@@ -5,14 +5,12 @@ from __future__ import annotations
 import json
 import re
 import shlex
-import subprocess
 from pathlib import Path
 
-import delivery
 import project_mvv
-from pace import PaceError, read_pace
+from pace import PaceError
 from step_result import result
-from supervise_lib.decl import decl_roots, release_routes, require_versions, with_decls
+from supervise_lib.decl import decl_roots, with_decls
 from supervise_lib.sprint_waves import (
     sprint_branch,
     plan_fast_check,
@@ -28,12 +26,29 @@ from supervise_lib.sprint_waves import (
 )
 from supervise_lib.new_args import NEW_ARGS
 from supervise_lib.paths import CHECK_PY, HERE, SELF
-from supervise_lib.release_templates import RELEASE_FORMS, plan_promote
-from supervise_lib.verify_steps import merge_steps, plan_limits
+from supervise_lib.sprint_routes import (
+    MVV_PACES,
+    dev_channel_of,
+    has_release_template,
+    pace_decl,
+    route_rows,
+    route_waves,
+)
+from supervise_lib.verify_steps import merge_steps
 
 
 def prod_version(version: str) -> str:
     return re.sub(r"-.*$", "", version)
+
+
+def mvv_design_waves(a, repo: str, gate: str) -> list[dict]:
+    """MVV 判定つきの設計のステージと、その後の関門 1。設計の課題が無ければ空。"""
+    if not a.design:
+        return []
+    return [
+        {"name": "設計", "plans": {f"design-{n}": plan_mvv_design(a, n, repo) for n in a.design}},
+        {"name": "関門 1", "gate": gate},
+    ]
 
 
 def fast_sprint_plans(a) -> list[dict]:
@@ -41,15 +56,9 @@ def fast_sprint_plans(a) -> list[dict]:
     実装の queue が --then のステージで 検査（実行の条件）→ 実装レビュー（開発版ごと）→ 開発版 → 本番（先頭が MVV 判定）を
     順に流す。検査が立てばその中でレビューも通るため、実装レビューのステージは範囲が空になり流れない。"""
     repo = str(Path(a.worktree).resolve())
-    waves = []
-    if a.design:
-        waves.append({"name": "設計", "plans": {f"design-{n}": plan_mvv_design(a, n, repo) for n in a.design}})
-        waves.append(
-            {
-                "name": "関門 1",
-                "gate": "設計の計画がすべて完了なら通過する。結果が関門の計画の Pull Request だけ、利用者の承認を取ってマージする",
-            }
-        )
+    waves = mvv_design_waves(
+        a, repo, "設計の計画がすべて完了なら通過する。結果が関門の計画の Pull Request だけ、利用者の承認を取ってマージする"
+    )
     waves += [
         {"name": "実装", "plans": {f"impl-{n}": plan_fast_impl(a, n, repo) for n in a.issue}},
         {"name": "検査", "plans": {"check": plan_fast_check(a, repo, f"{a.name}-1")}, "then_of": "実装"},
@@ -75,10 +84,7 @@ def auto_sprint_plans(a) -> list[dict]:
     後ろに開発版と本番（先頭が MVV 判定の関門 2）を続ける。設計と開発版・本番だけを MVV 判定つきのプランで作り、
     スプリントブランチ以降を最初のステージの --then で 1 本の queue に流す（#1370 の決定 3）。check-trigger.py は通らない。"""
     repo = str(Path(a.worktree).resolve())
-    waves = []
-    if a.design:
-        waves.append({"name": "設計", "plans": {f"design-{n}": plan_mvv_design(a, n, repo) for n in a.design}})
-        waves.append({"name": "関門 1", "gate": AUTO_GATE_1})
+    waves = mvv_design_waves(a, repo, AUTO_GATE_1)
     first = "設計" if a.design else "スプリントブランチ"
     then = {"then_of": first} if a.design else {}
     impl = {}
@@ -190,16 +196,13 @@ def close_waves(a) -> list[dict]:
     ]
 
 
-MVV_PACES = ("fast", "auto")  # 承認ゲートを MVV 判定で通す進め方（使ってよい条件を確かめる）
-
-
 def pace_refusal(a) -> str | None:
     """pace: fast / auto を使ってよい条件を確かめる。外れた理由を返す（満たせば None）。
     読む宣言の節が進め方の名前（fast / auto）である以外は同じ条件で、ほかの節の値は使わない。"""
     name = a.pace
     roots = decl_roots(a.worktree, getattr(a, "repo", None))
     try:
-        pace = next((read_pace(r) for r in roots if (r / ".ndf" / "pace.json").is_file()), None)
+        pace = pace_decl(a)
     except PaceError as e:
         return str(e)
     if pace is None:
@@ -211,14 +214,9 @@ def pace_refusal(a) -> str | None:
         return f".ndf/pace.json の {name}.verify（導入の確認のコマンド）が無い"
     if a.mode not in sec["modes"]:
         return f"モード {a.mode} は {name} に入れられない（入れられるモード: {' / '.join(sec['modes'])}）"
-    prod = a.production_branch
-    if not prod:
-        head = subprocess.run(
-            ["git", "-C", str(roots[0]), "symbolic-ref", "--short", "refs/remotes/origin/HEAD"], capture_output=True, text=True
-        ).stdout.strip()
-        prod = head[len("origin/") :] if head.startswith("origin/") else None
-    if not prod or prod == a.base:
-        return "開発版のチャネルが無い（起点のブランチと本番のブランチが同じか、本番のブランチが分からない）"
+    channel = dev_channel_of(a)
+    if not channel.ok:
+        return channel.reason
     mroot = next((r for r in roots if any((r / ".ndf" / f).is_file() for f in ("mvv.md", "mvv.json"))), roots[0])
     return mvv_refusal(a.state, mroot, name)
 
@@ -237,60 +235,6 @@ def mvv_refusal(state_path: str | None, root=None, pace: str = "fast") -> str | 
     return project_mvv.approval_refusal(state, root or Path.cwd())
 
 
-MANUAL_RELEASE = "/ndf:release"
-
-
-def apply_routes(a) -> None:
-    """a.routes（リリースの経路）を宣言から組み、雛形で組む経路なら版数を確かめる（足りなければ DeclError）。"""
-    a.routes = release_routes(a, RELEASE_FORMS)
-    require_versions(a)
-
-
-def routes_of(a) -> list:
-    """リリースの経路（apply_decls が載せる a.routes。無ければ release.form だけから導く）。"""
-    rs = getattr(a, "routes", None)
-    if rs is None:
-        d = delivery.build({}, {}, a.release, base=a.base, production=getattr(a, "production_branch", None))
-        rs = delivery.routes(d, tuple(RELEASE_FORMS))
-    return rs
-
-
-def route_rows(a) -> list[dict]:
-    """sprint.json の「リリースの経路」の行。"""
-    return [r.as_dict() for r in routes_of(a)]
-
-
-def has_release_template(a) -> bool:
-    """リリースの経路が release.form の雛形（開発版 → 本番）で組むものか。"""
-    return any(r.stage == delivery.STAGE_TEMPLATE for r in routes_of(a))
-
-
-def manual_release_wave(a) -> dict:
-    """手で届ける経路のために最後に置く、手で行うリリースのステージ（プランを持たない）。note に経路ごとの理由を書く。"""
-    notes = [r.note for r in routes_of(a) if r.stage == delivery.STAGE_MANUAL and r.note]
-    why = "。".join(notes) or "手で届ける経路がある"
-    return {"name": "リリース", "manual": MANUAL_RELEASE, "note": f"{why}。検査の後に {MANUAL_RELEASE} で行う"}
-
-
-def route_waves(a, repo: str, then_of: str, mvv: str | None = None, condition: dict | None = None, note: str | None = None) -> list[dict]:
-    """雛形で組まない経路のステージ（#1336）。昇格の経路（promote）があれば「本番」（昇格のプラン）を、手で届ける経路
-    （manual）があれば「リリース」（手で行う）をこの順に置く。ベースブランチへのマージで届く経路（merged-by-check）と
-    届けない経路（none）はステージを置かない。"""
-    rs = routes_of(a)
-    waves = []
-    promote = next((r for r in rs if r.stage == delivery.STAGE_PROMOTE), None)
-    if promote:
-        ci_wait = int(plan_limits(a)["ci_wait_timeout"])
-        plan = plan_promote(a, repo, ci_wait, mvv, condition, production=promote.branch)
-        wave = {"name": "本番", "plans": {"promote": plan}, "then_of": then_of}
-        if note:
-            wave["note"] = note
-        waves.append(wave)
-    if any(r.stage == delivery.STAGE_MANUAL for r in rs):
-        waves.append(manual_release_wave(a))
-    return waves
-
-
 def advises(a, closing: bool = False) -> bool:
     """--state を渡した normal だけ助言の MVV 判定を置く（#1400 の決定 4）。new close（closing）には置かない。"""
     return bool(getattr(a, "state", None)) and not closing
@@ -300,13 +244,15 @@ def sprint_state_path(a) -> str:
     return str(Path(a.state).resolve())
 
 
+PACE_PLANS = {"fast": fast_sprint_plans, "auto": auto_sprint_plans}  # 進め方ごとのステージの組み立て（normal は sprint_plans）
+
+
 def sprint_plans(a) -> list[dict]:
     """スプリントのステージを順に返す。ステージの中の計画は queue --max 3 で同時に流してよい。
     リリースの経路が雛形で組むものでなければ、経路ごとのステージ（route_waves）を最後に置く。"""
-    if getattr(a, "pace", "normal") == "fast":
-        return fast_sprint_plans(a)
-    if getattr(a, "pace", "normal") == "auto":
-        return auto_sprint_plans(a)
+    build = PACE_PLANS.get(getattr(a, "pace", "normal"))
+    if build:
+        return build(a)
     repo = str(Path(a.worktree).resolve())
     advise = advises(a)
     design = plan_advise_design if advise else plan_sprint_design
@@ -413,31 +359,44 @@ def cmd_new_sprint(a, waves: list[dict] | None = None) -> dict:
     )
 
 
+def _write_plans(wave: dict, i: int, out: Path) -> list[str]:
+    """ステージのプランを 1 つずつファイルへ書き、パスの一覧を返す。"""
+    paths = []
+    for key, plan in wave["plans"].items():
+        p = out / f"{i}-{key}.json"
+        p.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n")
+        paths.append(str(p))
+    return paths
+
+
+def _stage_entry(wave: dict, i: int, out: Path) -> dict:
+    """ステージ 1 件の一覧の項目。then_of のステージは command を持たず、前のステージへ連結される。"""
+    entry = {"wave": i, "name": wave["name"]}
+    if "gate" in wave:
+        entry["gate"] = wave["gate"]
+    elif "manual" in wave:
+        entry.update(manual=wave["manual"], note=wave["note"])
+    else:
+        paths = _write_plans(wave, i, out)
+        entry["plans"] = paths
+        if "note" in wave:
+            entry["note"] = wave["note"]
+        if "then_of" in wave:
+            entry["then_of"] = wave["then_of"]
+        else:
+            entry["command"] = f"python3 {shlex.quote(str(SELF))} queue " + " ".join(map(shlex.quote, paths)) + " --max 3"
+    return entry
+
+
 def write_stage_index(waves: list[dict], out: Path) -> list[dict]:
     """ステージごとのプランをファイルへ書き、ステージの一覧（command / then_of の連結を含む）を返す。"""
     index = []
     for i, wave in enumerate(waves, 1):
-        entry = {"wave": i, "name": wave["name"]}
-        if "gate" in wave:
-            entry["gate"] = wave["gate"]
-        elif "manual" in wave:
-            entry.update(manual=wave["manual"], note=wave["note"])
-        else:
-            paths = []
-            for key, plan in wave["plans"].items():
-                p = out / f"{i}-{key}.json"
-                p.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n")
-                paths.append(str(p))
-            entry["plans"] = paths
-            if "note" in wave:
-                entry["note"] = wave["note"]
-            if "then_of" in wave:
-                # 前のステージの queue が --then で続けて流す
-                entry["then_of"] = wave["then_of"]
-                prev = next(e for e in index if e["name"] == wave["then_of"])
-                prev["command"] += " --then " + " ".join(map(shlex.quote, paths))
-            else:
-                entry["command"] = f"python3 {shlex.quote(str(SELF))} queue " + " ".join(map(shlex.quote, paths)) + " --max 3"
+        entry = _stage_entry(wave, i, out)
+        if "then_of" in entry:
+            # 前のステージの queue が --then で続けて流す
+            prev = next(e for e in index if e["name"] == entry["then_of"])
+            prev["command"] += " --then " + " ".join(map(shlex.quote, entry["plans"]))
         index.append(entry)
     return index
 
@@ -474,7 +433,6 @@ def next_text(pace: str, index: list[dict], advise: bool = False) -> str:
             "最初のステージの command を打つ（後ろのステージは --then で続く）。queue が gate を返したら、承認資料に判定の理由と"
             "根拠の項目を添えて承認を取り、関門のステージの説明に沿って続きのステージの resume を打つ"
         )
-    manual = next((e for e in index if "manual" in e), None)
-    if manual:
-        nxt += f"。リリースは {manual['manual']} で行う（{manual['note']}）"
+    for manual in (e for e in index if "manual" in e):
+        nxt += f"。{manual['name']}は {manual['manual']} で行う（{manual['note']}）"
     return nxt

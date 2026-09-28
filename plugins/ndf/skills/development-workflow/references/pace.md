@@ -86,15 +86,25 @@ conductor は `normal` で進める。`fast` と `auto` の条件は同じで、
 
 | 条件 | 確かめ方 |
 | --- | --- |
-| 開発版のチャネルがある | `.ndf/worktree.json` の `base_branch` が `production_branch`（無ければ既定ブランチ）と違う |
+| 開発版のチャネルがある | `.ndf/worktree.json` の `base_branch` が `production_branch`（無ければ既定ブランチ）と違う。同じなら、手動反映の本番系の形（下）であること |
 | インストール確認がある | `.ndf/pace.json` の `<節>.verify` にコマンドが書かれている |
 | リポジトリが許している | `.ndf/pace.json` の `<節>.enabled` が `true`。節が無ければ許さない |
 | モードが対象に入る | `--mode` が `<節>.modes`（既定 `light` / `standard` / `legacy-refactor`）に入る。`operation` と `documentation` は書いても入らない |
 | MVV が承認済み | スプリント状態ファイルに承認ゲート `MVV` の記録があり、その `sha256` が今の `mvv.md` と一致する。スプリント MVV が無いスプリントは、承認済みのプロジェクト MVV（[project-mvv.md](project-mvv.md)）と状態に残した参照（`project_mvv.sha256`）が一致する |
 | プロジェクト MVV が改訂されていない | 状態の `project_mvv.sha256` が今の `.ndf/mvv.md` と一致する。宣言が 未承認・承認と一致しない・壊れている なら断る |
 
-**使ってはいけない場面:** 開発版のチャネルが無いリポジトリ（マージがそのまま本番に届く）、インストールを確かめる
-手段が無いリリース、戻すのが高い変更（利用者のデータの移行など。下の「レッドライン」に当たるものは承認ゲートを省かない）。
+**手動反映の本番系の形。** 起点と本番チャネルが同じ（例 carmo-cdk: どちらも `main`。本番へは手で打つ `cdk deploy` で届く）でも、
+`.ndf/project.json` の `delivery` が次をすべて満たせば開発版のチャネルがあると数える（判定は `lib/delivery.py` の `dev_channel`）。
+
+- 読めて、`production: true`（本番系へ届く）の行が 1 つ以上ある。`production` は利用者が書く（解析は書かない）
+- `production: true` の行がすべて `kind: manual`
+- 本番チャネルへのマージで自動で反映する行（`kind: auto`・`branch` が本番チャネル・`production` が `false` でない）が無い
+
+`delivery` が無い・不明・読めない、`production: true` の行が無いときは断る。この形では本番チャネルへのマージは本番系へ届かず、
+`merge-gate` も承認ゲート 2 に数えない。承認ゲート 2 は手で行う本番のデプロイの前に掛かる（下の「リリースの経路からステージを組む」）。
+
+**使ってはいけない場面:** 開発版のチャネルが無いリポジトリ（マージがそのまま本番に届く・本番系の行を宣言していない）、
+インストールを確かめる手段が無いリリース、戻すのが高い変更（利用者のデータの移行など。下の「レッドライン」に当たるものは承認ゲートを省かない）。
 
 ## 設定（`.ndf/pace.json`）
 
@@ -205,6 +215,18 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 `mvv`（承認ゲート 2 の MVV 判定）→ `note` → `promote`（`--gate-approved mvv`）で、`note` か `promote` が落ちたら `handoff` が
 承認ゲートへ落とす。`fast` / `auto` の `merge` の経路では開発版のステージを置かない（ベースブランチへのマージが検証への反映である）。
 
+**手動反映の本番系の形の `fast` / `auto` は、手で届ける経路を 3 つのステージに分ける。** `normal` は上の「リリース」1 つのまま。
+
+| ステージ | 中身 | 流し方 |
+| --- | --- | --- |
+| 開発版 | 手で行う（`/ndf:release`）。`production: false` の行（検証の環境）へ届ける。承認は要らない。行が無ければ置かない | conductor が検査の後に行い、済んだら承認ゲート 2 の `command` を打つ |
+| 承認ゲート 2 | プラン `gate-2`: `facts`（`release-steps.py deploy-facts` が `<節>.verify` を走らせ、承認資料 `{state_dir}/work/approval-deploy.md` に本番系の行・ベースブランチの先頭のコミット・確認の終了コードを書く。確認の出力は秘密を含みうるため資料へ載せず、所有者だけが読める `<承認資料>.verify.log` へ分ける。作業ツリーの HEAD が先頭と違う・追跡中の変更があれば確認を走らせずに 3、確認が非 0 なら 1 で止まる）→ `mvv`（承認ゲート 2 の MVV 判定）→ `note`。`note` が落ちたら `handoff` | 開発版があれば単独の queue（`command`）、無ければ検査に `--then` で続く |
+| 本番 | 手で行う（`/ndf:release`）。`production: true` の行と、`production` を書いていない手動の行 | 承認ゲート 2 の通過（関門 2 の記録）の後に、承認資料のコミットを checkout して `trigger` を打つ。ベースブランチの先頭が違えば承認ゲート 2 からやり直す |
+
+`mvv` の `--pr` は、`auto` では検査のスプリントの Pull Request（`{queue_pr:check}`）、検査に続く `fast` では前のステージの Pull Request の
+すべて（`{queue_prs}`）である。単独の queue の `fast` は Pull Request を集められないため、MVV 判定を打たずに承認ゲート（10）を返し、
+利用者が承認する。
+
 ## 承認ゲートで止まった後の続け方
 
 **queue が `gate` を返したら、conductor は承認資料（`approval-request.md` の形）に判定・理由・根拠の項目（`mvv-gate.py` の結果の
@@ -213,7 +235,7 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 | 答え | 打つもの |
 | --- | --- |
 | 承認（ゲート 1） | `sprint-state.py gate <状態> "関門 1" --what <要約> --by user --outcome approved` → `supervise.py run <設計のプラン> --from approve` → マニフェストのスプリントブランチのステージの `resume` |
-| 承認（ゲート 2） | `sprint-state.py gate <状態> "関門 2" --what <要約> --by user --outcome approved` → `supervise.py run <本番のプラン> --from bump`（昇格のプランは `--from promote-approved`、マージの `merge-gate` で止まったプランは `--from merge-approved`） |
+| 承認（ゲート 2） | `sprint-state.py gate <状態> "関門 2" --what <要約> --by user --outcome approved` → `supervise.py run <本番のプラン> --from bump`（昇格のプランは `--from promote-approved`、マージの `merge-gate` で止まったプランは `--from merge-approved`。`gate-2` のプランは続きを流さず、手で行う「本番」のステージへ進む） |
 | 差し戻し | `sprint-state.py gate <状態> "関門 N" --what <要約> --by user --outcome rejected`。続きは流さない |
 
 **判定と食い違う答えは覆しとして残る。** 「従う」で自動に通った後の差し戻しは `override_reject`、「従わない」「判定できない」で

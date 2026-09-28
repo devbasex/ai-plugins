@@ -67,7 +67,7 @@ import schema  # noqa: E402
 import versions  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from release_lib import bump  # noqa: E402
+from release_lib import bump, deploy  # noqa: E402
 from release_lib.names import changelog_section, changelog_span, h2_lines, next_h2, plugin_of, release_decl  # noqa: E402
 from step_result import (
     EXIT_GATE,
@@ -1057,7 +1057,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--verified", default="", help="--approval: 導入を確かめた経路（カンマ区切り。例 claude,codex,kiro）")
     p.add_argument("--ref", help="--approval: 検証への配布で導入した ref（既定は宣言のベースブランチ）")
     p.set_defaults(func=cmd_notes)
-    return ap
+    return deploy.add_deploy_parser(sub, common, ap)  # deploy-facts（手動反映の本番系の承認資料。#1454）
 
 
 def main(argv: list[str] | None = None) -> int:

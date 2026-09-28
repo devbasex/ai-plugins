@@ -18,7 +18,7 @@ sys.path.insert(0, str(SCRIPTS / "lib"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import claude_accounts as ca  # noqa: E402
 import claude_usage as cu  # noqa: E402
-from account_fake import accounts, window  # noqa: E402,F401
+from account_fake import accounts, scoped_limit, window  # noqa: E402,F401
 
 
 def test_choose_picks_lowest_of_larger_utilization(accounts):
@@ -317,3 +317,131 @@ def test_supervise_stops_when_no_candidate(accounts, monkeypatch):
     sc, r = _runner(monkeypatch, "a")
     with pytest.raises(sc.AuthUnavailable):
         r.child_env(1800, {})
+
+
+# ---------------------------------------------------------------- 残りの量で選ぶ（#1453）
+
+MAX20, MAX5 = "default_claude_max_20x", "default_claude_max_5x"
+TEAM_SPEND = {"percent": 100, "severity": "critical"}  # 2026-09-28 の nyle-team の応答（spend_limit_reached は偽）
+
+
+def test_choose_by_remaining_prefers_larger_capacity(accounts):
+    """AC1: 5x の 40% と 20x の 50% では、残りの量の大きい 20x を選ぶ（31.5 < 105）。"""
+    accounts.add("small", tier=MAX5, util5=40, util7=0)
+    accounts.add("large", tier=MAX20, util5=50, util7=0)
+    c = ca.choose()
+    assert (c.name, c.score, c.remaining) == ("large", 50.0, 105.0)
+
+
+def test_weekly_capacity_uses_its_own_table(accounts, monkeypatch):
+    """AC2: 週の枠の大きさだけを差し替えると選ぶアカウントが入れ替わる。"""
+    monkeypatch.setitem(ca.CAPACITY, "t1", {"five_hour": 1000.0, "seven_day": 100.0})
+    monkeypatch.setitem(ca.CAPACITY, "t2", {"five_hour": 1000.0, "seven_day": 200.0})
+    accounts.add("a", tier="t1", util5=0, util7=10)  # 90
+    accounts.add("b", tier="t2", util5=0, util7=60)  # 80
+    assert ca.choose().name == "a"
+    monkeypatch.setitem(ca.CAPACITY, "t1", {"five_hour": 1000.0, "seven_day": 50.0})  # 45
+    assert ca.choose().name == "b"
+
+
+def test_scoped_week_sets_remaining_and_score(accounts):
+    """AC4・I5: モデル別の週の枠が週の枠より高ければ残りの量と使用率を決め、100 以上なら候補から外す。"""
+    accounts.add("a", tier=MAX20, capacity={"five_hour": 1000}, util5=10, util7=38, extra={"limits": [scoped_limit(58)]})
+    acc = ca.load_account("a") if ca.usage("a") else None
+    assert acc.usage.score() == 58.0
+    assert acc.remaining() == pytest.approx(1100 * 0.42)
+    assert ca.choose().remaining == pytest.approx(1100 * 0.42)
+    accounts.add("b", tier=MAX20, util5=0, util7=0, extra={"limits": [scoped_limit(100)]})
+    accounts.add("c", util5=80, util7=80)
+    c = ca.choose(exclude={"a"})
+    assert c.name == "c" and c.earliest[0] == "b"
+
+
+def test_spend_percent_or_critical_is_spend_limit(accounts):
+    """AC5・I4: spend.percent 100・severity critical なら spend_limit_reached が偽でも支出上限。"""
+    accounts.add("team", tier=MAX5, util5=0, util7=25, spend=False, extra={"spend": TEAM_SPEND})
+    accounts.add("other", util5=80, util7=80)
+    c = ca.choose()
+    assert c.name == "other" and c.earliest == ("team", math.inf)
+    row = next(r for r in ca.rows() if r["name"] == "team")
+    assert row["state"] == "支出上限" and row["spend_limit_reached"] is True and row["spend"] == {"percent": 100.0, "severity": "critical"}
+
+
+@pytest.mark.parametrize("spend", [{"percent": 100.5, "severity": None}, {"percent": 10, "severity": "critical"}])
+def test_spend_reached_by_either_field(spend):
+    u = cu.Usage(five_hour={"utilization": 1.0}, spend_limit_reached=False, spend=spend)
+    assert u.spend_reached() is True and u.limited_until(time.time()) == math.inf
+
+
+def test_unknown_capacity_and_unknown_usage_are_ordered_after(accounts):
+    """AC6・I3: 残りの量の分かる群 → 使用率の群 → 残量不明（読める候補が無いときだけ）。同じ入力には同じ名前。"""
+    accounts.add("a", tier=MAX20, util5=90 - 1, util7=0)  # 残りの量 23.1
+    accounts.add("b", util5=1, util7=1)  # tier 無し
+    accounts.add("c", tier="unknown_tier", util5=0, util7=0)
+    accounts.add("d", util5=None)  # 残量不明
+    assert [ca.choose().name for _ in range(2)] == ["a", "a"]
+    assert ca.choose(exclude={"a"}).name == "c"
+    assert ca.choose(exclude={"a", "c"}).name == "b"
+    assert ca.choose(exclude={"a", "b", "c"}).name == "d"
+
+
+def test_below_threshold_is_tried_before_larger_remaining(accounts, monkeypatch):
+    """I3（閾値）: 閾値以上の大きい残りの量より閾値未満の候補を先に返し、そのトークンを得られなければ閾値以上を返す。"""
+    accounts.add("big", tier=MAX20, capacity={"five_hour": 10000}, util5=95, util7=0)  # 500
+    accounts.add("small", tier=MAX5, util5=40, util7=0)  # 31.5
+    c = ca.choose()
+    assert c.name == "small" and c.score < ca.switch_at()
+    real = ca.token
+    monkeypatch.setattr(ca, "token", lambda n, *a, **k: None if n == "small" else real(n, *a, **k))
+    assert ca.choose().name == "big"
+
+
+def test_remaining_is_clamped_and_none_without_capacity():
+    """I1・I2: 100 を超える枠は 0、枠の大きさが無ければ None。宣言の無い枠は表、モデル別の週は週の枠の大きさ。"""
+    u = cu.Usage(five_hour={"utilization": 120.0}, seven_day={"utilization": 0.0})
+    assert ca.Account("a", "", False, None, u, tier=MAX20).remaining() == 0.0
+    assert ca.Account("a", "", False, None, u).remaining() is None
+    u = cu.Usage(five_hour={"utilization": 50.0}, seven_day={"utilization": 0.0}, scoped=[{"model": "Fable", "utilization": 90.0}])
+    acc = ca.Account("a", "", False, None, u, tier=MAX20, declared={"seven_day": 500.0})
+    assert acc.capacity() == {"five_hour": 210.0, "seven_day": 500.0}
+    assert acc.remaining() == pytest.approx(50.0)
+
+
+def test_broken_limits_and_spend_keep_windows(accounts):
+    """I6: limits・spend の形が違っても 5 時間の枠と週の枠は読め、その項目だけが None。"""
+    tok = accounts.add("a", util5=None)
+    accounts.fake.set_usage(tok, window(20), window(30), extra={"limits": "x", "spend": "y"})
+    u = ca.usage("a")
+    assert u.error is None and u.score() == 30.0 and u.scoped is None and u.spend is None
+    accounts.fake.set_usage(tok, window(20), window(30), extra={"limits": [{"kind": "weekly_scoped", "percent": "x"}]})
+    assert cu.parse_usage(accounts.fake.usage[tok][1], time.time()).scoped is None
+
+
+def test_old_usage_json_and_response_still_read(accounts):
+    """AC9・I7: limits・spend の無い応答と旧い形の usage.json を読める。"""
+    tok = accounts.add("a", tier=MAX20, util5=50, util7=0)
+    assert ca.usage("a").scoped == [] and ca.load_account("a").remaining() == 105.0
+    old = {
+        "fetched_at": cu.iso_utc(time.time()),
+        "five_hour": window(50),
+        "seven_day": window(0),
+        "spend_limit_reached": False,
+        "error": None,
+    }
+    (accounts.root / "a" / "usage.json").write_text(json.dumps(old))
+    acc = ca.load_account("a")
+    assert acc.usage.scoped is None and acc.usage.spend is None and acc.usage.spend_reached() is False
+    assert acc.remaining() == 105.0 and ca.choose().name == "a"
+    assert tok
+
+
+def test_set_capacity_writes_only_account_json(accounts):
+    """F4・I8: 宣言は account.json だけに書き、`None` で外すと表の値へ戻る。"""
+    accounts.add("a", tier=MAX5)
+    creds = (accounts.root / "a" / ".credentials.json").read_bytes()
+    assert ca.set_capacity("a", {"five_hour": None, "seven_day": 900}).capacity() == {"five_hour": 52.5, "seven_day": 900.0}
+    assert accounts.account("a")["capacity"] == {"seven_day": 900.0}
+    assert ca.set_capacity("a", {"five_hour": None, "seven_day": None}).capacity() == {"five_hour": 52.5, "seven_day": 640.0}
+    assert accounts.account("a")["capacity"] is None
+    assert (accounts.root / "a" / ".credentials.json").read_bytes() == creds
+    assert ca.set_capacity("zz", {"five_hour": 1}) is None

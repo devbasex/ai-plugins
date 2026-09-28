@@ -64,7 +64,7 @@ python3 "$SCRIPTS/project-decl.py" write --measure "$TMP/measure.json" --answers
 | --- | --- | --- |
 | `test`（P2） | `{"strategy"?, "ci"?: {"check"?, "junit_artifacts"?}, "suites": [{"name", "runner", "command", "scope_command"?, "junit"?, "container"?: {"service", "compose_files"}, "needs", "paths"}]}` | 指示書・README の走らせ方の行を正とする。コンテナ越しなら `container` を書き、`scope_command` の `{paths}`（空白で区切った 1 語）に範囲のパスが入る。`junit` はコマンドが JUnit XML を書く相対パス（pytest は `-o junit_family=xunit1 --junitxml=<パス>` をコマンドに書く。無ければ落ちたテストの見分けが全体の走らせ直しへ落ちる）。`strategy` は `local-full`（全体テストを手元で走らせる）/ `local-scoped-ci-whole`（範囲は手元、全体は CI に任せる。`ci.check` に待つチェック、`ci.junit_artifacts` に JUnit の成果物の名前の glob）/ `round-only`（パスでテストを選べない。suite の `command` をそのまま走らせる）。空なら所要と suite から導く（600 秒を超え CI が読めれば `local-scoped-ci-whole`。`scope_command` が無ければ `round-only`。ほかは `local-full`）ので、その既定を答えとして示し、手元で全体テストを回さない方針があるときだけ書き換える |
 | `branches`（P6） | `{"base": "<起点>", "production": "<本番>"}` | origin の HEAD・直近 100 件のマージ先・最後のコミットの日時を見る。放置したブランチ（長くコミットが無い `develop` など）は採らない |
-| `delivery`（P7） | `[{"target", "kind": "auto" / "manual", "trigger", "branch"?, "versioned"}]` | 配布の設定ファイル・ワークフローの `deploy` の行・版数の置き場とタグから決める |
+| `delivery`（P7） | `[{"target", "kind": "auto" / "manual", "trigger", "branch"?, "versioned", "production"?}]` | 配布の設定ファイル・ワークフローの `deploy` の行・版数の置き場とタグから決める。`production`（本番系へ届くか。[pace.md](pace.md) の「手動反映の本番系の形」）は解析では書かず、利用者が書く |
 | `issues`（P8） | `{"primary", "others"}`。名前は `github`・`markdown`・`redmine`・`external` など | 名前だけを書き、URL や識別子を書かない |
 | `ndf_policies`（P9） | `{"doc_lint": bool, "reject_md_wording_tests": bool}` | 指示書に NDF の文体の規則・`.md` の文言テストを退ける方針があるときだけ `true`。無ければ両方 `false` |
 

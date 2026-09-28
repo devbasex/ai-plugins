@@ -2305,9 +2305,37 @@
     {
       "term": "従量の接続の宣言",
       "context": "ndf-relay",
-      "meaning": "従量の接続で起動する子へ足す変数の並び。NDF_SUPERVISE_CLAUDE_FALLBACK（KEY=VALUE を空白区切り）に利用者が書き、ラッパーと supervise.py が同じものを読む",
+      "meaning": "従量の接続で起動する子へ足す変数の並び（KEY=VALUE を空白区切り）。環境変数 NDF_SUPERVISE_CLAUDE_FALLBACK か、relay の置き場に保存した宣言が持ち、環境変数があればそちらだけが効く。ラッパーと supervise.py が同じものを読む",
       "source": "",
-      "pending_source": "issues/issue-1389-design.md"
+      "pending_source": "issues/issue-1468-requirements.md"
+    },
+    {
+      "term": "relay の置き場",
+      "context": "ndf-relay",
+      "meaning": "relay.py が登録と設定を置くディレクトリ ${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/。アカウントの置き場と、保存した従量の接続の宣言を持つ",
+      "source": "",
+      "pending_source": "issues/issue-1468-requirements.md"
+    },
+    {
+      "term": "登録の途中の状態",
+      "context": "ndf-relay",
+      "meaning": "OAuth の account add を 2 回の呼び出しに分けたとき、1 回目（認可の URL を出す）と 2 回目（認可コードで登録を終える）の間に relay の置き場へ残す状態。期限を過ぎたら捨てる",
+      "source": "",
+      "pending_source": "issues/issue-1468-requirements.md"
+    },
+    {
+      "term": "待機中のログイン",
+      "context": "ndf-relay",
+      "meaning": "OAuth の account add の 1 回目で起動し、認可コードを受け取るまで生かしておく claude auth login のプロセス。登録の途中の状態が持ち、標準入力の FIFO でコードを受ける",
+      "source": "",
+      "pending_source": "issues/issue-1468-design.md"
+    },
+    {
+      "term": "呼べるかの確認",
+      "context": "ndf-relay",
+      "meaning": "従量の接続の宣言を保存する前に、その変数で Bedrock の Claude を 1 回呼び、通らなければ理由を 4 つの区分（認証切れ・権限が無い・地域で使えない・モデルが有効でない）で示すこと。通ったものだけを保存する",
+      "source": "",
+      "pending_source": "issues/issue-1468-design.md"
     },
     {
       "term": "スプリント",
