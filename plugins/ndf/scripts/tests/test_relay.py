@@ -3043,6 +3043,17 @@ def test_transcript_readers(tmp_path):
     tp.write_text(synthetic_row("x", FIVE_HOUR) + "\n" + goal_row(met=False) + "\n")
     assert rc.limit_of(str(tp)) == ("five_hour", 4102444800.0)
     assert rc.unmet_goal(str(tp)) == "c" and rc.resume_input(str(tp)) == "/goal c"
+    # 支出上限の実物（2026-09-28 の会話の記録の写し）。`quotaLimits` があれば種類とリセット時刻はそちらを読む
+    spend = "You've hit your individual spend limit · run /usage-credits to raise it, or visit claude.ai/admin-settings/usage · your session limit resets 6:30am (UTC)"
+    quota = {
+        "status": "rejected",
+        "resetsAt": 1790058600,
+        "rateLimitType": "five_hour",
+        "overageStatus": "rejected",
+        "overageDisabledReason": "org_spend_cap_reached",
+    }
+    tp.write_text(synthetic_row(spend, quota) + "\n")
+    assert rc.limit_of(str(tp)) == ("five_hour", 1790058600.0)
     tp.write_text(goal_row(met=True) + "\n")
     assert rc.unmet_goal(str(tp)) is None
     assert rc.background_open(str(tmp_path / "missing.jsonl"), time.time()) is True
