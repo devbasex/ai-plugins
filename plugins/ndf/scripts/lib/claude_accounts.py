@@ -509,17 +509,29 @@ def account_env(name: str, base: dict, before: float | None = REFRESH_BEFORE, mi
     従量の接続は `CLAUDE_CODE_OAUTH_TOKEN` と `FOREIGN_AUTH_ENV` を外してから宣言の変数を重ねる（認証の方式を
     宣言どおり 1 つにする）。アカウントは宣言のキーと、認証の優先順位でトークンより上に来る変数
     （`FOREIGN_AUTH_ENV`）を外してからトークンと名前を足す（混ぜない。I16）。"""
-    env = dict(base)
     declared = fallback_env(base)
-    metered = name == METERED
-    tok = None if metered else token(name, before, min_left=min_left)
-    if not metered and tok is None:
+    if name == METERED:
+        return _metered_env(dict(base), declared, FALLBACK_ENV not in base)
+    tok = token(name, before, min_left=min_left)
+    if tok is None:
         return None
-    # 保存した宣言では AWS の鍵も外す（呼べるかの確認と同じ環境にする。#1468 の決定 14）
-    saved = AWS_KEY_ENV if metered and FALLBACK_ENV not in base else ()
-    for k in ((TOKEN_ENV,) if metered else tuple(declared)) + FOREIGN_AUTH_ENV + saved:
+    return _account_env(dict(base), declared, name, tok)
+
+
+def _metered_env(env: dict, declared: dict, saved: bool) -> dict:
+    """従量の接続の環境。`saved`（保存した宣言）なら AWS の鍵も外す（呼べるかの確認と同じ環境にする。#1468 の決定 14）。"""
+    for k in (TOKEN_ENV,) + FOREIGN_AUTH_ENV + (AWS_KEY_ENV if saved else ()):
         env.pop(k, None)
-    env.update(declared if metered else {TOKEN_ENV: tok})
+    env.update(declared)
+    env[NAME_ENV] = METERED
+    return env
+
+
+def _account_env(env: dict, declared: dict, name: str, tok: str) -> dict:
+    """アカウントの環境（宣言のキーと FOREIGN_AUTH_ENV を外してトークンと名前を足す）。"""
+    for k in tuple(declared) + FOREIGN_AUTH_ENV:
+        env.pop(k, None)
+    env[TOKEN_ENV] = tok
     env[NAME_ENV] = name
     return env
 
