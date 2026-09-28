@@ -46,6 +46,16 @@ GATE_ROLLBACK = (
 )
 
 
+def _change_text(info):
+    """承認資料の差分の量の文言。"""
+    return f"{info.get('changedFiles', '?')} ファイル・+{info.get('additions', '?')} / -{info.get('deletions', '?')} 行"
+
+
+def _judge_rows(verdict):
+    """承認資料の判定の行（判定・理由・宣言の各項目）。"""
+    return [("判定", verdict.value), ("理由", verdict.reason), *[(i["name"], i["result"]) for i in verdict.items]]
+
+
 def gate_stop(n, verdict, info=None, next_cmd=None, plan_step="merge-approved"):
     """承認の無い本番系へのマージを止める結果（status: gate・終了コード 10）を出して終える。承認資料を書く。"""
     info = info or {}
@@ -56,11 +66,7 @@ def gate_stop(n, verdict, info=None, next_cmd=None, plan_step="merge-approved"):
         if verdict.value == delivery.PRODUCTION
         else f"{what} が本番系へ出るかを決められない（{verdict.reason}）"
     )
-    change = (
-        f"{info.get('changedFiles', '?')} ファイル・+{info.get('additions', '?')} / -{info.get('deletions', '?')} 行"
-        if info
-        else "（Pull Request を渡していないため読んでいない）"
-    )
+    change = _change_text(info) if info else "（Pull Request を渡していないため読んでいない）"
     target_row = {"url": info.get("url") or what}
     if info.get("title"):
         target_row["title"] = info["title"]
@@ -72,7 +78,7 @@ def gate_stop(n, verdict, info=None, next_cmd=None, plan_step="merge-approved"):
         title=f"{what} のマージ（本番系への反映。承認ゲート 2）",
         targets=[target_row],
         change=change,
-        judge=[("判定", verdict.value), ("理由", verdict.reason), *[(i["name"], i["result"]) for i in verdict.items], ("宛先", target)],
+        judge=[*_judge_rows(verdict), ("宛先", target)],
         consent=[f"{what} を {target} へマージし、本番系へ反映する"],
         rollback=GATE_ROLLBACK,
     )
@@ -210,8 +216,8 @@ def promote(a, cleanup):
             f"promote-{n}",
             title=f"#{n} の昇格（{a.head} → {a.base}。承認ゲート 2）",
             targets=[{"url": info.get("url") or f"#{n}", "title": info.get("title"), "base_head": f"{a.base} ← {a.head}"}],
-            change=f"{info.get('changedFiles', '?')} ファイル・+{info.get('additions', '?')} / -{info.get('deletions', '?')} 行",
-            judge=[("判定", verdict.value), ("理由", verdict.reason), *[(i["name"], i["result"]) for i in verdict.items]],
+            change=_change_text(info),
+            judge=_judge_rows(verdict),
             consent=[f"#{n} を {a.base} へマージし、本番系へ反映する"],
             rollback=GATE_ROLLBACK,
             path=a.out,
