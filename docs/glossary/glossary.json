@@ -2449,8 +2449,32 @@
     {
       "term": "後ろ倒しの候補",
       "context": "ndf-issue-upkeep",
-      "meaning": "直近のマイルストーンの中で遅延コストが最も低い課題。前倒しの候補と対にして示す",
+      "meaning": "直近のマイルストーンのうち、同じマイルストーンの課題が依存していない課題の中で遅延コストが最も低いもの。前倒しの候補と対にして示す",
       "pending_source": "issues/issue-1429-requirements.md"
+    },
+    {
+      "term": "容量",
+      "context": "ndf-issue-upkeep",
+      "meaning": "1 つのスプリントへ切り出す大きさの見積の段階の和の上限。宣言か引数で受け、既定値を持たない",
+      "pending_source": "issues/issue-1429-design.md"
+    },
+    {
+      "term": "余白",
+      "context": "ndf-issue-upkeep",
+      "meaning": "前倒しの候補にするために、遅延コストが切り出しの境界の課題を上回るべき尺度の段階の数。既定は 1",
+      "pending_source": "issues/issue-1429-design.md"
+    },
+    {
+      "term": "自動の閾値",
+      "context": "ndf-issue-upkeep",
+      "meaning": "前倒しを承認なしに反映するために、実害の大きさかリスク低減のどちらかが届くべき段階。既定は 8",
+      "pending_source": "issues/issue-1429-design.md"
+    },
+    {
+      "term": "バックログの宣言",
+      "context": "ndf-issue-upkeep",
+      "meaning": "尺度・余白・自動の閾値・容量・被依存の写し方・ラベルの下限・アンカーを持つ `.ndf/backlog.json`",
+      "pending_source": "issues/issue-1429-design.md"
     }
   ]
 }
