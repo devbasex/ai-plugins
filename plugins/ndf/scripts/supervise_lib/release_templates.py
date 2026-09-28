@@ -206,29 +206,16 @@ def plan_release_package_plugin(a) -> dict:
         # 関門 2 を MVV で判定する。関門（10）なら報告は 結果: 関門 で止まり、conductor が承認を取ってから
         # run <計画> --from bump で続ける。従えば判定の記録を --pr の PR のすべてへコメントしてから bump へ進み、
         # コメントが落ちたら handoff が関門 2 の by: mvv の記録を外して関門で終える（#1370 の I8）
-        material = f"{repo}/{approval}" if repo else approval
+        material = _material_path(repo, approval)
         state = str(Path(mvv).resolve())
-        steps[0:0] = [
-            {
-                "id": "mvv",
-                "type": "run",
-                "timeout": 900,
-                "cmd": f"{MVV_PY} check --sprint {shlex.quote(state)} --gate release "
-                f"--material {shlex.quote(material)} --pr {prs} --mode {a.mode}"
-                + (f" --root {shlex.quote(repo)}" if repo else "")
-                + f" --note {MVV_NOTE}",
-                "next": "note",
-                "gate_next": "end",
-            },
-            {
-                "id": "note",
-                "type": "run",
-                "timeout": 300,
-                "cmd": f"sh -c 'for p in {prs}; do gh pr comment \"$p\" --body-file {MVV_NOTE} || exit 1; done'",
-                "on_fail": "handoff",
-                "next": "bump",
-            },
-        ]
+        steps[0:0] = mvv_gate_steps(
+            f"{MVV_PY} check --sprint {shlex.quote(state)} --gate release "
+            f"--material {shlex.quote(material)} --pr {prs} --mode {a.mode}"
+            + (f" --root {shlex.quote(repo)}" if repo else "")
+            + f" --note {MVV_NOTE}",
+            f"sh -c 'for p in {prs}; do gh pr comment \"$p\" --body-file {MVV_NOTE} || exit 1; done'",
+            "bump",
+        )
         steps.append(handoff_step(state, "関門 2", "判定のコメント"))
     rule = RULE_RELEASE_DEV if dev else RULE_RELEASE_PROD_MVV if mvv else RULE_RELEASE_PROD
     plan = {
@@ -270,7 +257,7 @@ def advise_steps(state: str, gate: str, args: str, note: dict, head: dict | None
 def advise_release_steps(a, repo: str | None, approval: str, prs: str) -> list[dict]:
     """開発版の explain の後の助言の MVV 判定（#1400）。承認資料と出す版の PR を材料にし、判定の記録を承認資料の末尾へ足す。
     判定によらず、想定外の失敗でも mvv-note へ進み、プランの結果は facts の関門のままである。"""
-    material = f"{repo}/{approval}" if repo else approval
+    material = _material_path(repo, approval)
     state = shlex.quote(str(Path(a.advise).resolve()))
     args = f"--material {shlex.quote(material)} --pr {prs} --mode {a.mode}" + (f" --root {shlex.quote(repo)}" if repo else "")
     note = {
@@ -297,6 +284,19 @@ def bump_others_cmd(a, plugin: str) -> str:
         f'printf "%s\\n" "$out"; printf "%s\\n" "$out" | python3 -c "{PICK_BUMPS}" | while read -r n to; do '
         f'{STEPS_PY} bump --plugin "$n" --to "$to" --base {a.base} || exit 1; done'
     )
+
+
+def mvv_gate_steps(mvv_cmd: str, note_cmd: str, next_id: str) -> list[dict]:
+    """関門 2 の MVV 判定（mvv）と、判定の記録のコメント（note。落ちたら handoff）の 2 ステップ。note の後は `next_id` へ進む。"""
+    return [
+        {"id": "mvv", "type": "run", "timeout": 900, "cmd": mvv_cmd, "next": "note", "gate_next": "end"},
+        {"id": "note", "type": "run", "timeout": 300, "cmd": note_cmd, "on_fail": "handoff", "next": next_id},
+    ]
+
+
+def _material_path(repo, approval):
+    """承認資料の置き場。元のリポジトリが分かればその下。"""
+    return f"{repo}/{approval}" if repo else approval
 
 
 def plan_promote(a, repo: str, ci_wait: int, mvv: str | None = None, condition: dict | None = None, production: str | None = None) -> dict:
@@ -339,23 +339,12 @@ def plan_promote(a, repo: str, ci_wait: int, mvv: str | None = None, condition: 
                 "cmd": f"{promote} --prepare --out {material}",
                 "next": "mvv",
             },
-            {
-                "id": "mvv",
-                "type": "run",
-                "timeout": 900,
-                "cmd": f"sh -c '{MVV_PY} check --sprint {shlex.quote(state)} --gate release --material {material} --pr {pr_of} "
+            *mvv_gate_steps(
+                f"sh -c '{MVV_PY} check --sprint {shlex.quote(state)} --gate release --material {material} --pr {pr_of} "
                 f"--mode {a.mode} --root {shlex.quote(repo)} --note {MVV_NOTE}'",
-                "next": "note",
-                "gate_next": "end",
-            },
-            {
-                "id": "note",
-                "type": "run",
-                "timeout": 300,
-                "cmd": f"sh -c 'gh pr comment {pr_of} --body-file {MVV_NOTE}'",
-                "on_fail": "handoff",
-                "next": "promote",
-            },
+                f"sh -c 'gh pr comment {pr_of} --body-file {MVV_NOTE}'",
+                "promote",
+            ),
             {
                 "id": "promote",
                 "type": "run",
