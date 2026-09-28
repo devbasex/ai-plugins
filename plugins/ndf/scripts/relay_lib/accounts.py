@@ -76,7 +76,15 @@ def _scoped(scoped: list | None) -> str:
 
 def _metered(source: str, state: str, provider: str | None = None, details: dict | None = None, **extra) -> dict:
     """従量の接続の行（`extra` は `state` の前に置く）。"""
-    return {"name": ca.METERED, "kind": "metered", "source": source, "provider": provider, "details": details or {}, **extra, "state": state}
+    return {
+        "name": ca.METERED,
+        "kind": "metered",
+        "source": source,
+        "provider": provider,
+        "details": details or {},
+        **extra,
+        "state": state,
+    }
 
 
 def _metered_row() -> dict | None:
@@ -226,7 +234,13 @@ def _add_bedrock(asker: Asker, profile: str | None, region: str | None, model: s
         raise Fail("write_failed", f"置き場へ書けない（{e}）") from e
     if ca.FALLBACK_ENV in os.environ:
         print(f"環境変数 {ca.FALLBACK_ENV} が定義されているため、保存した宣言は効かない（環境変数が優先する）", file=sys.stderr)
-    return {"provider": bd.PROVIDER, **det, "replaced": old is not None, "text": f"登録した: 従量の接続（{bd.decl_inline(det)}）", **previous}
+    return {
+        "provider": bd.PROVIDER,
+        **det,
+        "replaced": old is not None,
+        "text": f"登録した: 従量の接続（{bd.decl_inline(det)}）",
+        **previous,
+    }
 
 
 def _check(name: str | None) -> dict:
