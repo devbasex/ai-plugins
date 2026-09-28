@@ -448,17 +448,20 @@ def _try_order(pool: list[Account], readable: bool) -> list[Account]:
     def reset(a: Account) -> float:
         return (a.usage.resets("five_hour") if a.usage else None) or math.inf
 
-    out: list[Account] = []
     below = [a for a in pool if a.score() is None or a.score() < thr]
     above = [a for a in pool if a not in below]
-    for side in (below, above):
-        rem = {a.name: a.remaining() for a in side}
-        by_rem = [a for a in side if rem[a.name] is not None]
-        by_score = [a for a in side if rem[a.name] is None and a.score() is not None]
-        out += sorted(by_rem, key=lambda a: (-rem[a.name], reset(a), a.name))
-        out += sorted(by_score, key=lambda a: (a.score(), reset(a), a.name))
-        if not readable:
-            out += sorted((a for a in side if a not in by_rem and a not in by_score), key=lambda a: a.name)
+    return _order_side(below, readable, reset) + _order_side(above, readable, reset)
+
+
+def _order_side(side: list[Account], readable: bool, reset) -> list[Account]:
+    """閾値で分けた片側の中の試す順: 残りの量の大きい順 → 使用率の小さい順 → （読める候補が無いときだけ）名前の順。"""
+    rem = {a.name: a.remaining() for a in side}
+    by_rem = [a for a in side if rem[a.name] is not None]
+    by_score = [a for a in side if rem[a.name] is None and a.score() is not None]
+    out = sorted(by_rem, key=lambda a: (-rem[a.name], reset(a), a.name))
+    out += sorted(by_score, key=lambda a: (a.score(), reset(a), a.name))
+    if not readable:
+        out += sorted((a for a in side if a not in by_rem and a not in by_score), key=lambda a: a.name)
     return out
 
 
