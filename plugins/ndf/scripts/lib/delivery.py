@@ -77,7 +77,7 @@ def _rows_of(project: dict, problems: list[str]) -> tuple[list[dict] | None, str
     if isinstance(v, dict) and isinstance(v.get("unknown"), str):
         return None, v["unknown"]
     if not isinstance(v, list):
-        problems.append(f"{PJ} の delivery: 並びでも {{\"unknown\": ...}} でもない")
+        problems.append(f'{PJ} の delivery: 並びでも {{"unknown": ...}} でもない')
         return None, None
     for i, row in enumerate(v):
         if not isinstance(row, dict) or row.get("kind") not in ("auto", "manual"):
@@ -145,7 +145,9 @@ def _row_text(row: dict) -> str:
 
 def judge_target(decl: DeliveryDecl, target: str) -> Verdict:
     """宛先 `target` へのマージが自動反映の本番チャネルへ入るか。上から順に最初に当たった条件で決まる。"""
-    items = [{"kind": "decl", "name": decl.sources.get("production", f"{WT} の production_branch"), "result": decl.production or "（無し）"}]
+    items = [
+        {"kind": "decl", "name": decl.sources.get("production", f"{WT} の production_branch"), "result": decl.production or "（無し）"}
+    ]
 
     def v(value, reason):
         return Verdict(target, value, reason, items)

@@ -2,13 +2,20 @@
 """merged-steps.py: merged の後片付けの決まった手順。
 
     python3 merged-steps.py cleanup <PR番号>... [--root <dir>]
-    python3 merged-steps.py merge-when-green <PR番号> [--method merge|squash|rebase]
+    python3 merged-steps.py merge-gate --base <宛先> [--pr <PR番号>] [--root <dir>]
+    python3 merged-steps.py merge-when-green <PR番号> [--gate-approved user|mvv] [--method merge|squash|rebase]
                             [--interval 秒] [--timeout 秒] [--stale-after 秒] [--no-cleanup] [--root <dir>]
+    python3 merged-steps.py promote --head <ベースブランチ> --base <本番チャネル> [--prepare] [--gate-approved user|mvv]
 
 cleanup: マージ済みの PR の作業ツリーとローカルブランチを外し、主ディレクトリを取り込む。
 merge-when-green: PR が draft なら `gh pr ready` で外し、CI のチェックが全部通るまで待ち
 （push で先頭のコミットが変われば待ち直す）、
 失敗があれば止まり、通れば `gh pr merge --admin` でマージして cleanup まで行う。
+最初の読みで宛先（baseRefName）を判定し、自動反映の本番チャネルか判定できない宛先なら、--gate-approved が無い限り
+CI を待たずに承認ゲート 2 で止まる（status: gate・metrics.gate: production-merge。判定は lib/delivery.py。#1336）。
+merge-gate: 宛先の判定だけを行う（0 = 進めてよい / 10 = 承認ゲート 2）。
+promote: 昇格の Pull Request（ベースブランチ → 本番チャネル）を探すか作り、merge-when-green と同じ判定と待ちで
+マージする（後片付けはしない）。--prepare は用意して承認資料を書くところで 0 で終える。
 実行が終わったのにチェックが pending のまま --stale-after 秒続けば、そのジョブを 1 度だけ
 `gh run rerun --job` で再実行し、再実行でも取り残されれば止まる。実行が終わりジョブに結論が
 あれば、チェックの表示が pending のままでも待たずにその結論で扱う。ジョブがランナーを待つ間は、
@@ -20,8 +27,9 @@ probe: 開いた PR のチェックを読み、強い順に failed（fix）/ sta
 stale_again（再実行しても取り残し）/ settled・queued・running（wait）/ passed・none（judge）の 1 つに分ける。
 `metrics` に class・action・prs・queued_runs を持つ。書き込みは --act の再実行だけ。終了コードは 0 = 調べた。
 
-結果は lib/step_result.py の形の 1 行の JSON。終了コードは 0 = ok / 10 = `git branch -D` が要る
-ブランチがある（同意が要る。提示物を書く）/ 1 = 取り込み・CI・マージが失敗 / 2 = 読めない。
+結果は lib/step_result.py の形の 1 行の JSON。終了コードは 0 = ok / 10 = 承認ゲート 2（metrics.gate が
+production-merge）か、`git branch -D` が要るブランチがある（同意が要る。どちらも提示物を書く）/
+1 = 取り込み・CI・マージが失敗 / 2 = 読めない。
 """
 
 from __future__ import annotations
@@ -52,6 +60,7 @@ from step_result import (
     result,
     run,
 )
+import delivery  # noqa: E402
 import gh_parts  # noqa: E402
 import repo  # noqa: E402
 
@@ -61,6 +70,7 @@ from merged_lib.checks import (
     GreenWatch,
     check_states,
     probe_checks,  # noqa: E402
+    pr_state,
     queued_run_count,
 )
 
@@ -307,15 +317,100 @@ def cmd_cleanup(a):
     emit(result(TOOL, status, summary, items, metrics, path, nxt))
 
 
+# --- 承認ゲート 2（自動反映の本番チャネルへのマージ。#1336） ------------------------
+
+GATE = "production-merge"
+GATE_ROLLBACK = (
+    "マージのコミットを revert する Pull Request を同じ宛先へマージする。本番系には revert が反映されるまで変更が残り、"
+    "その間に利用者が触れた結果（データの書き込みなど）は revert で戻らない"
+)
+
+
+def gate_stop(n, verdict, info=None, next_cmd=None, plan_step="merge-approved"):
+    """承認の無い本番系へのマージを止める結果（status: gate・終了コード 10）を出して終える。承認資料を書く。"""
+    info = info or {}
+    target = verdict.target or "（不明）"
+    what = f"#{n}" if n else f"宛先 {target} へのマージ"
+    lead = (
+        f"{what} の宛先 {target} は自動反映の本番チャネルである"
+        if verdict.value == delivery.PRODUCTION
+        else f"{what} が本番系へ出るかを決められない（{verdict.reason}）"
+    )
+    change = (
+        f"{info.get('changedFiles', '?')} ファイル・+{info.get('additions', '?')} / -{info.get('deletions', '?')} 行"
+        if info
+        else "（Pull Request を渡していないため読んでいない）"
+    )
+    target_row = {"url": info.get("url") or what}
+    if info.get("title"):
+        target_row["title"] = info["title"]
+    if info.get("headRefName"):
+        target_row["base_head"] = f"{target} ← {info['headRefName']}"
+    path = approval_present(
+        TOOL,
+        f"merge-{n or target}",
+        title=f"{what} のマージ（本番系への反映。承認ゲート 2）",
+        targets=[target_row],
+        change=change,
+        judge=[("判定", verdict.value), ("理由", verdict.reason), *[(i["name"], i["result"]) for i in verdict.items], ("宛先", target)],
+        consent=[f"{what} を {target} へマージし、本番系へ反映する"],
+        rollback=GATE_ROLLBACK,
+    )
+    cmd = next_cmd or (f"merge-when-green {n} --gate-approved user" if n else "merge-when-green <PR番号> --gate-approved user")
+    items = verdict.items + [{"kind": "pr", "name": what, "result": "gate", "base": target}]
+    emit(
+        result(
+            TOOL,
+            "gate",
+            f"{lead}。承認ゲート 2 の承認が要る",
+            items,
+            {"gate": GATE, "verdict": verdict.value, "target": target},
+            path,
+            f"承認を得たら {cmd}（プランなら run <プラン> --from {plan_step}）",
+        )
+    )
+
+
+def cmd_merge_gate(a):
+    """宛先へのマージが承認ゲート 2 に当たるかだけを判定する（gh を呼ぶのは承認資料に --pr の中身を載せるときだけ）。"""
+    root = git_root(a.root)
+    verdict = delivery.judge_target(delivery.load(root), a.base)
+    if verdict.stops:
+        info = pr_state(root, a.pr) if a.pr else None
+        gate_stop(a.pr, verdict, info)
+    emit(
+        result(
+            TOOL,
+            "ok",
+            f"宛先 {a.base} へのマージは承認ゲート 2 に当たらない（{verdict.reason}）",
+            verdict.items,
+            {"verdict": verdict.value, "target": a.base},
+        )
+    )
+
+
 # --- merge-when-green ---------------------------------------------------------
 
 
-def cmd_merge_when_green(a):
+def cmd_merge_when_green(a, next_cmd=None, plan_step="merge-approved"):
     root = git_root(a.root)
     n = a.pr
+    decl = delivery.load(root)  # 判定は保存しない。呼ぶたびに宣言から作り直す
     watch = GreenWatch(root, a)
+    judged = {}
+
+    def gate(info):
+        # CI を待つ前・draft を外す前に、最初の読みの宛先で判定する（gh の呼び出しを足さない）
+        verdict = delivery.judge_target(decl, info.get("baseRefName") or "")
+        judged["verdict"] = verdict
+        if verdict.stops and not a.gate_approved:
+            gate_stop(n, verdict, info, next_cmd, plan_step)
+
+    watch.on_open = gate
     watch.wait()
     items, waits, queued_runs = watch.items, watch.waits, watch.queued_runs
+    verdict = judged.get("verdict")
+    gate_metrics = {"verdict": verdict.value, "target": verdict.target} if verdict else {}
 
     if not any(i["kind"] == "pr" and i["result"] == "already_merged" for i in items):
         pin = ["--match-head-commit", watch.last_sha] if watch.last_sha else []  # 緑を確かめた先頭だけをマージする
@@ -330,13 +425,86 @@ def cmd_merge_when_green(a):
                     {"waits": waits},
                 )
             )
-        items.append({"kind": "pr", "name": f"#{n}", "result": "merged", "method": a.method})
+        merged = {"kind": "pr", "name": f"#{n}", "result": "merged", "method": a.method, "head": watch.last_sha}
+        if a.gate_approved:
+            merged["gate_approved"] = a.gate_approved  # 誰が承認ゲート 2 を通したか（監査で辿る。#1336 の I8）
+        items.append(merged)
 
     if a.no_cleanup:
-        emit(result(TOOL, "ok", f"#{n} をマージした（後片付けは行わない）", items, {"waits": waits, "queued_runs": queued_runs}))
+        emit(
+            result(
+                TOOL,
+                "ok",
+                f"#{n} をマージした（後片付けは行わない）",
+                items,
+                {"waits": waits, "queued_runs": queued_runs, **gate_metrics},
+            )
+        )
     status, summary, citems, metrics, path, nxt = cleanup(root, [n])
-    metrics = {**metrics, "waits": waits, "queued_runs": queued_runs}
+    metrics = {**metrics, "waits": waits, "queued_runs": queued_runs, **gate_metrics}
     emit(result(TOOL, status, f"#{n} をマージした。{summary}", items + citems, metrics, path, nxt))
+
+
+# --- promote（昇格の Pull Request。#1336） ------------------------------------
+
+
+def _open_promote_pr(root, head, base):
+    """開いた昇格の Pull Request（head → base）の番号。無ければ None。"""
+    p = gh_parts.gh(["pr", "list", "--head", head, "--base", base, "--state", "open", "--json", "number"], cwd=root)
+    if p.returncode != 0:
+        raise StepError(f"gh pr list が失敗: {p.stderr.strip()[:300]}")
+    try:
+        prs = json.loads(p.stdout or "[]")
+    except ValueError:
+        prs = []
+    return prs[0]["number"] if prs else None
+
+
+def cmd_promote(a):
+    """ベースブランチ（--head）から本番チャネル（--base）への昇格の Pull Request を作り（あれば使い）、承認ゲート 2 の後にマージする。
+    head はベースブランチなので、マージの後に後片付けをしない（#1336 の I7）。"""
+    root = git_root(a.root)
+    n = _open_promote_pr(root, a.head, a.base)
+    created = False
+    if n is None:
+        title = f"昇格: {a.head} → {a.base}"
+        body = f"{a.head} の変更を本番チャネル {a.base} へ入れる（merged-steps.py promote が作った）。マージは承認ゲート 2 の後に行う。"
+        p = gh_parts.gh(["pr", "create", "--head", a.head, "--base", a.base, "--title", title, "--body", body], cwd=root)
+        if p.returncode != 0:
+            err = (p.stderr or "").strip()
+            if "No commits between" in err:
+                emit(result(TOOL, "ok", f"{a.head} から {a.base} へ昇格する変更が無い", [], {"pr": None, "target": a.base}))
+            raise StepError(f"gh pr create が失敗: {err[:300]}")
+        n = int((p.stdout or "").strip().rstrip("/").rsplit("/", 1)[-1])
+        created = True
+    item = {"kind": "pr", "name": f"#{n}", "result": "created" if created else "found", "base": a.base, "head_branch": a.head}
+    if a.prepare:
+        info = pr_state(root, n)
+        verdict = delivery.judge_target(delivery.load(root), info.get("baseRefName") or a.base)
+        path = None
+        if verdict.stops:
+            path = approval_present(
+                TOOL,
+                f"promote-{n}",
+                title=f"#{n} の昇格（{a.head} → {a.base}。承認ゲート 2）",
+                targets=[{"url": info.get("url") or f"#{n}", "title": info.get("title"), "base_head": f"{a.base} ← {a.head}"}],
+                change=f"{info.get('changedFiles', '?')} ファイル・+{info.get('additions', '?')} / -{info.get('deletions', '?')} 行",
+                judge=[("判定", verdict.value), ("理由", verdict.reason), *[(i["name"], i["result"]) for i in verdict.items]],
+                consent=[f"#{n} を {a.base} へマージし、本番系へ反映する"],
+                rollback=GATE_ROLLBACK,
+            )
+        emit(
+            result(
+                TOOL,
+                "ok",
+                f"昇格の Pull Request #{n} を用意した（{a.head} → {a.base}）",
+                verdict.items + [item],
+                {"pr": n, "verdict": verdict.value, "target": a.base},
+                path,
+            )
+        )
+    a.pr, a.no_cleanup = n, True
+    cmd_merge_when_green(a, next_cmd=f"promote --head {a.head} --base {a.base} --gate-approved user", plan_step="promote-approved")
 
 
 # --- probe --------------------------------------------------------------------
@@ -458,15 +626,8 @@ def cmd_probe(a):
     )
 
 
-def build_parser():
-    ap = argparse.ArgumentParser(prog="merged-steps.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--root", help="対象のリポジトリの根（既定はカレントの git の根）")
-    sub = ap.add_subparsers(dest="cmd", required=True)
-    p = sub.add_parser("cleanup", parents=[common_parser()], help="マージ済みの PR の作業ツリーとローカルブランチを片付ける")
-    p.add_argument("prs", nargs="+", type=int, metavar="PR番号")
-    p.set_defaults(func=cmd_cleanup)
-    m = sub.add_parser("merge-when-green", parents=[common_parser()], help="CI が通るまで待ち、--admin でマージして後片付けまで行う")
-    m.add_argument("pr", type=int, metavar="PR番号")
+def add_wait_args(m):
+    """merge-when-green と promote が受ける、待ちと承認の引数。"""
     m.add_argument("--method", choices=("merge", "squash", "rebase"), default="merge")
     m.add_argument("--interval", type=float, default=10.0, help="CI を読み直す間隔（秒）")
     m.add_argument("--recheck", type=float, default=5.0, help="pending を見ずに通っていたとき、確かめ直すまでの間隔（秒）")
@@ -480,8 +641,41 @@ def build_parser():
         default=300.0,
         help="実行が終わったのにチェックが pending のまま続けば、ジョブを 1 度だけ再実行するまでの秒数",
     )
+    m.add_argument(
+        "--gate-approved",
+        choices=("user", "mvv"),
+        help="承認ゲート 2 を通した担い手（利用者 / MVV 判定）。自動反映の本番チャネルへのマージは、これが無ければ止まる",
+    )
+
+
+def build_parser():
+    ap = argparse.ArgumentParser(prog="merged-steps.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--root", help="対象のリポジトリの根（既定はカレントの git の根）")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("cleanup", parents=[common_parser()], help="マージ済みの PR の作業ツリーとローカルブランチを片付ける")
+    p.add_argument("prs", nargs="+", type=int, metavar="PR番号")
+    p.set_defaults(func=cmd_cleanup)
+    g = sub.add_parser(
+        "merge-gate", parents=[common_parser()], help="宛先へのマージが承認ゲート 2（自動反映の本番チャネル）に当たるかを判定する"
+    )
+    g.add_argument("--base", required=True, help="Pull Request の宛先のブランチ")
+    g.add_argument("--pr", type=int, help="承認資料に URL と差分の量を載せる Pull Request")
+    g.set_defaults(func=cmd_merge_gate)
+    m = sub.add_parser("merge-when-green", parents=[common_parser()], help="CI が通るまで待ち、--admin でマージして後片付けまで行う")
+    m.add_argument("pr", type=int, metavar="PR番号")
+    add_wait_args(m)
     m.add_argument("--no-cleanup", action="store_true", help="マージだけ行い、後片付けをしない")
     m.set_defaults(func=cmd_merge_when_green)
+    pm = sub.add_parser(
+        "promote",
+        parents=[common_parser()],
+        help="昇格の Pull Request（ベースブランチ → 本番チャネル）を作り、承認ゲート 2 の後にマージする",
+    )
+    pm.add_argument("--head", required=True, help="昇格させるブランチ（ベースブランチ）")
+    pm.add_argument("--base", required=True, help="本番チャネル")
+    pm.add_argument("--prepare", action="store_true", help="Pull Request を用意して承認資料を書くところで終える（マージしない）")
+    add_wait_args(pm)
+    pm.set_defaults(func=cmd_promote)
     pr = sub.add_parser(
         "probe", parents=[common_parser()], help="開いた PR のチェックを分類する（遅れの一次の調査）。--act なら取り残しを再実行する"
     )
