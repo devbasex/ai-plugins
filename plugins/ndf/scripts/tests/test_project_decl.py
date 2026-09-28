@@ -13,6 +13,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -661,3 +662,61 @@ def test_force_reanalysis(laravel, env, tmp_path):
     d = decl(laravel)
     assert d["issues"] == {"primary": "github", "others": []}
     assert d["checks"]["tools"] == [{"name": "hand", "config": "x"}]
+
+
+# --- 現状固定: 依存の定義の読み取り（dependencies） ----------------------------------------
+
+DEPS_REPO = {
+    "composer.json": json.dumps({"require": {"php": "^8.3"}, "require-dev": {"phpunit/phpunit": 10}}),
+    "web/package.json": json.dumps(
+        {"dependencies": {"react": "^18"}, "devDependencies": {"jest": "^29"}, "engines": {"node": ">=20"}}
+    ),
+    "a/b/package.json": json.dumps({"dependencies": {"deep": "1"}}),  # 2 段下は読まない
+    "pyproject.toml": "\n".join(
+        [
+            "[project]",
+            'name = "x"',
+            'requires-python = ">=3.11"',
+            'dependencies = ["Requests>=2", "rich[jupyter]; python_version>\'3\'"]',
+            "[project.optional-dependencies]",
+            'dev = ["pytest~=8"]',
+            "[dependency-groups]",
+            'lint = ["Ruff==0.5"]',
+            'nested = {include-group = "lint"}',
+            "[tool.poetry.dependencies]",
+            'Django = "^5"',
+            "[tool.poetry.dev-dependencies]",
+            'black = "*"',
+            "[tool.poetry.group.docs.dependencies]",
+            'MkDocs = "1.5"',
+        ]
+    )
+    + "\n",
+    "requirements-dev.txt": "# comment\n\nrequests==1.0\nFlask>=3 # web\n",
+}
+
+
+def test_dependencies_collects_every_manifest_by_language(tmp_path):
+    mr = _project_lib("measure_repo")
+    root = init_repo(tmp_path / "deps", DEPS_REPO)
+    assert mr.dependencies(mr.Tree(root, time.monotonic() + 60)) == {
+        "php": {"php": "^8.3", "phpunit/phpunit": "10"},
+        "javascript": {"react": "^18", "jest": "^29", "node": ">=20"},
+        "python": {
+            "requests": "Requests>=2",
+            "rich": "rich[jupyter]; python_version>'3'",
+            "pytest": "pytest~=8",
+            "ruff": "Ruff==0.5",
+            "django": "^5",
+            "black": "*",
+            "mkdocs": "1.5",
+            "python": ">=3.11",
+            "flask": "Flask>=3 # web",
+        },
+    }
+
+
+def test_dependencies_of_an_empty_repo_are_empty_per_language(tmp_path):
+    mr = _project_lib("measure_repo")
+    root = init_repo(tmp_path / "empty", {"README.md": "x\n", "package.json": "[1]", "composer.json": "{broken"})
+    assert mr.dependencies(mr.Tree(root, time.monotonic() + 60)) == {"php": {}, "javascript": {}, "python": {}}
