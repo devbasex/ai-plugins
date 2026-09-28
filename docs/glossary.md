@@ -144,7 +144,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | pace | `pace` | モードとは別の軸で、工程をどう通すかを決める。ウォーターフォールで各工程を検証し人の承認を取る normal、normal の承認だけを MVV 判定にする auto、実践投入の中で検証しながら MVV で自動に進める fast の 3 つ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | pace: auto | `auto` | 進め方の 1 つ。工程は normal と同じで、承認ゲート 1・2 だけを MVV 判定で自動にする。「従う」でレッドラインが無いときだけ通し、ほかは利用者へ戻す | — | — | `plugins/ndf/skills/development-workflow/references/pace.md` |
 | 実践投入 | — | pace: fast の検証の場所。実装の Pull Request が develop（開発版のチャネル）へ入り、開発版として配布され使われること。fast の検査はその後にトリガーで通る | — | — | `plugins/ndf/skills/development-workflow/references/pace.md` |
-| resume | `resume` | new mission のマニフェストで then_of のステージが持つ、そのステージから最後までを流す queue のコマンド。承認ゲートで止まった後に続きを流す | — | — | — |
+| resume | `resume` | new mission のマニフェストで then_of のステージが持つ、そのステージから最後までを流す queue のコマンド。承認ゲートで止まった後に続きを流す | — | — | `plugins/ndf/skills/development-workflow/references/pace.md` |
 | MVV | — | Mission / Vision / Value。プロジェクト MVV とミッション MVV の 2 層があり、下位は上位の範囲で具体化する | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | MVV 判定 | — | 承認ゲートのエビデンスが NDF の共通原則・プロジェクト MVV・ミッション MVV に従うかの判定。「従う」でレッドラインが無いときだけ承認ゲートを省き、記録を残す | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 上位の原則 | — | 「人を守り、人の発展を支える」。NDF の共通原則の最上位の 1 文 | — | — | — |
@@ -357,6 +357,10 @@ worktree の設定・セッション開始 hook・テスト環境の割り当て
 | セッション開始 hook | — | worktree-session.sh。Claude Code / Codex の SessionStart、Kiro の agentSpawn などで動く | 開始時の hook | — | `docs/specifications/ndf-worktree-declaration-and-entry-points.md` |
 | 開発 worktree | — | 人が変更を加えて Pull Request にする worktree。ブランチを持つ | 開発用の worktree | — | `plugins/ndf/skills/worktree/SKILL.md` |
 | レビュー worktree | — | cross-review と cross-refactoring が一時的に使う worktree。システムの一時ディレクトリに置く | レビュー用の worktree | — | `plugins/ndf/skills/worktree/SKILL.md` |
+| 依存物 | — | パッケージマネージャが入れる、追跡されないディレクトリ（`vendor/`・`node_modules/`・`.venv` など）。worktree には最初から無い | — | — | — |
+| 依存の用意 | — | worktree を作った直後、または未用意の既存 worktree を使う前（使い回し・手で打つやり直し）に、宣言に従って依存物を worktree で使える状態にすること。手段（コマンド・参照・複製）は問わない | — | — | — |
+| 用意の印 | — | 依存の用意が済んだことを示す、worktree ごとの git ディレクトリの `ndf-deps` ファイル。使い回すときはこれを見てやり直しを省く | — | — | — |
+| 到達の確認 | — | コンテナの中から worktree の探りの印を読み、テストのコンテナが worktree を見ているかを確かめること | — | — | — |
 
 ## mcp-serena（`mcp-serena`）
 

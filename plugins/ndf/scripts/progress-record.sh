@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # NDF plugin: issue の本文へ工程の進行を記録する。
 #
-#   progress-record.sh <issue番号> <工程名> [--mode M] [--pace normal|fast] [--worktree P] [--plan P]
+#   progress-record.sh <issue番号> <工程名> [--mode M] [--pace normal|fast|auto] [--worktree P] [--plan P]
 #                      [--repo <所有者>/<リポジトリ>] [--note TEXT]
 #
 # 工程名に `-` を渡すと、チェックリストを変えずに見出し行（モード・作業ツリー・実装計画のファイル）
@@ -135,7 +135,7 @@ else:
     done[stage] = " / ".join([stamp] + ([note] if note else []))
 
 meta_parts = [f"モード: {mode or '—'}"]
-if pace == "fast":  # 既定（normal）は書かない
+if pace in ("fast", "auto"):  # 既定（normal）は書かない
     meta_parts.append(f"進め方: {pace}")
 if worktree:
     meta_parts.append(f"作業ツリー: `{worktree}`")

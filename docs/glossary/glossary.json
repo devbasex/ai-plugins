@@ -1750,31 +1750,27 @@
       "context": "ndf-workflow",
       "meaning": "モードとは別の軸で、工程をどう通すかを決める。ウォーターフォールで各工程を検証し人の承認を取る normal、normal の承認だけを MVV 判定にする auto、実践投入の中で検証しながら MVV で自動に進める fast の 3 つ",
       "code": "pace",
-      "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
-      "pending_source": "issues/issue-1370-design.md"
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "pace: auto",
       "context": "ndf-workflow",
       "meaning": "進め方の 1 つ。工程は normal と同じで、承認ゲート 1・2 だけを MVV 判定で自動にする。「従う」でレッドラインが無いときだけ通し、ほかは利用者へ戻す",
       "code": "auto",
-      "source": "plugins/ndf/skills/development-workflow/references/pace.md",
-      "pending_source": "issues/issue-1370-requirements.md"
+      "source": "plugins/ndf/skills/development-workflow/references/pace.md"
     },
     {
       "term": "実践投入",
       "context": "ndf-workflow",
       "meaning": "pace: fast の検証の場所。実装の Pull Request が develop（開発版のチャネル）へ入り、開発版として配布され使われること。fast の検査はその後にトリガーで通る",
-      "source": "plugins/ndf/skills/development-workflow/references/pace.md",
-      "pending_source": "issues/issue-1370-design.md"
+      "source": "plugins/ndf/skills/development-workflow/references/pace.md"
     },
     {
       "term": "resume",
       "context": "ndf-workflow",
       "meaning": "new mission のマニフェストで then_of のステージが持つ、そのステージから最後までを流す queue のコマンド。承認ゲートで止まった後に続きを流す",
       "code": "resume",
-      "source": "",
-      "pending_source": "issues/issue-1370-design.md"
+      "source": "plugins/ndf/skills/development-workflow/references/pace.md"
     },
     {
       "term": "MVV",
@@ -2248,6 +2244,34 @@
       "code": "junit",
       "source": "",
       "pending_source": "issues/issue-1334-design.md"
+    },
+    {
+      "term": "依存物",
+      "context": "ndf-worktree",
+      "meaning": "パッケージマネージャが入れる、追跡されないディレクトリ（`vendor/`・`node_modules/`・`.venv` など）。worktree には最初から無い",
+      "source": "",
+      "pending_source": "issues/issue-1337-requirements.md"
+    },
+    {
+      "term": "依存の用意",
+      "context": "ndf-worktree",
+      "meaning": "worktree を作った直後、または未用意の既存 worktree を使う前（使い回し・手で打つやり直し）に、宣言に従って依存物を worktree で使える状態にすること。手段（コマンド・参照・複製）は問わない",
+      "source": "",
+      "pending_source": "issues/issue-1337-requirements.md"
+    },
+    {
+      "term": "用意の印",
+      "context": "ndf-worktree",
+      "meaning": "依存の用意が済んだことを示す、worktree ごとの git ディレクトリの `ndf-deps` ファイル。使い回すときはこれを見てやり直しを省く",
+      "source": "",
+      "pending_source": "issues/issue-1337-design.md"
+    },
+    {
+      "term": "到達の確認",
+      "context": "ndf-worktree",
+      "meaning": "コンテナの中から worktree の探りの印を読み、テストのコンテナが worktree を見ているかを確かめること",
+      "source": "",
+      "pending_source": "issues/issue-1337-design.md"
     }
   ]
 }

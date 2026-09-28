@@ -1,4 +1,4 @@
-"""mission_mvv.py: `mission-state.py init --pace fast` のミッション MVV（#1078）とプロジェクト MVV（#1366）の扱い。
+"""mission_mvv.py: `mission-state.py init --pace fast` / `auto` のミッション MVV（#1078）とプロジェクト MVV（#1366）の扱い。
 
 - マイルストーンの説明（`gh api repos/<所有者>/<リポジトリ>/milestones/<M>`）から `## Mission` / `## Vision` / `## Value` の節を
   状態のファイルの隣の `mvv.md` へ写し、`mvv.path`・`mvv.sha256` を返す。見出しが 1 つでも無い・取得できないときは止まる（3）。
@@ -19,6 +19,7 @@ from pathlib import Path
 import md
 
 MVV_SECTIONS = ("Mission", "Vision", "Value")
+MVV_PACES = ("fast", "auto")  # 承認ゲートを MVV 判定で通す進め方（MVV を写し、プロジェクト MVV の参照を残す）
 EXIT_UNREADABLE, EXIT_PRECONDITION = 2, 3
 
 
@@ -50,7 +51,7 @@ def _ref(path: Path) -> dict:
 
 def init_mvv(a, project) -> tuple[dict | None, tuple | None]:
     """(状態へ書く mvv, 止まるときの (理由, 終了コード, items))。pace が normal なら (None, None)。"""
-    if a.pace != "fast" or (not a.mvv and not a.milestone and project.approved):
+    if a.pace not in MVV_PACES or (not a.mvv and not a.milestone and project.approved):
         return None, None
     if a.mvv:
         path = Path(a.mvv).resolve()
@@ -58,7 +59,7 @@ def init_mvv(a, project) -> tuple[dict | None, tuple | None]:
             return None, (f"MVV のファイルが無い: {a.mvv}", EXIT_PRECONDITION, [])
         return _ref(path), None
     if not a.milestone:
-        return None, ("--pace fast には --milestone（MVV の複製元）か --mvv が要る", EXIT_UNREADABLE, [])
+        return None, (f"--pace {a.pace} には --milestone（MVV の複製元）か --mvv が要る", EXIT_UNREADABLE, [])
     try:
         text = mvv_sections(milestone_description(a.milestone, a.repo))
     except (OSError, FileNotFoundError) as e:
@@ -70,6 +71,23 @@ def init_mvv(a, project) -> tuple[dict | None, tuple | None]:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     return _ref(path), None
+
+
+def withdraw(m: dict, name: str, at: str) -> int:
+    """状態 m から同じ名前の承認ゲートの MVV 判定の記録（by: mvv）を外し、外した数を返す。MVV 判定で通した後に
+    承認ゲートへ落ちたときに使う（#1370 の I8）。外した時刻は外す記録が無くても withdrawals に残す。並列の設計プランが
+    後から書く by: mvv を `withdrawn` で断り、1 件でも関門へ落ちたら自動の通過を残さないためである。それより前の
+    MVV 判定は覆しの照合で直前の判定として読ませない（`project_mvv_signals.last_mvv_verdict`）。利用者の承認の記録は外さない。"""
+    gates = m.get("gates", [])
+    kept = [g for g in gates if not (g.get("name") == name and g.get("by") == "mvv")]
+    m["gates"] = kept
+    m.setdefault("withdrawals", []).append({"name": name, "at": at})
+    return len(gates) - len(kept)
+
+
+def withdrawn(m: dict, name: str) -> bool:
+    """同じ名前の承認ゲートで MVV 判定の通過を取り消したことがあるか。あれば by: mvv の記録を書かない。"""
+    return any(w.get("name") == name for w in m.get("withdrawals", []))
 
 
 def vet_stop(root: Path, path: str) -> tuple | None:

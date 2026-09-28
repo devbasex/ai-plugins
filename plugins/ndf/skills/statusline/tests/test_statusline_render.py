@@ -59,12 +59,30 @@ def write_agent(
     return f
 
 
-def render(root: Path, total: int = 100_000, size: int | None = None) -> str:
+def fake_claude(root: Path, body: str | None, *, rc: int = 0) -> Path:
+    """`claude auth status` の偽物を <root>/bin に置き、その bin のパスを返す。body が None なら失敗（rc）だけを返す"""
+    b = root / "bin"
+    b.mkdir(parents=True, exist_ok=True)
+    f = b / "claude"
+    script = "#!/bin/bash\n" + (f"cat <<'JSON'\n{body}\nJSON\n" if body is not None else f"exit {rc}\n")
+    f.write_text(script)
+    f.chmod(0o755)
+    return b
+
+
+def render(root: Path, total: int = 100_000, size: int | None = None, *, env: dict | None = None, bin_dir: Path | None = None) -> str:
     cw: dict = {"total_input_tokens": total}
     if size is not None:
         cw["context_window_size"] = size
     payload = {"transcript_path": str(root / "sess.jsonl"), "model": {"display_name": "Opus 5 (1M context)"}, "context_window": cw}
-    r = subprocess.run(["bash", str(STATUSLINE)], input=json.dumps(payload), capture_output=True, text=True, check=True)
+    # 接続先の取得を本物の claude に向けない。既定は失敗する偽物（何も出ない）で、控えはテストごとの場所に置く
+    e = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_CODE_USE_BEDROCK", "AWS_PROFILE")}
+    bins = bin_dir or fake_claude(root / "_default", None, rc=1)
+    e["PATH"] = f"{bins}:{e.get('PATH', '')}"
+    e["NDF_STATUSLINE_AUTH_CACHE"] = str(root / "_auth-cache.json")
+    if env:
+        e.update(env)
+    r = subprocess.run(["bash", str(STATUSLINE)], input=json.dumps(payload), capture_output=True, text=True, check=True, env=e)
     return r.stdout
 
 
@@ -135,3 +153,44 @@ def test_path_with_spaces(tmp_path):
     root = tmp_path / "my project dir"
     write_agent(root, "aaaa1111", tokens=33_000, description="空白下")
     assert "空白下 33k" in plain(render(root))
+
+
+AUTH_JSON = '{"loggedIn": true, "authMethod": "claude.ai", "apiProvider": "firstParty", "email": "dev@example.com", "orgName": "Example", "subscriptionType": "team"}'
+
+
+def test_account_email_is_shown_dim_at_the_end(tmp_path):
+    out = render(tmp_path, bin_dir=fake_claude(tmp_path, AUTH_JSON))
+    assert plain(out).endswith(" dev@example.com (team)")
+    assert "\033[2mdev@example.com (team)\033[0m" in out
+
+
+def test_account_without_subscription_type_shows_email_only(tmp_path):
+    out = plain(render(tmp_path, bin_dir=fake_claude(tmp_path, '{"loggedIn": true, "email": "solo@example.com"}')))
+    assert out.endswith(" solo@example.com")
+
+
+def test_account_is_cached_for_60s(tmp_path):
+    render(tmp_path, bin_dir=fake_claude(tmp_path, AUTH_JSON))
+    cache = tmp_path / "_auth-cache.json"
+    assert cache.is_file()
+    # 偽物を失敗するものへ替えても、控えが新しいうちは前の値が出る
+    out = plain(render(tmp_path, bin_dir=fake_claude(tmp_path / "broken", None, rc=1)))
+    assert out.endswith(" dev@example.com (team)")
+    t = time.time() - 61
+    os.utime(cache, (t, t))
+    out = plain(render(tmp_path, bin_dir=fake_claude(tmp_path / "broken", None, rc=1)))
+    assert "dev@example.com" not in out and not cache.exists()
+
+
+def test_bedrock_is_shown_with_profile(tmp_path):
+    out = plain(render(tmp_path, env={"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": "devbase"}))
+    assert out.endswith(" bedrock:devbase")
+    out = plain(render(tmp_path, env={"CLAUDE_CODE_USE_BEDROCK": "1"}))
+    assert out.endswith(" bedrock")
+
+
+def test_nothing_is_added_when_account_is_unavailable(tmp_path):
+    out = plain(render(tmp_path))
+    assert out.endswith("]")
+    out = plain(render(tmp_path, bin_dir=fake_claude(tmp_path / "loggedout", '{"loggedIn": false}')))
+    assert out.endswith("]")

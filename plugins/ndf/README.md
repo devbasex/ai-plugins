@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.36）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.37）
 ```
 
 ### agy
@@ -119,16 +119,9 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.36 へ更新するとき
+## v10.17.37 へ更新するとき
 
-- ミッション m1366 の課題を develop へ取り込む。（#1374）
-- `merged-steps.py` の worktree の削除で、退避に失敗したときに `--force` へ落ちない（critical）（#1369）
-- `pace.json` の `boundary_paths`・`triggers` の型を検証し、誤った値で fast の承認省略を許さない（#1369）
-- `mvv-gate.py` が変更したファイルの一覧を取れないときは承認ゲートへ戻す（#1369）
-- merge-when-green が緑を確かめた先頭の PR だけをマージする（#1369）
-- ほか、cross-review・cross-refactoring・fix・check-trigger・relay の例外の経路と契約の修正（#1369）
-- 用語チェックは Markdown の引用（`>` で始まる行）を検査しません。依頼の原文を引用した箇所に廃止した語があっても、チェックは落ちません。（#1375）
-- このリポジトリの承認ゲートの判定・レビューの指摘の基準・修正の見送り・リファクタリングの提案・judge・範囲外の起票が、NDF の共通原則 → このプロジェクト MVV の順で判断の基準を受け取る（#1379）
+- ミッション m1370 の課題を develop へ取り込む。（#1383）
 
 ## Playwright テストについて
 
@@ -365,7 +358,7 @@ agy models   # 認証確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.36/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.37/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -387,14 +380,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.36/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.37/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.36  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.37  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。

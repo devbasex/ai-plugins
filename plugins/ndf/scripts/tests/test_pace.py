@@ -56,6 +56,8 @@ def test_a_well_formed_declaration_is_read_with_defaults(tmp_path):
         ({"areas": {}}, "areas"),
         ({"fast": {"enabled": True, "modes": ""}}, "fast.modes"),
         ({"fast": []}, "fast"),
+        ({"auto": []}, "auto"),
+        ({"auto": {"enabled": True, "modes": "light"}}, "auto.modes"),
         ({"triggers": [1, 2]}, "triggers"),
         ({"triggers": "score"}, "triggers"),
         ({"triggers": {"score": -1}}, "triggers"),
@@ -65,6 +67,14 @@ def test_a_malformed_declaration_fails_closed(tmp_path, patch, message):
     with pytest.raises(pace.PaceError) as e:
         pace.read_pace(write(tmp_path, {**DECL, **patch}))
     assert message in str(e.value)
+
+
+def test_the_auto_section_is_read_on_its_own(tmp_path):
+    """#1370: auto の節は fast と同じ形で読み、無ければ不許可。fast の値は auto に写さない。"""
+    d = pace.read_pace(write(tmp_path, DECL))
+    assert d["auto"] == {"enabled": False, "verify": "", "modes": list(pace.DEFAULT_MODES)}
+    d = pace.read_pace(write(tmp_path, {**DECL, "auto": {"enabled": True, "verify": "v", "modes": ["light", "operation"]}}))
+    assert d["auto"] == {"enabled": True, "verify": "v", "modes": ["light"]} and d["fast"]["verify"] == "true"
 
 
 def test_a_missing_version_fails_closed(tmp_path):

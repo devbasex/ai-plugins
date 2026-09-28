@@ -189,7 +189,11 @@ NEW_ARGS = [
     ),
     (
         "--pace",
-        {"choices": ["normal", "fast"], "default": "normal", "help": "進め方（fast は使ってよい条件と MVV の承認を確かめる）"},
+        {
+            "choices": ["normal", "fast", "auto"],
+            "default": "normal",
+            "help": "進め方（fast と auto は使ってよい条件と MVV の承認を確かめる。auto は normal の工程で承認ゲート 1・2 を MVV 判定にする）",
+        },
         "mission",
     ),
     (
@@ -197,7 +201,7 @@ NEW_ARGS = [
         {
             "help": {
                 "*": "ミッションの状態（mission-state.py のファイル）",
-                "mission": "ミッションの状態（--pace fast と組。mission-state.py のファイル）",
+                "mission": "ミッションの状態（--pace fast / auto と組。mission-state.py のファイル）",
             }
         },
         "mission close",

@@ -173,11 +173,12 @@ class RunState:
         rec = plan.get("記録")
         if not rec:
             return
-        pace_first = plan.get("進め方") == "fast" and not self.pace_recorded
+        pace = plan.get("進め方")
+        pace_first = pace in ("fast", "auto") and not self.pace_recorded
         self.pace_recorded = True
         for issue in plan.get("課題", []):
             if pace_first:  # 通過記録と本文の見出し行へ進め方を先に書く（まとめる工程を記録なしと数えない）
-                subprocess.run(["bash", rec, str(issue), "pace", "fast"], cwd=cwd, capture_output=True, text=True)
+                subprocess.run(["bash", rec, str(issue), "pace", pace], cwd=cwd, capture_output=True, text=True)
             subprocess.run(["bash", rec, str(issue), "stage", stage], cwd=cwd, capture_output=True, text=True)
 
     def add_usage(self, kind: str, res: dict) -> None:

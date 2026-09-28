@@ -92,7 +92,7 @@ pj_is_stage() { _pj_in_list "$PJ_STAGES" "${1:-}"; }
 pj_is_mode() { _pj_in_list "$PJ_MODES" "${1:-}"; }
 pj_is_status() { _pj_in_list "$PJ_STATUSES" "${1:-}"; }
 # 進め方（#1078）。ボードのフィールドは持たず、issue の本文の見出し行と通過記録にだけ書く。
-PJ_PACES=$'normal\nfast'
+PJ_PACES=$'normal\nfast\nauto'
 pj_is_pace() { _pj_in_list "$PJ_PACES" "${1:-}"; }
 
 # キーが取る値の種類。single-select は一覧で照合し、text は照合しない。
