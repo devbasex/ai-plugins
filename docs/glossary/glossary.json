@@ -1782,9 +1782,15 @@
     {
       "term": "MVV 判定",
       "context": "ndf-workflow",
-      "meaning": "承認ゲートのエビデンスが NDF の共通原則・プロジェクト MVV・ミッション MVV に従うかの判定。「従う」でレッドラインが無いときだけ承認ゲートを省き、記録を残す",
+      "meaning": "承認ゲートのエビデンスが NDF の共通原則・プロジェクト MVV・ミッション MVV に従うかの判定。auto と fast では「従う」でレッドラインが無いときだけ承認ゲートを省き、記録を残す。normal では助言の MVV 判定として承認資料に載せ、承認は人が行う",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
-      "pending_source": "issues/issue-1366-design.md"
+      "pending_source": "issues/issue-1400-design.md"
+    },
+    {
+      "term": "助言の MVV 判定",
+      "context": "ndf-workflow",
+      "meaning": "承認ゲートの記録を書かずに、判定・理由・根拠の項目を承認資料へ載せるだけの MVV 判定（mvv-gate.py check --advise）。normal の承認ゲートの前に走り、承認するのは人である",
+      "pending_source": "issues/issue-1400-design.md"
     },
     {
       "term": "上位の原則",

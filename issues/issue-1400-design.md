@@ -1,0 +1,488 @@
+# #1400: プロジェクト MVV を normal・auto の各工程で従わせる
+
+要求と受け入れ条件は #1400 の本文にある（コピーは `issues/issue-1400-requirements.md`）。この文書は「どう作るか」だけを扱う。
+
+**変えるのは 3 か所である。** supervise の `work` のステップが MVV の節を worker へ渡す。`mvv-gate.py check` に承認ゲートの
+記録を書かない呼び方（`--advise`）を足す。これを `pace: normal` のミッションの承認ゲート 1・2 の前に置く。`requirements-design`・
+`design`・`tdd-cycle` の Skill 本文が MVV を読み、反する疑いを人へ戻す。
+
+例として、ai-plugins（プロジェクト MVV 版 1 が承認済み）で次を打つ。
+
+```bash
+supervise.py new mission --pace normal --state <状態> --design 1400 --issue 1400
+```
+
+設計のプランは次のように流れる。
+
+1. `design` のステップの worker は、システムプロンプトの末尾に MVV の節（11,271 バイト）を受け取る
+2. worker は決定ごとに「根拠: Value 6（MVV 版 1）」の行を書く。Value に反する疑いのある決定は書かずに「結果: 判断が要る」で終える
+3. cross-review の後に `mvv-gate.py check --advise` が走る。判定（例: 従う）と理由と根拠の項目を設計 PR のコメントへ書く
+4. プランは今どおり承認ゲート 1 で止まる。利用者が承認すると、conductor が承認を状態へ書く
+   （`mission-state.py gate <状態> "関門 1" --by user --outcome approved`）。判定が「反する疑い」なら、この承認が覆し
+   （`override_pass`）として 1 行残る
+
+## ドメインモデル
+
+### コンテキスト
+
+| コンテキスト | 何の語が 1 つの意味に決まるか |
+| --- | --- |
+| NDF の工程（`ndf-workflow`） | MVV 判定・承認ゲート・承認資料・ステップ・プラン・根拠の項目・覆し |
+
+コンテキストは 1 つで、コンテキストマップの関係は無い。
+
+### 集約
+
+| 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
+| --- | --- | --- | --- | --- |
+| ミッション状態 | `mission-state.py`（`init` と `gate`） | ミッション状態ファイル | 承認ゲートの記録（`gates[]`） | プロジェクト MVV の参照（版・sha256）・進め方 |
+| MVV 判定の記録 | `mvv-gate.py` | `mvv-gate.jsonl` の 1 行 | — | 判定・理由・根拠の項目・進め方・プロジェクト MVV の参照 |
+| 覆しの記録 | `mission-state.py gate --by user`（`lib/project_mvv_signals.record_override`） | `project-mvv-signals.jsonl` の 1 行 | — | 覆しの種類・直前の判定 |
+| ミッションのプラン | `supervise.py new mission`（`supervise_lib/mission.py`・`mission_waves.py`・`release_templates.py`） | ステージの一覧（`mission.json`） | プラン・ステップ | — |
+| 設計文書の決定の記録 | `design` の worker | 設計文書の「決定の記録」の節 | 決定 | 根拠の項目 |
+
+**プロジェクト MVV はこの変更では読むだけである。** 持ち主は `project-mvv.py approve` で、どの構成要素も書き換えない。
+
+### 不変条件
+
+| # | 集約 | 条件 | 破れたときの扱い |
+| --- | --- | --- | --- |
+| I1 | ミッション状態 | `--advise` の MVV 判定は、判定が「従う」でも承認ゲートの記録（`by: mvv`）を書かない | テストで落とす。書けば `normal` の承認ゲートが MVV 判定だけで通る |
+| I2 | ミッションのプラン | `normal` のプランは MVV 判定の結果によらず承認ゲートで止まり、`--from` で続けるまで先へ進まない | テストで落とす |
+| I3 | MVV 判定の記録 | プロジェクト MVV が承認済みでないとき、`--advise` は LLM を呼ばず、`mvv-gate.jsonl` に行を書かず、判定の記録（`--note`）も書かない | テストで落とす |
+| I4 | ミッションのプラン | `work` のステップが worker へ渡す MVV の節は `project_mvv.block(mvv)` の出力と 1 バイトも違わない。承認済みでなければ何も足さない | テストで落とす |
+| I5 | MVV 判定の記録 | 判定の行はすべて `pace` を持つ。既存のキーの名前と意味は変えない | テストで落とす |
+| I6 | ミッション状態 | `auto` / `fast` の MVV 判定は今どおり「従う」でレッドラインが無いときだけ `by: mvv` を書く | 既存のテストが落とす |
+| I7 | ミッションのプラン | `--state` を渡さない `normal` のミッションのプランは、今のプランと同じである | テストで落とす |
+| I8 | 覆しの記録 | 覆しは、人の答えが同じミッション・同じ承認ゲートの直前の判定と食い違ったときだけ 1 行書く（`normal` でも同じ） | テストで落とす |
+| I9 | 設計文書の決定の記録 | 決定 1 件ごとに根拠の項目の行が 1 つある | Skill 本文の手順が守らせる（文言のテストは書かない）。AC11 で確かめる |
+
+### ドメインイベント
+
+| # | イベント | 発生元 | 受け手 |
+| --- | --- | --- | --- |
+| E1 | プロジェクト MVV の状態を読んだ | supervise の実行の状態（`project_mvv_of`）・Skill の手順（`project-mvv.py check`） | `work` のステップ（E2）・Skill の手順（E3〜E5） |
+| E2 | `work` のステップのプロンプトに MVV の節を入れた | `WorkStep` | worker |
+| E3 | 要求と範囲を MVV と突き合わせた | `requirements-design` の worker | 課題の本文。反する疑いは conductor（作業の報告） |
+| E4 | 設計の決定ごとに根拠の項目を記録した | `design` の worker | 設計文書。`--advise` の MVV 判定の材料（E6） |
+| E5 | 実装の選択を MVV と突き合わせた | `tdd-cycle` の worker | 実装の PR。反する疑いは conductor（作業の報告） |
+| E6 | `normal` の承認ゲートの前に MVV 判定を走らせた | プランの `mvv` のステップ（`mvv-gate.py check --advise`） | `mvv-gate.jsonl`・判定の記録のファイル |
+| E7 | MVV 判定の結果を承認資料に載せた | プランの `mvv-note` のステップ | 設計 PR のコメント（ゲート 1）・承認資料のファイル（ゲート 2） |
+| E8 | 人が承認か差し戻しを答えた | 利用者（conductor が `mission-state.py gate --by user` で書く） | ミッション状態 |
+| E9 | 覆しを記録した | `mission-state.py gate --by user` | `project-mvv-signals.jsonl`（改訂の兆候） |
+
+### 用語
+
+| 用語 | 意味 | 用語集への反映 |
+| --- | --- | --- |
+| 助言の MVV 判定 | 承認ゲートの記録を書かずに、判定・理由・根拠の項目を承認資料へ載せるだけの MVV 判定（`mvv-gate.py check --advise`）。`normal` の承認ゲートの前に走り、承認するのは人である | 追加（`ndf-workflow`） |
+| MVV 判定 | 承認ゲートの材料が MVV に従うかの判定。`auto` / `fast` では「従う」で承認ゲートを通し、`normal` では助言の MVV 判定として承認資料へ載せる | 意味の変更（`ndf-workflow`） |
+| 根拠の項目 | 既存の語。設計の決定の記録にも書く | 変えない |
+| 覆し | 既存の語。`normal` の承認ゲートでも数える | 変えない |
+
+## 機能一覧
+
+| # | 機能 | 誰が使うか |
+| --- | --- | --- |
+| F1 | worker が MVV の節を受け取って作業する（要求・設計・実装・修正） | supervise の `work` のステップの worker |
+| F2 | 要求と範囲が MVV に反する疑いを人へ戻す | `requirements-design` の実行者（worker・対話の AI） |
+| F3 | 設計の決定ごとに根拠の項目を残し、反する疑いのある決定を人へ戻す | `design` の実行者 |
+| F4 | 実装の選択が MVV に反する疑いを人へ戻す | `tdd-cycle` の実行者 |
+| F5 | `normal` の承認ゲート 1・2 の前に助言の MVV 判定を走らせ、結果を承認資料へ載せる | conductor・利用者 |
+| F6 | `normal` の承認ゲートでの人の答えと判定の食い違いを覆しとして残す | conductor（`mission-state.py gate --by user`） |
+
+## 構成要素
+
+| 要素 | 責務 | 変え方 |
+| --- | --- | --- |
+| `work` のステップ（`supervise_lib/worker_steps.py` の `WorkStep`） | worker のシステムプロンプトの末尾へ MVV の節を足す。3 つの呼び方（最小構成の `claude -p`・Skill の `claude -p`（`full`）と再開・`external-ai.py run` のプロンプトファイル）で同じ文字列にする | 変える |
+| MVV 判定（`mvv-gate.py`） | `--advise` を受ける。承認ゲートの記録を書かず、どの判定でも終了コード 0 で返す。判定の行へ `pace` を足す。進め方の宣言が無いときのレッドラインを空として扱う（`--advise` のときだけ） | 変える |
+| MVV の判断の地点の共通部（`lib/project_mvv.py`） | `approval_refusal` の案内文から `--pace fast` の決め打ちを外す | 変える（文面だけ） |
+| ミッション状態（`mission-state.py init`） | プロジェクト MVV が承認済みなら、`pace` によらず参照（版・sha256）を書く | 変える |
+| `normal` のミッションの組み立て（`supervise_lib/mission.py`） | `--state` があれば設計と配布のプランへ助言の MVV 判定を入れる。承認ゲート 1・配布のステージの説明と `next` に `mission-state.py gate --by user` を足す。`normal` で `--state` があるマニフェストの見出しを `進め方: normal` にする | 変える |
+| 設計のプラン（`supervise_lib/mission_waves.py`） | `plan_advise_design`: `plan_mission_design` の `push-glossary` と `gate` の間へ `mvv`・`mvv-note` のステップを入れる | 足す |
+| 配布のプラン（`supervise_lib/release_templates.py`） | 開発版の `explain` の後へ `mvv`・`mvv-note` のステップを入れる（`advise` を渡されたときだけ） | 変える |
+| `requirements-design` の本文 | 手順 5 の後に「MVV と突き合わせる」を足す | 変える |
+| `design` の本文と `references/decisions.md` | 手順 3 で決定ごとに根拠の行を書き、反する疑いのある決定を人へ戻す | 変える |
+| `tdd-cycle` の本文 | 事前調査の後に「実装の選択を MVV と突き合わせる」を足す | 変える |
+| 参照（`approval-request.md`・`project-mvv.md`・`pace.md`）と `--state` の説明（`new_args.py`）・`mvv-gate.py` の docstring | 足した地点と記録の置き場、`normal` の列の MVV 判定、判断に使うものの「MVV 判定」の行 | 変える |
+| 用語集（`docs/glossary/glossary.json`） | 「助言の MVV 判定」を足し、「MVV 判定」の意味を直す | 変える |
+
+```mermaid
+graph TD
+    subgraph Skill の本文
+        RD[requirements-design]
+        DS[design と決定の記録]
+        TC[tdd-cycle]
+    end
+    subgraph supervise
+        MI[normal のミッションの組み立て]
+        DP[設計のプラン]
+        RP[配布のプラン]
+        WS[work のステップ]
+    end
+    subgraph 判定と記録
+        MG[MVV 判定]
+        PM[MVV の判断の地点の共通部]
+        MS[ミッション状態]
+    end
+    MI --> DP
+    MI --> RP
+    MI -->|どのプランも持つ| WS
+    WS -->|MVV の節| RD
+    WS -->|MVV の節| DS
+    WS -->|MVV の節| TC
+    DP -->|--advise| MG
+    RP -->|--advise| MG
+    WS --> PM
+    MG --> PM
+    MG -->|参照を読む| MS
+```
+
+図に載せない要素は、参照の文書・`new_args.py` の説明・`mvv-gate.py` の docstring・用語集である。どれも文面だけで、呼び出しの
+関係を持たない。
+
+### 文脈と配置
+
+```mermaid
+graph LR
+    利用者 -->|承認・差し戻し| CD[conductor]
+    CD -->|queue| SV[supervise の実行]
+    SV -->|claude -p| CL[Claude Code]
+    SV -->|gh| GH[GitHub の PR]
+    SV -->|追記| LOG[~/.local/state/ndf の jsonl]
+```
+
+配置は変わらない。どの処理も conductor の端末の中で今と同じプロセスとして動く（`supervise.py` の実行・`mvv-gate.py` の
+子プロセス・`claude -p`）。外部へ出るのは設計 PR のコメント 1 件（`gh pr comment`）だけ増える。
+
+### 置き場所
+
+```text
+plugins/ndf/
+├── scripts/
+│   ├── mvv-gate.py                      # --advise・pace
+│   ├── mission-state.py                 # init の参照
+│   ├── lib/project_mvv.py               # 案内文
+│   └── supervise_lib/
+│       ├── worker_steps.py              # MVV の節
+│       ├── mission.py                   # normal の組み立て
+│       ├── mission_waves.py             # plan_advise_design（新設）
+│       ├── release_templates.py         # 開発版の mvv・mvv-note
+│       └── new_args.py                  # --state の説明
+└── skills/
+    ├── requirements-design/SKILL.md
+    ├── design/SKILL.md
+    ├── design/references/decisions.md
+    ├── tdd-cycle/SKILL.md
+    └── development-workflow/references/{approval-request,project-mvv,pace}.md
+```
+
+### 既存の規則を新しい値（`pace: normal` の MVV 判定）に照らした結果
+
+MVV 判定を持つ進め方の集合（`fast` / `auto`）へ `normal` を足す。そのため、集合を前提にした規則を 2 つの経路で集めた。
+当てはまらないものだけを下の表に挙げる。
+
+| 経路 | 見たもの |
+| --- | --- |
+| 配布物の検索 | `fast\|auto` と `mvv 判定\|mvv-gate\|project_mvv\|by: mvv` の重なり |
+| `normal` のプランが通る手順 | `plan_mission_design`・`plan_mission_release`・`manifest_head`・`record_override` |
+
+| 規則 | 当てはまらない理由 | 載せた構成要素 |
+| --- | --- | --- |
+| `manifest_head` が「状態があれば `fast` の終わり」と読む | `normal` で `--state` を渡すと `進め方: fast` と書かれる | `normal` のミッションの組み立て |
+| `mission-state.py init` が参照を書くのは `MVV_PACES` だけ | 参照が無いと `approval_refusal` が判定を断る | ミッション状態 |
+| `approval_refusal` の案内「`--pace fast` で書く」 | `normal` の状態にも当てはまる案内にする | MVV の判断の地点の共通部 |
+| `mvv-gate.py` の判定の記録の文「`関門を省いた`」 | `--advise` は省かない | MVV 判定 |
+| `boundary_hits` が進め方の宣言の欠如を機械のチェックの外れとする | `normal` のリポジトリは `.ndf/pace.json` を持たないことがある | MVV 判定 |
+| `pace.md` の承認ゲートの表・フロー図の `normal` の列「利用者が承認する」 | MVV 判定が載る | 参照 |
+| `--state` の説明「`--pace fast / auto` と組」 | `normal` でも受ける | `--state` の説明 |
+
+## 構造
+
+```mermaid
+classDiagram
+    class WorkStep {
+        +execute(ctx, step)
+        +call_worker(ctx, step, prompt, cwd, name)
+        +mvv_system(ctx) str
+    }
+    class mvv_gate {
+        +cmd_check(a)
+        +advise_result(a, record)
+        +write_note(path, a, record)
+    }
+    class ProjectMvv
+    WorkStep ..> ProjectMvv : state.project_mvv_of
+    mvv_gate ..> ProjectMvv : load_mvv
+```
+
+- `WorkStep.mvv_system(ctx)` は `ctx.state.project_mvv_of(ctx.cwd)` を読む。承認済みなら `"\n\n" + project_mvv.block(mvv)` を、
+  ほかは空文字を返す。`execute` と `call_worker` は `WORK_SYSTEM` / `FULL_SYSTEM` の後ろへこれを足す
+- `mvv-gate.py` の `advise_result` は `--advise` のときの結果（status `ok`・終了コード 0）を組む。`write_note` は `advise` で見出しと
+  判定の行の文を変える
+
+## データ構造
+
+### MVV 判定の記録（`mvv-gate.jsonl` の 1 行）
+
+足すのは `pace` の 1 列だけである。**既存の行は書き換えない**（追記だけの事象の記録。過去の判定を失わない）。
+
+| 列 | 型 | 空を許すか | 意味 |
+| --- | --- | --- | --- |
+| `pace` | 文字列 | 許す（`""`） | ミッション状態の `pace`（`normal` / `auto` / `fast`）。状態を読めなかった行と、この変更より前の行は `""`（「分からない」） |
+| `passed` | 真偽 | 許さない | 既存。承認ゲートを通したか。`--advise` では常に `false` |
+
+`verdict` は既存のまま（`follow` / `not_follow` / `unknown` / `machine` / `unreadable`）。**プロジェクト MVV が承認済みでない
+`--advise` は行を書かない**（I3）。書くと「MVV なし」の行が改訂の兆候の集計に入り、`normal` しか使わないプロジェクトの記録が
+今と変わる。
+
+### ミッション状態
+
+| キー | 型 | 空を許すか | 意味 |
+| --- | --- | --- | --- |
+| `project_mvv` | `{version, sha256}` | 許す（キーが無い） | 既存。`init` の時点で承認済みのプロジェクト MVV の参照。**`pace` によらず**書く。無いのは MVV が承認済みでなかったか、この変更より前に作った状態 |
+
+### CRUD
+
+| 機能 | ミッション状態 | `mvv-gate.jsonl` | `project-mvv-signals.jsonl` | 設計 PR のコメント | 承認資料のファイル |
+| --- | --- | --- | --- | --- | --- |
+| F5 助言の MVV 判定 | R | C | R（改訂の提案） | C | U（末尾へ追記） |
+| F6 覆しの記録 | U（`gates[]`・`rejections[]`） | R | C | — | — |
+
+### 移行
+
+既存の `normal` の状態ファイルは `project_mvv` を持たない。そのまま `--state` に渡すと `approval_refusal` が「参照が無い」で断る。
+助言の MVV 判定は `machine` として理由を資料に載せ、プランは止まらない（要求の非機能の「移行性」）。
+
+## 入出力の契約
+
+### `mvv-gate.py check --advise`
+
+| 項目 | 書くこと |
+| --- | --- |
+| 名前 | `mvv-gate.py check --mission <状態> --gate design\|release [--material F...] [--pr N...] [--mode M] [--root DIR] [--note F] --advise` |
+| 入力 | `--advise`（真偽。省くと今の振る舞い）。ほかは今と同じ |
+| 出力（成功） | status `ok`・終了コード 0。`items[0]` が判定の行（`verdict`・`reasons`・`basis`・`pace`・`passed: false`）。改訂の提案があれば `items` の後ろに続く。`summary` は「承認ゲート N の MVV 判定（助言）: <判定>。承認は利用者が行う」 |
+| 出力（MVV なし） | status `ok`・終了コード 0。`items[0]` は `{"verdict": "none", "status": <none / unapproved / mismatch / unreadable>}`。LLM を呼ばず、行も `--note` も書かない |
+| 判定の記録（`--note`） | MVV なし以外のすべての判定で書く。見出し「MVV 判定（承認ゲート N・助言）」、判定・理由・根拠・時刻・ログの行。`machine` と `unreadable` は理由の欄に外れた理由を書く |
+| 失敗の形 | 引数の誤りは argparse の終了コード 2。**判定の中身で終了コードを変えない**（止めるのはプランの承認ゲート） |
+| 互換性 | `--advise` を省いた呼び出しは今と 1 バイトも変わらない振る舞い（行に `pace` が増えることを除く）。`auto` / `fast` のプランは `--advise` を渡さない |
+
+`--advise` で状態の `pace` が `auto` / `fast` でも拒まない（記録を書かないだけで害が無い）。
+
+### `supervise.py new mission --pace normal --state <状態>`
+
+| 項目 | 書くこと |
+| --- | --- |
+| 入力 | `--state`（今も受けるが `normal` では使っていない）。渡すと助言の MVV 判定のステップが入る |
+| 出力 | マニフェストの見出しに `進め方: normal`・`状態` が増える。承認ゲート 1 のステージの `gate` の文と `next` に `mission-state.py gate <状態> "関門 N" --by user --outcome approved\|rejected` が入る |
+| 互換性 | `--state` を省けば今と同じプラン（I7） |
+
+### Skill の本文の約束
+
+| Skill | どこで | 何をする |
+| --- | --- | --- |
+| `requirements-design` | 手順 5（対象範囲）の後 | MVV の節がプロンプトに無ければ `project-mvv.py context` で読む。要求・範囲が MVV に反する疑いがあれば、要求を書き切らずに人へ戻す（理由と根拠の項目つき）。受け入れ条件の文に項目を書き込まない |
+| `design` | 手順 3（決定を記録する） | 決定ごとに最後の行へ「根拠: <項目>（MVV 版 N）」を書く。当たる項目が無ければ「根拠: 根拠なし（MVV 版 N）」、MVV が無ければ「（MVV なし）」。反する疑いのある決定は書かずに人へ戻す |
+| `tdd-cycle` | 事前調査の後 | 依存の追加・公開インタフェースの形・データの扱いを選ぶとき、MVV に反する疑いがあれば実装を進めずに人へ戻す |
+
+### 参照の文書に足す行
+
+| 文書 | 足す行 |
+| --- | --- |
+| `project-mvv.md` の「判断の地点と記録」 | `work` のステップ（システムプロンプトの末尾・記録なし）／`requirements-design`（作業の報告の理由）／`design`（設計文書の決定の「根拠:」の行）／`tdd-cycle`（作業の報告の理由）／`normal` の承認ゲートの助言の MVV 判定（`mvv-gate.jsonl` の `pace: normal` の行・PR のコメントか承認資料の末尾） |
+| `pace.md` の承認ゲートの表とフロー図 | `normal` の列を「助言の MVV 判定を資料に載せ、利用者が承認する」にし、`--state` を渡したときだけと添える |
+| `approval-request.md` の「承認の判断に使うもの」 | 「MVV 判定」の行: 判定・理由・根拠の項目。機械のチェックで外れたら外れた理由。出所はゲート 1 が設計 PR のコメント、ゲート 2 が承認資料の末尾、判定の記録が無ければ「MVV なし」 |
+
+**「人へ戻す」の形は前提 7 に従う。** supervise の worker は作業の報告を「結果: 判断が要る」で終え、理由と根拠の項目を書く。
+対話の中では `decision-request` の形で利用者へ示す。
+
+## 処理の流れ
+
+### 承認ゲート 1（設計のプラン）
+
+```mermaid
+sequenceDiagram
+    participant P as 設計のプラン
+    participant G as mvv-gate.py
+    participant H as GitHub
+    participant C as conductor
+    P->>P: cross-review と用語チェックの後の push
+    P->>G: check --gate design --pr N --advise --note
+    alt MVV なし
+        G-->>P: 0（判定の記録を書かない）
+    else 機械のチェックで外れた・読めない
+        G-->>P: 0（理由を判定の記録へ）
+    else LLM の判定
+        G-->>P: 0（判定・理由・根拠を記録へ）
+    end
+    P->>H: mvv-note: 判定の記録があれば PR へコメント
+    P->>P: gate の judge（入力に mvv の結果）
+    P-->>C: 報告: 承認ゲートで止まった
+    C->>C: 承認資料に MVV 判定の行を載せて利用者へ示す
+    C->>C: mission-state.py gate 承認ゲート 1 --by user --outcome
+```
+
+- `mvv` のステップが 0 以外で終わったら（想定外の失敗）、`on_fail` で `gate` の judge へ進む。資料の MVV 判定の欄は
+  「判定を読めない」になる。**承認ゲートへ着くことを MVV 判定の成否に依らせない**
+- `mvv-note` のコメントが落ちても `gate` へ進む（`on_fail`）。判定の結果は `mvv` のステップの出力にも残る
+- 用語チェックの当たりが残った経路（`glossary-recheck` の失敗）も `push-glossary` から同じ `mvv` を通る
+
+### 承認ゲート 2（開発版の配布のプラン）
+
+```mermaid
+graph LR
+    V[verify] --> F{facts: 承認ゲート}
+    F -->|gate_next| E[explain]
+    E --> M[mvv --advise --material 承認資料]
+    M --> N[mvv-note: 承認資料の末尾へ追記]
+    N --> X[終わり: 結果は承認ゲート]
+    M -.->|想定外の失敗| X
+```
+
+- `facts` が承認ゲートを取り（今どおり）、`explain` の後に `mvv` と `mvv-note` が続く。プランの結果は `facts` の承認ゲートのまま
+- 材料は `explain` が書き終えた承認資料のファイル（`issues/approval-<プラグイン>-v<版>.md`）と、出す版の PR
+- `normal` の本番の配布は、今どおり利用者の承認の後に conductor が進める。その前に `mission-state.py gate <状態> "関門 2" --by user` を打つ
+
+### `mvv-gate.py check --advise` の分岐
+
+```mermaid
+graph TD
+    S[開始] --> A{プロジェクト MVV は承認済みか}
+    A -->|いいえ| Z[none を返す。行も記録も書かない]
+    A -->|はい| B{機械のチェック 1〜5}
+    B -->|外れた| W[machine の行と記録を書く]
+    B -->|通った| L[claude -p]
+    L -->|読めない| U[unreadable の行と記録を書く]
+    L -->|判定| J[判定の行と記録を書く]
+    W --> R[0 を返す]
+    U --> R
+    J --> R
+    Z --> R
+```
+
+**承認ゲートの記録（`mission-state.py gate --by mvv`）へ向かう辺は無い**（I1）。
+
+## 非機能の実現方式
+
+| 大項目 | 要求の条件 | 実現方式 | 確かめ方 |
+| --- | --- | --- | --- |
+| 性能・拡張性 | `work` のステップ 1 回あたりのプロンプトの増分は MVV の節の 1 回分（ai-plugins で 11,271 バイト）に限る。`normal` のミッションで増える LLM の呼び出しは承認ゲート 1 回につき `mvv-gate.py` の 1 回だけ | 節は実行の状態が 1 回だけ読んだ `ProjectMvv` から作り、システムプロンプトへ 1 回だけ足す（再開の呼び出しも同じ 1 回分）。助言の MVV 判定はプランの 1 ステップで、再試行を持たない | テストで増分がちょうど `block(mvv)` の長さ + 区切りであること、`mvv` のステップが設計と配布のプランに 1 つずつであることを見る |
+| 運用・保守性 | MVV の節を作る所は 1 か所。判定と覆しの記録は既存の `mvv-gate.jsonl` / `project-mvv-signals.jsonl` に書き、新しい記録の置き場を作らない | 節は `project_mvv.block` だけが作る。判定は `write_log`、覆しは `record_override` の既存の経路を使う | テストで記録の書き先が既存の 2 ファイルだけであることを見る |
+| 移行性 | 既存の `normal` のミッション状態ファイルでもプランが止まらずに動く。機械のチェックで断られたときは「機械のチェックで外れた」として資料に載せる | 参照の無い状態は `approval_refusal` の断りを `machine` として判定の記録へ書き、終了コード 0 で返す | 参照の無い状態で `--advise` を打ち、0 と `machine` の行と理由の載った記録を見る |
+
+## 決定の記録
+
+### 決定 1: `normal` の MVV 判定は `mvv-gate.py check` に `--advise` を足して走らせる
+
+機械のチェック・判定のプロンプト・判定の行・改訂の提案を `auto` / `fast` と共有できる。違いは「承認ゲートの記録を書かない」と
+「終了コード」の 2 点に閉じる。別の入口を作ると、機械のチェックと記録の形を 2 か所で保つことになり、前提 1（判定の規則を
+変えない）を守る場所が増える。
+
+判定の行だけを読む別の入口（`auto` / `fast` の判定を流用する）も採らなかった。`normal` には流用する判定の行が無い。
+
+根拠: Value 6 / Value 7（MVV 版 1）
+
+### 決定 2: 助言の MVV 判定は判定の中身によらず終了コード 0 で返し、止めるのは既存の承認ゲートにする
+
+`normal` のプランには既に承認ゲート（設計の `gate` の judge・開発版の `facts`）がある。MVV 判定が終了コード 10（承認ゲート）を返すと、1 本の
+プランの中で承認ゲートが 2 度記録される。承認資料の組み立ても 2 つの承認ゲートを読み分けることになる。終了コード 0 にすれば、プランの
+流れは MVV 判定が走ったかどうかで変わらない（I2）。
+
+根拠: Value 2（MVV 版 1）
+
+### 決定 3: `normal` のミッション状態にも、プロジェクト MVV が承認済みならその参照を書く
+
+`approval_refusal` は、ミッションの開始から承認ゲートまでの間に MVV が改訂されたことを状態の参照との食い違いで見つける。参照を
+書かずに `--advise` だけ照合を飛ばすと、改訂の前の MVV で始めたミッションを改訂の後の MVV で判定しても気づけない。書くのは
+版と sha256 だけで、状態を読むほかの処理（`pace` による分岐）は参照の有無を見ていない。
+
+根拠: Value 6（MVV 版 1）
+
+### 決定 4: 助言の MVV 判定のステップは、`--state` を渡した `normal` のミッションにだけ入れる
+
+判定の行と覆しはミッション状態ファイルのパスで結び付く（`last_mvv_verdict`）。状態が無いと覆しを数えられず、AC6 が成り立たない。
+`--state` を省いた起動のプランを今のまま保てば、MVV を使わないプロジェクトと既存の手順が変わらない（I7・前提 5）。
+
+根拠: Value 2 / Value 5（MVV 版 1）
+
+### 決定 5: `work` のステップの MVV の節は、worker のシステムプロンプトの末尾へ足す
+
+要求と設計のステップは Skill の呼び出し（`/ndf:design #N`）をプロンプトの先頭に置いて渡す。節をプロンプトの先頭へ足すと Skill の
+呼び出しとして解釈されず、末尾へ足すと 11,271 バイトが Skill の引数になる。システムプロンプトなら 3 つの呼び方（最小構成・
+Skill・`external-ai.py run`）で同じ位置に入り、再開の呼び出しにも同じ文字列が渡る。judge のようにユーザープロンプトの先頭へ置く
+形は採らなかった。
+
+根拠: Value 6（MVV 版 1）
+
+### 決定 6: プロジェクト MVV が承認済みでないときの助言の MVV 判定は、LLM も行も判定の記録も出さない
+
+AC7 は MVV の無いプロジェクトで今と同じ振る舞いを求める。`auto` / `fast` と同じく `machine` の行を書くと、2 つが変わる。
+MVV を持たないプロジェクトの `mvv-gate.jsonl` に毎回行が増え、設計 PR に「MVV なし」のコメントが付く。承認資料の「MVV なし」は、ステップの出力
+（`verdict: none`）から conductor が書く。プランのステップ自体は置き、実行の時点で読む（プランを作った後に MVV が承認される
+ことがある）。
+
+根拠: Value 2（MVV 版 1）
+
+### 決定 7: `--advise` では、進め方の宣言（`.ndf/pace.json`）が無いことをレッドラインが空であるとして扱う
+
+`pace.json` は `auto` / `fast` を使う条件の宣言で、`normal` しか使わないリポジトリは持たない。今の読み方では宣言の欠如が機械の
+チェックの外れになり、そうしたリポジトリでは助言の MVV 判定が一度も LLM へ届かない。宣言が壊れているときは今どおり外れにする。
+`--advise` を省いた呼び出しは変えない（前提 1）。
+
+根拠: Value 5（MVV 版 1）
+
+### 決定 8: 判定の結果は、ゲート 1 では設計 PR のコメント、ゲート 2 では承認資料のファイルの末尾に置く
+
+どちらも承認する人がそのとき読むものである。ゲート 1 の承認資料は conductor が PR から組み立て、ゲート 2 の承認資料は
+`approval-facts` が作るファイルそのものである。新しい置き場（状態ファイルの欄・別のファイル）を作ると、資料を組み立てる手順に
+読む所が 1 つ増える。
+
+根拠: Value 7（MVV 版 1）
+
+### 決定 9: `normal` の判定も改訂の兆候を `auto` / `fast` と同じに数え、行に `pace` を残すところまでにする
+
+分けて数えるかは利用者が AC11 の後に決める（要求の未決）。今の集計（`signals`・`unknown_streak`）を変えずに `pace` を残せば、
+どちらに決まっても行を書き直さずに集計だけを変えられる。
+
+根拠: Value 3（MVV 版 1）
+
+### 決定 10: 設計の決定の根拠の行は、見送りの返信と同じ「根拠: <項目>（MVV 版 N）」の形にする
+
+`project_mvv.basis_phrase` が cross-review と cross-refactoring の見送りの返信に使う形である。同じ形なら、読む人と照合する
+スクリプトが 1 つの形だけを知ればよい。
+
+根拠: Value 8（MVV 版 1）
+
+## テスト設計
+
+| 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
+| --- | --- | --- |
+| AC1・I4 | 承認済みの MVV で `work` のステップを 3 つの呼び方（最小構成・`full` と再開・`runtime` あり）で走らせると、渡るシステムプロンプト（`runtime` ではプロンプトファイル）が `block(mvv)` をそのまま含む | 節を judge だけに渡す・`block` 以外で組む・再開の呼び出しで落とすと落ちる |
+| AC1・AC7・I4 | MVV が無い・未承認・一致しない・壊れているとき、渡るシステムプロンプトが今と同じ | 「MVV なし」の節を足すと落ちる |
+| AC2・AC3・AC10・I9 | Skill 本文の手順（文言のテストを書かない）。AC11 の実機の確かめで設計文書の根拠の行を見る | — |
+| AC4 | `--advise` で偽の claude が `not_follow` を返すと、終了コード 0・判定の行・理由と根拠の載った判定の記録ができる。`follow`・`unknown`・読めない応答でも同じく 0 | 判定で終了コードを変える・記録を書かないと落ちる |
+| AC4 | 機械のチェック（参照の無い状態・`operation`・レッドライン・宣言の変更）で外れると、LLM を呼ばず、理由の載った記録と `machine` の行ができて 0 を返す | 外れたときに 10 を返す・記録を書かないと落ちる |
+| AC4 | `normal` と `--state` のミッションの設計のプランで `push-glossary` → `mvv` → `mvv-note` → `gate` と並び、`gate` の入力に `mvv` が入る。開発版のプランで `explain` → `mvv` → `mvv-note` と並ぶ | 並びを変える・`--advise` を落とすと落ちる |
+| AC5・I1 | `--advise` で `follow` の後、状態の `gates` が変わらない | `record_gate` を呼ぶと落ちる |
+| AC5・I2 | `mvv` のステップが 0 でも 0 以外でも、設計のプランの結果が承認ゲートになる | `mvv` の後を `merge` や `end` へつなぐと落ちる |
+| AC6・I5 | `--advise` の判定の行が `pace: normal` を持つ。`--advise` の無い行も状態の `pace` を持つ | `pace` を書かない・既存のキーを変えると落ちる |
+| AC6・I8 | `normal` の状態で `not_follow` の判定の後に `gate --by user --outcome approved` を打つと `override_pass` が 1 行、`follow` の後に `rejected` で `override_reject` が 1 行。判定と一致する答えでは書かない | 覆しを書かない・一致でも書くと落ちる |
+| AC7・I3 | MVV が無いプロジェクトの `--advise` は偽の claude を呼ばず、`mvv-gate.jsonl` と `--note` を作らずに 0 と `verdict: none` を返す | LLM を呼ぶ・行を書くと落ちる |
+| AC8・I6 | 既存の `auto` / `fast` のテストがそのまま通る。`--advise` の無い `follow` は今どおり `by: mvv` を書いて 0 | 既定で記録を書かなくすると落ちる |
+| AC9 | 参照の文書の表（文言のテストを書かない）。レビューで見る | — |
+| AC11 | リリースの後に ai-plugins のミッション 1 本で、設計文書の根拠の行と承認資料の MVV 判定の行を conductor が読む | — |
+| I7 | `--state` の無い `normal` のミッションのプランが、変更の前のプランと同じ（`mvv` のステップが無く、見出しに `状態` が無い） | `--state` の有無を見ずに足すと落ちる |
+| 決定 3 | `normal` で承認済みの MVV があると `init` が `project_mvv` を書き、MVV が無いと書かない | `pace` で分けたままにすると落ちる |
+| 決定 7 | `pace.json` の無いリポジトリで `--advise` がレッドラインのチェックを通って LLM を呼ぶ。`--advise` の無い呼び出しは今どおり外れにする。壊れた `pace.json` はどちらも外れ | 欠如を常に空にする・`--advise` でも外れにすると落ちる |
+| `manifest_head` | `normal` と `--state` のマニフェストの見出しが `進め方: normal` | `fast` と書くと落ちる |
+
+## 未確認のまま残ること
+
+| 項目 | 内容 |
+| --- | --- |
+| `normal` の判定を改訂の兆候で分けて数えるか | 利用者が AC11 の後の振り返りで決める（要求の未決の 3 つ目）。行の `pace` で分けられる |
+| システムプロンプトが 11 KB 増えたときの費用と秒 | 1 ステップあたりの増分は要求の上限の内に収まるが、ミッション 1 本あたりの実測は AC11 で使用量の帳簿から読む |
+| `mvv` のステップの `on_fail` を `end` にしたときのエンジンの扱い | 開発版のプランで想定外の失敗を承認ゲートのまま終える経路の書き方（`on_fail: "end"` か、`gate` を返すステップを置くか）は `tdd-cycle` で走らせて決める |
+| conductor が `normal` で `mission-state.py gate --by user` を打つ習慣 | マニフェストの `next` とステージの説明で案内する。打たれなかった承認は覆しとして数えられない。AC11 で確かめる |
