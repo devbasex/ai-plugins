@@ -87,7 +87,7 @@ claude のアカウントを 1 つ（`work1`）登録している。conductor �
 | E6 | 宣言が次の起動から効いた | 宣言の読み先（`claude_accounts.fallback_env`） | ラッパーの切り替え（`switch.py`・`run.py`）・`supervise.py` の切り替え（`supervise_lib/claude.py`） |
 | E7 | アカウントがすべて上限に達し、従量の接続へ切り替えた | ラッパーと `supervise.py` の切り替え（既存） | 既存どおり（`log.jsonl` の `account` の行・進捗ログ） |
 | E8 | 認可の URL を出し、登録の途中の状態を置き場に残した | OAuth の登録（`login.start`） | 呼び出し元（URL を利用者へ渡す）・2 回目の呼び出し |
-| E9 | 認可コードを受け取り、アカウントを登録した | OAuth の登録（`login.finish`） | `claude_accounts.register`（既存） |
+| E9 | 認可コードを受け取り、アカウントを登録した | OAuth の登録（`login.finish`）。登録を実行するのは `login.finish` が確かめを通した後に呼ぶ `claude_accounts.register`（既存）で、イベントはその呼び出しが成功して戻った後に起きる。`register` が失敗すれば E9 は起きない | 呼び出し元（`stage: registered` の結果を受け取る）・一覧（`account list`） |
 | E10 | 期限を過ぎた登録の途中の状態を捨てた | `claude_accounts.sweep_pending`（`account` の入口が毎回呼ぶ。捨てた名前の集合を返す） | 2 回目の呼び出し（入口から捨てた名前の集合を受け取り、対象の名前が含まれていれば `expired` を出す） |
 | E11 | 従量の接続を外した | `account remove metered`（`claude_accounts.remove_metered`） | 一覧・宣言の読み先 |
 
