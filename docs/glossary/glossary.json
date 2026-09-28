@@ -1782,9 +1782,15 @@
     {
       "term": "MVV 判定",
       "context": "ndf-workflow",
-      "meaning": "承認ゲートのエビデンスが NDF の共通原則・プロジェクト MVV・ミッション MVV に従うかの判定。「従う」でレッドラインが無いときだけ承認ゲートを省き、記録を残す",
+      "meaning": "承認ゲートのエビデンスが NDF の共通原則・プロジェクト MVV・ミッション MVV に従うかの判定。auto と fast では「従う」でレッドラインが無いときだけ承認ゲートを省き、記録を残す。normal では助言の MVV 判定として承認資料に載せ、承認は人が行う",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
-      "pending_source": "issues/issue-1366-design.md"
+      "pending_source": "issues/issue-1400-design.md"
+    },
+    {
+      "term": "助言の MVV 判定",
+      "context": "ndf-workflow",
+      "meaning": "承認ゲートの記録（by: mvv）は書かないが、mvv-gate.jsonl へ判定の行（pace 付き）を書き、判定・理由・根拠の項目を承認資料へ載せる MVV 判定（mvv-gate.py check --advise）。normal の承認ゲートの前に走り、承認するのは人である",
+      "pending_source": "issues/issue-1400-design.md"
     },
     {
       "term": "上位の原則",
@@ -1851,6 +1857,12 @@
       "context": "ndf-workflow",
       "meaning": "判断の記録に残す MVV の項目の番号（Mission / Vision / Value 3 / C4 / P1 / R2）。MVV が無ければ「MVV なし」、返されなければ「根拠なし」",
       "pending_source": "issues/issue-1366-design.md"
+    },
+    {
+      "term": "覆し",
+      "context": "ndf-workflow",
+      "meaning": "承認ゲートで人の答えが直前の MVV 判定と食い違ったこと。「反する疑い」「判定できない」を人が通すと override_pass、「従う」を人が差し戻すと override_reject。MVV の改訂の兆候に数える",
+      "pending_source": "issues/issue-1400-requirements.md"
     },
     {
       "term": "NDF の共通原則",

@@ -129,6 +129,19 @@
           }
         ]
       }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c '[ -n \"${NDF_RELAY_DIR:-}\" ] || exit 0; ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; python3 \"$ROOT/scripts/relay.py\" limit; exit 0'",
+            "description": "NDF: under the relay, tell the relay that the reply ended with an API error such as a usage limit",
+            "timeout": 5,
+            "continueOnError": true
+          }
+        ]
+      }
     ]
   }
 }

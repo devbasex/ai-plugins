@@ -19,7 +19,7 @@ import gh_call
 import gh_quota
 import slow_step as ss
 from supervise_lib import paths
-from supervise_lib.claude import ClaudeRunner, UsageLimit
+from supervise_lib.claude import AuthUnavailable, ClaudeRunner, UsageLimit
 from supervise_lib.plan import expand_parts, normalize_plan
 from supervise_lib.pr import PrStep
 from supervise_lib.slow import SLOW_EXIT, SlowAction, SlowWatch
@@ -180,10 +180,10 @@ class Engine:
                     ok, _ = self.handlers[step["type"]].execute(self.ctx, step)
                     nxt, r_result, r_reason = self._next_after_step(sid, step, ok)
             except UsageLimit as e:
-                # 利用上限はステップの失敗と区別する（on_fail・judge へ回さない）
+                # 利用上限と、渡せるトークンが無いことはステップの失敗と区別する（on_fail・judge へ回さない）
                 st.cur.setdefault("exit", 1)
                 st.cur["text"] = str(e)
-                nxt, r_result, r_reason = None, "止まった", "利用上限"
+                nxt, r_result, r_reason = None, "止まった", "認証" if isinstance(e, AuthUnavailable) else "利用上限"
             except SlowAction as e:
                 nxt, r_result, r_reason = self._next_after_slow(e, sid, step)
             if r_result is not None:
