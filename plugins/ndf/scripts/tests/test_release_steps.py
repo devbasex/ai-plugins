@@ -31,6 +31,12 @@ def repo(tmp_path: Path) -> Path:
     (root / "keep.txt").write_text("head\n", encoding="utf-8")
     (root / "out").mkdir()
     (root / "out" / "old.md").write_text("old\n", encoding="utf-8")
+    # ai-plugins と同じ宣言（ブランチと配るプラグインは宣言から読む。#1336）
+    (root / ".ndf").mkdir()
+    (root / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "develop", "production_branch": "main"}))
+    (root / ".ndf" / "supervise.json").write_text(
+        json.dumps({"release": {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude"]}})
+    )
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "t")
     return root
@@ -278,7 +284,7 @@ def test_release_remakes_the_pr_when_merged_pr_misses_new_commits(monkeypatch, i
     monkeypatch.setattr(mod, "git", git)
     monkeypatch.setattr(mod, "git_root", lambda r: ".")
     monkeypatch.setattr(mod, "find_pr", lambda root, head, base, states: {"number": 7, "state": "MERGED"})
-    monkeypatch.setattr(mod, "changelog_section", lambda root, ver: "")
+    monkeypatch.setattr(mod, "changelog_section", lambda root, ver, plugin: "")
     monkeypatch.setattr(mod, "run_checks", lambda root: [])
     monkeypatch.setattr(mod, "create_pr", lambda *a: 9)
     monkeypatch.setattr(mod, "wait_and_merge", lambda root, n: f"new-{n}")
@@ -590,3 +596,52 @@ def test_bump_raises_the_other_plugin_from_changed_plugins(repo):
     assert p.returncode == 0, p.stdout + p.stderr
     got = json.loads((root / "plugins/mcp/mcp-serena/.claude-plugin/plugin.json").read_text())
     assert got["version"] == "2.3.5"
+
+
+def _release_prod(monkeypatch, root: Path, wt: dict, plugin: str):
+    """release --channel prod を git と gh を差し替えて流し、(PR の作成, 呼んだ git, 結果) を返す。"""
+    import argparse
+
+    (root / ".ndf").mkdir(exist_ok=True)
+    (root / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, **wt}))
+    (root / ".ndf" / "supervise.json").write_text(
+        json.dumps({"release": {"form": "package-plugin", "plugin": plugin, "runtimes": ["claude"]}})
+    )
+    mod = _release_steps_module(monkeypatch)
+    calls, created, found = [], [], []
+
+    def git(r, *args, check=True):
+        calls.append(args)
+        rc = 1 if args[:3] == ("rev-parse", "-q", "--verify") else 0
+        out = "release/v1.2.3" if args[:2] == ("rev-parse", "--abbrev-ref") else ""
+        return subprocess.CompletedProcess(args, rc, out, "")
+
+    monkeypatch.setattr(mod, "git", git)
+    monkeypatch.setattr(mod, "git_root", lambda r: root)
+    monkeypatch.setattr(mod, "find_pr", lambda r, head, base, states: found.append((head, base)))
+    monkeypatch.setattr(mod, "changelog_section", lambda r, ver, plugin: "")
+    monkeypatch.setattr(mod, "run_checks", lambda r: [])
+    monkeypatch.setattr(mod, "create_pr", lambda r, base, head, title, body: created.append((base, head, title)) or len(created))
+    monkeypatch.setattr(mod, "wait_and_merge", lambda r, n: f"m-{n}")
+    monkeypatch.setattr(mod.gh_parts, "gh", lambda args, cwd=None: subprocess.CompletedProcess(args, 0, "", ""))
+    monkeypatch.setattr(mod, "emit", lambda obj, *a, **k: (_ for _ in ()).throw(SystemExit(obj)))
+    with pytest.raises(SystemExit) as e:
+        mod.cmd_release(argparse.Namespace(root=str(root), version="1.2.3", plugins=None, channel="prod"))
+    return found, created, calls, e.value.code
+
+
+def test_release_takes_branches_and_names_from_the_declaration(monkeypatch, tmp_path):
+    """#1336 の AC10: ベースブランチと本番チャネルを変えた宣言では、その名前で PR を作りタグを打つ（develop・main の直書きで動かない）。"""
+    found, created, calls, out = _release_prod(monkeypatch, tmp_path, {"base_branch": "trunk", "production_branch": "live"}, "foo")
+    assert found == [("release/v1.2.3", "trunk"), ("trunk", "live")]
+    assert created == [("trunk", "release/v1.2.3", "Release: foo v1.2.3"), ("live", "trunk", "Release: foo v1.2.3 を live へ")]
+    assert ("tag", "-a", "foo--v1.2.3", "m-2", "-m", "foo v1.2.3") in calls
+    assert out["metrics"]["tag"] == "foo--v1.2.3" and [i["base"] for i in out["items"] if i["kind"] == "pr"] == ["trunk", "live"]
+
+
+def test_release_with_the_ai_plugins_declaration_keeps_its_values(monkeypatch, tmp_path):
+    """#1336 の I9: ai-plugins の宣言では、ブランチ develop / main・タグ ndf--v<版>・題 Release: ndf v<版> が今と同じに出る。"""
+    found, created, calls, out = _release_prod(monkeypatch, tmp_path, {"base_branch": "develop", "production_branch": "main"}, "ndf")
+    assert found == [("release/v1.2.3", "develop"), ("develop", "main")]
+    assert created == [("develop", "release/v1.2.3", "Release: ndf v1.2.3"), ("main", "develop", "Release: ndf v1.2.3 を main へ")]
+    assert out["metrics"]["tag"] == "ndf--v1.2.3"
