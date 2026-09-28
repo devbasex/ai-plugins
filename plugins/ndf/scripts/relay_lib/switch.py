@@ -25,13 +25,6 @@ import claude_usage as cu  # noqa: E402
 # 上限シグナルファイルのうち、アカウントを替える引き金になる `error`（`authentication_failed` は別に扱う）
 LIMIT_ERRORS = ("rate_limit", "billing_error")
 
-# 切り替えの理由ごとの画面の 1 行（{reason}・{prev}・{to} を差し込む）。表に無い理由は _SWITCH_LINE_DEFAULT
-_SWITCH_LINES = {
-    **{k: "利用上限（{reason}）に達したため、アカウントを {prev} から {to}へ替えて続ける" for k in cu.KINDS},
-    "auth": "認証が通らなかったため、アカウントを {prev} から {to}へ替えて続ける",
-}
-_SWITCH_LINE_DEFAULT = "アカウントを {prev_or_default} から {to}へ替える"
-
 
 class UsageWatch:
     """定期の確認（別スレッド）。今のアカウントの使用率を間隔ごとに読み、閾値を超えたら `due` を立てる。
@@ -163,10 +156,12 @@ class AccountSwitch:
             n = self.watch.due if self.watch is not None and self.watch.due is not None else 0
             line = f"{prev} の使用率が {n:.0f}% に達したため、アカウントを {ca.account_label(to)}へ替える"
             row["usage"] = round(n)
+        elif reason in cu.KINDS:
+            line = f"利用上限（{reason}）に達したため、アカウントを {prev} から {ca.account_label(to)}へ替えて続ける"
+        elif reason == "auth":
+            line = f"認証が通らなかったため、アカウントを {prev} から {ca.account_label(to)}へ替えて続ける"
         else:
-            line = _SWITCH_LINES.get(reason, _SWITCH_LINE_DEFAULT).format(
-                reason=reason, prev=prev, prev_or_default=prev or "既定のログイン", to=ca.account_label(to)
-            )
+            line = f"アカウントを {prev or '既定のログイン'} から {ca.account_label(to)}へ替える"
         self.term.screen("ndf-relay: " + line)
         self.log(**row)
 
