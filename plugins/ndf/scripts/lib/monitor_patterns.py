@@ -15,8 +15,10 @@ import re
 USAGE_LIMIT_FATAL = [
     # kiro の実物（#619）
     re.compile(r"Monthly request limit reached"),
-    # claude の `--output-format json` の結果行（#647）。`:` の前後の空白は問わない
-    re.compile(r'"api_error_status"\s*:\s*429'),
+    # claude の `--output-format json` の結果行（#647）。`:` の前後の空白は問わない。
+    # **`{` で始まる JSON の行だけを読む。** 担当が差分やテストの定義（`LIMIT = {…429…}`）を
+    # 読み上げた行に一致させない
+    re.compile(r'^\{.*?"api_error_status"\s*:\s*429', re.MULTILINE),
     # quota / rate limit （`m.start()` をキーワード位置に合わせるため `^.*` を付けない。
     # `_match_is_quoted()` が backtick / 「」 引用を判定するために match 開始位置を使うため）
     re.compile(r"\b(?:quota exceeded|rate limit exceeded)\b", re.IGNORECASE),
