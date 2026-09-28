@@ -527,3 +527,35 @@ def test_setext_headings_have_anchors(tmp_path: Path) -> None:
     write(tmp_path, "docs/a.md", "見出し\n===\n\n[x](#見出し)\n")
     result = run(tmp_path)
     assert result.returncode == 0, result.stderr
+
+
+def _git_repo(root: Path) -> None:
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    write(root, ".gitignore", ".venv/\n")
+
+
+def test_ignored_markdown_in_git_repository_is_not_scanned(tmp_path: Path) -> None:
+    """git の管理下では無視されたディレクトリ（`.venv/`）の .md を走査しない。
+
+    `plugins/ndf/.venv/` に入った依存の README の壊れたリンクで pre-push が落ちた（2026-09-28）。
+    """
+    _git_repo(tmp_path)
+    write(tmp_path, "plugins/ndf/.venv/x/README.md", "[壊れた](missing.md)\n")
+    write(tmp_path, "docs/a.md", "# a\n")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "docs/a.md"], check=True)
+    result = run(tmp_path)
+    assert result.returncode == 0, result.stderr
+
+
+def test_tracked_and_new_markdown_in_git_repository_are_checked(tmp_path: Path) -> None:
+    """追跡済みの .md と、まだ add していない新しい .md の壊れたリンクは従来どおり検出する。"""
+    _git_repo(tmp_path)
+    write(tmp_path, "docs/a.md", "[壊れた](missing.md)\n")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "docs/a.md"], check=True)
+    write(tmp_path, "docs/new.md", "[壊れた](gone.md)\n")
+    result = run(tmp_path)
+    assert result.returncode == 1
+    assert failure_lines(result) == [
+        "- docs/a.md: missing link target: missing.md",
+        "- docs/new.md: missing link target: gone.md",
+    ]
