@@ -269,6 +269,21 @@ Pull Request がマージされた後の削除は `/ndf:merged` が行う。
 
 メインディレクトリに未コミットの変更があるときは追従せず、変更がある事実だけを伝える。
 
+## `EnterWorktree` との付き合い方
+
+**NDF の手順は `EnterWorktree` と Agent の `isolation: "worktree"` を使わない。** 隔離したセッションでは、
+Claude Code 本体が Bash を走らせる直前に「git がメインディレクトリを触らない」と示せないコマンドを拒む
+（`Refusing to run it`）。判定は権限モードに関係なく働き、版で変わる。
+
+| 状況 | どこで何を打つか |
+| --- | --- |
+| NDF の手順で worktree に入る | `worktree-setup.sh create` の後に `cd <worktree>` する（手順 2-3） |
+| 隔離の中で `… \| bash "$CLOSING"` の形が拒まれた | worktree の中で、スクリプトを変数でなくリテラルの絶対パスで書き、複合コマンドを 1 つずつに割る（`… \| bash /abs/…/lib/closing-issues.sh`） |
+| それでも拒まれる（`git -C <メインディレクトリ>` など） | `ExitWorktree` で隔離を外し、`cd <worktree>` してから同じコマンドを打つ |
+
+2.1.283 で本物の `closing-issues.sh` を打って確かめた。変数で渡す形と `git -C <メインディレクトリ>` は拒まれ、
+リテラルの絶対パスの形は通り、`ExitWorktree` の後は拒まれた行がそのまま通った。
+
 ## 依存の用意
 
 worktree は追跡されているファイルしか持たないため、`vendor/`・`node_modules/`・`.env` が無く、pre-commit や
