@@ -283,57 +283,47 @@ def compare_kiro(src, proj):
     return out
 
 
-def cmd_verify_install(a):
-    root = git_root(a.root)
-    plugins = [p.strip() for p in a.plugins.split(",") if p.strip()]
-    runtimes = [r.strip() for r in a.runtimes.split(",") if r.strip()]
-    bad = [r for r in runtimes if r not in ("claude", "codex", "kiro")]
-    if bad:
-        raise StepError(f"未知の runtime: {','.join(bad)}", EXIT_UNREADABLE)
-    rel = {p: plugin_dir(root, p).relative_to(root).as_posix() for p in plugins}
-
+def _resolve_ref(root, ref, expect):
+    """origin の ref の版と、比べる前の正式版のタグを返す。"""
     git(root, "fetch", "-q", "origin", "--tags")
-    ref_rev = git(root, "rev-parse", f"origin/{a.ref}").stdout.strip()
+    ref_rev = git(root, "rev-parse", f"origin/{ref}").stdout.strip()
     tags = git(root, "tag", "--list", "ndf--v*", "--sort=-v:refname").stdout.split()
-    cur = f"ndf--v{a.expect}"
+    cur = f"ndf--v{expect}"
     prev = next((t for t in tags if t != cur and "-" not in t[len("ndf--v") :]), None)
+    return ref_rev, prev
 
-    before = user_env_snapshot()
-    tmp = tempfile.mkdtemp(prefix="ndf-verify-install-")
+
+def _extract_archive(root, ref_rev, src):
+    arch = subprocess.run(["git", "-C", str(root), "archive", ref_rev], capture_output=True)
+    if arch.returncode != 0:
+        raise StepError(f"git archive {ref_rev[:8]} が失敗: {arch.stderr.decode(errors='replace')[:300]}")
+    tar = subprocess.run(["tar", "-x", "-C", str(src)], input=arch.stdout, capture_output=True)
+    if tar.returncode != 0:
+        raise StepError(f"展開が失敗: {tar.stderr.decode(errors='replace')[:300]}")
+
+
+def _verify_runtimes(a, env, src, tmp, runtimes, plugins, rel, changed):
+    """runtime ごとに導入して確かめ、(runtime ごとの結果, 中身の不一致) を返す。"""
     runtimes_res, mismatch = {}, []
-    try:
-        src = Path(tmp) / "src"
-        src.mkdir()
-        arch = subprocess.run(["git", "-C", str(root), "archive", ref_rev], capture_output=True)
-        if arch.returncode != 0:
-            raise StepError(f"git archive {ref_rev[:8]} が失敗: {arch.stderr.decode(errors='replace')[:300]}")
-        tar = subprocess.run(["tar", "-x", "-C", str(src)], input=arch.stdout, capture_output=True)
-        if tar.returncode != 0:
-            raise StepError(f"展開が失敗: {tar.stderr.decode(errors='replace')[:300]}")
+    for name, fn in (("claude", verify_claude), ("codex", verify_codex)):
+        if name not in runtimes:
+            continue
+        res, dirs = fn(env, a.ref, plugins, a.expect)
+        runtimes_res[name] = res
+        for p, d in dirs.items():
+            if d is None:
+                mismatch.append(f"{name}: {p} の導入先が無い")
+            else:
+                mismatch += compare_files(src, d, rel[p], changed[p], name, keeps_symlinks=(name != "codex"))
+    if "kiro" in runtimes:
+        runtimes_res["kiro"], proj = verify_kiro(env, src, tmp, a.expect)
+        if proj is not None:
+            mismatch += compare_kiro(src, proj)
+    return runtimes_res, mismatch
 
-        changed = {
-            p: ([f for f in git(root, "diff", "--name-only", prev, ref_rev, "--", r).stdout.split() if f] if prev else [])
-            for p, r in rel.items()
-        }
-        env = isolated_env(tmp)
-        for name, fn in (("claude", verify_claude), ("codex", verify_codex)):
-            if name not in runtimes:
-                continue
-            res, dirs = fn(env, a.ref, plugins, a.expect)
-            runtimes_res[name] = res
-            for p, d in dirs.items():
-                if d is None:
-                    mismatch.append(f"{name}: {p} の導入先が無い")
-                else:
-                    mismatch += compare_files(src, d, rel[p], changed[p], name, keeps_symlinks=(name != "codex"))
-        if "kiro" in runtimes:
-            runtimes_res["kiro"], proj = verify_kiro(env, src, tmp, a.expect)
-            if proj is not None:
-                mismatch += compare_kiro(src, proj)
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
 
-    after = user_env_snapshot()
+def _install_items(before, after, runtimes_res, mismatch, expect):
+    """利用者の環境の差分・runtime の結果・中身の不一致を items に並べ、(items, 通ったか, 環境が変わらないか) を返す。"""
     items = []
     env_same = before == after
     if not env_same:
@@ -348,12 +338,40 @@ def cmd_verify_install(a):
         res = "ok"
         if r.get("exit") != 0:
             res = "failed"
-        elif any(x != a.expect for x in vs):
+        elif any(x != expect for x in vs):
             res = "version_mismatch"
         if res != "ok":
             ok = False
         items.append({"kind": "runtime", "name": name, "result": res, **r})
     items += [{"kind": "file", "name": m, "result": "mismatch"} for m in mismatch]
+    return items, ok, env_same
+
+
+def cmd_verify_install(a):
+    root = git_root(a.root)
+    plugins = [p.strip() for p in a.plugins.split(",") if p.strip()]
+    runtimes = [r.strip() for r in a.runtimes.split(",") if r.strip()]
+    bad = [r for r in runtimes if r not in ("claude", "codex", "kiro")]
+    if bad:
+        raise StepError(f"未知の runtime: {','.join(bad)}", EXIT_UNREADABLE)
+    rel = {p: plugin_dir(root, p).relative_to(root).as_posix() for p in plugins}
+    ref_rev, prev = _resolve_ref(root, a.ref, a.expect)
+
+    before = user_env_snapshot()
+    tmp = tempfile.mkdtemp(prefix="ndf-verify-install-")
+    try:
+        src = Path(tmp) / "src"
+        src.mkdir()
+        _extract_archive(root, ref_rev, src)
+        changed = {
+            p: ([f for f in git(root, "diff", "--name-only", prev, ref_rev, "--", r).stdout.split() if f] if prev else [])
+            for p, r in rel.items()
+        }
+        runtimes_res, mismatch = _verify_runtimes(a, isolated_env(tmp), src, tmp, runtimes, plugins, rel, changed)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    items, ok, env_same = _install_items(before, user_env_snapshot(), runtimes_res, mismatch, a.expect)
     metrics = {
         "ref": a.ref,
         "rev": ref_rev[:8],
