@@ -282,6 +282,25 @@ def test_apply_refuses_a_stale_rank_and_unknown_directions(env):
     assert code == 2
 
 
+def test_apply_refuses_a_forward_move_that_leaves_its_group_behind(env):
+    snaps = env.snapshots()
+    scores = [
+        sc(1, tc=5, size=1),
+        sc(2, tc=1, size=2),
+        sc(3, size=3),
+        sc(4, ubv=13, tc=8, rr=8, size=5, observed_harm=True, depends_on=[3]),
+    ]
+    _, first = env.run("rank", "--scores", env.scores(scores), "--capacity", "8")
+    fwd = {f["number"]: f for f in first["metrics"]["forward"]}
+    assert fwd[4]["group"] == [3]
+    lead = _reschedule(snaps, first, 4, "前倒し")
+    code, out = env.run("apply", "--plan", env.plan([lead], rank=first["metrics"]["digest"]))
+    assert code == 2 and "#3" in out["summary"] and env.writes() == []
+    member = {**lead, "number": 3, "updated_at": snaps[3]["updated_at"], "digest": snaps[3]["digest"]}
+    code, out = env.run("apply", "--plan", env.plan([lead, member], rank=first["metrics"]["digest"]))
+    assert code != 2, out
+
+
 def test_rejected_move_is_remembered_by_apply_only(env):
     _, first = env.run("rank", "--scores", env.scores(BASE), "--capacity", "8")
     code, _ = env.run("apply", "--plan", env.plan([], rank=first["metrics"]["digest"], rejected=[{"number": 3, "direction": "前倒し"}]))

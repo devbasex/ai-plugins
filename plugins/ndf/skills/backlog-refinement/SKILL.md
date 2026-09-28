@@ -278,7 +278,8 @@ python3 "$UPKEEP/upkeep.py" apply --plan plan.json [--max-waits N]
 **順位の表と前倒し・後ろ倒しは、`rank` の結果を plan に入れて反映する。** plan の `rank` に `rank` の
 `metrics.digest` を書くと、`apply` が各マイルストーンの説明の末尾の `### 順位` の節を書き換える（節の外は変えず、
 同じ順位なら書かない）。前倒し・後ろ倒しは、候補ごとに `"reschedule": "前倒し"`（または `後ろ倒し`）と
-`"changes": {"milestone": <候補の移す先>}` を書く。扱いが「自動」の前倒しはそのまま反映し、「承認」の候補は
+`"changes": {"milestone": <候補の移す先>}` を書く。前倒しの候補に `group`（後ろに残る依存先）があれば、その各課題にも
+同じ移す先の前倒しの action を書く（欠けると `apply` が plan の誤りとして止まる）。扱いが「自動」の前倒しはそのまま反映し、「承認」の候補は
 `approved` によらず `needs_approval` へ回る。承認を得た番号を `rank --approved` で渡して打ち直し、「承認済み」になった
 結果で plan を作り直す。人が退けた移動は plan の `rejected`（`[{number, direction}]`）に書くと、`apply` が記録に残し、
 同じ移動は次の回から候補に出ない。**`pace` の値によってこの扱いは変わらない**（スプリント MVV の事前の承認は、主題の

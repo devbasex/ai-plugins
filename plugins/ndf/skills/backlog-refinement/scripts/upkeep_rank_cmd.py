@@ -324,6 +324,7 @@ class RankPlan:
         wants += [(act["number"], act["reschedule"], act) for act in self.plan["actions"] if act.get("reschedule")]
         if (wants or self.plan.get("rank")) and self.out is None:
             raise StepError("rank.json が無い（rank を打ってから plan を作る）", EXIT_UNREADABLE)
+        forward_acts = {(n, (act.get("changes") or {}).get("milestone")) for n, d, act in wants if act != "rejected" and d == R.FORWARD}
         for n, d, act in wants:
             if d not in R.DIRECTIONS:
                 errs.append(f"#{n} の向きは {' / '.join(R.DIRECTIONS)} のどれか: {d!r}")
@@ -334,6 +335,10 @@ class RankPlan:
             elif act != "rejected":
                 if (act.get("changes") or {}).get("milestone") != c["to"]:
                     errs.append(f"#{n} の changes.milestone は候補の移す先 {c['to']!r} と合わせる")
+                    continue
+                missing = [g for g in c.get("group", []) if d == R.FORWARD and c["number"] == n and (g, c["to"]) not in forward_acts]
+                if missing:
+                    errs.append(f"#{n} の前倒しは依存先 {', '.join(f'#{g}' for g in missing)} も同じ移す先で前倒しする")
                 elif c["decision"] == R.APPROVAL:
                     self.holds[n] = {**c, "direction": d, "number": n}
         if errs:
