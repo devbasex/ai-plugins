@@ -139,22 +139,6 @@ def run_ticking(
             errf.close()
 
 
-def minimal_args(system: str) -> list[str]:
-    """claude -p を最小構成（設定・MCP・スラッシュコマンドを読まず、会話を残さない）で起動する引数。"""
-    return [
-        "-p",
-        "--output-format",
-        "json",
-        "--no-session-persistence",
-        "--setting-sources",
-        "",
-        "--strict-mcp-config",
-        "--disable-slash-commands",
-        "--system-prompt",
-        system,
-    ]
-
-
 def claude_cmd(system: str, tools: str | None, cwd: str, full: bool = False, serena: bool = False, resume: str | None = None) -> list[str]:
     base = shlex.split(os.environ.get("NDF_SUPERVISE_CLAUDE", "claude"))
     if full:
@@ -176,7 +160,18 @@ def claude_cmd(system: str, tools: str | None, cwd: str, full: bool = False, ser
             ]
             + (["--resume", resume] if resume else [])
         )
-    cmd = base + minimal_args(system)
+    cmd = base + [
+        "-p",
+        "--output-format",
+        "json",
+        "--no-session-persistence",
+        "--setting-sources",
+        "",
+        "--strict-mcp-config",
+        "--disable-slash-commands",
+        "--system-prompt",
+        system,
+    ]
     if tools:
         allowed = tools
         if serena:

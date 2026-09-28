@@ -179,10 +179,22 @@ def ask(prompt: str) -> tuple[dict | None, str, dict]:
     呼び出しごとに使用量の帳簿へ 1 行を足す（#1142 の不足 f。source は mvv-gate、プランの外の呼び出し）。
     """
     import usage_ledger  # lib/ は起動の時に sys.path へ足してある
-    from supervise_lib.claude import minimal_args
 
     base = shlex.split(os.environ.get("NDF_MVV_CLAUDE", "claude"))
-    cmd = base + minimal_args(SYSTEM) + ["--tools", ""]
+    cmd = base + [
+        "-p",
+        "--output-format",
+        "json",
+        "--no-session-persistence",
+        "--setting-sources",
+        "",
+        "--strict-mcp-config",
+        "--disable-slash-commands",
+        "--system-prompt",
+        SYSTEM,
+        "--tools",
+        "",
+    ]
     try:
         p = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=600)
     except (OSError, subprocess.TimeoutExpired) as e:
