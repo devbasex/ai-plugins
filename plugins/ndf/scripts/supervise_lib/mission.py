@@ -24,6 +24,7 @@ from supervise_lib.mission_waves import (
     plan_mvv_design,
     plan_mvv_release,
 )
+from supervise_lib.new_args import NEW_ARGS
 from supervise_lib.paths import CHECK_PY, HERE, SELF
 from supervise_lib.release_templates import RELEASE_FORMS
 from supervise_lib.verify_steps import merge_step
@@ -273,13 +274,13 @@ def mission_plans(a) -> list[dict]:
 
 
 def normal_command(a) -> str:
-    """断ったときに示す normal の起動の形（--pace と --state を外した同じコマンド）。"""
-    words = ["python3", str(SELF), "new", "mission", "--name", a.name, "--worktree", a.worktree, "--issue", *map(str, a.issue)]
-    if a.design:
-        words += ["--design", *map(str, a.design)]
-    words += ["--version", a.version, "--mode", a.mode]
-    if a.out:
-        words += ["--out", a.out]
+    """断ったときに示す normal の起動の形（mission が受ける引数をすべて写し、--pace と --state だけを外す）。"""
+    words = ["python3", str(SELF), "new", "mission"]
+    for name, _, allowed in NEW_ARGS:
+        value = getattr(a, name.lstrip("-").replace("-", "_"), None)
+        if "mission" not in allowed.split() or name in ("--pace", "--state") or value in (None, [], False):
+            continue
+        words += [name, *map(str, value)] if isinstance(value, list) else [name] if value is True else [name, str(value)]
     return " ".join(map(shlex.quote, words))
 
 

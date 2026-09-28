@@ -134,6 +134,16 @@ def test_auto_is_refused_when_the_declaration_does_not_allow_it(tmp_path, pace, 
     assert "--pace" not in res["next"] and "new mission" in res["next"] and not out.exists()
 
 
+def test_the_normal_fallback_keeps_every_mission_option(tmp_path):
+    repo = make_repo(tmp_path, None)
+    extra = ["--test-cmd", "pytest {paths}", "--tests", "a", "b", "--scope", "s", "--base", "dev2", "--production-branch", "prd"]
+    p, _ = new_mission(tmp_path, repo, mission_state(tmp_path), *extra)
+    nxt = json.loads(p.stdout)["next"]
+    assert "--pace" not in nxt and "--state" not in nxt
+    for part in ["--test-cmd 'pytest {paths}'", "--tests a b", "--scope s", "--base dev2", "--production-branch prd", "--design 11"]:
+        assert part in nxt, nxt
+
+
 def test_auto_is_refused_for_operation_mode_without_a_dev_channel_and_without_mvv(tmp_path):
     repo = make_repo(tmp_path, {"auto": {**AUTO, "modes": ["operation", "standard"]}})
     p, _ = new_mission(tmp_path, repo, mission_state(tmp_path), "--mode", "operation")

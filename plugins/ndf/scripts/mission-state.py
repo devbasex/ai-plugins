@@ -258,12 +258,8 @@ def cmd_update(a) -> dict:
     rows = [{"plan": p["plan"], **p["row"]} for p in m["plans"]]
     finished = sum(1 for r in rows if r["result"] != NOT_DONE)
     stopped = sum(1 for r in rows if r["result"] not in (NOT_DONE, "完了"))
-    return outcome(
-        "ok",
-        f"計画 {len(rows)} 本: 終わった {finished} / 完了でない {stopped}",
-        rows,
-        {"plans": len(rows), "finished": finished, "stopped": stopped},
-    )
+    summary = f"計画 {len(rows)} 本: 終わった {finished} / 完了でない {stopped}"
+    return outcome("ok", summary, rows, {"plans": len(rows), "finished": finished, "stopped": stopped})
 
 
 def cmd_gate(a) -> dict:
@@ -286,12 +282,8 @@ def gate_locked(a) -> dict:
             m.setdefault("rejections", []).append({**entry, "by": "user", "outcome": "rejected"})
             jsonio.write_atomic(a.mission, m, indent=1)
             extra = f"。覆しを記録した（{override['kind']}）" if override else ""
-            return outcome(
-                "ok",
-                f"{a.name} の差し戻しを書いた（{at}。関門は通さない）{extra}",
-                [override] if override else [],
-                {"gates": len(m.get("gates", []))},
-            )
+            summary = f"{a.name} の差し戻しを書いた（{at}。関門は通さない）{extra}"
+            return outcome("ok", summary, [override] if override else [], {"gates": len(m.get("gates", []))})
         if a.outcome:
             entry["outcome"] = "approved"
     if a.name == MVV_GATE:
@@ -309,9 +301,7 @@ def gate_locked(a) -> dict:
         except ValueError:
             return outcome("stopped", f"--reasons は JSON の配列で渡す: {a.reasons}", exit=EXIT_UNREADABLE)
         entry.update(by="mvv", verdict=a.verdict, reasons=reasons if isinstance(reasons, list) else [reasons], log=a.log or "")
-    gates = [g for g in m.get("gates", []) if g.get("name") != a.name]
-    gates.append(entry)
-    m["gates"] = gates
+    m["gates"] = gates = [g for g in m.get("gates", []) if g.get("name") != a.name] + [entry]
     jsonio.write_atomic(a.mission, m, indent=1)
     who = "MVV 判定" if a.by == "mvv" else "承認"
     return outcome("ok", f"{a.name} の{who}を書いた（{at}）", gates, {"gates": len(gates)})
