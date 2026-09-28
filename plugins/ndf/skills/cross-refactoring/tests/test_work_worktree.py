@@ -71,3 +71,47 @@ def test_run_test_at_returns_to_detached_head(gitfacts, tmp_path, monkeypatch):
     assert gitfacts.run_test_at(str(work), base, "true", "feat/x", 60) == "pass"
 
     assert _git("rev-parse", "HEAD", cwd=work).stdout.strip() == head
+
+
+def _declare_vendor(main, deps):
+    """メインディレクトリに無視される `vendor/bin/pint` と、依存の用意の宣言を置く（#1337）。"""
+    import json
+
+    (main / ".git" / "info" / "exclude").write_text("vendor/\n.ndf/\n", encoding="utf-8")
+    pint = main / "vendor" / "bin" / "pint"
+    pint.parent.mkdir(parents=True)
+    pint.write_text("#!/bin/sh\necho pint-ok\n")
+    pint.chmod(0o755)
+    (main / ".ndf").mkdir()
+    (main / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "deps": deps}))
+
+
+def test_work_worktree_gets_dependencies(cmd_setup, tmp_path, monkeypatch):
+    main = _repo_with_dev_worktree(tmp_path)
+    _declare_vendor(main, {"copy_from_main": ["vendor"]})
+    monkeypatch.chdir(main)
+    work = tmp_path / "tmp" / "rf1" / "work"
+
+    cmd_setup._ensure_work_worktree(work, "feat/x")
+
+    out = subprocess.run([str(work / "vendor" / "bin" / "pint")], capture_output=True, text=True)
+    assert out.stdout.strip() == "pint-ok"
+
+
+def test_work_worktree_stops_when_dependencies_fail_and_retries_on_reuse(cmd_setup, tmp_path, monkeypatch):
+    import json
+
+    import pytest
+
+    main = _repo_with_dev_worktree(tmp_path)
+    _declare_vendor(main, {"run": ["false"]})
+    monkeypatch.chdir(main)
+    work = tmp_path / "tmp" / "rf1" / "work"
+
+    with pytest.raises(SystemExit):
+        cmd_setup._ensure_work_worktree(work, "feat/x")
+    assert work.is_dir()
+
+    (main / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "deps": {"copy_from_main": ["vendor"]}}))
+    cmd_setup._ensure_work_worktree(work, "feat/x")
+    assert (work / "vendor" / "bin" / "pint").is_file()

@@ -24,6 +24,7 @@ from typing import Any, Callable, Optional
 
 import junit
 import test_strategy as ts
+import worktree_deps
 
 Runner = Callable[[Any, str, int, Optional[pathlib.Path]], tuple[Optional[int], bool]]
 SLEEP = time.sleep  # CI の待ちの眠り。テストが差し替える
@@ -226,12 +227,17 @@ def failing_at(
     """着手前の HEAD（`sha`）の一時のworktreeでも落ちる ID。作れない・読めなければ空（既存失敗とみなさない）。
 
     **上限で打ち切った suite があれば `None`**（見分けられない）。空にすると既存失敗が変更起因へ入るため。
+    宣言（`.ndf/worktree.json` の `deps`）の依存の用意に失敗したときも `None` を返す。
     """
     holder = pathlib.Path(tempfile.mkdtemp(prefix="ndf-baseline-"))
     tree = holder / "tree"
     try:
         if not _git(work, ["worktree", "add", "--detach", "-q", str(tree), sha]):
             return []
+        # 依存物の無い worktree では着手前の HEAD でも落ち、変更起因が既存失敗へ入る（#1337）。
+        # 用意できなければ見分けられない
+        if not worktree_deps.prepare(tree).ok:
+            return None
         still, readable, cut = failing_in(str(tree), strategy, ids, timeout, log_dir, "baseline", run, started)
         if cut:
             return None

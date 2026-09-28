@@ -142,6 +142,34 @@
         }
       }
     },
+    "deps": {
+      "type": "object",
+      "description": "依存の用意。worktree を作った直後に、copy_from_main・copy_as_real・run の順に行う。無いか空なら何もしない。個人の宣言からは反映しない",
+      "additionalProperties": true,
+      "properties": {
+        "copy_from_main": {
+          "type": "array",
+          "description": "メインディレクトリからハードリンクで複製するパス（使えない配置では実体の複製）。worktree の中でその場で書き換えないパスだけを置く。複製元が無ければ失敗にする",
+          "items": {
+            "type": "string"
+          }
+        },
+        "copy_as_real": {
+          "type": "array",
+          "description": "実体で複製するパス。worktree の中で書き換えるもの。copy_from_main の内側を指してよい。複製元が無ければ失敗にする",
+          "items": {
+            "type": "string"
+          }
+        },
+        "run": {
+          "type": "array",
+          "description": "複製の後に worktree を作業ディレクトリにして sh -c で順に走らせるコマンド。1 つでも 0 以外なら止める",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
     "testenv": {
       "type": "object",
       "additionalProperties": true,
@@ -223,6 +251,10 @@
               "port_role": {
                 "type": "string",
                 "description": "入口の URL を組み立てるときに使う port_roles の役割名。既定は http"
+              },
+              "service": {
+                "type": "string",
+                "description": "テストを走らせるコンテナのサービス名。あれば走らせる前に、そのコンテナが worktree を見ているかを確かめ、届かなければ走らせない"
               }
             }
           }

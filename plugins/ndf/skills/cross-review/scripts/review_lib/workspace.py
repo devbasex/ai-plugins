@@ -13,6 +13,7 @@ from typing import NamedTuple
 
 import review_lib  # noqa: E402
 import gh_call  # noqa: E402
+import worktree_deps  # noqa: E402
 from review_lib import github  # noqa: E402
 
 
@@ -44,6 +45,15 @@ def _is_registered_worktree(path: str) -> bool:
     out = review_lib._sh(["git", "worktree", "list", "--porcelain"], check=False)
     target = str(pathlib.Path(path).resolve())
     return any(line == f"worktree {target}" for line in out.splitlines())
+
+
+def _prepare_review_deps(worktree: str, *, if_unprepared: bool = False) -> None:
+    """宣言（`.ndf/worktree.json` の `deps`）に従って依存を用意する（#1337）。失敗したら止まる。
+
+    worktree は消さない。次の init が使い回すときに `if_unprepared` でやり直す。
+    """
+    if worktree_deps.prepare_reporting(worktree, if_unprepared=if_unprepared):
+        review_lib.die(f"依存の用意に失敗しました（worktree は残します。次の init がやり直します）: {worktree}")
 
 
 def _create_worktree(worktree: str, pr: int, head_branch: str) -> None:
