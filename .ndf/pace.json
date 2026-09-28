@@ -5,6 +5,11 @@
     "modes": ["light", "standard", "legacy-refactor"],
     "verify": "python3 plugins/ndf/scripts/release-verification-steps.py verify-install --ref develop --runtimes claude,codex,kiro"
   },
+  "auto": {
+    "enabled": true,
+    "modes": ["light", "standard", "legacy-refactor"],
+    "verify": "python3 plugins/ndf/scripts/release-verification-steps.py verify-install --ref develop --runtimes claude,codex,kiro"
+  },
   "areas": [
     {"name": "駆動", "common": true,
      "paths": ["plugins/ndf/scripts/supervise.py", "plugins/ndf/scripts/mission-state.py", "plugins/ndf/scripts/relay.py",
