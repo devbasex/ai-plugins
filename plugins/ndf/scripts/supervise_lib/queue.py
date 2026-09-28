@@ -215,36 +215,56 @@ def cmd_queue(plans: list[str], max_: int, poll: float = 1.0, then: list | None 
     done_path = queue_done_path(plans, done)
     done_path.unlink(missing_ok=True)  # 前の queue の終わりを待つ側が読まないように、始めに消す
     wait_cursor_path(done_path).unlink(missing_ok=True)
-    all_plans = [*plans, *(p for st in stages for p in st)]
+    _write_queue_start(done_path, [*plans, *(p for st in stages for p in st)])
+    items = _run_first(plans, max_, poll)
+    for stage in stages:
+        items += _run_stage(stage, items, max_, poll)
+    res = _queue_result(items, max_, done_path)
+    write_text_atomic(done_path, json.dumps(res, ensure_ascii=False) + "\n")
+    return res
+
+
+def _write_queue_start(done_path: Path, all_plans: list[str]) -> None:
+    """流す計画の一覧と読み始める所を done の隣へ書く（wait が読む）。"""
     write_text_atomic(
         queue_plans_path(done_path),
         json.dumps({"started": now_iso(), "plans": all_plans, "offsets": {p: progress_size(p) for p in all_plans}}, ensure_ascii=False)
         + "\n",
     )
+
+
+def _run_first(plans: list[str], max_: int, poll: float) -> list[dict]:
+    """初めの計画を流す。{queue_pr:<名>} を埋められない計画は流さずに理由を残す。"""
     first, early = [], []
     for p in plans:
         err = fill_queue_pr(p, [])
         (early if err else first).append({"plan": p, "result": NOT_RUN, "reason": err} if err else p)
-    items = early + run_batch(first, max_, poll)
-    for stage in stages:
-        not_done = [i for i in items if i["result"] != "完了"]
-        if not_done:
-            ran_bad = [i for i in not_done if i["result"] != NOT_RUN]
-            reason = (
-                "前の計画が完了していない: " + "、".join(f"{i['plan']}（{i['result']}）" for i in ran_bad)
-                if ran_bad
-                else "前のステージを流さなかった"
-            )
-            items += [{"plan": p, "result": NOT_RUN, "reason": reason} for p in stage]
-            continue
-        prs, runnable, skipped_then = queue_prs(items), [], []
-        for p in stage:
-            err = fill_queue_prs(p, prs) or fill_queue_pr(p, items)
-            if err:
-                skipped_then.append({"plan": p, "result": NOT_RUN, "reason": err})
-            else:
-                runnable.append(p)
-        items += skipped_then + (run_batch(runnable, max_, poll) if runnable else [])
+    return early + run_batch(first, max_, poll)
+
+
+def _run_stage(stage: list[str], items: list[dict], max_: int, poll: float) -> list[dict]:
+    """後続のステージを、前のすべての計画が 完了 のときだけ流す。足す items を返す。"""
+    not_done = [i for i in items if i["result"] != "完了"]
+    if not_done:
+        ran_bad = [i for i in not_done if i["result"] != NOT_RUN]
+        reason = (
+            "前の計画が完了していない: " + "、".join(f"{i['plan']}（{i['result']}）" for i in ran_bad)
+            if ran_bad
+            else "前のステージを流さなかった"
+        )
+        return [{"plan": p, "result": NOT_RUN, "reason": reason} for p in stage]
+    prs, runnable, skipped_then = queue_prs(items), [], []
+    for p in stage:
+        err = fill_queue_prs(p, prs) or fill_queue_pr(p, items)
+        if err:
+            skipped_then.append({"plan": p, "result": NOT_RUN, "reason": err})
+        else:
+            runnable.append(p)
+    return skipped_then + (run_batch(runnable, max_, poll) if runnable else [])
+
+
+def _queue_result(items: list[dict], max_: int, done_path: Path) -> dict:
+    """items から status・summary・metrics を組み立てる。"""
     ran = [i for i in items if i["result"] != NOT_RUN]
     skipped = len(items) - len(ran)
     stopped = [i for i in ran if i["result"] not in ("完了", "関門")]
@@ -254,7 +274,7 @@ def cmd_queue(plans: list[str], max_: int, poll: float = 1.0, then: list | None 
     if skipped:
         summary += f"。後続 {skipped} 本は流さなかった"
     nxt = "関門の計画の report.md を読んで提示する" if status == "gate" else None
-    res = result(
+    return result(
         "supervise-queue",
         status,
         summary,
@@ -262,8 +282,6 @@ def cmd_queue(plans: list[str], max_: int, poll: float = 1.0, then: list | None 
         {"plans": len(ran), "stopped": len(stopped), "gate": len(gates), "not_run": skipped, "max": max_, "done": str(done_path)},
         next=nxt,
     )
-    write_text_atomic(done_path, json.dumps(res, ensure_ascii=False) + "\n")
-    return res
 
 
 WAIT_DONE, WAIT_ATTENTION, WAIT_TIMEOUT = 0, 20, 3  # 20 は共通の契約の「LLM の判断待ち」、3 は前提が無い
