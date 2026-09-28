@@ -434,7 +434,7 @@ def _order_side(side: list[Account], readable: bool) -> list[Account]:
     return out
 
 
-def _candidates(exclude, before: float | None, keep, now: float) -> tuple[list[Account], tuple[str, float] | None]:
+def _account_pool(exclude, before: float | None, keep, now: float) -> tuple[list[Account], tuple[str, float] | None]:
     """上限に達していない候補と、上限にあるもののうち最も早く戻るアカウントと時刻。「再登録が要る」は外す。"""
     pool, earliest = [], None
     for n in [n for n in names() if n not in exclude]:
@@ -458,7 +458,7 @@ def choose(exclude=(), before: float | None = REFRESH_BEFORE, keep=(), now: floa
     得られないもの（残り `min_left` 秒以下を含む）は外す（#1389 の I13）。`keep` の名前はトークンを更新しない
     （動いている区間のアカウント。#1389 の I5）。"""
     now = time.time() if now is None else now
-    pool, earliest = _candidates(exclude, before, keep, now)
+    pool, earliest = _account_pool(exclude, before, keep, now)
     readable = any(a.known() for a in pool)
     for pick in _try_order(pool, readable):
         if token(pick.name, None if pick.name in keep else before, now, min_left) is not None:
