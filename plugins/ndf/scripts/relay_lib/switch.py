@@ -89,17 +89,29 @@ class AccountSwitch:
         cur, thr = self.account, ca.switch_at()
         declared = bool(ca.fallback_env(self.env))
         if kind is not None:
-            c = ca.choose(exclude=set() if kind == "auth" or cur in (None, ca.METERED) else {cur})
-            if c.name:
-                return c.name, "recovered" if cur == ca.METERED else kind, c
-            if declared and cur != ca.METERED:
-                return ca.METERED, kind, c
-            return None, kind, c
+            return self._pick_after_limit(kind, cur, declared)
         if cur == ca.METERED:
-            c = ca.choose()
-            if c.recoverable(thr):
-                return c.name, "recovered", c
-            return ca.METERED, None, c
+            return self._pick_from_metered(thr)
+        return self._pick_at_start(cur, thr, declared)
+
+    def _pick_after_limit(self, kind: str, cur: str | None, declared: bool) -> tuple[str | None, str | None, ca.Choice | None]:
+        """上限の後。None が返れば切り替えずに子を残す。"""
+        c = ca.choose(exclude=set() if kind == "auth" or cur in (None, ca.METERED) else {cur})
+        if c.name:
+            return c.name, "recovered" if cur == ca.METERED else kind, c
+        if declared and cur != ca.METERED:
+            return ca.METERED, kind, c
+        return None, kind, c
+
+    def _pick_from_metered(self, thr: float) -> tuple[str | None, str | None, ca.Choice | None]:
+        """従量の接続で動いているときの区間の起動。閾値未満のアカウントがあれば戻す。"""
+        c = ca.choose()
+        if c.recoverable(thr):
+            return c.name, "recovered", c
+        return ca.METERED, None, c
+
+    def _pick_at_start(self, cur: str | None, thr: float, declared: bool) -> tuple[str | None, str | None, ca.Choice | None]:
+        """区間の起動。今のアカウントが使えて閾値未満なら替えない。"""
         due = self.watch.due if self.watch is not None else None
         usable, score = False, None
         if cur is not None:
