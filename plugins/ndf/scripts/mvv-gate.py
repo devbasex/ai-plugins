@@ -350,6 +350,39 @@ def advise_none(a, project: pm.ProjectMvv) -> tuple[dict, int | None]:
     return result(TOOL, "ok", f"{GATES[a.gate]} の MVV 判定（助言）: {pm.NO_MVV}（{pm.STATUS_LABEL[project.status]}）", [item]), None
 
 
+def machine_checks(a, root: Path, project: pm.ProjectMvv, record: dict) -> tuple[str | None, list[str]]:
+    """機械のチェック（状態・承認・モード・宣言・越えない線・材料）。ミッション MVV の本文と材料を返し、外れは `Back` を投げる。"""
+    state = json.loads(Path(a.mission).read_text(encoding="utf-8"))
+    if project.status in ("unapproved", "mismatch", "unreadable"):
+        raise Back(f"プロジェクト MVV が{pm.STATUS_LABEL[project.status]}（{project.error or ''}）")
+    if why := pm.approval_refusal(state, root, project, advise=a.advise):
+        raise Back(why)
+    mission = mission_text(state)
+    if mission is not None:
+        record["mission_mvv"] = {"sha256": state["mvv"]["sha256"]}
+    if a.mode in EXCLUDED_MODES:
+        raise Back(f"モード {a.mode} は関門を省かない")
+    infos = {n: pr_facts(n, a.repo, root) for n in a.pr}
+    if changed := decl_changes(infos):
+        raise Back("プロジェクト MVV の宣言を変える（共通原則の C7。MVV 判定で通さない）: " + " / ".join(changed))
+    if hits := boundary_hits(root, infos, a.advise):
+        raise Back("越えない線のパスに当たる: " + " / ".join(hits))
+    materials = []
+    for m in a.material:
+        if not Path(m).is_file():
+            raise Back(f"材料のファイルが無い: {m}")
+        materials.append(f"## {m}\n\n{Path(m).read_text(encoding='utf-8')}")
+    materials += [pr_material(n, info) for n, info in infos.items()]
+    if a.gate == "design":
+        for n, info in infos.items():
+            for path in design_docs(info):
+                materials.append(design_material(n, path, info, a.repo, root))
+                record["material"].append(f"#{n} {path}")
+    if not materials:
+        raise Back("材料が無い（--material か --pr を渡す）")
+    return mission, materials
+
+
 def cmd_check(a) -> tuple[dict, int | None]:
     root = Path(a.root or ".").resolve()
     project = pm.load_mvv(root)
@@ -404,37 +437,7 @@ def cmd_check(a) -> tuple[dict, int | None]:
         ), EXIT_GATE
 
     try:
-        state = json.loads(Path(a.mission).read_text(encoding="utf-8"))
-        if project.status in ("unapproved", "mismatch", "unreadable"):
-            raise Back(f"プロジェクト MVV が{pm.STATUS_LABEL[project.status]}（{project.error or ''}）")
-        why = pm.approval_refusal(state, root, project, advise=a.advise)
-        if why:
-            raise Back(why)
-        mission = mission_text(state)
-        if mission is not None:
-            record["mission_mvv"] = {"sha256": state["mvv"]["sha256"]}
-        if a.mode in EXCLUDED_MODES:
-            raise Back(f"モード {a.mode} は関門を省かない")
-        infos = {n: pr_facts(n, a.repo, root) for n in a.pr}
-        changed = decl_changes(infos)
-        if changed:
-            raise Back("プロジェクト MVV の宣言を変える（共通原則の C7。MVV 判定で通さない）: " + " / ".join(changed))
-        hits = boundary_hits(root, infos, a.advise)
-        if hits:
-            raise Back("越えない線のパスに当たる: " + " / ".join(hits))
-        materials = []
-        for m in a.material:
-            if not Path(m).is_file():
-                raise Back(f"材料のファイルが無い: {m}")
-            materials.append(f"## {m}\n\n{Path(m).read_text(encoding='utf-8')}")
-        materials += [pr_material(n, info) for n, info in infos.items()]
-        if a.gate == "design":
-            for n, info in infos.items():
-                for path in design_docs(info):
-                    materials.append(design_material(n, path, info, a.repo, root))
-                    record["material"].append(f"#{n} {path}")
-        if not materials:
-            raise Back("材料が無い（--material か --pr を渡す）")
+        mission, materials = machine_checks(a, root, project, record)
     except (OSError, ValueError) as e:
         return back(f"ミッションの状態を読めない: {e}", "machine")
     except Back as e:
