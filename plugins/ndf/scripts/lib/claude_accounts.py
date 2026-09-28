@@ -312,8 +312,7 @@ def _oauth(name: str) -> dict | None:
 
 
 def _creds(name: str) -> dict | None:
-    o = _oauth(name)
-    return o if o is not None and isinstance(o.get("accessToken"), str) and o["accessToken"] else None
+    return o if (o := _oauth(name)) is not None and isinstance(o.get("accessToken"), str) and o["accessToken"] else None
 
 
 def _token_held(name: str, before: float | None, now: float, force: bool = False, min_left: float = 0) -> str | None:
