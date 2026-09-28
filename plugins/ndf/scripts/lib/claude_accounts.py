@@ -225,10 +225,9 @@ def _update_account(name: str, **fields) -> None:
     """排他の中で呼ぶ。登録の無いアカウントは作らない（I2）。"""
     path = os.path.join(account_dir(name), ACCOUNT_FILE)
     a = _read(path)
-    if a is None:
-        return
-    a.update(fields)
-    _write(path, a)
+    if a is not None:
+        a.update(fields)
+        _write(path, a)
 
 
 def note_limit(name: str, kind: str, resets_at: float | None, now: float | None = None) -> None:
@@ -459,10 +458,9 @@ def owner_of(email: str, other_than: str = "") -> str | None:
 
 def register(name: str, staging: str, email: str) -> None:
     """ログインの済んだ `staging` を `name` として置く。同じ名前の古いものは置き換える。"""
-    now = time.time()
     with _locked(name):
         final = account_dir(name)
-        row = {"name": name, "email": email, "registered_at": iso_utc(now), "needs_relogin": False, "limit": None}
+        row = {"name": name, "email": email, "registered_at": iso_utc(time.time()), "needs_relogin": False, "limit": None}
         _write(os.path.join(staging, ACCOUNT_FILE), row)
         if os.path.exists(final):
             shutil.rmtree(final)
