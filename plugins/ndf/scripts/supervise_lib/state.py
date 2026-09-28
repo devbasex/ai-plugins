@@ -15,6 +15,7 @@ from pathlib import Path
 import clock
 import legacy_names
 import usage_ledger
+from sprint_mvv import MVV_PACES
 from supervise_lib.claude import TICK
 
 REPORT_INTERVAL = 600  # 最後の行から動きが無いときに「まだ動いている」を足すまでの秒数。計画の "report_interval"
@@ -201,7 +202,7 @@ class RunState:
         if not rec:
             return
         pace = plan.get("進め方")
-        pace_first = pace in ("fast", "auto") and not self.pace_recorded
+        pace_first = pace in MVV_PACES and not self.pace_recorded
         self.pace_recorded = True
         for issue in plan.get("課題", []):
             if pace_first:  # 通過記録と本文の見出し行へ進め方を先に書く（まとめる工程を記録なしと数えない）

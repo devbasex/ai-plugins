@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import delivery
 from pace import PaceError, read_pace
+from sprint_mvv import MVV_PACES
 from supervise_lib.decl import DeclError, decl_roots, delivery_decl, require_versions
 from supervise_lib.plan import QUEUE_PRS
 from supervise_lib.release_templates import GATE_2_MATERIAL, RELEASE_FORMS, plan_gate_2, plan_promote
 from supervise_lib.verify_steps import plan_limits
-
-MVV_PACES = ("fast", "auto")  # 承認ゲートを MVV 判定で通す進め方（使ってよい条件を確かめる）
 
 
 def pace_decl(a) -> dict | None:
