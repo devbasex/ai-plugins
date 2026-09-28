@@ -41,12 +41,7 @@ from step_result import (
     version_arg,
 )
 import delivery  # noqa: E402
-import deps  # noqa: E402
 import repo as repo_lib  # noqa: E402
-
-deps.require("md")
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from release_lib.names import release_tag, release_tag_before  # noqa: E402
 
 TOOL = "release-verification"
 
@@ -330,8 +325,10 @@ def cmd_verify_install(a):
 
     git(root, "fetch", "-q", "origin", "--tags")
     ref_rev = git(root, "rev-parse", f"origin/{a.ref}").stdout.strip()
-    cur = release_tag(plugins[0], a.expect)  # タグは先頭のプラグイン（宣言の release.plugin）から決める
-    prev = release_tag_before(root, plugins[0], cur)
+    prefix = f"{plugins[0]}--v"  # タグの接頭辞は先頭のプラグイン（宣言の release.plugin）から決める
+    tags = git(root, "tag", "--list", f"{prefix}*", "--sort=-v:refname").stdout.split()
+    cur = f"{prefix}{a.expect}"
+    prev = next((t for t in tags if t != cur and "-" not in t[len(prefix) :]), None)
 
     before = user_env_snapshot()
     tmp = tempfile.mkdtemp(prefix="ndf-verify-install-")
