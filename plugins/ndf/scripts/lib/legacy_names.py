@@ -61,20 +61,27 @@ def rewrite_argv(entry: str, argv: list[str], mode: str | None = None) -> list[s
     for old, new in ARGS.get(entry, ()):
         i = 0
         while i < len(out):
-            n = len(old)
-            if tuple(out[i : i + n]) == old:
-                _tell(f"{entry} {' '.join(old)}", " ".join(new), mode)
-                out[i : i + n] = new
-                i += n
+            m = _match(old, new, out, i)
+            if m is None:
+                i += 1
                 continue
-            if n == 1 and out[i].startswith(old[0] + "="):
-                _tell(f"{entry} {old[0]}", new[0], mode)
-                out[i] = new[0] + out[i][len(old[0]) :]
-            elif n == 2 and out[i] == f"{old[0]}={old[1]}":
-                _tell(f"{entry} {' '.join(old)}", " ".join(new), mode)
-                out[i] = f"{new[0]}={new[1]}"
-            i += 1
+            span, repl, told_old, told_new = m
+            _tell(f"{entry} {told_old}", told_new, mode)
+            out[i : i + span] = repl
+            i += span
     return out
+
+
+def _match(old: tuple, new: tuple, out: list[str], i: int) -> tuple[int, list[str], str, str] | None:
+    """位置 i で旧名に当たれば (置き換える語の数, 置き換え後の語の並び, 案内の旧名, 案内の新しい名前) を返す。"""
+    n = len(old)
+    if tuple(out[i : i + n]) == old:
+        return n, list(new), " ".join(old), " ".join(new)
+    if n == 1 and out[i].startswith(old[0] + "="):
+        return 1, [new[0] + out[i][len(old[0]) :]], old[0], new[0]
+    if n == 2 and out[i] == f"{old[0]}={old[1]}":
+        return 1, [f"{new[0]}={new[1]}"], " ".join(old), " ".join(new)
+    return None
 
 
 def forward(old_script: str, mode: str | None = None) -> None:
