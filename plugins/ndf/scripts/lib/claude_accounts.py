@@ -68,6 +68,11 @@ WINDOWS = ("five_hour", "seven_day")
 # ---------------------------------------------------------------- 設定と置き場
 
 
+def _now(now: float | None) -> float:
+    """時刻の引数の既定（None なら今）。"""
+    return time.time() if now is None else now
+
+
 def _setting(name: str, default: float) -> float:
     """設定の数（負は 0）。無い・読めないときは `default`。"""
     try:
@@ -308,7 +313,7 @@ def note_limit(name: str, kind: str, resets_at: float | None, now: float | None 
     """アカウント `name` が上限（種類 `kind`）に達したと観測したことを残す。"""
     if not name or name == METERED:
         return
-    now = time.time() if now is None else now
+    now = _now(now)
     try:
         with _locked(name):
             _update_account(name, limit={"type": kind, "resets_at": iso_utc(resets_at), "observed_at": iso_utc(now)})
@@ -369,7 +374,7 @@ def _refresh_and_store(name: str, o: dict, now: float, fallback: str | None) -> 
 
 def token(name: str, before: float | None = REFRESH_BEFORE, now: float | None = None, min_left: float = 0) -> str | None:
     """子へ渡すアクセストークン。期限の `before` 秒前を切っていれば更新する（None は更新しない）。`min_left` は `_token_held`。"""
-    now = time.time() if now is None else now
+    now = _now(now)
     try:
         with _locked(name):
             return _token_held(name, before, now, min_left=min_left)
@@ -399,7 +404,7 @@ def _fetch(name: str, before: float | None, now: float) -> Usage:
 
 def usage(name: str, before: float | None = REFRESH_BEFORE, now: float | None = None) -> Usage | None:
     """残量。前の取得から `check_interval()` 秒の中なら保存した値を返し、取得先を呼ばない（I6）。"""
-    now = time.time() if now is None else now
+    now = _now(now)
     path = _path(name, USAGE_FILE)
     try:
         with _locked(name):
@@ -474,7 +479,7 @@ def choose(exclude=(), before: float | None = REFRESH_BEFORE, keep=(), now: floa
     残量不明は、上限に達していない候補に読めるものが無いときだけ候補にする（名前の順）。「再登録が要る」とトークンを
     得られないもの（残り `min_left` 秒以下を含む）は外す（#1389 の I13）。`keep` の名前はトークンを更新しない
     （動いている区間のアカウント。#1389 の I5）。"""
-    now = time.time() if now is None else now
+    now = _now(now)
     pool, earliest = _account_pool(exclude, before, keep, now)
     readable = any(a.known() for a in pool)
     for pick in _try_order(pool, readable):
@@ -609,7 +614,7 @@ def discard(path: str) -> None:
 
 def rows(now: float | None = None) -> list[dict]:
     """一覧の中身（推論は呼ばない）。期限の過ぎたトークンだけを更新する（動いている区間のトークンを替えない）。"""
-    now = time.time() if now is None else now
+    now = _now(now)
     out = []
     for n in names():
         usage(n, 0, now)
@@ -755,7 +760,7 @@ def make_pending(name: str) -> str:
 
 def save_pending(name: str, pid: int, now: float | None = None) -> Pending:
     """待機中のログインの識別と期限を `pending.json` へ書く。"""
-    now = time.time() if now is None else now
+    now = _now(now)
     import procs
 
     p = Pending(name, pid, procs.start_time(pid) or 0.0, now + PENDING_TTL)
@@ -790,7 +795,7 @@ def discard_pending(name: str) -> None:
 
 def sweep_pending(now: float | None = None) -> set[str]:
     """期限を過ぎた登録の途中の状態を捨て、捨てた名前の集合を返す（E10）。"""
-    now = time.time() if now is None else now
+    now = _now(now)
     gone = set()
     try:
         entries = os.listdir(store_dir())
