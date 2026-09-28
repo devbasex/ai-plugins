@@ -122,6 +122,34 @@ class Milestones:
             self._by_title[title] = made["number"]
         return self._by_title[title]
 
+    def open_rows(self) -> list[dict]:
+        """open のマイルストーン（題名・番号・説明）。"""
+        rows = self.gh.call([f"repos/{self.gh.repo}/milestones?state=open&per_page=100"], paginate=True) or []
+        return [r for r in rows if isinstance(r, dict) and r.get("state", "open") == "open"]
+
+    def set_description(self, number: int, description: str, target=None) -> None:
+        """マイルストーンの説明を書き換える。題名と状態は送らない（順序を書き換えない。#1429 の I5）。"""
+        self.gh.call(
+            [f"repos/{self.gh.repo}/milestones/{number}", "-X", "PATCH", "--input", "-"],
+            stdin=json.dumps({"description": description}, ensure_ascii=False),
+            target=target,
+        )
+
+
+def sub_issues(gh: Gh, parents, notes: list) -> dict:
+    """open の親ごとの open の子の番号。サブイシューの API が無ければ（404）空で返し、notes に残す。"""
+    out = {}
+    for n in parents:
+        try:
+            kids = gh.call([f"repos/{gh.repo}/issues/{n}/sub_issues?per_page=100"], paginate=True, target=n) or []
+        except StepError as e:
+            if "404" in str(e):
+                notes.append("サブイシューの API が無いため、本文と説明の並列の組の依存だけで並べた")
+                return {}
+            raise
+        out[n] = sorted(k["number"] for k in kids if isinstance(k, dict) and k.get("state") == "open")
+    return out
+
 
 def _with_labels(cur: dict, got, add=(), drop=None) -> dict:
     """ラベルの書き込みの応答（いまのラベルの一覧）を課題へ写す。応答が無ければ手元で足し引きする。"""
