@@ -607,9 +607,7 @@ def test_unresolved_thread_ids_failure_is_none(
 
 
 @pytest.mark.parametrize("repo", ["", None, "octo", "octo/", "/repo"])
-def test_unresolved_thread_ids_bad_repo_is_none_without_calling_gh(
-    monkeypatch: pytest.MonkeyPatch, repo: Any
-) -> None:
+def test_unresolved_thread_ids_bad_repo_is_none_without_calling_gh(monkeypatch: pytest.MonkeyPatch, repo: Any) -> None:
     """現状固定。`owner/name` の形でない repo は gh を呼ばずに `None`。"""
     calls: list[list[str]] = []
     monkeypatch.setattr(post_queue, "run", _run_returning([], calls))
