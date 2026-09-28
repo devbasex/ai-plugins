@@ -34,6 +34,21 @@
 指定できる）からの差分にあるプラグインのうち、差分の中でまだ版を上げていないものである。開発版の
 プランは他のプラグインの版を上げない。他のプラグインのタグは打たない。
 
+**配布の手順（`release-steps.py`・`release-verification-steps.py`）は、次の値を宣言と origin から読む。** リポジトリごとの値を
+スクリプトに埋め込まない。
+
+| 値 | 出所 |
+| --- | --- |
+| ベースブランチ（開発版の PR の宛先・差分の起点） | `.ndf/worktree.json` の `base_branch`（無ければ既定ブランチ） |
+| 本番チャネル（本番の PR の宛先・タグを打つコミット） | `.ndf/worktree.json` の `production_branch`（無ければ既定ブランチ） |
+| タグの接頭辞 `<名前>--v`・題 `Release: <名前> v<版>` | `--plugin` / `--plugins` の先頭 → `.ndf/supervise.json` の `release.plugin` |
+| 導入元の `owner/repo` | `origin` の URL |
+| マーケットプレイスの名前 | `.claude-plugin/marketplace.json` の `name`（無ければリポジトリ名） |
+
+**次の 3 つは、この形を選んだリポジトリが守る約束であり、宣言では変えない。** リポジトリの根の `CHANGELOG.md` と
+見出し `## [<プラグイン> <基底の版>]`、プラグインの置き場 `plugins/<名前>/.claude-plugin/plugin.json`（MCP は
+`plugins/mcp/<名前>/`）、版の形 `X.Y.Z[-dev.N]`。
+
 ## このリポジトリでの例
 
 ```bash

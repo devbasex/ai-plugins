@@ -52,7 +52,9 @@ python3 "$SCRIPTS/supervise.py" wait <プラン>-state/queue-done.json
 | --- | --- |
 | `scripts/check-trigger.py eval` | 検査を回すかを判定する |
 | `scripts/check-trigger.py stats` | 検査のラウンド数と指摘の数を集計する |
-| `scripts/merged-steps.py merge-when-green` | CI が通るまで待ってマージし、後片付けまで行う |
+| `scripts/merged-steps.py merge-when-green` | CI が通るまで待ってマージし、後片付けまで行う。宛先が自動反映の本番チャネルなら `--gate-approved user\|mvv` が無い限り CI を待たずに承認ゲート 2（終了コード 10）で止まる |
+| `scripts/merged-steps.py merge-gate` | 宛先へのマージが承認ゲート 2 に当たるかだけを判定する（0 = 進めてよい / 10 = 承認ゲート 2） |
+| `scripts/merged-steps.py promote` | 昇格の Pull Request（ベースブランチ → 本番チャネル）を作り、承認ゲート 2 の後にマージする（後片付けはしない） |
 | `scripts/merged-steps.py cleanup` | マージ済みの PR の worktree とブランチを片付ける |
 | `scripts/release-steps.py approval-facts` | 本番の承認資料のうち機械で作れる部分を書き出す |
 | `scripts/release-verification-steps.py verify-install` | 開発版を導入して確かめる |

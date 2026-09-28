@@ -133,9 +133,16 @@ python3 "$SCRIPTS/merged-steps.py" cleanup <PR番号>... --root <メインディ
 
 ```bash
 python3 "$SCRIPTS/merged-steps.py" merge-when-green <PR番号> --root <メインディレクトリ> \
-  [--method merge|squash|rebase] [--interval 10] [--recheck 5] [--no-checks-after 60] [--timeout 3600] [--stale-after 300] [--no-cleanup]
+  [--gate-approved user|mvv] [--method merge|squash|rebase] [--interval 10] [--recheck 5] [--no-checks-after 60] [--timeout 3600] \
+  [--stale-after 300] [--no-cleanup]
 ```
 
+- **最初の読みで宛先を判定し、自動反映の本番チャネル（判定を決められない宛先を含む）なら、`--gate-approved` が無い限り
+  CI を待たず・draft も外さずに `gate`（10）で止まる。** `metrics.gate` が `production-merge` で、`items` に判定に使った宣言
+  （ファイルとキーと値）と宛先が、`presentation_path` に承認資料が載る。後片付けの `git branch -D` の同意（同じ 10）とは
+  `metrics.gate` で見分ける。条件は `development-workflow` の「本番系へ届く操作」
+- 承認を得たら同じコマンドに `--gate-approved user`（`fast` / `auto` で MVV 判定が通したときは `mvv`）を付けて打ち直す。
+  マージした結果の Pull Request の行に `gate_approved` とマージした先頭のコミット（`head`）が残る。承認を得ずに付けない
 - CI のチェックが全部通るまで待つ。push で先頭のコミットが変わると待ち直す（`items` に `rewait` が載る）
 - 同じ先頭のコミットで pending を見た後に全部が通れば、その周でマージする。pending を見ずに通って
   いたときだけ `--recheck` 秒後に 1 度確かめ直す。rollup が空のうちはマージせず、`--no-checks-after`
@@ -301,8 +308,9 @@ bash "$SCRIPTS/../skills/development-workflow/scripts/stage-check.sh" report <is
 検証環境のチャネルへ入れるマージは取り消せるため、承認を求めない。**本番系へ届く操作
 だけが承認ゲートである**（設計 Pull Request のマージは、どのチャネルでも承認が要る別の承認ゲートである）。
 
-**本番系へ届く操作は 2 つの形を取る。** リリース（`release`）と、運用モードの実行
-（`operation` の実装）である。マージが関わるのは前者で、規則は `/ndf:release` が持つ。
+**本番系へ届く操作は 3 つの形を取る。** リリース（`release`）、運用モードの実行
+（`operation` の実装）、自動反映の本番チャネルへの Pull Request のマージである。リリースの規則は `/ndf:release` が持ち、
+最後のものは `merge-when-green` が止める（上の「マージから行うとき」）。
 どのブランチが本番チャネルかはリポジトリが設定する（`.ndf/worktree.json` の
 `production_branch`。設定が無ければ既定ブランチ）。
 

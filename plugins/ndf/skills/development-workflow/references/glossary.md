@@ -59,7 +59,7 @@ flowchart TB
 | 語 | 意味 | 英語や識別子 | 正本 |
 | --- | --- | --- | --- |
 | マイルストーン | 着手の順序を表す単位。スプリントはこの中から切り出す | GitHub の milestone。open は `<2 桁の連番> <主題>`、closed は `v<版数>` | [parallel-work.md](parallel-work.md) の「用語」 |
-| スプリント | 1 つの版として出す課題と Pull Request のセット。区切りは 1 つの版として出す中身で決める。工程はスプリント単位で 1 回ずつ通し、モードもスプリントで 1 つにする | ブランチ `sprint/<名前>`、目録 `sprint.json`、状態のファイル（例 `sprint-state.json`） | [parallel-work.md](parallel-work.md) の「用語」 |
+| スプリント | 1 回のリリースとして出す課題と Pull Request のセット。版数を持つプロジェクトでは 1 つの版になる。区切りは 1 回のリリースとして出す中身で決める。工程はスプリント単位で 1 回ずつ通し、モードもスプリントで 1 つにする | ブランチ `sprint/<名前>`、目録 `sprint.json`、状態のファイル（例 `sprint-state.json`） | [parallel-work.md](parallel-work.md) の「用語」 |
 | スプリント課題 | スプリントに含まれる Pull Request の本文が、閉じる語で指す課題 | `sprint-close.py` が閉じる | [progress-tracking](../../progress-tracking/SKILL.md) |
 | 工程 | 工程表（モードごとに起動する Skill の表）の 1 行。要求と受け入れ条件・設計・実装・リリースなど | 進捗記録の `stage` | [../SKILL.md](../SKILL.md) の「モードごとに起動する Skill」 |
 | フェーズ | supervisor 1 つ（またはプラン 1 本）が通す、連続する工程のグループ。設計・実装・検査・取り込み・仕上げ・リリースの 6 つ | プランの `"フェーズ"`、Agent の `description` の先頭語 | [agent-layers.md](agent-layers.md) の「フェーズ」 |
