@@ -360,6 +360,11 @@ def probe_prs(root, a):
     return list(dict.fromkeys(out))
 
 
+def _check_item(n, name, result, **extra) -> dict:
+    """probe の根拠の 1 件（PR n のチェック name）。"""
+    return {"kind": "check", "pr": int(n), "name": name, "result": result, **extra}
+
+
 def probe_one(root, n, act, items):
     """1 本の PR のチェックを分類する。(分類, 手) を返し、根拠を items に足す。読めなければ None。"""
     p = gh_parts.gh(["pr", "view", n, "--json", "number,state,statusCheckRollup"], cwd=root)
@@ -377,33 +382,28 @@ def probe_one(root, n, act, items):
     again = [s for s in stale if s[3] > 1]
     if failed:
         cls = "failed"
-        items += [{"kind": "check", "pr": int(n), "name": f, "result": "failed"} for f in failed]
+        items += [_check_item(n, f, "failed") for f in failed]
     elif first:
         cls = "stale"
     elif again:
         cls = "stale_again"
-        items += [
-            {"kind": "check", "pr": int(n), "name": s[0], "result": "stale_again", "run": s[1], "job": s[2], "attempt": s[3]} for s in again
-        ]
+        items += [_check_item(n, s[0], "stale_again", run=s[1], job=s[2], attempt=s[3]) for s in again]
     elif settled:
         cls = "settled"
-        items += [
-            {"kind": "check", "pr": int(n), "name": s[0], "result": "settled", "run": s[1], "job": s[2], "conclusion": s[3]}
-            for s in settled
-        ]
+        items += [_check_item(n, s[0], "settled", run=s[1], job=s[2], conclusion=s[3]) for s in settled]
     elif queued:
         cls = "queued"
-        items += [{"kind": "check", "pr": int(n), "name": q, "result": "queued"} for q in queued]
+        items += [_check_item(n, q, "queued") for q in queued]
     elif pending:
         cls = "running"
-        items += [{"kind": "check", "pr": int(n), "name": c, "result": "running"} for c in pending]
+        items += [_check_item(n, c, "running") for c in pending]
     else:
         cls = "passed"
     action = PROBE_ACTIONS[cls]
     if cls == "stale":
         done = True
         for name, run_id, job_id, attempt in first:
-            item = {"kind": "check", "pr": int(n), "name": name, "result": "stale", "run": run_id, "job": job_id, "attempt": attempt}
+            item = _check_item(n, name, "stale", run=run_id, job=job_id, attempt=attempt)
             if act:
                 r = gh_parts.gh(["run", "rerun", run_id, "--job", job_id], cwd=root)
                 item["result"] = "rerun" if r.returncode == 0 else "rerun_failed"

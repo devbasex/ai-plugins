@@ -158,7 +158,7 @@ Pull Request の作成の時点と後片付けの報告だけ**で、後片付�
 | `release-verification` | 検証結果を記録した後 | 後に振り返りが続かない変更（振り返りを通らない `operation`） |
 | `release` | 「蓄積した課題を棚卸しする」の前 | 後にリリース後テストも振り返りも続かない変更（`light`、どちらも通らない `operation`） |
 
-**いずれも「スプリントを閉じる → `issue-upkeep`」の順で呼ぶ。** 逆にすると、`issue-upkeep` の
+**いずれも「スプリントを閉じる → `backlog-refinement`」の順で呼ぶ。** 逆にすると、`backlog-refinement` の
 手順 1 が読む「このスプリントで閉じた課題」がまだ閉じていない。
 
 **利用者の入力を求めない。** 閉じる判断は、スプリントの工程を通ったことで既に済んでいる
@@ -183,8 +183,8 @@ python3 "$SCRIPTS/sprint-close.py" --record-pr <記録のPR番号> \
 
 | `status`（終了コード） | 次にすること |
 | --- | --- |
-| `ok`（0） | `items` の表を報告に貼り、`issue-upkeep` へ進む |
-| `stopped`（1） | 失敗した課題がある。`items[].reason` と `cmd`（やり直すコマンド）を報告し、最終工程を完了と報告せず、`issue-upkeep` を呼ばずに止まる |
+| `ok`（0） | `items` の表を報告に貼り、`backlog-refinement` へ進む |
+| `stopped`（1） | 失敗した課題がある。`items[].reason` と `cmd`（やり直すコマンド）を報告し、最終工程を完了と報告せず、`backlog-refinement` を呼ばずに止まる |
 | `stopped`（2） | スプリントの PR の一覧が取れない。推測せず運用者に一覧を聞き、`--prs` で打ち直す |
 | `stopped`（3） | 呼び出しの誤り。引数を直して打ち直す |
 
@@ -198,7 +198,7 @@ python3 "$SCRIPTS/sprint-close.py" --record-pr <記録のPR番号> \
 | `failed` | 状態を読めない、または閉じた後も CLOSED でない | 番号・`reason`・`cmd`（やり直す `gh issue close`） |
 | `kept_open` | 閉じる条件に当たらない | 番号と `reason`（いつ閉じるか） |
 
-**`kept_open` は失敗ではない。** 止める理由にせず、`issue-upkeep` へ進んでよい。
+**`kept_open` は止める理由にしない。** `backlog-refinement` へ進んでよい。
 
 ### 閉じる条件
 

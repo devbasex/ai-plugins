@@ -195,12 +195,12 @@ gh issue list --repo "$ISSUE_REPO" --state all --search "<由来>"   # 例: "PR 
 | --- | --- |
 | `out-of-scope` | 範囲外の課題を、**見つけたその場で**起票する |
 | `retrospective` | **その変更の進め方**を見直し、起票の取りこぼしを拾う |
-| `issue-upkeep` | **蓄積した既存の課題**を棚卸しする |
+| `backlog-refinement` | **蓄積した既存の課題**を棚卸しする |
 
 **ここでの 3 択は発見の瞬間の判断で、蓄積した課題には及ばない。** 蓄積した課題への判断は
-`issue-upkeep` が持つ。価値の判断は `issue-upkeep` の「やらない」、どこを直すかの構造の判断は
-`issue-upkeep` の「ルートコーズ」である（判断と見る対象の表の正本は
-[issue-upkeep の「既存の Skill との境界」](../issue-upkeep/SKILL.md)）。
+`backlog-refinement` が持つ。価値の判断は `backlog-refinement` の「やらない」、どこを直すかの構造の判断は
+`backlog-refinement` の「ルートコーズ」である（判断と見る対象の表の正本は
+[backlog-refinement の「既存の Skill との境界」](../backlog-refinement/SKILL.md)）。
 
 **発見の瞬間には、指摘の周辺しか見えていない。** 「範囲内へ入れる」は同じ原因・同じ形の
 指摘をこの変更へ取り込む判断で、溜まった課題の中から同じ原因を持つものを探す判断ではない。

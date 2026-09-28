@@ -14,7 +14,7 @@
 | 実行計画の置き場所・形・作る手順・見直す時点と手順・閉じる手順、課題グループの読み方 | `plugins/ndf/skills/issue-plan-strategy/references/execution-plan.md` |
 | 実行計画の入口 | `plugins/ndf/skills/issue-plan-strategy/SKILL.md` |
 | 守る必須ルール 6 つ、変更重複の目安、機械が見るものと手順として書くもの | `plugins/ndf/skills/development-workflow/references/parallel-work.md` |
-| マイルストーンの説明へ課題グループを書く手順 | `plugins/ndf/skills/issue-upkeep/references/milestones.md` の「並列の組（見込み）」 |
+| マイルストーンの説明へ課題グループを書く手順 | `plugins/ndf/skills/backlog-refinement/references/milestones.md` の「並列の組（見込み）」 |
 | 測定のコマンドの引数と出力 | この文書と `plugins/ndf/scripts/parallel-measure.py` |
 
 ## 概要
@@ -76,7 +76,7 @@ Pull Request の head を読むため、新しい手順は要らない。並行�
 
 **実行計画はメインディレクトリの `issues/` に置き、開いている間はコミットしない。** 見直しのたびに
 Pull Request を通すと、計画の更新がマージを待ち、進み具合に遅れる。マイルストーンの説明（節だけを
-差し替える仕組みが要る）・追跡用の issue（`issue-upkeep` が拾う）・`.git/ndf/`（人がたどり着かない）
+差し替える仕組みが要る）・追跡用の issue（`backlog-refinement` が拾う）・`.git/ndf/`（人がたどり着かない）
 は採らなかった。`parallel-batch-<連番>/` の規約は、全体指示書をメインディレクトリへコミットする運用が
 `develop` への直接のコミットの禁止と両立しないため置き換えた。
 
@@ -233,7 +233,7 @@ oom_kill_increased = yes なら allowed = max(0, min(allowed, running − 1))
 | `concurrency` が変更重複・並行度・最大同時本数を出し、端が接するだけの対は重ならない。偽の `gh` が受けた引数が `pr view` だけ | 同上 |
 | 必須ルール 4・5・6 の文言、必須ルール 6 の理由に「メモリ」と「21GiB」、コンテナを起動する supervisor は 1 本、変更重複の目安の 3 区分と列 | 文書を読んで確かめる（照合するテストは持たない） |
 | `execution-plan.md` に置き場所・コミットしないこと・行の列・確度と状態の値・契機 5 つ・閉じる手順・課題グループを読むこと・`capacity` を起動の前に実行することがあり、初期値の数値（2048・25%）が無い | 文書を読んで確かめる（照合するテストは持たない） |
-| `milestones.md` に「並列の組（見込み）」の節と列、手順 2A から写す文、見込みであり確定は実行計画が持つ文があり、手順 2A の控える項目が 6 行のまま、既存の名前と連番のテストが通る。0 件になった課題グループの行削除で番号を詰めない | `plugins/ndf/skills/issue-upkeep/tests/test_issue_upkeep_layout.py` |
+| `milestones.md` に「並列の組（見込み）」の節と列、手順 2A から写す文、見込みであり確定は実行計画が持つ文があり、手順 2A の控える項目が 6 行のまま、既存の名前と連番のテストが通る。0 件になった課題グループの行削除で番号を詰めない | `plugins/ndf/skills/backlog-refinement/tests/test_issue_upkeep_layout.py` |
 | 閉じた実行計画のコメントと振り返りが読める | リリース後テスト（次に複数のバンドルを持つスプリントを進めたとき） |
 
 ## 運用

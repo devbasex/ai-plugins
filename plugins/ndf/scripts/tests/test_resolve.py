@@ -218,3 +218,14 @@ def test_nothing_found_exits_3(tmp_path, home, project) -> None:
 def test_bad_arguments_exit_2(home, project) -> None:
     assert run_entry(ENTRY, project, home, "skill").returncode == 2
     assert run_entry(ENTRY, project, home, "nope").returncode == 2
+
+
+def test_old_skill_name_resolves_to_the_new_skill(home, project) -> None:
+    """#1429 の決定 20: 旧名の Skill は旧名の表で新しい名前へ引き、案内を標準エラーへ出す。"""
+    root = make_plugin(home / ".gemini" / "config" / "plugins" / "ndf", skills=("backlog-refinement",))
+    (root / "scripts" / "lib").mkdir(parents=True, exist_ok=True)
+    shutil.copy(ENTRY.parent / "lib" / "legacy_names.py", root / "scripts" / "lib" / "legacy_names.py")
+    got = run_entry(root / "scripts" / "resolve.sh", project, home, "scripts", "issue-upkeep")
+    assert got.returncode == 0
+    assert got.stdout.strip() == str(root / "skills" / "backlog-refinement" / "scripts")
+    assert "backlog-refinement" in got.stderr

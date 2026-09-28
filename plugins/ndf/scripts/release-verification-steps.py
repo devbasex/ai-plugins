@@ -314,58 +314,46 @@ def install_source(root, a):
     return (slug, market_of(root, slug), d.production), plugins
 
 
-def cmd_verify_install(a):
-    root = git_root(a.root)
-    where, plugins = install_source(root, a)
-    runtimes = [r.strip() for r in a.runtimes.split(",") if r.strip()]
-    bad = [r for r in runtimes if r not in ("claude", "codex", "kiro")]
-    if bad:
-        raise StepError(f"未知の runtime: {','.join(bad)}", EXIT_UNREADABLE)
-    rel = {p: plugin_dir(root, p).relative_to(root).as_posix() for p in plugins}
+def _extract_source(root, ref_rev, tmp) -> Path:
+    """ref_rev の中身を git archive で tmp/src へ取り出す。"""
+    src = Path(tmp) / "src"
+    src.mkdir()
+    arch = subprocess.run(["git", "-C", str(root), "archive", ref_rev], capture_output=True)
+    if arch.returncode != 0:
+        raise StepError(f"git archive {ref_rev[:8]} が失敗: {arch.stderr.decode(errors='replace')[:300]}")
+    tar = subprocess.run(["tar", "-x", "-C", str(src)], input=arch.stdout, capture_output=True)
+    if tar.returncode != 0:
+        raise StepError(f"展開が失敗: {tar.stderr.decode(errors='replace')[:300]}")
+    return src
 
-    git(root, "fetch", "-q", "origin", "--tags")
-    ref_rev = git(root, "rev-parse", f"origin/{a.ref}").stdout.strip()
-    prefix = f"{plugins[0]}--v"  # タグの接頭辞は先頭のプラグイン（宣言の release.plugin）から決める
-    tags = git(root, "tag", "--list", f"{prefix}*", "--sort=-v:refname").stdout.split()
-    cur = f"{prefix}{a.expect}"
-    prev = next((t for t in tags if t != cur and "-" not in t[len(prefix) :]), None)
 
-    before = user_env_snapshot()
-    tmp = tempfile.mkdtemp(prefix="ndf-verify-install-")
+def _verify_runtimes(a, root, src, tmp, runtimes, plugins, rel, prev, ref_rev, where):
+    """ランタイムごとに導入して確かめる。(ランタイムごとの結果, 中身の不一致) を返す。"""
     runtimes_res, mismatch = {}, []
-    try:
-        src = Path(tmp) / "src"
-        src.mkdir()
-        arch = subprocess.run(["git", "-C", str(root), "archive", ref_rev], capture_output=True)
-        if arch.returncode != 0:
-            raise StepError(f"git archive {ref_rev[:8]} が失敗: {arch.stderr.decode(errors='replace')[:300]}")
-        tar = subprocess.run(["tar", "-x", "-C", str(src)], input=arch.stdout, capture_output=True)
-        if tar.returncode != 0:
-            raise StepError(f"展開が失敗: {tar.stderr.decode(errors='replace')[:300]}")
+    changed = {
+        p: ([f for f in git(root, "diff", "--name-only", prev, ref_rev, "--", r).stdout.split() if f] if prev else [])
+        for p, r in rel.items()
+    }
+    env = isolated_env(tmp)
+    for name, fn in (("claude", verify_claude), ("codex", verify_codex)):
+        if name not in runtimes:
+            continue
+        res, dirs = fn(env, a.ref, plugins, a.expect, where)
+        runtimes_res[name] = res
+        for p, d in dirs.items():
+            if d is None:
+                mismatch.append(f"{name}: {p} の導入先が無い")
+            else:
+                mismatch += compare_files(src, d, rel[p], changed[p], name, keeps_symlinks=(name != "codex"))
+    if "kiro" in runtimes:
+        runtimes_res["kiro"], proj = verify_kiro(env, src, tmp, a.expect)
+        if proj is not None:
+            mismatch += compare_kiro(src, proj)
+    return runtimes_res, mismatch
 
-        changed = {
-            p: ([f for f in git(root, "diff", "--name-only", prev, ref_rev, "--", r).stdout.split() if f] if prev else [])
-            for p, r in rel.items()
-        }
-        env = isolated_env(tmp)
-        for name, fn in (("claude", verify_claude), ("codex", verify_codex)):
-            if name not in runtimes:
-                continue
-            res, dirs = fn(env, a.ref, plugins, a.expect, where)
-            runtimes_res[name] = res
-            for p, d in dirs.items():
-                if d is None:
-                    mismatch.append(f"{name}: {p} の導入先が無い")
-                else:
-                    mismatch += compare_files(src, d, rel[p], changed[p], name, keeps_symlinks=(name != "codex"))
-        if "kiro" in runtimes:
-            runtimes_res["kiro"], proj = verify_kiro(env, src, tmp, a.expect)
-            if proj is not None:
-                mismatch += compare_kiro(src, proj)
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
 
-    after = user_env_snapshot()
+def _build_result(a, ref_rev, prev, runtimes_res, mismatch, before, after) -> dict:
+    """ランタイムごとの結果・中身の不一致・利用者の環境の差分から結果をまとめる。"""
     items = []
     env_same = before == after
     if not env_same:
@@ -401,7 +389,35 @@ def cmd_verify_install(a):
         else f"導入の確認が通らない（runtime: {', '.join(bad_rt) or 'なし'} / 中身の不一致 {len(mismatch)} 件"
         f" / 利用者の環境が{'変わらない' if env_same else '変わった'}）"
     )
-    emit(result(TOOL, "ok" if ok else "stopped", summary, items, metrics))
+    return result(TOOL, "ok" if ok else "stopped", summary, items, metrics)
+
+
+def cmd_verify_install(a):
+    root = git_root(a.root)
+    where, plugins = install_source(root, a)
+    runtimes = [r.strip() for r in a.runtimes.split(",") if r.strip()]
+    bad = [r for r in runtimes if r not in ("claude", "codex", "kiro")]
+    if bad:
+        raise StepError(f"未知の runtime: {','.join(bad)}", EXIT_UNREADABLE)
+    rel = {p: plugin_dir(root, p).relative_to(root).as_posix() for p in plugins}
+
+    git(root, "fetch", "-q", "origin", "--tags")
+    ref_rev = git(root, "rev-parse", f"origin/{a.ref}").stdout.strip()
+    prefix = f"{plugins[0]}--v"  # タグの接頭辞は先頭のプラグイン（宣言の release.plugin）から決める
+    tags = git(root, "tag", "--list", f"{prefix}*", "--sort=-v:refname").stdout.split()
+    cur = f"{prefix}{a.expect}"
+    prev = next((t for t in tags if t != cur and "-" not in t[len(prefix) :]), None)
+
+    before = user_env_snapshot()
+    tmp = tempfile.mkdtemp(prefix="ndf-verify-install-")
+    try:
+        src = _extract_source(root, ref_rev, tmp)
+        runtimes_res, mismatch = _verify_runtimes(a, root, src, tmp, runtimes, plugins, rel, prev, ref_rev, where)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    after = user_env_snapshot()
+    emit(_build_result(a, ref_rev, prev, runtimes_res, mismatch, before, after))
 
 
 def build_parser():

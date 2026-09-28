@@ -93,7 +93,7 @@ class Gh:
             self.sleep(seconds)
 
 
-def _repo(root, arg) -> str:
+def target_repo(root, arg) -> str:
     if arg:
         return arg
     p = post_queue.run(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
@@ -102,7 +102,7 @@ def _repo(root, arg) -> str:
     return p.stdout.strip()
 
 
-def _issues(gh: Gh, query: str) -> list[dict]:
+def list_issues(gh: Gh, query: str) -> list[dict]:
     rows = gh.call([f"repos/{gh.repo}/issues?{query}&per_page=100"], paginate=True) or []
     return [r for r in rows if isinstance(r, dict) and not r.get("pull_request")]
 
@@ -122,8 +122,43 @@ class Milestones:
             self._by_title[title] = made["number"]
         return self._by_title[title]
 
+    def open_rows(self) -> list[dict]:
+        """open のマイルストーン（題名・番号・説明）。"""
+        rows = self.gh.call([f"repos/{self.gh.repo}/milestones?state=open&per_page=100"], paginate=True) or []
+        return [r for r in rows if isinstance(r, dict) and r.get("state", "open") == "open"]
 
-def _with_labels(cur: dict, got, add=(), drop=None) -> dict:
+    def set_description(self, number: int, description: str, target=None) -> None:
+        """マイルストーンの説明を書き換える。題名と状態は送らない（順序を書き換えない。#1429 の I5）。"""
+        self.gh.call(
+            [f"repos/{self.gh.repo}/milestones/{number}", "-X", "PATCH", "--input", "-"],
+            stdin=json.dumps({"description": description}, ensure_ascii=False),
+            target=target,
+        )
+
+
+def _sub_issue_kids(gh: Gh, n, target=None) -> list | None:
+    """課題 n のサブイシューの一覧。サブイシューの API が無ければ（404）None を返す。"""
+    try:
+        return gh.call([f"repos/{gh.repo}/issues/{n}/sub_issues?per_page=100"], paginate=True, target=target) or []
+    except StepError as e:
+        if "404" in str(e):
+            return None
+        raise
+
+
+def sub_issues(gh: Gh, parents, notes: list) -> dict:
+    """open の親ごとの open の子の番号。サブイシューの API が無ければ（404）空で返し、notes に残す。"""
+    out = {}
+    for n in parents:
+        kids = _sub_issue_kids(gh, n, target=n)
+        if kids is None:
+            notes.append("サブイシューの API が無いため、本文と説明の並列の組の依存だけで並べた")
+            return {}
+        out[n] = sorted(k["number"] for k in kids if isinstance(k, dict) and k.get("state") == "open")
+    return out
+
+
+def with_labels(cur: dict, got, add=(), drop=None) -> dict:
     """ラベルの書き込みの応答（いまのラベルの一覧）を課題へ写す。応答が無ければ手元で足し引きする。"""
     if isinstance(got, list):
         labels = [lb if isinstance(lb, dict) else {"name": lb} for lb in got]

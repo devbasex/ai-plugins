@@ -148,41 +148,50 @@ class _Scan:
     def block(self, n: sp.Node, st: _Place) -> tuple[int, bool, bool]:
         entry_cds, t = st.cds, n.type
         if t == "if_statement":
-            for c in n.children:
-                if c.type in ("elif_clause", "else_clause"):
-                    if st.cds > entry_cds:
-                        st.cwd = None
-                    for g, bg in sp.statement_list(c):
-                        self.stmt(g, st.copy() if bg else st)
-                elif c.is_named and c.type != "comment":
-                    nxt = c.next_sibling
-                    self.stmt(c, st.copy() if nxt is not None and nxt.type == "&" else st)
+            self._block_if(n, st, entry_cds)
         elif t == "case_statement":
-            entry, fell = st.cwd, False
-            for c in n.children:
-                if c.type != "case_item":
-                    if c.is_named and sp.field_of(n, c) == "value":
-                        self.substs(c, st)
-                    continue
-                if not fell:
-                    st.cwd = entry
-                for g, bg in sp.statement_list(c):
-                    if sp.field_of(c, g) != "value":
-                        self.stmt(g, st.copy() if bg else st)
-                fell = any(k.type in (";&", ";;&") for k in c.children)
+            self._block_case(n, st)
         else:
-            for c in n.children:
-                if not c.is_named or c.type == "comment":
-                    continue
-                if c.type == "do_group":
-                    self.seq(c, st)
-                elif sp.field_of(n, c) in ("value", "initializer", "condition", "update") and c.type not in STATEMENTS:
-                    self.substs(c, st)
-                else:
-                    self.stmt(c, st)
+            self._block_loop(n, st)
         if st.cds > entry_cds:
             st.cwd = None
         return (st.cds - entry_cds, False, False)
+
+    def _block_if(self, n: sp.Node, st: _Place, entry_cds: int) -> None:
+        for c in n.children:
+            if c.type in ("elif_clause", "else_clause"):
+                if st.cds > entry_cds:
+                    st.cwd = None
+                for g, bg in sp.statement_list(c):
+                    self.stmt(g, st.copy() if bg else st)
+            elif c.is_named and c.type != "comment":
+                nxt = c.next_sibling
+                self.stmt(c, st.copy() if nxt is not None and nxt.type == "&" else st)
+
+    def _block_case(self, n: sp.Node, st: _Place) -> None:
+        entry, fell = st.cwd, False
+        for c in n.children:
+            if c.type != "case_item":
+                if c.is_named and sp.field_of(n, c) == "value":
+                    self.substs(c, st)
+                continue
+            if not fell:
+                st.cwd = entry
+            for g, bg in sp.statement_list(c):
+                if sp.field_of(c, g) != "value":
+                    self.stmt(g, st.copy() if bg else st)
+            fell = any(k.type in (";&", ";;&") for k in c.children)
+
+    def _block_loop(self, n: sp.Node, st: _Place) -> None:
+        for c in n.children:
+            if not c.is_named or c.type == "comment":
+                continue
+            if c.type == "do_group":
+                self.seq(c, st)
+            elif sp.field_of(n, c) in ("value", "initializer", "condition", "update") and c.type not in STATEMENTS:
+                self.substs(c, st)
+            else:
+                self.stmt(c, st)
 
     def andor(self, n: sp.Node, st: _Place, redirs) -> tuple[int, bool, bool]:
         c, last, or1, cond = self._andor(n, st, redirs)

@@ -68,7 +68,7 @@
     "./skills/quality-gates",
     "./skills/worktree",
     "./skills/out-of-scope",
-    "./skills/issue-upkeep",
+    "./skills/backlog-refinement",
     "./skills/progress-tracking",
     "./skills/release-verification",
     "./skills/retrospective",

@@ -211,6 +211,51 @@ class GreenWatch:
         self.waits += 1
         time.sleep(self.a.recheck if self.recheck else gap)
 
+    def _ensure_ready(self):
+        """draft のままではマージできない。ready で走り出すチェックも待つよう、待ちの前に外す。失敗なら emit で抜ける。"""
+        root, n, items = self.root, self.n, self.items
+        p = gh_parts.gh(["pr", "ready", str(n)], cwd=root)
+        if p.returncode != 0:
+            emit(
+                result(
+                    TOOL,
+                    "stopped",
+                    f"gh pr ready が失敗: {p.stderr.strip()[:300]}",
+                    items + [{"kind": "pr", "name": f"#{n}", "result": "stopped", "reason": p.stderr.strip()[:300]}],
+                    {"waits": self.waits},
+                )
+            )
+        items.append({"kind": "pr", "name": f"#{n}", "result": "ready"})
+
+    def _reset_on_new_sha(self, sha):
+        """push で CI が走り直した。前のコミットで見た結果は使わない。"""
+        if self.last_sha is None or sha == self.last_sha:
+            return
+        self.items.append(
+            {
+                "kind": "restart",
+                "name": sha or "?",
+                "result": "rewait",
+                "reason": f"先頭のコミットが {str(self.last_sha)[:8]} から {str(sha)[:8]} へ変わった",
+            }
+        )
+        self.green_sha = self.pending_sha = self.empty_since = None
+        self.stale_since, self.rerun_done = {}, set()
+
+    def _settle_pending(self, info, pending, failed, passed):
+        """実行が終わってジョブに結論があるのに表示が pending のままのチェックは、結論で扱う（待たない）。(stale, queued) を返す。"""
+        items = self.items
+        stale, queued, settled = probe_checks(self.root, info.get("statusCheckRollup"))
+        for name, run_id, job_id, conclusion in settled:
+            if name not in pending:
+                continue
+            pending.remove(name)
+            (failed if conclusion.upper() in FAIL_CONCLUSIONS else passed).append(name)
+            item = {"kind": "check", "name": name, "result": "settled", "run": run_id, "job": job_id, "conclusion": conclusion}
+            if item not in items:
+                items.append(item)
+        return (stale, queued)
+
     def poll(self):
         """1 回読む。終われば ("done", 理由)、待つなら ("wait", 読んだ中身)。止めるときは emit で抜ける。"""
         root, a, n, items, waits = self.root, self.a, self.n, self.items, self.waits
@@ -233,46 +278,11 @@ class GreenWatch:
             hook, self.on_open = self.on_open, None
             hook(info)
         if info.get("isDraft"):
-            # draft のままではマージできない。ready で走り出すチェックも待つよう、待ちの前に外す
-            p = gh_parts.gh(["pr", "ready", str(n)], cwd=root)
-            if p.returncode != 0:
-                emit(
-                    result(
-                        TOOL,
-                        "stopped",
-                        f"gh pr ready が失敗: {p.stderr.strip()[:300]}",
-                        items + [{"kind": "pr", "name": f"#{n}", "result": "stopped", "reason": p.stderr.strip()[:300]}],
-                        {"waits": waits},
-                    )
-                )
-            items.append({"kind": "pr", "name": f"#{n}", "result": "ready"})
-        if self.last_sha is not None and sha != self.last_sha:
-            # push で CI が走り直した。前のコミットで見た結果は使わない
-            items.append(
-                {
-                    "kind": "restart",
-                    "name": sha or "?",
-                    "result": "rewait",
-                    "reason": f"先頭のコミットが {str(self.last_sha)[:8]} から {str(sha)[:8]} へ変わった",
-                }
-            )
-            self.green_sha = self.pending_sha = self.empty_since = None
-            self.stale_since, self.rerun_done = {}, set()
+            self._ensure_ready()
+        self._reset_on_new_sha(sha)
         self.last_sha = sha
         pending, failed, passed = check_states(info.get("statusCheckRollup"))
-        probed = None
-        if pending:
-            # 実行が終わってジョブに結論があるのに表示が pending のままのチェックは、結論で扱う（待たない）
-            stale, queued, settled = probe_checks(root, info.get("statusCheckRollup"))
-            probed = (stale, queued)
-            for name, run_id, job_id, conclusion in settled:
-                if name not in pending:
-                    continue
-                pending.remove(name)
-                (failed if conclusion.upper() in FAIL_CONCLUSIONS else passed).append(name)
-                item = {"kind": "check", "name": name, "result": "settled", "run": run_id, "job": job_id, "conclusion": conclusion}
-                if item not in items:
-                    items.append(item)
+        probed = self._settle_pending(info, pending, failed, passed) if pending else None
         if failed:
             emit(
                 result(

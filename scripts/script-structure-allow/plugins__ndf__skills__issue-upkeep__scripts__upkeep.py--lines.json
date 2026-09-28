@@ -1,1 +1,0 @@
-{"path": "plugins/ndf/skills/issue-upkeep/scripts/upkeep.py", "name": "", "kind": "lines", "reason": "L0 の時点で 624 行。C7 は重複だけをライブラリへ置き換える。触って 500 行以下にしたら消す。一括の整形（#1323）で物理行が増えた。gh の呼び出しと待ちを upkeep_gh.py へ分けた。構造改善（#1407）で cmd_candidates と cmd_apply を段に分けて増えた", "lines": 671}

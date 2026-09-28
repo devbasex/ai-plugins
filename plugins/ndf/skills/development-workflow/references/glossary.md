@@ -105,7 +105,7 @@ flowchart TB
 | 重点領域 | 領域のうち、触った Pull Request の点数を重くするもの | `areas[].common`、`common_weight` | [pace.md](pace.md) の「設定」 |
 | judge のステップ | 結果ファイルと規則の抜粋だけを渡し、次のステップを LLM に決めさせるステップ。Tool を持たない | `"type": "judge"` | [supervise.py](../../../scripts/supervise.py) の docstring |
 | 決定 | judge のステップが返す、次に取る手 | `decision`（`choices` のどれか） | [supervise.py](../../../scripts/supervise.py) の docstring |
-| 区分 | `issue-upkeep` が課題ごとに決める 8 つ（そのまま・追記が要る・書き直しが要る・閉じてよい・やらない・重複・ルートコーズ・要判断） | `plan.json` の `verdict` | [issue-upkeep](../../issue-upkeep/SKILL.md) の「用語」 |
+| 区分 | `backlog-refinement` が課題ごとに決める 8 つ（そのまま・追記が要る・書き直しが要る・閉じてよい・やらない・重複・ルートコーズ・要判断） | `plan.json` の `verdict` | [backlog-refinement](../../backlog-refinement/SKILL.md) の「用語」 |
 
 ## 承認ゲートと承認
 
@@ -147,7 +147,7 @@ flowchart TB
 | 手順 | 1 つの Skill の中で順に通す作業の単位。`cross-refactoring` の提案・リファクタリング計画・テスト追加・実装・検証/修正の 5 つ、`document-restructuring` の測る・並べ替える・整える・測り直すの 4 つ | — | [cross-refactoring](../../cross-refactoring/SKILL.md)、[document-restructuring](../../document-restructuring/SKILL.md) |
 | リファクタリング計画 | `cross-refactoring` が採る改善項目を決め、見送った提案と理由を残す出力 | — | [cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
 | バッファ | `cross-refactoring` の見積りで、想定最大時間から経過を引いた後に残しておく時間 | 「想定最大時間 − 経過 − バッファ」 | [cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
-| 完了判定 | コマンドの証跡で完了を判定する工程 | `/ndf:quality-gates` | [quality-gates](../../quality-gates/SKILL.md) |
+| 完了判定 | コマンドの証跡で完了を判定する工程。スクラムの完了の定義に当たる | `/ndf:quality-gates` | [quality-gates](../../quality-gates/SKILL.md) |
 | 範囲テスト | 変更が触った範囲に限って走らせるテスト | `new impl --tests`、プランの `test-limited` のステップ、`cross-refactoring` の `test_targets` | [supervise.py](../../../scripts/supervise.py) の docstring、[cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
 | ラウンドテスト | `cross-refactoring` の `round-only` で、項目ごとにそのまま走らせるコマンド（`{paths}` を含まない `--round-test`、または `scope_command` の無い suite の `command`） | `--round-test`、`round_test` | [cross-refactoring](../../cross-refactoring/SKILL.md) の「引数」 |
 | 範囲テストの雛形 | `{paths}` を空白で区切った 1 語として含むテストのコマンド（宣言の `scope_command` か、`{paths}` を含む引数）。`{paths}` を対象の語の並びへ置き換えて走らせる | `scope_command` | [project-analysis.md](project-analysis.md) の P2 |
@@ -194,7 +194,7 @@ flowchart TB
 | 安定版と実験版 | NDF の変更の 2 つの経路。既定で働くもの（安定版）は工程どおりに、呼んだときだけ働くもの（実験版）はその場で実装して使ってから入れる | stable / experimental、台帳 `docs/ndf-experiments.md` | ai-plugins の `AGENTS.md` の「安定版と実験版」 |
 | 即時修正 | 4 つの条件（[../SKILL.md](../SKILL.md) の「即時修正」）を満たす不具合を、起票せず、その場のプランで直すこと。マージ済みの変更の不具合なら流出不具合として記録する | `new impl --escape-of <PR>` | [../SKILL.md](../SKILL.md) の「即時修正」、[pace.md](pace.md) の「流出不具合の記録」 |
 | 範囲外の課題 | この変更の受け入れ条件にも直す対象にも入らない課題。見つけたその場で issue にする | `/ndf:out-of-scope` | [out-of-scope](../../out-of-scope/SKILL.md) |
-| 棚卸し | 既存の課題の本文・マイルストーン・ラベルを現状に合わせること | `/ndf:issue-upkeep`、`upkeep.py` | [issue-upkeep](../../issue-upkeep/SKILL.md) の「用語」 |
+| 棚卸し | 既存の課題の本文・マイルストーン・ラベルを現状に合わせ、着手の順位を決め直すこと。スクラムのバックログリファインメントに当たる | `/ndf:backlog-refinement`、`upkeep.py` | [backlog-refinement](../../backlog-refinement/SKILL.md) の「用語」 |
 | 実装計画 | `implementation-plan` が `issues/` に書く、実装の前の計画 | `issues/{feature-name}.md`（タスク ID があれば `issues/TASK-1234_<説明>.md`） | [implementation-plan](../../implementation-plan/SKILL.md) |
 | 確定仕様化 | 完了した実装計画を `docs/` の確定仕様へ書き直す工程 | `/ndf:plan-to-spec` | [plan-to-spec](../../plan-to-spec/SKILL.md) |
 | 用語集の設定 | プロジェクトの用語集の置き場・形式・チェックの対象を持つファイル。設計の工程を持つモードでは、これと用語集が揃うまで設計へ入らない | `.ndf/glossary.json`、`glossary.py gate` | [glossary-format.md](../../requirements-design/references/glossary-format.md) |
