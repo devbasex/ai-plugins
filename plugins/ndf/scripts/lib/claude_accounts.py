@@ -170,6 +170,8 @@ class Account:
     needs_relogin: bool
     limit: dict | None
     usage: Usage | None
+    org_id: str = ""  # 組織（`claude auth status` の orgId）。組織を記録する前の登録は空
+    org_name: str = ""
 
     def observed_until(self, now: float) -> float | None:
         """上限の観測（`limit`）が今も効いているなら、その終わりの時刻。"""
@@ -218,6 +220,8 @@ def load_account(name: str) -> Account | None:
         needs_relogin=bool(a.get("needs_relogin")),
         limit=a.get("limit") if isinstance(a.get("limit"), dict) else None,
         usage=Usage.from_json(_read(os.path.join(d, USAGE_FILE))),
+        org_id=str(a.get("org_id") or ""),
+        org_name=str(a.get("org_name") or ""),
     )
 
 
@@ -447,20 +451,13 @@ def staging_dir(name: str) -> str:
     return d
 
 
-def owner_of(email: str, other_than: str = "") -> str | None:
-    """同じメールアドレスで登録済みのアカウントの名前（I3）。"""
-    for n in names():
-        acc = load_account(n)
-        if n != other_than and acc and acc.email and acc.email.lower() == email.lower():
-            return n
-    return None
-
-
-def register(name: str, staging: str, email: str) -> None:
+def register(name: str, staging: str, email: str, org_id: str = "", org_name: str = "") -> None:
     """ログインの済んだ `staging` を `name` として置く。同じ名前の古いものは置き換える。"""
     with _locked(name):
         final = account_dir(name)
         row = {"name": name, "email": email, "registered_at": iso_utc(time.time()), "needs_relogin": False, "limit": None}
+        if org_id:
+            row.update(org_id=org_id, org_name=org_name)
         _write(os.path.join(staging, ACCOUNT_FILE), row)
         if os.path.exists(final):
             shutil.rmtree(final)
@@ -491,6 +488,8 @@ def rows(now: float | None = None) -> list[dict]:
             {
                 "name": n,
                 "email": acc.email,
+                "org_id": acc.org_id or None,
+                "org_name": acc.org_name or None,
                 "five_hour": u.five_hour if u else None,
                 "seven_day": u.seven_day if u else None,
                 "spend_limit_reached": u.spend_limit_reached if u else None,
