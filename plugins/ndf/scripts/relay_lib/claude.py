@@ -309,13 +309,8 @@ def pending_wakeups(transcript_path: str, now: float) -> list[dict]:
 
     予約は Stop hook の `background_tasks` に入らないが、残っていると `/exit` で Claude Code が選択肢を出して
     止まる（区間 7・16）。`stop: true` の呼び出しより前の予約は取り消されたものとして数えない。"""
-    return _wakeup_tasks(_wakeup_fires(_iter_transcript_rows(transcript_path)), now)
-
-
-def _wakeup_fires(rows) -> list[float]:
-    """会話の記録の行から、取り消されていない `ScheduleWakeup` の発火の時刻（delay は 60〜3600 秒に丸める）。"""
     fires: list[float] = []
-    for row in rows:
+    for row in _iter_transcript_rows(transcript_path):
         content = _content(row)
         at = parse_iso(row.get("timestamp"))
         if row.get("type") != "assistant" or not isinstance(content, list) or at is None:
@@ -328,11 +323,6 @@ def _wakeup_fires(rows) -> list[float]:
                 fires = []
             elif isinstance(inp.get("delaySeconds"), (int, float)):
                 fires.append(at + min(max(inp["delaySeconds"], 60), 3600))
-    return fires
-
-
-def _wakeup_tasks(fires: list[float], now: float) -> list[dict]:
-    """`now` より後の発火を `running_tasks` と同じ形へ写す。"""
     return [
         {"id": "ScheduleWakeup", "type": "wakeup", "command": "発火の予定 " + time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(f))}
         for f in fires
