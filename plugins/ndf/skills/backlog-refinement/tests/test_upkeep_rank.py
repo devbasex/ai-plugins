@@ -408,3 +408,21 @@ def test_two_hundred_issues_and_four_hundred_edges_within_five_seconds():
     t = time.monotonic()
     out = R.compute_ranking(board(specs, place, deps=deps, capacity=40))
     assert time.monotonic() - t < 5 and sum(len(m["rows"]) for m in out["milestones"]) > 0
+
+
+def test_plan_holds_the_lead_when_its_group_is_held_for_approval(tmp_path):
+    """依存先が自分の候補（承認）で保留に入れば、「自動」の先頭も保留にして先頭だけを動かさない（AC6）。"""
+    import json
+
+    import upkeep_rank_cmd as RC
+
+    fwd = [
+        {"number": 3, "group": [], "to": "01 近い", "decision": R.APPROVAL, "move_digest": "m3"},
+        {"number": 4, "group": [3], "to": "01 近い", "decision": R.AUTO, "move_digest": "m4"},
+    ]
+    (tmp_path / "rank.json").write_text(json.dumps({"metrics": {"digest": "d", "forward": fwd, "backward": []}}))
+    acts = [{"number": n, "reschedule": R.FORWARD, "changes": {"milestone": "01 近い"}} for n in (4, 3)]
+    rp = RC.RankPlan({"actions": acts, "rank": "d"}, tmp_path, lambda p: json.loads(p.read_text()))
+    assert set(rp.holds) == {3, 4}
+    buckets = {"applied": [], "unchanged": [], "already": [], "needs_approval": [4, 3]}
+    assert rp.unmoved(acts, buckets) == [3, 4]

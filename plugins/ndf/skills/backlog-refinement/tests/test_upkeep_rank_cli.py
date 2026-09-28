@@ -355,3 +355,22 @@ def test_candidates_pick_unscored_issues_only_after_rank(env):
     got = {i["number"] for i in out["items"] if "unscored" in i.get("routes", [])}
     assert got == {1, 4}  # 本文の変わった #1 と、見積の無い #4
     assert not (env.sd / "rank.json").exists()
+
+
+def test_apply_does_not_write_the_table_when_a_planned_move_fails(env):
+    """予定どおりに移せなかった課題があれば、順位の表を書かずに止める（表と課題の所属を食い違わせない）。"""
+    snaps = env.snapshots()
+    scores = [
+        sc(1, tc=5, size=1),
+        sc(2, tc=1, size=2),
+        sc(3, size=3),
+        sc(4, ubv=13, tc=8, rr=8, size=5, observed_harm=True, depends_on=[3]),
+    ]
+    _, first = env.run("rank", "--scores", env.scores(scores), "--capacity", "8")
+    lead = _reschedule(snaps, first, 4, "前倒し")
+    member = {**lead, "number": 3, "updated_at": snaps[3]["updated_at"], "digest": snaps[3]["digest"]}
+    env.set(lambda st: st["issues"]["3"].update(updated_at="2026-09-20T00:00:00Z", body="変わった"))
+    code, out = env.run("apply", "--plan", env.plan([lead, member], rank=first["metrics"]["digest"]))
+    assert code == 20 and out["metrics"]["skipped_changed"] == [3], out
+    assert out["metrics"]["tables_withheld"] == [3] and out["metrics"]["tables"]["written"] == []
+    assert "### 順位" not in env.state()["milestones"][0]["description"]

@@ -305,6 +305,7 @@ class RankPlan:
         self.metrics = (self.out or {}).get("metrics") or {}
         self.stale = bool(plan.get("rank")) and plan.get("rank") != self.metrics.get("digest")
         self.holds: dict = {}
+        self.withheld: list[int] = []
         self.tables = _empty_tables()
         if self.used:
             self._check()
@@ -343,6 +344,25 @@ class RankPlan:
                     self.holds[n] = {**c, "direction": d, "number": n}
         if errs:
             raise StepError("plan の誤り: " + " / ".join(errs), EXIT_UNREADABLE)
+        self._hold_leads_of_held_groups({n for n, d, act in wants if act != "rejected" and d == R.FORWARD})
+
+    def _hold_leads_of_held_groups(self, leads):
+        """依存先が保留に入った前倒しの先頭も保留にする（先頭だけが動いて依存先を置いていかない。AC6）。"""
+        changed = True
+        while changed:
+            changed = False
+            for n in sorted(leads - set(self.holds)):
+                c = self.candidate(n, R.FORWARD)
+                if c["number"] == n and any(g in self.holds for g in c.get("group", [])):
+                    self.holds[n] = {**c, "direction": R.FORWARD, "number": n}
+                    changed = True
+
+    def unmoved(self, actions, buckets) -> list[int]:
+        """順位の表が移したものとして置くのに、この apply で移せなかった課題（表を書かない理由になる）。"""
+        placed = {n for f in self.metrics.get("forward", []) if f["decision"] in (R.AUTO, R.APPROVED) for n in [f["number"], *f["group"]]}
+        placed |= {b["number"] for b in self.metrics.get("backward", []) if b["decision"] == R.APPROVED}
+        done = set(buckets["applied"]) | set(buckets["unchanged"]) | set(buckets["already"])
+        return sorted({act["number"] for act in actions if act.get("reschedule") and act["number"] in placed} - done)
 
     def hold(self, act) -> str | None:
         if act["number"] in self.holds:
