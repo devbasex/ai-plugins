@@ -182,12 +182,10 @@ class Account:
     tier: str = ""  # `.credentials.json` の `claudeAiOauth.rateLimitTier`。読めなければ空
     declared: dict | None = None  # 枠の大きさの宣言（`account.json` の `capacity`。正の数の枠だけ）
 
-    def score(self) -> float | None:
-        """使用率（残量を読んでいなければ None）。"""
+    def score(self) -> float | None:  # 使用率（残量を読んでいなければ None）
         return self.usage.score() if self.usage else None
 
-    def known(self) -> bool:
-        """残量を読めているか。"""
+    def known(self) -> bool:  # 残量を読めているか
         return bool(self.usage and self.usage.windows_known())
 
     def capacity(self) -> dict:
