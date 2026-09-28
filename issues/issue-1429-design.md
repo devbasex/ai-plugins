@@ -75,7 +75,7 @@ WSJF で比べると #1399（4.8）は #1422（10.0）に負けて前へ出な�
 | E5 | 順位を算出した | `upkeep.py rank` | 手順 3・`report` |
 | E6 | 前倒し・後ろ倒しの候補を出した | `upkeep.py rank` | 手順 3・棚卸しの提示 |
 | E7 | 自動で反映する前倒しと順位の表を書いた | `upkeep.py apply` | `report`・次の棚卸しの `rank`（前回の表） |
-| E8 | 承認側の候補を一括で示し、承認か却下を受けた | `upkeep.py apply`（提示）と conductor（承認） | `upkeep.py rank --approved` → `apply` |
+| E8 | 承認側の候補を一括で示し、承認か却下を受けた | `upkeep.py apply`（提示）と conductor（承認） | 承認: `upkeep.py rank --approved` → `apply`。却下: `apply` の plan の `rejected` → `estimates.json` の `rejected` → 次の `rank` |
 | E9 | 前回の順位からの変化と理由を報告した | `upkeep.py report` | 完了報告 |
 
 ### 用語
@@ -86,7 +86,7 @@ WSJF で比べると #1399（4.8）は #1422（10.0）に負けて前へ出な�
 | 余白 | 前倒しの候補にするために、遅延コストが切り出しの境界の課題を上回るべき尺度の段階の数。既定は 1 | 追加（`ndf-issue-upkeep`） |
 | 自動の閾値 | 前倒しを承認なしに反映するために、実害の大きさかリスク低減のどちらかが届くべき段階。既定は 8 | 追加（`ndf-issue-upkeep`） |
 | バックログの宣言 | 尺度・余白・自動の閾値・容量・被依存の写し方・ラベルの下限・アンカーを持つ `.ndf/backlog.json` | 追加（`ndf-issue-upkeep`） |
-| 後ろ倒しの候補 | 直近のマイルストーンのうち、同じマイルストーンの課題が依存していない課題の中で遅延コストが最も低いもの。前倒しの候補と対にして示す | 意味の変更（`ndf-issue-upkeep`） |
+| 後ろ倒しの候補 | 直近のマイルストーンのうち、同じマイルストーンの課題が依存していない課題の中で遅延コストが最も低い 1 件。前倒しの候補の最小の遅延コスト以上のものと、順序で次のマイルストーンが無いときは出さない。前倒しの候補と対にして示す | 意味の変更（`ndf-issue-upkeep`） |
 
 ## 機能一覧
 
@@ -213,7 +213,7 @@ erDiagram
 | 置き場 | 何を持つか | 書く者 | 時系列の扱い |
 | --- | --- | --- | --- |
 | `.ndf/backlog.json` | バックログの宣言（入出力の契約を参照） | 利用者 | Git の履歴 |
-| `$NDF_UPKEEP_STATE_DIR/<repo>/estimates.json` | 課題ごとの最新の見積（段階・根拠・実害の観測・依存・`digest`）。回をまたいで残し、`candidates` は消さない | `rank` | 上書き。過去の段階は説明の `### 順位` の表と棚卸しの報告に残る |
+| `$NDF_UPKEEP_STATE_DIR/<repo>/estimates.json` | 課題ごとの最新の見積（段階・根拠・実害の観測・依存・`digest`）と、却下した移動の `rejected`（`{number, direction, digest}` の列。`digest` は却下した時の見積の値）。回をまたいで残し、`candidates` は消さない | 見積は `rank`、`rejected` は `apply` | 上書き。過去の段階は説明の `### 順位` の表と棚卸しの報告に残る。`rejected` の要素は、同じ番号の見積の `digest` が変わった `rank` が消す |
 | `$NDF_UPKEEP_STATE_DIR/<repo>/rank.json` | その回の `rank` の出力と要約値（`digest`） | `rank` | その回だけ。`candidates` が消す |
 | マイルストーンの説明の `### 順位` の節 | 順位の表と境界の 1 行 | `apply` | 上書き。前回との差分は `rank` が書く前に読んで報告へ出す |
 
@@ -250,7 +250,7 @@ erDiagram
 | --- | --- | --- | --- | --- | --- |
 | F1 `candidates` | — | R | D | — | R |
 | F3・F4 `rank` | R | C/U | C | R | R |
-| F5 `apply` | — | — | R | C/U | U |
+| F5 `apply` | — | U（`rejected`） | R | C/U | U |
 | F6 `report` | — | — | R | — | — |
 
 移行は要らない。表の無いマイルストーンは、初回の `apply` で節を足す。
@@ -314,6 +314,7 @@ python3 upkeep.py rank [--scores <見積の入力>] [--approved 12,34] [--capaci
 | `metrics.forward[]` | `{number, from, to, cod, boundary_cod, threshold, diff, higher_columns, decision: "自動" / "承認" / "承認済み", group}` |
 | `metrics.backward[]` | 0 件か 1 件。`{number, from, to, cod, decision: "承認" / "承認済み"}` |
 | `metrics.changes[]` | `{milestone, number, kind: "up" / "down" / "new" / "removed" / "unknown_previous", from_rank, to_rank, columns: ["TC 3→8"], reason}` |
+| `metrics.rejected[]` | 前回までに却下され、見積の `digest` が変わっていないため候補から外した移動。`{number, direction, digest}` |
 | `metrics.excluded[]` | `{number, reason}`（段階が無い・尺度に無い値・根拠が空・列が欠けた） |
 | `metrics.cross_milestone_deps[]` | 前のマイルストーンの課題が後ろのマイルストーンの課題に依存している組（`milestones.md` の「順序を直すとき」の材料） |
 | `metrics.digest` | 出力の要約値。`apply` の plan が指す |
@@ -342,6 +343,7 @@ python3 upkeep.py rank [--scores <見積の入力>] [--approved 12,34] [--capaci
 | 追加 | 振る舞い |
 | --- | --- |
 | `rank`（任意） | `rank.json` の `metrics.digest` と一致すれば、各マイルストーンの `### 順位` の節を書く。一致しなければ書かずに終了コード 20（`next`: `rank` を打ち直す） |
+| `rejected`（任意。`[{number, direction}]`） | 人が退けた移動。`rank.json` の候補に同じ番号・向きがあることを確かめ（無ければ plan の誤り（2））、`estimates.json` の `rejected` へその時の見積の `digest` と一緒に足す。課題のマイルストーンは変えない |
 | `reschedule`（任意。`前倒し` / `後ろ倒し`） | `rank.json` の候補に同じ番号・向きがあり、`changes.milestone` が候補の移す先と一致することを確かめる。合わなければ plan の誤り（2）。扱いが「自動」か「承認済み」なら反映し、「承認」なら `approved` によらず `needs_approval` へ回す |
 
 **「承認」を「承認済み」にするのは `rank --approved` だけである。** 承認を得た番号を `--approved` で渡して `rank` を
@@ -384,7 +386,7 @@ sequenceDiagram
 1. 設定を合成して検証する。循環の検査の前に、見積の検証（I1）で外す課題を決める
 2. 依存を合成する。優先はサブイシュー API（子は親に依存）→ `depends_on`（本文）→ 説明の `### 並列の組（見込み）` の依存の列。上位の取り元に逆向きの辺があれば下位の辺を捨てる
 3. 実効の段階を決める。UBV = max（LLM の段階, ラベルの下限）、RR/OE = max（LLM の段階, 被依存の数の写し）。被依存の数は open の課題からの辺だけを数える
-4. `--approved` の移動と、自動の前倒しを入れる前の並びで境界と候補を決める。候補を決めた後に、自動と承認済みの移動を入れて表の並びを算出し直す
+4. `--approved` の移動と、自動の前倒しを入れる前の並びで境界と候補を決める。`estimates.json` の `rejected` にあり見積の `digest` が同じ番号・向きは候補にせず `metrics.rejected[]` へ出す（`digest` が変わった要素は消す）。候補を決めた後に、自動と承認済みの移動を入れて表の並びを算出し直す
 5. マイルストーンごとに、同じマイルストーンの中の依存だけを制約にして Kahn の算法で並べる。並べられる課題の中は WSJF の降順 → CoD の降順 → 番号の昇順
 6. 前回の `### 順位` の表と比べて変化を出す
 
@@ -396,7 +398,7 @@ stateDiagram-v2
     [*] --> 自動: 実害の観測あり かつ UBV か RR/OE が閾値以上
     [*] --> 承認: 上に当たらない前倒し・すべての後ろ倒し
     承認 --> 承認済み: rank --approved
-    承認 --> 却下: 人が退けた（次の棚卸しで算出し直す）
+    承認 --> 却下: 人が退けた（apply の rejected で estimates.json に残す。見積の digest が変わるまで候補から外す）
     自動 --> 反映済み: apply
     承認済み --> 反映済み: apply
     反映済み --> [*]
@@ -425,8 +427,9 @@ stateDiagram-v2
 | AC4・I2 | 被依存の数が写し方どおり段階になり、LLM の値と大きい方が採られ `sources` に出る | 写しで LLM の値を下げる・出所を出さない |
 | AC5 | 容量で境界の番号と Size の和が出る。容量が無いと境界も候補も無く `next` に渡し方 | 容量の既定値をスクリプトに持つ |
 | AC6 | 閾値以上の後ろ・未設定の課題が候補になり、差と高い列が出る。依存先が後ろにあれば `group` に入る。尺度の最大を超える境界でも閾値が決まる | WSJF で比べる・余白を掛けない・依存先を置いていく |
-| AC7 | 前倒しの候補があるとき、依存されていない CoD 最小の課題が後ろ倒しに 1 件出る | 依存されている課題を後ろ倒しに出す |
+| AC7 | 前倒しの候補があるとき、依存されていない CoD 最小の課題が後ろ倒しに 1 件出る。その CoD が前倒しの候補の最小以上か、次のマイルストーンが無ければ出ない | 依存されている課題を後ろ倒しに出す・入る課題より重要な課題を出す・移す先の無い候補を出す |
 | AC8 | 実害の観測あり かつ 閾値以上だけが「自動」。後ろ倒しはすべて「承認」 | 実害の観測を見ない・後ろ倒しを自動にする |
+| E8（却下） | plan の `rejected` が `estimates.json` に番号・向き・`digest` で残り、次の `rank` はその移動を候補に出さず `metrics.rejected[]` に出す。見積の `digest` が変わると候補に戻る | 却下を残さず毎回同じ移動を提示する・`digest` が変わっても外したままにする |
 | AC9・I7 | 「承認」の `reschedule` は `approved: true` でも `rank --approved` が無ければ反映しない。`pace` を読まない | `approved` だけで反映する |
 | AC10・I5 | `rank` と `apply` がマイルストーンの題名と説明の `### 順位` の外を書かない。集計値が出る | 題名の連番を振り直す |
 | AC11・I6 | `### 順位` の節だけを置き換え、並列の組と説明の文が変わらない。同じ順位で 2 回目は書かない | 節の終わりを誤って並列の組まで消す・毎回書く |
