@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -110,14 +109,6 @@ def build(
     return DeliveryDecl(b, p, rows, rel, problems, sources, unknown)
 
 
-def _read_supervise(f: Path) -> tuple[dict, str | None]:
-    try:
-        data = json.loads(f.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as e:
-        return {}, f"{SV}: JSON として読めない（{e}）"
-    return (data, None) if isinstance(data, dict) else ({}, f"{SV}: 最上位がオブジェクトでない")
-
-
 def load_delivery(root) -> DeliveryDecl:
     """`root` のリポジトリの宣言を読む。例外を上げず、壊れた宣言は `problems` に書く。"""
     problems = []
@@ -132,7 +123,7 @@ def load_delivery(root) -> DeliveryDecl:
     for base in dict.fromkeys(p for p in (Path(root), main) if p):
         f = Path(base) / SV
         if f.is_file():
-            sv, why = _read_supervise(f)
+            sv, why = repo.read_json_object(f, SV)
             if why:
                 problems.append(why)
             break
