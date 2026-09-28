@@ -98,14 +98,20 @@ def prepare(worktree: str | Path, *, main_dir: str | Path | None = None, if_unpr
     return Result(p.returncode, p.stderr.strip())
 
 
+def _prepare_and_report(worktree: str | Path, *, main_dir: str | Path | None = None, if_unprepared: bool = False) -> Result:
+    """`prepare` して、報告（`worktree-deps.sh` の標準エラー）があれば標準エラーへ出す。"""
+    res = prepare(worktree, main_dir=main_dir, if_unprepared=if_unprepared)
+    if res.message:
+        print(res.message, file=sys.stderr)
+    return res
+
+
 def prepare_reporting(worktree: str | Path, *, main_dir: str | Path | None = None, if_unprepared: bool = False) -> str | None:
     """`prepare` して報告（済み・失敗の行と末尾）を標準エラーへ出す。失敗なら先頭の 1 行を返す（ほかは None）。
 
     worktree は消さない。呼び出し側は返った行を誤りの文に入れて止まる。
     """
-    res = prepare(worktree, main_dir=main_dir, if_unprepared=if_unprepared)
-    if res.message:
-        print(res.message, file=sys.stderr)
+    res = _prepare_and_report(worktree, main_dir=main_dir, if_unprepared=if_unprepared)
     if res.ok:
         return None
     return res.message.splitlines()[0] if res.message else f"依存の用意: 終了コード {res.code}"
@@ -116,10 +122,7 @@ def main(argv: list[str]) -> int:
     if len(args) != 2 or args[0] != "prepare":
         print("使い方: worktree_deps.py prepare <worktree> [--if-unprepared]", file=sys.stderr)
         return 1
-    res = prepare(args[1], if_unprepared="--if-unprepared" in argv)
-    if res.message:
-        print(res.message, file=sys.stderr)
-    return res.code
+    return _prepare_and_report(args[1], if_unprepared="--if-unprepared" in argv).code
 
 
 if __name__ == "__main__":
