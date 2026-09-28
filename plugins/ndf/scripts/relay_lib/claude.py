@@ -180,23 +180,31 @@ def carried_args(args: list[str]) -> list[str]:
             break
         if not a.startswith("-") or a == "-":
             continue  # 位置引数（最初のプロンプト）
-        long = a.startswith("--")
-        name = a.split("=", 1)[0] if long else a[:2]  # `-nfoo` は `-n` に値が付いた 1 語
-        group = [a]
-        one_word = "=" in a if long else len(a) > 2
-        if not one_word and name in REQUIRED_FLAGS:
-            group += args[i : i + 1]
-            i += 1
-        elif not one_word and name not in BOOL_FLAGS:
-            take_all = name in VARIADIC_FLAGS
-            while i < len(args) and not args[i].startswith("-"):
-                group.append(args[i])
-                i += 1
-                if not take_all:
-                    break
+        name, group, i = _split_flag(args, i - 1)
         if name not in SECTION_FLAGS:
             out += group
     return out
+
+
+def _split_flag(args: list[str], i: int) -> tuple[str, list[str], int]:
+    """`args[i]` の選択肢 1 つぶんを値ごと切り出す。(選択肢名, 選択肢と値の語, 次に読む位置)。"""
+    a = args[i]
+    i += 1
+    long = a.startswith("--")
+    name = a.split("=", 1)[0] if long else a[:2]  # `-nfoo` は `-n` に値が付いた 1 語
+    group = [a]
+    one_word = "=" in a if long else len(a) > 2
+    if not one_word and name in REQUIRED_FLAGS:
+        group += args[i : i + 1]
+        i += 1
+    elif not one_word and name not in BOOL_FLAGS:
+        take_all = name in VARIADIC_FLAGS
+        while i < len(args) and not args[i].startswith("-"):
+            group.append(args[i])
+            i += 1
+            if not take_all:
+                break
+    return name, group, i
 
 
 def say(msg: str) -> None:
