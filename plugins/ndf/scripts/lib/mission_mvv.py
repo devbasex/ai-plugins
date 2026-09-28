@@ -47,13 +47,6 @@ def milestone_description(milestone: str, repo: str | None) -> str:
     return p.stdout
 
 
-def milestone_text(milestone: str, repo: str | None) -> tuple[str | None, str | None]:
-    """マイルストーンの説明の MVV の節と、見出しがそろわないときの理由。読めなければ OSError。"""
-    text = mvv_sections(milestone_description(milestone, repo))
-    heads = " / ".join(f"## {k}" for k in MVV_SECTIONS)
-    return text, None if text else f"マイルストーン {milestone} の説明に {heads} の見出しがそろっていない"
-
-
 def _ref(path: Path) -> dict:
     return {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
 
@@ -71,7 +64,8 @@ def normal_mvv(a) -> tuple[dict | None, tuple | None, dict | None]:
     if not a.milestone:
         return None, None, None
     try:
-        text, why = milestone_text(a.milestone, a.repo)
+        text = mvv_sections(milestone_description(a.milestone, a.repo))
+        why = None if text else f"マイルストーン {a.milestone} の説明に ## Mission / ## Vision / ## Value の見出しがそろっていない"
     except OSError as e:
         text, why = None, f"マイルストーン {a.milestone} の説明を読めない: {e}"
     if text is None:
@@ -94,11 +88,12 @@ def init_mvv(a, project) -> tuple[dict | None, tuple | None]:
     if not a.milestone:
         return None, (f"--pace {a.pace} には --milestone（MVV の複製元）か --mvv が要る", EXIT_UNREADABLE, [])
     try:
-        text, why = milestone_text(a.milestone, a.repo)
+        text = mvv_sections(milestone_description(a.milestone, a.repo))
     except (OSError, FileNotFoundError) as e:
         return None, (f"マイルストーン {a.milestone} の説明を読めない: {e}", EXIT_PRECONDITION, [])
     if text is None:
-        return None, (f"{why}。説明を直してから打ち直す", EXIT_PRECONDITION, [])
+        why = f"マイルストーン {a.milestone} の説明に ## Mission / ## Vision / ## Value の見出しがそろっていない。説明を直してから打ち直す"
+        return None, (why, EXIT_PRECONDITION, [])
     path = Path(a.mission).resolve().parent / "mvv.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
