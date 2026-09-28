@@ -419,8 +419,7 @@ def _try_order(pool: list[Account], readable: bool) -> list[Account]:
     同順は `five_hour` のリセット時刻の早い方、次に名前の順。"""
     thr = switch_at()
     below = [a for a in pool if a.score() is None or a.score() < thr]
-    above = [a for a in pool if a not in below]
-    return _order_side(below, readable) + _order_side(above, readable)
+    return _order_side(below, readable) + _order_side([a for a in pool if a not in below], readable)
 
 
 def _order_side(side: list[Account], readable: bool) -> list[Account]:
