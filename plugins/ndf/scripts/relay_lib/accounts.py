@@ -307,13 +307,6 @@ def _emit(command: str, as_json: bool, code: int, payload: dict) -> int:
     return code
 
 
-def _fail(command: str, as_json: bool, code: int, message: str, payload: dict) -> int:
-    """失敗を文（標準エラー）か JSON 1 つで出す。JSON の鍵は `payload` の後に `message` を置く。"""
-    if not as_json:
-        print(message, file=sys.stderr)
-    return _emit(command, as_json, code, {**payload, "message": message})
-
-
 def _respond(command: str, as_json: bool, fn) -> int:
     """副命令を動かし、結果を文（成功は標準出力・失敗は標準エラー）か JSON 1 つ（標準出力）で出す。"""
     try:
@@ -321,11 +314,18 @@ def _respond(command: str, as_json: bool, fn) -> int:
     except MissingArgs as e:
         cands = "".join(f"\n  {k} の候補: {', '.join(v)}" for k, v in e.candidates.items())
         msg = ("入力を待たずに止めた。足りない引数: " + ", ".join(e.missing) + cands) if e.missing else "入力が無い"
-        return _fail(command, as_json, 2, msg, {"reason": "missing_args", "missing": e.missing, "candidates": e.candidates})
+        if not as_json:
+            print(msg, file=sys.stderr)
+        return _emit(command, as_json, 2, {"reason": "missing_args", "missing": e.missing, "candidates": e.candidates, "message": msg})
     except Fail as e:
-        return _fail(command, as_json, e.code, e.message, {"reason": e.reason, **e.extra})
+        if not as_json:
+            print(e.message, file=sys.stderr)
+        return _emit(command, as_json, e.code, {"reason": e.reason, **e.extra, "message": e.message})
     except OSError as e:
-        return _fail(command, as_json, 1, f"置き場へ書けない（{e}）", {"reason": "write_failed"})
+        msg = f"置き場へ書けない（{e}）"
+        if not as_json:
+            print(msg, file=sys.stderr)
+        return _emit(command, as_json, 1, {"reason": "write_failed", "message": msg})
     text = res.pop("text", None)
     if not as_json and text:
         print(text)
