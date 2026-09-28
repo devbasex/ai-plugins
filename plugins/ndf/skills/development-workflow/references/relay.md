@@ -129,6 +129,55 @@ conductor では、コンテキスト量の hook が工程へ入る起動を 1 �
 （[context-window.md](context-window.md) の「上限を超えたら hook が止める」）。背景の処理
 （supervisor を含む）が動いているあいだの応答ではシグナルファイルを書かない。
 
+## 利用上限でアカウントを替えて続ける
+
+**claude のアカウントを 2 つ以上登録しておくと、利用上限で止まらずに別のアカウントで続く。** 登録は端末から打つ
+（`claude auth login` が URL を示し、認可コードの貼り付けを待つ）。
+
+```bash
+python3 ~/.claude/ndf/relay.py account add work1   # 専用の設定ディレクトリで claude auth login が動く
+python3 ~/.claude/ndf/relay.py account add work2
+python3 ~/.claude/ndf/relay.py account list        # 推論を呼ばずに残量を出す（--json もある）
+python3 ~/.claude/ndf/relay.py account remove work2
+```
+
+```text
+名前   識別           5 時間        7 日         支出上限      状態
+work1  a@example.com  15%（04:59）  3%（09-29）  達していない  使える
+work2  b@example.com  2%（05:40）   41%（09-30） 達していない  使える
+```
+
+状態は `使える`・`上限（<リセット時刻>）`・`支出上限`・`残量不明`・`再登録が要る` の 5 つ。`再登録が要る` は同じ名前で
+`account add` し直す。置き場は `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/accounts/`（0700。ファイルは 0600）で、共有の
+`~/.claude/.credentials.json` は読み書きしない。子へは選んだアカウントのアクセストークンを環境変数
+`CLAUDE_CODE_OAUTH_TOKEN` で渡す（引数には載せない）ので、同じ `~/.claude` を共有する別のコンテナの claude は替わらない。
+
+| いつ | ラッパー | `supervise.py`（プランの claude -p） |
+| --- | --- | --- |
+| 起動 | 区間ごとに、上限に達していないアカウントのうち `5 時間` と `7 日` の使用率の大きい方が最も小さいものを選ぶ。今のアカウントが閾値未満なら替えない | 起動したときのアカウント（`NDF_CLAUDE_ACCOUNT`）で呼ぶ |
+| 利用上限（5 時間・7 日・支出上限） | 子の応答が上限で終わると（`StopFailure` hook の `limit.json`）、次の区間を別のアカウントで `claude --resume <会話> "<最初の入力>"` として起動する。最初の入力は `ndf-next` があればそれ、無ければ未達の `/goal <条件>`、それも無ければ定型の文。**背景の作業が残っている間は子を終えない** | 待たずに別のアカウントで同じ呼び出しをやり直す |
+| 使用率が閾値を超えた | 定期の確認（推論なし）が 1 行を出し、**次のカットポイントで**替える | — |
+| すべて上限 | 宣言があれば従量の接続へ移る。無ければ 1 行を出して子を残す | 宣言があれば従量の接続へ移る。無ければ今と同じ上限待ち |
+| 従量の接続で動いている間 | 定期の確認で上限の外れたアカウントを見つけたら、次のカットポイントで戻す | 起動のたびに戻れるかを確かめる |
+
+**従量の接続の宣言は `NDF_SUPERVISE_CLAUDE_FALLBACK` である**（`KEY=VALUE` を空白区切り。値はリポジトリに書かない）。
+
+```bash
+export NDF_SUPERVISE_CLAUDE_FALLBACK='CLAUDE_CODE_USE_BEDROCK=1 AWS_PROFILE=<名前> AWS_REGION=us-east-1'
+```
+
+従量の接続で起動する子にはトークンを渡さず、アカウントで起動する子には宣言の変数を渡さない（混ぜない）。記録と画面に
+出るのは変数の名前だけである。**登録が 1 つ以下なら今と同じ**（ラッパーは上限で何もしない。`supervise.py` は宣言を
+呼び出しごとに 1 度だけ試してから上限待ち）。切り替えに LLM は使わない。
+
+| 設定 | 既定 | 意味 |
+| --- | --- | --- |
+| `NDF_ACCOUNT_CHECK_INTERVAL` | 300 | 使用量の取得先を 1 アカウントにつき何秒に 1 回まで呼ぶか。定期の確認の間隔も兼ねる |
+| `NDF_ACCOUNT_SWITCH_AT` | 90 | 閾値（%）。100 以上なら閾値では替えない |
+
+替えるたびに画面へ `ndf-relay:` の 1 行（例: `利用上限（five_hour）に達したため、アカウントを work1 から work2（b@example.com）へ替えて続ける`）
+が出て、`log.jsonl` に `account` の行が残る。
+
 ## カットポイントの引継ぎ文書と ndf-next はスクリプトで作る
 
 **conductor は引継ぎ文書の「今の会話の進み」の表と `ndf-next` の文面を手で書かない。**
@@ -212,7 +261,8 @@ python3 $M next $O/mission.json --doc $DOC --replace >/dev/null && sed -n '/^```
 
 | `event` | いつ | 主なキー |
 | --- | --- | --- |
-| `start` | セッションを起動した | `section`・`pid`・`command`・`from_session`・`plugin_version`（起動の直前に読んだ版）・`cwd`（シグナルファイルの作業ディレクトリが消えていたら `cwd_fallback` に元の値）・`carried`（2 つ目以降のセッションだけ。ブロックの中身の前に付けた引数） |
+| `start` | セッションを起動した | `section`・`pid`・`command`・`from_session`・`plugin_version`（起動の直前に読んだ版）・`cwd`（シグナルファイルの作業ディレクトリが消えていたら `cwd_fallback` に元の値）・`carried`（2 つ目以降のセッションだけ。ブロックの中身の前に付けた引数）・`account`（登録が 2 つ以上のときだけ。起動したアカウント。`metered` は従量の接続） |
+| `account` | アカウントを替えた・すべて上限で替えなかった | `section`・`reason`（`five_hour` / `seven_day` / `spend` / `unknown` / `auth` / `threshold` / `recovered` など）・`from`・`to`（替えなかったら null）・`earliest`（最も早く戻るアカウントと時刻）・`keys`（従量の接続へ移ったときの変数の名前）・`usage`（閾値のときの使用率） |
 | `end` | セッションが終わった | `seconds`（起動からシグナルファイルを書くまで。シグナルファイルなしなら終わりまで）・`ended_by`（`mark` / `no-mark` / `sigterm` / `sigkill`） |
 | `stop` | 次のセッションを起動しないと決めた | `reason`（`stop-file` / `max-starts` / `spin` / `update-failed` / `start-failed` / `error`） |
 

@@ -66,7 +66,15 @@ drive のステップ: `cmd`（または `"drive": "cross-review" | "cross-refac
 利用上限: claude -p（work・drive の worker・judge・pr）が利用上限（session limit・HTTP 429・
 `api_error_status: 429`・「You've hit your limit … resets …」。lib/monitor.py の USAGE LIMIT の表と同じ文言）で
 落ちたら、ステップの失敗とは区別する（on_fail・judge へ回さない）。ステップの結果に `"limit": true` と読めた解除時刻を残す。
-- 環境変数 `NDF_SUPERVISE_CLAUDE_FALLBACK`（`KEY=VALUE` を空白区切り。例 `CLAUDE_CODE_USE_BEDROCK=1`）が
+- 登録済みの claude アカウント（`relay.py account add`）が 2 つ以上あれば、上限に当たったアカウントを除いて最も
+  上限から遠いものへ替え、待たずに同じ呼び出しを起動し直す（`lib/claude_accounts.py`。子へは `CLAUDE_CODE_OAUTH_TOKEN`
+  と `NDF_CLAUDE_ACCOUNT` を渡す）。以後の呼び出しもそのアカウントで起動する。ステップの `auth` に
+  `アカウント <名前>（<種類>）`、報告に `認証: 切り替え（アカウント <名前>）`、途中の報告に `"kind": "account"` の行を残す。
+  起動したときの `NDF_CLAUDE_ACCOUNT`（動いている区間のアカウント）のトークンはプランが更新しない
+- 候補が無く `NDF_SUPERVISE_CLAUDE_FALLBACK`（従量の接続の宣言）があれば、その変数を足しトークンを外した環境へ移り、
+  以後の呼び出しもそれで起動する。起動のたびに登録済みのアカウントの残量を読み（推論なし）、上限を外れ閾値
+  （`NDF_ACCOUNT_SWITCH_AT`）未満のものがあれば戻す（`auth` は `従量の接続（<変数名>）`・`アカウント <名前>（recovered）`）
+- 登録が 1 つ以下なら、環境変数 `NDF_SUPERVISE_CLAUDE_FALLBACK`（`KEY=VALUE` を空白区切り。例 `CLAUDE_CODE_USE_BEDROCK=1`）が
   あれば、それを環境に足した同じ claude -p で 1 度だけ起動し直す。報告に `認証: 切り替え（<変数名>）` を書く
 - それでも上限なら、解除時刻 + 1 分まで（読めなければ計画の `"limit_retry_seconds"`、既定 900 秒）待って
   同じ呼び出しを起動し直す。待ちは LLM を使わない（time.sleep）。queue の枠は待ちの間も保つ
@@ -115,6 +123,8 @@ queue の置き換え: `{queue_prs}` は前のすべてのステージの Pull R
 - `"kind": "gh-limit"`: judge が打ち直すステップの前の出力が GitHub の上限（`gh_parts.is_rate_limited`）のとき、
   打ち直す前に待った 1 回ごとに 1 行（step・waited・reset）。待つのは `gh api rate_limit` の graphql の残りが 0 のときの reset まで。
   読めなければ（残りがあるときも）同じステップの待ちごとに 60 秒から倍々で、1 時間で頭打ち
+- `"kind": "account"`: 利用上限などで claude -p のアカウントを替えた 1 回ごとに 1 行（step・reason・from・to。
+  従量の接続へ移ったときは to が `metered` で、keys に宣言の変数の名前。値は書かない）
 - `"kind": "attention"`: conductor の判断が要る出来事（reason が 止まった・関門・同じ失敗の繰り返し・
   judge のステップで stop が出そう・遅れ）。worker の行の語と繰り返し、ステップの結果からスクリプトで分ける。
   `queue` はこの行を標準出力の `{"tool": "supervise-queue", "event": "attention", ...}` で知らせる

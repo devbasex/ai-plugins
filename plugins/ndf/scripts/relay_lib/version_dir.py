@@ -43,7 +43,17 @@ import versions  # noqa: E402
 CURRENT_FILE = "relay.current"
 MANIFEST = runtime.MANIFEST
 # ラッパーが import するライブラリ（包みと、venv が使う deps）
-LIB_FILES = ("lib/clock.py", "lib/deps.py", "lib/jsonio.py", "lib/locks.py", "lib/md.py", "lib/procs.py", "lib/versions.py")
+LIB_FILES = (
+    "lib/claude_accounts.py",
+    "lib/claude_usage.py",
+    "lib/clock.py",
+    "lib/deps.py",
+    "lib/jsonio.py",
+    "lib/locks.py",
+    "lib/md.py",
+    "lib/procs.py",
+    "lib/versions.py",
+)
 # 環境の宣言と lock。プラグインではプラグインの根（scripts/ の 1 つ上）、バージョンディレクトリでは中にある
 PROJECT_FILES = ("pyproject.toml", "uv.lock")
 DIR_RE = re.compile(r"^relay-.+-[0-9a-f]{8}$")
