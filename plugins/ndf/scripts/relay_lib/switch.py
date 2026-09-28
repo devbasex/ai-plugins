@@ -197,17 +197,34 @@ class AccountSwitch:
         lim = self.read_limit()
         if lim is None:
             return None
-        auth = lim.get("error") == "authentication_failed" and self.account not in (None, ca.METERED) and self.auth_section != self.section
-        if not self._limit_relevant(lim, auth):
+        err = lim.get("error")
+        auth = err == "authentication_failed" and self.account not in (None, ca.METERED) and self.auth_section != self.section
+        if not self.multi or (err not in LIMIT_ERRORS and not auth):
+            self.drop_limit(lim)  # 上限でない失敗（overloaded など）と、登録が 1 つ以下のときは読み捨てる
             return None
         written = parse_iso(lim.get("written_at")) or time.time()
         tp = lim.get("transcript_path") or ""
         snap = cl.file_snap(tp)
-        if self._limit_on_hold(lim, written, tp, snap):
+        latest = max(written, self.term.last_input, snap[1] / 1e9 if snap else 0)
+        if time.time() - latest < self.quiet:
+            return None
+        if os.path.exists(self.path(QUESTION_FILE)) or asked_after(self.dir, self.path(LIMIT_FILE)):
+            return None
+        if cl.after_mark(tp, written)[1]:
+            self.drop_limit(lim)  # シグナルファイルの後に利用者が入力した
+            return None
+        if os.path.exists(self.path(STOP_FILE)):
+            self.halt("stop-file", "停止の合図がある")
             return None
         kind, resets = ("auth", None) if auth else cl.limit_of(tp)
-        self._note_observed(lim, kind, resets)
-        if self._wait_background(lim, kind, tp):
+        if self.noted != lim["written_at"]:
+            self.noted = lim["written_at"]
+            if kind != "auth":
+                ca.note_limit(self.account or "", kind, resets)
+        if cl.background_open(tp, time.time()):
+            if self.told != lim["written_at"]:
+                self.told = lim["written_at"]
+                self.term.screen(f"ndf-relay: 上限（{kind}）に達したが、背景の作業が残っているため終わるまで替えない")
             return None
         if auth:
             self.auth_section = self.section
@@ -226,44 +243,6 @@ class AccountSwitch:
             self.halt(*refusal)
             return None
         return {**lim, "_kind": "limit", "_snap": snap, "_plan": (to, reason, choice)}
-
-    def _limit_relevant(self, lim, auth) -> bool:
-        """替える対象の上限か。上限でない失敗（overloaded など）と、登録が 1 つ以下のときは読み捨てて偽を返す。"""
-        if not self.multi or (lim.get("error") not in LIMIT_ERRORS and not auth):
-            self.drop_limit(lim)
-            return False
-        return True
-
-    def _limit_on_hold(self, lim, written, tp, snap) -> bool:
-        """静けさ・質問・利用者の入力・停止の合図のどれかで、今は替えないなら真。"""
-        latest = max(written, self.term.last_input, snap[1] / 1e9 if snap else 0)
-        if time.time() - latest < self.quiet:
-            return True
-        if os.path.exists(self.path(QUESTION_FILE)) or asked_after(self.dir, self.path(LIMIT_FILE)):
-            return True
-        if cl.after_mark(tp, written)[1]:
-            self.drop_limit(lim)  # シグナルファイルの後に利用者が入力した
-            return True
-        if os.path.exists(self.path(STOP_FILE)):
-            self.halt("stop-file", "停止の合図がある")
-            return True
-        return False
-
-    def _note_observed(self, lim, kind, resets):
-        """上限の観測を 1 つのシグナルファイルにつき 1 回だけ記録する。"""
-        if self.noted != lim["written_at"]:
-            self.noted = lim["written_at"]
-            if kind != "auth":
-                ca.note_limit(self.account or "", kind, resets)
-
-    def _wait_background(self, lim, kind, tp) -> bool:
-        """背景の作業が残るなら 1 度だけ知らせて真を返す（終わるまで替えない）。"""
-        if not cl.background_open(tp, time.time()):
-            return False
-        if self.told != lim["written_at"]:
-            self.told = lim["written_at"]
-            self.term.screen(f"ndf-relay: 上限（{kind}）に達したが、背景の作業が残っているため終わるまで替えない")
-        return True
 
     def limit_start(self, m) -> tuple[list[str], str, str, dict]:
         """上限で替えた次の区間の (引数, 記録のコマンド, 元の会話, cwd の元)。`ndf-next` があればそれを入力にする。"""
