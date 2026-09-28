@@ -149,15 +149,6 @@ def view(kind: str, number: int, fields: str, repo: str | None = None) -> Attemp
     return gh_quota.with_fallback(by_rest, graphql)
 
 
-def _keep_list_item(kind: str, d: dict, state: str, labels: list[str]) -> bool:
-    """REST の一覧の 1 件を残すか。issue の一覧に混ざる PR・merged でない PR・ラベルの足りない PR を捨てる。"""
-    if kind == "issue" and "pull_request" in d:
-        return False
-    if state == "merged" and not d.get("merged_at"):
-        return False
-    return not (kind == "pr" and labels and not set(labels) <= {x.get("name") for x in d.get("labels") or []})
-
-
 def _list(kind: str, repo: str | None, fields: str, state: str, labels: list[str] | None, limit: int) -> Attempt:
     slug = _slug(repo)
     labels = list(labels or [])
@@ -174,8 +165,13 @@ def _list(kind: str, repo: str | None, fields: str, state: str, labels: list[str
             if not a.ok or not isinstance(a.value, list):
                 return a if not a.ok else Attempt(None, "REST の一覧を読めない", "rest")
             for d in a.value:
-                if _keep_list_item(kind, d, state, labels):
-                    out.append(gh_fields.to_json_shape(kind, d, fields))
+                if kind == "issue" and "pull_request" in d:
+                    continue
+                if state == "merged" and not d.get("merged_at"):
+                    continue
+                if kind == "pr" and labels and not set(labels) <= {x.get("name") for x in d.get("labels") or []}:
+                    continue
+                out.append(gh_fields.to_json_shape(kind, d, fields))
             if len(a.value) < PER_PAGE:
                 break
             page += 1
