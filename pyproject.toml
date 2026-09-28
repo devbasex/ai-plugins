@@ -71,3 +71,6 @@ ignore = [
 "plugins/ndf/scripts/tests/test_gh_call.py" = ["F811"]
 "plugins/ndf/scripts/tests/test_gh_quota.py" = ["F811"]
 "plugins/ndf/scripts/tests/test_gh_rest.py" = ["F811"]
+# account_fake のフィクスチャ accounts も同じ形（#1389）
+"plugins/ndf/scripts/tests/test_claude_accounts.py" = ["F811"]
+"plugins/ndf/scripts/tests/test_supervise.py" = ["F811"]

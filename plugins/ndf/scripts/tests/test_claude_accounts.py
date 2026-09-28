@@ -114,7 +114,10 @@ def test_failed_fetch_counts_for_interval(accounts):
 def test_expired_token_is_refreshed_then_used(accounts):
     accounts.add("a", expires_in=-60, util5=None)
     accounts.add("b", util5=90, util7=90)
-    accounts.fake.refresh["a-refresh-SECRET"] = (200, {"access_token": "a-new-SECRET", "refresh_token": "a-refresh2-SECRET", "expires_in": 28800})
+    accounts.fake.refresh["a-refresh-SECRET"] = (
+        200,
+        {"access_token": "a-new-SECRET", "refresh_token": "a-refresh2-SECRET", "expires_in": 28800},
+    )
     accounts.fake.set_usage("a-new-SECRET", window(5), window(5))
     rows = {r["name"]: r for r in ca.rows()}
     assert rows["a"]["state"] == "使える" and rows["a"]["five_hour"]["utilization"] == 5
@@ -185,7 +188,13 @@ def test_permissions_and_shared_credentials_untouched(accounts):
 def test_env_for_account_and_metered_do_not_mix(accounts, monkeypatch):
     tok = accounts.add("a")
     decl = "CLAUDE_CODE_USE_BEDROCK=1 AWS_PROFILE=p ANTHROPIC_API_KEY=sk-SECRET"
-    base = {"NDF_SUPERVISE_CLAUDE_FALLBACK": decl, "CLAUDE_CODE_USE_BEDROCK": "1", "ANTHROPIC_API_KEY": "sk-SECRET", "CLAUDE_CODE_OAUTH_TOKEN": "old", "X": "y"}
+    base = {
+        "NDF_SUPERVISE_CLAUDE_FALLBACK": decl,
+        "CLAUDE_CODE_USE_BEDROCK": "1",
+        "ANTHROPIC_API_KEY": "sk-SECRET",
+        "CLAUDE_CODE_OAUTH_TOKEN": "old",
+        "X": "y",
+    }
     env = ca.env_for("a", base)
     assert env["CLAUDE_CODE_OAUTH_TOKEN"] == tok and env["NDF_CLAUDE_ACCOUNT"] == "a" and env["X"] == "y"
     assert "CLAUDE_CODE_USE_BEDROCK" not in env and "ANTHROPIC_API_KEY" not in env

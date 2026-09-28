@@ -52,7 +52,11 @@ class FakeAnthropic:
                     fake.usage_calls.append(tok)
                 if fake.delay:
                     time.sleep(fake.delay)
-                self.reply(*fake.usage.get(tok, (401, {"error": "unknown token"})))
+                got = fake.usage.get(tok, (401, {"error": "unknown token"}))
+                if isinstance(got, list):  # 呼ばれるたびに次の応答（最後のものは繰り返す）
+                    with fake.lock:
+                        got = got.pop(0) if len(got) > 1 else got[0]
+                self.reply(*got)
 
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
@@ -67,8 +71,11 @@ class FakeAnthropic:
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
     def set_usage(self, token, five=None, seven=None, spend=False, status=200):
-        body = {"five_hour": five, "seven_day": seven, "extra_usage": {"spend_limit_reached": spend}}
-        self.usage[token] = (status, body)
+        self.usage[token] = self.usage_reply(five, seven, spend, status)
+
+    @staticmethod
+    def usage_reply(five=None, seven=None, spend=False, status=200):
+        return (status, {"five_hour": five, "seven_day": seven, "extra_usage": {"spend_limit_reached": spend}})
 
     def close(self):
         self.server.shutdown()
@@ -95,7 +102,16 @@ class Store:
         if refresh_in is not None:
             oauth["refreshTokenExpiresAt"] = int((time.time() + refresh_in) * 1000)
         self.write(d / ".credentials.json", {"claudeAiOauth": oauth})
-        self.write(d / "account.json", {"name": name, "email": email or f"{name}@example.com", "registered_at": "2026-09-28T00:00:00+00:00", "needs_relogin": False, "limit": None})
+        self.write(
+            d / "account.json",
+            {
+                "name": name,
+                "email": email or f"{name}@example.com",
+                "registered_at": "2026-09-28T00:00:00+00:00",
+                "needs_relogin": False,
+                "limit": None,
+            },
+        )
         if util5 is not None:
             self.fake.set_usage(token, window(util5, 3600), window(util7, 86400), spend)
         else:
@@ -133,7 +149,13 @@ def accounts(tmp_path, monkeypatch):
     s = Store(root, fake, shared)
     for k, v in s.env().items():
         monkeypatch.setenv(k, v)
-    for k in ("NDF_ACCOUNT_CHECK_INTERVAL", "NDF_ACCOUNT_SWITCH_AT", "CLAUDE_CODE_OAUTH_TOKEN", "NDF_CLAUDE_ACCOUNT", "NDF_SUPERVISE_CLAUDE_FALLBACK"):
+    for k in (
+        "NDF_ACCOUNT_CHECK_INTERVAL",
+        "NDF_ACCOUNT_SWITCH_AT",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "NDF_CLAUDE_ACCOUNT",
+        "NDF_SUPERVISE_CLAUDE_FALLBACK",
+    ):
         monkeypatch.delenv(k, raising=False)
     yield s
     fake.close()

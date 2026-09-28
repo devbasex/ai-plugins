@@ -668,7 +668,10 @@ def register(name: str, staging: str, email: str) -> None:
     now = time.time()
     with _locked(name):
         final = account_dir(name)
-        _write(os.path.join(staging, ACCOUNT_FILE), {"name": name, "email": email, "registered_at": _iso(now), "needs_relogin": False, "limit": None})
+        _write(
+            os.path.join(staging, ACCOUNT_FILE),
+            {"name": name, "email": email, "registered_at": _iso(now), "needs_relogin": False, "limit": None},
+        )
         if os.path.exists(final):
             shutil.rmtree(final)
         os.replace(staging, final)
