@@ -516,12 +516,7 @@ def _apply_outcome(repo, actions, buckets, partial, why_partial, prev, waits, rp
         parts = []
         if buckets["skipped_changed"]:
             parts.append("照合で飛ばした " + " ".join(f"#{x}" for x in buckets["skipped_changed"]) + " を手順 2A へ戻す")
-        if rp.withheld:
-            parts.append(
-                "移せなかった "
-                + " ".join(f"#{x}" for x in rp.withheld)
-                + " があるため順位の表を書いていない。rank を打ち直して plan を作り直す"
-            )
+        parts += rp.withheld_notes()
         if partial or rp.tables["failed"]:
             parts.append("時間を置いて同じ plan で apply を打ち直す（済んだものは記録で飛ぶ）")
         nxt = "。".join(parts)
@@ -562,10 +557,9 @@ def cmd_apply(a):
         if reason:
             it["reason"] = reason
         items.append(it)
-    # 移せなかった移動があれば、予定の配置で書いた順位の表が課題の所属と食い違うため表を書かない
     rp.withheld = [] if partial else rp.unmoved(actions, buckets)
     try:
-        rp.tables = rp.write_tables(None if partial or rp.withheld else ms)
+        rp.tables = rp.write_tables(None if partial else ms)
     except Partial as e:
         partial, why_partial = True, str(e)
     rp.update_rejected()

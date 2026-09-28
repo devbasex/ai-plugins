@@ -342,9 +342,27 @@ class RankPlan:
                     errs.append(f"#{n} の前倒しは依存先 {', '.join(f'#{g}' for g in missing)} も同じ移す先で前倒しする")
                 elif c["decision"] == R.APPROVAL:
                     self.holds[n] = {**c, "direction": d, "number": n}
+        errs += self._missing_moves({(n, d) for n, d, _ in wants})
         if errs:
             raise StepError("plan の誤り: " + " / ".join(errs), EXIT_UNREADABLE)
         self._hold_leads_of_held_groups({n for n, d, act in wants if act != "rejected" and d == R.FORWARD})
+
+    def _missing_moves(self, named) -> list[str]:
+        """rank を入れた plan で、順位の表が移したものとして置く移動（自動・承認済み）の action か却下が無いもの。"""
+        if not self.plan.get("rank") or self.stale:
+            return []
+        placed = [
+            (n, R.FORWARD)
+            for f in self.metrics.get("forward", [])
+            if f["decision"] in (R.AUTO, R.APPROVED)
+            for n in [f["number"], *f["group"]]
+        ]
+        placed += [(b["number"], R.BACKWARD) for b in self.metrics.get("backward", []) if b["decision"] == R.APPROVED]
+        return [
+            f"#{n} の{d}（{self.candidate(n, d)['decision']}）の action が無い（順位の表が移したものとして置く）"
+            for n, d in placed
+            if (n, d) not in named
+        ]
 
     def _hold_leads_of_held_groups(self, leads):
         """依存先が保留に入った前倒しの先頭も保留にする（先頭だけが動いて依存先を置いていかない。AC6）。"""
@@ -358,11 +376,22 @@ class RankPlan:
                     changed = True
 
     def unmoved(self, actions, buckets) -> list[int]:
-        """順位の表が移したものとして置くのに、この apply で移せなかった課題（表を書かない理由になる）。"""
+        """順位の表が移したものとして置くのに、この apply で移せなかった課題（表を書かない理由になる）。
+
+        plan に reschedule の action が無い課題も数える。action の有無で絞ると、書き漏らした移動は
+        マイルストーンが動かないまま表だけ移す先に載り、所属と表が食い違う。
+        """
         placed = {n for f in self.metrics.get("forward", []) if f["decision"] in (R.AUTO, R.APPROVED) for n in [f["number"], *f["group"]]}
         placed |= {b["number"] for b in self.metrics.get("backward", []) if b["decision"] == R.APPROVED}
-        done = set(buckets["applied"]) | set(buckets["unchanged"]) | set(buckets["already"])
-        return sorted({act["number"] for act in actions if act.get("reschedule") and act["number"] in placed} - done)
+        moved = {act["number"] for act in actions if act.get("reschedule")}
+        done = (set(buckets["applied"]) | set(buckets["unchanged"]) | set(buckets["already"])) & moved
+        return sorted(placed - done) if self.plan.get("rank") and not self.stale else []
+
+    def withheld_notes(self) -> list[str]:
+        if not self.withheld:
+            return []
+        nums = " ".join(f"#{x}" for x in self.withheld)
+        return [f"移せなかった {nums} があるため順位の表を書いていない。rank を打ち直して plan を作り直す"]
 
     def hold(self, act) -> str | None:
         if act["number"] in self.holds:
@@ -389,7 +418,7 @@ class RankPlan:
     def write_tables(self, ms: Milestones) -> dict:
         """各マイルストーンの説明の `### 順位` の節を書く（I5・I6・AC11）。拒まれたら行を半分ずつ減らす（決定 15）。"""
         got = _empty_tables()
-        if ms is None or not self.plan.get("rank") or self.stale:
+        if ms is None or not self.plan.get("rank") or self.stale or self.withheld:
             return got
         current = {r["title"]: r for r in ms.open_rows()}
         for m in self.metrics.get("milestones", []):

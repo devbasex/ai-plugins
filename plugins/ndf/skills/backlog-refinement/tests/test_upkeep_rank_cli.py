@@ -256,7 +256,7 @@ def test_apply_moves_auto_holds_approval_and_writes_the_table_once(env):
     assert "### 順位" in m1["description"] and "| 1 | #4 |" in m1["description"]
     assert all("title" not in json.dumps(c) for c in st["calls"] if "milestones/1" in " ".join(c))
     before = len(env.writes())
-    code, out = env.run("apply", "--plan", env.plan([], rank=first["metrics"]["digest"]))
+    code, out = env.run("apply", "--plan", env.plan(actions[:1], rank=first["metrics"]["digest"]))
     assert code == 0 and out["metrics"]["tables"]["written"] == [] and len(env.writes()) == before
 
     # 承認を得た移動は rank --approved で打ち直してから反映する（AC9）
@@ -302,9 +302,11 @@ def test_apply_refuses_a_forward_move_that_leaves_its_group_behind(env):
 
 
 def test_rejected_move_is_remembered_by_apply_only(env):
+    snaps = env.snapshots()
     _, first = env.run("rank", "--scores", env.scores(BASE), "--capacity", "8")
-    code, _ = env.run("apply", "--plan", env.plan([], rank=first["metrics"]["digest"], rejected=[{"number": 3, "direction": "前倒し"}]))
-    assert code == 0
+    auto = [_reschedule(snaps, first, 4, "前倒し")]
+    code, out = env.run("apply", "--plan", env.plan(auto, rank=first["metrics"]["digest"], rejected=[{"number": 3, "direction": "前倒し"}]))
+    assert code == 0, out
     saved = json.loads((env.sd / "rejected.json").read_text())
     assert [(r["number"], r["direction"]) for r in saved] == [(3, "前倒し")]
     _, again = env.run("rank", "--capacity", "8")
@@ -374,3 +376,16 @@ def test_apply_does_not_write_the_table_when_a_planned_move_fails(env):
     assert code == 20 and out["metrics"]["skipped_changed"] == [3], out
     assert out["metrics"]["tables_withheld"] == [3] and out["metrics"]["tables"]["written"] == []
     assert "### 順位" not in env.state()["milestones"][0]["description"]
+
+
+def test_apply_does_not_write_the_table_when_the_plan_omits_an_auto_move(env):
+    """rank を入れた plan が「自動」の前倒しの action を書き漏らしたら、何も書かずに plan の誤りとして止める。"""
+    scores = [
+        sc(1, tc=5, size=1),
+        sc(2, tc=1, size=2),
+        sc(3, size=3),
+        sc(4, ubv=13, tc=8, rr=8, size=5, observed_harm=True, depends_on=[3]),
+    ]
+    _, first = env.run("rank", "--scores", env.scores(scores), "--capacity", "8")
+    code, out = env.run("apply", "--plan", env.plan([], rank=first["metrics"]["digest"]))
+    assert code == 2 and "#4" in out["summary"] and "#3" in out["summary"] and env.writes() == [], out
