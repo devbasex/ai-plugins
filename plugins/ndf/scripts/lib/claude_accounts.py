@@ -322,9 +322,20 @@ def _token_held(name: str, before: float | None, now: float, force: bool = False
         _update_account(name, needs_relogin=True)
         return None
     exp = (o.get("expiresAt") or 0) / 1000
-    before = None if before is None else max(before, min_left)
-    if not force and (before is None or exp - now > before):
+    if not _needs_refresh(exp, now, before, force, min_left):
         return o["accessToken"] if exp - now > min_left else None
+    # 一時的な失敗なら、残りが足りれば今のトークンを使う
+    return _refresh_and_store(name, o, now, o["accessToken"] if exp - now > min_left and not force else None)
+
+
+def _needs_refresh(exp: float, now: float, before: float | None, force: bool, min_left: float) -> bool:
+    """期限 `exp` のトークンを更新するか。`before` は `min_left` 以上に引き上げる（None は更新しない）。"""
+    before = None if before is None else max(before, min_left)
+    return force or (before is not None and exp - now <= before)
+
+
+def _refresh_and_store(name: str, o: dict, now: float, fallback: str | None) -> str | None:
+    """排他の中で呼ぶ。トークンを更新して書き込み、新しいアクセストークンを返す。一時的な失敗なら `fallback`。"""
     rexp = o.get("refreshTokenExpiresAt")
     if isinstance(rexp, (int, float)) and rexp / 1000 <= now:
         _update_account(name, needs_relogin=True)
@@ -333,8 +344,8 @@ def _token_held(name: str, before: float | None, now: float, force: bool = False
     if how == "rejected":
         _update_account(name, needs_relogin=True)
         return None
-    if new is None:  # 一時的な失敗。残りが足りれば今のトークンを使う
-        return o["accessToken"] if exp - now > min_left and not force else None
+    if new is None:
+        return fallback
     try:
         whole = _read(_creds_path(name)) or {}
         whole["claudeAiOauth"] = new
