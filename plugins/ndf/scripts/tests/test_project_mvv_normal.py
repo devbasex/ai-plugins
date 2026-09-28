@@ -368,3 +368,35 @@ def test_the_design_plan_stops_at_gate_1_whatever_the_advice(tmp_path, monkeypat
     plan = {"フェーズ": "設計", "課題": [11], "作業場所": str(tmp_path), "steps": tail}
     engine.Engine(plan, tmp_path / "sv").run()
     assert "- 結果: 関門" in (tmp_path / "sv" / "report.md").read_text()
+
+
+# ---------------------------------------------------------------- 助言のステップの現状固定（I-010・I-011）
+
+
+def test_advise_design_steps_keeps_its_current_shape(tmp_path):
+    from supervise_lib.mission_waves import MVV_NOTE, MVV_PY, advise_design_steps
+
+    state = tmp_path / "state.json"
+    a = SimpleNamespace(state=str(state), mode="standard")
+    note = MVV_NOTE
+    assert advise_design_steps(a) == [
+        {
+            "id": "mvv",
+            "type": "run",
+            "stage": "設計",
+            "timeout": 900,
+            "cmd": f"rm -f {note} && {MVV_PY} check --mission {state.resolve()} --gate design --pr {{pr}} --mode standard --root . "
+            f"--note {note} --advise",
+            "on_fail": "mvv-note",
+            "next": "mvv-note",
+        },
+        {
+            "id": "mvv-note",
+            "type": "run",
+            "stage": "設計",
+            "timeout": 300,
+            "cmd": f"sh -c '[ ! -f {note} ] || gh pr comment {{pr}} --body-file {note}'",
+            "on_fail": "gate",
+            "next": "gate",
+        },
+    ]
