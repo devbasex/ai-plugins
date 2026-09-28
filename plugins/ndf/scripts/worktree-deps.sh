@@ -4,7 +4,9 @@
 #   prepare <worktree> [--if-unprepared]
 #       共有の宣言（.ndf/worktree.json）の `deps` 節に従って、依存物を worktree で使える状態にする。
 #       copy_from_main（ハードリンクの複製）・copy_as_real（実体の複製）・run（コマンド）の順に行う。
-#       --if-unprepared は、今の HEAD と宣言で用意した印があれば何もしない（使い回す worktree で使う）
+#       --if-unprepared は、今の HEAD と宣言で用意した印があれば何もしない（使い回す worktree で使う）。
+#       印が別の HEAD・宣言のもの（前に用意した worktree を同期した後）なら、既にある複製の宛先は
+#       そのまま使い、無い宛先の複製と run だけをやり直す
 #
 # 終了コード:
 #   0  用意した / 宣言が無い / --if-unprepared で今の HEAD と宣言の印があった
@@ -79,8 +81,13 @@ deps_key() {
 }
 KEY=$(deps_key)
 
-if [ "$IF_UNPREPARED" = 1 ] && [ -f "$MARK" ] && [ "$(cat "$MARK" 2>/dev/null)" = "$KEY" ]; then
-  exit 0
+# --if-unprepared で印が食い違うときは、前に用意した worktree のやり直しである。既にある複製の宛先は
+# run（`npm ci` など）が入れ替えたり、メインディレクトリ側が更新されたりして食い違いうるため、
+# 食い違いで失敗にせず、そのまま使う。
+REDO=0
+if [ "$IF_UNPREPARED" = 1 ] && [ -f "$MARK" ]; then
+  [ "$(cat "$MARK" 2>/dev/null)" = "$KEY" ] && exit 0
+  REDO=1
 fi
 
 # --- 宣言を読む ---------------------------------------------------------------
@@ -134,8 +141,13 @@ LOG="$WORK/log"
 STAMP="$WORK/stamp"
 : > "$LOG"
 
-# 引数なしの prepare は印を見ずにやり直す。失敗の後に印が残らないよう、先に消す。
-rm -f "$MARK"
+# 引数なしの prepare は印を見ずにやり直す。失敗の後に効く印が残らないよう、先に消す。
+# やり直しでは、前に用意したことだけを残す（どの KEY とも一致しない中身にする）。
+if [ "$REDO" = 1 ]; then
+  printf '%s\n' redo-pending > "$MARK" 2>/dev/null || rm -f "$MARK"
+else
+  rm -f "$MARK"
+fi
 
 fail() {
   local step="$1"
@@ -159,6 +171,7 @@ for rel in "${COPY_FROM_MAIN[@]+"${COPY_FROM_MAIN[@]}"}"; do
     printf '複製元がありません: %s\n' "$MAIN_DIR/$rel" >> "$LOG"
     fail "$step"
   fi
+  [ "$REDO" = 1 ] && [ -e "$TARGET/$rel" ] && ! [ -L "$TARGET/$rel" ] && continue
   copy_one "$rel" >> "$LOG" 2>&1 || fail "$step"
 done
 
@@ -174,6 +187,7 @@ for rel in "${COPY_AS_REAL[@]+"${COPY_AS_REAL[@]}"}"; do
     printf '複製元がありません: %s\n' "$MAIN_DIR/$rel" >> "$LOG"
     fail "$step"
   fi
+  [ "$REDO" = 1 ] && [ -e "$TARGET/$rel" ] && ! [ -L "$TARGET/$rel" ] && continue
   replace_with_real_copy "$rel" >> "$LOG" 2>&1 || fail "$step"
 done
 

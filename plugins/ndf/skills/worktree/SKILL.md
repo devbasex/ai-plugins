@@ -305,6 +305,8 @@ bash "$SCRIPTS/worktree-deps.sh" prepare "$WT" --if-unprepared  # 用意が済�
 
 用意が済むと worktree ごとの git の管理ディレクトリに印（`ndf-deps`）を書く。印は用意した時の HEAD と宣言の
 中身を持つ。使い回す worktree は、HEAD も宣言も変わっていなければやり直さない（別の commit へ同期した後はやり直す）。
+このやり直しでは、既にある `copy_from_main` / `copy_as_real` の宛先はメインディレクトリと食い違っていてもそのまま使い、
+無い宛先の複製と `run` だけを走らせる（`run` が入れ替えた依存物や、メインディレクトリ側の更新で止めない）。
 コミットしていない lock ファイルの変更などで用意し直すときは、引数なしの `prepare` を打つ。
 
 **`copy_from_main` に置くのは、worktree の中でその場で書き換えないパスだけにする。** ハードリンクで複製するため、

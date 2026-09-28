@@ -272,6 +272,51 @@ def test_if_unprepared_redoes_after_head_or_declaration_changes(repo: Path, tmp_
     assert counter.read_text().count("x") == 3
 
 
+def test_if_unprepared_redo_keeps_diverged_copies_and_reruns_run(repo: Path, tmp_path: Path) -> None:
+    """同期の後のやり直しは、食い違う既存の複製先で止めず、そのまま使って run だけを走らせ直す。"""
+    counter = tmp_path / "count"
+    declare(repo, {"copy_from_main": ["vendor"], "copy_as_real": [".env"], "run": [f"echo x >> {counter}"]})
+    wt = add_worktree(repo)
+    assert run(DEPS, ["prepare", str(wt), "--if-unprepared"], repo).returncode == 0
+
+    # run が依存物を入れ替えた worktree と、メインディレクトリ側で更新した .env
+    (wt / "vendor" / "autoload.php").unlink()
+    (wt / "vendor" / "autoload.php").write_text("<?php // reinstalled\n", encoding="utf-8")
+    (repo / ".env").write_text("APP=2\n", encoding="utf-8")
+    git(repo, "commit", "-q", "--allow-empty", "-m", "next")
+    git(wt, "checkout", "-q", "--detach", git(repo, "rev-parse", "HEAD").stdout.strip())
+
+    r = run(DEPS, ["prepare", str(wt), "--if-unprepared"], repo)
+
+    assert r.returncode == 0, r.stderr
+    assert counter.read_text().count("x") == 2
+    assert (wt / "vendor" / "autoload.php").read_text(encoding="utf-8") == "<?php // reinstalled\n"
+    assert (repo / "vendor" / "autoload.php").read_text(encoding="utf-8") == "<?php\n"
+    assert (wt / ".env").read_text(encoding="utf-8") == "APP=1\n"
+    assert run(DEPS, ["prepare", str(wt), "--if-unprepared"], repo).returncode == 0
+    assert counter.read_text().count("x") == 2
+
+
+def test_failed_if_unprepared_redo_stays_a_redo(repo: Path, tmp_path: Path) -> None:
+    """やり直しが失敗しても、次の --if-unprepared は食い違う複製先で止めずにやり直す。"""
+    flag = tmp_path / "fail"
+    flag.write_text("", encoding="utf-8")
+    declare(repo, {"copy_as_real": [".env"], "run": [f"test ! -s {flag}"]})
+    wt = add_worktree(repo)
+    assert run(DEPS, ["prepare", str(wt), "--if-unprepared"], repo).returncode == 0
+    (repo / ".env").write_text("APP=2\n", encoding="utf-8")
+    git(repo, "commit", "-q", "--allow-empty", "-m", "next")
+    git(wt, "checkout", "-q", "--detach", git(repo, "rev-parse", "HEAD").stdout.strip())
+
+    flag.write_text("1", encoding="utf-8")
+    assert run(DEPS, ["prepare", str(wt), "--if-unprepared"], repo).returncode == 1
+    flag.write_text("", encoding="utf-8")
+    r = run(DEPS, ["prepare", str(wt), "--if-unprepared"], repo)
+
+    assert r.returncode == 0, r.stderr
+    assert (wt / ".env").read_text(encoding="utf-8") == "APP=1\n"
+
+
 def test_failed_redo_removes_mark(repo: Path) -> None:
     """引数なしの prepare が失敗したら印は残らない。"""
     declare(repo, {"run": ["true"]})
