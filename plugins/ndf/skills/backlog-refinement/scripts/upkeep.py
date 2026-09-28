@@ -76,7 +76,7 @@ from step_result import (
 )
 import upkeep_rank_cmd as RC  # noqa: E402
 import upkeep_report  # noqa: E402
-from upkeep_gh import DEFAULT_MAX_WAIT, DEFAULT_MAX_WAITS, Gh, Milestones, Partial, _issues, _repo, _with_labels  # noqa: E402
+from upkeep_gh import DEFAULT_MAX_WAIT, DEFAULT_MAX_WAITS, Gh, Milestones, Partial, _issues, _repo, _sub_issue_kids, _with_labels  # noqa: E402
 
 TOOL = "backlog-refinement"
 
@@ -253,14 +253,11 @@ def _route_sub_issues(gh, repo, closed, open_issues, routes, notes):
     for c in closed:
         if not (c.get("sub_issues_summary") or {}).get("total") or not sub_api:
             continue
-        try:
-            kids = gh.call([f"repos/{repo}/issues/{c['number']}/sub_issues?per_page=100"], paginate=True) or []
-        except StepError as e:
-            if "404" in str(e):
-                sub_api = False
-                notes.append("サブイシューの API が無いため本文の参照だけで子を拾った")
-                continue
-            raise
+        kids = _sub_issue_kids(gh, c["number"])
+        if kids is None:
+            sub_api = False
+            notes.append("サブイシューの API が無いため本文の参照だけで子を拾った")
+            continue
         for k in kids:
             if k.get("state") == "open":
                 routes.add(k["number"], "sub-issue", f"#{c['number']}")

@@ -136,17 +136,24 @@ class Milestones:
         )
 
 
+def _sub_issue_kids(gh: Gh, n, target=None) -> list | None:
+    """課題 n のサブイシューの一覧。サブイシューの API が無ければ（404）None を返す。"""
+    try:
+        return gh.call([f"repos/{gh.repo}/issues/{n}/sub_issues?per_page=100"], paginate=True, target=target) or []
+    except StepError as e:
+        if "404" in str(e):
+            return None
+        raise
+
+
 def sub_issues(gh: Gh, parents, notes: list) -> dict:
     """open の親ごとの open の子の番号。サブイシューの API が無ければ（404）空で返し、notes に残す。"""
     out = {}
     for n in parents:
-        try:
-            kids = gh.call([f"repos/{gh.repo}/issues/{n}/sub_issues?per_page=100"], paginate=True, target=n) or []
-        except StepError as e:
-            if "404" in str(e):
-                notes.append("サブイシューの API が無いため、本文と説明の並列の組の依存だけで並べた")
-                return {}
-            raise
+        kids = _sub_issue_kids(gh, n, target=n)
+        if kids is None:
+            notes.append("サブイシューの API が無いため、本文と説明の並列の組の依存だけで並べた")
+            return {}
         out[n] = sorted(k["number"] for k in kids if isinstance(k, dict) and k.get("state") == "open")
     return out
 
