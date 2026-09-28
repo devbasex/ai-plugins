@@ -9,7 +9,7 @@ from pathlib import Path
 from supervise_lib.decl import WORKTREE_DECL, DeclError, with_decls
 from supervise_lib.paths import HERE, MERGED_PY, MVV_PY, STEPS_PY, VERIFY_PY
 from supervise_lib.plan import QUEUE_PRS
-from supervise_lib.verify_steps import handoff_step
+from supervise_lib.verify_steps import MARGIN_FLOOR, handoff_step
 
 
 MVV_NOTE = "{state_dir}/work/mvv-note.md"  # mvv-gate.py が書く判定の記録（PR のコメントか承認資料の末尾）
@@ -312,7 +312,7 @@ def plan_promote(a, repo: str, ci_wait: int, mvv: str | None = None, condition: 
         raise DeclError(f"昇格に要る本番チャネルが無い（--production-branch か .ndf/{WORKTREE_DECL} の production_branch）")
     promote = f"{MERGED_PY} promote --head {shlex.quote(head)} --base {shlex.quote(base)}"
     wait = f" --timeout {ci_wait}"
-    timeout = ci_wait + max(30, ci_wait // 10)
+    timeout = ci_wait + max(MARGIN_FLOOR, ci_wait // 10)
     approved = {
         "id": "promote-approved",
         "type": "run",
