@@ -26,7 +26,6 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 from step_result import (
@@ -190,7 +189,7 @@ def _run_steps(env, steps):
 
 
 def verify_claude(env, ref, plugins, expect, where):
-    slug, market, production = where.slug, where.market, where.production
+    slug, market, production = where
     src = f"https://github.com/{slug}.git#{ref}" if ref != production else slug
     steps = [["claude", "plugin", "marketplace", "add", src]]
     steps += [["claude", "plugin", "install", f"{p}@{market}"] for p in plugins]
@@ -209,7 +208,7 @@ def verify_claude(env, ref, plugins, expect, where):
 
 
 def verify_codex(env, ref, plugins, expect, where):
-    slug, market, production = where.slug, where.market, where.production
+    slug, market, production = where
     add = ["codex", "plugin", "marketplace", "add", slug]
     if ref != production:
         add += ["--ref", ref]
@@ -303,14 +302,6 @@ def compare_kiro(src, proj):
     return out
 
 
-class InstallSource(NamedTuple):
-    """導入元: owner/repo・マーケットプレイスの名前・本番チャネル。"""
-
-    slug: str
-    market: str
-    production: str | None
-
-
 def install_source(root, a):
     """導入元（owner/repo・マーケットプレイスの名前・本番チャネル）と、確かめるプラグイン。値は origin の URL と宣言から読む
     （#1336 の決定 8）。--ref は宣言のベースブランチか本番チャネルに限る。"""
@@ -325,7 +316,7 @@ def install_source(root, a):
     plugins = [p.strip() for p in names.split(",") if p.strip()]
     if not plugins:
         raise StepError("確かめるプラグインを決められない（--plugins か .ndf/supervise.json の release.plugin）", EXIT_UNREADABLE)
-    return InstallSource(slug, market_of(root, slug), d.production), plugins
+    return (slug, market_of(root, slug), d.production), plugins
 
 
 def _extract_ref(root, rev, dest):
