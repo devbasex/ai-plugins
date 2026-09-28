@@ -79,7 +79,7 @@ supervise.py new mission は new sprint へ改名した。new sprint で呼ぶ�
 | E1 | 用語集の語を置き換え、旧名を廃止した語に載せた | 実装の最初のコミット | 用語チェック（`glossary.py check`） |
 | E2 | 本文・コード・ファイル名をスプリントへ置き換えた | 実装のコミット | 既存のテスト・構造チェック |
 | E3 | 利用者がスプリントを始めた（`supervise.py new sprint`） | 利用者か conductor | `supervise_lib/sprint.py`（旧名 `new mission` は旧名の対応表を経て同じ所へ渡る） |
-| E4 | スプリントブランチを作った（`sprint/<名前>`） | スプリントブランチのプラン | `supervise_lib/sprint_waves.py`（表を引き、既存の `mission/<名前>` があればそれをブランチにする）・`lib/pr_mode.py`（表の旧名の頭 `mission/` の宛先も課題の Pull Request と判定する）。`worktree-setup.sh` は渡された `--from` を使うだけ、`pr-steps.py` は `lib/pr_mode.py` の判定を使うだけで、どちらも旧名の頭を持たない（I2） |
+| E4 | スプリントブランチを作った（`sprint/<名前>`） | スプリントブランチのプラン | `supervise_lib/sprint_waves.py`（表を引き、`sprint/<名前>` が無く `mission/<名前>` があるときだけ `mission/<名前>` をブランチにする。両方あれば `sprint/<名前>`。I4）・`lib/pr_mode.py`（表の旧名の頭 `mission/` の宛先も課題の Pull Request と判定する）。`worktree-setup.sh` は渡された `--from` を使うだけ、`pr-steps.py` は `lib/pr_mode.py` の判定を使うだけで、どちらも旧名の頭を持たない（I2） |
 | E5 | 改名の前に始めた実行を再開した | 利用者か conductor が既存のプランを `queue` に渡した | `supervise_lib/state.py`（`ミッション状態` を読む）・旧名のスクリプト（新しいスクリプトへ渡す） |
 | E6 | 旧名の受け付けを外した | 受け付けをやめる課題（決定 4）の実装 | 旧名の対応表（切り替えを「やめる」へ）。旧名で呼ぶと終了コード 2 |
 
@@ -88,10 +88,10 @@ supervise.py new mission は new sprint へ改名した。new sprint で呼ぶ�
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
 | スプリント | 1 つの版として出す課題と Pull Request のセット。期間ではなく、1 つの版として出す中身で切る。工程はスプリント単位で 1 回ずつ通し、モードもスプリントで 1 つにする | 追加（要求の PR で済み）。E1 で `source` を `plugins/ndf/skills/development-workflow/references/glossary.md` にし、`deprecated` に旧名を載せる |
-| スプリント状態ファイル | スプリントのプラン・done・承認ゲートの記録・MVV・版を持つファイル（パスは呼ぶ側が決め、手順書の例は `sprint-state.json`。目録 `sprint.json` とは別のファイル） | 同上 |
-| スプリントブランチ | 課題の Pull Request を集め、ベースブランチへの Pull Request をスプリントで 1 本にするブランチ（`sprint/<名前>`） | 同上 |
-| スプリント課題 | スプリントに含まれる Pull Request の本文が、閉じる語で指す課題 | 同上 |
-| スプリント MVV | スプリント単位の MVV。プロジェクト MVV の範囲での具体化 | 同上 |
+| スプリント状態ファイル | スプリントのプラン・done・承認ゲートの記録・MVV・版を持つファイル（パスは呼ぶ側が決め、手順書の例は `sprint-state.json`。目録 `sprint.json` とは別のファイル） | 追加（要求の PR で済み）。E1 で `source` と `deprecated` をスプリントと同じに直し、登録済みの意味「…を持つファイル（`sprint.json`）」を左の意味（パスは呼ぶ側が決める。例 `sprint-state.json`。目録 `sprint.json` とは別のファイル）へ書き換える（`docs/glossary/glossary.json` と `docs/glossary.md`） |
+| スプリントブランチ | 課題の Pull Request を集め、ベースブランチへの Pull Request をスプリントで 1 本にするブランチ（`sprint/<名前>`） | 追加（要求の PR で済み）。E1 で `source` と `deprecated` をスプリントと同じに直す |
+| スプリント課題 | スプリントに含まれる Pull Request の本文が、閉じる語で指す課題 | 追加（要求の PR で済み）。E1 で `source` と `deprecated` をスプリントと同じに直す |
+| スプリント MVV | スプリント単位の MVV。プロジェクト MVV の範囲での具体化 | 追加（要求の PR で済み）。E1 で `source` と `deprecated` をスプリントと同じに直す |
 | 根拠の項目 | 判断の記録と設計の決定の記録に残す MVV の項目の番号。スプリント MVV の項目は頭に「スプリント」を付ける（スプリント Value 4。R の番号はそのまま） | 意味の変更（E1） |
 
 **廃止する 5 語の行き先**（E1。旧名の語はそれぞれの新しい語の `deprecated` へ移し、元の語の行は消す）:
@@ -103,6 +103,11 @@ supervise.py new mission は new sprint へ改名した。new sprint で呼ぶ�
 | ミッションブランチ | スプリントブランチ | 移す（1 語） |
 | ミッション課題 | スプリント課題 | 移す（1 語） |
 | ミッション MVV | スプリント MVV | — |
+
+**目録を「ミッション状態ファイル」と呼ぶ 3 か所は「目録」へ書き換える**（E2。語の置き換えを機械的に当てない）。
+`agent-layers.md:77`（ステージの置き場）・`waiting.md:154`（プランを書き出したときにできるもの）・`context-window.md:199`（再開の表の 4 行目）は、
+キー `ステージ` を持つ目録（`<out>/mission.json`）を「ミッション状態ファイル」と呼んでいる。これをそのまま「スプリント状態ファイル」へ
+置き換えると、再開のときに conductor が `ステージ` をスプリント状態ファイルの側で探す。3 か所は「目録（`<out>/sprint.json`）」と書く。
 
 **意味の文だけを直す語**（E1）: レッドライン・MVV・MVV 判定・MVV の照合・根拠の項目・実行計画・マイルストーン・リリース記録・
 conductor・ステージ・resume の 11 語。意味の文の「ミッション」を「スプリント」へ、`new mission` を `new sprint` へ置き換える。

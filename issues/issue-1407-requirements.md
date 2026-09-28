@@ -21,18 +21,18 @@ NDF の工程の単位「ミッション」（1 つの版として出す課題�
   - コマンド: `supervise.py new mission`・`supervise.py new check --mission <状態>`
   - ブランチ: `mission/<名前>`（`worktree-setup.sh` が課題の worktree の起点に使う）
   - スクリプト: `mission-state.py`・`mission-close.py`・`lib/mission_mvv.py`・`supervise_lib/mission.py`・`supervise_lib/mission_waves.py`
-  - 状態ファイル: `mission.json`（キーは `ミッション`・`ブランチ`・`ステージ`）。JSON のキー `mission`・`mission_mvv`・`mission_prs`
+  - 目録: `mission.json`（キーは `ミッション`・`ブランチ`・`ステージ`）。JSON のキー `mission`・`mission_mvv`・`mission_prs`
   - `scripts/script-structure-allow/` の許可の 2 件が `mission-state.py` のパスを持つ
 - 進行中の状態: `~/.local/state/ndf/sv/` に 10 件。7 件が `mission.json` を持つ。プランの JSON（`*-state` を含む）は `mission-state.py` などのスクリプトの絶対パスをコマンドの文字列に埋めている
 - 候補の衝突（grep）: スプリントは用語集・`plugins/ndf` とも 0 件。バンドル（用語集にある）・バッチ（本文 10 か所）・ウェーブ（`mission_waves.py`）は衝突
 
 ## 前提
 
-- 前提 1: 新しい名前は次の対応で決める。語: ミッション → スプリント、ミッション状態ファイル → スプリント状態ファイル、ミッションブランチ → スプリントブランチ、ミッション課題 → スプリント課題、ミッション MVV → スプリント MVV。コードの名前: `mission` → `sprint`（`supervise.py new sprint`・`--sprint`・`sprint/<名前>`・`sprint.json`・`sprint-state.py`・`sprint-close.py`・`lib/sprint_mvv.py`・`supervise_lib/sprint.py`・`supervise_lib/sprint_waves.py`・キー `sprint`・`sprint_mvv`・`sprint_prs`）
+- 前提 1: 新しい名前は次の対応で決める。語: ミッション → スプリント、ミッション状態ファイル → スプリント状態ファイル、ミッションブランチ → スプリントブランチ、ミッション課題 → スプリント課題、ミッション MVV → スプリント MVV。コードの名前: `mission` → `sprint`（`supervise.py new sprint`・`--sprint`・`sprint/<名前>`・目録 `sprint.json`・`sprint-state.py`・`sprint-close.py`・`lib/sprint_mvv.py`・`supervise_lib/sprint.py`・`supervise_lib/sprint_waves.py`・キー `sprint`・`sprint_mvv`・`sprint_prs`）
 - 前提 2: スプリント MVV の項目の番号の形（根拠の項目の「ミッション Value 4」→「スプリント Value 4」）は改名に合わせて変える。`R<番号>` はそのまま
 - 前提 3: 旧名の受け付け（AC4）は、この改名を載せた正式版の次の正式版まで残し、その次の版で外す。版数はリリースで決まるため、決めの記録には「改名を載せた正式版 + 1 つ」の規則と、決まった時点の版数を書く
 - 前提 4: 旧名のスクリプト（`mission-state.py`・`mission-close.py`）は、新しい名前のスクリプトを呼ぶ薄い入口として残す。既存のプランの JSON がパスを埋めているためである（AC5）。旧名のモジュール（`lib/mission_mvv.py` など）はリポジトリの外から読まれないため残さない
-- 前提 5: 状態ファイルは、新しい名前（`sprint.json`）が無く旧名（`mission.json`）があれば旧名を読む。旧名のファイルをその場で書き換えない（戻すときに旧版の NDF が読めなくなるため）
+- 前提 5: 目録は、新しい名前（`sprint.json`）が無く旧名（`mission.json`）があれば旧名を読む。旧名のファイルをその場で書き換えない（戻すときに旧版の NDF が読めなくなるため）
 - 前提 6: 過去の記録（`CHANGELOG.md`・`docs/ndf-version-decisions.md`・`issues/` の既存の文書・`docs/development-history/`・`docs/presentations/`・`docs/articles/`・既存の課題と Pull Request の本文）は書いた時点の記録として書き換えない
 - 前提 7: `AGENTS.md` と `CLAUDE.md` の運用の節の書き換えは C7 に当たり、NDF の共通原則の書き換えは共通原則の改訂に当たる。どちらも中身（規則）を変えず語だけを置き換える範囲に限り、設計の承認（承認ゲート 1）で利用者の承認を得てから行う
 - 前提 8: 実施は進行中の m1389・m1400 を今の名前で通し切った後に始める。#1400 の設計・実装で足した語もこの課題でまとめて置き換える
@@ -71,7 +71,7 @@ NDF の工程の単位「ミッション」（1 つの版として出す課題�
 | 用語 | 意味 |
 | --- | --- |
 | スプリント | 1 つの版として出す課題と Pull Request のセット。期間ではなく、1 つの版として出す中身で切る。工程はスプリント単位で 1 回ずつ通し、モードもスプリントで 1 つにする |
-| スプリント状態ファイル | スプリントのプラン・done・承認ゲートの記録・MVV・版を持つファイル（`sprint.json`） |
+| スプリント状態ファイル | スプリントのプラン・done・承認ゲートの記録・MVV・版を持つファイル（パスは呼ぶ側が決め、手順書の例は `sprint-state.json`。目録 `sprint.json` とは別のファイル） |
 | スプリントブランチ | 課題の Pull Request を集め、ベースブランチへの Pull Request をスプリントで 1 本にするブランチ（`sprint/<名前>`） |
 | スプリント課題 | スプリントに含まれる Pull Request の本文が、閉じる語で指す課題 |
 | スプリント MVV | スプリント単位の MVV。プロジェクト MVV の範囲での具体化 |
@@ -80,7 +80,7 @@ NDF の工程の単位「ミッション」（1 つの版として出す課題�
 
 - [ ] AC1: 用語集で、「ミッション」「ミッション状態ファイル」「ミッションブランチ」「ミッション課題」「ミッション MVV」の 5 語が「用語」の表の 5 語に置き換わり、旧名がそれぞれの `deprecated` に載る。「スプリント」の意味に「期間ではなく 1 つの版として出す中身で切る」が入る。ほかの語の意味の文にも工程の単位の意味の「ミッション」が残らない
 - [ ] AC2: 対象範囲の本文（前提 6 の過去の記録を除く）で `grep -rn ミッション` に当たる行が、MVV の Mission（使命）の意味の行だけになる。`python3 plugins/ndf/scripts/glossary.py check --diff origin/develop --rules all` が 0 で終わる
-- [ ] AC3: `supervise.py new sprint --name M ...` が今の `new mission` と同じプランを書き出し、状態ファイルを `sprint.json`・スプリントブランチを `sprint/<名前>` として作る。`supervise.py new check --sprint <状態>` が今の `--mission` と同じに動く。スクリプト・モジュール・JSON のキーが前提 1 の名前になる
+- [ ] AC3: `supervise.py new sprint --name M ...` が今の `new mission` と同じプランを書き出し、目録を `sprint.json`・スプリントブランチを `sprint/<名前>` として作る。`supervise.py new check --sprint <状態>` が今の `--mission` と同じに動く。スクリプト・モジュール・JSON のキーが前提 1 の名前になる
 - [ ] AC4: 前提 3 の版まで、旧名 `supervise.py new mission`・`--mission`・旧名のスクリプト（`mission-state.py`・`mission-close.py`）が新しい名前と同じ結果を返し、標準エラーに新しい名前を 1 行で案内する。既存の `mission/<名前>` のブランチがあるスプリントは、そのブランチを使い続ける
 - [ ] AC5: 改名の前に `~/.local/state/ndf/sv/` に書かれたプランと `mission.json`（キー `ミッション`・`ブランチ`・`ステージ`）を持つ実行を、改名の後の NDF の `supervise.py queue` に渡すと、止まった所から再開する。`mission.json` はその場で書き換えられない
 - [ ] AC6: 既存のテスト（`uv run --frozen --project . --all-extras pytest . -q -n 4`）が通る。AC3〜AC5 の旧名と新名の両方の呼び方にテストがある
