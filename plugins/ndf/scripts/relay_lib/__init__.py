@@ -24,7 +24,7 @@
 このパッケージの全モジュールを import するため、途中でバージョンディレクトリが替わっても別の版を読まない（決定 5）。
 
 モジュール: `runtime`（ラッパーを動かす python と環境）・`accounts`（アカウントの副命令）・`common`（定数と小さな関数）・`proc`（親のたどり）・`record`（`log.jsonl` と `next.json`）・
-`mark`（hook の本体）・`claude`（本物の claude と会話の記録）・`terminal`（端末と子）・`run`（`Relay`）・
+`mark`（hook の本体）・`claude`（本物の claude と会話の記録）・`terminal`（端末と子）・`run`（`Relay`）・`switch`（区間のアカウント）・
 `shellrc`（シェルの設定の囲み）・`version_dir`（複製）・`install`（導入の副命令）。
 
 規約は skills/development-workflow/references/relay.md にある。

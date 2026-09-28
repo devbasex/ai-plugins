@@ -93,6 +93,7 @@ class Relay(AccountSwitch):
         """区間を起動する。`plan` は上限の後に決めた (アカウント, 理由, 選んだ結果)。無ければここで選ぶ（F4）。"""
         self.record.drop_mark()
         remove(self.path(QUESTION_FILE))
+        remove(self.path(LIMIT_FILE))  # 前の子の上限シグナルファイル（新しい子の hook はまだ書けない）
         prev = self.account
         to, reason, choice = (plan or self.pick(None)) if self.multi else (None, None, None)
         env = cl.section_env(self.env, to) if to else None
