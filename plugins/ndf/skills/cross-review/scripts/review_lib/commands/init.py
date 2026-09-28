@@ -343,11 +343,13 @@ def _init_new_state(
 
     def _prepare_worktree_and_comments(worktree: str, pr: object, head_branch: str, repo: str) -> _InitWorkspaceContext:
         # worktree 分離 — _tmp_dir() より先に worktree を作成/確認する
+        reused = False
         if not pathlib.Path(worktree).exists():
             workspace_mod._create_worktree(worktree, pr, head_branch)
         elif workspace_mod._is_registered_worktree(worktree):
             review_lib.info(f"↻ 既存 worktree 流用: {worktree}")
             workspace_mod._sync_worktree(worktree, pr, head_branch)
+            reused = True
         else:
             # パスは存在するが現リポジトリの worktree ではない (別リポジトリの残骸等)。
             # 流用すると git 操作が壊れるため退避して作り直す。
@@ -355,6 +357,7 @@ def _init_new_state(
             pathlib.Path(worktree).rename(stale)
             review_lib.info(f"⚠ 現リポジトリの worktree でないため退避: {stale}")
             workspace_mod._create_worktree(worktree, pr, head_branch)
+        workspace_mod._prepare_review_deps(worktree, if_unprepared=reused)
 
         # worktree 作成/確認後に _tmp_dir() を呼ぶ (ここで .cross_review/ が作られる)
         tmp_dir = store._tmp_dir(worktree)

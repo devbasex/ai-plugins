@@ -25,6 +25,7 @@ import project_decl
 import repo as repo_lib
 import statefile
 import test_strategy as ts
+import worktree_deps
 
 from .. import ABORT, die, info
 from .. import baseline as baseline_lib
@@ -823,6 +824,7 @@ def _ensure_work_worktree(work: pathlib.Path, head_branch: str) -> None:
     if work.exists():
         if _is_registered_worktree(work):
             _sync_work_worktree(work, head_branch)
+            _prepare_work_deps(work, if_unprepared=True)
             return
         stale = work.with_name(f"work.stale-{time.strftime('%Y%m%d%H%M%S')}")
         work.rename(stale)
@@ -832,6 +834,16 @@ def _ensure_work_worktree(work: pathlib.Path, head_branch: str) -> None:
     sh(["git", "fetch", "origin", head_branch])
     sh(["git", "worktree", "add", "--detach", str(work), f"origin/{head_branch}"])
     info(f"✅ 書き込み用の作業ディレクトリを作成しました: {work}")
+    _prepare_work_deps(work)
+
+
+def _prepare_work_deps(work: pathlib.Path, *, if_unprepared: bool = False) -> None:
+    """宣言（`.ndf/worktree.json` の `deps`）に従って依存を用意する（#1337）。失敗したら止まる。
+
+    作業ディレクトリは消さない。次の init が使い回すときに `if_unprepared` でやり直す。
+    """
+    if worktree_deps.prepare_reporting(work, if_unprepared=if_unprepared):
+        die(f"依存の用意に失敗しました（作業ディレクトリは残します。次の init がやり直します）: {work}")
 
 
 def _sync_work_worktree(work: pathlib.Path, head_branch: str) -> None:

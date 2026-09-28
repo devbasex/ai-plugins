@@ -29,6 +29,7 @@ sys.path.insert(
 )
 
 import assignment  # noqa: E402
+import container_reach  # noqa: E402
 import deps  # noqa: E402
 
 # `refactor_lib` の呼び名の表の読み取り（md）と報告の表（mdtable）が外部パッケージを使う。
@@ -277,7 +278,14 @@ def main() -> None:
     add_report_parser(sub)
 
     args = p.parse_args()
-    args.func(args)
+    try:
+        args.func(args)
+    except container_reach.Unreachable as e:
+        # コンテナで走る suite が worktree を見ていない。走らせると結果はメインディレクトリのコードのもので、
+        # 既存失敗にも通ったことにもしない（#1337）
+        from refactor_lib import die
+
+        die(f"コンテナで走るテストへ作業ディレクトリが届かないため、走らせずに止めます: {e.reason}")
 
 
 if __name__ == "__main__":

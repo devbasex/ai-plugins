@@ -9,6 +9,8 @@ import subprocess
 import time
 from typing import Optional
 
+import container_reach
+
 from . import info
 from .paths import git_out
 
@@ -33,13 +35,18 @@ def run_with_timeout(
     シェルで走らせる。
 
     `output` を渡すと標準出力と標準エラーをそのファイルへ書く（修正担当へ渡す材料）。
+
+    宣言にコンテナで走る suite があれば、そのコンテナが `cwd` を見ているかを先に確かめ、テスト環境の値を足して
+    走らせる。見ていなければ走らせずに `container_reach.Unreachable` を送る（#1337）。
     """
+    extra = container_reach.env_for(cwd)
     sink = open(output, "wb") if output is not None else None
     try:
         proc = subprocess.Popen(
             command,
             shell=isinstance(command, str),
             cwd=cwd,
+            env={**os.environ, **extra} if extra else None,
             start_new_session=True,
             stdout=sink if sink is not None else subprocess.PIPE,
             stderr=subprocess.STDOUT if sink is not None else subprocess.PIPE,

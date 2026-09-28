@@ -343,6 +343,11 @@ do_create() {
   fi
   printf '作業ツリー: %s\n' "$target"
   printf '起点: %s\n' "$base"
+
+  # 共有の宣言に `deps` があるときだけ依存の用意を起こす（#1337）。失敗しても worktree は消さず、
+  # `worktree-deps.sh` の終了コード（1 失敗 / 3 宣言が壊れている）で終わる。
+  wt_deps_declared "$MAIN_DIR" || return 0
+  "$SCRIPT_DIR/worktree-deps.sh" prepare "$target"
 }
 
 case "$SUBCOMMAND" in
