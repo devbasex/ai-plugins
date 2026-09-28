@@ -138,6 +138,10 @@ class AccountSwitch:
             return self._pick_after_limit(kind, cur, declared)
         if cur == ca.METERED:
             return self._pick_from_metered(thr)
+        return self._pick_for_section(cur, thr, declared)
+
+    def _pick_for_section(self, cur: str | None, thr: float, declared: bool) -> tuple[str | None, str | None, ca.Choice | None]:
+        """区間の起動で、今のアカウント（か既定のログイン）から次を選ぶ。"""
         due = self.watch.due if self.watch is not None else None
         usable, score, left = False, None, None
         if cur is not None:
