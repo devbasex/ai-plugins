@@ -26,6 +26,11 @@ import claude_usage as cu  # noqa: E402
 LIMIT_ERRORS = ("rate_limit", "billing_error")
 
 
+def recoverable(c: ca.Choice, thr: float) -> bool:
+    """従量の接続から候補 `c` へ戻せるか（選べて、使用率が閾値 `thr` 未満か不明）。"""
+    return bool(c.name) and (c.score is None or c.score < thr)
+
+
 class UsageWatch:
     """定期の確認（別スレッド）。今のアカウントの使用率を間隔ごとに読み、閾値を超えたら `due` を立てる。
     従量の接続で動く間は登録済みのアカウントすべてを読み、戻せるものがあれば `recover` を立てる。
@@ -61,7 +66,7 @@ class UsageWatch:
         cur, thr = self.relay.account, ca.switch_at()
         if cur == ca.METERED:
             c = ca.choose(before=0)  # 期限を過ぎたトークンだけを更新する
-            if c.name and (c.score is None or c.score < thr):
+            if recoverable(c, thr):
                 if self.recover != c.name:
                     self.lines.put(f"{c.name} の上限が外れた。次のカットポイントで従量の接続から戻す")
                 self.recover = c.name
@@ -123,7 +128,7 @@ class AccountSwitch:
     def _pick_from_metered(thr: float) -> tuple[str | None, str | None, ca.Choice]:
         """従量の接続で動く区間の起動。戻せるアカウントがあれば戻す。"""
         c = ca.choose()
-        if c.name and (c.score is None or c.score < thr):
+        if recoverable(c, thr):
             return c.name, "recovered", c
         return ca.METERED, None, c
 
