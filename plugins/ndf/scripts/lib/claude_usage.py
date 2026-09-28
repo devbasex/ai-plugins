@@ -161,17 +161,18 @@ def _parse_scoped(limits) -> list | None:
         return []
     if not isinstance(limits, list):
         return None
-    out = []
-    for x in limits:
-        if not isinstance(x, dict) or x.get("kind") != "weekly_scoped":
-            continue
-        if not isinstance(x.get("percent"), (int, float)):
-            return None
-        scope = x.get("scope") if isinstance(x.get("scope"), dict) else {}
-        m = scope.get("model") if isinstance(scope.get("model"), dict) else {}
-        model = m.get("display_name") if isinstance(m.get("display_name"), str) else m.get("id")
-        out.append(_scoped_row(model, x["percent"], x.get("resets_at")))
-    return out
+    out = [_parse_scoped_limit(x) for x in limits if isinstance(x, dict) and x.get("kind") == "weekly_scoped"]
+    return None if any(x is None for x in out) else out
+
+
+def _parse_scoped_limit(x: dict) -> dict | None:
+    """`weekly_scoped` の要素 1 つを保存の形へ写す。`percent` が数でなければ None（崩れている）。"""
+    if not isinstance(x.get("percent"), (int, float)):
+        return None
+    scope = x.get("scope") if isinstance(x.get("scope"), dict) else {}
+    m = scope.get("model") if isinstance(scope.get("model"), dict) else {}
+    model = m.get("display_name") if isinstance(m.get("display_name"), str) else m.get("id")
+    return _scoped_row(model, x["percent"], x.get("resets_at"))
 
 
 def _parse_spend(sp) -> dict | None:
