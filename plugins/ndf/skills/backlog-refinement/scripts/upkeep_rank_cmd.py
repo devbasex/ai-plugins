@@ -164,6 +164,49 @@ def _rank_summary(got, excluded, cfg) -> str:
     return s + (f"・外した {len(excluded)} 件" if excluded else "")
 
 
+def _write_rank_result(sd, out, code=None):
+    jsonio.write_atomic(sd / "rank.json", out, indent=1)
+    return emit(out, code)
+
+
+def _build_board(a, gh, rows, order, scores, cfg, sd, ctx, notes):
+    """open の課題・前回の表・見積・依存の辺から Board を作る。戻り値は (board, issues, ests, excluded)。"""
+    open_issues = _issues(gh, "state=open")
+    issues = {
+        i["number"]: {"milestone": (i.get("milestone") or {}).get("title"), "labels": [lb.get("name") for lb in i.get("labels") or []]}
+        for i in open_issues
+    }
+    previous = {r["title"]: tab for r in rows if (tab := R.parse_rank_table(r.get("description") or "")) is not None}
+    ests, excluded = estimates(issues, scores, ctx.read_state(sd / "estimates.json") or {}, previous, cfg)
+    jsonio.write_atomic(sd / "estimates.json", {str(n): e.to_json() for n, e in ests.items()}, indent=1)
+    notes.extend(f"--scores の #{n} は open でないため除いた" for n in (i.get("number") for i in scores.get("issues", [])) if n not in issues)
+    subs = sub_issues(gh, [i["number"] for i in open_issues if (i.get("sub_issues_summary") or {}).get("total")], notes)
+    edges = R.merge_edges(
+        [
+            R.sub_issue_edges(subs),
+            [(n, d) for n, e in ests.items() for d in e.depends_on],
+            [e for r in rows for e in R.parallel_group_edges(r.get("description") or "")],
+        ],
+        set(issues),
+    )
+    rejected = ctx.read_state(sd / "rejected.json") or []
+    board = R.Board(issues, ests, cfg, order, subs, edges, previous, rejected, tuple(a.approved), excluded)
+    return board, issues, ests, excluded
+
+
+def _rank_metrics(repo, order, cfg, got, ests, excluded) -> dict:
+    return {
+        "repo": repo,
+        "order": order,
+        "capacity": cfg.capacity,
+        **{k: got[k] for k in ("milestones", "forward", "backward", "changes", "rejected", "rejected_stale", "cross_milestone_deps")},
+        "excluded": excluded,
+        "waiting_decision": sorted(n for n, e in ests.items() if e.waiting_decision),
+        "needs_detail": {str(n): list(e.needs_detail) for n, e in sorted(ests.items()) if e.needs_detail},
+        "restored": sorted(n for n, e in ests.items() if e.restored),
+    }
+
+
 def cmd_rank(a, ctx):
     root = git_root(a.root)
     repo = _repo(root, a.repo)
@@ -176,30 +219,12 @@ def cmd_rank(a, ctx):
     scores = _read_scores(a.scores, ctx.read_state)
     rows = Milestones(gh).open_rows()
     if not rows:
-        out = result(ctx.tool, "ok", "マイルストーンが無いため順位の算出を飛ばした", [], {"repo": repo, "skipped": True})
-        jsonio.write_atomic(sd / "rank.json", out, indent=1)
-        return emit(out)
+        return _write_rank_result(
+            sd, result(ctx.tool, "ok", "マイルストーンが無いため順位の算出を飛ばした", [], {"repo": repo, "skipped": True})
+        )
     order = R.milestone_order([r["title"] for r in rows], scores.get("milestones"))
-    open_issues = _issues(gh, "state=open")
-    issues = {
-        i["number"]: {"milestone": (i.get("milestone") or {}).get("title"), "labels": [lb.get("name") for lb in i.get("labels") or []]}
-        for i in open_issues
-    }
-    previous = {r["title"]: tab for r in rows if (tab := R.parse_rank_table(r.get("description") or "")) is not None}
-    ests, excluded = estimates(issues, scores, ctx.read_state(sd / "estimates.json") or {}, previous, cfg)
-    jsonio.write_atomic(sd / "estimates.json", {str(n): e.to_json() for n, e in ests.items()}, indent=1)
-    notes = [f"--scores の #{n} は open でないため除いた" for n in (i.get("number") for i in scores.get("issues", [])) if n not in issues]
-    subs = sub_issues(gh, [i["number"] for i in open_issues if (i.get("sub_issues_summary") or {}).get("total")], notes)
-    edges = R.merge_edges(
-        [
-            R.sub_issue_edges(subs),
-            [(n, d) for n, e in ests.items() for d in e.depends_on],
-            [e for r in rows for e in R.parallel_group_edges(r.get("description") or "")],
-        ],
-        set(issues),
-    )
-    rejected = ctx.read_state(sd / "rejected.json") or []
-    board = R.Board(issues, ests, cfg, order, subs, edges, previous, rejected, tuple(a.approved), excluded)
+    notes = []
+    board, issues, ests, excluded = _build_board(a, gh, rows, order, scores, cfg, sd, ctx, notes)
     try:
         got = R.compute_ranking(board)
     except R.CycleError as e:
@@ -212,18 +237,8 @@ def cmd_rank(a, ctx):
             {"repo": repo, "cycle": e.numbers},
             next="循環する依存の記述を直す（どちらを先にするかは人が決める）",
         )
-        jsonio.write_atomic(sd / "rank.json", out, indent=1)
-        return emit(out, EXIT_UNREADABLE)
-    metrics = {
-        "repo": repo,
-        "order": order,
-        "capacity": cfg.capacity,
-        **{k: got[k] for k in ("milestones", "forward", "backward", "changes", "rejected", "rejected_stale", "cross_milestone_deps")},
-        "excluded": excluded,
-        "waiting_decision": sorted(n for n, e in ests.items() if e.waiting_decision),
-        "needs_detail": {str(n): list(e.needs_detail) for n, e in sorted(ests.items()) if e.needs_detail},
-        "restored": sorted(n for n, e in ests.items() if e.restored),
-    }
+        return _write_rank_result(sd, out, EXIT_UNREADABLE)
+    metrics = _rank_metrics(repo, order, cfg, got, ests, excluded)
     metrics["digest"] = R.stable_digest(metrics)
     metrics.update(notes=notes, waits=gh.waits)
     nxt = None
@@ -234,8 +249,7 @@ def cmd_rank(a, ctx):
     out = result(
         ctx.tool, "gate" if excluded else "ok", _rank_summary(got, excluded, cfg), _items(issues, got, excluded), metrics, next=nxt
     )
-    jsonio.write_atomic(sd / "rank.json", out, indent=1)
-    emit(out, EXIT_PAUSE if excluded else None)
+    _write_rank_result(sd, out, EXIT_PAUSE if excluded else None)
 
 
 # ---------------- candidates ----------------
