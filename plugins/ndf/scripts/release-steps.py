@@ -521,16 +521,9 @@ def pr_titles(root, prs, skipped=None):
     return require_merged(items, prs)
 
 
-def cmd_changelog(a):
-    root = git_root(a.root)
+def _update_changelog(root, a, items) -> dict:
+    """CHANGELOG.md へこの版の節を足すか、既存の節へ PR を挿す（見出しは基底の版。開発版の接尾辞は載せない）。"""
     cl = root / "CHANGELOG.md"
-    if not cl.is_file():
-        raise StepError("CHANGELOG.md が無い", EXIT_PRECONDITION)
-    skipped = []
-    items = pr_titles(root, a.prs, skipped)
-    sections = []
-
-    # CHANGELOG.md（見出しは基底の版。開発版の接尾辞は載せない）
     lines = cl.read_text(encoding="utf-8").split("\n")
     a.plugin = plugin_of(root, a)
     head, (at, end) = f"## [{a.plugin} {base_of(a.version)}]", changelog_span(lines, a.plugin, a.version)
@@ -540,9 +533,13 @@ def cmd_changelog(a):
         if first == len(lines) and lines and lines[-1] != "":
             block = [""] + block
         lines[first:first] = block
-        sections.append(
-            {"kind": "section", "name": "CHANGELOG.md", "result": "added", "heading": block[0] or block[1], "added": [n for n, _ in items]}
-        )
+        section = {
+            "kind": "section",
+            "name": "CHANGELOG.md",
+            "result": "added",
+            "heading": block[0] or block[1],
+            "added": [n for n, _ in items],
+        }
     else:
         body = "\n".join(lines[at:end])
         add = [(n, b) for n, b in items if f"#{n}）" not in body and f"#{n})" not in body]
@@ -550,33 +547,49 @@ def cmd_changelog(a):
         while ins - 1 > at and lines[ins - 1].strip() == "":
             ins -= 1
         lines[ins:ins] = [b for _, b in add]
-        sections.append({"kind": "section", "name": "CHANGELOG.md", "result": "added", "heading": lines[at], "added": [n for n, _ in add]})
+        section = {"kind": "section", "name": "CHANGELOG.md", "result": "added", "heading": lines[at], "added": [n for n, _ in add]}
     cl.write_text("\n".join(lines), encoding="utf-8")
+    return section
 
-    # plugin の README の更新案内: 見出しから次の同じ深さの見出しまでを、この版の PR の一覧へ差し替える
+
+def _update_plugin_readme(root, a, items) -> dict | None:
+    """plugin の README の更新案内: 見出しから次の同じ深さの見出しまでを、この版の PR の一覧へ差し替える。"""
     try:
         pdir = plugin_dir(root, a.plugin)
     except StepError:
         pdir = None
     readme = pdir / "README.md" if pdir else None
     h = f"## v{a.version} へ更新するとき"
-    if readme and readme.is_file():
-        rl = readme.read_text(encoding="utf-8").split("\n")
-        i = next((j for j in h2_lines(rl) if rl[j] == h), None)
-        if i is not None:
-            end = next_h2(rl, i)
-            if not any(f"（#{n}）" in l for l in rl[i:end] for n, _ in items):
-                rl[i + 1 : end] = [""] + [b for _, b in items] + [""]
-                readme.write_text("\n".join(rl), encoding="utf-8")
-                sections.append(
-                    {
-                        "kind": "section",
-                        "name": readme.relative_to(root).as_posix(),
-                        "result": "replaced",
-                        "heading": h,
-                        "added": [n for n, _ in items],
-                    }
-                )
+    if not (readme and readme.is_file()):
+        return None
+    rl = readme.read_text(encoding="utf-8").split("\n")
+    i = next((j for j in h2_lines(rl) if rl[j] == h), None)
+    if i is None:
+        return None
+    end = next_h2(rl, i)
+    if any(f"（#{n}）" in l for l in rl[i:end] for n, _ in items):
+        return None
+    rl[i + 1 : end] = [""] + [b for _, b in items] + [""]
+    readme.write_text("\n".join(rl), encoding="utf-8")
+    return {
+        "kind": "section",
+        "name": readme.relative_to(root).as_posix(),
+        "result": "replaced",
+        "heading": h,
+        "added": [n for n, _ in items],
+    }
+
+
+def cmd_changelog(a):
+    root = git_root(a.root)
+    if not (root / "CHANGELOG.md").is_file():
+        raise StepError("CHANGELOG.md が無い", EXIT_PRECONDITION)
+    skipped = []
+    items = pr_titles(root, a.prs, skipped)
+    sections = [_update_changelog(root, a, items)]
+    readme_section = _update_plugin_readme(root, a, items)
+    if readme_section is not None:
+        sections.append(readme_section)
 
     readme_done = any(s["result"] == "replaced" for s in sections)
     emit(
