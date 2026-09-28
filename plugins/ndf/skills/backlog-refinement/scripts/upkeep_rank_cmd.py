@@ -179,7 +179,9 @@ def _build_board(a, gh, rows, order, scores, cfg, sd, ctx, notes):
     previous = {r["title"]: tab for r in rows if (tab := R.parse_rank_table(r.get("description") or "")) is not None}
     ests, excluded = estimates(issues, scores, ctx.read_state(sd / "estimates.json") or {}, previous, cfg)
     jsonio.write_atomic(sd / "estimates.json", {str(n): e.to_json() for n, e in ests.items()}, indent=1)
-    notes.extend(f"--scores の #{n} は open でないため除いた" for n in (i.get("number") for i in scores.get("issues", [])) if n not in issues)
+    notes.extend(
+        f"--scores の #{n} は open でないため除いた" for n in (i.get("number") for i in scores.get("issues", [])) if n not in issues
+    )
     subs = sub_issues(gh, [i["number"] for i in open_issues if (i.get("sub_issues_summary") or {}).get("total")], notes)
     edges = R.merge_edges(
         [
@@ -266,6 +268,11 @@ def unscored(sd, read_state, open_issues, snapshot_digest) -> list[int]:
 # ---------------- apply ----------------
 
 
+def _empty_tables() -> dict:
+    """表の書き込み結果の空の形。呼ぶたびに新しい dict を返す。"""
+    return {"written": [], "unchanged": [], "truncated": {}, "failed": []}
+
+
 def _rejected_by_length(e: StepError) -> bool:
     return "422" in str(e) or "Validation Failed" in str(e)
 
@@ -298,7 +305,7 @@ class RankPlan:
         self.metrics = (self.out or {}).get("metrics") or {}
         self.stale = bool(plan.get("rank")) and plan.get("rank") != self.metrics.get("digest")
         self.holds: dict = {}
-        self.tables = {"written": [], "unchanged": [], "truncated": {}, "failed": []}
+        self.tables = _empty_tables()
         if self.used:
             self._check()
 
@@ -356,7 +363,7 @@ class RankPlan:
 
     def write_tables(self, ms: Milestones) -> dict:
         """各マイルストーンの説明の `### 順位` の節を書く（I5・I6・AC11）。拒まれたら行を半分ずつ減らす（決定 15）。"""
-        got = {"written": [], "unchanged": [], "truncated": {}, "failed": []}
+        got = _empty_tables()
         if ms is None or not self.plan.get("rank") or self.stale:
             return got
         current = {r["title"]: r for r in ms.open_rows()}
