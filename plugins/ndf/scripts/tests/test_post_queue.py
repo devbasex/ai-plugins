@@ -560,3 +560,59 @@ def test_flush_cli_prints_the_dropped_count(tmp_path: pathlib.Path, monkeypatch:
 
     out = capsys.readouterr().out
     assert "PENDING_DROPPED=1" in out and "PENDING_REMAINING=0" in out
+
+
+# ---------------- 未解決のスレッドの識別子（I-011 の現状固定） ----------------
+
+
+def test_unresolved_thread_ids_returns_stripped_nonblank_lines(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """現状固定。gh の出力の行を前後の空白を除いて返し、空行は捨てる。"""
+    calls: list[list[str]] = []
+    out = post_queue.Attempt(0, "T_1\n  T_2  \n\n   \nT_3\n", "")
+    monkeypatch.setattr(post_queue, "run", _run_returning([out], calls))
+
+    assert post_queue.unresolved_thread_ids("octo/repo", 12) == ["T_1", "T_2", "T_3"]
+    assert len(calls) == 1
+    cmd = calls[0]
+    assert cmd[:5] == ["gh", "api", "graphql", "--paginate", "-F"]
+    assert "owner=octo" in cmd
+    assert "name=repo" in cmd
+    assert "pr=12" in cmd
+    assert f"query={post_queue._UNRESOLVED_QUERY}" in cmd
+    assert cmd[-2:] == ["--jq", post_queue._UNRESOLVED_JQ]
+
+
+def test_unresolved_thread_ids_empty_output_is_empty_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """現状固定。成功して出力が空なら、`None` ではなく空の一覧を返す。"""
+    calls: list[list[str]] = []
+    monkeypatch.setattr(post_queue, "run", _run_returning([post_queue.Attempt(0, "", "")], calls))
+
+    assert post_queue.unresolved_thread_ids("octo/repo", "7") == []
+    assert "pr=7" in calls[0]
+
+
+def test_unresolved_thread_ids_failure_is_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """現状固定。gh が失敗したら `None`（0 件と区別する）。"""
+    calls: list[list[str]] = []
+    monkeypatch.setattr(post_queue, "run", _run_returning([_NORMAL_FAIL], calls))
+
+    assert post_queue.unresolved_thread_ids("octo/repo", 1) is None
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("repo", ["", None, "octo", "octo/", "/repo"])
+def test_unresolved_thread_ids_bad_repo_is_none_without_calling_gh(
+    monkeypatch: pytest.MonkeyPatch, repo: Any
+) -> None:
+    """現状固定。`owner/name` の形でない repo は gh を呼ばずに `None`。"""
+    calls: list[list[str]] = []
+    monkeypatch.setattr(post_queue, "run", _run_returning([], calls))
+
+    assert post_queue.unresolved_thread_ids(repo, 1) is None
+    assert calls == []
