@@ -24,7 +24,7 @@ import jsonio
 import repo as repo_lib
 import upkeep_rank as R
 from step_result import EXIT_PAUSE, EXIT_UNREADABLE, StepError, emit, git_root, result
-from upkeep_gh import Gh, Milestones, _issues, _repo, sub_issues
+from upkeep_gh import Gh, Milestones, list_issues, target_repo, sub_issues
 
 DECL = Path(".ndf") / "backlog.json"
 NO_WORK_ROLLBACK = "閉じた課題を reopen し、wontfix を外す（本文は GitHub の編集履歴から戻せる）"
@@ -171,7 +171,7 @@ def _write_rank_result(sd, out, code=None):
 
 def _build_board(a, gh, rows, order, scores, cfg, sd, ctx, notes):
     """open の課題・前回の表・見積・依存の辺から Board を作る。戻り値は (board, issues, ests, excluded)。"""
-    open_issues = _issues(gh, "state=open")
+    open_issues = list_issues(gh, "state=open")
     issues = {
         i["number"]: {"milestone": (i.get("milestone") or {}).get("title"), "labels": [lb.get("name") for lb in i.get("labels") or []]}
         for i in open_issues
@@ -211,7 +211,7 @@ def _rank_metrics(repo, order, cfg, got, ests, excluded) -> dict:
 
 def cmd_rank(a, ctx):
     root = git_root(a.root)
-    repo = _repo(root, a.repo)
+    repo = target_repo(root, a.repo)
     gh = Gh(repo)
     sd = ctx.state_dir(a.state_dir, repo)
     try:

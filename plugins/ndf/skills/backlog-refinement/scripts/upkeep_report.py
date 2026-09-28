@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from step_result import EXIT_PRECONDITION, StepError, emit, git_root, result
-from upkeep_gh import _repo
+from upkeep_gh import target_repo
 from upkeep_rank_config import SLOT_SPLIT
 
 
 def cmd_report(a, ctx):
     root = git_root(a.root)
-    repo = _repo(root, a.repo)
+    repo = target_repo(root, a.repo)
     sd = ctx.state_dir(a.state_dir, repo)
     cand, app, rank = (ctx.read_state(sd / f"{f}.json") for f in ("candidates", "apply", "rank"))
     if cand is None and app is None and rank is None:

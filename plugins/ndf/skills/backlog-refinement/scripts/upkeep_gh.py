@@ -93,7 +93,7 @@ class Gh:
             self.sleep(seconds)
 
 
-def _repo(root, arg) -> str:
+def target_repo(root, arg) -> str:
     if arg:
         return arg
     p = post_queue.run(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
@@ -102,7 +102,7 @@ def _repo(root, arg) -> str:
     return p.stdout.strip()
 
 
-def _issues(gh: Gh, query: str) -> list[dict]:
+def list_issues(gh: Gh, query: str) -> list[dict]:
     rows = gh.call([f"repos/{gh.repo}/issues?{query}&per_page=100"], paginate=True) or []
     return [r for r in rows if isinstance(r, dict) and not r.get("pull_request")]
 
@@ -158,7 +158,7 @@ def sub_issues(gh: Gh, parents, notes: list) -> dict:
     return out
 
 
-def _with_labels(cur: dict, got, add=(), drop=None) -> dict:
+def with_labels(cur: dict, got, add=(), drop=None) -> dict:
     """ラベルの書き込みの応答（いまのラベルの一覧）を課題へ写す。応答が無ければ手元で足し引きする。"""
     if isinstance(got, list):
         labels = [lb if isinstance(lb, dict) else {"name": lb} for lb in got]

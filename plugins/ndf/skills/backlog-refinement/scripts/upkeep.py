@@ -76,7 +76,7 @@ from step_result import (
 )
 import upkeep_rank_cmd as RC  # noqa: E402
 import upkeep_report  # noqa: E402
-from upkeep_gh import DEFAULT_MAX_WAIT, DEFAULT_MAX_WAITS, Gh, Milestones, Partial, _issues, _repo, _sub_issue_kids, _with_labels  # noqa: E402
+from upkeep_gh import DEFAULT_MAX_WAIT, DEFAULT_MAX_WAITS, Gh, Milestones, Partial, list_issues, target_repo, _sub_issue_kids, with_labels  # noqa: E402
 
 TOOL = "backlog-refinement"
 
@@ -230,7 +230,7 @@ def _route_diff(open_issues, root, since_ref, routes):
 
 def _route_milestones(gh, repo, open_issues, since, routes, notes):
     milestones = gh.call([f"repos/{repo}/milestones?state=all&per_page=100"], paginate=True) or []
-    closed = [c for c in _issues(gh, f"state=closed&since={since}") if (c.get("closed_at") or "") >= since]
+    closed = [c for c in list_issues(gh, f"state=closed&since={since}") if (c.get("closed_at") or "") >= since]
     empty_milestones = []
     if milestones:
         for i in open_issues:
@@ -344,10 +344,10 @@ def _candidate_result(a, repo, since, open_issues, closed, paths, idents, routes
 
 def cmd_candidates(a):
     root = git_root(a.root)
-    repo = _repo(root, a.repo)
+    repo = target_repo(root, a.repo)
     gh = Gh(repo)
     since = _ref_date(root, a.since_ref)
-    open_issues = _issues(gh, "state=open")
+    open_issues = list_issues(gh, "state=open")
     routes = _Routes(open_issues)
     notes = []
 
@@ -458,11 +458,11 @@ def _apply_one(gh, ms, repo, act, rec, record, hold=None):
                 stdin=json.dumps({"labels": add}, ensure_ascii=False),
                 target=n,
             )
-            cur, wrote = _with_labels(cur, got, add=add), True
+            cur, wrote = with_labels(cur, got, add=add), True
         for lb in remove:
             seg = urllib.parse.quote(lb, safe="")  # `status/blocked` の `/` を別のパスにしない
             got = gh.call([f"repos/{repo}/issues/{n}/labels/{seg}", "-X", "DELETE"], target=n)
-            cur, wrote = _with_labels(cur, got, drop=lb), True
+            cur, wrote = with_labels(cur, got, drop=lb), True
         record({"result": "applied", "fields": sorted(patch), "add_labels": add, "remove_labels": remove})
         return "applied", ", ".join(sorted(patch) + [f"+{x}" for x in add] + [f"-{x}" for x in remove])
     except (Partial, StepError) as e:
@@ -524,7 +524,7 @@ def _apply_outcome(repo, actions, buckets, partial, why_partial, prev, waits, rp
 def cmd_apply(a):
     root = git_root(a.root)
     plan = _load_plan(a.plan)
-    repo = a.repo or plan.get("repo") or _repo(root, None)
+    repo = a.repo or plan.get("repo") or target_repo(root, None)
     sd = _state_dir(a.state_dir, repo)
     ledger_path = sd / "ledger.json"
     ledger = _read_state(ledger_path) or {}
