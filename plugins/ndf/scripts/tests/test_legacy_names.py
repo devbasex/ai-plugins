@@ -272,3 +272,14 @@ def test_old_names_live_only_in_the_table():
         text = p.read_text(encoding="utf-8", errors="replace")
         hits += [f"{p.relative_to(SCRIPTS)}: {n}" for n in old_names() if re.search(re.escape(n), text)]
     assert hits == []
+
+
+def test_old_skill_name_is_forwarded_with_a_notice(capsys):
+    """#1429 の決定 20: 旧名の Skill は新しい名前へ引き、案内を 1 行出す。旧名でない名前はそのまま返す。"""
+    assert ln.skill_name("issue-upkeep") == "backlog-refinement"
+    assert "backlog-refinement" in capsys.readouterr().err
+    assert ln.skill_name("worktree") == "worktree"
+    assert capsys.readouterr().err == ""
+    with pytest.raises(SystemExit) as e:
+        ln.skill_name("issue-upkeep", mode="refuse")
+    assert e.value.code == 2

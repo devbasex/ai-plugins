@@ -635,3 +635,103 @@ def test_verify_install_source_comes_from_origin_and_declaration(repo):
     write(repo, ".ndf/worktree.json", json.dumps({"version": 1, "base_branch": "trunk", "production_branch": "live"}))
     where, _ = mod.install_source(repo, argparse.Namespace(ref="trunk", plugins="foo"))
     assert where[2] == "live"
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["ok", "version_mismatch", "failed", "file_mismatch", "user_env_changed"],
+)
+def test_verify_install_assembles_items_and_metrics(tmp_path, monkeypatch, case):
+    """現状固定: cmd_verify_install が導入の結果・中身の比較・利用者の環境から items と metrics を組み立てる。"""
+    import argparse
+    import types
+
+    mod = load_verification()
+    calls = []
+
+    def fake_git(root, *args):
+        calls.append(args)
+        out = {
+            "rev-parse": "abcdef1234567890\n",
+            "tag": "ndf--v1.2.0 ndf--v1.1.0-dev.3 ndf--v1.1.0 ndf--v1.0.0\n",
+            "diff": "plugins/ndf/a.txt plugins/ndf/b.txt\n",
+        }.get(args[0], "")
+        return types.SimpleNamespace(stdout=out)
+
+    def fake_run(cmd, **kw):
+        return types.SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+
+    snaps = iter([{"claude": "x"}, {"claude": "y" if case == "user_env_changed" else "x"}])
+    seen = {}
+
+    def verify_claude(env, ref, plugins, expect, where):
+        code = 1 if case == "failed" else 0
+        ver = "9.9.9" if case == "version_mismatch" else "1.2.0"
+        return {"exit": code, "version": {"ndf": ver, "mcp-serena": "0.1.0"}}, {"ndf": tmp_path / "inst", "mcp-serena": None}
+
+    def compare_files(src, d, rel, changed, name, keeps_symlinks):
+        seen["compare"] = (rel, changed, name, keeps_symlinks)
+        return ["claude: a.txt が違う"] if case == "file_mismatch" else []
+
+    emitted = []
+    monkeypatch.setattr(mod, "git_root", lambda r: tmp_path)
+    monkeypatch.setattr(mod, "install_source", lambda root, a: (("o/r", "m", "main"), ["ndf", "mcp-serena"]))
+    monkeypatch.setattr(mod, "plugin_dir", lambda root, p: root / "plugins" / p)
+    monkeypatch.setattr(mod, "git", fake_git)
+    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(mod, "user_env_snapshot", lambda: next(snaps))
+    monkeypatch.setattr(mod, "isolated_env", lambda tmp: {})
+    monkeypatch.setattr(mod, "verify_claude", verify_claude)
+    monkeypatch.setattr(mod, "compare_files", compare_files)
+    monkeypatch.setattr(mod, "emit", emitted.append)
+
+    a = argparse.Namespace(root=str(tmp_path), ref="develop", expect="1.2.0", runtimes="claude", plugins=None)
+    mod.cmd_verify_install(a)
+    out = emitted[0]
+
+    assert ("tag", "--list", "ndf--v*", "--sort=-v:refname") in calls
+    # 前の正式版は今の版と開発版を除いた最新のタグ
+    assert out["metrics"]["prev_tag"] == "ndf--v1.1.0"
+    assert ("diff", "--name-only", "ndf--v1.1.0", "abcdef1234567890", "--", "plugins/ndf") in calls
+    assert seen["compare"] == ("plugins/ndf", ["plugins/ndf/a.txt", "plugins/ndf/b.txt"], "claude", True)
+    assert out["metrics"]["rev"] == "abcdef12" and out["metrics"]["ref"] == "develop"
+    kinds = [(i["kind"], i["name"], i["result"]) for i in out["items"]]
+    assert ("file", "claude: mcp-serena の導入先が無い", "mismatch") in kinds
+    rt = {"ok": "ok", "version_mismatch": "version_mismatch", "failed": "failed"}.get(case, "ok")
+    assert ("runtime", "claude", rt) in kinds
+    assert out["status"] == "stopped"  # mcp-serena の導入先が無いので常に止まる
+    assert out["metrics"]["user_env_unchanged"] is (case != "user_env_changed")
+    if case == "user_env_changed":
+        assert ("user_env", "claude", "changed") in kinds
+    assert out["metrics"]["mismatch"] == (2 if case == "file_mismatch" else 1)
+
+
+def test_verify_install_all_ok_emits_ok(tmp_path, monkeypatch):
+    """現状固定: 版・中身・利用者の環境がそろえば ok で、summary に ref と版が出る。"""
+    import argparse
+    import types
+
+    mod = load_verification()
+
+    def fake_git(root, *args):
+        out = {"rev-parse": "abcdef1234567890\n", "tag": "ndf--v1.2.0\n"}.get(args[0], "")
+        return types.SimpleNamespace(stdout=out)
+
+    emitted = []
+    monkeypatch.setattr(mod, "git_root", lambda r: tmp_path)
+    monkeypatch.setattr(mod, "install_source", lambda root, a: (("o/r", "m", "main"), ["ndf"]))
+    monkeypatch.setattr(mod, "plugin_dir", lambda root, p: root / "plugins" / p)
+    monkeypatch.setattr(mod, "git", fake_git)
+    monkeypatch.setattr(mod.subprocess, "run", lambda cmd, **kw: types.SimpleNamespace(returncode=0, stdout=b"", stderr=b""))
+    monkeypatch.setattr(mod, "user_env_snapshot", lambda: {"k": "v"})
+    monkeypatch.setattr(mod, "isolated_env", lambda tmp: {})
+    monkeypatch.setattr(mod, "verify_codex", lambda *a: ({"exit": 0, "version": "1.2.0"}, {"ndf": tmp_path}))
+    monkeypatch.setattr(mod, "compare_files", lambda *a, **k: [])
+    monkeypatch.setattr(mod, "emit", emitted.append)
+
+    mod.cmd_verify_install(argparse.Namespace(root=None, ref="develop", expect="1.2.0", runtimes="codex", plugins=None))
+    out = emitted[0]
+    assert out["status"] == "ok"
+    assert out["metrics"]["prev_tag"] is None and out["metrics"]["mismatch"] == 0
+    assert [(i["kind"], i["name"], i["result"]) for i in out["items"]] == [("runtime", "codex", "ok")]
+    assert "develop（abcdef12）" in out["summary"] and "v1.2.0" in out["summary"]

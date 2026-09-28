@@ -14,7 +14,7 @@
 | [doc-consistency-checks.md](doc-consistency-checks.md) | リンクのチェック（見出しへの参照・`issues/` の走査・インラインコード）と、版と配布の正本のチェック J（版数の例を例どうしで比べる規則）。書き方は正本とチェックスクリプトが正 |
 | [ndf-worktree-declaration-and-entry-points.md](ndf-worktree-declaration-and-entry-points.md) | 設定を共有と個人に分ける重ね合わせ、追従を既定で止めること、読めない設定と `init` の終了コード、編集の案内が読む書き込み先の抽出。手順は `worktree` の SKILL.md と `references/declaration.md` が正 |
 | [ndf-testenv-lock-and-registry.md](ndf-testenv-lock-and-registry.md) | テスト環境の排他の判定を陳腐化の規則へ揃えたこと、worktree レジストリへ書けなかったときの扱い。手順は `worktree` の `references/test-execution.md` が正 |
-| [ndf-issue-upkeep-root-cause.md](ndf-issue-upkeep-root-cause.md) | 溜まった課題を根本原因の場所で直す判定（ルートコーズ）と、構造の判断の担い手。親 issue とサブイシューの実測、マイルストーンを連番で読む理由。手順は `issue-upkeep` の SKILL.md と `references/` が正 |
+| [ndf-issue-upkeep-root-cause.md](ndf-issue-upkeep-root-cause.md) | 溜まった課題を根本原因の場所で直す判定（ルートコーズ）と、構造の判断の担い手。親 issue とサブイシューの実測、マイルストーンを連番で読む理由。手順は `backlog-refinement` の SKILL.md と `references/` が正 |
 | [cross-review-evidence-based.md](cross-review-evidence-based.md) | 証拠ベースのレビューと効果の測定。状態ファイルの契約と決定の理由。手順は `cross-review` の `SKILL.md` が正 |
 | [cross-review-launch-outcome.md](cross-review-launch-outcome.md) | 起動結果の語彙（理由 9 語）とリトライ可否、利用上限と CLI の上限の検知、プロセスグループでの起動と停止。手順は `cross-review` の `SKILL.md` と `docs/` が正 |
 | [cross-review-participants-and-seats.md](cross-review-participants-and-seats.md) | 利用可能な参加者だけで収束ループを始めるライブラリ（認証確認を止めない形・参加者プールと足す者／外す者・毎ラウンド 2 スロットの埋め方・スロット名・cross-refactoring の実装担当の決め方 `choose_implementer`）と、再開で渡した引数の反映。手順は `cross-review` の `SKILL.md` と `docs/` が正 |

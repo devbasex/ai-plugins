@@ -532,6 +532,18 @@ def test_mvv_sections_keep_a_heading_inside_a_fence():
     assert out == ("## Mission\n\n使命\n\n```md\n## 囲みの中\n```\n\n## Vision\n\n像\n\n## Value\n\n価値\n")
 
 
+def test_mvv_sections_leave_out_the_backlog_tables():
+    """#1429 の決定 16: 説明の末尾の `### 並列の組（見込み）` と `### 順位` はスプリント MVV へ写さない。"""
+    text = (
+        "## Mission\n\n使命\n\n## Vision\n\n像\n\n## Value\n\n価値\n\n### 並列の組（見込み）\n\n| 組 | 課題 |\n\n"
+        "### 順位\n\n| 順位 | 課題 |\n<!-- ndf:section-end -->\n"
+    )
+    load_sprint_state()
+    import sprint_mvv
+
+    assert sprint_mvv.mvv_sections(text) == "## Mission\n\n使命\n\n## Vision\n\n像\n\n## Value\n\n価値\n"
+
+
 def test_find_section_skips_headings_inside_a_fence():
     text = "# 文書\n\n```\n## 今の会話の進み\n```\n\n## 今の会話の進み\n\n本文\n\n## 次\n"
     head_start, body_start, body_end, head_line = load_sprint_state().find_section(text, "今の会話の進み")

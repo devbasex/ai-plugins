@@ -42,7 +42,7 @@ description: "Fix bugs and data inconsistencies upstream at the root cause. Use 
 **「上流で直す」と、棚卸の「ルートコーズ」は見る対象が違う。** ここで上流をたどるのは、
 見つけて直している最中の不具合である。起票済みの課題を一覧で見比べ、現れている場所ではなく
 根本原因の場所で直すと決めるのは、課題の棚卸の「ルートコーズ」である
-（[issue-upkeep](../issue-upkeep/SKILL.md)）。
+（[backlog-refinement](../backlog-refinement/SKILL.md)）。
 
 ### 再現テストを先に書く（必須）
 
@@ -204,4 +204,4 @@ SQLクエリ結果をそのまま貼り、「コードを読んだ推測」と�
 - `/ndf:cherry-pick-pr` — 複数ブランチへの修正適用戦略
 - `/ndf:logging-guidelines` — ログ設計（原因特定を容易にする）
 - `/ndf:out-of-scope` — 根本原因が今回の範囲の外にあったときの起票と、起票先のリポジトリの判断
-- `/ndf:issue-upkeep` — 溜まった課題を、根本原因の場所で直すと決める（ルートコーズ）
+- `/ndf:backlog-refinement` — 溜まった課題を、根本原因の場所で直すと決める（ルートコーズ）

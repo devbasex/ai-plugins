@@ -87,17 +87,8 @@ def _issue_repo(root: Path) -> str | None:
     return repo.owner_repo(root)
 
 
-def collect_materials(root: Path, a) -> dict:
-    started = time.monotonic()
-    dl = Deadline(a.budget)
-    settings, err = pm.read_settings(root)
-    if err:
-        raise StepError(err, EXIT_PRECONDITION)
-    th = {
-        "commits": a.trend_commits if a.trend_commits is not None else settings["trend_commits"],
-        "issues": a.trend_issues if a.trend_issues is not None else settings["trend_issues"],
-    }
-    missing: list[dict] = []
+def _collect_commits(root: Path, dl, missing: list) -> tuple[int, list[str]]:
+    """コミットの数と件名。読めなければ missing に残す。"""
     commits: list[str] = []
     n_commits = 0
     p = _run_bounded(["git", "rev-list", "--count", "HEAD"], root, dl)
@@ -110,6 +101,11 @@ def collect_materials(root: Path, a) -> dict:
             missing.append({"what": "コミットの件名", "reason": q})
         else:
             commits = [ln for ln in q.stdout.splitlines() if ln.strip()]
+    return n_commits, commits
+
+
+def _collect_issues(root: Path, dl, missing: list) -> list[dict]:
+    """課題の一覧。読めなければ missing に残す。"""
     issues: list[dict] = []
     slug = _issue_repo(root)
     if not slug:
@@ -125,8 +121,11 @@ def collect_materials(root: Path, a) -> dict:
                 issues = json.loads(q.stdout or "[]")
             except ValueError:
                 missing.append({"what": "課題", "reason": "gh の出力を読めない"})
-    counts = {"commits": n_commits, "issues": len(issues)}
-    mode = "trend" if counts["commits"] < th["commits"] and counts["issues"] < th["issues"] else "history"
+    return issues
+
+
+def _collect_sources(root: Path, a, mode: str, issues: list[dict], commits: list[str], missing: list) -> list[dict]:
+    """素材（依頼文・README・指示書と、history なら決定の文書・課題・コミット）を集める。"""
     raw: list[dict] = []
     if a.request_file:
         try:
@@ -146,6 +145,25 @@ def collect_materials(root: Path, a) -> dict:
         for it in sorted(issues, key=lambda x: -int(x.get("number") or 0))[:MAX_ISSUES]:
             raw.append({"kind": "issue", "ref": f"#{it.get('number')}", "text": _clean(f"{it.get('title', '')}\n\n{it.get('body') or ''}")})
         raw += [{"kind": "commit", "ref": redact(ln), "text": redact(ln)} for ln in commits]
+    return raw
+
+
+def collect_materials(root: Path, a) -> dict:
+    started = time.monotonic()
+    dl = Deadline(a.budget)
+    settings, err = pm.read_settings(root)
+    if err:
+        raise StepError(err, EXIT_PRECONDITION)
+    th = {
+        "commits": a.trend_commits if a.trend_commits is not None else settings["trend_commits"],
+        "issues": a.trend_issues if a.trend_issues is not None else settings["trend_issues"],
+    }
+    missing: list[dict] = []
+    n_commits, commits = _collect_commits(root, dl, missing)
+    issues = _collect_issues(root, dl, missing)
+    counts = {"commits": n_commits, "issues": len(issues)}
+    mode = "trend" if counts["commits"] < th["commits"] and counts["issues"] < th["issues"] else "history"
+    raw = _collect_sources(root, a, mode, issues, commits, missing)
     sources = [{"id": f"S{i}", **s} for i, s in enumerate(raw, 1)]
     return {
         "root": str(root),

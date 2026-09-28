@@ -128,6 +128,11 @@ case "$NAME" in */*|.|..) usage ;; esac
 
 ROOT=$(find_root) || die "NDF のプラグインルートが見つからない（$MARKER を持つ候補が無い。候補の順序は skills/development-workflow/references/scripts-lookup.md）"
 
+# 旧名の Skill は新しい名前へ引く（旧名の表は scripts/lib/legacy_names.py だけが持つ）。案内は標準エラーへ出る
+if [ -n "$NAME" ] && [ ! -d "$ROOT/skills/$NAME" ] && [ -f "$ROOT/scripts/lib/legacy_names.py" ]; then
+  NAME=$(python3 "$ROOT/scripts/lib/legacy_names.py" skill "$NAME") || exit $?
+fi
+
 case "$KIND" in
   root) echo "$ROOT" ;;
   scripts)
