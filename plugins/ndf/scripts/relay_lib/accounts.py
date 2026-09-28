@@ -29,14 +29,24 @@ def _env(config_dir: str) -> dict:
     return env
 
 
+def _auth(claude: str, config_dir: str, *args: str) -> subprocess.CompletedProcess | None:
+    """専用の設定ディレクトリで `claude auth <副命令>` を起動する。起動できなければ None。"""
+    try:
+        return subprocess.run(
+            [claude, "auth", *args], env=_env(config_dir), stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 def _email(claude: str, config_dir: str) -> str | None:
     """専用の設定ディレクトリの `claude auth status`（JSON）からメールアドレスを読む。"""
+    p = _auth(claude, config_dir, "status", "--json")
+    if p is None:
+        return None
     try:
-        p = subprocess.run(
-            [claude, "auth", "status", "--json"], env=_env(config_dir), stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30
-        )
         d = json.loads(p.stdout)
-    except (OSError, subprocess.SubprocessError, ValueError):
+    except ValueError:
         return None
     if not isinstance(d, dict) or not d.get("loggedIn") or not isinstance(d.get("email"), str):
         return None
@@ -120,18 +130,8 @@ def cmd_remove(name: str) -> int:
     claude = cl.resolve_claude()
     ok = False
     if claude is not None:
-        try:
-            p = subprocess.run(
-                [claude, "auth", "logout"],
-                env=_env(ca.account_dir(name)),
-                stdin=subprocess.DEVNULL,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            ok = p.returncode == 0
-        except (OSError, subprocess.SubprocessError):
-            ok = False
+        p = _auth(claude, ca.account_dir(name), "logout")
+        ok = p is not None and p.returncode == 0
     if not ok:
         print("claude auth logout が通らなかった（登録は外す）", file=sys.stderr)
     ca.unregister(name)
