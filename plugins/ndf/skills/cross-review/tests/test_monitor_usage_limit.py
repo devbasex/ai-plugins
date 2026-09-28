@@ -124,6 +124,9 @@ NOT_USAGE_LIMIT_LINES = [
     ("Python の文字列", f'    CLAUDE_WEEKLY = "{CLAUDE_WEEKLY}"'),
     ("差分の追加行", f"+{CODEX_USAGE_LIMIT_PREFIXED}"),
     ("差分の文脈行", f" {CLAUDE_SESSION}"),
+    # PR 1404 のテストの定義を codex が読み上げた行（2026-09-28 の実物）。JSON の結果行ではない
+    ("Python の辞書", 'LIMIT = {"out": {"result": "' + CLAUDE_SESSION + '", "is_error": True, "api_error_status": 429}, "code": 1}'),
+    ("差分の追加行の JSON", "+" + CLAUDE_429),
 ]
 
 

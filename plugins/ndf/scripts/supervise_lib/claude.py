@@ -7,18 +7,19 @@
 from __future__ import annotations
 
 import json
+import math
 import os
-import re
 import shlex
 import signal
 import subprocess
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
+import claude_accounts as ca
 import procs
 import usage_ledger
+from claude_usage import LIMIT_EPOCH, kind_of_text, limit_reset_at  # noqa: F401  上限の文言の読みは部品が持つ
 from monitor import USAGE_LIMIT_FATAL  # 利用上限の文言の表
 from supervise_lib.prompts import JUDGE_SYSTEM, PR_SYSTEM, SLOW_SYSTEM
 
@@ -72,9 +73,6 @@ FULL_TOOLS = "Read,Edit,Write,Bash,Grep,Glob,Skill,Agent,Monitor,SendMessage,Too
 TAIL = 6000  # LLM へ渡す出力の末尾の文字数
 LIMIT_RETRY = 900  # 利用上限の解除時刻が読めないときの待ち（秒）。計画の "limit_retry_seconds"
 LIMIT_WAIT_MAX = 10800  # 利用上限の待ちの最大（秒）。計画の "limit_wait_max"
-# claude の古い形の上限の文言（`Claude AI usage limit reached|<解除の UNIX 時刻>`）
-LIMIT_EPOCH = re.compile(r"usage limit reached\|(\d{9,11})", re.I)
-LIMIT_RESETS = re.compile(r"resets?(?:\s+at)?\s+(\d{1,2})(?::(\d{2}))?\s*([ap]m)?(?:\s*\(([^)]+)\))?", re.I)
 TICK = 5.0  # 子プロセスの待ちを区切って見る秒数の上限
 
 
@@ -142,6 +140,22 @@ def run_ticking(
             errf.close()
 
 
+def minimal_args(system: str) -> list[str]:
+    """claude -p を最小構成（設定・MCP・スラッシュコマンドを読まず、会話を残さない）で起動する引数。"""
+    return [
+        "-p",
+        "--output-format",
+        "json",
+        "--no-session-persistence",
+        "--setting-sources",
+        "",
+        "--strict-mcp-config",
+        "--disable-slash-commands",
+        "--system-prompt",
+        system,
+    ]
+
+
 def claude_cmd(system: str, tools: str | None, cwd: str, full: bool = False, serena: bool = False, resume: str | None = None) -> list[str]:
     base = shlex.split(os.environ.get("NDF_SUPERVISE_CLAUDE", "claude"))
     if full:
@@ -163,18 +177,7 @@ def claude_cmd(system: str, tools: str | None, cwd: str, full: bool = False, ser
             ]
             + (["--resume", resume] if resume else [])
         )
-    cmd = base + [
-        "-p",
-        "--output-format",
-        "json",
-        "--no-session-persistence",
-        "--setting-sources",
-        "",
-        "--strict-mcp-config",
-        "--disable-slash-commands",
-        "--system-prompt",
-        system,
-    ]
+    cmd = base + minimal_args(system)
     if tools:
         allowed = tools
         if serena:
@@ -208,10 +211,11 @@ def call_claude(
     env: dict | None = None,
     tick=None,
     every: float = TICK,
+    child_env: dict | None = None,
 ) -> dict:
     """claude -p を 1 回呼び、結果の本文と使用量を返す（既定は最小構成）。
 
-    `env` は環境に足す変数（認証の切り替え）。利用上限で落ちたら `"limit": true` と、読めれば
+    `env` は環境に足す変数（認証の切り替え）。`child_env` を渡すと環境をそれで置き換える（アカウントの切り替え）。利用上限で落ちたら `"limit": true` と、読めれば
     解除の時刻（UNIX 時刻）を `"resets_at"` に残す。`tick` は待ちの間に every 秒ごとに呼ぶ。
     """
     started = time.time()
@@ -223,7 +227,7 @@ def call_claude(
             input=prompt,
             cwd=cwd,
             timeout=timeout,
-            env={**os.environ, **env} if env else None,
+            env=child_env if child_env is not None else ({**os.environ, **env} if env else None),
         )
     except subprocess.TimeoutExpired:
         return ClaudeCall(
@@ -260,49 +264,20 @@ def is_usage_limit(text: str) -> bool:
     return any(rx.search(text or "") for rx in USAGE_LIMIT_FATAL) or bool(LIMIT_EPOCH.search(text or ""))
 
 
-def limit_reset_at(text: str, now: float | None = None) -> float | None:
-    """上限の文言から解除の時刻（UNIX 時刻）を読む。読めなければ None。
-
-    読む形: `usage limit reached|<UNIX 時刻>` と `resets 3pm (Asia/Tokyo)` / `resets at 15:30`。
-    時刻だけの形は、今より後の最初のその時刻（時間帯が無ければ手元の時間帯）とする。
-    """
-    now = time.time() if now is None else now
-    m = LIMIT_EPOCH.search(text or "")
-    if m:
-        return float(m.group(1))
-    m = LIMIT_RESETS.search(text or "")
-    if not m:
-        return None
-    hour, minute, ampm, zone = int(m.group(1)), int(m.group(2) or 0), (m.group(3) or "").lower(), m.group(4)
-    if ampm:
-        if not 1 <= hour <= 12:
-            return None
-        hour = hour % 12 + (12 if ampm == "pm" else 0)
-    if hour > 23 or minute > 59:
-        return None
-    try:
-        tz = ZoneInfo(zone.strip()) if zone else None
-    except (KeyError, ValueError):
-        tz = None
-    cur = datetime.fromtimestamp(now, tz) if tz else datetime.fromtimestamp(now).astimezone()
-    at = cur.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    if at.timestamp() <= now:
-        at += timedelta(days=1)
-    return at.timestamp()
-
-
-def fallback_env() -> dict:
-    """NDF_SUPERVISE_CLAUDE_FALLBACK（`KEY=VALUE` を空白区切り）を読む。"""
-    out = {}
-    for tok in shlex.split(os.environ.get("NDF_SUPERVISE_CLAUDE_FALLBACK", "")):
-        k, sep, v = tok.partition("=")
-        if sep and k:
-            out[k] = v
-    return out
-
-
 class UsageLimit(Exception):
     """利用上限の待ちが最大を超えた。ステップの失敗とは区別して止まる。"""
+
+
+class AuthUnavailable(UsageLimit):
+    """登録済みのアカウントのトークンを得られず、替えるアカウントも従量の接続も無い。起動した時の環境で呼ばずに止まる。"""
+
+
+class AccountsLimited(Exception):
+    """今のアカウントのトークンを渡せず、他のアカウントは上限なだけ（待てば戻る）。上限と同じく解除まで待つ。"""
+
+    def __init__(self, message: str, resets_at: float | None):
+        super().__init__(message)
+        self.resets_at = resets_at
 
 
 class ClaudeRunner:
@@ -314,56 +289,159 @@ class ClaudeRunner:
 
     def __init__(self, ctx) -> None:
         self.ctx = ctx
+        # 動いている区間のアカウント（起動したときの環境の NDF_CLAUDE_ACCOUNT）。プランはこのトークンを更新しない（I5）
+        self.section = os.environ.get(ca.NAME_ENV) or None
+        # 次の呼び出しのアカウント（`metered` は従量の接続）。None は起動したときの環境のまま
+        self.account = self.section
 
     def call(self, system: str, prompt: str, tools: str | None, cwd: str, timeout: int, **kw) -> ClaudeCall:
         """claude -p を呼ぶ。利用上限をここで扱う。
 
-        上限に当たったら、NDF_SUPERVISE_CLAUDE_FALLBACK があればその変数を足して 1 度だけ起動し直す。
-        それでも上限なら、解除の時刻 + 1 分（読めなければ "limit_retry_seconds"）まで待って同じ呼び出しを
-        起動し直す。待ちの合計が "limit_wait_max" を超えるなら UsageLimit を投げる。
+        登録済みのアカウントが 2 つ以上あれば、上限に当たったアカウントを除いて最も上限から遠いものへ替え、待たずに
+        同じ呼び出しをやり直す。候補が無ければ NDF_SUPERVISE_CLAUDE_FALLBACK（従量の接続）へ移り、以後の呼び出しも
+        それで起動する（起動のたびに戻れるかを確かめる）。登録が 1 つ以下なら今までどおり、FALLBACK があれば
+        その変数を足して 1 度だけ起動し直す。それでも上限なら、解除の時刻 + 1 分（読めなければ "limit_retry_seconds"）
+        まで待って同じ呼び出しを起動し直す。待ちの合計が "limit_wait_max" を超えるなら UsageLimit を投げる。
         待ちの実際の秒数は NDF_SUPERVISE_LIMIT_SLEEP で短くできる（試験用）。
         """
         ctx, st = self.ctx, self.ctx.state
         retry = ctx.plan.get("limit_retry_seconds", LIMIT_RETRY)
         wait_max = ctx.plan.get("limit_wait_max", LIMIT_WAIT_MAX)
-        fallback = fallback_env()
+        fallback = ca.fallback_env()
+        multi = ca.registered() >= 2
         tried_fallback, waited = False, 0.0
+        tried: set[str] = set()  # この呼び出しで上限に当たったアカウント
         kw = {"tick": ctx.tick, "every": st.every, **kw}
         while True:
-            res = call_claude(system, prompt, tools, cwd, timeout, **kw)
+            try:
+                child = self.child_env(timeout, fallback) if multi else None
+            except AccountsLimited as e:
+                waited += self._wait_for_reset({"resets_at": e.resets_at, "text": str(e)}, retry, wait_max, waited)
+                continue
+            res = call_claude(system, prompt, tools, cwd, timeout, child_env=child, **kw)
             if res.get("limit"):
                 self.note_limit(res)
-                if fallback and not tried_fallback:
+                if multi and self.account != ca.METERED:
+                    if self._switch_after_limit(res, tried, fallback):
+                        continue
+                elif not multi and fallback and not tried_fallback:
                     tried_fallback = True
-                    for k in fallback:
-                        if k not in st.switched:
-                            st.switched.append(k)
-                    st.cur["auth"] = "切り替え（" + ", ".join(fallback) + "）"
-                    res = call_claude(system, prompt, tools, cwd, timeout, env=fallback, **kw)
-                    if res.get("limit"):
-                        self.note_limit(res)
+                    # 宣言より優先される親の認証（OAuth トークン・AUTH_TOKEN・Bedrock/Vertex など）を外した環境で呼ぶ
+                    metered = ca.account_env(ca.METERED, dict(os.environ))
+                    res = self._try_fallback_once(
+                        fallback, lambda: call_claude(system, prompt, tools, cwd, timeout, child_env=metered, **kw)
+                    )
             if not res.get("limit"):
                 return res
-            wait = max(0.0, res["resets_at"] + 60 - time.time()) if res.get("resets_at") else float(retry)
-            if waited + wait > wait_max:
-                raise UsageLimit(
-                    f"利用上限の待ちが最大 {wait_max} 秒を超える（待った {round(waited)} 秒、"
-                    f"次の待ち {round(wait)} 秒）: {(res.get('text') or '')[:200]}"
-                )
-            short = os.environ.get("NDF_SUPERVISE_LIMIT_SLEEP")
-            paused_at = time.time()
-            until = paused_at + (min(wait, float(short)) if short else wait)
-            ctx.slow.paused = True  # 上限の待ちは遅れと見なさない（待った秒を経過から引く）
-            try:
-                while time.time() < until:  # 待ちの間も「まだ動いている」を書く
-                    time.sleep(max(0.0, min(st.every, until - time.time())))
-                    ctx.tick()
-            finally:
-                ctx.slow.paused = False
-                if ctx.slow.watch:
-                    ctx.slow.watch.paused += time.time() - paused_at
-            waited += wait
-            st.cur["limit_waited"] = round(st.cur.get("limit_waited", 0) + wait, 1)
+            waited += self._wait_for_reset(res, retry, wait_max, waited)
+            tried.clear()  # 待った後は上限の解けたアカウントを選び直せる
+
+    def _switch_after_limit(self, res: dict, tried: set[str], fallback: dict) -> bool:
+        """上限に当たったアカウントを記録し、登録済みのアカウントか従量の接続へ替える。替えたら真。"""
+        kind = kind_of_text(res.get("text") or "")
+        if self.account:
+            ca.note_limit(self.account, kind, res.get("resets_at"))
+            tried.add(self.account)
+        nxt = ca.choose(exclude=tried, keep=self.keep())
+        if nxt.name:
+            self.switch(nxt.name, kind)
+            return True
+        if fallback:
+            self.switch(ca.METERED, kind, keys=list(fallback))
+            return True
+        return False
+
+    def _try_fallback_once(self, fallback: dict, call) -> ClaudeCall:
+        """旧来の FALLBACK の変数を足して起動し直す（登録が 1 つ以下のとき、1 度だけ）。"""
+        st = self.ctx.state
+        for k in fallback:
+            if k not in st.switched:
+                st.switched.append(k)
+        st.cur["auth"] = "切り替え（" + ", ".join(fallback) + "）"
+        res = call()
+        if res.get("limit"):
+            self.note_limit(res)
+        return res
+
+    def _wait_for_reset(self, res: dict, retry: float, wait_max: float, waited: float) -> float:
+        """解除の時刻まで待ち、待った秒数を返す。待ちの合計が wait_max を超えるなら UsageLimit を投げる。"""
+        ctx, st = self.ctx, self.ctx.state
+        wait = max(0.0, res["resets_at"] + 60 - time.time()) if res.get("resets_at") else float(retry)
+        if waited + wait > wait_max:
+            raise UsageLimit(
+                f"利用上限の待ちが最大 {wait_max} 秒を超える（待った {round(waited)} 秒、"
+                f"次の待ち {round(wait)} 秒）: {(res.get('text') or '')[:200]}"
+            )
+        short = os.environ.get("NDF_SUPERVISE_LIMIT_SLEEP")
+        paused_at = time.time()
+        until = paused_at + (min(wait, float(short)) if short else wait)
+        ctx.slow.paused = True  # 上限の待ちは遅れと見なさない（待った秒を経過から引く）
+        try:
+            while time.time() < until:  # 待ちの間も「まだ動いている」を書く
+                time.sleep(max(0.0, min(st.every, until - time.time())))
+                ctx.tick()
+        finally:
+            ctx.slow.paused = False
+            if ctx.slow.watch:
+                ctx.slow.watch.paused += time.time() - paused_at
+        st.cur["limit_waited"] = round(st.cur.get("limit_waited", 0) + wait, 1)
+        return wait
+
+    def keep(self) -> set[str]:
+        """トークンを更新しないアカウント（動いている区間のもの）。"""
+        return {self.section} if self.section else set()
+
+    def child_env(self, timeout: float = 0, fallback: dict | None = None) -> dict | None:
+        """次の呼び出しの環境（登録が 2 つ以上のとき）。None は起動したときの環境のまま（アカウントを持たないとき）。
+
+        従量の接続で動いている間は、起動のたびに登録済みのアカウントへ戻れるかを確かめる（閾値未満のものだけ）。
+        今のアカウントのトークンが得られなければ（期限切れ・期限まで `timeout` 秒以下・再登録が要る）別のアカウントを
+        選び、無ければ従量の接続（`fallback`）へ移る。それも無く、他のアカウントが上限なだけなら AccountsLimited を
+        投げて解除まで待たせる。候補が 1 つも無ければ AuthUnavailable を投げる（起動した時の古いトークンで呼ばない）。"""
+        if self.account == ca.METERED:
+            c = ca.choose(keep=self.keep(), min_left=timeout)
+            if c.name and (c.score is None or c.score < ca.switch_at()):
+                self.switch(c.name, "recovered")
+            else:
+                return ca.account_env(ca.METERED, dict(os.environ))
+        if self.account is None:
+            return None
+        env = ca.account_env(self.account, dict(os.environ), None if self.account in self.keep() else ca.REFRESH_BEFORE, timeout)
+        if env is not None:
+            return env
+        c = ca.choose(exclude={self.account}, keep=self.keep(), min_left=timeout)
+        env = ca.account_env(c.name, dict(os.environ), None if c.name in self.keep() else ca.REFRESH_BEFORE, timeout) if c.name else None
+        if env is not None:
+            self.switch(c.name, "auth")
+            return env
+        if fallback:
+            self.switch(ca.METERED, "auth", keys=list(fallback))
+            return ca.account_env(ca.METERED, dict(os.environ))
+        if c.earliest:
+            name, until = c.earliest
+            raise AccountsLimited(
+                f"アカウント {self.account} のトークンを渡せず、替えるアカウント {name} は上限にある",
+                None if until == math.inf else until,
+            )
+        raise AuthUnavailable(f"アカウント {self.account} のトークンを得られず、替えるアカウントも従量の接続の宣言も無い")
+
+    def switch(self, to: str, reason: str, keys: list[str] | None = None) -> None:
+        """次の呼び出しのアカウントを替え、プランの状態（`auth`・`switched`）と途中の報告へ 1 行残す（I12）。"""
+        st = self.ctx.state
+        before, self.account = self.account, to
+        if to == ca.METERED:
+            text = "従量の接続（" + ", ".join(keys or []) + "）"
+            short = text
+        else:
+            text = f"アカウント {to}（{reason}）"
+            short = f"アカウント {to}"
+        st.cur["auth"] = text
+        if short not in st.switched:
+            st.switched.append(short)
+        row = {"kind": "account", "step": st.cur.get("id"), "reason": reason, "from": before, "to": to}
+        if keys:
+            row["keys"] = keys
+        st.progress_write(row)
 
     def note_limit(self, res: dict) -> None:
         cur = self.ctx.state.cur

@@ -1,4 +1,4 @@
-"""hook の本体: Stop（`mark`）・停止（`stop`）・質問の合図（`question`）・カットポイントの告知（`notice`）。
+"""hook の本体: Stop（`mark`）・StopFailure（`limit`）・停止（`stop`）・質問の合図（`question`）・カットポイントの告知（`notice`）。
 
 #895・#980・#1016・#1142 の C6。合図 `next.json` と `log.jsonl` は `record.RelayRecord` を通して書く。
 """
@@ -16,6 +16,7 @@ from . import proc
 from .common import (
     ASKED_FILE,
     HELD_FILE,
+    LIMIT_FILE,
     MARK_FILE,
     PID_FILE,
     QUESTION_FILE,
@@ -143,6 +144,34 @@ def cmd_mark() -> int:
             record.drop_mark()
         return 0
     record.write_mark(blocks[0], data)
+    return 0
+
+
+def cmd_limit() -> int:
+    """StopFailure hook の本体（#1389）。ラッパーの直接の子の応答が API の失敗で終わったら `limit.json` を書く。
+
+    書くのは `written_at`・`error`・`transcript_path`・`session_id`・`cwd` だけで、応答の本文とトークンは書かない。
+    上限の種類とリセット時刻は、ラッパーが会話の記録の最後の合成応答から読む。StopFailure の出力と終了コードは
+    Claude Code が無視するので、常に 0 を返す。"""
+    d = os.environ.get("NDF_RELAY_DIR")
+    if not d or not relay_running(d):
+        return 0
+    try:
+        data = json.loads(sys.stdin.read())
+    except ValueError:
+        return 0
+    if not isinstance(data, dict) or not proc.is_direct_child(d):
+        return 0
+    write_json_atomic(
+        os.path.join(d, LIMIT_FILE),
+        {
+            "written_at": stamp(),
+            "error": str(data.get("error") or ""),
+            "transcript_path": str(data.get("transcript_path") or ""),
+            "session_id": str(data.get("session_id") or ""),
+            "cwd": str(data.get("cwd") or ""),
+        },
+    )
     return 0
 
 

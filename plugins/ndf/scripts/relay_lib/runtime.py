@@ -36,9 +36,9 @@ import deps  # noqa: E402
 GROUPS = ("procs", "locks", "md", "versions", "terminal")
 REEXEC_ENV = "NDF_RELAY_REEXEC"
 UV_ENV = "NDF_RELAY_UV"
-PREPARE = {"install", "uninstall", "status", "startup", "stop"}
+PREPARE = {"install", "uninstall", "status", "startup", "stop", "account"}
 # hook の副命令が環境の無いときに返す終了コード（is-child の 1 は「ラッパーの直接の子でない」）
-PASS = {"mark": 0, "question": 0, "is-child": 1, "notice": 0}
+PASS = {"mark": 0, "limit": 0, "question": 0, "is-child": 1, "notice": 0}
 MANIFEST = "MANIFEST"
 
 
