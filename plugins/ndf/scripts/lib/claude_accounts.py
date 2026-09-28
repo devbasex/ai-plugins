@@ -436,8 +436,7 @@ def _order_side(side: list[Account], readable: bool) -> list[Account]:
 
 def _candidates(exclude, before: float | None, keep, now: float) -> tuple[list[Account], tuple[str, float] | None]:
     """上限に達していない候補と、上限にあるもののうち最も早く戻るアカウントと時刻。「再登録が要る」は外す。"""
-    earliest: tuple[str, float] | None = None
-    pool: list[Account] = []
+    pool, earliest = [], None
     for n in [n for n in names() if n not in exclude]:
         usage(n, None if n in keep else before, now)
         acc = load_account(n)
