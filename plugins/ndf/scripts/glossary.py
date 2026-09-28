@@ -221,7 +221,12 @@ def pending_problem(root: Path, rel: str) -> str | None:
     return None if (root / rel).is_file() else "が指す設計文書が無い"
 
 
-def _context_findings(g: dict, hit) -> list[str]:
+def structure_findings(g: dict, decl: Declaration) -> list[dict]:
+    items = []
+
+    def hit(rule, term, detail):
+        items.append({"rule": rule, "path": decl.source, "line": 0, "term": term, "detail": detail})
+
     ids = []
     for i, c in enumerate(g.get("contexts", [])):
         if (
@@ -236,10 +241,8 @@ def _context_findings(g: dict, hit) -> list[str]:
         if c["id"] in ids:
             hit("schema", c["id"], f"contexts[{i}] の id が重なる")
         ids.append(c["id"])
-    return ids
-
-
-def _live_index(g: dict) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
+    seen: dict[tuple[str, str], int] = {}
+    code_seen: dict[tuple[str, str], int] = {}
     live_by_ctx: dict[str, set[str]] = {}
     codes_by_ctx: dict[str, set[str]] = {}
     for t in terms_of(g):
@@ -247,58 +250,6 @@ def _live_index(g: dict) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
             live_by_ctx.setdefault(t["context"], set()).add(t["term"])
         if isinstance(t.get("context"), str) and code_of(t):
             codes_by_ctx.setdefault(t["context"], set()).add(code_of(t))
-    return live_by_ctx, codes_by_ctx
-
-
-def _term_schema_findings(i: int, t: dict, decl: Declaration, ids: list[str], hit) -> None:
-    if "deprecated" in t and not isinstance(t["deprecated"], list):
-        hit("schema", t["term"], f"terms[{i}] の deprecated は文字列の配列で書く")
-    if "source" in t and not isinstance(t["source"], str):
-        hit("schema", t["term"], f"terms[{i}] の source は文字列で書く")
-    elif "pending_source" in t and not isinstance(t["pending_source"], str):
-        hit("schema", t["term"], f"terms[{i}] の pending_source は文字列で書く")
-    elif (
-        decl.source_paths and t.get("source") and "://" not in t["source"] and not declared_path_matches(t["source"], decl.source_paths)
-    ):
-        hit(
-            "unconfirmed_source",
-            t["term"],
-            f"terms[{i}] の source が確定仕様を指さない: {t['source']}（check.source_paths に当たるパスへ移す。"
-            "確定前は source を空にし、plan-to-spec が確定仕様を書いたときに入れる）",
-        )
-    if isinstance(t.get("pending_source"), str) and (problem := pending_problem(decl.root, t["pending_source"])):
-        hit("schema", t["term"], f"terms[{i}] の pending_source {problem}: {t['pending_source']}")
-    if t["context"] not in ids:
-        hit("schema", t["term"], f"terms[{i}] の context が宣言されていない: {t['context']}")
-
-
-def _deprecated_findings(i: int, t: dict, live_by_ctx: dict[str, set[str]], codes_by_ctx: dict[str, set[str]], hit) -> None:
-    for w in deprecated_of(t):
-        if len(w) < 2:
-            hit("schema", w, f"terms[{i}] の廃止した語が 1 文字で照合できない")
-        elif w in live_by_ctx.get(t["context"], set()):
-            hit("schema", w, f"terms[{i}] の廃止した語が同じコンテキストの生きた語と重なる")
-    if "code" in t and code_of(t) is None:
-        hit("schema", str(t["code"]), f"terms[{i}] の code は英小文字の snake_case で書く（例: approval_gate）")
-    if "deprecated_code" in t and (
-        not isinstance(t["deprecated_code"], list) or len(deprecated_code_of(t)) != len(t["deprecated_code"])
-    ):
-        hit("schema", t["term"], f"terms[{i}] の deprecated_code は英小文字の snake_case の文字列の配列で書く")
-    for w in deprecated_code_of(t):
-        if w in codes_by_ctx.get(t["context"], set()):
-            hit("schema", w, f"terms[{i}] の廃止した識別子が同じコンテキストの生きた識別子と重なる")
-
-
-def structure_findings(g: dict, decl: Declaration) -> list[dict]:
-    items = []
-
-    def hit(rule, term, detail):
-        items.append({"rule": rule, "path": decl.source, "line": 0, "term": term, "detail": detail})
-
-    live_by_ctx, codes_by_ctx = _live_index(g)
-    ids = _context_findings(g, hit)
-    seen: dict[tuple[str, str], int] = {}
-    code_seen: dict[tuple[str, str], int] = {}
     for i, t in enumerate(g.get("terms", [])):
         if not isinstance(t, dict):
             hit("schema", "", f"terms[{i}] はオブジェクトで書く")
@@ -307,8 +258,39 @@ def structure_findings(g: dict, decl: Declaration) -> list[dict]:
         if missing:
             hit("schema", str(t.get("term") or ""), f"terms[{i}] に {' / '.join(missing)} が無い")
             continue
-        _term_schema_findings(i, t, decl, ids, hit)
-        _deprecated_findings(i, t, live_by_ctx, codes_by_ctx, hit)
+        if "deprecated" in t and not isinstance(t["deprecated"], list):
+            hit("schema", t["term"], f"terms[{i}] の deprecated は文字列の配列で書く")
+        if "source" in t and not isinstance(t["source"], str):
+            hit("schema", t["term"], f"terms[{i}] の source は文字列で書く")
+        elif "pending_source" in t and not isinstance(t["pending_source"], str):
+            hit("schema", t["term"], f"terms[{i}] の pending_source は文字列で書く")
+        elif (
+            decl.source_paths and t.get("source") and "://" not in t["source"] and not declared_path_matches(t["source"], decl.source_paths)
+        ):
+            hit(
+                "unconfirmed_source",
+                t["term"],
+                f"terms[{i}] の source が確定仕様を指さない: {t['source']}（check.source_paths に当たるパスへ移す。"
+                "確定前は source を空にし、plan-to-spec が確定仕様を書いたときに入れる）",
+            )
+        if isinstance(t.get("pending_source"), str) and (problem := pending_problem(decl.root, t["pending_source"])):
+            hit("schema", t["term"], f"terms[{i}] の pending_source {problem}: {t['pending_source']}")
+        if t["context"] not in ids:
+            hit("schema", t["term"], f"terms[{i}] の context が宣言されていない: {t['context']}")
+        for w in deprecated_of(t):
+            if len(w) < 2:
+                hit("schema", w, f"terms[{i}] の廃止した語が 1 文字で照合できない")
+            elif w in live_by_ctx.get(t["context"], set()):
+                hit("schema", w, f"terms[{i}] の廃止した語が同じコンテキストの生きた語と重なる")
+        if "code" in t and code_of(t) is None:
+            hit("schema", str(t["code"]), f"terms[{i}] の code は英小文字の snake_case で書く（例: approval_gate）")
+        if "deprecated_code" in t and (
+            not isinstance(t["deprecated_code"], list) or len(deprecated_code_of(t)) != len(t["deprecated_code"])
+        ):
+            hit("schema", t["term"], f"terms[{i}] の deprecated_code は英小文字の snake_case の文字列の配列で書く")
+        for w in deprecated_code_of(t):
+            if w in codes_by_ctx.get(t["context"], set()):
+                hit("schema", w, f"terms[{i}] の廃止した識別子が同じコンテキストの生きた識別子と重なる")
         if code_of(t):
             ckey = (t["context"], code_of(t))
             if ckey in code_seen:
