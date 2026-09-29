@@ -26,7 +26,6 @@ import pathlib
 import subprocess
 import sys
 import time
-from typing import NamedTuple
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "lib"))
@@ -190,23 +189,19 @@ def _decide_status(passed: bool, triage: dict | None, lint: list[dict] | None) -
     return status, code, suffix
 
 
-class OutcomeContext(NamedTuple):
-    """結果の 1 行を組む材料。戦略・上限・注記は解決した戦略から、残りは走らせた結果から渡す。"""
-
-    strategy: ts.Strategy
-    limits: dict
-    notes: list[str]
-    passed: bool
-    detail: str
-    triage: dict | None = None
-    lint: list[dict] | None = None
-
-
-def _emit_outcome(ctx: OutcomeContext) -> int:
-    items = _outcome_items(ctx.strategy, ctx.limits, ctx.notes, ctx.triage, ctx.lint)
-    status, code, suffix = _decide_status(ctx.passed, ctx.triage, ctx.lint)
-    lint_caused = [v for v in ctx.lint or [] if v.get("verdict") == "caused"]
-    emit(result(TOOL, status, ctx.detail + suffix, items, {"caused": len((ctx.triage or {}).get("caused") or []) + len(lint_caused)}))
+def _emit_outcome(
+    strategy: ts.Strategy,
+    limits: dict,
+    notes: list[str],
+    triage: dict | None,
+    passed: bool,
+    detail: str,
+    lint: list[dict] | None = None,
+) -> int:
+    items = _outcome_items(strategy, limits, notes, triage, lint)
+    status, code, suffix = _decide_status(passed, triage, lint)
+    lint_caused = [v for v in lint or [] if v.get("verdict") == "caused"]
+    emit(result(TOOL, status, detail + suffix, items, {"caused": len((triage or {}).get("caused") or []) + len(lint_caused)}))
     return code
 
 
@@ -235,22 +230,20 @@ def cmd_scope(a) -> int:
     seconds = round(time.monotonic() - started, 1)
     detail = f"範囲テスト {len(runs)} 本（{seconds} 秒 / 戦略 {strategy.name}）"
     if not failed:
-        return _emit_outcome(OutcomeContext(strategy, limits, notes, passed=True, detail=detail))
+        return _emit_outcome(strategy, limits, notes, None, True, detail)
     lint_failed = [
         {"suite": r.suite, "verdict": "caused", "reason": "変更したファイルで落ちた", "command": r.command}
         for r in runs
         if r.kind == ts.LINT and r.command in failed
     ]
     if not any(kinds.get(c) == ts.TEST for c in failed):
-        return _emit_outcome(OutcomeContext(strategy, limits, notes, passed=False, detail=detail + " が落ちた", lint=lint_failed))
+        return _emit_outcome(strategy, limits, notes, None, False, detail + " が落ちた", lint_failed)
     triage = (
         _classify(root, strategy, limits, a.base)
         if strategy.name != ts.ROUND_ONLY
         else {"fallback_reason": "round-only は JUnit を読まない"}
     )
-    return _emit_outcome(
-        OutcomeContext(strategy, limits, notes, passed=False, detail=detail + " が落ちた", triage=triage, lint=lint_failed or None)
-    )
+    return _emit_outcome(strategy, limits, notes, triage, False, detail + " が落ちた", lint_failed or None)
 
 
 class _Resp:
@@ -293,14 +286,12 @@ def _wait_ci(
         emit(result(TOOL, "stopped", f"{detail} の結論を得られなかった（上限か照会の失敗）", [{"waited_seconds": waited}], {}))
         return 2
     if outcome == "success":
-        return _emit_outcome(OutcomeContext(strategy, limits, notes, passed=not lint, detail=detail, lint=lint))
+        return _emit_outcome(strategy, limits, notes, None, not lint, detail, lint)
     xmls = test_triage.ci_junit_xmls(
         owner_repo, sha, checks, (strategy.ci or {}).get("junit_artifacts"), fetch_runs=lambda: last.get("runs")
     )
     triage = _classify(root, strategy, limits, base, ci_xmls=xmls)
-    return _emit_outcome(
-        OutcomeContext(strategy, limits, notes, passed=False, detail=detail + f" の結論は {outcome}", triage=triage, lint=lint)
-    )
+    return _emit_outcome(strategy, limits, notes, triage, False, detail + f" の結論は {outcome}", lint)
 
 
 def _run_lint_whole(root: pathlib.Path, strategy: ts.Strategy, limits: dict, a) -> tuple[list[dict] | None, int | None]:
@@ -333,7 +324,7 @@ def cmd_whole(a) -> int:
     commands = strategy.whole_commands(ts.TEST)
     if not commands:
         if lint is not None:
-            return _emit_outcome(OutcomeContext(strategy, limits, notes, passed=not lint, detail="静的解析の全体テスト", lint=lint))
+            return _emit_outcome(strategy, limits, notes, None, not lint, "静的解析の全体テスト", lint)
         emit(result(TOOL, "stopped", "全体テストのコマンド（suites[].command）が無い", [{"note": n} for n in notes], {}))
         return 2
     test_triage.clear_junit(str(root), strategy)
@@ -349,12 +340,12 @@ def cmd_whole(a) -> int:
     seconds = round(time.monotonic() - started, 1)
     detail = f"全体テスト {len(commands)} 本（{seconds} 秒 / 戦略 {strategy.name}）"
     if not failed_any:
-        return _emit_outcome(OutcomeContext(strategy, limits, notes, passed=not lint, detail=detail, lint=lint))
+        return _emit_outcome(strategy, limits, notes, None, not lint, detail, lint)
     if strategy.name == ts.ROUND_ONLY:
-        triage = {"fallback_reason": "round-only は JUnit を読まない"}
-        return _emit_outcome(OutcomeContext(strategy, limits, notes, passed=False, detail=detail + " が落ちた", triage=triage, lint=lint))
-    triage = _classify(root, strategy, limits, a.base)
-    return _emit_outcome(OutcomeContext(strategy, limits, notes, passed=False, detail=detail + " が落ちた", triage=triage, lint=lint))
+        return _emit_outcome(
+            strategy, limits, notes, {"fallback_reason": "round-only は JUnit を読まない"}, False, detail + " が落ちた", lint
+        )
+    return _emit_outcome(strategy, limits, notes, _classify(root, strategy, limits, a.base), False, detail + " が落ちた", lint)
 
 
 def main(argv=None) -> int:
