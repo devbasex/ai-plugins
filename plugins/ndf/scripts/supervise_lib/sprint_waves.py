@@ -12,7 +12,7 @@ from pathlib import Path
 import legacy_names
 
 from supervise_lib.decl import decl_fields
-from supervise_lib.paths import GLOSSARY_PY, MVV_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, WORKTREE_SETUP
+from supervise_lib.paths import GLOSSARY_PY, MVV_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, SYNC_DESIGN_BODY, WORKTREE_SETUP
 from supervise_lib.release_templates import MVV_NOTE, advise_steps, plan_release
 from supervise_lib.templates import plan_check, plan_check_since, plan_impl
 from supervise_lib.verify_steps import handoff_step, merge_steps
@@ -114,6 +114,16 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
                 "title": f"設計: #{n}",
                 "summary": f"#{n} の設計（スプリント {a.name}）",
                 "append": [DESIGN_GLOSSARY_NOTE],
+                "next": "sync-body",
+            },
+            # 本文の「決めたこと」を review の前に合わせる。無いと CI の pr-body-decisions が落ち、cross-review が
+            # コード関連の CI 失敗として round 1 で中断する（m1483 の PR 1499・1500）
+            {
+                "id": "sync-body",
+                "type": "run",
+                "stage": "ドキュメントレビュー",
+                "timeout": 120,
+                "cmd": SYNC_DESIGN_BODY,
                 "next": "review",
             },
             # --max-rounds を渡さない。設計の分類の既定（3 ラウンド・前のラウンドからの変更だけ）で回る
