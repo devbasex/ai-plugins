@@ -5,7 +5,6 @@ gh と claude は PATH の先頭に置いた偽物で置き換える。実機の
 
 from __future__ import annotations
 
-import copy
 import json
 import os
 import subprocess
@@ -29,7 +28,6 @@ import gh_call  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from account_fake import FakeAnthropic, accounts, window  # noqa: E402,F401
-from project_fixtures import CARMO  # noqa: E402
 
 FAKE_GH = """#!{py}
 import json, sys
@@ -2054,8 +2052,26 @@ def test_pr_body_tests_table_escapes_a_pipe_in_the_last_line(tmp_path, monkeypat
     assert "| test | 0 | a \\| b |" in body.read_text().splitlines()
 
 
-CARMO_PROJECT = copy.deepcopy(CARMO)
-CARMO_PROJECT["ci"].pop("required_checks")
+CARMO_PROJECT = {
+    "version": 1,
+    "test": {
+        "strategy": "local-scoped-ci-whole",
+        "ci": {"check": "test-results", "junit_artifacts": "junit-*"},
+        "suites": [
+            {
+                "name": "phpunit",
+                "runner": "phpunit",
+                "command": "docker compose exec -T app ./vendor/bin/phpunit --log-junit build/ndf/junit.xml",
+                "scope_command": "docker compose exec -T app ./vendor/bin/phpunit --log-junit build/ndf/junit.xml {paths}",
+                "junit": "build/ndf/junit.xml",
+                "container": {"service": "app"},
+                "paths": ["tests"],
+            }
+        ],
+    },
+    "test_duration": {"measured": [{"seconds": 3827.0, "source": "ci-junit", "detail": "run"}]},
+    "ci": {"provider": "github-actions", "workflows": [{"path": ".github/workflows/test-results.yml", "jobs": 24, "wall_seconds": 360.0}]},
+}
 
 
 def _carmo_repo(tmp_path):
