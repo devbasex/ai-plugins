@@ -44,13 +44,17 @@
 | 戦略 | `test_strategy.resolve`（cross-refactoring の `init`・supervise の `new` が 1 回だけ呼んで写す） | cross-refactoring の状態ファイルの `strategy`、supervise のプランの `strategy` | 戦略 | suite の写し | 種別・全体テストのコマンド・範囲テストの雛形・`notes` |
 | 項目の取り込み | cross-refactoring の `implement`（実装とテスト整備ラウンドの取り込み） | 状態ファイルの `items[]` のうち `commits.implement`・`commits.test` と、状態の遷移「→ `implemented`（実装の取り込み）・→ `tested`・→ `deferred`」 | 項目 | — | コミット・状態 |
 | 項目の検証 | cross-refactoring の `converge`（検証と修正の取り込み） | 状態ファイルの `items[]` のうち `scope_commands`・`commits.fix`・`fix_count` と、状態の遷移「→ `verified`・→ `failing`・`failing` → `implemented`（修正の取り込み）」 | 項目 | — | 範囲テストのコマンド（`scope_commands`）・状態 |
+| 項目の取り消し | cross-refactoring の `undo.drop`（`implement`・`converge`・`wholetest`（危険フラグ）・`gate_ci`（最終ゲート）が呼ぶ 1 つの関数。再開は `undo.resume_pending_drop` が同じ関数を呼ぶ） | 状態ファイルの `items[]` のうち状態の遷移「→ `reverted`」と `failure_reason`、積み直しでの全項目の `commits.implement`・`commits.test`・`commits.fix` の付け替えと、`drops`・`pending_drop` | 取り消し | — | 取り消した項目・理由・付け替えの対応（旧 SHA → 新 SHA） |
 | 起動の失敗の記録 | cross-refactoring の `refactor_lib/launch.py`（着手前・項目・テスト整備ラウンド・最終ゲートの手順が呼ぶ 1 つの関数） | 状態ファイルの `launch_failure` | 記録 | — | コマンド・終了コード・理由・手順 |
 | テストの実行の結果 | `test-run.py`（1 回の起動が 1 つの結果を書く） | `test-run.py` の結果 JSON（`status`・`items[].launch_failed`） | 結果 | — | コマンド・終了コード・理由・ログ |
 
 **保存先ごとに集約を分け、各々の持ち主を 1 つにする。** cross-refactoring は `test-run.py` の結果 JSON を書かず、
 `test-run.py` は状態ファイルを書かない。`items[]` は `implement` と `converge` がともに `status` を書くため、
 書く欄と状態の遷移で 2 つの集約に分け、遷移ごとの持ち主を 1 つにする。`implement` は検証の遷移を書かず、`converge` は
-取り込みの遷移を書かない。2 つの手順は同じ項目を同時に扱わない（手順の順は `phases.py` が決める）。起動の失敗の判別（`test_strategy.outcome`）だけを両者が共有する（I7）。
+取り込みの遷移を書かない。例外は取り消しで、→ `reverted` の遷移と積み直しでの `commits.*` の付け替えは
+どちらの手順も直接書かず、項目の取り消し（`undo.drop`）だけが書く。`implement`・`converge`・`wholetest`・`gate_ci` は
+`undo.drop` を呼ぶだけで、取り消しの後の SHA を自分で書き換えない（`commits.implement`・`commits.test` を
+`implement` が、`commits.fix` を `converge` が書くのは取り込みのときだけである）。2 つの手順は同じ項目を同時に扱わない（手順の順は `phases.py` が決める）。起動の失敗の判別（`test_strategy.outcome`）だけを両者が共有する（I7）。
 持ち主のほかは読むだけである。戦略は状態ファイルへ写した後に変えない（今の `as_state` の約束）。
 項目の検証は戦略を ID（状態ファイルの `strategy`）で参照し、suite の中身を自分で持たない。
 
