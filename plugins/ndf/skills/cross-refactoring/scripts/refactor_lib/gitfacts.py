@@ -13,7 +13,7 @@ import subprocess
 from typing import Any, Optional
 
 from . import github, pathkinds, process, publish, results, worktree
-from .paths import git_out, resolve_commit
+from .paths import git_out
 
 # 分けた先の名前を再エクスポートする。`from .gitfacts import ...` で使う側の import を変えない。
 
@@ -263,7 +263,7 @@ def collect_commit_facts(
     """
     facts: list[dict[str, Any]] = []
     for sha in shas:
-        full = resolve_commit(work, sha)
+        full = git_out(work, ["rev-parse", "--verify", f"{sha}^{{commit}}"])
         if full is None or full not in in_range:
             facts.append({"sha": sha, "exists": False})
             continue

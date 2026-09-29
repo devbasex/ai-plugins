@@ -13,7 +13,7 @@ import re
 
 from typing import Any, Iterable, Optional
 
-from .paths import git_out, resolve_commit
+from .paths import git_out
 from .gitfacts import safe_int
 from .vocabulary import (
     DIFF_BUDGET_FACTOR,
@@ -188,7 +188,7 @@ def unassigned_fix_commits(work: str, reported_shas: list[str], ordered_range: l
     適用と同じく、**範囲のコミットは全て申告されていること**を求める。
     申告から漏れた修正コミットは検証を受けないまま Pull Request に残る。
     """
-    reported_full = {full for full in (resolve_commit(work, s) for s in reported_shas) if full}
+    reported_full = {full for full in (git_out(work, ["rev-parse", "--verify", f"{s}^{{commit}}"]) for s in reported_shas) if full}
     return sorted(set(ordered_range) - reported_full)
 
 

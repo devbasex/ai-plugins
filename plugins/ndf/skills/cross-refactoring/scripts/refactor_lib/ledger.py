@@ -24,7 +24,7 @@ from typing import Any, Optional
 
 from . import gitfacts  # 属性は呼ぶ時点で引く（gitfacts → publish → ledger の循環を避ける）
 from .items import LIVE, REVERTED, item_shas
-from .paths import git_out, resolve_commit
+from .paths import git_out
 
 ITEM = "item"
 FINAL_FIX = "final_fix"
@@ -129,7 +129,7 @@ def remap_orchestrator_commits(state: dict[str, Any], mapping: dict[str, str]) -
 
 
 def _full(work: str, sha: str) -> str:
-    return resolve_commit(work, sha) or sha
+    return git_out(work, ["rev-parse", "--verify", f"{sha}^{{commit}}"]) or sha
 
 
 def _owners(state: dict[str, Any], work: str) -> dict[str, dict[str, Any]]:
