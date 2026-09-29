@@ -65,7 +65,14 @@ def _base(work: pathlib.Path, files: list[str], push: bool = True) -> str:
 
 
 def _item(item_id: str, rank: int, path: str, sha: str, status: str = "implemented") -> dict:
-    return {"id": item_id, "rank": rank, "path": path, "symbol": item_id, "status": status, "commits": {"test": None, "implement": sha, "fix": []}}
+    return {
+        "id": item_id,
+        "rank": rank,
+        "path": path,
+        "symbol": item_id,
+        "status": status,
+        "commits": {"test": None, "implement": sha, "fix": []},
+    }
 
 
 def _state(tmp_path, work, base, items, **over):
@@ -307,7 +314,12 @@ def test_a_failed_drop_leaves_origin_untouched(undo, tmp_path, repo):
     c2 = commit_with_trailers(work, "I-002", item_trailers("I-002"))
     _change(work, "src/bar.py", 3, "by-I-003")
     c3 = commit_with_trailers(work, "I-003", item_trailers("I-003"))
-    path = _state(tmp_path, work, base, [_item("I-001", 1, "src/foo.py", c1), _item("I-002", 2, "src/foo.py", c2), _item("I-003", 3, "src/bar.py", c3)])
+    path = _state(
+        tmp_path,
+        work,
+        base,
+        [_item("I-001", 1, "src/foo.py", c1), _item("I-002", 2, "src/foo.py", c2), _item("I-003", 3, "src/bar.py", c3)],
+    )
 
     with pytest.raises(SystemExit) as e:
         undo.drop(path, read_state(path), ["I-001"], "範囲テストが落ちた")
@@ -351,7 +363,9 @@ def _six_items(tmp_path, repo):
     """#1237 の 6 項目。I-001 は見送り、I-004 は I-002 の変更の隣の行を触る。"""
     work = repo["work"]
     base = _base(work, sorted(set(FILES_1237.values())))
-    items = [{"id": "I-001", "rank": 1, "path": "supervise.py", "status": "deferred", "commits": {"test": None, "implement": None, "fix": []}}]
+    items = [
+        {"id": "I-001", "rank": 1, "path": "supervise.py", "status": "deferred", "commits": {"test": None, "implement": None, "fix": []}}
+    ]
     for n, (item_id, rel) in enumerate(FILES_1237.items(), start=2):
         _change(work, rel, 3 if item_id == "I-004" else 2, f"by-{item_id}")
         items.append(_item(item_id, n, rel, commit_with_trailers(work, item_id, item_trailers(item_id)), status="verified"))
@@ -418,7 +432,9 @@ def test_a_drop_without_commits_to_remove_does_not_touch_git(undo, tmp_path, rep
     """AC-R1: 取り消すコミットが無ければ `mode: skip` で git に触れない。"""
     work = repo["work"]
     base = _base(work, ["src/a.py"])
-    path = _state(tmp_path, work, base, [{"id": "I-001", "rank": 1, "status": "planned", "commits": {"test": None, "implement": None, "fix": []}}])
+    path = _state(
+        tmp_path, work, base, [{"id": "I-001", "rank": 1, "status": "planned", "commits": {"test": None, "implement": None, "fix": []}}]
+    )
 
     record = undo.drop(path, read_state(path), ["I-001"], "not_done")
 
