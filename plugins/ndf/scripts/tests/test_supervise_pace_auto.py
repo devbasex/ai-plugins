@@ -99,9 +99,10 @@ def test_auto_sprint_writes_the_normal_order_with_mvv_gates(tmp_path):
     assert next(s for s in impl["steps"] if s["type"] == "pr")["base"] == "sprint/m27"
     check = load(waves["検査"]["plans"][0])
     assert steps_of(check)["pr"]["base"] == "develop" and "実行の条件" not in check
-    # check-trigger.py はどのプランにも無い
+    # 検査のトリガー（check-trigger.py eval / prepare）はどのプランにも無い。検査の記録（record）は書く（#1317）
     for path in [p for w in manifest["ステージ"] for p in w.get("plans", [])]:
-        assert "check-trigger.py" not in Path(path).read_text()
+        text = Path(path).read_text()
+        assert "check-trigger.py eval" not in text and "check-trigger.py prepare" not in text
     # ゲート 1: 用語チェックの後に mvv、0 なら approve → merge、落ちたら handoff
     ds = steps_of(load(waves["設計"]["plans"][0]))
     assert ds["push-glossary"]["next"] == "mvv" and ds["mvv"]["next"] == "approve" and ds["mvv"]["gate_next"] == "end"
