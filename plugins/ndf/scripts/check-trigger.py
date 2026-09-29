@@ -685,12 +685,8 @@ def link_escape(e: dict, checks: list[dict]) -> tuple[dict | None, str]:
     return None, "no_range" if any(not isinstance(c.get("prs"), list) for c in before) else "no_check"
 
 
-def cmd_stats(a, root: Path) -> tuple[dict, int]:
-    events = read_events(root)
-    evals = [e for e in events if e["kind"] == "eval"]
-    checks = [e for e in events if e["kind"] == "check"]
-    escapes = [e for e in events if e["kind"] == "escape"]
-    ended = [e for e in checks if e.get("result") in ENDED]
+def link_escapes(escapes: list[dict], checks: list[dict]) -> tuple[dict[int, list[int]], list[dict]]:
+    """流出不具合を検査へ結び付ける。(id(検査) -> 直した PR の列, 結び付かない流出不具合の列)。"""
     linked: dict[int, list[int]] = {}
     unlinked = []
     for e in escapes:
@@ -699,30 +695,49 @@ def cmd_stats(a, root: Path) -> tuple[dict, int]:
             unlinked.append({"pr": e.get("pr"), "of": e.get("of") or 0, "reason": reason})
         else:
             linked.setdefault(id(c), []).append(e.get("pr"))
+    return linked, unlinked
+
+
+def escapes_in_window(c: dict, i: int, windows: list[dict], escapes: list[dict]) -> int:
+    """窓の i 番目の検査 c の後、次の記録までに記録された流出不具合の数。"""
+    # 実装レビューだけの回は次の記録（どちらの検査もレビューを通る）までで切り、
+    # 構造改善を含む検査は同じ種類の次の記録までで切る
+    review = c.get("only") == "review"
+    nxt = next((d for d in windows[i + 1 :] if review or d.get("only") != "review"), None)
+    until = parse_at(nxt["at"]) if nxt else clock.now(utc=True)
+    return sum(1 for e in escapes if parse_at(c["at"]) < parse_at(e["at"]) <= until)
+
+
+def check_row(c: dict, linked: dict[int, list[int]]) -> dict:
+    return {
+        "id": c.get("id"),
+        "at": c["at"],
+        "result": c.get("result"),
+        "scope": c.get("scope", "since"),
+        "pr": c.get("pr"),
+        "target_pr": c.get("target_pr"),
+        "prs": c.get("prs"),
+        "only": c.get("only"),
+        "findings": read_findings(c.get("findings")),
+        "escapes_linked": linked.get(id(c), []),
+    }
+
+
+def cmd_stats(a, root: Path) -> tuple[dict, int]:
+    events = read_events(root)
+    evals = [e for e in events if e["kind"] == "eval"]
+    checks = [e for e in events if e["kind"] == "check"]
+    escapes = [e for e in events if e["kind"] == "escape"]
+    ended = [e for e in checks if e.get("result") in ENDED]
+    linked, unlinked = link_escapes(escapes, checks)
     # 時刻の窓を切るのは範囲が時刻で連続する検査（scope: since）だけ。PR を指す検査は窓を切らない
     windows = [e for e in ended if e.get("scope", "since") == "since"]
     rows = []
     for c in checks:
-        row = {
-            "id": c.get("id"),
-            "at": c["at"],
-            "result": c.get("result"),
-            "scope": c.get("scope", "since"),
-            "pr": c.get("pr"),
-            "target_pr": c.get("target_pr"),
-            "prs": c.get("prs"),
-            "only": c.get("only"),
-            "findings": read_findings(c.get("findings")),
-            "escapes_linked": linked.get(id(c), []),
-        }
+        row = check_row(c, linked)
         i = next((k for k, w in enumerate(windows) if w is c), None)
         if i is not None:
-            # 実装レビューだけの回は次の記録（どちらの検査もレビューを通る）までで切り、
-            # 構造改善を含む検査は同じ種類の次の記録までで切る
-            review = c.get("only") == "review"
-            nxt = next((d for d in windows[i + 1 :] if review or d.get("only") != "review"), None)
-            until = parse_at(nxt["at"]) if nxt else clock.now(utc=True)
-            row["escapes_after"] = sum(1 for e in escapes if parse_at(c["at"]) < parse_at(e["at"]) <= until)
+            row["escapes_after"] = escapes_in_window(c, i, windows, escapes)
         rows.append(row)
     fired: dict[str, int] = {}
     for e in evals:
