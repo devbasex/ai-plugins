@@ -168,15 +168,10 @@ def _merge_duplicates(state: dict[str, Any]) -> list[dict[str, Any]]:
     `duplicate` で見送り、賛同した者を統合先へ足す。
     """
     candidates = state["candidates"]
+    merged_into: dict[str, str] = {}
     by_group: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for item in candidates:
         by_group.setdefault(group_key(item), []).append(item)
-    return _apply_merges(state, candidates, _duplicate_map(state, by_group))
-
-
-def _duplicate_map(state: dict[str, Any], by_group: dict[tuple[str, str], list[dict[str, Any]]]) -> dict[str, str]:
-    """組ごとに `{統合される候補 id: 統合先 id}` を求める。"""
-    merged_into: dict[str, str] = {}
     for members in by_group.values():
         for j, later in enumerate(members):
             for earlier in members[:j]:
@@ -185,15 +180,6 @@ def _duplicate_map(state: dict[str, Any], by_group: dict[tuple[str, str], list[d
                 if _same_change(state, earlier, later):
                     merged_into[later["id"]] = earlier["id"]
                     break
-    return merged_into
-
-
-def _apply_merges(
-    state: dict[str, Any],
-    candidates: list[dict[str, Any]],
-    merged_into: dict[str, str],
-) -> list[dict[str, Any]]:
-    """統合された候補の賛同した者を統合先へ足して `duplicate` で見送り、残りを返す。"""
     by_id = {c["id"]: c for c in candidates}
     kept = []
     for item in candidates:
