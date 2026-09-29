@@ -202,6 +202,44 @@ def plan_to_merge(a, head: list[dict]) -> dict:
 NO_REFACTOR_MODES = ("light", "operation", "documentation")
 
 
+def _inspect_steps(a, pr_ref: str, scope: str) -> list[dict]:
+    """検査の assess・refactor・review のステップ。pr_ref は PR の番号か、駆動が埋める `{pr}`。"""
+    return [
+        {
+            "id": "assess",
+            "type": "run",
+            "preset": "assess",
+            "stage": "構造改善",
+            "skip_to": "review",
+            "on_fail": "refactor",
+            "next": "refactor",
+        },
+        # 駆動で回す（最終ゲートは全体テスト。テストの走らせ方は cross-refactoring が同じ宣言から読む。#1334）
+        {
+            "id": "refactor",
+            "type": "drive",
+            "drive": "cross-refactoring",
+            "kind": "構造改善",
+            "stage": "構造改善",
+            "timeout": 3600,
+            "args": f"{pr_ref} --workflow-step --scope {scope}{refactor_template_arg(a)}",
+            "on_fail": "abort",
+            "next": "review",
+        },
+        {
+            "id": "review",
+            "type": "drive",
+            "drive": "cross-review",
+            "kind": "実装レビュー",
+            "stage": "実装レビュー",
+            "timeout": 3600,
+            "args": f"{pr_ref} --max-rounds 4",
+            "on_fail": "abort",
+            "next": "test-all",
+        },
+    ]
+
+
 def plan_check(a) -> dict:
     """PR を指す検査（`new check --pr`）。終わり方（マージ・変更なし・落ちた）にかかわらず検査の記録へ 1 行を書く
     （`check-trigger.py record --target-pr`。#1317）。落ちたステップと judge の止める判断は abort へ行き、
@@ -217,18 +255,6 @@ def plan_check(a) -> dict:
         else f"$(gh api 'repos/{{owner}}/{{repo}}/pulls/{pr}/files' --paginate --jq '.[].filename'"
         f" | xargs -n1 dirname | sort -u | grep -vx '\\.')"
     )
-    # 駆動で回す（最終ゲートは全体テスト。テストの走らせ方は cross-refactoring が同じ宣言から読む。#1334）
-    refactor = {
-        "id": "refactor",
-        "type": "drive",
-        "drive": "cross-refactoring",
-        "kind": "構造改善",
-        "stage": "構造改善",
-        "timeout": 3600,
-        "args": f"{pr} --workflow-step --scope {scope}{refactor_template_arg(a)}",
-        "on_fail": "abort",
-        "next": "review",
-    }
     plan = _with_test_meta(
         {
             "フェーズ": "検査",
@@ -239,27 +265,7 @@ def plan_check(a) -> dict:
             "上限": 12,
             "Pull Request": str(pr),
             "steps": [
-                {
-                    "id": "assess",
-                    "type": "run",
-                    "preset": "assess",
-                    "stage": "構造改善",
-                    "skip_to": "review",
-                    "on_fail": "refactor",
-                    "next": "refactor",
-                },
-                refactor,
-                {
-                    "id": "review",
-                    "type": "drive",
-                    "drive": "cross-review",
-                    "kind": "実装レビュー",
-                    "stage": "実装レビュー",
-                    "timeout": 3600,
-                    "args": f"{pr} --max-rounds 4",
-                    "on_fail": "abort",
-                    "next": "test-all",
-                },
+                *_inspect_steps(a, str(pr), scope),
                 {
                     "id": "test-all",
                     "type": "run",
@@ -360,37 +366,7 @@ def plan_check_since(a) -> dict:
             "changes": "無し（検査の修正だけ）",
             "next": "review" if review_only else "assess",
         },
-        {
-            "id": "assess",
-            "type": "run",
-            "preset": "assess",
-            "stage": "構造改善",
-            "skip_to": "review",
-            "on_fail": "refactor",
-            "next": "refactor",
-        },
-        {
-            "id": "refactor",
-            "type": "drive",
-            "drive": "cross-refactoring",
-            "kind": "構造改善",
-            "stage": "構造改善",
-            "timeout": 3600,
-            "args": f"{{pr}} --workflow-step --scope {scope}{refactor_template_arg(a)}",
-            "on_fail": "abort",
-            "next": "review",
-        },
-        {
-            "id": "review",
-            "type": "drive",
-            "drive": "cross-review",
-            "kind": "実装レビュー",
-            "stage": "実装レビュー",
-            "timeout": 3600,
-            "args": "{pr} --max-rounds 4",
-            "on_fail": "abort",
-            "next": "test-all",
-        },
+        *_inspect_steps(a, "{pr}", scope),
         # 検査の間に起点のブランチが進んでも finish の付け替えの後にマージできるよう、毎回取り込んでから測る
         {
             "id": "test-all",
