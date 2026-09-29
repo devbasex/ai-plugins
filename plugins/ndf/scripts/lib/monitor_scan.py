@@ -74,7 +74,9 @@ def _scan_patterns(
             if any(b.search(line) for b in benign_patterns):
                 continue
             # マッチ部位が backtick / 日本語「」 で引用されている場合も benign。
-            if monitor_patterns._match_is_quoted(line, m.start() - line_start, m.end() - line_start):
+            # 引用の判定はキーワードの位置で行う（表に `kw` の組があれば、その位置）。
+            ks, ke = m.span("kw") if "kw" in pat.groupindex else m.span()
+            if monitor_patterns._match_is_quoted(line, ks - line_start, ke - line_start):
                 continue
             return line.strip()
     return None

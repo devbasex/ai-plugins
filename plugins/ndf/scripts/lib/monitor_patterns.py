@@ -19,9 +19,15 @@ USAGE_LIMIT_FATAL = [
     # **`{` で始まる JSON の行だけを読む。** 担当が差分やテストの定義（`LIMIT = {…429…}`）を
     # 読み上げた行に一致させない
     re.compile(r'^\{.*?"api_error_status"\s*:\s*429', re.MULTILINE),
-    # quota / rate limit （`m.start()` をキーワード位置に合わせるため `^.*` を付けない。
-    # `_match_is_quoted()` が backtick / 「」 引用を判定するために match 開始位置を使うため）
-    re.compile(r"\b(?:quota exceeded|rate limit exceeded)\b", re.IGNORECASE),
+    # quota / rate limit。**差分（行頭の `+` / `-`）・コメント（`#` / `//`）・Markdown
+    # （見出し・リスト・番号付きリスト・表・引用）の行は読まない。** 担当が差分や文書を
+    # 読み上げた行に一致させない（429 の JSON の行と同じ方針）。
+    # 引用の判定（`_match_is_quoted()`）はキーワードの位置で行うため、`_scan_patterns()` は
+    # 名前付きの組 `kw` の位置を使う
+    re.compile(
+        r"^(?![+-]|[ \t]*(?:#|//|[*>|]|-\s|\d+\.\s))[^\n]*?(?P<kw>\b(?:quota exceeded|rate limit exceeded)\b)",
+        re.IGNORECASE | re.MULTILINE,
+    ),
     # HTTP 429 の状態行
     re.compile(r"^HTTP/\d\S* 429 ", re.MULTILINE),
     # codex と claude の実物（#811）。**行頭で始まる形だけを読む。** 担当は作業中の
