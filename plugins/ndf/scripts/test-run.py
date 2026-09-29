@@ -188,7 +188,7 @@ def _emit_outcome(
         detail += "。静的解析が落ちた: " + "・".join(f"{v['suite']}（{v['reason']}）" for v in lint_caused)
     elif lint:
         detail += "。落ちた静的解析は既存失敗: " + "・".join(f"{v['suite']}（{v['reason']}）" for v in lint)
-    emit(result(TOOL, status, detail, items, {"caused": len((triage or {}).get("caused") or []) + len(lint_caused)}), code=code)
+    emit(result(TOOL, status, detail, items, {"caused": len((triage or {}).get("caused") or []) + len(lint_caused)}))
     return code
 
 

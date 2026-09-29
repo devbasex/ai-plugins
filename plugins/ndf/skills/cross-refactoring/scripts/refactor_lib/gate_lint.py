@@ -20,7 +20,7 @@ from .gitfacts import run_with_timeout
 from .paths import work_dir
 
 
-def run(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]) -> tuple[bool, str]:
+def lint_gate(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]) -> tuple[bool, str]:
     """静的解析の全体テストを、戦略に関わらず手元で走らせる（#1483 決定 7）。落ちた suite は
     `test_triage.lint_verdict` で着手前の成否から判定し、変更起因が無ければ通す（I12）。起動の失敗なら止める。
 

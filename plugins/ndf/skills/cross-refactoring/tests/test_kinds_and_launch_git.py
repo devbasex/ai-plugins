@@ -19,8 +19,8 @@ from crossref_helpers import CALC, build_git_flow, commit_with_trailers, git, it
 
 FAR = "2099-01-01T00:00:00+00:00"
 # 行末の空白を「整形の違反」とみなす静的解析（ruff format --check の代わり。ツールに依存しない）。
-WS_SCOPE = "sh -c 'for f; do if grep -q \" $\" \"$f\"; then exit 1; fi; done' x {paths}"
-WS_WHOLE = "sh -c '! git grep -q \" $\" -- \"*.py\"'"
+WS_SCOPE = 'sh -c \'for f; do if grep -q " $" "$f"; then exit 1; fi; done\' x {paths}'
+WS_WHOLE = 'sh -c \'! git grep -q " $" -- "*.py"\''
 
 
 def _lint(**over):
@@ -121,7 +121,13 @@ def test_a_clean_change_passes_the_lint_scope_test(flow, cmd_setup, cmd_implemen
 def test_an_old_item_command_is_still_read(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
     """移行性 — `scope_commands` を持たない旧形の項目（語の並びの `command`）も同じ語で走る。"""
     _implement(
-        flow, cmd_setup, cmd_implement, CALC + "\nX = 1\n", strategy_state(), scope_commands=None, command=["pytest", "-q", "tests/test_calc.py"]
+        flow,
+        cmd_setup,
+        cmd_implement,
+        CALC + "\nX = 1\n",
+        strategy_state(),
+        scope_commands=None,
+        command=["pytest", "-q", "tests/test_calc.py"],
     )
     state = read_state(flow["path"])
     del state["items"][0]["scope_commands"]
@@ -202,7 +208,7 @@ def test_the_final_gate_judges_a_failing_lint_by_the_baseline(flow, refactor, be
     gate_lint = importlib.import_module("refactor_lib.gate_lint")
     state = _gate_state(flow, before=before, lint=lint, change=change)
     gate = {"fix_rounds": 0, "checks": [], "mode": "test"}
-    ok, detail = gate_lint.run(flow["path"], state, gate)
+    ok, detail = gate_lint.lint_gate(flow["path"], state, gate)
     assert ok is passed
     assert [v["verdict"] for v in gate["lint"]] == [verdict]
     assert gate["checks"][-1]["mode"] == "lint"
@@ -217,7 +223,7 @@ def test_a_launch_failure_in_the_final_gate_stops(flow, refactor, capsys):
     state["strategy"] = _strategy(_lint(command="nosuchcmd_1483"))
     write_state(flow["path"], state)
     with pytest.raises(SystemExit) as e:
-        gate_lint.run(flow["path"], state, {"checks": []})
+        gate_lint.lint_gate(flow["path"], state, {"checks": []})
     assert e.value.code == 4
     assert read_state(flow["path"])["launch_failure"]["command"] == "nosuchcmd_1483"
 

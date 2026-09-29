@@ -195,8 +195,8 @@ def by_file(ids: list[str]) -> dict[str, list[str]]:
 
 
 def rerun_groups(strategy: ts.Strategy, files: list[str]) -> list[tuple[ts.Suite, list[str]]]:
-    """落ちたファイル（`::` 付きの対象も可）を受け持つテストの suite ごとに分ける（`test_strategy.test_groups`）。"""
-    return ts.test_groups(strategy, [str(f) for f in files])
+    """落ちたファイル（`::` 付きの対象も可）を受け持つテストの suite ごとに分ける（`test_strategy.suite_groups`）。"""
+    return ts.suite_groups(strategy, [str(f) for f in files])
 
 
 def rerun_commands(strategy: ts.Strategy, files: list[str]) -> list[str]:

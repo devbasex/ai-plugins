@@ -83,7 +83,7 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
         gate["mode"] = "test"
     else:
         passed, detail = _run_and_record_gate_check(path, state, gate)
-    lint_passed, lint_detail = gate_lint.run(path, state, gate)
+    lint_passed, lint_detail = gate_lint.lint_gate(path, state, gate)
     if lint_detail:
         detail = f"{detail} / {lint_detail}"
     passed = passed and lint_passed

@@ -273,7 +273,7 @@ def suite_for(strategy: Strategy, path: str, kind: str = TEST) -> Optional[Suite
     return best
 
 
-def test_groups(strategy: Strategy, targets: list[str]) -> list[tuple[Suite, list[str]]]:
+def suite_groups(strategy: Strategy, targets: list[str]) -> list[tuple[Suite, list[str]]]:
     """テストの対象を受け持つテストの suite ごとに分ける。受け持つ suite の無いものは最初のテストの suite へ。"""
     groups: dict[str, tuple[Suite, list[str]]] = {}
     scoped = strategy.scoped_suites(TEST)
@@ -288,7 +288,7 @@ def test_groups(strategy: Strategy, targets: list[str]) -> list[tuple[Suite, lis
 def scope_runs(strategy: Strategy, targets: list[str], changed: list[str]) -> list[ScopeRun]:
     """範囲テストの並び。テストの suite には対象（`targets`）を、静的解析の suite には変更したファイル（`changed`）の
     うち `covers` に当たるものを入れる（I10）。入れるものが無い suite は組まない。"""
-    runs = [ScopeRun(s.name, TEST, fill(str(s.scope_command), paths)) for s, paths in test_groups(strategy, list(targets))]
+    runs = [ScopeRun(s.name, TEST, fill(str(s.scope_command), paths)) for s, paths in suite_groups(strategy, list(targets))]
     for suite in strategy.scoped_suites(LINT):
         mine = [str(f) for f in changed if suite.covers(str(f))]
         if mine:
