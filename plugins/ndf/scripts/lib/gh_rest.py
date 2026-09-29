@@ -52,6 +52,22 @@ def view_json(kind: str, number: int, fields: str, repo: str | None = None, cwd:
     return gh_call.GhResult(0, json.dumps(gh_fields.to_json_shape(kind, d, fields), ensure_ascii=False), "")
 
 
+def _decode_concatenated_arrays(text: str) -> list:
+    """`gh api --paginate` がページごとの配列を続けて書いた出力（`[...][...]`）を 1 つの並びにする。
+    配列でないページや壊れた JSON は ValueError。"""
+    rows: list = []
+    dec, i = json.JSONDecoder(), 0
+    while True:
+        while i < len(text) and text[i].isspace():
+            i += 1
+        if i >= len(text):
+            return rows
+        page, i = dec.raw_decode(text, i)
+        if not isinstance(page, list):
+            raise ValueError(page)
+        rows += page
+
+
 def pr_files(number: int, repo: str | None = None, cwd: str | None = None) -> gh_call.GhResult:
     """PR の変更したファイルを全件読む（REST の `pulls/<n>/files` を全ページ）。
 
@@ -62,18 +78,8 @@ def pr_files(number: int, repo: str | None = None, cwd: str | None = None) -> gh
     r = gh_call.gh(["api", "--paginate", path], cwd=cwd)
     if r.returncode != 0:
         return r
-    rows: list = []
-    text, dec, i = r.stdout, json.JSONDecoder(), 0
     try:
-        while True:  # --paginate はページごとの配列を続けて書く（`[...][...]`）
-            while i < len(text) and text[i].isspace():
-                i += 1
-            if i >= len(text):
-                break
-            page, i = dec.raw_decode(text, i)
-            if not isinstance(page, list):
-                raise ValueError(page)
-            rows += page
+        rows = _decode_concatenated_arrays(r.stdout)
         files = [
             {
                 "path": f["filename"],
