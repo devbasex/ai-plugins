@@ -515,60 +515,68 @@ def versions_in_range(rm: release_map.ReleaseMap, since: float, until: float | N
     return out
 
 
+def _a_in_b(r: dict, b_issues: set[int]) -> bool:
+    """A の会話のブランチの課題が、報告から読んだ B の課題に入っているか。"""
+    m = re.search(r"issue-(\d+)", r["branch"])
+    return bool(m and int(m.group(1)) in b_issues)
+
+
+def _total_cost(av: list[dict], bv: list[dict], b_out: float) -> float:
+    """換算 A+B（B に含まれる A を除き、B 外を足す）。"""
+    return sum(r["cost"] for r in av if not r["in_B"]) + sum(r["cost_low"] for r in bv) + b_out
+
+
+def _version_row(
+    rm: release_map.ReleaseMap, v: str | None, partial: bool, a: list[dict], b: list[dict], c: list[dict], outside: list[dict]
+) -> dict:
+    av, bv, cv, ov = ([r for r in rs if r["version"] == v] for rs in (a, b, c, outside))
+    seen = {r["pr"] for r in av + bv if r.get("pr")}
+    release_prs = len(rm.prs_of(v)) if v else 0
+    # 報告から読んだ B（帳簿の無い期間）には full のステップの会話（A）の使用量も足されている。
+    # 同じ版で報告の B の課題に A のブランチの課題が入っていれば、A を B に含まれるものとして合計から外す。
+    # 帳簿から読んだ B は full の行を session_id で除いてあるため、推定を使わない（I1）
+    b_issues = {i for r in bv if r["source"] == "report" for i in r["issues"]}
+    for r in av:
+        r["in_B"] = _a_in_b(r, b_issues)
+    b_out = sum(r["cost"] for r in ov)
+    cost = _total_cost(av, bv, b_out)
+    return {
+        "version": v or "未リリース",
+        "partial": partial,
+        "A_convs": len(av),
+        "B_plans": len(bv),
+        "B_from_ledger": sum(r["source"] == "ledger" for r in bv),
+        "release_prs": release_prs,
+        "prs_seen": len(seen),
+        "cost_A": round(sum(r["cost"] for r in av)),
+        "cost_B_low": round(sum(r["cost_low"] for r in bv)),
+        "cost_B_high": round(sum(r["cost_high"] for r in bv)),
+        "B_outside": round(b_out),
+        "cost_total_low": round(cost),
+        "A_in_B": sum(r["in_B"] for r in av),
+        "cost_per_pr": round(cost / release_prs) if release_prs else None,
+        "A_P_per_conv": round(sum(r["P"] for r in av) / len(av)) if av else None,
+        "A_calls_per_conv": round(sum(r["calls"] for r in av) / len(av), 1) if av else None,
+        "A_min_per_conv": round(sum(r["active_sec"] for r in av) / len(av) / 60, 1) if av else None,
+        "B_turns_per_plan": round(sum(r["turns"] for r in bv) / len(bv), 1) if bv else None,
+        "B_llm_min_per_plan": round(sum(r["llm_sec"] for r in bv) / len(bv) / 60, 1) if bv else None,
+        "C_seats": len(cv),
+        "C_cost": round(sum(r["cost"] for r in cv)),
+        "C_P_per_seat": round(sum(r["P"] for r in cv) / len(cv)) if cv else None,
+        "C_calls_per_seat": round(sum(r["calls"] for r in cv) / len(cv), 1) if cv else None,
+        "kinds_A": dict(Counter(r["kind"] for r in av)),
+        "kinds_B": dict(Counter(r["kind"] for r in bv)),
+        "models_B": dict(Counter(r["model"] for r in bv)),
+    }
+
+
 def table(
     rm: release_map.ReleaseMap, a: list[dict], b: list[dict], c: list[dict], outside: list[dict], since: float, until: float | None
 ) -> list[dict]:
-    rows = []
     vers = versions_in_range(rm, since, until)
     if any(r["version"] is None for r in a + b + c + outside):
         vers.append((None, True))
-    for v, partial in vers:
-        av = [r for r in a if r["version"] == v]
-        bv = [r for r in b if r["version"] == v]
-        cv = [r for r in c if r["version"] == v]
-        ov = [r for r in outside if r["version"] == v]
-        seen = {r["pr"] for r in av + bv if r.get("pr")}
-        release_prs = len(rm.prs_of(v)) if v else 0
-        # 報告から読んだ B（帳簿の無い期間）には full のステップの会話（A）の使用量も足されている。
-        # 同じ版で報告の B の課題に A のブランチの課題が入っていれば、A を B に含まれるものとして合計から外す。
-        # 帳簿から読んだ B は full の行を session_id で除いてあるため、推定を使わない（I1）
-        b_issues = {i for r in bv if r["source"] == "report" for i in r["issues"]}
-        for r in av:
-            m = re.search(r"issue-(\d+)", r["branch"])
-            r["in_B"] = bool(m and int(m.group(1)) in b_issues)
-        b_out = sum(r["cost"] for r in ov)
-        cost = sum(r["cost"] for r in av if not r["in_B"]) + sum(r["cost_low"] for r in bv) + b_out
-        rows.append(
-            {
-                "version": v or "未リリース",
-                "partial": partial,
-                "A_convs": len(av),
-                "B_plans": len(bv),
-                "B_from_ledger": sum(r["source"] == "ledger" for r in bv),
-                "release_prs": release_prs,
-                "prs_seen": len(seen),
-                "cost_A": round(sum(r["cost"] for r in av)),
-                "cost_B_low": round(sum(r["cost_low"] for r in bv)),
-                "cost_B_high": round(sum(r["cost_high"] for r in bv)),
-                "B_outside": round(b_out),
-                "cost_total_low": round(cost),
-                "A_in_B": sum(r["in_B"] for r in av),
-                "cost_per_pr": round(cost / release_prs) if release_prs else None,
-                "A_P_per_conv": round(sum(r["P"] for r in av) / len(av)) if av else None,
-                "A_calls_per_conv": round(sum(r["calls"] for r in av) / len(av), 1) if av else None,
-                "A_min_per_conv": round(sum(r["active_sec"] for r in av) / len(av) / 60, 1) if av else None,
-                "B_turns_per_plan": round(sum(r["turns"] for r in bv) / len(bv), 1) if bv else None,
-                "B_llm_min_per_plan": round(sum(r["llm_sec"] for r in bv) / len(bv) / 60, 1) if bv else None,
-                "C_seats": len(cv),
-                "C_cost": round(sum(r["cost"] for r in cv)),
-                "C_P_per_seat": round(sum(r["P"] for r in cv) / len(cv)) if cv else None,
-                "C_calls_per_seat": round(sum(r["calls"] for r in cv) / len(cv), 1) if cv else None,
-                "kinds_A": dict(Counter(r["kind"] for r in av)),
-                "kinds_B": dict(Counter(r["kind"] for r in bv)),
-                "models_B": dict(Counter(r["model"] for r in bv)),
-            }
-        )
-    return rows
+    return [_version_row(rm, v, partial, a, b, c, outside) for v, partial in vers]
 
 
 def md(rows: list[dict], meta: dict) -> str:
