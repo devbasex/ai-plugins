@@ -47,11 +47,10 @@ def commands_of(strategy: ts.Strategy, scope: list[str], work: pathlib.Path) -> 
     return "whole", _whole_runs(strategy)
 
 
-def run_baseline(strategy: ts.Strategy, work: pathlib.Path, timeout: int, scope: list[str], tmp_dir: pathlib.Path) -> dict[str, Any]:
-    """着手前のテストを戦略に沿って実行して記録する。上限を超えたときと起動の失敗のときだけ止める。"""
-    mode, runs = commands_of(strategy, scope, work)
-    test_triage.clear_junit(str(work), strategy)
-    started = time.monotonic()
+def _run_suites(
+    runs: list[ts.ScopeRun], mode: str, timeout: int, started: float, work: pathlib.Path, tmp_dir: pathlib.Path
+) -> tuple[str, dict[str, str]]:
+    """runs を走らせて `(テストの成否, suite ごとの成否)` を返す。上限を超えたときと起動の失敗のときは止める。"""
     status = "green"
     suites: dict[str, str] = {}
     for i, run in enumerate(runs):
@@ -70,6 +69,30 @@ def run_baseline(strategy: ts.Strategy, work: pathlib.Path, timeout: int, scope:
         suites[run.suite] = "green" if passed and suites.get(run.suite) != "red" else "red"
         if not passed and run.kind == ts.TEST:
             status = "red"
+    return status, suites
+
+
+def _report_baseline(record: dict[str, Any], runs: list[ts.ScopeRun], lint_red: list[str], seconds: float, mode: str) -> None:
+    if record["status"] == "red":
+        ids, reason = record["existing_failures"], record["existing_failures_reason"]
+        shown = f"{len(ids)} 件を既存失敗として記録" if ids is not None else f"落ちたテストを読めない（{reason}）"
+        info(
+            f"⚠ 着手前のテストが失敗しています（{record['command']}）。{shown}して続けます（既存失敗の外で新しく落ちたテストが無ければ最終ゲートは通ります）"
+        )
+    elif runs and not lint_red:
+        info(f"✅ 着手前のテスト成功: {record['command']}（{seconds} 秒 / {mode}）")
+    elif not runs:
+        info("ℹ 着手前に走らせるテストがありません（--scope のテストの置き場所を受け持つ suite が無い）")
+    if lint_red:
+        info(f"⚠ 着手前に静的解析の suite（{', '.join(lint_red)}）が落ちています。最終ゲートは変更したファイルに絞って判定します")
+
+
+def run_baseline(strategy: ts.Strategy, work: pathlib.Path, timeout: int, scope: list[str], tmp_dir: pathlib.Path) -> dict[str, Any]:
+    """着手前のテストを戦略に沿って実行して記録する。上限を超えたときと起動の失敗のときだけ止める。"""
+    mode, runs = commands_of(strategy, scope, work)
+    test_triage.clear_junit(str(work), strategy)
+    started = time.monotonic()
+    status, suites = _run_suites(runs, mode, timeout, started, work, tmp_dir)
     seconds = round(time.monotonic() - started, 1)
     record: dict[str, Any] = {
         "mode": mode,
@@ -85,19 +108,8 @@ def run_baseline(strategy: ts.Strategy, work: pathlib.Path, timeout: int, scope:
     }
     lint_red = sorted(r.suite for r in runs if r.kind == ts.LINT and suites.get(r.suite) == "red")
     if status == "red":
-        ids, reason = test_triage.read_junit(str(work), strategy)
-        record["existing_failures"] = ids
-        record["existing_failures_reason"] = reason
-        shown = f"{len(ids)} 件を既存失敗として記録" if ids is not None else f"落ちたテストを読めない（{reason}）"
-        info(
-            f"⚠ 着手前のテストが失敗しています（{record['command']}）。{shown}して続けます（既存失敗の外で新しく落ちたテストが無ければ最終ゲートは通ります）"
-        )
-    elif runs and not lint_red:
-        info(f"✅ 着手前のテスト成功: {record['command']}（{seconds} 秒 / {mode}）")
-    elif not runs:
-        info("ℹ 着手前に走らせるテストがありません（--scope のテストの置き場所を受け持つ suite が無い）")
-    if lint_red:
-        info(f"⚠ 着手前に静的解析の suite（{', '.join(lint_red)}）が落ちています。最終ゲートは変更したファイルに絞って判定します")
+        record["existing_failures"], record["existing_failures_reason"] = test_triage.read_junit(str(work), strategy)
+    _report_baseline(record, runs, lint_red, seconds, mode)
     return record
 
 
