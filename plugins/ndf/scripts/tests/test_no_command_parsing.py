@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 import sys
 from pathlib import Path
 
@@ -51,6 +52,6 @@ def test_no_shipped_source_parses_the_test_command():
 def test_the_scope_words_are_the_template_words_with_paths_replaced():
     """範囲テストの語は、雛形の語の並びから `{paths}` の語だけを対象に差し替えたもの。並べ替えも足しもしない。"""
     template = "docker compose exec -T app ./vendor/bin/phpunit --log-junit build/ndf/junit.xml {paths} --colors=never"
-    words = ts.scope_words(template, ["tests/Unit/A.php", "tests/Unit/B.php"])
+    words = shlex.split(ts.fill(template, ["tests/Unit/A.php", "tests/Unit/B.php"]))
     before, after = template.split(" {paths} ")
     assert words == before.split() + ["tests/Unit/A.php", "tests/Unit/B.php"] + after.split()

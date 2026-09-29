@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import pathlib
 import re
 import subprocess
 from typing import Any, Optional
@@ -193,6 +194,16 @@ def commit_files(work: str, sha: str) -> list[str]:
     """コミットが触ったファイルのリポジトリ相対パス。範囲のチェックに使う。"""
     out = git_out(work, ["show", "--name-only", "--format=", sha])
     return [p.strip() for p in (out or "").splitlines() if p.strip()]
+
+
+def changed_files(work: str, shas: list[str]) -> list[str]:
+    """コミットの並びが変えたファイルのうち、worktree に残るもの（静的解析の範囲テストの範囲。#1483 I10）。"""
+    out: list[str] = []
+    for sha in shas:
+        for f in commit_files(work, sha):
+            if f not in out and (pathlib.Path(work) / f).is_file():
+                out.append(f)
+    return out
 
 
 def commit_test_changes(work: str, sha: str) -> dict[str, tuple[list[str], list[str]]]:

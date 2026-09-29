@@ -1513,14 +1513,12 @@ def test_a_carmo_declaration_runs_only_the_scope_test_before_the_start(run_init,
     assert state["strategy"]["name"] == "local-scoped-ci-whole" and state["strategy"]["source"] == "test.strategy"
     whole = CARMO_DECL["test"]["suites"][0]["command"]
     assert whole not in test_calls.seen
-    assert test_calls.seen == [
-        ["docker", "compose", "exec", "-T", "app", "./vendor/bin/phpunit", "--log-junit", "build/ndf/junit.xml", "tests"]
-    ]
+    assert test_calls.seen == ["docker compose exec -T app ./vendor/bin/phpunit --log-junit build/ndf/junit.xml tests"]
     assert state["baseline_test"]["mode"] == "scope"
 
 
 def test_cross_refactoring_and_supervise_build_the_same_scope_words(refactor):
-    """#1334 AC7・I10 — 同じ宣言と対象から、cross-refactoring の項目の検証と supervise の `test-run.py scope` が同じ語の並びを組む。"""
+    """#1334 AC7・I10 — 同じ宣言と対象から、cross-refactoring の項目の検証と supervise の `test-run.py scope` が同じコマンドを組む。"""
     import importlib
 
     import test_strategy as ts
@@ -1529,5 +1527,32 @@ def test_cross_refactoring_and_supervise_build_the_same_scope_words(refactor):
     targets = importlib.import_module("refactor_lib.targets")
     strategy = ts.resolve(CARMO_DECL)
     paths = ["tests/Unit/AServiceTest.php", "tests/Unit/BServiceTest.php"]
-    assert targets.scope_words_for(strategy, paths) == test_triage.rerun_words(strategy, paths)
-    assert targets.scope_words_for(strategy, paths)[0][-2:] == paths
+    assert [r.command for r in targets.scope_runs_for(strategy, paths)] == test_triage.rerun_commands(strategy, paths)
+    assert targets.scope_runs_for(strategy, paths)[0].command.endswith(" " + " ".join(paths))
+
+
+# ---------- #1483: 静的解析の雛形・起動の失敗 ----------
+
+LINT_TEMPLATE = "uvx --from shellcheck-py shellcheck -s bash {paths}"
+
+
+def test_a_lint_template_never_runs_on_the_whole_directory(run_init, tmp_path, test_calls):
+    """AC16・AC17 — 静的解析の雛形を `--test-kind lint` で渡し `--scope` がシェルスクリプトだけなら、着手前に `.` を
+    渡さず、テストの置き場所の検査で止まらず、行わなかったことを戦略の表示に残す。"""
+    scope = ["scripts/a.sh", "scripts/b.sh"]
+    run_init(_args(tmp_path, scope=scope, baseline_test=LINT_TEMPLATE, round_test=None, test_kind="lint"))
+    _, state = _state_of(tmp_path)
+    assert [s["kind"] for s in state["strategy"]["suites"]] == ["lint"]
+    assert test_calls.seen == ["uvx --from shellcheck-py shellcheck -s bash scripts/a.sh scripts/b.sh"]
+    assert not any(c.endswith(" .") or " . " in c for c in test_calls.seen)
+    assert state["baseline_test"]["suites"] == {"args": "green"}
+
+
+def test_a_launch_failure_before_the_start_stops_the_init(run_init, tmp_path, test_calls, capsys):
+    """AC13（着手前）— 起動できないコマンドは「落ちた」として続けず、中断で止まり、コマンドと理由を出す。"""
+    test_calls.codes["nosuchcmd_1483"] = 127
+    with pytest.raises(SystemExit) as e:
+        run_init(_args(tmp_path, baseline_test="nosuchcmd_1483", round_test=None))
+    assert e.value.code == refactor_abort()
+    err = capsys.readouterr().err
+    assert "起動の失敗" in err and "nosuchcmd_1483" in err and "127" in err

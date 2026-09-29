@@ -41,8 +41,11 @@ class Container(schema.Shape):
 
 
 class Suite(schema.Shape):
-    """テストの 1 まとまり。`scope_command` の `{paths}`（空白で区切った 1 語）に範囲のパスが入る。
-    `junit` はコマンドが JUnit XML を書く作業ディレクトリからの相対パス（無ければ落ちたテストの見分けは走らせ直しへ落ちる）。"""
+    """テストの 1 まとまり。`scope_command` の `{paths}`（引用の外の、空白で区切った 1 語）に、シェルの引用で守った範囲の
+    パスが入る。`command` と `scope_command` はシェルで走らせる。
+    `junit` はコマンドが JUnit XML を書く作業ディレクトリからの相対パス（無ければ落ちたテストの見分けは走らせ直しへ落ちる）。
+    `kind` は種別で、`test`（テスト）か `lint`（静的解析。整形の検査を含む）。書かなければ `test`。静的解析の suite の範囲は
+    変更したファイルのうち `paths` に当たるもの。`paths` の要素は接頭辞（ディレクトリ）か glob（`*.sh` など）で、空ならすべて。"""
 
     name: str
     runner: str
@@ -52,6 +55,7 @@ class Suite(schema.Shape):
     container: Optional[Container] = None
     needs: list[str] = []
     paths: list[str] = []
+    kind: Literal["test", "lint"] = "test"
 
 
 class TestCi(schema.Shape):

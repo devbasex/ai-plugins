@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import shlex
 
 import pytest
 
@@ -73,7 +74,7 @@ def test_items_carry_rank_estimate_tests_and_targets(planned, cmd_plan, capsys):
     assert [i["candidate_id"] for i in items] == ["C-001", "C-002"]  # 等級が先
     assert items[0]["tests"] == ["tests/test_new.py"]
     # 範囲テストは戦略の雛形の `{paths}` を対象へ置き換えたもの（#1334 AC2）。語は雛形の語の並びから `{paths}` を除いたものを含む。
-    assert items[0]["command"] == SCOPE_WORDS + ["tests/test_new.py"]
+    assert items[0]["scope_commands"] == [{"suite": "pytest", "kind": "test", "command": shlex.join(SCOPE_WORDS + ["tests/test_new.py"])}]
     assert items[0]["estimate"] == {"test": 2.7, "implement": 1.3, "verify": 0.2}
     assert items[0]["test_start_deadline"] is not None
     assert items[1]["test_start_deadline"] is None
@@ -140,7 +141,7 @@ def test_a_round_test_is_used_as_is_when_targets_cannot_be_built(planned, cmd_pl
     path = planned([a], [_answer(a, test_targets=[])], strategy=_round_only("make test-unit"))
     _run(cmd_plan)
     item = read_state(path)["items"][0]
-    assert item["command"] == ["make", "test-unit"]
+    assert item["scope_commands"] == [{"suite": "round", "kind": "test", "command": "make test-unit"}]
     assert item["command_source"] == "round_test"
 
 
@@ -287,3 +288,21 @@ def test_d5_keeps_the_runtime_risk_when_jev_is_not_confident(planned, cmd_plan, 
     items = {i["symbol"]: i for i in read_state(path)["items"]}
     assert (items["f"]["public_io"], items["f"]["public_io_source"]) == (True, "runtime")
     assert (items["g"]["public_io"], items["g"]["public_io_source"]) == (False, "runtime")
+
+
+def test_a_lint_only_strategy_skips_the_test_round_and_says_so(planned, cmd_plan, refactor):
+    """#1483 AC16・I9 — テストの種別の suite が無い戦略では、足すテストを空にし、項目を no_target で見送らず、
+    行わなかったことを計画に残す。"""
+    import importlib
+
+    lint = {"name": "sc", "command": "", "scope_command": "shellcheck {paths}", "junit": None, "paths": ["*.sh"], "kind": "lint"}
+    a = _candidate(1, "f")
+    strategy = strategy_state("local-full", "args", suites=[lint])
+    path = planned([a], [_answer(a, tests=["tests/test_new.py"], test_targets=[])], strategy=strategy)
+    _run(cmd_plan)
+    state = read_state(path)
+    item = state["items"][0]
+    assert item["tests"] == [] and item["scope_commands"] == [] and item["command_source"] == "lint"
+    assert state["plan_notes"] == [cmd_plan.NO_TEST_SUITE_NOTE]
+    plan_lib = importlib.import_module("refactor_lib.plan")
+    assert f"- 行わなかったこと: {cmd_plan.NO_TEST_SUITE_NOTE}" in plan_lib.strategy_lines(state)

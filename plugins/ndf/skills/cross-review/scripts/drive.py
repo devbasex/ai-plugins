@@ -46,6 +46,29 @@ def review_paths():
     return github, workspace
 
 
+def sweep_verify_lines(worktree) -> str:
+    """最終スイープの検証のコマンドの段落（#1483 I13）。宣言の `test` があれば全体テスト（両方の種別）を名指しする。
+
+    宣言が無い・解けなければ空で、プロンプトは今の探し方（Step 7.5）のまま。`--verify-command` は読まない。
+    """
+    if not worktree:
+        return ""
+    import project_decl
+    import test_strategy as ts
+
+    try:
+        commands = ts.verify_commands(project_decl.read_project_decl(str(worktree)))
+    except Exception:  # 宣言が読めなければ今の探し方に任せる
+        return ""
+    if not commands:
+        return ""
+    listed = "\n".join(f"  - {c}" for c in commands)
+    return (
+        "- 修正をコミットしたら、検証は次のコマンドを作業ディレクトリで順に走らせる（.ndf/project.json の test）。"
+        f"Step 7.5 の探し方は使わない:\n{listed}\n"
+    )
+
+
 class Drive:
     def __init__(self, pr: int, rotate_mode: str, init_args: list[str]):
         self.pr = pr
@@ -171,7 +194,7 @@ class Drive:
 - 作業ディレクトリは detached HEAD（PR の head）のままでよい。ブランチへ切り替えず、そこでコミットする。送る（push）のは取り込み
 - ループの終わり: {s.get("final")}
 - `fix-steps.py context` には環境変数 `CROSS_REVIEW_STATE={self.tmp}/cross-review-pr{self.pr}-state.json` を渡す（ループと同じ指摘の基準を使う）
-
+{sweep_verify_lines(s.get("worktree_path"))}
 GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
 """
 

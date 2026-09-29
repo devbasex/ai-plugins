@@ -11,9 +11,10 @@ import time
 from typing import Any, Callable
 
 import statefile
+import test_strategy as ts
 import test_triage
 
-from . import info, timeline, triage
+from . import info, launch, timeline, triage
 from .gitfacts import run_with_timeout
 from .outbound import dropped_line
 from .paths import work_dir
@@ -32,10 +33,13 @@ def defer_to_final_gate(path: pathlib.Path, state: dict[str, Any], record: dict[
     )
 
 
-def run_locally(state: dict[str, Any], log: pathlib.Path) -> tuple[bool, bool, list[str]]:
-    """手元で全体テストを 1 度走らせる。`(通ったか, 打ち切ったか, 走らせたコマンド)`。"""
+def run_locally(state: dict[str, Any], log: pathlib.Path, path: Any = None) -> tuple[bool, bool, list[str]]:
+    """手元でテストの種別の全体テストを 1 度走らせる。`(通ったか, 打ち切ったか, 走らせたコマンド)`。
+
+    静的解析は項目ごとに変更したファイルで走らせ済みのため入れない（#1483 決定 7）。起動の失敗なら止める。
+    """
     work = work_dir(state)
-    commands = timeline.strategy_of(state).whole_commands()
+    commands = timeline.strategy_of(state).whole_commands(ts.TEST)
     triage.clear_junit(state)
     passed, timed_out = True, False
     with open(log, "wb"):
@@ -47,7 +51,10 @@ def run_locally(state: dict[str, Any], log: pathlib.Path) -> tuple[bool, bool, l
         code, timed_out = test_triage.run_within(
             limit, started, lambda left, command=command, part=part: run_with_timeout(command, work, left, output=part)
         )
-        if timed_out or code != 0:
+        result = ts.outcome(code, timed_out)
+        if result.launch_failed:
+            launch.stop(path, state, "whole", command, result, part)
+        if result.status != ts.PASSED:
             passed = False
         if timed_out:
             break
@@ -61,7 +68,7 @@ def whole_fallback_command(state: dict[str, Any]) -> Any:
     直ったと誤り、最終ゲートで同じ失敗を見つけ直して修正の起動が増える。各 suite は括弧で分けて
     作業ディレクトリの移動を持ち越さず、`&&` で最初に落ちた suite で止める。
     """
-    commands = timeline.strategy_of(state).whole_commands()
+    commands = timeline.strategy_of(state).whole_commands(ts.TEST)
     if len(commands) <= 1:
         return commands[0] if commands else []
     return " && ".join(f"( {c} )" for c in commands)
@@ -83,7 +90,7 @@ def fallback(
     """
     info(f"⚠ {record['fallback_reason']}ため、全体を 1 度走らせ直して見分けます")
     rerun_log = log.with_name("verify-whole-rerun.log")
-    passed, timed_out, _ = run_locally(state, rerun_log)
+    passed, timed_out, _ = run_locally(state, rerun_log, path)
     record["fallback_rerun"] = "pass" if passed else ("timeout" if timed_out else "fail")
     if passed:
         record["resolution"] = "kept"

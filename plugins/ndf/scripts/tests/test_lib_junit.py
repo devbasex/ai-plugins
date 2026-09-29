@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import pathlib
+import shlex
 import subprocess
 import sys
 import zipfile
@@ -156,8 +157,8 @@ def _runner(plan):
     seen = []
 
     def run(command, cwd, timeout, log):
-        seen.append(list(command))
-        files = [w for w in command if w.startswith("tests/")]
+        seen.append(shlex.split(command))
+        files = [w for w in shlex.split(command) if w.startswith("tests/")]
         failing = [(f, n) for f in files for n in plan.get(f, [])]
         _write_junit(cwd, failing)
         return (1 if failing else 0), False
@@ -182,7 +183,7 @@ def test_failures_are_split_into_flaky_preexisting_and_caused(tmp_path, prefix):
     def run(command, cwd, timeout, log):
         calls["n"] += 1
         at_head = str(cwd) == str(work)
-        files = [w for w in command if w.startswith("tests/")]
+        files = [w for w in shlex.split(command) if w.startswith("tests/")]
         failing = [("tests/test_b.py", "test_err")] if "tests/test_b.py" in files else []
         if not at_head and "tests/sub/test_a.py" in files:
             failing.append(("tests/sub/test_a.py", "test_bad"))
@@ -229,7 +230,7 @@ def test_a_failure_absent_at_the_base_is_caused_and_gets_a_rerun_command(tmp_pat
     )
     assert out["caused"] == ["tests/test_b.py::c::test_err"]
     assert out["flaky"] == ["tests/sub/test_a.py::c::test_bad"]
-    assert out["rerun_words"] == [["pytest", "-q", "tests/test_b.py"]]
+    assert out["rerun_commands"] == ["pytest -q tests/test_b.py"]
 
 
 def test_known_existing_failures_are_preexisting_without_a_base_run(tmp_path):
@@ -305,7 +306,7 @@ def test_phpunit_ci_junit_is_split_like_pytest(tmp_path):
     seen = []
 
     def run(command, cwd, timeout, log):
-        seen.append(list(command))
+        seen.append(shlex.split(command))
         return 1, False  # JUnit を書かない走らせ直しは、そのファイルの ID がまだ落ちているとみなす
 
     known = test_triage.classify(

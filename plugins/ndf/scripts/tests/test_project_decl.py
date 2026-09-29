@@ -661,3 +661,24 @@ def test_force_reanalysis(laravel, env, tmp_path):
     d = decl(laravel)
     assert d["issues"] == {"primary": "github", "others": []}
     assert d["checks"]["tools"] == [{"name": "hand", "config": "x"}]
+
+
+# --- #1483 AC1・AC2: suite の種別 ---------------------------------------------------------
+
+
+def _suite_decl(kind: str) -> dict:
+    return {"version": 1, "test": {"suites": [{"name": "sc", "runner": "shellcheck", "command": "bash lint.sh", "kind": kind}]}}
+
+
+def test_a_lint_kind_passes_the_check(plain, env):
+    """AC1 — 種別 `lint` を書いた宣言は形の検証を通る（手書きなので古いとだけ言われる）。"""
+    write(plain, ".ndf/project.json", json.dumps(_suite_decl("lint")))
+    code, _, text = run(env, "check", "--root", str(plain))
+    assert code == 2 and "suites[0].kind" not in text and "analysis" in text
+
+
+def test_an_unknown_kind_fails_the_check_and_names_the_suite(plain, env):
+    """AC2 — 2 値以外の種別は検証で落ち、どの suite のどのキーかを出す。"""
+    write(plain, ".ndf/project.json", json.dumps(_suite_decl("unit")))
+    code, _, text = run(env, "check", "--root", str(plain))
+    assert code == 3 and "suites[0].kind" in text
