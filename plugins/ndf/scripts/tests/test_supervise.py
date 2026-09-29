@@ -503,6 +503,40 @@ def test_new_check_uses_assess_skip(tmp_path):
     assert "--scope a.py" in steps["refactor"]["args"]
 
 
+@pytest.mark.parametrize("mode", ["light", "operation", "documentation"])
+def test_new_check_skips_refactor_for_modes_without_it(tmp_path, mode):
+    # 工程表で「構造改善」を通らないモードは、検査を実装レビューから始める
+    out = tmp_path / "c.json"
+    p = cli("new", "check", "--pr", "999", "--worktree", "/w", "--mode", mode, "--out", str(out))
+    assert p.returncode == 0, p.stderr
+    ids = [s["id"] for s in json.loads(out.read_text())["steps"]]
+    assert ids[0] == "review" and "assess" not in ids and "refactor" not in ids
+
+
+def test_new_sprint_check_for_light_goes_from_pr_to_review(tmp_path):
+    out = tmp_path / "m"
+    p = cli(
+        "new",
+        "sprint",
+        "--name",
+        "m",
+        "--worktree",
+        str(tmp_path),
+        "--issue",
+        "1",
+        "--mode",
+        "light",
+        "--version",
+        "10.18.0-dev.1",
+        "--out",
+        str(out),
+    )
+    assert p.returncode == 0, p.stderr
+    waves = {w["name"]: w for w in json.loads((out / "sprint.json").read_text())["ステージ"]}
+    steps = {s["id"]: s for s in json.loads(Path(waves["検査"]["plans"][0]).read_text())["steps"]}
+    assert steps["pr"]["next"] == "review" and "refactor" not in steps
+
+
 def test_new_impl_requires_title():
     p = cli("new", "impl", "--issue", "1", "--worktree", "/w", "--tests", "t")
     assert p.returncode == 2
