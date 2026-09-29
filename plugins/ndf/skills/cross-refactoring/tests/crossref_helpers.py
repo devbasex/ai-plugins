@@ -200,6 +200,36 @@ def test_total():
 """
 
 
+def planned_item(item_id: str, rank: int, **over: Any) -> dict[str, Any]:
+    """計画済み（`planned`）の項目。`src/calc.py#add` の long_method を extract_method で直す形で、差分だけを `over` で渡す。"""
+    return {
+        "id": item_id,
+        "rank": rank,
+        "path": "src/calc.py",
+        "symbol": "add",
+        "smell": "long_method",
+        "technique": "extract_method",
+        "severity": "major",
+        "proposed_by": ["codex"],
+        "tier": "high",
+        "risk": False,
+        "tests": [],
+        "test_targets": ["tests/test_calc.py"],
+        "command": ["pytest", "-q", "tests/test_calc.py"],
+        "command_source": "targets",
+        "estimate": {"test": 0.0, "implement": 1.3, "verify": 0.2},
+        "start_deadline": "2099-01-01T00:00:00+00:00",
+        "test_start_deadline": None,
+        "status": "planned",
+        "commits": {"test": None, "implement": None, "fix": []},
+        "seconds": {},
+        "fix_count": 0,
+        "danger": [],
+        "estimated_diff_lines": 20,
+        **over,
+    }
+
+
 def git(*args: str, cwd: Any) -> "subprocess.CompletedProcess[str]":
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True)
 

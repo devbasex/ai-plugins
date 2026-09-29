@@ -20,6 +20,7 @@ from crossref_helpers import (
     commit_with_trailers,
     git,
     item_trailers,
+    planned_item,
     read_state,
     write_state,
 )
@@ -73,32 +74,7 @@ def _call(module, name, **kwargs):
 
 
 def _item(item_id, rank, public_io):
-    return {
-        "id": item_id,
-        "rank": rank,
-        "path": "src/calc.py",
-        "symbol": "add",
-        "smell": "long_method",
-        "technique": "extract_method",
-        "severity": "major",
-        "proposed_by": ["codex"],
-        "tier": "high",
-        "risk": False,
-        "public_io": public_io,
-        "tests": [],
-        "test_targets": ["tests/test_calc.py"],
-        "command": ["pytest", "-q", "tests/test_calc.py"],
-        "command_source": "targets",
-        "estimate": {"test": 0.0, "implement": 1.3, "verify": 0.2},
-        "start_deadline": FAR,
-        "test_start_deadline": None,
-        "status": "planned",
-        "commits": {"test": None, "implement": None, "fix": []},
-        "seconds": {},
-        "fix_count": 0,
-        "danger": [],
-        "estimated_diff_lines": 20,
-    }
+    return planned_item(item_id, rank, public_io=public_io)
 
 
 def test_the_stages_after_the_plan_ask_no_llm(flow, cmd_setup, cmd_implement, cmd_converge, cmd_gate, forbid_llm):
