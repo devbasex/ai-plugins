@@ -2591,6 +2591,24 @@
       "code": "tool_paths",
       "source": "",
       "pending_source": "issues/issue-1436-requirements.md"
+    },
+    {
+      "term": "取り消しの判定",
+      "context": "ndf-cross-refactoring",
+      "meaning": "改善項目ごとに取り消したかと、起点から HEAD までの各コミットを公開してよいか・積み直すかを 1 か所で決める処理。取り消しの経路と push の直前の照合が同じものを呼ぶ",
+      "pending_source": "issues/issue-1482-requirements.md"
+    },
+    {
+      "term": "残留コミット",
+      "context": "ndf-cross-refactoring",
+      "meaning": "見放した（STALLED・結果なし）実装担当のプロセスが、オーケストレーターの判定の後に積んだコミット",
+      "pending_source": "issues/issue-1482-requirements.md"
+    },
+    {
+      "term": "途中の push",
+      "context": "ndf-cross-refactoring",
+      "meaning": "cross-refactoring で、最終ゲートへ入るより前の push",
+      "pending_source": "issues/issue-1482-requirements.md"
     }
   ]
 }
