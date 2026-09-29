@@ -60,7 +60,7 @@ def scope_cmd(a, tests: str) -> str:
 
 def whole_cmd(a) -> str:
     """全体テストのステップのコマンド（`test-run.py whole`。CI に任せる戦略は Pull Request のチェックを待つ）。"""
-    paths = scope_paths(a) if getattr(a, "test_cmd", None) and test_kind(a) == ts.LINT else []
+    paths = (getattr(a, "test_paths", None) or scope_paths(a)) if getattr(a, "test_cmd", None) and test_kind(a) == ts.LINT else []
     extra = " --paths " + " ".join(shlex.quote(p) for p in paths) if paths else ""
     return f"{TEST_RUN_PY} whole --pr {{pr}}{_template_arg(a)}{extra}"
 

@@ -288,3 +288,21 @@ def test_d5_keeps_the_runtime_risk_when_jev_is_not_confident(planned, cmd_plan, 
     items = {i["symbol"]: i for i in read_state(path)["items"]}
     assert (items["f"]["public_io"], items["f"]["public_io_source"]) == (True, "runtime")
     assert (items["g"]["public_io"], items["g"]["public_io_source"]) == (False, "runtime")
+
+
+def test_a_lint_only_strategy_skips_the_test_round_and_says_so(planned, cmd_plan, refactor):
+    """#1483 AC16・I9 — テストの種別の suite が無い戦略では、足すテストを空にし、項目を no_target で見送らず、
+    行わなかったことを計画に残す。"""
+    import importlib
+
+    lint = {"name": "sc", "command": "", "scope_command": "shellcheck {paths}", "junit": None, "paths": ["*.sh"], "kind": "lint"}
+    a = _candidate(1, "f")
+    strategy = strategy_state("local-full", "args", suites=[lint])
+    path = planned([a], [_answer(a, tests=["tests/test_new.py"], test_targets=[])], strategy=strategy)
+    _run(cmd_plan)
+    state = read_state(path)
+    item = state["items"][0]
+    assert item["tests"] == [] and item["scope_commands"] == [] and item["command_source"] == "lint"
+    assert state["plan_notes"] == [cmd_plan.NO_TEST_SUITE_NOTE]
+    plan_lib = importlib.import_module("refactor_lib.plan")
+    assert f"- 行わなかったこと: {cmd_plan.NO_TEST_SUITE_NOTE}" in plan_lib.strategy_lines(state)
