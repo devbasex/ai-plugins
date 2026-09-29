@@ -130,29 +130,6 @@ class Participants:
 Probe = Callable[[list[str]], tuple[dict[str, dict[str, Any]], bool]]
 
 
-def _validate_names(include: list[str], exclude: list[str], only: Optional[str]) -> None:
-    """名前の綴りと、include / exclude / only の矛盾を確かめる。"""
-    for name in (*include, *exclude, *([only] if only is not None else [])):
-        if name not in ALL_RUNTIMES:
-            raise AssignmentError(f"参加できないランタイムです: {name}（{'/'.join(ALL_RUNTIMES)} のいずれか）")
-    overlap = set(include) & set(exclude)
-    if overlap:
-        raise AssignmentError(f"足す者と外す者に同じ名前があります: {', '.join(_in_fixed_order(overlap))}")
-    # 矛盾は無視より先に見る。母集合に無い名前の除外を先に捨てると、`--only agy
-    # --exclude agy` が矛盾ではなく「参加者に無い」で止まり、理由を読み違える。
-    if only is not None and only in exclude:
-        raise AssignmentError(f"--only と --exclude が矛盾しています: {only}")
-
-
-def _split_by_probe(participants: list[str], probe: Probe) -> tuple[list[str], dict[str, str], bool]:
-    """probe の結果で参加者を（通った者, 通らなかった者と理由, 飛ばされたか）に分ける。"""
-    results, skipped = probe(list(participants))
-    if skipped:
-        return list(participants), {}, skipped
-    unavailable = {n: str(results.get(n, {}).get("detail", "")) for n in participants if not results.get(n, {}).get("ok", False)}
-    return [n for n in participants if n not in unavailable], unavailable, skipped
-
-
 def resolve_participants(
     pool: Iterable[str],
     *,
@@ -185,7 +162,16 @@ def resolve_participants(
     include = list(include)
     exclude = list(exclude)
 
-    _validate_names(include, exclude, only)
+    for name in (*include, *exclude, *([only] if only is not None else [])):
+        if name not in ALL_RUNTIMES:
+            raise AssignmentError(f"参加できないランタイムです: {name}（{'/'.join(ALL_RUNTIMES)} のいずれか）")
+    overlap = set(include) & set(exclude)
+    if overlap:
+        raise AssignmentError(f"足す者と外す者に同じ名前があります: {', '.join(_in_fixed_order(overlap))}")
+    # 矛盾は無視より先に見る。母集合に無い名前の除外を先に捨てると、`--only agy
+    # --exclude agy` が矛盾ではなく「参加者に無い」で止まり、理由を読み違える。
+    if only is not None and only in exclude:
+        raise AssignmentError(f"--only と --exclude が矛盾しています: {only}")
     base = set(pool) | set(include)
     if only is not None and only not in base:
         base.add(only)
@@ -199,7 +185,12 @@ def resolve_participants(
             raise AssignmentError(f"--only は参加者のいずれかを指定してください: {only}（参加者: {', '.join(participants)}）")
         participants = [only]
 
-    available, unavailable, skipped = _split_by_probe(participants, probe)
+    results, skipped = probe(list(participants))
+    if skipped:
+        available, unavailable = list(participants), {}
+    else:
+        unavailable = {n: str(results.get(n, {}).get("detail", "")) for n in participants if not results.get(n, {}).get("ok", False)}
+        available = [n for n in participants if n not in unavailable]
 
     if require_all and unavailable:
         failed = " / ".join(f"{n}（{d}）" for n, d in unavailable.items())
