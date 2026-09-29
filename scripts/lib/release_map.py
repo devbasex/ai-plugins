@@ -155,6 +155,11 @@ class ReleaseMap:
                 self._counts.setdefault(self.version_of_pr(n)[0], set()).add(n)
         return set(self._counts.get(version, set()))
 
+    def merged_pr_of_issues(self, issues: list[int]) -> list[int]:
+        """課題を題に持つマージ済みの PR のうち、番号の最も小さい 1 件（無ければ空）。"""
+        found = [p["number"] for i in issues for p in self.by_issue.get(i, []) if p.get("mergedAt")]
+        return sorted(set(found))[:1]
+
     def window(self, version: str) -> tuple[float | None, float]:
         """版の期間（前の正式版のタグの時刻, この版のタグの時刻]。"""
         for i, r in enumerate(self.versions):

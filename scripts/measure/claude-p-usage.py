@@ -280,10 +280,7 @@ def plan_prs(plan_path: str, meta: dict, rm: release_map.ReleaseMap) -> list[int
     prs = [n for n in dict.fromkeys(prs) if n in rm.prs]
     if prs:
         return prs
-    found = []
-    for i in _issues(meta.get("課題")):
-        found += [p["number"] for p in rm.by_issue.get(i, []) if p.get("mergedAt")]
-    return sorted(set(found))[:1]
+    return rm.merged_pr_of_issues(_issues(meta.get("課題")))
 
 
 def _issues(value) -> list[int]:
@@ -496,10 +493,7 @@ def pr_of_report(rm: release_map.ReleaseMap):
     def f(r):
         if r["pr_field"]:
             return [int(x) for x in r["pr_field"] if int(x) in rm.prs]
-        prs = []
-        for i in r["issues"]:
-            prs += [p["number"] for p in rm.by_issue.get(i, []) if p.get("mergedAt")]
-        return sorted(set(prs))[:1]
+        return rm.merged_pr_of_issues(r["issues"])
 
     return f
 
