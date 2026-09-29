@@ -38,7 +38,7 @@ worktree の運用が供給者、レビューと公開が顧客の関係（顧�
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
 | I1 | ツールのパスの定義 | 3 つの工程は同じ関数 `tool_paths.load` から定義を得る。工程ごとに既定を持たない | 既定を変えるテストで 3 工程のどれかが追随しなければ落ちる |
-| I2 | ツールのパスの定義 | 設定が無い・読めない・版が違うときは既定の 2 つだけになる | 止めない。既定で進む |
+| I2 | ツールのパスの定義 | 設定（`.ndf/worktree.json`）が無いか `tool_paths` の項目が無いときだけ、既定の 2 つになる。設定があるのに読めない・版が違う・`tool_paths` の型が違うときは、既定へ戻さない（`add` で足したパスが検査と push の直前の検査から消え、`auth_secret` を含み得る中身がコミット・push され得るため） | `load` が `ToolPathsUnreadable` を出し、3 工程は既存の中断で止める（既定で進まない） |
 | I3 | worktree の変更の分類 | ツールのパスの変更は、利用者の変更の一覧に 1 件も入らない。利用者の変更はツールのパスの一覧に入らない | 検査が誤って止まる・誤って通る |
 | I4 | 公開 | NDF の経路が作るコミットと push に、ツールのパスの変更が入らない | push の直前の検査が止める（push しない） |
 | I5 | 開発 worktree | `pr` の手順はツールのパスのファイルの中身を変えない（index から外すだけ） | 利用者の変更が失われる |
@@ -147,7 +147,7 @@ classDiagram
 
 | 関数 | 入力 | 出力 | 失敗 |
 | --- | --- | --- | --- |
-| `load(root)` | 定義を読む worktree の根 | 既定に `add` を足し `remove` を引いた一覧（順序は既定 → `add`、重複なし） | 無い・読めない・版が違う → 既定（I2）。例外を出さない |
+| `load(root)` | 定義を読む worktree の根 | 既定に `add` を足し `remove` を引いた一覧（順序は既定 → `add`、重複なし） | 設定が無い・`tool_paths` が無い → 既定（I2）。設定があるのに読めない（`repo.read_worktree_decl` が理由を返す）・`version` が 1 でない・`tool_paths` / `add` / `remove` の型が違う・要素が文字列でない → `ToolPathsUnreadable(理由)` を出す（I2） |
 | `matches(path, entries)` | 根からの相対パス | 完全一致か、末尾 `/` の項目の前方一致なら真 | — |
 | `split(paths, entries)` | パスの列 | `Split(user, tool)`。順序は入力のまま | — |
 | `tracked(worktree, entries)` | worktree・一覧 | `git ls-files -z -- <entries>` が返す追跡対象のパス | git が失敗 → 空 |
@@ -168,7 +168,7 @@ classDiagram
 | 名前 | `tool_paths`（任意の object） |
 | 入力 | `add`: 文字列の配列（足すパス）。`remove`: 文字列の配列（外す既定のパス）。どちらも任意。末尾 `/` は前方一致、それ以外は完全一致 |
 | 出力 | `load` の一覧 |
-| 失敗の形 | 型が違う項目は無視する（文字列でない要素・配列でない値）。止めない |
+| 失敗の形 | 型が違う項目（文字列でない要素・配列でない値）・読めない JSON・`version` が 1 でないときは、項目を無視せずに止める（I2）。理由の 1 行は `❌ .ndf/worktree.json の tool_paths を読めない: <理由>。直してから打ち直す` で、中身は出さない（I7）。止め方は各工程の既存の中断に揃える: `state.py start-round` は「作業ツリーの状態を読み取れない」と同じ終了コード 8、cross-refactoring は `die`、`result_posts.py fix` は `PushResult(ok=False, pushed=False)`、`pr-steps.py` は `stopped` |
 | 互換性 | 項目が無ければ既定だけ。既存の `version: 1` のまま足す（`additionalProperties: true` の範囲） |
 
 ```json
@@ -189,6 +189,7 @@ classDiagram
 | --- | --- | --- |
 | ツールのパスだけが変わっている | 0 | `↷ ツールのパスを検査から外した: <パス…>` |
 | 利用者の変更がある | 8 | 1 行目 `❌ worktree に未 push の変更が残っています: <利用者の変更…>。 修正を push してから次のラウンドを開始してください`。2 行目 `↷ ツールのパスを検査から外した: <パス…>`（ツールのパスの変更があるときだけ） |
+| `.ndf/worktree.json` があるのに `tool_paths` を読めない（I2） | 8 | `❌ .ndf/worktree.json の tool_paths を読めない: <理由>。直してから打ち直す` |
 
 ツールのパスの一覧は、印を掛けたパスと、印の無いまま変わっていたパスを合わせたものである。印を掛けたパスは git から変更が見えないため、変わったかどうかを区別しない。
 
@@ -326,7 +327,7 @@ skip-worktree は追跡対象にしか掛からない。`.serena/` を追跡も�
 | 8 | ツールのパスでない変更だけのとき、`start-round` 相当が 8・`_require_clean_worktree` が中断・`commit` がその変更をコミットする | 分類が利用者の変更をツールのパスへ入れる |
 | 9 / I1 | `tool_paths.DEFAULT` を差し替えると、cross-review・cross-refactoring・`pr-steps.py` の 3 経路の分類が同時に変わる | どれかの工程が既定を自分で持つ |
 | 10 / I5 | `commit` の後、ツールのパスのファイルの中身が commit の前と同じ | `unstage` の代わりに `checkout` で戻す |
-| I2 | `.ndf/worktree.json` が壊れている・版が 2・`tool_paths` の型が違うとき、`load` が既定を返し例外を出さない | 読めない設定で止まる |
+| I2 | `.ndf/worktree.json` が無い・`tool_paths` が無いとき、`load` が既定の 2 つを返す。壊れている・版が 2・`tool_paths` の型が違うとき、`load` が `ToolPathsUnreadable` を出し、start-round が 8・cross-refactoring が中断・`push_fix` が push しない・`pr-steps.py` が `stopped` になり、どれも `add` のパスをコミット・push しない | 読めない設定で既定へ戻り、`add` のパスをコミット・push する |
 | I3 | `split` が同じパスを両方の一覧へ入れない。前方一致の項目 `x/` が `xy/a` に当たらない | 前方一致に `/` を付けずに比べる |
 | I4 | 4 と 3 の push の直前の検査。基準と比べられないときは push しない | 比べられないときに空と読んで push する |
 | I6 | 開発 worktree で `pr-steps.py` を通しても `git ls-files -v` に `S` が現れない。`hide` は追跡対象外のパスを渡しても失敗しない | 開発 worktree へ `hide` を呼ぶ・追跡対象外を git へ渡して 128 で落ちる |
