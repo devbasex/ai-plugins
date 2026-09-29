@@ -93,7 +93,7 @@ launch_runtime() {
   case "$RUNTIME" in
     codex)
       nohup codex exec --dangerously-bypass-approvals-and-sandbox \
-        --config reasoning.effort=medium -C "$WORKDIR" "${MODEL_ARGS[@]}" \
+        --config reasoning.effort=medium -C "$WORKDIR" ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} \
         < "$PROMPT" > "$STDOUT_LOG" 2> "$ERR_LOG" &
       PID=$!
       ;;
@@ -103,7 +103,7 @@ launch_runtime() {
       [ -n "$EXTRA_DIR" ] && add_dir_args+=(--add-dir "$EXTRA_DIR")
       # `--print-timeout` は単位付きの時間を取る（数字だけでは `missing unit` で落ちる）。
       nohup agy --dangerously-skip-permissions --output-format text \
-        --print-timeout "${PRINT_TIMEOUT}s" "${MODEL_ARGS[@]}" "${add_dir_args[@]}" \
+        --print-timeout "${PRINT_TIMEOUT}s" ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} "${add_dir_args[@]}" \
         -p="$(cat "$PROMPT")" \
         < /dev/null > "$STDOUT_LOG" 2> "$ERR_LOG" &
       PID=$!
@@ -112,12 +112,12 @@ launch_runtime() {
       nohup claude -p \
         --permission-mode acceptEdits \
         --allowed-tools "$CLAUDE_ALLOWED_TOOLS" \
-        --output-format json "${MODEL_ARGS[@]}" \
+        --output-format json ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} \
         < "$PROMPT" > "$STDOUT_LOG" 2> "$ERR_LOG" &
       PID=$!
       ;;
     kiro)
-      nohup kiro-cli chat --no-interactive --trust-all-tools "${MODEL_ARGS[@]}" \
+      nohup kiro-cli chat --no-interactive --trust-all-tools ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} \
         < "$PROMPT" > "$STDOUT_LOG" 2> "$ERR_LOG" &
       PID=$!
       ;;
