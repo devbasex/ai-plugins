@@ -135,7 +135,8 @@ def merge_spy(patch_lib, refactor, monkeypatch):
 
     patch_lib("discard_impl_leftovers", lambda state, work: None)
     patch_lib("push_head", lambda state: seen["pushed"].append("push"))
-    patch_lib("revert_item_commits", lambda state, item, dry_run=False: seen["reverted"].append(item) or 1)
+    # 取り消しは判定（`undo.discard` → `ledger`）が消すコミットを決める。git の振る舞いは test_ledger_git.py が縛る
+    patch_lib("discard", lambda path, state, reason: seen["reverted"].append(reason) or {"mode": "item"})
     patch_lib("git_out", lambda work, args, **k: "HEADSHA" if args[:2] == ["rev-parse", "HEAD"] else "C1FULL")
     patch_lib("commits_in_range", lambda work, base, head: None if not base else ["C1FULL"])
     patch_lib(

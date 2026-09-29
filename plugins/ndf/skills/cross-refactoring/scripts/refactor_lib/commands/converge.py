@@ -21,17 +21,14 @@ from typing import Any, Optional
 
 import statefile
 
-from .. import budget, clock, danger, info, targets, timeline, triage, wholetest
+from .. import budget, clock, danger, info, publish, targets, timeline, triage, wholetest
 from ..gitfacts import (
-    revert_range,
     collect_commit_facts,
     commit_files,
     commit_trailers,
     commits_in_range,
     discard_impl_leftovers,
-    flush_pending_push,
     note_stopped,
-    push_with_retry_marker,
     record_observed_model,
 )
 from ..items import (
@@ -46,7 +43,7 @@ from ..paths import work_dir
 from ..outbound import item_lines, plan_line
 from ..paths import git_out, load_state
 from ..phases import add_phase_seconds, finish_phase, phase_record
-from ..undo import drop, resume_pending_drop
+from ..undo import discard, drop, resume_pending_drop
 from ..verify import (
     verify_commit_basics,
     collect_test_changes,
@@ -300,7 +297,6 @@ def _recheck_whole(path: pathlib.Path, state: dict[str, Any], record: dict[str, 
 def _prepare(path: pathlib.Path, state: dict[str, Any]) -> None:
     discard_impl_leftovers(state, work_dir(state))
     resume_pending_drop(path, state)
-    flush_pending_push(path, state, state)
 
 
 def cmd_verify(args: argparse.Namespace) -> None:
@@ -336,7 +332,8 @@ def cmd_verify(args: argparse.Namespace) -> None:
     finish_phase(state, "verify")
     state["phase"] = "final"
     statefile.save(path, state)
-    push_with_retry_marker(path, state, state)
+    # 最終ゲートへ入る時点の公開が、実行で最初の push になる（#1399）
+    publish.enter_final_gate(path, state)
     kept = [i["id"] for i in live_items(state)]
     info(f"✅ 検証を終えました（残った項目 {len(kept)} 件）。{plan_line(state)}")
     for line in item_lines(state, kept):
@@ -432,9 +429,8 @@ def _apply_fix_result(
     if problems and ordered:
         for problem in problems:
             info(f"❌ {problem}")
-        state["pending_push"] = True
-        statefile.save(path, state)
-        revert_range(work, ordered, result["head"])
+        # 修正のコミットはどの改善項目にも記録されていないため、取り消しの判定が消す
+        discard(path, state, "手順を外れた修正")
         info(f"↩ 修正の範囲 {len(ordered)} コミットを取り消しました")
         return
     if ordered:
@@ -483,6 +479,4 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     _account_fix(state, targets)
     state["fix"] = None
     statefile.save(path, state)
-    if state.get("pending_push"):
-        push_with_retry_marker(path, state, state)
     info(f"修正を取り込みました（{len(result['ordered'])} コミット / 対象 {len(targets)} 件）。{plan_line(state)}")

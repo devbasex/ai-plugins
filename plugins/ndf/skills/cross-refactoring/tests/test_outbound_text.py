@@ -144,6 +144,7 @@ def test_the_report_counts_each_item_once(refactor, tmp_path, env_tmp_dir, capsy
                 "detail": "締め切り",
             }
         ],
+        final_gate={"fix_rounds": 0, "checks": [], "status": "passed"},
     )
     env_tmp_dir(path)
     refactor.cmd_report(type("A", (), {"id": 130, "metrics": False})())

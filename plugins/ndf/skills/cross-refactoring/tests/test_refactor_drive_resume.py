@@ -58,6 +58,9 @@ class FakeRefactor:
         if sub == "merge-proposals":
             return 2, ""
         if sub == "final-gate":
+            # 実機と同じく、通った最終ゲートは状態の `final_gate.status` を `passed` にする（採用を数える条件）
+            self.state["final_gate"] = {"status": "passed" if self.gate in ("passed", "cross-review") else self.gate}
+            self.save()
             return 0, f"FINAL_GATE={self.gate}\n"
         if sub == "finalize":
             self.state["phase"] = "done"
@@ -288,7 +291,11 @@ def test_monitor_failure_in_fix_goes_on_to_merge(tmp_path, monkeypatch, capsys, 
         if Path(cmd[1]).name == "refactor.py" and cmd[2] == "final-gate":
             gates.append(1)
             fake.calls.append(("refactor.py", *cmd[2:]))
-            return (2, "") if phase == "final-fix" and len(gates) == 1 else (0, "FINAL_GATE=passed\n")
+            if phase == "final-fix" and len(gates) == 1:
+                return 2, ""
+            fake.state["final_gate"] = {"status": "passed"}
+            fake.save()
+            return 0, "FINAL_GATE=passed\n"
         return real(cmd, env, cwd)
 
     monkeypatch.setattr(rf, "call", call)

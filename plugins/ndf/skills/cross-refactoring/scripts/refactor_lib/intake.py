@@ -18,12 +18,8 @@ from typing import Any, Optional
 
 import statefile
 
-from . import info
-from .gitfacts import (
-    commits_in_range,
-    push_with_retry_marker,
-    revert_item_commits,
-)
+from . import info, undo
+from .gitfacts import commits_in_range
 from .paths import git_out
 
 
@@ -78,33 +74,22 @@ def discard_unverified(
     state: dict[str, Any],
     scope: IntakeScope,
     ordered_range: list[str],
-    dry_run: bool = False,
 ) -> int:
     """検証を受けていない範囲を取り消し、起点を取り消し後の HEAD へ進める。
 
-    順序は「フラグを立てて保存 → 新しい順に取り消す → 起点を書いて保存」である。
-    **取り消しへ着手する前にフラグを立てる。** 取り消しは済んだのに公開できずに終わると、
-    未検証の変更が Pull Request に残ったままになる。**起点はその場で保存する。**
-    保存せずに落ちると、次の実行が古い起点から範囲を取り直し、取り消しコミット自体を
-    「未申告」と判定して取り消しを取り消してしまう。
+    どのコミットを消すかは取り消しの判定（`undo.discard` → `ledger`）が決める。範囲のコミットは
+    どの改善項目にも記録されていないため消える。**起点はその場で保存する。** 保存せずに落ちると、
+    次の実行が古い起点から範囲を取り直す。push はしない（最終ゲートの後の経路は呼び出し側が push する）。
     """
     if not ordered_range:
         return 0
     info(f"検証を通らない変更を残さないため、{scope.label} の範囲を取り消します")
-    if not dry_run:
-        scope.holder["pending_push"] = True
-        statefile.save(path, state)
-    revert_item_commits(
-        state,
-        {"item_id": scope.label, "commits": list(ordered_range)},
-        dry_run=dry_run,
-    )
-    if not dry_run:
-        head = git_out(state["worktrees"]["work"], ["rev-parse", "HEAD"])
-        scope.holder[scope.base_key] = head
-        if scope.mirror is not None:
-            scope.mirror["base_sha"] = head
-        statefile.save(path, state)
+    undo.discard(path, state, scope.label)
+    head = git_out(state["worktrees"]["work"], ["rev-parse", "HEAD"])
+    scope.holder[scope.base_key] = head
+    if scope.mirror is not None:
+        scope.mirror["base_sha"] = head
+    statefile.save(path, state)
     return len(ordered_range)
 
 
@@ -159,8 +144,6 @@ def close_without_result(
         }
     )
     statefile.save(path, state)
-    if reverted:
-        push_with_retry_marker(path, state, scope.holder)
     info(f"⚠ {scope.impl} は結果を残しませんでした（{reason}）。取り消したコミットは {reverted} 件です")
     return ClosedAttempt(
         reason=reason,

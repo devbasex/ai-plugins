@@ -63,8 +63,6 @@ _worktree_changes = worktree._worktree_changes
 discard_impl_leftovers = worktree.discard_impl_leftovers
 replay_commits = worktree.replay_commits
 reset_hard = worktree.reset_hard
-revert_item_commits = worktree.revert_item_commits
-revert_range = worktree.revert_range
 
 # 実装担当は自分の成果を報告する側なので、結果ファイルの値をそのままチェックに使うと
 # 「JSON を書き換えるだけで通る」チェックになる。ここは git だけを情報源にする。
