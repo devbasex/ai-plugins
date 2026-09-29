@@ -71,6 +71,8 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 文言固定テスト | — | リポジトリで追跡している .md を読み、その文字列・見出し・表の並びを照合するテスト。書かない | — | — | `docs/specifications/cross-refactoring-round-tests-and-assess.md` |
 | 手順 | — | 1 つの Skill の中で順に通す作業の単位。cross-refactoring の提案・リファクタリング計画・テスト追加・実装・検証/修正の 5 つ、document-restructuring の測る・並べ替える・整える・測り直すの 4 つ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 範囲テスト | — | 変更が触った範囲に限って走らせるテスト | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| suite の種別 | — | テストの宣言（.ndf/project.json の test.suites[]）の 1 件がテストか静的解析（整形の検査を含む）か。書かなければテスト | — | — | — |
+| 起動の失敗 | — | テストのコマンドのプロセスを起動できない、またはシェルが終了コード 126 / 127 を返したこと。テストが落ちたこととは別に扱う | — | — | — |
 | 危険フラグ | `danger` | cross-refactoring で、範囲テストでは覆えない変更（D1〜D5）。立てば全体テストを 1 度走らせる | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 設計 Pull Request | — | 要求仕様と設計文書だけを載せ、実装を含まない Pull Request。変更ファイルに issues/ の要求・設計・決定の記録を含む | — | — | `docs/specifications/ndf-design-phase.md` |
 | 正本 | `source` | その事柄の定義を持つ唯一の文書。食い違ったときはこれを正とする | — | — | `docs/specifications/doc-consistency-checks.md` |

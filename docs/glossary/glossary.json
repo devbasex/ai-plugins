@@ -708,6 +708,18 @@
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
+      "term": "suite の種別",
+      "context": "ndf-workflow",
+      "meaning": "テストの宣言（.ndf/project.json の test.suites[]）の 1 件がテストか静的解析（整形の検査を含む）か。書かなければテスト",
+      "pending_source": "issues/issue-1483-requirements.md"
+    },
+    {
+      "term": "起動の失敗",
+      "context": "ndf-workflow",
+      "meaning": "テストのコマンドのプロセスを起動できない、またはシェルが終了コード 126 / 127 を返したこと。テストが落ちたこととは別に扱う",
+      "pending_source": "issues/issue-1483-requirements.md"
+    },
+    {
       "term": "危険フラグ",
       "context": "ndf-workflow",
       "meaning": "cross-refactoring で、範囲テストでは覆えない変更（D1〜D5）。立てば全体テストを 1 度走らせる",
