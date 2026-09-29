@@ -266,7 +266,7 @@ classDiagram
 **積み直しで書き直す SHA は項目のコミットに限らない。** 積み直しの起点より後を指す保存済みの地点も、
 対応表で書き直す。対象は `phases.*.base_sha`・`fix.base_sha`・`final_gate.fix_base_sha`・`final_gate.fix_commits`・
 `ledger.orchestrator_commits` である。`ledger.orchestrator_commits` だけは台帳の持ち主の `ledger.remap_orchestrator_commits(state, mapping)` を通して書き直し、残りは `undo` が書き直す。地点の対応は「元の履歴でその地点以前にある最後の残すコミットの
-新しい SHA。無ければ積み直しの起点」とする。書き直さないと、次のマージ処理が履歴に無い起点から範囲を取る。
+新しい SHA。無ければ積み直しの起点」とする。`remap_orchestrator_commits` は対応表に無い SHA をそのまま残し、同じ取り消しで作る revert の SHA は書き直しの後に `note_orchestrator_commit` で足す。書き直さないと、次のマージ処理が履歴に無い起点から範囲を取る。
 
 **既存の状態ファイルからの再開**: `ledger` が無ければ公開した地点を `plan.base_sha` とみなす。旧い版で途中の push を
 済ませた状態ファイルでは、これが実際の公開した地点より古い。そのときは積み直しが push 済みのコミットを置き換え、
@@ -335,8 +335,8 @@ sequenceDiagram
                 U-->>C: 終了コード 4
             end
         end
-        U->>L: mark_dropped・note_orchestrator_commit（revert）
         U->>L: remap_orchestrator_commits(SHA の対応表)
+        U->>L: mark_dropped・note_orchestrator_commit（revert）
         U->>U: SHA の対応表で残りの保存済みの地点を書き直し、drops を追記し、pending_drop を消して保存
         U-->>C: 記録（mode・dropped・removed・replayed・reverted）
     end
