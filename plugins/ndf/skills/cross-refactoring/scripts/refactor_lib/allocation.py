@@ -202,8 +202,15 @@ def _run_id(state: dict[str, Any]) -> str:
     return f"rf{state.get('id')}-{stamp}"
 
 
-def _kind_seconds(state: dict[str, Any]) -> dict[str, dict[str, float]]:
-    """種類ごとの `{"count", "seconds"}`。取り消し・見送りの項目と、コミットの無い欄は数えない。"""
+def build_row(state: dict[str, Any]) -> dict[str, Any]:
+    """状態（版 2）から履歴の 1 行を作る。
+
+    項目の所要は**進行側がコミットの時刻から測った `items[].seconds`** を使う
+    （#933 決定 8）。担当の申告は使わない。テストはコミットがある項目だけ、実装も
+    コミットがある項目だけを数える。取り消し・見送りの項目は数えない。取り消しは
+    コミットの欄を残したまま状態だけを変えるため、欄だけを見ると所要の無い件数で
+    1 件あたりが下がる。
+    """
     kinds: dict[str, dict[str, float]] = {}
 
     def add(kind: str, seconds: Any) -> None:
@@ -220,29 +227,12 @@ def _kind_seconds(state: dict[str, Any]) -> dict[str, dict[str, float]]:
             add("test", seconds.get("test"))
         if commits.get("implement") and item.get("kind"):
             add(str(item["kind"]), seconds.get("implement"))
-    return kinds
 
-
-def _elapsed_seconds(state: dict[str, Any], at: Any) -> Optional[int]:
-    """`started_at` から `at` までの秒。どちらかを読めなければ `None`。"""
-    started, ended = _parse_time(state.get("started_at")), _parse_time(at)
-    if started and ended:
-        return int((ended.astimezone(_dt.timezone.utc) - started.astimezone(_dt.timezone.utc)).total_seconds())
-    return None
-
-
-def build_row(state: dict[str, Any]) -> dict[str, Any]:
-    """状態（版 2）から履歴の 1 行を作る。
-
-    項目の所要は**進行側がコミットの時刻から測った `items[].seconds`** を使う
-    （#933 決定 8）。担当の申告は使わない。テストはコミットがある項目だけ、実装も
-    コミットがある項目だけを数える。取り消し・見送りの項目は数えない。取り消しは
-    コミットの欄を残したまま状態だけを変えるため、欄だけを見ると所要の無い件数で
-    1 件あたりが下がる。
-    """
-    kinds = _kind_seconds(state)
     at = _ended_at(state)
-    elapsed = _elapsed_seconds(state, at)
+    started, ended = _parse_time(state.get("started_at")), _parse_time(at)
+    elapsed = None
+    if started and ended:
+        elapsed = int((ended.astimezone(_dt.timezone.utc) - started.astimezone(_dt.timezone.utc)).total_seconds())
     verify = state.get("verify_stats") or {}
     fix = state.get("fix_stats") or {}
     whole = state.get("whole_test") or {}
