@@ -55,6 +55,7 @@ SEAT_PREFIX = "-tmp-ndf-worktrees-devbasex--ai-plugins-"
 USE_RE = re.compile(r"LLM の使用量: 入力 (\d+) / cache read (\d+) / cache write (\d+) / 出力 (\d+) / \$([\d.]+)")
 REC_RE = re.compile(r"- 記録: (\S+)")
 PR_RE = re.compile(r"- Pull Request: ([^\n]*)")
+PR_NUM_RE = re.compile(r"(?:pull/|#|^)(\d{3,5})\b")
 ISSUE_RE = re.compile(r"- 課題: ([^\n]*)")
 PHASE_RE = re.compile(r"- フェーズ: ([^\n]*)")
 WORKER_RE = re.compile(r"使った worker: 修正 (\d+)（claude -p）/ 判断 (\d+)")
@@ -226,7 +227,7 @@ def parse_report(text: str) -> list[dict]:
                 "judge": int(w.group(2)) if w else None,
                 "turns": sum(int(r[1]) for r in rows),
                 "llm_sec": sum(float(r[2] or 0) for r in rows),
-                "pr_field": re.findall(r"(?:pull/|#|^)(\d{3,5})\b", pr.group(1).strip()) if pr else [],
+                "pr_field": PR_NUM_RE.findall(pr.group(1).strip()) if pr else [],
                 "issues": [int(x) for x in re.findall(r"#(\d+)", iss.group(1))] if iss else [],
                 "phase_len": len(ph.group(1)) if ph else 0,
             }
@@ -262,7 +263,7 @@ def _pr_numbers(value) -> list[int]:
     if isinstance(value, list):
         return [n for v in value for n in _pr_numbers(v)]
     if isinstance(value, str):
-        return [int(x) for x in re.findall(r"(?:pull/|#|^)(\d{3,5})\b", value.strip())]
+        return [int(x) for x in PR_NUM_RE.findall(value.strip())]
     return []
 
 
