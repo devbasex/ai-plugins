@@ -16,30 +16,10 @@ if str(LIB) not in sys.path:
 
 import test_strategy as ts  # noqa: E402
 
-CARMO = {
-    "version": 1,
-    "test": {
-        "strategy": "local-scoped-ci-whole",
-        "ci": {"check": "test-results", "junit_artifacts": "junit-*"},
-        "suites": [
-            {
-                "name": "phpunit",
-                "runner": "phpunit",
-                "command": "docker compose exec -T app ./vendor/bin/phpunit --log-junit build/ndf/junit.xml",
-                "scope_command": "docker compose exec -T app ./vendor/bin/phpunit --log-junit build/ndf/junit.xml {paths}",
-                "junit": "build/ndf/junit.xml",
-                "container": {"service": "app"},
-                "paths": ["tests"],
-            }
-        ],
-    },
-    "test_duration": {"measured": [{"seconds": 3827.0, "source": "ci-junit", "detail": "run"}]},
-    "ci": {
-        "provider": "github-actions",
-        "workflows": [{"path": ".github/workflows/test-results.yml", "jobs": 24, "wall_seconds": 360.0}],
-        "required_checks": ["test-results", "codex-review"],
-    },
-}
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from carmo_project import carmo_project  # noqa: E402
+
+CARMO = carmo_project()
 
 AI_PLUGINS = {
     "version": 1,
