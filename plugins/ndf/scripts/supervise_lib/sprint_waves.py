@@ -250,7 +250,7 @@ def plan_sprint_check(a, repo: str) -> dict:
             "body": "template",
             "summary": f"スプリント {a.name} の課題を {a.base} へ取り込む。\n\n{related}",
             "changes": f"スプリント {a.name} の課題を {a.base} へ取り込む。",
-            "next": "assess",
+            "next": plan["steps"][0]["id"],
         },
     ] + plan["steps"]
     return plan

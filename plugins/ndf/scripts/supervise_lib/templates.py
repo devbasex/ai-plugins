@@ -198,6 +198,10 @@ def plan_to_merge(a, head: list[dict]) -> dict:
     return plan
 
 
+# development-workflow の工程表で「構造改善」が「—」のモード
+NO_REFACTOR_MODES = ("light", "operation", "documentation")
+
+
 def plan_check(a) -> dict:
     pr = a.pr
     # 範囲の指定が無ければ、PR が変えたファイルのディレクトリ（根を除く）を範囲にする。ステップはシェルで動く。
@@ -219,7 +223,7 @@ def plan_check(a) -> dict:
         "args": f"{pr} --workflow-step --scope {scope}{refactor_template_arg(a)}",
         "next": "review",
     }
-    return _with_test_meta(
+    plan = _with_test_meta(
         {
             "フェーズ": "検査",
             "課題": a.issue or [],
@@ -279,6 +283,10 @@ def plan_check(a) -> dict:
         },
         a,
     )
+    # 工程表で「構造改善」を通らないモードは、実装レビューから始める
+    if a.mode in NO_REFACTOR_MODES:
+        plan["steps"] = [s for s in plan["steps"] if s["id"] not in ("assess", "refactor")]
+    return plan
 
 
 def _with_test_meta(plan: dict, a) -> dict:
