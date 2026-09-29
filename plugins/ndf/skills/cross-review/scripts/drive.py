@@ -257,34 +257,50 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
             return "done"
         if rc != 0:
             raise Stop(f"state.py start-round が終了コード {rc} で止まった", rc)
-        rv = parse_vars(out)
+        jrc, jout = self.collect_reviews(parse_vars(out))
+        return self.after_judge(jrc, jout)
+
+    def run_reviewers(self, agents: list[str], rnd: str, reviewers: list[str]) -> None:
+        """担当を起動して監視し、結果が揃っていれば検証と反証まで通す。"""
+        for a in agents:
+            self.sh("launch-reviewer.sh", a, str(self.pr), rnd)
+        call(
+            [sys.executable, str(HERE / "monitor.py"), str(self.pr), "--phase", "review", "--agents", ",".join(agents)],
+            self.env,
+            self.v.get("WORKTREE"),
+        )
+        missing = [a for a in agents if self.st("read-result", str(self.pr), a)[0] != 0]
+        if not missing:
+            # 結果の欠けた担当がいれば、検証と反証は judge の起動し直し・中断の後へ回す。
+            # 先に通すと、起動し直した後に全担当分をもう一度通すため 1 回分が捨てられる。
+            self.st("verify-findings", str(self.pr))
+            self.sh("critique-round.sh", str(self.pr), rnd, *reviewers)
+
+    def judge(self) -> tuple[int, str]:
+        """judge を打つ。8 なら flush してからもう一度打つ。"""
+        jrc, jout = self.st("judge", str(self.pr))
+        if jrc == 8:
+            self.st("flush", str(self.pr))
+            jrc, jout = self.st("judge", str(self.pr))
+        return jrc, jout
+
+    def collect_reviews(self, rv: dict) -> tuple[int, str]:
+        """担当の結果を集めて judge する。judge が 7 なら 1 度だけ指名された担当を起動し直す。"""
         rnd = rv.get("ROUND", "")
         agents = rv.get("REVIEWERS", "").split()
         relaunched = False
         while True:
-            for a in agents:
-                self.sh("launch-reviewer.sh", a, str(self.pr), rnd)
-            call(
-                [sys.executable, str(HERE / "monitor.py"), str(self.pr), "--phase", "review", "--agents", ",".join(agents)],
-                self.env,
-                self.v.get("WORKTREE"),
-            )
-            missing = [a for a in agents if self.st("read-result", str(self.pr), a)[0] != 0]
-            if not missing:
-                # 結果の欠けた担当がいれば、検証と反証は judge の起動し直し・中断の後へ回す。
-                # 先に通すと、起動し直した後に全担当分をもう一度通すため 1 回分が捨てられる。
-                self.st("verify-findings", str(self.pr))
-                self.sh("critique-round.sh", str(self.pr), rnd, *rv.get("REVIEWERS", "").split())
-            jrc, jout = self.st("judge", str(self.pr))
-            if jrc == 8:
-                self.st("flush", str(self.pr))
-                jrc, jout = self.st("judge", str(self.pr))
+            self.run_reviewers(agents, rnd, rv.get("REVIEWERS", "").split())
+            jrc, jout = self.judge()
             if jrc == 7 and not relaunched:
                 agents = parse_vars(jout).get("RELAUNCH_AGENTS", "").split()
                 relaunched = True
                 if agents:
                     continue
-            break
+            return jrc, jout
+
+    def after_judge(self, jrc: int, jout: str) -> str:
+        """judge の終了コードから done / round / fix を決める。"""
         if jrc == 0:
             return "done"
         if jrc != 2:
