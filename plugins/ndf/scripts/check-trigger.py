@@ -518,34 +518,6 @@ def findings_of(state: Path) -> tuple[dict, str]:
     return findings, (failed[-1] if failed else "")
 
 
-PR_END_RESULT = {"MERGED": "merged", "CLOSED": "no_change"}
-
-
-def _append_failed(root: Path, row: dict) -> str:
-    """落ちた検査の行を書き、書けたかの文言を返す（書けなくても止めない）。"""
-    try:
-        append_event(root, row)
-        return "記録した"
-    except OSError as e:
-        return f"記録できない（{e}）"
-
-
-def _ended_result(root: Path, n: int) -> str:
-    """PR の状態を検査の終わり方（merged / no_change）へ写す。マージも閉じもされていなければ止める。"""
-    state = json.loads(gh_or_stop(root, "pr", "view", str(n), "--json", "state")).get("state")
-    res = PR_END_RESULT.get(state)
-    if not res:
-        raise Stop(f"#{n} がマージも閉じられもしていない（{state}）", EXIT_VIOLATION)
-    return res
-
-
-def _append_or_stop(root: Path, row: dict) -> None:
-    try:
-        append_event(root, row)
-    except OSError as e:
-        raise Stop(f"検査の記録へ書けない: {e}", EXIT_VIOLATION)
-
-
 def record_target(a, root: Path) -> tuple[dict, int]:
     """PR を指す検査（`new check --pr`）の記録。範囲の起点（`to`）と検査の PR（`pr`）を持たないため、差分の検査の
     範囲に影響しない。`check-base` を消さず、`check-done/*` を進めず、PR を閉じない（検査した PR は実装の PR である）。"""
@@ -564,11 +536,21 @@ def record_target(a, root: Path) -> tuple[dict, int]:
     }
     if a.failed:
         row.update(result="failed", failed_at=failed_at or "不明")
-        written = _append_failed(root, row)
+        try:
+            append_event(root, row)
+            written = "記録した"
+        except OSError as e:
+            written = f"記録できない（{e}）"
         return result(TOOL, "stopped", f"検査 {a.id}（#{n}）が {row['failed_at']} で落ちた。{written}", [row], {}), EXIT_VIOLATION
-    res = _ended_result(root, n)
+    state = json.loads(gh_or_stop(root, "pr", "view", str(n), "--json", "state")).get("state")
+    res = {"MERGED": "merged", "CLOSED": "no_change"}.get(state)
+    if not res:
+        raise Stop(f"#{n} がマージも閉じられもしていない（{state}）", EXIT_VIOLATION)
     row["result"] = res
-    _append_or_stop(root, row)
+    try:
+        append_event(root, row)
+    except OSError as e:
+        raise Stop(f"検査の記録へ書けない: {e}", EXIT_VIOLATION)
     return result(TOOL, "ok", f"検査 {a.id} を記録した（{res}・#{n}）", [row], {}), EXIT_OK
 
 
@@ -597,7 +579,11 @@ def cmd_record(a, root: Path) -> tuple[dict, int]:
         row["pr"] = a.pr
     if a.failed:
         row.update(result="failed", failed_at=failed_at or "不明")
-        written = _append_failed(root, row)
+        try:
+            append_event(root, row)
+            written = "記録した"
+        except OSError as e:
+            written = f"記録できない（{e}）"
         delete_base(root, a.id)
         if a.pr:
             gh_call.gh(["pr", "close", str(a.pr), "--comment", "検査が途中で落ちたため閉じる"], cwd=str(root))
@@ -606,9 +592,15 @@ def cmd_record(a, root: Path) -> tuple[dict, int]:
         ), EXIT_VIOLATION
     if not a.pr:
         raise Stop("record には --pr か --failed が要る")
-    res = _ended_result(root, a.pr)
+    state = json.loads(gh_or_stop(root, "pr", "view", str(a.pr), "--json", "state")).get("state")
+    res = {"MERGED": "merged", "CLOSED": "no_change"}.get(state)
+    if not res:
+        raise Stop(f"#{a.pr} がマージも閉じられもしていない（{state}）", EXIT_VIOLATION)
     row["result"] = res
-    _append_or_stop(root, row)
+    try:
+        append_event(root, row)
+    except OSError as e:
+        raise Stop(f"検査の記録へ書けない: {e}", EXIT_VIOLATION)
     delete_base(root, a.id)
     pushed, unpushed = push_done(root, row["to"], a.review)
     note = f"・origin の {' / '.join(pushed)} を進めた" if pushed else ""
