@@ -125,6 +125,7 @@ def test_add_bedrock_by_args_without_terminal(tmp_path, accounts, aws):  # noqa:
         "replaced": False,
     }
     assert "?" not in p.stderr  # 問いを出していない
+    assert not [c for c in aws.calls() if c["argv"][:2] == ["bedrock", "list-inference-profiles"]]  # --model があれば候補を読まない
     rows = out_json(run(tmp_path, accounts, aws, "list", "--json"))
     assert rows[-1]["name"] == "metered" and rows[-1]["kind"] == "metered" and rows[-1]["source"] == "saved"
     assert rows[-1]["details"] == {"profile": "bedrock-dev", "region": "us-west-2", "model": MODEL}
@@ -410,6 +411,16 @@ def test_metered_env_drops_aws_keys_only_for_saved(accounts):  # noqa: F811
     assert env["AWS_PROFILE"] == "p" and not any(k in env for k in (*AWS_SECRETS, "CLAUDE_CODE_OAUTH_TOKEN"))
     env = ca.account_env(ca.METERED, {**base, ca.FALLBACK_ENV: "CLAUDE_CODE_USE_BEDROCK=1"})
     assert "AWS_PROFILE" not in env and env["AWS_ACCESS_KEY_ID"] == AWS_SECRETS["AWS_ACCESS_KEY_ID"]
+
+
+def test_account_env_keeps_user_vars_with_saved_decl(accounts):  # noqa: F811
+    """保存した宣言があっても、アカウントの子から利用者のシェルの AWS_PROFILE などを外さない（認証の変数だけ外す）。"""
+    ca.save_metered("bedrock", {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": "p", "ANTHROPIC_MODEL": "m"}, {"profile": "p"})
+    tok = accounts.add("a")
+    base = {"AWS_PROFILE": "mine", "ANTHROPIC_MODEL": "my-model", "CLAUDE_CODE_USE_BEDROCK": "1"}
+    env = ca.account_env("a", base)
+    assert env["AWS_PROFILE"] == "mine" and env["ANTHROPIC_MODEL"] == "my-model"
+    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == tok and "CLAUDE_CODE_USE_BEDROCK" not in env
 
 
 @pytest.mark.parametrize(

@@ -217,7 +217,7 @@ def _add_bedrock(asker: Asker, profile: str | None, region: str | None, model: s
             raise Fail("no_profiles", "AWS のプロファイルが無い（aws configure list-profiles が 0 件）。先に aws configure sso などで作る")
         profile = asker.value("--profile", "AWS のプロファイル", None, cands)
     region = region or bd.region(profile) or asker.value("--region", f"地域（{profile} に region が無い）")
-    model = asker.value("--model", "モデル", model, bd.models(profile, region))
+    model = model or asker.value("--model", "モデル", None, bd.models(profile, region))
     t = bd.Target(profile, region, model)
     _verify_or_fail(t)
     old = ca.load_metered()
