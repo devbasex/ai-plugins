@@ -8,7 +8,7 @@ from typing import Any, Optional
 
 import tool_paths
 
-from . import die, info
+from . import ABORT, die, info
 from .paths import git_out
 
 
@@ -148,20 +148,11 @@ def _control_prefix(state: dict[str, Any], work: str) -> Optional[str]:
     return f"{relative}/"
 
 
-def _tool_entries(work: str) -> list[str]:
-    """作業ディレクトリの中の `.ndf/worktree.json` からツールのパス（#1436）の定義を読む。読めなければ中断する。"""
-    try:
-        return tool_paths.load(work)
-    except tool_paths.ToolPathsUnreadable as e:
-        die(e.message)
-        raise SystemExit(1)  # die は戻らないが、型のために置く
-
-
 def _split_dirty(state: dict[str, Any], work: str) -> tool_paths.Split:
     """作業ツリーの未コミット変更を、利用者の変更とツールのパスに分ける。制御用ディレクトリは除く。"""
     control = _control_prefix(state, work)
     paths = sorted(path for path in _worktree_changes(work) if not (control and path.startswith(control)))
-    return tool_paths.split(paths, _tool_entries(work))
+    return tool_paths.split_changes(paths, tool_paths.load_or_die(work, ABORT))
 
 
 def _dirty_paths(state: dict[str, Any], work: str) -> list[str]:

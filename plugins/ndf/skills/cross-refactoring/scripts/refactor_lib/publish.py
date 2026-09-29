@@ -174,17 +174,15 @@ def _require_no_tool_paths(state: dict[str, Any]) -> None:
     基準は head ブランチを取り込んだ `FETCH_HEAD`。取り込めない・比べられないときも送らない。
     """
     work = state["worktrees"]["work"]
-    entries = worktree._tool_entries(work)
-    fetch = ["fetch", "origin", state["head_branch"]]
-    fetched = subprocess.run(["git", *fetch], cwd=work, capture_output=True, text=True)
-    if fetched.returncode != 0 and gh_available():
-        # push と同じく、認証で落ちたときは helper を退避して 1 度だけやり直す
-        fetched = subprocess.run(["git", *credential_fallback_args(), *fetch], cwd=work, capture_output=True, text=True)
-    blocked = (
-        tool_paths.push_blocked(work, "FETCH_HEAD", entries)
-        if fetched.returncode == 0
-        else "ツールのパスの有無を確かめられないため push しない"
-    )
+
+    def git_run(*args: str) -> subprocess.CompletedProcess:
+        p = subprocess.run(["git", *args], cwd=work, capture_output=True, text=True)
+        if p.returncode != 0 and gh_available():
+            # push と同じく、認証で落ちたときは helper を退避して 1 度だけやり直す
+            p = subprocess.run(["git", *credential_fallback_args(), *args], cwd=work, capture_output=True, text=True)
+        return p
+
+    blocked = tool_paths.before_push(work, state["head_branch"], git_run)
     if blocked:
         die(blocked)
 

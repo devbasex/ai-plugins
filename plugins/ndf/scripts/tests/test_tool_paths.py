@@ -62,17 +62,17 @@ def serena_rewrites(root, paths=SERENA):
 
 
 def test_load_defaults_without_a_declaration(tmp_path):
-    assert tool_paths.load(make_repo(tmp_path / "r")) == SERENA
+    assert tool_paths.load_entries(make_repo(tmp_path / "r")) == SERENA
 
 
 @pytest.mark.parametrize("decl", [{"version": 1}, {"version": 2}, {"base_branch": "develop"}])
 def test_load_defaults_without_tool_paths(tmp_path, decl):
-    assert tool_paths.load(make_repo(tmp_path / "r", decl)) == SERENA
+    assert tool_paths.load_entries(make_repo(tmp_path / "r", decl)) == SERENA
 
 
 def test_load_adds_and_removes(tmp_path):
     decl = {"version": 1, "tool_paths": {"add": [".idea/", SERENA[0]], "remove": [SERENA[1]]}}
-    assert tool_paths.load(make_repo(tmp_path / "r", decl)) == [SERENA[0], ".idea/"]
+    assert tool_paths.load_entries(make_repo(tmp_path / "r", decl)) == [SERENA[0], ".idea/"]
 
 
 @pytest.mark.parametrize(
@@ -87,14 +87,14 @@ def test_load_adds_and_removes(tmp_path):
 )
 def test_load_refuses_unreadable_tool_paths(tmp_path, decl):
     with pytest.raises(tool_paths.ToolPathsUnreadable):
-        tool_paths.load(make_repo(tmp_path / "r", decl))
+        tool_paths.load_entries(make_repo(tmp_path / "r", decl))
 
 
 def test_load_refuses_broken_json(tmp_path):
     root = make_repo(tmp_path / "r")
     write(root, ".ndf/worktree.json", "{broken")
     with pytest.raises(tool_paths.ToolPathsUnreadable) as e:
-        tool_paths.load(root)
+        tool_paths.load_entries(root)
     assert e.value.message.startswith(".ndf/worktree.json の tool_paths を読めない:")
 
 
@@ -104,22 +104,22 @@ def test_load_does_not_read_the_main_directory(tmp_path):
     wt = tmp_path / "wt"
     git(main, "worktree", "add", "-q", "--detach", str(wt))
     write(main, ".ndf/worktree.json", json.dumps({"version": 1, "tool_paths": {"remove": SERENA}}))
-    assert tool_paths.load(wt) == SERENA
+    assert tool_paths.load_entries(wt) == SERENA
 
 
 # --- 照合と分類（I3） ---------------------------------------------------------------
 
 
 def test_prefix_entry_needs_the_slash():
-    assert tool_paths.matches("x/a", ["x/"])
-    assert not tool_paths.matches("xy/a", ["x/"])
-    assert not tool_paths.matches("x", ["x/"])
-    assert tool_paths.matches("a/b.yml", ["a/b.yml"])
-    assert not tool_paths.matches("a/b.yml.bak", ["a/b.yml"])
+    assert tool_paths.is_tool_path("x/a", ["x/"])
+    assert not tool_paths.is_tool_path("xy/a", ["x/"])
+    assert not tool_paths.is_tool_path("x", ["x/"])
+    assert tool_paths.is_tool_path("a/b.yml", ["a/b.yml"])
+    assert not tool_paths.is_tool_path("a/b.yml.bak", ["a/b.yml"])
 
 
 def test_split_puts_each_path_in_one_list():
-    s = tool_paths.split(["src/a.txt", SERENA[0], "x/1"], [SERENA[0], "x/"])
+    s = tool_paths.split_changes(["src/a.txt", SERENA[0], "x/1"], [SERENA[0], "x/"])
     assert s.user == ["src/a.txt"] and s.tool == [SERENA[0], "x/1"]
     assert not set(s.user) & set(s.tool)
 
@@ -268,6 +268,6 @@ def test_default_is_the_single_definition_for_pr_steps(tmp_path, monkeypatch):
     write(root, "src/a.txt", "new\n")
     serena_rewrites(root)
     monkeypatch.setattr(tool_paths, "DEFAULT", ("src/a.txt",))
-    user, tool = mod.split_status(root, mod.tool_entries(root))
-    assert [mod.status_path(l) for l in tool] == ["src/a.txt"]
-    assert sorted(mod.status_path(l) for l in user) == SERENA
+    user, tool = mod.tool_paths.split_status(root, mod.tool_paths.load_entries(root))
+    assert [line[3:] for line in tool] == ["src/a.txt"]
+    assert sorted(line[3:] for line in user) == SERENA

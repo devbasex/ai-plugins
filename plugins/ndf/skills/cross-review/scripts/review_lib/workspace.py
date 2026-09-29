@@ -103,16 +103,7 @@ def _create_worktree(worktree: str, pr: int, head_branch: str) -> None:
             )
             review_lib.die(f"gh pr checkout --detach #{pr} 失敗: {checkout_result.stderr.strip()}")
         review_lib.info(f"✅ worktree 作成 (gh pr checkout --detach #{pr}): {worktree}")
-    _hide_tool_paths(worktree, _tool_entries(worktree, 1))
-
-
-def _tool_entries(worktree: str, code: int) -> list[str]:
-    """レビュー worktree の中の `.ndf/worktree.json` からツールのパスの定義を読む。読めなければ止める。"""
-    try:
-        return tool_paths.load(worktree)
-    except tool_paths.ToolPathsUnreadable as e:
-        review_lib.die(e.message, code=code)
-        raise SystemExit(code)  # die は戻らないが、型のために置く
+    _hide_tool_paths(worktree, tool_paths.load_or_die(worktree, 1))
 
 
 def _hide_tool_paths(worktree: str, entries: list[str]) -> None:
@@ -250,9 +241,9 @@ def _is_synced(
     ツールのパス（#1436）の変更は利用者の変更に数えない。外したパス（印の掛かったパスと、
     印の無いまま変わっていたパス）は 1 行で出す。
     """
-    entries = _tool_entries(worktree, code) if entries is None else entries
+    entries = tool_paths.load_or_die(worktree, code) if entries is None else entries
     tracked, untracked = _worktree_changes(worktree, exclusions, code)
-    user, tool = tool_paths.split(tracked, entries)
+    user, tool = tool_paths.split_changes(tracked, entries)
     shown = tool_paths.describe(dict.fromkeys([*tool_paths.hidden(worktree, entries), *tool]))
     if user:
         review_lib.die(
@@ -410,7 +401,7 @@ def _sync_worktree(
     あり、意味が違う。
     """
     code = 8 if strict else 1
-    entries = _tool_entries(worktree, code)
+    entries = tool_paths.load_or_die(worktree, code)
     exclusions = _sync_exclusions(worktree)
     have_base, target, label = _resolve_sync_target(worktree, pr, head)
 

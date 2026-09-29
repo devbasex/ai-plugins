@@ -153,32 +153,6 @@ def diff_numbers(root, ref):
     return {"commits": commits, "files": files, "insertions": ins, "deletions": dels, "shortstat": last}
 
 
-# --- ツールのパス（#1436） -------------------------------------------------------------
-
-TOOL_PATHS_HINT = "意図した変更なら git commit で直接コミットする"
-
-
-def tool_entries(root):
-    """開発 worktree の `.ndf/worktree.json` からツールのパスの定義を読む。読めなければ止める。"""
-    try:
-        return tool_paths.load(root)
-    except tool_paths.ToolPathsUnreadable as e:
-        raise StepError(e.message, EXIT_UNREADABLE)
-
-
-def status_path(line):
-    """`git status --short` の 1 行のパス（改名は移動先）。"""
-    path = line[3:]
-    return path.split(" -> ", 1)[1] if " -> " in path else path
-
-
-def split_status(root, entries):
-    """未コミットの行を、利用者の変更とツールのパスの変更に分ける。"""
-    lines = [l for l in git(root, "-c", "core.quotePath=false", "status", "--short").stdout.splitlines() if l.strip()]
-    user = [l for l in lines if not tool_paths.matches(status_path(l).strip('"'), entries)]
-    return user, [l for l in lines if l not in user]
-
-
 # --- plan -------------------------------------------------------------------------
 
 
@@ -217,7 +191,7 @@ def cmd_plan(a):
             ),
             EXIT_PRECONDITION,
         )
-    status, tool_status = split_status(root, tool_entries(root))
+    status, tool_status = tool_paths.split_status(root, tool_paths.load_or_stop(root, EXIT_UNREADABLE))  # #1436
     ref = compare_ref(root, base)
     nums = diff_numbers(root, ref)
     in_commits = []
@@ -232,14 +206,8 @@ def cmd_plan(a):
         {"kind": "changes", "name": f"{len(status)} 件の未コミット", "result": "uncommitted" if status else "clean", "files": status[:50]}
     )
     if tool_status:
-        items.append(
-            {
-                "kind": "tool_paths",
-                "name": f"{len(tool_status)} 件のツールのパスの変更（コミットしない）",
-                "result": "excluded",
-                "files": tool_status[:50],
-            }
-        )
+        n = f"{len(tool_status)} 件のツールのパスの変更（コミットしない）"
+        items.append({"kind": "tool_paths", "name": n, "result": "excluded", "files": tool_status[:50]})
     for sha in in_commits:
         items.append({"kind": "commit", "name": sha, "result": "closing_word"})
     metrics = {
@@ -307,13 +275,12 @@ def cmd_commit(a):
                 {"branch": branch, "closing_words": words},
             )
         )
-    entries = tool_entries(root)
+    entries = tool_paths.load_or_stop(root, EXIT_UNREADABLE)
     git(root, "add", "-A")
-    # ツールのパスは index から外すだけで、ファイルの中身は残す（#1436）。外した後も worktree に
-    # 変更が残るため、コミットの有無は status でなく index で決める
+    # ツールのパス（#1436）は index から外すだけで中身は残す。worktree に変更が残るため、有無は index で決める
     unstaged = tool_paths.unstage(root, entries)
     tool_items = [{"kind": "tool_paths", "name": " ".join(unstaged), "result": "unstaged"}] if unstaged else []
-    hint = f"。{tool_paths.describe(unstaged)}（{TOOL_PATHS_HINT}）" if unstaged else ""
+    hint = f"。{tool_paths.describe(unstaged)}（意図した変更なら git commit で直接コミットする）" if unstaged else ""
     if git(root, "diff", "--cached", "--quiet", check=False).returncode == 0:
         emit(result(TOOL, "ok", f"コミットする変更が無い{hint}", tool_items, {"branch": branch, "committed": False}))
     run(["git", "-C", str(root), "commit", "-q", "-m", msg])

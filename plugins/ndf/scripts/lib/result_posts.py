@@ -487,20 +487,6 @@ def _git(worktree: pathlib.Path | str, *args: str) -> subprocess.CompletedProces
     return subprocess.run(["git", "-C", str(worktree), *fallback, *args], capture_output=True, text=True)
 
 
-def _tool_paths_blocking_push(worktree: pathlib.Path | str, head_branch: str) -> str | None:
-    """push の直前に、送るコミットへツールのパス（#1436）が入っていないかを確かめる。止める理由か `None`。
-
-    基準は送り先のブランチを取り込んだ `FETCH_HEAD`。取り込めない・読めないときは送らない。
-    """
-    try:
-        entries = tool_paths.load(worktree)
-    except tool_paths.ToolPathsUnreadable as e:
-        return e.message
-    if _git(worktree, "fetch", "origin", head_branch).returncode != 0:
-        return "ツールのパスの有無を確かめられないため push しない"
-    return tool_paths.push_blocked(worktree, "FETCH_HEAD", entries)
-
-
 def push_fix(worktree: pathlib.Path | str, head_branch: str, fix_commit: str | None) -> PushResult:
     """現在の頭を送り先のブランチへ送り、報告されたコミットが載ったことを確かめる。
 
@@ -511,8 +497,7 @@ def push_fix(worktree: pathlib.Path | str, head_branch: str, fix_commit: str | N
         return PushResult(True, False, True, "コミットが無いため送らない")
     if not (str(worktree or "") and head_branch):
         return PushResult(False, False, False, "送る先（作業ツリーとブランチ）が分からない")
-    blocked = _tool_paths_blocking_push(worktree, head_branch)
-    if blocked:
+    if blocked := tool_paths.before_push(worktree, head_branch, lambda *a: _git(worktree, *a)):  # #1436
         return PushResult(False, False, False, blocked)
     pushed = _git(worktree, "push", "origin", f"HEAD:{head_branch}")
     if pushed.returncode != 0:

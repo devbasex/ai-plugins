@@ -31,7 +31,6 @@ import worktree_deps
 from .. import ABORT, die, info
 from .. import baseline as baseline_lib
 from .. import timeline
-from .. import worktree as worktree_lib
 from ..paths import (
     default_worktree_base,
     sh,
@@ -838,7 +837,7 @@ def _ensure_work_worktree(work: pathlib.Path, head_branch: str) -> None:
     info(f"✅ 書き込み用の作業ディレクトリを作成しました: {work}")
     # ツールのパス（#1436）へ skip-worktree の印を掛ける。担当の CLI が起動した Serena などが
     # 書き換えても、同期の前の検査に現れず、コミットにも入らない。
-    tool_paths.hide(str(work), worktree_lib._tool_entries(str(work)))
+    tool_paths.hide(str(work), tool_paths.load_or_die(work, ABORT))
     _prepare_work_deps(work)
 
 
@@ -870,7 +869,7 @@ def _sync_work_worktree(work: pathlib.Path, head_branch: str) -> None:
         die(f"origin/{head_branch} を取得できませんでした: {fetched.stderr.strip()[:300]}。古い HEAD のまま進めないため中断します")
     # 印の掛かったツールのパスに手元の変更があると、そのパスを変える先への早送りが失敗する。
     # 書き込み用の作業ディレクトリの中身なので、印を外して HEAD へ戻してから動かす（#1436 決定 2）。
-    entries = worktree_lib._tool_entries(str(work))
+    entries = tool_paths.load_or_die(work, ABORT)
     tool_paths.release(str(work), entries)
     r = subprocess.run(
         ["git", "merge", "--ff-only", f"origin/{head_branch}"],

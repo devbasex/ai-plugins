@@ -1,6 +1,6 @@
 """ツールのパス（#1436）: CLI が起動したツール（Serena MCP など）が worktree の中で書き換える既知のパス。
 
-cross-review・cross-refactoring・`pr` の 3 つの工程は、定義をこのモジュールの `load` からだけ得る
+cross-review・cross-refactoring・`pr` の 3 つの工程は、定義をこのモジュールの `load_entries` からだけ得る
 （工程ごとに既定を持たない）。定義は既定の 2 つに `.ndf/worktree.json` の `tool_paths.add` を足し、
 `tool_paths.remove` を引いたもの。項目は完全一致か、末尾 `/` の前方一致で照合する。
 
@@ -10,8 +10,9 @@ cross-review・cross-refactoring・`pr` の 3 つの工程は、定義をこの�
 
 from __future__ import annotations
 
+import subprocess
 import sys
-from typing import Iterable, NamedTuple, Sequence
+from typing import Callable, Iterable, NamedTuple, Sequence
 
 import proc
 import repo
@@ -19,6 +20,7 @@ import repo
 # NDF と mcp-serena が `SERENA_HOME=.serena` で起動する Serena の書き先。
 DEFAULT: tuple[str, ...] = (".serena/project.yml", ".serena/serena_config.yml")
 DESCRIBE_HEAD = "↷ ツールのパスを検査から外した:"
+UNCHECKED = "ツールのパスの有無を確かめられないため push しない"
 
 
 class ToolPathsUnreadable(Exception):
@@ -47,7 +49,7 @@ def _string_list(value, key: str) -> list[str]:
     return list(value)
 
 
-def load(root) -> list[str]:
+def load_entries(root) -> list[str]:
     """`root` の直下の `.ndf/worktree.json` から定義を読む（メインディレクトリへ探しに行かない）。
 
     設定が無い・`tool_paths` が無いときは既定。読めないときは `ToolPathsUnreadable`。
@@ -67,17 +69,33 @@ def load(root) -> list[str]:
     return [p for p in dict.fromkeys([*DEFAULT, *add]) if p not in remove]
 
 
-def matches(path: str, entries: Iterable[str]) -> bool:
+def load_or_die(root, code: int) -> list[str]:
+    """`load_entries` の結果。読めなければ案内の 1 行を出して `code` で終える（各工程の既存の中断）。"""
+    try:
+        return load_entries(root)
+    except ToolPathsUnreadable as e:
+        proc.die(e.message, code)
+
+
+def load_or_stop(root, code: int) -> list[str]:
+    """`load_entries` の結果。読めなければ `proc.StepError(案内, code)`（手順のスクリプトの `stopped`）。"""
+    try:
+        return load_entries(root)
+    except ToolPathsUnreadable as e:
+        raise proc.StepError(e.message, code) from None
+
+
+def is_tool_path(path: str, entries: Iterable[str]) -> bool:
     """完全一致か、末尾 `/` の項目の前方一致なら真。"""
     return any(path == e or (e.endswith("/") and path.startswith(e)) for e in entries)
 
 
-def split(paths: Iterable[str], entries: Sequence[str]) -> Split:
+def split_changes(paths: Iterable[str], entries: Sequence[str]) -> Split:
     """パスを利用者の変更とツールのパスに分ける。順序は入力のまま。"""
     user: list[str] = []
     tool: list[str] = []
     for p in paths:
-        (tool if matches(p, entries) else user).append(p)
+        (tool if is_tool_path(p, entries) else user).append(p)
     return Split(user, tool)
 
 
@@ -142,7 +160,7 @@ def release(worktree, entries: Sequence[str]) -> list[str]:
 def unstage(worktree, entries: Sequence[str]) -> list[str]:
     """index に入ったツールのパスを外す。ファイルの中身は変えない。失敗は `proc.StepError`。"""
     staged = proc.git(worktree, "diff", "--cached", "--name-only", "-z").stdout.split("\0")
-    paths = [p for p in staged if p and matches(p, entries)]
+    paths = [p for p in staged if p and is_tool_path(p, entries)]
     if paths:
         proc.git(worktree, "--literal-pathspecs", "reset", "-q", "--", *paths)
     return paths
@@ -153,7 +171,7 @@ def committed(worktree, base: str, entries: Sequence[str]) -> list[str] | None:
     changed = _git_paths(worktree, "diff", "--name-only", "-z", f"{base}...HEAD")
     if changed is None:
         return None
-    return [p for p in changed if matches(p, entries)]
+    return [p for p in changed if is_tool_path(p, entries)]
 
 
 def describe(paths: Iterable[str]) -> str:
@@ -162,11 +180,36 @@ def describe(paths: Iterable[str]) -> str:
     return f"{DESCRIBE_HEAD} {' '.join(paths)}" if paths else ""
 
 
+def split_status(worktree, entries: Sequence[str]) -> Split:
+    """`git status --short` の行を分ける（改名は移動先のパスで照合する）。行はそのまま返す。失敗は `proc.StepError`。"""
+    out = proc.git(worktree, "-c", "core.quotePath=false", "status", "--short").stdout
+    user: list[str] = []
+    tool: list[str] = []
+    for line in (x for x in out.splitlines() if x.strip()):
+        path = line[3:].split(" -> ", 1)[-1].strip('"')
+        (tool if is_tool_path(path, entries) else user).append(line)
+    return Split(user, tool)
+
+
+def before_push(worktree, head_branch: str, git_run: Callable[..., subprocess.CompletedProcess]) -> str | None:
+    """push の直前の検査。送り先を取り込み、`FETCH_HEAD...HEAD` にツールのパスがあれば止める理由を返す。
+
+    `git_run(*args)` は呼び出し側の git の起動（認証の退避を含む）。定義が読めない・取り込めないときも止める。
+    """
+    try:
+        entries = load_entries(worktree)
+    except ToolPathsUnreadable as e:
+        return e.message
+    if git_run("fetch", "origin", head_branch).returncode != 0:
+        return UNCHECKED
+    return push_blocked(worktree, "FETCH_HEAD", entries)
+
+
 def push_blocked(worktree, base: str, entries: Sequence[str]) -> str | None:
     """push の直前の検査。止める理由の 1 行、止めなくてよければ `None`。"""
     found = committed(worktree, base, entries)
     if found is None:
-        return "ツールのパスの有無を確かめられないため push しない"
+        return UNCHECKED
     if found:
         return (
             f"ツールのパスがコミットに入っているため push しない: {' '.join(found)}。 .gitignore に入れるか、コミットから外してから打ち直す"
