@@ -26,7 +26,6 @@ import review_lib.commands.judge
 import review_lib.commands.read_result
 import review_lib.commands.report
 import review_lib.commands.start_round
-from review_state_helpers import approve, judge_round, judge_state
 
 PR = 6196
 REPO = "o/r"
@@ -43,15 +42,34 @@ def tmp_dir(monkeypatch, tmp_path, state_mod):
 
 
 def _state(rounds: list[dict], **over) -> dict:
-    return judge_state(PR, REPO, rounds, **over)
+    state = {
+        "current_pr": PR,
+        "repo": REPO,
+        "max_rounds": 12,
+        "rotate_after": 8,
+        "only": None,
+        "rounds": rounds,
+        "pr_history": [{"pr": PR, "rounds": len(rounds)}],
+        "deferred_nits": [],
+        "final": None,
+    }
+    state.update(over)
+    return state
 
 
 def _round(no: int = 1, **over) -> dict:
-    return judge_round(PR, no, "2026-09-01T00:00:00+00:00", **over)
+    entry: dict = {"round": no, "pr": PR, "started_at": "2026-09-01T00:00:00+00:00"}
+    entry.update(over)
+    return entry
 
 
 def _approve() -> dict:
-    return approve()
+    return {
+        "intent": "APPROVE",
+        "posted_as": "APPROVE",
+        "comments": 0,
+        "by_severity": {"critical": 0, "major": 0},
+    }
 
 
 def _write(tmp_dir: pathlib.Path, state: dict) -> None:
