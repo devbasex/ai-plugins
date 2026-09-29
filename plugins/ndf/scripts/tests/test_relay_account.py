@@ -423,6 +423,17 @@ def test_account_env_keeps_user_vars_with_saved_decl(accounts):  # noqa: F811
     assert env["CLAUDE_CODE_OAUTH_TOKEN"] == tok and "CLAUDE_CODE_USE_BEDROCK" not in env
 
 
+def test_account_env_from_metered_section_drops_saved_decl(accounts):  # noqa: F811
+    """従量の接続の区間の中（base が保存した宣言の変数を持つ）からアカウントへ戻すと、宣言のキーを外す。"""
+    decl = {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": "p", "AWS_REGION": "r", "ANTHROPIC_MODEL": "m"}
+    ca.save_metered("bedrock", decl, {"profile": "p"})
+    tok = accounts.add("a")
+    base = ca.account_env(ca.METERED, {"PATH": "/bin"})
+    env = ca.account_env("a", base)
+    assert not any(k in env for k in decl) and env["PATH"] == "/bin"
+    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == tok and env[ca.NAME_ENV] == "a"
+
+
 @pytest.mark.parametrize(
     "body",
     [

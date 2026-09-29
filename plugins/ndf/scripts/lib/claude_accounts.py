@@ -513,14 +513,16 @@ def account_env(name: str, base: dict, before: float | None = REFRESH_BEFORE, mi
 
     従量の接続は `CLAUDE_CODE_OAUTH_TOKEN` と `FOREIGN_AUTH_ENV` を外してから宣言の変数を重ねる（認証の方式を
     宣言どおり 1 つにする）。アカウントは認証の優先順位でトークンより上に来る変数（`FOREIGN_AUTH_ENV`）と、
-    環境変数の宣言のときだけ宣言のキーを外してトークンと名前を足す（混ぜない。I16。保存した宣言では外さない）。"""
+    環境変数の宣言のときと、`base` が従量の接続の環境（`NDF_CLAUDE_ACCOUNT=metered`）のときだけ宣言のキーを外して
+    トークンと名前を足す（混ぜない。I16。それ以外の保存した宣言では利用者のシェルの変数を残すため外さない）。"""
     declared = fallback_env(base)
     if name == METERED:
         return _metered_env(dict(base), declared, FALLBACK_ENV not in base)
     tok = token(name, before, min_left=min_left)
     if tok is None:
         return None
-    return _account_env(dict(base), declared if FALLBACK_ENV in base else {}, name, tok)
+    strip = FALLBACK_ENV in base or base.get(NAME_ENV) == METERED
+    return _account_env(dict(base), declared if strip else {}, name, tok)
 
 
 def _metered_env(env: dict, declared: dict, saved: bool) -> dict:
