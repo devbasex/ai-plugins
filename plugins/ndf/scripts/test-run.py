@@ -152,43 +152,6 @@ def _lint_verdicts(root: pathlib.Path, strategy: ts.Strategy, limits: dict, a, f
     return out
 
 
-def _outcome_items(strategy: ts.Strategy, limits: dict, notes: list[str], triage: dict | None, lint: list[dict] | None) -> list[dict]:
-    items = [{"strategy": strategy.name, "source": strategy.source, "limits": {k: v for k, v in limits.items() if k != "basis"}}]
-    for note in notes:
-        items.append({"note": note})
-    if triage is not None:
-        items.append({k: triage.get(k) for k in ("failed_tests", "flaky", "preexisting", "caused", "fallback_reason")})
-    if lint:
-        items.append({"lint": lint})
-    return items
-
-
-def _decide_status(passed: bool, triage: dict | None, lint: list[dict] | None) -> tuple[str, int, str]:
-    """（status, 終了コード, detail へ足す文）を決める。"""
-    lint_caused = [v for v in lint or [] if v.get("verdict") == "caused"]
-    caused = bool(triage and triage.get("caused"))
-    suffix = ""
-    if passed:
-        status, code = "ok", 0
-    elif triage is None and lint is not None:
-        status, code = "ok", 0
-    elif triage is not None and triage.get("fallback_reason") is None and not caused:
-        status, code = "ok", 0
-        suffix += "（落ちたテストはフレーキーと既存失敗だけ）"
-    elif triage is not None and triage.get("fallback_reason"):
-        status, code = "stopped", 2
-        suffix += f"。見分けを全体の走らせ直しに落とした: {triage['fallback_reason']}"
-    else:
-        status, code = "stopped", 1
-    if lint_caused and code == 0:
-        status, code = "stopped", 1
-    if lint_caused:
-        suffix += "。静的解析が落ちた: " + "・".join(f"{v['suite']}（{v['reason']}）" for v in lint_caused)
-    elif lint:
-        suffix += "。落ちた静的解析は既存失敗: " + "・".join(f"{v['suite']}（{v['reason']}）" for v in lint)
-    return status, code, suffix
-
-
 def _emit_outcome(
     strategy: ts.Strategy,
     limits: dict,
@@ -198,10 +161,34 @@ def _emit_outcome(
     detail: str,
     lint: list[dict] | None = None,
 ) -> int:
-    items = _outcome_items(strategy, limits, notes, triage, lint)
-    status, code, suffix = _decide_status(passed, triage, lint)
+    items = [{"strategy": strategy.name, "source": strategy.source, "limits": {k: v for k, v in limits.items() if k != "basis"}}]
+    for note in notes:
+        items.append({"note": note})
+    if triage is not None:
+        items.append({k: triage.get(k) for k in ("failed_tests", "flaky", "preexisting", "caused", "fallback_reason")})
     lint_caused = [v for v in lint or [] if v.get("verdict") == "caused"]
-    emit(result(TOOL, status, detail + suffix, items, {"caused": len((triage or {}).get("caused") or []) + len(lint_caused)}))
+    if lint:
+        items.append({"lint": lint})
+    caused = bool(triage and triage.get("caused"))
+    if passed:
+        status, code = "ok", 0
+    elif triage is None and lint is not None:
+        status, code = "ok", 0
+    elif triage is not None and triage.get("fallback_reason") is None and not caused:
+        status, code = "ok", 0
+        detail += "（落ちたテストはフレーキーと既存失敗だけ）"
+    elif triage is not None and triage.get("fallback_reason"):
+        status, code = "stopped", 2
+        detail += f"。見分けを全体の走らせ直しに落とした: {triage['fallback_reason']}"
+    else:
+        status, code = "stopped", 1
+    if lint_caused and code == 0:
+        status, code = "stopped", 1
+    if lint_caused:
+        detail += "。静的解析が落ちた: " + "・".join(f"{v['suite']}（{v['reason']}）" for v in lint_caused)
+    elif lint:
+        detail += "。落ちた静的解析は既存失敗: " + "・".join(f"{v['suite']}（{v['reason']}）" for v in lint)
+    emit(result(TOOL, status, detail, items, {"caused": len((triage or {}).get("caused") or []) + len(lint_caused)}))
     return code
 
 
