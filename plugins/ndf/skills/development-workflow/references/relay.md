@@ -131,8 +131,9 @@ conductor では、コンテキスト量の hook が工程へ入る起動を 1 �
 
 ## 利用上限でアカウントを替えて続ける
 
-**claude のアカウントを 2 つ以上登録しておくと、利用上限で止まらずに別のアカウントで続く。** 登録は端末から打つ
-（`claude auth login` が URL を示し、認可コードの貼り付けを待つ）。**Linux（コンテナを含む）だけで使える。** macOS の
+**claude のアカウントを 2 つ以上登録しておくと、利用上限で止まらずに別のアカウントで続く。** 端末で打てば
+`claude auth login` が URL を示し、認可コードの貼り付けを待つ（1 回で終わる）。端末でなければ 2 回に分かれる（下の
+「AI が代わりに打つとき」）。**Linux（コンテナを含む）だけで使える。** macOS の
 claude はログインの資格情報を Keychain に置き、設定ディレクトリの `.credentials.json` を書かないため、macOS の
 `account add` は登録の前に止まる。1 つのメールアドレスで複数の組織（個人と Team など）に属していれば、組織ごとに別の
 アカウントとして登録できる（ログインのときに組織を選ぶ。同じメールアドレスと組織の 2 つ目は拒む）。
@@ -144,6 +145,26 @@ python3 ~/.claude/ndf/relay.py account list        # 推論を呼ばずに残量
 python3 ~/.claude/ndf/relay.py account capacity work2 - 900   # 週の枠の大きさだけを 900 USD と宣言する（- - で外す）
 python3 ~/.claude/ndf/relay.py account remove work2
 ```
+
+**`account` の副命令はすべて `--yes`（確認を飛ばす）と `--json`（結果を JSON 1 つで標準出力へ返す）を受ける。**
+対話で聞く値（名前・プロファイル・地域・モデル・確認）はすべて引数でも渡せ、揃っていれば何も聞かない。標準入力が
+端末でなければ入力を待たず、足りない引数の名前（`--json` なら `missing` と `candidates`）を示して終了コード 2 で終わる。
+
+### AI が代わりに打つとき
+
+conductor・worker は Bash から打つ（標準入力は端末でない）。人が要るのは、ブラウザでの認可と、画面に出た認可コードを
+AI へ返すことだけである。
+
+```bash
+python3 ~/.claude/ndf/relay.py account add work2 --json
+# → {"ok": true, "stage": "awaiting_code", "url": "https://…", "expires_at": "…"}。URL を利用者へ渡す
+printf '%s\n' '<認可コード>' | python3 ~/.claude/ndf/relay.py account add work2 --code - --json
+# → {"ok": true, "stage": "registered", "email": "…"}
+```
+
+1 回目は `claude auth login` を待たせたまま（待機中のログイン）認可の URL を返す。登録の途中の状態は置き場の
+`.pending-<名前>/` に残り、10 分を過ぎると次の `account` の呼び出しで捨てる（2 回目は `expired` で 1）。認可コードは
+`--code -`（標準入力の 1 行）で渡す。引数に載せると `ps` と打った側の記録に残る。
 
 ```text
 名前   識別           5 時間        7 日         モデル別の週        支出上限      枠の大きさ     残り  状態
@@ -165,6 +186,8 @@ work2  b@example.com  40%（05:40）  0%（09-30）  -                   達し�
 `extra_usage.spend_limit_reached`・`spend.percent` ≥ 100・`spend.severity` = `critical` のどれかで達したとする。
 
 識別の列は、同じメールアドレスの登録が 2 件以上あるときだけ `a@example.com（Team A）` のように組織名を添える。
+従量の接続の宣言があれば、最後に `metered` の行（識別は `Bedrock（<プロファイル>・<地域>・<モデル>）` か
+`環境変数（<変数の名前>）`、状態は `保存した宣言`・`環境変数の宣言`・`壊れている（宣言なしとして扱う）` のどれか）が出る。
 
 状態は `使える`・`上限（<リセット時刻>）`・`支出上限`・`残量不明`・`再登録が要る` の 5 つ。`再登録が要る` は同じ名前で
 `account add` し直す。置き場は `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/accounts/`（0700。ファイルは 0600）で、共有の
@@ -179,7 +202,27 @@ work2  b@example.com  40%（05:40）  0%（09-30）  -                   達し�
 | すべて上限 | 宣言があれば従量の接続へ移る。無ければ 1 行を出して子を残す | 宣言があれば従量の接続へ移る。無ければ今と同じ上限待ち |
 | 従量の接続で動いている間 | 定期の確認で上限の外れたアカウントを見つけたら、次のカットポイントで戻す | 起動のたびに戻れるかを確かめる |
 
-**従量の接続の宣言は `NDF_SUPERVISE_CLAUDE_FALLBACK` である**（`KEY=VALUE` を空白区切り。値はリポジトリに書かない）。
+**従量の接続（Bedrock）は `account add-bedrock` で登録する。** AWS のプロファイルは先に `aws configure sso` などで
+作っておく。候補（`aws configure list-profiles`）が 1 つなら確認だけ、複数なら番号で選ぶ。地域はプロファイルの `region`、
+モデルは Bedrock の推論プロファイルのうち Claude のものから選ぶ。保存の前に `aws sts get-caller-identity` と
+`aws bedrock-runtime converse`（最大 1 トークン。1 回分の費用が掛かる）で呼べるかを確かめ、呼べなければ理由（`認証切れ`・
+`権限が無い`・`地域で使えない`・`モデルが有効でない`）と AWS のエラーの種類の名前を出して保存しない。macOS でも使える。
+
+```bash
+python3 ~/.claude/ndf/relay.py account add-bedrock        # 端末で選ぶ
+python3 ~/.claude/ndf/relay.py account add-bedrock --profile bedrock-dev --model <モデルの ID> --yes --json
+python3 ~/.claude/ndf/relay.py account check metered      # 今の宣言で呼べるかを確かめる
+python3 ~/.claude/ndf/relay.py account remove metered     # 保存した宣言を外す
+```
+
+宣言はアカウントの置き場の `metered.json`（0600）に保存し、次の起動から効く。シェルの設定ファイルは書き換えない。
+保存するのは変数の名前と値（`CLAUDE_CODE_USE_BEDROCK`・`AWS_PROFILE`・`AWS_REGION`・`ANTHROPIC_MODEL`）だけで、AWS の鍵は
+`~/.aws/` に残る。保存した宣言で起動する子からは、環境の AWS の鍵の変数を外す。宣言は 1 つだけで、置き換えは確認
+（`--yes`）が要る。保存先が壊れていれば、ラッパーは区間 1 の起動で、`supervise.py` は最初の呼び出しの前に 1 行出し、
+宣言なしとして扱う。
+
+**環境変数で上書きする場合は `NDF_SUPERVISE_CLAUDE_FALLBACK` を定義する**（`KEY=VALUE` を空白区切り。値はリポジトリに
+書かない）。定義されていれば（空でも）保存した宣言は読まない。Bedrock 以外（API キーなど）もこの形で宣言する。
 
 ```bash
 export NDF_SUPERVISE_CLAUDE_FALLBACK='CLAUDE_CODE_USE_BEDROCK=1 AWS_PROFILE=<名前> AWS_REGION=us-east-1'
@@ -282,6 +325,7 @@ python3 $M next $O/sprint-state.json --doc $DOC --replace >/dev/null && sed -n '
 | --- | --- | --- |
 | `start` | セッションを起動した | `section`・`pid`・`command`・`from_session`・`plugin_version`（起動の直前に読んだ版）・`cwd`（シグナルファイルの作業ディレクトリが消えていたら `cwd_fallback` に元の値）・`carried`（2 つ目以降のセッションだけ。ブロックの中身の前に付けた引数）・`account`（登録が 2 つ以上のときだけ。起動したアカウント。`metered` は従量の接続） |
 | `account` | アカウントを替えた・すべて上限で替えなかった | `section`・`reason`（`five_hour` / `seven_day` / `spend` / `unknown` / `auth` / `threshold` / `recovered` など）・`from`・`to`（替えなかったら null）・`earliest`（最も早く戻るアカウントと時刻）・`keys`（従量の接続へ移ったときの変数の名前）・`usage`（閾値のときの使用率） |
+| `metered_invalid` | 区間 1 の起動で、保存した従量の接続の宣言が壊れていた（宣言なしとして扱う） | `section`・`detail`（理由の 1 行） |
 | `end` | セッションが終わった | `seconds`（起動からシグナルファイルを書くまで。シグナルファイルなしなら終わりまで）・`ended_by`（`mark` / `no-mark` / `sigterm` / `sigkill`） |
 | `stop` | 次のセッションを起動しないと決めた | `reason`（`stop-file` / `max-starts` / `spin` / `update-failed` / `start-failed` / `error`） |
 

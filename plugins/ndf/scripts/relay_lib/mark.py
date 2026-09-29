@@ -113,37 +113,58 @@ def asked_after(d: str, mark_path: str) -> bool:
     return w is not None and a is not None and a >= w
 
 
-def cmd_mark() -> int:
+def _hook_input() -> tuple[str, dict] | None:
+    """ラッパーの直接の子が送った hook の入力と状態ディレクトリ。対象でなければ None。"""
     d = os.environ.get("NDF_RELAY_DIR")
     if not d or not relay_running(d):
-        return 0
+        return None
     try:
         data = json.loads(sys.stdin.read())
     except ValueError:
-        return 0
+        return None
     if not isinstance(data, dict) or not proc.is_direct_child(d):
+        return None
+    return d, data
+
+
+def _mark_action(blocks: list[str], tasks: list[dict]) -> str:
+    """合図の扱い: `skip`（背景の作業か複数の候補で書かない）・`idle`（候補なし）・`write`（書く）。"""
+    if tasks or len(blocks) > 1:
+        return "skip"
+    return "write" if blocks else "idle"
+
+
+def _skip_mark(d: str, record: RelayRecord, blocks: list[str], tasks: list[dict], active: bool) -> None:
+    record.drop_mark()
+    if not blocks:
+        return
+    section = current_section(d)
+    reason = "blocks" if len(blocks) > 1 else "background"
+    held = reason == "background" and hold_once(d, section, blocks[0], active)
+    record.mark_skipped(section, reason, tasks, held)
+    if held:
+        print(json.dumps({"decision": "block", "reason": hold_reason(tasks)}, ensure_ascii=False))
+
+
+def cmd_mark() -> int:
+    got = _hook_input()
+    if got is None:
         return 0
+    d, data = got
     # Stop が起きたなら質問は表示されていない（Esc で取り消した合図もここで消える）
     remove(os.path.join(d, QUESTION_FILE))
     record = RelayRecord(d)
     blocks = next_blocks(str(data.get("last_assistant_message") or ""))
     tasks = running_tasks(data.get("background_tasks")) + cl.pending_wakeups(str(data.get("transcript_path") or ""), time.time())
-    if tasks or len(blocks) > 1:
-        record.drop_mark()
-        if blocks:
-            section = current_section(d)
-            reason = "blocks" if len(blocks) > 1 else "background"
-            held = reason == "background" and hold_once(d, section, blocks[0], bool(data.get("stop_hook_active")))
-            record.mark_skipped(section, reason, tasks, held)
-            if held:
-                print(json.dumps({"decision": "block", "reason": hold_reason(tasks)}, ensure_ascii=False))
-        return 0
-    if not blocks:
+    action = _mark_action(blocks, tasks)
+    if action == "skip":
+        _skip_mark(d, record, blocks, tasks, bool(data.get("stop_hook_active")))
+    elif action == "idle":
         # 合図の後に応答が続いた（目標が未達など）。質問が出ていなければ前の合図を残す
         if asked_after(d, record.path(MARK_FILE)):
             record.drop_mark()
-        return 0
-    record.write_mark(blocks[0], data)
+    else:
+        record.write_mark(blocks[0], data)
     return 0
 
 

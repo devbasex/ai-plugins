@@ -1,4 +1,4 @@
-"""NDF のラッパー: カットポイントで claude を起動し直す（#895）。中身は #1142 の C6 でこのパッケージへ分けた。
+r"""NDF のラッパー: カットポイントで claude を起動し直す（#895）。中身は #1142 の C6 でこのパッケージへ分けた。
 
 副命令:
 
@@ -8,7 +8,7 @@
 | `stop` | 動いているラッパーすべてに停止の合図を置く |
 | `mark` | Stop hook の本体。最後の応答の `ndf-next` のブロックを合図 `next.json` へ写す |
 | `limit` | StopFailure hook の本体。子の応答が API の失敗（利用上限など）で終わったことを `limit.json` へ書く（#1389） |
-| `account add <名前>` / `account list [--json]` / `account capacity <名前> <5 時間の枠> <週の枠>` / `account remove <名前>` | 切り替えに使う claude アカウントを登録する・一覧する・枠の大きさを宣言する（`-` で外す）・外す（#1389・#1453。置き場は `lib/claude_accounts.py`） |
+| `account add <名前> [--code <コード>\|-]` / `account add-bedrock` / `account check metered` / `account list` / `account capacity <名前> <5 時間の枠> <週の枠>` / `account remove <名前>\|metered` | 切り替えに使う claude アカウントと従量の接続（Bedrock）を登録する・確かめる・一覧する・枠の大きさを宣言する（`-` で外す）・外す（#1389・#1453・#1468。置き場は `lib/claude_accounts.py`）。すべて `--yes` と `--json` を受け、端末でなければ入力を待たない |
 | `install` / `uninstall` / `status` | `/ndf:install-wrapper` の本体。複製（ランチャーとバージョンディレクトリ）とラッパーの rc を `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/` に置き、シェルの設定へ読み込みの 1 行を足す・外す・状態を示す（#928） |
 | `startup` | SessionStart hook の本体。在る複製を今の版で置き直し（版は後退させない）、10.17.4〜10.17.6 が自動で足した囲みを 1 度だけ知らせる。シェルの設定は書かない |
 | `question open` / `question close` | `AskUserQuestion` の `PreToolUse` / `PostToolUse` hook の本体。質問の表示中の合図を作る・消す（関門を越えない守り） |
@@ -23,7 +23,8 @@
 区間ごとに新しい版で動き、動いているラッパーは古い版のままでありうるためである。動いているラッパーは起動時に
 このパッケージの全モジュールを import するため、途中でバージョンディレクトリが替わっても別の版を読まない（決定 5）。
 
-モジュール: `runtime`（ラッパーを動かす python と環境）・`accounts`（アカウントの副命令）・`common`（定数と小さな関数）・`proc`（親のたどり）・`record`（`log.jsonl` と `next.json`）・
+モジュール: `runtime`（ラッパーを動かす python と環境）・`accounts`（アカウントの副命令の入口）・`ask`（値の決定）・
+`login`（OAuth の登録）・`bedrock`（Bedrock の登録と確かめ）・`common`（定数と小さな関数）・`proc`（親のたどり）・`record`（`log.jsonl` と `next.json`）・
 `mark`（hook の本体）・`claude`（本物の claude と会話の記録）・`terminal`（端末と子）・`run`（`Relay`）・`switch`（区間のアカウント）・
 `shellrc`（シェルの設定の囲み）・`version_dir`（複製）・`install`（導入の副命令）。
 
@@ -46,7 +47,7 @@ def main(argv: list[str]) -> int:
 
     if not argv:
         print(
-            "usage: relay.py run|stop|mark|limit|install|uninstall|status|startup|question open|close|is-child|notice|account add|list|capacity|remove",
+            "usage: relay.py run|stop|mark|limit|install|uninstall|status|startup|question open|close|is-child|notice|account add|add-bedrock|check|list|capacity|remove",
             file=sys.stderr,
         )
         return 2

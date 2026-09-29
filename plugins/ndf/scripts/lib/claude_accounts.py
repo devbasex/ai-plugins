@@ -6,14 +6,15 @@
 
 置き場は `${NDF_ACCOUNTS_DIR:-${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/accounts}/`（0700）。アカウントごとの設定ディレクトリ
 `<名前>/`（0700。`auth login` の書き先）に `.credentials.json`・`account.json`・`usage.json`（0600）を置き、
-排他は `<名前>.lock` で取る。
+排他は `<名前>.lock` で取る。保存した従量の接続の宣言 `metered.json`（0600）と、OAuth の 2 回の登録の間の
+登録の途中の状態 `.pending-<名前>/`（0700）も置き場に置く（#1468）。
 
 - 共有の設定ディレクトリの `.credentials.json` は読まず、書かない。子へは選んだアカウントのアクセストークンを
   環境変数 `CLAUDE_CODE_OAUTH_TOKEN` で渡す（引数に載せない）
 - 使用量の取得先は 1 アカウントにつき `NDF_ACCOUNT_CHECK_INTERVAL` 秒（既定 300）に 1 回までしか呼ばない。
   数えるのは `usage.json` の `fetched_at`（成否を問わない）で、プロセス・コンテナをまたぐ
 - 選び方・判定に LLM を呼ばない。呼ぶのは使用量の取得先とトークンの更新の宛先だけである
-- 標準ライブラリと `claude_usage`・`locks`（filelock。使う関数の中で import する）だけを読む
+- 標準ライブラリと `claude_usage`・`locks`（filelock）・`procs`（psutil。どちらも使う関数の中で import する）だけを読む
 """
 
 from __future__ import annotations
@@ -39,6 +40,16 @@ NAME_ENV = "NDF_CLAUDE_ACCOUNT"
 FOREIGN_AUTH_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX")
 AUTH_ENV = (TOKEN_ENV, NAME_ENV, *FOREIGN_AUTH_ENV)
 FALLBACK_ENV = "NDF_SUPERVISE_CLAUDE_FALLBACK"
+AWS_KEY_ENV = ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN")
+# 保存した宣言に入れてはならない資格情報の変数（#1468 の I1）
+SECRET_ENV = (*AWS_KEY_ENV, "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", TOKEN_ENV)
+METERED_FILE = "metered.json"
+PENDING_TTL = 600.0  # 登録の途中の状態の期限（秒。#1468 の決定 3）
+# 登録の途中の状態の置き場（`pending_dir`）に置くもの
+PENDING_CONFIG = "config"
+PENDING_FIFO = "code.fifo"
+PENDING_OUT = "login.out"
+PENDING_FILE = "pending.json"
 ACCOUNT_FILE = "account.json"
 USAGE_FILE = "usage.json"
 CRED_FILE = ".credentials.json"
@@ -55,6 +66,11 @@ WINDOWS = ("five_hour", "seven_day")
 
 
 # ---------------------------------------------------------------- 設定と置き場
+
+
+def _now(now: float | None) -> float:
+    """時刻の引数の既定（None なら今）。"""
+    return time.time() if now is None else now
 
 
 def _setting(name: str, default: float) -> float:
@@ -229,16 +245,22 @@ class Account:
         vals = [v for v in (self.usage.limited_until(now) if self.usage else None, self.observed_until(now)) if v]
         return max(vals) if vals else None
 
+    def _is_spend_limit(self) -> bool:
+        """上限が支出上限か（読んだ残量が支出上限に達しているか、観測した上限の種類が spend）。"""
+        if self.known() and self.usage.spend_reached():
+            return True
+        return (self.limit or {}).get("type") == "spend"
+
     def state(self, now: float) -> str:
         """一覧の状態の列。"""
         if self.needs_relogin:
             return "再登録が要る"
         until = self.limited_until(now)
-        if until is not None:
-            if self.known() and self.usage.spend_reached() or (self.limit or {}).get("type") == "spend":
-                return "支出上限"
-            return f"上限（{local_time(until)}）"
-        return "使える" if self.known() else "残量不明"
+        if until is None:
+            return "使える" if self.known() else "残量不明"
+        if self._is_spend_limit():
+            return "支出上限"
+        return f"上限（{local_time(until)}）"
 
 
 def local_time(t: float | None, form: str = "%m-%d %H:%M") -> str:
@@ -291,7 +313,7 @@ def note_limit(name: str, kind: str, resets_at: float | None, now: float | None 
     """アカウント `name` が上限（種類 `kind`）に達したと観測したことを残す。"""
     if not name or name == METERED:
         return
-    now = time.time() if now is None else now
+    now = _now(now)
     try:
         with _locked(name):
             _update_account(name, limit={"type": kind, "resets_at": iso_utc(resets_at), "observed_at": iso_utc(now)})
@@ -352,7 +374,7 @@ def _refresh_and_store(name: str, o: dict, now: float, fallback: str | None) -> 
 
 def token(name: str, before: float | None = REFRESH_BEFORE, now: float | None = None, min_left: float = 0) -> str | None:
     """子へ渡すアクセストークン。期限の `before` 秒前を切っていれば更新する（None は更新しない）。`min_left` は `_token_held`。"""
-    now = time.time() if now is None else now
+    now = _now(now)
     try:
         with _locked(name):
             return _token_held(name, before, now, min_left=min_left)
@@ -382,7 +404,7 @@ def _fetch(name: str, before: float | None, now: float) -> Usage:
 
 def usage(name: str, before: float | None = REFRESH_BEFORE, now: float | None = None) -> Usage | None:
     """残量。前の取得から `check_interval()` 秒の中なら保存した値を返し、取得先を呼ばない（I6）。"""
-    now = time.time() if now is None else now
+    now = _now(now)
     path = _path(name, USAGE_FILE)
     try:
         with _locked(name):
@@ -457,7 +479,7 @@ def choose(exclude=(), before: float | None = REFRESH_BEFORE, keep=(), now: floa
     残量不明は、上限に達していない候補に読めるものが無いときだけ候補にする（名前の順）。「再登録が要る」とトークンを
     得られないもの（残り `min_left` 秒以下を含む）は外す（#1389 の I13）。`keep` の名前はトークンを更新しない
     （動いている区間のアカウント。#1389 の I5）。"""
-    now = time.time() if now is None else now
+    now = _now(now)
     pool, earliest = _account_pool(exclude, before, keep, now)
     readable = any(a.known() for a in pool)
     for pick in _try_order(pool, readable):
@@ -470,9 +492,16 @@ def choose(exclude=(), before: float | None = REFRESH_BEFORE, keep=(), now: floa
 
 
 def fallback_env(environ=None) -> dict:
-    """従量の接続の宣言 `NDF_SUPERVISE_CLAUDE_FALLBACK`（`KEY=VALUE` を空白区切り）を読む。"""
+    """従量の接続の宣言（子へ足す変数の組）。宣言が無ければ空。
+
+    環境変数 `NDF_SUPERVISE_CLAUDE_FALLBACK`（`KEY=VALUE` を空白区切り）が定義されていれば（空でも）それだけを読み、
+    無ければ置き場の `metered.json`（保存した宣言）を読む（#1468 の I4）。保存先が壊れていれば空（I5）。"""
+    environ = environ if environ is not None else os.environ
+    if FALLBACK_ENV not in environ:
+        d = load_metered()
+        return dict(d.env) if d else {}
     out = {}
-    for tok in shlex.split((environ if environ is not None else os.environ).get(FALLBACK_ENV, "")):
+    for tok in shlex.split(environ.get(FALLBACK_ENV, "")):
         k, sep, v = tok.partition("=")
         if sep and k:
             out[k] = v
@@ -483,17 +512,33 @@ def account_env(name: str, base: dict, before: float | None = REFRESH_BEFORE, mi
     """`base` にアカウント `name`（か `metered`）の環境を重ねる。トークンを得られなければ None。
 
     従量の接続は `CLAUDE_CODE_OAUTH_TOKEN` と `FOREIGN_AUTH_ENV` を外してから宣言の変数を重ねる（認証の方式を
-    宣言どおり 1 つにする）。アカウントは宣言のキーと、認証の優先順位でトークンより上に来る変数
-    （`FOREIGN_AUTH_ENV`）を外してからトークンと名前を足す（混ぜない。I16）。"""
-    env = dict(base)
+    宣言どおり 1 つにする）。アカウントは認証の優先順位でトークンより上に来る変数（`FOREIGN_AUTH_ENV`）と、
+    環境変数の宣言のときと、`base` が従量の接続の環境（`NDF_CLAUDE_ACCOUNT=metered`）のときだけ宣言のキーを外して
+    トークンと名前を足す（混ぜない。I16。それ以外の保存した宣言では利用者のシェルの変数を残すため外さない）。"""
     declared = fallback_env(base)
-    metered = name == METERED
-    tok = None if metered else token(name, before, min_left=min_left)
-    if not metered and tok is None:
+    if name == METERED:
+        return _metered_env(dict(base), declared, FALLBACK_ENV not in base)
+    tok = token(name, before, min_left=min_left)
+    if tok is None:
         return None
-    for k in ((TOKEN_ENV,) if metered else tuple(declared)) + FOREIGN_AUTH_ENV:
+    strip = FALLBACK_ENV in base or base.get(NAME_ENV) == METERED
+    return _account_env(dict(base), declared if strip else {}, name, tok)
+
+
+def _metered_env(env: dict, declared: dict, saved: bool) -> dict:
+    """従量の接続の環境。`saved`（保存した宣言）なら AWS の鍵も外す（呼べるかの確認と同じ環境にする。#1468 の決定 14）。"""
+    for k in (TOKEN_ENV,) + FOREIGN_AUTH_ENV + (AWS_KEY_ENV if saved else ()):
         env.pop(k, None)
-    env.update(declared if metered else {TOKEN_ENV: tok})
+    env.update(declared)
+    env[NAME_ENV] = METERED
+    return env
+
+
+def _account_env(env: dict, declared: dict, name: str, tok: str) -> dict:
+    """アカウントの環境（宣言のキーと FOREIGN_AUTH_ENV を外してトークンと名前を足す）。"""
+    for k in tuple(declared) + FOREIGN_AUTH_ENV:
+        env.pop(k, None)
+    env[TOKEN_ENV] = tok
     env[NAME_ENV] = name
     return env
 
@@ -571,30 +616,203 @@ def discard(path: str) -> None:
 
 def rows(now: float | None = None) -> list[dict]:
     """一覧の中身（推論は呼ばない）。期限の過ぎたトークンだけを更新する（動いている区間のトークンを替えない）。"""
-    now = time.time() if now is None else now
+    now = _now(now)
     out = []
     for n in names():
         usage(n, 0, now)
         acc = load_account(n)
-        if acc is None:
-            continue
-        u = acc.usage if acc.known() else None
-        out.append(
-            {
-                "name": n,
-                "email": acc.email,
-                "org_id": acc.org_id or None,
-                "org_name": acc.org_name or None,
-                "five_hour": u.five_hour if u else None,
-                "seven_day": u.seven_day if u else None,
-                "scoped": u.scoped if u else None,
-                "spend_limit_reached": u.spend_reached() if u else None,
-                "spend": u.spend if u else None,
-                "tier": acc.tier or None,
-                "capacity": acc.capacity(),
-                "capacity_declared": {k: (acc.declared or {}).get(k) for k in WINDOWS},
-                "remaining": acc.remaining(),
-                "state": acc.state(now),
-            }
-        )
+        if acc is not None:
+            out.append(_account_row(n, acc, now))
     return out
+
+
+def _account_row(name: str, acc: Account, now: float) -> dict:
+    """一覧の 1 アカウント分の行。残量を読めていなければ枠と支出の鍵は None。"""
+    u = acc.usage if acc.known() else None
+    return {
+        "name": name,
+        "email": acc.email,
+        "org_id": acc.org_id or None,
+        "org_name": acc.org_name or None,
+        "five_hour": u.five_hour if u else None,
+        "seven_day": u.seven_day if u else None,
+        "scoped": u.scoped if u else None,
+        "spend_limit_reached": u.spend_reached() if u else None,
+        "spend": u.spend if u else None,
+        "tier": acc.tier or None,
+        "capacity": acc.capacity(),
+        "capacity_declared": {k: (acc.declared or {}).get(k) for k in WINDOWS},
+        "remaining": acc.remaining(),
+        "state": acc.state(now),
+    }
+
+
+# ---------------------------------------------------------------- 保存した従量の接続の宣言（#1468）
+
+
+@dataclass
+class MeteredDecl:
+    """保存した従量の接続の宣言。`env` は子へ足す変数の組、`details` は一覧に出す提供元ごとの識別。"""
+
+    provider: str
+    env: dict
+    details: dict
+    verified_at: str
+
+
+def metered_path() -> str:
+    return os.path.join(store_dir(), METERED_FILE)
+
+
+def _check_decl(provider, env, details) -> None:
+    """宣言の形と I1（資格情報の変数を含まない）を確かめる。違えば ValueError。"""
+    if not isinstance(provider, str) or not provider:
+        raise ValueError("提供元が無い")
+    for m in (env, details):
+        if not isinstance(m, dict) or not m or not all(isinstance(k, str) and isinstance(v, str) for k, v in m.items()):
+            raise ValueError("変数の組の形が違う")
+    bad = [k for k in env if not re.fullmatch(r"[A-Z_][A-Z0-9_]*", k)]
+    if bad or any(k in SECRET_ENV for k in env):
+        raise ValueError("資格情報の変数か不正な名前を含む")
+
+
+def _metered_read() -> tuple[MeteredDecl | None, str | None]:
+    """(保存した宣言, 壊れているときの理由)。保存先が無ければ (None, None)。"""
+    path = metered_path()
+    if not os.path.lexists(path):
+        return None, None
+    d = _read(path)
+    if d is None:
+        return None, "JSON として読めない"
+    if d.get("version") != 1:
+        return None, "知らない版"
+    try:
+        _check_decl(d.get("provider"), d.get("env"), d.get("details"))
+    except ValueError as e:
+        return None, str(e)
+    return MeteredDecl(d["provider"], dict(d["env"]), dict(d["details"]), str(d.get("verified_at") or "")), None
+
+
+def load_metered() -> MeteredDecl | None:
+    return _metered_read()[0]
+
+
+def metered_problem(environ=None) -> str | None:
+    """保存先が壊れていれば、その 1 行（宣言なしとして扱う。I5）。環境変数の宣言が効いているときは None。"""
+    if FALLBACK_ENV in (environ if environ is not None else os.environ):
+        return None
+    why = _metered_read()[1]
+    return None if why is None else f"保存した従量の接続の宣言（{metered_path()}）が壊れている（{why}）。宣言なしとして扱う"
+
+
+def save_metered(provider: str, env: dict, details: dict, now: float | None = None) -> None:
+    """呼べるかの確認が通った宣言を保存する（置き換え。I2・I6）。資格情報の変数を含めば ValueError（I1）。"""
+    _check_decl(provider, env, details)
+    make_store()
+    row = {"version": 1, "provider": provider, "env": env, "details": details, "verified_at": iso_utc(time.time() if now is None else now)}
+    _write(metered_path(), row)
+
+
+def remove_metered() -> bool:
+    """保存した宣言を消す。無ければ偽。"""
+    try:
+        os.remove(metered_path())
+    except FileNotFoundError:
+        return False
+    return True
+
+
+# ---------------------------------------------------------------- 登録の途中の状態（#1468）
+
+
+@dataclass
+class Pending:
+    """OAuth の 2 回の登録の間に置き場へ残す状態（`.pending-<名前>/`）。"""
+
+    name: str
+    pid: int
+    pid_start: float
+    expires_at: float
+
+    def alive(self) -> bool:
+        """待機中のログインが生きているか（pid の開始の時刻が記録と一致し、ゾンビでない）。"""
+        import procs
+
+        return procs.start_time(self.pid) == self.pid_start
+
+    def expired(self, now: float) -> bool:
+        return now >= self.expires_at
+
+
+def pending_dir(name: str) -> str:
+    return os.path.join(store_dir(), f".pending-{name}")
+
+
+def make_pending(name: str) -> str:
+    """登録の途中の状態を作り直す（前の待機中のログインは止める）。`config/`（0700）・`code.fifo`・`login.out`（0600）を置く。"""
+    discard_pending(name)
+    make_store()
+    d = pending_dir(name)
+    os.mkdir(d, 0o700)
+    os.mkdir(os.path.join(d, PENDING_CONFIG), 0o700)
+    os.mkfifo(os.path.join(d, PENDING_FIFO), 0o600)
+    os.close(os.open(os.path.join(d, PENDING_OUT), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+    return d
+
+
+def save_pending(name: str, pid: int, now: float | None = None) -> Pending:
+    """待機中のログインの識別と期限を `pending.json` へ書く。"""
+    now = _now(now)
+    import procs
+
+    p = Pending(name, pid, procs.start_time(pid) or 0.0, now + PENDING_TTL)
+    row = {
+        "version": 1,
+        "name": name,
+        "pid": pid,
+        "pid_start": p.pid_start,
+        "created_at": iso_utc(now),
+        "expires_at": iso_utc(p.expires_at),
+    }
+    _write(os.path.join(pending_dir(name), PENDING_FILE), row)
+    return p
+
+
+def read_pending(name: str) -> Pending | None:
+    d = _read(os.path.join(pending_dir(name), PENDING_FILE))
+    if d is None or not isinstance(d.get("pid"), int) or not isinstance(d.get("pid_start"), (int, float)):
+        return None
+    return Pending(name, d["pid"], float(d["pid_start"]), epoch(d.get("expires_at")) or 0.0)
+
+
+def discard_pending(name: str) -> None:
+    """待機中のログインを止め（SIGTERM → 猶予の後に SIGKILL）、登録の途中の状態を消す。"""
+    import procs
+
+    p = read_pending(name)
+    if p is not None and p.alive():
+        procs.stop_tree(p.pid)
+    shutil.rmtree(pending_dir(name), ignore_errors=True)
+
+
+def sweep_pending(now: float | None = None) -> set[str]:
+    """期限を過ぎた登録の途中の状態を捨て、捨てた名前の集合を返す（E10）。"""
+    now = _now(now)
+    gone = set()
+    try:
+        entries = os.listdir(store_dir())
+    except OSError:
+        return gone
+    for e in entries:
+        name = e.removeprefix(".pending-")
+        if name == e:
+            continue
+        p = read_pending(name)
+        try:
+            stale = p.expired(now) if p else now - os.stat(pending_dir(name)).st_mtime > PENDING_TTL
+        except OSError:
+            continue
+        if stale:
+            discard_pending(name)
+            gone.add(name)
+    return gone
