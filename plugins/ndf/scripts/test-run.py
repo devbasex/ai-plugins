@@ -184,7 +184,8 @@ def _decide_status(passed: bool, triage: dict | None, lint: list[dict] | None) -
         suffix += f"。見分けを全体の走らせ直しに落とした: {triage['fallback_reason']}"
     else:
         status, code = "stopped", 1
-    if lint_caused and code == 0:
+    if lint_caused:
+        # 変更起因と確定した静的解析の失敗は、テスト側の見分け（判断不能の 2 を含む）より先に効く。
         status, code = "stopped", 1
     if lint_caused:
         suffix += "。静的解析が落ちた: " + "・".join(f"{v['suite']}（{v['reason']}）" for v in lint_caused)

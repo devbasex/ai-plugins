@@ -215,3 +215,20 @@ def test_a_declared_round_only_lint_failure_is_a_caused_lint_failure(tmp_path):
     code, out = _run(root, "scope", "--paths", "x")
     assert code == 1, out
     assert "JUnit を読まない" not in out["summary"] and "静的解析が落ちた" in out["summary"]
+
+
+def test_a_round_only_lint_failure_wins_over_an_undecidable_test_failure(tmp_path):
+    """round-only でテストと静的解析が同時に落ちても、確定した静的解析の失敗で変更起因（1）にする。"""
+    decl = {
+        "test": {
+            "strategy": "round-only",
+            "suites": [
+                {"name": "unit", "runner": "sh", "kind": "test", "command": "false"},
+                {"name": "sh", "runner": "sh", "kind": "lint", "command": "false"},
+            ],
+        }
+    }
+    root = _repo(tmp_path, decl)
+    code, out = _run(root, "scope", "--paths", "x")
+    assert code == 1, out
+    assert "静的解析が落ちた" in out["summary"]
