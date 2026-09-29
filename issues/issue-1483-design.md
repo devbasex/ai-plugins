@@ -43,8 +43,11 @@
 | テストの宣言 | 利用者（手で書く）と `project-decl.py write`（解析の答えを書く） | `.ndf/project.json` の `test` | `test` | suite（`name` で識別） | 種別・`command`・`scope_command`・`paths` |
 | 戦略 | `test_strategy.resolve`（cross-refactoring の `init`・supervise の `new` が 1 回だけ呼んで写す） | cross-refactoring の状態ファイルの `strategy`、supervise のプランの `strategy` | 戦略 | suite の写し | 種別・全体テストのコマンド・範囲テストの雛形・`notes` |
 | 項目の検証 | cross-refactoring の `converge`・`implement` | 状態ファイルの `items[]` | 項目 | — | 範囲テストのコマンド（`scope_commands`）・状態 |
-| 起動の失敗の記録 | cross-refactoring の検証の手順（着手前・項目・最終ゲート）と `test-run.py` | 状態ファイルの `launch_failure`、`test-run.py` の結果 JSON の `items` | 記録 | — | コマンド・終了コード・理由・手順 |
+| 起動の失敗の記録 | cross-refactoring の `refactor_lib/launch.py`（着手前・項目・テスト整備ラウンド・最終ゲートの手順が呼ぶ 1 つの関数） | 状態ファイルの `launch_failure` | 記録 | — | コマンド・終了コード・理由・手順 |
+| テストの実行の結果 | `test-run.py`（1 回の起動が 1 つの結果を書く） | `test-run.py` の結果 JSON（`status`・`items[].launch_failed`） | 結果 | — | コマンド・終了コード・理由・ログ |
 
+**保存先ごとに集約を分け、各々の持ち主を 1 つにする。** cross-refactoring は `test-run.py` の結果 JSON を書かず、
+`test-run.py` は状態ファイルを書かない。起動の失敗の判別（`test_strategy.outcome`）だけを両者が共有する（I7）。
 持ち主のほかは読むだけである。戦略は状態ファイルへ写した後に変えない（今の `as_state` の約束）。
 項目の検証は戦略を ID（状態ファイルの `strategy`）で参照し、suite の中身を自分で持たない。
 
@@ -63,7 +66,7 @@
 | I9 | 項目の検証 | テスト整備ラウンドの判定と `--scope` の検査は、テストの種別の suite だけを見る | 静的解析の suite の結果で足したテストの項目を取り消せば直す（AC15・AC16） |
 | I10 | 項目の検証 | 静的解析の suite の範囲は、その項目のコミットが変えたファイルのうち、その suite の `paths` に当たりworktreeに残るものである | 対象のテストの並び（`test_targets`）を静的解析へ渡せば直す（AC8） |
 | I11 | 戦略 | 引数の雛形は、同じ種別の宣言の範囲テストの雛形を置き換える。全体テストは種別ごとに宣言の `command` が引数より先に効く | 引数の雛形から全体テストを組んで宣言の `command` を使わなければ直す（AC6） |
-| I12 | 戦略 | 着手前に落ちていた静的解析の suite の全体の失敗は、変更したファイルに絞って判定する | 変更と無関係な違反で最終ゲート修正へ回れば直す（目的の 1 つ目） |
+| I12 | 戦略 | 着手前に落ちていた静的解析の suite の全体の失敗は、suite に `scope_command` があれば変更したファイルに絞った範囲テストで判定し、無ければ絞らずに既存失敗として記録して判定から外す（報告に出す） | 変更と無関係な違反で最終ゲート修正へ回れば直す。`scope_command` の無い suite を変更起因として修正へ回しても直す（目的の 1 つ目・決定 9） |
 | I13 | — | cross-review の最終スイープは、宣言の `test` があれば宣言の全体テストだけを名指しし、`--verify-command` を読まない | `--verify-command` の値がプロンプトに現れれば直す（AC19・AC20） |
 
 ### ドメインイベント
@@ -72,11 +75,12 @@
 | --- | --- | --- | --- |
 | E1 | 宣言を読んだ | `project_decl.read_project_decl`（`model.validate_decl` で種別を確かめる） | `test_strategy.decl_of` |
 | E2 | 戦略を解いた | `test_strategy.resolve` | cross-refactoring の `init`（状態ファイル）・supervise の `new`（プラン）・`test-run.py`・cross-review の `drive.py` |
-| E3 | 着手前の全体テストを走らせた | cross-refactoring の `baseline.run_baseline`・supervise の `test-all`（`test-run.py whole`） | 状態ファイルの `baseline_test`（suite ごとの成否を足す） |
+| E3 | 着手前の全体テストを走らせた | cross-refactoring の `baseline.run_baseline` | 状態ファイルの `baseline_test`（suite ごとの成否を足す） |
+| E3a | 全体テストのステップを走らせた | supervise の `test-all`（`test-run.py whole`） | `test-run.py` の結果 JSON と終了コード。supervise のステップは今と同じく終了コードで次へ進むか止まるかを決め、プランへは成否を写さない（`baseline_test` を持たない） |
 | E4 | 項目の範囲テストを走らせた | cross-refactoring の `converge._run_limited` | 項目の状態（`verified` / `failing`） |
 | E5 | テスト整備ラウンドで足したテストを判定した | cross-refactoring の `implement._run_added_tests` | 項目の取り込み（`intake.test_failed`） |
 | E6 | 最終ゲートで全体テストを走らせた | cross-refactoring の `gate._local_gate` | 最終ゲートの記録（`final_gate.checks[]`） |
-| E7 | 起動の失敗を報告して止まった | E3・E4・E5・E6 の手順と `test-run.py` | 利用者（報告と終了コード）・状態ファイルの `launch_failure` |
+| E7 | 起動の失敗を報告して止まった | E3・E4・E5・E6 の手順（cross-refactoring）と `test-run.py`（E3a を含む） | 利用者（報告と終了コード）。cross-refactoring は状態ファイルの `launch_failure`、`test-run.py` は結果 JSON の `items[].launch_failed` へ書く |
 | E8 | 最終スイープのプロンプトに検証のコマンドを書いた | cross-review の `drive.sweep_prompt` | 最終スイープの worker |
 
 **E5 も E7 の発生元に入れる。** 要求の表は E3・E4・E6 だけを挙げるが、足したテストのコマンドも同じ関数で
@@ -88,7 +92,7 @@
 | --- | --- | --- |
 | suite の種別 | 宣言の suite の `kind`。`test`（テスト）か `lint`（静的解析。整形の検査を含む）。書かなければ `test` | 意味の変更（`ndf-workflow`。キーと値を足す） |
 | 範囲テストの雛形 | `{paths}` を引用の外の 1 字句として含むテストのコマンド（宣言の `scope_command` か `{paths}` を含む引数）。`{paths}` をシェルの引用で守った対象の並びへ置き換え、シェルで走らせる | 意味の変更（`ndf-workflow`） |
-| 変更したファイル | cross-refactoring の項目のコミット（実装と修正）が変えたファイルのうち、worktreeに残るもの。静的解析の suite の範囲になる | 追加（`ndf-cross-refactoring`） |
+| 変更したファイル | cross-refactoring の項目のコミット（実装と修正）が変えたファイルのうち、worktreeに残るもの。そのうち静的解析の suite の `paths` に当たるものが、その suite の範囲になる | 追加（`ndf-cross-refactoring`） |
 | 起動の失敗 | （要求で追加済み） | 変更なし |
 
 ## 機能一覧
