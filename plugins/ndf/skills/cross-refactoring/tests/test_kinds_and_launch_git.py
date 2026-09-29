@@ -216,6 +216,19 @@ def test_the_final_gate_judges_a_failing_lint_by_the_baseline(flow, refactor, be
         assert "着手前から落ちていた" in detail
 
 
+def test_the_final_gate_lint_shares_the_whole_timeout_with_the_test_run(flow, refactor):
+    """最終ゲートの静的解析は、手元のテストの全体テストの開始時刻から同じ `whole_timeout` を数える。"""
+    import time
+
+    gate_lint = importlib.import_module("refactor_lib.gate_lint")
+    state = _gate_state(flow, before="green", lint=_lint(), change="Z = 3\n")
+    gate = {"fix_rounds": 0, "checks": [], "mode": "test"}
+    limit = importlib.import_module("refactor_lib.timeline").state_whole_timeout(state)
+    ok, _ = gate_lint.lint_gate(flow["path"], state, gate, started=time.monotonic() - limit)
+    assert ok is False
+    assert gate["lint"][0]["verdict"] == "caused"
+
+
 def test_a_launch_failure_in_the_final_gate_stops(flow, refactor, capsys):
     """AC13（最終ゲート）— 静的解析の全体テストが起動できなければ中断で止まり、記録を残す。"""
     gate_lint = importlib.import_module("refactor_lib.gate_lint")

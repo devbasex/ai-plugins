@@ -77,13 +77,19 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
     state["phase"] = "final"
 
     state.pop("launch_failure", None)
+    # 手元でテストの全体テストを走らせたときは、静的解析もその開始時刻から同じ上限で数える（1 回の全体検証を
+    # 1 つの `whole_timeout` に収める。test-run.py の whole と同じ）。使い回し・CI で見るときは手元で走らないので渡さない。
+    whole_started: Optional[float] = None
     if _reusable_whole_test(state):
         gate["whole_test_reused"] = True
         passed, detail = True, "検証の中で通った全体テストを使い回しました（HEAD は進んでいません）"
         gate["mode"] = "test"
     else:
+        whole_started = time.monotonic()
         passed, detail = _run_and_record_gate_check(path, state, gate)
-    lint_passed, lint_detail = gate_lint.lint_gate(path, state, gate)
+        if gate.get("mode") != "test":
+            whole_started = None
+    lint_passed, lint_detail = gate_lint.lint_gate(path, state, gate, started=whole_started)
     if lint_detail:
         detail = f"{detail} / {lint_detail}"
     passed = passed and lint_passed

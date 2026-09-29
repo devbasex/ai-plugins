@@ -76,9 +76,13 @@ def _record_lint_check(gate: dict[str, Any], suites: list[Any], passed: bool, de
     )
 
 
-def lint_gate(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]) -> tuple[bool, str]:
+def lint_gate(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], started: Optional[float] = None) -> tuple[bool, str]:
     """静的解析の全体テストを、戦略に関わらず手元で走らせる（#1483 決定 7）。落ちた suite は
     `test_triage.lint_verdict` で着手前の成否から判定し、変更起因が無ければ通す（I12）。起動の失敗なら止める。
+
+    `started`（`time.monotonic()`）を渡すと、上限 `whole_timeout` をその時刻から数える。手元でテストの
+    全体テストを走らせた直後に呼ぶときは、その開始時刻を渡して 1 回の全体検証を 1 つの上限に収める
+    （test-run.py の whole と同じ）。省くと呼んだ時刻から数える。
 
     戻りは（通ったか, 記録の 1 行）。静的解析の suite が無ければ `(True, "")`。
     """
@@ -95,7 +99,8 @@ def lint_gate(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]) -
         "per_suite": baseline.get("suites") if isinstance(baseline.get("suites"), dict) else None,
         "changed": None,
     }
-    started = env["started"] = time.monotonic()
+    env["started"] = started if started is not None else time.monotonic()
+    lint_started = time.monotonic()
     verdicts: list[dict[str, Any]] = []
     for i, suite in enumerate(suites):
         verdict = _judge_suite(path, state, suite, i, env)
@@ -104,7 +109,7 @@ def lint_gate(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]) -
     caused = [v for v in verdicts if v["verdict"] == "caused"]
     gate["lint"] = verdicts
     passed = not caused
-    seconds = round(time.monotonic() - started, 1)
+    seconds = round(time.monotonic() - lint_started, 1)
     detail = _lint_detail(suites, verdicts)
     for v in verdicts:
         if v["verdict"] == "preexisting":
