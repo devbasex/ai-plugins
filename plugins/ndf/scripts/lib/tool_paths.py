@@ -169,7 +169,6 @@ def push_blocked(worktree, base: str, entries: Sequence[str]) -> str | None:
         return "ツールのパスの有無を確かめられないため push しない"
     if found:
         return (
-            f"ツールのパスがコミットに入っているため push しない: {' '.join(found)}。"
-            " .gitignore に入れるか、コミットから外してから打ち直す"
+            f"ツールのパスがコミットに入っているため push しない: {' '.join(found)}。 .gitignore に入れるか、コミットから外してから打ち直す"
         )
     return None
