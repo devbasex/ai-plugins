@@ -12,14 +12,32 @@ import json
 
 import pytest
 
-from crossref_helpers import make_state_v2, plan_entry, read_state
+from crossref_helpers import make_state_v2, read_state
 
 
 COMMENT_URL = "https://github.com/devbasex/ai-plugins/pull/130#issuecomment-999"
 
 
 def _item(**over):
-    return plan_entry(**over)
+    base = {
+        "id": "I-001",
+        "rank": 1,
+        "path": "src/foo.py",
+        "symbol": "Foo.handle",
+        "smell": "long_method",
+        "technique": "extract_method",
+        "severity": "major",
+        "tier": "high",
+        "rationale": "1 関数が 6 つの処理を通しで行っている",
+        "plan": "1. 範囲の確定を切り出す",
+        "tests": [],
+        "estimated_diff_lines": 40,
+        "proposed_by": ["codex", "agy"],
+        "status": "verified",
+        "commits": {"test": None, "implement": "abc1234", "fix": []},
+    }
+    base.update(over)
+    return base
 
 
 def _state(tmp_path, **over):

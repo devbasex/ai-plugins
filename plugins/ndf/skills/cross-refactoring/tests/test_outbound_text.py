@@ -12,23 +12,34 @@
 from __future__ import annotations
 
 
-from crossref_helpers import make_state_v2, plan_entry, read_state
+from crossref_helpers import make_state_v2, read_state
 
 COMMENT_URL = "https://github.com/devbasex/ai-plugins/pull/130#issuecomment-999"
 
 
 def _item(**over):
-    return plan_entry(
-        **{
-            "rationale": "理由",
-            "plan": "手順",
-            "estimate": {"test": 0.0, "implement": 1.3, "verify": 0.2},
-            "proposed_by": ["codex"],
-            "fix_count": 0,
-            "danger": [],
-            **over,
-        }
-    )
+    base = {
+        "id": "I-001",
+        "rank": 1,
+        "path": "src/foo.py",
+        "symbol": "Foo.handle",
+        "smell": "long_method",
+        "technique": "extract_method",
+        "severity": "major",
+        "tier": "high",
+        "rationale": "理由",
+        "plan": "手順",
+        "tests": [],
+        "estimate": {"test": 0.0, "implement": 1.3, "verify": 0.2},
+        "estimated_diff_lines": 40,
+        "proposed_by": ["codex"],
+        "status": "verified",
+        "fix_count": 0,
+        "danger": [],
+        "commits": {"test": None, "implement": "abc1234", "fix": []},
+    }
+    base.update(over)
+    return base
 
 
 def _state(tmp_path, **over):
