@@ -137,6 +137,9 @@ def test_status_does_not_write_the_issue_body(repo):
 )
 def test_the_body_matches_the_two_commands_run_separately(repo, tmp_path, key, value, flag):
     """1 行で残る本文が、今の 2 コマンドの組（本文は `progress-record.sh`）と同じになる。"""
+    # 2 回の実行が分をまたぐと時刻の目印だけが食い違うため、時刻を固定する
+    (repo.bin / "date").write_text("#!/usr/bin/env bash\necho '2026-01-02 03:04'\n", encoding="utf-8")
+    (repo.bin / "date").chmod(0o755)
     out = run(repo, SYNC, "42", key, value)
     assert out.returncode == 0, out.stderr
     one_line = repo.body.read_text(encoding="utf-8")
