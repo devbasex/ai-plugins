@@ -61,7 +61,7 @@ _VIEW_FIELDS: dict[str, dict[str, Callable[[dict[str, Any]], Any]]] = {
         "state": lambda d: str(d.get("state") or "").upper(),
     },
 }
-VIEW_REST_PATH = {"pr": "pulls", "issue": "issues"}
+_VIEW_REST_PATH = {"pr": "pulls", "issue": "issues"}
 
 
 def field_names(fields: str | list[str]) -> list[str]:
