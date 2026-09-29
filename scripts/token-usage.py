@@ -377,6 +377,53 @@ def mode_of(modes: Counter) -> str:
     return next(iter(modes)) if len(modes) == 1 else "混在"
 
 
+def _read_seat(main: Path, s, idle_cap: int, until: float | None) -> "External | None":
+    """レビュー・改修の claude の席を External として読む。応答の無い記録（起動に失敗した席）は None。"""
+    m = WT_RE.search(s.cwd + "/")
+    if not (m and s.times and s.usage.calls):
+        return None
+    for p in sorted((main.parent / main.stem / "subagents").glob("*.jsonl")):  # 席が Agent で起動した分も席の消費に入れる
+        sub = scan_file(p, until=until).usage
+        sub.p = 0  # P は席 1 起動の固定費のまま（サブエージェントの最初の文脈を足さない）
+        s.usage.add(sub)
+    return External(
+        "claude",
+        m.group(2)[:2],
+        "/".join(m.groups()),
+        min(s.times),
+        active_seconds(s.times, idle_cap),
+        s.models and most_common(s.models) or "不明",
+        tokens={"context": s.usage.context, "out": s.usage.out, "cost": s.usage.cost},
+        usage=s.usage,
+    )
+
+
+def _build_session_roles(s, subs: list, idle_cap: int, until: float | None) -> tuple[dict, Counter, set, set]:
+    """conductor と worker の役ごとの Role へ合算し、(roles, modes, prs, keys) を返す。"""
+    launched = dict(s.agent_types)
+    for _, sub, _ in subs:  # worker は supervisor の記録の Agent 呼び出しで起動される
+        launched.update(sub.agent_types)
+    roles: dict = defaultdict(Role)
+    c = roles[("conductor", "-", "-")]
+    c.usage.add(s.usage)
+    c.n += 1
+    c.sec += active_seconds(s.times, idle_cap)
+    modes, prs, keys = Counter(s.modes), set(s.prs), set(s.keys)
+    for _, sub, meta in subs:
+        if until is not None and not sub.times:  # 打ち切りより後に起動した分は、作り直したときに起動数を増やさない
+            continue
+        depth = int(meta.get("spawnDepth") or 1)
+        layer = layer_of(depth, meta.get("description"))
+        r = roles[(layer, role_of(meta.get("description"), layer), agent_type_of(meta, launched))]
+        r.usage.add(sub.usage)
+        r.n += 1
+        r.sec += (max(sub.times) - min(sub.times)) if sub.times else 0
+        modes.update(sub.modes)
+        prs |= sub.prs
+        keys |= sub.keys
+    return roles, modes, prs, keys
+
+
 def read_claude(root: Path, idle_cap: int, until: float | None = None) -> tuple[list[Session], list, dict]:
     sessions: list[Session] = []
     seats: list = []
@@ -389,51 +436,17 @@ def read_claude(root: Path, idle_cap: int, until: float | None = None) -> tuple[
             continue
         s = scan_file(main, head, until)  # 判定で読んだ本文を使い、同じファイルを 2 度読まない
         if is_seat or s.cwd.startswith("/tmp/ndf-worktrees/"):
-            m = WT_RE.search(s.cwd + "/")
-            if m and s.times and s.usage.calls:  # 応答の無い記録（起動に失敗した席）は数えない
-                for p in sorted((main.parent / main.stem / "subagents").glob("*.jsonl")):  # 席が Agent で起動した分も席の消費に入れる
-                    sub = scan_file(p, until=until).usage
-                    sub.p = 0  # P は席 1 起動の固定費のまま（サブエージェントの最初の文脈を足さない）
-                    s.usage.add(sub)
-                seats.append(
-                    External(
-                        "claude",
-                        m.group(2)[:2],
-                        "/".join(m.groups()),
-                        min(s.times),
-                        active_seconds(s.times, idle_cap),
-                        s.models and most_common(s.models) or "不明",
-                        tokens={"context": s.usage.context, "out": s.usage.out, "cost": s.usage.cost},
-                        usage=s.usage,
-                    )
-                )
+            seat = _read_seat(main, s, idle_cap, until)
+            if seat is not None:
+                seats.append(seat)
             continue
         subs = [(p, scan_file(p, until=until), read_meta(p)) for p in sorted((main.parent / main.stem / "subagents").glob("*.jsonl"))]
         found = [v for v in (s.versions or [v for _, sub, _ in subs for v in sub.versions]) if versions.version_order(v) is not None]
         if not found or not s.times:
             skipped["版を判定できない"] += 1
             continue
-        launched = dict(s.agent_types)
-        for _, sub, _ in subs:  # worker は supervisor の記録の Agent 呼び出しで起動される
-            launched.update(sub.agent_types)
-        roles: dict = defaultdict(Role)
+        roles, modes, prs, keys = _build_session_roles(s, subs, idle_cap, until)
         c = roles[("conductor", "-", "-")]
-        c.usage.add(s.usage)
-        c.n += 1
-        c.sec += active_seconds(s.times, idle_cap)
-        modes, prs, keys = Counter(s.modes), set(s.prs), set(s.keys)
-        for _, sub, meta in subs:
-            if until is not None and not sub.times:  # 打ち切りより後に起動した分は、作り直したときに起動数を増やさない
-                continue
-            depth = int(meta.get("spawnDepth") or 1)
-            layer = layer_of(depth, meta.get("description"))
-            r = roles[(layer, role_of(meta.get("description"), layer), agent_type_of(meta, launched))]
-            r.usage.add(sub.usage)
-            r.n += 1
-            r.sec += (max(sub.times) - min(sub.times)) if sub.times else 0
-            modes.update(sub.modes)
-            prs |= sub.prs
-            keys |= sub.keys
         sessions.append(
             Session(
                 found[0],
