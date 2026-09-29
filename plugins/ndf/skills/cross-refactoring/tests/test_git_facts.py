@@ -199,23 +199,6 @@ def test_revert_order_tolerates_unknown_shas(gitfacts, work):
     assert ordered[0] == known, "履歴にあるものを先に戻す"
 
 
-def test_reverting_in_history_order_succeeds(gitfacts, work):
-    """履歴順に戻せば、同じファイルを触る連続コミットでも競合しない。"""
-    base = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
-    first = _commit(work, "one", {"src/a.py": "a = 1\n"})
-    second = _commit(work, "two", {"src/a.py": "a = 2\n"})
-
-    state = {"worktrees": {"work": str(work)}}
-    item = {"item_id": "I-001", "commits": [first, second]}  # 古い順の申告
-    assert gitfacts.revert_item_commits(state, item) == 2
-    assert item["reverted"] is True
-
-    # 取り消し後は着手前の状態へ戻る（このファイルは base に存在しない）
-    assert not (work / "src" / "a.py").exists()
-    diff = _git("diff", "--name-only", base, "HEAD", cwd=work).stdout.strip()
-    assert diff == "", f"着手前との差分が残っている: {diff}"
-
-
 def test_run_test_at_missing_commit_preserves_branch(gitfacts, work):
     """現状固定: 存在しない SHA は missing を返し、元のブランチを保つ。"""
     branch = _git("rev-parse", "--abbrev-ref", "HEAD", cwd=work).stdout.strip()
@@ -361,39 +344,14 @@ def test_find_item_returns_none_for_a_missing_id_when_not_required(items):
     assert items.find_item(state, "I-002") == {"id": "I-002"}
 
 
-def test_revert_item_commits_failure_message_includes_item_id(gitfacts, work, capsys):
-    """現状固定: revert_item_commits 失敗時は項目 ID 接頭辞付きのエラー文を出して中断する。"""
+def test_revert_range_returns_the_commit_it_could_not_revert(worktree, work):
+    """戻せないコミットで止めずに返す。着手前へ戻すかは呼び出し側（`undo`）が決める。"""
     first = _commit(work, "one", {"src/a.py": "a = 1\n"})
     second = _commit(work, "two", {"src/a.py": "a = 2\n"})
 
-    state = {"worktrees": {"work": str(work)}}
-    item = {"item_id": "I-001", "commits": [first]}
-
-    with pytest.raises(SystemExit) as e:
-        gitfacts.revert_item_commits(state, item)
-
-    assert e.value.code == 4
-    err = capsys.readouterr().err
-    assert "❌ I-001 のコミット" in err
-    assert "を取り消せませんでした" in err
-    assert f"（HEAD を {second} へ戻しました）" in err
+    assert worktree.revert_range(str(work), [first]) == first
     assert _git("rev-parse", "HEAD", cwd=work).stdout.strip() == second
-
-
-def test_revert_range_failure_message_has_no_item_id_prefix(gitfacts, work, capsys):
-    """現状固定: revert_range 失敗時は項目 ID 接頭辞のないエラー文を出して中断する。"""
-    first = _commit(work, "one", {"src/a.py": "a = 1\n"})
-    second = _commit(work, "two", {"src/a.py": "a = 2\n"})
-
-    with pytest.raises(SystemExit) as e:
-        gitfacts.revert_range(str(work), [first], second)
-
-    assert e.value.code == 4
-    err = capsys.readouterr().err
-    assert "❌ コミット" in err
-    assert "を取り消せませんでした" in err
-    assert f"（HEAD を {second} へ戻しました）" in err
-    assert _git("rev-parse", "HEAD", cwd=work).stdout.strip() == second
+    assert _git("status", "--porcelain", cwd=work).stdout.strip() == "", "revert の途中の状態を残さない"
 
 
 def _check_runs(*runs):

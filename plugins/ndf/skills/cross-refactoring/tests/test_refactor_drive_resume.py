@@ -58,7 +58,10 @@ class FakeRefactor:
         if sub == "merge-proposals":
             return 2, ""
         if sub == "final-gate":
-            return 0, f"FINAL_GATE={self.gate}\n"
+            # 実機と同じく、通った最終ゲートは状態の `final_gate.status` を `passed` にする（採用を数える条件）
+            self.state["final_gate"] = {"status": "passed" if self.gate in ("passed", "cross-review") else self.gate}
+            self.save()
+            return (1 if self.gate == "failed" else 0), f"FINAL_GATE={self.gate}\n"
         if sub == "finalize":
             self.state["phase"] = "done"
             self.save()
@@ -87,6 +90,16 @@ def test_rerun_from_done_keeps_counts(tmp_path, monkeypatch, capsys):
     m = out["metrics"]
     assert code == 0 and (m["items"], m["adopted"], m["reverted"], m["fix_rounds"]) == (2, 1, 1, 2)
     assert fake.inits() == 1  # done から打ち直すと init を打たない
+
+
+def test_a_run_whose_final_gate_did_not_pass_stops_without_adopting(tmp_path, monkeypatch, capsys):
+    """AC-1399-6: 最終ゲートが `passed` でないまま終わった実行は完了にせず、採用を 0 と数える。"""
+    monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path))
+    monkeypatch.setattr(rf, "call", FakeRefactor(tmp_path, gate="failed"))
+    code, out = run_main(ARGV, capsys)
+    assert (code, out["status"]) == (1, "stopped")
+    assert out["metrics"]["exit"] == 1
+    assert (out["metrics"]["adopted"], out["metrics"]["unconfirmed"]) == (0, 1)
 
 
 def test_rerun_after_cross_review_keeps_review_status(tmp_path, monkeypatch, capsys):
@@ -288,7 +301,11 @@ def test_monitor_failure_in_fix_goes_on_to_merge(tmp_path, monkeypatch, capsys, 
         if Path(cmd[1]).name == "refactor.py" and cmd[2] == "final-gate":
             gates.append(1)
             fake.calls.append(("refactor.py", *cmd[2:]))
-            return (2, "") if phase == "final-fix" and len(gates) == 1 else (0, "FINAL_GATE=passed\n")
+            if phase == "final-fix" and len(gates) == 1:
+                return 2, ""
+            fake.state["final_gate"] = {"status": "passed"}
+            fake.save()
+            return 0, "FINAL_GATE=passed\n"
         return real(cmd, env, cwd)
 
     monkeypatch.setattr(rf, "call", call)

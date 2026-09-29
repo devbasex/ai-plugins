@@ -112,6 +112,9 @@ def test_a_commit_in_range_is_reverted_and_the_base_moves_to_the_new_head(intake
     gate = state["final_gate"]
     patch_lib("commits_in_range", lambda work, base, head: ["c2", "c1"])
     patch_lib("git_out", lambda work, args, **kw: "newhead")
+    discarded: list[str] = []
+    # 消すコミットは取り消しの判定が決める（`undo.discard_range`）。git の振る舞いは test_ledger_git.py が縛る
+    patch_lib("discard_range", lambda path, state, reason: discarded.append(reason) or {"mode": "item"})
 
     closed = intake.close_without_result(gated, state, _scope(intake, gate), _outcome(reason="stalled", detail="無進捗"))
 
@@ -128,7 +131,8 @@ def test_a_commit_in_range_is_reverted_and_the_base_moves_to_the_new_head(intake
             "reverted": 2,
         }
     ]
-    assert [c[-1] for c in no_git if c[:2] == ["git", "revert"]] == ["c2", "c1"]
+    assert discarded == ["final-gate-fix1"]
+    assert not [c for c in no_git if "push" in c], "取り消しは push を伴わない（公開は呼び出し側）"
     assert read_state(gated)["final_gate"]["fix_base_sha"] == "newhead"
 
 

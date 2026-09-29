@@ -11,7 +11,7 @@ import models as models_lib
 import run_metrics
 import statefile
 
-from .. import allocation, clock, info, launch, timeline
+from .. import allocation, clock, info, launch, ledger, timeline
 from ..codemetrics_view import record_lines
 from ..items import item_label
 from ..measure import summary_extra
@@ -26,7 +26,7 @@ APPROVED = "approved"
 
 
 def _gate_passed(state: dict[str, Any]) -> bool:
-    return (state.get("final_gate") or {}).get("status") == "passed"
+    return ledger.adoption_confirmed(state)
 
 
 def cmd_finalize(args: argparse.Namespace) -> None:
@@ -311,10 +311,12 @@ def _print_deferred(state: dict[str, Any]) -> None:
     reverted = [i for i in state.get("items") or [] if i.get("status") == "reverted"]
     print("## 見送った提案と取り消した項目")
     print()
-    print(
-        f"- 採用: {sum(1 for i in state.get('items') or [] if i.get('status') == 'verified')} 件"
-        f" / 取り消し: {len(reverted)} 件 / 見送り: {len(deferred)} 件"
-    )
+    # 最終ゲートを経ていない実行は、残った改善項目を採用と表さない（I8）
+    if ledger.adoption_confirmed(state):
+        adopted = f"{sum(1 for i in state.get('items') or [] if i.get('status') == 'verified')} 件"
+    else:
+        adopted = f"未確定（最終ゲートを経ていない。残った改善項目 {ledger.remaining_count(state)} 件）"
+    print(f"- 採用: {adopted} / 取り消し: {len(reverted)} 件 / 見送り: {len(deferred)} 件")
     print("- 見送りの理由別: " + " / ".join(f"{r} {counts.get(r, 0)}" for r in DEFER_REASONS))
     print(f"- 内訳: 改修計画にある — {plan_reference(state)}")
 

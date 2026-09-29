@@ -382,6 +382,8 @@ def _build_initial_state(args: argparse.Namespace, ctx: InitialContext) -> dict[
         "final_gate": {"fix_rounds": 0, "checks": []},
         "pending_push": False,
         "pending_drop": None,
+        # 公開の台帳（#1482）。公開した地点（`published_sha`）はまだ無い。無ければ `plan.base_sha` を使う
+        "ledger": {"orchestrator_commits": []},
         "history_written": False,
         "code_metrics": code_metrics_record(ctx.work, getattr(args, "code_metrics", None) is not False),
     }

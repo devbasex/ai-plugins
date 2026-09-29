@@ -12,68 +12,32 @@ from . import ABORT, die, info
 from .paths import git_out
 
 
-def revert_item_commits(state: dict[str, Any], item: dict[str, Any], dry_run: bool = False) -> int:
-    """改善項目のコミットを取り消し、取り消した件数を返す。
-
-    **新しいコミットから順に戻す。** 逆順にすると後続の取り消しが競合する。
-    取り消しに失敗したら中断する。半端な状態を Pull Request に残さない。
-
-    適用の検証に失敗したときと、レビューが収束しなかったときの両方から呼ぶ。
-    前者で呼ばないと、実装担当が既に push した差分が Pull Request に残り、
-    以後のレビュー対象にも混入する。
-    """
-    # **取り消し済みなら何もしない。** push の失敗などで叩き直したときに、
-    # 既に戻したコミットへもう一度 `git revert` を掛けると必ず失敗し、
-    # そこから先へ進めなくなる。
-    if item.get("reverted"):
-        info(f"↩ {item['item_id']} は取り消し済みです")
-        return 0
-
-    work = state["worktrees"]["work"]
-    shas = _order_newest_first(work, [s for s in (item.get("commits") or []) if isinstance(s, str) and s])
-    if dry_run:
-        for sha in shas:
-            info(f"（dry-run）git revert --no-edit {sha}")
-        return len(shas)
-
-    # 途中で失敗したら**着手前の HEAD まで戻す**。1 項目が複数のコミットを持つとき、
-    # 先行して成功した取り消しだけが履歴に残ると、再実行で不整合になって進めなくなる。
-    before = git_out(work, ["rev-parse", "HEAD"])
-    revert_range(work, shas, before, prefix=f"{item['item_id']} の")
-    item["reverted"] = True
-    return len(shas)
-
-
 def reset_hard(work: str, sha: Optional[str]) -> None:
     """着手前の HEAD へ戻す。半端な履歴を Pull Request に残さないための後始末。"""
     if sha:
         subprocess.run(["git", "reset", "--hard", sha], cwd=work, capture_output=True, text=True)
 
 
-def revert_range(work: str, ordered: list[str], before: Optional[str], prefix: str = "") -> None:
-    """範囲を**新しい順に**全て取り消す。失敗したら着手前へ戻して中断する。
+def revert_range(work: str, ordered: list[str]) -> Optional[str]:
+    """並びの順に `git revert` する。戻せなかったコミットを返す（全部戻せたら `None`）。
 
-    範囲全体を新しい順にたどる取り消しは、履歴をそのまま逆再生するだけなので
-    **競合しない**。競合するのは「一部のコミットだけを飛ばして戻す」ときである。
+    **ここで中断しない。** 戻せないときは `git revert --abort` だけを打ち、着手前へ戻すかは呼び出し側
+    （`undo`）が決める。同じファイルを触った項目まで広げてやり直せるようにするためである。
     """
     for sha in ordered:
-        r = subprocess.run(
-            ["git", "revert", "--no-edit", sha],
-            cwd=work,
-            capture_output=True,
-            text=True,
-        )
+        r = subprocess.run(["git", "revert", "--no-edit", sha], cwd=work, capture_output=True, text=True)
         if r.returncode != 0:
             subprocess.run(["git", "revert", "--abort"], cwd=work, capture_output=True, text=True)
-            reset_hard(work, before)
-            die(f"{prefix}コミット {sha} を取り消せませんでした: {r.stderr.strip()[:400]}（HEAD を {before} へ戻しました）")
+            info(f"⚠ {sha[:12]} を戻せませんでした: {r.stderr.strip()[:200]}")
+            return sha
+    return None
 
 
-def replay_commits(work: str, shas: list[str]) -> Optional[dict[str, str]]:
-    """残す項目のコミットを**古い順に**積み直し、`{元の SHA: 新しい SHA}` を返す。
+def replay_commits(work: str, shas: list[str]) -> tuple[dict[str, str], Optional[str]]:
+    """コミットを**古い順に**積み直し、`({元の SHA: 新しい SHA}, 積み直せなかったコミット)` を返す。
 
-    競合したら `None` を返す。**ここで中断しない。** どの項目を残せるか決められない
-    だけなので、呼び出し側がラウンド全件の取り消しへ退避できる。
+    競合したら `git cherry-pick --abort` だけを打って返す。**ここで中断しない。** 同じファイルを
+    触った項目まで広げるかは呼び出し側（`undo`）が決める。
     """
     mapping: dict[str, str] = {}
     for sha in shas:
@@ -85,10 +49,10 @@ def replay_commits(work: str, shas: list[str]) -> Optional[dict[str, str]]:
         )
         if r.returncode != 0:
             subprocess.run(["git", "cherry-pick", "--abort"], cwd=work, capture_output=True, text=True)
-            info(f"⚠ {sha[:7]} を積み直せませんでした: {r.stderr.strip()[:200]}")
-            return None
+            info(f"⚠ {sha[:12]} を積み直せませんでした: {r.stderr.strip()[:200]}")
+            return mapping, sha
         mapping[sha] = git_out(work, ["rev-parse", "HEAD"]) or sha
-    return mapping
+    return mapping, None
 
 
 def _order_newest_first(work: str, shas: list[str]) -> list[str]:

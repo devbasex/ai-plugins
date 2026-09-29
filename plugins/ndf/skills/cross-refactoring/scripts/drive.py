@@ -12,6 +12,8 @@ init → 提案 → 改修計画 → テスト追加 → 実装 → 検証と修
 止まるときの JSON の形と終了コードの表はライブラリの `scripts/lib/drive_pause.py` にある（使うのは 23 だけ。中断の `metrics.exit` が 4 なら refactor.py の中断）。
 子の起動・KEY=VALUE の読み取り・最終ステータスの決定は `scripts/lib/loop_drive.py` にある。
 件数（metrics）は状態ファイルから数える: items / adopted / reverted / deferred / fix_rounds（項目の修正の回数の和）/ final_gate。
+採用（adopted）は最終ゲートが `passed` のときだけ数え、通っていなければ 0 にして残った改善項目の数を unconfirmed に出す。
+最終ゲートを経ずに終わった実行は完了にせず、中断（stopped・metrics.exit に最終ゲートの終了コード）で終える（#1482）。
 """
 
 from __future__ import annotations
@@ -44,12 +46,22 @@ FOCUS = (
 )
 
 
+def _ledger_module():
+    """取り消しの判定（`refactor_lib.ledger`）。報告と同じ判定で採用を数える（I8）。"""
+    if str(HERE) not in sys.path:
+        sys.path.append(str(HERE))
+    from refactor_lib import ledger
+
+    return ledger
+
+
 class Drive:
     def __init__(self, pr: int, init_args: list[str]):
         self.pr = pr
         self.init_args = init_args
         self.env = dict(os.environ)
         self.v: dict = {}
+        self.final_rc = 1  # 最後に打った final-gate の終了コード
 
     def rf(self, *args: str, ok=(0,)) -> tuple[int, dict]:
         rc, out = call([sys.executable, str(HERE / "refactor.py"), *args], self.env)
@@ -113,14 +125,19 @@ class Drive:
         by = {}
         for it in items:
             by[it.get("status")] = by.get(it.get("status"), 0) + 1
-        return {
+        led = _ledger_module()
+        confirmed = led.adoption_confirmed(s)
+        c = {
             "items": len(items),
-            "adopted": by.get("verified", 0),
+            "adopted": by.get("verified", 0) if confirmed else 0,
             "reverted": by.get("reverted", 0),
             "deferred": by.get("deferred", 0),
             "fix_rounds": sum(int(it.get("fix_count") or 0) for it in items),
             "final_gate": self.v.get("FINAL_GATE") or (s.get("final_gate") or {}).get("status"),
         }
+        if not confirmed:
+            c["unconfirmed"] = led.remaining_count(s)
+        return c
 
     def todo(self, phase: str) -> bool:
         cur = self.v.get("PHASE") or "propose"
@@ -240,6 +257,7 @@ class Drive:
         for _ in range(100):
             self.v.pop("FINAL_GATE", None)
             rc, _ = self.rf("final-gate", i, ok=(0, 1, 2))
+            self.final_rc = rc
             if rc in (0, 1):
                 return
             if self.v.get("FINAL_GATE") == "recheck":
@@ -256,6 +274,8 @@ class Drive:
 
     def done(self, extra: dict | None = None) -> dict:
         c = {**self.counts(), **(extra or {})}
+        if "unconfirmed" in c:
+            raise Stop(f"最終ゲートを経ていないため、残った改善項目 {c['unconfirmed']} 件は採用と確定していない", self.final_rc)
         return dp.done(
             TOOL,
             f"改修計画の実行が終わった（項目 {c['items']}・採用 {c['adopted']}・取り消し {c['reverted']}・見送り {c['deferred']}）",

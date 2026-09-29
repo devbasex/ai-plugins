@@ -158,8 +158,13 @@ def test_push_goes_on_without_tool_paths(repo, publish, patch_lib, tmp_path):
     write(work, "src.py", "new\n")
     git(work, "add", "-A")
     git(work, "commit", "-q", "-m", "item")
+    state = _state(tmp_path, work, command="")
+    # 送るコミットは記録した改善項目のもの（記録の無いコミットは push の直前の照合で止まる。#817）
+    state["items"] = [
+        {"id": "I-001", "status": "verified", "commits": {"test": None, "implement": git(work, "rev-parse", "HEAD"), "fix": []}}
+    ]
 
-    publish.push_head(_state(tmp_path, work, command=""))
+    publish.push_head(state)
 
     assert git(repo.origin, "rev-parse", HEAD) == git(work, "rev-parse", "HEAD")
     assert git(repo.origin, "show", "--name-only", "--format=", HEAD) == "src.py"
