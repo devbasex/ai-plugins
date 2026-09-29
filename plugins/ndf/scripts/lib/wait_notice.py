@@ -320,11 +320,12 @@ def github_slug(remote_url: str) -> str | None:
     return f"{m.group(1)}/{m.group(2)}" if m else None
 
 
-def _collect_urls(text: str, slug: str | None, redmine_base: str) -> tuple[list[str], list[tuple[int, str, str]]]:
-    """本文から URL と参照（Redmine の `#123`・課題の `#123`）を切り出して正規化する。
-
-    戻りは（PR の URL の並び, 本文の位置の順に並べた（位置, 種類, URL）の並び）。
-    """
+def extract_urls(
+    kind: str, text: str, slug: str | None = None, redmine_url: str | None = None, pr_fallback: str | None = None
+) -> list[tuple[str, str]]:
+    """本文から関連 URL を抜く。承認待ちは PR を先頭に置き、本文に無ければ `pr_fallback` を使う。"""
+    text = text or ""
+    redmine_base = (redmine_url or "").rstrip("/")
     redmine_host = urlparse(redmine_base).netloc if redmine_base else ""
     found: list[tuple[int, str, str]] = []
     prs: list[str] = []
@@ -345,14 +346,6 @@ def _collect_urls(text: str, slug: str | None, redmine_base: str) -> tuple[list[
         for m in _HASH_REF.finditer(stripped):
             found.append((m.start(), "issue", f"https://github.com/{slug}/issues/{m.group(1)}"))
     found.sort()
-    return prs, found
-
-
-def extract_urls(
-    kind: str, text: str, slug: str | None = None, redmine_url: str | None = None, pr_fallback: str | None = None
-) -> list[tuple[str, str]]:
-    """本文から関連 URL を抜く。承認待ちは PR を先頭に置き、本文に無ければ `pr_fallback` を使う。"""
-    prs, found = _collect_urls(text or "", slug, (redmine_url or "").rstrip("/"))
     out: list[tuple[str, str]] = []
     if kind == APPROVAL:
         for url in prs or ([pr_fallback] if pr_fallback else []):
