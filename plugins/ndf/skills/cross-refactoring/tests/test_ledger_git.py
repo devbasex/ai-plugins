@@ -118,7 +118,7 @@ def test_the_judgement_is_defined_only_in_the_ledger():
 
 
 def test_commands_do_not_revert_without_the_judgement():
-    """AC-2: `commands/` は `revert_range` を直接呼ばず、取り消しは `undo.drop` / `undo.discard` を通る。"""
+    """AC-2: `commands/` は `revert_range` を直接呼ばず、取り消しは `undo.drop` / `undo.discard_range` を通る。"""
     for path in (SCRIPTS / "refactor_lib" / "commands").glob("*.py"):
         text = path.read_text(encoding="utf-8")
         assert "revert_range" not in text and "revert_item_commits" not in text, path
@@ -355,7 +355,7 @@ FILES_1237 = {
     "I-003": "supervise.py",
     "I-004": "cross-refactoring/scripts/drive.py",
     "I-005": "cross-review/scripts/drive.py",
-    "I-006": "experimental/phase_cost.py",
+    "I-006": "cost/phase_cost.py",
 }
 
 

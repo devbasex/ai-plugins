@@ -126,7 +126,7 @@ def test_an_unowned_extra_commit_is_removed_and_older_commits_are_kept(tmp_path,
     (work / "src" / "extra.py").write_text("unowned\n", encoding="utf-8")
     extra = commit_with_trailers(work, "unowned", {})
 
-    record = undo.discard(path, state, "改修計画外")
+    record = undo.discard_range(path, state, "改修計画外")
 
     assert record == {
         "at": record["at"],

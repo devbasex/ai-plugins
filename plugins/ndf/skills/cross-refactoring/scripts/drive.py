@@ -46,7 +46,7 @@ FOCUS = (
 )
 
 
-def _ledger():
+def _ledger_module():
     """取り消しの判定（`refactor_lib.ledger`）。報告と同じ判定で採用を数える（I8）。"""
     if str(HERE) not in sys.path:
         sys.path.append(str(HERE))
@@ -125,7 +125,7 @@ class Drive:
         by = {}
         for it in items:
             by[it.get("status")] = by.get(it.get("status"), 0) + 1
-        led = _ledger()
+        led = _ledger_module()
         confirmed = led.adoption_confirmed(s)
         c = {
             "items": len(items),

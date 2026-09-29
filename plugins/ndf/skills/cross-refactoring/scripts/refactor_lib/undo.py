@@ -18,7 +18,7 @@
 **中断しても再開できる形で記録する。** 着手の前に取り消しの前の HEAD（`pending_drop.before`）を保存し、
 記録を終えたら消す。残ったまま再開したら、その HEAD へ戻してから計画を作り直す。
 
-入口は `drop`（改善項目の単位）と `discard`（結果を残さなかった起動・手順を外れた修正の範囲）の 2 つ。
+入口は `drop`（改善項目の単位）と `discard_range`（結果を残さなかった起動・手順を外れた修正の範囲）の 2 つ。
 """
 
 from __future__ import annotations
@@ -147,7 +147,7 @@ def _record(
     return record
 
 
-def _give_up(path: pathlib.Path, state: dict[str, Any], plan: ledger.RebuildPlan, conflict: str) -> None:
+def _restore_and_stop(path: pathlib.Path, state: dict[str, Any], plan: ledger.RebuildPlan, conflict: str) -> None:
     """広げても積み直せないとき。HEAD は `_execute` が取り消しの前へ戻してある。"""
     state["pending_drop"] = None
     statefile.save(path, state)
@@ -174,11 +174,11 @@ def _rebuild(path: pathlib.Path, state: dict[str, Any], targets: list[str], reas
     if outcome.conflict:
         wide = ledger.plan_rebuild(state, work, targets, widen=True)
         if not wide.widened:
-            _give_up(path, state, wide, outcome.conflict)
+            _restore_and_stop(path, state, wide, outcome.conflict)
         info(f"⚠ 積み直しが衝突したため、同じファイルを触った {len(wide.widened)} 件（{', '.join(wide.widened)}）も取り消します")
         plan, outcome = wide, _execute(work, wide)
         if outcome.conflict:
-            _give_up(path, state, plan, outcome.conflict)
+            _restore_and_stop(path, state, plan, outcome.conflict)
     return _record(path, state, plan, outcome, targets, reason)
 
 
@@ -194,7 +194,7 @@ def drop(path: pathlib.Path, state: dict[str, Any], item_ids: list[str], reason:
     return _rebuild(path, state, targets, reason)
 
 
-def discard(path: pathlib.Path, state: dict[str, Any], reason: str) -> dict[str, Any]:
+def discard_range(path: pathlib.Path, state: dict[str, Any], reason: str) -> dict[str, Any]:
     """どの改善項目にも記録されていないコミットを消す（結果を残さなかった起動・手順を外れた修正の範囲）。
 
     範囲の起点を受け取らない。記録されていないコミットは判定が `stray` とし、積み直しで消える。

@@ -77,14 +77,14 @@ def discard_unverified(
 ) -> int:
     """検証を受けていない範囲を取り消し、起点を取り消し後の HEAD へ進める。
 
-    どのコミットを消すかは取り消しの判定（`undo.discard` → `ledger`）が決める。範囲のコミットは
+    どのコミットを消すかは取り消しの判定（`undo.discard_range` → `ledger`）が決める。範囲のコミットは
     どの改善項目にも記録されていないため消える。**起点はその場で保存する。** 保存せずに落ちると、
     次の実行が古い起点から範囲を取り直す。push はしない（最終ゲートの後の経路は呼び出し側が push する）。
     """
     if not ordered_range:
         return 0
     info(f"検証を通らない変更を残さないため、{scope.label} の範囲を取り消します")
-    undo.discard(path, state, scope.label)
+    undo.discard_range(path, state, scope.label)
     head = git_out(state["worktrees"]["work"], ["rev-parse", "HEAD"])
     scope.holder[scope.base_key] = head
     if scope.mirror is not None:

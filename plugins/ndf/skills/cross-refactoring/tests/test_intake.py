@@ -113,8 +113,8 @@ def test_a_commit_in_range_is_reverted_and_the_base_moves_to_the_new_head(intake
     patch_lib("commits_in_range", lambda work, base, head: ["c2", "c1"])
     patch_lib("git_out", lambda work, args, **kw: "newhead")
     discarded: list[str] = []
-    # 消すコミットは取り消しの判定が決める（`undo.discard`）。git の振る舞いは test_ledger_git.py が縛る
-    patch_lib("discard", lambda path, state, reason: discarded.append(reason) or {"mode": "item"})
+    # 消すコミットは取り消しの判定が決める（`undo.discard_range`）。git の振る舞いは test_ledger_git.py が縛る
+    patch_lib("discard_range", lambda path, state, reason: discarded.append(reason) or {"mode": "item"})
 
     closed = intake.close_without_result(gated, state, _scope(intake, gate), _outcome(reason="stalled", detail="無進捗"))
 

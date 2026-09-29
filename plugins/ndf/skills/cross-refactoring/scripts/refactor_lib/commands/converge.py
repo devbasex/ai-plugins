@@ -43,7 +43,7 @@ from ..paths import work_dir
 from ..outbound import item_lines, plan_line
 from ..paths import git_out, load_state
 from ..phases import add_phase_seconds, finish_phase, phase_record
-from ..undo import discard, drop, resume_pending_drop
+from ..undo import discard_range, drop, resume_pending_drop
 from ..verify import (
     verify_commit_basics,
     collect_test_changes,
@@ -430,7 +430,7 @@ def _apply_fix_result(
         for problem in problems:
             info(f"❌ {problem}")
         # 修正のコミットはどの改善項目にも記録されていないため、取り消しの判定が消す
-        discard(path, state, "手順を外れた修正")
+        discard_range(path, state, "手順を外れた修正")
         info(f"↩ 修正の範囲 {len(ordered)} コミットを取り消しました")
         return
     if ordered:

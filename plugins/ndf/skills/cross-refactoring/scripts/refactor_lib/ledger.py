@@ -90,7 +90,7 @@ def remaining_count(state: dict[str, Any]) -> int:
 # ---------- 公開の台帳 ----------
 
 
-def _ledger(state: dict[str, Any]) -> dict[str, Any]:
+def _book(state: dict[str, Any]) -> dict[str, Any]:
     ledger = state.get("ledger")
     if not isinstance(ledger, dict):
         ledger = state["ledger"] = {}
@@ -110,18 +110,18 @@ def in_final_gate(state: dict[str, Any]) -> bool:
 
 
 def note_published(state: dict[str, Any], sha: str) -> None:
-    _ledger(state)["published_sha"] = sha
+    _book(state)["published_sha"] = sha
 
 
 def note_orchestrator_commit(state: dict[str, Any], sha: str) -> None:
-    commits = _ledger(state)["orchestrator_commits"]
+    commits = _book(state)["orchestrator_commits"]
     if sha and sha not in commits:
         commits.append(sha)
 
 
 def remap_orchestrator_commits(state: dict[str, Any], mapping: dict[str, str]) -> None:
     """積み直しで変わった SHA を書き直す。対応表に無い SHA はそのまま残す。"""
-    ledger = _ledger(state)
+    ledger = _book(state)
     ledger["orchestrator_commits"] = [mapping.get(s, s) for s in ledger["orchestrator_commits"]]
 
 
@@ -160,7 +160,7 @@ def _ledger_commits(state: dict[str, Any]) -> list[str]:
     return list(ledger.get("orchestrator_commits") or [])
 
 
-def classify(state: dict[str, Any], work: str, shas: list[str]) -> list[CommitVerdict]:
+def classify_commits(state: dict[str, Any], work: str, shas: list[str]) -> list[CommitVerdict]:
     """コミットを分類する。`stray` にはトレーラーの `Item-Id` と件名を添える。"""
     kept = keepers(state, work)
     owners = _owners(state, work)
@@ -268,4 +268,4 @@ def unpublishable(state: dict[str, Any], work: str, remote_tip: str) -> list[Com
     shas = _oldest_first(work, spec)
     if shas is None:
         return [CommitVerdict(sha=remote_tip, kind=STRAY, subject="送るコミットを確定できません")]
-    return [v for v in classify(state, work, shas) if v.kind == STRAY]
+    return [v for v in classify_commits(state, work, shas) if v.kind == STRAY]
