@@ -224,7 +224,16 @@ def parse_symilar(text: str, roots: Iterable[str]) -> dict[str, Any]:
         head = _SIM_HEAD.match(lines[i])
         if head:
             count, k = int(head.group(1)), int(head.group(2))
-            clones.append(_clone(TOOL_SYMILAR, "python", count, _parse_symilar_block(lines, i + 1, k, roots)))
+            locations = []
+            for line in lines[i + 1 : i + 1 + k]:
+                loc = _SIM_LOC.match(line)
+                if loc is None:
+                    raise UnreadableOutput(f"symilar の場所の行を読めない: {line!r:.80}")
+                path = to_relative(loc.group(1), roots) or loc.group(1)
+                locations.append({"path": path, "start": int(loc.group(2)) + 1, "end": int(loc.group(3))})
+            if len(locations) < k:
+                raise UnreadableOutput("symilar の場所の行が足りない")
+            clones.append(_clone(TOOL_SYMILAR, "python", count, locations))
             i += 1 + k
             continue
         m = _SIM_TOTAL.match(lines[i])
@@ -234,20 +243,6 @@ def parse_symilar(text: str, roots: Iterable[str]) -> dict[str, Any]:
     if total is None:
         raise UnreadableOutput("symilar の出力に TOTAL の行が無い")
     return {"clones": clones, "total_lines": total[0], "duplicated_lines": total[1]}
-
-
-def _parse_symilar_block(lines: list[str], start: int, k: int, roots: list[str]) -> list[dict[str, Any]]:
-    """ヘッダに続く `k` 行の場所の行を読み、1 始まりの範囲へ直した場所を返す。"""
-    locations = []
-    for line in lines[start : start + k]:
-        loc = _SIM_LOC.match(line)
-        if loc is None:
-            raise UnreadableOutput(f"symilar の場所の行を読めない: {line!r:.80}")
-        path = to_relative(loc.group(1), roots) or loc.group(1)
-        locations.append({"path": path, "start": int(loc.group(2)) + 1, "end": int(loc.group(3))})
-    if len(locations) < k:
-        raise UnreadableOutput("symilar の場所の行が足りない")
-    return locations
 
 
 def parse_jscpd(text: Optional[str], roots: Iterable[str]) -> dict[str, Any]:
