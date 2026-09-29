@@ -341,10 +341,6 @@ def _finish(b: dict) -> dict:
     return b
 
 
-def _out_of_range(t: float, since: float, until: float | None) -> bool:
-    return t < since or (until is not None and t > until)
-
-
 def read_ledger_plans(
     rows: list[tuple[float, dict]], since: float, until: float | None, a_sessions: set[str], rm: release_map.ReleaseMap
 ) -> tuple[list[dict], dict, list[dict]]:
@@ -357,7 +353,7 @@ def read_ledger_plans(
     outside = _empty_b(OUTSIDE, "ledger")
     outside_rows = []
     for t, r in rows:
-        if _out_of_range(t, since, until):
+        if t < since or (until is not None and t > until):
             continue
         plan = r.get("plan") or ""
         b = plans.setdefault(plan, _empty_b(plan, "ledger")) if plan else outside
@@ -398,7 +394,7 @@ def _reports_from_files(since: float, until: float | None, found: dict[tuple, di
     """残っている report.md（時刻はファイルの更新時刻）"""
     for p in [*SV_ROOT.glob("*/plans/*-state/report.md"), *SV_ROOT.glob("*/*-state/report.md")]:
         t = p.stat().st_mtime
-        if _out_of_range(t, since, until):
+        if t < since or (until is not None and t > until):
             continue
         for r in parse_report(p.read_text(errors="replace")):
             r["at"] = t
@@ -430,7 +426,7 @@ def _reports_from_transcripts(since: float, until: float | None, found: dict[tup
             if d.get("type") != "user":
                 continue
             t = tu.parse_ts(d.get("timestamp"))
-            if t is None or _out_of_range(t, since, until):
+            if t is None or t < since or (until is not None and t > until):
                 continue
             for tx in _tool_result_texts(d):
                 for r in parse_report(tx):
