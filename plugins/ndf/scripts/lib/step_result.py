@@ -63,7 +63,7 @@ def code_matches(status: str, code: int) -> bool:
     return code in (EXIT_VIOLATION, EXIT_UNREADABLE, EXIT_PRECONDITION)
 
 
-def _check_items(obj: dict, errs: list[str]) -> None:
+def _check_item_types(obj: dict, errs: list[str]) -> None:
     if "items" not in obj:
         return
     if not isinstance(obj["items"], list):
@@ -81,7 +81,7 @@ def _check_field_types(obj: dict, errs: list[str]) -> None:
         errs.append(f"status は {' / '.join(STATUSES)} のどれか: {obj['status']!r}")
     if "summary" in obj and not isinstance(obj["summary"], str):
         errs.append("summary は文字列で書く")
-    _check_items(obj, errs)
+    _check_item_types(obj, errs)
     if "metrics" in obj and not isinstance(obj["metrics"], dict):
         errs.append("metrics はオブジェクトで書く")
     for k in OPTIONAL:
