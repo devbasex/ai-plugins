@@ -25,7 +25,7 @@
 5. 続けて別の項目を取り消しても、前の取り消しの積み直しのコミットは「残すコミット」として扱われるだけで、
    `git revert` の対象に入らない。コミット数は取り消しの回数で伸びない
 6. 検証を終えて最終ゲートへ入る時点で、初めて push する。push の直前に `ledger.unpublishable` が
-   origin の head から HEAD までのコミットを照らし、残すコミットでないもの（見放した担当の残留コミットなど）が
+   origin の head から HEAD までのコミットを照らす。残すコミットでないもの（見放した担当の残留コミットなど）が
    1 つでもあれば、push せずに終了コード 4 で止まる
 
 ## ドメインモデル
@@ -125,8 +125,8 @@
 | `tests/test_module_owners.py` | 変更 | `OWNERS` の `worktree` から `revert_item_commits` を除き、`ledger` の行を足す。`gitfacts` の再輸出から 2 つを外す |
 | `tests/test_final_fix.py` | 変更 | 「範囲を取り消す」テストの期待を、revert のコミットではなく「範囲のコミットが HEAD の履歴から消える」へ改める |
 
-`refactor_lib/gate_ci.py`（`revert_deferred`）・`refactor_lib/wholetest.py`・`converge._narrow` は `undo.drop` を
-呼ぶだけで、呼び方は変えない。
+次の 3 つは `undo.drop` を呼ぶだけで、呼び方は変えない。`refactor_lib/gate_ci.py`（`revert_deferred`）・
+`refactor_lib/wholetest.py`・`converge._narrow` である。
 
 ```mermaid
 graph TB
@@ -262,9 +262,9 @@ classDiagram
 | `drops[].reverted` | int | — | 公開済みの範囲で `git revert` したコミット数 |
 | `drops[].reverted_commits` | int | — | **書かなくなる。** 既存の記録は読めるまま残す |
 
-**積み直しで書き直す SHA は項目のコミットに限らない。** 積み直しの起点より後を指す保存済みの地点
-（`phases.*.base_sha`・`fix.base_sha`・`final_gate.fix_base_sha`・`final_gate.fix_commits`・
-`ledger.orchestrator_commits`）も対応表で書き直す。地点の対応は「元の履歴でその地点以前にある最後の残すコミットの
+**積み直しで書き直す SHA は項目のコミットに限らない。** 積み直しの起点より後を指す保存済みの地点も、
+対応表で書き直す。対象は `phases.*.base_sha`・`fix.base_sha`・`final_gate.fix_base_sha`・`final_gate.fix_commits`・
+`ledger.orchestrator_commits` である。地点の対応は「元の履歴でその地点以前にある最後の残すコミットの
 新しい SHA。無ければ積み直しの起点」とする。書き直さないと、次のマージ処理が履歴に無い起点から範囲を取る。
 
 **既存の状態ファイルからの再開**: `ledger` が無ければ公開した地点を `plan.base_sha` とみなす。旧い版で途中の push を
@@ -295,8 +295,15 @@ classDiagram
 | 公開した地点が HEAD の祖先でない | 4 | `✖ 公開した地点 <12 桁> が HEAD の祖先にないため取り消せません` |
 | 取り消しの前の HEAD へ戻せない（`reset` の失敗） | 4 | 既存の `die` の形 |
 
-**drive の結果**: 最終ゲートが `passed` でないまま終わったら `status: stopped`（終了コード 1）、`metrics.exit` に
-最終ゲートの終了コード、`metrics.adopted` は 0、`metrics.unconfirmed` に残った改善項目の数を載せる。
+**drive の結果**: 最終ゲートが `passed` でないまま終わったら、次の形で終える。
+
+| 欄 | 値 |
+| --- | --- |
+| `status` | `stopped`（終了コード 1） |
+| `metrics.exit` | 最終ゲートの終了コード |
+| `metrics.adopted` | 0 |
+| `metrics.unconfirmed` | 残った改善項目の数 |
+
 `summary` は「最終ゲートを経ていないため、残った改善項目 N 件は採用と確定していない」とする。
 
 **`refactor.py report`**: 最終ゲートが `passed` でなければ、「採用: N 件」の行を
@@ -340,16 +347,17 @@ sequenceDiagram
 3. 未公開の範囲（`P..HEAD`、古い順）の各コミットを `classify` し、`dropped` の項目のコミットと `stray` を「消す」、
    それ以外を「残す」に分ける
 4. 公開済みの範囲（`plan.base_sha..P`）にある `dropped` の項目のコミットを、新しい順に「戻す」（`revert`）へ並べる
-5. `widen=True` なら、3 と 4 で「消す」「戻す」にしたコミットが触ったファイルを触った、取り消されていない改善項目を
-   `dropped` へ足し（足した項目は `widened`）、3 と 4 を 1 度だけやり直す。足した項目のコミットから、さらには広げない
+5. `widen=True` なら、3 と 4 で「消す」「戻す」にしたコミットが触ったファイルを集める。そのファイルを触った、
+   取り消されていない改善項目を `dropped` へ足し（足した項目は `widened`）、3 と 4 を 1 度だけやり直す。
+   足した項目のコミットから、さらには広げない
 6. 起点 = 「消す」の中で最も古いコミットの親。「消す」が無ければ HEAD（reset しない）
 7. `replay` = 起点より後の「残す」（古い順）
 8. 「消す」も「戻す」も無ければ空の計画
 
 **`discard` は `targets` が空の `drop` である。** 結果を残さなかった起動・手順を外れた修正のコミットは、
 どの改善項目にも記録されていないため `stray` になり、3 で消える。範囲の起点を呼び出し元から受け取らない。
-取り消しを行う 4 つの経路（`undo.drop` / `intake.discard_unverified` / `converge._apply_fix_result` /
-最終ゲート修正のマージ処理）は、この 1 つの計画から消すコミットを得る。
+取り消しを行う 4 つの経路は、この 1 つの計画から消すコミットを得る。4 つとは `undo.drop`・
+`intake.discard_unverified`・`converge._apply_fix_result`・最終ゲート修正のマージ処理である。
 
 `discard_unverified` は `undo.discard` を呼んだ後、今までどおり起点の鍵（`scope.base_key`）を取り消し後の HEAD へ
 進める。
