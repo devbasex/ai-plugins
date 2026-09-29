@@ -111,11 +111,11 @@ def test_rerun_from_sweep_keeps_rounds_and_findings(tmp_path, monkeypatch, capsy
     code, out = run_main(["5"], capsys)
     assert code == 0 and out["status"] == "ok"
     m = out["metrics"]
-    assert (m["rounds"], m["findings"], m["final"], m["review_status"]) == (2, 6, "approved", "approved")
+    assert (m["rounds"], m["comments"], m["final"], m["review_status"]) == (2, 6, "approved", "approved")
     assert fake.inits() == inits  # sweep から打ち直すと init を打たない
 
     code, out = run_main(["5"], capsys)  # done からの打ち直しも同じ件数を返す
-    assert code == 0 and out["metrics"]["rounds"] == 2 and out["metrics"]["findings"] == 6
+    assert code == 0 and out["metrics"]["rounds"] == 2 and out["metrics"]["comments"] == 6
     assert fake.inits() == inits
 
 
