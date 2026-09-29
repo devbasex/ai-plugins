@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import shlex
+import subprocess
 import sys
 from pathlib import Path
 
@@ -71,7 +73,7 @@ def test_ai_plugins_derives_local_full_from_the_duration():
     """AC2 — 宣言に `test.strategy` が無ければ所要から導く。ai-plugins（424 秒 ≤ 600）は local-full。"""
     s = ts.resolve(AI_PLUGINS)
     assert (s.name, s.source) == ("local-full", "derived:test_duration")
-    words = ts.scope_words(s.suites[0].scope_command, ["plugins/ndf/scripts/tests/test_x.py"])
+    words = shlex.split(ts.fill(s.suites[0].scope_command, ["plugins/ndf/scripts/tests/test_x.py"]))
     assert words == [
         "uv",
         "run",
@@ -113,8 +115,8 @@ def test_the_duration_source_order_is_record_then_junit_then_steps():
 def test_suites_without_a_scope_template_derive_round_only():
     decl = {"test": {"suites": [{"name": "make", "runner": "make", "command": "make test"}]}}
     s = ts.resolve(decl)
-    assert (s.name, s.source, s.round_command) == ("round-only", "derived:test.suites", "make test")
-    assert s.whole_commands() == ["make test"]
+    assert (s.name, s.source, s.round_command) == ("round-only", "derived:test.suites", None)
+    assert s.whole_commands() == ["make test"] and s.round_commands() == ["make test"]
 
 
 def test_arguments_come_before_the_declaration():
@@ -125,7 +127,9 @@ def test_arguments_come_before_the_declaration():
     assert ts.resolve({}, round_test="make test-unit").whole_commands() == ["make test-unit"], "宣言も --baseline-test も無ければ兼ねる"
     s = ts.resolve(AI_PLUGINS, round_test="pytest {paths} -q")
     assert (s.name, s.source) == ("local-full", "args")
-    assert s.suites[0].scope_command == "pytest {paths} -q" and s.suites[0].command == "pytest . -q"
+    assert [x.scope_command for x in s.scoped_suites()] == ["pytest {paths} -q"]
+    assert s.whole_commands() == [AI_PLUGINS["test"]["suites"][0]["command"]], "全体テストは宣言の command（#1483 I11）"
+    assert ts.resolve({}, round_test="pytest {paths} -q").whole_commands() == ["pytest . -q"]
     s = ts.resolve({}, baseline_test="pytest -q")
     assert (s.name, s.round_command) == ("round-only", "pytest -q") and s.notes
 
@@ -163,7 +167,7 @@ def test_the_prefix_changes_neither_the_strategy_nor_the_targets(prefix):
     decl["test"]["suites"][0]["scope_command"] = f"{prefix}pytest {{paths}} -q"
     s = ts.resolve(decl)
     assert (s.name, s.source) == ("local-full", "derived:test_duration")
-    words = ts.scope_words(s.suites[0].scope_command, ["tests/a.py", "tests/b.py"])
+    words = shlex.split(ts.fill(s.suites[0].scope_command, ["tests/a.py", "tests/b.py"]))
     assert words[-3:] == ["tests/a.py", "tests/b.py", "-q"]
     assert words[: len(words) - 3] == prefix.split() + ["pytest"]
 
@@ -276,3 +280,191 @@ def test_state_round_trip_keeps_the_resolved_strategy():
     s = ts.resolve(CARMO)
     again = ts.Strategy.from_state(json.loads(json.dumps(s.as_state())))
     assert again.as_state() == s.as_state()
+
+
+# ---------- #1483: suite の種別・全体テスト・範囲テスト・起動の失敗 ----------
+
+LINT_ONLY = {
+    "test": {
+        "suites": [{"name": "sc", "runner": "shellcheck", "kind": "lint", "scope_command": "shellcheck -s bash {paths}", "paths": ["*.sh"]}]
+    }
+}
+
+
+def _without_kind(state: dict) -> dict:
+    return {**state, "suites": [{k: v for k, v in s.items() if k != "kind"} for s in state["suites"]]}
+
+
+def test_a_declaration_without_kind_resolves_as_before():
+    """AC3・I3 — 種別を書かない宣言（このリポジトリの宣言を含む）の戦略・全体テスト・範囲テストが変わらない。"""
+    repo_decl = json.loads((Path(__file__).resolve().parents[4] / ".ndf" / "project.json").read_text(encoding="utf-8"))
+    for decl in (AI_PLUGINS, CARMO, repo_decl):
+        s = ts.resolve(decl)
+        suite = decl["test"]["suites"][0]
+        state = _without_kind(s.as_state())
+        assert state["suites"][0] == {k: suite.get(k) for k in ("name", "command", "scope_command", "junit")} | {
+            "paths": suite.get("paths") or []
+        }
+        assert all(x.kind == "test" for x in s.suites)
+        assert s.whole_commands() == [suite["command"]]
+        runs = ts.scope_runs(s, ["tests/a.py"], ["x.sh"])
+        assert [shlex.split(r.command) for r in runs] == [
+            [w if w != "{paths}" else "tests/a.py" for w in shlex.split(suite["scope_command"])]
+        ]
+
+
+def test_the_kind_survives_the_state_and_an_old_state_reads_as_test():
+    """AC4 — `as_state` に種別が残り、種別の無い状態を `from_state` で読むとテスト。"""
+    s = ts.resolve(LINT_ONLY)
+    assert s.as_state()["suites"][0]["kind"] == "lint"
+    assert ts.Strategy.from_state(s.as_state()).suites[0].kind == "lint"
+    old = _without_kind(ts.resolve(AI_PLUGINS).as_state())
+    assert ts.Strategy.from_state(old).suites[0].kind == "test"
+
+
+def test_a_lint_only_strategy_never_puts_a_dot_at_paths():
+    """AC5・I4 — 静的解析の suite だけで `command` が無ければ、全体テストに `{paths}` を `.` にしたものが入らない。"""
+    s = ts.resolve(LINT_ONLY)
+    assert "shellcheck -s bash ." not in s.whole_commands()
+    s = ts.resolve({}, baseline_test="shellcheck -s bash {paths}", template_kind="lint")
+    assert s.whole_commands() == [] and ts.NO_LINT_WHOLE in s.notes
+
+
+def test_the_declared_command_wins_over_the_argument_template():
+    """AC6・I11 — 引数の雛形と宣言の `command` の両方があれば、全体テストは宣言の `command`。"""
+    decl = {"test": {"suites": [{"name": "sc", "runner": "sc", "kind": "lint", "command": "bash scripts/check-lint.sh"}]}}
+    s = ts.resolve(decl, baseline_test="shellcheck {paths}", template_kind="lint", scope_paths=["a.sh"])
+    assert s.whole_commands("lint") == ["bash scripts/check-lint.sh"]
+    s = ts.resolve(AI_PLUGINS, baseline_test="pytest {paths}")
+    assert s.whole_commands("test") == [AI_PLUGINS["test"]["suites"][0]["command"]]
+
+
+def test_a_lint_template_fills_paths_with_the_scope():
+    """AC7 — 静的解析の雛形は `{paths}` を範囲のパスで埋める。範囲が無ければ全体テストは無く、`notes` に理由。"""
+    s = ts.resolve({}, baseline_test="shellcheck -s bash {paths}", template_kind="lint", scope_paths=["scripts/a.sh", "b c.sh"])
+    assert s.whole_commands() == ["shellcheck -s bash scripts/a.sh 'b c.sh'"]
+    assert s.notes == []
+    s = ts.resolve({}, baseline_test="shellcheck -s bash {paths}", template_kind="lint")
+    assert s.whole_commands() == [] and s.notes == [ts.NO_LINT_WHOLE]
+
+
+def test_scope_runs_give_targets_to_tests_and_changed_files_to_lint():
+    """AC8・I10 — テストの suite には対象、静的解析の suite には変更したファイルのうち `paths` に当たるもの。"""
+    decl = {
+        "test": {
+            "suites": [
+                {"name": "py", "runner": "pytest", "command": "pytest .", "scope_command": "pytest {paths}"},
+                {
+                    "name": "fmt",
+                    "runner": "ruff",
+                    "kind": "lint",
+                    "command": "ruff format --check .",
+                    "scope_command": "ruff format --check {paths}",
+                    "paths": ["*.py"],
+                },
+                {"name": "sc", "runner": "sc", "kind": "lint", "scope_command": "shellcheck {paths}", "paths": ["scripts"]},
+            ]
+        }
+    }
+    s = ts.resolve(decl)
+    runs = ts.scope_runs(s, ["tests/test_a.py"], ["src/a.py", "scripts/x.sh", "README.md"])
+    assert [(r.suite, r.kind, r.command) for r in runs] == [
+        ("py", "test", "pytest tests/test_a.py"),
+        ("fmt", "lint", "ruff format --check src/a.py"),
+        ("sc", "lint", "shellcheck scripts/x.sh"),
+    ]
+    assert ts.scope_runs(s, [], ["README.md"]) == []
+
+
+def test_the_kind_comes_only_from_the_declaration_or_the_argument():
+    """I1 — 同じ雛形でも種別の引数で種別が変わり、雛形の語を変えても種別は変わらない。"""
+    for template in ("shellcheck {paths}", "ruff check {paths}", "pytest {paths}"):
+        assert ts.resolve({}, baseline_test=template).scoped_suites()[0].kind == "test"
+        assert ts.resolve({}, baseline_test=template, template_kind="lint").scoped_suites()[0].kind == "lint"
+    with pytest.raises(ts.StrategyError):
+        ts.resolve({}, baseline_test="pytest {paths}", template_kind="unit")
+
+
+def test_round_only_runs_each_suite_in_its_own_shell(tmp_path):
+    """AC10・I6 — 宣言から導いた round-only は suite ごとに 1 本で、前の suite の `cd` が後に効かない。"""
+    for d in ("a", "b"):
+        (tmp_path / d).mkdir()
+    decl = {
+        "test": {
+            "suites": [
+                {"name": "a", "runner": "x", "command": "cd a && touch ran"},
+                {"name": "b", "runner": "x", "command": "cd b && touch ran"},
+            ]
+        }
+    }
+    s = ts.resolve(decl)
+    assert s.name == "round-only" and s.round_command is None
+    for command in s.round_commands():
+        assert subprocess.run(command, shell=True, cwd=tmp_path).returncode == 0
+    assert (tmp_path / "a" / "ran").exists() and (tmp_path / "b" / "ran").exists()
+
+
+@pytest.mark.parametrize(
+    "code, timed_out, status",
+    [
+        (0, False, "passed"),
+        (1, False, "failed"),
+        (2, False, "failed"),
+        (126, False, "launch_failed"),
+        (127, False, "launch_failed"),
+        (None, True, "timed_out"),
+    ],
+)
+def test_outcome_separates_launch_failures(code, timed_out, status):
+    """AC11・I7 — 終了コードと打ち切りから「通った / 落ちた / 起動の失敗 / 打ち切った」を返す。"""
+    got = ts.outcome(code, timed_out)
+    assert got.status == status and got.launch_failed == (status == "launch_failed")
+    if status == "launch_failed":
+        assert str(code) in got.reason
+
+
+def test_fill_quotes_every_path_as_one_argument(tmp_path):
+    """AC22・I2 — 空白・`$`・`;`・`(` を含むパスも 1 つの引数としてシェルへ渡る。"""
+    paths = ["a b.py", "$x;(y).sh", "c.py"]
+    command = ts.fill("printf '%s\\n' {paths}", paths)
+    out = subprocess.run(command, shell=True, cwd=tmp_path, capture_output=True, text=True).stdout
+    assert out.splitlines() == paths
+
+
+@pytest.mark.parametrize("template", ["pytest '{paths}'", 'pytest "{paths}"', "pytest a{paths}", "x {paths} '{paths}'"])
+def test_a_quoted_or_glued_paths_is_rejected(template):
+    """AC22・決定 2 — 引用の中や語に付いた `{paths}` は雛形として拒む。"""
+    assert ts.template_problem(template, "k") is not None
+
+
+@pytest.mark.parametrize("template", ["(cd sub && pytest -q {paths})", "pytest {paths};echo done", "env X=$HOME pytest {paths}"])
+def test_shell_templates_are_accepted(template):
+    assert ts.template_problem(template, "k") is None
+
+
+def test_covers_matches_globs_and_prefixes():
+    suite = ts.Suite("s", "", "x {paths}", paths=["*.sh", "tools"])
+    assert suite.covers("a.sh") and suite.covers("scripts/b.sh") and suite.covers("tools/x.py")
+    assert not suite.covers("a.py") and not suite.covers("toolsx/y")
+
+
+def test_verify_commands_list_both_kinds_or_none():
+    """AC19・AC20 — 宣言の全体テスト（両方の種別）を返し、宣言が無ければ `None`。"""
+    decl = {
+        "test": {
+            "suites": [
+                {"name": "py", "runner": "pytest", "command": "pytest .", "scope_command": "pytest {paths}"},
+                {"name": "lint", "runner": "sh", "kind": "lint", "command": "bash scripts/check-lint.sh"},
+            ]
+        }
+    }
+    assert ts.verify_commands(decl) == ["pytest .", "bash scripts/check-lint.sh"]
+    assert ts.verify_commands({}) is None
+    assert ts.verify_commands({"test": {"unknown": "x"}}) is None
+
+
+def test_verify_commands_stops_on_an_invalid_declaration():
+    """`test` があって解けない宣言は、宣言が無いときと分けて、不正なキーを示して止める。"""
+    decl = {"test": {"suites": [{"name": "py", "kind": "bogus", "command": "pytest ."}]}}
+    with pytest.raises(ts.StrategyError, match=r"test\.suites\[0\]\.kind"):
+        ts.verify_commands(decl)

@@ -11,6 +11,7 @@ import math
 import shlex
 
 import test_strategy as ts
+from supervise_lib.decl import scope_paths, test_kind
 from supervise_lib.paths import MERGE_CMD, MERGE_GATE_CMD, MERGE_PROBE, SPRINT_STATE_PY, TEST_RUN_PY
 
 # ステップの `timeout` に足す余裕（上限の 1 割。下限は監視の 1 周期の 2 倍）
@@ -24,7 +25,9 @@ def plan_strategy(a) -> dict | None:
     if isinstance(found, dict):
         return found
     template = getattr(a, "test_cmd", None)
-    return ts.resolve({}, baseline_test=template).as_state() if template else None
+    if not template:
+        return None
+    return ts.resolve({}, baseline_test=template, template_kind=test_kind(a), scope_paths=scope_paths(a)).as_state()
 
 
 def plan_limits(a) -> dict:
@@ -42,8 +45,12 @@ def with_margin(seconds: int) -> int:
 
 
 def _template_arg(a) -> str:
+    """`--template` と、静的解析の雛形なら `--test-kind lint`（種別は `test-run.py` へそのまま渡す）。"""
     template = getattr(a, "test_cmd", None)
-    return f" --template {shlex.quote(template)}" if template else ""
+    if not template:
+        return ""
+    kind = test_kind(a)
+    return f" --template {shlex.quote(template)}" + (f" --test-kind {kind}" if kind != ts.TEST else "")
 
 
 def scope_cmd(a, tests: str) -> str:
@@ -53,7 +60,9 @@ def scope_cmd(a, tests: str) -> str:
 
 def whole_cmd(a) -> str:
     """全体テストのステップのコマンド（`test-run.py whole`。CI に任せる戦略は Pull Request のチェックを待つ）。"""
-    return f"{TEST_RUN_PY} whole --pr {{pr}}{_template_arg(a)}"
+    paths = (getattr(a, "test_paths", None) or scope_paths(a)) if getattr(a, "test_cmd", None) and test_kind(a) == ts.LINT else []
+    extra = " --paths " + " ".join(shlex.quote(p) for p in paths) if paths else ""
+    return f"{TEST_RUN_PY} whole --pr {{pr}}{_template_arg(a)}{extra}"
 
 
 def scope_timeout(a) -> int:
@@ -70,7 +79,10 @@ def whole_timeout(a) -> int:
 def refactor_template_arg(a) -> str:
     """`--test-cmd` を渡したときだけ、cross-refactoring へ同じ雛形を `--baseline-test` で渡す（宣言があれば渡さない）。"""
     template = getattr(a, "test_cmd", None)
-    return f" --baseline-test {shlex.quote(template)}" if template else ""
+    if not template:
+        return ""
+    kind = test_kind(a)
+    return f" --baseline-test {shlex.quote(template)}" + (f" --test-kind {kind}" if kind != ts.TEST else "")
 
 
 def merge_steps(a, **extra) -> list[dict]:

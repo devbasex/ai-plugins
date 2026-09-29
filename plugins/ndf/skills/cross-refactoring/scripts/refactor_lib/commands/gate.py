@@ -27,9 +27,10 @@ import time
 from typing import Any, Optional
 
 import statefile
+import test_strategy as ts
 import test_triage
 
-from .. import clock, die, info, timeline, triage
+from .. import clock, die, gate_lint, info, launch, timeline, triage
 from ..gitfacts import (
     discard_impl_leftovers,
     flush_pending_push,
@@ -75,12 +76,23 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
     standalone = not state.get("workflow_step")
     state["phase"] = "final"
 
+    state.pop("launch_failure", None)
+    # 手元でテストの全体テストを走らせたときは、静的解析もテストの実行秒数を差し引いた上限で数える（1 回の全体検証を
+    # 1 つの `whole_timeout` に収める。test-run.py の whole と同じ）。落ちたテストの見分けの時間は上限の外に置く。
+    # 使い回し・CI で見るときは手元で走らないので渡さない。
+    whole_started: Optional[float] = None
     if _reusable_whole_test(state):
         gate["whole_test_reused"] = True
         passed, detail = True, "検証の中で通った全体テストを使い回しました（HEAD は進んでいません）"
         gate["mode"] = "test"
     else:
-        passed, detail = _run_and_record_gate_check(path, state, gate)
+        passed, detail, test_seconds = _run_and_record_gate_check(path, state, gate)
+        if gate.get("mode") == "test":
+            whole_started = time.monotonic() - test_seconds
+    lint_passed, lint_detail = gate_lint.lint_gate(path, state, gate, started=whole_started)
+    if lint_detail:
+        detail = f"{detail} / {lint_detail}"
+    passed = passed and lint_passed
 
     if passed and standalone:
         _emit_cross_review(
@@ -148,14 +160,17 @@ def _reusable_whole_test(state: dict[str, Any]) -> bool:
     return bool(head) and head == record.get("head")
 
 
-def _run_and_record_gate_check(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]) -> tuple[bool, str]:
-    """最終ゲートのチェックを 1 回走らせ、`checks` へ記録して結果を返す。落ちたら見分け、変更起因が無ければ通す。"""
+def _run_and_record_gate_check(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]) -> tuple[bool, str, float]:
+    """最終ゲートのチェックを 1 回走らせ、`checks` へ記録して結果を返す。落ちたら見分け、変更起因が無ければ通す。
+
+    3 つ目はチェックそのものの実行秒数（見分けの時間を含まない）。静的解析の上限の起点に使う。
+    """
     # **排他である。** CI で見るなら手元のテストを実行せず継続的統合の結論だけで判定し、無ければ
     # 手元のテストだけで判定する。「どちらか一方が通れば通過」とはしない。
     ci = ci_mode(state)
     gate["mode"] = "ci" if ci else "test"
     started = time.monotonic()
-    passed, detail, verdict = ci_gate(state) if ci else _local_gate(state)
+    passed, detail, verdict = ci_gate(state) if ci else _local_gate(path, state)
     seconds = round(time.monotonic() - started, 1)
     if not passed and verdict is not None:
         # 落ちたテストを見分ける。変更起因が無ければ通す（I5・決定 11）。
@@ -177,14 +192,14 @@ def _run_and_record_gate_check(path: pathlib.Path, state: dict[str, Any], gate: 
         # 履歴の `whole_test.final`（AC17）。修正の後に走らせ直したときは足し込む。
         gate["whole_test_seconds"] = round(float(gate.get("whole_test_seconds") or 0.0) + seconds, 1)
     statefile.save(path, state)
-    return passed, detail
+    return passed, detail, seconds
 
 
 def _gate_command(state: dict[str, Any]) -> str:
     """記録に残す最終ゲートの相手（チェックの名前か全体テストのコマンド）。"""
     if ci_mode(state):
         return " / ".join(ci_checks(state))
-    return " && ".join(timeline.strategy_of(state).whole_commands())
+    return " && ".join(timeline.strategy_of(state).whole_commands(ts.TEST))
 
 
 def _emit_cross_review(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], message: str) -> None:
@@ -453,9 +468,14 @@ def cmd_merge_final_fix(args: argparse.Namespace) -> None:
     push_with_retry_marker(path, state, gate)
 
 
-def _local_gate(state: dict[str, Any]) -> tuple[bool, str, Optional[dict[str, Any]]]:
-    """全体テストを手元で実行する（I4: `local-scoped-ci-whole` では呼ばない）。3 つ目は落ちたときの見分けの材料。"""
-    commands = timeline.strategy_of(state).whole_commands()
+def _local_gate(path: pathlib.Path, state: dict[str, Any]) -> tuple[bool, str, Optional[dict[str, Any]]]:
+    """テストの種別の全体テストを手元で実行する（I4: `local-scoped-ci-whole` では呼ばない）。3 つ目は落ちたときの見分けの材料。
+
+    起動の失敗なら止める（#1483 E7）。静的解析は `_lint_gate` が走らせる。
+    """
+    commands = timeline.strategy_of(state).whole_commands(ts.TEST)
+    if not commands:
+        return True, "テストの種別の全体テストが無い", None
     work = work_dir(state)
     timeout = timeline.state_whole_timeout(state)
     triage.clear_junit(state)
@@ -463,6 +483,9 @@ def _local_gate(state: dict[str, Any]) -> tuple[bool, str, Optional[dict[str, An
     for command in commands:
         # 上限は suite 群全体で 1 つ（test-run.py の whole と同じ）
         code, timed_out = test_triage.run_within(timeout, started, lambda left, command=command: run_with_timeout(command, work, left))
+        result = ts.outcome(code, timed_out)
+        if result.launch_failed:
+            launch.stop(path, state, "gate", command, result)
         if timed_out:
             return False, f"{command} が {timeout} 秒で終わりませんでした", {"timed_out": True}
         if code != 0:

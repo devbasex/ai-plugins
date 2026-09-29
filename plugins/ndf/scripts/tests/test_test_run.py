@@ -19,9 +19,16 @@ def mod():
     return module
 
 
-def _whole(mod, monkeypatch, tmp_path, seconds_per_suite):
-    """3 本の suite が各 `seconds_per_suite` 秒かかる全体テストを、上限 100 秒で走らせる。渡した上限の並びを返す。"""
-    strategy = types.SimpleNamespace(name="local-full", source="test", whole_on_ci=False, whole_commands=lambda: ["a", "b", "c"])
+def _whole(mod, monkeypatch, tmp_path, seconds_per_suite, lint=(), tests=("a", "b", "c")):
+    """suite が各 `seconds_per_suite` 秒かかる全体テスト（静的解析 `lint` → テスト `tests`）を、上限 100 秒で走らせる。
+    渡した上限の並びを返す。"""
+    strategy = types.SimpleNamespace(
+        name="local-full",
+        source="test",
+        whole_on_ci=False,
+        suites=[],
+        whole_commands=lambda kind=None: list(lint) if kind == "lint" else list(tests),
+    )
     monkeypatch.setattr(mod, "_resolve", lambda root, template: (strategy, {"whole_timeout": 100, "test_timeout": 100}, []))
     monkeypatch.setattr(mod.test_triage, "clear_junit", lambda work, s: None)
     now = [0.0]
@@ -46,6 +53,20 @@ def test_later_suites_get_only_the_seconds_left(mod, monkeypatch, tmp_path, caps
     code, given = _whole(mod, monkeypatch, tmp_path, 30)
     assert code == 0
     assert given == [100, 70, 40]
+
+
+def test_lint_and_tests_share_one_limit(mod, monkeypatch, tmp_path, capsys):
+    """静的解析の後のテストは、静的解析が使った残りの秒だけで走る（種別ごとに上限を丸ごと渡さない）。"""
+    code, given = _whole(mod, monkeypatch, tmp_path, 30, lint=("l",), tests=("a", "b"))
+    assert code == 0
+    assert given == [100, 70, 40]
+
+
+def test_tests_after_lint_stop_at_the_shared_limit(mod, monkeypatch, tmp_path, capsys):
+    code, given = _whole(mod, monkeypatch, tmp_path, 40, lint=("l",), tests=("a", "b"))
+    assert code != 0
+    assert given == [100, 60, 20], "静的解析の 40 秒を差し引いた残りでテストが打ち切られる"
+    assert "全体テストが 100 秒で終わらなかった" in capsys.readouterr().out
 
 
 def test_the_limit_is_shared_so_the_suites_cannot_run_n_times_longer(mod, monkeypatch, tmp_path, capsys):
@@ -92,3 +113,122 @@ def test_scope_suites_cannot_run_n_times_longer(mod, monkeypatch, tmp_path, caps
     code, given = _scope(mod, monkeypatch, tmp_path, 60)
     assert code != 0
     assert given == [100, 40], "2 本目は残りの 40 秒だけを受け取る"
+
+
+# ---------- #1483: 種別・シェル経由・起動の失敗（一時リポジトリで実際に走らせる） ----------
+
+
+def _repo(tmp_path, decl=None):
+    import json
+    import subprocess
+
+    root = tmp_path / "repo"
+    (root / ".ndf").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "i"], check=True
+    )
+    if decl is not None:
+        (root / ".ndf" / "project.json").write_text(json.dumps(decl), encoding="utf-8")
+    return root
+
+
+def _run(root, *args):
+    import json
+    import subprocess
+    import sys
+
+    p = subprocess.run([sys.executable, str(SCRIPT), *args, "--root", str(root)], capture_output=True, text=True)
+    return p.returncode, json.loads(p.stdout.strip().splitlines()[-1])
+
+
+def test_a_launch_failure_is_not_a_failure(tmp_path):
+    """AC12 — 起動できないコマンドは終了コード 2 と `items[].launch_failed`、落ちたコマンドは 1。"""
+    root = _repo(tmp_path)
+    (root / "a.sh").write_text("echo hi\n", encoding="utf-8")
+    code, out = _run(root, "scope", "--paths", "a.sh", "--template", "nosuchcmd_1483 {paths}")
+    assert code == 2 and out["items"][0]["launch_failed"]["code"] == 127
+    assert "nosuchcmd_1483 a.sh" in out["summary"] and out["items"][0]["launch_failed"]["command"] == "nosuchcmd_1483 a.sh"
+    code, out = _run(root, "whole", "--template", "nosuchcmd_1483 {paths}")
+    assert code == 2 and out["items"][0]["launch_failed"]["command"] == "nosuchcmd_1483 ."
+    code, out = _run(root, "scope", "--paths", "a.sh", "--template", "false {paths}", "--test-kind", "lint", "--changed", "a.sh")
+    assert code == 1 and not any("launch_failed" in i for i in out["items"])
+
+
+def test_a_scope_template_with_cd_runs_through_the_shell(tmp_path):
+    """AC9 — `(cd sub && ... {paths})` の範囲テストが、起動の失敗にならずに走る。"""
+    root = _repo(tmp_path)
+    (root / "sub").mkdir()
+    (root / "sub" / "t.txt").write_text("x", encoding="utf-8")
+    code, out = _run(root, "scope", "--paths", "t.txt", "--template", "(cd sub && test -f {paths})")
+    assert code == 0, out
+
+
+def test_a_lint_template_never_runs_on_the_whole_directory(tmp_path):
+    """AC5・AC17（test-run.py）— 静的解析の雛形は `{paths}` を `.` にせず、`--paths` で埋める。"""
+    root = _repo(tmp_path)
+    (root / "a.sh").write_text("echo hi\n", encoding="utf-8")
+    template = "sh -c 'for f; do test -f \"$f\" || exit 9; done' x {paths}"
+    code, out = _run(root, "whole", "--template", template, "--test-kind", "lint", "--paths", "a.sh")
+    assert code == 0, out
+    code, out = _run(root, "whole", "--template", template, "--test-kind", "lint")
+    assert code != 0 and any(i.get("note", "").startswith("静的解析の雛形に") for i in out["items"])
+
+
+def test_the_declared_lint_suite_runs_on_the_changed_files(tmp_path):
+    """AC8（test-run.py scope）— 宣言の静的解析の suite は、変更したファイルのうち `paths` に当たるものにかかる。"""
+    decl = {
+        "test": {
+            "suites": [
+                {
+                    "name": "sh",
+                    "runner": "sh",
+                    "kind": "lint",
+                    "scope_command": "sh -c 'for f; do sh -n \"$f\" || exit 1; done' x {paths}",
+                    "paths": ["*.sh"],
+                },
+            ]
+        }
+    }
+    root = _repo(tmp_path, decl)
+    (root / "good.sh").write_text("echo hi\n", encoding="utf-8")
+    (root / "bad.sh").write_text("if\n", encoding="utf-8")
+    (root / "README.md").write_text("if\n", encoding="utf-8")
+    code, _ = _run(root, "scope", "--paths", "x", "--changed", "good.sh", "README.md")
+    assert code == 0
+    code, out = _run(root, "scope", "--paths", "x", "--changed", "good.sh", "bad.sh")
+    assert code == 1 and "x good.sh bad.sh" in str(out["items"])
+
+
+def test_a_declared_round_only_lint_failure_is_a_caused_lint_failure(tmp_path):
+    """宣言から導いた round-only の静的解析の suite が落ちたら、判断不能（2）でなく変更起因の静的解析（1）。"""
+    decl = {
+        "test": {
+            "strategy": "round-only",
+            "suites": [
+                {"name": "unit", "runner": "sh", "kind": "test", "command": "true"},
+                {"name": "sh", "runner": "sh", "kind": "lint", "command": "false"},
+            ],
+        }
+    }
+    root = _repo(tmp_path, decl)
+    code, out = _run(root, "scope", "--paths", "x")
+    assert code == 1, out
+    assert "JUnit を読まない" not in out["summary"] and "静的解析が落ちた" in out["summary"]
+
+
+def test_a_round_only_lint_failure_wins_over_an_undecidable_test_failure(tmp_path):
+    """round-only でテストと静的解析が同時に落ちても、確定した静的解析の失敗で変更起因（1）にする。"""
+    decl = {
+        "test": {
+            "strategy": "round-only",
+            "suites": [
+                {"name": "unit", "runner": "sh", "kind": "test", "command": "false"},
+                {"name": "sh", "runner": "sh", "kind": "lint", "command": "false"},
+            ],
+        }
+    }
+    root = _repo(tmp_path, decl)
+    code, out = _run(root, "scope", "--paths", "x")
+    assert code == 1, out
+    assert "静的解析が落ちた" in out["summary"]

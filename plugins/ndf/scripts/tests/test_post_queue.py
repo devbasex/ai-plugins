@@ -71,6 +71,30 @@ def test_flush_skips_posted_sends_success_and_stops_at_rate_limit(tmp_path: path
     ]
 
 
+def test_flush_ignores_json_files_without_a_sequence_name(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """待ち行列のディレクトリに置かれた連番でない JSON は項目として読まず、触らない。"""
+    other = tmp_path / "fix-pr1500-decisions.json"
+    other.write_text(json.dumps({"decisions": []}), encoding="utf-8")
+    _write_item(tmp_path, 1)
+    seen: list[int] = []
+
+    def posted_match(item):
+        seen.append(item["seq"])
+        return False, None
+
+    monkeypatch.setattr(post_queue, "posted_match", posted_match)
+    monkeypatch.setattr(post_queue, "send", lambda item: post_queue.Attempt(0, '{"id": 1}', ""))
+
+    queue = post_queue.Queue(tmp_path)
+    result = queue.flush()
+
+    assert seen == [1]
+    assert [item["seq"] for item in result.sent] == [1]
+    assert result.failed is None and result.remaining == 0
+    assert queue.paths() == [] and queue.count() == 0
+    assert json.loads(other.read_text(encoding="utf-8")) == {"decisions": []}
+
+
 def test_flush_stops_at_a_normal_send_failure(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """現状固定。通常失敗でも後続を送らず、上限とは区別する。"""
     paths = [_write_item(tmp_path, seq) for seq in range(1, 3)]

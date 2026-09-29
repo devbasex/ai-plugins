@@ -595,3 +595,77 @@ def test_22_unresolvable_repo_returns_2_without_reading(fake, tmp_path, monkeypa
     assert out.returncode == 2, (out.stdout, out.stderr)
     assert "リポジトリを決められません" in out.stderr
     assert not fake.calls()
+
+
+# --- 作る時点の本文（render） ---------------------------------------------------
+
+
+def design_checkout(tmp_path, branch="design/issue-1-x"):
+    """起点（origin/develop）から設計文書と要求を足したブランチの作業場所を作る。"""
+    repo = tmp_path / "work"
+    repo.mkdir()
+
+    def git(*args):
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+
+    git("init", "-q", "-b", "develop")
+    git("config", "user.email", "t@example.com")
+    git("config", "user.name", "t")
+    (repo / "README.md").write_text("# r\n\n## 決定の記録\n\n### 起点の決定は数えない\n", encoding="utf-8")
+    git("add", ".")
+    git("commit", "-q", "-m", "base")
+    git("update-ref", "refs/remotes/origin/develop", "HEAD")
+    git("checkout", "-q", "-b", branch)
+    (repo / "issues").mkdir()
+    (repo / "issues" / "issue-1-design.md").write_text(DESIGN, encoding="utf-8")
+    (repo / "issues" / "issue-1-requirements.md").write_text("# 要求\n\n本文\n", encoding="utf-8")
+    git("add", ".")
+    git("commit", "-q", "-m", "design")
+    return repo
+
+
+def render(fake, repo, body, *extra):
+    src = fake.dir / "body.md"
+    src.write_text(body, encoding="utf-8")
+    return fake.run("render", "--base", "develop", "--body", str(src), *extra, cwd=str(repo))
+
+
+def test_30_render_places_section_like_sync_without_reading_github(fake, tmp_path):
+    repo = design_checkout(tmp_path)
+    body = "## Summary\n\n- 要約\n\n## Test plan\n\n- [ ] 何か\n"
+    out = render(fake, repo, body)
+    assert out.returncode == 0, out.stderr
+    assert not fake.calls()
+    assert out.stdout == "## Summary\n\n- 要約\n\n" + EXPECTED + "\n## Test plan\n\n- [ ] 何か\n"
+    # 作った本文のまま PR にすれば sync は書き込まない（本文の編集で CI を再起動しない）
+    design_pr(fake, out.stdout)
+    assert fake.run("sync", "7", "--repo", REPO).returncode == 0
+    assert not fake.writes()
+
+
+def test_30_render_leaves_matching_body_unchanged(fake, tmp_path):
+    repo = design_checkout(tmp_path)
+    body = "## Summary\n\n" + EXPECTED
+    out = render(fake, repo, body)
+    assert out.returncode == 0 and out.stdout == body
+
+
+def test_31_render_leaves_non_design_branch_unchanged(fake, tmp_path):
+    repo = design_checkout(tmp_path, branch="feature/issue-1-x")
+    out = render(fake, repo, "## Summary\n")
+    assert out.returncode == 0 and out.stdout == "## Summary\n"
+
+
+def test_32_render_without_base_ref_returns_2_and_prints_nothing(fake, tmp_path):
+    repo = design_checkout(tmp_path)
+    src = fake.dir / "body.md"
+    src.write_text("## Summary\n", encoding="utf-8")
+    out = fake.run("render", "--base", "main", "--body", str(src), cwd=str(repo))
+    assert out.returncode == 2 and out.stdout == ""
+
+
+@pytest.mark.parametrize("args", [["render"], ["render", "--base", "develop"], ["render", "--body", "x"], ["render", "7"]])
+def test_32_render_usage_errors_return_3(fake, args):
+    out = fake.run(*args)
+    assert out.returncode == 3, (args, out.stdout, out.stderr)
+    assert not fake.calls()

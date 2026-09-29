@@ -103,6 +103,16 @@ NEEDS = {
 }
 
 
+def test_kind(a) -> str:
+    """`--test-cmd` の雛形の種別（`--test-kind`。既定はテスト。#1483 決定 3）。"""
+    return getattr(a, "test_kind", None) or "test"
+
+
+def scope_paths(a) -> list[str]:
+    """静的解析の雛形の全体テストで `{paths}` に入れる範囲 = 明示した `--tests`。`.`（sprint の既定）は数えない（I4）。"""
+    return [str(t) for t in getattr(a, "tests", None) or [] if str(t) not in (".", "")]
+
+
 def apply_decls(a) -> None:
     """引数に無いものを .ndf/ の宣言から埋める。雛形に要るのにどちらにも無ければ DeclError。
 
@@ -133,9 +143,11 @@ def apply_decls(a) -> None:
     a.release = sv.get("release") or None
     decl, a.test_note = _project_decl(roots, sv)
     a.strategy, a.test_limits = None, None
+    # 静的解析の雛形の全体テストの範囲。スプリントが各計画（検査の計画を含む）へ引き継ぐ（#1483）
+    a.test_paths = getattr(a, "test_paths", None) or scope_paths(a)
     if decl.get("test") is not None or a.test_cmd:
         try:
-            strategy = ts.resolve(decl, baseline_test=a.test_cmd)
+            strategy = ts.resolve(decl, baseline_test=a.test_cmd, template_kind=test_kind(a), scope_paths=scope_paths(a))
         except ts.StrategyError as e:
             raise DeclError(str(e)) from e
         w, w_source = ts.whole_seconds(decl)
@@ -210,6 +222,8 @@ def decl_fields(a) -> dict:
         "base",
         "production_branch",
         "test_cmd",
+        "test_kind",
+        "test_paths",
         "test_all",
         "no_reports",
         "sync_checks",

@@ -63,39 +63,49 @@ def code_matches(status: str, code: int) -> bool:
     return code in (EXIT_VIOLATION, EXIT_UNREADABLE, EXIT_PRECONDITION)
 
 
-def validate_result(obj, code: int | None = None) -> list[str]:
-    """結果の形の誤りを並べて返す。空なら正しい。code を渡すと status との対応も確かめる。"""
-    if not isinstance(obj, dict):
-        return ["結果はオブジェクトで書く"]
-    errs = []
-    for k in REQUIRED:
-        if k not in obj:
-            errs.append(f"{k} が無い")
-    unknown = set(obj) - set(REQUIRED) - set(OPTIONAL)
-    if unknown:
-        errs.append(f"知らない項目: {', '.join(sorted(unknown))}")
+def _check_item_types(obj: dict, errs: list[str]) -> None:
+    if "items" not in obj:
+        return
+    if not isinstance(obj["items"], list):
+        errs.append("items は配列で書く")
+        return
+    for i, it in enumerate(obj["items"]):
+        if not isinstance(it, dict):
+            errs.append(f"items[{i}] はオブジェクトで書く")
+
+
+def _check_field_types(obj: dict, errs: list[str]) -> None:
     if "tool" in obj and (not isinstance(obj["tool"], str) or not obj["tool"]):
         errs.append("tool は空でない文字列で書く")
     if "status" in obj and obj["status"] not in STATUSES:
         errs.append(f"status は {' / '.join(STATUSES)} のどれか: {obj['status']!r}")
     if "summary" in obj and not isinstance(obj["summary"], str):
         errs.append("summary は文字列で書く")
-    if "items" in obj:
-        if not isinstance(obj["items"], list):
-            errs.append("items は配列で書く")
-        else:
-            for i, it in enumerate(obj["items"]):
-                if not isinstance(it, dict):
-                    errs.append(f"items[{i}] はオブジェクトで書く")
+    _check_item_types(obj, errs)
     if "metrics" in obj and not isinstance(obj["metrics"], dict):
         errs.append("metrics はオブジェクトで書く")
     for k in OPTIONAL:
         if k in obj and obj[k] is not None and not isinstance(obj[k], str):
             errs.append(f"{k} は文字列で書く")
+
+
+def _check_status_code(obj: dict, code: int | None, errs: list[str]) -> None:
     if obj.get("status") == "gate" and not obj.get("presentation_path") and not obj.get("next"):
         errs.append("gate には presentation_path か next を添える")
     if code is not None and obj.get("status") in STATUSES and not code_matches(obj["status"], code):
         errs.append(f"status {obj['status']} と終了コード {code} が合わない")
+
+
+def validate_result(obj, code: int | None = None) -> list[str]:
+    """結果の形の誤りを並べて返す。空なら正しい。code を渡すと status との対応も確かめる。"""
+    if not isinstance(obj, dict):
+        return ["結果はオブジェクトで書く"]
+    errs = [f"{k} が無い" for k in REQUIRED if k not in obj]
+    unknown = set(obj) - set(REQUIRED) - set(OPTIONAL)
+    if unknown:
+        errs.append(f"知らない項目: {', '.join(sorted(unknown))}")
+    _check_field_types(obj, errs)
+    _check_status_code(obj, code, errs)
     return errs
 
 

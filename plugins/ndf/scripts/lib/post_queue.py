@@ -514,10 +514,14 @@ class Queue:
         self.dir = pathlib.Path(directory)
 
     def paths(self) -> list[pathlib.Path]:
-        """連番の順に並べた項目のファイル。"""
+        """連番の順に並べた項目のファイル。
+
+        **連番の名前（`put` が書く `{seq:04d}-{kind}-{ident}.json`）に合うものだけを返す。**
+        同じディレクトリに置かれた別の JSON を項目として読むと、`kind` などの欠けで落ちる。
+        """
         if not self.dir.is_dir():
             return []
-        return sorted(self.dir.glob("*.json"), key=lambda p: p.name)
+        return sorted((p for p in self.dir.glob("*.json") if _SEQ_RE.match(p.name)), key=lambda p: p.name)
 
     def count(self) -> int:
         return len(self.paths())

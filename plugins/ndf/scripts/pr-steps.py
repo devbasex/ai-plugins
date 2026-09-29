@@ -42,6 +42,7 @@ from step_result import (
 )
 import gh_parts  # noqa: E402
 import repo  # noqa: E402
+import tool_paths  # noqa: E402
 from pr_mode import needs_review, pr_target, split_stages, with_mode_line  # noqa: E402
 
 TOOL = "pr"
@@ -190,7 +191,7 @@ def cmd_plan(a):
             ),
             EXIT_PRECONDITION,
         )
-    status = [l for l in git(root, "status", "--short").stdout.splitlines() if l.strip()]
+    status, tool_status = tool_paths.split_status(root, tool_paths.load_or_stop(root, EXIT_UNREADABLE))  # #1436
     ref = compare_ref(root, base)
     nums = diff_numbers(root, ref)
     in_commits = []
@@ -204,6 +205,9 @@ def cmd_plan(a):
     items.append(
         {"kind": "changes", "name": f"{len(status)} 件の未コミット", "result": "uncommitted" if status else "clean", "files": status[:50]}
     )
+    if tool_status:
+        n = f"{len(tool_status)} 件のツールのパスの変更（コミットしない）"
+        items.append({"kind": "tool_paths", "name": n, "result": "excluded", "files": tool_status[:50]})
     for sha in in_commits:
         items.append({"kind": "commit", "name": sha, "result": "closing_word"})
     metrics = {
@@ -271,17 +275,22 @@ def cmd_commit(a):
                 {"branch": branch, "closing_words": words},
             )
         )
+    entries = tool_paths.load_or_stop(root, EXIT_UNREADABLE)
     git(root, "add", "-A")
-    if not git(root, "status", "--porcelain").stdout.strip():
-        emit(result(TOOL, "ok", "コミットする変更が無い", [], {"branch": branch, "committed": False}))
+    # ツールのパス（#1436）は index から外すだけで中身は残す。worktree に変更が残るため、有無は index で決める
+    unstaged = tool_paths.unstage(root, entries)
+    tool_items = [{"kind": "tool_paths", "name": " ".join(unstaged), "result": "unstaged"}] if unstaged else []
+    hint = f"。{tool_paths.describe(unstaged)}（意図した変更なら git commit で直接コミットする）" if unstaged else ""
+    if git(root, "diff", "--cached", "--quiet", check=False).returncode == 0:
+        emit(result(TOOL, "ok", f"コミットする変更が無い{hint}", tool_items, {"branch": branch, "committed": False}))
     run(["git", "-C", str(root), "commit", "-q", "-m", msg])
     sha = git(root, "rev-parse", "HEAD").stdout.strip()
     emit(
         result(
             TOOL,
             "ok",
-            f"コミットした: {sha[:12]} {msg.splitlines()[0][:80]}",
-            [{"kind": "commit", "name": sha[:12], "result": "committed"}],
+            f"コミットした: {sha[:12]} {msg.splitlines()[0][:80]}{hint}",
+            [{"kind": "commit", "name": sha[:12], "result": "committed"}, *tool_items],
             {"branch": branch, "committed": True, "sha": sha},
         )
     )

@@ -82,6 +82,16 @@ def _verify_result(finding: dict[str, Any]) -> str:
     return str((v or {}).get("result") or "not_run")
 
 
+def verify_rank_of(result: str) -> int:
+    """実行の結果（`verification.result`）の強さ。知らない結果は -1。"""
+    return _VERIFY_RANK.get(result, -1)
+
+
+def verify_rank(finding: dict[str, Any]) -> int:
+    """指摘の実行の結果の強さ。"""
+    return verify_rank_of(_verify_result(finding))
+
+
 def _verdicts(finding: dict[str, Any], verdict: str) -> list[str]:
     """その値を返した担当の一覧。"""
     return [str(c.get("agent")) for c in finding.get("critiques") or [] if c.get("verdict") == verdict]
@@ -178,7 +188,7 @@ def _absorb(rep: dict[str, Any], other: dict[str, Any]) -> None:
     # **実行の結果は組から選び直す。** `reproduced` > `not_reproduced` > `not_run` の
     # 順で採り、出所を残す。**実行し直さない**（2 段目は反証の後にあり、その時点では
     # 組の全員が `verification` を持っている）。
-    if _VERIFY_RANK.get(_verify_result(other), -1) > _VERIFY_RANK.get(_verify_result(rep), -1):
+    if verify_rank(other) > verify_rank(rep):
         rep["verification"] = other.get("verification")
 
     # **根拠の対は同じ要素から採る。** `evidence` だけの要素と `falsification` だけの

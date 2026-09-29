@@ -273,6 +273,10 @@ while ループ脱出後にメインが以下のプロンプトでサブエー�
 > **修正をコミットした場合は、対象リポジトリの検証を 1 度通すこと。** 何を実行するかは
 > 対象リポジトリを見て決める。**コマンドを推測して組み立てない。**
 >
+> 対象リポジトリに `.ndf/project.json` の `test` があれば、駆動（`drive.py`）がプロンプトに宣言の全体テスト
+> （テストと静的解析の両方の suite の `command`）を並べる。そのときは並んだコマンドを順に実行し、下の探し方は使わない。
+> 起動の引数 `--verify-command`（実行検証 Step 2.5 の許可の一覧）は、ここでは使わない。宣言が無いときだけ次の手順で探す。
+>
 > 1. 実行手段を探す。`Makefile` の `test` / `lint` / `check` ターゲット、`package.json` の
 >    `scripts`、`pyproject.toml` の `[tool.pytest.ini_options]`、`composer.json` の
 >    `scripts`、継続的統合の定義（`.github/workflows/*.yml`）が実行しているコマンド。

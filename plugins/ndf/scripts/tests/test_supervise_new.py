@@ -568,3 +568,18 @@ def test_plan_promote_with_mvv_judges_before_merging(tmp_path):
     assert steps["promote"]["cmd"].endswith("--gate-approved mvv") and steps["promote"]["on_fail"] == "handoff"
     assert steps["note"]["on_fail"] == "handoff" and steps["handoff"]["gate_next"] == "end"
     assert plan["base_branch"] == "develop"
+
+
+def test_a_lint_test_cmd_never_builds_a_whole_test_on_the_dot(tmp_path):
+    """#1483 AC18 — 静的解析の `--test-cmd` は `{paths}` を `.` にした全体テストを組まず、`--tests` の範囲を `test-run.py` へ渡す。"""
+    root = plain_repo(tmp_path, {"form": "package-plugin", "plugin": "foo", "runtimes": ["claude"]})
+    out = tmp_path / "m"
+    p = new_sprint(root, out, "--test-cmd", "shellcheck -s bash {paths}", "--test-kind", "lint", "--tests", "scripts/a.sh")
+    assert p.returncode == 0, p.stderr
+    wholes = [
+        s["cmd"]
+        for f in sorted(out.glob("*.json"))
+        for s in json.loads(f.read_text()).get("steps") or []
+        if "test-run.py whole" in str(s.get("cmd"))
+    ]
+    assert wholes and all("--test-kind lint" in c and c.endswith("--paths scripts/a.sh") for c in wholes)

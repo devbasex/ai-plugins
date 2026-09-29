@@ -25,7 +25,7 @@ from .gitfacts import run_with_timeout
 from .paths import work_dir
 
 
-def _run(command: Any, cwd: str, timeout: int, log: Optional[pathlib.Path]) -> tuple[Optional[int], bool]:
+def run_test(command: Any, cwd: str, timeout: int, log: Optional[pathlib.Path]) -> tuple[Optional[int], bool]:
     return run_with_timeout(command, cwd, timeout, output=log)
 
 
@@ -74,12 +74,12 @@ def classify(state: dict[str, Any], timed_out: bool, ci_xmls: Optional[list[byte
         timeout=timeline.state_test_timeout(state),
         log_dir=pathlib.Path(state["tmp_dir"]),
         existing_failures=existing_failures(state),
-        run=_run,
+        run=run_test,
     )
-    words = result.pop("rerun_words", [])
-    # 変更起因のファイルだけを走らせ直す語の並び。修正担当へ渡し、取り消しの判定にも使う。
-    result["rerun_commands"] = words
-    result["rerun_command"] = words[0] if words else None
+    commands = list(result.get("rerun_commands") or [])
+    # 変更起因のファイルだけを走らせ直すコマンド（シェルで走らせる文字列）。修正担当へ渡し、取り消しの判定にも使う。
+    result["rerun_commands"] = commands
+    result["rerun_command"] = commands[0] if commands else None
     result["rerun_log"] = str(pathlib.Path(state["tmp_dir"]) / "rerun-*.log")
     return result
 
