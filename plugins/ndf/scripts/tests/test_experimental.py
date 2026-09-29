@@ -187,6 +187,54 @@ def test_issue_body_refuses_paths_only_on_this_machine(tmp_path):
     assert not (tmp_path / "gh.log").exists()  # gh は呼ばない
 
 
+def _run_body(tmp_path, clone, env, text, *extra):
+    body = tmp_path / "body.md"
+    body.write_text(text)
+    # 読み直しは書いた本文をそのまま返す
+    (tmp_path / "bin" / "gh").write_text(f'#!/bin/sh\necho called >> "$FAKE_GH_LOG"\n[ "$2" = view ] && cat {body}\nexit 0\n')
+    p = subprocess.run(
+        [sys.executable, str(EXP / "issue-body.py"), "set", "1", str(body), *extra], cwd=clone, env=env, capture_output=True, text=True
+    )
+    return p, json.loads(p.stdout.strip().splitlines()[-1])
+
+
+def _commit_on_branch(clone, push):
+    def run(*a):
+        subprocess.run(a, cwd=clone, check=True, capture_output=True, text=True)
+
+    run("git", "switch", "-q", "-c", "design/x")
+    run("git", "add", "issues/local-only.md")
+    run("git", "commit", "-qm", "design")
+    if push:
+        run("git", "push", "-q", "-u", "origin", "design/x")
+
+
+def test_issue_body_accepts_paths_pushed_to_the_current_branch(tmp_path):
+    # 設計 PR のブランチへ push 済みなら、起点のブランチへマージする前でも通し、そのブランチの blob の URL を案内する
+    clone, env = _body_repo(tmp_path)
+    _commit_on_branch(clone, push=True)
+    p, out = _run_body(tmp_path, clone, env, "要求は `issues/local-only.md` にある\n", "--repo", "o/r")
+    assert p.returncode == 0, p.stdout + p.stderr
+    pushed = [i for i in out["items"] if i["result"] == "pushed_branch"]
+    assert pushed == [
+        {
+            "number": 1,
+            "result": "pushed_branch",
+            "path": "issues/local-only.md",
+            "ref": "origin/design/x",
+            "url": "https://github.com/o/r/blob/design/x/issues/local-only.md",
+        }
+    ]
+
+
+def test_issue_body_still_refuses_paths_committed_but_not_pushed(tmp_path):
+    clone, env = _body_repo(tmp_path)
+    _commit_on_branch(clone, push=False)
+    p, out = _run_body(tmp_path, clone, env, "要求は `issues/local-only.md` にある\n")
+    assert p.returncode == 1 and [i["path"] for i in out["items"]] == ["issues/local-only.md"]
+    assert not (tmp_path / "gh.log").exists()
+
+
 def test_review_terms_count_counts_findings_without_replies(tmp_path):
     """review-terms-count.py: 返信を除いた指摘を、語・定義と食い違いの語の並びで数える（1 件が両方に当たりうる）。"""
     comments = [

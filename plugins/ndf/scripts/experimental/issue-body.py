@@ -9,6 +9,8 @@
 書き込む前に、本文が `…` で指すリポジトリのパスのうち、手元にはあるが origin の起点のブランチ
 （`.ndf/worktree.json` の `base_branch`、無ければ origin/HEAD）に無いものを探す。あれば GitHub から
 読めない参照として、書かずに 1 で終わる（コミット前の `issues/` のファイルを指して済ませないため）。
+ただし push 済みのリモートのブランチ（現在のブランチの upstream か `origin/<現在のブランチ>`）に
+あれば通し、そのブランチの blob の URL を結果に出す（設計 PR のブランチをマージする前に本文を書き直すため）。
 どこにも無いパス（これから作るファイル）は見ない。
 """
 
@@ -51,22 +53,55 @@ def base_ref(root: Path) -> str | None:
     return "origin/main" if git(root, "rev-parse", "-q", "--verify", "origin/main").returncode == 0 else None
 
 
-def local_only_paths(text: str) -> list[str]:
-    """手元にはあるが、origin の起点のブランチに無いパスを返す（リポジトリの外なら空）。"""
+def pushed_refs(root: Path, base: str) -> list[str]:
+    """push 済みのリモートのブランチ（現在のブランチの upstream と `origin/<現在のブランチ>`）。起点は除く。"""
+    refs = []
+    up = git(root, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
+    if up.returncode == 0 and up.stdout.strip().startswith("origin/"):
+        refs.append(up.stdout.strip())
+    cur = git(root, "branch", "--show-current").stdout.strip()
+    if cur and git(root, "rev-parse", "-q", "--verify", f"refs/remotes/origin/{cur}").returncode == 0:
+        refs.append(f"origin/{cur}")
+    return [r for r in dict.fromkeys(refs) if r != base]
+
+
+def blob_base(root: Path, repo: str | None) -> str | None:
+    """GitHub の blob の URL の頭（`https://github.com/OWNER/REPO/blob`）。`--repo` か origin の URL から決める。"""
+    if not repo:
+        m = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$", git(root, "remote", "get-url", "origin").stdout.strip())
+        repo = m.group(1) if m else None
+    return f"https://github.com/{repo}/blob" if repo else None
+
+
+def local_only_paths(text: str, repo: str | None = None) -> tuple[list[str], list[dict]]:
+    """手元にはあるが、origin の起点のブランチに無いパスを返す（リポジトリの外なら空）。
+
+    push 済みのリモートのブランチにあるものは 2 つ目の戻り値へ分け、そのブランチの blob の URL を添える。
+    """
     top = git(Path.cwd(), "rev-parse", "--show-toplevel")
     if top.returncode != 0:
-        return []
+        return [], []
     root = Path(top.stdout.strip())
     ref = base_ref(root)
     if not ref:
-        return []
-    out = []
+        return [], []
+    out, pushed = [], []
+    branches = None
     for path in dict.fromkeys(m.group(1).rstrip("/") for m in PATH_RE.finditer(text)):
         if path.startswith((".", "~", "/")) or not (root / path).exists():
             continue
-        if git(root, "cat-file", "-e", f"{ref}:{path}").returncode != 0:
+        if git(root, "cat-file", "-e", f"{ref}:{path}").returncode == 0:
+            continue
+        if branches is None:
+            branches = pushed_refs(root, ref)
+        hit = next((b for b in branches if git(root, "cat-file", "-e", f"{b}:{path}").returncode == 0), None)
+        if hit is None:
             out.append(path)
-    return out
+            continue
+        base = blob_base(root, repo)
+        url = f"{base}/{hit.removeprefix('origin/')}/{path}" if base else None
+        pushed.append({"path": path, "ref": hit, "url": url})
+    return out, pushed
 
 
 def first_diff(a: str, b: str) -> dict:
@@ -88,7 +123,7 @@ def main() -> int:
     a = ap.parse_args()
     repo = ["--repo", a.repo] if a.repo else []
     want = Path(a.file).read_text()
-    missing = local_only_paths(want)
+    missing, pushed = local_only_paths(want, a.repo)
     if missing:
         emit(
             result(
@@ -128,8 +163,16 @@ def main() -> int:
         result(
             TOOL,
             "ok",
-            f"#{a.number} の本文を書き直し、読み直して一致を確かめた",
-            [{"number": a.number, "result": "matched", "lines": len(norm(want).splitlines())}],
+            f"#{a.number} の本文を書き直し、読み直して一致を確かめた"
+            + (
+                f"。起点へ未マージで push 済みのブランチにだけあるパス: {'・'.join(x['url'] or x['path'] for x in pushed)}"
+                if pushed
+                else ""
+            ),
+            [
+                {"number": a.number, "result": "matched", "lines": len(norm(want).splitlines())},
+                *({"number": a.number, "result": "pushed_branch", **x} for x in pushed),
+            ],
         )
     )
 
