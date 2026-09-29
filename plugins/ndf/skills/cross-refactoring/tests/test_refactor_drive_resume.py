@@ -61,7 +61,7 @@ class FakeRefactor:
             # 実機と同じく、通った最終ゲートは状態の `final_gate.status` を `passed` にする（採用を数える条件）
             self.state["final_gate"] = {"status": "passed" if self.gate in ("passed", "cross-review") else self.gate}
             self.save()
-            return 0, f"FINAL_GATE={self.gate}\n"
+            return (1 if self.gate == "failed" else 0), f"FINAL_GATE={self.gate}\n"
         if sub == "finalize":
             self.state["phase"] = "done"
             self.save()
@@ -90,6 +90,16 @@ def test_rerun_from_done_keeps_counts(tmp_path, monkeypatch, capsys):
     m = out["metrics"]
     assert code == 0 and (m["items"], m["adopted"], m["reverted"], m["fix_rounds"]) == (2, 1, 1, 2)
     assert fake.inits() == 1  # done から打ち直すと init を打たない
+
+
+def test_a_run_whose_final_gate_did_not_pass_stops_without_adopting(tmp_path, monkeypatch, capsys):
+    """AC-1399-6: 最終ゲートが `passed` でないまま終わった実行は完了にせず、採用を 0 と数える。"""
+    monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path))
+    monkeypatch.setattr(rf, "call", FakeRefactor(tmp_path, gate="failed"))
+    code, out = run_main(ARGV, capsys)
+    assert (code, out["status"]) == (1, "stopped")
+    assert out["metrics"]["exit"] == 1
+    assert (out["metrics"]["adopted"], out["metrics"]["unconfirmed"]) == (0, 1)
 
 
 def test_rerun_after_cross_review_keeps_review_status(tmp_path, monkeypatch, capsys):
