@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import re
 import urllib.parse
-from typing import Any
+from typing import Any, Callable
 
 import gh_call
 import gh_fields
@@ -158,6 +158,24 @@ def _keep_list_item(kind: str, d: dict, state: str, labels: list[str]) -> bool:
     return not (kind == "pr" and labels and not set(labels) <= {x.get("name") for x in d.get("labels") or []})
 
 
+def _rest_pages(base: str, keep: Callable[[Any], bool], shape: Callable[[Any], Any], limit: int) -> Attempt:
+    """REST の一覧をページを進めて読み、`keep` を通った項目を `shape` で整えて `limit` 件まで返す。
+    短いページが来たら終わりとみなす。"""
+    out: list[Any] = []
+    page = 1
+    while len(out) < limit:
+        a = _rest(f"{base}&page={page}")
+        if not a.ok or not isinstance(a.value, list):
+            return a if not a.ok else Attempt(None, "REST の一覧を読めない", "rest")
+        for d in a.value:
+            if keep(d):
+                out.append(shape(d))
+        if len(a.value) < PER_PAGE:
+            break
+        page += 1
+    return Attempt(out[:limit], "", "rest")
+
+
 def _list(kind: str, repo: str | None, fields: str, state: str, labels: list[str] | None, limit: int) -> Attempt:
     slug = _slug(repo)
     labels = list(labels or [])
@@ -167,19 +185,9 @@ def _list(kind: str, repo: str | None, fields: str, state: str, labels: list[str
         base = f"repos/{slug}/{gh_fields.VIEW_REST_PATH[kind]}?state={rest_state}&per_page={PER_PAGE}"
         if kind == "issue" and labels:
             base += "&labels=" + ",".join(labels)
-        out: list[dict[str, Any]] = []
-        page = 1
-        while len(out) < limit:
-            a = _rest(f"{base}&page={page}")
-            if not a.ok or not isinstance(a.value, list):
-                return a if not a.ok else Attempt(None, "REST の一覧を読めない", "rest")
-            for d in a.value:
-                if _keep_list_item(kind, d, state, labels):
-                    out.append(gh_fields.to_json_shape(kind, d, fields))
-            if len(a.value) < PER_PAGE:
-                break
-            page += 1
-        return Attempt(out[:limit], "", "rest")
+        return _rest_pages(
+            base, lambda d: _keep_list_item(kind, d, state, labels), lambda d: gh_fields.to_json_shape(kind, d, fields), limit
+        )
 
     args = [kind, "list", "--repo", slug, "--state", state, "--limit", str(limit), "--json", fields]
     for name in labels:
