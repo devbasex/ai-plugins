@@ -60,8 +60,6 @@ ISSUE_RE = re.compile(r"- 課題: ([^\n]*)")
 PHASE_RE = re.compile(r"- フェーズ: ([^\n]*)")
 WORKER_RE = re.compile(r"使った worker: 修正 (\d+)（claude -p）/ 判断 (\d+)")
 ROW_RE = re.compile(r"^\| (\S+) \| (\d+) \| ([\d.]*) \| (\d+) \| (\d+) \| (\d+) \| \$([\d.]+) \|$", re.M)
-# 報告から読んだ行の換算に使う既定のモデル（報告はモデルを持たない）
-REPORT_MODEL = "claude-opus-5-5"
 
 
 def plan_name_re(sv_root: Path) -> re.Pattern:
@@ -443,9 +441,12 @@ def _reports_from_transcripts(since: float, until: float | None, found: dict[tup
 
 
 def _report_cost(r: dict) -> tuple[float, float]:
-    # 換算: モデルと 5 分/1 時間の別が無い。既定のモデル（REPORT_MODEL）の read 倍率と、書き込み 5 分（下限）
+    # 換算: モデルと 5 分/1 時間の別が無い。既定のモデル（claude-opus-5-5）の read 倍率と、書き込み 5 分（下限）
     low = round(
-        r["input"] + r["cache_read"] * tu.read_rate(REPORT_MODEL) + r["cache_write"] * tu.WEIGHTS["w5"] + r["output"] * tu.WEIGHTS["out"],
+        r["input"]
+        + r["cache_read"] * tu.read_rate("claude-opus-5-5")
+        + r["cache_write"] * tu.WEIGHTS["w5"]
+        + r["output"] * tu.WEIGHTS["out"],
         1,
     )
     return low, round(low + r["cache_write"] * (tu.WEIGHTS["w1h"] - tu.WEIGHTS["w5"]), 1)
