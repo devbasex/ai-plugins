@@ -33,7 +33,6 @@ from ..gitfacts import (
     note_stopped,
     push_with_retry_marker,
     record_observed_model,
-    run_with_timeout,
 )
 from ..items import (
     FAILING,
@@ -58,28 +57,21 @@ from ..verify import (
 # ---------- 範囲テスト ----------
 
 
-def _run_words(state: dict[str, Any], words: Any, log: pathlib.Path) -> bool:
-    """語の並びをシェルを通さずに走らせる（AC10b）。全体テストの文字列はシェルで走らせる。打ち切りは失敗。"""
-    if isinstance(words, str):
-        code, timed_out = run_with_timeout(str(words), work_dir(state), timeline.state_whole_timeout(state), output=log)
-    else:
-        # 語の並び 1 つか、suite ごとの語の並びの並び（`targets.as_commands`）。上限は suite 群で 1 つ
-        code, timed_out = targets.run_commands(words, work_dir(state), timeline.state_test_timeout(state), log)
-    return (not timed_out) and code == 0
-
-
 def _log_path(state: dict[str, Any], item_id: str) -> pathlib.Path:
     return pathlib.Path(state["tmp_dir"]) / f"verify-{item_id}.log"
 
 
-def _run_limited(state: dict[str, Any], items: list[dict[str, Any]]) -> None:
-    """項目ごとに範囲テストを走らせ、`verified` / `failing` にする。同じ語の並びは 1 回だけ。"""
-    results: dict[tuple[tuple[str, ...], ...], tuple[bool, pathlib.Path]] = {}
+def _run_limited(path: pathlib.Path, state: dict[str, Any], items: list[dict[str, Any]]) -> None:
+    """項目ごとに範囲テスト（テストの種別と静的解析）を走らせ、`verified` / `failing` にする。同じコマンドの並びは 1 回だけ。
+
+    起動の失敗なら、その項目の状態を変えずに止まる（先に `verified` にした項目はそのまま残る。I8）。
+    """
+    results: dict[tuple[str, ...], tuple[bool, pathlib.Path]] = {}
     for item in items:
-        key = targets.command_key(item.get("command"))
+        key = targets.run_key(targets.verify_runs(state, item))
         if key not in results:
             log = _log_path(state, item["id"])
-            results[key] = (_run_words(state, [list(c) for c in key], log), log)
+            results[key] = (targets.run_or_stop(path, state, list(key), log), log)
         passed, log = results[key]
         item["status"] = VERIFIED if passed else FAILING
         item["last_log"] = str(log)
@@ -99,6 +91,7 @@ def _revert_shared(
     group: list[dict[str, Any]],
     reason: str,
     command: Any = None,
+    whole: bool = False,
 ) -> bool:
     """同じ語の並びを共有した項目を、新しい方から 1 件ずつ取り消す（AC15）。
 
@@ -115,8 +108,8 @@ def _revert_shared(
         remaining = [i for i in remaining if i.get("status") in (FAILING, IMPLEMENTED, VERIFIED)]
         if not remaining:
             return False
-        words = command if command else list(remaining[0].get("command") or [])
-        if _run_words(state, words, _log_path(state, remaining[0]["id"])):
+        words = command if command else [r.command for r in targets.verify_runs(state, remaining[0])]
+        if targets.run_or_stop(path, state, words, _log_path(state, remaining[0]["id"]), whole=bool(command) and whole):
             for item in remaining:
                 item["status"] = VERIFIED
             return True
@@ -142,10 +135,10 @@ def _give_up(path: pathlib.Path, state: dict[str, Any]) -> None:
     """修正に使える時間が尽きたら、落ちた項目を取り消す（設計の「検証と修正の繰り返し」2）。"""
     if not _fix_stop(state):
         return
-    groups: dict[tuple[tuple[str, ...], ...], list[dict[str, Any]]] = {}
+    groups: dict[tuple[str, ...], list[dict[str, Any]]] = {}
     for item in live_items(state):
         if item.get("status") == FAILING:
-            groups.setdefault(targets.command_key(item.get("command")), []).append(item)
+            groups.setdefault(targets.command_key(item), []).append(item)
     for group in groups.values():
         _revert_shared(path, state, group, f"範囲テストが{STOP_REASON}")
 
@@ -216,7 +209,7 @@ def _whole_test(path: pathlib.Path, state: dict[str, Any], flags: list[str]) -> 
     info(f"⚠ 危険フラグ（{', '.join(flags)}）が立ったため、全体テストを 1 度走らせます")
     started = time.monotonic()
     log = pathlib.Path(state["tmp_dir"]) / "verify-whole-test.log"
-    passed, timed_out, commands = wholetest.run_locally(state, log)
+    passed, timed_out, commands = wholetest.run_locally(state, log, path)
     record.update(
         {
             "ran": True,
@@ -273,11 +266,11 @@ def _fix_or_narrow(
         for item in items:
             item["status"] = FAILING
             item["last_log"] = str(log)
-            item["whole_test_command"] = list(rerun) if isinstance(rerun, list) else [str(rerun)]
+            item["whole_test_command"] = [str(rerun)] if isinstance(rerun, str) else list(rerun)
         info(f"🔧 変更起因の失敗を直しに回します（危険フラグの項目 {len(items)} 件）")
         return True
     reason = f"危険フラグで走らせた全体テストで落ちたテストが{STOP_REASON}"
-    passed = _revert_shared(path, state, items, reason, command=rerun)
+    passed = _revert_shared(path, state, items, reason, command=rerun, whole=not record.get("rerun_command"))
     record["reverted"] = True
     record["resolution"] = "narrowed"
     info(f"↩ 危険フラグの項目を新しい順に取り消しました（{'落ちたテストが通った時点で止めた' if passed else '全件'}）。{plan_line(state)}")
@@ -292,7 +285,7 @@ def _recheck_whole(path: pathlib.Path, state: dict[str, Any], record: dict[str, 
         return False
     log = pathlib.Path(state["tmp_dir"]) / "verify-whole-rerun.log"
     rerun = record.get("rerun_command") or wholetest.whole_fallback_command(state)
-    if _run_words(state, rerun, log):
+    if targets.run_or_stop(path, state, rerun, log, whole=not record.get("rerun_command"), phase="whole"):
         record["resolution"] = "fixed"
         for item in items:
             item.pop("whole_test_command", None)
@@ -325,7 +318,8 @@ def cmd_verify(args: argparse.Namespace) -> None:
     _prepare(path, state)
     state["phase"] = "verify"
     started = time.monotonic()
-    _run_limited(state, [i for i in live_items(state) if i.get("status") == IMPLEMENTED])
+    state.pop("launch_failure", None)
+    _run_limited(path, state, [i for i in live_items(state) if i.get("status") == IMPLEMENTED])
     statefile.save(path, state)
     _give_up(path, state)
 

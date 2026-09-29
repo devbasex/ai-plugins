@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import types
 import os
 import sys
 from pathlib import Path
@@ -430,3 +431,37 @@ def test_new_check_with_scope_uses_drive_steps(tmp_path):
     a.scope = []
     refactor = templates.plan_check(a)["steps"][1]
     assert refactor["type"] == "drive" and "pulls/998/files" in refactor["args"]
+
+
+# --- #1483 AC19・AC20: 最終スイープの検証のコマンド ---------------------------------------
+
+
+def _sweep_prompt(tmp_path, decl):
+    wt = tmp_path / "wt"
+    (wt / ".ndf").mkdir(parents=True)
+    if decl is not None:
+        (wt / ".ndf" / "project.json").write_text(json.dumps(decl), encoding="utf-8")
+    fake = FakeReview(tmp_path, [])
+    drive = types.SimpleNamespace(tmp=tmp_path, pr=5, state=lambda: fake.state, path=lambda stem: str(tmp_path / f"{stem}.json"))
+    return cr.Drive.sweep_prompt(drive)
+
+
+def test_the_sweep_names_the_declared_whole_tests(tmp_path):
+    """AC19・I13 — 宣言の `test` があれば、全体テスト（テストと静的解析）を名指しし、探し方を使わないと書く。"""
+    decl = {
+        "test": {
+            "suites": [
+                {"name": "py", "runner": "pytest", "command": "pytest -q", "scope_command": "pytest {paths}"},
+                {"name": "lint", "runner": "sh", "kind": "lint", "command": "bash scripts/check-lint.sh"},
+            ]
+        }
+    }
+    prompt = _sweep_prompt(tmp_path, decl)
+    assert "  - pytest -q\n  - bash scripts/check-lint.sh\n" in prompt
+    assert "Step 7.5 の探し方は使わない" in prompt
+
+
+def test_the_sweep_keeps_the_search_without_a_declaration(tmp_path):
+    """AC20 — 宣言が無ければ、検証のコマンドの段落を足さない（今の探し方のまま）。"""
+    prompt = _sweep_prompt(tmp_path, None)
+    assert "Step 7.5 の探し方は使わない" not in prompt and ".ndf/project.json の test" not in prompt

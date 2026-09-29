@@ -32,7 +32,8 @@ SLEEP = time.sleep  # CI の待ちの眠り。テストが差し替える
 
 
 def run_command(command: Any, cwd: str, timeout: int, log: Optional[pathlib.Path] = None) -> tuple[Optional[int], bool]:
-    """語の並びはシェルを通さず、文字列はシェルで走らせる。`(終了コード, 打ち切ったか)`。
+    """文字列はシェルで走らせる（宣言と戦略のコマンドはどれも文字列。I5）。語の並びはシェルを通さない。
+    `(終了コード, 打ち切ったか)`。起動の例外は 127 に置き換え、例外の文をログへ書く（判別は `test_strategy.outcome`）。
 
     **打ち切るときはプロセスグループごと止める。** `subprocess.run(timeout=...)` が止めるのは直接の子
     （シェル）だけで、pytest などの孫が残って作業ツリーを書き換え続ける（`refactor_lib.process.run_with_timeout` と同じ理由）。
@@ -53,7 +54,9 @@ def run_command(command: Any, cwd: str, timeout: int, log: Optional[pathlib.Path
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
             )
-        except OSError:
+        except OSError as e:
+            if sink is not subprocess.DEVNULL:
+                sink.write(f"起動できない: {e}\n".encode("utf-8"))
             return 127, False
         try:
             return proc.wait(timeout=timeout), False
@@ -127,6 +130,25 @@ def _git(work: str, args: list[str]) -> bool:
         return False
 
 
+def changed_since(work: str, base: str) -> list[str]:
+    """`base` から worktree までに変わったファイルと、追跡していない新しいファイルのうち、worktree に残るもの。
+
+    静的解析の suite の範囲（#1483 の用語「変更したファイル」）。コミットしていない変更を含める。
+    """
+    out: list[str] = []
+    for args in (["diff", "--name-only", "-z", base], ["ls-files", "-z", "--others", "--exclude-standard"]):
+        try:
+            p = subprocess.run(["git", *args], cwd=work, capture_output=True)
+        except OSError:
+            continue
+        if p.returncode != 0:
+            continue
+        for f in p.stdout.decode("utf-8", "replace").split("\0"):
+            if f and f not in out and (pathlib.Path(work) / f).is_file():
+                out.append(f)
+    return out
+
+
 def clear_junit(work: str, strategy: ts.Strategy) -> None:
     """走らせる前に JUnit の置き場を消す（前の実行の結果を読まないため）。"""
     for suite in strategy.suites:
@@ -173,20 +195,13 @@ def by_file(ids: list[str]) -> dict[str, list[str]]:
 
 
 def rerun_groups(strategy: ts.Strategy, files: list[str]) -> list[tuple[ts.Suite, list[str]]]:
-    """落ちたファイル（`::` 付きの対象も可）を受け持つ suite ごとに分ける。受け持つ suite の無いものは最初の suite へ。"""
-    groups: dict[str, tuple[ts.Suite, list[str]]] = {}
-    scoped = strategy.scoped_suites()
-    for f in files:
-        suite = ts.suite_for(strategy, str(f).split("::", 1)[0]) or (scoped[0] if scoped else None)
-        if suite is None:
-            continue
-        groups.setdefault(suite.name, (suite, []))[1].append(f)
-    return list(groups.values())
+    """落ちたファイル（`::` 付きの対象も可）を受け持つテストの suite ごとに分ける（`test_strategy.suite_groups`）。"""
+    return ts.suite_groups(strategy, [str(f) for f in files])
 
 
-def rerun_words(strategy: ts.Strategy, files: list[str]) -> list[list[str]]:
-    """落ちたファイルだけを走らせ直す語の並び（suite ごとに 1 つ。`scope_words` の置き換えだけで組む）。"""
-    return [ts.scope_words(str(suite.scope_command), paths) for suite, paths in rerun_groups(strategy, files)]
+def rerun_commands(strategy: ts.Strategy, files: list[str]) -> list[str]:
+    """落ちたファイルだけを走らせ直すコマンド（テストの suite ごとに 1 つ。シェルで走らせる。`test_strategy.fill`）。"""
+    return [ts.fill(str(suite.scope_command), paths) for suite, paths in rerun_groups(strategy, files)]
 
 
 def failing_in(
@@ -211,8 +226,8 @@ def failing_in(
     tracked = tracked_files(work)
     for suite, paths in rerun_groups(strategy, list(by_file(ids))):
         clear_junit(work, strategy)
-        words, log = ts.scope_words(str(suite.scope_command), paths), log_dir / f"{label}-{suite.name}.log"
-        code, timed_out = run_within(timeout, started, lambda left, words=words, log=log: run(words, work, left, log))
+        command, log = ts.fill(str(suite.scope_command), paths), log_dir / f"{label}-{suite.name}.log"
+        code, timed_out = run_within(timeout, started, lambda left, command=command, log=log: run(command, work, left, log))
         if not timed_out and code == 0:
             continue
         found, _ = read_junit(work, ts.Strategy(strategy.name, strategy.source, [suite]), tracked)
@@ -322,8 +337,59 @@ def classify(
         "caused": caused,
         "fallback_reason": None,
         "baseline_head": base_sha,
-        "rerun_words": rerun_words(strategy, list(by_file(caused))) if caused else [],
+        "rerun_commands": rerun_commands(strategy, list(by_file(caused))) if caused else [],
     }
+
+
+# ---------- 静的解析 ----------
+
+
+def lint_verdict(
+    *,
+    work: str,
+    suite: ts.Suite,
+    baseline: Optional[str],
+    changed: list[str],
+    timeout: int,
+    log: pathlib.Path,
+    run: Runner = run_command,
+) -> dict[str, Any]:
+    """全体で落ちた静的解析の suite を、既存失敗（`preexisting`）か変更起因（`caused`）に分ける（#1483 I12）。
+
+    | 着手前（`baseline`） | `scope_command` | 判定 |
+    | --- | --- | --- |
+    | `green` | — | 変更起因 |
+    | `red` | ある | 変更したファイルに絞った範囲テストが通れば既存失敗、落ちれば変更起因 |
+    | `red` | 無い | 既存失敗（着手前から落ちていたため判定から外す） |
+    | 読めない（`None`） | ある | `red` と同じく絞って判定する |
+    | 読めない（`None`） | 無い | 変更起因（迷ったら変更起因の側へ倒す） |
+
+    戻りは `{suite, verdict, reason, command, outcome}`。`outcome` は絞った範囲テストの `test_strategy.Outcome`
+    （走らせなければ `None`）で、起動の失敗の判別は呼ぶ側が `outcome.launch_failed` で行う。
+    """
+    out: dict[str, Any] = {"suite": suite.name, "verdict": "caused", "reason": "", "command": None, "outcome": None}
+    if baseline == "green":
+        out["reason"] = "着手前は通っていた"
+        return out
+    if not suite.scope_command:
+        if baseline == "red":
+            out.update(verdict="preexisting", reason="着手前から落ちていたため判定から外した（scope_command が無く絞れない）")
+        else:
+            out["reason"] = "着手前の成否が無く、scope_command も無いため絞れない"
+        return out
+    mine = [f for f in changed if suite.covers(f)]
+    if not mine:
+        out.update(verdict="preexisting", reason="変更したファイルにこの suite の受け持つものが無い")
+        return out
+    command = ts.fill(str(suite.scope_command), mine)
+    code, timed_out = run(command, work, timeout, log)
+    result = ts.outcome(code, timed_out)
+    out.update(command=command, outcome=result)
+    if result.status == ts.PASSED:
+        out.update(verdict="preexisting", reason="変更したファイルに絞ると通る")
+    else:
+        out["reason"] = f"変更したファイルに絞っても落ちる（{result.reason}）"
+    return out
 
 
 # ---------- CI ----------

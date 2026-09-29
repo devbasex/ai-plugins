@@ -678,3 +678,28 @@ def test_the_ci_gate_reads_every_check_with_one_query_per_poll(refactor, cmd_gat
 
     assert "FINAL_GATE=passed" in capsys.readouterr().out
     assert len([cmd for cmd in spy["gh"] if any("check-runs" in str(w) for w in cmd)]) == 1
+
+
+def test_the_lint_limit_excludes_the_triage_time(cmd_gate, tmp_path, env_tmp_dir, spy, monkeypatch):
+    """静的解析の上限は、テストの実行秒数だけを差し引いて数える。落ちたテストの見分けの時間は引かない。"""
+    state_path = _state(tmp_path, workflow_step=True)
+    env_tmp_dir(state_path)
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(cmd_gate.time, "monotonic", lambda: clock["now"])
+
+    def fake_check(path, state, gate):
+        # テストが 5 秒、見分けが 100 秒かかった
+        gate["mode"] = "test"
+        clock["now"] += 105.0
+        return True, "d", 5.0
+
+    seen = {}
+
+    def fake_lint(path, state, gate, started=None):
+        seen["started"] = started
+        return True, ""
+
+    monkeypatch.setattr(cmd_gate, "_run_and_record_gate_check", fake_check)
+    monkeypatch.setattr(cmd_gate.gate_lint, "lint_gate", fake_lint)
+    cmd_gate.cmd_final_gate(_args())
+    assert seen["started"] == 1100.0

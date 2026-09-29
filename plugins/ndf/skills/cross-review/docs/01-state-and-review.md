@@ -72,6 +72,11 @@ cd "$WORKTREE"
    混ざるためである。`-x` は付けず、tmp ディレクトリは `-e` で除外する。`.gitignore` に
    `.cross_review/` を持たないリポジトリでも、state.json と result.json が残る。
 
+   ツールのパス（既定は `.serena/project.yml` と `.serena/serena_config.yml`。足し引きは
+   `worktree` の `references/declaration.md`）には、作成と同期の後に `git update-index --skip-worktree`
+   を掛ける。担当の CLI が起動した Serena が書き換えても、fix 担当の `git add -A` で index へ入らず、
+   ラウンドの開始の検査でも止まらない。同期の前は印を外して HEAD の内容へ戻す。
+
    **再開の経路でも同じ同期を行う。** 中断から再開するまでの間に head が進んでいることがある。
    **ラウンドの開始時（Step 1）にも同期する。** そちらは失われるものがあるときに止める。
 4. 既存コメントスナップショット (`fix/scripts/fetch-pr-comments.sh` で 3 ソース一括取得) → `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt`

@@ -46,6 +46,34 @@ def review_paths():
     return github, workspace
 
 
+def sweep_verify_lines(worktree) -> str:
+    """最終スイープの検証のコマンドの段落（#1483 I13）。宣言の `test` があれば全体テスト（両方の種別）を名指しする。
+
+    宣言が無い・読めなければ空で、プロンプトは今の探し方（Step 7.5）のまま。`test` があって解けない（不正な
+    `kind` など）ときは、どのキーが不正かを添えて `Stop` で止める。`--verify-command` は読まない。
+    """
+    if not worktree:
+        return ""
+    import project_decl
+    import test_strategy as ts
+
+    try:
+        decl = project_decl.read_project_decl(str(worktree))
+    except Exception:  # 宣言が読めなければ今の探し方に任せる
+        return ""
+    try:
+        commands = ts.verify_commands(decl)
+    except ts.StrategyError as e:
+        raise Stop(f".ndf/project.json の test が不正: {e}", 2) from e
+    if not commands:
+        return ""
+    listed = "\n".join(f"  - {c}" for c in commands)
+    return (
+        "- 修正をコミットしたら、検証は次のコマンドを作業ディレクトリで順に走らせる（.ndf/project.json の test）。"
+        f"Step 7.5 の探し方は使わない:\n{listed}\n"
+    )
+
+
 class Drive:
     def __init__(self, pr: int, rotate_mode: str, init_args: list[str]):
         self.pr = pr
@@ -171,7 +199,7 @@ class Drive:
 - 作業ディレクトリは detached HEAD（PR の head）のままでよい。ブランチへ切り替えず、そこでコミットする。送る（push）のは取り込み
 - ループの終わり: {s.get("final")}
 - `fix-steps.py context` には環境変数 `CROSS_REVIEW_STATE={self.tmp}/cross-review-pr{self.pr}-state.json` を渡す（ループと同じ指摘の基準を使う）
-
+{sweep_verify_lines(s.get("worktree_path"))}
 GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
 """
 
@@ -234,34 +262,50 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
             return "done"
         if rc != 0:
             raise Stop(f"state.py start-round が終了コード {rc} で止まった", rc)
-        rv = parse_vars(out)
+        jrc, jout = self.collect_reviews(parse_vars(out))
+        return self.after_judge(jrc, jout)
+
+    def run_reviewers(self, agents: list[str], rnd: str, reviewers: list[str]) -> None:
+        """担当を起動して監視し、結果が揃っていれば検証と反証まで通す。"""
+        for a in agents:
+            self.sh("launch-reviewer.sh", a, str(self.pr), rnd)
+        call(
+            [sys.executable, str(HERE / "monitor.py"), str(self.pr), "--phase", "review", "--agents", ",".join(agents)],
+            self.env,
+            self.v.get("WORKTREE"),
+        )
+        missing = [a for a in agents if self.st("read-result", str(self.pr), a)[0] != 0]
+        if not missing:
+            # 結果の欠けた担当がいれば、検証と反証は judge の起動し直し・中断の後へ回す。
+            # 先に通すと、起動し直した後に全担当分をもう一度通すため 1 回分が捨てられる。
+            self.st("verify-findings", str(self.pr))
+            self.sh("critique-round.sh", str(self.pr), rnd, *reviewers)
+
+    def judge(self) -> tuple[int, str]:
+        """judge を打つ。8 なら flush してからもう一度打つ。"""
+        jrc, jout = self.st("judge", str(self.pr))
+        if jrc == 8:
+            self.st("flush", str(self.pr))
+            jrc, jout = self.st("judge", str(self.pr))
+        return jrc, jout
+
+    def collect_reviews(self, rv: dict) -> tuple[int, str]:
+        """担当の結果を集めて judge する。judge が 7 なら 1 度だけ指名された担当を起動し直す。"""
         rnd = rv.get("ROUND", "")
         agents = rv.get("REVIEWERS", "").split()
         relaunched = False
         while True:
-            for a in agents:
-                self.sh("launch-reviewer.sh", a, str(self.pr), rnd)
-            call(
-                [sys.executable, str(HERE / "monitor.py"), str(self.pr), "--phase", "review", "--agents", ",".join(agents)],
-                self.env,
-                self.v.get("WORKTREE"),
-            )
-            missing = [a for a in agents if self.st("read-result", str(self.pr), a)[0] != 0]
-            if not missing:
-                # 結果の欠けた担当がいれば、検証と反証は judge の起動し直し・中断の後へ回す。
-                # 先に通すと、起動し直した後に全担当分をもう一度通すため 1 回分が捨てられる。
-                self.st("verify-findings", str(self.pr))
-                self.sh("critique-round.sh", str(self.pr), rnd, *rv.get("REVIEWERS", "").split())
-            jrc, jout = self.st("judge", str(self.pr))
-            if jrc == 8:
-                self.st("flush", str(self.pr))
-                jrc, jout = self.st("judge", str(self.pr))
+            self.run_reviewers(agents, rnd, rv.get("REVIEWERS", "").split())
+            jrc, jout = self.judge()
             if jrc == 7 and not relaunched:
                 agents = parse_vars(jout).get("RELAUNCH_AGENTS", "").split()
                 relaunched = True
                 if agents:
                     continue
-            break
+            return jrc, jout
+
+    def after_judge(self, jrc: int, jout: str) -> str:
+        """judge の終了コードから done / round / fix を決める。"""
         if jrc == 0:
             return "done"
         if jrc != 2:
@@ -354,45 +398,64 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
             c,
         )
 
+    # --- 段階ごとの 1 歩。戻り値は返す結果か、None（ループを続ける） ---
+    def step_done(self, ds: dict, stage: str) -> dict | None:
+        return self.done(self.tmp / f"drive-pr{self.pr}-report.md")
+
+    def step_fix(self, ds: dict, stage: str) -> dict | None:
+        if not self.path("fix").is_file():
+            return self.pause(ds, "fix", self.fix_prompt())
+        paused = self.after_fix(ds)
+        self.save_ds(ds)
+        return paused or None
+
+    def step_rotate(self, ds: dict, stage: str) -> dict | None:
+        paused = self.rotate(ds) if stage == "rotate" else self.set_current(ds)
+        self.save_ds(ds)
+        return paused or None
+
+    def step_newtext(self, ds: dict, stage: str) -> dict | None:
+        if not self.path("newtext").is_file():
+            return self.pause(ds, "newtext", self.newtext_prompt())
+        self.rotate_execute(ds)
+        self.save_ds(ds)
+        return None
+
+    def step_sweep(self, ds: dict, stage: str) -> dict | None:
+        if stage == "sweep" and self.path("sweep").is_file():
+            return self.finish(ds)
+        return self.pause(ds, "sweep", self.sweep_prompt())
+
+    def step_round(self, ds: dict, stage: str) -> dict | None:
+        nxt = self.review_round()
+        if nxt == "round":
+            return None
+        if nxt == "fix":
+            return self.pause(ds, "fix", self.fix_prompt())
+        ds["stage"] = "sweep-start"
+        self.save_ds(ds)
+        return None
+
+    # 段階 → 1 歩のメソッド名。表に無い段階は round として扱う
+    STEPS = {
+        "done": "step_done",
+        "fix": "step_fix",
+        "rotate": "step_rotate",
+        "rotate-created": "step_rotate",
+        "newtext": "step_newtext",
+        "sweep": "step_sweep",
+        "sweep-start": "step_sweep",
+    }
+
     def run(self) -> dict:
         self.init()
         ds = self.load_ds()
         self.save_ds(ds)
         for _ in range(1000):
             stage = ds.get("stage", "round")
-            if stage == "done":
-                return self.done(self.tmp / f"drive-pr{self.pr}-report.md")
-            if stage == "fix":
-                if not self.path("fix").is_file():
-                    return self.pause(ds, "fix", self.fix_prompt())
-                paused = self.after_fix(ds)
-                self.save_ds(ds)
-                if paused:
-                    return paused
-                continue
-            if stage in ("rotate", "rotate-created"):
-                paused = self.rotate(ds) if stage == "rotate" else self.set_current(ds)
-                self.save_ds(ds)
-                if paused:
-                    return paused
-                continue
-            if stage == "newtext":
-                if not self.path("newtext").is_file():
-                    return self.pause(ds, "newtext", self.newtext_prompt())
-                self.rotate_execute(ds)
-                self.save_ds(ds)
-                continue
-            if stage in ("sweep", "sweep-start"):
-                if stage == "sweep" and self.path("sweep").is_file():
-                    return self.finish(ds)
-                return self.pause(ds, "sweep", self.sweep_prompt())
-            nxt = self.review_round()
-            if nxt == "round":
-                continue
-            if nxt == "fix":
-                return self.pause(ds, "fix", self.fix_prompt())
-            ds["stage"] = "sweep-start"
-            self.save_ds(ds)
+            res = getattr(self, self.STEPS.get(stage, "step_round"))(ds, stage)
+            if res is not None:
+                return res
         raise Stop("ステップの数が上限を超えた", 1)
 
 

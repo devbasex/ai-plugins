@@ -99,16 +99,17 @@
 
 宣言（`.ndf/project.json` の `test`。[project-analysis.md](../../development-workflow/references/project-analysis.md) の P2）と
 引数から、共通層 `scripts/lib/test_strategy.py` の `resolve` が決める。supervise の `new` も同じ関数を使う。
-**コマンドの語・実行器の名前・前置きは見ない。** コマンドへの加工は `{paths}`（空白で区切った 1 語）を対象の語の並びへ
-置き換えることだけである。
+**コマンドの語・実行器の名前・前置きは見ない。** コマンドへの加工は `{paths}`（引用の外の、空白で区切った 1 語）を
+シェルの引用で守った対象の並びへ置き換えることだけで、コマンドはどれもシェルで 1 本ずつ走らせる。suite の種別
+（`kind`。`test` か `lint`）は宣言か `--test-kind` だけで決まり、雛形の語から推測しない。
 
 | 入力（上から順に当てる） | 戦略 | 根拠 |
 | --- | --- | --- |
 | `--round-test` が `{paths}` を含まない | `round-only`（ラウンドテスト = その値。全体テストは `--baseline-test` か宣言の suite の `command`） | `args` |
-| `--round-test` か `--baseline-test` が `{paths}` を含む | 宣言の `test.strategy` があればそれ、無ければ `local-full`（雛形 = その値） | `args` |
+| `--round-test` か `--baseline-test` が `{paths}` を含む | 宣言の `test.strategy` があればそれ、無ければ `local-full`（雛形 = その値。宣言の同じ種別の suite の `scope_command` を置き換える） | `args` |
 | `--baseline-test` だけが `{paths}` を含まない | `round-only`（ラウンドテスト = 全体テスト = その値。項目ごとに全体を走らせると知らせる） | `args` |
 | 宣言の `test.strategy` | その値 | `test.strategy` |
-| 宣言の suite に `scope_command` が 1 つも無い | `round-only`（ラウンドテスト = suite の `command`） | `derived:test.suites` |
+| 宣言の suite に `scope_command` が 1 つも無い（テストの suite があればテストの suite だけで見る） | `round-only`（ラウンドテスト = suite ごとの `command`） | `derived:test.suites` |
 | 所要 w（`test_duration`。`ndf-record` → `ci-junit` → `ci-steps` の順）> 600 秒で、宣言の `ci` が読める | `local-scoped-ci-whole` | `derived:test_duration` |
 | それ以外 | `local-full` | `derived:test_duration` |
 | 宣言の `test` が無い・不明 | 止める（`.ndf/project.json の test が無い（か不明: <理由>）。/ndf:development-workflow の手順 0 で解析するか、--round-test を渡す`） | — |
@@ -119,8 +120,25 @@
 | `local-scoped-ci-whole` | 同上（コンテナ越しでよい） | `--scope` の置き場所の範囲テストだけ | 走らせず最終ゲートへ寄せる（`whole_test.deferred`） | push 済みの HEAD のチェック（`test.ci.check` か必須のチェック）を `limits.ci_wait_timeout` まで待つ |
 | `round-only` | ラウンドテストをそのまま | 全体テストとラウンドテスト | 手元で 1 度 | 手元で全体テスト |
 
-雛形の不備（`{paths}` が無い・`--filter={paths}` のように 1 語として立っていない）と、`local-scoped-ci-whole` なのに
-`scope_command` を持つ suite が無いときは、理由を出して止める。
+雛形の不備（`{paths}` が無い・`--filter={paths}` や `'{paths}'` のように引用の外の 1 語として立っていない）と、
+`local-scoped-ci-whole` なのに `scope_command` を持つ suite が無いときは、理由を出して止める。
+
+**全体テストは種別ごとに、宣言の `command` が引数の雛形より先に効く。** 宣言に `command` が無ければ、テストの雛形は
+`{paths}` を `.` にしたもの、静的解析の雛形は `{paths}` を `--scope` のパスで埋めたものを全体テストにする。静的解析の
+雛形の `{paths}` は `.` にしない（`shellcheck .` のようにディレクトリを渡すと、変更と無関係に落ちる）。
+
+| 種別 | 範囲テストの範囲 | 着手前・最終ゲート | 危険フラグの全体テスト |
+| --- | --- | --- | --- |
+| テスト（`test`） | 項目の `test_targets` | 上の戦略の表のとおり | 走らせる |
+| 静的解析（`lint`） | 項目のコミットが変えたファイルのうち suite の `paths`（接頭辞か glob）に当たるもの。検証のたびに組む | どの戦略でも手元で全体テストを走らせ、suite ごとの成否を `baseline_test.suites` に残す | 走らせない |
+
+テストの種別の suite が無い戦略では、`--scope` のテストの置き場所の検査とテスト整備ラウンドを行わず、そのことを
+計画と報告の「行わなかったこと」に書く。
+
+**起動の失敗で止まる。** 着手前・項目の範囲テスト・テスト整備ラウンド・最終ゲートのどこかでテストのコマンドを起動できない
+（終了コード 126 / 127）と、落ちたとは扱わず、項目の状態を変えず取り消しもせずに中断（終了コード 4）する。記録は状態ファイルの
+`launch_failure` に、報告には `⛔ 起動の失敗（<手順>）: <コマンド> — <理由>` の行が出る。コマンドを直して再開すると、
+次の未検証の項目から続く。
 
 ### 作業ディレクトリの構成
 

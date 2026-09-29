@@ -225,7 +225,7 @@ classDiagram
 | `template_problem` | 字句の分け方を `shlex.shlex(text, posix=False, punctuation_chars=True)` にする（決定 2） |
 | `outcome(code, timed_out)` | 新設。`Outcome` を返す（I7。下の「入出力の契約」） |
 | `resolve(..., template_kind="test", scope_paths=None)` | 引数を 2 つ足す。解き方は「処理の流れ」 |
-| `verify_commands(decl)` | 新設。最終スイープに書く全体テストの並び。宣言の `test` が無いか解けなければ `None`（I13） |
+| `verify_commands(decl)` | 新設。最終スイープに書く全体テストの並び。宣言の `test` が無い・不明なら `None`、`test` があって解けなければ `StrategyError`（I13） |
 | `scope_words`・`whole_command_of`・`suite_for` | `scope_words` は消す。`whole_command_of` はテストの種別の引数の雛形だけに使う。`suite_for` は `kind` を受け、その種別の suite だけを見る |
 
 **`test_strategy.py` は純粋な処理のままにする。** 変更したファイルの読み取り（git）とコマンドの実行は呼ぶ側が行い、
@@ -331,7 +331,8 @@ $ touch n.sh; sh -c './n.sh'; echo "rc=$?"  →  rc=126
 ### 最終スイープのプロンプト（cross-review）
 
 `verify_commands(decl)` が並びを返したときだけ、プロンプトへ次の段落を足す。返さなければ今と同じ文のまま
-である（AC20）。
+である（AC20）。`test` があって解けない（不正な `kind` など）ときは、既定の探し方へ流さず、不正なキーを示して
+駆動を止める（`Stop`、終了コード 2）。
 
 ```text
 - 修正をコミットしたら、検証は次のコマンドを作業ディレクトリで順に走らせる（.ndf/project.json の test）。

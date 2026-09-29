@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import re
 import urllib.parse
-from typing import Any
+from typing import Any, Callable
 
 import gh_call
 import gh_fields
@@ -40,7 +40,7 @@ def view_json(kind: str, number: int, fields: str, repo: str | None = None, cwd:
     names = gh_fields.field_names(fields)
     if not names or any(f not in _VIEW_JSON_FIELDS[kind] for f in names):
         return r
-    path = f"repos/{repo or '{owner}/{repo}'}/{gh_fields._VIEW_REST_PATH[kind]}/{int(number)}"
+    path = f"repos/{repo or '{owner}/{repo}'}/{gh_fields.VIEW_REST_PATH[kind]}/{int(number)}"
     rr = gh_call.gh(["api", path], cwd=cwd)
     try:
         d = json.loads(rr.stdout) if rr.returncode == 0 else None
@@ -50,6 +50,22 @@ def view_json(kind: str, number: int, fields: str, repo: str | None = None, cwd:
         why = rr.stderr.strip() or "REST の応答を読めない"
         return gh_call.GhResult(rr.returncode or 1, "", f"{r.stderr.strip()}\nREST でも読めない: {why}")
     return gh_call.GhResult(0, json.dumps(gh_fields.to_json_shape(kind, d, fields), ensure_ascii=False), "")
+
+
+def _decode_concatenated_arrays(text: str) -> list:
+    """`gh api --paginate` がページごとの配列を続けて書いた出力（`[...][...]`）を 1 つの並びにする。
+    配列でないページや壊れた JSON は ValueError。"""
+    rows: list = []
+    dec, i = json.JSONDecoder(), 0
+    while True:
+        while i < len(text) and text[i].isspace():
+            i += 1
+        if i >= len(text):
+            return rows
+        page, i = dec.raw_decode(text, i)
+        if not isinstance(page, list):
+            raise ValueError(page)
+        rows += page
 
 
 def pr_files(number: int, repo: str | None = None, cwd: str | None = None) -> gh_call.GhResult:
@@ -62,18 +78,8 @@ def pr_files(number: int, repo: str | None = None, cwd: str | None = None) -> gh
     r = gh_call.gh(["api", "--paginate", path], cwd=cwd)
     if r.returncode != 0:
         return r
-    rows: list = []
-    text, dec, i = r.stdout, json.JSONDecoder(), 0
     try:
-        while True:  # --paginate はページごとの配列を続けて書く（`[...][...]`）
-            while i < len(text) and text[i].isspace():
-                i += 1
-            if i >= len(text):
-                break
-            page, i = dec.raw_decode(text, i)
-            if not isinstance(page, list):
-                raise ValueError(page)
-            rows += page
+        rows = _decode_concatenated_arrays(r.stdout)
         files = [
             {
                 "path": f["filename"],
@@ -143,7 +149,7 @@ def view(kind: str, number: int, fields: str, repo: str | None = None) -> Attemp
         return graphql()
 
     def by_rest() -> Attempt:
-        a = _rest(f"repos/{slug}/{gh_fields._VIEW_REST_PATH[kind]}/{int(number)}")
+        a = _rest(f"repos/{slug}/{gh_fields.VIEW_REST_PATH[kind]}/{int(number)}")
         return a if not a.ok else a._replace(value=gh_fields.to_json_shape(kind, a.value or {}, fields))
 
     return gh_quota.with_fallback(by_rest, graphql)
@@ -158,28 +164,36 @@ def _keep_list_item(kind: str, d: dict, state: str, labels: list[str]) -> bool:
     return not (kind == "pr" and labels and not set(labels) <= {x.get("name") for x in d.get("labels") or []})
 
 
+def _rest_pages(base: str, keep: Callable[[Any], bool], shape: Callable[[Any], Any], limit: int) -> Attempt:
+    """REST の一覧をページを進めて読み、`keep` を通った項目を `shape` で整えて `limit` 件まで返す。
+    短いページが来たら終わりとみなす。"""
+    out: list[Any] = []
+    page = 1
+    while len(out) < limit:
+        a = _rest(f"{base}&page={page}")
+        if not a.ok or not isinstance(a.value, list):
+            return a if not a.ok else Attempt(None, "REST の一覧を読めない", "rest")
+        for d in a.value:
+            if keep(d):
+                out.append(shape(d))
+        if len(a.value) < PER_PAGE:
+            break
+        page += 1
+    return Attempt(out[:limit], "", "rest")
+
+
 def _list(kind: str, repo: str | None, fields: str, state: str, labels: list[str] | None, limit: int) -> Attempt:
     slug = _slug(repo)
     labels = list(labels or [])
 
     def by_rest() -> Attempt:
         rest_state = "closed" if state == "merged" else state
-        base = f"repos/{slug}/{gh_fields._VIEW_REST_PATH[kind]}?state={rest_state}&per_page={PER_PAGE}"
+        base = f"repos/{slug}/{gh_fields.VIEW_REST_PATH[kind]}?state={rest_state}&per_page={PER_PAGE}"
         if kind == "issue" and labels:
             base += "&labels=" + ",".join(labels)
-        out: list[dict[str, Any]] = []
-        page = 1
-        while len(out) < limit:
-            a = _rest(f"{base}&page={page}")
-            if not a.ok or not isinstance(a.value, list):
-                return a if not a.ok else Attempt(None, "REST の一覧を読めない", "rest")
-            for d in a.value:
-                if _keep_list_item(kind, d, state, labels):
-                    out.append(gh_fields.to_json_shape(kind, d, fields))
-            if len(a.value) < PER_PAGE:
-                break
-            page += 1
-        return Attempt(out[:limit], "", "rest")
+        return _rest_pages(
+            base, lambda d: _keep_list_item(kind, d, state, labels), lambda d: gh_fields.to_json_shape(kind, d, fields), limit
+        )
 
     args = [kind, "list", "--repo", slug, "--state", state, "--limit", str(limit), "--json", fields]
     for name in labels:
@@ -244,7 +258,7 @@ def _edit(
     def by_rest() -> Attempt:
         fields = {k: v for k, v in (("title", title), ("body", body)) if v is not None}
         if fields:
-            a = _rest(f"repos/{slug}/{gh_fields._VIEW_REST_PATH[kind]}/{n}", "PATCH", fields)
+            a = _rest(f"repos/{slug}/{gh_fields.VIEW_REST_PATH[kind]}/{n}", "PATCH", fields)
             if not a.ok:
                 return a
         if add_labels:

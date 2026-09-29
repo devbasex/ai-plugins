@@ -170,12 +170,18 @@ def existing_failures_line(baseline: dict[str, Any]) -> str:
 def strategy_lines(state: dict[str, Any]) -> list[str]:
     """テストの戦略・根拠・範囲テストの雛形・最終ゲートへ寄せた危険フラグ（#1334）。報告と改修計画が共有する。"""
     strategy = state.get("strategy") or {}
-    templates = [s.get("scope_command") for s in strategy.get("suites") or [] if s.get("scope_command")]
+    templates = [
+        f"{s['scope_command']}（静的解析）" if s.get("kind") == "lint" else s["scope_command"]
+        for s in strategy.get("suites") or []
+        if s.get("scope_command")
+    ]
     deferred = (state.get("whole_test") or {}).get("deferred") or {}
     lines = [
         f"- テストの戦略: {strategy.get('name') or '—'}（根拠 {strategy.get('source') or '—'}）",
         f"- 範囲テストの雛形: {' / '.join(templates) or (strategy.get('round_command') or '—')}",
     ]
+    # 行わなかったこと（テストの種別の suite が無い戦略。#1483 AC16）。
+    lines.extend(f"- 行わなかったこと: {note}" for note in state.get("plan_notes") or [])
     if deferred:
         lines.append(
             f"- 最終ゲートへ寄せた危険フラグ: {', '.join(deferred.get('flags') or [])}（項目 {', '.join(deferred.get('items') or [])}）"

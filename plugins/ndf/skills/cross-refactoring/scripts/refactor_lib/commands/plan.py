@@ -17,6 +17,7 @@ import jev
 import project_mvv
 import run_metrics
 import statefile
+import test_strategy as ts
 
 from .. import allocation, budget, clock, info, targets, timeline
 from ..gitfacts import read_result, record_observed_model
@@ -223,13 +224,27 @@ def _allocation_table(state: dict[str, Any]) -> dict[str, Any]:
     return table
 
 
+NO_TEST_SUITE_NOTE = "テストの種別の suite が無いため、テスト整備ラウンドと --scope のテストの置き場所の検査を行わない"
+
+
 def _limited_commands(state: dict[str, Any], items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """項目ごとの範囲テストの語の並びを、戦略の雛形の `{paths}` の置き換えで決める。決まらない項目は `no_target` で見送る（AC10b）。"""
+    """項目ごとのテストの種別の範囲テストを、戦略の雛形の `{paths}` の置き換えで決める。決まらない項目は `no_target` で見送る（AC10b）。
+
+    テストの種別の suite が無い戦略では、項目の `tests` を空にし（テスト整備ラウンドを行わない）、そのことを
+    `plan_notes` に残す（#1483 I9・AC16）。静的解析の範囲テストは検証のたびに組む。
+    """
     work = work_dir(state)
+    if not timeline.strategy_of(state).has_kind(ts.TEST):
+        notes = state.setdefault("plan_notes", [])
+        if NO_TEST_SUITE_NOTE not in notes:
+            notes.append(NO_TEST_SUITE_NOTE)
+            info(f"ℹ {NO_TEST_SUITE_NOTE}")
+        for item in items:
+            item["tests"] = []
     kept = []
     for item in items:
-        words, origin = targets.limited_command(state, item.get("test_targets") or [], work, item.get("tests") or [])
-        if words is None:
+        runs, origin = targets.limited_runs(state, item.get("test_targets") or [], work, item.get("tests") or [])
+        if runs is None:
             defer(
                 state,
                 item,
@@ -237,7 +252,8 @@ def _limited_commands(state: dict[str, Any], items: list[dict[str, Any]]) -> lis
                 "範囲テストを組み立てられない（test_targets が --scope のテストの置き場所に無いか、雛形を持つ suite が無い）",
             )
             continue
-        item["command"], item["command_source"] = list(words), origin
+        item["scope_commands"], item["command_source"] = targets.runs_state(runs), origin
+        item.pop("command", None)
         kept.append(item)
     return kept
 
@@ -271,7 +287,7 @@ def _plan_items(
                         "risk",
                         "tests",
                         "test_targets",
-                        "command",
+                        "scope_commands",
                         "command_source",
                         "mvv_basis",
                     )

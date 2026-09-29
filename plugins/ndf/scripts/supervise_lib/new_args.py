@@ -95,6 +95,15 @@ NEW_ARGS = [
         {"help": "範囲テストの雛形（{paths} を 1 語で含むコマンド）。宣言（.ndf/project.json の test）より先に効く"},
         "impl fix check sprint close",
     ),
+    (
+        "--test-kind",
+        {
+            "choices": ("test", "lint"),
+            "default": "test",
+            "help": "範囲テストの雛形（--test-cmd）の種別。test = テスト / lint = 静的解析（整形の検査を含む）。既定 test",
+        },
+        "impl fix check sprint close",
+    ),
     ("--test-all", {"help": "廃止（知らせて無視する。全体テストは宣言の suites[].command）"}, "impl fix check sprint close"),
     ("--mode", {"default": "standard", "help": "モード（既定 standard）"}, "impl fix check release sprint close"),
     (

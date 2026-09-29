@@ -11,6 +11,7 @@ import subprocess
 from typing import Any
 
 import statefile
+import tool_paths
 
 from . import die, info, timeline, worktree
 from .paths import sh
@@ -167,6 +168,25 @@ def _push_with_credential_fallback(args: list[str], cwd: str) -> None:
     sh(["git", *fallback, *args], cwd=cwd)
 
 
+def _require_no_tool_paths(state: dict[str, Any]) -> None:
+    """push の直前に、送るコミットへツールのパス（#1436）が入っていないかを確かめる。入っていれば中断する。
+
+    基準は head ブランチを取り込んだ `FETCH_HEAD`。取り込めない・比べられないときも送らない。
+    """
+    work = state["worktrees"]["work"]
+
+    def git_run(*args: str) -> subprocess.CompletedProcess:
+        p = subprocess.run(["git", *args], cwd=work, capture_output=True, text=True)
+        if p.returncode != 0 and gh_available():
+            # push と同じく、認証で落ちたときは helper を退避して 1 度だけやり直す
+            p = subprocess.run(["git", *credential_fallback_args(), *args], cwd=work, capture_output=True, text=True)
+        return p
+
+    blocked = tool_paths.before_push(work, state["head_branch"], git_run)
+    if blocked:
+        die(blocked)
+
+
 def push_head(state: dict[str, Any]) -> None:
     """head ブランチへ push する。**`--force` は使わない。**
 
@@ -174,6 +194,7 @@ def push_head(state: dict[str, Any]) -> None:
     変更が Pull Request へ現れ、取り消しの反映漏れがそのまま残る。
     """
     _sync_generated(state)
+    _require_no_tool_paths(state)
     _push_with_credential_fallback(
         ["push", "origin", f"HEAD:{state['head_branch']}"],
         state["worktrees"]["work"],

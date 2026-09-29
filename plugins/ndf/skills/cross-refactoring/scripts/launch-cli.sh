@@ -122,14 +122,18 @@ case "$PHASE" in
     ITEMS_JSON=$(jq '[.items[] | select(.status == "planned" or .status == "tested")
       | {item_id: .id, rank, path, symbol, smell, technique, rationale, plan, tests,
          start_deadline, estimate_minutes: .estimate.implement,
-         test_command: (.command | join(" "))}]' "$STATE")
+         test_command: (if .scope_commands then (.scope_commands | map(.command) | join(" ; "))
+                        else ((.command // []) | if ((.[0] // "") | type) == "array" then map(join(" ")) | join(" ; ") else join(" ") end) end)}]' "$STATE")
     ;;
   fix)
     # 落ちた項目だけ。**同じ語の並びを共有した項目はまとめて 1 つの修正の対象**になる。
     # 全体のテストで落ちた項目（決定 22）は、落ちたテストだけを走らせ直すコマンドを渡す。
     ITEMS_JSON=$(jq '[.items[] | select(.status == "failing")
       | {item_id: .id, path, symbol, technique, plan, fix_count,
-         test_command: ((.whole_test_command // .command) | join(" ")), test_log: .last_log}]' "$STATE")
+         test_command: (if .whole_test_command then (.whole_test_command | join(" "))
+                        elif .scope_commands then (.scope_commands | map(.command) | join(" ; "))
+                        else ((.command // []) | if ((.[0] // "") | type) == "array" then map(join(" ")) | join(" ; ") else join(" ") end) end),
+         test_log: .last_log}]' "$STATE")
     ;;
   *)
     ITEMS_JSON='[]'
