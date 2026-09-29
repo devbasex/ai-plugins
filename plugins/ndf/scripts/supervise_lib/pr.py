@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 
 import gh_call
 import mdtable
 from pr_mode import with_mode_line
 from supervise_lib.claude import TAIL
+from supervise_lib.paths import DECISIONS_SH
 from supervise_lib.prompts import PR_SYSTEM
 
 PR_FOOTER = "🤖 Generated with [Claude Code](https://claude.com/claude-code)"  # PR 本文の末尾の署名（1 度だけ）
@@ -45,6 +47,30 @@ class PrStep:
         head, tail = (body[:at], body[at:]) if at >= 0 else (body, "")
         return head.rstrip() + "\n\n" + "\n\n".join(extra) + "\n\n" + tail
 
+    def with_decisions(self, ctx, body: str, base: str) -> str:
+        """設計の PR の本文へ「決めたこと」の節を作る時点で入れる（`pr-body-decisions.sh render`）。
+
+        作った後に sync で書き直すと、本文の編集（edited）で CI の pr-body-decisions がもう 1 度起動する。
+        読めなかったときは本文を変えない（後の sync のステップが直す）。
+        """
+        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as f:
+            f.write(body)
+            path = f.name
+        try:
+            done = subprocess.run(
+                ["bash", str(DECISIONS_SH), "render", "--base", base, "--body", path],
+                cwd=ctx.cwd,
+                capture_output=True,
+                timeout=120,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return body
+        finally:
+            Path(path).unlink(missing_ok=True)
+        if done.returncode != 0 or not done.stdout:
+            return body
+        return done.stdout.decode("utf-8", "replace")
+
     def execute(self, ctx, step: dict) -> tuple[bool, str]:
         """push して Draft の Pull Request を作る。既にあれば本文だけを書き直す。本文は既定で LLM に書かせる（body が llm でないときは機械生成のまま）。"""
         base = step.get("base") or ctx.base_branch()
@@ -60,6 +86,8 @@ class PrStep:
             body = self._llm_body(ctx, step, body, changes, issues)
         body = self.with_appended(ctx, body, step)
         body = with_mode_line(body, ctx.plan.get("モード"), self.passed_stages(ctx, step))
+        if step.get("decisions"):
+            body = self.with_decisions(ctx, body, base)
         return self._publish(ctx, base, branch, title, body)
 
     def _push(self, ctx) -> tuple[str, str | None]:

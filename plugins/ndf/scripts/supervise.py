@@ -11,7 +11,7 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
 | work  | 1 つの作業（修正・調査）を worker として行わせる | Tool あり（Read/Edit/Write/Bash/Grep/Glob）。`"full": true` なら設定・プラグイン・Skill をそのまま読む claude -p で Skill を回す（cross-review など） |
 | drive | 駆動（cross-review / cross-refactoring の drive.py）を run として回し、`pause` のときだけ worker に判断・修正をさせて駆動へ返す | pause のときだけ（work と同じ最小構成） |
 | judge | 結果ファイルと規則の抜粋だけを渡し、次のステップを決めさせる | Tool なし |
-| pr    | push して Draft の Pull Request を作る（スクリプト）。本文は材料（計画の値・コミット・変更の統計・run の結果・設計文書）から LLM が書く。`"body": "template"` なら材料をそのまま本文にする。本文には必ず「## 利用者向けの変化」の節を置く（ステップの `changes`、無ければ `summary`、それも無ければ題名から。配布の説明文の材料）。`"append": [<パス>...]`（`{state_dir}` を置き換える）のうち、あるファイルの中身を署名の前へそのまま足す。末尾の署名は本文に無いときだけ足す | 本文だけTool なし |
+| pr    | push して Draft の Pull Request を作る（スクリプト）。本文は材料（計画の値・コミット・変更の統計・run の結果・設計文書）から LLM が書く。`"body": "template"` なら材料をそのまま本文にする。本文には必ず「## 利用者向けの変化」の節を置く（ステップの `changes`、無ければ `summary`、それも無ければ題名から。配布の説明文の材料）。`"append": [<パス>...]`（`{state_dir}` を置き換える）のうち、あるファイルの中身を署名の前へそのまま足す。末尾の署名は本文に無いときだけ足す。`"decisions": true` なら、設計の PR の本文へ「決めたこと」の節を作る時点で入れる（`pr-body-decisions.sh render`。後の sync が書き込まず、CI を 2 度起動しない） | 本文だけTool なし |
 
 使い方:
     supervise.py run <plan.json> [--state-dir DIR] [--from <ステップの id>] [--slow K=V]...
