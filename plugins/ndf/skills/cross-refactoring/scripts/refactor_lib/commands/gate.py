@@ -77,18 +77,18 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
     state["phase"] = "final"
 
     state.pop("launch_failure", None)
-    # 手元でテストの全体テストを走らせたときは、静的解析もその開始時刻から同じ上限で数える（1 回の全体検証を
-    # 1 つの `whole_timeout` に収める。test-run.py の whole と同じ）。使い回し・CI で見るときは手元で走らないので渡さない。
+    # 手元でテストの全体テストを走らせたときは、静的解析もテストの実行秒数を差し引いた上限で数える（1 回の全体検証を
+    # 1 つの `whole_timeout` に収める。test-run.py の whole と同じ）。落ちたテストの見分けの時間は上限の外に置く。
+    # 使い回し・CI で見るときは手元で走らないので渡さない。
     whole_started: Optional[float] = None
     if _reusable_whole_test(state):
         gate["whole_test_reused"] = True
         passed, detail = True, "検証の中で通った全体テストを使い回しました（HEAD は進んでいません）"
         gate["mode"] = "test"
     else:
-        whole_started = time.monotonic()
-        passed, detail = _run_and_record_gate_check(path, state, gate)
-        if gate.get("mode") != "test":
-            whole_started = None
+        passed, detail, test_seconds = _run_and_record_gate_check(path, state, gate)
+        if gate.get("mode") == "test":
+            whole_started = time.monotonic() - test_seconds
     lint_passed, lint_detail = gate_lint.lint_gate(path, state, gate, started=whole_started)
     if lint_detail:
         detail = f"{detail} / {lint_detail}"
@@ -160,8 +160,11 @@ def _reusable_whole_test(state: dict[str, Any]) -> bool:
     return bool(head) and head == record.get("head")
 
 
-def _run_and_record_gate_check(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]) -> tuple[bool, str]:
-    """最終ゲートのチェックを 1 回走らせ、`checks` へ記録して結果を返す。落ちたら見分け、変更起因が無ければ通す。"""
+def _run_and_record_gate_check(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]) -> tuple[bool, str, float]:
+    """最終ゲートのチェックを 1 回走らせ、`checks` へ記録して結果を返す。落ちたら見分け、変更起因が無ければ通す。
+
+    3 つ目はチェックそのものの実行秒数（見分けの時間を含まない）。静的解析の上限の起点に使う。
+    """
     # **排他である。** CI で見るなら手元のテストを実行せず継続的統合の結論だけで判定し、無ければ
     # 手元のテストだけで判定する。「どちらか一方が通れば通過」とはしない。
     ci = ci_mode(state)
@@ -189,7 +192,7 @@ def _run_and_record_gate_check(path: pathlib.Path, state: dict[str, Any], gate: 
         # 履歴の `whole_test.final`（AC17）。修正の後に走らせ直したときは足し込む。
         gate["whole_test_seconds"] = round(float(gate.get("whole_test_seconds") or 0.0) + seconds, 1)
     statefile.save(path, state)
-    return passed, detail
+    return passed, detail, seconds
 
 
 def _gate_command(state: dict[str, Any]) -> str:

@@ -189,6 +189,12 @@ class Strategy:
             return [self.round_command]
         return [s.command for s in self.suites if s.command]
 
+    def round_runs(self) -> list[ScopeRun]:
+        """ラウンドテストを種別つきで並べる。引数由来の `round_command` は `round_kind`、宣言からなら suite ごとの `kind`。"""
+        if self.round_command:
+            return [ScopeRun("round", self.round_kind, self.round_command)]
+        return [ScopeRun(s.name, s.kind, s.command) for s in self.suites if s.command]
+
     def as_state(self) -> dict[str, Any]:
         """状態ファイルとプランへ写す形。以後は変えない（集約の不変条件）。"""
         out = {

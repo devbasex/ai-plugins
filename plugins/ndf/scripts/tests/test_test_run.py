@@ -198,3 +198,20 @@ def test_the_declared_lint_suite_runs_on_the_changed_files(tmp_path):
     assert code == 0
     code, out = _run(root, "scope", "--paths", "x", "--changed", "good.sh", "bad.sh")
     assert code == 1 and "x good.sh bad.sh" in str(out["items"])
+
+
+def test_a_declared_round_only_lint_failure_is_a_caused_lint_failure(tmp_path):
+    """宣言から導いた round-only の静的解析の suite が落ちたら、判断不能（2）でなく変更起因の静的解析（1）。"""
+    decl = {
+        "test": {
+            "strategy": "round-only",
+            "suites": [
+                {"name": "unit", "runner": "sh", "kind": "test", "command": "true"},
+                {"name": "sh", "runner": "sh", "kind": "lint", "command": "false"},
+            ],
+        }
+    }
+    root = _repo(tmp_path, decl)
+    code, out = _run(root, "scope", "--paths", "x")
+    assert code == 1, out
+    assert "JUnit を読まない" not in out["summary"] and "静的解析が落ちた" in out["summary"]

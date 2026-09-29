@@ -217,7 +217,7 @@ def cmd_scope(a) -> int:
     root = pathlib.Path(a.root).resolve()
     strategy, limits, notes = _resolve(root, a)
     if strategy.name == ts.ROUND_ONLY:
-        runs = [ts.ScopeRun("round", ts.TEST, c) for c in strategy.round_commands()]
+        runs = strategy.round_runs()
     else:
         changed = _changed(root, a) if strategy.scoped_suites(ts.LINT) else []
         runs = ts.scope_runs(strategy, list(a.paths), changed)
