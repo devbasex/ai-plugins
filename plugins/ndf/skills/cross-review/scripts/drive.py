@@ -393,45 +393,64 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
             c,
         )
 
+    # --- 段階ごとの 1 歩。戻り値は返す結果か、None（ループを続ける） ---
+    def step_done(self, ds: dict, stage: str) -> dict | None:
+        return self.done(self.tmp / f"drive-pr{self.pr}-report.md")
+
+    def step_fix(self, ds: dict, stage: str) -> dict | None:
+        if not self.path("fix").is_file():
+            return self.pause(ds, "fix", self.fix_prompt())
+        paused = self.after_fix(ds)
+        self.save_ds(ds)
+        return paused or None
+
+    def step_rotate(self, ds: dict, stage: str) -> dict | None:
+        paused = self.rotate(ds) if stage == "rotate" else self.set_current(ds)
+        self.save_ds(ds)
+        return paused or None
+
+    def step_newtext(self, ds: dict, stage: str) -> dict | None:
+        if not self.path("newtext").is_file():
+            return self.pause(ds, "newtext", self.newtext_prompt())
+        self.rotate_execute(ds)
+        self.save_ds(ds)
+        return None
+
+    def step_sweep(self, ds: dict, stage: str) -> dict | None:
+        if stage == "sweep" and self.path("sweep").is_file():
+            return self.finish(ds)
+        return self.pause(ds, "sweep", self.sweep_prompt())
+
+    def step_round(self, ds: dict, stage: str) -> dict | None:
+        nxt = self.review_round()
+        if nxt == "round":
+            return None
+        if nxt == "fix":
+            return self.pause(ds, "fix", self.fix_prompt())
+        ds["stage"] = "sweep-start"
+        self.save_ds(ds)
+        return None
+
+    # 段階 → 1 歩のメソッド名。表に無い段階は round として扱う
+    STEPS = {
+        "done": "step_done",
+        "fix": "step_fix",
+        "rotate": "step_rotate",
+        "rotate-created": "step_rotate",
+        "newtext": "step_newtext",
+        "sweep": "step_sweep",
+        "sweep-start": "step_sweep",
+    }
+
     def run(self) -> dict:
         self.init()
         ds = self.load_ds()
         self.save_ds(ds)
         for _ in range(1000):
             stage = ds.get("stage", "round")
-            if stage == "done":
-                return self.done(self.tmp / f"drive-pr{self.pr}-report.md")
-            if stage == "fix":
-                if not self.path("fix").is_file():
-                    return self.pause(ds, "fix", self.fix_prompt())
-                paused = self.after_fix(ds)
-                self.save_ds(ds)
-                if paused:
-                    return paused
-                continue
-            if stage in ("rotate", "rotate-created"):
-                paused = self.rotate(ds) if stage == "rotate" else self.set_current(ds)
-                self.save_ds(ds)
-                if paused:
-                    return paused
-                continue
-            if stage == "newtext":
-                if not self.path("newtext").is_file():
-                    return self.pause(ds, "newtext", self.newtext_prompt())
-                self.rotate_execute(ds)
-                self.save_ds(ds)
-                continue
-            if stage in ("sweep", "sweep-start"):
-                if stage == "sweep" and self.path("sweep").is_file():
-                    return self.finish(ds)
-                return self.pause(ds, "sweep", self.sweep_prompt())
-            nxt = self.review_round()
-            if nxt == "round":
-                continue
-            if nxt == "fix":
-                return self.pause(ds, "fix", self.fix_prompt())
-            ds["stage"] = "sweep-start"
-            self.save_ds(ds)
+            res = getattr(self, self.STEPS.get(stage, "step_round"))(ds, stage)
+            if res is not None:
+                return res
         raise Stop("ステップの数が上限を超えた", 1)
 
 
