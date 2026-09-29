@@ -143,7 +143,9 @@ def _propagate_best_verification(targets: list[dict[str, Any]], by_id: dict[Any,
                 continue
             if _merged_root(member, by_id) is not rep:
                 continue
-            if findings_mod.verify_rank(member) > findings_mod.verify_rank_of(str(best.get("result") or "not_run")):
+            if findings_mod._VERIFY_RANK.get(findings_mod._verify_result(member), -1) > findings_mod._VERIFY_RANK.get(
+                str(best.get("result") or "not_run"), -1
+            ):
                 best = member["verification"]
         if best is not rep["verification"]:
             rep["verification"] = dict(best)
