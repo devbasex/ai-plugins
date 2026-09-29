@@ -526,6 +526,11 @@ def _total_cost(av: list[dict], bv: list[dict], b_out: float) -> float:
     return sum(r["cost"] for r in av if not r["in_B"]) + sum(r["cost_low"] for r in bv) + b_out
 
 
+def _per(rows: list[dict], key: str, scale: float = 1, ndigits: int | None = None) -> float | None:
+    """rows の key の 1 行あたりの平均（scale で割って丸める）。rows が空なら None。"""
+    return round(sum(r[key] for r in rows) / len(rows) / scale, ndigits) if rows else None
+
+
 def _version_row(
     rm: release_map.ReleaseMap, v: str | None, partial: bool, a: list[dict], b: list[dict], c: list[dict], outside: list[dict]
 ) -> dict:
@@ -555,15 +560,15 @@ def _version_row(
         "cost_total_low": round(cost),
         "A_in_B": sum(r["in_B"] for r in av),
         "cost_per_pr": round(cost / release_prs) if release_prs else None,
-        "A_P_per_conv": round(sum(r["P"] for r in av) / len(av)) if av else None,
-        "A_calls_per_conv": round(sum(r["calls"] for r in av) / len(av), 1) if av else None,
-        "A_min_per_conv": round(sum(r["active_sec"] for r in av) / len(av) / 60, 1) if av else None,
-        "B_turns_per_plan": round(sum(r["turns"] for r in bv) / len(bv), 1) if bv else None,
-        "B_llm_min_per_plan": round(sum(r["llm_sec"] for r in bv) / len(bv) / 60, 1) if bv else None,
+        "A_P_per_conv": _per(av, "P"),
+        "A_calls_per_conv": _per(av, "calls", ndigits=1),
+        "A_min_per_conv": _per(av, "active_sec", scale=60, ndigits=1),
+        "B_turns_per_plan": _per(bv, "turns", ndigits=1),
+        "B_llm_min_per_plan": _per(bv, "llm_sec", scale=60, ndigits=1),
         "C_seats": len(cv),
         "C_cost": round(sum(r["cost"] for r in cv)),
-        "C_P_per_seat": round(sum(r["P"] for r in cv) / len(cv)) if cv else None,
-        "C_calls_per_seat": round(sum(r["calls"] for r in cv) / len(cv), 1) if cv else None,
+        "C_P_per_seat": _per(cv, "P"),
+        "C_calls_per_seat": _per(cv, "calls", ndigits=1),
         "kinds_A": dict(Counter(r["kind"] for r in av)),
         "kinds_B": dict(Counter(r["kind"] for r in bv)),
         "models_B": dict(Counter(r["model"] for r in bv)),
