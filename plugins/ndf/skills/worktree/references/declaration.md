@@ -55,6 +55,31 @@ bash "$SCRIPTS/worktree-setup.sh" init
 }
 ```
 
+## ツールが書き換えるファイルを追跡しているリポジトリ
+
+CLI が起動したツール（Serena MCP など）は、利用者の操作なしに worktree の中のファイルを書き換える。
+このパスを「ツールのパス」と呼び、cross-review・cross-refactoring・`pr` の手順は検査とコミットの
+対象から外す。既定は `.serena/project.yml` と `.serena/serena_config.yml` の 2 つである。
+
+| 工程 | 扱い |
+| --- | --- |
+| cross-review のレビュー worktree・cross-refactoring の書き込み用の作業ディレクトリ | 作った後に `git update-index --skip-worktree` を掛ける。HEAD を動かす前に外して HEAD の内容へ戻し、動かした後に掛け直す |
+| ラウンドの開始・同期の前の検査 | ツールのパスの変更だけでは止まらない。外したパスを `↷ ツールのパスを検査から外した:` の 1 行で出す |
+| push の直前 | 送るコミットにツールのパスがあれば push しない（追跡対象外のツールのパスは `.gitignore` へ入れる） |
+| `pr-steps.py plan` / `commit` | `plan` は `tool_paths` の項目に分けて数え、`commit` は index から外す（ファイルの中身は残す）。意図した変更は `git commit` で直接コミットする |
+
+足すときは `tool_paths.add`、既定から外すときは `tool_paths.remove` を書く。末尾が `/` の項目は
+前方一致、それ以外は完全一致である。読むのは検査する worktree の直下のこのファイルだけで、
+レビュー worktree では Pull Request の head の設定になる。`tool_paths` があるのに読めない
+（JSON が壊れている・`version` が 1 でない・型が違う）ときは、既定へ戻さずに止まる。
+
+```json
+{
+  "version": 1,
+  "tool_paths": { "add": [".idea/workspace.xml"], "remove": [".serena/project.yml"] }
+}
+```
+
 ## 開発の起点が既定ブランチと違うリポジトリ
 
 既定ブランチに正式版を置き、開発の本流を別のブランチに置く構成では、`base_branch` を書く。

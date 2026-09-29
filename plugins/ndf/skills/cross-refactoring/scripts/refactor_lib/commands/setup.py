@@ -25,6 +25,7 @@ import project_decl
 import repo as repo_lib
 import statefile
 import test_strategy as ts
+import tool_paths
 import worktree_deps
 
 from .. import ABORT, die, info
@@ -834,6 +835,9 @@ def _ensure_work_worktree(work: pathlib.Path, head_branch: str) -> None:
     sh(["git", "fetch", "origin", head_branch])
     sh(["git", "worktree", "add", "--detach", str(work), f"origin/{head_branch}"])
     info(f"✅ 書き込み用の作業ディレクトリを作成しました: {work}")
+    # ツールのパス（#1436）へ skip-worktree の印を掛ける。担当の CLI が起動した Serena などが
+    # 書き換えても、同期の前の検査に現れず、コミットにも入らない。
+    tool_paths.hide(str(work), tool_paths.load_or_die(work, ABORT))
     _prepare_work_deps(work)
 
 
@@ -863,12 +867,17 @@ def _sync_work_worktree(work: pathlib.Path, head_branch: str) -> None:
         # 取得できないまま古い `origin/<head>` へ早送りすると、同期したつもりで
         # **古い HEAD のまま**進んでしまう。通信・認証の失敗はここで止める。
         die(f"origin/{head_branch} を取得できませんでした: {fetched.stderr.strip()[:300]}。古い HEAD のまま進めないため中断します")
+    # 印の掛かったツールのパスに手元の変更があると、そのパスを変える先への早送りが失敗する。
+    # 書き込み用の作業ディレクトリの中身なので、印を外して HEAD へ戻してから動かす（#1436 決定 2）。
+    entries = tool_paths.load_or_die(work, ABORT)
+    tool_paths.release(str(work), entries)
     r = subprocess.run(
         ["git", "merge", "--ff-only", f"origin/{head_branch}"],
         cwd=str(work),
         capture_output=True,
         text=True,
     )
+    tool_paths.hide(str(work), entries)
     if r.returncode != 0:
         die(
             f"作業ディレクトリを origin/{head_branch} へ早送りできませんでした: "

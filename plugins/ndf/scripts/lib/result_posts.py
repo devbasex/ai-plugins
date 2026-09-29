@@ -33,6 +33,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import design_body  # noqa: E402
 import post_queue  # noqa: E402
 import statefile  # noqa: E402
+import tool_paths  # noqa: E402
 
 # レビューの本文の先頭行。**照合の鍵はラウンドと席までの前方一致である**ため、判定の
 # 語はこの行の末尾に置く（`post_queue.review_match_key`）。
@@ -496,6 +497,8 @@ def push_fix(worktree: pathlib.Path | str, head_branch: str, fix_commit: str | N
         return PushResult(True, False, True, "コミットが無いため送らない")
     if not (str(worktree or "") and head_branch):
         return PushResult(False, False, False, "送る先（作業ツリーとブランチ）が分からない")
+    if blocked := tool_paths.before_push(worktree, head_branch, lambda *a: _git(worktree, *a)):  # #1436
+        return PushResult(False, False, False, blocked)
     pushed = _git(worktree, "push", "origin", f"HEAD:{head_branch}")
     if pushed.returncode != 0:
         return PushResult(False, False, False, (pushed.stderr or pushed.stdout or "").strip()[:300])

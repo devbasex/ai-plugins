@@ -6,7 +6,9 @@ import pathlib
 import subprocess
 from typing import Any, Optional
 
-from . import die, info
+import tool_paths
+
+from . import ABORT, die, info
 from .paths import git_out
 
 
@@ -146,10 +148,19 @@ def _control_prefix(state: dict[str, Any], work: str) -> Optional[str]:
     return f"{relative}/"
 
 
-def _dirty_paths(state: dict[str, Any], work: str) -> list[str]:
-    """作業ツリーの未コミット変更のパス。制御用ディレクトリは除く。"""
+def _split_dirty(state: dict[str, Any], work: str) -> tool_paths.Split:
+    """作業ツリーの未コミット変更を、利用者の変更とツールのパスに分ける。制御用ディレクトリは除く。"""
     control = _control_prefix(state, work)
-    return sorted(path for path in _worktree_changes(work) if not (control and path.startswith(control)))
+    paths = sorted(path for path in _worktree_changes(work) if not (control and path.startswith(control)))
+    return tool_paths.split_changes(paths, tool_paths.load_or_die(work, ABORT))
+
+
+def _dirty_paths(state: dict[str, Any], work: str) -> list[str]:
+    """作業ツリーの未コミット変更のパス。制御用ディレクトリとツールのパスは除く。
+
+    ツールのパスを除くので、同期コミット（このパスだけを `git add` する）にも入らない。
+    """
+    return _split_dirty(state, work).user
 
 
 def _discard_worktree_changes(work: str) -> None:
@@ -204,7 +215,9 @@ def _require_clean_worktree(state: dict[str, Any], work: str) -> None:
     無視されたファイルはここに現れない。生成物やキャッシュを `.gitignore` へ
     入れてあれば止まらない。
     """
-    dirty = _dirty_paths(state, work)
+    dirty, tool = _split_dirty(state, work)
+    if tool:
+        info(tool_paths.describe(tool))
     if not dirty:
         return
     shown = ", ".join(dirty[:5])
