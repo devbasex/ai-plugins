@@ -20,6 +20,7 @@ PY = sys.executable
 
 sys.path.insert(0, str(SCRIPTS / "lib"))
 from step_result import validate_result  # noqa: E402
+import claude_accounts as ca  # noqa: E402
 
 sys.path.insert(0, str(SCRIPTS))
 from supervise_lib import claude, commands, engine, paths, plan, pr as pr_step, queue  # noqa: E402
@@ -865,6 +866,37 @@ def test_all_limited_moves_to_metered_then_recovers(tmp_path, seq, accounts, mon
     assert [(r["reason"], r["from"], r["to"]) for r in rows] == [("five_hour", "a", "metered"), ("recovered", "metered", "b")]
     assert rows[0]["keys"] == ["CLAUDE_CODE_USE_BEDROCK", "ANTHROPIC_API_KEY"]
     assert "SECRET" not in (tmp_path / "state" / "progress.jsonl").read_text() and "SECRET" not in text
+
+
+@pytest.mark.parametrize("env_decl", [None, "ANTHROPIC_API_KEY=sk-SECRET"])
+def test_all_limited_uses_saved_declaration_unless_env(tmp_path, seq, accounts, monkeypatch, env_decl):
+    """#1468 の AC4: すべて上限なら保存した宣言の変数で呼ぶ。環境変数の宣言があれば、保存した宣言は 1 つも入らない。"""
+    set_responses, calls = seq
+    monkeypatch.setenv("NDF_ACCOUNT_CHECK_INTERVAL", "0")
+    ta = accounts.add("a", util5=100)
+    accounts.add("b", util5=100)
+    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "a")
+    if env_decl is not None:
+        monkeypatch.setenv("NDF_SUPERVISE_CLAUDE_FALLBACK", env_decl)
+    ca.save_metered("bedrock", {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": "p"}, {"profile": "p"})
+    set_responses(LIMIT, OK)
+    s, text = run_plan(tmp_path, WORK_THEN_FAIL)
+    got = [(c["token"], c["bedrock"], c["account"]) for c in calls()]
+    assert got == [(ta, None, "a"), (None, None if env_decl else "1", "metered")]
+    keys = "ANTHROPIC_API_KEY" if env_decl else "CLAUDE_CODE_USE_BEDROCK, AWS_PROFILE"
+    assert s.state.results["w"]["auth"] == f"従量の接続（{keys}）"
+    assert "SECRET" not in (tmp_path / "state" / "progress.jsonl").read_text() and "SECRET" not in text
+
+
+def test_broken_saved_declaration_is_told_once(tmp_path, seq, accounts, capsys):
+    """#1468 の I5: 保存先が壊れていれば、最初の呼び出しの前に標準エラーと進捗ログへ 1 行出し、宣言なしで進む。"""
+    set_responses, calls = seq
+    (accounts.root / "metered.json").write_text("{broken")
+    set_responses(OK)
+    s, text = run_plan(tmp_path, WORK_TWICE)
+    assert "結果: 完了" in text and len(calls()) == 2
+    assert len(progress_rows(tmp_path, "metered_invalid")) == 1
+    assert capsys.readouterr().err.count("壊れている") == 1
 
 
 def test_single_account_keeps_fallback_once_per_call(tmp_path, seq, accounts, monkeypatch):

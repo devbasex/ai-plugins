@@ -71,10 +71,13 @@ drive のステップ: `cmd`（または `"drive": "cross-review" | "cross-refac
   と `NDF_CLAUDE_ACCOUNT` を渡す）。以後の呼び出しもそのアカウントで起動する。ステップの `auth` に
   `アカウント <名前>（<種類>）`、報告に `認証: 切り替え（アカウント <名前>）`、途中の報告に `"kind": "account"` の行を残す。
   起動したときの `NDF_CLAUDE_ACCOUNT`（動いている区間のアカウント）のトークンはプランが更新しない
-- 候補が無く `NDF_SUPERVISE_CLAUDE_FALLBACK`（従量の接続の宣言）があれば、その変数を足しトークンを外した環境へ移り、
+- 従量の接続の宣言は、環境変数 `NDF_SUPERVISE_CLAUDE_FALLBACK` が定義されていれば（空でも）それ、無ければ
+  `relay.py account add-bedrock` が保存した宣言（アカウントの置き場の `metered.json`）である。保存先が壊れていれば
+  最初の呼び出しの前に標準エラーと途中の報告（`"kind": "metered_invalid"`）へ 1 行出し、宣言なしとして扱う
+- 候補が無く従量の接続の宣言があれば、その変数を足しトークンを外した環境へ移り、
   以後の呼び出しもそれで起動する。起動のたびに登録済みのアカウントの残量を読み（推論なし）、上限を外れ閾値
   （`NDF_ACCOUNT_SWITCH_AT`）未満のものがあれば戻す（`auth` は `従量の接続（<変数名>）`・`アカウント <名前>（recovered）`）
-- 登録が 1 つ以下なら、環境変数 `NDF_SUPERVISE_CLAUDE_FALLBACK`（`KEY=VALUE` を空白区切り。例 `CLAUDE_CODE_USE_BEDROCK=1`）が
+- 登録が 1 つ以下なら、従量の接続の宣言（環境変数は `KEY=VALUE` を空白区切り。例 `CLAUDE_CODE_USE_BEDROCK=1`）が
   あれば、それを環境に足した同じ claude -p で 1 度だけ起動し直す。報告に `認証: 切り替え（<変数名>）` を書く
 - それでも上限なら、解除時刻 + 1 分まで（読めなければ計画の `"limit_retry_seconds"`、既定 900 秒）待って
   同じ呼び出しを起動し直す。待ちは LLM を使わない（time.sleep）。queue の枠は待ちの間も保つ
