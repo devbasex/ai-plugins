@@ -107,8 +107,3 @@ def item_shas(item: dict[str, Any]) -> list[str]:
 def live_items(state: dict[str, Any]) -> list[dict[str, Any]]:
     """取り消されていない項目。"""
     return [i for i in state.get("items") or [] if i.get("status") in LIVE]
-
-
-def newest_first(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """新しい項目から。実装は順位の順に積まれるため、順位の大きい方が新しい。"""
-    return sorted(items, key=lambda i: int(i.get("rank") or 0), reverse=True)

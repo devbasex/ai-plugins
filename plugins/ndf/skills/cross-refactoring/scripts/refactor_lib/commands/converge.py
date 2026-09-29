@@ -38,7 +38,6 @@ from ..items import (
     find_item,
     item_shas,
     live_items,
-    newest_first,
 )
 from ..paths import work_dir
 from ..outbound import item_lines, plan_line
@@ -78,6 +77,11 @@ def _run_limited(path: pathlib.Path, state: dict[str, Any], items: list[dict[str
         item["verify_runs"] = int(item.get("verify_runs") or 0) + 1
 
 
+def _newest_first(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """新しい項目から。実装は順位の順に積まれるため、順位の大きい方が新しい。"""
+    return sorted(items, key=lambda i: int(i.get("rank") or 0), reverse=True)
+
+
 def _revert_shared(
     path: pathlib.Path,
     state: dict[str, Any],
@@ -93,7 +97,7 @@ def _revert_shared(
     範囲テスト（`command` を渡せば全体のテストで落ちたテストだけ）で、全体のテストではない。
     通った時点で止めたら真、全件を取り消したら偽を返す。
     """
-    remaining = newest_first(group)
+    remaining = _newest_first(group)
     while remaining:
         target = remaining.pop(0)
         target["failure_reason"] = reason
@@ -197,7 +201,7 @@ def _whole_test(path: pathlib.Path, state: dict[str, Any], flags: list[str]) -> 
     if not flags or record.get("ran"):
         return False
     if timeline.strategy_of(state).whole_on_ci:
-        wholetest.defer_to_final_gate(path, state, record, flags, [i["id"] for i in newest_first(live_items(state)) if i.get("danger")])
+        wholetest.defer_to_final_gate(path, state, record, flags, [i["id"] for i in _newest_first(live_items(state)) if i.get("danger")])
         return False
     info(f"⚠ 危険フラグ（{', '.join(flags)}）が立ったため、全体テストを 1 度走らせます")
     started = time.monotonic()
@@ -218,7 +222,7 @@ def _whole_test(path: pathlib.Path, state: dict[str, Any], flags: list[str]) -> 
     if passed:
         info("✅ 全体テストが通りました")
         return False
-    flagged = [i for i in newest_first(live_items(state)) if i.get("danger")]
+    flagged = [i for i in _newest_first(live_items(state)) if i.get("danger")]
     record["items"] = [i["id"] for i in flagged]
     record.update(triage.classify(state, timed_out))
     statefile.save(path, state)
