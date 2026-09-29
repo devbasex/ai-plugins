@@ -60,7 +60,7 @@
 | --- | --- | --- |
 | 載った版 | PR が載った正式版。CHANGELOG の版の節 → マージの時刻の後の最初の正式版のタグ → 行の時刻の後の最初の正式版のタグ、の順で決める | 追加（`ndf-workflow`） |
 | 動いた版 | 呼び出しや会話を動かした NDF の版（帳簿の `ndf_version`・会話の Skill の置き場の版） | 追加（`ndf-workflow`） |
-| 検査の記録 | 意味は変えない。検査の行に `scope`・`target_pr`・`prs` の列が増える | 変更なし |
+| 検査の記録 | 意味は変えない。検査の行に `scope`・`target_pr`・`prs` の列が増える | 追加（`ndf-workflow`。用語集に無かったため、要求の定義を載せる） |
 
 ## 機能一覧
 
@@ -85,7 +85,7 @@
 | `plugins/ndf/scripts/supervise_lib/templates.py` | `plan_check`（`--pr`）に `record` と `abort` のステップを足す。両方の検査の雛形で judge の `stop` を `abort` へ向ける |
 | `plugins/ndf/skills/cross-review/scripts/drive.py` | `counts()` の `findings` を修正担当が扱った指摘の数にし、レビューのコメントの数を `comments` で出す |
 | `plugins/ndf/skills/development-workflow/references/pace.md` | 検査の記録の表（`check` の列）と `stats` の出力の説明を新しい列に合わせる |
-| `docs/glossary/glossary.json` | 「載った版」「動いた版」を足す |
+| `docs/glossary/glossary.json` | 「載った版」「動いた版」「検査の記録」を足す（`docs/glossary.md` も同じ 3 語） |
 
 ```mermaid
 graph LR
