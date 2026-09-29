@@ -40,7 +40,7 @@ def view_json(kind: str, number: int, fields: str, repo: str | None = None, cwd:
     names = gh_fields.field_names(fields)
     if not names or any(f not in _VIEW_JSON_FIELDS[kind] for f in names):
         return r
-    path = f"repos/{repo or '{owner}/{repo}'}/{gh_fields._VIEW_REST_PATH[kind]}/{int(number)}"
+    path = f"repos/{repo or '{owner}/{repo}'}/{gh_fields.VIEW_REST_PATH[kind]}/{int(number)}"
     rr = gh_call.gh(["api", path], cwd=cwd)
     try:
         d = json.loads(rr.stdout) if rr.returncode == 0 else None
@@ -143,7 +143,7 @@ def view(kind: str, number: int, fields: str, repo: str | None = None) -> Attemp
         return graphql()
 
     def by_rest() -> Attempt:
-        a = _rest(f"repos/{slug}/{gh_fields._VIEW_REST_PATH[kind]}/{int(number)}")
+        a = _rest(f"repos/{slug}/{gh_fields.VIEW_REST_PATH[kind]}/{int(number)}")
         return a if not a.ok else a._replace(value=gh_fields.to_json_shape(kind, a.value or {}, fields))
 
     return gh_quota.with_fallback(by_rest, graphql)
@@ -164,7 +164,7 @@ def _list(kind: str, repo: str | None, fields: str, state: str, labels: list[str
 
     def by_rest() -> Attempt:
         rest_state = "closed" if state == "merged" else state
-        base = f"repos/{slug}/{gh_fields._VIEW_REST_PATH[kind]}?state={rest_state}&per_page={PER_PAGE}"
+        base = f"repos/{slug}/{gh_fields.VIEW_REST_PATH[kind]}?state={rest_state}&per_page={PER_PAGE}"
         if kind == "issue" and labels:
             base += "&labels=" + ",".join(labels)
         out: list[dict[str, Any]] = []
@@ -244,7 +244,7 @@ def _edit(
     def by_rest() -> Attempt:
         fields = {k: v for k, v in (("title", title), ("body", body)) if v is not None}
         if fields:
-            a = _rest(f"repos/{slug}/{gh_fields._VIEW_REST_PATH[kind]}/{n}", "PATCH", fields)
+            a = _rest(f"repos/{slug}/{gh_fields.VIEW_REST_PATH[kind]}/{n}", "PATCH", fields)
             if not a.ok:
                 return a
         if add_labels:
