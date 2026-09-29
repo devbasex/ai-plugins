@@ -335,3 +335,79 @@ def test_token_usage_default_axes_do_not_read_pr_list(tmp_path):
     r = run_tu(roots, "--repo", str(tmp_path / "not-a-repo"), "--prs-json", str(missing))
     assert "release_prs" not in r["per_pr"][0]
     assert not missing.exists()
+
+
+# ---------- read_reports の現状固定（I-002） ----------
+
+
+def _report(record: str, inp: int, read: int = 100, out: int = 20, write: int = 50) -> str:
+    return (
+        "## フェーズの報告\n\n- 課題: #1\n"
+        f"- 記録: `{record}`\n"
+        f"- LLM の使用量: 入力 {inp} / cache read {read} / cache write {write} / 出力 {out} / $0.10\n"
+    )
+
+
+def _tool_result_line(at: str, text: str, typ: str = "user") -> dict:
+    return {"type": typ, "timestamp": at, "message": {"content": [{"type": "tool_result", "content": text}]}}
+
+
+def test_read_reports_characterization(tmp_path):
+    """read_reports の今の振る舞いを固定する（report.md と会話の tool_result の両方、重複と期間の扱い）。"""
+    sv, projects = tmp_path / "sv", tmp_path / "projects"
+    cpu_mod.configure(tmp_path / "repo", sv, projects, "seat-")
+    try:
+        # 1) report.md: 新しい置き場・古い plans/ の置き場・期間の外・LLM を使わない報告
+        def put(rel: str, text: str, at: str) -> None:
+            p = sv / rel / "report.md"
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(text, encoding="utf-8")
+            os.utime(p, (ts(at), ts(at)))
+
+        a = sv / "r-1" / "2-impl-5-state"
+        put("r-1/2-impl-5-state", _report(str(a), 10), "2026-09-10T01:00:00Z")
+        b = sv / "r-2" / "plans" / "3-check-state"
+        put("r-2/plans/3-check-state", _report(str(b), 7), "2026-09-10T02:00:00Z")
+        old = sv / "r-3" / "1-design-state"
+        put("r-3/1-design-state", _report(str(old), 9), "2026-09-01T00:00:00Z")  # since より前
+        zero = sv / "r-4" / "1-release-state"
+        put("r-4/1-release-state", _report(str(zero), 0, read=0, out=0, write=0), "2026-09-10T03:00:00Z")
+        # 2) 会話: 同じ記録で数値が伸びた報告（最後だけ残る）・記録が計画名に合わない報告・type が user でない行・期間の外
+        c = sv / "r-5" / "7-review-state"
+        lines = [
+            _tool_result_line("2026-09-10T04:00:00Z", _report(str(c), 1, read=10, out=1)),
+            _tool_result_line("2026-09-10T05:00:00Z", _report(str(c), 1, read=500, out=5)),
+            _tool_result_line("2026-09-10T06:00:00Z", _report("/elsewhere/x", 3)),
+            _tool_result_line("2026-09-10T06:30:00Z", _report(str(sv / "r-6" / "1-impl-state"), 4), typ="assistant"),
+            _tool_result_line("2026-09-12T00:00:00Z", _report(str(sv / "r-7" / "1-impl-state"), 6)),
+            # report.md と同じ報告が会話にもある。早い方の時刻が残る
+            _tool_result_line("2026-09-10T00:30:00Z", _report(str(a), 10)),
+        ]
+        f = projects / "p" / "s.jsonl"
+        f.parent.mkdir(parents=True)
+        f.write_text("\n".join(json.dumps(x, ensure_ascii=False) for x in lines) + "\nnot json LLM の使用量\n", encoding="utf-8")
+
+        got = cpu_mod.read_reports(ts("2026-09-05T00:00:00Z"), ts("2026-09-11T00:00:00Z"))
+    finally:
+        cpu_mod.configure(Path.home(), Path.home() / ".local/state/ndf/sv", Path.home() / ".claude/projects", "")
+
+    assert [(r["plan"], r["kind"], r["input"], r["cache_read"], r["output"], cpu_mod.iso(r["at"])) for r in got] == [
+        ("r-1/2-impl-5", "impl", 10, 100, 20, "2026-09-10T00:30:00Z"),
+        ("r-2/3-check", "check", 7, 100, 20, "2026-09-10T02:00:00Z"),
+        ("r-5/7-review", "review", 1, 500, 5, "2026-09-10T05:00:00Z"),
+        ("不明", "不明", 3, 100, 20, "2026-09-10T06:00:00Z"),
+    ]
+    r = got[0]
+    assert (r["source"], r["model"], r["calls"], r["cache_write_5m"], r["cache_write_1h"], r["full_calls"], r["run_version"]) == (
+        "report",
+        "不明",
+        None,
+        None,
+        None,
+        None,
+        "-",
+    )
+    low = round(10 + 100 * cpu_mod.tu.read_rate("claude-opus-5-5") + 50 * cpu_mod.tu.WEIGHTS["w5"] + 20 * cpu_mod.tu.WEIGHTS["out"], 1)
+    assert r["cost_low"] == low
+    assert r["cost_high"] == round(low + 50 * (cpu_mod.tu.WEIGHTS["w1h"] - cpu_mod.tu.WEIGHTS["w5"]), 1)
+    assert (r["issues"], r["pr_field"], r["usd"]) == ([1], [], 0.1)
