@@ -2609,6 +2609,24 @@
       "context": "ndf-cross-refactoring",
       "meaning": "cross-refactoring で、最終ゲートへ入るより前の push",
       "pending_source": "issues/issue-1482-requirements.md"
+    },
+    {
+      "term": "残すコミット",
+      "context": "ndf-cross-refactoring",
+      "meaning": "取り消しの判定が残すと決めたコミット。取り消されていない改善項目に記録されたコミット・受け入れた最終ゲート修正のコミット・オーケストレーターが状態ファイルに記録したコミットのどれかで、公開してよいのはこれだけである",
+      "pending_source": "issues/issue-1482-design.md"
+    },
+    {
+      "term": "公開した地点",
+      "context": "ndf-cross-refactoring",
+      "meaning": "cross-refactoring のオーケストレーターが最後に push した HEAD。まだ push していなければ plan.base_sha。これより前のコミットは取り消しで書き換えない",
+      "pending_source": "issues/issue-1482-design.md"
+    },
+    {
+      "term": "積み直しの起点",
+      "context": "ndf-cross-refactoring",
+      "meaning": "取り消しで git reset --hard する先。未公開の範囲で最も古い「消すコミット」の親で、公開した地点より前には置かない",
+      "pending_source": "issues/issue-1482-design.md"
     }
   ]
 }
