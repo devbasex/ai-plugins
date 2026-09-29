@@ -354,24 +354,10 @@ def load_skills(skills_dir: pathlib.Path) -> list[dict]:
     return skills
 
 
-def check_skill(s: dict) -> list[Finding]:
-    name_hint = s["dir"]
-    fm = s["fm"]
-    if fm is None:
-        if s.get("fm_error"):
-            return [Finding(name_hint, "error", "spec/frontmatter", f"YAML として読めない（{s['fm_error']}）")]
-        return [Finding(name_hint, "error", "spec/frontmatter", "frontmatter がない")]
-
-    out: list[Finding] = []
-
-    def add(level, code, msg):
-        out.append(Finding(name_hint, level, code, msg))
-
+def _check_spec(s: dict, fm: dict, add) -> None:
+    """仕様準拠の検査。"""
     desc = fm.get("description", "")
-    wtu = fm.get("when_to_use", "")
     name = fm.get("name", "")
-
-    # --- 仕様準拠 ---
     if not name:
         add("error", "spec/name", "name がない")
     else:
@@ -391,13 +377,19 @@ def check_skill(s: dict) -> list[Finding]:
     if len(compat) > COMPATIBILITY_MAX:
         add("error", "spec/compatibility", f"compatibility が {len(compat)} 文字（上限 {COMPATIBILITY_MAX}）")
 
-    # --- 安全性 ---
+
+def _check_safety(s: dict, fm: dict, add) -> None:
+    """安全性の検査。"""
     # Agent Skills 仕様がシステムプロンプトへの注入リスクとして警告している。
     if "<" in s["block"] or ">" in s["block"]:
         bad = [k for k, v in fm.items() if "<" in v or ">" in v]
         add("error", "safety/angle-bracket", f"frontmatter に < または > が含まれる（{', '.join(bad) or '不明'}）")
 
-    # --- 可搬性 ---
+
+def _check_portability(s: dict, fm: dict, add) -> None:
+    """可搬性の検査。"""
+    desc = fm.get("description", "")
+    wtu = fm.get("when_to_use", "")
     # Codex と Kiro は when_to_use を読まないため、発動条件は description に要る。
     if desc and not USE_WHEN_RE.search(desc):
         add("error", "portability/use-when", "description に発動条件を示す語（Use when / 使う / とき）がない")
@@ -435,7 +427,11 @@ def check_skill(s: dict) -> list[Finding]:
             "置き換えるため、名前付きの変数で受けるか処理をスクリプトへ移す",
         )
 
-    # --- 運用 ---
+
+def _check_ops(s: dict, fm: dict, add) -> None:
+    """運用の検査。"""
+    desc = fm.get("description", "")
+    wtu = fm.get("when_to_use", "")
     if len(desc) > DESCRIPTION_OPS_MAX:
         add("error", "ops/description-length", f"description が {len(desc)} 文字（運用上限 {DESCRIPTION_OPS_MAX}）")
     if len(desc) + len(wtu) > DESC_PLUS_WTU_MAX:
@@ -487,6 +483,23 @@ def check_skill(s: dict) -> list[Finding]:
     unknown = sorted(set(fm) - ALLOWED_KEYS)
     if unknown:
         add("error", "ops/unknown-key", f"未知の項目名: {', '.join(unknown)}")
+
+
+def check_skill(s: dict) -> list[Finding]:
+    name_hint = s["dir"]
+    fm = s["fm"]
+    if fm is None:
+        if s.get("fm_error"):
+            return [Finding(name_hint, "error", "spec/frontmatter", f"YAML として読めない（{s['fm_error']}）")]
+        return [Finding(name_hint, "error", "spec/frontmatter", "frontmatter がない")]
+
+    out: list[Finding] = []
+
+    def add(level, code, msg):
+        out.append(Finding(name_hint, level, code, msg))
+
+    for check in (_check_spec, _check_safety, _check_portability, _check_ops):
+        check(s, fm, add)
 
     return out
 
