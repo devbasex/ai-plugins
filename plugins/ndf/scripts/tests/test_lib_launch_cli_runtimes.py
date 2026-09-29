@@ -7,6 +7,8 @@ import pathlib
 import subprocess
 import time
 
+import pytest
+
 
 LAUNCH = pathlib.Path(__file__).resolve().parents[1] / "lib" / "launch-cli.sh"
 STUB = """#!/bin/sh
@@ -16,7 +18,14 @@ mv "$NDF_TEST_ARGS_FILE.tmp" "$NDF_TEST_ARGS_FILE"
 """
 
 
-def _launch(tmp_path: pathlib.Path, runtime: str, *, allowed_tools: str | None = None) -> list[str]:
+def _launch(
+    tmp_path: pathlib.Path,
+    runtime: str,
+    *,
+    allowed_tools: str | None = None,
+    model: str = "test-model",
+    interpreter: str | None = None,
+) -> list[str]:
     workdir = tmp_path / "work"
     workdir.mkdir()
     prompt = tmp_path / "prompt.md"
@@ -37,8 +46,10 @@ def _launch(tmp_path: pathlib.Path, runtime: str, *, allowed_tools: str | None =
     if allowed_tools is not None:
         env["NDF_CLAUDE_ALLOWED_TOOLS"] = allowed_tools
 
+    # 上限は数字で渡す（`limits.py` を引かず、python3 の無い bash 3.2 の環境でも起動まで進む）。
+    command = [str(LAUNCH), runtime, str(workdir), str(prompt), str(stem), model, "", "60"]
     subprocess.run(
-        [str(LAUNCH), runtime, str(workdir), str(prompt), str(stem), "test-model"],
+        [interpreter, *command] if interpreter else command,
         env=env,
         check=True,
         capture_output=True,
@@ -76,3 +87,21 @@ def test_kiro_launch_arguments(tmp_path):
 
     assert args[:3] == ["chat", "--no-interactive", "--trust-all-tools"]
     assert args[args.index("--model") + 1] == "test-model"
+
+
+# 空の配列を `set -u` の下で展開しても起動まで進むこと（#476）。bash 4.4 未満（macOS の既定の
+# 3.2）は空配列の `"${arr[@]}"` を unbound variable として扱い、`nohup` の行を実行しない。
+# bash 3.2 の実体は `NDF_TEST_BASH32` で渡す（無ければ手元の bash で同じ経路を通す）。
+@pytest.mark.parametrize("runtime", ["codex", "agy", "claude", "kiro"])
+def test_launch_without_model_passes_no_model_flag(tmp_path, runtime):
+    args = _launch(tmp_path, runtime, model="")
+
+    assert "--model" not in args
+
+
+@pytest.mark.skipif(not os.environ.get("NDF_TEST_BASH32"), reason="bash 3.2 の実体が無い")
+@pytest.mark.parametrize("runtime", ["codex", "agy", "claude", "kiro"])
+def test_launch_without_model_under_bash32(tmp_path, runtime):
+    args = _launch(tmp_path, runtime, model="", interpreter=os.environ["NDF_TEST_BASH32"])
+
+    assert "--model" not in args
