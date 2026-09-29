@@ -254,35 +254,35 @@ def load_allow(path: Path) -> list[dict]:
     return rows
 
 
-def _scan_file(root: Path, rel: str, defs: dict[str, list[tuple[str, str, str]]], violations: list[dict]) -> bool:
-    """1 ファイルの行数と包みを検査し、関数を defs へ集める。関数を読めなければ False を返す。"""
-    text = (root / rel).read_text(errors="ignore")
-    n = text.count("\n") + (0 if text.endswith("\n") or not text else 1)
-    if n > MAX_LINES:
-        violations.append({"kind": "lines", "path": rel, "function": "", "detail": f"{n} 行", "lines": n})
-    lang = "py" if rel.endswith(".py") else "sh"
-    if lang == "py":
-        for part, where in sorted(wrapped_parts(text).items()):
-            if rel not in WRAPPED[part]:
-                violations.append(
-                    {
-                        "kind": "wrapped",
-                        "path": rel,
-                        "function": part,
-                        "detail": f"包み {' / '.join(WRAPPED[part])} が受け持つ部品を使う（{where}）",
-                    }
-                )
-    found = py_functions(text) if lang == "py" else sh_functions(text)
-    if found is None:
-        return False
-    for name, key in found:
-        if not excluded(name, lang):
-            defs[lang].append((rel, name, key))
-    return True
-
-
-def _duplicate_violations(defs: dict[str, list[tuple[str, str, str]]]) -> list[dict]:
+def scan(root: Path) -> tuple[list[dict], dict]:
+    files = list_files(root)
     violations: list[dict] = []
+    defs: dict[str, list[tuple[str, str, str]]] = {"py": [], "sh": []}  # lang -> [(path, name, key)]
+    unparsed = 0
+    for rel in files:
+        text = (root / rel).read_text(errors="ignore")
+        n = text.count("\n") + (0 if text.endswith("\n") or not text else 1)
+        if n > MAX_LINES:
+            violations.append({"kind": "lines", "path": rel, "function": "", "detail": f"{n} 行", "lines": n})
+        lang = "py" if rel.endswith(".py") else "sh"
+        if lang == "py":
+            for part, where in sorted(wrapped_parts(text).items()):
+                if rel not in WRAPPED[part]:
+                    violations.append(
+                        {
+                            "kind": "wrapped",
+                            "path": rel,
+                            "function": part,
+                            "detail": f"包み {' / '.join(WRAPPED[part])} が受け持つ部品を使う（{where}）",
+                        }
+                    )
+        found = py_functions(text) if lang == "py" else sh_functions(text)
+        if found is None:
+            unparsed += 1
+            continue
+        for name, key in found:
+            if not excluded(name, lang):
+                defs[lang].append((rel, name, key))
     for lang, items in defs.items():
         by_key, by_name = defaultdict(set), defaultdict(dict)
         for path, name, key in items:
@@ -305,15 +305,6 @@ def _duplicate_violations(defs: dict[str, list[tuple[str, str, str]]]) -> list[d
                     violations.append(
                         {"kind": "same-name", "path": path, "function": name, "detail": "同じ名前で本体が違う: " + ", ".join(diff)}
                     )
-    return violations
-
-
-def scan(root: Path) -> tuple[list[dict], dict]:
-    files = list_files(root)
-    violations: list[dict] = []
-    defs: dict[str, list[tuple[str, str, str]]] = {"py": [], "sh": []}  # lang -> [(path, name, key)]
-    unparsed = sum(not _scan_file(root, rel, defs, violations) for rel in files)
-    violations += _duplicate_violations(defs)
     violations += hook_deps(root)
     metrics = {"files": len(files), "functions": sum(len(v) for v in defs.values()), "unparsed": unparsed}
     return violations, metrics
