@@ -135,20 +135,29 @@ def d3(work: str, files: list[str], symbol: str, scope: list[str]) -> list[str]:
     for path in files:
         if is_test_path(path):
             continue
-        name = pathlib.PurePosixPath(path).name
-        if name in ENTRY_NAMES:
-            hits.append(f"entry:{path}")
+        for hit, unique in _references_to(work, path, symbol, excludes):
+            if not unique or hit not in hits:
+                hits.append(hit)
+    return hits
+
+
+def _references_to(work: str, path: str, symbol: str, excludes: list[str]) -> list[tuple[str, bool]]:
+    """本番のファイル 1 本の判定。`(当たった語, 既に当たった語なら足さないか)` の並びを返す。
+
+    入口と `git grep` の失敗は重複を除かずに足し、当たったパターンだけ重複を除く。
+    """
+    if pathlib.PurePosixPath(path).name in ENTRY_NAMES:
+        return [(f"entry:{path}", False)]
+    own = [f":(exclude){path}"]
+    hits: list[tuple[str, bool]] = []
+    for pattern in _module_patterns(path, symbol):
+        found = _grep(work, pattern, excludes + own)
+        if found is None:
+            info(f"⚠ git grep に失敗しました（{pattern}）。参照の有無を判定できないため D3 を立てます")
+            hits.append((f"grep-failed:{pattern}", False))
             continue
-        own = [f":(exclude){path}"]
-        for pattern in _module_patterns(path, symbol):
-            found = _grep(work, pattern, excludes + own)
-            if found is None:
-                info(f"⚠ git grep に失敗しました（{pattern}）。参照の有無を判定できないため D3 を立てます")
-                hits.append(f"grep-failed:{pattern}")
-                continue
-            if any(pathlib.PurePosixPath(f).suffix.lower() in CODE_EXTENSIONS for f in found):
-                if pattern not in hits:
-                    hits.append(pattern)
+        if any(pathlib.PurePosixPath(f).suffix.lower() in CODE_EXTENSIONS for f in found):
+            hits.append((pattern, True))
     return hits
 
 
