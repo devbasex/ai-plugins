@@ -661,6 +661,110 @@ def _min(x: float | None) -> str:
     return "-" if x is None else f"{x:.1f}"
 
 
+def _per_pr_row(axis: dict, ss: list[Session], rmap: "release_map.ReleaseMap | None") -> dict:
+    with_pr = [s for s in ss if s.prs]
+    n_pr = sum(len(s.prs) for s in with_pr)
+    pr_axis = axis
+    if rmap is not None and RELEASE_AXIS in axis:  # 版の PR 数は PR の一覧と寄せ方だけで決める（I5）
+        pr_axis = axis | {"release_prs": len(rmap.prs_of(axis[RELEASE_AXIS])), "release_by": dict(Counter(s.release_by for s in ss))}
+    if not n_pr:
+        return pr_axis | {"sessions": len(ss), "sessions_with_pr": 0, "prs": 0}
+    layer_cost = Counter()
+    total = Usage()
+    ext = Counter()
+    for s in with_pr:
+        for (layer, *_), r in s.roles.items():
+            layer_cost[layer] += r.usage.cost
+            total.add(r.usage)
+        for e in s.external:
+            for tk, tv in e.tokens.items():
+                ext[f"{e.runtime}.{tk}"] += tv
+    return pr_axis | {
+        "sessions": len(ss),
+        "sessions_with_pr": len(with_pr),
+        "prs": n_pr,
+        "conductor_cost": layer_cost["conductor"] / n_pr,
+        "supervisor_cost": layer_cost["supervisor"] / n_pr,
+        "worker_cost": layer_cost["worker"] / n_pr,
+        "context": total.context / n_pr,
+        "out": total.out / n_pr,
+        "minutes": sum(s.active for s in with_pr) / n_pr / 60,
+        "codex_input": ext["codex.input"] / n_pr,
+        "codex_out": ext["codex.out"] / n_pr,
+        "kiro_credit": ext["kiro.credit"] / n_pr,
+        "claude_seat_cost": ext["claude.cost"] / n_pr,
+    }
+
+
+def _per_role_rows(axis: dict, ss: list[Session]) -> list[dict]:
+    roles: dict = defaultdict(Role)
+    for s in ss:
+        for rk, r in s.roles.items():
+            roles[rk].usage.add(r.usage)
+            roles[rk].n += r.n
+            roles[rk].sec += r.sec
+    layer_order = {"conductor": 0, "supervisor": 1, "worker": 2}
+    rows = []
+    for (layer, role, agent_type), r in sorted(roles.items(), key=lambda x: (layer_order[x[0][0]], x[0][1], x[0][2])):
+        stats = call_stats(r.usage, r.n)
+        if agent_type == LEDGER_AGENT:  # 呼び出しの並びが分からない起動は P・書き直しを出さない
+            for k in SEQ_KEYS:
+                stats.pop(k)
+        rows.append(
+            axis
+            | {
+                "layer": layer,
+                "role": role,
+                "agent_type": agent_type,
+                "count": r.n,
+                "cost": r.usage.cost / r.n,
+                "context": r.usage.context / r.n,
+                "out": r.usage.out / r.n,
+                "minutes": r.sec / r.n / 60,
+                **stats,
+            }
+        )
+    return rows
+
+
+def _external_rows(axis: dict, ss: list[Session]) -> list[dict]:
+    ext_groups: dict = defaultdict(list)
+    for s in ss:
+        for e in s.external:
+            ext_groups[(e.runtime, e.kind, e.model)].append(e)
+    rows = []
+    for (rt, kind, model), es in sorted(ext_groups.items()):
+        tok = Counter()
+        calls = Usage()
+        with_calls = [e for e in es if e.usage]
+        for e in es:
+            tok.update(e.tokens)
+        for e in with_calls:
+            calls.add(e.usage)
+        # 呼び出しの並びが分かる席だけを分母にする。分からない席しか無ければ P・k を出さない（kiro はターン数を k に）
+        if with_calls:
+            stats = call_stats(calls, len(with_calls)) | {"call_seats": len(with_calls)}
+            if rt == "codex":  # codex は書き込みを記録しない（キャッシュに当たらなかった分は書き直しの判定にだけ使う）
+                stats.pop("w5"), stats.pop("w1h")
+        elif "calls" in tok:  # kiro のターン数は利用者のターンで、呼び出し回数 k ではない
+            stats = {"turns": tok.pop("calls") / len(es)}
+        else:
+            stats = {}
+        rows.append(
+            axis
+            | {
+                "runtime": rt,
+                "skill": "cross-review" if kind == "pr" else "cross-refactoring",
+                "cli_model": model,
+                "count": len(es),
+                **{k: v / len(es) for k, v in tok.items()},
+                "minutes": sum(e.sec for e in es) / len(es) / 60,
+                **stats,
+            }
+        )
+    return rows
+
+
 def aggregate(sessions: list[Session], by: list[str], rmap: "release_map.ReleaseMap | None" = None) -> dict:
     groups: dict[tuple, list[Session]] = defaultdict(list)
     for s in sessions:
@@ -680,101 +784,9 @@ def aggregate(sessions: list[Session], by: list[str], rmap: "release_map.Release
     for k in sorted(groups, key=order):
         ss = groups[k]
         axis = dict(zip(by, k))
-        with_pr = [s for s in ss if s.prs]
-        n_pr = sum(len(s.prs) for s in with_pr)
-        pr_axis = axis
-        if rmap is not None and RELEASE_AXIS in axis:  # 版の PR 数は PR の一覧と寄せ方だけで決める（I5）
-            pr_axis = axis | {"release_prs": len(rmap.prs_of(axis[RELEASE_AXIS])), "release_by": dict(Counter(s.release_by for s in ss))}
-        if n_pr:
-            layer_cost = Counter()
-            total = Usage()
-            ext = Counter()
-            for s in with_pr:
-                for (layer, *_), r in s.roles.items():
-                    layer_cost[layer] += r.usage.cost
-                    total.add(r.usage)
-                for e in s.external:
-                    for tk, tv in e.tokens.items():
-                        ext[f"{e.runtime}.{tk}"] += tv
-            per_pr.append(
-                pr_axis
-                | {
-                    "sessions": len(ss),
-                    "sessions_with_pr": len(with_pr),
-                    "prs": n_pr,
-                    "conductor_cost": layer_cost["conductor"] / n_pr,
-                    "supervisor_cost": layer_cost["supervisor"] / n_pr,
-                    "worker_cost": layer_cost["worker"] / n_pr,
-                    "context": total.context / n_pr,
-                    "out": total.out / n_pr,
-                    "minutes": sum(s.active for s in with_pr) / n_pr / 60,
-                    "codex_input": ext["codex.input"] / n_pr,
-                    "codex_out": ext["codex.out"] / n_pr,
-                    "kiro_credit": ext["kiro.credit"] / n_pr,
-                    "claude_seat_cost": ext["claude.cost"] / n_pr,
-                }
-            )
-        else:
-            per_pr.append(pr_axis | {"sessions": len(ss), "sessions_with_pr": 0, "prs": 0})
-        roles: dict = defaultdict(Role)
-        for s in ss:
-            for rk, r in s.roles.items():
-                roles[rk].usage.add(r.usage)
-                roles[rk].n += r.n
-                roles[rk].sec += r.sec
-        layer_order = {"conductor": 0, "supervisor": 1, "worker": 2}
-        for (layer, role, agent_type), r in sorted(roles.items(), key=lambda x: (layer_order[x[0][0]], x[0][1], x[0][2])):
-            stats = call_stats(r.usage, r.n)
-            if agent_type == LEDGER_AGENT:  # 呼び出しの並びが分からない起動は P・書き直しを出さない
-                for k in SEQ_KEYS:
-                    stats.pop(k)
-            per_role.append(
-                axis
-                | {
-                    "layer": layer,
-                    "role": role,
-                    "agent_type": agent_type,
-                    "count": r.n,
-                    "cost": r.usage.cost / r.n,
-                    "context": r.usage.context / r.n,
-                    "out": r.usage.out / r.n,
-                    "minutes": r.sec / r.n / 60,
-                    **stats,
-                }
-            )
-        ext_groups: dict = defaultdict(list)
-        for s in ss:
-            for e in s.external:
-                ext_groups[(e.runtime, e.kind, e.model)].append(e)
-        for (rt, kind, model), es in sorted(ext_groups.items()):
-            tok = Counter()
-            calls = Usage()
-            with_calls = [e for e in es if e.usage]
-            for e in es:
-                tok.update(e.tokens)
-            for e in with_calls:
-                calls.add(e.usage)
-            # 呼び出しの並びが分かる席だけを分母にする。分からない席しか無ければ P・k を出さない（kiro はターン数を k に）
-            if with_calls:
-                stats = call_stats(calls, len(with_calls)) | {"call_seats": len(with_calls)}
-                if rt == "codex":  # codex は書き込みを記録しない（キャッシュに当たらなかった分は書き直しの判定にだけ使う）
-                    stats.pop("w5"), stats.pop("w1h")
-            elif "calls" in tok:  # kiro のターン数は利用者のターンで、呼び出し回数 k ではない
-                stats = {"turns": tok.pop("calls") / len(es)}
-            else:
-                stats = {}
-            external.append(
-                axis
-                | {
-                    "runtime": rt,
-                    "skill": "cross-review" if kind == "pr" else "cross-refactoring",
-                    "cli_model": model,
-                    "count": len(es),
-                    **{k: v / len(es) for k, v in tok.items()},
-                    "minutes": sum(e.sec for e in es) / len(es) / 60,
-                    **stats,
-                }
-            )
+        per_pr.append(_per_pr_row(axis, ss, rmap))
+        per_role += _per_role_rows(axis, ss)
+        external += _external_rows(axis, ss)
     return {"per_pr": per_pr, "per_role": per_role, "external": external}
 
 
