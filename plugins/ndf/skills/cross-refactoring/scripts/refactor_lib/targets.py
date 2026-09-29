@@ -34,24 +34,6 @@ from .timeline import state_test_timeout, state_whole_timeout, strategy_of
 _SHELL_CHARS = frozenset(";&|$`<>()\n")
 
 
-def _target_ok(target: object, work: str, locations: list[str], planned_paths: set[str]) -> bool:
-    """`test_targets` の 1 つが組み立てに使えるか（条件は `valid_targets` の説明）。"""
-    if not isinstance(target, str) or not target:
-        return False
-    if any(ch in _SHELL_CHARS or ch.isspace() for ch in target):
-        return False
-    path = target.split("::", 1)[0]
-    if not path or os.path.isabs(path):
-        return False
-    normalized = os.path.normpath(path)
-    if normalized == ".." or normalized.startswith("../"):
-        return False
-    if not (pathlib.Path(work) / normalized).exists() and normalized not in planned_paths:
-        return False
-    # `covered_by_roots` は起点が空なら全てを入れるため、空の場合は呼び出し元で弾いてある。
-    return covered_by_roots(normalized, locations)
-
-
 def valid_targets(
     targets: list[str],
     work: str,
@@ -72,7 +54,23 @@ def valid_targets(
     locations = [os.path.normpath(loc) for loc in test_locations(list(scope), work)]
     if not locations:
         return False
-    return all(_target_ok(target, work, locations, planned_paths) for target in targets)
+    for target in targets:
+        if not isinstance(target, str) or not target:
+            return False
+        if any(ch in _SHELL_CHARS or ch.isspace() for ch in target):
+            return False
+        path = target.split("::", 1)[0]
+        if not path or os.path.isabs(path):
+            return False
+        normalized = os.path.normpath(path)
+        if normalized == ".." or normalized.startswith("../"):
+            return False
+        if not (pathlib.Path(work) / normalized).exists() and normalized not in planned_paths:
+            return False
+        # `covered_by_roots` は起点が空なら全てを入れるため、空の場合は上で弾いてある。
+        if not covered_by_roots(normalized, locations):
+            return False
+    return True
 
 
 def scope_runs_for(strategy: ts.Strategy, paths: list[str]) -> Optional[list[ts.ScopeRun]]:
