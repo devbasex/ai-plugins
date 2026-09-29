@@ -2568,7 +2568,7 @@
     {
       "term": "ツールのパス",
       "context": "ndf-worktree",
-      "meaning": "CLI が起動したツール（MCP サーバーなど）が、利用者の操作なしに worktree の中で書き換える既知のパス。既定（`.serena/project.yml` と `.serena/serena_config.yml`）と `.ndf/` の設定で決まる。検査とコミットの対象から外す",
+      "meaning": "CLI が起動したツール（MCP サーバーなど）が、利用者の操作なしに worktree の中で書き換える既知のパス。既定（`.serena/project.yml` と `.serena/serena_config.yml`）と `.ndf/worktree.json` の `tool_paths`（`add` / `remove`）で決まる。検査とコミットの対象から外す",
       "code": "tool_paths",
       "source": "",
       "pending_source": "issues/issue-1436-requirements.md"
