@@ -289,6 +289,13 @@
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
+      "term": "検査の記録",
+      "code": "check_log",
+      "context": "ndf-workflow",
+      "meaning": "check-trigger.py が検査の事象（eval・check・escape）を 1 行ずつ追記する jsonl（checks/<owner>__<repo>.jsonl）。トリガーの判定と stats が読む",
+      "pending_source": "issues/issue-1316-requirements.md"
+    },
+    {
       "term": "重点領域",
       "context": "ndf-workflow",
       "meaning": "`pace: fast` の領域のうち、触った Pull Request の点数を重くするもの",
