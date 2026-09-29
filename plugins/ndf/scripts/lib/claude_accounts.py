@@ -620,11 +620,11 @@ def rows(now: float | None = None) -> list[dict]:
         usage(n, 0, now)
         acc = load_account(n)
         if acc is not None:
-            out.append(_row(n, acc, now))
+            out.append(_account_row(n, acc, now))
     return out
 
 
-def _row(name: str, acc: Account, now: float) -> dict:
+def _account_row(name: str, acc: Account, now: float) -> dict:
     """一覧の 1 アカウント分の行。残量を読めていなければ枠と支出の鍵は None。"""
     u = acc.usage if acc.known() else None
     return {
