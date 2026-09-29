@@ -9,7 +9,7 @@ from typing import Any, Optional
 import tool_paths
 
 from . import ABORT, die, info
-from .paths import git_out
+from .paths import git_out, resolve_commit
 
 
 def reset_hard(work: str, sha: Optional[str]) -> None:
@@ -67,7 +67,7 @@ def _order_newest_first(work: str, shas: list[str]) -> list[str]:
     if history is None:
         return list(shas)
     rank = {sha: i for i, sha in enumerate(history.split())}  # 0 が最も新しい
-    resolved = {s: (git_out(work, ["rev-parse", "--verify", f"{s}^{{commit}}"]) or s) for s in shas}
+    resolved = {s: (resolve_commit(work, s) or s) for s in shas}
     return sorted(shas, key=lambda s: rank.get(resolved[s], len(rank)))
 
 
