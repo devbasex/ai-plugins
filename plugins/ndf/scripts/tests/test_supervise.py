@@ -1221,7 +1221,7 @@ def test_new_sprint_writes_waves_in_order(tmp_path):
     ]
     assert "design-glossary --mode" in ds["glossary"]["cmd"] and "on_fail" not in ds["glossary"]
     # PR 本文の「決めたこと」を review の前に合わせる。無いと CI の pr-body-decisions が落ち、cross-review が中断する
-    assert ds["pr"]["next"] == "sync-body" and ds["sync-body"]["next"] == "review"
+    assert ds["pr"]["decisions"] is True and ds["pr"]["next"] == "sync-body" and ds["sync-body"]["next"] == "review"
     assert "pr-body-decisions.sh" in ds["sync-body"]["cmd"] and ds["sync-body"]["cmd"].endswith(" sync {pr}")
     assert ds["review"]["next"] == "sync-review" and ds["sync-review"]["next"] == "glossary-check"
     assert "--ff-only" in ds["sync-review"]["cmd"]  # レビューが push した直しに追いついてから語を見る

@@ -111,10 +111,12 @@ MVV_PY = f"python3 {HERE / 'mvv-gate.py'}"
 SPRINT_STATE_PY = f"python3 {HERE / 'sprint-state.py'}"
 GLOSSARY_PY = f"python3 {HERE / 'glossary.py'}"
 SPEC_COPY_PY = f"python3 {HERE / 'spec-copy.py'}"
+DECISIONS_SH = HERE / "pr-body-decisions.sh"  # 設計の PR の本文の「決めたこと」を設計文書の決定へ合わせる
 # 設計の PR の本文の「決めたこと」を設計文書の決定へ合わせてから push する（CI の pr-body-decisions が見る）
-PUSH_DESIGN = f"git push -q && bash {HERE / 'pr-body-decisions.sh'} sync {{pr}}"
-# PR を作った直後に本文の「決めたこと」を合わせる。review の前に CI の pr-body-decisions を通すため
-SYNC_DESIGN_BODY = f"bash {HERE / 'pr-body-decisions.sh'} sync {{pr}}"
+PUSH_DESIGN = f"git push -q && bash {DECISIONS_SH} sync {{pr}}"
+# PR を作った直後に本文の「決めたこと」を確かめる。pr のステップ（decisions）が作る時点で揃えるため、
+# 揃っていれば書き込まず（本文の編集で CI を再起動しない）、揃わなかったときだけ直す
+SYNC_DESIGN_BODY = f"bash {DECISIONS_SH} sync {{pr}}"
 STEPS_PY = f"python3 {HERE / 'release-steps.py'}"
 VERIFY_PY = f"python3 {HERE / 'release-verification-steps.py'}"
 MERGED_PY = f"python3 {HERE / 'merged-steps.py'}"

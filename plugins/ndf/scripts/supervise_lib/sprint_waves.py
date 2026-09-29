@@ -114,10 +114,13 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
                 "title": f"設計: #{n}",
                 "summary": f"#{n} の設計（スプリント {a.name}）",
                 "append": [DESIGN_GLOSSARY_NOTE],
+                # 本文の「決めたこと」を作る時点で入れる。作った後に書き直すと CI を 2 度起動する
+                "decisions": True,
                 "next": "sync-body",
             },
-            # 本文の「決めたこと」を review の前に合わせる。無いと CI の pr-body-decisions が落ち、cross-review が
-            # コード関連の CI 失敗として round 1 で中断する（m1483 の PR 1499・1500）
+            # 本文の「決めたこと」を review の前に確かめる。無いと CI の pr-body-decisions が落ち、cross-review が
+            # コード関連の CI 失敗として round 1 で中断する（m1483 の PR 1499・1500）。pr のステップが揃えていれば
+            # 書き込まない
             {
                 "id": "sync-body",
                 "type": "run",

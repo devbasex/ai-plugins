@@ -3,7 +3,12 @@
 #
 #   pr-body-decisions.sh check <PR番号> [--repo <所有者>/<リポジトリ>]
 #   pr-body-decisions.sh sync  <PR番号> [--repo <所有者>/<リポジトリ>]
+#   pr-body-decisions.sh render --base <起点のブランチ> --body <本文のファイル>
 #
+# `render` は Pull Request を作る前に使う。本文のファイルの中身へ、手元の HEAD の設計文書
+# （`origin/<起点>...HEAD` で変わった .md）から作った節を `sync` と同じ位置へ入れて標準出力へ出す。
+# 作る時点で本文が揃っていれば、後の `sync` は書き込まず、本文の編集で CI を 2 度起動しない。
+# GitHub を読まない。head のブランチが design/ で始まらなければ本文をそのまま出す。
 # **本文は決定の中身を持たず、設計文書の `## 決定の記録` の下の `### ` の見出しだけを写す。**
 # 見出しだけであれば文字列の一致で食い違いを判定でき、`sync` は節の外を 1 バイトも変えずに
 # 書き直せる。
@@ -20,20 +25,36 @@
 #   1  食い違った（`check` は差分を標準出力へ出す。`sync` は書き込んだ後も食い違った）
 #   2  読めなかった（`gh` が無い・Pull Request が無い・API の失敗）、または書き込みに失敗した
 #   3  呼び出しの誤り（副コマンドが無い・未知の副コマンド・番号が数値でない）。GitHub を読まない
+#   `render` は 0（出した）か 2（git を読めなかった。標準出力へ何も出さない）か 3 を返す
 #
 # **2 を 0 へ畳まない。** この結果は承認の提示に使う。確かめられなかったことを一致と報告しない。
 set -uo pipefail
 
 usage() {
   printf 'usage: pr-body-decisions.sh check|sync <PR番号> [--repo <所有者>/<リポジトリ>]\n' >&2
+  printf '       pr-body-decisions.sh render --base <起点のブランチ> --body <本文のファイル>\n' >&2
   exit 3
 }
 
 SUB="${1:-}"
 case "$SUB" in
   check|sync) ;;
+  render)
+    shift
+    BASE=
+    BODY=
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --base) [ -n "${2:-}" ] || usage; BASE="$2"; shift 2 ;;
+        --body) [ -n "${2:-}" ] || usage; BODY="$2"; shift 2 ;;
+        *) printf 'ERROR: 知らない引数です: %s\n' "$1" >&2; usage ;;
+      esac
+    done
+    [ -n "$BASE" ] && [ -n "$BODY" ] || usage
+    ;;
   *) usage ;;
 esac
+if [ "$SUB" != render ]; then
 PR="${2:-}"
 case "$PR" in
   ''|*[!0-9]*) printf 'ERROR: PR 番号が数値ではありません: %s\n' "$PR" >&2; usage ;;
@@ -60,8 +81,9 @@ if [ -z "$REPO" ]; then
     exit 2
   fi
 fi
+fi
 
-python3 - "$SUB" "$PR" "$REPO" <<'PY'
+python3 - "$SUB" "${PR:-}" "${REPO:-}" "${BASE:-}" "${BODY:-}" <<'PY'
 import difflib
 import json
 import os
@@ -71,7 +93,7 @@ import sys
 import tempfile
 import urllib.parse
 
-sub, pr, repo = sys.argv[1:4]
+sub, pr, repo, base, body_file = sys.argv[1:6]
 HEADING = "## 決めたこと"
 MARKER = "<!-- 設計文書の「決定の記録」の見出しから pr-body-decisions.sh sync が作る。手で書き換えない -->"
 DESIGN_BRANCH_PREFIX = "design/"
@@ -294,7 +316,55 @@ def handle_comparison(sub, comparison):
     return sync_section(body, span, expected, docs, head_sha)
 
 
+def git(*args):
+    try:
+        done = subprocess.run(["git", *args], capture_output=True, timeout=120)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise Unreadable(f"git {args[0]}: {exc}")
+    if done.returncode != 0:
+        detail = done.stderr.decode("utf-8", "replace").strip().splitlines()
+        raise Unreadable(f"git {' '.join(args)}: {detail[-1] if detail else done.returncode}")
+    try:
+        return done.stdout.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise Unreadable(f"git {' '.join(args)}: UTF-8 ではありません: {exc}")
+
+
+def local_markdown():
+    """手元の HEAD で、起点から変わった（削除でない）.md の決定の見出し。changed_markdown の手元版。"""
+    out = git("diff", "--name-only", "--no-renames", "--diff-filter=d", "-z", f"origin/{base}...HEAD")
+    docs = []
+    for name in sorted(n for n in out.split("\0") if n.endswith(".md")):
+        headings = decision_headings(git("show", f"HEAD:{name}"))
+        if headings:
+            docs.append((name, headings))
+    return docs
+
+
+def render():
+    try:
+        with open(body_file, "rb") as f:
+            body = f.read().decode("utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        print(f"ERROR: 本文のファイルを読めなかった: {exc}", file=sys.stderr)
+        return 2
+    try:
+        branch = git("rev-parse", "--abbrev-ref", "HEAD").strip()
+        if branch.startswith(DESIGN_BRANCH_PREFIX):
+            docs = local_markdown()
+            same, span, _, expected = compare(body, docs)
+            if not same:
+                body = rewrite(body, span, expected)
+    except Unreadable as exc:
+        print(f"ERROR: 読めなかった（本文を出さない）: {exc}", file=sys.stderr)
+        return 2
+    sys.stdout.buffer.write(body.encode("utf-8"))
+    return 0
+
+
 def main():
+    if sub == "render":
+        return render()
     try:
         head_ref, head_sha, body = read_pr()
         if not head_ref.startswith(DESIGN_BRANCH_PREFIX):
