@@ -65,15 +65,16 @@ def pushed_refs(root: Path, base: str) -> list[str]:
     return [r for r in dict.fromkeys(refs) if r != base]
 
 
-def blob_base(root: Path, repo: str | None) -> str | None:
-    """GitHub の blob の URL の頭（`https://github.com/OWNER/REPO/blob`）。`--repo` か origin の URL から決める。"""
-    if not repo:
-        m = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$", git(root, "remote", "get-url", "origin").stdout.strip())
-        repo = m.group(1) if m else None
-    return f"https://github.com/{repo}/blob" if repo else None
+def blob_base(root: Path) -> str | None:
+    """GitHub の blob の URL の頭（`https://github.com/OWNER/REPO/blob`）。origin の URL から決める。
+
+    ブランチは origin から取るため、`--repo`（課題の置き場）とは別に、同じ origin から決める。
+    """
+    m = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$", git(root, "remote", "get-url", "origin").stdout.strip())
+    return f"https://github.com/{m.group(1)}/blob" if m else None
 
 
-def local_only_paths(text: str, repo: str | None = None) -> tuple[list[str], list[dict]]:
+def local_only_paths(text: str) -> tuple[list[str], list[dict]]:
     """手元にはあるが、origin の起点のブランチに無いパスを返す（リポジトリの外なら空）。
 
     push 済みのリモートのブランチにあるものは 2 つ目の戻り値へ分け、そのブランチの blob の URL を添える。
@@ -98,7 +99,7 @@ def local_only_paths(text: str, repo: str | None = None) -> tuple[list[str], lis
         if hit is None:
             out.append(path)
             continue
-        base = blob_base(root, repo)
+        base = blob_base(root)
         url = f"{base}/{hit.removeprefix('origin/')}/{path}" if base else None
         pushed.append({"path": path, "ref": hit, "url": url})
     return out, pushed
@@ -123,7 +124,7 @@ def main() -> int:
     a = ap.parse_args()
     repo = ["--repo", a.repo] if a.repo else []
     want = Path(a.file).read_text()
-    missing, pushed = local_only_paths(want, a.repo)
+    missing, pushed = local_only_paths(want)
     if missing:
         emit(
             result(

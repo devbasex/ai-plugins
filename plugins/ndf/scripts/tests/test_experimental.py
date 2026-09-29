@@ -210,10 +210,12 @@ def _commit_on_branch(clone, push):
 
 
 def test_issue_body_accepts_paths_pushed_to_the_current_branch(tmp_path):
-    # 設計 PR のブランチへ push 済みなら、起点のブランチへマージする前でも通し、そのブランチの blob の URL を案内する
+    # 設計 PR のブランチへ push 済みなら、起点のブランチへマージする前でも通し、そのブランチの blob の URL を案内する。
+    # URL のリポジトリはブランチと同じ origin から決め、課題の置き場の --repo は使わない
     clone, env = _body_repo(tmp_path)
     _commit_on_branch(clone, push=True)
-    p, out = _run_body(tmp_path, clone, env, "要求は `issues/local-only.md` にある\n", "--repo", "o/r")
+    subprocess.run(["git", "remote", "set-url", "origin", "https://github.com/o/r.git"], cwd=clone, check=True)
+    p, out = _run_body(tmp_path, clone, env, "要求は `issues/local-only.md` にある\n", "--repo", "records/elsewhere")
     assert p.returncode == 0, p.stdout + p.stderr
     pushed = [i for i in out["items"] if i["result"] == "pushed_branch"]
     assert pushed == [
