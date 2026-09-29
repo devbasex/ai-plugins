@@ -23,8 +23,6 @@ from pathlib import Path
 
 DEFAULT_PLUGIN = "ndf"
 PR_LIST_LIMIT = 2000
-# 正式版の版数の形（タグと CHANGELOG の見出しで同じ定義を使う）
-RELEASE_VERSION = r"\d+(?:\.\d+)*"
 
 
 def ts(s: str) -> float:
@@ -60,7 +58,7 @@ def load_releases(repo: Path, plugin: str = DEFAULT_PLUGIN) -> list[Release]:
         if len(parts) != 2 or not parts[0].startswith(prefix):
             continue
         v = parts[0][len(prefix) :]
-        if "-" in v or not re.fullmatch(RELEASE_VERSION, v):
+        if "-" in v or not re.fullmatch(r"\d+(?:\.\d+)*", v):
             continue
         rel.append(Release(v, float(parts[1])))
     return sorted(rel, key=lambda r: r.tagged_at)
@@ -68,7 +66,7 @@ def load_releases(repo: Path, plugin: str = DEFAULT_PLUGIN) -> list[Release]:
 
 def changelog_prs(text: str, plugin: str = DEFAULT_PLUGIN) -> dict[int, str]:
     """CHANGELOG の `## [<plugin> <正式版>]` の節に現れる `#<番号>` → 版。先に現れた（新しい）版を採る。"""
-    head = re.compile(r"## \[" + re.escape(plugin) + " (" + RELEASE_VERSION + r")\]")
+    head = re.compile(r"## \[" + re.escape(plugin) + r" (\d+(?:\.\d+)*)\]")
     sec, m = None, {}
     for line in text.split("\n"):
         h = head.match(line)
