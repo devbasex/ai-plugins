@@ -178,7 +178,7 @@ flowchart LR
 検証で最終ゲートへ寄せた危険フラグの項目（`whole_test.deferred`）は、締め切りを過ぎて変更起因が残ったとき、
 新しい順に 1 件ずつ取り消して変更起因のファイルを手元で走らせ直し、通った時点で止めて push し、次の最終ゲートが CI を待ち直す。
 
-**静的解析の全体テストは、戦略に関わらず手元で走らせる**（使い回しの有無にも関わらない。記録は `final_gate.checks[]` の
+**静的解析の全体テストは、どの戦略でも、使い回しがあっても手元で走らせる**（記録は `final_gate.checks[]` の
 `mode: lint` と `final_gate.lint`）。落ちた suite は着手前の suite ごとの成否（`baseline_test.suites`）で分ける。
 
 | 着手前 | suite の `scope_command` | 判定 |
