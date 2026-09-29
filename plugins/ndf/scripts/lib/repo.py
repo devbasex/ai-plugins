@@ -38,12 +38,13 @@ def slug(owner_repo_value: str | None) -> str | None:
     return owner_repo_value.replace("/", "--") if owner_repo_value else None
 
 
-def read_worktree_decl(root) -> tuple[dict, str | None]:
+def read_worktree_decl(root, fallback: bool = True) -> tuple[dict, str | None]:
     """`.ndf/worktree.json` の中身と、読めなかった理由。`root` → メインディレクトリの順に探す。
 
+    `fallback=False` なら `root` の直下だけを読み、メインディレクトリへ探しに行かない。
     無ければ `({}, None)`。JSON として読めない・オブジェクトでなければ `({}, 理由)`（理由にファイルを書く）。
     """
-    main = main_dir(root) if root else None
+    main = main_dir(root) if root and fallback else None
     for base in dict.fromkeys(p for p in (Path(root) if root else None, main) if p):
         f = Path(base) / WORKTREE_DECL
         if not f.is_file():

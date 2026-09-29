@@ -13,6 +13,7 @@ from typing import NamedTuple
 
 import review_lib  # noqa: E402
 import gh_call  # noqa: E402
+import tool_paths  # noqa: E402
 import worktree_deps  # noqa: E402
 from review_lib import github  # noqa: E402
 
@@ -102,6 +103,25 @@ def _create_worktree(worktree: str, pr: int, head_branch: str) -> None:
             )
             review_lib.die(f"gh pr checkout --detach #{pr} 失敗: {checkout_result.stderr.strip()}")
         review_lib.info(f"✅ worktree 作成 (gh pr checkout --detach #{pr}): {worktree}")
+    _hide_tool_paths(worktree, _tool_entries(worktree, 1))
+
+
+def _tool_entries(worktree: str, code: int) -> list[str]:
+    """レビュー worktree の中の `.ndf/worktree.json` からツールのパスの定義を読む。読めなければ止める。"""
+    try:
+        return tool_paths.load(worktree)
+    except tool_paths.ToolPathsUnreadable as e:
+        review_lib.die(e.message, code=code)
+        raise SystemExit(code)  # die は戻らないが、型のために置く
+
+
+def _hide_tool_paths(worktree: str, entries: list[str]) -> None:
+    """ツールのパスへ skip-worktree の印を掛ける（#1436）。
+
+    担当の CLI が起動した Serena などが書き換えても、fix 担当の `git add -A` で index へ入らず、
+    ラウンドの開始の検査にも現れない。失敗しても止めない（`tool_paths.hide` が警告を出す）。
+    """
+    tool_paths.hide(worktree, entries)
 
 
 class HeadRef(NamedTuple):
@@ -219,19 +239,29 @@ def _is_synced(
     head: HeadRef,
     exclusions: list[str],
     code: int,
+    entries: list[str] | None = None,
 ) -> bool:
     """基準と突き合わせ、書き換えが要らないかを返す。失われるものがあるときは止める。
 
     **`strict=True` の経路からだけ呼ぶ。** 見つかる変更は、同じループの修正の工程が
     今まさに残したものである。捨てると修正そのものが失われ、しかも失われたことが
     誰にも見えない。
+
+    ツールのパス（#1436）の変更は利用者の変更に数えない。外したパス（印の掛かったパスと、
+    印の無いまま変わっていたパス）は 1 行で出す。
     """
+    entries = _tool_entries(worktree, code) if entries is None else entries
     tracked, untracked = _worktree_changes(worktree, exclusions, code)
-    if tracked:
+    user, tool = tool_paths.split(tracked, entries)
+    shown = tool_paths.describe(dict.fromkeys([*tool_paths.hidden(worktree, entries), *tool]))
+    if user:
         review_lib.die(
-            f"作業ツリーに未 push の変更が残っています: {' '.join(tracked[:10])}。 修正を push してから次のラウンドを開始してください",
+            f"worktree に未 push の変更が残っています: {' '.join(user[:10])}。 修正を push してから次のラウンドを開始してください"
+            + (f"\n{shown}" if shown else ""),
             code=code,
         )
+    if shown:
+        review_lib.info(shown)
     ahead = subprocess.run(
         ["git", "rev-list", "--count", f"{head.oid}..HEAD"],
         capture_output=True,
@@ -380,14 +410,17 @@ def _sync_worktree(
     あり、意味が違う。
     """
     code = 8 if strict else 1
+    entries = _tool_entries(worktree, code)
     exclusions = _sync_exclusions(worktree)
     have_base, target, label = _resolve_sync_target(worktree, pr, head)
 
     if have_base:
-        if strict and isinstance(head, HeadRef) and _is_synced(worktree, pr, head, exclusions, code):
+        if strict and isinstance(head, HeadRef) and _is_synced(worktree, pr, head, exclusions, code, entries):
+            _hide_tool_paths(worktree, entries)
             return
         if not strict and _has_unpushed_commits(worktree, target):
             review_lib.info(f"↷ 作業ツリーに PR #{pr} の head より先の未 push のコミットがあるため巻き戻さない")
+            _hide_tool_paths(worktree, entries)
             return
     elif strict:
         # HEAD を動かす前に、何が失われるかを数える材料が無い（基準が手元に無いのだから、
@@ -399,8 +432,12 @@ def _sync_worktree(
     else:
         # フォーク PR は origin に head branch が無い。作成時と同じ経路で合わせる。
         review_lib.info(f"⚠ git fetch origin {label} 失敗 (フォーク PR の可能性) — gh pr checkout でフォールバック")
+    # 印の掛かったツールのパスに手元の変更があると、そのパスを変える先への `reset --hard` が
+    # 失敗する。レビュー worktree の中身なので、印を外して HEAD へ戻してから動かす（#1436 決定 2）。
+    tool_paths.release(worktree, entries)
     _reset_worktree_head(worktree, pr, target if have_base else None, code)
     _clean_untracked_files(worktree, exclusions, code)
+    _hide_tool_paths(worktree, entries)
     rev = subprocess.run(
         ["git", "rev-parse", "--short", "HEAD"],
         capture_output=True,

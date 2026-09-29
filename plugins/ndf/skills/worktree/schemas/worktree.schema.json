@@ -46,6 +46,29 @@
         }
       }
     },
+    "tool_paths": {
+      "type": "object",
+      "description": "ツールのパス（CLI が起動したツールが利用者の操作なしに書き換える既知のパス）の足し引き。cross-review・cross-refactoring・pr の手順が検査とコミットの対象から外す。既定は .serena/project.yml と .serena/serena_config.yml。読むのは検査する worktree の直下のこのファイルだけ。型が違うときは既定へ戻さず止まる",
+      "additionalProperties": true,
+      "properties": {
+        "add": {
+          "type": "array",
+          "description": "既定に足すパス。末尾が / の項目は前方一致、それ以外は完全一致",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "remove": {
+          "type": "array",
+          "description": "既定から外すパス。外したパスの変更は利用者の変更として扱う",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
     "localenv": {
       "type": "object",
       "additionalProperties": true,
