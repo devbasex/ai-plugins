@@ -230,6 +230,28 @@ def planned_item(item_id: str, rank: int, **over: Any) -> dict[str, Any]:
     }
 
 
+def plan_entry(**over: Any) -> dict[str, Any]:
+    """改修計画に載せる検証済みの項目。`src/foo.py#Foo.handle` を extract_method で直す形で、差分だけを `over` で渡す。"""
+    return {
+        "id": "I-001",
+        "rank": 1,
+        "path": "src/foo.py",
+        "symbol": "Foo.handle",
+        "smell": "long_method",
+        "technique": "extract_method",
+        "severity": "major",
+        "tier": "high",
+        "rationale": "1 関数が 6 つの処理を通しで行っている",
+        "plan": "1. 範囲の確定を切り出す",
+        "tests": [],
+        "estimated_diff_lines": 40,
+        "proposed_by": ["codex", "agy"],
+        "status": "verified",
+        "commits": {"test": None, "implement": "abc1234", "fix": []},
+        **over,
+    }
+
+
 def git(*args: str, cwd: Any) -> "subprocess.CompletedProcess[str]":
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True)
 
