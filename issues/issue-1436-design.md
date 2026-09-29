@@ -38,7 +38,7 @@ worktree の運用が供給者、レビューと公開が顧客の関係（顧�
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
 | I1 | ツールのパスの定義 | 3 つの工程は同じ関数 `tool_paths.load` から定義を得る。工程ごとに既定を持たない | 既定を変えるテストで 3 工程のどれかが追随しなければ落ちる |
-| I2 | ツールのパスの定義 | 設定（`.ndf/worktree.json`）が無いか `tool_paths` の項目が無いときだけ、既定の 2 つになる。設定があるのに読めない・版が違う・`tool_paths` の型が違うときは、既定へ戻さない（`add` で足したパスが検査と push の直前の検査から消え、`auth_secret` を含み得る中身がコミット・push され得るため） | `load` が `ToolPathsUnreadable` を出し、3 工程は既存の中断で止める（既定で進まない） |
+| I2 | ツールのパスの定義 | 設定（`.ndf/worktree.json`）が無いか `tool_paths` の項目が無いときだけ、既定の 2 つになる（`version` が 1 でなくても `tool_paths` が無ければ既定で進む。既存の宣言の読み手と同じく、知らない版は宣言が無いのと同じに扱う）。設定があるのに JSON として読めない・`tool_paths` があるのに版が違う・`tool_paths` の型が違うときは、既定へ戻さない（`add` で足したパスが検査と push の直前の検査から消え、`auth_secret` を含み得る中身がコミット・push され得るため） | `load` が `ToolPathsUnreadable` を出し、3 工程は既存の中断で止める（既定で進まない） |
 | I3 | worktree の変更の分類 | ツールのパスの変更は、利用者の変更の一覧に 1 件も入らない。利用者の変更はツールのパスの一覧に入らない | 検査が誤って止まる・誤って通る |
 | I4 | 公開 | NDF の経路が作るコミットと push に、ツールのパスの変更が入らない | push の直前の検査が止める（push しない） |
 | I5 | 開発 worktree | `pr` の手順はツールのパスのファイルの中身を変えない（index から外すだけ） | 利用者の変更が失われる |
@@ -79,6 +79,7 @@ worktree の運用が供給者、レビューと公開が顧客の関係（顧�
 | 要素 | 責務 |
 | --- | --- |
 | `plugins/ndf/scripts/lib/tool_paths.py`（新規） | 定義の読み込み（`load`）・分類（`split`）・印の掛け外し（`hide` / `release`）・index からの除外（`unstage`）・コミットの検査（`committed`）。3 工程が使う唯一の置き場 |
+| `scripts/lib/repo.py` の `read_worktree_decl` | メインディレクトリへ探しに行かない読み方（`fallback=False`）を足す。`load` がこれを使う（既存の呼び出しは変えない） |
 | `skills/worktree/schemas/worktree.schema.json` | `tool_paths`（`add` / `remove`）の項目を足す |
 | `skills/cross-review/scripts/review_lib/workspace.py` | 作成の後に `hide`。`_is_synced` で `split` を使い、止める案内を 2 行に分ける。`_reset_worktree_head` の前後で `release` / `hide` |
 | `scripts/lib/result_posts.py` の `push_fix` | push の直前に `committed` で検査し、当たれば push しない |
@@ -147,7 +148,7 @@ classDiagram
 
 | 関数 | 入力 | 出力 | 失敗 |
 | --- | --- | --- | --- |
-| `load(root)` | 定義を読む worktree の根 | 既定に `add` を足し `remove` を引いた一覧（順序は既定 → `add`、重複なし） | 設定が無い・`tool_paths` が無い → 既定（I2）。設定があるのに読めない（`repo.read_worktree_decl` が理由を返す）・`version` が 1 でない・`tool_paths` / `add` / `remove` の型が違う・要素が文字列でない → `ToolPathsUnreadable(理由)` を出す（I2） |
+| `load(root)` | 定義を読む worktree の根 | 既定に `add` を足し `remove` を引いた一覧（順序は既定 → `add`、重複なし） | 読むのは `root` 直下の `.ndf/worktree.json` だけで、メインディレクトリへ探しに行かない（`repo.read_worktree_decl(root, fallback=False)`。「定義は、検査する worktree の中の `.ndf/worktree.json` から読む」に揃え、Pull Request の head に設定が無いレビュー worktree でレビュアーの手元の設定を読まない）。設定が無い・`tool_paths` が無い（`version` が 1 でない場合を含む）→ 既定（I2）。設定があるのに JSON として読めない（`read_worktree_decl` が理由を返す）・`tool_paths` があるのに `version` が 1 でない（キーが無い場合を含む）・`tool_paths` / `add` / `remove` の型が違う・要素が文字列でない → `ToolPathsUnreadable(理由)` を出す（I2） |
 | `matches(path, entries)` | 根からの相対パス | 完全一致か、末尾 `/` の項目の前方一致なら真 | — |
 | `split(paths, entries)` | パスの列 | `Split(user, tool)`。順序は入力のまま | — |
 | `tracked(worktree, entries)` | worktree・一覧 | `git ls-files -z -- <entries>` が返す追跡対象のパス | git が失敗 → 空 |
@@ -168,7 +169,7 @@ classDiagram
 | 名前 | `tool_paths`（任意の object） |
 | 入力 | `add`: 文字列の配列（足すパス）。`remove`: 文字列の配列（外す既定のパス）。どちらも任意。末尾 `/` は前方一致、それ以外は完全一致 |
 | 出力 | `load` の一覧 |
-| 失敗の形 | 型が違う項目（文字列でない要素・配列でない値）・読めない JSON・`version` が 1 でないときは、項目を無視せずに止める（I2）。理由の 1 行は `❌ .ndf/worktree.json の tool_paths を読めない: <理由>。直してから打ち直す` で、中身は出さない（I7）。止め方は各工程の既存の中断に揃える: `state.py start-round` は「作業ツリーの状態を読み取れない」と同じ終了コード 8、cross-refactoring は `die`、`result_posts.py fix` は `PushResult(ok=False, pushed=False)`、`pr-steps.py` は `stopped` |
+| 失敗の形 | 型が違う項目（文字列でない要素・配列でない値）・読めない JSON・`tool_paths` があるのに `version` が 1 でないときは、項目を無視せずに止める（I2）。`tool_paths` が無ければ `version` によらず既定で進む。理由の 1 行は `❌ .ndf/worktree.json の tool_paths を読めない: <理由>。直してから打ち直す` で、中身は出さない（I7）。止め方は各工程の既存の中断に揃える: `state.py init` は作成の後の `hide` の前に `load` が失敗したら既存の init の中断（`die`、終了コード 1、同じ 1 行の案内）で止め、`hide` の「止めない」を `load` の失敗へ広げない。`state.py start-round` は worktree の状態（`git status`）を読めないときと同じ終了コード 8、cross-refactoring は `die`、`result_posts.py fix` は `PushResult(ok=False, pushed=False)`、`pr-steps.py` は `stopped` |
 | 互換性 | 項目が無ければ既定だけ。既存の `version: 1` のまま足す（`additionalProperties: true` の範囲） |
 
 ```json
@@ -327,7 +328,7 @@ skip-worktree は追跡対象にしか掛からない。`.serena/` を追跡も�
 | 8 | ツールのパスでない変更だけのとき、`start-round` 相当が 8・`_require_clean_worktree` が中断・`commit` がその変更をコミットする | 分類が利用者の変更をツールのパスへ入れる |
 | 9 / I1 | `tool_paths.DEFAULT` を差し替えると、cross-review・cross-refactoring・`pr-steps.py` の 3 経路の分類が同時に変わる | どれかの工程が既定を自分で持つ |
 | 10 / I5 | `commit` の後、ツールのパスのファイルの中身が commit の前と同じ | `unstage` の代わりに `checkout` で戻す |
-| I2 | `.ndf/worktree.json` が無い・`tool_paths` が無いとき、`load` が既定の 2 つを返す。壊れている・版が 2・`tool_paths` の型が違うとき、`load` が `ToolPathsUnreadable` を出し、start-round が 8・cross-refactoring が中断・`push_fix` が push しない・`pr-steps.py` が `stopped` になり、どれも `add` のパスをコミット・push しない | 読めない設定で既定へ戻り、`add` のパスをコミット・push する |
+| I2 | `.ndf/worktree.json` が無い・`tool_paths` が無い（版が 2・`version` が無い場合を含む）とき、`load` が既定の 2 つを返し、どの工程も止まらない。レビュー worktree に設定が無くメインディレクトリにだけ設定があるとき、`load` が既定を返す。壊れている・`tool_paths` があって版が 2 か `version` が無い・`tool_paths` の型が違うとき、`load` が `ToolPathsUnreadable` を出し、init が 1・start-round が 8・cross-refactoring が中断・`push_fix` が push しない・`pr-steps.py` が `stopped` になり、どれも `add` のパスをコミット・push しない | 読めない設定で既定へ戻り、`add` のパスをコミット・push する。`tool_paths` の無い設定で止まる。メインディレクトリの設定を読む。init が `load` の失敗を握りつぶして進む |
 | I3 | `split` が同じパスを両方の一覧へ入れない。前方一致の項目 `x/` が `xy/a` に当たらない | 前方一致に `/` を付けずに比べる |
 | I4 | 4 と 3 の push の直前の検査。基準と比べられないときは push しない | 比べられないときに空と読んで push する |
 | I6 | 開発 worktree で `pr-steps.py` を通しても `git ls-files -v` に `S` が現れない。`hide` は追跡対象外のパスを渡しても失敗しない | 開発 worktree へ `hide` を呼ぶ・追跡対象外を git へ渡して 128 で落ちる |
