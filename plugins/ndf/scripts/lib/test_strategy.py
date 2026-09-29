@@ -514,15 +514,15 @@ def resolve(
 
 
 def verify_commands(decl: dict[str, Any]) -> Optional[list[str]]:
-    """cross-review の最終スイープに名指しする全体テスト（両方の種別。I13）。宣言の `test` が無いか解けなければ `None`。"""
+    """cross-review の最終スイープに名指しする全体テスト（両方の種別。I13）。宣言の `test` が無い・不明なら `None`。
+
+    `test` があって解けない（不正な `kind` など）ときは `StrategyError` をそのまま上げる。宣言が無いときと
+    分けないと、不正な宣言が最終スイープの既定の探し方へ黙って流れる。
+    """
     test, _ = _test_of(decl)
     if test is None:
         return None
-    try:
-        commands = resolve(decl).whole_commands()
-    except StrategyError:
-        return None
-    return commands or None
+    return resolve(decl).whole_commands() or None
 
 
 def decl_of(root, supervise_decl: Optional[dict[str, Any]] = None) -> tuple[dict[str, Any], Optional[str]]:

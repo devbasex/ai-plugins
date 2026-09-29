@@ -461,3 +461,10 @@ def test_verify_commands_list_both_kinds_or_none():
     assert ts.verify_commands(decl) == ["pytest .", "bash scripts/check-lint.sh"]
     assert ts.verify_commands({}) is None
     assert ts.verify_commands({"test": {"unknown": "x"}}) is None
+
+
+def test_verify_commands_stops_on_an_invalid_declaration():
+    """`test` があって解けない宣言は、宣言が無いときと分けて、不正なキーを示して止める。"""
+    decl = {"test": {"suites": [{"name": "py", "kind": "bogus", "command": "pytest ."}]}}
+    with pytest.raises(ts.StrategyError, match=r"test\.suites\[0\]\.kind"):
+        ts.verify_commands(decl)

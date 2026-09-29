@@ -106,13 +106,16 @@ def _emit_launch(strategy: ts.Strategy, command: str, outcome: ts.Outcome, log: 
     return 2
 
 
-def _run_each(root: pathlib.Path, commands: list[str], limit: float, prefix: str) -> tuple[list, tuple | None]:
+def _run_each(
+    root: pathlib.Path, commands: list[str], limit: float, prefix: str, started: float | None = None
+) -> tuple[list, tuple | None]:
     """コマンドをシェルで 1 本ずつ走らせる。上限は全体で 1 つ。
 
+    `started`（`time.monotonic()`）を渡すと、その時刻からの残りで走らせる（種別をまたいで上限を共有する）。
     戻りは（`(コマンド, Outcome, ログ)` の並び, 止めた理由）。止めた理由は起動の失敗か打ち切りの `(コマンド, Outcome, ログ)`。
     """
     (root / LOG_DIR).mkdir(parents=True, exist_ok=True)
-    started = time.monotonic()
+    started = time.monotonic() if started is None else started
     done = []
     for i, command in enumerate(commands):
         log = root / LOG_DIR / f"{prefix}-{i}.log"
@@ -303,15 +306,15 @@ def _wait_ci(
     )
 
 
-def _run_lint_whole(root: pathlib.Path, strategy: ts.Strategy, limits: dict, a) -> tuple[list[dict] | None, int | None]:
-    """静的解析の全体テストを手元で走らせる（戦略に関わらず。#1483 決定 7）。
+def _run_lint_whole(root: pathlib.Path, strategy: ts.Strategy, limits: dict, a, started: float) -> tuple[list[dict] | None, int | None]:
+    """静的解析の全体テストを手元で走らせる（戦略に関わらず。#1483 決定 7）。上限は `started` から共有する。
 
     戻りは（落ちた suite の判定の並び。走らせるものが無ければ `None`, 止めたときの終了コード）。
     """
     commands = strategy.whole_commands(ts.LINT)
     if not commands:
         return None, None
-    done, stopped = _run_each(root, commands, float(limits["whole_timeout"]), "whole-lint")
+    done, stopped = _run_each(root, commands, float(limits["whole_timeout"]), "whole-lint", started)
     if stopped is not None:
         command, outcome, log = stopped
         if outcome.launch_failed:
@@ -325,7 +328,9 @@ def _run_lint_whole(root: pathlib.Path, strategy: ts.Strategy, limits: dict, a) 
 def cmd_whole(a) -> int:
     root = pathlib.Path(a.root).resolve()
     strategy, limits, notes = _resolve(root, a)
-    lint, code = _run_lint_whole(root, strategy, limits, a)
+    # 手元の全体検証（静的解析とテスト）は 1 つの whole_timeout に収める
+    budget_started = time.monotonic()
+    lint, code = _run_lint_whole(root, strategy, limits, a, budget_started)
     if code is not None:
         return code
     if strategy.whole_on_ci:
@@ -338,7 +343,7 @@ def cmd_whole(a) -> int:
         return 2
     test_triage.clear_junit(str(root), strategy)
     started = time.monotonic()
-    done, stopped = _run_each(root, commands, float(limits["whole_timeout"]), "whole")
+    done, stopped = _run_each(root, commands, float(limits["whole_timeout"]), "whole", budget_started)
     if stopped is not None:
         command, outcome, log = stopped
         if outcome.launch_failed:

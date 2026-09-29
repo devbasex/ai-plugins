@@ -49,7 +49,8 @@ def review_paths():
 def sweep_verify_lines(worktree) -> str:
     """最終スイープの検証のコマンドの段落（#1483 I13）。宣言の `test` があれば全体テスト（両方の種別）を名指しする。
 
-    宣言が無い・解けなければ空で、プロンプトは今の探し方（Step 7.5）のまま。`--verify-command` は読まない。
+    宣言が無い・読めなければ空で、プロンプトは今の探し方（Step 7.5）のまま。`test` があって解けない（不正な
+    `kind` など）ときは、どのキーが不正かを添えて `Stop` で止める。`--verify-command` は読まない。
     """
     if not worktree:
         return ""
@@ -57,9 +58,13 @@ def sweep_verify_lines(worktree) -> str:
     import test_strategy as ts
 
     try:
-        commands = ts.verify_commands(project_decl.read_project_decl(str(worktree)))
+        decl = project_decl.read_project_decl(str(worktree))
     except Exception:  # 宣言が読めなければ今の探し方に任せる
         return ""
+    try:
+        commands = ts.verify_commands(decl)
+    except ts.StrategyError as e:
+        raise Stop(f".ndf/project.json の test が不正: {e}", 2) from e
     if not commands:
         return ""
     listed = "\n".join(f"  - {c}" for c in commands)

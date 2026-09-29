@@ -19,10 +19,15 @@ def mod():
     return module
 
 
-def _whole(mod, monkeypatch, tmp_path, seconds_per_suite):
-    """3 本の suite が各 `seconds_per_suite` 秒かかる全体テストを、上限 100 秒で走らせる。渡した上限の並びを返す。"""
+def _whole(mod, monkeypatch, tmp_path, seconds_per_suite, lint=(), tests=("a", "b", "c")):
+    """suite が各 `seconds_per_suite` 秒かかる全体テスト（静的解析 `lint` → テスト `tests`）を、上限 100 秒で走らせる。
+    渡した上限の並びを返す。"""
     strategy = types.SimpleNamespace(
-        name="local-full", source="test", whole_on_ci=False, whole_commands=lambda kind=None: [] if kind == "lint" else ["a", "b", "c"]
+        name="local-full",
+        source="test",
+        whole_on_ci=False,
+        suites=[],
+        whole_commands=lambda kind=None: list(lint) if kind == "lint" else list(tests),
     )
     monkeypatch.setattr(mod, "_resolve", lambda root, template: (strategy, {"whole_timeout": 100, "test_timeout": 100}, []))
     monkeypatch.setattr(mod.test_triage, "clear_junit", lambda work, s: None)
@@ -48,6 +53,20 @@ def test_later_suites_get_only_the_seconds_left(mod, monkeypatch, tmp_path, caps
     code, given = _whole(mod, monkeypatch, tmp_path, 30)
     assert code == 0
     assert given == [100, 70, 40]
+
+
+def test_lint_and_tests_share_one_limit(mod, monkeypatch, tmp_path, capsys):
+    """静的解析の後のテストは、静的解析が使った残りの秒だけで走る（種別ごとに上限を丸ごと渡さない）。"""
+    code, given = _whole(mod, monkeypatch, tmp_path, 30, lint=("l",), tests=("a", "b"))
+    assert code == 0
+    assert given == [100, 70, 40]
+
+
+def test_tests_after_lint_stop_at_the_shared_limit(mod, monkeypatch, tmp_path, capsys):
+    code, given = _whole(mod, monkeypatch, tmp_path, 40, lint=("l",), tests=("a", "b"))
+    assert code != 0
+    assert given == [100, 60, 20], "静的解析の 40 秒を差し引いた残りでテストが打ち切られる"
+    assert "全体テストが 100 秒で終わらなかった" in capsys.readouterr().out
 
 
 def test_the_limit_is_shared_so_the_suites_cannot_run_n_times_longer(mod, monkeypatch, tmp_path, capsys):
