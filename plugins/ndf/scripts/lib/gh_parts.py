@@ -257,52 +257,39 @@ def _parser() -> argparse.ArgumentParser:
     return p
 
 
-def _cmd_pr_info(args: argparse.Namespace) -> tuple[dict, int]:
-    parts = {x.strip() for x in args.with_parts.split(",") if x.strip()}
-    unknown = parts - set(gh_pr_info.WITH_PARTS)
-    if unknown:
-        step_result.emit(step_result.result("pr-info", "stopped", f"知らない --with: {', '.join(sorted(unknown))}"), 2)
-    return gh_pr_info.pr_info(args.pr, args.repo, parts, pathlib.Path(args.out_dir) if args.out_dir else None)
-
-
-def _cmd_unresolved_threads(args: argparse.Namespace) -> tuple[dict, int]:
-    slug = gh_call.resolve_repo(args.repo)
-    threads = gh_graphql.unresolved_threads(slug or "", args.pr)
-    if threads is None:
-        return step_result.result("unresolved-threads", "stopped", f"PR #{args.pr} の未解決のスレッドを取得できない"), 2
-    items = [{"kind": "thread", "name": t["thread_id"], "result": "unresolved", **t} for t in threads]
-    return step_result.result("unresolved-threads", "ok", f"未解決 {len(threads)}", items, {"unresolved_threads": len(threads)}), 0
-
-
-def _cmd_body_section(args: argparse.Namespace) -> tuple[dict, int]:
-    number = args.issue if args.issue is not None else args.pr
-    if args.op in ("get", "replace") and not args.heading.strip().startswith("#"):
-        step_result.emit(step_result.result("body-section", "stopped", "--heading に見出しの行（`## 進行` など）を渡す"), 2)
-    if args.op == "append" and not args.line.strip():
-        step_result.emit(step_result.result("body-section", "stopped", "--line が空"), 2)
-    content = ""
-    if args.op == "replace":
-        if not args.content_file:
-            step_result.emit(step_result.result("body-section", "stopped", "--content-file が要る"), 2)
-        content = sys.stdin.read() if args.content_file == "-" else pathlib.Path(args.content_file).read_text(encoding="utf-8")
-    return body_section(args.op, number, args.repo, args.heading, content, args.line)
-
-
-def _cmd_review_post(args: argparse.Namespace) -> tuple[dict, int]:
-    return review_post(args.payload, args.result, args.pr, args.round_no, args.seat, args.repo, args.head_sha, args.queue_dir)
-
-
-_COMMANDS = {
-    "pr-info": _cmd_pr_info,
-    "unresolved-threads": _cmd_unresolved_threads,
-    "body-section": _cmd_body_section,
-    "review-post": _cmd_review_post,
-}
-
-
 def main(argv: list[str] | None = None) -> None:
     args = _parser().parse_args(argv)
-    obj, code = _COMMANDS[args.cmd](args)
+    if args.cmd == "pr-info":
+        parts = {x.strip() for x in args.with_parts.split(",") if x.strip()}
+        unknown = parts - set(gh_pr_info.WITH_PARTS)
+        if unknown:
+            step_result.emit(step_result.result("pr-info", "stopped", f"知らない --with: {', '.join(sorted(unknown))}"), 2)
+        obj, code = gh_pr_info.pr_info(args.pr, args.repo, parts, pathlib.Path(args.out_dir) if args.out_dir else None)
+    elif args.cmd == "unresolved-threads":
+        slug = gh_call.resolve_repo(args.repo)
+        threads = gh_graphql.unresolved_threads(slug or "", args.pr)
+        if threads is None:
+            obj, code = step_result.result("unresolved-threads", "stopped", f"PR #{args.pr} の未解決のスレッドを取得できない"), 2
+        else:
+            items = [{"kind": "thread", "name": t["thread_id"], "result": "unresolved", **t} for t in threads]
+            obj, code = (
+                step_result.result("unresolved-threads", "ok", f"未解決 {len(threads)}", items, {"unresolved_threads": len(threads)}),
+                0,
+            )
+    elif args.cmd == "body-section":
+        number = args.issue if args.issue is not None else args.pr
+        if args.op in ("get", "replace") and not args.heading.strip().startswith("#"):
+            step_result.emit(step_result.result("body-section", "stopped", "--heading に見出しの行（`## 進行` など）を渡す"), 2)
+        if args.op == "append" and not args.line.strip():
+            step_result.emit(step_result.result("body-section", "stopped", "--line が空"), 2)
+        content = ""
+        if args.op == "replace":
+            if not args.content_file:
+                step_result.emit(step_result.result("body-section", "stopped", "--content-file が要る"), 2)
+            content = sys.stdin.read() if args.content_file == "-" else pathlib.Path(args.content_file).read_text(encoding="utf-8")
+        obj, code = body_section(args.op, number, args.repo, args.heading, content, args.line)
+    else:
+        obj, code = review_post(args.payload, args.result, args.pr, args.round_no, args.seat, args.repo, args.head_sha, args.queue_dir)
     step_result.emit(obj, code)
 
 
