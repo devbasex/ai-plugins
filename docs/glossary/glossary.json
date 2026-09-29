@@ -708,6 +708,25 @@
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
+      "term": "suite の種別",
+      "context": "ndf-workflow",
+      "meaning": "テストの宣言（.ndf/project.json の test.suites[]）の 1 件がテスト（test）か静的解析（lint。整形の検査を含む）か。キーは kind。書かなければ test",
+      "pending_source": "issues/issue-1483-requirements.md",
+      "code": "kind"
+    },
+    {
+      "term": "起動の失敗",
+      "context": "ndf-workflow",
+      "meaning": "テストのコマンドのプロセスを起動できない、またはシェルが終了コード 126 / 127 を返したこと。テストが落ちたこととは別に扱う",
+      "pending_source": "issues/issue-1483-requirements.md"
+    },
+    {
+      "term": "変更したファイル",
+      "context": "ndf-cross-refactoring",
+      "meaning": "判定の起点から変わったファイルのうち、worktree に残るもの。起点は判定ごとに決まる。項目の範囲テストではその項目のコミット（実装と修正）、最終ゲートでは着手前の HEAD、`test-run.py whole` では merge-base である。そのうち静的解析の suite の `paths` に当たるものが、その suite の範囲になる",
+      "pending_source": "issues/issue-1483-design.md"
+    },
+    {
       "term": "危険フラグ",
       "context": "ndf-workflow",
       "meaning": "cross-refactoring で、範囲テストでは覆えない変更（D1〜D5）。立てば全体テストを 1 度走らせる",
@@ -2205,10 +2224,10 @@
     {
       "term": "範囲テストの雛形",
       "context": "ndf-workflow",
-      "meaning": "{paths} を空白で区切った 1 語として含むテストのコマンド（宣言の scope_command か、{paths} を含む引数）。{paths} を対象の語の並びへ置き換えて走らせる",
+      "meaning": "{paths} を引用の外の 1 字句として含むテストのコマンド（宣言の scope_command か、{paths} を含む引数）。{paths} をシェルの引用で守った対象の並びへ置き換え、シェルで走らせる",
       "code": "scope_command",
       "source": "",
-      "pending_source": "issues/issue-1334-design.md"
+      "pending_source": "issues/issue-1483-design.md"
     },
     {
       "term": "JUnit の置き場",
