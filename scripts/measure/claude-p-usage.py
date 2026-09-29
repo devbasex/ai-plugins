@@ -392,9 +392,8 @@ def read_ledger_plans(
 # ---------- B: 帳簿の無い期間（フェーズの報告） ----------
 
 
-def read_reports(since: float, until: float | None) -> list[dict]:
-    found: dict[tuple, dict] = {}
-    # 1) 残っている report.md（時刻はファイルの更新時刻）
+def _reports_from_files(since: float, until: float | None, found: dict[tuple, dict]) -> None:
+    """残っている report.md（時刻はファイルの更新時刻）"""
     for p in [*SV_ROOT.glob("*/plans/*-state/report.md"), *SV_ROOT.glob("*/*-state/report.md")]:
         t = p.stat().st_mtime
         if t < since or (until is not None and t > until):
@@ -402,7 +401,17 @@ def read_reports(since: float, until: float | None) -> list[dict]:
         for r in parse_report(p.read_text(errors="replace")):
             r["at"] = t
             found.setdefault((r["record"], r["input"], r["cache_read"], r["output"]), r)
-    # 2) 会話の tool_result に出た報告（conductor / サブエージェントが読んだもの）
+
+
+def _tool_result_texts(d: dict) -> list[str]:
+    content = (d.get("message") or {}).get("content")
+    if not isinstance(content, list):
+        return []
+    return [tu._text(c.get("content")) for c in content if isinstance(c, dict) and c.get("type") == "tool_result"]
+
+
+def _reports_from_transcripts(since: float, until: float | None, found: dict[tuple, dict]) -> None:
+    """会話の tool_result に出た報告（conductor / サブエージェントが読んだもの）"""
     for f in PROJ.glob("**/*.jsonl"):
         if f.stat().st_mtime < since:
             continue
@@ -421,41 +430,51 @@ def read_reports(since: float, until: float | None) -> list[dict]:
             t = tu.parse_ts(d.get("timestamp"))
             if t is None or t < since or (until is not None and t > until):
                 continue
-            content = (d.get("message") or {}).get("content")
-            texts = (
-                [tu._text(c.get("content")) for c in content if isinstance(c, dict) and c.get("type") == "tool_result"]
-                if isinstance(content, list)
-                else []
-            )
-            for tx in texts:
+            for tx in _tool_result_texts(d):
                 for r in parse_report(tx):
                     k = (r["record"], r["input"], r["cache_read"], r["output"])
                     if k not in found or t < found[k]["at"]:
                         r["at"] = t
                         found[k] = r
-    out = []
-    for r in found.values():
-        m = PLANNAME_RE.search(r["record"])
-        r["plan"] = f"{m.group(1)}/{m.group(2)}" if m else "不明"
-        r["kind"] = kind_of_name(m.group(2) if m else "")
-        if r["input"] + r["cache_read"] + r["cache_write"] + r["output"] == 0:
-            continue  # LLM を使わなかった計画（run だけ）は数えない
-        # 換算: モデルと 5 分/1 時間の別が無い。既定のモデル（claude-opus-5-5）の read 倍率と、書き込み 5 分（下限）
-        r["cost_low"] = round(
-            r["input"]
-            + r["cache_read"] * tu.read_rate("claude-opus-5-5")
-            + r["cache_write"] * tu.WEIGHTS["w5"]
-            + r["output"] * tu.WEIGHTS["out"],
-            1,
-        )
-        r["cost_high"] = round(r["cost_low"] + r["cache_write"] * (tu.WEIGHTS["w1h"] - tu.WEIGHTS["w5"]), 1)
-        r.update(source="report", model="不明", calls=None, cache_write_5m=None, cache_write_1h=None, full_calls=None, run_version="-")
-        out.append(r)
+
+
+def _report_cost(r: dict) -> tuple[float, float]:
+    # 換算: モデルと 5 分/1 時間の別が無い。既定のモデル（claude-opus-5-5）の read 倍率と、書き込み 5 分（下限）
+    low = round(
+        r["input"]
+        + r["cache_read"] * tu.read_rate("claude-opus-5-5")
+        + r["cache_write"] * tu.WEIGHTS["w5"]
+        + r["output"] * tu.WEIGHTS["out"],
+        1,
+    )
+    return low, round(low + r["cache_write"] * (tu.WEIGHTS["w1h"] - tu.WEIGHTS["w5"]), 1)
+
+
+def _annotate_report(r: dict) -> dict | None:
+    m = PLANNAME_RE.search(r["record"])
+    r["plan"] = f"{m.group(1)}/{m.group(2)}" if m else "不明"
+    r["kind"] = kind_of_name(m.group(2) if m else "")
+    if r["input"] + r["cache_read"] + r["cache_write"] + r["output"] == 0:
+        return None  # LLM を使わなかった計画（run だけ）は数えない
+    r["cost_low"], r["cost_high"] = _report_cost(r)
+    r.update(source="report", model="不明", calls=None, cache_write_5m=None, cache_write_1h=None, full_calls=None, run_version="-")
+    return r
+
+
+def _last_per_record(rows: list[dict]) -> list[dict]:
     # 同じ記録で数値が伸びた報告（途中と最後）は最後の 1 件だけ残す
     best: dict[str, dict] = {}
-    for r in sorted(out, key=lambda r: r["cache_read"] + r["output"]):
+    for r in sorted(rows, key=lambda r: r["cache_read"] + r["output"]):
         best[r["record"]] = r
     return sorted(best.values(), key=lambda r: r["at"])
+
+
+def read_reports(since: float, until: float | None) -> list[dict]:
+    found: dict[tuple, dict] = {}
+    _reports_from_files(since, until, found)
+    _reports_from_transcripts(since, until, found)
+    annotated = [_annotate_report(r) for r in found.values()]
+    return _last_per_record([r for r in annotated if r is not None])
 
 
 # ---------- 寄せと集計 ----------
