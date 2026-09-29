@@ -723,7 +723,7 @@
     {
       "term": "変更したファイル",
       "context": "ndf-cross-refactoring",
-      "meaning": "cross-refactoring の項目のコミット（実装と修正）が変えたファイルのうち、worktree に残るもの。そのうち静的解析の suite の `paths` に当たるものが、その suite の範囲になる",
+      "meaning": "判定の起点から変わったファイルのうち、worktree に残るもの。起点は判定ごとに決まる。項目の範囲テストではその項目のコミット（実装と修正）、最終ゲートでは着手前の HEAD、`test-run.py whole` では merge-base である。そのうち静的解析の suite の `paths` に当たるものが、その suite の範囲になる",
       "pending_source": "issues/issue-1483-design.md"
     },
     {
