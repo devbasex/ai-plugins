@@ -200,17 +200,6 @@ def _whole_test(path: pathlib.Path, state: dict[str, Any], flags: list[str]) -> 
         wholetest.defer_to_final_gate(path, state, record, flags, [i["id"] for i in newest_first(live_items(state)) if i.get("danger")])
         return False
     info(f"⚠ 危険フラグ（{', '.join(flags)}）が立ったため、全体テストを 1 度走らせます")
-    passed, timed_out, log = _run_whole_locally(path, state, record, flags)
-    if passed:
-        info("✅ 全体テストが通りました")
-        return False
-    return _triage_whole(path, state, record, flags, timed_out, log)
-
-
-def _run_whole_locally(
-    path: pathlib.Path, state: dict[str, Any], record: dict[str, Any], flags: list[str]
-) -> tuple[bool, bool, pathlib.Path]:
-    """全体テストを手元で走らせて記録し、`(通ったか, 打ち切ったか, ログ)` を返す。"""
     started = time.monotonic()
     log = pathlib.Path(state["tmp_dir"]) / "verify-whole-test.log"
     passed, timed_out, commands = wholetest.run_locally(state, log, path)
@@ -226,18 +215,9 @@ def _run_whole_locally(
         }
     )
     statefile.save(path, state)
-    return passed, timed_out, log
-
-
-def _triage_whole(
-    path: pathlib.Path,
-    state: dict[str, Any],
-    record: dict[str, Any],
-    flags: list[str],
-    timed_out: bool,
-    log: pathlib.Path,
-) -> bool:
-    """落ちた全体テストを見分け、変更起因のものがあれば修正へ回す。修正へ回したら真。"""
+    if passed:
+        info("✅ 全体テストが通りました")
+        return False
     flagged = [i for i in newest_first(live_items(state)) if i.get("danger")]
     record["items"] = [i["id"] for i in flagged]
     record.update(triage.classify(state, timed_out))
