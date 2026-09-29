@@ -76,29 +76,43 @@ def _remap(state: dict[str, Any], work: str, mapping: dict[str, str], points: di
 
     **書き戻さないと、次の取り消しとマージ処理が履歴に無い SHA を指す。**
     """
-
-    def full(sha: Any) -> Any:
-        return (git_out(work, ["rev-parse", "--verify", f"{sha}^{{commit}}"]) or sha) if isinstance(sha, str) and sha else sha
-
     for item in state.get("items") or []:
-        commits = item.get("commits") or {}
-        for key in ("test", "implement"):
-            if commits.get(key):
-                commits[key] = mapping.get(full(commits[key]), commits[key])
-        commits["fix"] = [mapping.get(full(s), s) for s in commits.get("fix") or []]
+        _remap_commits(work, item, mapping)
     for record in (state.get("phases") or {}).values():
         if isinstance(record, dict) and record.get("base_sha"):
-            record["base_sha"] = points.get(full(record["base_sha"]), record["base_sha"])
+            record["base_sha"] = _remap_one(work, points, record["base_sha"])
     fix = state.get("fix")
     if isinstance(fix, dict) and fix.get("base_sha"):
-        fix["base_sha"] = points.get(full(fix["base_sha"]), fix["base_sha"])
+        fix["base_sha"] = _remap_one(work, points, fix["base_sha"])
     gate = state.get("final_gate")
     if isinstance(gate, dict):
         if gate.get("fix_base_sha"):
-            gate["fix_base_sha"] = points.get(full(gate["fix_base_sha"]), gate["fix_base_sha"])
+            gate["fix_base_sha"] = _remap_one(work, points, gate["fix_base_sha"])
         if gate.get("fix_commits"):
-            gate["fix_commits"] = [mapping.get(full(s), s) for s in gate["fix_commits"]]
+            gate["fix_commits"] = _remap_many(work, mapping, gate["fix_commits"])
     ledger.remap_orchestrator_commits(state, mapping)
+
+
+def _full(work: str, sha: Any) -> Any:
+    return (git_out(work, ["rev-parse", "--verify", f"{sha}^{{commit}}"]) or sha) if isinstance(sha, str) and sha else sha
+
+
+def _remap_one(work: str, table: dict[str, str], sha: Any) -> Any:
+    """SHA を完全な形へ解決して対応表（1 対 1 の SHA か地点）を引く。無ければ元の値。"""
+    return table.get(_full(work, sha), sha)
+
+
+def _remap_many(work: str, table: dict[str, str], shas: list[Any]) -> list[Any]:
+    return [_remap_one(work, table, s) for s in shas]
+
+
+def _remap_commits(work: str, item: dict[str, Any], mapping: dict[str, str]) -> None:
+    """項目のコミット（test / implement / fix）を書き戻す。"""
+    commits = item.get("commits") or {}
+    for key in ("test", "implement"):
+        if commits.get(key):
+            commits[key] = _remap_one(work, mapping, commits[key])
+    commits["fix"] = _remap_many(work, mapping, commits.get("fix") or [])
 
 
 def _close_commitless(state: dict[str, Any], targets: list[str], reason: str) -> list[str]:
