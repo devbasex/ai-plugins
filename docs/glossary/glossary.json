@@ -710,14 +710,21 @@
     {
       "term": "suite の種別",
       "context": "ndf-workflow",
-      "meaning": "テストの宣言（.ndf/project.json の test.suites[]）の 1 件がテストか静的解析（整形の検査を含む）か。書かなければテスト",
-      "pending_source": "issues/issue-1483-requirements.md"
+      "meaning": "テストの宣言（.ndf/project.json の test.suites[]）の 1 件がテスト（test）か静的解析（lint。整形の検査を含む）か。キーは kind。書かなければ test",
+      "pending_source": "issues/issue-1483-requirements.md",
+      "code": "kind"
     },
     {
       "term": "起動の失敗",
       "context": "ndf-workflow",
       "meaning": "テストのコマンドのプロセスを起動できない、またはシェルが終了コード 126 / 127 を返したこと。テストが落ちたこととは別に扱う",
       "pending_source": "issues/issue-1483-requirements.md"
+    },
+    {
+      "term": "変更したファイル",
+      "context": "ndf-cross-refactoring",
+      "meaning": "cross-refactoring の項目のコミット（実装と修正）が変えたファイルのうち、worktree に残るもの。静的解析の suite の範囲になる",
+      "pending_source": "issues/issue-1483-design.md"
     },
     {
       "term": "危険フラグ",
@@ -2217,10 +2224,10 @@
     {
       "term": "範囲テストの雛形",
       "context": "ndf-workflow",
-      "meaning": "{paths} を空白で区切った 1 語として含むテストのコマンド（宣言の scope_command か、{paths} を含む引数）。{paths} を対象の語の並びへ置き換えて走らせる",
+      "meaning": "{paths} を引用の外の 1 字句として含むテストのコマンド（宣言の scope_command か、{paths} を含む引数）。{paths} をシェルの引用で守った対象の並びへ置き換え、シェルで走らせる",
       "code": "scope_command",
       "source": "",
-      "pending_source": "issues/issue-1334-design.md"
+      "pending_source": "issues/issue-1483-design.md"
     },
     {
       "term": "JUnit の置き場",
