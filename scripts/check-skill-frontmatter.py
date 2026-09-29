@@ -764,51 +764,29 @@ def calibrate(skills_dirs: list[pathlib.Path]) -> int:
     return 0
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument(
-        "--skills-dir",
-        action="append",
-        default=None,
-        help="チェック対象の Skill ディレクトリ。複数指定できる（既定: manifests/ を持つ plugin family の skills/ を全てチェック）",
-    )
-    ap.add_argument("--strict", action="store_true", help="警告も失敗として扱う")
-    ap.add_argument("--report", action="store_true", help="判定せず実測値の一覧だけ出力する")
-    ap.add_argument("--calibrate", action="store_true", help="Claude Code の /context を実測し、文字数→トークンの換算比を保存する")
-    args = ap.parse_args()
+def _discover_skills_dirs() -> list[pathlib.Path]:
+    # plugin family を manifests/ の有無から検出する。移行の途中は 2 つの構成が
+    # 混ざるため、どちらも拾う。
+    #   split  … plugins/<family>-shared（編集元。生成物はチェックしない）
+    #   single … plugins/<family>（配布ディレクトリが 1 つだけ）
+    # 初期一覧の予算はプラグイン横断で共有されるため、既定では全 family を対象に
+    # して合計も出す。
+    found = []
+    for d in sorted(pathlib.Path("plugins").glob("*")):
+        if not (d / "manifests").is_dir() or not (d / "skills").is_dir():
+            continue
+        if d.name.endswith(("-claude", "-codex", "-kiro")):
+            continue
+        found.append(d / "skills")
+        # どの manifest にも載せない Skill も規約のチェックは受ける。配らないだけで、
+        # 中身は同じ規約で書く（後で配布へ回すときに書き直しが要らないように）。
+        if (d / "optional-skills").is_dir():
+            found.append(d / "optional-skills")
+    return found
 
-    if args.skills_dir:
-        skills_dirs = [pathlib.Path(d) for d in args.skills_dir]
-    else:
-        # plugin family を manifests/ の有無から検出する。移行の途中は 2 つの構成が
-        # 混ざるため、どちらも拾う。
-        #   split  … plugins/<family>-shared（編集元。生成物はチェックしない）
-        #   single … plugins/<family>（配布ディレクトリが 1 つだけ）
-        # 初期一覧の予算はプラグイン横断で共有されるため、既定では全 family を対象に
-        # して合計も出す。
-        found = []
-        for d in sorted(pathlib.Path("plugins").glob("*")):
-            if not (d / "manifests").is_dir() or not (d / "skills").is_dir():
-                continue
-            if d.name.endswith(("-claude", "-codex", "-kiro")):
-                continue
-            found.append(d / "skills")
-            # どの manifest にも載せない Skill も規約のチェックは受ける。配らないだけで、
-            # 中身は同じ規約で書く（後で配布へ回すときに書き直しが要らないように）。
-            if (d / "optional-skills").is_dir():
-                found.append(d / "optional-skills")
-        skills_dirs = found
-    for d in skills_dirs:
-        if not d.is_dir():
-            print(f"[check-skill-frontmatter] ディレクトリがない: {d}", file=sys.stderr)
-            return 2
-    if not skills_dirs:
-        print("[check-skill-frontmatter] チェック対象が見つからない", file=sys.stderr)
-        return 2
 
-    if args.calibrate:
-        return calibrate(skills_dirs)
-
+def _run_checks(skills_dirs: list[pathlib.Path]) -> tuple[list[Finding], list[dict], list[tuple[pathlib.Path, dict]], dict] | None:
+    """全 Skill を検査して集計する。SKILL.md の無いディレクトリがあれば None を返す。"""
     findings: list[Finding] = []
     skills: list[dict] = []
     per_family: list[tuple[pathlib.Path, dict]] = []
@@ -816,7 +794,7 @@ def main() -> int:
         family_skills = load_skills(skills_dir)
         if not family_skills:
             print(f"[check-skill-frontmatter] SKILL.md が見つからない: {skills_dir}", file=sys.stderr)
-            return 2
+            return None
         for s in family_skills:
             findings.extend(check_skill(s))
         # トリガ語の重複・外部名の衝突・初期一覧の予算は family をまたいで判定する
@@ -834,35 +812,70 @@ def main() -> int:
         for runtime, total in m["listings"].items():
             metrics["listings"][runtime] = metrics["listings"].get(runtime, 0) + total
     findings.extend(check_budget(metrics))
+    return findings, skills, per_family, metrics
+
+
+def _print_report(skills: list[dict], per_family: list[tuple[pathlib.Path, dict]], metrics: dict) -> None:
+    for skills_dir, m in per_family:
+        print(
+            f"# {skills_dir}  Skill {sum(1 for s in skills if str(skills_dir) in str(s['path']))} 個"
+            f" / frontmatter {m['frontmatter_total']} 文字"
+            f" / claude 一覧 {m['listings'].get('claude', 0)} 文字"
+        )
+    print()
+    print(f"{'skill':34} {'lines':>5} {'desc':>5} {'wtu':>5}  flags")
+    for s in sorted(skills, key=lambda x: x["dir"]):
+        fm = s["fm"] or {}
+        flags = [k for k in ("disable-model-invocation", "user-invocable", "paths", "effort", "context", "arguments", "license") if k in fm]
+        print(f"{s['dir']:34} {s['lines']:>5} {len(fm.get('description', '')):>5} {len(fm.get('when_to_use', '')):>5}  {','.join(flags)}")
+    print(f"\nSkill 数: {len(skills)}")
+    # 予算は plugin family をまたいだ合計で判定するが、利用者が片方しか入れない
+    # 場合もあるため family 別の内訳も出す。
+    limits = listing_limits()
+    names = [d.parent.name.replace("-shared", "") for d, _ in per_family]
+    print(f"\n{'runtime':8} {'合計':>7} {'上限':>7}  " + "  ".join(f"{n:>14}" for n in names))
+    for runtime, total in sorted(metrics["listings"].items()):
+        limit = limits.get(runtime)
+        cells = "  ".join(f"{m['listings'].get(runtime, 0):>14}" for _, m in per_family)
+        print(f"{runtime:8} {total:>7} {(limit or '—'):>7}  {cells}")
+    print(f"\nfrontmatter 合計: {metrics['frontmatter_total']} 文字 (目安 {FRONTMATTER_TOTAL_MAX})")
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument(
+        "--skills-dir",
+        action="append",
+        default=None,
+        help="チェック対象の Skill ディレクトリ。複数指定できる（既定: manifests/ を持つ plugin family の skills/ を全てチェック）",
+    )
+    ap.add_argument("--strict", action="store_true", help="警告も失敗として扱う")
+    ap.add_argument("--report", action="store_true", help="判定せず実測値の一覧だけ出力する")
+    ap.add_argument("--calibrate", action="store_true", help="Claude Code の /context を実測し、文字数→トークンの換算比を保存する")
+    args = ap.parse_args()
+
+    if args.skills_dir:
+        skills_dirs = [pathlib.Path(d) for d in args.skills_dir]
+    else:
+        skills_dirs = _discover_skills_dirs()
+    for d in skills_dirs:
+        if not d.is_dir():
+            print(f"[check-skill-frontmatter] ディレクトリがない: {d}", file=sys.stderr)
+            return 2
+    if not skills_dirs:
+        print("[check-skill-frontmatter] チェック対象が見つからない", file=sys.stderr)
+        return 2
+
+    if args.calibrate:
+        return calibrate(skills_dirs)
+
+    checked = _run_checks(skills_dirs)
+    if checked is None:
+        return 2
+    findings, skills, per_family, metrics = checked
 
     if args.report:
-        for skills_dir, m in per_family:
-            print(
-                f"# {skills_dir}  Skill {sum(1 for s in skills if str(skills_dir) in str(s['path']))} 個"
-                f" / frontmatter {m['frontmatter_total']} 文字"
-                f" / claude 一覧 {m['listings'].get('claude', 0)} 文字"
-            )
-        print()
-        print(f"{'skill':34} {'lines':>5} {'desc':>5} {'wtu':>5}  flags")
-        for s in sorted(skills, key=lambda x: x["dir"]):
-            fm = s["fm"] or {}
-            flags = [
-                k for k in ("disable-model-invocation", "user-invocable", "paths", "effort", "context", "arguments", "license") if k in fm
-            ]
-            print(
-                f"{s['dir']:34} {s['lines']:>5} {len(fm.get('description', '')):>5} {len(fm.get('when_to_use', '')):>5}  {','.join(flags)}"
-            )
-        print(f"\nSkill 数: {len(skills)}")
-        # 予算は plugin family をまたいだ合計で判定するが、利用者が片方しか入れない
-        # 場合もあるため family 別の内訳も出す。
-        limits = listing_limits()
-        names = [d.parent.name.replace("-shared", "") for d, _ in per_family]
-        print(f"\n{'runtime':8} {'合計':>7} {'上限':>7}  " + "  ".join(f"{n:>14}" for n in names))
-        for runtime, total in sorted(metrics["listings"].items()):
-            limit = limits.get(runtime)
-            cells = "  ".join(f"{m['listings'].get(runtime, 0):>14}" for _, m in per_family)
-            print(f"{runtime:8} {total:>7} {(limit or '—'):>7}  {cells}")
-        print(f"\nfrontmatter 合計: {metrics['frontmatter_total']} 文字 (目安 {FRONTMATTER_TOTAL_MAX})")
+        _print_report(skills, per_family, metrics)
         return 0
 
     errors = [f for f in findings if f.level == "error"]
