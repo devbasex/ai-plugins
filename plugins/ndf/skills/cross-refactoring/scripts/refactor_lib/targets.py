@@ -1,8 +1,10 @@
-"""項目ごとの範囲テストの語の並びを組み立てる（#933 I8・#1334 F2）。
+"""項目ごとの範囲テストを組み立てて走らせる（#933 I8・#1334 F2・#1483）。
 
 **実装担当はコマンドを返さず、テストの対象（`test_targets`）だけを返す。** 担当が書いたコマンドをそのまま
 走らせると、検証の中身を担当が決められてしまう。進行側が戦略の範囲テストの雛形（宣言の `scope_command` か
-`{paths}` を含む引数）の `{paths}` を対象へ置き換えて組み立て、`shell=False` で走らせる。
+`{paths}` を含む引数）の `{paths}` を、シェルの引用で守った対象の並びへ置き換えて組み立て（`test_strategy.scope_runs`）、
+シェルで 1 本ずつ走らせる（#1483 I5）。テストの種別の範囲テストは計画の時点で組んで項目の `scope_commands` へ置き、
+静的解析の範囲テストは検証のたびに項目のコミットが変えたファイルから組む（#1483 決定 8）。
 
 **コマンドの語は `{paths}` の置き換えのほかに読まない**（#1334 I2）。実行器の名前・前置き・オプションの値を
 見て差し替えの位置を決める処理は持たない。
@@ -19,11 +21,15 @@ from typing import Any, Iterable, Optional
 import test_strategy as ts
 import test_triage
 
+from . import launch
+from .gitfacts import changed_files
+from .items import item_shas
+from .paths import work_dir
 from .process import run_with_timeout
 from .scope import covered_by_roots, test_locations
-from .timeline import strategy_of
+from .timeline import state_test_timeout, state_whole_timeout, strategy_of
 
-# 対象の語に含まれてはならない文字。組み立てた語の並びは `shell=False` で走らせるが、
+# 対象の語に含まれてはならない文字。組み立てるときにシェルの引用で守るが（`test_strategy.fill`）、
 # 担当が書いた値を語として通す以上、シェルの構文に読める値は最初から受け取らない。
 _SHELL_CHARS = frozenset(";&|$`<>()\n")
 
@@ -67,105 +73,155 @@ def valid_targets(
     return True
 
 
-def scope_words_for(strategy: ts.Strategy, paths: list[str]) -> Optional[list[list[str]]]:
-    """対象のパスを受け持つ suite ごとに、その suite の雛形で組んだ語の並び（suite ごとに 1 つ）。
+def scope_runs_for(strategy: ts.Strategy, paths: list[str]) -> Optional[list[ts.ScopeRun]]:
+    """対象のパスを受け持つテストの suite ごとに、その suite の雛形で組んだ範囲テスト（suite ごとに 1 つ）。
 
-    分け方は失敗の走らせ直し（`test_triage.rerun_groups`）と同じ。`scope_command` を持つ suite が無ければ `None`。
+    分け方は失敗の走らせ直し（`test_triage.rerun_groups`）と同じ。テストの `scope_command` が無ければ `None`。
     """
     if not paths:
         return None
-    return test_triage.rerun_words(strategy, [str(p) for p in paths]) or None
+    return ts.scope_runs(strategy, [str(p) for p in paths], []) or None
 
 
-def as_commands(command: Any) -> list[list[str]]:
-    """項目の `command` をコマンドの並びにする。
-
-    `command` は 1 つの語の並び（`list[str]`。suite が 1 つ）か、suite ごとの語の並びの並び
-    （`list[list[str]]`。対象が複数の suite にまたがる）。どちらでもなければ空。
-    """
+def _legacy_commands(command: Any) -> list[str]:
+    """旧形の項目の `command`（語の並びか、その並び）をシェルで走らせる文字列へ直す（`shlex.join`。語は変わらない）。"""
+    if isinstance(command, str):
+        return [command] if command else []
     if not isinstance(command, list) or not command:
         return []
     if all(isinstance(c, list) for c in command):
-        return [[str(w) for w in c] for c in command if c]
-    return [[str(w) for w in command]]
+        return [shlex.join([str(w) for w in c]) for c in command if c]
+    return [shlex.join([str(w) for w in command])]
 
 
-def command_key(command: Any) -> tuple[tuple[str, ...], ...]:
-    """同じ検証を 1 回だけ走らせるための鍵。"""
-    return tuple(tuple(c) for c in as_commands(command))
+def item_runs(item: dict[str, Any]) -> list[ts.ScopeRun]:
+    """項目に置いた範囲テスト（`scope_commands`）。無ければ旧形の `command` をテストとして読む。"""
+    runs = item.get("scope_commands")
+    if isinstance(runs, list):
+        return [ts.ScopeRun.from_state(r) for r in runs if isinstance(r, dict)]
+    return [ts.ScopeRun("legacy", ts.TEST, c) for c in _legacy_commands(item.get("command"))]
 
 
-def item_command(commands: list[list[str]]) -> Any:
-    """項目の `command` に書く形。suite が 1 つなら語の並びのまま、複数なら suite ごとの並び。"""
-    return list(commands[0]) if len(commands) == 1 else [list(c) for c in commands]
+def lint_runs(state: dict[str, Any], item: dict[str, Any]) -> list[ts.ScopeRun]:
+    """静的解析の範囲テスト。項目のコミットが変えたファイルのうち suite の `paths` に当たるものを入れる（I10）。
 
-
-def command_text(command: Any) -> str:
-    """表示用の 1 行（suite ごとの語の並びを ` && ` でつなぐ。走らせるときはつながない）。"""
-    return " && ".join(" ".join(c) for c in as_commands(command))
-
-
-def run_commands(command: Any, work: str, timeout: int, log: pathlib.Path) -> tuple[Optional[int], bool]:
-    """項目の `command`（形は `as_commands`）をシェルを通さずに順に走らせる。戻りは（終了コード, 打ち切ったか）。
-
-    上限 `timeout` は suite 群全体で 1 つ（`test_triage.run_within`）。落ちた・打ち切った時点で止める。
-    suite が複数なら 2 本目からの出力は `log` の名前に番号を足したファイルへ書き、最後に `log` へ足す。
+    宣言から導いた `round-only` はラウンドテストが静的解析の全体を兼ねるため組まない。
     """
-    commands = as_commands(command)
+    strategy = strategy_of(state)
+    if not strategy.scoped_suites(ts.LINT) or (strategy.name == ts.ROUND_ONLY and not strategy.round_command):
+        return []
+    return ts.scope_runs(strategy, [], changed_files(work_dir(state), item_shas(item)))
+
+
+def verify_runs(state: dict[str, Any], item: dict[str, Any]) -> list[ts.ScopeRun]:
+    """項目の検証で走らせる範囲テスト（テストの種別と静的解析）。"""
+    return item_runs(item) + lint_runs(state, item)
+
+
+def run_key(runs: list[ts.ScopeRun]) -> tuple[str, ...]:
+    """同じ検証を 1 回だけ走らせるための鍵（コマンドの並び）。"""
+    return tuple(r.command for r in runs)
+
+
+def command_key(item: dict[str, Any]) -> tuple[str, ...]:
+    """項目のテストの種別の範囲テストの鍵（取り消しで共有した項目をまとめる）。"""
+    return run_key(item_runs(item))
+
+
+def runs_state(runs: list[ts.ScopeRun]) -> list[dict[str, str]]:
+    return [r.as_state() for r in runs]
+
+
+def command_text(runs: Any) -> str:
+    """表示用の 1 行（コマンドを ` ; ` で並べる。走らせるときはつながない）。"""
+    commands = [r.command if isinstance(r, ts.ScopeRun) else str(r) for r in runs or []]
+    return " ; ".join(commands)
+
+
+def run_commands(commands: list[str], work: str, timeout: int, log: pathlib.Path) -> tuple[ts.Outcome, Optional[str]]:
+    """コマンドをシェルで 1 本ずつ順に走らせ、結果（`test_strategy.outcome`）と最後に走らせたコマンドを返す。
+
+    上限 `timeout` は全体で 1 つ（`test_triage.run_within`）。落ちた・打ち切った・起動の失敗の時点で止める。
+    2 本目からの出力は `log` の名前に番号を足したファイルへ書き、最後に `log` へ足す。
+    """
+    commands = [c for c in commands if c]
     if not commands:
-        return None, False
+        return ts.outcome(0, False), None
     started = time.monotonic()
     logs = [log if i == 0 else log.with_name(f"{log.stem}-{i + 1}{log.suffix}") for i in range(len(commands))]
-    code: Optional[int] = 0
-    timed_out = False
+    result = ts.outcome(0, False)
+    last: Optional[str] = None
     ran = 0
-    for words, out in zip(commands, logs):
+    for command, out in zip(commands, logs):
         code, timed_out = test_triage.run_within(
-            timeout, started, lambda left, words=words, out=out: run_with_timeout(words, work, left, output=out)
+            timeout, started, lambda left, command=command, out=out: run_with_timeout(command, work, left, output=out)
         )
         ran += 1
-        if timed_out or code != 0:
+        last = command
+        result = ts.outcome(code, timed_out)
+        if result.status != ts.PASSED:
             break
     if ran > 1:
         with open(log, "ab") as sink:
             for extra in logs[1:ran]:
                 if extra.exists():
                     sink.write(extra.read_bytes())
-    return code, timed_out
+    return result, last
 
 
-def round_words(strategy: Optional[ts.Strategy]) -> Optional[list[str]]:
-    """`round-only` のラウンドテストの語の並び。ほかの戦略・無ければ `None`。"""
-    if strategy is None or strategy.name != ts.ROUND_ONLY or not strategy.round_command:
+def round_runs(strategy: Optional[ts.Strategy]) -> Optional[list[ts.ScopeRun]]:
+    """`round-only` のラウンドテスト（suite ごとに 1 本。I6）。ほかの戦略・無ければ `None`。"""
+    if strategy is None or strategy.name != ts.ROUND_ONLY:
         return None
-    try:
-        words = shlex.split(strategy.round_command)
-    except ValueError:
-        return None
-    return words or None
+    if strategy.round_command:
+        return [ts.ScopeRun("round", strategy.round_kind, strategy.round_command)]
+    runs = [ts.ScopeRun(s.name, s.kind, s.command) for s in strategy.suites if s.command]
+    return runs or None
 
 
-def limited_command(
+def limited_runs(
     state_like: dict[str, Any],
     test_targets: list[str],
     work: str,
     planned: Iterable[str] = (),
-) -> tuple[Any, str]:
-    """項目の検証に使う語の並び（形は `as_commands`）と、その由来（`targets` / `round_test` / `none`）。
+) -> tuple[Optional[list[ts.ScopeRun]], str]:
+    """項目の検証に使うテストの種別の範囲テストと、その由来（`targets` / `round_test` / `lint` / `none`）。
 
-    対象が複数の suite にまたがるときは、suite ごとにその雛形で組んだ語の並びを全て返す。
+    対象が複数の suite にまたがるときは、suite ごとにその雛形で組んだ範囲テストを全て返す。
 
-    `round-only` はラウンドテストをそのまま走らせる。ほかの戦略は `test_targets` を雛形の `{paths}` へ入れ、
+    `round-only` はラウンドテストをそのまま走らせる。テストの種別の suite が無い戦略は空の並び（`lint`。
+    静的解析の範囲テストは検証のたびに組む）。ほかの戦略は `test_targets` を雛形の `{paths}` へ入れ、
     入れられなければ `none`（呼ぶ側が `no_target` で見送る）。**全体テストを項目の検証に使うことはない。**
     """
     strategy = strategy_of(state_like)
-    words = round_words(strategy)
-    if words is not None:
-        return words, "round_test"
+    runs = round_runs(strategy)
+    if runs is not None:
+        return runs, "round_test"
+    if not strategy.has_kind(ts.TEST):
+        return [], "lint"
     scope = state_like.get("target_scope") or state_like.get("scope") or []
     targets = list(test_targets or [])
     if valid_targets(targets, work, scope, planned):
-        built = scope_words_for(strategy, targets)
+        built = scope_runs_for(strategy, targets)
         if built:
-            return item_command(built), "targets"
+            return built, "targets"
     return None, "none"
+
+
+def run_or_stop(
+    path: pathlib.Path, state: dict[str, Any], commands: Any, log: pathlib.Path, *, whole: bool = False, phase: str = "verify"
+) -> bool:
+    """コマンドをシェルで 1 本ずつ走らせる（#1483 I5）。通ったら真、落ちた・打ち切ったら偽。
+
+    `commands` は文字列 1 つか文字列の並び（旧形の語の並びは `shlex.join` で読む）。上限は `whole` なら全体テストの、
+    そうでなければテストの上限で、全体で 1 つ。起動の失敗なら `launch.stop` で止まる（I8）。
+    """
+    if isinstance(commands, str):
+        commands = [commands]
+    elif isinstance(commands, list) and commands and not all(isinstance(c, str) for c in commands):
+        commands = [r.command for r in item_runs({"command": commands})]
+    limit = state_whole_timeout(state) if whole else state_test_timeout(state)
+    result, last = run_commands([str(c) for c in commands or []], work_dir(state), limit, log)
+    if result.launch_failed:
+        launch.stop(path, state, phase, last, result, log)
+    return result.status == "passed"

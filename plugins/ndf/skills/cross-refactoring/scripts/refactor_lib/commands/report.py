@@ -11,7 +11,7 @@ import models as models_lib
 import run_metrics
 import statefile
 
-from .. import allocation, clock, info, timeline
+from .. import allocation, clock, info, launch, timeline
 from ..codemetrics_view import record_lines
 from ..items import item_label
 from ..measure import summary_extra
@@ -173,6 +173,10 @@ def _print_header(state: dict[str, Any]) -> None:
         f"{' / 検証の結果を使い回した' if gate.get('whole_test_reused') else ''}"
         f" / 修正 {gate.get('fix_rounds', 0)} 回）"
     )
+    for lint in gate.get("lint") or []:
+        print(f"- 最終ゲートの静的解析 {lint.get('suite')}: {lint.get('verdict')}（{lint.get('reason')}）")
+    if state.get("launch_failure"):
+        print(f"- {launch.line(state['launch_failure'])}")
     print(f"- 監視が止めた手順: {_stopped_line(state)}")
     print(f"- 配分テーブル: {(state.get('plan') or {}).get('table_source') or '—'}")
     print(f"- 改修計画: {plan_reference(state)}")

@@ -1513,14 +1513,12 @@ def test_a_carmo_declaration_runs_only_the_scope_test_before_the_start(run_init,
     assert state["strategy"]["name"] == "local-scoped-ci-whole" and state["strategy"]["source"] == "test.strategy"
     whole = CARMO_DECL["test"]["suites"][0]["command"]
     assert whole not in test_calls.seen
-    assert test_calls.seen == [
-        ["docker", "compose", "exec", "-T", "app", "./vendor/bin/phpunit", "--log-junit", "build/ndf/junit.xml", "tests"]
-    ]
+    assert test_calls.seen == ["docker compose exec -T app ./vendor/bin/phpunit --log-junit build/ndf/junit.xml tests"]
     assert state["baseline_test"]["mode"] == "scope"
 
 
 def test_cross_refactoring_and_supervise_build_the_same_scope_words(refactor):
-    """#1334 AC7・I10 — 同じ宣言と対象から、cross-refactoring の項目の検証と supervise の `test-run.py scope` が同じ語の並びを組む。"""
+    """#1334 AC7・I10 — 同じ宣言と対象から、cross-refactoring の項目の検証と supervise の `test-run.py scope` が同じコマンドを組む。"""
     import importlib
 
     import test_strategy as ts
@@ -1529,5 +1527,5 @@ def test_cross_refactoring_and_supervise_build_the_same_scope_words(refactor):
     targets = importlib.import_module("refactor_lib.targets")
     strategy = ts.resolve(CARMO_DECL)
     paths = ["tests/Unit/AServiceTest.php", "tests/Unit/BServiceTest.php"]
-    assert targets.scope_words_for(strategy, paths) == test_triage.rerun_words(strategy, paths)
-    assert targets.scope_words_for(strategy, paths)[0][-2:] == paths
+    assert [r.command for r in targets.scope_runs_for(strategy, paths)] == test_triage.rerun_commands(strategy, paths)
+    assert targets.scope_runs_for(strategy, paths)[0].command.endswith(" " + " ".join(paths))

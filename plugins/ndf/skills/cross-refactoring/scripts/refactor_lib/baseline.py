@@ -1,8 +1,10 @@
-"""着手前のテスト（#1334 F3）。`commands/setup.py` の `init` が呼ぶ。
+"""着手前のテスト（#1334 F3・#1483）。`commands/setup.py` の `init` が呼ぶ。
 
 戦略ごとに走らせるものが違う。`local-full` は全体テスト、`local-scoped-ci-whole` は `--scope` のテストの置き場所の
-範囲テスト（全体テストは手元で走らせない。I4）、`round-only` は全体テストとラウンドテスト。**落ちても止めない。**
-落ちたテストは JUnit から読んで既存失敗として書き、最終ゲートは既存失敗の外で新しく落ちたテストが無ければ通る（I5）。
+範囲テスト（テストの全体テストは手元で走らせない。I4）、`round-only` は全体テストとラウンドテスト。静的解析の
+全体テストは戦略に関わらず手元で走らせる（#1483 決定 7）。**落ちても止めない。** suite ごとの成否を
+`baseline_test.suites` に書き（最終ゲートの静的解析の判定に使う。I12）、落ちたテストは JUnit から読んで既存失敗として書く。
+最終ゲートは既存失敗の外で新しく落ちたテストが無ければ通る（I5）。起動の失敗なら止める（#1483 E7）。
 """
 
 from __future__ import annotations
@@ -15,56 +17,65 @@ import statefile
 import test_strategy as ts
 import test_triage
 
-from . import ABORT, die, info
+from . import ABORT, die, info, launch
 from .gitfacts import run_with_timeout
 from .paths import git_out
 from .scope import test_locations
 
 
-def commands_of(strategy: ts.Strategy, scope: list[str], work: pathlib.Path) -> tuple[str, list[Any]]:
-    """着手前に走らせるもの。`(mode, コマンドの並び)`。mode は `whole` / `scope` / `round`。"""
+def _whole_runs(strategy: ts.Strategy, kind: Any = None) -> list[ts.ScopeRun]:
+    """全体テストを suite ごとの `ScopeRun` にする（suite に `command` が無ければラウンドテスト）。"""
+    runs = [ts.ScopeRun(s.name, s.kind, s.command) for s in strategy.suites if s.command and (kind is None or s.kind == kind)]
+    if runs or any(s.command for s in strategy.suites):
+        return runs
+    return [ts.ScopeRun("round", strategy.round_kind, c) for c in strategy.whole_commands(kind)]
+
+
+def commands_of(strategy: ts.Strategy, scope: list[str], work: pathlib.Path) -> tuple[str, list[ts.ScopeRun]]:
+    """着手前に走らせるもの。`(mode, 範囲テストか全体テストの並び)`。mode は `whole` / `scope` / `round`。"""
     if strategy.name == ts.ROUND_ONLY:
         # 全体テストの後にラウンドテストを 1 回。同じコマンドなら 2 度走らせない（#880）。
-        # 宣言から導いたラウンドテストは全体テストの `&&` 連結で、中身が同じなのでこれも 2 度走らせない。
-        commands = list(strategy.whole_commands())
+        runs = _whole_runs(strategy)
+        commands = [r.command for r in runs]
         if strategy.round_command and strategy.round_command not in commands and strategy.round_command != " && ".join(commands):
-            commands.append(strategy.round_command)
-        return "round", commands
+            runs.append(ts.ScopeRun("round", strategy.round_kind, strategy.round_command))
+        return "round", runs
     if strategy.whole_on_ci:
         locations = test_locations(scope, str(work))
-        words = []
-        scoped = strategy.scoped_suites()
-        for suite in scoped:
-            mine = [loc for loc in locations if ts.suite_for(strategy, loc) is suite] or (locations if len(scoped) == 1 else [])
-            if mine:
-                words.append(ts.scope_words(str(suite.scope_command), mine))
-        return "scope", words
-    return "whole", strategy.whole_commands()
+        runs = ts.scope_runs(strategy, locations, []) if locations else []
+        return "scope", runs + _whole_runs(strategy, ts.LINT)
+    return "whole", _whole_runs(strategy)
 
 
 def run_baseline(strategy: ts.Strategy, work: pathlib.Path, timeout: int, scope: list[str], tmp_dir: pathlib.Path) -> dict[str, Any]:
-    """着手前のテストを戦略に沿って実行して記録する。上限を超えたときだけ止める。"""
-    mode, commands = commands_of(strategy, scope, work)
+    """着手前のテストを戦略に沿って実行して記録する。上限を超えたときと起動の失敗のときだけ止める。"""
+    mode, runs = commands_of(strategy, scope, work)
     test_triage.clear_junit(str(work), strategy)
     started = time.monotonic()
     status = "green"
-    for i, command in enumerate(commands):
+    suites: dict[str, str] = {}
+    for i, run in enumerate(runs):
         log = tmp_dir / f"init-{mode}-{i}.log"
         # 上限は suite 群全体で 1 つ（test-run.py の whole と同じ）
         code, timed_out = test_triage.run_within(
-            timeout, started, lambda left, command=command, log=log: run_with_timeout(command, str(work), left, output=log)
+            timeout, started, lambda left, command=run.command, log=log: run_with_timeout(command, str(work), left, output=log)
         )
-        shown = command if isinstance(command, str) else " ".join(command)
-        if timed_out:
-            die(f"着手前のテストが {timeout} 秒で終わりませんでした（{shown}）。打ち切りました")
+        result = ts.outcome(code, timed_out)
+        if result.status == ts.TIMED_OUT:
+            die(f"着手前のテストが {timeout} 秒で終わりませんでした（{run.command}）。打ち切りました")
             raise SystemExit(ABORT)
-        if code != 0:
+        if result.launch_failed:
+            launch.stop(None, {}, "baseline", run.command, result, log)
+        passed = result.status == ts.PASSED
+        suites[run.suite] = "green" if passed and suites.get(run.suite) != "red" else "red"
+        if not passed and run.kind == ts.TEST:
             status = "red"
     seconds = round(time.monotonic() - started, 1)
     record: dict[str, Any] = {
         "mode": mode,
-        "command": " && ".join(c if isinstance(c, str) else " ".join(c) for c in commands) or None,
+        "command": " && ".join(r.command for r in runs) or None,
         "status": status,
+        "suites": suites,
         "checked_at": statefile.now(),
         "seconds": seconds,
         # **HEAD も残す。** 全体テストが落ちたとき、既存失敗かをこの SHA で見分け（決定 22）、報告と改修計画に基準として出す。
@@ -72,6 +83,7 @@ def run_baseline(strategy: ts.Strategy, work: pathlib.Path, timeout: int, scope:
         "existing_failures": [],
         "existing_failures_reason": None,
     }
+    lint_red = sorted(r.suite for r in runs if r.kind == ts.LINT and suites.get(r.suite) == "red")
     if status == "red":
         ids, reason = test_triage.read_junit(str(work), strategy)
         record["existing_failures"] = ids
@@ -80,10 +92,12 @@ def run_baseline(strategy: ts.Strategy, work: pathlib.Path, timeout: int, scope:
         info(
             f"⚠ 着手前のテストが失敗しています（{record['command']}）。{shown}して続けます（既存失敗の外で新しく落ちたテストが無ければ最終ゲートは通ります）"
         )
-    elif commands:
+    elif runs and not lint_red:
         info(f"✅ 着手前のテスト成功: {record['command']}（{seconds} 秒 / {mode}）")
-    else:
+    elif not runs:
         info("ℹ 着手前に走らせるテストがありません（--scope のテストの置き場所を受け持つ suite が無い）")
+    if lint_red:
+        info(f"⚠ 着手前に静的解析の suite（{', '.join(lint_red)}）が落ちています。最終ゲートは変更したファイルに絞って判定します")
     return record
 
 
@@ -92,5 +106,5 @@ def round_record(strategy: ts.Strategy, baseline: dict[str, Any]) -> dict[str, A
 
     ほかの戦略は `command` を `None` で残す。項目の検証は戦略の雛形で組み立てた語の並びだけを使う（AC10b）。
     """
-    command = strategy.round_command if strategy.name == ts.ROUND_ONLY else None
+    command = " ; ".join(strategy.round_commands()) or None if strategy.name == ts.ROUND_ONLY else None
     return {"command": command, "status": baseline["status"], "checked_at": baseline["checked_at"]}

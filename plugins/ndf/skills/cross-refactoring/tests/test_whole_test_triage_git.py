@@ -198,7 +198,7 @@ def test_a_failure_caused_by_the_change_goes_to_fix_and_is_kept_when_fixed(flow,
     item = _items(flow)["I-001"]
     assert item["status"] == "failing"
     # 修正担当へは、落ちたテストのファイルだけを走らせ直すコマンド（雛形の {paths} の置き換え）とその出力を渡す
-    assert item["whole_test_command"] == SCOPE_COMMAND.split()[:-1] + ["tests/test_total.py"]
+    assert item["whole_test_command"] == [" ".join(SCOPE_COMMAND.split()[:-1] + ["tests/test_total.py"])]
     with open(item["last_log"], encoding="utf-8") as fh:
         assert "test_total" in fh.read()
 
@@ -300,10 +300,10 @@ def test_without_junit_and_a_red_baseline_the_flagged_items_are_reverted_togethe
 def test_a_ci_whole_strategy_defers_the_whole_test_to_the_final_gate(flow, cmd_setup, cmd_implement, cmd_converge, capsys, patch_lib):
     """AC3・AC8 — 全体テストを CI に任せる戦略では、危険フラグが立っても検証の中で全体テストを走らせず、最終ゲートへ寄せる。"""
     whole_runs: list = []
-    original = sys.modules["refactor_lib.commands.converge"].run_with_timeout
+    original = sys.modules["refactor_lib.targets"].run_with_timeout
 
     def spy_run(command, cwd, timeout, grace=5.0, output=None):
-        if isinstance(command, str):
+        if command == strategy_state("local-scoped-ci-whole")["suites"][0]["command"]:
             whole_runs.append(command)
         return original(command, cwd, timeout, grace, output)
 

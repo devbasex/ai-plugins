@@ -187,8 +187,15 @@ def add_init_parser(sub: argparse._SubParsersAction) -> None:
         "--baseline-test",
         default=None,
         metavar="CMD",
-        help="全体のテスト。{paths} を含めば範囲テストの雛形（全体は {paths} を . にしたもの）、"
-        "含まなければ全体テストのコマンドとしてそのまま走らせる（戦略は round-only）。省けば宣言の test を読む",
+        help="全体のテスト。{paths} を含めば範囲テストの雛形（全体は宣言の command、無ければテストは {paths} を . にしたもの、"
+        "静的解析は {paths} を --scope で埋めたもの）、含まなければ全体テストのコマンドとしてそのまま走らせる（戦略は round-only）。"
+        "省けば宣言の test を読む",
+    )
+    init.add_argument(
+        "--test-kind",
+        choices=("test", "lint"),
+        default="test",
+        help="--baseline-test と --round-test の雛形の種別（test = テスト / lint = 静的解析。整形の検査を含む）。既定は test",
     )
     init.add_argument(
         "--round-test",

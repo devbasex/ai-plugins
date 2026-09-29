@@ -1,14 +1,17 @@
-"""テストの戦略（#1334）。宣言（`.ndf/project.json` の `test`）と引数から、範囲テストの走らせ方・全体テストの
-置き場（手元か CI か）・時間の上限を決める。cross-refactoring と supervise が同じ関数を使う（I10）。
+"""テストの戦略（#1334・#1483）。宣言（`.ndf/project.json` の `test`）と引数から、suite の種別（テスト / 静的解析）・
+範囲テストの組み立て・全体テストとその置き場（手元か CI か）・時間の上限・起動の失敗の判別を決める。
+cross-refactoring・supervise・`test-run.py`・cross-review が同じ関数を使う（I10）。
 
 **純粋な処理だけを置く。** ファイルもプロセスも触らない（宣言の読み取りは `decl_of` だけで、`project_decl` を通す）。
-戦略はコマンドの語・実行器の名前・前置きを見ずに決まる（I1）。コマンドへの加工は `{paths}` の 1 語を対象の語の並びへ
-置き換えることだけである（I2・決定 14）。解けないときは `StrategyError` を上げ、終了コードは呼ぶ側が決める。
-標準ライブラリだけで書く。
+戦略と種別はコマンドの語・実行器の名前・前置きを見ずに決まる（I1。種別は宣言の `kind` か引数 `--test-kind` だけ）。
+コマンドへの加工は `{paths}` の字句をシェルの引用で守った対象の並びへ置き換えることだけである（I2・`fill`）。
+コマンドはどれもシェル経由で 1 つずつ走らせる文字列である（I5・I6）。解けないときは `StrategyError` を上げ、
+終了コードは呼ぶ側が決める。標準ライブラリだけで書く。
 """
 
 from __future__ import annotations
 
+import fnmatch
 import math
 import shlex
 from dataclasses import dataclass, field
@@ -19,7 +22,19 @@ LOCAL_SCOPED_CI_WHOLE = "local-scoped-ci-whole"
 ROUND_ONLY = "round-only"
 STRATEGIES = (LOCAL_FULL, LOCAL_SCOPED_CI_WHOLE, ROUND_ONLY)
 
+# suite の種別（#1483 決定 1）。書かなければテスト（I3）。
+TEST = "test"
+LINT = "lint"
+KINDS = (TEST, LINT)
+
+# 実行の結果（`outcome`。I7）。
+PASSED = "passed"
+FAILED = "failed"
+LAUNCH_FAILED = "launch_failed"
+TIMED_OUT = "timed_out"
+
 PATHS = "{paths}"
+_GLOB_CHARS = ("*", "?", "[")
 # 所要の出所を採る順（決定 2）。手元の実測 → CI の JUnit の直列の合計 → CI のテストの step の合計。
 DURATION_SOURCES = ("ndf-record", "ci-junit", "ci-steps")
 # 所要がこれを超え、宣言の CI が読めれば、全体テストを CI に任せる（決定 2。既定の予算 30 分の 1/3）。
@@ -35,6 +50,7 @@ CI_WAIT_UNKNOWN_SHARE = 0.20  # c が分からなければ 0.20·B
 UNKNOWN_DURATION_LIMITS = {"test_timeout": 900, "whole_timeout": 1800, "ci_wait_timeout": 3600}
 
 MISSING_TEST = ".ndf/project.json の test が無い（か不明: {reason}）。/ndf:development-workflow の手順 0 で解析するか、--round-test を渡す"
+NO_LINT_WHOLE = "静的解析の雛形に {paths} を埋める範囲のパスが無いため、静的解析の全体テストを組まない（{paths} を . にしない）"
 
 
 class StrategyError(Exception):
@@ -43,13 +59,18 @@ class StrategyError(Exception):
 
 @dataclass
 class Suite:
-    """宣言の suite の写し。`scope_command` を持たない suite は範囲テストに使わない。"""
+    """宣言の suite の写し。`scope_command` を持たない suite は範囲テストに使わない。`kind` は `test` か `lint`。"""
 
     name: str
     command: str
     scope_command: Optional[str] = None
     junit: Optional[str] = None
     paths: list[str] = field(default_factory=list)
+    kind: str = TEST
+
+    def covers(self, path: str) -> bool:
+        """`path`（`::` 付きの対象も可）をこの suite が受け持つか。glob の要素は `fnmatchcase`、ほかは接頭辞の一致。"""
+        return _match_len(self, path) is not None
 
     def as_state(self) -> dict[str, Any]:
         return {
@@ -58,12 +79,78 @@ class Suite:
             "scope_command": self.scope_command,
             "junit": self.junit,
             "paths": list(self.paths),
+            "kind": self.kind,
         }
+
+
+def _match_len(suite: Suite, path: str) -> Optional[int]:
+    """`suite.paths` のうち `path` に当たる要素の長さ（最長）。当たらなければ `None`。"""
+    target = str(path).split("::", 1)[0]
+    best: Optional[int] = None
+    for root in suite.paths or ["."]:
+        r = str(root)
+        if any(c in r for c in _GLOB_CHARS):
+            name = target.rsplit("/", 1)[-1]
+            hit = fnmatch.fnmatchcase(target, r) or ("/" not in r and fnmatch.fnmatchcase(name, r))
+        else:
+            r = r.rstrip("/")
+            hit = r in (".", "") or target == r or target.startswith(r + "/")
+            r = "" if r == "." else r
+        if hit and (best is None or len(r) > best):
+            best = len(r)
+    return best
+
+
+@dataclass
+class ScopeRun:
+    """範囲テストの 1 本（どの suite の、どの種別の、どのコマンドか）。状態ファイルの `items[].scope_commands` の 1 要素。"""
+
+    suite: str
+    kind: str
+    command: str
+
+    def as_state(self) -> dict[str, str]:
+        return {"suite": self.suite, "kind": self.kind, "command": self.command}
+
+    @classmethod
+    def from_state(cls, data: dict[str, Any]) -> "ScopeRun":
+        return cls(str(data.get("suite") or ""), str(data.get("kind") or TEST), str(data.get("command") or ""))
+
+
+@dataclass
+class Outcome:
+    """1 本のコマンドの結果（`outcome`）。`status` は `passed` / `failed` / `launch_failed` / `timed_out`。"""
+
+    status: str
+    code: Optional[int]
+    reason: str
+
+    @property
+    def launch_failed(self) -> bool:
+        return self.status == LAUNCH_FAILED
+
+
+def outcome(code: Optional[int], timed_out: bool) -> Outcome:
+    """終了コードと打ち切りから結果を決める唯一の関数（I7）。起動の例外は実行器が 127 に置き換えて渡す（決定 6）。"""
+    if timed_out:
+        return Outcome(TIMED_OUT, code, "上限で打ち切った")
+    if code == 0:
+        return Outcome(PASSED, 0, "")
+    if code == 127:
+        return Outcome(LAUNCH_FAILED, 127, "終了コード 127（コマンドが見つからないか、起動できない）")
+    if code == 126:
+        return Outcome(LAUNCH_FAILED, 126, "終了コード 126（実行できない）")
+    return Outcome(FAILED, code, f"終了コード {code}")
 
 
 @dataclass
 class Strategy:
-    """解いた戦略。`source` は根拠（`test.strategy` / `derived:test.suites` / `derived:test_duration` / `args`）。"""
+    """解いた戦略。`source` は根拠（`test.strategy` / `derived:test.suites` / `derived:test_duration` / `args`）。
+
+    `round_command` は引数（`--round-test` など）のラウンドテストか、旧形の状態ファイルの ` && ` でつないだもの。
+    宣言から導いた `round-only` では `None` で、ラウンドテストは suite ごとの `command` から組む（I6）。
+    `round_kind` は `round_command` の種別。
+    """
 
     name: str
     source: str
@@ -71,24 +158,40 @@ class Strategy:
     round_command: Optional[str] = None
     ci: Optional[dict[str, Any]] = None
     notes: list[str] = field(default_factory=list)
+    round_kind: str = TEST
 
     @property
     def whole_on_ci(self) -> bool:
         return self.name == LOCAL_SCOPED_CI_WHOLE
 
-    def scoped_suites(self) -> list[Suite]:
-        return [s for s in self.suites if s.scope_command]
+    def scoped_suites(self, kind: Optional[str] = None) -> list[Suite]:
+        return [s for s in self.suites if s.scope_command and (kind is None or s.kind == kind)]
 
-    def whole_commands(self) -> list[str]:
-        """手元で走らせる全体テストのコマンド（シェルで走らせる文字列）。suite が無い `round-only` はラウンドテストそのもの。"""
-        commands = [s.command for s in self.suites if s.command]
-        if commands:
+    def has_kind(self, kind: str) -> bool:
+        """その種別の suite（か、その種別のラウンドテスト）があるか。"""
+        return any(s.kind == kind for s in self.suites) or bool(self.round_command and self.round_kind == kind)
+
+    def whole_commands(self, kind: Optional[str] = None) -> list[str]:
+        """手元で走らせる全体テストのコマンド（シェルで 1 つずつ走らせる文字列）。`kind` が `None` なら両方の種別。
+
+        suite に `command` が 1 つも無ければラウンドテストが全体を兼ねる（今と同じ）。
+        """
+        commands = [s.command for s in self.suites if s.command and (kind is None or s.kind == kind)]
+        if commands or any(s.command for s in self.suites):
             return commands
-        return [self.round_command] if self.round_command else []
+        if self.round_command and (kind is None or kind == self.round_kind):
+            return [self.round_command]
+        return []
+
+    def round_commands(self) -> list[str]:
+        """ラウンドテストのコマンドの並び。引数（か旧形の状態）なら `[round_command]`、宣言からなら suite ごとに 1 つ（I6）。"""
+        if self.round_command:
+            return [self.round_command]
+        return [s.command for s in self.suites if s.command]
 
     def as_state(self) -> dict[str, Any]:
         """状態ファイルとプランへ写す形。以後は変えない（集約の不変条件）。"""
-        return {
+        out = {
             "name": self.name,
             "source": self.source,
             "suites": [s.as_state() for s in self.suites],
@@ -96,11 +199,19 @@ class Strategy:
             "ci": dict(self.ci) if self.ci else None,
             "notes": list(self.notes),
         }
+        if self.round_command:
+            out["round_kind"] = self.round_kind
+        return out
 
     @classmethod
     def from_state(cls, data: dict[str, Any]) -> "Strategy":
+        """状態ファイルの戦略。`kind` を持たない suite（旧形）はテストとして読む（I3）。"""
         suites = [
-            Suite(**{k: s.get(k) for k in ("name", "command", "scope_command", "junit")}, paths=list(s.get("paths") or []))
+            Suite(
+                **{k: s.get(k) for k in ("name", "command", "scope_command", "junit")},
+                paths=list(s.get("paths") or []),
+                kind=str(s.get("kind") or TEST),
+            )
             for s in data.get("suites") or []
         ]
         return cls(
@@ -110,23 +221,31 @@ class Strategy:
             data.get("round_command"),
             data.get("ci"),
             list(data.get("notes") or []),
+            str(data.get("round_kind") or TEST),
         )
 
 
 # ---------- 雛形 ----------
 
 
+def _tokens(text: str) -> list[str]:
+    """シェルの字句（括弧・`&&`・`;` を別の字句にし、引用を字句に残す）。`{paths}` は 1 字句になる。"""
+    lexer = shlex.shlex(text, posix=False, punctuation_chars=True)
+    lexer.wordchars += "{}$"
+    return list(lexer)
+
+
 def template_problem(template: str, key: str) -> Optional[str]:
-    """範囲テストの雛形の不備。`{paths}` が無い・1 語として立っていない・語に分けられないなら理由、なければ `None`。"""
+    """範囲テストの雛形の不備。`{paths}` が無い・引用の外の 1 字句として立っていない・字句に分けられないなら理由、なければ `None`。"""
     text = str(template or "")
     if PATHS not in text:
         return f"{key} に {PATHS} が無い。範囲テストの雛形は {PATHS} を 1 語で含める（今: {text}）"
     try:
-        words = shlex.split(text)
+        words = _tokens(text)
     except ValueError:
         return f"{key} を語に分けられない（今: {text}）"
-    if PATHS not in words:
-        return f"{key} の {PATHS} は空白で区切った 1 語で書く（今: {text}）"
+    if PATHS not in words or any(PATHS in w and w != PATHS for w in words):
+        return f"{key} の {PATHS} は引用の外に、空白で区切った 1 語で書く（今: {text}）"
     return None
 
 
@@ -134,33 +253,47 @@ def has_paths(command: Optional[str]) -> bool:
     return bool(command) and PATHS in str(command)
 
 
-def scope_words(template: str, paths: list[str]) -> list[str]:
-    """雛形の `{paths}` の語を対象の語の並びへ置き換えた語の並び（`shell=False` で走らせる）。"""
-    words = shlex.split(str(template))
-    out: list[str] = []
-    for word in words:
-        if word == PATHS:
-            out.extend(str(p) for p in paths)
-        else:
-            out.append(word)
-    return out
+def fill(template: str, paths: list[str]) -> str:
+    """雛形の `{paths}` の字句を、シェルの引用で守った対象の並び（`shlex.join`）へ置き換えた文字列（I2・AC22）。"""
+    return str(template).replace(PATHS, shlex.join([str(p) for p in paths]))
 
 
 def whole_command_of(template: str) -> str:
-    """雛形から全体テストのコマンド（`{paths}` を `.` にした文字列）を作る。"""
+    """テストの種別の雛形から全体テストのコマンド（`{paths}` を `.` にした文字列）を作る。静的解析には使わない（I4）。"""
     return str(template).replace(PATHS, ".")
 
 
-def suite_for(strategy: Strategy, path: str) -> Optional[Suite]:
-    """パスを受け持つ suite（`paths` の最長の一致）。`scope_command` を持つ suite だけを見る。"""
+def suite_for(strategy: Strategy, path: str, kind: str = TEST) -> Optional[Suite]:
+    """パスを受け持つ `kind` の suite（`paths` の最長の一致）。`scope_command` を持つ suite だけを見る。"""
     best, best_len = None, -1
-    for suite in strategy.scoped_suites():
-        for root in suite.paths or ["."]:
-            r = str(root).rstrip("/")
-            if r in (".", "") or path == r or path.startswith(r + "/"):
-                if len(r) > best_len:
-                    best, best_len = suite, len(r)
+    for suite in strategy.scoped_suites(kind):
+        n = _match_len(suite, path)
+        if n is not None and n > best_len:
+            best, best_len = suite, n
     return best
+
+
+def test_groups(strategy: Strategy, targets: list[str]) -> list[tuple[Suite, list[str]]]:
+    """テストの対象を受け持つテストの suite ごとに分ける。受け持つ suite の無いものは最初のテストの suite へ。"""
+    groups: dict[str, tuple[Suite, list[str]]] = {}
+    scoped = strategy.scoped_suites(TEST)
+    for t in targets:
+        suite = suite_for(strategy, str(t), TEST) or (scoped[0] if scoped else None)
+        if suite is None:
+            continue
+        groups.setdefault(suite.name, (suite, []))[1].append(str(t))
+    return list(groups.values())
+
+
+def scope_runs(strategy: Strategy, targets: list[str], changed: list[str]) -> list[ScopeRun]:
+    """範囲テストの並び。テストの suite には対象（`targets`）を、静的解析の suite には変更したファイル（`changed`）の
+    うち `covers` に当たるものを入れる（I10）。入れるものが無い suite は組まない。"""
+    runs = [ScopeRun(s.name, TEST, fill(str(s.scope_command), paths)) for s, paths in test_groups(strategy, list(targets))]
+    for suite in strategy.scoped_suites(LINT):
+        mine = [str(f) for f in changed if suite.covers(str(f))]
+        if mine:
+            runs.append(ScopeRun(suite.name, LINT, fill(str(suite.scope_command), mine)))
+    return runs
 
 
 # ---------- 宣言の読み取り ----------
@@ -188,6 +321,7 @@ def _suites_of(test: dict[str, Any]) -> list[Suite]:
                 scope_command=str(s["scope_command"]) if s.get("scope_command") else None,
                 junit=str(s["junit"]) if s.get("junit") else None,
                 paths=[str(p) for p in s.get("paths") or []],
+                kind=str(s.get("kind") or TEST),
             )
         )
     return out
@@ -240,13 +374,18 @@ def _ci_target(test: dict[str, Any], decl: dict[str, Any], ci_check: Optional[st
 
 
 def propose(decl: dict[str, Any]) -> tuple[Optional[str], str]:
-    """宣言だけから戦略を導く（解析の答えの既定と、`test.strategy` が無い宣言の経路）。戻りは（戦略, 根拠）。"""
+    """宣言だけから戦略を導く（解析の答えの既定と、`test.strategy` が無い宣言の経路）。戻りは（戦略, 根拠）。
+
+    `scope_command` の有無は、テストの suite があればテストの suite だけで、無ければ静的解析の suite で見る（決定 5）。
+    """
     test, reason = _test_of(decl)
     if test is None:
         return None, f"unknown:{reason}" if reason is not None else "missing"
     if test.get("strategy") in STRATEGIES:
         return str(test["strategy"]), "test.strategy"
-    if not any(s.scope_command for s in _suites_of(test)):
+    suites = _suites_of(test)
+    basis = [s for s in suites if s.kind == TEST] or suites
+    if not any(s.scope_command for s in basis):
         return ROUND_ONLY, "derived:test.suites"
     w, _ = whole_seconds(decl)
     if w is not None and w > CI_WHOLE_THRESHOLD_SECONDS and ci_of(decl) is not None:
@@ -254,43 +393,88 @@ def propose(decl: dict[str, Any]) -> tuple[Optional[str], str]:
     return LOCAL_FULL, "derived:test_duration"
 
 
+def _check_kind(kind: str, key: str) -> None:
+    if kind not in KINDS:
+        raise StrategyError(f"{key} は {' か '.join(KINDS)} で書く（今: {kind}）")
+
+
 def _check_templates(suites: list[Suite]) -> None:
     for i, suite in enumerate(suites):
+        _check_kind(suite.kind, f"test.suites[{i}].kind")
         if suite.scope_command:
             problem = template_problem(suite.scope_command, f"test.suites[{i}].scope_command")
             if problem:
                 raise StrategyError(problem)
 
 
+def _args_suites(template: str, kind: str, declared: list[Suite], scope_paths: Optional[list[str]], notes: list[str]) -> list[Suite]:
+    """引数の雛形（`{paths}` を含む）を種別 `kind` の範囲テストの雛形にした suite の並び（I11）。
+
+    宣言の同じ種別の suite は `scope_command` を外して残し、全体テストは宣言の `command` が先に効く。宣言に
+    `command` が無ければ、テストは `{paths}` を `.` にしたもの、静的解析は `{paths}` を範囲のパスで埋めたもの（I4）。
+    宣言のほかの種別の suite はそのまま残す。
+    """
+    same = [Suite(s.name, s.command, None, s.junit, list(s.paths), s.kind) for s in declared if s.kind == kind]
+    others = [s for s in declared if s.kind != kind]
+    paths = [str(p) for p in scope_paths or [] if str(p)]
+    if any(s.command for s in same):
+        whole = ""
+    elif kind == TEST:
+        whole = whole_command_of(template)
+    elif paths:
+        whole = fill(template, paths)
+    else:
+        whole = ""
+        notes.append(NO_LINT_WHOLE)
+    arg = Suite("args", whole, template, paths=(paths or ["."]) if kind == LINT else ["."], kind=kind)
+    return [*same, arg, *others]
+
+
 def _from_args(
-    decl: dict[str, Any], baseline_test: Optional[str], round_test: Optional[str], ci_check: Optional[str]
+    decl: dict[str, Any],
+    baseline_test: Optional[str],
+    round_test: Optional[str],
+    ci_check: Optional[str],
+    kind: str,
+    scope_paths: Optional[list[str]],
 ) -> Optional[Strategy]:
-    """引数からの解き方（決定 2 の表の上 3 行）。引数が無ければ `None`。"""
+    """引数からの解き方（決定 2 の表の上 3 行）。引数が無ければ `None`。雛形の種別は `kind`（I1）。"""
     test, _ = _test_of(decl)
-    declared = str((test or {}).get("strategy") or "") if test else ""
+    declared_name = str((test or {}).get("strategy") or "") if test else ""
+    declared = _suites_of(test or {})
+    for i, suite in enumerate(declared):
+        _check_kind(suite.kind, f"test.suites[{i}].kind")
+    others = [s for s in declared if s.kind != kind]
+    _check_templates(others)
+    notes: list[str] = []
     if round_test and not has_paths(round_test):
-        # 全体テストは `--baseline-test`（`{paths}` を含めば `.` にしたもの）→ 宣言の suite の `command`。
+        # 全体テストは `--baseline-test`（`{paths}` を含めば種別の規則で組む）→ 宣言の suite の `command`。
         # どちらも無ければラウンドテストが全体を兼ねる。
-        if baseline_test:
-            suites = [Suite("args", whole_command_of(baseline_test), baseline_test if has_paths(baseline_test) else None, paths=["."])]
+        if baseline_test and has_paths(baseline_test):
+            suites = _args_suites(baseline_test, kind, declared, scope_paths, notes)
+        elif baseline_test:
+            suites = [Suite("args", str(baseline_test), None, paths=["."], kind=kind), *others]
         else:
-            suites = [s for s in _suites_of(test or {}) if s.command]
-        return Strategy(ROUND_ONLY, "args", suites, round_command=str(round_test), notes=["--round-test をそのまま走らせる"])
+            suites = [s for s in declared if s.command]
+        notes.insert(0, "--round-test をそのまま走らせる")
+        return Strategy(ROUND_ONLY, "args", suites, round_command=str(round_test), notes=notes, round_kind=kind)
     template = round_test if has_paths(round_test) else (baseline_test if has_paths(baseline_test) else None)
     if template:
         problem = template_problem(template, "--round-test" if has_paths(round_test) else "--baseline-test")
         if problem:
             raise StrategyError(problem)
-        name = declared if declared in STRATEGIES and declared != ROUND_ONLY else LOCAL_FULL
-        suite = Suite("args", whole_command_of(template), template, paths=["."])
+        name = declared_name if declared_name in STRATEGIES and declared_name != ROUND_ONLY else LOCAL_FULL
+        suites = _args_suites(template, kind, declared, scope_paths, notes)
         ci = _ci_target(test or {}, decl, ci_check) if name == LOCAL_SCOPED_CI_WHOLE else None
-        return Strategy(name, "args", [suite], ci=ci)
+        return Strategy(name, "args", suites, ci=ci, notes=notes)
     if baseline_test:
         return Strategy(
             ROUND_ONLY,
             "args",
+            others,
             round_command=str(baseline_test),
             notes=["--baseline-test に {paths} が無いため、項目ごとに全体テストを走らせる"],
+            round_kind=kind,
         )
     return None
 
@@ -301,9 +485,16 @@ def resolve(
     baseline_test: Optional[str] = None,
     round_test: Optional[str] = None,
     ci_check: Optional[str] = None,
+    template_kind: str = TEST,
+    scope_paths: Optional[list[str]] = None,
 ) -> Strategy:
-    """宣言と引数から戦略を解く（決定 2 の表を上から当てる）。解けなければ `StrategyError`（I3）。"""
-    from_args = _from_args(decl, baseline_test, round_test, ci_check)
+    """宣言と引数から戦略を解く（決定 2 の表を上から当てる）。解けなければ `StrategyError`（I3）。
+
+    `template_kind` は引数の雛形（`--baseline-test` / `--round-test` / `--test-cmd`）の種別、`scope_paths` は
+    静的解析の雛形の全体テストで `{paths}` に入れる範囲のパス（cross-refactoring の `--scope`・supervise の `--tests`）。
+    """
+    _check_kind(str(template_kind), "--test-kind")
+    from_args = _from_args(decl, baseline_test, round_test, ci_check, str(template_kind), scope_paths)
     if from_args is not None:
         return from_args
     test, reason = _test_of(decl)
@@ -313,14 +504,25 @@ def resolve(
     _check_templates(suites)
     name, source = propose(decl)
     if name == ROUND_ONLY:
-        commands = [s.command for s in suites if s.command]
-        if not commands:
+        if not any(s.command for s in suites):
             raise StrategyError("test.suites に command を持つ suite が無い")
-        return Strategy(ROUND_ONLY, source, suites, round_command=" && ".join(commands))
+        return Strategy(ROUND_ONLY, source, suites)
     if name == LOCAL_SCOPED_CI_WHOLE and not any(s.scope_command for s in suites):
         raise StrategyError("local-scoped-ci-whole には scope_command を持つ suite が要る")
     ci = _ci_target(test, decl, ci_check) if name == LOCAL_SCOPED_CI_WHOLE else None
     return Strategy(str(name), source, suites, ci=ci)
+
+
+def verify_commands(decl: dict[str, Any]) -> Optional[list[str]]:
+    """cross-review の最終スイープに名指しする全体テスト（両方の種別。I13）。宣言の `test` が無いか解けなければ `None`。"""
+    test, _ = _test_of(decl)
+    if test is None:
+        return None
+    try:
+        commands = resolve(decl).whole_commands()
+    except StrategyError:
+        return None
+    return commands or None
 
 
 def decl_of(root, supervise_decl: Optional[dict[str, Any]] = None) -> tuple[dict[str, Any], Optional[str]]:

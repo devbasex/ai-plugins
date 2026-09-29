@@ -30,7 +30,7 @@ def _clock(monkeypatch, seconds_per_suite):
 
 
 def _whole_state(monkeypatch, module):
-    strategy = types.SimpleNamespace(whole_commands=lambda: ["a", "b", "c"])
+    strategy = types.SimpleNamespace(whole_commands=lambda kind=None: [] if kind == "lint" else ["a", "b", "c"])
     timeline = sys.modules["refactor_lib.timeline"]
     monkeypatch.setattr(timeline, "strategy_of", lambda state: strategy)
     monkeypatch.setattr(timeline, "state_whole_timeout", lambda state: 100)
@@ -44,7 +44,7 @@ def test_local_gate_shares_the_limit_across_suites(refactor, monkeypatch, per_su
     _whole_state(monkeypatch, gate)
     run, given = _clock(monkeypatch, per_suite)
     monkeypatch.setattr(gate, "run_with_timeout", run)
-    passed, _, _ = gate._local_gate({})
+    passed, _, _ = gate._local_gate(None, {})
     assert given == expected
     assert passed is (per_suite == 30)
 
@@ -62,7 +62,8 @@ def test_run_locally_shares_the_limit_across_suites(refactor, monkeypatch, tmp_p
 
 def test_run_baseline_shares_the_limit_across_suites(refactor, monkeypatch, tmp_path):
     baseline = sys.modules["refactor_lib.baseline"]
-    monkeypatch.setattr(baseline, "commands_of", lambda strategy, scope, work: ("whole", ["a", "b", "c"]))
+    runs = [baseline.ts.ScopeRun(c, "test", c) for c in ("a", "b", "c")]
+    monkeypatch.setattr(baseline, "commands_of", lambda strategy, scope, work: ("whole", runs))
     monkeypatch.setattr(baseline.test_triage, "clear_junit", lambda work, strategy: None)
     run, given = _clock(monkeypatch, 60)
     monkeypatch.setattr(baseline, "run_with_timeout", run)
@@ -78,7 +79,8 @@ def test_a_derived_round_command_does_not_run_the_suites_twice(refactor, tmp_pat
     strategy = ts.Strategy(
         "round-only", "derived:test.suites", [ts.Suite("a", "run a"), ts.Suite("b", "run b")], round_command="run a && run b"
     )
-    assert baseline.commands_of(strategy, [], tmp_path) == ("round", ["run a", "run b"])
+    mode, runs = baseline.commands_of(strategy, [], tmp_path)
+    assert (mode, [r.command for r in runs]) == ("round", ["run a", "run b"])
 
 
 def _two_suites(ts):
@@ -97,20 +99,21 @@ def test_targets_across_suites_run_each_suite_with_its_own_template(refactor, mo
         (tmp_path / "tests" / d).mkdir(parents=True)
         (tmp_path / "tests" / d / "test_t.py").write_text("", encoding="utf-8")
     monkeypatch.setattr(targets, "strategy_of", lambda state: strategy)
-    command, origin = targets.limited_command({"target_scope": ["tests"]}, ["tests/a/test_t.py", "tests/b/test_t.py::y"], str(tmp_path))
+    runs, origin = targets.limited_runs({"target_scope": ["tests"]}, ["tests/a/test_t.py", "tests/b/test_t.py::y"], str(tmp_path))
     assert origin == "targets"
-    assert targets.as_commands(command) == [["run-a", "tests/a/test_t.py"], ["run-b", "tests/b/test_t.py::y"]]
-    assert targets.command_key(command) == (("run-a", "tests/a/test_t.py"), ("run-b", "tests/b/test_t.py::y"))
+    commands = [r.command for r in runs]
+    assert commands == ["run-a tests/a/test_t.py", "run-b tests/b/test_t.py::y"]
+    assert targets.command_key({"scope_commands": targets.runs_state(runs)}) == tuple(commands)
 
-    single, _ = targets.limited_command({"target_scope": ["tests"]}, ["tests/a/test_t.py"], str(tmp_path))
-    assert single == ["run-a", "tests/a/test_t.py"], "suite が 1 つなら今の形（語の並び 1 つ）のまま"
+    single, _ = targets.limited_runs({"target_scope": ["tests"]}, ["tests/a/test_t.py"], str(tmp_path))
+    assert [r.command for r in single] == ["run-a tests/a/test_t.py"]
 
     run, given = _clock(monkeypatch, 30)
-    seen: list[list[str]] = []
+    seen: list[str] = []
     monkeypatch.setattr(targets, "run_with_timeout", lambda words, cwd, timeout, **kw: (seen.append(words), run(words, cwd, timeout))[1])
-    code, timed_out = targets.run_commands(command, str(tmp_path), 100, tmp_path / "verify.log")
-    assert (code, timed_out) == (0, False)
-    assert seen == [["run-a", "tests/a/test_t.py"], ["run-b", "tests/b/test_t.py::y"]]
+    result, _ = targets.run_commands(commands, str(tmp_path), 100, tmp_path / "verify.log")
+    assert result.status == "passed"
+    assert seen == commands
     assert given == [100, 70], "suite 群で 1 つの上限を分け合う"
 
 

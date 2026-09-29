@@ -23,8 +23,9 @@ from typing import Any, Optional
 
 import project_decl
 import statefile
+import test_strategy as ts
 
-from .. import clock, die, info, targets, timeline
+from .. import clock, die, info, launch, targets, timeline
 from ..gitfacts import (
     collect_commit_facts,
     commit_time,
@@ -225,41 +226,47 @@ def _finish(path: pathlib.Path, state: dict[str, Any], phase: str) -> None:
 # ---------- テストの追加 ----------
 
 
-def _test_words(state: dict[str, Any], item: dict[str, Any], files: list[str]) -> Optional[list[list[str]]]:
-    """足したテストを今のコードで走らせる語の並び（suite ごとに 1 つ。`targets.as_commands` の形）。
+def _added_test_commands(state: dict[str, Any], item: dict[str, Any], files: list[str]) -> list[str]:
+    """足したテストを今のコードで走らせるコマンド（テストの種別の suite だけ。suite ごとに 1 つ。#1483 I9）。
 
     項目の範囲テストが対象から組み立てたものならそれを使う。ラウンドテストをそのまま使う項目は、
     戦略に雛形（`scope_command`）があれば足したテストのファイルを `{paths}` へ入れ、無ければ
-    ラウンドテストをそのまま走らせる。
+    ラウンドテストのうちテストの種別のものをそのまま走らせる。静的解析の結果では判定しない。
     """
+    own = [r.command for r in targets.item_runs(item) if r.kind == ts.TEST]
     if item.get("command_source") == "targets":
-        return targets.as_commands(item["command"]) or None
+        return own
     work = work_dir(state)
     strategy = timeline.strategy_of(state)
     tests = [f for f in files if targets.valid_targets([f], work, list(state.get("target_scope") or []))]
     if tests:
-        built = targets.scope_words_for(strategy, tests)
+        built = targets.scope_runs_for(strategy, tests)
         if built:
-            return built
-    return targets.as_commands(item.get("command")) or None
+            return [r.command for r in built]
+    return own
 
 
-def _run_added_tests(state: dict[str, Any], intake: Intake) -> None:
-    """足したテストが今のコードで通るかを確かめる（決定 13）。同じ語の並びは 1 回だけ走らせる。"""
+def _run_added_tests(path: pathlib.Path, state: dict[str, Any], intake: Intake) -> None:
+    """足したテストが今のコードで通るかを確かめる（決定 13）。同じコマンドの並びは 1 回だけ走らせる。
+
+    起動の失敗なら項目を落とさずに止まる（#1483 I8）。
+    """
     work = work_dir(state)
     timeout = timeline.state_test_timeout(state)
-    results: dict[tuple[tuple[str, ...], ...], bool] = {}
+    results: dict[tuple[str, ...], bool] = {}
     for item_id, fact in intake.accepted.items():
-        words = _test_words(state, find_item(state, item_id), list(fact.get("files") or []))
-        if not words:
+        commands = _added_test_commands(state, find_item(state, item_id), list(fact.get("files") or []))
+        if not commands:
             continue
-        key = targets.command_key(words)
+        key = tuple(commands)
         if key not in results:
             log = pathlib.Path(state["tmp_dir"]) / f"add-tests-{item_id}.log"
-            code, timed_out = targets.run_commands(words, work, timeout, log)
-            results[key] = (not timed_out) and code == 0
+            result, last = targets.run_commands(commands, work, timeout, log)
+            if result.launch_failed:
+                launch.stop(path, state, "tests", last, result, log)
+            results[key] = result.status == ts.PASSED
         if not results[key]:
-            intake.test_failed[item_id] = f"足したテストが今のコードで通りません（{targets.command_text(words)}）"
+            intake.test_failed[item_id] = f"足したテストが今のコードで通りません（{targets.command_text(commands)}）"
             intake.extra.append(fact["sha"])
 
 
@@ -352,7 +359,7 @@ def cmd_merge_tests(args: argparse.Namespace) -> None:
         record_observed_model(state, str(state["implementer"]), "add-tests")
         note_stopped(state, str(state["implementer"]), "add-tests")
         intake = _intake_tests(state)
-        _run_added_tests(state, intake)
+        _run_added_tests(path, state, intake)
         for item_id, fact in intake.accepted.items():
             if item_id in intake.test_failed:
                 continue

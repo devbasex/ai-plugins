@@ -492,12 +492,8 @@ def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
     work = root / "work"
     _ensure_work_worktree(work, head_branch)
 
-    # **`--scope` の関門はここで通す**（#436 決定 5）。テストの置き場所が範囲に無いまま進むと、
-    # テスト整備ラウンドが足したテストが検証に効かない。案内だけでは同じ失敗を繰り返すため、**止める**。
-    require_scope_covers_tests(args.scope, str(work))
-
     # **テストの戦略は宣言（`.ndf/project.json` の `test`）と引数から解く**（#1334 E1）。コマンドの文字列は
-    # 解析しない。解けなければ欠けたキーと直し方を出して止める（I3）。
+    # 解析しない。解けなければ欠けたキーと直し方を出して止める（I3）。引数の雛形の種別は `--test-kind`（#1483 I1）。
     decl = project_decl.read_project_decl(str(work))
     try:
         strategy = ts.resolve(
@@ -505,6 +501,8 @@ def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
             baseline_test=getattr(args, "baseline_test", None),
             round_test=getattr(args, "round_test", None),
             ci_check=getattr(args, "ci_check", None),
+            template_kind=getattr(args, "test_kind", None) or ts.TEST,
+            scope_paths=list(args.scope or []),
         )
     except ts.StrategyError as e:
         die(str(e))
@@ -512,6 +510,14 @@ def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
     info(f"🧭 テストの戦略: {strategy.name}（根拠 {strategy.source}）")
     for note in strategy.notes:
         info(f"   ℹ {note}")
+
+    # **`--scope` の関門は戦略を解いてから通す**（#436 決定 5・#1483 I9）。テストの置き場所が範囲に無いまま進むと、
+    # テスト整備ラウンドが足したテストが検証に効かない。案内だけでは同じ失敗を繰り返すため、**止める**。
+    # テストの種別の suite が無い戦略はテスト整備ラウンドを行わないため、検査を通らない（計画に残す）。
+    if strategy.has_kind(ts.TEST):
+        require_scope_covers_tests(args.scope, str(work))
+    else:
+        info("   ℹ テストの種別の suite が無いため、--scope のテストの置き場所の検査とテスト整備ラウンドを行いません")
 
     tmp_dir = tmp_dir_for(work)
     tmp_dir.mkdir(parents=True, exist_ok=True)

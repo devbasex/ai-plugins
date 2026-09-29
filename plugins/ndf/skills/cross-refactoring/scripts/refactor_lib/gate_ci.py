@@ -100,7 +100,9 @@ def revert_deferred(path: pathlib.Path, state: dict[str, Any], gate: dict[str, A
         live[item_id]["failure_reason"] = reason
         drop(path, state, [item_id], reason)
         reverted.append(item_id)
-        code, timed_out = run_with_timeout(list(rerun), work_dir(state), timeline.state_test_timeout(state))
+        code, timed_out = run_with_timeout(
+            rerun if isinstance(rerun, str) else list(rerun), work_dir(state), timeline.state_test_timeout(state)
+        )
         if not timed_out and code == 0:
             break
     gate["reverted_deferred"] = list(gate.get("reverted_deferred") or []) + reverted
