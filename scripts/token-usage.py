@@ -790,6 +790,25 @@ def aggregate(sessions: list[Session], by: list[str], rmap: "release_map.Release
     return {"per_pr": per_pr, "per_role": per_role, "external": external}
 
 
+def _cache_row(r: dict, by: list[str], lead: tuple[str, ...], writes: bool = False) -> list[str]:
+    """「呼び出しとキャッシュ」の表の 1 行。writes は書き込み 5 分・1 時間の列を持つ表（フェーズごと）で立てる。"""
+    return (
+        [r[a] for a in by]
+        + [r[c] for c in lead]
+        + [
+            str(r["count"]),
+            _k(r["p"]) if "p" in r else "-",
+            f"{r['k']:.1f}" if "k" in r else "-",
+            *([_m(r["w5"]), _m(r["w1h"])] if writes else []),
+            str(r.get("rewrites", "-")),
+            str(r.get("rewrites_after_5m", "-")),
+            _m(r["rewrite_tokens_after_5m"]) if "rewrite_tokens_after_5m" in r else "-",
+            _m(r["read_tokens_after_5m"]) if "read_tokens_after_5m" in r else "-",
+            _min(r.get("rewrite_gap_median")),
+        ]
+    )
+
+
 def render_md(result: dict, by: list[str]) -> str:
     heads = [AXIS_LABEL[a] for a in by]
 
@@ -897,25 +916,7 @@ def render_md(result: dict, by: list[str]) -> str:
             "5 分超の読み込み",
             "間隔",
         ],
-        [
-            [r[a] for a in by]
-            + [
-                r["layer"],
-                r["role"],
-                r["agent_type"],
-                str(r["count"]),
-                _k(r["p"]) if "p" in r else "-",
-                f"{r['k']:.1f}",
-                _m(r["w5"]),
-                _m(r["w1h"]),
-                str(r.get("rewrites", "-")),
-                str(r.get("rewrites_after_5m", "-")),
-                _m(r["rewrite_tokens_after_5m"]) if "rewrite_tokens_after_5m" in r else "-",
-                _m(r["read_tokens_after_5m"]) if "read_tokens_after_5m" in r else "-",
-                _min(r.get("rewrite_gap_median")),
-            ]
-            for r in result["per_role"]
-        ],
+        [_cache_row(r, by, ("layer", "role", "agent_type"), writes=True) for r in result["per_role"]],
     )
     out += ["", "## 外部 CLI（1 起動あたり）", "", "kiro はトークン数を記録しない（値が 0）ため credit だけを載せる。agy は読まない。", ""]
     out += table(
@@ -946,23 +947,7 @@ def render_md(result: dict, by: list[str]) -> str:
     ]
     out += table(
         heads + ["ランタイム", "Skill", "モデル", "起動", "P", "k", "書き直し", "5 分超", "5 分超の書き直し", "5 分超の読み込み", "間隔"],
-        [
-            [r[a] for a in by]
-            + [
-                r["runtime"],
-                r["skill"],
-                r["cli_model"],
-                str(r["count"]),
-                _k(r["p"]) if "p" in r else "-",
-                f"{r['k']:.1f}" if "k" in r else "-",
-                str(r.get("rewrites", "-")),
-                str(r.get("rewrites_after_5m", "-")),
-                _m(r["rewrite_tokens_after_5m"]) if "rewrite_tokens_after_5m" in r else "-",
-                _m(r["read_tokens_after_5m"]) if "read_tokens_after_5m" in r else "-",
-                _min(r.get("rewrite_gap_median")),
-            ]
-            for r in result["external"]
-        ],
+        [_cache_row(r, by, ("runtime", "skill", "cli_model")) for r in result["external"]],
     )
     return "\n".join(out) + "\n"
 
