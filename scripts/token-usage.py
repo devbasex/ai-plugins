@@ -68,8 +68,6 @@ LINK_MARGIN = 600  # 外部 CLI を会話へ寄せるときの時刻の余裕（
 VERSION_RE = re.compile(r"Base directory for this skill: \S*?/ai-plugins/ndf/(\d+\.\d+\.\d+(?:-[\w.]+)?)/skills/")
 MODE_RE = re.compile(r"\bmode\s+[\"']?(light|operation|legacy-refactor|standard|documentation|architecture|full)\b")
 PR_URL_RE = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
-# 同じ URL から所有者/リポジトリと番号を取る（PR_URL_RE は findall で URL 全体を返す使い方のため別に置く）
-PR_URL_PARTS_RE = re.compile(r"github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)")
 WT_RE = re.compile(r"/tmp/ndf-worktrees/([\w.-]+--[\w.-]+)/((?:pr|rf)\d+)")
 
 AXES = ("version", "mode", "model", "cc", "reviewers")
@@ -998,7 +996,7 @@ def pr_numbers(urls: set, slug: str | None) -> list[int]:
     """会話が作った PR の URL のうち、`slug`（`<所有者>/<リポジトリ>`。None なら問わない）の番号を小さい順に。"""
     out = set()
     for u in urls:
-        m = PR_URL_PARTS_RE.search(u)
+        m = re.search(r"github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)", u)
         if m and (slug is None or m.group(1) == slug):
             out.add(int(m.group(2)))
     return sorted(out)
