@@ -43,7 +43,7 @@
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
 | 改善項目の採否 | 前へ進める遷移（`planned` → … → `verified`）は各コマンド。**`reverted` へ落とす遷移は `ledger.mark_dropped` だけ** | 改善項目（`state["items"][]`） | — | 記録したコミット（`commits.test` / `implement` / `fix[]`） |
-| 公開の台帳 | `ledger.py`（`note_published` / `note_orchestrator_commit`）。`publish.py` と `undo.py` はこの関数を通して書く | 台帳（`state["ledger"]`） | — | 公開した地点・オーケストレーターのコミットの SHA の並び |
+| 公開の台帳 | `ledger.py`（`note_published` / `note_orchestrator_commit` / `remap_orchestrator_commits`）。`publish.py` と `undo.py` はこの関数を通して書き、`state["ledger"]` の欄を直接書かない | 台帳（`state["ledger"]`） | — | 公開した地点・オーケストレーターのコミットの SHA の並び |
 | 取り消しの記録 | `undo.py` | 取り消し（`state["drops"][]`・`state["pending_drop"]`） | — | 積み直しの計画（`RebuildPlan`） |
 
 **判定（どのコミットを残し、消し、戻し、公開してよいか）は `ledger.py` の純粋な関数が持つ。** git を書き換えるのは
@@ -229,6 +229,7 @@ classDiagram
         +unpublishable(state, work, remote_tip) list~CommitVerdict~
         +note_published(state, sha)
         +note_orchestrator_commit(state, sha)
+        +remap_orchestrator_commits(state, mapping)
     }
     ledger ..> RebuildPlan : 作る
     ledger ..> CommitVerdict : 作る
@@ -253,7 +254,7 @@ classDiagram
 | 欄 | 型 | 空の値 | 意味 |
 | --- | --- | --- | --- |
 | `ledger.published_sha` | str | 欄が無い（→ `plan.base_sha` を使う） | 公開した地点。push が通るたびに push した HEAD を書く |
-| `ledger.orchestrator_commits` | list[str] | `[]` | オーケストレーターが作ったコミットの完全な SHA。同期・計画の記録のコミットは作った直後、revert は取り消しの記録の時点で足す。積み直しで SHA が変わったら書き直す |
+| `ledger.orchestrator_commits` | list[str] | `[]` | オーケストレーターが作ったコミットの完全な SHA。同期・計画の記録のコミットは作った直後、revert は取り消しの記録の時点で足す。積み直しで SHA が変わったら `ledger.remap_orchestrator_commits` が書き直す（`undo` は対応表を渡すだけ） |
 | `pending_drop.before` | str | 欄が無い（→ 今の HEAD から判定し直す） | 取り消しの前の HEAD。再開はここへ戻してやり直す |
 | `drops[].mode` | str | — | `item` / `widened` / `skip`。**`all` は書かない**（既存の記録にある `all` は読めるまま残す） |
 | `drops[].origin` | str | — | 積み直しの起点 |
@@ -264,7 +265,7 @@ classDiagram
 
 **積み直しで書き直す SHA は項目のコミットに限らない。** 積み直しの起点より後を指す保存済みの地点も、
 対応表で書き直す。対象は `phases.*.base_sha`・`fix.base_sha`・`final_gate.fix_base_sha`・`final_gate.fix_commits`・
-`ledger.orchestrator_commits` である。地点の対応は「元の履歴でその地点以前にある最後の残すコミットの
+`ledger.orchestrator_commits` である。`ledger.orchestrator_commits` だけは台帳の持ち主の `ledger.remap_orchestrator_commits(state, mapping)` を通して書き直し、残りは `undo` が書き直す。地点の対応は「元の履歴でその地点以前にある最後の残すコミットの
 新しい SHA。無ければ積み直しの起点」とする。書き直さないと、次のマージ処理が履歴に無い起点から範囲を取る。
 
 **既存の状態ファイルからの再開**: `ledger` が無ければ公開した地点を `plan.base_sha` とみなす。旧い版で途中の push を
@@ -335,7 +336,8 @@ sequenceDiagram
             end
         end
         U->>L: mark_dropped・note_orchestrator_commit（revert）
-        U->>U: SHA の対応表で保存済みの地点を書き直し、drops を追記し、pending_drop を消して保存
+        U->>L: remap_orchestrator_commits(SHA の対応表)
+        U->>U: SHA の対応表で残りの保存済みの地点を書き直し、drops を追記し、pending_drop を消して保存
         U-->>C: 記録（mode・dropped・removed・replayed・reverted）
     end
 ```
