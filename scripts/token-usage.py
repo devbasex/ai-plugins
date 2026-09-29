@@ -778,23 +778,23 @@ def _external_rows(axis: dict, ss: list[Session]) -> list[dict]:
     return rows
 
 
-def axis_order(axis: str, v: str) -> tuple:
-    """軸の値の並べ替えの鍵。版は版の順、載った版は版の順で並べて版でない値を後ろへ、他は文字列の順。"""
-    if axis == "version":
-        return version_key(v)
-    if axis == RELEASE_AXIS:
-        o = versions.version_order(v)
-        return ((0, o) if o else (1, v),)
-    return (v,)
-
-
 def aggregate(sessions: list[Session], by: list[str], rmap: "release_map.ReleaseMap | None" = None) -> dict:
     groups: dict[tuple, list[Session]] = defaultdict(list)
     for s in sessions:
         groups[tuple(s.axis(a) for a in by)].append(s)
 
+    def order(k):
+        return tuple(
+            version_key(v)
+            if a == "version"
+            else ((0, versions.version_order(v)) if versions.version_order(v) else (1, v),)
+            if a == RELEASE_AXIS
+            else (v,)
+            for a, v in zip(by, k)
+        )
+
     per_pr, per_role, external = [], [], []
-    for k in sorted(groups, key=lambda k: tuple(axis_order(a, v) for a, v in zip(by, k))):
+    for k in sorted(groups, key=order):
         ss = groups[k]
         axis = dict(zip(by, k))
         per_pr.append(_per_pr_row(axis, ss, rmap))
