@@ -87,7 +87,7 @@ conductor は `normal` で進める。`fast` と `auto` の条件は同じで、
 | 条件 | 確かめ方 |
 | --- | --- |
 | 開発版のチャネルがある | `.ndf/worktree.json` の `base_branch` が `production_branch`（無ければ既定ブランチ）と違う。同じなら、手動反映の本番系の形（下）であること |
-| インストール確認がある | `.ndf/pace.json` の `<節>.verify` にコマンドが書かれている |
+| 導入の確認がある | `.ndf/pace.json` の `<節>.verify` にコマンドが書かれている。確認が走る置き場は下の「リリースの経路からステージを組む」 |
 | リポジトリが許している | `.ndf/pace.json` の `<節>.enabled` が `true`。節が無ければ許さない |
 | モードが対象に入る | `--mode` が `<節>.modes`（既定 `light` / `standard` / `legacy-refactor`）に入る。`operation` と `documentation` は書いても入らない |
 | MVV が承認済み | スプリント状態ファイルに承認ゲート `MVV` の記録があり、その `sha256` が今の `mvv.md` と一致する。スプリント MVV が無いスプリントは、承認済みのプロジェクト MVV（[project-mvv.md](project-mvv.md)）と状態に残した参照（`project_mvv.sha256`）が一致する |
@@ -116,10 +116,10 @@ conductor は `normal` で進める。`fast` と `auto` の条件は同じで、
 | `version` | 数 | 許さない（`1` だけ。必須） | 宣言の形の版。無い・`1` 以外なら `check-trigger` / `mvv-gate` / `supervise.py new sprint --pace fast|auto` が止まる |
 | `fast.enabled` | bool | 偽 | `fast` を許すか |
 | `fast.modes` | 文字列の配列 | 既定の 3 つ | `fast` を使ってよいモード |
-| `fast.verify` | 文字列 | `fast` を断る | インストール確認のコマンド |
+| `fast.verify` | 文字列 | `fast` を断る | 導入の確認のコマンド |
 | `auto.enabled` | bool | 偽 | `auto` を許すか |
 | `auto.modes` | 文字列の配列 | 既定の 3 つ | `auto` を使ってよいモード |
-| `auto.verify` | 文字列 | `auto` を断る | インストール確認のコマンド（`fast.verify` と共有しない） |
+| `auto.verify` | 文字列 | `auto` を断る | 導入の確認のコマンド（`fast.verify` と共有しない） |
 | `areas[].name` / `common` / `paths` | 文字列 / bool / glob の配列 | name と paths は許さない | 領域。`common` が真なら重点領域で、触った Pull Request は `common_weight` 点。流出不具合の重なりはこの単位で数える |
 | `boundary_paths` | glob の配列 | 機械のチェックは無し | レッドラインに当たるファイル |
 | `triggers.score` / `common_weight` / `lines` / `escapes` / `hours` | 数 | 15 / 2 / 5000 / 2 / 24 | トリガーの閾値 |
@@ -204,16 +204,26 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 
 | `delivery` の行 | 経路 | 検査の後に置くステージ |
 | --- | --- | --- |
-| `kind: auto`・`branch` がベースブランチ | `merge` | 置かない。検査の Pull Request のマージが反映で、宛先が自動反映の本番チャネルならそこで承認ゲート 2 に当たる |
+| `kind: auto`・`branch` がベースブランチ | `merge` | `normal` は置かない。検査の Pull Request のマージが反映で、宛先が自動反映の本番チャネルならそこで承認ゲート 2 に当たる。`fast` / `auto` で昇格の行が無ければ「導入の確認」: プラン `verify`（下の `verify` のステップ 1 つ。検査に `--then` で続く） |
 | `kind: auto`・`branch` が本番チャネル（ベースブランチと違う） | `merge` | 「本番」: 昇格のプラン（ベースブランチ → 本番チャネルの Pull Request を `merged-steps.py promote` が作り、承認ゲート 2 の後にマージする。後片付けはしない） |
 | `kind: auto`・`branch` が無いか別のブランチ、`kind: manual`、`versioned: true` | `manual` | 「リリース」: 手で行うステージ（`/ndf:release`。note に `target` と `trigger`） |
 | `delivery: []` | `none` | 置かない |
 | `delivery` が無い・不明（`{"unknown": ...}`） | `manual` | 「リリース」: 手で行うステージ。note に経路を決められない理由 |
 
-「本番」と「リリース」が両方あれば、この順に置く。昇格のプランは `normal` では `promote`（承認の引数無し。承認ゲート 2 で
-終える）→ 承認の後に `run <プラン> --from promote-approved`、`fast` / `auto` では `prepare`（Pull Request と承認資料）→
-`mvv`（承認ゲート 2 の MVV 判定）→ `note` → `promote`（`--gate-approved mvv`）で、`note` か `promote` が落ちたら `handoff` が
-承認ゲートへ落とす。`fast` / `auto` の `merge` の経路では開発版のステージを置かない（ベースブランチへのマージが検証への反映である）。
+「本番」（か「導入の確認」）と「リリース」が両方あれば、この順に置く。昇格のプランは `normal` では `promote`（承認の引数無し。
+承認ゲート 2 で終える）→ 承認の後に `run <プラン> --from promote-approved`、`fast` / `auto` では `verify`（導入の確認）→
+`prepare`（Pull Request と承認資料）→ `mvv`（承認ゲート 2 の MVV 判定）→ `note` → `promote`（`--gate-approved mvv`）で、
+`note` か `promote` が落ちたら `handoff` が承認ゲートへ落とす。`fast` / `auto` の `merge` の経路では開発版のステージを置かない
+（ベースブランチへのマージが検証への反映である）。
+
+**`fast` / `auto` の `merge` の経路では、導入の確認（`<節>.verify`）を 1 つのスプリントの中で 1 度だけ走らせる。** 昇格のプランが
+あればその先頭の `verify`、無ければ「導入の確認」のステージの `verify` である。`verify` は `release-steps.py verify-facts` が
+メインディレクトリをベースブランチの先頭へ fast-forward してから `<節>.verify` を走らせ、承認資料 `{state_dir}/work/approval-verify.md`
+に確認したコミット・コマンド・終了コードを書く。確認の出力は資料へ載せず、所有者だけが読める `<承認資料>.verify.log` へ分ける。
+確認が非 0 なら 1、HEAD が先頭と違う・追跡中の変更があれば確認を走らせずに 3 で止まり、昇格の Pull Request を作らず `mvv` へも
+進まない。`mvv` は昇格の承認資料と `approval-verify.md` の 2 つを材料に読む。`new close` は `fast` の節を読み、最終の検査で変更が
+無ければ（実行の条件の skip）確認も走らない。節に `verify` が無ければ `new close` もプランを書かずに 2 で終える。
+開発版のチャネルへの反映を待つのは `<節>.verify` のコマンドの側で、NDF は待たない。止まったら直して `supervise.py run <プラン> --from verify` で打ち直す。
 
 **手動反映の本番系の形の `fast` / `auto` は、手で届ける経路を 3 つのステージに分ける。** `normal` は上の「リリース」1 つのまま。
 

@@ -320,12 +320,51 @@ def _material_path(repo, approval):
     return f"{repo}/{approval}" if repo else approval
 
 
-def plan_promote(a, repo: str, ci_wait: int, mvv: str | None = None, condition: dict | None = None, production: str | None = None) -> dict:
+VERIFY_MATERIAL = "{state_dir}/work/approval-verify.md"  # verify-facts が書く承認資料（#1457）
+
+
+def facts_step(repo: str, cmd: str, next_id: str, step_id: str = "facts") -> dict:
+    """導入の確認を走らせて承認資料を書くステップ（落ちたらプランが止まる）。gate-2・昇格・導入の確認のプランが使う。"""
+    # timeout は導入の確認の上限（雛形の verify-install と同じ）
+    return {"id": step_id, "type": "run", "stage": "配布", "timeout": 1500, "cwd": repo, "cmd": cmd, "next": next_id}
+
+
+def verify_facts_cmd(a, repo: str, verify: str) -> str:
+    q = shlex.quote
+    return f"{STEPS_PY} verify-facts --root {q(repo)} --base {q(a.base)} --verify {q(verify)} --out {VERIFY_MATERIAL}"
+
+
+def plan_verify(a, repo: str, verify: str, condition: dict | None = None) -> dict:
+    """経路 merge だけのスプリント（#1457）の「導入の確認」のプラン: verify（導入の確認。落ちたら止まる）の 1 ステップ。"""
+    plan = {
+        "フェーズ": "配布（導入の確認）",
+        "課題": a.issue,
+        "モード": a.mode,
+        "作業場所": repo,
+        "リポジトリ": repo,
+        "規則": RULE_VERIFY,
+        "上限": 12,
+        "steps": [facts_step(repo, verify_facts_cmd(a, repo, verify), "end", "verify")],
+    }
+    if condition:
+        plan["実行の条件"] = condition
+    return with_decls(plan, a)
+
+
+def plan_promote(
+    a,
+    repo: str,
+    ci_wait: int,
+    mvv: str | None = None,
+    condition: dict | None = None,
+    production: str | None = None,
+    verify: str | None = None,
+) -> dict:
     """昇格のプラン（#1336 の F5）: ベースブランチ（a.base）から本番チャネル（a.production_branch）への Pull Request を
     `merged-steps.py promote` が作り（あれば使い）、承認ゲート 2 の後にマージする。後片付けはしない（head はベースブランチ）。
 
     - normal（`mvv` 無し）: promote（承認の引数無し。承認ゲート 2 で終える）→ promote-approved（`--from` でだけ入る）
-    - fast / auto（`mvv` にスプリントの状態）: prepare（PR と承認資料）→ mvv（承認ゲート 2 の MVV 判定）→ note（判定のコメント）→
+    - fast / auto（`mvv` にスプリントの状態）: verify（導入の確認。落ちたら止まる。#1457）→ prepare（PR と承認資料）→ mvv（承認ゲート 2 の MVV 判定）→ note（判定のコメント）→
       promote（`--gate-approved mvv`）。note か promote が落ちたら handoff が承認ゲートへ落とす
     """
     head, base = a.base, production or a.production_branch
@@ -348,10 +387,13 @@ def plan_promote(a, repo: str, ci_wait: int, mvv: str | None = None, condition: 
             approved,
         ]
     else:
+        if not verify:
+            raise DeclError("fast / auto の昇格のプランに導入の確認のコマンド（<節>.verify）が無い")
         state = str(Path(mvv).resolve())
         material = "{state_dir}/work/approval-promote.md"
         pr_of = f'$(gh pr list --head {shlex.quote(head)} --base {shlex.quote(base)} --state open --json number --jq ".[0].number")'
         steps = [
+            facts_step(repo, verify_facts_cmd(a, repo, verify), "prepare", "verify"),
             {
                 "id": "prepare",
                 "type": "run",
@@ -361,7 +403,7 @@ def plan_promote(a, repo: str, ci_wait: int, mvv: str | None = None, condition: 
                 "next": "mvv",
             },
             *mvv_gate_steps(
-                f"sh -c '{MVV_PY} check --sprint {shlex.quote(state)} --gate release --material {material} --pr {pr_of} "
+                f"sh -c '{MVV_PY} check --sprint {shlex.quote(state)} --gate release --material {material} {VERIFY_MATERIAL} --pr {pr_of} "
                 f"--mode {a.mode} --root {shlex.quote(repo)} --note {MVV_NOTE}'",
                 f"sh -c 'gh pr comment {pr_of} --body-file {MVV_NOTE}'",
                 "promote",
@@ -404,15 +446,7 @@ def plan_gate_2(a, repo: str, mvv: str, verify: str, prs: str | None, condition:
     本番のデプロイそのものは、このプランの後の手で行う「本番」のステージで担い手が起こす。"""
     state = str(Path(mvv).resolve())
     q = shlex.quote
-    facts = {
-        "id": "facts",
-        "type": "run",
-        "stage": "配布",
-        "timeout": 1500,  # 導入の確認の上限（雛形の verify-install と同じ）
-        "cwd": repo,
-        "cmd": f"{STEPS_PY} deploy-facts --root {q(repo)} --verify {q(verify)} --out {GATE_2_MATERIAL}",
-        "next": "mvv",
-    }
+    facts = facts_step(repo, f"{STEPS_PY} deploy-facts --root {q(repo)} --verify {q(verify)} --out {GATE_2_MATERIAL}", "mvv")
     if prs is None:
         why = q("前のステージの Pull Request を集められないため、承認ゲート 2 は MVV 判定で通さず、利用者の承認を求める")
         steps = [
@@ -454,6 +488,8 @@ def plan_gate_2(a, repo: str, mvv: str, verify: str, prs: str | None, condition:
 RULE_GATE_2 = (
     "本番のデプロイの前の承認ゲート 2。導入の確認（facts）が落ちたら直さずに止める。本番のデプロイ（trigger）はこのプランでは打たない。"
 )
+
+RULE_VERIFY = "開発版のチャネルへの反映の後の導入の確認。落ちたら直さずに止める。"
 
 RULE_PROMOTE = (
     "昇格の Pull Request のマージは本番系への反映で、承認ゲート 2 に当たる。承認の無いマージは merged-steps.py が止める。"
