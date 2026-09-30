@@ -60,20 +60,10 @@ from pathlib import Path
 
 _LIB = Path(__file__).resolve().parents[3] / "scripts" / "lib"
 sys.path.insert(0, str(_LIB))
+import deps  # noqa: E402  外部パッケージの環境（upkeep_gh が投稿キューを読む）
 import jsonio  # noqa: E402
-from step_result import (
-    EXIT_PAUSE,
-    EXIT_PRECONDITION,
-    EXIT_UNREADABLE,
-    StepError,  # noqa: E402
-    approval_present,
-    common_parser,
-    emit,
-    git,
-    git_root,
-    main_with,
-    result,
-)
+from step_result import EXIT_PAUSE, EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, approval_present, common_parser  # noqa: E402
+from step_result import emit, git, git_root, main_with, result  # noqa: E402
 import upkeep_rank_cmd as RC  # noqa: E402
 import upkeep_report  # noqa: E402
 from upkeep_gh import DEFAULT_MAX_WAIT, DEFAULT_MAX_WAITS, Gh, Milestones, Partial, list_issues, target_repo, _sub_issue_kids, with_labels  # noqa: E402
@@ -607,6 +597,7 @@ def build_parser():
 
 
 def main(argv=None):
+    deps.require("durable")
     main_with(build_parser(), lambda a: TOOL, argv)
 
 
