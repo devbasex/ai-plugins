@@ -33,6 +33,8 @@ MODULES = [
     "worker_steps",
     "pr",
     "engine",
+    "admission",
+    "flow",
     "templates",
     "verify_steps",
     "release_templates",
@@ -62,7 +64,12 @@ NO_ENGINE = [
     "queue",
     "new_args",
     "paths",
+    "admission",
 ]
+
+# 関数の中の import で、モジュールの循環にしない辺（Engine.run と cmd_queue が耐久ワークフローを始める。
+# flow は Engine と、queue のファイルだけに触る関数を import する）
+LAZY = {("engine", "flow"), ("queue", "flow")}
 
 
 def run(*args: str) -> subprocess.CompletedProcess:
@@ -129,7 +136,7 @@ def test_only_commands_imports_engine(name):
 
 
 def test_imports_have_no_cycle():
-    graph = {m: lib_imports(m) & set(MODULES) for m in MODULES}
+    graph = {m: {n for n in lib_imports(m) & set(MODULES) if (m, n) not in LAZY} for m in MODULES}
 
     def visit(m: str, path: tuple[str, ...]) -> None:
         assert m not in path, " → ".join((*path, m))

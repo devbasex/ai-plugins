@@ -1,0 +1,191 @@
+{
+  "フェーズ": "検査",
+  "課題": [
+    15
+  ],
+  "モード": "standard",
+  "作業場所": "<TMP>/repo/.worktrees/check/m9-final",
+  "branch": "check/m9-final",
+  "起点": "origin/main",
+  "リポジトリ": "<TMP>/repo",
+  "規則": "全体テストが落ちたら（落ちたテストだけの再実行でも落ちた後）、検査の修正に起因するなら fix、修正に無関係なら finish。2 回直しても同じなら abort。",
+  "上限": 20,
+  "実行の条件": {
+    "cmd": "git -C <TMP>/repo fetch -q origin && python3 <NDF>/scripts/check-trigger.py eval --id m9-final --root <TMP>/repo --final",
+    "skip_code": 3
+  },
+  "steps": [
+    {
+      "id": "prepare",
+      "type": "run",
+      "stage": "構造改善",
+      "timeout": 600,
+      "cmd": "python3 <NDF>/scripts/check-trigger.py prepare --id m9-final --state {state_dir} --root .",
+      "on_fail": "abort-before-pr",
+      "next": "pr"
+    },
+    {
+      "id": "pr",
+      "type": "pr",
+      "stage": "構造改善",
+      "base": "check-base/m9-final",
+      "title": "検査: m9-final",
+      "body": "template",
+      "on_fail": "abort-before-pr",
+      "summary": "前回の検査からの差分に構造改善と実装レビューを 1 回ずつ通す（m9-final）。範囲・立ったトリガー・先に見る範囲は `python3 <NDF>/scripts/check-trigger.py scope --id m9-final` と状態ディレクトリの check.json にある。検査の後に宛先を起点のブランチへ付け替える",
+      "changes": "無し（検査の修正だけ）",
+      "next": "assess"
+    },
+    {
+      "id": "assess",
+      "type": "run",
+      "preset": "assess",
+      "stage": "構造改善",
+      "skip_to": "review",
+      "on_fail": "refactor",
+      "next": "refactor"
+    },
+    {
+      "id": "refactor",
+      "type": "drive",
+      "drive": "cross-refactoring",
+      "kind": "構造改善",
+      "stage": "構造改善",
+      "timeout": 3600,
+      "args": "{pr} --workflow-step --scope $(python3 <NDF>/scripts/check-trigger.py scope --id m9-final --state {state_dir} --root .)",
+      "on_fail": "abort",
+      "next": "review"
+    },
+    {
+      "id": "review",
+      "type": "drive",
+      "drive": "cross-review",
+      "kind": "実装レビュー",
+      "stage": "実装レビュー",
+      "timeout": 3600,
+      "args": "{pr} --max-rounds 4",
+      "on_fail": "abort",
+      "next": "test-all"
+    },
+    {
+      "id": "test-all",
+      "type": "run",
+      "stage": "完了判定",
+      "timeout": 1980,
+      "cmd": "git pull -q --rebase && git fetch -q origin main && git merge -q --no-edit origin/main && git push -q && python3 <NDF>/scripts/test-run.py whole --pr {pr}",
+      "on_fail": "judge",
+      "next": "finish"
+    },
+    {
+      "id": "judge",
+      "type": "judge",
+      "inputs": [
+        "test-all"
+      ],
+      "question": "全体テストの失敗（起点のブランチの取り込みの衝突を含む）を直す（fix）か、修正に無関係として進める（finish）か、止める（abort）か",
+      "choices": [
+        "fix",
+        "finish",
+        "abort"
+      ]
+    },
+    {
+      "id": "fix",
+      "type": "work",
+      "kind": "修正",
+      "inputs": [
+        "test-all"
+      ],
+      "prompt": "失敗したテストを直してコミットし、git push する。origin/main の取り込みで衝突していれば、両方の変更を残して衝突を解き、マージのコミットを作って git push する。",
+      "next": "test-all"
+    },
+    {
+      "id": "finish",
+      "type": "run",
+      "stage": "Pull Request",
+      "cmd": "python3 <NDF>/scripts/check-trigger.py finish --id m9-final --pr {pr} --root .",
+      "skip_to": "record",
+      "on_fail": "abort",
+      "next": "ready"
+    },
+    {
+      "id": "ready",
+      "type": "run",
+      "cmd": "sh -c 'git push -q && gh pr ready {pr}'",
+      "on_fail": "abort",
+      "next": "merge-gate"
+    },
+    {
+      "id": "merge-gate",
+      "type": "run",
+      "timeout": 120,
+      "cmd": "python3 <NDF>/scripts/merged-steps.py merge-gate --pr {pr}",
+      "gate_next": "end",
+      "next": "merge",
+      "on_fail": "abort"
+    },
+    {
+      "id": "merge",
+      "type": "run",
+      "timeout": 3960,
+      "cmd": "python3 <NDF>/scripts/merged-steps.py merge-when-green {pr} --timeout 3600",
+      "probe": {
+        "cmd": "python3 <NDF>/scripts/merged-steps.py probe --pr {pr} --act"
+      },
+      "on_fail": "abort",
+      "next": "record"
+    },
+    {
+      "id": "merge-approved",
+      "type": "run",
+      "timeout": 3960,
+      "cmd": "python3 <NDF>/scripts/merged-steps.py merge-when-green {pr} --timeout 3600 --gate-approved user",
+      "probe": {
+        "cmd": "python3 <NDF>/scripts/merged-steps.py probe --pr {pr} --act"
+      },
+      "on_fail": "abort",
+      "next": "record"
+    },
+    {
+      "id": "record",
+      "type": "run",
+      "cmd": "python3 <NDF>/scripts/check-trigger.py record --id m9-final --state {state_dir} --root . --pr {pr}",
+      "on_fail": "abort",
+      "next": "end"
+    },
+    {
+      "id": "abort",
+      "type": "run",
+      "cmd": "python3 <NDF>/scripts/check-trigger.py record --id m9-final --state {state_dir} --root . --failed --pr {pr}",
+      "next": "end"
+    },
+    {
+      "id": "abort-before-pr",
+      "type": "run",
+      "cmd": "python3 <NDF>/scripts/check-trigger.py record --id m9-final --state {state_dir} --root . --failed",
+      "next": "end"
+    }
+  ],
+  "base_branch": "main",
+  "テストの戦略": {
+    "name": "local-full",
+    "source": "derived:test_duration",
+    "note": ".ndf/supervise.json の test.command を読んだ（.ndf/project.json に test が無い）。宣言は project.json へ移す"
+  },
+  "テストの時間": {
+    "init_test_timeout": 1800,
+    "test_timeout": 900,
+    "whole_timeout": 1800,
+    "ci_wait_timeout": 3600,
+    "basis": {
+      "budget_minutes": null,
+      "w": null,
+      "w_source": null,
+      "c": null,
+      "x": null,
+      "strategy": "local-full",
+      "unknown_duration": true
+    }
+  },
+  "スプリント状態": "<TMP>/out/sprint/sprint.json"
+}

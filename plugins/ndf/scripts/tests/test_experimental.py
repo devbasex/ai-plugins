@@ -47,6 +47,22 @@ def test_default_behaviour_files_cover_skills_and_skip_readme():
     assert "README.md" not in files
 
 
+LEDGER = PLUGIN.parents[1] / "docs" / "ndf-experiments.md"
+
+
+def test_trials_moved_to_the_main_body_are_removed():
+    """台帳の行き先が「本体へ移した」の試行は、試行の置き場に残らない（台帳だけ直して試行を残さない）。"""
+    left = []
+    for line in LEDGER.read_text().splitlines():
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) < 5 or not cells[0].startswith("`") or not cells[-1].startswith("本体へ移した"):
+            continue
+        name = cells[0].strip("`")
+        if (EXP / name).exists() or (EXP / Path(name).stem).exists():
+            left.append(name)
+    assert left == []
+
+
 def fake_gh(tmp_path, view_body):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()

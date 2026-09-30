@@ -22,7 +22,7 @@ sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE.parent / "lib"))
 import deps  # noqa: E402
 
-deps.require("procs")  # relay_lib.proc が procs（psutil の包み）を読む
+deps.require("procs", "versions")  # relay_lib.proc が procs（psutil の包み）を、relay_lib.version_dir が versions（semver の包み）を読む
 from relay_lib import common as relay_common  # noqa: E402
 from relay_lib import proc as relay_proc  # noqa: E402
 from relay_lib import version_dir as relay_version_dir  # noqa: E402

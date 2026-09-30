@@ -156,7 +156,7 @@ JSON の形と終了コードの表は共通ライブラリの `scripts/lib/driv
 レビュー・戻り値ファイル）だけを持つ。担当はコミットまでで、送信・返信・決着は駆動の取り込みが行う。
 振動を検知したときは、メインが正しい状態を決めてから打ち直す。
 
-再開は同じコマンドを打ち直すだけである。進みは `$TMP_DIR/drive-pr<PR>.json` と state.json にあり、pause の
+再開は同じコマンドを打ち直すだけである。進みは耐久の記録（`~/.local/state/ndf/dbos/review-<鍵>.sqlite`）と state.json にあり、pause の
 結果ファイルがあればその続きから進む。`metrics` は state.json から数えた件数（`rounds` / `prs` / `findings` /
 `fixed` / `deferred` / `rejected` / `unresolved` / `final` / `review_status`）である。
 

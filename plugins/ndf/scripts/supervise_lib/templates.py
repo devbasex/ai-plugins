@@ -10,7 +10,7 @@ from pathlib import Path
 from step_result import result
 from supervise_lib import release_templates
 from supervise_lib.decl import with_decls
-from supervise_lib.paths import CHECK_PY, report_result, state_dir_of
+from supervise_lib.paths import CHECK_PY
 from supervise_lib.verify_steps import merge_steps, refactor_template_arg, scope_cmd, scope_timeout, test_meta, whole_cmd, whole_timeout
 
 
@@ -32,31 +32,10 @@ IMPL_RULES = (
 )
 
 
-def plan_done(path: Path) -> bool:
-    """計画が終わったか。状態ディレクトリの report.md の結果が完了なら終わり。"""
-    rep = state_dir_of(str(path)) / "report.md"
-    return rep.is_file() and report_result(rep.read_text()) == "完了"
+def impl_prompt(a) -> str:
+    """実装の指示文。--prompt が無ければ課題への参照を組み、共通の規則を足す。
 
-
-def other_files(out: Path) -> list[tuple[str, list[str]]]:
-    """同じディレクトリにある、まだ終わっていない他の計画の「触るファイル」を [(課題, パス)] で返す。"""
-    found = []
-    for f in sorted(out.parent.glob("*.json")):
-        if f.resolve() == out.resolve() or plan_done(f):
-            continue
-        try:
-            plan = json.loads(f.read_text())
-        except (OSError, ValueError):
-            continue
-        files = plan.get("触るファイル") if isinstance(plan, dict) else None
-        if isinstance(files, list) and files:
-            issues = " ".join(f"#{i}" for i in plan.get("課題", []))
-            found.append((issues or f.name, [str(x) for x in files]))
-    return found
-
-
-def impl_prompt(a, out: Path | None) -> str:
-    """実装の指示文。--prompt が無ければ課題への参照を組み、共通の規則と他の計画の除外を足す。"""
+    同時に流れる他のプランの `触るファイル` の除外は、流す時点で `WorkStep` が足す（#1248）。"""
     n = a.issue[0]
     if a.prompt_file:
         head = Path(a.prompt_file).read_text().rstrip()
@@ -70,19 +49,10 @@ def impl_prompt(a, out: Path | None) -> str:
             head = f"課題 {refs} を実装する。本文はそれぞれ `gh issue view <番号>` で読む（何をするか と 受け入れ条件）。"
         if getattr(a, "files", None):
             head += "\n触る範囲: " + "、".join(a.files)
-    parts = [head]
-    others = other_files(out) if out else []
-    if others:
-        parts.append(
-            "並行して別の計画が次を触る。それらは変えない: " + "、".join(f"{', '.join(files)}（{issues}）" for issues, files in others)
-        )
-    parts.append(IMPL_RULES)
-    return "\n".join(parts) + "\n"
+    return f"{head}\n{IMPL_RULES}\n"
 
 
-def plan_impl(a, out: Path | None = None) -> dict:
-    if out is None and hasattr(a, "out"):
-        out = Path(a.out or f"plan-{a.issue[0]}.json")
+def plan_impl(a) -> dict:
     impl = {
         "id": "impl",
         "type": "work",
@@ -91,7 +61,7 @@ def plan_impl(a, out: Path | None = None) -> dict:
         "stage": "実装",
         "issues": True,
         "timeout": 3600,
-        "prompt": impl_prompt(a, out),
+        "prompt": impl_prompt(a),
     }
     return plan_to_merge(a, [impl])
 

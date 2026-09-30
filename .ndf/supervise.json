@@ -12,6 +12,11 @@
     {"name": "links", "command": "python3 scripts/check-markdown-links.py"},
     {"name": "instructions", "command": "python3 plugins/ndf/scripts/instructions-check.py --root ."}
   ],
+  "queue": {
+    "shared": [
+      {"path": "plugins/ndf/scripts/lib/README.md", "touched_by": ["plugins/ndf/scripts/lib/"]}
+    ]
+  },
   "release": {
     "form": "package-plugin",
     "plugin": "ndf",

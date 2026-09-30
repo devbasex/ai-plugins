@@ -40,7 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import clock  # noqa: E402  時刻の読み取り（#1142 の L0）
 import deps  # noqa: E402  外部パッケージの環境（#1142 の決定 17）
 
-deps.require("procs")  # cgroup の位置と使用量は procs（psutil の包み）が読む
+deps.require("procs", "durable")  # cgroup の位置と使用量は procs（psutil の包み）が読む
 import procs  # noqa: E402
 import gh_parts  # noqa: E402  GitHub の読み取り（#1142 の L0）
 

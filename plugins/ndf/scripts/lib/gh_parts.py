@@ -46,6 +46,7 @@ import sys
 from typing import Any
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import deps  # noqa: E402
 import gh_call  # noqa: E402
 import gh_checks  # noqa: E402
 import gh_fields  # noqa: E402
@@ -302,6 +303,7 @@ _COMMANDS = {
 
 def main(argv: list[str] | None = None) -> None:
     args = _parser().parse_args(argv)
+    deps.require("durable")  # 投稿キュー（post-review）は耐久の記録を使う
     obj, code = _COMMANDS[args.cmd](args)
     step_result.emit(obj, code)
 

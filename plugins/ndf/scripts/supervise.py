@@ -79,8 +79,8 @@ import supervise_lib  # noqa: E402,F401  lib/ を sys.path へ足す
 import deps  # noqa: E402
 
 deps.require(
-    "mdtable", "schema", "procs", "locks"
-)  # 表（pr・commands）・宣言の形（decl）・claude -p の打ち切り（claude）・アカウントの排他（claude_accounts）
+    "md", "mdtable", "schema", "procs", "locks", "durable"
+)  # 課題の本文（state → sprint_mvv → md）・表（pr・commands）・宣言の形（decl）・claude -p の打ち切り（claude）・アカウントの排他（claude_accounts）・耐久の記録（flow）
 from supervise_lib import commands, sprint, sprint_routes, new_args, queue, templates  # noqa: E402
 from supervise_lib.decl import DeclError, apply_decls  # noqa: E402
 from supervise_lib.plan import EXAMPLE  # noqa: E402

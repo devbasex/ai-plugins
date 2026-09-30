@@ -21,7 +21,7 @@ REPO = SCRIPTS.parents[2]
 PY = sys.executable
 
 sys.path.insert(0, str(SCRIPTS))
-from supervise_lib import engine, paths, queue  # noqa: E402
+from supervise_lib import engine, flow, paths, queue  # noqa: E402
 
 
 def cli(*args, cwd=None):
@@ -436,7 +436,7 @@ def test_queue_pr_placeholder_takes_the_named_plan_or_zero(tmp_path, monkeypatch
     close = plan_file(tmp_path, "4-close", [{"id": "t", "type": "run", "cmd": "echo {queue_pr:release-prod}", "next": "end"}])
     seen = {}
 
-    def batch(plans, m, poll):
+    def batch(plans, adm, args):
         items = []
         for p in plans:
             if p == close:
@@ -447,7 +447,7 @@ def test_queue_pr_placeholder_takes_the_named_plan_or_zero(tmp_path, monkeypatch
                 items.append({"plan": p, "result": "完了", "report": str(paths.state_dir_of(p) / "report.md")})
         return items
 
-    monkeypatch.setattr(queue, "run_batch", batch)
+    monkeypatch.setattr(flow, "run_stage", batch)
     queue.cmd_queue([impl], 3, poll=0.05, then=[[prod], [close]])
     assert seen["cmd"] == "echo 77"
     close2 = plan_file(tmp_path, "4-close-b", [{"id": "t", "type": "run", "cmd": "echo {queue_pr:release-prod}", "next": "end"}])

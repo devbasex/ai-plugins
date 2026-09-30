@@ -30,6 +30,7 @@ from typing import Any, NamedTuple
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
+import deps  # noqa: E402  外部パッケージの環境（投稿キューは耐久の記録を使う）
 import design_body  # noqa: E402
 import post_queue  # noqa: E402
 import statefile  # noqa: E402
@@ -271,16 +272,14 @@ def post_review(
     """
     findings = len(_findings(_read_json(payload_path)))
     item = review_posts(payload_path, result_path, repo, pr, round_no, seat, head_sha, is_own_pr, since=since)[0]
-    path = post_queue.enqueue(queue, item["kind"], repo, pr, item["fields"], actor=actor, extra=item["extra"])
-    seq = (post_queue.read_item(path) or {}).get("seq")
+    seq = post_queue.enqueue(queue, item["kind"], repo, pr, item["fields"], actor=actor, extra=item["extra"])["seq"]
     flushed = queue.flush()
 
     ours_failed = flushed.failed is not None and flushed.failed.get("seq") == seq
     if ours_failed and post_queue.rejected_by_position(flushed.failed):
         queue.drop(flushed.failed.get("seq"))
         item = review_posts(payload_path, result_path, repo, pr, round_no, seat, head_sha, is_own_pr, evacuate_all=True, since=since)[0]
-        path = post_queue.enqueue(queue, item["kind"], repo, pr, item["fields"], actor=actor, extra=item["extra"])
-        seq = (post_queue.read_item(path) or {}).get("seq")
+        seq = post_queue.enqueue(queue, item["kind"], repo, pr, item["fields"], actor=actor, extra=item["extra"])["seq"]
         flushed = queue.flush()
 
     done = _find(flushed.sent, seq) or _find(flushed.skipped, seq)
@@ -425,10 +424,8 @@ def post_fix(
     """返信・決着・まとめを待ち行列へ積んで流す。"""
     seqs: dict[int, str] = {}
     for item in fix_posts(result_path, repo, pr, round_no):
-        path = post_queue.enqueue(queue, item["kind"], repo, pr, item["fields"], actor=actor, extra=item["extra"])
-        seq = (post_queue.read_item(path) or {}).get("seq")
-        if seq is not None:
-            seqs[int(seq)] = item["kind"]
+        seq = post_queue.enqueue(queue, item["kind"], repo, pr, item["fields"], actor=actor, extra=item["extra"])["seq"]
+        seqs[int(seq)] = item["kind"]
     flushed = queue.flush()
 
     done = {int(i["seq"]): i for i in (flushed.sent + flushed.skipped) if i.get("seq") is not None}
@@ -601,6 +598,7 @@ def main() -> None:
     f.add_argument("--actor")
     f.set_defaults(func=cmd_fix)
     args = p.parse_args()
+    deps.require("durable")
     sys.exit(args.func(args))
 
 

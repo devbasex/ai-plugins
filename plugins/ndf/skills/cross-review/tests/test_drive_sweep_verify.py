@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -12,8 +13,12 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 
 
 def _load():
-    spec = importlib.util.spec_from_file_location("cross_review_drive_sweep_verify", SCRIPTS / "drive.py")
+    """同じ名前で 1 度だけ読む（耐久ワークフローの登録を 1 つのモジュールに保つ）。"""
+    if "cross_review_drive" in sys.modules:
+        return sys.modules["cross_review_drive"]
+    spec = importlib.util.spec_from_file_location("cross_review_drive", SCRIPTS / "drive.py")
     mod = importlib.util.module_from_spec(spec)
+    sys.modules["cross_review_drive"] = mod
     spec.loader.exec_module(mod)
     return mod
 

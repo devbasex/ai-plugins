@@ -49,7 +49,7 @@ PLUGIN_ROOT = HERE.parents[2]
 sys.path.insert(0, str(PLUGIN_ROOT / "scripts" / "lib"))
 import deps  # noqa: E402
 
-deps.require("md")
+deps.require("md", "durable")
 import md  # noqa: E402
 from step_result import (  # noqa: E402
     EXIT_PRECONDITION,
@@ -337,6 +337,42 @@ def load_decisions(path: str) -> dict:
     return d
 
 
+def _decision_problems(e: dict) -> list[str]:
+    """振り分け 1 件の decision ごとの誤り。"""
+    why = []
+    if e.get("decision") not in DECISIONS:
+        why.append(f"decision が {'/'.join(DECISIONS)} のどれでもない: {e.get('decision')!r}")
+    if e.get("decision") == "rejected":
+        why += [f"rejected には {k} が要る" for k in ("path", "line", "severity") if e.get(k) in (None, "")]
+    if e.get("decision") in ("deferred", "rejected") and not str(e.get("reason") or "").strip():
+        why.append("deferred / rejected には reason が要る")
+    if e.get("decision") == "separate_pr" and not str(e.get("issue") or "").strip():
+        why.append("separate_pr には issue（起票した番号）が要る")
+    if e.get("decision") == "fixed" and e.get("severity") not in FIX_SEVERITIES:
+        why.append(
+            f"fixed は severity が {'/'.join(FIX_SEVERITIES)} のときだけ（minor / nit は waived にする。"
+            f"基準に当たるなら重要度を判定し直して criterion を書く）: {e.get('severity')!r}"
+        )
+    if e.get("decision") == "waived":
+        if e.get("severity") not in WAIVE_SEVERITIES:
+            why.append(f"waived は severity が {'/'.join(WAIVE_SEVERITIES)} のときだけ: {e.get('severity')!r}")
+        if e.get("criterion") not in (None, ""):
+            why.append("waived は criterion を持たない（基準に当たるなら major 以上で直す）")
+        if e.get("waive_kind") not in review_criteria.WAIVE_KINDS:
+            why.append(f"waived には waive_kind（{'/'.join(review_criteria.WAIVE_KINDS)}）が要る: {e.get('waive_kind')!r}")
+    return why
+
+
+def _criterion_problems(e: dict, focus_names=()) -> list[str]:
+    """振り分け 1 件の criterion の誤り。"""
+    c = e.get("criterion")
+    if c not in (None, "") and (isinstance(c, bool) or c not in review_criteria.CRITERION_NUMBERS):
+        return [f"criterion は {'/'.join(map(str, review_criteria.CRITERION_NUMBERS))} のどれか: {c!r}"]
+    if c == review_criteria.FOCUS_CRITERION and not focus_names:
+        return ["criterion 3 はレビューの重点の宣言があるとき（review_focus が空でない）だけ"]
+    return []
+
+
 def check_decisions(decs: list, focus_names=()) -> list[dict]:
     """振り分けの誤りを items の形で返す。空なら通る（設計の不変条件 I1〜I3）。"""
     bad = []
@@ -344,34 +380,7 @@ def check_decisions(decs: list, focus_names=()) -> list[dict]:
         if not isinstance(e, dict):
             bad.append({"index": i, "result": "invalid", "reason": "オブジェクトでない"})
             continue
-        why = []
-        if e.get("decision") not in DECISIONS:
-            why.append(f"decision が {'/'.join(DECISIONS)} のどれでもない: {e.get('decision')!r}")
-        if e.get("decision") == "rejected":
-            for k in ("path", "line", "severity"):
-                if e.get(k) in (None, ""):
-                    why.append(f"rejected には {k} が要る")
-        if e.get("decision") in ("deferred", "rejected") and not str(e.get("reason") or "").strip():
-            why.append("deferred / rejected には reason が要る")
-        if e.get("decision") == "separate_pr" and not str(e.get("issue") or "").strip():
-            why.append("separate_pr には issue（起票した番号）が要る")
-        if e.get("decision") == "fixed" and e.get("severity") not in FIX_SEVERITIES:
-            why.append(
-                f"fixed は severity が {'/'.join(FIX_SEVERITIES)} のときだけ（minor / nit は waived にする。"
-                f"基準に当たるなら重要度を判定し直して criterion を書く）: {e.get('severity')!r}"
-            )
-        if e.get("decision") == "waived":
-            if e.get("severity") not in WAIVE_SEVERITIES:
-                why.append(f"waived は severity が {'/'.join(WAIVE_SEVERITIES)} のときだけ: {e.get('severity')!r}")
-            if e.get("criterion") not in (None, ""):
-                why.append("waived は criterion を持たない（基準に当たるなら major 以上で直す）")
-            if e.get("waive_kind") not in review_criteria.WAIVE_KINDS:
-                why.append(f"waived には waive_kind（{'/'.join(review_criteria.WAIVE_KINDS)}）が要る: {e.get('waive_kind')!r}")
-        c = e.get("criterion")
-        if c not in (None, "") and (isinstance(c, bool) or c not in review_criteria.CRITERION_NUMBERS):
-            why.append(f"criterion は {'/'.join(map(str, review_criteria.CRITERION_NUMBERS))} のどれか: {c!r}")
-        elif c == review_criteria.FOCUS_CRITERION and not focus_names:
-            why.append("criterion 3 はレビューの重点の宣言があるとき（review_focus が空でない）だけ")
+        why = _decision_problems(e) + _criterion_problems(e, focus_names)
         if why:
             bad.append(
                 {
