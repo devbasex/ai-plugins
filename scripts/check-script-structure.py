@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""NDF のスクリプトの構造チェック（#1142 の不変条件 I4・I5・I13・I14・I16）。
+"""NDF のスクリプトの構造チェック（#1142 の不変条件 I4・I5・I13・I14・I15・I16）。
 
 見るのは `plugins/ndf/` の下の `.py` と `.sh` のうち、テストを除くもの（`tests/`・`test/` の下と
 `test_` で始まるファイル）。git の作業ツリーでは git が追跡するファイルだけを見る。
@@ -20,6 +20,13 @@
   モジュールは `require` を呼んだら（`deps.require(…)`・`from deps import require`）落ち、command は `uv run` を
   挟んだら落ちる（hook は SessionStart が用意した環境の python を直に起動する）。例外リストの `name` は
   `deps.require` か `uv run`
+- `durable-boundary`: プランの実行・投稿キュー・収束ループの置き場（`DURABLE_BOUNDARY`）に、ステップの遷移の
+  ループ・再開の位置の読み書き・子プロセスの数え上げによる同時の本数の制御が残る（I15・C-1）。見るのは
+  `Engine.run` と 2 本の drive の `Drive.run`（cross-refactoring は `Drive.phases`・`Drive.final_gate` も）の
+  `for` / `while` の文、`RunState.record` が `state.json` へ書く辞書の `log`・`llm`・`project_mvv` 以外の鍵、
+  `supervise_lib/queue.py` の `Popen`・`.poll()`・関数 `run_batch`、`post_queue.Queue` の `os.open`・`glob` の
+  呼び出し（`_import_legacy` を除く）、drive の `save_ds`・`ds_path`。あわせて `state.py` を除く置き場が
+  `durable.workflow` の関数を持つか、それを持つモジュールを import することを見る。置き場を 1 つも持たない木は見ない
 
 副命令のハンドラー（`cmd_*`）・`main`・`build_parser`・`_build_parser`・シェルの `usage` は規則で外す。
 
@@ -52,7 +59,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 SCAN = "plugins/ndf"
 MAX_LINES = 500
-KINDS = ("lines", "same-body", "same-name", "wrapped", "hook-deps")
+KINDS = ("lines", "same-body", "same-name", "wrapped", "hook-deps", "durable-boundary")
 LIB = "plugins/ndf/scripts/"
 # I14: 部品 → 使ってよい包み（決定 19。擬似端末は relay_lib/terminal.py が包みを兼ねる）
 WRAPPED = {
@@ -319,6 +326,7 @@ def scan(root: Path) -> tuple[list[dict], dict]:
     unparsed = sum(not _scan_file(root, rel, defs, violations) for rel in files)
     violations += _duplicate_violations(defs)
     violations += hook_deps(root)
+    violations += durable_boundary(root)
     metrics = {"files": len(files), "functions": sum(len(v) for v in defs.values()), "unparsed": unparsed}
     return violations, metrics
 
@@ -405,6 +413,158 @@ def hook_deps(root: Path) -> list[dict]:
                 }
             )
     return out
+
+
+def _walk_no_nested(node: ast.AST):
+    """node の下を、入れ子の関数とクラスの中に入らずにたどる。"""
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        yield child
+        yield from _walk_no_nested(child)
+
+
+def _find_def(tree: ast.Module, dotted: str) -> ast.AST | None:
+    """`Class.method` か `func` の定義（無ければ None）。"""
+    scope: ast.AST = tree
+    for part in dotted.split("."):
+        scope = next(
+            (
+                n
+                for n in getattr(scope, "body", [])
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and n.name == part
+            ),
+            None,
+        )
+        if scope is None:
+            return None
+    return scope
+
+
+def _is_durable_workflow(node: ast.AST) -> bool:
+    f = node.func if isinstance(node, ast.Call) else node
+    return isinstance(f, ast.Attribute) and f.attr == "workflow" and isinstance(f.value, ast.Name) and f.value.id == "durable"
+
+
+def _has_workflow(tree: ast.AST) -> bool:
+    """`@durable.workflow(...)` の関数か、`durable.workflow(...)(関数)` の呼び出しを持つか。"""
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and any(_is_durable_workflow(d) for d in node.decorator_list):
+            return True
+        if isinstance(node, ast.Call) and _is_durable_workflow(node):
+            return True
+    return False
+
+
+def _no_loops(fn: ast.AST) -> str | None:
+    for node in _walk_no_nested(fn):
+        if isinstance(node, (ast.For, ast.AsyncFor, ast.While)):
+            return f"{node.lineno} 行: {type(node).__name__.lower().replace('async', '')} の文"
+    return None
+
+
+def _state_keys(fn: ast.AST) -> str | None:
+    """`json.dumps(<辞書>)` に渡す辞書の鍵が STATE_KEYS に収まるか。"""
+    literal: dict[str, list[ast.AST]] = defaultdict(list)
+    for node in _walk_no_nested(fn):
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Name) and isinstance(node.value, ast.Dict):
+                    literal[t.id] += node.value.keys
+                elif isinstance(t, ast.Subscript) and isinstance(t.value, ast.Name):
+                    literal[t.value.id].append(t.slice)
+    for node in _walk_no_nested(fn):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "dumps" and node.args):
+            continue
+        arg = node.args[0]
+        keys = arg.keys if isinstance(arg, ast.Dict) else literal.get(arg.id, []) if isinstance(arg, ast.Name) else [arg]
+        for k in keys:
+            if not (isinstance(k, ast.Constant) and k.value in STATE_KEYS):
+                return f"{node.lineno} 行: state.json へ書く辞書に {ast.unparse(k) if k is not None else '**'} の鍵"
+    return None
+
+
+def _no_process_pool(tree: ast.AST) -> str | None:
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "run_batch":
+            return f"{node.lineno} 行: 関数 run_batch"
+        if isinstance(node, ast.Call):
+            f = node.func
+            name = f.attr if isinstance(f, ast.Attribute) else f.id if isinstance(f, ast.Name) else ""
+            if name == "Popen" or (name == "poll" and isinstance(f, ast.Attribute)):
+                return f"{node.lineno} 行: {name} の呼び出し"
+    return None
+
+
+def _no_file_queue(cls: ast.AST) -> str | None:
+    for method in getattr(cls, "body", []):
+        if getattr(method, "name", "") == "_import_legacy":
+            continue
+        for sub in ast.walk(method):
+            if isinstance(sub, ast.Call) and isinstance(sub.func, (ast.Attribute, ast.Name)):
+                f = sub.func
+                name = f.attr if isinstance(f, ast.Attribute) else f.id
+                owner = f.value.id if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) else ""
+                if (name == "open" and owner == "os") or name in ("glob", "rglob", "iglob"):
+                    return f"{sub.lineno} 行: {owner + '.' if owner else ''}{name} の呼び出し（{getattr(method, 'name', '')}）"
+    return None
+
+
+def _no_drive_file(tree: ast.AST) -> str | None:
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in ("save_ds", "ds_path"):
+            return f"{node.lineno} 行: {node.name} の定義（drive の状態ファイル）"
+    return None
+
+
+def durable_boundary(root: Path) -> list[dict]:
+    """I15: 置き場の関数に、遷移のループ・再開の位置の読み書き・子プロセスの数え上げが無く、耐久ワークフローがあるか。"""
+    present = [rel for rel in DURABLE_BOUNDARY if (root / rel).is_file()]
+    if not present:
+        return []  # 置き場を持たない木（テストの一時の木など）は見ない
+    out: list[dict] = []
+
+    def bad(rel: str, function: str, detail: str) -> None:
+        out.append({"kind": "durable-boundary", "path": rel, "function": function, "detail": detail})
+
+    for rel, (targets, rule, needs_workflow) in DURABLE_BOUNDARY.items():
+        if rel not in present:
+            bad(rel, "", "I15 の置き場のファイルが無い")
+            continue
+        text = (root / rel).read_text(errors="ignore")
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            bad(rel, "", "構文木を読めない")
+            continue
+        for dotted in targets or ("",):
+            node = _find_def(tree, dotted) if dotted else tree
+            if node is None:
+                bad(rel, dotted, "I15 の表の関数・クラスが無い")
+                continue
+            why = rule(node)
+            if why:
+                bad(rel, dotted, why)
+        if rel in DRIVES and (why := _no_drive_file(tree)):
+            bad(rel, "Drive", why)
+        if needs_workflow and not _has_workflow(tree):
+            mods = [f for f in (_module_file(root, n) for n in _imported(rel, text)) if f]
+            if not any(_has_workflow(ast.parse((root / m).read_text(errors="ignore"))) for m in mods):
+                bad(rel, "durable.workflow", "@durable.workflow の関数も、それを持つモジュールの呼び出しも無い")
+    return out
+
+
+STATE_KEYS = ("log", "llm", "project_mvv")
+# I15 の置き場: ファイル → (見る関数・クラス（空はモジュール全体）, 規則, 耐久ワークフローが要るか)
+DURABLE_BOUNDARY = {
+    LIB + "supervise_lib/engine.py": (("Engine.run",), _no_loops, True),
+    LIB + "supervise_lib/state.py": (("RunState.record",), _state_keys, False),
+    LIB + "supervise_lib/queue.py": ((), _no_process_pool, True),
+    LIB + "lib/post_queue.py": (("Queue",), _no_file_queue, True),
+    "plugins/ndf/skills/cross-review/scripts/drive.py": (("Drive.run",), _no_loops, True),
+    "plugins/ndf/skills/cross-refactoring/scripts/drive.py": (("Drive.run", "Drive.phases", "Drive.final_gate"), _no_loops, True),
+}
+DRIVES = ("plugins/ndf/skills/cross-review/scripts/drive.py", "plugins/ndf/skills/cross-refactoring/scripts/drive.py")
 
 
 def item(kind: str, path: str, function: str, result: str, detail: str) -> dict:
