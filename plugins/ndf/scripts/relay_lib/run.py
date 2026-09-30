@@ -112,7 +112,7 @@ class Relay(AccountSwitch):
             to, reason, choice, env = self.replace_unusable(to)
         if env is None:
             env = self.env
-        at = self.term.spawn(self.claude, [*(carried or []), *args], cwd, env, self.path(CHILD_FILE))
+        at = self.term.spawn(self.claude, cl.metered_settings([*(carried or []), *args], env, cwd), cwd, env, self.path(CHILD_FILE))
         self.section += 1
         self.started_at = at
         self.account = to

@@ -13,6 +13,7 @@ import time
 from .common import config_dir, data_dir, env_num, launcher_path, parse_iso
 
 import claude_accounts as ca  # noqa: E402,I001  common が lib/ を sys.path に置く
+from claude_settings import metered_settings  # noqa: E402,F401  区間の引数へ宣言を足す（#1543。run.py が呼ぶ）
 import claude_usage as cu  # noqa: E402
 
 # 素通しにする引数と副命令（Claude Code 2.1.280 の `claude --help` から写す）

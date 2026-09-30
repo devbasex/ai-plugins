@@ -3043,6 +3043,30 @@ def test_saved_metered_declaration_is_used(term, accounts):
     no_secret(t)
 
 
+@pytest.mark.parametrize("user", [None, {"model": "x", "env": {"AWS_REGION": "us-east-1", "KEEP": "1"}}])
+def test_metered_section_gets_declaration_as_settings(term, accounts, user):
+    """#1543: 従量の接続の区間は宣言を `--settings` の env でも渡す（settings.json の env に負けない）。
+    利用者の `--settings` は 1 つにまとめて残し、アカウントの区間は引数を変えない。"""
+    ta = accounts.add("a", util5=10)
+    tb = accounts.add("b", util5=None)
+    accounts.fake.set_usage(tb, window(100, 1800), window(5))
+    decl = {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": "default", "AWS_REGION": "ap-northeast-1"}
+    accounts.write(
+        accounts.root / "metered.json", {"version": 1, "provider": "bedrock", "env": decl, "details": {"profile": "p"}, "verified_at": "x"}
+    )
+    first = ["--settings", json.dumps(user)] if user else []
+    t = term(*first, env={**accounts.env(), "NDF_ACCOUNT_CHECK_INTERVAL": "1"})
+    t.wait_start(1)
+    assert t.starts()[0]["argv"] == first
+    accounts.fake.set_usage(ta, window(100, 3600), window(5))
+    hit_limit(t, 0)
+    t.wait_start(2)
+    argv = t.starts()[1]["argv"]
+    want = {**(user or {}), "env": {**(user or {}).get("env", {}), **decl}}
+    assert t.starts()[1]["account"] == "metered" and argv[0] == "--settings" and json.loads(argv[1]) == want
+    assert argv[-3] == "--resume" and argv.count("--settings") == 1
+
+
 def test_broken_saved_declaration_is_told_at_first_section(term, accounts):
     """#1468 の I5: 保存先が壊れていれば、区間 1 の起動で画面と log.jsonl に 1 行出し、宣言なしとして扱う。"""
     accounts.add("a", util5=10)

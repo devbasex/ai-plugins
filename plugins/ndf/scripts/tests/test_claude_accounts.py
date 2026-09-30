@@ -17,6 +17,7 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS / "lib"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import claude_accounts as ca  # noqa: E402
+import claude_settings as cs  # noqa: E402
 import claude_usage as cu  # noqa: E402
 from account_fake import accounts, scoped_limit, window  # noqa: E402,F401
 
@@ -520,3 +521,87 @@ def test_set_capacity_writes_only_account_json(accounts):
     assert accounts.account("a")["capacity"] is None
     assert (accounts.root / "a" / ".credentials.json").read_bytes() == creds
     assert ca.set_capacity("zz", {"five_hour": 1}) is None
+
+
+# ---------------------------------------------------------------- 従量の接続の宣言を --settings でも渡す（#1543）
+
+
+def _settings_of(args: list[str]) -> list[dict]:
+    """引数の `--settings` の値を JSON として並べる（`--settings=値` の形も読む）。"""
+    out = []
+    for i, a in enumerate(args):
+        if a == "--":
+            break
+        if i and args[i - 1] == "--settings":
+            continue
+        if a == "--settings":
+            out.append(json.loads(args[i + 1]))
+        elif a.startswith("--settings="):
+            out.append(json.loads(a.split("=", 1)[1]))
+    return out
+
+
+def test_metered_settings_passes_declaration(accounts):  # noqa: F811
+    """利用者の settings.json の env は子の環境変数より優先されるため、宣言を `--settings` の env でも渡す。"""
+    decl = {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": "default", "AWS_REGION": "ap-northeast-1"}
+    ca.save_metered("bedrock", decl, {"profile": "default"})
+    env = ca.account_env(ca.METERED, {})
+    args = cs.metered_settings(["--model", "m", "続き"], env, str(accounts.root))
+    assert _settings_of(args) == [{"env": decl}] and args[-3:] == ["--model", "m", "続き"]
+
+
+def test_metered_settings_leaves_accounts_alone(accounts):  # noqa: F811
+    accounts.add("a")
+    ca.save_metered("bedrock", {"AWS_PROFILE": "p"}, {"profile": "p"})
+    args = ["--settings", '{"model": "x"}', "p"]
+    assert cs.metered_settings(args, ca.account_env("a", {}), "/") == args
+    assert cs.metered_settings(args, {}, "/") == args
+
+
+def test_metered_settings_merges_existing_settings(accounts, tmp_path):  # noqa: F811
+    """既存の `--settings`（JSON・ファイル・`=` の形）は 1 つにまとめ、宣言のキーだけを宣言で上書きする。
+    Claude Code は `--settings` が複数あると最後の 1 つだけを使うため、並べずにまとめる。"""
+    ca.save_metered("bedrock", {"AWS_PROFILE": "default", "AWS_REGION": "ap-northeast-1"}, {"profile": "default"})
+    env = ca.account_env(ca.METERED, {})
+    user = {"model": "x", "env": {"AWS_REGION": "us-east-1", "KEEP": "1"}}
+    want = {"model": "x", "env": {"AWS_REGION": "ap-northeast-1", "KEEP": "1", "AWS_PROFILE": "default"}}
+    got = cs.metered_settings(["--settings", json.dumps(user), "p"], env, str(tmp_path))
+    assert _settings_of(got) == [want] and got[-1] == "p"
+    (tmp_path / "s.json").write_text(json.dumps(user))
+    got = cs.metered_settings(["--settings=s.json", "p"], env, str(tmp_path))
+    assert _settings_of(got) == [want] and "--settings=s.json" not in got
+    got = cs.metered_settings(["--settings", "{}", "--", "--settings", "{}"], env, str(tmp_path))
+    assert got[-2:] == ["--settings", "{}"] and _settings_of(got) == [{"env": {"AWS_PROFILE": "default", "AWS_REGION": "ap-northeast-1"}}]
+
+
+def test_metered_settings_keeps_unreadable_settings(accounts, tmp_path):  # noqa: F811
+    """読めない既存の `--settings` は触らない（Claude Code の読み込みの失敗をそのまま見せる）。"""
+    ca.save_metered("bedrock", {"AWS_PROFILE": "p"}, {"profile": "p"})
+    args = ["--settings", "missing.json", "p"]
+    assert cs.metered_settings(args, ca.account_env(ca.METERED, {}), str(tmp_path)) == args
+
+
+def test_metered_settings_never_carries_secrets(accounts):  # noqa: F811
+    """環境変数の宣言が資格情報を持っていても、引数には載せない（環境変数だけで渡す）。"""
+    env = ca.account_env(ca.METERED, {ca.FALLBACK_ENV: "CLAUDE_CODE_USE_BEDROCK=1 ANTHROPIC_API_KEY=sk-SECRET AWS_SESSION_TOKEN=t-SECRET"})
+    args = cs.metered_settings([], env, "/")
+    assert "SECRET" not in " ".join(args) and _settings_of(args) == [{"env": {"CLAUDE_CODE_USE_BEDROCK": "1"}}]
+    assert cs.metered_settings([], ca.account_env(ca.METERED, {ca.FALLBACK_ENV: "ANTHROPIC_API_KEY=sk-SECRET"}), "/") == []
+
+
+@pytest.mark.parametrize("full", [False, True])
+def test_supervise_passes_metered_declaration_as_settings(accounts, monkeypatch, full):  # noqa: F811
+    """supervise.py の claude -p も、従量の接続の子へ宣言を `--settings` で渡す（#1543）。起動の語は先頭に残す。"""
+    sys.path.insert(0, str(SCRIPTS))
+    from supervise_lib import claude as sc
+
+    ca.save_metered("bedrock", {"AWS_REGION": "ap-northeast-1"}, {"region": "ap-northeast-1"})
+    monkeypatch.setenv("NDF_SUPERVISE_CLAUDE", "python3 fake.py")
+    seen = []
+    monkeypatch.setattr(
+        sc, "run_ticking", lambda cmd, *a, **k: seen.append(cmd) or subprocess.CompletedProcess(cmd, 0, '{"result": "2"}', "")
+    )
+    sc.call_claude("s", "p", None, str(accounts.root), 10, full=full, child_env=ca.account_env(ca.METERED, {}))
+    sc.call_claude("s", "p", None, str(accounts.root), 10, full=full, child_env=None)
+    assert seen[0][:2] == ["python3", "fake.py"] and _settings_of(seen[0]) == [{"env": {"AWS_REGION": "ap-northeast-1"}}]
+    assert "--settings" not in seen[1]
