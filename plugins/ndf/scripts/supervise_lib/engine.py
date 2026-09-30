@@ -2,7 +2,8 @@
 
 ステップの型からハンドラーを引き、成功・失敗・承認ゲート・遅れの打ち切り・利用上限で次のステップを決める。
 記録は `RunState` が持ち、claude -p は `ClaudeRunner`、遅れの見張りは `SlowWatch` が持つ。
-`engine` を import するのは `commands` だけである。
+`engine` を import するのは `commands` と `flow` だけである。ステップの遷移のループは `flow.plan_workflow`（耐久ワークフロー）が
+持ち、`Engine` は 1 ステップを流して次を決める判断のメソッドと、記録の組み直し（`replay`）を持つ。
 """
 
 from __future__ import annotations
@@ -139,49 +140,66 @@ class Engine:
         return self.state.write_report(self.plan, result, reason)
 
     def run(self, start: str | None = None) -> str:
-        st, slow = self.state, self.slow
-        sid = start or self.order[0]
-        result, reason = "完了", "無し"
-        limit = self.plan.get("上限", 30)
-        n = 0
-        stopped = self._prepare(start)
-        if stopped:
-            return stopped
-        while sid:
-            n += 1
-            if n > limit:
-                result, reason = "止まった", f"ステップの数が上限 {limit} を超えた"
-                break
-            step = self.steps.get(sid)
-            if step is None:
-                result, reason = "止まった", f"知らないステップ: {sid}"
-                break
-            nxt, r_result, r_reason = self._run_step(sid, step)
-            if r_result is not None:
-                result, reason = r_result, r_reason
-            slow.end_watch()
-            st.record(n, sid, nxt, (self.steps.get(nxt) or {}).get("type") if nxt else None, is_gate)
-            sid = nxt
-        return self.report(*self._final_result(result, reason))
+        """プランを流して `## フェーズの報告` を返す。ステップの遷移は耐久ワークフロー（`flow.plan_workflow`）が持つ。"""
+        from supervise_lib import flow  # flow が Engine を import するため、モジュールの循環を避けてここで読む
 
-    def _prepare(self, start: str | None) -> str | None:
-        """ステップを流す前の準備。流さないときは報告を返す（流すなら None）。"""
-        st, slow = self.state, self.slow
+        return flow.run_engine(self, start)
+
+    def setup(self, start: str | None) -> tuple[str, str] | None:
+        """ステップを流す前の、ファイルを書かない準備（打ち直しでも毎回流す）。流さないなら (結果, 理由)。"""
         if start and not self.plan.get("Pull Request"):
             self._restore_pr()
         try:
-            slow.cfg = slow.resolve_slow()
+            self.slow.cfg = self.slow.resolve_slow()
         except ss.SlowConfigError as e:
-            return self.report("止まった", f"slow の設定が読めない（{e.args[0]}）")
+            return "止まった", f"slow の設定が読めない（{e.args[0]}）"
+        return None
+
+    def prepare(self, start: str | None) -> tuple[str, str] | None:
+        """実行の条件と worktree の用意（耐久ステップの中で 1 回だけ流す）。流さないなら (結果, 理由)。"""
         if self.plan.get("実行の条件") and not start:
             skipped = self.check_condition(self.plan["実行の条件"])
             if skipped:
                 return skipped
         err = self.ensure_worktree()
         if err:
-            return self.report("止まった", err)
-        slow.history = ss.history_path(self.cwd, st.dir, slow.cfg.history)
+            return "止まった", err
         return None
+
+    def after_prepare(self) -> None:
+        """worktree ができた後の、ファイルを書かない準備（遅れの見張りの履歴の置き場）。"""
+        self.slow.history = ss.history_path(self.cwd, self.state.dir, self.slow.cfg.history)
+
+    def execute(self, n: int, sid: str) -> dict:
+        """n 番目のステップ `sid` を流して記録し、耐久ステップの出力（`replay` が組み直す材料）を返す。
+
+        落ちた前の起動がこのステップの途中で止まっていれば、残した子のプロセスグループを止めてから流し、
+        記録に `resumed` を付ける（孤児の片付け。決定 35）。"""
+        st = self.state
+        prev = st.begin_step(sid)
+        try:
+            nxt, result, reason = self._run_step(sid, self.steps[sid])
+            if prev == sid:
+                st.cur["resumed"] = True
+            self.slow.end_watch()
+            st.record(n, sid, nxt, (self.steps.get(nxt) or {}).get("type") if nxt else None, is_gate)
+        finally:
+            st.end_step()
+        return {
+            "n": n,
+            "sid": sid,
+            "nxt": nxt,
+            "result": result,
+            "reason": reason,
+            "cur": dict(st.cur),
+            "pr": self.plan.get("Pull Request"),
+            "acc": st.snapshot(),
+        }
+
+    def replay(self, out: dict) -> None:
+        """記録のある耐久ステップの出力から、ファイルを書かずに実行の状態を組み直す（このプロセスで流したステップは除く）。"""
+        if self.state.replay(out) and out.get("pr"):
+            self.plan["Pull Request"] = out["pr"]
 
     def _run_step(self, sid: str, step: dict) -> tuple[str | None, str | None, str | None]:
         """1 ステップを始めて流し、(次のステップ, 結果, 理由) を返す。結果を変えないときは結果・理由が None。"""
@@ -274,8 +292,8 @@ class Engine:
             return step["on_fail"], None, None
         return None, "止まった", f"遅れ: {e.reason}"
 
-    def check_condition(self, cond: dict) -> str | None:
-        """計画の実行の条件を、作業ツリーを作る前に打つ。流すなら None、流さないなら報告を返す。"""
+    def check_condition(self, cond: dict) -> tuple[str, str] | None:
+        """計画の実行の条件を、作業ツリーを作る前に打つ。流すなら None、流さないなら (結果, 理由)。"""
         cmd = str(cond.get("cmd") or "").replace("{state_dir}", str(self.state.dir))
         wt = Path(self.plan["作業場所"])
         cwd = self.plan.get("リポジトリ") or (
@@ -304,9 +322,9 @@ class Engine:
         if code == 0:
             return None
         if code == cond.get("skip_code", 3):
-            return self.report("完了", f"実行の条件に当たらない（{summary}）")
+            return "完了", f"実行の条件に当たらない（{summary}）"
         self.state.attention("止まった", f"実行の条件を判定できない（exit={code}）: {summary}")
-        return self.report("止まった", f"実行の条件を判定できない（exit={code}: {summary}）")
+        return "止まった", f"実行の条件を判定できない（exit={code}: {summary}）"
 
     def copy_presentation(self, step: dict) -> str | None:
         """結果 JSON の presentation_path を、`presentation_to` があればそこへ写してパスを返す。"""

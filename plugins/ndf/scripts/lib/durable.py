@@ -197,7 +197,8 @@ def _console_to_stderr() -> None:
     （テストの capsys のように）閉じた出力先を flush して起動が落ちる。"""
     for h in logging.getLogger("dbos").handlers:
         if h.name == "__dbos_console_log_handler__" and isinstance(h, logging.StreamHandler):
-            h.stream = sys.stderr  # setStream は前の出力先を flush するため使わない
+            with h.lock:  # setStream は前の出力先を flush するため、閉じた出力先では使えない
+                h.stream = sys.stderr
 
 
 def launch(

@@ -968,7 +968,8 @@ def test_section_account_is_not_refreshed_by_plan(tmp_path, seq, accounts, monke
     run_plan(tmp_path, [{"id": "w", "type": "work", "prompt": "直す", "next": "end"}])
     assert calls()[0]["token"] == ta and accounts.fake.refresh_calls == []
     accounts.add("a", expires_in=-60)
-    s, _ = run_plan(tmp_path, [{"id": "w", "type": "work", "prompt": "直す", "next": "end"}])
+    # 完了の記録があるプランは打ち直しで流し直さないため、フェーズの名前を変えた別のプランで呼ぶ
+    s, _ = run_plan(tmp_path, [{"id": "w", "type": "work", "prompt": "直す", "next": "end"}], フェーズ="試験（2 本目）")
     assert calls()[1]["token"] == tb and accounts.fake.refresh_calls == []
     assert s.state.results["w"]["auth"] == "アカウント b（auth）"
 
