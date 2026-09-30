@@ -1556,3 +1556,120 @@ def test_a_launch_failure_before_the_start_stops_the_init(run_init, tmp_path, te
     assert e.value.code == refactor_abort()
     err = capsys.readouterr().err
     assert "起動の失敗" in err and "nosuchcmd_1483" in err and "127" in err
+
+
+def _fake_baseline(monkeypatch, runs, codes, junit=(["t::a"], None)):
+    """`run_baseline` の外側（git・JUnit・時刻・実行）を差し替える。`codes` はコマンド → 終了コード。"""
+    baseline = sys.modules["refactor_lib.baseline"]
+    monkeypatch.setattr(baseline, "commands_of", lambda strategy, scope, work: ("whole", runs))
+    monkeypatch.setattr(baseline.test_triage, "clear_junit", lambda work, strategy: None)
+    monkeypatch.setattr(baseline.test_triage, "read_junit", lambda work, strategy: junit)
+    monkeypatch.setattr(baseline, "git_out", lambda work, args: "headsha")
+    monkeypatch.setattr(baseline.statefile, "now", lambda: "2026-09-30T00:00:00+00:00")
+    monkeypatch.setattr(baseline, "run_with_timeout", lambda command, cwd, timeout, output=None: (codes[command], False))
+    return baseline
+
+
+def test_run_baseline_records_a_green_run_of_test_and_lint_suites(refactor, monkeypatch, tmp_path, capsys):
+    """現状固定: すべて通れば green。suite ごとの成否・コマンドの連結・HEAD を記録する。"""
+    ts = sys.modules["refactor_lib.baseline"].ts
+    runs = [ts.ScopeRun("unit", ts.TEST, "run unit"), ts.ScopeRun("lint", ts.LINT, "run lint")]
+    baseline = _fake_baseline(monkeypatch, runs, {"run unit": 0, "run lint": 0})
+
+    record = baseline.run_baseline(types.SimpleNamespace(), tmp_path, 100, [], tmp_path)
+
+    seconds = record.pop("seconds")
+    assert isinstance(seconds, float)
+    assert record == {
+        "mode": "whole",
+        "command": "run unit && run lint",
+        "status": "green",
+        "suites": {"unit": "green", "lint": "green"},
+        "checked_at": "2026-09-30T00:00:00+00:00",
+        "head": "headsha",
+        "existing_failures": [],
+        "existing_failures_reason": None,
+    }
+    captured = capsys.readouterr()
+    assert "着手前のテスト成功: run unit && run lint" in captured.out + captured.err
+
+
+def test_run_baseline_records_existing_failures_and_a_red_lint_suite(refactor, monkeypatch, tmp_path, capsys):
+    """現状固定: テストの suite が落ちたら red にして JUnit の失敗を既存失敗に書く。同じ suite の 1 本でも
+    落ちれば suite は red のまま。静的解析だけの失敗は status を red にしない。"""
+    ts = sys.modules["refactor_lib.baseline"].ts
+    runs = [
+        ts.ScopeRun("unit", ts.TEST, "run unit 1"),
+        ts.ScopeRun("unit", ts.TEST, "run unit 2"),
+        ts.ScopeRun("lint", ts.LINT, "run lint"),
+    ]
+    baseline = _fake_baseline(monkeypatch, runs, {"run unit 1": 1, "run unit 2": 0, "run lint": 2})
+
+    record = baseline.run_baseline(types.SimpleNamespace(), tmp_path, 100, [], tmp_path)
+
+    assert record["status"] == "red"
+    assert record["suites"] == {"unit": "red", "lint": "red"}
+    assert record["existing_failures"] == ["t::a"]
+    assert record["existing_failures_reason"] is None
+    out = "".join(capsys.readouterr())
+    assert "1 件を既存失敗として記録" in out
+    assert "静的解析の suite（lint）が落ちています" in out
+    assert "着手前のテスト成功" not in out
+
+
+def test_run_baseline_keeps_green_when_only_a_lint_suite_fails(refactor, monkeypatch, tmp_path, capsys):
+    """現状固定: 静的解析だけが落ちたら status は green のまま、成功の表示を出さない。"""
+    ts = sys.modules["refactor_lib.baseline"].ts
+    runs = [ts.ScopeRun("unit", ts.TEST, "run unit"), ts.ScopeRun("lint", ts.LINT, "run lint")]
+    baseline = _fake_baseline(monkeypatch, runs, {"run unit": 0, "run lint": 1})
+
+    record = baseline.run_baseline(types.SimpleNamespace(), tmp_path, 100, [], tmp_path)
+
+    assert record["status"] == "green"
+    assert record["suites"] == {"unit": "green", "lint": "red"}
+    assert record["existing_failures"] == []
+    out = "".join(capsys.readouterr())
+    assert "着手前のテスト成功" not in out
+    assert "静的解析の suite（lint）が落ちています" in out
+
+
+def test_run_baseline_records_unreadable_junit_as_none(refactor, monkeypatch, tmp_path, capsys):
+    """現状固定: JUnit を読めなければ既存失敗は None で、理由を残す。"""
+    ts = sys.modules["refactor_lib.baseline"].ts
+    runs = [ts.ScopeRun("unit", ts.TEST, "run unit")]
+    baseline = _fake_baseline(monkeypatch, runs, {"run unit": 1}, junit=(None, "JUnit が無い"))
+
+    record = baseline.run_baseline(types.SimpleNamespace(), tmp_path, 100, [], tmp_path)
+
+    assert (record["status"], record["existing_failures"], record["existing_failures_reason"]) == ("red", None, "JUnit が無い")
+    assert "落ちたテストを読めない（JUnit が無い）" in "".join(capsys.readouterr())
+
+
+def test_run_baseline_without_runs_records_no_command(refactor, monkeypatch, tmp_path, capsys):
+    """現状固定: 走らせるものが無ければ command は None、status は green で、無い旨を知らせる。"""
+    baseline = _fake_baseline(monkeypatch, [], {})
+
+    record = baseline.run_baseline(types.SimpleNamespace(), tmp_path, 100, [], tmp_path)
+
+    assert (record["command"], record["status"], record["suites"]) == (None, "green", {})
+    assert "着手前に走らせるテストがありません" in "".join(capsys.readouterr())
+
+
+def test_run_baseline_stops_on_a_launch_failure(refactor, monkeypatch, tmp_path):
+    """現状固定: 起動の失敗（終了コード 127）は `launch.stop` へ渡して止める。"""
+    ts = sys.modules["refactor_lib.baseline"].ts
+    runs = [ts.ScopeRun("unit", ts.TEST, "missing-cmd")]
+    baseline = _fake_baseline(monkeypatch, runs, {"missing-cmd": 127})
+    stopped = []
+
+    def stop(*args):
+        stopped.append(args)
+        raise SystemExit(9)
+
+    monkeypatch.setattr(baseline.launch, "stop", stop)
+
+    with pytest.raises(SystemExit):
+        baseline.run_baseline(types.SimpleNamespace(), tmp_path, 100, [], tmp_path)
+
+    assert stopped[0][2:4] == ("baseline", "missing-cmd")
+    assert stopped[0][5] == tmp_path / "init-whole-0.log"

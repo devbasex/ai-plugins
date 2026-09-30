@@ -21,17 +21,14 @@ from typing import Any, Optional
 
 import statefile
 
-from .. import budget, clock, danger, info, targets, timeline, triage, wholetest
+from .. import budget, clock, danger, info, publish, targets, timeline, triage, wholetest
 from ..gitfacts import (
-    revert_range,
     collect_commit_facts,
     commit_files,
     commit_trailers,
     commits_in_range,
     discard_impl_leftovers,
-    flush_pending_push,
     note_stopped,
-    push_with_retry_marker,
     record_observed_model,
 )
 from ..items import (
@@ -41,12 +38,13 @@ from ..items import (
     find_item,
     item_shas,
     live_items,
+    newest_first,
 )
 from ..paths import work_dir
 from ..outbound import item_lines, plan_line
 from ..paths import git_out, load_state
 from ..phases import add_phase_seconds, finish_phase, phase_record
-from ..undo import drop, resume_pending_drop
+from ..undo import discard_range, drop, resume_pending_drop
 from ..verify import (
     verify_commit_basics,
     collect_test_changes,
@@ -80,11 +78,6 @@ def _run_limited(path: pathlib.Path, state: dict[str, Any], items: list[dict[str
         item["verify_runs"] = int(item.get("verify_runs") or 0) + 1
 
 
-def _newest_first(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """新しい項目から。実装は順位の順に積まれるため、順位の大きい方が新しい。"""
-    return sorted(items, key=lambda i: int(i.get("rank") or 0), reverse=True)
-
-
 def _revert_shared(
     path: pathlib.Path,
     state: dict[str, Any],
@@ -100,7 +93,7 @@ def _revert_shared(
     範囲テスト（`command` を渡せば全体のテストで落ちたテストだけ）で、全体のテストではない。
     通った時点で止めたら真、全件を取り消したら偽を返す。
     """
-    remaining = _newest_first(group)
+    remaining = newest_first(group)
     while remaining:
         target = remaining.pop(0)
         target["failure_reason"] = reason
@@ -204,9 +197,20 @@ def _whole_test(path: pathlib.Path, state: dict[str, Any], flags: list[str]) -> 
     if not flags or record.get("ran"):
         return False
     if timeline.strategy_of(state).whole_on_ci:
-        wholetest.defer_to_final_gate(path, state, record, flags, [i["id"] for i in _newest_first(live_items(state)) if i.get("danger")])
+        wholetest.defer_to_final_gate(path, state, record, flags, [i["id"] for i in newest_first(live_items(state)) if i.get("danger")])
         return False
     info(f"⚠ 危険フラグ（{', '.join(flags)}）が立ったため、全体テストを 1 度走らせます")
+    passed, timed_out, log = _run_whole_locally(path, state, record, flags)
+    if passed:
+        info("✅ 全体テストが通りました")
+        return False
+    return _triage_whole(path, state, record, flags, timed_out, log)
+
+
+def _run_whole_locally(
+    path: pathlib.Path, state: dict[str, Any], record: dict[str, Any], flags: list[str]
+) -> tuple[bool, bool, pathlib.Path]:
+    """全体テストを手元で走らせて記録し、`(通ったか, 打ち切ったか, ログ)` を返す。"""
     started = time.monotonic()
     log = pathlib.Path(state["tmp_dir"]) / "verify-whole-test.log"
     passed, timed_out, commands = wholetest.run_locally(state, log, path)
@@ -222,10 +226,19 @@ def _whole_test(path: pathlib.Path, state: dict[str, Any], flags: list[str]) -> 
         }
     )
     statefile.save(path, state)
-    if passed:
-        info("✅ 全体テストが通りました")
-        return False
-    flagged = [i for i in _newest_first(live_items(state)) if i.get("danger")]
+    return passed, timed_out, log
+
+
+def _triage_whole(
+    path: pathlib.Path,
+    state: dict[str, Any],
+    record: dict[str, Any],
+    flags: list[str],
+    timed_out: bool,
+    log: pathlib.Path,
+) -> bool:
+    """落ちた全体テストを見分け、変更起因のものがあれば修正へ回す。修正へ回したら真。"""
+    flagged = [i for i in newest_first(live_items(state)) if i.get("danger")]
     record["items"] = [i["id"] for i in flagged]
     record.update(triage.classify(state, timed_out))
     statefile.save(path, state)
@@ -300,7 +313,6 @@ def _recheck_whole(path: pathlib.Path, state: dict[str, Any], record: dict[str, 
 def _prepare(path: pathlib.Path, state: dict[str, Any]) -> None:
     discard_impl_leftovers(state, work_dir(state))
     resume_pending_drop(path, state)
-    flush_pending_push(path, state, state)
 
 
 def cmd_verify(args: argparse.Namespace) -> None:
@@ -336,7 +348,8 @@ def cmd_verify(args: argparse.Namespace) -> None:
     finish_phase(state, "verify")
     state["phase"] = "final"
     statefile.save(path, state)
-    push_with_retry_marker(path, state, state)
+    # 最終ゲートへ入る時点の公開が、実行で最初の push になる（#1399）
+    publish.enter_final_gate(path, state)
     kept = [i["id"] for i in live_items(state)]
     info(f"✅ 検証を終えました（残った項目 {len(kept)} 件）。{plan_line(state)}")
     for line in item_lines(state, kept):
@@ -432,9 +445,8 @@ def _apply_fix_result(
     if problems and ordered:
         for problem in problems:
             info(f"❌ {problem}")
-        state["pending_push"] = True
-        statefile.save(path, state)
-        revert_range(work, ordered, result["head"])
+        # 修正のコミットはどの改善項目にも記録されていないため、取り消しの判定が消す
+        discard_range(path, state, "手順を外れた修正")
         info(f"↩ 修正の範囲 {len(ordered)} コミットを取り消しました")
         return
     if ordered:
@@ -483,6 +495,4 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     _account_fix(state, targets)
     state["fix"] = None
     statefile.save(path, state)
-    if state.get("pending_push"):
-        push_with_retry_marker(path, state, state)
     info(f"修正を取り込みました（{len(result['ordered'])} コミット / 対象 {len(targets)} 件）。{plan_line(state)}")

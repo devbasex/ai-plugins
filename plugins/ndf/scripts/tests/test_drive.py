@@ -151,7 +151,16 @@ def test_review_drive_pauses_for_fix_then_sweep_then_finishes(tmp_path, monkeypa
     code, out = run_main(cr, ["5"], capsys)
     assert code == 0 and out["status"] == "ok"
     m = out["metrics"]
-    assert (m["rounds"], m["findings"], m["fixed"], m["rejected"], m["unresolved"], m["final"]) == (2, 8, 2, 1, 1, "approved")
+    # 指摘は修正担当の単位（直した 2 + 却下 1）、コメントの数は別の名前で出す（#1317）
+    assert (m["rounds"], m["comments"], m["findings"], m["fixed"], m["rejected"], m["unresolved"], m["final"]) == (
+        2,
+        8,
+        3,
+        2,
+        1,
+        1,
+        "approved",
+    )
     assert any(c[0] == "result_posts.py" for c in fake.calls)
     assert Path(out["items"][0]["report"]).read_text() == "## 報告\n"
 
@@ -216,7 +225,9 @@ class FakeRefactor:
         self.tmp, self.gate, self.rc = tmp, gate, rc or {}
         self.calls = []
         items = [{"status": "verified", "fix_count": 1}, {"status": "reverted"}, {"status": "deferred"}]
-        (tmp / "cross-refactoring-rf7-state.json").write_text(json.dumps({"items": items}))
+        # 採用を数えるのは最終ゲートが passed の実行だけ（#1482）。この偽物は最終ゲートを通った実行を表す
+        state = {"items": items, "final_gate": {"status": "passed"}}
+        (tmp / "cross-refactoring-rf7-state.json").write_text(json.dumps(state))
 
     def __call__(self, cmd, env=None, cwd=None):
         name = Path(cmd[1]).name if cmd[0] in (PY, "bash") else cmd[0]

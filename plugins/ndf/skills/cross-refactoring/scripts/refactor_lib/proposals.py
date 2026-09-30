@@ -172,6 +172,46 @@ def order_key(item: dict[str, Any]) -> tuple:
     )
 
 
+def _partition_by_severity(
+    merged: dict[tuple[str, str, str], dict[str, Any]], min_severity: int
+) -> tuple[list[dict[str, Any]], list[tuple[dict[str, Any], str]]]:
+    """語彙外を含む提案は `vocabulary`、しきい値未満は `threshold` で見送り、`(残す提案, 見送り)` を返す。"""
+    deferred: list[tuple[dict[str, Any], str]] = []
+    kept: list[dict[str, Any]] = []
+    for item in merged.values():
+        if item["degraded"]:
+            deferred.append((item, DEFER_VOCABULARY))
+        elif SEVERITY_ORDER[item["severity"]] < min_severity:
+            deferred.append((item, DEFER_THRESHOLD))
+        else:
+            kept.append(item)
+    return kept, deferred
+
+
+def _select_by_group(
+    kept: list[dict[str, Any]], groups: int, per_group: int
+) -> tuple[list[dict[str, Any]], list[tuple[dict[str, Any], str]]]:
+    """並べ済みの提案を組にまとめ、上位 `groups` 組の上位 `per_group` 件を取る。`(候補, rank の見送り)` を返す。"""
+    group_order: list[tuple[str, str]] = []
+    members: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for item in kept:
+        key = group_key(item)
+        if key not in members:
+            group_order.append(key)
+            members[key] = []
+        members[key].append(item)
+
+    candidates: list[dict[str, Any]] = []
+    deferred: list[tuple[dict[str, Any], str]] = []
+    for position, key in enumerate(group_order):
+        for index, item in enumerate(members[key]):
+            if position < groups and index < per_group:
+                candidates.append(item)
+            else:
+                deferred.append((item, DEFER_RANK))
+    return candidates, deferred
+
+
 def build_candidates(
     proposals: dict[str, list[dict[str, Any]]],
     threshold: str = DEFAULT_SEVERITY_THRESHOLD,
@@ -192,33 +232,10 @@ def build_candidates(
     """
     merged = _merge_by_key(proposals)
     min_severity = SEVERITY_ORDER.get(threshold, SEVERITY_ORDER[DEFAULT_SEVERITY_THRESHOLD])
-    deferred: list[tuple[dict[str, Any], str]] = []
-    kept: list[dict[str, Any]] = []
-    for item in merged.values():
-        if item["degraded"]:
-            deferred.append((item, DEFER_VOCABULARY))
-        elif SEVERITY_ORDER[item["severity"]] < min_severity:
-            deferred.append((item, DEFER_THRESHOLD))
-        else:
-            kept.append(item)
+    kept, deferred = _partition_by_severity(merged, min_severity)
     kept.sort(key=order_key)
-
-    group_order: list[tuple[str, str]] = []
-    members: dict[tuple[str, str], list[dict[str, Any]]] = {}
-    for item in kept:
-        key = group_key(item)
-        if key not in members:
-            group_order.append(key)
-            members[key] = []
-        members[key].append(item)
-
-    candidates: list[dict[str, Any]] = []
-    for position, key in enumerate(group_order):
-        for index, item in enumerate(members[key]):
-            if position < groups and index < per_group:
-                candidates.append(item)
-            else:
-                deferred.append((item, DEFER_RANK))
+    candidates, deferred_rank = _select_by_group(kept, groups, per_group)
+    deferred.extend(deferred_rank)
     for n, item in enumerate(candidates, start=1):
         item["id"] = f"C-{n:03d}"
         item.pop("degraded", None)

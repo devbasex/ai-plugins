@@ -11,6 +11,7 @@ import json
 import re
 import sys
 import time
+from dataclasses import dataclass
 
 import gh_parts
 import waits
@@ -110,7 +111,18 @@ def pr_state(root, n):
     return gh_json(root, ["pr", "view", str(n), "--json", PR_FIELDS], f"gh pr view {n}")
 
 
-def watch_stuck_checks(root, n, probed, a, items, stale_since, rerun_done, waits):
+@dataclass
+class StuckWatch:
+    """取り残されたチェックの監視の状態。PR 番号・結果の items・待ちの回数・取り残しを見た時刻・再実行したチェック。"""
+
+    n: int
+    items: list
+    waits: int
+    stale_since: dict
+    rerun_done: set
+
+
+def watch_stuck_checks(root, probed, a, st: StuckWatch):
     """待ちの 1 周ぶん、pending のチェックが取り残されていないか・ランナー待ちかを見る。
 
     実行が completed なのにチェックが pending のままの状態が a.stale_after 秒続けば、そのジョブを
@@ -120,25 +132,25 @@ def watch_stuck_checks(root, n, probed, a, items, stale_since, rerun_done, waits
     stale, queued = probed
     now = time.monotonic()
     names = {name for name, *_ in stale}
-    for k in [k for k in stale_since if k not in names]:
-        del stale_since[k]
+    for k in [k for k in st.stale_since if k not in names]:
+        del st.stale_since[k]
     for name, run_id, job_id, *_ in stale:
-        since = stale_since.setdefault(name, now)
+        since = st.stale_since.setdefault(name, now)
         if now - since < a.stale_after:
             continue
-        _rerun_stale_check(root, n, name, run_id, job_id, items, waits, rerun_done, stale_since)
+        _rerun_stale_check(root, name, run_id, job_id, st)
     return _report_queued(root, queued)
 
 
-def _rerun_stale_check(root, n, name, run_id, job_id, items, waits, rerun_done, stale_since):
+def _rerun_stale_check(root, name, run_id, job_id, st: StuckWatch):
     """取り残されたチェック 1 件を 1 度だけ再実行する。再実行済み・再実行の失敗なら emit で止まる。"""
-    if name in rerun_done:
+    if name in st.rerun_done:
         emit(
             result(
                 TOOL,
                 "stopped",
-                f"#{n} の取り残されたチェックが再実行でも動かない: {name}",
-                items
+                f"#{st.n} の取り残されたチェックが再実行でも動かない: {name}",
+                st.items
                 + [
                     {
                         "kind": "check",
@@ -149,7 +161,7 @@ def _rerun_stale_check(root, n, name, run_id, job_id, items, waits, rerun_done, 
                         "reason": "取り残されたチェックが再実行でも動かない",
                     }
                 ],
-                {"waits": waits},
+                {"waits": st.waits},
                 next=f"gh run view {run_id} で実行とジョブの状態を読み、手で再実行するか GitHub の障害を確かめる",
             )
         )
@@ -160,14 +172,14 @@ def _rerun_stale_check(root, n, name, run_id, job_id, items, waits, rerun_done, 
                 TOOL,
                 "stopped",
                 f"gh run rerun {run_id} --job {job_id} が失敗: {p.stderr.strip()[:300]}",
-                items
+                st.items
                 + [{"kind": "check", "name": name, "result": "stopped", "run": run_id, "job": job_id, "reason": p.stderr.strip()[:300]}],
-                {"waits": waits},
+                {"waits": st.waits},
             )
         )
-    items.append({"kind": "check", "name": name, "result": "rerun", "run": run_id, "job": job_id})
-    rerun_done.add(name)
-    del stale_since[name]
+    st.items.append({"kind": "check", "name": name, "result": "rerun", "run": run_id, "job": job_id})
+    st.rerun_done.add(name)
+    del st.stale_since[name]
 
 
 def _report_queued(root, queued):
@@ -308,7 +320,7 @@ class GreenWatch:
             self.recheck = True
         else:
             self.green_sha, self.pending_sha, self.empty_since = None, sha, None
-            count = watch_stuck_checks(root, n, probed, a, items, self.stale_since, self.rerun_done, waits)
+            count = watch_stuck_checks(root, probed, a, StuckWatch(n, items, waits, self.stale_since, self.rerun_done))
             if count is not None:
                 self.queued_runs = count  # 最後に見た待ち行列の件数
         if time.monotonic() >= self.deadline:

@@ -123,22 +123,29 @@ class Drive:
             return {}
 
     def counts(self) -> dict:
+        """件数。**指摘（findings）と修正（fixed）は修正担当の単位でそろえる**（#1317）。
+
+        `findings` は修正担当が扱った指摘（各ラウンドの直した・見送った・却下したの和）で、`findings >= fixed` が
+        数え方で成り立つ。レビュー担当が出したコメントの数は `comments` で別に出す（1 つのコメントに複数の指摘が
+        入り、2 者が同じ所を指せば 2 件になるため、指摘の数と比べない）。収束の判定はこの値を読まない。"""
         s = self.state()
         rounds = s.get("rounds") or []
-        findings = fixed = rejected = 0
+        comments = fixed = deferred = rejected = 0
         for r in rounds:
             for who in r.get("reviewers") or []:
-                findings += int((r.get(who) or {}).get("comments") or 0)
+                comments += int((r.get(who) or {}).get("comments") or 0)
             fx = r.get("fix") or {}
             fixed += int(fx.get("fixed") or 0)
+            deferred += int(fx.get("deferred") or 0)
             rejected += int(fx.get("rejected") or 0)
         sweep = s.get("sweep") or {}
         return {
             "rounds": len(rounds),
             "prs": len(s.get("pr_history") or []) or 1,
-            "findings": findings,
+            "comments": comments,
+            "findings": fixed + deferred + rejected,
             "fixed": fixed,
-            "deferred": len(s.get("deferred_nits") or []),
+            "deferred": deferred,
             "rejected": rejected,
             "unresolved": sweep.get("remaining_open"),
             "final": s.get("final"),
@@ -393,7 +400,7 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
         c = self.counts()
         return dp.done(
             TOOL,
-            f"収束ループが終わった（final={c['final']}・{c['rounds']} ラウンド・指摘 {c['findings']}・未解決 {c['unresolved']}）",
+            f"収束ループが終わった（final={c['final']}・{c['rounds']} ラウンド・コメント {c['comments']}・指摘 {c['findings']}・修正 {c['fixed']}・未解決 {c['unresolved']}）",
             rp,
             c,
         )

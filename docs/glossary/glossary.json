@@ -289,6 +289,13 @@
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
+      "term": "検査の記録",
+      "code": "check_log",
+      "context": "ndf-workflow",
+      "meaning": "check-trigger.py が検査の事象（eval・check・escape）を 1 行ずつ追記する jsonl（checks/<owner>__<repo>.jsonl）。トリガーの判定と stats が読む",
+      "pending_source": "issues/issue-1316-requirements.md"
+    },
+    {
       "term": "重点領域",
       "context": "ndf-workflow",
       "meaning": "`pace: fast` の領域のうち、触った Pull Request の点数を重くするもの",
@@ -2591,6 +2598,54 @@
       "code": "tool_paths",
       "source": "",
       "pending_source": "issues/issue-1436-requirements.md"
+    },
+    {
+      "term": "載った版",
+      "context": "ndf-workflow",
+      "meaning": "PR が載った正式版。CHANGELOG の版の節 → マージの時刻の後の最初の正式版のタグ → 行の時刻の後の最初の正式版のタグ、の順で決める。計測で版を寄せる規則",
+      "pending_source": "issues/issue-1316-design.md"
+    },
+    {
+      "term": "動いた版",
+      "context": "ndf-workflow",
+      "meaning": "呼び出しや会話を動かした NDF の版（使用量の帳簿の ndf_version・会話の Skill の置き場の版）",
+      "pending_source": "issues/issue-1316-design.md"
+    },
+    {
+      "term": "取り消しの判定",
+      "context": "ndf-cross-refactoring",
+      "meaning": "改善項目ごとに取り消したかと、起点から HEAD までの各コミットを残すか・消すか・戻すか・公開してよいかを 1 か所で決める処理。取り消しの経路と push の直前の照合が同じものを呼ぶ",
+      "pending_source": "issues/issue-1482-requirements.md"
+    },
+    {
+      "term": "残留コミット",
+      "context": "ndf-cross-refactoring",
+      "meaning": "見放した（STALLED・結果なし）実装担当のプロセスが、オーケストレーターの判定の後に積んだコミット",
+      "pending_source": "issues/issue-1482-requirements.md"
+    },
+    {
+      "term": "途中の push",
+      "context": "ndf-cross-refactoring",
+      "meaning": "cross-refactoring で、最終ゲートへ入るより前の push",
+      "pending_source": "issues/issue-1482-requirements.md"
+    },
+    {
+      "term": "残すコミット",
+      "context": "ndf-cross-refactoring",
+      "meaning": "取り消しの判定が残すと決めたコミット。取り消されていない改善項目に記録されたコミット・受け入れた最終ゲート修正のコミット・オーケストレーターが状態ファイルに記録したコミットのどれかで、公開してよいのはこれだけである",
+      "pending_source": "issues/issue-1482-design.md"
+    },
+    {
+      "term": "公開した地点",
+      "context": "ndf-cross-refactoring",
+      "meaning": "cross-refactoring のオーケストレーターが最後に push した HEAD。まだ push していなければ plan.base_sha。これより前のコミットは取り消しで書き換えない",
+      "pending_source": "issues/issue-1482-design.md"
+    },
+    {
+      "term": "積み直しの起点",
+      "context": "ndf-cross-refactoring",
+      "meaning": "取り消しで git reset --hard する先。未公開の範囲で最も古い「消すコミット」の親で、公開した地点より前には置かない",
+      "pending_source": "issues/issue-1482-design.md"
     }
   ]
 }

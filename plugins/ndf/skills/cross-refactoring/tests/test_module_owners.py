@@ -31,9 +31,7 @@ OWNERS = {
     "process": ("run_with_timeout", "_process_group_alive", "_kill_process_group", "run_test_at"),
     "github": ("resolved_threads_on_github", "_fetch_review_threads_page", "_REVIEW_THREADS_QUERY", "check_run_result", "_gh_api_get"),
     "worktree": (
-        "revert_item_commits",
         "reset_hard",
-        "revert_range",
         "replay_commits",
         "_order_newest_first",
         "_worktree_changes",
