@@ -200,11 +200,16 @@ def links(text: str) -> list[Link]:
                 line += 1
             if c.type != "link_open":
                 continue
-            label = []
-            for d in kids[k + 1 :]:
-                if d.type == "link_close":
-                    break
-                if d.type in ("text", "code_inline"):
-                    label.append(d.content)
-            out.append(Link(unquote(str(c.attrs.get("href", ""))), "".join(label), line))
+            out.append(Link(unquote(str(c.attrs.get("href", ""))), _link_label(kids, k), line))
     return out
+
+
+def _link_label(kids: list, start: int) -> str:
+    """`start` の link_open から link_close までの文字列（text と code_inline の字面）。"""
+    label = []
+    for d in kids[start + 1 :]:
+        if d.type == "link_close":
+            break
+        if d.type in ("text", "code_inline"):
+            label.append(d.content)
+    return "".join(label)
