@@ -264,8 +264,7 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
         rc, out = self.st("start-round", str(self.pr))
         if rc == 1:
             return "done"
-        if rc != 0:
-            raise Stop(f"state.py start-round が終了コード {rc} で止まった", rc)
+        self.must((rc, out), "state.py start-round")
         jrc, jout = self.collect_reviews(parse_vars(out))
         return self.after_judge(jrc, jout)
 
@@ -312,15 +311,13 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
         """judge の終了コードから done / round / fix を決める。"""
         if jrc == 0:
             return "done"
-        if jrc != 2:
-            raise Stop(f"state.py judge が終了コード {jrc} で止まった", jrc)
+        self.must((jrc, ""), "state.py judge", ok=(2,))
         if parse_vars(jout).get("MODEL_CONFIRMED") == "1":
             return "round"  # 設計 PR のモデルの段が承認された。修正を挟まずに詳細の段へ進む（#1111）
         orc, _ = self.st("check-oscillation", str(self.pr))
         if orc == 4:
             return "done"  # final = oscillation。最終スイープへ
-        if orc not in (0, 2):
-            raise Stop(f"state.py check-oscillation が終了コード {orc} で止まった", orc)
+        self.must((orc, ""), "state.py check-oscillation", ok=(0, 2))
         return "fix"
 
     def merge_fix(self) -> str:
@@ -328,8 +325,7 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
         rc, _ = self.st("merge-fix", str(self.pr))
         if rc == 3:
             return "sweep-start"
-        if rc != 0:
-            raise Stop(f"state.py merge-fix が終了コード {rc} で止まった", rc)
+        self.must((rc, ""), "state.py merge-fix")
         return "rotate"
 
     def rotate_prepare(self) -> str:
