@@ -39,6 +39,7 @@ def run_main(mod, argv, capsys):
     assert validate_result(out, e.value.code) == []
     return e.value.code, out
 
+
 # --- cross-review ---------------------------------------------------------------
 
 
