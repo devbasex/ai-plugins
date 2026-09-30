@@ -39,10 +39,10 @@ from supervise_lib import admission, paths
 from supervise_lib import queue as queue_files
 from supervise_lib.decl import QUEUE_RESOURCES, SUPERVISE_DECL, DeclError, decl_roots, queue_decl, read_decl
 from supervise_lib.engine import Engine
+from supervise_lib.queue import FINISHED
 from supervise_lib.state import RunState
 from supervise_lib.worker_steps import CONCURRENT_FILES
 
-FINISHED = ("完了", "関門")  # 打ち直しでも流し直さない結果（止まったは次の実行の回で頭から流す）
 PLANS = "plans"  # queue が流すプランの耐久キュー
 PARENT_WAIT = 120.0  # 回復した slot_workflow が、自分を入れた plan_workflow の回復を待つ上限（秒）
 _ENGINES: dict[str, Engine] = {}

@@ -158,6 +158,7 @@ def write_text_atomic(path: Path, text: str) -> None:
 
 
 NOT_RUN = "流さなかった"
+FINISHED = ("完了", "関門")  # 打ち直しでも流し直さない結果（止まったは次の実行の回で頭から流す）
 NO_REPORT = "報告なし"
 
 
@@ -282,7 +283,7 @@ def plan_item(plan: str, out: dict) -> dict:
         Path(plan).with_suffix(".log").write_text(out["report"].rstrip("\n") + "\n", encoding="utf-8")
     except OSError:
         pass
-    code = 0 if out["result"] in ("完了", "関門") else 3
+    code = 0 if out["result"] in FINISHED else 3
     return {"plan": plan, "result": out["result"], "exit": code, "report": str(rep), "seconds": out.get("seconds", 0.0)}
 
 
@@ -303,7 +304,7 @@ def _queue_result(items: list[dict], max_: int, done_path: Path) -> dict:
     """items から status・summary・metrics を組み立てる。"""
     ran = [i for i in items if i["result"] != NOT_RUN]
     skipped = len(items) - len(ran)
-    stopped = [i for i in ran if i["result"] not in ("完了", "関門")]
+    stopped = [i for i in ran if i["result"] not in FINISHED]
     gates = [i for i in ran if i["result"] == "関門"]
     status = "stopped" if stopped else "gate" if gates else "ok"
     summary = f"{len(ran)} 本: 完了 {len(ran) - len(stopped) - len(gates)} / 関門 {len(gates)} / 止まった {len(stopped)}"
