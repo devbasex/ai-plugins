@@ -38,11 +38,11 @@ NDF のスクリプト（`plugins/ndf/scripts/` と各 Skill の `scripts/`。�
 | `scripts/lib/transcript_agents.py` | 795 |  |
 | `scripts/glossary.py` | 781 |  |
 | `scripts/worktree-testenv.sh` | 716 |  |
-| `skills/issue-upkeep/scripts/upkeep.py` | 624 |  |
+| `skills/backlog-refinement/scripts/upkeep.py` | 624 |  |
 | `scripts/merged-steps.py` | 615 |  |
 | `scripts/check-trigger.py` | 607 |  |
 | `scripts/lib/result_posts.py` | 605 |  |
-| `scripts/mission-state.py` | 586 |  |
+| `scripts/sprint-state.py` | 586 |  |
 | `skills/cross-review/scripts/measure.py` | 582 |  |
 | `dev.kiro/install.sh` | 561 |  |
 
@@ -53,7 +53,7 @@ NDF のスクリプト（`plugins/ndf/scripts/` と各 Skill の `scripts/`。�
 | 今の時刻（`now` / `now_iso`） | 8 | `check-trigger.py`・`mvv-gate.py`・`relay.py`・`supervise.py`・`lib/statefile.py`・`lib/monitor_outcome.py`・cross-review `state.py`・cross-refactoring `clock.py` |
 | git / gh の呼び出し（`git` / `_git` / `gh`） | 11 | `check-trigger.py`・`doc-lint.py`・`glossary.py`・`lib/step_result.py`・`lib/gh_parts.py`・`mvv-gate.py`・`release-steps.py` ほか |
 | 時刻の読み取り（`_parse_time`） | 5 | `lib/post_queue.py`・`lib/run_metrics.py`・`lib/transcript_agents.py`・cross-refactoring `allocation.py`・cross-review `measure.py` |
-| JSON の読み書き・結果の出力（`read_json` / `load` / `emit` / `die` / `info`） | 12 | `check-trigger.py`・`glossary.py`・`relay.py`・`lib/statefile.py`・`lib/step_result.py`・`mission-state.py`・`release-steps.py` ほか |
+| JSON の読み書き・結果の出力（`read_json` / `load` / `emit` / `die` / `info`） | 12 | `check-trigger.py`・`glossary.py`・`relay.py`・`lib/statefile.py`・`lib/step_result.py`・`sprint-state.py`・`release-steps.py` ほか |
 | リポジトリの識別（`repo_slug`・`declared_base`） | 6 | `lib/step_result.py`・cross-refactoring `paths.py`・`fix-steps.py`・`doc-lint.py`・`pr-steps.py`・`supervise.py` |
 | 収束ループの drive（`parse_vars` / `review_status` / `call`） | 2 | cross-review と cross-refactoring の `drive.py`（本体が同じ） |
 | 外部 CLI の起動（`launch-cli.sh`・`resolve_print_timeout`） | 3 | `lib/launch-cli.sh`・cross-refactoring の `launch-cli.sh`（差 365 行）・cross-review `critique.sh` |
@@ -70,11 +70,29 @@ NDF のスクリプト（`plugins/ndf/scripts/` と各 Skill の `scripts/`。�
 | f | 計画が起動した `claude -p` の消費が版ごとの集計に入らない | `scripts/token-usage.py --by version` は 10.17.10 以降で supervisor と worker の値が 0 になる。原因は 3 つ: worker と判断の `claude -p` は `--no-session-persistence` で起動するため会話の記録が残らない / 計画の状態を `/tmp/ndf-sv/` に置き、消えた（72 本のうち使用量が残ったのは 14 本）/ usage を合計でしか残さず、モデル・呼び出し回数・書き込みの 5 分と 1 時間の区別が無い。Skill を回すステップの会話は、別の conductor としてその時に入っていた版で数えられる（計測の詳細は課題のコメント） |
 | g | GitHub の GraphQL が上限のとき、REST の枠が空いていても配布が止まる | 2026-09-26 の本番 10.17.28 で、`release-steps.py changelog` の `gh pr view` が `GraphQL: API rate limit already exceeded` で落ち、judge が待たずに 10 回やり直して止まった（REST の残りは 5000）。GraphQL を使う `gh pr` / `gh issue` の呼び出しは 23 ファイル・115 か所にあり、上限の見分けと REST の読み取りを持つ `lib/gh_parts.py` を使うのは 5 ファイルだけ。配布の経路（`release-steps.py` の読み取り・bump の打ち直し・judge の待ち）は即時修正 #1211 で直した |
 | h | 標準ライブラリだけで書く前提のため、GitHub の呼び出しと上限の扱いを自前で持っている | `gh pr` / `gh issue`（GraphQL）の呼び出しが 241 か所、`gh api`（REST）が 72 か所、`gh` を呼ぶ配布スクリプトが 35 本ある（2026-09-26）。上限の見分け・待ち直し・ETag の条件付きの要求・同時数の制限は、githubkit 0.16.1 のような外部パッケージがすでに持つ（同日に実物で確認）。外部パッケージを使うには依存を解決する仕組みが要る。githubkit は pydantic-core のようなバイナリを引き込むため、ファイルを同梱する形は取れない（アーキテクチャごとに要る） |
+| i | 計画の実行（ステップの遷移・状態・再開）とキュー（同時の本数・依存・後続の抑止）を自作している | `supervise_lib` の `engine`・`state`・`queue`・`plan`・`steps`・`slow` の 6 本・約 1,500 行（2026-09-26）。自作のため、考慮点が起票として積み上がる: `--files` の重なり（#1248）・共有の一覧の衝突（#1249）・共有の外部の枠（#889）。スプリント 2 では最初のキューの 7 本のうち 4 本が #1248 か #1249 で止まり、切り直した C3 も #1249 でもう一度止まった |
+| j | 汎用的で車輪の再発明になる処理を自作している | 2026-09-26 に 4 本の worker で数えた。69 項目・20 種類（Markdown の構造の読み取りは囲みを追う実装が 9 本、シェルの字句解析は約 1,960 行・自作が 3 本、JSON の形の検証は `isinstance(` が 132 行・36 ファイル）。一覧と置き換え先は `issues/issue-1142-design-libraries.md` |
+
+## 進み具合（2026-09-29、develop 23ee982e）
+
+上の計測表は着手前の基準である。
+
+| スプリント | 状態 |
+| --- | --- |
+| 1（記録と不足 a〜f） | 済んだ |
+| 2（ライブラリとコンテキスト） | 済んだ |
+| 2b（汎用の処理をライブラリへ。決定 19・20。D5〜D8 ほか） | 済んだ |
+| 2c（計画の実行とキューを DBOS へ。決定 21） | 残り。DBOS は `plugins/ndf/scripts/experimental/runner-trial/` の試行だけで、本体は使っていない |
+| 3（語・撤去・測り直し） | 残り。E9（移行の後を同じ物差しで測り直す）を含む |
+
+- `scripts/supervise.py` は 228 行、`skills/cross-review/scripts/state.py` は 278 行（基準は 3401 行・5121 行）
+- 500 行を超えるファイルは 17 本（基準は 23 本）。最大は `scripts/release-steps.py` の 1079 行
+  - 数え方: `plugins/ndf/` の `scripts/`・`skills/*/scripts/`・`dev.kiro/` の `.py` / `.sh`。テストと `scripts/experimental/` を除く
 
 ## 直さないと何が起きるか
 
 - 手を入れる worker が大きなファイルを読み通す。`supervise.py` は約 190 KB で、1 回で 6〜7 万トークンほどになる（見積り）
-- 並列のミッションが同じファイルに触り、衝突する（2026-09-25 の区間 11 では #1135 と #1137、#1138 と #1139）
+- 並列のスプリントが同じファイルに触り、衝突する（2026-09-25 の区間 11 では #1135 と #1137、#1138 と #1139）
 - 同じ概念の実装が食い違う。片方だけ直した不具合がもう片方に残る
 - 効果を測れないまま改善を重ねる（f）
 
@@ -86,11 +104,13 @@ NDF のスクリプト（`plugins/ndf/scripts/` と各 Skill の `scripts/`。�
 - `/ndf:development-workflow` の `standard` モードで進める。`pace: fast` は使わない（承認ゲート 1・2 は利用者の承認）
 - 語: 「段」は使わない。「入口」ではなく「エントリポイント」と書く
 - 外部パッケージを使ってよい。依存は uv で解決し、uv が無い環境では入れる（2026-09-26 利用者。不足 h）
+- 計画の実行（`supervise.py` のステップの遷移）とキューは、自作をやめて既存のライブラリへ置き換える。条件は、サーバーを立てずに動くこと。多少の揮発（落ちたときに進行中のステップをやり直す程度）は許容する（2026-09-26 利用者。不足 i）
+- 汎用的で車輪の再発明になる処理は、自作をやめて外部ライブラリを使うように設計を調整する（2026-09-26 利用者。不足 j）
 
 ## 目的
 
 - スクリプトの変更 1 回で読む量を減らす
-- 触るファイルが重ならない単位でミッションを並べられるようにする
+- 触るファイルが重ならない単位でスプリントを並べられるようにする
 - 同じ概念の実装を 1 つにする
 - conductor が手で組み立てている操作を、NDF のエントリポイントにする（a〜c）
 - 改善の効果を、同じ物差しで移行の前後に測れるようにする（d・f）
@@ -99,8 +119,8 @@ NDF のスクリプト（`plugins/ndf/scripts/` と各 Skill の `scripts/`。�
 ## 前提
 
 - 前提 1: Skill の手順・計画の JSON・hook・`.ndf/` の宣言が呼ぶエントリポイント（パス・引数・出力の形）は変えない。変えるエントリポイントは設計が 1 つずつ挙げ、古いエントリポイントを移行の間だけ残す
-- 前提 2: 移行は複数のミッションに分ける。各ミッションは版を 1 つ出し（10.17.x）、途中の版でも利用者の手順は変わらない
-- 前提 3: 移行の間も、ほかのミッションは並列に進む。移行のミッションが触るファイルは、同時に流れるほかのミッションと重ならないように設計が順序を決める
+- 前提 2: 移行は複数のスプリントに分ける。各スプリントは版を 1 つ出し（10.17.x）、途中の版でも利用者の手順は変わらない
+- 前提 3: 移行の間も、ほかのスプリントは並列に進む。移行のスプリントが触るファイルは、同時に流れるほかのスプリントと重ならないように設計が順序を決める
 - 前提 4: 試行（`plugins/ndf/scripts/experimental/`）は範囲に含むが、試行の置き場の規則（既定で動くものから参照しない）は変えない。ライブラリを試行と安定で共有するのは、試行 → 安定の向きだけとする
 
 ## 対象範囲
@@ -121,10 +141,10 @@ NDF のスクリプト（`plugins/ndf/scripts/` と各 Skill の `scripts/`。�
 
 ## 進め方
 
-0. 計測と振り返り: マイルストーン 26（トークン消費の削減）で入れた改善の効果を、同じ物差しで測って振り返る（`/ndf:retrospective`）。測るのは、区間（ミッション）ごとの LLM の費用・トークン（cache read / write・出力）・所要時間・worker の起動の数と固定費・検査とレビューの回数と指摘の数・流出不具合の数。材料は各計画の `state.json` と `progress.jsonl`、`skill-stats.py --agents`、`phase_cost.py`、`check-trigger.py stats`、引継ぎ文書の表。移行の前の値を基準として残し、設計が何を減らすかの根拠にする
+0. 計測と振り返り: マイルストーン 26（トークン消費の削減）で入れた改善の効果を、同じ物差しで測って振り返る（`/ndf:retrospective`）。測るのは、区間（スプリント）ごとの LLM の費用・トークン（cache read / write・出力）・所要時間・worker の起動の数と固定費・検査とレビューの回数と指摘の数・流出不具合の数。材料は各計画の `state.json` と `progress.jsonl`、`skill-stats.py --agents`、`phase_cost.py`、`check-trigger.py stats`、引継ぎ文書の表。移行の前の値を基準として残し、設計が何を減らすかの根拠にする
 1. 要求: この本文を仕様の正とし、用語集（`.ndf/glossary.json`）にスクリプトの語をそろえる
 2. 設計（設計 PR・承認ゲート 1）: 設計文書の先頭のドメインモデルの節（#1111）に、ライブラリ（git / gh / 結果の契約 / 状態ファイル / 時刻 / claude と外部 CLI の呼び出し）と、各コンテキスト（計画の実行・収束ループ・配布・worktree・中継・記録と測定）を書く。クラスの責務・モジュールの置き場所・移行の順序を決める
-3. 実装: 設計の順に、触るファイルが重ならない単位で並列に移す（6 本まで）。既存のテストで振る舞いが変わらないことを確かめる。ミッションは複数に分かれる
+3. 実装: 設計の順に、触るファイルが重ならない単位で並列に移す（6 本まで）。既存のテストで振る舞いが変わらないことを確かめる。スプリントは複数に分かれる
 
 #773（supervisor の切れ目）はこの設計の後に着手する。
 
@@ -136,11 +156,11 @@ NDF のスクリプト（`plugins/ndf/scripts/` と各 Skill の `scripts/`。�
 | E2 | スクリプトの語を用語集に揃えた | E1 の後、要求を書くとき | 採るか決められない語は利用者へ返す | E1 |
 | E3 | 設計を承認した（承認ゲート 1） | 設計 PR の提示 | 差し戻しは設計 PR を直して再提示する | E2 |
 | E4 | ライブラリを 1 か所へまとめた | 最初の移行ステップ | 既存のテストが落ちたら、その移行ステップを戻す | E3 |
-| E5 | コンテキストごとのモジュールへ移した | 各移行ステップ | 既存のテストが落ちたら、その移行ステップを戻す。ほかのミッションと衝突したら順序を入れ替える | E4（ライブラリに依存する移行ステップ） |
+| E5 | コンテキストごとのモジュールへ移した | 各移行ステップ | 既存のテストが落ちたら、その移行ステップを戻す。ほかのスプリントと衝突したら順序を入れ替える | E4（ライブラリに依存する移行ステップ） |
 | E6 | エントリポイントの形が変わらないことを確かめた | 各移行ステップの PR | 変わったエントリポイントがあれば、古いエントリポイントを残して移行ステップを直す | E5 |
-| E7 | 開発版を導入して確かめた | 各ミッションの開発版 | 導入の不一致はリリースプランを直す | E6 |
-| E8 | 本番を承認した（承認ゲート 2） | 各ミッションの本番の提示 | 差し戻しは開発版へ戻す | E7 |
-| E9 | 移行の後を同じ物差しで測り直した | 最後のミッションの本番の後 | 測れない値は理由と一緒に残す | E8、E1 と同じスクリプト |
+| E7 | 開発版を導入して確かめた | 各スプリントの開発版 | 導入の不一致はリリースプランを直す | E6 |
+| E8 | 本番を承認した（承認ゲート 2） | 各スプリントの本番の提示 | 差し戻しは開発版へ戻す | E7 |
+| E9 | 移行の後を同じ物差しで測り直した | 最後のスプリントの本番の後 | 測れない値は理由と一緒に残す | E8、E1 と同じスクリプト |
 
 ## 用語
 
@@ -174,7 +194,7 @@ NDF のスクリプト（`plugins/ndf/scripts/` と各 Skill の `scripts/`。�
 - [ ] `mvv-gate.py` の設計の判定に、設計 PR の設計文書が材料として渡る（e）
 - [ ] 計画が起動した `claude -p` の消費が、版ごとの集計に入る。計画の状態は OS の再起動と `/tmp` の掃除で消えない場所に残り、usage はステップごとにモデル・呼び出し回数・書き込みの 5 分と 1 時間を分けて持つ（f）
 - [ ] GitHub の読み書きが 1 つのライブラリを通る。読み直し（CI と PR の状態の待ち）は REST の ETag 付きの要求で行い、変わっていない間は上限に数えられない。片方の枠が上限のときは、代われる操作をもう片方の枠で行い、代われない操作は回復の時刻まで待ってからやり直す。待ちの問い合わせの間隔は、変化が無い間は伸ばす（g）
-- [ ] 外部パッケージを、1 つの宣言と lock で版を固定して使える。エントリポイントを起動する形（`python3 <パス>`）は変わらず、依存の解決は uv が行う。uv が無い環境では版を固定して入れてから続け、入れられないとき（ネットワークが無いなど）は理由を出して止まる。hook とラッパーのバージョンディレクトリは標準ライブラリだけで動く（h）
+- [ ] 外部パッケージを、1 つの宣言と lock で版を固定して使える。エントリポイントを起動する形（`python3 <パス>`）は変わらず、依存の解決は uv が行う。uv が無い環境では版を固定して入れてから続け、入れられないとき（ネットワークが無いなど）は理由を出して止まる。hook とラッパーは、SessionStart とラッパーの複製が同じ lock から用意した環境の python を直に起動し、`deps.require()` を呼ばない。環境がまだ無いとき、hook は判定をせずにパススルーで終わる（h。設計の決定 20）
 
 退行しないこと:
 - [ ] 既存のテストが、置き換え先の変更だけで通る
@@ -187,9 +207,9 @@ NDF のスクリプト（`plugins/ndf/scripts/` と各 Skill の `scripts/`。�
 | 大項目 | 条件 |
 | --- | --- |
 | 性能・拡張性 | worker がスクリプトを 1 つ直すときに読むファイルの大きさの中央値が、移行の前より小さい（計測は E1 と E9 で同じスクリプト） |
-| 運用・保守性 | 並列のミッションが同じファイルを触った件数が、移行の後の 10 本の PR で移行の前より少ない |
+| 運用・保守性 | 並列のスプリントが同じファイルを触った件数が、移行の後の 10 本の PR で移行の前より少ない |
 | 移行性 | 途中の版を導入した利用者の手順が変わらない。どの移行ステップでも 1 つ前へ戻せる |
-| システム環境 | Python 3.10 以上・bash 3.2（macOS 既定）で動く。外部パッケージは宣言と lock に載るものだけを使い、uv で解決する。hook とラッパーのバージョンディレクトリは外部パッケージを使わない |
+| システム環境 | Python 3.10 以上・bash 3.2（macOS 既定）で動く。外部パッケージは宣言と lock に載るものだけを使い、uv で解決する。hook とラッパーは用意済みの環境の python を直に起動し、`uv run` を挟まない（設計の決定 20） |
 
 ## 影響
 
@@ -203,7 +223,7 @@ NDF のスクリプト（`plugins/ndf/scripts/` と各 Skill の `scripts/`。�
 
 | 項目 | 手段 |
 | --- | --- |
-| テスト | `uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest pytest . -q -n 4` |
+| テスト | `uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest pytest . -q -n 4`。設計の決定 22 の移行ステップ L1b の後は、根の `pyproject.toml` の環境で `uv run --frozen --project . --all-extras pytest . -q -n auto` |
 | 配布物 | `bash scripts/build-runtime-plugins.sh --check`、`claude plugin validate .` |
 | 構造 | 構文木で重複と行数を数えるチェック（設計 PR で `scripts/` へ置き、継続的統合で走らせる） |
 | 手動確認 | 開発版を `release-verification-steps.py verify-install` で導入し、中継（relay）の下で区間を 1 回切り替える |
@@ -214,6 +234,7 @@ NDF のスクリプト（`plugins/ndf/scripts/` と各 Skill の `scripts/`。�
 | --- | --- |
 | プロジェクト構造 | AGENTS.md の「マーケットプレイスの構造」と「安定版と実験版」 |
 | コーディング規約 | 結果 JSON の形は `plugins/ndf/scripts/lib/README.md`。語は `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| 設計文書 | `issues/issue-1142-design.md`（入口）・`issue-1142-design-decisions.md`（決定の一覧）・`issue-1142-design-libraries.md`（外部ライブラリと移行のスプリント 2b）・`issue-1142-design-modules.md`・`issue-1142-design-migration.md` |
 | テスト戦略 | 既存のテストを振る舞いの固定に使う。移す関数に既存のテストが無ければ、移す前に現状固定テストを足す（`refactoring`） |
 
 ## 境界
@@ -233,7 +254,7 @@ NDF のスクリプト（`plugins/ndf/scripts/` と各 Skill の `scripts/`。�
 | --- | ---: | --- |
 | `関門` → 承認ゲート | 119 / 17 | フェーズレポートの `結果: 関門`、計画の `"gate"` の説明 |
 | `配布` → リリース | 102 / 23 | 計画の `"フェーズ": "配布（開発版）"` / `"配布（本番）"` |
-| `計画` → プラン | 253 / 38 | `new` の出力の `計画を書いた`、ミッション状態ファイルの `plans[].kind` |
+| `計画` → プラン | 253 / 38 | `new` の出力の `計画を書いた`、スプリント状態ファイルの `plans[].kind` |
 | `作業ツリー` → worktree | 198 / 34 | 計画の `"作業場所"` の説明 |
 | `改修計画` → リファクタリング計画 | 104 / 22 | cross-refactoring の状態ファイル |
 | `主ディレクトリ` → メインディレクトリ | 57 / 9 | hook の案内の文 |
@@ -244,3 +265,127 @@ NDF のスクリプト（`plugins/ndf/scripts/` と各 Skill の `scripts/`。�
 | `区間` → セッション / `合図` → シグナルファイル | 32 / 6・32 / 3 | `relay.py` の `log.jsonl` の `section`、境の行 `── ndf-relay: 区間 2 ──` |
 | `提示物` → 承認資料 | 26 / 6 | |
 | ほか（`予備時間`・`等級`・`ミッションの状態`・`進行の記録`・`越えない線`・`逃げた不具合`・`途中の報告`・`告知`・`素通し`・`取り残されたチェック`・`静止`・`フェーズの報告`・`導入確認`） | 各 1〜16 | |
+
+## スプリント 2c の要求と受け入れ条件（不足 i・決定 21）
+
+依頼の原文の語は、用語集の語へ直してスプリント 2c と書く（上の「進み具合」の表の行と同じ）。
+
+### 依頼（原文）
+
+> #1142。範囲はミッション 2c（計画の実行とキューを DBOS Transact へ置き換える。設計の決定 21、`issues/issue-1142-design-libraries.md` の「決定 21」と `issues/issue-1142-design-decisions.md`）だけに絞る。本文の既存の節（依頼・決めたこと・受け入れ条件）は消さず、「ミッション 2c の要求と受け入れ条件」の節を足す（不足 i、#1248・#1249・#889 の扱い、計画の JSON・supervise.py のエントリポイント・進捗ログの形を変えないこと、kill -9 からの再開）。#773（supervisor の切れ目）は設計の入力として関係を書く。人へ問わずに進め、決められない点は前提か未決として課題の本文へ書く。（2026-09-30 conductor の起動指示）
+
+この節はスプリント 2c だけを扱う。上の「決めたこと」（2026-09-26 利用者。サーバーを立てない・進行中のステップをやり直す程度の揮発は許容する）と、設計の決定 21（DBOS Transact を SQLite で使う）はすでに決まっており、この節はそれを受け入れ条件へ落とす。
+
+### 何を置き換えるか（2026-09-30、develop `dfeb3517` で数えた行数）
+
+| 置き場 | 行数 | 今の役割 |
+| --- | ---: | --- |
+| `scripts/supervise_lib/engine.py` | 333 | ステップの遷移（`next`・`on_fail`・judge の選択・上限 20・承認ゲート） |
+| `scripts/supervise_lib/state.py` | 358 | プランの状態（`state.json`）の読み書きと再開の位置 |
+| `scripts/supervise_lib/queue.py` | 401 | 同時に流す本数（`--max`）・後続（`--then`）・attention の転送 |
+| `scripts/supervise_lib/steps.py` | 190 | ステップの起動と結果の読み取り |
+| `scripts/supervise_lib/slow.py` | 285 | 遅れの見張り |
+| `scripts/lib/post_queue.py` の `Queue` | 821（ファイル全体） | PR へのコメントの投稿キューとやり直し |
+| `skills/cross-review/scripts/drive.py` / `skills/cross-refactoring/scripts/drive.py` のループ | 479 / 350 | 収束ループのラウンドの駆動 |
+
+数え方: `wc -l`。`supervise_lib/plan.py`（248 行）はプランの JSON の形を持つため、形は変えずに残す（下の受け入れ条件）。不足 i の表の「6 本・約 1,500 行」は 2026-09-26 の値で、その後に スプリント 2b の移行で行数が動いた。
+
+### 関係する課題の扱い
+
+| 課題 | 状態（2026-09-30） | スプリント 2c での扱い |
+| --- | --- | --- |
+| #1248 同時に流すプランの `--files` の重なり | OPEN | **2c で直す。** キューへ入れる時点（流す時点）で、同時に流れる候補の `--files` の重なり（ディレクトリの包含を含む）を検査し、重なる組を知らせて同時には流さない。除外を「プランを作る時点の、まだ終わっていないプラン」から決める今の形（`supervise_lib/templates.py` の `other_files`）をやめ、手で再開・マージしたプランを並行中と数えない |
+| #1249 共有の一覧の衝突 | CLOSED（v10.17.30 で例外リストを 1 ファイル 1 項目の置き場 `scripts/script-structure-allow/` へ分けた） | **一般の形を 2c で持つ。** 行数の例外リストは直ったが、複数のプランが同じ一覧（`scripts/lib/README.md` の索引など）を触ると同じ衝突が起きる。キューへ入れる前の重なりの検査が、宣言した共有の一覧を触るプランどうしを重なりとして扱う |
+| #889 共有する外部の枠 | OPEN | **2c で直す。** GitHub の GraphQL を使うステップを資源のタグの枠（DBOS のキューの `concurrency`）で数え、枠の本数を超えて同時に流さない。上限に当たったときの退避と待ちは今の `lib/gh_quota.py`（`with_fallback`・`wait_for_reset`）のまま使う。`agent-layers.md`・`parallel-work.md` への枠の記述の追記は含まない（Skill の本文の書き直しは範囲外） |
+| #773 supervisor の切れ目 | OPEN | **設計の入力。2c では閉じない。** #773 の直し方の候補「収束ループの各ラウンドは worker へ出し、supervisor には結果の要約だけを戻す」は、2 本の `drive.py` のループを DBOS のワークフローへ移すと、ラウンドが DBOS のステップとして supervisor の context window の外で進む形になる。設計はこの形を妨げない切り方（ラウンド 1 回 = ステップ 1 つ、要約だけを返す）を選ぶ。`agent-layers.md` の切れ目の変更と測り直しは #773 に残る（上の「含まない」の #773 と同じ） |
+
+### ドメインイベント（2c）
+
+番号は全体の E1〜E9 と分けて `C` を付ける。
+
+| # | イベント | 引き金 | 失敗したとき | 順序の前提 |
+| --- | --- | --- | --- | --- |
+| C1 | プランを書き出した | `supervise.py new <種別>` | 今と同じ（引数の誤りは stopped の結果 JSON） | — |
+| C2 | 重なりを検査した | `supervise.py queue` / `run` がキューへ入れる前 | 重なる組を知らせ、同時には流さない（受け入れ条件 C-4。待たせるか止めるかは未決 1） | C1 |
+| C3 | キューへ入れた | C2 の後 | DBOS の状態ファイル（SQLite）へ書けなければ理由を出して止まる | C2 |
+| C4 | 枠を取った | ステップが資源のタグ（GraphQL）を持つとき | 枠が空くまで待つ | C3 |
+| C5 | ステップを流した・結果を記録した | 前のステップの `next` / `on_fail` | 今の `on_fail`・judge・上限 20 の規則のまま | C3（C4） |
+| C6 | 進捗ログへ step・attention の行を書いた | C5 の各ステップの始まりと終わり | 書けなければ今と同じ扱い | C5 |
+| C7 | 承認ゲートで止まった | 承認ゲートのステップ | 承認の無い打ち直しは同じ所で止まったまま | C5 |
+| C8 | プロセスが落ちた（kill -9・OS の再起動） | 外から | — | C5 の途中 |
+| C9 | 打ち直しで続けた | 利用者か conductor が同じコマンドを打ち直す | 状態ファイルが読めなければ理由を出して止まる | C7 か C8 |
+| C10 | キューが終わった | 全プランが done か attention | `supervise.py wait` が今と同じ終了コード（done 0 / attention 20 / 上限 3）を返す | C5〜C9 |
+
+C8 は引き金を持たない（外から起きる）。再開の振る舞いは受け入れ条件 C-6 に移した。C2 の「待たせる」か「止める」かは未決 1 に移した。
+
+### 前提
+
+- 前提 C1: DBOS Transact は試行と同じ `dbos==3.1.0` を SQLite で使い、`plugins/ndf/pyproject.toml` の extra（1 グループ）と `uv.lock` に載せ、エントリポイントは `deps.require()` で使う（決定 17・23）。計画の実行は hook の経路ではないため、決定 20 の所要の制約を受けない（決定 21）
+- 前提 C2: DBOS の状態ファイル（SQLite）は、不足 f で決めた「OS の再起動と `/tmp` の掃除で消えない状態の置き場所」に置く
+- 前提 C3: 揮発の許容は「落ちたときに流れていたステップを頭から流し直す」までとする（2026-09-26 利用者）。流し直すステップの副作用（コミット・push・PR の作成）が 2 回起きても壊れないことは、今のステップの作り（冪等な打ち直し）に任せ、2c では足さない
+- 前提 C4: 移行の版より前に書き出して流していたプラン（`state.json` だけを持つもの）は、移行の後に打ち直すと先頭から流し直してよい。今の `state.json` から DBOS の記録への読み替えは作らない（プランは長くて数時間で終わり、移行の版をまたいで流れるプランは少ない）
+- 前提 C5: 同時の本数の既定は今の値（`queue --max` の既定 3）を保ち、GraphQL の枠の既定は設計が決める。どちらも `.ndf/supervise.json` の宣言か引数で変えられる（MVV の Value 5）
+- 前提 C6: 2c の移行ステップの切り方と順序は、2b の後に設計が決める（決定 21）。この節は切り方を決めない
+
+### 未決（設計で決める）
+
+1. 重なりが見つかったとき、後から入れる側を待たせるか（直列にする）、止めて知らせるか。#1248 の案は両方を挙げる。受け入れ条件 C-4 はどちらでも「同時には流さず、重なる組を知らせる」を満たせば通る
+2. 共有の一覧をどこで宣言するか（`.ndf/supervise.json` に置くか、プランの `--files` とは別の引数にするか）
+3. GraphQL の枠の既定の本数（#889。1 本あたりの問い合わせの見込みの測り方を含む）
+4. `supervise_lib/slow.py`（遅れの見張り）を DBOS の上へ移すか、ステップの中の見張りとして残すか
+
+### 対象範囲（2c）
+
+含む:
+- 上の「何を置き換えるか」の表のステップの遷移・状態の保存と再開・キュー・投稿キュー・収束ループのラウンドの駆動を、DBOS のワークフロー・ステップ・キューへ置き換える
+- #1248・#889 と、#1249 の一般の形（共有の一覧）の検査と枠
+- 試行（`scripts/experimental/runner-trial.py` と `runner-trial/`）の撤去と、台帳（`docs/ndf-experiments.md`）の「行き先」の記入
+
+含まない:
+- プランの JSON の形・雛形の中身（ステップの並び）の変更
+- `supervise.py` の副命令の追加・削除
+- #773 の supervisor の切れ目の変更と、`agent-layers.md`・`parallel-work.md` の本文の書き直し
+- ステップの中で動くもの（worker の起動・`claude -p` の包み・GitHub の呼び出し）の置き換え（決定 16・17・24 のまま）
+- DBOS を Postgres で使うこと・サーバーを立てること
+
+### 受け入れ条件（2c）
+
+置き換え:
+- [ ] C-1 ステップの遷移・状態の保存と再開・同時の本数と枠が DBOS のワークフロー・ステップ・キューで動き、上の表の置き場に、遷移のループ・状態ファイルへの再開位置の書き込み・子プロセスの数え上げによる同時の本数の制御が残らない（設計が挙げる置き場と関数の一覧を、構文木で確かめるチェックが継続的統合で走る）
+- [ ] C-2 `supervise.py run` / `queue` の実行中に、NDF のプロセスが待ち受けるポートが 0 本で、状態は SQLite のファイル 1 つ以上だけに残る（前提 C2 の置き場所）
+
+形を変えないこと:
+- [ ] C-3a `supervise.py new <種別>`（sprint・impl・fix・check・release・close）が書き出すプランの JSON が、同じ引数で移行の前と同じになる（移行の前に書き出した JSON と突き合わせるテスト）。移行の前の版で書き出したプランの JSON を、移行の後の `run` で流せる
+- [ ] C-3b `supervise.py` の副命令 10 個（run・history・expected・example・new・queue・wait・design-glossary・note・sync-check）の引数・結果 JSON の鍵・終了コードが変わらない。`wait` は done で 0・attention で 20・上限で 3 を返す
+- [ ] C-3c 進捗ログ（`<state-dir>/progress.jsonl`）の行の鍵と値の形が変わらず、移行の前の `supervise.py wait` と `history` が移行の後の進捗ログを読める。`<プラン>-state` のパスも変わらない
+- [ ] C-3d `on_fail`・judge の選択・上限 20・承認ゲートの振る舞いが変わらない（既存のテストが置き換え先の変更だけで通る）
+
+関係する課題:
+- [ ] C-4 `queue` と `run` は、キューへ入れる時点で、同時に流れる候補との `--files` の重なり（ディレクトリの包含を含む）と、宣言した共有の一覧を触る組を数え、重なる組を結果 JSON の `items` と標準エラーへ知らせ、同時には流さない。手で再開・マージして終わったプランは並行中に数えない（#1248・#1249）
+- [ ] C-5 GitHub の GraphQL を使うと宣言したステップは、資源のタグの枠の本数を超えて同時に流れない。枠の本数は宣言か引数で変えられる（#889）
+
+再開:
+- [ ] C-6 `run` / `queue` のプロセスをステップの途中で `kill -9` し、同じコマンドを打ち直すと、落ちたときに流れていたステップから流し直し、済んだステップを流し直さない。キューの後続（`--then`）は前のプランが済むまで流れない。承認ゲートで止まったプランは、承認の無い打ち直しでは同じ所で止まったまま、承認で続く（試行 `runner-trial.py check dbos` と同じ 5 つのシナリオを、置き換えた本体に対するテストで流す）
+
+依存と試行:
+- [ ] C-7 `dbos` が `plugins/ndf/pyproject.toml` の 1 つの extra と `uv.lock` に版を固定して載り、`python3 plugins/ndf/scripts/supervise.py ...` の起動の形は変わらない。uv が無い環境では決定 17 の手順で入れてから続け、入れられないときは理由を出して止まる
+- [ ] C-8 `scripts/experimental/runner-trial.py` と `runner-trial/` が消え、`docs/ndf-experiments.md` の台帳の「行き先」に置き換えた PR が書かれる
+
+### 非機能の条件（2c）
+
+| 大項目 | 条件 |
+| --- | --- |
+| 性能 | 1 ステップあたりの所要の上乗せ（キューの問い合わせの間隔と import）が、移行の前の同じプランに比べて 1 ステップ 1 秒以内（試行では 6 本で +6.4 秒・import は温まって 0.24 秒）。測り方は設計が決め、`supervise.py history` の所要で比べる |
+| 可用性 | 前提 C3 の揮発（流れていたステップの流し直し）より多くを失わない（C-6） |
+| 移行性 | 途中の版を導入した利用者の手順が変わらない（前提 1）。移行の版より前のプランは前提 C4 のとおり先頭から流し直せる |
+| システム環境 | Python 3.10 以上。DBOS は SQLite で使い、Postgres とサーバーを要しない。ほかのプロジェクトでも `.ndf/supervise.json` の宣言だけで同じに動く（ai-plugins の形を既定に埋め込まない） |
+
+### 検証手段（2c）
+
+| 項目 | 手段 |
+| --- | --- |
+| テスト | `uv run --frozen --project . --all-extras pytest . -q -n auto`（決定 22） |
+| 再開 | C-6 のテスト（kill -9 を含む。試行の `runner-trial.py check dbos` のシナリオを本体へ移したもの） |
+| ポート | C-2 は実行中の `ss -ltnp`（または psutil の `net_connections`）で NDF のプロセスの待ち受けを数える |
+| 配布物 | `bash scripts/build-runtime-plugins.sh --check`、`claude plugin validate .` |
+| 手動確認 | 開発版で `supervise.py new impl` のプランを 2 本 `queue` で流し、途中で kill -9 して打ち直す |
