@@ -421,6 +421,18 @@ def test_metered_env_drops_aws_keys_only_for_saved(accounts):  # noqa: F811
     assert "AWS_PROFILE" not in env and env["AWS_ACCESS_KEY_ID"] == AWS_SECRETS["AWS_ACCESS_KEY_ID"]
 
 
+def test_metered_and_login_env_drop_account_scopes(accounts, monkeypatch, tmp_path):  # noqa: F811
+    """#1523 の受け入れ条件 6・I4: 従量の接続の子と、専用の設定ディレクトリの claude にアカウントのスコープを残さない。"""
+    from relay_lib import login
+
+    base = {ca.SCOPES_ENV: "user:inference user:mcp_servers", "PATH": "/bin"}
+    ca.save_metered("bedrock", {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": "p"}, {"profile": "p"})
+    assert ca.SCOPES_ENV not in ca.account_env(ca.METERED, base)
+    assert ca.SCOPES_ENV not in ca.account_env(ca.METERED, {**base, ca.FALLBACK_ENV: "ANTHROPIC_API_KEY=k"})
+    monkeypatch.setenv(ca.SCOPES_ENV, base[ca.SCOPES_ENV])
+    assert ca.SCOPES_ENV not in login._claude_env(str(tmp_path))
+
+
 def test_account_env_keeps_user_vars_with_saved_decl(accounts):  # noqa: F811
     """保存した宣言があっても、アカウントの子から利用者のシェルの AWS_PROFILE などを外さない（認証の変数だけ外す）。"""
     ca.save_metered("bedrock", {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": "p", "ANTHROPIC_MODEL": "m"}, {"profile": "p"})

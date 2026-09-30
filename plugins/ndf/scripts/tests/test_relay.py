@@ -2841,6 +2841,7 @@ def hit_limit(t, n, text="You've hit your session limit", quota=FIVE_HOUR, error
 def no_secret(t):
     assert all("SECRET" not in " ".join(s["argv"]) for s in t.starts())
     assert "SECRET" not in json.dumps(t.rows()) and "SECRET" not in t.text
+    assert "user:inference" not in json.dumps(t.rows())  # アカウントのスコープも記録に出さない（#1523 の I6）
 
 
 def test_limit_switches_account_and_resumes_goal(term, accounts):
