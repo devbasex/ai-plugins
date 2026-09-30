@@ -324,6 +324,36 @@ def test_hook_path_must_not_use_deps(tmp_path: Path):
     }
 
 
+DEPS_PY = 'GROUPS = {"md": ["markdown_it"], "mdtable": ["tabulate"], "durable": ["dbos", "filelock"], "locks": ["filelock"]}\n'
+
+
+def test_require_must_list_groups_reached_through_imports(tmp_path: Path):
+    """決定 23: supervise.py の形（エントリポイント → パッケージ → lib を経て md に届く）で、require に md が無ければ落ちる。"""
+    put(tmp_path, "scripts/lib/deps.py", DEPS_PY)
+    put(tmp_path, "scripts/lib/md.py", "from markdown_it import MarkdownIt\n")
+    put(tmp_path, "scripts/lib/mvv.py", "import md\n")
+    put(tmp_path, "scripts/sup_lib/__init__.py", "")
+    put(tmp_path, "scripts/sup_lib/state.py", "import mvv\n")
+    put(tmp_path, "scripts/sup_lib/table.py", "import tabulate\n")
+    put(tmp_path, "scripts/sup_lib/cmds.py", "from . import state\nfrom .table import x\n")
+    entry = "import deps\n\ndeps.require({})\nfrom sup_lib import cmds\n"
+    put(tmp_path, "scripts/sup.py", entry.format('"mdtable"'))
+    # 関数の中の import と except ImportError で受ける import は読み込み時に届かない
+    put(
+        tmp_path,
+        "scripts/lazy.py",
+        "import deps\n\ndeps.require('mdtable')\ntry:\n    import markdown_it\nexcept ImportError:\n    pass\n\ndef f():\n    import md\n",
+    )
+    put(tmp_path, "scripts/lock.py", "import deps\n\ndeps.require('durable')\nimport filelock\n")  # 同じ名前は持つグループのどれかでよい
+    put(tmp_path, "scripts/plain.py", "import md\n")  # require を呼ばないモジュールは見ない
+    code, r = run(tmp_path, [])
+    assert code == 1
+    assert kinds(r) == {("require-groups", "plugins/ndf/scripts/sup.py:md")}
+    put(tmp_path, "scripts/sup.py", entry.format('"md", "mdtable"'))
+    code, r = run(tmp_path, [])
+    assert code == 0, r
+
+
 GOOD_BOUNDARY = {
     "scripts/supervise_lib/flow.py": "import durable\n\n@durable.workflow(name='w')\ndef plan_workflow():\n    for s in range(3):\n        pass\n",
     "scripts/supervise_lib/engine.py": (
