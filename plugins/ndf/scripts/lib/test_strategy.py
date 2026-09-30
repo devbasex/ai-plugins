@@ -51,6 +51,10 @@ UNKNOWN_DURATION_LIMITS = {"test_timeout": 900, "whole_timeout": 1800, "ci_wait_
 
 MISSING_TEST = ".ndf/project.json の test が無い（か不明: {reason}）。/ndf:development-workflow の手順 0 で解析するか、--round-test を渡す"
 NO_LINT_WHOLE = "静的解析の雛形に {paths} を埋める範囲のパスが無いため、静的解析の全体テストを組まない（{paths} を . にしない）"
+WHOLE_FROM_TEMPLATE = (
+    "全体テストは宣言の test.suites[].command が無いため、雛形の {paths} を . にしたコマンドで組んだ。"
+    "静的解析のコマンドなら --test-kind lint か、宣言の test.suites（kind: lint）を使う"
+)
 
 
 class StrategyError(Exception):
@@ -417,7 +421,8 @@ def _args_suites(template: str, kind: str, declared: list[Suite], scope_paths: O
     """引数の雛形（`{paths}` を含む）を種別 `kind` の範囲テストの雛形にした suite の並び（I11）。
 
     宣言の同じ種別の suite は `scope_command` を外して残し、全体テストは宣言の `command` が先に効く。宣言に
-    `command` が無ければ、テストは `{paths}` を `.` にしたもの、静的解析は `{paths}` を範囲のパスで埋めたもの（I4）。
+    `command` が無ければ、テストは `{paths}` を `.` にしたもの（その旨を
+    `WHOLE_FROM_TEMPLATE` の注記で残す）、静的解析は `{paths}` を範囲のパスで埋めたもの（I4）。
     宣言のほかの種別の suite はそのまま残す。
     """
     same = [Suite(s.name, s.command, None, s.junit, list(s.paths), s.kind) for s in declared if s.kind == kind]
@@ -427,6 +432,7 @@ def _args_suites(template: str, kind: str, declared: list[Suite], scope_paths: O
         whole = ""
     elif kind == TEST:
         whole = whole_command_of(template)
+        notes.append(WHOLE_FROM_TEMPLATE)
     elif paths:
         whole = fill(template, paths)
     else:

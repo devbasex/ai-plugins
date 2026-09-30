@@ -468,3 +468,45 @@ def test_verify_commands_stops_on_an_invalid_declaration():
     decl = {"test": {"suites": [{"name": "py", "kind": "bogus", "command": "pytest ."}]}}
     with pytest.raises(ts.StrategyError, match=r"test\.suites\[0\]\.kind"):
         ts.verify_commands(decl)
+
+
+# ---------- #1437: 雛形から組んだ全体テストの注記 ----------
+
+PYTEST_DECL = {"test": {"suites": [{"name": "py", "runner": "pytest", "command": "pytest -q"}]}}
+LINT_ONLY_DECL = {"test": {"suites": [{"name": "sc", "runner": "shellcheck", "kind": "lint", "command": "shellcheck -s bash a.sh"}]}}
+
+
+@pytest.mark.parametrize("decl", [{}, LINT_ONLY_DECL], ids=["no-decl", "lint-only-decl"])
+def test_a_whole_test_built_from_the_template_carries_one_note(decl):
+    """#1437 AC1・I1 — 宣言にテストの `command` が無く種別 test の雛形なら、`{paths}` を `.` にした全体テストと注記 1 件。"""
+    s = ts.resolve(decl, baseline_test="shellcheck -s bash {paths}", scope_paths=["a.sh"])
+    assert "shellcheck -s bash ." in s.whole_commands()
+    assert s.notes == [ts.WHOLE_FROM_TEMPLATE]
+
+
+def test_the_note_does_not_depend_on_the_command_words():
+    """#1437 I4 — 同じ形の雛形は、コマンドの語に依らず同じ注記を持つ。"""
+    a = ts.resolve({}, baseline_test="shellcheck -s bash {paths}")
+    b = ts.resolve({}, baseline_test="pytest {paths} -q")
+    assert a.notes == b.notes == [ts.WHOLE_FROM_TEMPLATE]
+
+
+def test_a_template_without_declaration_still_runs_the_whole_directory():
+    """#1437 AC7・I3 — 注記を足しても、全体テストは `pytest . -q` のまま、suite の並びと名前も変わらない。"""
+    s = ts.resolve({}, baseline_test="pytest {paths} -q")
+    assert s.whole_commands() == ["pytest . -q"]
+    assert [(x.name, x.scope_command, x.kind) for x in s.suites] == [("args", "pytest {paths} -q", "test")]
+
+
+@pytest.mark.parametrize("kind", ["test", "lint"])
+def test_a_declared_whole_test_wins_over_the_template(kind):
+    """#1437 AC4・I2 — 宣言にテストの `command` があれば、全体テスト（テスト）は宣言だけで、注記は付かない。"""
+    template = "uvx --from shellcheck-py shellcheck -s bash {paths}"
+    s = ts.resolve(PYTEST_DECL, baseline_test=template, template_kind=kind, scope_paths=["images/redmine7/postresync.sh"])
+    tests = [x.command for x in s.suites if x.kind == "test" and x.command]
+    assert tests == ["pytest -q"]
+    assert all(" ." not in c for c in s.whole_commands())
+    assert ts.WHOLE_FROM_TEMPLATE not in s.notes
+    if kind == "lint":
+        lints = [x.command for x in s.suites if x.kind == "lint" and x.command]
+        assert lints == ["uvx --from shellcheck-py shellcheck -s bash images/redmine7/postresync.sh"]
