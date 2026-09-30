@@ -1,0 +1,62 @@
+{
+  "スプリント": "m9",
+  "ブランチ": "sprint/m9",
+  "リリースの経路": [
+    {
+      "route": "template",
+      "target": "package-plugin",
+      "branch": "main",
+      "stage": "template",
+      "note": null
+    }
+  ],
+  "ステージ": [
+    {
+      "wave": 1,
+      "name": "設計",
+      "plans": [
+        "<TMP>/out/sprint/1-design-16.json"
+      ],
+      "command": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/sprint/1-design-16.json --max 3"
+    },
+    {
+      "wave": 2,
+      "name": "関門 1",
+      "gate": "設計 Pull Request をまとめて承認してマージする"
+    },
+    {
+      "wave": 3,
+      "name": "スプリントブランチ",
+      "plans": [
+        "<TMP>/out/sprint/3-sprint-branch.json"
+      ],
+      "command": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/sprint/3-sprint-branch.json --max 3"
+    },
+    {
+      "wave": 4,
+      "name": "実装",
+      "plans": [
+        "<TMP>/out/sprint/4-impl-16.json",
+        "<TMP>/out/sprint/4-impl-17.json"
+      ],
+      "command": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/sprint/4-impl-16.json <TMP>/out/sprint/4-impl-17.json --max 3"
+    },
+    {
+      "wave": 5,
+      "name": "検査",
+      "plans": [
+        "<TMP>/out/sprint/5-check.json"
+      ],
+      "command": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/sprint/5-check.json --max 3 --then <TMP>/out/sprint/6-release.json"
+    },
+    {
+      "wave": 6,
+      "name": "配布",
+      "plans": [
+        "<TMP>/out/sprint/6-release.json"
+      ],
+      "then_of": "検査",
+      "resume": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/sprint/6-release.json --max 3"
+    }
+  ]
+}

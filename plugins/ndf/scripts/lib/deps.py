@@ -56,6 +56,7 @@ GROUPS = {
     "waits": ["tenacity"],
     "notify": ["slack_sdk", "dotenv", "httpx"],
     "terminal": ["ptyprocess"],
+    "durable": ["dbos", "filelock"],
 }
 EXIT_PRECONDITION = 3
 REEXEC_ENV = "NDF_DEPS_REEXEC"

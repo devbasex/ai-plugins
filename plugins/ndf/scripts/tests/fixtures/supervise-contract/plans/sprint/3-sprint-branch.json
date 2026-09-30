@@ -1,0 +1,21 @@
+{
+  "フェーズ": "実装",
+  "課題": [
+    16,
+    17
+  ],
+  "モード": "standard",
+  "作業場所": "<TMP>/repo",
+  "規則": "",
+  "上限": 3,
+  "steps": [
+    {
+      "id": "sprint-branch",
+      "type": "run",
+      "stage": "作業場所の用意",
+      "timeout": 600,
+      "cmd": "bash <NDF>/scripts/worktree-setup.sh create sprint/m9 && git -C <TMP>/repo/.worktrees/sprint/m9 push -q -u origin sprint/m9",
+      "next": "end"
+    }
+  ]
+}

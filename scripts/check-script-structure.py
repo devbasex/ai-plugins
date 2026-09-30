@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""NDF のスクリプトの構造チェック（#1142 の不変条件 I4・I5・I13・I14）。
+"""NDF のスクリプトの構造チェック（#1142 の不変条件 I4・I5・I13・I14・I16）。
 
 見るのは `plugins/ndf/` の下の `.py` と `.sh` のうち、テストを除くもの（`tests/`・`test/` の下と
 `test_` で始まるファイル）。git の作業ツリーでは git が追跡するファイルだけを見る。
@@ -11,7 +11,8 @@
   別々に数える
 
 - `wrapped`: 汎用の処理の包み（`lib/` の包み。決定 19）が受け持つ標準ライブラリの部品を、包みの外の Python の
-  モジュールが使う（I14）。部品と持ち主は `WRAPPED` の表で、`fcntl`・`pty`・`termios`・`urllib.request` の import、
+  モジュールが使う（I14）。部品と持ち主は `WRAPPED` の表で、`fcntl`・`pty`・`termios`・`urllib.request`・`dbos`
+  （耐久の記録の包み `lib/durable.py`。I16）の import、
   `/proc/` の読み取り（docstring を除く文字列）、囲み（```` ``` ```` / `~~~`）を追う正規表現と `startswith` を見る。
   例外リストの `name` は部品の名前（`fcntl` など）
 - `hook-deps`: hook の経路が `deps.require()` を呼ぶ（I13・決定 20）。hook の経路は、hook のエントリポイント
@@ -61,7 +62,10 @@ WRAPPED = {
     "urllib.request": (LIB + "lib/notify.py",),
     "proc-fs": (LIB + "lib/procs.py",),
     "fence-regex": (LIB + "lib/md.py",),
+    "dbos": (LIB + "lib/durable.py",),
 }
+# I14 のうち import で見る部品（I16 の dbos を含む）
+IMPORT_PARTS = ("fcntl", "pty", "termios", "urllib.request", "dbos")
 # I13: hook のエントリポイント（決定 20）。ここから import でたどれるモジュールは deps を import しない
 HOOK_ENTRIES = (LIB + "hook.py",)
 IMPORT_ROOTS = (LIB, LIB + "lib/")
@@ -163,12 +167,12 @@ def wrapped_parts(text: str) -> dict[str, str]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for a in node.names:
-                for part in ("fcntl", "pty", "termios", "urllib.request"):
+                for part in IMPORT_PARTS:
                     if a.name == part or a.name.startswith(part + "."):
                         hit(part, node, f"import {a.name}")
         elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
             names = {a.name for a in node.names}
-            for part in ("fcntl", "pty", "termios", "urllib.request"):
+            for part in IMPORT_PARTS:
                 if (
                     node.module == part
                     or node.module.startswith(part + ".")

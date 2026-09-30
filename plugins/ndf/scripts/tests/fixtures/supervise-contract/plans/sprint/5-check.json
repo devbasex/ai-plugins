@@ -1,0 +1,170 @@
+{
+  "フェーズ": "検査",
+  "課題": [
+    16,
+    17
+  ],
+  "モード": "standard",
+  "作業場所": "<TMP>/repo/.worktrees/sprint/m9",
+  "規則": "全体テストが落ちたら（落ちたテストだけの再実行でも落ちた後）、変更に起因するなら fix、変更に無関係なら ready。2 回直しても同じなら abort。",
+  "上限": 12,
+  "steps": [
+    {
+      "id": "collect",
+      "type": "run",
+      "stage": "実装",
+      "timeout": 600,
+      "cmd": "git pull -q --ff-only origin sprint/m9",
+      "next": "pr"
+    },
+    {
+      "id": "pr",
+      "type": "pr",
+      "stage": "Pull Request",
+      "base": "main",
+      "title": "スプリント m9",
+      "body": "template",
+      "summary": "スプリント m9 の課題を main へ取り込む。\n\n関連: #16 #17",
+      "changes": "スプリント m9 の課題を main へ取り込む。",
+      "next": "assess"
+    },
+    {
+      "id": "assess",
+      "type": "run",
+      "preset": "assess",
+      "stage": "構造改善",
+      "skip_to": "review",
+      "on_fail": "refactor",
+      "next": "refactor"
+    },
+    {
+      "id": "refactor",
+      "type": "drive",
+      "drive": "cross-refactoring",
+      "kind": "構造改善",
+      "stage": "構造改善",
+      "timeout": 3600,
+      "args": "{pr} --workflow-step --scope $(gh api 'repos/{owner}/{repo}/pulls/{pr}/files' --paginate --jq '.[].filename' | xargs -n1 dirname | sort -u | grep -vx '\\.')",
+      "on_fail": "abort",
+      "next": "review"
+    },
+    {
+      "id": "review",
+      "type": "drive",
+      "drive": "cross-review",
+      "kind": "実装レビュー",
+      "stage": "実装レビュー",
+      "timeout": 3600,
+      "args": "{pr} --max-rounds 4",
+      "on_fail": "abort",
+      "next": "test-all"
+    },
+    {
+      "id": "test-all",
+      "type": "run",
+      "stage": "完了判定",
+      "timeout": 1980,
+      "cmd": "git pull -q --rebase && python3 <NDF>/scripts/test-run.py whole --pr {pr}",
+      "on_fail": "judge",
+      "next": "ready"
+    },
+    {
+      "id": "judge",
+      "type": "judge",
+      "inputs": [
+        "test-all"
+      ],
+      "question": "全体テストの失敗を直す（fix）か、変更に無関係として進める（ready）か、止める（abort）か",
+      "choices": [
+        "fix",
+        "ready",
+        "abort"
+      ]
+    },
+    {
+      "id": "fix",
+      "type": "work",
+      "kind": "修正",
+      "inputs": [
+        "test-all"
+      ],
+      "prompt": "失敗したテストを直してコミットし、git push する。",
+      "next": "test-all"
+    },
+    {
+      "id": "ready",
+      "type": "run",
+      "cmd": "git push -q; gh pr ready {pr}",
+      "on_fail": "abort",
+      "next": "merge-gate"
+    },
+    {
+      "id": "merge-gate",
+      "type": "run",
+      "timeout": 120,
+      "cmd": "python3 <NDF>/scripts/merged-steps.py merge-gate --pr {pr}",
+      "gate_next": "end",
+      "next": "merge",
+      "on_fail": "abort"
+    },
+    {
+      "id": "merge",
+      "type": "run",
+      "timeout": 3960,
+      "cmd": "python3 <NDF>/scripts/merged-steps.py merge-when-green {pr} --timeout 3600",
+      "probe": {
+        "cmd": "python3 <NDF>/scripts/merged-steps.py probe --pr {pr} --act"
+      },
+      "on_fail": "abort",
+      "next": "record"
+    },
+    {
+      "id": "merge-approved",
+      "type": "run",
+      "timeout": 3960,
+      "cmd": "python3 <NDF>/scripts/merged-steps.py merge-when-green {pr} --timeout 3600 --gate-approved user",
+      "probe": {
+        "cmd": "python3 <NDF>/scripts/merged-steps.py probe --pr {pr} --act"
+      },
+      "on_fail": "abort",
+      "next": "record"
+    },
+    {
+      "id": "record",
+      "type": "run",
+      "cmd": "python3 <NDF>/scripts/check-trigger.py record --id 'pr-{pr}' --state {state_dir} --root . --target-pr {pr}",
+      "on_fail": "abort",
+      "next": "end"
+    },
+    {
+      "id": "abort",
+      "type": "run",
+      "cmd": "python3 <NDF>/scripts/check-trigger.py record --id 'pr-{pr}' --state {state_dir} --root . --target-pr {pr} --failed",
+      "next": "end"
+    }
+  ],
+  "base_branch": "main",
+  "テストの戦略": {
+    "name": "local-full",
+    "source": "derived:test_duration",
+    "note": ".ndf/supervise.json の test.command を読んだ（.ndf/project.json に test が無い）。宣言は project.json へ移す"
+  },
+  "テストの時間": {
+    "init_test_timeout": 1800,
+    "test_timeout": 900,
+    "whole_timeout": 1800,
+    "ci_wait_timeout": 3600,
+    "basis": {
+      "budget_minutes": null,
+      "w": null,
+      "w_source": null,
+      "c": null,
+      "x": null,
+      "strategy": "local-full",
+      "unknown_duration": true
+    }
+  },
+  "branch": "sprint/m9",
+  "起点": "origin/sprint/m9",
+  "リポジトリ": "<TMP>/repo"
+}

@@ -1,0 +1,121 @@
+{
+  "フェーズ": "配布（開発版）",
+  "課題": [
+    14
+  ],
+  "モード": "standard",
+  "作業場所": "<TMP>/repo",
+  "branch": "release/v1.2.0-dev.1",
+  "起点": "origin/main",
+  "規則": "run のステップが落ちたら、出力を読んで直せるもの（版数の書き漏れ・文書の形）は fix。外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度（retry）。認証や権限の不足・タグの重複は stop。",
+  "上限": 20,
+  "steps": [
+    {
+      "id": "bump",
+      "type": "run",
+      "stage": "配布",
+      "cmd": "python3 <NDF>/scripts/release-steps.py bump --plugin foo --to 1.2.0-dev.1 --base main",
+      "on_fail": "judge",
+      "next": "changelog"
+    },
+    {
+      "id": "changelog",
+      "type": "run",
+      "cmd": "python3 <NDF>/scripts/release-steps.py changelog --version 1.2.0-dev.1 --prs 5 6",
+      "on_fail": "judge",
+      "next": "notes"
+    },
+    {
+      "id": "notes",
+      "type": "run",
+      "stage": "配布",
+      "cmd": "sh -c 'python3 <NDF>/scripts/release-steps.py notes --version 1.2.0-dev.1 --prs 5 6 && git add -A && (git diff --cached --quiet || git commit -q -m \"Release: foo v1.2.0-dev.1\")'",
+      "on_fail": "judge",
+      "next": "release"
+    },
+    {
+      "id": "release",
+      "type": "run",
+      "stage": "配布",
+      "timeout": 2400,
+      "cmd": "python3 <NDF>/scripts/release-steps.py release --version 1.2.0-dev.1 --channel dev",
+      "on_fail": "judge",
+      "next": "verify",
+      "probe": {
+        "cmd": "python3 <NDF>/scripts/merged-steps.py probe --head {branch} --head {base} --act"
+      }
+    },
+    {
+      "id": "verify",
+      "type": "run",
+      "stage": "配布",
+      "timeout": 1500,
+      "cwd": "o/r",
+      "cmd": "sh -c 'git pull -q --ff-only origin main && python3 <NDF>/scripts/release-verification-steps.py verify-install --ref main --expect 1.2.0-dev.1 --runtimes claude'",
+      "on_fail": "judge",
+      "next": "facts"
+    },
+    {
+      "id": "facts",
+      "type": "run",
+      "cwd": "o/r",
+      "cmd": "python3 <NDF>/scripts/release-steps.py approval-facts --version 1.2.0 --prs 5 6",
+      "presentation_to": "issues/approval-foo-v1.2.0.md",
+      "on_fail": "judge",
+      "gate_next": "explain",
+      "next": "explain"
+    },
+    {
+      "id": "explain",
+      "type": "run",
+      "cwd": "o/r",
+      "cmd": "python3 <NDF>/scripts/release-steps.py notes --version 1.2.0-dev.1 --prs 5 6 --approval issues/approval-foo-v1.2.0.md --verified claude --ref main",
+      "on_fail": "judge",
+      "next": "end"
+    },
+    {
+      "id": "judge",
+      "type": "judge",
+      "inputs": [
+        "bump",
+        "changelog",
+        "notes",
+        "release",
+        "verify",
+        "facts",
+        "explain"
+      ],
+      "question": "落ちたステップを直す（fix）か、同じステップをもう一度（retry）か、止める（stop）か。retry なら decision に落ちたステップの id を返す",
+      "choices": [
+        "fix",
+        "bump",
+        "changelog",
+        "notes",
+        "release",
+        "verify",
+        "facts",
+        "explain",
+        "stop"
+      ]
+    },
+    {
+      "id": "fix",
+      "type": "work",
+      "kind": "修正",
+      "inputs": [
+        "bump",
+        "changelog",
+        "notes",
+        "release",
+        "verify",
+        "facts",
+        "explain"
+      ],
+      "prompt": "落ちたステップの出力を読み、原因を直してコミットする（push しない）。直したら次は落ちたステップからやり直す。",
+      "next": "release"
+    }
+  ],
+  "base_branch": "main",
+  "リポジトリ": "o/r",
+  "記録": "<NDF>/scripts/projects-sync.sh"
+}
