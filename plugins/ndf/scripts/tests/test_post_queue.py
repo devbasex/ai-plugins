@@ -652,12 +652,31 @@ def _ids(queue: post_queue.Queue) -> list[str]:
         return sorted(fl["durable"].workflow_ids("post-"))
 
 
-def test_an_empty_queue_answers_without_opening_the_record(tmp_path: pathlib.Path) -> None:
-    """積んでいない待ち行列の count は耐久の記録を作らない。"""
+def test_an_empty_queue_answers_without_opening_the_record(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """積んでいない待ち行列の count は耐久の記録を作らず、DBOS の読み込みと耐久ワークフローの登録（`_flows`）も起こさない。"""
     queue = post_queue.Queue(tmp_path / "pending")
 
-    assert queue.count() == 0 and queue.flush().remaining == 0
-    assert not post_queue._flows()["durable"].record_path("posts", str(queue.dir.absolute())).exists()
+    def no_flows() -> None:
+        raise AssertionError("空の待ち行列で _flows を呼んだ")
+
+    monkeypatch.setattr(post_queue, "_flows", no_flows)
+    assert queue.count() == 0 and queue.paths() == [] and queue.items() == [] and queue.flush().remaining == 0
+    assert not queue.drop(1)
+    assert not post_queue.durable_keys.record_path("posts", str(queue.dir.absolute())).exists()
+
+
+def test_an_empty_queue_does_not_import_dbos(tmp_path: pathlib.Path) -> None:
+    """空の待ち行列の count / paths は、新しいプロセスで dbos も durable も読み込まない（空キューの高速経路）。"""
+    code = (
+        "import sys, pathlib; sys.path.insert(0, sys.argv[1]); import post_queue;"
+        "q = post_queue.Queue(pathlib.Path(sys.argv[2])); assert q.count() == 0 and q.paths() == [];"
+        "print('dbos' in sys.modules, 'durable' in sys.modules)"
+    )
+    env = {**os.environ, "NDF_DBOS_DIR": str(tmp_path / "db")}
+    out = subprocess.run(
+        [sys.executable, "-c", code, str(LIB), str(tmp_path / "pending")], capture_output=True, text=True, env=env, check=True
+    )
+    assert out.stdout.split() == ["False", "False"]
 
 
 def test_legacy_items_are_imported_with_their_sequence(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:

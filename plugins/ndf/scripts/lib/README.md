@@ -84,6 +84,7 @@
 | [shparse.py](shparse.py) | シェルの構文木（tree-sitter-bash）。試行 T2 で見つけた構文木の癖 5 つを直して渡し、読み直せない ERROR があるか（`has_unreadable_error`）を返す。hook の経路で使うため `deps.require()` を呼ばない | `hook_lib/`（書き込み先の推定・Bash の判定・語の分割） |
 | [locks.py](locks.py) | ファイルロック（`<対象>.lock` で取る排他・待たない取得・排他つきの 1 行の追記）。filelock を呼び、`fcntl` を使うのはここだけ | `hook_lib/`（token の guard・待ちの通知） |
 | [durable.py](durable.py) | 耐久の記録（DBOS Transact を SQLite で使う）。起動 1 回に 1 つの SQLite（置き場は `NDF_DBOS_DIR` → `${XDG_STATE_HOME}/ndf/dbos` → `~/.local/state/ndf/dbos`）・実行の鍵とファイルロック・形式の版・実行の回の選び方（`resolve`）・止まりと続き（`pause` / `resume`）・`os._exit` での抜け方・30 日を過ぎた記録の削除。DBOS を import するのはここだけ（I16）。使う側は `deps.require(..., "durable")` | `supervise_lib`・収束ループの 2 つの `drive.py`・`post_queue.py` |
+| [durable_keys.py](durable_keys.py) | 耐久の記録の置き場（`records_dir`）・実行の鍵（`launch_key` / `key_hash`）・記録のファイル（`record_path`）。DBOS を import せず、記録が有るかだけを確かめる呼び出し（空の投稿キューの `count()` など）が DBOS を読まずに答えるために `durable.py` から分けた。`durable.py` が同じ名前で出す | `durable.py`・`post_queue.py` |
 | [drive_pause.py](drive_pause.py) | 収束ループの駆動が止まるときの結果の形（pause の 1 行 JSON）と終了コードの表（0 完了 / 20 fix / 21 sweep / 22 newtext / 23 cross-review / 1 中断） | 収束ループの 2 つの `drive.py` |
 
 ## 手順のスクリプトの結果

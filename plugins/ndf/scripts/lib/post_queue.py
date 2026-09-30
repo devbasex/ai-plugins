@@ -64,6 +64,7 @@ if str(_LIB) not in sys.path:
     sys.path.insert(0, str(_LIB))
 import clock  # noqa: E402  時刻の読み取り（#1142 の L0）
 import deps  # noqa: E402  外部パッケージの環境（#1142 の決定 17）
+import durable_keys  # noqa: E402  記録の有無を DBOS を読まずに確かめる
 import gh_graphql  # noqa: E402  未解決のスレッドの問い合わせ（#1142 の L0）
 import gh_quota  # noqa: E402  上限の語（#1142 の L0）
 import proc  # noqa: E402  子プロセスの起動（#1142 の L0）
@@ -557,7 +558,7 @@ class Queue:
 
     def _dormant(self) -> bool:
         """耐久の記録も移行の前のファイルも無い（DBOS を起動せずに空と答えられる）。"""
-        return not self._import_legacy() and not _flows()["durable"].record_path("posts", str(self.dir.absolute())).exists()
+        return not self._import_legacy() and not durable_keys.record_path("posts", str(self.dir.absolute())).exists()
 
     @contextlib.contextmanager
     def _session(self) -> Iterator[dict[str, Any]]:

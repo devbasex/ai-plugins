@@ -29,7 +29,6 @@
 from __future__ import annotations
 
 import contextlib
-import hashlib
 import logging
 import os
 import re
@@ -42,6 +41,7 @@ from typing import Any, Callable, Iterable, Mapping, Optional
 from dbos import DBOS, DBOSClient, SetEnqueueOptions, SetWorkflowID
 
 import locks
+from durable_keys import KIND_RE, DurableError, key_hash, launch_key, record_path, records_dir  # noqa: F401  durable の名前として出す
 
 FORMAT = "ndf-durable-1"
 POLL_SECONDS = 0.2  # 耐久キューと通知の問い合わせの間隔（1 ステップの上乗せを 1 秒以内に収める）
@@ -49,11 +49,6 @@ KEEP_DAYS = 30  # 使われていない耐久の記録を消すまでの日数
 PAUSE_SECONDS = 30 * 86400  # 止まり（pause）の待ちの上限
 RUNNING = ("PENDING", "ENQUEUED")
 FINISHED = ("SUCCESS", "ERROR", "CANCELLED", "MAX_RECOVERY_ATTEMPTS_EXCEEDED")
-KIND_RE = re.compile(r"^[a-z][a-z0-9]*$")
-
-
-class DurableError(RuntimeError):
-    """耐久の記録を開けない・書けない・使い方の誤り。理由を文にして持つ。"""
 
 
 @dataclass(frozen=True)
@@ -83,33 +78,7 @@ class Outcome:
 _STATE: dict[str, Any] = {"launched": None, "stack": None, "queues": {}}
 
 
-# ---- 置き場と鍵 ----
-
-
-def records_dir(env: Optional[Mapping[str, str]] = None) -> Path:
-    """耐久の記録の置き場（モジュールの docstring の順）。"""
-    env = os.environ if env is None else env
-    if env.get("NDF_DBOS_DIR"):
-        return Path(env["NDF_DBOS_DIR"])
-    base = env.get("XDG_STATE_HOME") or str(Path(env.get("HOME") or Path.home()) / ".local" / "state")
-    return Path(base) / "ndf" / "dbos"
-
-
-def key_hash(text: str, n: int = 12) -> str:
-    """鍵に使う sha256 の先頭 `n` 字。"""
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:n]
-
-
-def launch_key(kind: str, identity: str) -> str:
-    """実行の鍵（`<種類>-<12 字>`）。`kind` は英小文字と数字だけ。"""
-    if not KIND_RE.match(kind):
-        raise DurableError(f"耐久の記録の種類は英小文字と数字だけ: {kind!r}")
-    return f"{kind}-{key_hash(identity)}"
-
-
-def record_path(kind: str, identity: str) -> Path:
-    """耐久の記録のファイル。無ければ DBOS を起動せずに「積んでいない」と答えられる。"""
-    return records_dir() / f"{launch_key(kind, identity)}.sqlite"
+# ---- 置き場と鍵（`durable_keys.py`。DBOS を読まずに記録の有無を答えるため分けた） ----
 
 
 def _url(path: Path) -> str:
