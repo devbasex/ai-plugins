@@ -38,6 +38,7 @@ TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
 NAME_ENV = "NDF_CLAUDE_ACCOUNT"
 # アカウントのスコープ（空白区切り）。無いと Claude Code は変数のトークンを `user:inference` だけとみなす（#1523）
 SCOPES_ENV = "CLAUDE_CODE_OAUTH_SCOPES"
+USAGE_SCOPE = "user:profile"  # 使用量の取得先が要るスコープ
 # 認証の優先順位でトークンより上に来る変数（アカウントの子で外す）と、専用の設定ディレクトリの claude で外す変数
 FOREIGN_AUTH_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX")
 AUTH_ENV = (TOKEN_ENV, SCOPES_ENV, NAME_ENV, *FOREIGN_AUTH_ENV)
@@ -418,7 +419,7 @@ def _fetch(name: str, before: float | None, now: float) -> Usage:
     if tok is None:
         return Usage(fetched_at=now, error="token")
     o = _creds(name) or {}
-    if "user:profile" not in (o.get("scopes") or ["user:profile"]):
+    if USAGE_SCOPE not in (o.get("scopes") or [USAGE_SCOPE]):
         return Usage(fetched_at=now, error="scope")
     status, u = get_usage(tok, now)
     if status == 401 and before is not None:
