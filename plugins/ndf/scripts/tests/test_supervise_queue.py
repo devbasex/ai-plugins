@@ -64,7 +64,10 @@ def test_groups_join_chained_overlaps_and_keep_the_order():
 def test_tags_come_from_the_step_type_and_the_command():
     assert admission.tags({"type": "pr"}, RES) == ["graphql"] and admission.tags({"type": "drive"}, RES) == ["graphql"]
     assert admission.tags({"type": "run", "cmd": "python3 /x/merged-steps.py merge-when-green 1"}, RES) == ["graphql"]
-    assert admission.tags({"type": "run", "cmd": "pytest"}, RES) == [] and admission.tags({"type": "work", "prompt": "merged-steps.py"}, RES) == []
+    assert (
+        admission.tags({"type": "run", "cmd": "pytest"}, RES) == []
+        and admission.tags({"type": "work", "prompt": "merged-steps.py"}, RES) == []
+    )
     two = {**RES, "api": {"limit": 1, "types": [], "commands": ["merged-steps.py", "curl"]}}
     assert admission.tags({"type": "run", "cmd": "merged-steps.py"}, two) == ["api", "graphql"]
 
@@ -73,8 +76,13 @@ def test_tags_come_from_the_step_type_and_the_command():
 
 
 def test_queue_decl_defaults_and_overrides():
-    assert decl.queue_decl({}) == {"resources": {"graphql": {"limit": 2, "types": ["pr", "drive"], "commands": ["merged-steps.py"]}}, "shared": []}
-    got = decl.queue_decl({"queue": {"resources": {"graphql": {"limit": 1}, "api": {"limit": 3, "commands": ["curl"]}}, "shared": [{"path": "i.md"}]}})
+    assert decl.queue_decl({}) == {
+        "resources": {"graphql": {"limit": 2, "types": ["pr", "drive"], "commands": ["merged-steps.py"]}},
+        "shared": [],
+    }
+    got = decl.queue_decl(
+        {"queue": {"resources": {"graphql": {"limit": 1}, "api": {"limit": 3, "commands": ["curl"]}}, "shared": [{"path": "i.md"}]}}
+    )
     assert got["resources"]["graphql"] == {"limit": 1, "types": ["pr", "drive"], "commands": ["merged-steps.py"]}
     assert got["resources"]["api"] == {"limit": 3, "types": [], "commands": ["curl"]}
     assert got["shared"] == [{"path": "i.md", "touched_by": ["i.md"]}]
@@ -238,6 +246,17 @@ def test_a_malformed_declaration_stops_the_queue_before_any_plan_runs(tmp_path, 
     assert q.visits() == [] and not list(durable.records_dir().glob("queue-*.sqlite"))
 
 
+def test_a_plan_ending_with_an_exception_does_not_stop_the_other_plans(tmp_path, env):
+    q = Queue(tmp_path, env)
+    good = q.plan("good", [run_step(note(tmp_path, "g"))])
+    bad = q.plan("bad", [{"id": "x", "cmd": "true"}])  # type の無いステップは Engine の中で例外になる
+    p, res = q.run(bad, good)
+    items = {Path(i["plan"]).stem: i for i in res["items"]}
+    assert p.returncode == 1 and res["status"] == "stopped", p.stderr
+    assert items["good"]["result"] == "完了" and q.visits() == ["g"]
+    assert items["bad"]["result"] == "報告なし" and items["bad"]["exit"] == 1 and "KeyError" in items["bad"]["reason"]
+
+
 # ---- C-5・I21: 資源の枠 ----
 
 
@@ -296,7 +315,11 @@ def test_killed_queue_continues_from_the_running_step_and_then_runs_the_next_sta
     q.kill_when(lambda: (q.state(b) / "report.md").exists() and q.sleeping(a, "a2"), *args)
     assert sorted(q.visits()) == ["a1", "a2", "b1"] and not (t / "done.json").exists()
     p, res = q.run(*args)
-    assert p.returncode == 0 and [(Path(i["plan"]).stem, i["result"]) for i in res["items"]] == [("a", "完了"), ("b", "完了"), ("c", "完了")], p.stderr
+    assert p.returncode == 0 and [(Path(i["plan"]).stem, i["result"]) for i in res["items"]] == [
+        ("a", "完了"),
+        ("b", "完了"),
+        ("c", "完了"),
+    ], p.stderr
     assert sorted(q.visits()[:3]) == ["a1", "a2", "b1"] and q.visits()[3:] == ["a2", "a3", "c1"]  # 済んだステップとプランは流し直さない
     assert "を続ける" in p.stderr
     assert q.step_lines(a) == ["a1", "a2", "a3"] and q.step_lines(b) == ["b1"]  # C-3c: step の行は 2 度書かれない
@@ -324,6 +347,39 @@ def test_killed_queue_reruns_the_tagged_step_once(tmp_path, env):
     assert q.visits() == ["a1", "a2", "a2", "a3"] and q.step_lines(a) == ["a1", "a2", "a3"]
 
 
+def test_killed_queue_keeps_the_branch_taken_before_the_kill(tmp_path, env):
+    t, q = tmp_path, Queue(tmp_path, env)
+    a = q.plan("a", [
+        {**run_step(note(t, "t", "exit 1"), "t"), "on_fail": "fix"},
+        {**run_step(note(t, "ok"), "ok"), "next": "end"},
+        {**run_step(once_slow(t, "fix"), "fix"), "next": "after"},
+        run_step(note(t, "after"), "after"),
+    ])  # fmt: skip
+    q.kill_when_sleeping(a, "fix", a)
+    p, res = q.run(a)
+    assert p.returncode == 0 and res["items"][0]["result"] == "完了", p.stderr
+    assert q.visits() == ["t", "fix", "fix", "after"] and q.step_lines(a) == ["t", "fix", "after"]
+
+
+def test_killed_queue_counts_the_rounds_of_a_loop_across_the_kill(tmp_path, env):
+    """on_fail で戻るループの途中で落ちても、済んだ回を流し直さずに同じ回数で終わる。"""
+    t, q = tmp_path, Queue(tmp_path, env)
+    count = t / "count"
+    bump = f"n=$(cat {count} 2>/dev/null || echo 0); n=$((n+1)); echo $n > {count}; [ $n -ge 4 ]"
+    sleep_once = (
+        f"[ $(cat {count}) -eq 2 ] && [ ! -f {t / 'fix.slept'} ] && touch {t / 'fix.slept'} && echo $$ > {t / 'fix.pid'} && sleep 60; true"
+    )
+    a = q.plan("a", [
+        {**run_step(note(t, "check", bump), "check"), "on_fail": "fix", "next": "end"},
+        {**run_step(note(t, "fix", sleep_once), "fix"), "next": "check"},
+    ])  # fmt: skip
+    q.kill_when_sleeping(a, "fix", a)
+    p, res = q.run(a)
+    assert p.returncode == 0 and res["items"][0]["result"] == "完了", p.stderr
+    assert q.visits() == ["check", "fix", "check", "fix", "fix", "check", "fix", "check"] and count.read_text().strip() == "4"
+    assert q.step_lines(a) == ["check", "fix", "check", "fix", "check", "fix", "check"]
+
+
 def test_a_gate_stays_a_gate_and_a_stopped_plan_runs_again_from_the_top(tmp_path, env):
     t, q = tmp_path, Queue(tmp_path, env)
     gate = q.plan("gate", [{**run_step(note(t, "g1", "exit 10"), "g1"), "gate_next": "end"}])
@@ -331,7 +387,10 @@ def test_a_gate_stays_a_gate_and_a_stopped_plan_runs_again_from_the_top(tmp_path
     for _ in range(2):
         p, res = q.run(gate, stop)
         assert p.returncode == 1 and {Path(i["plan"]).stem: i["result"] for i in res["items"]} == {"gate": "関門", "stop": "止まった"}
+        events = [json.loads(ln) for ln in p.stdout.splitlines()[:-1]]
+        assert [(Path(e["plan"]).stem, e["reason"]) for e in events if e["reason"] == "関門"] == [("gate", "関門")]  # 打ち直しでも知らせる
     assert sorted(q.visits()) == ["g1", "s1", "s1", "s2", "s2"]  # 関門は同じ所で止まったまま、止まったプランは頭から
+    assert q.step_lines(gate) == ["g1"]
 
 
 def test_relaunching_with_other_plans_cancels_the_running_queue_before_launch(tmp_path, env):

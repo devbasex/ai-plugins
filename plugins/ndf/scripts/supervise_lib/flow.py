@@ -39,6 +39,7 @@ from supervise_lib import admission, paths
 from supervise_lib import queue as queue_files
 from supervise_lib.decl import QUEUE_RESOURCES, SUPERVISE_DECL, DeclError, decl_roots, queue_decl, read_decl
 from supervise_lib.engine import Engine
+from supervise_lib.state import RunState
 from supervise_lib.worker_steps import CONCURRENT_FILES
 
 FINISHED = ("完了", "関門")  # 打ち直しでも流し直さない結果（止まったは次の実行の回で頭から流す）
@@ -274,7 +275,8 @@ def fill_step(first: bool, stage: list[str], items: list[dict]) -> dict:
 def admit_step(plans: list[str], shared: list[dict]) -> dict:
     """流すプランの実行の回を選び、重なりの組を数えて標準エラーへ知らせる（耐久ステップの中なので、打ち直しで 2 度出ない）。
 
-    完了か関門の記録があるプランは流し直さず、並行中にも数えない。キューの外のプランは候補に入らない（C-4）。"""
+    完了か関門の記録があるプランは流し直さず、並行中にも数えない。キューの外のプランは候補に入らない（C-4）。
+    関門の記録があるプランは、記録した関門の attention を進捗ログへ書き直す。"""
     refs: dict[str, dict] = {}
     files: dict[str, list[str]] = {}
     for p in plans:
@@ -284,6 +286,8 @@ def admit_step(plans: list[str], shared: list[dict]) -> dict:
         refs[p] = {"prefix": prefix, "id": ref.id, "action": ref.action, "output": ref.output}
         if ref.action != "done":
             files[p] = queue_files.touched_files(body)
+        elif ref.output.get("result") == "関門":  # 承認の無い打ち直しでも、conductor へもう一度知らせる
+            RunState(paths.state_dir_of(p), json.loads(body)).retell_gates(ref.output.get("gates") or [])
     grouped = admission.groups(files, shared)
     pairs = admission.overlaps(files, shared)
     for o in pairs:
