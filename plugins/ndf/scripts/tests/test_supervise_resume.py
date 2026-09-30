@@ -109,10 +109,11 @@ def wait_for(cond, timeout: float = 60.0) -> None:
 
 
 def kill_when_sleeping(plan: Plan, sid: str, fmt: str = "-") -> int:
-    """`sid` が眠り始めたら起動を kill -9 する。ステップの子（シェル）の pid を返す。"""
+    """`sid` が眠り始め、`step.pid` に子が載ったら起動を kill -9 する。ステップの子（シェル）の pid を返す。"""
     proc = plan.spawn(fmt)
     pidfile = plan.tmp / f"{sid}.pid"
     wait_for(lambda: pidfile.exists() and pidfile.read_text().strip())
+    wait_for(lambda: '"children": [{' in ((plan.state / "step.pid").read_text() if (plan.state / "step.pid").exists() else ""))
     os.kill(proc.pid, signal.SIGKILL)
     proc.wait(timeout=10)
     return int(pidfile.read_text())
