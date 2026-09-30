@@ -379,6 +379,12 @@
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
+      "term": "導入の確認",
+      "context": "ndf-workflow",
+      "meaning": "`.ndf/pace.json` の `<節>.verify` に書かれたコマンドを、ベースブランチの先頭で走らせること。pace: fast / auto の承認ゲート 2 の前に走り、終了コードを承認資料へ載せ、出力は所有者だけが読めるログへ分ける",
+      "pending_source": "issues/issue-1457-design.md"
+    },
+    {
       "term": "リリース完了の確認",
       "context": "ndf-workflow",
       "meaning": "公開が済んだことを、リリース先の状態から読み取れる値",
@@ -2440,6 +2446,12 @@
       "meaning": "ベースブランチから本番チャネルへ変更を入れる Pull Request",
       "code": "promotion_pr",
       "pending_source": "issues/issue-1336-design.md"
+    },
+    {
+      "term": "昇格のプラン",
+      "context": "ndf-release",
+      "meaning": "リリースの経路 promote のための「本番」のステージのプラン（plan_promote）。昇格の Pull Request を作り、承認ゲート 2 の後にマージする",
+      "pending_source": "issues/issue-1457-design.md"
     },
     {
       "term": "プロダクトバックログ",
