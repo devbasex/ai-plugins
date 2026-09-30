@@ -378,11 +378,8 @@ class Drive:
         ref = durable.resolve(durable.launch_key(KIND, identity), finished=finished)
         if ref.action == "done":
             return ref.output["result"]
+        after = durable.resume_paused(ref)
         wid = durable.start(ref, refactor_drive, self.pr, self.init_args)
-        seen = durable.event(wid) if ref.action == "continue" else None
-        after = int(seen["seq"]) if isinstance(seen, dict) else 0
-        if after:
-            durable.resume(wid, after)
         out = durable.wait(wid, "pause", after=after)
         if out.kind == "event":
             self.paused = True

@@ -389,3 +389,16 @@ def test_continue_reads_the_event_seq_and_resume_accepts_a_ref_or_an_id(opened):
     assert durable.wait(wid, "pause", after=1, timeout=30).value == {"seq": 2, "result": "again"}
     durable.resume(wid, 2, note="done")
     assert durable.wait(wid, "pause", after=2, timeout=30) == durable.Outcome("done", [1, 2, "done"])
+
+
+def test_resume_paused_sends_the_seq_on_continue_and_returns_0_on_start(opened):
+    durable.launch("review", "paused")
+    ref = durable.resolve("review-paused")
+    assert durable.resume_paused(ref) == 0
+    wid = durable.start(ref, waits_for_resume)
+    assert durable.wait(wid, "pause", timeout=30).value == {"seq": 1, "result": "stop"}
+    again = durable.resolve("review-paused")
+    assert again.action == "continue" and durable.resume_paused(again) == 1
+    assert durable.wait(wid, "pause", after=1, timeout=30).value == {"seq": 2, "result": "again"}
+    durable.resume(wid, 2)
+    assert durable.wait(wid, "pause", after=2, timeout=30).kind == "done"

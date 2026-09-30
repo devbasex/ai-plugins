@@ -385,6 +385,18 @@ def event(wid: str, key: str = "pause") -> Any:
     return DBOS.get_event(wid, key, timeout_seconds=0)
 
 
+def resume_paused(ref: WorkflowRef, event: str = "pause") -> int:
+    """`ref` が `continue` でイベント `event` が立っていれば、その `seq` へ続きを送って `seq` を返す。それ以外は 0。"""
+    if ref.action != "continue":
+        return 0
+    ev = DBOS.get_event(ref.id, event, timeout_seconds=0)
+    if not isinstance(ev, dict):
+        return 0
+    seq = int(ev.get("seq") or 0)
+    resume(ref, seq)
+    return seq
+
+
 def wait(wid: str, key: Optional[str] = None, after: int = 0, poll: float = POLL_SECONDS, timeout: Optional[float] = None) -> Outcome:
     """耐久ワークフローの終わりか、イベント `key` の `seq` が `after` を超えるまで待つ。`timeout` 秒を過ぎたら `Outcome("timeout")`。"""
     deadline = None if timeout is None else time.monotonic() + timeout

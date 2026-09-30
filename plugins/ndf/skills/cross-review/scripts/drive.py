@@ -383,12 +383,7 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
         ref = durable.resolve(f"review-{durable.key_hash(identity)}", finished=self.finished)
         if ref.action == "done":
             return ref.output["result"], ref.output["code"]
-        seen = 0
-        if ref.action == "continue":
-            ev = durable.event(ref.id)
-            if isinstance(ev, dict):
-                seen = int(ev.get("seq") or 0)
-                durable.resume(ref, seen)  # 止まりの続き。結果ファイルが無ければ同じ段階がもう一度止まる
+        seen = durable.resume_paused(ref)  # 止まりの続き。結果ファイルが無ければ同じ段階がもう一度止まる
         durable.start(ref, review_drive, self.pr, self.rotate_mode, self.init_args)
         got = durable.wait(ref.id, "pause", after=seen)
         if got.kind in ("event", "done"):
