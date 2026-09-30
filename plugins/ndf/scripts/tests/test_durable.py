@@ -93,6 +93,13 @@ CHILD = textwrap.dedent(
         durable.launch("run", "ident")
         print("held", flush=True)
         time.sleep(120)
+    elif mode == "ports":
+        import psutil
+
+        durable.launch("run", "ports", queues={{"plans": {{"worker_concurrency": 2}}}})
+        time.sleep(0.5)
+        conns = psutil.Process().net_connections(kind="inet")
+        print(json.dumps([c.laddr.port for c in conns if c.status == psutil.CONN_LISTEN]), flush=True)
     elif mode == "second":
         try:
             durable.launch("run", "ident", lock_timeout=0.5)
@@ -221,11 +228,12 @@ def test_one_process_opens_one_record(opened):
         durable.launch("run", "two")
 
 
-def test_no_port_is_listened_while_launched(opened):
-    psutil = pytest.importorskip("psutil")
-    durable.launch("run", "ports", queues={"plans": {"worker_concurrency": 2}})
-    listening = [c for c in psutil.Process().net_connections(kind="inet") if c.status == psutil.CONN_LISTEN]
-    assert listening == []
+def test_no_port_is_listened_while_launched(child):
+    pytest.importorskip("psutil")
+    out = child("ports")
+    assert out.returncode == 0, out.stderr
+    assert json.loads(out.stdout) == []
+    assert list(durable.records_dir().glob("run-*.sqlite"))
 
 
 def test_enqueue_runs_on_a_registered_queue_and_an_empty_listen_leaves_it_queued(opened):

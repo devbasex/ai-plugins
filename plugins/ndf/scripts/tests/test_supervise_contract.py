@@ -148,7 +148,11 @@ def observe_results(tmp: Path) -> dict:
 
     done = tmp / "q2" / "done.json"
     p = cli("queue", str(runnable(tmp, "stop")), "--poll", "0.2", "--done", str(done), cwd=tmp)
-    obs["queue stop"] = {"exit": p.returncode, **shape(last_json(p.stdout)), "results": [it.get("result") for it in last_json(p.stdout)["items"]]}
+    obs["queue stop"] = {
+        "exit": p.returncode,
+        **shape(last_json(p.stdout)),
+        "results": [it.get("result") for it in last_json(p.stdout)["items"]],
+    }
 
     done = tmp / "q3" / "done.json"
     p = cli("queue", str(runnable(tmp, "gate")), "--then", str(runnable(tmp, "ok")), "--poll", "0.2", "--done", str(done), cwd=tmp)
