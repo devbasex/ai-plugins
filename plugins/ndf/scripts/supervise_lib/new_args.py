@@ -271,28 +271,47 @@ def fill_new_defaults(a) -> None:
             setattr(a, dest, kw.get("default", False if kw.get("action") == "store_true" else None))
 
 
+def _check_impl(ap: argparse.ArgumentParser, a) -> None:
+    if not (a.issue and a.tests and a.title):
+        ap.error("new impl には --issue・--tests・--title が要る")
+
+
+def _check_fix(ap: argparse.ArgumentParser, a) -> None:
+    if not ((a.worktree or a.branch) and a.tests and a.title):
+        ap.error("new fix には --worktree か --branch・--tests・--title が要る")
+    if not a.worktree:
+        a.worktree = fix_worktree(a.branch)
+
+
+def _check_check(ap: argparse.ArgumentParser, a) -> None:
+    if a.since_last and a.pr:
+        ap.error("new check の --since-last と --pr は同時に渡せない")
+    if a.since_last and not a.id:
+        ap.error("new check --since-last には --id（検査の名前）が要る")
+    if a.review_only and not a.since_last:
+        ap.error("new check の --review-only は --since-last と組にする")
+    if a.review_only and a.final:
+        ap.error("new check の --review-only と --final は同時に渡せない")
+    if not (a.pr or a.since_last):
+        ap.error("new check には --pr か --since-last が要る")
+
+
+def _check_release(ap: argparse.ArgumentParser, a) -> None:
+    if not (a.version and (a.prs or a.prs_from_queue) and a.channel):
+        ap.error("new release には --version・--prs（か --prs-from-queue）・--channel が要る")
+    if not (a.repo or "/.worktrees/" in a.worktree):
+        ap.error("new release には --repo が要る（作業場所が /.worktrees/ の下に無い）")
+
+
+# 種類ごとの引数の組の検査（表に無い種類は確かめない）
+NEW_CHECKS = {"impl": _check_impl, "fix": _check_fix, "check": _check_check, "release": _check_release}
+
+
 def check_new(ap: argparse.ArgumentParser, a) -> None:
     """impl / fix / check / release の引数の組を確かめる（足りなければ ap.error で終了コード 2）。"""
-    if a.kind == "impl" and not (a.issue and a.tests and a.title):
-        ap.error("new impl には --issue・--tests・--title が要る")
-    if a.kind == "fix" and not ((a.worktree or a.branch) and a.tests and a.title):
-        ap.error("new fix には --worktree か --branch・--tests・--title が要る")
-    if a.kind == "fix" and not a.worktree:
-        a.worktree = fix_worktree(a.branch)
-    if a.kind == "check" and a.since_last and a.pr:
-        ap.error("new check の --since-last と --pr は同時に渡せない")
-    if a.kind == "check" and a.since_last and not a.id:
-        ap.error("new check --since-last には --id（検査の名前）が要る")
-    if a.kind == "check" and a.review_only and not a.since_last:
-        ap.error("new check の --review-only は --since-last と組にする")
-    if a.kind == "check" and a.review_only and a.final:
-        ap.error("new check の --review-only と --final は同時に渡せない")
-    if a.kind == "check" and not (a.pr or a.since_last):
-        ap.error("new check には --pr か --since-last が要る")
-    if a.kind == "release" and not (a.version and (a.prs or a.prs_from_queue) and a.channel):
-        ap.error("new release には --version・--prs（か --prs-from-queue）・--channel が要る")
-    if a.kind == "release" and not (a.repo or "/.worktrees/" in a.worktree):
-        ap.error("new release には --repo が要る（作業場所が /.worktrees/ の下に無い）")
+    check = NEW_CHECKS.get(a.kind)
+    if check is not None:
+        check(ap, a)
 
 
 def check_sprint(ap: argparse.ArgumentParser, a) -> None:
