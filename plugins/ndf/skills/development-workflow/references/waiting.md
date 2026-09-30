@@ -96,10 +96,10 @@
 `step` / `alive` / `worker` の行では起きない。
 
 ```bash
-# Bash の run_in_background: true で起動する（前景で打たない）。S はプランの状態ディレクトリ
+# Bash の run_in_background: true で起動する（前景で打たない）。S はプランの状態ディレクトリ、最後の 3600 が上限の秒数
 S="<プラン>-state"; n=$(cat "$S/progress.jsonl" 2>/dev/null | grep -c '"kind": "attention"')
-timeout 3600 bash -c 'c() { cat "$1/progress.jsonl" 2>/dev/null | grep -c "\"kind\": \"attention\""; }
-until [ -s "$1/report.md" ] || [ "$(c "$1")" -gt "$2" ]; do sleep 5; done' _ "$S" "$n"; rc=$?; echo "exit=$rc"; exit "$rc"
+bash -c 'c() { cat "$1/progress.jsonl" 2>/dev/null | grep -c "\"kind\": \"attention\""; }
+until [ -s "$1/report.md" ] || [ "$(c "$1")" -gt "$2" ]; do [ "$SECONDS" -lt "$3" ] || exit 124; sleep 5; done' _ "$S" "$n" 3600; rc=$?; echo "exit=$rc"; exit "$rc"
 ```
 
 - `queue` で流すときは、この until ループの代わりに `supervise.py wait` で待つ（次の節）
@@ -205,8 +205,8 @@ interim」）で行う。
 （[agent-layers.md](agent-layers.md) の起動指示の `置き場所`）。
 
 ```bash
-# Bash の run_in_background: true で起動する（前景で打たない）
-timeout 3600 bash -c 'until [ -e "$1.done" ]; do sleep 5; done' _ "<置き場所>"; rc=$?; echo "exit=$rc"; exit "$rc"
+# Bash の run_in_background: true で起動する（前景で打たない）。最後の 3600 が上限の秒数
+bash -c 'until [ -e "$1.done" ]; do [ "$SECONDS" -lt "$2" ] || exit 124; sleep 5; done' _ "<置き場所>" 3600; rc=$?; echo "exit=$rc"; exit "$rc"
 ```
 
 | 終了コード | supervisor の動き |

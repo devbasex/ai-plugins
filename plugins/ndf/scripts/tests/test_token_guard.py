@@ -20,6 +20,7 @@ import sys
 import threading
 
 import pytest
+from waiting_templates import attention_template, done_template
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "hook.py"
@@ -200,6 +201,14 @@ def test_sleep_denied_on_hour_and_day_units(cmd, state):
 def test_background_bash_is_allowed(state):
     p = bash("sleep 30 && tail x", run_in_background=True)
     assert denied(run(p, state)) is None
+
+
+@pytest.mark.parametrize("template", ["attention", "done"])
+def test_waiting_templates_need_background(template, state):
+    # waiting.md の待ちの雛形（#1297）: 前景は拒み、run_in_background: true は通す
+    cmd = attention_template("/tmp/p-state", 3600) if template == "attention" else done_template("/tmp/w/report.md", 3600)
+    assert denied(run(bash(cmd), state))
+    assert denied(run(bash(cmd, run_in_background=True), state)) is None
 
 
 def test_monitor_is_not_judged(state):

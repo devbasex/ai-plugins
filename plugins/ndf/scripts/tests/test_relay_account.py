@@ -100,7 +100,15 @@ def test_add_bedrock_interactive_then_list(tmp_path, accounts, aws):  # noqa: F8
     }
     assert oct(metered_file(accounts).stat().st_mode & 0o777) == "0o600"
     lines = run(tmp_path, accounts, aws, "list").stdout.splitlines()
-    assert any(x.startswith("metered") and "bedrock-dev" in x and "us-west-2" in x and MODEL in x and "保存した宣言" in x for x in lines)
+    assert any(
+        x.startswith("metered")
+        and "bedrock-dev" in x
+        and "us-west-2" in x
+        and MODEL.removeprefix("us.anthropic.") in x
+        and MODEL not in x
+        and "保存した宣言" in x
+        for x in lines
+    )
 
 
 def test_add_bedrock_single_profile_confirm(tmp_path, accounts, aws):  # noqa: F811

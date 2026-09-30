@@ -69,6 +69,14 @@ def relay_uv(tmp_path, monkeypatch):
     monkeypatch.setenv("NDF_RELAY_UV", str(fake_uv(tmp_path)))
 
 
+@pytest.fixture(autouse=True)
+def relay_accounts_dir(tmp_path, monkeypatch):
+    """アカウントの置き場を空の一時ディレクトリへ向ける。向けないと、実行した人の `~/.claude/ndf/accounts` の
+    `metered.json`（保存した従量の接続の宣言）を `fallback_env` が読み、宣言の無い前提のテストが落ちる。
+    `accounts` のフィクスチャはこの後に自分の置き場へ向け直す。"""
+    monkeypatch.setenv("NDF_ACCOUNTS_DIR", str(tmp_path / "no-accounts"))
+
+
 def isolated_env(tmp_path, **extra):
     """一時の HOME と XDG_* だけを持つ環境。本物の HOME を指さないことを確かめてから返す。
 
@@ -3188,16 +3196,15 @@ def test_account_add_list_remove(tmp_path, accounts):
     lines = p.stdout.splitlines()
     assert lines[0].split() == ["名前", "識別", "5", "時間", "7", "日", "モデル別の週", "支出上限", "枠の大きさ", "残り", "状態"]
     assert any(
-        line.startswith("work1")
-        and "a@example.com" in line
-        and "15%" in line
-        and "3%" in line
-        and "達していない" in line
-        and "使える" in line
+        line.startswith("work1") and "a@example.com" in line and "15%" in line and "3%" in line and " no " in line and "使える" in line
         for line in lines
     )
+    assert "達して" not in p.stdout  # 支出上限の列は yes / no の短い語
+    assert "%（" not in p.stdout  # 表の使用率の列にリセットの日付と時刻を添えない
     rows = json.loads(account_cmd(tmp_path, accounts, "list", "--json", tty=False).stdout)
     assert [r["name"] for r in rows] == ["work1", "work2"] and rows[0]["five_hour"]["utilization"] == 15
+    assert rows[0]["five_hour"]["resets_at"] and rows[0]["seven_day"]["resets_at"]  # JSON にはリセットの時刻を残す
+    assert rows[0]["spend_limit_reached"] is False  # JSON は真偽値のまま
     assert all(c["argv"][:1] == ["auth"] for c in auth_calls(tmp_path))  # 推論を呼ばない
     assert all(c["token"] is None for c in auth_calls(tmp_path))
     for d in ("work1", "work2"):
@@ -3241,7 +3248,26 @@ def test_account_add_same_email_other_org(tmp_path, accounts):
     ]
     lines = account_cmd(tmp_path, accounts, "list", tty=False).stdout.splitlines()
     assert any(line.startswith("work2") and "a@example.com（Team A）" in line for line in lines)
+    assert any(line.startswith("work1") and "a@example.com（個人）" in line for line in lines)  # 個人の組織の既定の名前は短く
+    assert "'s Organization" not in "\n".join(lines)
     assert sorted(p.name for p in accounts.root.iterdir() if not p.name.endswith(".lock")) == ["work1", "work2"]
+
+
+@pytest.mark.parametrize(
+    ("profile", "label"),
+    [("default", "Bedrock（ap-northeast-1・claude-opus-5-5）"), ("dev", "Bedrock（dev・ap-northeast-1・claude-opus-5-5）")],
+)
+def test_account_list_metered_label_is_short(tmp_path, accounts, profile, label):
+    """表の metered の識別は地域の接頭辞と `anthropic.` を外したモデル名にし、プロファイルは default 以外のときだけ出す。"""
+    details = {"profile": profile, "region": "ap-northeast-1", "model": "jp.anthropic.claude-opus-5-5"}
+    decl = {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": profile, "AWS_REGION": "ap-northeast-1"}
+    accounts.write(
+        accounts.root / "metered.json", {"version": 1, "provider": "bedrock", "env": decl, "details": details, "verified_at": "x"}
+    )
+    lines = account_cmd(tmp_path, accounts, "list", tty=False).stdout.splitlines()
+    assert any(line.startswith("metered") and label in line for line in lines), lines
+    rows = json.loads(account_cmd(tmp_path, accounts, "list", "--json", tty=False).stdout)
+    assert rows[-1]["details"] == details  # JSON の出力は変えない
 
 
 def test_account_add_same_email_without_known_org_rejects(tmp_path, accounts):

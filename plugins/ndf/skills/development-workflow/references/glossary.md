@@ -154,7 +154,7 @@ flowchart TB
 | suite の種別 | テストの宣言の suite がテスト（`test`）か静的解析（`lint`。整形の検査を含む）か。書かなければテスト。テストの suite の範囲は対象のテスト、静的解析の suite の範囲は変更したファイルのうち `paths` に当たるもの | `.ndf/project.json` の `test.suites[].kind`、引数 `--test-kind` | [project-analysis.md](project-analysis.md) の P2 |
 | 起動の失敗 | テストのコマンドのプロセスを起動できない、またはシェルが終了コード 126 / 127 を返したこと。テストが落ちたこととは別に扱い、その時点で止まる | `launch_failed`、`launch_failure` | [cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
 | JUnit の置き場 | テストのコマンドが JUnit XML を書くファイルの、作業ディレクトリからの相対パス（宣言の `suites[].junit`）。NDF はコマンドへ引数を足さず、このファイルから落ちたテストの ID を読む | `junit` | [project-analysis.md](project-analysis.md) の P2 |
-| 全体テスト | リポジトリ全体を範囲にするテスト。戦略が `local-scoped-ci-whole` なら手元で走らせず CI の結果で見る | プランの `test-all` のステップ、`.ndf/project.json` の `test.suites[].command` | [supervise.py](../../../scripts/supervise.py) の docstring |
+| 全体テスト | リポジトリ全体を範囲にするテストか静的解析。テストは宣言の `command`、無ければ範囲テストの雛形の `{paths}` を `.` にしたもの（その旨を注記 `WHOLE_FROM_TEMPLATE` に残す）。静的解析は宣言の `command`、無ければ雛形の `{paths}` を範囲のパスで埋めたもの（範囲のパスが無ければ組まず、注記 `NO_LINT_WHOLE` を残す）。戦略が `local-scoped-ci-whole` なら手元で走らせず CI の結果で見る | プランの `test-all` のステップ、`.ndf/project.json` の `test.suites[].command` | [supervise.py](../../../scripts/supervise.py) の docstring |
 | 危険フラグ | `cross-refactoring` で、範囲テストでは覆えない変更（D1〜D5）。立てば全体テストを 1 度走らせる | D1〜D5 | [cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
 | グレード | `cross-refactoring` が候補ごとに付ける適用の価値（high / medium / low）。改善項目の順位の最初のキー | `tier` | [cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
 | コメントのスナップショット | `cross-review` が取る既存コメントの一覧。2 ラウンド目以降は取り直す | `state.py init` | [cross-review](../../cross-review/SKILL.md) |

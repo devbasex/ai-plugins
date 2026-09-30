@@ -379,6 +379,12 @@
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
+      "term": "導入の確認",
+      "context": "ndf-workflow",
+      "meaning": "`.ndf/pace.json` の `<節>.verify` に書かれたコマンドを、ベースブランチの先頭で走らせること。pace: fast / auto で、経路 promote では承認ゲート 2 の前に、経路 merge だけのときは検査の後に走り、終了コードを承認資料へ載せ、出力は所有者だけが読めるログへ分ける",
+      "pending_source": "issues/issue-1457-design.md"
+    },
+    {
       "term": "リリース完了の確認",
       "context": "ndf-workflow",
       "meaning": "公開が済んだことを、リリース先の状態から読み取れる値",
@@ -914,7 +920,7 @@
     {
       "term": "投稿キュー",
       "context": "ndf-cross-review",
-      "meaning": "送る前に投稿を積み、上限で送れなければ残す仕組み（lib/post_queue.py）",
+      "meaning": "送る前に投稿を積み、上限で送れなければ残す仕組み（lib/post_queue.py）。スプリント 2c の後、項目は耐久の記録に置く",
       "code": "post_queue",
       "source": "docs/specifications/cross-review-writes-to-conductor.md",
       "deprecated": [
@@ -1408,6 +1414,12 @@
       "deprecated": [
         "完了の目印"
       ]
+    },
+    {
+      "term": "待ちの雛形",
+      "context": "ndf-workflow",
+      "meaning": "waiting.md が持つ、背景で起動して条件が成り立つまで待つ until ループのコマンド。成り立てば 0、上限に達すれば 124 で終わり、exit=<終了コード> を出す",
+      "source": "plugins/ndf/skills/development-workflow/references/waiting.md"
     },
     {
       "term": "横断 Skill",
@@ -1933,7 +1945,7 @@
     {
       "term": "全体テスト",
       "context": "ndf-workflow",
-      "meaning": "リポジトリ全体を範囲にするテスト",
+      "meaning": "リポジトリ全体を範囲にするテストか静的解析。テストは宣言の suites[].command、無ければ雛形の {paths} を . にしたもの（その旨を注記に残す）。静的解析は宣言の command、無ければ雛形の {paths} を範囲のパスで埋めたもの（範囲のパスが無ければ組まず、その旨を注記に残す）",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
       "deprecated": [
         "全体のテスト"
@@ -2056,7 +2068,7 @@
       "term": "drive の状態",
       "code": "drive_state",
       "context": "ndf-cross-review",
-      "meaning": "収束ループの drive.py が Pull Request ごとに持つ状態ファイル（drive-pr<N>.json / drive-rf<ID>.json）。stage と init_vars を持つ",
+      "meaning": "収束ループの drive.py が Pull Request ごとに持つ状態ファイル（drive-pr<N>.json / drive-rf<ID>.json）。stage と init_vars を持つ。スプリント 2c の Q3・Q4 で耐久の記録へ移して廃止する",
       "pending_source": "issues/issue-1142-design.md"
     },
     {
@@ -2442,6 +2454,12 @@
       "pending_source": "issues/issue-1336-design.md"
     },
     {
+      "term": "昇格のプラン",
+      "context": "ndf-release",
+      "meaning": "リリースの経路 promote のための「本番」のステージのプラン（plan_promote）。昇格の Pull Request を作り、承認ゲート 2 の後にマージする",
+      "pending_source": "issues/issue-1457-design.md"
+    },
+    {
       "term": "プロダクトバックログ",
       "context": "ndf-issue-upkeep",
       "meaning": "open の課題を着手の順に並べた全体。マイルストーンの順（上の層）→ マイルストーンの中の順位（下の層）の辞書順で読む",
@@ -2646,6 +2664,76 @@
       "context": "ndf-cross-refactoring",
       "meaning": "取り消しで git reset --hard する先。未公開の範囲で最も古い「消すコミット」の親で、公開した地点より前には置かない",
       "pending_source": "issues/issue-1482-design.md"
+    },
+    {
+      "term": "耐久ワークフロー",
+      "context": "ndf-workflow",
+      "meaning": "DBOS の @DBOS.workflow の関数の 1 回の実行。ID を持ち、落ちた後の起動が記録から続ける。プラン 1 本・キュー 1 本・drive 1 回・投稿の項目 1 件がそれぞれ 1 つ",
+      "code": "durable_workflow",
+      "pending_source": "issues/issue-1142-design-dbos.md"
+    },
+    {
+      "term": "耐久ステップ",
+      "context": "ndf-workflow",
+      "meaning": "耐久ワークフローの中で出力を SQLite へ記録する単位（DBOS の @DBOS.step）。記録のある耐久ステップは続けるときに流し直さない。プランのステップとは別の語",
+      "code": "durable_step",
+      "pending_source": "issues/issue-1142-design-dbos.md"
+    },
+    {
+      "term": "耐久キュー",
+      "context": "ndf-workflow",
+      "meaning": "DBOS の register_queue で作る、同時の本数と分割を持つ待ち行列。supervise.py queue（キュー）とは別の語",
+      "code": "durable_queue",
+      "pending_source": "issues/issue-1142-design-dbos.md"
+    },
+    {
+      "term": "耐久の記録",
+      "context": "ndf-workflow",
+      "meaning": "1 回の起動が持つ DBOS の SQLite のファイル（~/.local/state/ndf/dbos/<種類>-<鍵>.sqlite）",
+      "code": "durable_store",
+      "pending_source": "issues/issue-1142-design-dbos.md"
+    },
+    {
+      "term": "実行の鍵",
+      "context": "ndf-workflow",
+      "meaning": "起動を識別する文字列（run-<プランのパスの sha256 の先頭 12 字> など）。耐久の記録のファイル名と executor_id に使う",
+      "code": "run_key",
+      "pending_source": "issues/issue-1142-design-dbos.md"
+    },
+    {
+      "term": "実行の回",
+      "context": "ndf-workflow",
+      "meaning": "同じ実行の鍵の中で、耐久ワークフローを頭から流した 1 回。ID の末尾の番号",
+      "code": "attempt",
+      "pending_source": "issues/issue-1142-design-dbos.md"
+    },
+    {
+      "term": "資源のタグ",
+      "context": "ndf-workflow",
+      "meaning": "ステップが使う、共有する外部の枠の名前（今は graphql だけ）",
+      "code": "resource_tag",
+      "pending_source": "issues/issue-1142-design-dbos.md"
+    },
+    {
+      "term": "資源の枠",
+      "context": "ndf-workflow",
+      "meaning": "資源のタグごとの、同時に流せるステップの本数の上限（.ndf/supervise.json の queue.resources）",
+      "code": "resource_limit",
+      "pending_source": "issues/issue-1142-design-dbos.md"
+    },
+    {
+      "term": "重なりの組",
+      "context": "ndf-workflow",
+      "meaning": "同じステージの 2 本のプランで、触るファイルが包含で重なるか同じ共有の一覧に当たるもの。同時には流さない",
+      "code": "overlap_pair",
+      "pending_source": "issues/issue-1142-design-dbos.md"
+    },
+    {
+      "term": "共有の一覧",
+      "context": "ndf-workflow",
+      "meaning": "複数のプランが同じ行の並びへ書き足すファイル（索引など）。.ndf/supervise.json の queue.shared に書く",
+      "code": "shared_list",
+      "pending_source": "issues/issue-1142-design-dbos.md"
     }
   ]
 }

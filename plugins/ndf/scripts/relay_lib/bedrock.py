@@ -195,6 +195,15 @@ def decl_label(d: dict) -> str:
     return f"Bedrock（{_decl_body(d)}）"
 
 
+def decl_short(d: dict) -> str:
+    """表に出す短い識別（`Bedrock（[<プロファイル>・]<地域>・<モデルの短い名>）`）。プロファイルは default 以外のときだけ出す。"""
+    model = re.sub(r"^(?:[a-z]{2,4}\.)?anthropic\.", "", d.get("model", "-"))
+    parts = [d.get("region", "-"), model]
+    if d.get("profile", "-") != "default":
+        parts.insert(0, d.get("profile", "-"))
+    return f"Bedrock（{'・'.join(parts)}）"
+
+
 def decl_inline(d: dict) -> str:
     """括弧の中に入れる形の識別（`Bedrock・<プロファイル>・<地域>・<モデル>`）。"""
     return f"Bedrock・{_decl_body(d)}"

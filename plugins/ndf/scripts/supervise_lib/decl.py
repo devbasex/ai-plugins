@@ -150,6 +150,9 @@ def apply_decls(a) -> None:
             strategy = ts.resolve(decl, baseline_test=a.test_cmd, template_kind=test_kind(a), scope_paths=scope_paths(a))
         except ts.StrategyError as e:
             raise DeclError(str(e)) from e
+        # 戦略の注記（雛形から組んだ全体テスト・組まなかった静的解析の全体テスト）を計画の作成の時点で知らせる（#1437）
+        for note in strategy.notes:
+            print(f"⚠ {note}", file=sys.stderr, flush=True)
         w, w_source = ts.whole_seconds(decl)
         c = ts.ci_wall_seconds(decl, (strategy.ci or {}).get("check") if strategy.ci else None)
         a.strategy = strategy.as_state()
