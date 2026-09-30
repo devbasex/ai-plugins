@@ -355,3 +355,37 @@ def test_purge_old_removes_unused_records_older_than_30_days(tmp_path: Path):
     assert removed == ["run-a"]
     assert not any(f.exists() for f in stale) and not locks.lock_path(tmp_path / "run-a").exists()
     assert all(f.exists() for f in fresh + busy + mine)
+
+
+# ---- 2 つの drive.py の Drive.run が頼る起動の形（現状固定） ----
+
+
+def test_review_key_built_from_key_hash_equals_launch_key():
+    """cross-review の Drive.run は `review-{key_hash}`、cross-refactoring は `launch_key` で鍵を作る。どちらも同じ鍵になる。"""
+    identity = "/tmp/x/.cross_review"
+    assert f"review-{durable.key_hash(identity)}" == durable.launch_key("review", identity)
+
+
+def test_launched_path_matches_record_path_of_the_same_kind_and_identity(opened):
+    """cross-refactoring の Drive.run は開いた記録の置き場を `record_path` と比べて開き直すかを決める。"""
+    got = durable.launch("refactor", "same-id")
+    assert durable.launched().path == got.path == durable.record_path("refactor", "same-id")
+    assert durable.launched().path != durable.record_path("refactor", "other-id")
+
+
+def test_continue_reads_the_event_seq_and_resume_accepts_a_ref_or_an_id(opened):
+    """止まった耐久ワークフローを resolve すると continue になり、event の seq から続きを送る（ref でも ID でも同じ）。"""
+    durable.launch("review", "cont")
+    ref = durable.resolve("review-cont")
+    wid = durable.start(ref, waits_for_resume)
+    assert wid == ref.id
+    assert durable.wait(wid, "pause", timeout=30) == durable.Outcome("event", {"seq": 1, "result": "stop"})
+    again = durable.resolve("review-cont")
+    assert (again.id, again.action) == (wid, "continue")
+    assert durable.start(again, waits_for_resume) == wid
+    seen = durable.event(again.id)
+    assert isinstance(seen, dict) and int(seen["seq"]) == 1
+    durable.resume(again, 1)
+    assert durable.wait(wid, "pause", after=1, timeout=30).value == {"seq": 2, "result": "again"}
+    durable.resume(wid, 2, note="done")
+    assert durable.wait(wid, "pause", after=2, timeout=30) == durable.Outcome("done", [1, 2, "done"])
