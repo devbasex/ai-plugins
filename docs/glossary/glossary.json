@@ -1969,9 +1969,21 @@
     {
       "term": "引継ぎ文書",
       "context": "ndf-workflow",
-      "meaning": "会話を切って再開するための文書。「今の会話の進み」（プランごとの行の表）と「次に実行するコマンド」の節をスクリプトが書く",
+      "meaning": "会話を切って新しいセッションで続けるための文書。メインディレクトリの .ndf/handoff/<名>.md に置き、コミットしない。1 本が 1 つの引継ぎの対象を受け持つ",
       "code": "handoff",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "引継ぎの対象",
+      "context": "ndf-workflow",
+      "meaning": "引継ぎ文書 1 本が受け持つ仕事のまとまり（スプリント・マイルストーン・課題のどれか）。名の頭（sprint- / milestone- / issue-）になる",
+      "pending_source": "issues/issue-1560-design.md"
+    },
+    {
+      "term": "引継ぎの履歴",
+      "context": "ndf-workflow",
+      "meaning": "引継ぎ文書の本体から終わった項目を移す文書。本体と同じ場所の <名>-history.md",
+      "pending_source": "issues/issue-1560-design.md"
     },
     {
       "term": "ndf-next",
