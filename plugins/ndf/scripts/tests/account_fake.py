@@ -188,6 +188,7 @@ def accounts(tmp_path, monkeypatch):
         "NDF_ACCOUNT_CHECK_INTERVAL",
         "NDF_ACCOUNT_SWITCH_AT",
         "CLAUDE_CODE_OAUTH_TOKEN",
+        "CLAUDE_CODE_OAUTH_SCOPES",
         "NDF_CLAUDE_ACCOUNT",
         "NDF_SUPERVISE_CLAUDE_FALLBACK",
     ):
