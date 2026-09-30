@@ -42,7 +42,7 @@ deps.require("md", "mdtable", "durable")
 import drive_pause as dp  # noqa: E402
 import durable  # noqa: E402
 from drive_pause import Stop  # noqa: E402
-from loop_drive import call, parse_vars, review_status  # noqa: E402,F401  テストは `call` をこのモジュールの上で差し替える
+from loop_drive import call, durable_identity, parse_vars, review_status  # noqa: E402,F401  テストは `call` をこのモジュールの上で差し替える
 import repo as repo_lib  # noqa: E402
 
 TOOL = "cross-refactoring-drive"
@@ -145,8 +145,7 @@ class Drive:
 
     def identity(self) -> str:
         """耐久の記録の実行の鍵の元。状態の置き場（求まらなければ作業ディレクトリと PR）。"""
-        tmp = self.known_tmp()
-        return str(tmp.resolve()) if tmp is not None else f"{Path.cwd().resolve()}#{self.pr}"
+        return durable_identity(self.known_tmp(), self.pr)
 
     def state_file(self) -> Path:
         return self.tmp / f"cross-refactoring-rf{self.v['ID']}-state.json"

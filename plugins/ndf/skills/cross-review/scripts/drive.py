@@ -36,7 +36,7 @@ import drive_pause as dp  # noqa: E402
 import durable  # noqa: E402
 import step_result as sr  # noqa: E402
 from drive_pause import Stop  # noqa: E402
-from loop_drive import call, parse_vars, review_status  # noqa: E402,F401  テストは `call` をこのモジュールの上で差し替える
+from loop_drive import call, durable_identity, parse_vars, review_status  # noqa: E402,F401  テストは `call` をこのモジュールの上で差し替える
 
 TOOL = "cross-review-drive"
 DOCS02 = SKILL / "docs" / "02-fix-and-rotation.md"
@@ -245,8 +245,7 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
 
     def identity(self) -> str:
         """耐久の記録の鍵の元。状態の置き場（求まらなければ作業ディレクトリと PR）。"""
-        tmp = self.known_tmp()
-        return str(tmp.resolve()) if tmp is not None else f"{Path.cwd().resolve()}#{self.pr}"
+        return durable_identity(self.known_tmp(), self.pr)
 
     def init(self) -> dict:
         out = self.must(call([sys.executable, str(HERE / "state.py"), "init", str(self.pr), *self.init_args], self.env), "state.py init")

@@ -69,3 +69,12 @@ def test_identity_is_the_resolved_tmp_or_cwd_and_pr(path, tmp_path, monkeypatch)
     assert d.identity() == str((tmp_path / "t").resolve())
     d.known_tmp = lambda: None
     assert d.identity() == f"{tmp_path.resolve()}#42"
+
+
+def test_durable_identity_is_the_resolved_tmp(tmp_path: Path):
+    assert loop_drive.durable_identity(tmp_path / "a" / ".." / "b", 7) == str((tmp_path / "b").resolve())
+
+
+def test_durable_identity_without_tmp_is_cwd_and_pr(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert loop_drive.durable_identity(None, 7) == f"{tmp_path.resolve()}#7"
