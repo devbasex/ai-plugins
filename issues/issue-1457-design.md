@@ -87,7 +87,7 @@ ai-plugins（ `release.form: package-plugin` ）は経路が雛形なので、�
 | # | イベント | 発生元 | 受け手 |
 | --- | --- | --- | --- |
 | E1 | スプリントのプランを組んだ | `supervise.py new sprint` / `new close` | conductor |
-| E2 | 検査の Pull Request をベースブランチへマージした | 検査のプラン | 導入の確認のステップ（ `then_of` で続く） |
+| E2 | 検査の Pull Request をベースブランチへマージした | 検査のプラン | 経路 `promote` を持つ: 次のステージ「本番」の昇格のプランの先頭の `verify` のステップ（ステージの並びで続く。 `then_of` ではない）。経路 `merge` だけ: ステージ「導入の確認」の `verify` のステップ（ `then_of` で続く） |
 | E3 | 開発版のチャネルへ反映した | ベースブランチへの push（NDF の外） | `<節>.verify` のコマンド（反映を待つのはコマンドの側） |
 | E4 | 導入の確認を走らせた | 確認のステップ（ `verify-facts` ） | プランの engine（終了コードで次のステップを決める） |
 | E5 | 確認の終了コードを承認資料へ書いた | `verify-facts` | `mvv` のステップ（ `--material` ）・人 |
@@ -96,11 +96,17 @@ ai-plugins（ `release.form: package-plugin` ）は経路が雛形なので、�
 
 経路 `merge` だけのスプリントでは E6・E7 が無く、E5 の受け手は人だけである。
 
+**「インストール確認」との住み分け。** 用語集の「インストール確認」は、隔離した HOME で ref からプラグインをインストールし版と中身を
+確かめること（ `release-verification-steps.py verify-install` ）の意味のまま変えない。 `<節>.verify` に書くコマンドの 1 つになりうるが、
+`<節>.verify` を走らせること全体は「導入の確認」と呼ぶ。 `pace.md` で `<節>.verify` を指して「インストール確認」と書いている箇所
+（「使ってよい条件」の表の「インストール確認がある」・設定の表の `fast.verify` / `auto.verify` の説明・経路の図の「開発版の配布と
+インストール確認」の節点）は、F4 で「導入の確認」へ改める。
+
 ### 用語
 
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
-| 導入の確認 | `.ndf/pace.json` の `<節>.verify` に書かれたコマンドを、ベースブランチの先頭で走らせること。 `pace.md` の「インストール確認」と同じ行を指す | 追加（ `ndf-workflow` ） |
+| 導入の確認 | `.ndf/pace.json` の `<節>.verify` に書かれたコマンドを、ベースブランチの先頭で走らせること。経路 `promote` では承認ゲート 2 の前（昇格のプランの先頭）に、経路 `merge` だけのときは検査の後（ステージ「導入の確認」）に走る | 追加（ `ndf-workflow` ） |
 | 昇格のプラン | 経路 `promote` のための「本番」のステージのプラン。ベースブランチ → 本番チャネルの Pull Request を作り、承認ゲート 2 の後にマージする | 追加（ `ndf-release` ） |
 
 ## 機能一覧
@@ -127,7 +133,7 @@ ai-plugins（ `release.form: package-plugin` ）は経路が雛形なので、�
 | `sprint_routes.py` の `pace_verify` （新規） | `manual_production_waves` の節の選び方と `verify` の確かめを切り出す | 選んだ進め方の節の `verify` を返す（ `new close` は `fast` ）。無ければ `DeclError` |
 | `sprint_routes.py` の `route_waves` | `mvv` のあるとき、昇格のプランへ `verify` を渡す。経路 `promote` が無く `merge` があれば「導入の確認」のステージを置く | 雛形で組まない経路のステージ |
 | `sprint_routes.py` の `manual_production_waves` | `pace_verify` を使う。組むステージは変えない | 手動反映の本番系のステージ（今のまま） |
-| `development-workflow/references/pace.md` | 経路の表と昇格のプランの説明に確認のステップを足す | 利用者向けの説明 |
+| `development-workflow/references/pace.md` | 経路の表と昇格のプランの説明に確認のステップを足す。 `<節>.verify` を指す「インストール確認」を「導入の確認」へ改める（用語の節の住み分け） | 利用者向けの説明 |
 
 呼び出しの関係（ `→` は呼ぶ）:
 

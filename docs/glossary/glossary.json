@@ -381,7 +381,7 @@
     {
       "term": "導入の確認",
       "context": "ndf-workflow",
-      "meaning": "`.ndf/pace.json` の `<節>.verify` に書かれたコマンドを、ベースブランチの先頭で走らせること。pace: fast / auto の承認ゲート 2 の前に走り、終了コードを承認資料へ載せ、出力は所有者だけが読めるログへ分ける",
+      "meaning": "`.ndf/pace.json` の `<節>.verify` に書かれたコマンドを、ベースブランチの先頭で走らせること。pace: fast / auto で、経路 promote では承認ゲート 2 の前に、経路 merge だけのときは検査の後に走り、終了コードを承認資料へ載せ、出力は所有者だけが読めるログへ分ける",
       "pending_source": "issues/issue-1457-design.md"
     },
     {
