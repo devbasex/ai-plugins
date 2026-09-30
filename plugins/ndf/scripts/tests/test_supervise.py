@@ -23,7 +23,7 @@ from step_result import validate_result  # noqa: E402
 import claude_accounts as ca  # noqa: E402
 
 sys.path.insert(0, str(SCRIPTS))
-from supervise_lib import claude, commands, engine, paths, plan, pr as pr_step, queue  # noqa: E402
+from supervise_lib import claude, commands, engine, flow, paths, plan, pr as pr_step, queue  # noqa: E402
 import gh_call  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -298,7 +298,7 @@ def test_queue_creates_worktrees_in_order_before_run(tmp_path, monkeypatch):
         f.write_text(json.dumps(wt_plan(repo, b)))
         plans.append(str(f))
     real = paths.ensure_worktree
-    monkeypatch.setattr(paths, "ensure_worktree", lambda plan, **kw: calls.append(plan["branch"]) or real(plan, **kw))
+    monkeypatch.setattr(flow, "make_worktree", lambda plan, **kw: calls.append(plan["branch"]) or real(plan, **kw))
     res = queue.cmd_queue(plans, 3, poll=0.1)
     assert calls == ["feat/a", "feat/b", "feat/c"]
     assert res["status"] == "ok", res
@@ -629,7 +629,7 @@ def test_queue_removes_old_done_at_start(tmp_path, monkeypatch):
     done.parent.mkdir()
     done.write_text("古い")
     seen = []
-    monkeypatch.setattr(queue, "run_batch", lambda plans, m, poll: seen.append(done.exists()) or [{"plan": plans[0], "result": "完了"}])
+    monkeypatch.setattr(flow, "run_stage", lambda plans, adm, args: seen.append(done.exists()) or [{"plan": plans[0], "result": "完了"}])
     res = queue.cmd_queue([a], 3)
     assert seen == [False] and json.loads(done.read_text()) == res
 
@@ -1630,15 +1630,15 @@ def test_queue_then_fills_prs_from_reports(tmp_path, fakes, monkeypatch):
         impl.append(str(f))
     rel = release_plan(tmp_path, "dev", "10.17.99-dev.1", "--prs", "1052", "--prs-from-queue")
     assert plan.QUEUE_PRS in rel.read_text()
-    real, seen = queue.run_batch, {}
+    real, seen = flow.run_stage, {}
 
-    def batch(plans, m, poll):
+    def batch(plans, adm, args):
         if str(rel) in plans:  # 後続の配布は流さず、流す時の計画を読む
             seen.update({s["id"]: s for s in json.loads(rel.read_text())["steps"]})
             return [{"plan": p, "result": "完了"} for p in plans]
-        return real(plans, m, poll)
+        return real(plans, adm, args)
 
-    monkeypatch.setattr(queue, "run_batch", batch)
+    monkeypatch.setattr(flow, "run_stage", batch)
     done = tmp_path / "done.json"
     res = queue.cmd_queue(impl, 3, poll=0.1, then=[str(rel)], done=str(done))
     assert res["status"] == "ok", res
@@ -1721,29 +1721,50 @@ def test_wait_returns_3_on_timeout_before_queue_starts(tmp_path):
 # --- 機械で組む指示文と説明文（#1054）---
 
 
-def test_new_impl_builds_prompt_from_issue_and_excludes_other_plans(tmp_path):
+def test_new_impl_builds_prompt_from_issue_without_counting_other_plans(tmp_path):
+    """実装の指示文は、書き出す時点の他のプランを数えない（除外の行は、流す時点で WorkStep が足す。#1248）。"""
     other = tmp_path / "plan-1053.json"
     other.write_text(json.dumps({"フェーズ": "実装", "課題": [1053], "触るファイル": ["a.py", "b.py"], "steps": []}))
-    done = tmp_path / "plan-1050.json"
-    done.write_text(json.dumps({"フェーズ": "実装", "課題": [1050], "触るファイル": ["done.py"], "steps": []}))
-    (tmp_path / "plan-1050-state").mkdir()
-    (tmp_path / "plan-1050-state" / "report.md").write_text("## フェーズの報告\n\n- 結果: 完了\n")
     out = tmp_path / "plan-1054.json"
     p = cli("new", "impl", "--issue", "1054", "--worktree", "/w", "--tests", "t", "--title", "Add: x", "--files", "c.py", "--out", str(out))
     assert p.returncode == 0, p.stderr
     plan = json.loads(out.read_text())
     prompt = plan["steps"][0]["prompt"]
     assert "gh issue view 1054" in prompt and "c.py" in prompt
-    assert "並行して別の計画が次を触る。それらは変えない: a.py, b.py（#1053）" in prompt
-    assert "done.py" not in prompt
+    assert "並行して" not in prompt and "a.py" not in prompt
     assert "Closes" in prompt and "push しない" in prompt and "今の決まりだけ" in prompt
     assert plan["触るファイル"] == ["c.py"]
-    # --prompt を渡しても共通の規則と除外は足す
+    # --prompt を渡しても共通の規則は足す
     p = cli(
         "new", "impl", "--issue", "1054", "--worktree", "/w", "--tests", "t", "--title", "Add: x", "--prompt", "指示", "--out", str(out)
     )
     prompt = json.loads(out.read_text())["steps"][0]["prompt"]
-    assert prompt.startswith("指示\n") and "a.py, b.py（#1053）" in prompt and "push しない" in prompt
+    assert prompt.startswith("指示\n") and "並行して" not in prompt and "push しない" in prompt
+
+
+def test_queue_tells_the_impl_worker_the_files_of_the_plans_running_at_the_same_time(tmp_path, fakes):
+    """同じステージで同時に流れる他のプランの 触るファイル を、流す時点で実装の指示文へ足す（#1248）。
+
+    同じ重なりの組のプラン（同時に流れない）・別のステージのプラン・キューの外のプランは数えない。"""
+    (tmp_path / ".ndf").mkdir()
+    (tmp_path / ".ndf" / "supervise.json").write_text('{"version": 1}')
+
+    def impl(name, files):
+        f = tmp_path / f"{name}.json"
+        step = {"id": "impl", "type": "work", "kind": "実装", "prompt": f"実装 {name}\n共通の規則\n", "next": "end"}
+        f.write_text(json.dumps({"フェーズ": "実装", "課題": [], "作業場所": str(tmp_path), "触るファイル": files, "steps": [step]}))
+        return str(f)
+
+    a, b, c, d = impl("a", ["lib/a.py"]), impl("b", ["docs/"]), impl("c", ["lib/"]), impl("d", ["x.py"])
+    impl("outside", ["outside.py"])  # 同じディレクトリにあるが、キューへ入れない
+    res = queue.cmd_queue([a, b, c], 3, poll=0.05, then=[[d]])
+    assert [i["result"] for i in res["items"]] == ["完了"] * 4, res
+    prompts = {n: next(t for t in fakes.read_text().split("\n=====\n") if f"実装 {n}\n" in t) for n in "abcd"}
+    rule = "並行して別のプランが次を触る。それらは変えない: "
+    assert f"共通の規則\n{rule}docs/\n\n## 入力" in prompts["a"]
+    assert f"{rule}lib/a.py、lib/\n" in prompts["b"]
+    assert f"{rule}docs/\n" in prompts["c"]
+    assert "並行して" not in prompts["d"]
 
 
 def test_new_impl_opens_pr_before_test_all(tmp_path):

@@ -122,7 +122,7 @@ python3 plugins/ndf/scripts/supervise.py wait q/done.json
 | --- | --- | --- |
 | キューが終わった（done に結果の JSON が書かれた） | 0 | 結果の JSON の `items[0]`（キューの結果）の `status` を見る。`gate` なら承認ゲートを返したプランの `report.md` を読んで提示する |
 | キューが流すプランの `progress.jsonl` に `attention` の行が足された | 20 | その行（結果の `items`）と `progress.jsonl` の末尾だけを読み、止めるか続けるかを決める。続けるなら同じ `wait` を打つ。知らせた行の続きから待つ |
-| 上限（`--timeout`、既定 10800 秒）に達した | 3 | キューの `<プラン>.log` と `progress.jsonl` の最後の行を 1 度読み、同じ `wait` を打つ |
+| 上限（`--timeout`、既定 10800 秒）に達した | 3 | 流れているプランの `progress.jsonl` の最後の行を 1 度読み、同じ `wait` を打つ |
 
 - 出力は要約の 1 行と結果の JSON の 1 行だけである
 - キューは始めに流すプランの一覧（`--then` を含む）と読み始める所を done の隣の `<done>.plans.json` へ書き、

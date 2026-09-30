@@ -14,7 +14,7 @@ from pydantic import ConfigDict
 
 # プロジェクトごとの宣言（リポジトリの根の .ndf/）。形は DECLARATIONS の節にある
 WORKTREE_DECL = "worktree.json"  # base_branch（起点のブランチ）・production_branch（本番のブランチ）
-SUPERVISE_DECL = "supervise.json"  # test・sync_checks・release
+SUPERVISE_DECL = "supervise.json"  # test・sync_checks・release・queue
 
 
 class DeclError(Exception):
@@ -89,6 +89,64 @@ def declared_base_of(roots) -> str | None:
 def sync_checks_of(decl: dict) -> list[tuple[str, str]]:
     """.ndf/supervise.json の sync_checks を [(名前, コマンド)] で返す。"""
     return [(c.name, c.command) for c in supervise_shape(decl).sync_checks]
+
+
+# 資源の枠の既定（#1142 の決定 30）。宣言の resources.<タグ> が項目ごとに上書きする
+QUEUE_RESOURCES = {"graphql": {"limit": 2, "types": ["pr", "drive"], "commands": ["merged-steps.py"]}}
+
+
+class QueueResource(schema.Shape):
+    """資源の枠: 同時に流せる本数（limit）と、タグを持つステップの型（types）・run の cmd に含まれる語（commands）。"""
+
+    limit: int
+    types: list[str] = []
+    commands: list[str] = []
+
+
+class SharedList(schema.Shape):
+    """共有の一覧: 複数のプランが書き足すファイル（path）と、当たり方（touched_by。無ければ path そのもの）。"""
+
+    path: str
+    touched_by: list[str] = []
+
+
+class QueueDecl(schema.Shape):
+    """.ndf/supervise.json の queue。"""
+
+    resources: dict[str, QueueResource] = {}
+    shared: list[SharedList] = []
+
+
+def queue_decl(decl: dict) -> dict:
+    """supervise.json の queue を既定と合わせて `{"resources": {タグ: {limit, types, commands}}, "shared": [{path, touched_by}]}` で返す。
+
+    無ければ既定（graphql の枠 2 本・共有の一覧は無し）。形が違えば DeclError。"""
+    raw = decl.get("queue") or {}
+    hint = '（queue は {"resources": {タグ: {"limit", "types", "commands"}}, "shared": [{"path", "touched_by"}]} で書く）'
+    declared = (raw.get("resources") or {}) if isinstance(raw, dict) else None
+    if isinstance(declared, dict):  # 既定へ、宣言したタグを項目ごとに重ねる
+        merged = {**QUEUE_RESOURCES, **declared}
+        raw = {**raw, "resources": {t: {**QUEUE_RESOURCES.get(t, {}), **r} if isinstance(r, dict) else r for t, r in merged.items()}}
+    try:
+        shape = schema.load_shape(QueueDecl, raw, "supervise.json: queue")
+    except schema.ShapeError as e:
+        raise DeclError(f"{e}{hint}") from e
+    low = [t for t, r in shape.resources.items() if r.limit < 1]
+    if low:
+        raise DeclError(f"supervise.json: queue.resources.{low[0]}.limit: 1 以上の整数にする{hint}")
+    out = schema.dump_shape(shape)
+    for s in out["shared"]:
+        s["touched_by"] = s["touched_by"] or [s["path"]]
+    return out
+
+
+def queue_decl_of(plans: list[dict]) -> dict:
+    """queue が流すプランの宣言（`queue_decl`）。プランの作業場所と元のリポジトリを入れた順に探し、最後に今のディレクトリを探す。"""
+    roots: list[Path] = []
+    for plan in plans:
+        if isinstance(plan, dict) and plan.get("作業場所"):
+            roots += decl_roots(str(plan["作業場所"]), plan.get("リポジトリ"))[:-1]
+    return queue_decl(read_decl(list(dict.fromkeys([*roots, Path.cwd()])), SUPERVISE_DECL))
 
 
 # 雛形が宣言から受けるもの。引数が宣言より先に効く
