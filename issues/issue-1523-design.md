@@ -50,8 +50,10 @@ Claude Code 2.1.285 は、変数で受けたトークンのスコープを `CLAU
 | 登録済みアカウント（アカウントごと） | `lib/claude_accounts.py` | アカウント（名前） | — | 認証情報（アクセストークン・リフレッシュトークン・2 つの期限・**スコープ**）・識別・残量・上限の観測 |
 
 **この変更は集約に値を足さない。** スコープは今も認証情報（`.credentials.json` の `claudeAiOauth.scopes`）にあり、
-`claude auth login` が書き、トークンの更新（`claude_usage.refresh_oauth`）が引き継ぐ。変えるのは、子の環境を組み立てる
-ときにこの値を読むことだけである。子の環境は集約の外の出力（毎回組み立て直す値）で、保存しない。
+集約へ書き込むのは `lib/claude_accounts.py` だけである。`claude auth login` は仮置きのディレクトリ（`staging_dir`）へ
+書き、それを集約へ取り込むのは `claude_accounts.register` である。トークンの更新（`claude_usage.refresh_oauth`）は
+旧いスコープを引き継いだ新しい値を返すだけで、書き込むのは `claude_accounts` の `_refresh_and_store` である。
+変えるのは、子の環境を組み立てるときにこの値を読むことだけである。子の環境は集約の外の出力（毎回組み立て直す値）で、保存しない。
 
 区間のアカウント（`relay_lib/run.py`）とプランのアカウント（`supervise_lib/claude.py`）は #1389 のまま変えない。
 
