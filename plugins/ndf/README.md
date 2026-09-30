@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.46）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.47-dev.1）
 ```
 
 ### agy
@@ -119,15 +119,10 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.46 へ更新するとき
+## v10.17.47-dev.1 へ更新するとき
 
-- Fix: 利用上限の誤判定と issue-body.py の push 済みブランチの扱い（振り返りの即時修正 2 件）（#1495）
-- Docs: プロジェクト MVV を版 2 へ改訂する（#1497）
-- Fix: 検査のプランは構造改善を通らないモードで assess と refactor を置かない（#1498）
-- 設計: #1436（#1499）
-- 設計: #1483（#1500）
-- Fix: 設計プランで review の前に PR 本文の決めたことを合わせ、待ち行列は連番の項目だけを読む（#1501）
-- スプリント m1483 の課題を develop へ取り込む。（#1506）
+- スプリント m1316 の課題を develop へ取り込む。（#1520）
+- スプリント m1482 の課題を develop へ取り込む。（#1521）
 
 ## Playwright テストについて
 
@@ -364,7 +359,7 @@ agy models   # 認証確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.46/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.47-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -386,14 +381,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.46/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.47-dev.1/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.46  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.47-dev.1  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
