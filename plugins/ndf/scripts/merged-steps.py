@@ -365,22 +365,17 @@ def _check_item(n, name, result, **extra) -> dict:
     return {"kind": "check", "pr": int(n), "name": name, "result": result, **extra}
 
 
-def _read_check_states(root, rollup):
-    """rollup のチェックを (failed, first, again, settled, queued, pending) に分ける。"""
+def _classify_checks(root, n, rollup):
+    """rollup のチェックを分類する。(分類, 根拠) を返す。stale の根拠は取り残された初回のチェックそのもの。"""
     pending, failed, passed = check_states(rollup)
     stale, queued, settled = probe_checks(root, rollup) if pending else ([], [], [])
     failed += [s[0] for s in settled if s[3].upper() in FAIL_CONCLUSIONS]
     first = [s for s in stale if s[3] <= 1]
     again = [s for s in stale if s[3] > 1]
-    return failed, first, again, settled, queued, pending
-
-
-def _classify_checks(n, failed, first, again, settled, queued, pending):
-    """チェックの状態から分類を決める。(分類, 根拠) を返す。"""
     if failed:
         return "failed", [_check_item(n, f, "failed") for f in failed]
     if first:
-        return "stale", []
+        return "stale", first
     if again:
         return "stale_again", [_check_item(n, s[0], "stale_again", run=s[1], job=s[2], attempt=s[3]) for s in again]
     if settled:
@@ -394,17 +389,16 @@ def _classify_checks(n, failed, first, again, settled, queued, pending):
 
 def _rerun_stale(root, n, first, act):
     """取り残されたチェックを --act なら再実行する。(根拠, 手) を返す。"""
-    items, done = [], True
+    items = []
     for name, run_id, job_id, attempt in first:
         item = _check_item(n, name, "stale", run=run_id, job=job_id, attempt=attempt)
         if act:
             r = gh_parts.gh(["run", "rerun", run_id, "--job", job_id], cwd=root)
             item["result"] = "rerun" if r.returncode == 0 else "rerun_failed"
             if r.returncode != 0:
-                done = False
                 item["reason"] = r.stderr.strip()[:300]
         items.append(item)
-    return items, "remedied" if act and done else "judge"
+    return items, "remedied" if act and all(i["result"] == "rerun" for i in items) else "judge"
 
 
 def probe_one(root, n, act, items):
@@ -416,13 +410,11 @@ def probe_one(root, n, act, items):
         info = None
     if not isinstance(info, dict) or info.get("state") != "OPEN":
         return None
-    states = _read_check_states(root, info.get("statusCheckRollup"))
-    cls, found = _classify_checks(n, *states)
-    items += found
+    cls, found = _classify_checks(root, n, info.get("statusCheckRollup"))
     action = PROBE_ACTIONS[cls]
     if cls == "stale":
-        found, action = _rerun_stale(root, n, states[1], act)
-        items += found
+        found, action = _rerun_stale(root, n, found, act)
+    items += found
     return cls, action
 
 

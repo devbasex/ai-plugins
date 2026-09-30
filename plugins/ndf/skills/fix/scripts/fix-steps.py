@@ -343,9 +343,7 @@ def _decision_problems(e: dict) -> list[str]:
     if e.get("decision") not in DECISIONS:
         why.append(f"decision が {'/'.join(DECISIONS)} のどれでもない: {e.get('decision')!r}")
     if e.get("decision") == "rejected":
-        for k in ("path", "line", "severity"):
-            if e.get(k) in (None, ""):
-                why.append(f"rejected には {k} が要る")
+        why += [f"rejected には {k} が要る" for k in ("path", "line", "severity") if e.get(k) in (None, "")]
     if e.get("decision") in ("deferred", "rejected") and not str(e.get("reason") or "").strip():
         why.append("deferred / rejected には reason が要る")
     if e.get("decision") == "separate_pr" and not str(e.get("issue") or "").strip():
