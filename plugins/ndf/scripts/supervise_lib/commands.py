@@ -235,9 +235,23 @@ def cmd_expected(plan_path: str, history: str | None, slow_pairs: list[str]) -> 
 
 
 def cmd_run(plan_path: str, state_dir: str | None, slow: list[str], start: str | None) -> int:
-    """プランを 1 本流し、報告を標準出力へ出す。終了コードは完了か関門なら 0、それ以外は 3。"""
+    """プランを 1 本流し、報告を標準出力へ出す。終了コードは完了か関門なら 0、それ以外は 3。
+
+    落ちた後に同じコマンドを打ち直すと、耐久の記録から流れていたステップで続ける。完了か関門の記録があれば流さずに同じ報告を返す。"""
+    import durable
+    from supervise_lib import flow  # DBOS の import は run と queue だけが払う
+
     plan = json.loads(Path(plan_path).read_text())
     state = Path(state_dir) if state_dir else state_dir_of(plan_path)
-    text = Engine(plan, state, slow, plan_path).run(start)
+    engine = Engine(plan, state, slow, plan_path)
+    try:
+        flow.launch_run(engine, start)  # 実行の鍵はプランの絶対パスから決める（run-<12 字>）
+    except durable.DurableError as e:
+        print(f"supervise-run: 止まった: {e}", file=sys.stderr)
+        return 3
+    try:
+        text = engine.run(start)
+    finally:
+        durable.close()
     print(text)
     return 0 if "結果: 完了" in text or "結果: 関門" in text else 3
