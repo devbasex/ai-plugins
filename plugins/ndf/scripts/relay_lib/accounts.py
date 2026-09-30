@@ -129,7 +129,7 @@ def _table_row(r: dict, emails: list[str]) -> tuple[str, ...]:
     """一覧の 1 件を表示の 1 行へ写す。`emails` は全件のメールアドレス（小文字）。"""
     if r["kind"] == "metered":
         return (r["name"], _metered_label(r), *("-",) * (len(HEADER) - 3), r["state"])
-    spend = {True: "達している", False: "達していない"}.get(r["spend_limit_reached"], "-")
+    spend = {True: "yes", False: "no"}.get(r["spend_limit_reached"], "-")
     # 同じメールアドレスが 2 件以上あるときだけ組織名を添える（1 件なら個人の組織名はメールの繰り返しになる）
     ident = f"{r['email']}（{_org_label(r)}）" if r["org_name"] and emails.count(r["email"].lower()) > 1 else r["email"]
     return (

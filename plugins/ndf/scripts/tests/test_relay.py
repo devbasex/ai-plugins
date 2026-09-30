@@ -3196,18 +3196,15 @@ def test_account_add_list_remove(tmp_path, accounts):
     lines = p.stdout.splitlines()
     assert lines[0].split() == ["名前", "識別", "5", "時間", "7", "日", "モデル別の週", "支出上限", "枠の大きさ", "残り", "状態"]
     assert any(
-        line.startswith("work1")
-        and "a@example.com" in line
-        and "15%" in line
-        and "3%" in line
-        and "達していない" in line
-        and "使える" in line
+        line.startswith("work1") and "a@example.com" in line and "15%" in line and "3%" in line and " no " in line and "使える" in line
         for line in lines
     )
+    assert "達して" not in p.stdout  # 支出上限の列は yes / no の短い語
     assert "%（" not in p.stdout  # 表の使用率の列にリセットの日付と時刻を添えない
     rows = json.loads(account_cmd(tmp_path, accounts, "list", "--json", tty=False).stdout)
     assert [r["name"] for r in rows] == ["work1", "work2"] and rows[0]["five_hour"]["utilization"] == 15
     assert rows[0]["five_hour"]["resets_at"] and rows[0]["seven_day"]["resets_at"]  # JSON にはリセットの時刻を残す
+    assert rows[0]["spend_limit_reached"] is False  # JSON は真偽値のまま
     assert all(c["argv"][:1] == ["auth"] for c in auth_calls(tmp_path))  # 推論を呼ばない
     assert all(c["token"] is None for c in auth_calls(tmp_path))
     for d in ("work1", "work2"):
