@@ -101,7 +101,7 @@ def _engine(prefix: str, args: dict | None = None) -> Engine:
 
 
 @durable.step(name="ndf.supervise.prepare")
-def prepare(prefix: str, start: str | None) -> Any:
+def prepare_step(prefix: str, start: str | None) -> Any:
     """実行の条件と worktree の用意（ファイルとプロセスに触る）。流さないなら [結果, 理由]。"""
     return _engine(prefix).prepare(start)
 
@@ -113,7 +113,7 @@ def run_step(prefix: str, n: int, sid: str) -> dict:
 
 
 @durable.step(name="ndf.supervise.report")
-def report(prefix: str, result: str, reason: str) -> str:
+def report_step(prefix: str, result: str, reason: str) -> str:
     return _engine(prefix).report(result, reason)
 
 
@@ -122,7 +122,7 @@ def plan_workflow(args: dict) -> dict:
     """プラン 1 本の実行。ステップを `nxt` の順に流し、ステップの数が上限を超えるか知らないステップに当たれば止まる。"""
     prefix, start = args["prefix"], args.get("start")
     eng = _engine(prefix, args)
-    stopped = eng.setup(start) or prepare(prefix, start)
+    stopped = eng.setup(start) or prepare_step(prefix, start)
     if stopped:
         result, reason = stopped
     else:
@@ -145,4 +145,4 @@ def plan_workflow(args: dict) -> dict:
             sid = out["nxt"]
         result, reason = eng._final_result(result, reason)
     gates = [a for a in eng.state.attention_log if a.get("reason") == "関門"]
-    return {"result": result, "reason": reason, "report": report(prefix, result, reason), "gates": gates}
+    return {"result": result, "reason": reason, "report": report_step(prefix, result, reason), "gates": gates}

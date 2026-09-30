@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import logging
 import os
 import re
 import sys
@@ -189,6 +190,15 @@ def cancel_others(path: Path, keep: Iterable[str]) -> list[str]:
     return stopped
 
 
+def _follow_stderr() -> None:
+    """DBOS のコンソールのログを今の標準エラーへ向け直す。DBOS は最初の起動の標準エラーを握ったままにし、
+    それが閉じられていると（テストの出力の捕捉）同じプロセスの次の起動が `flush` で落ちる。"""
+    for h in logging.getLogger("dbos").handlers:
+        if type(h) is logging.StreamHandler:
+            with h.lock:  # setStream は古いストリームを flush するため、閉じたストリームでは使えない
+                h.stream = sys.stderr
+
+
 def launch(
     kind: str,
     identity: str,
@@ -226,6 +236,7 @@ def launch(
             "application_version": FORMAT,
             "notification_listener_polling_interval_sec": POLL_SECONDS,
         }
+        _follow_stderr()
         DBOS(config=config)  # type: ignore[arg-type]
         stack.callback(DBOS.destroy, destroy_registry=False)
         specs = dict(queues or {})

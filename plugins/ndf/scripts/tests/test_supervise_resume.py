@@ -321,3 +321,19 @@ def test_supervise_py_run_keeps_its_exit_codes(tmp_path, env):
         p = subprocess.run([PY, str(SUPERVISE), "run", str(plan.path)], capture_output=True, text=True, env=env, cwd=t, timeout=120)
         assert p.returncode == 0 and "- 結果: 関門" in p.stdout, p.stderr
     assert plan.visits() == ["a"]
+
+
+def test_engine_runs_again_after_the_stream_of_the_first_launch_is_closed(tmp_path, capsys):
+    """DBOS が最初の起動で握った標準エラーが閉じられても（テストの出力の捕捉）、同じプロセスの次の起動が落ちない。"""
+    import logging
+
+    from supervise_lib import engine
+
+    plan = {"フェーズ": "試験", "課題": [], "作業場所": str(tmp_path), "steps": [{"id": "a", "type": "run", "cmd": "true", "next": "end"}]}
+    assert "- 結果: 完了" in engine.Engine(dict(plan), tmp_path / "s1").run()
+    closed = open(tmp_path / "closed.log", "w")  # noqa: SIM115  閉じたファイルは flush で落ちる（StringIO は落ちない）
+    closed.close()
+    for h in logging.getLogger("dbos").handlers:
+        if type(h) is logging.StreamHandler:
+            h.stream = closed
+    assert "- 結果: 完了" in engine.Engine(dict(plan), tmp_path / "s2").run()
