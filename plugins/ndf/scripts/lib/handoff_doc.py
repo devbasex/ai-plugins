@@ -40,7 +40,7 @@ def replace_body(text: str, word: str, body: str) -> str | None:
     return text[:body_start] + body + text[body_end:]
 
 
-def atx_headings(text: str, level: int) -> list[tuple[str, int]]:
+def level_headings(text: str, level: int) -> list[tuple[str, int]]:
     """深さ level の ATX 見出しの (文, 行の番号) の並び。囲みの中の `#` を数えない。"""
     lines = text.splitlines()
     return [(heading_text(lines[h.line]), h.line) for h in md.headings(text) if h.level == level and lines[h.line].startswith("#")]
