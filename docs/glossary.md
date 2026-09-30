@@ -345,6 +345,7 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 枠の大きさの宣言 | — | 利用者が登録済みアカウントごとに書く枠の大きさ（account.json の capacity）。対応表の値より先に効く | — | — | — |
 | モデル別の週の枠 | — | 使用量の応答の limits[] のうち kind が weekly_scoped のもの。特定のモデル（例: Fable）だけの週の上限 | — | — | — |
 | claude.ai のコネクタ | — | 利用者が claude.ai で接続した MCP サーバー（Slack・Notion・Google Drive など）。Claude Code は起動時に claude.ai から一覧を取り、claude mcp list に claude.ai <名前> として並べる | — | — | — |
+| アカウントのスコープ | — | 登録済みアカウントのトークンに付いた権限の並び。アカウントの置き場の .credentials.json の claudeAiOauth.scopes で、子へは CLAUDE_CODE_OAUTH_SCOPES（空白区切り）で渡す | — | — | — |
 
 ## NDF のリリース（`ndf-release`）
 
