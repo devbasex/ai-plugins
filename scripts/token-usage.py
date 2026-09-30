@@ -5,7 +5,10 @@
 集計できるようにしたもの。**読むだけで、送信先を持たない。**
 
     python3 scripts/token-usage.py [--min-version 10.14.0] [--by version,mode,model]
-                                   [--format md|json]
+                                   [--format md|json] [--repo <リポジトリ>] [--prs-json <キャッシュ>]
+
+軸 `version` は動いた版（会話を動かした NDF の版）、軸 `release` は載った版（会話が作った PR が載った正式版。
+寄せ方は `lib/release_map.py` で、`measure/claude-p-usage.py` と同じ）。`release` の軸のときだけ PR の一覧を読む。
 
 読む記録（ほかに、計画が起動した `claude -p` の使用量の帳簿 `--usage-root` の行を、その時刻に動いていた
 会話の supervisor / worker の層へ加える。Skill を回すステップの行（`full`）は会話が残るため読まない）:
@@ -45,6 +48,7 @@ import mdtable  # noqa: E402
 import versions  # noqa: E402
 from transcript_agents import layer_of, role_of  # フェーズの語彙は 1 か所に置く
 import usage_ledger  # 計画が起動した claude -p の使用量の帳簿（#1142）
+import release_map  # 載った版への寄せ方（#1316。claude-p-usage.py と同じ関数）
 
 # 換算費用の重み（input=1）。cache read だけはモデルで倍率が違うため READ_RATES で決める
 WEIGHTS = {"inp": 1.0, "w5": 1.25, "w1h": 2.0, "out": 5.0}
@@ -64,10 +68,21 @@ LINK_MARGIN = 600  # 外部 CLI を会話へ寄せるときの時刻の余裕（
 VERSION_RE = re.compile(r"Base directory for this skill: \S*?/ai-plugins/ndf/(\d+\.\d+\.\d+(?:-[\w.]+)?)/skills/")
 MODE_RE = re.compile(r"\bmode\s+[\"']?(light|operation|legacy-refactor|standard|documentation|architecture|full)\b")
 PR_URL_RE = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
+# 同じ URL から所有者/リポジトリと番号を取る（PR_URL_RE は findall で URL 全体を返す使い方のため別に置く）
+PR_URL_PARTS_RE = re.compile(r"github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)")
 WT_RE = re.compile(r"/tmp/ndf-worktrees/([\w.-]+--[\w.-]+)/((?:pr|rf)\d+)")
 
 AXES = ("version", "mode", "model", "cc", "reviewers")
-AXIS_LABEL = {"version": "ndf の版", "mode": "モード", "model": "モデル", "cc": "Claude Code", "reviewers": "cross-review の担当"}
+# 軸 release（載った版）は PR の一覧を読むため、--by で名指ししたときだけ使う（既定と記録の作り直しは通信しない）
+RELEASE_AXIS = "release"
+AXIS_LABEL = {
+    "version": "動いた版",
+    "release": "載った版",
+    "mode": "モード",
+    "model": "モデル",
+    "cc": "Claude Code",
+    "reviewers": "cross-review の担当",
+}
 
 
 def version_key(v: str):
@@ -322,6 +337,8 @@ class Session:
     active: float
     roles: dict  # (層, フェーズ, 定義の名前) -> Role
     external: list = field(default_factory=list)
+    release: str = "-"  # 載った版（軸 release のときだけ place_releases が決める）
+    release_by: str = "-"  # 寄せ方（changelog / merged_at / time_only）
 
     @property
     def reviewers(self) -> str:
@@ -362,6 +379,53 @@ def mode_of(modes: Counter) -> str:
     return next(iter(modes)) if len(modes) == 1 else "混在"
 
 
+def _read_seat(main: Path, s, idle_cap: int, until: float | None) -> "External | None":
+    """レビュー・改修の claude の席を External として読む。応答の無い記録（起動に失敗した席）は None。"""
+    m = WT_RE.search(s.cwd + "/")
+    if not (m and s.times and s.usage.calls):
+        return None
+    for p in sorted((main.parent / main.stem / "subagents").glob("*.jsonl")):  # 席が Agent で起動した分も席の消費に入れる
+        sub = scan_file(p, until=until).usage
+        sub.p = 0  # P は席 1 起動の固定費のまま（サブエージェントの最初の文脈を足さない）
+        s.usage.add(sub)
+    return External(
+        "claude",
+        m.group(2)[:2],
+        "/".join(m.groups()),
+        min(s.times),
+        active_seconds(s.times, idle_cap),
+        s.models and most_common(s.models) or "不明",
+        tokens={"context": s.usage.context, "out": s.usage.out, "cost": s.usage.cost},
+        usage=s.usage,
+    )
+
+
+def _build_session_roles(s, subs: list, idle_cap: int, until: float | None) -> tuple[dict, Counter, set, set]:
+    """conductor と worker の役ごとの Role へ合算し、(roles, modes, prs, keys) を返す。"""
+    launched = dict(s.agent_types)
+    for _, sub, _ in subs:  # worker は supervisor の記録の Agent 呼び出しで起動される
+        launched.update(sub.agent_types)
+    roles: dict = defaultdict(Role)
+    c = roles[("conductor", "-", "-")]
+    c.usage.add(s.usage)
+    c.n += 1
+    c.sec += active_seconds(s.times, idle_cap)
+    modes, prs, keys = Counter(s.modes), set(s.prs), set(s.keys)
+    for _, sub, meta in subs:
+        if until is not None and not sub.times:  # 打ち切りより後に起動した分は、作り直したときに起動数を増やさない
+            continue
+        depth = int(meta.get("spawnDepth") or 1)
+        layer = layer_of(depth, meta.get("description"))
+        r = roles[(layer, role_of(meta.get("description"), layer), agent_type_of(meta, launched))]
+        r.usage.add(sub.usage)
+        r.n += 1
+        r.sec += (max(sub.times) - min(sub.times)) if sub.times else 0
+        modes.update(sub.modes)
+        prs |= sub.prs
+        keys |= sub.keys
+    return roles, modes, prs, keys
+
+
 def read_claude(root: Path, idle_cap: int, until: float | None = None) -> tuple[list[Session], list, dict]:
     sessions: list[Session] = []
     seats: list = []
@@ -374,51 +438,17 @@ def read_claude(root: Path, idle_cap: int, until: float | None = None) -> tuple[
             continue
         s = scan_file(main, head, until)  # 判定で読んだ本文を使い、同じファイルを 2 度読まない
         if is_seat or s.cwd.startswith("/tmp/ndf-worktrees/"):
-            m = WT_RE.search(s.cwd + "/")
-            if m and s.times and s.usage.calls:  # 応答の無い記録（起動に失敗した席）は数えない
-                for p in sorted((main.parent / main.stem / "subagents").glob("*.jsonl")):  # 席が Agent で起動した分も席の消費に入れる
-                    sub = scan_file(p, until=until).usage
-                    sub.p = 0  # P は席 1 起動の固定費のまま（サブエージェントの最初の文脈を足さない）
-                    s.usage.add(sub)
-                seats.append(
-                    External(
-                        "claude",
-                        m.group(2)[:2],
-                        "/".join(m.groups()),
-                        min(s.times),
-                        active_seconds(s.times, idle_cap),
-                        s.models and most_common(s.models) or "不明",
-                        tokens={"context": s.usage.context, "out": s.usage.out, "cost": s.usage.cost},
-                        usage=s.usage,
-                    )
-                )
+            seat = _read_seat(main, s, idle_cap, until)
+            if seat is not None:
+                seats.append(seat)
             continue
         subs = [(p, scan_file(p, until=until), read_meta(p)) for p in sorted((main.parent / main.stem / "subagents").glob("*.jsonl"))]
         found = [v for v in (s.versions or [v for _, sub, _ in subs for v in sub.versions]) if versions.version_order(v) is not None]
         if not found or not s.times:
             skipped["版を判定できない"] += 1
             continue
-        launched = dict(s.agent_types)
-        for _, sub, _ in subs:  # worker は supervisor の記録の Agent 呼び出しで起動される
-            launched.update(sub.agent_types)
-        roles: dict = defaultdict(Role)
+        roles, modes, prs, keys = _build_session_roles(s, subs, idle_cap, until)
         c = roles[("conductor", "-", "-")]
-        c.usage.add(s.usage)
-        c.n += 1
-        c.sec += active_seconds(s.times, idle_cap)
-        modes, prs, keys = Counter(s.modes), set(s.prs), set(s.keys)
-        for _, sub, meta in subs:
-            if until is not None and not sub.times:  # 打ち切りより後に起動した分は、作り直したときに起動数を増やさない
-                continue
-            depth = int(meta.get("spawnDepth") or 1)
-            layer = layer_of(depth, meta.get("description"))
-            r = roles[(layer, role_of(meta.get("description"), layer), agent_type_of(meta, launched))]
-            r.usage.add(sub.usage)
-            r.n += 1
-            r.sec += (max(sub.times) - min(sub.times)) if sub.times else 0
-            modes.update(sub.modes)
-            prs |= sub.prs
-            keys |= sub.keys
         sessions.append(
             Session(
                 found[0],
@@ -646,111 +676,152 @@ def _min(x: float | None) -> str:
     return "-" if x is None else f"{x:.1f}"
 
 
-def aggregate(sessions: list[Session], by: list[str]) -> dict:
+def _per_pr_row(axis: dict, ss: list[Session], rmap: "release_map.ReleaseMap | None") -> dict:
+    with_pr = [s for s in ss if s.prs]
+    n_pr = sum(len(s.prs) for s in with_pr)
+    pr_axis = axis
+    if rmap is not None and RELEASE_AXIS in axis:  # 版の PR 数は PR の一覧と寄せ方だけで決める（I5）
+        pr_axis = axis | {"release_prs": len(rmap.prs_of(axis[RELEASE_AXIS])), "release_by": dict(Counter(s.release_by for s in ss))}
+    if not n_pr:
+        return pr_axis | {"sessions": len(ss), "sessions_with_pr": 0, "prs": 0}
+    layer_cost = Counter()
+    total = Usage()
+    ext = Counter()
+    for s in with_pr:
+        for (layer, *_), r in s.roles.items():
+            layer_cost[layer] += r.usage.cost
+            total.add(r.usage)
+        for e in s.external:
+            for tk, tv in e.tokens.items():
+                ext[f"{e.runtime}.{tk}"] += tv
+    return pr_axis | {
+        "sessions": len(ss),
+        "sessions_with_pr": len(with_pr),
+        "prs": n_pr,
+        "conductor_cost": layer_cost["conductor"] / n_pr,
+        "supervisor_cost": layer_cost["supervisor"] / n_pr,
+        "worker_cost": layer_cost["worker"] / n_pr,
+        "context": total.context / n_pr,
+        "out": total.out / n_pr,
+        "minutes": sum(s.active for s in with_pr) / n_pr / 60,
+        "codex_input": ext["codex.input"] / n_pr,
+        "codex_out": ext["codex.out"] / n_pr,
+        "kiro_credit": ext["kiro.credit"] / n_pr,
+        "claude_seat_cost": ext["claude.cost"] / n_pr,
+    }
+
+
+def _per_role_rows(axis: dict, ss: list[Session]) -> list[dict]:
+    roles: dict = defaultdict(Role)
+    for s in ss:
+        for rk, r in s.roles.items():
+            roles[rk].usage.add(r.usage)
+            roles[rk].n += r.n
+            roles[rk].sec += r.sec
+    layer_order = {"conductor": 0, "supervisor": 1, "worker": 2}
+    rows = []
+    for (layer, role, agent_type), r in sorted(roles.items(), key=lambda x: (layer_order[x[0][0]], x[0][1], x[0][2])):
+        stats = call_stats(r.usage, r.n)
+        if agent_type == LEDGER_AGENT:  # 呼び出しの並びが分からない起動は P・書き直しを出さない
+            for k in SEQ_KEYS:
+                stats.pop(k)
+        rows.append(
+            axis
+            | {
+                "layer": layer,
+                "role": role,
+                "agent_type": agent_type,
+                "count": r.n,
+                "cost": r.usage.cost / r.n,
+                "context": r.usage.context / r.n,
+                "out": r.usage.out / r.n,
+                "minutes": r.sec / r.n / 60,
+                **stats,
+            }
+        )
+    return rows
+
+
+def _external_rows(axis: dict, ss: list[Session]) -> list[dict]:
+    ext_groups: dict = defaultdict(list)
+    for s in ss:
+        for e in s.external:
+            ext_groups[(e.runtime, e.kind, e.model)].append(e)
+    rows = []
+    for (rt, kind, model), es in sorted(ext_groups.items()):
+        tok = Counter()
+        calls = Usage()
+        with_calls = [e for e in es if e.usage]
+        for e in es:
+            tok.update(e.tokens)
+        for e in with_calls:
+            calls.add(e.usage)
+        # 呼び出しの並びが分かる席だけを分母にする。分からない席しか無ければ P・k を出さない（kiro はターン数を k に）
+        if with_calls:
+            stats = call_stats(calls, len(with_calls)) | {"call_seats": len(with_calls)}
+            if rt == "codex":  # codex は書き込みを記録しない（キャッシュに当たらなかった分は書き直しの判定にだけ使う）
+                stats.pop("w5"), stats.pop("w1h")
+        elif "calls" in tok:  # kiro のターン数は利用者のターンで、呼び出し回数 k ではない
+            stats = {"turns": tok.pop("calls") / len(es)}
+        else:
+            stats = {}
+        rows.append(
+            axis
+            | {
+                "runtime": rt,
+                "skill": "cross-review" if kind == "pr" else "cross-refactoring",
+                "cli_model": model,
+                "count": len(es),
+                **{k: v / len(es) for k, v in tok.items()},
+                "minutes": sum(e.sec for e in es) / len(es) / 60,
+                **stats,
+            }
+        )
+    return rows
+
+
+def axis_order(axis: str, v: str) -> tuple:
+    """軸の値の並べ替えの鍵。版は版の順、載った版は版の順で並べて版でない値を後ろへ、他は文字列の順。"""
+    if axis == "version":
+        return version_key(v)
+    if axis == RELEASE_AXIS:
+        o = versions.version_order(v)
+        return ((0, o) if o else (1, v),)
+    return (v,)
+
+
+def aggregate(sessions: list[Session], by: list[str], rmap: "release_map.ReleaseMap | None" = None) -> dict:
     groups: dict[tuple, list[Session]] = defaultdict(list)
     for s in sessions:
         groups[tuple(s.axis(a) for a in by)].append(s)
 
-    def order(k):
-        return tuple(version_key(v) if a == "version" else (v,) for a, v in zip(by, k))
-
     per_pr, per_role, external = [], [], []
-    for k in sorted(groups, key=order):
+    for k in sorted(groups, key=lambda k: tuple(axis_order(a, v) for a, v in zip(by, k))):
         ss = groups[k]
         axis = dict(zip(by, k))
-        with_pr = [s for s in ss if s.prs]
-        n_pr = sum(len(s.prs) for s in with_pr)
-        if n_pr:
-            layer_cost = Counter()
-            total = Usage()
-            ext = Counter()
-            for s in with_pr:
-                for (layer, *_), r in s.roles.items():
-                    layer_cost[layer] += r.usage.cost
-                    total.add(r.usage)
-                for e in s.external:
-                    for tk, tv in e.tokens.items():
-                        ext[f"{e.runtime}.{tk}"] += tv
-            per_pr.append(
-                axis
-                | {
-                    "sessions": len(ss),
-                    "sessions_with_pr": len(with_pr),
-                    "prs": n_pr,
-                    "conductor_cost": layer_cost["conductor"] / n_pr,
-                    "supervisor_cost": layer_cost["supervisor"] / n_pr,
-                    "worker_cost": layer_cost["worker"] / n_pr,
-                    "context": total.context / n_pr,
-                    "out": total.out / n_pr,
-                    "minutes": sum(s.active for s in with_pr) / n_pr / 60,
-                    "codex_input": ext["codex.input"] / n_pr,
-                    "codex_out": ext["codex.out"] / n_pr,
-                    "kiro_credit": ext["kiro.credit"] / n_pr,
-                    "claude_seat_cost": ext["claude.cost"] / n_pr,
-                }
-            )
-        else:
-            per_pr.append(axis | {"sessions": len(ss), "sessions_with_pr": 0, "prs": 0})
-        roles: dict = defaultdict(Role)
-        for s in ss:
-            for rk, r in s.roles.items():
-                roles[rk].usage.add(r.usage)
-                roles[rk].n += r.n
-                roles[rk].sec += r.sec
-        layer_order = {"conductor": 0, "supervisor": 1, "worker": 2}
-        for (layer, role, agent_type), r in sorted(roles.items(), key=lambda x: (layer_order[x[0][0]], x[0][1], x[0][2])):
-            stats = call_stats(r.usage, r.n)
-            if agent_type == LEDGER_AGENT:  # 呼び出しの並びが分からない起動は P・書き直しを出さない
-                for k in SEQ_KEYS:
-                    stats.pop(k)
-            per_role.append(
-                axis
-                | {
-                    "layer": layer,
-                    "role": role,
-                    "agent_type": agent_type,
-                    "count": r.n,
-                    "cost": r.usage.cost / r.n,
-                    "context": r.usage.context / r.n,
-                    "out": r.usage.out / r.n,
-                    "minutes": r.sec / r.n / 60,
-                    **stats,
-                }
-            )
-        ext_groups: dict = defaultdict(list)
-        for s in ss:
-            for e in s.external:
-                ext_groups[(e.runtime, e.kind, e.model)].append(e)
-        for (rt, kind, model), es in sorted(ext_groups.items()):
-            tok = Counter()
-            calls = Usage()
-            with_calls = [e for e in es if e.usage]
-            for e in es:
-                tok.update(e.tokens)
-            for e in with_calls:
-                calls.add(e.usage)
-            # 呼び出しの並びが分かる席だけを分母にする。分からない席しか無ければ P・k を出さない（kiro はターン数を k に）
-            if with_calls:
-                stats = call_stats(calls, len(with_calls)) | {"call_seats": len(with_calls)}
-                if rt == "codex":  # codex は書き込みを記録しない（キャッシュに当たらなかった分は書き直しの判定にだけ使う）
-                    stats.pop("w5"), stats.pop("w1h")
-            elif "calls" in tok:  # kiro のターン数は利用者のターンで、呼び出し回数 k ではない
-                stats = {"turns": tok.pop("calls") / len(es)}
-            else:
-                stats = {}
-            external.append(
-                axis
-                | {
-                    "runtime": rt,
-                    "skill": "cross-review" if kind == "pr" else "cross-refactoring",
-                    "cli_model": model,
-                    "count": len(es),
-                    **{k: v / len(es) for k, v in tok.items()},
-                    "minutes": sum(e.sec for e in es) / len(es) / 60,
-                    **stats,
-                }
-            )
+        per_pr.append(_per_pr_row(axis, ss, rmap))
+        per_role += _per_role_rows(axis, ss)
+        external += _external_rows(axis, ss)
     return {"per_pr": per_pr, "per_role": per_role, "external": external}
+
+
+def _cache_row(r: dict, by: list[str], lead: tuple[str, ...], writes: bool = False) -> list[str]:
+    """「呼び出しとキャッシュ」の表の 1 行。writes は書き込み 5 分・1 時間の列を持つ表（フェーズごと）で立てる。"""
+    return (
+        [r[a] for a in by]
+        + [r[c] for c in lead]
+        + [
+            str(r["count"]),
+            _k(r["p"]) if "p" in r else "-",
+            f"{r['k']:.1f}" if "k" in r else "-",
+            *([_m(r["w5"]), _m(r["w1h"])] if writes else []),
+            str(r.get("rewrites", "-")),
+            str(r.get("rewrites_after_5m", "-")),
+            _m(r["rewrite_tokens_after_5m"]) if "rewrite_tokens_after_5m" in r else "-",
+            _m(r["read_tokens_after_5m"]) if "read_tokens_after_5m" in r else "-",
+            _min(r.get("rewrite_gap_median")),
+        ]
+    )
 
 
 def render_md(result: dict, by: list[str]) -> str:
@@ -779,6 +850,9 @@ def render_md(result: dict, by: list[str]) -> str:
         "書き直しでない呼び出しの読み込みの量（どちらも合計）。定義はサブエージェントの定義の名前。"
     )
     out = [summary, "", legend, "", "## PR 1 本あたり", ""]
+    released = RELEASE_AXIS in by
+    if released:
+        out += ["載った PR は、その版に載ったマージ済みの PR の数（PR の一覧と寄せ方だけで決まる）。PR は会話が作った PR の数。", ""]
     rows = []
     for r in result["per_pr"]:
         if not r["prs"]:
@@ -788,6 +862,9 @@ def render_md(result: dict, by: list[str]) -> str:
             + [
                 str(r["sessions_with_pr"]),
                 str(r["prs"]),
+            ]
+            + ([str(r.get("release_prs", "-"))] if released else [])
+            + [
                 _m(r["conductor_cost"]),
                 _m(r["supervisor_cost"]),
                 _m(r["worker_cost"]),
@@ -802,9 +879,9 @@ def render_md(result: dict, by: list[str]) -> str:
         )
     out += table(
         heads
+        + ["会話", "PR"]
+        + (["載った PR"] if released else [])
         + [
-            "会話",
-            "PR",
             "conductor 換算",
             "supervisor 換算",
             "worker 換算",
@@ -854,25 +931,7 @@ def render_md(result: dict, by: list[str]) -> str:
             "5 分超の読み込み",
             "間隔",
         ],
-        [
-            [r[a] for a in by]
-            + [
-                r["layer"],
-                r["role"],
-                r["agent_type"],
-                str(r["count"]),
-                _k(r["p"]) if "p" in r else "-",
-                f"{r['k']:.1f}",
-                _m(r["w5"]),
-                _m(r["w1h"]),
-                str(r.get("rewrites", "-")),
-                str(r.get("rewrites_after_5m", "-")),
-                _m(r["rewrite_tokens_after_5m"]) if "rewrite_tokens_after_5m" in r else "-",
-                _m(r["read_tokens_after_5m"]) if "read_tokens_after_5m" in r else "-",
-                _min(r.get("rewrite_gap_median")),
-            ]
-            for r in result["per_role"]
-        ],
+        [_cache_row(r, by, ("layer", "role", "agent_type"), writes=True) for r in result["per_role"]],
     )
     out += ["", "## 外部 CLI（1 起動あたり）", "", "kiro はトークン数を記録しない（値が 0）ため credit だけを載せる。agy は読まない。", ""]
     out += table(
@@ -903,23 +962,7 @@ def render_md(result: dict, by: list[str]) -> str:
     ]
     out += table(
         heads + ["ランタイム", "Skill", "モデル", "起動", "P", "k", "書き直し", "5 分超", "5 分超の書き直し", "5 分超の読み込み", "間隔"],
-        [
-            [r[a] for a in by]
-            + [
-                r["runtime"],
-                r["skill"],
-                r["cli_model"],
-                str(r["count"]),
-                _k(r["p"]) if "p" in r else "-",
-                f"{r['k']:.1f}" if "k" in r else "-",
-                str(r.get("rewrites", "-")),
-                str(r.get("rewrites_after_5m", "-")),
-                _m(r["rewrite_tokens_after_5m"]) if "rewrite_tokens_after_5m" in r else "-",
-                _m(r["read_tokens_after_5m"]) if "read_tokens_after_5m" in r else "-",
-                _min(r.get("rewrite_gap_median")),
-            ]
-            for r in result["external"]
-        ],
+        [_cache_row(r, by, ("runtime", "skill", "cli_model")) for r in result["external"]],
     )
     return "\n".join(out) + "\n"
 
@@ -951,6 +994,23 @@ def collect(
     return sessions, unlinked, skipped
 
 
+def pr_numbers(urls: set, slug: str | None) -> list[int]:
+    """会話が作った PR の URL のうち、`slug`（`<所有者>/<リポジトリ>`。None なら問わない）の番号を小さい順に。"""
+    out = set()
+    for u in urls:
+        m = PR_URL_PARTS_RE.search(u)
+        if m and (slug is None or m.group(1) == slug):
+            out.add(int(m.group(2)))
+    return sorted(out)
+
+
+def place_releases(sessions: list[Session], rmap: "release_map.ReleaseMap", slug: str | None) -> None:
+    """会話を載った版へ寄せる（会話が作った PR → 会話の終わりの時刻の順。release_map.place）。"""
+    for s in sessions:
+        pl = rmap.place(pr_numbers(s.prs, slug), s.end)
+        s.release, s.release_by = pl.version or "未リリース", pl.by
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="ndf の版ごとのトークン消費と所要時間を集計する")
     home = Path(os.path.expanduser("~"))
@@ -958,7 +1018,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--codex-root", type=Path, default=home / ".codex/sessions")
     ap.add_argument("--kiro-root", type=Path, default=home / ".kiro/sessions/cli")
     ap.add_argument("--min-version", help="この版以上だけを集計する（例: 10.14.0）")
-    ap.add_argument("--by", default="version,mode,model", help=f"表の軸（カンマ区切り）: {', '.join(AXES)}")
+    ap.add_argument(
+        "--by",
+        default="version,mode,model",
+        help=f"表の軸（カンマ区切り）: {', '.join(AXES + (RELEASE_AXIS,))}。version は動いた版、release は載った版",
+    )
+    ap.add_argument("--repo", type=Path, default=Path.cwd(), help="軸 release で PR の一覧・タグ・CHANGELOG を読むリポジトリ")
+    ap.add_argument(
+        "--prs-json", type=Path, help="PR の一覧のキャッシュ（無ければ gh pr list を 1 回打って書く）。軸 release のときだけ読む"
+    )
     ap.add_argument("--idle-cap", type=int, default=IDLE_CAP, help="所要に入れる行の間隔の上限（秒）")
     ap.add_argument("--format", choices=("md", "json"), default="md")
     ap.add_argument(
@@ -974,9 +1042,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = ap.parse_args(argv)
     by = [a.strip() for a in args.by.split(",") if a.strip()]
-    bad = [a for a in by if a not in AXES]
+    bad = [a for a in by if a not in AXES + (RELEASE_AXIS,)]
     if bad or not by:
-        ap.error(f"--by に使えない軸: {', '.join(bad) or '(空)'}（使える軸: {', '.join(AXES)}）")
+        ap.error(f"--by に使えない軸: {', '.join(bad) or '(空)'}（使える軸: {', '.join(AXES + (RELEASE_AXIS,))}）")
 
     until = None
     if args.until:
@@ -988,7 +1056,12 @@ def main(argv: list[str] | None = None) -> int:
     sessions, unlinked, skipped = collect(
         args.claude_root, args.codex_root, args.kiro_root, args.idle_cap, until, args.min_version, args.usage_root
     )
-    result = aggregate(sessions, by)
+    rmap = None
+    if RELEASE_AXIS in by:  # PR の一覧を読む通信は軸 release のときだけ
+        rmap = release_map.ReleaseMap.from_repo(args.repo, release_map.load_prs(args.repo, args.prs_json))
+        key = usage_ledger.repo_key(str(args.repo))
+        place_releases(sessions, rmap, key.replace("__", "/", 1) if key != usage_ledger.UNKNOWN else None)
+    result = aggregate(sessions, by, rmap)
     result["meta"] = {
         "by": by,
         "min_version": args.min_version,

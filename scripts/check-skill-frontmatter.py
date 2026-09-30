@@ -33,6 +33,7 @@ import pathlib
 import subprocess
 import re
 import sys
+from typing import NamedTuple
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
 from ndf_wrappers import require  # noqa: E402  根の lock で包みの依存を解決する（#1142 の決定 19）
@@ -87,8 +88,6 @@ CALIBRATION_FILE = pathlib.Path(__file__).resolve().with_name("skill-listing-cal
 #   "The budget scales at 1% of the model's context window."
 #   引き上げは skillListingBudgetFraction 設定 / SLASH_COMMAND_TOOL_CHAR_BUDGET 環境変数。
 #   Opus 5 の 1,000,000 トークンで 1% = 10,000 トークン。
-CLAUDE_CONTEXT_TOKENS = 1_000_000
-CLAUDE_LISTING_FRACTION = 0.01
 #   1 項目は description + when_to_use を合わせて 1,536 文字で切り詰める。
 #   "each entry's combined text is capped at 1,536 characters regardless of budget"
 CLAUDE_ITEM_TRUNCATE = 1_536
@@ -100,9 +99,6 @@ CLAUDE_ITEM_TRUNCATE = 1_536
 #   2% = 5,440 トークン。コンテキスト長が判明しているため 8,000 のフォールバックは使わない。
 #   比率は 2 倍でもコンテキストが 1/3.7 のため、**予算は Claude Code の約半分**にしかならず、
 #   実質ここが全体の制約になる。
-CODEX_CONTEXT_TOKENS = 272_000
-CODEX_LISTING_FRACTION = 0.02
-CODEX_LISTING_LEVEL = "error"
 #
 # Kiro: 公式ドキュメント（kiro.dev/docs/skills）に一覧予算の規定が無い。
 #   既定モデル auto のコンテキストは 1,000,000。**この値は過去の実測の記録である。**
@@ -114,8 +110,6 @@ CODEX_LISTING_LEVEL = "error"
 #   取る手段が kiro-cli の版によって変わるため、機械でのチェックは置いていない）。
 #   規定が無い以上どこかから基準を借りるほかなく、コンテキスト長が同じ Claude Code の
 #   1% を当てる。憶測で独自の値を置くより、同じ土俵の実在する規定へ揃えるほうが根拠が残る。
-KIRO_CONTEXT_TOKENS = 1_000_000
-KIRO_LISTING_FRACTION = CLAUDE_LISTING_FRACTION
 #
 # agy（Antigravity CLI）: 公式ドキュメント（antigravity.google/docs/skills）に一覧予算の
 #   規定が無い。既定のモデルは Gemini 3.x Flash 系（`agy models` の先頭が
@@ -125,15 +119,30 @@ KIRO_LISTING_FRACTION = CLAUDE_LISTING_FRACTION
 #   コンテキスト長 1,000,000 は Claude Code の Opus 5 と同じであり、規定が無い以上
 #   どこかから基準を借りるほかない。憶測で独自の値を置くより、同じコンテキスト長を持つ
 #   実在する規定へ揃えるほうが根拠が残る（Kiro CLI と同じ扱い）。
-AGY_CONTEXT_TOKENS = 1_000_000
-AGY_LISTING_FRACTION = CLAUDE_LISTING_FRACTION
 
 # 一覧に何が載るかはランタイムごとに違う。**公式に記述があるのは Claude Code と Codex
 # だけ**である。
 #   Claude Code: "loads a listing of skill names and descriptions into context"
 #   Codex:       "In Codex, the initial list also includes each skill's file path."
 # Kiro CLI と agy は一覧の構成も公式に記述が無いため、多い側（パスを含む）で見積もる。
-LISTING_INCLUDES_PATH = {"claude": False, "codex": True, "kiro": True, "agy": True}
+
+
+class Listing(NamedTuple):
+    """ランタイムの初期一覧の予算の決め方。値の出典は上のランタイムごとのコメントにある。"""
+
+    context_tokens: int  # モデルのコンテキスト長
+    fraction: float  # 一覧に割くコンテキストの割合
+    level: str  # 予算を超えたときの判定
+    includes_path: bool  # 一覧に Skill のファイルパスが載るか
+
+
+# Kiro と agy の割合は Claude Code から借りる（上の Kiro・agy のコメント）
+LISTINGS = {
+    "claude": Listing(1_000_000, 0.01, "error", False),
+    "codex": Listing(272_000, 0.02, "error", True),
+    "kiro": Listing(1_000_000, 0.01, "error", True),
+    "agy": Listing(1_000_000, 0.01, "error", True),
+}
 
 # 全 Skill の frontmatter 合計。**plugin family をまたいで合計する**（利用者の環境では
 # 複数のプラグインが同時に入るため、family 内だけ見ても実際の注入量にならない）。
@@ -354,24 +363,10 @@ def load_skills(skills_dir: pathlib.Path) -> list[dict]:
     return skills
 
 
-def check_skill(s: dict) -> list[Finding]:
-    name_hint = s["dir"]
-    fm = s["fm"]
-    if fm is None:
-        if s.get("fm_error"):
-            return [Finding(name_hint, "error", "spec/frontmatter", f"YAML として読めない（{s['fm_error']}）")]
-        return [Finding(name_hint, "error", "spec/frontmatter", "frontmatter がない")]
-
-    out: list[Finding] = []
-
-    def add(level, code, msg):
-        out.append(Finding(name_hint, level, code, msg))
-
+def _check_spec(s: dict, fm: dict, add) -> None:
+    """仕様準拠の検査。"""
     desc = fm.get("description", "")
-    wtu = fm.get("when_to_use", "")
     name = fm.get("name", "")
-
-    # --- 仕様準拠 ---
     if not name:
         add("error", "spec/name", "name がない")
     else:
@@ -391,13 +386,19 @@ def check_skill(s: dict) -> list[Finding]:
     if len(compat) > COMPATIBILITY_MAX:
         add("error", "spec/compatibility", f"compatibility が {len(compat)} 文字（上限 {COMPATIBILITY_MAX}）")
 
-    # --- 安全性 ---
+
+def _check_safety(s: dict, fm: dict, add) -> None:
+    """安全性の検査。"""
     # Agent Skills 仕様がシステムプロンプトへの注入リスクとして警告している。
     if "<" in s["block"] or ">" in s["block"]:
         bad = [k for k, v in fm.items() if "<" in v or ">" in v]
         add("error", "safety/angle-bracket", f"frontmatter に < または > が含まれる（{', '.join(bad) or '不明'}）")
 
-    # --- 可搬性 ---
+
+def _check_portability(s: dict, fm: dict, add) -> None:
+    """可搬性の検査。"""
+    desc = fm.get("description", "")
+    wtu = fm.get("when_to_use", "")
     # Codex と Kiro は when_to_use を読まないため、発動条件は description に要る。
     if desc and not USE_WHEN_RE.search(desc):
         add("error", "portability/use-when", "description に発動条件を示す語（Use when / 使う / とき）がない")
@@ -435,7 +436,11 @@ def check_skill(s: dict) -> list[Finding]:
             "置き換えるため、名前付きの変数で受けるか処理をスクリプトへ移す",
         )
 
-    # --- 運用 ---
+
+def _check_ops(s: dict, fm: dict, add) -> None:
+    """運用の検査。"""
+    desc = fm.get("description", "")
+    wtu = fm.get("when_to_use", "")
     if len(desc) > DESCRIPTION_OPS_MAX:
         add("error", "ops/description-length", f"description が {len(desc)} 文字（運用上限 {DESCRIPTION_OPS_MAX}）")
     if len(desc) + len(wtu) > DESC_PLUS_WTU_MAX:
@@ -488,6 +493,23 @@ def check_skill(s: dict) -> list[Finding]:
     if unknown:
         add("error", "ops/unknown-key", f"未知の項目名: {', '.join(unknown)}")
 
+
+def check_skill(s: dict) -> list[Finding]:
+    name_hint = s["dir"]
+    fm = s["fm"]
+    if fm is None:
+        if s.get("fm_error"):
+            return [Finding(name_hint, "error", "spec/frontmatter", f"YAML として読めない（{s['fm_error']}）")]
+        return [Finding(name_hint, "error", "spec/frontmatter", "frontmatter がない")]
+
+    out: list[Finding] = []
+
+    def add(level, code, msg):
+        out.append(Finding(name_hint, level, code, msg))
+
+    for check in (_check_spec, _check_safety, _check_portability, _check_ops):
+        check(s, fm, add)
+
     return out
 
 
@@ -508,13 +530,8 @@ def listing_limits() -> dict[str, int | None]:
     """初期一覧の予算を文字数で返す。予算はトークンで効くため換算比を掛ける。"""
     cpt, _ = load_calibration()
     out: dict[str, int | None] = {}
-    for runtime, tokens, frac in (
-        ("claude", CLAUDE_CONTEXT_TOKENS, CLAUDE_LISTING_FRACTION),
-        ("codex", CODEX_CONTEXT_TOKENS, CODEX_LISTING_FRACTION),
-        ("kiro", KIRO_CONTEXT_TOKENS, KIRO_LISTING_FRACTION),
-        ("agy", AGY_CONTEXT_TOKENS, AGY_LISTING_FRACTION),
-    ):
-        out[runtime] = None if frac is None or tokens is None else int(tokens * frac * cpt)
+    for runtime, li in LISTINGS.items():
+        out[runtime] = int(li.context_tokens * li.fraction * cpt)
     return out
 
 
@@ -573,7 +590,7 @@ def measure_aggregate(skills: list[dict], skills_dir: pathlib.Path) -> dict:
                 # Codex / Kiro は when_to_use を一覧へ載せない。
                 d = desc
             item = len(name) + len(d)
-            if LISTING_INCLUDES_PATH.get(runtime, True):
+            if runtime not in LISTINGS or LISTINGS[runtime].includes_path:
                 item += len(rel)
             listings[runtime] += item
 
@@ -587,14 +604,13 @@ def check_budget(metrics: dict) -> list[Finding]:
     """
     out: list[Finding] = []
     limits = listing_limits()
-    levels = {"claude": "error", "codex": CODEX_LISTING_LEVEL, "kiro": "error", "agy": "error"}
     for runtime, total in sorted(metrics["listings"].items()):
         limit = limits.get(runtime)
         if limit is not None and total > limit:
             out.append(
                 Finding(
                     "(全体)",
-                    levels.get(runtime, "error"),
+                    LISTINGS[runtime].level if runtime in LISTINGS else "error",
                     f"ops/{runtime}-listing",
                     f"{runtime} の初期一覧に載る合計が {total} 文字（上限 {limit}）",
                 )
@@ -751,51 +767,29 @@ def calibrate(skills_dirs: list[pathlib.Path]) -> int:
     return 0
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument(
-        "--skills-dir",
-        action="append",
-        default=None,
-        help="チェック対象の Skill ディレクトリ。複数指定できる（既定: manifests/ を持つ plugin family の skills/ を全てチェック）",
-    )
-    ap.add_argument("--strict", action="store_true", help="警告も失敗として扱う")
-    ap.add_argument("--report", action="store_true", help="判定せず実測値の一覧だけ出力する")
-    ap.add_argument("--calibrate", action="store_true", help="Claude Code の /context を実測し、文字数→トークンの換算比を保存する")
-    args = ap.parse_args()
+def _discover_skills_dirs() -> list[pathlib.Path]:
+    # plugin family を manifests/ の有無から検出する。移行の途中は 2 つの構成が
+    # 混ざるため、どちらも拾う。
+    #   split  … plugins/<family>-shared（編集元。生成物はチェックしない）
+    #   single … plugins/<family>（配布ディレクトリが 1 つだけ）
+    # 初期一覧の予算はプラグイン横断で共有されるため、既定では全 family を対象に
+    # して合計も出す。
+    found = []
+    for d in sorted(pathlib.Path("plugins").glob("*")):
+        if not (d / "manifests").is_dir() or not (d / "skills").is_dir():
+            continue
+        if d.name.endswith(("-claude", "-codex", "-kiro")):
+            continue
+        found.append(d / "skills")
+        # どの manifest にも載せない Skill も規約のチェックは受ける。配らないだけで、
+        # 中身は同じ規約で書く（後で配布へ回すときに書き直しが要らないように）。
+        if (d / "optional-skills").is_dir():
+            found.append(d / "optional-skills")
+    return found
 
-    if args.skills_dir:
-        skills_dirs = [pathlib.Path(d) for d in args.skills_dir]
-    else:
-        # plugin family を manifests/ の有無から検出する。移行の途中は 2 つの構成が
-        # 混ざるため、どちらも拾う。
-        #   split  … plugins/<family>-shared（編集元。生成物はチェックしない）
-        #   single … plugins/<family>（配布ディレクトリが 1 つだけ）
-        # 初期一覧の予算はプラグイン横断で共有されるため、既定では全 family を対象に
-        # して合計も出す。
-        found = []
-        for d in sorted(pathlib.Path("plugins").glob("*")):
-            if not (d / "manifests").is_dir() or not (d / "skills").is_dir():
-                continue
-            if d.name.endswith(("-claude", "-codex", "-kiro")):
-                continue
-            found.append(d / "skills")
-            # どの manifest にも載せない Skill も規約のチェックは受ける。配らないだけで、
-            # 中身は同じ規約で書く（後で配布へ回すときに書き直しが要らないように）。
-            if (d / "optional-skills").is_dir():
-                found.append(d / "optional-skills")
-        skills_dirs = found
-    for d in skills_dirs:
-        if not d.is_dir():
-            print(f"[check-skill-frontmatter] ディレクトリがない: {d}", file=sys.stderr)
-            return 2
-    if not skills_dirs:
-        print("[check-skill-frontmatter] チェック対象が見つからない", file=sys.stderr)
-        return 2
 
-    if args.calibrate:
-        return calibrate(skills_dirs)
-
+def _run_checks(skills_dirs: list[pathlib.Path]) -> tuple[list[Finding], list[dict], list[tuple[pathlib.Path, dict]], dict] | None:
+    """全 Skill を検査して集計する。SKILL.md の無いディレクトリがあれば None を返す。"""
     findings: list[Finding] = []
     skills: list[dict] = []
     per_family: list[tuple[pathlib.Path, dict]] = []
@@ -803,7 +797,7 @@ def main() -> int:
         family_skills = load_skills(skills_dir)
         if not family_skills:
             print(f"[check-skill-frontmatter] SKILL.md が見つからない: {skills_dir}", file=sys.stderr)
-            return 2
+            return None
         for s in family_skills:
             findings.extend(check_skill(s))
         # トリガ語の重複・外部名の衝突・初期一覧の予算は family をまたいで判定する
@@ -821,35 +815,70 @@ def main() -> int:
         for runtime, total in m["listings"].items():
             metrics["listings"][runtime] = metrics["listings"].get(runtime, 0) + total
     findings.extend(check_budget(metrics))
+    return findings, skills, per_family, metrics
+
+
+def _print_report(skills: list[dict], per_family: list[tuple[pathlib.Path, dict]], metrics: dict) -> None:
+    for skills_dir, m in per_family:
+        print(
+            f"# {skills_dir}  Skill {sum(1 for s in skills if str(skills_dir) in str(s['path']))} 個"
+            f" / frontmatter {m['frontmatter_total']} 文字"
+            f" / claude 一覧 {m['listings'].get('claude', 0)} 文字"
+        )
+    print()
+    print(f"{'skill':34} {'lines':>5} {'desc':>5} {'wtu':>5}  flags")
+    for s in sorted(skills, key=lambda x: x["dir"]):
+        fm = s["fm"] or {}
+        flags = [k for k in ("disable-model-invocation", "user-invocable", "paths", "effort", "context", "arguments", "license") if k in fm]
+        print(f"{s['dir']:34} {s['lines']:>5} {len(fm.get('description', '')):>5} {len(fm.get('when_to_use', '')):>5}  {','.join(flags)}")
+    print(f"\nSkill 数: {len(skills)}")
+    # 予算は plugin family をまたいだ合計で判定するが、利用者が片方しか入れない
+    # 場合もあるため family 別の内訳も出す。
+    limits = listing_limits()
+    names = [d.parent.name.replace("-shared", "") for d, _ in per_family]
+    print(f"\n{'runtime':8} {'合計':>7} {'上限':>7}  " + "  ".join(f"{n:>14}" for n in names))
+    for runtime, total in sorted(metrics["listings"].items()):
+        limit = limits.get(runtime)
+        cells = "  ".join(f"{m['listings'].get(runtime, 0):>14}" for _, m in per_family)
+        print(f"{runtime:8} {total:>7} {(limit or '—'):>7}  {cells}")
+    print(f"\nfrontmatter 合計: {metrics['frontmatter_total']} 文字 (目安 {FRONTMATTER_TOTAL_MAX})")
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument(
+        "--skills-dir",
+        action="append",
+        default=None,
+        help="チェック対象の Skill ディレクトリ。複数指定できる（既定: manifests/ を持つ plugin family の skills/ を全てチェック）",
+    )
+    ap.add_argument("--strict", action="store_true", help="警告も失敗として扱う")
+    ap.add_argument("--report", action="store_true", help="判定せず実測値の一覧だけ出力する")
+    ap.add_argument("--calibrate", action="store_true", help="Claude Code の /context を実測し、文字数→トークンの換算比を保存する")
+    args = ap.parse_args()
+
+    if args.skills_dir:
+        skills_dirs = [pathlib.Path(d) for d in args.skills_dir]
+    else:
+        skills_dirs = _discover_skills_dirs()
+    for d in skills_dirs:
+        if not d.is_dir():
+            print(f"[check-skill-frontmatter] ディレクトリがない: {d}", file=sys.stderr)
+            return 2
+    if not skills_dirs:
+        print("[check-skill-frontmatter] チェック対象が見つからない", file=sys.stderr)
+        return 2
+
+    if args.calibrate:
+        return calibrate(skills_dirs)
+
+    checked = _run_checks(skills_dirs)
+    if checked is None:
+        return 2
+    findings, skills, per_family, metrics = checked
 
     if args.report:
-        for skills_dir, m in per_family:
-            print(
-                f"# {skills_dir}  Skill {sum(1 for s in skills if str(skills_dir) in str(s['path']))} 個"
-                f" / frontmatter {m['frontmatter_total']} 文字"
-                f" / claude 一覧 {m['listings'].get('claude', 0)} 文字"
-            )
-        print()
-        print(f"{'skill':34} {'lines':>5} {'desc':>5} {'wtu':>5}  flags")
-        for s in sorted(skills, key=lambda x: x["dir"]):
-            fm = s["fm"] or {}
-            flags = [
-                k for k in ("disable-model-invocation", "user-invocable", "paths", "effort", "context", "arguments", "license") if k in fm
-            ]
-            print(
-                f"{s['dir']:34} {s['lines']:>5} {len(fm.get('description', '')):>5} {len(fm.get('when_to_use', '')):>5}  {','.join(flags)}"
-            )
-        print(f"\nSkill 数: {len(skills)}")
-        # 予算は plugin family をまたいだ合計で判定するが、利用者が片方しか入れない
-        # 場合もあるため family 別の内訳も出す。
-        limits = listing_limits()
-        names = [d.parent.name.replace("-shared", "") for d, _ in per_family]
-        print(f"\n{'runtime':8} {'合計':>7} {'上限':>7}  " + "  ".join(f"{n:>14}" for n in names))
-        for runtime, total in sorted(metrics["listings"].items()):
-            limit = limits.get(runtime)
-            cells = "  ".join(f"{m['listings'].get(runtime, 0):>14}" for _, m in per_family)
-            print(f"{runtime:8} {total:>7} {(limit or '—'):>7}  {cells}")
-        print(f"\nfrontmatter 合計: {metrics['frontmatter_total']} 文字 (目安 {FRONTMATTER_TOTAL_MAX})")
+        _print_report(skills, per_family, metrics)
         return 0
 
     errors = [f for f in findings if f.level == "error"]

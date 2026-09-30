@@ -224,6 +224,28 @@ def test_check_since_last_has_a_condition_and_every_failure_reaches_abort(tmp_pa
     assert_transitions_exist(plan)
 
 
+def test_check_of_a_pr_records_every_ending_and_judge_stops_through_abort(tmp_path):
+    """PR を指す検査も、マージの後と落ちたときに検査の記録へ 1 行を書く（#1317）。"""
+    out = tmp_path / "check.json"
+    p = cli("new", "check", "--pr", "5", "--worktree", str(tmp_path), "--out", str(out))
+    assert p.returncode == 0, p.stdout + p.stderr
+    plan = load(out)
+    s = steps_of(plan)
+    assert s["merge"]["next"] == "record" and s["merge-approved"]["next"] == "record"
+    assert "record --id pr-5" in s["record"]["cmd"] and s["record"]["cmd"].endswith("--target-pr 5")
+    assert s["abort"]["cmd"] == s["record"]["cmd"] + " --failed"
+    for step in plan["steps"]:
+        if step["type"] in ("run", "drive") and step["id"] not in ("abort", "assess", "test-all"):
+            assert step.get("on_fail") == "abort", step
+    assert "stop" not in s["judge"]["choices"] and "abort" in s["judge"]["choices"]
+    assert_transitions_exist(plan)
+    since = tmp_path / "since.json"
+    assert cli("new", "check", "--since-last", "--id", "m-4", "--worktree", str(tmp_path), "--out", str(since)).returncode == 0
+    s = steps_of(load(since))
+    assert "stop" not in s["judge"]["choices"] and "abort" in s["judge"]["choices"]
+    assert s["refactor"]["on_fail"] == "abort" and s["review"]["on_fail"] == "abort"
+
+
 def test_since_ref_reaches_the_condition_and_prepare_but_not_record(tmp_path):
     out = tmp_path / "review.json"
     p = cli(

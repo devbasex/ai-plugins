@@ -151,7 +151,7 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 
 **並びは `normal` と同じで、設計のステージの queue が後ろのステージを `--then` で本番まで流す。** 前のステージの
 プランがすべて `完了` のときだけ後ろが流れ、1 本でも `関門` なら queue は後ろを流さずに `gate` を返す。
-`check-trigger.py` は呼ばれない。マニフェスト（`<out>/sprint.json`）は `進め方: auto`・`状態`・`ブランチ` を持つ。
+検査のトリガー（`check-trigger.py eval`）は呼ばれない（検査のプランは終わりに検査の記録を書く）。マニフェスト（`<out>/sprint.json`）は `進め方: auto`・`状態`・`ブランチ` を持つ。
 
 | ステージ | プラン | 流し方 |
 | --- | --- | --- |
@@ -288,7 +288,7 @@ Pull Request が範囲から外れる。ブランチはリポジトリにある�
 | `pr` → `assess` → `refactor` → `review` → `test-all` | いつもの検査と同じ。`refactor` の範囲は `check-trigger.py scope`（重点領域 → 流出不具合の領域 → その他）。`--review-only` は `assess` と `refactor` を持たず、`pr` → `review` と進む |
 | `finish` | 宛先をベースブランチへ付け替える。検査で変更が無ければ Pull Request を閉じて `record` へ飛ぶ |
 | `ready` → `merge` → `record` | マージして検査の記録を足し、`check-base/<名>` を消す |
-| `abort` / `abort-before-pr` | 落ちた run のステップの行き先。`result: failed` と落ちたステップを記録し、`check-base/<名>` を消し、Pull Request を閉じて止まる |
+| `abort` / `abort-before-pr` | 落ちたステップと judge の止める判断（`abort`）の行き先。`result: failed` と落ちたステップを記録し、`check-base/<名>` を消し、Pull Request を閉じて止まる |
 
 **`failed` の後の次の評価は同じ `from` から数え直すため、範囲を取りこぼさない。**
 
@@ -370,16 +370,35 @@ Pull Request のコメント）の 3 つがそろったときに限る。** レ�
 `withdrawals[]` に承認ゲートの名前と時刻が残る。どの進め方で通ったかは、状態とマニフェストの `進め方` と、課題の本文の
 見出し行の `進め方: <値>`（`normal` 以外で書く）で読む。
 
-以下は `fast` の検査の記録である。
+以下は検査の記録である。**書き手は `check-trigger.py record` の 1 つで、前回の検査からの差分の検査
+（`new check --since-last`。`scope: since`）も、PR を指す検査（`new check --pr N`。`record --target-pr N`・`scope: pr`）も、
+マージ・変更なし・落ちたのどの終わり方でも 1 行を書く。** PR を指す検査の行は `pr` と `to` を持たないため、トリガーの範囲の
+起点にも、範囲から外す PR にもならない。承認ゲートで止まった間と、計画の外から止められた計画は書かない。
 検査の記録は通過記録と同じ置き場（`${CLAUDE_PLUGIN_DATA}` → `${XDG_STATE_HOME:-~/.local/state}/ndf` →
 `${TMPDIR:-/tmp}/ndf-checks`）の `checks/<所有者>__<リポジトリ>.jsonl` に、事象を追記するだけで持つ。
 
 | `kind` | いつ足すか | 主な列 |
 | --- | --- | --- |
 | `eval` | 評価のたび（立たなかった回も） | `id`・`from`・`to`・`fired`・`metrics`（`prs`・`score`・`lines`・`hours`・`escapes`） |
-| `check` | 検査の終わり | `result`（`merged` / `no_change` / `failed`）・`failed_at`・`pr`・`findings`（`applied`・`reverted`・`findings`・`unresolved`） |
+| `check` | 検査の終わり | `result`（`merged` / `no_change` / `failed`）・`failed_at`・`scope`（`since` / `pr`。無い行は `since`）・`pr`（`since` の検査の PR）・`target_pr`（`pr` の検査した PR）・`prs`（範囲の PR）・`findings` |
 | `escape` | 流出不具合を直したマージの後 | `pr`・`of`（0 は不明）・`areas` |
 
-**`check-trigger.py stats` が集計する**（評価の回数と立った回数・トリガーごとの回数・検査ごとの指摘の件数・検査の後に
-流出した不具合の件数）。スプリントの終わりの振り返りはこの出力を材料にし、検査を 5 回回した後に閾値を見直す。
+`findings` の件数は計画の `state.json` の `counts`（フェーズレポートと同じ出所）から写す。
+
+| キー | 単位 |
+| --- | --- |
+| `applied`・`reverted` | 構造改善の改善項目 |
+| `findings`・`fixed`・`deferred`・`rejected` | 修正担当が扱った指摘（`findings` = 直した + 見送った + 却下した。`findings` ≥ `fixed`） |
+| `comments` | レビュー担当が出したコメント（1 つに複数の指摘が入り、2 者が同じ所を指せば 2 件。指摘の数と比べない） |
+| `unresolved` | 解決されていないスレッド |
+| `rounds` | 実装レビューのラウンド |
+
+`comments` を持たない古い行の `findings` はコメントの数である。`stats` はそれを `comments` として出し、`findings` と
+`fixed` を空にする（行は書き換えない）。
+
+**`check-trigger.py stats` が集計する**（評価の回数と立った回数・トリガーごとの回数・検査ごとの件数・検査の後に
+流出した不具合の件数・流出不具合と検査の結び付き）。流出不具合は、持ち込んだ PR（`of`）を範囲（`prs`）に含めた最新の
+検査へ結び付く（`items[].escapes_linked`）。結び付かないものは `metrics.unlinked` に理由と並ぶ: `of_unknown`（`of: 0`）/
+`no_check`（`of` を範囲に含めた検査が無い）/ `no_range`（それより前に範囲を持たない古い行しか無い）。時刻の窓で数える
+`escapes_after` は `scope: since` の検査だけが持つ。スプリントの終わりの振り返りはこの出力を材料にし、検査を 5 回回した後に閾値を見直す。
 別の端末では記録が無く、最新の正式版のタグから数え直す（範囲が広がる側に倒れ、取りこぼしは起きない）。

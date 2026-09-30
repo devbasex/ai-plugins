@@ -21,7 +21,7 @@ RULE_IMPL = (
 )
 RULE_CHECK = (
     "全体テストが落ちたら（落ちたテストだけの再実行でも落ちた後）、変更に起因するなら fix、"
-    "変更に無関係なら ready。2 回直しても同じなら stop。"
+    "変更に無関係なら ready。2 回直しても同じなら abort。"
 )
 FIX_PROMPT = "失敗した箇所を直してコミットする（push しない）。変更に起因しない失敗は直さない。"
 IMPL_RULES = (
@@ -202,8 +202,51 @@ def plan_to_merge(a, head: list[dict]) -> dict:
 NO_REFACTOR_MODES = ("light", "operation", "documentation")
 
 
+def _inspect_steps(a, pr_ref: str, scope: str) -> list[dict]:
+    """検査の assess・refactor・review のステップ。pr_ref は PR の番号か、駆動が埋める `{pr}`。"""
+    return [
+        {
+            "id": "assess",
+            "type": "run",
+            "preset": "assess",
+            "stage": "構造改善",
+            "skip_to": "review",
+            "on_fail": "refactor",
+            "next": "refactor",
+        },
+        # 駆動で回す（最終ゲートは全体テスト。テストの走らせ方は cross-refactoring が同じ宣言から読む。#1334）
+        {
+            "id": "refactor",
+            "type": "drive",
+            "drive": "cross-refactoring",
+            "kind": "構造改善",
+            "stage": "構造改善",
+            "timeout": 3600,
+            "args": f"{pr_ref} --workflow-step --scope {scope}{refactor_template_arg(a)}",
+            "on_fail": "abort",
+            "next": "review",
+        },
+        {
+            "id": "review",
+            "type": "drive",
+            "drive": "cross-review",
+            "kind": "実装レビュー",
+            "stage": "実装レビュー",
+            "timeout": 3600,
+            "args": f"{pr_ref} --max-rounds 4",
+            "on_fail": "abort",
+            "next": "test-all",
+        },
+    ]
+
+
 def plan_check(a) -> dict:
+    """PR を指す検査（`new check --pr`）。終わり方（マージ・変更なし・落ちた）にかかわらず検査の記録へ 1 行を書く
+    （`check-trigger.py record --target-pr`。#1317）。落ちたステップと judge の止める判断は abort へ行き、
+    落ちた行を書いてから止まる。承認ゲートで止まった間は書かず、承認の後に merge-approved から record へ進む。"""
     pr = a.pr
+    name = getattr(a, "id", None) or f"pr-{pr}"
+    record = f"{CHECK_PY} record --id {shlex.quote(name)} --state {{state_dir}} --root . --target-pr {pr}"
     # 範囲の指定が無ければ、PR が変えたファイルのディレクトリ（根を除く）を範囲にする。ステップはシェルで動く。
     # 一覧は REST から取る（gh pr diff は差分が 20000 行を超えると 406 で拒み、範囲が空になる）
     scope = (
@@ -212,17 +255,6 @@ def plan_check(a) -> dict:
         else f"$(gh api 'repos/{{owner}}/{{repo}}/pulls/{pr}/files' --paginate --jq '.[].filename'"
         f" | xargs -n1 dirname | sort -u | grep -vx '\\.')"
     )
-    # 駆動で回す（最終ゲートは全体テスト。テストの走らせ方は cross-refactoring が同じ宣言から読む。#1334）
-    refactor = {
-        "id": "refactor",
-        "type": "drive",
-        "drive": "cross-refactoring",
-        "kind": "構造改善",
-        "stage": "構造改善",
-        "timeout": 3600,
-        "args": f"{pr} --workflow-step --scope {scope}{refactor_template_arg(a)}",
-        "next": "review",
-    }
     plan = _with_test_meta(
         {
             "フェーズ": "検査",
@@ -233,26 +265,7 @@ def plan_check(a) -> dict:
             "上限": 12,
             "Pull Request": str(pr),
             "steps": [
-                {
-                    "id": "assess",
-                    "type": "run",
-                    "preset": "assess",
-                    "stage": "構造改善",
-                    "skip_to": "review",
-                    "on_fail": "refactor",
-                    "next": "refactor",
-                },
-                refactor,
-                {
-                    "id": "review",
-                    "type": "drive",
-                    "drive": "cross-review",
-                    "kind": "実装レビュー",
-                    "stage": "実装レビュー",
-                    "timeout": 3600,
-                    "args": f"{pr} --max-rounds 4",
-                    "next": "test-all",
-                },
+                *_inspect_steps(a, str(pr), scope),
                 {
                     "id": "test-all",
                     "type": "run",
@@ -266,8 +279,8 @@ def plan_check(a) -> dict:
                     "id": "judge",
                     "type": "judge",
                     "inputs": ["test-all"],
-                    "question": "全体テストの失敗を直す（fix）か、変更に無関係として進める（ready）か、止める（stop）か",
-                    "choices": ["fix", "ready", "stop"],
+                    "question": "全体テストの失敗を直す（fix）か、変更に無関係として進める（ready）か、止める（abort）か",
+                    "choices": ["fix", "ready", "abort"],
                 },
                 {
                     "id": "fix",
@@ -277,8 +290,10 @@ def plan_check(a) -> dict:
                     "prompt": "失敗したテストを直してコミットし、git push する。",
                     "next": "test-all",
                 },
-                {"id": "ready", "type": "run", "cmd": f"git push -q; gh pr ready {pr}", "next": "merge-gate"},
-                *merge_steps(a, next="end"),
+                {"id": "ready", "type": "run", "cmd": f"git push -q; gh pr ready {pr}", "on_fail": "abort", "next": "merge-gate"},
+                *merge_steps(a, on_fail="abort", next="record"),
+                {"id": "record", "type": "run", "cmd": record, "on_fail": "abort", "next": "end"},
+                {"id": "abort", "type": "run", "cmd": f"{record} --failed", "next": "end"},
             ],
         },
         a,
@@ -295,7 +310,7 @@ def _with_test_meta(plan: dict, a) -> dict:
 
 RULE_CHECK_SINCE = (
     "全体テストが落ちたら（落ちたテストだけの再実行でも落ちた後）、検査の修正に起因するなら fix、"
-    "修正に無関係なら finish。2 回直しても同じなら stop。"
+    "修正に無関係なら finish。2 回直しても同じなら abort。"
 )
 
 
@@ -351,35 +366,7 @@ def plan_check_since(a) -> dict:
             "changes": "無し（検査の修正だけ）",
             "next": "review" if review_only else "assess",
         },
-        {
-            "id": "assess",
-            "type": "run",
-            "preset": "assess",
-            "stage": "構造改善",
-            "skip_to": "review",
-            "on_fail": "refactor",
-            "next": "refactor",
-        },
-        {
-            "id": "refactor",
-            "type": "drive",
-            "drive": "cross-refactoring",
-            "kind": "構造改善",
-            "stage": "構造改善",
-            "timeout": 3600,
-            "args": f"{{pr}} --workflow-step --scope {scope}{refactor_template_arg(a)}",
-            "next": "review",
-        },
-        {
-            "id": "review",
-            "type": "drive",
-            "drive": "cross-review",
-            "kind": "実装レビュー",
-            "stage": "実装レビュー",
-            "timeout": 3600,
-            "args": "{pr} --max-rounds 4",
-            "next": "test-all",
-        },
+        *_inspect_steps(a, "{pr}", scope),
         # 検査の間に起点のブランチが進んでも finish の付け替えの後にマージできるよう、毎回取り込んでから測る
         {
             "id": "test-all",
@@ -398,8 +385,8 @@ def plan_check_since(a) -> dict:
             "type": "judge",
             "inputs": ["test-all"],
             "question": "全体テストの失敗（起点のブランチの取り込みの衝突を含む）を直す（fix）か、修正に無関係として進める"
-            "（finish）か、止める（stop）か",
-            "choices": ["fix", "finish", "stop"],
+            "（finish）か、止める（abort）か",
+            "choices": ["fix", "finish", "abort"],
         },
         {
             "id": "fix",
