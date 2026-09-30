@@ -224,7 +224,7 @@ graph TD
 ```mermaid
 classDiagram
     class Durable {
-        +launch(kind, identity, queues)
+        +launch(kind, identity, queues, listen)
         +resolve(prefix, finished) WorkflowRef
         +pause(payload)
         +resume(ref)
@@ -256,7 +256,11 @@ classDiagram
     Engine ..> Flow : run が plan_workflow を始める
 ```
 
-**`Engine` はプロセスの中の登録簿（実行の鍵 → `Engine`）で耐久ワークフローから引く。** 落ちた後の起動では、
+**`Engine` はプロセスの中の登録簿（`plan_workflow` の ID → `Engine`）で耐久ワークフローから引く。** 鍵を
+実行の鍵にしないのは、`queue` では 1 つのプロセス（実行の鍵は `queue-<12 字>` の 1 つ）で複数のプランの
+`plan_workflow` と `tagged_step` が流れ、実行の鍵では別のプランの `Engine` を引くか上書きするためである。
+`run_step(key, sid)` と `tagged_step(key, sid)` の `key` はこの ID で、`plan_workflow` が自分の ID
+（`DBOS.workflow_id`）を入力として渡す。落ちた後の起動では、
 DBOS が `launch()` の直後に耐久ワークフローを回復するため、`main` が `Engine` を作るより先に `plan_workflow` が
 流れ始めうる。`plan_workflow` は登録簿に無ければ、入力（プランのパス・状態ディレクトリ・`--slow`・開始の
 ステップ・同時に流れる他の組のファイル）から `Engine` を作る。入力は耐久の記録に残るため、作り直しは決定的である。
@@ -314,6 +318,13 @@ drive は、`recv` の上限（30 日）で先に終わっている。
 | `plan_workflow` | 結果が `完了` か `関門`（`止まった` は次の実行の回で頭から流す。今の打ち直しと同じ） |
 | `queue_workflow` | 常に偽（打ち直しは新しい実行の回。プランごとに `plan_workflow` の `resolve` が済んだプランを流し直さない） |
 | `review_drive` / `refactor_drive` | 終わり（done）で、レビューの状態のファイル（`cross-review-pr<N>-state.json` / リファクタリング計画の状態）がまだある |
+
+**`plan_workflow` の新しい実行の回を始める前に、`resolve` は同じパス鍵で接頭辞（中身鍵・開始）の違う
+`PENDING` / `ENQUEUED` の `plan_workflow` を `cancel_workflow` で止め、終わる（`CANCELLED` になり、流れていた
+耐久ステップが抜ける）まで待つ。** executor_id は実行の鍵（パス鍵だけから作る）なので、`kill -9` の後にプランを
+直すか `--from` で打ち直すと、`launch()` は古い接頭辞の `plan_workflow` を回復して流し始め、`resolve` は新しい
+接頭辞に記録が無いため新しい実行の回を始める。止めずに始めると、同じ `<プラン>-state/` と worktree を 2 本の
+`plan_workflow` が同時に書く（決定 35 が防ぐ破損と同じ形）。待つのは長くても流れていた 1 ステップの残りである。
 
 **プランの中身鍵を ID に入れるのは、プランを直して打ち直したら頭から流すためである。** `queue` の
 `fill` がプランを書き換えるのは耐久ステップの中なので、打ち直しでは書き換えた後の中身で同じ ID になる。
@@ -428,6 +439,7 @@ sequenceDiagram
     else 途中の実行の回がある（落ちた後）
         D-->>F: launch が回復して続ける
     else 無い・止まった
+        D->>D: 接頭辞の違う途中の plan_workflow を cancel_workflow して終わりを待つ
         M->>F: 実行の回 N を始める
     end
     loop 次のステップがある間（上限まで）
@@ -497,8 +509,8 @@ max 2（同時は最大 2 本。A と B は重ならない）
 パスの要素の単位で行う（`a/b` は `a/bc` を含まない）。
 
 **資源のタグのあるステップは、`plan_workflow` が耐久キュー `res-graphql`（`concurrency` = 資源の枠の本数）へ
-`tagged_step` を入れ、その結果を待つ。** `tagged_step` は同じプロセスで流れ、登録簿の `Engine` の `run_step` を
-呼ぶ。上限に当たったときの退避と待ちは今の `lib/gh_quota.py` のまま使う。
+`tagged_step` を入れ、その結果を待つ。** `tagged_step` は同じプロセスで流れ、入力の `key`（入れた
+`plan_workflow` の ID）で登録簿の `Engine` を引いて `run_step` を呼ぶ。上限に当たったときの退避と待ちは今の `lib/gh_quota.py` のまま使う。
 
 ### drive の止まりと続き
 
@@ -549,7 +561,14 @@ graph TD
 
 **耐久キュー `posts` は `worker_concurrency=1` で、止まった項目の後ろは流れない。** 今の「1 件でも送れなければ
 そこで止める」を、ファイルの連番の代わりに耐久キューの順で保つ。`FlushResult` の `remaining` は、終わっていない
-`post_item` の数である。**耐久の記録のファイルが無いときの `count()` は DBOS を起動せずに 0 を返す**
+`post_item` の数である。
+
+**耐久キュー `posts` を待ち受けて取り出すのは `flush` だけにする。** DBOS は `launch()` したプロセスが既定で
+登録済みのすべての耐久キューを待ち受けるため、そのままでは `add` のために耐久の記録を開いた短命の CLI が
+`post_item` をその場でバックグラウンドのスレッドで送り、送信の途中で終わりうる。`durable.launch` は待ち受ける
+耐久キューの名前（`listen`）を受け、`launch()` の前に `DBOS.listen_queues(listen)` を打つ（`dbos==3.1.0`。
+空の一覧はどのキューも待ち受けない）。`post_queue` は `flush` だけが `["posts"]`、`add`・`count`・`items`・
+`drop`・`set_aside` は `[]` を渡す。**耐久の記録のファイルが無いときの `count()` は DBOS を起動せずに 0 を返す**
 （import 0.24〜0.78 秒を、積んでいない呼び出しに払わせない）。
 
 ### 孤児の片付け
