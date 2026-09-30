@@ -651,3 +651,76 @@ def test_every_strategy_note_is_reported_once_when_planning(tmp_path):
     assert p.returncode == with_paths.returncode == 0, p.stderr + with_paths.stderr
     assert p.stderr.count(ts.NO_LINT_WHOLE) == 1
     assert ts.NO_LINT_WHOLE not in with_paths.stderr
+
+
+# 現状固定: new_args.check_new の引数の組の判定（I-012）。止まるときは ap.error の文言と終了コード 2。
+from types import SimpleNamespace  # noqa: E402
+import argparse  # noqa: E402
+
+from supervise_lib import new_args  # noqa: E402
+
+
+def new_ns(kind, **kw):
+    base = dict(kind=kind, issue=None, tests=None, title=None, worktree="", branch=None,
+                since_last=False, pr=None, id=None, review_only=False, final=False,
+                version=None, prs=None, prs_from_queue=False, channel=None, repo=None)
+    base.update(kw)
+    return SimpleNamespace(**base)
+
+
+@pytest.mark.parametrize("kind,kw,message", [
+    ("impl", dict(tests="t", title="x"), "new impl には --issue・--tests・--title が要る"),
+    ("impl", dict(issue="1", title="x"), "new impl には --issue・--tests・--title が要る"),
+    ("fix", dict(tests="t", title="x"), "new fix には --worktree か --branch・--tests・--title が要る"),
+    ("fix", dict(worktree="/w", title="x"), "new fix には --worktree か --branch・--tests・--title が要る"),
+    ("check", dict(since_last=True, pr="5", id="c"), "new check の --since-last と --pr は同時に渡せない"),
+    ("check", dict(since_last=True), "new check --since-last には --id（検査の名前）が要る"),
+    ("check", dict(pr="5", review_only=True), "new check の --review-only は --since-last と組にする"),
+    ("check", dict(since_last=True, id="c", review_only=True, final=True),
+     "new check の --review-only と --final は同時に渡せない"),
+    ("check", dict(), "new check には --pr か --since-last が要る"),
+    ("release", dict(prs="1", channel="dev", repo="r"),
+     "new release には --version・--prs（か --prs-from-queue）・--channel が要る"),
+    ("release", dict(version="1.0.0", channel="dev", repo="r"),
+     "new release には --version・--prs（か --prs-from-queue）・--channel が要る"),
+    ("release", dict(version="1.0.0", prs="1", channel="dev", worktree="/tmp/x"),
+     "new release には --repo が要る（作業場所が /.worktrees/ の下に無い）"),
+])
+def test_check_new_rejects_incomplete_combinations(kind, kw, message, capsys):
+    with pytest.raises(SystemExit) as e:
+        new_args.check_new(argparse.ArgumentParser(prog="p"), new_ns(kind, **kw))
+    assert e.value.code == 2
+    assert capsys.readouterr().err.strip().endswith(f"error: {message}")
+
+
+@pytest.mark.parametrize("kind,kw", [
+    ("impl", dict(issue="1", tests="t", title="x")),
+    ("fix", dict(worktree="/w", tests="t", title="x")),
+    ("check", dict(pr="5")),
+    ("check", dict(pr="5", final=True)),
+    ("check", dict(since_last=True, id="c")),
+    ("check", dict(since_last=True, id="c", review_only=True)),
+    ("release", dict(version="1.0.0", prs="1", channel="dev", repo="r")),
+    ("release", dict(version="1.0.0", prs_from_queue=True, channel="dev", worktree="/r/.worktrees/b")),
+    ("sprint", dict()),
+])
+def test_check_new_accepts_complete_combinations(kind, kw):
+    a = new_ns(kind, **kw)
+    before = vars(a).copy()
+    assert new_args.check_new(argparse.ArgumentParser(prog="p"), a) is None
+    assert vars(a) == before
+
+
+def test_check_new_fix_with_branch_only_fills_worktree(monkeypatch):
+    monkeypatch.setattr(new_args, "fix_worktree", lambda branch: f"/wt/{branch}")
+    a = new_ns("fix", branch="fix/x", tests="t", title="x")
+    new_args.check_new(argparse.ArgumentParser(prog="p"), a)
+    assert a.worktree == "/wt/fix/x"
+
+
+def test_check_new_check_reports_since_last_with_pr_before_missing_id(capsys):
+    # 複数の条件に当たるときは先に書かれた判定の文言が出る
+    with pytest.raises(SystemExit):
+        new_args.check_new(argparse.ArgumentParser(prog="p"),
+                           new_ns("check", since_last=True, pr="5", review_only=True, final=True))
+    assert "--since-last と --pr は同時に渡せない" in capsys.readouterr().err
