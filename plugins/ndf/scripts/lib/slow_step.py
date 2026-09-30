@@ -41,17 +41,22 @@ class SlowConfig:
     history: str | None = None
 
 
-def _coerce(key: str, kind, value):
-    if kind is bool:
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, str) and value.lower() in ("true", "false"):
-            return value.lower() == "true"
-        raise SlowConfigError(key)
-    if key == "history":
-        if value is None or (isinstance(value, str) and value):
-            return value
-        raise SlowConfigError(key)
+def _coerce_bool(key: str, value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.lower() in ("true", "false"):
+        return value.lower() == "true"
+    raise SlowConfigError(key)
+
+
+def _coerce_optional_str(key: str, value) -> str | None:
+    if value is None or (isinstance(value, str) and value):
+        return value
+    raise SlowConfigError(key)
+
+
+def _coerce_number(key: str, value) -> int | float:
+    """bool を拒み、文字列は float に読み、負の数を拒む。"""
     if isinstance(value, bool):
         raise SlowConfigError(key)
     if isinstance(value, str):
@@ -61,6 +66,15 @@ def _coerce(key: str, kind, value):
             raise SlowConfigError(key) from None
     if not isinstance(value, (int, float)) or value < 0:
         raise SlowConfigError(key)
+    return value
+
+
+def _coerce(key: str, kind, value):
+    if kind is bool:
+        return _coerce_bool(key, value)
+    if key == "history":
+        return _coerce_optional_str(key, value)
+    value = _coerce_number(key, value)
     if kind is int:
         if float(value) != int(value):
             raise SlowConfigError(key)

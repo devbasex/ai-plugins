@@ -39,19 +39,34 @@ def fetch_check_runs(
         if resp is None or not isinstance(resp.body, dict):
             return None
         if total is None:
-            try:
-                total = int(resp.body.get("total_count") or 0)
-            except (TypeError, ValueError):
+            total = _read_total(resp)
+            if total is None:
                 return None
             if total <= 0:
                 return [] if empty_ok else None
-        chunk = resp.body.get("check_runs")
-        if not isinstance(chunk, list) or not chunk:
+        chunk = _page_runs(resp)
+        if chunk is None:
             break
-        runs.extend(r for r in chunk if isinstance(r, dict))
+        runs.extend(chunk)
         if len(runs) >= total:
             break
     return runs if (runs or empty_ok) else None
+
+
+def _read_total(resp) -> int | None:
+    """応答の `total_count`（無ければ 0）。数として読めなければ None。"""
+    try:
+        return int(resp.body.get("total_count") or 0)
+    except (TypeError, ValueError):
+        return None
+
+
+def _page_runs(resp) -> list[dict[str, Any]] | None:
+    """1 ページ分のチェックジョブ（dict の行だけ）。一覧が無いか空なら None（ページ送りの終わり）。"""
+    chunk = resp.body.get("check_runs")
+    if not isinstance(chunk, list) or not chunk:
+        return None
+    return [r for r in chunk if isinstance(r, dict)]
 
 
 def _run_order(indexed: tuple[int, dict[str, Any]]) -> tuple[str, int, int]:

@@ -17,6 +17,9 @@ Claude Code は `CLAUDE_CODE_OAUTH_TOKEN` を設定ディレクトリの `.crede
 リンクを張ると Claude Code がファイルを足すたびに追随が要る。共有の `.credentials.json` の `claudeAiOauth` を差し替える形は、
 同じアカウントグループのすべてのコンテナのアカウントを替えるため採らない。
 
+トークンと一緒に、アカウントのスコープを `CLAUDE_CODE_OAUTH_SCOPES` で渡す（#1523。変数のトークンだけでは Claude Code が
+スコープを `user:inference` だけとみなし、claude.ai のコネクタを読まないため。`issues/issue-1523-design.md` の決定 1）。
+
 ### 決定 2: 登録は専用の設定ディレクトリで `claude auth login` させ、既存の認証情報を複製しない
 
 `account add` は `CLAUDE_CONFIG_DIR=<置き場>/<名前> claude auth login` を起動する。ログインのたびに独立した許可が発行され、

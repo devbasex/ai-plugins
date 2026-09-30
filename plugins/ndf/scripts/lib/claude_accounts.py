@@ -10,7 +10,7 @@
 登録の途中の状態 `.pending-<名前>/`（0700）も置き場に置く（#1468）。
 
 - 共有の設定ディレクトリの `.credentials.json` は読まず、書かない。子へは選んだアカウントのアクセストークンを
-  環境変数 `CLAUDE_CODE_OAUTH_TOKEN` で渡す（引数に載せない）
+  環境変数 `CLAUDE_CODE_OAUTH_TOKEN` で、そのアカウントのスコープを `CLAUDE_CODE_OAUTH_SCOPES` で渡す（引数に載せない）
 - 使用量の取得先は 1 アカウントにつき `NDF_ACCOUNT_CHECK_INTERVAL` 秒（既定 300）に 1 回までしか呼ばない。
   数えるのは `usage.json` の `fetched_at`（成否を問わない）で、プロセス・コンテナをまたぐ
 - 選び方・判定に LLM を呼ばない。呼ぶのは使用量の取得先とトークンの更新の宛先だけである
@@ -36,9 +36,12 @@ NAME_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}")
 METERED = "metered"  # 従量の接続を表す予約の名前。登録できない
 TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
 NAME_ENV = "NDF_CLAUDE_ACCOUNT"
+# アカウントのスコープ（空白区切り）。無いと Claude Code は変数のトークンを `user:inference` だけとみなす（#1523）
+SCOPES_ENV = "CLAUDE_CODE_OAUTH_SCOPES"
+USAGE_SCOPE = "user:profile"  # 使用量の取得先が要るスコープ
 # 認証の優先順位でトークンより上に来る変数（アカウントの子で外す）と、専用の設定ディレクトリの claude で外す変数
 FOREIGN_AUTH_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX")
-AUTH_ENV = (TOKEN_ENV, NAME_ENV, *FOREIGN_AUTH_ENV)
+AUTH_ENV = (TOKEN_ENV, SCOPES_ENV, NAME_ENV, *FOREIGN_AUTH_ENV)
 FALLBACK_ENV = "NDF_SUPERVISE_CLAUDE_FALLBACK"
 AWS_KEY_ENV = ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN")
 # 保存した宣言に入れてはならない資格情報の変数（#1468 の I1）
@@ -183,6 +186,15 @@ def lock_timeout() -> type[BaseException]:
     return locks.LockTimeout
 
 
+def _with_lock(name: str, fn, on_fail):
+    """アカウント `name` の排他の中で `fn()` を呼ぶ。排他を取れないか OSError なら `on_fail()` を返す。"""
+    try:
+        with _locked(name):
+            return fn()
+    except (lock_timeout(), OSError):
+        return on_fail()
+
+
 # ---------------------------------------------------------------- アカウントと上限の観測
 
 
@@ -314,11 +326,11 @@ def note_limit(name: str, kind: str, resets_at: float | None, now: float | None 
     if not name or name == METERED:
         return
     now = _now(now)
-    try:
-        with _locked(name):
-            _update_account(name, limit={"type": kind, "resets_at": iso_utc(resets_at), "observed_at": iso_utc(now)})
-    except (lock_timeout(), OSError):
-        pass
+    _with_lock(
+        name,
+        lambda: _update_account(name, limit={"type": kind, "resets_at": iso_utc(resets_at), "observed_at": iso_utc(now)}),
+        lambda: None,
+    )
 
 
 # ---------------------------------------------------------------- トークン
@@ -372,14 +384,38 @@ def _refresh_and_store(name: str, o: dict, now: float, fallback: str | None) -> 
     return new["accessToken"]
 
 
+def _scopes_held(name: str) -> str | None:
+    """排他の中で呼ぶ。置き場の `scopes` を並びのまま空白で結ぶ。空でない list で、要素がすべて空白を含まない
+    空でない文字列のときだけ返す（それ以外は None。足さず、補わない）。"""
+    s = (_oauth(name) or {}).get("scopes")
+    return " ".join(s) if isinstance(s, list) and s and all(isinstance(x, str) and x.split() == [x] for x in s) else None
+
+
+@dataclass(frozen=True)
+class Grant:
+    """1 回の排他の中で読んだアクセストークンとスコープ（空白区切り。読めなければ None）。"""
+
+    token: str
+    scopes: str | None
+
+
+def _grant(name: str, before: float | None, now: float | None = None, min_left: float = 0) -> Grant | None:
+    """1 回の排他の中で読んだアクセストークンとスコープ（Grant）。トークンを得られなければ None。
+
+    スコープはトークンの後に読む（更新すると置き場の `scopes` が書き直される）。読めなければスコープだけ None。"""
+    now = _now(now)
+
+    def held() -> Grant | None:
+        tok = _token_held(name, before, now, min_left=min_left)
+        return None if tok is None else Grant(tok, _scopes_held(name))
+
+    return _with_lock(name, held, lambda: None)
+
+
 def token(name: str, before: float | None = REFRESH_BEFORE, now: float | None = None, min_left: float = 0) -> str | None:
     """子へ渡すアクセストークン。期限の `before` 秒前を切っていれば更新する（None は更新しない）。`min_left` は `_token_held`。"""
-    now = _now(now)
-    try:
-        with _locked(name):
-            return _token_held(name, before, now, min_left=min_left)
-    except (lock_timeout(), OSError):
-        return None
+    g = _grant(name, before, now, min_left)
+    return g.token if g else None
 
 
 # ---------------------------------------------------------------- 使用量
@@ -391,7 +427,7 @@ def _fetch(name: str, before: float | None, now: float) -> Usage:
     if tok is None:
         return Usage(fetched_at=now, error="token")
     o = _creds(name) or {}
-    if "user:profile" not in (o.get("scopes") or ["user:profile"]):
+    if USAGE_SCOPE not in (o.get("scopes") or [USAGE_SCOPE]):
         return Usage(fetched_at=now, error="scope")
     status, u = get_usage(tok, now)
     if status == 401 and before is not None:
@@ -406,18 +442,18 @@ def usage(name: str, before: float | None = REFRESH_BEFORE, now: float | None = 
     """残量。前の取得から `check_interval()` 秒の中なら保存した値を返し、取得先を呼ばない（I6）。"""
     now = _now(now)
     path = _path(name, USAGE_FILE)
-    try:
-        with _locked(name):
-            saved = Usage.from_json(_read(path))
-            if saved is not None and now - saved.fetched_at < check_interval():
-                return saved
-            if _read(_path(name, ACCOUNT_FILE)) is None:
-                return None
-            u = _fetch(name, before, now)
-            _write(path, u.to_json())
-            return u
-    except (lock_timeout(), OSError):
-        return Usage.from_json(_read(path))
+
+    def held() -> Usage | None:
+        saved = Usage.from_json(_read(path))
+        if saved is not None and now - saved.fetched_at < check_interval():
+            return saved
+        if _read(_path(name, ACCOUNT_FILE)) is None:
+            return None
+        u = _fetch(name, before, now)
+        _write(path, u.to_json())
+        return u
+
+    return _with_lock(name, held, lambda: Usage.from_json(_read(path)))
 
 
 # ---------------------------------------------------------------- 選び方
@@ -511,35 +547,39 @@ def fallback_env(environ=None) -> dict:
 def account_env(name: str, base: dict, before: float | None = REFRESH_BEFORE, min_left: float = 0) -> dict | None:
     """`base` にアカウント `name`（か `metered`）の環境を重ねる。トークンを得られなければ None。
 
-    従量の接続は `CLAUDE_CODE_OAUTH_TOKEN` と `FOREIGN_AUTH_ENV` を外してから宣言の変数を重ねる（認証の方式を
+    従量の接続はトークン・スコープの変数と `FOREIGN_AUTH_ENV` を外してから宣言の変数を重ねる（認証の方式を
     宣言どおり 1 つにする）。アカウントは認証の優先順位でトークンより上に来る変数（`FOREIGN_AUTH_ENV`）と、
     環境変数の宣言のときと、`base` が従量の接続の環境（`NDF_CLAUDE_ACCOUNT=metered`）のときだけ宣言のキーを外して
-    トークンと名前を足す（混ぜない。I16。それ以外の保存した宣言では利用者のシェルの変数を残すため外さない）。"""
+    トークン・スコープ・名前を足す（混ぜない。I16。それ以外の保存した宣言では利用者のシェルの変数を残すため外さない）。"""
     declared = fallback_env(base)
     if name == METERED:
         return _metered_env(dict(base), declared, FALLBACK_ENV not in base)
-    tok = token(name, before, min_left=min_left)
-    if tok is None:
+    grant = _grant(name, before, min_left=min_left)
+    if grant is None:
         return None
     strip = FALLBACK_ENV in base or base.get(NAME_ENV) == METERED
-    return _account_env(dict(base), declared if strip else {}, name, tok)
+    return _account_env(dict(base), declared if strip else {}, name, grant.token, grant.scopes)
 
 
 def _metered_env(env: dict, declared: dict, saved: bool) -> dict:
     """従量の接続の環境。`saved`（保存した宣言）なら AWS の鍵も外す（呼べるかの確認と同じ環境にする。#1468 の決定 14）。"""
-    for k in (TOKEN_ENV,) + FOREIGN_AUTH_ENV + (AWS_KEY_ENV if saved else ()):
+    for k in (TOKEN_ENV, SCOPES_ENV) + FOREIGN_AUTH_ENV + (AWS_KEY_ENV if saved else ()):
         env.pop(k, None)
     env.update(declared)
     env[NAME_ENV] = METERED
     return env
 
 
-def _account_env(env: dict, declared: dict, name: str, tok: str) -> dict:
-    """アカウントの環境（宣言のキーと FOREIGN_AUTH_ENV を外してトークンと名前を足す）。"""
-    for k in tuple(declared) + FOREIGN_AUTH_ENV:
+def _account_env(env: dict, declared: dict, name: str, tok: str, scopes: str | None) -> dict:
+    """アカウントの環境（宣言のキーと FOREIGN_AUTH_ENV を外してトークンと名前を足す）。
+
+    スコープの変数は `base` の値を残さない。読めたら上書きし、読めなければ外す（前のアカウントのものを継がない）。"""
+    for k in tuple(declared) + FOREIGN_AUTH_ENV + (SCOPES_ENV,):
         env.pop(k, None)
     env[TOKEN_ENV] = tok
     env[NAME_ENV] = name
+    if scopes is not None:
+        env[SCOPES_ENV] = scopes
     return env
 
 
