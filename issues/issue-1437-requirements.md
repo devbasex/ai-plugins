@@ -54,6 +54,7 @@
 含む:
 - 宣言が無く、`--test-cmd`（または `test-run.py --template` / cross-refactoring の `--baseline-test`・`--round-test` の雛形）の種別が test で、全体テストを雛形の `{paths}` を `.` にして組んだときの注記
 - `supervise.py new`（impl・fix・check・sprint・close）が計画を作るとき、その注記を標準エラーへ 1 度出すこと
+- 同じく、戦略のほかの注記（`--test-kind lint` で範囲のパスが無いときの `NO_LINT_WHOLE` を含む）も標準エラーへ 1 度出すこと（設計の決定 3。設計の承認で範囲に加えた）
 - 報告の事例（宣言あり＋雛形）と静的解析の雛形（`--tests` あり・なし）の回帰テスト
 
 含まない:
