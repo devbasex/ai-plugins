@@ -1,7 +1,9 @@
-"""queue と wait: プランを別プロセスの run として並べて流し、終わりか attention まで待つ（#1142 の C1）。
+"""queue と wait: プランを 1 つのプロセスの中で並べて流し、終わりか attention まで待つ（#1142 の C1・決定 26）。
 
-`engine` を import しない。プランは `SELF` の `run` として流す。worktree は `paths.ensure_worktree` で作る
-（テストがモジュールの属性を差し替える）。
+`cmd_queue` は耐久ワークフロー `flow.queue_workflow` を始めるか続け、終わるまでプランの attention を標準出力へ
+知らせる。落ちた後に同じコマンドを打ち直すと、耐久の記録から流れていたステップで続ける。このモジュールは
+DBOS を import しない（`wait` ほかの副命令が払わないよう、`flow` は `cmd_queue` の中で読む）。`flow` の
+耐久ステップが呼ぶ、ファイルだけに触る関数（一覧・QUEUE_PRS の埋め込み・結果の組み立て）もここに置く。
 """
 
 from __future__ import annotations
@@ -9,15 +11,14 @@ from __future__ import annotations
 import json
 import os
 import re
-import subprocess
 import sys
 import time
 from pathlib import Path
 
 from clock import now_iso  # cmd_wait の引数 clock（時計の差し替え）と名前を分ける
 from step_result import result
-from supervise_lib import paths
-from supervise_lib.paths import SELF, queue_done_path, queue_plans_path, report_result, state_dir_of, wait_cursor_path
+from supervise_lib.decl import DeclError, queue_decl_of
+from supervise_lib.paths import queue_done_path, queue_plans_path, report_result, state_dir_of, wait_cursor_path
 from supervise_lib.plan import QUEUE_PRS, pr_number
 
 
@@ -156,76 +157,82 @@ def write_text_atomic(path: Path, text: str) -> None:
     os.replace(tmp, path)
 
 
-def run_batch(plans: list[str], max_: int, poll: float) -> list[dict]:
-    """計画を同時に max_ 本まで走らせ、空いた枠へ順に流し、終わった順に結果を返す。"""
-    pending, running, items = list(plans), {}, []
-    seen: dict[str, int] = {}
-    while pending or running:
-        while pending and len(running) < max_:
-            plan = pending.pop(0)
-            # 作業ツリーは queue の側で順に作る（同時の git worktree add は .git/config の lock で落ちる）。
-            # 作れなかったときの報告は run が同じ誤りで書く
-            try:
-                data = json.loads(Path(plan).read_text())
-                if not data.get("実行の条件"):  # 条件のある計画は run が条件を打ってから作る
-                    paths.ensure_worktree(data)
-            except (OSError, ValueError, KeyError, AttributeError):
-                pass
-            prog = state_dir_of(plan) / "progress.jsonl"
-            seen[plan] = prog.stat().st_size if prog.is_file() else 0  # 前の実行の行は知らせない
-            log = open(Path(plan).with_suffix(".log"), "w")
-            running[plan] = (
-                subprocess.Popen([sys.executable, str(SELF), "run", plan], stdout=log, stderr=subprocess.STDOUT),
-                log,
-                time.time(),
-            )
-        for plan in list(running):
-            seen[plan] = notify_attention(plan, seen[plan])
-        for plan, (proc, log, started) in list(running.items()):
-            if proc.poll() is None:
-                continue
-            seen[plan] = notify_attention(plan, seen[plan])
-            log.close()
-            rep = state_dir_of(plan) / "report.md"
-            res = report_result(rep.read_text()) if rep.is_file() else "報告なし"
-            items.append(
-                {"plan": plan, "result": res, "exit": proc.returncode, "report": str(rep), "seconds": round(time.time() - started, 1)}
-            )
-            del running[plan]
-        if running:
-            time.sleep(poll)
-    return items
-
-
 NOT_RUN = "流さなかった"
+FINISHED = ("完了", "関門")  # 打ち直しでも流し直さない結果（止まったは次の実行の回で頭から流す）
+NO_REPORT = "報告なし"
 
 
 def cmd_queue(plans: list[str], max_: int, poll: float = 1.0, then: list | None = None, done: str | None = None) -> dict:
-    """計画を同時に max_ 本まで走らせ、空いた枠へ順に流す。
+    """プランを同時に max_ 本まで、同じプロセスの中で流す。空いた枠へ入れた順に流す。
 
-    走っている計画の progress.jsonl に conductor 向けの行（"kind": "attention"）が足されたら、
-    標準出力へ 1 行の JSON（"event": "attention"）で知らせる。最後の行は従来どおり結果の JSON。
-    then の計画は、前の計画がすべて 完了 のときだけ同じ枠（max_）で続けて流す。1 本でも 完了 でなければ
-    流さず、items に 流さなかった と理由を残す。then の計画の QUEUE_PRS（new release --prs-from-queue）は、
-    流す前に前の計画の報告の Pull Request の番号で置き換える。
-    then はステージの並び（[[計画...], [計画...]]）でもよい。ステージは前のすべてのステージが 完了 のときだけ流し、QUEUE_PRS は
-    前のすべてのステージの Pull Request、{queue_pr:<名>} は前のステージの名前の一致する計画の Pull Request 1 本で置き換える。
-    始めに流す計画の一覧を done の隣へ書き（wait が読む）、終わったら（後続を含めて）結果の JSON を done へ書く。"""
-    stages = [list(t) for t in then] if then and not isinstance(then[0], str) else ([list(then)] if then else [])
+    流れているプランの progress.jsonl に conductor 向けの行（"kind": "attention"）が足されたら、
+    標準出力へ 1 行の JSON（"event": "attention"）で知らせる。最後の行は結果の JSON。
+    then のプランは、前のプランがすべて 完了 のときだけ同じ枠（max_）で続けて流す。1 本でも 完了 でなければ
+    流さず、items に 流さなかった と理由を残す。then のプランの QUEUE_PRS（new release --prs-from-queue）は、
+    流す前に前のプランの報告の Pull Request の番号で置き換える。
+    then はステージの並び（[[プラン...], [プラン...]]）でもよい。ステージは前のすべてのステージが 完了 のときだけ流し、QUEUE_PRS は
+    前のすべてのステージの Pull Request、{queue_pr:<名>} は前のステージの名前の一致するプランの Pull Request 1 本で置き換える。
+    同じステージで `触るファイル` が重なるか同じ共有の一覧に当たるプラン（重なりの組）は、知らせて 1 本ずつ流す。資源のタグの
+    あるステップは、資源の枠の本数まで同時に流す（宣言は .ndf/supervise.json の queue）。
+    始めに流すプランの一覧を done の隣へ書き（wait が読む）、終わったら（後続を含めて）結果の JSON を done へ書く。
+    落ちた後に同じコマンドを打ち直すと、流れていたステップから続ける。流すプランの並びを変えて打ち直すと、途中の
+    記録を止めて頭から流す（完了か関門の記録があるプランは流し直さない）。"""
+    import durable
+    from supervise_lib import flow  # DBOS の import は run と queue だけが払う
+
+    then_stages = [list(t) for t in then] if then and not isinstance(then[0], str) else ([list(then)] if then else [])
+    stages = [list(plans), *then_stages]
+    all_plans = [p for stage in stages for p in stage]
     done_path = queue_done_path(plans, done)
+    try:
+        decl = queue_decl_of([_read_plan(p) for p in all_plans])
+    except DeclError as e:
+        return _not_started(str(e), max_, done_path)
     done_path.unlink(missing_ok=True)  # 前の queue の終わりを待つ側が読まないように、始めに消す
+    seen = {p: progress_size(p) for p in all_plans}  # 前の実行の行は知らせない
+    listing = _read_listing(queue_plans_path(done_path))
+    try:
+        prefix = flow.launch_queue(done_path, max_, decl["resources"], listing is not None and listing.get("plans") != all_plans)
+    except durable.DurableError as e:
+        return _not_started(str(e), max_, done_path)
+    try:
+        ref = durable.resolve(prefix)
+        if ref.action == "continue":
+            print(f"[ndf supervise] 落ちた前の起動の {ref.id} を続ける（済んだステップは流し直さない）", file=sys.stderr)
+        args = {"stages": stages, "max": max_, "done": str(done_path), "resources": decl["resources"], "shared": decl["shared"]}
+        wid = durable.start(ref, flow.queue_workflow, args)
+        while True:
+            got = durable.wait(wid, poll=min(poll, durable.POLL_SECONDS), timeout=poll)
+            for p in all_plans:
+                seen[p] = notify_attention(p, seen[p])
+            if got.kind != "timeout":
+                break
+        if got.kind != "done":
+            durable.output_of(wid)  # 耐久ワークフローの中の例外をそのまま上げる
+            raise durable.DurableError(f"耐久ワークフロー {wid} が終わらなかった（{got.kind}: {got.value}）")
+        return got.value
+    finally:
+        durable.close()
+
+
+def _read_plan(plan: str) -> dict:
+    try:
+        data = json.loads(Path(plan).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _not_started(reason: str, max_: int, done_path: Path) -> dict:
+    """流す前に止まったときの結果（宣言の形が違う・耐久の記録を開けない）。"""
+    metrics = {"plans": 0, "stopped": 0, "gate": 0, "not_run": 0, "max": max_, "done": str(done_path)}
+    return result("supervise-queue", "stopped", reason, [], metrics)
+
+
+def start_listing(done_path: Path, all_plans: list[str]) -> None:
+    """前の queue の終わりと wait の続きを消し、流すプランの一覧と読み始める所を done の隣へ書く（wait が読む）。"""
+    done_path.unlink(missing_ok=True)
     wait_cursor_path(done_path).unlink(missing_ok=True)
-    _write_queue_start(done_path, [*plans, *(p for st in stages for p in st)])
-    items = _run_first(plans, max_, poll)
-    for stage in stages:
-        items += _run_stage(stage, items, max_, poll)
-    res = _queue_result(items, max_, done_path)
-    write_text_atomic(done_path, json.dumps(res, ensure_ascii=False) + "\n")
-    return res
-
-
-def _write_queue_start(done_path: Path, all_plans: list[str]) -> None:
-    """流す計画の一覧と読み始める所を done の隣へ書く（wait が読む）。"""
     write_text_atomic(
         queue_plans_path(done_path),
         json.dumps({"started": now_iso(), "plans": all_plans, "offsets": {p: progress_size(p) for p in all_plans}}, ensure_ascii=False)
@@ -233,41 +240,71 @@ def _write_queue_start(done_path: Path, all_plans: list[str]) -> None:
     )
 
 
-def _run_first(plans: list[str], max_: int, poll: float) -> list[dict]:
-    """初めの計画を流す。{queue_pr:<名>} を埋められない計画は流さずに理由を残す。"""
-    first, early = [], []
-    for p in plans:
-        err = fill_queue_pr(p, [])
-        (early if err else first).append({"plan": p, "result": NOT_RUN, "reason": err} if err else p)
-    return early + run_batch(first, max_, poll)
+def fill_stage(first: bool, stage: list[str], items: list[dict]) -> tuple[list[dict], list[str]]:
+    """ステージを流す前に、プランの {queue_pr:<名>} と QUEUE_PRS を埋める。(流さないプランの items, 流すプラン) を返す。
 
-
-def _run_stage(stage: list[str], items: list[dict], max_: int, poll: float) -> list[dict]:
-    """後続のステージを、前のすべての計画が 完了 のときだけ流す。足す items を返す。"""
+    後続のステージ（first でない）は、前のすべてのプランが 完了 のときだけ流す。埋められないプランは流さずに理由を残す。"""
     not_done = [i for i in items if i["result"] != "完了"]
-    if not_done:
+    if not first and not_done:
         ran_bad = [i for i in not_done if i["result"] != NOT_RUN]
         reason = (
             "前の計画が完了していない: " + "、".join(f"{i['plan']}（{i['result']}）" for i in ran_bad)
             if ran_bad
             else "前のステージを流さなかった"
         )
-        return [{"plan": p, "result": NOT_RUN, "reason": reason} for p in stage]
-    prs, runnable, skipped_then = queue_prs(items), [], []
+        return [{"plan": p, "result": NOT_RUN, "reason": reason} for p in stage], []
+    prs = None if first else queue_prs(items)
+    skipped, runnable = [], []
     for p in stage:
-        err = fill_queue_prs(p, prs) or fill_queue_pr(p, items)
+        err = (None if prs is None else fill_queue_prs(p, prs)) or fill_queue_pr(p, items)
         if err:
-            skipped_then.append({"plan": p, "result": NOT_RUN, "reason": err})
+            skipped.append({"plan": p, "result": NOT_RUN, "reason": err})
         else:
             runnable.append(p)
-    return skipped_then + (run_batch(runnable, max_, poll) if runnable else [])
+    return skipped, runnable
+
+
+def touched_files(body: str) -> list[str]:
+    """プランの JSON の `触るファイル`（読めない・無いなら空）。"""
+    try:
+        files = json.loads(body).get("触るファイル")
+    except (ValueError, AttributeError):
+        return []
+    return [str(f) for f in files if str(f).strip()] if isinstance(files, list) else []
+
+
+def plan_item(plan: str, out: dict) -> dict:
+    """プランの耐久ワークフローの出力から、結果の JSON の items の 1 件を作り、報告を <プラン>.log へ書く。"""
+    rep = state_dir_of(plan) / "report.md"
+    if "error" in out:
+        print(f"supervise-queue: {plan} が例外で終わった: {out['error']}", file=sys.stderr, flush=True)
+        return {"plan": plan, "result": NO_REPORT, "exit": 1, "report": str(rep), "seconds": 0.0, "reason": out["error"]}
+    try:
+        Path(plan).with_suffix(".log").write_text(out["report"].rstrip("\n") + "\n", encoding="utf-8")
+    except OSError:
+        pass
+    code = 0 if out["result"] in FINISHED else 3
+    return {"plan": plan, "result": out["result"], "exit": code, "report": str(rep), "seconds": out.get("seconds", 0.0)}
+
+
+def write_done(done_path: Path, items: list[dict], max_: int, overlaps: list[dict], limits: dict) -> dict:
+    """items へ重なりの組を足して結果の JSON を組み立て、done へ書いて返す。"""
+    for i in items:
+        mine = [{"with": o["b"], "paths": o["paths"]} for o in overlaps if o["a"] == i["plan"]]
+        mine += [{"with": o["a"], "paths": o["paths"][::-1]} for o in overlaps if o["b"] == i["plan"]]
+        if mine:
+            i["overlap"] = mine
+    res = _queue_result(items, max_, done_path)
+    res["metrics"].update(overlaps=len(overlaps), resource_limits=limits)
+    write_text_atomic(done_path, json.dumps(res, ensure_ascii=False) + "\n")
+    return res
 
 
 def _queue_result(items: list[dict], max_: int, done_path: Path) -> dict:
     """items から status・summary・metrics を組み立てる。"""
     ran = [i for i in items if i["result"] != NOT_RUN]
     skipped = len(items) - len(ran)
-    stopped = [i for i in ran if i["result"] not in ("完了", "関門")]
+    stopped = [i for i in ran if i["result"] not in FINISHED]
     gates = [i for i in ran if i["result"] == "関門"]
     status = "stopped" if stopped else "gate" if gates else "ok"
     summary = f"{len(ran)} 本: 完了 {len(ran) - len(stopped) - len(gates)} / 関門 {len(gates)} / 止まった {len(stopped)}"
@@ -395,7 +432,7 @@ def _timeout_response(timeout: float, done_path: Path) -> tuple[str, dict, int]:
             summary,
             [],
             {"event": "timeout", "timeout": timeout, "done": str(done_path)},
-            next="queue の <計画>.log と progress.jsonl を見て、続けるならもう一度 wait を打つ",
+            next="プランの progress.jsonl を見て、続けるならもう一度 wait を打つ",
         ),
         WAIT_TIMEOUT,
     )

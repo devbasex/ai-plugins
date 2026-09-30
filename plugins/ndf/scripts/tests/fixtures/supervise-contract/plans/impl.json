@@ -1,0 +1,153 @@
+{
+  "フェーズ": "実装",
+  "課題": [
+    11
+  ],
+  "モード": "standard",
+  "作業場所": "<TMP>/repo",
+  "規則": "範囲テストや全体テストが落ちたら（落ちたテストだけの再実行でも落ちた後）、変更に起因するなら fix、環境や変更に無関係なら次のステップ（範囲テストなら pr、全体テストなら doc-lint）。2 回直しても同じ失敗なら stop。",
+  "上限": 20,
+  "steps": [
+    {
+      "id": "impl",
+      "type": "work",
+      "kind": "実装",
+      "serena": true,
+      "stage": "実装",
+      "issues": true,
+      "timeout": 3600,
+      "prompt": "課題 #11 を実装する。本文は `gh issue view 11` で読む（何をするか と 受け入れ条件）。\n触る範囲: src/a.py\n共通:\n- 文書には今の決まりだけを書く。.md の文言を照合するテストは書かない\n- コミットの件名と本文に課題を閉じる語（Closes / Fixes / Resolves）を書かない。区切りごとにコミットする（push しない）\n",
+      "next": "test-limited"
+    },
+    {
+      "id": "test-limited",
+      "type": "run",
+      "stage": "完了判定",
+      "timeout": 990,
+      "cmd": "python3 <NDF>/scripts/test-run.py scope --paths tests/test_a.py",
+      "on_fail": "judge",
+      "next": "pr"
+    },
+    {
+      "id": "judge",
+      "type": "judge",
+      "inputs": [
+        "test-limited",
+        "test-all"
+      ],
+      "question": "テストの失敗を直すか（fix）、範囲テストの失敗が変更に無関係なら PR へ（pr）、全体テストの失敗が変更に無関係なら文書のチェックへ（doc-lint）、止めるか（stop）",
+      "choices": [
+        "fix",
+        "pr",
+        "doc-lint",
+        "stop"
+      ]
+    },
+    {
+      "id": "fix",
+      "type": "work",
+      "kind": "修正",
+      "inputs": [
+        "test-limited",
+        "test-all"
+      ],
+      "prompt": "失敗した箇所を直してコミットする（push しない）。変更に起因しない失敗は直さない。",
+      "next": "test-limited"
+    },
+    {
+      "id": "pr",
+      "type": "pr",
+      "stage": "Pull Request",
+      "base": "main",
+      "title": "Impl: x",
+      "summary": "",
+      "changes": "",
+      "next": "test-all"
+    },
+    {
+      "id": "test-all",
+      "type": "run",
+      "stage": "完了判定",
+      "timeout": 1980,
+      "cmd": "python3 <NDF>/scripts/test-run.py whole --pr {pr}",
+      "on_fail": "judge",
+      "next": "doc-lint"
+    },
+    {
+      "id": "doc-lint",
+      "type": "run",
+      "preset": "doc-lint",
+      "stage": "完了判定",
+      "on_fail": "fix-doc",
+      "next": "ready"
+    },
+    {
+      "id": "fix-doc",
+      "type": "work",
+      "kind": "修正",
+      "inputs": [
+        "doc-lint"
+      ],
+      "prompt": "ヒットした行を今の決まりだけを書く形へ直してコミットする（push しない）。",
+      "next": "doc-lint"
+    },
+    {
+      "id": "ready",
+      "type": "run",
+      "cmd": "sh -c 'git push -q && gh pr ready {pr}'",
+      "next": "merge-gate"
+    },
+    {
+      "id": "merge-gate",
+      "type": "run",
+      "timeout": 120,
+      "cmd": "python3 <NDF>/scripts/merged-steps.py merge-gate --pr {pr}",
+      "gate_next": "end",
+      "next": "merge"
+    },
+    {
+      "id": "merge",
+      "type": "run",
+      "timeout": 3960,
+      "cmd": "python3 <NDF>/scripts/merged-steps.py merge-when-green {pr} --timeout 3600",
+      "probe": {
+        "cmd": "python3 <NDF>/scripts/merged-steps.py probe --pr {pr} --act"
+      },
+      "next": "end"
+    },
+    {
+      "id": "merge-approved",
+      "type": "run",
+      "timeout": 3960,
+      "cmd": "python3 <NDF>/scripts/merged-steps.py merge-when-green {pr} --timeout 3600 --gate-approved user",
+      "probe": {
+        "cmd": "python3 <NDF>/scripts/merged-steps.py probe --pr {pr} --act"
+      },
+      "next": "end"
+    }
+  ],
+  "base_branch": "main",
+  "テストの戦略": {
+    "name": "local-full",
+    "source": "derived:test_duration",
+    "note": ".ndf/supervise.json の test.command を読んだ（.ndf/project.json に test が無い）。宣言は project.json へ移す"
+  },
+  "テストの時間": {
+    "init_test_timeout": 1800,
+    "test_timeout": 900,
+    "whole_timeout": 1800,
+    "ci_wait_timeout": 3600,
+    "basis": {
+      "budget_minutes": null,
+      "w": null,
+      "w_source": null,
+      "c": null,
+      "x": null,
+      "strategy": "local-full",
+      "unknown_duration": true
+    }
+  },
+  "触るファイル": [
+    "src/a.py"
+  ]
+}

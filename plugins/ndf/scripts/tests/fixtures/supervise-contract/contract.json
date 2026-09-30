@@ -1,0 +1,252 @@
+{
+  "usage": {
+    "run": "usage: supervise.py run [-h] [--state-dir STATE_DIR] [--from START] [--slow K=V] plan",
+    "history": "usage: supervise.py history [-h] {import} ...",
+    "expected": "usage: supervise.py expected [-h] [--history HISTORY] [--slow K=V] plan",
+    "example": "usage: supervise.py example [-h]",
+    "new": "usage: supervise.py new [-h] {impl,fix,check,release,sprint,close} ...",
+    "queue": "usage: supervise.py queue [-h] [--max MAX] [--poll POLL] [--then PLAN [PLAN ...]] [--done DONE] plans [plans ...]",
+    "wait": "usage: supervise.py wait [-h] [--timeout TIMEOUT] [--poll POLL] done",
+    "design-glossary": "usage: supervise.py design-glossary [-h] [--mode MODE] [--root ROOT] --out OUT",
+    "note": "usage: supervise.py note [-h] --report REPORT [--next NEXT] [--section SECTION] doc",
+    "sync-check": "usage: supervise.py sync-check [-h] [--root ROOT] [--commit]",
+    "new sprint": "usage: supervise.py new sprint [-h] --worktree WORKTREE [--issue ISSUE [ISSUE ...]] [--base BASE] [--production-branch PRODUCTION_BRANCH] [--test-cmd TEST_CMD] [--test-kind {test,lint}] [--test-all TEST_ALL] [--mode MODE] [--out OUT] [--tests PATH [PATH ...]] [--scope PATH [PATH ...]] [--version VERSION] [--name NAME] [--design DESIGN [DESIGN ...]] [--pace {normal,fast,auto}] [--state STATE]",
+    "new impl": "usage: supervise.py new impl [-h] --worktree WORKTREE [--issue ISSUE [ISSUE ...]] [--base BASE] [--test-cmd TEST_CMD] [--test-kind {test,lint}] [--test-all TEST_ALL] [--mode MODE] [--out OUT] [--tests PATH [PATH ...]] [--title TITLE] [--summary SUMMARY] [--prompt PROMPT] [--prompt-file PROMPT_FILE] [--files PATH [PATH ...]] [--changes CHANGES] [--branch BRANCH] [--escape-of ESCAPE_OF]",
+    "new fix": "usage: supervise.py new fix [-h] [--worktree WORKTREE] [--issue ISSUE [ISSUE ...]] [--base BASE] [--test-cmd TEST_CMD] [--test-kind {test,lint}] [--test-all TEST_ALL] [--mode MODE] [--out OUT] [--tests PATH [PATH ...]] [--title TITLE] [--summary SUMMARY] [--branch BRANCH] [--escape-of ESCAPE_OF]",
+    "new check": "usage: supervise.py new check [-h] --worktree WORKTREE [--issue ISSUE [ISSUE ...]] [--base BASE] [--test-cmd TEST_CMD] [--test-kind {test,lint}] [--test-all TEST_ALL] [--mode MODE] [--out OUT] [--scope PATH [PATH ...]] [--pr PR] [--since-last] [--id ID] [--final] [--since-ref SINCE_REF] [--review-only] [--sprint SPRINT]",
+    "new release": "usage: supervise.py new release [-h] --worktree WORKTREE [--issue ISSUE [ISSUE ...]] [--base BASE] [--production-branch PRODUCTION_BRANCH] [--mode MODE] [--out OUT] [--branch BRANCH] [--version VERSION] [--prs PRS [PRS ...]] [--prs-from-queue] [--channel {dev,prod}] [--prev-tag PREV_TAG] [--repo REPO] [--mvv MVV]",
+    "new close": "usage: supervise.py new close [-h] --worktree WORKTREE [--issue ISSUE [ISSUE ...]] [--base BASE] [--production-branch PRODUCTION_BRANCH] [--test-cmd TEST_CMD] [--test-kind {test,lint}] [--test-all TEST_ALL] [--mode MODE] [--out OUT] [--version VERSION] [--name NAME] [--state STATE] [--prod PROD] [--milestone MILESTONE]",
+    "history import": "usage: supervise.py history import [-h] [--history HISTORY] progress [progress ...]"
+  },
+  "results": {
+    "run ok": {
+      "exit": 0,
+      "result": "- 結果: 完了"
+    },
+    "run gate": {
+      "exit": 0,
+      "result": "- 結果: 関門"
+    },
+    "run stop": {
+      "exit": 3,
+      "result": "- 結果: 止まった"
+    },
+    "example": {
+      "exit": 0,
+      "keys": [
+        "steps",
+        "フェーズ",
+        "モード",
+        "上限",
+        "作業場所",
+        "規則",
+        "課題"
+      ]
+    },
+    "expected": {
+      "exit": 0,
+      "keys": [
+        "items",
+        "metrics",
+        "status",
+        "summary",
+        "tool"
+      ],
+      "item_keys": [
+        "basis",
+        "expected",
+        "kind",
+        "name",
+        "type"
+      ],
+      "metric_keys": [
+        "enabled",
+        "history"
+      ]
+    },
+    "new impl": {
+      "exit": 0,
+      "keys": [
+        "items",
+        "metrics",
+        "status",
+        "summary",
+        "tool"
+      ],
+      "item_keys": [
+        "kind",
+        "path",
+        "steps"
+      ],
+      "metric_keys": [
+        "steps"
+      ]
+    },
+    "queue ok": {
+      "exit": 0,
+      "keys": [
+        "items",
+        "metrics",
+        "status",
+        "summary",
+        "tool"
+      ],
+      "item_keys": [
+        "exit",
+        "plan",
+        "report",
+        "result",
+        "seconds"
+      ],
+      "metric_keys": [
+        "done",
+        "gate",
+        "max",
+        "not_run",
+        "overlaps",
+        "plans",
+        "resource_limits",
+        "stopped"
+      ]
+    },
+    "wait done": {
+      "exit": 0,
+      "keys": [
+        "items",
+        "metrics",
+        "status",
+        "summary",
+        "tool"
+      ],
+      "item_keys": [
+        "items",
+        "metrics",
+        "status",
+        "summary",
+        "tool"
+      ],
+      "metric_keys": [
+        "done",
+        "event",
+        "queue_status"
+      ]
+    },
+    "queue stop": {
+      "exit": 1,
+      "keys": [
+        "items",
+        "metrics",
+        "status",
+        "summary",
+        "tool"
+      ],
+      "item_keys": [
+        "exit",
+        "plan",
+        "report",
+        "result",
+        "seconds"
+      ],
+      "metric_keys": [
+        "done",
+        "gate",
+        "max",
+        "not_run",
+        "overlaps",
+        "plans",
+        "resource_limits",
+        "stopped"
+      ],
+      "results": [
+        "止まった"
+      ]
+    },
+    "queue gate": {
+      "exit": 10,
+      "keys": [
+        "items",
+        "metrics",
+        "next",
+        "status",
+        "summary",
+        "tool"
+      ],
+      "item_keys": [
+        "exit",
+        "plan",
+        "reason",
+        "report",
+        "result",
+        "seconds"
+      ],
+      "metric_keys": [
+        "done",
+        "gate",
+        "max",
+        "not_run",
+        "overlaps",
+        "plans",
+        "resource_limits",
+        "stopped"
+      ],
+      "results": [
+        "関門",
+        "流さなかった"
+      ],
+      "events": [
+        "attention"
+      ],
+      "event_keys": [
+        "at",
+        "event",
+        "plan",
+        "progress",
+        "reason",
+        "step",
+        "text",
+        "tool"
+      ]
+    },
+    "wait attention": {
+      "exit": 20,
+      "keys": [
+        "items",
+        "metrics",
+        "next",
+        "status",
+        "summary",
+        "tool"
+      ],
+      "item_keys": [
+        "at",
+        "plan",
+        "progress",
+        "reason",
+        "step",
+        "text"
+      ],
+      "metric_keys": [
+        "attention",
+        "done",
+        "event"
+      ]
+    },
+    "wait timeout": {
+      "exit": 3,
+      "keys": [
+        "items",
+        "metrics",
+        "next",
+        "status",
+        "summary",
+        "tool"
+      ],
+      "item_keys": [],
+      "metric_keys": [
+        "done",
+        "event",
+        "timeout"
+      ]
+    }
+  }
+}

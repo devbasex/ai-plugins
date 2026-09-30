@@ -7,17 +7,23 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 
 import clock
+import jsonio
 import legacy_names
+import procs
 import usage_ledger
 from sprint_mvv import MVV_PACES
-from supervise_lib.claude import TICK
+from supervise_lib.claude import TICK, watch_children
 
+STEP_PID = "step.pid"  # 流れているステップの子のプロセスグループ（ステップが流れている間だけある）
 REPORT_INTERVAL = 600  # 最後の行から動きが無いときに「まだ動いている」を足すまでの秒数。計画の "report_interval"
 # worker の途中の報告を分ける語（スクリプトで見る。LLM は使わない）
 PROGRESS_STOP = re.compile(r"止まった|止まる|進めない|進められない|判断が要る|できなかった|stuck", re.I)
@@ -27,6 +33,40 @@ PROGRESS_FAIL = re.compile(r"失敗|落ちた|落ちる|エラー|\berror\b|\bfa
 
 def counts_text(counts: dict) -> str:
     return " / ".join(f"{k} {v}" for k, v in counts.items() if v is not None) or "無し"
+
+
+def _read_step_pid(path: Path) -> dict | None:
+    return jsonio.read(path, missing=None, broken=None, want=dict)
+
+
+def _write_step_pid(path: Path, data: dict) -> None:
+    jsonio.write_atomic(path, data, indent=None)
+
+
+def reap_orphans(state_dir: Path) -> str | None:
+    """前の起動が残した `step.pid` の子のうち、pid が同じ起動時刻で生きているもののプロセスグループを止める。
+
+    起動時刻を照らすのは、pid の使い回しで関係の無いグループを止めないため。前の起動が途中だったステップの id を返す
+    （`step.pid` が無ければ None）。"""
+    path = Path(state_dir) / STEP_PID
+    data = _read_step_pid(path)
+    if data is None:
+        return None
+    for c in data.get("children") or []:
+        pid, created = c.get("pid"), c.get("create_time")
+        now = procs.start_time(pid) if isinstance(pid, int) else None
+        if now is None or created is None or abs(now - float(created)) > 0.01:
+            continue
+        try:
+            os.killpg(int(c.get("pgid")), signal.SIGKILL)
+        except (OSError, TypeError, ValueError):
+            continue
+        print(
+            f"[ndf supervise] 落ちた前の起動がステップ {data.get('step')} で残した子のプロセスグループ {c.get('pgid')} を止めた",
+            file=sys.stderr,
+        )
+    path.unlink(missing_ok=True)
+    return data.get("step")
 
 
 class RunState:
@@ -47,6 +87,7 @@ class RunState:
         self.switched: list[str] = []  # 利用上限で切り替えた認証（変数の名前・アカウント・従量の接続）
         self.cur: dict = {}
         self.fail_counts: dict[str, int] = {}
+        self.applied = 0  # 記録した（流したか組み直した）最後のステップの番号
         # 途中の報告（progress.jsonl）。LLM を使わずスクリプトで書き・分ける
         self.progress = self.dir / "progress.jsonl"
         self.interval = float(plan.get("report_interval", REPORT_INTERVAL))
@@ -57,6 +98,7 @@ class RunState:
         self.worker_last = ""
         self.worker_counts: dict[str, int] = {}
         self.attention_keys: set[str] = set()
+        self.attention_log: list[dict] = []  # 書いた attention の行（関門で打ち直したときに知らせ直す）
         self.pcount = {"step": 0, "alive": 0, "worker": 0, "malformed": 0, "attention": 0, "slow": 0, "llm": 0, "llm_cost": 0.0}
         self.slow_events: list[dict] = []
         self.worker_recent: list[str] = []
@@ -114,7 +156,9 @@ class RunState:
         if key in self.attention_keys:
             return
         self.attention_keys.add(key)
-        self.progress_write({"kind": "attention", "step": self.cur.get("id"), "reason": reason, "text": text[:300]})
+        rec = {"step": self.cur.get("id"), "reason": reason, "text": text[:300]}
+        self.attention_log.append(rec)
+        self.progress_write({"kind": "attention", **rec})
 
     def classify_worker(self, text: str) -> None:
         """worker の 1 行を語と繰り返しで分け、conductor の判断が要るものだけを attention にする。"""
@@ -189,6 +233,29 @@ class RunState:
             }
         )
 
+    # --- 流れているステップの子（孤児の片付け。決定 35） ---
+    def begin_step(self, sid: str) -> str | None:
+        """ステップを流す前に孤児を片付け、`step.pid` を起こす。前の起動が途中だったステップの id を返す。"""
+        prev = reap_orphans(self.dir)
+        _write_step_pid(self.dir / STEP_PID, {"step": sid, "children": []})
+        watch_children(self.note_child)
+        return prev
+
+    def end_step(self) -> None:
+        watch_children(None)
+        (self.dir / STEP_PID).unlink(missing_ok=True)
+
+    def note_child(self, pid: int, started: bool) -> None:
+        """`step.pid` へ子（新しいセッションの先頭なので pgid = pid）と起動時刻を足すか外す。"""
+        path = self.dir / STEP_PID
+        data = _read_step_pid(path)
+        if data is None:
+            return
+        data["children"] = [c for c in data.get("children") or [] if c.get("pid") != pid]
+        if started:
+            data["children"].append({"pgid": pid, "pid": pid, "create_time": procs.start_time(pid)})
+        _write_step_pid(path, data)
+
     # --- 記録 ---
     def out_path(self, n: int, sid: str) -> Path:
         return self.dir / f"{n:02d}-{sid}.out"
@@ -244,6 +311,7 @@ class RunState:
 
     def record(self, n: int, sid: str, nxt: str | None, next_type: str | None, is_gate) -> None:
         """終わったステップを残す: 結果・区切りの行・失敗の回数・出力ファイル・`state.json`。"""
+        self.applied = max(self.applied, n)
         self.results[sid] = dict(self.cur)
         self.read_worker_lines()
         self.step_line(nxt)
@@ -267,6 +335,50 @@ class RunState:
 
             data["project_mvv"] = project_mvv.record(self.project_mvv)
         (self.dir / "state.json").write_text(json.dumps(data, ensure_ascii=False, indent=1))
+
+    def snapshot(self) -> dict:
+        """ステップをまたいで積む値の写し。耐久ステップの出力に入れ、落ちた後の続きで `replay` が戻す。"""
+        return {
+            "llm": dict(self.llm),
+            "gates": [dict(g) for g in self.gates],
+            "fail_counts": dict(self.fail_counts),
+            "last_stage": self.last_stage,
+            "pace_recorded": self.pace_recorded,
+            "switched": list(self.switched),
+            "slow_events": [dict(e) for e in self.slow_events],
+            "pcount": dict(self.pcount),
+            "attention_keys": sorted(self.attention_keys),
+            "attention_log": [dict(a) for a in self.attention_log],
+        }
+
+    def replay(self, out: dict) -> bool:
+        """記録のある耐久ステップ（`Engine.execute` の出力）から、ファイルを書かずに記録を組み直す。
+
+        このプロセスで記録したステップ（番号が `applied` 以下）は組み直さない。組み直したら True。
+        進捗ログの行・`.out`・`state.json` は書かないため、続けても同じ行は 2 度書かれない。"""
+        if out["n"] <= self.applied:
+            return False
+        self.applied = out["n"]
+        self.cur = dict(out["cur"])
+        self.results[out["sid"]] = dict(self.cur)
+        self.log.append({k: v for k, v in self.cur.items() if k != "text"})
+        acc = out.get("acc") or {}
+        self.llm = dict(acc.get("llm", self.llm))
+        self.gates = [dict(g) for g in acc.get("gates", self.gates)]
+        self.fail_counts = dict(acc.get("fail_counts", self.fail_counts))
+        self.last_stage = acc.get("last_stage", self.last_stage)
+        self.pace_recorded = acc.get("pace_recorded", self.pace_recorded)
+        self.switched = list(acc.get("switched", self.switched))
+        self.slow_events = [dict(e) for e in acc.get("slow_events", self.slow_events)]
+        self.pcount = dict(acc.get("pcount", self.pcount))
+        self.attention_keys = set(acc.get("attention_keys", self.attention_keys))
+        self.attention_log = [dict(a) for a in acc.get("attention_log", self.attention_log)]
+        return True
+
+    def retell_gates(self, recorded: list[dict]) -> None:
+        """関門の記録を返す打ち直しで、記録した関門の attention を進捗ログへ書き直す（conductor へもう一度知らせる）。"""
+        for rec in recorded:
+            self.progress_write({"kind": "attention", **rec})
 
     def write_report(self, plan: dict, result: str, reason: str) -> str:
         """`## フェーズの報告` を組み、`report.md` へ書いて返す。"""

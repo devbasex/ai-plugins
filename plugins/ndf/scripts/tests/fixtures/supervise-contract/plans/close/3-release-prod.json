@@ -1,0 +1,161 @@
+{
+  "フェーズ": "配布（本番）",
+  "課題": [
+    15
+  ],
+  "モード": "standard",
+  "作業場所": "<TMP>/repo/.worktrees/release/v1.2.0",
+  "branch": "release/v1.2.0",
+  "起点": "origin/main",
+  "規則": "関門 2 は利用者か MVV 判定が承認した（先頭の mvv のステップが 0 を返したときだけ先へ進む）。run のステップが落ちたら、直せるもの（版数の書き漏れ・文書の形）は fix。外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度。タグの重複・権限の不足は stop。",
+  "上限": 20,
+  "steps": [
+    {
+      "id": "mvv",
+      "type": "run",
+      "timeout": 900,
+      "cmd": "python3 <NDF>/scripts/mvv-gate.py check --sprint <TMP>/out/sprint/sprint.json --gate release --material <TMP>/repo/issues/approval-foo-v1.2.0.md --pr {queue_prs} --mode standard --root <TMP>/repo --note {state_dir}/work/mvv-note.md",
+      "next": "note",
+      "gate_next": "end"
+    },
+    {
+      "id": "note",
+      "type": "run",
+      "timeout": 300,
+      "cmd": "sh -c 'for p in {queue_prs}; do gh pr comment \"$p\" --body-file {state_dir}/work/mvv-note.md || exit 1; done'",
+      "on_fail": "handoff",
+      "next": "bump"
+    },
+    {
+      "id": "bump",
+      "type": "run",
+      "stage": "配布",
+      "cmd": "python3 <NDF>/scripts/release-steps.py bump --plugin foo --to 1.2.0 --base main",
+      "on_fail": "judge",
+      "next": "bump-others"
+    },
+    {
+      "id": "bump-others",
+      "type": "run",
+      "stage": "配布",
+      "cmd": "out=$(python3 <NDF>/scripts/release-steps.py changed-plugins --plugin foo) || { printf \"%s\\n\" \"$out\"; exit 1; }; printf \"%s\\n\" \"$out\"; printf \"%s\\n\" \"$out\" | python3 -c \"import json,sys; [print(i[\\\"name\\\"], i[\\\"to\\\"]) for i in json.loads(sys.stdin.read().strip().splitlines()[-1])[\\\"items\\\"]]\" | while read -r n to; do python3 <NDF>/scripts/release-steps.py bump --plugin \"$n\" --to \"$to\" --base main || exit 1; done",
+      "on_fail": "judge",
+      "next": "changelog"
+    },
+    {
+      "id": "changelog",
+      "type": "run",
+      "cmd": "python3 <NDF>/scripts/release-steps.py changelog --version 1.2.0 --prs {queue_prs}",
+      "on_fail": "judge",
+      "next": "notes"
+    },
+    {
+      "id": "notes",
+      "type": "run",
+      "stage": "配布",
+      "cmd": "sh -c 'python3 <NDF>/scripts/release-steps.py notes --version 1.2.0 --prs {queue_prs} && git add -A && (git diff --cached --quiet || git commit -q -m \"Release: foo v1.2.0\")'",
+      "on_fail": "judge",
+      "next": "snapshot"
+    },
+    {
+      "id": "snapshot",
+      "type": "run",
+      "stage": "配布",
+      "timeout": 900,
+      "cmd": "sh -c 'python3 <NDF>/scripts/release-steps.py run --root . --stage production --version 1.2.0 && git add -A && (git diff --cached --quiet || git commit -q -m \"Release: foo v1.2.0 のトークン消費の記録\")'",
+      "on_fail": "judge",
+      "next": "release"
+    },
+    {
+      "id": "release",
+      "type": "run",
+      "stage": "配布",
+      "timeout": 3000,
+      "cmd": "python3 <NDF>/scripts/release-steps.py release --version 1.2.0 --channel prod",
+      "on_fail": "judge",
+      "next": "verify",
+      "probe": {
+        "cmd": "python3 <NDF>/scripts/merged-steps.py probe --head {branch} --head {base} --act"
+      }
+    },
+    {
+      "id": "verify",
+      "type": "run",
+      "stage": "リリース後テスト",
+      "timeout": 1500,
+      "cwd": "<TMP>/repo",
+      "cmd": "sh -c 'git pull -q --ff-only origin main && python3 <NDF>/scripts/release-verification-steps.py verify-install --ref main --expect 1.2.0 --runtimes claude'",
+      "on_fail": "judge",
+      "next": "cleanup"
+    },
+    {
+      "id": "cleanup",
+      "type": "run",
+      "stage": "後片付け",
+      "cwd": "<TMP>/repo",
+      "cmd": "sh -c 'python3 <NDF>/scripts/merged-steps.py cleanup $(gh pr list --state merged --limit 30 --json number,headRefName --jq \".[] | select(.headRefName | startswith(\\\"release/v1.2.0\\\")) | .number\") {queue_prs}'",
+      "on_fail": "judge",
+      "next": "end"
+    },
+    {
+      "id": "judge",
+      "type": "judge",
+      "inputs": [
+        "bump",
+        "bump-others",
+        "changelog",
+        "notes",
+        "snapshot",
+        "release",
+        "verify",
+        "cleanup"
+      ],
+      "question": "落ちたステップを直す（fix）か、同じステップをもう一度（retry）か、止める（stop）か。retry なら decision に落ちたステップの id を返す",
+      "choices": [
+        "fix",
+        "bump",
+        "bump-others",
+        "changelog",
+        "notes",
+        "snapshot",
+        "release",
+        "verify",
+        "cleanup",
+        "stop"
+      ]
+    },
+    {
+      "id": "fix",
+      "type": "work",
+      "kind": "修正",
+      "inputs": [
+        "bump",
+        "bump-others",
+        "changelog",
+        "notes",
+        "snapshot",
+        "release",
+        "verify",
+        "cleanup"
+      ],
+      "prompt": "落ちたステップの出力を読み、原因を直してコミットする（push しない）。直したら次は落ちたステップからやり直す。",
+      "next": "release"
+    },
+    {
+      "id": "handoff",
+      "type": "run",
+      "timeout": 120,
+      "cmd": "sh -c 'python3 <NDF>/scripts/sprint-state.py gate \"$1\" \"$2\" --withdraw >/dev/null || echo \"$2 の MVV 判定の記録を外せなかった\"; echo \"$3\"; exit 10' handoff <TMP>/out/sprint/sprint.json '関門 2' '判定のコメントが失敗した。関門 2 は自動で通さず、利用者の承認を求める'",
+      "gate_next": "end",
+      "next": "end"
+    }
+  ],
+  "base_branch": "main",
+  "リポジトリ": "<TMP>/repo",
+  "記録": "<NDF>/scripts/projects-sync.sh",
+  "実行の条件": {
+    "cmd": "python3 <NDF>/scripts/check-trigger.py changed --id m9-final --root <TMP>/repo",
+    "skip_code": 3
+  },
+  "スプリント状態": "<TMP>/out/sprint/sprint.json"
+}

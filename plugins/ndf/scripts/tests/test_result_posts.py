@@ -309,7 +309,7 @@ def test_a_position_rejection_of_an_earlier_item_is_not_taken_as_ours(tmp_path, 
         actor=ACTOR,
         extra={"ident": f"agy-r{ROUND}"},
     )
-    earlier_seq = post_queue.read_item(earlier)["seq"]
+    earlier_seq = earlier["seq"]
     fake_gh.set_rules(
         [
             {"match": "pulls/730/reviews?", "stdout": "[]"},

@@ -15,6 +15,10 @@ from supervise_lib.prompts import FULL_SYSTEM, PROGRESS_PROMPT, REPORT_DONE, REP
 from supervise_lib.steps import RunStep, last_json
 import project_mvv
 
+CONCURRENT_FILES = (
+    "並行の触るファイル"  # 実行中のプランへ queue が入れる、同時に流れる他のプランの 触るファイル（プランの JSON には書かない）
+)
+
 
 class WorkStep:
     """work のステップ: 1 つの作業を worker（最小構成の claude -p か external-ai.py run）に行わせる。"""
@@ -82,13 +86,22 @@ class WorkStep:
             "runtime": rt,
         }
 
+    def concurrent_rule(self, ctx, step: dict) -> str:
+        """実装の指示文へ足す除外の行。同時に流れる他のプランの `触るファイル` を、流す時点で入れる（#1248）。"""
+        files = ctx.plan.get(CONCURRENT_FILES) or []
+        if step.get("kind") != "実装" or not files:
+            return ""
+        return "\n並行して別のプランが次を触る。それらは変えない: " + "、".join(files)
+
     def execute(self, ctx, step: dict) -> tuple[bool, str]:
         issues = self.issue_text(ctx, step)
         cwd = step.get("cwd", ctx.cwd)
+        rule = self.concurrent_rule(ctx, step)
         prompt = (
             f"作業: {step.get('kind', '修正')}\n作業場所: {cwd}\n\n"
             + (f"{issues}\n\n## 指示\n" if issues else "")
-            + f"{step['prompt']}\n\n## 入力\n{ctx.inputs_text(step)}\n\n"
+            + (step["prompt"].rstrip("\n") + rule if rule else step["prompt"])
+            + f"\n\n## 入力\n{ctx.inputs_text(step)}\n\n"
             + WORKDIR_PROMPT.format(path=ctx.state.work)
             + "\n\n"
             + PROGRESS_PROMPT.format(path=ctx.state.progress.resolve())

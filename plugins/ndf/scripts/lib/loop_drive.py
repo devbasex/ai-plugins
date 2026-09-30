@@ -9,6 +9,12 @@ from __future__ import annotations
 import shlex
 import subprocess
 import sys
+from pathlib import Path
+
+
+def durable_identity(tmp: Path | None, pr: int) -> str:
+    """耐久の記録の鍵の元。状態の置き場（求まらなければ作業ディレクトリと PR）。"""
+    return str(tmp.resolve()) if tmp is not None else f"{Path.cwd().resolve()}#{pr}"
 
 
 def call(cmd: list[str], env: dict | None = None, cwd: str | None = None) -> tuple[int, str]:

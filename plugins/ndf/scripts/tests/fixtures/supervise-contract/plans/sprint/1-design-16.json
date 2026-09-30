@@ -1,0 +1,145 @@
+{
+  "フェーズ": "設計",
+  "課題": [
+    16
+  ],
+  "モード": "standard",
+  "作業場所": "<TMP>/repo/.worktrees/design/issue-16",
+  "branch": "design/issue-16",
+  "起点": "origin/main",
+  "リポジトリ": "<TMP>/repo",
+  "規則": "設計の cross-review は上限 3 ラウンドで関門 1 へ渡す（収束を待たない）。レビューが ok か、上限・振動で打ち切られたなら gate。駆動そのものが失敗したら stop。",
+  "上限": 12,
+  "steps": [
+    {
+      "id": "glossary",
+      "type": "run",
+      "stage": "設計",
+      "timeout": 300,
+      "cmd": "python3 <NDF>/scripts/supervise.py design-glossary --mode standard --root . --out {state_dir}/work/glossary-candidates.md",
+      "next": "requirements-check"
+    },
+    {
+      "id": "requirements-check",
+      "type": "run",
+      "stage": "要求と受け入れ条件",
+      "timeout": 120,
+      "cmd": "python3 <NDF>/scripts/spec-copy.py check 16 issues/issue-16-requirements.md",
+      "on_fail": "requirements",
+      "next": "design"
+    },
+    {
+      "id": "requirements",
+      "type": "work",
+      "full": true,
+      "kind": "要求",
+      "stage": "要求と受け入れ条件",
+      "issues": true,
+      "timeout": 3600,
+      "next": "design",
+      "prompt": "/ndf:requirements-design #16。人へ問わずに進め、決められない点は前提か未決として課題の本文へ書く。本文を書いたら `spec-copy.py write 16 issues/issue-16-requirements.md` で写しを作り、コミットする（push しない）。"
+    },
+    {
+      "id": "design",
+      "type": "work",
+      "full": true,
+      "kind": "設計",
+      "stage": "設計",
+      "issues": true,
+      "timeout": 3600,
+      "next": "pr",
+      "prompt": "/ndf:design #16。設計文書は 1,000 行以下にする（超える主題は設計を 2 本に分けると報告する）。コミットする（push しない）。"
+    },
+    {
+      "id": "pr",
+      "type": "pr",
+      "stage": "ドキュメントレビュー",
+      "base": "main",
+      "title": "設計: #16",
+      "summary": "#16 の設計（スプリント m9）",
+      "append": [
+        "{state_dir}/work/glossary-candidates.md"
+      ],
+      "decisions": true,
+      "next": "sync-body"
+    },
+    {
+      "id": "sync-body",
+      "type": "run",
+      "stage": "ドキュメントレビュー",
+      "timeout": 120,
+      "cmd": "bash <NDF>/scripts/pr-body-decisions.sh sync {pr}",
+      "next": "review"
+    },
+    {
+      "id": "review",
+      "type": "drive",
+      "drive": "cross-review",
+      "kind": "ドキュメントレビュー",
+      "stage": "ドキュメントレビュー",
+      "timeout": 3600,
+      "args": "{pr}",
+      "on_fail": "gate",
+      "next": "sync-review"
+    },
+    {
+      "id": "sync-review",
+      "type": "run",
+      "stage": "ドキュメントレビュー",
+      "timeout": 120,
+      "cmd": "git fetch -q && git merge -q --ff-only '@{u}'",
+      "next": "glossary-check"
+    },
+    {
+      "id": "glossary-check",
+      "type": "run",
+      "stage": "ドキュメントレビュー",
+      "timeout": 120,
+      "cmd": "python3 <NDF>/scripts/glossary.py check --diff origin/main --root .",
+      "on_fail": "fix-glossary",
+      "next": "push-glossary"
+    },
+    {
+      "id": "fix-glossary",
+      "type": "work",
+      "kind": "修正",
+      "stage": "ドキュメントレビュー",
+      "inputs": [
+        "glossary-check"
+      ],
+      "timeout": 1800,
+      "next": "glossary-recheck",
+      "prompt": "用語チェックの当たりを直す。未登録の語は用語集へ足す（source は空にし、pending_source に設計文書のパスを書く）か、用語集の語へ言い換える。廃止した語は用語集の語へ言い換える。用語集を変えたら `glossary.py render` で文書を作り直し、コミットする（push しない）。利用者が採るかを決めるべき語は直さずに「判断が要る」と報告する。"
+    },
+    {
+      "id": "glossary-recheck",
+      "type": "run",
+      "stage": "ドキュメントレビュー",
+      "timeout": 120,
+      "cmd": "python3 <NDF>/scripts/glossary.py check --diff origin/main --root .",
+      "on_fail": "push-glossary",
+      "next": "push-glossary"
+    },
+    {
+      "id": "push-glossary",
+      "type": "run",
+      "stage": "ドキュメントレビュー",
+      "timeout": 300,
+      "cmd": "git push -q && bash <NDF>/scripts/pr-body-decisions.sh sync {pr}",
+      "next": "gate"
+    },
+    {
+      "id": "gate",
+      "type": "judge",
+      "inputs": [
+        "review",
+        "glossary-recheck"
+      ],
+      "question": "関門 1（設計 Pull Request のマージ）へ渡す（gate）か、止める（stop）か。glossary-recheck に用語チェックの当たりが残っていれば、関門 1 の提示に載せる",
+      "choices": [
+        "gate",
+        "stop"
+      ]
+    }
+  ]
+}

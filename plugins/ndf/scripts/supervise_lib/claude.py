@@ -13,6 +13,7 @@ import shlex
 import signal
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -91,13 +92,21 @@ def kill_group(p: subprocess.Popen) -> None:
         pass
 
 
+_STEP = threading.local()  # このスレッドで起こす子を知らせる先（RunState.note_child。耐久ステップを流すスレッドごと）
+
+
+def watch_children(note) -> None:
+    """このスレッドで `run_ticking` が起こす子を `note(pid, 起きたか)` へ知らせる。None で外す（孤児の片付け）。"""
+    _STEP.note = note
+
+
 def run_ticking(
     cmd, tick=None, every: float = TICK, timeout: float | None = None, input: str | None = None, err_path: Path | None = None, **kw
 ) -> subprocess.CompletedProcess:
     """subprocess.run と同じく待つが、every 秒ごとに tick() を呼ぶ（長いステップの待ちの中で進行を書く）。
 
     err_path を渡すと stderr をそのファイルへ書かせる（待ちの間に最後の行を読めるように）。
-    子は新しいセッションで起こす。打ち切りは子のプロセスグループを止めて subprocess.TimeoutExpired を投げる。
+    子は新しいセッションで起こし、`watch_children` の知らせる先へ渡す（孤児の片付け）。打ち切りは子のプロセスグループを止めて subprocess.TimeoutExpired を投げる。
     tick() が例外を投げたら（遅れの見張りの打ち切り）、子のプロセスグループを止めてから投げ直す。"""
     errf = open(err_path, "w", encoding="utf-8") if err_path else None
     try:
@@ -114,6 +123,9 @@ def run_ticking(
         if errf:
             errf.close()
         raise
+    note = getattr(_STEP, "note", None)
+    if note:
+        note(p.pid, True)
     deadline = time.time() + timeout if timeout else None
     first = True
     try:
@@ -137,6 +149,8 @@ def run_ticking(
                         kill_group(p)
                         raise
     finally:
+        if note:
+            note(p.pid, False)
         if errf and not errf.closed:
             errf.close()
 
