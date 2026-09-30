@@ -68,7 +68,7 @@
 
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
-| 全体テスト | プランの `test-all` のステップで走らせるテストか静的解析。テストはリポジトリ全体を範囲にする（宣言の `suites[].command`、無ければ雛形の `{paths}` を `.` にしたもの）。静的解析は宣言の `command`、無ければ雛形の `{paths}` を範囲のパスで埋めたもの（範囲のパスが無ければ組まず `NO_LINT_WHOLE`） | 変更あり（`development-workflow/references/glossary.md` と `docs/glossary.md` の「全体テスト」の行） |
+| 全体テスト | リポジトリ全体を範囲にするテストか静的解析。テストは宣言の `suites[].command`、無ければ雛形の `{paths}` を `.` にしたもの。静的解析は宣言の `command`、無ければ雛形の `{paths}` を範囲のパスで埋めたもの（範囲のパスが無ければ組まず `NO_LINT_WHOLE`） | 変更あり（`development-workflow/references/glossary.md` と `docs/glossary.md` の「全体テスト」の行） |
 | 範囲テストの雛形 | `{paths}` を 1 語で含むコマンド | 変更なし |
 
 ## 機能一覧

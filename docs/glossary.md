@@ -171,7 +171,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 検査 | — | リファクタリング・コードレビュー・完了判定・Pull Request を通すフェーズ。fast ではトリガーが立ったときだけ、前回の検査からの差分に流す。コードレビューだけは開発版ごとに流す（--review-only） | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | チェック | — | 機械が合否を返すもの。CI のジョブと、mvv-gate.py・doc-lint.py などのスクリプト | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 完了判定 | — | コマンドの証跡で完了を判定する工程。スクラムの完了の定義に当たる | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| 全体テスト | — | プランの test-all のステップで走らせるテストか静的解析。テストはリポジトリ全体を範囲にし、静的解析は宣言の command が無ければ雛形の {paths} を範囲のパスで埋める | 全体のテスト | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| 全体テスト | — | リポジトリ全体を範囲にするテストか静的解析。静的解析は宣言の command が無ければ雛形の {paths} を範囲のパスで埋める | 全体のテスト | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | コメントのスナップショット | — | cross-review が取る既存コメントの一覧。2 ラウンド目以降は取り直す | 既存コメントのスナップショット | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | doc-lint | — | 追加した Markdown の行に、検討の痕跡・課題番号の由来・比較の語が無いかを見るチェック | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 引継ぎ文書 | `handoff` | 会話を切って再開するための文書。「今の会話の進み」（プランごとの行の表）と「次に実行するコマンド」の節をスクリプトが書く | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |

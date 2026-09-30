@@ -1933,7 +1933,7 @@
     {
       "term": "全体テスト",
       "context": "ndf-workflow",
-      "meaning": "リポジトリ全体を範囲にするテスト",
+      "meaning": "リポジトリ全体を範囲にするテストか静的解析。静的解析は宣言の command が無ければ雛形の {paths} を範囲のパスで埋める",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
       "deprecated": [
         "全体のテスト"
