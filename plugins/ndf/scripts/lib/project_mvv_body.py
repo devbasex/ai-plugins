@@ -61,29 +61,51 @@ def item_ids(text: str) -> list[str]:
 def shape_problems(text: str) -> list[dict]:
     """本文の形の誤り（I4）。`[{"item", "reason"}]`。空なら形は正しい。"""
     secs = body_sections(text)
-    out = []
-    for word in REQUIRED_SECTIONS:
-        if _section(secs, word) is None:
-            out.append({"item": word, "reason": f"`## {word}` の見出しが無い"})
+    return [
+        *_missing_sections(secs),
+        *_value_shape(secs),
+        *_principle_copies(secs),
+        *_foreign_table_ids(text),
+        *_operations_shape(secs),
+    ]
+
+
+def _missing_sections(secs) -> list[dict]:
+    return [{"item": word, "reason": f"`## {word}` の見出しが無い"} for word in REQUIRED_SECTIONS if _section(secs, word) is None]
+
+
+def _value_shape(secs) -> list[dict]:
     value = _section(secs, "Value")
     if value is not None and not any(re.match(r"^\d+\.\s", ln) for ln in value):
-        out.append({"item": "Value", "reason": "`## Value` に番号つきの箇条（`1. ...`）が無い"})
-    for word in PRINCIPLE_HEADINGS:
-        if any(k.startswith(word) for k in secs):
-            out.append(
-                {"item": "priority" if word == "優先順位" else "principle", "reason": f"共通原則の写し（`## {word}` の節）を持てない"}
-            )
+        return [{"item": "Value", "reason": "`## Value` に番号つきの箇条（`1. ...`）が無い"}]
+    return []
+
+
+def _principle_copies(secs) -> list[dict]:
+    return [
+        {"item": "priority" if word == "優先順位" else "principle", "reason": f"共通原則の写し（`## {word}` の節）を持てない"}
+        for word in PRINCIPLE_HEADINGS
+        if any(k.startswith(word) for k in secs)
+    ]
+
+
+def _foreign_table_ids(text: str) -> list[dict]:
+    out = []
     for k, n in _table_ids(text):
         if k == "C":
             out.append({"item": f"C{n}", "reason": f"共通原則の操作（C{n} の行）を本文へ写せない。固有の操作は P の番号で書く"})
         if k == "R":
             out.append({"item": f"R{n}", "reason": "R の番号はスプリント MVV のものである。固有の操作は P の番号で書く"})
+    return out
+
+
+def _operations_shape(secs) -> list[dict]:
     ops = _section(secs, OPERATIONS_HEADING)
     if ops is not None:
         others = [f"{k}{n}" for k, n in _table_ids("\n".join(ops)) if k != "P"]
         if not any(k == "P" for k, _ in _table_ids("\n".join(ops))) and not others:
-            out.append({"item": OPERATIONS_HEADING, "reason": f"`## {OPERATIONS_HEADING}` に `| P1 | ... |` の行が無い"})
-    return out
+            return [{"item": OPERATIONS_HEADING, "reason": f"`## {OPERATIONS_HEADING}` に `| P1 | ... |` の行が無い"}]
+    return []
 
 
 def item_texts(text: str) -> dict[str, str]:

@@ -67,8 +67,8 @@ drive のステップ: `cmd`（または `"drive": "cross-review" | "cross-refac
 `api_error_status: 429`・「You've hit your limit … resets …」。lib/monitor.py の USAGE LIMIT の表と同じ文言）で
 落ちたら、ステップの失敗とは区別する（on_fail・judge へ回さない）。ステップの結果に `"limit": true` と読めた解除時刻を残す。
 - 登録済みの claude アカウント（`relay.py account add`）が 2 つ以上あれば、上限に当たったアカウントを除いて最も
-  上限から遠いものへ替え、待たずに同じ呼び出しを起動し直す（`lib/claude_accounts.py`。子へは `CLAUDE_CODE_OAUTH_TOKEN`
-  と `NDF_CLAUDE_ACCOUNT` を渡す）。以後の呼び出しもそのアカウントで起動する。ステップの `auth` に
+  上限から遠いものへ替え、待たずに同じ呼び出しを起動し直す（`lib/claude_accounts.py`。子へは `CLAUDE_CODE_OAUTH_TOKEN`・
+  `CLAUDE_CODE_OAUTH_SCOPES`（アカウントのスコープ。claude.ai のコネクタの読み込みに要る）・`NDF_CLAUDE_ACCOUNT` を渡す）。以後の呼び出しもそのアカウントで起動する。ステップの `auth` に
   `アカウント <名前>（<種類>）`、報告に `認証: 切り替え（アカウント <名前>）`、途中の報告に `"kind": "account"` の行を残す。
   起動したときの `NDF_CLAUDE_ACCOUNT`（動いている区間のアカウント）のトークンはプランが更新しない
 - 従量の接続の宣言は、環境変数 `NDF_SUPERVISE_CLAUDE_FALLBACK` が定義されていれば（空でも）それ、無ければ

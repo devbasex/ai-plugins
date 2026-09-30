@@ -319,6 +319,81 @@ def test_supervise_stops_when_no_candidate(accounts, monkeypatch):
         r.child_env(1800, {})
 
 
+# ---------------------------------------------------------------- アカウントのスコープ（#1523）
+
+ABSENT = object()  # `scopes` のキーが無い
+
+
+def _set_scopes(accounts, name, scopes):
+    o = accounts.creds(name)
+    o.pop("scopes")
+    if scopes is not ABSENT:
+        o["scopes"] = scopes
+    accounts.write(accounts.root / name / ".credentials.json", {"claudeAiOauth": o})
+
+
+def test_account_env_carries_scopes_of_the_store(accounts):
+    """受け入れ条件 3・I1: 子のスコープは置き場の並びのまま。共有の設定ディレクトリからは読まず、取得先も呼ばない。"""
+    scopes = ["user:profile", "user:mcp_servers", "user:inference"]
+    accounts.add("a", scopes=scopes)
+    accounts.write(accounts.shared / ".credentials.json", {"claudeAiOauth": {"accessToken": "x", "scopes": ["user:shared"]}})
+    env = ca.account_env("a", {k: "1" for k in ca.FOREIGN_AUTH_ENV})
+    assert env[ca.SCOPES_ENV] == " ".join(scopes) and "user:mcp_servers" in env[ca.SCOPES_ENV].split()
+    assert not set(ca.FOREIGN_AUTH_ENV) & set(env)
+    assert accounts.fake.usage_calls == [] and accounts.fake.refresh_calls == []
+
+
+def test_account_env_reads_scopes_after_refresh(accounts):
+    """I1: トークンを更新したら、更新の応答で書き直された後のスコープを渡す（更新の宛先は 1 回だけ呼ぶ）。"""
+    accounts.add("a", expires_in=60, scopes=["user:inference"])
+    accounts.fake.refresh["a-refresh-SECRET"] = (
+        200,
+        {"access_token": "a-new-SECRET", "expires_in": 28800, "scope": "user:inference user:mcp_servers"},
+    )
+    env = ca.account_env("a", {})
+    assert (env[ca.TOKEN_ENV], env[ca.SCOPES_ENV]) == ("a-new-SECRET", "user:inference user:mcp_servers")
+    assert accounts.fake.refresh_calls == ["a-refresh-SECRET"] and accounts.fake.usage_calls == []
+
+
+def test_account_env_replaces_scopes_of_previous_account(accounts):
+    """受け入れ条件 4・I2: 前のアカウントのスコープを残さない（上書きするか、読めなければ外す）。"""
+    accounts.add("a", scopes=["user:inference", "user:mcp_servers"])
+    accounts.add("b", scopes=["user:inference"])
+    accounts.add("c")
+    _set_scopes(accounts, "c", ABSENT)
+    base = ca.account_env("a", {})
+    assert ca.account_env("b", base)[ca.SCOPES_ENV] == "user:inference"
+    assert ca.SCOPES_ENV not in ca.account_env("c", base)
+
+
+@pytest.mark.parametrize("bad", [ABSENT, None, "user:inference", [], ["user:inference", 1], ["user:inference user:mcp_servers"], [""]])
+def test_broken_scopes_start_without_the_variable(accounts, bad):
+    """受け入れ条件 5・I3: `scopes` が無い・壊れていても子を起動し、スコープの変数を外す。再登録は求めない。"""
+    tok = accounts.add("a")
+    _set_scopes(accounts, "a", bad)
+    env = ca.account_env("a", {ca.SCOPES_ENV: "user:inference user:mcp_servers"})
+    assert env[ca.TOKEN_ENV] == tok and ca.SCOPES_ENV not in env
+    assert not accounts.account("a")["needs_relogin"]
+
+
+def test_relay_and_supervise_build_the_same_account_env(accounts, monkeypatch):
+    """受け入れ条件 2・8: ラッパーと supervise.py の子の環境は認証の変数が同じで、置き場の場所を変えない。"""
+    accounts.add("a", scopes=["user:inference", "user:mcp_servers"])
+    accounts.add("b")
+    sc, r = _runner(monkeypatch, "a")
+    from relay_lib import claude as relay_claude
+
+    base = dict(os.environ)
+    store = ca.store_dir()
+    wrapped, worker = relay_claude.section_env(base, "a"), r.child_env(0, {})
+    keys = (ca.TOKEN_ENV, ca.SCOPES_ENV, ca.NAME_ENV, *ca.FOREIGN_AUTH_ENV, "CLAUDE_CONFIG_DIR", "NDF_ACCOUNTS_DIR")
+    assert {k: wrapped.get(k) for k in keys} == {k: worker.get(k) for k in keys}
+    assert wrapped[ca.SCOPES_ENV] == "user:inference user:mcp_servers"
+    assert (wrapped["CLAUDE_CONFIG_DIR"], wrapped["NDF_ACCOUNTS_DIR"]) == (base["CLAUDE_CONFIG_DIR"], base["NDF_ACCOUNTS_DIR"])
+    monkeypatch.setattr(ca.os, "environ", wrapped)
+    assert ca.store_dir() == store
+
+
 # ---------------------------------------------------------------- 残りの量で選ぶ（#1453）
 
 MAX20, MAX5 = "default_claude_max_20x", "default_claude_max_5x"

@@ -2610,6 +2610,18 @@
       "pending_source": "issues/issue-1453-design.md"
     },
     {
+      "term": "claude.ai のコネクタ",
+      "context": "ndf-relay",
+      "meaning": "利用者が claude.ai で接続した MCP サーバー（Slack・Notion・Google Drive など）。Claude Code は起動時に claude.ai から一覧を取り、claude mcp list に claude.ai <名前> として並べる",
+      "pending_source": "issues/issue-1523-requirements.md"
+    },
+    {
+      "term": "アカウントのスコープ",
+      "context": "ndf-relay",
+      "meaning": "登録済みアカウントのトークンに付いた権限の並び。アカウントの置き場の .credentials.json の claudeAiOauth.scopes で、子へは CLAUDE_CODE_OAUTH_SCOPES（空白区切り）で渡す",
+      "pending_source": "issues/issue-1523-design.md"
+    },
+    {
       "term": "ツールのパス",
       "context": "ndf-worktree",
       "meaning": "CLI が起動したツール（MCP サーバーなど）が、利用者の操作なしに worktree の中で書き換える既知のパス。既定（`.serena/project.yml` と `.serena/serena_config.yml`）と `.ndf/worktree.json` の `tool_paths`（`add` / `remove`）で決まる。検査とコミットの対象から外す",

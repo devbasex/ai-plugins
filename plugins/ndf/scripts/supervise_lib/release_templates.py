@@ -126,30 +126,8 @@ def _add_prod_mvv_gate(steps: list[dict], a, repo: str | None, approval: str, pr
     steps.append(handoff_step(state, "関門 2", "判定のコメント"))
 
 
-def plan_release_package_plugin(a) -> dict:
-    """Claude Code のプラグインを配る形（package-plugin）の計画。宣言の release は
-    {"form": "package-plugin", "plugin": <名前>, "runtimes": [<導入を確かめるランタイム>...]}。
-    dev: bump → changelog → 説明文 → sync-check → release → verify-install（起点のブランチ）→ approval-facts
-    → 提示物の欄。prod: bump → bump-others（前のタグからの差分のある他のプラグインの PATCH。
-    release-steps.py changed-plugins）→ changelog → 説明文 → 消費の記録 → sync-check → release → verify-install
-    （本番のブランチ）→ 後片付け。sync-check は同期とチェックの宣言があるときだけ置く。
-    説明文と提示物の欄は release-steps.py notes が PR 本文の「利用者向けの変化」から組む（LLM を使わない）。"""
-    v, dev = a.version, a.channel == "dev"
-    plugin, runtimes = _validate_release_decl(a.release, dev, a)
-    rts = ",".join(runtimes)
-    base = re.sub(r"-.*$", "", v)  # 開発版の本番承認の提示物は正式版の番号で作る
-    # --prs-from-queue なら、queue が先行の計画の Pull Request の番号で QUEUE_PRS を置き換える
-    prs = " ".join([*map(str, a.prs), *([QUEUE_PRS] if getattr(a, "prs_from_queue", False) else [])])
-    repo = a.repo or (a.worktree.split("/.worktrees/")[0] if "/.worktrees/" in a.worktree else None)
-    sync = bool(getattr(a, "sync_checks", None))
-    after_notes = "sync" if sync else "release"
-    run_ids = (
-        ["bump", *([] if dev else ["bump-others"]), "changelog", "notes"]
-        + ([] if dev else ["snapshot"])
-        + (["sync"] if sync else [])
-        + ["release", "verify"]
-        + (["facts", "explain"] if dev else [])
-    )
+def _prepare_steps(a, plugin: str, v: str, prs: str, dev: bool, after_notes: str) -> list[dict]:
+    """bump から説明文まで（本番は bump-others と消費の記録を挟む）のステップ。"""
     # 説明文は PR 本文の「利用者向けの変化」から機械で組む（節が無い PR は題名）
     notes = (
         f"sh -c '{STEPS_PY} notes --version {v} --prs {prs} && git add -A && "
@@ -183,10 +161,12 @@ def plan_release_package_plugin(a) -> dict:
     ]
     if not dev:
         steps.append(_snapshot_step(plugin, v, after_notes))
-    ref = a.base if dev else a.production_branch
-    if sync:
-        steps.append({"id": "sync", "type": "run", "preset": "sync-check", "on_fail": "judge", "next": "release"})
-    steps += [
+    return steps
+
+
+def _release_verify_steps(a, v: str, dev: bool, repo: str | None, ref: str, rts: str) -> list[dict]:
+    """release と verify（導入の確かめ）のステップ。"""
+    return [
         {
             "id": "release",
             "type": "run",
@@ -209,16 +189,11 @@ def plan_release_package_plugin(a) -> dict:
             "next": "facts" if dev else "cleanup",
         },
     ]
-    if not dev:
-        # 後片付け: 配布の PR（head が release/v{v} で始まる。開発版の release/v{v}-dev.N も含む。宛先は起点のブランチ）と
-        # スプリントの PR（--prs）のブランチと作業ツリー
-        run_ids.append("cleanup")
-        steps.append(_cleanup_step(v, prs, repo))
-    approval = f"issues/approval-{plugin}-v{base}.md"
-    mvv = getattr(a, "mvv", None)
-    if dev:
-        steps += _dev_approval_steps(a, repo, approval, prs, rts)
-    steps += [
+
+
+def _judge_fix_steps(run_ids: list[str], after_notes: str) -> list[dict]:
+    """落ちたステップの判断（judge）と修正（fix）のステップ。"""
+    return [
         {
             "id": "judge",
             "type": "judge",
@@ -236,6 +211,47 @@ def plan_release_package_plugin(a) -> dict:
             "next": after_notes,
         },
     ]
+
+
+def plan_release_package_plugin(a) -> dict:
+    """Claude Code のプラグインを配る形（package-plugin）の計画。宣言の release は
+    {"form": "package-plugin", "plugin": <名前>, "runtimes": [<導入を確かめるランタイム>...]}。
+    dev: bump → changelog → 説明文 → sync-check → release → verify-install（起点のブランチ）→ approval-facts
+    → 提示物の欄。prod: bump → bump-others（前のタグからの差分のある他のプラグインの PATCH。
+    release-steps.py changed-plugins）→ changelog → 説明文 → 消費の記録 → sync-check → release → verify-install
+    （本番のブランチ）→ 後片付け。sync-check は同期とチェックの宣言があるときだけ置く。
+    説明文と提示物の欄は release-steps.py notes が PR 本文の「利用者向けの変化」から組む（LLM を使わない）。"""
+    v, dev = a.version, a.channel == "dev"
+    plugin, runtimes = _validate_release_decl(a.release, dev, a)
+    rts = ",".join(runtimes)
+    base = re.sub(r"-.*$", "", v)  # 開発版の本番承認の提示物は正式版の番号で作る
+    # --prs-from-queue なら、queue が先行の計画の Pull Request の番号で QUEUE_PRS を置き換える
+    prs = " ".join([*map(str, a.prs), *([QUEUE_PRS] if getattr(a, "prs_from_queue", False) else [])])
+    repo = a.repo or (a.worktree.split("/.worktrees/")[0] if "/.worktrees/" in a.worktree else None)
+    sync = bool(getattr(a, "sync_checks", None))
+    after_notes = "sync" if sync else "release"
+    run_ids = (
+        ["bump", *([] if dev else ["bump-others"]), "changelog", "notes"]
+        + ([] if dev else ["snapshot"])
+        + (["sync"] if sync else [])
+        + ["release", "verify"]
+        + (["facts", "explain"] if dev else [])
+    )
+    steps = _prepare_steps(a, plugin, v, prs, dev, after_notes)
+    ref = a.base if dev else a.production_branch
+    if sync:
+        steps.append({"id": "sync", "type": "run", "preset": "sync-check", "on_fail": "judge", "next": "release"})
+    steps += _release_verify_steps(a, v, dev, repo, ref, rts)
+    if not dev:
+        # 後片付け: 配布の PR（head が release/v{v} で始まる。開発版の release/v{v}-dev.N も含む。宛先は起点のブランチ）と
+        # スプリントの PR（--prs）のブランチと作業ツリー
+        run_ids.append("cleanup")
+        steps.append(_cleanup_step(v, prs, repo))
+    approval = f"issues/approval-{plugin}-v{base}.md"
+    mvv = getattr(a, "mvv", None)
+    if dev:
+        steps += _dev_approval_steps(a, repo, approval, prs, rts)
+    steps += _judge_fix_steps(run_ids, after_notes)
     if mvv and not dev:
         _add_prod_mvv_gate(steps, a, repo, approval, prs)
     rule = RULE_RELEASE_DEV if dev else RULE_RELEASE_PROD_MVV if mvv else RULE_RELEASE_PROD

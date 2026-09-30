@@ -193,6 +193,10 @@ work2  b@example.com  40%（05:40）  0%（09-30）  -                   達し�
 `account add` し直す。置き場は `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/accounts/`（0700。ファイルは 0600）で、共有の
 `~/.claude/.credentials.json` は読み書きしない。子へは選んだアカウントのアクセストークンを環境変数
 `CLAUDE_CODE_OAUTH_TOKEN` で渡す（引数には載せない）ので、同じ `~/.claude` を共有する別のコンテナの claude は替わらない。
+トークンと一緒に、そのアカウントのスコープ（置き場の `.credentials.json` の `scopes`）を `CLAUDE_CODE_OAUTH_SCOPES` で渡す。
+これで、ラッパーの下の claude と `supervise.py` の claude -p でも、選んだアカウントの claude.ai のコネクタ（Slack・Notion など）が
+読み込まれる。置き場の `scopes` を読めないアカウントでは変数を渡さず、コネクタは読み込まれない（起動は止めない）。
+従量の接続の子には、トークンもスコープも渡さない。
 
 | いつ | ラッパー | `supervise.py`（プランの claude -p） |
 | --- | --- | --- |
