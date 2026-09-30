@@ -261,7 +261,7 @@ def test_wrapped_parts_outside_their_wrapper_fail(tmp_path: Path):
     put(tmp_path, "scripts/lib/post_queue.py", "import dbos._sys_db\n")
     code, r = run(tmp_path, [])
     assert code == 1
-    assert kinds(r) == {
+    assert {k for k in kinds(r) if k[0] == "wrapped"} == {
         ("wrapped", "plugins/ndf/scripts/a.py:fcntl"),
         ("wrapped", "plugins/ndf/scripts/a.py:urllib.request"),
         ("wrapped", "plugins/ndf/scripts/b.py:proc-fs"),
@@ -321,4 +321,117 @@ def test_hook_path_must_not_use_deps(tmp_path: Path):
         ("hook-deps", "plugins/ndf/scripts/lib/helper.py:deps.require"),
         ("hook-deps", "plugins/ndf/scripts/hook_lib/inner.py:deps.require"),
         ("hook-deps", "plugins/ndf/hooks/claude.json:uv run"),
+    }
+
+
+GOOD_BOUNDARY = {
+    "scripts/supervise_lib/flow.py": "import durable\n\n@durable.workflow(name='w')\ndef plan_workflow():\n    for s in range(3):\n        pass\n",
+    "scripts/supervise_lib/engine.py": (
+        "class Engine:\n    def run(self, start=None):\n        from supervise_lib import flow\n\n        return flow.run_engine(self, start)\n"
+    ),
+    "scripts/supervise_lib/state.py": (
+        "import json\n\nclass RunState:\n    def record(self):\n        data = {'log': self.log, 'llm': self.llm}\n"
+        "        if self.project_mvv is not None:\n            data['project_mvv'] = 1\n"
+        "        (self.dir / 'state.json').write_text(json.dumps(data))\n"
+    ),
+    "scripts/supervise_lib/queue.py": "import time\n\ndef cmd_queue(a):\n    from supervise_lib import flow\n\n    return flow.plan_workflow()\n",
+    "scripts/lib/post_queue.py": (
+        "import durable\n\nclass Queue:\n    def put(self):\n        return durable.workflow(name='n')(lambda r: r)\n\n"
+        "    def _import_legacy(self):\n        return sorted(self.dir.glob('*.json'))\n"
+    ),
+    "skills/cross-review/scripts/drive.py": (
+        "import durable\n\nclass Drive:\n    def run(self):\n        return durable.start(1)\n\n"
+        "@durable.workflow(name='review')\ndef review_drive():\n    while True:\n        break\n"
+    ),
+    "skills/cross-refactoring/scripts/drive.py": (
+        "import durable\n\nclass Drive:\n    def run(self):\n        return 1\n\n    def phases(self):\n        return 1\n\n"
+        "    def final_gate(self):\n        return [x for x in range(2)]\n\n"
+        "@durable.workflow(name='refactor_drive')\ndef refactor_drive():\n    for x in range(2):\n        pass\n"
+    ),
+}
+
+
+def boundary_tree(root: Path, **broken: str) -> set[tuple[str, str]]:
+    """I15 の置き場の最小の木を書き、broken（相対パスの `/` を `__` にした名前 → 中身）で差し替えて検査する。"""
+    for rel, text in GOOD_BOUNDARY.items():
+        put(root, rel, broken.get(rel.replace("/", "__").replace("-", "_").removesuffix(".py"), text))
+    return {(v["path"].removeprefix("plugins/ndf/"), v["function"]) for v in structure.durable_boundary(root)}
+
+
+def test_durable_boundary_passes_the_minimal_tree_and_skips_trees_without_it(tmp_path: Path):
+    """I15: ループは耐久ワークフローの中だけ。置き場を 1 つも持たない木は見ない。"""
+    assert structure.durable_boundary(tmp_path) == []
+    assert boundary_tree(tmp_path) == set()
+
+
+@pytest.mark.parametrize(
+    "name, text, hit",
+    [
+        (
+            "scripts__supervise_lib__engine",
+            "class Engine:\n    def run(self, start=None):\n        from supervise_lib import flow\n        while True:\n            flow.step()\n",
+            ("scripts/supervise_lib/engine.py", "Engine.run"),
+        ),
+        (
+            "scripts__supervise_lib__state",
+            "import json\n\nclass RunState:\n    def record(self):\n        data = {'log': 1}\n        data['next'] = 3\n"
+            "        (self.dir / 'state.json').write_text(json.dumps(data))\n",
+            ("scripts/supervise_lib/state.py", "RunState.record"),
+        ),
+        (
+            "scripts__supervise_lib__queue",
+            "import subprocess\nfrom supervise_lib import flow\n\ndef run_batch(ps):\n    return [p for p in ps]\n",
+            ("scripts/supervise_lib/queue.py", ""),
+        ),
+        (
+            "scripts__supervise_lib__queue",
+            "import subprocess\nfrom supervise_lib import flow\n\ndef go(p):\n    return p.poll()\n",
+            ("scripts/supervise_lib/queue.py", ""),
+        ),
+        (
+            "scripts__lib__post_queue",
+            "import durable, os\n\nclass Queue:\n    def put(self):\n        durable.workflow(name='n')(lambda r: r)\n"
+            "        return os.open('x', os.O_CREAT)\n",
+            ("scripts/lib/post_queue.py", "Queue"),
+        ),
+        (
+            "skills__cross_review__scripts__drive",
+            "import durable\n\nclass Drive:\n    def run(self):\n        for r in range(3):\n            pass\n\n"
+            "@durable.workflow(name='review')\ndef review_drive():\n    pass\n",
+            ("skills/cross-review/scripts/drive.py", "Drive.run"),
+        ),
+        (
+            "skills__cross_refactoring__scripts__drive",
+            "import durable\n\nclass Drive:\n    def run(self):\n        return 1\n\n    def phases(self):\n        return 1\n\n"
+            "    def final_gate(self):\n        return 1\n\n    def save_ds(self):\n        pass\n\n"
+            "@durable.workflow(name='refactor_drive')\ndef refactor_drive():\n    pass\n",
+            ("skills/cross-refactoring/scripts/drive.py", "Drive"),
+        ),
+        (
+            "skills__cross_refactoring__scripts__drive",
+            "import durable\n\nclass Drive:\n    def run(self):\n        return 1\n\n    def final_gate(self):\n        return 1\n",
+            ("skills/cross-refactoring/scripts/drive.py", "Drive.phases"),
+        ),
+    ],
+)
+def test_durable_boundary_catches_loops_and_file_state_brought_back(tmp_path: Path, name: str, text: str, hit: tuple[str, str]):
+    """I15（C-1）: 置き場へ遷移のループ・state.json の再開位置・子プロセス・ファイルの待ち行列・drive の状態ファイルを戻すと落ちる。"""
+    assert hit in boundary_tree(tmp_path, **{name: text})
+
+
+def test_durable_boundary_needs_a_workflow_not_only_the_missing_loop(tmp_path: Path):
+    """I15: ループを消して耐久ワークフローも置かない壊し方を落とす（import した先に有れば通る）。"""
+    no_flow = "class Engine:\n    def run(self, start=None):\n        return None\n"
+    got = boundary_tree(
+        tmp_path,
+        scripts__supervise_lib__engine=no_flow,
+        skills__cross_review__scripts__drive="import durable\n\nclass Drive:\n    def run(self):\n        return 1\n",
+    )
+    assert got == {
+        ("scripts/supervise_lib/engine.py", "durable.workflow"),
+        ("skills/cross-review/scripts/drive.py", "durable.workflow"),
+    }
+    (tmp_path / "plugins/ndf/scripts/supervise_lib/engine.py").unlink()
+    assert ("scripts/supervise_lib/engine.py", "") in {
+        (v["path"].removeprefix("plugins/ndf/"), v["function"]) for v in structure.durable_boundary(tmp_path)
     }

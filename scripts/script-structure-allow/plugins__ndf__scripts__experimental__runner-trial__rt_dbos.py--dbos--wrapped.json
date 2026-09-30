@@ -1,1 +1,0 @@
-{"path": "plugins/ndf/scripts/experimental/runner-trial/rt_dbos.py", "name": "dbos", "kind": "wrapped", "reason": "2c の Q0 で DBOS の包みを lib/durable.py に置いた。試行は既定で動くものから参照しないため複製のまま残し、Q6 で試行ごと消す"}
