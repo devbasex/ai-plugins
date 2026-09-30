@@ -18,7 +18,7 @@
 >   - `issues/` は NDF を使うプロジェクトに必ずあるとは限らない。`.ndf/` は `development-workflow` の手順 0 が作るため必ずある（`worktree/SKILL.md` のメインディレクトリで編集してよいパスにも載る）
 >   - VS Code はドットで始まるフォルダを先頭に並べるので目に入る。ワークスペース直下は並行すると根に何本も並ぶため採らない
 > - **コミットしない。`.gitignore` にも入れない。** 追跡外の新しい文書として `git status` に `?? .ndf/handoff/` と出る方が探しやすい
->   - 手元の検査（`check-markdown-links.py`・`check-doc-line-limit.py`）は `git ls-files` で対象を選ぶため、追跡外の文書は検査を落とさない（2026-09-30 に確かめた）
+>   - 追跡外の文書は手元の検査を落とさない（2026-09-30 に確かめた）。理由は検査ごとに違う: `check-markdown-links.py` は `git ls-files --others` で追跡外も一覧に入れるが、走査の対象（`DEFAULT_SCAN_TARGETS`）に `.ndf` が無い。`check-doc-line-limit.py` は `--others` を付けない `git ls-files` で追跡ファイルだけを見る
 > - **CRUD の規則を定める**（下の案を設計で確定する）
 >
 > ## CRUD の規則（案）

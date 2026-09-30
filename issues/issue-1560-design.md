@@ -67,16 +67,17 @@ conductor が打つスクリプトで、書き換えの主体ではない。supe
 
 ### ドメインイベント
 
-要求の番号を引き継ぐ。
+要求の番号を引き継ぐ。「処理する主体」はイベントを受けて次の処理をする者だけを書き、続くイベントと書く先・出す先は
+別の列に分ける。
 
-| # | イベント | 発生元 | 受け手 |
-| --- | --- | --- | --- |
-| E1 | 対象の引継ぎ文書を作った | `handoff.py init`（conductor が restart かカットポイントで打つ） | E2 |
-| E2 | 引継ぎ文書を更新した | conductor（節の書き直し）・`handoff.py next`・`sprint-state.py render` / `next` | E3・E4 |
-| E3 | 終わった項目を履歴の文書へ移した | `handoff.py check --trim`（「前の会話の進み」の節）と conductor（それ以外の終わった項目） | 引継ぎの履歴 |
-| E4 | 再開コマンドに文書のパスを含めて出した | restart の手順 3・カットポイントの conductor | ラッパーか利用者 |
-| E5 | 新しいセッションが引継ぎ文書を読んだ | `development-workflow` の「新しい会話で戻す」 | 次にやることの 1 つ目 |
-| E6 | 引継ぎ文書を消した | `handoff.py remove`（対象が閉じた後の conductor） | 報告 |
+| # | イベント | 発生元 | 処理する主体（すること） | 続くイベント | 書く先・出す先 |
+| --- | --- | --- | --- | --- | --- |
+| E1 | 対象の引継ぎ文書を作った | `handoff.py init`（conductor が restart かカットポイントで打つ） | conductor（現在地と次にやることを書き直す） | E2 | 本体 `.ndf/handoff/<名>.md` |
+| E2 | 引継ぎ文書を更新した | conductor（節の書き直し）・`handoff.py next`・`sprint-state.py render` / `next` | conductor（`handoff.py check --trim` を打つ） | E3 | 本体 |
+| E3 | 終わった項目を履歴の文書へ移した | `handoff.py check --trim`（「前の会話の進み」の節）と conductor（それ以外の終わった項目） | conductor（再開コマンドのブロックを出す） | E4 | 履歴 `<名>-history.md` |
+| E4 | 再開コマンドに文書のパスを含めて出した | restart の手順 3・カットポイントの conductor | ラッパー（`ndf-next` の囲みを拾って次のセッションを起動する。ラッパーの外では利用者が貼る） | E5 | 最後の応答の `ndf-next` の囲み |
+| E5 | 新しいセッションが引継ぎ文書を読んだ | `development-workflow` の「新しい会話で戻す」 | 新しいセッションの conductor（次にやることの 1 つ目から始める） | — | — |
+| E6 | 引継ぎ文書を消した | `handoff.py remove`（対象が閉じた後の conductor） | conductor（消したパスを報告に並べる） | — | 報告 |
 
 ### 用語
 
@@ -109,7 +110,7 @@ conductor が打つスクリプトで、書き換えの主体ではない。supe
 | `sprint-state.py`（変更） | 上の 2 関数を `lib/handoff_doc.py` から読む。引数・出力・振る舞いは変えない |
 | `restart/SKILL.md`（変更） | 手順に「引継ぎの対象を決め、文書を作る・更新する」を足し、再開コマンドの表の 1・2 行目に文書のパスを含める |
 | `context-window.md`（変更） | 「新しい会話で戻す」の表の先頭に文書を読む行を置く。更新の文は正本を指す |
-| `relay.md`（変更） | 例の `DOC=issues/handoff-<名>.md` と雛形の文面の例を `.ndf/handoff/<名>.md` にし、置き場の規則は正本を指す |
+| `relay.md`（変更） | 例の `DOC=issues/handoff-<名>.md` を `DOC` に `handoff.py path <名>` の `path`（メインディレクトリの絶対パス）を入れる形にし、置き場の規則は正本を指す。**手順も変える:** (1) 手順 1 の `--goal` の雛形に「`.ndf/handoff/<名>.md` の続きから」を必ず書く規則を足す（`sprint-state.py` の差し込みの語は増やさず、名はスプリントの間変わらないため文字のまま書く。正本の「更新する」にも同じ規則を置く）。(2) カットポイントの 3 つの呼び出しと本番後のパイプラインの前に `handoff.py init <名> --title <表示名>`、`next --replace` の後に `handoff.py check <名> --trim` を足す |
 | `development-workflow/SKILL.md`（変更） | 対象の最後の工程（振り返り）の後に文書を消す 1 文と、正本への案内 |
 | `conductor-entrypoints.md`（変更） | 「セッションの切り替えと記録」の表に `handoff.py` の 6 つの副命令を足す |
 | 開発ワークフローの用語集 `glossary.md`（変更） | 「引継ぎ文書」の行を直し、「引継ぎの対象」「引継ぎの履歴」を足す |
@@ -306,7 +307,7 @@ plugins/ndf/
 | 名 | 一致する語 |
 | --- | --- |
 | `issue-<N>` | `#<N>`（後ろに数字が続かない） |
-| `milestone-<N>` | `マイルストーン <N>`・`milestone <N>`・`milestone-<N>`（空白は 0 個以上、英字の大小を問わない） |
+| `milestone-<N>` | `マイルストーン <N>`・`milestone <N>`・`milestone-<N>`（空白は 0 個以上、英字の大小を問わない。`<N>` の後ろに数字が続かない） |
 | `sprint-<X>` | `sprint-<X>`、または前後が英数字と `-` でない `<X>` |
 
 **互換性。** 新設のため既存の呼び出し側は無い。`sprint-state.py` は関数の置き場が変わるだけで、引数と出力を変えない。
@@ -362,7 +363,13 @@ sequenceDiagram
   （名が I2 の形に合わなければ次へ）→ `/goal` か会話がマイルストーンを進めていれば `milestone-<番号>` →
   課題番号があれば `issue-<最初の番号>`。どれも無ければ文書を作らない（restart の表の 3 行目か、引数だけで出す）
 - **スプリント状態ファイルがあるカットポイントでは、`next` の代わりに `sprint-state.py next --doc <本体> --replace`
-  を打つ**（relay.md の今の手順）。同じ節を同じ形で置き換える
+  を打つ**（relay.md の今の手順）。同じ節を同じ形で置き換える。再開コマンドは `goal_template` から作られるため、
+  文書のパスは `sprint-state.py init --goal` の雛形に「`.ndf/handoff/<名>.md` の続きから」を文字のまま書いて含める
+  （E4・受け入れ条件 7。差し込みの語は足さず、`sprint-state.py` の振る舞いは変えない）
+- **本番後のパイプライン（relay.md）もこの図の順に流す。** 先頭に `handoff.py init`、`next --replace` の後に
+  `handoff.py check --trim` を置く。`render --demote` がカットポイントごとに足す「前の会話の進み」を `--trim` が
+  履歴へ移すため、節は重ならず（I3）、300 行の検査（I5）も走る。`check` が 1 か 5 ならパイプラインはブロックを出さずに
+  止まり、conductor が完了の通知で終了コードを受けて下の規則で扱ってからブロックを出す
 - `init`・`next` が 0 以外なら、ブロックを出さずに理由を報告する（E2 の失敗。更新されていない文書で再開させない）
 - `check` が 1 なら、conductor が違反の節を正本の形へ直して打ち直す。5 のまま移せる項目が無ければ、超えた行数を
   報告してブロックを出す（E3 の失敗）
@@ -430,7 +437,8 @@ stateDiagram-v2
 | 1・I2 | `init` が 3 つの形の名で本体を作り、形に合わない名（`handoff`・`issue-x`・`../a`）を 2 で拒む | 名の形を確かめないようにする |
 | 2・I1 | worktree を `--root` にした `init` が、メインディレクトリの `.ndf/handoff/` に作り、worktree の下に作らない | カレントの `.ndf/` へ書くようにする |
 | 3・I7 | 作った後のリポジトリで `git status --short` に `?? .ndf/handoff/` が出て、`git check-ignore` が 1 を返す | `.gitignore` に書くようにする |
-| 4 | 追跡外の本体を置いたリポジトリで `check-markdown-links.py`・`check-doc-line-limit.py` が落ちない | 2 つの検査が `git ls-files` を使わずに探すようにする |
+| 4（`check-markdown-links.py`） | 追跡外の本体を置いたリポジトリで落ちない。安全な理由は、`git ls-files --others` で追跡外も一覧に入れるが、走査の対象（`DEFAULT_SCAN_TARGETS`）に `.ndf` が無いことである | `DEFAULT_SCAN_TARGETS` に `.ndf` を足す（追跡外の本体も走査される） |
+| 4（`check-doc-line-limit.py`） | 追跡外の 501 行の本体を置いたリポジトリで落ちない。安全な理由は、`--others` を付けない `git ls-files '*.md'` で追跡ファイルだけを見ることである | `git ls-files` に `--others` を足す |
 | 5・I3 | `check` が雛形どおりの本体で 0、節の欠け・順の逆・重複・雛形に無い節でそれぞれ 1 と違反の節を返す。任意の 2 節が無くても 0 | 順か重複を見ないようにする |
 | 6・I4 | `next` に渡した複数行の再開コマンドと、本体の節の囲みの中身と、出力の `block` の中身が同じ | 前後の空白を詰める・囲みの外に置く |
 | 7 | 手動: `claude -p` で `/ndf:restart` を打ち、出たブロックに `.ndf/handoff/<名>.md` がある | — |
@@ -439,7 +447,7 @@ stateDiagram-v2
 | 10・I6 | 手動: `agents/supervisor*.md`・`agents/worker.md` と `supervise_lib` の起動指示に `handoff.py` と引継ぎ文書を書く手順が無い | — |
 | 11・I8 | `remove` が本体と履歴を消し、消したパスを返す。`.ndf/handoff/` の外のパスは 2 で拒む。事実の照合は手動（リリース後テスト） | 外のパスを消せるようにする |
 | 12 | `path .ndf/handoff/<名>.md --exists` が worktree からもメインディレクトリの本体を返す。始める項目は手動 | カレントを起点に解決する |
-| 13 | `find` が一致 1 本で 0 とそのパスを返す。`#15` の入力で `issue-1560` に当たらない | 数字の後ろを確かめない |
+| 13 | `find` が一致 1 本で 0 とそのパスを返す。`#15` の入力で `issue-1560` に当たらず、`マイルストーン 26` の入力で `milestone-2` に当たらない | 数字の後ろを確かめない |
 | 14・I9 | `find` が一致 2 本（`issue-1560` と `milestone-26` に当たる入力）で 4 と 2 本のパスを返す | 先頭の 1 本を返す |
 | 15・I10 | `path <無い名> --exists` が 1 を返し、ほかの本体を返さない | 近い名を返す |
 | 16 | 手動: 正本の「書かないもの」の節を読む（`.md` の文言は照合しない） | — |
