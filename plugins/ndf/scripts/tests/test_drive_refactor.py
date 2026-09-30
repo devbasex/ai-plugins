@@ -29,6 +29,20 @@ def load(name, path):
 
 cr = load("cr_drive", SKILLS / "cross-review" / "scripts" / "drive.py")
 rf = load("rf_drive", SKILLS / "cross-refactoring" / "scripts" / "drive.py")
+
+
+@pytest.fixture(autouse=True)
+def durable_in_process(monkeypatch):
+    """止まりで抜けるところを SystemExit に替え、同じプロセスの打ち直しが開いたままの耐久の記録を続ける。"""
+
+    def leave(code):
+        raise SystemExit(code)
+
+    monkeypatch.setattr(rf.durable, "exit_leaving_pending", leave)
+    yield
+    rf.durable.close()
+
+
 sys.path.insert(0, str(SCRIPTS))
 from supervise_lib import engine, paths, templates, worker_steps  # noqa: E402
 

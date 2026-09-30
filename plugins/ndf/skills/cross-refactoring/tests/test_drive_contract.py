@@ -1,4 +1,4 @@
-"""cross-refactoring の drive.py が共通層の pause の表（`scripts/lib/drive_pause.py`）で止まること。"""
+"""cross-refactoring の drive.py がライブラリの pause の表（`scripts/lib/drive_pause.py`）で止まること。"""
 
 from __future__ import annotations
 
@@ -25,6 +25,18 @@ def _load(name: str, path: Path):
 rf = _load("rf_drive_contract", SKILL / "scripts" / "drive.py")
 
 
+@pytest.fixture(autouse=True)
+def durable_in_process(monkeypatch):
+    """止まりで抜けるところを SystemExit に替え、同じプロセスの打ち直しが開いたままの耐久の記録を続ける。"""
+
+    def leave(code):
+        raise SystemExit(code)
+
+    monkeypatch.setattr(rf.durable, "exit_leaving_pending", leave)
+    yield
+    rf.durable.close()
+
+
 def test_drive_reads_the_shared_table():
     assert rf.dp is drive_pause
     assert rf.Stop is drive_pause.Stop
@@ -49,6 +61,10 @@ def test_final_gate_pause_exits_with_the_shared_code(tmp_path, monkeypatch, caps
     out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert e.value.code == drive_pause.PAUSE_CODES["cross-review"]
     assert out["items"][0]["pause"] == "cross-review" and out["next"] == "cross-review"
+    # 続きを待つ耐久ワークフローを残すと、テストのプロセスが抜けられない。結果を書いて終わらせる
+    Path(out["items"][0]["result_file"]).write_text('{"review_status": "approved"}')
+    with pytest.raises(SystemExit):
+        rf.main(["5", "--scope", "src", "--baseline-test", "pytest"])
 
 
 def test_abort_keeps_the_original_code_in_metrics(tmp_path, monkeypatch, capsys):
