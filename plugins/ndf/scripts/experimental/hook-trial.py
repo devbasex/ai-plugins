@@ -8,7 +8,7 @@
     python3 hook-trial.py sdk [--work DIR] [--live [--runs N]]  # 4a: claude-agent-sdk が supervise_lib/claude.py の契約を満たすか
     python3 hook-trial.py bump [--work DIR]       # 4b: bump-my-version が release-steps.py の cmd_bump の書き換えを満たすか
 
-依存は runner-trial.py と同じ形（uv の環境へ起動し直す）で解決し、宣言と lock は隣の hook-trial/ にある（extra は
+依存は uv の環境へ起動し直す形で解決し、宣言と lock は隣の hook-trial/ にある（extra は
 hook・sdk・bump）。環境は ~/.cache/ndf/venv/hook-trial-<extra> に置く（NDF_DEPS_VENV を接頭辞に変えられる）。
 作業ファイルは --work（既定 ~/.cache/ndf/hook-trial）に置く。
 結果は lib/step_result.py の形の 1 行の JSON。終了コード 0 = ok / 1 = 確かめたことが成り立たない / 3 = 前提が無い。

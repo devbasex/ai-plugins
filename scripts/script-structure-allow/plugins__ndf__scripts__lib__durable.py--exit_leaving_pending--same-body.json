@@ -1,1 +1,0 @@
-{"path": "plugins/ndf/scripts/lib/durable.py", "name": "exit_leaving_pending", "kind": "same-body", "reason": "2c の Q0 で DBOS の包みを lib/durable.py に置いた。試行は既定で動くものから参照しないため複製のまま残し、Q6 で試行ごと消す"}
