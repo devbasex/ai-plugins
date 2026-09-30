@@ -224,7 +224,7 @@ graph TD
 ```mermaid
 classDiagram
     class Durable {
-        +launch(kind, identity, queues, listen)
+        +launch(kind, identity, queues, listen, keep)
         +resolve(prefix, finished) WorkflowRef
         +pause(payload)
         +resume(ref)
@@ -319,12 +319,26 @@ drive は、`recv` の上限（30 日）で先に終わっている。
 | `queue_workflow` | 常に偽（打ち直しは新しい実行の回。プランごとに `plan_workflow` の `resolve` が済んだプランを流し直さない） |
 | `review_drive` / `refactor_drive` | 終わり（done）で、レビューの状態のファイル（`cross-review-pr<N>-state.json` / リファクタリング計画の状態）がまだある |
 
-**`plan_workflow` の新しい実行の回を始める前に、`resolve` は同じパス鍵で接頭辞（中身鍵・開始）の違う
-`PENDING` / `ENQUEUED` の `plan_workflow` を `cancel_workflow` で止め、終わる（`CANCELLED` になり、流れていた
-耐久ステップが抜ける）まで待つ。** executor_id は実行の鍵（パス鍵だけから作る）なので、`kill -9` の後にプランを
-直すか `--from` で打ち直すと、`launch()` は古い接頭辞の `plan_workflow` を回復して流し始め、`resolve` は新しい
-接頭辞に記録が無いため新しい実行の回を始める。止めずに始めると、同じ `<プラン>-state/` と worktree を 2 本の
-`plan_workflow` が同時に書く（決定 35 が防ぐ破損と同じ形）。待つのは長くても流れていた 1 ステップの残りである。
+**`run` は、ロックを取った後・`DBOS.launch()` の前に、同じパス鍵で接頭辞（中身鍵・開始）の違う
+`PENDING` / `ENQUEUED` の `plan_workflow` を、`DBOSClient`（launch しない）の
+`cancel_workflow(id, cancel_children=True)` で止める。** `durable.launch` が続ける接頭辞（`keep`）を受けて行う。
+executor_id は実行の鍵（パス鍵だけから作る）なので、`kill -9` の後にプランを直すか `--from` で打ち直すと、
+止めずに `launch()` すれば古い接頭辞の `plan_workflow` と、それが耐久キュー `res-graphql` へ入れた子の
+`tagged_step`（`<親の ID>-t<番号>`）が回復して流れ始める。`resolve` は新しい接頭辞に記録が無いため新しい実行の回を
+始めるので、同じ `<プラン>-state/` と worktree を 2 本の `plan_workflow` が同時に書く（決定 35 が防ぐ破損と同じ形）。
+`launch()` の後に止める形は採らない。DBOS 3.1.0 の `cancel_workflow` は状態の行を `CANCELLED` へ書くだけで、
+回復して流れているスレッドの耐久ステップを止めないため、状態を見て待っても古いステップが最大 1 回流れる。
+`launch()` の前ならロック（I17）で他に流す者が無く、`CANCELLED` の耐久ワークフローは回復も取り出しもされないため、
+終わりを待つ必要が無い。親だけを止めると子は `ENQUEUED` / `PENDING` のまま残り、`res-graphql` を待ち受ける
+新しい起動が流すため、子も止める（既定の `cancel_children=False` では止まらない）。
+
+2026-09-30 に `dbos==3.1.0` で確かめた（親の耐久ワークフローが耐久キューへ子を 1 つ入れ、親と子が各 3 秒の
+ステップを流す間に `kill -9`。executor_id `run-abc`）。
+
+```text
+止めずに launch:                      親 step 1〜2・子 step 1〜2 が新しい pid で流れる
+DBOSClient で止めてから launch:       [('plan-old-1', 'CANCELLED'), ('plan-old-1-t1', 'CANCELLED')]・ステップは 1 つも流れない
+```
 
 **プランの中身鍵を ID に入れるのは、プランを直して打ち直したら頭から流すためである。** `queue` の
 `fill` がプランを書き換えるのは耐久ステップの中なので、打ち直しでは書き換えた後の中身で同じ ID になる。
@@ -432,14 +446,15 @@ sequenceDiagram
     participant F as flow.plan_workflow
     participant E as Engine
     participant S as run_step（耐久ステップ）
-    M->>D: launch("run", プランのパス)（ロックを取る）
+    M->>D: launch("run", プランのパス, keep="plan-<パス鍵>-<中身鍵>-<開始>")（ロックを取る）
+    D->>D: DBOSClient で接頭辞の違う途中の plan_workflow を子ごと cancel_workflow（launch の前）
+    D->>D: DBOS.launch()（残った途中の実行の回を回復する）
     M->>D: resolve("plan-<パス鍵>-<中身鍵>-<開始>")
     alt 完了か関門の記録がある
         D-->>M: 記録した報告
     else 途中の実行の回がある（落ちた後）
         D-->>F: launch が回復して続ける
     else 無い・止まった
-        D->>D: 接頭辞の違う途中の plan_workflow を cancel_workflow して終わりを待つ
         M->>F: 実行の回 N を始める
     end
     loop 次のステップがある間（上限まで）
@@ -742,6 +757,7 @@ C7 に当たる。** 1 本の PR に分け、人の承認を得てからマー�
 | C-8 | `test_experimental.py` と台帳の行き先 | 試行を消さずに台帳だけ直す |
 | I16 | 構造チェックの I14 が、`lib/durable.py` の外の `import dbos` を落とす | `flow.py` で `from dbos import DBOS` と書く |
 | I17 | 同じ実行の鍵で 2 つ起動すると、2 つ目はロックで待ち、同じステップが 2 度流れない | ロックを取らずに `launch` する |
+| 古い回の停止 | 子の `tagged_step` を入れた途中で `kill -9` し、プランを直すか `--from` で打ち直すと、古い接頭辞の `plan_workflow` と子が `CANCELLED` になり、古いステップが 1 つも流れない | `launch()` の後に止める・`cancel_children` を省く |
 | I18 | 形式の版を変えた起動は、前の版の途中の記録を続けず、実行の回 2 を頭から流す | 版を読まずに `retrieve_workflow` する |
 | I19 | cross-review の drive を `sweep` まで進めて打ち直すと、`state.py init` が流れず、`metrics.rounds` が 0 でない。cross-refactoring も同じ | `init` を耐久ステップの外で打つ |
 | drive の止まり | 結果ファイルを書かずに打ち直すと、同じ種類の止まりを番号を増やして返す。書いてから打ち直すと次の段階へ進む | 止まりの番号を見ずに前のイベントを出す |
