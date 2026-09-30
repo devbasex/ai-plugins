@@ -365,6 +365,48 @@ def _check_item(n, name, result, **extra) -> dict:
     return {"kind": "check", "pr": int(n), "name": name, "result": result, **extra}
 
 
+def _read_check_states(root, rollup):
+    """rollup のチェックを (failed, first, again, settled, queued, pending) に分ける。"""
+    pending, failed, passed = check_states(rollup)
+    stale, queued, settled = probe_checks(root, rollup) if pending else ([], [], [])
+    failed += [s[0] for s in settled if s[3].upper() in FAIL_CONCLUSIONS]
+    first = [s for s in stale if s[3] <= 1]
+    again = [s for s in stale if s[3] > 1]
+    return failed, first, again, settled, queued, pending
+
+
+def _classify_checks(n, failed, first, again, settled, queued, pending):
+    """チェックの状態から分類を決める。(分類, 根拠) を返す。"""
+    if failed:
+        return "failed", [_check_item(n, f, "failed") for f in failed]
+    if first:
+        return "stale", []
+    if again:
+        return "stale_again", [_check_item(n, s[0], "stale_again", run=s[1], job=s[2], attempt=s[3]) for s in again]
+    if settled:
+        return "settled", [_check_item(n, s[0], "settled", run=s[1], job=s[2], conclusion=s[3]) for s in settled]
+    if queued:
+        return "queued", [_check_item(n, q, "queued") for q in queued]
+    if pending:
+        return "running", [_check_item(n, c, "running") for c in pending]
+    return "passed", []
+
+
+def _rerun_stale(root, n, first, act):
+    """取り残されたチェックを --act なら再実行する。(根拠, 手) を返す。"""
+    items, done = [], True
+    for name, run_id, job_id, attempt in first:
+        item = _check_item(n, name, "stale", run=run_id, job=job_id, attempt=attempt)
+        if act:
+            r = gh_parts.gh(["run", "rerun", run_id, "--job", job_id], cwd=root)
+            item["result"] = "rerun" if r.returncode == 0 else "rerun_failed"
+            if r.returncode != 0:
+                done = False
+                item["reason"] = r.stderr.strip()[:300]
+        items.append(item)
+    return items, "remedied" if act and done else "judge"
+
+
 def probe_one(root, n, act, items):
     """1 本の PR のチェックを分類する。(分類, 手) を返し、根拠を items に足す。読めなければ None。"""
     p = gh_parts.gh(["pr", "view", n, "--json", "number,state,statusCheckRollup"], cwd=root)
@@ -374,44 +416,13 @@ def probe_one(root, n, act, items):
         info = None
     if not isinstance(info, dict) or info.get("state") != "OPEN":
         return None
-    rollup = info.get("statusCheckRollup")
-    pending, failed, passed = check_states(rollup)
-    stale, queued, settled = probe_checks(root, rollup) if pending else ([], [], [])
-    failed += [s[0] for s in settled if s[3].upper() in FAIL_CONCLUSIONS]
-    first = [s for s in stale if s[3] <= 1]
-    again = [s for s in stale if s[3] > 1]
-    if failed:
-        cls = "failed"
-        items += [_check_item(n, f, "failed") for f in failed]
-    elif first:
-        cls = "stale"
-    elif again:
-        cls = "stale_again"
-        items += [_check_item(n, s[0], "stale_again", run=s[1], job=s[2], attempt=s[3]) for s in again]
-    elif settled:
-        cls = "settled"
-        items += [_check_item(n, s[0], "settled", run=s[1], job=s[2], conclusion=s[3]) for s in settled]
-    elif queued:
-        cls = "queued"
-        items += [_check_item(n, q, "queued") for q in queued]
-    elif pending:
-        cls = "running"
-        items += [_check_item(n, c, "running") for c in pending]
-    else:
-        cls = "passed"
+    states = _read_check_states(root, info.get("statusCheckRollup"))
+    cls, found = _classify_checks(n, *states)
+    items += found
     action = PROBE_ACTIONS[cls]
     if cls == "stale":
-        done = True
-        for name, run_id, job_id, attempt in first:
-            item = _check_item(n, name, "stale", run=run_id, job=job_id, attempt=attempt)
-            if act:
-                r = gh_parts.gh(["run", "rerun", run_id, "--job", job_id], cwd=root)
-                item["result"] = "rerun" if r.returncode == 0 else "rerun_failed"
-                if r.returncode != 0:
-                    done = False
-                    item["reason"] = r.stderr.strip()[:300]
-            items.append(item)
-        action = "remedied" if act and done else "judge"
+        found, action = _rerun_stale(root, n, states[1], act)
+        items += found
     return cls, action
 
 
