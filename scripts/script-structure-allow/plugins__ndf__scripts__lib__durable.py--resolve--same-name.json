@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/durable.py", "name": "resolve", "kind": "same-name", "reason": "#1142 の設計（issue-1142-design-dbos.md のクラス図）が決めた durable の関数の名前。モジュールで修飾して呼ぶ（durable.resolve）ため取り違えない"}

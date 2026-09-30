@@ -257,6 +257,8 @@ def test_wrapped_parts_outside_their_wrapper_fail(tmp_path: Path):
     put(tmp_path, "scripts/c.py", "import re\nF = re.compile(r'^\\s*(```|~~~)')\n")
     put(tmp_path, "scripts/d.py", "def f(s):\n    return s.startswith(('```', '~~~'))\n")
     put(tmp_path, "scripts/e.py", "import termios\nimport pty\nfrom urllib.request import urlopen\n")
+    put(tmp_path, "scripts/supervise_lib/flow.py", "from dbos import DBOS\n")
+    put(tmp_path, "scripts/lib/post_queue.py", "import dbos._sys_db\n")
     code, r = run(tmp_path, [])
     assert code == 1
     assert kinds(r) == {
@@ -268,6 +270,8 @@ def test_wrapped_parts_outside_their_wrapper_fail(tmp_path: Path):
         ("wrapped", "plugins/ndf/scripts/e.py:termios"),
         ("wrapped", "plugins/ndf/scripts/e.py:pty"),
         ("wrapped", "plugins/ndf/scripts/e.py:urllib.request"),
+        ("wrapped", "plugins/ndf/scripts/supervise_lib/flow.py:dbos"),
+        ("wrapped", "plugins/ndf/scripts/lib/post_queue.py:dbos"),
     }
 
 
@@ -277,6 +281,7 @@ def test_wrappers_may_use_their_parts_and_mentions_do_not_count(tmp_path: Path):
     put(tmp_path, "scripts/lib/md.py", "import re\nF = re.compile('```')\n")
     put(tmp_path, "scripts/lib/notify.py", "import urllib.request\n")
     put(tmp_path, "scripts/relay_lib/terminal.py", "import pty\nimport termios\n")
+    put(tmp_path, "scripts/lib/durable.py", "from dbos import DBOS, DBOSClient\n")
     # docstring の言及・囲みを書く側の文字列・urllib.parse は数えない
     put(
         tmp_path,

@@ -56,8 +56,8 @@ CHILD = textwrap.dedent(
 
     @durable.workflow
     def parent(n):
-        wid = durable.enqueue("res", child, 2, id=durable.current_id() + "-t1")
-        return [s(0), durable.result(wid)]
+        wid = durable.submit("res", child, 2, id=durable.current_id() + "-t1")
+        return [s(0), durable.output_of(wid)]
 
     @durable.workflow
     def paused():
@@ -69,7 +69,7 @@ CHILD = textwrap.dedent(
         durable.launch("run", "ident")
         ref = durable.resolve("plan-x")
         print(json.dumps({{"action": ref.action, "id": ref.id}}), flush=True)
-        print(json.dumps(durable.result(durable.start(ref, plan, 4))), flush=True)
+        print(json.dumps(durable.output_of(durable.start(ref, plan, 4))), flush=True)
     elif mode == "parent":
         durable.launch("run", "ident", queues={{"res": {{"concurrency": 1}}}})
         durable.start(durable.resolve("plan-old"), parent, 1)
@@ -88,7 +88,7 @@ CHILD = textwrap.dedent(
         ref = durable.resolve("review-x")
         seen = durable.event(ref.id)
         durable.resume(ref, seen["seq"], note="written")
-        print(json.dumps({{"action": ref.action, "out": durable.result(ref.id)}}), flush=True)
+        print(json.dumps({{"action": ref.action, "out": durable.output_of(ref.id)}}), flush=True)
     elif mode == "hold":
         durable.launch("run", "ident")
         print("held", flush=True)
@@ -116,7 +116,11 @@ def child(tmp_path: Path):
 
     def spawn(mode: str, *extra: str) -> subprocess.Popen:
         return subprocess.Popen(
-            [sys.executable, str(script), mode, str(log), *extra], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=os.environ.copy()
+            [sys.executable, str(script), mode, str(log), *extra],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=os.environ.copy(),
         )
 
     run.spawn = spawn  # type: ignore[attr-defined]
@@ -163,12 +167,12 @@ def test_the_tests_write_records_under_a_temporary_directory():
 
 
 def test_run_key_is_kind_and_the_first_12_chars_of_sha256():
-    key = durable.run_key("run", "/p/plan.json")
+    key = durable.launch_key("run", "/p/plan.json")
     assert key.startswith("run-") and len(key) == len("run-") + 12
-    assert key == durable.run_key("run", "/p/plan.json") != durable.run_key("run", "/p/other.json")
-    assert durable.record_path("queue", "d") == durable.records_dir() / f"{durable.run_key('queue', 'd')}.sqlite"
+    assert key == durable.launch_key("run", "/p/plan.json") != durable.launch_key("run", "/p/other.json")
+    assert durable.record_path("queue", "d") == durable.records_dir() / f"{durable.launch_key('queue', 'd')}.sqlite"
     with pytest.raises(durable.DurableError):
-        durable.run_key("Run/x", "i")
+        durable.launch_key("Run/x", "i")
 
 
 # ---- 起動・実行の回 ----
@@ -201,7 +205,7 @@ def test_resolve_starts_run_1_then_returns_the_finished_output_without_running_a
     assert got.path == durable.records_dir() / f"{got.key}.sqlite" and got.path.exists()
     ref = durable.resolve("plan-a")
     assert (ref.id, ref.number, ref.action) == ("plan-a-1", 1, "start")
-    assert durable.result(durable.start(ref, twice, 1)) == [2, 4]
+    assert durable.output_of(durable.start(ref, twice, 1)) == [2, 4]
     again = durable.resolve("plan-a", finished=lambda out: out == [2, 4])
     assert (again.id, again.action, again.output) == ("plan-a-1", "done", [2, 4])
     assert durable.start(again, twice, 1) == "plan-a-1"
@@ -226,12 +230,12 @@ def test_no_port_is_listened_while_launched(opened):
 
 def test_enqueue_runs_on_a_registered_queue_and_an_empty_listen_leaves_it_queued(opened):
     durable.launch("posts", "q1", queues={"posts": {"worker_concurrency": 1}})
-    assert durable.result(durable.enqueue("posts", twice, 3, id="post-0001")) == [6, 8]
+    assert durable.output_of(durable.submit("posts", twice, 3, id="post-0001")) == [6, 8]
     with pytest.raises(durable.DurableError):
-        durable.enqueue("nope", twice, 1)
+        durable.submit("nope", twice, 1)
     durable.close()
     durable.launch("posts", "q2", queues={"posts": {"worker_concurrency": 1}}, listen=[])
-    wid = durable.enqueue("posts", twice, 5, id="post-0002")
+    wid = durable.submit("posts", twice, 5, id="post-0002")
     time.sleep(1.0)
     assert durable.status(wid) == "ENQUEUED"
 

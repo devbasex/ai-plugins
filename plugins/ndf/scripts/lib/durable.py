@@ -14,7 +14,7 @@
     durable.launch("run", str(plan), keep=prefix)          # 実行の鍵の排他を取り、DBOS を起動する
     ref = durable.resolve(prefix, finished=lambda out: out["result"] in ("完了", "関門"))
     wid = durable.start(ref, plan_workflow, prefix)       # done なら何も始めない
-    out = ref.output if ref.action == "done" else durable.result(wid)
+    out = ref.output if ref.action == "done" else durable.output_of(wid)
 
 - 置き場: `NDF_DBOS_DIR` → `${XDG_STATE_HOME}/ndf/dbos` → `~/.local/state/ndf/dbos`（`records_dir`）
 - 実行の鍵: `<種類>-<識別の sha256 の先頭 12 字>`。ファイル名・executor_id・ファイルロック（`<鍵>.lock`）に使う（I17）
@@ -94,21 +94,21 @@ def records_dir(env: Optional[Mapping[str, str]] = None) -> Path:
     return Path(base) / "ndf" / "dbos"
 
 
-def digest(text: str, n: int = 12) -> str:
+def key_hash(text: str, n: int = 12) -> str:
     """鍵に使う sha256 の先頭 `n` 字。"""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:n]
 
 
-def run_key(kind: str, identity: str) -> str:
+def launch_key(kind: str, identity: str) -> str:
     """実行の鍵（`<種類>-<12 字>`）。`kind` は英小文字と数字だけ。"""
     if not KIND_RE.match(kind):
         raise DurableError(f"耐久の記録の種類は英小文字と数字だけ: {kind!r}")
-    return f"{kind}-{digest(identity)}"
+    return f"{kind}-{key_hash(identity)}"
 
 
 def record_path(kind: str, identity: str) -> Path:
     """耐久の記録のファイル。無ければ DBOS を起動せずに「積んでいない」と答えられる。"""
-    return records_dir() / f"{run_key(kind, identity)}.sqlite"
+    return records_dir() / f"{launch_key(kind, identity)}.sqlite"
 
 
 def _url(path: Path) -> str:
@@ -206,7 +206,7 @@ def launch(
     """
     if _STATE["launched"] is not None:
         raise DurableError("耐久の記録はこのプロセスで開いている（1 つの起動は 1 つの耐久の記録）")
-    key = run_key(kind, identity)
+    key = launch_key(kind, identity)
     directory = records_dir()
     path = directory / f"{key}.sqlite"
     stack = contextlib.ExitStack()
@@ -277,7 +277,10 @@ def resolve(prefix: str, finished: Callable[[Any], bool] = lambda _out: False) -
     last = runs[n]
     fresh = WorkflowRef(f"{prefix}-{n + 1}", n + 1, "start")
     if last.app_version != FORMAT:
-        print(f"[ndf durable] {last.workflow_id} は形式の版 {last.app_version} の記録のため続けず、実行の回 {n + 1} を頭から流す", file=sys.stderr)
+        print(
+            f"[ndf durable] {last.workflow_id} は形式の版 {last.app_version} の記録のため続けず、実行の回 {n + 1} を頭から流す",
+            file=sys.stderr,
+        )
         return fresh
     if last.status in RUNNING:
         return WorkflowRef(last.workflow_id, n, "continue")
@@ -294,8 +297,14 @@ def start(ref: WorkflowRef, func: Callable, *args: Any, **kwargs: Any) -> str:
     return ref.id
 
 
-def enqueue(
-    queue: str, func: Callable, *args: Any, id: Optional[str] = None, partition: Optional[str] = None, priority: Optional[int] = None, **kwargs: Any
+def submit(
+    queue: str,
+    func: Callable,
+    *args: Any,
+    id: Optional[str] = None,
+    partition: Optional[str] = None,
+    priority: Optional[int] = None,
+    **kwargs: Any,
 ) -> str:
     """耐久キュー `queue`（`launch` の `queues` に渡したもの）へ耐久ワークフローを入れる。ID を返す。"""
     q = _STATE["queues"].get(queue)
@@ -310,7 +319,7 @@ def enqueue(
         return q.enqueue(func, *args, **kwargs).workflow_id
 
 
-def result(wid: str) -> Any:
+def output_of(wid: str) -> Any:
     """耐久ワークフローの終わりを待って出力を返す（失敗は例外のまま上げる）。"""
     return DBOS.retrieve_workflow(wid).get_result()
 
@@ -369,11 +378,11 @@ def wait(wid: str, key: Optional[str] = None, after: int = 0, poll: float = POLL
     while True:
         st = status(wid)
         if st == "SUCCESS":
-            return Outcome("done", result(wid))
+            return Outcome("done", output_of(wid))
         if st in FINISHED:
             kind = "cancelled" if st == "CANCELLED" else "error"
             try:
-                result(wid)
+                output_of(wid)
             except Exception as exc:  # noqa: BLE001  失敗の理由を文にして返す
                 return Outcome(kind, f"{type(exc).__name__}: {exc}")
             return Outcome(kind, st)
