@@ -1410,6 +1410,12 @@
       ]
     },
     {
+      "term": "待ちの雛形",
+      "context": "ndf-workflow",
+      "meaning": "waiting.md が持つ、背景で起動して条件が成り立つまで待つ until ループのコマンド。成り立てば 0、上限に達すれば 124 で終わり、exit=<終了コード> を出す",
+      "source": "plugins/ndf/skills/development-workflow/references/waiting.md"
+    },
+    {
       "term": "横断 Skill",
       "context": "ndf-workflow",
       "meaning": "工程表に載らず、どの工程からも呼ばれる Skill（progress-tracking / out-of-scope など）",
