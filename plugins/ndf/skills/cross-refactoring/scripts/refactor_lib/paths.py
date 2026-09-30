@@ -124,3 +124,8 @@ def git_out(work: str, args: list[str], strip: bool = True) -> Optional[str]:
 def resolve_commit(work: str, sha: str) -> Optional[str]:
     """SHA（短縮形を含む）をコミットの完全な SHA へ解決する。解決できなければ `None`。"""
     return git_out(work, ["rev-parse", "--verify", f"{sha}^{{commit}}"])
+
+
+def full_commit(work: str, sha: Any) -> Any:
+    """SHA を完全な形へ解決する。解決できない SHA と、文字列でない・空の値はそのまま返す。"""
+    return (resolve_commit(work, sha) or sha) if isinstance(sha, str) and sha else sha

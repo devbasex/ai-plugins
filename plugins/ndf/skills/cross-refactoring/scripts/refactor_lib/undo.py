@@ -31,7 +31,7 @@ import statefile
 
 from . import die, info, ledger
 from .items import find_item, item_shas
-from .paths import git_out, resolve_commit, work_dir
+from .paths import full_commit, git_out, work_dir
 from .worktree import replay_commits, reset_hard, revert_range
 
 
@@ -93,13 +93,9 @@ def _remap(state: dict[str, Any], work: str, mapping: dict[str, str], points: di
     ledger.remap_orchestrator_commits(state, mapping)
 
 
-def _full(work: str, sha: Any) -> Any:
-    return (resolve_commit(work, sha) or sha) if isinstance(sha, str) and sha else sha
-
-
 def _remap_one(work: str, table: dict[str, str], sha: Any) -> Any:
     """SHA を完全な形へ解決して対応表（1 対 1 の SHA か地点）を引く。無ければ元の値。"""
-    return table.get(_full(work, sha), sha)
+    return table.get(full_commit(work, sha), sha)
 
 
 def _remap_many(work: str, table: dict[str, str], shas: list[Any]) -> list[Any]:

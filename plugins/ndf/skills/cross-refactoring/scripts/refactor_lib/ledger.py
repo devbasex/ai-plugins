@@ -24,7 +24,7 @@ from typing import Any, Optional
 
 from . import gitfacts  # 属性は呼ぶ時点で引く（gitfacts → publish → ledger の循環を避ける）
 from .items import LIVE, REVERTED, item_shas
-from .paths import git_out, resolve_commit
+from .paths import full_commit, git_out
 
 ITEM = "item"
 FINAL_FIX = "final_fix"
@@ -128,16 +128,12 @@ def remap_orchestrator_commits(state: dict[str, Any], mapping: dict[str, str]) -
 # ---------- コミットの分類 ----------
 
 
-def _full(work: str, sha: str) -> str:
-    return resolve_commit(work, sha) or sha
-
-
 def _owners(state: dict[str, Any], work: str) -> dict[str, dict[str, Any]]:
     """`完全な SHA → 改善項目`。取り消した項目も含める（`stray` の出力に項目を添えるため）。"""
     owners: dict[str, dict[str, Any]] = {}
     for item in state.get("items") or []:
         for sha in item_shas(item):
-            owners[_full(work, sha)] = item
+            owners[full_commit(work, sha)] = item
     return owners
 
 
@@ -145,13 +141,13 @@ def keepers(state: dict[str, Any], work: str) -> dict[str, str]:
     """残すコミット（`完全な SHA → kind`）。"""
     kept: dict[str, str] = {}
     for sha in _ledger_commits(state):
-        kept[_full(work, sha)] = ORCHESTRATOR
+        kept[full_commit(work, sha)] = ORCHESTRATOR
     for sha in (state.get("final_gate") or {}).get("fix_commits") or []:
-        kept[_full(work, sha)] = FINAL_FIX
+        kept[full_commit(work, sha)] = FINAL_FIX
     for item in state.get("items") or []:
         if is_live(item):
             for sha in item_shas(item):
-                kept[_full(work, sha)] = ITEM
+                kept[full_commit(work, sha)] = ITEM
     return kept
 
 
@@ -166,7 +162,7 @@ def classify_commits(state: dict[str, Any], work: str, shas: list[str]) -> list[
     owners = _owners(state, work)
     verdicts: list[CommitVerdict] = []
     for sha in shas:
-        full = _full(work, sha)
+        full = full_commit(work, sha)
         owner = owners.get(full) or {}
         verdict = CommitVerdict(sha=full, kind=kept.get(full, STRAY), item_id=str(owner.get("id") or ""))
         if verdict.kind == STRAY:
@@ -234,12 +230,12 @@ def plan_rebuild(state: dict[str, Any], work: str, targets: list[str], widen: bo
     if not point:
         # 改修計画の前はどのコミットも改善項目に属さない。取り消すものが無い
         return plan
-    point = _full(work, point)
+    point = full_commit(work, point)
     if git_out(work, ["merge-base", "--is-ancestor", point, before or "HEAD"]) is None:
         plan.error = f"公開した地点 {point[:12]} が HEAD の祖先にないため取り消せません"
         return plan
     unpublished = _oldest_first(work, [f"{point}..{before}"]) or []
-    published = (_oldest_first(work, [f"{_full(work, base)}..{point}"]) or []) if base else []
+    published = (_oldest_first(work, [f"{full_commit(work, base)}..{point}"]) or []) if base else []
     dropped = set(targets)
     remove, revert, stray = _split(state, work, unpublished, published, dropped)
     if widen:

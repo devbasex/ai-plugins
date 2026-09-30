@@ -223,8 +223,11 @@ def _kind_seconds(state: dict[str, Any]) -> dict[str, dict[str, float]]:
     return kinds
 
 
-def _elapsed_seconds(state: dict[str, Any], at: Any) -> Optional[int]:
-    """`started_at` から `at` までの秒。どちらかを読めなければ `None`。"""
+def _seconds_from_start(state: dict[str, Any], at: Any) -> Optional[int]:
+    """`started_at` から `at`（実行の終わり）までの秒。どちらかを読めなければ `None`。
+
+    履歴の 1 行の `elapsed_seconds` に使う。`commands.report` の所要（最終ゲートの終わりまで）とは終わりの取り方が違う。
+    """
     started, ended = _parse_time(state.get("started_at")), _parse_time(at)
     if started and ended:
         return int((ended.astimezone(_dt.timezone.utc) - started.astimezone(_dt.timezone.utc)).total_seconds())
@@ -242,7 +245,7 @@ def build_row(state: dict[str, Any]) -> dict[str, Any]:
     """
     kinds = _kind_seconds(state)
     at = _ended_at(state)
-    elapsed = _elapsed_seconds(state, at)
+    elapsed = _seconds_from_start(state, at)
     verify = state.get("verify_stats") or {}
     fix = state.get("fix_stats") or {}
     whole = state.get("whole_test") or {}
