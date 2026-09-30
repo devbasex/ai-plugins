@@ -232,3 +232,39 @@ def test_a_round_only_lint_failure_wins_over_an_undecidable_test_failure(tmp_pat
     code, out = _run(root, "scope", "--paths", "x")
     assert code == 1, out
     assert "静的解析が落ちた" in out["summary"]
+
+
+# ---------- #1437: 雛形から組んだ全体テストの注記が結果に残る ----------
+
+
+def _ts():
+    import sys
+
+    sys.path.insert(0, str(SCRIPT.parent / "lib"))
+    import test_strategy
+
+    return test_strategy
+
+
+def _notes(out):
+    return [i["note"] for i in out["items"] if "note" in i]
+
+
+def test_a_failed_whole_test_from_the_template_keeps_the_note(tmp_path):
+    """#1437 AC2・F3 — 宣言の無いリポジトリで雛形から組んだ全体テストが落ちても、`items` に注記が残る。"""
+    ts = _ts()
+
+    root = _repo(tmp_path)
+    code, out = _run(root, "whole", "--template", 'sh -c \'test -f "$1" && ! test -d "$1"\' x {paths}')
+    assert code == 1, out
+    assert _notes(out).count(ts.WHOLE_FROM_TEMPLATE) == 1
+
+
+def test_a_lint_template_without_paths_keeps_no_lint_whole(tmp_path):
+    """#1437 AC6 — 静的解析の雛形で範囲のパスが無ければ、全体テストを組まず `NO_LINT_WHOLE` を残す。"""
+    ts = _ts()
+
+    root = _repo(tmp_path)
+    code, out = _run(root, "whole", "--template", "echo {paths}", "--test-kind", "lint")
+    assert ts.NO_LINT_WHOLE in _notes(out) and ts.WHOLE_FROM_TEMPLATE not in _notes(out)
+    assert not any(i.get("command") == "echo ." for i in out["items"])

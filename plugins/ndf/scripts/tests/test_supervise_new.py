@@ -583,3 +583,66 @@ def test_a_lint_test_cmd_never_builds_a_whole_test_on_the_dot(tmp_path):
         if "test-run.py whole" in str(s.get("cmd"))
     ]
     assert wholes and all("--test-kind lint" in c and c.endswith("--paths scripts/a.sh") for c in wholes)
+
+
+# --- #1437: 戦略の注記を計画の作成の時点で標準エラーへ出す ---------------------------------
+
+sys.path.insert(0, str(SCRIPTS / "lib"))
+import test_strategy as ts  # noqa: E402
+
+PYTEST_SUITE = {"version": 1, "test": {"suites": [{"name": "py", "runner": "pytest", "command": "pytest -q"}]}}
+
+
+def _repo_1437(tmp_path, project=None):
+    """supervise.json に test の無いリポジトリ。`project` を渡せば .ndf/project.json に置く。"""
+    root = plain_repo(tmp_path, {"form": "package-plugin", "plugin": "foo", "runtimes": ["claude"]})
+    sv = json.loads((root / ".ndf" / "supervise.json").read_text())
+    sv.pop("test")
+    (root / ".ndf" / "supervise.json").write_text(json.dumps(sv))
+    if project is not None:
+        (root / ".ndf" / "project.json").write_text(json.dumps(project))
+    return root
+
+
+def _wholes(out):
+    return [
+        s["cmd"]
+        for f in sorted(out.glob("*.json"))
+        for s in json.loads(f.read_text()).get("steps") or []
+        if "test-run.py whole" in str(s.get("cmd"))
+    ]
+
+
+def test_a_whole_test_from_the_template_is_reported_once_when_planning(tmp_path):
+    """#1437 AC3・I5 — 宣言が無く種別 test の雛形なら、注記が標準エラーにちょうど 1 度出て、終了コードは宣言ありと同じ。"""
+    root = _repo_1437(tmp_path)
+    p = new_sprint(root, tmp_path / "m", "--test-cmd", "shellcheck -s bash {paths}", "--tests", "a.sh")
+    declared = new_sprint(
+        _repo_1437(tmp_path / "d", PYTEST_SUITE), tmp_path / "d" / "m", "--test-cmd", "shellcheck -s bash {paths}", "--tests", "a.sh"
+    )
+    assert p.returncode == declared.returncode == 0, p.stderr + declared.stderr
+    assert p.stderr.count(ts.WHOLE_FROM_TEMPLATE) == 1
+    assert ts.WHOLE_FROM_TEMPLATE not in declared.stderr
+
+
+def test_a_declared_lint_run_fills_the_whole_lint_with_the_tests(tmp_path):
+    """#1437 AC5 — 宣言あり・`--test-kind lint`・`--tests` の計画は、`test-all` に範囲を渡し、静的解析の全体テストをそのパスで埋める。"""
+    path = "images/redmine7/postresync.sh"
+    template = "uvx --from shellcheck-py shellcheck -s bash {paths}"
+    out = tmp_path / "m"
+    p = new_sprint(_repo_1437(tmp_path, PYTEST_SUITE), out, "--test-cmd", template, "--test-kind", "lint", "--tests", path)
+    assert p.returncode == 0, p.stderr
+    wholes = _wholes(out)
+    assert wholes and all(f"--paths {path}" in c for c in wholes)
+    s = ts.resolve(PYTEST_SUITE, baseline_test=template, template_kind="lint", scope_paths=[path])
+    assert [x.command for x in s.suites if x.kind == "lint"] == [f"uvx --from shellcheck-py shellcheck -s bash {path}"]
+
+
+def test_every_strategy_note_is_reported_once_when_planning(tmp_path):
+    """#1437 D3・I5 — `--test-kind lint` で範囲のパスが無ければ `NO_LINT_WHOLE` も 1 度出て、終了コードはパスがあるときと同じ。"""
+    args = ("--test-cmd", "shellcheck -s bash {paths}", "--test-kind", "lint")
+    p = new_sprint(_repo_1437(tmp_path, PYTEST_SUITE), tmp_path / "m", *args)
+    with_paths = new_sprint(_repo_1437(tmp_path / "w", PYTEST_SUITE), tmp_path / "w" / "m", *args, "--tests", "a.sh")
+    assert p.returncode == with_paths.returncode == 0, p.stderr + with_paths.stderr
+    assert p.stderr.count(ts.NO_LINT_WHOLE) == 1
+    assert ts.NO_LINT_WHOLE not in with_paths.stderr
