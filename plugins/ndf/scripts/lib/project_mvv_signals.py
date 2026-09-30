@@ -66,23 +66,24 @@ def unknown_streak(gate_rows: list[dict], sha: str | None) -> int:
     return n
 
 
-def signals(root, mvv: pm.ProjectMvv, *, signals_log=None, gate_log=None, escapes: list[dict] | None = None) -> dict:
-    """改訂の兆候の集計（I18）。現行の版の sha256 と承認の日時より後の記録だけを数え、閾値と比べる。"""
-    st = pm.resolve_settings(mvv.settings)
-    th = st["revise_after"]
-    key = pm.mvv_repo_key(root)
-    since = _parse_at(mvv.approved_at) if mvv.approved else None
-    sha = mvv.sha256 if mvv.approved else None
-    sig = [r for r in read_jsonl(signals_log or pm.signals_log_path()) if r.get("repo") == key and _after(r, since)]
-    if mvv.approved:
+def _collect_signals(key, since, sha, approved, log) -> list[dict]:
+    """signals ログのうち、同じリポジトリで承認の日時より後の行（承認済みなら現行の版の行だけ）。"""
+    sig = [r for r in read_jsonl(log) if r.get("repo") == key and _after(r, since)]
+    if approved:
         sig = [r for r in sig if r.get("project_sha256") == sha]
-    gate_rows = [
-        r for r in read_jsonl(gate_log or pm.gate_log_path()) if (r.get("project_mvv") or {}).get("sha256") == sha and _after(r, since)
-    ]
-    if mvv.approved:
-        gate_rows = [r for r in gate_rows if r.get("repo") in (None, key)]
-    esc = [e for e in (escapes or []) if e.get("kind") == "escape" and _after(e, since)]
-    counts = {
+    return sig
+
+
+def _collect_gate_rows(key, sha, since, approved, log) -> list[dict]:
+    """gate ログのうち、現行の版の判定で承認の日時より後の行（承認済みなら同じリポジトリか repo の無い行だけ）。"""
+    rows = [r for r in read_jsonl(log) if (r.get("project_mvv") or {}).get("sha256") == sha and _after(r, since)]
+    if approved:
+        rows = [r for r in rows if r.get("repo") in (None, key)]
+    return rows
+
+
+def _count_signals(sig: list[dict], gate_rows: list[dict], esc: list[dict], sha) -> dict:
+    return {
         "overrides": len(sig),
         "override_reject": sum(1 for r in sig if r.get("kind") == "override_reject"),
         "override_pass": sum(1 for r in sig if r.get("kind") == "override_pass"),
@@ -90,9 +91,27 @@ def signals(root, mvv: pm.ProjectMvv, *, signals_log=None, gate_log=None, escape
         "escapes": len(esc),
         "unknown_streak": unknown_streak(gate_rows, sha),
     }
+
+
+def _over_thresholds(counts: dict, th: dict, st: dict) -> list[str]:
     over = [k for k in ("overrides", "unknowns", "escapes") if counts[k] >= th[k]]
     if counts["unknown_streak"] >= st["unknown_streak"]:
         over.append("unknown_streak")
+    return over
+
+
+def signals(root, mvv: pm.ProjectMvv, *, signals_log=None, gate_log=None, escapes: list[dict] | None = None) -> dict:
+    """改訂の兆候の集計（I18）。現行の版の sha256 と承認の日時より後の記録だけを数え、閾値と比べる。"""
+    st = pm.resolve_settings(mvv.settings)
+    th = st["revise_after"]
+    key = pm.mvv_repo_key(root)
+    since = _parse_at(mvv.approved_at) if mvv.approved else None
+    sha = mvv.sha256 if mvv.approved else None
+    sig = _collect_signals(key, since, sha, mvv.approved, signals_log or pm.signals_log_path())
+    gate_rows = _collect_gate_rows(key, sha, since, mvv.approved, gate_log or pm.gate_log_path())
+    esc = [e for e in (escapes or []) if e.get("kind") == "escape" and _after(e, since)]
+    counts = _count_signals(sig, gate_rows, esc, sha)
+    over = _over_thresholds(counts, th, st)
     return {"counts": counts, "thresholds": {**th, "unknown_streak": st["unknown_streak"]}, "over": over, "version": mvv.version}
 
 
