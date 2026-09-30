@@ -22,7 +22,6 @@ from .common import PKG_ROOT  # noqa: F401  lib/ を sys.path に置く
 from .login import owner_of  # noqa: F401  公開の名前（テストが使う）
 
 import claude_accounts as ca  # noqa: E402,I001
-import claude_usage as cu  # noqa: E402
 
 USAGE = (
     "usage: relay.py account add [<名前>] [--code <コード>|-] | add-bedrock [--profile <名前>] [--region <地域>] [--model <ID>]"
@@ -47,10 +46,11 @@ def _add(asker: Asker, name: str | None, code: str | None, as_json: bool, swept:
     return {"name": name, **res}
 
 
-def _window(w: dict | None, form: str) -> str:
+def _window(w: dict | None) -> str:
+    """枠の使用率（表が 1 行に収まるよう、リセットの日時は添えない。日時は JSON の出力が持つ）。"""
     if not w:
         return "-"
-    return f"{w['utilization']:.0f}%（{ca.local_time(cu.epoch(w.get('resets_at')), form)}）"
+    return f"{w['utilization']:.0f}%"
 
 
 def _usd(v: float | None) -> str:
@@ -71,7 +71,7 @@ def _scoped(scoped: list | None) -> str:
     if not scoped:
         return "-"
     w = max(scoped, key=lambda x: x["utilization"])
-    return f"{w['model'] or '-'} {_window(w, '%m-%d')}"
+    return f"{w['model'] or '-'} {_window(w)}"
 
 
 def _metered(source: str, state: str, provider: str | None = None, details: dict | None = None, **extra) -> dict:
@@ -135,8 +135,8 @@ def _table_row(r: dict, emails: list[str]) -> tuple[str, ...]:
     return (
         r["name"],
         ident,
-        _window(r["five_hour"], "%H:%M"),
-        _window(r["seven_day"], "%m-%d"),
+        _window(r["five_hour"]),
+        _window(r["seven_day"]),
         _scoped(r["scoped"]),
         spend,
         _capacity(r),

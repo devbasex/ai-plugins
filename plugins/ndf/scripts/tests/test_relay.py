@@ -3204,8 +3204,10 @@ def test_account_add_list_remove(tmp_path, accounts):
         and "使える" in line
         for line in lines
     )
+    assert "%（" not in p.stdout  # 表の使用率の列にリセットの日付と時刻を添えない
     rows = json.loads(account_cmd(tmp_path, accounts, "list", "--json", tty=False).stdout)
     assert [r["name"] for r in rows] == ["work1", "work2"] and rows[0]["five_hour"]["utilization"] == 15
+    assert rows[0]["five_hour"]["resets_at"] and rows[0]["seven_day"]["resets_at"]  # JSON にはリセットの時刻を残す
     assert all(c["argv"][:1] == ["auth"] for c in auth_calls(tmp_path))  # 推論を呼ばない
     assert all(c["token"] is None for c in auth_calls(tmp_path))
     for d in ("work1", "work2"):
