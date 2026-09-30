@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 
 import clock
+import jsonio
 import legacy_names
 import procs
 import usage_ledger
@@ -35,17 +36,11 @@ def counts_text(counts: dict) -> str:
 
 
 def _read_step_pid(path: Path) -> dict | None:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    return data if isinstance(data, dict) else None
+    return jsonio.read(path, missing=None, broken=None, want=dict)
 
 
 def _write_step_pid(path: Path, data: dict) -> None:
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    os.replace(tmp, path)
+    jsonio.write_atomic(path, data, indent=None)
 
 
 def reap_orphans(state_dir: Path) -> str | None:
