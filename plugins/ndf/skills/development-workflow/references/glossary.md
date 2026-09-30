@@ -173,7 +173,9 @@ flowchart TB
 | 通過工程 | ある課題について、進捗記録が実際に書かれた工程の集合 | — | [stage-completeness.md](stage-completeness.md) の「用語」 |
 | 通過記録 | 通過工程を課題ごとに残したファイル | `stage-check.sh report <番号>` | [stage-completeness.md](stage-completeness.md) の「用語」 |
 | スプリント状態ファイル | スプリントのプラン・done・承認ゲートの記録・MVV・版を持つファイル。パスは呼ぶ側が決め、目録 `sprint.json` とは別のファイルにする。引継ぎ文書の表と ndf-next をここから作る | 例 `sprint-state.json`、`sprint-state.py init` / `update` / `gate` / `render` / `next` / `status` | [sprint-state.py](../../../scripts/sprint-state.py) の docstring |
-| 引継ぎ文書 | 会話を切って再開するための文書。「今の会話の進み」（プランごとの行の表）と「次に実行するコマンド」の節をスクリプトが書く | `issues/handoff-<名>.md`、`supervise.py note` | [relay.md](relay.md) の「カットポイントの引継ぎ文書と ndf-next はスクリプトで作る」 |
+| 引継ぎ文書 | 会話を切って新しいセッションで続けるための文書。メインディレクトリに置き、コミットしない。1 本が 1 つの引継ぎの対象を受け持つ。「今の会話の進み」と「次に実行するコマンド」の節はスクリプトが書く | `.ndf/handoff/<名>.md`、`handoff.py`、`supervise.py note` | [handoff.md](handoff.md) |
+| 引継ぎの対象 | 引継ぎ文書 1 本が受け持つ仕事のまとまり（スプリント・マイルストーン・課題のどれか）。名の頭になる | `sprint-` / `milestone-` / `issue-` | [handoff.md](handoff.md) の「置き場と名」 |
+| 引継ぎの履歴 | 引継ぎ文書の本体から終わった項目を移す文書。本体と同じ場所に置く | `<名>-history.md`、`handoff.py check --trim` | [handoff.md](handoff.md) の「作る・更新する」 |
 | ndf-next | 次のセッションの最初の入力を置く、情報文字列 `ndf-next` の囲みのコードブロック。最後の応答に 1 つだけ置く | 囲みの情報文字列 `ndf-next` | [context-window.md](context-window.md) の「新しい会話で戻す」 |
 | シグナルファイル | ラッパーへ知らせるファイル。Stop hook が最後の応答の ndf-next を移した `next.json` と、止める `stop`。ラッパーはこれを受けてセッションを切り替える | `next.json`、`stop`、`relay.py mark` | [relay.md](relay.md) の「承認ゲートを越えない守り」 |
 | アナウンス | ndf-next のブロックの直前にそのまま置く 1 文。1 行目がラッパーの内か外かを示す | `relay.py notice`（1 行目 `relay` / `outside`、2 行目がアナウンス） | [context-window.md](context-window.md) の「新しい会話で戻す」 |

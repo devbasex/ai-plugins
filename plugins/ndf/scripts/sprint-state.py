@@ -41,7 +41,7 @@ from supervise_lib.paths import sha256_of, state_dir_of  # noqa: E402
 import clock  # noqa: E402
 import jsonio  # noqa: E402
 import locks  # noqa: E402
-import md  # noqa: E402
+from handoff_doc import find_section, heading_text  # noqa: E402
 import mdtable  # noqa: E402
 import step_result  # noqa: E402
 import project_mvv as pm  # noqa: E402
@@ -388,28 +388,6 @@ def section_body(m: dict) -> str:
         lines.append(f"- LLM の費用の計: ${sum(c for c in total if c is not None):.3f}")
     lines.append("")
     return "\n".join(lines) + "\n"
-
-
-def find_section(text: str, word: str) -> tuple[int, int, int, str] | None:
-    """見出しに word を含む最初の節の (見出しの行の始まり, 本文の始まり, 本文の終わり, 見出しの行) を返す。
-
-    本文は、見出しと同じか浅い見出しの手前まで。囲みのコードブロックの中の # は見出しとみなさない。
-    見出しは行頭の `#` で始まるもの（ATX）だけを数える。"""
-    lines = text.splitlines(keepends=True)
-    offsets = [0]
-    for line in lines:
-        offsets.append(offsets[-1] + len(line))
-    atx = [h for h in md.headings(text) if lines[h.line].startswith("#")]
-    for k, h in enumerate(atx):
-        if word not in lines[h.line].rstrip("\r\n"):
-            continue
-        end = next((o.line for o in atx[k + 1 :] if o.level <= h.level), None)
-        return offsets[h.line], offsets[h.line + 1], len(text) if end is None else offsets[end], lines[h.line]
-    return None
-
-
-def heading_text(line: str) -> str:
-    return line.rstrip("\r\n").lstrip("#").strip()
 
 
 def cmd_render(a) -> dict:

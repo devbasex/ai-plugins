@@ -218,7 +218,7 @@ pace: fast
 次の工程を始める再開コマンド（`/ndf:development-workflow #<課題>`。今のセッションを `/goal` で始めていたときだけ先頭に `/goal `）を、
 情報文字列 `ndf-next` の囲みのコードブロック 1 つで出す。** 3 層では conductor がフェーズレポート（`## フェーズの報告`）かキューの done を
 受け取った時点で出し（supervisor とプランは出さない）、`結果: 関門` なら承認ゲートの承認と取り込みの後に出す。
-出す時点・アナウンス・新しい会話が状態を戻す手順は `context-window.md` の「新しい会話で戻す」にある。
+出す時点・アナウンス・新しい会話が状態を戻す手順は `context-window.md` の「新しい会話で戻す」にある。出す前に引継ぎ文書（メインディレクトリの `.ndf/handoff/<名>.md`）を作るか更新し、対象の最後の工程（振り返り。マイルストーンは閉じた後）の後に conductor が消す。規則は [references/handoff.md](references/handoff.md) にある。
 
 ## 即時修正
 
@@ -496,5 +496,5 @@ flowchart TD
 - [references/pace.md](references/pace.md) — 進め方（`pace`）のフロー・`fast` と `auto` の条件・設定・プランのステージ・検査のトリガー・MVV 判定
 - [references/approval-request.md](references/approval-request.md) — 承認を求めるときに提示するもの
 - [references/operation-run.md](references/operation-run.md) — `operation` の実行の範囲・記録・失敗したときの扱い
-- [references/context-window.md](references/context-window.md) — context window のカットポイント、委譲する対象としない対象、残量の見方
+- [references/context-window.md](references/context-window.md) — context window のカットポイント、委譲する対象としない対象、残量の見方。引継ぎ文書の置き場・節の形・作る／読む／更新する／消す規則は [references/handoff.md](references/handoff.md)
 - [references/agent-layers.md](references/agent-layers.md) — 3 層（conductor / supervisor / worker）の責務、フェーズ、報告の形

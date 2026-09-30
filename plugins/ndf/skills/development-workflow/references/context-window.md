@@ -187,12 +187,14 @@ Codex / Kiro / agy には hook を置かない。4 つのカットポイント�
   を含む）を挟まずにアナウンスとブロックを出して応答を終える。状態は課題の本文と Pull Request に残り、
   取り消せるためである。ラッパーの外でも挟まない（確認の答えと貼り付けで入力が 2 度になる）。
   **`/goal` の文面が「承認を求める」と書いていても、指すのは `SKILL.md` の承認ゲート 2 つだけである**
-- **引継ぎ文書の「次に実行するコマンド」の節も、同じブロックで書く。** 形の定義はこの節だけに置く
+- **引継ぎ文書の「次に実行するコマンド」の節も、同じブロックで書く。** ブロックの形の定義はこの節だけに置く。
+  引継ぎ文書の置き場・節の形・作る／更新する／消す規則は [handoff.md](handoff.md) にある
 
 **新しい会話の `development-workflow` は、次の順で状態を戻す。**
 
 | # | 読むもの | 戻すもの |
 | --- | --- | --- |
+| 0 | 引継ぎ文書（入力が名指ししたもの。無ければ入力の語に一致する 1 本。見つけ方と一致しないときの扱いは [handoff.md](handoff.md) の「読む」） | 次にやることの 1 つ目。状態は 1〜5 で確かめ、食い違えば 1〜5 を正とする |
 | 1 | 課題の本文の `## 進行`（`gh issue view <番号> --json body`） | モード・worktree・計画ファイル・通った工程 |
 | 2 | `bash <この Skill のディレクトリ>/scripts/stage-check.sh report <番号>`（プラグインの `scripts/` に無く、`development-workflow` の `scripts/` にある） | 通過記録。本文と食い違えば通過記録を正とする |
 | 3 | 1 の worktree（`.worktrees/<ブランチ名>`）のブランチ名で `gh pr list --head <ブランチ名> --state all`。実装の Pull Request は `gh issue view <番号> --json closedByPullRequestsReferences` でも引く | 設計・実装の Pull Request と状態 |
