@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
 import pathlib
+import signal
+import subprocess
 import sys
+import time
 from typing import Any
 
 import pytest
@@ -638,3 +642,141 @@ def test_unresolved_thread_ids_bad_repo_is_none_without_calling_gh(monkeypatch: 
 
     assert post_queue.unresolved_thread_ids(repo, 1) is None
     assert calls == []
+
+
+# ---------------- 耐久の記録（#1142 の Q2。送りの試行 1 回 = 耐久ワークフロー 1 つ） ----------------
+
+
+def _ids(queue: post_queue.Queue) -> list[str]:
+    with queue._session() as fl:
+        return sorted(fl["durable"].workflow_ids("post-"))
+
+
+def test_an_empty_queue_answers_without_opening_the_record(tmp_path: pathlib.Path) -> None:
+    """積んでいない待ち行列の count は耐久の記録を作らない。"""
+    queue = post_queue.Queue(tmp_path / "pending")
+
+    assert queue.count() == 0 and queue.flush().remaining == 0
+    assert not post_queue._flows()["durable"].record_path("posts", str(queue.dir.absolute())).exists()
+
+
+def test_legacy_items_are_imported_with_their_sequence(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """移行の前のファイルは最初の flush で同じ連番のまま送られ、`imported/` へ移る。"""
+    for seq in (3, 7):
+        _write_item(tmp_path, seq)
+    sent: list[int] = []
+    monkeypatch.setattr(post_queue, "posted_match", lambda item: (False, None))
+    monkeypatch.setattr(post_queue, "send", lambda item: sent.append(item["seq"]) or post_queue.Attempt(0, "{}", ""))
+
+    queue = post_queue.Queue(tmp_path)
+    result = queue.flush()
+
+    assert sent == [3, 7] and result.remaining == 0
+    assert sorted(p.name for p in (tmp_path / "imported").iterdir()) == ["0003-pr-comment-3.json", "0007-pr-comment-7.json"]
+    assert not list(tmp_path.glob("*.json"))
+    assert post_queue.enqueue(queue, "pr-comment", "o/r", 1, {"body": "次"})["seq"] == 8
+
+
+def test_an_unsent_item_is_retried_in_order_by_the_next_flush(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """上限の項目の後ろは送られず、次の flush が次の試行で順に送る。試行ごとに耐久ワークフローが 1 つ増える。"""
+    queue = post_queue.Queue(tmp_path)
+    for body in ("一", "二"):
+        post_queue.enqueue(queue, "pr-comment", "o/r", 5, {"body": body}, extra={"ident": body})
+    limited = {"on": True}
+    sent: list[str] = []
+
+    def send(item):
+        if limited["on"]:
+            return post_queue.Attempt(1, "", "API rate limit exceeded (HTTP 429)")
+        sent.append(item["match"]["body"])
+        return post_queue.Attempt(0, '{"id": 1}', "")
+
+    monkeypatch.setattr(post_queue, "posted_match", lambda item: (False, None))
+    monkeypatch.setattr(post_queue, "send", send)
+
+    first = queue.flush()
+    limited["on"] = False
+    second = queue.flush()
+
+    assert first.rate_limited is True and first.failed["seq"] == 1 and first.remaining == 2
+    assert [i["seq"] for i in second.sent] == [1, 2] and second.remaining == 0 and sent == ["一", "二"]
+    assert second.sent[0]["attempts"] == 1
+    assert _ids(queue) == ["post-0001-pr-comment-一-a0", "post-0001-pr-comment-一-a1", "post-0001-pr-comment-一-a2"] + [
+        "post-0002-pr-comment-二-a0",
+        "post-0002-pr-comment-二-a1",
+    ]
+
+
+def test_flush_drop_flush_run_in_one_process_that_exits_normally(tmp_path: pathlib.Path) -> None:
+    """result_posts の順（flush → drop → 積み直し → flush）を 1 つのプロセスで打ち、プロセスが普通に終わる。"""
+    script = tmp_path / "run.py"
+    script.write_text(
+        f"""
+import sys
+sys.path.insert(0, {str(LIB)!r})
+import post_queue
+calls = []
+def send(item):
+    calls.append(item["seq"])
+    if len(calls) == 1:
+        return post_queue.Attempt(1, '{{"message": "Line could not be resolved"}}', "gh: Unprocessable Entity (HTTP 422)")
+    return post_queue.Attempt(0, '{{"id": 9}}', "")
+post_queue.send = send
+post_queue.posted_match = lambda item: (False, None)
+q = post_queue.Queue({str(tmp_path / "pending")!r})
+seq = post_queue.enqueue(q, "review-post", "o/r", 1, {{"body": "b", "event": "COMMENT"}})["seq"]
+first = q.flush()
+assert post_queue.rejected_by_position(first.failed), first
+assert q.drop(first.failed["seq"]) is True
+seq = post_queue.enqueue(q, "review-post", "o/r", 1, {{"body": "b2", "event": "COMMENT"}})["seq"]
+second = q.flush()
+print(seq, [i["seq"] for i in second.sent], second.remaining, calls)
+""",
+        encoding="utf-8",
+    )
+    out = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, timeout=120)
+
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.split("\n")[0] == "2 [2] 0 [1, 2]"
+
+
+def test_an_attempt_cut_by_kill_is_sent_again_after_checking_it_was_not_posted(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """送りの途中で kill -9 された試行は次に開くときに止め、次の flush が既投稿の照合から次の試行で送る。"""
+    started = tmp_path / "started"
+    script = tmp_path / "hang.py"
+    script.write_text(
+        f"""
+import pathlib, sys, time
+sys.path.insert(0, {str(LIB)!r})
+import post_queue
+def send(item):
+    pathlib.Path({str(started)!r}).write_text("x")
+    time.sleep(60)
+post_queue.send = send
+post_queue.posted_match = lambda item: (False, None)
+q = post_queue.Queue({str(tmp_path / "pending")!r})
+post_queue.enqueue(q, "pr-comment", "o/r", 1, {{"body": "b"}})
+q.flush()
+""",
+        encoding="utf-8",
+    )
+    proc = subprocess.Popen([sys.executable, str(script)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        deadline = time.monotonic() + 60
+        while not started.exists() and time.monotonic() < deadline and proc.poll() is None:
+            time.sleep(0.05)
+        assert started.exists(), proc.communicate(timeout=5)
+    finally:
+        os.kill(proc.pid, signal.SIGKILL)
+        proc.wait(timeout=10)
+    checked: list[int] = []
+    monkeypatch.setattr(post_queue, "posted_match", lambda item: checked.append(item["seq"]) or (False, None))
+    monkeypatch.setattr(post_queue, "send", lambda item: post_queue.Attempt(0, '{"id": 3}', ""))
+
+    queue = post_queue.Queue(tmp_path / "pending")
+    result = queue.flush()
+
+    assert checked == [1] and [i["seq"] for i in result.sent] == [1] and result.remaining == 0
+    assert _ids(queue) == ["post-0001-pr-comment-1-a0", "post-0001-pr-comment-1-a1", "post-0001-pr-comment-1-a2"]

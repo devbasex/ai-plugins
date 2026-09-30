@@ -61,7 +61,7 @@ from typing import Literal
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
 
-deps.require("schema", "versions", "bump", "md", "mdtable")
+deps.require("schema", "versions", "bump", "md", "mdtable", "durable")
 import mdtable  # noqa: E402
 import schema  # noqa: E402
 import versions  # noqa: E402
