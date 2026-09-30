@@ -63,7 +63,7 @@
 - **コネクタを取りに行く条件は、トークンに付いたスコープの一覧に `user:mcp_servers` があることである。** 本体の claude.ai のコネクタの取得（`[claudeai-mcp]` のログを出す関数）は、`ENABLE_CLAUDEAI_MCP_SERVERS` と `disableClaudeAiConnectors` の設定・安全モード・サードパーティの接続（Bedrock など）・API キーの優先を順に見た後、認証情報の `scopes` が `user:mcp_servers` を含まなければ `Missing user:mcp_servers scope` で取得をやめる
 - **環境変数 `CLAUDE_CODE_OAUTH_TOKEN` のトークンには、スコープが `user:inference` だけとして付く。** 本体は変数のトークンを `refreshToken: null`・`expiresAt: null` の認証情報として組み立て、スコープを `CLAUDE_CODE_OAUTH_SCOPES`（空白区切り）から読み、無ければ既定の `["user:inference"]` にする。課題の表で「既定のログインのトークンでも 0 件」になった理由はこれで説明がつく（トークンの持ち主やトークンが持つ本当のスコープに依らない）
 - アカウント `nyle-personal` の置き場の `.credentials.json` のスコープは `user:file_upload user:inference user:mcp_servers user:plugins user:profile user:sessions:claude_code` である
-- 変数が無い今のセッションで、`CLAUDE_CODE_OAUTH_SCOPES` に上のスコープを入れて `claude mcp list` を打つと、claude.ai のコネクタ 5 件が `✔ Connected` で並んだ。**ただしこのとき `CLAUDE_CODE_OAUTH_TOKEN` は入っておらず、認証は共有の `.credentials.json` だった。** 変数のトークンと `CLAUDE_CODE_OAUTH_SCOPES` を組み合わせたときにコネクタが読まれるかは、この工程では確かめていない（トークンを取り出して扱う操作は共通原則の C1 に当たるため、未決 1 へ回した）
+- 変数が無い今のセッションで、`CLAUDE_CODE_OAUTH_SCOPES` に上のスコープを入れて `claude mcp list` を打つと、claude.ai のコネクタ 5 件が `✔ Connected` で並んだ。**ただしこのとき `CLAUDE_CODE_OAUTH_TOKEN` は入っておらず、認証は共有の `.credentials.json` だった。** 変数のトークンと `CLAUDE_CODE_OAUTH_SCOPES` を組み合わせたときにコネクタが読まれるかは、この工程では確かめていない（トークンを取り出して扱う操作は共通原則の C1 に当たるため、未決 1 へ回した。利用者の許しを得て確かめた結果は未決 1 にある）
 - 本体には、スコープを変数で渡す使い方の前例がある（リモートの環境の起動で `CLAUDE_CODE_OAUTH_TOKEN` と `CLAUDE_CODE_OAUTH_SCOPES` を組にして子へ渡している）
 
 これで設計の候補は次の 3 つになる。どれを採るかは `design` が決める。
@@ -71,7 +71,7 @@
 | 候補 | 中身 | 要求から見た懸念 |
 | --- | --- | --- |
 | A（課題の案 1） | アカウントの置き場を `CLAUDE_CONFIG_DIR` にして渡す | #1389 の決定 1 で採らなかった形。会話の記録（`projects/`）・プラグイン・設定・`.claude.json` が置き場へ移る。Claude Code 自身が置き場の `.credentials.json` を更新し、NDF の更新（決定 3）と取り合う。子の中で `CLAUDE_CONFIG_DIR` から導くアカウントの置き場（`store_dir()`）の場所がずれる |
-| B | トークンは今のまま変数で渡し、アカウントの `.credentials.json` のスコープを `CLAUDE_CODE_OAUTH_SCOPES` で添える | 変数のトークンと組み合わせたときに読まれるかが未検証（未決 1）。本体の内部の振る舞いに頼る（前提 2） |
+| B | トークンは今のまま変数で渡し、アカウントの `.credentials.json` のスコープを `CLAUDE_CODE_OAUTH_SCOPES` で添える | 変数のトークンと組み合わせるとコネクタが読まれることを実測で確かめた（未決 1）。本体の内部の振る舞いに頼る（前提 2） |
 | C（課題の案 2） | 今のまま渡し、読まれないことを文書に書く | 期待する振る舞いを満たさない。A と B がどちらも成り立たないときの退路 |
 
 ## 前提
@@ -174,6 +174,6 @@
 
 | 項目 | 誰が決めるか | 期限 |
 | --- | --- | --- |
-| 1. 変数のトークンと `CLAUDE_CODE_OAUTH_SCOPES` を組み合わせたとき、コネクタが読まれるか（候補 B が成り立つか）。登録済みアカウントのトークンを NDF の `account_env()` の経路で子へ渡して `claude mcp list` を打てば確かめられるが、実物のトークンを使うため共通原則の C1 に当たる | 利用者が確かめを許すか決め、`design` が結果で候補を選ぶ | 設計の承認の前 |
-| 2. 認証の渡し方を変えるこの変更は、共通原則の C1（秘密に触れる）・C2（認証を変える）に当たる疑いがある。`pace` が承認ゲート 1 を MVV の判定に任せる設定でも、設計の承認は人が行うか | 利用者 | 設計の承認のとき |
-| 3. 候補 A を採る場合、共有の設定（プラグイン・`settings.json`・`.claude.json`・`projects/`）を置き場へどうつなぐか | `design` | 設計の承認の前 |
+| 1. （決まった、2026-09-30 利用者が確かめを許し conductor が実測）変数のトークンと `CLAUDE_CODE_OAUTH_SCOPES` を組み合わせると、コネクタは読まれる。nyle-personal の置き場のトークンを変数で渡し（値は表示・記録していない）、Claude Code 2.1.285 で `claude mcp list` を打った: トークンだけ → claude.ai のコネクタ 0 件 / トークン＋置き場の `scopes`（6 つ）→ 5 件すべて `✔ Connected` / トークン＋`user:inference user:mcp_servers` だけ → 5 件 / 置き場を `CLAUDE_CONFIG_DIR` → 5 件。**候補 B が成り立つ** | — | — |
+| 2. （決まった、2026-09-30 利用者）設計の承認は人が行う。このスプリントは `pace: normal` で、承認ゲート 1・2 とも利用者が承認する | — | — |
+| 3. 候補 A を採る場合、共有の設定（プラグイン・`settings.json`・`.claude.json`・`projects/`）を置き場へどうつなぐか。候補 B が成り立ったため、A を採る理由が無ければ要らない | `design` | 設計の承認の前 |
