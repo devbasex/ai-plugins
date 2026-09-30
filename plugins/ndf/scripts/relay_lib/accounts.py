@@ -106,7 +106,7 @@ def _metered_label(m: dict) -> str:
     if m["source"] == "env":
         return "環境変数（" + ", ".join(m["keys"]) + "）"
     if m["provider"] == bd.PROVIDER:
-        return bd.decl_label(m["details"])
+        return bd.decl_short(m["details"])
     return m["provider"] or "-"
 
 
@@ -131,7 +131,7 @@ def _table_row(r: dict, emails: list[str]) -> tuple[str, ...]:
         return (r["name"], _metered_label(r), *("-",) * (len(HEADER) - 3), r["state"])
     spend = {True: "達している", False: "達していない"}.get(r["spend_limit_reached"], "-")
     # 同じメールアドレスが 2 件以上あるときだけ組織名を添える（1 件なら個人の組織名はメールの繰り返しになる）
-    ident = f"{r['email']}（{r['org_name']}）" if r["org_name"] and emails.count(r["email"].lower()) > 1 else r["email"]
+    ident = f"{r['email']}（{_org_label(r)}）" if r["org_name"] and emails.count(r["email"].lower()) > 1 else r["email"]
     return (
         r["name"],
         ident,
@@ -143,6 +143,11 @@ def _table_row(r: dict, emails: list[str]) -> tuple[str, ...]:
         _usd(r["remaining"]),
         r["state"],
     )
+
+
+def _org_label(r: dict) -> str:
+    """組織名の表示。個人の組織の既定の名前（`<メール>'s Organization`）は `個人` に縮める。"""
+    return "個人" if r["org_name"].lower() == f"{r['email']}'s organization".lower() else r["org_name"]
 
 
 def _table_lines(rows: list[dict]) -> list[str]:

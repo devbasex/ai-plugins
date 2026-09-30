@@ -3249,7 +3249,26 @@ def test_account_add_same_email_other_org(tmp_path, accounts):
     ]
     lines = account_cmd(tmp_path, accounts, "list", tty=False).stdout.splitlines()
     assert any(line.startswith("work2") and "a@example.com（Team A）" in line for line in lines)
+    assert any(line.startswith("work1") and "a@example.com（個人）" in line for line in lines)  # 個人の組織の既定の名前は短く
+    assert "'s Organization" not in "\n".join(lines)
     assert sorted(p.name for p in accounts.root.iterdir() if not p.name.endswith(".lock")) == ["work1", "work2"]
+
+
+@pytest.mark.parametrize(
+    ("profile", "label"),
+    [("default", "Bedrock（ap-northeast-1・claude-opus-5-5）"), ("dev", "Bedrock（dev・ap-northeast-1・claude-opus-5-5）")],
+)
+def test_account_list_metered_label_is_short(tmp_path, accounts, profile, label):
+    """表の metered の識別は地域の接頭辞と `anthropic.` を外したモデル名にし、プロファイルは default 以外のときだけ出す。"""
+    details = {"profile": profile, "region": "ap-northeast-1", "model": "jp.anthropic.claude-opus-5-5"}
+    decl = {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": profile, "AWS_REGION": "ap-northeast-1"}
+    accounts.write(
+        accounts.root / "metered.json", {"version": 1, "provider": "bedrock", "env": decl, "details": details, "verified_at": "x"}
+    )
+    lines = account_cmd(tmp_path, accounts, "list", tty=False).stdout.splitlines()
+    assert any(line.startswith("metered") and label in line for line in lines), lines
+    rows = json.loads(account_cmd(tmp_path, accounts, "list", "--json", tty=False).stdout)
+    assert rows[-1]["details"] == details  # JSON の出力は変えない
 
 
 def test_account_add_same_email_without_known_org_rejects(tmp_path, accounts):
