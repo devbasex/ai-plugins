@@ -69,6 +69,14 @@ def relay_uv(tmp_path, monkeypatch):
     monkeypatch.setenv("NDF_RELAY_UV", str(fake_uv(tmp_path)))
 
 
+@pytest.fixture(autouse=True)
+def relay_accounts_dir(tmp_path, monkeypatch):
+    """アカウントの置き場を空の一時ディレクトリへ向ける。向けないと、実行した人の `~/.claude/ndf/accounts` の
+    `metered.json`（保存した従量の接続の宣言）を `fallback_env` が読み、宣言の無い前提のテストが落ちる。
+    `accounts` のフィクスチャはこの後に自分の置き場へ向け直す。"""
+    monkeypatch.setenv("NDF_ACCOUNTS_DIR", str(tmp_path / "no-accounts"))
+
+
 def isolated_env(tmp_path, **extra):
     """一時の HOME と XDG_* だけを持つ環境。本物の HOME を指さないことを確かめてから返す。
 
