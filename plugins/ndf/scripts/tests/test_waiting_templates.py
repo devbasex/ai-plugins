@@ -33,7 +33,9 @@ def start(cmd, bin_dir):
     env = {"PATH": str(bin_dir)}
     assert shutil.which("timeout", path=env["PATH"]) is None
     assert shutil.which("gtimeout", path=env["PATH"]) is None
-    return subprocess.Popen([str(bin_dir / "bash"), "-c", cmd], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True), time.monotonic()
+    return subprocess.Popen(
+        [str(bin_dir / "bash"), "-c", cmd], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    ), time.monotonic()
 
 
 def finish(proc, t0, limit):
