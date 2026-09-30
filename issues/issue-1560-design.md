@@ -110,7 +110,7 @@ conductor が打つスクリプトで、書き換えの主体ではない。supe
 | `sprint-state.py`（変更） | 上の 2 関数を `lib/handoff_doc.py` から読む。引数・出力・振る舞いは変えない |
 | `restart/SKILL.md`（変更） | 手順に「引継ぎの対象を決め、文書を作る・更新する」を足し、再開コマンドの表の 1・2 行目に文書のパスを含める |
 | `context-window.md`（変更） | 「新しい会話で戻す」の表の先頭に文書を読む行を置く。更新の文は正本を指す |
-| `relay.md`（変更） | 例の `DOC=issues/handoff-<名>.md` を `DOC` に `handoff.py path <名>` の `path`（メインディレクトリの絶対パス）を入れる形にし、置き場の規則は正本を指す。**手順も変える:** (1) 手順 1 の `--goal` の雛形に「`.ndf/handoff/<名>.md` の続きから」を必ず書く規則を足す（`sprint-state.py` の差し込みの語は増やさず、名はスプリントの間変わらないため文字のまま書く。正本の「更新する」にも同じ規則を置く）。(2) カットポイントの 3 つの呼び出しと本番後のパイプラインの前に `handoff.py init <名> --title <表示名>`、`next --replace` の後に `handoff.py check <名> --trim` を足す |
+| `relay.md`（変更） | 例の `DOC=issues/handoff-<名>.md` を `DOC` に `handoff.py path <名>` の `path`（メインディレクトリの絶対パス）を入れる形にし、置き場の規則は正本を指す。**手順も変える:** (1) 手順 1 の `--goal` の雛形に「`.ndf/handoff/sprint-{name}.md` の続きから」（スプリント名が I2 の形に合わなければ `.ndf/handoff/milestone-{milestone}.md`）を必ず書く規則を足す（既存の差し込みの語 `{name}`・`{milestone}` を使い、文書のパスを文字のまま書かない。雛形は次のスプリントでも同じものを使うため、文字のままでは前のスプリントの文書を指し続ける。`sprint-state.py` の差し込みの語と振る舞いは変えない。正本の「更新する」にも同じ規則を置く）。(2) カットポイントの 3 つの呼び出しと本番後のパイプラインの前に `handoff.py init <名> --title <表示名>`、`next --replace` の後に `handoff.py check <名> --trim` を足す。(3) 本番後のパイプラインを背景の Bash で流す前に、conductor が `init` を打ち、本番の後の現在地と次にやることを文書へ書く手順を足す（パイプラインの中では書き直せないため） |
 | `development-workflow/SKILL.md`（変更） | 対象の最後の工程（振り返り）の後に文書を消す 1 文と、正本への案内 |
 | `conductor-entrypoints.md`（変更） | 「セッションの切り替えと記録」の表に `handoff.py` の 6 つの副命令を足す |
 | 開発ワークフローの用語集 `glossary.md`（変更） | 「引継ぎ文書」の行を直し、「引継ぎの対象」「引継ぎの履歴」を足す |
@@ -364,9 +364,14 @@ sequenceDiagram
   課題番号があれば `issue-<最初の番号>`。どれも無ければ文書を作らない（restart の表の 3 行目か、引数だけで出す）
 - **スプリント状態ファイルがあるカットポイントでは、`next` の代わりに `sprint-state.py next --doc <本体> --replace`
   を打つ**（relay.md の今の手順）。同じ節を同じ形で置き換える。再開コマンドは `goal_template` から作られるため、
-  文書のパスは `sprint-state.py init --goal` の雛形に「`.ndf/handoff/<名>.md` の続きから」を文字のまま書いて含める
-  （E4・受け入れ条件 7。差し込みの語は足さず、`sprint-state.py` の振る舞いは変えない）
-- **本番後のパイプライン（relay.md）もこの図の順に流す。** 先頭に `handoff.py init`、`next --replace` の後に
+  文書のパスは `sprint-state.py init --goal` の雛形に「`.ndf/handoff/sprint-{name}.md` の続きから」（スプリント名が
+  I2 の形に合わなければ `.ndf/handoff/milestone-{milestone}.md`）と既存の差し込みの語で書いて含める（E4・受け入れ条件 7）。
+  雛形は次のスプリントでも同じものを使う（relay.md）ため、パスを文字のまま書くと前のスプリントの文書を指し続ける。
+  差し込みの語は足さず、`sprint-state.py` の振る舞いは変えない
+- **本番後のパイプライン（relay.md）もこの図の順に流す。** 図の 3 つ目（現在地・次にやることを書き直す）は背景の Bash
+  では行えないため、conductor がパイプラインを流す前に `handoff.py init` を打ち、本番の後の現在地と次にやることを
+  文書へ書く（必須の 2 節を空のまま `check` へ渡さず、E5 の読み先を空にしない）。パイプラインの先頭の `handoff.py init` は
+  既にある文書をそのまま残し、`next --replace` の後に
   `handoff.py check --trim` を置く。`render --demote` がカットポイントごとに足す「前の会話の進み」を `--trim` が
   履歴へ移すため、節は重ならず（I3）、300 行の検査（I5）も走る。`check` が 1 か 5 ならパイプラインはブロックを出さずに
   止まり、conductor が完了の通知で終了コードを受けて下の規則で扱ってからブロックを出す
