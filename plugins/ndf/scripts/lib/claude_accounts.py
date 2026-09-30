@@ -185,6 +185,15 @@ def lock_timeout() -> type[BaseException]:
     return locks.LockTimeout
 
 
+def _with_lock(name: str, fn, on_fail):
+    """アカウント `name` の排他の中で `fn()` を呼ぶ。排他を取れないか OSError なら `on_fail()` を返す。"""
+    try:
+        with _locked(name):
+            return fn()
+    except (lock_timeout(), OSError):
+        return on_fail()
+
+
 # ---------------------------------------------------------------- アカウントと上限の観測
 
 
@@ -316,11 +325,11 @@ def note_limit(name: str, kind: str, resets_at: float | None, now: float | None 
     if not name or name == METERED:
         return
     now = _now(now)
-    try:
-        with _locked(name):
-            _update_account(name, limit={"type": kind, "resets_at": iso_utc(resets_at), "observed_at": iso_utc(now)})
-    except (lock_timeout(), OSError):
-        pass
+    _with_lock(
+        name,
+        lambda: _update_account(name, limit={"type": kind, "resets_at": iso_utc(resets_at), "observed_at": iso_utc(now)}),
+        lambda: None,
+    )
 
 
 # ---------------------------------------------------------------- トークン
@@ -386,12 +395,12 @@ def _grant(name: str, before: float | None, now: float | None = None, min_left: 
 
     スコープはトークンの後に読む（更新すると置き場の `scopes` が書き直される）。読めなければスコープだけ None。"""
     now = _now(now)
-    try:
-        with _locked(name):
-            tok = _token_held(name, before, now, min_left=min_left)
-            return None if tok is None else (tok, _scopes_held(name))
-    except (lock_timeout(), OSError):
-        return None
+
+    def held() -> tuple[str, str | None] | None:
+        tok = _token_held(name, before, now, min_left=min_left)
+        return None if tok is None else (tok, _scopes_held(name))
+
+    return _with_lock(name, held, lambda: None)
 
 
 def token(name: str, before: float | None = REFRESH_BEFORE, now: float | None = None, min_left: float = 0) -> str | None:
@@ -424,18 +433,18 @@ def usage(name: str, before: float | None = REFRESH_BEFORE, now: float | None = 
     """残量。前の取得から `check_interval()` 秒の中なら保存した値を返し、取得先を呼ばない（I6）。"""
     now = _now(now)
     path = _path(name, USAGE_FILE)
-    try:
-        with _locked(name):
-            saved = Usage.from_json(_read(path))
-            if saved is not None and now - saved.fetched_at < check_interval():
-                return saved
-            if _read(_path(name, ACCOUNT_FILE)) is None:
-                return None
-            u = _fetch(name, before, now)
-            _write(path, u.to_json())
-            return u
-    except (lock_timeout(), OSError):
-        return Usage.from_json(_read(path))
+
+    def held() -> Usage | None:
+        saved = Usage.from_json(_read(path))
+        if saved is not None and now - saved.fetched_at < check_interval():
+            return saved
+        if _read(_path(name, ACCOUNT_FILE)) is None:
+            return None
+        u = _fetch(name, before, now)
+        _write(path, u.to_json())
+        return u
+
+    return _with_lock(name, held, lambda: Usage.from_json(_read(path)))
 
 
 # ---------------------------------------------------------------- 選び方
