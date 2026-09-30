@@ -1,4 +1,4 @@
-"""drive.py の再開: done まで進んだ駆動は `refactor.py init` を打ち直さない（#1142 の I7・不足 d）。
+"""drive.py の再開: 打ち直した駆動は耐久の記録から続け、`refactor.py init` を打ち直さない（#1142 の I19・不足 d）。
 
 実機の `refactor.py init` は、`phase` が `done` の状態を再開の対象にせず、新しい状態で作り直す。
 偽物の `call` がその振る舞いを模し、打ち直した駆動が実際の件数を返すことを確かめる。
@@ -27,6 +27,18 @@ def _load():
 
 
 rf = _load()
+
+
+@pytest.fixture(autouse=True)
+def durable_in_process(monkeypatch):
+    """止まりで抜けるところを SystemExit に替え、同じプロセスの打ち直しが開いたままの耐久の記録を続ける。"""
+
+    def leave(code):
+        raise SystemExit(code)
+
+    monkeypatch.setattr(rf.durable, "exit_leaving_pending", leave)
+    yield
+    rf.durable.close()
 
 
 class FakeRefactor:
@@ -117,12 +129,72 @@ def test_rerun_after_cross_review_keeps_review_status(tmp_path, monkeypatch, cap
     assert fake.inits() == inits
 
 
-def test_drive_state_keeps_init_vars(tmp_path, monkeypatch, capsys):
+def test_rerun_without_the_result_pauses_again_with_a_larger_number(tmp_path, monkeypatch, capsys):
+    """結果ファイルを書かずに打ち直すと同じ止まりを番号を増やして返し、書いてから打ち直すと finalize へ進む。
+
+    進みは耐久の記録だけが持ち、drive の状態ファイル（`drive-rf<ID>.json`）は書かない（#1142 の決定 32・I19）。"""
     monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path))
-    monkeypatch.setattr(rf, "call", FakeRefactor(tmp_path))
-    run_main(ARGV, capsys)
-    ds = json.loads((tmp_path / "drive-rf7.json").read_text())
-    assert ds["init_vars"]["ID"] == "7" and ds["init_vars"]["TMP_DIR"] == str(tmp_path)
+    fake = FakeRefactor(tmp_path, gate="cross-review")
+    monkeypatch.setattr(rf, "call", fake)
+    code, out = run_main(ARGV, capsys)
+    assert code == 23
+    (wid,) = rf.durable.workflow_ids("refactor-")
+    assert rf.durable.event(wid)["seq"] == 1
+    code, out = run_main(ARGV, capsys)
+    assert code == 23 and out["items"][0]["pause"] == "cross-review"
+    assert rf.durable.event(wid)["seq"] == 2
+    assert not (tmp_path / "drive-rf7.json").exists()
+    Path(out["items"][0]["result_file"]).write_text('{"review_status": "approved"}')
+    code, out = run_main(ARGV, capsys)
+    assert code == 0 and out["metrics"]["review_status"] == "approved"
+    assert fake.inits() == 1 and not (tmp_path / "drive-rf7.json").exists()
+
+
+# 別のプロセスで drive.py の main を打つ。偽物の refactor.py は状態ファイルを読み直し、呼び出しをファイルへ残す
+RUNNER = """
+import importlib.util, json, sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("resume_test", {test!r})
+t = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(t)
+tmp, log = Path(sys.argv[1]), Path(sys.argv[2])
+fake = t.FakeRefactor.__new__(t.FakeRefactor)
+fake.tmp, fake.gate, fake.calls = tmp, "cross-review", []
+fake.state = json.loads((tmp / "cross-refactoring-rf7-state.json").read_text())
+
+def call(cmd, env=None, cwd=None):
+    out = fake(cmd, env, cwd)
+    with log.open("a") as f:
+        f.write(json.dumps(fake.calls[-1]) + "\\n")
+    return out
+
+t.rf.call = call
+t.rf.main(sys.argv[3:])
+"""
+
+
+def test_a_pause_survives_the_process_and_the_next_process_does_not_init_again(tmp_path, monkeypatch):
+    """止まりのまま抜けたプロセスの後、別のプロセスの打ち直しが耐久の記録から続け、init を打たない（I19）。"""
+    monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path))
+    FakeRefactor(tmp_path)  # 状態ファイルを置く
+    runner = tmp_path / "runner.py"
+    runner.write_text(RUNNER.format(test=str(Path(__file__).resolve())))
+    log = tmp_path / "calls.jsonl"
+
+    def drive():
+        p = subprocess.run([PY, str(runner), str(tmp_path), str(log), *ARGV], capture_output=True, text=True, timeout=120)
+        return p.returncode, json.loads(p.stdout.strip().splitlines()[-1])
+
+    code, out = drive()
+    assert code == 23 and out["items"][0]["pause"] == "cross-review"
+    code, _ = drive()
+    assert code == 23
+    Path(out["items"][0]["result_file"]).write_text('{"review_status": "approved"}')
+    code, out = drive()
+    assert code == 0 and out["metrics"]["review_status"] == "approved"
+    calls = [json.loads(line) for line in log.read_text().splitlines()]
+    assert [c[1] for c in calls if c[0] == "refactor.py"].count("init") == 1
+    assert ["refactor.py", "finalize", "7", "--review-status", "approved"] in calls
 
 
 def test_rerun_finds_drive_state_under_given_root(tmp_path, monkeypatch, capsys):

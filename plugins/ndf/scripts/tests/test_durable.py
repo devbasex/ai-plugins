@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import signal
 import subprocess
@@ -226,6 +227,18 @@ def test_one_process_opens_one_record(opened):
     durable.launch("run", "one")
     with pytest.raises(durable.DurableError):
         durable.launch("run", "two")
+
+
+def test_a_second_launch_in_one_process_does_not_flush_a_closed_log_stream(opened):
+    """DBOS のログの出力先が前の起動の（閉じた）標準エラーに残っても、開き直しは落ちない（テストの capsys の形）。"""
+    durable.launch("run", "first")
+    durable.close()
+    closed = open(os.devnull, "w")
+    closed.close()
+    for h in logging.getLogger("dbos").handlers:
+        if h.name == "__dbos_console_log_handler__":
+            h.stream = closed
+    assert durable.launch("run", "second").key == durable.launch_key("run", "second")
 
 
 def test_no_port_is_listened_while_launched(child):
