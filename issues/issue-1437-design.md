@@ -52,23 +52,23 @@
 
 ### ドメインイベント
 
-要求の番号を引き継ぐ。
+要求の番号を引き継ぐ。発生元と受け手は実装の呼び出しの向きに合わせる。`resolve` が `_from_args` を通して `_args_suites` を呼び、`_args_suites` が全体テストと注記を組んで返し、`resolve` がそれを `Strategy` に詰めて読む側へ返す。
 
 | # | イベント | 発生元 | 受け手 |
 | --- | --- | --- | --- |
-| E1 | 利用者が `--test-cmd` の雛形と種別を渡した | 利用者（`supervise.py new` / `test-run.py --template` / cross-refactoring の起動） | `resolve`（E2） |
-| E2 | 戦略が全体テストを決めた | `resolve` | `_args_suites`（E3） |
-| E3 | 全体テストを雛形から組んだことが注記として戦略に載った | `_args_suites` | `apply_decls`（E4）・`test-run.py`（E5）・cross-refactoring の `setup`（既存の表示） |
+| E1 | 利用者が `--test-cmd` の雛形と種別を渡した | 利用者（`supervise.py new` / `test-run.py --template` / cross-refactoring の起動） | `resolve`（`_from_args` を通して `_args_suites` を呼ぶ） |
+| E2 | 戦略が全体テストを決めた | `_args_suites`（suite の並びを組む） | `resolve`（返された suite の並びを `Strategy` に詰める） |
+| E3 | 全体テストを雛形から組んだことが注記として戦略に載った | `_args_suites`（E2 と同じ呼び出しで `notes` へ足す） | 返された `Strategy` を使う側: `apply_decls`（E4）・`test-run.py`（E5）・cross-refactoring の `setup`（既存の表示） |
 | E4 | `supervise.py new` が計画を書き、注記を標準エラーへ出した | `apply_decls` | 利用者・conductor |
 | E5 | `test-run.py whole` が全体テストを走らせ、結果の `items` に注記を残した | `test-run.py` | judge・supervisor |
 
 ### 用語
 
-新しい語は作らない。「全体テスト」「範囲テスト」「範囲テストの雛形」「テストの戦略」「suite の種別」は用語集（`ndf-workflow`）の意味のまま使う。
+新しい語は作らない。「範囲テスト」「範囲テストの雛形」「テストの戦略」「suite の種別」は用語集（`ndf-workflow`）の意味のまま使う。「全体テスト」は、用語集が「リポジトリ全体を範囲にするテスト」とだけ書き、今の `_args_suites` が静的解析の全体テストを範囲のパスで埋めている（実例の表の 2・5 行目）ことと食い違っていたため、用語集をこの意味へ直す。
 
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
-| 全体テスト | 範囲を絞らずに走らせるテストか静的解析。宣言の `suites[].command`、無ければ雛形から組む | 変更なし |
+| 全体テスト | プランの `test-all` のステップで走らせるテストか静的解析。テストはリポジトリ全体を範囲にする（宣言の `suites[].command`、無ければ雛形の `{paths}` を `.` にしたもの）。静的解析は宣言の `command`、無ければ雛形の `{paths}` を範囲のパスで埋めたもの（範囲のパスが無ければ組まず `NO_LINT_WHOLE`） | 変更あり（`development-workflow/references/glossary.md` と `docs/glossary.md` の「全体テスト」の行） |
 | 範囲テストの雛形 | `{paths}` を 1 語で含むコマンド | 変更なし |
 
 ## 機能一覧
@@ -192,6 +192,8 @@ sequenceDiagram
 
 どの注記を出すかを読む側で選ぶと、戦略に注記を足すたびに読む側を直すことになる。`supervise` の経路で戦略に載りうる注記は `WHOLE_FROM_TEMPLATE` と `NO_LINT_WHOLE` で、どちらも計画の作成の時点で利用者が知るべきことである（`NO_LINT_WHOLE` は今は `test-all` を走らせるまで見えない）。cross-refactoring の `setup` も同じくすべてを出している。
 
+これは要求の対象範囲（含む）を 1 点広げる。要求が標準エラーへ出すと定めるのは `WHOLE_FROM_TEMPLATE` だけで、`NO_LINT_WHOLE` を標準エラーへ出すこと（`--test-kind lint` で範囲のパスが無い `supervise.py new` で `⚠` の行が 1 行増える）は要求に無い。広げた振る舞いは受け入れ条件の外に置かず、テスト設計の D3 で縛る。要求の本文の対象範囲へこの 1 行を足すかは、設計の承認で決める（「未確認のまま残ること」）。
+
 根拠: Value 6 / Value 2（MVV 版 2）
 
 ### 決定 4: 注記の文に雛形を埋め込まない
@@ -212,6 +214,7 @@ sequenceDiagram
 | AC6 | `--test-kind lint` で範囲のパスが無い `test-run.py whole` の結果の `items` に `NO_LINT_WHOLE` が残り、静的解析の全体テストが組まれない | 範囲が無いときに `.` で組む、注記を捨てる |
 | AC7・I3 | 宣言が無く種別 test の雛形 `pytest {paths} -q` の全体テストは `pytest . -q` のまま。注記を足しても suite の並びと戦略の名前は変わらない | 雛形から全体テストを組むのをやめる、注記を足すときに suite を変える |
 | I4 | 同じ形の雛形 `shellcheck -s bash {paths}` と `pytest {paths} -q` が同じ注記を持つ | コマンドの語で注記の有無を分ける |
+| D3・I5 | 宣言に pytest の suite があり `--test-kind lint` で範囲のパスが無い `supervise.py new sprint` を走らせると、標準エラーに `NO_LINT_WHOLE` の文がちょうど 1 度出て、終了コードは範囲のパスがあるときと同じ | `apply_decls` が `WHOLE_FROM_TEMPLATE` だけを選んで出す、2 度出す、注記で終了コードを変える |
 | AC8 | 全体テスト（`uv run --frozen --project . --all-extras pytest . -q -n 4`）と `ruff check plugins/ndf/scripts` が通る | 既存のテストが `notes == []` や標準エラーの中身を固定していて落ちる |
 
 既存の `test_a_lint_template_fills_paths_with_the_scope` は静的解析の雛形で `notes == []` を見ており、テストの種別の分岐に触れないため変えない。
@@ -220,5 +223,6 @@ sequenceDiagram
 
 | 項目 | 内容 |
 | --- | --- |
+| 要求の対象範囲 | 決定 3 は `NO_LINT_WHOLE` も標準エラーへ出し、要求の対象範囲（含む）を 1 点広げる。要求の本文（#1437）の対象範囲へ「戦略の注記（`NO_LINT_WHOLE` を含む）を標準エラーへ出すこと」を足すかは、設計の承認で決める。足さないと決めたら、決定 3 を `WHOLE_FROM_TEMPLATE` だけを出す形へ改め、D3 を外す |
 | 判定の読み手 | judge が `items` の注記を読んで「雛形から組んだ全体テストの失敗」と見分けるかは、judge の規則（前提 4・`lint_verdict`）に依る。この変更では規則を変えず、注記が judge の判定を変えるかは実運用で見る |
 | `supervise.json` の `test.command` | `decl_of` が `supervise.json` の `test.command` を宣言へ読み替えるときも、`{paths}` を `.` にした全体テストを組む。これは宣言の経路で、既存の注記（`supervise.json` を読んだ旨）を持つため、この変更では注記を足さない |
