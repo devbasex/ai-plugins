@@ -334,21 +334,28 @@ def verify_facts_cmd(a, repo: str, verify: str) -> str:
     return f"{STEPS_PY} verify-facts --root {q(repo)} --base {q(a.base)} --verify {q(verify)} --out {VERIFY_MATERIAL}"
 
 
-def plan_verify(a, repo: str, verify: str, condition: dict | None = None) -> dict:
-    """経路 merge だけのスプリント（#1457）の「導入の確認」のプラン: verify（導入の確認。落ちたら止まる）の 1 ステップ。"""
+def release_plan(a, repo: str, phase: str, rule: str, steps: list, condition: dict | None) -> dict:
+    """配布のプラン（導入の確認・昇格・承認ゲート 2）に共通の枠。上限 12 で、condition があれば「実行の条件」を足す。"""
     plan = {
-        "フェーズ": "配布（導入の確認）",
+        "フェーズ": phase,
         "課題": a.issue,
         "モード": a.mode,
         "作業場所": repo,
         "リポジトリ": repo,
-        "規則": RULE_VERIFY,
+        "規則": rule,
         "上限": 12,
-        "steps": [facts_step(repo, verify_facts_cmd(a, repo, verify), "end", "verify")],
+        "steps": steps,
     }
     if condition:
         plan["実行の条件"] = condition
     return with_decls(plan, a)
+
+
+def plan_verify(a, repo: str, verify: str, condition: dict | None = None) -> dict:
+    """経路 merge だけのスプリント（#1457）の「導入の確認」のプラン: verify（導入の確認。落ちたら止まる）の 1 ステップ。"""
+    return release_plan(
+        a, repo, "配布（導入の確認）", RULE_VERIFY, [facts_step(repo, verify_facts_cmd(a, repo, verify), "end", "verify")], condition
+    )
 
 
 def plan_promote(
@@ -421,19 +428,7 @@ def plan_promote(
             approved,
             handoff_step(state, "関門 2", "昇格のマージ"),
         ]
-    plan = {
-        "フェーズ": "配布（昇格）",
-        "課題": a.issue,
-        "モード": a.mode,
-        "作業場所": repo,
-        "リポジトリ": repo,
-        "規則": RULE_PROMOTE,
-        "上限": 12,
-        "steps": steps,
-    }
-    if condition:
-        plan["実行の条件"] = condition
-    return with_decls(plan, a)
+    return release_plan(a, repo, "配布（昇格）", RULE_PROMOTE, steps, condition)
 
 
 GATE_2_MATERIAL = "{state_dir}/work/approval-deploy.md"  # deploy-facts が書く承認資料
@@ -470,19 +465,7 @@ def plan_gate_2(a, repo: str, mvv: str, verify: str, prs: str | None, condition:
             f'for p; do gh pr comment "$p" --body-file {MVV_NOTE} || exit 1; done\''
         )
         steps = [facts, *mvv_gate_steps(mvv_cmd, note_cmd, "end"), handoff_step(state, "関門 2", "判定のコメント")]
-    plan = {
-        "フェーズ": "配布（承認ゲート 2）",
-        "課題": a.issue,
-        "モード": a.mode,
-        "作業場所": repo,
-        "リポジトリ": repo,
-        "規則": RULE_GATE_2,
-        "上限": 12,
-        "steps": steps,
-    }
-    if condition:
-        plan["実行の条件"] = condition
-    return with_decls(plan, a)
+    return release_plan(a, repo, "配布（承認ゲート 2）", RULE_GATE_2, steps, condition)
 
 
 RULE_GATE_2 = (
