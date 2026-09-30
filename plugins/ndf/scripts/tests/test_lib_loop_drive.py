@@ -55,3 +55,17 @@ def test_call_returns_code_and_stdout_and_passes_stderr(capsys):
     code, out = loop_drive.call([sys.executable, "-c", "import sys; print('o'); sys.stderr.write('e'); sys.exit(5)"])
     assert (code, out) == (5, "o\n")
     assert capsys.readouterr().err == "e"
+
+
+@pytest.mark.parametrize("path", DRIVES, ids=lambda p: p.parents[1].name)
+def test_identity_is_the_resolved_tmp_or_cwd_and_pr(path, tmp_path, monkeypatch):
+    """Drive.identity（現状固定）: 状態の置き場が求まればその絶対パス、求まらなければ `<作業ディレクトリ>#<PR>`。"""
+    drive = load(path)
+    d = object.__new__(drive.Drive)
+    d.pr = 42
+    (tmp_path / "t").mkdir()
+    monkeypatch.chdir(tmp_path)
+    d.known_tmp = lambda: Path("t")
+    assert d.identity() == str((tmp_path / "t").resolve())
+    d.known_tmp = lambda: None
+    assert d.identity() == f"{tmp_path.resolve()}#42"
