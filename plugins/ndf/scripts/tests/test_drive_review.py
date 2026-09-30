@@ -7,6 +7,10 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import pickle
+import tempfile
+import traceback
 import types
 import sys
 from pathlib import Path
@@ -22,22 +26,64 @@ import drive_pause  # noqa: E402
 
 
 def load(name, path):
+    """同じ名前で 1 度だけ読む（耐久ワークフローの登録を 1 つのモジュールに保つ）。"""
+    if name in sys.modules:
+        return sys.modules[name]
     spec = importlib.util.spec_from_file_location(name, path)
     mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
     spec.loader.exec_module(mod)
     return mod
 
 
-cr = load("cr_drive", SKILLS / "cross-review" / "scripts" / "drive.py")
+cr = load("cross_review_drive", SKILLS / "cross-review" / "scripts" / "drive.py")
 rf = load("rf_drive", SKILLS / "cross-refactoring" / "scripts" / "drive.py")
 
 
+def fork_main(mod, argv) -> tuple[int, str]:
+    """駆動を fork した子で 1 回打つ。子は止まりのまま `os._exit` で抜けるため、テストのプロセスに耐久の記録と
+    待ちのスレッドを残さない。差し替えた `call` の中身（呼び出しの記録ほか）は子が終わる前に書き出して親へ戻す。"""
+    fake = mod.call
+    fd, box = tempfile.mkstemp(suffix=".pickle")
+    os.close(fd)
+    r, w = os.pipe()
+    pid = os.fork()
+    if pid == 0:  # 子
+        os.close(r)
+        try:
+            sys.stdout = os.fdopen(w, "w")
+
+            def leave(code):
+                sys.stdout.flush()
+                with open(box, "wb") as f:
+                    pickle.dump(dict(getattr(fake, "__dict__", {})), f)
+                os._exit(code if isinstance(code, int) else 1)
+
+            mod.durable.exit_leaving_pending = leave
+            try:
+                mod.main(argv)
+            except SystemExit as e:
+                leave(e.code)
+        except BaseException:  # noqa: BLE001  子の失敗は親で終了コード 99 として見る
+            traceback.print_exc()
+        os._exit(99)
+    os.close(w)
+    with os.fdopen(r) as f:
+        text = f.read()
+    _, status = os.waitpid(pid, 0)
+    with open(box, "rb") as f:
+        saved = f.read()
+    os.unlink(box)
+    if saved and hasattr(fake, "__dict__"):
+        fake.__dict__.update(pickle.loads(saved))
+    return os.waitstatus_to_exitcode(status), text
+
+
 def run_main(mod, argv, capsys):
-    with pytest.raises(SystemExit) as e:
-        mod.main(argv)
-    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
-    assert validate_result(out, e.value.code) == []
-    return e.value.code, out
+    code, text = fork_main(mod, argv)
+    out = json.loads(text.strip().splitlines()[-1])
+    assert validate_result(out, code) == []
+    return code, out
 
 
 # --- cross-review ---------------------------------------------------------------

@@ -1,16 +1,20 @@
-"""drive.py の再開: sweep / done まで進んだ駆動は `state.py init` を打ち直さない（#1142 の I7・不足 d）。
+"""drive.py の再開: 打ち直した駆動は耐久の記録から続き、`state.py init` を打ち直さない（#1142 の I19・不足 d）。
 
 実機の `state.py init` は、`final` が決まった状態を再開の対象にせず、空の状態で上書きする。
 偽物の `call` がその振る舞いを模し、打ち直した駆動が実際のラウンド数と指摘数を返すことを確かめる。
+駆動は 1 回ずつ fork した子で打つ（`test_drive_review.fork_main` と同じ形。止まりのまま `os._exit` で抜ける）。
 """
 
 from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import pickle
 import subprocess
 import sys
 import tempfile
+import traceback
 from pathlib import Path
 
 import pytest
@@ -20,8 +24,12 @@ PY = sys.executable
 
 
 def _load():
-    spec = importlib.util.spec_from_file_location("cross_review_drive_resume", SCRIPTS / "drive.py")
+    """同じ名前で 1 度だけ読む（耐久ワークフローの登録を 1 つのモジュールに保つ）。"""
+    if "cross_review_drive" in sys.modules:
+        return sys.modules["cross_review_drive"]
+    spec = importlib.util.spec_from_file_location("cross_review_drive", SCRIPTS / "drive.py")
     mod = importlib.util.module_from_spec(spec)
+    sys.modules["cross_review_drive"] = mod
     spec.loader.exec_module(mod)
     return mod
 
@@ -85,9 +93,41 @@ class FakeReview:
 
 
 def run_main(argv, capsys):
-    with pytest.raises(SystemExit) as e:
-        cr.main(argv)
-    return e.value.code, json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    """駆動を fork した子で 1 回打つ。差し替えた `call` の中身は子が終わる前に書き出して親へ戻す。"""
+    fake = cr.call
+    fd, box = tempfile.mkstemp(suffix=".pickle")
+    os.close(fd)
+    r, w = os.pipe()
+    pid = os.fork()
+    if pid == 0:  # 子
+        os.close(r)
+        try:
+            sys.stdout = os.fdopen(w, "w")
+
+            def leave(code):
+                sys.stdout.flush()
+                with open(box, "wb") as f:
+                    pickle.dump(dict(getattr(fake, "__dict__", {})), f)
+                os._exit(code if isinstance(code, int) else 1)
+
+            cr.durable.exit_leaving_pending = leave
+            try:
+                cr.main(argv)
+            except SystemExit as e:
+                leave(e.code)
+        except BaseException:  # noqa: BLE001  子の失敗は親で終了コード 99 として見る
+            traceback.print_exc()
+        os._exit(99)
+    os.close(w)
+    with os.fdopen(r) as f:
+        text = f.read()
+    _, status = os.waitpid(pid, 0)
+    with open(box, "rb") as f:
+        saved = f.read()
+    os.unlink(box)
+    if saved:
+        fake.__dict__.update(pickle.loads(saved))
+    return os.waitstatus_to_exitcode(status), json.loads(text.strip().splitlines()[-1])
 
 
 def drive_to_sweep(fake: FakeReview, argv, capsys) -> dict:
@@ -119,12 +159,13 @@ def test_rerun_from_sweep_keeps_rounds_and_findings(tmp_path, monkeypatch, capsy
     assert fake.inits() == inits
 
 
-def test_drive_state_keeps_init_vars(tmp_path, monkeypatch, capsys):
+def test_progress_lives_in_the_durable_record(tmp_path, monkeypatch, capsys):
+    """進みは耐久の記録（種類 review・鍵の元は状態の置き場）にあり、駆動の状態ファイルを書かない。"""
     monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
     monkeypatch.setattr(cr, "call", FakeReview(tmp_path))
     run_main(["5"], capsys)
-    ds = json.loads((tmp_path / "drive-pr5.json").read_text())
-    assert ds["init_vars"]["TMP_DIR"] == str(tmp_path) and ds["init_vars"]["REPO"] == "o/r"
+    assert not (tmp_path / "drive-pr5.json").exists()
+    assert cr.durable.record_path("review", str(tmp_path.resolve())).is_file()
 
 
 def test_rerun_finds_drive_state_under_given_worktree(tmp_path, monkeypatch, capsys):
@@ -171,24 +212,43 @@ def test_rerun_finds_drive_state_under_default_worktree(tmp_path, monkeypatch, c
     assert code == 0 and out["metrics"]["rounds"] == 2 and fake.inits() == inits
 
 
-def test_drive_state_before_sweep_still_runs_init(tmp_path, monkeypatch, capsys):
-    """sweep より前の段階では、これまでどおり init を打って再開する。"""
+def test_rerun_before_sweep_does_not_run_init_again(tmp_path, monkeypatch, capsys):
+    """sweep より前の止まりから打ち直しても、1 回の中で init は 1 回だけ流れる（I19）。"""
     monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
     fake = FakeReview(tmp_path)
     monkeypatch.setattr(cr, "call", fake)
     run_main(["5"], capsys)
-    run_main(["5"], capsys)
-    assert fake.inits() == 2
-
-
-def test_drive_state_of_other_dir_is_not_used(tmp_path, monkeypatch, capsys):
-    """駆動の状態の `init_vars` が別の置き場を指すなら使わず、init を打つ。"""
-    monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
-    fake = FakeReview(tmp_path)
-    monkeypatch.setattr(cr, "call", fake)
-    (tmp_path / "drive-pr5.json").write_text(json.dumps({"stage": "done", "init_vars": {"TMP_DIR": str(tmp_path / "other")}}))
     run_main(["5"], capsys)
     assert fake.inits() == 1
+
+
+def test_rerun_without_the_result_pauses_again_with_a_new_number(tmp_path, monkeypatch, capsys):
+    """結果ファイルを書かずに打ち直すと、同じ種類の止まりを番号を増やして返し、ラウンドを流し直さない。"""
+    import dbos
+
+    monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
+    fake = FakeReview(tmp_path)
+    monkeypatch.setattr(cr, "call", fake)
+    first = run_main(["5"], capsys)
+    again = run_main(["5"], capsys)
+    assert first[0] == again[0] == 20 and first[1]["items"][0]["pause"] == again[1]["items"][0]["pause"] == "fix"
+    assert sum(1 for c in fake.calls if c[:2] == ("state.py", "start-round")) == 1
+    client = dbos.DBOSClient(system_database_url=f"sqlite:///{cr.durable.record_path('review', str(tmp_path.resolve()))}")
+    try:
+        (wf,) = client.list_workflows(load_input=False, load_output=False)
+        assert client.get_event(wf.workflow_id, "pause", timeout_seconds=0)["seq"] == 2
+    finally:
+        client.destroy()
+
+
+def test_leftover_drive_state_file_is_not_read(tmp_path, monkeypatch, capsys):
+    """移行の前の駆動の状態ファイル（`drive-pr<N>.json`）は読まない。耐久の記録が無ければ init から流す。"""
+    monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
+    fake = FakeReview(tmp_path)
+    monkeypatch.setattr(cr, "call", fake)
+    (tmp_path / "drive-pr5.json").write_text(json.dumps({"stage": "done", "init_vars": {"TMP_DIR": str(tmp_path)}}))
+    code, _ = run_main(["5"], capsys)
+    assert code == 20 and fake.inits() == 1
 
 
 class FakeRotateFails(FakeReview):
@@ -231,7 +291,6 @@ def test_rerun_after_prepare_failure_retries_rotation(tmp_path, monkeypatch, cap
     run_main(["5"], capsys)
     assert sum(1 for c in fake.calls if c[:2] == ("state.py", "start-round")) == starts
     assert sum(1 for c in fake.calls if c[:2] == ("rotate-pr.sh", "prepare")) == 2
-    assert json.loads((tmp_path / "drive-pr5.json").read_text())["stage"] == "rotate"
 
 
 class FakeSetCurrentFails(FakeReview):
@@ -266,7 +325,6 @@ def test_rerun_after_set_current_failure_does_not_create_pr_again(tmp_path, monk
     Path(out["items"][0]["result_file"]).write_text("{}")
     code, _ = run_main(argv, capsys)
     assert code != 0
-    assert json.loads((tmp_path / "drive-pr5.json").read_text())["stage"] == "rotate-created"
     run_main(argv, capsys)
     assert sum(1 for c in fake.calls if c[:2] == ("rotate-pr.sh", "execute")) == 1
     sets = [c for c in fake.calls if c[:2] == ("state.py", "set-current-pr")]
