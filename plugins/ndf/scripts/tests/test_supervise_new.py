@@ -169,6 +169,9 @@ SAMPLES = {
     "no-delivery": ({"base_branch": "main", "production_branch": "main"}, [], [("none", "none")], []),
 }
 
+# new close（fast のスプリントの終わり）が検査の後に置くステージ。経路 merge だけなら「導入の確認」が加わる（#1457）
+CLOSE_STAGES = {"carmo-system-console": ["導入の確認"], "carmo-contractors-app": ["導入の確認", "リリース"]}
+
 
 @pytest.mark.parametrize("name", list(SAMPLES))
 def test_samples_start_and_close_a_sprint_without_versions(tmp_path, name):
@@ -178,6 +181,7 @@ def test_samples_start_and_close_a_sprint_without_versions(tmp_path, name):
     root = plain_repo(tmp_path)
     (root / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, **wt}))
     (root / ".ndf" / "project.json").write_text(json.dumps({"delivery": rows}, ensure_ascii=False))
+    (root / ".ndf" / "pace.json").write_text(json.dumps({"version": 1, "fast": {"enabled": True, "verify": "true"}}))
     out = tmp_path / "m"
     p = cli("new", "sprint", "--name", "m6", "--worktree", str(root), "--issue", "216", "--out", str(out), cwd=root)
     assert p.returncode == 0, p.stderr
@@ -195,7 +199,7 @@ def test_samples_start_and_close_a_sprint_without_versions(tmp_path, name):
     p = close_cli(root, close_out)
     assert p.returncode == 0, p.stderr
     closing = json.loads((close_out / "sprint.json").read_text())
-    assert [w["name"] for w in closing["ステージ"]] == ["最終の検査", *stages, "まとめ"]
+    assert [w["name"] for w in closing["ステージ"]] == ["最終の検査", *CLOSE_STAGES.get(name, stages), "まとめ"]
 
 
 # --- #1193: 設計のプランの入口 --------------------------------------------------------
@@ -553,18 +557,19 @@ def test_merge_steps_gate_then_merge_and_approved_only_by_from(tmp_path):
 
 
 def test_plan_promote_with_mvv_judges_before_merging(tmp_path):
-    """#1336 の F5（fast / auto）: prepare → mvv（承認ゲート 2 の判定。関門ならプランを終える）→ note → promote
+    """#1336 の F5（fast / auto）: verify（#1457）→ prepare → mvv（承認ゲート 2 の判定。関門ならプランを終える）→ note → promote
     （--gate-approved mvv）。note か promote が落ちたら handoff が承認ゲートへ落とす。"""
     import argparse
 
     from supervise_lib.release_templates import plan_promote
 
     a = argparse.Namespace(base="develop", production_branch="main", issue=[1], mode="standard", no_reports="")
-    plan = plan_promote(a, str(tmp_path), 600, mvv=str(tmp_path / "s.json"))
+    plan = plan_promote(a, str(tmp_path), 600, mvv=str(tmp_path / "s.json"), verify="true")
     steps = {s["id"]: s for s in plan["steps"]}
-    assert [s["id"] for s in plan["steps"]][:4] == ["prepare", "mvv", "note", "promote"]
+    assert [s["id"] for s in plan["steps"]][:5] == ["verify", "prepare", "mvv", "note", "promote"]
     assert "--prepare --out" in steps["prepare"]["cmd"] and steps["mvv"]["gate_next"] == "end"
-    assert "--gate release" in steps["mvv"]["cmd"] and "--material {state_dir}/work/approval-promote.md" in steps["mvv"]["cmd"]
+    material = "--material {state_dir}/work/approval-promote.md {state_dir}/work/approval-verify.md"
+    assert "--gate release" in steps["mvv"]["cmd"] and material in steps["mvv"]["cmd"]
     assert steps["promote"]["cmd"].endswith("--gate-approved mvv") and steps["promote"]["on_fail"] == "handoff"
     assert steps["note"]["on_fail"] == "handoff" and steps["handoff"]["gate_next"] == "end"
     assert plan["base_branch"] == "develop"

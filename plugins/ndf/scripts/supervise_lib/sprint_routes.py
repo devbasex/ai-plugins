@@ -7,7 +7,7 @@ from pace import PaceError, read_pace
 from sprint_mvv import MVV_PACES
 from supervise_lib.decl import DeclError, decl_roots, delivery_decl, require_versions
 from supervise_lib.plan import QUEUE_PRS
-from supervise_lib.release_templates import GATE_2_MATERIAL, RELEASE_FORMS, plan_gate_2, plan_promote
+from supervise_lib.release_templates import GATE_2_MATERIAL, RELEASE_FORMS, plan_gate_2, plan_promote, plan_verify
 from supervise_lib.verify_steps import plan_limits
 
 
@@ -59,19 +59,40 @@ def manual_release_wave(a) -> dict:
     return {"name": "リリース", "manual": MANUAL_RELEASE, "note": f"{why}。検査の後に {MANUAL_RELEASE} で行う"}
 
 
+def pace_verify(a) -> str:
+    """選んだ進め方の節の verify（導入の確認のコマンド）。new close は fast のスプリントの終わりとして fast を読む。
+    宣言が壊れている・節に verify が無ければ DeclError。"""
+    pace = a.pace if getattr(a, "pace", None) in MVV_PACES else "fast"
+    try:
+        sec = (pace_decl(a) or {}).get(pace) or {}
+    except PaceError as e:
+        raise DeclError(str(e)) from e
+    if not sec.get("verify"):
+        raise DeclError(f".ndf/pace.json の {pace}.verify（導入の確認のコマンド）が無い")
+    return sec["verify"]
+
+
 def route_waves(a, repo: str, then_of: str, mvv: str | None = None, condition: dict | None = None, note: str | None = None) -> list[dict]:
     """雛形で組まない経路のステージ（#1336）。昇格の経路（promote）があれば「本番」（昇格のプラン）を、手で届ける経路
-    （manual）があれば「リリース」（手で行う）をこの順に置く。ベースブランチへのマージで届く経路（merged-by-check）と
-    届けない経路（none）はステージを置かない。"""
+    （manual）があれば「リリース」（手で行う）をこの順に置く。fast / auto（mvv あり）では、昇格のプランの先頭で導入の確認を
+    走らせ、昇格が無くベースブランチへのマージで届く経路（merged-by-check）があれば「導入の確認」のステージを置く（#1457）。
+    normal の merged-by-check と、届けない経路（none）はステージを置かない。"""
     if mvv and dev_channel_of(a).value == delivery.MANUAL_PRODUCTION:
         return manual_production_waves(a, repo, then_of, mvv, condition)
     rs = routes_of(a)
     waves = []
     promote = next((r for r in rs if r.stage == delivery.STAGE_PROMOTE), None)
+    merge = any(r.stage == delivery.STAGE_MERGED_BY_CHECK for r in rs)
+    verify = pace_verify(a) if mvv and (promote or merge) else None
     if promote:
         ci_wait = int(plan_limits(a)["ci_wait_timeout"])
-        plan = plan_promote(a, repo, ci_wait, mvv, condition, production=promote.branch)
+        plan = plan_promote(a, repo, ci_wait, mvv, condition, production=promote.branch, verify=verify)
         wave = {"name": "本番", "plans": {"promote": plan}, "then_of": then_of}
+        if note:
+            wave["note"] = note
+        waves.append(wave)
+    elif verify:
+        wave = {"name": "導入の確認", "plans": {"verify": plan_verify(a, repo, verify, condition)}, "then_of": then_of}
         if note:
             wave["note"] = note
         waves.append(wave)
@@ -88,16 +109,11 @@ def manual_production_waves(a, repo: str, then_of: str, mvv: str, condition: dic
     dev = [r for r in rs if r.production is False]
     prod = [r for r in rs if r.production is not False]
     pace = a.pace if getattr(a, "pace", None) in MVV_PACES else "fast"  # new close は fast のスプリントの終わり
-    try:
-        sec = (pace_decl(a) or {}).get(pace) or {}
-    except PaceError as e:
-        raise DeclError(str(e)) from e
-    if not sec.get("verify"):
-        raise DeclError(f".ndf/pace.json の {pace}.verify（導入の確認のコマンド）が無い")
+    verify = pace_verify(a)
     # auto は検査のスプリントの PR（単独の queue でも同じディレクトリの検査の報告から埋まる）、fast は前のステージの PR のすべて。
     # fast の単独の queue は前のステージの PR を集められないため、MVV 判定を打たずに利用者の承認ゲートにする（決定 6）
     prs = "{queue_pr:check}" if pace == "auto" else None if dev else QUEUE_PRS
-    gate = {"name": "承認ゲート 2", "plans": {"gate-2": plan_gate_2(a, repo, mvv, sec["verify"], prs, condition)}}
+    gate = {"name": "承認ゲート 2", "plans": {"gate-2": plan_gate_2(a, repo, mvv, verify, prs, condition)}}
     waves = []
     if dev:
         why = "。".join(r.note for r in dev if r.note)

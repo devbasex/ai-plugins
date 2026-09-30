@@ -1,6 +1,10 @@
-"""手動反映の本番系（#1454）の承認ゲート 2 の材料を組む（`release-steps.py deploy-facts`）。
+"""導入の確認を走らせ、承認資料を組む（`release-steps.py deploy-facts` / `verify-facts`）。
 
     python3 release-steps.py deploy-facts --verify <コマンド> --out <承認資料> [--root <dir>]
+    python3 release-steps.py verify-facts --base <ベースブランチ> --verify <コマンド> --out <承認資料> [--root <dir>]
+
+deploy-facts は手動反映の本番系（#1454）の承認ゲート 2 の材料、verify-facts は経路 merge / promote の fast / auto の
+導入の確認の材料（#1457。配布の宣言は読まない）。
 
 `verify`（`.ndf/pace.json` の `<節>.verify`）を `root` で `sh -c` で走らせ、本番系へ届ける行（`production: true` と、
 `production` の無い手動の行）の target・trigger、ベースブランチの先頭のコミット（本番へ届けるのはこのコミットに限る）、
@@ -41,12 +45,32 @@ def deploy_markdown(rows, base: str, sha: str, verify: str, code: int) -> str:
         f"- ベースブランチ {base} の先頭: `{sha}`。導入の確認もこのコミットで走らせた。本番へ届けるのはこのコミットに限る。"
         "先頭が変わったら承認ゲート 2 からやり直す",
         "",
+        *verify_lines(verify, code),
+    ]
+    return "\n".join(lines)
+
+
+def verify_lines(verify: str, code: int) -> list[str]:
+    """承認資料の「導入の確認」の節（コマンド・終了コード・出力を載せない旨）。"""
+    return [
         "## 導入の確認",
         "",
         f"- コマンド: `{verify}`",
         f"- 終了コード: {code}",
         "- 出力は秘密を含みうるため、この資料へ載せない（手元のログに残す）",
         "",
+    ]
+
+
+def verify_markdown(base: str, sha: str, verify: str, code: int) -> str:
+    lines = [
+        "# 導入の確認の承認資料",
+        "",
+        "## 確認したコミット",
+        "",
+        f"- ベースブランチ {base} の先頭: `{sha}`。導入の確認はこのコミットで走らせた",
+        "",
+        *verify_lines(verify, code),
     ]
     return "\n".join(lines)
 
@@ -57,6 +81,11 @@ def add_deploy_parser(sub, common, ap):
     p.add_argument("--verify", required=True, help="導入の確認のコマンド（.ndf/pace.json の <節>.verify）")
     p.add_argument("--out", required=True, help="承認資料の置き場")
     p.set_defaults(func=cmd_deploy_facts)
+    p = sub.add_parser("verify-facts", parents=[common], help="導入の確認を走らせ、その承認資料を書く（経路 merge / promote）")
+    p.add_argument("--base", required=True, help="ベースブランチ（確認するのはこの先頭のコミット）")
+    p.add_argument("--verify", required=True, help="導入の確認のコマンド（.ndf/pace.json の <節>.verify）")
+    p.add_argument("--out", required=True, help="承認資料の置き場")
+    p.set_defaults(func=cmd_verify_facts)
     return ap
 
 
@@ -66,6 +95,14 @@ def cmd_deploy_facts(a):
     if m["verify_exit"] != 0:
         emit(result(TOOL, "stopped", f"導入の確認が {m['verify_exit']} で終わった。本番のデプロイへ進まない", items, m, a.out))
     emit(result(TOOL, "ok", f"承認資料を書いた（本番系の行 {m['rows']}・{m['base']} の先頭 {m['sha'][:8]}）", items, m, a.out))
+
+
+def cmd_verify_facts(a):
+    """確認が非 0 なら 1（承認資料は書く）、--out へ書けないなら 2、確認するコミットが違えば 3 で終える。"""
+    items, m = verify_facts(git_root(a.root), a.base, a.verify, a.out)
+    if m["verify_exit"] != 0:
+        emit(result(TOOL, "stopped", f"導入の確認が {m['verify_exit']} で終わった。承認ゲート 2 へ進まない", items, m, a.out))
+    emit(result(TOOL, "ok", f"導入の確認が通った（{m['base']} の先頭 {m['sha'][:8]}）", items, m, a.out))
 
 
 def catch_up(root, base: str, sha: str, head: str) -> str:
@@ -105,6 +142,27 @@ def write_private(path: Path, text: str) -> None:
         f.write(text)
 
 
+def run_verify(root, base: str, verify: str, out: str) -> dict:
+    """ベースブランチの先頭で確認を 1 度走らせ、出力を所有者だけが読める `<out>.verify.log` へ書く。
+    {"sha", "verify_exit", "log"} を返す。前提を満たさなければ 3、ログへ書けなければ 2 の StepError。"""
+    sha = head_of_base(root, base)
+    p = subprocess.run(["sh", "-c", verify], cwd=root, capture_output=True, text=True)
+    log = Path(f"{out}.verify.log")
+    try:
+        Path(out).parent.mkdir(parents=True, exist_ok=True)
+        write_private(log, p.stdout + p.stderr)
+    except OSError as e:
+        raise StepError(f"確認のログを書けない: {e}", EXIT_UNREADABLE) from e
+    return {"sha": sha, "verify_exit": p.returncode, "log": str(log)}
+
+
+def write_material(out: str, text: str) -> None:
+    try:
+        Path(out).write_text(text, encoding="utf-8")
+    except OSError as e:
+        raise StepError(f"承認資料を書けない: {e}", EXIT_UNREADABLE) from e
+
+
 def deploy_facts(root, verify: str, out: str) -> tuple[list[dict], dict]:
     """承認資料を `out` へ書き、(items, metrics) を返す。metrics の verify_exit が確認の終了コード、log が出力の置き場。"""
     decl = delivery.load_delivery(root)
@@ -113,14 +171,14 @@ def deploy_facts(root, verify: str, out: str) -> tuple[list[dict], dict]:
         raise StepError(f"配布の宣言を読めない: {why}", EXIT_UNREADABLE)
     rows = deploy_rows(decl)
     base = decl.base or ""
-    sha = head_of_base(root, base)
-    p = subprocess.run(["sh", "-c", verify], cwd=root, capture_output=True, text=True)
-    log = Path(f"{out}.verify.log")
-    try:
-        Path(out).parent.mkdir(parents=True, exist_ok=True)
-        write_private(log, p.stdout + p.stderr)
-        Path(out).write_text(deploy_markdown(rows, base, sha, verify, p.returncode), encoding="utf-8")
-    except OSError as e:
-        raise StepError(f"承認資料を書けない: {e}", EXIT_UNREADABLE) from e
+    m = run_verify(root, base, verify, out)
+    write_material(out, deploy_markdown(rows, base, m["sha"], verify, m["verify_exit"]))
     items = [{"kind": "decl", "name": r.get("target") or "", "result": r.get("trigger") or ""} for r in rows]
-    return items, {"verify_exit": p.returncode, "rows": len(rows), "sha": sha, "base": base, "log": str(log)}
+    return items, {**m, "rows": len(rows), "base": base}
+
+
+def verify_facts(root, base: str, verify: str, out: str) -> tuple[list[dict], dict]:
+    """経路 merge / promote の導入の確認（#1457）。承認資料を `out` へ書き、(items, metrics) を返す。"""
+    m = run_verify(root, base, verify, out)
+    write_material(out, verify_markdown(base, m["sha"], verify, m["verify_exit"]))
+    return [{"kind": "verify", "name": verify, "result": str(m["verify_exit"])}], {**m, "base": base}
