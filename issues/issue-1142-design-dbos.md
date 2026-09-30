@@ -33,7 +33,7 @@ DBOS が SQLite の記録から耐久ワークフローを続ける。済んだ�
 | ライブラリ | 耐久ワークフロー・耐久ステップ・耐久キュー・耐久の記録・実行の鍵・実行の回 |
 | プランの実行 | 資源のタグ・資源の枠・重なりの組・共有の一覧・孤児の片付け |
 | 収束ループ | drive の止まり（pause）と続き（resume）の受け渡し |
-| 記録と測定（投稿キュー） | 投稿の項目 1 件 = 耐久ワークフロー 1 つ |
+| 記録と測定（投稿キュー） | 送りの試行 1 回 = 耐久ワークフロー 1 つ（積んだ記録も 1 つ） |
 
 **コンテキストマップに足す関係は 1 つだけである。** ライブラリの `lib/durable.py` が上流（共有カーネル）で、
 `supervise_lib`・2 本の `drive.py`・`lib/post_queue.py` が下流である。**DBOS を import するのは `lib/durable.py`
@@ -106,7 +106,7 @@ DBOS が SQLite の記録から耐久ワークフローを続ける。済んだ�
 
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
-| 耐久ワークフロー | DBOS の `@DBOS.workflow` の関数の 1 回の実行。ID を持ち、落ちた後の起動が記録から続ける。プラン 1 本・キュー 1 本・drive 1 回・投稿の項目 1 件がそれぞれ 1 つ | 追加（`ndf-workflow`） |
+| 耐久ワークフロー | DBOS の `@DBOS.workflow` の関数の 1 回の実行。ID を持ち、落ちた後の起動が記録から続ける。プラン 1 本・キュー 1 本・drive 1 回・投稿の送りの試行 1 回がそれぞれ 1 つ | 追加（`ndf-workflow`） |
 | 耐久ステップ | 耐久ワークフローの中で出力を SQLite へ記録する単位（DBOS の `@DBOS.step`）。記録のある耐久ステップは続けるときに流し直さない。プランのステップ（`ステップ`）とは別の語 | 追加（`ndf-workflow`） |
 | 耐久キュー | DBOS の `register_queue` で作る、同時の本数・分割を持つ待ち行列。`supervise.py queue`（`キュー`）とは別の語 | 追加（`ndf-workflow`） |
 | 耐久の記録 | 1 回の起動が持つ DBOS の SQLite のファイル（`~/.local/state/ndf/dbos/<種類>-<鍵>.sqlite`） | 追加（`ndf-workflow`） |
@@ -141,11 +141,11 @@ DBOS が SQLite の記録から耐久ワークフローを続ける。済んだ�
 | `supervise_lib/state.py`（変更） | 耐久ステップの出力（今のステップの記録）から、ファイルを書かずに記録を組み直す `replay(cur)` を足す。`state.json` の `log[]` の要素に鍵 `resumed`・`graphql` を足す（I11） |
 | `supervise_lib/queue.py`（変更） | `cmd_queue` は耐久ワークフロー `queue_workflow` を始めるか続け、終わるまで attention を標準出力へ知らせる。`run_batch` と子プロセスを消す。`cmd_wait` は今のまま |
 | `supervise_lib/commands.py`（変更） | `cmd_run` が実行の鍵を決めて `durable.launch` を打つ |
-| `supervise_lib/claude.py`（変更） | 子を起動したら `<状態>/step.pid` に pgid・pid・起動時刻を書き、終わったら消す。流す前に前の `step.pid` の生きたグループを止める（孤児の片付け。決定 33） |
+| `supervise_lib/claude.py`（変更） | 子を起動したら `<状態>/step.pid` に pgid・pid・起動時刻を書き、終わったら消す。流す前に前の `step.pid` の生きたグループを止める（孤児の片付け。決定 35） |
 | `supervise_lib/templates.py`（変更） | `other_files` と実装の指示文の除外の行を消す（#1248） |
 | `supervise_lib/worker_steps.py`（変更） | `WorkStep` の実装の指示文へ、同じステージで同時に流れる他の組の `触るファイル` を流す時点で足す |
 | `supervise_lib/decl.py`（変更） | `.ndf/supervise.json` の `queue`（`resources`・`shared`）を読む |
-| `lib/post_queue.py`（変更） | `Queue` の項目の置き場を耐久の記録へ移す。1 項目 = 1 耐久ワークフロー（`post_item`）。送り方・既投稿の照合・恒久の失敗の判定は今のまま |
+| `lib/post_queue.py`（変更） | `Queue` の項目の置き場を耐久の記録へ移す。積んだ記録と送りの試行 1 回が、それぞれ耐久ワークフロー 1 つ（`note`・`attempt`）。送り方・既投稿の照合・恒久の失敗の判定は今のまま |
 | `lib/result_posts.py`（変更） | `enqueue` の戻り値を項目のファイルのパスから項目の辞書へ替える（`read_item(path)` の読み直しを消す） |
 | 2 本の `drive.py`（変更） | `Drive.run` のループを `@durable.workflow` の関数へ移す。止まりは `durable.pause`、続きは打ち直しの `durable.resume`。`save_ds`・`ds_path` を消す |
 | 2 本の `SKILL.md`（変更） | 「進みは `$TMP_DIR/drive-pr<PR>.json`」の 1 文を耐久の記録へ直す |
@@ -215,8 +215,9 @@ graph TD
 | 収束ループの drive 1 回 | `Drive.run` の `for` と `drive-pr<N>.json` | 耐久ワークフロー `review_drive` / `refactor_drive` | `review-<鍵>-<回>` / `refactor-<鍵>-<回>` |
 | ラウンド 1 回・段階 1 つ | `step_round` ほか | 耐久ステップ（1 ラウンド = 1 つ。要約だけを返す。#773） | — |
 | drive の止まり（fix・sweep・newtext・cross-review） | `dp.pause` を返して抜ける | `set_event("pause")` → `recv("resume")` の待ちのまま `os._exit` | 話題 `resume` |
-| 投稿の項目 1 件 | `pending/<連番>-<種別>-<識別子>.json` | 耐久キュー `posts`（`worker_concurrency=1`）に入れた耐久ワークフロー `post_item` | `post-<連番 4 桁>-<種別>-<識別子>` |
-| 上限で送れない項目 | ファイルを残して `flush` が止まる | `set_event("blocked")` → `recv("retry")` の待ち | 話題 `retry` |
+| 投稿の項目を積む | `pending/<連番>-<種別>-<識別子>.json` | 耐久ワークフロー `note`（出力が積んだ記録） | `post-<連番 4 桁>-<種別>-<識別子>-a0` |
+| 投稿の送りの試行 1 回 | `flush` のループの 1 回 | `flush` が同期で起こす耐久ワークフロー `attempt`（耐久ステップ `try` を 1 つ持つ） | `post-<連番 4 桁>-<種別>-<識別子>-a<回>`（回は 1 から） |
+| 上限で送れない項目 | ファイルを残して `flush` が止まる | 試行が「送れなかった」（`unsent`）で終わり、`flush` がそこで打ち切る。次の `flush` が次の試行を起こす | 同上 |
 | 遅れの見張り | `SlowWatch`（ステップの子の待ちの中） | 置かない。耐久ステップの中に残す（決定 31） | — |
 
 ### クラス図（変える型だけ）
@@ -301,7 +302,7 @@ drive は、`recv` の上限（30 日）で先に終わっている。
 | `plan_workflow` | `plan-<パス鍵>-<中身鍵>-<開始>-<回>` | パス鍵 = プランの絶対パスの sha256 の先頭 12 字、中身鍵 = 流す時点のプランのファイルの sha256 の先頭 8 字、開始 = `--from` のステップの id（無ければ `-`） |
 | `queue_workflow` | `queue-<done の鍵>-<回>` | |
 | `review_drive` / `refactor_drive` | `review-<鍵>-<回>` / `refactor-<鍵>-<回>` | |
-| `post_item` | `post-<連番 4 桁>-<種別>-<識別子>` | 連番 = 同じ耐久の記録の `post_item` の最大 + 1 |
+| 投稿の `note` / `attempt` | `post-<連番 4 桁>-<種別>-<識別子>-a<回>` | 連番 = 同じ耐久の記録にある項目の名前の連番の最大 + 1。回 0 が積んだ記録、1 から送りの試行と取り除き（`drop`） |
 
 **`durable.resolve(prefix, finished)` が、同じ接頭辞の最後の実行の回を見て続けるか新しく始めるかを決める。**
 
@@ -357,8 +358,7 @@ executor_id と `application_version` の両方が一致する `PENDING` の耐�
 | `admit` の出力 | `{"groups": [[プラン...]], "overlaps": [{"a", "b", "paths"}], "others": {プラン: [パス...]}}` | 分割の鍵・`items`・標準エラー・`WorkStep` の除外の行 |
 | イベント `pause`（drive） | `{"seq": <番号>, "result": <dp.pause の JSON>, "code": <終了コード>}` | 打ち直しの `main` が出力して抜ける |
 | メッセージ `resume`（drive） | `{"seq": <続ける止まりの番号>}` | `recv` の待ちを解く |
-| イベント `blocked`（投稿） | `{"seq", "rate_limited", "last_error"}` | `flush` の `FlushResult` |
-| メッセージ `retry`（投稿） | `{}` | 次の `flush` が送る |
+| 投稿の `note` / `attempt` の出力 | `{"state", "item"}`（`attempt` の `unsent` は `rate_limited` も持つ）。`state` は `queued`・`sent`・`skipped`・`dropped`・`unsent`・`withdrawn` | 項目の状態（最後に終わった記録の `state`）と `flush` の `FlushResult` |
 
 ### 消えるファイル・残るファイル
 
@@ -368,7 +368,7 @@ executor_id と `application_version` の両方が一致する `PENDING` の耐�
 | `<プラン>.log`（`queue` の隣） | 残る。中身は子の標準出力から、そのプランの `## フェーズの報告` に替わる |
 | `<done>`・`<done>.plans.json`・`<done>.wait.json` | 残る（`wait` が読む。形は変えない） |
 | `$TMP_DIR/drive-pr<N>.json`・`drive-rf<ID>.json` | 書かない（耐久の記録へ移す） |
-| `<待ち行列>/pending/<連番>-*.json` | 書かない。移行の前に積まれていたものは最初の `flush` が耐久の記録へ取り込み、`pending/imported/` へ移す |
+| `<待ち行列>/pending/<連番>-*.json` | 書かない。移行の前に積まれていたものは、最初に耐久の記録を開いた操作（`flush`・`count` ほか）が同じ連番のまま取り込み、`pending/imported/` へ移す |
 | `<待ち行列>/pending/dropped/` | 残る（恒久の失敗の控え。人が読む） |
 | `<プラン>-state/step.pid` | 新設（孤児の片付け。ステップが流れている間だけある） |
 
@@ -562,29 +562,33 @@ KEY=VALUE は耐久ステップの出力として記録し、耐久ワークフ�
 
 ```mermaid
 graph TD
-    A[result_posts が add する] --> B[post_item を耐久キュー posts へ入れる]
-    B --> C[flush: launch と legacy の取り込み]
-    C --> D{post_item を 1 つずつ流す}
-    D -- 既投稿 --> E[飛ばした として終わる]
-    D -- 送れた --> F[送った として終わる]
-    D -- 恒久の失敗 --> G[dropped/ へ控えを書いて終わる]
-    D -- 上限か一時の失敗 --> H[blocked を立てて retry を待つ]
-    H --> I[flush は FlushResult を返して os._exit]
-    I --> J[次の flush が retry を送る]
-    J --> D
+    A[result_posts が add する] --> B[note: 回 0 の積んだ記録]
+    B --> C[flush: 耐久の記録を開く。途中で落ちた試行を止め、移行の前のファイルを取り込む]
+    C --> D{終わっていない項目を連番の順に 1 つずつ、次の回の attempt を同期で流す}
+    D -- 既投稿 --> E[skipped で終わる]
+    D -- 送れた --> F[sent で終わる]
+    D -- 恒久の失敗 --> G[dropped/ へ控えを書いて dropped で終わる]
+    E --> D
+    F --> D
+    G --> D
+    D -- 上限か一時の失敗 --> H[unsent で終わり、flush はそこで打ち切る]
+    H --> I[flush は FlushResult を返し、耐久の記録を閉じる]
+    I --> J[次の flush が同じ項目の次の回の attempt を起こす]
 ```
 
-**耐久キュー `posts` は `worker_concurrency=1` で、止まった項目の後ろは流れない。** 今の「1 件でも送れなければ
-そこで止める」を、ファイルの連番の代わりに耐久キューの順で保つ。`FlushResult` の `remaining` は、終わっていない
-`post_item` の数である。
+**送りの試行 1 回が耐久ワークフロー 1 つで、`flush` は連番の順に同期で起こし、最初に送れなかった項目で打ち切る。**
+今の「1 件でも送れなければそこで止める」を、耐久キューを使わずに `flush` の順で保つ。試行は `recv` で待たずに
+「送れなかった」（`unsent`）で終わるため、`flush` の呼び出し側（`lib/result_posts.py` の flush → drop → flush、
+cross-review の `judge.py`・`posts.py`）は `flush` の後も同じプロセスで続けられ、プロセスは普通に終われる。
+項目の状態は、項目の名前を接頭辞に持つ耐久ワークフローのうち最後に終わったものの出力が決める。`FlushResult` の
+`remaining` は、状態が `queued` か `unsent` の項目の数である。
 
-**耐久キュー `posts` を待ち受けて取り出すのは `flush` だけにする。** DBOS は `launch()` したプロセスが既定で
-登録済みのすべての耐久キューを待ち受けるため、そのままでは `add` のために耐久の記録を開いた短命の CLI が
-`post_item` をその場でバックグラウンドのスレッドで送り、送信の途中で終わりうる。`durable.launch` は待ち受ける
-耐久キューの名前（`listen`）を受け、`launch()` の前に `DBOS.listen_queues(listen)` を打つ（`dbos==3.1.0`。
-空の一覧はどのキューも待ち受けない）。`post_queue` は `flush` だけが `["posts"]`、`add`・`count`・`items`・
-`drop`・`set_aside` は `[]` を渡す。**耐久の記録のファイルが無いときの `count()` は DBOS を起動せずに 0 を返す**
-（import 0.24〜0.78 秒を、積んでいない呼び出しに払わせない）。
+**耐久の記録は操作のたびに開いて閉じ、耐久キューも待ち受けも使わない。** `durable.launch` は `keep=()` で打ち、
+途中（`PENDING`）の試行を launch の前にすべて止める。止めないと、`add` のために開いた短命の CLI で、落ちた試行が
+回復してバックグラウンドのスレッドで送り、送信の途中で終わりうる。止めた試行の項目は次の `flush` が次の回で
+既投稿の照合から送り直すため、二重に送らない。同じプロセスで同じ記録を開いている間の呼び出し（`post` の中の
+`flush` と `add`）は、開いたものを使う。**耐久の記録のファイルも移行の前のファイルも無いときの `count()` は
+DBOS を起動せずに 0 を返す。**
 
 ### 孤児の片付け
 
@@ -598,7 +602,7 @@ graph TD
 
 | 大項目 | 要求の条件 | 実現方式 | 確かめ方 |
 | --- | --- | --- | --- |
-| 性能 | 1 ステップあたりの上乗せが 1 秒以内 | 耐久キューの問い合わせの間隔を `plans`・`res-graphql`・`posts` とも 0.2 秒にする（試行の 0.1 秒で 6 本 72 ステップ +6.4 秒 = 1 ステップ約 0.09 秒）。DBOS の import は 1 起動 1 回で、`new`・`wait` ほかの副命令は DBOS を import しない（`flow` は `cmd_run`・`cmd_queue` の中で import する） | 同じ偽物のプラン（run のステップ 12 本・`cmd` は `true`）を移行の前後で `run` し、壁時計の差をステップの数で割る。ステップの中の秒は `supervise.py history import` で取り込んで前後で比べる。結果を Q1 の PR に貼る |
+| 性能 | 1 ステップあたりの上乗せが 1 秒以内 | 耐久キューの問い合わせの間隔を `plans`・`res-graphql` とも 0.2 秒にする（試行の 0.1 秒で 6 本 72 ステップ +6.4 秒 = 1 ステップ約 0.09 秒）。DBOS の import は 1 起動 1 回で、`new`・`wait` ほかの副命令は DBOS を import しない（`flow` は `cmd_run`・`cmd_queue` の中で import する） | 同じ偽物のプラン（run のステップ 12 本・`cmd` は `true`）を移行の前後で `run` し、壁時計の差をステップの数で割る。ステップの中の秒は `supervise.py history import` で取り込んで前後で比べる。結果を Q1 の PR に貼る |
 | 可用性 | 流れていたステップの流し直しより多くを失わない | 耐久ステップの出力を SQLite に記録し、同じ executor_id と形式の版で回復する | C-6 のテスト（kill -9） |
 | 移行性 | 途中の版の利用者の手順が変わらない。移行の前のプランは頭から流し直せる | 副命令と引数を変えない。移行の前の `state.json` だけを持つプランは `resolve` が「無い」と見て実行の回 1 から流す | 移行の前の版で書いたプランを `run` するテスト（C-3a の後半） |
 | システム環境 | Python 3.10 以上・Postgres とサーバーを要しない・宣言だけでほかのプロジェクトでも動く | `system_database_url` は `sqlite:///` だけ。DBOS の管理サーバーと Conductor は設定しない。`queue` の宣言は無ければ既定 | C-2 のテスト（実行中の待ち受けのポートを `lib/procs.py` の psutil で数えて 0）。`--python 3.10` の全体テスト |
@@ -684,12 +688,17 @@ drive の状態ファイルを残して耐久ワークフローと並べる形�
 
 根拠: Value 6 / Value 7（MVV 版 2）
 
-### 決定 33: 投稿キューは 1 項目 = 1 耐久ワークフローにし、耐久の記録は待ち行列のディレクトリごとに分ける
+### 決定 33: 投稿キューは送りの試行 1 回 = 1 耐久ワークフローにし、耐久の記録は待ち行列のディレクトリごとに分ける
 
 投稿キューを使うのは短命の CLI（`state.py`・`refactor.py`・`fix-steps.py` ほか）で、PR ごとに 1 つのプロセスが
 順に打つ。待ち行列のディレクトリを鍵にすれば、今の `Queue(dir)` の呼び出しを変えずに、別の PR のプロセスと
-記録が混ざらない。移行の前に積まれた `pending/` の項目は、最初の `flush` が同じ連番で取り込む。取り込まないと、
+記録が混ざらない。移行の前に積まれた `pending/` の項目は、最初に記録を開いたときに同じ連番で取り込む。取り込まないと、
 上限の間に移行した利用者のレビューのコメントが送られないまま消える。
+
+送れない項目を耐久ワークフローの中で `recv` で待つ形は採らない（2026-09-30 利用者）。`flush` を `os._exit` で
+抜けることになり、`flush` の後も同じプロセスで続ける呼び出し側（`lib/result_posts.py` の flush → drop → flush、
+cross-review の `judge.py`・`posts.py`）が続けられない。試行を「送れなかった」で終わらせ、次の `flush` が次の試行を
+同期で起こす形なら、耐久キュー `posts` と待ち受けの切り分け（`listen`）も要らない。
 
 根拠: Value 1 / Value 5（MVV 版 2）
 
@@ -761,7 +770,7 @@ C7 に当たる。** 1 本の PR に分け、人の承認を得てからマー�
 | I18 | 形式の版を変えた起動は、前の版の途中の記録を続けず、実行の回 2 を頭から流す | 版を読まずに `retrieve_workflow` する |
 | I19 | cross-review の drive を `sweep` まで進めて打ち直すと、`state.py init` が流れず、`metrics.rounds` が 0 でない。cross-refactoring も同じ | `init` を耐久ステップの外で打つ |
 | drive の止まり | 結果ファイルを書かずに打ち直すと、同じ種類の止まりを番号を増やして返す。書いてから打ち直すと次の段階へ進む | 止まりの番号を見ずに前のイベントを出す |
-| 投稿キュー | 上限の項目の後ろは送られず、次の `flush` で順に送られる。恒久の失敗は `dropped/` へ控えを書いて後ろを送る。移行の前の `pending/` の項目は最初の `flush` で同じ連番のまま送られる | 耐久キュー `posts` の同時の本数を 2 にする・取り込みで連番を振り直す |
+| 投稿キュー | 上限の項目の後ろは送られず、次の `flush` が次の試行で順に送る。恒久の失敗は `dropped/` へ控えを書いて後ろを送る。移行の前の `pending/` の項目は最初の `flush` で同じ連番のまま送られる。同じプロセスで flush・drop・積み直し・flush を打て、プロセスが普通に終わる。送りの途中で `kill -9` した試行は、次の `flush` が既投稿の照合から次の試行で送る。積んでいない `count` は耐久の記録を作らない | 送れなかった項目で打ち切らずに後ろを送る・試行を `recv` で待たせる・落ちた試行を止めずに回復させる・取り込みで連番を振り直す |
 | 孤児の片付け | 前の `step.pid` のグループが生きていれば止めてから流す。pid が同じでも起動時刻が違えば止めない | 起動時刻を照らさない |
 | 性能 | 非機能の表の測り方で、1 ステップあたり 1 秒以内 | 問い合わせの間隔を 1 秒（DBOS の既定）に戻す |
 
