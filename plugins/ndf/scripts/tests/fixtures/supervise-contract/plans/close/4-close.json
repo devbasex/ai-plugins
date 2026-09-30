@@ -1,0 +1,92 @@
+{
+  "フェーズ": "まとめ",
+  "課題": [
+    15
+  ],
+  "モード": "standard",
+  "作業場所": "<TMP>/repo/.worktrees/spec/m9",
+  "branch": "spec/m9",
+  "起点": "origin/main",
+  "リポジトリ": "<TMP>/repo",
+  "記録": "<NDF>/scripts/projects-sync.sh",
+  "規則": "",
+  "上限": 12,
+  "進め方": "fast",
+  "steps": [
+    {
+      "id": "spec",
+      "type": "work",
+      "full": true,
+      "kind": "確定仕様化",
+      "stage": "確定仕様化",
+      "timeout": 3600,
+      "prompt": "/ndf:plan-to-spec #15。課題の issues/ の計画と設計を docs/ へ移し、コミットする（push しない）。移すものが無ければ何もしない。",
+      "next": "pr"
+    },
+    {
+      "id": "pr",
+      "type": "pr",
+      "stage": "Pull Request",
+      "base": "main",
+      "title": "確定仕様化: スプリント m9",
+      "summary": "スプリント m9（#15）の計画と設計を docs/ へ移す。issues/ と docs/ だけを触る",
+      "changes": "無し（文書の置き場所だけ）",
+      "next": "ready"
+    },
+    {
+      "id": "ready",
+      "type": "run",
+      "cmd": "sh -c 'git push -q && gh pr ready {pr}'",
+      "next": "merge-gate"
+    },
+    {
+      "id": "merge-gate",
+      "type": "run",
+      "timeout": 120,
+      "cmd": "python3 <NDF>/scripts/merged-steps.py merge-gate --pr {pr}",
+      "gate_next": "end",
+      "next": "merge"
+    },
+    {
+      "id": "merge",
+      "type": "run",
+      "timeout": 3960,
+      "cmd": "python3 <NDF>/scripts/merged-steps.py merge-when-green {pr} --timeout 3600",
+      "probe": {
+        "cmd": "python3 <NDF>/scripts/merged-steps.py probe --pr {pr} --act"
+      },
+      "next": "close"
+    },
+    {
+      "id": "merge-approved",
+      "type": "run",
+      "timeout": 3960,
+      "cmd": "python3 <NDF>/scripts/merged-steps.py merge-when-green {pr} --timeout 3600 --gate-approved user",
+      "probe": {
+        "cmd": "python3 <NDF>/scripts/merged-steps.py probe --pr {pr} --act"
+      },
+      "next": "close"
+    },
+    {
+      "id": "close",
+      "type": "run",
+      "stage": "後片付け",
+      "cwd": "<TMP>/repo",
+      "timeout": 900,
+      "cmd": "python3 <NDF>/scripts/sprint-close.py --record-pr {queue_pr:release-prod} --issues 15 --with-verification --label 'スプリント m9の後片付け'",
+      "next": "retro"
+    },
+    {
+      "id": "retro",
+      "type": "work",
+      "full": true,
+      "kind": "振り返り",
+      "stage": "振り返り",
+      "timeout": 3600,
+      "prompt": "/ndf:retrospective スプリント m9（#15）。材料に検査の記録の集計（`python3 <NDF>/scripts/check-trigger.py stats --root <TMP>/repo` の出力: トリガーが立った回数・検査ごとの指摘の件数・検査の後に逃げた不具合の件数）を使い、閾値の見直しが要るかを書く。",
+      "next": "end"
+    }
+  ],
+  "base_branch": "main",
+  "スプリント状態": "<TMP>/out/sprint/sprint.json"
+}
