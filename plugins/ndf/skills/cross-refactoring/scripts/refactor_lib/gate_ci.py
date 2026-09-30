@@ -16,7 +16,7 @@ import test_triage
 from . import die, info, timeline
 from .github import gh_api_get
 from .gitfacts import run_with_timeout
-from .items import live_items
+from .items import live_items, newest_first
 from .outbound import plan_line
 from .paths import git_out, work_dir
 from .undo import drop
@@ -94,10 +94,9 @@ def revert_deferred(path: pathlib.Path, state: dict[str, Any], gate: dict[str, A
     live = {i["id"]: i for i in live_items(state)}
     reason = "最終ゲートへ寄せた危険フラグの全体テストで変更起因の失敗が出て、締め切りを過ぎた"
     reverted: list[str] = []
-    for item_id in sorted(ids, key=lambda i: -int((live.get(i) or {}).get("rank") or 0)):
-        if item_id not in live:
-            continue
-        live[item_id]["failure_reason"] = reason
+    for item in newest_first([live[i] for i in ids if i in live]):
+        item_id = item["id"]
+        item["failure_reason"] = reason
         drop(path, state, [item_id], reason)
         reverted.append(item_id)
         code, timed_out = run_with_timeout(

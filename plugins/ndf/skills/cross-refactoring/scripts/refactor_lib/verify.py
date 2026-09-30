@@ -13,7 +13,7 @@ import re
 
 from typing import Any, Iterable, Optional
 
-from .paths import git_out
+from .paths import git_out, resolve_commit
 from .gitfacts import safe_int
 from .vocabulary import (
     DIFF_BUDGET_FACTOR,
@@ -188,7 +188,7 @@ def unassigned_fix_commits(work: str, reported_shas: list[str], ordered_range: l
     適用と同じく、**範囲のコミットは全て申告されていること**を求める。
     申告から漏れた修正コミットは検証を受けないまま Pull Request に残る。
     """
-    reported_full = {full for full in (git_out(work, ["rev-parse", "--verify", f"{s}^{{commit}}"]) for s in reported_shas) if full}
+    reported_full = {full for full in (resolve_commit(work, s) for s in reported_shas) if full}
     return sorted(set(ordered_range) - reported_full)
 
 
@@ -441,13 +441,32 @@ def doc_wording_tests(
     hits: list[tuple[str, str]] = []
     for path, (before, after) in sorted(changes.items()):
         added = _added_lines(before, after)
-        found = {lit for line in added for lit in _markdown_literals(line, tracked)}
-        tree = _parse("".join(after)) if path.endswith(".py") else None
-        if tree is not None:
-            names = {
-                **_markdown_constants(tree, tracked),
-                **_imported_constants(tree, path, tracked, changes, work, sha),
-            }
-            found.update(literal for name, literal in names.items() if any(re.search(rf"\b{re.escape(name)}\b", line) for line in added))
+        found = _direct_references(added, tracked)
+        found.update(_constant_references(path, after, added, tracked, changes, work, sha))
         hits.extend((path, literal) for literal in sorted(found))
     return hits
+
+
+def _direct_references(added: list[str], tracked: list[str]) -> set[str]:
+    """追加行の文字列リテラルのうち、追跡している `.md` を指すもの。"""
+    return {lit for line in added for lit in _markdown_literals(line, tracked)}
+
+
+def _constant_references(
+    path: str,
+    after: list[str],
+    added: list[str],
+    tracked: list[str],
+    changes: dict[str, tuple[list[str], list[str]]],
+    work: Optional[str],
+    sha: Optional[str],
+) -> set[str]:
+    """Python のテストで、`.md` を指す定数（直下の定数と補助モジュールの import）を追加行が識別子として使うもの。"""
+    tree = _parse("".join(after)) if path.endswith(".py") else None
+    if tree is None:
+        return set()
+    names = {
+        **_markdown_constants(tree, tracked),
+        **_imported_constants(tree, path, tracked, changes, work, sha),
+    }
+    return {literal for name, literal in names.items() if any(re.search(rf"\b{re.escape(name)}\b", line) for line in added)}

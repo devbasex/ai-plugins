@@ -1,6 +1,8 @@
-"""push の直前の生成物の同期と、head ブランチへの push。
+"""push の直前の生成物の同期と照合、head ブランチへの push。
 
-**公開するのはオーケストレーターだけである。** 認証の退避の値はライブラリ（`scripts/lib/git-credential.sh`）が持つ。
+**公開するのはオーケストレーターだけで、最終ゲートへ入った後だけである**（#1482 の決定 7）。push の直前に、
+送るコミットがすべて残すコミットかを取り消しの判定（`ledger.unpublishable`）で照らし、違えば push せずに
+終了コード 4 で止まる。認証の退避の値はライブラリ（`scripts/lib/git-credential.sh`）が持つ。
 """
 
 from __future__ import annotations
@@ -13,8 +15,8 @@ from typing import Any
 import statefile
 import tool_paths
 
-from . import die, info, timeline, worktree
-from .paths import sh
+from . import die, info, ledger, timeline, worktree
+from .paths import git_out, sh
 from .plan import format_plan, normalize_plan_file, publish_plan_comment
 from .process import run_with_timeout
 from .vocabulary import (
@@ -123,7 +125,12 @@ def _sync_generated(state: dict[str, Any]) -> None:
         _write_plan_file(state, work, plan_rel)
     if command:
         _run_sync_command(state, work, command)
+    before = git_out(work, ["rev-parse", "HEAD"])
     _commit_sync_changes(work, command, worktree._dirty_paths(state, work), plan_rel)
+    after = git_out(work, ["rev-parse", "HEAD"])
+    if after and after != before:
+        # 同期のコミットは残すコミットとして台帳へ記録する（記録しないと push の直前の照合で止まる）
+        ledger.note_orchestrator_commit(state, after)
 
 
 # 退避に使う値は共通層が 1 か所で持つ（#524）。**複製は持たない。** 手順書と実装が
@@ -187,6 +194,27 @@ def _require_no_tool_paths(state: dict[str, Any]) -> None:
         die(blocked)
 
 
+def _require_publishable(state: dict[str, Any]) -> None:
+    """送るコミット（`FETCH_HEAD..HEAD`）がすべて残すコミットかを照らす。違えば push せずに止まる（#817）。
+
+    見放した担当の残留コミットは、判定の後にも積まれうる。その場で取り消して push し直さない。
+    担当のプロセスが生きていれば、取り消した後にもまたコミットされうるためである。
+    """
+    stray = ledger.unpublishable(state, state["worktrees"]["work"], "FETCH_HEAD")
+    if not stray:
+        return
+    info("✖ 公開してよくないコミットがあるため push しません")
+    for v in stray:
+        info(f"   {v.sha[:12]} Item-Id={v.trailer_item_id or '-'} {v.subject}")
+    die(f"origin の {state['head_branch']} は変えていません")
+
+
+def _require_final(state: dict[str, Any]) -> None:
+    """公開の入口は最終ゲートへ入った後だけ push する。入る前に呼ばれたら呼び出し元の誤りとして止まる。"""
+    if not ledger.in_final_gate(state):
+        die("最終ゲートへ入る前には push しません（呼び出し元の誤り）")
+
+
 def push_head(state: dict[str, Any]) -> None:
     """head ブランチへ push する。**`--force` は使わない。**
 
@@ -195,10 +223,10 @@ def push_head(state: dict[str, Any]) -> None:
     """
     _sync_generated(state)
     _require_no_tool_paths(state)
-    _push_with_credential_fallback(
-        ["push", "origin", f"HEAD:{state['head_branch']}"],
-        state["worktrees"]["work"],
-    )
+    _require_publishable(state)
+    work = state["worktrees"]["work"]
+    _push_with_credential_fallback(["push", "origin", f"HEAD:{state['head_branch']}"], work)
+    ledger.note_published(state, git_out(work, ["rev-parse", "HEAD"]) or "")
     # **改修計画のコメントは push の後で更新する**（#436 決定 6）。差分に混ざらない
     # ので push とは独立だが、公開した内容と食い違わないよう後ろへ置く。投稿に
     # 失敗しても進行は止めない（`publish_plan_comment` が出力へ残す）。
@@ -211,18 +239,45 @@ def push_with_retry_marker(path: pathlib.Path, state: dict[str, Any], entry: dic
     フラグを残さずに push すると、失敗したときに**取り消しがローカルだけに留まる**。
     処理済みガードで次回は素通りするため、Pull Request へ永久に反映されない。
     """
+    _require_final(state)
     entry["pending_push"] = True
     statefile.save(path, state)
-    push_head(state)
+    _push_and_save(path, state)
     entry["pending_push"] = False
     statefile.save(path, state)
+
+
+def _push_and_save(path: pathlib.Path, state: dict[str, Any]) -> None:
+    """push し、止まっても台帳（同期のコミット・公開した地点）を保存する。
+
+    保存しないと、同期のコミットが記録に無いまま残り、次の照合がそれを `stray` として止める。
+    """
+    try:
+        push_head(state)
+    finally:
+        statefile.save(path, state)
 
 
 def flush_pending_push(path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any]) -> None:
     """前回やり残した push を、処理済みの判定より**先に**片づける。"""
+    _require_final(state)
     if not entry.get("pending_push"):
         return
     info("↻ 前回 push できなかった取り消しを反映します")
-    push_head(state)
+    _push_and_save(path, state)
     entry["pending_push"] = False
     statefile.save(path, state)
+
+
+def enter_final_gate(path: pathlib.Path, state: dict[str, Any]) -> None:
+    """最終ゲートへ入る時点の公開。**実行で最初の push になる**（途中の push はしない。#1399）。
+
+    検証の終わりと最終ゲートの入口の両方から呼ぶ。HEAD が公開した地点と同じで、やり残しも無ければ何もしない。
+    """
+    _require_final(state)
+    point = ledger.published_point(state)
+    if not point:
+        return  # 改修計画の前に最終ゲートへ来た。公開する改善は無い
+    if git_out(state["worktrees"]["work"], ["rev-parse", "HEAD"]) == point and not state.get("pending_push"):
+        return
+    push_with_retry_marker(path, state, state)

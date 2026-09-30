@@ -30,7 +30,7 @@ import statefile
 import test_strategy as ts
 import test_triage
 
-from .. import clock, die, gate_lint, info, launch, timeline, triage
+from .. import clock, die, gate_lint, info, launch, publish, timeline, triage
 from ..gitfacts import (
     discard_impl_leftovers,
     flush_pending_push,
@@ -75,6 +75,10 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
     gate = state.setdefault("final_gate", {"fix_rounds": 0, "checks": []})
     standalone = not state.get("workflow_step")
     state["phase"] = "final"
+    statefile.save(path, state)
+    # 検証を通らずに来た実行（残る項目が 0 件）でも、判定の前に 1 度だけ公開する。HEAD が公開した地点と
+    # 同じなら何もしない。CI で見る戦略では、この push が無いと読むチェックが動かない
+    publish.enter_final_gate(path, state)
 
     state.pop("launch_failure", None)
     # 手元でテストの全体テストを走らせたときは、静的解析もテストの実行秒数を差し引いた上限で数える（1 回の全体検証を
@@ -315,6 +319,9 @@ def _close_failed_final_fix(
     if not closed.relaunch_same_agent:
         gate["no_relaunch"] = True
     statefile.save(path, state)
+    if closed.reverted:
+        # 最終ゲートは push 済みの地点を判定する。取り消した後の HEAD を公開してから判定へ戻す
+        push_with_retry_marker(path, state, gate)
     sys.exit(2)
 
 

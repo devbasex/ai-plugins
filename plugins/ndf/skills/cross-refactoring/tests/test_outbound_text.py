@@ -121,6 +121,15 @@ def test_the_report_does_not_list_the_deferred_breakdown(refactor, tmp_path, env
     assert COMMENT_URL in out, "改修計画の生の URL が無い"
 
 
+def test_the_report_does_not_call_items_adopted_without_the_final_gate(refactor, tmp_path, env_tmp_dir, capsys):
+    """AC-1399-6: 最終ゲートを経ていない実行は、残った改善項目を「採用」と数えない。"""
+    path, _ = _state(tmp_path, items=[_item(id="I-001", status="verified"), _item(id="I-002", status="verified")])
+    env_tmp_dir(path)
+    refactor.cmd_report(type("A", (), {"id": 130, "metrics": False})())
+    out = capsys.readouterr().out
+    assert "採用: 未確定" in out and "採用: 2 件" not in out
+
+
 def test_the_report_counts_each_item_once(refactor, tmp_path, env_tmp_dir, capsys):
     """採用・取り消し・見送りの和が項目の数を超えない（3042be53 の二重計上の回帰）。
 
@@ -144,6 +153,7 @@ def test_the_report_counts_each_item_once(refactor, tmp_path, env_tmp_dir, capsy
                 "detail": "締め切り",
             }
         ],
+        final_gate={"fix_rounds": 0, "checks": [], "status": "passed"},
     )
     env_tmp_dir(path)
     refactor.cmd_report(type("A", (), {"id": 130, "metrics": False})())

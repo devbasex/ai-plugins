@@ -69,6 +69,7 @@ _MODULES = (
     "github",
     "intake",
     "items",
+    "ledger",
     "outbound",
     "pathkinds",
     "paths",

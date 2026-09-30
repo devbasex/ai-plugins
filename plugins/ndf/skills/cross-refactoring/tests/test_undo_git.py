@@ -4,6 +4,7 @@
 | --- | --- |
 | 別ファイル / 離れた行 | 項目だけを取り消し、残す項目は積み直せる（`item`） |
 | 同一ファイルの隣接行 | 積み直せない。同じファイルを触った項目まで広げる（`widened`） |
+| 広げた後も隣接が残る | 取り消しの前の HEAD へ戻して終了コード 4（全件の取り消しへは進まない。#1237） |
 
 **隣接する変更は git だけでは分離できない。** 取り消した側の行が消えると、残す側の
 パッチが前提にしている文脈も消えるためである。広げてでも Pull Request を決定的な
@@ -117,15 +118,15 @@ def test_an_item_without_commits_is_closed_without_touching_git(tmp_path, undo):
     assert git("rev-parse", "HEAD", cwd=work).stdout.strip() == head
 
 
-def test_an_unowned_extra_commit_is_removed_while_item_commits_are_replayed(tmp_path, undo):
-    """現状固定: extra_shas は消え、項目に属する履歴だけが積み直される。"""
+def test_an_unowned_extra_commit_is_removed_and_older_commits_are_kept(tmp_path, undo):
+    """どの項目にも記録されていないコミットは消え、それより古い項目のコミットは積み直さずに残る。"""
     work, base, c1, c2 = _repo(tmp_path, 30)
     path = _state(tmp_path, work, base, c1, c2)
     state = read_state(path)
     (work / "src" / "extra.py").write_text("unowned\n", encoding="utf-8")
     extra = commit_with_trailers(work, "unowned", {})
 
-    record = undo.drop(path, state, [], "改修計画外", [extra])
+    record = undo.discard_range(path, state, "改修計画外")
 
     assert record == {
         "at": record["at"],
@@ -133,15 +134,16 @@ def test_an_unowned_extra_commit_is_removed_while_item_commits_are_replayed(tmp_
         "reason": "改修計画外",
         "dropped": [],
         "extra": [extra],
-        "reverted_commits": 3,
-        "replayed": 2,
+        "origin": c2,
+        "removed": 1,
+        "replayed": 0,
+        "reverted": 0,
     }
     assert not (work / "src" / "extra.py").exists()
     items = {i["id"]: i for i in read_state(path)["items"]}
-    assert items["I-001"]["status"] == "implemented"
-    assert items["I-002"]["status"] == "implemented"
-    assert items["I-001"]["commits"]["implement"] != c1
-    assert items["I-002"]["commits"]["implement"] != c2
+    assert items["I-001"]["commits"]["implement"] == c1
+    assert items["I-002"]["commits"]["implement"] == c2
+    assert git("rev-parse", "HEAD", cwd=work).stdout.strip() == c2
     assert read_state(path)["pending_drop"] is None
 
 
@@ -159,57 +161,110 @@ def test_an_interrupted_drop_is_redone_on_resume(tmp_path, undo):
 
 
 def test_a_drop_interrupted_after_replay_keeps_the_remaining_item_on_resume(tmp_path, undo):
-    """積み直しの後・状態の保存の前に落ちても、再開で残す項目を失わない。
+    """積み直しの後・状態の保存の前に落ちても、再開で残す項目を失わない（I7）。
 
-    取り消しは revert と cherry-pick を積むだけで履歴を書き換えないため、中断後も
-    旧 SHA は起点から HEAD の範囲に残り、状態の所有者表と対応が付く。
+    再開は記録した取り消しの前の HEAD（`pending_drop.before`）へ戻してから計画を作り直す。
     """
     work, base, c1, c2 = _repo(tmp_path, 30)
     path = _state(tmp_path, work, base, c1, c2)
     before = copy.deepcopy(read_state(path))
     undo.drop(path, read_state(path), ["I-001"], "中断")
+    finished = read_state(path)
     # git は積み直しまで進み、状態は着手直後（フラグだけ立った旧 SHA のまま）で残った
-    before["pending_drop"] = {"items": ["I-001"], "extra": [], "reason": "中断"}
+    before["pending_drop"] = {"items": ["I-001"], "reason": "中断", "before": c2}
     path.write_text(json.dumps(before, ensure_ascii=False), encoding="utf-8")
 
     undo.resume_pending_drop(path, read_state(path))
 
     assert "line3-by-I-001" not in (work / "src" / "foo.py").read_text(encoding="utf-8")
     assert "changed-by-I-002" in (work / "src" / "foo.py").read_text(encoding="utf-8")
-    items = {i["id"]: i for i in read_state(path)["items"]}
+    resumed = read_state(path)
+    items = {i["id"]: i for i in resumed["items"]}
     assert items["I-001"]["status"] == "reverted"
     assert items["I-002"]["status"] == "implemented"
     assert git("rev-parse", "HEAD", cwd=work).stdout.strip() == items["I-002"]["commits"]["implement"]
-    assert read_state(path)["pending_drop"] is None
+    assert (
+        git("rev-parse", "HEAD^{tree}", cwd=work).stdout.strip()
+        == git("rev-parse", f"{finished['items'][1]['commits']['implement']}^{{tree}}", cwd=work).stdout.strip()
+    )
+    assert len(resumed["drops"]) == 1
+    assert resumed["pending_drop"] is None
 
 
-def test_a_replay_conflict_without_a_shared_file_drops_every_item(tmp_path, undo):
-    """広げる相手が無いまま積み直しが競合したら、改修計画の項目をすべて取り消す（`all`）。
+def test_a_conflict_left_after_widening_restores_head_and_stops(tmp_path, undo, capsys):
+    """同じファイルまで広げても積み直せなければ、全件を取り消さずに取り消しの前へ戻して止まる（AC-1237-4）。
 
-    残す I-002 は、取り消す改修計画外のコミットの隣の行を触っている。I-002 は I-001 と
-    同じファイルを触らないため広げる相手にならず、積み直しは競合する。
+    I-002 は I-001 の隣の行（foo.py）と bar.py を触り、I-003 は I-002 の bar.py の隣の行を触る。I-001 を
+    取り消すと I-002 が衝突して広がり、広げた後は I-003 が衝突する。I-003 は foo.py を触らないため広がらない。
     """
     work, base, c1, _ = _repo(tmp_path, 30)
     git("reset", "-q", "--hard", c1, cwd=work)
+    foo = (work / "src" / "foo.py").read_text(encoding="utf-8").splitlines(keepends=True)
+    foo[3] = "changed-by-I-002\n"
+    (work / "src" / "foo.py").write_text("".join(foo), encoding="utf-8")
     bar = list(LINES)
-    bar[2] = "line3-unowned\n"
-    (work / "src" / "bar.py").write_text("".join(bar), encoding="utf-8")
-    extra = commit_with_trailers(work, "unowned", {})
-    bar[3] = "changed-by-I-002\n"
+    bar[2] = "line3-by-I-002\n"
     (work / "src" / "bar.py").write_text("".join(bar), encoding="utf-8")
     c2 = commit_with_trailers(work, "I-002", item_trailers("I-002"))
+    bar[3] = "line4-by-I-003\n"
+    (work / "src" / "bar.py").write_text("".join(bar), encoding="utf-8")
+    c3 = commit_with_trailers(work, "I-003", item_trailers("I-003"))
     path = _state(tmp_path, work, base, c1, c2)
     state = read_state(path)
-    state["items"][1]["path"] = "src/bar.py"
+    state["items"].append(
+        {"id": "I-003", "rank": 3, "path": "src/bar.py", "status": "implemented", "commits": {"test": None, "implement": c3, "fix": []}}
+    )
 
-    record = undo.drop(path, state, ["I-001"], "テスト", [extra])
+    with pytest.raises(SystemExit) as e:
+        undo.drop(path, state, ["I-001"], "テスト")
 
-    assert record["mode"] == "all"
-    assert sorted(record["dropped"]) == ["I-001", "I-002"]
-    for name in ("foo.py", "bar.py"):
-        assert (work / "src" / name).read_text(encoding="utf-8") == "".join(LINES)
+    assert e.value.code == 4
+    assert git("rev-parse", "HEAD", cwd=work).stdout.strip() == c3
+    err = capsys.readouterr().err
+    assert c3[:12] in err and "I-002" in err
     items = {i["id"]: i for i in read_state(path)["items"]}
-    assert items["I-001"]["status"] == "reverted"
-    assert items["I-002"]["status"] == "reverted"
-    assert "巻き込まれた" in items["I-002"]["failure_reason"]
-    assert read_state(path)["pending_drop"] is None
+    assert [items[i]["status"] for i in ("I-001", "I-002", "I-003")] == ["implemented"] * 3
+    assert not read_state(path).get("drops")
+
+
+def test_remap_rewrites_item_commits_and_saved_points_through_full_shas(tmp_path, undo):
+    """現状固定: `_remap` は短い SHA も完全な SHA へ解決して引き、対応表に無い値はそのまま残す。
+
+    項目のコミット・`fix` の並び・オーケストレーターのコミットは `mapping` で、フェーズと修正と
+    最終ゲートの起点は `points` で書き直す。最終ゲートの `fix_commits` は `mapping` で書き直す。
+    """
+    work, base, c1, c2 = _repo(tmp_path, 30)
+    mapping = {c1: "new-c1", c2: "new-c2"}
+    points = {c1: "point-c1", base: "point-base"}
+    state = {
+        "items": [
+            {"id": "I-001", "commits": {"test": c1[:10], "implement": c2, "fix": [c1[:8], "unknown"]}},
+            {"id": "I-002", "commits": {"test": None, "implement": base}},
+            {"id": "I-003"},
+        ],
+        "phases": {"a": {"base_sha": c1[:12]}, "b": {"base_sha": ""}, "c": "not-a-dict", "d": {"base_sha": c2}},
+        "fix": {"base_sha": base},
+        "final_gate": {"fix_base_sha": c1, "fix_commits": [c2, "zzz"]},
+        "ledger": {"orchestrator_commits": [c1, "other"]},
+    }
+
+    undo._remap(state, str(work), mapping, points)
+
+    assert state["items"][0]["commits"] == {"test": "new-c1", "implement": "new-c2", "fix": ["new-c1", "unknown"]}
+    assert state["items"][1]["commits"] == {"test": None, "implement": base, "fix": []}
+    assert state["items"][2] == {"id": "I-003"}
+    assert state["phases"] == {"a": {"base_sha": "point-c1"}, "b": {"base_sha": ""}, "c": "not-a-dict", "d": {"base_sha": c2}}
+    assert state["fix"] == {"base_sha": "point-base"}
+    assert state["final_gate"] == {"fix_base_sha": "point-c1", "fix_commits": ["new-c2", "zzz"]}
+    # オーケストレーターのコミットは完全な SHA のまま引く（短い SHA を解決しない）
+    assert state["ledger"]["orchestrator_commits"] == ["new-c1", "other"]
+
+
+def test_remap_leaves_a_state_without_optional_sections_alone(tmp_path, undo):
+    """現状固定: `phases` / `fix` / `final_gate` が無い・空でも落ちず、台帳だけが用意される。"""
+    work, _, c1, _ = _repo(tmp_path, 30)
+    state = {"items": None, "fix": "not-a-dict", "final_gate": {}}
+
+    undo._remap(state, str(work), {c1: "x"}, {})
+
+    assert state == {"items": None, "fix": "not-a-dict", "final_gate": {}, "ledger": {"orchestrator_commits": []}}

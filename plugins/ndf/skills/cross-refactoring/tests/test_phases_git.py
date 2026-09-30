@@ -194,10 +194,10 @@ def test_a_commit_without_a_planned_item_is_reverted_alone(flow, cmd_setup, cmd_
     assert items["I-001"]["status"] == "tested"
     assert (work / "tests" / "test_total.py").exists()
     assert not (work / "tests" / "test_extra.py").exists()
-    # 積み直しで SHA が変わっても、記録は履歴にあるコミットを指す。
+    # 消すコミットより古いコミットは積み直さない。記録は元のコミットのまま、HEAD がそれを指す（#1482）
     recorded = items["I-001"]["commits"]["test"]
-    assert git("cat-file", "-t", recorded, cwd=work).stdout.strip() == "commit"
-    assert recorded != kept  # 積み直したコミットを指す
+    assert recorded == kept
+    assert git("rev-parse", "HEAD", cwd=work).stdout.strip() == kept
 
 
 def test_a_test_commit_touching_production_code_rejects_the_item(flow, cmd_setup, cmd_implement):

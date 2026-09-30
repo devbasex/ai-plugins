@@ -25,14 +25,12 @@ import project_decl
 import statefile
 import test_strategy as ts
 
-from .. import clock, die, info, launch, targets, timeline
+from .. import clock, die, info, launch, ledger, targets, timeline
 from ..gitfacts import (
     collect_commit_facts,
     commit_time,
     commits_in_range,
     discard_impl_leftovers,
-    flush_pending_push,
-    push_with_retry_marker,
     note_stopped,
     record_observed_model,
     safe_int,
@@ -41,7 +39,6 @@ from ..gitfacts import (
 from ..items import (
     DEFERRED,
     IMPLEMENTED,
-    LIVE,
     PLANNED,
     TESTED,
     defer,
@@ -109,7 +106,7 @@ def _group_by_item(
     for fact in facts:
         item_id = str((fact.get("trailers") or {}).get("Item-Id") or "").strip()
         item = find_item(state, item_id, required=False) if item_id else None
-        if item is None or item.get("status") not in LIVE or not allowed(item):
+        if not ledger.is_live(item) or not allowed(item):
             intake.extra.append(fact["sha"])
             continue
         by_item.setdefault(item_id, []).append(fact)
@@ -161,7 +158,7 @@ def _settle(
     # 逆再生と積み直しで履歴だけが伸びる。
     done = any(d.get("reason") == label for d in state.get("drops") or [])
     if (targets or intake.extra) and not done:
-        drop(path, state, targets, label, intake.extra)
+        drop(path, state, targets, label)
     # 見送った項目は `drop` が付けた `reverted` を `deferred` へ改める。取り消しと見送りの
     # 両方に数えると、報告の件数の和が項目の数を超える（設計の状態遷移）。
     for reason_code, found in ((DEFER_NOT_DONE, intake.not_done), (DEFER_TEST_FAILED, intake.test_failed)):
@@ -205,10 +202,12 @@ def _recalled(state: dict[str, Any], phase: str) -> Optional[Intake]:
 
 
 def _prepare(path: pathlib.Path, state: dict[str, Any]) -> None:
-    """取り込みの前の片づけ。やり残した取り消しと公開を先に済ませ、未コミットの変更を捨てる。"""
+    """取り込みの前の片づけ。やり残した取り消しを先に済ませ、未コミットの変更を捨てる。
+
+    **push はしない。** 公開は最終ゲートへ入る時点にまとめる（#1399）。
+    """
     discard_impl_leftovers(state, work_dir(state))
     resume_pending_drop(path, state)
-    flush_pending_push(path, state, state)
 
 
 def _finish(path: pathlib.Path, state: dict[str, Any], phase: str) -> None:
@@ -216,8 +215,6 @@ def _finish(path: pathlib.Path, state: dict[str, Any], phase: str) -> None:
     if not live_items(state):
         state["phase"] = "final"
     statefile.save(path, state)
-    if state.get("pending_push"):
-        push_with_retry_marker(path, state, state)
     if not live_items(state):
         info("残る項目が 0 件のため、最終ゲートへ進みます")
         sys.exit(2)
