@@ -391,15 +391,23 @@ def _scopes_held(name: str) -> str | None:
     return " ".join(s) if isinstance(s, list) and s and all(isinstance(x, str) and x.split() == [x] for x in s) else None
 
 
-def _grant(name: str, before: float | None, now: float | None = None, min_left: float = 0) -> tuple[str, str | None] | None:
-    """1 回の排他の中で読んだ (アクセストークン, スコープ)。トークンを得られなければ None。
+@dataclass(frozen=True)
+class Grant:
+    """1 回の排他の中で読んだアクセストークンとスコープ（空白区切り。読めなければ None）。"""
+
+    token: str
+    scopes: str | None
+
+
+def _grant(name: str, before: float | None, now: float | None = None, min_left: float = 0) -> Grant | None:
+    """1 回の排他の中で読んだアクセストークンとスコープ（Grant）。トークンを得られなければ None。
 
     スコープはトークンの後に読む（更新すると置き場の `scopes` が書き直される）。読めなければスコープだけ None。"""
     now = _now(now)
 
-    def held() -> tuple[str, str | None] | None:
+    def held() -> Grant | None:
         tok = _token_held(name, before, now, min_left=min_left)
-        return None if tok is None else (tok, _scopes_held(name))
+        return None if tok is None else Grant(tok, _scopes_held(name))
 
     return _with_lock(name, held, lambda: None)
 
@@ -407,7 +415,7 @@ def _grant(name: str, before: float | None, now: float | None = None, min_left: 
 def token(name: str, before: float | None = REFRESH_BEFORE, now: float | None = None, min_left: float = 0) -> str | None:
     """子へ渡すアクセストークン。期限の `before` 秒前を切っていれば更新する（None は更新しない）。`min_left` は `_token_held`。"""
     g = _grant(name, before, now, min_left)
-    return g[0] if g else None
+    return g.token if g else None
 
 
 # ---------------------------------------------------------------- 使用量
@@ -550,7 +558,7 @@ def account_env(name: str, base: dict, before: float | None = REFRESH_BEFORE, mi
     if grant is None:
         return None
     strip = FALLBACK_ENV in base or base.get(NAME_ENV) == METERED
-    return _account_env(dict(base), declared if strip else {}, name, *grant)
+    return _account_env(dict(base), declared if strip else {}, name, grant.token, grant.scopes)
 
 
 def _metered_env(env: dict, declared: dict, saved: bool) -> dict:
