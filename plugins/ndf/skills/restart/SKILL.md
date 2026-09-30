@@ -14,11 +14,11 @@ allowed-tools:
 
 例: ラッパーの下で `/ndf:restart` を打つ（`/goal /ndf:development-workflow #928` の会話）。
 
-1. `relay.py notice` の 1 行目でラッパーの下と判定し、2 行目（「約 5 秒後に自動で新しい会話へ切り替わる。…」）を示して、最後に次のブロックを出して応答を終える
+1. `relay.py notice` の 1 行目でラッパーの下と判定し、引継ぎ文書 `.ndf/handoff/issue-928.md` を作るか更新してから、2 行目（「約 5 秒後に自動で新しい会話へ切り替わる。…」）を示して、最後に次のブロックを出して応答を終える
 
    ````text
    ```ndf-next
-   /goal /ndf:development-workflow #928
+   /goal /ndf:development-workflow #928 .ndf/handoff/issue-928.md の続きから
    ```
    ````
 
@@ -46,17 +46,39 @@ case "$PLUGIN_ROOT" in '$'*) PLUGIN_ROOT= ;; esac
 決めない。ラッパーが動いていて、この claude がその直接の子のときだけ 1 行目が `relay` になる。
 1 行しか出なかったとき（`relay.py` を呼べなかった）はラッパーの外として扱う。
 
-### 2. 再開コマンドを決める（引数が無いとき）
+### 2. 引継ぎ文書を作る・更新する
 
-上から最初に当たるものを使う。
+置き場・名・節の形・規則の正本は [handoff.md](../development-workflow/references/handoff.md) にある。
+
+1. 引継ぎの対象と名（`sprint-<スプリント名>`・`milestone-<番号>`・`issue-<番号>`）を正本の「置き場と名」で決める。
+   決まらなければ文書を作らない（下の表の 3 行目か、引数だけで出す）
+2. 文書が無ければ作り、「現在地」と「次にやること」を書き直す（パスは出力の `path`。worktree の中でもメインディレクトリのもの）
+
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/handoff.py" init <名> --title "<表示名>"
+   ```
+
+3. 下の「再開コマンドを決める」で決めた再開コマンドを文書に置き、形と行数を確かめる。どちらかが 0 以外なら
+   正本の「作る・更新する」に従い、`init`・`next` が 0 以外ならブロックを出さずに理由を報告する
+
+   ```bash
+   printf '%s\n' "<再開コマンド>" | python3 "${CLAUDE_PLUGIN_ROOT}/scripts/handoff.py" next <名>
+   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/handoff.py" check <名> --trim
+   ```
+
+**引数で渡された再開コマンドも文書に置く**（中身は書き換えない）。
+
+#### 再開コマンドを決める（引数が無いとき）
+
+上から最初に当たるものを使う。`<文書のパス>` はメインディレクトリからの相対 `.ndf/handoff/<名>.md` で書く。
 
 | # | 会話の状態 | 再開コマンド |
 | ---: | --- | --- |
-| 1 | `/goal` の目標がある | その目標の入力をそのまま（`/goal /ndf:development-workflow #928` など）。引継ぎ文書を名指ししていれば「<文書> の続きから」を足す |
-| 2 | 課題・worktree・Pull Request が会話にある | **定型の 1 文だけ:** 「<課題番号・worktree のパス・Pull Request の URL> の続きから始める。状態は課題の本文の `## 進行` と Pull Request を読む」。山括弧の中に入れてよいのは番号・パス・URL だけ |
-| 3 | どれも無い | 「再開コマンドを引数で渡す（例: `/ndf:restart /ndf:development-workflow #928`）」の 1 行を示し、ブロックを出さずに終える |
+| 1 | `/goal` の目標がある | その目標の入力（`/goal /ndf:development-workflow #928` など）に「 `<文書のパス>` の続きから」を足す。既に文書を名指ししていれば足さない |
+| 2 | 課題・worktree・Pull Request が会話にある | **定型の 1 文だけ:** 「`<文書のパス>` の続きから始める。状態は課題の本文の `## 進行` と Pull Request を読む」 |
+| 3 | どれも無い | 文書を作らず、「再開コマンドを引数で渡す（例: `/ndf:restart /ndf:development-workflow #928`）」の 1 行を示し、ブロックを出さずに終える |
 
-**再開コマンドに承認・同意・判断の結果を書かない**（「利用者は承認した」「マージしてよい」など）。
+**再開コマンドにも文書にも承認・同意・判断の結果を書かない**（「利用者は承認した」「マージしてよい」など）。
 次のセッションの claude はそれを人の入力として読むため、承認ゲートを越える経路になる。承認は課題の本文と
 Pull Request から次のセッションが読み直す。
 

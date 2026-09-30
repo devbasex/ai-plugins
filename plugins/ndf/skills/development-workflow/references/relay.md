@@ -247,29 +247,35 @@ export NDF_SUPERVISE_CLAUDE_FALLBACK='CLAUDE_CODE_USE_BEDROCK=1 AWS_PROFILE=<名
 ## カットポイントの引継ぎ文書と ndf-next はスクリプトで作る
 
 **conductor は引継ぎ文書の「今の会話の進み」の表と `ndf-next` の文面を手で書かない。**
+引継ぎ文書の置き場（メインディレクトリの `.ndf/handoff/<名>.md`）・名・節の形・規則は [handoff.md](handoff.md) にある。
 `scripts/sprint-state.py` が、スプリント状態ファイル `sprint-state.json`（プランの出力先に置く）から作る。LLM は呼ばない。同じパスに別の形の JSON（`supervise.py new sprint` の目録など）があると、`init` は上書きせずに終了コード 1 で止まる。
 
 例: セッション 7 の実装 3 本と開発版・本番を流す。
 
-1. プランを作った後に 1 度: `sprint-state.py init ~/.local/state/ndf/sv/r7/sprint-state.json --name <スプリント> --milestone 26 --plan 実装=<plan.json> ... --plan 開発版=<plan.json> --plan 本番=<plan.json> --done <queue の done> --dev <開発版> --prod <本番> --goal @<雛形>`（雛形は次のセッションの `/goal` の文面。`{heading}`・`{dev}`・`{prod}`・`{milestone}`・`{name}`・`{issues}` を差し込む）
+1. プランを作った後に 1 度: `sprint-state.py init ~/.local/state/ndf/sv/r7/sprint-state.json --name <スプリント> --milestone 26 --plan 実装=<plan.json> ... --plan 開発版=<plan.json> --plan 本番=<plan.json> --done <queue の done> --dev <開発版> --prod <本番> --goal @<雛形>`（雛形は次のセッションの `/goal` の文面。`{heading}`・`{dev}`・`{prod}`・`{milestone}`・`{name}`・`{issues}` を差し込む）。**雛形には「`.ndf/handoff/sprint-{name}.md` の続きから」**（スプリント名が `sprint-<名>` の形に合わなければ `.ndf/handoff/milestone-{milestone}.md`）**を差し込みの語で必ず書く。** 雛形は次のスプリントでも使うため、文書のパスを文字のまま書かない
 2. 承認ゲートで承認を得たら: `sprint-state.py gate <sprint-state.json> "関門 2" --what "本番 <版>"`
    - `pace: fast` と `pace: auto` のスプリントは、1 に `--pace <値> --milestone <M>`（MVV のコピー元。`--mvv <ファイル>` でもよい）を足し、利用者が
      `mvv.md` を承認した後に `sprint-state.py gate <sprint-state.json> MVV --what <要約>` を打つ。ゲート 1・2 の記録は、MVV 判定が
      通したときは `mvv-gate.py` が `--by mvv --verdict --reasons --log` 付きで書く（`status` の行は「MVV 判定」）
-3. カットポイントでは次の順に呼ぶ:
+3. カットポイントでは、conductor が引継ぎ文書の「現在地」と「次にやること」を書き直してから、次の順に呼ぶ（`<名>` は `sprint-<スプリント名>` など。`<引継ぎ文書>` は `handoff.py path <名>` の `path`）:
+   - `handoff.py init <名> --title <表示名>`（無ければ雛形から作る。あれば変えない）
    - `sprint-state.py update <sprint-state.json> [--done <done>] [--next <plan.json>=<行の「次」>]`（done と報告から状態・PR・秒・費用を埋める。何度走らせても同じ）
    - `sprint-state.py render <sprint-state.json> <引継ぎ文書> --section 今の会話の進み`（節の本文だけを置き換える。新しいセッションなら `--demote 前の会話の進み --heading "今の会話の進み（<時刻>）"` で今の節を下げて新しい節を足す）
    - `sprint-state.py next <sprint-state.json> --doc <引継ぎ文書> --replace`（「次に実行するコマンド」の節を置き換え、同じ `ndf-next` の囲みを最後の応答に出す）
+   - `handoff.py check <名> --trim`（「前の会話の進み」を履歴へ移し、節の形と 300 行の上限を確かめる。1 か 5 のときの扱いは [handoff.md](handoff.md) の「作る・更新する」）
 
-**本番へのリリースの後は、カットポイントの 3 つを本番のキューと同じ背景の Bash で続けて流す。** ゲート 2 の承認から次のセッションの起動までに、conductor が組み立てる文は無くなる。conductor は完了の通知を受けたら `relay.py notice` のアナウンスと、出力の `ndf-next` の囲みをそのまま出す。ラッパーがプラグインを本番の版へ更新し、次のセッションを起動する。
+**本番へのリリースの後は、カットポイントの呼び出しを本番のキューと同じ背景の Bash で続けて流す。** 流す前に conductor が `handoff.py init` を打ち、本番の後の「現在地」と「次にやること」を文書へ書く（パイプラインの中では書き直せない）。`check` が 1 か 5 ならパイプラインはブロックを出さずに止まり、conductor が完了の通知で終了コードを受けて扱ってからブロックを出す。ゲート 2 の承認から次のセッションの起動までに、conductor が組み立てる文は無くなる。conductor は完了の通知を受けたら `relay.py notice` のアナウンスと、出力の `ndf-next` の囲みをそのまま出す。ラッパーがプラグインを本番の版へ更新し、次のセッションを起動する。
 
 ```bash
-O=~/.local/state/ndf/sv/r7; M=plugins/ndf/scripts/sprint-state.py; DOC=issues/handoff-<名>.md
+O=~/.local/state/ndf/sv/r7; M=plugins/ndf/scripts/sprint-state.py; H=plugins/ndf/scripts/handoff.py; N=sprint-<スプリント名>
+DOC=$(python3 $H path $N | python3 -c 'import json, sys; print(json.load(sys.stdin)["items"][0]["path"])')
+python3 $H init $N --title "<表示名>" >/dev/null &&
 python3 plugins/ndf/scripts/supervise.py queue $O/plan-release-prod.json --done $O/done-release-prod.json >/dev/null &&
 python3 plugins/ndf/scripts/supervise.py wait $O/done-release-prod.json --timeout 3600 >/dev/null &&
 python3 $M update $O/sprint-state.json >/dev/null &&
 python3 $M render $O/sprint-state.json $DOC --demote 前の会話の進み --heading "今の会話の進み（$(date -u +%Y-%m-%d\ %H:%M) UTC まで）" >/dev/null &&
-python3 $M next $O/sprint-state.json --doc $DOC --replace >/dev/null && sed -n '/^```ndf-next/,/^```$/p' $DOC
+python3 $M next $O/sprint-state.json --doc $DOC --replace >/dev/null &&
+python3 $H check $N --trim >/dev/null && sed -n '/^```ndf-next/,/^```$/p' $DOC
 ```
 
 **次のセッションを止めずに続けるには、`/goal` の雛形を特定の課題に縛らない。** 雛形には「効果の順の残りから次のスプリントを選び、同じパイプラインで流し、最後に同じ雛形で `ndf-next` を出す」ことを書く。止まるのは承認ゲート 2 つだけになる。

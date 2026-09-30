@@ -228,7 +228,11 @@ def trim(text: str, history: Path, name: str) -> tuple[str, list[str]]:
         moved.append(handoff_doc.heading_text(head))
         text = text[:start] + text[end:]
     if parts:
-        old = read(history) if history.is_file() else f"# 引継ぎの履歴: {name}\n\n本体は [{name}.md]({name}.md) にある。終わった項目を古い順に足す。\n"
+        old = (
+            read(history)
+            if history.is_file()
+            else f"# 引継ぎの履歴: {name}\n\n本体は [{name}.md]({name}.md) にある。終わった項目を古い順に足す。\n"
+        )
         write(history, old.rstrip("\n") + "\n\n" + "\n".join(parts))
     return text, moved
 
