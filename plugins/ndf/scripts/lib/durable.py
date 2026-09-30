@@ -333,8 +333,8 @@ def submit(
 
 
 def output_of(wid: str) -> Any:
-    """耐久ワークフローの終わりを待って出力を返す（失敗は例外のまま上げる）。"""
-    return DBOS.retrieve_workflow(wid).get_result()
+    """耐久ワークフローの終わりを待って出力を返す（失敗は例外のまま上げる）。終わりは `POLL_SECONDS` の間隔で見る。"""
+    return DBOS.retrieve_workflow(wid).get_result(polling_interval_sec=POLL_SECONDS)
 
 
 def status(wid: str) -> Optional[str]:

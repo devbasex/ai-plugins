@@ -103,7 +103,9 @@
         "gate",
         "max",
         "not_run",
+        "overlaps",
         "plans",
+        "resource_limits",
         "stopped"
       ]
     },
@@ -150,7 +152,9 @@
         "gate",
         "max",
         "not_run",
+        "overlaps",
         "plans",
+        "resource_limits",
         "stopped"
       ],
       "results": [
@@ -180,7 +184,9 @@
         "gate",
         "max",
         "not_run",
+        "overlaps",
         "plans",
+        "resource_limits",
         "stopped"
       ],
       "results": [

@@ -33,6 +33,7 @@ MODULES = [
     "worker_steps",
     "pr",
     "engine",
+    "admission",
     "flow",
     "templates",
     "verify_steps",
@@ -63,10 +64,12 @@ NO_ENGINE = [
     "queue",
     "new_args",
     "paths",
+    "admission",
 ]
 
-# メソッドの中の import で、モジュールの循環にしない辺（Engine.run が耐久ワークフローを始める。flow は Engine を import する）
-LAZY = {("engine", "flow")}
+# 関数の中の import で、モジュールの循環にしない辺（Engine.run と cmd_queue が耐久ワークフローを始める。
+# flow は Engine と、queue のファイルだけに触る関数を import する）
+LAZY = {("engine", "flow"), ("queue", "flow")}
 
 
 def run(*args: str) -> subprocess.CompletedProcess:
