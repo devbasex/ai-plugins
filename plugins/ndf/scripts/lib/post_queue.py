@@ -27,13 +27,15 @@ GitHub の利用回数の上限に達すると投稿は失敗する。**失敗�
 
 ## 待ち行列の形
 
-置き場所は状態ファイルと同じ `<作業ツリー>/.cross_review/pending/` で、1 項目 1 ファイルの
-JSON である。名前は `<連番 4 桁>-<種別>-<識別子>.json` で、**順序はファイル名の連番だけが
-決める**。
+項目は耐久の記録（`lib/durable.py`。種類 `posts`・鍵の元は待ち行列のディレクトリ
+`<作業ツリー>/.cross_review/pending/` の絶対パス）に置く。項目の名前は `<連番 4 桁>-<種別>-<識別子>` で、
+**順序は連番だけが決める**。積んだ記録と送りの試行 1 回が、それぞれ耐久ワークフロー
+`post-<名前>-a<回>` 1 つである（回 0 が積んだ記録）。ディレクトリに残るのは、恒久の失敗の控え（`dropped/`）と、
+移行の前に積まれて取り込んだファイル（`imported/`）だけである。
 
 | 項目のキー | 意味 |
 | --- | --- |
-| `seq` | 連番。既存の最大値 + 1 |
+| `seq` | 連番。記録のある名前の最大値 + 1 |
 | `kind` | 種別。冪等の照会をどれにするかを決める |
 | `repo` / `pr` | 宛先 |
 | `actor` | 投稿する主体のログイン名。冪等の照合で投稿者を見るために持つ |
@@ -41,19 +43,21 @@ JSON である。名前は `<連番 4 桁>-<種別>-<識別子>.json` で、**�
 | `request` | 送る内容。`method` / `path` / `fields`（GraphQL は `query`） |
 | `match` | 冪等の照会で「同じ」とみなす条件 |
 | `extra` | 呼び出し側が使う付随情報（担当・ラウンドなど）。この層は読まない |
+
+使う側のエントリポイントは `deps.require(..., "durable")` を先に呼ぶ。
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime as _dt
 import json
-import os
 import pathlib
 import re
 import sys
 import time
-from typing import Any, NamedTuple
+from typing import Any, Iterator, NamedTuple
 
 _LIB = pathlib.Path(__file__).resolve().parent
 if str(_LIB) not in sys.path:
@@ -458,22 +462,16 @@ def posted_match(item: dict[str, Any]) -> tuple[bool | None, dict[str, Any] | No
     return None, None
 
 
-def already_posted(item: dict[str, Any]) -> bool | None:
-    """同じ内容が既に GitHub 側にあるか。確かめられなければ `None`。"""
-    return posted_match(item)[0]
-
-
 # ---------------- 待ち行列 ----------------
 
-_SEQ_RE = re.compile(r"^(\d{4})-")
+_SEQ_RE = re.compile(r"^(\d{4,})-")
+# 耐久ワークフローの ID `post-<名前>-a<回>`。名前は `<連番 4 桁>-<種別>-<識別子>`、回 0 は積んだ記録。
+_ID_RE = re.compile(r"^post-(\d{4,}-.+)-a(\d+)$")
+OPEN_STATES = ("queued", "unsent")  # 項目の記録の状態のうち、終わっていないもの
 
 
 def read_item(path: pathlib.Path) -> dict[str, Any] | None:
-    """待ち行列の項目を 1 件読む。読めなければ `None`。
-
-    項目は作成先の JSON ファイルへ直接書かれるため、書き込みの途中で終了すると
-    空または途中までのファイルが残りうる。
-    """
+    """移行の前のファイルの項目を 1 件読む。読めなければ `None`（書き込みの途中で終わったファイルが残りうる）。"""
     try:
         item = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -481,15 +479,8 @@ def read_item(path: pathlib.Path) -> dict[str, Any] | None:
     return item if isinstance(item, dict) else None
 
 
-_read_item = read_item
-
-
 def rejected_by_position(item: dict[str, Any]) -> bool:
-    """待ち行列に残った項目が、指した位置を解決できずに拒まれたものか。
-
-    流した後に呼ぶ。`is_position_unresolved` と同じ判定を、項目へ残した状態と説明から
-    行う（流す側は `Attempt` を返さないため）。
-    """
+    """待ち行列に残った項目が、指した位置を解決できずに拒まれたものか（`is_position_unresolved` を項目の状態と説明で行う）。"""
     if int(item.get("last_status") or 0) != 422:
         return False
     return _POSITION_WORD in str(item.get("last_error") or "").lower()
@@ -503,158 +494,200 @@ class FlushResult(NamedTuple):
     failed: dict[str, Any] | None
     remaining: int
     rate_limited: bool
-    # 恒久的な失敗で飛ばし、`dropped/` へ移した項目（#962）。
+    # 恒久的な失敗で飛ばし、`dropped/` へ控えを書いた項目（#962）。
     dropped: list[dict[str, Any]] = []
 
 
+def _seq_order(name: str) -> tuple[int, str]:
+    return (int(m.group(1)) if (m := _SEQ_RE.match(name)) else 0, name)
+
+
+def _aside(directory: pathlib.Path, name: str, item: dict[str, Any]) -> pathlib.Path:
+    """送れない項目の控えを `dropped/<名前>.json` へ書く（人が読む）。"""
+    dest = directory / "dropped" / f"{name}.json"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(json.dumps(item, indent=2, ensure_ascii=False), encoding="utf-8")
+    return dest
+
+
+def _try_once(directory: str, name: str, item: dict[str, Any]) -> dict[str, Any]:
+    """送りの試行 1 回。既投稿の照合 → 送る → 恒久の失敗の見分けの順で、項目の記録を返す。"""
+    item = dict(item)
+    found, row = posted_match(item)
+    if found is True:
+        return {"state": "skipped", "item": {**item, "response": row} if row is not None else item}
+    attempt = send(item)
+    if attempt.ok:
+        item["response"] = None
+        with contextlib.suppress(json.JSONDecodeError):
+            item["response"] = json.loads(attempt.stdout or "null")
+        return {"state": "sent", "item": item}
+    item.update(attempts=int(item.get("attempts") or 0) + 1, last_error=attempt.summary(), last_status=attempt.http)
+    if is_permanent_failure(item, attempt):
+        _aside(pathlib.Path(directory), name, item)
+        return {"state": "dropped", "item": item}
+    return {"state": "unsent", "item": item, "rate_limited": is_rate_limited(attempt)}
+
+
+_FLOWS: dict[str, Any] = {}
+
+
+def _flows() -> dict[str, Any]:
+    """項目の記録（`note`）と送りの試行（`attempt`）の耐久ワークフロー。DBOS は項目を扱うときに初めて読む。"""
+    if not _FLOWS:
+        import durable
+
+        tag = f"ndf.{__name__}"  # 同じファイルを別の名前で読んだモジュールと登録の名前を分ける
+        try_step = durable.step(name=f"{tag}.try")(_try_once)
+        note = durable.workflow(name=f"{tag}.note")(lambda record: record)
+        _FLOWS.update(durable=durable, note=note, attempt=durable.workflow(name=f"{tag}.attempt")(lambda *a: try_step(*a)))
+    return _FLOWS
+
+
 class Queue:
-    """1 つの Pull Request 分の待ち行列。"""
+    """1 つの Pull Request 分の待ち行列。項目は耐久の記録（種類 `posts`・鍵の元は待ち行列のディレクトリ）に置く。
+
+    **項目の状態は、名前を接頭辞に持つ耐久ワークフローのうち最後に終わったものの出力が決める。** 回 0 が積んだ記録
+    （`queued`）で、送りの試行ごとに回を進める（`sent`・`skipped`・`dropped`・`unsent`）。`drop` は `withdrawn` を記録する。
+    試行は同期で流し、送れなければ `unsent` で終わる（待たない）。途中で落ちた試行は次に開くときに止める（`keep=()`）。"""
 
     def __init__(self, directory: str | pathlib.Path) -> None:
         self.dir = pathlib.Path(directory)
+        self._left: list[pathlib.Path] = []  # 読めずに残った移行の前のファイル
 
-    def paths(self) -> list[pathlib.Path]:
-        """連番の順に並べた項目のファイル。
+    def _dormant(self) -> bool:
+        """耐久の記録も移行の前のファイルも無い（DBOS を起動せずに空と答えられる）。"""
+        return not self._import_legacy() and not _flows()["durable"].record_path("posts", str(self.dir.absolute())).exists()
 
-        **連番の名前（`put` が書く `{seq:04d}-{kind}-{ident}.json`）に合うものだけを返す。**
-        同じディレクトリに置かれた別の JSON を項目として読むと、`kind` などの欠けで落ちる。
-        """
+    @contextlib.contextmanager
+    def _session(self) -> Iterator[dict[str, Any]]:
+        """耐久の記録を開く。同じ記録を開いている間に呼べば、開いたものを使う。"""
+        fl, ident = _flows(), str(self.dir.absolute())
+        opened = fl["durable"].launched()
+        if opened is not None and opened.key == fl["durable"].launch_key("posts", ident):
+            yield fl
+            return
+        fl["durable"].launch("posts", ident, keep=())
+        try:
+            self._left = self._import_legacy(fl)
+            yield fl
+        finally:
+            fl["durable"].close()
+
+    def _scan(self, fl: dict[str, Any]) -> tuple[list[tuple[str, int, dict[str, Any]]], set[str]]:
+        """終わっていない項目（名前・次の回・項目）を連番の順に並べたものと、記録のあるすべての名前。"""
+        durable, last, done = fl["durable"], {}, {}
+        for wid in durable.workflow_ids("post-"):
+            if m := _ID_RE.match(wid):
+                last[m.group(1)] = max(last.get(m.group(1), -1), int(m.group(2)))
+        for wid in durable.workflow_ids("post-", ["SUCCESS"]):
+            if (m := _ID_RE.match(wid)) and int(m.group(2)) >= done.get(m.group(1), (-1, ""))[0]:
+                done[m.group(1)] = (int(m.group(2)), wid)
+        records = {n: durable.output_of(wid) for n, (_, wid) in done.items()}
+        rows = [(n, last[n] + 1, r["item"]) for n, r in records.items() if r.get("state") in OPEN_STATES]
+        return sorted(rows, key=lambda r: _seq_order(r[0])), set(last)
+
+    def _run(self, fl: dict[str, Any], func: Any, name: str, n: int, *args: Any) -> dict[str, Any]:
+        wid = f"post-{name}-a{n}"
+        fl["durable"].start(fl["durable"].WorkflowRef(wid, n, "start"), func, *args)
+        if (got := fl["durable"].wait(wid, poll=0.01)).kind != "done":  # 同期で待つ（output_of の問い合わせは 1 秒おき）
+            raise fl["durable"].DurableError(f"{wid} が終わらなかった: {got.value}")
+        return got.value
+
+    def _import_legacy(self, fl: dict[str, Any] | None = None) -> list[pathlib.Path]:
+        """移行の前の `<連番>-*.json` を同じ名前（連番）のまま耐久の記録へ取り込み `imported/` へ移す。`fl` が無ければ数えるだけ。
+
+        読めないファイルは取り込まずに残し、残ったファイルを返す。"""
         if not self.dir.is_dir():
             return []
-        return sorted((p for p in self.dir.glob("*.json") if _SEQ_RE.match(p.name)), key=lambda p: p.name)
+        files = sorted((p for p in self.dir.glob("*.json") if _SEQ_RE.match(p.name)), key=lambda p: _seq_order(p.name))
+        if fl is None or not files:
+            return files
+        known, left = self._scan(fl)[1], []
+        for p in files:
+            item = read_item(p)
+            if item is None:
+                left.append(p)
+                continue
+            if p.stem not in known:
+                item.setdefault("seq", _seq_order(p.name)[0])
+                self._run(fl, fl["note"], p.stem, 0, {"state": "queued", "item": item})
+            (self.dir / "imported").mkdir(exist_ok=True)
+            p.replace(self.dir / "imported" / p.name)
+        return left
+
+    def paths(self) -> list[pathlib.Path]:
+        """連番の順に並べた、終わっていない項目の名前のパス（`<名前>.json`。ファイルは無い）と、読めずに残ったファイル。"""
+        if self._dormant():
+            return []
+        with self._session() as fl:
+            return sorted([self.dir / f"{n}.json" for n, _, _ in self._scan(fl)[0]] + self._left, key=lambda p: _seq_order(p.name))
 
     def count(self) -> int:
         return len(self.paths())
 
     def items(self) -> list[tuple[pathlib.Path, dict[str, Any]]]:
-        """読める項目だけを連番の順に返す。
+        """終わっていない項目（名前のパスと項目）を連番の順に返す。読めずに残ったファイルは含めない。"""
+        if self._dormant():
+            return []
+        with self._session() as fl:
+            return [(self.dir / f"{n}.json", item) for n, _, item in self._scan(fl)[0]]
 
-        **読めない項目をどう扱うかは `flush()` が決める。** ここで落とすのは、
-        件数を数えるだけの呼び出し元に読み取りの失敗を持ち込まないためである。
-        """
-        out: list[tuple[pathlib.Path, dict[str, Any]]] = []
-        for p in self.paths():
-            item = _read_item(p)
-            if item is not None:
-                out.append((p, item))
-        return out
+    def _close_item(self, match: Any, state: str) -> dict[str, Any] | None:
+        """`match(名前, 項目)` に当たる最初の終わっていない項目に `state` を記録し、項目を返す。"""
+        with self._session() as fl:
+            for n, nxt, item in self._scan(fl)[0]:
+                if match(n, item):
+                    self._run(fl, fl["note"], n, nxt, {"state": state, "item": item})
+                    return {**item, "name": n}
+        return None
 
     def drop(self, seq: Any) -> bool:
-        """連番で指した項目を 1 件取り除く。
-
-        送れなかった項目を、送る内容を変えて積み直すときに使う（差分の外を指す指摘の
-        退避）。**そのまま積み足すと、同じ論点の要求が 2 件並ぶ。**
-        """
-        if seq is None:
+        """連番で指した項目を 1 件取り除く。差分の外を指す指摘を、送る内容を変えて積み直す前に使う（そのまま積むと 2 件並ぶ）。"""
+        if seq is None or self._dormant():
             return False
-        for path, item in self.items():
-            if item.get("seq") == seq:
-                path.unlink(missing_ok=True)
-                return True
-        return False
+        return self._close_item(lambda _n, item: item.get("seq") == seq, "withdrawn") is not None
 
     def set_aside(self, path: pathlib.Path) -> pathlib.Path:
-        """送れない項目を待ち行列から外し、`dropped/` へ移して残す。"""
-        dest_dir = self.dir / "dropped"
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        dest = dest_dir / path.name
-        path.replace(dest)
-        return dest
+        """送れない項目を待ち行列から外し、控えを `dropped/` へ残す。`path` は `paths()` の 1 つ。"""
+        got = self._close_item(lambda n, _item: n == pathlib.Path(path).stem, "dropped")
+        if got is None:
+            raise FileNotFoundError(str(path))
+        return _aside(self.dir, got.pop("name"), got)
 
-    def _next_seq(self) -> int:
-        seqs = [int(m.group(1)) for m in (_SEQ_RE.match(p.name) for p in self.paths()) if m]
-        return (max(seqs) + 1) if seqs else 1
-
-    def add(self, item: dict[str, Any], ident: str | int) -> pathlib.Path:
-        """項目を 1 件足す。連番は `O_EXCL` で確保する。
-
-        積むのは進行側の 1 プロセスだけであるため関門は要らないが、**中断して再開した
-        ときに番号が重ならないようにする。**
-        """
-        self.dir.mkdir(parents=True, exist_ok=True)
-        seq = self._next_seq()
-        while True:
-            path = self.dir / f"{seq:04d}-{item['kind']}-{ident}.json"
-            try:
-                fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-            except FileExistsError:
-                seq += 1
-                continue
-            item["seq"] = seq
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(item, f, indent=2, ensure_ascii=False)
-            return path
-
-    def _item_to_send(self, path: pathlib.Path) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
-        """項目を読み、送る項目・既投稿・読込失敗のいずれかを返す。"""
-        item = _read_item(path)
-        if item is None:
-            return (
-                None,
-                None,
-                {
-                    "path": str(path),
-                    "last_error": f"待ち行列の項目を読めない ({path.name})",
-                },
-            )
-        found, row = posted_match(item)
-        if found is not True:
-            return item, None, None
-        if row is not None:
-            item["response"] = row
-        path.unlink(missing_ok=True)
-        return None, item, None
-
-    def _send_item(self, path: pathlib.Path, item: dict[str, Any]) -> tuple[bool, Any]:
-        """1 項目を送り、成功時の応答または失敗情報を項目へ反映する。"""
-        attempt = send(item)
-        if attempt.ok:
-            try:
-                item["response"] = json.loads(attempt.stdout or "null")
-            except json.JSONDecodeError:
-                item["response"] = None
-            path.unlink(missing_ok=True)
-            return True, attempt
-        item["attempts"] = int(item.get("attempts") or 0) + 1
-        item["last_error"] = attempt.summary()
-        item["last_status"] = attempt.http
-        path.write_text(json.dumps(item, indent=2, ensure_ascii=False), encoding="utf-8")
-        return False, attempt
+    def add(self, item: dict[str, Any], ident: str | int) -> dict[str, Any]:
+        """項目を 1 件足し、連番を入れた項目を返す。連番は記録のある名前の最大 + 1（実行の鍵の排他の中で決める）。"""
+        with self._session() as fl:
+            names = self._scan(fl)[1] | {p.stem for p in self._left}
+            item["seq"] = max((_seq_order(n)[0] for n in names), default=0) + 1
+            self._run(fl, fl["note"], f"{item['seq']:04d}-{item['kind']}-{ident}", 0, {"state": "queued", "item": item})
+            return item
 
     def flush(self) -> FlushResult:
-        """積んだ項目を連番の順に送る。
+        """積んだ項目を連番の順に送る。項目ごとに、次の試行を 1 つの耐久ワークフローとして同期で流す。
 
         **1 件でも送れなければそこで止める。** 先の項目を飛ばして後の項目を送ると、
         Pull Request 上での順序が入れ替わる。**ただし恒久的な失敗（`is_permanent_failure`）
-        の項目は飛ばし、`dropped/` へ移して後ろを送る**（#962）。送り直しても届かない
+        の項目は飛ばし、`dropped/` へ控えを書いて後ろを送る**（#962）。送り直しても届かない
         項目で止まると、後ろの決着とまとめが何度流しても送られない。
         """
-        sent: list[dict[str, Any]] = []
-        skipped: list[dict[str, Any]] = []
-        dropped: list[dict[str, Any]] = []
-        failed: dict[str, Any] | None = None
-        rate_limited = False
-        for path in self.paths():
-            item, already_posted, read_failure = self._item_to_send(path)
-            if read_failure is not None:
-                failed = read_failure
-                break
-            if already_posted is not None:
-                skipped.append(already_posted)
-                continue
-            assert item is not None
-            ok, attempt = self._send_item(path, item)
-            if ok:
-                sent.append(item)
-                continue
-            if is_permanent_failure(item, attempt):
-                self.set_aside(path)
-                dropped.append(item)
-                continue
-            failed = item
-            rate_limited = is_rate_limited(attempt)
-            break
-        return FlushResult(sent, skipped, failed, self.count(), rate_limited, dropped)
+        done: dict[str, list[dict[str, Any]]] = {"sent": [], "skipped": [], "dropped": []}
+        failed, rate_limited, remaining = None, False, 0
+        if not self._dormant():
+            with self._session() as fl:
+                rows = [(f"{n}.json", n, nxt, item) for n, nxt, item in self._scan(fl)[0]]
+                for fname, name, nxt, item in sorted(rows + [(p.name, "", 0, {}) for p in self._left], key=lambda r: _seq_order(r[0])):
+                    if not name:
+                        failed = {"path": str(self.dir / fname), "last_error": f"待ち行列の項目を読めない ({fname})"}
+                        break
+                    out = self._run(fl, fl["attempt"], name, nxt, str(self.dir), name, item)
+                    if out["state"] in done:
+                        done[out["state"]].append(out["item"])
+                        continue
+                    failed, rate_limited = out["item"], bool(out.get("rate_limited"))
+                    break
+                remaining = len(self._scan(fl)[0]) + len(self._left)
+        return FlushResult(done["sent"], done["skipped"], failed, remaining, rate_limited, done["dropped"])
 
 
 def enqueue(
@@ -667,24 +700,14 @@ def enqueue(
     extra: dict[str, Any] | None = None,
     last_error: str = "",
     attempts: int = 0,
-) -> pathlib.Path:
-    """投稿する内容を 1 件積む。"""
+) -> dict[str, Any]:
+    """投稿する内容を 1 件積み、連番を入れた項目を返す。"""
     if kind not in KINDS:
         raise ValueError(f"未知の種別: {kind}")
     built = request_for(kind, repo, int(pr), fields)
-    item = {
-        "seq": 0,
-        "kind": kind,
-        "repo": repo,
-        "pr": int(pr),
-        "actor": actor,
-        "created_at": _dt.datetime.now(_dt.timezone.utc).astimezone().isoformat(timespec="seconds"),
-        "attempts": attempts,
-        "last_error": last_error,
-        "request": built["request"],
-        "match": built["match"],
-        "extra": extra or {},
-    }
+    created = _dt.datetime.now(_dt.timezone.utc).astimezone().isoformat(timespec="seconds")
+    item = {"seq": 0, "kind": kind, "repo": repo, "pr": int(pr), "actor": actor, "created_at": created, "attempts": attempts}
+    item.update(last_error=last_error, request=built["request"], match=built["match"], extra=extra or {})
     return queue.add(item, extra.get("ident") if extra else pr)
 
 
@@ -697,10 +720,11 @@ def post(
     Pull Request 上での順序が入れ替わる。
     """
     if queue.count():
-        queue.flush()
-    if queue.count():
-        enqueue(queue, kind, repo, pr, fields, actor=actor, extra=extra)
-        return QUEUED, None
+        with queue._session():
+            queue.flush()
+            if queue.count():
+                enqueue(queue, kind, repo, pr, fields, actor=actor, extra=extra)
+                return QUEUED, None
     built = request_for(kind, repo, int(pr), fields)
     item = {"kind": kind, "repo": repo, "pr": int(pr), "actor": actor, "request": built["request"], "match": built["match"]}
     attempt = send(item)
@@ -728,13 +752,9 @@ def retry(cmd: list[str], max_wait: float = 900.0, interval: float = 30.0, stdin
     def announce(_seconds: float, _next: int) -> None:
         print(f"⏳ 上限のため {interval:g} 秒待って再実行します: {' '.join(cmd)}", file=sys.stderr)
 
+    retried = lambda a: not a.ok and is_rate_limited(a)  # noqa: E731
     return waits.retry_call(
-        lambda: run(cmd, stdin=stdin),
-        lambda a: not a.ok and is_rate_limited(a),
-        max_wait=max_wait,
-        interval=interval,
-        sleep=sleep,
-        on_wait=announce,
+        lambda: run(cmd, stdin=stdin), retried, max_wait=max_wait, interval=interval, sleep=sleep, on_wait=announce
     ).value
 
 
@@ -812,6 +832,8 @@ def main() -> None:
     sp.set_defaults(func=cmd_retry)
 
     args = p.parse_args()
+    if args.cmd != "retry":
+        deps.require("durable")  # 標準入力を読む前に起動し直す
     if getattr(args, "command", None) and args.command and args.command[0] == "--":
         args.command = args.command[1:]
     sys.exit(args.func(args))

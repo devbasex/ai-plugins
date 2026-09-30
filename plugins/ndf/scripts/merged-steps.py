@@ -47,7 +47,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
 
-deps.require("waits")
+deps.require("waits", "durable")
 from step_result import (
     StepError,
     approval_present,

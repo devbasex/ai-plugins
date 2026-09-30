@@ -190,12 +190,14 @@ def cancel_others(path: Path, keep: Iterable[str]) -> list[str]:
     return stopped
 
 
-def _follow_stderr() -> None:
-    """DBOS のコンソールのログを今の標準エラーへ向け直す。DBOS は最初の起動の標準エラーを握ったままにし、
-    それが閉じられていると（テストの出力の捕捉）同じプロセスの次の起動が `flush` で落ちる。"""
+def _console_to_stderr() -> None:
+    """DBOS のコンソールのログの出力先を今の sys.stderr へ向け直す。
+
+    DBOS は出力先を最初の起動の sys.stderr に固定し、次の起動で flush する。1 つのプロセスで開き直すと
+    （テストの capsys のように）閉じた出力先を flush して起動が落ちる。"""
     for h in logging.getLogger("dbos").handlers:
-        if type(h) is logging.StreamHandler:
-            with h.lock:  # setStream は古いストリームを flush するため、閉じたストリームでは使えない
+        if h.name == "__dbos_console_log_handler__" and isinstance(h, logging.StreamHandler):
+            with h.lock:  # setStream は前の出力先を flush するため、閉じた出力先では使えない
                 h.stream = sys.stderr
 
 
@@ -236,7 +238,7 @@ def launch(
             "application_version": FORMAT,
             "notification_listener_polling_interval_sec": POLL_SECONDS,
         }
-        _follow_stderr()
+        _console_to_stderr()
         DBOS(config=config)  # type: ignore[arg-type]
         stack.callback(DBOS.destroy, destroy_registry=False)
         specs = dict(queues or {})

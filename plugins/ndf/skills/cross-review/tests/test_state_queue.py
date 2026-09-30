@@ -56,7 +56,7 @@ def test_the_queued_item_keeps_what_to_post(queue_mod, fake_gh, qdir) -> None:
     fake_gh.set_mode("rate_limit")
     _post(queue_mod, qdir)
 
-    item = json.loads(queue_mod.Queue(qdir).paths()[0].read_text(encoding="utf-8"))
+    item = queue_mod.Queue(qdir).items()[0][1]
     assert item["kind"] == "pr-comment"
     assert item["repo"] == REPO
     assert item["pr"] == PR
@@ -161,7 +161,7 @@ def test_a_failed_flush_records_the_attempt(queue_mod, fake_gh, qdir) -> None:
     result = queue_mod.Queue(qdir).flush()
 
     assert result.remaining == 1
-    item = json.loads(queue_mod.Queue(qdir).paths()[0].read_text(encoding="utf-8"))
+    item = queue_mod.Queue(qdir).items()[0][1]
     assert item["attempts"] == 2  # 積んだときの 1 回 + 流そうとした 1 回
     assert "rate limit" in item["last_error"].lower()
 
