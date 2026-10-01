@@ -20,13 +20,15 @@ r"""NDF のラッパー: カットポイントで claude を起動し直す（#8
 動かす前に `runtime.enter` でそれらを import できる環境の python を選ぶ（起動し直す）。環境が無いとき、hook の
 副命令は判定をせずに終わり、`run` は本物の claude を素通しする。副命令のモジュールはそのあとで import する。
 合図と作業ディレクトリの形（`next.json` のキーと `NDF_RELAY_DIR` のファイル）は版をまたいで変えない。hook は
-区間ごとに新しい版で動き、動いているラッパーは古い版のままでありうるためである。動いているラッパーは起動時に
-このパッケージの全モジュールを import するため、途中でバージョンディレクトリが替わっても別の版を読まない（決定 5）。
+区間ごとに新しい版で動き、動いているラッパーは古い版のままでありうるためである（入れ替えの仕組みを持たない版・
+入れ替えに失敗したとき）。動いているラッパーは起動時にこのパッケージの全モジュールを import するため、途中で
+バージョンディレクトリが替わっても別の版を読まない（決定 5）。新しい版へ移るのは、区間の切り替えで子の居ない間に
+`handover` が行うラッパーの入れ替え（`os.execve`）だけである（#1587）。
 
 モジュール: `runtime`（ラッパーを動かす python と環境）・`accounts`（アカウントの副命令の入口）・`ask`（値の決定）・
 `login`（OAuth の登録）・`bedrock`（Bedrock の登録と確かめ）・`common`（定数と小さな関数）・`proc`（親のたどり）・`record`（`log.jsonl` と `next.json`）・
 `mark`（hook の本体）・`claude`（本物の claude と会話の記録）・`terminal`（端末と子）・`run`（`Relay`）・`switch`（区間のアカウント）・
-`shellrc`（シェルの設定の囲み）・`version_dir`（複製）・`install`（導入の副命令）。
+`shellrc`（シェルの設定の囲み）・`version_dir`（複製）・`handover`（ラッパーの入れ替えの判定と申し送り）・`install`（導入の副命令）。
 
 規約は skills/development-workflow/references/relay.md にある。
 """

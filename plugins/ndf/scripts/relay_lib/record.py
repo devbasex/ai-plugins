@@ -86,6 +86,27 @@ def current_section(d: str) -> int | None:
     return None
 
 
+def running_version_dir(d: str) -> tuple[bool, str | None]:
+    """ラッパーの log.jsonl の最後の start の行の `relay_version_dir`（動いているバージョンディレクトリ。#1587）。
+
+    (キーがあるか, 名前)。キーの無い行は入れ替えの仕組みを持たない版が書いたもの、名前が None はプラグインの
+    キャッシュから起動したもの。start の行が無ければ (False, None)。"""
+    try:
+        with open(os.path.join(d, LOG_FILE)) as f:
+            lines = f.readlines()
+    except OSError:
+        return False, None
+    for raw in reversed(lines):
+        try:
+            row = json.loads(raw)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and row.get("event") == "start":
+            name = row.get("relay_version_dir")
+            return "relay_version_dir" in row, name if isinstance(name, str) else None
+    return False, None
+
+
 def make_relay_dir() -> str:
     root = state_root()
     os.makedirs(root, mode=0o700, exist_ok=True)

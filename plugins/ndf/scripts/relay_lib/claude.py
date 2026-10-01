@@ -245,8 +245,8 @@ def plugin_cli(claude: str, args: list[str], timeout: float) -> subprocess.Compl
         return None
 
 
-def read_plugin(claude: str, marketplace: str | None = None) -> tuple[str, str] | None:
-    """`claude plugin list --json` から (マーケットプレイス, 版) を読む。"""
+def read_plugin(claude: str, marketplace: str | None = None) -> tuple[str, str, str | None] | None:
+    """`claude plugin list --json` から (マーケットプレイス, 版, 導入先 `installPath`) を読む。導入先は無ければ None。"""
     p = plugin_cli(claude, ["list", "--json"], env_num("NDF_RELAY_LIST_TIMEOUT", 15))
     if p is None or p.returncode != 0:
         return None
@@ -263,19 +263,20 @@ def read_plugin(claude: str, marketplace: str | None = None) -> tuple[str, str] 
             continue
         ver = it.get("version")
         if mk and isinstance(ver, str) and ver:
-            return mk, ver
+            path = it.get("installPath")
+            return mk, ver, path if isinstance(path, str) and path else None
     return None
 
 
-def update_plugin(claude: str, marketplace: str) -> str | None:
-    """マーケットプレイスと ndf を更新し、更新後の版を返す。どれかに失敗したら None。"""
+def update_plugin(claude: str, marketplace: str) -> tuple[str, str | None] | None:
+    """マーケットプレイスと ndf を更新し、更新後の (版, 導入先) を返す。どれかに失敗したら None。"""
     t = env_num("NDF_RELAY_UPDATE_TIMEOUT", 120)
     for args in (["marketplace", "update", marketplace], ["update", f"ndf@{marketplace}", "-y"]):
         p = plugin_cli(claude, args, t)
         if p is None or p.returncode != 0:
             return None
     got = read_plugin(claude, marketplace)
-    return got[1] if got else None
+    return got[1:] if got else None
 
 
 # ---------------------------------------------------------------- 会話の記録

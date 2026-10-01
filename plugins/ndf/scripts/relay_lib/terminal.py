@@ -64,13 +64,14 @@ class Terminal:
         self.saved = termios.tcgetattr(0)
         tty.setraw(0)
 
-    def restore(self) -> None:
+    def restore(self, keep_input: bool = False) -> None:
+        """控えた設定へ戻す。`keep_input` なら打たれた入力を捨てない（ラッパーの入れ替えの前。#1587 の決定 6）。"""
         import termios
 
         if self.saved is None:
             return
         try:
-            termios.tcsetattr(0, termios.TCSAFLUSH, self.saved)
+            termios.tcsetattr(0, termios.TCSADRAIN if keep_input else termios.TCSAFLUSH, self.saved)
         except (OSError, termios.error):
             pass
 

@@ -5,6 +5,7 @@
 
 区間のアカウント（#1389）の選び方・上限シグナルファイルの判定・定期の確認は `switch` の `AccountSwitch` と
 `UsageWatch` が持つ。
+ラッパーの入れ替え（#1587）は `handover` の `Swapper` が持つ。
 """
 
 from __future__ import annotations
@@ -13,9 +14,9 @@ import os
 import shlex
 import signal
 import time
-from dataclasses import dataclass
 
 from . import claude as cl
+from . import handover as ho
 from . import record, version_dir
 from .common import (
     CHILD_FILE,
@@ -48,20 +49,7 @@ class NoAccountEnv(Exception):
     """選んだアカウントのトークンを起動の直前に得られず、替えるアカウントも従量の接続の宣言も無い。子を起動しない。"""
 
 
-@dataclass
-class SectionInput:
-    """区間の起動の入力。`plan` は上限の後に決めた (アカウント, 理由, 選んだ結果)。"""
-
-    args: list[str]
-    cwd: str
-    command: str
-    from_session: str
-    cwd_fallback: str | None = None
-    carried: list[str] | None = None
-    plan: tuple | None = None
-
-
-class Relay(AccountSwitch):
+class Relay(AccountSwitch, ho.Swapper):
     """前景に常駐し、区間ごとの claude を擬似端末の子として起動する。"""
 
     def __init__(self, claude: str, relay_dir: str, marketplace: str, version: str, term: Terminal, limit: StartLimit):
@@ -98,7 +86,7 @@ class Relay(AccountSwitch):
 
     # -- 子の起動
 
-    def start_section(self, s: SectionInput) -> None:
+    def start_section(self, s: ho.SectionInput) -> None:
         """区間を起動する。`s.plan` は上限の後に決めた (アカウント, 理由, 選んだ結果)。無ければここで選ぶ（F4）。"""
         args, cwd, command, from_session = s.args, s.cwd, s.command, s.from_session
         cwd_fallback, carried, plan = s.cwd_fallback, s.carried, s.plan
@@ -126,6 +114,7 @@ class Relay(AccountSwitch):
             from_session=from_session,
             plugin_version=self.version,
             cwd=cwd,
+            relay_version_dir=ho.own_dir(),
         )
         if cwd_fallback is not None:
             row["cwd_fallback"] = cwd_fallback
@@ -370,10 +359,10 @@ class Relay(AccountSwitch):
 
     def prepare_next(self, m) -> tuple[str, str | None] | None:
         """プラグインを更新し、合図から次の区間の (cwd, 退避前の cwd) を決める。更新に失敗したら None。"""
-        version = cl.update_plugin(self.claude, self.marketplace)
-        if version is None:
+        got = cl.update_plugin(self.claude, self.marketplace)
+        if got is None:
             return None
-        self.version = version
+        self.version, self.install_path = got
         cwd = m.get("cwd") or os.getcwd()
         fb = None
         if not os.path.isdir(cwd):
@@ -381,10 +370,14 @@ class Relay(AccountSwitch):
         return cwd, fb
 
     def loop(self, first_args: list[str]) -> int:
-        carried = cl.carried_args(first_args)
+        self.first_args = first_args
         code = self._start_first_section(first_args)
         if code is not None:
             return code
+        return self._serve()
+
+    def _serve(self) -> int:  # 合図を待って切り替える（入れ替えた後の版は最初のセッションを起動せずここから）
+        carried = cl.carried_args(self.first_args)
         while True:
             res = self.term.pump(tick=self.tick)
             if res[0] == "exit":
@@ -401,16 +394,17 @@ class Relay(AccountSwitch):
             nxt = self.prepare_next(src)
             if nxt is None:
                 return self.give_up("update-failed", "プラグインの更新か版の読み取りに失敗した", shown)
-            cwd, fb = nxt
+            s = ho.SectionInput(args, nxt[0], command, from_session, cwd_fallback=nxt[1], carried=carried, plan=plan)
+            self.swap(s, shown)  # 入れ替えたら戻らない（I1。子の居ないこの 1 か所だけ）
             self.term.screen(f"── ndf-relay: 区間 {self.section + 1} ──")
-            code = self._start_next_section(args, cwd, command, from_session, fb, carried, plan, shown)
+            code = self._start_next_section(s, shown)
             if code is not None:
                 return code
 
     def _start_first_section(self, first_args: list[str]) -> int | None:
         """最初の区間を起動する。起動できなければ終了コード。"""
         try:
-            self.start_section(SectionInput(args=first_args, cwd=os.getcwd(), command=shlex.join(first_args), from_session=""))
+            self.start_section(ho.SectionInput(args=first_args, cwd=os.getcwd(), command=shlex.join(first_args), from_session=""))
         except StartFailed as e:
             self.log(event="stop", section=self.section + 1, reason="start-failed", errno=e.err)
             cl.say(f"claude を起動できない（{os.strerror(e.err)}）")
@@ -429,12 +423,10 @@ class Relay(AccountSwitch):
             return args, command, from_session, src, shlex.join(["claude", *args]), m["_plan"]
         return [m["command"]], m["command"], m.get("session_id") or "", m, m["command"], None
 
-    def _start_next_section(self, args, cwd, command, from_session, fb, carried, plan, shown) -> int | None:
+    def _start_next_section(self, s: ho.SectionInput, shown: str) -> int | None:
         """次の区間を起動する。起動できなければ終了コード。"""
         try:
-            self.start_section(
-                SectionInput(args=args, cwd=cwd, command=command, from_session=from_session, cwd_fallback=fb, carried=carried, plan=plan)
-            )
+            self.start_section(s)
         except StartFailed as e:
             return self.give_up("start-failed", f"claude を起動できない（{os.strerror(e.err)}）", shown, errno=e.err)
         except NoAccountEnv as e:
@@ -450,6 +442,9 @@ class Relay(AccountSwitch):
 
 
 def cmd_run(args: list[str]) -> int:
+    path = os.environ.pop(ho.HANDOVER_ENV, None)  # 入れ替えた後（#1587）。子の claude と hook へ継がせない
+    if path:
+        return Relay.from_handover(path, _serve_terminal)
     if os.environ.get("NDF_RELAY") == "0":
         claude = cl.resolve_claude()
         if claude is None:
@@ -483,6 +478,11 @@ def cmd_run(args: list[str]) -> int:
     relay = Relay(claude, relay_dir, got[0], got[1], term, StartLimit(os.path.join(relay_dir, LOG_FILE)))
     # 使うバージョンディレクトリに印を置く。startup はこの印のあるディレクトリを消さない
     inuse = version_dir.claim_inuse()
+    return _serve_terminal(relay, term, inuse, lambda: relay.loop(args))
+
+
+def _serve_terminal(relay: Relay, term: Terminal, inuse: str | None, body) -> int:
+    """端末を raw にして `body` を動かし、終わったら端末・ラッパー・使用中の印を片づける。"""
 
     def on_signal(signum, _frame):
         term.restore()
@@ -493,7 +493,7 @@ def cmd_run(args: list[str]) -> int:
     signal.signal(signal.SIGWINCH, lambda *_: term.copy_winsize())
     try:
         term.set_raw()
-        return relay.loop(args)
+        return body()
     finally:
         term.restore()
         relay.close()

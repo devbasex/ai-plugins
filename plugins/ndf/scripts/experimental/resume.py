@@ -4,7 +4,7 @@
     python3 resume.py [--relay-dir DIR]
 
 出すもの: ラッパーの判定と理由・この区間の始まり（自動か手か）・前の区間の終わり（ended_by）・
-プラグインの版（区間の起動時・導入済み・複製）・
+プラグインの版（区間の起動時・導入済み・複製・動いているラッパー）・
 前の区間と今の区間で合図を書かなかった Stop（mark_skipped: 背景の作業が残った・ブロックが 2 つ以上）。人が読む数行の後に step_result の 1 行の JSON。
 ラッパーの外でも exit 0 で終わる。
 """
@@ -25,6 +25,7 @@ import deps  # noqa: E402
 deps.require("procs", "versions")  # relay_lib.proc が procs（psutil の包み）を、relay_lib.version_dir が versions（semver の包み）を読む
 from relay_lib import common as relay_common  # noqa: E402
 from relay_lib import proc as relay_proc  # noqa: E402
+from relay_lib import record as relay_record  # noqa: E402
 from relay_lib import version_dir as relay_version_dir  # noqa: E402
 from step_result import emit, result  # noqa: E402
 
@@ -105,6 +106,17 @@ def copy_version() -> str | None:
         return None
 
 
+UNKNOWN = "不明（打ち直すと見える）"
+
+
+def running_version(d: Path | None) -> str | None:
+    """動いているラッパーの版（start の行の `relay_version_dir` の版）。キーの無い版のラッパーは UNKNOWN（#1587）。"""
+    if d is None:
+        return None
+    has, name = relay_record.running_version_dir(str(d))
+    return relay_version_dir.version_of(name) if has else UNKNOWN
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--relay-dir", default=os.environ.get("NDF_RELAY_DIR"))
@@ -117,8 +129,13 @@ def main() -> int:
     started_by = None
     if start:
         started_by = "自動（合図から）" if start.get("from_session") else "手（利用者の起動）"
-    vers = {"区間の起動時": (start or {}).get("plugin_version"), "導入済み": installed_version(), "複製": copy_version()}
-    known = {v for v in vers.values() if v}
+    vers = {
+        "区間の起動時": (start or {}).get("plugin_version"),
+        "導入済み": installed_version(),
+        "複製": copy_version(),
+        "動いているラッパー": running_version(d) if start else None,
+    }
+    known = {v for v in vers.values() if v and v != UNKNOWN}
     lines = [f"ラッパー: {pos}" + (f"（{a.relay_dir}）" if a.relay_dir else "")]
     if start:
         lines.append(f"この区間: {start.get('section')}・{started_by}・{start.get('at')}")

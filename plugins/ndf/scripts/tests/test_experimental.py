@@ -161,6 +161,39 @@ def test_resume_lists_mark_skipped_of_previous_and_current_section(tmp_path):
     assert "b5rbmp9yj" in p.stdout and "背景の作業が残った" in p.stdout
 
 
+@pytest.mark.parametrize(
+    "row, shown, mismatch",
+    [
+        ({"relay_version_dir": "relay-10.17.53-bbbb2222"}, "動いているラッパー 10.17.53", False),
+        ({"relay_version_dir": "relay-10.17.52-aaaa1111"}, "動いているラッパー 10.17.52", True),
+        ({}, "動いているラッパー 不明（打ち直すと見える）", False),
+    ],
+    ids=["same", "differs", "unknown"],
+)
+def test_resume_lists_running_wrapper_version(tmp_path, row, shown, mismatch):
+    """版の行に動いているラッパーの版を並べ、違えば食い違いあり。不明は食い違いに数えない（#1587 の AC15・AC16）。"""
+    cur = tmp_path / "state" / "ndf" / "relay" / "20261001T000000Z-1-a"
+    cur.mkdir(parents=True)
+    (cur / "log.jsonl").write_text(
+        json.dumps({"event": "start", "section": 1, "from_session": "", "plugin_version": "10.17.53", **row}) + "\n"
+    )
+    (tmp_path / "cfg" / "ndf").mkdir(parents=True)
+    (tmp_path / "cfg" / "ndf" / "relay.version").write_text("10.17.53\n")
+    env = {
+        **os.environ,
+        "XDG_STATE_HOME": str(tmp_path / "state"),
+        "CLAUDE_CONFIG_DIR": str(tmp_path / "cfg"),
+        "XDG_DATA_HOME": str(tmp_path / "data"),
+    }
+    p = subprocess.run([sys.executable, str(EXP / "resume.py"), "--relay-dir", str(cur)], capture_output=True, text=True, env=env)
+    assert p.returncode == 0, p.stderr
+    line = next(x for x in p.stdout.splitlines() if x.startswith("版: "))
+    assert shown in line and ("（食い違いあり）" in line) is mismatch
+    res = json.loads(p.stdout.strip().splitlines()[-1])
+    assert res["items"][0]["versions"]["動いているラッパー"] == shown.split(" ", 1)[1]
+    assert res["metrics"]["version_mismatch"] is mismatch
+
+
 def _body_repo(tmp_path):
     """origin（bare）と clone を作り、clone に origin/develop へ載っていないファイルを 1 つ置く。"""
 
