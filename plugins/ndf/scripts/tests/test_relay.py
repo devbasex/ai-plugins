@@ -102,7 +102,7 @@ def fence(body, info="ndf-next", ticks=3):
 # ---------------------------------------------------------------- mark（AC3 / AC4 / AC4b / AC24）
 
 
-class Relay:
+class FakeRelayDir:
     """動いているラッパーに見立てた作業ディレクトリ。`relay.lock` を持ち、`child.pid` を書く。"""
 
     def __init__(self, tmp_path, child_pid=None):
@@ -124,7 +124,7 @@ class Relay:
 
 @pytest.fixture()
 def relay(tmp_path):
-    r = Relay(tmp_path)
+    r = FakeRelayDir(tmp_path)
     yield r
     if not r.lock.closed:
         r.release()
@@ -1820,7 +1820,7 @@ def home_of_now():
 
 def test_status_session_relay(mod, tmp_path, monkeypatch, capsys):
     # 関数で呼ぶ status の親は pytest の親。そこを child.pid にすると最初に当たる claude がラッパーの子になる
-    r = Relay(tmp_path, child_pid=os.getppid())
+    r = FakeRelayDir(tmp_path, child_pid=os.getppid())
     (r.dir / "relay.pid").write_text("4321")
     monkeypatch.setenv("NDF_RELAY_DIR", str(r.dir))
     try:
@@ -1858,7 +1858,7 @@ def test_status_session_no_dir_hints_when_devbase_loader_exists(mod, tmp_path, m
 
 
 def test_status_session_not_running(mod, tmp_path, monkeypatch, capsys):
-    r = Relay(tmp_path)
+    r = FakeRelayDir(tmp_path)
     r.release()
     monkeypatch.setenv("NDF_RELAY_DIR", str(r.dir))
     assert session_lines(mod, capsys) == [
@@ -1867,7 +1867,7 @@ def test_status_session_not_running(mod, tmp_path, monkeypatch, capsys):
 
 
 def test_status_session_not_child(mod, tmp_path, monkeypatch, capsys):
-    r = Relay(tmp_path, child_pid=999999)
+    r = FakeRelayDir(tmp_path, child_pid=999999)
     monkeypatch.setenv("NDF_RELAY_DIR", str(r.dir))
     try:
         assert session_lines(mod, capsys) == ["ndf-relay: このセッション: ラッパーの直接の子ではない（fork・bg-pty-host・別の入口。#1016）"]
@@ -1877,7 +1877,7 @@ def test_status_session_not_child(mod, tmp_path, monkeypatch, capsys):
 
 def test_status_session_cannot_trace_parents(mod, tmp_path, monkeypatch, capsys):
     # /proc も ps も使えない環境。ほかの行はそのまま出す
-    r = Relay(tmp_path, child_pid=999999)
+    r = FakeRelayDir(tmp_path, child_pid=999999)
     monkeypatch.setenv("NDF_RELAY_DIR", str(r.dir))
     monkeypatch.setattr(relay_proc, "proc_info", lambda pid: None)
     try:
@@ -2455,7 +2455,7 @@ def test_notice_relay_not_running(relay):
 
 
 def test_notice_not_direct_child(tmp_path):
-    r = Relay(tmp_path, child_pid=1)
+    r = FakeRelayDir(tmp_path, child_pid=1)
     try:
         assert notice_lines(notice(r.dir, "5")) == ["outside", notice_not_child(1)]
     finally:
@@ -4144,7 +4144,7 @@ def test_status_shows_running_wrapper(mod, tmp_path, monkeypatch, capsys, row, c
         (base / n).mkdir(parents=True)
         (base / n / "MANIFEST").touch()
     (base / "relay.current").write_text(current + "\n")
-    r = Relay(tmp_path, child_pid=os.getppid())
+    r = FakeRelayDir(tmp_path, child_pid=os.getppid())
     (r.dir / "relay.pid").write_text("4321")
     _start_row(r.dir, relay_version_dir="ignored-older-row")
     _start_row(r.dir, **row)
