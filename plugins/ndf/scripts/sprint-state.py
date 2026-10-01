@@ -55,7 +55,6 @@ NEXT_SECTION_DEFAULT = "次に実行するコマンド"
 NOT_DONE = "まだ"
 PACES = ("normal", "fast", "auto")
 MVV_GATE = "MVV"  # 利用者が MVV を承認した記録の名前
-EXIT_UNREADABLE, EXIT_PRECONDITION = 2, 3
 
 
 def outcome(status: str, summary: str, items=None, metrics=None, **extra) -> dict:
@@ -265,7 +264,7 @@ def gate_locked(a) -> dict:
     if a.withdraw:
         return withdraw_gate(a, m, at)
     if not a.what:
-        return outcome("stopped", "--what が要る（--withdraw のときだけ省ける）", exit=EXIT_UNREADABLE)
+        return outcome("stopped", "--what が要る（--withdraw のときだけ省ける）", exit=step_result.EXIT_UNREADABLE)
     entry = {"name": a.name, "what": a.what, "at": at}
     if a.by == "user":
         override = pms.record_override(m, a.sprint, a.name, a.outcome, at, Path(a.root or ".").resolve(), a.mvv_log, pr=a.pr)
@@ -286,11 +285,11 @@ def gate_locked(a) -> dict:
         if sprint_mvv.withdrawn(m, a.name):
             return outcome("stopped", f"{a.name} は MVV 判定の通過を取り消した。自動で通さず、利用者の承認を求める")
         if not a.verdict:
-            return outcome("stopped", "--by mvv には --verdict が要る", exit=EXIT_UNREADABLE)
+            return outcome("stopped", "--by mvv には --verdict が要る", exit=step_result.EXIT_UNREADABLE)
         try:
             reasons = json.loads(a.reasons or "[]")
         except ValueError:
-            return outcome("stopped", f"--reasons は JSON の配列で渡す: {a.reasons}", exit=EXIT_UNREADABLE)
+            return outcome("stopped", f"--reasons は JSON の配列で渡す: {a.reasons}", exit=step_result.EXIT_UNREADABLE)
         entry.update(by="mvv", verdict=a.verdict, reasons=reasons if isinstance(reasons, list) else [reasons], log=a.log or "")
     m["gates"] = gates = [g for g in m.get("gates", []) if g.get("name") != a.name] + [entry]
     jsonio.write_atomic(a.sprint, m, indent=1)
@@ -301,7 +300,7 @@ def gate_locked(a) -> dict:
 def withdraw_gate(a, m: dict, at: str) -> dict:
     """同じ名前の承認ゲートの by: mvv の記録を外す（`lib/sprint_mvv.withdraw`。#1370 の I8）。"""
     if a.by != "user" or a.outcome or a.verdict:
-        return outcome("stopped", "--withdraw は --by・--outcome・--verdict と併せて渡さない", exit=EXIT_UNREADABLE)
+        return outcome("stopped", "--withdraw は --by・--outcome・--verdict と併せて渡さない", exit=step_result.EXIT_UNREADABLE)
     n = sprint_mvv.withdraw(m, a.name, at)
     jsonio.write_atomic(a.sprint, m, indent=1)
     done = f"記録を外した（{at}）" if n else "記録が無い（外すものが無い）"
