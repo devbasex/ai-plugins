@@ -860,6 +860,21 @@ def staging_dir(name: str) -> str:
 REPLACED_ON_RELOGIN = (CRED_FILE, account_files.CONFIG_FILE, ACCOUNT_FILE)
 
 
+def _replace_on_relogin(staging: str, final: str) -> None:
+    """登録し直しで、置き場 `final` の認証のファイルだけを `staging` のものへ置き換える。アカウントの排他の中で呼ぶ。"""
+    for f in (USAGE_FILE, account_files.BASE_FILE):
+        with suppress(FileNotFoundError):
+            os.remove(os.path.join(final, f))
+    for f in REPLACED_ON_RELOGIN:
+        src = os.path.join(staging, f)
+        if os.path.exists(src):
+            os.replace(src, os.path.join(final, f))
+        elif f == account_files.CONFIG_FILE:  # 前の oauthAccount を残さない（I13）
+            with suppress(FileNotFoundError):
+                os.remove(os.path.join(final, f))
+    shutil.rmtree(staging, ignore_errors=True)
+
+
 def register(name: str, staging: str, email: str, org_id: str = "", org_name: str = "") -> None:
     """ログインの済んだ `staging` を `name` として置く。
 
@@ -877,17 +892,7 @@ def register(name: str, staging: str, email: str, org_id: str = "", org_name: st
                 os.remove(final)
             os.replace(staging, final)
         else:
-            for f in (USAGE_FILE, account_files.BASE_FILE):
-                with suppress(FileNotFoundError):
-                    os.remove(os.path.join(final, f))
-            for f in REPLACED_ON_RELOGIN:
-                src = os.path.join(staging, f)
-                if os.path.exists(src):
-                    os.replace(src, os.path.join(final, f))
-                elif f == account_files.CONFIG_FILE:  # 前の oauthAccount を残さない（I13）
-                    with suppress(FileNotFoundError):
-                        os.remove(os.path.join(final, f))
-            shutil.rmtree(staging, ignore_errors=True)
+            _replace_on_relogin(staging, final)
         _secure(name)
 
 
