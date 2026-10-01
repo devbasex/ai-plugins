@@ -14,6 +14,7 @@ import os
 import shlex
 import signal
 import time
+from dataclasses import replace
 
 from . import claude as cl
 from . import handover as ho
@@ -385,11 +386,11 @@ class Relay(AccountSwitch, ho.Swapper):
             m, code = self.finalize_section(m, written)
             if code is not None:
                 return code
-            args, command, from_session, src, shown, plan = self._next_section_input(m)
+            s, src, shown = self._next_section_input(m, carried)
             nxt = self.prepare_next(src)
             if nxt is None:
                 return self.give_up("update-failed", "プラグインの更新か版の読み取りに失敗した", shown)
-            s = ho.SectionInput(args, nxt[0], command, from_session, cwd_fallback=nxt[1], carried=carried, plan=plan)
+            s = replace(s, cwd=nxt[0], cwd_fallback=nxt[1])
             self.swap(s, shown)  # 入れ替えたら戻らない（I1。子の居ないこの 1 か所だけ）
             self.term.screen(f"── ndf-relay: 区間 {self.section + 1} ──")
             code = self._start_next_section(s, shown)
@@ -410,13 +411,15 @@ class Relay(AccountSwitch, ho.Swapper):
             return 2
         return None
 
-    def _next_section_input(self, m: dict) -> tuple[list[str], str, str, dict, str, tuple | None]:
-        """次の区間の (引数, 記録のコマンド, 元の会話, cwd の元, 表示のコマンド, 上限の後の選び方)。"""
+    def _next_section_input(self, m: dict, carried: list[str] | None) -> tuple[ho.SectionInput, dict, str]:
+        """次の区間の (起動の入力, cwd の元, 表示のコマンド)。入力の cwd は仮置きで、`prepare_next` の結果で埋める。"""
         if m.get("_kind") == "limit":
             self.drop_limit(m)
             args, command, from_session, src = self.limit_start(m)
-            return args, command, from_session, src, shlex.join(["claude", *args]), m["_plan"]
-        return [m["command"]], m["command"], m.get("session_id") or "", m, m["command"], None
+            s = ho.SectionInput(args, "", command, from_session, carried=carried, plan=m["_plan"])
+            return s, src, shlex.join(["claude", *args])
+        s = ho.SectionInput([m["command"]], "", m["command"], m.get("session_id") or "", carried=carried)
+        return s, m, m["command"]
 
     def _start_next_section(self, s: ho.SectionInput, shown: str) -> int | None:
         """次の区間を起動する。起動できなければ終了コード。"""
