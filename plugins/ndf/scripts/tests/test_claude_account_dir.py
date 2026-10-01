@@ -149,8 +149,14 @@ def _setup(shared_file: Path, account: Path, s: dict, a: dict | None, b: dict | 
 def test_first_sync_copies_shared_part_and_onboarding_only(dirs):
     shared, account = dirs
     sf = shared / ".claude.json"
-    s = {"projects": {"/p": {"hasTrustDialogAccepted": True}}, "mcpServers": {"m": {"command": "x"}}, "oauthAccount": {"emailAddress": "s@x"},
-         "hasCompletedOnboarding": True, "lastOnboardingVersion": "2.1.0", "numStartups": 9}
+    s = {
+        "projects": {"/p": {"hasTrustDialogAccepted": True}},
+        "mcpServers": {"m": {"command": "x"}},
+        "oauthAccount": {"emailAddress": "s@x"},
+        "hasCompletedOnboarding": True,
+        "lastOnboardingVersion": "2.1.0",
+        "numStartups": 9,
+    }
     a = {"oauthAccount": {"emailAddress": "a@x"}, "userID": "u1", "numStartups": 1}
     _setup(sf, account, s, a, None)
     assert ad.sync_config(str(sf), str(account)) is None
@@ -182,7 +188,13 @@ def test_sync_table(dirs, s_val, a_val, want):
     def proj(v):
         return {"/p": {"k": v, "other": 0}} if v is not None else {"/p": {"other": 0}}
 
-    _setup(sf, account, {"projects": proj(s_val), "keep": "S"}, {"projects": proj(a_val), "userID": "u"}, {"projects": proj(1), "mcpServers": {}, "userID": "u"})
+    _setup(
+        sf,
+        account,
+        {"projects": proj(s_val), "keep": "S"},
+        {"projects": proj(a_val), "userID": "u"},
+        {"projects": proj(1), "mcpServers": {}, "userID": "u"},
+    )
     assert ad.sync_config(str(sf), str(account)) is None
     for got in (_r(sf), _r(account / ".claude.json")):
         assert got["projects"]["/p"].get("k") == want and got["projects"]["/p"]["other"] == 0
@@ -192,7 +204,13 @@ def test_sync_table(dirs, s_val, a_val, want):
 def test_session_added_project_is_written_back(dirs):
     shared, account = dirs
     sf = shared / ".claude.json"
-    _setup(sf, account, {"projects": {"/a": {"t": 1}}}, {"projects": {"/a": {"t": 1}}, "userID": "u"}, {"projects": {"/a": {"t": 1}}, "userID": "u"})
+    _setup(
+        sf,
+        account,
+        {"projects": {"/a": {"t": 1}}},
+        {"projects": {"/a": {"t": 1}}, "userID": "u"},
+        {"projects": {"/a": {"t": 1}}, "userID": "u"},
+    )
     a = _r(account / ".claude.json")
     a["projects"]["/new"] = {"hasTrustDialogAccepted": True}
     _w(account / ".claude.json", a)

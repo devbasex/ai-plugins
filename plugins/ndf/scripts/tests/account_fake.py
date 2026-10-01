@@ -1,7 +1,8 @@
 """登録済みアカウントのテストが使う置き場と、使用量の取得先・トークンの更新の宛先の偽物（#1389）。
 
 `accounts` の fixture は `NDF_ACCOUNTS_DIR`・`NDF_ACCOUNT_USAGE_URL`・`NDF_ACCOUNT_TOKEN_URL` を偽物へ向け、
-共有の設定ディレクトリ（`CLAUDE_CONFIG_DIR`）に番兵の `.credentials.json` を置く。偽物は推論の宛先を持たない。
+共有の設定ディレクトリ（`CLAUDE_CONFIG_DIR`）に番兵の `.credentials.json` を置く。`HOME` も一時ディレクトリへ向け、
+利用者の `~/.claude/` と `~/.claude.json` に触れない。偽物は推論の宛先を持たない。
 """
 
 from __future__ import annotations
@@ -181,6 +182,9 @@ def accounts(tmp_path, monkeypatch):
     Store.write(shared / ".credentials.json", SHARED_CREDS)
     root = tmp_path / "accounts"
     root.mkdir(mode=0o700)
+    home = tmp_path / "accounts-home"  # `isolated_env` の `home` と分ける（本物の HOME と同じかを比べる）
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
     s = Store(root, fake, shared)
     for k, v in s.env().items():
         monkeypatch.setenv(k, v)
@@ -191,6 +195,8 @@ def accounts(tmp_path, monkeypatch):
         "CLAUDE_CODE_OAUTH_SCOPES",
         "NDF_CLAUDE_ACCOUNT",
         "NDF_SUPERVISE_CLAUDE_FALLBACK",
+        "NDF_SHARED_CONFIG_DIR",
+        "CLAUDE_CODE_PLUGIN_CACHE_DIR",
     ):
         monkeypatch.delenv(k, raising=False)
     yield s

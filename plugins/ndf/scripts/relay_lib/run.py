@@ -105,8 +105,10 @@ class Relay(AccountSwitch):
         self.record.drop_mark()
         remove(self.path(QUESTION_FILE), self.path(LIMIT_FILE))  # 上限シグナルファイルは前の子のもの（新しい子の hook はまだ書けない）
         prev = self.account
+        if self.multi:
+            self.settle_account(prev)  # 前のセッションの .claude.json の共有する部分を書き戻してから次を用意する（E12）
         to, reason, choice = (plan or self.pick(None)) if self.multi else (None, None, None)
-        env = cl.section_env(self.env, to) if to else None
+        env = cl.section_env(self.env, to, self.note_account_dir) if to else None
         if to and env is None:  # 親の認証へ戻さない。選び直し、無ければ止める
             to, reason, choice, env = self.replace_unusable(to)
         if env is None:
@@ -145,21 +147,34 @@ class Relay(AccountSwitch):
                     self.watch.start()
         self.limit.release()
 
+    def settle_account(self, name: str | None) -> None:
+        """アカウント `name` のセッションの後の書き戻し（従量の接続・既定のログインでは何もしない）。"""
+        if name and name != ca.METERED:
+            ca.settle(name, self.env, lambda row: self.note_account_dir(row, self.section))
+
+    def note_account_dir(self, row: dict, section: int | None = None) -> None:
+        """アカウントの設定ディレクトリの用意・書き戻しの結果を `log.jsonl` の `account_dir` の行と、使わないときは画面の
+        1 行に残す。行に載せるのは項目の名前と理由の語だけである（I14）。"""
+        self.log(event="account_dir", section=self.section + 1 if section is None else section, **row)
+        if not row.get("ok"):
+            why = ca.prepare_reason_text(row["account"], row.get("reason"))
+            self.term.screen(f"ndf-relay: アカウント {row['account']} を使わない（{why}）")
+
     def replace_unusable(self, failed: str) -> tuple[str, str, ca.Choice, dict]:
-        """トークンを得られなかった `failed` の代わりを選ぶ。(名前か `metered`, 理由, 選んだ結果, 環境)。
+        """使えなかった `failed` の代わりを選ぶ。(名前か `metered`, 理由, 選んだ結果, 環境)。
         登録済みのアカウント → 従量の接続の宣言の順に試し、どれも無ければ NoAccountEnv を投げる。"""
         tried = {failed}
         while True:
-            c = ca.choose(exclude=tried)
+            c = ca.choose(exclude=tried, keep=self.keep())
             if not c.name:
                 break
-            env = cl.section_env(self.env, c.name)
+            env = cl.section_env(self.env, c.name, self.note_account_dir)
             if env is not None:
                 return c.name, REASON_AUTH, c, env
             tried.add(c.name)
         if failed != ca.METERED and ca.fallback_env(self.env):
             return ca.METERED, REASON_AUTH, c, cl.section_env(self.env, ca.METERED)
-        raise NoAccountEnv(f"アカウント {failed} のトークンを得られず、替えるアカウントも従量の接続の宣言も無い")
+        raise NoAccountEnv(f"アカウント {failed} を使えず、替えるアカウントも従量の接続の宣言も無い")
 
     # -- 合図の判定
 
@@ -443,6 +458,8 @@ class Relay(AccountSwitch):
     def close(self) -> None:
         if self.watch is not None:
             self.watch.stop()
+        if self.multi:
+            self.settle_account(self.account)
         self.limit.release()
         remove(self.path(PID_FILE), self.path(cl.SETTINGS_FILE))  # まとめた設定は利用者の資格情報を持ちうるため残さない
         _unlock(self.lock)
