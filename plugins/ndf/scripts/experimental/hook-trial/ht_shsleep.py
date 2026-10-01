@@ -57,7 +57,7 @@ def _sleep_cmd(n, limit, loop, depth) -> bool:
         subs = [c] if c.type in SUBST else list(_substs(c))
         if any(_sleep(s, limit, loop, False, depth) for s in subs):
             return True
-    i = _skip_wrappers(words)
+    i = _command_start(words)
     if i >= len(words):
         return False
     name, rest = words[i], words[i + 1 :]
@@ -72,7 +72,7 @@ def _sleep_cmd(n, limit, loop, depth) -> bool:
     return False
 
 
-def _skip_wrappers(words: list) -> int:
+def _command_start(words: list) -> int:
     """ラッパー語とそのオプション・秒数・代入を読み飛ばし、実コマンド名の添字を返す。"""
     i = 0
     while i < len(words):
