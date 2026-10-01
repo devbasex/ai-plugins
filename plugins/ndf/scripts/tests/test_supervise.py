@@ -697,6 +697,47 @@ def test_old_plan_and_report_keys_are_read(tmp_path):
     assert commands.note_row(old, "") == "| #2 | 実装: 完了 | — |"
 
 
+NOTE_REPORT = """## フェーズの報告
+
+- フェーズ: 実装
+- 課題: #1054
+- 結果: {res}
+- Pull Request: {pr}
+- 理由: {reason}
+- LLM の使用量: 入力 56 / cache read 1423577 / cache write 78735 / 出力 24980 / {cost}
+- 記録: x
+"""
+
+
+@pytest.mark.parametrize(
+    "fields, row",
+    [
+        # 完了でなければ理由を足す。費用は報告の文字のまま（0.50 を 0.5 に丸めない）
+        (
+            {"res": "止まった", "pr": "https://example/pull/9", "reason": "テストが落ちた", "cost": "$0.50"},
+            "| #1054 | 実装: 止まった（https://example/pull/9、$0.50）。理由: テストが落ちた | 直す |",
+        ),
+        (
+            {"res": "止まった", "pr": "無し", "reason": "テストが落ちた", "cost": "$1.178"},
+            "| #1054 | 実装: 止まった（$1.178）。理由: テストが落ちた | 直す |",
+        ),
+        # 理由が「無し」なら足さない。完了なら理由があっても足さない
+        ({"res": "止まった", "pr": "無し", "reason": "無し", "cost": "$1.178"}, "| #1054 | 実装: 止まった（$1.178） | 直す |"),
+        ({"res": "完了", "pr": "#9", "reason": "書いてある", "cost": "$2"}, "| #1054 | 実装: 完了（#9、$2） | 直す |"),
+        # 費用が行の末尾に `/ $数` の形で無ければ出さない。Pull Request も無ければ括弧ごと出さない
+        ({"res": "止まった", "pr": "無し", "reason": "上限", "cost": "不明"}, "| #1054 | 実装: 止まった。理由: 上限 | 直す |"),
+    ],
+)
+def test_note_row_shows_reason_and_cost_when_not_done(fields, row):
+    """現状固定: 表の行は、報告の Pull Request・費用・理由をこの形で並べる。"""
+    assert commands.note_row(NOTE_REPORT.format(**fields), "直す") == row
+
+
+def test_note_row_of_an_empty_report():
+    """現状固定: 読める行が無い報告は、課題も次も「—」で埋める。"""
+    assert commands.note_row("", "") == "| — | :  | — |"
+
+
 def test_note_without_section_stops(tmp_path):
     doc = tmp_path / "handoff.md"
     doc.write_text("# 無し\n")
