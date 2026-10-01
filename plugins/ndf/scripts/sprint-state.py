@@ -106,6 +106,12 @@ def default_label(kind: str, issues: list[int], m: dict) -> str:
     return f"{kind} {tail}".strip()
 
 
+def plan_entry(kind: str, plan: str, m: dict) -> dict:
+    """計画の行（init の --plan と、update が done から足す行で同じ形）。"""
+    issues = plan_issues(plan)
+    return {"kind": kind, "plan": plan, "issues": issues, "label": default_label(kind, issues, m), "next": ""}
+
+
 # ---------------------------------------------------------------- init / update / gate
 
 
@@ -178,8 +184,7 @@ def cmd_init(a) -> dict:
         m["project_mvv"] = {"version": project.version, "sha256": project.sha256}
     for text in a.plan or []:
         kind, plan = parse_pair(text, "--plan")
-        issues = plan_issues(plan)
-        m["plans"].append({"kind": kind, "plan": plan, "issues": issues, "label": default_label(kind, issues, m), "next": ""})
+        m["plans"].append(plan_entry(kind, plan, m))
     jsonio.write_atomic(a.sprint, m, indent=1)
     return outcome(
         "ok",
@@ -235,9 +240,7 @@ def cmd_update(a) -> dict:
     for plan in items:
         # init で --plan を渡さなかった計画も、done に載った時点で表の行にする
         if plan not in known:
-            issues = plan_issues(plan)
-            kind = plan_kind(plan)
-            m["plans"].append({"kind": kind, "plan": plan, "issues": issues, "label": default_label(kind, issues, m), "next": ""})
+            m["plans"].append(plan_entry(plan_kind(plan), plan, m))
     for p in m["plans"]:
         if p["plan"] in nexts:
             p["next"] = nexts[p["plan"]]
