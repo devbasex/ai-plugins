@@ -234,11 +234,10 @@ def call_claude(
         data = {"result": p.stdout, "is_error": p.returncode != 0}
     ok = p.returncode == 0 and not data.get("is_error")
     text = data.get("result") or p.stderr[-TAIL:]
-    limit = not ok and is_usage_limit("\n".join([str(data.get("result") or ""), p.stderr, p.stdout]))
+    result = str(data.get("result") or "")
+    limit = not ok and is_usage_limit("\n".join([result, p.stderr, p.stdout]))
     # 認証の失敗（`result` が `Failed to authenticate` で始まるか、`api_error_status` が 401。#1576 の実測 H）
-    auth = (
-        not ok and not limit and (str(data.get("result") or "").startswith("Failed to authenticate") or data.get("api_error_status") == 401)
-    )
+    auth = not ok and not limit and (result.startswith("Failed to authenticate") or data.get("api_error_status") == 401)
     return ClaudeCall(
         {
             "ok": ok,
@@ -252,7 +251,7 @@ def call_claude(
             "seconds": round(time.time() - started, 1),
             "limit": limit,
             "auth": auth,
-            "resets_at": limit_reset_at("\n".join([str(data.get("result") or ""), p.stderr])) if limit else None,
+            "resets_at": limit_reset_at("\n".join([result, p.stderr])) if limit else None,
         }
     )
 
