@@ -60,50 +60,23 @@ def once(argv, data: bytes, env) -> tuple[float, subprocess.CompletedProcess]:
     return (time.perf_counter() - t) * 1000, p
 
 
-def cmd_timing(a) -> None:
-    work = Path(a.work)
-    repo = make_repo(work)
-    tmp = work / "timing" / "tmp"
-    tmp.mkdir(parents=True, exist_ok=True)
-    env = dict(os.environ, TMPDIR=str(tmp), PYTHONDONTWRITEBYTECODE="1")
-    py = sys.executable
-    variants = {
-        "worktree-guard.sh": ["bash", str(GUARD)],
-        "python 直": [py, str(HOOK)],
-        "sh + python": ["sh", "-c", LAUNCH, py, str(HOOK)],
+def _stat_rows(key: str, samples: dict[str, list[float]], outs: dict) -> dict:
+    """変種ごとの計測値から `timing.json` の行を作る。終了コードと案内の有無は最後の 1 回のもの。"""
+    return {
+        f"{key} / {name}": {
+            "median_ms": round(statistics.median(xs), 1),
+            "p90_ms": round(sorted(xs)[int(len(xs) * 0.9) - 1], 1),
+            "runs": len(xs),
+            "exit": outs[name][0],
+            "notice": outs[name][1],
+        }
+        for name, xs in samples.items()
     }
-    bases = {"python -c pass": [py, "-c", "pass"], "python + import tree_sitter_bash": [py, "-c", "import tree_sitter, tree_sitter_bash"]}
-    rows, items = {}, []
-    # steady: 同じセッションで打ち直す（状態ファイルが温まり、今の guard は同じパスの案内を 2 回目から出さない）
-    # fresh: 1 回ごとに新しいセッション（状態を解決し直し、案内まで出す）
-    keys = []
-    for mode in ("steady", "fresh"):
-        for pname, pl in payloads(repo).items():
-            key = f"{mode} / {pname}"
-            keys.append(key)
-            outs = {}
-            for name, argv in variants.items():
-                for _ in range(3):  # 温める
-                    once(argv, json.dumps(pl).encode(), env)
-            samples: dict[str, list[float]] = {k: [] for k in variants}
-            for i in range(a.runs):
-                data = json.dumps({**pl, "session_id": f"t2-{mode}-{i}"} if mode == "fresh" else pl).encode()
-                for name, argv in variants.items():  # 交互に流して、機械の揺れを両方へ等しく載せる
-                    ms, p = once(argv, data, env)
-                    samples[name].append(ms)
-                    outs[name] = (p.returncode, bool(p.stdout.strip()))
-            for name, xs in samples.items():
-                rows[f"{key} / {name}"] = {
-                    "median_ms": round(statistics.median(xs), 1),
-                    "p90_ms": round(sorted(xs)[int(len(xs) * 0.9) - 1], 1),
-                    "runs": len(xs),
-                    "exit": outs[name][0],
-                    "notice": outs[name][1],
-                }
-    for name, argv in bases.items():
-        xs = [once(argv, b"", env)[0] for _ in range(a.runs)]
-        rows[name] = {"median_ms": round(statistics.median(xs), 1), "runs": len(xs)}
-    worse = []
+
+
+def _compare(rows: dict, keys: list[str]) -> tuple[list, list]:
+    """今の guard と新しい変種を比べ、(結果の items, 悪くなったものの一覧) を返す。"""
+    items, worse = [], []
     for pname in keys:
         now = rows[f"{pname} / worktree-guard.sh"]["median_ms"]
         for name in ("python 直", "sh + python"):
@@ -124,6 +97,46 @@ def cmd_timing(a) -> None:
         for name in ("python 直", "sh + python") if pname.startswith("fresh") else ():
             if rows[f"{pname} / {name}"]["notice"] != n0:
                 worse.append(f"{pname} / {name} の案内の有無が今と違う")
+    return items, worse
+
+
+def cmd_timing(a) -> None:
+    work = Path(a.work)
+    repo = make_repo(work)
+    tmp = work / "timing" / "tmp"
+    tmp.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ, TMPDIR=str(tmp), PYTHONDONTWRITEBYTECODE="1")
+    py = sys.executable
+    variants = {
+        "worktree-guard.sh": ["bash", str(GUARD)],
+        "python 直": [py, str(HOOK)],
+        "sh + python": ["sh", "-c", LAUNCH, py, str(HOOK)],
+    }
+    bases = {"python -c pass": [py, "-c", "pass"], "python + import tree_sitter_bash": [py, "-c", "import tree_sitter, tree_sitter_bash"]}
+    rows = {}
+    # steady: 同じセッションで打ち直す（状態ファイルが温まり、今の guard は同じパスの案内を 2 回目から出さない）
+    # fresh: 1 回ごとに新しいセッション（状態を解決し直し、案内まで出す）
+    keys = []
+    for mode in ("steady", "fresh"):
+        for pname, pl in payloads(repo).items():
+            key = f"{mode} / {pname}"
+            keys.append(key)
+            outs = {}
+            for name, argv in variants.items():
+                for _ in range(3):  # 温める
+                    once(argv, json.dumps(pl).encode(), env)
+            samples: dict[str, list[float]] = {k: [] for k in variants}
+            for i in range(a.runs):
+                data = json.dumps({**pl, "session_id": f"t2-{mode}-{i}"} if mode == "fresh" else pl).encode()
+                for name, argv in variants.items():  # 交互に流して、機械の揺れを両方へ等しく載せる
+                    ms, p = once(argv, data, env)
+                    samples[name].append(ms)
+                    outs[name] = (p.returncode, bool(p.stdout.strip()))
+            rows.update(_stat_rows(key, samples, outs))
+    for name, argv in bases.items():
+        xs = [once(argv, b"", env)[0] for _ in range(a.runs)]
+        rows[name] = {"median_ms": round(statistics.median(xs), 1), "runs": len(xs)}
+    items, worse = _compare(rows, keys)
     (work / "timing.json").write_text(json.dumps(rows, ensure_ascii=False, indent=1), encoding="utf-8")
     status = "stopped" if worse else "ok"
     emit(

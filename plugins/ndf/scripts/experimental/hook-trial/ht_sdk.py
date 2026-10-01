@@ -130,6 +130,25 @@ def pairs(argv: list[str]) -> dict:
     return out
 
 
+def compare_args(now: dict, sdk: dict) -> dict:
+    """今の引数 `now` と SDK の引数 `sdk` を比べ、足りないもの・違うもの・SDK だけにあるものを返す。"""
+    missing, differ = [], []
+    for k, v in now.items():
+        if k in ("--output-format", "--print"):
+            continue  # SDK は stream-json で話す（結果は ResultMessage で読む）
+        if k not in sdk:
+            missing.append(k)
+        elif k in ("--mcp-config",):
+            if json.loads(sdk[k]).get("mcpServers") != json.loads(v).get("mcpServers"):
+                differ.append(k)
+        elif k in ("--tools", "--allowed-tools"):
+            if set(str(sdk[k]).split(",")) != set(str(v).split(",")):
+                differ.append(f"{k}（{v} / {sdk[k]}）")
+        elif sdk[k] != v:
+            differ.append(f"{k}（{v!r} / {sdk[k]!r}）")
+    return {"missing": missing, "differs": differ, "sdk_only": sorted(k for k in sdk if k not in now)}
+
+
 def check_args(work: Path, items: list, bad: list) -> None:
     from supervise_lib import claude as cl
 
@@ -153,32 +172,9 @@ def check_args(work: Path, items: list, bad: list) -> None:
                 resume="sess-1" if kind == "full" else None,
             )[1:]
         )
-        missing, differ = [], []
-        for k, v in now.items():
-            if k in ("--output-format", "--print"):
-                continue  # SDK は stream-json で話す（結果は ResultMessage で読む）
-            if k not in sdk:
-                missing.append(k)
-            elif k in ("--mcp-config",):
-                if json.loads(sdk[k]).get("mcpServers") != json.loads(v).get("mcpServers"):
-                    differ.append(k)
-            elif k in ("--tools", "--allowed-tools"):
-                if set(str(sdk[k]).split(",")) != set(str(v).split(",")):
-                    differ.append(f"{k}（{v} / {sdk[k]}）")
-            elif sdk[k] != v:
-                differ.append(f"{k}（{v!r} / {sdk[k]!r}）")
-        extra = sorted(k for k in sdk if k not in now)
-        ok = not missing and not differ
-        items.append(
-            {
-                "kind": "sdk_args",
-                "name": kind,
-                "result": "same" if ok else "differs",
-                "missing": missing,
-                "differs": differ,
-                "sdk_only": extra,
-            }
-        )
+        diff = compare_args(now, sdk)
+        ok = not diff["missing"] and not diff["differs"]
+        items.append({"kind": "sdk_args", "name": kind, "result": "same" if ok else "differs", **diff})
         if not ok:
             bad.append(f"引数（{kind}）")
 
