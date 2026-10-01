@@ -112,8 +112,12 @@ def switch_at() -> float:
     return _setting("NDF_ACCOUNT_SWITCH_AT", 90)
 
 
+def _home() -> str:
+    return os.path.expanduser("~")
+
+
 def _home_config() -> str:
-    return os.path.join(os.path.expanduser("~"), ".claude")
+    return os.path.join(_home(), ".claude")
 
 
 def _original_config(environ) -> str:
@@ -135,7 +139,7 @@ def shared_config_file(environ=None) -> str:
     if os.path.exists(legacy):
         return legacy
     orig = _original_config(environ)
-    return os.path.join(orig, ".claude.json") if orig else os.path.join(os.path.expanduser("~"), ".claude.json")
+    return os.path.join(orig, account_files.CONFIG_FILE) if orig else os.path.join(_home(), account_files.CONFIG_FILE)
 
 
 def store_dir() -> str:
