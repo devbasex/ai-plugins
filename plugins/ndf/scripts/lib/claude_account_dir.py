@@ -33,8 +33,6 @@ LOCAL_NAMES = (
     "usage.json",
     ".ndf-shared-base.json",
 )
-# 共有側に無ければ作る項目（無いまま起動すると claude がアカウント側に実体を作る）
-ENSURED = ("projects", "settings.json")
 CONFIG_FILE = ".claude.json"
 LEGACY_CONFIG_FILE = ".config.json"  # `.claude.json` の古い名前（本体はあれば先に読む）
 BASE_FILE = ".ndf-shared-base.json"
@@ -61,6 +59,7 @@ class Links:
 
 
 def _ensure_shared(shared: str) -> None:
+    """共有側に `projects` と `settings.json` が無ければ作る（無いまま起動すると claude がアカウント側に実体を作る）。"""
     os.makedirs(shared, exist_ok=True)
     p = os.path.join(shared, "projects")
     if not os.path.lexists(p):
