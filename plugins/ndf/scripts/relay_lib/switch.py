@@ -67,9 +67,19 @@ _SWITCH_MESSAGES = {
 }
 
 
-def recoverable(c: ca.Choice, thr: float) -> bool:
-    """従量の接続から候補 `c` へ戻せるか（選べて、使用率が閾値 `thr` 未満か不明）。"""
-    return bool(c.name) and (c.score is None or c.score < thr)
+# 切り替えの理由 → 次のセッションの最初の入力（未達の `/goal` が無いとき。#1576 の決定 16）
+_RESUME_TEXTS = {
+    _LIMIT: "利用上限でアカウントを替えた。中断したところから続ける",
+    REASON_AUTH: "認証が通らなかったためアカウントを替えた。中断したところから続ける",
+    REASON_THRESHOLD: "使用率が切り替えの閾値を超えたためアカウントを替えた。中断したところから続ける",
+    REASON_RECOVERED: "上限が外れたためアカウントへ戻した。中断したところから続ける",
+}
+_RESUME_DEFAULT = "アカウントを替えた。中断したところから続ける"
+
+
+def resume_text(reason: str | None) -> str:
+    """切り替えの理由に合う再開の文。上限の種類（`cu.KINDS`）はどれも同じ文にまとめる。"""
+    return _RESUME_TEXTS.get(_LIMIT if reason in cu.KINDS else reason, _RESUME_DEFAULT)
 
 
 class UsageWatch:
@@ -106,8 +116,8 @@ class UsageWatch:
     def check(self) -> None:
         cur, thr = self.relay.account, ca.switch_at()
         if cur == ca.METERED:
-            c = ca.choose(before=0)  # 期限を過ぎたトークンだけを更新する
-            if recoverable(c, thr):
+            c = ca.choose()  # 期限を過ぎたトークンだけを、更新の排他を取れたときに更新する
+            if c.recoverable(thr):
                 if self.recover != c.name:
                     self.lines.put(f"{c.name} の上限が外れた。次のカットポイントで従量の接続から戻す")
                 self.recover = c.name
@@ -116,7 +126,7 @@ class UsageWatch:
             return
         if not cur or thr >= 100 or self.due is not None:
             return
-        u = ca.usage(cur, None)  # 動いている区間のトークンは更新しない
+        u = ca.usage(cur, False)  # 動いているセッションのトークンは claude が更新する（#1576 の I8）
         score = u.score() if u else None
         if score is not None and score >= thr:
             self.due = score
@@ -148,7 +158,7 @@ class AccountSwitch:
             usable, score, left = self._current_standing(cur)
             if usable and due is None and (score is None or score < thr):
                 return cur, None, None
-        c = ca.choose(exclude={cur} if cur else set())
+        c = ca.choose(exclude={cur} if cur else set(), keep=self.keep())
         if c.name:
             if usable and self.no_better(c, score, left):
                 return cur, None, c
@@ -159,10 +169,32 @@ class AccountSwitch:
             return ca.METERED, REASON_LIMITED, c
         return cur, None, c
 
-    @staticmethod
-    def _pick_after_limit(kind: str, cur: str | None, declared: bool) -> tuple[str | None, str | None, ca.Choice]:
-        """上限の後の選び直し。None が返れば切り替えずに子を残す。"""
-        c = ca.choose(exclude=set() if kind == REASON_AUTH or cur in (None, ca.METERED) else {cur})
+    def stop_accounts(self) -> None:
+        """ラッパーの終了時: 定期の確認を止め、今のアカウントの .claude.json の共有する部分を書き戻す（E12）。"""
+        if self.watch is not None:
+            self.watch.stop()
+        self.settle_account(self.account)
+
+    def settle_account(self, name: str | None) -> None:
+        """アカウント `name` のセッションの後の書き戻し（登録が 1 つ以下・従量の接続・既定のログインでは何もしない）。"""
+        if self.multi and name and name != ca.METERED:
+            ca.settle(name, self.env, lambda row: self.note_account_dir(row, self.section))
+
+    def note_account_dir(self, row: dict, section: int | None = None) -> None:
+        """アカウントの設定ディレクトリの用意・書き戻しの結果を `log.jsonl` の `account_dir` の行と、使わないときは画面の
+        1 行に残す。行に載せるのは項目の名前と理由の語だけである（I14）。"""
+        self.log(event="account_dir", section=self.section + 1 if section is None else section, **row)
+        if not row.get("ok"):
+            why = ca.prepare_reason_text(row["account"], row.get("reason"))
+            self.term.screen(f"ndf-relay: アカウント {row['account']} を使わない（{why}）")
+
+    def keep(self) -> set[str]:
+        """トークンを更新しないアカウント（今のセッションのアカウント。claude が更新する。#1576 の I8）。"""
+        return {self.account} if self.account and self.account != ca.METERED else set()
+
+    def _pick_after_limit(self, kind: str, cur: str | None, declared: bool) -> tuple[str | None, str | None, ca.Choice]:
+        """上限と認証の失敗の後の選び直し（今のアカウントを除く）。None が返れば切り替えずに子を残す。"""
+        c = ca.choose(exclude=set() if cur in (None, ca.METERED) else {cur}, keep=self.keep())
         if c.name:
             return c.name, REASON_RECOVERED if cur == ca.METERED else kind, c
         if declared and cur != ca.METERED:
@@ -173,16 +205,17 @@ class AccountSwitch:
     def _pick_from_metered(thr: float) -> tuple[str | None, str | None, ca.Choice]:
         """従量の接続で動く区間の起動。戻せるアカウントがあれば戻す。"""
         c = ca.choose()
-        if recoverable(c, thr):
+        if c.recoverable(thr):
             return c.name, REASON_RECOVERED, c
         return ca.METERED, None, c
 
     @staticmethod
     def _current_standing(cur: str) -> tuple[bool, float | None, float | None]:
-        """今のアカウントの (使えるか, 使用率, 残りの量)。"""
-        u = ca.usage(cur)
+        """今のアカウントの (使えるか, 使用率, 残りの量)。トークンは更新しない（claude が更新する）。"""
+        u = ca.usage(cur, False)
         acc = ca.load_account(cur)
-        usable = acc is not None and not acc.needs_relogin and acc.limited_until(time.time()) is None
+        now = time.time()
+        usable = acc is not None and not acc.needs_relogin and not acc.auth_held(now) and acc.limited_until(now) is None
         score = u.score() if u else None
         left = acc.remaining() if acc is not None else None
         return usable, score, left
@@ -281,8 +314,7 @@ class AccountSwitch:
         if self._wait_background(lim, kind, tp):
             return None
         if auth:
-            self.auth_section = self.section
-            ca.token(self.account or "", math.inf)  # 更新してから、同じアカウントを含めて選び直す
+            self.auth_section = self.section  # NDF は動いている claude のトークンを更新しない（#1576 の I8）
         to, reason, choice = self.pick(kind)
         if to is None:
             self.log(event="account", section=self.section, reason=kind, **{"from": self.account}, to=None, earliest=self.earliest(choice))
@@ -324,7 +356,9 @@ class AccountSwitch:
         """上限の観測を 1 つのシグナルファイルにつき 1 回だけ記録する。"""
         if self.noted != lim["written_at"]:
             self.noted = lim["written_at"]
-            if kind != REASON_AUTH:
+            if kind == REASON_AUTH:
+                ca.note_auth_failed(self.account or "")
+            else:
                 ca.note_limit(self.account or "", kind, resets)
 
     def _wait_background(self, lim, kind, tp) -> bool:
@@ -337,10 +371,14 @@ class AccountSwitch:
         return True
 
     def limit_start(self, m) -> tuple[list[str], str, str, dict]:
-        """上限で替えた次の区間の (引数, 記録のコマンド, 元の会話, cwd の元)。`ndf-next` があればそれを入力にする。"""
+        """上限で替えた次の区間の (引数, 記録のコマンド, 元の会話, cwd の元)。`ndf-next` があればそれを入力にする。
+
+        無ければ、未達の `/goal` か、切り替えの理由に合う再開の文を入力にする。"""
         nxt = self.read_mark()
         if nxt is not None:
             return [nxt["command"]], nxt["command"], nxt.get("session_id") or "", nxt
-        first = cl.resume_input(m.get("transcript_path") or "")
+        plan = m.get("_plan")
+        reason = plan[1] if isinstance(plan, tuple) and len(plan) > 1 else None
+        first = cl.resume_input(m.get("transcript_path") or "", resume_text(reason))
         sid = m.get("session_id") or ""
         return (["--resume", sid, first] if sid else [first]), first, sid, m

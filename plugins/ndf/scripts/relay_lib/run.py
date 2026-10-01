@@ -105,8 +105,9 @@ class Relay(AccountSwitch):
         self.record.drop_mark()
         remove(self.path(QUESTION_FILE), self.path(LIMIT_FILE))  # 上限シグナルファイルは前の子のもの（新しい子の hook はまだ書けない）
         prev = self.account
+        self.settle_account(prev)  # 前のセッションの .claude.json の共有する部分を書き戻してから次を用意する（E12）
         to, reason, choice = (plan or self.pick(None)) if self.multi else (None, None, None)
-        env = cl.section_env(self.env, to) if to else None
+        env = cl.section_env(self.env, to, self.note_account_dir) if to else None
         if to and env is None:  # 親の認証へ戻さない。選び直し、無ければ止める
             to, reason, choice, env = self.replace_unusable(to)
         if env is None:
@@ -146,20 +147,20 @@ class Relay(AccountSwitch):
         self.limit.release()
 
     def replace_unusable(self, failed: str) -> tuple[str, str, ca.Choice, dict]:
-        """トークンを得られなかった `failed` の代わりを選ぶ。(名前か `metered`, 理由, 選んだ結果, 環境)。
+        """使えなかった `failed` の代わりを選ぶ。(名前か `metered`, 理由, 選んだ結果, 環境)。
         登録済みのアカウント → 従量の接続の宣言の順に試し、どれも無ければ NoAccountEnv を投げる。"""
         tried = {failed}
         while True:
-            c = ca.choose(exclude=tried)
+            c = ca.choose(exclude=tried, keep=self.keep())
             if not c.name:
                 break
-            env = cl.section_env(self.env, c.name)
+            env = cl.section_env(self.env, c.name, self.note_account_dir)
             if env is not None:
                 return c.name, REASON_AUTH, c, env
             tried.add(c.name)
         if failed != ca.METERED and ca.fallback_env(self.env):
             return ca.METERED, REASON_AUTH, c, cl.section_env(self.env, ca.METERED)
-        raise NoAccountEnv(f"アカウント {failed} のトークンを得られず、替えるアカウントも従量の接続の宣言も無い")
+        raise NoAccountEnv(f"アカウント {failed} を使えず、替えるアカウントも従量の接続の宣言も無い")
 
     # -- 合図の判定
 
@@ -441,8 +442,7 @@ class Relay(AccountSwitch):
         return None
 
     def close(self) -> None:
-        if self.watch is not None:
-            self.watch.stop()
+        self.stop_accounts()
         self.limit.release()
         remove(self.path(PID_FILE), self.path(cl.SETTINGS_FILE))  # まとめた設定は利用者の資格情報を持ちうるため残さない
         _unlock(self.lock)

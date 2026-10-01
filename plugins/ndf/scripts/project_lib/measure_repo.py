@@ -303,16 +303,18 @@ def measure_services(tree: Tree) -> tuple[dict, list[str]]:
     return measured({"container": bool(files), "compose_files": files, "databases": sorted(dbs)}), sorted(set(names))
 
 
-def _test_commands(tree: Tree) -> list[str]:
+def _test_scripts(tree: Tree, filename: str) -> list[str]:
+    """`filename`（package.json / composer.json）の scripts のうち、名前に test を含むもの。"""
     cmds = []
-    for f in tree.shallow("package.json"):
+    for f in tree.shallow(filename):
         for k, v in (tree.json(f).get("scripts") or {}).items():
             if "test" in k:
                 cmds.append(f"{f}: {k} = {v}")
-    for f in tree.shallow("composer.json"):
-        for k, v in (tree.json(f).get("scripts") or {}).items():
-            if "test" in k:
-                cmds.append(f"{f}: {k} = {v}")
+    return cmds
+
+
+def _test_commands(tree: Tree) -> list[str]:
+    cmds = _test_scripts(tree, "package.json") + _test_scripts(tree, "composer.json")
     for f in tree.shallow("Makefile"):
         cmds += [f"{f}: {m.group(0).strip()}" for m in re.finditer(r"^test[\w-]*:.*$", tree.read(f) or "", re.M)]
     cmds += [p for p in tree.files if p.count("/") <= 1 and re.search(r"test", p.rsplit("/", 1)[-1]) and p.endswith(".sh")]

@@ -143,35 +143,95 @@ def test_rejected_refresh_needs_relogin(accounts):
 
 def test_refresh_token_expired_needs_relogin_without_calling(accounts):
     accounts.add("a", expires_in=-60, refresh_in=-10, util5=None)
-    assert ca.token("a") is None
+    ca.usage("a")
     assert accounts.fake.refresh_calls == [] and accounts.account("a")["needs_relogin"] is True
 
 
 def test_concurrent_refresh_calls_endpoint_once(accounts):
-    accounts.add("a", expires_in=60)  # 期限の 60 分前を切っている
+    """I9: 並んだ取得のうち 1 本だけが更新の宛先を呼び、ほかは排他の中で読み直した新しいトークンを使う。"""
+    accounts.add("a", expires_in=-60, util5=None)
     accounts.fake.refresh["a-refresh-SECRET"] = (200, {"access_token": "a-new-SECRET", "expires_in": 28800})
-    got = []
-    ts = [threading.Thread(target=lambda: got.append(ca.token("a"))) for _ in range(2)]
+    accounts.fake.set_usage("a-new-SECRET", window(5), window(5))
+    ts = [threading.Thread(target=lambda: ca.usage("a")) for _ in range(2)]
     for t in ts:
         t.start()
     for t in ts:
         t.join()
-    assert got == ["a-new-SECRET", "a-new-SECRET"]
     assert accounts.fake.refresh_calls == ["a-refresh-SECRET"]
+    assert accounts.creds("a")["accessToken"] == "a-new-SECRET"
 
 
-def test_keep_account_is_not_refreshed(accounts):
-    accounts.add("a", expires_in=600)  # 期限の 60 分前を切っているが過ぎていない
-    accounts.add("b", expires_in=-60, util5=None)
-    accounts.fake.refresh["b-refresh-SECRET"] = (200, {"access_token": "b-new", "expires_in": 28800})
-    assert ca.choose(exclude={"b"}, keep={"a"}).name == "a"
-    assert ca.choose(exclude={"a"}, keep={"b"}).name is None  # 期限の過ぎた keep は更新せず外す
+def test_fresh_token_is_not_refreshed_before_expiry(accounts):
+    """決定 11: 期限の前の更新はしない（期限内なら宛先を呼ばない）。"""
+    accounts.add("a", expires_in=600)
+    accounts.fake.refresh["a-refresh-SECRET"] = (200, {"access_token": "a-new", "expires_in": 28800})
+    ca.rows()
+    assert ca.choose().name == "a" and accounts.fake.refresh_calls == []
+
+
+def test_keep_account_is_not_refreshed(accounts, monkeypatch):
+    """受け入れ条件 14・I8: `keep` と環境の NDF_CLAUDE_ACCOUNT のアカウントは、期限切れでも 401 でも更新しない。"""
+    accounts.add("a", expires_in=-60, util5=None)
+    tb = accounts.add("b", util5=None)
+    accounts.fake.usage[tb] = (401, {"error": "expired"})
+    for n in ("a", "b"):
+        accounts.fake.refresh[f"{n}-refresh-SECRET"] = (200, {"access_token": f"{n}-new", "expires_in": 28800})
+    before = {n: (accounts.root / n / ".credentials.json").read_bytes() for n in ("a", "b")}
+    ca.choose(keep={"a", "b"})
+    assert len(accounts.fake.usage_calls) == 1  # 期限の過ぎた a は取得先も呼ばない。b は 401 で更新しない
+    monkeypatch.setenv(ca.NAME_ENV, "b")
+    ca.usage("b", now=time.time() + 1000)  # 環境の NDF_CLAUDE_ACCOUNT は refresh=True でも更新しない
     assert accounts.fake.refresh_calls == []
+    assert {n: (accounts.root / n / ".credentials.json").read_bytes() for n in ("a", "b")} == before
+
+
+def test_refresh_lock_held_by_claude_blocks_refresh(accounts):
+    """I9: claude の更新の排他（.oauth_refresh.lock）があれば宛先を呼ばず、その回の残量は読めない。"""
+    accounts.add("a", expires_in=-60, util5=None)
+    accounts.fake.refresh["a-refresh-SECRET"] = (200, {"access_token": "a-new", "expires_in": 28800})
+    (accounts.root / "a" / ".oauth_refresh.lock").mkdir()
+    assert ca.usage("a").error == "token" and accounts.fake.refresh_calls == []
+    assert (accounts.root / "a" / ".oauth_refresh.lock").is_dir()  # 横取りしない
+
+
+def test_refresh_rereads_inside_lock(accounts, monkeypatch):
+    """I9: 排他の中で読み直した認証ファイルが別の期限内のトークンなら、宛先を呼ばずにそれで取得する。"""
+    accounts.add("a", expires_in=-60, util5=None)
+    accounts.fake.set_usage("a-other-SECRET", window(7), window(7))
+    real = ca._refresh_lock
+
+    @ca.contextmanager
+    def swapped(name):
+        o = accounts.creds(name)
+        o.update(accessToken="a-other-SECRET", expiresAt=int((time.time() + 3600) * 1000))
+        accounts.write(accounts.root / name / ".credentials.json", {"claudeAiOauth": o})  # claude が更新した
+        with real(name) as held:
+            yield held
+
+    monkeypatch.setattr(ca, "_refresh_lock", swapped)
+    assert ca.usage("a").five_hour["utilization"] == 7 and accounts.fake.refresh_calls == []
+
+
+def test_refresh_keeps_mcp_oauth_and_leaves_no_temp(accounts):
+    """I9・決定 21: NDF の更新は claudeAiOauth だけを重ね、mcpOAuth を変えない。一時ファイルを残さない。"""
+    accounts.add("a", expires_in=-60, util5=None)
+    path = accounts.root / "a" / ".credentials.json"
+    data = json.loads(path.read_text())
+    data["mcpOAuth"] = {"srv": {"accessToken": "mcp-SECRET"}}
+    accounts.write(path, data)
+    accounts.fake.refresh["a-refresh-SECRET"] = (200, {"access_token": "a-new-SECRET", "expires_in": 28800})
+    accounts.fake.set_usage("a-new-SECRET", window(5), window(5))
+    ca.usage("a")
+    got = json.loads(path.read_text())
+    assert got["mcpOAuth"] == {"srv": {"accessToken": "mcp-SECRET"}} and got["claudeAiOauth"]["accessToken"] == "a-new-SECRET"
+    assert not [p for p in (accounts.root / "a").iterdir() if p.name.endswith(".tmp")]
+    assert not (accounts.root / "a" / ".oauth_refresh.lock").exists()
 
 
 def test_permissions_and_shared_credentials_untouched(accounts):
+    """受け入れ条件 7・I3・I15: 共有の .credentials.json は内容も更新時刻も変わらず、symlink にもならない。"""
     accounts.add("a")
-    accounts.add("b", expires_in=60)
+    accounts.add("b", expires_in=-60)
     accounts.fake.refresh["b-refresh-SECRET"] = (200, {"access_token": "b-new-SECRET", "expires_in": 28800})
     os.chmod(accounts.root / "a" / "account.json", 0o644)
     os.chmod(accounts.root, 0o755)
@@ -179,14 +239,17 @@ def test_permissions_and_shared_credentials_untouched(accounts):
     before = (shared.read_bytes(), shared.stat().st_mtime_ns)
     ca.rows()
     ca.choose()
-    ca.account_env("b", {})
+    ca.account_env("b", {"CLAUDE_CONFIG_DIR": str(accounts.shared)})
+    ca.settle("b", {"CLAUDE_CONFIG_DIR": str(accounts.shared)})
     ca.note_limit("a", "seven_day", None)
     assert (shared.read_bytes(), shared.stat().st_mtime_ns) == before
+    assert not (accounts.root / "b" / ".credentials.json").is_symlink()
     assert oct(accounts.root.stat().st_mode & 0o777) == "0o700"
     for d in ("a", "b"):
         assert oct((accounts.root / d).stat().st_mode & 0o777) == "0o700"
         for f in (accounts.root / d).iterdir():
-            assert oct(f.stat().st_mode & 0o777) == "0o600", f
+            if not f.is_symlink():
+                assert oct(f.stat().st_mode & 0o777) == "0o600", f
 
 
 def test_account_env_and_metered_do_not_mix(accounts, monkeypatch):
@@ -200,8 +263,8 @@ def test_account_env_and_metered_do_not_mix(accounts, monkeypatch):
         "X": "y",
     }
     env = ca.account_env("a", base)
-    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == tok and env["NDF_CLAUDE_ACCOUNT"] == "a" and env["X"] == "y"
-    assert "CLAUDE_CODE_USE_BEDROCK" not in env and "ANTHROPIC_API_KEY" not in env
+    assert ca.TOKEN_ENV not in env and env["NDF_CLAUDE_ACCOUNT"] == "a" and env["X"] == "y"
+    assert "CLAUDE_CODE_USE_BEDROCK" not in env and "ANTHROPIC_API_KEY" not in env and tok not in env.values()
     m = ca.account_env("metered", {"NDF_SUPERVISE_CLAUDE_FALLBACK": decl, "CLAUDE_CODE_OAUTH_TOKEN": tok})
     assert "CLAUDE_CODE_OAUTH_TOKEN" not in m and m["NDF_CLAUDE_ACCOUNT"] == "metered"
     assert m["CLAUDE_CODE_USE_BEDROCK"] == "1" and m["AWS_PROFILE"] == "p"
@@ -209,10 +272,10 @@ def test_account_env_and_metered_do_not_mix(accounts, monkeypatch):
 
 def test_account_env_drops_undeclared_auth(accounts):
     """宣言が無くても、認証の優先順位でトークンより上に来る変数はアカウントの子から外す。"""
-    tok = accounts.add("a")
+    accounts.add("a")
     base = {k: "1" for k in ca.FOREIGN_AUTH_ENV}
     env = ca.account_env("a", base)
-    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == tok and not set(ca.FOREIGN_AUTH_ENV) & set(env)
+    assert env[ca.NAME_ENV] == "a" and not set(ca.FOREIGN_AUTH_ENV) & set(env)
 
 
 def test_metered_env_keeps_only_declared_auth():
@@ -224,20 +287,13 @@ def test_metered_env_keeps_only_declared_auth():
     assert not {"ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX"} & set(env)
 
 
-def test_token_with_short_life_is_not_given(accounts):
-    """更新しないトークンは、期限まで min_left 秒以下なら渡さない。"""
-    tok = accounts.add("a", expires_in=600)
-    assert ca.token("a", None) == tok
-    assert ca.token("a", None, min_left=1800) is None
-
-
 @pytest.mark.parametrize("status", [429, 408, 500])
 def test_transient_refresh_failure_keeps_account(accounts, status):
-    """一時的な失敗（429・408・5xx）は再登録を求めず、期限の前なら今のトークンを使う。"""
-    tok = accounts.add("a", expires_in=60)
+    """一時的な失敗（429・408・5xx）は再登録を求めず、候補に残す（claude が起動の後に自分で更新する）。"""
+    accounts.add("a", expires_in=-60, util5=None)
     accounts.fake.refresh["a-refresh-SECRET"] = (status, {"error": "busy"})
-    assert ca.token("a") == tok
-    assert not accounts.account("a").get("needs_relogin")
+    assert ca.usage("a").error == "token"
+    assert not accounts.account("a").get("needs_relogin") and ca.usable("a")
 
 
 def test_names_ignore_staging_and_reserved(accounts):
@@ -292,108 +348,70 @@ def test_fallback_env_reads_given_environ():
 
 def _runner(monkeypatch, section):
     sys.path.insert(0, str(SCRIPTS))
+    from types import SimpleNamespace
+
     from supervise_lib import claude as sc
 
     monkeypatch.setenv(ca.NAME_ENV, section)
-    return sc, sc.ClaudeRunner(object())
+    rows: list[dict] = []
+    ctx = SimpleNamespace(state=SimpleNamespace(cur={"id": "s1"}, switched=[], progress_write=rows.append), progress=rows)
+    return sc, sc.ClaudeRunner(ctx)
 
 
 def test_supervise_waits_when_others_are_only_limited(accounts, monkeypatch):
-    """区間のトークンの残りが打ち切りより短く、他が上限なだけなら止めずに解除まで待たせる。"""
-    accounts.add("a", expires_in=600)
+    """区間のアカウントが使えず、他が上限なだけなら止めずに解除まで待たせる。"""
+    accounts.add("a")
+    ca.note_auth_failed("a")
     tb = accounts.add("b", util5=None)
     accounts.fake.set_usage(tb, window(100, 1800), window(5))
     sc, r = _runner(monkeypatch, "a")
     with pytest.raises(sc.AccountsLimited) as e:
-        r.child_env(1800, {})
+        r.child_env({})
     assert e.value.resets_at is not None and e.value.resets_at > time.time()
 
 
 def test_supervise_stops_when_no_candidate(accounts, monkeypatch):
     """替えるアカウントが 1 つも無ければ（再登録が要る）認証で止まる。"""
-    accounts.add("a", expires_in=600)
+    accounts.add("a")
+    ca.note_auth_failed("a")
     accounts.add("b")
     acc = accounts.account("b")
     acc["needs_relogin"] = True
     accounts.write(accounts.root / "b" / "account.json", acc)
     sc, r = _runner(monkeypatch, "a")
     with pytest.raises(sc.AuthUnavailable):
-        r.child_env(1800, {})
-
-
-# ---------------------------------------------------------------- アカウントのスコープ（#1523）
-
-ABSENT = object()  # `scopes` のキーが無い
-
-
-def _set_scopes(accounts, name, scopes):
-    o = accounts.creds(name)
-    o.pop("scopes")
-    if scopes is not ABSENT:
-        o["scopes"] = scopes
-    accounts.write(accounts.root / name / ".credentials.json", {"claudeAiOauth": o})
-
-
-def test_account_env_carries_scopes_of_the_store(accounts):
-    """受け入れ条件 3・I1: 子のスコープは置き場の並びのまま。共有の設定ディレクトリからは読まず、取得先も呼ばない。"""
-    scopes = ["user:profile", "user:mcp_servers", "user:inference"]
-    accounts.add("a", scopes=scopes)
-    accounts.write(accounts.shared / ".credentials.json", {"claudeAiOauth": {"accessToken": "x", "scopes": ["user:shared"]}})
-    env = ca.account_env("a", {k: "1" for k in ca.FOREIGN_AUTH_ENV})
-    assert env[ca.SCOPES_ENV] == " ".join(scopes) and "user:mcp_servers" in env[ca.SCOPES_ENV].split()
-    assert not set(ca.FOREIGN_AUTH_ENV) & set(env)
-    assert accounts.fake.usage_calls == [] and accounts.fake.refresh_calls == []
-
-
-def test_account_env_reads_scopes_after_refresh(accounts):
-    """I1: トークンを更新したら、更新の応答で書き直された後のスコープを渡す（更新の宛先は 1 回だけ呼ぶ）。"""
-    accounts.add("a", expires_in=60, scopes=["user:inference"])
-    accounts.fake.refresh["a-refresh-SECRET"] = (
-        200,
-        {"access_token": "a-new-SECRET", "expires_in": 28800, "scope": "user:inference user:mcp_servers"},
-    )
-    env = ca.account_env("a", {})
-    assert (env[ca.TOKEN_ENV], env[ca.SCOPES_ENV]) == ("a-new-SECRET", "user:inference user:mcp_servers")
-    assert accounts.fake.refresh_calls == ["a-refresh-SECRET"] and accounts.fake.usage_calls == []
-
-
-def test_account_env_replaces_scopes_of_previous_account(accounts):
-    """受け入れ条件 4・I2: 前のアカウントのスコープを残さない（上書きするか、読めなければ外す）。"""
-    accounts.add("a", scopes=["user:inference", "user:mcp_servers"])
-    accounts.add("b", scopes=["user:inference"])
-    accounts.add("c")
-    _set_scopes(accounts, "c", ABSENT)
-    base = ca.account_env("a", {})
-    assert ca.account_env("b", base)[ca.SCOPES_ENV] == "user:inference"
-    assert ca.SCOPES_ENV not in ca.account_env("c", base)
-
-
-@pytest.mark.parametrize("bad", [ABSENT, None, "user:inference", [], ["user:inference", 1], ["user:inference user:mcp_servers"], [""]])
-def test_broken_scopes_start_without_the_variable(accounts, bad):
-    """受け入れ条件 5・I3: `scopes` が無い・壊れていても子を起動し、スコープの変数を外す。再登録は求めない。"""
-    tok = accounts.add("a")
-    _set_scopes(accounts, "a", bad)
-    env = ca.account_env("a", {ca.SCOPES_ENV: "user:inference user:mcp_servers"})
-    assert env[ca.TOKEN_ENV] == tok and ca.SCOPES_ENV not in env
-    assert not accounts.account("a")["needs_relogin"]
+        r.child_env({})
 
 
 def test_relay_and_supervise_build_the_same_account_env(accounts, monkeypatch):
-    """受け入れ条件 2・8: ラッパーと supervise.py の子の環境は認証の変数が同じで、置き場の場所を変えない。"""
-    accounts.add("a", scopes=["user:inference", "user:mcp_servers"])
+    """受け入れ条件 2・I1: ラッパーと supervise.py の子の環境は同じで、トークンとスコープの変数を持たず、
+    CLAUDE_CONFIG_DIR がアカウントの設定ディレクトリを指す。置き場の場所は変わらない。"""
+    tok = accounts.add("a", scopes=["user:inference", "user:mcp_servers"])
     accounts.add("b")
+    monkeypatch.setenv(ca.TOKEN_ENV, "old-SECRET")
+    monkeypatch.setenv(ca.SCOPES_ENV, "user:inference")
     sc, r = _runner(monkeypatch, "a")
     from relay_lib import claude as relay_claude
 
     base = dict(os.environ)
     store = ca.store_dir()
-    wrapped, worker = relay_claude.section_env(base, "a"), r.child_env(0, {})
-    keys = (ca.TOKEN_ENV, ca.SCOPES_ENV, ca.NAME_ENV, *ca.FOREIGN_AUTH_ENV, "CLAUDE_CONFIG_DIR", "NDF_ACCOUNTS_DIR")
+    wrapped, worker = relay_claude.section_env(base, "a"), r.child_env({})
+    keys = (
+        ca.TOKEN_ENV,
+        ca.SCOPES_ENV,
+        ca.NAME_ENV,
+        *ca.FOREIGN_AUTH_ENV,
+        ca.CONFIG_ENV,
+        ca.SHARED_ENV,
+        ca.PLUGIN_CACHE_ENV,
+        "NDF_ACCOUNTS_DIR",
+    )
     assert {k: wrapped.get(k) for k in keys} == {k: worker.get(k) for k in keys}
-    assert wrapped[ca.SCOPES_ENV] == "user:inference user:mcp_servers"
-    assert (wrapped["CLAUDE_CONFIG_DIR"], wrapped["NDF_ACCOUNTS_DIR"]) == (base["CLAUDE_CONFIG_DIR"], base["NDF_ACCOUNTS_DIR"])
+    assert ca.TOKEN_ENV not in wrapped and ca.SCOPES_ENV not in wrapped and tok not in wrapped.values()
+    assert wrapped[ca.CONFIG_ENV] == str(accounts.root / "a") and wrapped[ca.NAME_ENV] == "a"
+    assert wrapped[ca.SHARED_ENV] == str(accounts.shared) and wrapped[ca.PLUGIN_CACHE_ENV] == str(accounts.shared / "plugins")
     monkeypatch.setattr(ca.os, "environ", wrapped)
-    assert ca.store_dir() == store
+    assert ca.store_dir() == store and ca.shared_dir() == str(accounts.shared)
 
 
 # ---------------------------------------------------------------- 残りの量で選ぶ（#1453）
@@ -463,13 +481,13 @@ def test_unknown_capacity_and_unknown_usage_are_ordered_after(accounts):
 
 
 def test_below_threshold_is_tried_before_larger_remaining(accounts, monkeypatch):
-    """I3（閾値）: 閾値以上の大きい残りの量より閾値未満の候補を先に返し、そのトークンを得られなければ閾値以上を返す。"""
+    """I3（閾値）: 閾値以上の大きい残りの量より閾値未満の候補を先に返し、それを起動できなければ閾値以上を返す。"""
     accounts.add("big", tier=MAX20, capacity={"five_hour": 10000}, util5=95, util7=0)  # 500
     accounts.add("small", tier=MAX5, util5=40, util7=0)  # 31.5
     c = ca.choose()
     assert c.name == "small" and c.score < ca.switch_at()
-    real = ca.token
-    monkeypatch.setattr(ca, "token", lambda n, *a, **k: None if n == "small" else real(n, *a, **k))
+    real = ca.usable
+    monkeypatch.setattr(ca, "usable", lambda n, *a, **k: False if n == "small" else real(n, *a, **k))
     assert ca.choose().name == "big"
 
 
@@ -631,3 +649,90 @@ def test_supervise_passes_metered_declaration_as_settings(accounts, monkeypatch,
     sc.call_claude("s", "p", None, str(accounts.root), 10, full=full, child_env=None)
     assert seen[0][:2] == ["python3", "fake.py"] and _settings_of(seen[0]) == [{"env": {"AWS_REGION": "ap-northeast-1"}}]
     assert "--settings" not in seen[1]
+
+
+# --- 現状固定: usable の判定と needs_relogin の書き込み（根拠は現状の出力。仕様の主張ではない） ---------
+
+NOW = 1_800_000_000.0
+EXPIRED, AT_MARGIN, FRESH = 0, int((NOW + 60) * 1000), int((NOW + 61) * 1000)
+REFRESH_PAST, REFRESH_NOW, REFRESH_AHEAD = int((NOW - 1) * 1000), int(NOW * 1000), int((NOW + 1) * 1000)
+
+
+def _held(accounts, oauth, name="a"):
+    """登録済みの `name` の認証ファイルを `oauth` だけにする。"""
+    accounts.add(name, util5=None)
+    accounts.write(accounts.root / name / ".credentials.json", {"claudeAiOauth": oauth})
+
+
+@pytest.mark.parametrize(
+    "oauth,expected",
+    [
+        ({"accessToken": "t", "refreshToken": "r", "expiresAt": EXPIRED}, True),
+        ({"accessToken": "t", "refreshToken": "r", "refreshTokenExpiresAt": REFRESH_AHEAD, "expiresAt": EXPIRED}, True),
+        ({"accessToken": "t", "refreshToken": "r", "refreshTokenExpiresAt": "soon", "expiresAt": EXPIRED}, True),
+        ({"accessToken": "t", "refreshToken": "r", "refreshTokenExpiresAt": REFRESH_NOW, "expiresAt": EXPIRED}, False),
+        ({"accessToken": "t", "refreshToken": "r", "refreshTokenExpiresAt": REFRESH_PAST, "expiresAt": FRESH}, True),
+        ({"accessToken": "t", "refreshToken": "r", "refreshTokenExpiresAt": REFRESH_PAST, "expiresAt": AT_MARGIN}, False),
+        ({"accessToken": "t", "expiresAt": FRESH}, True),
+        ({"accessToken": "t", "refreshToken": "", "expiresAt": EXPIRED}, False),
+        ({"accessToken": "t"}, False),
+        ({"accessToken": "", "refreshToken": "r", "expiresAt": FRESH}, False),
+        ({"accessToken": 1, "refreshToken": "r", "expiresAt": FRESH}, False),
+        ({"refreshToken": "r", "expiresAt": FRESH}, False),
+    ],
+)
+def test_usable_by_tokens_marks_relogin_only_when_not_usable(accounts, oauth, expected):
+    _held(accounts, oauth)
+    assert ca.usable("a", now=NOW) is expected
+    assert accounts.account("a")["needs_relogin"] is (not expected)
+
+
+@pytest.mark.parametrize("content", [None, "{broken", "[1]", json.dumps({"claudeAiOauth": "x"})])
+def test_usable_without_readable_credentials_marks_relogin(accounts, content):
+    accounts.add("a", util5=None)
+    cred = accounts.root / "a" / ".credentials.json"
+    cred.unlink() if content is None else cred.write_text(content)
+    assert ca.usable("a", now=NOW) is False
+    assert accounts.account("a")["needs_relogin"] is True
+
+
+def test_usable_stops_at_the_record_before_touching_credentials(accounts):
+    """登録の記録が無い・読めない・再登録が要ると書いてあるときは偽を返し、記録を作らず書き換えない。"""
+    assert ca.usable("ghost", now=NOW) is False and not (accounts.root / "ghost").exists()
+    _held(accounts, {"accessToken": "t", "refreshToken": "r", "expiresAt": FRESH}, "flagged")
+    _held(accounts, {"accessToken": "t", "refreshToken": "r", "expiresAt": FRESH}, "broken")
+    flagged, broken = accounts.root / "flagged" / "account.json", accounts.root / "broken" / "account.json"
+    accounts.write(flagged, {**accounts.account("flagged"), "needs_relogin": True})
+    broken.write_text("{broken")
+    before = (flagged.read_bytes(), broken.read_bytes())
+    assert ca.usable("flagged", now=NOW) is False and ca.usable("broken", now=NOW) is False
+    assert (flagged.read_bytes(), broken.read_bytes()) == before
+
+
+def test_usable_marks_relogin_when_permissions_cannot_be_fixed(accounts, monkeypatch):
+    _held(accounts, {"accessToken": "t", "refreshToken": "r", "expiresAt": FRESH})
+    loose = accounts.root / "a" / "other.json"
+    loose.write_text("{}")
+    os.chmod(loose, 0o644)
+    real = os.chmod
+
+    def chmod(path, mode, *a, **k):  # 他人のファイルのように、このファイルだけ権限を直せない
+        if str(path) == str(loose):
+            raise PermissionError(path)
+        return real(path, mode, *a, **k)
+
+    monkeypatch.setattr(ca.os, "chmod", chmod)
+    assert ca.usable("a", now=NOW) is False
+    assert accounts.account("a")["needs_relogin"] is True
+
+
+# --- 現状固定: 更新の宛先を呼ぶ前のリフレッシュトークンの期限の確かめ（根拠は現状の出力。仕様の主張ではない） ---------
+
+
+def test_refresh_after_401_is_rejected_without_calling_when_refresh_token_expired(accounts):
+    """期限内のアクセストークンが 401 で、リフレッシュトークンが期限切れなら、更新の宛先を呼ばずに再登録が要るとする。"""
+    ta = accounts.add("a", refresh_in=-10, util5=None)
+    accounts.fake.usage[ta] = (401, {"error": "expired"})
+    ca.usage("a")
+    assert accounts.fake.usage_calls == [ta] and accounts.fake.refresh_calls == []
+    assert accounts.account("a")["needs_relogin"] is True

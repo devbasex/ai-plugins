@@ -283,6 +283,10 @@ sequenceDiagram
 
 ### 決定 1: 子の認証は今のまま変数のトークンで渡し、アカウントの `scopes` を `CLAUDE_CODE_OAUTH_SCOPES` で添える
 
+**#1576 で置き換えた。** 今は、アカウントの設定ディレクトリを子の `CLAUDE_CONFIG_DIR` にし、トークンもスコープも
+変数で渡さない。claude.ai のコネクタは、claude が認証ファイルのスコープを自分で読んで取りに行く。採った形と理由は
+[issue-1576-design-decisions.md](issue-1576-design-decisions.md) の決定 1 にある。以下は置き換える前の記録である。
+
 Claude Code 2.1.285 は、変数のトークンのスコープを `CLAUDE_CODE_OAUTH_SCOPES` から読み、無ければ `user:inference`
 だけとみなす。このため、足りないのは認証の方式ではなくスコープの宣言である。変数のトークンにスコープを添えると
 claude.ai のコネクタが読まれることを実物のアカウントで確かめた（要求の未決 1）。#1389 の決定 1 の性質（設定・

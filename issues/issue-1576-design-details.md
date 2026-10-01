@@ -30,7 +30,6 @@ classDiagram
   class claude_account_dir {
     +LOCAL_NAMES
     +LOCAL_PREFIXES
-    +ENSURED
     +link_shared(shared, account) Links
     +sync_config(shared_file, account) str|None
     +readable(account) bool

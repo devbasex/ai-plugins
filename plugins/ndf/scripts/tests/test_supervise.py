@@ -894,7 +894,7 @@ n = len(open(os.path.join(state, "calls")).read().splitlines()) if os.path.exist
 responses = json.load(open(os.path.join(state, "responses.json")))
 r = responses[min(n, len(responses) - 1)]
 sys.stdin.read()
-open(os.path.join(state, "calls"), "a").write(json.dumps({"n": n, "bedrock": os.environ.get("CLAUDE_CODE_USE_BEDROCK"), "token": os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"), "account": os.environ.get("NDF_CLAUDE_ACCOUNT"), "auth_token": os.environ.get("ANTHROPIC_AUTH_TOKEN")}) + "\\n")
+open(os.path.join(state, "calls"), "a").write(json.dumps({"n": n, "bedrock": os.environ.get("CLAUDE_CODE_USE_BEDROCK"), "token": os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"), "config_dir": os.environ.get("CLAUDE_CONFIG_DIR"), "account": os.environ.get("NDF_CLAUDE_ACCOUNT"), "auth_token": os.environ.get("ANTHROPIC_AUTH_TOKEN")}) + "\\n")
 if r.get("stderr"):
     sys.stderr.write(r["stderr"])
 print(json.dumps(r["out"]))
@@ -1004,13 +1004,14 @@ def progress_rows(tmp_path, kind):
 def test_limit_switches_to_registered_account_without_wait(tmp_path, seq, accounts, monkeypatch):
     """受け入れ条件 6: worker が上限に当たると、待たずに別の登録済みアカウントで同じ呼び出しをやり直す。"""
     set_responses, calls = seq
-    ta = accounts.add("a", util5=50)
-    tb = accounts.add("b", util5=20)
+    accounts.add("a", util5=50)
+    accounts.add("b", util5=20)
     accounts.add("c", util5=60)
     monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "a")
     set_responses(LIMIT, OK)
     s, text = run_plan(tmp_path, WORK_THEN_FAIL)
-    assert [(c["token"], c["account"]) for c in calls()] == [(ta, "a"), (tb, "b")]
+    got = [(c["token"], c["config_dir"], c["account"]) for c in calls()]
+    assert got == [(None, str(accounts.root / "a"), "a"), (None, str(accounts.root / "b"), "b")]
     w = s.state.results["w"]
     assert w["auth"] == "アカウント b（five_hour）" and "limit_waited" not in w
     assert "- 認証: 切り替え（アカウント b）" in text
@@ -1022,12 +1023,12 @@ def test_limit_switches_to_registered_account_without_wait(tmp_path, seq, accoun
 def test_all_accounts_limited_without_declaration_waits(tmp_path, seq, accounts, monkeypatch):
     """受け入れ条件 4・14: 候補が無く宣言も無ければ、今と同じ上限待ちに入る。"""
     set_responses, calls = seq
-    ta = accounts.add("a")
+    accounts.add("a")
     accounts.add("b", util5=100)
     monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "a")
     set_responses(LIMIT_NO_TIME, OK)
     s, text = run_plan(tmp_path, WORK_THEN_FAIL, limit_retry_seconds=3)
-    assert [c["token"] for c in calls()] == [ta, ta]
+    assert [c["config_dir"] for c in calls()] == [str(accounts.root / "a")] * 2
     assert s.state.results["w"]["limit_waited"] == 3 and "auth" not in s.state.results["w"]
 
 
@@ -1035,7 +1036,7 @@ def test_all_limited_moves_to_metered_then_recovers(tmp_path, seq, accounts, mon
     """受け入れ条件 12・13: すべて上限なら宣言の接続へ移り、上限が外れたアカウントへ次の起動で戻る。"""
     set_responses, calls = seq
     monkeypatch.setenv("NDF_ACCOUNT_CHECK_INTERVAL", "0")
-    ta = accounts.add("a", util5=100)
+    accounts.add("a", util5=100)
     tb = accounts.add("b", util5=None)
     full, low = FakeAnthropic.usage_reply(window(100), window(10)), FakeAnthropic.usage_reply(window(10), window(10))
     accounts.fake.usage[tb] = [full, full, low]
@@ -1043,8 +1044,9 @@ def test_all_limited_moves_to_metered_then_recovers(tmp_path, seq, accounts, mon
     monkeypatch.setenv("NDF_SUPERVISE_CLAUDE_FALLBACK", "CLAUDE_CODE_USE_BEDROCK=1 ANTHROPIC_API_KEY=sk-SECRET")
     set_responses(LIMIT, OK, OK)
     s, text = run_plan(tmp_path, WORK_TWICE)
-    got = [(c["token"], c["bedrock"], c["account"]) for c in calls()]
-    assert got == [(ta, None, "a"), (None, "1", "metered"), (tb, None, "b")]
+    got = [(c["token"], c["config_dir"], c["bedrock"], c["account"]) for c in calls()]
+    a, b, shared = str(accounts.root / "a"), str(accounts.root / "b"), str(accounts.shared)
+    assert got == [(None, a, None, "a"), (None, shared, "1", "metered"), (None, b, None, "b")]
     assert s.state.results["w1"]["auth"] == "従量の接続（CLAUDE_CODE_USE_BEDROCK, ANTHROPIC_API_KEY）"
     assert s.state.results["w2"]["auth"] == "アカウント b（recovered）"
     rows = progress_rows(tmp_path, "account")
@@ -1058,7 +1060,7 @@ def test_all_limited_uses_saved_declaration_unless_env(tmp_path, seq, accounts, 
     """#1468 の AC4: すべて上限なら保存した宣言の変数で呼ぶ。環境変数の宣言があれば、保存した宣言は 1 つも入らない。"""
     set_responses, calls = seq
     monkeypatch.setenv("NDF_ACCOUNT_CHECK_INTERVAL", "0")
-    ta = accounts.add("a", util5=100)
+    accounts.add("a", util5=100)
     accounts.add("b", util5=100)
     monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "a")
     if env_decl is not None:
@@ -1066,8 +1068,8 @@ def test_all_limited_uses_saved_declaration_unless_env(tmp_path, seq, accounts, 
     ca.save_metered("bedrock", {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": "p"}, {"profile": "p"})
     set_responses(LIMIT, OK)
     s, text = run_plan(tmp_path, WORK_THEN_FAIL)
-    got = [(c["token"], c["bedrock"], c["account"]) for c in calls()]
-    assert got == [(ta, None, "a"), (None, None if env_decl else "1", "metered")]
+    got = [(c["config_dir"], c["bedrock"], c["account"]) for c in calls()]
+    assert got == [(str(accounts.root / "a"), None, "a"), (str(accounts.shared), None if env_decl else "1", "metered")]
     keys = "ANTHROPIC_API_KEY" if env_decl else "CLAUDE_CODE_USE_BEDROCK, AWS_PROFILE"
     assert s.state.results["w"]["auth"] == f"従量の接続（{keys}）"
     assert "SECRET" not in (tmp_path / "state" / "progress.jsonl").read_text() and "SECRET" not in text
@@ -1109,31 +1111,67 @@ def test_single_account_fallback_drops_parent_auth(tmp_path, seq, accounts, monk
 
 
 def test_section_account_is_not_refreshed_by_plan(tmp_path, seq, accounts, monkeypatch):
-    """I5: 動いている区間のアカウントは期限の 60 分前を切っても更新しない。期限を過ぎていれば別のアカウントで呼ぶ。"""
+    """#1576 の I8: 動いている区間のアカウントは期限切れでも NDF が更新せず、そのアカウントのまま呼ぶ（claude が更新する）。"""
     set_responses, calls = seq
-    ta = accounts.add("a", expires_in=2400)  # 期限の 60 分前を切り、打ち切りの 1800 秒よりは長い
-    tb = accounts.add("b", util5=30)
+    accounts.add("a", expires_in=-60)
+    accounts.add("b", util5=30)
     accounts.fake.refresh["a-refresh-SECRET"] = (200, {"access_token": "a-new", "expires_in": 28800})
     monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "a")
     set_responses(OK)
     run_plan(tmp_path, [{"id": "w", "type": "work", "prompt": "直す", "next": "end"}])
-    assert calls()[0]["token"] == ta and accounts.fake.refresh_calls == []
-    accounts.add("a", expires_in=-60)
-    # 完了の記録があるプランは打ち直しで流し直さないため、フェーズの名前を変えた別のプランで呼ぶ
-    s, _ = run_plan(tmp_path, [{"id": "w", "type": "work", "prompt": "直す", "next": "end"}], フェーズ="試験（2 本目）")
-    assert calls()[1]["token"] == tb and accounts.fake.refresh_calls == []
-    assert s.state.results["w"]["auth"] == "アカウント b（auth）"
+    assert calls()[0]["config_dir"] == str(accounts.root / "a") and accounts.fake.refresh_calls == []
 
 
-def test_section_token_shorter_than_timeout_switches(tmp_path, seq, accounts, monkeypatch):
-    """区間のトークンが打ち切りの秒より先に切れるなら、途中で切れないように別のアカウントで呼ぶ。"""
+AUTH_FAILED = {
+    "out": {
+        "result": "Failed to authenticate: OAuth session expired and could not be refreshed",
+        "is_error": True,
+        "api_error_status": None,
+    },
+    "code": 1,
+}
+
+
+def test_auth_failure_result_switches_account_and_retries(tmp_path, seq, accounts, monkeypatch):
+    """受け入れ条件 20・I12: 結果行が認証の失敗なら観測を残し、別のアカウントで同じ呼び出しをやり直す（再登録は求めない）。"""
     set_responses, calls = seq
-    accounts.add("a", expires_in=600)
-    tb = accounts.add("b", util5=30)
+    accounts.add("a", util5=10)
+    accounts.add("b", util5=30)
+    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "a")
+    set_responses(AUTH_FAILED, OK)
+    s, text = run_plan(tmp_path, [{"id": "w", "type": "work", "prompt": "直す", "next": "end"}])
+    assert [c["account"] for c in calls()] == ["a", "b"] and "結果: 完了" in text
+    assert s.state.results["w"]["auth"] == "アカウント b（auth）"
+    assert accounts.account("a")["auth_failed"]["observed_at"] and not accounts.account("a")["needs_relogin"]
+
+
+def test_auth_failure_without_candidate_stops(tmp_path, seq, accounts, monkeypatch):
+    """認証の失敗の後に替える候補も従量の接続も無ければ AuthUnavailable で止まる（同じアカウントを 2 度試さない）。"""
+    set_responses, calls = seq
+    accounts.add("a", util5=10)
+    accounts.add("b")
+    acc = accounts.account("b")
+    acc["needs_relogin"] = True
+    accounts.write(accounts.root / "b" / "account.json", acc)
+    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "a")
+    set_responses(AUTH_FAILED, OK)
+    s, text = run_plan(tmp_path, [{"id": "w", "type": "work", "prompt": "直す", "next": "end"}])
+    assert [c["account"] for c in calls()] == ["a"] and "止まった" in text and "認証" in text
+
+
+def test_unreadable_account_config_is_skipped_by_plan(tmp_path, seq, accounts, monkeypatch):
+    """I19: アカウント側の .claude.json が読めないアカウントでは呼ばず、別の候補で呼ぶ。進捗ログに理由が残る。"""
+    set_responses, calls = seq
+    accounts.add("a", util5=10)
+    accounts.add("b", util5=30)
+    (accounts.root / "a" / ".claude.json").write_text('{"projects": ')
     monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "a")
     set_responses(OK)
-    s, _ = run_plan(tmp_path, [{"id": "w", "type": "work", "prompt": "直す", "next": "end"}])
-    assert calls()[0]["token"] == tb and s.state.results["w"]["auth"] == "アカウント b（auth）"
+    run_plan(tmp_path, [{"id": "w", "type": "work", "prompt": "直す", "next": "end"}])
+    assert [c["account"] for c in calls()] == ["b"]
+    assert (accounts.root / "a" / ".claude.json").read_text() == '{"projects": '
+    rows = progress_rows(tmp_path, "account_dir")
+    assert [(r["account"], r["ok"], r["reason"]) for r in rows if not r["ok"]] == [("a", False, "account_unreadable")]
 
 
 def test_no_token_and_no_alternative_stops_without_old_env(tmp_path, seq, accounts, monkeypatch):
