@@ -567,7 +567,9 @@ def test_run_switches_to_next_section(term, tmp_path):
     rows = t.rows()
     assert [r["event"] for r in rows] == ["start", "end", "start"]
     s1, e1, s2 = rows
-    assert set(s1) == {"event", "at", "section", "pid", "command", "from_session", "plugin_version", "cwd"}
+    assert set(s1) == {"event", "at", "section", "pid", "command", "from_session", "plugin_version", "cwd", "relay_version_dir"}
+    assert s1["relay_version_dir"] is None and s2["relay_version_dir"] is None  # プラグインのキャッシュから起動（#1587 の AC13）
+    assert not events(rows, "reexec") and not events(rows, "reexec_skipped")  # キャッシュからの起動は入れ替えない（AC12）
     assert s1["command"] == "--model haiku"
     assert s1["plugin_version"] == "1.0.0"
     assert s2["plugin_version"] == "2.0.0"
@@ -3820,3 +3822,292 @@ def test_tell_account_reason_lines_characterization(monkeypatch, prev, reason, d
     r.tell_account(prev, "b", reason, None)
     assert r.screens == ["ndf-relay: " + line]
     assert r.rows == [{"event": "account", "section": 3, "reason": reason, "from": prev, "to": "b", **extra}]
+
+
+# ---------------------------------------------------------------- ラッパーの入れ替え（#1587）
+
+from relay_lib import handover as relay_handover  # noqa: E402
+
+OLD_VER, NEW_VER = "10.17.52", "10.17.53"
+
+
+def handover_data(**over):
+    """申し送りの中身（設計の申し送りの形の表）。"""
+    d = {
+        "shown": "/goal 続き",
+        "from_dir": f"relay-{OLD_VER}-aaaa1111",
+        "to_dir": f"relay-{NEW_VER}-bbbb2222",
+        "written_at": 1790000000.0,
+        "prepare_seconds": 0.5,
+        "claude": "/bin/claude",
+        "marketplace": "mk",
+        "version": NEW_VER,
+        "first_args": ["--model", "haiku"],
+        "state": {"section": 7, "account": None, "multi": False, "auth_section": 0},
+        "next": {
+            "args": ["/goal 続き"],
+            "cwd": "/work",
+            "command": "/goal 続き",
+            "from_session": "s1",
+            "cwd_fallback": None,
+            "carried": ["--model", "haiku"],
+            "plan": None,
+        },
+    }
+    d.update(over)
+    return d
+
+
+def test_handover_written_private_and_removed_after_read(tmp_path):
+    """申し送りは 0600 で書き、形の表のキーだけを持ち、読んだら消す（I7）。"""
+    d = tmp_path / "relay"
+    d.mkdir(mode=0o700)
+    path = relay_handover.write(str(d), handover_data())
+    assert pathlib.Path(path).stat().st_mode & 0o777 == 0o600
+    keys = set(json.loads(pathlib.Path(path).read_text()))
+    assert keys == {"schema", "prepare_seconds", *relay_handover.REQUIRED}
+    got, shown = relay_handover.read(path)
+    assert got is not None and got["state"]["section"] == 7 and shown == "/goal 続き"
+    assert not os.path.exists(path) and os.listdir(d) == []
+
+
+@pytest.mark.parametrize(
+    "body, shown",
+    [
+        (None, None),  # 無い
+        ("{not json", None),  # 壊れている
+        (json.dumps({"schema": 99, **handover_data()}), "/goal 続き"),  # 知らない schema
+        (json.dumps({"schema": 1, **{k: v for k, v in handover_data().items() if k != "next"}}), "/goal 続き"),  # 必須のキーが無い
+    ],
+    ids=["missing", "broken", "schema", "key"],
+)
+def test_handover_read_rejects(tmp_path, body, shown):
+    path = tmp_path / "handover.json"
+    if body is not None:
+        path.write_text(body)
+    assert relay_handover.read(str(path)) == (None, shown)
+    assert not path.exists()
+
+
+def test_section_input_round_trips_through_handover():
+    """申し送りの `next` は SectionInput そのもので、上限の後の選び方（Choice）も戻る（I4）。"""
+    import claude_accounts as ca
+
+    s = relay_run.SectionInput(
+        args=["--resume", "s1", "続き"],
+        cwd="/w",
+        command="続き",
+        from_session="s1",
+        cwd_fallback="/gone",
+        carried=["--model", "haiku"],
+        plan=("b", "limit", ca.Choice(name="b", score=0.2, earliest=("a", 123.0), remaining=None)),
+    )
+    back = relay_run.SectionInput.from_json(json.loads(json.dumps(s.to_json())))
+    assert back == s
+
+
+def test_version_of_reads_version_from_name():
+    assert relay_version_dir.version_of("relay-10.17.53-bbbb2222") == "10.17.53"
+    assert relay_version_dir.version_of("relay-10.17.53-dev.1-bbbb2222") == "10.17.53-dev.1"
+    assert relay_version_dir.version_of("scripts") is None and relay_version_dir.version_of(None) is None
+
+
+def test_expected_dir_is_the_name_startup_places(tmp_path, home):
+    """導入先のファイルから計算した名前は、その版の startup が置く名前と同じ（決定 2）。"""
+    new = plugin_root(tmp_path, NEW_VER, "new")
+    (home / ".bashrc").write_text("")
+    assert relay_cmd(tmp_path, "install", relay=plugin_root(tmp_path, OLD_VER, "old")).returncode == 0
+    assert relay_cmd(tmp_path, "startup", relay=new).returncode == 0
+    assert relay_handover.expected_dir(str(new.parent.parent), "ignored") == current_of(cfg(tmp_path))
+    assert relay_handover.expected_dir(str(tmp_path / "missing"), NEW_VER) is None
+    assert relay_handover.expected_dir(None, NEW_VER) is None
+
+
+def fake_startup(root, base, name, env=True, reader=True):
+    """更新後の版の startup の代わり。`base` に `name` のバージョンディレクトリを置いて relay.current で指す。
+    `env` が偽なら環境の python を置かず、`"noexec"` なら実行できない python を置く。`reader` が偽なら handover.py を置かない。"""
+    script = f"""#!/usr/bin/env python3
+import os, sys
+if sys.argv[1:] != ["startup"]:
+    sys.exit(0)
+base, name = {str(base)!r}, {name!r}
+vd = os.path.join(base, name)
+os.makedirs(os.path.join(vd, "relay_lib"), exist_ok=True)
+open(os.path.join(vd, "MANIFEST"), "w").close()
+if {reader!r}:
+    open(os.path.join(vd, "relay_lib", "handover.py"), "w").close()
+env = {env!r}
+if env:
+    os.makedirs(os.path.join(vd, ".venv", "bin"), exist_ok=True)
+    py = os.path.join(vd, ".venv", "bin", "python")
+    open(py, "w").write("#!/bin/sh\\nexit 9\\n")
+    os.chmod(py, 0o644 if env == "noexec" else 0o755)
+open(os.path.join(base, "relay.current"), "w").write(name + "\\n")
+"""
+    (root / "scripts" / "relay.py").write_text(script)
+
+
+class Swap:
+    """複製のランチャーから起動したラッパーで、版をまたぐ切り替えを 1 回行う場（偽の claude と一時の複製の置き場）。"""
+
+    def __init__(self, tmp_path, term, after=NEW_VER, after_root=None, args=("--model", "haiku"), env=None):
+        home = home_of(tmp_path)
+        home.mkdir(exist_ok=True)
+        (home / ".bashrc").write_text("")
+        self.old = plugin_root(tmp_path, OLD_VER, "old").parent.parent
+        assert relay_cmd(tmp_path, "install", relay=self.old / "scripts" / "relay.py").returncode == 0
+        self.base = cfg(tmp_path)
+        self.old_name = current_of(self.base)
+        if after_root is None:
+            after_root = self.old if after == OLD_VER else plugin_root(tmp_path, after, "new").parent.parent
+        self.new = after_root
+        e = {
+            "FAKE_VERSION": OLD_VER,
+            "FAKE_INSTALL_PATH": self.old,
+            "FAKE_VERSION_AFTER": after,
+            "FAKE_INSTALL_PATH_AFTER": after_root,
+            **(env or {}),
+        }
+        self.t = term(*args, env=e, cmd=[sys.executable, str(self.base / "relay.py"), "run"])
+
+    def cut(self, body="/goal 次"):
+        self.t.wait_start(1)
+        self.t.type(f"mark {body}\r")
+        self.t.wait_start(2)
+        return self.t.rows()
+
+
+def test_swap_runs_next_session_in_new_version_dir(tmp_path, term):
+    """版をまたぐ切り替えで、同じ PID・同じ作業ディレクトリのまま更新後のバージョンディレクトリへ入れ替わり、
+    セッションの番号は続く（AC1〜AC3・AC5〜AC7・AC9・AC13）。"""
+    sw = Swap(tmp_path, term)
+    t = sw.t
+    rows = sw.cut()
+    new_name = current_of(sw.base)
+    assert new_name.startswith(f"relay-{NEW_VER}-") and new_name != sw.old_name
+    assert [r["event"] for r in rows] == ["start", "end", "reexec", "start"]
+    s1, e1, rx, s2 = rows
+    assert s1["relay_version_dir"] == sw.old_name and s2["relay_version_dir"] == new_name
+    assert (rx["section"], rx["from"], rx["to"]) == (1, sw.old_name, new_name)
+    assert isinstance(rx["prepare_seconds"], float) and isinstance(rx["seconds"], float)
+    assert (s1["section"], e1["section"], s2["section"]) == (1, 1, 2)
+    assert s2["plugin_version"] == NEW_VER
+    # PID と作業ディレクトリは変わらない
+    assert t.proc.poll() is None
+    (d,) = t.relay_dirs()
+    assert (d / "relay.pid").read_text() == str(t.proc.pid)
+    assert relay_common.relay_running(str(d))
+    assert t.starts()[1]["relay_dir"] == str(d)
+    assert not (d / "handover.json").exists()
+    # 使用中の印は入れ替え後のバージョンディレクトリにだけある
+    assert not (sw.base / sw.old_name / f"inuse-{t.proc.pid}").exists()
+    assert (sw.base / new_name / f"inuse-{t.proc.pid}").exists()
+    assert "── ndf-relay: 区間 2 ──" in t.text and "入れ替えずに" not in t.text
+    assert termios.tcgetattr(t.slave) != t.before  # raw のまま中継する
+    # 入れ替えた後も停止シグナルファイルの扱いが続く（起動は 2 回のまま）
+    (d / "stop").touch()
+    t.type("mark /goal その次\r")
+    t.wait(lambda: events(t.rows(), "stop"), what="停止の行")
+    assert events(t.rows(), "stop")[-1]["reason"] == "stop-file"
+    t.type("quit 0\r")
+    assert t.finish() == 0
+    assert len(events(t.rows(), "start")) == 2 and len(events(t.rows(), "reexec")) == 1
+    assert termios.tcgetattr(t.slave) == t.before
+
+
+@pytest.mark.parametrize("swap", [True, False])
+def test_swap_keeps_next_session_input(tmp_path, term, swap):
+    """次のセッションの引数・cwd・引き継ぐ引数は、入れ替えの有無で同じ（AC4）。同じ名前なら入れ替えず、
+    外部コマンドの呼び出しも増えない（AC8）。"""
+    sw = Swap(tmp_path, term, after=NEW_VER if swap else OLD_VER)
+    rows = sw.cut()
+    second = sw.t.starts()[1]
+    assert second["argv"] == ["--model", "haiku", "/goal 次"]
+    assert second["cwd"] == str(tmp_path)
+    assert [r for r in rows if r["event"] == "start"][1]["carried"] == ["--model", "haiku"]
+    assert sw.t.calls() == [["list", "--json"], ["marketplace", "update", "mk"], ["update", "ndf@mk", "-y"], ["list", "--json"]]
+    assert bool(events(rows, "reexec")) is swap and not events(rows, "reexec_skipped")
+    sw.t.type("quit 0\r")
+    assert sw.t.finish() == 0
+
+
+def _break(case, sw_args, tmp_path):
+    """入れ替えを失敗させる用意。(Swap に渡す引数, 起動の後に呼ぶもの)。"""
+    if case == "unreadable":
+        return {"after_root": tmp_path / "missing"}, None
+    if case == "not-placed":  # 後退の防止で startup が置かない
+        return {"after": "10.17.51"}, None
+    root = plugin_root(tmp_path, NEW_VER, "new").parent.parent
+    base = cfg(tmp_path)
+    name = f"relay-{NEW_VER}-cccc3333"
+    if case == "startup-failed":
+        (root / "scripts" / "relay.py").write_text("import sys\nsys.exit(3)\n")
+    elif case == "no-env":
+        fake_startup(root, base, name, env=False)
+    elif case == "no-handover":
+        fake_startup(root, base, name, reader=False)
+    elif case == "exec-failed":
+        fake_startup(root, base, name, env="noexec")
+    elif case == "handover-write":
+
+        def block(t):
+            (d,) = t.relay_dirs()
+            (d / f"handover.json.{t.proc.pid}.tmp").mkdir()
+
+        return {"after_root": root}, block
+    return {"after_root": root}, None
+
+
+@pytest.mark.parametrize("case", ["startup-failed", "not-placed", "unreadable", "no-env", "no-handover", "handover-write", "exec-failed"])
+def test_swap_failure_keeps_current_version(tmp_path, term, case):
+    """入れ替えられないときは、今の版のまま次のセッションを起動し、画面に 1 行と reexec_skipped の 1 行を残す（AC10・I5・I9）。"""
+    kw, hook = _break(case, None, tmp_path)
+    sw = Swap(tmp_path, term, **kw)
+    t = sw.t
+    t.wait_start(1)
+    if hook:
+        hook(t)
+    t.type("mark /goal 次\r")
+    t.wait_start(2)
+    rows = t.rows()
+    assert [r["event"] for r in rows] == ["start", "end", "reexec_skipped", "start"]
+    sk = rows[2]
+    assert sk["reason"] == case and sk["reason"] in relay_handover.REASONS
+    assert sk["section"] == 1 and sk["from"] == sw.old_name and isinstance(sk["seconds"], float)
+    assert rows[3]["relay_version_dir"] == sw.old_name and rows[3]["section"] == 2
+    assert t.text.count("入れ替えずに今の版で続ける") == 1
+    assert (sw.base / sw.old_name / f"inuse-{t.proc.pid}").exists()
+    (d,) = t.relay_dirs()
+    assert not (d / "handover.json").exists()
+    t.type("quit 0\r")
+    assert t.finish() == 0
+    assert termios.tcgetattr(t.slave) == t.before
+
+
+@pytest.mark.parametrize(
+    "body, shown",
+    [
+        (None, "claude を打ち直し、前の会話は /resume で選ぶ"),
+        ("{not json", "claude を打ち直し、前の会話は /resume で選ぶ"),
+        (json.dumps({"schema": 99, **handover_data()}), "/goal 続き"),
+        (json.dumps({"schema": 1, **{k: v for k, v in handover_data().items() if k != "state"}}), "/goal 続き"),
+    ],
+    ids=["missing", "broken", "schema", "key"],
+)
+def test_run_from_unreadable_handover_stops_with_command(tmp_path, home, body, shown):
+    """入れ替えた後に申し送りを読めなければ、子を起動せず、次のコマンドを示して止まる（AC11・I6）。"""
+    d = tmp_path / "relay-dir"
+    d.mkdir(mode=0o700)
+    (d / "log.jsonl").write_text(json.dumps({"event": "start", "section": 7}) + "\n")
+    path = d / "handover.json"
+    if body is not None:
+        path.write_text(body)
+    fake = tmp_path / "fake"
+    fake.mkdir()
+    p = relay_cmd(tmp_path, "run", NDF_RELAY_HANDOVER=path, NDF_RELAY_CLAUDE=FAKE, FAKE_DIR=fake, FAKE_RELAY=RELAY)
+    assert p.returncode == 2, p.stderr
+    assert "次の区間を起動できない" in p.stdout and shown in p.stdout
+    assert not (fake / "starts.jsonl").exists() and not (fake / "calls.jsonl").exists()
+    last = json.loads((d / "log.jsonl").read_text().splitlines()[-1])
+    assert (last["event"], last["reason"], last["section"]) == ("stop", "handover", 7)
+    assert not path.exists()

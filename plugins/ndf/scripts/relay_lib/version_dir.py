@@ -58,9 +58,15 @@ LIB_FILES = (
 )
 # 環境の宣言と lock。プラグインではプラグインの根（scripts/ の 1 つ上）、バージョンディレクトリでは中にある
 PROJECT_FILES = ("pyproject.toml", "uv.lock")
-DIR_RE = re.compile(r"^relay-.+-[0-9a-f]{8}$")
+DIR_RE = re.compile(r"^relay-(.+)-[0-9a-f]{8}$")
 TMP_RE = re.compile(r"^relay-.+-[0-9a-f]{8}\.tmp-(\d+)$")
 KEEP = 2
+
+
+def version_of(name: str | None) -> str | None:
+    """バージョンディレクトリの名前（`relay-<版>-<digest>`）の版。名前の形でなければ None。"""
+    m = DIR_RE.match(name) if isinstance(name, str) else None
+    return m.group(1) if m else None
 
 
 def copy_version_path() -> str:
