@@ -16,6 +16,8 @@ import claude_accounts as ca  # noqa: E402,I001  common が lib/ を sys.path �
 from claude_settings import metered_settings  # noqa: E402,F401  区間の引数へ宣言を足す（#1543。run.py が呼ぶ）
 import claude_usage as cu  # noqa: E402
 
+# 従量の接続の区間へ渡す、利用者の `--settings` のファイルと宣言をまとめた設定（状態ディレクトリの 0600。引数へ展開しない。#1543）
+SETTINGS_FILE = "metered-settings.json"
 # 素通しにする引数と副命令（Claude Code 2.1.280 の `claude --help` から写す）
 PASS_FLAGS = {"-p", "--print", "-h", "--help", "-v", "--version"}
 SUBCOMMANDS = {

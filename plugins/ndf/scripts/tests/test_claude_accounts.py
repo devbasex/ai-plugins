@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import stat
 import subprocess
 import sys
 import threading
@@ -559,7 +560,7 @@ def test_metered_settings_leaves_accounts_alone(accounts):  # noqa: F811
 
 
 def test_metered_settings_merges_existing_settings(accounts, tmp_path):  # noqa: F811
-    """既存の `--settings`（JSON・ファイル・`=` の形）は 1 つにまとめ、宣言のキーだけを宣言で上書きする。
+    """既存の `--settings`（JSON。ファイルは次のテスト）は 1 つにまとめ、宣言のキーだけを宣言で上書きする。
     Claude Code は `--settings` が複数あると最後の 1 つだけを使うため、並べずにまとめる。"""
     ca.save_metered("bedrock", {"AWS_PROFILE": "default", "AWS_REGION": "ap-northeast-1"}, {"profile": "default"})
     env = ca.account_env(ca.METERED, {})
@@ -567,11 +568,30 @@ def test_metered_settings_merges_existing_settings(accounts, tmp_path):  # noqa:
     want = {"model": "x", "env": {"AWS_REGION": "ap-northeast-1", "KEEP": "1", "AWS_PROFILE": "default"}}
     got = cs.metered_settings(["--settings", json.dumps(user), "p"], env, str(tmp_path))
     assert _settings_of(got) == [want] and got[-1] == "p"
-    (tmp_path / "s.json").write_text(json.dumps(user))
-    got = cs.metered_settings(["--settings=s.json", "p"], env, str(tmp_path))
-    assert _settings_of(got) == [want] and "--settings=s.json" not in got
     got = cs.metered_settings(["--settings", "{}", "--", "--settings", "{}"], env, str(tmp_path))
     assert got[-2:] == ["--settings", "{}"] and _settings_of(got) == [{"env": {"AWS_PROFILE": "default", "AWS_REGION": "ap-northeast-1"}}]
+
+
+def test_metered_settings_keeps_file_settings_out_of_args(accounts, tmp_path):  # noqa: F811
+    """既存の `--settings` がファイルなら、まとめた設定も 0600 のファイルで渡す。ファイルの `env` は利用者の資格情報を
+    持ちうるため、中身を引数へ展開しない（引数は他のプロセスから読める）。"""
+    ca.save_metered("bedrock", {"AWS_PROFILE": "default", "AWS_REGION": "ap-northeast-1"}, {"profile": "default"})
+    env = ca.account_env(ca.METERED, {})
+    user = {"model": "x", "env": {"AWS_REGION": "us-east-1", "GITHUB_TOKEN": "g-SECRET"}}
+    want = {"model": "x", "env": {"AWS_REGION": "ap-northeast-1", "GITHUB_TOKEN": "g-SECRET", "AWS_PROFILE": "default"}}
+    (tmp_path / "s.json").write_text(json.dumps(user))
+    store = tmp_path / "merged.json"
+    for args, path in ((["--settings=s.json", "p"], store), (["--settings", str(tmp_path / "s.json"), "p"], None)):
+        got = cs.metered_settings(args, env, str(tmp_path), store=path and str(path))
+        assert got[0] == "--settings" and got[2:] == ["p"] and "SECRET" not in " ".join(got)
+        merged = Path(got[1])
+        assert json.loads(merged.read_text()) == want and stat.S_IMODE(merged.stat().st_mode) == 0o600
+        assert path is None or merged == path
+        merged.unlink()
+    assert json.loads((tmp_path / "s.json").read_text()) == user  # 利用者のファイルは書き換えない
+    # まとめた設定を書けなければ引数を変えない（中身を引数へ展開する側へは倒さない）
+    args = ["--settings", "s.json", "p"]
+    assert cs.metered_settings(args, env, str(tmp_path), store=str(tmp_path / "none" / "merged.json")) == args
 
 
 def test_metered_settings_keeps_unreadable_settings(accounts, tmp_path):  # noqa: F811

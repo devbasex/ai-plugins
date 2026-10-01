@@ -24,6 +24,7 @@ import json
 import os
 import pathlib
 import shutil
+import stat
 import subprocess
 import sys
 
@@ -3043,10 +3044,18 @@ def test_saved_metered_declaration_is_used(term, accounts):
     no_secret(t)
 
 
-@pytest.mark.parametrize("user", [None, {"model": "x", "env": {"AWS_REGION": "us-east-1", "KEEP": "1"}}])
-def test_metered_section_gets_declaration_as_settings(term, accounts, user):
+@pytest.mark.parametrize(
+    "user, as_file",
+    [
+        (None, False),
+        ({"model": "x", "env": {"AWS_REGION": "us-east-1", "KEEP": "1"}}, False),
+        ({"model": "x", "env": {"AWS_REGION": "us-east-1", "GITHUB_TOKEN": "g-SECRET"}}, True),
+    ],
+)
+def test_metered_section_gets_declaration_as_settings(term, accounts, tmp_path, user, as_file):
     """#1543: 従量の接続の区間は宣言を `--settings` の env でも渡す（settings.json の env に負けない）。
-    利用者の `--settings` は 1 つにまとめて残し、アカウントの区間は引数を変えない。"""
+    利用者の `--settings` は 1 つにまとめて残し、アカウントの区間は引数を変えない。利用者の値がファイルなら、
+    まとめた設定も状態ディレクトリの 0600 のファイルで渡す（ファイルの `env` の資格情報を引数へ展開しない）。"""
     ta = accounts.add("a", util5=10)
     tb = accounts.add("b", util5=None)
     accounts.fake.set_usage(tb, window(100, 1800), window(5))
@@ -3055,6 +3064,9 @@ def test_metered_section_gets_declaration_as_settings(term, accounts, user):
         accounts.root / "metered.json", {"version": 1, "provider": "bedrock", "env": decl, "details": {"profile": "p"}, "verified_at": "x"}
     )
     first = ["--settings", json.dumps(user)] if user else []
+    if as_file:
+        (tmp_path / "s.json").write_text(json.dumps(user))
+        first = ["--settings", str(tmp_path / "s.json")]
     t = term(*first, env={**accounts.env(), "NDF_ACCOUNT_CHECK_INTERVAL": "1"})
     t.wait_start(1)
     assert t.starts()[0]["argv"] == first
@@ -3063,8 +3075,16 @@ def test_metered_section_gets_declaration_as_settings(term, accounts, user):
     t.wait_start(2)
     argv = t.starts()[1]["argv"]
     want = {**(user or {}), "env": {**(user or {}).get("env", {}), **decl}}
-    assert t.starts()[1]["account"] == "metered" and argv[0] == "--settings" and json.loads(argv[1]) == want
+    assert t.starts()[1]["account"] == "metered" and argv[0] == "--settings"
     assert argv[-3] == "--resume" and argv.count("--settings") == 1
+    if not as_file:
+        assert json.loads(argv[1]) == want
+        return
+    merged = pathlib.Path(argv[1])
+    assert merged == t.relay_dirs()[0] / "metered-settings.json" and "SECRET" not in " ".join(argv)
+    assert json.loads(merged.read_text()) == want and stat.S_IMODE(merged.stat().st_mode) == 0o600
+    t.type("quit 0\r")
+    assert t.finish() == 0 and not merged.exists()  # 終われば残さない
 
 
 def test_broken_saved_declaration_is_told_at_first_section(term, accounts):
