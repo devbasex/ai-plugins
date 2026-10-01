@@ -109,7 +109,7 @@ launch_runtime() {
       PID=$!
       ;;
     claude)
-      nohup claude -p \
+      nohup claude -p ${CLAUDE_SETTINGS_ARGS[@]+"${CLAUDE_SETTINGS_ARGS[@]}"} \
         --permission-mode acceptEdits \
         --allowed-tools "$CLAUDE_ALLOWED_TOOLS" \
         --output-format json ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} \
@@ -138,6 +138,16 @@ MODEL_ARGS=()
 
 # claude の事前承認ツール。root 実行でも通る組み合わせにする。
 CLAUDE_ALLOWED_TOOLS=${NDF_CLAUDE_ALLOWED_TOOLS:-Bash,Read,Write,Edit,Glob,Grep}
+
+# 従量の接続の区間から起動する claude にも、宣言の変数を `--settings` の env で渡す（#1543）。
+# 利用者の settings.json の env は環境変数より優先されるため、環境変数だけでは宣言が負ける。
+# 組み立ては relay・supervise.py と同じ `claude_settings.py` が持つ。組めなければ今までどおり起動する。
+CLAUDE_SETTINGS_ARGS=()
+if [ "$RUNTIME" = claude ] && [ "${NDF_CLAUDE_ACCOUNT:-}" = metered ]; then
+  CLAUDE_SETTINGS=$(python3 "$(dirname -- "${BASH_SOURCE[0]}")/claude_settings.py") || {
+    echo "従量の接続の宣言を --settings へ組めません（環境変数だけで起動します）" >&2; CLAUDE_SETTINGS=; }
+  if [ -n "$CLAUDE_SETTINGS" ]; then CLAUDE_SETTINGS_ARGS=(--settings "$CLAUDE_SETTINGS"); fi
+fi
 
 cd "$WORKDIR"
 

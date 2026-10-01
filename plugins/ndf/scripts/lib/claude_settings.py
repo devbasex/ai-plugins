@@ -1,14 +1,25 @@
 """従量の接続の子の claude へ、宣言の変数を `--settings` の env でも渡す（#1543）。
 
-relay の区間と supervise.py の `claude -p` が同じ組み立てを使う。宣言の読み先は `claude_accounts` が持つ。
+relay の区間・supervise.py の `claude -p`・`launch-cli.sh` の claude が同じ組み立てを使う。宣言の読み先は
+`claude_accounts` が持つ。スクリプトとして呼ぶと、今の環境で足す `--settings` の値を 1 行で出す（足さなければ何も出さない）。
 """
 
 from __future__ import annotations
 
 import json
 import os
+import sys
 
 import claude_accounts as ca
+
+# 引数へ載せない名前の語。`SECRET_ENV` に無い資格情報（`AWS_BEARER_TOKEN_BEDROCK`・`ANTHROPIC_CUSTOM_HEADERS` など）を
+# 名前で外す。引数は同じホストの他のプロセスから読める（`ps`・`/proc/<pid>/cmdline`）ため、迷う名前は載せない側へ倒す
+SECRET_WORDS = ("KEY", "TOKEN", "SECRET", "PASSWORD", "HEADERS")
+
+
+def is_secret(name: str) -> bool:
+    """引数へ載せない変数か（`SECRET_ENV` の名前か、名前に `SECRET_WORDS` の語を含む）。"""
+    return name in ca.SECRET_ENV or any(w in name.upper() for w in SECRET_WORDS)
 
 
 def metered_settings(args: list[str], env: dict, cwd: str, keep: int = 0) -> list[str]:
@@ -17,10 +28,11 @@ def metered_settings(args: list[str], env: dict, cwd: str, keep: int = 0) -> lis
     Claude Code は利用者の `settings.json` の `env` を環境変数より優先するため、環境変数だけでは宣言が負ける。
     `--settings` は複数あると最後の 1 つだけが効くため、`--` より前の既存の `--settings`（JSON かファイル。相対パスは
     `cwd` から）を 1 つに読み込み、宣言のキーだけを上書きして先頭に置く。読めない既存の値があれば引数を変えない。
-    資格情報の変数（`SECRET_ENV`）は引数に載せない（環境変数だけで渡す）。先頭の `keep` 語（起動の語）はそのまま残す。"""
+    資格情報の変数（`is_secret`）は引数に載せない（環境変数だけで渡す。資格情報でなくても名前が当たれば同じ扱いで、
+    `settings.json` の `env` に同じ名前があれば負ける）。先頭の `keep` 語（起動の語）はそのまま残す。"""
     if env.get(ca.NAME_ENV) != ca.METERED:
         return list(args)
-    declared = {k: v for k, v in ca.fallback_env(env).items() if k not in ca.SECRET_ENV}
+    declared = {k: v for k, v in ca.fallback_env(env).items() if not is_secret(k)}
     if not declared:
         return list(args)
     head, args = list(args[:keep]), list(args[keep:])
@@ -54,3 +66,15 @@ def _read_settings(value: str, cwd: str) -> dict | None:
     except (OSError, ValueError):
         return None
     return d if isinstance(d, dict) else None
+
+
+def main() -> int:
+    """今の環境の子の claude へ足す `--settings` の値を出す（`launch-cli.sh` が読む。足さなければ何も出さない）。"""
+    args = metered_settings([], dict(os.environ), os.getcwd())
+    if args:
+        print(args[1])
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

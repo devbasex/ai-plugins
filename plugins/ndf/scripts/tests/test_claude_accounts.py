@@ -587,6 +587,12 @@ def test_metered_settings_never_carries_secrets(accounts):  # noqa: F811
     args = cs.metered_settings([], env, "/")
     assert "SECRET" not in " ".join(args) and _settings_of(args) == [{"env": {"CLAUDE_CODE_USE_BEDROCK": "1"}}]
     assert cs.metered_settings([], ca.account_env(ca.METERED, {ca.FALLBACK_ENV: "ANTHROPIC_API_KEY=sk-SECRET"}), "/") == []
+    # `SECRET_ENV` に無い資格情報も、名前の語（KEY・TOKEN・SECRET・PASSWORD・HEADERS）で外す（引数は他のプロセスから読める）
+    other = "AWS_BEARER_TOKEN_BEDROCK=b-SECRET ANTHROPIC_FOUNDRY_API_KEY=f-SECRET ANTHROPIC_CUSTOM_HEADERS=x-SECRET DB_PASSWORD=p-SECRET"
+    env = ca.account_env(ca.METERED, {ca.FALLBACK_ENV: f"AWS_REGION=ap-northeast-1 {other}"})
+    args = cs.metered_settings([], env, "/")
+    assert "SECRET" not in " ".join(args) and _settings_of(args) == [{"env": {"AWS_REGION": "ap-northeast-1"}}]
+    assert env["AWS_BEARER_TOKEN_BEDROCK"] == "b-SECRET"  # 環境変数では渡る
 
 
 @pytest.mark.parametrize("full", [False, True])

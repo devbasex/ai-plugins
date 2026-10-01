@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import subprocess
@@ -25,6 +26,7 @@ def _launch(
     allowed_tools: str | None = None,
     model: str = "test-model",
     interpreter: str | None = None,
+    extra_env: dict | None = None,
 ) -> list[str]:
     workdir = tmp_path / "work"
     workdir.mkdir()
@@ -43,6 +45,9 @@ def _launch(
         "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
         "NDF_TEST_ARGS_FILE": str(args_file),
     }
+    # 従量の接続の区間の中でテストを回しても、宣言を足さない既定の形を見る（足す形は extra_env で渡す）。
+    env.pop("NDF_CLAUDE_ACCOUNT", None)
+    env.update(extra_env or {})
     if allowed_tools is not None:
         env["NDF_CLAUDE_ALLOWED_TOOLS"] = allowed_tools
 
@@ -80,6 +85,22 @@ def test_claude_launch_arguments_and_allowed_tools_override(tmp_path):
     assert args[args.index("--allowed-tools") + 1] == "Read,Grep"
     assert args[args.index("--output-format") + 1] == "json"
     assert args[args.index("--model") + 1] == "test-model"
+
+
+def test_claude_launch_passes_metered_declaration_as_settings(tmp_path):
+    """従量の接続の区間から起動する claude にも、宣言を `--settings` の env で渡す（#1543）。資格情報は載せない。"""
+    decl = "AWS_REGION=ap-northeast-1 AWS_BEARER_TOKEN_BEDROCK=b-SECRET"
+    args = _launch(tmp_path, "claude", extra_env={"NDF_CLAUDE_ACCOUNT": "metered", "NDF_SUPERVISE_CLAUDE_FALLBACK": decl})
+
+    assert args[0] == "-p" and "SECRET" not in " ".join(args)
+    assert json.loads(args[args.index("--settings") + 1]) == {"env": {"AWS_REGION": "ap-northeast-1"}}
+    assert args[args.index("--allowed-tools") + 1] == "Bash,Read,Write,Edit,Glob,Grep"
+
+
+@pytest.mark.parametrize("env", [{}, {"NDF_CLAUDE_ACCOUNT": "a"}, {"NDF_CLAUDE_ACCOUNT": "metered", "NDF_SUPERVISE_CLAUDE_FALLBACK": ""}])
+def test_claude_launch_without_metered_declaration_passes_no_settings(tmp_path, env):
+    """アカウントの区間・宣言の無い従量の接続では `--settings` を足さない。"""
+    assert "--settings" not in _launch(tmp_path, "claude", extra_env={"NDF_SUPERVISE_CLAUDE_FALLBACK": "AWS_REGION=r", **env})
 
 
 def test_kiro_launch_arguments(tmp_path):
