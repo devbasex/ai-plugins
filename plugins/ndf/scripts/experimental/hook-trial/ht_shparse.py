@@ -297,35 +297,40 @@ class Targets:
     def redirects(self, rs, st: St) -> None:
         for r in rs:
             if r.type == "heredoc_redirect":
-                start = next((c for c in r.children if c.type == "heredoc_start"), None)
-                quoted = start is not None and any(q in text(start) for q in "'\"\\")
-                for c in r.children:
-                    if c.type == "file_redirect":
-                        self.redirects([c], st)
-                    elif c.type == "heredoc_body" and not quoted:
-                        if c.child_count:
-                            self.substs(c, st)
-                        else:
-                            for m in BACKTICK.finditer(text(c)):
-                                self.seq(parse(m.group(1)), st.copy())
-                continue
-            if r.type != "file_redirect":
+                self._heredoc_redirect(r, st)
+            elif r.type == "file_redirect":
+                self._file_redirect(r, st)
+            else:
                 self.substs(r, st)
-                continue
-            dests = [c for c in r.children if field(r, c) == "destination"]
-            dest = dests[0] if dests else None
-            op = "".join(text(c) for c in r.children if field(r, c) not in ("destination", "descriptor")).replace(" ", "")
-            if dest is not None:
-                self.substs(dest, st)
-            if op not in WRITE_OPS or dest is None:
-                continue
-            gap = r.text[: dest.start_byte - r.start_byte]
-            if b"\n" in gap:  # `>` の直後の改行は bash の構文エラー（ファイルは開かない）
-                continue
-            v = value(dest)
-            if op == ">&" and (v == "-" or v.isdigit()):
-                continue
-            self.emit(v, st)
+
+    def _heredoc_redirect(self, r, st: St) -> None:
+        start = next((c for c in r.children if c.type == "heredoc_start"), None)
+        quoted = start is not None and any(q in text(start) for q in "'\"\\")
+        for c in r.children:
+            if c.type == "file_redirect":
+                self.redirects([c], st)
+            elif c.type == "heredoc_body" and not quoted:
+                if c.child_count:
+                    self.substs(c, st)
+                else:
+                    for m in BACKTICK.finditer(text(c)):
+                        self.seq(parse(m.group(1)), st.copy())
+
+    def _file_redirect(self, r, st: St) -> None:
+        dests = [c for c in r.children if field(r, c) == "destination"]
+        dest = dests[0] if dests else None
+        op = "".join(text(c) for c in r.children if field(r, c) not in ("destination", "descriptor")).replace(" ", "")
+        if dest is not None:
+            self.substs(dest, st)
+        if op not in WRITE_OPS or dest is None:
+            return
+        gap = r.text[: dest.start_byte - r.start_byte]
+        if b"\n" in gap:  # `>` の直後の改行は bash の構文エラー（ファイルは開かない）
+            return
+        v = value(dest)
+        if op == ">&" and (v == "-" or v.isdigit()):
+            return
+        self.emit(v, st)
 
     def substs(self, n, st: St) -> None:
         """語の中のコマンド置換とプロセス置換を部分シェルとして流す。"""
