@@ -4111,3 +4111,53 @@ def test_run_from_unreadable_handover_stops_with_command(tmp_path, home, body, s
     last = json.loads((d / "log.jsonl").read_text().splitlines()[-1])
     assert (last["event"], last["reason"], last["section"]) == ("stop", "handover", 7)
     assert not path.exists()
+
+
+def _start_row(d, **extra):
+    with open(d / "log.jsonl", "a") as f:
+        f.write(json.dumps({"event": "start", "section": 1, **extra}) + "\n")
+
+
+@pytest.mark.parametrize(
+    "row, current, expected",
+    [
+        ({"relay_version_dir": "relay-10.17.53-bbbb2222"}, "relay-10.17.53-bbbb2222", "relay-10.17.53-bbbb2222（複製が指すものと同じ）"),
+        (
+            {"relay_version_dir": "relay-10.17.52-aaaa1111"},
+            "relay-10.17.53-bbbb2222",
+            "relay-10.17.52-aaaa1111。複製は relay-10.17.53-bbbb2222 を指す。次のカットポイントで入れ替わる。"
+            "すぐ替えるなら /exit してから claude を打ち直す",
+        ),
+        (
+            {},
+            "relay-10.17.53-bbbb2222",
+            "不明（入れ替えの仕組みを持たない版）。/exit してから claude を打ち直すと、以後は版が見え、更新で入れ替わる",
+        ),
+        ({"relay_version_dir": None}, "relay-10.17.53-bbbb2222", "プラグインのキャッシュから起動（入れ替えない）"),
+    ],
+    ids=["same", "differs", "unknown", "cache"],
+)
+def test_status_shows_running_wrapper(mod, tmp_path, monkeypatch, capsys, row, current, expected):
+    """ラッパー経由の status は、動いているラッパーのバージョンディレクトリと複製との違いを示す（AC14・AC16）。"""
+    base = pathlib.Path(relay_common.config_dir())
+    for n in ("relay-10.17.52-aaaa1111", "relay-10.17.53-bbbb2222"):
+        (base / n).mkdir(parents=True)
+        (base / n / "MANIFEST").touch()
+    (base / "relay.current").write_text(current + "\n")
+    r = Relay(tmp_path, child_pid=os.getppid())
+    (r.dir / "relay.pid").write_text("4321")
+    _start_row(r.dir, relay_version_dir="ignored-older-row")
+    _start_row(r.dir, **row)
+    monkeypatch.setenv("NDF_RELAY_DIR", str(r.dir))
+    try:
+        assert relay_install.cmd_status() == 0
+        lines = capsys.readouterr().out.splitlines()
+    finally:
+        r.release()
+    i = next(i for i, x in enumerate(lines) if x.startswith("ndf-relay: このセッション: ラッパー経由"))
+    assert lines[i + 1] == "ndf-relay: 動いているラッパー: " + expected
+
+
+def test_status_outside_relay_has_no_running_wrapper_line(mod, capsys):
+    assert relay_install.cmd_status() == 0
+    assert "動いているラッパー" not in capsys.readouterr().out
