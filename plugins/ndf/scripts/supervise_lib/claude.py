@@ -431,7 +431,7 @@ class ClaudeRunner:
         environ = dict(os.environ)
         if self.account == ca.METERED:
             c = ca.choose(keep=self.keep())
-            if not (c.name and (c.score is None or c.score < ca.switch_at())):
+            if not c.recoverable(ca.switch_at()):
                 return ca.account_env(ca.METERED, environ)
             self.switch(c.name, "recovered")
         if self.account is None:

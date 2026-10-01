@@ -572,6 +572,10 @@ class Choice:
     earliest: tuple[str, float] | None = None
     remaining: float | None = None
 
+    def recoverable(self, thr: float) -> bool:
+        """従量の接続からこの候補へ戻せるか（選べて、使用率が閾値 `thr` 未満か不明）。"""
+        return bool(self.name) and (self.score is None or self.score < thr)
+
 
 def _try_order(pool: list[Account], readable: bool) -> list[Account]:
     """試す順（I3）: 使用率が閾値未満（読めないものを含む）の側を先に、各側の中で (1) 残りの量の大きい順 →
