@@ -470,7 +470,7 @@ def cmd_run(args: list[str]) -> int:
         cl.say("ラッパーを始めない（作業ディレクトリを作れない）。カットポイントでは示されたコマンドを手で入力する")
         cl.passthrough(claude, args)
     term = Terminal()
-    relay = Relay(claude, relay_dir, got[0], got[1], term, StartLimit(os.path.join(relay_dir, LOG_FILE)))
+    relay = Relay(claude, relay_dir, got.marketplace, got.version, term, StartLimit(os.path.join(relay_dir, LOG_FILE)))
     # 使うバージョンディレクトリに印を置く。startup はこの印のあるディレクトリを消さない
     inuse = version_dir.claim_inuse()
     return _serve_terminal(relay, term, inuse, lambda: relay.loop(args))

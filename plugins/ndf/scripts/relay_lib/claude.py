@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 import time
+from typing import NamedTuple
 
 from .common import config_dir, data_dir, env_num, launcher_path, parse_iso
 
@@ -245,7 +246,15 @@ def plugin_cli(claude: str, args: list[str], timeout: float) -> subprocess.Compl
         return None
 
 
-def read_plugin(claude: str, marketplace: str | None = None) -> tuple[str, str, str | None] | None:
+class PluginInfo(NamedTuple):
+    """`claude plugin list --json` から読んだ ndf の 1 件。導入先 `installPath` は無ければ None。"""
+
+    marketplace: str
+    version: str
+    install_path: str | None
+
+
+def read_plugin(claude: str, marketplace: str | None = None) -> PluginInfo | None:
     """`claude plugin list --json` から (マーケットプレイス, 版, 導入先 `installPath`) を読む。導入先は無ければ None。"""
     p = plugin_cli(claude, ["list", "--json"], env_num("NDF_RELAY_LIST_TIMEOUT", 15))
     if p is None or p.returncode != 0:
@@ -264,7 +273,7 @@ def read_plugin(claude: str, marketplace: str | None = None) -> tuple[str, str, 
         ver = it.get("version")
         if mk and isinstance(ver, str) and ver:
             path = it.get("installPath")
-            return mk, ver, path if isinstance(path, str) and path else None
+            return PluginInfo(mk, ver, path if isinstance(path, str) and path else None)
     return None
 
 
@@ -276,7 +285,7 @@ def update_plugin(claude: str, marketplace: str) -> tuple[str, str | None] | Non
         if p is None or p.returncode != 0:
             return None
     got = read_plugin(claude, marketplace)
-    return got[1:] if got else None
+    return (got.version, got.install_path) if got else None
 
 
 # ---------------------------------------------------------------- 会話の記録
