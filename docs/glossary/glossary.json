@@ -2084,6 +2084,13 @@
       "pending_source": "issues/issue-1587-requirements.md"
     },
     {
+      "term": "入れ替えの申し送り",
+      "code": "relay_handover",
+      "context": "ndf-relay",
+      "meaning": "ラッパーの入れ替えの直前に作業ディレクトリへ書く、次のセッションの起動の入力とラッパーの状態のファイル（handover.json）。入れ替えた後のラッパーが読んで消す",
+      "pending_source": "issues/issue-1587-design.md"
+    },
+    {
       "term": "drive の状態",
       "code": "drive_state",
       "context": "ndf-cross-review",
