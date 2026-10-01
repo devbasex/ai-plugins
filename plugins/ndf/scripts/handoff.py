@@ -100,6 +100,12 @@ def paths_of(root, name: str) -> tuple[Path, Path]:
     return d / f"{name}.md", d / f"{name}{HISTORY_SUFFIX}.md"
 
 
+def named_paths(a) -> tuple[str, Path, Path]:
+    """副命令の引数の名を検証し、(名, 本体, 履歴) を返す。"""
+    name = handoff_name(a.name)
+    return (name, *paths_of(a.root, name))
+
+
 def read_doc(p: Path) -> str:
     try:
         return p.read_text(encoding="utf-8")
@@ -128,8 +134,7 @@ def cmd_path(a) -> int:
 
 
 def cmd_init(a) -> int:
-    name = handoff_name(a.name)
-    body, _ = paths_of(a.root, name)
+    _, body, _ = named_paths(a)
     if body.is_file():
         return emit_result(f"既にある（変えない）: {body}", [{"path": str(body), "created": False}])
     write_doc(body, read_doc(TEMPLATE).replace("{title}", a.title))
@@ -174,8 +179,7 @@ def command_block(stdin_text: str) -> str:
 
 
 def cmd_next(a) -> int:
-    name = handoff_name(a.name)
-    body, _ = paths_of(a.root, name)
+    _, body, _ = named_paths(a)
     block = command_block(sys.stdin.read())
     text = read_doc(body)
     found = handoff_doc.find_section(text, COMMAND_SECTION)
@@ -237,8 +241,7 @@ def trim(text: str, history: Path, name: str) -> tuple[str, list[str]]:
 
 
 def cmd_check(a) -> int:
-    name = handoff_name(a.name)
-    body, history = paths_of(a.root, name)
+    name, body, history = named_paths(a)
     text = read_doc(body)
     moved: list[str] = []
     if a.trim:
@@ -257,9 +260,8 @@ def cmd_check(a) -> int:
 
 
 def cmd_remove(a) -> int:
-    name = handoff_name(a.name)
     removed = []
-    for p in paths_of(a.root, name):
+    for p in named_paths(a)[1:]:
         if p.is_file():
             try:
                 p.unlink()
