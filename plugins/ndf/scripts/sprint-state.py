@@ -42,7 +42,7 @@ from supervise_lib.paths import sha256_of, state_dir_of  # noqa: E402
 import clock  # noqa: E402
 import jsonio  # noqa: E402
 import locks  # noqa: E402
-from handoff_doc import find_section, heading_text  # noqa: E402
+from handoff_doc import COMMAND_SECTION, PROGRESS_SECTION, find_section, heading_text  # noqa: E402
 import mdtable  # noqa: E402
 import step_result  # noqa: E402
 import project_mvv as pm  # noqa: E402
@@ -50,8 +50,8 @@ import project_mvv_signals as pms  # noqa: E402
 import sprint_mvv  # noqa: E402
 
 TOOL = "sprint-state"
-SECTION_DEFAULT = "今の会話の進み"
-NEXT_SECTION_DEFAULT = "次に実行するコマンド"
+SECTION_DEFAULT = PROGRESS_SECTION
+NEXT_SECTION_DEFAULT = COMMAND_SECTION
 NOT_DONE = "まだ"
 PACES = ("normal", "fast", "auto")
 MVV_GATE = "MVV"  # 利用者が MVV を承認した記録の名前

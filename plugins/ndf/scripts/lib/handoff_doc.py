@@ -11,6 +11,12 @@ from typing import NamedTuple
 import md
 
 
+# 節の名前。雛形（`data/handoff-template.md`）の見出しと対応する（「前の会話の進み」は render --demote が下げた後の名前）
+COMMAND_SECTION = "次に実行するコマンド"
+PROGRESS_SECTION = "今の会話の進み"
+DEMOTED_SECTION = "前の会話の進み"
+
+
 class SectionSpan(NamedTuple):
     """節の位置（全文の中の文字の位置）と見出しの行。"""
 

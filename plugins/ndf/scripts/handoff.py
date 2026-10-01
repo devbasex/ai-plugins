@@ -45,8 +45,6 @@ TEMPLATE = Path(__file__).resolve().parent / "data" / "handoff-template.md"
 HANDOFF_DIR = Path(".ndf") / "handoff"
 HISTORY_SUFFIX = "-history"
 NAME_RE = re.compile(r"^(?:issue-[0-9]+|milestone-[0-9]+|sprint-[0-9A-Za-z][0-9A-Za-z_-]*)$")
-COMMAND_SECTION = "次に実行するコマンド"
-DEMOTED_SECTION = "前の会話の進み"
 OPTIONAL_MARK = "<!-- 任意"
 DEFAULT_MAX_LINES = 300
 
@@ -182,14 +180,18 @@ def cmd_next(a) -> int:
     _, body, _ = named_paths(a)
     block = command_block(sys.stdin.read())
     text = read_doc(body)
-    found = handoff_doc.find_section(text, COMMAND_SECTION)
+    found = handoff_doc.find_section(text, handoff_doc.COMMAND_SECTION)
     if found is None:
-        return emit_result(f"見出しに「{COMMAND_SECTION}」を含む節が無い（文書を変えない）: {body}", code=step_result.EXIT_VIOLATION)
+        return emit_result(
+            f"見出しに「{handoff_doc.COMMAND_SECTION}」を含む節が無い（文書を変えない）: {body}", code=step_result.EXIT_VIOLATION
+        )
     tail = "\n" if found.body_end < len(text) else ""
-    out = handoff_doc.replace_body(text, COMMAND_SECTION, "\n" + block + tail)
+    out = handoff_doc.replace_body(text, handoff_doc.COMMAND_SECTION, "\n" + block + tail)
     if out != text:
         write_doc(body, out)
-    return emit_result(f"節「{COMMAND_SECTION}」を置き換えた: {body}", [{"path": str(body), "block": block, "changed": out != text}])
+    return emit_result(
+        f"節「{handoff_doc.COMMAND_SECTION}」を置き換えた: {body}", [{"path": str(body), "block": block, "changed": out != text}]
+    )
 
 
 def template_sections() -> list[tuple[str, bool]]:
@@ -226,7 +228,7 @@ def violations(text: str) -> list[dict]:
 def trim(text: str, history: Path, name: str) -> tuple[str, list[str]]:
     """「前の会話の進み」の節をすべて履歴の末尾へ移す。移した見出しを返す。"""
     moved, parts = [], []
-    while (found := handoff_doc.find_section(text, DEMOTED_SECTION)) is not None:
+    while (found := handoff_doc.find_section(text, handoff_doc.DEMOTED_SECTION)) is not None:
         parts.append(text[found.head_start : found.body_end].rstrip("\n") + "\n")
         moved.append(handoff_doc.heading_text(found.head_line))
         text = text[: found.head_start] + text[found.body_end :]
