@@ -323,6 +323,85 @@ def test_init_overwrites_own_state(r6):
     assert json.loads(Path(r6["sprint"]).read_text())["name"] == "作り直し"
 
 
+GATE_AT = "2026-09-25T07:22:00+00:00"
+
+
+def gate(sprint: str, tmp: Path, *args: str) -> tuple[int, dict, dict]:
+    """gate を打ち、終了コード・結果・打った後の状態を返す。直前の MVV 判定は空のログから読ませる。"""
+    p = run("gate", sprint, *args, "--at", GATE_AT, "--mvv-log", str(tmp / "mvv-gate.jsonl"), "--root", str(tmp))
+    return p.returncode, json.loads(p.stdout), json.loads(Path(sprint).read_text())
+
+
+def stopped(summary: str) -> dict:
+    return {"tool": "sprint-state", "status": "stopped", "summary": summary, "items": [], "metrics": {}}
+
+
+def user_gate_paths(sprint: str, tmp: Path) -> None:
+    """現状固定: 利用者の承認・差し戻し・取り消しの結果と、止まる形（終了コードと文面）。"""
+    before = json.loads(Path(sprint).read_text())
+    g2 = before["gates"][0]
+    assert gate(sprint, tmp, "関門 1") == (2, stopped("--what が要る（--withdraw のときだけ省ける）"), before)
+    g1 = {"name": "関門 1", "what": "設計", "at": GATE_AT}
+    code, out, m = gate(sprint, tmp, "関門 1", "--what", "設計")
+    assert (code, m["gates"]) == (0, [g2, g1])
+    assert out == {
+        "tool": "sprint-state",
+        "status": "ok",
+        "summary": f"関門 1 の承認を書いた（{GATE_AT}）",
+        "items": [g2, g1],
+        "metrics": {"gates": 2},
+    }
+    # 同じ名前を書き直すと末尾へ移る。--outcome approved を渡したときだけ記録に outcome が載る
+    g2a = {"name": "関門 2", "what": "本番", "at": GATE_AT, "outcome": "approved"}
+    code, out, m = gate(sprint, tmp, "関門 2", "--what", "本番", "--outcome", "approved")
+    assert (code, out["items"], m["gates"]) == (0, [g1, g2a], [g1, g2a])
+    # 差し戻しは関門を通さず rejections へだけ書く
+    code, out, m = gate(sprint, tmp, "関門 3", "--what", "配布", "--outcome", "rejected")
+    assert (code, out["summary"]) == (0, f"関門 3 の差し戻しを書いた（{GATE_AT}。関門は通さない）")
+    assert (out["items"], out["metrics"], m["gates"]) == ([], {"gates": 2}, [g1, g2a])
+    assert m["rejections"] == [{"name": "関門 3", "what": "配布", "at": GATE_AT, "by": "user", "outcome": "rejected"}]
+    # --withdraw はほかの指定と併せると止まり、外す記録が無くても取り消しの時刻を残す
+    for extra in (("--outcome", "approved"), ("--by", "mvv"), ("--by", "mvv", "--verdict", "follow")):
+        assert gate(sprint, tmp, "関門 2", "--withdraw", *extra) == (
+            2,
+            stopped("--withdraw は --by・--outcome・--verdict と併せて渡さない"),
+            m,
+        )
+    code, out, m = gate(sprint, tmp, "関門 2", "--withdraw")
+    assert (code, out["summary"]) == (0, "関門 2 の MVV 判定の記録が無い（外すものが無い）")
+    assert (out["items"], out["metrics"], m["gates"]) == ([g1, g2a], {"gates": 2, "withdrawn": 0}, [g1, g2a])
+    assert m["withdrawals"] == [{"name": "関門 2", "at": GATE_AT}]
+
+
+def mvv_gate_paths(sprint: str, tmp: Path) -> None:
+    """現状固定: MVV 判定で通す記録（--by mvv）の形・取り消し・止まる形。"""
+    before = json.loads(Path(sprint).read_text())
+    kept = before["gates"]
+    assert gate(sprint, tmp, "関門 1", "--what", "設計", "--by", "mvv") == (2, stopped("--by mvv には --verdict が要る"), before)
+    assert gate(sprint, tmp, "関門 1", "--what", "設計", "--by", "mvv", "--verdict", "follow", "--reasons", "[x") == (
+        2,
+        stopped("--reasons は JSON の配列で渡す: [x"),
+        before,
+    )
+    # 配列でない理由は 1 件の配列にする。--reasons と --log を省くと空になる。--by mvv の記録に outcome は載らない
+    g1 = {"name": "関門 1", "what": "設計", "at": GATE_AT, "by": "mvv", "verdict": "follow", "reasons": ["Value 1"], "log": ""}
+    code, out, m = gate(sprint, tmp, "関門 1", "--what", "設計", "--by", "mvv", "--verdict", "follow", "--reasons", '"Value 1"')
+    assert (code, out["summary"], m["gates"]) == (0, f"関門 1 のMVV 判定を書いた（{GATE_AT}）", [*kept, g1])
+    g3 = {"name": "関門 3", "what": "配布", "at": GATE_AT, "by": "mvv", "verdict": "unknown", "reasons": [], "log": ""}
+    code, out, m = gate(sprint, tmp, "関門 3", "--what", "配布", "--by", "mvv", "--verdict", "unknown", "--outcome", "approved")
+    assert (code, out["items"], out["metrics"], m["gates"]) == (0, [*kept, g1, g3], {"gates": len(kept) + 2}, [*kept, g1, g3])
+    # 取り消すと同じ名前の by: mvv の記録だけが外れ、以後その関門へ --by mvv を書かない
+    code, out, m = gate(sprint, tmp, "関門 1", "--withdraw")
+    assert (code, out["summary"]) == (0, f"関門 1 の MVV 判定の記録を外した（{GATE_AT}）")
+    assert (out["items"], out["metrics"], m["gates"]) == ([*kept, g3], {"gates": len(kept) + 1, "withdrawn": 1}, [*kept, g3])
+    assert m["withdrawals"] == [{"name": "関門 1", "at": GATE_AT}]
+    assert gate(sprint, tmp, "関門 1", "--what", "設計", "--by", "mvv", "--verdict", "follow") == (
+        1,
+        stopped("関門 1 は MVV 判定の通過を取り消した。自動で通さず、利用者の承認を求める"),
+        m,
+    )
+
+
 def test_gate_and_status(r6):
     init(r6)
     ok("update", r6["sprint"], "--done", r6["pdone"])
@@ -335,6 +414,7 @@ def test_gate_and_status(r6):
     assert lines[0] == "スプリント: (a)(b) 置き換え（マイルストーン 26）"
     assert "実装 #1053: 完了（#1056・586.4 秒・$1.178）。次: —" in lines
     assert lines[-1] == "関門 2: 承認 2026-09-25T07:23:00+00:00"
+    user_gate_paths(r6["sprint"], r6["dir"])
 
 
 def load_relay():
@@ -490,11 +570,22 @@ def test_mvv_approval_and_the_gate_by_the_judgement(tmp_path):
     )
     p = run("status", str(sprint))
     assert "関門 2: MVV 判定 " in p.stdout
+    mvv_gate_paths(str(sprint), tmp_path)
 
 
 def test_mvv_approval_without_an_mvv_stops(r6):
     init(r6)
     assert run("gate", r6["sprint"], "MVV", "--what", "x").returncode == 1
+    # 現状固定: 止まる順。--what の有無 → 差し戻し → MVV の有無 → --by mvv の引数
+    sprint, tmp = r6["sprint"], r6["dir"]
+    before = json.loads(Path(sprint).read_text())
+    no_mvv = stopped("MVV が無い（init --pace fast か auto で写す）。MVV の承認を書かない")
+    assert gate(sprint, tmp, "MVV", "--what", "x") == (1, no_mvv, before)
+    assert gate(sprint, tmp, "MVV", "--what", "x", "--by", "mvv") == (1, no_mvv, before)
+    assert gate(sprint, tmp, "MVV", "--by", "mvv") == (2, stopped("--what が要る（--withdraw のときだけ省ける）"), before)
+    code, out, m = gate(sprint, tmp, "MVV", "--what", "x", "--outcome", "rejected")
+    assert (code, out["summary"], m["gates"]) == (0, f"MVV の差し戻しを書いた（{GATE_AT}。関門は通さない）", [])
+    assert m["rejections"] == [{"name": "MVV", "what": "x", "at": GATE_AT, "by": "user", "outcome": "rejected"}]
 
 
 def test_update_adds_plans_from_done_without_init_plan(r6):
