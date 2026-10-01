@@ -3862,11 +3862,11 @@ def test_handover_written_private_and_removed_after_read(tmp_path):
     """申し送りは 0600 で書き、形の表のキーだけを持ち、読んだら消す（I7）。"""
     d = tmp_path / "relay"
     d.mkdir(mode=0o700)
-    path = relay_handover.write(str(d), handover_data())
+    path = relay_handover.write_handover(str(d), handover_data())
     assert pathlib.Path(path).stat().st_mode & 0o777 == 0o600
     keys = set(json.loads(pathlib.Path(path).read_text()))
     assert keys == {"schema", "prepare_seconds", *relay_handover.REQUIRED}
-    got, shown = relay_handover.read(path)
+    got, shown = relay_handover.read_handover(path)
     assert got is not None and got["state"]["section"] == 7 and shown == "/goal 続き"
     assert not os.path.exists(path) and os.listdir(d) == []
 
@@ -3885,7 +3885,7 @@ def test_handover_read_rejects(tmp_path, body, shown):
     path = tmp_path / "handover.json"
     if body is not None:
         path.write_text(body)
-    assert relay_handover.read(str(path)) == (None, shown)
+    assert relay_handover.read_handover(str(path)) == (None, shown)
     assert not path.exists()
 
 
@@ -3893,7 +3893,7 @@ def test_section_input_round_trips_through_handover():
     """申し送りの `next` は SectionInput そのもので、上限の後の選び方（Choice）も戻る（I4）。"""
     import claude_accounts as ca
 
-    s = relay_run.SectionInput(
+    s = relay_handover.SectionInput(
         args=["--resume", "s1", "続き"],
         cwd="/w",
         command="続き",
@@ -3902,7 +3902,7 @@ def test_section_input_round_trips_through_handover():
         carried=["--model", "haiku"],
         plan=("b", "limit", ca.Choice(name="b", score=0.2, earliest=("a", 123.0), remaining=None)),
     )
-    back = relay_run.SectionInput.from_json(json.loads(json.dumps(s.to_json())))
+    back = relay_handover.SectionInput.from_json(json.loads(json.dumps(s.to_json())))
     assert back == s
 
 

@@ -5,10 +5,7 @@
 
 区間のアカウント（#1389）の選び方・上限シグナルファイルの判定・定期の確認は `switch` の `AccountSwitch` と
 `UsageWatch` が持つ。
-
-セッションの切り替えで、更新後の版のバージョンディレクトリへラッパーを入れ替える（#1587）。判定と申し送りは
-`handover` が持ち、`Relay.swap` が子の居ない 1 か所（前の `end` の後、次の `start` の前）でだけ呼ぶ。
-入れ替えた後の版は `cmd_run` で申し送りを受け、`Relay.resume` から続ける。
+ラッパーの入れ替え（#1587）は `handover` の `Swapper` が持つ。
 """
 
 from __future__ import annotations
@@ -16,9 +13,7 @@ from __future__ import annotations
 import os
 import shlex
 import signal
-import sys
 import time
-from dataclasses import asdict, dataclass
 
 from . import claude as cl
 from . import handover as ho
@@ -30,7 +25,6 @@ from .common import (
     LOG_FILE,
     MARK_FILE,
     PID_FILE,
-    PKG_ROOT,
     QUESTION_FILE,
     QUESTION_LOCK,
     STOP_FILE,
@@ -55,37 +49,7 @@ class NoAccountEnv(Exception):
     """選んだアカウントのトークンを起動の直前に得られず、替えるアカウントも従量の接続の宣言も無い。子を起動しない。"""
 
 
-@dataclass
-class SectionInput:
-    """区間の起動の入力。`plan` は上限の後に決めた (アカウント, 理由, 選んだ結果)。"""
-
-    args: list[str]
-    cwd: str
-    command: str
-    from_session: str
-    cwd_fallback: str | None = None
-    carried: list[str] | None = None
-    plan: tuple | None = None
-
-    def to_json(self) -> dict:
-        """申し送りの `next`。`plan` の選んだ結果は `Choice` のキーの辞書になる。"""
-        return asdict(self)
-
-    @classmethod
-    def from_json(cls, d: dict) -> SectionInput:
-        plan = d.get("plan")
-        if plan:
-            to, reason, ch = plan
-            if isinstance(ch, dict):
-                ch = dict(ch)
-                if ch.get("earliest"):
-                    ch["earliest"] = tuple(ch["earliest"])
-                ch = ca.Choice(**ch)
-            plan = (to, reason, ch)
-        return cls(**{k: d[k] for k in ho.NEXT_KEYS if k != "plan"}, plan=plan or None)
-
-
-class Relay(AccountSwitch):
+class Relay(AccountSwitch, ho.Swapper):
     """前景に常駐し、区間ごとの claude を擬似端末の子として起動する。"""
 
     def __init__(self, claude: str, relay_dir: str, marketplace: str, version: str, term: Terminal, limit: StartLimit):
@@ -109,8 +73,6 @@ class Relay(AccountSwitch):
         self.account: str | None = None  # 今の区間のアカウント（`metered` は従量の接続。None は今と同じ環境）
         self.noted = self.told = None  # 上限の観測を残した・背景の作業の 1 行を出したシグナルファイルの written_at
         self.auth_section = 0  # 認証の失敗を扱った区間（区間ごとに 1 度だけ）
-        self.first_args: list[str] = []
-        self.install_path: str | None = None  # 更新後のプラグインの導入先（入れ替えの判定が読む）
         self.watch = UsageWatch(self) if self.multi else None
         self.lock = _lock(self.path(LOCK_FILE), None)  # 動いている間は持ち続ける（relay_running が見る）
         with open(self.path(PID_FILE), "w") as f:
@@ -124,7 +86,7 @@ class Relay(AccountSwitch):
 
     # -- 子の起動
 
-    def start_section(self, s: SectionInput) -> None:
+    def start_section(self, s: ho.SectionInput) -> None:
         """区間を起動する。`s.plan` は上限の後に決めた (アカウント, 理由, 選んだ結果)。無ければここで選ぶ（F4）。"""
         args, cwd, command, from_session = s.args, s.cwd, s.command, s.from_session
         cwd_fallback, carried, plan = s.cwd_fallback, s.carried, s.plan
@@ -414,8 +376,7 @@ class Relay(AccountSwitch):
             return code
         return self._serve()
 
-    def _serve(self) -> int:
-        """合図を待って切り替える。子が合図なしに終われば同じ終了コードで、止まれば決まった終了コードで返す。"""
+    def _serve(self) -> int:  # 合図を待って切り替える（入れ替えた後の版は最初のセッションを起動せずここから）
         carried = cl.carried_args(self.first_args)
         while True:
             res = self.term.pump(tick=self.tick)
@@ -433,8 +394,7 @@ class Relay(AccountSwitch):
             nxt = self.prepare_next(src)
             if nxt is None:
                 return self.give_up("update-failed", "プラグインの更新か版の読み取りに失敗した", shown)
-            cwd, fb = nxt
-            s = SectionInput(args=args, cwd=cwd, command=command, from_session=from_session, cwd_fallback=fb, carried=carried, plan=plan)
+            s = ho.SectionInput(args, nxt[0], command, from_session, cwd_fallback=nxt[1], carried=carried, plan=plan)
             self.swap(s, shown)  # 入れ替えたら戻らない（I1。子の居ないこの 1 か所だけ）
             self.term.screen(f"── ndf-relay: 区間 {self.section + 1} ──")
             code = self._start_next_section(s, shown)
@@ -444,7 +404,7 @@ class Relay(AccountSwitch):
     def _start_first_section(self, first_args: list[str]) -> int | None:
         """最初の区間を起動する。起動できなければ終了コード。"""
         try:
-            self.start_section(SectionInput(args=first_args, cwd=os.getcwd(), command=shlex.join(first_args), from_session=""))
+            self.start_section(ho.SectionInput(args=first_args, cwd=os.getcwd(), command=shlex.join(first_args), from_session=""))
         except StartFailed as e:
             self.log(event="stop", section=self.section + 1, reason="start-failed", errno=e.err)
             cl.say(f"claude を起動できない（{os.strerror(e.err)}）")
@@ -463,7 +423,7 @@ class Relay(AccountSwitch):
             return args, command, from_session, src, shlex.join(["claude", *args]), m["_plan"]
         return [m["command"]], m["command"], m.get("session_id") or "", m, m["command"], None
 
-    def _start_next_section(self, s: SectionInput, shown: str) -> int | None:
+    def _start_next_section(self, s: ho.SectionInput, shown: str) -> int | None:
         """次の区間を起動する。起動できなければ終了コード。"""
         try:
             self.start_section(s)
@@ -472,104 +432,6 @@ class Relay(AccountSwitch):
         except NoAccountEnv as e:
             return self.give_up("auth", str(e), shown)
         return None
-
-    # -- ラッパーの入れ替え（#1587）
-
-    def swap(self, s: SectionInput, shown: str) -> None:
-        """動いているバージョンディレクトリと更新後に使うべきものが違えば、入れ替える（戻らない）。
-
-        同じ名前・キャッシュからの起動では何もしない（外部コマンドも行も無い。I8・I10）。入れ替えられなければ
-        画面に 1 行と `reexec_skipped` の行を残して戻る（I5）。例外を外へ出さない。"""
-        running = ho.running_dir()
-        if running is None:
-            return
-        t0 = time.time()
-        stage, to = ho.UNREADABLE, None
-        try:
-            expected = ho.expected_dir(self.install_path, self.version)
-            if expected == running:
-                return
-            if expected is None:
-                raise ho.Skip(ho.UNREADABLE, "更新後のプラグインの導入先を読めない")
-            base = ho.copy_base()
-            stage = ho.STARTUP_FAILED
-            to = ho.prepare(self.install_path, running, base)
-            stage = ho.HANDOVER_WRITE
-            path = ho.write(self.dir, self.handover(s, shown, running, to, t0))
-            stage = ho.EXEC_FAILED
-            self._exec(base, to, path)
-        except ho.Skip as e:
-            self._swap_skipped(e.reason, running, to, e.detail, t0)
-        except Exception as e:  # 入れ替えの失敗で次のセッションを失わない
-            self._swap_skipped(stage, running, to, f"想定外の例外（{type(e).__name__}）", t0)
-
-    def handover(self, s: SectionInput, shown: str, running: str, to: str, t0: float) -> dict:
-        """申し送りの中身（設計の申し送りの形の表。認証情報と環境変数を持たない）。"""
-        now = time.time()
-        return dict(
-            shown=shown,
-            from_dir=running,
-            to_dir=to,
-            written_at=now,
-            prepare_seconds=round(now - t0, 3),
-            claude=self.claude,
-            marketplace=self.marketplace,
-            version=self.version,
-            first_args=list(self.first_args),
-            state=dict(section=self.section, account=self.account, multi=self.multi, auth_section=self.auth_section),
-            next=s.to_json(),
-        )
-
-    def _exec(self, base: str, to: str, path: str) -> None:
-        """`count.lock` を放し、端末を入力を捨てずに戻して exec する。失敗したら元へ戻して Skip（exec-failed）。"""
-        python, argv = ho.exec_argv(base, to, self.first_args)
-        env = ho.exec_env(path)
-        self.limit.release()
-        self.term.restore(keep_input=True)
-        sys.stdout.flush()
-        sys.stderr.flush()
-        try:
-            os.execve(python, argv, env)
-        except OSError as e:
-            ho.discard(path)
-            self.term.set_raw()
-            end = time.time() + 5
-            while not self.limit.take() and time.time() < end:
-                time.sleep(0.1)
-            raise ho.Skip(ho.EXEC_FAILED, f"{to} を起動できない（{e.strerror or type(e).__name__}）") from None
-
-    def _swap_skipped(self, reason: str, running: str, to: str | None, detail: str, t0: float) -> None:
-        row = {"section": self.section, "reason": reason, "from": running}
-        if to:
-            row["to"] = to
-        if detail:
-            row["detail"] = detail
-        self.log(event="reexec_skipped", **row, seconds=ho.elapsed(t0))
-        self.term.screen(f"ndf-relay: ラッパーを新しい版へ入れ替えずに今の版で続ける（{reason}: {detail or '理由は不明'}）")
-
-    def restore_state(self, state: dict) -> None:
-        """申し送りの状態を戻す（セッションの番号は続き。アカウントを切り替えるかは数え直さない）。"""
-        self.section = state["section"]
-        self.account = state["account"]
-        self.auth_section = state["auth_section"]
-        multi = bool(state["multi"])
-        if multi != self.multi:
-            self.multi = multi
-            self.watch = UsageWatch(self) if multi else None
-
-    def resume(self, h: dict) -> int:
-        """入れ替えた後: `count.lock` を取り直し（上限は判定し直さない）、申し送りの次のセッションを起動して続ける。"""
-        self.first_args = list(h["first_args"])
-        end = time.time() + 5
-        while not self.limit.take():
-            if time.time() >= end:
-                return self.give_up("count-lock", "起動の数を数えるロックが取れない", h["shown"])
-            time.sleep(0.1)
-        self.term.screen(f"── ndf-relay: 区間 {self.section + 1} ──")
-        code = self._start_next_section(SectionInput.from_json(h["next"]), h["shown"])
-        if code is not None:
-            return code
-        return self._serve()
 
     def close(self) -> None:
         self.stop_accounts()
@@ -580,9 +442,9 @@ class Relay(AccountSwitch):
 
 
 def cmd_run(args: list[str]) -> int:
-    path = os.environ.pop(ho.HANDOVER_ENV, None)  # 子の claude と hook へ継がせない
+    path = os.environ.pop(ho.HANDOVER_ENV, None)  # 入れ替えた後（#1587）。子の claude と hook へ継がせない
     if path:
-        return run_from_handover(path)
+        return Relay.from_handover(path, _serve_terminal)
     if os.environ.get("NDF_RELAY") == "0":
         claude = cl.resolve_claude()
         if claude is None:
@@ -617,40 +479,6 @@ def cmd_run(args: list[str]) -> int:
     # 使うバージョンディレクトリに印を置く。startup はこの印のあるディレクトリを消さない
     inuse = version_dir.claim_inuse()
     return _serve_terminal(relay, term, inuse, lambda: relay.loop(args))
-
-
-def run_from_handover(path: str) -> int:
-    """入れ替えた後の `run`。起動の判定と `claude plugin list` を通さず、申し送りから続ける（決定 4）。"""
-    d = os.path.dirname(path)
-    h, shown = ho.read(path)
-    if h is None:
-        return handover_unreadable(d, shown)
-    term = Terminal()
-    relay = Relay(h["claude"], d, h["marketplace"], h["version"], term, StartLimit(os.path.join(d, LOG_FILE)))
-    relay.restore_state(h["state"])
-    # 新しい方へ印を置いてから古い方の印を消す（I11・決定 7。pid は exec で変わらない）
-    inuse = version_dir.claim_inuse()
-    if h["from_dir"] != os.path.basename(PKG_ROOT):
-        version_dir.release_inuse(os.path.join(ho.copy_base(), h["from_dir"], f"inuse-{os.getpid()}"))
-    relay.log(
-        event="reexec",
-        section=h["state"]["section"],
-        **{"from": h["from_dir"], "to": h["to_dir"]},
-        prepare_seconds=h.get("prepare_seconds"),
-        seconds=ho.elapsed(h["written_at"]) if isinstance(h["written_at"], (int, float)) else None,
-    )
-    return _serve_terminal(relay, term, inuse, lambda: relay.resume(h))
-
-
-def handover_unreadable(d: str, shown: str | None) -> int:
-    """申し送りを読めない: 次のセッションを起動せず、手で打つコマンドを示して止まる（I6）。"""
-    try:
-        RelayRecord(d).log(event="stop", section=record.current_section(d), reason="handover")
-    except OSError:
-        pass
-    command = shown or "claude を打ち直し、前の会話は /resume で選ぶ"
-    Terminal.screen(f"ndf-relay: 次の区間を起動できない（ラッパーの入れ替えの申し送りを読めない）。次のコマンド:\r\n{command}")
-    return 2
 
 
 def _serve_terminal(relay: Relay, term: Terminal, inuse: str | None, body) -> int:
