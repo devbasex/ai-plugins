@@ -446,40 +446,49 @@ def _is_line_comment_start(line: str, i: int, hash_style: bool, suffix: str) -> 
     )
 
 
+def _step_char(
+    line: str, chars: list[str], i: int, state: tuple[bool, str | None, bool], rules: tuple[str, tuple[str, ...]]
+) -> tuple[int, tuple[bool, str | None, bool]]:
+    """走査を 1 手進める。state は (`/* */` の中か, 開いている引用, 行末の `\\` で改行をエスケープしたか)、
+    rules は (拡張子, 引用を開く記号)。(次の位置, 次の state) を返す。行末までのコメントは空白にして行末を返す。"""
+    block, quote, escaped_eol = state
+    suffix, opens = rules
+    hash_style, sh = suffix in (".py", ".sh"), suffix == ".sh"
+    if block:
+        block, i = _consume_block_comment(line, chars, i)
+        return i, (block, quote, escaped_eol)
+    if quote:
+        i, quote, escaped_eol = _advance_in_quote(line, i, quote, sh, escaped_eol)
+        return i, (block, quote, escaped_eol)
+    if sh and line[i] == "\\":
+        return i + 2, state
+    opened = next((q for q in opens if line.startswith(q, i)), None)
+    if opened:
+        return i + len(opened), (block, opened, escaped_eol)
+    if _is_line_comment_start(line, i, hash_style, suffix):
+        chars[i:] = " " * (len(line) - i)
+        return len(line), state
+    if not hash_style and line.startswith("/*", i):
+        chars[i : i + 2] = "  "
+        return i + 2, (True, quote, escaped_eol)
+    return i + 1, state
+
+
 def mask_comments(lines: list[str], suffix: str) -> list[str]:
     """コードの行のコメントを空白に置き換える。`#` は .py / .sh（.sh は語の頭だけ）、`//` と `/* */` は .js / .ts。
     文字列の内側の記号はコメントとみなさない（`"--cart"` の識別子は残す）。行をまたぐ文字列（.py の三連引用符、
     .js / .ts のバッククォート、.sh の引用）は次の行へ持ち越す。.sh は引用の外の `\\` で次の 1 文字を飛ばし、
     `'` の内側の `\\` はエスケープとみなさない。.py / .js / .ts の通常の引用も、行末の `\\` で改行を
     エスケープしたときは次の行へ持ち越す。"""
-    hash_style, sh = suffix in (".py", ".sh"), suffix == ".sh"
     opens = {".py": ('"""', "'''", '"', "'"), ".sh": ('"', "'")}.get(suffix, ("`", '"', "'"))
-    multiline = {'"', "'"} if sh else {'"""', "'''", "`"}
+    multiline = {'"', "'"} if suffix == ".sh" else {'"""', "'''", "`"}
+    rules = (suffix, opens)
     out, block, quote = [], False, None
     for line in lines:
-        chars, i, escaped_eol = list(line), 0, False
+        chars, i, state = list(line), 0, (block, quote, False)
         while i < len(line):
-            if block:
-                block, i = _consume_block_comment(line, chars, i)
-                continue
-            c = line[i]
-            if quote:
-                i, quote, escaped_eol = _advance_in_quote(line, i, quote, sh, escaped_eol)
-                continue
-            if sh and c == "\\":
-                i += 2
-                continue
-            opened = next((q for q in opens if line.startswith(q, i)), None)
-            if opened:
-                i, quote = i + len(opened), opened
-                continue
-            if _is_line_comment_start(line, i, hash_style, suffix):
-                chars[i:] = " " * (len(line) - i)
-                break
-            if not hash_style and line.startswith("/*", i):
-                chars[i : i + 2], block, i = "  ", True, i + 2
-                continue
-            i += 1
+            i, state = _step_char(line, chars, i, state, rules)
+        block, quote, escaped_eol = state
         if quote not in multiline and not escaped_eol:
             quote = None
         out.append("".join(chars))
