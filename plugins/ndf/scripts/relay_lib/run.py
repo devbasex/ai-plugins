@@ -103,8 +103,7 @@ class Relay(AccountSwitch):
         args, cwd, command, from_session = s.args, s.cwd, s.command, s.from_session
         cwd_fallback, carried, plan = s.cwd_fallback, s.carried, s.plan
         self.record.drop_mark()
-        remove(self.path(QUESTION_FILE))
-        remove(self.path(LIMIT_FILE))  # 前の子の上限シグナルファイル（新しい子の hook はまだ書けない）
+        remove(self.path(QUESTION_FILE), self.path(LIMIT_FILE))  # 上限シグナルファイルは前の子のもの（新しい子の hook はまだ書けない）
         prev = self.account
         to, reason, choice = (plan or self.pick(None)) if self.multi else (None, None, None)
         env = cl.section_env(self.env, to) if to else None
@@ -112,7 +111,8 @@ class Relay(AccountSwitch):
             to, reason, choice, env = self.replace_unusable(to)
         if env is None:
             env = self.env
-        at = self.term.spawn(self.claude, [*(carried or []), *args], cwd, env, self.path(CHILD_FILE))
+        argv = cl.metered_settings([*(carried or []), *args], env, cwd, store=self.path(cl.SETTINGS_FILE))
+        at = self.term.spawn(self.claude, argv, cwd, env, self.path(CHILD_FILE))
         self.section += 1
         self.started_at = at
         self.account = to
@@ -444,7 +444,7 @@ class Relay(AccountSwitch):
         if self.watch is not None:
             self.watch.stop()
         self.limit.release()
-        remove(self.path(PID_FILE))
+        remove(self.path(PID_FILE), self.path(cl.SETTINGS_FILE))  # まとめた設定は利用者の資格情報を持ちうるため残さない
         _unlock(self.lock)
         self.lock = None
 

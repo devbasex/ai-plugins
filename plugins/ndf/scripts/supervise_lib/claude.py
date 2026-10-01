@@ -19,6 +19,7 @@ from datetime import datetime
 from pathlib import Path
 
 import claude_accounts as ca
+from claude_settings import metered_settings
 import procs
 import usage_ledger
 from claude_usage import LIMIT_EPOCH, kind_of_text, limit_reset_at  # noqa: F401  上限の文言の読みは部品が持つ
@@ -231,12 +232,12 @@ def call_claude(
     """claude -p を 1 回呼び、結果の本文と使用量を返す（既定は最小構成）。
 
     `env` は環境に足す変数（認証の切り替え）。`child_env` を渡すと環境をそれで置き換える（アカウントの切り替え）。利用上限で落ちたら `"limit": true` と、読めれば
-    解除の時刻（UNIX 時刻）を `"resets_at"` に残す。`tick` は待ちの間に every 秒ごとに呼ぶ。
-    """
+    解除の時刻（UNIX 時刻）を `"resets_at"` に残す。`tick` は待ちの間に every 秒ごとに呼ぶ。"""
     started = time.time()
+    cmd = claude_cmd(system, tools, cwd, full, serena, resume)  # 従量の接続は宣言を --settings でも渡す（#1543）
     try:
         p = run_ticking(
-            claude_cmd(system, tools, cwd, full, serena, resume),
+            metered_settings(cmd, child_env if child_env is not None else os.environ, cwd, cmd.index("-p")),
             tick,
             every,
             input=prompt,

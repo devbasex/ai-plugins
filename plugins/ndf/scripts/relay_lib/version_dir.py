@@ -45,6 +45,7 @@ MANIFEST = runtime.MANIFEST
 # ラッパーが import するライブラリ（包みと、venv が使う deps）
 LIB_FILES = (
     "lib/claude_accounts.py",
+    "lib/claude_settings.py",
     "lib/claude_usage.py",
     "lib/clock.py",
     "lib/deps.py",
