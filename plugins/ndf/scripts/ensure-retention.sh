@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # NDF plugin: Claude Code の設定の置き場（CLAUDE_CONFIG_DIR、無ければ ~/.claude）の settings.json の cleanupPeriodDays を最低 90 日に保つ。
+# - settings.json が symlink なら参照先へ書き、印と排他も参照先の隣に置く（symlink を実体に置き換えない。#1576）
 # - 既存値 >= 90 なら何もしない
 # - 既存値 < 90 or 未設定 なら 90 に更新
 # - 前回チェックから 7 日経っていなければスキップ (多重実行防止)
@@ -8,8 +9,10 @@ set -euo pipefail
 
 MIN_DAYS=90
 GUARD_DAYS=7
-CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-SETTINGS="$CONFIG_DIR/settings.json"
+# shellcheck source=lib/claude-settings.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/claude-settings.sh"
+SETTINGS="$(claude_settings_path)"
+CONFIG_DIR="$(dirname "$SETTINGS")"
 FLAG="$CONFIG_DIR/.ndf-retention-checked"
 LOCK="$CONFIG_DIR/.ndf-retention.lock"
 

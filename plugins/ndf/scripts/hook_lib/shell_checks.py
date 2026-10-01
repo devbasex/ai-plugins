@@ -55,6 +55,29 @@ def _sleep_in(n: sp.Node, limit: float, loop: bool, bg: bool, depth: int) -> boo
     )
 
 
+def _skip_wrappers(words: list[sp.Word]) -> int:
+    """包みのコマンド（`env`・`timeout` など）とその引数を読み飛ばし、本体の語の位置を返す。"""
+    i = 0
+    while i < len(words) and words[i] in WRAPPERS:
+        i += 1
+        while i < len(words) and (words[i][:1] == "-" or sleep_seconds(words[i]) is not None or ASSIGN.match(words[i])):
+            i += 1
+    return i
+
+
+def _shell_script(rest: list[sp.Word]) -> str | None:
+    """シェルの引数から `-c` の中身を取り出す。`-c` が無いか、中身の語が無ければ None。`-o` のように引数を取るフラグは飛ばす。"""
+    j = 0
+    while j < len(rest) and rest[j][:1] in "-+":
+        if SHELL_OPT_WITH_ARG.fullmatch(rest[j]):
+            j += 2
+            continue
+        if rest[j].startswith("-") and not rest[j].startswith("--") and "c" in rest[j].lstrip("-"):
+            return rest[j + 1] if j + 1 < len(rest) else None
+        j += 1
+    return None
+
+
 def _sleep_command(n: sp.Node, limit: float, loop: bool, depth: int) -> bool:
     for c in n.children:  # 置換の中は前景で動く
         if c.type in ("file_redirect", "heredoc_redirect"):
@@ -63,11 +86,7 @@ def _sleep_command(n: sp.Node, limit: float, loop: bool, depth: int) -> bool:
         if any(_sleep_in(s, limit, loop, False, depth) for s in subs):
             return True
     words = _words(n)
-    i = 0
-    while i < len(words) and words[i] in WRAPPERS:
-        i += 1
-        while i < len(words) and (words[i][:1] == "-" or sleep_seconds(words[i]) is not None or ASSIGN.match(words[i])):
-            i += 1
+    i = _skip_wrappers(words)
     if i >= len(words):
         return False
     name, rest = words[i], words[i + 1 :]
@@ -75,15 +94,8 @@ def _sleep_command(n: sp.Node, limit: float, loop: bool, depth: int) -> bool:
         sec = sleep_seconds(rest[0])
         return loop or (sec is not None and sec > limit)
     if name in SHELLS:
-        j = 0
-        while j < len(rest) and rest[j][:1] in "-+":
-            if SHELL_OPT_WITH_ARG.fullmatch(rest[j]):
-                j += 2
-                continue
-            if rest[j].startswith("-") and not rest[j].startswith("--") and "c" in rest[j].lstrip("-"):
-                return j + 1 < len(rest) and foreground_sleep(rest[j + 1], limit, loop, depth + 1)
-            j += 1
-        return False
+        script = _shell_script(rest)
+        return script is not None and foreground_sleep(script, limit, loop, depth + 1)
     if name == "eval":
         return foreground_sleep(" ".join(rest), limit, loop, depth + 1)
     return False

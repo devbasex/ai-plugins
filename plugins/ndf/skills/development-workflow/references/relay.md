@@ -189,19 +189,61 @@ work2  b@example.com  40%（05:40）  0%（09-30）  -                   達し�
 従量の接続の宣言があれば、最後に `metered` の行（識別は `Bedrock（<プロファイル>・<地域>・<モデル>）` か
 `環境変数（<変数の名前>）`、状態は `保存した宣言`・`環境変数の宣言`・`壊れている（宣言なしとして扱う）` のどれか）が出る。
 
-状態は `使える`・`上限（<リセット時刻>）`・`支出上限`・`残量不明`・`再登録が要る` の 5 つ。`再登録が要る` は同じ名前で
-`account add` し直す。置き場は `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/accounts/`（0700。ファイルは 0600）で、共有の
-`~/.claude/.credentials.json` は読み書きしない。子へは選んだアカウントのアクセストークンを環境変数
-`CLAUDE_CODE_OAUTH_TOKEN` で渡す（引数には載せない）ので、同じ `~/.claude` を共有する別のコンテナの claude は替わらない。
-トークンと一緒に、そのアカウントのスコープ（置き場の `.credentials.json` の `scopes`）を `CLAUDE_CODE_OAUTH_SCOPES` で渡す。
-これで、ラッパーの下の claude と `supervise.py` の claude -p でも、選んだアカウントの claude.ai のコネクタ（Slack・Notion など）が
-読み込まれる。置き場の `scopes` を読めないアカウントでは変数を渡さず、コネクタは読み込まれない（起動は止めない）。
-従量の接続の子には、トークンもスコープも渡さない。
+状態は `使える`・`上限（<リセット時刻>）`・`支出上限`・`残量不明`・`認証の失敗`・`再登録が要る` の 6 つ。`再登録が要る` は
+同じ名前で `account add` し直す。`認証の失敗` は子の応答が認証の失敗で終わったアカウントで、後の残量の取得が通るか 1 時間で
+`使える` へ戻る。
+
+**アカウントの設定ディレクトリが、そのアカウントで起動する claude の `CLAUDE_CONFIG_DIR` になる。** 置き場は
+`${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/accounts/`（0700）で、アカウントごとの `<名前>/`（0700）に認証ファイル
+（`.credentials.json`）・`.claude.json`・NDF の記録（0600）を実体で持ち、ほかは共有の設定ディレクトリ（`~/.claude`）の直下への
+symlink にする。会話の記録（`projects`）・設定（`settings.json`）・プラグインは共有側の 1 か所に入るので、アカウントを替えても
+`--resume` と設定がそのまま効く。子へはトークンもスコープも渡さず、claude が自分の認証ファイルでトークンを更新する（8 時間で
+認証切れにならない）。`/status`・statusline・`claude auth status` には、そのアカウントの email と契約の種類が出る。共有の
+`~/.claude/.credentials.json` は読み書きしないので、素の claude で `/login` を打っても、ラッパーの下の claude のアカウントは
+替わらない。
+
+| 子の環境の変数 | 値 |
+| --- | --- |
+| `CLAUDE_CONFIG_DIR` | アカウントの設定ディレクトリ（`<置き場>/<名前>`） |
+| `NDF_CLAUDE_ACCOUNT` | アカウントの名前 |
+| `NDF_SHARED_CONFIG_DIR` | 元の `CLAUDE_CONFIG_DIR`（無かったら空文字）。子の中の `supervise.py` が共有の設定ディレクトリを求める |
+| `CLAUDE_CODE_PLUGIN_CACHE_DIR` | `<共有>/plugins`（元にあればその値）。子が導入したプラグインの記録を共有側のパスにする |
+| `CLAUDE_CODE_OAUTH_TOKEN`・`CLAUDE_CODE_OAUTH_SCOPES` | 渡さない（元の環境にあっても外す） |
+
+起動の前に、ラッパーと `supervise.py` はアカウントの設定ディレクトリを用意する。共有側に増えた項目の symlink を足し、
+共有の `~/.claude.json` の `projects`（プロジェクトの信頼・MCP サーバーの許可）と `mcpServers` をアカウント側の `.claude.json` へ
+写す（`oauthAccount` はアカウントごとのまま）。ラッパーは、セッションの切れ目と終了時に、アカウント側で変わった分を共有の
+`~/.claude.json` へ書き戻す。claude.ai のコネクタは、claude が認証ファイルのスコープを自分で読んで取りに行く。従量の接続の子は
+共有の設定ディレクトリで起動する（`CLAUDE_CONFIG_DIR` を元の値へ戻す）。
+
+次の表に当たるアカウントでは claude を起動せず、次の候補へ移る。理由は画面の 1 行（`ndf-relay: アカウント <名前> を使わない（<理由>）`）と
+`log.jsonl` の `account_dir` の行に残る。
+
+| 理由 | 直し方 |
+| --- | --- |
+| 認証ファイルが別のアカウントのものになっている（アカウントの claude の中で `/login` を打った） | `account add <名前>` で登録し直す |
+| 会話の記録の置き場 `projects` が共有の設定ディレクトリを指していない | アカウントの設定ディレクトリの `projects` の中身を共有の `~/.claude/projects/` へ移し、`projects` を消す（次の起動で symlink になる） |
+| アカウント側の `.claude.json` が壊れている | 下の 2 つのどちらか |
+
+アカウント側の `.claude.json` が JSON として読めないときは、NDF は直さない。アカウントの設定ディレクトリの
+`backups/.claude.json.backup.<ミリ秒>` のうち JSON として読める新しいものを `.claude.json` へ `cp` するか、`.claude.json` を
+消す（`oauthAccount` は claude が次の応答で取り直し、最初の案内の印は共有側から写る）。どちらの後も、次の起動で共有側の
+`projects` と `mcpServers` にそろう。
+
+**`/mcp` で OAuth 認証した MCP サーバー（claude.ai のコネクタでないもの）は、アカウントごとに認証が要る。** そのトークンは
+認証ファイルに入るため、共有側で済ませた認証はアカウントの子に届かない。アカウントごとに 1 度、そのアカウントの対話の
+セッションで `/mcp` から認証する。対話を持たない claude -p の worker は認証し直せないので、認証の済んでいないアカウントで
+動く worker はそのサーバーの Tool を使えない。登録し直すと、そのアカウントでもう 1 度認証が要る。
+
+同じ名前で登録し直しても、アカウントの設定ディレクトリの symlink と、claude がアカウント側に作った項目（`plans` など）は残る。
+共有側に無くアカウント側にだけある項目は、アカウントを替えた先から見えない。`account_dir` の行の `local_only` に名前が出るので、
+共有したいものは共有の `~/.claude/` へ移す（次の起動で symlink になる）。登録を外しても（`account remove`）共有側は消えない。
 
 | いつ | ラッパー | `supervise.py`（プランの claude -p） |
 | --- | --- | --- |
 | 起動 | 区間ごとに、上限に達していないアカウントのうち残りの量の最も大きいものを選ぶ。今のアカウントが閾値未満なら替えず、閾値を超えていても候補の残りの量が今以下なら替えない | 起動したときのアカウント（`NDF_CLAUDE_ACCOUNT`）で呼ぶ |
-| 利用上限（5 時間・7 日・支出上限） | 子の応答が上限で終わると（`StopFailure` hook の `limit.json`）、次の区間を別のアカウントで `claude --resume <会話> "<最初の入力>"` として起動する。最初の入力は `ndf-next` があればそれ、無ければ未達の `/goal <条件>`、それも無ければ定型の文。**背景の作業が残っている間は子を終えない** | 待たずに別のアカウントで同じ呼び出しをやり直す |
+| 利用上限（5 時間・7 日・支出上限） | 子の応答が上限で終わると（`StopFailure` hook の `limit.json`）、次の区間を別のアカウントで `claude --resume <会話> "<最初の入力>"` として起動する。最初の入力は `ndf-next` があればそれ、無ければ未達の `/goal <条件>`、それも無ければ切り替えの理由に合う定型の文（例: `利用上限でアカウントを替えた。中断したところから続ける`）。**背景の作業が残っている間は子を終えない** | 待たずに別のアカウントで同じ呼び出しをやり直す |
+| 認証が通らなかった | 子の応答が認証の失敗で終わると、そのアカウントを 1 時間候補から外し、上限のときと同じく別のアカウントで次の区間を起動する（最初の入力は `認証が通らなかったためアカウントを替えた。中断したところから続ける`）。1 つの区間につき 1 度だけ | 結果が認証の失敗なら、そのアカウントを外して同じ呼び出しをやり直す |
 | 使用率が閾値を超えた | 定期の確認（推論なし）が 1 行を出し、**次のカットポイントで**替える | — |
 | すべて上限 | 宣言があれば従量の接続へ移る。無ければ 1 行を出して子を残す | 宣言があれば従量の接続へ移る。無ければ今と同じ上限待ち |
 | 従量の接続で動いている間 | 定期の確認で上限の外れたアカウントを見つけたら、次のカットポイントで戻す | 起動のたびに戻れるかを確かめる |
@@ -232,7 +274,7 @@ python3 ~/.claude/ndf/relay.py account remove metered     # 保存した宣言�
 export NDF_SUPERVISE_CLAUDE_FALLBACK='CLAUDE_CODE_USE_BEDROCK=1 AWS_PROFILE=<名前> AWS_REGION=us-east-1'
 ```
 
-従量の接続で起動する子にはトークンを渡さず、アカウントで起動する子には宣言の変数を渡さない（混ぜない）。記録と画面に
+従量の接続で起動する子にはアカウントの設定ディレクトリを渡さず、アカウントで起動する子には宣言の変数を渡さない（混ぜない）。記録と画面に
 出るのは変数の名前だけである。**登録が 1 つ以下なら今と同じ**（ラッパーは上限で何もしない。`supervise.py` は宣言を
 呼び出しごとに 1 度だけ試してから上限待ち）。切り替えに LLM は使わない。
 
@@ -247,29 +289,35 @@ export NDF_SUPERVISE_CLAUDE_FALLBACK='CLAUDE_CODE_USE_BEDROCK=1 AWS_PROFILE=<名
 ## カットポイントの引継ぎ文書と ndf-next はスクリプトで作る
 
 **conductor は引継ぎ文書の「今の会話の進み」の表と `ndf-next` の文面を手で書かない。**
+引継ぎ文書の置き場（メインディレクトリの `.ndf/handoff/<名>.md`）・名・節の形・規則は [handoff.md](handoff.md) にある。
 `scripts/sprint-state.py` が、スプリント状態ファイル `sprint-state.json`（プランの出力先に置く）から作る。LLM は呼ばない。同じパスに別の形の JSON（`supervise.py new sprint` の目録など）があると、`init` は上書きせずに終了コード 1 で止まる。
 
 例: セッション 7 の実装 3 本と開発版・本番を流す。
 
-1. プランを作った後に 1 度: `sprint-state.py init ~/.local/state/ndf/sv/r7/sprint-state.json --name <スプリント> --milestone 26 --plan 実装=<plan.json> ... --plan 開発版=<plan.json> --plan 本番=<plan.json> --done <queue の done> --dev <開発版> --prod <本番> --goal @<雛形>`（雛形は次のセッションの `/goal` の文面。`{heading}`・`{dev}`・`{prod}`・`{milestone}`・`{name}`・`{issues}` を差し込む）
+1. プランを作った後に 1 度: `sprint-state.py init ~/.local/state/ndf/sv/r7/sprint-state.json --name <スプリント> --milestone 26 --plan 実装=<plan.json> ... --plan 開発版=<plan.json> --plan 本番=<plan.json> --done <queue の done> --dev <開発版> --prod <本番> --goal @<雛形>`（雛形は次のセッションの `/goal` の文面。`{heading}`・`{dev}`・`{prod}`・`{milestone}`・`{name}`・`{issues}` を差し込む）。**雛形には「`.ndf/handoff/sprint-{name}.md` の続きから」**（スプリント名が `sprint-<名>` の形に合わなければ `.ndf/handoff/milestone-{milestone}.md`）**を差し込みの語で必ず書く。** 雛形は次のスプリントでも使うため、文書のパスを文字のまま書かない
 2. 承認ゲートで承認を得たら: `sprint-state.py gate <sprint-state.json> "関門 2" --what "本番 <版>"`
    - `pace: fast` と `pace: auto` のスプリントは、1 に `--pace <値> --milestone <M>`（MVV のコピー元。`--mvv <ファイル>` でもよい）を足し、利用者が
      `mvv.md` を承認した後に `sprint-state.py gate <sprint-state.json> MVV --what <要約>` を打つ。ゲート 1・2 の記録は、MVV 判定が
      通したときは `mvv-gate.py` が `--by mvv --verdict --reasons --log` 付きで書く（`status` の行は「MVV 判定」）
-3. カットポイントでは次の順に呼ぶ:
+3. カットポイントでは、conductor が引継ぎ文書の「現在地」と「次にやること」を書き直してから、次の順に呼ぶ（`<名>` は `sprint-<スプリント名>` など。`<引継ぎ文書>` は `handoff.py path <名>` の `path`）:
+   - `handoff.py init <名> --title <表示名>`（無ければ雛形から作る。あれば変えない）
    - `sprint-state.py update <sprint-state.json> [--done <done>] [--next <plan.json>=<行の「次」>]`（done と報告から状態・PR・秒・費用を埋める。何度走らせても同じ）
    - `sprint-state.py render <sprint-state.json> <引継ぎ文書> --section 今の会話の進み`（節の本文だけを置き換える。新しいセッションなら `--demote 前の会話の進み --heading "今の会話の進み（<時刻>）"` で今の節を下げて新しい節を足す）
    - `sprint-state.py next <sprint-state.json> --doc <引継ぎ文書> --replace`（「次に実行するコマンド」の節を置き換え、同じ `ndf-next` の囲みを最後の応答に出す）
+   - `handoff.py check <名> --trim`（「前の会話の進み」を履歴へ移し、節の形と 300 行の上限を確かめる。1 か 5 のときの扱いは [handoff.md](handoff.md) の「作る・更新する」）
 
-**本番へのリリースの後は、カットポイントの 3 つを本番のキューと同じ背景の Bash で続けて流す。** ゲート 2 の承認から次のセッションの起動までに、conductor が組み立てる文は無くなる。conductor は完了の通知を受けたら `relay.py notice` のアナウンスと、出力の `ndf-next` の囲みをそのまま出す。ラッパーがプラグインを本番の版へ更新し、次のセッションを起動する。
+**本番へのリリースの後は、カットポイントの呼び出しを本番のキューと同じ背景の Bash で続けて流す。** 流す前に conductor が `handoff.py init` を打ち、本番の後の「現在地」と「次にやること」を文書へ書く（パイプラインの中では書き直せない）。`check` が 1 か 5 ならパイプラインはブロックを出さずに止まり、conductor が完了の通知で終了コードを受けて扱ってからブロックを出す。ゲート 2 の承認から次のセッションの起動までに、conductor が組み立てる文は無くなる。conductor は完了の通知を受けたら `relay.py notice` のアナウンスと、出力の `ndf-next` の囲みをそのまま出す。ラッパーがプラグインを本番の版へ更新し、次のセッションを起動する。
 
 ```bash
-O=~/.local/state/ndf/sv/r7; M=plugins/ndf/scripts/sprint-state.py; DOC=issues/handoff-<名>.md
+O=~/.local/state/ndf/sv/r7; M=plugins/ndf/scripts/sprint-state.py; H=plugins/ndf/scripts/handoff.py; N=sprint-<スプリント名>
+DOC=$(python3 $H path $N | python3 -c 'import json, sys; print(json.load(sys.stdin)["items"][0]["path"])')
+python3 $H init $N --title "<表示名>" >/dev/null &&
 python3 plugins/ndf/scripts/supervise.py queue $O/plan-release-prod.json --done $O/done-release-prod.json >/dev/null &&
 python3 plugins/ndf/scripts/supervise.py wait $O/done-release-prod.json --timeout 3600 >/dev/null &&
 python3 $M update $O/sprint-state.json >/dev/null &&
 python3 $M render $O/sprint-state.json $DOC --demote 前の会話の進み --heading "今の会話の進み（$(date -u +%Y-%m-%d\ %H:%M) UTC まで）" >/dev/null &&
-python3 $M next $O/sprint-state.json --doc $DOC --replace >/dev/null && sed -n '/^```ndf-next/,/^```$/p' $DOC
+python3 $M next $O/sprint-state.json --doc $DOC --replace >/dev/null &&
+python3 $H check $N --trim >/dev/null && sed -n '/^```ndf-next/,/^```$/p' $DOC
 ```
 
 **次のセッションを止めずに続けるには、`/goal` の雛形を特定の課題に縛らない。** 雛形には「効果の順の残りから次のスプリントを選び、同じパイプラインで流し、最後に同じ雛形で `ndf-next` を出す」ことを書く。止まるのは承認ゲート 2 つだけになる。

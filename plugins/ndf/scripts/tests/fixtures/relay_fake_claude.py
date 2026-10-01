@@ -157,6 +157,7 @@ def main():
             "claudecode": os.environ.get("CLAUDECODE"),
             "depth": os.environ.get("NDF_RELAY_DEPTH"),
             "token": os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
+            "config_dir": os.environ.get("CLAUDE_CONFIG_DIR"),
             "account": os.environ.get("NDF_CLAUDE_ACCOUNT"),
             "bedrock": os.environ.get("CLAUDE_CODE_USE_BEDROCK"),
             "api_key": os.environ.get("ANTHROPIC_API_KEY"),

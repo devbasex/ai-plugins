@@ -66,5 +66,11 @@ python3 "$SCRIPTS/supervise.py" wait <プラン>-state/queue-done.json
 | --- | --- |
 | `scripts/relay.py notice` | 切り替えの前に、利用者へ出す案内を得る。仕組みは [relay.md](relay.md) |
 | `scripts/relay.py status` | ラッパーの導入の状態を確かめる |
+| `scripts/handoff.py path` | 引継ぎ文書の本体と履歴の、メインディレクトリの絶対パスを得る（`--exists` で本体の有無）。規則は [handoff.md](handoff.md) |
+| `scripts/handoff.py init` | 引継ぎ文書が無ければ雛形から作る |
+| `scripts/handoff.py find` | 名指しの無い再開で、入力の語に一致する引継ぎ文書を探す |
+| `scripts/handoff.py next` | 引継ぎ文書の「次に実行するコマンド」の節を再開コマンドで置き換える |
+| `scripts/handoff.py check` | 引継ぎ文書の節の形と行数を確かめる（`--trim` で「前の会話の進み」を履歴へ移す） |
+| `scripts/handoff.py remove` | 対象が閉じた後に、引継ぎ文書の本体と履歴を消す |
 | `skills/skill-stats/scripts/skill-stats.py --agents` | 3 層（conductor / supervisor / worker）の context window を出す |
 | `skills/external-ai/scripts/external-ai.py run <CLI>` | 外部 AI に 1 回の問いを投げる |

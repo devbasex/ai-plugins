@@ -84,6 +84,7 @@ deps.require(
 from supervise_lib import commands, sprint, sprint_routes, new_args, queue, templates  # noqa: E402
 from supervise_lib.decl import DeclError, apply_decls  # noqa: E402
 from supervise_lib.plan import EXAMPLE  # noqa: E402
+import handoff_doc  # noqa: E402
 import legacy_names  # noqa: E402
 from step_result import emit  # noqa: E402  supervise_lib が lib/ を sys.path へ足す
 
@@ -177,7 +178,7 @@ def main() -> int:
     t.add_argument("doc")
     t.add_argument("--report", required=True)
     t.add_argument("--next", default="")
-    t.add_argument("--section", default="今の会話の進み")
+    t.add_argument("--section", default=handoff_doc.PROGRESS_SECTION)
     c = sub.add_parser("sync-check", help="宣言した同期とチェック（.ndf/supervise.json の sync_checks）")
     c.add_argument("--root", default=".")
     c.add_argument("--commit", action="store_true", help="同期で変わったファイルをコミットする")

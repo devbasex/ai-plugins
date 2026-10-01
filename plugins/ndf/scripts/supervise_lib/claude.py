@@ -19,6 +19,7 @@ from datetime import datetime
 from pathlib import Path
 
 import claude_accounts as ca
+from claude_settings import metered_settings
 import procs
 import usage_ledger
 from claude_usage import LIMIT_EPOCH, kind_of_text, limit_reset_at  # noqa: F401  上限の文言の読みは部品が持つ
@@ -157,18 +158,8 @@ def run_ticking(
 
 def minimal_args(system: str) -> list[str]:
     """claude -p を最小構成（設定・MCP・スラッシュコマンドを読まず、会話を残さない）で起動する引数。"""
-    return [
-        "-p",
-        "--output-format",
-        "json",
-        "--no-session-persistence",
-        "--setting-sources",
-        "",
-        "--strict-mcp-config",
-        "--disable-slash-commands",
-        "--system-prompt",
-        system,
-    ]
+    head = ["-p", "--output-format", "json", "--no-session-persistence", "--setting-sources", "", "--strict-mcp-config"]
+    return head + ["--disable-slash-commands", "--system-prompt", system]
 
 
 def claude_cmd(system: str, tools: str | None, cwd: str, full: bool = False, serena: bool = False, resume: str | None = None) -> list[str]:
@@ -177,21 +168,8 @@ def claude_cmd(system: str, tools: str | None, cwd: str, full: bool = False, ser
         # Skill を回すステップ（cross-review など）。設定・プラグイン・Skill・hook をそのまま読む
         # 新しい文脈の claude -p。本体の会話なのでキャッシュはサブスクリプションなら 1 時間。
         # 報告が無いまま終わったときに --resume で起こし直すため、会話は残す
-        return (
-            base
-            + [
-                "-p",
-                "--output-format",
-                "json",
-                "--permission-mode",
-                "acceptEdits",
-                "--allowed-tools",
-                FULL_TOOLS,
-                "--append-system-prompt",
-                system,
-            ]
-            + (["--resume", resume] if resume else [])
-        )
+        args = ["-p", "--output-format", "json", "--permission-mode", "acceptEdits", "--allowed-tools", FULL_TOOLS]
+        return base + args + ["--append-system-prompt", system] + (["--resume", resume] if resume else [])
     cmd = base + minimal_args(system)
     if tools:
         allowed = tools
@@ -231,12 +209,12 @@ def call_claude(
     """claude -p を 1 回呼び、結果の本文と使用量を返す（既定は最小構成）。
 
     `env` は環境に足す変数（認証の切り替え）。`child_env` を渡すと環境をそれで置き換える（アカウントの切り替え）。利用上限で落ちたら `"limit": true` と、読めれば
-    解除の時刻（UNIX 時刻）を `"resets_at"` に残す。`tick` は待ちの間に every 秒ごとに呼ぶ。
-    """
+    解除の時刻（UNIX 時刻）を `"resets_at"` に残す。`tick` は待ちの間に every 秒ごとに呼ぶ。"""
     started = time.time()
+    cmd = claude_cmd(system, tools, cwd, full, serena, resume)  # 従量の接続は宣言を --settings でも渡す（#1543）
     try:
         p = run_ticking(
-            claude_cmd(system, tools, cwd, full, serena, resume),
+            metered_settings(cmd, child_env if child_env is not None else os.environ, cwd, cmd.index("-p")),
             tick,
             every,
             input=prompt,
@@ -256,7 +234,10 @@ def call_claude(
         data = {"result": p.stdout, "is_error": p.returncode != 0}
     ok = p.returncode == 0 and not data.get("is_error")
     text = data.get("result") or p.stderr[-TAIL:]
-    limit = not ok and is_usage_limit("\n".join([str(data.get("result") or ""), p.stderr, p.stdout]))
+    result = str(data.get("result") or "")
+    limit = not ok and is_usage_limit("\n".join([result, p.stderr, p.stdout]))
+    # 認証の失敗（`result` が `Failed to authenticate` で始まるか、`api_error_status` が 401。#1576 の実測 H）
+    auth = not ok and not limit and (result.startswith("Failed to authenticate") or data.get("api_error_status") == 401)
     return ClaudeCall(
         {
             "ok": ok,
@@ -269,7 +250,8 @@ def call_claude(
             "session": data.get("session_id"),
             "seconds": round(time.time() - started, 1),
             "limit": limit,
-            "resets_at": limit_reset_at("\n".join([str(data.get("result") or ""), p.stderr])) if limit else None,
+            "auth": auth,
+            "resets_at": limit_reset_at("\n".join([result, p.stderr])) if limit else None,
         }
     )
 
@@ -284,11 +266,11 @@ class UsageLimit(Exception):
 
 
 class AuthUnavailable(UsageLimit):
-    """登録済みのアカウントのトークンを得られず、替えるアカウントも従量の接続も無い。起動した時の環境で呼ばずに止まる。"""
+    """登録済みのアカウントを使えず、替えるアカウントも従量の接続も無い。起動した時の環境で呼ばずに止まる。"""
 
 
 class AccountsLimited(Exception):
-    """今のアカウントのトークンを渡せず、他のアカウントは上限なだけ（待てば戻る）。上限と同じく解除まで待つ。"""
+    """今のアカウントを使えず、他のアカウントは上限なだけ（待てば戻る）。上限と同じく解除まで待つ。"""
 
     def __init__(self, message: str, resets_at: float | None):
         super().__init__(message)
@@ -304,11 +286,12 @@ class ClaudeRunner:
 
     def __init__(self, ctx) -> None:
         self.ctx = ctx
-        # 動いている区間のアカウント（起動したときの環境の NDF_CLAUDE_ACCOUNT）。プランはこのトークンを更新しない（I5）
+        # 動いている区間のアカウント（起動したときの環境の NDF_CLAUDE_ACCOUNT）。プランはこのトークンを更新しない（#1576 の I8）
         self.section = os.environ.get(ca.NAME_ENV) or None
         # 次の呼び出しのアカウント（`metered` は従量の接続）。None は起動したときの環境のまま
         self.account = self.section
         self.metered_told = False  # 壊れた保存の宣言の 1 行を出したか
+        self.running: list[str | None] = []  # 実行中の呼び出しのアカウント
 
     def call(self, system: str, prompt: str, tools: str | None, cwd: str, timeout: int, **kw) -> ClaudeCall:
         """claude -p を呼ぶ。利用上限をここで扱う。
@@ -328,14 +311,20 @@ class ClaudeRunner:
         multi = ca.registered() >= 2
         tried_fallback, waited = False, 0.0
         tried: set[str] = set()  # この呼び出しで上限に当たったアカウント
+        auth_failed: set[str] = set()  # この呼び出しで認証が通らなかったアカウント（同じアカウントを 2 度試さない）
         kw = {"tick": ctx.tick, "every": st.every, **kw}
         while True:
             try:
-                child = self.child_env(timeout, fallback) if multi else None
+                child = self.child_env(fallback) if multi else None
             except AccountsLimited as e:
                 waited += self._wait_for_reset({"resets_at": e.resets_at, "text": str(e)}, retry, wait_max, waited)
                 continue
-            res = call_claude(system, prompt, tools, cwd, timeout, child_env=child, **kw)
+            res = self._call_running(lambda: call_claude(system, prompt, tools, cwd, timeout, child_env=child, **kw))
+            if res.get("auth") and multi and self.account not in (None, ca.METERED) and self.account not in auth_failed:
+                # 認証の失敗の観測を残し、次の child_env が今のアカウントを除いて選び直す（上限のときと同じ経路。#1576 の E9）
+                auth_failed.add(self.account)
+                ca.note_auth_failed(self.account)
+                continue
             if res.get("limit"):
                 self.note_limit(res)
                 if multi and self.account != ca.METERED:
@@ -414,43 +403,54 @@ class ClaudeRunner:
         st.cur["limit_waited"] = round(st.cur.get("limit_waited", 0) + wait, 1)
         return wait
 
-    def keep(self) -> set[str]:
-        """トークンを更新しないアカウント（動いている区間のもの）。"""
-        return {self.section} if self.section else set()
+    def _call_running(self, call) -> ClaudeCall:
+        """呼び出しの間、そのアカウントを「動いている」に数える（NDF がトークンを更新しない。#1576 の I8）。"""
+        name = self.account
+        self.running.append(name)
+        try:
+            return call()
+        finally:
+            self.running.remove(name)
 
-    def child_env(self, timeout: float = 0, fallback: dict | None = None) -> dict | None:
+    def keep(self) -> set[str]:
+        """トークンを更新しないアカウント（動いている区間のものと、実行中の呼び出しのもの）。"""
+        return {n for n in (self.section, *self.running) if n and n != ca.METERED}
+
+    def note_account_dir(self, row: dict) -> None:
+        """アカウントの設定ディレクトリの用意の結果を進捗ログの `account_dir` の行に残す（名前と理由の語だけ。I14）。"""
+        st = self.ctx.state
+        st.progress_write({"kind": "account_dir", "step": st.cur.get("id"), **row})
+
+    def child_env(self, fallback: dict | None = None) -> dict | None:
         """次の呼び出しの環境（登録が 2 つ以上のとき）。None は起動したときの環境のまま（アカウントを持たないとき）。
 
-        従量の接続で動いている間は、起動のたびに登録済みのアカウントへ戻れるかを確かめる（閾値未満のものだけ）。
-        今のアカウントのトークンが得られなければ（期限切れ・期限まで `timeout` 秒以下・再登録が要る）別のアカウントを
-        選び、無ければ従量の接続（`fallback`）へ移る。それも無く、他のアカウントが上限なだけなら AccountsLimited を
-        投げて解除まで待たせる。候補が 1 つも無ければ AuthUnavailable を投げる（起動した時の古いトークンで呼ばない）。"""
+        従量の接続の間は、起動のたびに閾値未満のアカウントへ戻れるかを確かめる。今のアカウントを使えなければ（再登録が要る・
+        認証の失敗の観測がある・設定ディレクトリを用意できない）別のアカウント、従量の接続（`fallback`）の順に替える。どれも無く、
+        他が上限なだけなら AccountsLimited（解除まで待つ）、候補が無ければ AuthUnavailable を投げる（起動した時の環境で呼ばない）。"""
+        environ = dict(os.environ)
         if self.account == ca.METERED:
-            c = ca.choose(keep=self.keep(), min_left=timeout)
-            if c.name and (c.score is None or c.score < ca.switch_at()):
-                self.switch(c.name, "recovered")
-            else:
-                return ca.account_env(ca.METERED, dict(os.environ))
+            c = ca.choose(keep=self.keep())
+            if not c.recoverable(ca.switch_at()):
+                return ca.account_env(ca.METERED, environ)
+            self.switch(c.name, "recovered")
         if self.account is None:
             return None
-        env = ca.account_env(self.account, dict(os.environ), None if self.account in self.keep() else ca.REFRESH_BEFORE, timeout)
-        if env is not None:
+        acc = ca.load_account(self.account)
+        if not (acc and acc.auth_held(time.time())) and (env := ca.account_env(self.account, environ, self.note_account_dir)):
             return env
-        c = ca.choose(exclude={self.account}, keep=self.keep(), min_left=timeout)
-        env = ca.account_env(c.name, dict(os.environ), None if c.name in self.keep() else ca.REFRESH_BEFORE, timeout) if c.name else None
+        c, env = ca.choose_env(exclude={self.account}, keep=self.keep(), base=environ, note=self.note_account_dir)
         if env is not None:
             self.switch(c.name, "auth")
             return env
         if fallback:
             self.switch(ca.METERED, "auth", keys=list(fallback))
-            return ca.account_env(ca.METERED, dict(os.environ))
+            return ca.account_env(ca.METERED, environ)
         if c.earliest:
             name, until = c.earliest
             raise AccountsLimited(
-                f"アカウント {self.account} のトークンを渡せず、替えるアカウント {name} は上限にある",
-                None if until == math.inf else until,
+                f"アカウント {self.account} を使えず、替えるアカウント {name} は上限にある", None if until == math.inf else until
             )
-        raise AuthUnavailable(f"アカウント {self.account} のトークンを得られず、替えるアカウントも従量の接続の宣言も無い")
+        raise AuthUnavailable(f"アカウント {self.account} を使えず、替えるアカウントも従量の接続の宣言も無い")
 
     def switch(self, to: str, reason: str, keys: list[str] | None = None) -> None:
         """次の呼び出しのアカウントを替え、プランの状態（`auth`・`switched`）と途中の報告へ 1 行残す（I12）。"""

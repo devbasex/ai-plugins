@@ -118,11 +118,12 @@ def relay_running(d: str) -> bool:
     return held is None
 
 
-def remove(path: str) -> None:
-    try:
-        os.unlink(path)
-    except OSError:
-        pass
+def remove(*paths: str) -> None:
+    for path in paths:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
 
 
 def fallback_cwd(cwd: str) -> str:

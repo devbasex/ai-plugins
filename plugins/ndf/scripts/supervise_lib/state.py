@@ -380,13 +380,9 @@ class RunState:
         for rec in recorded:
             self.progress_write({"kind": "attention", **rec})
 
-    def write_report(self, plan: dict, result: str, reason: str) -> str:
-        """`## フェーズの報告` を組み、`report.md` へ書いて返す。"""
-        l = self.llm
-        self.read_worker_lines()
-        pc = self.pcount
-        steps = " → ".join(f"{e['id']}" + (f"[{e['decision']}]" if "decision" in e else f"(exit={e.get('exit')})") for e in self.log)
-        rows = (
+    def _step_rows(self) -> str:
+        """LLM を使ったステップの表の行。無ければ「無し」の 1 行。"""
+        return (
             "\n".join(
                 f"| {e['id']} | {e['llm']['turns']} | {e.get('seconds', '')} | {e['llm']['cache_read']} | "
                 f"{e['llm']['cache_write']} | {e['llm']['output']} | ${e['llm']['cost']:.3f} |"
@@ -395,24 +391,9 @@ class RunState:
             )
             or "| 無し | | | | | | |"
         )
-        counts = {}
-        for e in self.log:
-            if "counts" in e:
-                counts[e["id"]] = e["counts"]
-        counts_line = "; ".join(f"{k}: {counts_text(v)}" for k, v in counts.items()) or "無し"
-        if self.gates:
-            gate_line = "; ".join(f"ステップ {g['id']}（exit={g['exit']}）" for g in self.gates)
-        else:
-            gate_line = "本番の系へ届く操作" if result == "関門" else "無し"
-        presented = (
-            ", ".join(
-                [
-                    *(g["presentation"] for g in self.gates if g.get("presentation")),
-                    *(e["presentation"] for e in self.log if e.get("gate_as_ok") and e.get("presentation")),
-                ]
-            )
-            or "無し"
-        )
+
+    def _extra_lines(self) -> str:
+        """認証の切り替え・利用上限・遅れの行。記録があるものだけを出す。"""
         extra = ""
         if self.switched:
             extra += f"- 認証: 切り替え（{', '.join(self.switched)}）\n"
@@ -444,6 +425,32 @@ class RunState:
                 )
                 + "\n"
             )
+        return extra
+
+    def write_report(self, plan: dict, result: str, reason: str) -> str:
+        """`## フェーズの報告` を組み、`report.md` へ書いて返す。"""
+        l = self.llm
+        self.read_worker_lines()
+        pc = self.pcount
+        steps = " → ".join(f"{e['id']}" + (f"[{e['decision']}]" if "decision" in e else f"(exit={e.get('exit')})") for e in self.log)
+        counts = {}
+        for e in self.log:
+            if "counts" in e:
+                counts[e["id"]] = e["counts"]
+        counts_line = "; ".join(f"{k}: {counts_text(v)}" for k, v in counts.items()) or "無し"
+        if self.gates:
+            gate_line = "; ".join(f"ステップ {g['id']}（exit={g['exit']}）" for g in self.gates)
+        else:
+            gate_line = "本番の系へ届く操作" if result == "関門" else "無し"
+        presented = (
+            ", ".join(
+                [
+                    *(g["presentation"] for g in self.gates if g.get("presentation")),
+                    *(e["presentation"] for e in self.log if e.get("gate_as_ok") and e.get("presentation")),
+                ]
+            )
+            or "無し"
+        )
         text = f"""## フェーズの報告
 
 - フェーズ: {plan.get("フェーズ")}
@@ -454,7 +461,7 @@ class RunState:
 - Pull Request: {plan.get("Pull Request", "無し")}
 - 最後に記録した工程: {self.last_stage}
 - 使った worker: 修正 {l["work"]}（claude -p）/ 判断 {l["judge"]}（claude -p）
-{extra}- 途中の報告: ステップ {pc["step"]} / まだ動いている {pc["alive"]} / worker {pc["worker"]}（形が違う {pc["malformed"]}）/ conductor 向け {pc["attention"]} / 遅れの調査 {pc["slow"]} / LLM へ回した {pc["llm"]} 回・${pc["llm_cost"]:.3f}（{self.progress}）
+{self._extra_lines()}- 途中の報告: ステップ {pc["step"]} / まだ動いている {pc["alive"]} / worker {pc["worker"]}（形が違う {pc["malformed"]}）/ conductor 向け {pc["attention"]} / 遅れの調査 {pc["slow"]} / LLM へ回した {pc["llm"]} 回・${pc["llm_cost"]:.3f}（{self.progress}）
 - 提示物: {presented}
 - 理由: {reason}
 - 通ったステップ: {steps}
@@ -464,7 +471,7 @@ class RunState:
 
 | ステップ | 往復 | 秒 | cache read | cache write | 出力 | 費用 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-{rows}
+{self._step_rows()}
 """
         (self.dir / "report.md").write_text(text)
         return text

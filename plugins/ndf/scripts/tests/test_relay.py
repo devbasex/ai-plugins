@@ -24,6 +24,7 @@ import json
 import os
 import pathlib
 import shutil
+import stat
 import subprocess
 import sys
 
@@ -2846,18 +2847,18 @@ def no_secret(t):
 
 def test_limit_switches_account_and_resumes_goal(term, accounts):
     """受け入れ条件 3: 上限で子を終え、最も上限から遠いアカウントと `--resume` で次の区間を起動する。"""
-    ta = accounts.add("a", util5=10)
-    tb = accounts.add("b", util5=30)
+    accounts.add("a", util5=10)
+    accounts.add("b", util5=30)
     accounts.add("c", util5=60)
     t = account_term(term, accounts)
     t.wait_start(1)
     s0 = t.starts()[0]
-    assert (s0["token"], s0["account"]) == (ta, "a")
+    assert (s0["token"], s0["config_dir"], s0["account"]) == (None, str(accounts.root / "a"), "a")
     t.type(f"tr {goal_row(met=False, at=iso_now())}\r")
     hit_limit(t, 0)
     t.wait_start(2)
     s1 = t.starts()[1]
-    assert (s1["token"], s1["account"]) == (tb, "b")
+    assert (s1["token"], s1["config_dir"], s1["account"]) == (None, str(accounts.root / "b"), "b")
     assert s1["argv"][-3:] == ["--resume", f"s{s0['pid']}", "/goal c"]
     assert b"/exit\r" in t.child_input(0)
     assert "アカウント a（a@example.com）で起動する" in t.text
@@ -2870,16 +2871,78 @@ def test_limit_switches_account_and_resumes_goal(term, accounts):
     no_secret(t)
 
 
+def test_auth_failure_switches_without_refresh(term, accounts):
+    """受け入れ条件 11・20・#1576 の I8・I12: 認証の失敗では NDF が更新せず、観測を残して別のアカウントへ替え、認証の文で続ける。"""
+    accounts.add("a", util5=10)
+    accounts.add("b", util5=30)
+    accounts.fake.refresh["a-refresh-SECRET"] = (200, {"access_token": "a-new-SECRET", "expires_in": 28800})
+    t = account_term(term, accounts)
+    t.wait_start(1)
+    hit_limit(t, 0, error="authentication_failed")
+    t.wait_start(2)
+    s0, s1 = t.starts()
+    assert s1["account"] == "b" and s1["config_dir"] == str(accounts.root / "b")
+    assert s1["argv"][-3:] == ["--resume", f"s{s0['pid']}", "認証が通らなかったためアカウントを替えた。中断したところから続ける"]
+    assert accounts.fake.refresh_calls == [] and accounts.account("a")["auth_failed"] and not accounts.account("a")["needs_relogin"]
+    assert [(r["reason"], r["from"], r["to"]) for r in events(t.rows(), "account")] == [("auth", "a", "b")]
+    assert "認証が通らなかったため、アカウントを a から b（b@example.com）へ替えて続ける" in t.text
+    no_secret(t)
+
+
+def test_auth_failure_without_candidate_keeps_child(term, accounts):
+    """受け入れ条件 20: 認証の失敗の後に候補も宣言も無ければ、理由 auth を残して子を残す。"""
+    accounts.add("a", util5=10)
+    accounts.add("b", util5=100)
+    t = account_term(term, accounts)
+    t.wait_start(1)
+    hit_limit(t, 0, error="authentication_failed")
+    t.wait(lambda: "子はこのまま残す" in t.text, timeout=20, what="子を残す 1 行")
+    assert len(t.starts()) == 1 and b"/exit" not in t.child_input(0)
+    assert [(r["reason"], r["to"]) for r in events(t.rows(), "account")] == [("auth", None)]
+
+
+def test_unshared_projects_account_is_skipped(term, accounts):
+    """受け入れ条件 18・#1576 の I6: projects が共有を指さないアカウントは使わず、理由を画面と記録に残す。"""
+    accounts.add("a", util5=10)
+    accounts.add("b", util5=30)
+    (accounts.root / "a" / "projects").mkdir()
+    t = account_term(term, accounts)
+    t.wait_start(1)
+    assert t.starts()[0]["account"] == "b"
+    assert "アカウント a を使わない（会話の記録の置き場 projects が共有の設定ディレクトリを指していない）" in t.text
+    rows = [r for r in events(t.rows(), "account_dir") if not r["ok"]]
+    assert [(r["account"], r["reason"], r["section"]) for r in rows] == [("a", "projects_not_shared", 1)]
+
+
+def test_section_switch_writes_back_claude_json(term, accounts):
+    """受け入れ条件 19・#1576 の E12: 次のセッションの前に、前のアカウントの .claude.json で足した projects を共有側へ書き戻す。"""
+    accounts.add("a", util5=10)
+    accounts.add("b", util5=30)
+    accounts.write(accounts.shared / ".claude.json", {"projects": {"/p": {"t": 1}}, "keep": 1})
+    accounts.write(accounts.root / "a" / ".claude.json", {"userID": "u-a"})
+    t = account_term(term, accounts)
+    t.wait_start(1)
+    a = json.loads((accounts.root / "a" / ".claude.json").read_text())
+    assert a["projects"] == {"/p": {"t": 1}}
+    a["projects"]["/new"] = {"hasTrustDialogAccepted": True}
+    accounts.write(accounts.root / "a" / ".claude.json", a)
+    hit_limit(t, 0)
+    t.wait_start(2)
+    shared = json.loads((accounts.shared / ".claude.json").read_text())
+    assert shared["projects"]["/new"] == {"hasTrustDialogAccepted": True} and shared["keep"] == 1
+    assert json.loads((accounts.root / "b" / ".claude.json").read_text())["projects"]["/new"] == {"hasTrustDialogAccepted": True}
+
+
 def test_spend_limit_without_quota_switches_with_fixed_input(term, accounts):
     """受け入れ条件 3（支出上限）: `quotaLimits` が無くても本文で `spend` と読み、未達の目標が無ければ定型の文で続ける。"""
     accounts.add("a", util5=10)
-    tb = accounts.add("b", util5=30)
+    accounts.add("b", util5=30)
     t = account_term(term, accounts)
     t.wait_start(1)
     hit_limit(t, 0, text="You've hit your individual spend limit", quota=None, error="billing_error")
     t.wait_start(2)
     s1 = t.starts()[1]
-    assert s1["token"] == tb and s1["argv"][-1] == "利用上限でアカウントを替えた。中断したところから続ける"
+    assert s1["config_dir"] == str(accounts.root / "b") and s1["argv"][-1] == "利用上限でアカウントを替えた。中断したところから続ける"
     assert events(t.rows(), "account")[0]["reason"] == "spend"
 
 
@@ -2921,6 +2984,8 @@ def test_one_or_no_account_does_nothing_on_limit(term, accounts, n):
     t = account_term(term, accounts)
     t.wait_start(1)
     assert t.starts()[0]["token"] is None and t.starts()[0]["account"] is None
+    assert t.starts()[0]["config_dir"] == str(accounts.shared)  # 受け入れ条件 21: 設定ディレクトリを変えない
+    assert not (accounts.root / "a" / "projects").exists()  # 用意を呼ばない
     hit_limit(t, 0)
     time.sleep(1.5)
     assert len(t.starts()) == 1 and b"/exit" not in t.child_input(0)
@@ -3004,7 +3069,7 @@ def test_metered_safety_net_and_recovery(term, accounts):
     hit_limit(t, 0)
     t.wait_start(2)
     s1 = t.starts()[1]
-    assert (s1["token"], s1["account"], s1["bedrock"]) == (None, "metered", "1")
+    assert (s1["token"], s1["config_dir"], s1["account"], s1["bedrock"]) == (None, str(accounts.shared), "metered", "1")
     assert s1["argv"][-3] == "--resume"
     assert "従量の接続（CLAUDE_CODE_USE_BEDROCK ほか 2 つ）へ替えて続ける" in t.text
     row = events(t.rows(), "account")[0]
@@ -3016,7 +3081,7 @@ def test_metered_safety_net_and_recovery(term, accounts):
     t.type("mark 次\r")
     t.wait_start(3)
     s2 = t.starts()[2]
-    assert (s2["token"], s2["account"], s2["bedrock"], s2["api_key"]) == (tb, "b", None, None)
+    assert (s2["token"], s2["config_dir"], s2["account"], s2["bedrock"], s2["api_key"]) == (None, str(accounts.root / "b"), "b", None, None)
     back = events(t.rows(), "account")[1]
     assert (back["reason"], back["from"], back["to"]) == ("recovered", "metered", "b")
     assert "b（b@example.com）の上限が外れたため、従量の接続からアカウント b へ戻して続ける" in t.text
@@ -3038,9 +3103,52 @@ def test_saved_metered_declaration_is_used(term, accounts):
     hit_limit(t, 0)
     t.wait_start(2)
     s1 = t.starts()[1]
-    assert (s1["token"], s1["account"], s1["bedrock"]) == (None, "metered", "1")
+    assert (s1["token"], s1["config_dir"], s1["account"], s1["bedrock"]) == (None, str(accounts.shared), "metered", "1")
     assert events(t.rows(), "account")[0]["keys"] == list(decl) and events(t.rows(), "metered_invalid") == []
     no_secret(t)
+
+
+@pytest.mark.parametrize(
+    "user, as_file",
+    [
+        (None, False),
+        ({"model": "x", "env": {"AWS_REGION": "us-east-1", "KEEP": "1"}}, False),
+        ({"model": "x", "env": {"AWS_REGION": "us-east-1", "GITHUB_TOKEN": "g-SECRET"}}, True),
+    ],
+)
+def test_metered_section_gets_declaration_as_settings(term, accounts, tmp_path, user, as_file):
+    """#1543: 従量の接続の区間は宣言を `--settings` の env でも渡す（settings.json の env に負けない）。
+    利用者の `--settings` は 1 つにまとめて残し、アカウントの区間は引数を変えない。利用者の値がファイルなら、
+    まとめた設定も状態ディレクトリの 0600 のファイルで渡す（ファイルの `env` の資格情報を引数へ展開しない）。"""
+    ta = accounts.add("a", util5=10)
+    tb = accounts.add("b", util5=None)
+    accounts.fake.set_usage(tb, window(100, 1800), window(5))
+    decl = {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": "default", "AWS_REGION": "ap-northeast-1"}
+    accounts.write(
+        accounts.root / "metered.json", {"version": 1, "provider": "bedrock", "env": decl, "details": {"profile": "p"}, "verified_at": "x"}
+    )
+    first = ["--settings", json.dumps(user)] if user else []
+    if as_file:
+        (tmp_path / "s.json").write_text(json.dumps(user))
+        first = ["--settings", str(tmp_path / "s.json")]
+    t = term(*first, env={**accounts.env(), "NDF_ACCOUNT_CHECK_INTERVAL": "1"})
+    t.wait_start(1)
+    assert t.starts()[0]["argv"] == first
+    accounts.fake.set_usage(ta, window(100, 3600), window(5))
+    hit_limit(t, 0)
+    t.wait_start(2)
+    argv = t.starts()[1]["argv"]
+    want = {**(user or {}), "env": {**(user or {}).get("env", {}), **decl}}
+    assert t.starts()[1]["account"] == "metered" and argv[0] == "--settings"
+    assert argv[-3] == "--resume" and argv.count("--settings") == 1
+    if not as_file:
+        assert json.loads(argv[1]) == want
+        return
+    merged = pathlib.Path(argv[1])
+    assert merged == t.relay_dirs()[0] / "metered-settings.json" and "SECRET" not in " ".join(argv)
+    assert json.loads(merged.read_text()) == want and stat.S_IMODE(merged.stat().st_mode) == 0o600
+    t.type("quit 0\r")
+    assert t.finish() == 0 and not merged.exists()  # 終われば残さない
 
 
 def test_broken_saved_declaration_is_told_at_first_section(term, accounts):
@@ -3085,7 +3193,7 @@ def test_transcript_readers(tmp_path):
     assert kind == "seven_day" and resets is not None
     tp.write_text(synthetic_row("x", FIVE_HOUR) + "\n" + goal_row(met=False) + "\n")
     assert rc.limit_of(str(tp)) == ("five_hour", 4102444800.0)
-    assert rc.unmet_goal(str(tp)) == "c" and rc.resume_input(str(tp)) == "/goal c"
+    assert rc.unmet_goal(str(tp)) == "c" and rc.resume_input(str(tp), "x") == "/goal c"
     # 支出上限の実物（2026-09-28 の会話の記録の写し）。`quotaLimits` があれば種類とリセット時刻はそちらを読む
     spend = "You've hit your individual spend limit · run /usage-credits to raise it, or visit claude.ai/admin-settings/usage · your session limit resets 6:30am (UTC)"
     quota = {
@@ -3227,7 +3335,7 @@ def test_account_add_rejects(tmp_path, accounts):
     assert account_cmd(tmp_path, accounts, "add", "metered").returncode == 2
     assert account_cmd(tmp_path, accounts, "add", "work4", FAKE_LOGIN_FAIL="1", FAKE_EMAIL="c@example.com").returncode == 1
     assert account_cmd(tmp_path, accounts, "add", "work1", FAKE_EMAIL="a@example.com").returncode == 1  # 登録済みの名前
-    assert sorted(p.name for p in accounts.root.iterdir() if not p.name.endswith(".lock")) == ["work1"]
+    assert sorted(p.name for p in accounts.root.iterdir() if not p.name.endswith(".lock") and p.name != ".locks") == ["work1"]
     assert account_cmd(tmp_path, accounts, "remove", "none", tty=False).returncode == 1
     assert account_cmd(tmp_path, accounts, "list", "--bad", tty=False).returncode == 2
 
@@ -3251,7 +3359,7 @@ def test_account_add_same_email_other_org(tmp_path, accounts):
     assert any(line.startswith("work2") and "a@example.com（Team A）" in line for line in lines)
     assert any(line.startswith("work1") and "a@example.com（個人）" in line for line in lines)  # 個人の組織の既定の名前は短く
     assert "'s Organization" not in "\n".join(lines)
-    assert sorted(p.name for p in accounts.root.iterdir() if not p.name.endswith(".lock")) == ["work1", "work2"]
+    assert sorted(p.name for p in accounts.root.iterdir() if not p.name.endswith(".lock") and p.name != ".locks") == ["work1", "work2"]
 
 
 @pytest.mark.parametrize(
@@ -3350,6 +3458,10 @@ def test_account_add_stops_on_macos(monkeypatch, capsys):
 def _bare_relay(env):
     r = object.__new__(relay_run.Relay)
     r.env = env
+    r.account = None
+    r.section = 0
+    r.notes = []
+    r.note_account_dir = lambda row, section=None: r.notes.append(row)
     return r
 
 
@@ -3358,9 +3470,10 @@ def test_start_env_failure_repicks_another_account(accounts, monkeypatch):
     accounts.add("a", util5=10)
     tb = accounts.add("b", util5=30)
     real = relay_claude.section_env
-    monkeypatch.setattr(relay_claude, "section_env", lambda base, name: None if name == "a" else real(base, name))
+    monkeypatch.setattr(relay_claude, "section_env", lambda base, name, note=None: None if name == "a" else real(base, name, note))
     to, reason, _, env = _bare_relay({}).replace_unusable("a")
-    assert (to, reason, env["CLAUDE_CODE_OAUTH_TOKEN"]) == ("b", "auth", tb)
+    assert (to, reason, env["CLAUDE_CONFIG_DIR"]) == ("b", "auth", str(accounts.root / "b"))
+    assert tb not in env.values() and "CLAUDE_CODE_OAUTH_TOKEN" not in env
 
 
 def test_start_env_failure_uses_metered_or_stops(accounts, monkeypatch):
@@ -3368,7 +3481,7 @@ def test_start_env_failure_uses_metered_or_stops(accounts, monkeypatch):
     accounts.add("a", util5=10)
     accounts.add("b", util5=30)
     monkeypatch.setattr(
-        relay_claude, "section_env", lambda base, name: relay_claude.ca.account_env(name, base) if name == "metered" else None
+        relay_claude, "section_env", lambda base, name, note=None: relay_claude.ca.account_env(name, base) if name == "metered" else None
     )
     to, _, _, env = _bare_relay({"NDF_SUPERVISE_CLAUDE_FALLBACK": "ANTHROPIC_API_KEY=k"}).replace_unusable("a")
     assert to == "metered" and env["ANTHROPIC_API_KEY"] == "k"
@@ -3448,6 +3561,9 @@ class _Acc:
     def limited_until(self, now):
         return self.limited
 
+    def auth_held(self, now):
+        return False
+
     def remaining(self):
         return self.left
 
@@ -3470,7 +3586,7 @@ def _fake_ca(monkeypatch, *, choice, usage=None, acc=None, thr=90.0):
 
     monkeypatch.setattr(relay_switch.ca, "switch_at", lambda: thr)
     monkeypatch.setattr(relay_switch.ca, "choose", choose)
-    monkeypatch.setattr(relay_switch.ca, "usage", lambda name, before=None: usage)
+    monkeypatch.setattr(relay_switch.ca, "usage", lambda name, refresh=True: usage)
     monkeypatch.setattr(relay_switch.ca, "load_account", lambda name: acc)
     return calls
 
@@ -3489,7 +3605,7 @@ METERED_DECL = {"NDF_SUPERVISE_CLAUDE_FALLBACK": "ANTHROPIC_API_KEY=k"}
     "kind, cur, env, name, want, exclude",
     [
         ("five_hour", "a", {}, "b", ("b", "five_hour"), {"a"}),
-        ("auth", "a", {}, "b", ("b", "auth"), set()),
+        ("auth", "a", {}, "b", ("b", "auth"), {"a"}),  # 認証の失敗でも今のアカウントを除く（#1576 の I12）
         ("five_hour", "metered", {}, "b", ("b", "recovered"), set()),
         ("five_hour", None, {}, "b", ("b", "five_hour"), set()),
         ("five_hour", "a", METERED_DECL, None, ("metered", "five_hour"), {"a"}),
@@ -3586,7 +3702,7 @@ def test_usage_watch_on_metered_characterization(monkeypatch, name, score, recov
     w.check()
     assert w.recover == recover and w.due is None
     assert _drain(w) == ([f"{name} の上限が外れた。次のカットポイントで従量の接続から戻す"] if recover else [])
-    assert calls[0] == {"exclude": set(), "before": 0}
+    assert calls[0] == {"exclude": set()}
 
 
 def test_usage_watch_recover_cleared_characterization(monkeypatch):
