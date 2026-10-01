@@ -181,7 +181,7 @@ def cmd_next(a) -> int:
     found = handoff_doc.find_section(text, COMMAND_SECTION)
     if found is None:
         return emit_result(f"見出しに「{COMMAND_SECTION}」を含む節が無い（文書を変えない）: {body}", code=step_result.EXIT_VIOLATION)
-    tail = "\n" if found[2] < len(text) else ""
+    tail = "\n" if found.body_end < len(text) else ""
     out = handoff_doc.replace_body(text, COMMAND_SECTION, "\n" + block + tail)
     if out != text:
         write_doc(body, out)
@@ -194,7 +194,7 @@ def template_sections() -> list[tuple[str, bool]]:
     out = []
     for title, _ in handoff_doc.level_headings(text, 2):
         found = handoff_doc.find_section(text, title)
-        out.append((title, OPTIONAL_MARK not in text[found[1] : found[2]]))
+        out.append((title, OPTIONAL_MARK not in text[found.body_start : found.body_end]))
     return out
 
 
@@ -223,10 +223,9 @@ def trim(text: str, history: Path, name: str) -> tuple[str, list[str]]:
     """「前の会話の進み」の節をすべて履歴の末尾へ移す。移した見出しを返す。"""
     moved, parts = [], []
     while (found := handoff_doc.find_section(text, DEMOTED_SECTION)) is not None:
-        start, _, end, head = found
-        parts.append(text[start:end].rstrip("\n") + "\n")
-        moved.append(handoff_doc.heading_text(head))
-        text = text[:start] + text[end:]
+        parts.append(text[found.head_start : found.body_end].rstrip("\n") + "\n")
+        moved.append(handoff_doc.heading_text(found.head_line))
+        text = text[: found.head_start] + text[found.body_end :]
     if parts:
         old = (
             read_doc(history)

@@ -465,7 +465,7 @@ def cmd_next(a) -> dict | None:
         found = find_section(text, a.section)
         if found is None:
             return outcome("stopped", f"見出しに「{a.section}」を含む節が無い: {a.doc}")
-        heading = heading_text(found[3])
+        heading = heading_text(found.head_line)
     if not (m.get("goal_template") or "").strip():
         return outcome("stopped", "sprint.json に /goal の雛形（goal_template）が無い")
     block = next_block(m, heading)

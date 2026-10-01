@@ -6,10 +6,21 @@
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
 import md
 
 
-def find_section(text: str, word: str) -> tuple[int, int, int, str] | None:
+class SectionSpan(NamedTuple):
+    """節の位置（全文の中の文字の位置）と見出しの行。"""
+
+    head_start: int  # 見出しの行の始まり
+    body_start: int  # 本文の始まり
+    body_end: int  # 本文の終わり
+    head_line: str  # 見出しの行（改行を含む）
+
+
+def find_section(text: str, word: str) -> SectionSpan | None:
     """見出しに word を含む最初の節の (見出しの行の始まり, 本文の始まり, 本文の終わり, 見出しの行) を返す。
 
     本文は、見出しと同じか浅い見出しの手前まで。"""
@@ -22,7 +33,7 @@ def find_section(text: str, word: str) -> tuple[int, int, int, str] | None:
         if word not in lines[h.line].rstrip("\r\n"):
             continue
         end = next((o.line for o in atx[k + 1 :] if o.level <= h.level), None)
-        return offsets[h.line], offsets[h.line + 1], len(text) if end is None else offsets[end], lines[h.line]
+        return SectionSpan(offsets[h.line], offsets[h.line + 1], len(text) if end is None else offsets[end], lines[h.line])
     return None
 
 
@@ -36,8 +47,7 @@ def replace_body(text: str, word: str, body: str) -> str | None:
     found = find_section(text, word)
     if found is None:
         return None
-    _, body_start, body_end, _ = found
-    return text[:body_start] + body + text[body_end:]
+    return text[: found.body_start] + body + text[found.body_end :]
 
 
 def level_headings(text: str, level: int) -> list[tuple[str, int]]:
