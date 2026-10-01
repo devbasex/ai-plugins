@@ -71,6 +71,7 @@
 | [deps.py](deps.py) | 外部パッケージを使うエントリポイントが最初に呼ぶ `require("<グループ>")`。import できなければ uv の環境（宣言と版の固定はプラグインルートの `pyproject.toml` と `uv.lock`。`project=` を渡せばその根の 1 組と `<根>/.venv`）で起動し直し、uv が無ければ版を固定して入れる。入れられなければ終了コード 3。hook とラッパーは `require()` を呼ばない（ラッパーの環境は `relay_lib/runtime.py` が `find_uv`・`install_uv`・`venv_dir` で用意する） | 外部パッケージを使うエントリポイント・根の `scripts/`（`scripts/lib/ndf_wrappers.py` を通す）・`relay_lib/runtime.py` |
 | [md.py](md.py) | Markdown の構造の読み取り（囲み・見出し・節・表・地の文・リンクとアンカー）。markdown-it-py を呼ぶのはここだけ。書き込みは読み取った行の区間で呼び出し側が行う | `cross-refactoring`（`refactor_lib/vocabulary.py`）・`relay_lib/mark.py`。ほかは D1〜D8 が呼び出し側を置き換える |
 | [mdtable.py](mdtable.py) | Markdown の表の組み立て（列の幅を揃えない行・セルの縦棒のエスケープ・数の列の右寄せ）。tabulate を呼ぶのはここだけ | `cross-refactoring`（`refactor_lib/plan.py`・`commands/report.py`）。ほかは D1〜D8 が呼び出し側を置き換える |
+| [handoff_doc.py](handoff_doc.py) | 引継ぎ文書の節の読み書き（見出しに語を含む節の位置・見出しの文・節の本文の置き換え・深さごとの見出しの並び）。囲みの中の `#` を見出しと数えない | `handoff.py` / `sprint-state.py` |
 | [schema.py](schema.py) | JSON と設定の形の検証（`Shape` と `load_shape`）。pydantic の誤りを日本語の 1 行（`ShapeError`）へ直し、語彙に無い値を下げる読みは `lenient_choice` | L1 の時点では無し（D1〜D8 が呼び出し側を置き換える） |
 | [procs.py](procs.py) | プロセスの生死（ゾンビは死）・親子・木の停止（グループの先頭ならグループへ）・メモリと cgroup。psutil を呼び、`/proc/` を読むのはここだけ | 同上 |
 | [versions.py](versions.py) | 版数（`X.Y.Z`・`-dev.N`・`-rc.N`）の比較と次の版、bump-my-version の `replace`。semver と bump-my-version を呼ぶのはここだけ | 同上 |

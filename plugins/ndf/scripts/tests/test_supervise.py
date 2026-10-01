@@ -697,6 +697,157 @@ def test_old_plan_and_report_keys_are_read(tmp_path):
     assert commands.note_row(old, "") == "| #2 | 実装: 完了 | — |"
 
 
+def _report_state_empty(st):
+    return {"フェーズ": "試験", "課題": [858, 859], "次のフェーズ": "検査", "Pull Request": "https://example/pull/9"}, "完了", "無し"
+
+
+def _report_state_rich(st):
+    llm = {"turns": 3, "cache_read": 100, "cache_write": 20, "output": 7, "cost": 0.0125}
+    st.log = [
+        {"id": "impl", "exit": 0, "seconds": 12.5, "llm": llm, "counts": {"passed": 3, "failed": None, "skipped": 0}},
+        {"id": "judge", "decision": "続ける", "llm": {**llm, "turns": 1, "cost": 1}, "counts": {"failed": None}},
+        {"id": "show", "exit": 12, "gate_as_ok": True, "presentation": "/w/shown.md"},
+        {"id": "quiet", "exit": 12, "presentation": "/w/not-shown.md"},
+        {"id": "wait", "exit": 0, "limit": True, "limit_hits": 2, "limit_waited": 90, "limit_resets": "03:00"},
+        {"id": "wait2", "limit": True},
+    ]
+    st.llm.update(work=2, judge=1, input=56, cache_read=200, cache_write=40, output=14, cost=1.0125)
+    st.last_stage = "Pull Request"
+    st.gates = [{"id": "release", "exit": 10, "presentation": "/w/gate.md"}, {"id": "merge", "exit": 11}]
+    st.switched = ["CLAUDE_KEY_2", "従量"]
+    st.slow_events = [
+        {"step": "impl", "round": 1, "act": "wait", "by": "rule"},
+        {"step": "impl", "round": 2, "act": "wait", "by": "llm"},
+        {"step": "impl", "act": "kill", "by": "rule", "probe": {"class": "hang", "action": "none"}},
+        {"step": "pr", "round": 3, "act": "wait", "by": "rule", "probe": {"class": "net", "action": "remedied"}},
+    ]
+    st.pcount.update(step=6, alive=1, attention=2, slow=4, llm=1, llm_cost=0.02)
+    st.progress.write_text(
+        '{"kind": "worker", "text": "テストを書いた"}\n{"kind": "step", "id": "impl"}\nこわれた行\n{"kind": "worker", "text": " "}\n[1]\n\n{"kind": "worker", "text": "書きかけ'
+    )
+    return {"フェーズ": "実装", "課題": [1054], "次のフェーズ": "検査"}, "関門", "承認を待つ"
+
+
+REPORT_EMPTY = """## フェーズの報告
+
+- フェーズ: 試験
+- 課題: #858 #859
+- 結果: 完了
+- 関門: 無し
+- 次のフェーズ: 検査
+- Pull Request: https://example/pull/9
+- 最後に記録した工程: 無し
+- 使った worker: 修正 0（claude -p）/ 判断 0（claude -p）
+- 途中の報告: ステップ 0 / まだ動いている 0 / worker 0（形が違う 0）/ conductor 向け 0 / 遅れの調査 0 / LLM へ回した 0 回・$0.000（{dir}/progress.jsonl）
+- 提示物: 無し
+- 理由: 無し
+- 通ったステップ: {empty}
+- 件数: 無し
+- LLM の使用量: 入力 0 / cache read 0 / cache write 0 / 出力 0 / $0.000
+- 記録: {dir}
+
+| ステップ | 往復 | 秒 | cache read | cache write | 出力 | 費用 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 無し | | | | | | |
+"""
+
+REPORT_RICH = """## フェーズの報告
+
+- フェーズ: 実装
+- 課題: #1054
+- 結果: 関門
+- 関門: ステップ release（exit=10）; ステップ merge（exit=11）
+- 次のフェーズ: 無し
+- Pull Request: 無し
+- 最後に記録した工程: Pull Request
+- 使った worker: 修正 2（claude -p）/ 判断 1（claude -p）
+- 認証: 切り替え（CLAUDE_KEY_2, 従量）
+- 利用上限: wait 2 回（待ち 90 秒・解除 03:00）; wait2 1 回（待ち 0 秒）
+- 遅れ: impl 2 回目 wait（llm）; impl 0 回目 kill（rule・hang）; pr 3 回目 wait（rule・net）
+- 途中の報告: ステップ 6 / まだ動いている 1 / worker 1（形が違う 3）/ conductor 向け 2 / 遅れの調査 4 / LLM へ回した 1 回・$0.020（{dir}/progress.jsonl）
+- 提示物: /w/gate.md, /w/shown.md
+- 理由: 承認を待つ
+- 通ったステップ: impl(exit=0) → judge[続ける] → show(exit=12) → quiet(exit=12) → wait(exit=0) → wait2(exit=None)
+- 件数: impl: passed 3 / skipped 0; judge: 無し
+- LLM の使用量: 入力 56 / cache read 200 / cache write 40 / 出力 14 / $1.012
+- 記録: {dir}
+
+| ステップ | 往復 | 秒 | cache read | cache write | 出力 | 費用 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| impl | 3 | 12.5 | 100 | 20 | 7 | $0.013 |
+| judge | 1 |  | 100 | 20 | 7 | $1.000 |
+"""
+
+
+@pytest.mark.parametrize("fill, expected", [(_report_state_empty, REPORT_EMPTY), (_report_state_rich, REPORT_RICH)], ids=["empty", "rich"])
+def test_write_report_text_of_a_state(tmp_path, fill, expected):
+    """現状固定: 報告の全文。`{dir}` は状態ディレクトリ、`{empty}` は空（行末の空白を書かないための目印）。空の状態と、関門・認証の切り替え・利用上限・遅れ・途中の報告がある状態。"""
+    from supervise_lib.state import RunState
+
+    st = RunState(tmp_path / "state", {})
+    plan, result, reason = fill(st)
+    text = st.write_report(plan, result, reason)
+    assert text.replace(str(st.dir), "{dir}") == expected.replace("{empty}", "")
+    assert (st.dir / "report.md").read_text() == text
+
+
+@pytest.mark.parametrize("result, gate", [("関門", "本番の系へ届く操作"), ("止まった", "無し")])
+def test_write_report_without_gates_or_plan_keys(tmp_path, result, gate):
+    """現状固定: 関門の記録が無いときの関門の行と、計画に鍵が無いときの行。完了でなければ次のフェーズを書かない。"""
+    from supervise_lib.state import RunState
+
+    lines = RunState(tmp_path / "state", {}).write_report({"次のフェーズ": "検査"}, result, "x").splitlines()
+    assert lines[2:8] == [
+        "- フェーズ: None",
+        "- 課題: ",
+        f"- 結果: {result}",
+        f"- 関門: {gate}",
+        "- 次のフェーズ: 無し",
+        "- Pull Request: 無し",
+    ]
+
+
+NOTE_REPORT = """## フェーズの報告
+
+- フェーズ: 実装
+- 課題: #1054
+- 結果: {res}
+- Pull Request: {pr}
+- 理由: {reason}
+- LLM の使用量: 入力 56 / cache read 1423577 / cache write 78735 / 出力 24980 / {cost}
+- 記録: x
+"""
+
+
+@pytest.mark.parametrize(
+    "fields, row",
+    [
+        # 完了でなければ理由を足す。費用は報告の文字のまま（0.50 を 0.5 に丸めない）
+        (
+            {"res": "止まった", "pr": "https://example/pull/9", "reason": "テストが落ちた", "cost": "$0.50"},
+            "| #1054 | 実装: 止まった（https://example/pull/9、$0.50）。理由: テストが落ちた | 直す |",
+        ),
+        (
+            {"res": "止まった", "pr": "無し", "reason": "テストが落ちた", "cost": "$1.178"},
+            "| #1054 | 実装: 止まった（$1.178）。理由: テストが落ちた | 直す |",
+        ),
+        # 理由が「無し」なら足さない。完了なら理由があっても足さない
+        ({"res": "止まった", "pr": "無し", "reason": "無し", "cost": "$1.178"}, "| #1054 | 実装: 止まった（$1.178） | 直す |"),
+        ({"res": "完了", "pr": "#9", "reason": "書いてある", "cost": "$2"}, "| #1054 | 実装: 完了（#9、$2） | 直す |"),
+        # 費用が行の末尾に `/ $数` の形で無ければ出さない。Pull Request も無ければ括弧ごと出さない
+        ({"res": "止まった", "pr": "無し", "reason": "上限", "cost": "不明"}, "| #1054 | 実装: 止まった。理由: 上限 | 直す |"),
+    ],
+)
+def test_note_row_shows_reason_and_cost_when_not_done(fields, row):
+    """現状固定: 表の行は、報告の Pull Request・費用・理由をこの形で並べる。"""
+    assert commands.note_row(NOTE_REPORT.format(**fields), "直す") == row
+
+
+def test_note_row_of_an_empty_report():
+    """現状固定: 読める行が無い報告は、課題も次も「—」で埋める。"""
+    assert commands.note_row("", "") == "| — | :  | — |"
+
+
 def test_note_without_section_stops(tmp_path):
     doc = tmp_path / "handoff.md"
     doc.write_text("# 無し\n")

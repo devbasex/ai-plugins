@@ -37,11 +37,12 @@ import supervise_lib  # noqa: E402,F401  lib/ を sys.path へ足す
 import deps  # noqa: E402
 
 deps.require("md", "mdtable", "schema", "locks")  # schema は supervise_lib.paths → decl が使う
+import report_fields  # noqa: E402
 from supervise_lib.paths import sha256_of, state_dir_of  # noqa: E402
 import clock  # noqa: E402
 import jsonio  # noqa: E402
 import locks  # noqa: E402
-import md  # noqa: E402
+from handoff_doc import COMMAND_SECTION, PROGRESS_SECTION, find_section, heading_text  # noqa: E402
 import mdtable  # noqa: E402
 import step_result  # noqa: E402
 import project_mvv as pm  # noqa: E402
@@ -49,12 +50,11 @@ import project_mvv_signals as pms  # noqa: E402
 import sprint_mvv  # noqa: E402
 
 TOOL = "sprint-state"
-SECTION_DEFAULT = "今の会話の進み"
-NEXT_SECTION_DEFAULT = "次に実行するコマンド"
+SECTION_DEFAULT = PROGRESS_SECTION
+NEXT_SECTION_DEFAULT = COMMAND_SECTION
 NOT_DONE = "まだ"
 PACES = ("normal", "fast", "auto")
 MVV_GATE = "MVV"  # 利用者が MVV を承認した記録の名前
-EXIT_UNREADABLE, EXIT_PRECONDITION = 2, 3
 
 
 def outcome(status: str, summary: str, items=None, metrics=None, **extra) -> dict:
@@ -63,8 +63,7 @@ def outcome(status: str, summary: str, items=None, metrics=None, **extra) -> dic
 
 
 def field(report: str, name: str) -> str:
-    m = re.search(rf"^- {re.escape(name)}: (.*)$", report, re.M)
-    return m.group(1).strip() if m else ""
+    return report_fields.report_field(report, name)
 
 
 def pr_label(value: str) -> str:
@@ -73,11 +72,6 @@ def pr_label(value: str) -> str:
         return ""
     m = re.search(r"(\d+)\s*$", value)
     return f"#{m.group(1)}" if m else value
-
-
-def report_cost(report: str) -> float | None:
-    m = re.search(r"/ \$([0-9.]+)\s*$", field(report, "LLM の使用量"))
-    return float(m.group(1)) if m else None
 
 
 def plan_issues(plan: str) -> list[int]:
@@ -114,6 +108,12 @@ def default_label(kind: str, issues: list[int], m: dict) -> str:
         return f"本番 {m['versions']['prod']}"
     tail = " ".join(f"#{i}" for i in issues)
     return f"{kind} {tail}".strip()
+
+
+def plan_entry(kind: str, plan: str, m: dict) -> dict:
+    """計画の行（init の --plan と、update が done から足す行で同じ形）。"""
+    issues = plan_issues(plan)
+    return {"kind": kind, "plan": plan, "issues": issues, "label": default_label(kind, issues, m), "next": ""}
 
 
 # ---------------------------------------------------------------- init / update / gate
@@ -188,8 +188,7 @@ def cmd_init(a) -> dict:
         m["project_mvv"] = {"version": project.version, "sha256": project.sha256}
     for text in a.plan or []:
         kind, plan = parse_pair(text, "--plan")
-        issues = plan_issues(plan)
-        m["plans"].append({"kind": kind, "plan": plan, "issues": issues, "label": default_label(kind, issues, m), "next": ""})
+        m["plans"].append(plan_entry(kind, plan, m))
     jsonio.write_atomic(a.sprint, m, indent=1)
     return outcome(
         "ok",
@@ -228,10 +227,9 @@ def fill_row(p: dict, item: dict | None) -> dict:
         text = rep.read_text()
         row["report"] = str(rep)
         row["pr"] = pr_label(field(text, "Pull Request"))
-        row["cost"] = report_cost(text)
-        reason = field(text, "理由")
-        if row["result"] != "完了" and reason not in ("", "無し"):
-            row["reason"] = reason
+        cost = report_fields.cost(text)
+        row["cost"] = float(cost) if cost else None
+        row["reason"] = report_fields.reason_shown(text, row["result"])
     return row
 
 
@@ -246,9 +244,7 @@ def cmd_update(a) -> dict:
     for plan in items:
         # init で --plan を渡さなかった計画も、done に載った時点で表の行にする
         if plan not in known:
-            issues = plan_issues(plan)
-            kind = plan_kind(plan)
-            m["plans"].append({"kind": kind, "plan": plan, "issues": issues, "label": default_label(kind, issues, m), "next": ""})
+            m["plans"].append(plan_entry(plan_kind(plan), plan, m))
     for p in m["plans"]:
         if p["plan"] in nexts:
             p["next"] = nexts[p["plan"]]
@@ -275,43 +271,64 @@ def gate_locked(a) -> dict:
     if a.withdraw:
         return withdraw_gate(a, m, at)
     if not a.what:
-        return outcome("stopped", "--what が要る（--withdraw のときだけ省ける）", exit=EXIT_UNREADABLE)
+        return outcome("stopped", "--what が要る（--withdraw のときだけ省ける）", exit=step_result.EXIT_UNREADABLE)
     entry = {"name": a.name, "what": a.what, "at": at}
     if a.by == "user":
         override = pms.record_override(m, a.sprint, a.name, a.outcome, at, Path(a.root or ".").resolve(), a.mvv_log, pr=a.pr)
         if a.outcome == "rejected":
-            m.setdefault("rejections", []).append({**entry, "by": "user", "outcome": "rejected"})
-            jsonio.write_atomic(a.sprint, m, indent=1)
-            extra = f"。覆しを記録した（{override['kind']}）" if override else ""
-            summary = f"{a.name} の差し戻しを書いた（{at}。関門は通さない）{extra}"
-            return outcome("ok", summary, [override] if override else [], {"gates": len(m.get("gates", []))})
+            return reject_gate(a, m, entry, override, at)
         if a.outcome:
             entry["outcome"] = "approved"
     if a.name == MVV_GATE:
-        mvv = m.get("mvv") or {}
-        if not mvv.get("path") or not Path(mvv["path"]).is_file():
+        sha = mvv_sha(m)
+        if sha is None:
             return outcome("stopped", "MVV が無い（init --pace fast か auto で写す）。MVV の承認を書かない")
-        entry["sha256"] = sha256_of(Path(mvv["path"]))
+        entry["sha256"] = sha
     if a.by == "mvv":
-        if sprint_mvv.withdrawn(m, a.name):
-            return outcome("stopped", f"{a.name} は MVV 判定の通過を取り消した。自動で通さず、利用者の承認を求める")
-        if not a.verdict:
-            return outcome("stopped", "--by mvv には --verdict が要る", exit=EXIT_UNREADABLE)
-        try:
-            reasons = json.loads(a.reasons or "[]")
-        except ValueError:
-            return outcome("stopped", f"--reasons は JSON の配列で渡す: {a.reasons}", exit=EXIT_UNREADABLE)
-        entry.update(by="mvv", verdict=a.verdict, reasons=reasons if isinstance(reasons, list) else [reasons], log=a.log or "")
+        judged, stop = mvv_judgement(a, m)
+        if stop:
+            return stop
+        entry.update(judged)
     m["gates"] = gates = [g for g in m.get("gates", []) if g.get("name") != a.name] + [entry]
     jsonio.write_atomic(a.sprint, m, indent=1)
     who = "MVV 判定" if a.by == "mvv" else "承認"
     return outcome("ok", f"{a.name} の{who}を書いた（{at}）", gates, {"gates": len(gates)})
 
 
+def reject_gate(a, m: dict, entry: dict, override: dict | None, at: str) -> dict:
+    """利用者の差し戻しを書く。関門は通さない。"""
+    m.setdefault("rejections", []).append({**entry, "by": "user", "outcome": "rejected"})
+    jsonio.write_atomic(a.sprint, m, indent=1)
+    extra = f"。覆しを記録した（{override['kind']}）" if override else ""
+    summary = f"{a.name} の差し戻しを書いた（{at}。関門は通さない）{extra}"
+    return outcome("ok", summary, [override] if override else [], {"gates": len(m.get("gates", []))})
+
+
+def mvv_sha(m: dict) -> str | None:
+    """スプリント MVV の写しのハッシュ。写しが無ければ `None`。"""
+    mvv = m.get("mvv") or {}
+    if not mvv.get("path") or not Path(mvv["path"]).is_file():
+        return None
+    return sha256_of(Path(mvv["path"]))
+
+
+def mvv_judgement(a, m: dict) -> tuple[dict | None, dict | None]:
+    """(--by mvv の記録に足す鍵, 止まるときの結果)。取り消し済みか、--verdict・--reasons を読めなければ止まる。"""
+    if sprint_mvv.withdrawn(m, a.name):
+        return None, outcome("stopped", f"{a.name} は MVV 判定の通過を取り消した。自動で通さず、利用者の承認を求める")
+    if not a.verdict:
+        return None, outcome("stopped", "--by mvv には --verdict が要る", exit=step_result.EXIT_UNREADABLE)
+    try:
+        reasons = json.loads(a.reasons or "[]")
+    except ValueError:
+        return None, outcome("stopped", f"--reasons は JSON の配列で渡す: {a.reasons}", exit=step_result.EXIT_UNREADABLE)
+    return {"by": "mvv", "verdict": a.verdict, "reasons": reasons if isinstance(reasons, list) else [reasons], "log": a.log or ""}, None
+
+
 def withdraw_gate(a, m: dict, at: str) -> dict:
     """同じ名前の承認ゲートの by: mvv の記録を外す（`lib/sprint_mvv.withdraw`。#1370 の I8）。"""
     if a.by != "user" or a.outcome or a.verdict:
-        return outcome("stopped", "--withdraw は --by・--outcome・--verdict と併せて渡さない", exit=EXIT_UNREADABLE)
+        return outcome("stopped", "--withdraw は --by・--outcome・--verdict と併せて渡さない", exit=step_result.EXIT_UNREADABLE)
     n = sprint_mvv.withdraw(m, a.name, at)
     jsonio.write_atomic(a.sprint, m, indent=1)
     done = f"記録を外した（{at}）" if n else "記録が無い（外すものが無い）"
@@ -388,28 +405,6 @@ def section_body(m: dict) -> str:
         lines.append(f"- LLM の費用の計: ${sum(c for c in total if c is not None):.3f}")
     lines.append("")
     return "\n".join(lines) + "\n"
-
-
-def find_section(text: str, word: str) -> tuple[int, int, int, str] | None:
-    """見出しに word を含む最初の節の (見出しの行の始まり, 本文の始まり, 本文の終わり, 見出しの行) を返す。
-
-    本文は、見出しと同じか浅い見出しの手前まで。囲みのコードブロックの中の # は見出しとみなさない。
-    見出しは行頭の `#` で始まるもの（ATX）だけを数える。"""
-    lines = text.splitlines(keepends=True)
-    offsets = [0]
-    for line in lines:
-        offsets.append(offsets[-1] + len(line))
-    atx = [h for h in md.headings(text) if lines[h.line].startswith("#")]
-    for k, h in enumerate(atx):
-        if word not in lines[h.line].rstrip("\r\n"):
-            continue
-        end = next((o.line for o in atx[k + 1 :] if o.level <= h.level), None)
-        return offsets[h.line], offsets[h.line + 1], len(text) if end is None else offsets[end], lines[h.line]
-    return None
-
-
-def heading_text(line: str) -> str:
-    return line.rstrip("\r\n").lstrip("#").strip()
 
 
 def cmd_render(a) -> dict:
@@ -497,7 +492,7 @@ def cmd_next(a) -> dict | None:
         found = find_section(text, a.section)
         if found is None:
             return outcome("stopped", f"見出しに「{a.section}」を含む節が無い: {a.doc}")
-        heading = heading_text(found[3])
+        heading = heading_text(found.head_line)
     if not (m.get("goal_template") or "").strip():
         return outcome("stopped", "sprint.json に /goal の雛形（goal_template）が無い")
     block = next_block(m, heading)

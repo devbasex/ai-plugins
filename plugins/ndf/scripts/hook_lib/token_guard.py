@@ -35,6 +35,7 @@ HERE = str(SCRIPTS)
 STAGES = SCRIPTS / "lib" / "token-guard-stages.txt"
 WAITING_DOC = "development-workflow/references/waiting.md"
 CONTEXT_DOC = "development-workflow/references/context-window.md"
+HANDOFF_DOC = "development-workflow/references/handoff.md"
 STAGE_PREFIXES = ("設計", "実装", "検査", "取り込み", "仕上げ")
 TAIL_LINES = 200
 RECORD_DAYS = 7
@@ -81,16 +82,21 @@ def guards_dir() -> Path | None:
     return None
 
 
+def _env_int(name: str, default: int) -> int:
+    """環境変数の 0 以上の整数。空か、数字の並びでなければ default。"""
+    value = os.environ.get(name) or ""
+    return int(value) if value.isdigit() else default
+
+
 @contextmanager
 def session_lock(directory: Path, sid: str) -> Iterator[bool]:
     """セッションごとの排他（`<dir>/<sid>.guard.lock`）。取れなければ偽を渡す（呼び出し側は判定せずに通す）。
 
     錠の名前を移行の前の `<sid>.lock`（`lock-common.sh` のディレクトリ）と分け、版をまたいだ 2 つの錠が互いを
     読めずに両方とも通す形を作らない。"""
-    wait = os.environ.get("NDF_TOKEN_GUARD_LOCK_WAIT", "1")
     import locks  # 排他が要る判定のときだけ読む（filelock の import は Bash と Edit の判定に載せない）
 
-    held = locks.exclusive(directory / f"{sid}.guard", timeout=int(wait) if wait.isdigit() else 1)
+    held = locks.exclusive(directory / f"{sid}.guard", timeout=_env_int("NDF_TOKEN_GUARD_LOCK_WAIT", 1))
     try:
         held.__enter__()
     except (locks.LockTimeout, OSError):
@@ -164,8 +170,7 @@ def guard_read(raw: dict) -> dict | None:
     if not sid or not path:
         return None
     key = "\t".join((path, _field(raw, "tool_input", "offset"), _field(raw, "tool_input", "limit")))
-    lim = os.environ.get("NDF_READ_REPEAT_LIMIT") or "3"
-    limit = int(lim) if lim.isdigit() else 3
+    limit = _env_int("NDF_READ_REPEAT_LIMIT", 3)
     d = guards_dir()
     if d is None:
         return None
@@ -264,20 +269,14 @@ def issue_refs(text: str) -> str:
     return " ".join(refs)
 
 
-def guard_context(raw: dict, tool: str) -> dict | None:
-    if _off("NDF_CONTEXT_GUARD") or _field(raw, "agent_id"):  # agent_id はサブエージェントの中でだけ付く
-        return None
-    tp, sid = _field(raw, "transcript_path"), _field(raw, "session_id")
-    if "/subagents/" in tp or not tp or not sid:
-        return None
+def _launch_key(raw: dict, tool: str) -> tuple[str, str] | None:
+    """新しいフェーズの起動なら (1 度だけ通すための鍵, 課題番号を探す文)。対象の起動でなければ None。"""
     if tool == "Bash":
         cmd = _field(raw, "tool_input", "command")
         from . import shell_checks
 
-        if not shell_checks.starts_plan(cmd):
-            return None
-        key, words = f"plan\t{cmd}", ""
-    elif tool == "Skill":
+        return (f"plan\t{cmd}", "") if shell_checks.starts_plan(cmd) else None
+    if tool == "Skill":
         skill = _field(raw, "tool_input", "skill").removeprefix("ndf:")
         try:
             stages = STAGES.read_text(encoding="utf-8").splitlines()
@@ -286,17 +285,38 @@ def guard_context(raw: dict, tool: str) -> dict | None:
         if skill not in stages:
             return None
         words = _field(raw, "tool_input", "args")
-        key = f"skill\t{skill}\t{words}"
-    else:
-        words = _field(raw, "tool_input", "description")
-        if ":" not in words or words.split(":", 1)[0] not in STAGE_PREFIXES:
-            return None
-        key = f"agent\t{words}"
+        return f"skill\t{skill}\t{words}", words
+    words = _field(raw, "tool_input", "description")
+    if ":" not in words or words.split(":", 1)[0] not in STAGE_PREFIXES:
+        return None
+    return f"agent\t{words}", words
+
+
+def _context_deny(total: int, limit: int, nxt: str, notice: str | None) -> dict:
+    """上限を超えたときの拒否。ラッパーの下（notice がある）と外で文面が違う。"""
+    if notice is not None:
+        return deny(
+            f"会話の文脈が {total} トークンで、上限 {limit} を超えた。ラッパーの下なので、上限を超えている限りこの起動を止め続ける。新しいフェーズ（プランを含む）を起動せず、動いているプランと supervisor の報告を待ってから、引継ぎ文書（メインディレクトリの .ndf/handoff/<名>.md）を {HANDOFF_DOC} に従って作るか更新し、次のコマンドを情報文字列 ndf-next の囲みのコードブロック 1 つで出して応答を終える（中身: /goal {nxt} .ndf/handoff/<名>.md の続きから。同じ中身を文書の「次に実行するコマンド」にも置く）。<課題番号> のままなら、進めている課題の番号を補う。ブロックの直前に次の 1 文をそのまま書き、承認や確認を挟まずに出して終える: {notice}。規約: {CONTEXT_DOC}（止めるなら NDF_CONTEXT_GUARD=0、上限は NDF_CONTEXT_LIMIT）"
+        )
+    return deny(
+        f"会話の文脈が {total} トークンで、上限 {limit} を超えた。この工程（プランを含む）は新しい会話で始める。次のコマンドを情報文字列 ndf-next の囲みのコードブロック 1 つで示して応答を終える。中身: {nxt}（今の区間を /goal で始めていたなら /goal {nxt}）。<課題番号> のままなら、進めている課題の番号を補って示す。このまま続けると利用者が決めたら、同じ起動をもう一度行うと 1 度だけ通る。規約: {CONTEXT_DOC}（止めるなら NDF_CONTEXT_GUARD=0、上限は NDF_CONTEXT_LIMIT）"
+    )
+
+
+def guard_context(raw: dict, tool: str) -> dict | None:
+    if _off("NDF_CONTEXT_GUARD") or _field(raw, "agent_id"):  # agent_id はサブエージェントの中でだけ付く
+        return None
+    tp, sid = _field(raw, "transcript_path"), _field(raw, "session_id")
+    if "/subagents/" in tp or not tp or not sid:
+        return None
+    launch = _launch_key(raw, tool)
+    if launch is None:
+        return None
+    key, words = launch
     total = context_tokens(tp)
     if total is None:
         return None
-    lim = os.environ.get("NDF_CONTEXT_LIMIT") or "200000"
-    limit = int(lim) if lim.isdigit() else 200000
+    limit = _env_int("NDF_CONTEXT_LIMIT", 200000)
     d = guards_dir()
     if d is None:
         return None
@@ -315,14 +335,7 @@ def guard_context(raw: dict, tool: str) -> dict | None:
         if total <= limit:
             return None
         write_json(mark, {"key": key})
-    nxt = f"/ndf:development-workflow {issue_refs(words) or '<課題番号>'}"
-    if notice is not None:
-        return deny(
-            f"会話の文脈が {total} トークンで、上限 {limit} を超えた。ラッパーの下なので、上限を超えている限りこの起動を止め続ける。新しいフェーズ（プランを含む）を起動せず、動いているプランと supervisor の報告を待ってから、引継ぎ文書（/goal の指示が名指ししたもの。無ければ書かない）を更新し、次のコマンドを情報文字列 ndf-next の囲みのコードブロック 1 つで出して応答を終える（中身: /goal {nxt}、名指しの引継ぎ文書があれば「<文書> の続きから」）。<課題番号> のままなら、進めている課題の番号を補う。ブロックの直前に次の 1 文をそのまま書き、承認や確認を挟まずに出して終える: {notice}。規約: {CONTEXT_DOC}（止めるなら NDF_CONTEXT_GUARD=0、上限は NDF_CONTEXT_LIMIT）"
-        )
-    return deny(
-        f"会話の文脈が {total} トークンで、上限 {limit} を超えた。この工程（プランを含む）は新しい会話で始める。次のコマンドを情報文字列 ndf-next の囲みのコードブロック 1 つで示して応答を終える。中身: {nxt}（今の区間を /goal で始めていたなら /goal {nxt}）。<課題番号> のままなら、進めている課題の番号を補って示す。このまま続けると利用者が決めたら、同じ起動をもう一度行うと 1 度だけ通る。規約: {CONTEXT_DOC}（止めるなら NDF_CONTEXT_GUARD=0、上限は NDF_CONTEXT_LIMIT）"
-    )
+    return _context_deny(total, limit, f"/ndf:development-workflow {issue_refs(words) or '<課題番号>'}", notice)
 
 
 def guard_supervisor_cut(raw: dict) -> dict | None:

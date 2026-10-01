@@ -372,12 +372,9 @@ def machine_checks(a, root: Path, project: pm.ProjectMvv, record: dict) -> tuple
     return sprint, materials
 
 
-def cmd_check(a) -> tuple[dict, int | None]:
-    root = Path(a.root or ".").resolve()
-    project = pm.load_mvv(root)
-    if a.advise and not project.approved:
-        return advise_none(a, project)
-    record = {
+def new_record(a, root: Path, project) -> dict:
+    """判定の記録の初期値。"""
+    return {
         "at": clock.now_iso("utc"),
         "gate": a.gate,
         "sprint": a.sprint,
@@ -389,6 +386,36 @@ def cmd_check(a) -> tuple[dict, int | None]:
         "pace": str(jsonio.read(a.sprint, missing={}, broken={}, want=dict).get("pace") or ""),  # 読めなければ判定の中で外れにする
         "sprint_mvv": None,
     }
+
+
+def passed(a, root: Path, project, record: dict, usage: dict) -> tuple[dict, int | None]:
+    """MVV に従うときの関門の記録と結果。記録を書けなければ関門へ落とす。"""
+    record.update(verdict="follow", passed=True, **usage)
+    write_log(a.log, record)
+    err = record_gate(a, record)
+    if err:
+        record["passed"] = False
+        return result(
+            TOOL,
+            "gate",
+            f"{GATES[a.gate]}: MVV に従うが、関門の記録を書けない（{err}）。利用者の承認を求める",
+            [record],
+            usage,
+            next="利用者の承認を求める",
+        ), EXIT_GATE
+    if a.note:
+        write_note(a.note, a, record)
+    return result(
+        TOOL, "ok", f"{GATES[a.gate]}: MVV に従う。関門を省いて進めてよい", [record, *revise_items(a, root, project)], usage
+    ), None
+
+
+def cmd_check(a) -> tuple[dict, int | None]:
+    root = Path(a.root or ".").resolve()
+    project = pm.load_mvv(root)
+    if a.advise and not project.approved:
+        return advise_none(a, project)
+    record = new_record(a, root, project)
 
     def advised(summary: str, usage: dict | None = None, extra: dict | None = None):
         """助言の MVV 判定の結果。行と記録を書き、判定によらず 0 で返す（#1400 の決定 2）。"""
@@ -439,29 +466,10 @@ def cmd_check(a) -> tuple[dict, int | None]:
     record.update(reasons=verdict["reasons"], boundary=boundary, basis=pm.basis(verdict.get("basis"), project, sprint=sprint))
     if a.advise:
         record.update(verdict=verdict["verdict"], **usage)
-        why = "越えない線に当たる: " + " / ".join(map(str, boundary)) if boundary else verdict["verdict"]
-        return advised(why, usage)
+        return advised(pm.verdict_reason(verdict), usage)
     if verdict["verdict"] != "follow" or boundary:
-        why = "越えない線に当たる: " + " / ".join(map(str, boundary)) if boundary else verdict["verdict"]
-        return back(why, verdict["verdict"], usage=usage)
-    record.update(verdict="follow", passed=True, **usage)
-    write_log(a.log, record)
-    err = record_gate(a, record)
-    if err:
-        record["passed"] = False
-        return result(
-            TOOL,
-            "gate",
-            f"{GATES[a.gate]}: MVV に従うが、関門の記録を書けない（{err}）。利用者の承認を求める",
-            [record],
-            usage,
-            next="利用者の承認を求める",
-        ), EXIT_GATE
-    if a.note:
-        write_note(a.note, a, record)
-    return result(
-        TOOL, "ok", f"{GATES[a.gate]}: MVV に従う。関門を省いて進めてよい", [record, *revise_items(a, root, project)], usage
-    ), None
+        return back(pm.verdict_reason(verdict), verdict["verdict"], usage=usage)
+    return passed(a, root, project, record, usage)
 
 
 def main() -> int:

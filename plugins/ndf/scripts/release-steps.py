@@ -51,7 +51,6 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -67,7 +66,7 @@ import schema  # noqa: E402
 import versions  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from release_lib import bump, deploy  # noqa: E402
+from release_lib import bump, deploy, step_run  # noqa: E402
 from release_lib.names import changelog_section, changelog_span, h2_lines, next_h2, plugin_of, release_decl  # noqa: E402
 from step_result import (
     EXIT_GATE,
@@ -223,6 +222,16 @@ def expand(step: Step, version: str) -> list[str]:
     return [c.replace("{version}", version) for c in step.command]
 
 
+def changed_paths(root: Path, before_paths: set[str], before: dict[str, str | None]) -> list[str]:
+    """コマンドの後の状態と比べ、内容の変わったパスを返す。"""
+    after_paths = status_paths(root)
+    union = before_paths | after_paths
+    after = digests(root, union)
+    for p in after_paths - before_paths:  # コマンドの前は変更が無かった = HEAD の内容
+        before[p] = _head_digest(root, p)
+    return sorted(p for p in union if before[p] != after[p])
+
+
 def run_steps(root: Path, stage: str, version: str, dry_run: bool) -> int:
     steps = load_steps(root)
     if steps is None:
@@ -230,11 +239,7 @@ def run_steps(root: Path, stage: str, version: str, dry_run: bool) -> int:
     for step in selected(steps, stage):
         command = expand(step, version)
         if dry_run:
-            print(f"コマンド: {step.name}（{step.stage}）")
-            print(f"  command: {' '.join(command)}")
-            print(f"  writes: {', '.join(step.writes) or '（何も書かない）'}")
-            if step.guide:
-                print(f"  guide: {step.guide}")
+            step_run.print_step(step, command)
             continue
         try:
             before_paths = status_paths(root)
@@ -242,21 +247,10 @@ def run_steps(root: Path, stage: str, version: str, dry_run: bool) -> int:
         except (OSError, StepError) as e:
             print(f"コマンド: {step.name} → 実行しない（git status を取れない: {e}）", file=sys.stderr)
             return 1
-        sys.stdout.flush()
-        try:
-            rc = subprocess.run(command, cwd=str(root), timeout=step.timeout).returncode
-        except subprocess.TimeoutExpired:
-            print(f"コマンド: {step.name} → 時間切れ（{step.timeout} 秒）")
+        rc = step_run.run_command(root, step, command)
+        if rc is None:
             return 1
-        except OSError as e:
-            print(f"コマンド: {step.name} → 起動できない: {e}")
-            return 1
-        after_paths = status_paths(root)
-        union = before_paths | after_paths
-        after = digests(root, union)
-        for p in after_paths - before_paths:  # コマンドの前は変更が無かった = HEAD の内容
-            before[p] = _head_digest(root, p)
-        changed = sorted(p for p in union if before[p] != after[p])
+        changed = changed_paths(root, before_paths, before)
         outside = [p for p in changed if not allowed(p, step.writes)]
         print(f"コマンド: {step.name} → {rc}")
         for p in changed:
