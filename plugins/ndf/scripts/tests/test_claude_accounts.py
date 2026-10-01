@@ -724,3 +724,15 @@ def test_usable_marks_relogin_when_permissions_cannot_be_fixed(accounts, monkeyp
     monkeypatch.setattr(ca.os, "chmod", chmod)
     assert ca.usable("a", now=NOW) is False
     assert accounts.account("a")["needs_relogin"] is True
+
+
+# --- 現状固定: 更新の宛先を呼ぶ前のリフレッシュトークンの期限の確かめ（根拠は現状の出力。仕様の主張ではない） ---------
+
+
+def test_refresh_after_401_is_rejected_without_calling_when_refresh_token_expired(accounts):
+    """期限内のアクセストークンが 401 で、リフレッシュトークンが期限切れなら、更新の宛先を呼ばずに再登録が要るとする。"""
+    ta = accounts.add("a", refresh_in=-10, util5=None)
+    accounts.fake.usage[ta] = (401, {"error": "expired"})
+    ca.usage("a")
+    assert accounts.fake.usage_calls == [ta] and accounts.fake.refresh_calls == []
+    assert accounts.account("a")["needs_relogin"] is True

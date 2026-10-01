@@ -441,6 +441,12 @@ def _fresh(o: dict, now: float) -> bool:
     return (o.get("expiresAt") or 0) / 1000 - now > EXPIRY_MARGIN
 
 
+def _refresh_expired(o: dict, now: float) -> bool:
+    """リフレッシュトークンが期限切れか（期限が数値で `now` 以前）。期限が無い・数値でなければ偽。"""
+    rexp = o.get("refreshTokenExpiresAt")
+    return isinstance(rexp, (int, float)) and rexp / 1000 <= now
+
+
 def _usable_held(name: str, now: float) -> bool:
     """排他の中で呼ぶ。`usable` の中身。認証ファイルが無い・読めない・権限を直せない・期限の切れたアクセストークンを
     更新できる見込みが無い（リフレッシュトークンが無いか期限切れ）なら `needs_relogin` を真にする。"""
@@ -451,8 +457,7 @@ def _usable_held(name: str, now: float) -> bool:
     if not _secure(name) or o is None:
         _update_account(name, needs_relogin=True)
         return False
-    rexp = o.get("refreshTokenExpiresAt")
-    refreshable = bool(o.get("refreshToken")) and not (isinstance(rexp, (int, float)) and rexp / 1000 <= now)
+    refreshable = bool(o.get("refreshToken")) and not _refresh_expired(o, now)
     if refreshable or _fresh(o, now):
         return True
     _update_account(name, needs_relogin=True)  # 期限の切れたアクセストークンを更新できる見込みが無い（今のまま）
@@ -500,8 +505,7 @@ def _refresh(name: str, seen: str, now: float) -> str | None:
             return None
         if o["accessToken"] != seen and _fresh(o, now):
             return o["accessToken"]
-        rexp = o.get("refreshTokenExpiresAt")
-        how, new = ("rejected", None) if isinstance(rexp, (int, float)) and rexp / 1000 <= now else refresh_oauth(o, now, REFRESH_TIMEOUT)
+        how, new = ("rejected", None) if _refresh_expired(o, now) else refresh_oauth(o, now, REFRESH_TIMEOUT)
         if how == "rejected":
             _update_account(name, needs_relogin=True)
             return None
