@@ -341,6 +341,12 @@ def basis_phrase(items, mvv: ProjectMvv, sprint_sha: str | None = None) -> str:
     return f"根拠: {' / '.join(items) if items else NO_BASIS}（MVV 版 {mvv.version}{tail}）"
 
 
+def verdict_reason(verdict: dict) -> str:
+    """越えない線に当たればその線を、当たらなければ判定の語を返す。"""
+    boundary = verdict["boundary"]
+    return "越えない線に当たる: " + " / ".join(map(str, boundary)) if boundary else verdict["verdict"]
+
+
 def from_record(ref) -> ProjectMvv:
     """状態に写した参照から、本文を持たない `ProjectMvv` を組み直す（返信の句に使う）。"""
     if not isinstance(ref, dict) or ref.get("status") not in STATUSES:

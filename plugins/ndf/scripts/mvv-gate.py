@@ -372,12 +372,6 @@ def machine_checks(a, root: Path, project: pm.ProjectMvv, record: dict) -> tuple
     return sprint, materials
 
 
-def verdict_reason(verdict: dict) -> str:
-    """越えない線に当たればその線を、当たらなければ判定の語を返す。"""
-    boundary = verdict["boundary"]
-    return "越えない線に当たる: " + " / ".join(map(str, boundary)) if boundary else verdict["verdict"]
-
-
 def new_record(a, root: Path, project) -> dict:
     """判定の記録の初期値。"""
     return {
@@ -472,9 +466,9 @@ def cmd_check(a) -> tuple[dict, int | None]:
     record.update(reasons=verdict["reasons"], boundary=boundary, basis=pm.basis(verdict.get("basis"), project, sprint=sprint))
     if a.advise:
         record.update(verdict=verdict["verdict"], **usage)
-        return advised(verdict_reason(verdict), usage)
+        return advised(pm.verdict_reason(verdict), usage)
     if verdict["verdict"] != "follow" or boundary:
-        return back(verdict_reason(verdict), verdict["verdict"], usage=usage)
+        return back(pm.verdict_reason(verdict), verdict["verdict"], usage=usage)
     return passed(a, root, project, record, usage)
 
 
