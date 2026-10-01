@@ -1,7 +1,7 @@
 # #1576 の設計: 構造・データ構造・入出力の契約・処理の流れ・非機能
 
 [issue-1576-design.md](issue-1576-design.md) の続きである。ドメインモデル・機能一覧・構成要素は先頭のファイルに、決定の記録・
-設計の工程で確かめたこと（実測 A〜I）・テスト設計・未確認のまま残ることは
+設計の工程で確かめたこと（実測 A〜J）・テスト設計・未確認のまま残ることは
 [issue-1576-design-decisions.md](issue-1576-design-decisions.md) にある。
 
 ## 構造
@@ -18,6 +18,7 @@ classDiagram
     +prepare(name, base) Prepared
     +settle(name, base, note)
     +detach(name)
+    +register(name, staging, email, org_id, org_name)
     +usable(name) bool
     +usage(name, refresh, now) Usage|None
     +choose(exclude, keep, now) Choice
@@ -41,6 +42,7 @@ classDiagram
     +reason str|None
     +added int
     +skipped list
+    +local_only list
     +sync str|None
   }
   claude_accounts ..> claude_account_dir: 排他の中で呼ぶ
@@ -80,7 +82,7 @@ symlink にしない項目の一覧である。正本は `lib/claude_account_dir
 
 | 項目 | 一致 | 書くもの | 固有にする理由 |
 | --- | --- | --- | --- |
-| `.credentials.json` | 前方一致 | claude・NDF の更新 | 認証情報。書き込みの一時ファイルを含む |
+| `.credentials.json` | 前方一致 | claude・NDF の更新 | 認証情報。claude.ai のトークン（`claudeAiOauth`）と、`/mcp` で OAuth 認証した MCP サーバーのトークン（`mcpOAuth`。実測 J）を持つ。書き込みの一時ファイルを含む |
 | `.claude.json` | 前方一致 | claude・NDF の同期 | `oauthAccount` とアカウントごとのキャッシュ。本体の排他（`.claude.json.lock`）と書き込みの一時ファイルを含む |
 | `.oauth_refresh.lock` | 前方一致 | claude・NDF の更新 | 更新の排他と、その持ち主のファイル |
 | `.config.json` | 完全一致 | claude | `.claude.json` の古い名前（本体はこのファイルがあれば先に読む。実測 B） |
@@ -100,6 +102,12 @@ symlink にしない項目の一覧である。正本は `lib/claude_account_dir
 
 **共有側に無ければ作る項目は 2 つである。** `projects`（空のディレクトリ）と `settings.json`（`{}`。0600）。
 受け入れ条件 8 が名指しする 2 つで、無いまま起動すると claude がアカウント側に実体を作る。
+
+**`/mcp` で OAuth 認証した MCP サーバーの認証は、アカウントごとに持つ。** トークンは認証ファイルの `mcpOAuth` に
+あり（実測 J）、認証ファイルはアカウント固有の項目である。共有の `.credentials.json` の `mcpOAuth` は、NDF が読まず
+写さない（I3）。共有側で済ませた認証はアカウントの子に届かず、利用者がアカウントごとに `/mcp` で認証する（決定 21）。
+サーバーの定義（`mcpServers`）は同期で両側にそろうので、認証の済んでいないアカウントでは、そのサーバーが
+認証待ちで並ぶ。
 
 ### 足す・変えるデータ
 
@@ -126,7 +134,7 @@ C は作る、R は読む、U は更新する、D は消す。括弧は Claude C
 | F4 claude -p を動かす | R（claude が U） | R・U | C・R | U | U | R・U | — |
 | F5 従量の接続 | — | R | — | — | — | — | （R） |
 | F6 使えないアカウントを避ける | R | U | R | R | D（読めないとき） | — | — |
-| F8 移行・登録の削除 | D（削除のとき） | D（削除のとき） | C・D | D（削除のとき） | D（削除のとき） | — | — |
+| F8 移行・登録の削除・登録し直し | D（削除のとき）・U（登録し直しのとき） | D（削除のとき）。登録し直しでは `account.json` を U、`usage.json` を D | C・D（削除のとき。登録し直しでは触れない） | D（削除のとき）・U（登録し直しのとき） | D（削除・登録し直しのとき） | — | — |
 
 F7 と F9 はデータに触れない。F1・F3・F4 が同じ列を触るのは、3 つとも `prepare()` を通るためである。
 
@@ -173,6 +181,7 @@ F7 と F9 はデータに触れない。F1・F3・F4 が同じ列を触るのは
 | `prepare(name, base)` | 名前・元の環境 | `Prepared` | 例外を出さず `ok=False` と `reason` | 新設 |
 | `settle(name, base=None, note=None)` | 名前 | なし | 例外を出さない。同期できなければ `note` へ渡す | 新設 |
 | `detach(name)` | 名前 | なし | 排他を取れなければ `LockTimeout`（`unregister` と同じ） | 新設 |
+| `register(name, staging, email, org_id="", org_name="")` | 名前・ログインの済んだ staging・識別 | なし | 排他を取れなければ `LockTimeout`（今と同じ） | 引数は変えない。同じ名前の置き場があるときの置き換え方だけを変える（「登録し直し」の節） |
 | `usable(name)` | 名前 | 真偽 | 認証ファイルが無い・読めない・権限を直せないときは `needs_relogin` を真にして偽 | 新設（`token()` の確かめを置き換える） |
 | `usage(name, refresh=True, now=None)` | 名前・更新してよいか | `Usage` か None | 今と同じ | `before` を `refresh` に変える |
 | `choose(exclude=(), keep=(), now=None)` | 除く名前・動いている名前 | `Choice` | 今と同じ | `before`・`min_left` を削除 |
@@ -199,7 +208,7 @@ F7 と F9 はデータに触れない。F1・F3・F4 が同じ列を触るのは
 
 | 出力 | 形 | いつ |
 | --- | --- | --- |
-| `log.jsonl` の `account_dir` の行 | `section`（起動しようとしたセッション）・`account`・`ok`・`reason`・`added`（足した symlink の数）・`skipped`（飛ばした項目の名前）・`sync` | 用意か書き戻しで、足した・飛ばした・使えない・同期できないのどれかがあったとき。何も無ければ書かない |
+| `log.jsonl` の `account_dir` の行 | `section`（起動しようとしたセッション）・`account`・`ok`・`reason`・`added`（足した symlink の数）・`skipped`（同じ名前の実体があって飛ばした項目の名前）・`local_only`（共有側に無く、アカウント側にだけある実体の名前）・`sync` | 用意か書き戻しで、足した・飛ばした・アカウント側にだけある実体がある・使えない・同期できないのどれかがあったとき。何も無ければ書かない |
 | 画面の 1 行 | `ndf-relay: アカウント <名前> を使わない（<理由の文>）` | `ok` が偽のとき |
 | `supervise.py` の進捗ログ | `"kind": "account_dir"` と上と同じ項目（`section` の代わりに `step`） | 同上 |
 
@@ -272,8 +281,34 @@ sequenceDiagram
 1. 共有側に `projects` と `settings.json` が無ければ作る
 2. 共有の設定ディレクトリの直下の項目のうち、アカウント固有の項目でないものを順に見る。アカウント側に何も無ければ
    `<共有>/<項目>` への symlink を作る。正しい symlink があれば何もしない。参照先の違う symlink は付け替える。
-   実体があれば飛ばして名前を返す
-3. アカウント側の `projects` の実パスが共有側の `projects` の実パスと同じかを返す
+   実体があれば飛ばして名前を返す（`skipped`）
+3. アカウントの設定ディレクトリの直下の項目のうち、アカウント固有の項目でも symlink でもなく、共有側に同じ名前が
+   無いものの名前を返す（`local_only`）。消さず、移さない（I5）。claude がそのアカウントのセッションで初めて作った
+   項目（`plans`・`tasks`・`agents` など）がここに出る。手順 2 は共有側の直下だけを見るので、この手順が無いと、
+   共有側に同じ名前ができるまで記録に出ない
+4. アカウント側の `projects` の実パスが共有側の `projects` の実パスと同じかを返す
+
+`prepare` は、`skipped` と `local_only` を `Prepared` に載せて返す。`local_only` の項目は、アカウントを替えた先の
+セッションから見えない。起動は止めない（決定 5）。利用者は `account_dir` の行で名前を知り、共有したいものを共有の
+設定ディレクトリへ移す（次の用意が symlink にする）。
+
+### 登録し直し
+
+`register()` は、同じ名前の置き場が既にあるとき（`needs_relogin` や識別の食い違いの後の `account add <名前>`）、
+アカウントの排他の中で次の順に動く（決定 20）。置き場が無いとき（最初の登録）は、今のまま staging を置き場にする。
+
+1. staging に `account.json` を書く（今のまま。`needs_relogin` は偽、`limit` と認証の失敗の観測は無い）
+2. 置き場の `usage.json` と同期の控えを消す。前の認証で読んだ残量と、前の `.claude.json` との突き合わせの控えで
+   あり、次の取得と次の用意（最初の同期）が作り直す
+3. staging の `.credentials.json`・`.claude.json`・`account.json` を、この順に置き場へ置き換えで移す。staging に
+   `.claude.json` が無ければ、置き場の `.claude.json` を消す（前の `oauthAccount` が残ると、次の用意が識別の
+   食い違いで止まる。I13）。`account.json` を最後にするのは、途中で落ちたときに、前の `account.json` の
+   `needs_relogin` が残るようにするためである
+4. staging の残りを捨て、権限を直す（I15。今のまま）
+
+置き場のほかの項目には触れない。共有の項目への symlink、claude がアカウント側に作った実体、`backups` などの
+ほかのアカウント固有の項目は残る（I5）。置き換えた認証ファイルに前の `mcpOAuth` は無いので、登録し直した
+アカウントでは、OAuth の MCP サーバーの認証がもう 1 度要る（決定 21）。
 
 ### 共有する設定の部分の同期
 

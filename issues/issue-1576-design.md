@@ -7,13 +7,13 @@
 | --- | --- |
 | この文書 | 承認で見てほしいこと・例・ドメインモデル・機能一覧・構成要素 |
 | [issue-1576-design-details.md](issue-1576-design-details.md) | 構造・データ構造・入出力の契約・処理の流れ・非機能の実現方式 |
-| [issue-1576-design-decisions.md](issue-1576-design-decisions.md) | 設計の工程で確かめたこと（実測 A〜I）・決定の記録・テスト設計・未確認のまま残ること |
+| [issue-1576-design-decisions.md](issue-1576-design-decisions.md) | 設計の工程で確かめたこと（実測 A〜J）・決定の記録・テスト設計・未確認のまま残ること |
 
 置き換える前の形は [issue-1389-design.md](issue-1389-design.md) と [issue-1523-design.md](issue-1523-design.md) にある。
 
 ## 承認で見てほしいこと
 
-この変更は認証の渡し方を変えるため、設計の承認を MVV 判定に任せない（要求の前提 7）。人に見てほしい点は次の 6 つである。
+この変更は認証の渡し方を変えるため、設計の承認を MVV 判定に任せない（要求の前提 7）。人に見てほしい点は次の 7 つである。
 
 | # | 何を | なぜ人が見るか | 詳しく |
 | --- | --- | --- | --- |
@@ -23,6 +23,7 @@
 | 4 | 実物のアカウントを使う確かめは、この工程で行っていない。要求の未決 2（NDF が書いた認証ファイルを動いている claude が読み直す）は、本体のコードを読んだだけである | 秘密に触れる操作（C1）は人の承認が要る | [未確認のまま残ること](issue-1576-design-decisions.md) |
 | 5 | 要求が設計へ任せた未決 2〜7 に答えた。動いている claude のアカウントを NDF は更新しない（未決 2）。`.claude.json` は同期の控えとの突き合わせで写す（未決 3）。`/login` で別のアカウントになった置き場は使わない（未決 4）。固有の項目のほかはすべて共有する（未決 5・7）。認証の失敗では再登録を求めず、1 時間だけ候補から外す（未決 6） | 利用者の環境で起きる振る舞いを決めた | 決定 10・6・15・4・5・13・14 |
 | 6 | アカウント側の `.claude.json` が JSON として読めないアカウントでは、claude を起動しない。NDF は壊れたファイルを直さず、利用者が退避から戻すか、ファイルを消す | そのアカウントは、利用者が手で戻すまで使われない | 決定 19 |
+| 7 | `/mcp` で OAuth 認証した MCP サーバー（claude.ai のコネクタでないもの）の認証が、アカウントごとに要るようになる。本体はそのトークンを認証ファイルの `mcpOAuth` に置き（実測 J）、NDF は共有の `.credentials.json` を読まない（I3）ため、共有側で済ませた認証はアカウントの子に届かない。今は子が共有の設定ディレクトリのまま起動するので届いている。対話を持たない claude -p の worker は認証し直せず、認証の済んでいないアカウントではそのサーバーの Tool を使えない | 今の振る舞いからの後退で、認証情報の置き場に関わる（C1・C2） | 決定 21・[未確認のまま残ること](issue-1576-design-decisions.md) |
 
 ## 例: `ohama-personal` のセッションが 8 時間を超える
 
@@ -113,7 +114,7 @@
 | I2 | 登録の記録 | 従量の接続の子の環境は、トークンとスコープの変数を持たず、`CLAUDE_CONFIG_DIR` は元の環境の値へ戻る（元に無ければ変数が無い）。`NDF_SHARED_CONFIG_DIR` を残さない（#1389 I16 を足した変数へ広げる） | — |
 | I3 | アカウントの認証情報 | NDF は共有の設定ディレクトリの `.credentials.json` を読まず、書かず、symlink にもしない（#1389 I4） | — |
 | I4 | 共有物 | アカウントの設定ディレクトリの symlink の参照先は、共有の設定ディレクトリの直下の項目（`<共有>/<項目>`）だけである。別のアカウントの設定ディレクトリを経由しない。アカウントの置き場は、入れ子の起動でも共有の設定ディレクトリから求める | 参照先の違う symlink は付け替える |
-| I5 | 共有物 | 用意は、共有の設定ディレクトリの項目とアカウントの設定ディレクトリの実体を消さず、移さず、上書きしない。登録の削除は symlink の先を消さない | 同じ名前の実体があれば飛ばし、項目の名前を記録する |
+| I5 | 共有物 | 用意は、共有の設定ディレクトリの項目とアカウントの設定ディレクトリの実体を消さず、移さず、上書きしない。登録の削除は symlink の先を消さない。登録し直し（同じ名前での `account add`）は、アカウントの設定ディレクトリのうち、アカウント固有の項目でない項目（共有の項目への symlink と、claude がアカウント側に作った実体）を消さない | 同じ名前の実体があれば飛ばし、項目の名前を記録する（`skipped`）。共有側に同じ名前が無く、アカウント側にだけある実体も、名前を記録する（`local_only`） |
 | I6 | 共有物 | アカウントの設定ディレクトリの `projects` が共有の `projects` と同じ実体を指さないアカウントで、claude を起動しない | 次の候補へ移り、理由を画面の 1 行と記録に残す |
 | I7 | 登録の記録 | NDF は、アカウントの設定ディレクトリの実パスに `.lock` を付けたパス（`accounts/<名前>.lock`）を作らず、開かない。NDF のアカウントごとの排他は `accounts/.locks/<名前>.lock` で取る | — |
 | I8 | アカウントの認証情報 | NDF は、claude が動いているアカウントのトークンを更新せず、その認証ファイルを書かない。「動いている」は、呼ぶ側が渡す名前（ラッパーの今のセッション・`supervise.py` の実行中の呼び出し）と、起動した環境の `NDF_CLAUDE_ACCOUNT` で決める | 使用量はファイルにあるトークンで読み、読めなければ残量不明にする |
@@ -176,7 +177,7 @@
 | F5 | すべて上限のときに従量の接続へ移り、上限が外れたら戻る（変数と設定ディレクトリを混ぜない） | 利用者・conductor |
 | F6 | 使えないアカウント（認証が通らない・識別が食い違う・会話の記録が共有されない・アカウント側の `.claude.json` が読めない）を避けて続け、理由を画面と記録で知る | 利用者 |
 | F7 | 切り替えの理由に合う再開の文で、中断したところから続ける | conductor |
-| F8 | 登録し直さずに新しい形へ移る。登録を外しても共有の設定が残る | 利用者 |
+| F8 | 登録し直さずに新しい形へ移る。登録を外しても共有の設定が残る。登録し直しても、claude がアカウント側に作った項目が残る | 利用者 |
 | F9 | 文書と説明で、子へ何を渡すかを知る | 利用者・NDF の開発者 |
 
 ## 構成要素
@@ -187,6 +188,7 @@
 | `lib/claude_accounts.py` の `shared_dir()`・`SHARED_ENV`・`store_dir()` | 追加・変更 | 共有の設定ディレクトリを求める。`NDF_SHARED_CONFIG_DIR` があればその値（空なら `~/.claude`）、無ければ `CLAUDE_CONFIG_DIR`（無ければ `~/.claude`）。`store_dir()` はここから求める（I4） |
 | 同 `_locked()`・`_sweep_old_locks()` | 変更・追加 | 排他のパスを `accounts/.locks/<名前>` に変える（I7）。置き場の直下の古い排他ファイルを消す（E2） |
 | 同 `prepare()`・`settle()`・`detach()` | 追加 | アカウントの排他の中で、用意（古い排他ファイルの掃除 → 使えるかの確かめ → アカウント側の `.claude.json` が読めるかの確かめ → 識別の照合 → symlink → 同期）と、書き戻し（同期だけ）と、symlink の取り外しを行う。失敗は例外にせず結果で返す |
+| 同 `register()` | 変更 | 同じ名前の置き場があるときは、置き場を丸ごと消さない。NDF の記録の `usage.json` と同期の控えを消し、staging の `.credentials.json`・`.claude.json`・`account.json` だけを置き場へ移して、staging の残りを捨てる。ほかの項目（symlink・claude が作った実体）には触れない（I5・決定 20）。置き場が無いとき（最初の登録）は今のまま staging を置き場にする |
 | 同 `account_env()`・`_account_env()`・`_metered_env()` | 変更 | 用意が通ったら I1 の環境を、従量の接続なら I2 の環境を組み立てる。記録すべきことを `note` へ渡す |
 | 同 `usable()` | 追加 | 候補として起動できるかを、ネットワークを使わずに確かめる（登録の記録・権限・認証ファイルにリフレッシュトークンか期限内のアクセストークンがある） |
 | 同 `usage()`・`_fetch()`・`_refresh()`・`_refresh_lock()` | 変更・追加 | 使用量の取得と、I8・I9 を満たす更新。更新の排他を取り、排他の中で読み直す |
@@ -204,11 +206,11 @@
 | 同 `call_claude()`・`ClaudeRunner.call()` | 変更 | claude -p の結果が認証の失敗なら（実測 H）、結果に `auth` の印を付ける。登録済みアカウントで呼んでいたら、`note_auth_failed` で観測を残し、そのアカウントを除いて `choose` し、同じ呼び出しをやり直す（E9・I12）。候補が無ければ従量の接続へ移り、それも無ければ今の `child_env()` と同じく、他のアカウントが上限なだけなら解除まで待ち、候補が 1 つも無ければ `AuthUnavailable` で止まる |
 | `scripts/lib/claude-settings.sh` | 新設 | `settings.json` の実パスを返すシェルの関数（symlink なら参照先） |
 | `scripts/ensure-retention.sh`・`scripts/statusline-switch.sh` | 変更 | 上の関数で求めた実パスへ書き、排他・印・控えを実パスの隣に置く（I16） |
-| 文書と説明 | 変更 | `references/relay.md` の認証の渡し方と、アカウント側の `.claude.json` が読めないときの戻し方（決定 19）、`supervise_lib/plan.py` の説明、`lib/claude_accounts.py` の冒頭、用語集、[issue-1389-design-decisions.md](issue-1389-design-decisions.md) の決定 1 と [issue-1523-design.md](issue-1523-design.md) の決定 1 への追記（置き換えたことと、この文書の決定 1 への参照） |
+| 文書と説明 | 変更 | `references/relay.md` の認証の渡し方と、アカウント側の `.claude.json` が読めないときの戻し方（決定 19）と、OAuth の MCP サーバーをアカウントごとに `/mcp` で認証すること（決定 21）、`supervise_lib/plan.py` の説明、`lib/claude_accounts.py` の冒頭、用語集、[issue-1389-design-decisions.md](issue-1389-design-decisions.md) の決定 1 と [issue-1523-design.md](issue-1523-design.md) の決定 1 への追記（置き換えたことと、この文書の決定 1 への参照） |
 
 変えないもの: アカウントの選び方の順（`_try_order`）、上限の検知、`relay_lib/login.py` の登録の手順、`statusline.sh`、
-`relay_lib/common.py` の `config_dir()`、`claude_accounts.unregister()` と `register()`（`shutil.rmtree` は symlink を
-辿らない。実測 F）。
+`relay_lib/common.py` の `config_dir()`、`claude_accounts.unregister()`（`shutil.rmtree` は symlink を辿らない。実測 F）。
+`relay_lib/login.py` が `register()` を呼ぶ形（引数）も変えない。
 
 ### `CLAUDE_CONFIG_DIR` が共有の設定ディレクトリを指す前提の規則
 
@@ -291,7 +293,8 @@ graph TD
 
 どこで動くかは変えない。プロセスの境界をまたいで流れるものからトークンが消え、設定ディレクトリのパスとアカウントの
 名前だけになる。トークンの更新の宛先を呼ぶ主体は、NDF から claude へ移る。claude.ai のコネクタは、claude が認証ファイルの
-スコープを自分で読んで取りに行く（#1523 の辺はそのまま効く）。
+スコープを自分で読んで取りに行く（#1523 の辺はそのまま効く）。`/mcp` で OAuth 認証した MCP サーバーのトークンは、
+子がアカウント側の認証ファイルから読むため、アカウントごとに認証が要る（決定 21）。
 
 ### パッケージ・モジュール構成
 
@@ -300,7 +303,7 @@ plugins/ndf/
 ├── scripts/
 │   ├── lib/claude_account_dir.py     # 新設: symlink・.claude.json の同期・識別
 │   ├── lib/claude-settings.sh        # 新設: settings.json の実パス
-│   ├── lib/claude_accounts.py        # 変更: 置き場・排他・用意・環境・更新・観測
+│   ├── lib/claude_accounts.py        # 変更: 置き場・排他・用意・登録し直し・環境・更新・観測
 │   ├── lib/claude_usage.py           # 変更: 更新の宛先の待ちの上限
 │   ├── relay_lib/claude.py           # 変更: section_env・resume_input
 │   ├── relay_lib/switch.py           # 変更: 再開の文の表・認証の失敗の扱い
@@ -312,7 +315,7 @@ plugins/ndf/
 │   ├── ensure-retention.sh           # 変更: 実パスへ書く
 │   ├── statusline-switch.sh          # 変更: 実パスへ書く
 │   └── tests/                        # 変更: test_claude_accounts.py・test_relay_account.py・test_ensure_retention.py ほか
-└── skills/development-workflow/references/relay.md   # 変更: 認証の渡し方・読めない .claude.json の戻し方
+└── skills/development-workflow/references/relay.md   # 変更: 認証の渡し方・読めない .claude.json の戻し方・MCP サーバーの認証
 docs/glossary/glossary.json, docs/glossary.md          # 変更: 用語
 issues/issue-1389-design-decisions.md, issues/issue-1523-design.md   # 変更: 決定 1 への追記
 ```
