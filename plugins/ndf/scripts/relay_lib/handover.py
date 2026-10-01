@@ -181,6 +181,23 @@ def write_handover(relay_dir: str, data: dict) -> str:
     return path
 
 
+def _valid(data: dict) -> bool:
+    """申し送りの形の検査。知っている `schema` で、必須のキーと型がそろっていれば True。"""
+    schema = data.get("schema")
+    if not isinstance(schema, int) or isinstance(schema, bool) or not 1 <= schema <= SCHEMA:
+        return False
+    state, nxt = data.get("state"), data.get("next")
+    return not (
+        any(k not in data for k in REQUIRED)
+        or not isinstance(state, dict)
+        or not isinstance(nxt, dict)
+        or not isinstance(state.get("section"), int)
+        or any(k not in state for k in STATE_KEYS)
+        or any(k not in nxt for k in NEXT_KEYS)
+        or not isinstance(data.get("first_args"), list)
+    )
+
+
 def read_handover(path: str) -> tuple[dict | None, str | None]:
     """申し送りを読んで消す。(中身か None, 利用者が手で打つ次のコマンドか None)。
 
@@ -194,21 +211,7 @@ def read_handover(path: str) -> tuple[dict | None, str | None]:
     if not isinstance(data, dict):
         return None, None
     shown = data.get("shown") if isinstance(data.get("shown"), str) and data.get("shown") else None
-    schema = data.get("schema")
-    if not isinstance(schema, int) or isinstance(schema, bool) or not 1 <= schema <= SCHEMA:
-        return None, shown
-    state, nxt = data.get("state"), data.get("next")
-    if (
-        any(k not in data for k in REQUIRED)
-        or not isinstance(state, dict)
-        or not isinstance(nxt, dict)
-        or not isinstance(state.get("section"), int)
-        or any(k not in state for k in STATE_KEYS)
-        or any(k not in nxt for k in NEXT_KEYS)
-        or not isinstance(data.get("first_args"), list)
-    ):
-        return None, shown
-    return data, shown
+    return (data if _valid(data) else None), shown
 
 
 def exec_argv(base: str, to: str, first_args: list[str]) -> tuple[str, list[str]]:
