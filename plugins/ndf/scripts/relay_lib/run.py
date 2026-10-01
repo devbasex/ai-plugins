@@ -88,20 +88,18 @@ class Relay(AccountSwitch, ho.Swapper):
 
     def start_section(self, s: ho.SectionInput) -> None:
         """区間を起動する。`s.plan` は上限の後に決めた (アカウント, 理由, 選んだ結果)。無ければここで選ぶ（F4）。"""
-        args, cwd, command, from_session = s.args, s.cwd, s.command, s.from_session
-        cwd_fallback, carried, plan = s.cwd_fallback, s.carried, s.plan
         self.record.drop_mark()
         remove(self.path(QUESTION_FILE), self.path(LIMIT_FILE))  # 上限シグナルファイルは前の子のもの（新しい子の hook はまだ書けない）
         prev = self.account
         self.settle_account(prev)  # 前のセッションの .claude.json の共有する部分を書き戻してから次を用意する（E12）
-        to, reason, choice = (plan or self.pick(None)) if self.multi else (None, None, None)
+        to, reason, choice = (s.plan or self.pick(None)) if self.multi else (None, None, None)
         env = cl.section_env(self.env, to, self.note_account_dir) if to else None
         if to and env is None:  # 親の認証へ戻さない。選び直し、無ければ止める
             to, reason, choice, env = self.replace_unusable(to)
         if env is None:
             env = self.env
-        argv = cl.metered_settings([*(carried or []), *args], env, cwd, store=self.path(cl.SETTINGS_FILE))
-        at = self.term.spawn(self.claude, argv, cwd, env, self.path(CHILD_FILE))
+        argv = cl.metered_settings([*(s.carried or []), *s.args], env, s.cwd, store=self.path(cl.SETTINGS_FILE))
+        at = self.term.spawn(self.claude, argv, s.cwd, env, self.path(CHILD_FILE))
         self.section += 1
         self.started_at = at
         self.account = to
@@ -110,16 +108,16 @@ class Relay(AccountSwitch, ho.Swapper):
             at=stamp(at),
             section=self.section,
             pid=self.term.pid,
-            command=command,
-            from_session=from_session,
+            command=s.command,
+            from_session=s.from_session,
             plugin_version=self.version,
-            cwd=cwd,
+            cwd=s.cwd,
             relay_version_dir=ho.own_dir(),
         )
-        if cwd_fallback is not None:
-            row["cwd_fallback"] = cwd_fallback
-        if carried is not None:
-            row["carried"] = carried
+        if s.cwd_fallback is not None:
+            row["cwd_fallback"] = s.cwd_fallback
+        if s.carried is not None:
+            row["carried"] = s.carried
         if self.multi:
             row["account"] = to
         self.log(**row)
