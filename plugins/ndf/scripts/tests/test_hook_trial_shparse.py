@@ -77,3 +77,65 @@ def test_block(targets, cmd, want):
 @pytest.mark.parametrize("cmd,want", BLOCK_NOBASE)
 def test_block_without_base(targets, cmd, want):
     assert targets(cmd, with_base=False) == want
+
+
+# --- Targets.command: tee / sed -i / cp / mv の書き込み先と、cd による位置の移り ---
+
+COMMAND = [
+    ("echo x | tee a b", ["@/a", "@/b"]),
+    ("tee -a a", ["@/a"]),
+    ("sed -i s/a/b/ f", ["@/f"]),
+    ("sed -n p f", []),
+    ("sed -e s/a/b/ -i.bak f g", ["@/f", "@/g"]),
+    ("sed --in-place=.b -f s.sed f", ["@/f"]),
+    ("sed -ni s/a/b/ -- f", ["@/f"]),
+    ("cp a b", ["@/b"]),
+    ("mv -t d a b", ["@/d"]),
+    ("cp --target-directory=d a", ["@/d"]),
+    ("cp -td a", ["@/d"]),
+    ("mv --target-directory d a", ["@/d"]),
+    ("cd sub && echo > f", ["@/sub/f"]),
+    ("cd sub; echo > f", ["@/sub/f"]),
+    ("cd /abs/x; echo > f", ["/abs/x/f"]),
+    ("cd; echo > f", []),
+    ("cd $X; echo > f", []),
+    ("cd ~; echo > f", []),
+    ("cd -- d; echo > f", ["@/d/f"]),
+    ("cd -; echo > f", []),
+    ("cd -P d; echo > f", ["@/d/f"]),
+    ("cd a b; echo > f", ["@/a/f"]),
+    ("cd a/../b; echo > f", ["@/b/f"]),
+    ("cd a; cd ../b; echo > f", ["@/b/f"]),
+    ("cd a; cd $X; cd b; echo > f", []),
+    ("command cd d; echo > f", ["@/d/f"]),
+    ("builtin -- cd d; echo > f", ["@/d/f"]),
+    ("time -p cd d; echo > f", ["@/d/f"]),
+    ("command -p tee a", ["@/a"]),
+    ("> f cd d; echo > g", ["@/f", "@/d/g"]),
+    ("cd d > f; echo > g", ["@/f", "@/d/g"]),
+    ("X=$(echo > s) echo hi", ["@/s"]),
+    ("f() { cd d; }; f; echo > g", []),
+    ("f() { echo > x; }; f; echo > g", ["@/x", "@/g"]),
+    ("tee > f a", ["@/f", "@/a"]),
+    ("cat <<< x tee a", ["@/a"]),
+    ("env tee a | xargs sed -i s/a/b/ f", ["@/a", "@/f"]),
+    # 現状の記録: 語の位置に関わらず tee を見るので、echo の引数の tee の後ろも書き込み先になる
+    ("echo > f tee g", ["@/f", "@/g"]),
+    # 現状の記録: 引数そのものが置換のとき、中の書き込み先（s・t）は拾われない
+    ("echo $(echo > s) `echo > t`", []),
+]
+
+COMMAND_NOBASE = [
+    ("cd d; echo > f; tee a", ["f", "a"]),
+    ("f() { cd d; }; f; cp a b", ["b"]),
+]
+
+
+@pytest.mark.parametrize("cmd,want", COMMAND)
+def test_command(targets, cmd, want):
+    assert targets(cmd) == want
+
+
+@pytest.mark.parametrize("cmd,want", COMMAND_NOBASE)
+def test_command_without_base(targets, cmd, want):
+    assert targets(cmd, with_base=False) == want
