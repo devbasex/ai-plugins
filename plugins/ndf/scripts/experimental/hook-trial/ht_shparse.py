@@ -187,50 +187,59 @@ class Targets:
         entry_cds = st.cds
         t = n.type
         if t == "if_statement":
-            for c in n.children:
-                if c.type in ("elif_clause", "else_clause"):
-                    if st.cds > entry_cds:
-                        st.cwd = None
-                    for g, bg in statements(c):
-                        self.stmt(g, st.copy() if bg else st)
-                elif c.is_named and c.type != "comment":
-                    nxt = c.next_sibling
-                    self.stmt(c, st.copy() if nxt is not None and nxt.type == "&" else st)
+            self._if_block(n, st, entry_cds)
         elif t == "case_statement":
-            entry = st.cwd
-            fell = False
-            for c in n.children:
-                if c.type != "case_item":
-                    if c.is_named and field(n, c) == "value":
-                        self.substs(c, st)
-                    continue
-                if not fell:
-                    st.cwd = entry
-                for g, bg in statements(c):
-                    if field(c, g) == "value":
-                        continue
-                    self.stmt(g, st.copy() if bg else st)
-                fell = any(k.type in (";&", ";;&") for k in c.children)
+            self._case_block(n, st)
         else:
-            for c in n.children:
-                if c.is_named and c.type != "comment":
-                    if c.type == "do_group":
-                        self.seq(c, st)
-                    elif field(n, c) in ("value", "initializer", "condition", "update") and c.type not in (
-                        "command",
-                        "list",
-                        "pipeline",
-                        "redirected_statement",
-                        "compound_statement",
-                        "subshell",
-                        "negated_command",
-                    ):
-                        self.substs(c, st)
-                    else:
-                        self.stmt(c, st)
+            self._loop_block(n, st)
         if st.cds > entry_cds:
             st.cwd = None
         return (st.cds - entry_cds, False, False)
+
+    def _if_block(self, n, st: St, entry_cds: int) -> None:
+        for c in n.children:
+            if c.type in ("elif_clause", "else_clause"):
+                if st.cds > entry_cds:
+                    st.cwd = None
+                for g, bg in statements(c):
+                    self.stmt(g, st.copy() if bg else st)
+            elif c.is_named and c.type != "comment":
+                nxt = c.next_sibling
+                self.stmt(c, st.copy() if nxt is not None and nxt.type == "&" else st)
+
+    def _case_block(self, n, st: St) -> None:
+        entry = st.cwd
+        fell = False
+        for c in n.children:
+            if c.type != "case_item":
+                if c.is_named and field(n, c) == "value":
+                    self.substs(c, st)
+                continue
+            if not fell:
+                st.cwd = entry
+            for g, bg in statements(c):
+                if field(c, g) == "value":
+                    continue
+                self.stmt(g, st.copy() if bg else st)
+            fell = any(k.type in (";&", ";;&") for k in c.children)
+
+    def _loop_block(self, n, st: St) -> None:
+        for c in n.children:
+            if c.is_named and c.type != "comment":
+                if c.type == "do_group":
+                    self.seq(c, st)
+                elif field(n, c) in ("value", "initializer", "condition", "update") and c.type not in (
+                    "command",
+                    "list",
+                    "pipeline",
+                    "redirected_statement",
+                    "compound_statement",
+                    "subshell",
+                    "negated_command",
+                ):
+                    self.substs(c, st)
+                else:
+                    self.stmt(c, st)
 
     def andor(self, n, st: St, redirs):
         c, last, or1, cond = self._andor(n, st, redirs)
