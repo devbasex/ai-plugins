@@ -277,6 +277,89 @@ def test_propose_writes_candidates_with_the_four_sections_first(env):
     assert not (env["root"] / ".ndf").exists()  # 承認の前に .ndf/ へ書かない（AC5）
 
 
+def _proposal(cands, **over) -> dict:
+    return {**json.loads(proposal(cands)), **over}
+
+
+def _without(c: dict, key: str) -> dict:
+    return {k: v for k, v in c.items() if k != key}
+
+
+_A, _B = candidate("A"), candidate("B")
+PROBLEM_CASES = {
+    "ok": (lambda: _proposal([_A, _B]), []),
+    "not-an-object": (lambda: [1], ["JSON のオブジェクトでない"]),
+    "none": (lambda: None, ["JSON のオブジェクトでない"]),
+    "four-sections": (
+        lambda: _proposal([_A, _B], context="  ", premise=None, evidence=3, options=""),
+        ["経緯（context）が無い", "前提（premise）が無い", "根拠（evidence）が無い", "選択肢（options）が無い"],
+    ),
+    "candidates-not-a-list": (lambda: _proposal("x"), ["候補が 2 案以上ない"]),
+    "candidates-missing": (lambda: _without(_proposal([_A, _B]), "candidates"), ["候補が 2 案以上ない"]),
+    "one-candidate": (lambda: _proposal([_A]), ["候補が 2 案以上ない"]),
+    "candidate-not-an-object": (lambda: _proposal([_A, "x", _B]), ["候補 2: オブジェクトでない"]),
+    # id が無い候補は並びの番号で呼ぶ
+    "no-id": (lambda: _proposal([_A, _without(_without(_B, "id"), "mission")]), ["候補 2: Mission の本文が無い"]),
+    "values-empty": (lambda: _proposal([_A, {**_B, "values": []}]), ["候補 B: Value が無い"]),
+    "values-not-a-list": (lambda: _proposal([_A, {**_B, "values": "x"}]), ["候補 B: Value が無い"]),
+    "redlines-missing": (lambda: _proposal([_A, _without(_B, "redlines")]), ["候補 B: レッドライン（redlines）が無い"]),
+    # レッドラインは空の配列でよい
+    "redlines-empty": (lambda: _proposal([_A, {**_B, "redlines": []}]), []),
+    "redline-not-an-object": (lambda: _proposal([_A, {**_B, "redlines": ["x"]}]), ["候補 B: P の本文が無い"]),
+    "redline-without-id": (lambda: _proposal([_A, {**_B, "redlines": [{"text": "t", "evidence": []}]}]), ["候補 B: P の根拠が無い"]),
+    "vision-blank": (lambda: _proposal([_A, {**_B, "vision": {"text": "  ", "evidence": ["S1"]}}]), ["候補 B: Vision の本文が無い"]),
+    "evidence-shapes": (
+        lambda: _proposal([_A, {**_B, "values": [{"text": "t"}, {"text": "u", "evidence": "S1"}, {"text": "v", "evidence": []}]}]),
+        ["候補 B: Value 1 の根拠が無い", "候補 B: Value 2 の根拠が無い", "候補 B: Value 3 の根拠が無い"],
+    ),
+    "unknown-evidence": (
+        lambda: _proposal([_A, {**_B, "mission": {"text": "t", "evidence": ["S1", "S9", 7]}}]),
+        ["候補 B: Mission の根拠が材料に無い ID を指す（S9, 7）"],
+    ),
+    "questions-missing": (lambda: _without(_proposal([_A, _B]), "questions"), ["利用者に決めてもらう点（questions）が無い"]),
+    "questions-empty": (lambda: _proposal([_A, _B], questions=[]), ["利用者に決めてもらう点（questions）が無い"]),
+    "questions-blank": (lambda: _proposal([_A, _B], questions=["x", {"question": " "}]), ["利用者に決めてもらう点（questions）が無い"]),
+    # 並びの順: 4 節 → 案の数 → 候補ごと（Value と redlines の有無 → Mission・Vision・Value・P の本文と根拠）→ questions
+    "order": (
+        lambda: _proposal(
+            [
+                {**_A, "values": None, "redlines": None, "mission": None},
+                {
+                    **_B,
+                    "mission": {"text": "t"},
+                    "values": [{"text": ""}],
+                    "redlines": ["x", {"id": "P2", "text": "t", "evidence": ["S8"]}],
+                },
+                7,
+            ],
+            context="",
+            questions=None,
+        ),
+        [
+            "経緯（context）が無い",
+            "候補 A: Value が無い",
+            "候補 A: レッドライン（redlines）が無い",
+            "候補 A: Mission の本文が無い",
+            "候補 B: Mission の根拠が無い",
+            "候補 B: Value 1 の本文が無い",
+            "候補 B: P の本文が無い",
+            "候補 B: P2 の根拠が材料に無い ID を指す（S8）",
+            "候補 3: オブジェクトでない",
+            "利用者に決めてもらう点（questions）が無い",
+        ],
+    ),
+}
+
+
+@pytest.mark.parametrize("name", list(PROBLEM_CASES))
+def test_candidate_problems_names_each_missing_part(name):
+    """現状固定: 候補の形の誤りは、この文面とこの並びで返る。"""
+    from project_lib import mvv_candidates as mc
+
+    make, errs = PROBLEM_CASES[name]
+    assert mc.candidate_problems(make(), {"S1", "S2"}) == errs
+
+
 # ---------------------------------------------------------------- vet と approve（AC5・AC16・AC19・I4・決定 6）
 
 
