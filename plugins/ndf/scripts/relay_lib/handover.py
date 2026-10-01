@@ -296,9 +296,7 @@ class Swapper:
         except OSError as e:
             remove(path)
             self.term.set_raw()
-            end = time.time() + 5
-            while not self.limit.take() and time.time() < end:
-                time.sleep(0.1)
+            self.limit.take_within()
             raise Skip(EXEC_FAILED, f"{to} を起動できない（{e.strerror or type(e).__name__}）") from None
 
     def _swap_skipped(self, reason: str, running: str, to: str | None, detail: str, t0: float) -> None:
@@ -347,11 +345,8 @@ class Swapper:
     def resume(self, h: dict) -> int:
         """入れ替えた後: `count.lock` を取り直し（上限は判定し直さない）、申し送りの次のセッションを起動して続ける。"""
         self.first_args = list(h["first_args"])
-        end = time.time() + 5
-        while not self.limit.take():
-            if time.time() >= end:
-                return self.give_up("count-lock", "起動の数を数えるロックが取れない", h["shown"])
-            time.sleep(0.1)
+        if not self.limit.take_within():
+            return self.give_up("count-lock", "起動の数を数えるロックが取れない", h["shown"])
         self.term.screen(f"── ndf-relay: 区間 {self.section + 1} ──")
         code = self._start_next_section(SectionInput.from_json(h["next"]), h["shown"])
         if code is not None:

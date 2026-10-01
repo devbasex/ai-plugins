@@ -212,11 +212,8 @@ class Relay(AccountSwitch, ho.Swapper):
 
     def recheck(self, m) -> tuple[str, str] | None:
         """質問の後に読み直した合図で起動する前に、`count.lock`・上限・空回りを判定し直す。"""
-        end = time.time() + 5
-        while not self.limit.take():
-            if time.time() >= end:
-                return "count-lock", "起動の数を数えるロックが取れない"
-            time.sleep(0.1)
+        if not self.limit.take_within():
+            return "count-lock", "起動の数を数えるロックが取れない"
         return self.limit.refusal(parse_iso(m.get("written_at")) or time.time(), self.started_at)
 
     def halt(self, reason: str, why: str) -> None:

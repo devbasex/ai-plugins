@@ -139,6 +139,15 @@ class StartLimit:
         self.lock = held
         return True
 
+    def take_within(self, seconds: float = 5) -> bool:
+        """`count.lock` を `seconds` 秒まで 0.1 秒刻みで取り直す。取れなければ False。"""
+        end = time.time() + seconds
+        while not self.take():
+            if time.time() >= end:
+                return False
+            time.sleep(0.1)
+        return True
+
     def release(self) -> None:
         _unlock(self.lock)
         self.lock = None
