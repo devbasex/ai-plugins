@@ -82,16 +82,21 @@ def guards_dir() -> Path | None:
     return None
 
 
+def _env_int(name: str, default: int) -> int:
+    """環境変数の 0 以上の整数。空か、数字の並びでなければ default。"""
+    value = os.environ.get(name) or ""
+    return int(value) if value.isdigit() else default
+
+
 @contextmanager
 def session_lock(directory: Path, sid: str) -> Iterator[bool]:
     """セッションごとの排他（`<dir>/<sid>.guard.lock`）。取れなければ偽を渡す（呼び出し側は判定せずに通す）。
 
     錠の名前を移行の前の `<sid>.lock`（`lock-common.sh` のディレクトリ）と分け、版をまたいだ 2 つの錠が互いを
     読めずに両方とも通す形を作らない。"""
-    wait = os.environ.get("NDF_TOKEN_GUARD_LOCK_WAIT", "1")
     import locks  # 排他が要る判定のときだけ読む（filelock の import は Bash と Edit の判定に載せない）
 
-    held = locks.exclusive(directory / f"{sid}.guard", timeout=int(wait) if wait.isdigit() else 1)
+    held = locks.exclusive(directory / f"{sid}.guard", timeout=_env_int("NDF_TOKEN_GUARD_LOCK_WAIT", 1))
     try:
         held.__enter__()
     except (locks.LockTimeout, OSError):
@@ -165,8 +170,7 @@ def guard_read(raw: dict) -> dict | None:
     if not sid or not path:
         return None
     key = "\t".join((path, _field(raw, "tool_input", "offset"), _field(raw, "tool_input", "limit")))
-    lim = os.environ.get("NDF_READ_REPEAT_LIMIT") or "3"
-    limit = int(lim) if lim.isdigit() else 3
+    limit = _env_int("NDF_READ_REPEAT_LIMIT", 3)
     d = guards_dir()
     if d is None:
         return None
@@ -312,8 +316,7 @@ def guard_context(raw: dict, tool: str) -> dict | None:
     total = context_tokens(tp)
     if total is None:
         return None
-    lim = os.environ.get("NDF_CONTEXT_LIMIT") or "200000"
-    limit = int(lim) if lim.isdigit() else 200000
+    limit = _env_int("NDF_CONTEXT_LIMIT", 200000)
     d = guards_dir()
     if d is None:
         return None
