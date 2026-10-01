@@ -96,6 +96,32 @@ claude が再開コマンドを `ndf-next` のブロックで出して応答を�
 引数が無ければ、課題番号・worktree・Pull Request を差し込む定型の 1 文で作る。
 ラッパーの外では、手順の 1 行と貼り付ける中身を示すだけで終わる。
 
+## ラッパーの入れ替え
+
+**ラッパー自身も、カットポイントで更新後の版へ入れ替わる。** 子の claude が終わり、プラグインを更新した後、
+次のセッションを起動する前に、ラッパーは次の順で進む。
+
+1. 更新後のプラグインの導入先のファイルから、使うべきバージョンディレクトリの名前（`relay-<版>-<digest>`）を計算する。
+   動いているものと同じなら何もせず次のセッションを起動する
+2. 違えば、更新後のプラグインの `relay.py startup`（SessionStart hook と同じ処理）を子プロセスで打ち、
+   バージョンディレクトリと `relay.current` を置かせる（環境の用意を含む。上限は `NDF_RELAY_PREPARE_TIMEOUT`、既定 600 秒）
+3. 作業ディレクトリへ入れ替えの申し送り（`handover.json`。次のセッションの起動の入力とセッションの番号など。
+   認証情報を持たず、権限は 0600）を書き、新しいバージョンディレクトリの環境の python でランチャーを `os.execve` する
+4. 新しい版のラッパーが申し送りを読んで消し、同じ PID・同じ作業ディレクトリのまま次のセッションを起動する。
+   セッションの番号は続き、1 日の起動回数を数え直さない
+
+入れ替えないのは次のときである。
+
+| 場合 | 振る舞い |
+| --- | --- |
+| プラグインのキャッシュの `scripts/relay.py` を直接打って起動したラッパー | 判定しない |
+| 入れ替えの仕組みを持たない版（10.17.51 まで）で動いているラッパー | 入れ替わらない。`/exit` してから `claude` を 1 度打ち直すと、以後の更新で入れ替わる |
+| 用意・入れ替えに失敗した（下の `reexec_skipped` の `reason`） | 今の版のまま次のセッションを起動し、画面に 1 行出す |
+| 入れ替えた後に申し送りを読めない | 次のセッションを起動せず、手で打つ次のコマンドを示して止まる |
+
+動いているラッパーの版は、`/ndf:install-wrapper status` の「動いているラッパー」の行と、`log.jsonl` の
+`start` の行の `relay_version_dir` で見られる。
+
 ## 承認ゲートを越えない守り
 
 **ラッパーは、質問（`AskUserQuestion`）の答えを代わりに送らない。** 質問の表示中にラッパーが書いた `\r` は
@@ -113,7 +139,7 @@ claude が再開コマンドを `ndf-next` のブロックで出して応答を�
 
 - `/exit` と改行は 1 回の write で書く。確かめ直しと write は、質問の hook と同じロック（`question.lock`）の中で行い、書いた後も 1 秒持つ。**ロックを 3 秒以内に取れない質問の hook は、その質問を拒否する**（モデルが呼び直す）
 - 書いた `/exit` が質問の答えの後に働く形になったら、質問が消えるまで SIGTERM までの秒を数えない。子が終わった後はシグナルファイルを読み直し、無ければ次のセッションを起動しない
-- **守りが効くのは、ラッパーを起動し直した後からである**（`/exit` でラッパーを抜けて `claude` と打ち直した後）。動いているラッパーは古い版の `run` のまま動く
+- 守りを変えた版は、ラッパーが次のカットポイントでその版へ入れ替わった後（「ラッパーの入れ替え」）から効く。入れ替わらない場合は、`/exit` でラッパーを抜けて `claude` と打ち直した後から効く
 
 ## 上限
 
@@ -375,11 +401,13 @@ python3 $H check $N --trim >/dev/null && sed -n '/^```ndf-next/,/^```$/p' $DOC
 
 | `event` | いつ | 主なキー |
 | --- | --- | --- |
-| `start` | セッションを起動した | `section`・`pid`・`command`・`from_session`・`plugin_version`（起動の直前に読んだ版）・`cwd`（シグナルファイルの作業ディレクトリが消えていたら `cwd_fallback` に元の値）・`carried`（2 つ目以降のセッションだけ。ブロックの中身の前に付けた引数）・`account`（登録が 2 つ以上のときだけ。起動したアカウント。`metered` は従量の接続） |
+| `start` | セッションを起動した | `section`・`pid`・`command`・`from_session`・`plugin_version`（起動の直前に読んだ版）・`cwd`（シグナルファイルの作業ディレクトリが消えていたら `cwd_fallback` に元の値）・`carried`（2 つ目以降のセッションだけ。ブロックの中身の前に付けた引数）・`account`（登録が 2 つ以上のときだけ。起動したアカウント。`metered` は従量の接続）・`relay_version_dir`（動いているラッパーのバージョンディレクトリ。プラグインのキャッシュから起動したら null。キーが無ければ入れ替えの仕組みを持たない版） |
+| `reexec` | ラッパーが更新後の版へ入れ替わった（入れ替えた後の版が、次の `start` の前に書く） | `section`（終わったセッション）・`from`・`to`（バージョンディレクトリの名前）・`prepare_seconds`（用意に掛かった秒）・`seconds`（申し送りを書いてから入れ替わるまで） |
+| `reexec_skipped` | 版が違ったが入れ替えなかった | `section`・`reason`（`startup-failed` / `not-placed` / `unreadable` / `no-env` / `no-handover` / `handover-write` / `exec-failed`）・`from`・`to`（分かれば）・`detail`・`seconds` |
 | `account` | アカウントを替えた・すべて上限で替えなかった | `section`・`reason`（`five_hour` / `seven_day` / `spend` / `unknown` / `auth` / `threshold` / `recovered` など）・`from`・`to`（替えなかったら null）・`earliest`（最も早く戻るアカウントと時刻）・`keys`（従量の接続へ移ったときの変数の名前）・`usage`（閾値のときの使用率） |
 | `metered_invalid` | 区間 1 の起動で、保存した従量の接続の宣言が壊れていた（宣言なしとして扱う） | `section`・`detail`（理由の 1 行） |
 | `end` | セッションが終わった | `seconds`（起動からシグナルファイルを書くまで。シグナルファイルなしなら終わりまで）・`ended_by`（`mark` / `no-mark` / `sigterm` / `sigkill`） |
-| `stop` | 次のセッションを起動しないと決めた | `reason`（`stop-file` / `max-starts` / `spin` / `update-failed` / `start-failed` / `error`） |
+| `stop` | 次のセッションを起動しないと決めた | `reason`（`stop-file` / `max-starts` / `spin` / `update-failed` / `start-failed` / `error` / `handover`（入れ替えた後に申し送りを読めない）） |
 
 ```bash
 cat ~/.local/state/ndf/relay/*/log.jsonl | jq -c 'select(.event == "stop")'

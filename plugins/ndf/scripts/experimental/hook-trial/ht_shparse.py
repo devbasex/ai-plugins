@@ -187,50 +187,59 @@ class Targets:
         entry_cds = st.cds
         t = n.type
         if t == "if_statement":
-            for c in n.children:
-                if c.type in ("elif_clause", "else_clause"):
-                    if st.cds > entry_cds:
-                        st.cwd = None
-                    for g, bg in statements(c):
-                        self.stmt(g, st.copy() if bg else st)
-                elif c.is_named and c.type != "comment":
-                    nxt = c.next_sibling
-                    self.stmt(c, st.copy() if nxt is not None and nxt.type == "&" else st)
+            self._if_block(n, st, entry_cds)
         elif t == "case_statement":
-            entry = st.cwd
-            fell = False
-            for c in n.children:
-                if c.type != "case_item":
-                    if c.is_named and field(n, c) == "value":
-                        self.substs(c, st)
-                    continue
-                if not fell:
-                    st.cwd = entry
-                for g, bg in statements(c):
-                    if field(c, g) == "value":
-                        continue
-                    self.stmt(g, st.copy() if bg else st)
-                fell = any(k.type in (";&", ";;&") for k in c.children)
+            self._case_block(n, st)
         else:
-            for c in n.children:
-                if c.is_named and c.type != "comment":
-                    if c.type == "do_group":
-                        self.seq(c, st)
-                    elif field(n, c) in ("value", "initializer", "condition", "update") and c.type not in (
-                        "command",
-                        "list",
-                        "pipeline",
-                        "redirected_statement",
-                        "compound_statement",
-                        "subshell",
-                        "negated_command",
-                    ):
-                        self.substs(c, st)
-                    else:
-                        self.stmt(c, st)
+            self._loop_block(n, st)
         if st.cds > entry_cds:
             st.cwd = None
         return (st.cds - entry_cds, False, False)
+
+    def _if_block(self, n, st: St, entry_cds: int) -> None:
+        for c in n.children:
+            if c.type in ("elif_clause", "else_clause"):
+                if st.cds > entry_cds:
+                    st.cwd = None
+                for g, bg in statements(c):
+                    self.stmt(g, st.copy() if bg else st)
+            elif c.is_named and c.type != "comment":
+                nxt = c.next_sibling
+                self.stmt(c, st.copy() if nxt is not None and nxt.type == "&" else st)
+
+    def _case_block(self, n, st: St) -> None:
+        entry = st.cwd
+        fell = False
+        for c in n.children:
+            if c.type != "case_item":
+                if c.is_named and field(n, c) == "value":
+                    self.substs(c, st)
+                continue
+            if not fell:
+                st.cwd = entry
+            for g, bg in statements(c):
+                if field(c, g) == "value":
+                    continue
+                self.stmt(g, st.copy() if bg else st)
+            fell = any(k.type in (";&", ";;&") for k in c.children)
+
+    def _loop_block(self, n, st: St) -> None:
+        for c in n.children:
+            if c.is_named and c.type != "comment":
+                if c.type == "do_group":
+                    self.seq(c, st)
+                elif field(n, c) in ("value", "initializer", "condition", "update") and c.type not in (
+                    "command",
+                    "list",
+                    "pipeline",
+                    "redirected_statement",
+                    "compound_statement",
+                    "subshell",
+                    "negated_command",
+                ):
+                    self.substs(c, st)
+                else:
+                    self.stmt(c, st)
 
     def andor(self, n, st: St, redirs):
         c, last, or1, cond = self._andor(n, st, redirs)
@@ -288,35 +297,40 @@ class Targets:
     def redirects(self, rs, st: St) -> None:
         for r in rs:
             if r.type == "heredoc_redirect":
-                start = next((c for c in r.children if c.type == "heredoc_start"), None)
-                quoted = start is not None and any(q in text(start) for q in "'\"\\")
-                for c in r.children:
-                    if c.type == "file_redirect":
-                        self.redirects([c], st)
-                    elif c.type == "heredoc_body" and not quoted:
-                        if c.child_count:
-                            self.substs(c, st)
-                        else:
-                            for m in BACKTICK.finditer(text(c)):
-                                self.seq(parse(m.group(1)), st.copy())
-                continue
-            if r.type != "file_redirect":
+                self._heredoc_redirect(r, st)
+            elif r.type == "file_redirect":
+                self._file_redirect(r, st)
+            else:
                 self.substs(r, st)
-                continue
-            dests = [c for c in r.children if field(r, c) == "destination"]
-            dest = dests[0] if dests else None
-            op = "".join(text(c) for c in r.children if field(r, c) not in ("destination", "descriptor")).replace(" ", "")
-            if dest is not None:
-                self.substs(dest, st)
-            if op not in WRITE_OPS or dest is None:
-                continue
-            gap = r.text[: dest.start_byte - r.start_byte]
-            if b"\n" in gap:  # `>` の直後の改行は bash の構文エラー（ファイルは開かない）
-                continue
-            v = value(dest)
-            if op == ">&" and (v == "-" or v.isdigit()):
-                continue
-            self.emit(v, st)
+
+    def _heredoc_redirect(self, r, st: St) -> None:
+        start = next((c for c in r.children if c.type == "heredoc_start"), None)
+        quoted = start is not None and any(q in text(start) for q in "'\"\\")
+        for c in r.children:
+            if c.type == "file_redirect":
+                self.redirects([c], st)
+            elif c.type == "heredoc_body" and not quoted:
+                if c.child_count:
+                    self.substs(c, st)
+                else:
+                    for m in BACKTICK.finditer(text(c)):
+                        self.seq(parse(m.group(1)), st.copy())
+
+    def _file_redirect(self, r, st: St) -> None:
+        dests = [c for c in r.children if field(r, c) == "destination"]
+        dest = dests[0] if dests else None
+        op = "".join(text(c) for c in r.children if field(r, c) not in ("destination", "descriptor")).replace(" ", "")
+        if dest is not None:
+            self.substs(dest, st)
+        if op not in WRITE_OPS or dest is None:
+            return
+        gap = r.text[: dest.start_byte - r.start_byte]
+        if b"\n" in gap:  # `>` の直後の改行は bash の構文エラー（ファイルは開かない）
+            return
+        v = value(dest)
+        if op == ">&" and (v == "-" or v.isdigit()):
+            return
+        self.emit(v, st)
 
     def substs(self, n, st: St) -> None:
         """語の中のコマンド置換とプロセス置換を部分シェルとして流す。"""
@@ -332,6 +346,34 @@ class Targets:
                 self.substs(c, st)
 
     def command(self, n, st: St, redirs):
+        words, rs = self._command_parts(n, st, redirs)
+        i = 0
+        while i < len(words) and words[i] in ("command", "builtin", "time"):  # `time` はコマンド名として読まれる
+            i += 1
+            while i < len(words) and words[i] in ("-p", "--"):
+                i += 1
+        name = words[i] if i < len(words) else ""
+        is_cd = name == "cd" and st.base is not None
+        # 順序: リダイレクト → 書き込み先の解析 → moving と cd の状態の更新
+        self.redirects(rs, st)  # リダイレクトは命令より先に（cd の前の位置で）開く
+        for k, w in enumerate(words):
+            if w == "tee":
+                for a in words[k + 1 :]:
+                    if not a.startswith("-"):
+                        self.emit(a, st)
+            elif w == "sed":
+                self.sed(words[k + 1 :], st)
+            elif w in ("cp", "mv"):
+                self.cp_mv(words[k + 1 :], st)
+        if st.base is not None and name in st.moving:
+            st.cwd = None
+        if not is_cd:
+            return (0, False, False)
+        self._change_directory(words[i + 1 :], st)
+        return (1, True, False)
+
+    def _command_parts(self, n, st: St, redirs):
+        """命令の (語の並び, リダイレクトの並び)。代入と語の中の置換はここで読む。"""
         nodes, rs = [], list(redirs)
         for c in n.children:
             f = field(n, c)
@@ -347,29 +389,12 @@ class Targets:
         for c in nodes:
             self.substs(c, st)
             words.append(value(c))
-        i = 0
-        while i < len(words) and words[i] in ("command", "builtin", "time"):  # `time` はコマンド名として読まれる
-            i += 1
-            while i < len(words) and words[i] in ("-p", "--"):
-                i += 1
-        name = words[i] if i < len(words) else ""
-        is_cd = name == "cd" and st.base is not None
-        self.redirects(rs, st)  # リダイレクトは命令より先に（cd の前の位置で）開く
-        for k, w in enumerate(words):
-            if w == "tee":
-                for a in words[k + 1 :]:
-                    if not a.startswith("-"):
-                        self.emit(a, st)
-            elif w == "sed":
-                self.sed(words[k + 1 :], st)
-            elif w in ("cp", "mv"):
-                self.cp_mv(words[k + 1 :], st)
-        if st.base is not None and name in st.moving:
-            st.cwd = None
-        if not is_cd:
-            return (0, False, False)
+        return words, rs
+
+    def _change_directory(self, args, st: St) -> None:
+        """`cd` の引数から行き先を読み、cd の回数と cwd を更新する。"""
         dest, eoo = "", False
-        for a in words[i + 1 :]:
+        for a in args:
             if a == "--" and not eoo:
                 eoo = True
                 continue
@@ -385,7 +410,6 @@ class Targets:
             st.cwd = _abs(dest)
         elif st.cwd is not None:
             st.cwd = _abs(st.cwd + "/" + dest)
-        return (1, True, False)
 
     def sed(self, args, st: St) -> None:
         inplace, seen, skip, files = False, False, False, []

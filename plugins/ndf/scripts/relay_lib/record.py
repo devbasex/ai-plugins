@@ -69,21 +69,40 @@ class RelayRecord:
         remove(self.path(MARK_FILE))
 
 
-def current_section(d: str) -> int | None:
-    """ラッパーの log.jsonl の最後の start の区間の番号。"""
+def _start_rows(d: str):
+    """ラッパーの log.jsonl の start の行を新しい順に返す。JSON でない行・辞書でない行は飛ばす。読めなければ何も返さない。"""
     try:
         with open(os.path.join(d, LOG_FILE)) as f:
             lines = f.readlines()
     except OSError:
-        return None
+        return
     for raw in reversed(lines):
         try:
             row = json.loads(raw)
         except ValueError:
             continue
-        if isinstance(row, dict) and row.get("event") == "start" and isinstance(row.get("section"), int):
+        if isinstance(row, dict) and row.get("event") == "start":
+            yield row
+
+
+def current_section(d: str) -> int | None:
+    """ラッパーの log.jsonl の最後の start の区間の番号。番号が整数の行まで遡る。"""
+    for row in _start_rows(d):
+        if isinstance(row.get("section"), int):
             return row["section"]
     return None
+
+
+def running_version_dir(d: str) -> tuple[bool, str | None]:
+    """ラッパーの log.jsonl の最後の start の行の `relay_version_dir`（動いているバージョンディレクトリ。#1587）。
+
+    (キーがあるか, 名前)。キーの無い行は入れ替えの仕組みを持たない版が書いたもの、名前が None はプラグインの
+    キャッシュから起動したもの。start の行が無ければ (False, None)。最後の start の行だけを見て、前の行へは遡らない。"""
+    row = next(_start_rows(d), None)
+    if row is None:
+        return False, None
+    name = row.get("relay_version_dir")
+    return "relay_version_dir" in row, name if isinstance(name, str) else None
 
 
 def make_relay_dir() -> str:
@@ -116,6 +135,15 @@ class StartLimit:
         if held is None:
             return False
         self.lock = held
+        return True
+
+    def take_within(self, seconds: float = 5) -> bool:
+        """`count.lock` を `seconds` 秒まで 0.1 秒刻みで取り直す。取れなければ False。"""
+        end = time.time() + seconds
+        while not self.take():
+            if time.time() >= end:
+                return False
+            time.sleep(0.1)
         return True
 
     def release(self) -> None:

@@ -101,6 +101,11 @@ def step_rows(steps: list[dict]) -> list[dict]:
 
 
 def agent_rows(records: list, window_limit: int) -> tuple[list[dict], dict]:
+    return _agent_role_rows(records, window_limit), _worker_summary(records)
+
+
+def _agent_role_rows(records: list, window_limit: int) -> list[dict]:
+    """層・役割ごとの集計。応答が 3 以上の conductor 以外だけを数える。"""
     groups: dict[tuple[str, str], list] = defaultdict(list)
     for r in records:
         if r.layer != "conductor" and r.responses >= 3:
@@ -121,6 +126,11 @@ def agent_rows(records: list, window_limit: int) -> tuple[list[dict], dict]:
         )
     vocab = transcript_agents.POSTS + transcript_agents.TASKS + (transcript_agents.OTHER,)
     rows.sort(key=lambda r: (transcript_agents.LAYERS.index(r["layer"]), vocab.index(r["role"]) if r["role"] in vocab else len(vocab)))
+    return rows
+
+
+def _worker_summary(records: list) -> dict:
+    """supervisor と worker の親子の固定費の集計。応答の数で絞らず、全記録を使う。"""
     by_parent: dict[str, list] = defaultdict(list)
     for r in records:
         if r.layer == "worker" and r.parent_agent_id:
@@ -132,7 +142,7 @@ def agent_rows(records: list, window_limit: int) -> tuple[list[dict], dict]:
         if by_parent.get(s.agent_id) and (s.fixed or 0) + sum(w.fixed or 0 for w in by_parent[s.agent_id]) > (s.work or 0)
     )
     workers = [r for r in records if r.layer == "worker"]
-    return rows, {
+    return {
         "supervisors": len(supervisors),
         "supervisors_with_workers": sum(1 for s in supervisors if by_parent.get(s.agent_id)),
         "supervisors_overusing_workers": overuse,

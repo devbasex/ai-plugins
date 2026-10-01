@@ -3,7 +3,7 @@
 
 - `plugin ...` の副命令: 呼び出しを `FAKE_DIR/calls.jsonl` へ記録する。`list --json` は
   `ndf@mk` の要素を返す。版は `plugin update` が呼ばれた後なら `FAKE_VERSION_AFTER`、
-  前なら `FAKE_VERSION`（既定 1.0.0）。`FAKE_FAIL` に `list` / `update` / `marketplace` を
+  前なら `FAKE_VERSION`（既定 1.0.0）。導入先 `installPath` は同じく `FAKE_INSTALL_PATH_AFTER` / `FAKE_INSTALL_PATH`（無ければ出さない）。`FAKE_FAIL` に `list` / `update` / `marketplace` を
   含めると、その副命令が終了コード 1 で終わる。`FAKE_HANG` に含めると終わらない。
   `FAKE_BREAK_ON_LIST=N` なら N 回目の `list` の後に自分の実行権限を外す（次の exec が失敗する）
 - それ以外: 対話の区間として動く。起動の記録（argv・cwd・pid・環境の一部）を
@@ -63,7 +63,11 @@ def plugin(args):
         calls = [json.loads(x) for x in open(os.path.join(D, "calls.jsonl"))]
         updated = any(c["args"][:1] == ["update"] for c in calls)
         ver = os.environ.get("FAKE_VERSION_AFTER" if updated else "FAKE_VERSION") or os.environ.get("FAKE_VERSION") or "1.0.0"
-        print(json.dumps([{"id": "other@x", "version": "9"}, {"id": "ndf@mk", "version": ver}]))
+        item = {"id": "ndf@mk", "version": ver}
+        path = os.environ.get("FAKE_INSTALL_PATH_AFTER" if updated else "FAKE_INSTALL_PATH") or os.environ.get("FAKE_INSTALL_PATH")
+        if path:
+            item["installPath"] = path
+        print(json.dumps([{"id": "other@x", "version": "9"}, item]))
         lists = sum(c["args"][:1] == ["list"] for c in calls)
         if str(lists) == os.environ.get("FAKE_BREAK_ON_LIST"):
             os.chmod(sys.argv[0], 0o644)  # 次の exec を失敗させる

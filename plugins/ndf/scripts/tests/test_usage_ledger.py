@@ -280,3 +280,65 @@ def test_phase_cost_reads_state_home_by_default(tmp_path):
     p = subprocess.run([PY, str(SCRIPTS / "experimental" / "phase_cost.py")], capture_output=True, text=True, env=env)
     assert p.returncode == 0, p.stderr
     assert "計画 2 件・ステップ 2 件" in p.stdout
+
+
+# --- phase_cost.py の Agent の記録の集計（現状固定） ---
+
+
+def test_phase_cost_agent_rows_groups_and_summarizes():
+    phase_cost = load("phase_cost_for_ledger", SCRIPTS / "experimental" / "phase_cost.py")
+    rec = phase_cost.transcript_agents.AgentRecord
+    records = [
+        rec("conductor", "-", 0, agent_id="c", responses=10, fixed=1, work=1, peak=999_999),
+        rec("supervisor", "実装", 1, agent_id="s1", responses=5, fixed=100, work=500, peak=1000),
+        rec("supervisor", "設計", 1, agent_id="s2", responses=3, fixed=50, work=1000, peak=300_000),
+        rec("supervisor", "その他", 1, agent_id="s3", responses=3),
+        rec("supervisor", "実装", 1, agent_id="s4", responses=2, fixed=7, work=7, peak=7),  # 応答 3 未満は表に入らない
+        rec("worker", "調査", 2, agent_id="w1", parent_agent_id="s1", responses=4, fixed=300, work=100, peak=50),
+        rec("worker", "修正", 2, agent_id="w2", parent_agent_id="s1", responses=4, fixed=200, work=400, peak=70),
+        rec("worker", "調査", 2, agent_id="w3", parent_agent_id="s2", responses=3, fixed=10, work=20),
+        rec("worker", "謎", 2, agent_id="w4", responses=3, fixed=5, work=5),  # 語彙に無い役割は末尾、親なしは数えない
+        rec("worker", "調査", 2, agent_id="w5", parent_agent_id="s2", responses=1),
+    ]
+    rows, summary = phase_cost.agent_rows(records, 200_000)
+    keys = ["layer", "role", "count", "fixed_median", "work_median", "peak_max", "over_limit", "work_below_fixed"]
+    assert [list(r) for r in rows] == [keys] * 6
+    assert [[r[k] for k in keys] for r in rows] == [
+        ["supervisor", "設計", 1, 50, 1000, 300_000, 1, 0],
+        ["supervisor", "実装", 1, 100, 500, 1000, 0, 0],
+        ["supervisor", "その他", 1, "-", "-", 0, 0, 0],
+        ["worker", "調査", 2, 155, 60.0, 50, 0, 1],
+        ["worker", "修正", 1, 200, 400, 70, 0, 0],
+        ["worker", "謎", 1, 5, 5, 0, 0, 0],
+    ]
+    assert summary == {
+        "supervisors": 4,
+        "supervisors_with_workers": 2,
+        "supervisors_overusing_workers": 1,
+        "workers": 5,
+        "workers_per_supervisor_median": 1.0,
+        "unphased_supervisors": 1,
+    }
+    assert list(summary) == [
+        "supervisors",
+        "supervisors_with_workers",
+        "supervisors_overusing_workers",
+        "workers",
+        "workers_per_supervisor_median",
+        "unphased_supervisors",
+    ]
+
+
+def test_phase_cost_agent_rows_empty():
+    phase_cost = load("phase_cost_for_ledger", SCRIPTS / "experimental" / "phase_cost.py")
+    assert phase_cost.agent_rows([], 200_000) == (
+        [],
+        {
+            "supervisors": 0,
+            "supervisors_with_workers": 0,
+            "supervisors_overusing_workers": 0,
+            "workers": 0,
+            "workers_per_supervisor_median": "-",
+            "unphased_supervisors": 0,
+        },
+    )
