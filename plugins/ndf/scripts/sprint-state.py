@@ -37,6 +37,7 @@ import supervise_lib  # noqa: E402,F401  lib/ を sys.path へ足す
 import deps  # noqa: E402
 
 deps.require("md", "mdtable", "schema", "locks")  # schema は supervise_lib.paths → decl が使う
+import report_fields  # noqa: E402
 from supervise_lib.paths import sha256_of, state_dir_of  # noqa: E402
 import clock  # noqa: E402
 import jsonio  # noqa: E402
@@ -62,22 +63,12 @@ def outcome(status: str, summary: str, items=None, metrics=None, **extra) -> dic
     return {**step_result.result(TOOL, status, summary, items, metrics), **extra}
 
 
-def field(report: str, name: str) -> str:
-    m = re.search(rf"^- {re.escape(name)}: (.*)$", report, re.M)
-    return m.group(1).strip() if m else ""
-
-
 def pr_label(value: str) -> str:
     """報告の Pull Request（URL か番号）を `#番号` にする。無ければ空。"""
     if not value or value == "無し":
         return ""
     m = re.search(r"(\d+)\s*$", value)
     return f"#{m.group(1)}" if m else value
-
-
-def report_cost(report: str) -> float | None:
-    m = re.search(r"/ \$([0-9.]+)\s*$", field(report, "LLM の使用量"))
-    return float(m.group(1)) if m else None
 
 
 def plan_issues(plan: str) -> list[int]:
@@ -227,11 +218,10 @@ def fill_row(p: dict, item: dict | None) -> dict:
     if rep.is_file():
         text = rep.read_text()
         row["report"] = str(rep)
-        row["pr"] = pr_label(field(text, "Pull Request"))
-        row["cost"] = report_cost(text)
-        reason = field(text, "理由")
-        if row["result"] != "完了" and reason not in ("", "無し"):
-            row["reason"] = reason
+        row["pr"] = pr_label(report_fields.field(text, "Pull Request"))
+        cost = report_fields.cost(text)
+        row["cost"] = float(cost) if cost else None
+        row["reason"] = report_fields.reason_shown(text, row["result"])
     return row
 
 

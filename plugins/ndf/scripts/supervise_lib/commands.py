@@ -6,12 +6,12 @@
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 import sys
 from pathlib import Path
 
 import mdtable
+import report_fields
 import slow_step as ss
 from step_result import result
 from supervise_lib.decl import SUPERVISE_DECL, DeclError, decl_roots, read_decl, sync_checks_of
@@ -145,17 +145,17 @@ def cmd_design_glossary(root: str, mode: str, out: str) -> tuple[dict, int | Non
 
 def note_row(report: str, next_text: str) -> str:
     def field(name: str) -> str:
-        m = re.search(rf"^- {name}: (.*)$", report, re.M)
-        return m.group(1).strip() if m else ""
+        return report_fields.field(report, name)
 
-    cost = re.search(r"/ \$([0-9.]+)\s*$", field("LLM の使用量"))
+    cost = report_fields.cost(report)
     pr = field("Pull Request")
     state = f"{field('フェーズ') or field('持ち場')}: {field('結果')}"  # 旧い報告（持ち場）も読む
-    extra = [x for x in ((pr if pr and pr != "無し" else ""), (f"${cost.group(1)}" if cost else "")) if x]
+    extra = [x for x in ((pr if pr and pr != "無し" else ""), (f"${cost}" if cost else "")) if x]
     if extra:
         state += "（" + "、".join(extra) + "）"
-    if field("結果") != "完了" and field("理由") not in ("", "無し"):
-        state += f"。理由: {field('理由')}"
+    reason = report_fields.reason_shown(report, field("結果"))
+    if reason:
+        state += f"。理由: {reason}"
     return f"| {field('課題') or '—'} | {state} | {next_text or '—'} |"
 
 
