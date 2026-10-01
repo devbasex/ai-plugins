@@ -2661,7 +2661,7 @@
     {
       "term": "同期の控え",
       "context": "ndf-relay",
-      "meaning": "前の同期で両側へ書いた共有する設定の部分の写し（アカウントの設定ディレクトリの .ndf-shared-base.json）",
+      "meaning": "前の同期で両側へ書いた共有する設定の部分の写しと、その時点のアカウント側の userID（アカウントの設定ディレクトリの .ndf-shared-base.json）",
       "pending_source": "issues/issue-1576-design.md"
     },
     {

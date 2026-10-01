@@ -1,7 +1,7 @@
 # #1576 の設計: 構造・データ構造・入出力の契約・処理の流れ・非機能
 
 [issue-1576-design.md](issue-1576-design.md) の続きである。ドメインモデル・機能一覧・構成要素は先頭のファイルに、決定の記録・
-設計の工程で確かめたこと（実測 A〜H）・テスト設計・未確認のまま残ることは
+設計の工程で確かめたこと（実測 A〜I）・テスト設計・未確認のまま残ることは
 [issue-1576-design-decisions.md](issue-1576-design-decisions.md) にある。
 
 ## 構造
@@ -32,6 +32,7 @@ classDiagram
     +ENSURED
     +link_shared(shared, account) Links
     +sync_config(shared_file, account) str|None
+    +readable(account) bool
     +identity(account) tuple|None
     +unlink_shared(account)
   }
@@ -108,6 +109,7 @@ symlink にしない項目の一覧である。正本は `lib/claude_account_dir
 | `.ndf-shared-base.json` | `version` | int | 許さない | 形の版（1） |
 | 同 | `projects` | object | 許さない | 前の同期で両側へ書いた `projects`（プロジェクトのパス → 項目 → 値）。空の object は「項目が無い」 |
 | 同 | `mcpServers` | object | 許さない | 前の同期で両側へ書いた `mcpServers`（名前 → 定義） |
+| 同 | `userID` | string | 許す | 前の同期の時点のアカウント側の `.claude.json` の `userID`。空（null・キーが無い）は「その時点でアカウント側に `userID` が無かった」で、次の同期は控えを使わない（I18） |
 | アカウントの置き場 | `.locks/<名前>.lock` | 空のファイル | — | NDF のアカウントごとの排他（filelock）。消さない |
 
 既存の 3 ファイル（`.credentials.json`・`account.json`・`usage.json`）の形は変えない。
@@ -123,7 +125,7 @@ C は作る、R は読む、U は更新する、D は消す。括弧は Claude C
 | F3 替えても同じに使う | R | R・U | C・R | U | U | R・U | （R・U） |
 | F4 claude -p を動かす | R（claude が U） | R・U | C・R | U | U | R・U | — |
 | F5 従量の接続 | — | R | — | — | — | — | （R） |
-| F6 使えないアカウントを避ける | R | U | R | R | — | — | — |
+| F6 使えないアカウントを避ける | R | U | R | R | D（読めないとき） | — | — |
 | F8 移行・登録の削除 | D（削除のとき） | D（削除のとき） | C・D | D（削除のとき） | D（削除のとき） | — | — |
 
 F7 と F9 はデータに触れない。F1・F3・F4 が同じ列を触るのは、3 つとも `prepare()` を通るためである。
@@ -176,19 +178,22 @@ F7 と F9 はデータに触れない。F1・F3・F4 が同じ列を触るのは
 | `choose(exclude=(), keep=(), now=None)` | 除く名前・動いている名前 | `Choice` | 今と同じ | `before`・`min_left` を削除 |
 | `note_auth_failed(name, now=None)` | 名前 | なし | 排他を取れなければ何もしない（`note_limit` と同じ） | 新設 |
 
-`Prepared.reason` と、`account_env()` が `note` へ渡す理由は次の 6 つである。
+`Prepared.reason` と、`account_env()` が `note` へ渡す理由は次の 7 つである。
 
 | `reason` | いつ | 画面の 1 行の理由の文 |
 | --- | --- | --- |
 | `needs_relogin` | 登録の記録が「再登録が要る」 | 再登録が要る |
 | `no_credentials` | 認証ファイルが無い・読めない・権限を直せない | 認証ファイルが無いか読めない |
+| `account_unreadable` | I19 | アカウント側の `.claude.json` が壊れている。退避から戻すか、ファイルを消す |
 | `identity_mismatch` | I13 | 認証ファイルが別のアカウントのものになっている。`account add <名前>` で登録し直す |
 | `projects_not_shared` | I6 | 会話の記録の置き場 `projects` が共有の設定ディレクトリを指していない |
 | `lock_timeout` | アカウントの排他を 30 秒で取れない | アカウントの排他を取れない |
 | `io_error` | symlink を作れないなどの `OSError` | 設定ディレクトリを用意できない |
 
 `Prepared.sync`（同期の結果）は、同期できたら None、できなければ `shared_unreadable`・`account_unreadable`・
-`lock_busy`・`write_failed` のどれかである。同期の失敗では起動を止めない。
+`lock_busy`・`write_failed` のどれかである。用意の同期が `account_unreadable` を返したら、`reason` を
+`account_unreadable` にして起動しない（I19）。ほかの同期の失敗では起動を止めない。書き戻し（`settle`）は
+起動を伴わないので、どの結果も `note` へ渡すだけである。
 
 ### 記録と画面
 
@@ -198,7 +203,7 @@ F7 と F9 はデータに触れない。F1・F3・F4 が同じ列を触るのは
 | 画面の 1 行 | `ndf-relay: アカウント <名前> を使わない（<理由の文>）` | `ok` が偽のとき |
 | `supervise.py` の進捗ログ | `"kind": "account_dir"` と上と同じ項目（`section` の代わりに `step`） | 同上 |
 
-どの行にも、トークン・`.claude.json` の値・symlink の参照先のパスを書かない（I14）。
+どの行にも、トークン・`.claude.json` の値（同期の控えに控える `userID` を含む）・symlink の参照先のパスを書かない（I14）。
 
 ### 再開の文
 
@@ -231,8 +236,9 @@ sequenceDiagram
   A->>D: sync_config
   R->>A: account_env(名前, base, note)
   Note over A: アカウントの排他の中
-  A->>A: 古い排他ファイルを消す・usable・識別の照合
-  alt 使えない・識別が食い違う
+  A->>A: 古い排他ファイルを消す・usable
+  A->>D: readable・identity
+  alt 使えない・.claude.json が読めない・識別が食い違う
     A-->>R: None（note へ理由）
     R->>A: choose で次の候補か従量の接続
   else 使える
@@ -240,13 +246,23 @@ sequenceDiagram
     alt projects が共有を指さない
       A-->>R: None（note へ projects_not_shared）
     else 指している
-      A->>D: sync_config（失敗しても続ける）
-      A-->>R: 子の環境
-      R->>C: 起動
-      C->>C: 認証ファイルで認証し、期限が近ければ自分で更新する
+      A->>D: sync_config
+      alt 結果が account_unreadable
+        A-->>R: None（note へ account_unreadable）
+      else 同期できた・ほかの失敗（続ける）
+        A-->>R: 子の環境
+        R->>C: 起動
+        C->>C: 認証ファイルで認証し、期限が近ければ自分で更新する
+      end
     end
   end
 ```
+
+アカウント側の `.claude.json` が JSON として読めるかは、識別の照合の前に `readable` で確かめる（無いのは読めるに含む）。
+`readable` は、読めなければ同期の控えを消して偽を返し、`prepare` は symlink も同期も行わずに `account_unreadable` で
+返す（I19）。読めないファイルそのものには触れない。確かめの後に壊れて同期が `account_unreadable` を返したときも、
+同じ理由で起動しない。読めないまま起動すると、対話では本体が `Configuration error` の 2 択の画面で止まってラッパーの
+最初の入力がそこへ入り、claude -p は結果行を出さずに終了コード 1 で終わってファイルを初期化する（実測 I。決定 19）。
 
 `settle` を呼ぶのはラッパーだけである（前のセッションがアカウントのとき、次のセッションを起動する前と、ラッパーの
 終了時）。`supervise.py` は書き戻しを呼ばない。次の用意の同期が同じ働きをする（決定 8）。
@@ -268,15 +284,19 @@ S の場所は本体と同じ規則で決める（共有の設定ディレクト
 1. A と S の本体の排他（`<パス>.lock` のディレクトリ）を、A・S の順に取る。2 秒待っても取れなければ `lock_busy` で
    何も書かずに終わる。10 秒より古い排他は、本体と同じく残骸として消してから取る
 2. A・S・B を読む。S が JSON として読めなければ、何も書かずに終わる（`shared_unreadable`）。A が JSON として
-   読めなければ、A と S には何も書かず、B を消して終わる（`account_unreadable`。I18）。B を残すと、本体が壊れた A を
-   初期化して今の作業ディレクトリの `projects` を 1 件だけ書いた後の同期で、A が空でないため手順 3 の「無いか空」に
-   当たらず、B の残りの葉がすべて「アカウント側だけで消えた」と読まれて共有側から消える。B を消せば、次の同期は
+   読めなければ、A と S には何も書かず、B を消して終わる（`account_unreadable`。I18）。B を残すと、利用者が
+   `backups/` の退避から A を戻したとき、退避より後の同期で両側へ足した葉が「アカウント側だけで消えた」と読まれて
+   共有側から消える（退避は同期より古いことがあり、戻した A の `userID` は B と同じになる）。B を消せば、次の同期は
    B が無い最初の同期になり、共有側の値にそろう。ファイルが無いのは空として扱う
 3. `projects` はプロジェクトのパスと項目の 2 層、`mcpServers` は名前の 1 層で、葉ごとに次の表で値を決める。
-   B が無い最初の同期では、B を A と同じとみなす（共有側の値にそろう）。A のファイルが無いとき、または B に葉が
-   あるキー（`projects`・`mcpServers`）が A で無いか空のときも、そのキーは B を使わず最初の同期と同じに扱う（I18）。
-   A が失われた（消された・本体が初期化した）のか、利用者が全部を消したのかを区別できないためで、共有側から消さない
-   側へ倒す
+   B が無い最初の同期では、B を A と同じとみなす（共有側の値にそろう）。次のどれかに当たるときも、B を使わず
+   最初の同期と同じに扱う（I18）。A が失われたのか、利用者が消したのかを区別できないためで、共有側から消さない側へ倒す
+   - A のファイルが無い（`projects` と `mcpServers` の両方で B を使わない）
+   - A の `userID` が B の `userID` と同じでない。A か B のどちらかに `userID` が無い場合を含む（同上）。本体が A を
+     初期化すると、`userID` は別の値になるか無くなる。動いているセッションがその A を取り込むと、`projects` は今の
+     作業ディレクトリの 1 件だけになり、次の条件に当たらない（実測 I）。B に `userID` が無いのは、B を書いた時点で
+     A に `userID` が無かったときで、初期化をまたいだかを決められないため、同じに扱う
+   - B に葉があるキー（`projects`・`mcpServers`）が A で無いか空である（そのキーだけ B を使わない）
 
    | 共有側（S）は B から | アカウント側（A）は B から | 採る値 |
    | --- | --- | --- |
@@ -288,7 +308,8 @@ S の場所は本体と同じ規則で決める（共有の設定ディレクト
    「変わった」は、足した・値を変えた・消したのどれも含む。消した側を採れば、もう片側からも消す
 4. `hasCompletedOnboarding` と `lastOnboardingVersion` は、A に無く S にあるときだけ A へ写す（決定 7）
 5. 変わった側だけを書く。A は 0600 の一時ファイルからの置き換えで、S は実パスの隣の一時ファイルから実パスへの置き換えで
-   書く（symlink と権限を保つ）。最後に B を書く。途中で落ちても、次の同期が同じ結果に行き着く
+   書く（symlink と権限を保つ）。最後に B を、手順 2 で読んだ A の `userID` とともに書く（A に無ければ B にも持たない）。
+   `userID` は B のほかへ書かず、S へ写さない（I10・I14）。途中で落ちても、次の同期が同じ結果に行き着く
 
 ### NDF の使用量の取得とトークンの更新
 
@@ -385,4 +406,4 @@ SessionStart で呼び、上の流れに入らない）、`resume_text()`（最�
 | 運用・保守性 | `log.jsonl` のアカウントの名前は今のまま残す。用意で足せなかった項目と書き戻せなかった事実を `log.jsonl` に残す。トークンの値と `.claude.json` の中身は記録しない | `start`・`account` の行は変えない。`account_dir` の行を足す（項目の名前と理由の語だけ） | `account_dir` の行の項目を見る。記録にトークンと `.claude.json` の値が無い |
 | 移行性 | 登録し直さない。既存の 3 ファイルの形を変えない。古い版のラッパーとの並走は前提 8 | 「移行」の表のとおり。用意が毎回足りない分だけを足す | 今の形の偽の置き場（3 ファイルと古い排他ファイル）で環境が組み立つ。2 回目は何も足さない |
 | セキュリティ | トークンを環境変数・引数・記録・画面に出さない。共有の `.credentials.json` に触れない。アカウントの設定ディレクトリは 0700、認証ファイルと `.claude.json` は 0600。symlink の参照先は共有の設定ディレクトリの直下の項目だけ | 子へ渡すのはパスと名前だけにする（I1）。`.credentials.json` はアカウント固有の項目の先頭に置く（I3）。書くファイルは 0600 の一時ファイルから置き換え、用意の最後に権限を直す（I15）。symlink は `<共有>/<項目>` だけを作る（I4） | 子の環境にトークンの値が無い。共有側に番兵の `.credentials.json` を置いても symlink にならず、読まれない。権限と symlink の参照先を見る |
-| システム環境 | 基準は Claude Code 2.1.286。動作環境は擬似端末と symlink が使える Linux と macOS | 本体の内部の形に新しく合わせる箇所を 4 つに限る（更新の排他の名前・`.claude.json` の排他と置き場・`.claude.json` の 5 つのキー・`CLAUDE_CODE_PLUGIN_CACHE_DIR`）。hook の実パスの解決は symlink のときだけ `readlink -f` を呼ぶ（登録は macOS でできないため、macOS では呼ばれない） | 受け入れ条件 1・3・4・8 の実物の確かめを、版が上がったときに打ち直す |
+| システム環境 | 基準は Claude Code 2.1.286。動作環境は擬似端末と symlink が使える Linux と macOS | 本体の内部の形に新しく合わせる箇所を 4 つに限る（更新の排他の名前・`.claude.json` の排他と置き場・`.claude.json` の 6 つのキー・`CLAUDE_CODE_PLUGIN_CACHE_DIR`）。hook の実パスの解決は symlink のときだけ `readlink -f` を呼ぶ（登録は macOS でできないため、macOS では呼ばれない） | 受け入れ条件 1・3・4・8 の実物の確かめを、版が上がったときに打ち直す |
