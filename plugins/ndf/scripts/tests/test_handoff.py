@@ -44,6 +44,25 @@ def body_of(main: Path, name: str) -> Path:
     return main / ".ndf" / "handoff" / f"{name}.md"
 
 
+def test_note_appends_row_to_a_body_made_by_init(main, tmp_path):
+    """雛形から作った本体へ、`supervise.py note` が表を手で足さずに 1 行を足せる。"""
+    run(main, "init", "issue-1560", "--title", "t")
+    body = body_of(main, "issue-1560")
+    report = tmp_path / "report.md"
+    report.write_text("- 課題: #1560\n- フェーズ: 実装\n- 結果: 完了\n")
+    p = subprocess.run(
+        [sys.executable, str(SCRIPTS / "supervise.py"), "note", str(body), "--report", str(report), "--next", "マージ"],
+        capture_output=True,
+        text=True,
+    )
+    assert p.returncode == 0, p.stdout + p.stderr
+    text = body.read_text()
+    section = handoff_doc.find_section(text, handoff_doc.PROGRESS_SECTION)
+    rows = [l for l in text[section.body_start : section.body_end].splitlines() if l.startswith("|")]
+    assert len(rows) == 3 and rows[-1].startswith("| #1560 | 実装: 完了") and rows[-1].endswith("| マージ |"), rows
+    assert run(main, "check", "issue-1560")[0] == 0
+
+
 @pytest.mark.parametrize("name", ["issue-1560", "milestone-26", "sprint-m1142c"])
 def test_init_creates_body_from_template(main, name):
     code, out = run(main, "init", name, "--title", "題")
