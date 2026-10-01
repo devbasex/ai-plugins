@@ -67,14 +67,17 @@ drive のステップ: `cmd`（または `"drive": "cross-review" | "cross-refac
 `api_error_status: 429`・「You've hit your limit … resets …」。lib/monitor.py の USAGE LIMIT の表と同じ文言）で
 落ちたら、ステップの失敗とは区別する（on_fail・judge へ回さない）。ステップの結果に `"limit": true` と読めた解除時刻を残す。
 - 登録済みの claude アカウント（`relay.py account add`）が 2 つ以上あれば、上限に当たったアカウントを除いて最も
-  上限から遠いものへ替え、待たずに同じ呼び出しを起動し直す（`lib/claude_accounts.py`。子へは `CLAUDE_CODE_OAUTH_TOKEN`・
-  `CLAUDE_CODE_OAUTH_SCOPES`（アカウントのスコープ。claude.ai のコネクタの読み込みに要る）・`NDF_CLAUDE_ACCOUNT` を渡す）。以後の呼び出しもそのアカウントで起動する。ステップの `auth` に
+  上限から遠いものへ替え、待たずに同じ呼び出しを起動し直す（`lib/claude_accounts.py`。子へはトークンもスコープも渡さず、
+  `CLAUDE_CONFIG_DIR`（アカウントの設定ディレクトリ。claude が自分でトークンを更新する）・`NDF_CLAUDE_ACCOUNT`・
+  `NDF_SHARED_CONFIG_DIR`・`CLAUDE_CODE_PLUGIN_CACHE_DIR` を渡す）。以後の呼び出しもそのアカウントで起動する。ステップの `auth` に
   `アカウント <名前>（<種類>）`、報告に `認証: 切り替え（アカウント <名前>）`、途中の報告に `"kind": "account"` の行を残す。
-  起動したときの `NDF_CLAUDE_ACCOUNT`（動いている区間のアカウント）のトークンはプランが更新しない
+  結果が認証の失敗（`Failed to authenticate`）なら、そのアカウントを 1 時間候補から外して同じ呼び出しをやり直す（種類は `auth`）。
+  使えないアカウントの理由は途中の報告の `"kind": "account_dir"` の行に残る。起動したときの `NDF_CLAUDE_ACCOUNT`（動いている
+  区間のアカウント）と実行中の呼び出しのアカウントのトークンは、プランが更新しない
 - 従量の接続の宣言は、環境変数 `NDF_SUPERVISE_CLAUDE_FALLBACK` が定義されていれば（空でも）それ、無ければ
   `relay.py account add-bedrock` が保存した宣言（アカウントの置き場の `metered.json`）である。保存先が壊れていれば
   最初の呼び出しの前に標準エラーと途中の報告（`"kind": "metered_invalid"`）へ 1 行出し、宣言なしとして扱う
-- 候補が無く従量の接続の宣言があれば、その変数を足しトークンを外した環境へ移り、
+- 候補が無く従量の接続の宣言があれば、その変数を足し、`CLAUDE_CONFIG_DIR` を元の値へ戻した環境へ移り、
   以後の呼び出しもそれで起動する。起動のたびに登録済みのアカウントの残量を読み（推論なし）、上限を外れ閾値
   （`NDF_ACCOUNT_SWITCH_AT`）未満のものがあれば戻す（`auth` は `従量の接続（<変数名>）`・`アカウント <名前>（recovered）`）
 - 登録が 1 つ以下なら、従量の接続の宣言（環境変数は `KEY=VALUE` を空白区切り。例 `CLAUDE_CODE_USE_BEDROCK=1`）が

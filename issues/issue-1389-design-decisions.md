@@ -6,6 +6,11 @@
 
 ### 決定 1: 子の認証は環境変数 `CLAUDE_CODE_OAUTH_TOKEN` で渡し、設定ディレクトリは分けない
 
+**#1576 で置き換えた。** 今は、アカウントの設定ディレクトリを子の `CLAUDE_CONFIG_DIR` にし、トークンとスコープの変数を
+渡さない。変数のトークンは Claude Code が更新できず 8 時間で必ず 401 になり、`/status` にアカウントが出ないため。
+下で退けた理由（会話の記録と設定が分かれる）は、共有の項目を symlink にすると起きない。採った形と理由は
+[issue-1576-design-decisions.md](issue-1576-design-decisions.md) の決定 1 にある。以下は置き換える前の記録である。
+
 Claude Code は `CLAUDE_CODE_OAUTH_TOKEN` を設定ディレクトリの `.credentials.json` より優先する（2.1.283 で実測: 共有の
 設定ディレクトリのまま変数を足すと、`claude auth status` の `authMethod` が `oauth_token` になる）。環境変数は子孫の
 プロセス（`supervise.py`・worker・cross 系の CLI）へそのまま継がれ、設定・プラグイン・hook・会話の記録の置き場は

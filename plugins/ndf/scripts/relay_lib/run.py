@@ -105,8 +105,7 @@ class Relay(AccountSwitch):
         self.record.drop_mark()
         remove(self.path(QUESTION_FILE), self.path(LIMIT_FILE))  # 上限シグナルファイルは前の子のもの（新しい子の hook はまだ書けない）
         prev = self.account
-        if self.multi:
-            self.settle_account(prev)  # 前のセッションの .claude.json の共有する部分を書き戻してから次を用意する（E12）
+        self.settle_account(prev)  # 前のセッションの .claude.json の共有する部分を書き戻してから次を用意する（E12）
         to, reason, choice = (plan or self.pick(None)) if self.multi else (None, None, None)
         env = cl.section_env(self.env, to, self.note_account_dir) if to else None
         if to and env is None:  # 親の認証へ戻さない。選び直し、無ければ止める
@@ -146,19 +145,6 @@ class Relay(AccountSwitch):
                 if not self.watch.thread.is_alive():
                     self.watch.start()
         self.limit.release()
-
-    def settle_account(self, name: str | None) -> None:
-        """アカウント `name` のセッションの後の書き戻し（従量の接続・既定のログインでは何もしない）。"""
-        if name and name != ca.METERED:
-            ca.settle(name, self.env, lambda row: self.note_account_dir(row, self.section))
-
-    def note_account_dir(self, row: dict, section: int | None = None) -> None:
-        """アカウントの設定ディレクトリの用意・書き戻しの結果を `log.jsonl` の `account_dir` の行と、使わないときは画面の
-        1 行に残す。行に載せるのは項目の名前と理由の語だけである（I14）。"""
-        self.log(event="account_dir", section=self.section + 1 if section is None else section, **row)
-        if not row.get("ok"):
-            why = ca.prepare_reason_text(row["account"], row.get("reason"))
-            self.term.screen(f"ndf-relay: アカウント {row['account']} を使わない（{why}）")
 
     def replace_unusable(self, failed: str) -> tuple[str, str, ca.Choice, dict]:
         """使えなかった `failed` の代わりを選ぶ。(名前か `metered`, 理由, 選んだ結果, 環境)。
@@ -456,10 +442,7 @@ class Relay(AccountSwitch):
         return None
 
     def close(self) -> None:
-        if self.watch is not None:
-            self.watch.stop()
-        if self.multi:
-            self.settle_account(self.account)
+        self.stop_accounts()
         self.limit.release()
         remove(self.path(PID_FILE), self.path(cl.SETTINGS_FILE))  # まとめた設定は利用者の資格情報を持ちうるため残さない
         _unlock(self.lock)

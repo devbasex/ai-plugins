@@ -1,6 +1,6 @@
 """アカウントの設定ディレクトリを子の `CLAUDE_CONFIG_DIR` にする部品のテスト（#1576）。
 
-`lib/claude_accounts.py` の用意（`prepare`）・子の環境（`account_env`）・書き戻し（`settle`）・登録し直し・登録の削除・
+`lib/claude_accounts.py` の用意（`prepare_account`）・子の環境（`account_env`）・書き戻し（`settle`）・登録し直し・登録の削除・
 認証の失敗の観測を、偽のアカウントの置き場（`account_fake.py`）で縛る。
 """
 

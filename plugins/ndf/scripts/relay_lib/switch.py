@@ -174,6 +174,25 @@ class AccountSwitch:
             return ca.METERED, REASON_LIMITED, c
         return cur, None, c
 
+    def stop_accounts(self) -> None:
+        """ラッパーの終了時: 定期の確認を止め、今のアカウントの .claude.json の共有する部分を書き戻す（E12）。"""
+        if self.watch is not None:
+            self.watch.stop()
+        self.settle_account(self.account)
+
+    def settle_account(self, name: str | None) -> None:
+        """アカウント `name` のセッションの後の書き戻し（登録が 1 つ以下・従量の接続・既定のログインでは何もしない）。"""
+        if self.multi and name and name != ca.METERED:
+            ca.settle(name, self.env, lambda row: self.note_account_dir(row, self.section))
+
+    def note_account_dir(self, row: dict, section: int | None = None) -> None:
+        """アカウントの設定ディレクトリの用意・書き戻しの結果を `log.jsonl` の `account_dir` の行と、使わないときは画面の
+        1 行に残す。行に載せるのは項目の名前と理由の語だけである（I14）。"""
+        self.log(event="account_dir", section=self.section + 1 if section is None else section, **row)
+        if not row.get("ok"):
+            why = ca.prepare_reason_text(row["account"], row.get("reason"))
+            self.term.screen(f"ndf-relay: アカウント {row['account']} を使わない（{why}）")
+
     def keep(self) -> set[str]:
         """トークンを更新しないアカウント（今のセッションのアカウント。claude が更新する。#1576 の I8）。"""
         return {self.account} if self.account and self.account != ca.METERED else set()

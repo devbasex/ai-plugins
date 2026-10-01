@@ -126,7 +126,7 @@ def config_file(account: str) -> str:
     return legacy if os.path.exists(legacy) else os.path.join(account, CONFIG_FILE)
 
 
-def _load(path: str):
+def _read_config(path: str):
     """(ファイルがあるか, 中身の dict か読めなければ None)。"""
     try:
         with open(path, encoding="utf-8") as f:
@@ -147,7 +147,7 @@ def _drop_base(account: str) -> None:
 
 def readable(account: str) -> bool:
     """アカウント側の `.claude.json` が JSON として読めるか（無いのは読める）。読めなければ同期の控えを消す（I18・I19）。"""
-    if _load(config_file(account))[1] is None:
+    if _read_config(config_file(account))[1] is None:
         _drop_base(account)
         return False
     return True
@@ -155,7 +155,7 @@ def readable(account: str) -> bool:
 
 def identity(account: str) -> tuple[str, str] | None:
     """アカウント側の `oauthAccount` の (メールアドレス, 組織の識別)。無い・読めなければ None。"""
-    o = (_load(config_file(account))[1] or {}).get("oauthAccount")
+    o = (_read_config(config_file(account))[1] or {}).get("oauthAccount")
     if not isinstance(o, dict) or not isinstance(o.get("emailAddress"), str) or not o["emailAddress"]:
         return None
     org = o.get("organizationUuid")
@@ -217,7 +217,7 @@ def _unflatten(leaves: dict) -> dict:
     return out
 
 
-def _merge(s: dict, a: dict, b: dict) -> dict:
+def _merge_leaves(s: dict, a: dict, b: dict) -> dict:
     """葉ごとに、片側だけで変わった値を採る。両側で変わったら共有側（I11）。"""
     out = {}
     for k in set(s) | set(a) | set(b):
@@ -256,14 +256,14 @@ def sync_config(shared_file: str, account: str) -> str | None:
 
 
 def _sync_held(shared_file: str, afile: str, account: str) -> str | None:
-    s_exists, s = _load(shared_file)
+    s_exists, s = _read_config(shared_file)
     if s is None:
         return "shared_unreadable"
-    a_exists, a = _load(afile)
+    a_exists, a = _read_config(afile)
     if a is None:
         _drop_base(account)
         return "account_unreadable"
-    _, b = _load(os.path.join(account, BASE_FILE))
+    _, b = _read_config(os.path.join(account, BASE_FILE))
     b = b if isinstance(b, dict) and b.get("version") == 1 else None
     uid = a.get("userID") if isinstance(a.get("userID"), str) else None
     lost = not a_exists or b is None or uid is None or b.get("userID") != uid
@@ -273,7 +273,7 @@ def _sync_held(shared_file: str, afile: str, account: str) -> str | None:
         bl = _leaves(key, (b or {}).get(key))
         if lost or (bl and not al):
             bl = al  # 最初の同期と同じに扱う（共有側の値にそろう。I18）
-        merged = _merge(sl, al, bl)
+        merged = _merge_leaves(sl, al, bl)
         value = _unflatten(merged)
         if key in s or merged:
             new_s[key] = value

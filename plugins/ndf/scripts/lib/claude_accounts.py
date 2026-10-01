@@ -659,7 +659,7 @@ def fallback_env(environ=None) -> dict:
 
 @dataclass
 class Prepared:
-    """アカウントの設定ディレクトリの用意の結果（`prepare`）。`ok` が偽なら起動しない（理由は `reason`）。
+    """アカウントの設定ディレクトリの用意の結果（`prepare_account`）。`ok` が偽なら起動しない（理由は `reason`）。
 
     `added` は足した（付け替えた）symlink の数、`skipped` は同じ名前の実体があって飛ばした項目、`local_only` は共有側に
     無くアカウント側にだけある実体、`sync` は `.claude.json` の同期の結果（できたら None）。"""
@@ -739,7 +739,7 @@ def _prepare_held(name: str, base: dict) -> Prepared:
     return got
 
 
-def prepare(name: str, base: dict) -> Prepared:
+def prepare_account(name: str, base: dict) -> Prepared:
     """アカウントの排他の中で、アカウントの設定ディレクトリを用意する（E2・E3）。例外を出さず、結果で返す。
 
     古い形の排他ファイルの掃除 → 使えるかの確かめ → `.claude.json` が読めるかの確かめ → 識別の照合 → 共有の項目への
@@ -788,7 +788,7 @@ def account_env(name: str, base: dict, note=None) -> dict | None:
     declared = fallback_env(base)
     if name == METERED:
         return _metered_env(dict(base), declared, FALLBACK_ENV not in base)
-    got = prepare(name, base)
+    got = prepare_account(name, base)
     if note is not None and got.worth_noting():
         note(got.row(name))
     if not got.ok:
