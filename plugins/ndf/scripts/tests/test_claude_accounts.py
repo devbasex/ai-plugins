@@ -649,3 +649,78 @@ def test_supervise_passes_metered_declaration_as_settings(accounts, monkeypatch,
     sc.call_claude("s", "p", None, str(accounts.root), 10, full=full, child_env=None)
     assert seen[0][:2] == ["python3", "fake.py"] and _settings_of(seen[0]) == [{"env": {"AWS_REGION": "ap-northeast-1"}}]
     assert "--settings" not in seen[1]
+
+
+# --- 現状固定: usable の判定と needs_relogin の書き込み（根拠は現状の出力。仕様の主張ではない） ---------
+
+NOW = 1_800_000_000.0
+EXPIRED, AT_MARGIN, FRESH = 0, int((NOW + 60) * 1000), int((NOW + 61) * 1000)
+REFRESH_PAST, REFRESH_NOW, REFRESH_AHEAD = int((NOW - 1) * 1000), int(NOW * 1000), int((NOW + 1) * 1000)
+
+
+def _held(accounts, oauth, name="a"):
+    """登録済みの `name` の認証ファイルを `oauth` だけにする。"""
+    accounts.add(name, util5=None)
+    accounts.write(accounts.root / name / ".credentials.json", {"claudeAiOauth": oauth})
+
+
+@pytest.mark.parametrize(
+    "oauth,expected",
+    [
+        ({"accessToken": "t", "refreshToken": "r", "expiresAt": EXPIRED}, True),
+        ({"accessToken": "t", "refreshToken": "r", "refreshTokenExpiresAt": REFRESH_AHEAD, "expiresAt": EXPIRED}, True),
+        ({"accessToken": "t", "refreshToken": "r", "refreshTokenExpiresAt": "soon", "expiresAt": EXPIRED}, True),
+        ({"accessToken": "t", "refreshToken": "r", "refreshTokenExpiresAt": REFRESH_NOW, "expiresAt": EXPIRED}, False),
+        ({"accessToken": "t", "refreshToken": "r", "refreshTokenExpiresAt": REFRESH_PAST, "expiresAt": FRESH}, True),
+        ({"accessToken": "t", "refreshToken": "r", "refreshTokenExpiresAt": REFRESH_PAST, "expiresAt": AT_MARGIN}, False),
+        ({"accessToken": "t", "expiresAt": FRESH}, True),
+        ({"accessToken": "t", "refreshToken": "", "expiresAt": EXPIRED}, False),
+        ({"accessToken": "t"}, False),
+        ({"accessToken": "", "refreshToken": "r", "expiresAt": FRESH}, False),
+        ({"accessToken": 1, "refreshToken": "r", "expiresAt": FRESH}, False),
+        ({"refreshToken": "r", "expiresAt": FRESH}, False),
+    ],
+)
+def test_usable_by_tokens_marks_relogin_only_when_not_usable(accounts, oauth, expected):
+    _held(accounts, oauth)
+    assert ca.usable("a", now=NOW) is expected
+    assert accounts.account("a")["needs_relogin"] is (not expected)
+
+
+@pytest.mark.parametrize("content", [None, "{broken", "[1]", json.dumps({"claudeAiOauth": "x"})])
+def test_usable_without_readable_credentials_marks_relogin(accounts, content):
+    accounts.add("a", util5=None)
+    cred = accounts.root / "a" / ".credentials.json"
+    cred.unlink() if content is None else cred.write_text(content)
+    assert ca.usable("a", now=NOW) is False
+    assert accounts.account("a")["needs_relogin"] is True
+
+
+def test_usable_stops_at_the_record_before_touching_credentials(accounts):
+    """登録の記録が無い・読めない・再登録が要ると書いてあるときは偽を返し、記録を作らず書き換えない。"""
+    assert ca.usable("ghost", now=NOW) is False and not (accounts.root / "ghost").exists()
+    _held(accounts, {"accessToken": "t", "refreshToken": "r", "expiresAt": FRESH}, "flagged")
+    _held(accounts, {"accessToken": "t", "refreshToken": "r", "expiresAt": FRESH}, "broken")
+    flagged, broken = accounts.root / "flagged" / "account.json", accounts.root / "broken" / "account.json"
+    accounts.write(flagged, {**accounts.account("flagged"), "needs_relogin": True})
+    broken.write_text("{broken")
+    before = (flagged.read_bytes(), broken.read_bytes())
+    assert ca.usable("flagged", now=NOW) is False and ca.usable("broken", now=NOW) is False
+    assert (flagged.read_bytes(), broken.read_bytes()) == before
+
+
+def test_usable_marks_relogin_when_permissions_cannot_be_fixed(accounts, monkeypatch):
+    _held(accounts, {"accessToken": "t", "refreshToken": "r", "expiresAt": FRESH})
+    loose = accounts.root / "a" / "other.json"
+    loose.write_text("{}")
+    os.chmod(loose, 0o644)
+    real = os.chmod
+
+    def chmod(path, mode, *a, **k):  # 他人のファイルのように、このファイルだけ権限を直せない
+        if str(path) == str(loose):
+            raise PermissionError(path)
+        return real(path, mode, *a, **k)
+
+    monkeypatch.setattr(ca.os, "chmod", chmod)
+    assert ca.usable("a", now=NOW) is False
+    assert accounts.account("a")["needs_relogin"] is True
