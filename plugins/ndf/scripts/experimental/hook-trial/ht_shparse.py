@@ -341,6 +341,34 @@ class Targets:
                 self.substs(c, st)
 
     def command(self, n, st: St, redirs):
+        words, rs = self._command_parts(n, st, redirs)
+        i = 0
+        while i < len(words) and words[i] in ("command", "builtin", "time"):  # `time` はコマンド名として読まれる
+            i += 1
+            while i < len(words) and words[i] in ("-p", "--"):
+                i += 1
+        name = words[i] if i < len(words) else ""
+        is_cd = name == "cd" and st.base is not None
+        # 順序: リダイレクト → 書き込み先の解析 → moving と cd の状態の更新
+        self.redirects(rs, st)  # リダイレクトは命令より先に（cd の前の位置で）開く
+        for k, w in enumerate(words):
+            if w == "tee":
+                for a in words[k + 1 :]:
+                    if not a.startswith("-"):
+                        self.emit(a, st)
+            elif w == "sed":
+                self.sed(words[k + 1 :], st)
+            elif w in ("cp", "mv"):
+                self.cp_mv(words[k + 1 :], st)
+        if st.base is not None and name in st.moving:
+            st.cwd = None
+        if not is_cd:
+            return (0, False, False)
+        self._change_directory(words[i + 1 :], st)
+        return (1, True, False)
+
+    def _command_parts(self, n, st: St, redirs):
+        """命令の (語の並び, リダイレクトの並び)。代入と語の中の置換はここで読む。"""
         nodes, rs = [], list(redirs)
         for c in n.children:
             f = field(n, c)
@@ -356,29 +384,12 @@ class Targets:
         for c in nodes:
             self.substs(c, st)
             words.append(value(c))
-        i = 0
-        while i < len(words) and words[i] in ("command", "builtin", "time"):  # `time` はコマンド名として読まれる
-            i += 1
-            while i < len(words) and words[i] in ("-p", "--"):
-                i += 1
-        name = words[i] if i < len(words) else ""
-        is_cd = name == "cd" and st.base is not None
-        self.redirects(rs, st)  # リダイレクトは命令より先に（cd の前の位置で）開く
-        for k, w in enumerate(words):
-            if w == "tee":
-                for a in words[k + 1 :]:
-                    if not a.startswith("-"):
-                        self.emit(a, st)
-            elif w == "sed":
-                self.sed(words[k + 1 :], st)
-            elif w in ("cp", "mv"):
-                self.cp_mv(words[k + 1 :], st)
-        if st.base is not None and name in st.moving:
-            st.cwd = None
-        if not is_cd:
-            return (0, False, False)
+        return words, rs
+
+    def _change_directory(self, args, st: St) -> None:
+        """`cd` の引数から行き先を読み、cd の回数と cwd を更新する。"""
         dest, eoo = "", False
-        for a in words[i + 1 :]:
+        for a in args:
             if a == "--" and not eoo:
                 eoo = True
                 continue
@@ -394,7 +405,6 @@ class Targets:
             st.cwd = _abs(dest)
         elif st.cwd is not None:
             st.cwd = _abs(st.cwd + "/" + dest)
-        return (1, True, False)
 
     def sed(self, args, st: St) -> None:
         inplace, seen, skip, files = False, False, False, []
