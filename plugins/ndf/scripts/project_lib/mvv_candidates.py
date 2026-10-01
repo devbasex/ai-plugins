@@ -28,6 +28,39 @@ PROPOSE_SYSTEM = """あなたはプロジェクトの MVV（Mission / Vision / V
  "questions": [{"question": "利用者に決めてもらう点", "options": [{"label": "選択肢", "effect": "選んだときに決まること"}]}]}"""
 
 
+def _part_problems(label: str, name: str, part, known: set[str]) -> list[str]:
+    """項目 1 つ（Mission・Vision・Value・レッドライン）の本文と根拠の誤り。"""
+    if not isinstance(part, dict) or not str(part.get("text") or "").strip():
+        return [f"{label}: {name} の本文が無い"]
+    ev = part.get("evidence")
+    if not isinstance(ev, list) or not ev:
+        return [f"{label}: {name} の根拠が無い"]
+    if any(e not in known for e in ev):
+        return [f"{label}: {name} の根拠が材料に無い ID を指す（{', '.join(str(e) for e in ev if e not in known)}）"]
+    return []
+
+
+def _candidate_problems(i: int, c, known: set[str]) -> list[str]:
+    """候補 1 案の形の誤り（i は候補の並びの番号。0 始まり）。"""
+    w = f"候補 {c.get('id', i + 1) if isinstance(c, dict) else i + 1}"
+    if not isinstance(c, dict):
+        return [f"{w}: オブジェクトでない"]
+    errs = []
+    parts = [("Mission", c.get("mission")), ("Vision", c.get("vision"))]
+    values = c.get("values")
+    if not isinstance(values, list) or not values:
+        errs.append(f"{w}: Value が無い")
+        values = []
+    parts += [(f"Value {j}", v) for j, v in enumerate(values, 1)]
+    if not isinstance(c.get("redlines"), list):
+        errs.append(f"{w}: レッドライン（redlines）が無い")
+    else:
+        parts += [(r.get("id", "P") if isinstance(r, dict) else "P", r) for r in c["redlines"]]
+    for name, part in parts:
+        errs += _part_problems(w, name, part, known)
+    return errs
+
+
 def candidate_problems(data, known: set[str]) -> list[str]:
     """候補の形の誤り（I10・I19）。"""
     if not isinstance(data, dict):
@@ -38,29 +71,7 @@ def candidate_problems(data, known: set[str]) -> list[str]:
         errs.append("候補が 2 案以上ない")
         cands = cands if isinstance(cands, list) else []
     for i, c in enumerate(cands):
-        w = f"候補 {c.get('id', i + 1) if isinstance(c, dict) else i + 1}"
-        if not isinstance(c, dict):
-            errs.append(f"{w}: オブジェクトでない")
-            continue
-        parts = [("Mission", c.get("mission")), ("Vision", c.get("vision"))]
-        values = c.get("values")
-        if not isinstance(values, list) or not values:
-            errs.append(f"{w}: Value が無い")
-            values = []
-        parts += [(f"Value {j}", v) for j, v in enumerate(values, 1)]
-        if not isinstance(c.get("redlines"), list):
-            errs.append(f"{w}: レッドライン（redlines）が無い")
-        else:
-            parts += [(r.get("id", "P") if isinstance(r, dict) else "P", r) for r in c["redlines"]]
-        for name, part in parts:
-            if not isinstance(part, dict) or not str(part.get("text") or "").strip():
-                errs.append(f"{w}: {name} の本文が無い")
-                continue
-            ev = part.get("evidence")
-            if not isinstance(ev, list) or not ev:
-                errs.append(f"{w}: {name} の根拠が無い")
-            elif any(e not in known for e in ev):
-                errs.append(f"{w}: {name} の根拠が材料に無い ID を指す（{', '.join(str(e) for e in ev if e not in known)}）")
+        errs += _candidate_problems(i, c, known)
     qs = data.get("questions")
     if not isinstance(qs, list) or not any(isinstance(q, dict) and str(q.get("question") or "").strip() for q in qs):
         errs.append("利用者に決めてもらう点（questions）が無い")
