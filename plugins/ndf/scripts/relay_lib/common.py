@@ -15,6 +15,7 @@ import os
 import sys
 import time
 from contextlib import ExitStack
+from typing import NamedTuple
 
 # relay_lib の親。プラグインでは `scripts/`、複製ではバージョンディレクトリ（`relay-<版>-<digest>/`）
 PKG_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -139,6 +140,14 @@ def fallback_cwd(cwd: str) -> str:
             break
         p = parent
     return p if p and os.path.isdir(p) else os.path.expanduser("~")
+
+
+class PluginInfo(NamedTuple):
+    """`claude plugin list --json` から読んだ ndf の 1 件。導入先 `installPath` は無ければ None。"""
+
+    marketplace: str
+    version: str
+    install_path: str | None
 
 
 class LockBusy(Exception):

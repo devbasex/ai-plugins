@@ -9,9 +9,8 @@ import re
 import subprocess
 import sys
 import time
-from typing import NamedTuple
 
-from .common import config_dir, data_dir, env_num, launcher_path, parse_iso
+from .common import PluginInfo, config_dir, data_dir, env_num, launcher_path, parse_iso
 
 import claude_accounts as ca  # noqa: E402,I001  common が lib/ を sys.path に置く
 from claude_settings import metered_settings  # noqa: E402,F401  区間の引数へ宣言を足す（#1543。run.py が呼ぶ）
@@ -244,14 +243,6 @@ def plugin_cli(claude: str, args: list[str], timeout: float) -> subprocess.Compl
         return subprocess.run([claude, "plugin"] + args, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout, env=env)
     except (OSError, subprocess.SubprocessError):
         return None
-
-
-class PluginInfo(NamedTuple):
-    """`claude plugin list --json` から読んだ ndf の 1 件。導入先 `installPath` は無ければ None。"""
-
-    marketplace: str
-    version: str
-    install_path: str | None
 
 
 def read_plugin(claude: str, marketplace: str | None = None) -> PluginInfo | None:
