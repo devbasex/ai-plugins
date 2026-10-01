@@ -4161,3 +4161,69 @@ def test_status_shows_running_wrapper(mod, tmp_path, monkeypatch, capsys, row, c
 def test_status_outside_relay_has_no_running_wrapper_line(mod, capsys):
     assert relay_install.cmd_status() == 0
     assert "動いているラッパー" not in capsys.readouterr().out
+
+
+# --- log.jsonl の最後の start の行を読む 2 つ（現状固定） ---
+
+
+def _write_log(d, *lines):
+    rows = [x if isinstance(x, str) else json.dumps(x, ensure_ascii=False) for x in lines]
+    (d / relay_common.LOG_FILE).write_text("".join(r + "\n" for r in rows))
+
+
+@pytest.mark.parametrize(
+    "lines,expected",
+    [
+        ([], None),
+        ([{"event": "end", "section": 4}, {"event": "mark_skipped", "section": 5}], None),
+        (
+            [
+                {"event": "start", "section": 1},
+                {"event": "end", "section": 1},
+                {"event": "start", "section": 2},
+                {"event": "stop", "section": 9},
+            ],
+            2,
+        ),
+        # 番号が整数でない start は飛ばし、その前の start まで遡る
+        (
+            [{"event": "start", "section": 1}, {"event": "start", "section": "2"}, {"event": "start"}, {"event": "start", "section": None}],
+            1,
+        ),
+        ([{"event": "start", "section": 0}, {"event": "start", "section": 1.5}], 0),
+        # 現状の記録: 真偽値は整数として通る
+        ([{"event": "start", "section": 1}, {"event": "start", "section": True}], True),
+        # 読めない行・空行・辞書でない行は飛ばす
+        ([{"event": "start", "section": 3}, "{broken", "", "[1, 2]", '"start"', "null"], 3),
+    ],
+)
+def test_current_section_reads_last_start_with_int_section(tmp_path, lines, expected):
+    _write_log(tmp_path, *lines)
+    got = relay_record.current_section(str(tmp_path))
+    assert got == expected and type(got) is type(expected)
+
+
+@pytest.mark.parametrize(
+    "lines,expected",
+    [
+        ([], (False, None)),
+        ([{"event": "end", "relay_version_dir": "relay-x"}], (False, None)),
+        ([{"event": "start", "section": 1, "relay_version_dir": "relay-a"}, {"event": "end"}], (True, "relay-a")),
+        ([{"event": "start", "relay_version_dir": "relay-a"}, {"event": "start", "relay_version_dir": "relay-b"}], (True, "relay-b")),
+        # キーの無い start が最後なら、前の start へは遡らない（current_section とは違う）
+        ([{"event": "start", "relay_version_dir": "relay-a"}, {"event": "start", "section": 2}], (False, None)),
+        ([{"event": "start", "relay_version_dir": "relay-a"}, {"event": "start", "relay_version_dir": None}], (True, None)),
+        ([{"event": "start", "relay_version_dir": 5}], (True, None)),
+        ([{"event": "start", "relay_version_dir": "relay-a"}, "{broken", "", "[1, 2]", "null"], (True, "relay-a")),
+    ],
+)
+def test_running_version_dir_reads_last_start_row(tmp_path, lines, expected):
+    _write_log(tmp_path, *lines)
+    assert relay_record.running_version_dir(str(tmp_path)) == expected
+
+
+def test_last_start_readers_without_log_file(tmp_path):
+    assert relay_record.current_section(str(tmp_path)) is None
+    assert relay_record.current_section(str(tmp_path / "missing")) is None
+    assert relay_record.running_version_dir(str(tmp_path)) == (False, None)
+    assert relay_record.running_version_dir(str(tmp_path / "missing")) == (False, None)
