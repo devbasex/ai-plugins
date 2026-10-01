@@ -19,10 +19,13 @@ import time
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 
+CONFIG_FILE = ".claude.json"
+LEGACY_CONFIG_FILE = ".config.json"  # `.claude.json` の古い名前（本体はあれば先に読む）
+BASE_FILE = ".ndf-shared-base.json"
 # アカウント固有の項目（Claude Code 2.1.286 と NDF が書く）。前方一致は書き込みの一時ファイルと排他を含む
-LOCAL_PREFIXES = (".credentials.json", ".claude.json", ".oauth_refresh.lock")
+LOCAL_PREFIXES = (".credentials.json", CONFIG_FILE, ".oauth_refresh.lock")
 LOCAL_NAMES = (
-    ".config.json",
+    LEGACY_CONFIG_FILE,
     "backups",
     "policy-limits.json",
     "policy-limits.json.stamp.json",
@@ -31,11 +34,8 @@ LOCAL_NAMES = (
     ".ndf-statusline-auth.json",
     "account.json",
     "usage.json",
-    ".ndf-shared-base.json",
+    BASE_FILE,
 )
-CONFIG_FILE = ".claude.json"
-LEGACY_CONFIG_FILE = ".config.json"  # `.claude.json` の古い名前（本体はあれば先に読む）
-BASE_FILE = ".ndf-shared-base.json"
 SHARED_KEYS = ("projects", "mcpServers")
 ONBOARDING_KEYS = ("hasCompletedOnboarding", "lastOnboardingVersion")
 LOCK_WAIT = 2.0  # `.claude.json` の排他の待ちの上限（秒）
