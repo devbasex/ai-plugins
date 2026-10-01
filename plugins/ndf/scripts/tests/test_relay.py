@@ -3911,6 +3911,22 @@ def test_section_input_round_trips_through_handover():
     assert back == s
 
 
+@pytest.mark.parametrize("keep_input, when", [(False, "TCSAFLUSH"), (True, "TCSADRAIN")])
+def test_set_raw_keeps_typed_input_after_swap(monkeypatch, keep_input, when):
+    """入れ替えた後の raw 化は、旧版が残した入力を捨てない（#1587 の決定 6）。"""
+    import termios
+    import tty
+
+    from relay_lib.terminal import Terminal
+
+    calls = []
+    monkeypatch.setattr(termios, "tcgetattr", lambda fd: ["saved"])
+    monkeypatch.setattr(tty, "setraw", lambda fd, w=termios.TCSAFLUSH: calls.append((fd, w)))
+    t = Terminal()
+    t.set_raw(keep_input=keep_input)
+    assert calls == [(0, getattr(termios, when))] and t.saved == ["saved"]
+
+
 def test_version_of_reads_version_from_name():
     assert relay_version_dir.version_of("relay-10.17.53-bbbb2222") == "10.17.53"
     assert relay_version_dir.version_of("relay-10.17.53-dev.1-bbbb2222") == "10.17.53-dev.1"

@@ -479,8 +479,9 @@ def cmd_run(args: list[str]) -> int:
     return _serve_terminal(relay, term, inuse, lambda: relay.loop(args))
 
 
-def _serve_terminal(relay: Relay, term: Terminal, inuse: str | None, body) -> int:
-    """端末を raw にして `body` を動かし、終わったら端末・ラッパー・使用中の印を片づける。"""
+def _serve_terminal(relay: Relay, term: Terminal, inuse: str | None, body, keep_input: bool = False) -> int:
+    """端末を raw にして `body` を動かし、終わったら端末・ラッパー・使用中の印を片づける。
+    `keep_input` は入れ替えた後で、旧版が残した入力を捨てずに raw にする（#1587 の決定 6）。"""
 
     def on_signal(signum, _frame):
         term.restore()
@@ -490,7 +491,7 @@ def _serve_terminal(relay: Relay, term: Terminal, inuse: str | None, body) -> in
     signal.signal(signal.SIGHUP, on_signal)
     signal.signal(signal.SIGWINCH, lambda *_: term.copy_winsize())
     try:
-        term.set_raw()
+        term.set_raw(keep_input=keep_input)
         return body()
     finally:
         term.restore()

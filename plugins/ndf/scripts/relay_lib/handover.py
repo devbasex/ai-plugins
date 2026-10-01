@@ -301,7 +301,7 @@ class Swapper:
             os.execve(python, argv, env)
         except OSError as e:
             remove(path)
-            self.term.set_raw()
+            self.term.set_raw(keep_input=True)
             self.limit.take_within()
             raise Skip(EXEC_FAILED, f"{to} を起動できない（{e.strerror or type(e).__name__}）") from None
 
@@ -336,7 +336,7 @@ class Swapper:
             prepare_seconds=h.get("prepare_seconds"),
             seconds=elapsed(written) if isinstance(written, (int, float)) else None,
         )
-        return serve(relay, relay.term, inuse, lambda: relay.resume(h))
+        return serve(relay, relay.term, inuse, lambda: relay.resume(h), keep_input=True)
 
     def restore_state(self, state: dict) -> None:
         """申し送りの状態を戻す（セッションの番号は続き。アカウントを切り替えるかは数え直さない）。"""

@@ -56,13 +56,14 @@ class Terminal:
 
     # -- 端末の設定
 
-    def set_raw(self) -> None:
-        """今の設定を控えてから raw にする。戻すのは `restore`。"""
+    def set_raw(self, keep_input: bool = False) -> None:
+        """今の設定を控えてから raw にする。戻すのは `restore`。`keep_input` なら打たれた入力を捨てない
+        （ラッパーの入れ替えの後と、入れ替えに失敗して戻すとき。#1587 の決定 6）。"""
         import termios
         import tty
 
         self.saved = termios.tcgetattr(0)
-        tty.setraw(0)
+        tty.setraw(0, termios.TCSADRAIN if keep_input else termios.TCSAFLUSH)
 
     def restore(self, keep_input: bool = False) -> None:
         """控えた設定へ戻す。`keep_input` なら打たれた入力を捨てない（ラッパーの入れ替えの前。#1587 の決定 6）。"""
