@@ -3871,16 +3871,21 @@ def test_handover_written_private_and_removed_after_read(tmp_path):
     assert not os.path.exists(path) and os.listdir(d) == []
 
 
-@pytest.mark.parametrize(
-    "body, shown",
-    [
-        (None, None),  # 無い
-        ("{not json", None),  # 壊れている
-        (json.dumps({"schema": 99, **handover_data()}), "/goal 続き"),  # 知らない schema
-        (json.dumps({"schema": 1, **{k: v for k, v in handover_data().items() if k != "next"}}), "/goal 続き"),  # 必須のキーが無い
-    ],
-    ids=["missing", "broken", "schema", "key"],
-)
+def broken_handovers(drop, unreadable_shown):
+    """読めない申し送りの 4 通りの (本文, 期待する `shown`)。`drop` は 4 つ目で落とす必須のキー。
+
+    `unreadable_shown` は、本文から `shown` を読めない 2 通り（無い・壊れている）で期待する値。"""
+    return [
+        pytest.param(None, unreadable_shown, id="missing"),  # 無い
+        pytest.param("{not json", unreadable_shown, id="broken"),  # 壊れている
+        pytest.param(json.dumps({"schema": 99, **handover_data()}), "/goal 続き", id="schema"),  # 知らない schema
+        pytest.param(
+            json.dumps({"schema": 1, **{k: v for k, v in handover_data().items() if k != drop}}), "/goal 続き", id="key"
+        ),  # 必須のキーが無い
+    ]
+
+
+@pytest.mark.parametrize("body, shown", broken_handovers("next", None))
 def test_handover_read_rejects(tmp_path, body, shown):
     path = tmp_path / "handover.json"
     if body is not None:
@@ -4084,16 +4089,7 @@ def test_swap_failure_keeps_current_version(tmp_path, term, case):
     assert termios.tcgetattr(t.slave) == t.before
 
 
-@pytest.mark.parametrize(
-    "body, shown",
-    [
-        (None, "claude を打ち直し、前の会話は /resume で選ぶ"),
-        ("{not json", "claude を打ち直し、前の会話は /resume で選ぶ"),
-        (json.dumps({"schema": 99, **handover_data()}), "/goal 続き"),
-        (json.dumps({"schema": 1, **{k: v for k, v in handover_data().items() if k != "state"}}), "/goal 続き"),
-    ],
-    ids=["missing", "broken", "schema", "key"],
-)
+@pytest.mark.parametrize("body, shown", broken_handovers("state", "claude を打ち直し、前の会話は /resume で選ぶ"))
 def test_run_from_unreadable_handover_stops_with_command(tmp_path, home, body, shown):
     """入れ替えた後に申し送りを読めなければ、子を起動せず、次のコマンドを示して止まる（AC11・I6）。"""
     d = tmp_path / "relay-dir"
