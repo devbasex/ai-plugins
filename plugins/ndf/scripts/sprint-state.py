@@ -272,32 +272,53 @@ def gate_locked(a) -> dict:
     if a.by == "user":
         override = pms.record_override(m, a.sprint, a.name, a.outcome, at, Path(a.root or ".").resolve(), a.mvv_log, pr=a.pr)
         if a.outcome == "rejected":
-            m.setdefault("rejections", []).append({**entry, "by": "user", "outcome": "rejected"})
-            jsonio.write_atomic(a.sprint, m, indent=1)
-            extra = f"。覆しを記録した（{override['kind']}）" if override else ""
-            summary = f"{a.name} の差し戻しを書いた（{at}。関門は通さない）{extra}"
-            return outcome("ok", summary, [override] if override else [], {"gates": len(m.get("gates", []))})
+            return reject_gate(a, m, entry, override, at)
         if a.outcome:
             entry["outcome"] = "approved"
     if a.name == MVV_GATE:
-        mvv = m.get("mvv") or {}
-        if not mvv.get("path") or not Path(mvv["path"]).is_file():
+        sha = mvv_sha(m)
+        if sha is None:
             return outcome("stopped", "MVV が無い（init --pace fast か auto で写す）。MVV の承認を書かない")
-        entry["sha256"] = sha256_of(Path(mvv["path"]))
+        entry["sha256"] = sha
     if a.by == "mvv":
-        if sprint_mvv.withdrawn(m, a.name):
-            return outcome("stopped", f"{a.name} は MVV 判定の通過を取り消した。自動で通さず、利用者の承認を求める")
-        if not a.verdict:
-            return outcome("stopped", "--by mvv には --verdict が要る", exit=step_result.EXIT_UNREADABLE)
-        try:
-            reasons = json.loads(a.reasons or "[]")
-        except ValueError:
-            return outcome("stopped", f"--reasons は JSON の配列で渡す: {a.reasons}", exit=step_result.EXIT_UNREADABLE)
-        entry.update(by="mvv", verdict=a.verdict, reasons=reasons if isinstance(reasons, list) else [reasons], log=a.log or "")
+        judged, stop = mvv_judgement(a, m)
+        if stop:
+            return stop
+        entry.update(judged)
     m["gates"] = gates = [g for g in m.get("gates", []) if g.get("name") != a.name] + [entry]
     jsonio.write_atomic(a.sprint, m, indent=1)
     who = "MVV 判定" if a.by == "mvv" else "承認"
     return outcome("ok", f"{a.name} の{who}を書いた（{at}）", gates, {"gates": len(gates)})
+
+
+def reject_gate(a, m: dict, entry: dict, override: dict | None, at: str) -> dict:
+    """利用者の差し戻しを書く。関門は通さない。"""
+    m.setdefault("rejections", []).append({**entry, "by": "user", "outcome": "rejected"})
+    jsonio.write_atomic(a.sprint, m, indent=1)
+    extra = f"。覆しを記録した（{override['kind']}）" if override else ""
+    summary = f"{a.name} の差し戻しを書いた（{at}。関門は通さない）{extra}"
+    return outcome("ok", summary, [override] if override else [], {"gates": len(m.get("gates", []))})
+
+
+def mvv_sha(m: dict) -> str | None:
+    """スプリント MVV の写しのハッシュ。写しが無ければ `None`。"""
+    mvv = m.get("mvv") or {}
+    if not mvv.get("path") or not Path(mvv["path"]).is_file():
+        return None
+    return sha256_of(Path(mvv["path"]))
+
+
+def mvv_judgement(a, m: dict) -> tuple[dict | None, dict | None]:
+    """(--by mvv の記録に足す鍵, 止まるときの結果)。取り消し済みか、--verdict・--reasons を読めなければ止まる。"""
+    if sprint_mvv.withdrawn(m, a.name):
+        return None, outcome("stopped", f"{a.name} は MVV 判定の通過を取り消した。自動で通さず、利用者の承認を求める")
+    if not a.verdict:
+        return None, outcome("stopped", "--by mvv には --verdict が要る", exit=step_result.EXIT_UNREADABLE)
+    try:
+        reasons = json.loads(a.reasons or "[]")
+    except ValueError:
+        return None, outcome("stopped", f"--reasons は JSON の配列で渡す: {a.reasons}", exit=step_result.EXIT_UNREADABLE)
+    return {"by": "mvv", "verdict": a.verdict, "reasons": reasons if isinstance(reasons, list) else [reasons], "log": a.log or ""}, None
 
 
 def withdraw_gate(a, m: dict, at: str) -> dict:
