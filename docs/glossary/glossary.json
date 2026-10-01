@@ -2634,6 +2634,19 @@
       "pending_source": "issues/issue-1523-design.md"
     },
     {
+      "term": "アカウントの設定ディレクトリ",
+      "context": "ndf-relay",
+      "meaning": "登録済みアカウントごとのディレクトリ（アカウントの置き場の <名前>/）。認証ファイルと登録の記録を実体で持ち、そのアカウントで起動する claude の CLAUDE_CONFIG_DIR になる",
+      "code": "account_dir",
+      "pending_source": "issues/issue-1576-requirements.md"
+    },
+    {
+      "term": "共有の設定ディレクトリ",
+      "context": "ndf-relay",
+      "meaning": "ラッパーを通さずに起動した claude が使う設定ディレクトリ（${CLAUDE_CONFIG_DIR:-~/.claude}）。会話の記録・プラグイン・設定の正を持ち、登録済みアカウントの claude の中ではアカウントの設定ディレクトリの symlink の参照先になる",
+      "pending_source": "issues/issue-1576-requirements.md"
+    },
+    {
       "term": "ツールのパス",
       "context": "ndf-worktree",
       "meaning": "CLI が起動したツール（MCP サーバーなど）が、利用者の操作なしに worktree の中で書き換える既知のパス。既定（`.serena/project.yml` と `.serena/serena_config.yml`）と `.ndf/worktree.json` の `tool_paths`（`add` / `remove`）で決まる。検査とコミットの対象から外す",
