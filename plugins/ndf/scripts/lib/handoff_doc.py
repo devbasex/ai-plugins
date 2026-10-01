@@ -34,7 +34,7 @@ def find_section(text: str, word: str) -> SectionSpan | None:
     offsets = [0]
     for line in lines:
         offsets.append(offsets[-1] + len(line))
-    atx = md.atx_headings(text)
+    atx = md.atx_only_headings(text)
     for k, h in enumerate(atx):
         if word not in lines[h.line].rstrip("\r\n"):
             continue
@@ -59,4 +59,4 @@ def replace_body(text: str, word: str, body: str) -> str | None:
 def level_headings(text: str, level: int) -> list[tuple[str, int]]:
     """深さ level の ATX 見出しの (文, 行の番号) の並び。囲みの中の `#` を数えない。"""
     lines = text.splitlines()
-    return [(heading_text(lines[h.line]), h.line) for h in md.atx_headings(text) if h.level == level]
+    return [(heading_text(lines[h.line]), h.line) for h in md.atx_only_headings(text) if h.level == level]

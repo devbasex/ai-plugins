@@ -137,7 +137,7 @@ def headings(text: str) -> list[Heading]:
     return out
 
 
-def atx_headings(text: str) -> list[Heading]:
+def atx_only_headings(text: str) -> list[Heading]:
     """`headings` のうち、行頭が `#` の見出し（ATX）だけ。Setext の見出しを節に数えない読み手が使う。
 
     `sprint-close.py` の `parse_record` は同じ規則を `md_sections` の節へ当てている。"""
