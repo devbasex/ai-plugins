@@ -440,7 +440,8 @@ def test_account_env_keeps_user_vars_with_saved_decl(accounts):  # noqa: F811
     base = {"AWS_PROFILE": "mine", "ANTHROPIC_MODEL": "my-model", "CLAUDE_CODE_USE_BEDROCK": "1"}
     env = ca.account_env("a", base)
     assert env["AWS_PROFILE"] == "mine" and env["ANTHROPIC_MODEL"] == "my-model"
-    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == tok and "CLAUDE_CODE_USE_BEDROCK" not in env
+    assert env["CLAUDE_CONFIG_DIR"] == str(accounts.root / "a") and "CLAUDE_CODE_USE_BEDROCK" not in env
+    assert tok not in env.values() and "CLAUDE_CODE_OAUTH_TOKEN" not in env
 
 
 def test_account_env_from_metered_section_drops_saved_decl(accounts):  # noqa: F811
@@ -451,7 +452,7 @@ def test_account_env_from_metered_section_drops_saved_decl(accounts):  # noqa: F
     base = ca.account_env(ca.METERED, {"PATH": "/bin"})
     env = ca.account_env("a", base)
     assert not any(k in env for k in decl) and env["PATH"] == "/bin"
-    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == tok and env[ca.NAME_ENV] == "a"
+    assert env["CLAUDE_CONFIG_DIR"] == str(accounts.root / "a") and env[ca.NAME_ENV] == "a" and tok not in env.values()
 
 
 @pytest.mark.parametrize(

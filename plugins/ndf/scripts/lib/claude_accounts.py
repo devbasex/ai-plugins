@@ -1,20 +1,26 @@
-"""登録済みの claude アカウント: 置き場・トークン・使用量の保存・選び方・子の環境（#1389）。
+"""登録済みの claude アカウント: 置き場・使用量の保存・選び方・アカウントの設定ディレクトリの用意・子の環境（#1389・#1576）。
 
-ラッパー（`relay_lib/`）と `supervise.py` が同じこの部品を使う。置き場のファイルを書くのはこのモジュールだけである
-（`account add` の中で claude 自身が書く `.credentials.json` と `.claude.json` を除く）。宛先への 1 回の要求と
-文言の読みは `lib/claude_usage.py` が持つ。
+ラッパー（`relay_lib/`）と `supervise.py` が同じこの部品を使う。置き場のファイルを NDF の側で書くのはこのモジュールと
+その部品（`lib/claude_account_dir.py`）だけである。認証ファイル（`.credentials.json`）と `.claude.json` は claude 自身も
+書く。宛先への 1 回の要求と文言の読みは `lib/claude_usage.py` が持つ。
 
-置き場は `${NDF_ACCOUNTS_DIR:-${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/accounts}/`（0700）。アカウントごとの設定ディレクトリ
-`<名前>/`（0700。`auth login` の書き先）に `.credentials.json`・`account.json`・`usage.json`（0600）を置き、
-排他は `<名前>.lock` で取る。保存した従量の接続の宣言 `metered.json`（0600）と、OAuth の 2 回の登録の間の
-登録の途中の状態 `.pending-<名前>/`（0700）も置き場に置く（#1468）。
+置き場は `${NDF_ACCOUNTS_DIR:-<共有の設定ディレクトリ>/ndf/accounts}/`（0700）。アカウントの設定ディレクトリ `<名前>/`（0700）は、
+そのアカウントで起動する claude の `CLAUDE_CONFIG_DIR` になる。`.credentials.json`・`.claude.json`・`account.json`・
+`usage.json`・同期の控え（0600）を実体で持ち、ほかは共有の設定ディレクトリの直下への symlink にする（#1576）。
+NDF のアカウントごとの排他は `.locks/<名前>.lock` で取る（`<名前>.lock` は claude のトークンの更新の排他と同じパスに
+なるため使わない）。保存した従量の接続の宣言 `metered.json`（0600）と、OAuth の 2 回の登録の間の登録の途中の状態
+`.pending-<名前>/`（0700）も置き場に置く（#1468）。
 
-- 共有の設定ディレクトリの `.credentials.json` は読まず、書かない。子へは選んだアカウントのアクセストークンを
-  環境変数 `CLAUDE_CODE_OAUTH_TOKEN` で、そのアカウントのスコープを `CLAUDE_CODE_OAUTH_SCOPES` で渡す（引数に載せない）
+- 共有の設定ディレクトリの `.credentials.json` は読まず、書かない。子へはトークンもスコープも渡さず、アカウントの
+  設定ディレクトリを `CLAUDE_CONFIG_DIR` で渡す。トークンの更新は claude 自身が行う
+- NDF がトークンを更新するのは、動いている claude の無いアカウントで、期限が切れたか取得先が 401 を返し、claude と同じ
+  更新の排他（`.oauth_refresh.lock`）を取れたときだけである（#1576 の I8・I9）
+- 共有の設定ディレクトリは `NDF_SHARED_CONFIG_DIR`（子へ渡す元の `CLAUDE_CONFIG_DIR`）から求める（入れ子の起動でも同じ）
 - 使用量の取得先は 1 アカウントにつき `NDF_ACCOUNT_CHECK_INTERVAL` 秒（既定 300）に 1 回までしか呼ばない。
   数えるのは `usage.json` の `fetched_at`（成否を問わない）で、プロセス・コンテナをまたぐ
 - 選び方・判定に LLM を呼ばない。呼ぶのは使用量の取得先とトークンの更新の宛先だけである
-- 標準ライブラリと `claude_usage`・`locks`（filelock）・`procs`（psutil。どちらも使う関数の中で import する）だけを読む
+- 標準ライブラリと `claude_usage`・`claude_account_dir`・`locks`（filelock）・`procs`（psutil。どちらも使う関数の中で
+  import する）だけを読む
 """
 
 from __future__ import annotations
@@ -26,18 +32,24 @@ import re
 import shlex
 import shutil
 import time
-from contextlib import contextmanager
-from dataclasses import dataclass
+from contextlib import contextmanager, suppress
+from dataclasses import dataclass, field
 from datetime import datetime
 
+import claude_account_dir as account_files
 from claude_usage import Usage, epoch, get_usage, iso_utc, refresh_oauth
 
 NAME_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}")
 METERED = "metered"  # 従量の接続を表す予約の名前。登録できない
+# トークンとスコープの変数。子へは渡さない（元の環境にあれば外す。#1576 の I1）
 TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
-NAME_ENV = "NDF_CLAUDE_ACCOUNT"
-# アカウントのスコープ（空白区切り）。無いと Claude Code は変数のトークンを `user:inference` だけとみなす（#1523）
 SCOPES_ENV = "CLAUDE_CODE_OAUTH_SCOPES"
+NAME_ENV = "NDF_CLAUDE_ACCOUNT"
+CONFIG_ENV = "CLAUDE_CONFIG_DIR"
+# 子へ渡す元の `CLAUDE_CONFIG_DIR`（無かったら空文字）。入れ子の起動で共有の設定ディレクトリを求める（#1576 の決定 2）
+SHARED_ENV = "NDF_SHARED_CONFIG_DIR"
+# プラグインの導入の記録を共有側のパスにする（#1576 の決定 3）
+PLUGIN_CACHE_ENV = "CLAUDE_CODE_PLUGIN_CACHE_DIR"
 USAGE_SCOPE = "user:profile"  # 使用量の取得先が要るスコープ
 # 認証の優先順位でトークンより上に来る変数（アカウントの子で外す）と、専用の設定ディレクトリの claude で外す変数
 FOREIGN_AUTH_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX")
@@ -56,7 +68,12 @@ PENDING_FILE = "pending.json"
 ACCOUNT_FILE = "account.json"
 USAGE_FILE = "usage.json"
 CRED_FILE = ".credentials.json"
-REFRESH_BEFORE = 3600.0  # 期限のこの秒数前を切ったら更新する
+LOCKS_DIR = ".locks"
+REFRESH_LOCK = ".oauth_refresh.lock"  # claude と同じ更新の排他（設定ディレクトリの中のディレクトリ）
+EXPIRY_MARGIN = 60.0  # 残りがこの秒数以下のアクセストークンは期限切れとみなす
+REFRESH_TIMEOUT = 3.0  # 更新の排他の中の宛先の待ちの上限（秒。#1576 の決定 12）
+OLD_LOCK_AGE = 60.0  # 置き場の直下の古い形の排他ファイルを消す古さ（秒。これより新しいものは古い版が使っている）
+AUTH_FAILED_HOLD = 3600.0  # 認証の失敗の観測を候補から外す秒数（#1576 の決定 13。仮の値）
 LOCK_WAIT = 30.0
 NO_RESET_HOLD = 5 * 3600.0  # リセット時刻の読めない上限の観測を候補から外す秒数
 # 枠の大きさの対応表（`rateLimitTier` → 枠ごとの USD 換算）。根拠は issues/relay-capacity-estimate-2026-09-28.md。
@@ -94,12 +111,37 @@ def switch_at() -> float:
     return _setting("NDF_ACCOUNT_SWITCH_AT", 90)
 
 
+def _home_config() -> str:
+    return os.path.join(os.path.expanduser("~"), ".claude")
+
+
+def _original_config(environ) -> str:
+    """元の `CLAUDE_CONFIG_DIR`（無ければ空文字）。アカウントの子の中では `NDF_SHARED_CONFIG_DIR` が持つ。"""
+    return environ[SHARED_ENV] if SHARED_ENV in environ else environ.get(CONFIG_ENV) or ""
+
+
+def shared_dir(environ=None) -> str:
+    """共有の設定ディレクトリ。`NDF_SHARED_CONFIG_DIR` があればその値（空なら `~/.claude`）、無ければ
+    `CLAUDE_CONFIG_DIR`（無ければ `~/.claude`）。"""
+    return _original_config(os.environ if environ is None else environ) or _home_config()
+
+
+def shared_config_file(environ=None) -> str:
+    """共有の `.claude.json`（本体と同じ規則: 共有の設定ディレクトリの `.config.json` → 元の `CLAUDE_CONFIG_DIR` の
+    `.claude.json` → `~/.claude.json`）。"""
+    environ = os.environ if environ is None else environ
+    legacy = os.path.join(shared_dir(environ), account_files.LEGACY_CONFIG_FILE)
+    if os.path.exists(legacy):
+        return legacy
+    orig = _original_config(environ)
+    return os.path.join(orig, ".claude.json") if orig else os.path.join(os.path.expanduser("~"), ".claude.json")
+
+
 def store_dir() -> str:
     forced = os.environ.get("NDF_ACCOUNTS_DIR")
     if forced:
         return forced
-    base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
-    return os.path.join(base, "ndf", "accounts")
+    return os.path.join(shared_dir(), "ndf", "accounts")
 
 
 def account_dir(name: str) -> str:
@@ -172,12 +214,36 @@ def make_store() -> str:
 
 @contextmanager
 def _locked(name: str):
-    """アカウントごとの排他（`<置き場>/<名前>.lock`）。取れなければ locks.LockTimeout。"""
+    """アカウントごとの排他（`<置き場>/.locks/<名前>.lock`）。取れなければ locks.LockTimeout。
+
+    `<置き場>/<名前>.lock` は claude がトークンを更新するときに取る旧形式の排他と同じパスなので使わない（#1576 の I7）。"""
     import locks  # 外部パッケージ（filelock）。読み込みのときには import しない
 
     make_store()
-    with locks.exclusive(os.path.join(store_dir(), name), timeout=LOCK_WAIT):
+    d = os.path.join(store_dir(), LOCKS_DIR)
+    os.makedirs(d, mode=0o700, exist_ok=True)
+    with locks.exclusive(os.path.join(d, name), timeout=LOCK_WAIT):
         yield
+
+
+def _sweep_old_locks(now: float | None = None) -> None:
+    """置き場の直下の古い形の排他ファイル（空の `<名前>.lock` で、`OLD_LOCK_AGE` 秒より古いもの）を消す（E2）。"""
+    now = _now(now)
+    d = store_dir()
+    try:
+        entries = os.listdir(d)
+    except OSError:
+        return
+    for e in entries:
+        if not e.endswith(".lock") or e.startswith("."):
+            continue
+        p = os.path.join(d, e)
+        try:
+            st = os.lstat(p)
+            if os.path.isfile(p) and not os.path.islink(p) and st.st_size == 0 and now - st.st_mtime > OLD_LOCK_AGE:
+                os.remove(p)
+        except OSError:
+            continue
 
 
 def lock_timeout() -> type[BaseException]:
@@ -209,6 +275,7 @@ class Account:
     org_name: str = ""
     tier: str = ""  # `.credentials.json` の `claudeAiOauth.rateLimitTier`。読めなければ空
     declared: dict | None = None  # 枠の大きさの宣言（`account.json` の `capacity`。正の数の枠だけ）
+    auth_failed: float | None = None  # 認証の失敗の観測の時刻（`account.json` の `auth_failed.observed_at`。#1576）
 
     def score(self) -> float | None:  # 使用率（残量を読んでいなければ None）
         return self.usage.score() if self.usage else None
@@ -253,6 +320,10 @@ class Account:
             return None  # 観測の後に読んだ残量が上限にない
         return until
 
+    def auth_held(self, now: float) -> bool:
+        """認証の失敗の観測が効いているか（観測から `AUTH_FAILED_HOLD` 秒の間。後の取得の成功で観測は消える）。"""
+        return self.auth_failed is not None and now - self.auth_failed < AUTH_FAILED_HOLD
+
     def limited_until(self, now: float) -> float | None:
         vals = [v for v in (self.usage.limited_until(now) if self.usage else None, self.observed_until(now)) if v]
         return max(vals) if vals else None
@@ -267,6 +338,8 @@ class Account:
         """一覧の状態の列。"""
         if self.needs_relogin:
             return "再登録が要る"
+        if self.auth_held(now):
+            return "認証の失敗"
         until = self.limited_until(now)
         if until is None:
             return "使える" if self.known() else "残量不明"
@@ -295,6 +368,7 @@ def load_account(name: str) -> Account | None:
         org_name=str(a.get("org_name") or ""),
         tier=_tier(name),
         declared=_declared(a.get("capacity")),
+        auth_failed=epoch((a.get("auth_failed") or {}).get("observed_at")) if isinstance(a.get("auth_failed"), dict) else None,
     )
 
 
@@ -333,7 +407,15 @@ def note_limit(name: str, kind: str, resets_at: float | None, now: float | None 
     )
 
 
-# ---------------------------------------------------------------- トークン
+def note_auth_failed(name: str, now: float | None = None) -> None:
+    """子の claude の応答が認証の失敗で終わったことを残す（`needs_relogin` は変えない。#1576 の I12）。"""
+    if not name or name == METERED:
+        return
+    now = _now(now)
+    _with_lock(name, lambda: _update_account(name, auth_failed={"observed_at": iso_utc(now)}), lambda: None)
+
+
+# ---------------------------------------------------------------- 認証ファイルとトークンの更新
 
 
 def _path(name: str, file: str) -> str:
@@ -349,99 +431,117 @@ def _creds(name: str) -> dict | None:
     return o if (o := _oauth(name)) is not None and isinstance(o.get("accessToken"), str) and o["accessToken"] else None
 
 
-def _token_held(name: str, before: float | None, now: float, force: bool = False, min_left: float = 0) -> str | None:
-    """排他の中で呼ぶ。使えるアクセストークン（使えなければ None）。
+def _fresh(o: dict, now: float) -> bool:
+    """アクセストークンが期限内か（残りが `EXPIRY_MARGIN` 秒を超える）。"""
+    return (o.get("expiresAt") or 0) / 1000 - now > EXPIRY_MARGIN
 
-    `before` は期限の何秒前を切ったら更新するか（None は更新しない）。`min_left`（打ち切りの秒）以下しか残らないものは
-    更新するか None にする。`force` は期限に関わらず更新する（401 のとき）。断られたら `needs_relogin` を真にする。"""
+
+def _usable_held(name: str, now: float) -> bool:
+    """排他の中で呼ぶ。`usable` の中身。認証ファイルが無い・読めない・権限を直せない・期限の切れたアクセストークンを
+    更新できる見込みが無い（リフレッシュトークンが無いか期限切れ）なら `needs_relogin` を真にする。"""
     a = _read(_path(name, ACCOUNT_FILE))
     if a is None or a.get("needs_relogin"):
-        return None
+        return False
     o = _creds(name)
     if not _secure(name) or o is None:
         _update_account(name, needs_relogin=True)
-        return None
-    exp = (o.get("expiresAt") or 0) / 1000
-    before = None if before is None else max(before, min_left)
-    left = o["accessToken"] if exp - now > min_left else None
-    return left if not force and (before is None or exp - now > before) else _refresh_and_store(name, o, now, None if force else left)
-
-
-def _refresh_and_store(name: str, o: dict, now: float, fallback: str | None) -> str | None:
-    """排他の中で呼ぶ。トークンを更新して書き込み、新しいアクセストークンを返す。一時的な失敗なら `fallback`。"""
+        return False
     rexp = o.get("refreshTokenExpiresAt")
-    how, new = ("rejected", None) if isinstance(rexp, (int, float)) and rexp / 1000 <= now else refresh_oauth(o, now)
-    if how == "rejected":
-        _update_account(name, needs_relogin=True)
-        return None
-    if new is None:
-        return fallback
-    try:
-        _write(_path(name, CRED_FILE), {**(_read(_path(name, CRED_FILE)) or {}), "claudeAiOauth": new})
-    except OSError:
-        _update_account(name, needs_relogin=True)
-        return None
-    return new["accessToken"]
+    refreshable = bool(o.get("refreshToken")) and not (isinstance(rexp, (int, float)) and rexp / 1000 <= now)
+    if refreshable or _fresh(o, now):
+        return True
+    _update_account(name, needs_relogin=True)  # 期限の切れたアクセストークンを更新できる見込みが無い（今のまま）
+    return False
 
 
-def _scopes_held(name: str) -> str | None:
-    """排他の中で呼ぶ。置き場の `scopes` を並びのまま空白で結ぶ。空でない list で、要素がすべて空白を含まない
-    空でない文字列のときだけ返す（それ以外は None。足さず、補わない）。"""
-    s = (_oauth(name) or {}).get("scopes")
-    return " ".join(s) if isinstance(s, list) and s and all(isinstance(x, str) and x.split() == [x] for x in s) else None
-
-
-@dataclass(frozen=True)
-class Grant:
-    """1 回の排他の中で読んだアクセストークンとスコープ（空白区切り。読めなければ None）。"""
-
-    token: str
-    scopes: str | None
-
-
-def _grant(name: str, before: float | None, now: float | None = None, min_left: float = 0) -> Grant | None:
-    """1 回の排他の中で読んだアクセストークンとスコープ（Grant）。トークンを得られなければ None。
-
-    スコープはトークンの後に読む（更新すると置き場の `scopes` が書き直される）。読めなければスコープだけ None。"""
+def usable(name: str, now: float | None = None) -> bool:
+    """候補として起動できるか（ネットワークを使わない）。登録の記録があって再登録が要らず、権限を直せ、認証ファイルに
+    リフレッシュトークンか期限内のアクセストークンがある。"""
     now = _now(now)
-
-    def held() -> Grant | None:
-        tok = _token_held(name, before, now, min_left=min_left)
-        return None if tok is None else Grant(tok, _scopes_held(name))
-
-    return _with_lock(name, held, lambda: None)
+    return bool(_with_lock(name, lambda: _usable_held(name, now), lambda: False))
 
 
-def token(name: str, before: float | None = REFRESH_BEFORE, now: float | None = None, min_left: float = 0) -> str | None:
-    """子へ渡すアクセストークン。期限の `before` 秒前を切っていれば更新する（None は更新しない）。`min_left` は `_token_held`。"""
-    g = _grant(name, before, now, min_left)
-    return g.token if g else None
+@contextmanager
+def _refresh_lock(name: str):
+    """claude と同じ更新の排他（アカウントの設定ディレクトリの中の `.oauth_refresh.lock` のディレクトリ）を待たずに取る。
+
+    取れたら真を、取れなければ偽を流す。残った排他を横取りしない（#1576 の決定 12）。"""
+    lock = _path(name, REFRESH_LOCK)
+    try:
+        os.mkdir(lock, 0o700)
+    except OSError:
+        yield False
+        return
+    try:
+        yield True
+    finally:
+        try:
+            os.rmdir(lock)
+        except OSError:
+            pass
+
+
+def _refresh(name: str, seen: str, now: float) -> str | None:
+    """排他の中で呼ぶ。更新の排他を取り、読み直した認証ファイルが変わっていなければトークンを更新する（I9）。
+
+    `seen` は期限切れか 401 と判じたアクセストークン。読み直して別の期限内のトークンなら、宛先を呼ばずにそれを返す。
+    断られたら `needs_relogin` を真にして None、一時的な失敗と排他を取れないときも None。書くのは `claudeAiOauth` だけで、
+    ほかのキー（`mcpOAuth`）は書く直前に読み直したものを保つ。"""
+    with _refresh_lock(name) as held:
+        if not held:
+            return None
+        o = _creds(name)
+        if o is None:
+            return None
+        if o["accessToken"] != seen and _fresh(o, now):
+            return o["accessToken"]
+        rexp = o.get("refreshTokenExpiresAt")
+        how, new = ("rejected", None) if isinstance(rexp, (int, float)) and rexp / 1000 <= now else refresh_oauth(o, now, REFRESH_TIMEOUT)
+        if how == "rejected":
+            _update_account(name, needs_relogin=True)
+            return None
+        if new is None:
+            return None
+        try:
+            _write(_path(name, CRED_FILE), {**(_read(_path(name, CRED_FILE)) or {}), "claudeAiOauth": new})
+        except OSError:
+            return None
+        return new["accessToken"]
 
 
 # ---------------------------------------------------------------- 使用量
 
 
-def _fetch(name: str, before: float | None, now: float) -> Usage:
-    """排他の中で呼ぶ。取得先を呼んで残量を読む（推論は呼ばない）。401 なら 1 度だけ更新してやり直す。"""
-    tok = _token_held(name, before, now)
-    if tok is None:
+def _fetch(name: str, refresh: bool, now: float) -> Usage:
+    """排他の中で呼ぶ。取得先を呼んで残量を読む（推論は呼ばない）。`refresh` が偽なら更新の宛先を呼ばない（I8）。
+
+    アクセストークンが期限切れなら更新してから、取得先が 401 なら 1 度だけ更新してやり直す。"""
+    o = _creds(name) if _usable_held(name, now) else None
+    if o is None:
         return Usage(fetched_at=now, error="token")
-    o = _creds(name) or {}
     if USAGE_SCOPE not in (o.get("scopes") or [USAGE_SCOPE]):
         return Usage(fetched_at=now, error="scope")
+    tok = o["accessToken"] if _fresh(o, now) else (_refresh(name, o["accessToken"], now) if refresh else None)
+    if tok is None:
+        return Usage(fetched_at=now, error="token")
     status, u = get_usage(tok, now)
-    if status == 401 and before is not None:
-        tok = _token_held(name, before, now, force=True)
+    if status == 401 and refresh:
+        tok = _refresh(name, tok, now)
         if tok is None:
             return u
         status, u = get_usage(tok, now)
     return u
 
 
-def usage(name: str, before: float | None = REFRESH_BEFORE, now: float | None = None) -> Usage | None:
-    """残量。前の取得から `check_interval()` 秒の中なら保存した値を返し、取得先を呼ばない（I6）。"""
+def usage(name: str, refresh: bool = True, now: float | None = None) -> Usage | None:
+    """残量。前の取得から `check_interval()` 秒の中なら保存した値を返し、取得先を呼ばない（I6）。
+
+    `refresh` が偽か、`name` がこのプロセスの環境の `NDF_CLAUDE_ACCOUNT`（動いている claude のアカウント）なら、
+    トークンを更新しない（#1576 の I8）。動いている claude の無いアカウントの取得が成功したら、認証の失敗の観測を解く
+    （#1576 の I12。子が終わる前の取得では解かない）。"""
     now = _now(now)
     path = _path(name, USAGE_FILE)
+    refresh = refresh and name != os.environ.get(NAME_ENV)
 
     def held() -> Usage | None:
         saved = Usage.from_json(_read(path))
@@ -449,8 +549,10 @@ def usage(name: str, before: float | None = REFRESH_BEFORE, now: float | None = 
             return saved
         if _read(_path(name, ACCOUNT_FILE)) is None:
             return None
-        u = _fetch(name, before, now)
+        u = _fetch(name, refresh, now)
         _write(path, u.to_json())
+        if refresh and u.error is None and (_read(_path(name, ACCOUNT_FILE)) or {}).get("auth_failed"):
+            _update_account(name, auth_failed=None)
         return u
 
     return _with_lock(name, held, lambda: Usage.from_json(_read(path)))
@@ -492,13 +594,14 @@ def _order_side(side: list[Account], readable: bool) -> list[Account]:
     return out
 
 
-def _account_pool(exclude, before: float | None, keep, now: float) -> tuple[list[Account], tuple[str, float] | None]:
-    """上限に達していない候補と、上限にあるもののうち最も早く戻るアカウントと時刻。「再登録が要る」は外す。"""
+def _account_pool(exclude, keep, now: float) -> tuple[list[Account], tuple[str, float] | None]:
+    """上限に達していない候補と、上限にあるもののうち最も早く戻るアカウントと時刻。「再登録が要る」と認証の失敗の
+    観測があるものは外す。`keep` の名前はトークンを更新しない（動いている claude のアカウント。#1576 の I8）。"""
     pool, earliest = [], None
     for n in [n for n in names() if n not in exclude]:
-        usage(n, None if n in keep else before, now)
+        usage(n, n not in keep, now)
         acc = load_account(n)
-        if acc is None or acc.needs_relogin:
+        if acc is None or acc.needs_relogin or acc.auth_held(now):
             continue
         until = acc.limited_until(now)
         if until is None:
@@ -508,20 +611,30 @@ def _account_pool(exclude, before: float | None, keep, now: float) -> tuple[list
     return pool, earliest
 
 
-def choose(exclude=(), before: float | None = REFRESH_BEFORE, keep=(), now: float | None = None, min_left: float = 0) -> Choice:
+def choose(exclude=(), keep=(), now: float | None = None) -> Choice:
     """上限に達していないアカウントのうち、残りの量の最も大きいものを選ぶ（#1453 の I3）。
 
     使用率が切り替えの閾値未満の候補を先に試し、残りの量の分からない候補は分かる候補の後ろへ使用率の順で並べる。
-    残量不明は、上限に達していない候補に読めるものが無いときだけ候補にする（名前の順）。「再登録が要る」とトークンを
-    得られないもの（残り `min_left` 秒以下を含む）は外す（#1389 の I13）。`keep` の名前はトークンを更新しない
-    （動いている区間のアカウント。#1389 の I5）。"""
+    残量不明は、上限に達していない候補に読めるものが無いときだけ候補にする（名前の順）。「再登録が要る」・認証の失敗の
+    観測があるもの・起動できないもの（`usable`）は外す。`keep` の名前はトークンを更新しない（#1576 の I8）。"""
     now = _now(now)
-    pool, earliest = _account_pool(exclude, before, keep, now)
+    pool, earliest = _account_pool(exclude, keep, now)
     readable = any(a.known() for a in pool)
     for pick in _try_order(pool, readable):
-        if token(pick.name, None if pick.name in keep else before, now, min_left) is not None:
+        if usable(pick.name, now):
             return Choice(pick.name, pick.score(), earliest, pick.remaining())
     return Choice(None, None, earliest)
+
+
+def choose_env(exclude=(), keep=(), base=None, note=None) -> tuple[Choice, dict | None]:
+    """候補を選んでその環境を組み立てる。用意できない候補は除いて選び直す。(最後に選んだ結果, 環境か None)。"""
+    tried = set(exclude)
+    while True:
+        c = choose(exclude=tried, keep=keep)
+        env = account_env(c.name, dict(os.environ) if base is None else base, note) if c.name else None
+        if env is not None or not c.name:
+            return c, env
+        tried.add(c.name)
 
 
 # ---------------------------------------------------------------- 子の環境と従量の接続
@@ -544,42 +657,176 @@ def fallback_env(environ=None) -> dict:
     return out
 
 
-def account_env(name: str, base: dict, before: float | None = REFRESH_BEFORE, min_left: float = 0) -> dict | None:
-    """`base` にアカウント `name`（か `metered`）の環境を重ねる。トークンを得られなければ None。
+@dataclass
+class Prepared:
+    """アカウントの設定ディレクトリの用意の結果（`prepare_account`）。`ok` が偽なら起動しない（理由は `reason`）。
 
-    従量の接続はトークン・スコープの変数と `FOREIGN_AUTH_ENV` を外してから宣言の変数を重ねる（認証の方式を
-    宣言どおり 1 つにする）。アカウントは認証の優先順位でトークンより上に来る変数（`FOREIGN_AUTH_ENV`）と、
-    環境変数の宣言のときと、`base` が従量の接続の環境（`NDF_CLAUDE_ACCOUNT=metered`）のときだけ宣言のキーを外して
-    トークン・スコープ・名前を足す（混ぜない。I16。それ以外の保存した宣言では利用者のシェルの変数を残すため外さない）。"""
+    `added` は足した（付け替えた）symlink の数、`skipped` は同じ名前の実体があって飛ばした項目、`local_only` は共有側に
+    無くアカウント側にだけある実体、`sync` は `.claude.json` の同期の結果（できたら None）。"""
+
+    ok: bool
+    reason: str | None = None
+    added: int = 0
+    skipped: list = field(default_factory=list)
+    local_only: list = field(default_factory=list)
+    sync: str | None = None
+
+    def worth_noting(self) -> bool:
+        return not self.ok or bool(self.added or self.skipped or self.local_only or self.sync)
+
+    def row(self, name: str) -> dict:
+        """記録の 1 行の中身（項目の名前と理由の語だけ。値とパスを載せない。I14）。"""
+        return {
+            "account": name,
+            "ok": self.ok,
+            "reason": self.reason,
+            "added": self.added,
+            "skipped": list(self.skipped),
+            "local_only": list(self.local_only),
+            "sync": self.sync,
+        }
+
+
+# `Prepared.reason` の画面の 1 行の理由の文
+PREPARE_REASONS = {
+    "needs_relogin": "再登録が要る",
+    "no_credentials": "認証ファイルが無いか読めない",
+    "account_unreadable": "アカウント側の .claude.json が壊れている。退避から戻すか、ファイルを消す",
+    "identity_mismatch": "認証ファイルが別のアカウントのものになっている。account add {name} で登録し直す",
+    "projects_not_shared": "会話の記録の置き場 projects が共有の設定ディレクトリを指していない",
+    "lock_timeout": "アカウントの排他を取れない",
+    "io_error": "設定ディレクトリを用意できない",
+}
+
+
+def prepare_reason_text(name: str, reason: str | None) -> str:
+    return PREPARE_REASONS.get(reason or "", reason or "").format(name=name)
+
+
+def _identity_mismatch(a: dict, ident: tuple[str, str] | None) -> bool:
+    """アカウント側の `oauthAccount` の識別が `account.json` と食い違うか（無ければ通す。#1576 の I13）。"""
+    if ident is None:
+        return False
+    email, org = ident
+    if str(a.get("email") or "").lower() != email.lower():
+        return True
+    mine = str(a.get("org_id") or "")
+    return bool(mine and org and mine != org)
+
+
+def _prepare_held(name: str, base: dict) -> Prepared:
+    _sweep_old_locks()
+    a = _read(_path(name, ACCOUNT_FILE))
+    if a is None or a.get("needs_relogin"):
+        return Prepared(False, "needs_relogin")
+    if not _usable_held(name, time.time()):
+        return Prepared(False, "no_credentials")
+    d = account_dir(name)
+    if not account_files.readable(d):
+        return Prepared(False, "account_unreadable")
+    if _identity_mismatch(a, account_files.identity(d)):
+        _update_account(name, needs_relogin=True)
+        return Prepared(False, "identity_mismatch")
+    links = account_files.link_shared(shared_dir(base), d)
+    got = Prepared(links.projects_shared, None, links.added, links.skipped, links.local_only)
+    if not links.projects_shared:
+        got.reason = "projects_not_shared"
+        return got
+    got.sync = account_files.sync_config(shared_config_file(base), d)
+    if got.sync == "account_unreadable":
+        got.ok, got.reason = False, "account_unreadable"
+    _secure(name)
+    return got
+
+
+def prepare_account(name: str, base: dict) -> Prepared:
+    """アカウントの排他の中で、アカウントの設定ディレクトリを用意する（E2・E3）。例外を出さず、結果で返す。
+
+    古い形の排他ファイルの掃除 → 使えるかの確かめ → `.claude.json` が読めるかの確かめ → 識別の照合 → 共有の項目への
+    symlink → `.claude.json` の共有する設定の部分の同期の順。共有の設定ディレクトリは `base` から求める。"""
+    try:
+        with _locked(name):
+            return _prepare_held(name, base)
+    except lock_timeout():
+        return Prepared(False, "lock_timeout")
+    except OSError:
+        return Prepared(False, "io_error")
+
+
+def settle(name: str | None, base: dict | None = None, note=None) -> None:
+    """セッションの終わりに、アカウント側の `.claude.json` の共有する設定の部分を共有側へ書き戻す（E12）。
+
+    例外を出さない。同期できなければ `note`（記録の 1 行を受ける関数）へ渡す。"""
+    if not name or name == METERED or not valid_name(name) or not os.path.isfile(_path(name, ACCOUNT_FILE)):
+        return
+    base = dict(os.environ) if base is None else base
+    try:
+        with _locked(name):
+            sync = account_files.sync_config(shared_config_file(base), account_dir(name))
+    except lock_timeout():
+        sync = "lock_busy"
+    except OSError:
+        sync = "write_failed"
+    if sync and note:
+        note(Prepared(True, sync=sync).row(name))
+
+
+def detach(name: str) -> None:
+    """登録を外す前に、アカウントの設定ディレクトリの symlink を外す（参照先は消さない。I5）。"""
+    with _locked(name):
+        account_files.unlink_shared(account_dir(name))
+
+
+def account_env(name: str, base: dict, note=None) -> dict | None:
+    """`base` にアカウント `name`（か `metered`）の環境を重ねる。使えない・用意できないときは None（理由は `note` へ）。
+
+    登録済みアカウントは、アカウントの設定ディレクトリを用意してから `CLAUDE_CONFIG_DIR` をそこへ向け、トークンと
+    スコープの変数を外す（#1576 の I1）。認証の優先順位でトークンより上に来る変数（`FOREIGN_AUTH_ENV`）と、環境変数の
+    宣言のときと、`base` が従量の接続の環境（`NDF_CLAUDE_ACCOUNT=metered`）のときだけ宣言のキーを外す（混ぜない。
+    #1389 の I16。それ以外の保存した宣言では利用者のシェルの変数を残すため外さない）。従量の接続はトークン・スコープの
+    変数と `FOREIGN_AUTH_ENV` を外し、`CLAUDE_CONFIG_DIR` を元の値へ戻してから宣言の変数を重ねる（#1576 の I2）。"""
     declared = fallback_env(base)
     if name == METERED:
         return _metered_env(dict(base), declared, FALLBACK_ENV not in base)
-    grant = _grant(name, before, min_left=min_left)
-    if grant is None:
+    got = prepare_account(name, base)
+    if note is not None and got.worth_noting():
+        note(got.row(name))
+    if not got.ok:
         return None
     strip = FALLBACK_ENV in base or base.get(NAME_ENV) == METERED
-    return _account_env(dict(base), declared if strip else {}, name, grant.token, grant.scopes)
+    return _account_env(dict(base), declared if strip else {}, name)
 
 
 def _metered_env(env: dict, declared: dict, saved: bool) -> dict:
-    """従量の接続の環境。`saved`（保存した宣言）なら AWS の鍵も外す（呼べるかの確認と同じ環境にする。#1468 の決定 14）。"""
+    """従量の接続の環境。`saved`（保存した宣言）なら AWS の鍵も外す（呼べるかの確認と同じ環境にする。#1468 の決定 14）。
+
+    アカウントの子の中（`NDF_SHARED_CONFIG_DIR` がある）なら、`CLAUDE_CONFIG_DIR` を元の値へ戻し（元に無ければ外し）、
+    NDF が足したプラグインの置き場の変数を外す。"""
     for k in (TOKEN_ENV, SCOPES_ENV) + FOREIGN_AUTH_ENV + (AWS_KEY_ENV if saved else ()):
         env.pop(k, None)
+    if SHARED_ENV in env:
+        shared = shared_dir(env)
+        orig = env.pop(SHARED_ENV)
+        if orig:
+            env[CONFIG_ENV] = orig
+        else:
+            env.pop(CONFIG_ENV, None)
+        if env.get(PLUGIN_CACHE_ENV) == os.path.join(shared, "plugins"):
+            env.pop(PLUGIN_CACHE_ENV)
     env.update(declared)
     env[NAME_ENV] = METERED
     return env
 
 
-def _account_env(env: dict, declared: dict, name: str, tok: str, scopes: str | None) -> dict:
-    """アカウントの環境（宣言のキーと FOREIGN_AUTH_ENV を外してトークンと名前を足す）。
-
-    スコープの変数は `base` の値を残さない。読めたら上書きし、読めなければ外す（前のアカウントのものを継がない）。"""
-    for k in tuple(declared) + FOREIGN_AUTH_ENV + (SCOPES_ENV,):
+def _account_env(env: dict, declared: dict, name: str) -> dict:
+    """アカウントの環境（宣言のキー・FOREIGN_AUTH_ENV・トークンとスコープの変数を外し、設定ディレクトリと名前を足す）。"""
+    shared, orig = shared_dir(env), _original_config(env)
+    for k in tuple(declared) + FOREIGN_AUTH_ENV + (TOKEN_ENV, SCOPES_ENV):
         env.pop(k, None)
-    env[TOKEN_ENV] = tok
+    env[CONFIG_ENV] = os.path.abspath(account_dir(name))
     env[NAME_ENV] = name
-    if scopes is not None:
-        env[SCOPES_ENV] = scopes
+    env[SHARED_ENV] = orig
+    env.setdefault(PLUGIN_CACHE_ENV, os.path.join(shared, "plugins"))
     return env
 
 
@@ -605,17 +852,38 @@ def staging_dir(name: str) -> str:
     return d
 
 
+# 登録し直しで staging から置き場へ移すもの（この順。`account.json` を最後にする。#1576 の決定 20）
+REPLACED_ON_RELOGIN = (CRED_FILE, account_files.CONFIG_FILE, ACCOUNT_FILE)
+
+
 def register(name: str, staging: str, email: str, org_id: str = "", org_name: str = "") -> None:
-    """ログインの済んだ `staging` を `name` として置く。同じ名前の古いものは置き換える。"""
+    """ログインの済んだ `staging` を `name` として置く。
+
+    同じ名前の置き場があるときは丸ごと消さない。`usage.json` と同期の控えを消し、staging の `.credentials.json`・
+    `.claude.json`・`account.json` だけを置き換えで移して、staging の残りを捨てる。ほかの項目（共有の項目への symlink・
+    claude がアカウント側に作った実体・`backups`）には触れない（#1576 の I5・決定 20）。"""
     with _locked(name):
         final = account_dir(name)
         row = {"name": name, "email": email, "registered_at": iso_utc(time.time()), "needs_relogin": False, "limit": None}
         if org_id:
             row.update(org_id=org_id, org_name=org_name)
         _write(os.path.join(staging, ACCOUNT_FILE), row)
-        if os.path.exists(final):
-            shutil.rmtree(final)
-        os.replace(staging, final)
+        if not os.path.isdir(final) or os.path.islink(final):
+            if os.path.lexists(final):
+                os.remove(final)
+            os.replace(staging, final)
+        else:
+            for f in (USAGE_FILE, account_files.BASE_FILE):
+                with suppress(FileNotFoundError):
+                    os.remove(os.path.join(final, f))
+            for f in REPLACED_ON_RELOGIN:
+                src = os.path.join(staging, f)
+                if os.path.exists(src):
+                    os.replace(src, os.path.join(final, f))
+                elif f == account_files.CONFIG_FILE:  # 前の oauthAccount を残さない（I13）
+                    with suppress(FileNotFoundError):
+                        os.remove(os.path.join(final, f))
+            shutil.rmtree(staging, ignore_errors=True)
         _secure(name)
 
 
@@ -655,11 +923,11 @@ def discard(path: str) -> None:
 
 
 def rows(now: float | None = None) -> list[dict]:
-    """一覧の中身（推論は呼ばない）。期限の過ぎたトークンだけを更新する（動いている区間のトークンを替えない）。"""
+    """一覧の中身（推論は呼ばない）。期限の過ぎたトークンだけを、更新の排他を取れたときに更新する（I8・I9）。"""
     now = _now(now)
     out = []
     for n in names():
-        usage(n, 0, now)
+        usage(n, True, now)
         acc = load_account(n)
         if acc is not None:
             out.append(_account_row(n, acc, now))

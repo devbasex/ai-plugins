@@ -418,7 +418,6 @@ def after_mark(transcript_path: str, written: float) -> tuple[bool, bool]:
 
 # 背景の作業の終わりの通知（Claude Code 2.1.283 の会話の記録で実測。`queue-operation` の `content` か `attachment` に入る）
 NOTIFIED = re.compile(r"<tool-use-id>([^<\s]+)</tool-use-id>")
-RESUME_TEXT = "利用上限でアカウントを替えた。中断したところから続ける"
 
 
 def _synthetic_reply(row: dict) -> bool:
@@ -484,15 +483,15 @@ def background_open(transcript_path: str, now: float) -> bool:
     return bool(started - ended) or bool(pending_wakeups(transcript_path, now))
 
 
-def resume_input(transcript_path: str) -> str:
-    """上限で替えた次の区間の最初の入力。未達の `/goal` があれば入れ直し、無ければ定型の文。"""
+def resume_input(transcript_path: str, text: str) -> str:
+    """替えた次の区間の最初の入力。未達の `/goal` があれば入れ直し、無ければ `text`（切り替えの理由に合う文）。"""
     goal = unmet_goal(transcript_path)
-    return f"/goal {goal}" if goal else RESUME_TEXT
+    return f"/goal {goal}" if goal else text
 
 
-def section_env(base: dict, account: str | None) -> dict | None:
+def section_env(base: dict, account: str | None, note=None) -> dict | None:
     """区間の環境にアカウント（か `metered`）の環境を重ねる。`account` が None なら今と同じ環境。
-    トークンを得られなければ None。"""
+    使えない・設定ディレクトリを用意できなければ None（理由は `note` へ渡す）。"""
     if account is None:
         return dict(base)
-    return ca.account_env(account, base)
+    return ca.account_env(account, base, note)

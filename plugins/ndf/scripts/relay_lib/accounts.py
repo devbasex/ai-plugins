@@ -200,6 +200,7 @@ def _remove(asker: Asker, name: str | None) -> dict:
         return {"name": name, "text": f"外した: {name}（保存した従量の接続の宣言）"}
     if ca.load_account(name) is None:
         raise Fail("not_registered", f"登録されていない: {name}")
+    ca.detach(name)  # logout が設定ディレクトリの中を消す前に、共有の項目への symlink を外す（#1576 の I5）
     if not login.logout(name):
         print("claude auth logout が通らなかった（登録は外す）", file=sys.stderr)
     ca.unregister(name)
