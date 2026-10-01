@@ -252,8 +252,10 @@ def get_usage(access_token: str, now: float) -> tuple[int, Usage]:
     return 200, parse_usage(d, now)
 
 
-def refresh_oauth(o: dict, now: float) -> tuple[str, dict | None]:
-    """リフレッシュトークンで更新する。("ok", 新しい claudeAiOauth) / ("rejected", None) / ("error", None)。"""
+def refresh_oauth(o: dict, now: float, timeout: float = 30) -> tuple[str, dict | None]:
+    """リフレッシュトークンで更新する。("ok", 新しい claudeAiOauth) / ("rejected", None) / ("error", None)。
+
+    `timeout` は宛先の待ちの上限（秒）。"""
     body = {
         "grant_type": "refresh_token",
         "refresh_token": o.get("refreshToken") or "",
@@ -266,7 +268,7 @@ def refresh_oauth(o: dict, now: float) -> tuple[str, dict | None]:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    status, d = _http(req, 30)
+    status, d = _http(req, timeout)
     # 取り消し（invalid_grant など）と分かる 400/401/403 だけを rejected にする。429・408・5xx・通信の失敗・
     # 形の崩れた 200 は一時的な失敗として error（今のトークンを使い、次回に再試行する）にする
     if status in REFRESH_REJECTED:
