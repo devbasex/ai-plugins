@@ -25,8 +25,8 @@ import time
 from dataclasses import asdict, dataclass
 
 from . import runtime, version_dir
-from .claude import DROP_ENV
-from .common import LOG_FILE, PKG_ROOT, env_num, read_text, remove
+from .claude import DROP_ENV, SETTINGS_FILE
+from .common import LOG_FILE, PID_FILE, PKG_ROOT, env_num, read_text, remove
 from .record import RelayRecord, StartLimit, current_section
 from .switch import UsageWatch
 from .terminal import Terminal
@@ -129,6 +129,11 @@ def expected_dir(install_path: str | None, version: str | None) -> str | None:
         return VersionDir("", source=os.path.join(install_path, "scripts")).name_for(ver)
     except OSError:
         return None
+
+
+def has_launcher(install_path: str | None) -> bool:
+    """導入先 `install_path` に更新後の版のランチャー（`scripts/relay.py`）があるか。"""
+    return bool(install_path) and os.path.isfile(os.path.join(install_path, "scripts", LAUNCHER))
 
 
 def startup_env() -> dict:
@@ -258,7 +263,9 @@ class Swapper:
             expected = expected_dir(self.install_path, self.version)
             if expected == running:
                 return
-            if expected is None:
+            # 名前を計算できなくても（後の版が LIB_FILES を消した・改名したなど）導入先にランチャーがあれば
+            # startup を打ち、入れ替え先は置いた本人の relay.current で決める（決定 2）
+            if expected is None and not has_launcher(self.install_path):
                 raise Skip(UNREADABLE, "更新後のプラグインの導入先を読めない")
             base = copy_base()
             stage = STARTUP_FAILED
@@ -361,7 +368,10 @@ class Swapper:
 
 
 def stop_unreadable(d: str, shown: str | None) -> int:
-    """申し送りを読めない: 次のセッションを起動せず、手で打つコマンドを示して止まる（I6）。"""
+    """申し送りを読めない: 次のセッションを起動せず、手で打つコマンドを示して止まる（I6）。
+
+    旧版は exec で `Relay.close()` を飛ばしているため、資格情報を持ちうるまとめた設定と pid のファイルをここで消す。"""
+    remove(os.path.join(d, PID_FILE), os.path.join(d, SETTINGS_FILE))
     try:
         RelayRecord(d).log(event="stop", section=current_section(d), reason="handover")
     except OSError:

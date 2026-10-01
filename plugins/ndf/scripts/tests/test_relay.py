@@ -27,6 +27,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import types
 
 import pytest
 
@@ -4114,6 +4115,8 @@ def test_run_from_unreadable_handover_stops_with_command(tmp_path, home, body, s
     path = d / "handover.json"
     if body is not None:
         path.write_text(body)
+    (d / "relay.pid").write_text("1")
+    (d / "metered-settings.json").write_text("{}")
     fake = tmp_path / "fake"
     fake.mkdir()
     p = relay_cmd(tmp_path, "run", NDF_RELAY_HANDOVER=path, NDF_RELAY_CLAUDE=FAKE, FAKE_DIR=fake, FAKE_RELAY=RELAY)
@@ -4123,6 +4126,35 @@ def test_run_from_unreadable_handover_stops_with_command(tmp_path, home, body, s
     last = json.loads((d / "log.jsonl").read_text().splitlines()[-1])
     assert (last["event"], last["reason"], last["section"]) == ("stop", "handover", 7)
     assert not path.exists()
+    # 旧版が exec で飛ばした片づけ: 資格情報を持ちうるまとめた設定と pid のファイルを残さない
+    assert not (d / "relay.pid").exists() and not (d / "metered-settings.json").exists()
+
+
+@pytest.mark.parametrize("launcher, reason", [(True, "not-placed"), (False, "unreadable")])
+def test_swap_without_expected_name_runs_startup_when_launcher_exists(tmp_path, monkeypatch, launcher, reason):
+    """更新後の名前を計算できなくても（後の版が LIB_FILES を変えた）、導入先にランチャーがあれば startup へ進み、
+    入れ替え先は relay.current で決める。ランチャーも無ければ unreadable で見送る。"""
+    install = tmp_path / "plugin"
+    (install / "scripts").mkdir(parents=True)
+    if launcher:
+        (install / "scripts" / "relay.py").write_text("")
+    called, logged = [], []
+    monkeypatch.setattr(relay_handover, "running_dir", lambda: "relay-old-aaaa1111")
+    monkeypatch.setattr(relay_handover, "expected_dir", lambda *a: None)
+    monkeypatch.setattr(relay_handover, "copy_base", lambda: str(tmp_path))
+
+    def prepare(install_path, running, base):
+        called.append((install_path, running, base))
+        raise relay_handover.Skip(relay_handover.NOT_PLACED, "x")
+
+    monkeypatch.setattr(relay_handover, "prepare_target", prepare)
+    sw = relay_handover.Swapper()
+    sw.install_path, sw.version, sw.section = str(install), NEW_VER, 1
+    sw.log = lambda **row: logged.append(row)
+    sw.term = types.SimpleNamespace(screen=lambda text: None)
+    sw.swap(None, "claude")
+    assert bool(called) is launcher
+    assert [r["reason"] for r in logged] == [reason]
 
 
 def _start_row(d, **extra):
