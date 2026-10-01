@@ -4,6 +4,7 @@
 認証の失敗の観測を、偽のアカウントの置き場（`account_fake.py`）で縛る。
 """
 
+# ruff: noqa: F811  fixture の accounts を引数で受ける（account_fake から import する）
 from __future__ import annotations
 
 import json
