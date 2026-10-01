@@ -143,26 +143,8 @@ def _github_repo(root) -> str | None:
     return repo.owner_repo_from_url(url) if "github.com" in url else None
 
 
-def measure_project(root: Path, budget: float) -> dict:
-    """P1〜P10 を測る。git の木から測る項目を先に、残りの時間で `gh` の項目を測る。"""
-    start = time.monotonic()
-    deadline = start + budget
-    tree = mr.Tree(root, deadline)
-    items: dict = {}
-
-    def step(key, fn):
-        if time.monotonic() >= deadline:
-            items[key] = mr.unknown("時間切れ")
-            return None
-        try:
-            return fn()
-        except mr.TimeUp:  # 途中で締め切りを越えた項目は、読めた分だけで測ったことにしない
-            items[key] = mr.unknown("時間切れ")
-            return None
-        except Exception as e:  # noqa: BLE001  1 項目の失敗で測定を止めない（I12）
-            items[key] = mr.unknown(f"測れない: {type(e).__name__}: {str(e)[:200]}")
-            return None
-
+def _measure_tree_items(tree, step, items: dict) -> dict:
+    """git の木から測る項目を `items` へ入れ、リポジトリの中の課題の置き場（`issues` の材料）を返す。"""
     dep = step("languages", lambda: mr.dependencies(tree))
     if dep is None:
         dep = {"php": {}, "javascript": {}, "python": {}}
@@ -185,7 +167,11 @@ def measure_project(root: Path, budget: float) -> dict:
         v = step(key, fn)
         if v is not None:
             items[key] = v
-    repo_issues = step("issues", lambda: mr.measure_issues_repo(tree)) or {"markdown_files": 0, "templates": [], "hosts": []}
+    return step("issues", lambda: mr.measure_issues_repo(tree)) or {"markdown_files": 0, "templates": [], "hosts": []}
+
+
+def _measure_ci_items(tree, step, items: dict, root: Path, deadline: float, repo_issues: dict) -> list:
+    """`gh` と CI から測る項目を `items` へ入れ、指示ファイルと CI の注記を返す。"""
     head = fingerprint.branch_state(root)["head"]
     ci_part = step("ci", lambda: mci.measure_ci(tree, _github_repo(root), head, deadline))
     notes = list((items.get("instructions") or {}).get("value", {}).get("notes") or [])
@@ -199,6 +185,31 @@ def measure_project(root: Path, budget: float) -> dict:
         items.setdefault("test_duration", items.get("ci") or mr.unknown("時間切れ"))
     if "issues" not in items:
         items["issues"] = mci.measure_issues(repo_issues, ci_part or {})
+    return notes
+
+
+def measure_project(root: Path, budget: float) -> dict:
+    """P1〜P10 を測る。git の木から測る項目を先に、残りの時間で `gh` の項目を測る。"""
+    start = time.monotonic()
+    deadline = start + budget
+    tree = mr.Tree(root, deadline)
+    items: dict = {}
+
+    def step(key, fn):
+        if time.monotonic() >= deadline:
+            items[key] = mr.unknown("時間切れ")
+            return None
+        try:
+            return fn()
+        except mr.TimeUp:  # 途中で締め切りを越えた項目は、読めた分だけで測ったことにしない
+            items[key] = mr.unknown("時間切れ")
+            return None
+        except Exception as e:  # noqa: BLE001  1 項目の失敗で測定を止めない（I12）
+            items[key] = mr.unknown(f"測れない: {type(e).__name__}: {str(e)[:200]}")
+            return None
+
+    repo_issues = _measure_tree_items(tree, step, items)
+    notes = _measure_ci_items(tree, step, items, root, deadline, repo_issues)
     if tree.skipped:
         notes.append(f"秘密の名前のファイルを開かなかった: {'・'.join(tree.skipped[:10])}")
     return {
