@@ -56,7 +56,13 @@ def test_timing_slower_variant_stops(tmp_path, monkeypatch, capsys):
     worse = [f"{k} / {SH}" for k in KEYS]
     assert out["summary"] == "hook 1 回の所要の中央値（2 回ずつ）。悪くなった: " + " / ".join(worse)
     assert [i["name"] for i in out["items"]] == [f"{k} / {n}" for k in KEYS for n in (DIRECT, SH)]
-    assert out["items"][0] == {"kind": "timing", "name": f"steady / bash_write / {DIRECT}", "result": "faster", "now_ms": 10.0, "new_ms": 5.0}
+    assert out["items"][0] == {
+        "kind": "timing",
+        "name": f"steady / bash_write / {DIRECT}",
+        "result": "faster",
+        "now_ms": 10.0,
+        "new_ms": 5.0,
+    }
     assert out["items"][1] == {"kind": "timing", "name": f"steady / bash_write / {SH}", "result": "slower", "now_ms": 10.0, "new_ms": 20.0}
     assert out["metrics"] == rows
     assert list(rows) == [f"{k} / {n}" for k in KEYS for n in (GUARD, DIRECT, SH)] + ["python -c pass", "python + import tree_sitter_bash"]
@@ -84,7 +90,9 @@ def test_timing_notice_mismatch_is_compared_only_in_fresh(tmp_path, monkeypatch,
     code, out, rows, _ = run_timing(tmp_path, monkeypatch, capsys, {GUARD: 10.0, DIRECT: 5.0, SH: 5.0}, notice={GUARD: True, SH: True})
     assert code == 1
     fresh = [k for k in KEYS if k.startswith("fresh")]
-    assert out["summary"] == "hook 1 回の所要の中央値（2 回ずつ）。悪くなった: " + " / ".join(f"{k} / {DIRECT} の案内の有無が今と違う" for k in fresh)
+    assert out["summary"] == "hook 1 回の所要の中央値（2 回ずつ）。悪くなった: " + " / ".join(
+        f"{k} / {DIRECT} の案内の有無が今と違う" for k in fresh
+    )
     assert rows[f"fresh / edit / {GUARD}"]["notice"] is True
     assert rows[f"fresh / edit / {DIRECT}"]["notice"] is False
     assert rows[f"steady / edit / {GUARD}"]["notice"] is False
