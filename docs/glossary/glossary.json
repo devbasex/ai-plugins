@@ -2334,7 +2334,7 @@
     {
       "term": "アカウントの置き場",
       "context": "ndf-relay",
-      "meaning": "登録済みアカウントごとの設定ディレクトリを並べた ${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/accounts/。書くのは lib/claude_accounts.py だけ",
+      "meaning": "登録済みアカウントごとの設定ディレクトリを並べた <共有の設定ディレクトリ>/ndf/accounts/。NDF の側で書くのは lib/claude_accounts.py とその部品だけで、認証ファイルと .claude.json は claude 自身も書く",
       "source": "",
       "pending_source": "issues/issue-1389-design.md"
     },
@@ -2630,7 +2630,7 @@
     {
       "term": "アカウントのスコープ",
       "context": "ndf-relay",
-      "meaning": "登録済みアカウントのトークンに付いた権限の並び。アカウントの置き場の .credentials.json の claudeAiOauth.scopes で、子へは CLAUDE_CODE_OAUTH_SCOPES（空白区切り）で渡す",
+      "meaning": "登録済みアカウントのトークンに付いた権限の並び。認証ファイルの claudeAiOauth.scopes で、claude が認証ファイルから自分で読む（環境変数では渡さない）",
       "pending_source": "issues/issue-1523-design.md"
     },
     {
@@ -2645,6 +2645,36 @@
       "context": "ndf-relay",
       "meaning": "ラッパーを通さずに起動した claude が使う設定ディレクトリ（${CLAUDE_CONFIG_DIR:-~/.claude}）。会話の記録・プラグイン・設定の正を持ち、登録済みアカウントの claude の中ではアカウントの設定ディレクトリの symlink の参照先になる",
       "pending_source": "issues/issue-1576-requirements.md"
+    },
+    {
+      "term": "アカウント固有の項目",
+      "context": "ndf-relay",
+      "meaning": "アカウントの設定ディレクトリに実体で持ち、共有の設定ディレクトリへの symlink にしない項目（認証ファイル・.claude.json・更新の排他・NDF の記録など）",
+      "pending_source": "issues/issue-1576-design.md"
+    },
+    {
+      "term": "共有する設定の部分",
+      "context": "ndf-relay",
+      "meaning": ".claude.json のうち、共有の設定ディレクトリの側を正とする projects と mcpServers",
+      "pending_source": "issues/issue-1576-design.md"
+    },
+    {
+      "term": "同期の控え",
+      "context": "ndf-relay",
+      "meaning": "前の同期で両側へ書いた共有する設定の部分の写し（アカウントの設定ディレクトリの .ndf-shared-base.json）",
+      "pending_source": "issues/issue-1576-design.md"
+    },
+    {
+      "term": "更新の排他",
+      "context": "ndf-relay",
+      "meaning": "Claude Code がトークンを更新するときに設定ディレクトリの中に作る排他（.oauth_refresh.lock のディレクトリ）",
+      "pending_source": "issues/issue-1576-design.md"
+    },
+    {
+      "term": "認証の失敗の観測",
+      "context": "ndf-relay",
+      "meaning": "子の claude の応答が認証の失敗で終わったことの記録（account.json の auth_failed）。後の使用量の取得が成功するか 1 時間で解ける",
+      "pending_source": "issues/issue-1576-design.md"
     },
     {
       "term": "ツールのパス",
