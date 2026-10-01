@@ -53,6 +53,7 @@ PLUGIN_CACHE_ENV = "CLAUDE_CODE_PLUGIN_CACHE_DIR"
 USAGE_SCOPE = "user:profile"  # 使用量の取得先が要るスコープ
 # 認証の優先順位でトークンより上に来る変数（アカウントの子で外す）と、専用の設定ディレクトリの claude で外す変数
 FOREIGN_AUTH_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX")
+STRIPPED_AUTH_ENV = (TOKEN_ENV, SCOPES_ENV) + FOREIGN_AUTH_ENV  # 子へ渡さない認証の変数の組（#1576 の I1・I2）
 AUTH_ENV = (TOKEN_ENV, SCOPES_ENV, NAME_ENV, *FOREIGN_AUTH_ENV)
 FALLBACK_ENV = "NDF_SUPERVISE_CLAUDE_FALLBACK"
 AWS_KEY_ENV = ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN")
@@ -806,7 +807,7 @@ def _metered_env(env: dict, declared: dict, saved: bool) -> dict:
 
     アカウントの子の中（`NDF_SHARED_CONFIG_DIR` がある）なら、`CLAUDE_CONFIG_DIR` を元の値へ戻し（元に無ければ外し）、
     NDF が足したプラグインの置き場の変数を外す。"""
-    for k in (TOKEN_ENV, SCOPES_ENV) + FOREIGN_AUTH_ENV + (AWS_KEY_ENV if saved else ()):
+    for k in STRIPPED_AUTH_ENV + (AWS_KEY_ENV if saved else ()):
         env.pop(k, None)
     if SHARED_ENV in env:
         shared = shared_dir(env)
@@ -825,7 +826,7 @@ def _metered_env(env: dict, declared: dict, saved: bool) -> dict:
 def _account_env(env: dict, declared: dict, name: str) -> dict:
     """アカウントの環境（宣言のキー・FOREIGN_AUTH_ENV・トークンとスコープの変数を外し、設定ディレクトリと名前を足す）。"""
     shared, orig = shared_dir(env), _original_config(env)
-    for k in tuple(declared) + FOREIGN_AUTH_ENV + (TOKEN_ENV, SCOPES_ENV):
+    for k in tuple(declared) + STRIPPED_AUTH_ENV:
         env.pop(k, None)
     env[CONFIG_ENV] = os.path.abspath(account_dir(name))
     env[NAME_ENV] = name
