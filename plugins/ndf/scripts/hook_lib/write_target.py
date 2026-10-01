@@ -286,14 +286,7 @@ class _Scan:
             st.cwd = None
         if name != "cd" or st.base is None:
             return (0, False, False)
-        st.cds += 1
-        dest = _cd_destination(words[i + 1 :])
-        if dest == "" or "$" in dest or dest.startswith("~"):
-            st.cwd = None
-        elif dest.startswith("/"):
-            st.cwd = normalize_path(dest, "/")
-        elif st.cwd is not None:
-            st.cwd = normalize_path(st.cwd + "/" + dest, "/")
+        _apply_cd(st, words[i + 1 :])
         return (1, True, False)
 
 
@@ -317,6 +310,18 @@ def _noncontinuing(n: sp.Node) -> bool:
                 if name is not None and sp.unquote(name) in NONCONT:
                     return True
     return False
+
+
+def _apply_cd(st: _Place, args: list[str]) -> None:
+    """`cd` の引数から現在地を進める。宛先を字面から決められなければ `cwd` を None にする。"""
+    st.cds += 1
+    dest = _cd_destination(args)
+    if dest == "" or "$" in dest or dest.startswith("~"):
+        st.cwd = None
+    elif dest.startswith("/"):
+        st.cwd = normalize_path(dest, "/")
+    elif st.cwd is not None:
+        st.cwd = normalize_path(st.cwd + "/" + dest, "/")
 
 
 def _cd_destination(args: list[str]) -> str:
