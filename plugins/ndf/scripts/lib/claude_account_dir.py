@@ -254,6 +254,22 @@ def sync_config(shared_file: str, account: str) -> str | None:
         return "write_failed"
 
 
+def _load_base(account: str) -> dict | None:
+    """同期の控え。無い・読めない・版が違えば None。"""
+    _, b = _read_config(os.path.join(account, BASE_FILE))
+    return b if isinstance(b, dict) and b.get("version") == 1 else None
+
+
+def _merged_value(key: str, s: dict, a: dict, b: dict | None, lost: bool) -> tuple[dict, bool]:
+    """共有する設定の `key` を共有側・アカウント側・控えで突き合わせた (値, 葉が 1 つでもあるか)。"""
+    sl, al = _leaves(key, s.get(key)), _leaves(key, a.get(key))
+    bl = _leaves(key, (b or {}).get(key))
+    if lost or (bl and not al):
+        bl = al  # 最初の同期と同じに扱う（共有側の値にそろう。I18）
+    merged = _merge_leaves(sl, al, bl)
+    return _unflatten(merged), bool(merged)
+
+
 def _sync_held(shared_file: str, afile: str, account: str) -> str | None:
     s_exists, s = _read_config(shared_file)
     if s is None:
@@ -262,18 +278,12 @@ def _sync_held(shared_file: str, afile: str, account: str) -> str | None:
     if a is None:
         _drop_base(account)
         return "account_unreadable"
-    _, b = _read_config(os.path.join(account, BASE_FILE))
-    b = b if isinstance(b, dict) and b.get("version") == 1 else None
+    b = _load_base(account)
     uid = a.get("userID") if isinstance(a.get("userID"), str) else None
     lost = not a_exists or b is None or uid is None or b.get("userID") != uid
     new_s, new_a, base = dict(s), dict(a), {"version": 1}
     for key in SHARED_KEYS:
-        sl, al = _leaves(key, s.get(key)), _leaves(key, a.get(key))
-        bl = _leaves(key, (b or {}).get(key))
-        if lost or (bl and not al):
-            bl = al  # 最初の同期と同じに扱う（共有側の値にそろう。I18）
-        merged = _merge_leaves(sl, al, bl)
-        value = _unflatten(merged)
+        value, merged = _merged_value(key, s, a, b, lost)
         if key in s or merged:
             new_s[key] = value
         if key in a or merged:
@@ -282,12 +292,12 @@ def _sync_held(shared_file: str, afile: str, account: str) -> str | None:
     for k in ONBOARDING_KEYS:
         if k not in new_a and k in s:
             new_a[k] = s[k]
+    if uid is not None:
+        base["userID"] = uid
     if new_s != s:
         _write_json(shared_file, new_s, _mode(shared_file, 0o600))
     if new_a != a:
         _write_json(afile, new_a, 0o600)
-    if uid is not None:
-        base["userID"] = uid
     _write_json(os.path.join(account, BASE_FILE), base, 0o600)
     return None
 
