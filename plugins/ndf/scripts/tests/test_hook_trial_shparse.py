@@ -139,3 +139,72 @@ def test_command(targets, cmd, want):
 @pytest.mark.parametrize("cmd,want", COMMAND_NOBASE)
 def test_command_without_base(targets, cmd, want):
     assert targets(cmd, with_base=False) == want
+
+
+# --- Targets.redirects: リダイレクトの演算子・宛先・ヒアドキュメントの本文 ---
+
+REDIRECTS = [
+    ("echo > f", ["@/f"]),
+    ("echo >> f", ["@/f"]),
+    ("echo &> f", ["@/f"]),
+    ("echo &>> f", ["@/f"]),
+    ("echo >| f", ["@/f"]),
+    ("echo >& f", ["@/f"]),
+    ("echo 2>&1", []),
+    ("echo >&2", []),
+    ("echo >&-", []),
+    ("cat < in", []),
+    ("exec 3<> f", ["@/f"]),
+    ("echo 2> e > o", ["@/e", "@/o"]),
+    ("echo > /dev/null", []),
+    ("echo > /dev/stderr", []),
+    ('echo > "$X"', []),
+    ("echo > 'a b'", ["@/a b"]),
+    ("echo > ~/f", ["/home/u/f"]),
+    ('echo > "~/f"', ["@/~/f"]),
+    ("echo > ~", ["/home/u"]),
+    ("echo > ~user/f", []),
+    ("echo > /abs/f", ["/abs/f"]),
+    ("echo > ../f", ["^/f"]),
+    ("echo > //x//f", ["/x/f"]),
+    ("echo >\n f", []),
+    ("echo > f$(echo > s)", ["@/s"]),
+    ("cat <<EOF > f\n$(echo x > s)\nEOF", ["@/f", "@/s"]),
+    ("cat <<'EOF' > f\n$(echo x > s)\nEOF", ["@/f"]),
+    ("cat <<EOF\n`echo x > s`\nEOF", ["@/s"]),
+    ("cat <<EOF\n$((1+2)) $(echo > s)\nEOF", ["@/s"]),
+    ("cat <<\\EOF\n`echo x > s`\nEOF", []),
+    ('cat <<< "$(echo > s)" > f', ["@/s", "@/f"]),
+    ("a && b > f", ["@/f"]),
+    ("a | b > f", ["@/f"]),
+    ("{ echo a; } > f", ["@/f"]),
+    ("( cd d; echo > x ) > f", ["@/f", "@/d/x"]),
+    ("cd d && echo > f || echo > g", ["@/d/f"]),
+    ("> f", ["@/f"]),
+    ("! echo > f", ["@/f"]),
+    ("[[ -f x ]] > f", ["@/f"]),
+    ("X=1 > f", ["@/f"]),
+    # 現状の記録: 宛先そのものが置換のとき、中の書き込み先（s）は拾われない
+    ("echo > $(echo > s)", []),
+    ("cat < <(echo > s)", []),
+    # 現状の記録: プロセス置換の宛先は字面をつないだ語として出る
+    ("echo > >(tee t)", ["@/>(teet)"]),
+    # 現状の記録: ヒアドキュメントの後ろのパイプの先（tee t）は拾われない
+    ("cat <<EOF | tee t\nplain\nEOF", []),
+]
+
+REDIRECTS_NOBASE = [
+    ("echo > f 2> /dev/null >> ~/g", ["f", "~/g"]),
+    ("echo >& 2 > /abs/f", ["/abs/f"]),
+    ("echo > '&x' > '|y' > ';'", []),
+]
+
+
+@pytest.mark.parametrize("cmd,want", REDIRECTS)
+def test_redirects(targets, cmd, want):
+    assert targets(cmd) == want
+
+
+@pytest.mark.parametrize("cmd,want", REDIRECTS_NOBASE)
+def test_redirects_without_base(targets, cmd, want):
+    assert targets(cmd, with_base=False) == want
