@@ -95,16 +95,19 @@ class Skip(Exception):
 
 
 def running_dir(root: str = PKG_ROOT) -> str | None:
-    """動いているバージョンディレクトリの名前。プラグインのキャッシュから起動した（または隣にランチャーが無い）ときは None。"""
-    if not runtime.is_version_dir(root):
+    """入れ替えの対象になりうるときだけ返す、動いているバージョンディレクトリの名前。
+
+    `own_dir` の名前のうち、隣にランチャーがあるものに限る。プラグインのキャッシュから起動した（または隣にランチャーが無い）ときは None。"""
+    name = own_dir(root)
+    if name is None or not os.path.isfile(os.path.join(copy_base(root), LAUNCHER)):
         return None
-    if not os.path.isfile(os.path.join(os.path.dirname(root), LAUNCHER)):
-        return None
-    return os.path.basename(root)
+    return name
 
 
 def own_dir(root: str = PKG_ROOT) -> str | None:
-    """動いているバージョンディレクトリの名前（`start` の行の `relay_version_dir`）。キャッシュから起動したら None。"""
+    """`start` の行（`relay_version_dir`）へ記録する、動いているバージョンディレクトリの名前。キャッシュから起動したら None。
+
+    ランチャーが隣にあるかは見ない。入れ替えの判定には `running_dir` を使う。"""
     return os.path.basename(root) if runtime.is_version_dir(root) else None
 
 
