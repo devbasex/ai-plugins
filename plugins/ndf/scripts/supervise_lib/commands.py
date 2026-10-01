@@ -145,7 +145,7 @@ def cmd_design_glossary(root: str, mode: str, out: str) -> tuple[dict, int | Non
 
 def note_row(report: str, next_text: str) -> str:
     def field(name: str) -> str:
-        return report_fields.field(report, name)
+        return report_fields.report_field(report, name)
 
     cost = report_fields.cost(report)
     pr = field("Pull Request")

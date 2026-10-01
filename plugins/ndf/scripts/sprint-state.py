@@ -62,6 +62,10 @@ def outcome(status: str, summary: str, items=None, metrics=None, **extra) -> dic
     return {**step_result.result(TOOL, status, summary, items, metrics), **extra}
 
 
+def field(report: str, name: str) -> str:
+    return report_fields.report_field(report, name)
+
+
 def pr_label(value: str) -> str:
     """報告の Pull Request（URL か番号）を `#番号` にする。無ければ空。"""
     if not value or value == "無し":
@@ -222,7 +226,7 @@ def fill_row(p: dict, item: dict | None) -> dict:
     if rep.is_file():
         text = rep.read_text()
         row["report"] = str(rep)
-        row["pr"] = pr_label(report_fields.field(text, "Pull Request"))
+        row["pr"] = pr_label(field(text, "Pull Request"))
         cost = report_fields.cost(text)
         row["cost"] = float(cost) if cost else None
         row["reason"] = report_fields.reason_shown(text, row["result"])
