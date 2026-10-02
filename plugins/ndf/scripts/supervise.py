@@ -11,7 +11,7 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
 | work  | 1 つの作業（修正・調査）を worker として行わせる | Tool あり（Read/Edit/Write/Bash/Grep/Glob）。`"full": true` なら設定・プラグイン・Skill をそのまま読む claude -p で Skill を回す（cross-review など） |
 | drive | 駆動（cross-review / cross-refactoring の drive.py）を run として回し、`pause` のときだけ worker に判断・修正をさせて駆動へ返す | pause のときだけ（work と同じ最小構成） |
 | judge | 結果ファイルと規則の抜粋だけを渡し、次のステップを決めさせる | Tool なし |
-| pr    | push して Draft の Pull Request を作る（スクリプト）。本文は材料（計画の値・コミット・変更の統計・run の結果・設計文書）から LLM が書く。`"body": "template"` なら材料をそのまま本文にする。本文には必ず「## 利用者向けの変化」の節を置く（ステップの `changes`、無ければ `summary`、それも無ければ題名から。配布の説明文の材料）。`"append": [<パス>...]`（`{state_dir}` を置き換える）のうち、あるファイルの中身を署名の前へそのまま足す。末尾の署名は本文に無いときだけ足す。`"decisions": true` なら、設計の PR の本文へ「決めたこと」の節を作る時点で入れる（`pr-body-decisions.sh render`。後の sync が書き込まず、CI を 2 度起動しない） | 本文だけTool なし |
+| pr    | push して Draft の Pull Request を作る（スクリプト）。本文は材料（計画の値・コミット・変更の統計・run の結果・設計文書）から LLM が書く。`"body": "template"` なら材料をそのまま本文にする。本文には必ず「## 利用者向けの変化」の節を置く（ステップの `changes`、無ければ `summary`、それも無ければ題名から。配布の説明文の材料）。`"append": [<パス>...]`（`{state_dir}` を置き換える）のうち、あるファイルの中身を署名の前へそのまま足す。末尾の署名は本文に無いときだけ足す。`"decisions": true` なら、設計の PR の本文へ「決めたこと」の節を作る時点で入れる（`pr-body-decisions.sh render`。後の sync が書き込まず、CI を 2 度起動しない）。`"title_doc": <設計文書>` なら、囲みの外の最初の H1（256 コードポイント以内）を題にし、既存の PR の題も書き直す。読めなければ `title` で出し、既存の題は書き直さない | 本文だけTool なし |
 
 使い方:
     supervise.py run <plan.json> [--state-dir DIR] [--from <ステップの id>] [--slow K=V]...
@@ -58,10 +58,11 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
         # 終了コード: done = 0 / attention = 20 / 上限 = 3。attention の後にもう一度打つと、その続きから待つ
     supervise.py note <引継ぎ文書.md> --report <report.md> [--next 次の欄] [--section 見出しの語]
     supervise.py sync-check [--root DIR] [--commit]   # 宣言した同期とチェック（.ndf/supervise.json の sync_checks）
+    supervise.py sync-title --pr N --doc <設計文書>   # 設計 PR の題を設計文書の H1 に合わせ直す（違うときだけ。常に 0）
     supervise.py example            # 計画の例を出す
 
 new <種別> --help は、その種別の書き出すステップの並び・要る宣言・引数だけを出す。
-new / queue / wait / note / sync-check の結果は lib/step_result.py の形の 1 行の JSON（status を見る）。
+new / queue / wait / note / sync-check / sync-title の結果は lib/step_result.py の形の 1 行の JSON（status を見る）。
 
 
 プランの形と実行の決まり（ステップの型ごとの鍵・承認ゲート・遅れの見張り）は supervise_lib/plan.py の docstring にある。
@@ -84,6 +85,7 @@ deps.require(
     "md", "mdtable", "schema", "procs", "locks", "durable"
 )  # 課題の本文（state → sprint_mvv → md）・表（pr・commands）・宣言の形（decl）・claude -p の打ち切り（claude）・アカウントの排他（claude_accounts）・耐久の記録（flow）
 from supervise_lib import commands, design_stage, sprint, sprint_routes, new_args, queue, templates  # noqa: E402
+from supervise_lib import pr as pr_step  # noqa: E402
 from supervise_lib.decl import DeclError, apply_decls  # noqa: E402
 from supervise_lib.plan import EXAMPLE  # noqa: E402
 import handoff_doc  # noqa: E402
@@ -195,6 +197,14 @@ def main() -> int:
     c = sub.add_parser("sync-check", help="宣言した同期とチェック（.ndf/supervise.json の sync_checks）")
     c.add_argument("--root", default=".")
     c.add_argument("--commit", action="store_true", help="同期で変わったファイルをコミットする")
+    st = sub.add_parser(
+        "sync-title",
+        help="設計 PR の題を設計文書の H1 に合わせ直す",
+        description="設計文書の囲みの外の最初の H1 を読み、PR の題と違うときだけ書き直す。H1 を読めないときは書き直さない",
+        epilog="終了コード: 常に 0（gh の失敗は標準エラーへ出し、承認ゲートを止めない）",
+    )
+    st.add_argument("--pr", type=int, required=True, help="題を合わせる Pull Request")
+    st.add_argument("--doc", required=True, help="題を読む設計文書（作業ディレクトリからの相対パス）")
     a = ap.parse_args(legacy_names.rewrite_argv("supervise.py", sys.argv[1:]))
     if a.cmd == "new":
         new_args.fill_new_defaults(a)
@@ -233,6 +243,8 @@ def main() -> int:
         emit(commands.cmd_note(a.doc, a.report, a.next, a.section))
     if a.cmd == "sync-check":
         emit(commands.sync_check(a.root, a.commit))
+    if a.cmd == "sync-title":
+        emit(pr_step.sync_title(".", a.pr, a.doc))
     if a.cmd == "history":
         emit(commands.cmd_history_import(a.progress, a.history))
     if a.cmd == "expected":
