@@ -337,6 +337,23 @@ def _codex_turn_model(rollout: pathlib.Path) -> Observation:
     return Observation(model=found.pop())
 
 
+def model_record(requested: Optional[str] = None) -> dict[str, Optional[str]]:
+    """状態ファイルへ置くモデルの記録の初期形（指定値・実測値・取れなかった理由）。"""
+    return {"requested": requested, "observed": None, "unobserved": None}
+
+
+def apply_observation(record: dict[str, Any], observation: Observation) -> None:
+    """実測の結果を記録へ反映する。
+
+    取れたら `observed` を入れ `unobserved` を空にする。取れなければ `unobserved` だけを書き、
+    先に取れた `observed` があれば何も変えない（消さない）。
+    """
+    if observation.model:
+        record["observed"], record["unobserved"] = observation.model, None
+    elif not record.get("observed"):
+        record["unobserved"] = observation.reason
+
+
 def mismatch_warning(runtime: str, requested: Optional[str], observed: Optional[str]) -> Optional[str]:
     """指定値と実測値の食い違いを警告文にする。食い違いが無ければ `None`。
 

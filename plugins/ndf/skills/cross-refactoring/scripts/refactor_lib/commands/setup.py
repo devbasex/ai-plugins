@@ -343,11 +343,7 @@ def _build_initial_state(args: argparse.Namespace, ctx: InitialContext) -> dict[
         "implementer_reason": ctx.implementer_reason,
         # 名指しの記録。再開で `--implementer` を比べる相手（置き換えない。知らせるだけ）。
         "implementer_named": getattr(args, "implementer", None),
-        "implementer_model": {
-            "requested": (ctx.model_spec or {}).get(ctx.implementer),
-            "observed": None,
-            "unobserved": None,
-        },
+        "implementer_model": models_lib.model_record((ctx.model_spec or {}).get(ctx.implementer)),
         "judge": ctx.judge,
         "resume_changes": [],
         "models": ctx.model_spec,
@@ -771,7 +767,7 @@ def _recheck_implementer(state: dict[str, Any]) -> None:
         }
     )
     state["implementer"], state["implementer_reason"] = implementer, reason
-    state["implementer_model"] = {"requested": (state.get("models") or {}).get(implementer), "observed": None, "unobserved": None}
+    state["implementer_model"] = models_lib.model_record((state.get("models") or {}).get(implementer))
     info(f"↻ 実装担当を {implementer} へ替えました（{reason}）")
 
 

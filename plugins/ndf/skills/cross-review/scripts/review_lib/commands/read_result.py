@@ -79,11 +79,8 @@ def _record_reviewer_model(pr: int, agent: str) -> None:
     stem = f"{agent}-review-pr{pr}"
     ended_at = (monitor_outcome.read_outcome(tmp_dir, stem) or {}).get("ended_at")
     observation = models.observed_model(runtime, pathlib.Path(tmp_dir) / stem, ended_at, last.get("started_at"))
-    record = last.setdefault("reviewer_models", {}).setdefault(agent, {"requested": None, "observed": None, "unobserved": None})
-    if observation.model:
-        record["observed"], record["unobserved"] = observation.model, None
-    elif not record.get("observed"):
-        record["unobserved"] = observation.reason
+    record = last.setdefault("reviewer_models", {}).setdefault(agent, models.model_record())
+    models.apply_observation(record, observation)
     _fill_seat_model(last, agent, observation.model)
     store._save(pr, st)
 

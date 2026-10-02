@@ -60,12 +60,10 @@ def record_observed_model(state: dict[str, Any], runtime: str, phase: str) -> No
     record = (state.get("phases") or {}).get(phase) or {}
     ended_at = (read_result(state, runtime, phase).monitor or {}).get("ended_at")
     observation = models_lib.observed_model(runtime, stem, ended_at, record.get("launch_started_at") or record.get("started_at"))
-    model = state.setdefault("implementer_model", {"requested": None, "observed": None, "unobserved": None})
+    model = state.setdefault("implementer_model", models_lib.model_record())
+    models_lib.apply_observation(model, observation)
     if not observation.model:
-        if not model.get("observed"):
-            model["unobserved"] = observation.reason
         return
-    model["observed"], model["unobserved"] = observation.model, None
     warning = models_lib.mismatch_warning(runtime, model.get("requested"), observation.model)
     if warning:
         info(warning)

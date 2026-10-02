@@ -295,3 +295,30 @@ def test_an_unexpected_error_becomes_unreadable(tmp_path, monkeypatch):
     monkeypatch.setattr(models, "_read_launch_record", boom)
     o = models.observed_model("codex", tmp_path / "codex-x")
     assert (o.model, o.reason) == (None, "unreadable")
+
+
+@pytest.mark.parametrize(
+    "record, observation, expected",
+    [
+        (
+            {"requested": "r", "observed": None, "unobserved": "no_record"},
+            models.Observation(model="m"),
+            {"requested": "r", "observed": "m", "unobserved": None},
+        ),
+        (
+            {"requested": None, "observed": "m", "unobserved": None},
+            models.Observation(reason="no_record"),
+            {"requested": None, "observed": "m", "unobserved": None},
+        ),
+        (
+            models.model_record(),
+            models.Observation(reason="no_record"),
+            {"requested": None, "observed": None, "unobserved": "no_record"},
+        ),
+    ],
+    ids=["observed", "keeps_earlier_observation", "records_reason"],
+)
+def test_apply_observation(record, observation, expected):
+    """取れたら実測値を入れ、取れなければ先の実測値を消さずに理由だけを書く。"""
+    models.apply_observation(record, observation)
+    assert record == expected
