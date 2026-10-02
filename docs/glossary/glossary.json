@@ -70,6 +70,11 @@
       "id": "repo-dev-checks",
       "name": "このリポジトリの開発の検査",
       "meaning": "ai-plugins の開発で formatter と静的解析を手元と CI で走らせるときの語。NDF が利用者へ配る振る舞いではない"
+    },
+    {
+      "id": "ndf-training-optout",
+      "name": "NDF の学習の設定",
+      "meaning": "LLM のアカウントが入力を学習に使う設定かを確かめ、NDF のセッションの開始で Off にするときの語"
     }
   ],
   "terms": [
@@ -2834,6 +2839,24 @@
       "meaning": "ランタイムの宣言の review_seats。cross-review の毎ラウンドのスロットを交代させずにこの 2 つにする",
       "code": "review_seats",
       "pending_source": "issues/issue-1598-design.md"
+    },
+    {
+      "term": "学習の設定",
+      "context": "ndf-training-optout",
+      "meaning": "アカウントの「Help improve our AI models」。account/settings の grove_enabled で、true なら入力を学習に使う",
+      "pending_source": "issues/issue-1597-requirements.md"
+    },
+    {
+      "term": "学習の設定の確認",
+      "context": "ndf-training-optout",
+      "meaning": "学習の設定を読み、1 行の JSON で返すこと（check）。書き換えない",
+      "pending_source": "issues/issue-1597-requirements.md"
+    },
+    {
+      "term": "学習の設定の書き換え",
+      "context": "ndf-training-optout",
+      "meaning": "NDF のセッションの開始で、true の学習の設定を false にすること",
+      "pending_source": "issues/issue-1597-requirements.md"
     }
   ]
 }
