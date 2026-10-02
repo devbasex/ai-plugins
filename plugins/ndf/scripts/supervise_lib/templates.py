@@ -10,7 +10,7 @@ from pathlib import Path
 from step_result import result
 from supervise_lib import release_templates
 from supervise_lib.decl import with_decls
-from supervise_lib.paths import CHECK_PY, REFACTOR_SCOPE_PY
+from supervise_lib.paths import CHECK_PY, DRIVES, REFACTOR_SCOPE_PY
 from supervise_lib.procedures import pr_step, record_steps, with_record, with_touched
 from supervise_lib.verify_steps import merge_steps, refactor_template_arg, scope_cmd, scope_timeout, test_meta, whole_cmd, whole_timeout
 
@@ -185,6 +185,8 @@ def _inspect_steps(a, pr_ref: str, scope: str) -> list[dict]:
             "next": "refactor",
         },
         # 駆動で回す（最終ゲートは全体テスト。テストの走らせ方は cross-refactoring が同じ宣言から読む。#1334）
+        # 範囲を変数へ受けて終了コードを見る。`--scope $(...)` のままだと範囲を組めないときの停止（終了コード 2）が
+        # 捨てられ、空の --scope で argparse が落ちる
         {
             "id": "refactor",
             "type": "drive",
@@ -192,7 +194,7 @@ def _inspect_steps(a, pr_ref: str, scope: str) -> list[dict]:
             "kind": "構造改善",
             "stage": "構造改善",
             "timeout": 3600,
-            "args": f"{pr_ref} --workflow-step --scope {scope}{refactor_template_arg(a)}",
+            "cmd": f"ndf_scope={scope} || exit 2; python3 {DRIVES['cross-refactoring']} {pr_ref} --workflow-step --scope $ndf_scope{refactor_template_arg(a)}",
             "on_fail": "abort",
             "next": "review",
         },

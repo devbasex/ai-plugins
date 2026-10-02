@@ -529,7 +529,7 @@ def test_new_check_uses_assess_skip(tmp_path):
     assert p.returncode == 0, p.stderr
     steps = {s["id"]: s for s in json.loads(out.read_text())["steps"]}
     assert steps["assess"]["skip_to"] == "review"
-    assert "--scope a.py" in steps["refactor"]["args"]
+    assert "--scope a.py" in steps["refactor"]["cmd"]
 
 
 @pytest.mark.parametrize("mode", ["light", "operation", "documentation"])
@@ -2102,7 +2102,7 @@ def test_new_check_builds_the_refactor_scope_from_the_pr_files(tmp_path):
     refactor = next(s for s in json.loads(out.read_text())["steps"] if s["id"] == "refactor")
     assert refactor["type"] == "drive" and not refactor.get("full")
     # 範囲は refactor-scope.py が PR の差分から組み、明示した --scope は足す（#1484）
-    assert f"--scope $(python3 {SCRIPTS / 'refactor-scope.py'} --pr 999 --scope 'extra dir')" in refactor["args"]
+    assert f"ndf_scope=$(python3 {SCRIPTS / 'refactor-scope.py'} --pr 999 --scope 'extra dir')" in refactor["cmd"]
 
 
 def test_new_sprint_check_hands_the_declared_tests_and_scope_to_the_same_builder(tmp_path):
@@ -2114,7 +2114,25 @@ def test_new_sprint_check_hands_the_declared_tests_and_scope_to_the_same_builder
     assert p.returncode == 0, p.stderr
     check = next(out.glob("*-check.json"))
     refactor = next(s for s in json.loads(check.read_text())["steps"] if s["id"] == "refactor")
-    assert f"$(python3 {SCRIPTS / 'refactor-scope.py'} --pr {{pr}} --tests tests/cli --scope lib/a)" in refactor["args"]
+    assert f"$(python3 {SCRIPTS / 'refactor-scope.py'} --pr {{pr}} --tests tests/cli --scope lib/a)" in refactor["cmd"]
+
+
+def test_refactor_step_stops_with_the_scope_exit_code_before_starting_the_drive(tmp_path):
+    """範囲を組めない（refactor-scope.py が終了コード 2）ときは、駆動を空の --scope で起動せずに 2 で止まる。"""
+    from types import SimpleNamespace
+
+    from supervise_lib.templates import _inspect_steps
+
+    marker = tmp_path / "started"
+    stub = tmp_path / "bin" / "python3"  # 駆動の起動を記録だけする python3
+    stub.parent.mkdir()
+    stub.write_text(f"#!/bin/sh\ntouch {marker}\n")
+    stub.chmod(0o755)
+    env = {**os.environ, "PATH": f"{stub.parent}:{os.environ['PATH']}"}
+    for scope, code, started in (("$(exit 2)", 2, False), ("$(echo a.py)", 0, True)):
+        refactor = next(s for s in _inspect_steps(SimpleNamespace(), "1", scope) if s["id"] == "refactor")
+        p = subprocess.run(refactor["cmd"], shell=True, env=env, capture_output=True, text=True)
+        assert (p.returncode, marker.exists()) == (code, started), p.stderr
 
 
 def test_new_sprint_check_and_release_run_without_a_whole_skill(tmp_path):
@@ -2340,7 +2358,7 @@ def test_new_check_with_a_ci_whole_declaration_passes_no_test_command_to_the_ref
     assert p.returncode == 0, p.stderr
     plan = json.loads(out.read_text())
     steps = {s["id"]: s for s in plan["steps"]}
-    assert "--baseline-test" not in steps["refactor"]["args"] and "--round-test" not in steps["refactor"]["args"]
+    assert "--baseline-test" not in steps["refactor"]["cmd"] and "--round-test" not in steps["refactor"]["cmd"]
     assert plan["テストの戦略"]["name"] == "local-scoped-ci-whole" and plan["テストの戦略"]["source"] == "test.strategy"
     limits = plan["テストの時間"]
     # 予算を持たない supervise は、テストが 3·w（w = 3,827 秒）、CI の待ちが 3·c（c = 360 秒）

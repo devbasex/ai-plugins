@@ -52,7 +52,7 @@
       "kind": "構造改善",
       "stage": "構造改善",
       "timeout": 3600,
-      "args": "{pr} --workflow-step --scope $(python3 <NDF>/scripts/check-trigger.py scope --id m9-final --state {state_dir} --root .)",
+      "cmd": "ndf_scope=$(python3 <NDF>/scripts/check-trigger.py scope --id m9-final --state {state_dir} --root .) || exit 2; python3 <NDF>/skills/cross-refactoring/scripts/drive.py {pr} --workflow-step --scope $ndf_scope",
       "on_fail": "abort",
       "next": "review"
     },
