@@ -24,7 +24,7 @@ sys.path.insert(0, str(SCRIPTS))
 from supervise_lib import queue  # noqa: E402
 
 AUTO = {"enabled": True, "modes": ["light", "standard", "legacy-refactor"], "verify": "true"}
-STAGES = ["設計", "関門 1", "スプリントブランチ", "実装", "検査", "開発版", "本番"]
+STAGES = ["設計", "関門 1", "設計の結果", "スプリントブランチ", "実装", "検査", "開発版", "本番"]
 
 
 def load(path) -> dict:
@@ -171,7 +171,7 @@ def test_without_design_the_sprint_branch_carries_the_command(tmp_path):
     p, out = new_sprint(tmp_path, repo, sprint_state(tmp_path), design=False)
     assert p.returncode == 0, p.stdout + p.stderr
     waves = load(out / "sprint.json")["ステージ"]
-    assert [w["name"] for w in waves] == STAGES[2:]
+    assert [w["name"] for w in waves] == STAGES[3:]
     assert "command" in waves[0] and all(w["then_of"] == "スプリントブランチ" and "resume" in w for w in waves[1:])
 
 
@@ -180,7 +180,7 @@ def test_without_a_release_template_the_last_stage_is_manual(tmp_path):
     p, out = new_sprint(tmp_path, repo, sprint_state(tmp_path))
     assert p.returncode == 0, p.stdout + p.stderr
     waves = load(out / "sprint.json")["ステージ"]
-    assert [w["name"] for w in waves] == [*STAGES[:5], "リリース"] and "manual" in waves[-1]
+    assert [w["name"] for w in waves] == [*STAGES[:6], "リリース"] and "manual" in waves[-1]
     assert not any("--gate release" in Path(p).read_text() for w in waves for p in w.get("plans", []))
 
 

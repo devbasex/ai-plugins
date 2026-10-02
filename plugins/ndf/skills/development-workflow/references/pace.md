@@ -155,15 +155,16 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 
 | ステージ | プラン | 流し方 |
 | --- | --- | --- |
-| 設計 | `design-<N>`（review と用語チェックの後に `mvv` → `approve`（ラベル `design-approved` と判定のコメント）→ `merge`） | `command`: `queue <設計>... --max 3 --then <スプリントブランチ> --then <実装>... --then <検査> --then <開発版> --then <本番>` |
+| 設計 | `design-<N>`（review と用語チェックの後に `mvv` → `approve`（ラベル `design-approved` と判定のコメント）→ `merge`） | `command`: `queue <設計>... --max 3 --then <設計の結果> --then <スプリントブランチ> --then <実装>... --then <検査> --then <開発版> --then <本番>` |
 | ゲート 1 | 無し。設計のプランの MVV 判定が通せばマージ済みで通過する | — |
-| スプリントブランチ | `sprint-branch` | 1 つ目の `--then` |
-| 実装 | `impl-<N>`（起点と宛先はスプリントブランチ） | 2 つ目の `--then` |
-| 検査 | `check`（スプリントの develop 宛 Pull Request を 1 本出し、構造改善・コードレビュー・完了判定を 1 回通す） | 3 つ目の `--then` |
-| 開発版 | `release`（`facts` は `gate_as_ok`。出す版の Pull Request は検査のプランの PR） | 4 つ目の `--then` |
-| 本番 | `release-prod`（先頭が `mvv` → `note`（判定のコメントを検査の PR へ）→ `bump`） | 5 つ目の `--then` |
+| 設計の結果 | `design-results`（設計文書の「設計の結果」の表を読み、実装のプランへ触るファイルと取り込んだ課題を書く） | 1 つ目の `--then` |
+| スプリントブランチ | `sprint-branch` | 2 つ目の `--then` |
+| 実装 | `impl-<N>`（起点と宛先はスプリントブランチ） | 3 つ目の `--then` |
+| 検査 | `check`（スプリントの develop 宛 Pull Request を 1 本出し、構造改善・コードレビュー・完了判定を 1 回通す。マージの後に `check-done/*` を進める） | 4 つ目の `--then` |
+| 開発版 | `release`（`facts` は `gate_as_ok`。出す版の Pull Request は検査のプランの PR） | 5 つ目の `--then` |
+| 本番 | `release-prod`（先頭が `mvv` → `note`（判定のコメントを検査の PR へ）→ `bump`） | 6 つ目の `--then` |
 
-`--design` を省くと設計とゲート 1 が無く、スプリントブランチのステージが `command` を持つ。リリースの経路が雛形で
+`--design` を省くと設計・ゲート 1・設計の結果が無く、スプリントブランチのステージが `command` を持つ。リリースの経路が雛形で
 組むもの（`release.form` に雛形がある）でなければ、開発版と本番の代わりに下の「リリースの経路からステージを組む」のステージが入る。
 `then_of` のステージはマニフェストに `resume`（そのステージから最後までを流す queue のコマンド）を持つ。
 
@@ -180,11 +181,12 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 | --- | --- | --- |
 | 設計 | `design-<N>`（review の後に `mvv` → `approve`（ラベル `design-approved` と判定のコメント）→ `merge`） | `queue --max 3` |
 | ゲート 1 | 無し。設計のプランがすべて `完了` なら通過し、`関門` を返したプランの Pull Request だけ利用者の承認を取ってマージする | conductor |
-| 実装 | `impl-<N>`（`base` は develop） | `queue <実装>... --max 3 --then <検査> --then <コードレビュー> --then <開発版> --then <本番>` |
-| 検査 | `check`（実行条件 `check-trigger.py eval --id <スプリント>-1`） | 1 つ目の `--then` |
-| コードレビュー | `review`（`new check --since-last --review-only`。実行条件 `eval --id <スプリント>-review --review`） | 2 つ目の `--then`。検査が立った回は範囲が空になり流れない |
-| 開発版 | `release`（`facts` は `gate_as_ok`） | 3 つ目の `--then` |
-| 本番 | `release-prod`（先頭が `mvv` のステップ） | 4 つ目の `--then`。`関門` ならキューの結果が `gate` になり、承認の後に `run <プラン> --from bump` で続ける |
+| 設計の結果 | `design-results`（設計文書の「設計の結果」の表を読み、実装のプランへ触るファイルと取り込んだ課題を書く） | `queue <設計の結果> --then <実装>... --then <検査> --then <コードレビュー> --then <開発版> --then <本番>` |
+| 実装 | `impl-<N>`（`base` は develop。手動確認の節は実装の Pull Request に載る） | 1 つ目の `--then`（設計の課題が無ければ `queue <実装>... --max 3 --then <検査> ...` の `command`） |
+| 検査 | `check`（実行条件 `check-trigger.py eval --id <スプリント>-1`） | 次の `--then` |
+| コードレビュー | `review`（`new check --since-last --review-only`。実行条件 `eval --id <スプリント>-review --review`） | 次の `--then`。検査が立った回は範囲が空になり流れない |
+| 開発版 | `release`（`facts` は `gate_as_ok`） | 次の `--then` |
+| 本番 | `release-prod`（先頭が `mvv` のステップ） | 最後の `--then`。`関門` ならキューの結果が `gate` になり、承認の後に `run <プラン> --from bump` で続ける |
 
 **スプリントの終わり**は `supervise.py new close --name M --worktree <根> --issue N... --version <開発版> --prod <正式版>
 --state <状態>` が組む。最終の検査（実行条件 `eval --final`）→ 開発版と本番（実行条件 `changed --id <M>-final`。

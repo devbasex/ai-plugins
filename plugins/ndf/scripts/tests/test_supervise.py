@@ -1402,7 +1402,7 @@ def test_new_sprint_writes_waves_in_order(tmp_path):
     assert res["status"] == "ok"
     manifest = json.loads((out / "sprint.json").read_text())
     assert manifest["ブランチ"] == "sprint/v10-18"
-    assert [w["name"] for w in manifest["ステージ"]] == ["設計", "関門 1", "スプリントブランチ", "実装", "検査", "配布"]
+    assert [w["name"] for w in manifest["ステージ"]] == ["設計", "関門 1", "設計の結果", "スプリントブランチ", "実装", "検査", "配布"]
     waves = {w["name"]: w for w in manifest["ステージ"]}
     assert "plans" not in waves["関門 1"] and waves["関門 1"]["gate"]
     assert len(waves["実装"]["plans"]) == 2 and waves["実装"]["command"].endswith("--max 3")
@@ -1458,9 +1458,9 @@ def test_new_sprint_writes_waves_in_order(tmp_path):
     check = json.loads(Path(waves["検査"]["plans"][0]).read_text())
     assert check["branch"] == "sprint/v10-18" and "Pull Request" not in check
     pr = next(s for s in check["steps"] if s["type"] == "pr")
-    assert pr["base"] == "develop" and "関連: #11 #12" in pr["summary"]
-    assert "Closes" not in pr["summary"]
-    assert "関連" not in pr["changes"]  # 関連の行は「利用者向けの変化」へ入れない
+    # 閉じる課題は本文の材料（materials の closes）から「閉じる課題」の節へ 1 行ずつ入る（#1485 の AC10）
+    assert pr["base"] == "develop" and pr["materials"]["closes"] == [11, 12]
+    assert "Closes" not in pr["summary"] and "関連" not in pr["changes"]
     assert [s["id"] for s in check["steps"]][:3] == ["collect", "pr", "assess"]
 
 

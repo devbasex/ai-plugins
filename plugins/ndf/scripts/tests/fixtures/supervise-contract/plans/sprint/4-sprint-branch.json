@@ -17,5 +17,6 @@
       "cmd": "bash <NDF>/scripts/worktree-setup.sh create sprint/m9 && git -C <TMP>/repo/.worktrees/sprint/m9 push -q -u origin sprint/m9",
       "next": "end"
     }
-  ]
+  ],
+  "記録": "<NDF>/scripts/projects-sync.sh"
 }

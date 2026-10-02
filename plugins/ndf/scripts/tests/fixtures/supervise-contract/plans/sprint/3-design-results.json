@@ -1,0 +1,22 @@
+{
+  "フェーズ": "実装",
+  "課題": [
+    16,
+    17
+  ],
+  "モード": "standard",
+  "作業場所": "<TMP>/repo",
+  "規則": "",
+  "上限": 3,
+  "steps": [
+    {
+      "id": "design-results",
+      "type": "run",
+      "stage": "計画",
+      "timeout": 600,
+      "cmd": "python3 <NDF>/scripts/supervise.py design-results --manifest <TMP>/out/sprint/sprint.json --base main --root <TMP>/repo --design 16",
+      "next": "end"
+    }
+  ],
+  "記録": "<NDF>/scripts/projects-sync.sh"
+}

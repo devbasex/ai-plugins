@@ -187,5 +187,6 @@
       "unknown_duration": true
     }
   },
+  "記録": "<NDF>/scripts/projects-sync.sh",
   "スプリント状態": "<TMP>/out/sprint/sprint.json"
 }

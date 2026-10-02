@@ -21,11 +21,13 @@ from supervise_lib.sprint_waves import (
     plan_sprint_impl,
     plan_sprint_release,
     plan_advise_design,
+    plan_design_results,
     plan_mvv_design,
     plan_mvv_release,
 )
 from supervise_lib.new_args import NEW_ARGS
 from supervise_lib.paths import CHECK_PY, HERE, SELF
+from supervise_lib.procedures import sprint_out, with_record
 from supervise_lib.sprint_routes import (
     MVV_PACES,
     dev_channel_of,
@@ -39,6 +41,16 @@ from supervise_lib.verify_steps import merge_steps
 
 def prod_version(version: str) -> str:
     return re.sub(r"-.*$", "", version)
+
+
+DESIGN_RESULTS_STAGE = "設計の結果"
+
+
+def design_results_wave(a, repo: str, **then) -> list[dict]:
+    """承認ゲート 1 の直後の「設計の結果」のステージ（決定 2）。設計の課題が無ければ置かない。"""
+    if not a.design:
+        return []
+    return [{"name": DESIGN_RESULTS_STAGE, "plans": {"design-results": plan_design_results(a, repo)}, **then}]
 
 
 def mvv_design_waves(a, repo: str, gate: str) -> list[dict]:
@@ -59,16 +71,22 @@ def fast_sprint_plans(a) -> list[dict]:
     waves = mvv_design_waves(
         a, repo, "設計の計画がすべて完了なら通過する。結果が関門の計画の Pull Request だけ、利用者の承認を取ってマージする"
     )
+    # 設計の課題があれば、設計の結果のステージが実装の queue の先頭になり、実装以降はその --then で続く
+    waves += design_results_wave(a, repo)
+    first = DESIGN_RESULTS_STAGE if a.design else "実装"
+    impl = {"name": "実装", "plans": {f"impl-{n}": plan_fast_impl(a, n, repo) for n in a.issue}}
+    if a.design:
+        impl["then_of"] = first
     waves += [
-        {"name": "実装", "plans": {f"impl-{n}": plan_fast_impl(a, n, repo) for n in a.issue}},
-        {"name": "検査", "plans": {"check": plan_fast_check(a, repo, f"{a.name}-1")}, "then_of": "実装"},
-        {"name": "実装レビュー", "plans": {"review": plan_fast_check(a, repo, f"{a.name}-review", review_only=True)}, "then_of": "実装"},
+        impl,
+        {"name": "検査", "plans": {"check": plan_fast_check(a, repo, f"{a.name}-1")}, "then_of": first},
+        {"name": "実装レビュー", "plans": {"review": plan_fast_check(a, repo, f"{a.name}-review", review_only=True)}, "then_of": first},
     ]
     if not has_release_template(a):
-        return waves + route_waves(a, repo, "実装", mvv=a.state)  # 開発版のステージは置かない（#1336 の決定 12）
+        return waves + route_waves(a, repo, first, mvv=a.state)  # 開発版のステージは置かない（#1336 の決定 12）
     waves += [
-        {"name": "開発版", "plans": {"release": plan_mvv_release(a, repo, a.version, "dev")}, "then_of": "実装"},
-        {"name": "本番", "plans": {"release-prod": plan_mvv_release(a, repo, prod_version(a.version), "prod")}, "then_of": "実装"},
+        {"name": "開発版", "plans": {"release": plan_mvv_release(a, repo, a.version, "dev")}, "then_of": first},
+        {"name": "本番", "plans": {"release-prod": plan_mvv_release(a, repo, prod_version(a.version), "prod")}, "then_of": first},
     ]
     return waves
 
@@ -92,6 +110,7 @@ def auto_sprint_plans(a) -> list[dict]:
         plan = plan_sprint_impl(a, n, repo)
         plan["進め方"] = "auto"  # 課題の本文の見出し行と通過記録へ進め方を書く（supervise_lib/state.py）
         impl[f"impl-{n}"] = plan
+    waves += design_results_wave(a, repo, **then)
     waves += [
         {"name": "スプリントブランチ", "plans": {"sprint-branch": plan_sprint_branch(a, repo)}, **then},
         {"name": "実装", "plans": impl, "then_of": first},
@@ -114,7 +133,7 @@ def close_plan(a, repo: str) -> dict:
     stats = f"{CHECK_PY} stats --root {shlex.quote(repo)}"
     # 配布の記録は雛形の本番の PR にある。雛形で組まない経路は記録を持たない（0 = 本番の記録なし。#1336）
     record_pr = "{queue_pr:release-prod}" if has_release_template(a) else "0"
-    return with_decls(
+    plan = with_decls(
         {
             "フェーズ": "まとめ",
             "課題": a.issue,
@@ -123,7 +142,6 @@ def close_plan(a, repo: str) -> dict:
             "branch": branch,
             "起点": f"origin/{a.base}",
             "リポジトリ": repo,
-            "記録": str(HERE / "projects-sync.sh"),
             "規則": "",
             "上限": 12,
             "進め方": "fast",
@@ -177,6 +195,7 @@ def close_plan(a, repo: str) -> dict:
         },
         a,
     )
+    return with_record(plan)
 
 
 def close_waves(a) -> list[dict]:
@@ -260,6 +279,7 @@ def sprint_plans(a) -> list[dict]:
     if a.design:
         waves.append({"name": "設計", "plans": {f"design-{n}": design(a, n, repo) for n in a.design}})
         waves.append({"name": "関門 1", "gate": normal_gate_1(a) if advise else "設計 Pull Request をまとめて承認してマージする"})
+    waves += design_results_wave(a, repo)
     waves += [
         {"name": "スプリントブランチ", "plans": {"sprint-branch": plan_sprint_branch(a, repo)}},
         {"name": "実装", "plans": {f"impl-{n}": plan_sprint_impl(a, n, repo) for n in a.issue}},
@@ -341,7 +361,7 @@ def cmd_new_sprint(a, waves: list[dict] | None = None) -> dict:
         for wave in waves:
             for plan in (wave.get("plans") or {}).values():
                 plan["スプリント状態"] = sprint_state_path(a)
-    out = Path(a.out or f"sprint-{a.name}")
+    out = sprint_out(a)
     out.mkdir(parents=True, exist_ok=True)
     index = write_stage_index(waves, out)
     add_resume(index)

@@ -51,7 +51,10 @@
       "title": "Fix: x",
       "summary": "",
       "changes": "",
-      "next": "test-all"
+      "next": "test-all",
+      "materials": {
+        "manual": true
+      }
     },
     {
       "id": "test-all",
@@ -135,5 +138,6 @@
       "strategy": "local-full",
       "unknown_duration": true
     }
-  }
+  },
+  "記録": "<NDF>/scripts/projects-sync.sh"
 }

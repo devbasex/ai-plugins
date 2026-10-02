@@ -146,7 +146,7 @@ python3 plugins/ndf/scripts/supervise.py wait q/done.json
 
 ### スプリントを流すコマンド
 
-**`normal` の 1 スプリント（設計 → 承認ゲート 1 → スプリントブランチ → 実装 → 検査 → 開発版 → 承認ゲート 2 → 本番）で
+**`normal` の 1 スプリント（設計 → 承認ゲート 1 → 設計の結果 → スプリントブランチ → 実装 → 検査 → 開発版 → 承認ゲート 2 → 本番）で
 conductor が起きるのは、承認ゲート・`attention`・キューの終わりだけである。** 例はスプリント `m6`（課題 1052・1053、
 設計 Pull Request は 1052）で、`sv() { python3 "$SCRIPTS/supervise.py" "$@"; }`、`O=<作業ディレクトリ>/sprint-m6` とする。
 キューと `wait` は背景で起動し、done は上の「supervise.py の進捗ログ」で読む。
@@ -156,13 +156,17 @@ conductor が起きるのは、承認ゲート・`attention`・キューの終�
 2. 設計: `sv queue $O/1-design-1052.json --max 3 --done $O/done-1.json` と `sv wait $O/done-1.json`
 3. 承認ゲート 1: キューの結果が `gate` なら、設計 Pull Request をまとめて 1 回の承認に載せる。承認の後、
    conductor が `python3 "$SCRIPTS/merged-steps.py" merge-when-green <設計 PR 番号>` でマージする
-4. スプリントブランチ: `sv queue $O/3-sprint-branch.json --done $O/done-3.json` と `sv wait $O/done-3.json`
-5. 実装: `sv queue $O/4-impl-1052.json $O/4-impl-1053.json --max 3 --done $O/done-4.json` と `sv wait $O/done-4.json`
-6. 検査 → 開発版: `sv queue $O/5-check.json --max 3 --then $O/6-release.json --done $O/done-5.json` と
-   `sv wait $O/done-5.json`。検査のプランがスプリントの Pull Request をベースブランチへマージし、開発版のリリースプランが続けて流れる
-7. 承認ゲート 2: キューの結果が `gate`（開発版の facts のステップ）なら、承認資料を添えて本番の承認を取る
-8. 本番: `sv new release --version 10.18.0 --prs <スプリントの PR 番号> --channel prod --worktree <リポジトリの根>/.worktrees/release/v10.18.0 --out $O/7-release-prod.json`、
-   続けて `sv queue $O/7-release-prod.json --done $O/done-7.json` と `sv wait $O/done-7.json`。最後のステップが後片付けを行う
+4. 設計の結果: `sv queue $O/3-design-results.json --done $O/done-3.json` と `sv wait $O/done-3.json`。マージした設計文書の
+   「設計の結果」の表を読み、実装のプランへ触るファイルと取り込んだ課題を書く（読めなければプランを変えずに進む）
+5. スプリントブランチ: `sv queue $O/4-sprint-branch.json --done $O/done-4.json` と `sv wait $O/done-4.json`
+6. 実装: `sv queue $O/5-impl-1052.json $O/5-impl-1053.json --max 3 --done $O/done-5.json` と `sv wait $O/done-5.json`
+7. 検査 → 開発版: `sv queue $O/6-check.json --max 3 --then $O/7-release.json --done $O/done-6.json` と
+   `sv wait $O/done-6.json`。検査のプランがスプリントの Pull Request をベースブランチへマージし、開発版のリリースプランが続けて流れる。
+   スプリントの Pull Request の本文に「手動確認」のマージ前の行があれば、印が付くまで `merge-gate` が承認ゲートで止まる
+   （利用者が印を付けたら `sv run $O/6-check.json --from merge-gate`）
+8. 承認ゲート 2: キューの結果が `gate`（開発版の facts のステップ）なら、承認資料を添えて本番の承認を取る
+9. 本番: `sv new release --version 10.18.0 --prs <スプリントの PR 番号> --channel prod --worktree <リポジトリの根>/.worktrees/release/v10.18.0 --out $O/8-release-prod.json`、
+   続けて `sv queue $O/8-release-prod.json --done $O/done-8.json` と `sv wait $O/done-8.json`。最後のステップが後片付けを行う
 
 - ステージの番号とプランのファイル名は `new sprint` の出力（`sprint.json` の `ステージ`）が正である。書き出した `command` に `--done` を足して打つ
 - 確定仕様化と振り返りは `normal` のプランが持たないため、supervisor で回す（[agent-layers.md](agent-layers.md) の表の取り込み・仕上げの行）

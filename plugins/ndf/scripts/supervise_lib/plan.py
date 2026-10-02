@@ -26,6 +26,10 @@
 パートに分ける: work のステップに `"parts": [{"name": ..., "files": [...]}, ...]` を書くと、パートごとに
 新しい文脈の claude -p のステップ（`<id>-1`, `<id>-2`, ...）へ展開する。大きな実装は分けて書く。
 
+PR 本文の材料: pr のステップの `"materials"`（`supervise_lib/pr_materials.py`）が、手動確認（`manual`。既定 true）・
+`collect` のブランチへマージした実装の PR の利用者向けの変化・`design_results`（`design-results.json`）の設計 PR・
+`closes` と設計の結果の課題の `Closes` を本文へ集める。無ければ今の本文のまま。
+
 Serena: work のステップに `"serena": true` を書くと Serena の MCP だけを載せる（大きなコードを何度も読む実装向け）。
 
 課題の本文: work のステップに `"issues": [858]`（`true` なら計画の `課題`）を書くと、`gh issue view` の題と本文を
