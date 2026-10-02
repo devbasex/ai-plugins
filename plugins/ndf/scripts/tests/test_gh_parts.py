@@ -276,6 +276,24 @@ def test_checks_outcome_waits_for_checks_that_are_not_listed_yet():
     assert gh_checks.checks_outcome([_run("t", "success", "", 1)], ["t"]) == "success"
 
 
+def test_checks_outcome_edge_cases_are_fixed():
+    """現状固定（I-007）: 待つ名前が空・再実行・結論の順・空の名前・大文字・重複の扱い。"""
+    import gh_checks
+
+    t_ok, u_fail, v_cancel = _run("t", "SUCCESS", "", 1), _run("u", "failure", "", 2), _run("v", "cancelled", "", 3)
+    assert gh_checks.checks_outcome([], []) == "success"
+    assert gh_checks.checks_outcome([u_fail], []) == "success"
+    assert gh_checks.checks_outcome([t_ok], ["t", "t"]) == "success"
+    assert gh_checks.checks_outcome([t_ok, u_fail, v_cancel], ["t", "v", "u"]) == "cancelled"
+    assert gh_checks.checks_outcome([t_ok, u_fail, v_cancel], ["t", "u", "v"]) == "failure"
+    assert gh_checks.checks_outcome([t_ok, v_cancel, _run("w", "", "", 4, status="queued")], ["v", "w"]) == "pending"
+    assert gh_checks.checks_outcome([t_ok, _run("x", "", "", 5)], ["x"]) == "unknown"
+    assert gh_checks.checks_outcome([t_ok], ["t", ""]) == "pending"
+    rerun = [_run("u", "failure", "2026-01-01T00:00:00Z", 2), _run("u", "success", "2026-01-01T00:05:00Z", 6)]
+    assert gh_checks.checks_outcome(rerun, ["u"]) == "success"
+    assert gh_checks.checks_outcome(list(reversed(rerun)), ["u"]) == "success"
+
+
 # ---------------- unresolved-threads ----------------
 
 

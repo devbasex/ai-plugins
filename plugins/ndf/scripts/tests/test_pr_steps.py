@@ -439,3 +439,47 @@ def test_user_changes_heading_inside_fence_does_not_count(repo, env, tmp_path):
     code, out, err = call(["create", "--title", "題", "--body-file", str(b)], env, repo)
     assert code == 0, err
     assert out["metrics"]["user_changes"] is False
+
+
+# --- 現状固定: cmd_plan の ok の出力の形（I-005） ------------------------------------
+
+
+def test_plan_ok_output_shape_is_fixed(repo, env):
+    write(repo, "b.txt", "b\n")
+    code, out, err = call(["plan"], env, repo)
+    assert code == 0, err
+    assert out["status"] == "ok"
+    assert out["summary"] == "feature/x → develop: 未コミット 1 件・1 コミット・1 ファイル。新しい PR を作る"
+    assert [(i["kind"], i["name"], i["result"]) for i in out["items"]] == [
+        ("branch", "feature/x", "ok"),
+        ("base", "develop", "ok"),
+        ("existing_pr", "無し", "create"),
+        ("changes", "1 件の未コミット", "uncommitted"),
+    ]
+    m = out["metrics"]
+    assert {k: m[k] for k in ("branch", "base", "base_ref", "draft", "target", "review", "existing_pr", "uncommitted")} == {
+        "branch": "feature/x",
+        "base": "develop",
+        "base_ref": "origin/develop",
+        "draft": False,
+        "target": "develop",
+        "review": True,
+        "existing_pr": None,
+        "uncommitted": 1,
+    }
+    assert m["closing_words_in_message"] == [] and m["commits_with_closing_words"] == []
+
+
+def test_plan_force_accepts_an_undeclared_base(repo, env):
+    git(repo, "push", "-q", "origin", "feature/x:qa/staging")
+    code, out, err = call(["plan", "--base", "qa/staging", "--force"], env, repo)
+    assert code == 0, err
+    assert out["status"] == "ok" and out["metrics"]["base"] == "qa/staging"
+    assert [i["result"] for i in out["items"][:2]] == ["ok", "ok"]
+
+
+def test_plan_sprint_base_summary_names_the_sprint_review(repo, env):
+    git(repo, "push", "-q", "origin", "develop:sprint/m1")
+    code, out, err = call(["plan", "--base", "sprint/m1"], env, repo)
+    assert code == 0, err
+    assert out["summary"].endswith("新しい PR を作る（スプリントブランチ宛て。実装レビューはスプリントの PR で通す）")

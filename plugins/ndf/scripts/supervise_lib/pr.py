@@ -12,10 +12,10 @@ import mdtable
 from pr_mode import with_mode_line
 from supervise_lib.claude import TAIL
 from supervise_lib.paths import DECISIONS_SH
+from supervise_lib.pr_materials import CHANGES_HEADING, Materials, gather_materials
 from supervise_lib.prompts import PR_SYSTEM
 
 PR_FOOTER = "🤖 Generated with [Claude Code](https://claude.com/claude-code)"  # PR 本文の末尾の署名（1 度だけ）
-CHANGES_HEADING = "## 利用者向けの変化"  # 配布の説明文（release-steps.py notes）の材料になる PR 本文の節
 
 
 def user_changes(step: dict, title: str) -> str:
@@ -34,9 +34,10 @@ class PrStep:
     def git(self, ctx, *args: str) -> str:
         return subprocess.run(["git", *args], cwd=ctx.cwd, capture_output=True, text=True).stdout.rstrip()
 
-    def with_appended(self, ctx, body: str, step: dict) -> str:
-        """pr のステップの `append`（{state_dir} を置き換えたパス）のうち、あるファイルの中身を署名の前へそのまま足す。"""
-        extra = []
+    def with_appended(self, ctx, body: str, step: dict, sections: list[str] | None = None) -> str:
+        """材料の節（`sections`）と、pr のステップの `append`（{state_dir} を置き換えたパス）のうちあるファイルの中身を、
+        署名の前へそのまま足す。"""
+        extra = list(sections or [])
         for raw in step.get("append", []):
             f = Path(str(raw).replace("{state_dir}", str(ctx.state.dir)))
             if f.is_file():
@@ -81,10 +82,11 @@ class PrStep:
         branch, err = self._push(ctx)
         if err is not None:
             return False, err
-        title, changes, issues, body = self._machine_body(ctx, step, base, branch)
+        mats = self._materials(ctx, step, branch)
+        title, changes, issues, body = self._machine_body(ctx, step, base, branch, mats)
         if step.get("body", "llm") == "llm":
             body = self._llm_body(ctx, step, body, changes, issues)
-        body = self.with_appended(ctx, body, step)
+        body = self.with_appended(ctx, body, step, mats.sections)
         body = with_mode_line(body, ctx.plan.get("モード"), self.passed_stages(ctx, step))
         if step.get("decisions"):
             body = self.with_decisions(ctx, body, base)
@@ -99,7 +101,18 @@ class PrStep:
             return branch, push.stderr
         return branch, None
 
-    def _machine_body(self, ctx, step: dict, base: str, branch: str) -> tuple[str, str, str, str]:
+    def _materials(self, ctx, step: dict, branch: str) -> Materials:
+        """ステップの `materials` から本文の材料を集める。手動確認の印は今の PR 本文から引き継ぐ。"""
+        mats = step.get("materials")
+        if not mats:
+            return Materials()
+        old = ""
+        if mats.get("manual", True):
+            p = gh_call.gh(["pr", "list", "--head", branch, "--state", "open", "--json", "body", "--jq", '.[0].body // ""'], cwd=ctx.cwd)
+            old = p.stdout if p.returncode == 0 else ""
+        return gather_materials(str(ctx.cwd), [int(i) for i in ctx.plan.get("課題", [])], mats, old)
+
+    def _machine_body(self, ctx, step: dict, base: str, branch: str, mats: Materials | None = None) -> tuple[str, str, str, str]:
         """PR の材料を集めて機械生成の本文を作る。`(タイトル, 変更の節, 課題, 本文)`。"""
         subprocess.run(["git", "fetch", "-q", "origin", base], cwd=ctx.cwd, capture_output=True, text=True)
         rng = f"origin/{base}..HEAD"
@@ -114,7 +127,12 @@ class PrStep:
         issues = " ".join(f"#{i}" for i in ctx.plan.get("課題", []))
         docs = "\n".join(f"- `{d}`" for d in step.get("docs", [])) or "- 無し"
         title = step.get("title") or (self.git(ctx, "log", "--reverse", "--format=%s", rng).splitlines() or [branch])[0]
-        changes = user_changes(step, title)
+        mats = mats or Materials()
+        if mats.changes is None:
+            changes = user_changes(step, title)
+        else:  # 集めた実装の PR の変化（変化のある PR の行だけ。決定 7）
+            changes = CHANGES_HEADING + "\n\n" + ("\n".join(f"- {c}" for c in mats.changes) or "- 無し")
+        design = "".join(f"\n{d}" for d in mats.design)
         body = f"""{step.get("summary", "")}
 
 {changes}
@@ -122,7 +140,7 @@ class PrStep:
 ## 課題と設計
 
 - 課題: {issues}
-{docs}
+{docs}{design}
 
 ## コミット
 

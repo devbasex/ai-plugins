@@ -35,7 +35,7 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
     supervise.py new release ... --mvv <スプリントの状態>
         # prod: 先頭に MVV 判定（mvv-gate.py）のステップを置く。dev: approval-facts のステップを gate_as_ok にする
     supervise.py new sprint --name M --worktree <リポジトリの根> --issue N... --version <開発版> [--design N...] [--tests PATH...] [--out DIR]
-        # 並列の設計 → 関門 1 → スプリントブランチ → 並列の実装（スプリントブランチへ集める）→ 検査 1 回 → 配布
+        # 並列の設計 → 関門 1 → 設計の結果 → スプリントブランチ → 並列の実装（スプリントブランチへ集める）→ 検査 1 回 → 配布
         # をステージごとの計画の JSON と sprint.json へ書き出す。ステージの中は queue --max 3 で流す。配布は検査の queue が --then で流す
         # 設計の計画: 用語集（無ければ worktree の中で起こしてコミットする）→ 要求と受け入れ条件（本文と写しが一致すれば
         # 飛ばす）→ 設計 → 設計 PR → cross-review → 用語チェック → 関門 1
@@ -44,6 +44,8 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
         # → 検査（実行の条件）→ 開発版 → 本番（関門 2 は MVV 判定）を書く。条件に外れれば計画を書かずに止まる
     supervise.py new close --name M --worktree <根> --issue N... --version <開発版> --prod <正式版> --state <状態> [--out DIR]
         # スプリントの終わり: 最終の検査 → 開発版 → 本番（最終の検査で変更があったときだけ）→ 確定仕様化・閉じる・振り返り
+    supervise.py design-results --manifest <sprint.json> --base B --root <根> --design N...
+        # 設計の結果のステージ: マージした設計 PR の「設計の結果」の表を読み、実装のステージのプランを書き換える
     supervise.py design-glossary --mode M --root . --out <候補の語.md>
         # 設計の計画の入口: 用語集が揃えば何もしない。無ければ init と candidates を打ってコミットし、候補の語を書く
     supervise.py queue <plan.json>... [--max 3] [--then <plan.json>...]... [--done <パス>]
@@ -81,7 +83,7 @@ import deps  # noqa: E402
 deps.require(
     "md", "mdtable", "schema", "procs", "locks", "durable"
 )  # 課題の本文（state → sprint_mvv → md）・表（pr・commands）・宣言の形（decl）・claude -p の打ち切り（claude）・アカウントの排他（claude_accounts）・耐久の記録（flow）
-from supervise_lib import commands, sprint, sprint_routes, new_args, queue, templates  # noqa: E402
+from supervise_lib import commands, design_stage, sprint, sprint_routes, new_args, queue, templates  # noqa: E402
 from supervise_lib.decl import DeclError, apply_decls  # noqa: E402
 from supervise_lib.plan import EXAMPLE  # noqa: E402
 import handoff_doc  # noqa: E402
@@ -174,6 +176,17 @@ def main() -> int:
     g.add_argument("--mode", default="standard", help="モード（設計の工程の入口で用語集を見るモードか）")
     g.add_argument("--root", default=".", help="worktree の根")
     g.add_argument("--out", required=True, help="候補の語を書く Markdown のパス")
+    d = sub.add_parser(
+        "design-results",
+        help="設計の結果のステージ: マージした設計 PR の設計の結果を読み、実装のステージのプランを書き換える",
+        description="design/issue-<番号> のマージした PR が変えた issues/*.md の「設計の結果」の表を読み、実装のプランへ "
+        "触るファイル・取り込んだ課題・実行の条件を書く。design-results.json を manifest の隣へ書く",
+        epilog="終了コード: 書いた = 0（読めなかった設計の課題があっても 0）/ manifest を読めない・取り込み先が無い・扱いが食い違う = 2",
+    )
+    d.add_argument("--manifest", required=True, help="スプリントの計画の sprint.json")
+    d.add_argument("--base", required=True, help="設計 PR をマージしたベースブランチ")
+    d.add_argument("--root", default=".", help="リポジトリの根")
+    d.add_argument("--design", type=int, nargs="+", required=True, help="設計の課題")
     t = sub.add_parser("note", help="報告から引継ぎ文書の表へ 1 行を足す")
     t.add_argument("doc")
     t.add_argument("--report", required=True)
@@ -187,6 +200,8 @@ def main() -> int:
         new_args.fill_new_defaults(a)
     if a.cmd == "design-glossary":
         emit(*commands.cmd_design_glossary(a.root, a.mode, a.out))
+    if a.cmd == "design-results":
+        emit(*design_stage.cmd_design_results(a))
     if a.cmd == "example":
         print(json.dumps(EXAMPLE, ensure_ascii=False, indent=2))
         return 0

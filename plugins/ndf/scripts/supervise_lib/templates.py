@@ -11,6 +11,7 @@ from step_result import result
 from supervise_lib import release_templates
 from supervise_lib.decl import with_decls
 from supervise_lib.paths import CHECK_PY
+from supervise_lib.procedures import pr_step, record_steps, with_record, with_touched
 from supervise_lib.verify_steps import merge_steps, refactor_template_arg, scope_cmd, scope_timeout, test_meta, whole_cmd, whole_timeout
 
 
@@ -112,16 +113,15 @@ def plan_to_merge(a, head: list[dict]) -> dict:
         },
         {"id": "fix", "type": "work", "kind": "修正", "inputs": ["test-limited", "test-all"], "prompt": FIX_PROMPT, "next": "test-limited"},
         # Draft の PR を全体テストの前に出し、CI と手元の全体テストを並べる。直した後は pr のステップが push して本文を更新する
-        {
-            "id": "pr",
-            "type": "pr",
-            "stage": "Pull Request",
-            "base": a.base,
-            "title": a.title,
-            "summary": a.summary or "",
-            "changes": getattr(a, "changes", None) or "",
-            "next": "test-all",
-        },
+        # 手動確認の節は課題の PR に載せる（スプリントブランチへ集める実装の PR は載せず、スプリント PR に載せる）
+        pr_step(
+            a.base,
+            a.title,
+            a.summary or "",
+            getattr(a, "changes", None) or "",
+            "test-all",
+            {"manual": True} if getattr(a, "manual", True) else None,
+        ),
         {
             "id": "test-all",
             "type": "run",
@@ -160,8 +160,8 @@ def plan_to_merge(a, head: list[dict]) -> dict:
     }
     with_decls(plan, a)
     test_meta(plan, a)
-    if getattr(a, "files", None):
-        plan["触るファイル"] = a.files
+    with_record(plan)
+    with_touched(plan, getattr(a, "files", None))
     if a.branch:
         plan["branch"] = a.branch
         plan["起点"] = f"origin/{a.base}"
@@ -216,7 +216,6 @@ def plan_check(a) -> dict:
     落ちた行を書いてから止まる。承認ゲートで止まった間は書かず、承認の後に merge-approved から record へ進む。"""
     pr = a.pr
     name = getattr(a, "id", None) or f"pr-{pr}"
-    record = f"{CHECK_PY} record --id {shlex.quote(name)} --state {{state_dir}} --root . --target-pr {pr}"
     # 範囲の指定が無ければ、PR が変えたファイルのディレクトリ（根を除く）を範囲にする。ステップはシェルで動く。
     # 一覧は REST から取る（gh pr diff は差分が 20000 行を超えると 406 で拒み、範囲が空になる）
     scope = (
@@ -262,8 +261,7 @@ def plan_check(a) -> dict:
                 },
                 {"id": "ready", "type": "run", "cmd": f"git push -q; gh pr ready {pr}", "on_fail": "abort", "next": "merge-gate"},
                 *merge_steps(a, on_fail="abort", next="record"),
-                {"id": "record", "type": "run", "cmd": record, "on_fail": "abort", "next": "end"},
-                {"id": "abort", "type": "run", "cmd": f"{record} --failed", "next": "end"},
+                *record_steps(name, target_pr=pr, advance=getattr(a, "advance_done", False)),
             ],
         },
         a,
@@ -271,7 +269,7 @@ def plan_check(a) -> dict:
     # 工程表で「構造改善」を通らないモードは、実装レビューから始める
     if a.mode in NO_REFACTOR_MODES:
         plan["steps"] = [s for s in plan["steps"] if s["id"] not in ("assess", "refactor")]
-    return plan
+    return with_record(plan)
 
 
 def _with_test_meta(plan: dict, a) -> dict:
@@ -307,7 +305,6 @@ def plan_check_since(a) -> dict:
     cond += flag
     if getattr(a, "final", False):
         cond += " --final"
-    record = f"{CHECK_PY} record --id {name} --state {state} --root .{' --review' if review_only else ''}"
     first = "実装レビュー" if review_only else "構造改善"
     steps = [
         {
@@ -319,23 +316,21 @@ def plan_check_since(a) -> dict:
             "on_fail": "abort-before-pr",
             "next": "pr",
         },
-        {
-            "id": "pr",
-            "type": "pr",
-            "stage": first,
-            "base": f"check-base/{name}",
-            "title": f"検査: {name}",
-            "body": "template",
-            "on_fail": "abort-before-pr",
-            "summary": (
+        pr_step(
+            f"check-base/{name}",
+            f"検査: {name}",
+            (
                 f"前回の検査からの差分に{'実装レビュー' if review_only else '構造改善と実装レビュー'}を"
                 f" 1 回ずつ通す（{name}）。範囲・立ったトリガー・"
                 f"先に見る範囲は `{CHECK_PY} scope --id {name}` と状態ディレクトリの check.json にある。"
                 "検査の後に宛先を起点のブランチへ付け替える"
             ),
-            "changes": "無し（検査の修正だけ）",
-            "next": "review" if review_only else "assess",
-        },
+            "無し（検査の修正だけ）",
+            "review" if review_only else "assess",
+            stage=first,
+            body="template",
+            on_fail="abort-before-pr",
+        ),
         *_inspect_steps(a, "{pr}", scope),
         # 検査の間に起点のブランチが進んでも finish の付け替えの後にマージできるよう、毎回取り込んでから測る
         {
@@ -380,9 +375,7 @@ def plan_check_since(a) -> dict:
         },
         {"id": "ready", "type": "run", "cmd": "sh -c 'git push -q && gh pr ready {pr}'", "on_fail": "abort", "next": "merge-gate"},
         *merge_steps(a, on_fail="abort", next="record"),
-        {"id": "record", "type": "run", "cmd": f"{record} --pr {{pr}}", "on_fail": "abort", "next": "end"},
-        {"id": "abort", "type": "run", "cmd": f"{record} --failed --pr {{pr}}", "next": "end"},
-        {"id": "abort-before-pr", "type": "run", "cmd": f"{record} --failed", "next": "end"},
+        *record_steps(name, review=review_only, pr=True),
     ]
     if review_only:
         steps = [s for s in steps if s["id"] not in ("assess", "refactor")]
@@ -405,7 +398,7 @@ def plan_check_since(a) -> dict:
         "実行の条件": {"cmd": cond, "skip_code": 3},
         "steps": steps,
     }
-    return _with_test_meta(plan, a)
+    return with_record(_with_test_meta(plan, a))
 
 
 def cmd_new(a) -> dict:

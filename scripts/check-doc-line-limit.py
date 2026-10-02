@@ -39,6 +39,10 @@ EXEMPT: dict[str, str] = {
         "Keep a Changelog は最新の版が先頭にあり、版の見出しを上から辿れることを前提にする。"
         "分割すると『最新の版で何が変わったか』を探す入口が増える（#399）"
     ),
+    "docs/glossary.md": (
+        "`docs/glossary/glossary.json` から `glossary.py render` が 1 ファイルで作る生成物で、手で分割できない。"
+        "語を足すたびに上限へ当たるため、生成器を複数ファイルへ対応させるまでの暫定の除外"
+    ),
 }
 
 

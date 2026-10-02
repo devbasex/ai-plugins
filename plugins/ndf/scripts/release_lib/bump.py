@@ -15,7 +15,7 @@ import tempfile
 from pathlib import Path
 
 import versions
-from step_result import StepError, base_of
+from step_result import EXIT_PRECONDITION, StepError, base_of, plugin_dir
 
 
 def ver_pat(v):
@@ -157,3 +157,14 @@ def marketplace_range(lines, name):
         if m.group(1) == name:
             start = i
     return (start, len(lines)) if start is not None else (None, None)
+
+
+def require_bumped(root, plugin, ver):
+    """配る plugin の plugin.json の版が今回の版でなければ止める（bump が通らないまま版を上げない PR を出さない。#1315）。"""
+    pdir = plugin_dir(root, plugin)
+    try:
+        got = json.loads((pdir / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["version"]
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        raise StepError(f"plugin.json の版を読めない: {e}", EXIT_PRECONDITION)
+    if got != ver:
+        raise StepError(f"{plugin} の plugin.json の版が {got} で、今回の版 {ver} でない（bump が通っていない）", EXIT_PRECONDITION)

@@ -236,5 +236,5 @@ def test_separate_branches_keep_their_stages(tmp_path, form):
     assert p.returncode == 0, p.stdout + p.stderr
     manifest = load(out / "sprint.json")
     names = [w["name"] for w in manifest["ステージ"]]
-    assert names == (pa.STAGES if form else [*pa.STAGES[:5], "リリース"]), names
+    assert names == (pa.STAGES if form else [*pa.STAGES[:6], "リリース"]), names
     assert all("production" not in r for r in manifest["リリースの経路"]) is form

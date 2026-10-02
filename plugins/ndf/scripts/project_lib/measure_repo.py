@@ -190,41 +190,58 @@ def _first_number(spec: str) -> str:
     return f"0.{m.group(2)}" if m.group(1) == "0" and m.group(2) else m.group(1)
 
 
-def dependencies(tree: Tree) -> dict[str, dict[str, str]]:
-    """言語 → {依存の名前: 版の指定}。根と 1 段下の依存の定義から集める。"""
-    out: dict[str, dict[str, str]] = {"php": {}, "javascript": {}, "python": {}}
+def _php_dependencies(tree: Tree) -> dict[str, str]:
+    """composer.json の require / require-dev。"""
+    out: dict[str, str] = {}
     for f in tree.shallow("composer.json"):
         c = tree.json(f)
         for sec in ("require", "require-dev"):
-            out["php"].update({k: str(v) for k, v in (c.get(sec) or {}).items()})
+            out.update({k: str(v) for k, v in (c.get(sec) or {}).items()})
+    return out
+
+
+def _js_dependencies(tree: Tree) -> dict[str, str]:
+    """package.json の dependencies / devDependencies と engines.node。"""
+    out: dict[str, str] = {}
     for f in tree.shallow("package.json"):
         c = tree.json(f)
         for sec in ("dependencies", "devDependencies"):
-            out["javascript"].update({k: str(v) for k, v in (c.get(sec) or {}).items()})
+            out.update({k: str(v) for k, v in (c.get(sec) or {}).items()})
         if isinstance(c.get("engines"), dict) and c["engines"].get("node"):
-            out["javascript"]["node"] = str(c["engines"]["node"])
+            out["node"] = str(c["engines"]["node"])
+    return out
+
+
+def _py_dependencies(tree: Tree) -> dict[str, str]:
+    """pyproject.toml（project・dependency-groups・poetry）と requirements*.txt。"""
+    out: dict[str, str] = {}
     for f in tree.shallow("pyproject.toml"):
         c = tree.toml(f)
         proj = c.get("project") or {}
         for d in list(proj.get("dependencies") or []) + [x for v in (proj.get("optional-dependencies") or {}).values() for x in v]:
             name = re.split(r"[\s<>=!~\[;]", str(d), 1)[0].lower()
-            out["python"][name] = str(d)
+            out[name] = str(d)
         for group in (c.get("dependency-groups") or {}).values():
             for d in group if isinstance(group, list) else []:
-                out["python"][re.split(r"[\s<>=!~\[;]", str(d), 1)[0].lower()] = str(d)
+                out[re.split(r"[\s<>=!~\[;]", str(d), 1)[0].lower()] = str(d)
         poetry = (c.get("tool") or {}).get("poetry") or {}
         for sec in ("dependencies", "dev-dependencies"):
-            out["python"].update({k.lower(): str(v) for k, v in (poetry.get(sec) or {}).items()})
+            out.update({k.lower(): str(v) for k, v in (poetry.get(sec) or {}).items()})
         for g in (poetry.get("group") or {}).values():
-            out["python"].update({k.lower(): str(v) for k, v in (g.get("dependencies") or {}).items()})
+            out.update({k.lower(): str(v) for k, v in (g.get("dependencies") or {}).items()})
         if proj.get("requires-python"):
-            out["python"]["python"] = str(proj["requires-python"])
+            out["python"] = str(proj["requires-python"])
     for f in tree.shallow("requirements*.txt"):
         for line in (tree.read(f) or "").splitlines():
             name = re.split(r"[\s<>=!~\[;#]", line.strip(), 1)[0].lower()
             if name:
-                out["python"].setdefault(name, line.strip())
+                out.setdefault(name, line.strip())
     return out
+
+
+def dependencies(tree: Tree) -> dict[str, dict[str, str]]:
+    """言語 → {依存の名前: 版の指定}。根と 1 段下の依存の定義から集める。"""
+    return {"php": _php_dependencies(tree), "javascript": _js_dependencies(tree), "python": _py_dependencies(tree)}
 
 
 def measure_languages(tree: Tree, deps: dict) -> dict:

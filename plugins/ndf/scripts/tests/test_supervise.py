@@ -96,6 +96,35 @@ def test_a_failed_run_step_is_not_rerun_by_the_engine(tmp_path):
     assert [e["id"] for e in s.state.log] == ["t", "after"]
 
 
+@pytest.mark.parametrize(
+    ("failing", "visits"),
+    [
+        # 落ちたステップが fix の next より前: そこからやり直す（#1315 の bump）
+        ("bump", ["bump", "fix", "bump", "sync", "release", "verify"]),
+        # 落ちたステップが fix の next より後: next から配り直す（verify の前に release を流し直す）
+        ("verify", ["bump", "sync", "release", "verify", "fix", "sync", "release", "verify"]),
+    ],
+)
+def test_fix_goes_back_to_the_failed_step_before_its_next(tmp_path, fakes, failing, visits):
+    """#1315: back_to_failed の fix は、落ちたステップが next より並びで前なら、そのステップへ戻る。"""
+    once = tmp_path / "failed-once"
+    fail_once = f"sh -c '[ -f {once} ] || {{ touch {once}; exit 3; }}'"
+
+    def run_step(sid, nxt):
+        return {"id": sid, "type": "run", "cmd": fail_once if sid == failing else "true", "on_fail": "fix", "next": nxt}
+
+    steps = [
+        run_step("bump", "sync"),
+        run_step("sync", "release"),
+        run_step("release", "verify"),
+        run_step("verify", "end"),
+        {"id": "fix", "type": "work", "prompt": "直す", "inputs": ["bump", "verify"], "back_to_failed": True, "next": "sync"},
+    ]
+    s, text = run_plan(tmp_path, steps)
+    assert "結果: 完了" in text
+    assert [e["id"] for e in s.state.log] == visits
+
+
 @pytest.mark.parametrize("where", ["plan", "declaration"])
 def test_run_step_disables_pytest_reports(tmp_path, monkeypatch, where):
     # 計画の no_reports（無ければ作業場所の .ndf/supervise.json の test.no_reports）を足し、
@@ -1373,7 +1402,7 @@ def test_new_sprint_writes_waves_in_order(tmp_path):
     assert res["status"] == "ok"
     manifest = json.loads((out / "sprint.json").read_text())
     assert manifest["ブランチ"] == "sprint/v10-18"
-    assert [w["name"] for w in manifest["ステージ"]] == ["設計", "関門 1", "スプリントブランチ", "実装", "検査", "配布"]
+    assert [w["name"] for w in manifest["ステージ"]] == ["設計", "関門 1", "設計の結果", "スプリントブランチ", "実装", "検査", "配布"]
     waves = {w["name"]: w for w in manifest["ステージ"]}
     assert "plans" not in waves["関門 1"] and waves["関門 1"]["gate"]
     assert len(waves["実装"]["plans"]) == 2 and waves["実装"]["command"].endswith("--max 3")
@@ -1429,9 +1458,9 @@ def test_new_sprint_writes_waves_in_order(tmp_path):
     check = json.loads(Path(waves["検査"]["plans"][0]).read_text())
     assert check["branch"] == "sprint/v10-18" and "Pull Request" not in check
     pr = next(s for s in check["steps"] if s["type"] == "pr")
-    assert pr["base"] == "develop" and "関連: #11 #12" in pr["summary"]
-    assert "Closes" not in pr["summary"]
-    assert "関連" not in pr["changes"]  # 関連の行は「利用者向けの変化」へ入れない
+    # 閉じる課題は本文の材料（materials の closes）から「閉じる課題」の節へ 1 行ずつ入る（#1485 の AC10）
+    assert pr["base"] == "develop" and pr["materials"]["closes"] == [11, 12]
+    assert "Closes" not in pr["summary"] and "関連" not in pr["changes"]
     assert [s["id"] for s in check["steps"]][:3] == ["collect", "pr", "assess"]
 
 

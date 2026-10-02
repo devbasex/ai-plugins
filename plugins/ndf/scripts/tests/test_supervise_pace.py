@@ -94,8 +94,8 @@ def test_fast_sprint_puts_check_then_dev_then_prod_after_the_implementation(tmp_
     manifest = load(out / "sprint.json")
     assert manifest["進め方"] == "fast" and manifest["状態"].endswith("sprint-state.json")
     waves = {w["name"]: w for w in manifest["ステージ"]}
-    assert [w["name"] for w in manifest["ステージ"]] == ["設計", "関門 1", "実装", "検査", "実装レビュー", "開発版", "本番"]
-    cmd = waves["実装"]["command"]
+    assert [w["name"] for w in manifest["ステージ"]] == ["設計", "関門 1", "設計の結果", "実装", "検査", "実装レビュー", "開発版", "本番"]
+    cmd = waves["設計の結果"]["command"]  # 設計の結果の queue が実装以降を --then で流す（#1485 の決定 2）
     check, dev, prod = waves["検査"]["plans"][0], waves["開発版"]["plans"][0], waves["本番"]["plans"][0]
     review = waves["実装レビュー"]["plans"][0]
     assert cmd.index("--then " + check) < cmd.index("--then " + review) < cmd.index("--then " + dev) < cmd.index("--then " + prod)
