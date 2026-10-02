@@ -234,7 +234,7 @@
 - `viewer_login` — 自分のログイン名。一度取って持つキャッシュで、投稿キューの冪等の照合が
   「投稿者が自分か」を見るために使う
 - `rounds[].codex.queued` — 取り込みが送ったレビューが上限で送れず、投稿キューに残っているか。
-  流した直後に参照を書き戻して偽にする（[01-state-and-review.md](01-state-and-review.md) の投稿キューの節参照）
+  流した直後に参照を書き戻して偽にする（[07-posts-and-records.md](07-posts-and-records.md) の投稿キューの節参照）
 - `rounds[].codex.review_url` — 送信の応答が返した参照。流し直しで重複投稿が見つかったときは重複投稿の参照
 - `rounds[].codex.posted_inline` / `posted_body` — インラインとして送れた件数と、差分の外を
   理由に総評へ移した件数（#730）。`comments` は `posted_inline` と同じ値
@@ -388,25 +388,10 @@ launcher が生成するプロンプトに以下を強制している:
 **落とすのは、書き込む中身が確定した後である。** 読めなかった再実行が、一度取り込めて
 いた記録を消さないようにする。
 
-## 投稿の種別ごとの契約
+## 投稿と監視の記録
 
-**GitHub へ書くのはオーケストレーターだけで、すべて投稿キュー（`scripts/lib/post_queue.py`）を
-通る**。組み立てと送信は共通ライブラリの `scripts/lib/result_posts.py` が持つ。送る前に同じ
-ものが先にあるかを照合し、あれば送らずに重複投稿を応答として返す。
-
-| 種別 | 積む側 | 組み立ての元 | 二度書かない照合の鍵 |
-| --- | --- | --- | --- |
-| `review-post` | 指摘の取り込み（`read-result`） | 指摘ファイルと結果ファイル | 投稿者と、本文の先頭行の `## 🤖 cross-review \| round <R> \| <席> \|` までの前方一致（判定の語を含めない） |
-| `review-reply` | 修正の取り込み（`merge-fix`）/ 単独の `fix` | 修正の結果ファイルの `resolved_threads` / `deferred` / `rejected` | 返信先の指摘の識別子と、本文の先頭 80 文字 |
-| `thread-resolve` | 同上 | `resolved_threads`（と、`resolve` が真の見送り・却下） | スレッドの識別子と、すでに決着しているかどうか |
-| `pr-comment` | 同上（修正のまとめ）/ 巻き直し（`rotate-pr.sh`） | 修正の結果ファイルの件数とコミット | 投稿者と、本文の先頭 80 文字（まとめはラウンドとコミットを含む） |
-
-**差分の外を指すインラインで拒まれたら、その要求のインラインをすべて総評へ移して送り直す。**
-契機は応答の `errors` が `could not be resolved` を含むときだけで、ほかの 422 は失敗として
-止める。すでに決着したスレッドの決着をもう一度送っても失敗にならない（実測）。
-
-修正の送信は `git push origin HEAD:<ブランチ名>` で行い、戻り値ファイルの `fix_commit` が
-送り先に載ったことを確かめる。載っていなければ取り込みは失敗として止まる。
+投稿の種別ごとの契約と、監視と計測が残すファイルは
+[07-posts-and-records.md](07-posts-and-records.md) にある。
 
 ## ラウンドの開始時に担当へ渡すもの（#542）
 
@@ -421,38 +406,6 @@ round エントリを状態ファイルへ保存する前に次を行う。**失
 
 スナップショットを取り直すのは、次のラウンドの担当が同じ実行の前のラウンドの指摘と「対応しました」の返信を
 知らないと、直った指摘の近くを別の言い方で再び指摘し、振動の検知に当たるためである。
-
-## 監視と計測が残すファイル
-
-監視（`monitor.py`）と状態の保存が、AI の書き出しとは別に残す（#662）。
-
-| ファイル | 置き場所 | 中身 | いつ書くか |
-|---|---|---|---|
-| `<stem>-monitor.json` | `$TMP_DIR` | その担当の**最後の**監視の結果（`status` / `reason` / 時刻と、`--phase` の値の `phase`（省いたときは `null`）など 15 個のキー） | 担当 1 者の監視を終えたとき。起動（`launch-cli.sh`）の前に消す |
-| `<stem>-launch.json` | `$TMP_DIR` | 起動の記録（`runtime` / 作業ディレクトリの実パス `workdir` / 起動の直前の UTC の時刻 `started_at`）。実際に動いたモデルを取る側が、ランタイムのセッションの記録と結びつけるのに使う | 起動（`launch-cli.sh`）が CLI を起動する直前。前の起動の分は先に消す |
-| `monitor-outcomes.jsonl` | `$TMP_DIR` | 監視の結果を 1 行 1 つで**追記だけ**で積む | 同上。消さない |
-| `cross-review-pr<PR>-<開始時刻の UTC>.json` | 要約の置き場所の `<owner>--<repo>/` | 実行の要約（所要・`final`・ラウンド・起動と `measure`）。**本文・`detail` を含まない** | 状態を保存するたび（同じ実行は上書き） |
-
-`reason` は既定では `status` から決まる（`OK`→`ok` / `TIMEOUT`→`timeout` / `STALLED`→`stalled` /
-`EARLY_ERROR`→`early_error` / `NO_RESULT`→`missing` / `PIDFILE_BAD`→`pidfile_bad`）。監視が
-文言で区別した 2 つだけが状態から決まらない: 利用上限は `EARLY_ERROR` のまま `usage_limit`、
-CLI 自身の上限で結果を書かずに終わったときは `NO_RESULT` のまま `cli_timeout`（#729）。
-監視の標準出力と終了コードは変わらない。
-
-結果の取り込みは結果ファイルを自前で開かず、共通ライブラリの `monitor_outcome.read_launch_outcome(tmp_dir,
-"<agent>-review-pr<PR>", result_path)` が返す値（使える結果 `payload` / 理由 `reason` / 監視の詳細
-`detail` / リトライ可否 `relaunch_same_agent`）を読む。結果なしのときは
-`rounds[-1].<agent>` に `intent: "NO_RESULT"`、`no_result_reason: <reason>`、監視結果ファイルが
-あれば `monitor_detail: <detail>` を書く（**鍵が無い** = 監視結果ファイルが無かった。空文字は
-書かない）。理由の一覧は [01-state-and-review.md](01-state-and-review.md) の「結果を残さなかった
-レビュアーの扱い」にある。
-
-**要約の置き場所は worktree の外である。** `NDF_METRICS_DIR` → `$XDG_STATE_HOME/ndf/metrics` →
-`$HOME/.local/state/ndf/metrics` の順に決まり、`NDF_METRICS=0` のときは書かない。`state.py report`
-の最後の行が、書いた要約のパスか書かなかった理由を出す。集約するのは共通ライブラリの `run_metrics.py aggregate`
-（`--since` / `--until` / `--repo` / `--kind` / `--version` / `--by total|round-count|reason|pair`）である。
-`--by pair` は cross-review のラウンドをレビューの組（`rounds[].seats` のランタイムを辞書順に `+` でつなぐ。
-1 スロットならそのランタイム、記録が無ければ `不明`）ごとに数え、`組 / ラウンド数 / 実行数` の表を出す。
 
 ## `<worktree-base>` の解決順
 

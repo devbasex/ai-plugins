@@ -44,6 +44,7 @@ PR を**既定の参加者プール（claude / codex / kiro とホスト）か�
 - [docs/04-contracts.md](docs/04-contracts.md) — 状態ファイルの形式と AI への入出力の契約（手順の途中では読まない）
 - [docs/05-pool-and-convergence.md](docs/05-pool-and-convergence.md) — 誰がレビューし、いつ止めるか（参加者プール・担当の輪番・認証・終了基準の 3 層）
 - [docs/06-evidence.md](docs/06-evidence.md) — 指摘に求める根拠と反証条件、独立発見の規約、効果の測定（4 つの集約方式と限界）
+- [docs/07-posts-and-records.md](docs/07-posts-and-records.md) — 状態ファイルの外へ書くもの（投稿の種別ごとの契約・投稿キュー・監視と計測が残すファイル。手順の途中では読まない）
 - [scripts/drive.py](scripts/drive.py) — 収束ループの駆動（LLM が要る地点で pause を返して止まる）
 - [scripts/state.py](scripts/state.py) — state.json 操作。起動・監視・巻き直しは `launch-reviewer.sh` / `monitor.py` / `rotate-pr.sh`、効果の測定は `measure.py`（状態を保存するたびに呼ばれる）
 
