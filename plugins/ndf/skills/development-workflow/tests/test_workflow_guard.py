@@ -693,6 +693,57 @@ def test_a_number_after_the_merge_command_is_not_taken(repo: Path) -> None:
     assert result.stdout.strip() == ""
 
 
+# --- #581 1 回の実行に並んだマージ ------------------------------------------
+DESIGN_PR_269 = json.dumps(
+    {"number": 269, "state": "open", "head": {"ref": "design/parallel-batch-06"}, "base": {"ref": "develop"}, "labels": []}
+)
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ("gh pr merge 571 ; gh pr merge 572", ["571", "572"]),
+        ("gh pr merge 571&&gh pr merge 572", ["571", "572"]),
+        ("gh pr merge; gh pr merge 5", ["", "5"]),
+        ("gh api -X PUT repos/a/b/pulls/7/merge; gh pr merge 8", ["7", "8"]),
+    ],
+)
+def test_merge_target_lists_every_merge(repo: Path, command: str, expected: list[str]) -> None:
+    result = run_lib(f"wf_merge_target {shlex.quote(command)}", cwd=repo)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.split("\n")[:-1] == expected
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "gh pr merge 268 --squash ; gh pr merge 269 --squash",
+        "gh pr merge 218 --squash && gh pr merge 269 --squash",
+    ],
+)
+def test_a_second_unapproved_merge_is_denied(repo: Path, state: Path, tmp_path: Path, command: str) -> None:
+    """承認済みの 1 件目の後ろに並べた未承認の設計 Pull Request を通さない。"""
+    responses = {
+        "pulls/268": DESIGN_PR_APPROVED,
+        "pulls/218": FEATURE_PR,
+        "pulls/269": DESIGN_PR_269,
+        "labels/design-approved": LABEL_DEFINED,
+    }
+    result = guard(repo, state, command, tmp_path=tmp_path, responses=responses)
+
+    assert decision(result)["permissionDecision"] == "deny"
+    assert "269" in decision(result)["permissionDecisionReason"]
+
+
+def test_merges_that_are_all_approved_pass(repo: Path, state: Path, tmp_path: Path) -> None:
+    responses = {"pulls/268": DESIGN_PR_APPROVED, "pulls/218": FEATURE_PR}
+    result = guard(repo, state, "gh pr merge 268 --squash; gh pr merge 218 --squash", tmp_path=tmp_path, responses=responses)
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == ""
+
+
 def test_pr_create_body_glued_to_a_semicolon_is_read(repo: Path) -> None:
     """AC9"""
     command = 'gh pr create --body "Closes #161"; echo ok'
