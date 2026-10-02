@@ -62,7 +62,7 @@ def _apply_resume_args_block(st: dict[str, Any], args: argparse.Namespace) -> bo
     old_participants = st.get("participants")
     recorded = old_participants or {}
     # **再開した時点の宣言に従う（#1598 の前提 8）。** 記録の写しと今の宣言が違えば、引数が無くても作り直す。
-    policy_changed = _policy_state(policy) != recorded.get("policy")
+    policy_changed = runtime_policy.differs_from_record(policy, recorded)
     if any(getattr(args, name, None) is not None for name in PARTICIPANT_ARGS) or policy_changed:
         try:
             host = st.get("host") or assignment.detect_host(getattr(args, "host", None))[0]
@@ -154,10 +154,6 @@ def _load_policy() -> runtime_policy.RuntimePolicy | None:
     except runtime_policy.RuntimePolicyError as e:
         review_lib.die(str(e), code=1)
         raise
-
-
-def _policy_state(policy: runtime_policy.RuntimePolicy | None) -> dict[str, Any] | None:
-    return policy.to_state() if policy is not None else None
 
 
 def _outside_policy(st: dict[str, Any], seats: list[str]) -> list[str]:

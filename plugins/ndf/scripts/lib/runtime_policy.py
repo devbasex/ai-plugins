@@ -87,6 +87,16 @@ class RuntimePolicy:
         }
 
 
+def policy_state(policy: Optional[RuntimePolicy]) -> Optional[dict[str, Any]]:
+    """状態ファイルへ残す宣言の写し。宣言が無ければ `None`。"""
+    return policy.to_state() if policy is not None else None
+
+
+def differs_from_record(policy: Optional[RuntimePolicy], recorded_participants: Optional[dict[str, Any]]) -> bool:
+    """記録（状態ファイルの `participants`）の宣言の写しと今の宣言が違うか（再開した時点の宣言に従う。前提 8）。"""
+    return policy_state(policy) != (recorded_participants or {}).get("policy")
+
+
 def _runtime_of(name: str) -> str:
     m = SEAT_PATTERN.match(name)
     return m.group(1) if m else name

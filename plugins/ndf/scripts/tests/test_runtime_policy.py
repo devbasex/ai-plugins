@@ -333,3 +333,27 @@ def test_policy_loader_exits_on_a_broken_declaration(tmp_path, monkeypatch, caps
     assert e.value.code == code
     err = capsys.readouterr().err
     assert "知らないランタイム: gemini" in err and str(f.resolve()) in err
+
+
+def test_policy_state_is_none_without_policy():
+    assert runtime_policy.policy_state(None) is None
+
+
+@pytest.mark.parametrize(
+    "has_policy, recorded, expected",
+    [
+        (False, None, False),
+        (False, {"policy": None}, False),
+        (True, "same", False),
+        (True, None, True),
+        (True, {"policy": {"path": "x", "allowed": ["codex"], "review_seats": None}}, True),
+        (False, "same", True),
+    ],
+    ids=["none_none", "none_null", "same", "added", "changed", "removed"],
+)
+def test_differs_from_record(has_policy, recorded, expected):
+    """記録の宣言の写しと今の宣言が違うか。"""
+    policy = runtime_policy.RuntimePolicy(path="p", allowed=("claude",))
+    if recorded == "same":
+        recorded = {"policy": policy.to_state()}
+    assert runtime_policy.differs_from_record(policy if has_policy else None, recorded) is expected

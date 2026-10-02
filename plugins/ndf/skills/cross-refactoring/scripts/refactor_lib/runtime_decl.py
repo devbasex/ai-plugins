@@ -43,6 +43,4 @@ def keep_recorded(state: dict[str, Any], field_name: str, names: list[str]) -> l
 
 def policy_changed(state: dict[str, Any]) -> bool:
     """記録の宣言の写しと今の宣言が違うか（再開した時点の宣言に従う。前提 8）。"""
-    policy = load_policy()
-    now = policy.to_state() if policy is not None else None
-    return now != (state.get("participants") or {}).get("policy")
+    return runtime_policy.differs_from_record(load_policy(), state.get("participants"))
