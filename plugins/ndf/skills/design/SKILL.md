@@ -81,7 +81,10 @@ issue のことではない。
 雛形は [references/design-template.md](references/design-template.md) にある。節の並びと、
 各節が `implementation-plan` のどのタスクへつながるかもそこにある。
 
-**ドメインモデルの節を最初に書く。** 変更が属するコンテキスト・変える集約とその持ち主・不変条件・
+**H1 と承認する人が読む欄（目的・適用範囲・あるべき姿の根拠）を先に書き、続けてドメインモデルの節を書く。**
+欄の書き方は [design-template.md の「承認する人が読む欄」](references/design-template.md#承認する人が読む欄) にある。
+
+**ドメインモデルの節は機能一覧より先に書く。** 変更が属するコンテキスト・変える集約とその持ち主・不変条件・
 ドメインイベント・用語を、機能一覧より先に決める。書き方は
 [references/domain-model.md](references/domain-model.md) にある。
 

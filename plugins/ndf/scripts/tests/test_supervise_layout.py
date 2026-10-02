@@ -18,7 +18,20 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 SUPERVISE = SCRIPTS / "supervise.py"
 PKG = SCRIPTS / "supervise_lib"
 
-SUBCOMMANDS = ["run", "history", "expected", "example", "new", "queue", "wait", "design-glossary", "design-results", "note", "sync-check"]
+SUBCOMMANDS = [
+    "run",
+    "history",
+    "expected",
+    "example",
+    "new",
+    "queue",
+    "wait",
+    "design-glossary",
+    "design-results",
+    "note",
+    "sync-check",
+    "sync-title",
+]
 NEW_KINDS = ["impl", "fix", "check", "release", "sprint", "close"]
 MODULES = [
     "__init__",

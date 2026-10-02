@@ -55,6 +55,7 @@
       "type": "pr",
       "stage": "ドキュメントレビュー",
       "base": "main",
+      "title_doc": "issues/issue-16-design.md",
       "title": "設計: #16",
       "summary": "#16 の設計（スプリント m9）",
       "append": [
@@ -125,7 +126,7 @@
       "type": "run",
       "stage": "ドキュメントレビュー",
       "timeout": 300,
-      "cmd": "git push -q && bash <NDF>/scripts/pr-body-decisions.sh sync {pr}",
+      "cmd": "git push -q && bash <NDF>/scripts/pr-body-decisions.sh sync {pr} && python3 <NDF>/scripts/supervise.py sync-title --pr {pr} --doc issues/issue-16-design.md",
       "next": "gate"
     },
     {
