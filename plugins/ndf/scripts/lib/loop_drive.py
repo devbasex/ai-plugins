@@ -30,6 +30,21 @@ def rerun_reason(recorded_head: str | None, current_head: str | None, forced: bo
     return None
 
 
+def keep_finished(recorded_head: str | None, current_head: str | None, forced: bool) -> bool:
+    """完了した実行の回の結果をそのまま返してよいか。理由を標準エラーへ書く（#1340 の I10）。
+
+    終わりの時点の head から今の PR の head が進んだか `--reopen` なら返さず、新しい実行の回の `init` がラウンドを足す。
+    比べられないとき（head を持たない古い記録・今の head を取れない）は前回の結果を返す。
+    """
+    reason = rerun_reason(recorded_head, current_head, forced)
+    if reason:
+        print(f"↻ {reason}、ラウンドを足す", file=sys.stderr)
+        return False
+    if not (recorded_head and current_head):
+        print("ℹ head を比べられないため前回の結果を返す（足すなら --reopen）", file=sys.stderr)
+    return True
+
+
 def call(cmd: list[str], env: dict | None = None, cwd: str | None = None) -> tuple[int, str]:
     """スクリプトを 1 本実行し、終了コードと標準出力を返す。標準エラーはそのまま流す。"""
     p = subprocess.run(cmd, capture_output=True, text=True, errors="replace", env=env, cwd=cwd)

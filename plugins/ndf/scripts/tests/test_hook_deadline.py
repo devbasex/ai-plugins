@@ -130,7 +130,7 @@ def _hook_timeouts(path: Path) -> list[float]:
     return found
 
 
-@pytest.mark.parametrize("rel", ["hooks/claude.json", "hooks/codex.json", "dev.agy/hooks.json"])
+@pytest.mark.parametrize("rel", ["hooks/claude.json", "hooks/codex.json", "dev.agy/hooks.json"], ids=["claude", "codex", "agy"])
 def test_the_hook_limit_leaves_the_margin(rel):
     limits = _hook_timeouts(PLUGIN / rel)
     assert limits

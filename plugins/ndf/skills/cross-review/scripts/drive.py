@@ -37,7 +37,7 @@ import drive_pause as dp  # noqa: E402
 import durable  # noqa: E402
 import step_result as sr  # noqa: E402
 from drive_pause import Stop  # noqa: E402
-from loop_drive import call, durable_identity, parse_vars, rerun_reason, review_status  # noqa: E402,F401  テストは `call` をこのモジュールの上で差し替える
+from loop_drive import call, durable_identity, keep_finished, parse_vars, review_status  # noqa: E402,F401  テストは `call` をこのモジュールの上で差し替える
 
 TOOL = "cross-review-drive"
 DOCS02 = SKILL / "docs" / "02-fix-and-rotation.md"
@@ -128,12 +128,10 @@ class Drive:
     def pr_head(self, tmp: str | None = None) -> str | None:
         """状態ファイルの今の PR（巻き直しの後は新しい PR）の head の OID。取れなければ None。"""
         s = self.state(Path(tmp) if tmp else None)
-        repo, pr = s.get("repo"), s.get("current_pr") or self.pr
-        if not repo:
+        if not s.get("repo"):
             return None
-        rc, out = call(["gh", "api", f"repos/{repo}/pulls/{pr}", "--jq", ".head.sha"], self.env)
-        head = out.strip()
-        return head if rc == 0 and head else None
+        rc, out = call(["gh", "api", f"repos/{s['repo']}/pulls/{s.get('current_pr') or self.pr}", "--jq", ".head.sha"], self.env)
+        return out.strip() if rc == 0 and out.strip() else None
 
     def counts(self) -> dict:
         """件数。**指摘（findings）と修正（fixed）は修正担当の単位でそろえる**（#1317）。
@@ -379,24 +377,12 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
 
     # --- 起動: 耐久の記録を開き、耐久ワークフローを始めるか続けて、止まりか終わりを待つ ---
     def finished(self, out) -> bool:
-        """記録した終わりをそのまま返してよいか（I10）。レビューの状態のファイルが消えていれば頭から流す。
-
-        終わりの時点の head と今の PR の head が違うか `--reopen` なら返さず、新しい実行の回の `init` がラウンドを足す。
-        比べられないとき（head を持たない古い記録・今の head を取れない）は前回の結果を返す。
-        """
-        if not isinstance(out, dict) or (out.get("result") or {}).get("status") != "ok":
-            return False
-        if not (Path(out.get("tmp") or "") / f"cross-review-pr{self.pr}-state.json").is_file():
+        """記録した終わりを返してよいか（I10）。状態のファイルが消えていれば頭から流し、head の比べ方は `keep_finished` が決める。"""
+        tmp = out.get("tmp") if isinstance(out, dict) and (out.get("result") or {}).get("status") == "ok" else None
+        if not tmp or not (Path(tmp) / f"cross-review-pr{self.pr}-state.json").is_file():
             return False
         recorded = out.get("head")
-        current = self.pr_head(out.get("tmp")) if recorded and not self.reopen else None
-        reason = rerun_reason(recorded, current, self.reopen)
-        if reason:
-            print(f"↻ {reason}、ラウンドを足す", file=sys.stderr)
-            return False
-        if not (recorded and current):
-            print("ℹ head を比べられないため前回の結果を返す（足すなら --reopen）", file=sys.stderr)
-        return True
+        return keep_finished(recorded, self.pr_head(tmp) if recorded and not self.reopen else None, self.reopen)
 
     def run(self) -> tuple[dict, int]:
         identity = self.identity()
@@ -472,8 +458,7 @@ def review_drive(pr: int, rotate_mode: str, init_args: list[str]) -> dict:
     d = Drive(pr, rotate_mode, init_args)
     seq, stage = 0, "init"
 
-    def outcome(res: dict, head: str | None = None) -> dict:
-        # head は打ち直しが前回の結果を返すかを決める（終わりの時点の PR の head。#1340 の I10）
+    def outcome(res: dict, head: str | None = None) -> dict:  # head は終わりの時点の PR の head（#1340 の I10）
         return {"result": res, "code": dp.exit_code(res), "tmp": d.v.get("TMP_DIR"), "head": head}
 
     for _ in range(STEP_LIMIT):

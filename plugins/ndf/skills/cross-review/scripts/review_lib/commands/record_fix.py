@@ -43,7 +43,7 @@ def _check_threads(repo: str, pr: int, claimed: list[str]) -> None:
         review_lib.die(f"Resolve したと申告されたスレッドが未解決のまま残っています: {' '.join(still_open)}", code=5)
 
 
-def build_result(pr: int, commit: str, threads: list[str]) -> dict[str, Any]:
+def build_fix_record(pr: int, commit: str, threads: list[str]) -> dict[str, Any]:
     """戻り値ファイルの中身。形は契約のまま、値だけが決まっている。"""
     return {
         "pr": pr,
@@ -80,7 +80,7 @@ def cmd_record_fix(args: argparse.Namespace, ingest: Callable[..., None]) -> Non
     _check_threads(repo, current_pr, threads)
 
     path = store._resolve_tmp_dir(pr) / f"fix-pr{pr}-result.json"
-    jsonio.write_atomic(path, build_result(current_pr, commit, threads))
+    jsonio.write_atomic(path, build_fix_record(current_pr, commit, threads))
     review_lib.info(f"✍ 修正の記録の戻り値ファイルを書いた: {path}")
     fix = fix_result._read_fix_result(pr, path, None)
     ingest(pr, st, fix, pushed_by_host=True)
