@@ -13,11 +13,10 @@ from __future__ import annotations
 import json
 import os
 import urllib.parse
-import urllib.request
 from pathlib import Path
 
 from claude_training import NOT_LOCAL, Reading, http_reason, target, unread
-from claude_usage import http_json
+from claude_usage import http_json, new_request
 
 URL = "https://chatgpt.com/backend-api/settings/user"
 URL_ENV = "NDF_CODEX_SETTINGS_URL"  # 試験用の差し替え（手元のホストだけを受ける）
@@ -51,12 +50,12 @@ def auth(env) -> tuple[tuple[str, str | None] | None, str | None]:
     return (tok, acct if isinstance(acct, str) and acct else None), None
 
 
-def _request(url: str, cred: tuple[str, str | None], method: str = "GET") -> urllib.request.Request:
+def _chatgpt_request(url: str, cred: tuple[str, str | None], method: str = "GET"):
     tok, acct = cred
     headers = {"Authorization": f"Bearer {tok}", "User-Agent": USER_AGENT, "Accept": "application/json"}
     if acct:
         headers["ChatGPT-Account-Id"] = acct
-    return urllib.request.Request(url, method=method, headers=headers)
+    return new_request(url, headers, method)
 
 
 def convert(settings) -> tuple[bool | None, str | None]:
@@ -70,7 +69,7 @@ def convert(settings) -> tuple[bool | None, str | None]:
 
 def read_with(cred: tuple[str, str | None], url: str) -> tuple[Reading, list[str]]:
     """(読んだ結果, true だった鍵)。例外を出さない。"""
-    status, body = http_json(_request(url, cred), TIMEOUT, follow_redirects=False)
+    status, body = http_json(_chatgpt_request(url, cred), TIMEOUT, follow_redirects=False)
     if status != 200:
         return unread(http_reason(status), "codex"), []
     settings = (body or {}).get("settings")
@@ -95,5 +94,5 @@ def read_setting(env=None) -> Reading:
 def turn_off(cred: tuple[str, str | None], url: str, key: str) -> str | None:
     """1 つの鍵を false へ書き換える `PATCH` を 1 回送る。2xx なら None、そうでなければ理由。例外を出さない。"""
     patch = urllib.parse.urljoin(url, PATCH_PATH) + "?" + urllib.parse.urlencode({"feature": key, "value": "false"})
-    status, _ = http_json(_request(patch, cred, "PATCH"), TIMEOUT, follow_redirects=False)
+    status, _ = http_json(_chatgpt_request(patch, cred, "PATCH"), TIMEOUT, follow_redirects=False)
     return None if 200 <= status < 300 else http_reason(status)

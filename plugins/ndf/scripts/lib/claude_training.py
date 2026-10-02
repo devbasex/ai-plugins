@@ -14,12 +14,11 @@ import subprocess
 import sys
 import time
 import urllib.parse
-import urllib.request
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import claude_accounts as ca
-from claude_usage import http_json
+from claude_usage import http_json, new_request
 
 URL = "https://api.anthropic.com/api/oauth/account/settings"
 URL_ENV = "NDF_TRAINING_SETTINGS_URL"  # 試験用の差し替え（手元のホストだけを受ける）
@@ -128,17 +127,14 @@ def check_token(env, config_dir: str | None = None) -> tuple[str | None, str | N
     return tok, None
 
 
-def _request(url: str, token: str, method: str = "GET") -> urllib.request.Request:
-    return urllib.request.Request(
-        url,
-        method=method,
-        headers={"Authorization": f"Bearer {token}", "anthropic-beta": "oauth-2025-04-20", "Accept": "application/json"},
-    )
+def _oauth_request(url: str, token: str, method: str = "GET"):
+    headers = {"Authorization": f"Bearer {token}", "anthropic-beta": "oauth-2025-04-20", "Accept": "application/json"}
+    return new_request(url, headers, method)
 
 
 def read_with(token: str, url: str, config_dir: str | None = None) -> Reading:
     """トークンで学習の設定を 1 回読む。例外を出さない。"""
-    status, body = http_json(_request(url, token), TIMEOUT, follow_redirects=False)
+    status, body = http_json(_oauth_request(url, token), TIMEOUT, follow_redirects=False)
     if status != 200:
         return unread(http_reason(status), config_dir=config_dir)
     grove = (body or {}).get("grove_enabled")
@@ -166,6 +162,6 @@ def read_setting(env=None, config_dir: str | None = None) -> Reading:
 
 def turn_off(token: str, url: str) -> str | None:
     """`PATCH {"grove_enabled": false}` を 1 回送る。2xx なら None、そうでなければ理由。例外を出さない。"""
-    status, _ = http_json(_request(url, token, "PATCH"), TIMEOUT, body={"grove_enabled": False}, follow_redirects=False)
+    status, _ = http_json(_oauth_request(url, token, "PATCH"), TIMEOUT, body={"grove_enabled": False}, follow_redirects=False)
     return None if 200 <= status < 300 else http_reason(status)
 

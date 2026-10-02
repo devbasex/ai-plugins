@@ -221,6 +221,11 @@ def parse_usage(d: dict | None, now: float) -> Usage:
 # ---------------------------------------------------------------- 宛先
 
 
+def new_request(url: str, headers: dict[str, str], method: str = "GET") -> urllib.request.Request:
+    """`http_json` へ渡す要求。`urllib.request` を import するのをこのモジュールに留めるため、他のモジュールはこれで作る。"""
+    return urllib.request.Request(url, method=method, headers=headers)
+
+
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *a, **k):  # 3xx を送り直さず HTTPError として返す
         return None
