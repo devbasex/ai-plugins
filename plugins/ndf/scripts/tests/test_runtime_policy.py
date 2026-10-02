@@ -295,3 +295,41 @@ def test_supervise_stops_on_broken_declaration(tmp_path):
     _declare(work, {"allowed": []})
     stopped = eng.check_runtimes()
     assert stopped is not None and "allowed が空" in stopped[1]
+
+
+# ---------- cross-review / cross-refactoring の読み口（現状固定） ----------
+
+
+def _policy_loaders():
+    """cross-review の `_load_policy` と cross-refactoring の `load_policy`、それぞれの中断の終了コード。"""
+    for d in (ROOT / "skills" / "cross-review" / "scripts", ROOT / "skills" / "cross-refactoring" / "scripts"):
+        if str(d) not in sys.path:
+            sys.path.insert(0, str(d))
+    import refactor_lib.runtime_decl
+    import review_lib.participants
+
+    return [(review_lib.participants._load_policy, 1), (refactor_lib.runtime_decl.load_policy, 4)]
+
+
+@pytest.mark.parametrize("which", [0, 1], ids=["cross-review", "cross-refactoring"])
+def test_policy_loader_reads_the_cwd_declaration(tmp_path, monkeypatch, which):
+    """現状固定 — 宣言はカレントディレクトリのリポジトリから読み、無ければ `None` を返す。"""
+    load, _ = _policy_loaders()[which]
+    monkeypatch.chdir(tmp_path)
+    assert load() is None
+    f = _declare(tmp_path, {"allowed": ["claude", "codex"]})
+    p = load()
+    assert p.allowed == ("claude", "codex") and p.path == str(f.resolve())
+
+
+@pytest.mark.parametrize("which", [0, 1], ids=["cross-review", "cross-refactoring"])
+def test_policy_loader_exits_on_a_broken_declaration(tmp_path, monkeypatch, capsys, which):
+    """現状固定 — 壊れた宣言は理由の文を標準エラーへ出して終える（cross-review は 1、cross-refactoring は中断の 4）。"""
+    load, code = _policy_loaders()[which]
+    monkeypatch.chdir(tmp_path)
+    f = _declare(tmp_path, {"allowed": ["gemini"]})
+    with pytest.raises(SystemExit) as e:
+        load()
+    assert e.value.code == code
+    err = capsys.readouterr().err
+    assert "知らないランタイム: gemini" in err and str(f.resolve()) in err
