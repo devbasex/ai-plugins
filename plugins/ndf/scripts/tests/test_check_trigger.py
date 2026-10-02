@@ -31,6 +31,9 @@ if a[:2] == ["pr", "view"]:
     n = a[2]
     if "files" in a:
         print(json.dumps({{"files": [{{"path": p}} for p in st.get("files", {{}}).get(n, [])]}}))
+    elif "state,mergeCommit,baseRefName" in a:
+        sha = st.get("merges", {{}}).get(n)
+        print(json.dumps({{"state": st.get("states", {{}}).get(n, "OPEN"), "baseRefName": "develop", "mergeCommit": {{"oid": sha}} if sha else None}}))
     elif "state" in a:
         print(json.dumps({{"state": st.get("states", {{}}).get(n, "OPEN")}}))
     sys.exit(0)
@@ -496,6 +499,48 @@ def test_a_failed_check_of_one_pr_is_recorded_without_closing_it(repo, env, tmp_
     assert (row["scope"], row["result"], row["failed_at"]) == ("pr", "failed", "review")
     assert all(c[:2] != ["pr", "close"] for c in gh_calls(env))
     assert call(repo, env, "stats")[1]["metrics"]["failed"] == 1
+
+
+def done_sha(repo: Path, name: str) -> str:
+    out = git(repo, "ls-remote", "origin", f"refs/heads/check-done/{name}")
+    return out.split()[0] if out else ""
+
+
+def test_a_sprint_check_moves_check_done_to_the_merge_commit_of_its_pr(repo, env, tmp_path):
+    """#1272: スプリントの検査（--advance-done）はマージしたスプリント PR のマージのコミットへ check-done/* を進め、
+    次の差分の検査の範囲にスプリント PR の差分が入らない。"""
+    merge_pr(repo, 11, "feat/before", {"app/a.py": 1})
+    sprint = merge_pr(repo, 40, "sprint/m1", {"core/s.py": 3})
+    st = state_dir(tmp_path, [{"id": "review", "exit": 0, "counts": REVIEW}])
+    gh_set(env, states={"40": "MERGED"}, merges={"40": sprint})
+    code, out, _ = call(repo, env, "record", "--id", "check", "--target-pr", "40", "--advance-done", "--state", str(st))
+    assert code == 0, out
+    assert out["metrics"]["pushed"] == ["check-done/review", "check-done/check"]
+    assert done_sha(repo, "review") == sprint and done_sha(repo, "check") == sprint
+    assert events(env, "check")[-1]["to"] == sprint
+    git(repo, "fetch", "-q", "origin")
+    merge_pr(repo, 41, "feat/after", {"docs/x.md": 1})
+    st2 = state_dir(tmp_path / "next", [])
+    assert call(repo, env, "prepare", "--id", "m-2", "--state", str(st2))[0] == 0
+    assert json.loads((st2 / "check.json").read_text())["files"] == ["docs/x.md"]
+
+
+@pytest.mark.parametrize("state, failed", [("MERGED", True), ("CLOSED", False)])
+def test_a_failed_or_unmerged_sprint_check_does_not_move_check_done(repo, env, tmp_path, state, failed):
+    sprint = merge_pr(repo, 40, "sprint/m1", {"core/s.py": 3})
+    st = state_dir(tmp_path, [{"id": "review", "exit": 1}])
+    gh_set(env, states={"40": state}, merges={"40": sprint})
+    args = ["record", "--id", "check", "--target-pr", "40", "--advance-done", "--state", str(st)] + (["--failed"] if failed else [])
+    code, out, _ = call(repo, env, *args)
+    assert code == (1 if failed else 0), out
+    assert done_sha(repo, "check") == "" and done_sha(repo, "review") == ""
+    row = events(env, "check")[-1]
+    assert not row["to"] and row["result"] == ("failed" if failed else "no_change")
+
+
+def test_advance_done_needs_target_pr(repo, env, tmp_path):
+    st = state_dir(tmp_path, [])
+    assert call(repo, env, "record", "--id", "x", "--pr", "30", "--advance-done", "--state", str(st))[0] == 2
 
 
 def test_target_pr_cannot_be_combined_with_pr(repo, env, tmp_path):
