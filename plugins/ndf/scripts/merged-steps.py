@@ -300,25 +300,13 @@ def cmd_sweep_trash(a):
         raise StepError(f"--ref {a.ref} がコミットとして読めない", 2)
     items, metrics = trash.sweep(root, a.ref, apply=a.yes)
     kept = metrics["kept_trash"] + metrics["unledgered_trash"]
-    if a.yes:
-        emit(result(TOOL, "ok", f"本番に出た退避先 {metrics['swept_trash']} 件を消した（残した {kept} 件）", items, metrics))
     # 既定は消さずに挙げるだけ。退避先は Git に無い利用者のファイルを含み、消すと戻せない（C3・C4）
-    nxt = (
-        f"候補の退避先（items の result: candidate）を人へ示し、承認を得てから --yes を付けて打ち直す: sweep-trash --ref {a.ref} --yes"
-        if metrics["sweep_candidates"]
-        else None
-    )
-    emit(
-        result(
-            TOOL,
-            "ok",
-            f"本番に出た退避先 {metrics['sweep_candidates']} 件が回収の候補（消していない。残す {kept} 件）",
-            items,
-            metrics,
-            None,
-            nxt,
-        )
-    )
+    if a.yes:
+        summary, nxt = f"本番に出た退避先 {metrics['swept_trash']} 件を消した（残した {kept} 件）", None
+    else:
+        summary = f"本番に出た退避先 {metrics['sweep_candidates']} 件が回収の候補（消していない。残す {kept} 件）"
+        nxt = f"候補を人へ示し、承認後に打ち直す: sweep-trash --ref {a.ref} --yes" if metrics["sweep_candidates"] else None
+    emit(result(TOOL, "ok", summary, items, metrics, None, nxt))
 
 
 # --- merge-gate・merge-when-green・promote（本体は merged_lib/merge.py） ----------------
