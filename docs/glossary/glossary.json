@@ -2937,9 +2937,16 @@
     {
       "term": "手動確認の行",
       "context": "ndf-workflow",
-      "meaning": "要求の検証手段かテスト戦略の表で、自動化できない確認として書いた行。確かめる時期（マージ前 / リリース後テスト）を持つ",
+      "meaning": "要求の検証手段の表で、項目が「手動確認」で始まる行。項目が「手動確認（マージ前）」ならマージ前、それ以外はリリース後テストに確かめる",
       "source": "",
-      "pending_source": "issues/issue-1485-requirements.md"
+      "pending_source": "issues/issue-1485-design.md"
+    },
+    {
+      "term": "設計の結果",
+      "context": "ndf-workflow",
+      "meaning": "設計文書の「設計の結果」の節の表。課題ごとに扱い（実装する / 取り込む / 閉じる）・取り込み先・触るファイルを書き、実装のステージの前に機械が読む",
+      "source": "",
+      "pending_source": "issues/issue-1485-design.md"
     }
   ]
 }
