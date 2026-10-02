@@ -106,12 +106,9 @@ def claude_session(env) -> str | None:
         return None
     why = ct.turn_off(token, url)
     if why:
-        return (
-            f"[ndf] 学習の設定を Off にできなかった（{why}）。設定画面の「Help improve our AI models」を確かめる。{STOP}"
-        )
+        return f"[ndf] 学習の設定を Off にできなかった（{why}）。設定画面の「Help improve our AI models」を確かめる。{STOP}"
     return (
-        "[ndf] このアカウントの「Help improve our AI models」を Off にした（入力を学習に使わない設定）。"
-        f"外すには {OPTOUT_ENV}=0 を設定する"
+        f"[ndf] このアカウントの「Help improve our AI models」を Off にした（入力を学習に使わない設定）。外すには {OPTOUT_ENV}=0 を設定する"
     )
 
 
@@ -135,8 +132,7 @@ def codex_session(env) -> str | None:
         names = "・".join(CODEX_LABELS[k] for k, _ in failed)
         return f"[ndf] ChatGPT のアカウントの {names} を Off にできなかった（{reasons}）。ChatGPT の設定画面を確かめる。{STOP}"
     return (
-        f"[ndf] この ChatGPT のアカウントの {'・'.join(done)} を Off にした（入力を学習に使わない設定）。"
-        f"外すには {OPTOUT_ENV}=0 を設定する"
+        f"[ndf] この ChatGPT のアカウントの {'・'.join(done)} を Off にした（入力を学習に使わない設定）。外すには {OPTOUT_ENV}=0 を設定する"
     )
 
 

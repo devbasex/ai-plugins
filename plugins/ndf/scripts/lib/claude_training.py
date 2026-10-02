@@ -82,7 +82,10 @@ def _keychain_oauth() -> dict | None:
     try:
         out = subprocess.run(
             ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"],
-            capture_output=True, text=True, timeout=KEYCHAIN_TIMEOUT, check=False,
+            capture_output=True,
+            text=True,
+            timeout=KEYCHAIN_TIMEOUT,
+            check=False,
         ).stdout
         o = json.loads(out).get("claudeAiOauth")
     except (OSError, subprocess.SubprocessError, ValueError, AttributeError):
@@ -164,4 +167,3 @@ def turn_off(token: str, url: str) -> str | None:
     """`PATCH {"grove_enabled": false}` を 1 回送る。2xx なら None、そうでなければ理由。例外を出さない。"""
     status, _ = http_json(_oauth_request(url, token, "PATCH"), TIMEOUT, body={"grove_enabled": False}, follow_redirects=False)
     return None if 200 <= status < 300 else http_reason(status)
-
