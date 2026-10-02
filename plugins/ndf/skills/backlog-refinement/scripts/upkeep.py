@@ -56,6 +56,7 @@ import re
 import sys
 import tempfile
 import urllib.parse
+from dataclasses import dataclass
 from pathlib import Path
 
 _LIB = Path(__file__).resolve().parents[3] / "scripts" / "lib"
@@ -273,7 +274,20 @@ def _route_manual(a, routes, notes):
         routes.add(n, "manual")
 
 
-def _candidate_result(a, repo, since, open_issues, closed, paths, idents, routes, empty_milestones, notes, waits):
+@dataclass
+class CandidateScan:
+    """_route_* が集めた候補の材料。"""
+
+    routes: object
+    closed: list
+    paths: object
+    idents: object
+    empty_milestones: list
+    notes: list
+
+
+def _candidate_result(a, repo, since, open_issues, scan, waits):
+    routes = scan.routes
     found = routes.routes
     # コミットの件名が指す課題は直っている見込みが高いため、上限で切るときも先に残す
     order = sorted(found, key=lambda n: ("commit-subject" not in found[n], -len(found[n] - {"unscored"}), n))
@@ -297,7 +311,7 @@ def _candidate_result(a, repo, since, open_issues, closed, paths, idents, routes
                 "digest": snapshot_digest(i),
             }
         )
-    for t in empty_milestones:
+    for t in scan.empty_milestones:
         items.append({"kind": "milestone", "name": t, "result": "no-open-issue"})
     by_route = {r: sum(1 for n in keep if r in found[n]) for r in ROUTES}
     metrics = {
@@ -309,10 +323,10 @@ def _candidate_result(a, repo, since, open_issues, closed, paths, idents, routes
         "deferred": deferred,
         "limit": a.limit,
         "by_route": by_route,
-        "closed_since": len(closed),
-        "paths": len(paths),
-        "identifiers": len(idents),
-        "notes": notes,
+        "closed_since": len(scan.closed),
+        "paths": len(scan.paths),
+        "identifiers": len(scan.idents),
+        "notes": scan.notes,
         "waits": waits,
     }
     summary = (
@@ -352,7 +366,8 @@ def cmd_candidates(a):
     for n in RC.unscored(sd, _read_state, open_issues, snapshot_digest) if has_milestones else []:
         routes.add(n, "unscored")
 
-    out, deferred = _candidate_result(a, repo, since, open_issues, closed, paths, idents, routes, empty_milestones, notes, gh.waits)
+    scan = CandidateScan(routes, closed, paths, idents, empty_milestones, notes)
+    out, deferred = _candidate_result(a, repo, since, open_issues, scan, gh.waits)
     for f in ("apply.json", "rank.json"):  # 前の回の apply と rank を今回の報告へ混ぜない
         (sd / f).unlink(missing_ok=True)
     jsonio.write_atomic(sd / "candidates.json", out, indent=1)
