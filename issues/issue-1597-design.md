@@ -64,8 +64,8 @@ ChatGPT の `settings/user` とも同じ関係を置き、`lib/codex_training.py
 | I4 | 起動の認証 | OAuth でない接続（`claude_accounts.FOREIGN_AUTH_ENV` のどれかがある起動）では読みも書きも送らない | `check` は `training: null`・理由「OAuth でない接続」。`session-start` は何も出さずに終わる |
 | I5 | 起動の認証 | トークンとアカウントの識別子を標準出力・標準エラー・`systemMessage`・例外の文言に出さない。応答の本文を出力へ写さない | 理由は HTTP の状態コードと例外の型名だけで作る |
 | I6 | 学習の設定 | `session-start` はどの失敗でも終了コード 0 で終わり、セッションの開始を止めない | 予期しない例外も捕まえて失敗の知らせに変える |
-| I7 | 起動の認証 | 実際の OAuth のトークンを送る先は `https://api.anthropic.com` だけ。codex のトークンを送る先は `https://chatgpt.com` だけで、試験用の差し替え（`NDF_CODEX_SETTINGS_URL`）も下と同じ規則で受ける | 宛先は定数で持つ。試験用の環境変数（`NDF_TRAINING_SETTINGS_URL`）の差し替えは、ホストが手元（`127.0.0.1`・`::1`・`localhost`）の URL だけを受ける。照合は `urllib.parse.urlsplit` で取り出した `hostname` 成分（小文字化済み）が `127.0.0.1`・`::1`・`localhost` のどれかに完全一致するかだけで決め、URL の文字列への部分一致・前方一致を使わない。スキームは `http` か `https` に限り、userinfo（`@` の前）を持つ URL は受けない。パス・クエリ・userinfo に許可語が含まれても受ける理由にしない（`http://127.0.0.1.evil.example/`・`http://localhost.evil.example/`・`http://localhost@evil.example/`・`http://evil.example/?h=127.0.0.1` はどれも受けない）。それ以外の値が入っていれば、`check`・`session-start` ともトークンを読まず何も送らず、読み取りの失敗（理由「試験用の宛先が手元でない」）として扱う |
-| I8 | codex の学習の設定 | codex の `training` は 3 つの鍵のどれかが true なら true、`training_allowed` が false で残りの 2 つが false か無ければ false。`training_allowed` が真偽値でなければ null。`codex_training_allowed`・`_v2` が真偽値以外の値で在れば null | `lib/codex_training.py` の変換だけが決める（決定 13） |
+| I7 | 起動の認証 | 実際の OAuth のトークンを送る先は `https://api.anthropic.com` だけ。codex のトークンを送る先は `https://chatgpt.com` だけで、試験用の差し替え（`NDF_CODEX_SETTINGS_URL`）も下と同じ規則で受ける | 宛先は定数で持つ。試験用の環境変数（`NDF_TRAINING_SETTINGS_URL`）の差し替えは、ホストが手元（`127.0.0.1`・`::1`・`localhost`）の URL だけを受ける。照合は `urllib.parse.urlsplit` で取り出した `hostname` 成分（小文字化済み）が `127.0.0.1`・`::1`・`localhost` のどれかに完全一致するかだけで決め、URL の文字列への部分一致・前方一致を使わない。スキームは `http` か `https` に限り、userinfo（`@` の前）を持つ URL は受けない。パス・クエリ・userinfo に許可語が含まれても受ける理由にしない（`http://127.0.0.1.evil.example/`・`http://localhost.evil.example/`・`http://localhost@evil.example/`・`http://evil.example/?h=127.0.0.1` はどれも受けない）。それ以外の値が入っていれば、`check`・`session-start` ともトークンを読まず何も送らず、読み取りの失敗（理由「試験用の宛先が手元でない」）として扱う。学習の設定の HTTP（claude の `GET`・`PATCH` と codex の `GET`）はリダイレクトを追わない。3xx の応答は送り直さずに `HTTP <状態コード>` の失敗として扱い、許可した宛先が別の宛先へ転送してもトークンを転送先へ送らない |
+| I8 | codex の学習の設定 | codex の `training` は次の順に判定し、先に当たった規則で決める。(1) `training_allowed` が無いか真偽値でなければ null。(2) `codex_training_allowed`・`_v2` のどちらかが真偽値以外の値で在れば null。(3) 3 つの鍵のどれかが true なら true。(4) それ以外（`training_allowed` が false で、残りの 2 つが false か無い）は false。形の不正（1・2）を true の有無より先に見るため、`training_allowed` が無く `_v2` が true の応答も、`training_allowed` が true で `codex_training_allowed` が `"unknown"` の応答も null になる | `lib/codex_training.py` の変換だけが決める（決定 13） |
 | I9 | codex の認証 | `auth.json` の `auth_mode` が `chatgpt` でない（API キーのログイン）か、`tokens.access_token` が無ければ送らない。`account_id` は `ChatGPT-Account-Id` の見出しにだけ置き、出力に出さない | `training: null`・理由「ChatGPT のログインでない」か「codex のトークンが無い」 |
 
 ### ドメインイベント
@@ -111,7 +111,7 @@ ChatGPT の `settings/user` とも同じ関係を置き、`lib/codex_training.py
 | `plugins/ndf/scripts/training-optout.py` | 新規（実験版から移す） | 2 つの副命令の入口。`check` は F1 の 1 行の JSON（`lib/step_result.py` の形）と終了コード、`session-start` は F2〜F4 の判定と `systemMessage` の組み立て。標準ライブラリだけで書き、`python3` で直に動く |
 | `plugins/ndf/scripts/lib/claude_training.py` | 新規 | 腐敗防止層。OAuth でない接続の判定・トークンの読み・`GET` と `PATCH`・応答から `training` への変換。出力はしない（値を返すだけ） |
 | `plugins/ndf/scripts/lib/codex_training.py` | 新規 | ChatGPT の `settings/user` の腐敗防止層。ChatGPT でないログインの判定・`auth.json` の読み・`GET`・3 つの鍵から `training` への変換（I8）。`Reading` は `claude_training` のものを使う |
-| `plugins/ndf/scripts/lib/claude_usage.py` | 変更 | `_http` を公開名 `http_json` にし、`method` と JSON の本文を渡せるようにする。呼び出し元（`get_usage`・`refresh_oauth`）は名前を直すだけで振る舞いを変えない |
+| `plugins/ndf/scripts/lib/claude_usage.py` | 変更 | `_http` を公開名 `http_json` にし、`method` と JSON の本文と、リダイレクトを追うかの引数（既定は追う）を渡せるようにする。学習の設定の呼び出しは追わない側を渡す（I7）。呼び出し元（`get_usage`・`refresh_oauth`）は名前を直すだけで振る舞いを変えない |
 | `plugins/ndf/scripts/lib/claude_accounts.py` | 変更 | 設定ディレクトリを受けて `claudeAiOauth` を返す `oauth_in(config_dir)` を足し、`_oauth(name)` をその呼び出しにする |
 | `plugins/ndf/hooks/claude.json` | 変更 | SessionStart の `startup\|resume` の群に `training-optout.py session-start` の hook を 1 つ足す（`timeout` 10） |
 | `plugins/ndf/scripts/tests/test_training_optout.py` | 新規（実験版のテストを移して足す） | テスト設計の行（[テスト設計](issue-1597-design-decisions.md)）を縛る |
@@ -288,7 +288,8 @@ classDiagram
 | 試験用の差し替えが手元でない（I7） | `試験用の宛先が手元でない` |
 | codex: ChatGPT のログインでない（I9） | `ChatGPT のログインでない（API キーのログイン）` |
 | codex: `auth.json` かトークンが無い | `codex のトークンが無い` |
-| codex: 鍵が真偽値でない（I8） | `応答に training_allowed の真偽値が無い` |
+| codex: `training_allowed` が無いか真偽値でない（I8 の 1） | `応答に training_allowed の真偽値が無い` |
+| codex: `codex_training_allowed`・`_v2` が真偽値以外の値（I8 の 2） | `応答に codex_training_allowed の真偽値が無い` |
 | kiro / agy | `unsupported` |
 
 ### `training-optout.py session-start`
@@ -345,7 +346,7 @@ classDiagram
 | --- | --- |
 | 認証 | `$CODEX_HOME/auth.json`（既定 `~/.codex/auth.json`）の `auth_mode`・`tokens.access_token`・`tokens.account_id`。`auth_mode` が `chatgpt` でなければ送らない（I9）。`cli_auth_credentials_store` がキーリングで認証ファイルが無ければ「codex のトークンが無い」 |
 | 要求 | `GET https://chatgpt.com/backend-api/settings/user`。見出しは `Authorization: Bearer <トークン>`・`ChatGPT-Account-Id: <account_id>`・`User-Agent: ndf-training-optout`・`Accept: application/json`。打ち切り 3 秒 |
-| 応答から読む鍵 | `settings.training_allowed`・`settings.codex_training_allowed`・`settings.codex_training_allowed_v2`。他の鍵（告知・識別子）は読まずに捨てる（腐敗防止層） |
+| 応答から読む鍵 | `settings.training_allowed`・`settings.codex_training_allowed`・`settings.codex_training_allowed_v2`。他の鍵（お知らせ・識別子）は読まずに捨てる（腐敗防止層） |
 | 変換 | I8。`source` は `chatgpt/settings/user.training_allowed`、`updated_at` は null（応答に時刻が無い） |
 | 失敗 | claude と同じ表（`HTTP <状態コード>`・`通信の失敗`）に、I9・I8 の理由を足す |
 

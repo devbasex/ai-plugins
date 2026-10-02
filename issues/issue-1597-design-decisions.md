@@ -175,7 +175,7 @@ codex の書き換え（設計の「codex（ChatGPT のログイン）」の節�
 | `check`: 認証が無い・401・403・通信・真偽値でない → `stopped`・null・`reason`（I1） | 5 つの場合それぞれで `check`。終了コード 3 | どれか 1 つで `training` を false にすると落ちる。文字列 `"false"` を真偽値と読むと落ちる |
 | `check`: kiro / agy → `unsupported`・`stopped` | `--runtime` を 2 つ並べて `check` | 1 つでも `training` を false にすると落ちる |
 | `check --runtime codex`: 3 つの鍵がすべて false → false、どれかが true → true（I8） | `NDF_CODEX_SETTINGS_URL` の偽の宛先で、鍵の組を変えて `check`。`_v2` だけが true の場合を含める | 鍵を 1 つ見落とすと落ちる |
-| `check --runtime codex`: `training_allowed` が無い・真偽値でない・ChatGPT でないログイン・`auth.json` が無い・401・403・通信 → null（I8・I9） | それぞれの場合で `check`。ChatGPT でないログインと `auth.json` が無い場合は偽の宛先の要求の数が 0 | どれか 1 つで false を返すと落ちる |
+| `check --runtime codex`: `training_allowed` が無い・真偽値でない・ChatGPT でないログイン・`auth.json` が無い・401・403・通信 → null（I8・I9） | それぞれの場合で `check`。`training_allowed` が無く `_v2` が true の場合と、`training_allowed` が true で `codex_training_allowed` が文字列の場合も null（I8 の順序）。ChatGPT でないログインと `auth.json` が無い場合は偽の宛先の要求の数が 0 | どれか 1 つで false か true を返すと落ちる |
 | codex の要求の見出し | 偽の宛先が受けた要求に `User-Agent: ndf-training-optout` と `ChatGPT-Account-Id` があり、宛先の既定値が `https://chatgpt.com/backend-api/settings/user` | 見出しを外すか宛先を変えると落ちる |
 | `check` の置き場と実験版の片付け | `experimental/training-optout.py` が無く、`scripts/training-optout.py` があり、台帳の行に行き先がある | 実験版を残すか、台帳の行き先を空にすると落ちる |
 | 書き換え: true → `PATCH` が `{"grove_enabled": false}` で 1 回・知らせが出る（I2） | 偽の宛先が受けた要求を数え、本文と方法を見る。標準出力の `systemMessage` | `PATCH` を 2 回送るか、本文の値を変えるか、知らせを消すと落ちる |
@@ -189,6 +189,7 @@ codex の書き換え（設計の「codex（ChatGPT のログイン）」の節�
 | 既存の SessionStart の hook が変わらない | 既存のテスト（`test_relay.py`・`test_ensure_retention.py` ほか）がそのまま通る | 既存の hook の command か matcher を変えると落ちる |
 | 送り先は `api.anthropic.com` だけ（I7） | 差し替えの変数が無いときの宛先が `https://api.anthropic.com/api/oauth/account/settings` | 宛先を別のホストにすると落ちる |
 | 試験用の差し替えは手元のホストだけ（I7） | `NDF_TRAINING_SETTINGS_URL` に手元でないホスト（例 `https://example.invalid/`）を入れて `check` と `session-start` を呼び、どの宛先へも要求が出ず、`check` が `stopped`・`training: null`、`session-start` が終了コード 0 で失敗の知らせを出す | 差し替えをホストを見ずに受けると落ちる |
+| リダイレクトを追わない（I7） | 手元の偽の宛先が `302` で別の手元のポートへ転送する。`check`（claude と codex）と `session-start` を呼び、転送先が要求を 1 つも受けず、`check` が `training: null`・理由 `HTTP 302` を返す | 既定のリダイレクト処理のまま送ると落ちる |
 | 打ち切りの合計（非機能・性能） | 応答を返さない偽の宛先で `session-start` が 7 秒以内に終わり 0 | 打ち切りを外すか延ばすと落ちる |
 | 決定 14 の確認までは codex / kiro / agy で書き換えない（非機能・システム環境） | `hooks/codex.json`・`dev.agy/hooks.json` に `training-optout` が無い | 他のランタイムの hook に足すと落ちる。(a) に決まったら codex の行をこの表から外し、書き換えの行（claude と同じ 4 つ）を足す |
 | 利用者への説明 | 文言を照合するテストは書かない（`AGENTS.md`）。`plugins/ndf/README.md` の節をレビューで見る | — |
