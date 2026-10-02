@@ -155,19 +155,6 @@ def test_seats_record_runtime_model_and_partner(env, repo_dir):
     assert review_lib.participants.seat_records(["codex"]) == [{"seat": "codex", "runtime": "codex", "model": None, "partner": None}]
 
 
-def test_read_result_fills_the_model_from_claude_stdout(tmp_path, monkeypatch):
-    """AC13: claude の stdout の modelUsage からモデルを埋め、読めなければ null のまま。"""
-    monkeypatch.setattr(review_lib.commands.read_result.store, "_resolve_tmp_dir", lambda pr: tmp_path)
-    (tmp_path / f"claude-2-review-pr{PR}-stdout.log").write_text(
-        json.dumps({"type": "result", "result": "x", "modelUsage": {"claude-opus-5-5": {"inputTokens": 10}}})
-    )
-    entry = {"seats": review_lib.participants.seat_records(["claude", "claude-2"])}
-    review_lib.commands.read_result._record_seat_model(entry, "claude-2", PR)
-    review_lib.commands.read_result._record_seat_model(entry, "claude", PR)
-    assert entry["seats"][1]["model"] == "claude-opus-5-5"
-    assert entry["seats"][0]["model"] is None
-
-
 def test_resume_drops_recorded_outside_runtime_and_reselects_the_open_round(env, repo_dir, capsys):
     """AC12・I4: codex を記録した実行を claude だけの宣言で再開すると、codex を起動しない。
 

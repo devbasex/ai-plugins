@@ -64,6 +64,15 @@ codex exec --dangerously-bypass-approvals-and-sandbox --config model_reasoning_e
 | `--json` | JSON Lines でイベントを出力。`event.type=assistant_message` を grep すれば確実に本文を取れる |
 | `codex resume` | 長時間ジョブで親エージェントが再起動した場合にセッションを再開する |
 
+## 実際に動いたモデル
+
+`--model` を渡さなくても、実際に動いたモデルを取れる（#759。codex-cli 0.159.3 で実測）。
+`codex exec` は標準エラーの見出しに `session id: <ID>` を出し、セッションの記録
+`$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*-<ID>.jsonl`（`CODEX_HOME` が無ければ `~/.codex`）の
+`turn_context` の行に `"model"` を残す。共通ライブラリの `models.observed_model` が ID で記録を名指しし、
+ID が無いときは起動の記録（`<stem>-launch.json`）の開始〜終了の時刻範囲と作業ディレクトリで 1 件に絞る。
+候補が 2 件以上なら取らない（`ambiguous`）。見出しの `model:` は起動の設定の表示で、実測には使わない。
+
 ## 出力ストリーム
 
 | ストリーム | 内容 |

@@ -7,6 +7,7 @@ import json
 import pathlib
 from typing import Any
 
+import assignment  # noqa: E402
 import review_lib  # noqa: E402
 import models  # noqa: E402
 import monitor_outcome  # noqa: E402
@@ -52,6 +53,51 @@ def _record_no_result(
         entry["monitor_detail"] = monitor_detail
     st["rounds"][-1][agent] = entry
     store._save(pr, st)
+
+
+def _record_reviewer_model(pr: int, agent: str) -> None:
+    """その席のレビューの起動で実際に動いたモデルを、`rounds[-1].reviewer_models.<席>` へ書く（#759）。
+
+    **結果の検証より前に呼ぶ。** 結果が無くて止まる経路でも実測値が残る。取得は共通層の
+    `models.observed_model` が持ち、ランタイムは席の名前（`claude-2` など）から引く。
+    cross-review は `--model` を渡さないため、指定値は常に空である。取れなければ取れなかった
+    理由（`unobserved`）を書くが、同じラウンドで先に取れた実測値は消さない。
+    状態ファイルを読めないときとラウンドがまだ無いときは、何も書かずに戻る（後の処理が止める）。
+    """
+    path = store._state_path(pr)
+    if not path.exists():
+        return
+    try:
+        st = json.loads(path.read_text(encoding="utf-8"))
+        runtime = assignment.seat_runtime(agent)
+    except (OSError, json.JSONDecodeError, assignment.AssignmentError):
+        return
+    if not isinstance(st, dict) or not st.get("rounds"):
+        return
+    last = st["rounds"][-1]
+    tmp_dir = store._resolve_tmp_dir(pr)
+    stem = f"{agent}-review-pr{pr}"
+    ended_at = (monitor_outcome.read_outcome(tmp_dir, stem) or {}).get("ended_at")
+    observation = models.observed_model(runtime, pathlib.Path(tmp_dir) / stem, ended_at, last.get("started_at"))
+    record = last.setdefault("reviewer_models", {}).setdefault(agent, {"requested": None, "observed": None, "unobserved": None})
+    if observation.model:
+        record["observed"], record["unobserved"] = observation.model, None
+    elif not record.get("observed"):
+        record["unobserved"] = observation.reason
+    _fill_seat_model(last, agent, observation.model)
+    store._save(pr, st)
+
+
+def _fill_seat_model(round_entry: dict[str, Any], seat: str, model: str | None) -> None:
+    """ラウンドの席の記録（`rounds[].seats`。#1598 の AC13）へ、実際に動いたモデルを埋める。
+
+    値は `reviewer_models` と同じ 1 回の取得から写す。埋めるのは `null` のときだけで、
+    取れなければ `null` のまま残す。席の記録の無い古いラウンドは何もしない。
+    """
+    for rec in round_entry.get("seats") or []:
+        if rec.get("seat") == seat and rec.get("model") is None:
+            rec["model"] = model
+            return
 
 
 def _die_no_result(pr: int, agent: str, reason: str, msg: str, code: int = 1) -> None:
@@ -214,6 +260,7 @@ def cmd_read_result(args: argparse.Namespace) -> None:
     agent = args.agent
     pr = args.pr
     rfile = pathlib.Path(args.file or store._resolve_tmp_dir(pr) / f"{agent}-review-pr{pr}-result.json")
+    _record_reviewer_model(pr, agent)
     r = _validate_review_result(pr, agent, rfile)
 
     st = store._load(pr)
@@ -244,31 +291,12 @@ def cmd_read_result(args: argparse.Namespace) -> None:
         review_lib.die(f"{agent}: レビューを投稿できませんでした ({posted.detail})")
 
     collected = _record_review_post(st, agent, pr, r, posted)
-    _record_seat_model(last, agent, pr)
     store._save(pr, st)
     if posted.review_url:
         print(f"POSTED review_url={posted.review_url}")
     print(f"INLINE={posted.posted_inline} BODY={posted.posted_body} QUEUED={posted.queued}")
     print(f"FINDINGS={collected}")
     review_lib.info(f"✅ {agent}: intent={posted.intent} posted_as={posted.posted_as} comments={posted.posted_inline}")
-
-
-def _record_seat_model(round_entry: dict[str, Any], seat: str, pr: int) -> None:
-    """ラウンドの席の記録へ、実際に動いたモデルを埋める（#1598 の AC13・設計の決定 7）。
-
-    claude の `--output-format json` の stdout（`<seat>-review-pr<pr>-stdout.log`）から読む。読めない・
-    claude 以外なら `null` のまま残す。席の記録の無い古いラウンドは何もしない。埋めるのは `null` のときだけ。
-    """
-    for rec in round_entry.get("seats") or []:
-        if rec.get("seat") != seat or rec.get("model") is not None:
-            continue
-        log = store._resolve_tmp_dir(pr) / f"{seat}-review-pr{pr}-stdout.log"
-        try:
-            text = log.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            return
-        rec["model"] = models.observed_model(str(rec.get("runtime") or ""), text)
-        return
 
 
 def _validate_review_result(pr: int, agent: str, rfile: pathlib.Path) -> dict[str, Any]:

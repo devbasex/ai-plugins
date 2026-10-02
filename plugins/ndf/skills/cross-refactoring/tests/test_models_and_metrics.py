@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import pathlib
 
 import pytest
 
@@ -65,9 +66,9 @@ def test_no_flag_when_unspecified(models):
 # ---------- 計測に使えるかの判定 ----------
 
 
-def test_only_claude_reports_the_model_that_actually_ran(models):
+def test_claude_and_codex_report_the_model_that_actually_ran(models):
     """実測モデル名を取得できるランタイムを 1 箇所で宣言する。"""
-    assert models.OBSERVABLE_RUNTIMES == ("claude",)
+    assert models.OBSERVABLE_RUNTIMES == ("claude", "codex")
 
 
 def test_kiro_default_is_not_measurable(models):
@@ -80,8 +81,8 @@ def test_kiro_default_is_not_measurable(models):
 @pytest.mark.parametrize(
     ("runtime", "model", "measurable"),
     [
-        # 実測できる。指定が無くても実際に動いたモデルを読み取れる
-        ("claude", None, True),
+        # 指定も実測値も無ければ、claude も何が動いたか分からない
+        ("claude", None, False),
         ("claude", "opus-5", True),
         # 指定値で代用する。実測はできないが、何を渡したかは分かる
         ("codex", "gpt-5.5", True),
@@ -104,15 +105,27 @@ def test_separation_reason_differs_by_runtime(models):
     assert models.separation_reason("kiro", "auto") == ("kiro の auto はラウンドごとに違うモデルが動きうる")
     assert models.separation_reason("codex", None) == ("codex はモデルを指定しておらず、実際に動いたモデルも取得できない")
     assert models.separation_reason("agy", None) == ("agy はモデルを指定しておらず、実際に動いたモデルも取得できない")
-    assert models.separation_reason("claude", None) is None
+    assert models.separation_reason("claude", None) == ("claude はモデルを指定しておらず、実際に動いたモデルも取得できない")
     assert models.separation_reason("codex", "gpt-5.5") is None
+    # 実測値があれば、指定が無くても分離しない
+    assert models.separation_reason("codex", None, "gpt-6.1-sol") is None
+    assert models.separation_reason("kiro", None, "x") is None
 
 
 def test_assumption_note_marks_rounds_counted_on_trust(models):
     """指定があり実測できないラウンドは分離しないが、前提を報告へ残す。"""
     assert models.assumption_note("codex", "gpt-5.5") == ("codex は指定した gpt-5.5 で動いた前提で数える（実測不可）")
-    assert models.assumption_note("claude", "opus-5") is None
+    assert models.assumption_note("claude", "opus-5") == ("claude は指定した opus-5 で動いた前提で数える（実測不可）")
+    assert models.assumption_note("claude", "opus-5", "claude-opus-5") is None
     assert models.assumption_note("codex", None) is None
+
+
+def test_foreseen_separation_warns_only_runtimes_that_cannot_be_observed(models):
+    """着手前の警告は、実測できる見込みのあるランタイムを警告しない。"""
+    assert models.foreseen_separation("codex", None) is None
+    assert models.foreseen_separation("claude", None) is None
+    assert models.foreseen_separation("agy", None) == ("agy はモデルを指定しておらず、実際に動いたモデルも取得できない")
+    assert models.foreseen_separation("kiro", None) == ("kiro の auto はラウンドごとに違うモデルが動きうる")
 
 
 def test_label_marks_default_rounds(models):
@@ -123,36 +136,18 @@ def test_label_marks_default_rounds(models):
 # ---------- 実測値の取り出し ----------
 
 
-def test_observed_model_from_claude_json(models):
-    out = json.dumps(
-        {
-            "type": "result",
-            "is_error": False,
-            "modelUsage": {"claude-opus-5": {"inputTokens": 100}},
-        }
+def test_observed_model_picks_the_dominant_model(models, tmp_path):
+    """課題 #759 の例。キャッシュの読み取りを数え、補助の haiku ではなく opus を選ぶ。"""
+    stem = tmp_path / "claude-implement-rf751"
+    pathlib.Path(f"{stem}-launch.json").write_text(
+        json.dumps({"runtime": "claude", "workdir": str(tmp_path), "started_at": "2026-10-02T00:00:00Z"}), encoding="utf-8"
     )
-    assert models.observed_model("claude", out) == "claude-opus-5"
-
-
-def test_observed_model_picks_the_dominant_model(models):
-    out = json.dumps(
-        {
-            "modelUsage": {
-                "claude-haiku-4-5": {"inputTokens": 10},
-                "claude-opus-5": {"inputTokens": 900},
-            }
-        }
-    )
-    assert models.observed_model("claude", out) == "claude-opus-5"
-
-
-def test_observed_model_is_none_for_other_runtimes(models):
-    assert models.observed_model("codex", '{"modelUsage": {"x": {}}}') is None
-
-
-def test_observed_model_tolerates_broken_output(models):
-    assert models.observed_model("claude", "") is None
-    assert models.observed_model("claude", '{"modelUsage": broken') is None
+    usage = {
+        "claude-haiku-4-5-20251001": {"inputTokens": 3944, "cacheReadInputTokens": 0, "outputTokens": 28, "costUSD": 0.004},
+        "claude-opus-5[1m]": {"inputTokens": 22, "cacheReadInputTokens": 639525, "outputTokens": 4377, "costUSD": 1.012},
+    }
+    pathlib.Path(f"{stem}-stdout.log").write_text(json.dumps({"modelUsage": usage}), encoding="utf-8")
+    assert models.observed_model("claude", stem).model == "claude-opus-5[1m]"
 
 
 def test_mismatch_warning(models):
@@ -344,6 +339,7 @@ def test_record_observed_model_saves_the_observed_value(gitfacts, tmp_path):
     """
     tmp_dir = tmp_path / "tmp"
     tmp_dir.mkdir()
+    _write_launch(tmp_dir / "claude-implement-rf130", "claude", tmp_path)
     # 実装手順の骨格は `claude-implement-rf130`（I3）。
     (tmp_dir / "claude-implement-rf130-stdout.log").write_text(
         json.dumps(
@@ -359,8 +355,7 @@ def test_record_observed_model_saves_the_observed_value(gitfacts, tmp_path):
 
     gitfacts.record_observed_model(state, "claude", "implement")
 
-    # 現状固定: stdout ログから拾った実測値が保存される。
-    assert state["implementer_model"] == {"requested": "claude-opus-5", "observed": "claude-opus-5"}
+    assert state["implementer_model"] == {"requested": "claude-opus-5", "observed": "claude-opus-5", "unobserved": None}
 
 
 def test_record_observed_model_reads_only_the_named_phase(gitfacts, tmp_path):
@@ -375,3 +370,109 @@ def test_record_observed_model_reads_only_the_named_phase(gitfacts, tmp_path):
     gitfacts.record_observed_model(state, "claude", "implement")
 
     assert state["implementer_model"]["observed"] is None
+    assert state["implementer_model"]["unobserved"] == "no_record"
+
+
+def _write_launch(stem, runtime, workdir, started_at="2026-10-02T00:00:00Z"):
+    pathlib.Path(f"{stem}-launch.json").write_text(
+        json.dumps({"runtime": runtime, "workdir": str(workdir), "started_at": started_at}), encoding="utf-8"
+    )
+
+
+def _write_codex_session(codex_home, session_id, workdir, model, at="2026-10-02T00:00:05.123Z"):
+    day = codex_home / "sessions" / at[:4] / at[5:7] / at[8:10]
+    day.mkdir(parents=True, exist_ok=True)
+    rows = [
+        {"timestamp": at, "type": "session_meta", "payload": {"id": session_id, "cwd": str(workdir), "timestamp": at}},
+        {"timestamp": at, "type": "turn_context", "payload": {"cwd": str(workdir), "model": model}},
+    ]
+    path = day / f"rollout-2026-10-02T00-00-05-{session_id}.jsonl"
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+
+
+def _codex_state(tmp_path, monkeypatch, requested=None):
+    """`--model` なしで codex が実装担当になった実行。セッションの記録は `CODEX_HOME` に置く。"""
+    tmp_dir = tmp_path / "tmp"
+    tmp_dir.mkdir()
+    work = tmp_path / "work"
+    work.mkdir()
+    codex_home = tmp_path / "codex-home"
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    stem = tmp_dir / "codex-implement-rf130"
+    _write_launch(stem, "codex", work)
+    pathlib.Path(f"{stem}-monitor.json").write_text(json.dumps({"ended_at": "2026-10-02T09:10:00+09:00"}), encoding="utf-8")
+    pathlib.Path(f"{stem}-err.log").write_text("OpenAI Codex v0.159.3\n--------\nsession id: 01a0f9f8-aaaa\n--------\n", encoding="utf-8")
+    _write_codex_session(codex_home, "01a0f9f8-aaaa", work, "gpt-6.1-sol")
+    # 同じ作業ディレクトリと時刻に合うが ID の違う記録。ID で名指しするため拾わない。
+    _write_codex_session(codex_home, "01a0f9f8-bbbb", work, "gpt-other")
+    return {"id": 130, "tmp_dir": str(tmp_dir), "implementer_model": {"requested": requested, "observed": None, "unobserved": None}}
+
+
+def test_record_observed_model_reads_the_codex_session(gitfacts, tmp_path, monkeypatch):
+    """#759 AC1 — `--model` なしの codex でも、セッションの記録のモデル名が入る。"""
+    state = _codex_state(tmp_path, monkeypatch)
+
+    gitfacts.record_observed_model(state, "codex", "implement")
+
+    assert state["implementer_model"] == {"requested": None, "observed": "gpt-6.1-sol", "unobserved": None}
+
+
+def test_record_observed_model_warns_on_codex_mismatch(gitfacts, tmp_path, monkeypatch, capsys):
+    """#759 AC9 — codex の指定値と実測値が食い違えば警告する。"""
+    state = _codex_state(tmp_path, monkeypatch, requested="gpt-5.5")
+
+    gitfacts.record_observed_model(state, "codex", "implement")
+
+    assert "食い違" in capsys.readouterr().err
+
+
+def test_record_observed_model_keeps_an_earlier_observation(gitfacts, tmp_path):
+    """前の手順で取れた実測値は、後の手順で取れなくても消さない。"""
+    tmp_dir = tmp_path / "tmp"
+    tmp_dir.mkdir()
+    state = {"id": 130, "tmp_dir": str(tmp_dir), "implementer_model": {"requested": None, "observed": "gpt-6.1-sol", "unobserved": None}}
+
+    gitfacts.record_observed_model(state, "codex", "fix")
+
+    assert state["implementer_model"] == {"requested": None, "observed": "gpt-6.1-sol", "unobserved": None}
+
+
+def test_record_observed_model_ignores_a_leftover_from_before_the_phase(gitfacts, tmp_path):
+    """手順の開始より古い起動の記録は、前の起動の残骸として取らない。"""
+    tmp_dir = tmp_path / "tmp"
+    tmp_dir.mkdir()
+    stem = tmp_dir / "claude-implement-rf130"
+    _write_launch(stem, "claude", tmp_path, started_at="2026-10-01T00:00:00Z")
+    pathlib.Path(f"{stem}-stdout.log").write_text(json.dumps({"modelUsage": {"claude-opus-5": {"inputTokens": 1}}}), encoding="utf-8")
+    state = {
+        "id": 130,
+        "tmp_dir": str(tmp_dir),
+        "phases": {"implement": {"started_at": "2026-10-02T09:00:00+09:00"}},
+        "implementer_model": {"requested": None, "observed": None, "unobserved": None},
+    }
+
+    gitfacts.record_observed_model(state, "claude", "implement")
+
+    assert state["implementer_model"]["unobserved"] == "no_record"
+
+
+@pytest.mark.parametrize(
+    ("runtime", "model", "line"),
+    [
+        # AC4 — 実測値があれば指定が無くても分離せず、実測のモデル名を出す
+        ("codex", {"requested": None, "observed": "gpt-6.1-sol"}, "gpt-6.1-sol（実測）"),
+        ("kiro", {"requested": "claude-opus-5", "observed": None}, "claude-opus-5（指定。実測できず）"),
+        # AC5 — 実測値も指定も無ければ、ランタイムごとの分離の理由を出す
+        (
+            "codex",
+            {"requested": None, "observed": None},
+            "default（分離: codex はモデルを指定しておらず、実際に動いたモデルも取得できない）",
+        ),
+        ("kiro", {}, "default（分離: kiro の auto はラウンドごとに違うモデルが動きうる）"),
+    ],
+)
+def test_report_shows_the_implementer_model(refactor_lib, runtime, model, line):
+    import importlib
+
+    report = importlib.import_module(f"{refactor_lib.__name__}.commands.report")
+    assert report._implementer_model_text({"implementer": runtime, "implementer_model": model}) == line

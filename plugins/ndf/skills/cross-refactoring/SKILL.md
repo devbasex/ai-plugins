@@ -98,8 +98,11 @@ allowed-tools:
 **テストの走らせ方は宣言（`.ndf/project.json` の `test`）の戦略で決まる**（[docs/01](docs/01-state-and-propose.md) の「テストの戦略」）。
 `init` は `STRATEGY` / `STRATEGY_SOURCE` を返し、コマンドの文字列を解析しない。
 
-**モデルを比べたいなら `--model <ランタイム>=<name>` を参加者の全員に指定する。**
-実際に動いたモデルを取得できるのは claude だけで、残る者は指定値で代用する。
+**実際に動いたモデルは、`--model` を指定しなくても claude と codex なら記録される**。
+claude は出力の `modelUsage`、codex はセッションの記録（`$CODEX_HOME/sessions`）から取り、状態ファイルの
+`implementer_model.observed` に入れる。取れなければ取れなかった理由を `implementer_model.unobserved` に残す。
+agy と kiro は取れないため、モデルを比べたいなら `--model agy=<name>` / `--model kiro=<name>` を指定する
+（指定値で代用して集計に入れる）。指定も実測値も無い実行は、集計から分離される。
 
 ## 担当の決め方
 

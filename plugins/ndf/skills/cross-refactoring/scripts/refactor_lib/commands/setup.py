@@ -185,20 +185,20 @@ def _apply_post_event(state: dict[str, Any], is_own_pr: bool) -> None:
 
 
 def _warn_unmeasurable_models(model_spec: dict[str, Optional[str]], participants: Iterable[str]) -> None:
-    """実際に動いたモデルを取得できない指定を、**着手前に**知らせる。
+    """実際に動いたモデルを取得できない見込みの指定を、**着手前に**知らせる。
 
-    分離の対象は 2 つある。kiro の既定 `auto` はラウンドごとに違うモデルが動きうる。
-    実測モデル名を取れないランタイム（claude 以外）で `--model` を渡さないラウンドも、
+    分離の対象は 2 つある。kiro の既定 `auto` は選んだモデルが返らない。
+    実測モデル名を取れないランタイム（claude と codex 以外）で `--model` を渡さない実行も、
     何が動いたかを後から確かめる手段が無い。報告まで分からないと、比較のために
     回した実行が丸ごと無駄になる。止めはしない（比較が目的でない実行もある）。
     """
     for runtime in sorted(participants):
-        if models_lib.is_measurable(runtime, model_spec.get(runtime)):
+        if models_lib.foreseen_separation(runtime, model_spec.get(runtime)) is None:
             continue
         info(
             f"⚠ {runtime} のモデルが "
             f"{models_lib.label(model_spec.get(runtime))} です — "
-            "実際に動いたモデルを取得できないため、そのラウンドは集計から分離されます。"
+            "実際に動いたモデルを取得できないため、その実行は集計から分離されます。"
             f"比較するなら --model {runtime}=<モデル名> を指定してください"
         )
 
@@ -346,6 +346,7 @@ def _build_initial_state(args: argparse.Namespace, ctx: InitialContext) -> dict[
         "implementer_model": {
             "requested": (ctx.model_spec or {}).get(ctx.implementer),
             "observed": None,
+            "unobserved": None,
         },
         "judge": ctx.judge,
         "resume_changes": [],
@@ -770,10 +771,7 @@ def _recheck_implementer(state: dict[str, Any]) -> None:
         }
     )
     state["implementer"], state["implementer_reason"] = implementer, reason
-    state["implementer_model"] = {
-        "requested": (state.get("models") or {}).get(implementer),
-        "observed": None,
-    }
+    state["implementer_model"] = {"requested": (state.get("models") or {}).get(implementer), "observed": None, "unobserved": None}
     info(f"↻ 実装担当を {implementer} へ替えました（{reason}）")
 
 

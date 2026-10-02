@@ -26,6 +26,7 @@ esac
 [ -t 0 ] || cat > /dev/null
 case "$FAKE_MODE" in
   ok)      echo "レビューの結果" > "$FAKE_OUT"; echo "thinking" >&2
+           [ -n "$FAKE_SID" ] && printf 'session id: %s\n' "$FAKE_SID" >&2
            [ "$FAKE_NAME" = codex ] && printf 'tokens used\n123\n' >&2;;
   stdout)  if [ "$FAKE_NAME" = claude ]; then
              printf '{"type":"result","is_error":false,"result":"標準出力の結果","modelUsage":{"claude-x-1":{}}}'
@@ -97,6 +98,50 @@ def test_success_returns_file(tmp_path, runtime):
     assert (m["outcome"], m["source"], m["runtime"]) == ("ok", "file", runtime)
     assert pathlib.Path(m["result"]).read_text(encoding="utf-8").strip() == "レビューの結果"
     assert m["monitor_status"] == "OK"
+
+
+def test_codex_reports_the_model_that_actually_ran(tmp_path):
+    """#759 AC7 — `--model` なしの codex でも、結果の `model` にセッションの記録のモデル名が入る。"""
+    import datetime as dt
+
+    day = dt.datetime.now(dt.timezone.utc)
+    sessions = tmp_path / "codex-home" / "sessions" / day.strftime("%Y/%m/%d")
+    sessions.mkdir(parents=True)
+    row = {"type": "turn_context", "payload": {"model": "gpt-6.1-sol"}}
+    (sessions / "rollout-x-01a0-test.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
+    code, out = _run(tmp_path, "codex", "ok", CODEX_HOME=str(tmp_path / "codex-home"), FAKE_SID="01a0-test")
+    assert code == 0
+    assert out["metrics"]["model"] == "gpt-6.1-sol"
+
+
+def test_codex_without_a_session_record_says_why(tmp_path):
+    """記録が無ければ `default` のまま、取れなかった理由を標準エラーに 1 行出す。"""
+    prompt = tmp_path / "p.md"
+    prompt.write_text("これを読んで答える\n", encoding="utf-8")
+    (tmp_path / "work").mkdir()
+    env = _env(tmp_path, "codex", "ok", CODEX_HOME=str(tmp_path / "empty"))
+    p = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "run",
+            "codex",
+            "--prompt-file",
+            str(prompt),
+            "--output-file",
+            str(tmp_path / "out.md"),
+            "--workdir",
+            str(tmp_path / "work"),
+            "--poll",
+            "1",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert json.loads(p.stdout.strip().splitlines()[-1])["metrics"]["model"] == "default"
+    assert "実測値を取れなかった（no_record）" in p.stderr
 
 
 @pytest.mark.parametrize("runtime", ["kiro", "claude"])
