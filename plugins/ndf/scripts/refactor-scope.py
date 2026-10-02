@@ -18,31 +18,23 @@
 from __future__ import annotations
 
 import argparse
-import subprocess
+import json
 import sys
 from pathlib import Path, PurePosixPath
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import gh_rest  # noqa: E402
 
 TEST_DIRS = ("tests", "test")
 EXIT_UNREADABLE = 2
 
 
-def pr_files(pr: str, root: Path) -> list[str]:
-    """PR の差分のファイル（消したファイルを除く）。gh が失敗したら CalledProcessError。"""
-    out = subprocess.run(
-        [
-            "gh",
-            "api",
-            f"repos/{{owner}}/{{repo}}/pulls/{pr}/files",
-            "--paginate",
-            "--jq",
-            '.[] | select(.status != "removed") | .filename',
-        ],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-    return [ln.strip() for ln in out.splitlines() if ln.strip()]
+def diff_files(pr: str, root: Path) -> list[str]:
+    """PR の差分のファイル（消したファイルを除く）。読めなければ RuntimeError（文は gh の stderr）。"""
+    r = gh_rest.pr_files(int(pr), cwd=str(root))
+    if r.returncode != 0:
+        raise RuntimeError(r.stderr or f"gh が終了コード {r.returncode} で終えた")
+    return [f["path"] for f in json.loads(r.stdout) if f.get("status") != "removed"]
 
 
 def _in_test_dir(path: PurePosixPath) -> bool:
@@ -69,7 +61,7 @@ def _covered(item: str, others: list[str]) -> bool:
     return any(o != item and PurePosixPath(o) in p.parents for o in others)
 
 
-def build(files: list[str], tests: list[str], scope: list[str], root: Path) -> list[str]:
+def build_scope(files: list[str], tests: list[str], scope: list[str], root: Path) -> list[str]:
     """`--scope` に渡す範囲（順序を保ち、重複と他の項目のディレクトリの中の項目を除く）。"""
     declared = [t.rstrip("/") for t in tests if t.strip() not in (".", "", "./")]
     items = [*files, *(declared or near_tests(files, root)), *scope]
@@ -86,12 +78,12 @@ def main(argv: list[str] | None = None) -> int:
     a = ap.parse_args(argv)
     root = Path(a.root)
     try:
-        files = pr_files(a.pr, root)
-    except (OSError, subprocess.CalledProcessError) as e:
-        detail = getattr(e, "stderr", None) or str(e)
+        files = diff_files(a.pr, root)
+    except (OSError, ValueError, RuntimeError) as e:
+        detail = str(e)
         print(f"PR #{a.pr} の差分のファイルを取れない: {detail.strip()}", file=sys.stderr)
         return EXIT_UNREADABLE
-    print(" ".join(build(files, a.tests, a.scope, root)))
+    print(" ".join(build_scope(files, a.tests, a.scope, root)))
     return 0
 
 

@@ -25,7 +25,7 @@ def _tree(root: Path, *paths: str) -> Path:
 def test_scope_is_the_diff_files_not_their_directories(tmp_path):
     # #1417: 1 ファイルの変更でディレクトリ全体へ広げない
     root = _tree(tmp_path, "src/pkg/runtime", "tests")
-    got = rs.build(["src/pkg/runtime/a.py"], ["tests/runtime"], [], root)
+    got = rs.build_scope(["src/pkg/runtime/a.py"], ["tests/runtime"], [], root)
     assert got == ["src/pkg/runtime/a.py", "tests/runtime"]
 
 
@@ -33,7 +33,7 @@ def test_scope_adds_new_files_and_tests_near_the_changes_when_only_dot_is_declar
     # #1295: 新設したファイルは差分に入り、宣言が . だけなら近くのテストの置き場所を足し、--scope は置き換えずに足す
     root = _tree(tmp_path, "lib/devbase/tui", "lib/devbase/commands", "tests/cli", "plugins/x/scripts/tests")
     files = ["lib/devbase/commands/env_rows.py", "lib/devbase/tui/app.py", "plugins/x/scripts/lib/m.py", "tests/cli/test_env.py"]
-    got = rs.build(files, ["."], ["lib/devbase/tui", "lib/devbase/commands/env.py"], root)
+    got = rs.build_scope(files, ["."], ["lib/devbase/tui", "lib/devbase/commands/env.py"], root)
     assert got == [
         "lib/devbase/commands/env_rows.py",
         "plugins/x/scripts/lib/m.py",
@@ -50,7 +50,7 @@ def test_cli_reads_the_pr_files_from_rest_and_drops_removed_ones(tmp_path):
     fake.write_text(
         f"#!{sys.executable}\nimport json, sys\n"
         f"open({json.dumps(str(tmp_path / 'argv.json'))}, 'w').write(json.dumps(sys.argv[1:]))\n"
-        "print('src/a.py')\n"
+        "print(json.dumps([{'filename': 'src/a.py', 'status': 'added'}, {'filename': 'src/gone.py', 'status': 'removed'}]))\n"
     )
     fake.chmod(0o755)
     _tree(tmp_path, "src", "test")
@@ -59,8 +59,7 @@ def test_cli_reads_the_pr_files_from_rest_and_drops_removed_ones(tmp_path):
     assert p.returncode == 0, p.stderr
     assert p.stdout.split() == ["src/a.py", "test"]
     argv = json.loads((tmp_path / "argv.json").read_text())
-    assert argv[:2] == ["api", "repos/{owner}/{repo}/pulls/7/files"] and "--paginate" in argv
-    assert 'select(.status != "removed")' in argv[-1]
+    assert argv[0] == "api" and "--paginate" in argv and argv[-1].startswith("repos/{owner}/{repo}/pulls/7/files")
 
 
 def test_cli_prints_nothing_when_the_pr_files_cannot_be_read(tmp_path):
