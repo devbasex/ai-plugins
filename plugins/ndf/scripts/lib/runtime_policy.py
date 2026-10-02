@@ -10,7 +10,7 @@
 - `review_seats`（任意）: cross-review の固定の組。`SEAT_PATTERN` に合う 2 つの異なる席の名前で、
   どちらのランタイムも `allowed` にある
 
-宣言は利用者だけが書き、NDF は読むだけにする。宣言が無ければ `load` は `None` を返し、どこも制限しない。
+宣言は利用者だけが書き、NDF は読むだけにする。宣言が無ければ `read_policy` は `None` を返し、どこも制限しない。
 **壊れた宣言（読めない・空・知らない名前・知らないキー）は `None` へ落とさず止める。** 綴りの誤りを
 「宣言が無い」と読むと、制限が黙って外れるためである（設計の決定 2）。
 
@@ -25,14 +25,15 @@ import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 import repo
+import statefile
 from assignment import ALL_RUNTIMES, SEAT_PATTERN, AssignmentError
 
 DECL = Path(".ndf") / "runtimes.json"
 KEYS = ("allowed", "review_seats")
-# `check` の終了コード。external-ai の `EXIT_PRECONDITION` と supervise の「止まった」に揃える。
+# `check_runtime`（副命令 `check`）の終了コード。external-ai の `EXIT_PRECONDITION` と supervise の「止まった」に揃える。
 EXIT_POLICY = 3
 
 
@@ -62,6 +63,21 @@ class RuntimePolicy:
         if outside:
             raise RuntimePolicyError(self.reason(outside, source))
 
+    def keep_allowed(self, state: dict[str, Any], field_name: str, names: list[str], info: Callable[[str], Any]) -> list[str]:
+        """再開で記録から引き継いだ名前（席の名前も可）のうち、宣言の外のものを落とす（設計の決定 5）。
+
+        落としたら `info` へ知らせの 1 行を出し、`state["resume_changes"]` へ `policy:<field_name>` の変更を積む。
+        cross-review と cross-refactoring が共通に使う。
+        """
+        kept = [n for n in names if self.allows(_runtime_of(n))]
+        dropped = [n for n in names if n not in kept]
+        if dropped:
+            info(f"ℹ {', '.join(dropped)} は宣言の外のため、記録から引き継がずに外しました（{self.path}）")
+            state.setdefault("resume_changes", []).append(
+                {"at": statefile.now(), "field": f"policy:{field_name}", "from": names, "to": kept}
+            )
+        return kept
+
     def to_state(self) -> dict[str, Any]:
         """状態ファイルへ残す写し。"""
         return {
@@ -76,7 +92,7 @@ def _runtime_of(name: str) -> str:
     return m.group(1) if m else name
 
 
-def parse(data: Any, path: str) -> RuntimePolicy:
+def parse_policy(data: Any, path: str) -> RuntimePolicy:
     """宣言の中身を確かめて `RuntimePolicy` にする。破れていれば壊れた箇所を書いた `RuntimePolicyError`。"""
 
     def broken(what: str) -> RuntimePolicyError:
@@ -128,7 +144,7 @@ def find(root) -> Optional[Path]:
     return None
 
 
-def load(root) -> Optional[RuntimePolicy]:
+def read_policy(root) -> Optional[RuntimePolicy]:
     """`root` のリポジトリの宣言。無ければ `None`、壊れていれば `RuntimePolicyError`。"""
     f = find(root)
     if f is None:
@@ -137,12 +153,12 @@ def load(root) -> Optional[RuntimePolicy]:
         data = json.loads(f.read_text(encoding="utf-8"))
     except (OSError, ValueError) as e:
         raise RuntimePolicyError(f"ランタイムの宣言が壊れています（{f}）: JSON として読めない（{e}）") from e
-    return parse(data, str(f))
+    return parse_policy(data, str(f))
 
 
-def check(runtime: str, root, source: str = "このランタイムの指定") -> None:
+def check_runtime(runtime: str, root, source: str = "このランタイムの指定") -> None:
     """`runtime`（席の名前も可）を起動してよいか。外か壊れていれば `RuntimePolicyError`。宣言が無ければ何もしない。"""
-    policy = load(root)
+    policy = read_policy(root)
     if policy is not None:
         policy.require([runtime], source)
 
@@ -155,7 +171,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     c.add_argument("--root", default=".")
     args = ap.parse_args(argv)
     try:
-        check(args.runtime, args.root)
+        check_runtime(args.runtime, args.root)
     except RuntimePolicyError as e:
         print(str(e), file=sys.stderr)
         return EXIT_POLICY

@@ -70,10 +70,10 @@ def _apply_resume_args_block(st: dict[str, Any], args: argparse.Namespace) -> bo
             review_lib.die(str(e), code=1)
             raise
         include_eff = include if include is not None else list(recorded.get("included") or [])
-        if include is None:
-            include_eff = _drop_outside(st, policy, "included", include_eff)
+        if include is None and policy is not None:
+            include_eff = policy.keep_allowed(st, "included", include_eff, review_lib.info)
         if policy is not None and st.get("only") and getattr(args, "only", None) in (None, NONE_WORD):
-            if not _drop_outside(st, policy, "only", [st["only"]]):
+            if not policy.keep_allowed(st, "only", [st["only"]], review_lib.info):
                 st["only"] = None
         rebuild = argparse.Namespace(
             only=st.get("only"),
@@ -150,7 +150,7 @@ def _round_reviewers(st: dict[str, Any], round_no: int) -> list[str]:
 def _load_policy() -> runtime_policy.RuntimePolicy | None:
     """カレントディレクトリのリポジトリのランタイムの宣言。壊れていれば終了コード 1（前提 7）。"""
     try:
-        return runtime_policy.load(os.getcwd())
+        return runtime_policy.read_policy(os.getcwd())
     except runtime_policy.RuntimePolicyError as e:
         review_lib.die(str(e), code=1)
         raise
@@ -158,18 +158,6 @@ def _load_policy() -> runtime_policy.RuntimePolicy | None:
 
 def _policy_state(policy: runtime_policy.RuntimePolicy | None) -> dict[str, Any] | None:
     return policy.to_state() if policy is not None else None
-
-
-def _drop_outside(st: dict[str, Any], policy: runtime_policy.RuntimePolicy | None, field_name: str, names: list[str]) -> list[str]:
-    """再開で記録から引き継いだ名前のうち、宣言の外のものを落として知らせを積む（設計の決定 5）。"""
-    if policy is None:
-        return names
-    kept = [n for n in names if policy.allows(assignment.seat_runtime(n))]
-    dropped = [n for n in names if n not in kept]
-    if dropped:
-        review_lib.info(f"ℹ {', '.join(dropped)} は宣言の外のため、記録から引き継がずに外しました（{policy.path}）")
-        st.setdefault("resume_changes", []).append({"at": statefile.now(), "field": f"policy:{field_name}", "from": names, "to": kept})
-    return kept
 
 
 def _outside_policy(st: dict[str, Any], seats: list[str]) -> list[str]:

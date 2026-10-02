@@ -45,12 +45,12 @@ class _Probe:
 
 
 def test_load_returns_none_without_declaration(tmp_path):
-    assert runtime_policy.load(tmp_path) is None
+    assert runtime_policy.read_policy(tmp_path) is None
 
 
 def test_load_reads_allowed_and_review_seats(tmp_path):
     f = _declare(tmp_path, {"allowed": ["claude", "codex"], "review_seats": ["claude", "claude-2"]})
-    p = runtime_policy.load(tmp_path)
+    p = runtime_policy.read_policy(tmp_path)
     assert p.allowed == ("claude", "codex")
     assert p.review_seats == ("claude", "claude-2")
     assert p.to_state() == {"path": str(f.resolve()), "allowed": ["claude", "codex"], "review_seats": ["claude", "claude-2"]}
@@ -73,13 +73,13 @@ def test_load_reads_allowed_and_review_seats(tmp_path):
 def test_broken_declaration_raises_with_the_broken_part(tmp_path, body, what):
     f = _declare(tmp_path, body)
     with pytest.raises(runtime_policy.RuntimePolicyError) as e:
-        runtime_policy.load(tmp_path)
+        runtime_policy.read_policy(tmp_path)
     assert what in str(e.value) and str(f.resolve()) in str(e.value)
 
 
 def test_require_message_has_path_and_allowed(tmp_path):
     f = _declare(tmp_path, {"allowed": ["claude"]})
-    p = runtime_policy.load(tmp_path)
+    p = runtime_policy.read_policy(tmp_path)
     p.require(["claude", "claude-2", None], "x")
     with pytest.raises(runtime_policy.RuntimePolicyError) as e:
         p.require(["codex"], "--include")
@@ -99,7 +99,7 @@ def test_without_policy_participants_are_unchanged():
 
 def test_claude_only_probes_claude_only_and_seats_are_claude_and_claude2(tmp_path):
     _declare(tmp_path, {"allowed": ["claude"]})
-    policy = runtime_policy.load(tmp_path)
+    policy = runtime_policy.read_policy(tmp_path)
     probe = _Probe()
     r = assignment.resolve_participants(assignment.default_pool("claude"), host="claude", probe=probe, policy=policy)
     assert probe.called == ["claude"]
@@ -111,7 +111,7 @@ def test_claude_only_probes_claude_only_and_seats_are_claude_and_claude2(tmp_pat
 @pytest.mark.parametrize("kwargs", [{"include": ["codex"]}, {"only": "codex"}])
 def test_outside_include_or_only_stops_before_probe(tmp_path, kwargs):
     _declare(tmp_path, {"allowed": ["claude"]})
-    policy = runtime_policy.load(tmp_path)
+    policy = runtime_policy.read_policy(tmp_path)
     probe = _Probe()
     with pytest.raises(runtime_policy.RuntimePolicyError, match="codex は宣言の外"):
         assignment.resolve_participants(assignment.default_pool("claude"), host="claude", probe=probe, policy=policy, **kwargs)
@@ -121,14 +121,14 @@ def test_outside_include_or_only_stops_before_probe(tmp_path, kwargs):
 def test_host_outside_policy_is_not_in_pool(tmp_path):
     _declare(tmp_path, {"allowed": ["claude", "codex"]})
     r = assignment.resolve_participants(
-        assignment.default_pool("kiro"), host="kiro", probe=_Probe(), policy=runtime_policy.load(tmp_path)
+        assignment.default_pool("kiro"), host="kiro", probe=_Probe(), policy=runtime_policy.read_policy(tmp_path)
     )
     assert "kiro" not in r.pool and r.available == ["claude", "codex"]
 
 
 def test_pinned_seats_are_used_every_round(tmp_path):
     _declare(tmp_path, {"allowed": ["claude", "codex", "kiro"], "review_seats": ["claude", "claude-2"]})
-    policy = runtime_policy.load(tmp_path)
+    policy = runtime_policy.read_policy(tmp_path)
     r = assignment.resolve_participants(assignment.default_pool("claude"), host="claude", probe=_Probe(), policy=policy)
     for round_no in (1, 2, 3):
         assert assignment.review_seats(round_no, r.available, [], pinned=policy.review_seats) == ["claude", "claude-2"]
@@ -140,7 +140,7 @@ def test_pinned_seats_fall_back_when_runtime_unavailable():
 
 def test_failed_auth_fills_with_same_runtime_not_outside(tmp_path):
     _declare(tmp_path, {"allowed": ["claude", "codex"]})
-    policy = runtime_policy.load(tmp_path)
+    policy = runtime_policy.read_policy(tmp_path)
     probe = _Probe(fail={"codex"})
     r = assignment.resolve_participants(assignment.default_pool("claude"), host="claude", probe=probe, policy=policy)
     assert set(probe.called) <= {"claude", "codex"}
@@ -151,7 +151,7 @@ def test_no_participant_inside_policy_stops(tmp_path):
     _declare(tmp_path, {"allowed": ["agy"]})
     with pytest.raises(assignment.AssignmentError, match="宣言の中に参加者がいません"):
         assignment.resolve_participants(
-            assignment.default_pool("claude"), host="claude", probe=_Probe(), policy=runtime_policy.load(tmp_path)
+            assignment.default_pool("claude"), host="claude", probe=_Probe(), policy=runtime_policy.read_policy(tmp_path)
         )
 
 

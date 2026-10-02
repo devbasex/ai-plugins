@@ -65,7 +65,7 @@
 | # | イベント | 発生元 | 受け手 |
 | --- | --- | --- | --- |
 | E1 | 利用者がランタイムの宣言を書いた | 利用者 | E2 の読み手すべて |
-| E2 | ランタイムの宣言を読んだ | `runtime_policy.load` | cross-review / cross-refactoring の `init`・再開、external-ai、supervise、起動の共通部品 |
+| E2 | ランタイムの宣言を読んだ | `runtime_policy.read_policy` | cross-review / cross-refactoring の `init`・再開、external-ai、supervise、起動の共通部品 |
 | E3 | 参加者を決めた | `assignment.resolve_participants` | 状態ファイルの `participants` |
 | E4 | 認証を確かめた | `auth.probe_auth`（E3 の中） | 参加者 |
 | E5 | ラウンドのスロットを決めた | `participants._round_reviewers` | `start_round` |
@@ -193,7 +193,7 @@ classDiagram
 
 | 型・関数 | 形 |
 | --- | --- |
-| `runtime_policy.load(root) -> RuntimePolicy \| None` | `repo.main_dir(root)` の `.ndf/runtimes.json` を先に、無ければ `root` のものを読む（`project_decl` と同じ順）。どちらにも無ければ `None`。読めない・I1・I2 が破れていれば `RuntimePolicyError` |
+| `runtime_policy.read_policy(root) -> RuntimePolicy \| None` | `repo.main_dir(root)` の `.ndf/runtimes.json` を先に、無ければ `root` のものを読む（`project_decl` と同じ順）。どちらにも無ければ `None`。読めない・I1・I2 が破れていれば `RuntimePolicyError` |
 | `RuntimePolicy.require(names, source)` | `names` のうち `allowed` に無いものがあれば `RuntimePolicyError`。文は「`<名前> は宣言の外（<パス> の allowed: <一覧>）。<source> を外すか宣言を直す`」 |
 | `RuntimePolicy.to_state()` | `{"path", "allowed", "review_seats"}`（`review_seats` は無ければ `null`） |
 | `RuntimePolicyError` | `AssignmentError` を継ぐ。呼び出し元の既存の `except AssignmentError` の経路（`die(code=1)`）で止まる |

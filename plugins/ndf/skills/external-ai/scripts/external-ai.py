@@ -85,7 +85,7 @@ def policy_reason(runtime: str, workdir: pathlib.Path) -> str | None:
     if not top:
         return None
     try:
-        runtime_policy.check(runtime, top, "external-ai のランタイムの指定")
+        runtime_policy.check_runtime(runtime, top, "external-ai のランタイムの指定")
     except runtime_policy.RuntimePolicyError as e:
         return str(e)
     return None

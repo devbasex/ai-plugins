@@ -166,7 +166,7 @@ class Engine:
         roots = decl.decl_roots(str(self.plan.get("作業場所") or self.cwd or "."), self.plan.get("リポジトリ"))
         root = next((r for r in roots if r.is_dir()), None)
         try:
-            policy = runtime_policy.load(root)
+            policy = runtime_policy.read_policy(root)
         except runtime_policy.RuntimePolicyError as e:
             return "止まった", str(e)
         if policy is None:

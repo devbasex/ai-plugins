@@ -42,7 +42,7 @@ def test_outside_names_stop_before_participants(cmd_setup, tmp_path, monkeypatch
     f = _declare(tmp_path, {"allowed": ["claude"]})
     monkeypatch.chdir(tmp_path)
     with pytest.raises(SystemExit) as e:
-        cmd_setup._require_in_policy(names, source)
+        cmd_setup.runtime_decl.require_in_policy(names, source)
     assert e.value.code != 0
     err = capsys.readouterr().err
     assert "宣言の外" in err and str(f.resolve()) in err and "allowed: claude" in err
@@ -67,9 +67,9 @@ def test_resume_rebuilds_when_the_declaration_changed(cmd_setup, tmp_path, monke
         "participants": {"included": ["agy"], "excluded": [], "ignored_exclude": [], "require_all": False, "policy": None},
         "implementer_named": "agy",
     }
-    assert cmd_setup._policy_changed(state) is False
+    assert cmd_setup.runtime_decl.policy_changed(state) is False
     _declare(tmp_path, {"allowed": ["claude", "codex"]})
-    assert cmd_setup._policy_changed(state) is True
+    assert cmd_setup.runtime_decl.policy_changed(state) is True
     cmd_setup._rebuild_participants(state, None, None, None)
     assert state["runtimes"] == ["claude", "codex"]
     assert state["implementer_named"] is None
