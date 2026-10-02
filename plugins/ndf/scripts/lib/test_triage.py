@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import pathlib
 import shutil
@@ -204,6 +205,17 @@ def rerun_commands(strategy: ts.Strategy, files: list[str]) -> list[str]:
     return [ts.fill(str(suite.scope_command), paths) for suite, paths in rerun_groups(strategy, files)]
 
 
+@dataclasses.dataclass(frozen=True)
+class RerunContext:
+    """走らせ直しの共有の文脈。上限 `timeout` は `started`（`time.monotonic()`）からの全体で 1 つ（`run_within`）。"""
+
+    strategy: ts.Strategy
+    timeout: int
+    log_dir: pathlib.Path
+    run: Runner
+    started: float
+
+
 def failing_in(
     work: str,
     strategy: ts.Strategy,
@@ -220,14 +232,19 @@ def failing_in(
     上限 `timeout` は `started`（`time.monotonic()`。省けば今）からの suite 群全体で 1 つ（`run_within`）。
     """
     started = time.monotonic() if started is None else started
+    return _failing_in(RerunContext(strategy, timeout, log_dir, run, started), work, ids, label)
+
+
+def _failing_in(ctx: RerunContext, work: str, ids: list[str], label: str) -> tuple[list[str], bool, bool]:
+    strategy = ctx.strategy
     still: list[str] = []
     readable = True
     cut = False
     tracked = tracked_files(work)
     for suite, paths in rerun_groups(strategy, list(by_file(ids))):
         clear_junit(work, strategy)
-        command, log = ts.fill(str(suite.scope_command), paths), log_dir / f"{label}-{suite.name}.log"
-        code, timed_out = run_within(timeout, started, lambda left, command=command, log=log: run(command, work, left, log))
+        command, log = ts.fill(str(suite.scope_command), paths), ctx.log_dir / f"{label}-{suite.name}.log"
+        code, timed_out = run_within(ctx.timeout, ctx.started, lambda left, command=command, log=log: ctx.run(command, work, left, log))
         if not timed_out and code == 0:
             continue
         found, _ = read_junit(work, ts.Strategy(strategy.name, strategy.source, [suite]), tracked)
@@ -258,6 +275,10 @@ def failing_at(
     宣言にコンテナで走る suite があれば、一時の worktree はコンテナへ届かないため用意の前に `None` を返す。
     """
     started = time.monotonic() if started is None else started
+    return _failing_at(RerunContext(strategy, timeout, log_dir, run, started), work, sha, ids)
+
+
+def _failing_at(ctx: RerunContext, work: str, sha: str, ids: list[str]) -> Optional[list[str]]:
     holder = pathlib.Path(tempfile.mkdtemp(prefix="ndf-baseline-"))
     tree = holder / "tree"
     try:
@@ -267,11 +288,11 @@ def failing_at(
             return None  # 一時の worktree はコンテナへ届かない。見分けられない（用意も無駄になる）
         # 依存物の無い worktree では着手前の HEAD でも落ち、変更起因が既存失敗へ入る（#1337）。
         # 用意できなければ見分けられない
-        left = timeout - (time.monotonic() - started)
+        left = ctx.timeout - (time.monotonic() - ctx.started)
         if left < 1 or not worktree_deps.prepare(tree, timeout=left).ok:
             return None
         try:
-            still, readable, cut = failing_in(str(tree), strategy, ids, timeout, log_dir, "baseline", run, started)
+            still, readable, cut = _failing_in(ctx, str(tree), ids, "baseline")
         except container_reach.Unreachable:
             return None  # 一時の worktree はコンテナへ届かない。見分けられない
         if cut:
@@ -311,13 +332,14 @@ def classify(
             "baseline_head": base_sha,
         }
     known = set(existing_failures or [])
-    started = time.monotonic()  # 上限 `timeout` は走らせ直しと着手前の HEAD の再実行の全体で 1 つ
-    still, _, _ = failing_in(work, strategy, failed, timeout, log_dir, "rerun", run, started)
+    # 上限 `timeout` は走らせ直しと着手前の HEAD の再実行の全体で 1 つ
+    ctx = RerunContext(strategy, timeout, log_dir, run, time.monotonic())
+    still, _, _ = _failing_in(ctx, work, failed, "rerun")
     flaky = [i for i in failed if i not in still]
     at_base = [i for i in still if i in known]
     unknown = [i for i in still if i not in known]
     if unknown and base_sha:
-        base_failing = failing_at(work, base_sha, strategy, unknown, timeout, log_dir, run, started)
+        base_failing = _failing_at(ctx, work, base_sha, unknown)
         if base_failing is None:
             # 着手前の HEAD の再実行が上限で打ち切られた。既存失敗か変更起因かを決めず、判定不能として返す
             return {
