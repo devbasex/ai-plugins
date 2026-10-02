@@ -317,7 +317,7 @@ sequenceDiagram
                 WC->>ST: キーの値を追記（ここでは stages へ 配布）
             end
         end
-        opt stage の 配布 を積めた
+        opt stage が 配布 のとき（積めたかによらない。積めなかったら 記録なし に出る。I3）
             WC->>WC: wf_report
             WC-->>C: 記録なし: …（欠落があるときだけ）
         end
