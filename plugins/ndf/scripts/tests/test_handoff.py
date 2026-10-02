@@ -211,7 +211,9 @@ def test_untracked_body_does_not_fail_local_doc_checks(main):
     """受け入れ条件 4: 手元の検査は `.ndf/handoff/` の追跡外の文書を理由に落ちない。"""
     (main / "README.md").write_text("# 題\n")
     (main / "CHANGELOG.md").write_text("- 行\n" * 501)  # check-doc-line-limit.py の除外が指す先
-    git(main, "add", "README.md", "CHANGELOG.md")
+    (main / "docs").mkdir()
+    (main / "docs" / "glossary.md").write_text("- 行\n" * 501)  # 同上
+    git(main, "add", "README.md", "CHANGELOG.md", "docs/glossary.md")
     git(main, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "readme")
     run(main, "init", "issue-1", "--title", "題")
     body_of(main, "issue-1").write_text("[切れ](nowhere.md)\n" + "- 行\n" * 501)
