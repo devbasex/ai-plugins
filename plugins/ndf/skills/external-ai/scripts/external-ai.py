@@ -10,13 +10,17 @@
 
     {"tool": "external-ai", "status": "ok|stopped", "summary": "...",
      "items": [{"kind": "cli", "name": "codex", "result": "ok|no_result|timeout|stalled|
-                early_error|usage_limit|auth|missing_cli|launch_failed", ...}],
+                early_error|usage_limit|auth|missing_cli|launch_failed|policy", ...}],
      "metrics": {"outcome": "...", "result": "out.md", "source": "file|stdout|stderr",
                  "runtime": "codex", "model": "...", "monitor_status": "OK", "reason": "ok", ...}}
 
 `outcome` が `ok` のときだけ `status` は `ok`（終了コード 0）。回収した本文は必ず
 `--output-file` に置く。監視の結果（`<stem>-monitor.json`）の状態と理由を `metrics` に写す。
 待ちの上限は `limits.py` の工程の値で、上限を超えると必ず終わる。
+
+`check` と `run` は、`which` と認証確認より前に、作業ディレクトリ（`check` はカレント）のリポジトリの
+ランタイムの宣言（`.ndf/runtimes.json`。#1598）と照らす。外か宣言が壊れていれば起動せずに
+`outcome: policy`・終了コード 3 で終え、`metrics.reason` に理由を書く。
 """
 
 from __future__ import annotations
@@ -40,6 +44,7 @@ import limits  # noqa: E402
 import models  # noqa: E402
 import proc  # noqa: E402
 import monitor_outcome  # noqa: E402
+import runtime_policy  # noqa: E402
 import step_result as sr  # noqa: E402
 
 TOOL = "external-ai"
@@ -74,8 +79,23 @@ def finish(runtime: str, outcome: str, summary: str, metrics: dict, code: int | 
     sr.emit(sr.result(TOOL, status, summary, [item], metrics, next=next_), code if code is not None else sr.default_code(status))
 
 
-def precheck(runtime: str, skip_auth: bool) -> tuple[str, str] | None:
-    """前提を確かめる。通らなければ `(結末, 理由)` を返す。"""
+def policy_reason(runtime: str, workdir: pathlib.Path) -> str | None:
+    """`workdir` のリポジトリのランタイムの宣言で `runtime` を起動できなければ理由。git の外なら宣言は無いものとする。"""
+    top = proc.git_out(workdir, "rev-parse", "--show-toplevel")
+    if not top:
+        return None
+    try:
+        runtime_policy.check(runtime, top, "external-ai のランタイムの指定")
+    except runtime_policy.RuntimePolicyError as e:
+        return str(e)
+    return None
+
+
+def precheck(runtime: str, skip_auth: bool, workdir: pathlib.Path | None = None) -> tuple[str, str] | None:
+    """前提を確かめる。通らなければ `(結末, 理由)` を返す。宣言の確かめは `which` と認証確認より前に行う。"""
+    reason = policy_reason(runtime, workdir or pathlib.Path.cwd())
+    if reason:
+        return "policy", reason
     if shutil.which(EXECUTABLE[runtime]) is None:
         return "missing_cli", f"{EXECUTABLE[runtime]} が PATH に無い"
     if skip_auth:
@@ -92,7 +112,8 @@ def precheck(runtime: str, skip_auth: bool) -> tuple[str, str] | None:
 def cmd_check(a) -> None:
     pre = precheck(a.runtime, False)
     if pre:
-        finish(a.runtime, pre[0], f"{a.runtime} は使えない（{pre[1]}）", {}, sr.EXIT_PRECONDITION)
+        metrics = {"reason": pre[1]} if pre[0] == "policy" else {}
+        finish(a.runtime, pre[0], f"{a.runtime} は使えない（{pre[1]}）", metrics, sr.EXIT_PRECONDITION)
     finish(a.runtime, "ok", f"{a.runtime} は使える", {})
 
 
@@ -159,9 +180,10 @@ def cmd_run(a) -> None:
     if not workdir.is_dir():
         finish(runtime, "launch_failed", f"作業ディレクトリが無い: {workdir}", {}, sr.EXIT_PRECONDITION)
     skip_auth = a.no_auth_check or bool(os.environ.get(auth.SKIP_ENV))
-    pre = precheck(runtime, skip_auth)
+    pre = precheck(runtime, skip_auth, workdir)
     if pre:
-        finish(runtime, pre[0], f"{runtime} を起動しない（{pre[1]}）", {}, sr.EXIT_PRECONDITION)
+        metrics = {"reason": pre[1]} if pre[0] == "policy" else {}
+        finish(runtime, pre[0], f"{runtime} を起動しない（{pre[1]}）", metrics, sr.EXIT_PRECONDITION)
 
     output = pathlib.Path(a.output_file).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)

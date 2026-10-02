@@ -18,8 +18,9 @@ from pathlib import Path
 
 import gh_call
 import gh_quota
+import runtime_policy
 import slow_step as ss
-from supervise_lib import paths
+from supervise_lib import decl, paths
 from supervise_lib.claude import AuthUnavailable, ClaudeRunner, UsageLimit
 from supervise_lib.plan import expand_parts, normalize_plan
 from supervise_lib.pr import PrStep
@@ -153,6 +154,33 @@ class Engine:
             self.slow.cfg = self.slow.resolve_slow()
         except ss.SlowConfigError as e:
             return "止まった", f"slow の設定が読めない（{e.args[0]}）"
+        return self.check_runtimes()
+
+    def check_runtimes(self) -> tuple[str, str] | None:
+        """work / drive ステップの worker の起動先を、ランタイムの宣言（#1598）とすべて照らす。
+
+        どのステップも流す前に照らし、外か宣言が壊れていれば (止まった, 理由) を返す（AC9・AC10）。
+        `runtime` が無いか `claude-p` のステップは claude（`claude -p`）を起動する。宣言の場所は
+        `decl.decl_roots` の候補のうち先頭で実在するもの。
+        """
+        roots = decl.decl_roots(str(self.plan.get("作業場所") or self.cwd or "."), self.plan.get("リポジトリ"))
+        root = next((r for r in roots if r.is_dir()), None)
+        try:
+            policy = runtime_policy.load(root)
+        except runtime_policy.RuntimePolicyError as e:
+            return "止まった", str(e)
+        if policy is None:
+            return None
+        for sid in self.order:
+            step = self.steps[sid]
+            if step.get("type") not in ("work", "drive"):
+                continue
+            rt = step.get("runtime")
+            target = "claude" if not rt or rt == "claude-p" else str(rt)
+            try:
+                policy.require([target], f"ステップ {sid} の runtime")
+            except runtime_policy.RuntimePolicyError as e:
+                return "止まった", f"ステップ {sid} の worker を起動しない: {e}"
         return None
 
     def prepare(self, start: str | None) -> tuple[str, str] | None:

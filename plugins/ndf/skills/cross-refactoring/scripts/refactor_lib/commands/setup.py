@@ -23,6 +23,7 @@ import proc
 import project_mvv
 import project_decl
 import repo as repo_lib
+import runtime_policy
 import statefile
 import test_strategy as ts
 import tool_paths
@@ -126,6 +127,27 @@ def _names_arg(args: argparse.Namespace, option: str) -> Optional[list[str]]:
     return names
 
 
+def load_policy() -> Optional[runtime_policy.RuntimePolicy]:
+    """カレントディレクトリのリポジトリのランタイムの宣言（#1598）。壊れていれば中断する（前提 7）。"""
+    try:
+        return runtime_policy.load(pathlib.Path.cwd())
+    except runtime_policy.RuntimePolicyError as e:
+        die(str(e))
+        raise
+
+
+def _require_in_policy(names: Iterable[Optional[str]], source: str) -> None:
+    """新しく渡した名前が宣言の外なら、参加者を決める前に中断する（AC3・AC16）。"""
+    policy = load_policy()
+    if policy is None:
+        return
+    try:
+        policy.require(names, source)
+    except runtime_policy.RuntimePolicyError as e:
+        die(str(e))
+        raise
+
+
 def resolve_participants(
     host: str,
     include: list[str],
@@ -139,7 +161,10 @@ def resolve_participants(
     欠け・使える者が 0 者は、この工程の中断（終了コード 4）へ写す。母集合に無い者の
     除外は中断せず、`ℹ` の 1 行を出して続ける（#786 の決定 2）。状態ファイルは
     この関数の後に書かれるため、失敗したときは作られも書き換えられもしない。
+
+    ランタイムの宣言（#1598）があれば、母集合をその `allowed` で絞り、宣言の外の `include` を止める。
     """
+    policy = load_policy()
     try:
         pool = assignment.default_pool(host)
         resolved = assignment.resolve_participants(
@@ -149,7 +174,9 @@ def resolve_participants(
             exclude=exclude,
             probe=lambda names: auth.probe_auth(names, info=info),
             require_all=require_all,
+            policy=policy,
         )
+        pool = resolved.pool
     except assignment.AssignmentError as e:
         die(str(e))
         raise
@@ -402,6 +429,8 @@ def cmd_init(args: argparse.Namespace) -> None:
     inputs = _resolve_init_inputs(args)
     if inputs is None:
         return
+    # **宣言の外の名前は作業ディレクトリを用意する前に止める**（#1598 の AC3）。
+    _require_in_policy([*(inputs.include or []), getattr(args, "implementer", None)], "--include / --implementer")
     prep = _prepare_init(args)
     if _resume_if_pending(args, inputs, prep):
         return
@@ -670,7 +699,10 @@ def _rebuild_participants(
 ) -> None:
     """再開時の指定を補完し、参加者と作業ツリーの記録を作り直す。"""
     recorded = state.get("participants") or {}
-    include_eff = include if include is not None else list(recorded.get("included") or [])
+    include_eff = include if include is not None else _drop_outside(state, "included", list(recorded.get("included") or []))
+    named = state.get("implementer_named")
+    if named and not _drop_outside(state, "implementer_named", [named]):
+        state["implementer_named"] = None
     # `--exclude` を渡さない再開では、外した者と無視した除外の両方を足し戻す（#786 の AC4d。
     # 規則は cross-review と共通の `assignment.recorded_exclusions`）
     exclude_eff = exclude if exclude is not None else assignment.recorded_exclusions(recorded, include_eff)
@@ -693,6 +725,26 @@ def _rebuild_participants(
     worktrees = state.setdefault("worktrees", {})
     for runtime in state["runtimes"]:
         worktrees.setdefault(runtime, str(pathlib.Path(state["worktree_root"]) / runtime))
+
+
+def _drop_outside(state: dict[str, Any], field_name: str, names: list[str]) -> list[str]:
+    """再開で記録から引き継いだ名前のうち、宣言の外のものを落として知らせを積む（#1598 の設計の決定 5）。"""
+    policy = load_policy()
+    if policy is None:
+        return names
+    kept = [n for n in names if policy.allows(n)]
+    dropped = [n for n in names if n not in kept]
+    if dropped:
+        info(f"ℹ {', '.join(dropped)} は宣言の外のため、記録から引き継がずに外しました（{policy.path}）")
+        state.setdefault("resume_changes", []).append({"at": statefile.now(), "field": f"policy:{field_name}", "from": names, "to": kept})
+    return kept
+
+
+def _policy_changed(state: dict[str, Any]) -> bool:
+    """記録の宣言の写しと今の宣言が違うか（再開した時点の宣言に従う。前提 8）。"""
+    policy = load_policy()
+    now = policy.to_state() if policy is not None else None
+    return now != (state.get("participants") or {}).get("policy")
 
 
 def _resume(
@@ -721,7 +773,7 @@ def _resume(
         info(line)
 
     require_all = getattr(args, "require_all", None)
-    if include is not None or exclude is not None or require_all is not None:
+    if include is not None or exclude is not None or require_all is not None or _policy_changed(state):
         _rebuild_participants(state, include, exclude, require_all)
         _recheck_implementer(state)
 

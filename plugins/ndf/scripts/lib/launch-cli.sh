@@ -56,6 +56,11 @@ PRINT_TIMEOUT=${7:-implement}
 [ -s "$PROMPT" ] || { echo "プロンプトが空です: $PROMPT" >&2; exit 1; }
 mkdir -p "$(dirname "$STEM")"
 
+# **宣言の外のランタイムは起動しない（#1598 の I5）。** どの経路から呼ばれても、作業ディレクトリの
+# リポジトリの `.ndf/runtimes.json` と照らし、外か宣言が壊れていれば起動せずに終了コード 3 で終える。
+python3 "$(dirname -- "${BASH_SOURCE[0]}")/runtime_policy.py" check "$RUNTIME" --root "$WORKDIR" || {
+  echo "宣言により起動しません: $RUNTIME" >&2; exit 3; }
+
 # 工程名を CLI の上限の秒数へ解決する。**表に無い名前は起動せずに終える。**
 # 上限の表は `limits.py` だけが持つ（値を使うのは agy だけだが、名前のチェックは全ランタイムで行う）。
 # **`cd` で登らない。** 表の位置は文字列のまま渡す（Kiro CLI の symlink を字句で畳まない）。
