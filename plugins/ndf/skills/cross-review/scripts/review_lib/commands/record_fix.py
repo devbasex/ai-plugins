@@ -80,7 +80,7 @@ def cmd_record_fix(args: argparse.Namespace, ingest: Callable[..., None]) -> Non
     _check_threads(repo, current_pr, threads)
 
     path = store._resolve_tmp_dir(pr) / f"fix-pr{pr}-result.json"
-    jsonio.write_atomic(path, build_fix_record(current_pr, commit, threads))
+    jsonio.write_atomic(path, build_fix_record(int(pr), commit, threads))
     review_lib.info(f"✍ 修正の記録の戻り値ファイルを書いた: {path}")
     fix = fix_result._read_fix_result(pr, path, None)
     ingest(pr, st, fix, pushed_by_host=True)

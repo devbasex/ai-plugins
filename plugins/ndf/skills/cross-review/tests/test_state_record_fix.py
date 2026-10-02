@@ -182,6 +182,20 @@ def test_merge_fix_after_record_fix_returns_the_recorded_code(tmp_dir, state_mod
     assert len(gh["post"]) == 1
 
 
+def test_merge_fix_after_record_fix_on_a_rotated_pr_reads_the_record(tmp_dir, state_mod, gh, capsys):
+    """巻き直した後（current_pr が状態の鍵と違う）も、駆動の merge-fix（--file 無し）が記録を読める。"""
+    _seed(tmp_dir)
+    st = _state(tmp_dir)
+    st["current_pr"] = PR + 1
+    (tmp_dir / f"cross-review-pr{PR}-state.json").write_text(json.dumps(st))
+    _record(state_mod, "--resolved-thread", "PRRT_a")
+    assert json.loads((tmp_dir / f"fix-pr{PR}-result.json").read_text())["pr"] == PR
+    with pytest.raises(SystemExit) as e:
+        review_lib.commands.merge_fix.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
+    assert e.value.code == 0
+    assert "取り込み済み" in capsys.readouterr().err
+
+
 def _fix_file(tmp_dir: pathlib.Path, **over) -> None:
     body = {
         "pr": PR,
