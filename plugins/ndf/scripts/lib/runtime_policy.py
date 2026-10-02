@@ -119,6 +119,13 @@ def parse_policy(data: Any, path: str) -> RuntimePolicy:
     unknown = [k for k in data if k not in KEYS]
     if unknown:
         raise broken(f"知らないキー: {', '.join(map(str, unknown))}（{' / '.join(KEYS)} のみ）")
+    allowed = _parse_allowed(data, broken)
+    pinned = _parse_review_seats(data.get("review_seats"), allowed, broken)
+    return RuntimePolicy(path=path, allowed=allowed, review_seats=pinned)
+
+
+def _parse_allowed(data: dict[str, Any], broken: Callable[[str], RuntimePolicyError]) -> tuple[str, ...]:
+    """`allowed` を確かめる。破れていれば `broken` の例外を上げる。"""
     if "allowed" not in data:
         raise broken("allowed が無い")
     allowed = data["allowed"]
@@ -131,21 +138,26 @@ def parse_policy(data: Any, path: str) -> RuntimePolicy:
         raise broken(f"知らないランタイム: {', '.join(bad)}（{'/'.join(ALL_RUNTIMES)} のいずれか）")
     if len(set(allowed)) != len(allowed):
         raise broken("allowed に同じ名前が重なっている")
-    seats = data.get("review_seats")
-    pinned: Optional[tuple[str, str]] = None
-    if seats is not None:
-        if not isinstance(seats, list) or len(seats) != 2 or not all(isinstance(s, str) for s in seats):
-            raise broken("review_seats は席の名前 2 つの配列にする")
-        bad_seats = [s for s in seats if not SEAT_PATTERN.match(s)]
-        if bad_seats:
-            raise broken(f"review_seats の席の名前の形が違う: {', '.join(bad_seats)}")
-        if seats[0] == seats[1]:
-            raise broken(f"review_seats に同じ席の名前が 2 つある: {seats[0]}")
-        outside = [s for s in seats if _runtime_of(s) not in allowed]
-        if outside:
-            raise broken(f"review_seats のランタイムが allowed に無い: {', '.join(outside)}")
-        pinned = (seats[0], seats[1])
-    return RuntimePolicy(path=path, allowed=tuple(allowed), review_seats=pinned)
+    return tuple(allowed)
+
+
+def _parse_review_seats(
+    seats: Any, allowed: tuple[str, ...], broken: Callable[[str], RuntimePolicyError]
+) -> Optional[tuple[str, str]]:
+    """任意の `review_seats` を確かめる。無ければ `None`、破れていれば `broken` の例外を上げる。"""
+    if seats is None:
+        return None
+    if not isinstance(seats, list) or len(seats) != 2 or not all(isinstance(s, str) for s in seats):
+        raise broken("review_seats は席の名前 2 つの配列にする")
+    bad_seats = [s for s in seats if not SEAT_PATTERN.match(s)]
+    if bad_seats:
+        raise broken(f"review_seats の席の名前の形が違う: {', '.join(bad_seats)}")
+    if seats[0] == seats[1]:
+        raise broken(f"review_seats に同じ席の名前が 2 つある: {seats[0]}")
+    outside = [s for s in seats if _runtime_of(s) not in allowed]
+    if outside:
+        raise broken(f"review_seats のランタイムが allowed に無い: {', '.join(outside)}")
+    return (seats[0], seats[1])
 
 
 def find(root) -> Optional[Path]:
