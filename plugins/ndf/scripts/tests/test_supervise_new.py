@@ -561,7 +561,7 @@ def test_plan_promote_with_mvv_judges_before_merging(tmp_path):
     （--gate-approved mvv）。note か promote が落ちたら handoff が承認ゲートへ落とす。"""
     import argparse
 
-    from supervise_lib.release_templates import plan_promote
+    from supervise_lib.delivery_templates import plan_promote
 
     a = argparse.Namespace(base="develop", production_branch="main", issue=[1], mode="standard", no_reports="")
     plan = plan_promote(a, str(tmp_path), 600, mvv=str(tmp_path / "s.json"), verify="true")
