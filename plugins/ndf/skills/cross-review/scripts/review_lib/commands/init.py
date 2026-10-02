@@ -20,6 +20,7 @@ from review_lib import (  # noqa: E402
     github,
     participants as participants_mod,
     posts,
+    reopen as reopen_mod,
     review_focus,
     store,
     workspace as workspace_mod,
@@ -192,9 +193,17 @@ def _resume_from_state(
     if found is None:
         return False
     st, resume_state_file = found
+    reopened = None
+    if st.get("final") is not None:
+        # ラウンドを足す（#1340 の決定 1）。書くのは再開の反映と同じ 1 回で、反映が止まれば状態ファイルは足す前のまま残る。
+        reopened = reopen_mod.reopen(st, review_lib._now())
 
-    if _refresh_resume_state(st, pr, repo, manual_extra_review, args):
+    refreshed = _refresh_resume_state(st, pr, repo, manual_extra_review, args)
+    if reopened is not None or refreshed:
         store._write_state(resume_state_file, st)
+    if reopened is not None:
+        review_lib.info(f"↻ final={reopened['from_final']} のレビューにラウンドを足す（round {reopened['base_round'] + 1} から）")
+    if refreshed:
         review_lib.info("↻ 追加レビュー観点を state に反映して再開")
 
     tmp_dir = _sync_resume_worktree(st, pr, worktree)

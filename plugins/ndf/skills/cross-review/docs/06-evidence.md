@@ -215,7 +215,7 @@
 GitHub へ問い合わせない。**測定が失敗しても収束の進行は止まらない。**
 
 **状態を保存するたびに、測定の出力は実行の要約へ写る**。要約は worktree の外に置くため、
-レビュー worktree を消した後も読める（置き場所は [04-contracts.md](04-contracts.md) の
+レビュー worktree を消した後も読める（置き場所は [07-posts-and-records.md](07-posts-and-records.md) の
 「監視と計測が残すファイル」）。
 
 ```bash

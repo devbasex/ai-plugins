@@ -25,6 +25,7 @@ LIB = SCRIPTS / "review_lib"
 LAYERS = {
     "review_lib": 0,
     "review_lib.store": 1,
+    "review_lib.reopen": 1,
     "review_lib.github": 1,
     "review_lib.categories": 1,
     "review_lib.review_focus": 1,
@@ -79,7 +80,18 @@ def _target(module: str, name: str) -> str:
 
 
 def test_the_package_has_the_designed_modules() -> None:
-    commands = {"init", "start_round", "read_result", "verify_findings", "collect_critiques", "judge", "loop", "merge_fix", "report"}
+    commands = {
+        "init",
+        "start_round",
+        "read_result",
+        "verify_findings",
+        "collect_critiques",
+        "judge",
+        "loop",
+        "merge_fix",
+        "record_fix",
+        "report",
+    }
     expected = set(LAYERS) | {"review_lib.commands"} | {f"review_lib.commands.{c}" for c in commands}
     assert {_module_name(p) for p in _modules()} == expected
 
