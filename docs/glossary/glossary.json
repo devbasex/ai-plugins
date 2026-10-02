@@ -2857,6 +2857,12 @@
       "context": "ndf-training-optout",
       "meaning": "NDF のセッションの開始で、true の学習の設定を false にすること",
       "pending_source": "issues/issue-1597-requirements.md"
+    },
+    {
+      "term": "書き換えの無効化",
+      "context": "ndf-training-optout",
+      "meaning": "利用者が環境変数 NDF_TRAINING_OPTOUT=0 で学習の設定の書き換えを止めること。確認（check）は止めない",
+      "pending_source": "issues/issue-1597-design.md"
     }
   ]
 }

@@ -489,3 +489,4 @@ LLM のアカウントが入力を学習に使う設定かを確かめ、NDF の
 | 学習の設定 | — | アカウントの「Help improve our AI models」。account/settings の grove_enabled で、true なら入力を学習に使う | — | — | — |
 | 学習の設定の確認 | — | 学習の設定を読み、1 行の JSON で返すこと（check）。書き換えない | — | — | — |
 | 学習の設定の書き換え | — | NDF のセッションの開始で、true の学習の設定を false にすること | — | — | — |
+| 書き換えの無効化 | — | 利用者が環境変数 NDF_TRAINING_OPTOUT=0 で学習の設定の書き換えを止めること。確認（check）は止めない | — | — | — |
