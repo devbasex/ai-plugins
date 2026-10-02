@@ -2819,14 +2819,21 @@
     {
       "term": "ランタイムの宣言",
       "context": "ndf-agent-cli",
-      "meaning": "リポジトリの .ndf/ に置く、NDF が起動してよいランタイムの一覧と cross-review のレビューの組の選び方。無ければ制限しない",
-      "pending_source": "issues/issue-1598-requirements.md"
+      "meaning": ".ndf/runtimes.json。NDF が CLI として起動してよいランタイムの一覧（allowed）と、cross-review の固定の組（review_seats）を持つ。無ければ制限しない",
+      "pending_source": "issues/issue-1598-design.md"
     },
     {
       "term": "レビューの組",
       "context": "ndf-agent-cli",
-      "meaning": "cross-review の 1 ラウンドで並ぶ 2 つのスロットのランタイムの組み合わせ（claude+claude・claude+codex など）。組ごとの集計の単位",
-      "pending_source": "issues/issue-1598-requirements.md"
+      "meaning": "cross-review の 1 ラウンドの 2 つのスロットのランタイムを辞書順に + でつないだもの（claude+claude・claude+codex など）。組ごとの集計の単位",
+      "pending_source": "issues/issue-1598-design.md"
+    },
+    {
+      "term": "固定の組",
+      "context": "ndf-agent-cli",
+      "meaning": "ランタイムの宣言の review_seats。cross-review の毎ラウンドのスロットを交代させずにこの 2 つにする",
+      "code": "review_seats",
+      "pending_source": "issues/issue-1598-design.md"
     }
   ]
 }
