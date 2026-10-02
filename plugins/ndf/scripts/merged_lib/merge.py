@@ -2,6 +2,7 @@
 
 判定は `lib/delivery.py` の `judge_target`。自動反映の本番チャネルか、決められない宛先へのマージは、
 `--gate-approved user|mvv` が無ければ `gh pr merge` を打たずに承認ゲート 2（status: gate・終了コード 10）で止める。
+merge-gate は、PR 本文の手動確認（マージ前）に印の無い行があっても承認ゲートで止める（`lib/manual_checks.py`）。
 後片付け（`cleanup`）は merged-steps.py が持ち、呼び出しの引数で受ける。
 """
 
@@ -11,8 +12,9 @@ import json
 
 import delivery
 import gh_parts
+import manual_checks
 from merged_lib.checks import TOOL, GreenWatch, pr_state
-from step_result import StepError, approval_present, emit, git_root, result
+from step_result import StepError, approval_present, emit, gh_json, git_root, result
 
 
 def add_wait_args(m):
@@ -97,11 +99,38 @@ def gate_stop(n, verdict, info=None, next_cmd=None, plan_step="merge-approved"):
     )
 
 
+def manual_gate(root, n) -> None:
+    """PR 本文の「手動確認」の節に印の無いマージ前の行があれば、承認ゲート（終了コード 10）で止める（#1485 の決定 5）。
+    本文を読めなければ何もしない（承認ゲート 2 の判定だけを行う）。"""
+    try:
+        data = gh_json(root, ["pr", "view", str(n), "--json", "body"], f"gh pr view {n}")
+    except StepError:
+        return
+    body = data.get("body") if isinstance(data, dict) else ""
+    rows = manual_checks.unchecked_before_merge(body or "")
+    if not rows:
+        return
+    emit(
+        result(
+            TOOL,
+            "gate",
+            f"#{n} の手動確認（マージ前）に確認の済んでいない行が {len(rows)} 行ある: " + " / ".join(rows),
+            [{"kind": "manual", "name": r, "result": "unchecked"} for r in rows],
+            {"gate": "manual-check", "unchecked": len(rows)},
+            None,
+            f"確かめたら #{n} の本文の「手動確認」の行に印（[x]）を付け、run <プラン> --from merge-gate で続ける",
+        )
+    )
+
+
 def merge_gate(a):
-    """宛先へのマージが承認ゲート 2 に当たるかだけを判定する（gh を呼ぶのは承認資料に --pr の中身を載せるときだけ）。"""
+    """宛先へのマージが承認ゲート 2 に当たるかを判定する（gh を呼ぶのは承認資料に --pr の中身を載せるときだけ）。
+    その前に、--pr の本文に未確認のマージ前の手動確認の行があれば承認ゲートで止める。"""
     root = git_root(a.root)
     if not a.base and not a.pr:
         raise StepError("merge-gate には --base か --pr が要る", 2)
+    if a.pr:
+        manual_gate(root, a.pr)
     info = None if a.base else pr_state(root, a.pr)  # 宛先を渡さないプランは、PR の宛先を 1 回だけ読む
     base = a.base or (info or {}).get("baseRefName") or ""
     verdict = delivery.judge_target(delivery.load_delivery(root), base)
