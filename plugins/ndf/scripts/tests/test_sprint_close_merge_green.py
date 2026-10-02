@@ -589,7 +589,7 @@ def test_evacuate_survives_cross_device(repo, tmp_path, monkeypatch):
 
     monkeypatch.setattr(os, "rename", cross)
     monkeypatch.setattr(os, "replace", cross)
-    trash = Path(mod.evacuate(str(wt), "feat/y"))
+    trash = Path(mod.trash.evacuate(str(wt), "feat/y")[0])
     monkeypatch.setattr(os, "rename", real_rename)
     assert (trash / "untracked.txt").read_text(encoding="utf-8") == "u\n"
     assert (trash / "dir" / "f.txt").is_file()

@@ -164,7 +164,9 @@ def env(tmp_path):
         def writes(self):
             return [c for c in self.state()["calls"] if "-X" in c]
 
-    return Env()
+    env = Env()
+    env.run("candidates", "--since-ref", "v1", "--all")  # apply は記録（candidates.json の metrics.repo）と照合する
+    return env
 
 
 BANDS = {1: "なし", 2: "表示", 3: "表示", 5: "機能", 8: "機能", 13: "全体", 20: "全体"}

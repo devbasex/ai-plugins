@@ -9,7 +9,9 @@
 # `progress-record.sh` を呼んで issue の本文を更新し、その後でボードを更新する。`pace`（normal / fast）は
 # ボードのフィールドを持たず、本文の見出し行（`進め方: fast`）にだけ書く。
 # `status` はボードだけに書く（「スプリントを閉じる」だけが使う）。
-# 通過記録はこのコマンドを観測して積むため、入口はこのスクリプトのままにする。
+# **通過記録は自分では積まない（#725 の決定 1）。** `stage` / `mode` / `pace` は中で呼ぶ
+# `progress-record.sh` が 1 回だけ積む。`gh` が無くても `progress-record.sh` を呼ぶため、
+# ボードの宣言・`gh` の有無に関わらず通過記録が残る。1 回の実行に何件並べてもよい。
 #
 # **宣言（.ndf/projects.json）が無ければボードへは何もしない。** gh が無い場合と、
 # 記録に失敗した場合も終了コード 0 で抜ける。進行管理が理由で開発の工程が止まってはいけない。
@@ -22,6 +24,9 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/projects-common.sh
 . "$SCRIPT_DIR/lib/projects-common.sh" 2>/dev/null || exit 0
+# 工程名・モード・進め方の判定は workflow-common.sh の 1 か所が持つ（#725 の決定 3）。
+# shellcheck source=../skills/development-workflow/scripts/lib/workflow-common.sh
+. "$SCRIPT_DIR/../skills/development-workflow/scripts/lib/workflow-common.sh" 2>/dev/null || exit 0
 
 usage() {
   printf 'usage: projects-sync.sh <issue番号> <キー: stage|mode|pace|status|worktree|plan> <値>\n' >&2
@@ -44,18 +49,25 @@ if ! KIND=$(pj_key_kind "$KEY"); then
   usage
   exit 2
 fi
-if ! pj_is_valid_value "$KEY" "$VALUE"; then
+case "$KEY" in
+  stage) wf_is_stage "$VALUE" ;;
+  mode) wf_is_mode "$VALUE" ;;
+  pace) wf_is_pace "$VALUE" ;;
+  *) pj_is_valid_value "$KEY" "$VALUE" ;;
+esac || {
   printf 'ERROR: %s が取らない値です: %s\n' "$KEY" "$VALUE" >&2
   exit 2
-fi
+}
 
-command -v gh >/dev/null 2>&1 || exit 0
-
-# issue の本文。失敗してもボードの更新へ進む（終了コードの契約は誤りだけ 2）。
+# issue の本文と通過記録。失敗してもボードの更新へ進む（終了コードの契約は誤りだけ 2）。
+# **`gh` の有無を見る前に呼ぶ。** 通過記録は `gh` が無くても積む（#725 の決定 4）。
+# `progress-record.sh` も自分で `gh` の有無を見るため、本文の振る舞いは変わらない。
 case "$KEY" in
   stage) bash "$SCRIPT_DIR/progress-record.sh" "$ISSUE" "$VALUE" || : ;;
   mode|pace|worktree|plan) bash "$SCRIPT_DIR/progress-record.sh" "$ISSUE" - "--$KEY" "$VALUE" || : ;;
 esac
+
+command -v gh >/dev/null 2>&1 || exit 0
 
 command -v git >/dev/null 2>&1 || exit 0
 

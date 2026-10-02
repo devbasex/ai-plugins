@@ -19,7 +19,7 @@ closed / already_closed / failed / kept_open（--dry-run では would_close）�
 {kind:"board_note"} の項目に載る。
 `--record-pr 0` は「本番の記録なし」（最終の検査で変更が無く本番を飛ばした）。配布の記録を読まず、
 閉じる条件も見ずに --issues の課題を閉じる。--issues と一緒のときだけ受ける。
-終了コード: 0 = 失敗なし / 1 = 失敗あり（backlog-refinement へ進まない）/ 2 = 一覧が取れない・
+終了コード: 0 = 失敗なし / 1 = 失敗あり（棚卸しへ進まない）/ 2 = 一覧が取れない・
 --record-pr 0 に --issues が無い / 3 = 呼び出しの誤り。
 """
 
@@ -72,6 +72,11 @@ def read_record(root, repo, n):
     return "\n".join(parts)
 
 
+def _strip_note(text):
+    """版の文字列から全角の括弧の注記を落とす。"""
+    return re.sub(r"\s*（.*$", "", text).strip()
+
+
 def _read_dist_block(block):
     """配布の記録の節から段階・スプリントの PR・本番の版を読む。"""
     out = {"stage": None, "version": None, "sprint_prs": []}
@@ -83,7 +88,7 @@ def _read_dist_block(block):
     if (out["stage"] or "").startswith("本番"):
         for ln in block:
             if ln.startswith("版: ") and "→" in ln:
-                out["version"] = re.sub(r"\s*（.*$", "", ln.split("→", 1)[1]).strip()
+                out["version"] = _strip_note(ln.split("→", 1)[1])
                 break
     return out
 
@@ -101,7 +106,7 @@ def _verify_blocks(lines, sections):
             continue
         cur["lines"].append(ln)
         if ln.startswith("対象の版: ") and cur["ver"] is None:
-            cur["ver"] = re.sub(r"\s*（.*$", "", ln[len("対象の版: ") :]).strip()
+            cur["ver"] = _strip_note(ln[len("対象の版: ") :])
         if ln.startswith("合否:"):
             blocks.append(cur)
             cur = None
@@ -191,7 +196,16 @@ def issue_state(root, repo, n):
     return p.stdout.strip() if p.returncode == 0 and p.stdout.strip() else None
 
 
-def close_one(root, repo, n, record_repo, comment, notes):
+class CloseContext:
+    """全課題で一定の閉じる処理の材料。notes は課題ごとのボードの NOTE を溜める。"""
+
+    def __init__(self, root, record_repo, comment):
+        self.root, self.record_repo, self.comment = root, record_repo, comment
+        self.notes = []
+
+
+def close_one(ctx, repo, n):
+    root, record_repo, comment, notes = ctx.root, ctx.record_repo, ctx.comment, ctx.notes
     it = {"kind": "issue", "repo": repo, "number": n}
     before = issue_state(root, repo, n)
     if before is None:
@@ -201,13 +215,22 @@ def close_one(root, repo, n, record_repo, comment, notes):
         for ln in (s.stdout + s.stderr).splitlines():
             if "NOTE" in ln:
                 notes.append({"kind": "board_note", "name": f"{repo}#{n}", "result": "note", "reason": ln.strip()})
-    close_out = None
-    if before == "OPEN":
-        now = issue_state(root, repo, n)
-        if now == "OPEN":
-            c = gh_call.gh(["issue", "close", str(n), "--repo", repo, "--comment", comment], cwd=root)
-            close_out = (c.stdout + c.stderr).strip()[:300] or None
+    close_out = _close_if_open(root, repo, n, comment) if before == "OPEN" else None
     after = issue_state(root, repo, n)
+    return _close_result(it, before, after, close_out)
+
+
+def _close_if_open(root, repo, n, comment):
+    """読み直して OPEN なら閉じ、close の出力（無ければ None）を返す。"""
+    if issue_state(root, repo, n) != "OPEN":
+        return None
+    c = gh_call.gh(["issue", "close", str(n), "--repo", repo, "--comment", comment], cwd=root)
+    return (c.stdout + c.stderr).strip()[:300] or None
+
+
+def _close_result(it, before, after, close_out):
+    """before と after から 1 課題の結果を作る（already_closed / closed / failed）。"""
+    repo, n = it["repo"], it["number"]
     if before == "CLOSED":
         return {**it, "result": "already_closed"}
     if after == "CLOSED":
@@ -261,7 +284,7 @@ def _closing_blocker(a, rec, record_repo):
     return kept_all, verdicts
 
 
-def _close_item(a, root, repo, n, record_repo, kept_all, verdicts, comment, notes):
+def _close_item(a, ctx, repo, n, kept_all, verdicts):
     base = {"kind": "issue", "repo": repo, "number": n}
     if kept_all:
         return {**base, "result": "kept_open", "reason": kept_all}
@@ -269,13 +292,13 @@ def _close_item(a, root, repo, n, record_repo, kept_all, verdicts, comment, note
         why = "リリース後テストの行が無い" if (repo, n) not in verdicts else "リリース後テストに合格でない条件がある（不合格・保留）"
         return {**base, "result": "kept_open", "reason": why}
     if a.dry_run:
-        st = issue_state(root, repo, n)
+        st = issue_state(ctx.root, repo, n)
         return {
             **base,
             "result": "already_closed" if st == "CLOSED" else "would_close",
             **({"reason": "状態を読めない"} if st is None else {}),
         }
-    return close_one(root, repo, n, record_repo, comment, notes)
+    return close_one(ctx, repo, n)
 
 
 def _close_summary(items, prs, dry_run):
@@ -324,14 +347,16 @@ def cmd_close(a):
 
     kept_all, verdicts = _closing_blocker(a, rec, record_repo)
 
-    items, notes = [], []
+    items = []
     comment = f"スプリント（{a.label}）を通りました" if a.label else "スプリントの終わりの工程を通りました"
+    ctx = CloseContext(root, record_repo, comment)
+    notes = ctx.notes
     for repo, n in issues:
-        items.append(_close_item(a, root, repo, n, record_repo, kept_all, verdicts, comment, notes))
+        items.append(_close_item(a, ctx, repo, n, kept_all, verdicts))
 
     count, metrics, summary = _close_summary(items, prs, a.dry_run)
     if count["failed"]:
-        emit(result(TOOL, "stopped", summary, items + notes, metrics, next="失敗した課題の cmd でやり直す。backlog-refinement へ進まない"))
+        emit(result(TOOL, "stopped", summary, items + notes, metrics, next="失敗した課題の cmd でやり直す。棚卸しへ進まない"))
     emit(result(TOOL, "ok", summary, items + notes, metrics))
 
 

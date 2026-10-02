@@ -46,6 +46,18 @@ def read_backlog_decl(root) -> dict | None:
     return None
 
 
+# 候補の上限の既定（#842 の決定 6）。upkeep.py candidates が --limit → 宣言の candidate_limit → これの順に採る。
+DEFAULT_CANDIDATE_LIMIT = 10
+
+
+def candidate_limit(limit, decl) -> int:
+    """1 回に区分を決める候補の上限。引数 → 宣言 → 既定の順に採る。1 以上の整数でなければ終了コード 2。"""
+    v = limit if limit is not None else (decl or {}).get("candidate_limit", DEFAULT_CANDIDATE_LIMIT)
+    if isinstance(v, bool) or not isinstance(v, int) or v < 1:
+        raise StepError(f"候補の上限は 1 以上の整数で書く（--limit か {DECL} の candidate_limit）: {v!r}", EXIT_UNREADABLE)
+    return v
+
+
 def _label_floor(values):
     if not values:
         return None
@@ -317,40 +329,59 @@ class RankPlan:
 
     def _check(self):
         errs = []
+        wants = self._wants(errs)
+        if (wants or self.plan.get("rank")) and self.out is None:
+            raise StepError("rank.json が無い（rank を打ってから plan を作る）", EXIT_UNREADABLE)
+        forward_acts = {(n, (act.get("changes") or {}).get("milestone")) for n, d, act in wants if act != "rejected" and d == R.FORWARD}
+        for n, d, act in wants:
+            err = self._check_want(n, d, act, forward_acts)
+            if err:
+                errs.append(err)
+        errs += self._missing_moves({(n, d) for n, d, _ in wants})
+        if errs:
+            raise StepError("plan の誤り: " + " / ".join(errs), EXIT_UNREADABLE)
+        self._hold_leads_of_held_groups({n for n, d, act in wants if act != "rejected" and d == R.FORWARD})
+
+    def _wants(self, errs) -> list:
+        """plan の却下と reschedule の action を (number, direction, act か "rejected") の列にする。"""
         rej = self.plan.get("rejected", [])
         if not isinstance(rej, list):
             errs.append("rejected は [{number, direction}] の列で書く")
             rej = []
         wants = [(r.get("number"), r.get("direction"), "rejected") for r in rej if isinstance(r, dict)]
         wants += [(act["number"], act["reschedule"], act) for act in self.plan["actions"] if act.get("reschedule")]
-        if (wants or self.plan.get("rank")) and self.out is None:
-            raise StepError("rank.json が無い（rank を打ってから plan を作る）", EXIT_UNREADABLE)
-        forward_acts = {(n, (act.get("changes") or {}).get("milestone")) for n, d, act in wants if act != "rejected" and d == R.FORWARD}
-        for n, d, act in wants:
-            if d not in R.DIRECTIONS:
-                errs.append(f"#{n} の向きは {' / '.join(R.DIRECTIONS)} のどれか: {d!r}")
-                continue
-            c = self.candidate(n, d)
-            if c is None:
-                errs.append(f"#{n} の{d}は rank.json の候補に無い")
-            elif act != "rejected":
-                if (act.get("changes") or {}).get("milestone") != c["to"]:
-                    errs.append(f"#{n} の changes.milestone は候補の移す先 {c['to']!r} と合わせる")
-                    continue
-                missing = [g for g in c.get("group", []) if d == R.FORWARD and c["number"] == n and (g, c["to"]) not in forward_acts]
-                if missing:
-                    errs.append(f"#{n} の前倒しは依存先 {', '.join(f'#{g}' for g in missing)} も同じ移す先で前倒しする")
-                elif c["decision"] == R.APPROVAL:
-                    self.holds[n] = {**c, "direction": d, "number": n}
-        errs += self._missing_moves({(n, d) for n, d, _ in wants})
-        if errs:
-            raise StepError("plan の誤り: " + " / ".join(errs), EXIT_UNREADABLE)
-        self._hold_leads_of_held_groups({n for n, d, act in wants if act != "rejected" and d == R.FORWARD})
+        return wants
+
+    def _check_want(self, n, d, act, forward_acts) -> str | None:
+        """1 件の却下か移動を候補と照らす。誤りの文を返す（無ければ None）。承認待ちは self.holds へ置く。"""
+        if d not in R.DIRECTIONS:
+            return f"#{n} の向きは {' / '.join(R.DIRECTIONS)} のどれか: {d!r}"
+        c = self.candidate(n, d)
+        if c is None:
+            return f"#{n} の{d}は rank.json の候補に無い"
+        if act == "rejected":
+            return None
+        if (act.get("changes") or {}).get("milestone") != c["to"]:
+            return f"#{n} の changes.milestone は候補の移す先 {c['to']!r} と合わせる"
+        missing = [g for g in c.get("group", []) if d == R.FORWARD and c["number"] == n and (g, c["to"]) not in forward_acts]
+        if missing:
+            return f"#{n} の前倒しは依存先 {', '.join(f'#{g}' for g in missing)} も同じ移す先で前倒しする"
+        if c["decision"] == R.APPROVAL:
+            self.holds[n] = {**c, "direction": d, "number": n}
+        return None
 
     def _missing_moves(self, named) -> list[str]:
         """rank を入れた plan で、順位の表が移したものとして置く移動（自動・承認済み）の action か却下が無いもの。"""
         if not self.plan.get("rank") or self.stale:
             return []
+        return [
+            f"#{n} の{d}（{self.candidate(n, d)['decision']}）の action が無い（順位の表が移したものとして置く）"
+            for n, d in self._placed_moves()
+            if (n, d) not in named
+        ]
+
+    def _placed_moves(self) -> list[tuple]:
+        """順位の表が移したものとして置く (number, direction) の列（前倒しの自動・承認済みと後ろ倒しの承認済み）。"""
         placed = [
             (n, R.FORWARD)
             for f in self.metrics.get("forward", [])
@@ -358,11 +389,7 @@ class RankPlan:
             for n in [f["number"], *f["group"]]
         ]
         placed += [(b["number"], R.BACKWARD) for b in self.metrics.get("backward", []) if b["decision"] == R.APPROVED]
-        return [
-            f"#{n} の{d}（{self.candidate(n, d)['decision']}）の action が無い（順位の表が移したものとして置く）"
-            for n, d in placed
-            if (n, d) not in named
-        ]
+        return placed
 
     def _hold_leads_of_held_groups(self, leads):
         """依存先が保留に入った前倒しの先頭も保留にする（先頭だけが動いて依存先を置いていかない。AC6）。"""
@@ -381,8 +408,7 @@ class RankPlan:
         plan に reschedule の action が無い課題も数える。action の有無で絞ると、書き漏らした移動は
         マイルストーンが動かないまま表だけ移す先に載り、所属と表が食い違う。
         """
-        placed = {n for f in self.metrics.get("forward", []) if f["decision"] in (R.AUTO, R.APPROVED) for n in [f["number"], *f["group"]]}
-        placed |= {b["number"] for b in self.metrics.get("backward", []) if b["decision"] == R.APPROVED}
+        placed = {n for n, _ in self._placed_moves()}
         moved = {act["number"] for act in actions if act.get("reschedule")}
         done = (set(buckets["applied"]) | set(buckets["unchanged"]) | set(buckets["already"])) & moved
         return sorted(placed - done) if self.plan.get("rank") and not self.stale else []

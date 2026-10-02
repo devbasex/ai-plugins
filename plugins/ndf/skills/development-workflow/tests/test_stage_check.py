@@ -392,7 +392,7 @@ def test_without_a_pace_record_the_report_is_unchanged(repo: Path, state: Path) 
 
 
 def test_a_deferred_stage_moves_to_recorded_once_it_is_recorded(repo: Path, state: Path) -> None:
-    seed(repo, state, 1078, "standard", [*FAST_THROUGH_RELEASE, "確定仕様化", "振り返り"])
+    seed(repo, state, 1078, "standard", [*FAST_THROUGH_RELEASE, "確定仕様化", "振り返り", "棚卸し"])
     record(repo, state, 1078, "pace", "fast")
 
     out = report(repo, state, 1078).stdout

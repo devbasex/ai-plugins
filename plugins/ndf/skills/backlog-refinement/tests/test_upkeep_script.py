@@ -255,6 +255,92 @@ def test_candidates_limit_caps_one_run(env):
     assert not set(issues) & set(out["metrics"]["deferred"])
 
 
+def _more_open_issues(st, count):
+    for n in range(20, 20 + count):
+        st["issues"][str(n)] = _issue(n, f"溜まった課題 {n}", milestone="M2")
+
+
+def test_candidates_without_limit_cap_at_default(env):
+    # --limit を省いても上限は効く（#842）。--all で 12 件を集め、既定の 10 件で切る
+    env.set(lambda st: _more_open_issues(st, 5))
+    code, out = env.run("candidates", "--since-ref", "v1", "--all")
+    assert code == 20 and out["metrics"]["limit"] == 10
+    assert out["metrics"]["candidates"] == 10 and len(out["metrics"]["deferred"]) == 2
+    # 棚卸しの報告に持ち越しの番号と採った上限が載る
+    code, rep = env.run("report")
+    assert rep["metrics"]["deferred"] == out["metrics"]["deferred"] and rep["metrics"]["limit"] == 10
+
+
+def test_candidates_limit_comes_from_backlog_decl(env):
+    (env.root / ".ndf").mkdir()
+    (env.root / ".ndf" / "backlog.json").write_text(json.dumps({"candidate_limit": 3}))
+    code, out = env.run("candidates", "--since-ref", "v1")
+    assert code == 20 and out["metrics"]["limit"] == 3 and out["metrics"]["candidates"] == 3
+    # 引数は宣言に勝つ
+    code, out = env.run("candidates", "--since-ref", "v1", "--limit", "6")
+    assert code == 0 and out["metrics"]["limit"] == 6 and out["metrics"]["deferred"] == []
+
+
+@pytest.mark.parametrize("decl,args", [(None, ("--limit", "0")), ({"candidate_limit": 0}, ()), ({"candidate_limit": "10"}, ())])
+def test_candidates_reject_invalid_limit_before_collecting(env, decl, args):
+    if decl is not None:
+        (env.root / ".ndf").mkdir()
+        (env.root / ".ndf" / "backlog.json").write_text(json.dumps(decl))
+    code, out = env.run("candidates", "--since-ref", "v1", *args)
+    assert code == 2 and out["status"] == "stopped"
+    assert not env.state().get("calls")  # 候補を集めていない
+
+
+def test_candidates_zero_is_ok_under_limit(env):
+    # 候補が 0 件なら上限を当てても持ち越しにならず、そのまま飛ばせる
+    def drop(st):
+        for k in ("1", "2", "3", "4", "5", "6"):
+            st["issues"].pop(k)
+        st["sub_issues"] = {}
+
+    env.set(drop)
+    code, out = env.run("candidates", "--since-ref", "v1")
+    assert code == 0 and out["status"] == "ok" and out["metrics"]["candidates"] == 0
+
+
+def test_apply_refuses_plan_for_another_repo(env):
+    # plan の repo が記録のリポジトリ（gh repo view の o/r）と違えば、1 件も書かずに止まる（#842 の決定 7）
+    snap = env.snapshot(7)
+    f = env.path / "plan-other.json"
+    f.write_text(json.dumps({"repo": "x/other", "actions": [_action(snap, "追記が要る", {"title": "書き換え"})]}, ensure_ascii=False))
+    code, out = env.run("apply", "--plan", str(f))
+    assert code == 3 and out["status"] == "stopped"
+    assert "x/other" in out["items"][0]["reason"] and "o/r" in out["items"][0]["reason"]
+    assert env.writes() == []
+
+
+def test_apply_refuses_when_plan_and_repo_both_point_elsewhere(env):
+    # plan の repo と --repo を同じ別リポジトリにしても、記録（candidates.json の metrics.repo）が無ければ書かない
+    snap = env.snapshot(7)
+    f = env.path / "plan-other.json"
+    f.write_text(json.dumps({"repo": "x/other", "actions": [_action(snap, "追記が要る", {"title": "書き換え"})]}, ensure_ascii=False))
+    code, out = env.run("apply", "--plan", str(f), "--repo", "x/other")
+    assert code == 3 and out["status"] == "stopped"
+    assert "x/other" in out["items"][0]["reason"]
+    assert env.writes() == []
+
+
+def test_apply_refuses_when_record_is_for_another_repo(env, tmp_path):
+    # 記録の置き場に別のリポジトリの candidates.json があれば、書き込み先と合わないので書かない
+    snap = env.snapshot(7)
+    other = tmp_path / "state" / "x--other"
+    other.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "state" / "o--r" / "candidates.json").replace(other / "candidates.json")
+    rec = json.loads((other / "candidates.json").read_text())
+    assert rec["metrics"]["repo"] == "o/r"
+    f = env.path / "plan-other.json"
+    f.write_text(json.dumps({"repo": "x/other", "actions": [_action(snap, "追記が要る", {"title": "書き換え"})]}, ensure_ascii=False))
+    code, out = env.run("apply", "--plan", str(f), "--repo", "x/other")
+    assert code == 3 and out["status"] == "stopped"
+    assert "o/r" in out["items"][0]["reason"] and "x/other" in out["items"][0]["reason"]
+    assert env.writes() == []
+
+
 def test_apply_writes_only_what_differs(env):
     snap = env.snapshot(3)
     code, out = env.run(

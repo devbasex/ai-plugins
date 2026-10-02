@@ -147,6 +147,9 @@ URL は最終行に生のまま置く（Markdown リンクにすると利用者�
 
 **head のブランチ名が `design/` で始まる Pull Request の本文は、決定の中身を持たない**（決定は設計文書だけが持つ）。
 
+**設計 Pull Request の題は、設計文書の H1 と同じ文にして `--title` に渡す。** 題の形は `design` の
+[design-template.md の「承認する人が読む欄」](../design/references/design-template.md#承認する人が読む欄) にある。
+
 | 節 | 何を書くか |
 | --- | --- |
 | `## Summary` | 何を設計したかと、設計文書へのリンク。**決定を言い換えて書かない** |

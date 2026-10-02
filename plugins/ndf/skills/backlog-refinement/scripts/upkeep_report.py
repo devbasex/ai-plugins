@@ -22,6 +22,7 @@ def cmd_report(a, ctx):
                 "targets": cm["candidates"],
                 "by_route": cm["by_route"],
                 "deferred": cm["deferred"],
+                "limit": cm.get("limit"),
                 "notes": cm.get("notes", []),
                 "empty_milestones": [i["name"] for i in cand["items"] if i["kind"] == "milestone"],
             }

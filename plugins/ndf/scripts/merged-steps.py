@@ -2,12 +2,17 @@
 """merged-steps.py: merged の後片付けの決まった手順。
 
     python3 merged-steps.py cleanup <PR番号>... [--root <dir>]
+    python3 merged-steps.py sweep-trash --ref <本番に出たコミット> [--yes --only <退避先>...] [--root <dir>]
     python3 merged-steps.py merge-gate (--base <宛先> | --pr <PR番号>) [--pr <PR番号>] [--root <dir>]
     python3 merged-steps.py merge-when-green <PR番号> [--gate-approved user|mvv] [--method merge|squash|rebase]
                             [--interval 秒] [--timeout 秒] [--stale-after 秒] [--no-cleanup] [--root <dir>]
     python3 merged-steps.py promote --head <ベースブランチ> --base <本番チャネル> [--prepare] [--gate-approved user|mvv]
 
 cleanup: マージ済みの PR の作業ツリーとローカルブランチを外し、主ディレクトリを取り込む。
+`git worktree remove` が拒否した作業ツリーは、未追跡・無視されたファイルを退避してから外す。作り直せる生成物
+（`.venv`・`node_modules`・`__pycache__`・`target` など）は退避せずに捨てる（merged_lib/trash.py）。
+sweep-trash: 本番に出たコミット（--ref）に含まれるブランチの退避先を回収の候補として挙げる。消すのは、人が候補を見て
+承認した後に --yes と --only <承認した退避先>... を付けたときの、その名前の退避先だけ（消すと戻せない利用者のファイル）。
 merge-when-green: PR が draft なら `gh pr ready` で外し、CI のチェックが全部通るまで待ち
 （push で先頭のコミットが変われば待ち直す）、
 失敗があれば止まり、通れば `gh pr merge --admin` でマージして cleanup まで行う。
@@ -35,10 +40,8 @@ production-merge）か、`git branch -D` が要るブランチがある（同意
 from __future__ import annotations
 
 import argparse
-import datetime
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -64,7 +67,7 @@ import gh_parts  # noqa: E402
 import repo  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from merged_lib import merge  # noqa: E402
+from merged_lib import merge, trash  # noqa: E402
 from merged_lib.checks import (
     FAIL_CONCLUSIONS,
     check_states,
@@ -93,37 +96,11 @@ def list_worktrees(root):
     return items
 
 
-def common_git_dir(path):
-    d = Path(git(path, "rev-parse", "--git-common-dir").stdout.strip())
-    return d if d.is_absolute() else (Path(path) / d).resolve()
-
-
-def evacuate(path, label):
-    """未追跡・無視されたファイルを <git-common-dir>/ndf/worktree-trash/ へ移す。移した先を返す。"""
-    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d%H%M%S")
-    trash = common_git_dir(path) / "ndf" / "worktree-trash" / f"{label.replace('/', '__')}-{stamp}"
-    trash.mkdir(parents=True, exist_ok=True)
-    out = git(path, "status", "--ignored", "--untracked-files=all", "--porcelain=v1", "-z").stdout
-    for ent in out.split("\0"):
-        if ent[:3] not in ("?? ", "!! "):
-            continue
-        rel = ent[3:].rstrip("/")
-        if not rel:
-            continue
-        src, dst = Path(path) / rel, trash / rel
-        if not os.path.lexists(src):
-            continue
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        # 作業ツリーが /tmp（tmpfs）にあると、.git の下へはファイルシステムをまたぐ。
-        # os.replace は EXDEV で落ちるため、コピーと削除へ切り替わる shutil.move を使う
-        shutil.move(str(src), str(dst))
-    return str(trash)
-
-
-def remove_worktree(root, path, label):
+def remove_worktree(root, path, label, merge_commit=None):
     """作業ツリーを外す。拒否されたら未追跡・無視のファイルを退避してから --force で外す。(成否, 理由) を返す。
 
     追跡ファイルの未コミットの変更は退避できず --force が消すため、残っていれば外さず kept にする。
+    理由は `退避先 <パス>` で始まり、作り直せる生成物を捨てたら `（捨てた: <相対パス>, …）` を続ける。
     """
     if git(root, "worktree", "remove", path, check=False).returncode == 0:
         return True, None
@@ -132,13 +109,14 @@ def remove_worktree(root, path, label):
         names = ", ".join(line[3:] for line in dirty[:5]) + ("…" if len(dirty) > 5 else "")
         return False, f"追跡ファイルに未コミットの変更が {len(dirty)} 件ある（{names}）ため --force で外さない"
     try:
-        trash = evacuate(path, label)
+        dest, discarded = trash.evacuate(path, label, merge_commit)
     except (StepError, OSError) as e:
         return False, f"退避に失敗: {e}"
     p = git(root, "worktree", "remove", "--force", path, check=False)
-    if p.returncode == 0:
-        return True, f"退避先 {trash}"
-    return False, f"worktree remove --force が失敗: {p.stderr.strip()[:300]}"
+    if p.returncode != 0:
+        return False, f"worktree remove --force が失敗: {p.stderr.strip()[:300]}"
+    why = f"退避先 {dest}" if dest else "退避するものは無かった"
+    return True, why + (f"（捨てた: {', '.join(discarded)}）" if discarded else "")
 
 
 def same_untracked(main_dir, pull):
@@ -180,7 +158,7 @@ def _delete_branch(root, branch, add):
         add("branch", branch, "absent")
 
 
-def _remove_pr_tmp_worktree(root, tmp_wt, n, add):
+def _remove_pr_tmp_worktree(root, tmp_wt, n, add, merge_commit=None):
     """PR の一時作業ツリー（wt_base/slug/pr<n>）を、登録済みで detached のときだけ外す。"""
     if not tmp_wt.exists():
         return
@@ -191,7 +169,7 @@ def _remove_pr_tmp_worktree(root, tmp_wt, n, add):
     elif not w["detached"]:
         add("worktree", str(tmp_wt), "kept", "detached でない")
     else:
-        ok, why = remove_worktree(root, w["path"], f"pr{n}")
+        ok, why = remove_worktree(root, w["path"], f"pr{n}", merge_commit)
         add("worktree", w["path"], "removed" if ok else "kept", why)
 
 
@@ -211,6 +189,7 @@ def _cleanup_pr(root, main_dir, slug, wt_base, n, add):
         add("pr", branch or f"#{n}", "kept", f"#{n} が MERGED でない（{info.get('state')}）")
         return
 
+    merge_commit = (info.get("mergeCommit") or {}).get("oid")
     branch_free = True
     for wt in list_worktrees(root):
         if wt["branch"] != branch:
@@ -219,7 +198,7 @@ def _cleanup_pr(root, main_dir, slug, wt_base, n, add):
             add("worktree", wt["path"], "kept", "主ディレクトリはこのブランチを checkout しているため外さない")
             branch_free = False
             continue
-        ok, why = remove_worktree(root, wt["path"], branch)
+        ok, why = remove_worktree(root, wt["path"], branch, merge_commit)
         add("worktree", wt["path"], "removed" if ok else "kept", why)
         branch_free = branch_free and ok
 
@@ -227,7 +206,7 @@ def _cleanup_pr(root, main_dir, slug, wt_base, n, add):
         _delete_branch(root, branch, add)
 
     if slug:
-        _remove_pr_tmp_worktree(root, wt_base / slug / f"pr{n}", n, add)
+        _remove_pr_tmp_worktree(root, wt_base / slug / f"pr{n}", n, add, merge_commit)
 
 
 def _update_main_dir(main_dir, add):
@@ -315,6 +294,20 @@ def cmd_cleanup(a):
     emit(result(TOOL, status, summary, items, metrics, path, nxt))
 
 
+def cmd_sweep_trash(a):
+    root = git_root(a.root)
+    if git(root, "rev-parse", "-q", "--verify", f"{a.ref}^{{commit}}", check=False).returncode != 0:
+        raise StepError(f"--ref {a.ref} がコミットとして読めない", 2)
+    if a.yes != bool(a.only):
+        raise StepError("--yes には承認した退避先の名前（候補の items[].name）を --only で必ず渡す", 2)
+    items, metrics = trash.sweep(root, a.ref, approved=a.only)
+    # 既定は消さずに挙げるだけ。消すのは承認した名前の退避先だけ（Git に無い利用者のファイルで戻せない。C3・C4）
+    done = f"{metrics['swept_trash']} 件を消した（" if a.yes else "を消していない（"
+    summary = f"本番に出た退避先{done}回収の候補 {metrics['sweep_candidates']} 件・残す {metrics['kept_trash'] + metrics['unledgered_trash']} 件）"
+    nxt = (cmd := trash.sweep_command(a.ref, items)) and f"候補を人へ示し、承認した名前だけを渡して消す: {cmd}"
+    emit(result(TOOL, "ok", summary, items, metrics, None, nxt))
+
+
 # --- merge-gate・merge-when-green・promote（本体は merged_lib/merge.py） ----------------
 
 
@@ -369,22 +362,25 @@ def _classify_checks(root, n, rollup):
     """rollup のチェックを分類する。(分類, 根拠) を返す。stale の根拠は取り残された初回のチェックそのもの。"""
     pending, failed, passed = check_states(rollup)
     stale, queued, settled = probe_checks(root, rollup) if pending else ([], [], [])
-    failed += [s[0] for s in settled if s[3].upper() in FAIL_CONCLUSIONS]
-    first = [s for s in stale if s[3] <= 1]
-    again = [s for s in stale if s[3] > 1]
-    if failed:
-        return "failed", [_check_item(n, f, "failed") for f in failed]
-    if first:
-        return "stale", first
-    if again:
-        return "stale_again", [_check_item(n, s[0], "stale_again", run=s[1], job=s[2], attempt=s[3]) for s in again]
-    if settled:
-        return "settled", [_check_item(n, s[0], "settled", run=s[1], job=s[2], conclusion=s[3]) for s in settled]
-    if queued:
-        return "queued", [_check_item(n, q, "queued") for q in queued]
-    if pending:
-        return "running", [_check_item(n, c, "running") for c in pending]
-    return "passed", []
+    failed += [name for name, _run, _job, conclusion in settled if conclusion.upper() in FAIL_CONCLUSIONS]
+    first = [s for s in stale if s[3] <= 1]  # s[3] は試行回数
+    again = [(name, run, job, attempt) for name, run, job, attempt in stale if attempt > 1]
+    # 優先順に並べ、根拠が空でない最初の分類を返す
+    ranked = (
+        ("failed", [_check_item(n, f, "failed") for f in failed]),
+        ("stale", first),
+        ("stale_again", [_probe_item(n, s, "stale_again", "attempt") for s in again]),
+        ("settled", [_probe_item(n, s, "settled", "conclusion") for s in settled]),
+        ("queued", [_check_item(n, q, "queued") for q in queued]),
+        ("running", [_check_item(n, c, "running") for c in pending]),
+    )
+    return next(((kind, items) for kind, items in ranked if items), ("passed", []))
+
+
+def _probe_item(n, probe, result, last):
+    """probe_checks の 1 件 (name, run, job, 試行回数か結論) を根拠の 1 件にする。last は 4 つ目の要素の名前。"""
+    name, run, job, value = probe
+    return _check_item(n, name, result, run=run, job=job, **{last: value})
 
 
 def _rerun_stale(root, n, first, act):
@@ -459,6 +455,11 @@ def build_parser():
     p = sub.add_parser("cleanup", parents=[common_parser()], help="マージ済みの PR の作業ツリーとローカルブランチを片付ける")
     p.add_argument("prs", nargs="+", type=int, metavar="PR番号")
     p.set_defaults(func=cmd_cleanup)
+    t = sub.add_parser("sweep-trash", parents=[common_parser()], help="本番に出たブランチの退避先（worktree-trash）を消す")
+    t.add_argument("--ref", required=True, help="本番に出たコミット（タグ・本番チャネルのブランチ・マージコミット）")
+    t.add_argument("--yes", action="store_true", help="--only の退避先を消す。人が候補を見て承認したときだけ付ける")
+    t.add_argument("--only", nargs="+", default=[], metavar="退避先", help="承認した退避先の名前（候補の items[].name）")
+    t.set_defaults(func=cmd_sweep_trash)
     g = sub.add_parser(
         "merge-gate", parents=[common_parser()], help="宛先へのマージが承認ゲート 2（自動反映の本番チャネル）に当たるかを判定する"
     )

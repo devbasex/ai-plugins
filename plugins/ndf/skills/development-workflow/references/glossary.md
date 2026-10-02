@@ -168,7 +168,7 @@ flowchart TB
 
 | 語 | 意味 | 英語や識別子 | 正本 |
 | --- | --- | --- | --- |
-| 進捗記録 | 工程に入った時点で 1 回打つ記録。課題の本文の `## 進行` も同じ 1 回で更新される | `projects-sync.sh` | [stage-completeness.md](stage-completeness.md) の「用語」 |
+| 進捗記録 | 工程に入った時点で 1 回打つ記録。課題の本文の `## 進行` も同じ 1 回で更新される | `projects-sync.sh`、`progress-record.sh` | [stage-completeness.md](stage-completeness.md) の「用語」 |
 | ボード | 進行を記録する GitHub Projects のプロジェクト 1 つ。設定が無ければ何も動かない | `.ndf/projects.json` | [projects-tracking.md](projects-tracking.md) の「用語」 |
 | 通過工程 | ある課題について、進捗記録が実際に書かれた工程の集合 | — | [stage-completeness.md](stage-completeness.md) の「用語」 |
 | 通過記録 | 通過工程を課題ごとに残したファイル | `stage-check.sh report <番号>` | [stage-completeness.md](stage-completeness.md) の「用語」 |
@@ -198,7 +198,7 @@ flowchart TB
 | 安定版と実験版 | NDF の変更の 2 つの経路。既定で働くもの（安定版）は工程どおりに、呼んだときだけ働くもの（実験版）はその場で実装して使ってから入れる | stable / experimental、台帳 `docs/ndf-experiments.md` | ai-plugins の `AGENTS.md` の「安定版と実験版」 |
 | 即時修正 | 4 つの条件（[../SKILL.md](../SKILL.md) の「即時修正」）を満たす不具合を、起票せず、その場のプランで直すこと。マージ済みの変更の不具合なら流出不具合として記録する | `new impl --escape-of <PR>` | [../SKILL.md](../SKILL.md) の「即時修正」、[pace.md](pace.md) の「流出不具合の記録」 |
 | 範囲外の課題 | この変更の受け入れ条件にも直す対象にも入らない課題。見つけたその場で issue にする | `/ndf:out-of-scope` | [out-of-scope](../../out-of-scope/SKILL.md) |
-| 棚卸し | 既存の課題の本文・マイルストーン・ラベルを現状に合わせ、着手の順位を決め直すこと。スクラムのバックログリファインメントに当たる | `/ndf:backlog-refinement`、`upkeep.py` | [backlog-refinement](../../backlog-refinement/SKILL.md) の「用語」 |
+| 棚卸し | 既存の課題の本文・マイルストーン・ラベルを現状に合わせ、着手の順位を決め直すこと。スクラムのバックログリファインメントに当たる。工程表の行名でもある | `/ndf:backlog-refinement`、`upkeep.py`、進捗記録の `stage 棚卸し` | [backlog-refinement](../../backlog-refinement/SKILL.md) の「用語」 |
 | 実装計画 | `implementation-plan` が `issues/` に書く、実装の前の計画 | `issues/{feature-name}.md`（タスク ID があれば `issues/TASK-1234_<説明>.md`） | [implementation-plan](../../implementation-plan/SKILL.md) |
 | 確定仕様化 | 完了した実装計画を `docs/` の確定仕様へ書き直す工程 | `/ndf:plan-to-spec` | [plan-to-spec](../../plan-to-spec/SKILL.md) |
 | 用語集の設定 | プロジェクトの用語集の置き場・形式・チェックの対象を持つファイル。設計の工程を持つモードでは、これと用語集が揃うまで設計へ入らない | `.ndf/glossary.json`、`glossary.py gate` | [glossary-format.md](../../requirements-design/references/glossary-format.md) |

@@ -83,6 +83,16 @@
       "stage": "振り返り",
       "timeout": 3600,
       "prompt": "/ndf:retrospective スプリント m9（#15）。材料に検査の記録の集計（`python3 <NDF>/scripts/check-trigger.py stats --root <TMP>/repo` の出力: トリガーが立った回数・検査ごとの指摘の件数・検査の後に逃げた不具合の件数）を使い、閾値の見直しが要るかを書く。",
+      "next": "refine"
+    },
+    {
+      "id": "refine",
+      "type": "work",
+      "full": true,
+      "kind": "棚卸し",
+      "stage": "棚卸し",
+      "timeout": 3600,
+      "prompt": "/ndf:backlog-refinement スプリント m9（#15）。棚卸しの工程として無人で通す。候補が上限を超えて持ち越し（`metrics.deferred`）が出ても、`--limit` を上げて打ち直さず、番号と件数を報告に載せる。`upkeep.py apply` が終了コード 10 を返したら、承認を求めず、承認資料のパス（`presentation_path`）と対象の番号を報告に載せて終える。`--repo` を渡さない（記録のリポジトリの外へ書かない）。親 issue の起票と子 issue の結び付けは行わず、クラスタと提案する親 issue の内容（題・子の番号）を報告の「人の判断待ち」に載せて終える。",
       "next": "end"
     }
   ],

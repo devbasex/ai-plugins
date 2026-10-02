@@ -30,10 +30,10 @@ pj_repo_slug() {
   printf '%s/%s\n' "$owner" "$repo"
 }
 
-# 工程の値。**development-workflow の工程表の行名と一致させる。**
-# 綴りの違う値を書き込むと、ボードの側に工程表に無い値が増える。
-PJ_STAGES=$'要求と受け入れ条件\n作業場所の用意\n設計\n素材の収集と出典の確定\nドキュメント再構成\nドキュメントレビュー\n計画\n実装\n構造改善\n実装レビュー\n完了判定\nPull Request\n確定仕様化\n後片付け\n配布\n体裁レビュー\nリリース後テスト\n振り返り'
-PJ_MODES=$'light\noperation\nlegacy-refactor\nstandard\ndocumentation'
+# **工程名・モード・進め方の一覧はここに持たない（#725 の決定 3）。** 唯一の一覧は
+# development-workflow の workflow-common.sh（WF_STAGE_MATRIX / WF_MODES / WF_PACES）にあり、
+# 値の判定は wf_is_stage / wf_is_mode / wf_is_pace が行う。ここに写すと、一覧を変えるたびに
+# 2 か所を直すことになり、片方だけを直した版で本文と通過記録の工程名が食い違う（#459）。
 # ボードの既定のフィールド。GitHub が最初から持つもので、値も既定のまま使う。
 PJ_STATUSES=$'Todo\nIn Progress\nDone'
 
@@ -88,12 +88,7 @@ pj_field_name() {
 # パイプにしない。pipefail の下で grep -q が先に終わると printf が SIGPIPE を受け、
 # 一覧にある値でも 141 を返すため（#906）。
 _pj_in_list() { grep -Fxq -- "$2" <<<"$1"; }
-pj_is_stage() { _pj_in_list "$PJ_STAGES" "${1:-}"; }
-pj_is_mode() { _pj_in_list "$PJ_MODES" "${1:-}"; }
 pj_is_status() { _pj_in_list "$PJ_STATUSES" "${1:-}"; }
-# 進め方（#1078）。ボードのフィールドは持たず、issue の本文の見出し行と通過記録にだけ書く。
-PJ_PACES=$'normal\nfast\nauto'
-pj_is_pace() { _pj_in_list "$PJ_PACES" "${1:-}"; }
 
 # キーが取る値の種類。single-select は一覧で照合し、text は照合しない。
 pj_key_kind() {
@@ -104,13 +99,11 @@ pj_key_kind() {
   esac
 }
 
-# キーの値が妥当かを判定する。text は任意の文字列を受ける。
+# ボードだけが持つキー（status）と文字列のキーの値が妥当かを判定する。text は任意の文字列を受ける。
+# stage / mode / pace は工程表の値であり、呼ぶ側が workflow-common.sh の wf_is_* で判定する。
 pj_is_valid_value() {
   local key="${1:-}" value="${2:-}"
   case "$key" in
-    stage) pj_is_stage "$value" ;;
-    mode) pj_is_mode "$value" ;;
-    pace) pj_is_pace "$value" ;;
     status) pj_is_status "$value" ;;
     worktree|plan) [ -n "$value" ] ;;
     *) return 1 ;;
