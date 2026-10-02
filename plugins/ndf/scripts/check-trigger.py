@@ -558,9 +558,12 @@ def merged_at(root: Path, n: int) -> str:
     return sha
 
 
-def _pushed_note(pushed: list[str], unpushed: list[str]) -> str:
+def _pushed_result(root: Path, a_id: str, res: str, n: int, row: dict, to: str, review: bool) -> dict:
+    """`check-done/*` を `to` へ進め、進めた ref と送れなかった ref を添えた記録の結果。"""
+    pushed, unpushed = push_done(root, to, review)
     note = f"・origin の {' / '.join(pushed)} を進めた" if pushed else ""
-    return note + (f"・{' / '.join(unpushed)} を送れない（次の範囲は手元の記録から決まる）" if unpushed else "")
+    note += f"・{' / '.join(unpushed)} を送れない（次の範囲は手元の記録から決まる）" if unpushed else ""
+    return result(TOOL, "ok", f"検査 {a_id} を記録した（{res}・#{n}）{note}", [row], {"pushed": pushed, "unpushed": unpushed})
 
 
 def record_target(a, root: Path) -> tuple[dict, int]:
@@ -592,9 +595,7 @@ def record_target(a, root: Path) -> tuple[dict, int]:
     _append_or_stop(root, row)
     if not a.advance_done:
         return result(TOOL, "ok", f"検査 {a.id} を記録した（{res}・#{n}）", [row], {}), EXIT_OK
-    pushed, unpushed = push_done(root, row["to"], False)
-    note = _pushed_note(pushed, unpushed)
-    return result(TOOL, "ok", f"検査 {a.id} を記録した（{res}・#{n}）{note}", [row], {"pushed": pushed, "unpushed": unpushed}), EXIT_OK
+    return _pushed_result(root, a.id, res, n, row, row["to"], False), EXIT_OK
 
 
 def cmd_record(a, root: Path) -> tuple[dict, int]:
@@ -637,9 +638,7 @@ def cmd_record(a, root: Path) -> tuple[dict, int]:
     row["result"] = res
     _append_or_stop(root, row)
     delete_base(root, a.id)
-    pushed, unpushed = push_done(root, row["to"], a.review)
-    note = _pushed_note(pushed, unpushed)
-    return result(TOOL, "ok", f"検査 {a.id} を記録した（{res}・#{a.pr}）{note}", [row], {"pushed": pushed, "unpushed": unpushed}), EXIT_OK
+    return _pushed_result(root, a.id, res, a.pr, row, row["to"], a.review), EXIT_OK
 
 
 def push_done(root: Path, to: str, review: bool) -> tuple[list[str], list[str]]:
