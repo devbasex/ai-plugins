@@ -74,7 +74,8 @@
                  "resolved_threads": 4, "resolved_thread_ids": ["PRRT_kwDO..."],
                  "resolved_thread_positions": [
                    {"thread_id": "PRRT_kwDO...", "path": "src/foo.py", "line": 42}],
-                 "ci": "SUCCESS", "ci_note": null},
+                 "ci": "SUCCESS", "ci_note": null,
+                 "merge": {"stage": "done", "exit_code": 0}},
       "ended_at": "..."
     }
   ],
@@ -102,11 +103,16 @@
     {"pr": 123, "round": 1, "path": "src/foo.py", "line": 42, "severity": "minor",
      "comment_id": 3222849090, "summary": "...", "reason_for_rejection": "..."}
   ],
+  "reopens": [
+    {"at": "...", "from_final": "approved", "base_round": 3, "ended_at": "...",
+     "sweep": {"remaining_open": 0, "verified": true}}
+  ],
   "final": null
 }
 ```
 
-`final` 値: `approved` / `max_rounds` / `oscillation` / `error`
+`final` 値: `approved` / `max_rounds` / `oscillation` / `error`。確定した値から別の確定した値へ直接は移らない。
+確定した値から `null` へ戻すのは `init` がラウンドを足すときだけである（[01-state-and-review.md](01-state-and-review.md) の「ラウンドを足す」）。
 
 ### スロット名
 
@@ -254,6 +260,13 @@
   付けて決着したもので、`report` は残 deferred の一覧から外して件数だけを出す
 - `sweep` — 最終スイープ後の検証結果。`remaining_open` は GitHub 側で数え直した実数で、
   `declared_remaining_open` は結果ファイルの申告値。両者が食い違う場合は実数を採る
+- `reopens` — ラウンドを足した記録（古い順）。要素は `at`（足した時刻）・`from_final`（足す前の `final`）・
+  `base_round`（足した時点の `len(rounds)`）・`ended_at`・`sweep`（足す前の値。無ければ `null`）。鍵が無い状態ファイルは
+  足したことが無い（`base_round = 0`）として読む。上限・巻き直し・振動検知は最後の要素の `base_round` より後のラウンドで数える
+- `rounds[].fix.merge` — 修正の取り込みの段階。`stage` は `recorded`（記録を保存した）→ `posted`（返信・決着・まとめを
+  投稿した）→ `done`（CI の分類を終えた）、`exit_code` は `done` のときの取り込みの終了コード（0 / 3）。同じコミットの
+  戻り値ファイルで `merge-fix` を打ち直すと、`done` なら投稿も記録もせずに `exit_code` で抜け、そうでなければ済んでいない
+  段階から続ける。鍵が無い記録は `recorded` と読む（投稿キューが投稿済みの項目を送らずに済ませる）
 
 ## 再開で渡した引数の扱い
 
@@ -271,6 +284,37 @@
 **1 者指定は 2 行にまたがる。** 1 者指定（`--only`）は状態ファイルに載る項目であると同時に、
 参加する実行主体を決め直す引数でもある（`PARTICIPANT_ARGS`）。渡した再開は、指定した 1 者の
 認証確認をやり直し、通らなければ状態を書き換えずに終了コード 1 で止まる。
+
+## `record-fix`
+
+ホストが自分で直して送り、返信と Resolve を済ませたときに、修正の記録を作る。
+
+```bash
+python3 scripts/state.py record-fix <PR> [--commit <SHA>] [--resolved-thread <ID>]...
+```
+
+| 引数 | 既定 | 意味 |
+| --- | --- | --- |
+| `--commit` | PR の今の head の OID | 修正のコミット（送り済みであること） |
+| `--resolved-thread` | なし | 返信して Resolve したスレッドの node ID。繰り返して渡す |
+
+| 条件 | 振る舞い | 終了コード |
+| --- | --- | --- |
+| 最後のラウンドが無い・修正の記録が既にある | 書かずに理由を出す | 1 |
+| コミットが PR の head から辿れない（`compare/<commit>...<head>` が `identical` / `ahead` 以外か、取れない） | 書かずに `コミット <SHA> が PR の head にありません` | 5 |
+| PR の head・未解決の一覧を取れない、申告したスレッドが未解決 | 書かずに理由か未解決の ID を出す | 5 |
+| 上のどれでもない | 戻り値ファイル `fix-pr<PR>-result.json` を書き、`merge-fix` と同じ取り込み（送信は飛ばし、本文の揃え・記録・投稿・CI の分類）を通す | 取り込みの終了コード（0 / 3） |
+
+書く戻り値ファイルは [02-fix-and-rotation.md](02-fix-and-rotation.md) の戻り値スキーマの形で、`fixed_count` は申告した
+スレッドの数、`recorded_by` は取り込みが読まない出所の印である。
+
+```json
+{"pr": 1234, "fix_commit": "<SHA>", "fixed_count": 2, "resolved_threads": [{"thread_id": "PRRT_..."}],
+ "deferred": [], "rejected": [], "ci_status": null, "recorded_by": "record-fix"}
+```
+
+`drive.py` の修正の止まり（終了コード 20）で `record-fix` を打った後に `drive.py` を打ち直すと、取り込みは済んでいる
+ため `merge-fix` は記録した終了コードで戻る。
 
 ## AI への入出力契約（両 launcher 共通）
 

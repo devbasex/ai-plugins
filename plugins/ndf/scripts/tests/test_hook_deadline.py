@@ -50,7 +50,9 @@ def slow_git(tmp_path):
 
 def _payload(work: Path, tool: str = "Bash") -> str:
     tool_input = {"command": "echo hi > out.txt"} if tool == "Bash" else {"file_path": str(work / "a.py")}
-    return json.dumps({"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": tool_input, "cwd": str(work), "session_id": "t-deadline"})
+    return json.dumps(
+        {"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": tool_input, "cwd": str(work), "session_id": "t-deadline"}
+    )
 
 
 @pytest.mark.parametrize(

@@ -53,8 +53,10 @@ cd "$WORKTREE"
 
 `state.py init` が内部で行う処理:
 
-1. 既存 state.json があり `final == null` なら再開。**再開のときは PR 上の未解決の指摘を
-   数え、`carried_over` に記録する**（Step 3 の判定へ入る。取得できなければ記録は変えない）
+1. 既存 state.json があれば再開。`final` が確定していれば、先にラウンドを足す（下の「ラウンドを足す」）。
+   **再開のときは PR 上の未解決の指摘を数え、`carried_over` に記録する**（Step 3 の判定へ入る。取得できなければ
+   記録は変えない）。state.json が JSON として読めなければ、上書きせずに
+   `❌ レビューの状態ファイルを読めません: <パス>（<理由>）` を出して exit 1
 2. 自分の PR 判定（`gh api user` と `gh pr view --json author` を比較）
 3. worktree 作成（`<worktree-base>/<owner>--<repo>/pr<PR>`。`<worktree-base>` は `NDF_WORKTREE_BASE` env > `<システム tmpdir>/ndf-worktrees` の優先順で解決。既存パスが現リポジトリの登録済み worktree でなければ `.stale-<ts>` に退避して作り直す。実 path は state.json の `worktree_path` を参照）
 
@@ -87,6 +89,29 @@ cd "$WORKTREE"
 
 再開で渡した引数の扱いは [04-contracts.md](04-contracts.md) の同じ名前の節にある。
 
+### ラウンドを足す
+
+`final` が確定した（`approved` / `error` / `oscillation` / `max_rounds`）state.json に `init` を打つと、
+`final` を外し、`reopens` に 1 件積んでから今の再開の手順へ進む。足した記録の書き込みは再開の反映と同じ 1 回で、
+引数の反映が止まれば state.json は足す前のまま残る。標準エラーには次の 2 行が出る。
+
+```text
+↻ final=approved のレビューにラウンドを足す（round 4 から）
+↻ 前回中断 state から再開（round=3）
+```
+
+| 項目 | 扱い |
+| --- | --- |
+| `rounds` | 1 つも消さず変えない。次のラウンドは `len(rounds) + 1` |
+| `reopens[]` | `at`・`from_final`・`base_round`（足した時点の `len(rounds)`）・`ended_at`・`sweep` を持つ。古い順に積む |
+| `ended_at`・`sweep` | 足した記録へ移し、state.json からは消す（足した後の実行を前の実行の最終スイープで読まない） |
+| 上限・巻き直し・振動検知 | `base_round` より後のラウンドだけで数える。`--max-rounds` を渡せばその数で数え直す |
+| 足す前のラウンドの後始末のチェック | 最後の足した記録の `sweep` が `verified: true` かつ `remaining_open: 0` のときだけ当てない。それ以外は今と同じく当てる |
+
+`drive.py` から打つときは、終わりの時点の PR の head と今の head が違うか `--reopen` があれば新しい実行の回を始め、
+その `init` がラウンドを足す。head が同じなら前回の結果を返す。比べられないとき（head を持たない古い記録・今の
+head を取れない）は `ℹ head を比べられないため前回の結果を返す（足すなら --reopen）` を出して前回の結果を返す。
+
 ## Step 1: Round 開始判定
 
 ```bash
@@ -99,7 +124,7 @@ eval "$ROUND_VARS"
 # eval で取り込まれる変数: ROUND, ROUND_IN_PR, PR, MAX_ROUNDS, ROTATE_AFTER
 ```
 
-`state.py start-round` は `max_rounds` 超過なら `final=max_rounds` を書いて exit 1。
+`state.py start-round` は `max_rounds` 超過（最後にラウンドを足した時点より後のラウンドで数える）なら `final=max_rounds` を書いて exit 1。
 それ以外は新しい round エントリを state.rounds に push して KEY=VALUE を吐く。
 
 前のラウンドの後始末（返信と Resolve）が終わっていなければ **exit 5** で止まる。
@@ -458,6 +483,10 @@ Step 5 が担う返信と Resolve が飛ばされるため。
 判定の結果（`rounds[].verdict`）を持たない古い state.json では、保存された `intent` と
 重要度から判定し直して同じチェックへ通す。
 
+ホストが `/ndf:fix` を通さずに自分で直して送り、返信と Resolve を済ませたときは、戻り値ファイルを手で書かずに
+`state.py record-fix <PR> [--commit <SHA>] [--resolved-thread <ID>]...` で修正の記録を作る。形と終了コードは
+[04-contracts.md](04-contracts.md) の「`record-fix`」にある。
+
 ## Step 4: 振動検知
 
 ```bash
@@ -484,3 +513,7 @@ fi
 なる実測はまだ無いため、内訳を残して判断の材料を貯める。**
 
 PR ローテーション直後 (`round_in_pr < 2`) と現ラウンドの payload が無いときはスキップする。
+比べるのは最後にラウンドを足した時点より後のラウンドだけである。
+
+`final` が確定しているとき（`judge` が収束を書いた後など）は判定せず、`⏭ final=<値> は確定済み: 振動検知スキップ` を
+出して exit 2 で抜ける。`final` を書き換えないため、収束と中断が同じ出力に並ばない。
