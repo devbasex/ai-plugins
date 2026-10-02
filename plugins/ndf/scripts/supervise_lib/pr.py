@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -14,8 +15,10 @@ from supervise_lib.claude import TAIL
 from supervise_lib.paths import DECISIONS_SH
 from supervise_lib.pr_materials import CHANGES_HEADING, Materials, gather_materials
 from supervise_lib.prompts import PR_SYSTEM
+from step_result import result
 
 PR_FOOTER = "🤖 Generated with [Claude Code](https://claude.com/claude-code)"  # PR 本文の末尾の署名（1 度だけ）
+TITLE_MAX = 256  # 設計文書の H1 を題に使う上限（コードポイント。#1289 の決定 7）
 
 
 def user_changes(step: dict, title: str) -> str:
@@ -26,8 +29,48 @@ def user_changes(step: dict, title: str) -> str:
     return CHANGES_HEADING + "\n\n" + "\n".join(items)
 
 
+def design_title(path: Path) -> str | None:
+    """設計文書の題（#1289 の決定 1・7）。囲み（``` / ~~~）の外の最初の `# ` の行から `# ` を除き、前後の空白を
+    落とした文。ファイルが無い・読めない・H1 が無い・空・`TITLE_MAX` コードポイントを超えるときは None。"""
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    fence = ""
+    for line in text.splitlines():
+        mark = line.lstrip()[:3]
+        if mark in ("```", "~~~"):
+            fence = "" if fence == mark else (fence or mark)
+            continue
+        if not fence and line.startswith("# "):
+            title = line[2:].strip()
+            return title if title and len(title) <= TITLE_MAX else None
+    return None
+
+
+def sync_title(cwd: str, pr: int, doc: str) -> dict:
+    """設計 PR の題を設計文書の H1 に合わせ直す（#1289 の決定 9。`supervise.py sync-title`）。違うときだけ書き込み、
+    H1 を読めないときは書き込まない（人が付けた題を代わりの題で上書きしない）。gh の失敗も承認ゲートを止めないため
+    status は常に ok で、失敗は標準エラーへ出す。"""
+    title = design_title(Path(cwd) / doc)
+    if title is None:
+        return result("supervise-sync-title", "ok", f"{doc} から題を読めない。題は書き直さない", [], {"changed": 0})
+    now = gh_call.gh(["pr", "view", str(pr), "--json", "title", "--jq", ".title"], cwd=cwd)
+    if now.returncode != 0:
+        print(f"PR #{pr} の題を読めない: {now.stderr.strip()}", file=sys.stderr)
+        return result("supervise-sync-title", "ok", f"PR #{pr} の題を読めない", [], {"changed": 0})
+    if now.stdout.strip() == title:
+        return result("supervise-sync-title", "ok", f"PR #{pr} の題は H1 と同じ", [], {"changed": 0})
+    p = gh_call.gh(["pr", "edit", str(pr), "--title", title], cwd=cwd)
+    if p.returncode != 0:
+        print(f"PR #{pr} の題を書き直せない: {p.stderr.strip()}", file=sys.stderr)
+        return result("supervise-sync-title", "ok", f"PR #{pr} の題を書き直せない", [], {"changed": 0})
+    return result("supervise-sync-title", "ok", f"PR #{pr} の題を H1 に合わせた", [], {"changed": 1})
+
+
 class PrStep:
-    """push して Draft の Pull Request を作る。既にあれば本文だけを書き直す。本文は LLM に書かせてよい。"""
+    """push して Draft の Pull Request を作る。既にあれば本文だけを書き直す（`title_doc` の H1 を読めたときは題も）。
+    本文は LLM に書かせてよい。"""
 
     kind = "pr"
 
@@ -84,13 +127,15 @@ class PrStep:
             return False, err
         mats = self._materials(ctx, step, branch)
         title, changes, issues, body = self._machine_body(ctx, step, base, branch, mats)
+        # 設計 PR の題は設計文書の H1（#1289 の決定 1）。読めなければ title のまま出し、既存の PR の題は書き直さない
+        doc_title = design_title(Path(ctx.cwd) / step["title_doc"]) if step.get("title_doc") else None
         if step.get("body", "llm") == "llm":
             body = self._llm_body(ctx, step, body, changes, issues)
         body = self.with_appended(ctx, body, step, mats.sections)
         body = with_mode_line(body, ctx.plan.get("モード"), self.passed_stages(ctx, step))
         if step.get("decisions"):
             body = self.with_decisions(ctx, body, base)
-        return self._publish(ctx, base, branch, title, body)
+        return self._publish(ctx, base, branch, doc_title or title, body, retitle=doc_title is not None)
 
     def _push(self, ctx) -> tuple[str, str | None]:
         """HEAD を push する。`(ブランチ, 失敗の出力 | None)`。"""
@@ -183,13 +228,13 @@ class PrStep:
                 body = body.rstrip() + f"\n\n{PR_FOOTER}\n"
         return body
 
-    def _publish(self, ctx, base: str, branch: str, title: str, body: str) -> tuple[bool, str]:
-        """既存の PR があれば本文を書き直し、無ければ Draft で作る。"""
+    def _publish(self, ctx, base: str, branch: str, title: str, body: str, retitle: bool = False) -> tuple[bool, str]:
+        """既存の PR があれば本文を書き直し（retitle なら題も。#1289 の決定 6）、無ければ Draft で作る。"""
         found = gh_call.gh(
             ["pr", "list", "--head", branch, "--state", "open", "--json", "url", "--jq", ".[0].url"], cwd=ctx.cwd
         ).stdout.rstrip()
         if found:
-            p = gh_call.gh(["pr", "edit", found, "--body", body], cwd=ctx.cwd)
+            p = gh_call.gh(["pr", "edit", found, *(["--title", title] if retitle else []), "--body", body], cwd=ctx.cwd)
             url = found
         else:
             p = gh_call.gh(["pr", "create", "--draft", "--base", base, "--title", title, "--body", body], cwd=ctx.cwd)
