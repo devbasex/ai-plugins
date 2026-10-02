@@ -16,7 +16,8 @@
 | userPromptSubmit（Kiro CLI） | worktree の guard の、パスを見ない案内 |
 
 起動は `uv run` を挟まず、SessionStart が用意した環境の python を直に使う（`lib/hook_python.py`）。**どの失敗も
-終了コード 0 で、判定をせずに通す**（hook が止まると Tool の呼び出しが全部止まる）。拒否を返すのは token の guard だけで、
+終了コード 0 で、判定をせずに通す**（hook が止まると Tool の呼び出しが全部止まる）。PreToolUse と userPromptSubmit の
+guard は締め切り（`hook_lib/deadline.py`）の中で打ち、過ぎたら残りを飛ばして標準エラーへ 1 行残す。拒否を返すのは token の guard だけで、
 拒否があればそれだけを出す。案内は `additionalContext` に並べる。
 """
 
@@ -78,21 +79,42 @@ def dispatch(command: str, runtime: str, raw: dict | None) -> dict | str | None:
     if raw is None:
         return None
     ev = pl.event_of(raw)
-    outs = []
-    if command in ("", "worktree-guard") and (ev.tool_kind or ev.event in ("userPromptSubmit", "UserPromptSubmit")):
-        from hook_lib import worktree
-
-        outs.append(worktree.notice(ev))
-    if command == "token-guard" or (not command and runtime == "claude" and ev.event == "PreToolUse"):
-        from hook_lib import token_guard
-
-        if ev.tool in token_guard.TOOLS:
-            outs.append(token_guard.decision(ev))
+    outs: list = []
+    _guards(command, runtime, ev, outs)
     if not command and (ev.event in NOTIFY_EVENTS or ev.tool == "AskUserQuestion"):
         from hook_lib import wait_notify
 
         wait_notify.hook(runtime, raw)
     return _merge(outs)
+
+
+def _guards(command: str, runtime: str, ev, outs: list) -> None:
+    """worktree の guard と token の guard を締め切りの中で打ち、結果を `outs` へ足す（#1340 の I11・I12）。
+
+    guard が走るのは PreToolUse と userPromptSubmit（agy の入力は事象の名前を持たない）だけで、事象の名前を問わずに掛ける。
+    締め切りを過ぎたら残りの判定を飛ばし、標準エラーへ 1 行残す。それまでに終わった判定の結果（拒否を含む）は
+    `outs` に残り、今の `_merge` の規則で出る。
+    """
+    from hook_lib import deadline
+
+    dl = deadline.Deadline()
+    dl.start()
+    try:
+        if command in ("", "worktree-guard") and (ev.tool_kind or ev.event in ("userPromptSubmit", "UserPromptSubmit")):
+            dl.current = "worktree-guard"
+            from hook_lib import worktree
+
+            outs.append(worktree.notice(ev))
+        if command == "token-guard" or (not command and runtime == "claude" and ev.event == "PreToolUse"):
+            dl.current = "token-guard"
+            from hook_lib import token_guard
+
+            if ev.tool in token_guard.TOOLS:
+                outs.append(token_guard.decision(ev))
+    except deadline.HookDeadlineExceeded as e:
+        print(dl.notice(e.name), file=sys.stderr)
+    finally:
+        dl.cancel()
 
 
 def _opt(argv: list[str], name: str) -> str | None:
@@ -133,6 +155,9 @@ def main(argv: list[str]) -> int:
             sys.stdout.write(json.dumps(out, ensure_ascii=False) + "\n")
     except Exception:  # noqa: BLE001 — 環境が壊れている（import できない）・入力が読めない: 判定をせずに通す
         pass
+    except BaseException as e:  # 締め切りの割り込みが guard の外で届いた: 通す（hook_lib/deadline.py）
+        if type(e).__name__ != "HookDeadlineExceeded":
+            raise
     return 0
 
 
