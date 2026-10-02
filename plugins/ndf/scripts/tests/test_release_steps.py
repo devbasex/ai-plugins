@@ -283,7 +283,7 @@ def test_release_remakes_the_pr_when_merged_pr_misses_new_commits(monkeypatch, i
 
     monkeypatch.setattr(mod, "git", git)
     monkeypatch.setattr(mod, "git_root", lambda r: ".")
-    monkeypatch.setattr(mod, "require_bumped", lambda root, plugin, ver: None)
+    monkeypatch.setattr(mod.bump, "require_bumped", lambda root, plugin, ver: None)
     monkeypatch.setattr(mod, "find_pr", lambda root, head, base, states: {"number": 7, "state": "MERGED"})
     monkeypatch.setattr(mod, "changelog_section", lambda root, ver, plugin: "")
     monkeypatch.setattr(mod, "run_checks", lambda root: [])
@@ -645,7 +645,7 @@ def _release_prod(monkeypatch, root: Path, wt: dict, plugin: str):
 
     monkeypatch.setattr(mod, "git", git)
     monkeypatch.setattr(mod, "git_root", lambda r: root)
-    monkeypatch.setattr(mod, "require_bumped", lambda r, plugin, ver: None)
+    monkeypatch.setattr(mod.bump, "require_bumped", lambda r, plugin, ver: None)
     monkeypatch.setattr(mod, "find_pr", lambda r, head, base, states: found.append((head, base)))
     monkeypatch.setattr(mod, "changelog_section", lambda r, ver, plugin: "")
     monkeypatch.setattr(mod, "run_checks", lambda r: [])

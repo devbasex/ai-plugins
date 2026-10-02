@@ -665,28 +665,16 @@ def merge_commit_of(root, n):
     return ((d.get("mergeCommit") or {}).get("oid")) or None
 
 
-def require_bumped(root, plugin, ver):
-    """配る plugin の plugin.json の版が今回の版でなければ止める（bump が通らないまま版を上げない PR を出さない。#1315）。"""
-    pdir = plugin_dir(root, plugin)
-    try:
-        got = json.loads((pdir / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["version"]
-    except (OSError, ValueError, KeyError, TypeError) as e:
-        raise StepError(f"plugin.json の版を読めない: {e}", EXIT_PRECONDITION)
-    if got != ver:
-        raise StepError(f"{plugin} の plugin.json の版が {got} で、今回の版 {ver} でない（bump が通っていない）", EXIT_PRECONDITION)
-
-
 def cmd_release(a):
     root = git_root(a.root)
     ver = a.version
     base, prod, plugin = release_decl(root, a)
     plugins = [s.strip() for s in (a.plugins or plugin).split(",") if s.strip()]
-    branch = git(root, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
-    if branch != f"release/v{ver}":
+    if (branch := git(root, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()) != f"release/v{ver}":
         raise StepError(f"作業ツリーのブランチが release/v{ver} でない: {branch}", EXIT_PRECONDITION)
     if git(root, "status", "--porcelain", "--untracked-files=no").stdout.strip():
         raise StepError("作業ツリーにコミットしていない変更がある（bump と changelog をコミットしてから呼ぶ）", EXIT_PRECONDITION)
-    require_bumped(root, plugin, ver)
+    bump.require_bumped(root, plugin, ver)
 
     git(root, "push", "-q", "-u", "origin", "HEAD")
 
