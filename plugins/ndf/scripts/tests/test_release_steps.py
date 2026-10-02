@@ -283,6 +283,7 @@ def test_release_remakes_the_pr_when_merged_pr_misses_new_commits(monkeypatch, i
 
     monkeypatch.setattr(mod, "git", git)
     monkeypatch.setattr(mod, "git_root", lambda r: ".")
+    monkeypatch.setattr(mod, "require_bumped", lambda root, plugin, ver: None)
     monkeypatch.setattr(mod, "find_pr", lambda root, head, base, states: {"number": 7, "state": "MERGED"})
     monkeypatch.setattr(mod, "changelog_section", lambda root, ver, plugin: "")
     monkeypatch.setattr(mod, "run_checks", lambda root: [])
@@ -295,6 +296,32 @@ def test_release_remakes_the_pr_when_merged_pr_misses_new_commits(monkeypatch, i
     out = e.value.code
     assert ("merge-base", "--is-ancestor", "HEAD", "origin/develop") in calls
     assert (out["metrics"]["release_pr"], out["metrics"]["merge_commit"]) == ((7, "old-7") if in_develop else (9, "new-9"))
+
+
+@pytest.mark.parametrize("version", ["1.2.2", "1.2.3"])
+def test_release_stops_before_the_pr_when_plugin_json_is_not_bumped(monkeypatch, repo, version):
+    """#1315: plugin.json の版が今回の版でなければ、push も PR も作らずに前提の不足（3）で止まる。"""
+    import argparse
+
+    mod = _release_steps_module(monkeypatch)
+    pj = repo / "plugins" / "ndf" / ".claude-plugin" / "plugin.json"
+    pj.parent.mkdir(parents=True)
+    pj.write_text(json.dumps({"name": "ndf", "version": version}))
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "v")
+    git(repo, "checkout", "-q", "-b", "release/v1.2.3")
+    pushed = []
+    real_git = mod.git
+    monkeypatch.setattr(
+        mod, "git", lambda r, *args, check=True: pushed.append(args) if args[0] == "push" else real_git(r, *args, check=check)
+    )
+    monkeypatch.setattr(mod, "find_pr", lambda r, head, base, states: (_ for _ in ()).throw(SystemExit("pr")))
+    with pytest.raises((mod.StepError, SystemExit)) as e:
+        mod.cmd_release(argparse.Namespace(root=str(repo), version="1.2.3", plugins=None, channel="dev"))
+    if version == "1.2.3":
+        assert e.value.args == ("pr",) and pushed
+    else:
+        assert e.value.code == mod.EXIT_PRECONDITION and "1.2.2" in str(e.value) and not pushed
 
 
 def fake_gh(tmp_path: Path, prs: dict) -> dict:
@@ -618,6 +645,7 @@ def _release_prod(monkeypatch, root: Path, wt: dict, plugin: str):
 
     monkeypatch.setattr(mod, "git", git)
     monkeypatch.setattr(mod, "git_root", lambda r: root)
+    monkeypatch.setattr(mod, "require_bumped", lambda r, plugin, ver: None)
     monkeypatch.setattr(mod, "find_pr", lambda r, head, base, states: found.append((head, base)))
     monkeypatch.setattr(mod, "changelog_section", lambda r, ver, plugin: "")
     monkeypatch.setattr(mod, "run_checks", lambda r: [])
