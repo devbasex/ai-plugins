@@ -255,15 +255,6 @@ def _is_synthetic(row: dict) -> bool:
     return _message(row).get("model") == SYNTHETIC_MODEL
 
 
-def _is_assistant(row: dict) -> bool:
-    return row.get("type") == "assistant"
-
-
-def _responses(rows: list[dict]):
-    """合成でない assistant の応答だけを順に返す。"""
-    return (row for row in rows if _is_assistant(row) and not _is_synthetic(row))
-
-
 def _input_total(row: dict) -> int | None:
     usage = _message(row).get("usage")
     if not isinstance(usage, dict):
@@ -294,7 +285,7 @@ def _ending_of(rows: list[dict]) -> str:
     """表の上から順に判定し、最初に当たった値を返す（契約の終わり方の表）。"""
     last_assistant = -1
     for i, row in enumerate(rows):
-        if _is_assistant(row):
+        if row.get("type") == "assistant":
             last_assistant = i
     if any(row.get("type") == "user" for row in rows[last_assistant + 1 :]):
         return "in_progress"
@@ -310,7 +301,7 @@ def _tool_use_ids(rows: list[dict]) -> list[str]:
     """その記録が起動したサブエージェントの `tool_use` の id を集める。"""
     ids: list[str] = []
     for row in rows:
-        if not _is_assistant(row):
+        if row.get("type") != "assistant":
             continue
         content = _message(row).get("content")
         if not isinstance(content, list):
@@ -329,7 +320,9 @@ def _token_stats(rows: list[dict]) -> tuple[int | None, int | None, int | None]:
     """合成でない応答から固定費・最大充填・実作業を返す。"""
     fixed = None
     peak = None
-    for row in _responses(rows):
+    for row in rows:
+        if row.get("type") != "assistant" or _is_synthetic(row):
+            continue
         total = _input_total(row)
         if total is not None:
             if fixed is None:
@@ -343,7 +336,9 @@ def _model_stats(rows: list[dict]) -> tuple[int, str | None]:
     """合成でない応答から応答数と最頻出モデルを返す。"""
     seen: set[str] = set()
     models: Counter = Counter()
-    for row in _responses(rows):
+    for row in rows:
+        if row.get("type") != "assistant" or _is_synthetic(row):
+            continue
         message_id = _message(row).get("id")
         if isinstance(message_id, str) and message_id and message_id not in seen:
             seen.add(message_id)
@@ -368,7 +363,7 @@ def _count_interruptions(rows: list[dict]) -> int:
     interruptions = 0
     pending = 0
     for row in rows:
-        if not _is_assistant(row):
+        if row.get("type") != "assistant":
             continue
         if _is_synthetic(row):
             if _error_status(row) == "429":
@@ -396,7 +391,7 @@ def _fill_rate_limit(rows: list[dict], record: AgentRecord) -> None:
     if record.ending != "rate_limit":
         return
     for row in reversed(rows):
-        if not _is_assistant(row) or not _is_synthetic(row):
+        if row.get("type") != "assistant" or not _is_synthetic(row):
             continue
         quota = row.get("quotaLimits")
         if isinstance(quota, dict):
