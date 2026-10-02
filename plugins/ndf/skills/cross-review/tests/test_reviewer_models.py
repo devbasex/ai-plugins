@@ -54,7 +54,10 @@ def test_the_seat_model_is_recorded_even_when_no_result_is_left(tmp_dir, state_m
     pathlib.Path(f"{stem}-launch.json").write_text(
         json.dumps({"runtime": "claude", "workdir": str(tmp_dir), "started_at": "2026-10-02T00:00:01Z"}), encoding="utf-8"
     )
-    usage = {"claude-haiku-4-5": {"inputTokens": 3944, "outputTokens": 28}, "claude-opus-5[1m]": {"inputTokens": 22, "cacheReadInputTokens": 639525}}
+    usage = {
+        "claude-haiku-4-5": {"inputTokens": 3944, "outputTokens": 28},
+        "claude-opus-5[1m]": {"inputTokens": 22, "cacheReadInputTokens": 639525},
+    }
     pathlib.Path(f"{stem}-stdout.log").write_text(json.dumps({"modelUsage": usage}), encoding="utf-8")
 
     assert _read_result("claude-2", tmp_dir) == 1

@@ -37,11 +37,15 @@ def _launch(stem: pathlib.Path, runtime: str, workdir: pathlib.Path, started_at:
     )
 
 
-def _rollout(home: pathlib.Path, sid: str, cwd: pathlib.Path, at: str, models_: tuple[str, ...] = ("gpt-6.1-sol",), day: str | None = None) -> pathlib.Path:
+def _rollout(
+    home: pathlib.Path, sid: str, cwd: pathlib.Path, at: str, models_: tuple[str, ...] = ("gpt-6.1-sol",), day: str | None = None
+) -> pathlib.Path:
     day = day or at[:10]
     directory = home / "sessions" / day[:4] / day[5:7] / day[8:10]
     directory.mkdir(parents=True, exist_ok=True)
-    rows: list[dict] = [{"timestamp": at, "type": "session_meta", "payload": {"id": sid, "session_id": sid, "cwd": str(cwd), "timestamp": at}}]
+    rows: list[dict] = [
+        {"timestamp": at, "type": "session_meta", "payload": {"id": sid, "session_id": sid, "cwd": str(cwd), "timestamp": at}}
+    ]
     rows.append({"timestamp": at, "type": "response_item", "payload": {"type": "message", "content": [{"text": SECRET}]}})
     rows += [{"timestamp": at, "type": "turn_context", "payload": {"cwd": str(cwd), "model": m}} for m in models_]
     path = directory / f"rollout-{at[:19].replace(':', '-')}-{sid}.jsonl"
@@ -222,7 +226,9 @@ def test_launch_cli_writes_the_launch_record_before_cd(tmp_path):
     pathlib.Path(f"{stem}-launch.json").write_text('{"started_at": "2000-01-01T00:00:00Z"}', encoding="utf-8")
     env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
     # 作業ディレクトリは相対のシンボリックリンクで渡す。記録には実パスが入る
-    subprocess.run([str(LAUNCH), "codex", "link", str(prompt), str(stem), "", "", "60"], cwd=tmp_path, env=env, check=True, capture_output=True)
+    subprocess.run(
+        [str(LAUNCH), "codex", "link", str(prompt), str(stem), "", "", "60"], cwd=tmp_path, env=env, check=True, capture_output=True
+    )
     record = json.loads(pathlib.Path(f"{stem}-launch.json").read_text(encoding="utf-8"))
     assert record["runtime"] == "codex"
     assert record["workdir"] == os.path.realpath(work)
