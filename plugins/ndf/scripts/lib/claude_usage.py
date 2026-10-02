@@ -221,18 +221,33 @@ def parse_usage(d: dict | None, now: float) -> Usage:
 # ---------------------------------------------------------------- 宛先
 
 
-def _http(req: urllib.request.Request, timeout: float) -> tuple[int, dict | None]:
-    """(状態, JSON)。通信の失敗は (0, None)、JSON でなければ (状態, None)。"""
-    req.add_header("User-Agent", "ndf-claude-accounts")
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):  # 3xx を送り直さず HTTPError として返す
+        return None
+
+
+def http_json(
+    req: urllib.request.Request, timeout: float, *, body: dict | None = None, follow_redirects: bool = True
+) -> tuple[int, dict | None]:
+    """(状態, JSON)。通信の失敗は (0, None)、JSON でなければ (状態, None)。
+
+    `body` を渡すと JSON の本文として送る（方法は `req` の `method`）。`follow_redirects=False` なら 3xx を追わず、
+    その状態コードを返す（トークンを転送先へ送らない）。"""
+    if not req.has_header("User-agent"):
+        req.add_header("User-Agent", "ndf-claude-accounts")
+    if body is not None:
+        req.data = json.dumps(body).encode()
+        req.add_header("Content-Type", "application/json")
+    open_ = urllib.request.urlopen if follow_redirects else urllib.request.build_opener(_NoRedirect).open
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as f:
-            status, body = f.status, f.read()
+        with open_(req, timeout=timeout) as f:
+            status, raw = f.status, f.read()
     except urllib.error.HTTPError as e:
-        status, body = e.code, b""
+        status, raw = e.code, b""
     except (OSError, ValueError):
         return 0, None
     try:
-        data = json.loads(body)
+        data = json.loads(raw)
     except ValueError:
         return status, None
     return status, data if isinstance(data, dict) else None
@@ -244,7 +259,7 @@ def get_usage(access_token: str, now: float) -> tuple[int, Usage]:
         os.environ.get("NDF_ACCOUNT_USAGE_URL") or USAGE_URL,
         headers={"Authorization": f"Bearer {access_token}", "anthropic-beta": "oauth-2025-04-20"},
     )
-    status, d = _http(req, HTTP_TIMEOUT)
+    status, d = http_json(req, HTTP_TIMEOUT)
     if status == 0:
         return 0, Usage(fetched_at=now, error="network")
     if status != 200:
@@ -268,7 +283,7 @@ def refresh_oauth(o: dict, now: float, timeout: float = 30) -> tuple[str, dict |
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    status, d = _http(req, timeout)
+    status, d = http_json(req, timeout)
     # 取り消し（invalid_grant など）と分かる 400/401/403 だけを rejected にする。429・408・5xx・通信の失敗・
     # 形の崩れた 200 は一時的な失敗として error（今のトークンを使い、次回に再試行する）にする
     if status in REFRESH_REJECTED:
