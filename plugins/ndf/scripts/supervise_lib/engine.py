@@ -174,7 +174,7 @@ class Engine:
         return self.check_runtimes()
 
     def check_runtimes(self) -> tuple[str, str] | None:
-        """work / drive ステップの worker の起動先を、ランタイムの宣言（#1598）とすべて照らす。
+        """work / drive / judge ステップの起動先を、ランタイムの宣言（#1598）とすべて照らす。
 
         どのステップも流す前に照らし、外か宣言が壊れていれば (止まった, 理由) を返す（AC9・AC10）。
         `runtime` が無いか `claude-p` のステップと、`"full": true` のステップ（`runtime` を見ずに
@@ -202,7 +202,8 @@ class Engine:
             try:
                 policy.require([target], f"ステップ {sid} の runtime")
             except runtime_policy.RuntimePolicyError as e:
-                return "止まった", f"ステップ {sid} の worker を起動しない: {e}"
+                what = "judge（claude で判定する）" if kind == "judge" else "worker"
+                return "止まった", f"ステップ {sid} の {what} を起動しない: {e}"
         return None
 
     def prepare(self, start: str | None) -> tuple[str, str] | None:

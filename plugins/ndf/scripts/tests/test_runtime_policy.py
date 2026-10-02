@@ -296,6 +296,7 @@ def test_supervise_stops_steps_that_launch_claude_directly(tmp_path, step):
     _declare(work, {"allowed": ["codex"]})
     stopped = eng.check_runtimes()
     assert stopped is not None and "ステップ w" in stopped[1] and "claude" in stopped[1]
+    assert step["type"] != "judge" or "judge" in stopped[1]
 
 
 def test_supervise_claude_runner_refuses_outside_claude(tmp_path, monkeypatch):
