@@ -144,36 +144,31 @@ def sweep(root, ref) -> tuple[list[dict], dict]:
         if hit is None:
             metrics["kept_trash"] += 1
             continue
-        item = _remove(d, led, hit, ref)
-        items.append(item)
-        metrics["swept_trash" if item["result"] == "removed" else "kept_trash"] += 1
+        try:
+            shutil.rmtree(d)
+            ledger_of(d).unlink(missing_ok=True)
+        except OSError as e:
+            items.append({"kind": "trash", "name": str(d), "result": "kept", "reason": f"消せない: {e}"})
+            metrics["kept_trash"] += 1
+            continue
+        items.append(
+            {
+                "kind": "trash",
+                "name": str(d),
+                "result": "removed",
+                "reason": f"{led.get('branch')} の {hit[:12]} が本番（{ref[:12]}）に含まれる",
+            }
+        )
+        metrics["swept_trash"] += 1
     if unledgered:
         metrics["unledgered_trash"] = len(unledgered)
-        items.append(_unledgered_item(base, unledgered))
+        names = ", ".join(unledgered[:5]) + ("…" if len(unledgered) > 5 else "")
+        items.append(
+            {
+                "kind": "trash",
+                "name": str(base),
+                "result": "kept",
+                "reason": f"台帳の無い退避先 {len(unledgered)} 件（{names}）は本番に出たかを決められないため消さない",
+            }
+        )
     return items, metrics
-
-
-def _remove(d, led, hit, ref) -> dict:
-    """退避先 1 件と台帳を消し、結果の item を返す（消せなければ kept）。"""
-    try:
-        shutil.rmtree(d)
-        ledger_of(d).unlink(missing_ok=True)
-    except OSError as e:
-        return {"kind": "trash", "name": str(d), "result": "kept", "reason": f"消せない: {e}"}
-    return {
-        "kind": "trash",
-        "name": str(d),
-        "result": "removed",
-        "reason": f"{led.get('branch')} の {hit[:12]} が本番（{ref[:12]}）に含まれる",
-    }
-
-
-def _unledgered_item(base, names) -> dict:
-    """台帳の無い退避先をまとめた 1 件の item。"""
-    shown = ", ".join(names[:5]) + ("…" if len(names) > 5 else "")
-    return {
-        "kind": "trash",
-        "name": str(base),
-        "result": "kept",
-        "reason": f"台帳の無い退避先 {len(names)} 件（{shown}）は本番に出たかを決められないため消さない",
-    }
