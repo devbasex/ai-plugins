@@ -2947,6 +2947,27 @@
       "meaning": "設計文書の「設計の結果」の節の表。課題ごとに扱い（実装する / 取り込む / 閉じる）・取り込み先・触るファイルを書き、実装のステージの前に機械が読む",
       "source": "",
       "pending_source": "issues/issue-1485-design.md"
+    },
+    {
+      "term": "レビューの状態ファイル",
+      "context": "ndf-cross-review",
+      "meaning": "cross-review が <worktree>/.cross_review/cross-review-pr<PR>-state.json に置く、ラウンドの履歴（rounds）と終わり方（final）の記録",
+      "source": "",
+      "pending_source": "issues/issue-1340-requirements.md"
+    },
+    {
+      "term": "修正の記録",
+      "context": "ndf-cross-review",
+      "meaning": "修正の工程が作る戻り値ファイル（fix-pr<PR>-result.json）を merge-fix がレビューの状態ファイルへ取り込んだもの。修正必須のラウンドの次のラウンドを始める条件",
+      "source": "",
+      "pending_source": "issues/issue-1340-requirements.md"
+    },
+    {
+      "term": "hook の上限",
+      "context": "ndf-workflow",
+      "meaning": "ランタイムの hook の定義（hooks/*.json・dev.agy/hooks.json）の timeout。過ぎるとランタイムが hook を打ち切る",
+      "source": "",
+      "pending_source": "issues/issue-1340-requirements.md"
     }
   ]
 }
