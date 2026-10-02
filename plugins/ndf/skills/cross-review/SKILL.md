@@ -44,6 +44,7 @@ PR を**既定の参加者プール（claude / codex / kiro とホスト）か�
 - [docs/04-contracts.md](docs/04-contracts.md) — 状態ファイルの形式と AI への入出力の契約（手順の途中では読まない）
 - [docs/05-pool-and-convergence.md](docs/05-pool-and-convergence.md) — 誰がレビューし、いつ止めるか（参加者プール・担当の輪番・認証・終了基準の 3 層）
 - [docs/06-evidence.md](docs/06-evidence.md) — 指摘に求める根拠と反証条件、独立発見の規約、効果の測定（4 つの集約方式と限界）
+- [docs/07-posts-and-records.md](docs/07-posts-and-records.md) — 状態ファイルの外へ書くもの（投稿の種別ごとの契約・投稿キュー・監視と計測が残すファイル。手順の途中では読まない）
 - [scripts/drive.py](scripts/drive.py) — 収束ループの駆動（LLM が要る地点で pause を返して止まる）
 - [scripts/state.py](scripts/state.py) — state.json 操作。起動・監視・巻き直しは `launch-reviewer.sh` / `monitor.py` / `rotate-pr.sh`、効果の測定は `measure.py`（状態を保存するたびに呼ばれる）
 
@@ -133,7 +134,7 @@ Skill のディレクトリで次の 1 行を打ち、最後の行の結果 JSON
 渡す**（再開で渡した引数の扱いは [docs/04-contracts.md](docs/04-contracts.md) の「再開で渡した引数の扱い」）。
 
 ```bash
-python3 scripts/drive.py <PR> [--rotate-mode light|squash] [--max-rounds N] [--rotate-after K] [--host H] [--only R] \
+python3 scripts/drive.py <PR> [--rotate-mode light|squash] [--reopen] [--max-rounds N] [--rotate-after K] [--host H] [--only R] \
   [--exclude N] [--include N] [--require-all] [--focus TEXT] [--extra-instructions-file PATH] [--verify-command CMD] [--verify-exit-code N]
 ```
 
@@ -166,6 +167,12 @@ JSON の形と終了コードの表は共通ライブラリの `scripts/lib/driv
 再開は同じコマンドを打ち直すだけである。進みは耐久の記録（`~/.local/state/ndf/dbos/review-<鍵>.sqlite`）と state.json にあり、pause の
 結果ファイルがあればその続きから進む。`metrics` は state.json から数えた件数（`rounds` / `prs` / `findings` /
 `fixed` / `deferred` / `rejected` / `unresolved` / `final` / `review_status`）である。
+
+**終わったレビューにもう一度回すときも、同じコマンドを打ち直すだけである。** state.json を開かない・`mv` しない・
+書き換えない。終わりの時点の PR の head と今の head が違えば（差分を足した）、`state.py init` が `final` を外して
+`reopens` に 1 件積み、前のラウンドを残したまま次の番号のラウンドから続ける。上限・巻き直し・振動検知は足した時点から
+数え直す。head が同じなら前回の結果を返す。差分を足さずに回すとき（担当の認証で `error` になった、など）は `--reopen` を
+付ける。手順と鍵は [docs/01-state-and-review.md](docs/01-state-and-review.md) の「ラウンドを足す」にある。
 
 ## レビュー出力の制約と運用の切り分け
 

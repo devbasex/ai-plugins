@@ -53,7 +53,7 @@
       "kind": "構造改善",
       "stage": "構造改善",
       "timeout": 3600,
-      "args": "{pr} --workflow-step --scope $(gh api 'repos/{owner}/{repo}/pulls/{pr}/files' --paginate --jq '.[].filename' | xargs -n1 dirname | sort -u | grep -vx '\\.')",
+      "cmd": "ndf_scope=$(python3 <NDF>/scripts/refactor-scope.py --pr {pr}) || exit 2; python3 <NDF>/skills/cross-refactoring/scripts/drive.py {pr} --workflow-step --scope $ndf_scope",
       "on_fail": "abort",
       "next": "review"
     },

@@ -35,6 +35,7 @@ from review_lib.commands import (  # noqa: E402
     loop,
     merge_fix,
     read_result,
+    record_fix,
     report,
     start_round,
     verify_findings,
@@ -199,6 +200,16 @@ def _add_merge_fix_parser(sub: _Subparsers) -> None:
     sp.set_defaults(func=merge_fix.cmd_merge_fix)
 
 
+def _add_record_fix_parser(sub: _Subparsers) -> None:
+    sp = sub.add_parser(
+        "record-fix", help="Step 5 の代わり — ホストが自分で直した修正を確かめて修正の記録にする (0/3=取り込み/5=確かめられない)"
+    )
+    sp.add_argument("pr", type=int)
+    sp.add_argument("--commit", default=None, help="修正のコミット（既定は PR の今の head）")
+    sp.add_argument("--resolved-thread", action="append", default=[], help="返信して Resolve したスレッドの node ID（繰り返して渡す）")
+    sp.set_defaults(func=lambda a: record_fix.cmd_record_fix(a, merge_fix.ingest_fix))
+
+
 def _add_should_rotate_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser("should-rotate", help="Step 6 — rotate 要否 (0=rotate/2=keep)")
     sp.add_argument("pr", type=int)
@@ -245,6 +256,7 @@ _SUBCOMMAND_REGISTRARS = (
     _add_verify_findings_parser,
     _add_collect_critiques_parser,
     _add_merge_fix_parser,
+    _add_record_fix_parser,
     _add_should_rotate_parser,
     _add_set_current_pr_parser,
     _add_verify_sweep_parser,

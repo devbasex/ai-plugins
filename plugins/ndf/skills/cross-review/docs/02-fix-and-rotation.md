@@ -6,6 +6,7 @@
 |---|---|
 | (Agent) | Step 5 — 修正サブエージェント起動（メインからの責務） |
 | `scripts/state.py merge-fix` | Step 5 後段 — fix 戻り値マージ + CI 分類 |
+| `scripts/state.py record-fix` | Step 5 の代わり — ホストが自分で直して送った修正を確かめて記録にする |
 | `scripts/state.py should-rotate` | Step 6 — rotate 要否判定 |
 | `scripts/rotate-pr.sh prepare` | Step 6a — 旧 PR の素材を `rotate-pr<STATE_PR>-prepare.json` に dump |
 | (Agent) | Step 6b — light モードのみ。新 PR の title/body を再生成して `rotate-pr<STATE_PR>-newtext.json` に書き出し |
@@ -60,9 +61,10 @@ fi
 
 `state.py merge-fix` が内部で行う処理:
 
-1. `$TMP_DIR/fix-pr<PR>-result.json` を読んで `state.rounds[-1].fix` にマージ
+1. `$TMP_DIR/fix-pr<PR>-result.json` を読んで `state.rounds[-1].fix` にマージ（段階 `recorded`）
 2. `deferred` を `state.deferred_nits` に追記
-3. **CI 失敗の分類**:
+3. 返信・決着・まとめを投稿する（段階 `posted`）
+4. **CI 失敗の分類**（段階 `done`）:
    - code-fail（チェックジョブの名前がメタのチェック（`review_lib/ci.py` の `CI_META_PATTERNS`）に当たらない。テスト・lint・型検査・ビルドはここに入る）: `final=error` で中断 (exit 3)
    - meta-only (`check_pr_requirements` / `assignees` / `reviewers` / `labels` / `meta`): `ci_note` に記録して継続
    - 不明: 保守的に code-fail 扱い
@@ -73,6 +75,16 @@ meta-only の語は**区切りで挟まれた語として**一致したときだ
 
 **例**: `check_pr_requirements`（Assignees 未設定）はループ継続、
 lint や型検査の失敗は即中断してユーザ判断。
+
+**同じコミットを 2 回取り込まない。** 段階は `rounds[-1].fix.merge` に書き進める。最後のラウンドの `fix.commit` と
+戻り値ファイルのコミットが同じなら、`done` のときは何も書かず投稿もせずに記録した終了コード（0 / 3）で抜け、
+`done` でなければ済んでいない段階（投稿・CI の分類）から続ける。投稿の途中で止まった取り込みを打ち直しても、
+送信と記録はやり直さない。
+
+**ホストが `/ndf:fix` を通さずに自分で直したとき**は、コミットを送り、返信と Resolve を済ませてから
+`state.py record-fix <PR> --resolved-thread <ID>...` を打つ。コミットが PR の head から辿れることと、申告したスレッドが
+解決済みであることを GitHub で確かめ、戻り値ファイルを書いて同じ取り込みを通す（送信は飛ばす）。確かめられなければ
+記録を作らずに exit 5。形は [04-contracts.md](04-contracts.md) の「`record-fix`」にある。
 
 **収束の判定（Step 3）も同じ振り分けを使う**（#327）。両方の AI が承認したラウンドは、
 収束を返す前に `commits/{HEAD_OID}/check-runs` を **1 度だけ** 照会する。code-related の
