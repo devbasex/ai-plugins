@@ -359,23 +359,22 @@ def _classify_checks(root, n, rollup):
     failed += [name for name, _run, _job, conclusion in settled if conclusion.upper() in FAIL_CONCLUSIONS]
     first = [s for s in stale if s[3] <= 1]  # s[3] は試行回数
     again = [(name, run, job, attempt) for name, run, job, attempt in stale if attempt > 1]
-    if failed:
-        return "failed", [_check_item(n, f, "failed") for f in failed]
-    if first:
-        return "stale", first
-    if again:
-        return "stale_again", [
-            _check_item(n, name, "stale_again", run=run, job=job, attempt=attempt) for name, run, job, attempt in again
-        ]
-    if settled:
-        return "settled", [
-            _check_item(n, name, "settled", run=run, job=job, conclusion=conclusion) for name, run, job, conclusion in settled
-        ]
-    if queued:
-        return "queued", [_check_item(n, q, "queued") for q in queued]
-    if pending:
-        return "running", [_check_item(n, c, "running") for c in pending]
-    return "passed", []
+    # 優先順に並べ、根拠が空でない最初の分類を返す
+    ranked = (
+        ("failed", [_check_item(n, f, "failed") for f in failed]),
+        ("stale", first),
+        ("stale_again", [_probe_item(n, s, "stale_again", "attempt") for s in again]),
+        ("settled", [_probe_item(n, s, "settled", "conclusion") for s in settled]),
+        ("queued", [_check_item(n, q, "queued") for q in queued]),
+        ("running", [_check_item(n, c, "running") for c in pending]),
+    )
+    return next(((kind, items) for kind, items in ranked if items), ("passed", []))
+
+
+def _probe_item(n, probe, result, last):
+    """probe_checks の 1 件 (name, run, job, 試行回数か結論) を根拠の 1 件にする。last は 4 つ目の要素の名前。"""
+    name, run, job, value = probe
+    return _check_item(n, name, result, run=run, job=job, **{last: value})
 
 
 def _rerun_stale(root, n, first, act):
