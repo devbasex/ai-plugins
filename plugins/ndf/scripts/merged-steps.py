@@ -356,17 +356,21 @@ def _classify_checks(root, n, rollup):
     """rollup のチェックを分類する。(分類, 根拠) を返す。stale の根拠は取り残された初回のチェックそのもの。"""
     pending, failed, passed = check_states(rollup)
     stale, queued, settled = probe_checks(root, rollup) if pending else ([], [], [])
-    failed += [s[0] for s in settled if s[3].upper() in FAIL_CONCLUSIONS]
-    first = [s for s in stale if s[3] <= 1]
-    again = [s for s in stale if s[3] > 1]
+    failed += [name for name, _run, _job, conclusion in settled if conclusion.upper() in FAIL_CONCLUSIONS]
+    first = [s for s in stale if s[3] <= 1]  # s[3] は試行回数
+    again = [(name, run, job, attempt) for name, run, job, attempt in stale if attempt > 1]
     if failed:
         return "failed", [_check_item(n, f, "failed") for f in failed]
     if first:
         return "stale", first
     if again:
-        return "stale_again", [_check_item(n, s[0], "stale_again", run=s[1], job=s[2], attempt=s[3]) for s in again]
+        return "stale_again", [
+            _check_item(n, name, "stale_again", run=run, job=job, attempt=attempt) for name, run, job, attempt in again
+        ]
     if settled:
-        return "settled", [_check_item(n, s[0], "settled", run=s[1], job=s[2], conclusion=s[3]) for s in settled]
+        return "settled", [
+            _check_item(n, name, "settled", run=run, job=job, conclusion=conclusion) for name, run, job, conclusion in settled
+        ]
     if queued:
         return "queued", [_check_item(n, q, "queued") for q in queued]
     if pending:
