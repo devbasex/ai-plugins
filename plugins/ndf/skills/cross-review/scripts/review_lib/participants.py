@@ -49,7 +49,7 @@ def _apply_resume_args_block(st: dict[str, Any], args: argparse.Namespace) -> bo
     # **再開した時点の宣言に従う（#1598 の前提 8）。** 記録の写しと今の宣言が違えば、引数が無くても作り直す。
     policy_changed = runtime_policy.differs_from_record(policy, st.get("participants") or {})
     if any(getattr(args, name, None) is not None for name in PARTICIPANT_ARGS) or policy_changed:
-        _rebuild_participants(st, args, policy)
+        _reresolve_resume_participants(st, args, policy)
 
     return len(st.get("resume_changes") or []) > before
 
@@ -72,7 +72,7 @@ def _apply_plain_resume_args(st: dict[str, Any], args: argparse.Namespace, only:
         review_lib.info(line)
 
 
-def _rebuild_participants(st: dict[str, Any], args: argparse.Namespace, policy: Any) -> None:
+def _reresolve_resume_participants(st: dict[str, Any], args: argparse.Namespace, policy: Any) -> None:
     """渡さなかった担当の引数を状態ファイルの値で補い、使える者を解決し直して記録する（決定 14）。"""
     _, include, exclude = _normalize_participant_args(args)
     old_participants = st.get("participants")

@@ -110,7 +110,7 @@ def run_ticking(
     err_path を渡すと stderr をそのファイルへ書かせる（待ちの間に最後の行を読めるように）。
     子は新しいセッションで起こし、`watch_children` の知らせる先へ渡す（孤児の片付け）。打ち切りは子のプロセスグループを止めて subprocess.TimeoutExpired を投げる。
     tick() が例外を投げたら（遅れの見張りの打ち切り）、子のプロセスグループを止めてから投げ直す。"""
-    with _err_file(err_path) as errf:
+    with open(err_path, "w", encoding="utf-8") if err_path else contextlib.nullcontext() as errf:  # 閉じ済みでも閉じ直してよい
         p = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE if input is not None else subprocess.DEVNULL,
@@ -129,17 +129,6 @@ def run_ticking(
         finally:
             if note:
                 note(p.pid, False)
-
-
-@contextlib.contextmanager
-def _err_file(err_path: Path | None):
-    """stderr を書かせるファイルを開き、抜けるときに閉じていなければ閉じる。err_path が無ければ None。"""
-    errf = open(err_path, "w", encoding="utf-8") if err_path else None
-    try:
-        yield errf
-    finally:
-        if errf and not errf.closed:
-            errf.close()
 
 
 def _communicate_with_ticks(p, errf, err_path, every, deadline, input, tick, cmd, timeout) -> subprocess.CompletedProcess:
