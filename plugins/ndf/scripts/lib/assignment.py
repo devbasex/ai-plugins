@@ -96,7 +96,7 @@ def default_pool(host: str) -> list[str]:
 
 @dataclass
 class Participants:
-    """使える者の解決の結果。状態ファイルの `participants` のうち `fallback` を除く 8 項目。
+    """使える者の解決の結果。状態ファイルの `participants` のうち `fallback` を除く 9 項目。
 
     `fallback`（席の埋め合わせに使える者）は cross-review だけが持つため、呼び出し側が
     `to_state()` の辞書へ足す。`ignored_exclude` は「外す指定をしたが母集合に無かったため
@@ -111,6 +111,8 @@ class Participants:
     unavailable: dict[str, str] = field(default_factory=dict)
     probe_skipped: bool = False
     require_all: bool = False
+    # 決めた時点のランタイムの宣言の写し（`RuntimePolicy.to_state()`）。宣言が無ければ `None`（#1598）。
+    policy: Optional[dict[str, Any]] = None
 
     def to_state(self) -> dict[str, Any]:
         return {
@@ -122,6 +124,7 @@ class Participants:
             "unavailable": dict(self.unavailable),
             "probe_skipped": self.probe_skipped,
             "require_all": self.require_all,
+            "policy": dict(self.policy) if self.policy is not None else None,
         }
 
 
@@ -162,6 +165,7 @@ def resolve_participants(
     only: Optional[str] = None,
     probe: Probe,
     require_all: bool = False,
+    policy: Any = None,
 ) -> Participants:
     """母集合の既定・足す者・外す者・1 者指定から使える者を決める（設計の決定 2〜4）。
 
@@ -180,12 +184,19 @@ def resolve_participants(
 
     名前の綴りのチェック（argparse の型）はこの前段で済んでいる前提だが、ここでも
     `ALL_RUNTIMES` に無い名前は弾く。
+
+    `policy`（`runtime_policy.RuntimePolicy`。#1598）があれば、1 の後で `include` と `only` を
+    宣言と照らし（外があれば `RuntimePolicyError`）、`pool` を `allowed` で絞ってから 2 へ進む。
+    認証確認（4）は宣言の中の者にしか呼ばない。絞った結果、参加者が 0 なら止める。
     """
     pool = list(pool)
     include = list(include)
     exclude = list(exclude)
 
     _validate_names(include, exclude, only)
+    if policy is not None:
+        policy.require([*include, only], "--include / --only")
+        pool = [n for n in pool if policy.allows(n)]
     base = set(pool) | set(include)
     if only is not None and only not in base:
         base.add(only)
@@ -193,6 +204,11 @@ def resolve_participants(
     exclude = [n for n in exclude if n in base]
 
     participants = _in_fixed_order(base - set(exclude))
+    if policy is not None and not participants:
+        raise AssignmentError(
+            f"宣言の中に参加者がいません（{policy.path} の allowed: {', '.join(policy.allowed)}）。"
+            "--include で宣言の中のランタイムを足すか、宣言を直す"
+        )
 
     if only is not None:
         if only not in participants:
@@ -218,6 +234,7 @@ def resolve_participants(
         unavailable=unavailable,
         probe_skipped=skipped,
         require_all=require_all,
+        policy=policy.to_state() if policy is not None else None,
     )
 
 
@@ -254,7 +271,12 @@ def seat_runtime(seat: str) -> str:
     return m.group(1)
 
 
-def review_seats(round_no: int, available: list[str], fallback: list[str]) -> list[str]:
+def review_seats(
+    round_no: int,
+    available: list[str],
+    fallback: list[str],
+    pinned: Optional[Iterable[str]] = None,
+) -> list[str]:
     """cross-review のラウンドの 2 席を決める（設計の決定 9・20。規則の正本はこの表）。
 
     | 使える者の数 n | 席 |
@@ -268,9 +290,16 @@ def review_seats(round_no: int, available: list[str], fallback: list[str]) -> li
     この関数より前の輪番（外す 1 者を `(round_no - 1) % 3` で回す式）と一致する。埋め合わせの候補は使える者に含まれない者だけを
     使い、含まれる者は飛ばす（同じ席の名前を 2 つ返さないため）。`only` の処理は呼び出し側が
     先に行う（1 者指定は埋め合わせをしない）。
+
+    `pinned` はランタイムの宣言の固定の組（`review_seats`。#1598）。どちらの席のランタイムも
+    `available` にあれば、表に依らずその 2 席を返す。無ければ表の規則へ戻る。
     """
     if round_no < 1:
         raise AssignmentError(f"ラウンド番号は 1 以上です: {round_no}")
+    if pinned:
+        seats = list(pinned)
+        if all(seat_runtime(s) in available for s in seats):
+            return seats
     n = len(available)
     if n >= 3:
         picked = {available[round_no % n], available[(round_no + 1) % n]}

@@ -29,7 +29,15 @@ def _seed_state(tmp_dir: pathlib.Path) -> None:
         "repo": "o/r",
         "rounds": [
             {"round": 1, "pr": PR, "started_at": "2026-10-02T08:00:00+09:00", "reviewer_models": EARLIER},
-            {"round": 2, "pr": PR, "started_at": "2026-10-02T09:00:00+09:00"},
+            {
+                "round": 2,
+                "pr": PR,
+                "started_at": "2026-10-02T09:00:00+09:00",
+                "seats": [
+                    {"seat": "codex", "runtime": "codex", "model": None, "partner": "claude-2"},
+                    {"seat": "claude-2", "runtime": "claude", "model": None, "partner": "codex"},
+                ],
+            },
         ],
         "final": None,
     }
@@ -65,6 +73,7 @@ def test_the_seat_model_is_recorded_even_when_no_result_is_left(tmp_dir, state_m
     rounds = _rounds(tmp_dir)
     assert rounds[-1]["reviewer_models"]["claude-2"] == {"requested": None, "observed": "claude-opus-5[1m]", "unobserved": None}
     assert rounds[-1]["claude-2"]["intent"] == "NO_RESULT"
+    assert [r["model"] for r in rounds[-1]["seats"]] == [None, "claude-opus-5[1m]"], "席の記録（#1598 AC13）にも同じ値を写す"
     assert rounds[0]["reviewer_models"] == EARLIER, "前のラウンドの値を書き換えない"
 
 
@@ -75,6 +84,7 @@ def test_without_records_the_reason_is_recorded(tmp_dir, state_mod):
     assert _read_result("codex", tmp_dir) == 1
 
     assert _rounds(tmp_dir)[-1]["reviewer_models"]["codex"] == {"requested": None, "observed": None, "unobserved": "no_record"}
+    assert _rounds(tmp_dir)[-1]["seats"][0]["model"] is None, "取れなければ席の記録は null のまま"
 
 
 def test_kiro_is_recorded_as_unsupported(tmp_dir, state_mod):

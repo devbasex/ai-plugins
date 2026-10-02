@@ -107,6 +107,7 @@ LLM が決めるのは **どの CLI に渡すか**（上の表）と **プロン
 | `stopped` | `timeout` / `stalled` | 読むファイルを絞るか観点を分けて渡し直す |
 | `stopped` | `usage_limit` | 同じ CLI では解けない。別の CLI へ渡す |
 | `stopped` | `auth` / `missing_cli` | 補助ファイルのログイン・インストールの手順を行う（終了コード 3） |
+| `stopped` | `policy` | リポジトリのランタイムの宣言（`.ndf/runtimes.json`）の外。CLI を起動していない。`metrics.reason` を読み、宣言の中の CLI へ渡す（終了コード 3） |
 | `stopped` | `early_error` / `launch_failed` | `metrics.detail` を読む |
 
 - 使えるかだけを先に知りたいときは `external-ai.py check <runtime>`（CLI の有無と認証）

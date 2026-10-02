@@ -84,7 +84,20 @@ def _record_reviewer_model(pr: int, agent: str) -> None:
         record["observed"], record["unobserved"] = observation.model, None
     elif not record.get("observed"):
         record["unobserved"] = observation.reason
+    _fill_seat_model(last, agent, observation.model)
     store._save(pr, st)
+
+
+def _fill_seat_model(round_entry: dict[str, Any], seat: str, model: str | None) -> None:
+    """ラウンドの席の記録（`rounds[].seats`。#1598 の AC13）へ、実際に動いたモデルを埋める。
+
+    値は `reviewer_models` と同じ 1 回の取得から写す。埋めるのは `null` のときだけで、
+    取れなければ `null` のまま残す。席の記録の無い古いラウンドは何もしない。
+    """
+    for rec in round_entry.get("seats") or []:
+        if rec.get("seat") == seat and rec.get("model") is None:
+            rec["model"] = model
+            return
 
 
 def _die_no_result(pr: int, agent: str, reason: str, msg: str, code: int = 1) -> None:

@@ -231,7 +231,7 @@ def test_skipped_probe_satisfies_require_all(assignment):
 # ---------- 記録の形 ----------
 
 
-def test_to_state_has_the_eight_keys_without_fallback(assignment):
+def test_to_state_has_the_nine_keys_without_fallback(assignment):
     p = assignment.resolve_participants(
         ["codex", "agy", "kiro"],
         host="claude",
@@ -249,6 +249,7 @@ def test_to_state_has_the_eight_keys_without_fallback(assignment):
         "unavailable": {"kiro": "1 秒で応答しませんでした"},
         "probe_skipped": False,
         "require_all": False,
+        "policy": None,
     }
 
 
