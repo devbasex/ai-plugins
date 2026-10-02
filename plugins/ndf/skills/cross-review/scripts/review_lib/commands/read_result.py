@@ -7,7 +7,9 @@ import json
 import pathlib
 from typing import Any
 
+import assignment  # noqa: E402
 import review_lib  # noqa: E402
+import models  # noqa: E402
 import monitor_outcome  # noqa: E402
 import result_posts  # noqa: E402
 from review_lib import posts, store  # noqa: E402
@@ -50,6 +52,38 @@ def _record_no_result(
     if monitor_detail:
         entry["monitor_detail"] = monitor_detail
     st["rounds"][-1][agent] = entry
+    store._save(pr, st)
+
+
+def _record_reviewer_model(pr: int, agent: str) -> None:
+    """その席のレビューの起動で実際に動いたモデルを、`rounds[-1].reviewer_models.<席>` へ書く（#759）。
+
+    **結果の検証より前に呼ぶ。** 結果が無くて止まる経路でも実測値が残る。取得は共通層の
+    `models.observed_model` が持ち、ランタイムは席の名前（`claude-2` など）から引く。
+    cross-review は `--model` を渡さないため、指定値は常に空である。取れなければ取れなかった
+    理由（`unobserved`）を書くが、同じラウンドで先に取れた実測値は消さない。
+    状態ファイルを読めないときとラウンドがまだ無いときは、何も書かずに戻る（後の処理が止める）。
+    """
+    path = store._state_path(pr)
+    if not path.exists():
+        return
+    try:
+        st = json.loads(path.read_text(encoding="utf-8"))
+        runtime = assignment.seat_runtime(agent)
+    except (OSError, json.JSONDecodeError, assignment.AssignmentError):
+        return
+    if not isinstance(st, dict) or not st.get("rounds"):
+        return
+    last = st["rounds"][-1]
+    tmp_dir = store._resolve_tmp_dir(pr)
+    stem = f"{agent}-review-pr{pr}"
+    ended_at = (monitor_outcome.read_outcome(tmp_dir, stem) or {}).get("ended_at")
+    observation = models.observed_model(runtime, pathlib.Path(tmp_dir) / stem, ended_at, last.get("started_at"))
+    record = last.setdefault("reviewer_models", {}).setdefault(agent, {"requested": None, "observed": None, "unobserved": None})
+    if observation.model:
+        record["observed"], record["unobserved"] = observation.model, None
+    elif not record.get("observed"):
+        record["unobserved"] = observation.reason
     store._save(pr, st)
 
 
@@ -213,6 +247,7 @@ def cmd_read_result(args: argparse.Namespace) -> None:
     agent = args.agent
     pr = args.pr
     rfile = pathlib.Path(args.file or store._resolve_tmp_dir(pr) / f"{agent}-review-pr{pr}-result.json")
+    _record_reviewer_model(pr, agent)
     r = _validate_review_result(pr, agent, rfile)
 
     st = store._load(pr)

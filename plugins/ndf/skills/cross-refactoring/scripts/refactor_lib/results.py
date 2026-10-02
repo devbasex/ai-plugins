@@ -50,20 +50,22 @@ def note_stopped(state: dict[str, Any], runtime: str, phase: str) -> None:
 
 
 def record_observed_model(state: dict[str, Any], runtime: str, phase: str) -> None:
-    """実装担当の CLI の出力から、実際に使われたモデル名を拾って記録する。
+    """実装担当の CLI が実際に動かしたモデル名を、`implementer_model` に記録する（#759）。
 
-    取れるのは claude だけである。取れないランタイムは `None` のままにし、
-    報告では既定モデルの実行として区別する。
+    取得は共通層の `models.observed_model` が持つ（claude は出力の `modelUsage`、codex は
+    セッションの記録）。取れなければ取れなかった理由（`unobserved`）を書く。ただし、前の手順で
+    取れた実測値は消さない。手順の開始の時刻を下限に渡し、前の起動の残骸を拾わない。
     """
-    stem = stem_for(runtime, phase, state["id"])
-    stdout_log = pathlib.Path(state["tmp_dir"]) / f"{stem}-stdout.log"
-    if not stdout_log.exists():
+    stem = pathlib.Path(state["tmp_dir"]) / stem_for(runtime, phase, state["id"])
+    record = (state.get("phases") or {}).get(phase) or {}
+    ended_at = (read_result(state, runtime, phase).monitor or {}).get("ended_at")
+    observation = models_lib.observed_model(runtime, stem, ended_at, record.get("launch_started_at") or record.get("started_at"))
+    model = state.setdefault("implementer_model", {"requested": None, "observed": None, "unobserved": None})
+    if not observation.model:
+        if not model.get("observed"):
+            model["unobserved"] = observation.reason
         return
-    observed = models_lib.observed_model(runtime, stdout_log.read_text(encoding="utf-8", errors="replace"))
-    if not observed:
-        return
-    model = state.setdefault("implementer_model", {"requested": None, "observed": None})
-    model["observed"] = observed
-    warning = models_lib.mismatch_warning(runtime, model.get("requested"), observed)
+    model["observed"], model["unobserved"] = observation.model, None
+    warning = models_lib.mismatch_warning(runtime, model.get("requested"), observation.model)
     if warning:
         info(warning)

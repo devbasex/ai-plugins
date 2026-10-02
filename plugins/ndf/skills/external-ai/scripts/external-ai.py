@@ -208,8 +208,11 @@ def cmd_run(a) -> None:
     rec = monitor_outcome.read_outcome(tdir, stem_name) or {}
     mstatus, reason = rec.get("status", "PIDFILE_BAD"), rec.get("reason", "pidfile_bad")
     source, path = recover(runtime, stem, output)
-    stdout_log = pathlib.Path(f"{stem}-stdout.log")
-    observed = models.observed_model(runtime, stdout_log.read_text(encoding="utf-8", errors="replace") if stdout_log.is_file() else "")
+    # 実際に動いたモデル（#759）。同じ処理の中で起動したため、開始の下限は渡さない。
+    observation = models.observed_model(runtime, stem, rec.get("ended_at"))
+    observed = observation.model
+    if not observed:
+        print(f"ℹ {runtime}: 実測値を取れなかった（{observation.reason}）", file=sys.stderr)
     metrics = {
         "result": path,
         "source": source,

@@ -38,30 +38,40 @@ def test_parse_model_args_rejects_invalid_specs(values: list[str], message_part:
     assert message_part in str(exc_info.value)
 
 
+def _claude_launch(tmp_path: pathlib.Path, stdout_text: str) -> pathlib.Path:
+    stem = tmp_path / "claude-implement-rf1"
+    pathlib.Path(f"{stem}-launch.json").write_text(
+        '{"runtime": "claude", "workdir": "/w", "started_at": "2026-10-02T00:00:00Z"}', encoding="utf-8"
+    )
+    pathlib.Path(f"{stem}-stdout.log").write_text(stdout_text, encoding="utf-8")
+    return stem
+
+
 @pytest.mark.parametrize(
-    ("runtime", "stdout_text"),
+    ("stdout_text", "reason"),
     [
-        ("codex", ""),
-        ("claude", '{"result": "ok"}'),
-        ("claude", '{"modelUsage": {broken json'),
+        ("", "no_model_field"),
+        ('{"result": "ok"}', "no_model_field"),
+        ('{"modelUsage": {broken json', "unreadable"),
     ],
 )
-def test_observed_model_returns_none_when_model_cannot_be_observed(runtime: str, stdout_text: str) -> None:
-    """現状固定。公開出力からモデルを特定できない経路は None を返す。"""
-    assert observed_model(runtime, stdout_text) is None
+def test_observed_model_returns_a_reason_when_model_cannot_be_observed(tmp_path: pathlib.Path, stdout_text: str, reason: str) -> None:
+    """出力からモデルを特定できない経路は、実測値を持たず理由を返す。"""
+    observation = observed_model("claude", _claude_launch(tmp_path, stdout_text))
+    assert (observation.model, observation.reason) == (None, reason)
 
 
-def test_observed_model_selects_model_with_most_input_tokens() -> None:
-    """現状固定。複数モデルでは入力トークンが最大のモデル名を返す。"""
+def test_observed_model_selects_model_with_most_tokens(tmp_path: pathlib.Path) -> None:
+    """複数モデルでは 4 種のトークンの和が最大のモデル名を返す。"""
     stdout_text = """{
         "modelUsage": {
             "claude-sonnet": {"inputTokens": 120},
-            "claude-opus": {"inputTokens": 450},
-            "claude-haiku": {"inputTokens": 30}
+            "claude-opus": {"inputTokens": 10, "cacheReadInputTokens": 900},
+            "claude-haiku": {"inputTokens": 450}
         }
     }"""
 
-    assert observed_model("claude", stdout_text) == "claude-opus"
+    assert observed_model("claude", _claude_launch(tmp_path, stdout_text)).model == "claude-opus"
 
 
 @pytest.mark.parametrize(
@@ -82,20 +92,20 @@ def test_observed_model_selects_model_with_most_input_tokens() -> None:
             None,
             "codex はモデルを指定しておらず、実際に動いたモデルも取得できない",
         ),
-        ("claude", None, None),
+        ("claude", None, "claude はモデルを指定しておらず、実際に動いたモデルも取得できない"),
         ("kiro", "claude-sonnet", None),
         ("codex", "gpt-5", None),
     ],
 )
 def test_separation_reason_current_behavior(runtime: str, model: str | None, expected: str | None) -> None:
-    """現状固定。kiro の auto / 未指定かつ実測不可 / 分離しないの 3 分岐を記録する。"""
+    """実測値が無いとき、kiro の auto / 未指定 / 分離しないの 3 分岐になる。"""
     assert separation_reason(runtime, model) == expected
 
 
 @pytest.mark.parametrize(
     ("runtime", "model", "expected"),
     [
-        ("claude", None, True),
+        ("claude", None, False),
         ("codex", "gpt-5", True),
         ("kiro", "auto", False),
         ("kiro", None, False),

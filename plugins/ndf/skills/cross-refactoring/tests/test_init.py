@@ -370,14 +370,14 @@ def test_init_warns_when_kiro_is_given_auto_explicitly(run_init, tmp_path, capsy
     assert "kiro のモデルが auto です" in capsys.readouterr().err
 
 
-def test_init_warns_when_codex_or_agy_has_no_model(run_init, tmp_path, capsys):
-    """実測できないランタイムで指定が無いラウンドも、kiro の auto と同じく分離される。
+def test_init_does_not_warn_when_codex_has_no_model(run_init, tmp_path, capsys):
+    """codex は実際に動いたモデルをセッションの記録から取れる見込みがあるため、着手前に警告しない（#759）。
 
     警告の対象は参加者だけである。既定で外れる agy は、足したときだけ警告する。
     """
     run_init(_args(tmp_path, model=["kiro=claude-opus-5"]))
     warning = capsys.readouterr().err
-    assert "codex のモデルが default です" in warning
+    assert "codex のモデルが" not in warning
     assert "agy のモデルが" not in warning
 
 
@@ -1209,7 +1209,7 @@ def test_a_named_implementer_wins(run_init, tmp_path, capsys):
     _, state = _state_of(tmp_path)
     assert (state["implementer"], state["implementer_reason"]) == ("kiro", "named")
     assert state["implementer_named"] == "kiro"
-    assert state["implementer_model"] == {"requested": "claude-opus-5", "observed": None}
+    assert state["implementer_model"] == {"requested": "claude-opus-5", "observed": None, "unobserved": None}
     out = capsys.readouterr().out.splitlines()
     assert "IMPL=kiro" in out and "IMPL_MODEL=claude-opus-5" in out
 
