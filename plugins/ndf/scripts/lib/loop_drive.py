@@ -17,6 +17,19 @@ def durable_identity(tmp: Path | None, pr: int) -> str:
     return str(tmp.resolve()) if tmp is not None else f"{Path.cwd().resolve()}#{pr}"
 
 
+def rerun_reason(recorded_head: str | None, current_head: str | None, forced: bool) -> str | None:
+    """完了した実行の回を返さずに新しく始める理由。返してよければ `None`（#1340 の I10・決定 2・3）。
+
+    差分を足したかは PR の head で分かる。比べられない（どちらかが無い）ときは前回の結果を返す側に倒す。
+    GitHub の一時的な不調のたびに完了したループがもう 1 回回ると費用が掛かるため。#1263 が引数の比較を足す。
+    """
+    if forced:
+        return "--reopen が渡されたため"
+    if recorded_head and current_head and recorded_head != current_head:
+        return f"完了の時点の head {recorded_head[:7]} から {current_head[:7]} へ進んでいるため"
+    return None
+
+
 def call(cmd: list[str], env: dict | None = None, cwd: str | None = None) -> tuple[int, str]:
     """スクリプトを 1 本実行し、終了コードと標準出力を返す。標準エラーはそのまま流す。"""
     p = subprocess.run(cmd, capture_output=True, text=True, errors="replace", env=env, cwd=cwd)

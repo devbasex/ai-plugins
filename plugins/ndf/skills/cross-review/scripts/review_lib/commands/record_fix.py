@@ -65,7 +65,9 @@ def cmd_record_fix(args: argparse.Namespace, ingest: Callable[..., None]) -> Non
     if not rounds:
         review_lib.die("記録を付けるラウンドがありません。`state.py start-round` の後に打ってください")
     if rounds[-1].get("fix"):
-        review_lib.die(f"round {rounds[-1].get('round')} には修正の記録が既にあります。取り込みの続きは `state.py merge-fix {pr}` で行います")
+        review_lib.die(
+            f"round {rounds[-1].get('round')} には修正の記録が既にあります。取り込みの続きは `state.py merge-fix {pr}` で行います"
+        )
     repo = str(st.get("repo") or "")
     current_pr = int(st.get("current_pr") or pr)
     meta = github._fetch_pr_metadata(current_pr, repo or None)

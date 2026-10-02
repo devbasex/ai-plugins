@@ -183,7 +183,14 @@ def test_merge_fix_after_record_fix_returns_the_recorded_code(tmp_dir, state_mod
 
 
 def _fix_file(tmp_dir: pathlib.Path, **over) -> None:
-    body = {"pr": PR, "fix_commit": "abc1234", "fixed_count": 1, "resolved_threads": [{"thread_id": "PRRT_a"}], "deferred": [], "rejected": []}
+    body = {
+        "pr": PR,
+        "fix_commit": "abc1234",
+        "fixed_count": 1,
+        "resolved_threads": [{"thread_id": "PRRT_a"}],
+        "deferred": [],
+        "rejected": [],
+    }
     body.update(over)
     (tmp_dir / f"fix-pr{PR}-result.json").write_text(json.dumps(body))
 

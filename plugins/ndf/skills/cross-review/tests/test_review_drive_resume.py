@@ -1,7 +1,8 @@
 """drive.py の再開: 打ち直した駆動は耐久の記録から続き、`state.py init` を打ち直さない（#1142 の I19・不足 d）。
 
-実機の `state.py init` は、`final` が決まった状態を再開の対象にせず、空の状態で上書きする。
-偽物の `call` がその振る舞いを模し、打ち直した駆動が実際のラウンド数と指摘数を返すことを確かめる。
+`FakeReview` の `init` は `final` が決まった状態を空で上書きし、打ち直した駆動が耐久の記録から実際のラウンド数と
+指摘数を返すことを確かめる。`ReopeningReview` の `init` は実機と同じく `final` を外して履歴を残し（#1340）、
+終わりの時点の head と今の head で前回の結果を返すかが決まることを確かめる。
 駆動は 1 回ずつ fork した子で打つ（`test_drive_review.fork_main` と同じ形。止まりのまま `os._exit` で抜ける）。
 """
 
@@ -360,3 +361,106 @@ def test_missing_result_skips_verify_and_critique_until_relaunch(tmp_path, monke
     assert sum(1 for c in fake.calls if c[:2] == ("state.py", "verify-findings")) == 1
     assert sum(1 for c in fake.calls if c[0] == "critique-round.sh") == 1
     assert sum(1 for c in fake.calls if c[0] == "launch-reviewer.sh") == 2
+
+
+class ReopeningReview(FakeReview):
+    """`init` が確定した `final` を外して履歴を残す（#1340 の決定 1）。PR の head を `gh api` で返す。"""
+
+    def __init__(self, tmp: Path):
+        super().__init__(tmp)
+        self.head = "a" * 40
+
+    def __call__(self, cmd, env=None, cwd=None):
+        if cmd[0] == "gh":
+            self.calls.append(("gh", *cmd[1:]))
+            return 0, self.head + "\n"
+        if Path(cmd[1]).name == "state.py" and cmd[2] == "init":
+            self.calls.append(("state.py", *cmd[2:]))
+            if self.state.get("final") is not None:
+                self.state["final"] = None
+                self.state.pop("sweep", None)
+                self.save()
+            return 0, f"PR=5\nTMP_DIR={self.tmp}\nWORKTREE={self.tmp / 'wt'}\nREPO=o/r\n"
+        return super().__call__(cmd, env, cwd)
+
+
+def _drive_to_done(fake: ReopeningReview, argv, capsys) -> dict:
+    drive_to_sweep(fake, argv, capsys)
+    code, out = run_main(argv, capsys)
+    assert code == 0 and out["status"] == "ok"
+    return out
+
+
+def test_a_moved_head_starts_a_new_run_that_adds_rounds(tmp_path, monkeypatch, capsys):
+    """AC3・I10: 完了の時点の head と今の head が違えば、前回の結果を返さずに init からラウンドを足す。"""
+    monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
+    fake = ReopeningReview(tmp_path)
+    monkeypatch.setattr(cr, "call", fake)
+    _drive_to_done(fake, ["5"], capsys)
+    inits = fake.inits()
+
+    fake.head = "b" * 40
+    fake.judges = [0]
+    capsys.readouterr()
+    code, out = run_main(["5"], capsys)
+    assert fake.inits() == inits + 1
+    assert out["items"][0]["pause"] == "sweep"  # 新しい回のラウンドが収束して最終スイープで止まる
+    assert len(fake.state["rounds"]) == 3
+
+
+def test_the_same_head_returns_the_previous_result(tmp_path, monkeypatch, capsys):
+    """I10: head が同じなら前回の結果を返し、init を打たない。"""
+    monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
+    fake = ReopeningReview(tmp_path)
+    monkeypatch.setattr(cr, "call", fake)
+    _drive_to_done(fake, ["5"], capsys)
+    inits = fake.inits()
+    code, out = run_main(["5"], capsys)
+    assert code == 0 and out["status"] == "ok"
+    assert fake.inits() == inits
+
+
+def test_reopen_starts_a_new_run_without_a_new_commit(tmp_path, monkeypatch, capsys):
+    """I10: --reopen なら head が同じでも新しく始める。--reopen は init へ渡さない。"""
+    monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
+    fake = ReopeningReview(tmp_path)
+    monkeypatch.setattr(cr, "call", fake)
+    _drive_to_done(fake, ["5"], capsys)
+    inits = fake.inits()
+    fake.judges = [0]
+    run_main(["5", "--reopen"], capsys)
+    assert fake.inits() == inits + 1
+    assert all("--reopen" not in c for c in fake.calls if c[:2] == ("state.py", "init"))
+
+
+def test_a_record_without_head_returns_the_previous_result(tmp_path, monkeypatch, capsys):
+    """I10: head を比べられないときは前回の結果を返す（今の head を取れない）。"""
+    monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
+    fake = ReopeningReview(tmp_path)
+    monkeypatch.setattr(cr, "call", fake)
+    _drive_to_done(fake, ["5"], capsys)
+    inits = fake.inits()
+    fake.head = ""
+    code, out = run_main(["5"], capsys)
+    assert code == 0 and out["status"] == "ok"
+    assert fake.inits() == inits
+
+
+def test_rerun_reason_table():
+    import loop_drive
+
+    assert loop_drive.rerun_reason("a" * 7, "a" * 7, False) is None
+    assert loop_drive.rerun_reason(None, "b" * 7, False) is None
+    assert loop_drive.rerun_reason("a" * 7, None, False) is None
+    assert "aaaaaaa" in loop_drive.rerun_reason("a" * 40, "b" * 40, False)
+    assert "--reopen" in loop_drive.rerun_reason(None, None, True)
+
+
+def test_a_converged_round_does_not_run_the_oscillation_check(tmp_path, monkeypatch, capsys):
+    """AC8: judge が収束したラウンドの後に振動検知を打たない（収束と中断が同じ出力に並ばない）。"""
+    monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
+    fake = FakeReview(tmp_path)
+    fake.judges = [0]
+    monkeypatch.setattr(cr, "call", fake)
+    run_main(["5"], capsys)
+    assert not [c for c in fake.calls if c[:2] == ("state.py", "check-oscillation")]

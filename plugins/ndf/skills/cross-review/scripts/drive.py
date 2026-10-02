@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """drive.py: cross-review の収束ループを、LLM の判断が要る地点まで進めて止まる。
 
-    drive.py <PR> [--rotate-mode light|squash] [state.py init の引数...]
+    drive.py <PR> [--rotate-mode light|squash] [--reopen] [state.py init の引数...]
 
 init → ラウンド（起動・監視・取り込み・根拠の検証・判定）→ 振動の検知 → 修正 → 巻き直し →
 最終スイープ → 検証 → 報告を順に進める。LLM が要る地点（fix / sweep / newtext）で止まる。
-同じコマンドを打ち直すと続きから進む。進みは耐久の記録（`lib/durable.py`、種類 `review`・鍵の元は状態の置き場）に
+同じコマンドを打ち直すと続きから進む。収束ループが終わった後に打ち直すと、終わりの時点の PR の head と今の head が
+同じなら前回の結果を返し、違えば（または `--reopen` なら）新しい実行の回を始め、`state.py init` がラウンドを足す（#1340）。進みは耐久の記録（`lib/durable.py`、種類 `review`・鍵の元は状態の置き場）に
 あり、耐久ワークフロー `review_drive` の 1 回が収束ループの 1 回である。`state.py init` とラウンドは耐久ステップで、
 記録のある耐久ステップは打ち直しで流れない（init は 1 回の中で 1 回だけ。#1142 の I19）。止まりはイベント `pause` を
 立てて続きを待ち、打ち直しが続き（`resume`）を送る。結果ファイルが無ければ同じ止まりを番号を増やして返す。
@@ -36,7 +37,7 @@ import drive_pause as dp  # noqa: E402
 import durable  # noqa: E402
 import step_result as sr  # noqa: E402
 from drive_pause import Stop  # noqa: E402
-from loop_drive import call, durable_identity, parse_vars, review_status  # noqa: E402,F401  テストは `call` をこのモジュールの上で差し替える
+from loop_drive import call, durable_identity, parse_vars, rerun_reason, review_status  # noqa: E402,F401  テストは `call` をこのモジュールの上で差し替える
 
 TOOL = "cross-review-drive"
 DOCS02 = SKILL / "docs" / "02-fix-and-rotation.md"
@@ -88,10 +89,11 @@ class Held(Exception):
 
 
 class Drive:
-    def __init__(self, pr: int, rotate_mode: str, init_args: list[str]):
+    def __init__(self, pr: int, rotate_mode: str, init_args: list[str], reopen: bool = False):
         self.pr = pr
         self.rotate_mode = rotate_mode
         self.init_args = init_args
+        self.reopen = reopen
         self.env = dict(os.environ)
         self.v: dict = {}
         self.rotated: dict = {}
@@ -117,11 +119,21 @@ class Drive:
     def path(self, kind: str) -> Path:
         return self.tmp / f"{kind}-pr{self.pr}-result.json" if kind in ("fix", "sweep") else self.tmp / f"rotate-pr{self.pr}-{kind}.json"
 
-    def state(self) -> dict:
+    def state(self, tmp: Path | None = None) -> dict:
         try:
-            return json.loads((self.tmp / f"cross-review-pr{self.pr}-state.json").read_text())
+            return json.loads(((tmp or self.tmp) / f"cross-review-pr{self.pr}-state.json").read_text())
         except (OSError, json.JSONDecodeError):
             return {}
+
+    def pr_head(self, tmp: str | None = None) -> str | None:
+        """状態ファイルの今の PR（巻き直しの後は新しい PR）の head の OID。取れなければ None。"""
+        s = self.state(Path(tmp) if tmp else None)
+        repo, pr = s.get("repo"), s.get("current_pr") or self.pr
+        if not repo:
+            return None
+        rc, out = call(["gh", "api", f"repos/{repo}/pulls/{pr}", "--jq", ".head.sha"], self.env)
+        head = out.strip()
+        return head if rc == 0 and head else None
 
     def counts(self) -> dict:
         """件数。**指摘（findings）と修正（fixed）は修正担当の単位でそろえる**（#1317）。
@@ -367,10 +379,24 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
 
     # --- 起動: 耐久の記録を開き、耐久ワークフローを始めるか続けて、止まりか終わりを待つ ---
     def finished(self, out) -> bool:
-        """記録した終わりをそのまま返してよいか。レビューの状態のファイルが消えていれば頭から流す。"""
+        """記録した終わりをそのまま返してよいか（I10）。レビューの状態のファイルが消えていれば頭から流す。
+
+        終わりの時点の head と今の PR の head が違うか `--reopen` なら返さず、新しい実行の回の `init` がラウンドを足す。
+        比べられないとき（head を持たない古い記録・今の head を取れない）は前回の結果を返す。
+        """
         if not isinstance(out, dict) or (out.get("result") or {}).get("status") != "ok":
             return False
-        return (Path(out.get("tmp") or "") / f"cross-review-pr{self.pr}-state.json").is_file()
+        if not (Path(out.get("tmp") or "") / f"cross-review-pr{self.pr}-state.json").is_file():
+            return False
+        recorded = out.get("head")
+        current = self.pr_head(out.get("tmp")) if recorded and not self.reopen else None
+        reason = rerun_reason(recorded, current, self.reopen)
+        if reason:
+            print(f"↻ {reason}、ラウンドを足す", file=sys.stderr)
+            return False
+        if not (recorded and current):
+            print("ℹ head を比べられないため前回の結果を返す（足すなら --reopen）", file=sys.stderr)
+        return True
 
     def run(self) -> tuple[dict, int]:
         identity = self.identity()
@@ -446,14 +472,15 @@ def review_drive(pr: int, rotate_mode: str, init_args: list[str]) -> dict:
     d = Drive(pr, rotate_mode, init_args)
     seq, stage = 0, "init"
 
-    def outcome(res: dict) -> dict:
-        return {"result": res, "code": dp.exit_code(res), "tmp": d.v.get("TMP_DIR")}
+    def outcome(res: dict, head: str | None = None) -> dict:
+        # head は打ち直しが前回の結果を返すかを決める（終わりの時点の PR の head。#1340 の I10）
+        return {"result": res, "code": dp.exit_code(res), "tmp": d.v.get("TMP_DIR"), "head": head}
 
     for _ in range(STEP_LIMIT):
         try:
             stage, show, final = advance(d, stage)
             if final is not None:
-                return outcome(final)
+                return outcome(final, ok(act(d, "pr_head")))
             shown = ok(act(d, "pause", *show)) if show else None
         except Held as h:
             shown = ok(act(d, "stopped", h.msg, h.code))  # 同じ段階を続きでやり直す
@@ -468,8 +495,9 @@ def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("pr", type=int)
     ap.add_argument("--rotate-mode", choices=["light", "squash"], default="light")
+    ap.add_argument("--reopen", action="store_true", help="差分を足さずに、終わった収束ループへラウンドを足す")
     a, rest = ap.parse_known_args(argv)
-    d = Drive(a.pr, a.rotate_mode, rest)
+    d = Drive(a.pr, a.rotate_mode, rest, reopen=a.reopen)
     try:
         out, code = d.run()
     except (Stop, durable.DurableError) as e:
