@@ -322,10 +322,22 @@ class Engine:
             gnext = step.get("gate_next")
             return ((None if gnext == "end" else gnext) if gnext else self.next_of(sid, step)), None, None
         if ok:
-            return self.next_of(sid, step), None, None
+            return self.back_or_next(sid, step), None, None
         if step.get("on_fail"):
+            st.failed_step = sid
             return step["on_fail"], None, None
         return None, "止まった", f"ステップ {sid} が失敗した（exit={st.cur['exit']}）"
+
+    def back_or_next(self, sid: str, step: dict) -> str | None:
+        """成功したときの次のステップ。`"back_to_failed": true` のステップ（judge の後の fix）は、最後に落ちた
+        ステップが `next` より並びで前なら、そこからやり直す（直した後に落ちたステップを飛ばして先へ進まない。#1315）。"""
+        nxt = self.next_of(sid, step)
+        failed = self.state.failed_step
+        if not step.get("back_to_failed") or failed not in self.order:
+            return nxt
+        if nxt is None or nxt not in self.order or self.order.index(failed) < self.order.index(nxt):
+            return failed
+        return nxt
 
     def _next_after_slow(self, e: SlowAction, sid: str, step: dict) -> tuple[str | None, str | None, str | None]:
         """遅れの見張りがステップを打ち切った後始末（子はプロセスグループごと止めてある）。"""
@@ -340,6 +352,7 @@ class Engine:
             slow.carry = slow.watch
             return sid, None, None
         if e.action == "fix" and step.get("on_fail"):
+            st.failed_step = sid
             return step["on_fail"], None, None
         return None, "止まった", f"遅れ: {e.reason}"
 
