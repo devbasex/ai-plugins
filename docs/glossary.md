@@ -252,6 +252,8 @@ cross-review / cross-refactoring が参加者の CLI を選び、起動し、監
 | 認証確認 | — | 確認コマンドを走らせ、止めずに結果だけを返す参加者ごとの確認（probe_auth） | 認証の確認 | — | `docs/specifications/cross-review-participants-and-seats.md` |
 | スロット | `slot` | 1 ラウンドで 1 つの CLI プロセスが占める枠 | — | — | `docs/specifications/cross-review-participants-and-seats.md` |
 | フォールバック | `fallback` | 利用可能な参加者が 2 者に満たないとき、足りない分を埋める参加者（participants.fallback） | 埋め合わせ | — | `docs/specifications/cross-review-participants-and-seats.md` |
+| ランタイムの宣言 | — | リポジトリの .ndf/ に置く、NDF が起動してよいランタイムの一覧と cross-review のレビューの組の選び方。無ければ制限しない | — | — | — |
+| レビューの組 | — | cross-review の 1 ラウンドで並ぶ 2 つのスロットのランタイムの組み合わせ（claude+claude・claude+codex など）。組ごとの集計の単位 | — | — | — |
 
 ## NDF の cross-review（`ndf-cross-review`）
 

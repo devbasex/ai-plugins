@@ -2815,6 +2815,18 @@
       "meaning": "複数のプランが同じ行の並びへ書き足すファイル（索引など）。.ndf/supervise.json の queue.shared に書く",
       "code": "shared_list",
       "pending_source": "issues/issue-1142-design-dbos.md"
+    },
+    {
+      "term": "ランタイムの宣言",
+      "context": "ndf-agent-cli",
+      "meaning": "リポジトリの .ndf/ に置く、NDF が起動してよいランタイムの一覧と cross-review のレビューの組の選び方。無ければ制限しない",
+      "pending_source": "issues/issue-1598-requirements.md"
+    },
+    {
+      "term": "レビューの組",
+      "context": "ndf-agent-cli",
+      "meaning": "cross-review の 1 ラウンドで並ぶ 2 つのスロットのランタイムの組み合わせ（claude+claude・claude+codex など）。組ごとの集計の単位",
+      "pending_source": "issues/issue-1598-requirements.md"
     }
   ]
 }
