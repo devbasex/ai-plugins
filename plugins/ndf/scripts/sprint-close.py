@@ -191,7 +191,16 @@ def issue_state(root, repo, n):
     return p.stdout.strip() if p.returncode == 0 and p.stdout.strip() else None
 
 
-def close_one(root, repo, n, record_repo, comment, notes):
+class CloseContext:
+    """全課題で一定の閉じる処理の材料。notes は課題ごとのボードの NOTE を溜める。"""
+
+    def __init__(self, root, record_repo, comment):
+        self.root, self.record_repo, self.comment = root, record_repo, comment
+        self.notes = []
+
+
+def close_one(ctx, repo, n):
+    root, record_repo, comment, notes = ctx.root, ctx.record_repo, ctx.comment, ctx.notes
     it = {"kind": "issue", "repo": repo, "number": n}
     before = issue_state(root, repo, n)
     if before is None:
@@ -261,7 +270,7 @@ def _closing_blocker(a, rec, record_repo):
     return kept_all, verdicts
 
 
-def _close_item(a, root, repo, n, record_repo, kept_all, verdicts, comment, notes):
+def _close_item(a, ctx, repo, n, kept_all, verdicts):
     base = {"kind": "issue", "repo": repo, "number": n}
     if kept_all:
         return {**base, "result": "kept_open", "reason": kept_all}
@@ -269,13 +278,13 @@ def _close_item(a, root, repo, n, record_repo, kept_all, verdicts, comment, note
         why = "リリース後テストの行が無い" if (repo, n) not in verdicts else "リリース後テストに合格でない条件がある（不合格・保留）"
         return {**base, "result": "kept_open", "reason": why}
     if a.dry_run:
-        st = issue_state(root, repo, n)
+        st = issue_state(ctx.root, repo, n)
         return {
             **base,
             "result": "already_closed" if st == "CLOSED" else "would_close",
             **({"reason": "状態を読めない"} if st is None else {}),
         }
-    return close_one(root, repo, n, record_repo, comment, notes)
+    return close_one(ctx, repo, n)
 
 
 def _close_summary(items, prs, dry_run):
@@ -324,10 +333,12 @@ def cmd_close(a):
 
     kept_all, verdicts = _closing_blocker(a, rec, record_repo)
 
-    items, notes = [], []
+    items = []
     comment = f"スプリント（{a.label}）を通りました" if a.label else "スプリントの終わりの工程を通りました"
+    ctx = CloseContext(root, record_repo, comment)
+    notes = ctx.notes
     for repo, n in issues:
-        items.append(_close_item(a, root, repo, n, record_repo, kept_all, verdicts, comment, notes))
+        items.append(_close_item(a, ctx, repo, n, kept_all, verdicts))
 
     count, metrics, summary = _close_summary(items, prs, a.dry_run)
     if count["failed"]:
