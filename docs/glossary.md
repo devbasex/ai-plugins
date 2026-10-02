@@ -252,6 +252,10 @@ cross-review / cross-refactoring が参加者の CLI を選び、起動し、監
 | 認証確認 | — | 確認コマンドを走らせ、止めずに結果だけを返す参加者ごとの確認（probe_auth） | 認証の確認 | — | `docs/specifications/cross-review-participants-and-seats.md` |
 | スロット | `slot` | 1 ラウンドで 1 つの CLI プロセスが占める枠 | — | — | `docs/specifications/cross-review-participants-and-seats.md` |
 | フォールバック | `fallback` | 利用可能な参加者が 2 者に満たないとき、足りない分を埋める参加者（participants.fallback） | 埋め合わせ | — | `docs/specifications/cross-review-participants-and-seats.md` |
+| 実測値 | `observed_model` | CLI の出力かランタイムのセッションの記録から取った、実際に動いたモデル名。状態ファイルの observed | — | — | — |
+| 指定値 | — | --model で CLI へ渡したモデル名。状態ファイルの requested。未指定なら null | — | — | — |
+| 主たるモデル | — | 1 回の起動で複数のモデルが動いたとき、実測値として記録する 1 つ | — | — | — |
+| 分離 | — | 何が動いたか分からない実行を、モデル別の集計に入れず理由だけを報告すること | — | — | — |
 
 ## NDF の cross-review（`ndf-cross-review`）
 
