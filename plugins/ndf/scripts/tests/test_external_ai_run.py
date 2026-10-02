@@ -205,3 +205,47 @@ def test_missing_cli(tmp_path):
     env = {**os.environ, "PATH": "/nonexistent"}
     p = subprocess.run([sys.executable, str(SCRIPT), "check", "kiro"], env=env, capture_output=True, text=True)
     assert p.returncode == 3 and json.loads(p.stdout)["metrics"]["outcome"] == "missing_cli"
+
+
+# ---------- cmd_run の前提の確かめとモデルの記録（現状固定） ----------
+
+
+def _run_raw(tmp_path, runtime, prompt_text, *args):
+    prompt = tmp_path / "p.md"
+    prompt.write_text(prompt_text, encoding="utf-8")
+    p = subprocess.run(
+        [sys.executable, str(SCRIPT), "run", runtime, "--prompt-file", str(prompt), "--output-file", str(tmp_path / "out.md"), *args],
+        env=_env(tmp_path, runtime, "ok"),
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    out = json.loads(p.stdout.strip().splitlines()[-1])
+    assert step_result.validate_result(out, p.returncode) == [], (out, p.stderr[-2000:])
+    return p.returncode, out
+
+
+@pytest.mark.parametrize(
+    ("prompt_text", "extra", "code", "summary"),
+    [
+        ("", [], 3, "プロンプトが無いか空"),
+        ("x\n", ["--phase", "no-such-phase"], 2, "上限の表に無い工程: no-such-phase"),
+        ("x\n", ["--workdir", "/nonexistent/ndf-work"], 3, "作業ディレクトリが無い"),
+    ],
+)
+def test_run_preconditions_stop_before_launch(tmp_path, prompt_text, extra, code, summary):
+    """現状固定 — 空のプロンプト・表に無い工程・無い作業ディレクトリは起動せずに launch_failed で止める。"""
+    got, out = _run_raw(tmp_path, "kiro", prompt_text, *extra)
+    assert got == code and out["status"] == "stopped"
+    assert out["metrics"] == {"outcome": "launch_failed", "runtime": "kiro"}
+    assert summary in out["summary"]
+    assert not (tmp_path / "t").exists() and not (tmp_path / "out.md").exists()
+
+
+@pytest.mark.parametrize(("args", "model"), [((), "default"), (("--model", "spec-model"), "spec-model")])
+def test_run_records_the_specified_model_when_not_observed(tmp_path, args, model):
+    """現状固定 — 実測できないランタイムは指定したモデル、無ければ `default` を記録する。"""
+    code, out = _run(tmp_path, "kiro", "ok", *args)
+    m = out["metrics"]
+    assert code == 0 and m["model"] == model
+    assert pathlib.Path(m["stem"]).name.startswith("kiro-")
