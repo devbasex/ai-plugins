@@ -87,6 +87,7 @@ class RunState:
         self.switched: list[str] = []  # 利用上限で切り替えた認証（変数の名前・アカウント・従量の接続）
         self.cur: dict = {}
         self.fail_counts: dict[str, int] = {}
+        self.failed_step: str | None = None  # 最後に落ちて on_fail へ回ったステップ（fix の後に戻る先。#1315）
         self.applied = 0  # 記録した（流したか組み直した）最後のステップの番号
         # 途中の報告（progress.jsonl）。LLM を使わずスクリプトで書き・分ける
         self.progress = self.dir / "progress.jsonl"
@@ -342,6 +343,7 @@ class RunState:
             "llm": dict(self.llm),
             "gates": [dict(g) for g in self.gates],
             "fail_counts": dict(self.fail_counts),
+            "failed_step": self.failed_step,
             "last_stage": self.last_stage,
             "pace_recorded": self.pace_recorded,
             "switched": list(self.switched),
@@ -366,6 +368,7 @@ class RunState:
         self.llm = dict(acc.get("llm", self.llm))
         self.gates = [dict(g) for g in acc.get("gates", self.gates)]
         self.fail_counts = dict(acc.get("fail_counts", self.fail_counts))
+        self.failed_step = acc.get("failed_step", self.failed_step)
         self.last_stage = acc.get("last_stage", self.last_stage)
         self.pace_recorded = acc.get("pace_recorded", self.pace_recorded)
         self.switched = list(acc.get("switched", self.switched))

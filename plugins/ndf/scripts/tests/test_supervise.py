@@ -96,6 +96,35 @@ def test_a_failed_run_step_is_not_rerun_by_the_engine(tmp_path):
     assert [e["id"] for e in s.state.log] == ["t", "after"]
 
 
+@pytest.mark.parametrize(
+    ("failing", "visits"),
+    [
+        # 落ちたステップが fix の next より前: そこからやり直す（#1315 の bump）
+        ("bump", ["bump", "fix", "bump", "sync", "release", "verify"]),
+        # 落ちたステップが fix の next より後: next から配り直す（verify の前に release を流し直す）
+        ("verify", ["bump", "sync", "release", "verify", "fix", "sync", "release", "verify"]),
+    ],
+)
+def test_fix_goes_back_to_the_failed_step_before_its_next(tmp_path, fakes, failing, visits):
+    """#1315: back_to_failed の fix は、落ちたステップが next より並びで前なら、そのステップへ戻る。"""
+    once = tmp_path / "failed-once"
+    fail_once = f"sh -c '[ -f {once} ] || {{ touch {once}; exit 3; }}'"
+
+    def run_step(sid, nxt):
+        return {"id": sid, "type": "run", "cmd": fail_once if sid == failing else "true", "on_fail": "fix", "next": nxt}
+
+    steps = [
+        run_step("bump", "sync"),
+        run_step("sync", "release"),
+        run_step("release", "verify"),
+        run_step("verify", "end"),
+        {"id": "fix", "type": "work", "prompt": "直す", "inputs": ["bump", "verify"], "back_to_failed": True, "next": "sync"},
+    ]
+    s, text = run_plan(tmp_path, steps)
+    assert "結果: 完了" in text
+    assert [e["id"] for e in s.state.log] == visits
+
+
 @pytest.mark.parametrize("where", ["plan", "declaration"])
 def test_run_step_disables_pytest_reports(tmp_path, monkeypatch, where):
     # 計画の no_reports（無ければ作業場所の .ndf/supervise.json の test.no_reports）を足し、

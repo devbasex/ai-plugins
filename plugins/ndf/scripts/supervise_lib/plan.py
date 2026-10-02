@@ -115,7 +115,8 @@ queue の置き換え: `{queue_prs}` は前のすべてのステージの Pull R
 - `next` に `end` を書くと、そこでフェーズを完了として終える
 - run: 終了コード 0 なら `next`（無ければ次のステップ）。10〜19 は関門として `gate_next` か `next`。
   それ以外の 0 以外なら `on_fail`（無ければ止まる）
-- work: 終了後に `next`（無ければ次のステップ）
+- work: 終了後に `next`（無ければ次のステップ）。`"back_to_failed": true` なら、最後に落ちて `on_fail` へ回った
+  ステップが `next` より並びで前のとき、そのステップからやり直す（judge の後の fix で使う）
 - judge: 答えの `decision` がステップの id ならそのステップへ、`next` なら次のステップへ、`stop` なら止まる、
   `gate` なら関門として止まる。`choices` を渡すとその中から選ばせる
 
