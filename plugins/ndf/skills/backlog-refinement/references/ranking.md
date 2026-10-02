@@ -156,6 +156,7 @@ RR/OE を退避策で下げたかはスクリプトが判定できないため�
 | `large_min_size` | 大きい課題の閾値 | 尺度の上から 2 番目 | `--large-min-size` |
 | `harm_guide` | 実害の目安（区分 → 帯） | 上の表 | — |
 | `anchors` | 列 → 段階 → アンカーの課題 | 無し | — |
+| `candidate_limit` | 候補の上限（1 回の棚卸しで区分を決める候補の数。`candidates` が読む） | 10 | `candidates --limit` |
 
 ## 式と判定の置き場
 

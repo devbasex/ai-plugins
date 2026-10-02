@@ -266,6 +266,9 @@ def test_candidates_without_limit_cap_at_default(env):
     code, out = env.run("candidates", "--since-ref", "v1", "--all")
     assert code == 20 and out["metrics"]["limit"] == 10
     assert out["metrics"]["candidates"] == 10 and len(out["metrics"]["deferred"]) == 2
+    # 棚卸しの報告に持ち越しの番号と採った上限が載る
+    code, rep = env.run("report")
+    assert rep["metrics"]["deferred"] == out["metrics"]["deferred"] and rep["metrics"]["limit"] == 10
 
 
 def test_candidates_limit_comes_from_backlog_decl(env):

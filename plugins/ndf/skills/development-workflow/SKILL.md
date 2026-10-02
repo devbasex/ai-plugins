@@ -161,11 +161,11 @@ pace: fast
 | 体裁レビュー | — | — | — | — | `layout-review` |
 | リリース後テスト | — | `release-verification`（実行した経路とは別の経路で確かめられる場合） | `release-verification` | `release-verification` | `release-verification`（提出の後に確かめる経路がある場合） |
 | 振り返り | — | `retrospective`（実行の手順そのものを変えた場合） | `retrospective` | `retrospective` | `retrospective` |
+| 棚卸し | `backlog-refinement` | `backlog-refinement` | `backlog-refinement` | `backlog-refinement` | `backlog-refinement` |
 
 **表の行名は進捗記録の `stage` の値で、スクリプトが同じ字で読む。**
 
-範囲外の課題の起票（`out-of-scope`）はこの表に載らない。工程ではないため、モードで要否を
-決めない（「範囲外の課題を見つけたとき」を参照）。
+範囲外の課題の起票（`out-of-scope`）はこの表に載らない。工程ではないため、モードで要否を決めない（「範囲外の課題を見つけたとき」を参照）。
 
 **表の工程はスプリントの中で 1 回ずつ動き、中は並列にする。** 設計 Pull Request は主題ごとに同時に開いて
 並列で回し（1 本の設計文書は 1,000 行以下）、ゲート 1 でまとめて 1 回承認する。実装は課題ごとの worktree で並列に
@@ -218,7 +218,7 @@ pace: fast
 次の工程を始める再開コマンド（`/ndf:development-workflow #<課題>`。今のセッションを `/goal` で始めていたときだけ先頭に `/goal `）を、
 情報文字列 `ndf-next` の囲みのコードブロック 1 つで出す。** 3 層では conductor がフェーズレポート（`## フェーズの報告`）かキューの done を
 受け取った時点で出し（supervisor とプランは出さない）、`結果: 関門` なら承認ゲートの承認と取り込みの後に出す。
-出す時点・アナウンス・新しい会話が状態を戻す手順は `context-window.md` の「新しい会話で戻す」にある。出す前に引継ぎ文書（メインディレクトリの `.ndf/handoff/<名>.md`）を作るか更新し、対象の最後の工程（振り返り。マイルストーンは閉じた後）の後に conductor が消す。規則は [references/handoff.md](references/handoff.md) にある。
+出す時点・アナウンス・新しい会話が状態を戻す手順は `context-window.md` の「新しい会話で戻す」にある。出す前に引継ぎ文書（メインディレクトリの `.ndf/handoff/<名>.md`）を作るか更新し、対象の最後の工程（棚卸し。マイルストーンは閉じた後）の後に conductor が消す。規則は [references/handoff.md](references/handoff.md) にある。
 
 ## 即時修正
 
@@ -268,7 +268,7 @@ frontmatter の `hooks` が、承認ラベル（ラベル `design-approved`）�
 | 検証の場所 | 各工程で、配布の前（設計レビュー・テスト・リファクタリング・コードレビュー・完了判定） | 同じ | 実践投入の中（開発版の配布と利用）。検査は配布の後にトリガーでまとめて |
 | 承認 | 人が 2 回（設計・本番への配布） | MVV 判定が「従う」なら自動、ほかは人 | MVV 判定で自動（ほかは人） |
 | 判定と配布の単位 | スプリント（1 つの版として出す課題のまとまり） | スプリント | 課題ごとの Pull Request（develop へ直接入り、開発版も課題ごと） |
-| 確定仕様化・振り返り | 各工程の順に | 同じ | スプリントの終わりにまとめて |
+| 確定仕様化・振り返り・棚卸し | 各工程の順に | 同じ | スプリントの終わりにまとめて |
 | 向く場面 | 影響が大きい・戻しにくい変更、複数の課題を 1 版にまとめる | `normal` と同じ場面で、人の待ち時間を減らしたい | 小さく出して実践で確かめられる変更、開発版の利用者が近い |
 
 **MVV 判定は `mvv-gate.py` が行い、「従う」でレッドラインに当たらないときだけ承認ゲートを通す。** ほかは人の承認へ戻す。
@@ -414,7 +414,7 @@ flowchart TD
     M --> P[マージ後の後片付け]
     P --> RL[配布]
     RL --> Q[リリース後テスト]
-    Q --> T[振り返り]
+    Q --> T[振り返り] --> BR[棚卸し]
     RL -.->|standard / 未検証の項目なし| T
     A -.->|legacy-refactor| D
     C -.->|"legacy-refactor で分けない / operation"| G
@@ -426,7 +426,7 @@ flowchart TD
     S -.->|"light / 領域に当たらない"| I
     K -.->|light / operation| L
     L -.->|light / legacy-refactor / 確定仕様化を通さない operation| P
-    RL -.->|light / 振り返りを通さない operation| Z[終了]
+    RL -.->|light / 振り返りを通さない operation| BR
     C -.->|documentation| SR[素材の収集と出典の確定]
     SR -.-> DR
     F -.->|documentation| DW[執筆]
@@ -437,11 +437,11 @@ flowchart TD
 
 - すべてのモードが A（調査）から始まり、D（モード判定）を経て S（作業場所の用意）へ進む。
   B（要求と受け入れ条件）を経るのは `light` と `operation` と `standard` の 3 つで、
-  `legacy-refactor` は A から D へ抜ける。終わりは `light` が RL（配布）、
+  `legacy-refactor` は A から D へ抜ける。終わりはすべてのモードで BR（棚卸し）である。BR の前は `light` が RL（配布）、
   `legacy-refactor` と `standard` が T（振り返り）、`operation` は条件に当たれば
   T、当たらなければ RL である
 - **`documentation` は破線の経路（A → B → D → S → C → SR → DR → F → DW → I → J → K → L
-  → P → RL → LR → Q → T）を通る。** SR（素材の収集と出典の確定）が C（設計）の後、
+  → P → RL → LR → Q → T → BR）を通る。** SR（素材の収集と出典の確定）が C（設計）の後、
   LR（体裁レビュー）が RL（配布）の後に立ち、DW（執筆）が H の位置に立つ。R（リファクタリング）は
   通らない
 - **`operation` は N（全体テスト → ビルド・結合テスト）を通らない。** `quality-gates` が
