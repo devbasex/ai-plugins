@@ -15,8 +15,8 @@ import os
 import urllib.parse
 from pathlib import Path
 
-from claude_training import NOT_LOCAL, Reading, http_reason, target, unread
 from claude_usage import http_json, new_request
+from training_common import NOT_LOCAL, Reading, http_reason, patch_reason, target, unread
 
 URL = "https://chatgpt.com/backend-api/settings/user"
 URL_ENV = "NDF_CODEX_SETTINGS_URL"  # 試験用の差し替え（手元のホストだけを受ける）
@@ -95,4 +95,4 @@ def turn_off(cred: tuple[str, str | None], url: str, key: str) -> str | None:
     """1 つの鍵を false へ書き換える `PATCH` を 1 回送る。2xx なら None、そうでなければ理由。例外を出さない。"""
     patch = urllib.parse.urljoin(url, PATCH_PATH) + "?" + urllib.parse.urlencode({"feature": key, "value": "false"})
     status, _ = http_json(_chatgpt_request(patch, cred, "PATCH"), TIMEOUT, follow_redirects=False)
-    return None if 200 <= status < 300 else http_reason(status)
+    return patch_reason(status)

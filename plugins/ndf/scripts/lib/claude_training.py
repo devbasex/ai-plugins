@@ -13,12 +13,12 @@ import os
 import subprocess
 import sys
 import time
-import urllib.parse
-from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import claude_accounts as ca
 from claude_usage import http_json, new_request
+# ランタイムに依らない部品は training_common が持つ。training-optout.py と既存の利用者のために名前を再公開する
+from training_common import LOCAL_HOSTS, NETWORK, NOT_LOCAL, Reading, http_reason, patch_reason, target, unread  # noqa: F401
 
 URL = "https://api.anthropic.com/api/oauth/account/settings"
 URL_ENV = "NDF_TRAINING_SETTINGS_URL"  # 試験用の差し替え（手元のホストだけを受ける）
@@ -26,51 +26,9 @@ SOURCE = "oauth/account/settings.grove_enabled"
 TIMEOUT = 3.0
 KEYCHAIN_TIMEOUT = 2.0
 KEYCHAIN_SERVICE = "Claude Code-credentials"
-LOCAL_HOSTS = ("127.0.0.1", "::1", "localhost")
 
 NO_TOKEN = "OAuth のトークンが無い（CLAUDE_CODE_OAUTH_TOKEN・.credentials.json）"
-NETWORK = "通信の失敗"
-NOT_LOCAL = "試験用の宛先が手元でない"
 NO_BOOL = "応答に grove_enabled の真偽値が無い"
-
-
-@dataclass(frozen=True)
-class Reading:
-    """読んだ結果。`training` は true / false / null で、真偽値を読めなかったら必ず null（I1）。"""
-
-    runtime: str
-    training: bool | None
-    source: str | None = None
-    updated_at: str | None = None
-    reason: str | None = None
-    config_dir: str | None = None
-
-    def to_item(self) -> dict:
-        d = asdict(self)
-        return {k: d[k] for k in ("runtime", "config_dir", "training", "source", "updated_at", "reason")}
-
-
-def unread(reason: str, runtime: str = "claude", config_dir: str | None = None) -> Reading:
-    return Reading(runtime, None, reason=reason, config_dir=config_dir)
-
-
-def http_reason(status: int) -> str:
-    return NETWORK if status == 0 else f"HTTP {status}"
-
-
-def target(env, var: str, default: str) -> str | None:
-    """宛先。試験用の差し替えは、ホストが手元の http(s) の URL だけを受ける。受けられなければ None（I7）。"""
-    raw = env.get(var)
-    if not raw:
-        return default
-    try:
-        u = urllib.parse.urlsplit(raw)
-        host = (u.hostname or "").lower()
-    except ValueError:
-        return None
-    if u.scheme not in ("http", "https") or "@" in u.netloc or host not in LOCAL_HOSTS:
-        return None
-    return raw
 
 
 def foreign_auth(env) -> list[str]:
@@ -166,4 +124,4 @@ def read_setting(env=None, config_dir: str | None = None) -> Reading:
 def turn_off(token: str, url: str) -> str | None:
     """`PATCH {"grove_enabled": false}` を 1 回送る。2xx なら None、そうでなければ理由。例外を出さない。"""
     status, _ = http_json(_oauth_request(url, token, "PATCH"), TIMEOUT, body={"grove_enabled": False}, follow_redirects=False)
-    return None if 200 <= status < 300 else http_reason(status)
+    return patch_reason(status)
