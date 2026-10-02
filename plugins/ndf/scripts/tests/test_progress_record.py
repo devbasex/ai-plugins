@@ -39,11 +39,12 @@ def fake_gh(tmp_path):
         encoding="utf-8",
     )
     (bin_dir / "gh").chmod(0o755)
-    return type("G", (), {"bin": bin_dir, "body": body, "written": written})
+    return type("G", (), {"bin": bin_dir, "body": body, "written": written, "data": tmp_path / "data"})
 
 
 def run(fake_gh, *args):
-    env = {**os.environ, "PATH": f"{fake_gh.bin}:{os.environ['PATH']}"}
+    # 通過記録も積まれる（#725）。置き場所を試験用へ向ける
+    env = {**os.environ, "PATH": f"{fake_gh.bin}:{os.environ['PATH']}", "CLAUDE_PLUGIN_DATA": str(fake_gh.data)}
     return subprocess.run(["bash", str(SCRIPT), *args], capture_output=True, text=True, env=env, timeout=60)
 
 
@@ -128,7 +129,7 @@ def test_missing_gh_is_not_an_error(tmp_path):
         capture_output=True,
         text=True,
         timeout=60,
-        env={**os.environ, "PATH": str(bin_dir)},
+        env={**os.environ, "PATH": str(bin_dir), "CLAUDE_PLUGIN_DATA": str(tmp_path / "data")},
     )
     assert out.returncode == 0
     assert out.stdout == ""

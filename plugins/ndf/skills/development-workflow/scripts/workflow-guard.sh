@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
-# NDF plugin: tool 実行前の hook。工程の飛ばしを検知し、設計 Pull Request のマージを
-# 承認ラベルに縛る（#221 / #266）。
+# NDF plugin: tool 実行前の hook。設計 Pull Request のマージを承認ラベルに縛り（#266）、
+# Pull Request の作成の時点で実行証跡を案内する（#424）。
 #
 # `development-workflow` の frontmatter が、この Skill を呼んだ会話の単位へ登録する。
 # 判定はすべて lib/ が持ち、この入口は入力の受け取りと出力の整形だけを行う。
 #
+# **進捗記録は観測しない（#725）。** 通過記録へ積むのは記録のスクリプト（progress-record.sh）自身である。
+# この hook が見るのは、外部のコマンドを観測するしかない判定（マージと Pull Request の作成）だけである。
+#
 # 出力は 3 通りである。いずれも終了コード 0 で返す。
 #   - 拒否（permissionDecision: deny）— 設計 Pull Request のマージだけ
-#   - 案内（additionalContext）— 記録の無い必須の工程
+#   - 案内（additionalContext）— Pull Request の作成の時点の、記録の無い必須の工程
 #   - 何も出力しない — 判定の対象でないとき、条件を満たしたとき
 set -uo pipefail
 
@@ -19,7 +22,7 @@ PAYLOAD=$(cat 2>/dev/null || true)
 [ -n "$PAYLOAD" ] || exit 0
 
 # **jq や hook の環境が無くても、マージらしい本文は止める。** 入力を読み解けないことを通す
-# 理由にしない（決定 8）。#221 の報告はここで諦める（通す側へ倒す）。
+# 理由にしない（決定 8）。#424 の案内はここで諦める（通す側へ倒す）。
 #
 # hook の環境（SessionStart が用意した python。`wf_hook_python`）を条件へ入れるのは、`wf_split` が語の分割を
 # その python で行うためである（#1142 の決定 20）。環境が無いと分割の結果が空になり、`wf_merge_target` は
@@ -54,31 +57,6 @@ fi
 # --- #266 設計 Pull Request のマージ ----------------------------------------
 if ! REASON=$(wf_check_merge "$COMMAND"); then
   wf_emit_deny "$REASON"
-  exit 0
-fi
-
-# --- #221 進行の記録を観測して積む ------------------------------------------
-#
-# **Pull Request の作成の見分けより先に置く。** 後ろに置くと、進行の記録のコマンドが
-# 作成と誤って一致したときに記録が積まれなくなる。
-if SYNC=$(wf_parse_sync "$COMMAND"); then
-  IFS=$'\t' read -r ISSUE KEY VALUE <<<"$SYNC"
-  case "$ISSUE" in ''|*[!0-9]*) exit 0 ;; esac
-  case "$KEY" in stage|mode|pace) ;; *) exit 0 ;; esac
-  [ -n "$VALUE" ] || exit 0
-  if [ "$KEY" = "stage" ]; then wf_is_stage "$VALUE" || exit 0; fi
-  if [ "$KEY" = "mode" ]; then wf_is_mode "$VALUE" || exit 0; fi
-  if [ "$KEY" = "pace" ]; then wf_is_pace "$VALUE" || exit 0; fi
-
-  SLUG=$(wf_repo_slug ".") || exit 0
-  wf_record "$SLUG" "$ISSUE" "$KEY" "$VALUE" 2>/dev/null
-
-  # 配布の記録へ進んだときだけ、記録の無い必須の工程を案内する。
-  [ "$KEY" = "stage" ] && [ "$VALUE" = "$WF_REPORT_STAGE" ] || exit 0
-  REPORT=$(wf_report "$SLUG" "$ISSUE")
-  case "$REPORT" in
-    *'記録なし:'*|*'条件付き:'*) wf_emit_context "$REPORT" ;;
-  esac
   exit 0
 fi
 
