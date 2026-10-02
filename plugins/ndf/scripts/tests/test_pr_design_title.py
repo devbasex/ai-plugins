@@ -89,9 +89,7 @@ def run_pr_step(tmp_path: Path, root: Path) -> None:
         "フェーズ": "設計",
         "課題": [1],
         "作業場所": str(root),
-        "steps": [
-            {"id": "pr", "type": "pr", "base": "main", "body": "template", "title_doc": DOC, "title": "設計: #1", "next": "end"}
-        ],
+        "steps": [{"id": "pr", "type": "pr", "base": "main", "body": "template", "title_doc": DOC, "title": "設計: #1", "next": "end"}],
     }
     state = tmp_path / "state"
     (state / "work").mkdir(parents=True)
