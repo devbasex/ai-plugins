@@ -417,9 +417,9 @@ def _diff(cur: dict, ch: dict, ms: Milestones, n: int) -> tuple[dict, list, list
     return patch, add, remove
 
 
-def _precheck(act, rec, hold):
-    """反映しない理由があれば (区分, 理由) を返す（返す・済み・承認待ち）。反映してよければ None。"""
-    verdict = act["verdict"]
+def _apply_one(gh, ms, repo, act, rec, record, hold=None):
+    """1 件を反映し (区分, 理由) を返す。hold は承認を待つ移動の理由。Partial は書き込み後の要約値を記録してから投げ直す。"""
+    n, verdict, ch = act["number"], act["verdict"], act.get("changes") or {}
     if verdict in RETURNED:
         return "returned", "要判断は反映しない"
     if rec is not None and rec.get("result") != "partial":
@@ -428,14 +428,6 @@ def _precheck(act, rec, hold):
         return "needs_approval", "やらないは承認を得てから反映する"
     if hold:  # 承認の要る前倒し・後ろ倒しは approved によらず待つ（rank --approved で承認済みになる）
         return "needs_approval", hold
-    return None
-
-
-def _apply_one(gh, ms, repo, act, rec, record, hold=None):
-    """1 件を反映し (区分, 理由) を返す。hold は承認を待つ移動の理由。Partial は書き込み後の要約値を記録してから投げ直す。"""
-    n, ch = act["number"], act.get("changes") or {}
-    if pre := _precheck(act, rec, hold):
-        return pre
     cur, wrote = None, False
     try:
         cur = gh.call([f"repos/{repo}/issues/{n}"], target=n)
