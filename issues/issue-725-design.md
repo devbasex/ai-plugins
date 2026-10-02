@@ -307,12 +307,20 @@ sequenceDiagram
     PS->>PR: <N> "配布"
     PR->>WC: wf_is_stage など（引数のチェック）
     PR->>WC: wf_record_progress(slug, N, 配布, 空, 空)
-    alt slug を取れない・jq が無い・排他を取れない
-        WC-->>PR: NOTE を標準エラーへ（積まない）
-    else 積めた
-        WC->>ST: stages へ 配布 を追記
-        WC->>WC: wf_report
-        WC-->>C: 記録なし: …（欠落があるときだけ）
+    alt slug を取れない・jq が無い
+        WC-->>PR: NOTE を標準エラーへ 1 行（どのキーも積まない）
+    else 積む
+        loop 渡したキーごと（mode → pace → stage。排他はキーごとに取る。I3）
+            alt このキーの排他を取れない
+                WC-->>PR: NOTE を標準エラーへ 1 行（このキーだけ飛ばし、次のキーへ進む）
+            else 排他を取れた
+                WC->>ST: キーの値を追記（ここでは stages へ 配布）
+            end
+        end
+        opt stage の 配布 を積めた
+            WC->>WC: wf_report
+            WC-->>C: 記録なし: …（欠落があるときだけ）
+        end
     end
     alt gh が無い・課題を取得できない
         PR-->>PS: 終了コード 0（本文は書かない）
@@ -445,7 +453,8 @@ hook に「積まないが、欠落を案内する」役目を残す形は採ら
 | 受け入れ条件 10 | `workflow-guard.sh` と `workflow-common.sh` に `wf_parse_sync` が無い（`grep` で 0 件） | 定義を残すと落ちる |
 | 受け入れ条件 11 | 欠落のある課題で `stage 配布` を打つと標準出力に `記録なし:` が出る。欠落が無ければ案内の行が出ない | 案内を `wf_report` の全文にすると欠落なしで落ち、案内を出さないと欠落ありで落ちる |
 | I7・受け入れ条件 12 | 知らないキー・工程表に無い値・引数の不足で終了コード 2、通過記録が変わらない | 積む処理を引数のチェックより前に置くと落ちる |
-| I3・受け入れ条件 13 | 排他を握ったまま・`origin` を外した状態で、終了コード 0、本文は書き換わり、標準エラーに `NOTE:` の 1 行 | `wf_record_progress` の戻り値で抜けると落ちる |
+| I3・受け入れ条件 13 | `origin` を外した状態で `mode`・`pace`・`stage` を一度に渡すと、終了コード 0、本文は書き換わり、標準エラーに `NOTE:` の 1 行、通過記録のファイルが作られない | `wf_record_progress` の戻り値で抜けると落ちる |
+| I3・受け入れ条件 13 | 排他の取得を 1 回目だけ失敗させて（`wf_lock_acquire` を 1 回目だけ 1 を返す関数に差し替える）`mode`・`pace`・`stage` を一度に渡すと、終了コード 0、標準エラーに `NOTE:` の 1 行、`pace` と `stage` は積まれ `mode` は積まれない。排他を握ったままなら `NOTE:` が 3 行で何も積まれない | 排他の失敗で残りのキーも飛ばす（呼び出し全体を原子的に扱う）と落ちる |
 | I6・受け入れ条件 14・#459 | `projects-common.sh` に工程名・モード・進め方の一覧の定数が無く、`progress-record.sh` が本文へ並べる工程が `wf_stages` の並びと一致する | `PJ_STAGES` を戻して 1 つだけ工程を足すと、本文の並びがずれて落ちる |
 | 受け入れ条件 15・#961 | `supervise.py` の `record_stage` を、`記録` に `projects-sync.sh` を持つ計画で呼ぶと、課題ごとの通過記録に工程と進め方が入る | 子プロセスの記録が積まれない形へ戻すと落ちる |
 | 受け入れ条件 16 | `test_workflow_guard.py` のマージの拒否と実行証跡の案内のテストが、そのまま通る | `wf_is_candidate` から `pr create` まで外すと落ちる |
