@@ -25,6 +25,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
@@ -37,6 +38,7 @@ TOOL = "training-optout"
 RUNTIMES = ("claude", "codex", "kiro", "agy")
 OPTOUT_ENV = "NDF_TRAINING_OPTOUT"
 STOP = f"止めるには {OPTOUT_ENV}=0"
+MIN_CALL = 0.5  # 予算の残りがこれを切ったら送らない（打ち切られる通信を始めない）
 CODEX_LABELS = {
     "training_allowed": "「Improve the model for everyone」",
     "codex_training_allowed": "Codex の環境の学習（codex_training_allowed）",
@@ -119,19 +121,32 @@ def claude_session(env) -> str | None:
 
 
 def codex_session(env) -> str | None:
-    """codex の書き換え。true の鍵ごとに 1 回送る。"""
+    """codex の書き換え。true の鍵ごとに 1 回送る。
+
+    通信は全体で `xt.BUDGET` 秒の内に収める（hook の timeout 10 秒で打ち切られて知らせを失わないため）。
+    予算の残りが `MIN_CALL` 秒を切ったら残りの鍵は送らず、送れなかった鍵として知らせる。"""
+    deadline = time.monotonic() + xt.BUDGET
+
+    def left() -> float:
+        return min(xt.TIMEOUT, deadline - time.monotonic())
+
     url = ct.target(env, xt.URL_ENV, xt.URL)
     if url is None:
         return read_failed(ct.NOT_LOCAL)
     cred, why = xt.auth(env)
     if cred is None:
         return None if why == xt.NOT_CHATGPT else read_failed(why)  # API キーのログインには学習の設定が無い
-    reading, keys = xt.read_with(cred, url)
+    reading, keys = xt.read_with(cred, url, left())
     if reading.training is None:
         return read_failed(reading.reason)
     if not keys:
         return None
-    failed = [(k, r) for k in keys if (r := xt.turn_off(cred, url, k))]
+    failed = []
+    for k in keys:
+        t = left()
+        r = xt.turn_off(cred, url, k, t) if t >= MIN_CALL else xt.OUT_OF_TIME
+        if r:
+            failed.append((k, r))
     done = [CODEX_LABELS[k] for k in keys if k not in dict(failed)]
     if failed:
         reasons = "・".join(sorted({r for _, r in failed}))

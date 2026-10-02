@@ -24,6 +24,10 @@ PATCH_PATH = "account_user_setting"  # GET の URL から相対で決める
 SOURCE = "chatgpt/settings/user.training_allowed"
 KEYS = ("training_allowed", "codex_training_allowed", "codex_training_allowed_v2")
 TIMEOUT = 3.0
+# session-start の通信（GET 1 回と PATCH 最大 3 回）全体の時間予算。hooks/codex.json の timeout 10 秒から、
+# Python の起動と知らせの出力の分を引いた残り。1 回あたりの上限は TIMEOUT と予算の残りの小さい方
+BUDGET = 7.0
+OUT_OF_TIME = "時間の予算の内に送れなかった"
 USER_AGENT = "ndf-training-optout"  # Python の既定の User-Agent では 403 が返る（2026-10-02 の実測）
 
 NOT_CHATGPT = "ChatGPT のログインでない（API キーのログイン）"
@@ -67,9 +71,9 @@ def convert(settings) -> tuple[bool | None, str | None]:
     return any(settings.get(k) is True for k in KEYS), None
 
 
-def read_with(cred: tuple[str, str | None], url: str) -> tuple[Reading, list[str]]:
+def read_with(cred: tuple[str, str | None], url: str, timeout: float = TIMEOUT) -> tuple[Reading, list[str]]:
     """(読んだ結果, true だった鍵)。例外を出さない。"""
-    status, body = http_json(_chatgpt_request(url, cred), TIMEOUT, follow_redirects=False)
+    status, body = http_json(_chatgpt_request(url, cred), timeout, follow_redirects=False)
     if status != 200:
         return unread(http_reason(status), "codex"), []
     settings = (body or {}).get("settings")
@@ -91,8 +95,8 @@ def read_setting(env=None) -> Reading:
     return read_with(cred, url)[0]
 
 
-def turn_off(cred: tuple[str, str | None], url: str, key: str) -> str | None:
+def turn_off(cred: tuple[str, str | None], url: str, key: str, timeout: float = TIMEOUT) -> str | None:
     """1 つの鍵を false へ書き換える `PATCH` を 1 回送る。2xx なら None、そうでなければ理由。例外を出さない。"""
     patch = urllib.parse.urljoin(url, PATCH_PATH) + "?" + urllib.parse.urlencode({"feature": key, "value": "false"})
-    status, _ = http_json(_chatgpt_request(patch, cred, "PATCH"), TIMEOUT, follow_redirects=False)
+    status, _ = http_json(_chatgpt_request(patch, cred, "PATCH"), timeout, follow_redirects=False)
     return patch_reason(status)

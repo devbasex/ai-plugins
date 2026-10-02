@@ -486,6 +486,26 @@ def test_codex_session_start_turns_off_each_true_key(mod, capsys, fake):
     assert msg.startswith("[ndf] ") and "Off にした" in msg and "NDF_TRAINING_OPTOUT=0" in msg
 
 
+def test_codex_session_start_keeps_within_the_time_budget(mod, capsys, fake, monkeypatch):
+    """GET 1 回と PATCH 3 回の全体を予算の内に収め、予算の切れた鍵は送らずに知らせる（hook の 10 秒で打ち切られない）。"""
+    fake.replies["GET"] = chatgpt(training_allowed=True, codex_training_allowed=True, codex_training_allowed_v2=True)
+    monkeypatch.setattr(mod.xt, "BUDGET", 1.0)
+    monkeypatch.setattr(mod.xt, "TIMEOUT", 0.6)
+    sent = []
+
+    def slow_turn_off(cred, url, key, timeout):  # 応答しない宛先: 上限の秒まで待って失敗する
+        sent.append(timeout)
+        time.sleep(timeout)
+        return "通信できない"
+
+    monkeypatch.setattr(mod.xt, "turn_off", slow_turn_off)
+    t = time.monotonic()
+    msg = start(mod, capsys, "--runtime", "codex")
+    assert time.monotonic() - t < 1.3
+    assert sent and len(sent) < 3 and all(x <= 0.6 for x in sent), msg
+    assert "Off にできなかった" in msg and "時間の予算" in msg
+
+
 def test_codex_session_start_sends_nothing_when_false(mod, capsys, fake):
     fake.replies["GET"] = chatgpt(training_allowed=False, codex_training_allowed=False, codex_training_allowed_v2=False)
     assert start(mod, capsys, "--runtime", "codex") is None and fake.of("PATCH") == []

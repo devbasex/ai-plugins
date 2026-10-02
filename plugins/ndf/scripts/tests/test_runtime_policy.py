@@ -283,6 +283,33 @@ def test_supervise_stops_before_any_step_for_outside_worker(tmp_path, step):
     assert "ステップ w" in stopped[1] and "宣言の外" in stopped[1]
 
 
+@pytest.mark.parametrize(
+    "step",
+    [
+        {"id": "w", "type": "work", "kind": "実装", "prompt": "/ndf:x", "full": True, "runtime": "codex"},
+        {"id": "w", "type": "judge", "prompt": "x"},
+    ],
+)
+def test_supervise_stops_steps_that_launch_claude_directly(tmp_path, step):
+    """full のステップは runtime を見ずに、judge のステップは常に claude を起動する。"""
+    eng, work = _engine(tmp_path, [step])
+    _declare(work, {"allowed": ["codex"]})
+    stopped = eng.check_runtimes()
+    assert stopped is not None and "ステップ w" in stopped[1] and "claude" in stopped[1]
+
+
+def test_supervise_claude_runner_refuses_outside_claude(tmp_path, monkeypatch):
+    """ステップの runtime を通らない起動（遅れの判定・PR の本文など）も、共通の口で止める。"""
+    eng, work = _engine(tmp_path, [{"id": "w", "type": "work", "kind": "実装", "prompt": "x", "runtime": "codex"}])
+    _declare(work, {"allowed": ["codex"]})
+    assert eng.check_runtimes() is None
+    from supervise_lib import claude as sc
+
+    monkeypatch.setattr(sc, "call_claude", lambda *a, **k: pytest.fail("claude を起動した"))
+    res = eng.ctx.claude.call("s", "p", None, str(work), 10)
+    assert res["ok"] is False and "宣言の外" in res["text"]
+
+
 def test_supervise_passes_inside_and_without_declaration(tmp_path):
     eng, work = _engine(tmp_path, [{"id": "w", "type": "work", "kind": "実装", "prompt": "x", "runtime": "codex"}])
     assert eng.check_runtimes() is None

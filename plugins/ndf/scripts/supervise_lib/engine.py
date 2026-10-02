@@ -21,13 +21,30 @@ import gh_quota
 import runtime_policy
 import slow_step as ss
 from supervise_lib import decl, paths
-from supervise_lib.claude import AuthUnavailable, ClaudeRunner, UsageLimit
+from supervise_lib.claude import AuthUnavailable, ClaudeCall, ClaudeRunner, UsageLimit, claude_kind
 from supervise_lib.plan import expand_parts, normalize_plan
 from supervise_lib.pr import PrStep
 from supervise_lib.slow import SLOW_EXIT, SlowAction, SlowWatch
 from supervise_lib.state import RunState
 from supervise_lib.steps import JudgeStep, RunStep, StepContext, is_gate, last_json
 from supervise_lib.worker_steps import DriveStep, WorkStep
+
+
+class PolicyClaudeRunner(ClaudeRunner):
+    """ランタイムの宣言（#1598）を起動の前に照らす `ClaudeRunner`。
+
+    judge・遅れの判定・PR の本文のように、ステップの `runtime` を通らずに claude を直接起動する呼び出しも、
+    宣言が claude を許さなければ起動せずに失敗の結果を返す。`policy` は `Engine.check_runtimes` が読んで渡す
+    （None は宣言が無い＝照らさない）。"""
+
+    policy = None
+
+    def call(self, system: str, prompt: str, tools: str | None, cwd: str, timeout: int, **kw) -> ClaudeCall:
+        if self.policy is not None and not self.policy.allows("claude"):
+            reason = self.policy.reason(["claude"], "claude を直接起動するステップ")
+            kind = claude_kind(system, bool(kw.get("full")))
+            return ClaudeCall(ok=False, text=f"claude を起動しない: {reason}", usage={}, seconds=0, kind=kind, model_usage=None)
+        return super().call(system, prompt, tools, cwd, timeout, **kw)
 
 
 class Engine:
@@ -42,7 +59,7 @@ class Engine:
         self.ctx = StepContext(self.plan, self.steps, self.state, str(Path(plan_path).resolve()) if plan_path else "")
         self.ctx.tick = self.tick
         self.slow = self.ctx.slow = SlowWatch(self.ctx, slow_args)
-        self.ctx.claude = ClaudeRunner(self.ctx)
+        self.ctx.claude = PolicyClaudeRunner(self.ctx)
         self.gh_limit_waits: dict[str, int] = {}  # judge の retry で GitHub の上限を待った回数（ステップごと）
         self.run_step = RunStep()
         self.handlers = {h.kind: h for h in (self.run_step, WorkStep(), DriveStep(), PrStep(), JudgeStep())}
@@ -160,8 +177,10 @@ class Engine:
         """work / drive ステップの worker の起動先を、ランタイムの宣言（#1598）とすべて照らす。
 
         どのステップも流す前に照らし、外か宣言が壊れていれば (止まった, 理由) を返す（AC9・AC10）。
-        `runtime` が無いか `claude-p` のステップは claude（`claude -p`）を起動する。宣言の場所は
-        `decl.decl_roots` の候補のうち先頭で実在するもの。
+        `runtime` が無いか `claude-p` のステップと、`"full": true` のステップ（`runtime` を見ずに
+        claude を直接起動する）と judge のステップは claude（`claude -p`）を起動する。宣言の場所は
+        `decl.decl_roots` の候補のうち先頭で実在するもの。読んだ宣言は `PolicyClaudeRunner.policy` に渡し、
+        Claude を直接起動する共通の口（`PolicyClaudeRunner.call`）も起動の前に照らす。
         """
         roots = decl.decl_roots(str(self.plan.get("作業場所") or self.cwd or "."), self.plan.get("リポジトリ"))
         root = next((r for r in roots if r.is_dir()), None)
@@ -169,14 +188,17 @@ class Engine:
             policy = runtime_policy.read_policy(root)
         except runtime_policy.RuntimePolicyError as e:
             return "止まった", str(e)
+        self.ctx.claude.policy = policy
         if policy is None:
             return None
         for sid in self.order:
             step = self.steps[sid]
-            if step.get("type") not in ("work", "drive"):
+            kind = step.get("type")
+            if kind not in ("work", "drive", "judge"):
                 continue
             rt = step.get("runtime")
-            target = "claude" if not rt or rt == "claude-p" else str(rt)
+            direct = kind == "judge" or (kind == "work" and step.get("full")) or not rt or rt == "claude-p"
+            target = "claude" if direct else str(rt)
             try:
                 policy.require([target], f"ステップ {sid} の runtime")
             except runtime_policy.RuntimePolicyError as e:
