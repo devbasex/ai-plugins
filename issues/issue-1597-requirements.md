@@ -60,6 +60,7 @@
 - 利用者が NDF を使う Claude Code のセッションを始めると、そのアカウントの学習の設定が Off（`grove_enabled: false`）になっている状態にする。利用者は設定画面を開かなくてよい
 - 利用側のリポジトリ（利用条件で AI の学習への利用を禁じるデータを扱うもの）が「学習の設定を確かめた LLM にだけ入力を渡す」という規則を、プランや hook から機械で守れるようにする
 - 確かめられないとき・書き換えに失敗したときは「学習に使わない」と扱わず、セッションも止めない
+- codex（ChatGPT のログイン）も確認の対象にし、書き換えの手段が確かめられたら NDF を使う codex のセッションの開始で Off にする（追加の要求 2）
 
 ## 前提
 
@@ -70,20 +71,22 @@
 - 前提 5: 書き換えの起動の契機は、Claude Code の SessionStart（`startup`）の hook とする。`claude -p` で起動する worker も同じ契機で動く。アカウントの切り替え（`CLAUDE_CONFIG_DIR` がアカウントの設定ディレクトリを指す起動）でも、その起動の認証で読み書きする
 - 前提 6: 認証が OAuth でない起動（API キー・Bedrock・Vertex など、従量の接続）には学習の設定が無い。この起動では読み書きせず、確認の結果は「確かめられない」とする（「学習に使わない」と扱わない）
 - 前提 7: 学習の設定を Off にすると、Anthropic 側の会話の保存期間も変わる（一般向けの規約で、学習に使う設定の保存期間と使わない設定の保存期間が違う）。利用者の要求はこの変化を含むものとして扱い、設計の承認で人が確かめる
+- 前提 9: codex（ChatGPT のログイン）の学習の設定は、codex の認証（`$CODEX_HOME/auth.json`、既定 `~/.codex/auth.json` の `tokens.access_token` と `tokens.account_id`）で呼ぶ `GET https://chatgpt.com/backend-api/settings/user` の `settings.training_allowed`（ChatGPT の「Improve the model for everyone」）と `settings.codex_training_allowed`・`settings.codex_training_allowed_v2`（Codex の設定の「Include environments」と推定）で読める（2026-10-02 の実測、ChatGPT Pro の個人のワークスペース。値はどれも false）。公開の API ではない。書き換えの口 `PATCH https://chatgpt.com/backend-api/settings/account_user_setting` は在る（`GET` が `405`・`Allow: PATCH`）が、引数の形と応答を実物で確かめていない
 - 前提 8: true → false の切り替えは実物のアカウントで未確認（原文）。false のときに `PATCH` が `202`・本文 `null` を返し、`grove_updated_at` が変わらないことだけを確かめてある
 
 ## 対象範囲
 
 含む:
-- 学習の設定の確認（`check`）を安定版のエントリポイントとして置く（claude は読み取り、codex / kiro / agy は `unsupported`）
+- 学習の設定の確認（`check`）を安定版のエントリポイントとして置く（claude と codex は読み取り、kiro / agy は `unsupported`）
 - Claude Code の SessionStart の hook で、学習の設定が true なら false へ書き換え、利用者へ知らせる
+- codex の SessionStart の hook で同じことを行う。ただし書き換えの引数の形を確かめた後に限る（前提 9。確かめるまでは codex の書き換えを入れない）
 - 利用者が書き換えの動作を外す手段
 - 失敗（認証が無い・401・403・ネットワーク・応答の形の違い）でセッションを止めないこと
 - 利用側のリポジトリが hook かプランから確認を呼ぶ例（README か SKILL）
 - 実験版の `training-optout.py` を消し、台帳の行き先を書く
 
 含まない:
-- codex / kiro / agy の学習の設定の書き換え（確かめる手段が無い。`unsupported` を返すだけ）
+- kiro / agy の学習の設定の確認と書き換え（確かめる手段が無い。`unsupported` を返すだけ）
 - 組織が管理するアカウント（Team / Enterprise）で、組織の設定が学習の設定を決める場合の扱い。書き換えが拒まれたら失敗として知らせるだけにする
 - 学習の設定を true へ戻す操作（利用者が設定画面で行う）
 - 入力を LLM へ渡す前に確認を強制する hook（利用側のリポジトリが例を見て置く）
@@ -93,7 +96,7 @@
 
 | # | イベント | 引き金 | 失敗したとき | 順序の前提 |
 | --- | --- | --- | --- | --- |
-| E1 | NDF を読み込んだ Claude Code のセッションが始まった | 利用者か worker の起動（SessionStart の `startup`） | — | — |
+| E1 | NDF を読み込んだ Claude Code のセッション（codex の書き換えを入れた後は codex のセッションも）が始まった | 利用者か worker の起動（SessionStart の `startup`） | — | — |
 | E2 | 書き換えの動作が外されていると分かった | 利用者が外す手段を使っている | 外す手段の値が読めない → 外されていないとして扱う | E1 |
 | E3 | OAuth のトークンを読んだ | E1 の後、E2 で外されていない | トークンが無い・OAuth でない（前提 6） → E7（失敗を知らせる。従量の接続では知らせない） | E1・E2 |
 | E4 | 学習の設定を読んだ | E3 | 401・403・ネットワーク・応答に真偽値が無い → E7 | E3 |
@@ -107,7 +110,7 @@
 
 | 用語 | 意味 |
 | --- | --- |
-| 学習の設定 | アカウントの「Help improve our AI models」。`account/settings` の `grove_enabled` で、true なら入力を学習に使う |
+| 学習の設定 | アカウントの入力を学習に使うかの設定。claude は「Help improve our AI models」（`account/settings` の `grove_enabled`）、codex は ChatGPT の「Improve the model for everyone」（`settings/user` の `training_allowed`）と Codex の環境の学習（`codex_training_allowed`・`codex_training_allowed_v2`）。true なら入力を学習に使う |
 | 学習の設定の確認 | 学習の設定を読み、1 行の JSON で返すこと（`check`）。書き換えない |
 | 学習の設定の書き換え | NDF のセッションの開始で、true の学習の設定を false にすること |
 
@@ -118,7 +121,8 @@
 - [ ] 応答を差し替えたテストで、`grove_enabled` が false なら `status: "ok"`・終了コード 0・`items[0].training` が false になる
 - [ ] 応答を差し替えたテストで、`grove_enabled` が true なら `status: "stopped"`・`items[0].training` が true になる
 - [ ] 認証が無い・401・403・ネットワークの失敗・`grove_enabled` が真偽値でない、のそれぞれで `status: "stopped"`・`training` が null・`reason` に理由が入る（「学習に使わない」と扱わない）
-- [ ] `--runtime codex` / `kiro` / `agy` は `unsupported` を理由に返し、`status: "stopped"` になる
+- [ ] `--runtime kiro` / `agy` は `unsupported` を理由に返し、`status: "stopped"` になる
+- [ ] 応答を差し替えたテストで、`--runtime codex` は `training_allowed`・`codex_training_allowed`・`codex_training_allowed_v2` がすべて false なら `training: false`、どれかが true なら `training: true`、`training_allowed` が真偽値でない・認証が無い・codex が ChatGPT のログインでない・401・403・ネットワークの失敗なら `training: null` と `reason` になる
 - [ ] 確認のエントリポイントが `plugins/ndf/scripts/experimental/` の外にあり、実験版の `training-optout.py` が消えて、台帳の行に行き先が書かれている
 
 書き換え（SessionStart の hook）:
@@ -132,9 +136,16 @@
 - [ ] 利用者が書き換えの動作を外すと、`PATCH` を送らない（読み取りも送らない）
 - [ ] hook の定義が SessionStart の `startup` に載り、`claude plugin validate .` が終了コード 0 で終わる
 
+codex の書き換え（利用者が前提 9 の書き換えの形を確かめると決めた後に限る）:
+
+- [ ] codex の学習の設定が true のアカウント（応答を差し替える）で codex の SessionStart の hook を起動すると、true だった鍵ごとに書き換えが 1 回送られ、利用者向けの知らせが出る
+- [ ] 既に false なら書き換えを送らず、知らせも出さない
+- [ ] 失敗（認証が無い・401・403・ネットワーク・2xx 以外）で hook の終了コードが 0 で、失敗の知らせが出る
+- [ ] 書き換えの動作を外す手段（claude と同じ）を使うと、読み取りも書き換えも送らない
+
 退行しないこと:
 
-- [ ] 確認と書き換えの出力（標準出力・標準エラー・hook の出力）とログに、OAuth のトークンとアカウントの ID（`account/settings` の応答に含まれる識別子）が現れない（テストで応答とトークンに目印の文字列を入れて確かめる）
+- [ ] 確認と書き換えの出力（標準出力・標準エラー・hook の出力）とログに、OAuth のトークンとアカウントの ID（codex の `account_id`・`settings/user` の応答の識別子を含む）（`account/settings` の応答に含まれる識別子）が現れない（テストで応答とトークンに目印の文字列を入れて確かめる）
 - [ ] 既存の SessionStart の hook（ensure-retention・statusline・worktree-session・relay）の振る舞いが変わらない（既存のテストが通る）
 
 利用者への説明:
@@ -147,8 +158,8 @@
 | --- | --- |
 | 可用性 | どの失敗でも hook は終了コード 0 で終わり、セッションの開始を止めない |
 | 性能・拡張性 | hook の 1 回の実行は hook の `timeout` に収まる。読み書きの HTTP には打ち切りの時間を置き、その合計が `timeout` を超えない（値は設計で決める） |
-| セキュリティ | トークンは環境変数か認証ファイルから読むだけで、書き出さない。出力とログにトークンとアカウントの ID を出さない。送り先は `api.anthropic.com` だけ |
-| システム環境 | Claude Code の SessionStart の hook として動く。codex / kiro / agy では書き換えない |
+| セキュリティ | トークンは環境変数か認証ファイルから読むだけで、書き出さない。出力とログにトークンとアカウントの ID を出さない。送り先は `api.anthropic.com`（claude）と `chatgpt.com`（codex）だけ |
+| システム環境 | Claude Code の SessionStart の hook として動く。codex の書き換えは前提 9 の形を確かめた後に codex の SessionStart の hook として動く。kiro / agy では書き換えない |
 
 ## 影響
 
@@ -180,8 +191,8 @@
 | 区分 | 内容 |
 | --- | --- |
 | 常に行う | 既存テストの実行・`claude plugin validate .`・出力に秘密が出ないことのテスト |
-| 確認してから行う | Anthropic 以外の送り先を足すこと・認証ファイルへ書くこと・SessionStart 以外の契機を足すこと |
-| 行わない | トークンの更新・学習の設定を true にする書き換え・codex / kiro / agy の設定の書き換え |
+| 確認してから行う | Anthropic と ChatGPT（`chatgpt.com`）以外の送り先を足すこと・認証ファイルへ書くこと・SessionStart 以外の契機を足すこと |
+| 行わない | トークンの更新・学習の設定を true にする書き換え・kiro / agy の設定の書き換え・形を確かめていない codex の書き換えを実物のアカウントへ送ること |
 
 ## MVV との突き合わせ
 
@@ -208,3 +219,4 @@
 | 確認の安定版での置き場と名前（独立のスクリプトか、既存の `hook.py` の副命令か） | 設計 | 承認ゲート 1 |
 | SessionStart の `resume` でも動かすか | 設計 | 承認ゲート 1 |
 | 前提 7（保存期間の変化）を含めて書き換えてよいか | 利用者（承認ゲート 1） | 承認ゲート 1 |
+| codex の書き換えの形（前提 9）を、実物のアカウントで 1 回送って確かめてよいか。確かめないなら codex は確認だけにするか | 利用者（承認ゲート 1） | 承認ゲート 1 |
