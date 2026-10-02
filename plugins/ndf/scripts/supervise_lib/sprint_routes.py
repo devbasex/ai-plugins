@@ -7,7 +7,8 @@ from pace import PaceError, read_pace
 from sprint_mvv import MVV_PACES
 from supervise_lib.decl import DeclError, decl_roots, delivery_decl, require_versions
 from supervise_lib.plan import QUEUE_PRS
-from supervise_lib.release_templates import GATE_2_MATERIAL, RELEASE_FORMS, plan_gate_2, plan_promote, plan_verify
+from supervise_lib.delivery_templates import GATE_2_MATERIAL, plan_gate_2, plan_promote, plan_verify
+from supervise_lib.release_templates import RELEASE_FORMS
 from supervise_lib.verify_steps import plan_limits
 
 

@@ -5,7 +5,7 @@
     check-trigger.py prepare --id <名> --state <計画の状態ディレクトリ> [--review] [--root DIR]
     check-trigger.py scope --id <名> --state <DIR>
     check-trigger.py finish --id <名> --pr N [--root DIR]
-    check-trigger.py record --id <名> --state <DIR> (--pr N | --failed [--pr N] | --target-pr N [--failed]) [--review] [--root DIR]
+    check-trigger.py record --id <名> --state <DIR> (--pr N | --failed [--pr N] | --target-pr N [--advance-done] [--failed]) [--review] [--root DIR]
     check-trigger.py escape --pr N [--of M] [--root DIR]
     check-trigger.py changed --id <名> [--root DIR]
     check-trigger.py stats [--root DIR]
@@ -546,9 +546,32 @@ def _append_or_stop(root: Path, row: dict) -> None:
         raise Stop(f"検査の記録へ書けない: {e}", EXIT_VIOLATION)
 
 
+def merged_at(root: Path, n: int) -> str:
+    """マージした PR のマージのコミット。手元へ取り込んでから返す（送る前に手元にコミットが要る）。読めなければ空。"""
+    try:
+        d = json.loads(gh_or_stop(root, "pr", "view", str(n), "--json", "state,mergeCommit,baseRefName"))
+    except (Stop, ValueError):
+        d = None
+    sha = ((d.get("mergeCommit") or {}).get("oid") or "") if isinstance(d, dict) and d.get("state") == "MERGED" else ""
+    if sha and d.get("baseRefName"):
+        git_or_stop(root, "fetch", "-q", "origin", d["baseRefName"], check=False)
+    return sha
+
+
+def _pushed_result(root: Path, a_id: str, res: str, n: int, row: dict, to: str, review: bool) -> dict:
+    """`check-done/*` を `to` へ進め、進めた ref と送れなかった ref を添えた記録の結果。"""
+    pushed, unpushed = push_done(root, to, review)
+    note = f"・origin の {' / '.join(pushed)} を進めた" if pushed else ""
+    note += f"・{' / '.join(unpushed)} を送れない（次の範囲は手元の記録から決まる）" if unpushed else ""
+    return result(TOOL, "ok", f"検査 {a_id} を記録した（{res}・#{n}）{note}", [row], {"pushed": pushed, "unpushed": unpushed})
+
+
 def record_target(a, root: Path) -> tuple[dict, int]:
     """PR を指す検査（`new check --pr`）の記録。範囲の起点（`to`）と検査の PR（`pr`）を持たないため、差分の検査の
-    範囲に影響しない。`check-base` を消さず、`check-done/*` を進めず、PR を閉じない（検査した PR は実装の PR である）。"""
+    範囲に影響しない。`check-base` を消さず、`check-done/*` を進めず、PR を閉じない（検査した PR は実装の PR である）。
+
+    `--advance-done`（スプリントの検査。#1485 の決定 8）なら、検査が成功してマージした PR のマージのコミットを
+    `to` にして `check-done/*` を進める。落ちた検査とマージしなかった検査は進めない。"""
     findings, failed_at = findings_of(Path(a.state))
     n = a.target_pr
     row = {
@@ -568,11 +591,16 @@ def record_target(a, root: Path) -> tuple[dict, int]:
         return result(TOOL, "stopped", f"検査 {a.id}（#{n}）が {row['failed_at']} で落ちた。{written}", [row], {}), EXIT_VIOLATION
     res = _ended_result(root, n)
     row["result"] = res
+    row["to"] = merged_at(root, n) if a.advance_done and res == "merged" else ""
     _append_or_stop(root, row)
-    return result(TOOL, "ok", f"検査 {a.id} を記録した（{res}・#{n}）", [row], {}), EXIT_OK
+    if not a.advance_done:
+        return result(TOOL, "ok", f"検査 {a.id} を記録した（{res}・#{n}）", [row], {}), EXIT_OK
+    return _pushed_result(root, a.id, res, n, row, row["to"], False), EXIT_OK
 
 
 def cmd_record(a, root: Path) -> tuple[dict, int]:
+    if a.advance_done and a.target_pr is None:
+        raise Stop("--advance-done は --target-pr と一緒に渡す")
     if a.target_pr is not None:
         if a.pr is not None or a.review:
             raise Stop("--target-pr は --pr / --review と同時に渡せない")
@@ -610,11 +638,7 @@ def cmd_record(a, root: Path) -> tuple[dict, int]:
     row["result"] = res
     _append_or_stop(root, row)
     delete_base(root, a.id)
-    pushed, unpushed = push_done(root, row["to"], a.review)
-    note = f"・origin の {' / '.join(pushed)} を進めた" if pushed else ""
-    if unpushed:
-        note += f"・{' / '.join(unpushed)} を送れない（次の範囲は手元の記録から決まる）"
-    return result(TOOL, "ok", f"検査 {a.id} を記録した（{res}・#{a.pr}）{note}", [row], {"pushed": pushed, "unpushed": unpushed}), EXIT_OK
+    return _pushed_result(root, a.id, res, a.pr, row, row["to"], a.review), EXIT_OK
 
 
 def push_done(root: Path, to: str, review: bool) -> tuple[list[str], list[str]]:
@@ -795,6 +819,11 @@ def build_parser() -> argparse.ArgumentParser:
     s = add("record", True, True)
     s.add_argument("--pr", type=int)
     s.add_argument("--target-pr", type=int, help="PR を指す検査として記録する（検査した PR。範囲の起点にしない）")
+    s.add_argument(
+        "--advance-done",
+        action="store_true",
+        help="--target-pr の PR をマージしたら、そのマージのコミットへ check-done/* を進める（スプリントの検査）",
+    )
     s.add_argument("--failed", action="store_true")
     s.add_argument("--review", action="store_true", help="レビューだけの回として記録する（only: review）")
     s = add("escape")

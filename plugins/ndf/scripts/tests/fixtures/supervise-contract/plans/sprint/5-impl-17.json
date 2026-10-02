@@ -147,6 +147,7 @@
       "unknown_duration": true
     }
   },
+  "記録": "<NDF>/scripts/projects-sync.sh",
   "branch": "feat/issue-17-m9",
   "起点": "origin/sprint/m9",
   "リポジトリ": "<TMP>/repo"

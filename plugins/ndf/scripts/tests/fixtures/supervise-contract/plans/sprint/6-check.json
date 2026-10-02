@@ -24,9 +24,18 @@
       "base": "main",
       "title": "スプリント m9",
       "body": "template",
-      "summary": "スプリント m9 の課題を main へ取り込む。\n\n関連: #16 #17",
-      "changes": "スプリント m9 の課題を main へ取り込む。",
-      "next": "assess"
+      "summary": "スプリント m9 の課題を main へ取り込む。",
+      "changes": "",
+      "next": "assess",
+      "materials": {
+        "manual": true,
+        "collect": "sprint/m9",
+        "design_results": "<TMP>/out/sprint/design-results.json",
+        "closes": [
+          16,
+          17
+        ]
+      }
     },
     {
       "id": "assess",
@@ -132,14 +141,14 @@
     {
       "id": "record",
       "type": "run",
-      "cmd": "python3 <NDF>/scripts/check-trigger.py record --id 'pr-{pr}' --state {state_dir} --root . --target-pr {pr}",
+      "cmd": "python3 <NDF>/scripts/check-trigger.py record --id 'pr-{pr}' --state {state_dir} --root . --target-pr {pr} --advance-done",
       "on_fail": "abort",
       "next": "end"
     },
     {
       "id": "abort",
       "type": "run",
-      "cmd": "python3 <NDF>/scripts/check-trigger.py record --id 'pr-{pr}' --state {state_dir} --root . --target-pr {pr} --failed",
+      "cmd": "python3 <NDF>/scripts/check-trigger.py record --id 'pr-{pr}' --state {state_dir} --root . --target-pr {pr} --advance-done --failed",
       "next": "end"
     }
   ],
@@ -164,6 +173,7 @@
       "unknown_duration": true
     }
   },
+  "記録": "<NDF>/scripts/projects-sync.sh",
   "branch": "sprint/m9",
   "起点": "origin/sprint/m9",
   "リポジトリ": "<TMP>/repo"

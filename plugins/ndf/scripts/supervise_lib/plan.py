@@ -26,6 +26,10 @@
 パートに分ける: work のステップに `"parts": [{"name": ..., "files": [...]}, ...]` を書くと、パートごとに
 新しい文脈の claude -p のステップ（`<id>-1`, `<id>-2`, ...）へ展開する。大きな実装は分けて書く。
 
+PR 本文の材料: pr のステップの `"materials"`（`supervise_lib/pr_materials.py`）が、手動確認（`manual`。既定 true）・
+`collect` のブランチへマージした実装の PR の利用者向けの変化・`design_results`（`design-results.json`）の設計 PR・
+`closes` と設計の結果の課題の `Closes` を本文へ集める。無ければ今の本文のまま。
+
 Serena: work のステップに `"serena": true` を書くと Serena の MCP だけを載せる（大きなコードを何度も読む実装向け）。
 
 課題の本文: work のステップに `"issues": [858]`（`true` なら計画の `課題`）を書くと、`gh issue view` の題と本文を
@@ -115,7 +119,8 @@ queue の置き換え: `{queue_prs}` は前のすべてのステージの Pull R
 - `next` に `end` を書くと、そこでフェーズを完了として終える
 - run: 終了コード 0 なら `next`（無ければ次のステップ）。10〜19 は関門として `gate_next` か `next`。
   それ以外の 0 以外なら `on_fail`（無ければ止まる）
-- work: 終了後に `next`（無ければ次のステップ）
+- work: 終了後に `next`（無ければ次のステップ）。`"back_to_failed": true` なら、最後に落ちて `on_fail` へ回った
+  ステップが `next` より並びで前のとき、そのステップからやり直す（judge の後の fix で使う）
 - judge: 答えの `decision` がステップの id ならそのステップへ、`next` なら次のステップへ、`stop` なら止まる、
   `gate` なら関門として止まる。`choices` を渡すとその中から選ばせる
 

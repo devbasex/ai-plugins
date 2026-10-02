@@ -125,7 +125,9 @@ def checks_outcome(runs: list[dict[str, Any]] | None, names: list[str]) -> str |
     """
     if runs is None:
         return None
-    results = [check_result(runs, name) for name in names]
+    # 畳むのは 1 回だけにし、名前から結果を引く（空の名前は check_result と同じく一致なし）
+    by_name = {str(run.get("name") or ""): run_result(run) for run in fold_check_runs(runs)}
+    results = [by_name.get(name) if name else None for name in names]
     if any(r is None or r == "pending" for r in results):
         return "pending"
     return "success" if all(r == "success" for r in results) else str(next(r for r in results if r != "success"))

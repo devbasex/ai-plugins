@@ -794,3 +794,28 @@ def test_promote_prepare_writes_material_and_stops_short(repo, gh):
     code, out, _ = call("merged-steps.py", ["promote", "--head", "develop", "--base", "main", "--prepare"], gh.env, repo)
     assert code == 0 and out["metrics"]["pr"] == 9 and Path(out["presentation_path"]).is_file()
     assert merges(gh) == []
+
+
+# --- #1485: 手動確認（マージ前）の行が未確認なら merge-gate が止まる ---------------------------------
+
+MANUAL_BODY = "## 手動確認\n\n- [{box}] #7 マージ前: 実機で承認資料の欄を見る\n- #7 リリース後テストへ回す: 進行を見る\n\n## 次\n"
+
+
+@pytest.mark.parametrize(
+    "body, code",
+    [
+        (MANUAL_BODY.format(box=" "), 10),  # AC17: 未確認のマージ前の行
+        (MANUAL_BODY.format(box="x"), 0),  # AC17: 印を付けたら続く
+        ("## 手動確認\n\n- #7 リリース後テストへ回す: 進行を見る\n", 0),  # AC18
+        ("## 利用者向けの変化\n\n- 無し\n", 0),  # AC19
+    ],
+)
+def test_merge_gate_stops_on_unchecked_before_merge_rows(repo, gh, body, code):
+    declare(repo, *TRYGROUP)
+    gh.set(pr_seq={"5": [dict(to("develop"), body=body)]})
+    got, out, err = call("merged-steps.py", ["merge-gate", "--pr", "5"], gh.env, repo)
+    assert got == code, (out, err)
+    assert len(pr_views(gh)) == 1  # 本文と宛先を 1 回の gh pr view で読む
+    if code == 10:
+        assert out["metrics"]["gate"] == "manual-check" and "実機で承認資料の欄を見る" in out["summary"]
+        assert "--from merge-gate" in out["next"]

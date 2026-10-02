@@ -107,8 +107,9 @@ def queued_run_count(root):
 PR_FIELDS = "state,isDraft,headRefOid,statusCheckRollup,mergeStateStatus,baseRefName,headRefName,url,title,additions,deletions,changedFiles"
 
 
-def pr_state(root, n):
-    return gh_json(root, ["pr", "view", str(n), "--json", PR_FIELDS], f"gh pr view {n}")
+def pr_state(root, n, extra=()):
+    """PR の状態。`extra` の項目（merge-gate の `body` など）も同じ 1 回の gh pr view で読む。"""
+    return gh_json(root, ["pr", "view", str(n), "--json", ",".join((PR_FIELDS, *extra))], f"gh pr view {n}")
 
 
 @dataclass

@@ -13,6 +13,7 @@ import legacy_names
 
 from supervise_lib.decl import decl_fields
 from supervise_lib.paths import GLOSSARY_PY, MVV_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, SYNC_DESIGN_BODY, WORKTREE_SETUP
+from supervise_lib.procedures import DESIGN_RESULTS, pr_step, requirements_path, sprint_materials, sprint_out, with_record
 from supervise_lib.release_templates import MVV_NOTE, advise_steps, plan_release
 from supervise_lib.templates import plan_check, plan_check_since, plan_impl
 from supervise_lib.verify_steps import handoff_step, merge_steps
@@ -48,7 +49,7 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
     """設計のフェーズ: 設計文書を書き、設計 PR を出し、cross-review（設計の既定 3 ラウンド）の後に関門 1 で止まる。"""
     branch = f"design/issue-{n}"
     glossary_check = f"{GLOSSARY_PY} check --diff origin/{shlex.quote(a.base)} --root ."
-    copy = f"issues/issue-{n}-requirements.md"
+    copy = requirements_path(n)
     return {
         "フェーズ": "設計",
         "課題": [n],
@@ -202,15 +203,43 @@ def plan_sprint_branch(a, repo: str) -> dict:
     cmd = (
         f"bash {shlex.quote(str(WORKTREE_SETUP))} create {shlex.quote(mb)} && git -C {shlex.quote(wt)} push -q -u origin {shlex.quote(mb)}"
     )
-    return {
-        "フェーズ": "実装",
-        "課題": a.issue,
-        "モード": a.mode,
-        "作業場所": repo,
-        "規則": "",
-        "上限": 3,
-        "steps": [{"id": "sprint-branch", "type": "run", "stage": "作業場所の用意", "timeout": 600, "cmd": cmd, "next": "end"}],
-    }
+    return with_record(
+        {
+            "フェーズ": "実装",
+            "課題": a.issue,
+            "モード": a.mode,
+            "作業場所": repo,
+            "規則": "",
+            "上限": 3,
+            "steps": [{"id": "sprint-branch", "type": "run", "stage": "作業場所の用意", "timeout": 600, "cmd": cmd, "next": "end"}],
+        }
+    )
+
+
+def design_results_path(a) -> str:
+    """設計の結果のステージが書き、スプリント PR の pr のステップが読む `design-results.json` の絶対パス。"""
+    return str(sprint_out(a).resolve() / DESIGN_RESULTS)
+
+
+def plan_design_results(a, repo: str) -> dict:
+    """設計の結果のステージ（承認ゲート 1 の直後）: マージした設計 PR から設計の結果を読み、実装のステージのプランへ
+    `触るファイル`・取り込んだ課題・`実行の条件` を書く（決定 2）。LLM を呼ばない run のステップ 1 つ。"""
+    manifest = sprint_out(a).resolve() / "sprint.json"
+    cmd = (
+        f"python3 {shlex.quote(str(SELF))} design-results --manifest {shlex.quote(str(manifest))} "
+        f"--base {shlex.quote(a.base)} --root {shlex.quote(repo)} --design {' '.join(map(str, a.design))}"
+    )
+    return with_record(
+        {
+            "フェーズ": "実装",
+            "課題": a.issue,
+            "モード": a.mode,
+            "作業場所": repo,
+            "規則": "",
+            "上限": 3,
+            "steps": [{"id": "design-results", "type": "run", "stage": "計画", "timeout": 600, "cmd": cmd, "next": "end"}],
+        }
+    )
 
 
 def plan_sprint_impl(a, n: int, repo: str) -> dict:
@@ -230,6 +259,7 @@ def plan_sprint_impl(a, n: int, repo: str) -> dict:
             "title": f"#{n} を実装する（スプリント {a.name}）",
             "summary": f"#{n}（スプリント {a.name} のブランチへ集める）",
             "branch": branch,
+            "manual": False,  # 手動確認の節はスプリント PR に載せる
         }
     )
     plan = plan_impl(ns)
@@ -240,10 +270,11 @@ def plan_sprint_impl(a, n: int, repo: str) -> dict:
 def plan_sprint_check(a, repo: str) -> dict:
     """検査のフェーズ: スプリントブランチから起点のブランチへ PR を 1 本出し、構造改善・cross-review・完了判定を 1 回通す。"""
     mb = sprint_branch(a)
-    ns = argparse.Namespace(**decl_fields(a), pr="{pr}", scope=a.scope, issue=a.issue, mode=a.mode, worktree=f"{repo}/.worktrees/{mb}")
+    ns = argparse.Namespace(
+        **decl_fields(a), pr="{pr}", scope=a.scope, issue=a.issue, mode=a.mode, worktree=f"{repo}/.worktrees/{mb}", advance_done=True
+    )
     plan = plan_check(ns)
     plan.pop("Pull Request", None)
-    related = "関連: " + " ".join(f"#{i}" for i in a.issue)
     plan.update({"branch": mb, "起点": f"origin/{mb}", "リポジトリ": repo})
     plan["steps"] = [
         {
@@ -254,17 +285,16 @@ def plan_sprint_check(a, repo: str) -> dict:
             "cmd": f"git pull -q --ff-only origin {shlex.quote(mb)}",
             "next": "pr",
         },
-        {
-            "id": "pr",
-            "type": "pr",
-            "stage": "Pull Request",
-            "base": a.base,
-            "title": f"スプリント {a.name}",
-            "body": "template",
-            "summary": f"スプリント {a.name} の課題を {a.base} へ取り込む。\n\n{related}",
-            "changes": f"スプリント {a.name} の課題を {a.base} へ取り込む。",
-            "next": plan["steps"][0]["id"],
-        },
+        # 利用者向けの変化・閉じる課題・設計 PR・手動確認は、pr のステップが材料から集める（決定 4）
+        pr_step(
+            a.base,
+            f"スプリント {a.name}",
+            f"スプリント {a.name} の課題を {a.base} へ取り込む。",
+            "",
+            plan["steps"][0]["id"],
+            sprint_materials(mb, design_results_path(a), a.issue),
+            body="template",
+        ),
     ] + plan["steps"]
     return plan
 
