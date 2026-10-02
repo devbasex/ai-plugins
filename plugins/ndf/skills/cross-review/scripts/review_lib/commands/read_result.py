@@ -15,6 +15,20 @@ import result_posts  # noqa: E402
 from review_lib import posts, store  # noqa: E402
 
 
+def _load_round_state(pr: int) -> dict[str, Any] | None:
+    """ラウンドへの補助の記録に使う状態。無い・読めない・辞書でない・ラウンドが無いときは `None`。"""
+    path = store._state_path(pr)
+    if not path.exists():
+        return None
+    try:
+        st = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(st, dict) or not st.get("rounds"):
+        return None
+    return st
+
+
 def _record_no_result(
     pr: int,
     agent: str,
@@ -32,14 +46,8 @@ def _record_no_result(
     状態ファイルを読めないときとラウンドがまだ無いときは、何も書かずに戻る。呼び出し
     元はこの直後に die するため、ここで新たに止める理由が無い。
     """
-    path = store._state_path(pr)
-    if not path.exists():
-        return
-    try:
-        st = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return
-    if not isinstance(st, dict) or not st.get("rounds"):
+    st = _load_round_state(pr)
+    if st is None:
         return
     entry: dict[str, Any] = {
         "intent": posts.NO_RESULT,
@@ -64,15 +72,12 @@ def _record_reviewer_model(pr: int, agent: str) -> None:
     理由（`unobserved`）を書くが、同じラウンドで先に取れた実測値は消さない。
     状態ファイルを読めないときとラウンドがまだ無いときは、何も書かずに戻る（後の処理が止める）。
     """
-    path = store._state_path(pr)
-    if not path.exists():
+    st = _load_round_state(pr)
+    if st is None:
         return
     try:
-        st = json.loads(path.read_text(encoding="utf-8"))
         runtime = assignment.seat_runtime(agent)
-    except (OSError, json.JSONDecodeError, assignment.AssignmentError):
-        return
-    if not isinstance(st, dict) or not st.get("rounds"):
+    except assignment.AssignmentError:
         return
     last = st["rounds"][-1]
     tmp_dir = store._resolve_tmp_dir(pr)
