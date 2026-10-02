@@ -44,11 +44,11 @@ PR #1234 の cross-review が round 3 で収束した（`final=approved`）。�
 | I1 | レビューの状態ファイル | ラウンドを足しても `rounds` の要素は 1 つも消えず変わらない。次のラウンドの番号は `len(rounds) + 1` | 足さずに終了コード 1（書き込みの前に止める） |
 | I2 | レビューの状態ファイル | ラウンドを足すたびに `reopens` へ 1 件積み、`at`・`from_final`・`base_round`・`ended_at` を持つ | 同上 |
 | I3 | レビューの状態ファイル | ラウンドの上限と巻き直しの数は、最後に足した時点（`base_round`）より後のラウンドだけで数える | — （数え方の規則） |
-| I4 | レビューの状態ファイル | `base_round` 以前のラウンドには `start-round` の後始末の確認（修正の記録・Resolve の突き合わせ）を当てない | — （最終スイープが閉じたラウンドとして扱う） |
+| I4 | レビューの状態ファイル | `base_round` 以前のラウンドに `start-round` の後始末の確認（修正の記録・Resolve の突き合わせ）を当てないのは、最後の足した記録の `sweep` が `verified: true` かつ `remaining_open: 0` のときだけ（最終スイープが閉じたと検証できたラウンド）。`final` はスイープの前に確定し、未解決を残した終了もあるため、`final` の確定だけでは免除しない | 免除せず、`base_round` のラウンド（足す前の最後のラウンド）に今と同じ後始末の確認を当てる（未対応なら今と同じく止まる） |
 | I5 | レビューの状態ファイル | `final` が確定しているとき、`check-oscillation` は `final` を書き換えず、終了コード 4 を返さない | 判定せずに `⏭` を出して終了コード 2 |
 | I6 | レビューの状態ファイル | 振動検知が比べるのは、`base_round` より後で同じ PR の直近 2 ラウンドだけ | 2 つに満たなければ今と同じく飛ばす |
 | I7 | レビューの状態ファイル | `record-fix` が修正の記録を作るのは、コミットが PR の head から辿れ、申告したスレッドがすべて解決済みのときだけ | 記録を作らずに理由を出して終了コード 5 |
-| I8 | レビューの状態ファイル | 1 つのラウンドへ同じコミットの修正の記録を 2 回取り込まない | 2 回目の `merge-fix` は投稿もせずに `取り込み済み` を出して終了コード 0 |
+| I8 | レビューの状態ファイル | 1 つのラウンドへ同じコミットの修正の記録を 2 回取り込まない。取り込みが済んだかは、コミットの一致ではなく `rounds[-1].fix.merge`（取り込みの段階と終了コード）で決める | 同じコミットで `merge.stage` が `done` なら投稿もせずに `取り込み済み` を出し、記録した終了コード（0 / 3）を返す。`done` でなければ、済んでいない段階（投稿・CI の分類）から続ける |
 | I9 | レビューの状態ファイル | 状態ファイルが JSON として読めないとき、`init` は新しい状態で上書きしない | パスと理由を出して終了コード 1 |
 | I10 | 駆動の実行の回 | 前回の結果を返すのは、完了の時点の head が今の PR の head と同じで、`--reopen` が無いときだけ | 新しい実行の回を始める |
 | I11 | hook の 1 回の実行 | PreToolUse と userPromptSubmit の hook は、開始から締め切り（3.5 秒）までに終わる | 残りの判定を飛ばし、終了コード 0、標準エラーへ 1 行 |
@@ -96,9 +96,9 @@ PR #1234 の cross-review が round 3 で収束した（`final=approved`）。�
 | `review_lib/store.py` の `_find_resumable_state` | 変える | `final` が確定した状態も返す。JSON として読めなければパスと理由を出して終了コード 1（I9） |
 | `review_lib/reopen.py` | 新設 | `reopen(st, now)`: `final` を外して足した記録を積む（I1・I2）。`base_round(st)`: 最後に足した時点のラウンド数（足していなければ 0） |
 | `review_lib/commands/init.py` の `_resume_from_state` | 変える | `final` が確定していれば `reopen` を通してから今の再開の手順（引数の反映・同期・引継ぎ）へ進む |
-| `review_lib/commands/start_round.py` | 変える | 上限の判定を `len(rounds) - base_round` で行う（I3）。後始末の確認は最後のラウンドが `base_round` より後のときだけ（I4） |
+| `review_lib/commands/start_round.py` | 変える | 上限の判定を `len(rounds) - base_round` で行う（I3）。後始末の確認を飛ばすのは、最後のラウンドが `base_round` 以前で、最後の足した記録の `sweep` が検証済みかつ未解決 0 件のときだけ（I4） |
 | `review_lib/commands/loop.py` | 変える | `check-oscillation`: `final` が確定していれば判定しない（I5）。比べるラウンドを `base_round` より後に絞る（I6）。`should-rotate`: 数えるラウンドを `base_round` より後に絞る（I3） |
-| `review_lib/commands/merge_fix.py` | 変える | 最後のラウンドの `fix.commit` と戻り値ファイルのコミットが同じなら取り込まない（I8）。取り込みの本体を `record-fix` から呼べる関数に切り出す |
+| `review_lib/commands/merge_fix.py` | 変える | 取り込みの段階ごとに `rounds[-1].fix.merge` を書き進める。最後のラウンドの `fix.commit` と戻り値ファイルのコミットが同じなら、`merge.stage` が `done` のときは取り込まずに記録した終了コードを返し、`done` でなければ続きの段階から再開する（I8）。取り込みの本体を `record-fix` から呼べる関数に切り出す |
 | `review_lib/commands/record_fix.py` | 新設 | `state.py record-fix`: コミットと申告したスレッドを GitHub で確かめ（I7）、戻り値ファイルを契約の形で書いて `merge-fix` と同じ取り込みを通す |
 | `scripts/state.py` | 変える | 副命令 `record-fix` を登録する |
 | `scripts/drive.py` | 変える | 完了の記録を返すかを `loop_drive.rerun_reason` で決める（I10）。`--reopen` を受ける。`finish` が終わりの出力へ PR の head を残す |
@@ -155,7 +155,7 @@ graph TB
 | `drive.py` の `Drive.run` | `durable.resolve(..., finished=...)` | `finished` が `rerun_reason` を通す |
 | `drive.py` の `advance`（init の段階） | `state.py init` | 新しい実行の回では `init` が足す（引数は変えない） |
 | `drive.py` の `after_judge` | `state.py check-oscillation` | 呼ぶ条件は変えない（`judge` が 2 のときだけ） |
-| `drive.py` の `merge_fix` | `state.py merge-fix` | 取り込み済みなら 0 で戻る |
+| `drive.py` の `merge_fix` | `state.py merge-fix` | 取り込み済みなら記録した終了コード（0 / 3）で戻る。途中で止まった取り込みは続きから通す |
 | SKILL.md の手順を手で打つ利用者 | `state.py record-fix`・`check-oscillation` | 新しい副命令。`check-oscillation` は確定後に飛ばす |
 | `hooks/claude.json`・`hooks/codex.json` | `hook.py` | 締め切り。hook の定義は変えない |
 | `dev.agy/hooks.json`・`dev.kiro/install.sh` | `worktree-guard.sh` → `hook.py worktree-guard` | 同上 |
@@ -241,6 +241,14 @@ plugins/ndf/
 
 足した後の状態: `final = null`・`ended_at` と `sweep` の鍵を消す。
 
+修正の記録 `rounds[].fix` に鍵 `merge` を足す（I8）。`merge` が無い記録は、今の取り込みが投稿と CI の分類を
+終えてから書いたものとして `done`・終了コード 0 と読む。ただし `final = error` で終わっていれば終了コード 3 と読む。
+
+| 鍵 | 型 | 空の扱い | 意味 |
+| --- | --- | --- | --- |
+| `rounds[].fix.merge.stage` | 文字列 | 必須 | `recorded`（記録を保存した）→ `posted`（返信・決着・まとめを投稿した）→ `done`（CI の分類を終えた） |
+| `rounds[].fix.merge.exit_code` | int か null | `done` の前は null | 取り込みが返した終了コード（0 / 3） |
+
 駆動の実行の回の終わりの出力に `head`（`finish` の時点の PR の head の OID。取れなければ null）を足す。
 `head` を持たない古い記録は、比べられないため今と同じく前回の結果を返す。
 
@@ -296,6 +304,15 @@ plugins/ndf/
 ```
 
 `fixed_count` は申告したスレッドの数、`recorded_by` は取り込みが読まない印である（記録の出所を後から見分ける）。
+
+### `state.py merge-fix <PR>`（I8 で変わる所）
+
+| 条件 | 振る舞い | 終了コード |
+| --- | --- | --- |
+| 最後のラウンドに修正の記録が無い・コミットが違う | 今の取り込み。段階ごとに `merge.stage` を書き進める | 今のまま（0 / 3） |
+| 同じコミットで `merge.stage = recorded` | 記録を書き直さず、投稿から続ける | 続けた取り込みの終了コード |
+| 同じコミットで `merge.stage = posted` | 投稿せず、CI の分類から続ける | 続けた取り込みの終了コード |
+| 同じコミットで `merge.stage = done` | 書かず投稿もせずに `取り込み済み`（記録した終了コード） | `merge.exit_code` |
 
 ### `drive.py <PR> [--reopen] [今の引数]`
 
@@ -383,7 +400,9 @@ sequenceDiagram
 ```
 
 `drive.py` の修正の止まり（終了コード 20）でホストが `record-fix` を打った後に `drive.py` を打ち直すと、
-`drive.py` の `merge_fix` は取り込み済み（I8）として 0 で戻り、巻き直しの判定へ進む。
+`drive.py` の `merge_fix` は取り込み済み（I8）として記録した終了コードで戻る。0 なら巻き直しの判定へ進み、
+3（コード関連の CI 失敗）なら今と同じく中断する。`record-fix` の取り込みが投稿の途中で止まっていれば、
+打ち直した `merge-fix` が投稿から続ける。
 
 ### hook の締め切り
 
