@@ -249,3 +249,29 @@ def test_run_records_the_specified_model_when_not_observed(tmp_path, args, model
     m = out["metrics"]
     assert code == 0 and m["model"] == model
     assert pathlib.Path(m["stem"]).name.startswith("kiro-")
+
+
+def _load_external_ai():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("external_ai_under_test", SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.mark.parametrize(
+    "rec, source, path, expected",
+    [
+        ({"status": "OK"}, "file", "/o", ("ok", "codex の結果を回収した（file）: /o", None)),
+        ({"status": "NO_RESULT", "reason": "x"}, "stderr", "/e", ("no_result", "codex は終わったが結果が無い（理由: x）", "stderr の末尾を読む: /e")),
+        ({"status": "EARLY_ERROR", "reason": "r", "detail": "HTTP/2 401"}, None, None, ("auth", "codex を止めた（EARLY_ERROR / 理由: r）", None)),
+        ({"status": "EARLY_ERROR", "reason": "usage_limit", "detail": "HTTP/2 401"}, None, None, ("usage_limit", "codex を止めた（EARLY_ERROR / 理由: usage_limit）", None)),
+        ({"status": "WHATEVER", "reason": "r"}, None, None, ("launch_failed", "codex を止めた（WHATEVER / 理由: r）", None)),
+        ({}, None, None, ("launch_failed", "codex を止めた（PIDFILE_BAD / 理由: pidfile_bad）", None)),
+    ],
+    ids=["ok", "no_result", "auth", "usage_limit_over_auth", "unknown_status", "no_record"],
+)
+def test_run_outcome_characterization(rec, source, path, expected):
+    """現状固定 — 監視後の auth 判定・利用上限の優先・未知の状態の結末。"""
+    assert _load_external_ai().run_outcome("codex", rec, source, path) == expected

@@ -169,6 +169,46 @@ def with_output_instruction(prompt: str, output: pathlib.Path) -> str:
     )
 
 
+def monitor_argv(a, run_id: int, tdir: pathlib.Path) -> list[str]:
+    """`monitor.py` へ渡す引数。上限と無進捗の許容は指定があるときだけ足す。"""
+    mon = [
+        sys.executable,
+        str(LIB / "monitor.py"),
+        str(run_id),
+        "--agents",
+        a.runtime,
+        "--tmp-dir",
+        str(tdir),
+        "--stem-template",
+        STEM_TEMPLATE,
+        "--phase",
+        a.phase,
+        "--poll",
+        str(a.poll),
+    ]
+    if a.timeout:
+        mon += ["--timeout", str(a.timeout)]
+    if a.stall_timeout:
+        mon += ["--stall-timeout", str(a.stall_timeout)]
+    return mon
+
+
+def run_outcome(runtime: str, rec: dict, source: str | None, path: str | None) -> tuple[str, str, str | None]:
+    """監視の記録と回収元から `(結末, 説明, next)` を決める。副作用を持たない。"""
+    mstatus, reason = rec.get("status", "PIDFILE_BAD"), rec.get("reason", "pidfile_bad")
+    if mstatus in ("OK", "NO_RESULT") and source in ("file", "stdout"):
+        return "ok", f"{runtime} の結果を回収した（{source}）: {path}", None
+    hint = f"stderr の末尾を読む: {path}" if path else None
+    if mstatus in ("OK", "NO_RESULT"):
+        return "no_result", f"{runtime} は終わったが結果が無い（理由: {reason}）", hint
+    outcome = MONITOR_OUTCOME.get(mstatus, "launch_failed")
+    if reason == "usage_limit":
+        outcome = "usage_limit"
+    elif outcome == "early_error" and AUTH_DETAIL.search(rec.get("detail", "")):
+        outcome = "auth"
+    return outcome, f"{runtime} を止めた（{mstatus} / 理由: {reason}）", hint
+
+
 def cmd_run(a) -> None:
     runtime = a.runtime
     prompt = pathlib.Path(a.prompt_file)
@@ -206,26 +246,7 @@ def cmd_run(a) -> None:
     link.unlink(missing_ok=True)
     link.symlink_to(output)
 
-    mon = [
-        sys.executable,
-        str(LIB / "monitor.py"),
-        str(run_id),
-        "--agents",
-        runtime,
-        "--tmp-dir",
-        str(tdir),
-        "--stem-template",
-        STEM_TEMPLATE,
-        "--phase",
-        a.phase,
-        "--poll",
-        str(a.poll),
-    ]
-    if a.timeout:
-        mon += ["--timeout", str(a.timeout)]
-    if a.stall_timeout:
-        mon += ["--stall-timeout", str(a.stall_timeout)]
-    subprocess.run(mon, stdout=subprocess.DEVNULL)
+    subprocess.run(monitor_argv(a, run_id, tdir), stdout=subprocess.DEVNULL)
 
     rec = monitor_outcome.read_outcome(tdir, stem_name) or {}
     mstatus, reason = rec.get("status", "PIDFILE_BAD"), rec.get("reason", "pidfile_bad")
@@ -247,28 +268,8 @@ def cmd_run(a) -> None:
         "stem": str(stem),
     }
 
-    if mstatus in ("OK", "NO_RESULT") and source in ("file", "stdout"):
-        finish(runtime, "ok", f"{runtime} の結果を回収した（{source}）: {path}", metrics)
-    if mstatus in ("OK", "NO_RESULT"):
-        finish(
-            runtime,
-            "no_result",
-            f"{runtime} は終わったが結果が無い（理由: {reason}）",
-            metrics,
-            next_=f"stderr の末尾を読む: {path}" if path else None,
-        )
-    outcome = MONITOR_OUTCOME.get(mstatus, "launch_failed")
-    if reason == "usage_limit":
-        outcome = "usage_limit"
-    elif outcome == "early_error" and AUTH_DETAIL.search(rec.get("detail", "")):
-        outcome = "auth"
-    finish(
-        runtime,
-        outcome,
-        f"{runtime} を止めた（{mstatus} / 理由: {reason}）",
-        metrics,
-        next_=f"stderr の末尾を読む: {path}" if path else None,
-    )
+    outcome, summary, next_ = run_outcome(runtime, rec, source, path)
+    finish(runtime, outcome, summary, metrics, next_=next_)
 
 
 def main(argv=None) -> None:
