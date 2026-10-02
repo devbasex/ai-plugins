@@ -311,22 +311,19 @@ def _tool_use_ids(rows: list[dict]) -> list[str]:
     """その記録が起動したサブエージェントの `tool_use` の id を集める。"""
     ids: list[str] = []
     for row in rows:
-        for block in _content_blocks(row):
+        if not _is_assistant(row):
+            continue
+        content = _message(row).get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if not isinstance(block, dict):
+                continue
             if block.get("type") == "tool_use" and block.get("name") == "Agent":
                 block_id = block.get("id")
                 if isinstance(block_id, str) and block_id:
                     ids.append(block_id)
     return ids
-
-
-def _content_blocks(row: dict) -> list[dict]:
-    """assistant の行の content のうち、dict のブロックだけを返す。"""
-    if not _is_assistant(row):
-        return []
-    content = _message(row).get("content")
-    if not isinstance(content, list):
-        return []
-    return [block for block in content if isinstance(block, dict)]
 
 
 def _token_stats(rows: list[dict]) -> tuple[int | None, int | None, int | None]:
