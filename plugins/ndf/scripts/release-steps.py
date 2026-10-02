@@ -66,6 +66,7 @@ import schema  # noqa: E402
 import versions  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from merged_lib import trash  # noqa: E402
 from release_lib import bump, deploy, step_run  # noqa: E402
 from release_lib.names import changelog_section, changelog_span, h2_lines, next_h2, plugin_of, release_decl  # noqa: E402
 from step_result import (
@@ -760,6 +761,10 @@ def cmd_release(a):
         {"kind": "tag", "name": tag, "result": "pushed"},
         {"kind": "release", "name": tag, "result": "created"},
     ]
+    # 後片付け: この版に入ったブランチの退避先（merged の worktree-trash）は戻す先が無くなったので消す（#824）
+    swept, sweep_metrics = trash.sweep(root, merge)
+    items += swept
+    metrics.update(sweep_metrics)
     emit(result(TOOL, "ok", f"{plugin} v{ver} を {prod} へ出し、{tag} と GitHub Release を作った", items, metrics))
 
 
