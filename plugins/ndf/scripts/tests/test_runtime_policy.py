@@ -237,7 +237,11 @@ def test_aggregate_by_pair_counts_pairs_and_unknown(tmp_path):
     def seat(rt, name=None):
         return {"seat": name or rt, "runtime": rt, "model": None, "partner": None}
 
-    _summary(tmp_path, 1, [{"round": 1, "seats": [seat("codex"), seat("claude")]}, {"round": 2, "seats": [seat("claude"), seat("claude", "claude-2")]}])
+    _summary(
+        tmp_path,
+        1,
+        [{"round": 1, "seats": [seat("codex"), seat("claude")]}, {"round": 2, "seats": [seat("claude"), seat("claude", "claude-2")]}],
+    )
     _summary(tmp_path, 2, [{"round": 1, "seats": [seat("claude"), seat("codex")]}, {"round": 2}])
     args = run_metrics.build_parser().parse_args(["aggregate", "--kind", "cross-review", "--by", "pair", "--dir", str(tmp_path)])
     text = run_metrics.aggregate_table(tmp_path, args)
@@ -291,4 +295,3 @@ def test_supervise_stops_on_broken_declaration(tmp_path):
     _declare(work, {"allowed": []})
     stopped = eng.check_runtimes()
     assert stopped is not None and "allowed が空" in stopped[1]
-
