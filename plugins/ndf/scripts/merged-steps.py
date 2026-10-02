@@ -95,14 +95,6 @@ def list_worktrees(root):
     return items
 
 
-def evacuate(path, label, merge_commit=None):
-    """未追跡・無視されたファイルを退避先へ移し、退避先のパス（退避するものが無ければ None）を返す。
-
-    作り直せる生成物は退避せずに消す（本体と台帳は merged_lib/trash.py）。
-    """
-    return trash.evacuate(path, label, merge_commit)[0]
-
-
 def remove_worktree(root, path, label, merge_commit=None):
     """作業ツリーを外す。拒否されたら未追跡・無視のファイルを退避してから --force で外す。(成否, 理由) を返す。
 
