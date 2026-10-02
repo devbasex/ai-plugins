@@ -682,3 +682,54 @@ def test_an_unknown_kind_fails_the_check_and_names_the_suite(plain, env):
     write(plain, ".ndf/project.json", json.dumps(_suite_decl("unit")))
     code, _, text = run(env, "check", "--root", str(plain))
     assert code == 3 and "suites[0].kind" in text
+
+
+# --- 現状固定: measure_repo.dependencies（I-004） --------------------------------------
+
+
+def _deps_of(files: dict[str, str]):
+    mr = _project_lib("measure_repo")
+    tree = mr.Tree.__new__(mr.Tree)
+    tree.root, tree.deadline, tree.files = None, float("inf"), set(files)
+    tree.read = files.get
+    return mr.dependencies(tree)
+
+
+def test_dependencies_collects_every_manifest_kind_as_is():
+    files = {
+        "composer.json": json.dumps({"require": {"php": "^8.2", "laravel/framework": "^11.0"}, "require-dev": {"phpunit/phpunit": 10}}),
+        "web/package.json": json.dumps({"dependencies": {"react": "^18.2.0"}, "devDependencies": {"vitest": "1"}, "engines": {"node": ">=20"}}),
+        "deep/a/package.json": json.dumps({"dependencies": {"ignored": "1"}}),
+        "pyproject.toml": (
+            '[project]\nrequires-python = ">=3.11"\ndependencies = ["Django>=5.0", "requests[socks]~=2.31"]\n'
+            '[project.optional-dependencies]\ndev = ["pytest; python_version>\'3\'"]\n'
+            '[dependency-groups]\nlint = ["Ruff==0.6"]\nbad = "x"\n'
+            '[tool.poetry.dependencies]\nFlask = "^3.0"\n'
+            '[tool.poetry.dev-dependencies]\nBlack = "*"\n'
+            '[tool.poetry.group.docs.dependencies]\nMkDocs = "1.6"\n'
+        ),
+        "requirements.txt": "# comment\nDjango==4.0\nnumpy>=1.26  # pinned\n\n",
+        "requirements-dev.txt": "Mypy==1.10\n",
+    }
+    assert _deps_of(files) == {
+        "php": {"php": "^8.2", "laravel/framework": "^11.0", "phpunit/phpunit": "10"},
+        "javascript": {"react": "^18.2.0", "vitest": "1", "node": ">=20"},
+        "python": {
+            "django": "Django>=5.0",
+            "requests": "requests[socks]~=2.31",
+            "pytest": "pytest; python_version>'3'",
+            "ruff": "Ruff==0.6",
+            "flask": "^3.0",
+            "black": "*",
+            "mkdocs": "1.6",
+            "python": ">=3.11",
+            "numpy": "numpy>=1.26  # pinned",
+            "mypy": "Mypy==1.10",
+        },
+    }
+
+
+def test_dependencies_of_an_empty_or_broken_tree_are_empty_per_language():
+    assert _deps_of({}) == {"php": {}, "javascript": {}, "python": {}}
+    broken = {"composer.json": "{", "package.json": "[1]", "pyproject.toml": "[[", "requirements.txt": ""}
+    assert _deps_of(broken) == {"php": {}, "javascript": {}, "python": {}}
