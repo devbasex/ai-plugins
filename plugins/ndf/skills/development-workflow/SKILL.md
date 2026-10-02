@@ -254,8 +254,8 @@ issue にする**。呼び出し元・3 択の判断・振り返りでの拾い�
 
 ## 工程の飛ばしとマージを機械で見る
 
-この Skill の frontmatter の `hooks` が、進捗記録を通過工程として積み（記録の無い工程は案内するだけで
-拒否しない）、承認ラベル（ラベル `design-approved`）の無い設計 Pull Request のマージだけを拒否する。判定の 2 つ・
+進捗記録のスクリプトが自分で通過工程を積み（記録の無い工程は案内するだけで拒否しない）、この Skill の
+frontmatter の `hooks` が、承認ラベル（ラベル `design-approved`）の無い設計 Pull Request のマージだけを拒否する。判定の 2 つ・
 有効にする操作・通過記録の読み方・`fast` の工程の出し方は [references/stage-completeness.md](references/stage-completeness.md) にある。
 
 ## 進め方（`pace`）

@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from workflow_helpers import (
+    GUARD,
     LIB,
     base_env,
     checkout,
@@ -338,137 +339,34 @@ def test_the_reason_of_an_undetermined_merge_names_what_was_missing(repo: Path, 
     assert "design/" in reason
 
 
-# --- #221 進行の記録の観測 --------------------------------------------------
+# --- #725 進捗記録は hook が積まない ----------------------------------------
+#
+# 通過記録へ積むのは記録のスクリプト（progress-record.sh）自身である。hook は進捗記録の
+# コマンドを、実行するものでも、ヒアドキュメントやコメントに書いた例でも見ない。
 
 
-def test_parse_sync_reads_the_issue_key_and_value(repo: Path) -> None:
-    result = run_lib(
-        'wf_parse_sync \'bash "$SCRIPTS/projects-sync.sh" 161 stage "設計"\'',
-        cwd=repo,
-    )
+@pytest.mark.parametrize(
+    "command",
+    [
+        'bash "$SCRIPTS/projects-sync.sh" 161 stage "設計"',
+        'bash "$SCRIPTS/projects-sync.sh" 161 stage "配布"',
+        'bash /abs/scripts/projects-sync.sh 161 mode "standard"',
+        'cat <<EOF\nbash "$SCRIPTS/projects-sync.sh" 161 stage "設計"\nEOF',
+        '# bash "$SCRIPTS/projects-sync.sh" 161 stage "設計"\necho ok',
+    ],
+)
+def test_the_hook_does_not_record_a_progress_command(repo: Path, state: Path, command: str) -> None:
+    result = guard(repo, state, command)
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "161\tstage\t設計"
-
-
-def test_parse_sync_rejects_a_command_with_too_few_arguments(repo: Path) -> None:
-    result = run_lib(
-        "wf_parse_sync 'bash \"$SCRIPTS/projects-sync.sh\" 161 stage'",
-        cwd=repo,
-    )
-
-    assert result.returncode == 1
     assert result.stdout.strip() == ""
+    assert not state_file(state, 161).exists()
 
 
-def test_parse_sync_rejects_an_unrelated_command(repo: Path) -> None:
-    result = run_lib('wf_parse_sync "gh pr create --base develop"', cwd=repo)
-
-    assert result.returncode == 1
-    assert result.stdout.strip() == ""
-
-
-def test_a_sync_command_is_recorded(repo: Path, state: Path) -> None:
-    result = guard(repo, state, 'bash "$SCRIPTS/projects-sync.sh" 161 stage "設計"')
-
-    assert result.returncode == 0
-    saved = json.loads(state_file(state, 161).read_text(encoding="utf-8"))
-    assert saved["stages"] == ["設計"]
-
-
-def test_the_mode_is_recorded_from_the_same_command(repo: Path, state: Path) -> None:
-    guard(repo, state, 'bash /abs/scripts/projects-sync.sh 161 mode "standard"')
-
-    saved = json.loads(state_file(state, 161).read_text(encoding="utf-8"))
-    assert saved["mode"] == "standard"
-
-
-def test_recording_a_stage_before_the_release_says_nothing(repo: Path, state: Path) -> None:
-    result = guard(repo, state, 'bash "$SCRIPTS/projects-sync.sh" 161 stage "設計"')
-
-    assert result.stdout.strip() == ""
-
-
-def test_recording_the_release_reports_the_missing_stages(repo: Path, state: Path) -> None:
-    """#221-1: 必須の工程の記録が無いまま配布の記録へ進んだとき、名前が出力に現れる。"""
-    env = base_env(state)
-    run_stage_check("record", "161", "mode", "standard", cwd=repo, env=env)
-    for stage in (
-        "作業場所の用意",
-        "要求と受け入れ条件",
-        "設計",
-        "ドキュメントレビュー",
-        "計画",
-        "実装",
-        "構造改善",
-        "実装レビュー",
-        "完了判定",
-        "Pull Request",
-        "後片付け",
-    ):
-        run_stage_check("record", "161", "stage", stage, cwd=repo, env=env)
-
-    result = guard(repo, state, 'bash "$SCRIPTS/projects-sync.sh" 161 stage "配布"')
-
-    assert decision(result)["hookEventName"] == "PreToolUse"
-    assert "確定仕様化" in decision(result)["additionalContext"]
-    assert "permissionDecision" not in decision(result)
-
-
-def test_recording_the_release_without_a_gap_says_nothing(repo: Path, state: Path) -> None:
-    """#221-3 と同じ考え方。欠落が無ければ何も出さない。"""
-    env = base_env(state)
-    run_stage_check("record", "161", "mode", "light", cwd=repo, env=env)
-    for stage in (
-        "要求と受け入れ条件",
-        "作業場所の用意",
-        "設計",
-        "実装",
-        "実装レビュー",
-        "完了判定",
-        "Pull Request",
-        "後片付け",
-    ):
-        run_stage_check("record", "161", "stage", stage, cwd=repo, env=env)
-
-    result = guard(repo, state, 'bash "$SCRIPTS/projects-sync.sh" 161 stage "配布"')
-
-    assert result.stdout.strip() == ""
-
-
-def test_a_conditional_stage_without_a_record_is_not_a_gap(repo: Path, state: Path) -> None:
-    """条件付きの工程は、記録が無くても欠落としては並ばない。
-
-    `light` の「設計」は触る領域が該当したときだけ通る（#375）。当たらない変更では記録が
-    残らないため、**必須の工程の欠落と同じ列に並べない**。案内は出るが、文言が違う。
-    """
-    env = base_env(state)
-    run_stage_check("record", "161", "mode", "light", cwd=repo, env=env)
-    for stage in (
-        "要求と受け入れ条件",
-        "作業場所の用意",
-        "実装",
-        "実装レビュー",
-        "完了判定",
-        "Pull Request",
-        "後片付け",
-    ):
-        run_stage_check("record", "161", "stage", stage, cwd=repo, env=env)
-
-    result = guard(repo, state, 'bash "$SCRIPTS/projects-sync.sh" 161 stage "配布"')
-
-    assert "条件付き: 設計" in result.stdout
-    assert "記録なし:" not in result.stdout
-
-
-def test_a_repository_without_a_remote_records_nothing(tmp_path: Path, state: Path) -> None:
-    """リポジトリを特定できないときは通過記録を書かない。工程は止めない。"""
-    repo = init_repo(tmp_path / "bare", remote=None)
-
-    result = guard(repo, state, 'bash "$SCRIPTS/projects-sync.sh" 161 stage "配布"')
-
-    assert result.returncode == 0
-    assert result.stdout.strip() == ""
+def test_the_parse_of_progress_commands_is_gone() -> None:
+    """hook の側に、進捗記録のコマンドを読む関数が残っていない。"""
+    assert "wf_parse_sync" not in LIB.read_text(encoding="utf-8")
+    assert "wf_parse_sync" not in GUARD.read_text(encoding="utf-8")
 
 
 # --- R2-002: 案内の直列化と復号の契約（現状固定） ---------------------------
@@ -534,13 +432,8 @@ def test_emit_deny_round_trips_the_reason(text: str) -> None:
 
 # --- #565 コマンドの区切り ---------------------------------------------------
 #
-# 語の分割は、引用の外の制御演算子と本文の途中の改行で空の語（区切り）を出す。3 つの
-# 読み手は、1 つ目の対象のコマンドの終わりで読むのを止める。
-
-PARENT_BODY = (
-    "cd /work/ai-plugins; ls issues/ | grep 565; date '+%H:%M'; "
-    'bash plugins/ndf/scripts/projects-sync.sh 565 stage "要求と受け入れ条件"; echo "exit=$?"'
-)
+# 語の分割は、引用の外の制御演算子と本文の途中の改行で空の語（区切り）を出す。読み手
+# （マージと Pull Request の作成）は、対象のコマンドの終わりで読むのを止める。
 
 
 def split(text: str) -> list[str]:
@@ -553,13 +446,6 @@ def split(text: str) -> list[str]:
     out = result.stdout.decode("utf-8")
     assert out == "" or out.endswith("\0"), repr(out)
     return out.split("\0")[:-1] if out else []
-
-
-def stages_of(state: Path, issue: int) -> list[str]:
-    path = state_file(state, issue)
-    if not path.exists():
-        return []
-    return json.loads(path.read_text(encoding="utf-8"))["stages"]
 
 
 @pytest.mark.parametrize(
@@ -609,60 +495,6 @@ def test_split_finishes_quickly_on_a_long_body() -> None:
         return (after.ru_utime - before.ru_utime) + (after.ru_stime - before.ru_stime)
 
     assert cpu(body) <= 20 * cpu(line * 150)
-
-
-def test_a_stage_glued_to_a_semicolon_is_recorded(repo: Path, state: Path) -> None:
-    """AC1"""
-    guard(repo, state, 'bash plugins/ndf/scripts/projects-sync.sh 161 stage "設計"; echo "exit=$?"')
-
-    assert stages_of(state, 161) == ["設計"]
-
-
-@pytest.mark.parametrize(
-    "command",
-    [
-        'bash "$SCRIPTS/projects-sync.sh" 161 stage "設計"&& echo ok',
-        'bash "$SCRIPTS/projects-sync.sh" 161 stage "設計"|| echo ng',
-        'bash "$SCRIPTS/projects-sync.sh" 161 stage "設計"| tail -3',
-        '(bash "$SCRIPTS/projects-sync.sh" 161 stage "設計")',
-        'bash "$SCRIPTS/projects-sync.sh" 161 stage 設計&&echo',
-    ],
-)
-def test_a_stage_glued_to_an_operator_is_recorded(repo: Path, state: Path, command: str) -> None:
-    """AC2"""
-    guard(repo, state, command)
-
-    assert stages_of(state, 161) == ["設計"]
-
-
-def test_the_command_the_parent_ran_is_recorded(repo: Path, state: Path) -> None:
-    """AC3: 親の会話で実行した本文そのもの。"""
-    guard(repo, state, PARENT_BODY)
-
-    assert stages_of(state, 565) == ["要求と受け入れ条件"]
-
-
-def test_parse_sync_stops_at_the_boundary(repo: Path) -> None:
-    """AC4: 区切りより前に 3 語そろわなければ積まない。"""
-    result = run_lib("wf_parse_sync 'projects-sync.sh 161 stage; echo 設計'", cwd=repo)
-
-    assert result.returncode == 1
-    assert result.stdout.strip() == ""
-
-
-@pytest.mark.parametrize(
-    "command",
-    [
-        'bash "$SCRIPTS/projects-sync.sh" 161 stage "設計" 2>&1 | tail -3',
-        'bash "$SCRIPTS/projects-sync.sh" 161 stage "設計"',
-        'bash /abs/plugins/ndf/scripts/projects-sync.sh 161 stage "設計" 2>&1 | tail -2',
-    ],
-)
-def test_the_forms_recorded_before_stay_the_same(repo: Path, state: Path, command: str) -> None:
-    """AC5"""
-    guard(repo, state, command)
-
-    assert stages_of(state, 161) == ["設計"]
 
 
 def test_merge_target_stops_at_the_boundary(repo: Path) -> None:
@@ -770,13 +602,6 @@ def test_a_continued_merge_is_denied(repo: Path, state: Path, tmp_path: Path, co
     assert "268" in decision(result)["permissionDecisionReason"]
 
 
-def test_a_continued_stage_is_recorded(repo: Path, state: Path) -> None:
-    """AC13"""
-    guard(repo, state, 'bash plugins/ndf/scripts/projects-sync.sh \\\n  565 stage "設計"')
-
-    assert stages_of(state, 565) == ["設計"]
-
-
 # --- R1-003: `wf_is_candidate` の単体（現状固定） ---------------------------
 #
 # `wf_is_candidate` は、語の分割の前に走る安い絞り込みである。PR #593 で行末の `\` と
@@ -810,10 +635,9 @@ def test_is_candidate_passes_a_line_continued_target(text: str) -> None:
     [
         "gh pr merge 268",
         "gh pr create --base develop",
-        'bash plugins/ndf/scripts/projects-sync.sh 565 stage "設計"',
         "curl -s https://api.github.com/repos/o/r/pulls/268/merge",
     ],
-    ids=["merge", "create", "sync", "rest-merge"],
+    ids=["merge", "create", "rest-merge"],
 )
 def test_is_candidate_passes_a_single_line_target(text: str) -> None:
     """現状固定: 継続の無い対象コマンドはそのまま候補として通る。"""
@@ -827,8 +651,10 @@ def test_is_candidate_passes_a_single_line_target(text: str) -> None:
         "echo hello world",
         "git status --short",
         "gh pr view 268",
+        # 進捗記録は記録のスクリプトが自分で通過記録へ積むため、hook の対象にしない（#725）
+        'bash plugins/ndf/scripts/projects-sync.sh 565 stage "設計"',
     ],
-    ids=["empty", "echo", "git-status", "pr-view"],
+    ids=["empty", "echo", "git-status", "pr-view", "sync"],
 )
 def test_is_candidate_rejects_an_unrelated_command(text: str) -> None:
     """対照: いずれの目印にも当たらない本文は候補にしない。"""

@@ -11,7 +11,14 @@
 # 節の外は書き換えない（更新のたびに本文を取得し、その節だけを差し替える）。人が本文へ
 # 書いた内容を消さないためである。
 #
-# `gh` が無い、issue を取得できない、工程名が一覧に無いときは何もせず終了コード 0 で終わる。
+# **通過記録へ積むのもこのスクリプトである（#725）。** 引数のチェックを通った呼び出しごとに、
+# `--mode` / `--pace` / 工程名（`-` でないとき）を 1 件ずつ、本文を書く前に積む。本文の書き換えが
+# 失敗しても（`gh` が無い・issue を取得できない）積む。積めない（リポジトリを特定できない・`jq` が
+# 無い・排他を取れない）ときは標準エラーへ `NOTE:` を残して続ける。鍵は `--repo` があればそのリポジトリ、
+# 無ければ作業ディレクトリの origin である。`--worktree` / `--plan` / `--note` は積まない。
+# 工程名が `配布` で、記録の無い必須の工程があれば、その案内を本文の行より先に標準出力へ出す。
+#
+# `gh` が無い、issue を取得できないときは本文を書かずに終了コード 0 で終わる。
 # **進行管理が理由で開発の工程を止めない。**
 #
 # 呼び出し側の誤り（引数不足・知らない工程名）だけは 2 を返す。
@@ -20,6 +27,11 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/projects-common.sh
 . "$SCRIPT_DIR/lib/projects-common.sh" 2>/dev/null || exit 0
+# 工程名・モード・進め方の一覧と通過記録は development-workflow のライブラリが持つ（#725 の決定 2・3）。
+# **同じプラグインの根の相対で辿る。** `cd -P` で実体へ解決しない。agy の配置（dev.agy/scripts と
+# dev.agy/skills/development-workflow がどちらも symlink）でも、`scripts/` の 1 つ上に `skills/` がある。
+# shellcheck source=../skills/development-workflow/scripts/lib/workflow-common.sh
+. "$SCRIPT_DIR/../skills/development-workflow/scripts/lib/workflow-common.sh" 2>/dev/null || exit 0
 
 SECTION_HEADING="## 進行"
 
@@ -52,18 +64,29 @@ fi
 case "$ISSUE" in
   ''|*[!0-9]*) printf 'ERROR: issue 番号が数値ではありません: %s\n' "$ISSUE" >&2; exit 2 ;;
 esac
-if [ "$STAGE" != "-" ] && ! pj_is_stage "$STAGE"; then
+if [ "$STAGE" != "-" ] && ! wf_is_stage "$STAGE"; then
   printf 'ERROR: 工程表に無い工程名です: %s\n' "$STAGE" >&2
   exit 2
 fi
-if [ -n "$MODE" ] && ! pj_is_mode "$MODE"; then
+if [ -n "$MODE" ] && ! wf_is_mode "$MODE"; then
   printf 'ERROR: 知らないモードです: %s\n' "$MODE" >&2
   exit 2
 fi
-if [ -n "$PACE" ] && ! pj_is_pace "$PACE"; then
+if [ -n "$PACE" ] && ! wf_is_pace "$PACE"; then
   printf 'ERROR: 知らない進め方です: %s\n' "$PACE" >&2
   exit 2
 fi
+
+# 通過記録へ積む。**本文の書き換えより前に置く**（#725 の決定 4）。後ろの早い `exit 0` のどれを
+# 通っても、引数のチェックを通った呼び出しは 1 回だけ積まれる。
+if [ -n "$REPO" ]; then
+  SLUG=$REPO
+else
+  SLUG=$(wf_repo_slug ".") || SLUG=''
+fi
+RECORD_STAGE=$STAGE
+[ "$RECORD_STAGE" != "-" ] || RECORD_STAGE=''
+wf_record_progress "$SLUG" "$ISSUE" "$RECORD_STAGE" "$MODE" "$PACE"
 
 command -v gh >/dev/null 2>&1 || exit 0
 
@@ -80,7 +103,8 @@ fi
 # 節の中身を組み立てる。**目印を付けるのは、この呼び出しが記録する工程までである。**
 # 一覧の残りは空欄のまま残し、飛ばした工程がチェックの穴として見えるようにする。
 STAMP=$(date '+%Y-%m-%d %H:%M')
-export PJ_STAGES SECTION_HEADING STAGE STAMP MODE PACE WORKTREE PLAN NOTE
+STAGES=$(wf_stages)
+export STAGES SECTION_HEADING STAGE STAMP MODE PACE WORKTREE PLAN NOTE
 python3 - "$BODY_FILE" > "$NEW_FILE" <<'PY' || exit 0
 import os
 import re
@@ -88,7 +112,7 @@ import sys
 
 body = open(sys.argv[1], encoding="utf-8").read()
 heading = os.environ["SECTION_HEADING"]
-stages = os.environ["PJ_STAGES"].split("\n")
+stages = os.environ["STAGES"].split("\n")
 stage = os.environ["STAGE"]
 stamp = os.environ["STAMP"]
 

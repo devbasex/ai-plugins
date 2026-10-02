@@ -168,7 +168,7 @@ flowchart TB
 
 | 語 | 意味 | 英語や識別子 | 正本 |
 | --- | --- | --- | --- |
-| 進捗記録 | 工程に入った時点で 1 回打つ記録。課題の本文の `## 進行` も同じ 1 回で更新される | `projects-sync.sh` | [stage-completeness.md](stage-completeness.md) の「用語」 |
+| 進捗記録 | 工程に入った時点で 1 回打つ記録。課題の本文の `## 進行` も同じ 1 回で更新される | `projects-sync.sh`、`progress-record.sh` | [stage-completeness.md](stage-completeness.md) の「用語」 |
 | ボード | 進行を記録する GitHub Projects のプロジェクト 1 つ。設定が無ければ何も動かない | `.ndf/projects.json` | [projects-tracking.md](projects-tracking.md) の「用語」 |
 | 通過工程 | ある課題について、進捗記録が実際に書かれた工程の集合 | — | [stage-completeness.md](stage-completeness.md) の「用語」 |
 | 通過記録 | 通過工程を課題ごとに残したファイル | `stage-check.sh report <番号>` | [stage-completeness.md](stage-completeness.md) の「用語」 |

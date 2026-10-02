@@ -105,20 +105,20 @@ flowchart TB
 
 ### 進捗記録
 
-入口を `projects-sync.sh` にしたのは、通過記録がこのコマンドを観測して積むためである。
-入口を変えなければ hook の照合と `stage-completeness.md` の「変わらない 4 つの契約」を変えずに、
-1 行で 3 か所へ残せる。`progress-record.sh` を入口にすると hook の照合とテストが変わり、包みの
-スクリプトを足すと hook が覚える名前が 3 つになる。
+入口は `projects-sync.sh` の 1 行で、issue の本文・ボード・通過記録の 3 か所へ残る。
+**通過記録へ積むのは、中で呼ぶ `progress-record.sh` 自身である。** hook はコマンドを観測しないため、
+呼び方（並べる・番号を変数で書く）・ランタイム・Skill の起動の有無に依らず、1 回の記録でキーごとに 1 件が積まれる。
 
 ```text
 projects-sync.sh <課題番号> <キー> <値>
-  キー: stage | mode | status | worktree | plan
+  キー: stage | mode | pace | status | worktree | plan
 ```
 
 | キー | 打つ時点 | issue の本文 | ボード | 通過記録 |
 | --- | --- | --- | --- | --- |
-| `stage` | 工程に入るたび（課題ごと） | `progress-record.sh <課題> "<値>"`（チェックを付ける） | 工程のフィールド | 工程を積む |
+| `stage` | 工程に入るたび（課題ごと） | `progress-record.sh <課題> "<値>"`（チェックを付ける） | 工程のフィールド | 工程を積む。`配布` のときは記録の無い必須の工程を標準出力で案内する |
 | `mode` | フェーズの最初の工程で 1 度 | `progress-record.sh <課題> - --mode <値>`（見出し行だけ） | モードのフィールド | モードを書く |
+| `pace` | フェーズの最初の工程で 1 度 | `progress-record.sh <課題> - --pace <値>`（見出し行だけ） | 書かない | 進め方を書く |
 | `worktree` | 作業場所の用意の後に 1 度 | `progress-record.sh <課題> - --worktree <値>` | worktree のフィールド | 読まない |
 | `plan` | 計画の後に 1 度 | `progress-record.sh <課題> - --plan <値>` | 実装計画のファイルのフィールド | 読まない |
 | `status` | 「スプリントを閉じる」だけ | 書かない | Status | 読まない |

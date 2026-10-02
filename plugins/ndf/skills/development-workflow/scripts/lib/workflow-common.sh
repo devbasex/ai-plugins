@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2034  # WF_ の変数は source する側（workflow-guard.sh・stage-check.sh）が読む（#1323）
+# shellcheck disable=SC2034  # WF_ の変数は source する側（workflow-guard.sh・stage-check.sh・進捗記録のスクリプト）が読む（#1323）
 # NDF plugin: 工程の飛ばしの検知（#221）と、設計 Pull Request のマージの判定（#266）。
 #
-# **判定はすべてこのライブラリが持つ。** 入口のスクリプト（workflow-guard.sh /
-# stage-check.sh）は入出力の整形だけを行う。worktree の共通ライブラリと同じ構造である。
+# **判定はすべてこのライブラリが持つ。** 入口のスクリプト（workflow-guard.sh / stage-check.sh /
+# progress-record.sh / projects-sync.sh）は入出力の整形だけを行う。**工程名・モード・進め方の一覧も
+# ここの 1 か所だけに置く**（#725 の決定 3）。worktree の共通ライブラリと同じ構造である。
 #
 # 2 つの機能で、判定できないときの倒し方が逆になる。
 #
@@ -227,13 +228,14 @@ wf_split() {
 }
 
 # 判定の対象になりうる本文かを、走査の前に安く見分ける。
-# **当たらない本文では語の分割そのものを行わない。**
+# **当たらない本文では語の分割そのものを行わない。** 対象はマージと Pull Request の作成だけで、
+# 進捗記録は見ない（記録のスクリプトが自分で積む。#725）。
 #
 # **行末の `\` による継続は空白へ畳んでから見る。** `gh pr \⏎merge 268` は行単位の grep では
 # `pr` と `merge` が別の行に分かれ、読み手の判定まで届かない（#565）。
 wf_is_candidate() {
   local text="${1:-}"
-  grep -qE 'projects-sync\.sh|pr[[:space:]]+merge|pulls/[0-9]+/merge|pr[[:space:]]+create' \
+  grep -qE 'pr[[:space:]]+merge|pulls/[0-9]+/merge|pr[[:space:]]+create' \
     <<<"${text//$'\\\n'/ }"
 }
 
@@ -290,30 +292,6 @@ _wf_scan_gh_verb() {
     [ -z "$done_fn" ] || "$done_fn"
   fi
   [ "$any" -eq 0 ]
-}
-
-# 進行の記録のコマンドなら、課題番号・キー・値をタブ区切りで出す。
-#
-# 見分けは `projects-sync.sh` で終わる語である。呼び出し側は `$SCRIPTS` を展開してから
-# 実行するが、hook が受け取るのは書かれたままの本文なので、どちらの形でも当たる。
-#
-# **1 つ目の記録のコマンドだけを読む。** 見つけた後の区切りか 3 語目で止める。区切りを
-# 越えて読むと、`stage; echo 設計` の `echo` を値として読む。
-wf_parse_sync() {
-  local cmd="${1:-}" tok found=1
-  local -a args=()
-  while IFS= read -r -d '' tok; do
-    if [ "$found" -ne 0 ]; then
-      case "$tok" in *projects-sync.sh) found=0 ;; esac
-      continue
-    fi
-    [ -n "$tok" ] || break
-    args+=("$tok")
-    [ "${#args[@]}" -lt 3 ] || break
-  done < <(wf_split "$cmd")
-  [ "$found" -eq 0 ] || return 1
-  [ "${#args[@]}" -ge 3 ] || return 1
-  printf '%s\t%s\t%s\n' "${args[0]}" "${args[1]}" "${args[2]}"
 }
 
 # --- Pull Request の作成の観測（#424） ---------------------------------------
@@ -892,6 +870,28 @@ wf_report() {
 
 wf_report_empty() {
   printf '#%s の進行の記録がありません。\n' "${1:-}"
+}
+
+# 進捗記録 1 回分を通過記録へ積む（#725。呼ぶのは progress-record.sh だけ）。引数: <slug> <課題番号> <工程名|空> <モード|空> <進め方|空>
+# 空でないキーを mode → pace → stage の順に積み、排他を取れなかったキーだけ飛ばす。stage が
+# WF_REPORT_STAGE なら記録の無い必須の工程を標準出力へ案内する。**戻り値は常に 0 で、工程を止めない。**
+wf_record_progress() {
+  local slug="${1:-}" issue="${2:-}" stage="${3:-}" mode="${4:-}" pace="${5:-}" report
+  [ -n "$stage$mode$pace" ] || return 0
+  if [ -z "$slug" ] || ! command -v jq >/dev/null 2>&1; then
+    printf 'NOTE: リポジトリを特定できないか jq が無いため、#%s の通過記録は残しません\n' "$issue" >&2
+    return 0
+  fi
+  [ -z "$mode" ] || wf_record "$slug" "$issue" mode "$mode"
+  [ -z "$pace" ] || wf_record "$slug" "$issue" pace "$pace"
+  [ -n "$stage" ] || return 0
+  wf_record "$slug" "$issue" stage "$stage"
+  [ "$stage" = "$WF_REPORT_STAGE" ] || return 0
+  report=$(wf_report "$slug" "$issue")
+  case "$report" in
+    *'記録なし:'*|*'条件付き:'*) printf '%s\n' "$report" ;;
+  esac
+  return 0
 }
 
 # 設計 Pull Request のマージの判定は、通信を行う唯一の層として別のファイルへ置く。

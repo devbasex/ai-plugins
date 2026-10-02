@@ -149,7 +149,7 @@ context window を使ったかが読めなくなる。**語彙は次の 2 つだ
 | 作業ディレクトリ | supervisor が作業ファイルを置くディレクトリの絶対パス（例 `<scratchpad>/<フェーズ>-<課題番号>/`）。**conductor が supervisor ごとに決め、並行する supervisor どうしで重ならないようにする** |
 | 進捗記録 | コマンドの頭 `bash "<絶対パス>/projects-sync.sh" <課題番号> <キー> "<値>"` と、キー（`stage` / `mode` / `worktree` / `plan`）ごとの打つ時点。**conductor が `$SCRIPTS` を解いた絶対パスを二重引用符で囲んで書く。** 打つ時点は `progress-tracking` の抜粋（`references/excerpt.md`）の「呼び出し」を写す |
 
-**進捗記録は issue の本文の `## 進行` とボードの両方へ残り、`stage` は通過記録にも積まれる。** そのため supervisor は `progress-tracking` も `development-workflow` も起動せずにフェーズを通せる。打つのはその工程を行った supervisor である。パスを二重引用符で囲むのは、空白を含むパスで語が割れないためである。
+**進捗記録は issue の本文の `## 進行` とボードの両方へ残り、`stage` は通過記録にも積まれる。** 積むのは記録のスクリプト自身で hook に依らないため、supervisor は `progress-tracking` も `development-workflow` も起動せずにフェーズを通せる。打つのはその工程を行った supervisor である。パスを二重引用符で囲むのは、空白を含むパスで語が割れないためである。
 
 supervisor が守る規則:
 
