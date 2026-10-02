@@ -2930,7 +2930,7 @@
     {
       "term": "取り込んだ課題",
       "context": "ndf-workflow",
-      "meaning": "設計で、受け入れ内容を別の課題の実装へ含めると決めた課題。自分の実装のプランを持たない",
+      "meaning": "設計で、受け入れ内容を別の課題の実装へ含めると決めた課題。自分の実装のプランは残すが、`実行の条件` で飛ばして実行しない",
       "source": "",
       "pending_source": "issues/issue-1485-requirements.md"
     },
