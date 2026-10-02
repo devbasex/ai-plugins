@@ -175,7 +175,7 @@ codex の書き換え（設計の「codex（ChatGPT のログイン）」の節�
 | `check`: 認証が無い・401・403・通信・真偽値でない → `stopped`・null・`reason`（I1） | 5 つの場合それぞれで `check`。終了コード 3 | どれか 1 つで `training` を false にすると落ちる。文字列 `"false"` を真偽値と読むと落ちる |
 | `check`: kiro / agy → `unsupported`・`stopped` | `--runtime` を 2 つ並べて `check` | 1 つでも `training` を false にすると落ちる |
 | `check --runtime codex`: 3 つの鍵がすべて false → false、どれかが true → true（I8） | `NDF_CODEX_SETTINGS_URL` の偽の宛先で、鍵の組を変えて `check`。`_v2` だけが true の場合を含める | 鍵を 1 つ見落とすと落ちる |
-| `check --runtime codex`: `training_allowed` が無い・真偽値でない・ChatGPT でないログイン・`auth.json` が無い・401・403・通信 → null（I8・I9） | それぞれの場合で `check`。`training_allowed` が無く `_v2` が true の場合と、`training_allowed` が true で `codex_training_allowed` が文字列の場合も null（I8 の順序）。ChatGPT でないログインと `auth.json` が無い場合は偽の宛先の要求の数が 0 | どれか 1 つで false か true を返すと落ちる |
+| `check --runtime codex`: `training_allowed` が無い・真偽値でない・ChatGPT でないログイン・`auth.json` が無い・401・403・通信 → null（I8・I9） | それぞれの場合で `check`。`training_allowed` が無く `_v2` が true の場合と、`training_allowed` が true で `codex_training_allowed` が文字列の場合も null（I8 の順序）。`{"training_allowed": false, "codex_training_allowed": null, "codex_training_allowed_v2": false}` も null（I8 の 2。鍵が在って値が null）。ChatGPT でないログインと `auth.json` が無い場合は偽の宛先の要求の数が 0 | どれか 1 つで false か true を返すと落ちる |
 | codex の要求の見出し | 偽の宛先が受けた要求に `User-Agent: ndf-training-optout` と `ChatGPT-Account-Id` があり、宛先の既定値が `https://chatgpt.com/backend-api/settings/user` | 見出しを外すか宛先を変えると落ちる |
 | `check` の置き場と実験版の片付け | `experimental/training-optout.py` が無く、`scripts/training-optout.py` があり、台帳の行に行き先がある | 実験版を残すか、台帳の行き先を空にすると落ちる |
 | 書き換え: true → `PATCH` が `{"grove_enabled": false}` で 1 回・知らせが出る（I2） | 偽の宛先が受けた要求を数え、本文と方法を見る。標準出力の `systemMessage` | `PATCH` を 2 回送るか、本文の値を変えるか、知らせを消すと落ちる |

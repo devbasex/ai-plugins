@@ -65,7 +65,7 @@ ChatGPT の `settings/user` とも同じ関係を置き、`lib/codex_training.py
 | I5 | 起動の認証 | トークンとアカウントの識別子を標準出力・標準エラー・`systemMessage`・例外の文言に出さない。応答の本文を出力へ写さない | 理由は HTTP の状態コードと例外の型名だけで作る |
 | I6 | 学習の設定 | `session-start` はどの失敗でも終了コード 0 で終わり、セッションの開始を止めない | 予期しない例外も捕まえて失敗の知らせに変える |
 | I7 | 起動の認証 | 実際の OAuth のトークンを送る先は `https://api.anthropic.com` だけ。codex のトークンを送る先は `https://chatgpt.com` だけで、試験用の差し替え（`NDF_CODEX_SETTINGS_URL`）も下と同じ規則で受ける | 宛先は定数で持つ。試験用の環境変数（`NDF_TRAINING_SETTINGS_URL`）の差し替えは、ホストが手元（`127.0.0.1`・`::1`・`localhost`）の URL だけを受ける。照合は `urllib.parse.urlsplit` で取り出した `hostname` 成分（小文字化済み）が `127.0.0.1`・`::1`・`localhost` のどれかに完全一致するかだけで決め、URL の文字列への部分一致・前方一致を使わない。スキームは `http` か `https` に限り、userinfo（`@` の前）を持つ URL は受けない。パス・クエリ・userinfo に許可語が含まれても受ける理由にしない（`http://127.0.0.1.evil.example/`・`http://localhost.evil.example/`・`http://localhost@evil.example/`・`http://evil.example/?h=127.0.0.1` はどれも受けない）。それ以外の値が入っていれば、`check`・`session-start` ともトークンを読まず何も送らず、読み取りの失敗（理由「試験用の宛先が手元でない」）として扱う。学習の設定の HTTP（claude の `GET`・`PATCH` と codex の `GET`）はリダイレクトを追わない。3xx の応答は送り直さずに `HTTP <状態コード>` の失敗として扱い、許可した宛先が別の宛先へ転送してもトークンを転送先へ送らない |
-| I8 | codex の学習の設定 | codex の `training` は次の順に判定し、先に当たった規則で決める。(1) `training_allowed` が無いか真偽値でなければ null。(2) `codex_training_allowed`・`_v2` のどちらかが真偽値以外の値で在れば null。(3) 3 つの鍵のどれかが true なら true。(4) それ以外（`training_allowed` が false で、残りの 2 つが false か無い）は false。形の不正（1・2）を true の有無より先に見るため、`training_allowed` が無く `_v2` が true の応答も、`training_allowed` が true で `codex_training_allowed` が `"unknown"` の応答も null になる | `lib/codex_training.py` の変換だけが決める（決定 13） |
+| I8 | codex の学習の設定 | codex の `training` は次の順に判定し、先に当たった規則で決める。(1) `training_allowed` が無いか真偽値でなければ null。(2) `codex_training_allowed`・`_v2` のどちらかが真偽値以外の値で在れば null。鍵が在って値が JSON の null のときもここに当たる。鍵の有無は `in` で見て、`settings.get(鍵)` が None を返したことを「無い」と読まない（I1 と同じく、読めない値を「学習に使わない」と読ませない）。(3) 3 つの鍵のどれかが true なら true。(4) それ以外（`training_allowed` が false で、残りの 2 つが false か鍵ごと無い）は false。形の不正（1・2）を true の有無より先に見るため、`training_allowed` が無く `_v2` が true の応答も、`training_allowed` が true で `codex_training_allowed` が `"unknown"` の応答も null になる | `lib/codex_training.py` の変換だけが決める（決定 13） |
 | I9 | codex の認証 | `auth.json` の `auth_mode` が `chatgpt` でない（API キーのログイン）か、`tokens.access_token` が無ければ送らない。`account_id` は `ChatGPT-Account-Id` の見出しにだけ置き、出力に出さない | `training: null`・理由「ChatGPT のログインでない」か「codex のトークンが無い」 |
 
 ### ドメインイベント
@@ -289,7 +289,7 @@ classDiagram
 | codex: ChatGPT のログインでない（I9） | `ChatGPT のログインでない（API キーのログイン）` |
 | codex: `auth.json` かトークンが無い | `codex のトークンが無い` |
 | codex: `training_allowed` が無いか真偽値でない（I8 の 1） | `応答に training_allowed の真偽値が無い` |
-| codex: `codex_training_allowed`・`_v2` が真偽値以外の値（I8 の 2） | `応答に codex_training_allowed の真偽値が無い` |
+| codex: `codex_training_allowed`・`_v2` が真偽値以外の値（JSON の null を含む。I8 の 2） | `応答に codex_training_allowed の真偽値が無い` |
 | kiro / agy | `unsupported` |
 
 ### `training-optout.py session-start`
