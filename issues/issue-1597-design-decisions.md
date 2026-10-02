@@ -139,15 +139,27 @@ Codex にも効き、Codex の設定の「Include environments」はそれと別
 
 根拠: Value 6 / C1（MVV 版 2）
 
-### 決定 14: codex の書き換えは、書き換えの形を実物で確かめるまで入れない
+### 決定 14: codex の書き換えは、実物で確かめた形（問い合わせの文字列の `feature` と `value`）で送る
 
-書き換えの口（`PATCH https://chatgpt.com/backend-api/settings/account_user_setting`、`GET` に `405`・`Allow: PATCH`）は在るが、
-引数の形（鍵と値を問い合わせの文字列で渡すか本文で渡すか）と応答を確かめていない。実物のアカウントへ書き換えを送ることは、
-この設計の調べでは行わない（指示の範囲）。形を推測して入れると、起動のたびに失敗の知らせが出るか、別の設定を書き換えうる。
+承認ゲート 1 で利用者が (a) を選んだ（2026-10-02）。実物のアカウント（ChatGPT Pro の個人のワークスペース）で次を確かめた。
+見出しは読み取りと同じ（`Authorization`・`ChatGPT-Account-Id`・`User-Agent: ndf-training-optout`・`Accept`）。
 
-**利用者へ戻す判断**: (a) 利用者の許可のもと、実物のアカウントで 1 回、true にした項目を false へ戻す書き換えを送って形を確かめ、
-codex の書き換え（設計の「codex（ChatGPT のログイン）」の節の表）を実装に含める。(b) 確かめず、codex は確認だけにして書き換えは
-別の課題へ回す。判断が出るまでの暫定の振る舞いは (b) である。`check --runtime codex` は読み取りを返し、`hooks/codex.json` は変えない。
+| 送ったもの | 応答 | 送った後の `GET settings/user` |
+| --- | --- | --- |
+| `PATCH /backend-api/settings/account_user_setting?feature=training_allowed&value=false`（元の値と同じ） | `200`・本文 `{"training_allowed": false}` | 3 つとも false（変わらない） |
+| 同じ口へ `value=true` | `200`・本文 `{"training_allowed": true}` | `training_allowed` だけ true |
+| 同じ口へ `value=false`（元へ戻す） | `200`・本文 `{"training_allowed": false}` | 3 つとも false（元の値へ戻った） |
+| `feature=codex_training_allowed`・`feature=codex_training_allowed_v2` を `value=false`（元の値と同じ） | どちらも `200`・本文 `{"<鍵>": false}` | 3 つとも false |
+| `feature=no_such_feature_xyz`・`value=false` | `422`・本文 `{"detail": "Invalid feature name …"}` | 変わらない |
+
+本文（JSON）ではなく問い合わせの文字列で鍵と値を渡す。鍵の名前は `settings/user` の鍵と同じで、知らない鍵は `422` で拒まれる
+（別の設定を書き換えない）。true → false の向きを実物で確かめたのは `training_allowed` だけで、Codex の 2 つの鍵は false → false
+（受け付けること）だけを確かめた。
+
+`session-start --runtime codex`（`hooks/codex.json` の SessionStart）は、読んだ 3 つの鍵のうち true の鍵ごとに 1 回、
+`value=false` を送る。claude と同じく、既に false なら送らず知らせない・`NDF_TRAINING_OPTOUT=0` なら読みも書きも送らない・
+失敗しても終了コード 0 で失敗を知らせる。読み取りが null（I8 の形の不正）なら、true の鍵があっても送らない。
+ChatGPT でないログイン（API キー）は、claude の OAuth でない接続（決定 8）と同じく、送らず知らせない。
 
 根拠: C1 / C3 / Value 3（MVV 版 2）
 
@@ -156,6 +168,21 @@ codex の書き換え（設計の「codex（ChatGPT のログイン）」の節�
 実験版（PR #1606）の `--runtime codex` は `unsupported` のまま残し、codex の読み取りは本体へ移す実装で足す（実験版は本体へ移した時点で消えるため、二重に足さない）。
 
 根拠: Value 6（MVV 版 2）
+
+### 決定 16: `check` は実験版の最新の振る舞いに合わせ、決定 11 は `session-start` の書き換えだけに掛ける
+
+承認ゲート 1 の決定（2026-10-02）。実験版（PR #1606 の round 3）は、期限（`expiresAt`）の切れたトークン・OAuth より優先される
+認証の変数・従量の接続の宣言（`NDF_SUPERVISE_CLAUDE_FALLBACK`、無ければ置き場の `metered.json`）を「確かめられない」とし、
+`--config-dir` で登録アカウントごとに確かめる。`check` はこの振る舞いと `reason` の語（`OAuth 以外の接続が有効（<変数名>）`・
+`トークンの期限切れ（…）`・`従量の接続の宣言がある（…）`）を引き継ぎ、出力の項目に `config_dir` を持つ。
+決定 11（期限切れでも送る）は `session-start` の書き換えだけに掛ける。`check` は確かめた事実を返すため、期限の切れた
+トークンで送って 401 を受けるより、送らずに理由を示すほうが読み手に分かる。`session-start` は従量の接続の宣言を見ない
+（宣言は supervise が切り替え得る接続で、そのセッション自身の接続ではない）。
+
+HTTP は実験版の `notify`（httpx）でなく `claude_usage.http_json`（標準ライブラリ）を使う（決定 1・2）。hook が `python3` で
+直に動き、uv の環境へ起動し直さないためである。
+
+根拠: Value 6 / Value 7 / C1（MVV 版 2）
 
 ### ゲート 1 の扱い
 
@@ -177,7 +204,7 @@ codex の書き換え（設計の「codex（ChatGPT のログイン）」の節�
 | `check --runtime codex`: 3 つの鍵がすべて false → false、どれかが true → true（I8） | `NDF_CODEX_SETTINGS_URL` の偽の宛先で、鍵の組を変えて `check`。`_v2` だけが true の場合を含める | 鍵を 1 つ見落とすと落ちる |
 | `check --runtime codex`: `training_allowed` が無い・真偽値でない・ChatGPT でないログイン・`auth.json` が無い・401・403・通信 → null（I8・I9） | それぞれの場合で `check`。`training_allowed` が無く `_v2` が true の場合と、`training_allowed` が true で `codex_training_allowed` が文字列の場合も null（I8 の順序）。`{"training_allowed": false, "codex_training_allowed": null, "codex_training_allowed_v2": false}` も null（I8 の 2。鍵が在って値が null）。ChatGPT でないログインと `auth.json` が無い場合は偽の宛先の要求の数が 0 | どれか 1 つで false か true を返すと落ちる |
 | codex の要求の見出し | 偽の宛先が受けた要求に `User-Agent: ndf-training-optout` と `ChatGPT-Account-Id` があり、宛先の既定値が `https://chatgpt.com/backend-api/settings/user` | 見出しを外すか宛先を変えると落ちる |
-| `check` の置き場と実験版の片付け | `experimental/training-optout.py` が無く、`scripts/training-optout.py` があり、台帳の行に行き先がある | 実験版を残すか、台帳の行き先を空にすると落ちる |
+| `check` の置き場と実験版の片付け | `experimental/training-optout.py` が無く、`scripts/training-optout.py` がある。台帳の行き先はレビューで見る（.md の文言を照合しない） | 実験版を残すと落ちる |
 | 書き換え: true → `PATCH` が `{"grove_enabled": false}` で 1 回・知らせが出る（I2） | 偽の宛先が受けた要求を数え、本文と方法を見る。標準出力の `systemMessage` | `PATCH` を 2 回送るか、本文の値を変えるか、知らせを消すと落ちる |
 | 書き換え: false → `PATCH` を送らず知らせない（I2） | 偽の宛先の `PATCH` の数が 0、標準出力が空 | false でも送ると落ちる |
 | 書き換え: 認証が無い・401・403・通信・`PATCH` が 2xx 以外 → 終了コード 0・失敗の知らせ（I6） | 5 つの場合それぞれで `session-start`。`claude_training` の関数が例外を投げる場合も足す | 例外を外へ出すか、知らせを出さないと落ちる |
@@ -191,7 +218,10 @@ codex の書き換え（設計の「codex（ChatGPT のログイン）」の節�
 | 試験用の差し替えは手元のホストだけ（I7） | `NDF_TRAINING_SETTINGS_URL` に手元でないホスト（例 `https://example.invalid/`）を入れて `check` と `session-start` を呼び、どの宛先へも要求が出ず、`check` が `stopped`・`training: null`、`session-start` が終了コード 0 で失敗の知らせを出す | 差し替えをホストを見ずに受けると落ちる |
 | リダイレクトを追わない（I7） | 手元の偽の宛先が `302` で別の手元のポートへ転送する。`check`（claude と codex）と `session-start` を呼び、転送先が要求を 1 つも受けず、`check` が `training: null`・理由 `HTTP 302` を返す | 既定のリダイレクト処理のまま送ると落ちる |
 | 打ち切りの合計（非機能・性能） | 応答を返さない偽の宛先で `session-start` が 7 秒以内に終わり 0 | 打ち切りを外すか延ばすと落ちる |
-| 決定 14 の確認までは codex / kiro / agy で書き換えない（非機能・システム環境） | `hooks/codex.json`・`dev.agy/hooks.json` に `training-optout` が無い | 他のランタイムの hook に足すと落ちる。(a) に決まったら codex の行をこの表から外し、書き換えの行（claude と同じ 4 つ）を足す |
+| kiro / agy で書き換えない（非機能・システム環境） | `dev.agy`・`dev.kiro` の hook の定義に `training-optout` が無い | 他のランタイムの hook に足すと落ちる |
+| codex の書き換え: true の鍵ごとに `feature=<鍵>&value=false` を 1 回・知らせ（決定 14） | 偽の宛先が受けた `PATCH` の問い合わせの文字列と数 | 鍵を取り違えるか、false の鍵にも送ると落ちる |
+| codex の書き換え: 既に false・無効化・失敗（認証が無い・401・403・通信・2xx 以外・形の不正） | 送らない・知らせない／終了コード 0 で失敗を知らせる。形の不正では `PATCH` を送らない | 失敗で例外を出すか、読めない値で送ると落ちる |
+| codex の hook の定義 | `hooks/codex.json` の SessionStart に `session-start --runtime codex`・`timeout` 10 | hook を消すと落ちる |
 | 利用者への説明 | 文言を照合するテストは書かない（`AGENTS.md`）。`plugins/ndf/README.md` の節をレビューで見る | — |
 
 ## 未確認のまま残ること
@@ -203,8 +233,9 @@ codex の書き換え（設計の「codex（ChatGPT のログイン）」の節�
 | `CLAUDE_CODE_OAUTH_TOKEN`（`claude setup-token`）のスコープ | 長期のトークンが `user:profile` を持たなければ、読み取りが 403 になり、起動のたびに失敗の知らせが出る。手元の認証ファイルのトークンは `user:profile` を持つことだけを確かめた |
 | macOS のキーチェーン | 名前（`Claude Code-credentials`）と、`security` が確認の画面を出さずに読めるかを、macOS で確かめていない。画面が出れば 2 秒で打ち切り「確かめられない」になる |
 | Team / Enterprise のアカウント | 組織が学習の設定を決める場合の `GET` と `PATCH` の応答を確かめていない。拒まれれば書き換えの失敗として知らせる（要求の「含まない」） |
-| codex の書き換えの形 | `PATCH /backend-api/settings/account_user_setting` の引数の形と応答（決定 14）。利用者の判断 (a) / (b) を承認ゲート 1 で受ける |
+| codex の書き換えの形 | true → false を実物で確かめたのは `training_allowed` だけ。`codex_training_allowed(_v2)` は false の書き換えを受け付けることだけを確かめた（決定 14） |
+| `codex exec` の SessionStart | `codex exec` の worker でも SessionStart の hook が起きるかを確かめていない |
 | codex の鍵と画面の項目の対応 | `training_allowed` が「Improve the model for everyone」、`codex_training_allowed(_v2)` が Codex の「Include environments」という対応は名前からの推定。画面を切り替えて読み直す確認をしていない |
 | codex のログインの種類 | 確かめたのは ChatGPT Pro の個人のワークスペースだけ。Business / Enterprise のワークスペース・認証をキーリングに置く設定（`cli_auth_credentials_store`）・期限の切れたトークンの応答は確かめていない |
-| codex の SessionStart の出力 | codex の hook が `systemMessage` を利用者へ出すことは、出力の型（実行ファイルの JSON Schema）で見ただけで、画面で確かめていない（決定 14 で (a) のときに要る） |
+| codex の SessionStart の出力 | codex の hook が `systemMessage` を利用者へ出すことは、出力の型（実行ファイルの JSON Schema）で見ただけで、画面で確かめていない |
 | 会話の保存期間の変化 | 学習の設定を Off にすると保存期間も変わる（要求の前提 7）。これを含めて書き換えてよいかは、承認ゲート 1 で利用者が決める |
