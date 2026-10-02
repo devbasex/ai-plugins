@@ -21,12 +21,14 @@ import argparse
 import json
 import os
 import sys
-import urllib.error
-import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+import deps  # noqa: E402
 from step_result import EXIT_OK, EXIT_PRECONDITION, EXIT_VIOLATION, emit, main_with, result  # noqa: E402
+
+deps.require("notify")  # HTTP の呼び出しは notify（httpx の包み）が受け持つ
+import notify  # noqa: E402
 
 TOOL = "training-optout"
 URL = "https://api.anthropic.com/api/oauth/account/settings"
@@ -47,30 +49,30 @@ def claude_token() -> str | None:
     return tok if isinstance(tok, str) and tok else None
 
 
-def unknown(runtime: str, reason: str) -> dict:
+def unchecked(runtime: str, reason: str) -> dict:
     return {"runtime": runtime, "training": None, "source": None, "updated_at": None, "reason": reason}
 
 
 def check_claude() -> dict:
     tok = claude_token()
     if not tok:
-        return unknown("claude", "OAuth のトークンが無い（CLAUDE_CODE_OAUTH_TOKEN・.credentials.json）")
-    req = urllib.request.Request(URL, headers={"Authorization": f"Bearer {tok}", "anthropic-beta": "oauth-2025-04-20"})
+        return unchecked("claude", "OAuth のトークンが無い（CLAUDE_CODE_OAUTH_TOKEN・.credentials.json）")
+    res = notify.http_get(URL, timeout=20, headers={"Authorization": f"Bearer {tok}", "anthropic-beta": "oauth-2025-04-20"})
+    if not res.ok:
+        return unchecked("claude", res.error if res.status else "読めない（接続の失敗）")
     try:
-        body = json.load(urllib.request.urlopen(req, timeout=20))
-    except urllib.error.HTTPError as e:
-        return unknown("claude", f"HTTP {e.code}")
-    except (urllib.error.URLError, OSError, ValueError) as e:
-        return unknown("claude", f"読めない（{type(e).__name__}）")
+        body = json.loads(res.text)
+    except ValueError:
+        return unchecked("claude", "読めない（JSON でない応答）")
     grove = body.get("grove_enabled") if isinstance(body, dict) else None
     if not isinstance(grove, bool):
-        return unknown("claude", "応答に grove_enabled の真偽値が無い")
+        return unchecked("claude", "応答に grove_enabled の真偽値が無い")
     return {"runtime": "claude", "training": grove, "source": SOURCE, "updated_at": body.get("grove_updated_at"), "reason": None}
 
 
 def cmd_check(a):
     runtimes = list(dict.fromkeys(a.runtime or ["claude"]))
-    items = [check_claude() if r == "claude" else unknown(r, "unsupported") for r in runtimes]
+    items = [check_claude() if r == "claude" else unchecked(r, "unsupported") for r in runtimes]
     used = [i["runtime"] for i in items if i["training"] is True]
     unread = [i["runtime"] for i in items if i["training"] is None]
     if unread:

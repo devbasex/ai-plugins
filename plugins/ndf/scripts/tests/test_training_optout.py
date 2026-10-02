@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
-import io
 import json
-import urllib.error
 from pathlib import Path
 
 import pytest
@@ -36,14 +34,14 @@ def run(mod, capsys, *argv):
 def answer(mod, monkeypatch, body=None, status=None):
     seen = {}
 
-    def fake(req, timeout):
-        seen["auth"] = req.get_header("Authorization")
-        seen["beta"] = req.get_header("Anthropic-beta")
-        if status:
-            raise urllib.error.HTTPError(req.full_url, status, "x", {}, io.BytesIO(b"{}"))
-        return io.BytesIO(json.dumps(body).encode())
+    def fake(url, timeout=10.0, headers=None):
+        seen["auth"] = headers.get("Authorization")
+        seen["beta"] = headers.get("anthropic-beta")
+        if status is not None:
+            return mod.notify.HttpResult(status, "{}", {}, f"HTTP {status}" if status else "接続できない（x）")
+        return mod.notify.HttpResult(200, json.dumps(body), {})
 
-    monkeypatch.setattr(mod.urllib.request, "urlopen", fake)
+    monkeypatch.setattr(mod.notify, "http_get", fake)
     return seen
 
 
@@ -64,7 +62,7 @@ def test_grove_enabled_stops(mod, monkeypatch, capsys):
     assert code == 1 and res["status"] == "stopped" and res["items"][0]["training"] is True
 
 
-@pytest.mark.parametrize("body,status", [({"other": 1}, None), ({"grove_enabled": "no"}, None), (None, 403), (None, 401)])
+@pytest.mark.parametrize("body,status", [({"other": 1}, None), ({"grove_enabled": "no"}, None), (None, 403), (None, 401), (None, 0)])
 def test_unreadable_is_not_treated_as_optout(mod, monkeypatch, capsys, body, status):
     answer(mod, monkeypatch, body, status)
     code, res, raw = run(mod, capsys)

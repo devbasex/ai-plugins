@@ -22,9 +22,11 @@ supervise のプランでは、LLM を使うステップの前に `run` のス�
  "next": "impl"}
 ```
 
-Claude Code の hook では、`.claude/settings.json` の `SessionStart` から呼び、0 以外なら利用者へ知らせる。
+Claude Code の hook では、`.claude/settings.json` の `UserPromptSubmit` から呼び、0 以外なら終了コード 2 で
+入力を止める（`UserPromptSubmit` の終了コード 2 は、その入力を LLM へ渡さずに消し、標準エラーを利用者へ見せる）。
+`SessionStart` では止められない（終了コードによらずセッションが続く）。入力のたびに 1 回 HTTP を呼ぶ。
 
 ```json
-{"hooks": {"SessionStart": [{"hooks": [{"type": "command",
-  "command": "python3 <ai-plugins>/plugins/ndf/scripts/experimental/training-optout.py check >/dev/null || echo '学習に使わない設定を確かめられない。/privacy-settings を開く' >&2"}]}]}}
+{"hooks": {"UserPromptSubmit": [{"hooks": [{"type": "command",
+  "command": "python3 <ai-plugins>/plugins/ndf/scripts/experimental/training-optout.py check >/dev/null || { echo '学習に使わない設定を確かめられない。/privacy-settings を開く' >&2; exit 2; }"}]}]}}
 ```
