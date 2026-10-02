@@ -2,12 +2,9 @@
 # shellcheck disable=SC2034  # WF_ の変数は source する側（workflow-guard.sh・stage-check.sh・進捗記録のスクリプト）が読む（#1323）
 # NDF plugin: 工程の飛ばしの検知（#221）と、設計 Pull Request のマージの判定（#266）。
 #
-# **判定はすべてこのライブラリが持つ。** 入口のスクリプト（workflow-guard.sh /
-# stage-check.sh / plugins/ndf/scripts の progress-record.sh・projects-sync.sh）は入出力の整形だけを行う。
-# worktree の共通ライブラリと同じ構造である。
-#
-# **工程名・モード・進め方の一覧はここの 1 か所だけに置く（#725 の決定 3）。** 課題の本文の「進行」を
-# 書く progress-record.sh も、通過記録を報告する stage-check.sh も、同じ一覧を読む。
+# **判定はすべてこのライブラリが持つ。** 入口のスクリプト（workflow-guard.sh / stage-check.sh /
+# progress-record.sh / projects-sync.sh）は入出力の整形だけを行う。**工程名・モード・進め方の一覧も
+# ここの 1 か所だけに置く**（#725 の決定 3）。worktree の共通ライブラリと同じ構造である。
 #
 # 2 つの機能で、判定できないときの倒し方が逆になる。
 #
@@ -231,8 +228,8 @@ wf_split() {
 }
 
 # 判定の対象になりうる本文かを、走査の前に安く見分ける。
-# **当たらない本文では語の分割そのものを行わない。** 対象はマージと Pull Request の作成だけである。
-# 進捗記録は記録のスクリプト（progress-record.sh）が自分で通過記録へ積むため、hook は見ない（#725）。
+# **当たらない本文では語の分割そのものを行わない。** 対象はマージと Pull Request の作成だけで、
+# 進捗記録は見ない（記録のスクリプトが自分で積む。#725）。
 #
 # **行末の `\` による継続は空白へ畳んでから見る。** `gh pr \⏎merge 268` は行単位の grep では
 # `pr` と `merge` が別の行に分かれ、読み手の判定まで届かない（#565）。
@@ -875,25 +872,14 @@ wf_report_empty() {
   printf '#%s の進行の記録がありません。\n' "${1:-}"
 }
 
-# 進捗記録 1 回分を通過記録へ積む（#725）。**積むのは進捗記録のスクリプト（progress-record.sh）だけである。**
-# hook がコマンドの文字列から推測して積む形は採らない。呼び方（並べる・番号を変数で書く・例として
-# 文字列に書く）・実行の形（supervise.py の子プロセス・Claude Code 以外のランタイム）で取りこぼすため。
-#
-#   wf_record_progress <slug> <課題番号> <工程名|空> <モード|空> <進め方|空>
-#
-# 値はチェック済みのものを受ける。空でないキーを mode → pace → stage の順に 1 件ずつ積む。
-# 排他は wf_record が 1 件ごとに取り、取れなかったキーだけを飛ばして次へ進む。
-# stage が WF_REPORT_STAGE のときだけ、記録の無い必須の工程を標準出力へ案内する。
-# **戻り値は常に 0 である。** 進行管理が理由で工程を止めない。
+# 進捗記録 1 回分を通過記録へ積む（#725。呼ぶのは progress-record.sh だけ）。引数: <slug> <課題番号> <工程名|空> <モード|空> <進め方|空>
+# 空でないキーを mode → pace → stage の順に積み、排他を取れなかったキーだけ飛ばす。stage が
+# WF_REPORT_STAGE なら記録の無い必須の工程を標準出力へ案内する。**戻り値は常に 0 で、工程を止めない。**
 wf_record_progress() {
   local slug="${1:-}" issue="${2:-}" stage="${3:-}" mode="${4:-}" pace="${5:-}" report
   [ -n "$stage$mode$pace" ] || return 0
-  if [ -z "$slug" ]; then
-    printf 'NOTE: #%s のリポジトリを特定できないため、通過記録は残しません\n' "$issue" >&2
-    return 0
-  fi
-  if ! command -v jq >/dev/null 2>&1; then
-    printf 'NOTE: jq が無いため、#%s の通過記録は残しません\n' "$issue" >&2
+  if [ -z "$slug" ] || ! command -v jq >/dev/null 2>&1; then
+    printf 'NOTE: リポジトリを特定できないか jq が無いため、#%s の通過記録は残しません\n' "$issue" >&2
     return 0
   fi
   [ -z "$mode" ] || wf_record "$slug" "$issue" mode "$mode"
