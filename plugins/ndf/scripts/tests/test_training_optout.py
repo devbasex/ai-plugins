@@ -26,7 +26,9 @@ def mod(monkeypatch, tmp_path):
     spec = importlib.util.spec_from_file_location("training_optout", SCRIPT)
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
-    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    for k in ("CLAUDE_CODE_OAUTH_TOKEN", "NDF_SUPERVISE_CLAUDE_FALLBACK", *m.ca.FOREIGN_AUTH_ENV):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("NDF_ACCOUNTS_DIR", str(tmp_path / "store"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
     (tmp_path / ".credentials.json").write_text(json.dumps({"claudeAiOauth": {"accessToken": TOKEN}}))
     return m
@@ -102,10 +104,11 @@ def test_other_runtimes_are_unsupported(mod, monkeypatch, capsys):
     assert by["codex"]["training"] is None and by["codex"]["reason"] == "unsupported"
 
 
-def account(tmp_path, name, token):
+def account(tmp_path, name, token, expires_at=None):
     d = tmp_path / "accounts" / name
     d.mkdir(parents=True)
-    (d / ".credentials.json").write_text(json.dumps({"claudeAiOauth": {"accessToken": token}}))
+    oauth = {"accessToken": token} | ({} if expires_at is None else {"expiresAt": expires_at})
+    (d / ".credentials.json").write_text(json.dumps({"claudeAiOauth": oauth}))
     return str(d)
 
 
@@ -126,3 +129,42 @@ def test_unreadable_config_dir_stops(mod, monkeypatch, capsys, tmp_path):
     code, res, _ = run(mod, capsys, "--config-dir", missing)
     assert code == 3 and missing in res["summary"]
     assert res["items"][0]["training"] is False and res["items"][1]["training"] is None
+
+
+def test_expired_token_is_not_sent(mod, monkeypatch, capsys, tmp_path):
+    old = account(tmp_path, "old", "tok-old", expires_at=1000)
+    live = account(tmp_path, "live", "tok-live", expires_at=4102444800000)
+    seen = answer(mod, monkeypatch, {"grove_enabled": False})
+    code, res, raw = run(mod, capsys, "--config-dir", old, live)
+    assert code == 3 and seen["all"] == [f"Bearer {TOKEN}", "Bearer tok-live"]
+    by = {i["config_dir"]: i for i in res["items"]}
+    assert by[old]["training"] is None and "期限切れ" in by[old]["reason"] and by[live]["training"] is False
+    assert "tok-old" not in raw
+
+
+@pytest.mark.parametrize("var", ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX"])
+def test_non_oauth_connection_is_not_checked(mod, monkeypatch, capsys, tmp_path, var):
+    monkeypatch.setenv(var, "secret-value")
+    a = account(tmp_path, "a", "tok-a")
+    seen = answer(mod, monkeypatch, {"grove_enabled": False})
+    code, res, raw = run(mod, capsys, "--config-dir", a)
+    assert code == 3 and seen["all"] == ["Bearer tok-a"]  # 登録アカウントは supervise が変数を外して起動する
+    assert res["items"][0]["training"] is None and var in res["items"][0]["reason"]
+    assert "secret-value" not in raw
+
+
+def test_metered_declaration_is_not_checked(mod, monkeypatch, capsys):
+    monkeypatch.setenv("NDF_SUPERVISE_CLAUDE_FALLBACK", "CLAUDE_CODE_USE_BEDROCK=1 AWS_REGION=us-east-1")
+    answer(mod, monkeypatch, {"grove_enabled": False})
+    code, res, _ = run(mod, capsys)
+    assert code == 3 and [i["config_dir"] for i in res["items"]] == [None, "metered"]
+    assert res["items"][1]["training"] is None and "CLAUDE_CODE_USE_BEDROCK" in res["items"][1]["reason"]
+
+
+def test_saved_metered_declaration_is_not_checked_unless_cleared(mod, monkeypatch, capsys):
+    mod.ca.save_metered("bedrock", {"CLAUDE_CODE_USE_BEDROCK": "1"}, {"region": "us-east-1"})
+    answer(mod, monkeypatch, {"grove_enabled": False})
+    assert run(mod, capsys)[0] == 3
+    monkeypatch.setenv("NDF_SUPERVISE_CLAUDE_FALLBACK", "")
+    code, res, _ = run(mod, capsys)
+    assert code == 0 and len(res["items"]) == 1

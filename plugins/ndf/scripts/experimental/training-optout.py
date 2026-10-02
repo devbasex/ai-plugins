@@ -6,9 +6,15 @@
 claude は Claude Code と同じ OAuth の認証で `GET /api/oauth/account/settings` を読み、`grove_enabled`
 （設定画面の「Help improve our AI models」）が false なら学習に使わないと判定する。トークンは
 `CLAUDE_CODE_OAUTH_TOKEN`、無ければ `$CLAUDE_CONFIG_DIR`（既定 `~/.claude`）の `.credentials.json` から読む。
-期限切れのトークンは更新しない（401 で止まる。claude を 1 度起動すれば更新される）。
+期限（`expiresAt`）の切れたトークンは送らずに確かめられないとし、更新もしない（認証ファイルを書かない。その設定
+ディレクトリで claude を 1 度起動すれば更新される）。
 `--config-dir` を渡すと、既定のアカウントに加えて、渡した設定ディレクトリごとにその `.credentials.json` のトークンで
 確かめる（supervise は利用上限で登録アカウントを切り替えるため、使い得るアカウントをすべて確かめる）。
+
+OAuth で確かめられない接続は確かめられないとする。既定のアカウントの環境に OAuth より優先される認証の変数
+（`ANTHROPIC_API_KEY`・`ANTHROPIC_AUTH_TOKEN`・`CLAUDE_CODE_USE_BEDROCK`・`CLAUDE_CODE_USE_VERTEX`）があるときと、
+supervise やラッパーが利用上限で切り替える従量の接続の宣言（`NDF_SUPERVISE_CLAUDE_FALLBACK`、無ければ置き場の
+`metered.json`）があるときである。宣言を外すには `NDF_SUPERVISE_CLAUDE_FALLBACK=` を空で定義する。
 
 codex / kiro / agy は確かめる手段が無いため `unsupported` を返す。
 
@@ -23,11 +29,14 @@ import argparse
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 import deps  # noqa: E402
 from step_result import EXIT_OK, EXIT_PRECONDITION, EXIT_VIOLATION, emit, main_with, result  # noqa: E402
+
+import claude_accounts as ca  # noqa: E402
 
 deps.require("notify")  # HTTP の呼び出しは notify（httpx の包み）が受け持つ
 import notify  # noqa: E402
@@ -38,18 +47,33 @@ SOURCE = "oauth/account/settings.grove_enabled"
 RUNTIMES = ("claude", "codex", "kiro", "agy")
 
 
-def claude_token(config_dir: str | None = None) -> str | None:
-    """`config_dir` を渡したときは、その設定ディレクトリの `.credentials.json` だけを読む（環境のトークンは見ない）。"""
-    tok = None if config_dir else os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
+NO_TOKEN = "OAuth のトークンが無い（CLAUDE_CODE_OAUTH_TOKEN・.credentials.json）"
+
+
+def claude_token(config_dir: str | None = None) -> tuple[str | None, str | None]:
+    """(トークン, 確かめられない理由)。`config_dir` を渡したときは、その設定ディレクトリの `.credentials.json` だけを読む
+    （環境のトークンは見ない）。期限の切れたトークンは返さない。"""
+    tok = None if config_dir else os.environ.get(ca.TOKEN_ENV)
     if tok:
-        return tok
-    conf = Path(config_dir or os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+        return tok, None
+    conf = Path(config_dir or os.environ.get(ca.CONFIG_ENV) or Path.home() / ".claude")
     try:
-        data = json.loads((conf / ".credentials.json").read_text(encoding="utf-8"))
+        data = json.loads((conf / ca.CRED_FILE).read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return None
-    tok = (data.get("claudeAiOauth") or {}).get("accessToken") if isinstance(data, dict) else None
-    return tok if isinstance(tok, str) and tok else None
+        return None, NO_TOKEN
+    o = (data.get("claudeAiOauth") or {}) if isinstance(data, dict) else {}
+    tok = o.get("accessToken") if isinstance(o, dict) else None
+    if not (isinstance(tok, str) and tok):
+        return None, NO_TOKEN
+    exp = o.get("expiresAt")
+    if isinstance(exp, (int, float)) and exp / 1000 <= time.time():
+        return None, f"トークンの期限切れ（CLAUDE_CONFIG_DIR={conf} claude を 1 度起動して更新する）"
+    return tok, None
+
+
+def foreign_auth() -> list[str]:
+    """既定のアカウントの環境で OAuth より優先される認証の変数の名前（値は出さない）。"""
+    return [k for k in ca.FOREIGN_AUTH_ENV if os.environ.get(k)]
 
 
 def unchecked(runtime: str, reason: str, config_dir: str | None = None) -> dict:
@@ -57,9 +81,12 @@ def unchecked(runtime: str, reason: str, config_dir: str | None = None) -> dict:
 
 
 def check_claude(config_dir: str | None = None) -> dict:
-    tok = claude_token(config_dir)
+    foreign = [] if config_dir else foreign_auth()
+    if foreign:
+        return unchecked("claude", f"OAuth 以外の接続が有効（{', '.join(foreign)}）", config_dir)
+    tok, why = claude_token(config_dir)
     if not tok:
-        return unchecked("claude", "OAuth のトークンが無い（CLAUDE_CODE_OAUTH_TOKEN・.credentials.json）", config_dir)
+        return unchecked("claude", why, config_dir)
     res = notify.http_get(URL, timeout=20, headers={"Authorization": f"Bearer {tok}", "anthropic-beta": "oauth-2025-04-20"})
     if not res.ok:
         return unchecked("claude", res.error if res.status else "読めない（接続の失敗）", config_dir)
@@ -80,6 +107,15 @@ def check_claude(config_dir: str | None = None) -> dict:
     }
 
 
+def metered() -> list[dict]:
+    """従量の接続の宣言があれば、確かめられない 1 項目（変数の名前だけを出す）。"""
+    decl = ca.fallback_env()
+    if not decl:
+        return []
+    reason = f"従量の接続の宣言がある（{', '.join(decl)}。外すには {ca.FALLBACK_ENV}= を空で定義する）"
+    return [unchecked("claude", reason, ca.METERED)]
+
+
 def checked_name(item: dict) -> str:
     return f"{item['runtime']}（{item['config_dir']}）" if item["config_dir"] else item["runtime"]
 
@@ -89,7 +125,7 @@ def cmd_check(a):
     dirs = list(dict.fromkeys(a.config_dir or []))
     items = []
     for r in runtimes:
-        items += [check_claude(), *map(check_claude, dirs)] if r == "claude" else [unchecked(r, "unsupported")]
+        items += [check_claude(), *map(check_claude, dirs), *metered()] if r == "claude" else [unchecked(r, "unsupported")]
     used = [checked_name(i) for i in items if i["training"] is True]
     unread = [checked_name(i) for i in items if i["training"] is None]
     if unread:
