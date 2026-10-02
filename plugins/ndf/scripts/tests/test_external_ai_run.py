@@ -264,9 +264,24 @@ def _load_external_ai():
     "rec, source, path, expected",
     [
         ({"status": "OK"}, "file", "/o", ("ok", "codex の結果を回収した（file）: /o", None)),
-        ({"status": "NO_RESULT", "reason": "x"}, "stderr", "/e", ("no_result", "codex は終わったが結果が無い（理由: x）", "stderr の末尾を読む: /e")),
-        ({"status": "EARLY_ERROR", "reason": "r", "detail": "HTTP/2 401"}, None, None, ("auth", "codex を止めた（EARLY_ERROR / 理由: r）", None)),
-        ({"status": "EARLY_ERROR", "reason": "usage_limit", "detail": "HTTP/2 401"}, None, None, ("usage_limit", "codex を止めた（EARLY_ERROR / 理由: usage_limit）", None)),
+        (
+            {"status": "NO_RESULT", "reason": "x"},
+            "stderr",
+            "/e",
+            ("no_result", "codex は終わったが結果が無い（理由: x）", "stderr の末尾を読む: /e"),
+        ),
+        (
+            {"status": "EARLY_ERROR", "reason": "r", "detail": "HTTP/2 401"},
+            None,
+            None,
+            ("auth", "codex を止めた（EARLY_ERROR / 理由: r）", None),
+        ),
+        (
+            {"status": "EARLY_ERROR", "reason": "usage_limit", "detail": "HTTP/2 401"},
+            None,
+            None,
+            ("usage_limit", "codex を止めた（EARLY_ERROR / 理由: usage_limit）", None),
+        ),
         ({"status": "WHATEVER", "reason": "r"}, None, None, ("launch_failed", "codex を止めた（WHATEVER / 理由: r）", None)),
         ({}, None, None, ("launch_failed", "codex を止めた（PIDFILE_BAD / 理由: pidfile_bad）", None)),
     ],

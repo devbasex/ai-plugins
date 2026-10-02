@@ -17,6 +17,7 @@ from pathlib import Path
 
 import claude_accounts as ca
 from claude_usage import http_json, new_request
+
 # ランタイムに依らない部品は training_common が持つ。training-optout.py と既存の利用者のために名前を再公開する
 from training_common import LOCAL_HOSTS, NETWORK, NOT_LOCAL, Reading, http_reason, patch_reason, target, unread  # noqa: F401
 

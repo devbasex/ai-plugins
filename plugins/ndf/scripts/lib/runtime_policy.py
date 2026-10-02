@@ -141,9 +141,7 @@ def _parse_allowed(data: dict[str, Any], broken: Callable[[str], RuntimePolicyEr
     return tuple(allowed)
 
 
-def _parse_review_seats(
-    seats: Any, allowed: tuple[str, ...], broken: Callable[[str], RuntimePolicyError]
-) -> Optional[tuple[str, str]]:
+def _parse_review_seats(seats: Any, allowed: tuple[str, ...], broken: Callable[[str], RuntimePolicyError]) -> Optional[tuple[str, str]]:
     """任意の `review_seats` を確かめる。無ければ `None`、破れていれば `broken` の例外を上げる。"""
     if seats is None:
         return None
