@@ -202,7 +202,7 @@ SKILL.md はそこへ渡す。本文の自由文が決定を言い換えてい�
 [stage-completeness.md](../../plugins/ndf/skills/development-workflow/references/stage-completeness.md)
 にある。**案内が出ないことは、工程を通っていることの裏付けにはならない。**
 
-**tool 実行前の判定がコマンドの本文を読む読み手は 3 つで、読み方は共通である。** 進捗記録（通過記録を積む）・マージの判定（設計 Pull Request のマージを承認ラベルに縛る）・Pull Request の作成（この gate）である。
+**tool 実行前の判定がコマンドの本文を読む読み手は 2 つで、読み方は共通である。** マージの判定（設計 Pull Request のマージを承認ラベルに縛る）・Pull Request の作成（この gate）である。進捗記録は読まない。通過記録は記録のスクリプト（`progress-record.sh`）が自分で積む。
 `wf_split`（`development-workflow/scripts/lib/workflow-common.sh`）が引用符を解いて語に割り、
 引用の外の制御演算子を空の語（区切り）として出す。
 
@@ -217,7 +217,6 @@ SKILL.md はそこへ渡す。本文の自由文が決定を言い換えてい�
 
 | 読み手 | 対象を見つける前の区切り | 見つけた後の区切り |
 | --- | --- | --- |
-| `wf_parse_sync`（進捗記録） | 読み飛ばす | 読むのを止める。3 語そろっていなければ積まない |
 | `wf_merge_target`（マージの判定） | 探索をやり直す | そのマージの番号を出し、次のコマンドから探索をやり直す。1 回の実行に並んだマージは 1 件ずつ判定する。番号が無ければブランチから引き当てる |
 | `_wf_pr_create_body`（Pull Request の作成） | 探索をやり直す | 読むのを止める |
 
