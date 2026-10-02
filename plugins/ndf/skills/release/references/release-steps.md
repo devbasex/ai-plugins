@@ -132,14 +132,15 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --roo
 `merged` が worktree を外すときに退避したファイル（`<共通の git ディレクトリ>/ndf/worktree-trash/`）は、
 戻す必要が出るのが本番の前だけだからである。ただし退避先は Git にも本番のコミットにも無い利用者のファイル
 （手で直した `.env`・未追跡のメモ）を含み、消すと戻せない。**本番の承認はこの削除の承認を兼ねない**
-（共通原則の C3・C4）。候補（退避先のパスと `du -sh <退避先>` の容量）を人へ示し、承認を得たときだけ `--yes` で消す。
+（共通原則の C3・C4）。候補（退避先のパスと `du -sh <退避先>` の容量）を人へ示し、承認を得たときだけ、承認した退避先の名前を
+`--yes --only <名前>...` で渡して消す。名前の外の退避先（候補を挙げた後に増えたもの）は消さない。
 承認が無ければ退避先は残す。Claude Code のプラグインの形では `release --channel prod` が候補を挙げ、`next` に
-消す 1 行を載せる。それ以外の形では、本番へ出たコミット（タグ・本番チャネルのブランチ）を渡して打つ。
+候補の名前を並べた消す 1 行を載せる。それ以外の形では、本番へ出たコミット（タグ・本番チャネルのブランチ）を渡して打つ。
 検証リリースでは打たない。
 
 ```bash
 python3 "$SCRIPTS/merged-steps.py" sweep-trash --ref <本番に出たコミット>        # 候補を挙げるだけ（消さない）
-python3 "$SCRIPTS/merged-steps.py" sweep-trash --ref <本番に出たコミット> --yes  # 人の承認を得た後に消す
+python3 "$SCRIPTS/merged-steps.py" sweep-trash --ref <本番に出たコミット> --yes --only <承認した退避先>...  # 承認した名前だけを消す
 ```
 
 候補の件数（`metrics.sweep_candidates`）・消した退避先（`metrics.swept_trash`）・台帳が無いため残した件数

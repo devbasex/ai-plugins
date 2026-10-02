@@ -14,7 +14,9 @@
 回収（`sweep`）: 本番に出たコミット `ref` に、台帳の `head` か `merge_commit` が含まれる退避先を挙げる。
 戻す必要が出るのはそのブランチを含む版が本番へ出る前だけで、出た後は戻す先が無い。退避先は Git にも
 本番のコミットにも無い利用者のファイル（手で直した `.env` など）を含み、消すと戻せない（共通原則の C3・C4）。
-そのため既定では消さずに候補として挙げるだけにし、人が対象を見て承認したときだけ `apply=True` で消す。
+そのため既定では消さずに候補として挙げるだけにし、人が対象を見て承認したときだけ、承認した退避先の名前
+（候補の `items[].name`）の集合を `approved` に渡して、その集合に入る退避先だけを消す。集合の外の当たり（候補を
+挙げた後に退避された・動く ref が進んで増えた退避先）は、人が見ていないため候補のまま残す。
 台帳の無い退避先（この形より前の退避）は消さずに件数だけを報告する。日数による期限は持たない。
 """
 
@@ -23,6 +25,7 @@ from __future__ import annotations
 import datetime
 import json
 import os
+import shlex
 import shutil
 from pathlib import Path
 
@@ -128,28 +131,37 @@ def _contains(root, commit, ref) -> bool:
     return bool(commit) and git(root, "merge-base", "--is-ancestor", commit, ref, check=False).returncode == 0
 
 
-def sweep(root, ref, apply=False) -> tuple[list[dict], dict]:
+def sweep(root, ref, approved=None) -> tuple[list[dict], dict]:
     """`ref` に台帳のコミットが含まれる退避先を挙げる。(items, metrics) を返す。
 
-    `apply` が偽（既定）なら消さずに `result: candidate` で挙げる。人が対象を見て承認したときだけ
-    `apply=True` で消す（退避先は戻せない利用者のファイルを含む。共通原則の C3・C4）。
+    `approved` が None（既定）なら消さずに `result: candidate` で挙げる。人が候補を見て承認したときだけ、
+    承認した退避先の名前（`items[].name` か、その末尾のディレクトリ名）の集合を渡し、その集合に入る退避先
+    だけを消す（退避先は戻せない利用者のファイルを含む。共通原則の C3・C4）。集合の外の当たりは候補のまま残し、
+    集合にあっても当たらなくなった・見つからない名前は `kept` で報告する。
     """
     items, metrics = [], {"swept_trash": 0, "sweep_candidates": 0, "kept_trash": 0, "unledgered_trash": 0}
+    pending = set(approved or ())
     base = trash_root(root)
     if base is None or not base.is_dir():
-        return items, metrics
+        base_dirs = []
+    else:
+        base_dirs = sorted(p for p in base.iterdir() if p.is_dir())
     unledgered = []
-    for d in sorted(p for p in base.iterdir() if p.is_dir()):
+    for d in base_dirs:
         led = read_ledger(d)
         if led is None:
             unledgered.append(d.name)
             continue
+        names = {str(d), d.name} & pending
+        pending -= names
         hit = next((c for c in (led.get("merge_commit"), led.get("head")) if _contains(root, c, ref)), None)
         if hit is None:
             metrics["kept_trash"] += 1
+            if names:
+                items.append({"kind": "trash", "name": str(d), "result": "kept", "reason": f"承認されたが本番（{ref[:12]}）に含まれない"})
             continue
         why = f"{led.get('branch')} の {hit[:12]} が本番（{ref[:12]}）に含まれる"
-        if not apply:
+        if not names:
             items.append({"kind": "trash", "name": str(d), "result": "candidate", "reason": f"{why}。人の承認を得てから消す"})
             metrics["sweep_candidates"] += 1
             continue
@@ -160,15 +172,12 @@ def sweep(root, ref, apply=False) -> tuple[list[dict], dict]:
             items.append({"kind": "trash", "name": str(d), "result": "kept", "reason": f"消せない: {e}"})
             metrics["kept_trash"] += 1
             continue
-        items.append(
-            {
-                "kind": "trash",
-                "name": str(d),
-                "result": "removed",
-                "reason": why,
-            }
-        )
+        items.append({"kind": "trash", "name": str(d), "result": "removed", "reason": why})
         metrics["swept_trash"] += 1
+    for name in sorted(pending):
+        items.append(
+            {"kind": "trash", "name": name, "result": "kept", "reason": "承認された退避先が見つからない（台帳の無いものも消さない）"}
+        )
     if unledgered:
         metrics["unledgered_trash"] = len(unledgered)
         names = ", ".join(unledgered[:5]) + ("…" if len(unledgered) > 5 else "")
@@ -181,3 +190,11 @@ def sweep(root, ref, apply=False) -> tuple[list[dict], dict]:
             }
         )
     return items, metrics
+
+
+def sweep_command(ref, items) -> str | None:
+    """候補（`result: candidate`）を名指しで消す 1 行。候補が無ければ None。人の承認の後にだけ打つ。"""
+    names = [it["name"] for it in items if it.get("kind") == "trash" and it.get("result") == "candidate"]
+    if not names:
+        return None
+    return f"merged-steps.py sweep-trash --ref {shlex.quote(ref)} --yes --only " + " ".join(shlex.quote(n) for n in names)

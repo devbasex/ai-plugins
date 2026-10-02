@@ -154,7 +154,7 @@ def test_sweep_removes_only_the_trash_whose_branch_reached_production(repo, tmp_
     git(repo, "checkout", "-q", "main")
     git(repo, "merge", "-q", "--no-ff", "-m", "release", "feat/released")
 
-    out = sweep(repo, "main", "--yes")
+    out = sweep(repo, "main", "--yes", "--only", str(released), str(pending))
 
     assert not released.exists() and not released.with_name(released.name + ".json").exists()
     assert pending.is_dir() and (pending / "notes.txt").is_file()
@@ -171,7 +171,7 @@ def test_sweep_uses_the_merge_commit_for_a_squashed_branch(repo, tmp_path, merge
     git(repo, "checkout", "-q", "develop")
     trash = evacuated(repo, tmp_path, merged, "feat/squashed", merge_commit=squash)
 
-    out = sweep(repo, "main", "--yes")
+    out = sweep(repo, "main", "--yes", "--only", trash.name)
 
     assert not trash.exists() and out["metrics"]["swept_trash"] == 1
 
@@ -187,7 +187,31 @@ def test_sweep_without_approval_only_lists_candidates(repo, tmp_path, merged):
     assert released.is_dir() and (released / "notes.txt").is_file()
     assert out["metrics"]["swept_trash"] == 0 and out["metrics"]["sweep_candidates"] == 1
     assert [i["name"] for i in out["items"] if i["result"] == "candidate"] == [str(released)]
-    assert "--yes" in out["next"]
+    assert out["next"].endswith(f"--yes --only {released}")
+
+
+def test_sweep_keeps_a_trash_that_was_not_approved(repo, tmp_path, merged):
+    # 候補を挙げた後に退避された・ref が進んで増えた退避先は、人が見ていないため消さずに候補のまま残す（C3・C4）
+    shown = evacuated(repo, tmp_path, merged, "feat/shown")
+    later = evacuated(repo, tmp_path, merged, "feat/later")
+    git(repo, "checkout", "-q", "main")
+    git(repo, "merge", "-q", "--no-ff", "-m", "release", "feat/shown")
+    git(repo, "merge", "-q", "-s", "ours", "-m", "release", "feat/later")
+
+    out = sweep(repo, "main", "--yes", "--only", str(shown))
+
+    assert not shown.exists() and (later / "notes.txt").is_file()
+    assert out["metrics"]["swept_trash"] == 1 and out["metrics"]["sweep_candidates"] == 1
+    assert [i["name"] for i in out["items"] if i["result"] == "candidate"] == [str(later)]
+
+
+def test_sweep_requires_the_approved_names_with_yes(repo):
+    p = subprocess.run(
+        [sys.executable, str(SCRIPTS / "merged-steps.py"), "sweep-trash", "--ref", "main", "--yes", "--root", str(repo)],
+        capture_output=True,
+        text=True,
+    )
+    assert p.returncode == 2
 
 
 def test_sweep_keeps_trash_without_a_ledger(repo):

@@ -113,9 +113,13 @@ Pull Request では `merged` の対象が起点ブランチそのものになる
 ときの HEAD）・`merge_commit`（PR のマージコミット。squash でも本番に含まれるかを決められる）・`discarded`
 を持たせる。`merged-steps.py sweep-trash --ref <本番に出たコミット>` は、`head` か `merge_commit` が
 `--ref` に含まれる退避先を回収の候補（`result: candidate`）として挙げるだけで、消さない。消すのは、
-人が候補を見て承認した後に `--yes` を付けて打ち直したときだけである。Claude Code のプラグインの形では
-`release-steps.py release --channel prod` が最後に候補を挙げ、候補があれば承認後に打つ
-`sweep-trash --ref <マージコミット> --yes` の 1 行を `next` に出す。
+人が候補を見て承認した後に、承認した退避先の名前（候補の `items[].name`）を `--yes --only <名前>...` で
+渡したときの、その名前の退避先だけである。打ち直した時点の判定で消す範囲を決めないのは、候補を挙げてから
+承認までに別の退避先が増える（`merged` が別の worktree を退避した・`--ref main` のような動く ref が進んだ）と、
+人が見ていない退避先まで消えるためである。集合の外の当たりは候補のまま残し、`--only` の無い `--yes` は
+止める。Claude Code のプラグインの形では `release-steps.py release --channel prod` が最後に候補を挙げ、
+候補があれば承認後に打つ `sweep-trash --ref <マージコミット> --yes --only <候補の名前>...` の 1 行を
+`next` に出す。
 台帳の無い退避先（この形より前の退避）は消さずに件数だけを報告する。日数による保持期限は
 採らない（まだ本番へ出ていないブランチの退避先を消してしまう）。
 

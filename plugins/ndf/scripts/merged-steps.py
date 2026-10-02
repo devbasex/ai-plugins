@@ -2,7 +2,7 @@
 """merged-steps.py: merged の後片付けの決まった手順。
 
     python3 merged-steps.py cleanup <PR番号>... [--root <dir>]
-    python3 merged-steps.py sweep-trash --ref <本番に出たコミット> [--yes] [--root <dir>]
+    python3 merged-steps.py sweep-trash --ref <本番に出たコミット> [--yes --only <退避先>...] [--root <dir>]
     python3 merged-steps.py merge-gate (--base <宛先> | --pr <PR番号>) [--pr <PR番号>] [--root <dir>]
     python3 merged-steps.py merge-when-green <PR番号> [--gate-approved user|mvv] [--method merge|squash|rebase]
                             [--interval 秒] [--timeout 秒] [--stale-after 秒] [--no-cleanup] [--root <dir>]
@@ -12,7 +12,7 @@ cleanup: マージ済みの PR の作業ツリーとローカルブランチを�
 `git worktree remove` が拒否した作業ツリーは、未追跡・無視されたファイルを退避してから外す。作り直せる生成物
 （`.venv`・`node_modules`・`__pycache__`・`target` など）は退避せずに捨てる（merged_lib/trash.py）。
 sweep-trash: 本番に出たコミット（--ref）に含まれるブランチの退避先を回収の候補として挙げる。消すのは、人が候補を見て
-承認した後に --yes を付けたときだけ（退避先は Git に無い利用者のファイルを含み、消すと戻せない）。
+承認した後に --yes と --only <承認した退避先>... を付けたときの、その名前の退避先だけ（消すと戻せない利用者のファイル）。
 merge-when-green: PR が draft なら `gh pr ready` で外し、CI のチェックが全部通るまで待ち
 （push で先頭のコミットが変われば待ち直す）、
 失敗があれば止まり、通れば `gh pr merge --admin` でマージして cleanup まで行う。
@@ -298,14 +298,13 @@ def cmd_sweep_trash(a):
     root = git_root(a.root)
     if git(root, "rev-parse", "-q", "--verify", f"{a.ref}^{{commit}}", check=False).returncode != 0:
         raise StepError(f"--ref {a.ref} がコミットとして読めない", 2)
-    items, metrics = trash.sweep(root, a.ref, apply=a.yes)
-    kept = metrics["kept_trash"] + metrics["unledgered_trash"]
-    # 既定は消さずに挙げるだけ。退避先は Git に無い利用者のファイルを含み、消すと戻せない（C3・C4）
-    if a.yes:
-        summary, nxt = f"本番に出た退避先 {metrics['swept_trash']} 件を消した（残した {kept} 件）", None
-    else:
-        summary = f"本番に出た退避先 {metrics['sweep_candidates']} 件が回収の候補（消していない。残す {kept} 件）"
-        nxt = f"候補を人へ示し、承認後に打ち直す: sweep-trash --ref {a.ref} --yes" if metrics["sweep_candidates"] else None
+    if a.yes != bool(a.only):
+        raise StepError("--yes には承認した退避先の名前（候補の items[].name）を --only で必ず渡す", 2)
+    items, metrics = trash.sweep(root, a.ref, approved=a.only)
+    # 既定は消さずに挙げるだけ。消すのは承認した名前の退避先だけ（Git に無い利用者のファイルで戻せない。C3・C4）
+    done = f"{metrics['swept_trash']} 件を消した（" if a.yes else "を消していない（"
+    summary = f"本番に出た退避先{done}回収の候補 {metrics['sweep_candidates']} 件・残す {metrics['kept_trash'] + metrics['unledgered_trash']} 件）"
+    nxt = (cmd := trash.sweep_command(a.ref, items)) and f"候補を人へ示し、承認した名前だけを渡して消す: {cmd}"
     emit(result(TOOL, "ok", summary, items, metrics, None, nxt))
 
 
@@ -458,7 +457,8 @@ def build_parser():
     p.set_defaults(func=cmd_cleanup)
     t = sub.add_parser("sweep-trash", parents=[common_parser()], help="本番に出たブランチの退避先（worktree-trash）を消す")
     t.add_argument("--ref", required=True, help="本番に出たコミット（タグ・本番チャネルのブランチ・マージコミット）")
-    t.add_argument("--yes", action="store_true", help="候補を消す。人が候補を見て承認したときだけ付ける（既定は挙げるだけ）")
+    t.add_argument("--yes", action="store_true", help="--only の退避先を消す。人が候補を見て承認したときだけ付ける")
+    t.add_argument("--only", nargs="+", default=[], metavar="退避先", help="承認した退避先の名前（候補の items[].name）")
     t.set_defaults(func=cmd_sweep_trash)
     g = sub.add_parser(
         "merge-gate", parents=[common_parser()], help="宛先へのマージが承認ゲート 2（自動反映の本番チャネル）に当たるかを判定する"
