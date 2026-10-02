@@ -209,6 +209,7 @@ def _judge_fix_steps(run_ids: list[str], after_notes: str) -> list[dict]:
             "kind": "修正",
             "inputs": run_ids,
             "prompt": "落ちたステップの出力を読み、原因を直してコミットする（push しない）。直したら次は落ちたステップからやり直す。",
+            "back_to_failed": True,  # 落ちたのが after_notes より前（bump など）ならそこへ戻る（#1315）
             "next": after_notes,
         },
     ]

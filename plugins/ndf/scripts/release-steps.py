@@ -670,11 +670,11 @@ def cmd_release(a):
     ver = a.version
     base, prod, plugin = release_decl(root, a)
     plugins = [s.strip() for s in (a.plugins or plugin).split(",") if s.strip()]
-    branch = git(root, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
-    if branch != f"release/v{ver}":
+    if (branch := git(root, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()) != f"release/v{ver}":
         raise StepError(f"作業ツリーのブランチが release/v{ver} でない: {branch}", EXIT_PRECONDITION)
     if git(root, "status", "--porcelain", "--untracked-files=no").stdout.strip():
         raise StepError("作業ツリーにコミットしていない変更がある（bump と changelog をコミットしてから呼ぶ）", EXIT_PRECONDITION)
+    bump.require_bumped(root, plugin, ver)
 
     git(root, "push", "-q", "-u", "origin", "HEAD")
 

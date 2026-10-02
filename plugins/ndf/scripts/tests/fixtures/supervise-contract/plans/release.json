@@ -112,6 +112,7 @@
         "explain"
       ],
       "prompt": "落ちたステップの出力を読み、原因を直してコミットする（push しない）。直したら次は落ちたステップからやり直す。",
+      "back_to_failed": true,
       "next": "release"
     }
   ],
