@@ -98,8 +98,11 @@ allowed-tools:
 **テストの走らせ方は宣言（`.ndf/project.json` の `test`）の戦略で決まる**（[docs/01](docs/01-state-and-propose.md) の「テストの戦略」）。
 `init` は `STRATEGY` / `STRATEGY_SOURCE` を返し、コマンドの文字列を解析しない。
 
-**モデルを比べたいなら `--model <ランタイム>=<name>` を参加者の全員に指定する。**
-実際に動いたモデルを取得できるのは claude だけで、残る者は指定値で代用する。
+**実際に動いたモデルは、`--model` を指定しなくても claude と codex なら記録される**。
+claude は出力の `modelUsage`、codex はセッションの記録（`$CODEX_HOME/sessions`）から取り、状態ファイルの
+`implementer_model.observed` に入れる。取れなければ取れなかった理由を `implementer_model.unobserved` に残す。
+agy と kiro は取れないため、モデルを比べたいなら `--model agy=<name>` / `--model kiro=<name>` を指定する
+（指定値で代用して集計に入れる）。指定も実測値も無い実行は、集計から分離される。
 
 ## 担当の決め方
 
@@ -109,6 +112,7 @@ allowed-tools:
 
 - **ホストも別の CLI プロセスとして起動する。** ホストの会話の文脈を持ち込まずに、独立した提案を 1 つ得られる
 - **agy はホストのときだけ入る。** 起動の失敗と所要が最も多いためである。足すときは `--include agy`、外すときは `--exclude kiro` のように名指しする
+- **リポジトリの `.ndf/runtimes.json` の宣言の外のランタイムは参加させない**。参加者プールを宣言の `allowed` で絞り、宣言の外を `--include` / `--implementer` で渡すと作業ディレクトリを用意する前に止まる
 - **起動の前に各 CLI のログイン状態を確かめ**（コマンドは「前提」の節）、ログインしていない者を外して続ける。全員が揃わなければ止めたいときは `--require-all`
 
 **リファクタリング計画・テスト追加・実装・修正・最終ゲート修正は、実装担当 1 者が通す。** 実装担当は

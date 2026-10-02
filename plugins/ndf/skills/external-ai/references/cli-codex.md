@@ -52,7 +52,7 @@ echo 'kernel.unprivileged_userns_clone=1' | sudo tee /etc/sysctl.d/00-local-user
 `-C` で作業ディレクトリを渡す。
 
 ```bash
-codex exec --dangerously-bypass-approvals-and-sandbox --config reasoning.effort=medium \
+codex exec --dangerously-bypass-approvals-and-sandbox --config model_reasoning_effort=medium \
   -C <workdir> [--model M] < <prompt> > <stem>-stdout.log 2> <stem>-err.log
 ```
 
@@ -60,9 +60,18 @@ codex exec --dangerously-bypass-approvals-and-sandbox --config reasoning.effort=
 |---|---|
 | `-C <dir>` | 作業ディレクトリ。指定しないと cwd が想定と異なりファイルを読めなくなる |
 | `--dangerously-bypass-approvals-and-sandbox` | bwrap 非対応環境で必須。外部隔離環境内でのみ使用する |
-| `--config reasoning.effort=medium` | `high` だと思考へ偏り最終 message を返さない頻度が上がるため、既定で `medium` を推奨 |
+| `--config model_reasoning_effort=medium` | `high` だと思考へ偏り最終 message を返さない頻度が上がるため、既定で `medium` を推奨 |
 | `--json` | JSON Lines でイベントを出力。`event.type=assistant_message` を grep すれば確実に本文を取れる |
 | `codex resume` | 長時間ジョブで親エージェントが再起動した場合にセッションを再開する |
+
+## 実際に動いたモデル
+
+`--model` を渡さなくても、実際に動いたモデルを取れる（#759。codex-cli 0.159.3 で実測）。
+`codex exec` は標準エラーの見出しに `session id: <ID>` を出し、セッションの記録
+`$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*-<ID>.jsonl`（`CODEX_HOME` が無ければ `~/.codex`）の
+`turn_context` の行に `"model"` を残す。共通ライブラリの `models.observed_model` が ID で記録を名指しし、
+ID が無いときは起動の記録（`<stem>-launch.json`）の開始〜終了の時刻範囲と作業ディレクトリで 1 件に絞る。
+候補が 2 件以上なら取らない（`ambiguous`）。見出しの `model:` は起動の設定の表示で、実測には使わない。
 
 ## 出力ストリーム
 
@@ -92,7 +101,7 @@ Codex は最終 message を返さなくても `apply_patch` でファイルを�
 書き出し後、念のため stdout にも同じ内容を出力してください（冪等で問題ありません）。
 ```
 
-補助策として `--config reasoning.effort=medium` へ下げる、`--json` でイベントを採取する、
+補助策として `--config model_reasoning_effort=medium` へ下げる、`--json` でイベントを採取する、
 プロンプト末尾に「tool 呼び出しのみで終了しないこと」を明記する、の 3 つを併用する。
 
 回収は **ファイル → stdout → stderr** の順で、`external-ai.py run` が行う。
@@ -120,7 +129,7 @@ python3 "$SKILL_DIR/scripts/external-ai.py" run codex --phase review \
 **原因**: まだ最終回答を出す前に停止した、または最終 assistant message を出さずにセッションが終わった。
 
 **対処**: `metrics.outcome` が `no_result` なら「最終出力をファイル経由で保証する」の
-パターンで渡し直す（`apply_patch` 指示の追加 + `reasoning.effort=medium`）。
+パターンで渡し直す（`apply_patch` 指示の追加 + `model_reasoning_effort=medium`）。
 
 ### Q2. `bwrap: No permissions to create a new namespace` で exec 失敗
 

@@ -286,6 +286,71 @@ class _InitialStateContext(NamedTuple):
     manual_extra_review: str
 
 
+def _prepare_initial_assignment(args: argparse.Namespace) -> _InitialAssignment:
+    """担当ホストを確定し、起動対象の認証をチェックする。"""
+    # **ホストを先に確定する。** 状態ファイルの `host` として残り、出力にも出る。
+    # 推定できないときに既定を置かない（間違ったまま一周してしまう）。
+    try:
+        host, host_source = assignment.detect_host(getattr(args, "host", None))
+    except assignment.AssignmentError as e:
+        review_lib.die(str(e))
+        raise
+    review_lib.info(f"ホストの判定: {host}（{host_source}）")
+    # 使える者の解決は共通層が持つ（#727）。通らない者は外して続け、使える者が
+    # 1 者なら同じランタイムの 2 つ目で席を埋める。名前の矛盾と 0 者は終了コード 1。
+    participants = participants_mod._resolve_reviewers(host, args)
+    return _InitialAssignment(host=host, host_source=host_source, participants=participants)
+
+
+def _build_initial_review_state(
+    args: argparse.Namespace,
+    ctx: _InitialStateContext,
+) -> dict[str, Any]:
+    """確定済みの材料から、副作用なしに初期状態を組み立てる。"""
+    host, host_source, participants = ctx.assignment
+    only, _include, _exclude = participants_mod._normalize_participant_args(args)
+    # 分類（design / code）ごとに上限の既定を変える（#1005）。設計は 3 ラウンドで関門 1 へ渡す
+    kind = review_kind(ctx.pr_ctx.meta.head_branch, ctx.review_ctx.auto_review_categories)
+    return {
+        "started_at": review_lib._now(),
+        "host": host,
+        "host_source": host_source,
+        # 引数の既定は未指定（`None`）で、新規の経路がここで定数を置く（決定 13）
+        "review_kind": kind,
+        "max_rounds": args.max_rounds if args.max_rounds is not None else default_max_rounds(kind),
+        "rotate_after": args.rotate_after if args.rotate_after is not None else 8,
+        "only": only,
+        "participants": participants,
+        "resume_changes": [],
+        "current_pr": ctx.pr,
+        "worktree_path": ctx.pr_ctx.worktree,
+        "tmp_dir": str(ctx.ws_ctx.tmp_dir),
+        "repo": ctx.pr_ctx.repo,
+        "head_branch": ctx.pr_ctx.meta.head_branch,
+        "base_branch": ctx.pr_ctx.meta.base_branch,
+        "pr_author": ctx.pr_ctx.author,
+        "viewer_login": ctx.pr_ctx.me,
+        "is_own_pr": ctx.pr_ctx.is_own,
+        "event_downgrade": ctx.pr_ctx.event_downgrade,
+        "changed_files": ctx.review_ctx.changed_files,
+        "auto_review_categories": ctx.review_ctx.auto_review_categories,
+        "auto_review_instructions": ctx.review_ctx.auto_review,
+        "manual_extra_review_instructions": ctx.manual_extra_review,
+        "extra_review_instructions": ctx.manual_extra_review,
+        "review_instructions": ctx.review_ctx.review_instructions,
+        "pr_history": [{"pr": ctx.pr, "opened_at": review_lib._now(), "closed_at": None, "rounds": 0}],
+        "rounds": [],
+        "deferred_nits": [],
+        "rejected_findings": [],
+        "review_findings": [],
+        "evidence_rounds": [],
+        "verify_commands": list(getattr(args, "verify_command", None) or []),
+        "verify_exit_codes": list(getattr(args, "verify_exit_code", None) or []),
+        "carried_over": None,
+        "final": None,
+    }
+
+
 def _init_new_state(
     args: argparse.Namespace,
     pr: object,
@@ -377,69 +442,6 @@ def _init_new_state(
             tmp_dir=tmp_dir,
             state_file=state_file,
         )
-
-    def _prepare_initial_assignment(args: argparse.Namespace) -> _InitialAssignment:
-        """担当ホストを確定し、起動対象の認証をチェックする。"""
-        # **ホストを先に確定する。** 状態ファイルの `host` として残り、出力にも出る。
-        # 推定できないときに既定を置かない（間違ったまま一周してしまう）。
-        try:
-            host, host_source = assignment.detect_host(getattr(args, "host", None))
-        except assignment.AssignmentError as e:
-            review_lib.die(str(e))
-            raise
-        review_lib.info(f"ホストの判定: {host}（{host_source}）")
-        # 使える者の解決は共通層が持つ（#727）。通らない者は外して続け、使える者が
-        # 1 者なら同じランタイムの 2 つ目で席を埋める。名前の矛盾と 0 者は終了コード 1。
-        participants = participants_mod._resolve_reviewers(host, args)
-        return _InitialAssignment(host=host, host_source=host_source, participants=participants)
-
-    def _build_initial_review_state(
-        args: argparse.Namespace,
-        ctx: _InitialStateContext,
-    ) -> dict[str, Any]:
-        """確定済みの材料から、副作用なしに初期状態を組み立てる。"""
-        host, host_source, participants = ctx.assignment
-        only, _include, _exclude = participants_mod._normalize_participant_args(args)
-        # 分類（design / code）ごとに上限の既定を変える（#1005）。設計は 3 ラウンドで関門 1 へ渡す
-        kind = review_kind(ctx.pr_ctx.meta.head_branch, ctx.review_ctx.auto_review_categories)
-        return {
-            "started_at": review_lib._now(),
-            "host": host,
-            "host_source": host_source,
-            # 引数の既定は未指定（`None`）で、新規の経路がここで定数を置く（決定 13）
-            "review_kind": kind,
-            "max_rounds": args.max_rounds if args.max_rounds is not None else default_max_rounds(kind),
-            "rotate_after": args.rotate_after if args.rotate_after is not None else 8,
-            "only": only,
-            "participants": participants,
-            "resume_changes": [],
-            "current_pr": ctx.pr,
-            "worktree_path": ctx.pr_ctx.worktree,
-            "tmp_dir": str(ctx.ws_ctx.tmp_dir),
-            "repo": ctx.pr_ctx.repo,
-            "head_branch": ctx.pr_ctx.meta.head_branch,
-            "base_branch": ctx.pr_ctx.meta.base_branch,
-            "pr_author": ctx.pr_ctx.author,
-            "viewer_login": ctx.pr_ctx.me,
-            "is_own_pr": ctx.pr_ctx.is_own,
-            "event_downgrade": ctx.pr_ctx.event_downgrade,
-            "changed_files": ctx.review_ctx.changed_files,
-            "auto_review_categories": ctx.review_ctx.auto_review_categories,
-            "auto_review_instructions": ctx.review_ctx.auto_review,
-            "manual_extra_review_instructions": ctx.manual_extra_review,
-            "extra_review_instructions": ctx.manual_extra_review,
-            "review_instructions": ctx.review_ctx.review_instructions,
-            "pr_history": [{"pr": ctx.pr, "opened_at": review_lib._now(), "closed_at": None, "rounds": 0}],
-            "rounds": [],
-            "deferred_nits": [],
-            "rejected_findings": [],
-            "review_findings": [],
-            "evidence_rounds": [],
-            "verify_commands": list(getattr(args, "verify_command", None) or []),
-            "verify_exit_codes": list(getattr(args, "verify_exit_code", None) or []),
-            "carried_over": None,
-            "final": None,
-        }
 
     def _finalize_initial_state(
         args: argparse.Namespace,

@@ -70,7 +70,7 @@ def aggregate(state: dict[str, Any]) -> dict[str, Any]:
         _append_model_measurement_warnings(unmeasured, assumed, round_no, impl_runtime, requested, observed, "実装担当")
 
         reviews = _round_reviews(entry)
-        if _models.is_measurable(impl_runtime, requested):
+        if _models.is_measurable(impl_runtime, requested, observed):
             _aggregate_impl_round(impl, entry, items_by_id, impl_runtime, requested, reviews)
 
         _aggregate_round_reviewers(reviewer, entry, round_no, reviews, unmeasured, assumed)
@@ -97,7 +97,7 @@ def _aggregate_round_reviewers(
         requested = spec.get("requested")
         observed = spec.get("observed")
         _append_model_measurement_warnings(unmeasured, assumed, round_no, name, requested, observed, "レビュー担当")
-        if _models.is_measurable(name, requested):
+        if _models.is_measurable(name, requested, observed):
             _aggregate_reviewer_round(reviewer, entry, name, requested, reviews)
 
 
@@ -177,10 +177,10 @@ def _append_model_measurement_warnings(
     if warning:
         unmeasured.append(f"round {round_no}: {warning}")
     # 分離するかと、その理由はランタイムごとに違う。判断も文言も models.py が持つ。
-    reason = _models.separation_reason(runtime, requested)
+    reason = _models.separation_reason(runtime, requested, observed)
     if reason:
         unmeasured.append(f"round {round_no}: {reason}ため、{role_label}の集計から分離する")
-    note = _models.assumption_note(runtime, requested)
+    note = _models.assumption_note(runtime, requested, observed)
     if note:
         assumed.append(f"round {round_no}: {note}（{role_label}）")
 

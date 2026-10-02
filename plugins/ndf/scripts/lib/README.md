@@ -30,7 +30,7 @@
 | [limits.py](limits.py) | 監視の上限（工程ごと）・無進捗の許容（担当ごと）・CLI の上限（監視の上限 + 120 秒）の表。既定値はここだけが持つ（#598 / #537）。CLI の上限の上書きは `resolve_cli_timeout` と `cli-timeout --override N [--no-floor]` の 1 つで決める（既定では導いた値より短くできない） | 同上 |
 | [monitor_outcome.py](monitor_outcome.py) | 監視の結果の理由の語彙（9 語）と起動し直しの可否、結果ファイル・監視の記録の読み書き、起動 1 回の結末を 1 つの値として読む `read_launch_outcome`、担当 1 者の結末を書く `_record_outcome` | 同上 |
 | [bg-wait.sh](bg-wait.sh) | 600 秒を超える待ちを、背景の起動（`run`）と 540 秒以内に区切った待ち（`wait`）に分ける。終了コードは rc ファイルに残る | 収束ループの 2 つ（Codex / Kiro / agy で `drive.py` を待つ）/ `cross-review` の手順の監視 |
-| [launch-cli.sh](launch-cli.sh) | claude / codex / agy / kiro をランタイム名で分岐して背景起動する | 同上 |
+| [launch-cli.sh](launch-cli.sh) | claude / codex / agy / kiro をランタイム名で分岐して背景起動する。起動の直前に `runtime_policy.py check` で作業ディレクトリのリポジトリの宣言と照らし、外なら起動せずに終了コード 3 | 同上 |
 | （`skills/external-ai/scripts/external-ai.py`） | 上の 2 つと `auth.py` / `limits.py` を束ね、外部 CLI 1 回の起動・上限つきの待ち・回収（結果ファイル → stdout → stderr）を 1 本で行う。結果は `step_result` の形 | `external-ai` / `corder` / supervisor の worker |
 | [_tmpdir.sh](_tmpdir.sh) | 一時ディレクトリの解決。環境変数名とディレクトリ名を引数で受ける | 同上 |
 | [statefile.py](statefile.py) | 状態ファイルの読み書きと KEY=VALUE 出力、保存の後の差し込み口、再開で渡した引数の反映。`now`・`die`・`info`・`write_json_atomic` は `clock`・`proc`・`jsonio` の再エクスポート | 同上 |
@@ -60,8 +60,10 @@
 | [jsonio.py](jsonio.py) | JSON の読み（無い・壊れた・形が違うときの扱いを引数で選ぶ）と原子的な書き込み。標準ライブラリだけ | 同上 |
 | [proc.py](proc.py) | 子プロセスと git の起動（失敗は `StepError(msg, code)`）・`die`・`info` | `step_result.py` / `statefile.py` / `repo.py` / `cross-review`（`review_lib/`） / `cross-refactoring`（`refactor_lib/paths.py`・`commands/setup.py`） |
 | [tool_paths.py](tool_paths.py) | ツールのパス（CLI が起動したツールが書き換える既知のパス）の定義（既定と `.ndf/worktree.json` の `tool_paths`）・分類・skip-worktree の印・index からの除外・push の直前の検査 | `cross-review`（`review_lib/workspace.py`） / `result_posts.py` / `cross-refactoring`（`worktree.py`・`publish.py`・`commands/setup.py`） / `pr-steps.py` |
+| [worktree_base.py](worktree_base.py) | 作業用 worktree の親ディレクトリの解決（`NDF_WORKTREE_BASE` → `<システム tmpdir>/ndf-worktrees`） | `cross-review`（`review_lib/workspace.py`） / `cross-refactoring`（`paths.py`） |
 | [repo.py](repo.py) | メインディレクトリ・`owner/repo`・slug・起点（宣言のベースブランチ → origin の HEAD → `main` → `master`。git だけで決める） | `cross-review`（`review_lib/`） / `cross-refactoring`（`drive.py`・`commands/setup.py`） / `pr-steps.py` / `merged-steps.py`（C1〜C7 で各スクリプト） |
 | [project_decl.py](project_decl.py) | プロジェクトの宣言（`.ndf/project.json`）の読み取りと `ndf_policies` の判定。読めなければ `{}` で、キーが無ければ方針の検査を掛けない | `doc-lint.py` / `cross-refactoring`（`commands/implement.py`） |
+| [runtime_policy.py](runtime_policy.py) | ランタイムの宣言（`.ndf/runtimes.json`。`allowed` と任意の `review_seats`）の読み取りと照合。無ければ `None`、壊れていれば `RuntimePolicyError`（`AssignmentError` を継ぐ）で、制限を外さずに止める。外の名前の理由の文（宣言のパスと `allowed`）はここだけが作る。`check <runtime> --root <dir>` は外か壊れていれば終了コード 3 | `assignment.py`（`resolve_participants` の `policy`） / `launch-cli.sh` / `cross-review` / `cross-refactoring` / `external-ai.py` / `supervise_lib/engine.py` |
 | [project_mvv.py](project_mvv.py) | プロジェクト MVV の宣言（`.ndf/mvv.md`・`.ndf/mvv.json`）の読み取り（例外を上げず approved / none / unapproved / mismatch / unreadable）と、判断の地点へ渡す MVV の節（NDF の共通原則 → プロジェクト MVV → 判断の決まり）・根拠の項目の正規化・状態への写し・改訂の兆候の集計・fast の許可の照合。標準ライブラリだけで書く（型は `decl_models()` が pydantic を読んでから組む） | `project-mvv.py` / `mvv-gate.py` / `sprint-state.py` / `supervise_lib`（`sprint.py`・`steps.py`） / `review_criteria.py` / `cross-review`（`commands/init.py`） / `fix-steps.py` / `cross-refactoring`（`commands/setup.py`・`propose.py`・`plan.py`） |
 | [project_mvv_body.py](project_mvv_body.py) | プロジェクト MVV の本文の解析（見出し・Value の番号・固有の操作の `P<番号>`）と形の誤り（共通原則の写しを含む）・版どうしの差分 | `project_mvv.py` / `project-mvv.py` |
 | [project_mvv_decl.py](project_mvv_decl.py) | `.ndf/mvv.json` の形（標準ライブラリの検査と pydantic の型）と設定の既定。`schemas/mvv.schema.json` の正本 | `project_mvv.py` / `project-mvv.py` |

@@ -28,6 +28,7 @@
     "available": ["claude", "codex"],
     "unavailable": {"kiro": "kiro-cli が見つかりません"},
     "probe_skipped": false, "require_all": false,
+    "policy": null,
     "fallback": []
   },
   "resume_changes": [
@@ -57,6 +58,12 @@
       "started_at": "...",
       "verdict": "changes_requested",
       "reviewers": ["codex", "claude-2"],
+      "reviewer_models": {
+        "codex":    {"requested": null, "observed": "gpt-6.1-sol", "unobserved": null},
+        "claude-2": {"requested": null, "observed": null, "unobserved": "no_record"}},
+      "seats": [
+        {"seat": "codex", "runtime": "codex", "model": "gpt-6.1-sol", "partner": "claude-2"},
+        {"seat": "claude-2", "runtime": "claude", "model": null, "partner": "codex"}],
       "codex":  {"intent": "REQUEST_CHANGES", "posted_as": "COMMENT",
                  "comments": 5, "review_url": "...",
                  "by_severity": {"critical": 0, "major": 3, "minor": 2, "nit": 0}},
@@ -123,6 +130,12 @@
 
 - `host` — 確定したホスト名（`claude` / `codex` / `agy` / `kiro`）。参加者プールに残る
   （`participants` を持たない古い状態の再開では、変更の前と同じく参加者プールから外して輪番を回す）
+- `rounds[].reviewer_models.<席>` — そのラウンドのレビューの起動で実際に動いたモデル。
+  取り込み（`read-result`）が結果の検証より前に、共通ライブラリの `models.observed_model` で取って書く。
+  結果が無くて止まる経路でも残る。`requested` は指定値で、cross-review は `--model` を渡さないため常に `null`。
+  `observed` は実測値、`unobserved` は取れなかった理由の符号（`no_record` / `ambiguous` / `no_model_field` /
+  `unsupported` / `unreadable`）で、どちらか一方が入る。取れるのは claude と codex で、agy と kiro は `unsupported`。
+  前のラウンドの値は書き換えない。反証の起動（`critique.sh`）の分は残さない
 - `review_findings` — 取り込んだ指摘を **per-item** で蓄積する（#156）。各要素は
   `finding_id`（`<担当>-r<ラウンド>-<索引>`）を持つ。**取り込みの時点で採番し、統合・
   反証・実行検証の記録がどの指摘を指すかをこの値で結ぶ。** 担当とラウンドを含めるため、
@@ -173,13 +186,18 @@
   `excluded` / `ignored_exclude`（`--exclude` で指定したが参加者プールに無かったため無視した者。#786。
   この項目を持たない状態ファイルは空として読む）/ `available`（利用可能な参加者）/ `unavailable`（名前 → 確認が通らなかった理由）/
   `probe_skipped`（確認を飛ばしたか）/ `require_all` / `fallback`（スロットのフォールバックに使える
-  相手。**#892 の後に作る状態では空**で、変更の前に作った状態だけがホストを持ちうる）の 9 項目。**この項目を持たない状態ファイルは、この変更の前に始めた実行である**
+  相手。**#892 の後に作る状態では空**で、変更の前に作った状態だけがホストを持ちうる）/ `policy`（決めた時点の
+  ランタイムの宣言の写し `path` / `allowed` / `review_seats`。`null` は宣言が無かった。キーが無いのは #1598 の前の状態）の 10 項目。**この項目を持たない状態ファイルは、この変更の前に始めた実行である**
   （読み方は `05-pool-and-convergence.md`）。`unavailable` が空である理由は 2 つあり、
   `probe_skipped` がそれを分ける（全員が通った / 確認を飛ばした）
 - `resume_changes` — 再開で変えた値の記録（#727）。要素は `at` / `field` / `to` / `from` で、
   `field` は状態ファイルの鍵である。**追記だけを行う。** 参加者の記録を作り直したときは
   `participants` の 1 件として積む（中の項目ごとには積まない）
 - `rounds[].reviewers` — そのラウンドのレビュー担当 2 スロット。**ラウンドを開くときに決めて残す**
+- `rounds[].seats` — スロットごとの記録。`reviewers` と同じ並びで、`seat`（スロット名）/
+  `runtime` / `model`（実際に動いたモデル。`read-result` が `reviewer_models.<席>.observed` と同じ取得の値で埋め、
+  取れなければ `null`）/ `partner`（組の相手のスロット名。`--only` の 1 スロットでは `null`）を持つ。
+  キーが無いのは #1598 の前に開いたラウンドである。実行の要約の `rounds[].seats` へそのまま写る
 - `worktree_path` — 並行セッションとの分離。サブエージェントへの cwd 指示にも使う
 - `is_own_pr` / `event_downgrade` — 自分の PR の場合 `REQUEST_CHANGES → COMMENT` 強制ダウングレード
 - `rounds[].<担当>.intent` — AI の本来判定。**ループ判定はこれを見る**。担当ごとのキーの
@@ -247,6 +265,7 @@
 | 反映する | `--max-rounds` / `--rotate-after` / `--verify-command` / `--verify-exit-code` | 状態を書き換え、`resume_changes` へ 1 件積み、`↻ <項目>: <旧> → <新>` を出す |
 | 反映し、参加者を作り直す | `--only` | 状態を書き換えて記録へ積んだうえで、認証確認をやり直して `participants` を置き換える。`none` を渡すと 1 者指定を外す |
 | 参加者を作り直す | `--exclude` / `--include` / `--require-all` | 利用可能な参加者を解決し直して `participants` を置き換える。失敗したら状態を書き換えずに終了コード 1 |
+| （引数なしでも）参加者を作り直す | ランタイムの宣言の変更 | `participants.policy` と今の宣言が違えば作り直す。記録から引き継ぐ `included` / `only` のうち宣言の外のものは止めずに落とし、`policy:<項目>` を積む。判定の済んでいない最後のラウンドの担当に宣言の外の者がいれば選び直す |
 | 反映しない | `--host` | 状態と違うときだけ `ℹ --host は再開では反映しません` を出す |
 
 **1 者指定は 2 行にまたがる。** 1 者指定（`--only`）は状態ファイルに載る項目であると同時に、
@@ -366,6 +385,7 @@ round エントリを状態ファイルへ保存する前に次を行う。**失
 | ファイル | 置き場所 | 中身 | いつ書くか |
 |---|---|---|---|
 | `<stem>-monitor.json` | `$TMP_DIR` | その担当の**最後の**監視の結果（`status` / `reason` / 時刻と、`--phase` の値の `phase`（省いたときは `null`）など 15 個のキー） | 担当 1 者の監視を終えたとき。起動（`launch-cli.sh`）の前に消す |
+| `<stem>-launch.json` | `$TMP_DIR` | 起動の記録（`runtime` / 作業ディレクトリの実パス `workdir` / 起動の直前の UTC の時刻 `started_at`）。実際に動いたモデルを取る側が、ランタイムのセッションの記録と結びつけるのに使う | 起動（`launch-cli.sh`）が CLI を起動する直前。前の起動の分は先に消す |
 | `monitor-outcomes.jsonl` | `$TMP_DIR` | 監視の結果を 1 行 1 つで**追記だけ**で積む | 同上。消さない |
 | `cross-review-pr<PR>-<開始時刻の UTC>.json` | 要約の置き場所の `<owner>--<repo>/` | 実行の要約（所要・`final`・ラウンド・起動と `measure`）。**本文・`detail` を含まない** | 状態を保存するたび（同じ実行は上書き） |
 
@@ -386,7 +406,9 @@ CLI 自身の上限で結果を書かずに終わったときは `NO_RESULT` の
 **要約の置き場所は worktree の外である。** `NDF_METRICS_DIR` → `$XDG_STATE_HOME/ndf/metrics` →
 `$HOME/.local/state/ndf/metrics` の順に決まり、`NDF_METRICS=0` のときは書かない。`state.py report`
 の最後の行が、書いた要約のパスか書かなかった理由を出す。集約するのは共通ライブラリの `run_metrics.py aggregate`
-（`--since` / `--until` / `--repo` / `--kind` / `--version` / `--by total|round-count|reason`）である。
+（`--since` / `--until` / `--repo` / `--kind` / `--version` / `--by total|round-count|reason|pair`）である。
+`--by pair` は cross-review のラウンドをレビューの組（`rounds[].seats` のランタイムを辞書順に `+` でつなぐ。
+1 スロットならそのランタイム、記録が無ければ `不明`）ごとに数え、`組 / ラウンド数 / 実行数` の表を出す。
 
 ## `<worktree-base>` の解決順
 

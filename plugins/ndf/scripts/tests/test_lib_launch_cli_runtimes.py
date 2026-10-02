@@ -72,7 +72,7 @@ def test_codex_launch_arguments(tmp_path):
     args = _launch(tmp_path, "codex")
 
     assert args[:2] == ["exec", "--dangerously-bypass-approvals-and-sandbox"]
-    assert args[args.index("--config") + 1] == "reasoning.effort=medium"
+    assert args[args.index("--config") + 1] == "model_reasoning_effort=medium"
     assert args[args.index("-C") + 1] == str(tmp_path / "work")
     assert args[args.index("--model") + 1] == "test-model"
 

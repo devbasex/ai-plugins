@@ -58,7 +58,10 @@ jq -r '.is_error, (.permission_denials | length), .subtype' /tmp/claude-stdout.j
 | `subtype` | `success` / `error_during_execution` など |
 | `modelUsage` | **実際に使われたモデル名**。指定値との突き合わせに使える |
 
-`modelUsage` からモデル名を取れるのは 4 CLI のうち claude だけである。
+`modelUsage` には補助で動いたモデル（`claude-haiku-…` など）も並ぶ。主たるモデルは、各モデルの
+`inputTokens` + `cacheReadInputTokens` + `cacheCreationInputTokens` + `outputTokens` の和が最大のものとし、
+`claude-opus-5[1m]` のような CLI の名前をそのまま記録する（共通ライブラリの `models.observed_model`）。
+入力のトークンだけで選ぶと、キャッシュの読み取りを数えず補助のモデルを選ぶ。
 計測では指定値と実測値を突き合わせ、食い違ったら警告する。
 
 ## Skill を読ませる
