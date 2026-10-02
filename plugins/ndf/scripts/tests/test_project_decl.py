@@ -698,11 +698,13 @@ def _deps_of(files: dict[str, str]):
 def test_dependencies_collects_every_manifest_kind_as_is():
     files = {
         "composer.json": json.dumps({"require": {"php": "^8.2", "laravel/framework": "^11.0"}, "require-dev": {"phpunit/phpunit": 10}}),
-        "web/package.json": json.dumps({"dependencies": {"react": "^18.2.0"}, "devDependencies": {"vitest": "1"}, "engines": {"node": ">=20"}}),
+        "web/package.json": json.dumps(
+            {"dependencies": {"react": "^18.2.0"}, "devDependencies": {"vitest": "1"}, "engines": {"node": ">=20"}}
+        ),
         "deep/a/package.json": json.dumps({"dependencies": {"ignored": "1"}}),
         "pyproject.toml": (
             '[project]\nrequires-python = ">=3.11"\ndependencies = ["Django>=5.0", "requests[socks]~=2.31"]\n'
-            '[project.optional-dependencies]\ndev = ["pytest; python_version>\'3\'"]\n'
+            "[project.optional-dependencies]\ndev = [\"pytest; python_version>'3'\"]\n"
             '[dependency-groups]\nlint = ["Ruff==0.6"]\nbad = "x"\n'
             '[tool.poetry.dependencies]\nFlask = "^3.0"\n'
             '[tool.poetry.dev-dependencies]\nBlack = "*"\n'
