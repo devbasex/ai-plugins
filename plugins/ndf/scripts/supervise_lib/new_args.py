@@ -130,7 +130,11 @@ NEW_ARGS = [
         },
         "impl fix sprint",
     ),
-    ("--scope", {"nargs": "+", "default": [], "metavar": "PATH", "help": "構造改善の範囲"}, "check sprint"),
+    (
+        "--scope",
+        {"nargs": "+", "default": [], "metavar": "PATH", "help": "構造改善の範囲に足すパス（PR の差分のファイルとテストの置き場所に足す）"},
+        "check sprint",
+    ),
     ("--title", {"help": "Pull Request の題名"}, "impl fix"),
     ("--summary", {"help": "Pull Request 本文の要約"}, "impl fix"),
     ("--prompt", {"help": "実装の指示文"}, "impl"),

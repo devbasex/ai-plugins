@@ -25,7 +25,7 @@
       "kind": "構造改善",
       "stage": "構造改善",
       "timeout": 3600,
-      "args": "5 --workflow-step --scope $(gh api 'repos/{owner}/{repo}/pulls/5/files' --paginate --jq '.[].filename' | xargs -n1 dirname | sort -u | grep -vx '\\.')",
+      "args": "5 --workflow-step --scope $(python3 <NDF>/scripts/refactor-scope.py --pr 5)",
       "on_fail": "abort",
       "next": "review"
     },
