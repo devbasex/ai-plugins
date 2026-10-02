@@ -83,6 +83,7 @@ class RunState:
         self.llm = {"work": 0, "judge": 0, "input": 0, "cache_read": 0, "cache_write": 0, "output": 0, "cost": 0.0}
         self.last_stage = "無し"
         self.pace_recorded = False
+        self.recorded_stages: list[str] = []  # 課題の本文へ記録した工程（同じ工程を 2 度記録しない。#1485 の AC4）
         self.gates: list[dict] = []  # run のステップが返した関門（終了コード 10〜19）
         self.switched: list[str] = []  # 利用上限で切り替えた認証（変数の名前・アカウント・従量の接続）
         self.cur: dict = {}
@@ -261,13 +262,14 @@ class RunState:
         return self.dir / f"{n:02d}-{sid}.out"
 
     def record_stage(self, stage: str | None, plan: dict, cwd: str) -> None:
-        """工程が変わったら、計画の `記録` のスクリプトで課題ごとに通過を記録する。"""
+        """工程が変わったら、計画の `記録` のスクリプトで課題ごとに通過を記録する。記録した工程へ戻っても打ち直さない。"""
         if not stage or stage == self.last_stage:
             return
         self.last_stage = stage
         rec = plan.get("記録")
-        if not rec:
+        if not rec or stage in self.recorded_stages:
             return
+        self.recorded_stages.append(stage)
         pace = plan.get("進め方")
         pace_first = pace in MVV_PACES and not self.pace_recorded
         self.pace_recorded = True
@@ -344,6 +346,7 @@ class RunState:
             "fail_counts": dict(self.fail_counts),
             "last_stage": self.last_stage,
             "pace_recorded": self.pace_recorded,
+            "recorded_stages": list(self.recorded_stages),
             "switched": list(self.switched),
             "slow_events": [dict(e) for e in self.slow_events],
             "pcount": dict(self.pcount),
@@ -368,6 +371,7 @@ class RunState:
         self.fail_counts = dict(acc.get("fail_counts", self.fail_counts))
         self.last_stage = acc.get("last_stage", self.last_stage)
         self.pace_recorded = acc.get("pace_recorded", self.pace_recorded)
+        self.recorded_stages = list(acc.get("recorded_stages", self.recorded_stages))
         self.switched = list(acc.get("switched", self.switched))
         self.slow_events = [dict(e) for e in acc.get("slow_events", self.slow_events)]
         self.pcount = dict(acc.get("pcount", self.pcount))

@@ -73,7 +73,7 @@ def test_new_sprint_without_release_template_writes_until_check(tmp_path, releas
     assert res["status"] == "ok" and "/ndf:release" in res["next"]
     manifest = json.loads((out / "sprint.json").read_text())
     names = [w["name"] for w in manifest["ステージ"]]
-    assert names == ["設計", "関門 1", "スプリントブランチ", "実装", "検査", "リリース"]
+    assert names == ["設計", "関門 1", "設計の結果", "スプリントブランチ", "実装", "検査", "リリース"]
     last = manifest["ステージ"][-1]
     assert last["manual"] == "/ndf:release" and "plans" not in last and "command" not in last
     assert any(it.get("manual") == "/ndf:release" for it in res["items"])

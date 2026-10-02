@@ -8,7 +8,6 @@
   "branch": "spec/m9",
   "起点": "origin/main",
   "リポジトリ": "<TMP>/repo",
-  "記録": "<NDF>/scripts/projects-sync.sh",
   "規則": "",
   "上限": 12,
   "進め方": "fast",
@@ -88,5 +87,6 @@
     }
   ],
   "base_branch": "main",
+  "記録": "<NDF>/scripts/projects-sync.sh",
   "スプリント状態": "<TMP>/out/sprint/sprint.json"
 }

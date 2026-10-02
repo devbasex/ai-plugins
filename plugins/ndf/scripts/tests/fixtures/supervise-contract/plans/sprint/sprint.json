@@ -26,37 +26,45 @@
     },
     {
       "wave": 3,
-      "name": "スプリントブランチ",
+      "name": "設計の結果",
       "plans": [
-        "<TMP>/out/sprint/3-sprint-branch.json"
+        "<TMP>/out/sprint/3-design-results.json"
       ],
-      "command": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/sprint/3-sprint-branch.json --max 3"
+      "command": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/sprint/3-design-results.json --max 3"
     },
     {
       "wave": 4,
-      "name": "実装",
+      "name": "スプリントブランチ",
       "plans": [
-        "<TMP>/out/sprint/4-impl-16.json",
-        "<TMP>/out/sprint/4-impl-17.json"
+        "<TMP>/out/sprint/4-sprint-branch.json"
       ],
-      "command": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/sprint/4-impl-16.json <TMP>/out/sprint/4-impl-17.json --max 3"
+      "command": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/sprint/4-sprint-branch.json --max 3"
     },
     {
       "wave": 5,
-      "name": "検査",
+      "name": "実装",
       "plans": [
-        "<TMP>/out/sprint/5-check.json"
+        "<TMP>/out/sprint/5-impl-16.json",
+        "<TMP>/out/sprint/5-impl-17.json"
       ],
-      "command": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/sprint/5-check.json --max 3 --then <TMP>/out/sprint/6-release.json"
+      "command": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/sprint/5-impl-16.json <TMP>/out/sprint/5-impl-17.json --max 3"
     },
     {
       "wave": 6,
+      "name": "検査",
+      "plans": [
+        "<TMP>/out/sprint/6-check.json"
+      ],
+      "command": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/sprint/6-check.json --max 3 --then <TMP>/out/sprint/7-release.json"
+    },
+    {
+      "wave": 7,
       "name": "配布",
       "plans": [
-        "<TMP>/out/sprint/6-release.json"
+        "<TMP>/out/sprint/7-release.json"
       ],
       "then_of": "検査",
-      "resume": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/sprint/6-release.json --max 3"
+      "resume": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/sprint/7-release.json --max 3"
     }
   ]
 }

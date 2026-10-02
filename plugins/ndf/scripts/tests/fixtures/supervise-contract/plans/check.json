@@ -144,5 +144,6 @@
       "strategy": "local-full",
       "unknown_duration": true
     }
-  }
+  },
+  "記録": "<NDF>/scripts/projects-sync.sh"
 }

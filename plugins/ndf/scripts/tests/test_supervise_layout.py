@@ -18,10 +18,13 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 SUPERVISE = SCRIPTS / "supervise.py"
 PKG = SCRIPTS / "supervise_lib"
 
-SUBCOMMANDS = ["run", "history", "expected", "example", "new", "queue", "wait", "design-glossary", "note", "sync-check"]
+SUBCOMMANDS = ["run", "history", "expected", "example", "new", "queue", "wait", "design-glossary", "design-results", "note", "sync-check"]
 NEW_KINDS = ["impl", "fix", "check", "release", "sprint", "close"]
 MODULES = [
     "__init__",
+    "procedures",  # 単発とスプリントの雛形が共有する手順の定義（#1485）
+    "pr_materials",
+    "design_stage",
     "paths",
     "decl",
     "plan",

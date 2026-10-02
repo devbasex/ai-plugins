@@ -7,9 +7,10 @@ import shlex
 from pathlib import Path
 
 from supervise_lib.decl import WORKTREE_DECL, DeclError, with_decls
-from supervise_lib.paths import HERE, MERGED_PY, MVV_PY, STEPS_PY, VERIFY_PY
+from supervise_lib.paths import MERGED_PY, MVV_PY, STEPS_PY, VERIFY_PY
 from supervise_lib.plan import QUEUE_PRS
 from supervise_lib.verify_steps import MARGIN_FLOOR, handoff_step
+from supervise_lib.procedures import with_record
 
 
 MVV_NOTE = "{state_dir}/work/mvv-note.md"  # mvv-gate.py が書く判定の記録（PR のコメントか承認資料の末尾）
@@ -269,7 +270,7 @@ def plan_release_package_plugin(a) -> dict:
     with_decls(plan, a)
     if repo:
         plan["リポジトリ"] = repo
-        plan["記録"] = str(HERE / "projects-sync.sh")
+        with_record(plan)
     return plan
 
 
