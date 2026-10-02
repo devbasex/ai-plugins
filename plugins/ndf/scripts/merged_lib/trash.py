@@ -142,7 +142,12 @@ def sweep(root, ref) -> tuple[list[dict], dict]:
             metrics["kept_trash"] += 1
             continue
         items.append(
-            {"kind": "trash", "name": str(d), "result": "removed", "reason": f"{led.get('branch')} の {hit[:12]} が本番（{ref[:12]}）に含まれる"}
+            {
+                "kind": "trash",
+                "name": str(d),
+                "result": "removed",
+                "reason": f"{led.get('branch')} の {hit[:12]} が本番（{ref[:12]}）に含まれる",
+            }
         )
         metrics["swept_trash"] += 1
     if unledgered:
