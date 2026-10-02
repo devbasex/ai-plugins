@@ -55,7 +55,7 @@ NDF の側の語（学習の設定・`training` の真偽値）へ変換する�
 | I4 | 起動の認証 | OAuth でない接続（`claude_accounts.FOREIGN_AUTH_ENV` のどれかがある起動）では読みも書きも送らない | `check` は `training: null`・理由「OAuth でない接続」。`session-start` は何も出さずに終わる |
 | I5 | 起動の認証 | トークンとアカウントの識別子を標準出力・標準エラー・`systemMessage`・例外の文言に出さない。応答の本文を出力へ写さない | 理由は HTTP の状態コードと例外の型名だけで作る |
 | I6 | 学習の設定 | `session-start` はどの失敗でも終了コード 0 で終わり、セッションの開始を止めない | 予期しない例外も捕まえて失敗の知らせに変える |
-| I7 | 起動の認証 | 実際の OAuth のトークンを送る先は `https://api.anthropic.com` だけ | 宛先は定数で持つ。試験用の環境変数（`NDF_TRAINING_SETTINGS_URL`）の差し替えは、ホストが手元（`127.0.0.1`・`::1`・`localhost`）の URL だけを受ける。それ以外の値が入っていれば、`check`・`session-start` ともトークンを読まず何も送らず、読み取りの失敗（理由「試験用の宛先が手元でない」）として扱う |
+| I7 | 起動の認証 | 実際の OAuth のトークンを送る先は `https://api.anthropic.com` だけ | 宛先は定数で持つ。試験用の環境変数（`NDF_TRAINING_SETTINGS_URL`）の差し替えは、ホストが手元（`127.0.0.1`・`::1`・`localhost`）の URL だけを受ける。照合は `urllib.parse.urlsplit` で取り出した `hostname` 成分（小文字化済み）が `127.0.0.1`・`::1`・`localhost` のどれかに完全一致するかだけで決め、URL の文字列への部分一致・前方一致を使わない。スキームは `http` か `https` に限り、userinfo（`@` の前）を持つ URL は受けない。パス・クエリ・userinfo に許可語が含まれても受ける理由にしない（`http://127.0.0.1.evil.example/`・`http://localhost.evil.example/`・`http://localhost@evil.example/`・`http://evil.example/?h=127.0.0.1` はどれも受けない）。それ以外の値が入っていれば、`check`・`session-start` ともトークンを読まず何も送らず、読み取りの失敗（理由「試験用の宛先が手元でない」）として扱う |
 
 ### ドメインイベント
 
@@ -337,5 +337,5 @@ graph TD
 | --- | --- | --- | --- |
 | 可用性 | どの失敗でも hook は終了コード 0 で終わり、セッションの開始を止めない | `cmd_session_start` の全体を例外の捕捉で包み、終了コードを 0 に固定する。hook の command も `; exit 0` で終え、`python3` が無ければ何もしない。`continueOnError: true` | 各失敗の経路と、`claude_training` の関数が例外を投げるよう差し替えた場合に、終了コード 0 を見るテスト |
 | 性能・拡張性 | hook の 1 回の実行は hook の `timeout` に収まる。読み書きの HTTP には打ち切りの時間を置き、その合計が `timeout` を超えない | hook の `timeout` を 10 秒、HTTP の打ち切りを 1 回 3 秒（`GET` と `PATCH` で最大 6 秒）、キーチェーンの起動を 2 秒とする。合計の最大は 8 秒で、`python3` の起動を足しても 10 秒に収まる | 応答を返さない偽の宛先で、`session-start` が 7 秒以内に終わり終了コード 0 を返すテスト |
-| セキュリティ | トークンは環境変数か認証ファイルから読むだけで、書き出さない。出力とログにトークンとアカウントの ID を出さない。送り先は `api.anthropic.com` だけ | トークンは `Authorization` の見出しにだけ置く。`reason` と知らせは表の固定の文面と状態コード・型名だけで作り、応答の本文を写さない。ログのファイルは作らない。宛先は定数（試験用の差し替えだけ環境変数で、手元のホストに限る。I7） | トークンと応答（識別子の鍵）に目印の文字列を入れ、標準出力・標準エラーに目印が現れないことを見るテスト |
+| セキュリティ | トークンは環境変数か認証ファイルから読むだけで、書き出さない。出力とログにトークンとアカウントの ID を出さない。送り先は `api.anthropic.com` だけ | トークンは `Authorization` の見出しにだけ置く。`reason` と知らせは表の固定の文面と状態コード・型名だけで作り、応答の本文を写さない。ログのファイルは作らない。宛先は定数（試験用の差し替えだけ環境変数で、手元のホストに限る。I7） | トークンと応答（識別子の鍵）に目印の文字列を入れ、標準出力・標準エラーに目印が現れないことを見るテスト。I7 の例に挙げた手元に似せた URL のそれぞれで、トークンを読まず何も送らないことを見るテスト |
 | システム環境 | Claude Code の SessionStart の hook として動く。codex / kiro / agy では書き換えない | hook を `hooks/claude.json` にだけ置く。`check --runtime codex\|kiro\|agy` は `unsupported` | `claude plugin validate .` の終了コード 0。`hooks/codex.json` と `dev.agy/hooks.json` に `training-optout` が無いことを見るテスト |
