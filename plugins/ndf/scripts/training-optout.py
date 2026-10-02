@@ -89,6 +89,14 @@ def read_failed(reason: str) -> str:
     return f"[ndf] 学習の設定を確かめられなかった（{reason}）。「学習に使わない」とは扱わない。{STOP}"
 
 
+def turned_off_message(subject: str) -> str:
+    return f"[ndf] {subject}を Off にした（入力を学習に使わない設定）。外すには {OPTOUT_ENV}=0 を設定する"
+
+
+def turn_off_failed_message(subject: str, reasons: str, where: str) -> str:
+    return f"[ndf] {subject}を Off にできなかった（{reasons}）。{where}を確かめる。{STOP}"
+
+
 def claude_session(env) -> str | None:
     """claude の書き換え。知らせの文面か None（知らせない）を返す。"""
     if ct.foreign_auth(env):
@@ -106,10 +114,8 @@ def claude_session(env) -> str | None:
         return None
     why = ct.turn_off(token, url)
     if why:
-        return f"[ndf] 学習の設定を Off にできなかった（{why}）。設定画面の「Help improve our AI models」を確かめる。{STOP}"
-    return (
-        f"[ndf] このアカウントの「Help improve our AI models」を Off にした（入力を学習に使わない設定）。外すには {OPTOUT_ENV}=0 を設定する"
-    )
+        return turn_off_failed_message("学習の設定", why, "設定画面の「Help improve our AI models」")
+    return turned_off_message("このアカウントの「Help improve our AI models」")
 
 
 def codex_session(env) -> str | None:
@@ -130,10 +136,8 @@ def codex_session(env) -> str | None:
     if failed:
         reasons = "・".join(sorted({r for _, r in failed}))
         names = "・".join(CODEX_LABELS[k] for k, _ in failed)
-        return f"[ndf] ChatGPT のアカウントの {names} を Off にできなかった（{reasons}）。ChatGPT の設定画面を確かめる。{STOP}"
-    return (
-        f"[ndf] この ChatGPT のアカウントの {'・'.join(done)} を Off にした（入力を学習に使わない設定）。外すには {OPTOUT_ENV}=0 を設定する"
-    )
+        return turn_off_failed_message(f"ChatGPT のアカウントの {names} ", reasons, "ChatGPT の設定画面")
+    return turned_off_message(f"この ChatGPT のアカウントの {'・'.join(done)} ")
 
 
 def cmd_session_start(a) -> int:
