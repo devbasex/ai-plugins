@@ -93,7 +93,7 @@ launch_runtime() {
   case "$RUNTIME" in
     codex)
       nohup codex exec --dangerously-bypass-approvals-and-sandbox \
-        --config reasoning.effort=medium -C "$WORKDIR" ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} \
+        --config model_reasoning_effort=medium -C "$WORKDIR" ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} \
         < "$PROMPT" > "$STDOUT_LOG" 2> "$ERR_LOG" &
       PID=$!
       ;;
