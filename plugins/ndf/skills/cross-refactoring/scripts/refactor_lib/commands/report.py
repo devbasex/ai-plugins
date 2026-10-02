@@ -130,6 +130,18 @@ def _elapsed_seconds(state: dict[str, Any]) -> float:
     return max(clock.seconds_between(state.get("started_at"), end or clock.now()) or 0.0, 0.0)
 
 
+def _implementer_model_text(state: dict[str, Any]) -> str:
+    """実装担当のモデルの表示。実測値があればそれを出し、無ければ指定値か分離の理由を出す（#759）。"""
+    model = state.get("implementer_model") or {}
+    requested, observed = model.get("requested"), model.get("observed")
+    if observed:
+        return f"{observed}（実測）"
+    reason = models_lib.separation_reason(str(state.get("implementer") or ""), requested, observed)
+    if reason:
+        return f"{models_lib.label(None)}（分離: {reason}）"
+    return f"{requested}（指定。実測できず）"
+
+
 def _print_header(state: dict[str, Any]) -> None:
     budget_seconds = int(state.get("budget_minutes") or 0) * 60
     elapsed = _elapsed_seconds(state)
@@ -143,10 +155,7 @@ def _print_header(state: dict[str, Any]) -> None:
         f"- 想定最大時間: {state.get('budget_minutes')} 分 / 所要: {elapsed / 60:.1f} 分"
         f"（差 {(budget_seconds - elapsed) / 60:+.1f} 分。cross-review を除く）"
     )
-    print(
-        f"- 実装担当: {state.get('implementer')}（{state.get('implementer_reason')}）"
-        f" / モデル: {models_lib.label((state.get('implementer_model') or {}).get('requested'))}"
-    )
+    print(f"- 実装担当: {state.get('implementer')}（{state.get('implementer_reason')}） / モデル: {_implementer_model_text(state)}")
     jev_line = "使った" if judge.get("kind") == "jev" else f"使わなかった（{judge.get('reason')}）"
     print(f"- 判断に Jev を: {jev_line} / 呼び出しの失敗 {judge.get('failures', 0)} 回")
     for line in strategy_lines(state):

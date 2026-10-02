@@ -55,4 +55,11 @@ def summary_extra(path: pathlib.Path, state: dict[str, Any], launches: list[dict
         "phases": phases(state, launches),
         "budget_minutes": state.get("budget_minutes"),
         "implementer": state.get("implementer"),
+        # 「ランタイム × モデル」で集計する側が実測値と指定値を選べるよう、そのまま置く（#759）。
+        "implementer_model": _implementer_model(state),
     }
+
+
+def _implementer_model(state: dict[str, Any]) -> dict[str, Any]:
+    model = state.get("implementer_model") or {}
+    return {key: model.get(key) for key in ("requested", "observed", "unobserved")}

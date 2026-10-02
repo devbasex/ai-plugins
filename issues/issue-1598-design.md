@@ -65,7 +65,7 @@
 | # | イベント | 発生元 | 受け手 |
 | --- | --- | --- | --- |
 | E1 | 利用者がランタイムの宣言を書いた | 利用者 | E2 の読み手すべて |
-| E2 | ランタイムの宣言を読んだ | `runtime_policy.load` | cross-review / cross-refactoring の `init`・再開、external-ai、supervise、起動の共通部品 |
+| E2 | ランタイムの宣言を読んだ | `runtime_policy.read_policy` | cross-review / cross-refactoring の `init`・再開、external-ai、supervise、起動の共通部品 |
 | E3 | 参加者を決めた | `assignment.resolve_participants` | 状態ファイルの `participants` |
 | E4 | 認証を確かめた | `auth.probe_auth`（E3 の中） | 参加者 |
 | E5 | ラウンドのスロットを決めた | `participants._round_reviewers` | `start_round` |
@@ -106,7 +106,7 @@
 | cross-refactoring の参加者（`refactor_lib/commands/setup.py`） | `init` と再開で宣言を読み、`resolve_participants` へ渡す。`--implementer` が外なら止まる | 変える |
 | 起動の共通部品（`scripts/lib/launch-cli.sh`） | CLI を起動する直前に `runtime_policy.py check` を打ち、0 以外なら起動せずに終了コード 3 で終わる | 変える |
 | external-ai（`skills/external-ai/scripts/external-ai.py`） | `precheck` の最初に宣言を確かめ、外なら起動結果 `policy`・終了コード 3 | 変える |
-| supervise（`supervise_lib/engine.py` の `setup`） | プランの work / drive ステップの起動先（`runtime` が無いか `claude-p` なら claude）をすべて宣言と照らし、外があれば「止まった」を返す | 変える |
+| supervise（`supervise_lib/engine.py` の `setup`） | プランの work / drive / judge ステップの起動先（`runtime` が無いか `claude-p`、`"full": true` の work、judge のステップなら claude）をすべて宣言と照らし、外があれば「止まった」を返す。ステップを通らずに claude を直接起動する呼び出し（`on_fail` の judge・遅れの判定・PR の本文）は、共通の口（`PolicyClaudeRunner.call`）が起動の前に照らし、外なら起動せずに失敗を返す | 変える |
 | 実行の記録（`scripts/lib/run_metrics.py`） | 要約のラウンドへ `seats` を写す。`aggregate --by pair` で組ごとのラウンド数を出す | 変える |
 | 文書 | cross-review / cross-refactoring / external-ai の SKILL.md と docs、`docs/specifications/cross-review-participants-and-seats.md`、`scripts/lib/README.md`、supervise の手順、用語集 | 変える |
 
@@ -193,7 +193,7 @@ classDiagram
 
 | 型・関数 | 形 |
 | --- | --- |
-| `runtime_policy.load(root) -> RuntimePolicy \| None` | `repo.main_dir(root)` の `.ndf/runtimes.json` を先に、無ければ `root` のものを読む（`project_decl` と同じ順）。どちらにも無ければ `None`。読めない・I1・I2 が破れていれば `RuntimePolicyError` |
+| `runtime_policy.read_policy(root) -> RuntimePolicy \| None` | `repo.main_dir(root)` の `.ndf/runtimes.json` を先に、無ければ `root` のものを読む（`project_decl` と同じ順）。どちらにも無ければ `None`。読めない・I1・I2 が破れていれば `RuntimePolicyError` |
 | `RuntimePolicy.require(names, source)` | `names` のうち `allowed` に無いものがあれば `RuntimePolicyError`。文は「`<名前> は宣言の外（<パス> の allowed: <一覧>）。<source> を外すか宣言を直す`」 |
 | `RuntimePolicy.to_state()` | `{"path", "allowed", "review_seats"}`（`review_seats` は無ければ `null`） |
 | `RuntimePolicyError` | `AssignmentError` を継ぐ。呼び出し元の既存の `except AssignmentError` の経路（`die(code=1)`）で止まる |
@@ -333,7 +333,7 @@ graph TD
     XP -- 外・壊れている --> XS[outcome policy・終了コード 3]
     XP -- 中・宣言なし --> XW[which と認証確認・起動]
     S[supervise run] --> SS[Engine.setup]
-    SS --> SP{work / drive の起動先を<br/>すべて照らす}
+    SS --> SP{work / drive / judge の起動先を<br/>すべて照らす}
     SP -- 外・壊れている --> SR[止まった・終了コード 3<br/>どのステップも流さない]
     SP -- 中・宣言なし --> SF[今の流れ]
 ```

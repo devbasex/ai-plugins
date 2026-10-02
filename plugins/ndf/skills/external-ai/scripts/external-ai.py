@@ -10,13 +10,17 @@
 
     {"tool": "external-ai", "status": "ok|stopped", "summary": "...",
      "items": [{"kind": "cli", "name": "codex", "result": "ok|no_result|timeout|stalled|
-                early_error|usage_limit|auth|missing_cli|launch_failed", ...}],
+                early_error|usage_limit|auth|missing_cli|launch_failed|policy", ...}],
      "metrics": {"outcome": "...", "result": "out.md", "source": "file|stdout|stderr",
                  "runtime": "codex", "model": "...", "monitor_status": "OK", "reason": "ok", ...}}
 
 `outcome` が `ok` のときだけ `status` は `ok`（終了コード 0）。回収した本文は必ず
 `--output-file` に置く。監視の結果（`<stem>-monitor.json`）の状態と理由を `metrics` に写す。
 待ちの上限は `limits.py` の工程の値で、上限を超えると必ず終わる。
+
+`check` と `run` は、`which` と認証確認より前に、作業ディレクトリ（`check` はカレント）のリポジトリの
+ランタイムの宣言（`.ndf/runtimes.json`。#1598）と照らす。外か宣言が壊れていれば起動せずに
+`outcome: policy`・終了コード 3 で終え、`metrics.reason` に理由を書く。
 """
 
 from __future__ import annotations
@@ -40,6 +44,7 @@ import limits  # noqa: E402
 import models  # noqa: E402
 import proc  # noqa: E402
 import monitor_outcome  # noqa: E402
+import runtime_policy  # noqa: E402
 import step_result as sr  # noqa: E402
 
 TOOL = "external-ai"
@@ -74,8 +79,23 @@ def finish(runtime: str, outcome: str, summary: str, metrics: dict, code: int | 
     sr.emit(sr.result(TOOL, status, summary, [item], metrics, next=next_), code if code is not None else sr.default_code(status))
 
 
-def precheck(runtime: str, skip_auth: bool) -> tuple[str, str] | None:
-    """前提を確かめる。通らなければ `(結末, 理由)` を返す。"""
+def policy_reason(runtime: str, workdir: pathlib.Path) -> str | None:
+    """`workdir` のリポジトリのランタイムの宣言で `runtime` を起動できなければ理由。git の外なら宣言は無いものとする。"""
+    top = proc.git_out(workdir, "rev-parse", "--show-toplevel")
+    if not top:
+        return None
+    try:
+        runtime_policy.check_runtime(runtime, top, "external-ai のランタイムの指定")
+    except runtime_policy.RuntimePolicyError as e:
+        return str(e)
+    return None
+
+
+def precheck(runtime: str, skip_auth: bool, workdir: pathlib.Path | None = None) -> tuple[str, str] | None:
+    """前提を確かめる。通らなければ `(結末, 理由)` を返す。宣言の確かめは `which` と認証確認より前に行う。"""
+    reason = policy_reason(runtime, workdir or pathlib.Path.cwd())
+    if reason:
+        return "policy", reason
     if shutil.which(EXECUTABLE[runtime]) is None:
         return "missing_cli", f"{EXECUTABLE[runtime]} が PATH に無い"
     if skip_auth:
@@ -89,10 +109,16 @@ def precheck(runtime: str, skip_auth: bool) -> tuple[str, str] | None:
     return None
 
 
+def finish_precheck(runtime: str, pre: tuple[str, str], summary: str):
+    """前提が通らなかった結末で終える。理由を metrics へ入れるのは宣言（policy）のときだけ。"""
+    metrics = {"reason": pre[1]} if pre[0] == "policy" else {}
+    finish(runtime, pre[0], summary, metrics, sr.EXIT_PRECONDITION)
+
+
 def cmd_check(a) -> None:
     pre = precheck(a.runtime, False)
     if pre:
-        finish(a.runtime, pre[0], f"{a.runtime} は使えない（{pre[1]}）", {}, sr.EXIT_PRECONDITION)
+        finish_precheck(a.runtime, pre, f"{a.runtime} は使えない（{pre[1]}）")
     finish(a.runtime, "ok", f"{a.runtime} は使える", {})
 
 
@@ -148,6 +174,46 @@ def with_output_instruction(prompt: str, output: pathlib.Path) -> str:
     )
 
 
+def monitor_argv(a, run_id: int, tdir: pathlib.Path) -> list[str]:
+    """`monitor.py` へ渡す引数。上限と無進捗の許容は指定があるときだけ足す。"""
+    mon = [
+        sys.executable,
+        str(LIB / "monitor.py"),
+        str(run_id),
+        "--agents",
+        a.runtime,
+        "--tmp-dir",
+        str(tdir),
+        "--stem-template",
+        STEM_TEMPLATE,
+        "--phase",
+        a.phase,
+        "--poll",
+        str(a.poll),
+    ]
+    if a.timeout:
+        mon += ["--timeout", str(a.timeout)]
+    if a.stall_timeout:
+        mon += ["--stall-timeout", str(a.stall_timeout)]
+    return mon
+
+
+def run_outcome(runtime: str, rec: dict, source: str | None, path: str | None) -> tuple[str, str, str | None]:
+    """監視の記録と回収元から `(結末, 説明, next)` を決める。副作用を持たない。"""
+    mstatus, reason = rec.get("status", "PIDFILE_BAD"), rec.get("reason", "pidfile_bad")
+    if mstatus in ("OK", "NO_RESULT") and source in ("file", "stdout"):
+        return "ok", f"{runtime} の結果を回収した（{source}）: {path}", None
+    hint = f"stderr の末尾を読む: {path}" if path else None
+    if mstatus in ("OK", "NO_RESULT"):
+        return "no_result", f"{runtime} は終わったが結果が無い（理由: {reason}）", hint
+    outcome = MONITOR_OUTCOME.get(mstatus, "launch_failed")
+    if reason == "usage_limit":
+        outcome = "usage_limit"
+    elif outcome == "early_error" and AUTH_DETAIL.search(rec.get("detail", "")):
+        outcome = "auth"
+    return outcome, f"{runtime} を止めた（{mstatus} / 理由: {reason}）", hint
+
+
 def cmd_run(a) -> None:
     runtime = a.runtime
     prompt = pathlib.Path(a.prompt_file)
@@ -159,9 +225,9 @@ def cmd_run(a) -> None:
     if not workdir.is_dir():
         finish(runtime, "launch_failed", f"作業ディレクトリが無い: {workdir}", {}, sr.EXIT_PRECONDITION)
     skip_auth = a.no_auth_check or bool(os.environ.get(auth.SKIP_ENV))
-    pre = precheck(runtime, skip_auth)
+    pre = precheck(runtime, skip_auth, workdir)
     if pre:
-        finish(runtime, pre[0], f"{runtime} を起動しない（{pre[1]}）", {}, sr.EXIT_PRECONDITION)
+        finish_precheck(runtime, pre, f"{runtime} を起動しない（{pre[1]}）")
 
     output = pathlib.Path(a.output_file).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -184,32 +250,16 @@ def cmd_run(a) -> None:
     link.unlink(missing_ok=True)
     link.symlink_to(output)
 
-    mon = [
-        sys.executable,
-        str(LIB / "monitor.py"),
-        str(run_id),
-        "--agents",
-        runtime,
-        "--tmp-dir",
-        str(tdir),
-        "--stem-template",
-        STEM_TEMPLATE,
-        "--phase",
-        a.phase,
-        "--poll",
-        str(a.poll),
-    ]
-    if a.timeout:
-        mon += ["--timeout", str(a.timeout)]
-    if a.stall_timeout:
-        mon += ["--stall-timeout", str(a.stall_timeout)]
-    subprocess.run(mon, stdout=subprocess.DEVNULL)
+    subprocess.run(monitor_argv(a, run_id, tdir), stdout=subprocess.DEVNULL)
 
     rec = monitor_outcome.read_outcome(tdir, stem_name) or {}
     mstatus, reason = rec.get("status", "PIDFILE_BAD"), rec.get("reason", "pidfile_bad")
     source, path = recover(runtime, stem, output)
-    stdout_log = pathlib.Path(f"{stem}-stdout.log")
-    observed = models.observed_model(runtime, stdout_log.read_text(encoding="utf-8", errors="replace") if stdout_log.is_file() else "")
+    # 実際に動いたモデル（#759）。同じ処理の中で起動したため、開始の下限は渡さない。
+    observation = models.observed_model(runtime, stem, rec.get("ended_at"))
+    observed = observation.model
+    if not observed:
+        print(f"ℹ {runtime}: 実測値を取れなかった（{observation.reason}）", file=sys.stderr)
     metrics = {
         "result": path,
         "source": source,
@@ -222,28 +272,8 @@ def cmd_run(a) -> None:
         "stem": str(stem),
     }
 
-    if mstatus in ("OK", "NO_RESULT") and source in ("file", "stdout"):
-        finish(runtime, "ok", f"{runtime} の結果を回収した（{source}）: {path}", metrics)
-    if mstatus in ("OK", "NO_RESULT"):
-        finish(
-            runtime,
-            "no_result",
-            f"{runtime} は終わったが結果が無い（理由: {reason}）",
-            metrics,
-            next_=f"stderr の末尾を読む: {path}" if path else None,
-        )
-    outcome = MONITOR_OUTCOME.get(mstatus, "launch_failed")
-    if reason == "usage_limit":
-        outcome = "usage_limit"
-    elif outcome == "early_error" and AUTH_DETAIL.search(rec.get("detail", "")):
-        outcome = "auth"
-    finish(
-        runtime,
-        outcome,
-        f"{runtime} を止めた（{mstatus} / 理由: {reason}）",
-        metrics,
-        next_=f"stderr の末尾を読む: {path}" if path else None,
-    )
+    outcome, summary, next_ = run_outcome(runtime, rec, source, path)
+    finish(runtime, outcome, summary, metrics, next_=next_)
 
 
 def main(argv=None) -> None:

@@ -8,7 +8,8 @@
 #   workdir      CLI の作業ディレクトリ。**ここから外は触らせない**
 #   prompt-file  プロンプト。渡し方は CLI で違う（下の注意を参照）
 #   stem         出力ファイルのパス接頭辞。`<stem>.pid` / `<stem>-stdout.log` /
-#                `<stem>-err.log` を作る。監視スクリプトの `--stem-template` と揃える
+#                `<stem>-err.log` / `<stem>-launch.json`（起動の記録）を作る。
+#                監視スクリプトの `--stem-template` と揃える
 #   model        省略可。空文字なら CLI の既定モデルへ委ねる
 #   extra-dir    省略可。agy のときだけ作業領域へ追加する（結果ファイルの置き場所が
 #                作業ディレクトリの外にある場合）
@@ -56,6 +57,11 @@ PRINT_TIMEOUT=${7:-implement}
 [ -s "$PROMPT" ] || { echo "プロンプトが空です: $PROMPT" >&2; exit 1; }
 mkdir -p "$(dirname "$STEM")"
 
+# **宣言の外のランタイムは起動しない（#1598 の I5）。** どの経路から呼ばれても、作業ディレクトリの
+# リポジトリの `.ndf/runtimes.json` と照らし、外か宣言が壊れていれば起動せずに終了コード 3 で終える。
+python3 "$(dirname -- "${BASH_SOURCE[0]}")/runtime_policy.py" check "$RUNTIME" --root "$WORKDIR" || {
+  echo "宣言により起動しません: $RUNTIME" >&2; exit 3; }
+
 # 工程名を CLI の上限の秒数へ解決する。**表に無い名前は起動せずに終える。**
 # 上限の表は `limits.py` だけが持つ（値を使うのは agy だけだが、名前のチェックは全ランタイムで行う）。
 # **`cd` で登らない。** 表の位置は文字列のまま渡す（Kiro CLI の symlink を字句で畳まない）。
@@ -81,7 +87,23 @@ prepare_artifacts() {
   ERR_LOG=$STEM-err.log
   PID_FILE=$STEM.pid
   rm -f "$STDOUT_LOG" "$ERR_LOG" "$PID_FILE" "$STEM-result.json" "$STEM-progress.log" \
-    "$STEM-monitor.json"
+    "$STEM-monitor.json" "$STEM-launch.json"
+}
+
+# 起動の記録（`<stem>-launch.json`）を書く（#759）。実際に動いたモデルを取る側
+# （`models.observed_model`）が、開始の時刻と作業ディレクトリでランタイムの記録を結びつける。
+# **`cd` の前に書く。** 後で書くと、相対の stem が作業ディレクトリの下に落ちる。
+# 時刻は秒まで（BSD の `date` でも同じ形）。切り捨てるため、実際の起動より前か同じになる。
+# python3 を使わない（上限を数字で渡せば python3 の無い環境でも起動まで進む）。JSON の文字列に要る
+# 逆斜線と二重引用符だけを逃がす。
+write_launch_record() {
+  local real_workdir started_at
+  real_workdir=$(cd "$WORKDIR" && pwd -P)
+  real_workdir=${real_workdir//\\/\\\\}
+  real_workdir=${real_workdir//\"/\\\"}
+  started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  printf '{"runtime": "%s", "workdir": "%s", "started_at": "%s"}\n' \
+    "$RUNTIME" "$real_workdir" "$started_at" > "$STEM-launch.json"
 }
 
 # ランタイム名で分岐して nohup で背景起動し、PID を `PID` へ入れる。
@@ -148,6 +170,8 @@ if [ "$RUNTIME" = claude ] && [ "${NDF_CLAUDE_ACCOUNT:-}" = metered ]; then
     echo "従量の接続の宣言を --settings へ組めません（環境変数だけで起動します）" >&2; CLAUDE_SETTINGS=; }
   if [ -n "$CLAUDE_SETTINGS" ]; then CLAUDE_SETTINGS_ARGS=(--settings "$CLAUDE_SETTINGS"); fi
 fi
+
+write_launch_record
 
 cd "$WORKDIR"
 

@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/codex_training.py", "name": "turn_off", "kind": "same-name", "reason": "#1597 の設計（issues/issue-1597-design.md の「関数の契約」）。claude と codex の腐敗防止層が同じ名前の入口（read_setting・read_with・turn_off）を持ち、training-optout.py がランタイムごとにモジュールを選んで呼ぶ。宛先・認証・応答の形がランタイムごとに違うため本体は分ける（claude_training.py と対）"}

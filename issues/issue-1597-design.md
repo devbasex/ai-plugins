@@ -25,8 +25,8 @@
 
 codex（ChatGPT のログイン）は `check --runtime codex` で読める。`~/.codex/auth.json` のトークンで
 `GET https://chatgpt.com/backend-api/settings/user` を送り、`training_allowed` と Codex の環境の学習の 2 つの鍵が
-すべて false なら `training: false` を返す。codex のセッションの開始での書き換えは、書き換えの形を確かめるまで入れない
-（「codex（ChatGPT のログイン）」の節と[決定 14](issue-1597-design-decisions.md)）。
+すべて false なら `training: false` を返す。codex のセッションの開始（`hooks/codex.json` の SessionStart）でも、true の鍵ごとに
+`PATCH …/settings/account_user_setting?feature=<鍵>&value=false` を送って Off にする（[決定 14](issue-1597-design-decisions.md)）。
 
 ## ドメインモデル
 
@@ -48,7 +48,7 @@ ChatGPT の `settings/user` とも同じ関係を置き、`lib/codex_training.py
 | --- | --- | --- | --- | --- |
 | 学習の設定 | `lib/claude_training.py` の `turn_off`（Anthropic 側の値を false へ書き換える唯一の経路） | 学習の設定（アカウントの `grove_enabled`） | — | 読んだ結果（`training`・`updated_at`・`reason`） |
 | 起動の認証 | 持ち主なし（読むだけ。Claude Code が書く） | 起動の認証（`CLAUDE_CONFIG_DIR` と環境変数が決める） | — | OAuth のトークン・OAuth でない接続の指定 |
-| codex の学習の設定 | 持ち主なし（読むだけ。書き換えは決定 14 の確認まで持たない） | ChatGPT のアカウントの `settings`（3 つの鍵） | — | 読んだ結果（`Reading` を共用） |
+| codex の学習の設定 | `lib/codex_training.py` の `turn_off`（ChatGPT 側の値を false へ書き換える唯一の経路） | ChatGPT のアカウントの `settings`（3 つの鍵） | — | 読んだ結果（`Reading` を共用） |
 | codex の認証 | 持ち主なし（読むだけ。codex が書く） | `$CODEX_HOME/auth.json`（既定 `~/.codex`） | — | `auth_mode`・`tokens.access_token`・`tokens.account_id` |
 
 **学習の設定の持ち主は 1 つに決める。** `check` は読むだけで、書き換えるのは `session-start` が呼ぶ `turn_off` だけである。
@@ -102,7 +102,7 @@ ChatGPT の `settings/user` とも同じ関係を置き、`lib/codex_training.py
 | F3 | 読み取りか書き換えに失敗したことを知らせ、セッションを続ける | 利用者 |
 | F4 | 書き換えの動作を外す | 利用者（環境変数か `settings.json` の `env`） |
 | F5 | 実験版を本体へ移し、実験版と台帳の行を片付ける | NDF の開発者 |
-| F6 | codex のセッションの開始で、codex の学習の設定が true なら false へ書き換えて知らせる（決定 14 の確認の後に限る） | codex（SessionStart の hook）・利用者 |
+| F6 | codex のセッションの開始で、codex の学習の設定が true なら false へ書き換えて知らせる | codex（SessionStart の hook）・利用者 |
 
 ## 構成要素
 
@@ -119,10 +119,10 @@ ChatGPT の `settings/user` とも同じ関係を置き、`lib/codex_training.py
 | `plugins/ndf/scripts/experimental/README.md` | 変更 | `training-optout.py` の節を消す（PR #1606 が足した節） |
 | `docs/ndf-experiments.md` | 変更 | `training-optout.py` の行の「行き先」に本体の置き場を書く |
 | `plugins/ndf/README.md` | 変更 | SessionStart の節に書き換えと知らせを足し、外す手段と、利用側が `check` を hook・プランから呼ぶ例を書く |
-| `CHANGELOG.md` | 変更 | 開発版の節に 1 行 |
+| `CHANGELOG.md` | 変えない | 版の節はリリースの工程が書く（開発版は載せない） |
 
-**変えない構成要素**: `hooks/codex.json`（決定 14 の確認までは変えない。確かめた後に足す hook は「codex（ChatGPT のログイン）」の節）・
-`dev.agy/hooks.json`・`dev.kiro`（kiro / agy は手段が無い。要求の「含まない」）。
+**変えない構成要素**: `dev.agy/hooks.json`・`dev.kiro`（kiro / agy は手段が無い。要求の「含まない」）。
+`hooks/codex.json` は SessionStart に `session-start --runtime codex` の hook を 1 つ足す（「codex（ChatGPT のログイン）」の節）。
 `hook.py` とその環境（`$HOME/.cache/ndf/roots…/bin/python`）も使わない（[決定の記録](issue-1597-design-decisions.md)の決定 1）。
 
 ### 構成要素図
@@ -209,18 +209,20 @@ classDiagram
         +reason
     }
     class claude_training {
-        +metered(env) bool
+        +foreign_auth(env) list
         +oauth_token(env) str|None
         +read_setting(env) Reading
-        +turn_off(token) str|None
+        +read_with(token, url) Reading
+        +turn_off(token, url) str|None
     }
     class training_optout {
         +cmd_check()
         +cmd_session_start()
     }
     class codex_training {
-        +chatgpt_login(home) bool
+        +auth(env) cred|None
         +read_setting(env) Reading
+        +turn_off(cred, url, key) str|None
     }
     training_optout ..> claude_training: 呼ぶ
     training_optout ..> codex_training: 呼ぶ
@@ -233,11 +235,12 @@ classDiagram
 | 型・関数 | 責務 | 失敗の形 |
 | --- | --- | --- |
 | `Reading`（`dataclass`・不変） | 読んだ結果の値オブジェクト。`to_item()` が `check` の `items[]` の 1 要素を返す | — |
-| `metered(env)` | `claude_accounts.FOREIGN_AUTH_ENV` のどれかが空でなければ真 | 例外を出さない |
+| `foreign_auth(env)` | `claude_accounts.FOREIGN_AUTH_ENV` のうち空でない変数の名前（値は出さない） | 例外を出さない |
 | `oauth_token(env)` | `CLAUDE_CODE_OAUTH_TOKEN` → `oauth_in(CLAUDE_CONFIG_DIR か ~/.claude)` の `accessToken` → macOS のキーチェーン（下の注）の順に読む | 読めなければ None |
 | `read_setting(env)` | OAuth でない接続・トークン無し・HTTP の失敗・形の違いを `Reading(training=None, reason=…)` に変える | 例外を出さない。`reason` は I5 の形だけ |
 | `codex_training.read_setting(env)` | ChatGPT でないログイン・トークン無し・HTTP の失敗・形の違いを `Reading(runtime="codex", training=None, reason=…)` に変える。3 つの鍵を I8 で 1 つの `training` にする | 例外を出さない。`reason` は I5 の形だけ |
-| `turn_off(token)` | `PATCH` を 1 回送る。2xx なら None、そうでなければ理由の文字列 | 例外を出さない |
+| `turn_off(token, url)` | `PATCH` を 1 回送る。2xx なら None、そうでなければ理由の文字列 | 例外を出さない |
+| `codex_training.turn_off(cred, url, key)` | 1 つの鍵の `PATCH`（`feature=<鍵>&value=false`）を 1 回送る。2xx なら None、そうでなければ理由 | 例外を出さない |
 | `training_optout.cmd_check` | `--runtime` ごとに `claude_training.read_setting`・`codex_training.read_setting` か `unsupported` を並べ、終了コードを決めて 1 行の JSON を出す | 終了コード 0 / 1 / 3（「入出力の契約」） |
 | `training_optout.cmd_session_start` | 処理の流れの判定を行い、知らせがあれば `{"systemMessage": …}` を 1 行出す | 常に終了コード 0（I6） |
 
@@ -256,7 +259,7 @@ classDiagram
 
 | 項目 | 内容 |
 | --- | --- |
-| 名前 | `python3 "$SCRIPTS/training-optout.py" check [--runtime claude\|codex\|kiro\|agy]...` |
+| 名前 | `python3 "$SCRIPTS/training-optout.py" check [--runtime claude\|codex\|kiro\|agy]... [--config-dir <設定ディレクトリ>...]` |
 | 入力 | `--runtime` は繰り返してよい。省くと `claude`。重複は 1 つにする。環境変数は「認証の読み方」の表 |
 | 出力 | `lib/step_result.py` の形の 1 行の JSON（下の例） |
 | 失敗の形 | 下の終了コードの表。HTTP の失敗・認証が無い・形の違い・`unsupported` は `training: null` と `reason` |
@@ -264,7 +267,7 @@ classDiagram
 
 ```json
 {"tool": "training-optout", "status": "ok", "summary": "学習に使わない設定: claude",
- "items": [{"runtime": "claude", "training": false, "source": "oauth/account/settings.grove_enabled",
+ "items": [{"runtime": "claude", "config_dir": null, "training": false, "source": "oauth/account/settings.grove_enabled",
             "updated_at": "2026-10-02T01:23:45Z", "reason": null}], "metrics": {}}
 ```
 
@@ -280,8 +283,10 @@ classDiagram
 
 | 場合 | `reason` |
 | --- | --- |
-| OAuth でない接続 | `OAuth でない接続（API キー・認証トークン・Bedrock・Vertex）` |
-| トークンが無い | `OAuth のトークンが無い` |
+| OAuth でない接続 | `OAuth 以外の接続が有効（<空でない変数の名前>）`（値は出さない） |
+| トークンが無い | `OAuth のトークンが無い（CLAUDE_CODE_OAUTH_TOKEN・.credentials.json）` |
+| トークンの期限切れ（`check` だけ。決定 16） | `トークンの期限切れ（CLAUDE_CONFIG_DIR=<置き場> claude を 1 度起動して更新する）` |
+| 従量の接続の宣言（`check` だけ。`config_dir` は `metered`） | `従量の接続の宣言がある（<変数名>。外すには NDF_SUPERVISE_CLAUDE_FALLBACK= を空で定義する）` |
 | HTTP の状態が 200 でない | `HTTP <状態コード>` |
 | 通信の失敗 | `通信の失敗` |
 | 応答に真偽値が無い | `応答に grove_enabled の真偽値が無い` |
@@ -354,17 +359,16 @@ classDiagram
 置くと `200` が返った（2026-10-02 の実測）。`ChatGPT-Account-Id` は無くても個人のワークスペースでは `200` だったが、
 複数のワークスペースを持つアカウントで読む先を codex と同じにするため置く。
 
-### 書き換え（決定 14 の確認の後に入れる）
+### 書き換え（`session-start --runtime codex`）
 
-**書き換えの口は在るが、引数の形を実物で確かめていない。** `PATCH https://chatgpt.com/backend-api/settings/account_user_setting`
-（`GET` に `405`・`Allow: PATCH`）。確かめるまで、codex の書き換えは実装に入れず、`hooks/codex.json` も変えない。
-確かめた後に入れる形は次のとおりで、claude の書き換えと同じ観点で決める。
+**書き換えは `PATCH https://chatgpt.com/backend-api/settings/account_user_setting?feature=<鍵>&value=false` で送る。** 見出しは読み取りと同じで、
+応答は `200`・本文 `{"<鍵>": false}`（2026-10-02 の実測。[決定 14](issue-1597-design-decisions.md)）。claude の書き換えと同じ観点で決める。
 
 | 観点 | 決めたこと |
 | --- | --- |
-| 起動の契機 | `hooks/codex.json` の SessionStart に `python3 "$PLUGIN_ROOT/scripts/training-optout.py" session-start --runtime codex` を足す（`timeout` 10）。`codex exec` の worker も同じ契機で動くかは実装の時点で確かめる |
-| 送る条件 | 読んだ 3 つの鍵のうち true の鍵ごとに 1 回（I2 と同じく true → false の向きだけ）。false・null なら送らない |
-| 知らせ方 | `{"systemMessage": "[ndf] この ChatGPT のアカウントの「Improve the model for everyone」を Off にした …"}`（codex の hook の出力の型は `systemMessage` を持つ）。文面は claude の表に codex の行を足す |
+| 起動の契機 | `hooks/codex.json` の SessionStart に `python3 "$PLUGIN_ROOT/scripts/training-optout.py" session-start --runtime codex` を足す（`timeout` 10）。`codex exec` の worker も同じ契機で動くかは確かめていない |
+| 送る条件 | 読んだ 3 つの鍵のうち true の鍵ごとに 1 回（I2 と同じく true → false の向きだけ）。false なら送らない。読み取りが null（I8 の形の不正）なら、true の鍵があっても送らず失敗を知らせる。ChatGPT でないログインは送らず知らせない |
+| 知らせ方 | `{"systemMessage": "[ndf] この ChatGPT のアカウントの <書き換えた項目> を Off にした …"}`（codex の hook の出力の型は `systemMessage` を持つ）。文面は claude の表に codex の行を足す |
 | 外す手段 | `NDF_TRAINING_OPTOUT=0`（claude と同じ変数。I3 と同じく読みも書きも送らない） |
 | 失敗時 | I6 と同じ。終了コードは常に 0、失敗の知らせを出す |
 | 秘密 | I5・I9。トークンと `account_id` は見出しにだけ置く |
@@ -403,4 +407,4 @@ graph TD
 | 可用性 | どの失敗でも hook は終了コード 0 で終わり、セッションの開始を止めない | `cmd_session_start` の全体を例外の捕捉で包み、終了コードを 0 に固定する。hook の command も `; exit 0` で終え、`python3` が無ければ何もしない。`continueOnError: true` | 各失敗の経路と、`claude_training` の関数が例外を投げるよう差し替えた場合に、終了コード 0 を見るテスト |
 | 性能・拡張性 | hook の 1 回の実行は hook の `timeout` に収まる。読み書きの HTTP には打ち切りの時間を置き、その合計が `timeout` を超えない | hook の `timeout` を 10 秒、HTTP の打ち切りを 1 回 3 秒（`GET` と `PATCH` で最大 6 秒）、キーチェーンの起動を 2 秒とする。合計の最大は 8 秒で、`python3` の起動を足しても 10 秒に収まる | 応答を返さない偽の宛先で、`session-start` が 7 秒以内に終わり終了コード 0 を返すテスト |
 | セキュリティ | トークンは環境変数か認証ファイルから読むだけで、書き出さない。出力とログにトークンとアカウントの ID を出さない。送り先は `api.anthropic.com`（claude）と `chatgpt.com`（codex）だけ | トークンは `Authorization` の見出しにだけ、codex の `account_id` は `ChatGPT-Account-Id` の見出しにだけ置く。`reason` と知らせは表の固定の文面と状態コード・型名だけで作り、応答の本文を写さない。ログのファイルは作らない。宛先は定数（試験用の差し替えだけ環境変数で、手元のホストに限る。I7） | トークンと応答（識別子の鍵）に目印の文字列を入れ、標準出力・標準エラーに目印が現れないことを見るテスト。I7 の例に挙げた手元に似せた URL のそれぞれで、トークンを読まず何も送らないことを見るテスト |
-| システム環境 | Claude Code の SessionStart の hook として動く。codex の書き換えは決定 14 の確認の後。kiro / agy では書き換えない | hook を `hooks/claude.json` にだけ置く（決定 14 の確認までは）。`check --runtime codex` は読み取り、`kiro\|agy` は `unsupported` | `claude plugin validate .` の終了コード 0。`hooks/codex.json` と `dev.agy/hooks.json` に `training-optout` が無いことを見るテスト |
+| システム環境 | Claude Code と codex の SessionStart の hook として動く。kiro / agy では書き換えない | hook を `hooks/claude.json` と `hooks/codex.json` に置く。`check --runtime codex` は読み取り、`kiro\|agy` は `unsupported` | `claude plugin validate .` の終了コード 0。`dev.agy`・`dev.kiro` の hook の定義に `training-optout` が無いことを見るテスト |

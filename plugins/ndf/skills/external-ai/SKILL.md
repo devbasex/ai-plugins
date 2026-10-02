@@ -58,7 +58,7 @@ description: "Delegate coding, review, or research to the codex, agy, kiro-cli, 
 | 承認の与え方 | `--dangerously-bypass-approvals-and-sandbox` | `--dangerously-skip-permissions`（**作業領域の外への書き込みは止まらない**） | `--trust-all-tools`（**絞り込みは防御にならない**） | `--permission-mode acceptEdits` + `--allowed-tools` |
 | 非対話実行 | `codex exec` で完結。プロンプトは**標準入力必須** | `-p=<本文>` で渡す。**標準入力は受け取らない** | `chat --no-interactive` | `-p` |
 | 完了判定 | stderr の `^tokens used$` sentinel | プロセス終了（`kill -0` / `wait`） | **終了コードは使えない。** 結果ファイルと stderr の照合 | JSON の `is_error` / `subtype` |
-| 実測モデルの取得 | できない | できない | **できない**（既定 `auto` は特に不可） | `modelUsage` から取れる |
+| 実測モデルの取得 | セッションの記録（`$CODEX_HOME/sessions`）から取れる | できない | **できない**（`auto` が選んだモデルは返らない） | `modelUsage` から取れる |
 | 典型実行時間 | 5〜10 分 | 数十秒〜5 分 | 数分 | 数分（29 ターンで 218 秒の実測） |
 | 強み | コード逐語照合、長時間の深い調査 | 横断調査、長文生成、軽量タスク。作業領域を明示的に区切れる | claude 系 / gpt 系のモデルを同じハーネスで選べる | 手順書（Skill）への追従が最も安定 |
 | 弱み | セットアップ・運用が煩雑 | 高難度コード解析でやや浅くなることがある | **Skill を配置しても本文を読まない**（明示パスが必須） | 実行コストが高い（1 件 1.42 ドルの実測） |
@@ -107,6 +107,7 @@ LLM が決めるのは **どの CLI に渡すか**（上の表）と **プロン
 | `stopped` | `timeout` / `stalled` | 読むファイルを絞るか観点を分けて渡し直す |
 | `stopped` | `usage_limit` | 同じ CLI では解けない。別の CLI へ渡す |
 | `stopped` | `auth` / `missing_cli` | 補助ファイルのログイン・インストールの手順を行う（終了コード 3） |
+| `stopped` | `policy` | リポジトリのランタイムの宣言（`.ndf/runtimes.json`）の外。CLI を起動していない。`metrics.reason` を読み、宣言の中の CLI へ渡す（終了コード 3） |
 | `stopped` | `early_error` / `launch_failed` | `metrics.detail` を読む |
 
 - 使えるかだけを先に知りたいときは `external-ai.py check <runtime>`（CLI の有無と認証）

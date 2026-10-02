@@ -106,6 +106,14 @@
             "timeout": 5,
             "continueOnError": true,
             "suppressOutput": false
+          },
+          {
+            "type": "command",
+            "command": "sh -c 'ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; command -v python3 >/dev/null 2>&1 || exit 0; python3 \"$ROOT/scripts/training-optout.py\" session-start; exit 0'",
+            "description": "NDF: turn off 'Help improve our AI models' for this account (NDF_TRAINING_OPTOUT=0 to skip)",
+            "timeout": 10,
+            "continueOnError": true,
+            "suppressOutput": false
           }
         ]
       }
