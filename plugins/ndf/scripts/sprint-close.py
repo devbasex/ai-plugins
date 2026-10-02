@@ -215,13 +215,22 @@ def close_one(ctx, repo, n):
         for ln in (s.stdout + s.stderr).splitlines():
             if "NOTE" in ln:
                 notes.append({"kind": "board_note", "name": f"{repo}#{n}", "result": "note", "reason": ln.strip()})
-    close_out = None
-    if before == "OPEN":
-        now = issue_state(root, repo, n)
-        if now == "OPEN":
-            c = gh_call.gh(["issue", "close", str(n), "--repo", repo, "--comment", comment], cwd=root)
-            close_out = (c.stdout + c.stderr).strip()[:300] or None
+    close_out = _close_if_open(root, repo, n, comment) if before == "OPEN" else None
     after = issue_state(root, repo, n)
+    return _close_result(it, before, after, close_out)
+
+
+def _close_if_open(root, repo, n, comment):
+    """読み直して OPEN なら閉じ、close の出力（無ければ None）を返す。"""
+    if issue_state(root, repo, n) != "OPEN":
+        return None
+    c = gh_call.gh(["issue", "close", str(n), "--repo", repo, "--comment", comment], cwd=root)
+    return (c.stdout + c.stderr).strip()[:300] or None
+
+
+def _close_result(it, before, after, close_out):
+    """before と after から 1 課題の結果を作る（already_closed / closed / failed）。"""
+    repo, n = it["repo"], it["number"]
     if before == "CLOSED":
         return {**it, "result": "already_closed"}
     if after == "CLOSED":
