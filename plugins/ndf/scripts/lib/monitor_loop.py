@@ -87,12 +87,14 @@ def _initialize_monitor(
 def _validate_pid_cmdline(pid: int, agent: str, alive: bool, validated: bool) -> tuple[bool, monitor_types.MonitorOutcome | None]:
     if not alive or validated:
         return validated, None
-    cmdline_ok = monitor_proc._pid_cmdline_matches(pid, agent)
+    # 起動されるのはランタイムの CLI なので、席の名前（`claude-2`）ではなくランタイム名で照合する（#1412）
+    expected = monitor_types._agent_runtime(agent)
+    cmdline_ok = monitor_proc._pid_cmdline_matches(pid, expected)
     if cmdline_ok is False:
         monitor_proc._kill_pid(pid)
         return validated, monitor_types.MonitorOutcome.create(
             "PIDFILE_BAD",
-            f"pid {pid} cmdline does not contain '{agent}' (stale pidfile?)",
+            f"pid {pid} cmdline does not contain '{expected}' (stale pidfile?)",
         )
     return cmdline_ok is True, None
 
