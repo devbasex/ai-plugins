@@ -233,3 +233,65 @@ def test_launch_cli_writes_the_launch_record_before_cd(tmp_path):
     assert record["runtime"] == "codex"
     assert record["workdir"] == os.path.realpath(work)
     assert record["started_at"] != "2000-01-01T00:00:00Z" and record["started_at"].endswith("Z")
+
+
+def _claude_stem(tmp_path: pathlib.Path, stdout: str | None) -> pathlib.Path:
+    stem = tmp_path / "tmp" / "claude-implement-rf1"
+    _launch(stem, "claude", tmp_path)
+    if stdout is not None:
+        pathlib.Path(f"{stem}-stdout.log").write_text(stdout, encoding="utf-8")
+    return stem
+
+
+@pytest.mark.parametrize(
+    ("stdout", "expected"),
+    [
+        (None, (None, "no_record")),
+        ('{"result": "x"}', (None, "no_model_field")),
+        ('{"modelUsage": {}}', (None, "no_model_field")),
+        ('{"modelUsage": {"a": 1}', (None, "unreadable")),
+        ('[{"modelUsage": {"a": {}}}]', (None, "no_model_field")),
+        # 4 種のトークンの和で選ぶ。入力のトークンだけなら small が選ばれる
+        (
+            json.dumps(
+                {
+                    "modelUsage": {
+                        "small": {"inputTokens": 50, "outputTokens": 1},
+                        "big": {"inputTokens": 1, "cacheReadInputTokens": 100, "cacheCreationInputTokens": None},
+                        "odd": "not-a-dict",
+                    }
+                }
+            ),
+            ("big", None),
+        ),
+    ],
+)
+def test_claude_reads_the_dominant_model_of_model_usage(tmp_path, stdout, expected):
+    """現状固定 — claude は標準出力の `modelUsage` から、4 種のトークンの和が最大のモデルを取る。"""
+    o = models.observed_model("claude", _claude_stem(tmp_path, stdout))
+    assert (o.model, o.reason) == expected
+
+
+def test_claude_honours_the_launch_record_and_not_before(tmp_path):
+    """現状固定 — claude でも起動の記録と `not_before` で残骸を除く。"""
+    stem = _claude_stem(tmp_path, json.dumps({"modelUsage": {"m": {"outputTokens": 1}}}))
+    assert _observe_rt("claude", stem) == ("m", None)
+    assert _observe_rt("claude", stem, not_before="2026-10-02T00:00:01Z") == (None, "no_record")
+    pathlib.Path(f"{stem}-launch.json").unlink()
+    assert _observe_rt("claude", stem) == (None, "no_record")
+
+
+def _observe_rt(runtime, stem, not_before=None):
+    o = models.observed_model(runtime, stem, None, not_before)
+    return o.model, o.reason
+
+
+def test_an_unexpected_error_becomes_unreadable(tmp_path, monkeypatch):
+    """現状固定 — 内部で例外が出ても外へ出さず `unreadable` を返す。"""
+
+    def boom(*_a, **_k):
+        raise RuntimeError("x")
+
+    monkeypatch.setattr(models, "_read_launch_record", boom)
+    o = models.observed_model("codex", tmp_path / "codex-x")
+    assert (o.model, o.reason) == (None, "unreadable")
