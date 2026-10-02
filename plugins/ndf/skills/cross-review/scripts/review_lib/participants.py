@@ -146,6 +146,9 @@ def _round_reviewers(st: dict[str, Any], round_no: int) -> list[str]:
 
 # ---------- ランタイムの宣言（#1598） ----------
 
+# `_resolve_reviewers` の `policy` を渡さなかった印。`None`（宣言が無い）と区別する。
+_UNSET = object()
+
 
 def _load_policy() -> runtime_policy.RuntimePolicy | None:
     """カレントディレクトリのリポジトリのランタイムの宣言。壊れていれば終了コード 1（前提 7）。"""
@@ -235,7 +238,9 @@ def _normalize_participant_args(
     return only, _flatten("include"), _flatten("exclude")
 
 
-def _resolve_reviewers(host: str, args: argparse.Namespace, policy: Any = False) -> dict[str, Any]:
+def _resolve_reviewers(
+    host: str, args: argparse.Namespace, policy: runtime_policy.RuntimePolicy | None | object = _UNSET
+) -> dict[str, Any]:
     """使える者を決め、状態ファイルの `participants`（`fallback` を含む 9 項目）を返す。
 
     母集合は `default_pool(host)`（claude / codex / kiro とホスト）。母集合に無い者の
@@ -247,10 +252,10 @@ def _resolve_reviewers(host: str, args: argparse.Namespace, policy: Any = False)
     関数の後に書かれるため作られない）。
 
     ランタイムの宣言（#1598）があれば、母集合をその `allowed` で絞り、宣言の外の `--include` /
-    `--only` を終了コード 1 で止める。`policy` を渡さなければ（既定の `False`）ここで読む。
+    `--only` を終了コード 1 で止める。`policy` を渡さなければ（既定の `_UNSET`）ここで読む。
     """
     only, include, exclude = _normalize_participant_args(args)
-    if policy is False:
+    if policy is _UNSET:
         policy = _load_policy()
     probe = functools.partial(auth.probe_auth, info=review_lib.info)
     try:
