@@ -96,7 +96,7 @@ def env(tmp_path: Path) -> Env:
 
 
 def _checked(body: str) -> list[str]:
-    return [line[len("- [x] "):].split(" — ")[0] for line in body.splitlines() if line.startswith("- [x] ")]
+    return [line[len("- [x] ") :].split(" — ")[0] for line in body.splitlines() if line.startswith("- [x] ")]
 
 
 def test_four_records_in_one_run_are_all_kept(env: Env) -> None:
@@ -171,8 +171,32 @@ def test_without_gh_the_stage_is_still_recorded(env: Env, tmp_path: Path) -> Non
     """`gh` が無くても積み、終了コードは 0 である。"""
     nogh = tmp_path / "nogh"
     nogh.mkdir()
-    for name in ("bash", "git", "python3", "date", "mktemp", "cmp", "cat", "grep", "sed", "dirname", "rm", "cp",
-                 "jq", "mkdir", "mv", "tr", "head", "printf", "sleep", "rmdir", "find", "stat", "touch", "ls"):
+    for name in (
+        "bash",
+        "git",
+        "python3",
+        "date",
+        "mktemp",
+        "cmp",
+        "cat",
+        "grep",
+        "sed",
+        "dirname",
+        "rm",
+        "cp",
+        "jq",
+        "mkdir",
+        "mv",
+        "tr",
+        "head",
+        "printf",
+        "sleep",
+        "rmdir",
+        "find",
+        "stat",
+        "touch",
+        "ls",
+    ):
         found = shutil.which(name)
         if found:
             (nogh / name).symlink_to(found)
@@ -204,8 +228,9 @@ def test_the_release_lists_the_missing_stages_on_stdout(env: Env) -> None:
 def test_the_release_without_a_gap_says_nothing_more(env: Env) -> None:
     env.run(str(SYNC), "42", "mode", "light")
     # 必須と条件付きの工程をすべて記録してから配布へ進む
-    required = env.sh(f'. "{WF_LIB}"; wf_stages | while IFS= read -r s; do '
-                      'case "$(wf_stage_class light "$s")" in R|C) printf "%s\\n" "$s" ;; esac; done')
+    required = env.sh(
+        f'. "{WF_LIB}"; wf_stages | while IFS= read -r s; do case "$(wf_stage_class light "$s")" in R|C) printf "%s\\n" "$s" ;; esac; done'
+    )
     for name in required.stdout.splitlines():
         if name != "配布":
             env.run(str(SYNC), "42", "stage", name)
@@ -263,8 +288,8 @@ def test_a_failed_lock_skips_only_that_key(env: Env) -> None:
     script = (
         f'. "{WF_LIB}"\n'
         "n=0\n"
-        "wf_lock_acquire() { n=$((n + 1)); [ \"$n\" -gt 1 ] && ndf_lock_acquire \"$1\" \"$2\"; }\n"
-        f'wf_record_progress {SLUG} 42 設計 standard fast\n'
+        'wf_lock_acquire() { n=$((n + 1)); [ "$n" -gt 1 ] && ndf_lock_acquire "$1" "$2"; }\n'
+        f"wf_record_progress {SLUG} 42 設計 standard fast\n"
     )
     out = env.sh(script)
     assert out.returncode == 0, out.stderr
@@ -327,8 +352,15 @@ def test_a_stage_recorded_twice_reports_the_same(env: Env) -> None:
 def test_the_hook_does_not_record_from_the_command_text(env: Env, command: str) -> None:
     """#580: hook はコマンドの文字列から通過記録を作らない（I5）。"""
     payload = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "cwd": str(env.root), "tool_input": {"command": command}}
-    out = subprocess.run(["bash", str(GUARD)], cwd=env.root, env=env.env(), input=json.dumps(payload, ensure_ascii=False),
-                         capture_output=True, text=True, timeout=60)
+    out = subprocess.run(
+        ["bash", str(GUARD)],
+        cwd=env.root,
+        env=env.env(),
+        input=json.dumps(payload, ensure_ascii=False),
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
     assert out.returncode == 0, out.stderr
     assert out.stdout == ""
     assert not env.state_file(42).exists()
