@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from typing import Any
 
 import review_lib  # noqa: E402
@@ -201,6 +202,29 @@ def _record_fix_history(st: dict, normalized: dict[str, Any], pr: int) -> None:
         rejected_findings.append({**r, "pr": pr, "round": round_no})
 
 
+# 取り込みの段階（#1340 の I8）。`rounds[-1].fix.merge.stage` に書き進め、打ち直しは済んでいない段階から続ける。
+STAGE_RECORDED = "recorded"  # 記録を保存した
+STAGE_POSTED = "posted"  # 返信・決着・まとめを投稿した
+STAGE_DONE = "done"  # CI の分類を終えた
+
+
+def _merge_stage(st: dict, commit: object) -> str | None:
+    """最後のラウンドが同じコミットの修正の記録を持てば、その取り込みの段階を返す。持たなければ `None`。
+
+    `merge` を持たない更新前の記録は `recorded` と読む（投稿まで済んだかを決められないため、投稿から続ける）。
+    """
+    existing = (st.get("rounds") or [{}])[-1].get("fix")
+    if not (commit and isinstance(existing, dict) and existing.get("commit") == commit):
+        return None
+    merge = existing.get("merge")
+    return str(merge.get("stage") or STAGE_RECORDED) if isinstance(merge, dict) else STAGE_RECORDED
+
+
+def _set_stage(pr: int, st: dict, stage: str, exit_code: int | None = None) -> None:
+    st["rounds"][-1]["fix"]["merge"] = {"stage": stage, "exit_code": exit_code}
+    store._save(pr, st)
+
+
 def cmd_merge_fix(args: argparse.Namespace) -> None:
     """Step 5 後段 — fix サブエージェント戻り値を state にマージ + CI 分類。
 
@@ -217,25 +241,60 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     round_started_ts = fix_result._round_started_unixtime(st["rounds"][-1])
 
     fix = fix_result._read_fix_result(pr, args.file, round_started_ts)
+    ingest_fix(pr, st, fix)
 
+
+def ingest_fix(pr: int, st: dict, fix: dict, *, pushed_by_host: bool = False) -> None:
+    """修正の戻り値を取り込む（送信 → 本文の揃え → 記録 → 投稿 → CI の分類）。`merge-fix` と `record-fix` が通る。
+
+    `pushed_by_host` はホストが自分で送った修正（`record-fix`）で、送信を飛ばして本文の揃えから通す。
+    同じコミットの記録が既にあれば、`merge.stage` が `done` なら記録した終了コードで抜け、そうでなければ
+    済んでいない段階から続ける（I8）。終了コード: 0 = 続ける、3 = コード関連の CI 失敗（final=error）。
+    """
+    commit = fix.get("fix_commit") or fix.get("commit_sha")
+    stage = _merge_stage(st, commit)
+    if stage == STAGE_DONE:
+        code = int(st["rounds"][-1]["fix"]["merge"].get("exit_code") or 0)
+        review_lib.info(f"⏭ round {st['rounds'][-1].get('round')} の修正（commit={commit}）は取り込み済み（終了コード {code}）")
+        sys.exit(code)
+    if stage is None:
+        round_fix = _record_new_fix(pr, st, fix, commit, pushed_by_host)
+    else:
+        round_fix = st["rounds"][-1]["fix"]
+        review_lib.info(f"↻ round {st['rounds'][-1].get('round')} の修正（commit={commit}）の取り込みを {stage} の後から続ける")
+    if stage in (None, STAGE_RECORDED):
+        _post_fix(pr, st, fix)
+    _classify_fix_ci(pr, st, fix, round_fix)
+
+
+def _record_new_fix(pr: int, st: dict, fix: dict, commit: object, pushed_by_host: bool) -> dict:
+    """送信と本文の揃えを済ませ、修正の記録を保存する（段階 `recorded`）。"""
     # **送信と投稿は取り込む側が行う**（#730）。修正の担当はコミットまでで止まる。
     # 送れない・報告されたコミットが送り先に載っていないときは、記録も投稿もせずに
     # 止まる。同じ取り込みをやり直せば、同じ手順を最初から通る。
-    commit = fix.get("fix_commit") or fix.get("commit_sha")
-    pushed = result_posts.push_fix(str(st.get("worktree_path") or ""), str(st.get("head_branch") or ""), commit)
-    if not pushed.ok:
-        review_lib.die(f"修正を送れないか、報告されたコミットが送り先に載っていません: {pushed.detail}")
-    print(f"PUSHED={1 if pushed.pushed else 0} COMMIT_ON_HEAD={1 if pushed.contains else 0}")
+    if pushed_by_host:
+        pushed_flag = True  # 送り先に載っていることは `record-fix` が GitHub で確かめた
+        print("PUSHED=0 COMMIT_ON_HEAD=1")
+    else:
+        pushed = result_posts.push_fix(str(st.get("worktree_path") or ""), str(st.get("head_branch") or ""), commit)
+        if not pushed.ok:
+            review_lib.die(f"修正を送れないか、報告されたコミットが送り先に載っていません: {pushed.detail}")
+        print(f"PUSHED={1 if pushed.pushed else 0} COMMIT_ON_HEAD={1 if pushed.contains else 0}")
+        pushed_flag = pushed.pushed
     unsynced = design_body.sync_after_push(
-        str(st.get("repo") or ""), int(st.get("current_pr") or pr), str(st.get("head_branch") or ""), pushed.pushed
+        str(st.get("repo") or ""), int(st.get("current_pr") or pr), str(st.get("head_branch") or ""), pushed_flag
     )
     if unsynced:
         # 本文が古いまま round を取り込み済みにしない。送信は済んでいるため、打ち直すと揃えからやり直す。
         review_lib.die(f"本文の「決めたこと」を揃えられないため止めます。打ち直してください ({unsynced})")
 
     round_fix = _merge_fix_records(st, fix, pr)
-    store._save(pr, st)
+    _set_stage(pr, st, STAGE_RECORDED)
+    return round_fix
 
+
+def _post_fix(pr: int, st: dict, fix: dict) -> None:
+    """返信・決着・まとめを投稿する（段階 `posted`）。投稿キューが投稿済みの項目を送らずに済ませる。"""
     posted = result_posts.post_fix(
         posts._queue(pr),
         fix[fix_result.FIX_SOURCE_KEY],
@@ -253,9 +312,13 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         review_lib.info(f"⚠️ 送れない項目を {posted.dropped} 件飛ばしました ({posted.detail})")
     if posted.failed:
         review_lib.die(f"返信・決着・まとめを投稿できませんでした ({posted.detail})")
+    _set_stage(pr, st, STAGE_POSTED)
 
-    # CI 分類
+
+def _classify_fix_ci(pr: int, st: dict, fix: dict, round_fix: dict) -> None:
+    """修正の担当が申告した CI の結果を分類する（段階 `done`）。"""
     if (fix.get("ci_status") or "").upper() != "FAILURE":
+        _set_stage(pr, st, STAGE_DONE, 0)
         review_lib.info(f"✅ fix マージ完了 (commit={round_fix['commit']} fixed={round_fix['fixed']})")
         return
 
@@ -267,11 +330,11 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     if classified.code_failed:
         st["final"] = "error"
         st["ended_at"] = review_lib._now()
-        store._save(pr, st)
+        _set_stage(pr, st, STAGE_DONE, 3)
         review_lib.die(f"コード関連 CI 失敗。中断: {failed}", code=3)
 
     # meta only: 継続
     note = f"メタチェックのみ失敗: {failed} — コードと無関係のため継続"
     st["rounds"][-1]["fix"]["ci_note"] = note
-    store._save(pr, st)
+    _set_stage(pr, st, STAGE_DONE, 0)
     review_lib.info(f"⚠ メタチェックのみ失敗 ({failed}) — 継続")

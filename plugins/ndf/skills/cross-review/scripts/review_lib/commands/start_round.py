@@ -10,6 +10,7 @@ from review_lib import (  # noqa: E402
     github,
     participants as participants_mod,
     posts,
+    reopen as reopen_mod,
     review_focus,
     store,
     workspace as workspace_mod,
@@ -120,21 +121,25 @@ def cmd_start_round(args: argparse.Namespace) -> None:
     posts._auto_flush(args.pr)
     st = store._load(args.pr)
     total = len(st["rounds"])
+    # 上限は最後にラウンドを足した時点より後のラウンドだけで数える（#1340 の I3）。
+    base = reopen_mod.base_round(st)
+    since = reopen_mod.rounds_since(st)
     max_r = st["max_rounds"]
-    if total >= max_r:
+    if len(since) >= max_r:
         st["final"] = "max_rounds"
         st["ended_at"] = review_lib._now()
         store._save(args.pr, st)
         review_lib.die(f"max_rounds={max_r} 到達。中断。", code=1)
     # 上限に達していれば、そこでループが終わる。後始末のチェックはその後で意味を持たない。
-    if total > 0:
+    # 足す前のラウンドは、最終スイープが未解決 0 件で閉じたと検証できたときだけ確認を当てない（I4）。
+    if total > 0 and not (total <= base and reopen_mod.sweep_closed(st)):
         _guard_previous_round(st, st["rounds"][-1])
 
     pr = st["current_pr"]
     head = _sync_before_round(st, pr)
 
     round_no = total + 1
-    round_in_pr = sum(1 for r in st["rounds"] if r["pr"] == pr) + 1
+    round_in_pr = sum(1 for r in since if r["pr"] == pr) + 1
 
     # 既存コメントのスナップショットを取り直す（#542 の決定 6）。通しの 1 ラウンド目は `init` が取った
     # 直後のため取り直さない。失敗しても前のスナップショットのまま進める（前のスナップショットでも今と同じ条件で
@@ -166,7 +171,7 @@ def cmd_start_round(args: argparse.Namespace) -> None:
     st["rounds"].append(entry)
     store._save(args.pr, st)
 
-    review_lib.info(f"=== Round {round_no} / {max_r} (PR #{pr}, round_in_pr={round_in_pr}, レビュー: {' + '.join(reviewers)}) ===")
+    review_lib.info(f"=== Round {round_no} / {base + max_r} (PR #{pr}, round_in_pr={round_in_pr}, レビュー: {' + '.join(reviewers)}) ===")
     print(f"ROUND={round_no}")
     print(f"REVIEWERS='{' '.join(reviewers)}'")
     if stage is not None:
