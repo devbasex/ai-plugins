@@ -62,7 +62,7 @@ _LIB = Path(__file__).resolve().parents[3] / "scripts" / "lib"
 sys.path.insert(0, str(_LIB))
 import deps  # noqa: E402  外部パッケージの環境（upkeep_gh が投稿キューを読む）
 import jsonio  # noqa: E402
-from step_result import EXIT_PAUSE, EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, approval_present, common_parser  # noqa: E402
+from step_result import EXIT_GATE, EXIT_PAUSE, EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, approval_present, common_parser  # noqa: E402
 from step_result import emit, git, git_root, main_with, result  # noqa: E402
 import upkeep_rank_cmd as RC  # noqa: E402
 import upkeep_report  # noqa: E402
@@ -496,7 +496,7 @@ def _apply_outcome(repo, actions, buckets, partial, why_partial, prev, waits, rp
     if buckets["failed"]:
         status, code = "stopped", 1
     elif buckets["needs_approval"]:
-        status, code = "gate", 10
+        status, code = "gate", EXIT_GATE
         pres = RC.approval_presentation(TOOL, repo, actions, buckets["needs_approval"], rp.holds, approval_present)
         nxt = '承認を得た課題に "approved": true を付けて同じ plan で apply を打ち直す（済んだものは記録で飛ぶ）'
         if rp.holds:
