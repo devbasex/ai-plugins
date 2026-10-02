@@ -9,7 +9,10 @@
 # 通せば判定が抜けたままマージが動く。マージは取り消せず、設計を実装より先に確定させる
 # 工程はマージが済んだ時点で意味を失う。
 
-# コマンドの本文がマージなら 0 を返し、対象の番号を出す（番号が無ければ空を出す）。
+# コマンドの本文がマージなら 0 を返し、対象の番号を 1 件 1 行で出す（番号が無いマージは空の行を出す）。
+#
+# **1 回の実行に並んだマージはすべて出す（#581）。** 最初の 1 件だけを返すと、
+# `gh pr merge 571 ; gh pr merge 572` の 572 が承認の判定を通らずにマージされる。
 #
 # 拾う形は 2 つある。`gh pr merge`（番号あり・番号なし・Pull Request の URL）と、
 # REST の経路（`…/pulls/<番号>/merge`）である。マージそのものが REST で行われることが
@@ -30,9 +33,14 @@
 wf_merge_target() {
   local cmd="${1:-}" num=""
   # 区切りの扱い（#565）は `_wf_scan_gh_verb` が持つ。
-  _wf_scan_gh_verb "$cmd" "merge" _wf_merge_target_token || return 1
-  printf '%s\n' "$num"
+  _wf_scan_gh_verb "$cmd" "merge" _wf_merge_target_token _wf_merge_target_done || return 1
   return 0
+}
+
+# `wf_merge_target` の 1 コマンド分の終わり。`num` は呼び出し元のものを出して空へ戻す。
+_wf_merge_target_done() {
+  printf '%s\n' "$num"
+  num=""
 }
 
 # `wf_merge_target` の 1 語分。`num` は呼び出し元のものを書き換える。
@@ -159,15 +167,27 @@ _wf_verify_approval_label() {
 }
 
 # マージを通してよければ 0 を返し、何も出さない。止めるときは理由を出して 1 を返す。
+#
+# 1 回の実行に並んだマージは 1 件ずつ判定し、1 件でも止めるなら実行全体を止める（#581）。
 wf_check_merge() {
-  local cmd="${1:-}" num slug head json
-  num=$(wf_merge_target "$cmd") || return 0
+  local cmd="${1:-}" targets num slug
+  targets=$(wf_merge_target "$cmd") || return 0
+  num=${targets%%$'\n'*}
 
   _wf_require_merge_tools "$num" || return 1
 
   slug=$(wf_repo_slug ".") || {
     wf_deny_undetermined "$num" 'リポジトリの名前（origin の URL を取れない）'; return 1; }
 
+  while IFS= read -r num; do
+    _wf_check_one_merge "$slug" "$num" || return 1
+  done <<<"$targets"
+  return 0
+}
+
+# 1 件のマージを判定する。`num` が空ならブランチから引き当てる。
+_wf_check_one_merge() {
+  local slug="${1:-}" num="${2:-}" head json
   json=$(_wf_resolve_pr_info "$slug" "$num") || {
     printf '%s\n' "$json"
     return 1

@@ -264,11 +264,20 @@ _wf_seek_gh_verb() {
 #
 # `<each>` は `state`（3 が見つけた状態）と `found`（0 が見つけた）を読み書きできる。
 # 呼ぶ時点で、その語までの探索は済んでいる。
+#
+# **`<done>` を渡すと、見つけたコマンドの終わりごとに `<done>` を呼び、次のコマンドから探索を
+# やり直す（#581）。** 1 回の実行に並んだ 2 つ目以降のコマンドも読み手へ届く。`<done>` の後で
+# `found` は見つける前へ戻る。戻り値は 1 つでも見つけたら 0 である。
 _wf_scan_gh_verb() {
-  local cmd="${1:-}" verb="${2:-}" each="${3:-}" tok state=0 found=1
+  local cmd="${1:-}" verb="${2:-}" each="${3:-}" done_fn="${4:-}" tok state=0 found=1 any=1
   while IFS= read -r -d '' tok; do
     if [ -z "$tok" ]; then
-      [ "$found" -ne 0 ] || break
+      if [ "$found" -eq 0 ]; then
+        any=0
+        [ -n "$done_fn" ] || break
+        "$done_fn"
+        found=1
+      fi
       state=0
       continue
     fi
@@ -276,7 +285,11 @@ _wf_scan_gh_verb() {
     [ "$state" = "3" ] && found=0
     "$each" "$tok"
   done < <(wf_split "$cmd")
-  [ "$found" -eq 0 ]
+  if [ "$found" -eq 0 ]; then
+    any=0
+    [ -z "$done_fn" ] || "$done_fn"
+  fi
+  [ "$any" -eq 0 ]
 }
 
 # 進行の記録のコマンドなら、課題番号・キー・値をタブ区切りで出す。
