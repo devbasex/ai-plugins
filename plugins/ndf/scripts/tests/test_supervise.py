@@ -2095,15 +2095,26 @@ def test_run_from_restores_pr_from_previous_report(tmp_path):
     assert "n=1066" in s.state.results["b"]["text"]
 
 
-def test_new_check_without_scope_drives_over_the_pr_directories(tmp_path):
+def test_new_check_builds_the_refactor_scope_from_the_pr_files(tmp_path):
     out = tmp_path / "c.json"
-    p = cli("new", "check", "--pr", "999", "--worktree", "/w", "--out", str(out))
+    p = cli("new", "check", "--pr", "999", "--worktree", "/w", "--scope", "extra dir", "--out", str(out))
     assert p.returncode == 0, p.stderr
     refactor = next(s for s in json.loads(out.read_text())["steps"] if s["id"] == "refactor")
     assert refactor["type"] == "drive" and not refactor.get("full")
-    # 差分が 20000 行を超える PR は gh pr diff が 406 で拒むため、ファイルの一覧は REST から取る
-    assert "gh api 'repos/{owner}/{repo}/pulls/999/files' --paginate" in refactor["args"]
-    assert "gh pr diff" not in refactor["args"]
+    # 範囲は refactor-scope.py が PR の差分から組み、明示した --scope は足す（#1484）
+    assert f"--scope $(python3 {SCRIPTS / 'refactor-scope.py'} --pr 999 --scope 'extra dir')" in refactor["args"]
+
+
+def test_new_sprint_check_hands_the_declared_tests_and_scope_to_the_same_builder(tmp_path):
+    out = tmp_path / "m"
+    p = cli(
+        "new", "sprint", "--name", "m", "--worktree", str(tmp_path), "--issue", "1", "--version", "10.18.0-dev.1",
+        "--tests", "tests/cli", "--scope", "lib/a", "--out", str(out),
+    )  # fmt: skip
+    assert p.returncode == 0, p.stderr
+    check = next(out.glob("*-check.json"))
+    refactor = next(s for s in json.loads(check.read_text())["steps"] if s["id"] == "refactor")
+    assert f"$(python3 {SCRIPTS / 'refactor-scope.py'} --pr {{pr}} --tests tests/cli --scope lib/a)" in refactor["args"]
 
 
 def test_new_sprint_check_and_release_run_without_a_whole_skill(tmp_path):

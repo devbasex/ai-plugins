@@ -10,7 +10,7 @@ from pathlib import Path
 from step_result import result
 from supervise_lib import release_templates
 from supervise_lib.decl import with_decls
-from supervise_lib.paths import CHECK_PY
+from supervise_lib.paths import CHECK_PY, REFACTOR_SCOPE_PY
 from supervise_lib.procedures import pr_step, record_steps, with_record, with_touched
 from supervise_lib.verify_steps import merge_steps, refactor_template_arg, scope_cmd, scope_timeout, test_meta, whole_cmd, whole_timeout
 
@@ -210,20 +210,27 @@ def _inspect_steps(a, pr_ref: str, scope: str) -> list[dict]:
     ]
 
 
+def refactor_scope(a, pr) -> str:
+    """cross-refactoring へ渡す範囲を組むシェルの式（単発とスプリントの検査が使う 1 か所。#1484）。
+
+    PR の差分のファイルそのもの・宣言のテストの置き場所（無ければ変更したファイルの近くのテストの置き場所）・
+    明示した `--scope`（足す）を `refactor-scope.py` がステップの実行の時点で組む。"""
+    cmd = f"{REFACTOR_SCOPE_PY} --pr {pr}"
+    tests = [t for t in (getattr(a, "test_paths", None) or []) if str(t) not in (".", "")]
+    if tests:
+        cmd += " --tests " + " ".join(map(shlex.quote, map(str, tests)))
+    if getattr(a, "scope", None):
+        cmd += " --scope " + " ".join(map(shlex.quote, a.scope))
+    return f"$({cmd})"
+
+
 def plan_check(a) -> dict:
     """PR を指す検査（`new check --pr`）。終わり方（マージ・変更なし・落ちた）にかかわらず検査の記録へ 1 行を書く
     （`check-trigger.py record --target-pr`。#1317）。落ちたステップと judge の止める判断は abort へ行き、
     落ちた行を書いてから止まる。承認ゲートで止まった間は書かず、承認の後に merge-approved から record へ進む。"""
     pr = a.pr
     name = getattr(a, "id", None) or f"pr-{pr}"
-    # 範囲の指定が無ければ、PR が変えたファイルのディレクトリ（根を除く）を範囲にする。ステップはシェルで動く。
-    # 一覧は REST から取る（gh pr diff は差分が 20000 行を超えると 406 で拒み、範囲が空になる）
-    scope = (
-        " ".join(map(shlex.quote, a.scope))
-        if a.scope
-        else f"$(gh api 'repos/{{owner}}/{{repo}}/pulls/{pr}/files' --paginate --jq '.[].filename'"
-        f" | xargs -n1 dirname | sort -u | grep -vx '\\.')"
-    )
+    scope = refactor_scope(a, pr)
     plan = _with_test_meta(
         {
             "フェーズ": "検査",
