@@ -161,7 +161,7 @@ def _outside_policy(st: dict[str, Any], seats: list[str]) -> list[str]:
     allowed = ((st.get("participants") or {}).get("policy") or {}).get("allowed")
     if not allowed:
         return []
-    return [s for s in seats if assignment.SEAT_PATTERN.match(s) and assignment.seat_runtime(s) not in allowed]
+    return runtime_policy.outside_of(allowed, [s for s in seats if assignment.SEAT_PATTERN.match(s)])
 
 
 def _reselect_open_round(st: dict[str, Any]) -> None:

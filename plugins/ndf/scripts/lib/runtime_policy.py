@@ -59,7 +59,7 @@ class RuntimePolicy:
 
     def require(self, names: Iterable[Optional[str]], source: str) -> None:
         """`names` のうち `allowed` に無いもの（席の名前はランタイムへ直す）があれば `RuntimePolicyError`。"""
-        outside = [n for n in dict.fromkeys(n for n in names if n) if not self.allows(_runtime_of(n))]
+        outside = outside_of(self.allowed, dict.fromkeys(n for n in names if n))
         if outside:
             raise RuntimePolicyError(self.reason(outside, source))
 
@@ -69,8 +69,8 @@ class RuntimePolicy:
         落としたら `info` へ知らせの 1 行を出し、`state["resume_changes"]` へ `policy:<field_name>` の変更を積む。
         cross-review と cross-refactoring が共通に使う。
         """
-        kept = [n for n in names if self.allows(_runtime_of(n))]
-        dropped = [n for n in names if n not in kept]
+        dropped = outside_of(self.allowed, names)
+        kept = [n for n in names if n not in dropped]
         if dropped:
             info(f"ℹ {', '.join(dropped)} は宣言の外のため、記録から引き継がずに外しました（{self.path}）")
             state.setdefault("resume_changes", []).append(
@@ -95,6 +95,12 @@ def policy_state(policy: Optional[RuntimePolicy]) -> Optional[dict[str, Any]]:
 def differs_from_record(policy: Optional[RuntimePolicy], recorded_participants: Optional[dict[str, Any]]) -> bool:
     """記録（状態ファイルの `participants`）の宣言の写しと今の宣言が違うか（再開した時点の宣言に従う。前提 8）。"""
     return policy_state(policy) != (recorded_participants or {}).get("policy")
+
+
+def outside_of(allowed: Iterable[str], names: Iterable[str]) -> list[str]:
+    """`names`（席の名前はランタイムへ直す）のうち、`allowed` に無いもの。順序と重なりは `names` のまま。"""
+    allowed = tuple(allowed)
+    return [n for n in names if _runtime_of(n) not in allowed]
 
 
 def _runtime_of(name: str) -> str:
