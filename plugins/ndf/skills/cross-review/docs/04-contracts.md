@@ -126,7 +126,7 @@
 
 - `host` — 確定したホスト名（`claude` / `codex` / `agy` / `kiro`）。参加者プールに残る
   （`participants` を持たない古い状態の再開では、変更の前と同じく参加者プールから外して輪番を回す）
-- `rounds[].reviewer_models.<席>` — そのラウンドのレビューの起動で実際に動いたモデル（#759）。
+- `rounds[].reviewer_models.<席>` — そのラウンドのレビューの起動で実際に動いたモデル。
   取り込み（`read-result`）が結果の検証より前に、共通ライブラリの `models.observed_model` で取って書く。
   結果が無くて止まる経路でも残る。`requested` は指定値で、cross-review は `--model` を渡さないため常に `null`。
   `observed` は実測値、`unobserved` は取れなかった理由の符号（`no_record` / `ambiguous` / `no_model_field` /
@@ -375,7 +375,7 @@ round エントリを状態ファイルへ保存する前に次を行う。**失
 | ファイル | 置き場所 | 中身 | いつ書くか |
 |---|---|---|---|
 | `<stem>-monitor.json` | `$TMP_DIR` | その担当の**最後の**監視の結果（`status` / `reason` / 時刻と、`--phase` の値の `phase`（省いたときは `null`）など 15 個のキー） | 担当 1 者の監視を終えたとき。起動（`launch-cli.sh`）の前に消す |
-| `<stem>-launch.json` | `$TMP_DIR` | 起動の記録（`runtime` / 作業ディレクトリの実パス `workdir` / 起動の直前の UTC の時刻 `started_at`）。実際に動いたモデルを取る側が、ランタイムのセッションの記録と結びつけるのに使う（#759） | 起動（`launch-cli.sh`）が CLI を起動する直前。前の起動の分は先に消す |
+| `<stem>-launch.json` | `$TMP_DIR` | 起動の記録（`runtime` / 作業ディレクトリの実パス `workdir` / 起動の直前の UTC の時刻 `started_at`）。実際に動いたモデルを取る側が、ランタイムのセッションの記録と結びつけるのに使う | 起動（`launch-cli.sh`）が CLI を起動する直前。前の起動の分は先に消す |
 | `monitor-outcomes.jsonl` | `$TMP_DIR` | 監視の結果を 1 行 1 つで**追記だけ**で積む | 同上。消さない |
 | `cross-review-pr<PR>-<開始時刻の UTC>.json` | 要約の置き場所の `<owner>--<repo>/` | 実行の要約（所要・`final`・ラウンド・起動と `measure`）。**本文・`detail` を含まない** | 状態を保存するたび（同じ実行は上書き） |
 
