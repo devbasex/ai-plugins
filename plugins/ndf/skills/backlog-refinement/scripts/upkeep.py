@@ -17,7 +17,7 @@ candidates: 手順 1 の経路のうち機械で集められるものを集め�
   manual（--add で担当が足したもの）/ unscored（記録の見積が無いか、付けた後に要約値が変わった課題。rank を打った
   リポジトリだけ。上限で切るときは数えない）。commit-subject の候補は、上限で切るときも先に残す。候補ごとに updated_at と
   課題の要約値（題名・本文・状態・マイルストーン・ラベル）を返す。
-  --limit で 1 回に扱う件数に上限を置く。超えた分は items に載せず、metrics.deferred に番号だけを返す（終了コード 20）。
+  上限（--limit → .ndf/backlog.json の candidate_limit → 既定 10）を超えた分は items に載せず、metrics.deferred に番号だけを返す（終了コード 20）。
 apply: plan.json の変更を反映する。反映の直前に updated_at を照合し、変わっていれば課題の
   要約値を比べ、それも変わっていれば飛ばす（skipped_changed）。途中で止まった課題は書き込んだ後の
   要約値を記録に残し、打ち直しでは自分の書き込みとして扱う。済んだものは記録に記録して
@@ -277,7 +277,7 @@ def _candidate_result(a, repo, since, open_issues, closed, paths, idents, routes
     found = routes.routes
     # コミットの件名が指す課題は直っている見込みが高いため、上限で切るときも先に残す
     order = sorted(found, key=lambda n: ("commit-subject" not in found[n], -len(found[n] - {"unscored"}), n))
-    keep = order if a.limit is None else order[: a.limit]
+    keep = order[: a.limit]
     deferred = [n for n in order if n not in set(keep)]
     items = []
     # 上限を超えた候補は items に載せない（metrics.deferred にだけ並べる）。載せると
@@ -307,6 +307,7 @@ def _candidate_result(a, repo, since, open_issues, closed, paths, idents, routes
         "open": len(open_issues),
         "candidates": len(keep),
         "deferred": deferred,
+        "limit": a.limit,
         "by_route": by_route,
         "closed_since": len(closed),
         "paths": len(paths),
@@ -334,6 +335,7 @@ def _candidate_result(a, repo, since, open_issues, closed, paths, idents, routes
 
 def cmd_candidates(a):
     root = git_root(a.root)
+    a.limit = RC.candidate_limit(a.limit, RC.read_backlog_decl(root))  # 候補を集める前に決める（不正なら集めない）
     repo = target_repo(root, a.repo)
     gh = Gh(repo)
     since = _ref_date(root, a.since_ref)
@@ -516,7 +518,13 @@ def _apply_outcome(repo, actions, buckets, partial, why_partial, prev, waits, rp
 def cmd_apply(a):
     root = git_root(a.root)
     plan = _load_plan(a.plan)
-    repo = a.repo or plan.get("repo") or target_repo(root, None)
+    repo = target_repo(root, a.repo)
+    if plan.get("repo") not in (None, repo):  # 記録のリポジトリの外へ書かない（#842 の決定 7）
+        why = f"plan の repo {plan['repo']} は記録のリポジトリ {repo} と違う"
+        emit(
+            result(TOOL, "stopped", f"{why}。1 件も書かない", [{"kind": "plan", "name": a.plan, "result": "stopped", "reason": why}], {}),
+            EXIT_PRECONDITION,
+        )
     sd = _state_dir(a.state_dir, repo)
     ledger_path = sd / "ledger.json"
     ledger = _read_state(ledger_path) or {}
@@ -582,7 +590,7 @@ def build_parser():
     c.add_argument("--since-ref", required=True)
     c.add_argument("--all", action="store_true")
     c.add_argument("--add", type=_numbers, default=[], help="担当が足す課題の番号（12,34）")
-    c.add_argument("--limit", type=int, default=None, help="1 回に扱う候補の上限")
+    c.add_argument("--limit", type=int, default=None, help="1 回に扱う候補の上限（省くと宣言の candidate_limit、無ければ既定 10）")
     c.set_defaults(func=cmd_candidates)
     p = sub.add_parser("apply", parents=[common])
     p.add_argument("--plan", required=True)

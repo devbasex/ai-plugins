@@ -35,14 +35,15 @@ Pull Request\tR\tR\tR\tR\tR
 配布\tR\tR\tR\tR\tR
 体裁レビュー\t-\t-\t-\t-\tR
 リリース後テスト\t-\tC\tR\tR\tC
-振り返り\t-\tC\tR\tR\tR'
+振り返り\t-\tC\tR\tR\tR
+棚卸し\tR\tR\tR\tR\tR'
 
 # モードの高さ。**列の位置からは導かない**（決定 2-b）。`WF_MODES` の並びをそのまま
 # 高さにすると読みやすさのための並びが高さの根拠として読まれる。母集合が変わっても、
 # 列とは別に持てば高さの定義を直さずに済む。
 #
 # **`documentation` の高さの根拠は工程の数ではない**（マイルストーン 10 の決定 2）。この表で
-# `R` を数えると `standard` が 16 個、`documentation` は 14 個であり、最多ではない。根拠は
+# `R` を数えると `standard` が 17 個、`documentation` は 15 個であり、最多ではない。根拠は
 # **混在が分割し損ねた状態であること**にある。`documentation` と他のモードが混ざる Pull Request
 # は分けると定めており、`documentation` の列にしかない必須の工程（素材の収集と出典の確定 /
 # 体裁レビュー）は、`standard` の側でチェックすると一度も求められない。混ざっていること自体が
@@ -62,7 +63,7 @@ documentation\t5'
 # 並びは SKILL.md の「進め方」の表と同じである。
 WF_PACES=$'normal\tfast\tauto'
 WF_FAST_TRIGGER_STAGES=$'構造改善\n実装レビュー'
-WF_FAST_DEFERRED_STAGES=$'確定仕様化\n振り返り'
+WF_FAST_DEFERRED_STAGES=$'確定仕様化\n振り返り\n棚卸し'
 
 # 報告の引き金になる工程。ここへ進んだ時点で、記録の無い必須の工程を案内する。
 WF_REPORT_STAGE='配布'
