@@ -243,6 +243,46 @@ def issue_create(repo: str | None, title: str, body: str, labels: list[str] | No
     return _created(gh_quota.with_fallback(lambda: _rest(f"repos/{slug}/issues", "POST", payload), lambda: _graphql_cli(args, body, False)))
 
 
+def _rest_patch_fields(kind: str, slug: str, n: int, title: str | None, body: str | None) -> Attempt | None:
+    """title / body の PATCH。変える項目が無ければ呼ばない。失敗したときだけ結果を返す。"""
+    fields = {k: v for k, v in (("title", title), ("body", body)) if v is not None}
+    if fields:
+        a = _rest(f"repos/{slug}/{gh_fields.VIEW_REST_PATH[kind]}/{n}", "PATCH", fields)
+        if not a.ok:
+            return a
+    return None
+
+
+def _rest_add_labels(slug: str, n: int, add_labels: list[str] | None) -> Attempt | None:
+    if add_labels:
+        a = _rest(f"repos/{slug}/issues/{n}/labels", "POST", {"labels": list(add_labels)})
+        if not a.ok:
+            return a
+    return None
+
+
+def _rest_remove_labels(slug: str, n: int, remove_labels: list[str] | None) -> Attempt | None:
+    """付いていないラベル（404）は失敗にしない。"""
+    for name in remove_labels or []:
+        a = _rest(f"repos/{slug}/issues/{n}/labels/{urllib.parse.quote(name, safe='')}", "DELETE")
+        if not a.ok and "404" not in a.error:
+            return a
+    return None
+
+
+def _edit_cli_args(
+    kind: str, slug: str, n: int, title: str | None, body: str | None, add_labels: list[str] | None, remove_labels: list[str] | None
+) -> list[str]:
+    args = [kind, "edit", str(n), "--repo", slug]
+    args += ["--title", title] if title is not None else []
+    args += ["--body-file", "-"] if body is not None else []
+    for name in add_labels or []:
+        args += ["--add-label", name]
+    for name in remove_labels or []:
+        args += ["--remove-label", name]
+    return args
+
+
 def _edit(
     kind: str,
     repo: str | None,
@@ -256,28 +296,14 @@ def _edit(
     n = int(number)
 
     def by_rest() -> Attempt:
-        fields = {k: v for k, v in (("title", title), ("body", body)) if v is not None}
-        if fields:
-            a = _rest(f"repos/{slug}/{gh_fields.VIEW_REST_PATH[kind]}/{n}", "PATCH", fields)
-            if not a.ok:
-                return a
-        if add_labels:
-            a = _rest(f"repos/{slug}/issues/{n}/labels", "POST", {"labels": list(add_labels)})
-            if not a.ok:
-                return a
-        for name in remove_labels or []:
-            a = _rest(f"repos/{slug}/issues/{n}/labels/{urllib.parse.quote(name, safe='')}", "DELETE")
-            if not a.ok and "404" not in a.error:
-                return a
-        return Attempt(True, "", "rest")
+        return (
+            _rest_patch_fields(kind, slug, n, title, body)
+            or _rest_add_labels(slug, n, add_labels)
+            or _rest_remove_labels(slug, n, remove_labels)
+            or Attempt(True, "", "rest")
+        )
 
-    args = [kind, "edit", str(n), "--repo", slug]
-    args += ["--title", title] if title is not None else []
-    args += ["--body-file", "-"] if body is not None else []
-    for name in add_labels or []:
-        args += ["--add-label", name]
-    for name in remove_labels or []:
-        args += ["--remove-label", name]
+    args = _edit_cli_args(kind, slug, n, title, body, add_labels, remove_labels)
 
     def by_graphql() -> Attempt:
         a = _graphql_cli(args, body, False)
