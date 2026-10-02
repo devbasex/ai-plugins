@@ -99,7 +99,7 @@ GitHub の利用回数の上限に達すると投稿は失敗する。**失敗�
 
 ## 監視と計測が残すファイル
 
-監視（`monitor.py`）と状態の保存が、AI の書き出しとは別に残す（#662）。
+監視（`monitor.py`）と状態の保存が、AI の書き出しとは別に残す。
 
 | ファイル | 置き場所 | 中身 | いつ書くか |
 |---|---|---|---|
@@ -111,7 +111,7 @@ GitHub の利用回数の上限に達すると投稿は失敗する。**失敗�
 `reason` は既定では `status` から決まる（`OK`→`ok` / `TIMEOUT`→`timeout` / `STALLED`→`stalled` /
 `EARLY_ERROR`→`early_error` / `NO_RESULT`→`missing` / `PIDFILE_BAD`→`pidfile_bad`）。監視が
 文言で区別した 2 つだけが状態から決まらない: 利用上限は `EARLY_ERROR` のまま `usage_limit`、
-CLI 自身の上限で結果を書かずに終わったときは `NO_RESULT` のまま `cli_timeout`（#729）。
+CLI 自身の上限で結果を書かずに終わったときは `NO_RESULT` のまま `cli_timeout`。
 監視の標準出力と終了コードは変わらない。
 
 結果の取り込みは結果ファイルを自前で開かず、共通ライブラリの `monitor_outcome.read_launch_outcome(tmp_dir,
