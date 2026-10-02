@@ -5,18 +5,19 @@
 
 ## 実例: rf751 の実装担当が codex だったら
 
-`cross-refactoring` を `--model` なしで走らせ、実装担当が codex になった実行を考える。今は状態ファイルの
-`implementer_model` が `{"requested": null, "observed": null}` のまま残り、`report` は
-「codex はモデルを指定しておらず、実際に動いたモデルも取得できない」として集計から外す。
+`cross-refactoring` を `--model` なしで走らせ、実装担当が codex になった実行を考える。
 
-変更後は次のように動く。
+| | 状態ファイルの `implementer_model` | `report` |
+| --- | --- | --- |
+| 今 | `{"requested": null, "observed": null}` | 「codex はモデルを指定しておらず、実際に動いたモデルも取得できない」として集計から外す |
+| 変更後 | `{"requested": null, "observed": "gpt-6.1-sol", "unobserved": null}` | 実装担当の行に `gpt-6.1-sol（実測）` が出る。分離されない |
+
+変更後の値は、次の 4 つの手順で入る。
 
 1. 起動（`launch-cli.sh`）が `<stem>-launch.json` に開始の時刻と作業ディレクトリを書いてから codex を起動する
 2. codex は標準エラー（`<stem>-err.log`）の見出しに `session id: 01a0f9f8-…` を出す（codex-cli 0.159.3 で実測）
-3. 取り込みが `models.observed_model("codex", <stem>)` を呼ぶ。ID から `~/.codex/sessions/2026/10/02/rollout-…-01a0f9f8-….jsonl` を
-   名指しで開き、`turn_context` の `"model":"gpt-6.1-sol"` を取る
-4. 状態ファイルは `implementer_model = {"requested": null, "observed": "gpt-6.1-sol", "unobserved": null}` になり、
-   `report` の実装担当の行に `gpt-6.1-sol（実測）` が出る。分離されない
+3. 取り込みが `models.observed_model("codex", <stem>)` を呼ぶ。ID で rollout（`~/.codex/sessions/2026/10/02/rollout-…-01a0f9f8-….jsonl`）を名指しで開く
+4. rollout の `turn_context` から `"model":"gpt-6.1-sol"` を取り、状態ファイルへ書く
 
 ## ドメインモデル
 
@@ -28,9 +29,12 @@
 | cross-refactoring（`ndf-cross-refactoring`） | 実装担当とそのモデルの記録（`implementer_model`） |
 | cross-review（`ndf-cross-review`） | レビュー担当とそのモデルの記録（`reviewer_models`） |
 
-**関係は顧客 / 供給者である。** `ndf-agent-cli`（`plugins/ndf/scripts/lib/` の `launch-cli.sh` と `models.py`）が
-供給者で、実測値の取り方と分離の判定を 1 か所で持つ。cross-refactoring・cross-review・`external-ai.py run` は顧客で、
-取得の処理を自分では持たず、返った値を自分の状態ファイルへ書くだけにする。
+**関係は顧客 / 供給者である。**
+
+| 側 | 誰か | 持つもの |
+| --- | --- | --- |
+| 供給者 | `ndf-agent-cli`（`plugins/ndf/scripts/lib/` の `launch-cli.sh` と `models.py`） | 実測値の取り方と分離の判定。1 か所だけに置く |
+| 顧客 | cross-refactoring・cross-review・`external-ai.py run` | 返った値を自分の状態ファイルへ書く処理だけ。取得の処理は持たない |
 
 ### 集約
 
@@ -259,7 +263,14 @@ sequenceDiagram
     C->>C: 状態ファイル・結果 JSON に書く。指定値と食い違えば警告
 ```
 
-図は取得の経路だけを描く。`setup.py`（着手前の警告）・`report.py`・`measure.py`（状態ファイルを読む）・`metrics.py`（判定の引数の追随）・文書は、この流れの外にある。
+図は取得の経路だけを描く。次の要素はこの流れの外にある。
+
+| 要素 | 流れの外にある理由 |
+| --- | --- |
+| `setup.py` | 着手前の警告だけで、取得を呼ばない |
+| `report.py`・`measure.py` | 書かれた状態ファイルを後から読む |
+| `metrics.py` | 判定の関数の引数に追随するだけ |
+| 文書 | 実行されない |
 
 **監視が上限で止めた起動も取得する**（E2）。止める前に動いたモデルも記録の対象である。cross-review は
 `read_result` の最初（結果の検証より前）で取得するため、結果が無くて止まる経路でも実測値は残る。
@@ -280,9 +291,8 @@ sequenceDiagram
 
 ### 決定 1: 開始の時刻と作業ディレクトリは、起動が `<stem>-launch.json` に書く
 
-時刻範囲で記録を結びつけるには、CLI がセッションを作るより前の時刻が要る。起動は CLI を `nohup` する直前に
-時刻を知っている唯一の場所で、3 つの顧客（cross-refactoring・cross-review・`external-ai.py`）がすべて
-`lib/launch-cli.sh` を通るため、1 か所に書けば揃う。監視の `started_at` は起動が戻った後に始まるため、
+時刻範囲で記録を結びつけるには、CLI がセッションを作るより前の時刻が要る。その時刻を知っているのは、
+CLI を `nohup` する直前の起動だけである。3 つの顧客はすべて `lib/launch-cli.sh` を通るため、1 か所に書けば揃う。監視の `started_at` は起動が戻った後に始まるため、
 セッションの時刻が範囲の前に落ちうる。pid ファイルの更新時刻は `&` の後に書かれ、CLI の起動と順序が決まらない。
 
 根拠: Value 6 / Value 4（MVV 版 2）
@@ -301,7 +311,7 @@ rollout の `turn_context.model` から取る。見出しは起動の設定の�
 
 agy 1.2.11 は `--log-file`（CLI のログの置き場の上書き）を持つ。起動ごとに別のファイルへ書かせれば、
 時刻で切り出す必要も、並行する起動の行が混ざるおそれも無くなる。課題の実測（agy 1.2.6）では、ログの要求 URL
-`models/<名前>:streamGenerateContent` に実際のモデル名が載り、設定ファイルの値とは違った。URL のパスは Google の
+`models/<名前>:streamGenerateContent` に実際のモデル名が載った。その名前は設定ファイルの値と違った。URL のパスは Google の
 公開 API の形で、取れる名前は要求に実際に使ったモデルである。既定の `~/.gemini/antigravity-cli/cli.log` を時刻で切り出す
 案は、並行する起動の行を分けられないため採らない。`--output-format json` は、失敗のときの出力にモデルの欄が無く
 （下の「未確認」）、標準出力の回収も変わるため採らない。
@@ -345,27 +355,33 @@ kiro-cli 2.24.1 で 2026-10-02 に次の 3 か所を見た。どこにも `auto`
 
 ### 決定 7: 分離の判定は実測値を見る。取れる見込み（`OBSERVABLE_RUNTIMES`）は着手前の警告だけに使う
 
-分離すべきなのは何が動いたか分からない実行で、それは実行の後にしか決まらない。判定は
-「実測値がある → 分離しない」「kiro で指定が無いか `auto` → kiro の文言で分離」「指定も実測値も無い → ランタイム名を入れた文言で分離」
-の順にする。claude も実測値が取れず指定も無ければ分離する（今は claude を無条件に分離しない）。取れなかった実行を
-「取れたはず」として集計に入れると、要求の前提 7 と同じ害（誤った値を実測として扱う）になる。着手前の警告（`setup.py`）は
-まだ実測値が無いため、`foreseen_separation` が `OBSERVABLE_RUNTIMES`（claude・codex・agy）の外のランタイムだけを警告する。
+分離すべきなのは何が動いたか分からない実行で、それは実行の後にしか決まらない。判定は次の順に当てる。
+
+| 順 | 条件 | 判定 |
+| --- | --- | --- |
+| 1 | 実測値がある | 分離しない |
+| 2 | kiro で、指定が無いか `auto` | kiro の文言で分離する |
+| 3 | 指定も実測値も無い | ランタイム名を入れた文言で分離する |
+
+claude も実測値が取れず指定も無ければ分離する（今は claude を無条件に分離しない）。取れなかった実行を
+「取れたはず」として集計に入れると、要求の前提 7 と同じ害（誤った値を実測として扱う）になる。着手前の警告（`setup.py`）の時点では、まだ実測値が無い。そこで `foreseen_separation` は、
+`OBSERVABLE_RUNTIMES`（claude・codex・agy）の外のランタイムだけを警告する。
 
 根拠: Value 3（MVV 版 2）
 
 ### 決定 8: レビュー担当の実測値は、cross-review の `rounds[<n>].reviewer_models.<担当>` に置く
 
-`metrics.py` が既に読む位置と形（`{"requested", "observed"}`）に合わせ、読む側を変えずに済ませる。ラウンドごとに
+`metrics.py` が既に読む位置と形（`{"requested", "observed"}`）に合わせる。読む側を変えずに済む。ラウンドごとに
 担当が入れ替わるため、ラウンドの中に置く。反証の起動（`critique.sh`）は同じ担当の同じランタイムで、レビューの起動と
-別のモデルを使う設定を持たないため、重ねて残さない。#933 の後の cross-refactoring にはレビュー担当が無い（レビューは最終の
-`cross-review` が担う）ため、cross-refactoring の状態ファイルにはレビュー担当の欄を足さない。
+別のモデルを使う設定を持たないため、重ねて残さない。#933 の後の cross-refactoring にはレビュー担当が無い。
+レビューは最終の `cross-review` が担うため、cross-refactoring の状態ファイルにはレビュー担当の欄を足さない。
 
 根拠: Value 6 / Value 1（MVV 版 2）
 
 ### 決定 9: `report` の実装担当の行と実行の要約に、実測値を出す
 
-今の行は指定値だけを出し、実測値があっても `default` と読める。#760 は要約を「ランタイム × モデル」で束ねるため、
-要約に `implementer_model` をそのまま置き、束ねる側が実測値と指定値を選べるようにする。配分の履歴（`allocation.build_row`）には
+今の行は指定値だけを出し、実測値があっても `default` と読める。#760 は要約を「ランタイム × モデル」で集計するため、
+要約に `implementer_model` をそのまま置き、集計する側が実測値と指定値を選べるようにする。配分の履歴（`allocation.build_row`）には
 足さない。履歴は手順の所要の見積もりに使うもので、モデルで分けて使う箇所が無い。
 
 根拠: Value 3 / Value 1（MVV 版 2）
@@ -373,7 +389,7 @@ kiro-cli 2.24.1 で 2026-10-02 に次の 3 か所を見た。どこにも `auto`
 ## テスト設計
 
 テストは `plugins/ndf/scripts/tests`（`models.py` と `launch-cli.sh`）と、各 Skill の `tests`（顧客）に置く。
-セッションの記録は今の版の実物の形を写した小さな固定データで作る。`.md` の文言を照合するテストは書かない。
+セッションの記録は今の版の実物と同じ形の小さな固定データで作る。`.md` の文言を照合するテストは書かない。
 
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
