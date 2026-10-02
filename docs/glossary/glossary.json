@@ -2958,9 +2958,9 @@
     {
       "term": "修正の記録",
       "context": "ndf-cross-review",
-      "meaning": "修正の工程が作る戻り値ファイル（fix-pr<PR>-result.json）を merge-fix がレビューの状態ファイルへ取り込んだもの。修正必須のラウンドの次のラウンドを始める条件",
+      "meaning": "修正の工程が作る戻り値ファイル（fix-pr<PR>-result.json）を merge-fix がレビューの状態ファイルへ取り込んだもの。ホストが自分で直したときは state.py record-fix が同じ形で作る。修正必須のラウンドの次のラウンドを始める条件",
       "source": "",
-      "pending_source": "issues/issue-1340-requirements.md"
+      "pending_source": "issues/issue-1340-design.md"
     },
     {
       "term": "hook の上限",
@@ -2968,6 +2968,20 @@
       "meaning": "ランタイムの hook の定義（hooks/*.json・dev.agy/hooks.json）の timeout。過ぎるとランタイムが hook を打ち切る",
       "source": "",
       "pending_source": "issues/issue-1340-requirements.md"
+    },
+    {
+      "term": "ラウンドを足す",
+      "context": "ndf-cross-review",
+      "meaning": "final が確定したレビューの状態ファイルの final を外し、履歴を残したまま次の番号のラウンドから収束ループを続けること。state.py init の再開の経路が行い、reopens に 1 件残す",
+      "source": "",
+      "pending_source": "issues/issue-1340-design.md"
+    },
+    {
+      "term": "hook の締め切り",
+      "context": "ndf-workflow",
+      "meaning": "NDF の hook が自分で決める 1 回の実行の時間の上限（3.5 秒）。hook の上限より短く、過ぎたら残りの判定を飛ばして通し、標準エラーへ 1 行残す",
+      "source": "",
+      "pending_source": "issues/issue-1340-design.md"
     }
   ]
 }
