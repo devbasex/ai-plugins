@@ -2912,6 +2912,41 @@
       "context": "ndf-training-optout",
       "meaning": "codex の auth.json の auth_mode が chatgpt でない起動（API キーのログイン）。ChatGPT のアカウントの学習の設定が無く、読みを送らない",
       "pending_source": "issues/issue-1597-design.md"
+    },
+    {
+      "term": "スプリントの雛形",
+      "context": "ndf-workflow",
+      "meaning": "`supervise.py new sprint` がステージごとのプランを作る関数（`sprint_waves.py` の `plan_sprint_*` / `plan_fast_*`）",
+      "source": "",
+      "pending_source": "issues/issue-1485-requirements.md"
+    },
+    {
+      "term": "単発の雛形",
+      "context": "ndf-workflow",
+      "meaning": "`supervise.py new impl / fix / check` が 1 本のプランを作る関数（`templates.py`）",
+      "source": "",
+      "pending_source": "issues/issue-1485-requirements.md"
+    },
+    {
+      "term": "取り込んだ課題",
+      "context": "ndf-workflow",
+      "meaning": "設計で、受け入れ内容を別の課題の実装へ含めると決めた課題。自分の実装のプランは残すが、`実行の条件` で飛ばして実行しない",
+      "source": "",
+      "pending_source": "issues/issue-1485-requirements.md"
+    },
+    {
+      "term": "手動確認の行",
+      "context": "ndf-workflow",
+      "meaning": "要求の検証手段の表で、項目が「手動確認」で始まる行。項目が「手動確認（マージ前）」ならマージ前、それ以外はリリース後テストに確かめる",
+      "source": "",
+      "pending_source": "issues/issue-1485-design.md"
+    },
+    {
+      "term": "設計の結果",
+      "context": "ndf-workflow",
+      "meaning": "設計文書の「設計の結果」の節の表。課題ごとに扱い（実装する / 取り込む / 閉じる）・取り込み先・触るファイルを書き、実装のステージの前に機械が読む",
+      "source": "",
+      "pending_source": "issues/issue-1485-design.md"
     }
   ]
 }
