@@ -109,11 +109,16 @@ def precheck(runtime: str, skip_auth: bool, workdir: pathlib.Path | None = None)
     return None
 
 
+def finish_precheck(runtime: str, pre: tuple[str, str], summary: str):
+    """前提が通らなかった結末で終える。理由を metrics へ入れるのは宣言（policy）のときだけ。"""
+    metrics = {"reason": pre[1]} if pre[0] == "policy" else {}
+    finish(runtime, pre[0], summary, metrics, sr.EXIT_PRECONDITION)
+
+
 def cmd_check(a) -> None:
     pre = precheck(a.runtime, False)
     if pre:
-        metrics = {"reason": pre[1]} if pre[0] == "policy" else {}
-        finish(a.runtime, pre[0], f"{a.runtime} は使えない（{pre[1]}）", metrics, sr.EXIT_PRECONDITION)
+        finish_precheck(a.runtime, pre, f"{a.runtime} は使えない（{pre[1]}）")
     finish(a.runtime, "ok", f"{a.runtime} は使える", {})
 
 
@@ -222,8 +227,7 @@ def cmd_run(a) -> None:
     skip_auth = a.no_auth_check or bool(os.environ.get(auth.SKIP_ENV))
     pre = precheck(runtime, skip_auth, workdir)
     if pre:
-        metrics = {"reason": pre[1]} if pre[0] == "policy" else {}
-        finish(runtime, pre[0], f"{runtime} を起動しない（{pre[1]}）", metrics, sr.EXIT_PRECONDITION)
+        finish_precheck(runtime, pre, f"{runtime} を起動しない（{pre[1]}）")
 
     output = pathlib.Path(a.output_file).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
