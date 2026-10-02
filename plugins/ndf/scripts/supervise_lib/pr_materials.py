@@ -67,7 +67,7 @@ def collect_changes(cwd: str, branch: str) -> tuple[list[str], list[str]]:
     return changes, rows
 
 
-def gather(cwd: str, issues: list[int], materials: dict, old_body: str = "") -> Materials:
+def gather_materials(cwd: str, issues: list[int], materials: dict, old_body: str = "") -> Materials:
     """ステップの `materials` から本文の材料を集める。"""
     out = Materials()
     if materials.get("collect"):
@@ -75,7 +75,7 @@ def gather(cwd: str, issues: list[int], materials: dict, old_body: str = "") -> 
         if rows:
             out.sections.append(COLLECTED_HEADING + "\n\n" + "\n".join(rows))
     if "design_results" in materials:
-        res = design_results.load(materials["design_results"]) or design_results.DesignResults()
+        res = design_results.load_results(materials["design_results"]) or design_results.DesignResults()
         prs = " ".join(f"#{n}" for n in res.design_prs)
         out.design.append(f"- 設計: {prs}" if prs else "- 設計: 設計なし")
         if res.unread:
@@ -84,8 +84,8 @@ def gather(cwd: str, issues: list[int], materials: dict, old_body: str = "") -> 
         if closes:
             out.sections.append(CLOSES_HEADING + "\n\n" + "\n".join(f"Closes #{n}" for n in closes))
     if materials.get("manual", True):
-        rows = manual_checks.read_rows(cwd, issues, requirements_path)
-        manual = manual_checks.section(rows, old_body)
+        rows = manual_checks.issue_rows(cwd, issues, requirements_path)
+        manual = manual_checks.manual_section(rows, old_body)
         if manual:
             out.sections.append(manual)
     return out

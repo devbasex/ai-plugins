@@ -44,7 +44,7 @@ def rows_of(text: str, issue: int) -> list[ManualRow]:
     return out
 
 
-def read_rows(root: Path, issues, path_of) -> list[ManualRow]:
+def issue_rows(root: Path, issues, path_of) -> list[ManualRow]:
     """課題ごとに要求の写し（`path_of(番号)`）を読み、手動確認の行を課題の順に返す。写しの無い課題は飛ばす。"""
     out: list[ManualRow] = []
     for n in issues:
@@ -65,7 +65,7 @@ def checked_lines(body: str) -> set[str]:
     return {m.group(2).strip() for m in map(_BOX.match, (body or "").splitlines()) if m and m.group(1) in "xX"}
 
 
-def section(rows: list[ManualRow], old_body: str = "") -> str:
+def manual_section(rows: list[ManualRow], old_body: str = "") -> str:
     """PR 本文の「手動確認」の節。行が無ければ空（節を置かない）。`old_body` で印の付いた行は印を引き継ぐ。"""
     if not rows:
         return ""

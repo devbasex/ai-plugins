@@ -67,7 +67,7 @@ class DesignResults:
         return cls(rows, [int(n) for n in data.get("design_prs") or []], [int(n) for n in data.get("unread") or []])
 
 
-def load(path) -> DesignResults | None:
+def load_results(path) -> DesignResults | None:
     """`design-results.json` を読む。無い・読めなければ None。"""
     try:
         return DesignResults.from_json(json.loads(Path(path).read_text(encoding="utf-8")))
@@ -84,7 +84,7 @@ def _files(cell: str) -> list[str]:
     return [f.strip() for f in re.findall(r"`([^`]+)`", cell) if f.strip()]
 
 
-def parse(text: str) -> list[Row] | None:
+def parse_results(text: str) -> list[Row] | None:
     """設計文書から「設計の結果」の表を読む。節が無い・表の形が違えば None。"""
     import md  # Markdown のパーサー（deps の md）
 

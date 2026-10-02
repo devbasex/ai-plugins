@@ -12,7 +12,7 @@ import mdtable
 from pr_mode import with_mode_line
 from supervise_lib.claude import TAIL
 from supervise_lib.paths import DECISIONS_SH
-from supervise_lib.pr_materials import CHANGES_HEADING, Materials, gather
+from supervise_lib.pr_materials import CHANGES_HEADING, Materials, gather_materials
 from supervise_lib.prompts import PR_SYSTEM
 
 PR_FOOTER = "🤖 Generated with [Claude Code](https://claude.com/claude-code)"  # PR 本文の末尾の署名（1 度だけ）
@@ -110,7 +110,7 @@ class PrStep:
         if mats.get("manual", True):
             p = gh_call.gh(["pr", "list", "--head", branch, "--state", "open", "--json", "body", "--jq", '.[0].body // ""'], cwd=ctx.cwd)
             old = p.stdout if p.returncode == 0 else ""
-        return gather(str(ctx.cwd), [int(i) for i in ctx.plan.get("課題", [])], mats, old)
+        return gather_materials(str(ctx.cwd), [int(i) for i in ctx.plan.get("課題", [])], mats, old)
 
     def _machine_body(self, ctx, step: dict, base: str, branch: str, mats: Materials | None = None) -> tuple[str, str, str, str]:
         """PR の材料を集めて機械生成の本文を作る。`(タイトル, 変更の節, 課題, 本文)`。"""

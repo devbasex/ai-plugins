@@ -33,7 +33,7 @@ def merged_design_pr(root: str, base: str, n: int) -> int | None:
     return int(text) if text.isdigit() else None
 
 
-def design_docs(root: str, base: str, pr: int) -> list[str]:
+def changed_design_docs(root: str, base: str, pr: int) -> list[str]:
     """PR が変えた `issues/*.md` の、`origin/<base>` での中身。"""
     p = gh_call.gh(["pr", "view", str(pr), "--json", "files", "--jq", ".files[].path"], cwd=root)
     paths = [f for f in p.stdout.split() if re.fullmatch(r"issues/[^/]+\.md", f)] if p.returncode == 0 else []
@@ -54,7 +54,7 @@ def read_results(root: str, base: str, design: list[int]) -> dr.DesignResults:
         rows = None
         if pr is not None:
             res.design_prs.append(pr)
-            found = [r for r in (dr.parse(t) for t in design_docs(root, base, pr)) if r is not None]
+            found = [r for r in (dr.parse_results(t) for t in changed_design_docs(root, base, pr)) if r is not None]
             rows = [row for rs in found for row in rs] if found else None
         if rows is None:
             res.unread.append(n)

@@ -188,7 +188,7 @@ def run_design_results(out: Path, res: design_results.DesignResults) -> tuple[di
 
 def results_of(text: str, prs=(40,)) -> design_results.DesignResults:
     res = design_results.DesignResults(design_prs=list(prs))
-    res.add(design_results.parse(text))
+    res.add(design_results.parse_results(text))
     return res
 
 
@@ -229,7 +229,7 @@ def test_unread_design_results_keep_the_plans(tmp_path):
     res, code = run_design_results(out, design_results.DesignResults(unread=[11]))
     assert code == 0 and "#11" in res["summary"] and res["metrics"]["unread"] == [11]
     assert {p.name: p.read_text() for p in out.glob("*-impl-*.json")} == before
-    assert design_results.parse("# 設計\n\n## 決定の記録\n") is None
+    assert design_results.parse_results("# 設計\n\n## 決定の記録\n") is None
 
 
 def test_design_results_stop_without_a_host(tmp_path):
@@ -269,7 +269,7 @@ def test_sprint_pr_collects_changes_closes_design_and_manual(tmp_path, monkeypat
     )
     mats = procedures.sprint_materials("sprint/m17", str(tmp_path / "dr.json"), [11, 12, 15])
     old = "## 手動確認\n\n- [x] #11 マージ前: 実機で欄を見る\n"
-    got = pr_materials.gather(str(tmp_path), [11, 12], mats, old)
+    got = pr_materials.gather_materials(str(tmp_path), [11, 12], mats, old)
     # AC8・AC9・I7: 変化のある PR の行だけ。変化なし・読めなかった PR は「集めた実装の PR」へ
     assert got.changes == ["進行が記録される（#21）", "本文に集まる（#21）"]
     collected = got.sections[0]
@@ -287,7 +287,7 @@ def test_sprint_pr_collects_changes_closes_design_and_manual(tmp_path, monkeypat
 def test_no_design_and_no_manual_rows(tmp_path, monkeypatch):
     """AC11: 設計の課題が無ければ「設計なし」。AC19: 手動確認の行が無ければ節を置かない。"""
     fake_gh(monkeypatch, [])
-    got = pr_materials.gather(str(tmp_path), [11], procedures.sprint_materials("sprint/m", str(tmp_path / "none.json"), [11]))
+    got = pr_materials.gather_materials(str(tmp_path), [11], procedures.sprint_materials("sprint/m", str(tmp_path / "none.json"), [11]))
     assert got.design == ["- 設計: 設計なし"] and got.changes == []
     assert not any(s.startswith(manual_checks.HEADING) for s in got.sections)
 
