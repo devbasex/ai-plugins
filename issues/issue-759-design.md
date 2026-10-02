@@ -413,6 +413,6 @@ claude も実測値が取れず指定も無ければ分離する（今は claude
 
 | # | 項目 | 内容 | 確かめる時点 |
 | --- | --- | --- | --- |
-| 1 | agy 1.2.11 のログに要求 URL が載るか | この環境の agy は未認証で、`agy -p … --output-format json --log-file /tmp/agy759.log` は `authentication failed or timed out` で終わった。ログには `printmode.go: Print mode: starting (… model="" …)` までしか無かった。失敗のときの JSON の出力は `conversation_id` / `status` / `response` / `error` / `duration_seconds` / `num_turns` / `usage` だけで、モデルの欄が無い。バイナリの文字列には `~/.gemini/antigravity-cli/`・`cli.log`・`"modelName"` がある | 実装の最初に、認証済みの agy で `--log-file` を付けて 1 回起動して確かめる。載らなければ決定 3 の後段（agy は `unsupported`）へ倒し、文書も「agy は取れない」と書く |
+| 1 | agy 1.2.11 のログに要求 URL が載るか | この環境の agy は未認証で、`agy -p … --output-format json --log-file /tmp/agy759.log` は `authentication failed or timed out` で終わった。ログには `printmode.go: Print mode: starting (… model="" …)` までしか無かった。失敗のときの JSON の出力は `conversation_id` / `status` / `response` / `error` / `duration_seconds` / `num_turns` / `usage` だけで、モデルの欄が無い。バイナリの文字列には `~/.gemini/antigravity-cli/`・`cli.log`・`"modelName"` がある。未認証のまま起動しても `~/.gemini/antigravity-cli/` が作られ、既定のログは起動ごとの `log/cli-<日時>.log` に書かれ、`cli.log` はその最新を指すリンクになる（2026-10-02 に実測） | 実装の最初に、認証済みの agy で `--log-file` を付けて 1 回起動して確かめる。載らなければ決定 3 の後段（agy は `unsupported`）へ倒し、文書も「agy は取れない」と書く |
 | 2 | codex の見出しの形が版で変わるか | `session id:` の行は人向けの表示である。変わっても時刻範囲と作業ディレクトリの経路が残るため、取得は止まらない | 版が上がった時点のテストの固定データの更新で見る |
 | 3 | rollout の日付ディレクトリが現地時刻か UTC か | 手元は UTC のコンテナで、両者が一致した。前後 1 日を見るため、どちらでも拾える | 実装のテストでは前後の日付に置いた記録で確かめる |
