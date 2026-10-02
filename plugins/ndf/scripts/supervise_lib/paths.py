@@ -107,6 +107,8 @@ MERGE_GATE_CMD = f"python3 {HERE / 'merged-steps.py'} merge-gate --pr {{pr}}"  #
 # マージの待ちのステップの一次の調査（遅れたとき PR のチェックを分け、取り残しを再実行する）
 MERGE_PROBE = {"cmd": f"python3 {HERE / 'merged-steps.py'} probe --pr {{pr}} --act"}
 CHECK_PY = f"python3 {HERE / 'check-trigger.py'}"
+# 検査のプランが cross-refactoring へ渡す範囲を PR の差分と宣言から組む（#1484）
+REFACTOR_SCOPE_PY = f"python3 {HERE / 'refactor-scope.py'}"
 MVV_PY = f"python3 {HERE / 'mvv-gate.py'}"
 SPRINT_STATE_PY = f"python3 {HERE / 'sprint-state.py'}"
 GLOSSARY_PY = f"python3 {HERE / 'glossary.py'}"

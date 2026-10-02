@@ -61,26 +61,45 @@ def sync_check(root: str, commit: bool, checks: list[tuple[str, str]] | None = N
     return result("supervise-sync-check", "stopped" if failed else "ok", summary, items, {"failed": len(failed), "changed": len(changed)})
 
 
-def _commit_glossary(root: str, created: list[str]) -> str | None:
-    """起こしたファイルを add・コミットする。失敗したら巻き戻して誤りの文を返す（成功は None）。"""
-    for args in (["add", "--", *created], ["commit", "-q", "-m", "docs(glossary): 設計の入口で用語集を起こす", "--", *created]):
+def _ignored(root: str, paths: list[str]) -> list[str]:
+    """paths のうち .gitignore の対象のもの（git check-ignore）。"""
+    p = subprocess.run(["git", "check-ignore", "--", *paths], cwd=root, capture_output=True, text=True)
+    hit = set(p.stdout.splitlines())
+    return [c for c in paths if c in hit]
+
+
+def _commit_glossary(root: str, created: list[str], ignored: list[str]) -> str | None:
+    """起こしたファイルを add・コミットする。.gitignore の対象（`.ndf/` を追跡しないリポジトリの宣言など）は
+    コミットせずに作業ディレクトリへ残す（後の用語チェックはそこから読む）。失敗したら巻き戻して誤りの文を返す
+    （成功は None）。"""
+    tracked = [c for c in created if c not in ignored]
+    if not tracked:
+        return None
+    for args in (["add", "--", *tracked], ["commit", "-q", "-m", "docs(glossary): 設計の入口で用語集を起こす", "--", *tracked]):
         p = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True)
         if p.returncode != 0:
             # 起こしたファイルを消して、打ち直しが同じ経路（gate の停止 → init → コミット）を通るようにする
-            subprocess.run(["git", "rm", "-q", "--cached", "--ignore-unmatch", "--", *created], cwd=root, capture_output=True, text=True)
+            subprocess.run(["git", "rm", "-q", "--cached", "--ignore-unmatch", "--", *tracked], cwd=root, capture_output=True, text=True)
             for c in created:
                 Path(root, c).unlink(missing_ok=True)
             return f"起こした用語集をコミットできない: {p.stderr.strip()[-300:]}"
     return None
 
 
-def _glossary_note(created: list[str], words: list[dict]) -> str:
+def _glossary_note(created: list[str], words: list[dict], ignored: list[str] | None = None) -> str:
     """PR 本文へ足す用語集の候補の節。"""
+    skipped = (
+        "\n.gitignore の対象のためコミットしていない（作業ディレクトリにだけある）: " + "、".join(f"`{c}`" for c in ignored)
+        if ignored
+        else ""
+    )
     rows = [[w.get("term"), w.get("count"), w.get("kind"), f"`{w.get('first')}`"] for w in words]
     return (
         "## 用語集の候補\n\nこの Pull Request で用語集を起こした（`glossary.py init`）: "
         + "、".join(f"`{c}`" for c in created)
-        + "。\n語の採否は承認ゲート 1 で見る。候補の語（`glossary.py candidates`）:\n\n"
+        + "。"
+        + skipped
+        + "\n語の採否は承認ゲート 1 で見る。候補の語（`glossary.py candidates`）:\n\n"
         + (
             mdtable.table_markdown(("語", "回数", "種類", "最初の場所"), rows, align=(None, "right", None, None))
             if rows
@@ -126,19 +145,21 @@ def cmd_design_glossary(root: str, mode: str, out: str) -> tuple[dict, int | Non
             "supervise-design-glossary", "stopped", f"glossary.py init が失敗した: {init.get('summary')}", [], {"initialized": 0}
         ), code
     created = [it["name"] for it in init.get("items") or []]
+    ignored = _ignored(root, created) if created else []
     if created:
-        err = _commit_glossary(root, created)
+        err = _commit_glossary(root, created, ignored)
         if err is not None:
             return result("supervise-design-glossary", "stopped", err, [], {"initialized": 0}), 1
-    note = _glossary_note(created, words)
+    note = _glossary_note(created, words, ignored)
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     Path(out).write_text(note)
     shown = "、".join(str(w.get("term")) for w in words[:10])
     return result(
         "supervise-design-glossary",
         "ok",
-        f"用語集を起こしてコミットした（候補 {len(words)} 件{': ' + shown if shown else ''}）",
-        [{"name": c, "result": "created"} for c in created],
+        f"用語集を起こしてコミットした（候補 {len(words)} 件{': ' + shown if shown else ''}）"
+        + (f"。.gitignore の対象はコミットしていない: {'・'.join(ignored)}" if ignored else ""),
+        [{"name": c, "result": "created-ignored" if c in ignored else "created"} for c in created],
         {"initialized": 1, "candidates": len(words)},
     ), None
 

@@ -19,7 +19,7 @@
 [`cross-review` の SKILL.md](../../plugins/ndf/skills/cross-review/SKILL.md)と
 [`docs/`](../../plugins/ndf/skills/cross-review/docs/04-contracts.md)が正である。**
 投稿の種別ごとの照合の鍵は
-[状態ファイルと入出力の契約](../../plugins/ndf/skills/cross-review/docs/04-contracts.md)が持つ。
+[状態ファイルの外へ書くもの](../../plugins/ndf/skills/cross-review/docs/07-posts-and-records.md)が持つ。
 この文書が扱うのは、そこに書かない決定の理由と、ライブラリの契約である。
 
 ## 用語

@@ -40,9 +40,22 @@ def _apply_resume_args_block(st: dict[str, Any], args: argparse.Namespace) -> bo
     （決定 14）。作り直しの失敗は状態を書き換える前に起きる（`_resolve_reviewers` を
     先に呼び、通ってから `st` を書く）。
     """
-    only, include, exclude = _normalize_participant_args(args)
+    only, _, _ = _normalize_participant_args(args)
     before = len(st.get("resume_changes") or [])
 
+    _apply_plain_resume_args(st, args, only)
+
+    policy = _load_policy()
+    # **再開した時点の宣言に従う（#1598 の前提 8）。** 記録の写しと今の宣言が違えば、引数が無くても作り直す。
+    policy_changed = runtime_policy.differs_from_record(policy, st.get("participants") or {})
+    if any(getattr(args, name, None) is not None for name in PARTICIPANT_ARGS) or policy_changed:
+        _reresolve_resume_participants(st, args, policy)
+
+    return len(st.get("resume_changes") or []) > before
+
+
+def _apply_plain_resume_args(st: dict[str, Any], args: argparse.Namespace, only: str | None) -> None:
+    """`--only none` の解除と、担当に関わらない再開引数を状態へ反映する。"""
     # **`--only none` はここで処理する。** 正規化した `None` を表へ渡すと「未指定」と
     # 区別できず、指定を外す操作が黙って捨てられる（決定 15）。
     args_copy = argparse.Namespace(**vars(args))
@@ -58,37 +71,35 @@ def _apply_resume_args_block(st: dict[str, Any], args: argparse.Namespace) -> bo
     for line in statefile.apply_resume_args(st, args_copy, REVIEW_RESUME_FIELDS):
         review_lib.info(line)
 
-    policy = _load_policy()
+
+def _reresolve_resume_participants(st: dict[str, Any], args: argparse.Namespace, policy: Any) -> None:
+    """渡さなかった担当の引数を状態ファイルの値で補い、使える者を解決し直して記録する（決定 14）。"""
+    _, include, exclude = _normalize_participant_args(args)
     old_participants = st.get("participants")
     recorded = old_participants or {}
-    # **再開した時点の宣言に従う（#1598 の前提 8）。** 記録の写しと今の宣言が違えば、引数が無くても作り直す。
-    policy_changed = runtime_policy.differs_from_record(policy, recorded)
-    if any(getattr(args, name, None) is not None for name in PARTICIPANT_ARGS) or policy_changed:
-        try:
-            host = st.get("host") or assignment.detect_host(getattr(args, "host", None))[0]
-        except assignment.AssignmentError as e:
-            review_lib.die(str(e), code=1)
-            raise
-        include_eff = include if include is not None else list(recorded.get("included") or [])
-        if include is None and policy is not None:
-            include_eff = policy.keep_allowed(st, "included", include_eff, review_lib.info)
-        if policy is not None and st.get("only") and getattr(args, "only", None) in (None, NONE_WORD):
-            if not policy.keep_allowed(st, "only", [st["only"]], review_lib.info):
-                st["only"] = None
-        rebuild = argparse.Namespace(
-            only=st.get("only"),
-            include=include_eff,
-            exclude=(exclude if exclude is not None else assignment.recorded_exclusions(recorded, include_eff, st.get("only"))),
-            require_all=(args.require_all if getattr(args, "require_all", None) is not None else bool(recorded.get("require_all"))),
-        )
-        participants = _resolve_reviewers(host, rebuild, policy=policy)
-        st["participants"] = participants
-        st.setdefault("resume_changes", []).append(
-            {"at": statefile.now(), "field": "participants", "from": old_participants, "to": participants}
-        )
-        _reselect_open_round(st)
-
-    return len(st.get("resume_changes") or []) > before
+    try:
+        host = st.get("host") or assignment.detect_host(getattr(args, "host", None))[0]
+    except assignment.AssignmentError as e:
+        review_lib.die(str(e), code=1)
+        raise
+    include_eff = include if include is not None else list(recorded.get("included") or [])
+    if include is None and policy is not None:
+        include_eff = policy.keep_allowed(st, "included", include_eff, review_lib.info)
+    if policy is not None and st.get("only") and getattr(args, "only", None) in (None, NONE_WORD):
+        if not policy.keep_allowed(st, "only", [st["only"]], review_lib.info):
+            st["only"] = None
+    rebuild = argparse.Namespace(
+        only=st.get("only"),
+        include=include_eff,
+        exclude=(exclude if exclude is not None else assignment.recorded_exclusions(recorded, include_eff, st.get("only"))),
+        require_all=(args.require_all if getattr(args, "require_all", None) is not None else bool(recorded.get("require_all"))),
+    )
+    participants = _resolve_reviewers(host, rebuild, policy=policy)
+    st["participants"] = participants
+    st.setdefault("resume_changes", []).append(
+        {"at": statefile.now(), "field": "participants", "from": old_participants, "to": participants}
+    )
+    _reselect_open_round(st)
 
 
 # **母集合を広げる前からある 2 者。** `host` を持たない状態ファイル（このリポジトリの
