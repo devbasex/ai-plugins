@@ -92,7 +92,7 @@ Pull Request が最後かどうかを判断できない。
 
 | | 何を扱うか |
 | --- | --- |
-| `merged` | マージ後の後片付け。worktree とブランチの削除 |
+| `merged` | マージ後の後片付け。worktree とブランチの削除。その退避先は本番へ出した後にこの工程が消す（[references/release-steps.md](references/release-steps.md)「退避先の回収」） |
 | **この Skill** | 利用者が受け取れる状態にする |
 | `release-verification` | リリースされた成果物を、利用者の環境で確かめる |
 
