@@ -121,20 +121,27 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --roo
 - `release`: `dev` は `release/v<版>` → `develop` の Pull Request を作り、チェックを待ってマージする。
   `prod` は続けて `develop` → `main` をマージし、タグと GitHub Release を作る。`items[]`
   （マージした Pull Request・タグ・GitHub Release）がリリース完了の確認で照会した結果である。
-  `prod` は最後に「退避先の回収」を行い、`items[]` の `kind: trash` と `metrics.swept_trash` に載せる。
+  `prod` は最後に「退避先の回収」の候補を挙げ、`items[]` の `kind: trash`（`result: candidate`）と
+  `metrics.sweep_candidates` に載せる。消すのは人の承認を得た後である（下の節）。
   どちらの Pull Request でも pytest と runtime smoke は省かれて成功（skipping / pass）を返す
   （[版と配布](../../../../../docs/versioning-and-distribution.md#正式版を出す)）。待ちはそれを通ったものとして扱う
 
 ## 退避先の回収
 
-**本番へ出したら、その版に入ったブランチの退避先を消す。** `merged` が worktree を外すときに退避した
-ファイル（`<共通の git ディレクトリ>/ndf/worktree-trash/`）は、戻す必要が出るのが本番の前だけだからである。
-Claude Code のプラグインの形では `release --channel prod` が行う。それ以外の形では、本番へ出たコミット
-（タグ・本番チャネルのブランチ）を渡して打つ。検証リリースでは打たない。
+**本番へ出したら、その版に入ったブランチの退避先を回収の候補として挙げ、人の承認を得てから消す。**
+`merged` が worktree を外すときに退避したファイル（`<共通の git ディレクトリ>/ndf/worktree-trash/`）は、
+戻す必要が出るのが本番の前だけだからである。ただし退避先は Git にも本番のコミットにも無い利用者のファイル
+（手で直した `.env`・未追跡のメモ）を含み、消すと戻せない。**本番の承認はこの削除の承認を兼ねない**
+（共通原則の C3・C4）。候補（退避先のパスと `du -sh <退避先>` の容量）を人へ示し、承認を得たときだけ `--yes` で消す。
+承認が無ければ退避先は残す。Claude Code のプラグインの形では `release --channel prod` が候補を挙げ、`next` に
+消す 1 行を載せる。それ以外の形では、本番へ出たコミット（タグ・本番チャネルのブランチ）を渡して打つ。
+検証リリースでは打たない。
 
 ```bash
-python3 "$SCRIPTS/merged-steps.py" sweep-trash --ref <本番に出たコミット>
+python3 "$SCRIPTS/merged-steps.py" sweep-trash --ref <本番に出たコミット>        # 候補を挙げるだけ（消さない）
+python3 "$SCRIPTS/merged-steps.py" sweep-trash --ref <本番に出たコミット> --yes  # 人の承認を得た後に消す
 ```
 
-消した退避先（`metrics.swept_trash`）と、台帳が無いため残した件数（`metrics.unledgered_trash`）を完了報告に書く。
+候補の件数（`metrics.sweep_candidates`）・消した退避先（`metrics.swept_trash`）・台帳が無いため残した件数
+（`metrics.unledgered_trash`）を完了報告に書く。
 退避先と台帳の形は `merged` の SKILL.md にある。

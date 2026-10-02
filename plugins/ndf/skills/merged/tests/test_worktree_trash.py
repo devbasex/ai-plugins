@@ -67,6 +67,7 @@ def test_generated_dirs_are_discarded_not_evacuated(repo, tmp_path, merged):
     (wt / ".venv" / "lib" / "site.py").write_text("x\n", encoding="utf-8")
     (wt / "dbt" / "target").mkdir(parents=True)
     (wt / "dbt" / "target" / "manifest.json").write_text("{}\n", encoding="utf-8")
+    (wt / "dbt" / "dbt_project.yml").write_text("name: x\n", encoding="utf-8")
     (wt / "pkg" / "__pycache__").mkdir(parents=True)
     (wt / "pkg" / "__pycache__" / "m.pyc").write_bytes(b"\0")
     (wt / ".env").write_text("TOKEN=hand-edited\n", encoding="utf-8")
@@ -79,7 +80,8 @@ def test_generated_dirs_are_discarded_not_evacuated(repo, tmp_path, merged):
         assert gen in why
     [trash] = trash_dirs(repo)
     assert (trash / ".env").read_text(encoding="utf-8") == "TOKEN=hand-edited\n"
-    assert not (trash / ".venv").exists() and not (trash / "dbt").exists() and not (trash / "pkg").exists()
+    assert (trash / "dbt" / "dbt_project.yml").is_file() and not (trash / "dbt" / "target").exists()
+    assert not (trash / ".venv").exists() and not (trash / "pkg").exists()
     ledger = json.loads(trash.with_name(trash.name + ".json").read_text(encoding="utf-8"))
     assert ledger["branch"] == "feat/a" and ledger["head"] == git(repo, "rev-parse", "feat/a").strip()
     assert sorted(ledger["discarded"]) == [".venv", "dbt/target", "pkg/__pycache__"]
@@ -104,6 +106,30 @@ def test_a_file_named_like_a_generated_dir_is_evacuated(repo, tmp_path, merged):
     assert (Path(why[len("退避先 ") :]) / "target").is_file()
 
 
+def test_a_target_without_a_build_manifest_is_evacuated(repo, tmp_path, merged):
+    # 作り直しの設定が隣に無い target は生成物と決められないため、捨てずに退避する
+    wt = worktree(repo, tmp_path, "feat/t")
+    (wt / "target").mkdir()
+    (wt / "target" / "原稿.txt").write_text("draft\n", encoding="utf-8")
+    (wt / "data" / "target").mkdir(parents=True)
+    (wt / "data" / "target" / "input.csv").write_text("a,b\n", encoding="utf-8")
+    ok, why = merged.remove_worktree(str(repo), str(wt), "feat/t")
+    assert ok is True and "捨てた" not in why
+    trash = Path(why[len("退避先 ") :])
+    assert (trash / "target" / "原稿.txt").is_file() and (trash / "data" / "target" / "input.csv").is_file()
+
+
+def test_a_target_next_to_cargo_toml_is_discarded(repo, tmp_path, merged):
+    wt = worktree(repo, tmp_path, "feat/r")
+    (wt / "Cargo.toml").write_text("[package]\n", encoding="utf-8")
+    git(wt, "add", "Cargo.toml")
+    git(wt, "commit", "-q", "-m", "cargo")
+    (wt / "target" / "debug").mkdir(parents=True)
+    (wt / "target" / "debug" / "app").write_bytes(b"\0")
+    ok, why = merged.remove_worktree(str(repo), str(wt), "feat/r")
+    assert ok is True and why == "退避するものは無かった（捨てた: target）"
+
+
 def evacuated(repo, tmp_path, merged, branch, merge_commit=None):
     wt = worktree(repo, tmp_path, branch)
     (wt / "notes.txt").write_text("keep me\n", encoding="utf-8")
@@ -112,9 +138,9 @@ def evacuated(repo, tmp_path, merged, branch, merge_commit=None):
     return Path(why[len("退避先 ") :])
 
 
-def sweep(repo, ref):
+def sweep(repo, ref, *extra):
     p = subprocess.run(
-        [sys.executable, str(SCRIPTS / "merged-steps.py"), "sweep-trash", "--ref", ref, "--root", str(repo)],
+        [sys.executable, str(SCRIPTS / "merged-steps.py"), "sweep-trash", "--ref", ref, "--root", str(repo), *extra],
         capture_output=True,
         text=True,
     )
@@ -128,7 +154,7 @@ def test_sweep_removes_only_the_trash_whose_branch_reached_production(repo, tmp_
     git(repo, "checkout", "-q", "main")
     git(repo, "merge", "-q", "--no-ff", "-m", "release", "feat/released")
 
-    out = sweep(repo, "main")
+    out = sweep(repo, "main", "--yes")
 
     assert not released.exists() and not released.with_name(released.name + ".json").exists()
     assert pending.is_dir() and (pending / "notes.txt").is_file()
@@ -145,9 +171,23 @@ def test_sweep_uses_the_merge_commit_for_a_squashed_branch(repo, tmp_path, merge
     git(repo, "checkout", "-q", "develop")
     trash = evacuated(repo, tmp_path, merged, "feat/squashed", merge_commit=squash)
 
-    out = sweep(repo, "main")
+    out = sweep(repo, "main", "--yes")
 
     assert not trash.exists() and out["metrics"]["swept_trash"] == 1
+
+
+def test_sweep_without_approval_only_lists_candidates(repo, tmp_path, merged):
+    # 退避先は Git に無い利用者のファイルを含むため、--yes（人の承認）が無ければ消さずに候補として挙げる
+    released = evacuated(repo, tmp_path, merged, "feat/released")
+    git(repo, "checkout", "-q", "main")
+    git(repo, "merge", "-q", "--no-ff", "-m", "release", "feat/released")
+
+    out = sweep(repo, "main")
+
+    assert released.is_dir() and (released / "notes.txt").is_file()
+    assert out["metrics"]["swept_trash"] == 0 and out["metrics"]["sweep_candidates"] == 1
+    assert [i["name"] for i in out["items"] if i["result"] == "candidate"] == [str(released)]
+    assert "--yes" in out["next"]
 
 
 def test_sweep_keeps_trash_without_a_ledger(repo):

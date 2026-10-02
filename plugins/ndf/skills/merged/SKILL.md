@@ -122,8 +122,8 @@ python3 "$SCRIPTS/merged-steps.py" cleanup <PR番号>... --root <メインディ
 
 - `items[]` の `result` は `removed`（worktree を外した）/ `deleted`（ブランチを消した。`restore` が戻し方）/ `absent`（ローカルに無い。削除済みとして扱う）/ `kept`（MERGED でない・メインディレクトリが checkout している など。`reason` を報告へ載せる）/ `stopped` / `pulled` を取る
 - worktree の未追跡・無視されたファイルは `<共通の git ディレクトリ>/ndf/worktree-trash/` へ退避してから外す。退避先は `reason` に載る（`退避先 <パス>`。退避するものが残らなければ `退避するものは無かった` で、退避先を作らない）
-- 作り直せる生成物（パスのどこかに `.venv`・`node_modules`・`__pycache__`・`.pytest_cache`・`.mypy_cache`・`.ruff_cache`・`target` のディレクトリがあるもの）は退避せずに捨て、`reason` の `（捨てた: <相対パス>, …）` に載る
-- **退避先は、そのブランチを含む版が本番へ出たときに `release` の後片付けが消す**（`merged-steps.py sweep-trash --ref <本番に出たコミット>`）。それまでは残す。退避先とブランチの対応は退避先の隣の台帳 `<退避先>.json`（`branch`・`head`・`merge_commit`・`discarded`）が持ち、`head` か `merge_commit` が本番のコミットに含まれれば消す。台帳の無い退避先は消さずに件数だけを報告する
+- 作り直せる生成物（パスのどこかに `.venv`・`node_modules`・`__pycache__`・`.pytest_cache`・`.mypy_cache`・`.ruff_cache` のディレクトリがあるもの、同じ階層に `Cargo.toml`・`pom.xml`・`dbt_project.yml` がある `target` のディレクトリ）は退避せずに捨て、`reason` の `（捨てた: <相対パス>, …）` に載る。設定が隣に無い `target` は作り直せると決められないため通常の退避へ回す
+- **退避先は、そのブランチを含む版が本番へ出たときに `release` の後片付けが回収の候補として挙げ、人の承認を得てから消す**（`merged-steps.py sweep-trash --ref <本番に出たコミット>` が候補を挙げ、承認の後に `--yes` を付けて消す）。退避先は Git に無い利用者のファイルを含み消すと戻せないため、本番の承認だけでは消さない（共通原則の C3・C4）。それまでは残す。退避先とブランチの対応は退避先の隣の台帳 `<退避先>.json`（`branch`・`head`・`merge_commit`・`discarded`）が持ち、`head` か `merge_commit` が本番のコミットに含まれれば候補になる。台帳の無い退避先は消さずに件数だけを報告する
 - 追跡ファイルの未コミットの変更（modified / staged / 削除）は退避の対象でなく `--force` が消すため、残っていれば外さず `kept` にする（`reason` に件数とファイル名）。コミットするか捨ててから、もう一度実行する
 - レビュー worktree（システムの一時ディレクトリ配下の `pr<PR番号>`）もスクリプトが外す。cross-review / cross-refactoring の実行の要約は worktree の外にあり、消えない
 

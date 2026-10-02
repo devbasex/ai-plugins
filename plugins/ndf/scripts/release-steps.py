@@ -761,11 +761,19 @@ def cmd_release(a):
         {"kind": "tag", "name": tag, "result": "pushed"},
         {"kind": "release", "name": tag, "result": "created"},
     ]
-    # 後片付け: この版に入ったブランチの退避先（merged の worktree-trash）は戻す先が無くなったので消す（#824）
+    # 後片付け: この版に入ったブランチの退避先（merged の worktree-trash）を回収の候補として挙げる（#824）。
+    # 退避先は Git にも本番のコミットにも無い利用者のファイルを含むため、本番の承認だけでは消さない（C3・C4）。
+    # 消すのは、候補を人へ示して承認を得た後の `merged-steps.py sweep-trash --ref <merge> --yes` である
     swept, sweep_metrics = trash.sweep(root, merge)
     items += swept
     metrics.update(sweep_metrics)
-    emit(result(TOOL, "ok", f"{plugin} v{ver} を {prod} へ出し、{tag} と GitHub Release を作った", items, metrics))
+    nxt = (
+        f"回収の候補の退避先 {sweep_metrics['sweep_candidates']} 件（items の kind: trash・result: candidate）を人へ示し、"
+        f"承認を得てから merged-steps.py sweep-trash --ref {merge} --yes で消す"
+        if sweep_metrics["sweep_candidates"]
+        else None
+    )
+    emit(result(TOOL, "ok", f"{plugin} v{ver} を {prod} へ出し、{tag} と GitHub Release を作った", items, metrics, None, nxt))
 
 
 def cmd_approval_facts(a):

@@ -314,6 +314,33 @@ def test_apply_refuses_plan_for_another_repo(env):
     assert env.writes() == []
 
 
+def test_apply_refuses_when_plan_and_repo_both_point_elsewhere(env):
+    # plan の repo と --repo を同じ別リポジトリにしても、記録（candidates.json の metrics.repo）が無ければ書かない
+    snap = env.snapshot(7)
+    f = env.path / "plan-other.json"
+    f.write_text(json.dumps({"repo": "x/other", "actions": [_action(snap, "追記が要る", {"title": "書き換え"})]}, ensure_ascii=False))
+    code, out = env.run("apply", "--plan", str(f), "--repo", "x/other")
+    assert code == 3 and out["status"] == "stopped"
+    assert "x/other" in out["items"][0]["reason"]
+    assert env.writes() == []
+
+
+def test_apply_refuses_when_record_is_for_another_repo(env, tmp_path):
+    # 記録の置き場に別のリポジトリの candidates.json があれば、書き込み先と合わないので書かない
+    snap = env.snapshot(7)
+    other = tmp_path / "state" / "x--other"
+    other.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "state" / "o--r" / "candidates.json").replace(other / "candidates.json")
+    rec = json.loads((other / "candidates.json").read_text())
+    assert rec["metrics"]["repo"] == "o/r"
+    f = env.path / "plan-other.json"
+    f.write_text(json.dumps({"repo": "x/other", "actions": [_action(snap, "追記が要る", {"title": "書き換え"})]}, ensure_ascii=False))
+    code, out = env.run("apply", "--plan", str(f), "--repo", "x/other")
+    assert code == 3 and out["status"] == "stopped"
+    assert "o/r" in out["items"][0]["reason"] and "x/other" in out["items"][0]["reason"]
+    assert env.writes() == []
+
+
 def test_apply_writes_only_what_differs(env):
     snap = env.snapshot(3)
     code, out = env.run(
