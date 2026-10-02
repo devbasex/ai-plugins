@@ -72,6 +72,11 @@ def read_record(root, repo, n):
     return "\n".join(parts)
 
 
+def _strip_note(text):
+    """版の文字列から全角の括弧の注記を落とす。"""
+    return re.sub(r"\s*（.*$", "", text).strip()
+
+
 def _read_dist_block(block):
     """配布の記録の節から段階・スプリントの PR・本番の版を読む。"""
     out = {"stage": None, "version": None, "sprint_prs": []}
@@ -83,7 +88,7 @@ def _read_dist_block(block):
     if (out["stage"] or "").startswith("本番"):
         for ln in block:
             if ln.startswith("版: ") and "→" in ln:
-                out["version"] = re.sub(r"\s*（.*$", "", ln.split("→", 1)[1]).strip()
+                out["version"] = _strip_note(ln.split("→", 1)[1])
                 break
     return out
 
@@ -101,7 +106,7 @@ def _verify_blocks(lines, sections):
             continue
         cur["lines"].append(ln)
         if ln.startswith("対象の版: ") and cur["ver"] is None:
-            cur["ver"] = re.sub(r"\s*（.*$", "", ln[len("対象の版: ") :]).strip()
+            cur["ver"] = _strip_note(ln[len("対象の版: ") :])
         if ln.startswith("合否:"):
             blocks.append(cur)
             cur = None
