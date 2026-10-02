@@ -8,6 +8,7 @@ import pathlib
 from typing import Any
 
 import review_lib  # noqa: E402
+import models  # noqa: E402
 import monitor_outcome  # noqa: E402
 import result_posts  # noqa: E402
 from review_lib import posts, store  # noqa: E402
@@ -243,12 +244,31 @@ def cmd_read_result(args: argparse.Namespace) -> None:
         review_lib.die(f"{agent}: レビューを投稿できませんでした ({posted.detail})")
 
     collected = _record_review_post(st, agent, pr, r, posted)
+    _record_seat_model(last, agent, pr)
     store._save(pr, st)
     if posted.review_url:
         print(f"POSTED review_url={posted.review_url}")
     print(f"INLINE={posted.posted_inline} BODY={posted.posted_body} QUEUED={posted.queued}")
     print(f"FINDINGS={collected}")
     review_lib.info(f"✅ {agent}: intent={posted.intent} posted_as={posted.posted_as} comments={posted.posted_inline}")
+
+
+def _record_seat_model(round_entry: dict[str, Any], seat: str, pr: int) -> None:
+    """ラウンドの席の記録へ、実際に動いたモデルを埋める（#1598 の AC13・設計の決定 7）。
+
+    claude の `--output-format json` の stdout（`<seat>-review-pr<pr>-stdout.log`）から読む。読めない・
+    claude 以外なら `null` のまま残す。席の記録の無い古いラウンドは何もしない。埋めるのは `null` のときだけ。
+    """
+    for rec in round_entry.get("seats") or []:
+        if rec.get("seat") != seat or rec.get("model") is not None:
+            continue
+        log = store._resolve_tmp_dir(pr) / f"{seat}-review-pr{pr}-stdout.log"
+        try:
+            text = log.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return
+        rec["model"] = models.observed_model(str(rec.get("runtime") or ""), text)
+        return
 
 
 def _validate_review_result(pr: int, agent: str, rfile: pathlib.Path) -> dict[str, Any]:

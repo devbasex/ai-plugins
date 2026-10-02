@@ -25,7 +25,10 @@ cross-review / cross-refactoring の 1 回の実行が、何分かかりどう�
 
     run_metrics.py aggregate [--since <日付>] [--until <日付>] [--repo <owner>/<repo>]
                              [--kind <種類>] [--version <版>]
-                             [--by total|round-count|reason] [--dir <置き場所>]
+                             [--by total|round-count|reason|pair] [--dir <置き場所>]
+
+`--by pair` は cross-review のラウンドを、席の記録（`rounds[].seats`。#1598）のランタイムの組
+（辞書順に `+` でつなぐ。1 席ならそのランタイム）ごとに数える。席の記録の無いラウンドは `不明` へ数える。
 """
 
 from __future__ import annotations
@@ -164,6 +167,9 @@ def _round_rows(state: dict, run_end: Optional[str]) -> list[dict]:
             row["kind"] = entry.get("kind")
         row["started_at"] = _iso_seconds(entry.get("started_at"))
         row["ended_at"] = end
+        # 席ごとの記録（席・ランタイム・モデル・組の相手。#1598 の AC14）。無ければ書かない。
+        if isinstance(entry.get("seats"), list):
+            row["seats"] = [dict(s) for s in entry["seats"] if isinstance(s, dict)]
         out.append(row)
     return out
 
@@ -421,7 +427,38 @@ def _by_reason(rows: list[dict]) -> str:
     return _table(["種類", "担当", "理由", "起動回数"], table)
 
 
-_BY = {"total": _by_total, "round-count": _by_round_count, "reason": _by_reason}
+PAIR_UNKNOWN = "不明"
+
+
+def pair_name(round_row: dict) -> str:
+    """ラウンドのレビューの組。2 席ならランタイムを辞書順に `+` でつなぎ、1 席ならそのランタイム、記録が無ければ `不明`。"""
+    seats = round_row.get("seats")
+    if not isinstance(seats, list) or not seats:
+        return PAIR_UNKNOWN
+    runtimes = sorted(str(s.get("runtime")) for s in seats if isinstance(s, dict) and s.get("runtime"))
+    return "+".join(runtimes) if len(runtimes) == len(seats) else PAIR_UNKNOWN
+
+
+def _by_pair(rows: list[dict]) -> str:
+    rounds: dict[str, int] = {}
+    runs: dict[str, int] = {}
+    for row in rows:
+        if row.get("kind") != "cross-review":
+            continue
+        seen: set[str] = set()
+        for r in row.get("rounds") or []:
+            if not isinstance(r, dict):
+                continue
+            name = pair_name(r)
+            rounds[name] = rounds.get(name, 0) + 1
+            seen.add(name)
+        for name in seen:
+            runs[name] = runs.get(name, 0) + 1
+    table = [[k, str(n), str(runs[k])] for k, n in sorted(rounds.items(), key=lambda kv: (-kv[1], kv[0]))]
+    return _table(["組", "ラウンド数", "実行数"], table)
+
+
+_BY = {"total": _by_total, "round-count": _by_round_count, "reason": _by_reason, "pair": _by_pair}
 
 
 def aggregate_table(base: pathlib.Path, args: argparse.Namespace) -> str:
@@ -435,7 +472,7 @@ def aggregate_table(base: pathlib.Path, args: argparse.Namespace) -> str:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="実行の要約を束ねて出す（#662）")
     sub = p.add_subparsers(dest="cmd", required=True)
-    ag = sub.add_parser("aggregate", help="要約を種類・ラウンド数・理由で束ねて Markdown の表で出す")
+    ag = sub.add_parser("aggregate", help="要約を種類・ラウンド数・理由・レビューの組で束ねて Markdown の表で出す")
     ag.add_argument("--since", help="開始時刻の下限（日付だけならその日の 0 時から）")
     ag.add_argument("--until", help="開始時刻の上限（日付だけならその日を含む）")
     ag.add_argument("--repo", help="owner/repo")

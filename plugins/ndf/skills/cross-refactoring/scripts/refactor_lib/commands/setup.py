@@ -30,6 +30,7 @@ import worktree_deps
 
 from .. import ABORT, die, info
 from .. import baseline as baseline_lib
+from .. import runtime_decl
 from .. import timeline
 from ..paths import (
     default_worktree_base,
@@ -139,7 +140,10 @@ def resolve_participants(
     欠け・使える者が 0 者は、この工程の中断（終了コード 4）へ写す。母集合に無い者の
     除外は中断せず、`ℹ` の 1 行を出して続ける（#786 の決定 2）。状態ファイルは
     この関数の後に書かれるため、失敗したときは作られも書き換えられもしない。
+
+    ランタイムの宣言（#1598）があれば、母集合をその `allowed` で絞り、宣言の外の `include` を止める。
     """
+    policy = runtime_decl.load_policy()
     try:
         pool = assignment.default_pool(host)
         resolved = assignment.resolve_participants(
@@ -149,7 +153,9 @@ def resolve_participants(
             exclude=exclude,
             probe=lambda names: auth.probe_auth(names, info=info),
             require_all=require_all,
+            policy=policy,
         )
+        pool = resolved.pool
     except assignment.AssignmentError as e:
         die(str(e))
         raise
@@ -402,6 +408,8 @@ def cmd_init(args: argparse.Namespace) -> None:
     inputs = _resolve_init_inputs(args)
     if inputs is None:
         return
+    # **宣言の外の名前は作業ディレクトリを用意する前に止める**（#1598 の AC3）。
+    runtime_decl.require_in_policy([*(inputs.include or []), getattr(args, "implementer", None)], "--include / --implementer")
     prep = _prepare_init(args)
     if _resume_if_pending(args, inputs, prep):
         return
@@ -670,7 +678,10 @@ def _rebuild_participants(
 ) -> None:
     """再開時の指定を補完し、参加者と作業ツリーの記録を作り直す。"""
     recorded = state.get("participants") or {}
-    include_eff = include if include is not None else list(recorded.get("included") or [])
+    include_eff = include if include is not None else runtime_decl.keep_recorded(state, "included", list(recorded.get("included") or []))
+    named = state.get("implementer_named")
+    if named and not runtime_decl.keep_recorded(state, "implementer_named", [named]):
+        state["implementer_named"] = None
     # `--exclude` を渡さない再開では、外した者と無視した除外の両方を足し戻す（#786 の AC4d。
     # 規則は cross-review と共通の `assignment.recorded_exclusions`）
     exclude_eff = exclude if exclude is not None else assignment.recorded_exclusions(recorded, include_eff)
@@ -721,7 +732,7 @@ def _resume(
         info(line)
 
     require_all = getattr(args, "require_all", None)
-    if include is not None or exclude is not None or require_all is not None:
+    if include is not None or exclude is not None or require_all is not None or runtime_decl.policy_changed(state):
         _rebuild_participants(state, include, exclude, require_all)
         _recheck_implementer(state)
 

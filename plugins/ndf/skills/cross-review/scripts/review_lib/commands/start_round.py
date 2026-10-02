@@ -155,6 +155,8 @@ def cmd_start_round(args: argparse.Namespace) -> None:
         "pr": pr,
         "started_at": review_lib._now(),
         "reviewers": reviewers,
+        # 席ごとの記録（席・ランタイム・モデル・組の相手。#1598 の AC13）。`reviewers` と同じ並び。
+        "seats": participants_mod.seat_records(reviewers),
     }
     if head is not None:
         entry["head_sha"] = head.oid
