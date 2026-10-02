@@ -37,7 +37,7 @@
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
 | 設計文書 | 設計の作業（`design` の手順 2・3） | 頭のファイル `issues/issue-<番号>-design.md` | 節（目的・適用範囲・あるべき姿の根拠・ドメインモデル・決定の記録 ほか） | H1、決定の見出し、用語の行 |
-| 設計 PR | pr のステップと push-glossary のステップ（スプリント。どちらも `pr.py` の同じ関数で題を書く）／`/ndf:pr` を呼ぶ者（単発） | Pull Request | 本文 | 題 |
+| 設計 PR | pr のステップと、`PUSH_DESIGN` を打つ 2 つのステップ（push-glossary と、pace: fast / auto で足す push-glossary-gate）（スプリント。どれも `pr.py` の同じ関数で題を書く）／`/ndf:pr` を呼ぶ者（単発） | Pull Request | 本文 | 題 |
 | 承認資料 | conductor（承認ゲート 1 を組む者） | 承認資料 1 件 | 対象を開くもの・判断に使うもの | 4 行（目的・用語・適用範囲・あるべき姿の根拠）、「無し（理由）」、「題: 規約の形でない」 |
 | 承認する人が読む欄の規約 | `design` の参照（`design-template.md`） | 「承認する人が読む欄」の節 | — | 題の形・目的の形・欄の形・決定の見出しの形・実例 |
 
@@ -60,7 +60,7 @@
 | E2 | 「適用範囲」と「あるべき姿の根拠」の節を書いた | 設計の作業 | conductor（E5） |
 | E3 | 決定の見出しを書いた | 設計の作業 | `pr-body-decisions.sh`（本文の「決めたこと」）・conductor（E5） |
 | E4 | 設計 PR を出した（題は H1 と同じ文） | pr のステップ／`/ndf:pr` | conductor（E5） |
-| E4b | レビューの直しを送った後に題を H1 へ合わせ直した（違うときだけ書き直す） | push-glossary のステップ | conductor（E5） |
+| E4b | レビューの直しを送った後に題を H1 へ合わせ直した（違うときだけ書き直す） | push-glossary のステップ／push-glossary-gate のステップ | conductor（E5） |
 | E5 | 承認資料を組んだ（先頭に 4 行） | conductor | 承認する人（E6） |
 | E6 | 承認する人が承認か差し戻しを決めた | 承認する人 | conductor（差し戻しなら設計の工程へ戻す。今と同じ） |
 
@@ -96,7 +96,7 @@
 | `plugins/ndf/skills/requirements-design/SKILL.md` | 変更 | 「目的」の行に、設計文書の「目的」の章の出所になる 1 行（規約の節を指す） |
 | `plugins/ndf/skills/document-restructuring/SKILL.md` | 変更 | 設計文書の H1 と H1 の直後の「目的」の章は動かさない 1 行（規約の節を指す） |
 | `plugins/ndf/scripts/supervise_lib/pr.py` | 変更 | pr のステップの `title_doc` を読み、H1 を題にする。読めなければ今の `title` を使う。既存の PR では H1 を読めたときだけ題も書き直す。H1 を読む関数と題を合わせ直す関数（`sync-title` が呼ぶ）を同じ場所に置く（決定 9） |
-| `plugins/ndf/scripts/supervise_lib/sprint_waves.py` | 変更 | 設計 PR のステップに `"title_doc": "issues/issue-<番号>-design.md"` を足す（`"title": "設計: #<番号>"` は代わりの題として残す）。push-glossary のステップの `cmd` を `PUSH_DESIGN` の後に `supervise.py sync-title --pr {pr} --doc issues/issue-<番号>-design.md` を続ける形にする（決定 9） |
+| `plugins/ndf/scripts/supervise_lib/sprint_waves.py` | 変更 | 設計 PR のステップに `"title_doc": "issues/issue-<番号>-design.md"` を足す（`"title": "設計: #<番号>"` は代わりの題として残す）。`PUSH_DESIGN` を打つ 2 つのステップの `cmd` を、`PUSH_DESIGN` の後に `supervise.py sync-title --pr {pr} --doc issues/issue-<番号>-design.md` を続ける形にする。`plan_sprint_design` が push-glossary の `cmd` をこの形で組み、`plan_mvv_design` が足す push-glossary-gate は push-glossary の `cmd` をそのまま使う（`PUSH_DESIGN` を直に書かない）。`PUSH_DESIGN` の定数は設計 PR 以外の送りにも使うため変えない（決定 9） |
 | `plugins/ndf/scripts/supervise.py` | 変更 | 冒頭のステップの説明（pr の行）に `title_doc` を足す。`sync-title` のサブコマンドを足す（`pr.py` の関数を呼ぶだけ） |
 | `plugins/ndf/scripts/tests/`（pr のステップのテスト） | 新規か変更 | F3 の振る舞いと不変条件 I1・I5 を縛る |
 
@@ -199,7 +199,7 @@ sequenceDiagram
   participant Doc as 設計文書
   participant Pr as pr のステップ
   participant GH as GitHub
-  participant Pg as push-glossary のステップ
+  participant Pg as push-glossary／push-glossary-gate のステップ
   participant C as conductor
   participant H as 承認する人
   Dz->>Doc: H1・目的・適用範囲・根拠を書く（E1・E2）
@@ -226,7 +226,7 @@ sequenceDiagram
 | 大項目 | 実現方式 |
 | --- | --- |
 | 運用・保守性 | 規約の本文を `design-template.md` の「承認する人が読む欄」の節だけに置き、ほかの 9 ファイル（`decisions.md`・`deliverables.md`・`domain-model.md`・`design/SKILL.md`・`approval-request.md`・`agent-layers.md`・`pr/SKILL.md`・`requirements-design/SKILL.md`・`document-restructuring/SKILL.md`）は節へのリンクを含む 1〜2 行だけを持つ（I3） |
-| 性能・拡張性 | 規約の節は 60 行以内。雛形の中の増分は節の見出しと注記の 10 行前後。承認資料に足す行は 4 行。pr のステップが読むのは 1 ファイルだけで、GitHub への呼び出しは増やさない（既存の `edit` に `--title` を足すだけ）。push-glossary のステップは設計 PR 1 本につき題の照会を 1 回足し、書き込みは題が H1 と違うときだけ 1 回足す（ステップの数は増やさない） |
+| 性能・拡張性 | 規約の節は 60 行以内。雛形の中の増分は節の見出しと注記の 10 行前後。承認資料に足す行は 4 行。pr のステップが読むのは 1 ファイルだけで、GitHub への呼び出しは増やさない（既存の `edit` に `--title` を足すだけ）。push-glossary のステップ（pace: fast / auto で用語の当たりが残ったときは push-glossary-gate のステップ。1 本の実行で通るのはどちらか 1 つ）は設計 PR 1 本につき題の照会を 1 回足し、書き込みは題が H1 と違うときだけ 1 回足す（ステップの数は増やさない） |
 
 ## 決定の記録
 
@@ -280,9 +280,9 @@ GitHub の題には長さの上限があり、超えると `gh pr create` が失
 
 根拠: Vision / Value 5（MVV 版 2）
 
-### 決定 9: レビューの直しで変わった H1 を承認ゲート 1 の前に題へ反映するため、push-glossary のステップで題を合わせ直す
+### 決定 9: レビューの直しで変わった H1 を承認ゲート 1 の前に題へ反映するため、設計を送る 2 つのステップ（push-glossary と push-glossary-gate）で題を合わせ直す
 
-スプリントの設計のプランは pr → sync-body → review（cross-review）→ sync-review → glossary-check → push-glossary → gate と進み、review より後に pr のステップは無い。レビューの指摘で H1 を直すと、決定 6 だけでは題が古い H1 のまま承認ゲート 1 に届き、I1 が通常の経路で破れる。push-glossary のステップは glossary-check の成否によらず gate の前に必ず通り、レビューの直しと用語の直しの両方を送った後の head を持つため、ここで題を合わせ直す。題を書く関数は pr のステップと同じ `pr.py` の関数で、書き手の規則は 1 つのまま（決定 1）。承認資料に「題と H1 が違う」と添えるだけの案は、I1 を破ったまま承認する人に直させるため採らない。専用のステップを足す案は、プランのステップが 1 つ増え、push-glossary と同じ head を待つだけになるため採らない。
+スプリントの設計のプランは pr → sync-body → review（cross-review）→ sync-review → glossary-check → push-glossary → gate と進み、review より後に pr のステップは無い。レビューの指摘で H1 を直すと、決定 6 だけでは題が古い H1 のまま承認ゲート 1 に届き、I1 が通常の経路で破れる。pace: normal ではプランは glossary-check の成否によらず push-glossary を通って gate へ進む。pace: fast / auto（`plan_mvv_design`）では、glossary-recheck に当たりが残ると push-glossary を通らず push-glossary-gate → gate へ進み、当たりが無ければ push-glossary → mvv へ進む。どの経路でも承認ゲート 1（gate か mvv の判定）の前に、`PUSH_DESIGN` を打つ 2 つのステップのどちらか 1 つを必ず通り、そこはレビューの直しと用語の直しの両方を送った後の head を持つ。そのため 2 つのステップの両方で題を合わせ直す。push-glossary-gate は push-glossary の `cmd` をそのまま使い、片方だけに同期が付く食い違いを作らない。`PUSH_DESIGN` の定数に同期を含める案は、設計 PR 以外の送りでも題を書き換える経路を作るため採らない。題を書く関数は pr のステップと同じ `pr.py` の関数で、書き手の規則は 1 つのまま（決定 1）。承認資料に「題と H1 が違う」と添えるだけの案は、I1 を破ったまま承認する人に直させるため採らない。専用のステップを足す案は、プランのステップが 1 つ増え、push-glossary と同じ head を待つだけになるため採らない。
 
 根拠: Value 2 / Value 4 / Value 6（MVV 版 2）
 
@@ -298,6 +298,7 @@ GitHub の題には長さの上限があり、超えると `gh pr create` が失
 | I1（決定 6） | 既存の PR があり H1 を読めたとき、本文と一緒に題も書き直す。読めないときは題を書き直さない | 題を常に書き直す・一度も書き直さない、のどちらに壊しても落ちる |
 | I1（決定 9） | 既存の PR の題と違う H1 の設計文書で `sync-title` を打つと題を H1 に書き直し、同じなら書き込まず、H1 を読めないときは書き込まない。どれも 0 で終わる | 書き直さない・常に書き直す・読めないときに代わりの題で上書きする・失敗で非 0 を返す、のどれに壊しても落ちる |
 | I1（決定 9） | スプリントの設計のプランの push-glossary のステップの `cmd` が、送った後に `sync-title --pr {pr} --doc issues/issue-<番号>-design.md` を打つ | `sync-title` を落とすか番号を取り違えると落ちる |
+| I1（決定 9） | pace: fast / auto の設計のプラン（`plan_mvv_design`）の push-glossary-gate と push-glossary の両方の `cmd` が、送った後に `sync-title --pr {pr} --doc issues/issue-<番号>-design.md` を打つ（glossary-recheck の `on_fail` が push-glossary-gate を指し、その `next` が gate のまま） | push-glossary-gate に `PUSH_DESIGN` だけを書くか、どちらかの `sync-title` を落とすと落ちる |
 | AC9 | スプリントの設計のプランの pr のステップが `title_doc` に `issues/issue-<番号>-design.md`、`title` に `設計: #<番号>` を持つ | `title_doc` を落とすか番号を取り違えると落ちる |
 | AC1〜AC4・AC11・I2 | 雛形の H1・目的・欄・決定の見出し・実例を、実装の後に雛形で読んで確かめる（手動） | — |
 | AC5・I3 | 規約の文が雛形の節にだけあることを、9 ファイルの差分を読んで確かめる（手動） | — |
