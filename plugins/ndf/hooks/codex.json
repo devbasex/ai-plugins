@@ -21,6 +21,12 @@
             "command": "sh -c 'if [ -n \"$PLUGIN_ROOT\" ]; then bash \"$PLUGIN_ROOT/scripts/worktree-session.sh\"; fi; exit 0'",
             "timeout": 10,
             "statusMessage": "Checking the main directory for stray changes"
+          },
+          {
+            "type": "command",
+            "command": "sh -c 'if [ -n \"$PLUGIN_ROOT\" ] && command -v python3 >/dev/null 2>&1; then python3 \"$PLUGIN_ROOT/scripts/training-optout.py\" session-start --runtime codex; fi; exit 0'",
+            "timeout": 10,
+            "statusMessage": "Turning off model training on this ChatGPT account (NDF_TRAINING_OPTOUT=0 to skip)"
           }
         ]
       }

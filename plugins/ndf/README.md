@@ -211,6 +211,60 @@ bash <プラグインのパス>/scripts/worktree-setup.sh init
 規約は `skills/development-workflow/references/waiting.md`（待ち方）と
 `skills/development-workflow/references/context-window.md`（会話を切る）にあります。
 
+### 学習の設定を Off にする（Claude Code と Codex）
+
+NDF を読み込んだセッションの開始で、そのアカウントの「入力を学習に使う」設定を確かめ、On なら Off にします
+（`scripts/training-optout.py session-start`）。
+
+| ランタイム | 契機 | 読み書きする設定 |
+| --- | --- | --- |
+| Claude Code | SessionStart の `startup` と `resume`（`claude -p` の worker・`CLAUDE_CONFIG_DIR` で切り替えたアカウントも同じ） | 「Help improve our AI models」（OAuth の `account/settings` の `grove_enabled`） |
+| Codex（ChatGPT のログイン） | SessionStart | ChatGPT の「Improve the model for everyone」と Codex の環境の学習（`settings/user` の `training_allowed`・`codex_training_allowed`・`codex_training_allowed_v2`） |
+
+- Off にしたときだけ、画面に `[ndf] …を Off にした` を 1 行出します。既に Off なら何も送らず何も出しません
+- 読めない・書き換えられない（認証が無い・401・403・通信の失敗）ときは、`[ndf] 学習の設定を確かめられなかった…` か
+  `…Off にできなかった…` を出し、セッションは続けます。次の起動でもう一度試します
+- API キー・Bedrock・Vertex の接続（`ANTHROPIC_API_KEY`・`ANTHROPIC_AUTH_TOKEN`・`CLAUDE_CODE_USE_BEDROCK`・
+  `CLAUDE_CODE_USE_VERTEX` のどれか）と、Codex の API キーのログインには学習の設定が無いため、何もしません
+- Off にすると、Anthropic 側の会話の保存期間も、学習に使わない設定の期間に変わります
+- **外すには `NDF_TRAINING_OPTOUT=0` を設定します**（読みも書きも送りません）。恒久にするには `~/.claude/settings.json` の
+  `env` に書きます。Codex では起動の環境に置きます
+
+トークンとアカウントの ID は、見出しにだけ置いて出力とログに出しません。Codex の hook は、他の hook と同じく
+`~/.codex/config.toml` で有効にするまで動きません（下の「その他」）。
+
+**利用側のリポジトリで「学習の設定を確かめた LLM にだけ入力を渡す」には `check` を呼びます**（`<ndf>` は NDF のプラグインの置き場。NDF の hook の中では `$CLAUDE_PLUGIN_ROOT`）。 `check` は読むだけで書き換えず、
+`NDF_TRAINING_OPTOUT` も読みません。結果は 1 行の JSON で、終了コードが 0（すべて学習に使わない）のときだけ渡します。
+1 は学習に使う設定がある、3 は確かめられない（認証が無い・トークンの期限切れ・応答の形の違い・HTTP の失敗・
+OAuth 以外の接続・従量の接続の宣言・`unsupported`）です。`--runtime` は `claude`（既定）・`codex`・`kiro`・`agy` で、
+kiro と agy は確かめる手段が無いため `unsupported`（3）になります。
+
+```console
+$ python3 <ndf>/scripts/training-optout.py check --runtime claude --runtime codex
+{"tool": "training-optout", "status": "ok", "summary": "学習に使わない設定: claude, codex", "items": [{"runtime": "claude", "config_dir": null, "training": false, "source": "oauth/account/settings.grove_enabled", "updated_at": "2026-08-13T15:10:07Z", "reason": null}, {"runtime": "codex", "config_dir": null, "training": false, "source": "chatgpt/settings/user.training_allowed", "updated_at": null, "reason": null}], "metrics": {}}
+```
+
+supervise のプランでは、LLM を使うステップの前に `run` のステップを置きます（0 以外なら止まる）。supervise は利用上限で
+登録アカウントを切り替えるため、登録アカウントがあればその設定ディレクトリを `--config-dir` へすべて並べます
+（置き場は `${NDF_ACCOUNTS_DIR:-<共有の設定ディレクトリ>/ndf/accounts}/<名前>/`。無ければ `--config-dir` を外す）。
+従量の接続の宣言（`NDF_SUPERVISE_CLAUDE_FALLBACK`、無ければ置き場の `metered.json`）があると 3 で止まるため、
+supervise は `NDF_SUPERVISE_CLAUDE_FALLBACK=` を空で定義して起動します。`check` はトークンを更新しないため、期限の切れた
+登録アカウントは `CLAUDE_CONFIG_DIR=<アカウントの設定ディレクトリ> claude` を 1 度起動して更新してから流し直します。
+
+```json
+{"id": "optout", "type": "run", "timeout": 60,
+ "cmd": "python3 <ndf>/scripts/training-optout.py check --runtime claude --config-dir ~/.claude/ndf/accounts/*/",
+ "next": "impl"}
+```
+
+Claude Code の hook では、`.claude/settings.json` の `UserPromptSubmit` から呼び、0 以外なら終了コード 2 で入力を止めます
+（`UserPromptSubmit` の終了コード 2 はその入力を LLM へ渡さずに消し、標準エラーを利用者へ見せる。`SessionStart` では止められない）。
+
+```json
+{"hooks": {"UserPromptSubmit": [{"hooks": [{"type": "command",
+  "command": "python3 <ndf>/scripts/training-optout.py check >/dev/null || { echo '学習に使わない設定を確かめられない。/privacy-settings を開く' >&2; exit 2; }"}]}]}}
+```
+
 ### その他
 
 Claude Code の SessionStart hook（`hooks/claude.json`）は上記に加えて次を行います。
