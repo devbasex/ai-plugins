@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import os
@@ -109,8 +110,7 @@ def run_ticking(
     err_path を渡すと stderr をそのファイルへ書かせる（待ちの間に最後の行を読めるように）。
     子は新しいセッションで起こし、`watch_children` の知らせる先へ渡す（孤児の片付け）。打ち切りは子のプロセスグループを止めて subprocess.TimeoutExpired を投げる。
     tick() が例外を投げたら（遅れの見張りの打ち切り）、子のプロセスグループを止めてから投げ直す。"""
-    errf = open(err_path, "w", encoding="utf-8") if err_path else None
-    try:
+    with _err_file(err_path) as errf:
         p = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE if input is not None else subprocess.DEVNULL,
@@ -120,40 +120,50 @@ def run_ticking(
             start_new_session=True,
             **kw,
         )
-    except BaseException:
-        if errf:
-            errf.close()
-        raise
-    note = getattr(_STEP, "note", None)
-    if note:
-        note(p.pid, True)
-    deadline = time.time() + timeout if timeout else None
-    first = True
-    try:
-        while True:
-            wait = every if deadline is None else max(0.01, min(every, deadline - time.time()))
-            try:
-                out, err = p.communicate(input if first else None, timeout=wait)
-                if errf:
-                    errf.close()
-                    err = Path(err_path).read_text(encoding="utf-8", errors="replace")
-                return subprocess.CompletedProcess(cmd, p.returncode, out, err)
-            except subprocess.TimeoutExpired:
-                first = False
-                if deadline is not None and time.time() >= deadline:
-                    kill_group(p)
-                    raise subprocess.TimeoutExpired(cmd, timeout) from None
-                if tick:
-                    try:
-                        tick()
-                    except BaseException:
-                        kill_group(p)
-                        raise
-    finally:
+        note = getattr(_STEP, "note", None)
         if note:
-            note(p.pid, False)
+            note(p.pid, True)
+        deadline = time.time() + timeout if timeout else None
+        try:
+            return _communicate_with_ticks(p, errf, err_path, every, deadline, input, tick, cmd, timeout)
+        finally:
+            if note:
+                note(p.pid, False)
+
+
+@contextlib.contextmanager
+def _err_file(err_path: Path | None):
+    """stderr を書かせるファイルを開き、抜けるときに閉じていなければ閉じる。err_path が無ければ None。"""
+    errf = open(err_path, "w", encoding="utf-8") if err_path else None
+    try:
+        yield errf
+    finally:
         if errf and not errf.closed:
             errf.close()
+
+
+def _communicate_with_ticks(p, errf, err_path, every, deadline, input, tick, cmd, timeout) -> subprocess.CompletedProcess:
+    """every 秒ごとに tick() を呼びながら p の終わりを待つ。打ち切りと tick() の例外では子のプロセスグループを止める。"""
+    first = True
+    while True:
+        wait = every if deadline is None else max(0.01, min(every, deadline - time.time()))
+        try:
+            out, err = p.communicate(input if first else None, timeout=wait)
+            if errf:
+                errf.close()
+                err = Path(err_path).read_text(encoding="utf-8", errors="replace")
+            return subprocess.CompletedProcess(cmd, p.returncode, out, err)
+        except subprocess.TimeoutExpired:
+            first = False
+            if deadline is not None and time.time() >= deadline:
+                kill_group(p)
+                raise subprocess.TimeoutExpired(cmd, timeout) from None
+            if tick:
+                try:
+                    tick()
+                except BaseException:
+                    kill_group(p)
+                    raise
 
 
 def minimal_args(system: str) -> list[str]:
