@@ -374,6 +374,14 @@ class RankPlan:
         """rank を入れた plan で、順位の表が移したものとして置く移動（自動・承認済み）の action か却下が無いもの。"""
         if not self.plan.get("rank") or self.stale:
             return []
+        return [
+            f"#{n} の{d}（{self.candidate(n, d)['decision']}）の action が無い（順位の表が移したものとして置く）"
+            for n, d in self._placed_moves()
+            if (n, d) not in named
+        ]
+
+    def _placed_moves(self) -> list[tuple]:
+        """順位の表が移したものとして置く (number, direction) の列（前倒しの自動・承認済みと後ろ倒しの承認済み）。"""
         placed = [
             (n, R.FORWARD)
             for f in self.metrics.get("forward", [])
@@ -381,11 +389,7 @@ class RankPlan:
             for n in [f["number"], *f["group"]]
         ]
         placed += [(b["number"], R.BACKWARD) for b in self.metrics.get("backward", []) if b["decision"] == R.APPROVED]
-        return [
-            f"#{n} の{d}（{self.candidate(n, d)['decision']}）の action が無い（順位の表が移したものとして置く）"
-            for n, d in placed
-            if (n, d) not in named
-        ]
+        return placed
 
     def _hold_leads_of_held_groups(self, leads):
         """依存先が保留に入った前倒しの先頭も保留にする（先頭だけが動いて依存先を置いていかない。AC6）。"""
@@ -404,8 +408,7 @@ class RankPlan:
         plan に reschedule の action が無い課題も数える。action の有無で絞ると、書き漏らした移動は
         マイルストーンが動かないまま表だけ移す先に載り、所属と表が食い違う。
         """
-        placed = {n for f in self.metrics.get("forward", []) if f["decision"] in (R.AUTO, R.APPROVED) for n in [f["number"], *f["group"]]}
-        placed |= {b["number"] for b in self.metrics.get("backward", []) if b["decision"] == R.APPROVED}
+        placed = {n for n, _ in self._placed_moves()}
         moved = {act["number"] for act in actions if act.get("reschedule")}
         done = (set(buckets["applied"]) | set(buckets["unchanged"]) | set(buckets["already"])) & moved
         return sorted(placed - done) if self.plan.get("rank") and not self.stale else []
