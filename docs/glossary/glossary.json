@@ -585,7 +585,7 @@
     {
       "term": "棚卸し",
       "context": "ndf-workflow",
-      "meaning": "既存の課題の本文・マイルストーン・ラベルを現状に合わせ、着手の順位を決め直すこと。スクラムのバックログリファインメントに当たる",
+      "meaning": "既存の課題の本文・マイルストーン・ラベルを現状に合わせ、着手の順位を決め直すこと。スクラムのバックログリファインメントに当たる。工程表の行名（進捗記録の stage の値）でもある",
       "deprecated": [
         "手入れ"
       ],
@@ -2609,6 +2609,18 @@
       "context": "ndf-issue-upkeep",
       "meaning": "着手の前に人の判断（needs-decision・承認ゲート）を要する状態。費用に数えず、順位の値を変えずに印として出す",
       "pending_source": "issues/issue-1429-design.md"
+    },
+    {
+      "term": "候補の上限",
+      "context": "ndf-issue-upkeep",
+      "meaning": "1 回の棚卸しで区分を決める候補の数の上限。candidates の --limit、.ndf/backlog.json の candidate_limit、既定 10 の順に決まる",
+      "source": "plugins/ndf/skills/backlog-refinement/SKILL.md"
+    },
+    {
+      "term": "持ち越し",
+      "context": "ndf-issue-upkeep",
+      "meaning": "候補の上限を超えたため、その回で区分を決めずに残した候補。candidates の metrics.deferred に番号だけが載る",
+      "source": "plugins/ndf/skills/backlog-refinement/SKILL.md"
     },
     {
       "term": "残りの量",
