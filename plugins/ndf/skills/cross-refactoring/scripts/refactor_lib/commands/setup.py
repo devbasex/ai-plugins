@@ -771,11 +771,7 @@ def _recheck_implementer(state: dict[str, Any]) -> None:
         }
     )
     state["implementer"], state["implementer_reason"] = implementer, reason
-    state["implementer_model"] = {
-        "requested": (state.get("models") or {}).get(implementer),
-        "observed": None,
-        "unobserved": None,
-    }
+    state["implementer_model"] = {"requested": (state.get("models") or {}).get(implementer), "observed": None, "unobserved": None}
     info(f"↻ 実装担当を {implementer} へ替えました（{reason}）")
 
 
