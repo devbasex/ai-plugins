@@ -29,7 +29,7 @@
 
 | コンテキスト | 何の語が 1 つの意味に決まるか |
 | --- | --- |
-| NDF の学習の設定（`ndf-training-optout`） | 学習の設定・学習の設定の確認・学習の設定の書き換え・従量の接続・書き換えの無効化 |
+| NDF の学習の設定（`ndf-training-optout`） | 学習の設定・学習の設定の確認・学習の設定の書き換え・OAuth でない接続・書き換えの無効化 |
 
 Anthropic のアカウントの設定（`account/settings`）とは**腐敗防止層**の関係を置く。上流は公開の API ではなく、
 形が変わりうる（要求の前提 1）。`lib/claude_training.py` だけが応答の鍵（`grove_enabled`・`grove_updated_at`）を読み、
@@ -40,7 +40,7 @@ NDF の側の語（学習の設定・`training` の真偽値）へ変換する�
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
 | 学習の設定 | `lib/claude_training.py` の `turn_off`（Anthropic 側の値を false へ書き換える唯一の経路） | 学習の設定（アカウントの `grove_enabled`） | — | 読んだ結果（`training`・`updated_at`・`reason`） |
-| 起動の認証 | 持ち主なし（読むだけ。Claude Code が書く） | 起動の認証（`CLAUDE_CONFIG_DIR` と環境変数が決める） | — | OAuth のトークン・従量の接続の指定 |
+| 起動の認証 | 持ち主なし（読むだけ。Claude Code が書く） | 起動の認証（`CLAUDE_CONFIG_DIR` と環境変数が決める） | — | OAuth のトークン・OAuth でない接続の指定 |
 
 **学習の設定の持ち主は 1 つに決める。** `check` は読むだけで、書き換えるのは `session-start` が呼ぶ `turn_off` だけである。
 **起動の認証は書かない。** トークンの更新は Claude Code が行う（要求の「含まない」）。
@@ -51,11 +51,11 @@ NDF の側の語（学習の設定・`training` の真偽値）へ変換する�
 | --- | --- | --- | --- |
 | I1 | 学習の設定 | 読んだ結果の `training` は true / false / null の 3 つで、真偽値を読めなかったときは必ず null（「学習に使わない」と読ませない） | 応答の `grove_enabled` が真偽値でなければ null と理由を返す |
 | I2 | 学習の設定 | 書き換えは true → false の向きだけで、読んだ値が true のときにだけ 1 回送る | false・null のときは `PATCH` を送らない。true へ書き換える経路を持たない |
-| I3 | 学習の設定 | 書き換えの無効化（`NDF_TRAINING_OPTOUT=0`）のときは読みも書きも送らない | 環境変数を読んだ直後に終わる |
-| I4 | 起動の認証 | 従量の接続（`claude_accounts.FOREIGN_AUTH_ENV` のどれかがある起動）では読みも書きも送らない | `check` は `training: null`・理由「OAuth でない接続」。`session-start` は何も出さずに終わる |
+| I3 | 学習の設定 | 書き換えの無効化（`NDF_TRAINING_OPTOUT=0`）のときは、`session-start` が読みも書きも送らない。`check` はこの変数を読まず、無効化のときも読み取りを送る（書き換えの無効化は確認を止めない） | `session-start` が環境変数を読んだ直後に終わる。無効化の判定は `training-optout.py` の `session-start` の入口に置き、`claude_training`（`read_setting`・`turn_off`）には置かない |
+| I4 | 起動の認証 | OAuth でない接続（`claude_accounts.FOREIGN_AUTH_ENV` のどれかがある起動）では読みも書きも送らない | `check` は `training: null`・理由「OAuth でない接続」。`session-start` は何も出さずに終わる |
 | I5 | 起動の認証 | トークンとアカウントの識別子を標準出力・標準エラー・`systemMessage`・例外の文言に出さない。応答の本文を出力へ写さない | 理由は HTTP の状態コードと例外の型名だけで作る |
 | I6 | 学習の設定 | `session-start` はどの失敗でも終了コード 0 で終わり、セッションの開始を止めない | 予期しない例外も捕まえて失敗の知らせに変える |
-| I7 | 学習の設定 | 送り先は `https://api.anthropic.com` だけ | 宛先は定数で持ち、差し替えは試験用の環境変数（`NDF_TRAINING_SETTINGS_URL`）に限る |
+| I7 | 起動の認証 | 実際の OAuth のトークンを送る先は `https://api.anthropic.com` だけ | 宛先は定数で持つ。試験用の環境変数（`NDF_TRAINING_SETTINGS_URL`）の差し替えは、ホストが手元（`127.0.0.1`・`::1`・`localhost`）の URL だけを受ける。それ以外の値が入っていれば、`check`・`session-start` ともトークンを読まず何も送らず、読み取りの失敗（理由「試験用の宛先が手元でない」）として扱う |
 
 ### ドメインイベント
 
@@ -79,7 +79,7 @@ NDF の側の語（学習の設定・`training` の真偽値）へ変換する�
 | 学習の設定の確認 | 学習の設定を読み、1 行の JSON で返すこと（check）。書き換えない | 追加済み（要求） |
 | 学習の設定の書き換え | NDF のセッションの開始で、true の学習の設定を false にすること | 追加済み（要求） |
 | 書き換えの無効化 | 利用者が環境変数 NDF_TRAINING_OPTOUT=0 で学習の設定の書き換えを止めること。確認（check）は止めない | 追加 |
-| 従量の接続 | 用語集の `ndf-relay` の語と同じ意味で使う（OAuth でない、使った分だけ費用が掛かる接続）。この接続には学習の設定が無い | 既存の語を使う（追加しない） |
+| OAuth でない接続 | `claude_accounts.FOREIGN_AUTH_ENV` の変数（`ANTHROPIC_API_KEY`・`ANTHROPIC_AUTH_TOKEN`・`CLAUDE_CODE_USE_BEDROCK`・`CLAUDE_CODE_USE_VERTEX`）のどれかが空でない起動。この接続には学習の設定が無い。用語集の `ndf-relay` の「従量の接続」（Bedrock か API キーに限る）とは範囲が違うため、その語を使わない | 追加 |
 
 ## 機能一覧
 
@@ -96,7 +96,7 @@ NDF の側の語（学習の設定・`training` の真偽値）へ変換する�
 | 要素 | 変更 | 責務 |
 | --- | --- | --- |
 | `plugins/ndf/scripts/training-optout.py` | 新規（実験版から移す） | 2 つの副命令の入口。`check` は F1 の 1 行の JSON（`lib/step_result.py` の形）と終了コード、`session-start` は F2〜F4 の判定と `systemMessage` の組み立て。標準ライブラリだけで書き、`python3` で直に動く |
-| `plugins/ndf/scripts/lib/claude_training.py` | 新規 | 腐敗防止層。従量の接続の判定・トークンの読み・`GET` と `PATCH`・応答から `training` への変換。出力はしない（値を返すだけ） |
+| `plugins/ndf/scripts/lib/claude_training.py` | 新規 | 腐敗防止層。OAuth でない接続の判定・トークンの読み・`GET` と `PATCH`・応答から `training` への変換。出力はしない（値を返すだけ） |
 | `plugins/ndf/scripts/lib/claude_usage.py` | 変更 | `_http` を公開名 `http_json` にし、`method` と JSON の本文を渡せるようにする。呼び出し元（`get_usage`・`refresh_oauth`）は名前を直すだけで振る舞いを変えない |
 | `plugins/ndf/scripts/lib/claude_accounts.py` | 変更 | 設定ディレクトリを受けて `claudeAiOauth` を返す `oauth_in(config_dir)` を足し、`_oauth(name)` をその呼び出しにする |
 | `plugins/ndf/hooks/claude.json` | 変更 | SessionStart の `startup\|resume` の群に `training-optout.py session-start` の hook を 1 つ足す（`timeout` 10） |
@@ -208,7 +208,7 @@ classDiagram
 | `Reading`（`dataclass`・不変） | 読んだ結果の値オブジェクト。`to_item()` が `check` の `items[]` の 1 要素を返す | — |
 | `metered(env)` | `claude_accounts.FOREIGN_AUTH_ENV` のどれかが空でなければ真 | 例外を出さない |
 | `oauth_token(env)` | `CLAUDE_CODE_OAUTH_TOKEN` → `oauth_in(CLAUDE_CONFIG_DIR か ~/.claude)` の `accessToken` → macOS のキーチェーン（下の注）の順に読む | 読めなければ None |
-| `read_setting(env)` | 従量の接続・トークン無し・HTTP の失敗・形の違いを `Reading(training=None, reason=…)` に変える | 例外を出さない。`reason` は I5 の形だけ |
+| `read_setting(env)` | OAuth でない接続・トークン無し・HTTP の失敗・形の違いを `Reading(training=None, reason=…)` に変える | 例外を出さない。`reason` は I5 の形だけ |
 | `turn_off(token)` | `PATCH` を 1 回送る。2xx なら None、そうでなければ理由の文字列 | 例外を出さない |
 | `training_optout.cmd_check` | `--runtime` ごとに `read_setting` か `unsupported` を並べ、終了コードを決めて 1 行の JSON を出す | 終了コード 0 / 1 / 3（「入出力の契約」） |
 | `training_optout.cmd_session_start` | 処理の流れの判定を行い、知らせがあれば `{"systemMessage": …}` を 1 行出す | 常に終了コード 0（I6） |
@@ -252,11 +252,12 @@ classDiagram
 
 | 場合 | `reason` |
 | --- | --- |
-| 従量の接続 | `OAuth でない接続（API キー・Bedrock・Vertex）` |
+| OAuth でない接続 | `OAuth でない接続（API キー・認証トークン・Bedrock・Vertex）` |
 | トークンが無い | `OAuth のトークンが無い` |
 | HTTP の状態が 200 でない | `HTTP <状態コード>` |
 | 通信の失敗 | `通信の失敗` |
 | 応答に真偽値が無い | `応答に grove_enabled の真偽値が無い` |
+| 試験用の差し替えが手元でない（I7） | `試験用の宛先が手元でない` |
 | codex / kiro / agy | `unsupported` |
 
 ### `training-optout.py session-start`
@@ -276,7 +277,7 @@ classDiagram
 | true → `PATCH` が 2xx | `[ndf] このアカウントの「Help improve our AI models」を Off にした（入力を学習に使わない設定）。外すには NDF_TRAINING_OPTOUT=0 を設定する` |
 | 読み取りの失敗（トークンが無い・HTTP・通信・形） | `[ndf] 学習の設定を確かめられなかった（<理由>）。「学習に使わない」とは扱わない。止めるには NDF_TRAINING_OPTOUT=0` |
 | 書き換えの失敗（`PATCH` が 2xx 以外・通信） | `[ndf] 学習の設定を Off にできなかった（<理由>）。設定画面の「Help improve our AI models」を確かめる。止めるには NDF_TRAINING_OPTOUT=0` |
-| 既に false・無効化・従量の接続 | 出さない |
+| 既に false・無効化・OAuth でない接続 | 出さない |
 
 ### hook の定義
 
@@ -298,10 +299,10 @@ classDiagram
 | 変数 | 読む側 | 意味 |
 | --- | --- | --- |
 | `NDF_TRAINING_OPTOUT` | `session-start` | `0` なら書き換えの無効化（I3）。他の値・未設定は有効。`check` は読まない |
-| `ANTHROPIC_API_KEY`・`ANTHROPIC_AUTH_TOKEN`・`CLAUDE_CODE_USE_BEDROCK`・`CLAUDE_CODE_USE_VERTEX` | 両方 | どれかが空でなければ従量の接続（I4。`claude_accounts.FOREIGN_AUTH_ENV` をそのまま使う） |
+| `ANTHROPIC_API_KEY`・`ANTHROPIC_AUTH_TOKEN`・`CLAUDE_CODE_USE_BEDROCK`・`CLAUDE_CODE_USE_VERTEX` | 両方 | どれかが空でなければ OAuth でない接続（I4。`claude_accounts.FOREIGN_AUTH_ENV` をそのまま使う） |
 | `CLAUDE_CODE_OAUTH_TOKEN` | 両方 | あれば最優先のトークン |
 | `CLAUDE_CONFIG_DIR` | 両方 | 認証ファイルの置き場（無ければ `~/.claude`）。relay のアカウントの切り替えはこの値で効く |
-| `NDF_TRAINING_SETTINGS_URL` | 両方 | 試験用に宛先を差し替える（`claude_usage` の `NDF_ACCOUNT_USAGE_URL` と同じ扱い） |
+| `NDF_TRAINING_SETTINGS_URL` | 両方 | 試験用に宛先を差し替える。ホストが手元（`127.0.0.1`・`::1`・`localhost`）の URL だけを受け、それ以外ならトークンを読まず何も送らない（I7） |
 
 ## 処理の流れ
 
@@ -309,7 +310,7 @@ classDiagram
 graph TD
     S[session-start] --> O{NDF_TRAINING_OPTOUT が 0}
     O -->|はい| Q[出さずに終わる]
-    O -->|いいえ| M{従量の接続}
+    O -->|いいえ| M{OAuth でない接続}
     M -->|はい| Q
     M -->|いいえ| T{トークンを読めた}
     T -->|いいえ| FR[読み取りの失敗を知らせる]
@@ -336,5 +337,5 @@ graph TD
 | --- | --- | --- | --- |
 | 可用性 | どの失敗でも hook は終了コード 0 で終わり、セッションの開始を止めない | `cmd_session_start` の全体を例外の捕捉で包み、終了コードを 0 に固定する。hook の command も `; exit 0` で終え、`python3` が無ければ何もしない。`continueOnError: true` | 各失敗の経路と、`claude_training` の関数が例外を投げるよう差し替えた場合に、終了コード 0 を見るテスト |
 | 性能・拡張性 | hook の 1 回の実行は hook の `timeout` に収まる。読み書きの HTTP には打ち切りの時間を置き、その合計が `timeout` を超えない | hook の `timeout` を 10 秒、HTTP の打ち切りを 1 回 3 秒（`GET` と `PATCH` で最大 6 秒）、キーチェーンの起動を 2 秒とする。合計の最大は 8 秒で、`python3` の起動を足しても 10 秒に収まる | 応答を返さない偽の宛先で、`session-start` が 7 秒以内に終わり終了コード 0 を返すテスト |
-| セキュリティ | トークンは環境変数か認証ファイルから読むだけで、書き出さない。出力とログにトークンとアカウントの ID を出さない。送り先は `api.anthropic.com` だけ | トークンは `Authorization` の見出しにだけ置く。`reason` と知らせは表の固定の文面と状態コード・型名だけで作り、応答の本文を写さない。ログのファイルは作らない。宛先は定数（試験用の差し替えだけ環境変数） | トークンと応答（識別子の鍵）に目印の文字列を入れ、標準出力・標準エラーに目印が現れないことを見るテスト |
+| セキュリティ | トークンは環境変数か認証ファイルから読むだけで、書き出さない。出力とログにトークンとアカウントの ID を出さない。送り先は `api.anthropic.com` だけ | トークンは `Authorization` の見出しにだけ置く。`reason` と知らせは表の固定の文面と状態コード・型名だけで作り、応答の本文を写さない。ログのファイルは作らない。宛先は定数（試験用の差し替えだけ環境変数で、手元のホストに限る。I7） | トークンと応答（識別子の鍵）に目印の文字列を入れ、標準出力・標準エラーに目印が現れないことを見るテスト |
 | システム環境 | Claude Code の SessionStart の hook として動く。codex / kiro / agy では書き換えない | hook を `hooks/claude.json` にだけ置く。`check --runtime codex\|kiro\|agy` は `unsupported` | `claude plugin validate .` の終了コード 0。`hooks/codex.json` と `dev.agy/hooks.json` に `training-optout` が無いことを見るテスト |

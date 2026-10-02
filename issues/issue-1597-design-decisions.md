@@ -23,7 +23,7 @@
 `account/settings` は公開の API でなく形が変わりうるため、応答の鍵を読む場所を 1 か所（腐敗防止層）に限る。形が変わったときに
 直す場所が 1 つで済み、識別子を含む他の鍵を読まずに捨てることもここで守れる（I5）。
 
-HTTP は `claude_usage._http` を公開名 `http_json` にして使う（`method` と本文を足す）。従量の接続の判定は
+HTTP は `claude_usage._http` を公開名 `http_json` にして使う（`method` と本文を足す）。OAuth でない接続の判定は
 `claude_accounts.FOREIGN_AUTH_ENV` を、認証ファイルの読みは `claude_accounts` に足す `oauth_in(config_dir)` を使う。
 同じ OAuth の宛先へ同じ見出しで送る経路と、同じ認証ファイルを読む経路を、Skill やスクリプトごとに分けないためである。
 実験版のように `urllib` を直に呼ぶ形は、打ち切りと失敗の読み方が `claude_usage` と別に増えるため採らない。
@@ -66,7 +66,7 @@ NDF の他の止め方（`NDF_PLAN_HINT=0`・`NDF_SLEEP_GUARD=0` など）と同
 
 `systemMessage` は利用者の画面に出て、モデルの文脈には入らない。書き換えの知らせはモデルの判断に要らず、`additionalContext` や
 素の標準出力（SessionStart では文脈へ入る）に出すと、セッションごとにトークンを使う。知らせが無いとき（既に false・無効化・
-従量の接続）は何も出さない。`claude -p` の worker では知らせを読む人がいないが、同じアカウントの対話のセッションで同じ知らせが
+OAuth でない接続）は何も出さない。`claude -p` の worker では知らせを読む人がいないが、同じアカウントの対話のセッションで同じ知らせが
 出るため、別の経路（ログのファイル）を足さない。ログのファイルを作らないことで、トークンと識別子が残る置き場も増やさない。
 
 根拠: Value 2 / C6（MVV 版 2）
@@ -78,7 +78,7 @@ NDF の他の止め方（`NDF_PLAN_HINT=0`・`NDF_SLEEP_GUARD=0` など）と同
 
 根拠: Value 2 / 上位の原則（MVV 版 2）
 
-### 決定 8: 従量の接続では何も送らず、何も知らせない
+### 決定 8: OAuth でない接続では何も送らず、何も知らせない
 
 API キー・Bedrock・Vertex の起動には学習の設定が無い（要求の前提 6）。この起動で認証ファイルのトークンを使って読み書きすると、
 その起動が使っていないアカウントの設定を変える。知らせも出さない。失敗ではなく、確かめる対象が無いためである。`check` は
@@ -142,12 +142,14 @@ macOS の Claude Code は認証ファイルの代わりにキーチェーンへ�
 | 書き換え: true → `PATCH` が `{"grove_enabled": false}` で 1 回・知らせが出る（I2） | 偽の宛先が受けた要求を数え、本文と方法を見る。標準出力の `systemMessage` | `PATCH` を 2 回送るか、本文の値を変えるか、知らせを消すと落ちる |
 | 書き換え: false → `PATCH` を送らず知らせない（I2） | 偽の宛先の `PATCH` の数が 0、標準出力が空 | false でも送ると落ちる |
 | 書き換え: 認証が無い・401・403・通信・`PATCH` が 2xx 以外 → 終了コード 0・失敗の知らせ（I6） | 5 つの場合それぞれで `session-start`。`claude_training` の関数が例外を投げる場合も足す | 例外を外へ出すか、知らせを出さないと落ちる |
-| 書き換え: 従量の接続 → 送らず 0（I4） | `FOREIGN_AUTH_ENV` の 4 つのそれぞれを立て、偽の宛先の要求の数が 0、標準出力が空 | 判定の変数を 1 つ外すと落ちる |
+| 書き換え: OAuth でない接続 → 送らず 0（I4） | `FOREIGN_AUTH_ENV` の 4 つのそれぞれを立て、偽の宛先の要求の数が 0、標準出力が空 | 判定の変数を 1 つ外すと落ちる |
 | 書き換え: 無効化 → 読みも書きも送らない（I3） | `NDF_TRAINING_OPTOUT=0` で偽の宛先の要求の数が 0 | 読み取りの後に無効化を見る順にすると落ちる |
+| 確認: 無効化でも読む（I3） | `NDF_TRAINING_OPTOUT=0` で `check` を呼び、偽の宛先が `GET` を 1 回受け、`training` が応答の値になる | 無効化の判定を `claude_training` に置くか `check` で読むと落ちる |
 | hook の定義が SessionStart に載り validate が通る | `claude.json` の SessionStart の `startup\|resume` の群に `training-optout.py session-start` があり、`timeout` が 10。`claude plugin validate .` の終了コード 0 | 群の matcher を `startup` だけにするか、hook を消すと落ちる |
 | 秘密が出ない（I5） | トークンと応答（識別子の鍵・`grove_enabled` 以外の鍵）に目印の文字列を入れ、`check` と `session-start` の全経路の標準出力・標準エラーに目印が無い | `reason` に応答の本文か例外の文言を写すと落ちる |
 | 既存の SessionStart の hook が変わらない | 既存のテスト（`test_relay.py`・`test_ensure_retention.py` ほか）がそのまま通る | 既存の hook の command か matcher を変えると落ちる |
 | 送り先は `api.anthropic.com` だけ（I7） | 差し替えの変数が無いときの宛先が `https://api.anthropic.com/api/oauth/account/settings` | 宛先を別のホストにすると落ちる |
+| 試験用の差し替えは手元のホストだけ（I7） | `NDF_TRAINING_SETTINGS_URL` に手元でないホスト（例 `https://example.invalid/`）を入れて `check` と `session-start` を呼び、どの宛先へも要求が出ず、`check` が `stopped`・`training: null`、`session-start` が終了コード 0 で失敗の知らせを出す | 差し替えをホストを見ずに受けると落ちる |
 | 打ち切りの合計（非機能・性能） | 応答を返さない偽の宛先で `session-start` が 7 秒以内に終わり 0 | 打ち切りを外すか延ばすと落ちる |
 | codex / kiro / agy で書き換えない（非機能・システム環境） | `hooks/codex.json`・`dev.agy/hooks.json` に `training-optout` が無い | 他のランタイムの hook に足すと落ちる |
 | 利用者への説明 | 文言を照合するテストは書かない（`AGENTS.md`）。`plugins/ndf/README.md` の節をレビューで見る | — |
