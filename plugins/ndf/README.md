@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.54-dev.1）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.54）
 ```
 
 ### agy
@@ -119,8 +119,16 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.54-dev.1 へ更新するとき
+## v10.17.54 へ更新するとき
 
+- 設計: #1485（#1617）
+- operation-run の手順に、実行が依存する項目の読み取り方と、型ごとに分岐をたどる手順が載ります（#1618）
+- release は `plugin.json` の版が今回出す版と一致しないとき、PR を出さずに止まる（#1619）
+- 配布の計画で fix を行うと、落ちたステップが next より前にある場合はそのステップからやり直す（#1619）
+- `check-trigger.py record` に `--advance-done` を指定すると、スプリントの検査で check-done/* を進められる（#1620）
+- 要求の手動確認の行に、マージ前に確認する行で未確認のものがあると、merge-gate が承認ゲートで止まる（#1620）
+- 設計の雛形に「設計の結果」の節があり、仕様の雛形で手動確認（マージ前）の行を書ける（#1620）
+- 流し方の文書に、設計の結果のステージが載っている（#1620）
 - スプリント m1485 の課題を develop へ取り込む。（#1621）
 
 ## Playwright テストについて
@@ -412,7 +420,7 @@ agy models   # 認証確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.54-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.54/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -434,14 +442,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.54-dev.1/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.54/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.54-dev.1  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.54  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
