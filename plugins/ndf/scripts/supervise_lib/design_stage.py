@@ -2,7 +2,7 @@
 
 承認ゲート 1 の直後のステージが打つ。設計の課題ごとに `design/issue-<番号>` のマージした PR を探し、その PR が
 変えた `issues/*.md` を `origin/<ベースブランチ>` から読んで「設計の結果」の表を集める。実装する課題のプランへ
-`触るファイル` を、取り込んだ課題のプランへ `実行の条件` を書き、取り込み先のプランの `課題` と実装の指示文へ
+`触るファイル` を、取り込んだ課題と閉じる課題のプランへ `実行の条件` を書き、取り込み先のプランの `課題` と実装の指示文へ
 取り込んだ課題を足す。同じ入力に対しては同じ内容を書く（打ち直しても `課題` を重ねない）。"""
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from pathlib import Path
 import design_results as dr
 import gh_call
 from step_result import result
-from supervise_lib.procedures import DESIGN_RESULTS, absorbed_condition, with_touched
+from supervise_lib.procedures import DESIGN_RESULTS, absorbed_condition, closed_condition, with_touched
 from supervise_lib.templates import impl_prompt
 
 TOOL = "supervise-design-results"
@@ -78,19 +78,26 @@ def impl_plans(manifest: Path) -> dict[int, Path]:
 
 
 def rewrite(plans: dict[int, dict], res: dr.DesignResults) -> list[dict]:
-    """プランへ設計の結果を書く。取り込み先が無ければ DesignResultsError。書いた内容の一覧を返す。"""
-    implemented = {r.issue for r in res.rows if r.kind == dr.IMPLEMENT}
+    """プランへ設計の結果を書く。取り込み先に流れる実装プランが無ければ DesignResultsError（書き換える前に止まる）。
+    「閉じる」と「取り込む」の課題のプランは `実行の条件` で飛ばす。書いた内容の一覧を返す。"""
     absorbed: dict[int, list[int]] = {}
     for r in res.rows:
         if r.kind != dr.ABSORB:
             continue
-        if r.host not in plans and r.host not in implemented:
-            raise dr.DesignResultsError(f"#{r.issue} の取り込み先 #{r.host} がスプリントの課題にも設計の結果の実装する行にも無い")
+        host_row = res.row_of(r.host)
+        if r.host not in plans or (host_row is not None and host_row.kind != dr.IMPLEMENT):
+            raise dr.DesignResultsError(
+                f"#{r.issue} の取り込み先 #{r.host} に流れる実装プランが無い（スプリントの課題でないか、設計の結果で取り込む・閉じるとした）"
+            )
         absorbed.setdefault(r.host, []).append(r.issue)
     items = []
     for n, plan in plans.items():
-        host = res.host_of(n)
-        if host is not None and host in plans:
+        row, host = res.row_of(n), res.host_of(n)
+        if row is not None and row.kind == dr.CLOSE:
+            plan["実行の条件"] = closed_condition(n)
+            items.append({"issue": n, "closed": True})
+            continue
+        if host is not None:
             plan["実行の条件"] = absorbed_condition(n, host)
             items.append({"issue": n, "absorbed_into": host})
             continue

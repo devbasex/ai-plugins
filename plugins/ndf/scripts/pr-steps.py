@@ -156,16 +156,6 @@ def diff_numbers(root, ref):
 # --- plan -------------------------------------------------------------------------
 
 
-def _commits_with_closing_words(root, ref):
-    """`ref..HEAD` のコミットのうち本文に閉じる語を持つものの 12 桁 SHA（git log の順）。本文は NUL で区切る。"""
-    found = []
-    for line in git(root, "log", "--format=%H %B%x00", f"{ref}..HEAD").stdout.split("\x00"):
-        line = line.strip()
-        if line and closing_words(line):
-            found.append(line.split()[0][:12])
-    return found
-
-
 def cmd_plan(a):
     root = git_root(a.root)
     branch = current_branch(root)
@@ -204,7 +194,8 @@ def cmd_plan(a):
     status, tool_status = tool_paths.split_status(root, tool_paths.load_or_stop(root, EXIT_UNREADABLE))  # #1436
     ref = compare_ref(root, base)
     nums = diff_numbers(root, ref)
-    in_commits = _commits_with_closing_words(root, ref)
+    log = git(root, "log", "--format=%H %B%x00", f"{ref}..HEAD").stdout.split("\x00")  # 本文は NUL で区切る
+    in_commits = [c.split()[0][:12] for c in map(str.strip, log) if c and closing_words(c)]
     pr = existing_pr(root, branch)
     in_msg = closing_words(a.message or "")
     items.append({"kind": "existing_pr", "name": pr["url"] if pr else "無し", "result": "update" if pr else "create"})

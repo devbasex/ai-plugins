@@ -14,7 +14,7 @@ import delivery
 import gh_parts
 import manual_checks
 from merged_lib.checks import TOOL, GreenWatch, pr_state
-from step_result import StepError, approval_present, emit, gh_json, git_root, result
+from step_result import StepError, approval_present, emit, git_root, result
 
 
 def add_wait_args(m):
@@ -99,15 +99,10 @@ def gate_stop(n, verdict, info=None, next_cmd=None, plan_step="merge-approved"):
     )
 
 
-def manual_gate(root, n) -> None:
+def manual_gate(n, info) -> None:
     """PR 本文の「手動確認」の節に印の無いマージ前の行があれば、承認ゲート（終了コード 10）で止める（#1485 の決定 5）。
-    本文を読めなければ何もしない（承認ゲート 2 の判定だけを行う）。"""
-    try:
-        data = gh_json(root, ["pr", "view", str(n), "--json", "body"], f"gh pr view {n}")
-    except StepError:
-        return
-    body = data.get("body") if isinstance(data, dict) else ""
-    rows = manual_checks.unchecked_before_merge(body or "")
+    本文は merge_gate が宛先と 1 回で読んだもの。読めなければ何もしない（承認ゲート 2 の判定だけを行う）。"""
+    rows = manual_checks.unchecked_before_merge((info or {}).get("body") or "")
     if not rows:
         return
     emit(
@@ -124,14 +119,19 @@ def manual_gate(root, n) -> None:
 
 
 def merge_gate(a):
-    """宛先へのマージが承認ゲート 2 に当たるかを判定する（gh を呼ぶのは承認資料に --pr の中身を載せるときだけ）。
+    """宛先へのマージが承認ゲート 2 に当たるかを判定する（gh を呼ぶのは --pr を渡したときの 1 回だけ）。
     その前に、--pr の本文に未確認のマージ前の手動確認の行があれば承認ゲートで止める。"""
     root = git_root(a.root)
     if not a.base and not a.pr:
         raise StepError("merge-gate には --base か --pr が要る", 2)
-    if a.pr:
-        manual_gate(root, a.pr)
-    info = None if a.base else pr_state(root, a.pr)  # 宛先を渡さないプランは、PR の宛先を 1 回だけ読む
+    info = None
+    if a.pr:  # 本文（手動確認）と宛先を 1 回の gh pr view で読む
+        try:
+            info = pr_state(root, a.pr, extra=("body",))
+        except StepError:
+            if not a.base:
+                raise
+        manual_gate(a.pr, info)
     base = a.base or (info or {}).get("baseRefName") or ""
     verdict = delivery.judge_target(delivery.load_delivery(root), base)
     if verdict.stops:

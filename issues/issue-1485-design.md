@@ -275,7 +275,7 @@ classDiagram
 
 | 名前 | 入力 | 出力 | 失敗の形 |
 | --- | --- | --- | --- |
-| `supervise.py design-results` | `--manifest <sprint.json>`・`--base <ベースブランチ>`・`--root <リポジトリ>`・`--design <課題…>` | 結果の JSON。`summary` に読めなかった設計の課題を書く。`design-results.json` を manifest の隣へ書く | 0 = 書いた（読めなかった課題があっても 0）/ 2 = manifest を読めない・取り込み先がスプリントの課題にも設計の結果の実装する行にも無い・2 本の設計の結果が同じ課題に違う扱いを書いた |
+| `supervise.py design-results` | `--manifest <sprint.json>`・`--base <ベースブランチ>`・`--root <リポジトリ>`・`--design <課題…>` | 結果の JSON。`summary` に読めなかった設計の課題を書く。`design-results.json` を manifest の隣へ書く | 0 = 書いた（読めなかった課題があっても 0）/ 2 = manifest を読めない・取り込み先に流れる実装プランが無い（スプリントの課題でない・設計の結果で取り込む／閉じるとした）・2 本の設計の結果が同じ課題に違う扱いを書いた |
 | `check-trigger.py record --target-pr N --advance-done` | 今の `record --target-pr` に旗を 1 つ | 今の結果に `pushed` / `unpushed` を足す | `--failed` と同時なら進めない。PR がマージされていなければ進めない |
 | `merged-steps.py merge-gate --pr N` | 変わらない | 未確認のマージ前の行があれば、理由にその行を並べて終了コード 10 | 本文を読めなければ今の判定だけを行う |
 
@@ -343,7 +343,7 @@ graph TD
     C --> E{課題の扱い}
     E -->|実装する| F[with_touched と課題の追記]
     E -->|取り込む| G[取り込み先の課題へ足し、自分のプランへ absorbed_condition]
-    E -->|閉じる| H[Closes だけ]
+    E -->|閉じる| H[Closes に入れ、自分のプランへ closed_condition]
     F --> W[プランを書き戻す]
     G --> W
     H --> J[design-results.json]

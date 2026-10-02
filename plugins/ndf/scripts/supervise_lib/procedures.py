@@ -82,10 +82,19 @@ def record_steps(name: str, *, target_pr: str | None = None, advance: bool = Fal
     return steps
 
 
-def absorbed_condition(issue: int, host: int) -> dict:
-    """設計で他の課題へ取り込んだ課題の実装プランを飛ばす `実行の条件`（終了コード 3 で結果は「完了」）。"""
-    text = f"#{issue} は設計で #{host} へ取り込んだ（#{host} の実装プランが実装する）"
+def _skip_condition(text: str) -> dict:
+    """実装プランを飛ばす `実行の条件`（理由を出し、終了コード 3 で結果は「完了」）。"""
     return {"cmd": f"echo {shlex.quote(text)}; exit 3", "skip_code": 3}
+
+
+def absorbed_condition(issue: int, host: int) -> dict:
+    """設計で他の課題へ取り込んだ課題の実装プランを飛ばす `実行の条件`。"""
+    return _skip_condition(f"#{issue} は設計で #{host} へ取り込んだ（#{host} の実装プランが実装する）")
+
+
+def closed_condition(issue: int) -> dict:
+    """設計で「閉じる」とした課題の実装プランを飛ばす `実行の条件`（実装の PR を持たずにスプリント PR で閉じる）。"""
+    return _skip_condition(f"#{issue} は設計で閉じるとした（実装の PR を持たずにスプリント PR で閉じる）")
 
 
 def sprint_out(a) -> Path:

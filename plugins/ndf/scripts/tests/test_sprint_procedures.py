@@ -233,11 +233,37 @@ def test_unread_design_results_keep_the_plans(tmp_path):
 
 
 def test_design_results_stop_without_a_host(tmp_path):
-    """I2: 取り込み先がスプリントにも実装する行にも無ければ書き換えずに 2 で止まる。"""
+    """I2: 取り込み先がスプリントの課題に無ければ書き換えずに 2 で止まる。"""
     out = sprint_dir(tmp_path)
     doc = DESIGN_DOC.replace("| #12 | 取り込む | #11 |", "| #12 | 取り込む | #99 |").replace("| #11 | 実装する", "| #14 | 実装する")
     _, code = run_design_results(out, results_of(doc))
     assert code == 2 and "触るファイル" not in load(next(out.glob("*-impl-11.json")))
+
+
+def test_closed_issue_plan_skips(tmp_path):
+    """設計で「閉じる」とした課題のプランは `実行の条件` で飛び、実装のステップを流さない。"""
+    out = sprint_dir(tmp_path)
+    doc = "## 設計の結果\n\n| 課題 | 扱い | 取り込み先 | 触るファイル |\n| --- | --- | --- | --- |\n| #11 | 実装する | — | — |\n| #12 | 閉じる | — | — |\n"
+    _, code = run_design_results(out, results_of(doc))
+    closed = load(next(out.glob("*-impl-12.json")))
+    assert code == 0 and closed["実行の条件"] == procedures.closed_condition(12)
+    assert "実行の条件" not in load(next(out.glob("*-impl-11.json")))
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        "| #11 | 取り込む | #14 |\n| #12 | 実装する | — |\n| #14 | 実装する | — |\n",  # 取り込み先にプランが無い
+        "| #11 | 閉じる | — |\n| #12 | 取り込む | #11 |\n",  # 取り込み先を閉じた
+    ],
+)
+def test_design_results_stop_without_a_runnable_host(tmp_path, rows):
+    """I2: 取り込み先に流れる実装プランが無ければ書き換えずに 2 で止まる。"""
+    out = sprint_dir(tmp_path)
+    before = {p.name: p.read_text() for p in out.glob("*-impl-*.json")}
+    doc = "## 設計の結果\n\n| 課題 | 扱い | 取り込み先 | 触るファイル |\n| --- | --- | --- | --- |\n" + rows.replace(" |\n", " | — |\n")
+    _, code = run_design_results(out, results_of(doc))
+    assert code == 2 and {p.name: p.read_text() for p in out.glob("*-impl-*.json")} == before
 
 
 # ---------- PR 本文の材料（AC8〜AC12） ----------
