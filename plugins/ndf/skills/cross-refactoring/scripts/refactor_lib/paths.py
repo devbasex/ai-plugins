@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 import proc
 import statefile
+import worktree_base
 
 from . import die
 
@@ -22,18 +23,8 @@ def work_dir(state: dict[str, Any]) -> str:
     return str(state["worktrees"]["work"])
 
 
-def default_worktree_base() -> pathlib.Path:
-    """作業ディレクトリの親。解決順は cross-review と揃える。
-
-    1. 環境変数 `NDF_WORKTREE_BASE`（明示指定）
-    2. `<システム tmpdir>/ndf-worktrees`（非永続領域。コンテナ再作成で自動消滅）
-    """
-    import tempfile
-
-    env = os.environ.get("NDF_WORKTREE_BASE")
-    if env:
-        return pathlib.Path(env).resolve()
-    return pathlib.Path(tempfile.gettempdir()) / "ndf-worktrees"
+# worktree の親ディレクトリ。解決の規則は共通層の `worktree_base.worktree_parent` だけが持つ。
+default_worktree_base = worktree_base.worktree_parent
 
 
 def tmp_dir_for(work: pathlib.Path) -> pathlib.Path:

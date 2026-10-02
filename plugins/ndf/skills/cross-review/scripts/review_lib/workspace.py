@@ -8,33 +8,18 @@ from __future__ import annotations
 import os
 import pathlib
 import subprocess
-import tempfile
 from typing import NamedTuple
 
 import review_lib  # noqa: E402
 import gh_call  # noqa: E402
 import tool_paths  # noqa: E402
+import worktree_base  # noqa: E402
 import worktree_deps  # noqa: E402
 from review_lib import github  # noqa: E402
 
 
-def _default_worktree_base() -> pathlib.Path:
-    """worktree の親ディレクトリを解決する。
-
-    優先順位:
-      1. 環境変数 NDF_WORKTREE_BASE (明示オーバーライド)
-      2. <システム tmpdir>/ndf-worktrees (非永続領域。コンテナ再作成で自動消滅)
-
-    かつての /work/worktrees ($HOME/work/worktrees) は共有の永続 volume 上にあり、
-    別リポジトリの pr<N> と衝突する・明示削除が必要・volume を消費する問題が
-    あったため廃止した。
-    """
-    env = os.environ.get("NDF_WORKTREE_BASE")
-    if env:
-        # 相対パスのまま state.json に保存されると後続のパス比較が壊れるため、
-        # 常に絶対パスへ解決して返す。
-        return pathlib.Path(env).resolve()
-    return pathlib.Path(tempfile.gettempdir()) / "ndf-worktrees"
+# worktree の親ディレクトリ。解決の規則は共通層の `worktree_base.worktree_parent` だけが持つ。
+_default_worktree_base = worktree_base.worktree_parent
 
 
 def _is_registered_worktree(path: str) -> bool:
