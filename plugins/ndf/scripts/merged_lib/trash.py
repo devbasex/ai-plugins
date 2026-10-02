@@ -78,9 +78,17 @@ def evacuate(path, label, merge_commit=None):
         raise OSError(f"{path} の共通の git ディレクトリが分からない")
     trash = root / f"{label.replace('/', '__')}-{stamp}"
     head = git(path, "rev-parse", "HEAD", check=False).stdout.strip() or None
+    out = git(path, "status", "--ignored", "--untracked-files=all", "--porcelain=v1", "-z").stdout
     discarded, moved = [], 0
-    for rel in _stray_paths(path):
+    for ent in out.split("\0"):
+        if ent[:3] not in ("?? ", "!! "):
+            continue
+        rel = ent[3:].rstrip("/")
+        if not rel:
+            continue
         src = Path(path) / rel
+        if not os.path.lexists(src):
+            continue
         if gen := generated_root(path, rel):
             if gen not in discarded:
                 discarded.append(gen)
@@ -94,25 +102,6 @@ def evacuate(path, label, merge_commit=None):
         moved += 1
     if not moved:
         return None, discarded
-    _write_ledger(trash, label, head, merge_commit, discarded)
-    return str(trash), discarded
-
-
-def _stray_paths(path):
-    """git status の未追跡（??）と無視（!!）のパスのうち、まだ在るものを順に返す。"""
-    out = git(path, "status", "--ignored", "--untracked-files=all", "--porcelain=v1", "-z").stdout
-    for ent in out.split("\0"):
-        if ent[:3] not in ("?? ", "!! "):
-            continue
-        rel = ent[3:].rstrip("/")
-        if not rel:
-            continue
-        if not os.path.lexists(Path(path) / rel):
-            continue
-        yield rel
-
-
-def _write_ledger(trash, label, head, merge_commit, discarded):
     ledger = {
         "version": LEDGER_VERSION,
         "branch": label,
@@ -122,6 +111,7 @@ def _write_ledger(trash, label, head, merge_commit, discarded):
         "discarded": discarded,
     }
     ledger_of(trash).write_text(json.dumps(ledger, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    return str(trash), discarded
 
 
 def _contains(root, commit, ref) -> bool:
