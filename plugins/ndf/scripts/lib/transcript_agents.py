@@ -79,7 +79,6 @@ STEP_PHASES = {
 }
 
 ENDINGS = ("completed", "in_progress", "rate_limit", "api_error")
-RATE_LIMIT_STATUS = "429"  # 上限の中断を表す合成の応答の種別
 
 SYNTHETIC_MODEL = "<synthetic>"
 
@@ -304,7 +303,7 @@ def _ending_of(rows: list[dict]) -> str:
     last = rows[last_assistant]
     if not _is_synthetic(last):
         return "completed"
-    return "rate_limit" if _error_status(last) == RATE_LIMIT_STATUS else "api_error"
+    return "rate_limit" if _error_status(last) == "429" else "api_error"
 
 
 def _tool_use_ids(rows: list[dict]) -> list[str]:
@@ -372,7 +371,7 @@ def _count_interruptions(rows: list[dict]) -> int:
         if not _is_assistant(row):
             continue
         if _is_synthetic(row):
-            if _error_status(row) == RATE_LIMIT_STATUS:
+            if _error_status(row) == "429":
                 pending += 1
             continue
         interruptions += pending
