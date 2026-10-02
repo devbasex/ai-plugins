@@ -214,6 +214,18 @@ def test_another_repository_is_recorded_under_its_own_key(env: Env) -> None:
     assert not env.state_file(42).exists()
 
 
+def test_the_refinement_stage_is_recorded_and_required_in_every_mode(env: Env) -> None:
+    """棚卸しは工程表の最後の行で、5 つのモードすべてで必須である（#842）。"""
+    out = env.run(str(SYNC), "42", "stage", "棚卸し")
+    assert out.returncode == 0, out.stderr
+    assert env.stages(42) == ["棚卸し"]
+    got = env.sh(
+        f'. "{WF_LIB}"; wf_stages | tail -n 1; '
+        'for m in light operation legacy-refactor standard documentation; do wf_stage_class "$m" 棚卸し; done'
+    ).stdout.split()
+    assert got == ["棚卸し", "R", "R", "R", "R", "R"]
+
+
 def test_the_release_lists_the_missing_stages_on_stdout(env: Env) -> None:
     env.run(str(SYNC), "42", "mode", "standard")
     env.run(str(SYNC), "42", "stage", "設計")

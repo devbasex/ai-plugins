@@ -43,7 +43,7 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
         # --pace fast --state <スプリントの状態>: 使ってよい条件を確かめ、設計（関門 1 は MVV 判定）→ 実装（develop へ直接）
         # → 検査（実行の条件）→ 開発版 → 本番（関門 2 は MVV 判定）を書く。条件に外れれば計画を書かずに止まる
     supervise.py new close --name M --worktree <根> --issue N... --version <開発版> --prod <正式版> --state <状態> [--out DIR]
-        # スプリントの終わり: 最終の検査 → 開発版 → 本番（最終の検査で変更があったときだけ）→ 確定仕様化・閉じる・振り返り
+        # スプリントの終わり: 最終の検査 → 開発版 → 本番（最終の検査で変更があったときだけ）→ 確定仕様化・閉じる・振り返り・棚卸し
     supervise.py design-results --manifest <sprint.json> --base B --root <根> --design N...
         # 設計の結果のステージ: マージした設計 PR の「設計の結果」の表を読み、実装のステージのプランを書き換える
     supervise.py design-glossary --mode M --root . --out <候補の語.md>

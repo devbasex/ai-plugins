@@ -46,6 +46,18 @@ def read_backlog_decl(root) -> dict | None:
     return None
 
 
+# 候補の上限の既定（#842 の決定 6）。upkeep.py candidates が --limit → 宣言の candidate_limit → これの順に採る。
+DEFAULT_CANDIDATE_LIMIT = 10
+
+
+def candidate_limit(limit, decl) -> int:
+    """1 回に区分を決める候補の上限。引数 → 宣言 → 既定の順に採る。1 以上の整数でなければ終了コード 2。"""
+    v = limit if limit is not None else (decl or {}).get("candidate_limit", DEFAULT_CANDIDATE_LIMIT)
+    if isinstance(v, bool) or not isinstance(v, int) or v < 1:
+        raise StepError(f"候補の上限は 1 以上の整数で書く（--limit か {DECL} の candidate_limit）: {v!r}", EXIT_UNREADABLE)
+    return v
+
+
 def _label_floor(values):
     if not values:
         return None

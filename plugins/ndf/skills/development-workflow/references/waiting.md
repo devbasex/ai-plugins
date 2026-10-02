@@ -169,7 +169,7 @@ conductor が起きるのは、承認ゲート・`attention`・キューの終�
    続けて `sv queue $O/8-release-prod.json --done $O/done-8.json` と `sv wait $O/done-8.json`。最後のステップが後片付けを行う
 
 - ステージの番号とプランのファイル名は `new sprint` の出力（`sprint.json` の `ステージ`）が正である。書き出した `command` に `--done` を足して打つ
-- 確定仕様化と振り返りは `normal` のプランが持たないため、supervisor で回す（[agent-layers.md](agent-layers.md) の表の取り込み・仕上げの行）
+- 確定仕様化・振り返り・棚卸しは `normal` のプランが持たないため、supervisor で回す（[agent-layers.md](agent-layers.md) の表の取り込み・仕上げの行）
 - 本番の後に続けるコマンドは [relay.md](relay.md)、`pace: fast` と `pace: auto` の並びは [pace.md](pace.md) にある
 
 **サブエージェントは、背景の処理を残したまま応答を終えない。** 完了通知で再開はされるが、

@@ -75,6 +75,7 @@ STEP_PHASES = {
     "配布": "取り込み",
     "リリース後テスト": "仕上げ",
     "振り返り": "仕上げ",
+    "棚卸し": "仕上げ",
 }
 
 ENDINGS = ("completed", "in_progress", "rate_limit", "api_error")

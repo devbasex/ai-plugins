@@ -126,7 +126,7 @@ def auto_sprint_plans(a) -> list[dict]:
 
 
 def close_plan(a, repo: str) -> dict:
-    """スプリントの終わりのまとめ: 確定仕様化 → Pull Request → 課題を閉じる → 振り返りを 1 回ずつ。"""
+    """スプリントの終わりのまとめ: 確定仕様化 → Pull Request → 課題を閉じる → 振り返り → 棚卸しを 1 回ずつ。"""
     issues = ",".join(map(str, a.issue))
     refs = " ".join(f"#{i}" for i in a.issue)
     branch = f"spec/{a.name}"
@@ -189,6 +189,21 @@ def close_plan(a, repo: str) -> dict:
                     "prompt": f"/ndf:retrospective スプリント {a.name}（{refs}）。材料に検査の記録の集計（`{stats}` の出力: "
                     "トリガーが立った回数・検査ごとの指摘の件数・検査の後に逃げた不具合の件数）を使い、閾値の"
                     "見直しが要るかを書く。",
+                    "next": "refine",
+                },
+                {
+                    "id": "refine",
+                    "type": "work",
+                    "full": True,
+                    "kind": "棚卸し",
+                    "stage": "棚卸し",
+                    "timeout": 3600,
+                    "prompt": f"/ndf:backlog-refinement スプリント {a.name}（{refs}）。棚卸しの工程として無人で通す。"
+                    "候補が上限を超えて持ち越し（`metrics.deferred`）が出ても、`--limit` を上げて打ち直さず、番号と件数を"
+                    "報告に載せる。`upkeep.py apply` が終了コード 10 を返したら、承認を求めず、承認資料のパス"
+                    "（`presentation_path`）と対象の番号を報告に載せて終える。`--repo` を渡さない（記録のリポジトリの外へ"
+                    "書かない）。親 issue の起票と子 issue の結び付けは行わず、クラスタと提案する親 issue の内容（題・子の"
+                    "番号）を報告の「人の判断待ち」に載せて終える。",
                     "next": "end",
                 },
             ],
