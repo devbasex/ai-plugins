@@ -2817,6 +2817,43 @@
       "pending_source": "issues/issue-1142-design-dbos.md"
     },
     {
+      "term": "実測値",
+      "context": "ndf-agent-cli",
+      "meaning": "CLI の出力かランタイムのセッションの記録から取った、実際に動いたモデル名。状態ファイルの observed",
+      "pending_source": "issues/issue-759-requirements.md",
+      "code": "observed_model"
+    },
+    {
+      "term": "指定値",
+      "context": "ndf-agent-cli",
+      "meaning": "--model で CLI へ渡したモデル名。状態ファイルの requested。未指定なら null",
+      "pending_source": "issues/issue-759-requirements.md"
+    },
+    {
+      "term": "主たるモデル",
+      "context": "ndf-agent-cli",
+      "meaning": "1 回の起動で複数のモデルが動いたとき、実測値として記録する 1 つ",
+      "pending_source": "issues/issue-759-requirements.md"
+    },
+    {
+      "term": "分離",
+      "context": "ndf-agent-cli",
+      "meaning": "何が動いたか分からない実行を、モデル別の集計に入れず理由だけを報告すること",
+      "pending_source": "issues/issue-759-requirements.md"
+    },
+    {
+      "term": "起動の記録",
+      "context": "ndf-agent-cli",
+      "meaning": "起動 1 回の開始の時刻・作業ディレクトリ・ランタイムを、起動が自分で書いたファイル（<stem>-launch.json）",
+      "pending_source": "issues/issue-759-design.md"
+    },
+    {
+      "term": "取れなかった理由",
+      "context": "ndf-agent-cli",
+      "meaning": "実測値が null のときに残す符号（no_record / ambiguous / no_model_field / unsupported / unreadable）。状態ファイルの unobserved",
+      "pending_source": "issues/issue-759-design.md"
+    },
+    {
       "term": "ランタイムの宣言",
       "context": "ndf-agent-cli",
       "meaning": ".ndf/runtimes.json。NDF が CLI として起動してよいランタイムの一覧（allowed）と、cross-review の固定の組（review_seats）を持つ。無ければ制限しない",
