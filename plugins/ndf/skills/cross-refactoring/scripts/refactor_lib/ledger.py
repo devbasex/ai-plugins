@@ -22,8 +22,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+import statefile
+
 from . import gitfacts  # 属性は呼ぶ時点で引く（gitfacts → publish → ledger の循環を避ける）
-from .items import LIVE, REVERTED, item_shas
+from .items import DEFERRED, LIVE, REVERTED, VERIFIED, item_shas
 from .paths import full_commit, git_out
 
 ITEM = "item"
@@ -87,6 +89,90 @@ def remaining_count(state: dict[str, Any]) -> int:
     return sum(1 for i in state.get("items") or [] if is_live(i))
 
 
+# ---------- 表示の状態と件数（#1692 の決定 2。コメント・結果 JSON・報告がここを呼ぶ） ----------
+
+ADOPTED = "adopted"
+UNCONFIRMED = "unconfirmed"
+
+
+def display_status(state: dict[str, Any], item: dict[str, Any]) -> str:
+    """項目の表示の状態。**「採用」は最終ゲートが `passed` のときの `verified` だけ**（I2）。
+
+    最終ゲートが `passed` でなければ、取り消しでも見送りでもない項目（`LIVE`）はすべて「未確認」にする。
+    `passed` のとき、`verified` でない途中の状態は `status` のまま返す。
+    """
+    status = str(item.get("status") or "")
+    if status in (REVERTED, DEFERRED):
+        return status
+    if not adoption_confirmed(state):
+        return UNCONFIRMED if status in LIVE else status
+    return ADOPTED if status == VERIFIED else status
+
+
+@dataclass
+class Tally:
+    """表示の状態の件数。結果 JSON の `metrics` とリファクタリング計画のコメントの件数の行の元（I1）。"""
+
+    items: int
+    adopted: int
+    unconfirmed: int
+    reverted: int
+    deferred: int
+    confirmed: bool
+
+    def as_metrics(self) -> dict[str, Any]:
+        """結果 JSON の `metrics` の件数のキー。採用と確定していなければ `unconfirmed` を足す（adopted は 0 になる）。"""
+        out: dict[str, Any] = {"items": self.items, "adopted": self.adopted, "reverted": self.reverted, "deferred": self.deferred}
+        if not self.confirmed:
+            out["unconfirmed"] = self.unconfirmed
+        return out
+
+
+def tally(state: dict[str, Any]) -> Tally:
+    """表示の状態を数える。**件数の数え方はここだけが持つ。**"""
+    items = state.get("items") or []
+    shown = [display_status(state, i) for i in items]
+    return Tally(
+        items=len(items),
+        adopted=shown.count(ADOPTED),
+        unconfirmed=shown.count(UNCONFIRMED),
+        reverted=shown.count(REVERTED),
+        deferred=shown.count(DEFERRED),
+        confirmed=adoption_confirmed(state),
+    )
+
+
+# ---------- プランの外の取り消し（#1692 の I7。`plan-comment --scan-reverts` だけが呼ぶ） ----------
+
+
+def mark_outside_revert(item: dict[str, Any], revert_sha: str) -> None:
+    """プランの外で取り消された項目を取り消しにし、取り消す前の状態を `outside_revert` に残す。"""
+    item["outside_revert"] = {
+        "revert": revert_sha,
+        "prior_status": item.get("status"),
+        "prior_failure_reason": item.get("failure_reason"),
+    }
+    item.pop("failure_reason", None)
+    mark_dropped(item, f"プランの外で取り消した（{revert_sha[:12]}）")
+
+
+def restore_outside_revert(item: dict[str, Any]) -> bool:
+    """プランの外の取り消しが取り消された項目を、取り消す前の状態へ戻す。**`reverted` から戻す遷移はここだけ。**
+
+    `outside_revert` を持たない項目（スクリプトが取り消した項目）は戻さず偽を返す。
+    """
+    mark = item.get("outside_revert")
+    if not isinstance(mark, dict):
+        return False
+    item["status"] = mark.get("prior_status")
+    if mark.get("prior_failure_reason") is None:
+        item.pop("failure_reason", None)
+    else:
+        item["failure_reason"] = mark["prior_failure_reason"]
+    item.pop("outside_revert", None)
+    return True
+
+
 # ---------- 公開の台帳 ----------
 
 
@@ -111,6 +197,19 @@ def in_final_gate(state: dict[str, Any]) -> bool:
 
 def note_published(state: dict[str, Any], sha: str) -> None:
     _book(state)["published_sha"] = sha
+
+
+def note_publication(state: dict[str, Any], status: str, sha: str = "", reason: str = "") -> None:
+    """最後に試みた公開の結果（`publication`）を残す。`pushed`・`refused`・`observed` で、`refused` だけが理由を持つ。
+
+    `published_sha`（次の push の照合の起点）とは分ける。失敗や観測で照合の範囲を変えない（#1692 の決定 3）。
+    """
+    record: dict[str, Any] = {"status": status, "head": state.get("head_branch"), "at": statefile.now()}
+    if sha:
+        record["sha"] = sha
+    if reason:
+        record["reason"] = reason
+    state["publication"] = record
 
 
 def note_orchestrator_commit(state: dict[str, Any], sha: str) -> None:

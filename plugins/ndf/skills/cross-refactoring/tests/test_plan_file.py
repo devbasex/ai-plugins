@@ -93,7 +93,7 @@ def test_plan_shows_the_smell_the_technique_and_the_tier(plan, tmp_path):
 def test_plan_counts_the_commits_of_an_item(plan, tmp_path):
     """テスト・実装・修正のコミットを足した数を載せる（1 改善項目 = 1 コミットの確かめ）。"""
     _, state = _state(tmp_path, items=[_item(commits={"test": "t" * 7, "implement": "i" * 7, "fix": ["f" * 7]})])
-    assert "| 採用 | 3 |" in plan.format_plan(state)
+    assert "| 未確認 | 3 |" in plan.format_plan(state)
 
 
 def test_plan_lists_the_deferred_proposals_with_their_reason(plan, tmp_path):

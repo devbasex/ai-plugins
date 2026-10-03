@@ -2107,7 +2107,7 @@
       "code": "structure_check",
       "context": "ndf-workflow",
       "meaning": "テストを除くスクリプトの行数と、本体の同じ関数・同じ名前で本体の違う関数を構文木で数える継続的統合のチェック。ファイルを指定すると、検査は木全体で行い、合否を指定したファイルに関わる違反だけで決める",
-      "pending_source": "issues/issue-1649-design.md"
+      "source": "docs/specifications/cross-refactoring-verify-and-final-gate.md"
     },
     {
       "term": "指摘の基準",
@@ -2964,70 +2964,124 @@
       "term": "レビューの状態ファイル",
       "context": "ndf-cross-review",
       "meaning": "cross-review が <worktree>/.cross_review/cross-review-pr<PR>-state.json に置く、ラウンドの履歴（rounds）と終わり方（final）の記録",
-      "source": "",
-      "pending_source": "issues/issue-1340-requirements.md"
+      "source": "docs/specifications/cross-review-reopen-and-hook-deadline.md"
     },
     {
       "term": "修正の記録",
       "context": "ndf-cross-review",
       "meaning": "修正の工程が作る戻り値ファイル（fix-pr<PR>-result.json）を merge-fix がレビューの状態ファイルへ取り込んだもの。ホストが自分で直したときは state.py record-fix が同じ形で作る。修正必須のラウンドの次のラウンドを始める条件",
-      "source": "",
-      "pending_source": "issues/issue-1340-design.md"
+      "source": "docs/specifications/cross-review-reopen-and-hook-deadline.md"
     },
     {
       "term": "hook の上限",
       "context": "ndf-workflow",
       "meaning": "ランタイムの hook の定義（hooks/*.json・dev.agy/hooks.json）の timeout。過ぎるとランタイムが hook を打ち切る",
-      "source": "",
-      "pending_source": "issues/issue-1340-requirements.md"
+      "source": "docs/specifications/cross-review-reopen-and-hook-deadline.md"
     },
     {
       "term": "ラウンドを足す",
       "context": "ndf-cross-review",
       "meaning": "final が確定したレビューの状態ファイルの final を外し、履歴を残したまま次の番号のラウンドから収束ループを続けること。state.py init の再開の経路が行い、reopens に 1 件残す",
-      "source": "",
-      "pending_source": "issues/issue-1340-design.md"
+      "source": "docs/specifications/cross-review-reopen-and-hook-deadline.md"
     },
     {
       "term": "hook の締め切り",
       "context": "ndf-workflow",
       "meaning": "NDF の hook が自分で決める 1 回の実行の時間の上限（3.5 秒）。hook の上限より短く、過ぎたら残りの判定を飛ばして通し、標準エラーへ 1 行残す",
-      "source": "",
-      "pending_source": "issues/issue-1340-design.md"
+      "source": "docs/specifications/cross-review-reopen-and-hook-deadline.md"
     },
     {
       "term": "適用範囲",
       "context": "ndf-workflow",
       "meaning": "設計した変更が働く範囲。このリポジトリだけで働くのか配布先のリポジトリでも働くのか、プロジェクトごとに違うものを設定か引数のどちらで受けるのか。設計文書の節と承認資料の行に書く",
-      "source": "",
-      "pending_source": "issues/issue-1289-requirements.md"
+      "source": "docs/specifications/ndf-design-phase.md"
     },
     {
       "term": "あるべき姿の根拠",
       "context": "ndf-workflow",
       "meaning": "変更後の形が適切だと言える根拠。外部の一次情報・実測・利用者の指示の原文のどれか。設計文書の節と承認資料の行に書き、無ければ「無し（理由）」。MVV の根拠の項目とは別のもの",
-      "source": "",
-      "pending_source": "issues/issue-1289-requirements.md"
+      "source": "docs/specifications/ndf-design-phase.md"
     },
     {
       "term": "原因の項目",
       "context": "ndf-cross-refactoring",
       "meaning": "全体テストで変更起因として落ちたテストを、その変更で落とした改善項目。危険フラグの有無とは関係しない",
-      "pending_source": "issues/issue-1649-requirements.md"
+      "source": "docs/specifications/cross-refactoring-verify-and-final-gate.md"
     },
     {
       "term": "原因の手がかり",
       "context": "ndf-cross-refactoring",
       "meaning": "原因の項目を決めた根拠。path（落ちたテストの出力に項目の変えたファイルのパスが現れた）・isolate（項目を外した走らせ直しで通った）・undetermined（どちらでも決まらない）の 3 つ",
-      "pending_source": "issues/issue-1649-design.md",
-      "code": "basis"
+      "code": "basis",
+      "source": "docs/specifications/cross-refactoring-verify-and-final-gate.md"
     },
     {
       "term": "打ち切りの後の取り消し",
       "context": "ndf-cross-refactoring",
       "meaning": "工程の 1 つとして起動した cross-refactoring が、最終ゲート修正を打ち切った後に、原因の項目を取り消すか（案 A）、着手前の木へ戻すコミットを積む（案 B）処理",
-      "pending_source": "issues/issue-1649-design.md",
-      "code": "stop_revert"
+      "code": "stop_revert",
+      "source": "docs/specifications/cross-refactoring-verify-and-final-gate.md"
+    },
+    {
+      "term": "リファクタリング計画のコメント",
+      "context": "ndf-cross-refactoring",
+      "meaning": "cross-refactoring が対象の Pull Request に 1 件だけ置き、結果の出口のたびに同じものを編集するリファクタリング計画の記録。目印 `<!-- cross-refactoring plan rf<ID> -->` で引き当てる",
+      "pending_source": "issues/issue-1692-requirements.md"
+    },
+    {
+      "term": "結果の出口",
+      "context": "ndf-cross-refactoring",
+      "meaning": "リファクタリング計画ができた後に、cross-refactoring のスクリプトがその時点の結果を確定させて終了コードを返す地点（push の成功と失敗・最終ゲートの判定・打ち切り・取り消し・中断・finalize）",
+      "pending_source": "issues/issue-1692-requirements.md"
+    },
+    {
+      "term": "未確認",
+      "context": "ndf-cross-refactoring",
+      "meaning": "取り消されずに残ったが、最終ゲートが passed になっていない改善項目の状態。採用とは数えない",
+      "code": "unconfirmed",
+      "pending_source": "issues/issue-1692-design.md"
+    },
+    {
+      "term": "プランの外の取り消し",
+      "context": "ndf-cross-refactoring",
+      "meaning": "cross-refactoring のスクリプトが終わった後に、conductor が改善項目のコミットを git revert で取り消すこと",
+      "pending_source": "issues/issue-1692-requirements.md"
+    },
+    {
+      "term": "公開の結果",
+      "context": "ndf-cross-refactoring",
+      "meaning": "最後に試みた head ブランチへの push の結果（通った地点の SHA か、落ちた理由）。状態ファイルの publication に残す",
+      "code": "publication",
+      "pending_source": "issues/issue-1692-design.md"
+    },
+    {
+      "term": "未公開の改善項目",
+      "context": "ndf-cross-refactoring",
+      "meaning": "手元の HEAD が、公開した地点から到達できないコミットを持つこと。結果 JSON の metrics.unpublished",
+      "code": "unpublished",
+      "pending_source": "issues/issue-1692-design.md"
+    },
+    {
+      "term": "ジョブの識別子",
+      "context": "ndf-workflow",
+      "meaning": "継続的統合のジョブを指す `<ワークフローのファイルのパス>#<job id>`。`#<job id>` を省くとそのファイルのジョブすべてを指す。宣言の suites[].ci_jobs と test.ci_exempt が使う",
+      "source": "",
+      "pending_source": "issues/issue-464-design.md"
+    },
+    {
+      "term": "除外したジョブ",
+      "context": "ndf-workflow",
+      "meaning": "手元の検証で走らせないと宣言したジョブ。宣言の test.ci_exempt に理由と組で書く",
+      "code": "ci_exempt",
+      "source": "",
+      "pending_source": "issues/issue-464-design.md"
+    },
+    {
+      "term": "宣言に無いジョブ",
+      "context": "ndf-cross-refactoring",
+      "meaning": "継続的統合のジョブのうち、どの suite の ci_jobs にも除外したジョブにも当たらないもの。cross-refactoring の init が知らせ、状態ファイルの ci_coverage.undeclared に残す",
+      "source": "",
+      "pending_source": "issues/issue-464-design.md"
     }
   ]
 }

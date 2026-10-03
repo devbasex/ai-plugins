@@ -113,3 +113,15 @@ def test_the_worktree_base_falls_back_to_the_system_tmpdir(paths, monkeypatch):
     monkeypatch.delenv("NDF_WORKTREE_BASE", raising=False)
 
     assert paths.default_worktree_base() == pathlib.Path(tempfile.gettempdir()) / "ndf-worktrees"
+
+
+def test_found_state_does_not_resolve_the_default_place(paths, tmp_path, monkeypatch):
+    """先の候補で見つかれば、既定の置き場（git を起動する）を解決しない。"""
+    env_path = _make_state(tmp_path / "env", "from-env")
+    monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path / "env"))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(paths, "default_tmp_dir", lambda _id: pytest.fail("default_tmp_dir was called"))
+
+    path, _ = paths.load_state(STATE_ID)
+
+    assert path == env_path

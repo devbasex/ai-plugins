@@ -54,10 +54,13 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections import Counter
+from contextlib import suppress
 import os
 import re
 import sys
 from datetime import datetime, timezone
+from operator import ge, gt
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
@@ -174,22 +177,18 @@ def slug_of(root: Path) -> str:
     return found.replace("/", "__", 1)
 
 
+# 置き場の候補: (環境変数, その値からの置き場)。設定されている最初の環境変数で決める
+STATE_BASES = (("CLAUDE_PLUGIN_DATA", Path), ("XDG_STATE_HOME", lambda v: Path(v, "ndf")), ("HOME", lambda v: Path(v, ".local/state/ndf")))
+
+
 def state_base() -> Path:
     """通過記録と同じ順で置き場を決める。"""
-    fallback = Path(os.environ.get("TMPDIR", "/tmp")) / "ndf-checks"
-    if os.environ.get("CLAUDE_PLUGIN_DATA"):
-        base = Path(os.environ["CLAUDE_PLUGIN_DATA"])
-    elif os.environ.get("XDG_STATE_HOME"):
-        base = Path(os.environ["XDG_STATE_HOME"]) / "ndf"
-    elif os.environ.get("HOME"):
-        base = Path(os.environ["HOME"]) / ".local" / "state" / "ndf"
-    else:
-        return fallback
-    try:
-        (base / "checks").mkdir(parents=True, exist_ok=True)
-        return base
-    except OSError:
-        return fallback
+    base = next((make(os.environ[name]) for name, make in STATE_BASES if os.environ.get(name)), None)
+    if base is not None:
+        with suppress(OSError):
+            (base / "checks").mkdir(parents=True, exist_ok=True)
+            return base
+    return Path(os.environ.get("TMPDIR", "/tmp")) / "ndf-checks"
 
 
 def log_path(root: Path) -> Path:
@@ -298,12 +297,9 @@ def range_start(root: Path, events: list[dict], since: str | None, review: bool 
     return sha, commit_at(root, sha), f"origin/{base} との分岐点"
 
 
-def merged_prs(root: Path, frm: str, to: str, decl: dict, skip: set[int] = frozenset()) -> tuple[list[dict], list[str]]:
-    """(範囲へ入った PR, 外した PR のコミット)。merge commit と squash merge（件名の末尾 `(#N)`）を数える。squash の
-    件名にはブランチ名が残らないため、ブランチは GitHub から読んで `SKIP_BRANCHES` を当てる。検査の PR は記録の番号
-    （skip）でも外す。外したコミットは行数からも差し引くために返す。"""
-    found = []
-    excluded = []
+def _scan_log(root: Path, frm: str, to: str, skip: set[int]) -> tuple[list[tuple], list[str]]:
+    """範囲の first-parent のログから (sha, PR 番号, ブランチ名 or None) を拾い、skip の PR のコミットを外す。"""
+    found, excluded = [], []
     for line in git_or_stop(root, "log", "--first-parent", "--format=%H%x09%P%x09%s", f"{frm}..{to}").splitlines():
         sha, parents, subject = line.split("\t", 2)
         m = MERGE_SUBJECT.match(subject) if " " in parents else SQUASH_SUBJECT.search(subject.rstrip())
@@ -311,20 +307,33 @@ def merged_prs(root: Path, frm: str, to: str, decl: dict, skip: set[int] = froze
             excluded.append(sha)
         elif m:
             found.append((sha, int(m.group(1)), m.group(2) if m.re is MERGE_SUBJECT else None))
+    return found, excluded
+
+
+def _score_prs(found: list[tuple], root: Path, decl: dict) -> tuple[list[dict], list[str]]:
+    """squash の PR のブランチ名を GitHub から埋め、`SKIP_BRANCHES` のブランチを外し、残りに共通層の判定と点数を付ける。"""
     squashed = [n for _, n, branch in found if branch is None]
     heads, err = gh_rest.pr_head_branches(squashed, cwd=str(root)) if squashed else ({}, "")
     if heads is None:
         raise Stop(f"squash merge の PR のブランチを読めない: {err}", EXIT_VIOLATION)
-    out = []
+    out, excluded = [], []
     for sha, n, branch in found:
         branch = heads.get(n, "") if branch is None else branch
         if branch.startswith(SKIP_BRANCHES):
             excluded.append(sha)
             continue
-        files = git_or_stop(root, "diff", "--name-only", f"{sha}^1", sha).splitlines()
-        common = any(area_of(f, decl)[1] for f in files)
+        common = any(area_of(f, decl)[1] for f in git_or_stop(root, "diff", "--name-only", f"{sha}^1", sha).splitlines())
         out.append({"pr": n, "branch": branch, "common": common, "points": decl["triggers"]["common_weight"] if common else 1})
     return out, excluded
+
+
+def merged_prs(root: Path, frm: str, to: str, decl: dict, skip: set[int] = frozenset()) -> tuple[list[dict], list[str]]:
+    """(範囲へ入った PR, 外した PR のコミット)。merge commit と squash merge（件名の末尾 `(#N)`）を数える。squash の
+    件名にはブランチ名が残らないため、ブランチは GitHub から読んで `SKIP_BRANCHES` を当てる。検査の PR は記録の番号
+    （skip）でも外す。外したコミットは行数からも差し引くために返す。"""
+    found, excluded = _scan_log(root, frm, to, skip)
+    out, skipped = _score_prs(found, root, decl)
+    return out, excluded + skipped
 
 
 def changed_lines(root: Path, frm: str, to: str, excluded: list[str] = ()) -> int:
@@ -346,6 +355,10 @@ def escapes_since(events: list[dict], since: datetime) -> dict[str, int]:
     return counts
 
 
+# しきい値で立つトリガー: (metrics と triggers のキー, 立つ比較, PR が 1 本以上要るか)。上から順に判定する
+THRESHOLD_TRIGGERS = (("score", ge, False), ("lines", gt, False), ("escapes", ge, False), ("hours", ge, True))
+
+
 def evaluate(root: Path, final: bool, since: str | None, to_ref: str | None = None, review: bool = False) -> dict:
     decl = load_decl(root)
     events = read_events(root)
@@ -354,30 +367,20 @@ def evaluate(root: Path, final: bool, since: str | None, to_ref: str | None = No
     prs, excluded = merged_prs(root, frm, to, decl, {e["pr"] for e in events if e["kind"] == "check" and isinstance(e.get("pr"), int)})
     t = decl["triggers"]
     esc = escapes_since(events, since_at)
-    hours = round((clock.now(utc=True) - since_at).total_seconds() / 3600, 2)
     metrics = {
         "prs": len(prs),
         "score": sum(p["points"] for p in prs),
         "lines": changed_lines(root, frm, to, excluded),
-        "hours": hours,
+        "hours": round((clock.now(utc=True) - since_at).total_seconds() / 3600, 2),
         "escapes": max(esc.values(), default=0),
         "from": frm,
         "to": to,
     }
-    fired = []
-    if review:
-        if prs:
-            fired.append({"trigger": "review", "value": len(prs), "threshold": 1})
-        return {"decl": decl, "fired": fired, "metrics": metrics, "escape_areas": esc, "how": how, "prs": [p["pr"] for p in prs]}
-    if metrics["score"] >= t["score"]:
-        fired.append({"trigger": "score", "value": metrics["score"], "threshold": t["score"]})
-    if metrics["lines"] > t["lines"]:
-        fired.append({"trigger": "lines", "value": metrics["lines"], "threshold": t["lines"]})
-    if metrics["escapes"] >= t["escapes"]:
-        fired.append({"trigger": "escapes", "value": metrics["escapes"], "threshold": t["escapes"]})
-    if hours >= t["hours"] and prs:
-        fired.append({"trigger": "hours", "value": hours, "threshold": t["hours"]})
-    if final and prs:
+    fired = [{"trigger": "review", "value": len(prs), "threshold": 1}] if review and prs else []
+    for name, reached, needs_prs in THRESHOLD_TRIGGERS:
+        if not review and reached(metrics[name], t[name]) and (prs or not needs_prs):
+            fired.append({"trigger": name, "value": metrics[name], "threshold": t[name]})
+    if final and prs and not review:
         fired.append({"trigger": "final", "value": len(prs), "threshold": 1})
     return {"decl": decl, "fired": fired, "metrics": metrics, "escape_areas": esc, "how": how, "prs": [p["pr"] for p in prs]}
 
@@ -509,6 +512,7 @@ def findings_of(state: Path) -> tuple[dict, str]:
     findings = {
         "applied": ref.get("adopted", ref.get("applied")),
         "reverted": ref.get("reverted"),
+        **({"unconfirmed": ref["unconfirmed"]} if "unconfirmed" in ref else {}),  # 最終ゲートを経ていない実行だけ（#1652）
         # drive が返したキーだけを写す（古い drive の `findings` はコメントの数で、stats が読むときに読み替える）
         **{k: rev[k] for k in REVIEW_COUNTS if k in rev},
     }
@@ -747,46 +751,43 @@ def check_row(c: dict, linked: dict[int, list[int]]) -> dict:
     }
 
 
-def cmd_stats(a, root: Path) -> tuple[dict, int]:
-    events = read_events(root)
-    evals = [e for e in events if e["kind"] == "eval"]
-    checks = [e for e in events if e["kind"] == "check"]
-    escapes = [e for e in events if e["kind"] == "escape"]
-    ended = [e for e in checks if e.get("result") in ENDED]
-    linked, unlinked = link_escapes(escapes, checks)
-    # 時刻の窓を切るのは範囲が時刻で連続する検査（scope: since）だけ。PR を指す検査は窓を切らない
-    windows = [e for e in ended if e.get("scope", "since") == "since"]
-    rows = []
-    for c in checks:
-        row = check_row(c, linked)
-        i = next((k for k, w in enumerate(windows) if w is c), None)
-        if i is not None:
-            row["escapes_after"] = escapes_in_window(c, i, windows, escapes)
-        rows.append(row)
-    fired: dict[str, int] = {}
-    for e in evals:
-        for t in e.get("fired") or []:
-            fired[t] = fired.get(t, 0) + 1
-    n_linked = len(escapes) - len(unlinked)
-    metrics = {
+def _check_rows(checks: list[dict], windows: list[dict], escapes: list[dict], linked) -> list[dict]:
+    """検査ごとの行に、窓を切る検査なら窓の中の逃げた不具合を足す。"""
+    at = {id(w): i for i, w in enumerate(windows)}
+    return [
+        check_row(c, linked) | ({"escapes_after": escapes_in_window(c, at[id(c)], windows, escapes)} if id(c) in at else {}) for c in checks
+    ]
+
+
+def _stats_metrics(root: Path, evals: list[dict], checks: list[dict], escapes: list[dict], unlinked) -> dict:
+    return {
         "evals": len(evals),
         "fired": sum(1 for e in evals if e.get("fired")),
-        "by_trigger": fired,
+        "by_trigger": dict(Counter(t for e in evals for t in e.get("fired") or [])),
         "checks": len(checks),
         "checks_pr": sum(1 for c in checks if c.get("scope") == "pr"),
         "failed": sum(1 for c in checks if c.get("result") == "failed"),
         "escapes": len(escapes),
-        "escapes_linked": n_linked,
+        "escapes_linked": len(escapes) - len(unlinked),
         "escapes_unlinked": len(unlinked),
         "unlinked": unlinked,
         "log": str(log_path(root)),
     }
+
+
+def cmd_stats(a, root: Path) -> tuple[dict, int]:
+    events = read_events(root)
+    evals, checks, escapes = ([e for e in events if e["kind"] == kind] for kind in ("eval", "check", "escape"))
+    linked, unlinked = link_escapes(escapes, checks)
+    # 時刻の窓を切るのは範囲が時刻で連続する検査（scope: since）だけ。PR を指す検査は窓を切らない
+    windows = [e for e in checks if e.get("result") in ENDED and e.get("scope", "since") == "since"]
+    metrics = _stats_metrics(root, evals, checks, escapes, unlinked)
     return result(
         TOOL,
         "ok",
         f"評価 {metrics['evals']} 回（立った {metrics['fired']}）・検査 {len(checks)} 回（PR を指す {metrics['checks_pr']}）"
-        f"・逃げた不具合 {metrics['escapes']} 件（結び付いた {n_linked}）",
-        rows,
+        f"・逃げた不具合 {metrics['escapes']} 件（結び付いた {metrics['escapes_linked']}）",
+        _check_rows(checks, windows, escapes, linked),
         metrics,
     ), EXIT_OK
 
