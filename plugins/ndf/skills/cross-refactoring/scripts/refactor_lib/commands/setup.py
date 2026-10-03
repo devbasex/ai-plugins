@@ -19,7 +19,6 @@ import assignment
 import auth
 import jev
 import models as models_lib
-import proc
 import project_mvv
 import project_decl
 import repo as repo_lib
@@ -34,6 +33,7 @@ from .. import ci_coverage
 from .. import runtime_decl
 from .. import timeline
 from ..paths import (
+    github_repo_from_origin,
     default_worktree_base,
     sh,
     state_path,
@@ -202,17 +202,6 @@ def _warn_unmeasurable_models(model_spec: dict[str, Optional[str]], participants
             "実際に動いたモデルを取得できないため、その実行は集計から分離されます。"
             f"比較するなら --model {runtime}=<モデル名> を指定してください"
         )
-
-
-def github_repo_from_origin() -> Optional[str]:
-    """カレントの origin の URL から `owner/repo` を求める（GitHub の URL だけ）。求まらなければ `None`。
-
-    **求めた名前はそのまま使わない。** `repos/{owner}/{repo}/pulls/{PR}` の応答が
-    そのまま検証になるため、誤った名前は失敗として現れる（`_fetch_pr_context`）。
-    URL の読み方はライブラリの `repo.owner_repo_from_url` が持つ。
-    """
-    url = proc.git_out(pathlib.Path.cwd(), "remote", "get-url", "origin") or ""
-    return repo_lib.owner_repo_from_url(url) if "github.com" in url else None
 
 
 def _pr_payload(repo: str, pr: int) -> Optional[dict[str, Any]]:

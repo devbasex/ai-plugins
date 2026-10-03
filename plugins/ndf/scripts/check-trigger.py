@@ -509,6 +509,7 @@ def findings_of(state: Path) -> tuple[dict, str]:
     findings = {
         "applied": ref.get("adopted", ref.get("applied")),
         "reverted": ref.get("reverted"),
+        **({"unconfirmed": ref["unconfirmed"]} if "unconfirmed" in ref else {}),  # 最終ゲートを経ていない実行だけ（#1652）
         # drive が返したキーだけを写す（古い drive の `findings` はコメントの数で、stats が読むときに読み替える）
         **{k: rev[k] for k in REVIEW_COUNTS if k in rev},
     }

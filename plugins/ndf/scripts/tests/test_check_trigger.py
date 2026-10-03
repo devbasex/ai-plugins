@@ -415,6 +415,29 @@ def test_record_merged_moves_the_start_of_the_next_range(repo, env, tmp_path):
     assert call(repo, env, "changed", "--id", "m-1")[0] == 0
 
 
+def _check_trigger_module():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("check_trigger_under_test", SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.mark.parametrize("remaining", [3, 7, 12, 16, 11])
+def test_findings_copy_unconfirmed_of_a_refactor_step_that_did_not_pass_the_final_gate(tmp_path, remaining):
+    """#1652 の 5 本の形（採用 0・残った改善項目 N 件）から、applied 0 と unconfirmed N の両方が出る。"""
+    st = state_dir(tmp_path, [{"id": "refactor", "exit": 1, "counts": {"adopted": 0, "reverted": 2, "unconfirmed": remaining}}])
+    findings, failed = _check_trigger_module().findings_of(st)
+    assert (findings["applied"], findings["unconfirmed"], failed) == (0, remaining, "refactor")
+
+
+def test_findings_have_no_unconfirmed_when_the_refactor_step_did_not_return_it(tmp_path):
+    st = state_dir(tmp_path, [{"id": "refactor", "exit": 0, "counts": {"adopted": 2, "reverted": 1}}])
+    findings, _ = _check_trigger_module().findings_of(st)
+    assert "unconfirmed" not in findings
+
+
 def test_review_fires_on_one_pr_without_the_other_triggers(repo, env):
     write_decl(repo, {**TRIGGERS, "score": 99, "lines": 10_000})
     assert call(repo, env, "eval", "--review")[0] == 3

@@ -18,6 +18,8 @@ init → 提案 → 改修計画 → テスト追加 → 実装 → 検証と修
 子の起動・KEY=VALUE の読み取り・最終ステータスの決定は `scripts/lib/loop_drive.py` にある。
 件数（metrics）は状態ファイルから数える: items / adopted / reverted / deferred / fix_rounds（項目の修正の回数の和）/ final_gate。
 採用（adopted）は最終ゲートが `passed` のときだけ数え、通っていなければ 0 にして残った改善項目の数を unconfirmed に出す。
+unpublished は手元の HEAD が公開した地点より進んでいるか（plan-comment が判定できなければ null）。
+done・stopped・pause の各出口で、結果 JSON を組む前に `refactor.py plan-comment` を 1 度だけ打ち、リファクタリング計画のコメントを書き直す（#1692）。
 最終ゲートを経ずに終わった実行は完了にせず、中断（stopped・metrics.exit に最終ゲートの終了コード）で終える（#1482）。
 """
 
@@ -43,7 +45,6 @@ import drive_pause as dp  # noqa: E402
 import durable  # noqa: E402
 from drive_pause import Stop  # noqa: E402
 from loop_drive import call, durable_identity, parse_vars, review_status  # noqa: E402,F401  テストは `call` をこのモジュールの上で差し替える
-import repo as repo_lib  # noqa: E402
 
 TOOL = "cross-refactoring-drive"
 KIND = "refactor"  # 耐久の記録の種類
@@ -107,6 +108,7 @@ class Drive:
         self.extra_env: dict = {}  # 子へ足す環境変数
         self.v: dict = {}
         self.final_rc = 1  # 最後に打った final-gate の終了コード
+        self.comment_done = False  # done の出口でコメントを書き直したか（stopped へ移っても 2 度目を打たない。I8）
         self.paused = False  # main の側: 止まりで抜けるか
 
     def call(self, cmd: list[str]) -> tuple[int, str]:
@@ -138,10 +140,7 @@ class Drive:
             return paths.tmp_dir_for(Path(root).resolve() / "work")
         if os.environ.get("CROSS_REFACTORING_TMP_DIR"):
             return paths.tmp_dir_for(Path())  # 環境変数が作業ディレクトリより先に効く
-        from refactor_lib.commands.setup import github_repo_from_origin
-
-        repo = github_repo_from_origin()
-        return paths.tmp_dir_for(paths.default_worktree_base() / repo_lib.slug(repo) / f"rf{self.pr}" / "work") if repo else None
+        return paths.default_tmp_dir(self.pr)
 
     def identity(self) -> str:
         """耐久の記録の実行の鍵の元。状態の置き場（求まらなければ作業ディレクトリと PR）。"""
@@ -155,24 +154,36 @@ class Drive:
         return value if kind == "ok" and isinstance(value, dict) else {}
 
     def counts(self) -> dict:
+        """結果 JSON の件数。4 つの件数は `ledger.tally`（コメントの件数の行と同じ集計。I1）から数える。"""
         s = self.state()
         items = s.get("items") or []
-        by = {}
-        for it in items:
-            by[it.get("status")] = by.get(it.get("status"), 0) + 1
-        led = _ledger_module()
-        confirmed = led.adoption_confirmed(s)
+        t = _ledger_module().tally(s).as_metrics()
         c = {
-            "items": len(items),
-            "adopted": by.get("verified", 0) if confirmed else 0,
-            "reverted": by.get("reverted", 0),
-            "deferred": by.get("deferred", 0),
+            "items": t["items"],
+            "adopted": t["adopted"],
+            "reverted": t["reverted"],
+            "deferred": t["deferred"],
             "fix_rounds": sum(int(it.get("fix_count") or 0) for it in items),
             "final_gate": self.v.get("FINAL_GATE") or (s.get("final_gate") or {}).get("status"),
         }
-        if not confirmed:
-            c["unconfirmed"] = led.remaining_count(s)
+        if "unconfirmed" in t:
+            c["unconfirmed"] = t["unconfirmed"]
+        if "PLAN_COMMENT" in self.v:
+            # 未公開の改善項目があるか（決定 6）。plan-comment が判定できなければ null
+            c["unpublished"] = {"1": True, "0": False}.get(self.v.get("UNPUBLISHED") or "")
         return c
+
+    def refresh_plan_comment(self) -> None:
+        """結果の出口でリファクタリング計画のコメントを書き直す（#1692 の決定 1）。
+
+        **終了コードで分岐しない**（I5）。投稿に失敗しても結果 JSON と終了コードは変えず、1 行だけ残す。
+        """
+        if "TMP_DIR" not in self.v or "ID" not in self.v:
+            return
+        rc, out = self.call([sys.executable, str(HERE / "refactor.py"), "plan-comment", self.v["ID"]])
+        self.v.update({k: v for k, v in parse_vars(out).items() if k in ("PLAN_COMMENT", "UNPUBLISHED", "PLAN_URL")})
+        if rc != 0:
+            print(f"⚠ リファクタリング計画のコメントを書き直せなかった（plan-comment の終了コード {rc}。結果は変えない）", file=sys.stderr)
 
     def todo(self, phase: str) -> bool:
         cur = self.v.get("PHASE") or "propose"
@@ -322,6 +333,8 @@ class Drive:
         return rp
 
     def done(self, extra: dict | None = None) -> dict:
+        self.refresh_plan_comment()
+        self.comment_done = True
         c = {**self.counts(), **(extra or {})}
         if "unconfirmed" in c:
             raise Stop(f"最終ゲートを経ていないため、残った改善項目 {c['unconfirmed']} 件は採用と確定していない", self.final_rc)
@@ -333,6 +346,8 @@ class Drive:
         )
 
     def stopped(self, e: Stop) -> dict:
+        if not self.comment_done:
+            self.refresh_plan_comment()
         return dp.stopped(TOOL, str(e), self.counts() if "TMP_DIR" in self.v and "ID" in self.v else {}, e.code)
 
     def review_file(self) -> Path:
@@ -412,6 +427,7 @@ def refactor_drive(pr: int, init_args: list[str]) -> dict:
         if d.v.get("FINAL_GATE") == "cross-review":
             res = d.review_file()
             _unlink_step(str(res))
+            d.refresh_plan_comment()  # 続きを待つ前の 1 度（pause の結果の出口）
             status = None
             for seq in itertools.count(1):
                 msg = durable.pause(seq, result=d.pause_review(res), code=dp.PAUSE_CODES["cross-review"])
