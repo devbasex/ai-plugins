@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.57）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.58-dev.1）
 ```
 
 ### agy
@@ -119,11 +119,16 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.57 へ更新するとき
+## v10.17.58-dev.1 へ更新するとき
 
-- cross-refactoring で全体テストが落ちると、落ちたテストの本文に現れるパスから原因の項目を割り出し、その項目を取り消しの対象にする（#1671）（#1673）
-- 工程の 1 つでは、打ち切りの後に取り消してから終える（#1671）（#1673）
-- 打ち切りの後の扱いは、起動のされ方によって分かれる。分かれ方は文書に記載した（#1671）（#1673）
+- プロジェクト宣言の suite に `ci_jobs` を書くと、その suite に対応する継続的統合のジョブを指定できる（#1697）（#1701）
+- プロジェクト宣言の test に `ci_exempt` を書くと、継続的統合で動かさない理由を残せる。ジョブの識別子と理由の形は検査される（#1697）（#1701）
+- cross-refactoring の init は、継続的統合のジョブと宣言を突き合わせ、宣言に無いジョブを知らせる（#1697）（#1701）
+- cross-refactoring の SKILL.md に、init の知らせの読み方と、`ci_jobs`・`ci_exempt` の書き方を載せている（#1697）（#1701）
+- cross-refactoring のリファクタリング計画のコメントは、駆動の結果の出口ごとに書き直され、最新の状態を示します（#1700）（#1701）
+- push が失敗したときの出力では、認証情報が伏せられます（#1700）（#1701）
+- 検査のプランの件数は、refactor のステップで未確認（unconfirmed）のものを反映します（#1700）（#1701）
+- 手順の文書に、コメントを書き直す時点と `plan-comment --scan-reverts` の使い方を記載しています（#1700）（#1701）
 
 ## Playwright テストについて
 
@@ -414,7 +419,7 @@ agy models   # 認証確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.57/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.58-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -436,14 +441,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.57/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.58-dev.1/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.57  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.58-dev.1  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
