@@ -116,8 +116,8 @@ Pull Request では `merged` の対象が起点ブランチそのものになる
 人が候補を見て承認した後に、承認した退避先の名前（候補の `items[].name`）を `--yes --only <名前>...` で
 渡したときの、その名前の退避先だけである。打ち直した時点の判定で消す範囲を決めないのは、候補を挙げてから
 承認までに別の退避先が増える（`merged` が別の worktree を退避した・`--ref main` のような動く ref が進んだ）と、
-人が見ていない退避先まで消えるためである。集合の外の当たりは候補のまま残し、`--only` の無い `--yes` は
-止める。Claude Code のプラグインの形では `release-steps.py release --channel prod` が最後に候補を挙げ、
+人が見ていない退避先まで消えるためである。集合の外の当たりは候補のまま残す。`--yes` と `--only` は対で渡し、
+片方だけのとき・`--ref` がコミットとして読めないときは終了コード 2 で止める。Claude Code のプラグインの形では `release-steps.py release --channel prod` が最後に候補を挙げ、
 候補があれば承認後に打つ `sweep-trash --ref <マージコミット> --yes --only <候補の名前>...` の 1 行を
 `next` に出す。
 台帳の無い退避先（この形より前の退避）は消さずに件数だけを報告する。日数による保持期限は
@@ -278,6 +278,8 @@ Pull Request を選ぶため、別のスプリント課題を閉じうる。
 | frontmatter の `description` から "after listing them for approval" が消えている | `python3 scripts/check-skill-frontmatter.py` |
 | 退避のループが空白・改行・引用符・非 ASCII を含むパスと、追跡されたディレクトリの配下の無視されたパスを同じ相対パスで移す | 一時リポジトリでの実測（PR #747 の本文） |
 | 書けない退避先では 1 件目を退避した後に止まり、`git worktree remove` へ進まず worktree が残る | 同上 |
+| 作り直せる生成物を退避せずに捨て、設定が隣に無い `target` と同じ名前のファイルは退避する。退避するものが残らなければ退避先を作らない | `plugins/ndf/skills/merged/tests/test_worktree_trash.py`（`test_generated_dirs_are_discarded_not_evacuated` / `test_a_target_*` / `test_nothing_left_to_evacuate_makes_no_trash`） |
+| `sweep-trash` は本番に含まれる退避先を候補として挙げるだけで消さず、`--yes --only` で承認した名前だけを消す。squash のマージはマージコミットで決め、台帳の無い退避先・承認外の退避先は残す。`--yes` と `--only` の片方だけ・読めない `--ref` は終了コード 2 | 同上（`test_sweep_*`） |
 | 実 Pull Request に `/ndf:merged` を実行し、削除について利用者の入力を求める箇所が 0 | リリース後テスト |
 | スプリント課題が起点へのマージで閉じず、最終工程の後に閉じる | リリース後テスト（`gh api graphql` の ClosedEvent の時刻） |
 
