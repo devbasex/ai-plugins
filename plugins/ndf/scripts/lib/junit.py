@@ -49,6 +49,21 @@ def _cases(root: ET.Element) -> Iterable[tuple[ET.Element, Optional[str]]]:
         yield root, None
 
 
+def _failed_rows(root: ET.Element) -> Iterable[tuple[ET.Element, dict[str, str]]]:
+    """`failure` / `error` を持つ `testcase` と、その `{file, classname, name}`。"""
+    for case, suite_file in _cases(root):
+        if case.find("failure") is None and case.find("error") is None:
+            continue
+        yield (
+            case,
+            {
+                "file": str(case.get("file") or suite_file or ""),
+                "classname": str(case.get("classname") or ""),
+                "name": str(case.get("name") or ""),
+            },
+        )
+
+
 def failed_cases(xml_bytes: bytes) -> Optional[list[dict[str, str]]]:
     """`failure` / `error` を持つ `testcase` の `{file, classname, name}`。読めなければ `None`。"""
     try:
@@ -57,14 +72,7 @@ def failed_cases(xml_bytes: bytes) -> Optional[list[dict[str, str]]]:
         return None
     out: list[dict[str, str]] = []
     seen = set()
-    for case, suite_file in _cases(root):
-        if case.find("failure") is None and case.find("error") is None:
-            continue
-        row = {
-            "file": str(case.get("file") or suite_file or ""),
-            "classname": str(case.get("classname") or ""),
-            "name": str(case.get("name") or ""),
-        }
+    for _, row in _failed_rows(root):
         key = (row["file"], row["classname"], row["name"])
         if key not in seen:
             seen.add(key)
@@ -135,38 +143,36 @@ def failure_texts(xml_bytes: bytes, tracked: Iterable[str], limit: int = TEXT_CH
         return None
     files = list(tracked)
     out: dict[str, str] = {}
-    for case, suite_file in _cases(root):
+    for case, row in _failed_rows(root):
+        rel = relative_file(row["file"], files)
+        if rel is None:
+            continue
         parts = [
             "\n".join(p for p in (str(el.get("message") or ""), str(el.text or "")) if p)
             for el in (case.findall("failure") + case.findall("error"))
         ]
-        if not parts:
-            continue
-        row = {"classname": str(case.get("classname") or ""), "name": str(case.get("name") or "")}
-        rel = relative_file(str(case.get("file") or suite_file or ""), files)
-        if rel is None:
-            continue
         key = test_id(row, rel)
         out[key] = _trimmed("\n".join(filter(None, [out.get(key, ""), *parts])), limit)
     return out
 
 
-def read_failure_texts(path, tracked: Iterable[str]) -> Optional[dict[str, str]]:
-    """置き場のファイルから落ちたテストの本文を読む。無い・読めなければ `None`。"""
+def _read_with(path, parse: Callable[[bytes], Any]) -> Any:
+    """置き場のファイルを bytes で読んで `parse` へ渡す。無い・読めなければ `None`。"""
     try:
         with open(path, "rb") as fh:
-            return failure_texts(fh.read(), tracked)
+            return parse(fh.read())
     except OSError:
         return None
+
+
+def read_failure_texts(path, tracked: Iterable[str]) -> Optional[dict[str, str]]:
+    """置き場のファイルから落ちたテストの本文を読む。無い・読めなければ `None`。"""
+    return _read_with(path, lambda data: failure_texts(data, tracked))
 
 
 def read_failed_ids(path, tracked: Iterable[str]) -> Optional[list[str]]:
     """置き場のファイルから落ちた ID を読む。無い・読めなければ `None`。"""
-    try:
-        with open(path, "rb") as fh:
-            return failed_ids(fh.read(), tracked)
-    except OSError:
-        return None
+    return _read_with(path, lambda data: failed_ids(data, tracked))
 
 
 # ---------- CI の成果物 ----------
