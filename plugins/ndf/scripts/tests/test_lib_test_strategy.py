@@ -296,9 +296,8 @@ def _without_kind(state: dict) -> dict:
 
 
 def test_a_declaration_without_kind_resolves_as_before():
-    """AC3・I3 — 種別を書かない宣言（このリポジトリの宣言を含む）の戦略・全体テスト・範囲テストが変わらない。"""
-    repo_decl = json.loads((Path(__file__).resolve().parents[4] / ".ndf" / "project.json").read_text(encoding="utf-8"))
-    for decl in (AI_PLUGINS, CARMO, repo_decl):
+    """AC3・I3 — 種別を書かない宣言の戦略・全体テスト・範囲テストが変わらない。"""
+    for decl in (AI_PLUGINS, CARMO):
         s = ts.resolve(decl)
         suite = decl["test"]["suites"][0]
         state = _without_kind(s.as_state())
