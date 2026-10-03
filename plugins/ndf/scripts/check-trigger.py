@@ -369,25 +369,20 @@ def evaluate(root: Path, final: bool, since: str | None, to_ref: str | None = No
     prs, excluded = merged_prs(root, frm, to, decl, {e["pr"] for e in events if e["kind"] == "check" and isinstance(e.get("pr"), int)})
     t = decl["triggers"]
     esc = escapes_since(events, since_at)
-    hours = round((clock.now(utc=True) - since_at).total_seconds() / 3600, 2)
     metrics = {
         "prs": len(prs),
         "score": sum(p["points"] for p in prs),
         "lines": changed_lines(root, frm, to, excluded),
-        "hours": hours,
+        "hours": round((clock.now(utc=True) - since_at).total_seconds() / 3600, 2),
         "escapes": max(esc.values(), default=0),
         "from": frm,
         "to": to,
     }
-    fired = []
-    if review:
-        if prs:
-            fired.append({"trigger": "review", "value": len(prs), "threshold": 1})
-        return {"decl": decl, "fired": fired, "metrics": metrics, "escape_areas": esc, "how": how, "prs": [p["pr"] for p in prs]}
+    fired = [{"trigger": "review", "value": len(prs), "threshold": 1}] if review and prs else []
     for name, reached, needs_prs in THRESHOLD_TRIGGERS:
-        if reached(metrics[name], t[name]) and (prs or not needs_prs):
+        if not review and reached(metrics[name], t[name]) and (prs or not needs_prs):
             fired.append({"trigger": name, "value": metrics[name], "threshold": t[name]})
-    if final and prs:
+    if final and prs and not review:
         fired.append({"trigger": "final", "value": len(prs), "threshold": 1})
     return {"decl": decl, "fired": fired, "metrics": metrics, "escape_areas": esc, "how": how, "prs": [p["pr"] for p in prs]}
 
