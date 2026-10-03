@@ -166,13 +166,15 @@ PLAN_COMMIT_MESSAGE = (
     "状態ファイルは差分から除外されるため、Pull Request から読める場所へ置く。"
 )
 
-# 改善項目の状態を、Pull Request を読む側に通じる語へ置き換える。
+# 改善項目の表示の状態（`ledger.display_status`）を、Pull Request を読む側に通じる語へ置き換える。
+# `verified` は最終ゲートの結論で「採用」か「未確認」に分かれるため、呼び名を持たない（#1692 の I2）。
 ITEM_STATUS_LABELS = {
     "planned": "未着手",
     "tested": "テストを追加済み",
     "implemented": "検証中",
     "failing": "修正中",
-    "verified": "採用",
+    "adopted": "採用",
+    "unconfirmed": "未確認",
     "reverted": "取り消し",
     "deferred": "見送り",
 }

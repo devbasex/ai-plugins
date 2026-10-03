@@ -12,6 +12,7 @@ import subprocess
 from typing import Any, Optional
 
 import proc
+import repo as repo_lib
 import statefile
 import worktree_base
 
@@ -41,17 +42,43 @@ def state_path(tmp_dir: pathlib.Path, state_id: int) -> pathlib.Path:
     return tmp_dir / f"cross-refactoring-rf{state_id}-state.json"
 
 
+def github_repo_from_origin() -> Optional[str]:
+    """カレントの origin の URL から `owner/repo` を求める（GitHub の URL だけ）。求まらなければ `None`。
+
+    **求めた名前はそのまま使わない。** `repos/{owner}/{repo}/pulls/{PR}` の応答が
+    そのまま検証になるため、誤った名前は失敗として現れる（`_fetch_pr_context`）。
+    URL の読み方はライブラリの `repo.owner_repo_from_url` が持つ。
+    """
+    url = proc.git_out(pathlib.Path.cwd(), "remote", "get-url", "origin") or ""
+    return repo_lib.owner_repo_from_url(url) if "github.com" in url else None
+
+
+def default_tmp_dir(state_id: int) -> Optional[pathlib.Path]:
+    """既定の worktree の置き場の状態の置き場（`<既定の根>/<owner--repo>/rf<ID>/work/.cross_refactoring`）。
+
+    origin の owner/repo が求まらなければ `None`。環境変数 `CROSS_REFACTORING_TMP_DIR` は見ない
+    （駆動の `known_tmp` と `_find_state` が先に見る）。
+    """
+    repo = github_repo_from_origin()
+    if not repo:
+        return None
+    return default_worktree_base() / repo_lib.slug(repo) / f"rf{state_id}" / "work" / ".cross_refactoring"
+
+
 def _find_state(state_id: int) -> pathlib.Path:
     """状態ファイルを探す。見つからなければ終了する。
 
-    環境変数が設定されていればそこを、無ければ現在の作業ディレクトリからの
-    相対で探す。呼び出し側の bash は `init` の出力を `export` してから使う。
+    環境変数 → 現在の作業ディレクトリの `.cross_refactoring/` → 既定の worktree の置き場の順に探す。
+    駆動が終わった後の conductor は環境変数を持たないため、既定の置き場からも探す（#1692 の決定 5）。
     """
     env = os.environ.get("CROSS_REFACTORING_TMP_DIR")
     candidates = []
     if env:
         candidates.append(pathlib.Path(env) / f"cross-refactoring-rf{state_id}-state.json")
     candidates.append(pathlib.Path.cwd() / ".cross_refactoring" / f"cross-refactoring-rf{state_id}-state.json")
+    fallback = default_tmp_dir(state_id)
+    if fallback is not None:
+        candidates.append(fallback / f"cross-refactoring-rf{state_id}-state.json")
     for c in candidates:
         if c.exists():
             return c

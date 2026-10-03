@@ -22,7 +22,7 @@ _PATTERNS = (
 )
 
 
-def redact(text: str, max_lines: int = MAX_LINES, max_chars: int = MAX_CHARS) -> str:
+def redact_output(text: str, max_lines: int = MAX_LINES, max_chars: int = MAX_CHARS) -> str:
     """認証情報を `***` に置き換え、空でない末尾の `max_lines` 行・`max_chars` 字までに縮める。"""
     out = str(text or "")
     for pattern in _PATTERNS:

@@ -18,7 +18,9 @@ from typing import Any, Optional
 
 import mdtable
 
-from . import die, info, timeline
+import statefile
+
+from . import die, info, ledger, timeline
 from .codemetrics_view import record_lines
 from .paths import sh
 from .items import item_label
@@ -48,9 +50,35 @@ def plan_comment_marker(state: dict[str, Any]) -> str:
     return f"<!-- cross-refactoring plan rf{state.get('id')} -->"
 
 
-def plan_comment_body(state: dict[str, Any]) -> str:
-    """Pull Request のコメントとして投稿する本文。"""
-    return plan_comment_marker(state) + "\n\n" + format_plan(state)
+def plan_comment_body(state: dict[str, Any], unpublished: Optional[bool] = None) -> str:
+    """Pull Request のコメントとして投稿する本文。公開の行と書き直した時刻はコメントだけに置く。
+
+    ファイルの置き場所（`--plan-file`）へは書かない。書くと、公開のたびに本文が変わってコミットが積まれる。
+    """
+    head = [f"- 公開: {publication_line(state, unpublished)}", f"- 書き直した時刻: {statefile.now()}"]
+    return plan_comment_marker(state) + "\n\n" + format_plan(state, head)
+
+
+def counts_line(state: dict[str, Any]) -> str:
+    """件数の行。4 つの件数は結果 JSON の `metrics` と同じ集計（`ledger.tally`）から出る（I1）。"""
+    t = ledger.tally(state)
+    gate = (state.get("final_gate") or {}).get("status") or "未実行"
+    return f"採用 {t.adopted}・未確認 {t.unconfirmed}・取り消し {t.reverted}・見送り {t.deferred}（最終ゲート: {gate}）"
+
+
+def publication_line(state: dict[str, Any], unpublished: Optional[bool] = None) -> str:
+    """公開の行（`publication` の最後の試み）。`unpublished` が真なら未公開の改善項目があることを添える。"""
+    pub = state.get("publication") or {}
+    status = pub.get("status")
+    sha = str(pub.get("sha") or "")[:12]
+    if status == "pushed":
+        return f"{sha} を push した" + ("。その後の手元のコミットは未公開" if unpublished else "")
+    if status == "refused":
+        reason = " / ".join(str(pub.get("reason") or "理由の記録なし").splitlines())
+        return f"push できなかった（{reason}）" + ("。未公開の改善項目がある" if unpublished else "")
+    if status == "observed":
+        return f"origin の {pub.get('head') or state.get('head_branch')} は {sha}（プランの外の取り消しを読んだ地点）"
+    return "まだ push していない"
 
 
 def _comment_payload(out: str) -> Optional[dict[str, Any]]:
@@ -83,19 +111,25 @@ def _find_plan_comment(state: dict[str, Any]) -> Optional[dict[str, Any]]:
     return None
 
 
-def publish_plan_comment(state: dict[str, Any]) -> Optional[str]:
-    """改修計画のコメントを作るか、既にあるものを編集して URL を返す。
+def publish_plan_comment(state: dict[str, Any], unpublished: Optional[bool] = None) -> Optional[str]:
+    """改修計画のコメントを作るか、既にあるものを編集して URL を返す（`write_plan_comment` の URL）。"""
+    return write_plan_comment(state, unpublished)[1]
+
+
+def write_plan_comment(state: dict[str, Any], unpublished: Optional[bool] = None) -> tuple[str, Optional[str]]:
+    """改修計画のコメントを作るか編集し、`(結果, URL)` を返す。結果は `created`・`updated`・`skipped`・`failed`。
 
     **投稿できなくても進行は止めない。** 改修計画は実行の記録であり、これが
     残らないことと、変更が検証を通っていないことは別である。**通らなかったことは
     出力へ残す**（外へ出す文章の URL が「作成できていない」と書かれる）。
+    `gh api` は、コメントの ID を持っていれば編集 1 回、無ければ検索 1 回と作成か編集 1 回（I8）。
     """
     if plan_mode(state) != PLAN_COMMENT:
-        return None
+        return "skipped", None
     repo = str(state.get("repo") or "")
     pr = state.get("current_pr")
     if not repo or not pr:
-        return None
+        return "skipped", None
 
     known = state.get("plan_comment") or {}
     comment_id = known.get("id")
@@ -103,7 +137,7 @@ def publish_plan_comment(state: dict[str, Any]) -> Optional[str]:
         found = _find_plan_comment(state)
         comment_id = found.get("id") if found else None
 
-    body = plan_comment_body(state)
+    body = plan_comment_body(state, unpublished)
     if comment_id:
         out = sh(
             ["gh", "api", f"repos/{repo}/issues/comments/{comment_id}", "-X", "PATCH", "-f", f"body={body}"],
@@ -117,11 +151,11 @@ def publish_plan_comment(state: dict[str, Any]) -> Optional[str]:
     payload = _comment_payload(out)
     if payload is None:
         info("⚠ 改修計画のコメントを投稿できませんでした（進行は止めません）")
-        return known.get("url")
+        return "failed", known.get("url")
     record = {"id": payload["id"], "url": str(payload.get("html_url") or "")}
     state["plan_comment"] = record
     info(f"📝 改修計画を更新しました: {record['url']}")
-    return record["url"]
+    return ("updated" if comment_id else "created"), record["url"]
 
 
 def normalize_plan_file(value: Optional[str]) -> str:
@@ -189,8 +223,10 @@ def strategy_lines(state: dict[str, Any]) -> list[str]:
     return lines
 
 
-def format_plan(state: dict[str, Any]) -> str:
-    """改修計画の本文を組み立てる。**同じ状態からは同じ本文が出る。**
+def format_plan(state: dict[str, Any], head: Optional[list[str]] = None) -> str:
+    """改修計画の本文を組み立てる。**同じ状態と `head` からは同じ本文が出る。**
+
+    冒頭に件数の行を置き、`head`（コメントの公開の行と書き直した時刻）を続ける。
 
     提案の理由と手順は状態ファイルにしか残らず、そのディレクトリは差分から
     除外される。Pull Request を読む側からは、なぜ直したのかも、どう直す改修計画
@@ -204,6 +240,8 @@ def format_plan(state: dict[str, Any]) -> str:
         "`/ndf:cross-refactoring` が提案し、改修計画し、適用した改善項目の記録である。",
         "理由と手順は提案の時点でしか残らないため、公開の直前に書き出している。",
         "",
+        f"- 件数: {counts_line(state)}",
+        *(head or []),
         f"- 対象範囲: {', '.join(state.get('target_scope') or []) or '（未指定）'}",
         *strategy_lines(state),
         f"- 着手前のテスト: {baseline.get('command') or '（未指定）'}（{baseline.get('mode') or 'whole'}）",
@@ -219,7 +257,7 @@ def format_plan(state: dict[str, Any]) -> str:
     if not items:
         lines.extend(["（採用した改善項目なし）", ""])
     for item in items:
-        lines.extend(_plan_item_section(item))
+        lines.extend(_plan_item_section(state, item))
     lines.extend(record_lines(state))
     lines.extend(limits_section(state.get("limits") or {}))
     lines.extend(_plan_deferred_section(state))
@@ -295,9 +333,10 @@ def _plan_deferred_section(state: dict[str, Any]) -> list[str]:
     return lines
 
 
-def _plan_item_section(item: dict[str, Any]) -> list[str]:
-    """項目 1 件の見出し・要約表・理由・手順。"""
-    status = ITEM_STATUS_LABELS.get(item.get("status"), item.get("status") or "—")
+def _plan_item_section(state: dict[str, Any], item: dict[str, Any]) -> list[str]:
+    """項目 1 件の見出し・要約表・理由・手順。状態は表示の状態（`ledger.display_status`）で書く。"""
+    shown = ledger.display_status(state, item)
+    status = ITEM_STATUS_LABELS.get(shown, shown or "—")
     commits = item.get("commits") or {}
     count = len([s for s in (commits.get("test"), commits.get("implement"), *(commits.get("fix") or [])) if s])
     lines = [

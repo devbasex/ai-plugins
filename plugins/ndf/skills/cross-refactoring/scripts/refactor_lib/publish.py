@@ -12,12 +12,13 @@ import shutil
 import subprocess
 from typing import Any
 
+import secret_redact
 import statefile
 import tool_paths
 
-from . import die, info, ledger, timeline, worktree
+from . import Abort, die, info, ledger, timeline, worktree
 from .paths import git_out, sh
-from .plan import format_plan, normalize_plan_file, publish_plan_comment
+from .plan import format_plan, normalize_plan_file
 from .process import run_with_timeout
 from .vocabulary import (
     PLAN_COMMIT_MESSAGE,
@@ -206,7 +207,7 @@ def _require_publishable(state: dict[str, Any]) -> None:
     info("✖ 公開してよくないコミットがあるため push しません")
     for v in stray:
         info(f"   {v.sha[:12]} Item-Id={v.trailer_item_id or '-'} {v.subject}")
-    die(f"origin の {state['head_branch']} は変えていません")
+    die(f"公開してよくないコミットが {len(stray)} 件あるため push しません。origin の {state['head_branch']} は変えていません")
 
 
 def _require_final(state: dict[str, Any]) -> None:
@@ -220,17 +221,22 @@ def push_head(state: dict[str, Any]) -> None:
 
     **公開するのは進行側だけである。** 実装担当に push させると、検証を通る前に
     変更が Pull Request へ現れ、取り消しの反映漏れがそのまま残る。
+
+    **リファクタリング計画のコメントはここで書かない**（#1692 の決定 1）。公開の結果（`publication`）を
+    状態ファイルへ残し、コメントは駆動の結果の出口で `plan-comment` が 1 度だけ書き直す。
     """
-    _sync_generated(state)
-    _require_no_tool_paths(state)
-    _require_publishable(state)
     work = state["worktrees"]["work"]
-    _push_with_credential_fallback(["push", "origin", f"HEAD:{state['head_branch']}"], work)
-    ledger.note_published(state, git_out(work, ["rev-parse", "HEAD"]) or "")
-    # **改修計画のコメントは push の後で更新する**（#436 決定 6）。差分に混ざらない
-    # ので push とは独立だが、公開した内容と食い違わないよう後ろへ置く。投稿に
-    # 失敗しても進行は止めない（`publish_plan_comment` が出力へ残す）。
-    publish_plan_comment(state)
+    try:
+        _sync_generated(state)
+        _require_no_tool_paths(state)
+        _require_publishable(state)
+        _push_with_credential_fallback(["push", "origin", f"HEAD:{state['head_branch']}"], work)
+    except Abort as e:
+        ledger.note_publication(state, "refused", reason=secret_redact.redact_output(e.reason))
+        raise
+    sha = git_out(work, ["rev-parse", "HEAD"]) or ""
+    ledger.note_published(state, sha)
+    ledger.note_publication(state, "pushed", sha=sha)
 
 
 def push_with_retry_marker(path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any]) -> None:
