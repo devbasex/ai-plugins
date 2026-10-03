@@ -74,11 +74,11 @@ def _find_state(state_id: int) -> pathlib.Path:
     env = os.environ.get("CROSS_REFACTORING_TMP_DIR")
     candidates = []
     if env:
-        candidates.append(pathlib.Path(env) / f"cross-refactoring-rf{state_id}-state.json")
-    candidates.append(pathlib.Path.cwd() / ".cross_refactoring" / f"cross-refactoring-rf{state_id}-state.json")
+        candidates.append(state_path(pathlib.Path(env), state_id))
+    candidates.append(state_path(pathlib.Path.cwd() / ".cross_refactoring", state_id))
     fallback = default_tmp_dir(state_id)
     if fallback is not None:
-        candidates.append(fallback / f"cross-refactoring-rf{state_id}-state.json")
+        candidates.append(state_path(fallback, state_id))
     for c in candidates:
         if c.exists():
             return c

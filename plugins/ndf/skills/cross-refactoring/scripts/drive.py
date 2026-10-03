@@ -151,7 +151,9 @@ class Drive:
         return durable_identity(self.known_tmp(), self.pr)
 
     def state_file(self) -> Path:
-        return self.tmp / f"cross-refactoring-rf{self.v['ID']}-state.json"
+        from refactor_lib import paths
+
+        return paths.state_path(self.tmp, self.v["ID"])
 
     def state(self) -> dict:
         kind, value = _read_json_step(str(self.state_file()))
