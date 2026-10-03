@@ -48,12 +48,12 @@
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
 | I1 | 実行 | コメントの 4 つの件数（採用・未確認・取り消し・見送り）と、同じ時点の結果 JSON の `metrics` の 4 つの値は、同じ集計（`ledger.tally`）から出る | 集計を通らない数え方を作らない。テストが同じ状態ファイルから両方を作って比べる |
-| I2 | 実行 | 項目を「採用」と表すのは、最終ゲートが `passed` のときだけである。それ以外の取り消されていない項目は「未確認」と表す（既存の I8 の表示への延長） | 表示の規則を `ledger.display_status` の 1 か所に置く |
+| I2 | 実行 | 項目を「採用」と表すのは、最終ゲートが `passed` のときだけである。最終ゲートが `passed` でないとき、取り消しでも見送りでもない項目（`status` が `planned` / `tested` / `implemented` / `failing` / `verified`。`items.LIVE`）は「未確認」と表す。`reverted` は最終ゲートによらず「取り消し」、`deferred` は「見送り」と表す（既存の I8 の表示への延長） | 表示の規則を `ledger.display_status` の 1 か所に置く |
 | I3 | 実行 | リファクタリング計画ができる前（`plan` が無い）と、置き場所がコメントでない実行では、コメントを作らない | `plan-comment` は何もせず 0 で終わる |
 | I4 | 実行 | 1 つの実行のリファクタリング計画のコメントは 1 件である | 目印 `<!-- cross-refactoring plan rf<ID> -->` で引き当てて編集する |
 | I5 | 実行 | コメントの投稿・編集の失敗は、駆動の結果 JSON と終了コードを変えない | 駆動は `plan-comment` の終了コードで分岐しない。失敗は出力の 1 行に残す |
 | I6 | 実行 | 公開の結果の理由（コメントへ出す文）に認証情報を含めない | 記録する前に伏せ字にする（`secret_redact.redact`） |
-| I7 | 実行 | プランの外の取り消しで「取り消し」にするのは、origin の head ブランチで実装コミットが取り消されたままの項目だけである | 取り消しを取り消したコミットがあれば、元のコミットは取り消されていないと数える |
+| I7 | 実行 | プランの外の取り消しで「取り消し」にするのは、origin の head ブランチで実装コミットが取り消されたままの項目だけである。前の `--scan-reverts` でプランの外の取り消しにした項目の実装コミットが、今の走査で取り消されたままでなければ、その項目を取り消す前の状態へ戻す | 取り消しを取り消したコミットがあれば、元のコミットは取り消されていないと数える。取り消す前の状態は項目の `outside_revert` に残し、戻すのはこの印を持つ項目だけにする（スクリプトの中の取り消しは戻さない） |
 | I8 | 実行 | 1 つの結果の出口でコメントのために打つ `gh api` は、検索 1 回と作成か編集 1 回までである | ID を持っていれば検索しない。駆動は 1 回の終わりで 1 度だけ `plan-comment` を打つ |
 | I9 | 検査の記録 | refactor のステップの `metrics` に `unconfirmed` があれば、検査の件数に同じ値で写す | 無ければキーを作らない（古い記録と区別する） |
 
@@ -83,7 +83,7 @@ E10 は駆動の 3 つの結果の出口（done・stopped・pause）で、結果
 | --- | --- | --- |
 | リファクタリング計画のコメント | cross-refactoring が対象の Pull Request に 1 件だけ置き、結果の出口のたびに同じものを編集するリファクタリング計画の記録 | 追加（`ndf-cross-refactoring`。要求で追加済み） |
 | 結果の出口 | リファクタリング計画ができた後に、cross-refactoring のスクリプトがその時点の結果を確定させて終了コードを返す地点 | 追加（`ndf-cross-refactoring`。要求で追加済み） |
-| 未確認 | 取り消されずに残ったが、最終ゲートが `passed` になっていない改善項目の状態。採用とは数えない | 意味の変更（`ndf-cross-refactoring`。範囲テストで検証済みの項目に限らず、取り消されていない項目すべてにする） |
+| 未確認 | 取り消しにも見送りにもならずに残ったが、最終ゲートが `passed` になっていない改善項目の状態。採用とは数えない | 意味の変更（`ndf-cross-refactoring`。範囲テストで検証済みの項目に限らず、取り消しでも見送りでもない項目すべてにする） |
 | プランの外の取り消し | スクリプトが終わった後に、conductor が改善項目のコミットを `git revert` で取り消すこと | 追加（`ndf-cross-refactoring`。要求で追加済み） |
 | 公開の結果 | 最後に試みた head ブランチへの push の結果（通った地点の SHA か、落ちた理由）。状態ファイルの `publication` に残す | 追加（`ndf-cross-refactoring`） |
 | 未公開の改善項目 | 手元の HEAD が、公開した地点から到達できないコミットを持つこと。結果 JSON の `metrics.unpublished` | 追加（`ndf-cross-refactoring`） |
@@ -258,13 +258,22 @@ classDiagram
 | 項目 | 書くこと |
 | --- | --- |
 | 名前 | `python3 scripts/refactor.py plan-comment <PR> [--scan-reverts]` |
-| 入力 | `<PR>`（実行の ID。cross-refactoring の実行の ID は対象の PR の番号である）。`--scan-reverts` を付けると、origin の head ブランチからプランの外の取り消しを読んでから書き直す |
+| 入力 | `<PR>`（実行の ID。cross-refactoring の実行の ID は対象の PR の番号である）。`--scan-reverts` を付けると、origin の head ブランチからプランの外の取り消しと、その取り消しの取り消しを読んでから書き直す |
 | 状態ファイルの探し方 | `CROSS_REFACTORING_TMP_DIR` → 現在地の `.cross_refactoring/` → 既定の worktree の置き場（`<既定の根>/<origin の owner/repo>/rf<PR>/work/.cross_refactoring/`）の順 |
-| 出力（標準出力の KEY=VALUE） | `PLAN_COMMENT=updated\|created\|skipped\|failed`・`UNPUBLISHED=0\|1`（HEAD を読めなければ空）・`PLAN_URL=<URL>`（あれば）。`--scan-reverts` では `REVERTED_OUTSIDE=<項目 ID の空白区切り>` も出す |
+| 出力（標準出力の KEY=VALUE） | `PLAN_COMMENT=updated\|created\|skipped\|failed`・`UNPUBLISHED=0\|1`（HEAD を読めなければ空）・`PLAN_URL=<URL>`（あれば）。`--scan-reverts` では `REVERTED_OUTSIDE=<項目 ID の空白区切り>`（今回取り消しにした項目）と `RESTORED_OUTSIDE=<項目 ID の空白区切り>`（今回元の状態へ戻した項目）も出す |
 | 失敗の形 | 0 = 書き直した・書く対象が無い（`skipped`。I3）／ 1 = 投稿・編集に失敗した（`failed`）／ 4 = 状態ファイルが無い・`--scan-reverts` で origin を取り込めない（コメントも状態も変えない） |
 | 互換性 | 新しい子コマンドで、既存の子コマンドの引数と終了コードは変わらない |
 
-`--scan-reverts` の手順: work の worktree で `git fetch origin <head_branch>` → `git log --format=%H%x00%B plan.base_sha..FETCH_HEAD` を古い順に読む → 取り消されたままの SHA の集合を作る（I7）→ 実装コミット（`commits.implement`）がその集合にある取り消されていない項目を `ledger.mark_dropped(item, "プランの外で取り消した（<取り消しの SHA の先頭 12 字>）")` で取り消しにする → `publication` を `observed`・`sha=FETCH_HEAD` にする → 保存して書き直す。
+`--scan-reverts` の手順: work の worktree で `git fetch origin <head_branch>` → `git log --format=%H%x00%B plan.base_sha..FETCH_HEAD` を古い順に読む → 取り消されたままの SHA の集合を作る（I7）→ 実装コミット（`commits.implement`）がその集合にある取り消されていない項目を `ledger.mark_outside_revert(item, <取り消しの SHA>)` で取り消しにする → `outside_revert` を持つ項目のうち、実装コミットがその集合に無いものを `ledger.restore_outside_revert(item)` で元の状態へ戻す → `publication` を `observed`・`sha=FETCH_HEAD` にする → 保存して書き直す。
+
+プランの外の取り消しの印（I7）は、`ledger.py` の 2 つの関数だけが書く。
+
+| 関数 | すること |
+| --- | --- |
+| `mark_outside_revert(item, revert_sha)` | 項目の `outside_revert` に `{"revert": <取り消しの SHA>, "prior_status": <取り消す前の status>, "prior_failure_reason": <取り消す前の failure_reason。無ければ null>}` を残し、`mark_dropped(item, "プランの外で取り消した（<取り消しの SHA の先頭 12 字>）")` を呼ぶ |
+| `restore_outside_revert(item)` | `outside_revert` を持つ項目だけを対象に、`status` を `prior_status` へ、`failure_reason` を `prior_failure_reason` へ戻し（null なら消す）、`outside_revert` を消す。`reverted` から他の状態へ戻す遷移はここだけが持つ |
+
+`outside_revert` を持たない `reverted` の項目（検証・打ち切りの後にスクリプトが取り消した項目）は、走査の結果によらず戻さない。
 
 ### 結果 JSON（`drive.py`）
 
@@ -360,7 +369,8 @@ sequenceDiagram
         R-->>C: 4（状態もコメントも変えない）
     else 取り込めた
         R->>R: 取り消されたままの実装コミットの項目を取り消しにする
-        R-->>C: 0 か 1・REVERTED_OUTSIDE
+        R->>R: 取り消しが取り消された項目を outside_revert の元の状態へ戻す
+        R-->>C: 0 か 1・REVERTED_OUTSIDE・RESTORED_OUTSIDE
     end
 ```
 
@@ -378,11 +388,13 @@ stateDiagram-v2
     未確認 --> 採用: 次の最終ゲートが passed
     未確認 --> 取り消し: プランの外の取り消し（--scan-reverts）
     採用 --> 取り消し: プランの外の取り消し（--scan-reverts）
+    取り消し --> 未確認: プランの外の取り消しの取り消し（--scan-reverts。最終ゲートが passed でない）
+    取り消し --> 採用: プランの外の取り消しの取り消し（--scan-reverts。最終ゲートが passed で元が verified）
     取り消し --> [*]
     見送り --> [*]
 ```
 
-取り消しと見送りから他の状態へは移らない。採用から未確認へも移らない（最終ゲートの `passed` は戻らない）。
+見送りから他の状態へは移らない。取り消しから移るのは、プランの外の取り消しで取り消しにした項目（`outside_revert` を持つ）が、後の `--scan-reverts` で取り消しの取り消しを読んだときだけで、取り消す前の `status` へ戻り、表示の状態は `display_status` の規則で決まる（最終ゲートが `passed` で元が `verified` なら採用、`passed` でなければ未確認）。採用から未確認へは移らない（最終ゲートの `passed` は戻らない）。
 
 ## 非機能の実現方式
 
@@ -405,7 +417,7 @@ stateDiagram-v2
 
 ### 決定 2: コメント・結果 JSON・報告の件数を食い違わせないため、表示の状態と件数を `ledger` の 1 組の関数で決める
 
-今は結果 JSON（`drive.counts`）が最終ゲートの結論を見て採用を数え、コメント（`ITEM_STATUS_LABELS`）は見ずに `verified` を「採用」と書く。数え方が 2 か所にあるため片方だけが直った。`adoption_confirmed` を持つ `ledger` に `display_status` と `tally` を置き、3 つの書き手がそれを呼ぶ。最終ゲートが通っていないときは、`verified` に限らず取り消されていない項目をすべて「未確認」と表す。今の `metrics.unconfirmed` が取り消されていない項目すべてを数えているためで、こうすると件数の行と項目の状態の数が一致する。
+今は結果 JSON（`drive.counts`）が最終ゲートの結論を見て採用を数え、コメント（`ITEM_STATUS_LABELS`）は見ずに `verified` を「採用」と書く。数え方が 2 か所にあるため片方だけが直った。`adoption_confirmed` を持つ `ledger` に `display_status` と `tally` を置き、3 つの書き手がそれを呼ぶ。最終ゲートが通っていないときは、`verified` に限らず取り消しでも見送りでもない項目（`items.LIVE`）をすべて「未確認」と表す。今の `metrics.unconfirmed`（`ledger.remaining_count`）が `LIVE` の項目すべてを数えているためで、こうすると件数の行と項目の状態の数が一致する。
 
 `verified` だけを「未確認」にし、途中の状態（検証中など）を今の呼び名のまま残す案は採らない。冒頭の未確認の件数と、「未確認」と書かれた項目の数が食い違う。
 
@@ -466,7 +478,7 @@ push の失敗の出力を外へ出すのは cross-refactoring が最初だが�
 | AC7 | 単独起動で最終ゲート修正を打ち切った（`final-gate` が 1）状態から駆動が stopped で終わり、コメントの残った項目が「未確認」になる | stopped の書き直しを外すと落ちる |
 | AC8 | 案 A・案 B の後の書き直しで取り消した項目が「取り消し」になる。案 B の後に `final-gate` が 4 で止まったときも書き直される | `Stop` の経路で書き直さないと落ちる |
 | AC9・I3 | `plan` の無い状態ファイル（提案で止まった）で `plan-comment` を打つと、`gh` を 1 度も呼ばず `skipped` で 0 を返す。`plan` のある状態で `launch-cli.sh` の失敗で止めた駆動も書き直す | `plan` を見ずに投稿すると落ちる。駆動の外側の `Stop` だけ書き直さないと落ちる |
-| AC10・I7 | 項目のコミットを `git revert` して origin へ push した後、`plan-comment <PR> --scan-reverts` を現在地と環境変数なしで打つと、その項目が「取り消し」になる。取り消しを取り消したコミットがあれば元の項目は取り消しにならない | `This reverts commit` を読まない・取り消しの取り消しを数えない・既定の置き場を探さないと落ちる |
+| AC10・I7 | 項目のコミットを `git revert` して origin へ push した後、`plan-comment <PR> --scan-reverts` を現在地と環境変数なしで打つと、その項目が「取り消し」になる。取り消しを取り消したコミットがあれば元の項目は取り消しにならない。取り消しにした後にその取り消しを取り消して push し、もう一度 `--scan-reverts` を打つと、その項目が取り消す前の `status` へ戻り、件数の行も戻る | `This reverts commit` を読まない・取り消しの取り消しを数えない・`outside_revert` から元の状態へ戻さない・既定の置き場を探さないと落ちる |
 | AC10 | origin を取り込めない（`git fetch` が失敗）ときは 4 で終わり、状態ファイルと `gh` の呼び出しが変わらない | 取り込めないまま書き直すと落ちる |
 | AC11 | push が落ちた実行の結果 JSON が `adopted` 0・`unconfirmed` N・`unpublished` 真を持つ。push が通った後に HEAD が進んでいなければ `unpublished` 偽 | `unpublished` を出さない・公開した地点ではなく `plan.base_sha` と比べ続けると落ちる |
 | AC12・I9 | 5 本の形（`adopted` 0・`unconfirmed` N）の検査のプランの state.json から `findings_of` が `applied` 0 と `unconfirmed` N を返す。`unconfirmed` の無い state.json からはキーが出ない | `unconfirmed` を写さない・無いときに 0 を作ると落ちる |
