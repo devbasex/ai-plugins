@@ -235,7 +235,10 @@ def failing_in(
     return _failing_in(RerunContext(strategy, timeout, log_dir, run, started), work, ids, label)
 
 
-def _failing_in(ctx: RerunContext, work: str, ids: list[str], label: str) -> tuple[list[str], bool, bool]:
+def _failing_in(
+    ctx: RerunContext, work: str, ids: list[str], label: str, texts: Optional[dict[str, str]] = None
+) -> tuple[list[str], bool, bool]:
+    """`texts` を渡せば、まだ落ちている ID の JUnit の本文をそこへ足す（原因の項目の手がかり。#1649）。"""
     strategy = ctx.strategy
     still: list[str] = []
     readable = True
@@ -247,6 +250,8 @@ def _failing_in(ctx: RerunContext, work: str, ids: list[str], label: str) -> tup
         code, timed_out = run_within(ctx.timeout, ctx.started, lambda left, command=command, log=log: ctx.run(command, work, left, log))
         if not timed_out and code == 0:
             continue
+        if texts is not None and suite.junit:
+            texts.update(junit.read_failure_texts(pathlib.Path(work) / suite.junit, tracked) or {})
         found, _ = read_junit(work, ts.Strategy(strategy.name, strategy.source, [suite]), tracked)
         cut = cut or timed_out
         if timed_out or found is None:
@@ -334,7 +339,8 @@ def classify(
     known = set(existing_failures or [])
     # 上限 `timeout` は走らせ直しと着手前の HEAD の再実行の全体で 1 つ
     ctx = RerunContext(strategy, timeout, log_dir, run, time.monotonic())
-    still, _, _ = _failing_in(ctx, work, failed, "rerun")
+    texts: dict[str, str] = {}
+    still, _, _ = _failing_in(ctx, work, failed, "rerun", texts)
     flaky = [i for i in failed if i not in still]
     at_base = [i for i in still if i in known]
     unknown = [i for i in still if i not in known]
@@ -360,6 +366,8 @@ def classify(
         "fallback_reason": None,
         "baseline_head": base_sha,
         "rerun_commands": rerun_commands(strategy, list(by_file(caused))) if caused else [],
+        # 変更起因の ID ごとの、今の HEAD の走らせ直しの JUnit の本文（原因の項目を決める手がかり 1。#1649）
+        "caused_output": {i: texts[i] for i in caused if i in texts},
     }
 
 
