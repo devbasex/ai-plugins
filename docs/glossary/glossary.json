@@ -3065,23 +3065,20 @@
       "term": "ジョブの識別子",
       "context": "ndf-workflow",
       "meaning": "継続的統合のジョブを指す `<ワークフローのファイルのパス>#<job id>`。`#<job id>` を省くとそのファイルのジョブすべてを指す。宣言の suites[].ci_jobs と test.ci_exempt が使う",
-      "source": "",
-      "pending_source": "issues/issue-464-design.md"
+      "source": "docs/specifications/cross-refactoring-lint-suite-and-ci-coverage.md"
     },
     {
       "term": "除外したジョブ",
       "context": "ndf-workflow",
       "meaning": "手元の検証で走らせないと宣言したジョブ。宣言の test.ci_exempt に理由と組で書く",
       "code": "ci_exempt",
-      "source": "",
-      "pending_source": "issues/issue-464-design.md"
+      "source": "docs/specifications/cross-refactoring-lint-suite-and-ci-coverage.md"
     },
     {
       "term": "宣言に無いジョブ",
       "context": "ndf-cross-refactoring",
       "meaning": "継続的統合のジョブのうち、どの suite の ci_jobs にも除外したジョブにも当たらないもの。cross-refactoring の init が知らせ、状態ファイルの ci_coverage.undeclared に残す",
-      "source": "",
-      "pending_source": "issues/issue-464-design.md"
+      "source": "docs/specifications/cross-refactoring-lint-suite-and-ci-coverage.md"
     }
   ]
 }

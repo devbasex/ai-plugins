@@ -42,5 +42,6 @@
 | [ndf-ubiquitous-language.md](ndf-ubiquitous-language.md) | プロジェクトのユビキタス言語（用語集の設定と形・`glossary.py` の 6 つの副命令と用語チェックの規則・設計の工程の入口の検査・設計のフェーズの用語のステップ・レビューのモデルレビューと詳細レビュー・`spec-copy.py` と課題の本文のコピー・確定の時点で正本を移す `pending_source`）。手順は `requirements-design` / `design` の SKILL.md と `references/glossary-format.md` が正 |
 | [cross-review-reopen-and-hook-deadline.md](cross-review-reopen-and-hook-deadline.md) | `final` が確定したレビューに `init` でラウンドを足す判定（`drive.py` の head の比較）、確定した `final` での振動検知の飛ばし方、`record-fix` の確かめ方、PreToolUse・userPromptSubmit の hook の 3.5 秒の締め切り。手順は `cross-review` の `docs/01-state-and-review.md`・`docs/04-contracts.md` が正 |
 | [ndf-backlog-refinement-stage.md](ndf-backlog-refinement-stage.md) | 棚卸しを工程表の最後の行（仕上げのフェーズ）として通すこと、候補の上限（`upkeep.py candidates` の `--limit` → `candidate_limit` → 既定 10）、`apply` の書き込む先の照合、スプリントの終わりのプランの `refine` ステップと、それぞれの理由。手順は `backlog-refinement` の SKILL.md と `development-workflow` の `references/agent-layers.md` が正 |
+| [cross-refactoring-lint-suite-and-ci-coverage.md](cross-refactoring-lint-suite-and-ci-coverage.md) | cross-refactoring の整形・静的解析の suite（このリポジトリの lint の suite と `check-lint.sh` の範囲の契約）と、`init` が継続的統合のジョブを宣言（`ci_jobs`・`test.ci_exempt`）と突き合わせて宣言に無いジョブを知らせること（`ci_coverage`）、決定の理由。手順と宣言の書き方は `cross-refactoring` の `SKILL.md` が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
