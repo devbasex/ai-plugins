@@ -209,6 +209,19 @@ def measure_ci(tree: Tree, repo: str | None, head: str | None, deadline: float) 
     return out
 
 
+def _measure_workflow(gh: Gh, path: str, static_jobs: int, run: dict | None) -> tuple[dict, dict | None]:
+    """ワークフロー 1 本の行（パス・job 数・壁時計）と、その run のテストの step の所要。run が無ければ静的な job 数だけ。"""
+    entry = {"path": path, "jobs": static_jobs}
+    if not run:
+        return entry, None
+    wall = _span(run.get("run_started_at"), run.get("updated_at"))
+    if wall is not None:
+        entry["wall_seconds"] = wall
+    jobs = (gh.get(f"repos/{gh.repo}/actions/runs/{run['id']}/jobs?per_page=100") or {}).get("jobs") or []
+    entry["jobs"] = max(entry["jobs"], len(jobs))
+    return entry, _steps_of(jobs, run)
+
+
 def _measure_runs(gh: Gh, jobs_static: dict[str, int], head: str | None) -> tuple[dict, list[dict]]:
     runs = (gh.get(f"repos/{gh.repo}/actions/runs?status=success&per_page=50") or {}).get("workflow_runs") or []
     latest: dict[str, dict] = {}
@@ -216,17 +229,11 @@ def _measure_runs(gh: Gh, jobs_static: dict[str, int], head: str | None) -> tupl
         latest.setdefault(run.get("path") or "", run)
     workflows, junit, steps = [], None, None
     for path in sorted(set(jobs_static) | {p for p in latest if p}):
-        entry = {"path": path, "jobs": jobs_static.get(path, 0)}
         run = latest.get(path)
+        entry, found = _measure_workflow(gh, path, jobs_static.get(path, 0), run)
+        if found and found["seconds"] > (steps or {}).get("seconds", 0):
+            steps = found
         if run:
-            wall = _span(run.get("run_started_at"), run.get("updated_at"))
-            if wall is not None:
-                entry["wall_seconds"] = wall
-            jobs = (gh.get(f"repos/{gh.repo}/actions/runs/{run['id']}/jobs?per_page=100") or {}).get("jobs") or []
-            entry["jobs"] = max(entry["jobs"], len(jobs))
-            found = _steps_of(jobs, run)
-            if found and found["seconds"] > (steps or {}).get("seconds", 0):
-                steps = found
             junit = junit or _junit_of_run(gh, run)
         workflows.append(entry)
     ci = {"provider": "github-actions" if workflows else "none", "workflows": workflows, "required_checks": _required_checks(gh, head)}
