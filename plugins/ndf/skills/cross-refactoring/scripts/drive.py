@@ -150,6 +150,10 @@ class Drive:
         """耐久の記録の実行の鍵の元。状態の置き場（求まらなければ作業ディレクトリと PR）。"""
         return durable_identity(self.known_tmp(), self.pr)
 
+    def has_state(self) -> bool:
+        """状態ファイルを読める段階か（init が状態の置き場と ID を返した後か）。"""
+        return "TMP_DIR" in self.v and "ID" in self.v
+
     def state_file(self) -> Path:
         from refactor_lib import paths
 
@@ -182,7 +186,7 @@ class Drive:
 
         **終了コードで分岐しない**（I5）。投稿に失敗しても結果 JSON と終了コードは変えず、1 行だけ残す。
         """
-        if "TMP_DIR" not in self.v or "ID" not in self.v:
+        if not self.has_state():
             return
         rc, out = self.call([sys.executable, str(HERE / "refactor.py"), "plan-comment", self.v["ID"]])
         self.v.update({k: v for k, v in parse_vars(out).items() if k in ("PLAN_COMMENT", "UNPUBLISHED", "PLAN_URL")})
@@ -353,7 +357,7 @@ class Drive:
     def stopped(self, e: Stop) -> dict:
         if not self.comment_done:
             self.refresh_plan_comment()
-        return dp.stopped(TOOL, str(e), self.counts() if "TMP_DIR" in self.v and "ID" in self.v else {}, e.code)
+        return dp.stopped(TOOL, str(e), self.counts() if self.has_state() else {}, e.code)
 
     def review_file(self) -> Path:
         return self.tmp / f"drive-rf{self.v['ID']}-cross-review.json"
@@ -448,7 +452,7 @@ def refactor_drive(pr: int, init_args: list[str]) -> dict:
             result = d.done()
     except Stop as e:
         result = d.stopped(e)
-    return {"result": result, "state_file": str(d.state_file()) if "TMP_DIR" in d.v and "ID" in d.v else ""}
+    return {"result": result, "state_file": str(d.state_file()) if d.has_state() else ""}
 
 
 def main(argv: list[str] | None = None) -> None:
