@@ -3082,6 +3082,13 @@
       "meaning": "継続的統合のジョブのうち、どの suite の ci_jobs にも除外したジョブにも当たらないもの。cross-refactoring の init が知らせ、状態ファイルの ci_coverage.undeclared に残す",
       "source": "",
       "pending_source": "issues/issue-464-design.md"
+    },
+    {
+      "term": "依存の欠け",
+      "context": "ndf-workflow",
+      "meaning": "手順のスクリプトが deps.require で外部パッケージを用意できずに止まったこと。終了コード 69 で終わり、status は stopped。「飛ばしてよい」とも「前提が無い（3）」とも読まない",
+      "source": "",
+      "pending_source": "issues/issue-1654-design.md"
     }
   ]
 }
