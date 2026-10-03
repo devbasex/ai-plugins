@@ -585,7 +585,7 @@
     {
       "term": "棚卸し",
       "context": "ndf-workflow",
-      "meaning": "既存の課題の本文・マイルストーン・ラベルを現状に合わせ、着手の順位を決め直すこと。スクラムのバックログリファインメントに当たる",
+      "meaning": "既存の課題の本文・マイルストーン・ラベルを現状に合わせ、着手の順位を決め直すこと。スクラムのバックログリファインメントに当たる。工程表の行名（進捗記録の stage の値）でもある",
       "deprecated": [
         "手入れ"
       ],
@@ -2611,6 +2611,18 @@
       "pending_source": "issues/issue-1429-design.md"
     },
     {
+      "term": "候補の上限",
+      "context": "ndf-issue-upkeep",
+      "meaning": "1 回の棚卸しで区分を決める候補の数の上限。candidates の --limit、.ndf/backlog.json の candidate_limit、既定 10 の順に決まる",
+      "source": "plugins/ndf/skills/backlog-refinement/SKILL.md"
+    },
+    {
+      "term": "持ち越し",
+      "context": "ndf-issue-upkeep",
+      "meaning": "候補の上限を超えたため、その回で区分を決めずに残した候補。candidates の metrics.deferred に番号だけが載る",
+      "source": "plugins/ndf/skills/backlog-refinement/SKILL.md"
+    },
+    {
       "term": "残りの量",
       "context": "ndf-relay",
       "meaning": "登録済みアカウントが上限に達するまでに使える量の見積り。枠ごとの「枠の大きさ ×（1 − 使用率 / 100）」の最小（USD 換算）。保存せず、選ぶ・一覧を出すたびに求める",
@@ -2982,6 +2994,20 @@
       "meaning": "NDF の hook が自分で決める 1 回の実行の時間の上限（3.5 秒）。hook の上限より短く、過ぎたら残りの判定を飛ばして通し、標準エラーへ 1 行残す",
       "source": "",
       "pending_source": "issues/issue-1340-design.md"
+    },
+    {
+      "term": "適用範囲",
+      "context": "ndf-workflow",
+      "meaning": "設計した変更が働く範囲。このリポジトリだけで働くのか配布先のリポジトリでも働くのか、プロジェクトごとに違うものを設定か引数のどちらで受けるのか。設計文書の節と承認資料の行に書く",
+      "source": "",
+      "pending_source": "issues/issue-1289-requirements.md"
+    },
+    {
+      "term": "あるべき姿の根拠",
+      "context": "ndf-workflow",
+      "meaning": "変更後の形が適切だと言える根拠。外部の一次情報・実測・利用者の指示の原文のどれか。設計文書の節と承認資料の行に書き、無ければ「無し（理由）」。MVV の根拠の項目とは別のもの",
+      "source": "",
+      "pending_source": "issues/issue-1289-requirements.md"
     }
   ]
 }

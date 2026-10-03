@@ -50,6 +50,9 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
     branch = f"design/issue-{n}"
     glossary_check = f"{GLOSSARY_PY} check --diff origin/{shlex.quote(a.base)} --root ."
     copy = requirements_path(n)
+    doc = f"issues/issue-{n}-design.md"  # 設計文書の頭のファイル（#1289 の決定 2）。題はこの H1 から作る
+    # 設計を送った後に題を H1 へ合わせ直す（レビューの直しで H1 が変わる。#1289 の決定 9）
+    push = f"{PUSH_DESIGN} && python3 {shlex.quote(str(SELF))} sync-title --pr {{pr}} --doc {doc}"
     return {
         "フェーズ": "設計",
         "課題": [n],
@@ -112,7 +115,8 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
                 "type": "pr",
                 "stage": "ドキュメントレビュー",
                 "base": a.base,
-                "title": f"設計: #{n}",
+                "title_doc": doc,
+                "title": f"設計: #{n}",  # H1 を読めないときの題
                 "summary": f"#{n} の設計（スプリント {a.name}）",
                 "append": [DESIGN_GLOSSARY_NOTE],
                 # 本文の「決めたこと」を作る時点で入れる。作った後に書き直すと CI を 2 度起動する
@@ -183,7 +187,7 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
                 "on_fail": "push-glossary",
                 "next": "push-glossary",
             },
-            {"id": "push-glossary", "type": "run", "stage": "ドキュメントレビュー", "timeout": 300, "cmd": PUSH_DESIGN, "next": "gate"},
+            {"id": "push-glossary", "type": "run", "stage": "ドキュメントレビュー", "timeout": 300, "cmd": push, "next": "gate"},
             {
                 "id": "gate",
                 "type": "judge",
@@ -353,13 +357,15 @@ def plan_mvv_design(a, n: int, repo: str) -> dict:
     state = shlex.quote(str(Path(a.state).resolve()))
     note = MVV_NOTE
     # 用語チェックの当たりが直し切れずに残ったら、mvv の判定へ渡さず関門 1 の judge（gate）へ回す
+    push = ""
     for s in plan["steps"]:
         if s["id"] == "push-glossary":
             s["next"] = "mvv"
+            push = s["cmd"]  # 送りと題の合わせ直しを push-glossary と同じにする（#1289 の決定 9）
         elif s["id"] == "glossary-recheck":
             s["on_fail"] = "push-glossary-gate"
     plan["steps"] += [
-        {"id": "push-glossary-gate", "type": "run", "stage": "ドキュメントレビュー", "timeout": 300, "cmd": PUSH_DESIGN, "next": "gate"},
+        {"id": "push-glossary-gate", "type": "run", "stage": "ドキュメントレビュー", "timeout": 300, "cmd": push, "next": "gate"},
         {
             "id": "mvv",
             "type": "run",

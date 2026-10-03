@@ -136,7 +136,7 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 
 | 項目 | 決めること |
 | --- | --- |
-| 目的 | 何のための変更か。達成したい状態 |
+| 目的 | 何のための変更か。達成したい状態。設計文書の「目的」の章の出所になる（[design-template.md の「承認する人が読む欄」](../design/references/design-template.md#承認する人が読む欄)） |
 | 成功条件 | 受け入れ条件（4 で作ったもの） |
 | 検証手段 | 起動・テスト・静的解析・型検査をどのコマンドで行うか。自動化できない条件は手動確認の手順。「人が見る」条件は、擬似端末などで確かめる振る舞いと人が見る見た目に分ける（acceptance-criteria.md） |
 | プロジェクト構造 | 変更を置く場所と、置いてはいけない場所 |

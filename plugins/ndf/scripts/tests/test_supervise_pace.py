@@ -319,6 +319,15 @@ def test_close_runs_spec_close_and_retro_once_each_in_order(tmp_path):
     cmd = waves["最終の検査"]["command"]
     assert cmd.count("--then") == 3
     assert_transitions_exist(close)
+    # 棚卸しは振り返りの後の別のステップ（#842）。振り返りのプロンプトは棚卸しを含まない
+    steps = steps_of(close)
+    assert steps["retro"]["next"] == "refine" and "backlog-refinement" not in steps["retro"]["prompt"]
+    refine = steps["refine"]
+    assert refine["stage"] == "棚卸し" and refine["type"] == "work" and refine["timeout"] > 0
+    assert refine["next"] == "end" and stages.index("振り返り") < stages.index("棚卸し")
+    # 無人で通す: 上限を上げて打ち直さない・終了コード 10 で承認を求めない・記録のリポジトリの外へ書かない
+    for words in ("--limit` を上げて打ち直さず", "承認を求めず", "`--repo` を渡さない", "親 issue の起票"):
+        assert words in refine["prompt"]
 
 
 # ---------- new release --mvv・new impl --escape-of ----------
