@@ -562,7 +562,7 @@ def _resume_if_pending(args: argparse.Namespace, inputs: _InitInputs, prep: _Ini
         return False
     if state.get("phase") == "done":
         return False
-    _resume(prep.state_file, state, args, inputs.model_spec, inputs.include, inputs.exclude, prep.is_own_pr)
+    _resume(prep.state_file, state, args, inputs, prep.is_own_pr)
     return True
 
 
@@ -703,9 +703,7 @@ def _resume(
     state_file: pathlib.Path,
     state: dict[str, Any],
     args: argparse.Namespace,
-    model_spec: dict[str, Optional[str]],
-    include: Optional[list[str]],
-    exclude: Optional[list[str]],
+    inputs: _InitInputs,
     is_own_pr: bool,
 ) -> None:
     """前回中断した状態から再開する（#727 / #648 の決定 13〜16、#933 の「再開」）。
@@ -720,13 +718,13 @@ def _resume(
     budget_spec = RESUME_BUDGET_REPLACE if _before_plan(state) else RESUME_BUDGET_NOTIFY
     for line in statefile.apply_resume_args(state, args, budget_spec):
         info(line)
-    view, given = _notify_view(state, args, model_spec)
+    view, given = _notify_view(state, args, inputs.model_spec)
     for line in statefile.apply_resume_args(view, given, RESUME_NOTIFY_FIELDS):
         info(line)
 
     require_all = getattr(args, "require_all", None)
-    if include is not None or exclude is not None or require_all is not None or runtime_decl.policy_changed(state):
-        _rebuild_participants(state, include, exclude, require_all)
+    if inputs.include is not None or inputs.exclude is not None or require_all is not None or runtime_decl.policy_changed(state):
+        _rebuild_participants(state, inputs.include, inputs.exclude, require_all)
         _recheck_implementer(state)
 
     _apply_post_event(state, is_own_pr)
