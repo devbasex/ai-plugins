@@ -158,10 +158,12 @@ graph LR
 
 ### 打ち方（`SKILL.md`）
 
-「前提」の assess と「実行」の drive は、対象のリポジトリ（またはその worktree）の中で打つ。シェルの変数は呼び出しをまたいで残らないため、次の各ブロックを 1 回の呼び出しとし、どの呼び出しも先頭の入口の行（`RF=` / `LIB=` / `RC=`）を打ち直してから本体の行を打つ。`$R` の決め方は `development-workflow/references/scripts-lookup.md` を指す（`fix` の `SKILL.md` と同じ書き方）。
+「前提」の assess と「実行」の drive は、対象のリポジトリ（またはその worktree）の中で打つ。シェルの変数は呼び出しをまたいで残らないため、次の各ブロックを 1 回の呼び出しとし、どの呼び出しも先頭で `$R` を決め直し、入口の行（`RF=` / `LIB=` / `RC=`）を打ち直してから本体の行を打つ。`$R` もシェルの変数で、Codex / Kiro / agy では `${CLAUDE_PLUGIN_ROOT}` が置き換わらないため、呼び出しごとに `development-workflow/references/scripts-lookup.md` の「入口を探すコマンド」の for 文を打ち、続けて `[ -n "$R" ] || exit 3` で止める。for 文の正本は scripts-lookup.md に置き、`SKILL.md` の各ブロックの 1 行目はそこを指す（下のブロックの `<入口を探すコマンド>` の行）。
 
 ```bash
 # 呼び出し 1: assess（「前提」）
+<入口を探すコマンド>   # scripts-lookup.md の for 文。$R を決める
+[ -n "$R" ] || exit 3
 RF=$(bash "$R/scripts/resolve.sh" scripts cross-refactoring) || exit 3
 BASE="<開発の起点>"   # worktree-setup.sh check の「開発の起点:」の行の名前
 python3 "$RF/refactor.py" assess --base "origin/$BASE"; echo "exit=$?"
@@ -169,12 +171,16 @@ python3 "$RF/refactor.py" assess --base "origin/$BASE"; echo "exit=$?"
 
 ```bash
 # 呼び出し 2（Claude Code）: drive を run_in_background で起動し、完了通知を 1 回受ける
+<入口を探すコマンド>   # scripts-lookup.md の for 文。$R を決める
+[ -n "$R" ] || exit 3
 RF=$(bash "$R/scripts/resolve.sh" scripts cross-refactoring) || exit 3
 python3 "$RF/drive.py" <PR> --scope <範囲...> [「引数」の表のうち値のあるもの]
 ```
 
 ```bash
 # 呼び出し 2（Codex / Kiro / agy）: drive を背景に起動する
+<入口を探すコマンド>   # scripts-lookup.md の for 文。$R を決める
+[ -n "$R" ] || exit 3
 RF=$(bash "$R/scripts/resolve.sh" scripts cross-refactoring) || exit 3
 LIB=$(bash "$R/scripts/resolve.sh" scripts)/lib || exit 3
 RC="${TMPDIR:-/tmp}/cross-refactoring-drive-pr<PR>.rc"
@@ -183,6 +189,8 @@ bash "$LIB/bg-wait.sh" run "$RC" -- python3 "$RF/drive.py" <PR> --scope <範囲.
 
 ```bash
 # 呼び出し 3 以降（Codex / Kiro / agy）: 待ち。124 が返るあいだ、この呼び出しを別の呼び出しとして打ち直す
+<入口を探すコマンド>   # scripts-lookup.md の for 文。$R を決める
+[ -n "$R" ] || exit 3
 LIB=$(bash "$R/scripts/resolve.sh" scripts)/lib || exit 3
 RC="${TMPDIR:-/tmp}/cross-refactoring-drive-pr<PR>.rc"
 bash "$LIB/bg-wait.sh" wait "$RC"   # 1 回 540 秒以内。124 = まだ終わっていない
