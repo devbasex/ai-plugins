@@ -162,16 +162,14 @@ class Drive:
         s = self.state()
         items = s.get("items") or []
         t = _ledger_module().tally(s).as_metrics()
+        # unconfirmed は結果 JSON の末尾側に置く（キーの並びを変えない）
+        rest = {"unconfirmed": t.pop("unconfirmed")} if "unconfirmed" in t else {}
         c = {
-            "items": t["items"],
-            "adopted": t["adopted"],
-            "reverted": t["reverted"],
-            "deferred": t["deferred"],
+            **t,
             "fix_rounds": sum(int(it.get("fix_count") or 0) for it in items),
             "final_gate": self.v.get("FINAL_GATE") or (s.get("final_gate") or {}).get("status"),
         }
-        if "unconfirmed" in t:
-            c["unconfirmed"] = t["unconfirmed"]
+        c.update(rest)
         if "PLAN_COMMENT" in self.v:
             # 未公開の改善項目があるか（決定 6）。plan-comment が判定できなければ null
             c["unpublished"] = {"1": True, "0": False}.get(self.v.get("UNPUBLISHED") or "")
