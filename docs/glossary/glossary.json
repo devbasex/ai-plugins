@@ -3082,6 +3082,31 @@
       "meaning": "継続的統合のジョブのうち、どの suite の ci_jobs にも除外したジョブにも当たらないもの。cross-refactoring の init が知らせ、状態ファイルの ci_coverage.undeclared に残す",
       "source": "",
       "pending_source": "issues/issue-464-design.md"
+    },
+    {
+      "term": "単独起動",
+      "context": "ndf-cross-refactoring",
+      "meaning": "--workflow-step を付けずに呼んだ cross-refactoring の起動。最終ゲートが cross-review の承認収束になる",
+      "source": ""
+    },
+    {
+      "term": "対象のリポジトリ",
+      "context": "ndf-cross-refactoring",
+      "meaning": "cross-refactoring が Pull Request を取り、作業ディレクトリを作るリポジトリ。打った場所（現在のディレクトリ）が属する git の worktree の根で決まる",
+      "source": ""
+    },
+    {
+      "term": "最終ステータス",
+      "context": "ndf-cross-review",
+      "meaning": "cross-review の収束の終わり方を表す 1 語（approved / unverified / final の値 / unknown）。loop_drive.review_status が状態ファイルから決める",
+      "code": "review_status",
+      "source": ""
+    },
+    {
+      "term": "回答ファイル",
+      "context": "ndf-cross-review",
+      "meaning": "駆動が止まりで示す items[0].result_file。止まりへの答えを書き、同じコマンドの打ち直しが読む。担当 CLI の結果ファイルとは別",
+      "source": ""
     }
   ]
 }
