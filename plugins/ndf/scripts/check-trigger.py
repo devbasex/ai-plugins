@@ -176,11 +176,7 @@ def slug_of(root: Path) -> str:
 
 
 # 置き場の候補: (環境変数, その値からの置き場)。設定されている最初の環境変数で決める
-STATE_BASES = (
-    ("CLAUDE_PLUGIN_DATA", Path),
-    ("XDG_STATE_HOME", lambda v: Path(v) / "ndf"),
-    ("HOME", lambda v: Path(v) / ".local" / "state" / "ndf"),
-)
+STATE_BASES = (("CLAUDE_PLUGIN_DATA", Path), ("XDG_STATE_HOME", lambda v: Path(v, "ndf")), ("HOME", lambda v: Path(v, ".local/state/ndf")))
 
 
 def state_base() -> Path:
