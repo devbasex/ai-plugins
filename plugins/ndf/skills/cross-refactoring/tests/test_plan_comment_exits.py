@@ -160,7 +160,11 @@ def test_the_metrics_keep_their_keys_and_values_after_a_passed_final_gate(refact
         (None, None, "まだ push していない"),
         ({"status": "pushed", "sha": "a" * 40}, False, "aaaaaaaaaaaa を push した"),
         ({"status": "pushed", "sha": "a" * 40}, True, "その後の手元のコミットは未公開"),
-        ({"status": "refused", "reason": "pre-push: ruff format --check"}, True, "push できなかった（pre-push: ruff format --check）。未公開の改善項目がある"),
+        (
+            {"status": "refused", "reason": "pre-push: ruff format --check"},
+            True,
+            "push できなかった（pre-push: ruff format --check）。未公開の改善項目がある",
+        ),
         ({"status": "observed", "sha": "b" * 40, "head": HEAD_BRANCH}, False, f"origin の {HEAD_BRANCH} は bbbbbbbbbbbb"),
     ],
 )
