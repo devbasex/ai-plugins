@@ -3037,15 +3037,29 @@
     {
       "term": "未確認",
       "context": "ndf-cross-refactoring",
-      "meaning": "範囲テストで検証済み（verified）だが、最終ゲートが passed になっていない改善項目の状態。採用とは数えない",
+      "meaning": "取り消されずに残ったが、最終ゲートが passed になっていない改善項目の状態。採用とは数えない",
       "code": "unconfirmed",
-      "pending_source": "issues/issue-1692-requirements.md"
+      "pending_source": "issues/issue-1692-design.md"
     },
     {
       "term": "プランの外の取り消し",
       "context": "ndf-cross-refactoring",
       "meaning": "cross-refactoring のスクリプトが終わった後に、conductor が改善項目のコミットを git revert で取り消すこと",
       "pending_source": "issues/issue-1692-requirements.md"
+    },
+    {
+      "term": "公開の結果",
+      "context": "ndf-cross-refactoring",
+      "meaning": "最後に試みた head ブランチへの push の結果（通った地点の SHA か、落ちた理由）。状態ファイルの publication に残す",
+      "code": "publication",
+      "pending_source": "issues/issue-1692-design.md"
+    },
+    {
+      "term": "未公開の改善項目",
+      "context": "ndf-cross-refactoring",
+      "meaning": "手元の HEAD が、公開した地点から到達できないコミットを持つこと。結果 JSON の metrics.unpublished",
+      "code": "unpublished",
+      "pending_source": "issues/issue-1692-design.md"
     }
   ]
 }
