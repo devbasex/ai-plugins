@@ -223,18 +223,11 @@ def strategy_lines(state: dict[str, Any]) -> list[str]:
     return lines
 
 
-def format_plan(state: dict[str, Any], head: Optional[list[str]] = None) -> str:
-    """改修計画の本文を組み立てる。**同じ状態と `head` からは同じ本文が出る。**
-
-    冒頭に件数の行を置き、`head`（コメントの公開の行と書き直した時刻）を続ける。
-
-    提案の理由と手順は状態ファイルにしか残らず、そのディレクトリは差分から
-    除外される。Pull Request を読む側からは、なぜ直したのかも、どう直す改修計画
-    だったのかも見えない。ここで差分の中へ置く。
-    """
+def _plan_header_lines(state: dict[str, Any], head: Optional[list[str]]) -> list[str]:
+    """改修計画の冒頭（見出し・前書き・メタ情報のリスト）。"""
     baseline = state.get("baseline_test") or {}
     plan = state.get("plan") or {}
-    lines = [
+    return [
         f"# 改修計画 — {state['repo']} #{state['current_pr']}",
         "",
         "`/ndf:cross-refactoring` が提案し、改修計画し、適用した改善項目の記録である。",
@@ -249,10 +242,19 @@ def format_plan(state: dict[str, Any], head: Optional[list[str]] = None) -> str:
         f"- 既存失敗の件数: {existing_failures_line(baseline)}",
         f"- 想定最大時間: {state.get('budget_minutes')} 分 / 改修計画の時点で使えた時間: {plan.get('available_minutes', '—')} 分",
         f"- 実装担当: {state.get('implementer') or '—'}",
-        "",
-        "## 改善項目",
-        "",
     ]
+
+
+def format_plan(state: dict[str, Any], head: Optional[list[str]] = None) -> str:
+    """改修計画の本文を組み立てる。**同じ状態と `head` からは同じ本文が出る。**
+
+    冒頭に件数の行を置き、`head`（コメントの公開の行と書き直した時刻）を続ける。
+
+    提案の理由と手順は状態ファイルにしか残らず、そのディレクトリは差分から
+    除外される。Pull Request を読む側からは、なぜ直したのかも、どう直す改修計画
+    だったのかも見えない。ここで差分の中へ置く。
+    """
+    lines = [*_plan_header_lines(state, head), "", "## 改善項目", ""]
     items = state.get("items") or []
     if not items:
         lines.extend(["（採用した改善項目なし）", ""])
