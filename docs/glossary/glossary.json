@@ -3021,6 +3021,31 @@
       "meaning": "工程の 1 つとして起動した cross-refactoring が、最終ゲート修正を打ち切った後に、原因の項目を取り消すか（案 A）、着手前の木へ戻すコミットを積む（案 B）処理",
       "code": "stop_revert",
       "source": "docs/specifications/cross-refactoring-verify-and-final-gate.md"
+    },
+    {
+      "term": "リファクタリング計画のコメント",
+      "context": "ndf-cross-refactoring",
+      "meaning": "cross-refactoring が対象の Pull Request に 1 件だけ置き、結果の出口のたびに同じものを編集するリファクタリング計画の記録。目印 `<!-- cross-refactoring plan rf<ID> -->` で引き当てる",
+      "pending_source": "issues/issue-1692-requirements.md"
+    },
+    {
+      "term": "結果の出口",
+      "context": "ndf-cross-refactoring",
+      "meaning": "リファクタリング計画ができた後に、cross-refactoring のスクリプトがその時点の結果を確定させて終了コードを返す地点（push の成功と失敗・最終ゲートの判定・打ち切り・取り消し・中断・finalize）",
+      "pending_source": "issues/issue-1692-requirements.md"
+    },
+    {
+      "term": "未確認",
+      "context": "ndf-cross-refactoring",
+      "meaning": "範囲テストで検証済み（verified）だが、最終ゲートが passed になっていない改善項目の状態。採用とは数えない",
+      "code": "unconfirmed",
+      "pending_source": "issues/issue-1692-requirements.md"
+    },
+    {
+      "term": "プランの外の取り消し",
+      "context": "ndf-cross-refactoring",
+      "meaning": "cross-refactoring のスクリプトが終わった後に、conductor が改善項目のコミットを git revert で取り消すこと",
+      "pending_source": "issues/issue-1692-requirements.md"
     }
   ]
 }
