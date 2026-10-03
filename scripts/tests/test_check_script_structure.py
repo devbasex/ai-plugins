@@ -465,3 +465,83 @@ def test_durable_boundary_needs_a_workflow_not_only_the_missing_loop(tmp_path: P
     assert ("scripts/supervise_lib/engine.py", "") in {
         (v["path"].removeprefix("plugins/ndf/"), v["function"]) for v in structure.durable_boundary(tmp_path)
     }
+
+
+# ---------- ファイルの指定（#1668。項目の範囲テストの静的解析の suite） ----------
+
+
+def scoped_tree(root: Path) -> None:
+    """行数の違反 1 件と同じ名前の違反 1 組と、違反の無いファイルを持つ木。"""
+    put(root, "scripts/big.py", "x = 1\n" * 501)
+    put(root, "scripts/lib/participants.py", "def setup():\n    return 1\n")
+    put(root, "skills/x/scripts/setup.py", "def setup():\n    return 2\n")
+    put(root, "scripts/clean.py", "def clean():\n    return 3\n")
+
+
+def test_files_narrow_items_and_exit_code_to_the_given_files(tmp_path: Path):
+    scoped_tree(tmp_path)
+    code, r = run(tmp_path, [], "plugins/ndf/scripts/clean.py")
+    assert code == 0 and r["status"] == "ok" and r["items"] == []
+    assert r["metrics"]["targets"] == 1 and r["metrics"]["outside"] == 3
+    code, r = run(tmp_path, [], "plugins/ndf/scripts/big.py")
+    assert code == 1 and kinds(r) == {("lines", "plugins/ndf/scripts/big.py")}
+
+
+def test_same_name_counts_when_either_file_is_given(tmp_path: Path):
+    """#1634 の `participants.py` を指定すれば、ほかのファイルとの衝突が両側とも出る。"""
+    scoped_tree(tmp_path)
+    both = {
+        ("same-name", "plugins/ndf/scripts/lib/participants.py:setup"),
+        ("same-name", "plugins/ndf/skills/x/scripts/setup.py:setup"),
+    }
+    for given in ("plugins/ndf/scripts/lib/participants.py", "plugins/ndf/skills/x/scripts/setup.py"):
+        code, r = run(tmp_path, [], given)
+        assert code == 1 and kinds(r) == both
+
+
+def test_same_body_counts_when_the_other_file_is_given(tmp_path: Path):
+    put(tmp_path, "scripts/a.py", "def f():\n    return 1\n")
+    put(tmp_path, "scripts/b.py", "def g():\n    return 1\n")
+    code, r = run(tmp_path, [], str(tmp_path / "plugins/ndf/scripts/b.py"))
+    assert code == 1 and {k for k, _ in kinds(r)} == {"same-body"} and len(r["items"]) == 2
+
+
+def test_lines_over_the_allow_row_count_only_for_the_given_file(tmp_path: Path):
+    row = {"path": "plugins/ndf/scripts/big.py", "name": "", "kind": "lines", "reason": "分ける前", "lines": 600}
+    put(tmp_path, "scripts/big.py", "x = 1\n" * 601)
+    put(tmp_path, "scripts/clean.py", "x = 1\n")
+    assert run(tmp_path, [row], "plugins/ndf/scripts/clean.py")[0] == 0
+    code, r = run(tmp_path, [row], "plugins/ndf/scripts/big.py")
+    assert code == 1 and kinds(r) == {("lines", "plugins/ndf/scripts/big.py")}
+
+
+def test_allow_rows_count_by_their_path_or_their_file(tmp_path: Path):
+    """使われない例外の行は、行の path か、行のファイル自身を指定したときに数える。"""
+    row = {"path": "plugins/ndf/scripts/gone.py", "name": "f", "kind": "same-body", "reason": "移す前"}
+    put(tmp_path, "scripts/clean.py", "x = 1\n")
+    assert run(tmp_path, [row], "plugins/ndf/scripts/clean.py")[0] == 0
+    assert run(tmp_path, [row], "plugins/ndf/scripts/gone.py")[0] == 1
+    code, r = run(tmp_path, [row], "allow/" + structure.allow_file_name(row))
+    assert code == 1 and kinds(r) == {("unused-allow", "plugins/ndf/scripts/gone.py:f")}
+
+
+def test_giving_the_check_itself_counts_every_violation(tmp_path: Path):
+    scoped_tree(tmp_path)
+    full = run(tmp_path, [])[1]
+    code, r = run(tmp_path, [], "scripts/check-script-structure.py")
+    assert code == 1 and r["items"] == full["items"]
+
+
+def test_without_files_the_metrics_keep_their_keys(tmp_path: Path):
+    scoped_tree(tmp_path)
+    code, r = run(tmp_path, [])
+    assert code == 1 and len(r["items"]) == 3
+    assert "targets" not in r["metrics"] and "outside" not in r["metrics"]
+
+
+def test_broken_allow_list_stops_even_with_files(tmp_path: Path):
+    put(tmp_path, "scripts/clean.py", "x = 1\n")
+    (tmp_path / "allow").mkdir()
+    (tmp_path / "allow" / "x.json").write_text("{")
+    code, _ = run(tmp_path, None, "--allow", str(tmp_path / "allow"), "plugins/ndf/scripts/clean.py")
+    assert code == 2

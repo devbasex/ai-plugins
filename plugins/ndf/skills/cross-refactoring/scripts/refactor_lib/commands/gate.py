@@ -10,8 +10,8 @@
 
 全体テストの置き場は戦略で決まる（#1334）。`local-full` / `round-only` は手元で走らせ、`local-scoped-ci-whole`（か
 `--ci-check`）は push 済みの HEAD のチェックを上限まで待つ。落ちたら JUnit から落ちたテストを取り、フレーキー・既存失敗・
-変更起因に分け、変更起因が無ければ通す（I5）。検証で最終ゲートへ寄せた危険フラグの項目は、変更起因のとき締め切りを
-過ぎていれば新しい順に取り消す（決定 7）。
+変更起因に分け、変更起因が無ければ通す（I5）。修正を打ち切ったら、原因の項目から順に取り消す（単独は寄せた危険フラグの
+全体テストのときだけ。工程の 1 つとして起動したときは打ち切りの後の取り消し。#1649 #1669）。
 
 **テストで見つからない誤りを拾う工程は消えない。** 工程として起動したときに省いた
 分は、工程表の「実装レビュー」（`pr` → `cross-review`）が持つ。ここへ軽量なレビューを
@@ -30,7 +30,7 @@ import statefile
 import test_strategy as ts
 import test_triage
 
-from .. import clock, die, gate_lint, info, launch, publish, timeline, triage
+from .. import clock, die, gate_lint, info, launch, publish, stop_revert, timeline, triage
 from ..gitfacts import (
     discard_impl_leftovers,
     flush_pending_push,
@@ -57,12 +57,10 @@ from ..gate_ci import ci_checks, ci_gate, ci_mode, revert_deferred
 def cmd_final_gate(args: argparse.Namespace) -> None:
     """最終ゲートを通す（#933 の AC16b・決定 15・決定 16、#1334 F4〜F6）。
 
-    終了コード: 0 = 通過（または `cross-review` を実行する） / 2 = 落ちた
-    （修正ラウンドへ） / 1 = 修正を打ち切った（想定最大時間の終わり）（**取り消さず**報告へ抜ける）/
-    4 = 判断できない（CI が上限までに終わらない・照会できない）。
-
-    **最終ゲートは push 済みの地点である。** 打ち切っても取り消さない。取り消しの
-    判断は Pull Request の読み手が持つため、失敗として報告に書く。
+    終了コード: 0 = 通過（または `cross-review` を実行する） / 2 = 落ちた（修正ラウンドへ）・取り消した後の確かめ直し /
+    1 = 単独で起動して修正を打ち切った（**取り消さず**報告へ抜ける）/ 4 = 判断できない（CI が終わらない・案 B の後でも落ちた）。
+    打ち切ったとき、単独の起動は取り消さず判断を Pull Request の読み手へ渡し、工程の 1 つとして起動したときは
+    打ち切りの後の取り消し（`stop_revert`。#1669）で全体テストが通る状態へ戻してから確かめ直す。
 
     | 全体テストの置き場 | 見るもの |
     | --- | --- |
@@ -85,6 +83,7 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
     # 1 つの `whole_timeout` に収める。test-run.py の whole と同じ）。落ちたテストの見分けの時間は上限の外に置く。
     # 使い回し・CI で見るときは手元で走らないので渡さない。
     whole_started: Optional[float] = None
+    gate.pop("triage", None)  # 前回の見分けを残さない（今回のテストが通り静的解析だけが落ちたとき、古い変更起因で取り消さない）
     if _reusable_whole_test(state):
         gate["whole_test_reused"] = True
         passed, detail = True, "検証の中で通った全体テストを使い回しました（HEAD は進んでいません）"
@@ -111,8 +110,8 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
         return
 
     stop = _final_fix_stop(state, gate)
-    if stop and revert_deferred(path, state, gate):
-        # 寄せた危険フラグの項目を取り消した。取り消しを公開して、次の最終ゲートが CI を待ち直す。
+    if stop and (revert_deferred(path, state, gate) if standalone else stop_revert.revert_after_cutoff(path, state, gate)):
+        # 原因の項目を取り消した（単独は寄せた危険フラグの全体テスト、工程の 1 つは打ち切りの後の取り消し）。公開して確かめ直す。
         # **修正の依頼ではない（`recheck`）。** 駆動は修正の CLI を起動せずに `final-gate` を打ち直す。
         # 起点を取り消し後の HEAD へ置き直すのは、取り消しのコミットを後の `merge-final-fix` の範囲へ
         # 入れないためである。入れると未申告として取り消され、取り消した項目が PR へ戻る。
@@ -120,7 +119,7 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
         gate["fix_base_sha"] = git_out(work_dir(state), ["rev-parse", "HEAD"])
         statefile.save(path, state)
         push_with_retry_marker(path, state, gate)
-        info(f"↩ 最終ゲートへ寄せた危険フラグの項目を取り消しました（{detail}）。次の最終ゲートが確かめます")
+        info(f"↩ 最終ゲートを落とした原因の項目を取り消しました（{detail}）。次の最終ゲートが確かめます")
         statefile.emit(FINAL_GATE="recheck")
         sys.exit(2)
     if stop:
@@ -164,6 +163,9 @@ def _reusable_whole_test(state: dict[str, Any]) -> bool:
     return bool(head) and head == record.get("head")
 
 
+_TRIAGE_KEYS = ("failed_tests", "flaky", "preexisting", "caused", "caused_output", "fallback_reason", "rerun_command", "rerun_commands")
+
+
 def _run_and_record_gate_check(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]) -> tuple[bool, str, float]:
     """最終ゲートのチェックを 1 回走らせ、`checks` へ記録して結果を返す。落ちたら見分け、変更起因が無ければ通す。
 
@@ -179,9 +181,7 @@ def _run_and_record_gate_check(path: pathlib.Path, state: dict[str, Any], gate: 
     if not passed and verdict is not None:
         # 落ちたテストを見分ける。変更起因が無ければ通す（I5・決定 11）。
         classified = triage.classify(state, verdict.get("timed_out", False), verdict.get("ci_xmls"))
-        gate["triage"] = {
-            k: classified.get(k) for k in ("failed_tests", "flaky", "preexisting", "caused", "fallback_reason", "rerun_command")
-        }
+        gate["triage"] = {k: classified.get(k) for k in _TRIAGE_KEYS}
         if classified.get("fallback_reason"):
             detail += f" / 見分けを全体の走らせ直しに落とした（{classified['fallback_reason']}）"
         else:

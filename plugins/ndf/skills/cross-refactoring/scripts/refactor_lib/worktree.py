@@ -127,6 +127,17 @@ def _dirty_paths(state: dict[str, Any], work: str) -> list[str]:
     return _split_dirty(state, work).user
 
 
+def stop_if_dirty(state: dict[str, Any], work: str, what: str) -> None:
+    """未コミットの変更があれば、捨てずに終了コード 4 で止める（C4）。`what` は止める前に行おうとした操作。
+
+    取り消し（`undo.drop` の `reset --hard`）と着手前の木へ戻す `read-tree -u --reset` は、未コミットの変更を戻せずに消す。
+    """
+    dirty = _dirty_paths(state, work)
+    if dirty:
+        more = f" ほか {len(dirty) - 5} 件" if len(dirty) > 5 else ""
+        die(f"{what}前に、作業ツリーへ未コミットの変更があります（{', '.join(dirty[:5])}{more}）。捨てずに止まります。判断が要ります")
+
+
 def _discard_worktree_changes(work: str) -> None:
     """作業ツリーと index の未コミット変更を捨てる。**着手前が綺麗なときだけ呼ぶ。**
 
