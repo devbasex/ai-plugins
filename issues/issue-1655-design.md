@@ -158,18 +158,37 @@ graph LR
 
 ### 打ち方（`SKILL.md`）
 
-「前提」の assess と「実行」の drive は、対象のリポジトリ（またはその worktree）の中で、次のブロックを 1 つのシェルで打つ。`$R` の決め方は `development-workflow/references/scripts-lookup.md` を指す（`fix` の `SKILL.md` と同じ書き方）。
+「前提」の assess と「実行」の drive は、対象のリポジトリ（またはその worktree）の中で打つ。シェルの変数は呼び出しをまたいで残らないため、次の各ブロックを 1 回の呼び出しとし、どの呼び出しも先頭の入口の行（`RF=` / `LIB=` / `RC=`）を打ち直してから本体の行を打つ。`$R` の決め方は `development-workflow/references/scripts-lookup.md` を指す（`fix` の `SKILL.md` と同じ書き方）。
 
 ```bash
+# 呼び出し 1: assess（「前提」）
 RF=$(bash "$R/scripts/resolve.sh" scripts cross-refactoring) || exit 3
-LIB=$(bash "$R/scripts/resolve.sh" scripts)/lib || exit 3
 BASE="<開発の起点>"   # worktree-setup.sh check の「開発の起点:」の行の名前
 python3 "$RF/refactor.py" assess --base "origin/$BASE"; echo "exit=$?"
+```
+
+```bash
+# 呼び出し 2（Claude Code）: drive を run_in_background で起動し、完了通知を 1 回受ける
+RF=$(bash "$R/scripts/resolve.sh" scripts cross-refactoring) || exit 3
 python3 "$RF/drive.py" <PR> --scope <範囲...> [「引数」の表のうち値のあるもの]
+```
+
+```bash
+# 呼び出し 2（Codex / Kiro / agy）: drive を背景に起動する
+RF=$(bash "$R/scripts/resolve.sh" scripts cross-refactoring) || exit 3
+LIB=$(bash "$R/scripts/resolve.sh" scripts)/lib || exit 3
+RC="${TMPDIR:-/tmp}/cross-refactoring-drive-pr<PR>.rc"
 bash "$LIB/bg-wait.sh" run "$RC" -- python3 "$RF/drive.py" <PR> --scope <範囲...> [上と同じ引数]
 ```
 
-このうち入口の 2 行と assess の行は、「あるべき姿の根拠」の 1 行目の実測で打った形である。
+```bash
+# 呼び出し 3 以降（Codex / Kiro / agy）: 待ち。124 が返るあいだ、この呼び出しを別の呼び出しとして打ち直す
+LIB=$(bash "$R/scripts/resolve.sh" scripts)/lib || exit 3
+RC="${TMPDIR:-/tmp}/cross-refactoring-drive-pr<PR>.rc"
+bash "$LIB/bg-wait.sh" wait "$RC"   # 1 回 540 秒以内。124 = まだ終わっていない
+```
+
+`RC` の値は run と wait で同じ文字列にする（`<PR>` だけで決まり、呼び出しの間で受け渡す値を持たない）。入口の行（`RF=` / `LIB=`）と assess の行は、「あるべき姿の根拠」の 1 行目の実測で打った形である。
 
 ### 止まらずに中断する形（assess・drive）
 
