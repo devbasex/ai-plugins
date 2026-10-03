@@ -19,7 +19,7 @@ from typing import Any, Optional
 
 import statefile
 
-from . import culprit, die, info, ledger, timeline
+from . import culprit, die, info, ledger, timeline, worktree
 from .items import live_items
 from .paths import git_out, work_dir
 from .undo import ON_CONFLICT_RAISE
@@ -76,6 +76,12 @@ def _plan_b(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], why
     record = gate.setdefault("stop_revert", {})
     record.update({"plan": "B", "fallback_reason": why, "base_sha": base or None, "at": statefile.now()})
     statefile.save(path, state)
+    dirty = worktree._dirty_paths(state, work)
+    if dirty:  # read-tree -u --reset と失敗時の reset --hard が未コミットの変更を上書きするため、捨てずに止まる
+        more = f" ほか {len(dirty) - 5} 件" if len(dirty) > 5 else ""
+        die(
+            f"着手前の木へ戻す前に、作業ツリーへ未コミットの変更があります（{', '.join(dirty[:5])}{more}）。捨てずに止まります。判断が要ります"
+        )
     info(f"⚠ 案 A で通せませんでした（{why}）。着手前の木（{base[:12] or '不明'}）へ戻すコミットを積みます")
     head = git_out(work, ["rev-parse", "HEAD"]) or ""
     message = f"Revert: cross-refactoring の改善を着手前の木へ戻す（{why}）"

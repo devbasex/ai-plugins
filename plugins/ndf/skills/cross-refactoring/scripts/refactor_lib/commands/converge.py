@@ -262,6 +262,12 @@ def _whole_items(state: dict[str, Any], record: dict[str, Any]) -> list[dict[str
     return [i for i in live_items(state) if i["id"] in ids]
 
 
+def _one_command(rerun: Any) -> str:
+    """走らせ直すコマンドの並びを、suite の区切りを残した 1 本にする（launch-cli.sh は並びを空白で連結するため）。"""
+    commands = [rerun] if isinstance(rerun, str) else [str(c) for c in rerun]
+    return commands[0] if len(commands) == 1 else " && ".join(f"( {c} )" for c in commands)
+
+
 def _fix_or_narrow(
     path: pathlib.Path,
     state: dict[str, Any],
@@ -280,7 +286,7 @@ def _fix_or_narrow(
         for item in items:
             item["status"] = FAILING
             item["last_log"] = str(log)
-            item["whole_test_command"] = [str(rerun)] if isinstance(rerun, str) else list(rerun)
+            item["whole_test_command"] = [_one_command(rerun)]
         info(f"🔧 変更起因の失敗を直しに回します（原因の項目 {len(items)} 件）")
         return True
     narrow_log, whole = pathlib.Path(state["tmp_dir"]) / "verify-whole-narrow.log", not culprit.rerun_of(record)

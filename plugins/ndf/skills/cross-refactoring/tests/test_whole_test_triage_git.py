@@ -338,3 +338,10 @@ def test_the_report_and_the_plan_show_the_baseline(flow, cmd_report, plan, capsy
 
     for text in (out, body):
         assert "0123456" in text and "12.5" in text
+
+
+def test_the_fix_command_keeps_the_suite_boundaries(refactor):
+    """変更起因の suite が複数なら、launch-cli.sh が空白で連結しても壊れない 1 本にして渡す。"""
+    converge = sys.modules["refactor_lib.commands.converge"]
+    assert converge._one_command(["pytest a -q"]) == "pytest a -q"
+    assert converge._one_command(["pytest a -q", "pytest b -q"]) == "( pytest a -q ) && ( pytest b -q )"
