@@ -51,3 +51,62 @@ def test_declarations_without_the_keys_still_read():
 
 def test_this_repository_declaration_is_valid():
     model.validate_decl(json.loads((SCRIPTS.parents[2] / ".ndf" / "project.json").read_text(encoding="utf-8")))
+
+
+class FakeGh:
+    """`_measure_runs` が読む `Gh` の面（`repo` と `get`）だけを持つ。"""
+
+    repo = "o/r"
+
+    def __init__(self, responses: dict):
+        self.responses = responses
+        self.calls: list[str] = []
+
+    def get(self, path: str):
+        self.calls.append(path)
+        return self.responses.get(path)
+
+
+def test_measure_runs_keeps_the_current_shape(monkeypatch):
+    """現状固定: workflow ごとの最新の run・job 数・step の合計・必須チェックの形。"""
+    from project_lib import measure_ci
+
+    monkeypatch.setattr(measure_ci, "_junit_of_run", lambda gh, run: None)
+    run = {"id": 7, "path": ".github/workflows/ci.yml", "run_started_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:02:00Z"}
+    older = {**run, "id": 6}
+    step = {"name": "pytest", "started_at": "2026-01-01T00:00:10Z", "completed_at": "2026-01-01T00:01:10Z"}
+    gh = FakeGh(
+        {
+            "repos/o/r/actions/runs?status=success&per_page=50": {"workflow_runs": [run, older]},
+            "repos/o/r/actions/runs/7/jobs?per_page=100": {"jobs": [{"steps": [step]}, {"steps": []}, {"steps": []}]},
+            "repos/o/r/rules/branches/main": [
+                {
+                    "type": "required_status_checks",
+                    "parameters": {"required_status_checks": [{"context": "b"}, {"context": "a"}, {"context": "a"}]},
+                }
+            ],
+        }
+    )
+    ci, found = measure_ci._measure_runs(gh, {".github/workflows/ci.yml": 2, ".github/workflows/lint.yml": 1}, "main")
+    assert ci == {
+        "provider": "github-actions",
+        "workflows": [
+            {"path": ".github/workflows/ci.yml", "jobs": 3, "wall_seconds": 120.0},
+            {"path": ".github/workflows/lint.yml", "jobs": 1},
+        ],
+        "required_checks": ["a", "b"],
+    }
+    assert [d["source"] for d in found] == ["ci-steps"]
+    assert found[0]["seconds"] == 60.0
+    assert "repos/o/r/actions/runs/6/jobs?per_page=100" not in gh.calls
+
+
+def test_measure_runs_without_runs_or_workflows_reports_none():
+    """現状固定: run も workflow も無ければ provider は none で、head が無ければ必須チェックを読まない。"""
+    from project_lib import measure_ci
+
+    gh = FakeGh({})
+    ci, found = measure_ci._measure_runs(gh, {}, None)
+    assert ci == {"provider": "none", "workflows": [], "required_checks": []}
+    assert found == []
+    assert gh.calls == ["repos/o/r/actions/runs?status=success&per_page=50"]
