@@ -14,7 +14,7 @@ import statefile
 import test_strategy as ts
 import test_triage
 
-from . import info, launch, timeline, triage
+from . import culprit, info, launch, timeline, triage
 from .gitfacts import run_with_timeout
 from .outbound import dropped_line
 from .paths import work_dir
@@ -74,6 +74,20 @@ def whole_fallback_command(state: dict[str, Any]) -> Any:
     return " && ".join(f"( {c} )" for c in commands)
 
 
+LOG_CHARS = 1_000_000  # 手がかり 1 に使う走らせ直しのログの末尾の文字数
+
+
+def _log_text(log: pathlib.Path) -> str:
+    """走らせ直しのログ（suite が複数なら suite ごとのログも）の本文。"""
+    parts = []
+    for part in [log, *sorted(log.parent.glob(f"{log.stem}-*.log"))]:
+        try:
+            parts.append(part.read_text(encoding="utf-8", errors="replace")[-LOG_CHARS:])
+        except OSError:
+            continue
+    return "\n".join(parts)
+
+
 def fallback(
     path: pathlib.Path,
     state: dict[str, Any],
@@ -85,8 +99,11 @@ def fallback(
 ) -> bool:
     """JUnit で見分けられないときは全体を 1 度走らせ直す（#1334 前提 4・見分けの 4）。
 
-    通ればフレーキー（残す）。落ちれば、着手前が green なら変更起因として危険フラグの項目を修正へ回し、
+    通ればフレーキー（残す）。落ちれば、着手前が green なら変更起因として原因の項目を修正へ回し、
     着手前も red なら見分けられないので危険フラグの項目をまとめて取り消して理由を残す。
+
+    原因の項目は、走らせ直しのログに現れるパスだけで決める（手がかり 1）。項目を外した走らせ直しは全体テストになり
+    締め切りに収まらないため行わず、決まらなければ `undetermined` にする（#1649）。
     """
     info(f"⚠ {record['fallback_reason']}ため、全体を 1 度走らせ直して見分けます")
     rerun_log = log.with_name("verify-whole-rerun.log")
@@ -102,6 +119,7 @@ def fallback(
         record["resolution"] = "fixing"
         record["rerun_command"] = None
         info("🔧 走らせ直しでも落ち、着手前は通っていたため変更起因とみなします")
+        culprit.judge(state, record, {"caused": record["caused"], "caused_output": {"<全体>": _log_text(rerun_log)}}, None, isolate=False)
         return fix_or_narrow(path, state, record, rerun_log)
     reason = f"危険フラグ（{', '.join(flags)}）で走らせた全体テストが落ち、見分けられなかった（{record['fallback_reason']}）"
     for item in flagged:

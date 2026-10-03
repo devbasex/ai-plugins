@@ -42,10 +42,17 @@
 載せた時点の行数を `lines` に持つ（ラチェット）。違反に当たらない項目は `unused-allow` として落とす。
 直した移行ステップは、同じ PR でその項目のファイルを消す。
 
-    python3 scripts/check-script-structure.py [--root <リポジトリ>] [--allow <ディレクトリ>]
+    python3 scripts/check-script-structure.py [--root <リポジトリ>] [--allow <ディレクトリ>] [<ファイル>...]
+
+ファイル（根からの相対パスか根の下の絶対パス。無いファイルやディレクトリも可）を渡すと、検査は木全体で行い、
+`items` と合否を指定に関わる違反だけで決める（#1668。項目の範囲テストの静的解析の suite が使う）。関わるのは、
+違反の `path` が指定にあるとき、`same-name` / `same-body` では同じ名前・同じ本体を持つほかのファイルのどれかが
+指定にあるとき、指定に例外リストの置き場のファイルがあればその行に当たる違反と `unused-allow`、指定に検査の
+スクリプト自身があればすべての違反である。このとき `metrics` に `targets`（指定の数）と `outside`（指定に
+関わらず外した違反の数）を足す。
 
 最後に結果 JSON を 1 行出す（`plugins/ndf/scripts/lib/README.md` の形）。終了コードは 0 が違反なし、
-1 が違反あり、2 が例外リストの読めない・形の誤り。
+1 が違反あり、2 が例外リストの読めない・形の誤り（指定に関わらず 2）。
 """
 
 from __future__ import annotations
@@ -63,6 +70,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 SCAN = "plugins/ndf"
+SELF = "scripts/check-script-structure.py"
 MAX_LINES = 500
 KINDS = ("lines", "same-body", "same-name", "wrapped", "hook-deps", "durable-boundary", "require-groups")
 LIB = "plugins/ndf/scripts/"
@@ -310,7 +318,13 @@ def _duplicate_violations(defs: dict[str, list[tuple[str, str, str]]]) -> list[d
             if others and (path, name, "same-body") not in seen:
                 seen.add((path, name, "same-body"))
                 violations.append(
-                    {"kind": "same-body", "path": path, "function": name, "detail": "本体が同じ: " + ", ".join(sorted(others))}
+                    {
+                        "kind": "same-body",
+                        "path": path,
+                        "function": name,
+                        "detail": "本体が同じ: " + ", ".join(sorted(others)),
+                        "others": sorted(others),
+                    }
                 )
         for name, per_path in by_name.items():
             if len(per_path) < 2:
@@ -319,7 +333,13 @@ def _duplicate_violations(defs: dict[str, list[tuple[str, str, str]]]) -> list[d
                 diff = sorted(p for p, ks in per_path.items() if p != path and ks != keys)
                 if diff:
                     violations.append(
-                        {"kind": "same-name", "path": path, "function": name, "detail": "同じ名前で本体が違う: " + ", ".join(diff)}
+                        {
+                            "kind": "same-name",
+                            "path": path,
+                            "function": name,
+                            "detail": "同じ名前で本体が違う: " + ", ".join(diff),
+                            "others": diff,
+                        }
                     )
     return violations
 
@@ -704,23 +724,69 @@ def item(kind: str, path: str, function: str, result: str, detail: str) -> dict:
     }
 
 
-def check(root: Path, allow: list[dict]) -> tuple[list[dict], dict]:
+def _rel(root: Path, target: str) -> str:
+    """指定のパスを根からの相対パス（`/` 区切り・末尾の `/` なし）にする。根の外の絶対パスはそのまま返す。"""
+    p = Path(target)
+    if p.is_absolute():
+        try:
+            p = p.resolve().relative_to(root)
+        except ValueError:
+            return p.as_posix()
+    parts = [x for x in p.as_posix().split("/") if x not in ("", ".")]
+    return "/".join(parts) or "."
+
+
+def _under(path: str, targets: set[str]) -> bool:
+    """`path` が指定のどれかと同じか、指定のディレクトリの下にあるか。"""
+    return any(t == "." or path == t or path.startswith(t + "/") for t in targets)
+
+
+class Scope:
+    """位置引数のファイルの指定。違反と例外の行が指定に関わるかを決める（#1668）。"""
+
+    def __init__(self, root: Path, allow_dir: Path, targets: list[str]):
+        self.targets = {_rel(root, t) for t in targets}
+        allow_rel = _rel(root, str(allow_dir.resolve()))
+        self.everything = _under(SELF, self.targets) or _under(allow_rel, self.targets)
+        self.allow_files = {Path(t).name for t in self.targets if t.startswith(allow_rel + "/")}
+
+    def row(self, r: dict) -> bool:
+        """例外の行が指定に関わるか（行の `path` か、行のファイルが指定にある）。"""
+        return self.everything or _under(r["path"], self.targets) or allow_file_name(r) in self.allow_files
+
+    def violation(self, v: dict, row: dict | None) -> bool:
+        if self.everything or _under(v["path"], self.targets) or any(_under(o, self.targets) for o in v.get("others", ())):
+            return True
+        return row is not None and allow_file_name(row) in self.allow_files
+
+
+def check(root: Path, allow: list[dict], scope: Scope | None = None) -> tuple[list[dict], dict]:
     violations, metrics = scan(root)
     allowed = {(r["path"], r["name"], r["kind"]): r for r in allow}
     hit = set()
     items = []
+    outside = 0
     for v in violations:
         k = (v["path"], v["function"], v["kind"])
         row = allowed.get(k)
         if row is not None:
             hit.add(k)
             if v["kind"] == "lines" and v["lines"] > row["lines"]:
-                items.append(item("lines", v["path"], "", "violation", f"{v['lines']} 行。例外リストの {row['lines']} 行を超えた"))
+                if scope is None or scope.violation(v, row):
+                    items.append(item("lines", v["path"], "", "violation", f"{v['lines']} 行。例外リストの {row['lines']} 行を超えた"))
+                else:
+                    outside += 1
+            continue
+        if scope is not None and not scope.violation(v, None):
+            outside += 1
             continue
         items.append(item(v["kind"], v["path"], v["function"], "violation", v["detail"]))
     for r in allow:
         k = (r["path"], r["name"], r["kind"])
         if k not in hit:
+            if scope is not None and not scope.row(r):
+                outside += 1
+                continue
             items.append(
                 item(
                     "unused-allow",
@@ -732,6 +798,8 @@ def check(root: Path, allow: list[dict]) -> tuple[list[dict], dict]:
             )
     items.sort(key=lambda i: (i["path"], i["function"], i["kind"]))
     metrics.update(allowed=len(hit), violations=len(items))
+    if scope is not None:
+        metrics.update(targets=len(scope.targets), outside=outside)
     return items, metrics
 
 
@@ -747,14 +815,16 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--root", type=Path, default=REPO, help="リポジトリの根（既定はこのスクリプトのリポジトリ）")
     ap.add_argument("--allow", type=Path, help="例外リストの置き場（既定は <root>/scripts/script-structure-allow/）")
+    ap.add_argument("files", nargs="*", help="合否を決めるファイル（省くと木全体の違反で決める）")
     a = ap.parse_args(argv)
     root = a.root.resolve()
+    allow_dir = a.allow or root / "scripts" / "script-structure-allow"
     try:
-        allow = load_allow(a.allow or root / "scripts" / "script-structure-allow")
+        allow = load_allow(allow_dir)
     except UsageError as e:
         emit("stopped", str(e), [], {})
         return 2
-    items, metrics = check(root, allow)
+    items, metrics = check(root, allow, Scope(root, allow_dir, a.files) if a.files else None)
     if items:
         for i in items:
             print(f"{i['kind']}: {i['name']}: {i['detail']}", file=sys.stderr)

@@ -251,14 +251,14 @@ def test_a_failure_opens_a_fix_round(cmd_gate, tmp_path, env_tmp_dir, spy):
 
 
 def test_the_fix_cap_reports_the_failure_without_reverting(patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, spy, monkeypatch):
-    """**Step 7 は push 済みの地点である。** 上限に達しても取り消さない。
+    """**単独で起動したとき、Step 7 は push 済みの地点である。** 上限に達しても取り消さない（#1669 AC9）。
 
     取り消しの判断は Pull Request の読み手が持つ。失敗として報告に書く。
     """
     dropped: list = []
     patch_lib("drop", lambda *a, **k: dropped.append(a) or {})
     patch_lib("revert_range", lambda *a, **k: dropped.append(a))
-    state_path = _state(tmp_path, workflow_step=True, started_at="2000-01-01T00:00:00", final_gate={"fix_rounds": 2, "checks": []})
+    state_path = _state(tmp_path, started_at="2000-01-01T00:00:00", final_gate={"fix_rounds": 2, "checks": []})
     env_tmp_dir(state_path)
     spy["test_code"] = 1
 
@@ -283,8 +283,8 @@ def test_the_first_fix_is_tried_even_after_the_budget_ran_out(cmd_gate, tmp_path
 
 
 def test_the_second_fix_after_the_budget_ran_out_is_not_tried(cmd_gate, tmp_path, env_tmp_dir, spy):
-    """決定 26: 2 度目からは時計で打ち切る。"""
-    state_path = _state(tmp_path, workflow_step=True, started_at="2000-01-01T00:00:00", final_gate={"fix_rounds": 1, "checks": []})
+    """決定 26: 2 度目からは時計で打ち切る（単独の起動は取り消さずに 1 で終わる）。"""
+    state_path = _state(tmp_path, started_at="2000-01-01T00:00:00", final_gate={"fix_rounds": 1, "checks": []})
     env_tmp_dir(state_path)
     spy["test_code"] = 1
 
@@ -438,6 +438,17 @@ def test_a_whole_test_passed_in_verify_at_the_same_head_is_reused(refactor, cmd_
     assert expected in capsys.readouterr().out
 
 
+def test_a_new_gate_run_drops_the_previous_triage(refactor, cmd_gate, tmp_path, env_tmp_dir, spy):
+    """前回の見分けは今回の取り消しの根拠にしない（今回のテストが通れば変更起因は無い）。"""
+    stale = {"caused": ["tests/test_a.py::t"], "rerun_command": "pytest -q tests/test_a.py"}
+    state_path = _state(tmp_path, whole_test=PASSED_IN_VERIFY, final_gate={"fix_rounds": 1, "checks": [], "triage": stale})
+    env_tmp_dir(state_path)
+
+    cmd_gate.cmd_final_gate(_args())
+
+    assert "triage" not in read_state(state_path)["final_gate"]
+
+
 @pytest.mark.parametrize(
     "whole_test",
     [
@@ -551,7 +562,8 @@ NEW_FAILURE = "tests/test_new.py::tests.test_new::test_new"
 def _ci_whole_state(tmp_path, **over):
     over.setdefault("strategy", strategy_state("local-scoped-ci-whole"))
     over.setdefault("limits", {"test_timeout": 60, "whole_timeout": 60, "ci_wait_timeout": 60})
-    return _state(tmp_path, workflow_step=True, **over)
+    over.setdefault("workflow_step", True)
+    return _state(tmp_path, **over)
 
 
 def _failed_ci(patch_lib, spy, ids):
@@ -612,18 +624,23 @@ def _item(item_id, rank):
 def test_a_caused_failure_after_the_deadline_reverts_the_deferred_items_newest_first(
     patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, spy, capsys
 ):
-    """AC8・I8 — 寄せた危険フラグの項目は新しい順に取り消し、変更起因のファイルが通った時点で止める。全件は取り消さない。"""
+    """AC8・I8 — 単独の起動で寄せた危険フラグの全体テストが落ちたら、原因の判定の順に取り消し、通った時点で止める。
+
+    本文に項目のパスが現れず、項目のコミットも無い（外して走らせ直せない）ため原因は決まらず、新しい順になる（#1649 AC6）。
+    """
     dropped: list = []
     pushed: list = []
 
-    def fake_drop(path, state, ids, reason):
+    def fake_drop(path, state, ids, reason, on_conflict="stop"):
         dropped.extend(ids)
         spy["test_code"] = 0  # 取り消した後の走らせ直しは通る
 
     patch_lib("drop", fake_drop)
     patch_lib("push_with_retry_marker", lambda *a, **k: pushed.append(True))
+    patch_lib("_dirty_paths", lambda state, work: [])  # 作業ツリーは git でない（drop を差し替える）
     state_path = _ci_whole_state(
         tmp_path,
+        workflow_step=False,
         started_at="2000-01-01T00:00:00",
         limits={"test_timeout": 60, "whole_timeout": 60, "ci_wait_timeout": 60, "final_end_at": "2000-01-01T00:30:00"},
         final_gate={"fix_rounds": 1, "checks": []},
@@ -644,13 +661,55 @@ def test_a_caused_failure_after_the_deadline_reverts_the_deferred_items_newest_f
     with pytest.raises(SystemExit) as e:
         cmd_gate.cmd_final_gate(_args())
     assert e.value.code == 2, "取り消しを公開して、次の最終ゲートが CI を待ち直す"
-    assert dropped == ["I3"], "新しい（rank の大きい）寄せた項目から取り消し、通った時点で止める"
+    assert dropped == ["I3"], "原因が決まらなければ新しい（rank の大きい）項目から取り消し、通った時点で止める"
     assert pushed == [True]
     gate = read_state(state_path)["final_gate"]
     assert gate["reverted_deferred"] == ["I3"]
     # 修正の依頼ではない。起点を取り消し後の HEAD へ置き直し、取り消しを後の修正の範囲へ入れない。
     assert "FINAL_GATE=recheck" in capsys.readouterr().out
     assert gate["status"] == "recheck" and gate["fix_base_sha"]
+
+
+def test_the_deferred_revert_reverts_the_culprit_named_by_the_failure_not_the_flagged_items(
+    patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, spy, monkeypatch
+):
+    """#1649 AC6 — 寄せた危険フラグの取り消しも原因の判定に従う。本文に現れたファイルを変えた I2 だけを取り消す。"""
+    import sys
+
+    dropped: list = []
+
+    def fake_drop(path, state, ids, reason, on_conflict="stop"):
+        dropped.extend(ids)
+        spy["test_code"] = 0
+
+    patch_lib("drop", fake_drop)
+    patch_lib("push_with_retry_marker", lambda *a, **k: None)
+    patch_lib("_dirty_paths", lambda state, work: [])
+    culprit = sys.modules["refactor_lib.culprit"]
+    monkeypatch.setattr(culprit, "_changed_by", lambda work, item: {"I2": ["src/i2.py"]}.get(item["id"], [f"src/{item['id']}.py"]))
+    items = [_item("I1", 1), {**_item("I2", 2), "danger": []}, _item("I3", 3)]
+    state_path = _ci_whole_state(
+        tmp_path,
+        workflow_step=False,
+        started_at="2000-01-01T00:00:00",
+        limits={"test_timeout": 60, "whole_timeout": 60, "ci_wait_timeout": 60, "final_end_at": "2000-01-01T00:30:00"},
+        final_gate={"fix_rounds": 1, "checks": []},
+        items=items,
+        whole_test={"ran": False, "flags": [], "status": None, "deferred": {"flags": ["D2"], "items": ["I1", "I3"]}},
+    )
+    env_tmp_dir(state_path)
+    _failed_ci(patch_lib, spy, [NEW_FAILURE])
+    classified = {"failed_tests": [NEW_FAILURE], "flaky": [], "preexisting": [], "caused": [NEW_FAILURE], "fallback_reason": None}
+    classified.update({"caused_output": {NEW_FAILURE: "E  src/i2.py:3: boom"}, "rerun_command": "pytest -q tests/test_new.py"})
+    monkeypatch.setattr(cmd_gate.triage, "classify", lambda state, timed_out, ci_xmls=None: dict(classified))
+
+    with pytest.raises(SystemExit) as e:
+        cmd_gate.cmd_final_gate(_args())
+
+    assert e.value.code == 2
+    assert dropped == ["I2"], "危険フラグの I1・I3 ではなく、本文に現れたファイルを変えた I2"
+    gate = read_state(state_path)["final_gate"]
+    assert gate["culprit"]["culprits"] == ["I2"] and gate["culprit"]["basis"] == "path"
 
 
 def test_the_ci_gate_waits_without_pushing(patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, spy):

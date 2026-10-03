@@ -11,7 +11,7 @@ import models as models_lib
 import run_metrics
 import statefile
 
-from .. import allocation, clock, info, launch, ledger, timeline
+from .. import allocation, clock, culprit, info, launch, ledger, stop_revert, timeline
 from ..codemetrics_view import record_lines
 from ..items import item_label
 from ..measure import summary_extra
@@ -142,6 +142,46 @@ def _implementer_model_text(state: dict[str, Any]) -> str:
     return f"{requested}（指定。実測できず）"
 
 
+def _whole_test_lines(whole: dict[str, Any]) -> list[str]:
+    """検証の中の全体のテストと、その原因の項目の行。"""
+    lines: list[str] = []
+    if whole.get("ran"):
+        lines.append(
+            f"- 検証の中の全体のテスト: 走らせた（危険フラグ {', '.join(whole.get('flags') or [])} / "
+            f"{whole.get('status')}{_whole_detail(whole)}）"
+        )
+    elif whole.get("deferred"):
+        deferred = whole["deferred"]
+        lines.append(
+            f"- 検証の中の全体のテスト: 最終ゲートへ寄せた（危険フラグ {', '.join(deferred.get('flags') or [])} / 項目 {', '.join(deferred.get('items') or [])}）"
+        )
+    else:
+        lines.append("- 検証の中の全体のテスト: 走らせなかった（危険フラグが立たなかった）")
+    if whole.get("culprit"):
+        lines.append(f"- 検証の中の全体のテストの原因の項目: {culprit.verdict_line(whole['culprit'])}")
+    return lines
+
+
+def _final_gate_lines(gate: dict[str, Any]) -> list[str]:
+    """最終ゲートの見分け・原因・打ち切りの後の取り消し・結果・静的解析の行。"""
+    lines: list[str] = []
+    triage = gate.get("triage") or {}
+    if triage:
+        lines.append(f"- 最終ゲートの見分け: {_triage_line(triage)}")
+    if gate.get("culprit"):
+        lines.append(f"- 最終ゲートの原因の項目: {culprit.verdict_line(gate['culprit'])}")
+    if gate.get("stop_revert"):
+        lines.append(f"- 打ち切りの後の取り消し: {stop_revert.record_line(gate['stop_revert'])}")
+    lines.append(
+        f"- 最終ゲート: {gate.get('mode') or '—'}（{gate.get('status') or '未実行'}"
+        f"{' / 検証の結果を使い回した' if gate.get('whole_test_reused') else ''}"
+        f" / 修正 {gate.get('fix_rounds', 0)} 回）"
+    )
+    for lint in gate.get("lint") or []:
+        lines.append(f"- 最終ゲートの静的解析 {lint.get('suite')}: {lint.get('verdict')}（{lint.get('reason')}）")
+    return lines
+
+
 def _print_header(state: dict[str, Any]) -> None:
     budget_seconds = int(state.get("budget_minutes") or 0) * 60
     elapsed = _elapsed_seconds(state)
@@ -162,28 +202,8 @@ def _print_header(state: dict[str, Any]) -> None:
         print(line)
     baseline = state.get("baseline_test") or {}
     print(f"- 着手前のテスト（{baseline.get('mode') or 'whole'}）: {baseline_line(baseline)} / 既存失敗 {existing_failures_line(baseline)}")
-    if whole.get("ran"):
-        print(
-            f"- 検証の中の全体のテスト: 走らせた（危険フラグ {', '.join(whole.get('flags') or [])} / "
-            f"{whole.get('status')}{_whole_detail(whole)}）"
-        )
-    elif whole.get("deferred"):
-        deferred = whole["deferred"]
-        print(
-            f"- 検証の中の全体のテスト: 最終ゲートへ寄せた（危険フラグ {', '.join(deferred.get('flags') or [])} / 項目 {', '.join(deferred.get('items') or [])}）"
-        )
-    else:
-        print("- 検証の中の全体のテスト: 走らせなかった（危険フラグが立たなかった）")
-    triage = gate.get("triage") or {}
-    if triage:
-        print(f"- 最終ゲートの見分け: {_triage_line(triage)}")
-    print(
-        f"- 最終ゲート: {gate.get('mode') or '—'}（{gate.get('status') or '未実行'}"
-        f"{' / 検証の結果を使い回した' if gate.get('whole_test_reused') else ''}"
-        f" / 修正 {gate.get('fix_rounds', 0)} 回）"
-    )
-    for lint in gate.get("lint") or []:
-        print(f"- 最終ゲートの静的解析 {lint.get('suite')}: {lint.get('verdict')}（{lint.get('reason')}）")
+    for line in _whole_test_lines(whole) + _final_gate_lines(gate):
+        print(line)
     if state.get("launch_failure"):
         print(f"- {launch.line(state['launch_failure'])}")
     print(f"- 監視が止めた手順: {_stopped_line(state)}")
@@ -214,7 +234,7 @@ _RESOLUTIONS = {
     "kept": "変更が原因の失敗は無く、取り消さなかった",
     "fixing": "直しの途中",
     "fixed": "直して通った",
-    "narrowed": "直らず、危険フラグの項目を新しい順に取り消した",
+    "narrowed": "直らず、原因の項目から順に取り消した",
     "reverted_all": "落ちたテストを見分けられず、危険フラグの項目をまとめて取り消した",
     "deferred": "全体テストを CI に任せる戦略のため、最終ゲートへ寄せた",
 }

@@ -235,7 +235,10 @@ def failing_in(
     return _failing_in(RerunContext(strategy, timeout, log_dir, run, started), work, ids, label)
 
 
-def _failing_in(ctx: RerunContext, work: str, ids: list[str], label: str) -> tuple[list[str], bool, bool]:
+def _failing_in(
+    ctx: RerunContext, work: str, ids: list[str], label: str, texts: Optional[dict[str, str]] = None
+) -> tuple[list[str], bool, bool]:
+    """`texts` を渡せば、まだ落ちている ID の JUnit の本文をそこへ足す（原因の項目の手がかり。#1649）。"""
     strategy = ctx.strategy
     still: list[str] = []
     readable = True
@@ -247,6 +250,8 @@ def _failing_in(ctx: RerunContext, work: str, ids: list[str], label: str) -> tup
         code, timed_out = run_within(ctx.timeout, ctx.started, lambda left, command=command, log=log: ctx.run(command, work, left, log))
         if not timed_out and code == 0:
             continue
+        if texts is not None and suite.junit:
+            texts.update(junit.read_failure_texts(pathlib.Path(work) / suite.junit, tracked) or {})
         found, _ = read_junit(work, ts.Strategy(strategy.name, strategy.source, [suite]), tracked)
         cut = cut or timed_out
         if timed_out or found is None:
@@ -323,43 +328,55 @@ def classify(
     log_dir = pathlib.Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
     if failed is None:
-        return {
-            "failed_tests": None,
-            "flaky": [],
-            "preexisting": [],
-            "caused": [],
-            "fallback_reason": fallback_reason or "JUnit を読めない",
-            "baseline_head": base_sha,
-        }
+        return _result(None, [], [], [], fallback_reason or "JUnit を読めない", base_sha)
     known = set(existing_failures or [])
     # 上限 `timeout` は走らせ直しと着手前の HEAD の再実行の全体で 1 つ
     ctx = RerunContext(strategy, timeout, log_dir, run, time.monotonic())
-    still, _, _ = _failing_in(ctx, work, failed, "rerun")
+    texts: dict[str, str] = {}
+    still, _, _ = _failing_in(ctx, work, failed, "rerun", texts)
     flaky = [i for i in failed if i not in still]
+    at_base, decided = _split_by_baseline(ctx, work, still, known, base_sha)
+    preexisting = [i for i in still if i in at_base]
+    if not decided:
+        # 着手前の HEAD の再実行が上限で打ち切られた。既存失敗か変更起因かを決めず、判定不能として返す
+        reason = f"着手前の HEAD の再実行が上限（{timeout} 秒）の内に終わらず、既存失敗か変更起因かを見分けられない"
+        return _result(list(failed), flaky, preexisting, [], reason, base_sha)
+    caused = [i for i in still if i not in at_base]
+    return {
+        **_result(list(failed), flaky, preexisting, caused, None, base_sha),
+        "rerun_commands": rerun_commands(strategy, list(by_file(caused))) if caused else [],
+        # 変更起因の ID ごとの、今の HEAD の走らせ直しの JUnit の本文（原因の項目を決める手がかり 1。#1649）
+        "caused_output": {i: texts[i] for i in caused if i in texts},
+    }
+
+
+def _split_by_baseline(ctx: RerunContext, work: str, still: list[str], known: set[str], base_sha: Optional[str]) -> tuple[list[str], bool]:
+    """まだ落ちる ID のうち着手前にも落ちていたもの（既知 + 着手前の HEAD で落ちたもの）と、見分けが付いたか。"""
     at_base = [i for i in still if i in known]
     unknown = [i for i in still if i not in known]
     if unknown and base_sha:
         base_failing = _failing_at(ctx, work, base_sha, unknown)
         if base_failing is None:
-            # 着手前の HEAD の再実行が上限で打ち切られた。既存失敗か変更起因かを決めず、判定不能として返す
-            return {
-                "failed_tests": list(failed),
-                "flaky": flaky,
-                "preexisting": [i for i in still if i in at_base],
-                "caused": [],
-                "fallback_reason": f"着手前の HEAD の再実行が上限（{timeout} 秒）の内に終わらず、既存失敗か変更起因かを見分けられない",
-                "baseline_head": base_sha,
-            }
+            return at_base, False
         at_base += base_failing
-    caused = [i for i in still if i not in at_base]
+    return at_base, True
+
+
+def _result(
+    failed: Optional[list[str]],
+    flaky: list[str],
+    preexisting: list[str],
+    caused: list[str],
+    fallback_reason: Optional[str],
+    base_sha: Optional[str],
+) -> dict[str, Any]:
     return {
-        "failed_tests": list(failed),
+        "failed_tests": failed,
         "flaky": flaky,
-        "preexisting": [i for i in still if i in at_base],
+        "preexisting": preexisting,
         "caused": caused,
-        "fallback_reason": None,
+        "fallback_reason": fallback_reason,
         "baseline_head": base_sha,
-        "rerun_commands": rerun_commands(strategy, list(by_file(caused))) if caused else [],
     }
 
 

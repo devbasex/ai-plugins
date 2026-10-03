@@ -31,6 +31,19 @@
         "paths": [
           "."
         ]
+      },
+      {
+        "name": "script-structure",
+        "runner": "check-script-structure",
+        "kind": "lint",
+        "command": "python3 scripts/check-script-structure.py",
+        "scope_command": "python3 scripts/check-script-structure.py {paths}",
+        "needs": [],
+        "paths": [
+          "plugins/ndf",
+          "scripts/script-structure-allow",
+          "scripts/check-script-structure.py"
+        ]
       }
     ]
   },

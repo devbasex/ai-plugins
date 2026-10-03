@@ -49,6 +49,21 @@ def _cases(root: ET.Element) -> Iterable[tuple[ET.Element, Optional[str]]]:
         yield root, None
 
 
+def _failed_rows(root: ET.Element) -> Iterable[tuple[ET.Element, dict[str, str]]]:
+    """`failure` / `error` を持つ `testcase` と、その `{file, classname, name}`。"""
+    for case, suite_file in _cases(root):
+        if case.find("failure") is None and case.find("error") is None:
+            continue
+        yield (
+            case,
+            {
+                "file": str(case.get("file") or suite_file or ""),
+                "classname": str(case.get("classname") or ""),
+                "name": str(case.get("name") or ""),
+            },
+        )
+
+
 def failed_cases(xml_bytes: bytes) -> Optional[list[dict[str, str]]]:
     """`failure` / `error` を持つ `testcase` の `{file, classname, name}`。読めなければ `None`。"""
     try:
@@ -57,14 +72,7 @@ def failed_cases(xml_bytes: bytes) -> Optional[list[dict[str, str]]]:
         return None
     out: list[dict[str, str]] = []
     seen = set()
-    for case, suite_file in _cases(root):
-        if case.find("failure") is None and case.find("error") is None:
-            continue
-        row = {
-            "file": str(case.get("file") or suite_file or ""),
-            "classname": str(case.get("classname") or ""),
-            "name": str(case.get("name") or ""),
-        }
+    for _, row in _failed_rows(root):
         key = (row["file"], row["classname"], row["name"])
         if key not in seen:
             seen.add(key)
@@ -114,13 +122,57 @@ def failed_ids(xml_bytes: bytes, tracked: Iterable[str]) -> Optional[list[str]]:
     return out
 
 
-def read_failed_ids(path, tracked: Iterable[str]) -> Optional[list[str]]:
-    """置き場のファイルから落ちた ID を読む。無い・読めなければ `None`。"""
+TEXT_CHARS = 8000  # 1 件の本文に残す文字数。超えたら先頭と末尾を半分ずつ残す（状態ファイルを膨らませない）
+
+
+def _trimmed(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    half = limit // 2
+    return text[:half] + "\n…\n" + text[-half:]
+
+
+def failure_texts(xml_bytes: bytes, tracked: Iterable[str], limit: int = TEXT_CHARS) -> Optional[dict[str, str]]:
+    """落ちたテストの ID ごとの本文（`failure` / `error` の `message` と本文）。読めなければ `None`（#1649）。
+
+    ID は `failed_ids` と同じ形で、相対へ直せない ID は落とす。本文は `limit` 文字に縮める。
+    """
+    try:
+        root = ET.fromstring(xml_bytes)
+    except ET.ParseError:
+        return None
+    files = list(tracked)
+    out: dict[str, str] = {}
+    for case, row in _failed_rows(root):
+        rel = relative_file(row["file"], files)
+        if rel is None:
+            continue
+        parts = [
+            "\n".join(p for p in (str(el.get("message") or ""), str(el.text or "")) if p)
+            for el in (case.findall("failure") + case.findall("error"))
+        ]
+        key = test_id(row, rel)
+        out[key] = _trimmed("\n".join(filter(None, [out.get(key, ""), *parts])), limit)
+    return out
+
+
+def _read_with(path, parse: Callable[[bytes], Any]) -> Any:
+    """置き場のファイルを bytes で読んで `parse` へ渡す。無い・読めなければ `None`。"""
     try:
         with open(path, "rb") as fh:
-            return failed_ids(fh.read(), tracked)
+            return parse(fh.read())
     except OSError:
         return None
+
+
+def read_failure_texts(path, tracked: Iterable[str]) -> Optional[dict[str, str]]:
+    """置き場のファイルから落ちたテストの本文を読む。無い・読めなければ `None`。"""
+    return _read_with(path, lambda data: failure_texts(data, tracked))
+
+
+def read_failed_ids(path, tracked: Iterable[str]) -> Optional[list[str]]:
+    """置き場のファイルから落ちた ID を読む。無い・読めなければ `None`。"""
+    return _read_with(path, lambda data: failed_ids(data, tracked))
 
 
 # ---------- CI の成果物 ----------
