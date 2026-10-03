@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import re
 
-# ワークフローのファイルのパス（根からの相対）
-WORKFLOW_PATH = re.compile(r"\.github/workflows/[^/]+\.ya?ml$")
+# ワークフローの置き場（根からの相対）と、ファイルのパス（根からの相対）
+WORKFLOW_DIR = ".github/workflows"
+WORKFLOW_PATH = re.compile(re.escape(WORKFLOW_DIR) + r"/[^/]+\.ya?ml$")
 
 
 def job_ids(text: str) -> list[str]:

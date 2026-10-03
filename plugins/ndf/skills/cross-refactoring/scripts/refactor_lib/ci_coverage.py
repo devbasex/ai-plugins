@@ -20,7 +20,6 @@ import test_strategy as ts
 COMPARED = "compared"
 SKIPPED = "skipped"
 PROVIDER = "github-actions"
-WORKFLOW_DIR = ".github/workflows"
 
 
 @dataclass(frozen=True)
@@ -63,13 +62,13 @@ def _declared_jobs(decl: dict[str, Any]) -> set[str]:
 
 def _workflows(work: pathlib.Path) -> list[tuple[str, str]]:
     """作業ディレクトリのワークフロー（根からの相対パスと本文）を名前の順に。読めなければ `OSError` 系を投げる。"""
-    base = work / WORKFLOW_DIR
+    base = work / ci_workflows.WORKFLOW_DIR
     if not base.is_dir():
         return []
-    files = sorted(p for p in base.iterdir() if p.suffix in (".yml", ".yaml") and p.is_file())
+    files = sorted(p for p in base.iterdir() if ci_workflows.WORKFLOW_PATH.match(f"{ci_workflows.WORKFLOW_DIR}/{p.name}") and p.is_file())
     out = []
     for p in files:
-        rel = f"{WORKFLOW_DIR}/{p.name}"
+        rel = f"{ci_workflows.WORKFLOW_DIR}/{p.name}"
         try:
             out.append((rel, p.read_text(encoding="utf-8")))
         except (OSError, UnicodeDecodeError) as e:
