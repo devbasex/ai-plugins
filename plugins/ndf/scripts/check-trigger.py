@@ -55,6 +55,7 @@ from __future__ import annotations
 import argparse
 import json
 from collections import Counter
+from contextlib import suppress
 import os
 import re
 import sys
@@ -182,15 +183,12 @@ STATE_BASES = (("CLAUDE_PLUGIN_DATA", Path), ("XDG_STATE_HOME", lambda v: Path(v
 
 def state_base() -> Path:
     """通過記録と同じ順で置き場を決める。"""
-    fallback = Path(os.environ.get("TMPDIR", "/tmp")) / "ndf-checks"
     base = next((make(os.environ[name]) for name, make in STATE_BASES if os.environ.get(name)), None)
-    if base is None:
-        return fallback
-    try:
-        (base / "checks").mkdir(parents=True, exist_ok=True)
-        return base
-    except OSError:
-        return fallback
+    if base is not None:
+        with suppress(OSError):
+            (base / "checks").mkdir(parents=True, exist_ok=True)
+            return base
+    return Path(os.environ.get("TMPDIR", "/tmp")) / "ndf-checks"
 
 
 def log_path(root: Path) -> Path:
