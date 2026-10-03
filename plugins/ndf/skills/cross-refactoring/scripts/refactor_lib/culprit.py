@@ -94,6 +94,11 @@ def _isolate(
     work, strategy = work_dir(state), timeline.strategy_of(state)
     if not test_triage.rerun_groups(strategy, list(test_triage.by_file(tests))):
         return tests  # 走らせ直すコマンドが無い
+    dirty = worktree._dirty_paths(state, work)
+    if dirty:
+        # 外した後の `reset --hard`・`clean -fd` は未コミットの変更を戻せずに消す（C4）。消さずに外すのをやめる
+        info(f"⚠ 未コミットの変更があるため、項目を外した走らせ直しをしません（{', '.join(dirty[:5])}）")
+        return tests
     log_dir = pathlib.Path(state["tmp_dir"])
     for item in candidates:
         if not tests or _past(deadline):
@@ -176,13 +181,32 @@ class Narrowed:
     cut: Optional[str] = None
 
 
-def rerun_passes(state: dict[str, Any], rerun: Any) -> Callable[[], bool]:
-    """落ちたテストを走らせ直し、時間内に通ったかを返す関数を作る（revert_in_order へ渡す）。"""
+def rerun_of(verdict: dict[str, Any]) -> list[str]:
+    """見分けの結果から、変更起因の suite ごとの走らせ直すコマンドを返す。複数形の無い旧い記録は単数を使う。"""
+    commands = list(verdict.get("rerun_commands") or [])
+    return commands or ([verdict["rerun_command"]] if verdict.get("rerun_command") else [])
+
+
+def rerun_passes(state: dict[str, Any], rerun: Any, deadline: Optional[_dt.datetime] = None) -> Callable[[], bool]:
+    """落ちたテストを走らせ直し、時間内に通ったかを返す関数を作る（revert_in_order へ渡す）。
+
+    `rerun` はシェルで走らせる 1 本か、その並び（変更起因の suite ごと）で、すべて通ったときだけ真。各回の上限は
+    `deadline` までの残りで切り詰め、過ぎていれば走らせずに偽を返す。
+    """
     work, limit = work_dir(state), timeline.state_test_timeout(state)
+    commands = [rerun] if isinstance(rerun, str) else list(rerun)
 
     def passes() -> bool:
-        code, timed_out = run_with_timeout(rerun if isinstance(rerun, str) else list(rerun), work, limit)
-        return not timed_out and code == 0
+        for command in commands:
+            left = limit
+            if deadline is not None:
+                left = min(limit, int((deadline - clock.now()).total_seconds()))
+                if left < 1:
+                    return False
+            code, timed_out = run_with_timeout(command, work, left)
+            if timed_out or code != 0:
+                return False
+        return True
 
     return passes
 

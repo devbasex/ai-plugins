@@ -83,6 +83,7 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
     # 1 つの `whole_timeout` に収める。test-run.py の whole と同じ）。落ちたテストの見分けの時間は上限の外に置く。
     # 使い回し・CI で見るときは手元で走らないので渡さない。
     whole_started: Optional[float] = None
+    gate.pop("triage", None)  # 前回の見分けを残さない（今回のテストが通り静的解析だけが落ちたとき、古い変更起因で取り消さない）
     if _reusable_whole_test(state):
         gate["whole_test_reused"] = True
         passed, detail = True, "検証の中で通った全体テストを使い回しました（HEAD は進んでいません）"
@@ -162,6 +163,9 @@ def _reusable_whole_test(state: dict[str, Any]) -> bool:
     return bool(head) and head == record.get("head")
 
 
+_TRIAGE_KEYS = ("failed_tests", "flaky", "preexisting", "caused", "caused_output", "fallback_reason", "rerun_command", "rerun_commands")
+
+
 def _run_and_record_gate_check(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]) -> tuple[bool, str, float]:
     """最終ゲートのチェックを 1 回走らせ、`checks` へ記録して結果を返す。落ちたら見分け、変更起因が無ければ通す。
 
@@ -177,10 +181,7 @@ def _run_and_record_gate_check(path: pathlib.Path, state: dict[str, Any], gate: 
     if not passed and verdict is not None:
         # 落ちたテストを見分ける。変更起因が無ければ通す（I5・決定 11）。
         classified = triage.classify(state, verdict.get("timed_out", False), verdict.get("ci_xmls"))
-        gate["triage"] = {
-            k: classified.get(k)
-            for k in ("failed_tests", "flaky", "preexisting", "caused", "caused_output", "fallback_reason", "rerun_command")
-        }
+        gate["triage"] = {k: classified.get(k) for k in _TRIAGE_KEYS}
         if classified.get("fallback_reason"):
             detail += f" / 見分けを全体の走らせ直しに落とした（{classified['fallback_reason']}）"
         else:

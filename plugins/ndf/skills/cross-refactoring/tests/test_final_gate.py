@@ -438,6 +438,17 @@ def test_a_whole_test_passed_in_verify_at_the_same_head_is_reused(refactor, cmd_
     assert expected in capsys.readouterr().out
 
 
+def test_a_new_gate_run_drops_the_previous_triage(refactor, cmd_gate, tmp_path, env_tmp_dir, spy):
+    """前回の見分けは今回の取り消しの根拠にしない（今回のテストが通れば変更起因は無い）。"""
+    stale = {"caused": ["tests/test_a.py::t"], "rerun_command": "pytest -q tests/test_a.py"}
+    state_path = _state(tmp_path, whole_test=PASSED_IN_VERIFY, final_gate={"fix_rounds": 1, "checks": [], "triage": stale})
+    env_tmp_dir(state_path)
+
+    cmd_gate.cmd_final_gate(_args())
+
+    assert "triage" not in read_state(state_path)["final_gate"]
+
+
 @pytest.mark.parametrize(
     "whole_test",
     [

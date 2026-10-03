@@ -86,7 +86,7 @@ def revert_deferred(path: pathlib.Path, state: dict[str, Any], gate: dict[str, A
     """
     deferred = (state.get("whole_test") or {}).get("deferred") or {}
     verdict = gate.get("triage") or {}
-    rerun = verdict.get("rerun_command")
+    rerun = culprit.rerun_of(verdict)
     if not deferred.get("items") or not verdict.get("caused") or not rerun or not live_items(state):
         return False
     found = culprit.judge(state, gate, verdict, timeline.stop_revert_end(state))

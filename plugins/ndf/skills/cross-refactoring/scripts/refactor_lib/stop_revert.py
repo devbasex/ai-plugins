@@ -51,12 +51,12 @@ def _plan_a(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]) -> 
     end = timeline.stop_revert_end(state)
     record = gate["stop_revert"] = {"plan": "A", "reverted": [], "end_at": end.isoformat() if end else None, "at": statefile.now()}
     verdict = gate.get("triage") or {}
-    rerun = verdict.get("rerun_command")
+    rerun = culprit.rerun_of(verdict)
     if not verdict.get("caused") or not rerun:
         return "落ちたテストを走らせ直す語が無い（変更起因を挙げられない）"
     found = culprit.judge(state, gate, verdict, end)
     narrowed = culprit.revert_in_order(
-        path, state, found.order, REASON_A, culprit.rerun_passes(state, rerun), on_conflict=ON_CONFLICT_RAISE, deadline=end
+        path, state, found.order, REASON_A, culprit.rerun_passes(state, rerun, end), on_conflict=ON_CONFLICT_RAISE, deadline=end
     )
     record["reverted"] = narrowed.reverted
     statefile.save(path, state)
