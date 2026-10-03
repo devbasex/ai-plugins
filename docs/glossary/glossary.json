@@ -3008,6 +3008,18 @@
       "meaning": "変更後の形が適切だと言える根拠。外部の一次情報・実測・利用者の指示の原文のどれか。設計文書の節と承認資料の行に書き、無ければ「無し（理由）」。MVV の根拠の項目とは別のもの",
       "source": "",
       "pending_source": "issues/issue-1289-requirements.md"
+    },
+    {
+      "term": "原因の項目",
+      "context": "ndf-cross-refactoring",
+      "meaning": "全体テストで変更起因として落ちたテストを、その変更で落とした改善項目。危険フラグの有無とは関係しない",
+      "pending_source": "issues/issue-1649-requirements.md"
+    },
+    {
+      "term": "変更起因",
+      "context": "ndf-cross-refactoring",
+      "meaning": "全体テストで落ちたテストのうち、今の HEAD で再び落ち、着手前の HEAD では通るもの。フレーキー・既存失敗と分ける",
+      "pending_source": "issues/issue-1649-requirements.md"
     }
   ]
 }
