@@ -73,3 +73,8 @@ def test_workflow_jobs_counts_this_repository_like_job_ids():
     files = {str(p.relative_to(root)): p.read_text(encoding="utf-8") for p in (root / ".github" / "workflows").glob("*.y*ml")}
     counts = measure_ci.workflow_jobs(FakeTree(files))
     assert counts and all(counts[f] == len(ci_workflows.job_ids(files[f])) > 0 for f in counts)
+
+
+def test_job_ids_reads_keys_with_trailing_comments():
+    text = 'jobs: # CI\n  lint: # 静的解析\n    run: echo "#x"\n  "a#b": # q\n    x: 1\n'
+    assert ci_workflows.job_ids(text) == ["lint", "a#b"]

@@ -14,19 +14,21 @@ MAX_CHARS = 500
 
 _PATTERNS = (
     # URL の資格情報（`https://user:pass@host`・`https://x-access-token:<トークン>@host`・`https://<トークン>@host`）
-    re.compile(r"(?<=://)[^\s/@]+@"),
+    (re.compile(r"(?<=://)[^\s/@]+@"), MASK + "@"),
     # GitHub のトークンの形
-    re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{8,})"),
+    (re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{8,})"), MASK),
     # `x-access-token:<値>` が URL の外に現れたとき
-    re.compile(r"(?<=x-access-token:)[^\s@]+"),
+    (re.compile(r"(?<=x-access-token:)[^\s@]+"), MASK),
+    # 認証ヘッダー（`Authorization: Bearer <値>`・`Authorization: Basic <値>`・`Proxy-Authorization: ...`）は値ごと伏せる
+    (re.compile(r"(?i)\b((?:proxy-)?authorization\s*[:=]\s*)[^\r\n]+"), r"\1" + MASK),
 )
 
 
 def redact_output(text: str, max_lines: int = MAX_LINES, max_chars: int = MAX_CHARS) -> str:
     """認証情報を `***` に置き換え、空でない末尾の `max_lines` 行・`max_chars` 字までに縮める。"""
     out = str(text or "")
-    for pattern in _PATTERNS:
-        out = pattern.sub(lambda m: MASK + ("@" if m.group(0).endswith("@") else ""), out)
+    for pattern, repl in _PATTERNS:
+        out = pattern.sub(repl, out)
     lines = [line.rstrip() for line in out.splitlines() if line.strip()]
     out = "\n".join(lines[-max_lines:]) if max_lines > 0 else ""
     return out if len(out) <= max_chars else "…" + out[-(max_chars - 1) :]

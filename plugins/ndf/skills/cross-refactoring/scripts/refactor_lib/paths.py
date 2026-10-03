@@ -76,12 +76,13 @@ def _find_state(state_id: int) -> pathlib.Path:
     if env:
         candidates.append(state_path(pathlib.Path(env), state_id))
     candidates.append(state_path(pathlib.Path.cwd() / ".cross_refactoring", state_id))
-    fallback = default_tmp_dir(state_id)
-    if fallback is not None:
-        candidates.append(state_path(fallback, state_id))
     for c in candidates:
         if c.exists():
             return c
+    # 既定の置き場は git を 1 回起動して求めるため、先の候補で見つからないときだけ解決する
+    fallback = default_tmp_dir(state_id)
+    if fallback is not None and state_path(fallback, state_id).exists():
+        return state_path(fallback, state_id)
     die(f"状態ファイルが見つかりません（rf{state_id}）。CROSS_REFACTORING_TMP_DIR を export してから実行してください")
     raise SystemExit(1)  # die が抜けることはないが型のために置く
 

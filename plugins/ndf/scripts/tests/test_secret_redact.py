@@ -30,3 +30,16 @@ def test_redact_keeps_the_last_lines_and_chars():
     long = "x" * 2000
     out = redact(long)
     assert len(out) == 500 and out.startswith("…")
+
+
+def test_redact_hides_authorization_header_values():
+    text = "\n".join(
+        [
+            "> Authorization: Bearer abc.def-ghi",
+            "authorization: Basic dXNlcjpwYXNz",
+            "Proxy-Authorization: token sekrit",
+        ]
+    )
+    out = redact(text)
+    assert "abc.def-ghi" not in out and "dXNlcjpwYXNz" not in out and "sekrit" not in out
+    assert "Authorization: ***" in out and "authorization: ***" in out
