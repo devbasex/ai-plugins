@@ -24,7 +24,8 @@ def _args(state_id=130):
 
 def _gate_state(tmp_path, **over):
     over.setdefault("baseline_test", {"command": "pytest -q", "status": "green", "checked_at": "2026-09-24T10:00:00", "seconds": 6.0})
-    return make_state_v2(tmp_path, tmp_path / "work", phase="final", workflow_step=True, **over)
+    over.setdefault("workflow_step", True)
+    return make_state_v2(tmp_path, tmp_path / "work", phase="final", **over)
 
 
 @pytest.fixture
@@ -432,8 +433,8 @@ def test_a_usage_limit_on_the_final_fix_stops_the_fix(cmd_gate, tmp_path, env_tm
 
 
 def test_the_gate_after_the_cap_reports_without_reverting(cmd_gate, tmp_path, env_tmp_dir, merge_spy, gate_spy):
-    """AC30: 上限に達した後の最終ゲートは、落ちても取り消さず報告で終わる。"""
-    state_path = _failing_gate_state(tmp_path)
+    """AC30: 単独で起動したとき、上限に達した後の最終ゲートは、落ちても取り消さず報告で終わる（#1669 AC9）。"""
+    state_path = _failing_gate_state(tmp_path, workflow_step=False)
     env_tmp_dir(state_path)
     (state_path.parent / "codex-final-fix-monitor.json").write_text(
         __import__("json").dumps({"reason": "usage_limit", "detail": "上限"}), encoding="utf-8"
