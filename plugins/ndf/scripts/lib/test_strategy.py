@@ -447,6 +447,62 @@ def _args_suites(template: str, kind: str, declared: list[Suite], scope_paths: O
     return [*same, arg, *others]
 
 
+def _round_only_from_args(
+    baseline_test: Optional[str],
+    round_test: str,
+    kind: str,
+    declared: list[Suite],
+    others: list[Suite],
+    scope_paths: Optional[list[str]],
+) -> Strategy:
+    """`--round-test` に `{paths}` が無い経路（そのまま走らせる）。"""
+    notes: list[str] = []
+    # 全体テストは `--baseline-test`（`{paths}` を含めば種別の規則で組む）→ 宣言の suite の `command`。
+    # どちらも無ければラウンドテストが全体を兼ねる。
+    if baseline_test and has_paths(baseline_test):
+        suites = _args_suites(baseline_test, kind, declared, scope_paths, notes)
+    elif baseline_test:
+        suites = [Suite("args", str(baseline_test), None, paths=["."], kind=kind), *others]
+    else:
+        suites = [s for s in declared if s.command]
+    notes.insert(0, "--round-test をそのまま走らせる")
+    return Strategy(ROUND_ONLY, "args", suites, round_command=str(round_test), notes=notes, round_kind=kind)
+
+
+def _template_from_args(
+    decl: dict[str, Any],
+    test: Optional[dict[str, Any]],
+    template: str,
+    flag: str,
+    declared_name: str,
+    ci_check: Optional[str],
+    kind: str,
+    declared: list[Suite],
+    scope_paths: Optional[list[str]],
+) -> Strategy:
+    """雛形（`--round-test` か `--baseline-test` が `{paths}` を含む）の経路。"""
+    problem = template_problem(template, flag)
+    if problem:
+        raise StrategyError(problem)
+    notes: list[str] = []
+    name = declared_name if declared_name in STRATEGIES and declared_name != ROUND_ONLY else LOCAL_FULL
+    suites = _args_suites(template, kind, declared, scope_paths, notes)
+    ci = _ci_target(test or {}, decl, ci_check) if name == LOCAL_SCOPED_CI_WHOLE else None
+    return Strategy(name, "args", suites, ci=ci, notes=notes)
+
+
+def _baseline_only_from_args(baseline_test: str, kind: str, others: list[Suite]) -> Strategy:
+    """`--baseline-test` だけ（`{paths}` 無し）の経路。"""
+    return Strategy(
+        ROUND_ONLY,
+        "args",
+        others,
+        round_command=str(baseline_test),
+        notes=["--baseline-test に {paths} が無いため、項目ごとに全体テストを走らせる"],
+        round_kind=kind,
+    )
+
+
 def _from_args(
     decl: dict[str, Any],
     baseline_test: Optional[str],
@@ -463,36 +519,14 @@ def _from_args(
         _check_kind(suite.kind, f"test.suites[{i}].kind")
     others = [s for s in declared if s.kind != kind]
     _check_templates(others)
-    notes: list[str] = []
     if round_test and not has_paths(round_test):
-        # 全体テストは `--baseline-test`（`{paths}` を含めば種別の規則で組む）→ 宣言の suite の `command`。
-        # どちらも無ければラウンドテストが全体を兼ねる。
-        if baseline_test and has_paths(baseline_test):
-            suites = _args_suites(baseline_test, kind, declared, scope_paths, notes)
-        elif baseline_test:
-            suites = [Suite("args", str(baseline_test), None, paths=["."], kind=kind), *others]
-        else:
-            suites = [s for s in declared if s.command]
-        notes.insert(0, "--round-test をそのまま走らせる")
-        return Strategy(ROUND_ONLY, "args", suites, round_command=str(round_test), notes=notes, round_kind=kind)
-    template = round_test if has_paths(round_test) else (baseline_test if has_paths(baseline_test) else None)
-    if template:
-        problem = template_problem(template, "--round-test" if has_paths(round_test) else "--baseline-test")
-        if problem:
-            raise StrategyError(problem)
-        name = declared_name if declared_name in STRATEGIES and declared_name != ROUND_ONLY else LOCAL_FULL
-        suites = _args_suites(template, kind, declared, scope_paths, notes)
-        ci = _ci_target(test or {}, decl, ci_check) if name == LOCAL_SCOPED_CI_WHOLE else None
-        return Strategy(name, "args", suites, ci=ci, notes=notes)
+        return _round_only_from_args(baseline_test, round_test, kind, declared, others, scope_paths)
+    if has_paths(round_test):
+        return _template_from_args(decl, test, str(round_test), "--round-test", declared_name, ci_check, kind, declared, scope_paths)
+    if has_paths(baseline_test):
+        return _template_from_args(decl, test, str(baseline_test), "--baseline-test", declared_name, ci_check, kind, declared, scope_paths)
     if baseline_test:
-        return Strategy(
-            ROUND_ONLY,
-            "args",
-            others,
-            round_command=str(baseline_test),
-            notes=["--baseline-test に {paths} が無いため、項目ごとに全体テストを走らせる"],
-            round_kind=kind,
-        )
+        return _baseline_only_from_args(baseline_test, kind, others)
     return None
 
 
