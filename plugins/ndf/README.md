@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.56）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.57-dev.1）
 ```
 
 ### agy
@@ -119,18 +119,11 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.56 へ更新するとき
+## v10.17.57-dev.1 へ更新するとき
 
-- 進捗記録のスクリプトを実行すると、通過記録も同じスクリプトが積む（#1646）（#1663）
-- スプリントの設計 PR の題は、設計文書の H1 から作られる（#1647）（#1663）
-- 設計文書の雛形に、承認する人が読む欄がある。承認資料と design・pr・requirements-design・document-restructuring の各 Skill はこの欄を指す（#1647）（#1663）
-- 設計文書の雛形にある legacy-refactor の記述は、今の決まりだけを書いた形になっている（#1647）（#1663）
-- 棚卸しは工程表とフェーズの表に 1 行として載り、ほかの工程と同じ流れで進みます（#1650）（#1663）
-- 棚卸しで挙げる候補の数には上限があります（#1650）（#1663）
-- 棚卸しの結果を書き込む前に、書き込む先が照合されます（#1650）（#1663）
-- 最終工程の Skill（release・release-verification など）は棚卸しを呼び出しません（#1650）（#1663）
-- merged の工程で worktree を退避するとき、作り直せる生成物は退避先へ残らない（#1662）（#1663）
-- 退避先は本番リリースの後片付けで消える（#1662）（#1663）
+- cross-refactoring で全体テストが落ちると、落ちたテストの本文に現れるパスから原因の項目を割り出し、その項目を取り消しの対象にする（#1671）（#1673）
+- 工程の 1 つでは、打ち切りの後に取り消してから終える（#1671）（#1673）
+- 打ち切りの後の扱いは、起動のされ方によって分かれる。分かれ方は文書に記載した（#1671）（#1673）
 
 ## Playwright テストについて
 
@@ -421,7 +414,7 @@ agy models   # 認証確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.56/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.57-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -443,14 +436,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.56/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.57-dev.1/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.56  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.57-dev.1  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
