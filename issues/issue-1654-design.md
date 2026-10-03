@@ -86,10 +86,11 @@ E7 は E2 を順序の前提に持つ。変更の後は、E5 の後に E7 が起
 | 要素 | 責務 | 変更 |
 | --- | --- | --- |
 | `plugins/ndf/scripts/lib/deps.py` | 依存の欠けの終了コードを持つ唯一の場所。`_stop` が 69 で終える | 定数 `EXIT_PRECONDITION = 3` を `EXIT_DEPS_MISSING = 69` に替える。docstring の「終了コード 3」2 か所を 69 に直す |
+| `plugins/ndf/scripts/relay_lib/runtime.py` | ラッパー（ndf-relay）の環境を作れない・環境が無いときの終わり方 | 131 行目と 144 行目の `return deps.EXIT_PRECONDITION` を `return step_result.EXIT_PRECONDITION`（3 のまま）に替え、`import step_result` を足す。値は変えない（決定 5） |
 | `plugins/ndf/scripts/lib/step_result.py` | 共通の終了コードの定数と `code_matches` | `import deps` で `EXIT_DEPS_MISSING = deps.EXIT_DEPS_MISSING` を持ち、`code_matches("stopped", …)` の値の組へ足す |
 | `plugins/ndf/scripts/lib/README.md` | 終了コードの表の正本と、`deps.py` の行 | 表に 69 の行を足す。`deps.py` の行の「終了コード 3」を 69 に直す |
 | `plugins/ndf/scripts/supervise_lib/steps.py`・`engine.py` | run のステップの `skip_to` と `実行の条件` の判定 | 変えない。69 は `skip_code`（3）とも承認ゲート（10〜19）とも一致せず、既存の分岐で `on_fail` か `止まった` へ進む（決定 3） |
-| `plugins/ndf/skills/cross-refactoring/SKILL.md` | assess の打ち方と終了コードの読み方・`scripts/refactor.py` の説明 | 「前提」の節に 0・2・3・69 の 4 つの読み方を書く。`refactor.py` の説明から「標準ライブラリのみ」を外し、`md` / `mdtable` のグループを `deps.require` で用意すると書く |
+| `plugins/ndf/skills/cross-refactoring/SKILL.md` | assess の打ち方と終了コードの読み方・`scripts/refactor.py` の説明 | 「前提」の節に 0・2・3・69 の 4 つの読み方と、`uv run` 自身の失敗の 1（決定 6）を書く。`refactor.py` の説明から「標準ライブラリのみ」を外し、`md` / `mdtable` のグループを `deps.require` で用意すると書く |
 | `plugins/ndf/skills/cross-refactoring/scripts/refactor.py` | `assess` の help | help の終了コードの一覧に「69 = 依存が欠けた（判定していない）」を足す |
 | `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/assess.py` | `cmd_assess` の docstring の終了コードの一覧 | 同じ一覧に 69 を足す |
 | `docs/glossary/glossary.json`・`docs/glossary.md` | 用語集 | 「依存の欠け」を足し、`glossary.py render` で作り直す |
@@ -126,12 +127,12 @@ graph LR
 
 2026-10-03（b96fc6fb）に、テストを除く `plugins/` と `scripts/` を検索した。`deps.require` の語を含むファイルは 61 で、うち行頭でコードとして呼ぶものは 34（`deps.py` 自身の docstring を含む）である。根の `scripts/` の 7 ファイルは `scripts/lib/ndf_wrappers.py` の `require` を通して呼ぶ。差は docstring とコメントで、`lib/` のモジュール（`md.py`・`locks.py` など）が「使う側は先に呼ぶ」と書くものである。
 
-依存の欠けを 3 と読む呼び手を、次の 3 つで探して 0 件だった（前提 4 の確かめ）。
+依存の欠けを 3 と読む呼び手を、次の 3 つで探した（前提 4 の確かめ）。依存の欠けを 3 として意図して読む呼び手は無い。ただし `deps.require` を呼ぶコマンドの 3 を自前の意味で読む呼び手が 1 つあり（cross-review の `drive.py:336`）、依存の欠けをその意味へ取り違えている。この経路も 69 への変更で直る（下の表と「移行性」）。
 
 | 検索 | 対象 | 結果 |
 | --- | --- | --- |
-| `\[ndf deps\]` と `deps.EXIT` | `plugins/`・`scripts/` の `.py` / `.sh` / `.md`（テストを除く） | `deps.py` と README の `deps.py` の行だけ |
-| `== 3` / `-eq 3` / `3)` | `plugins/`・`scripts/` の `.py` / `.sh`（テストを除く） | 3 を読むのは `steps.py:109` と `engine.py:388`（`skip_code`）だけ。どちらも依存の欠けではなく「飛ばしてよい」を読む |
+| `\[ndf deps\]` と `deps.EXIT` | `plugins/`・`scripts/` の `.py` / `.sh` / `.md`（テストを除く） | `deps.py`・README の `deps.py` の行・`relay_lib/runtime.py:131` と `:144`（`return deps.EXIT_PRECONDITION`）。runtime.py の 2 か所は改名で AttributeError になるため、`step_result.EXIT_PRECONDITION` へ替える（決定 5） |
+| `== 3` / `-eq 3` / `3)` | `plugins/`・`scripts/` の `.py` / `.sh`（`plugins/ndf/skills` を含む。テストを除く） | `steps.py:109` と `engine.py:388`（`skip_code`）は依存の欠けではなく「飛ばしてよい」を読む。`cross-review/scripts/drive.py:336` は `state.py merge-fix` の 3 を `merge_fix.py` の自前のコード（ci-code-fail）と読んで `sweep-start` へ進む。`state.py` は import の時点で `deps.require("github", "mdtable", "durable")` を呼ぶ（`state.py:29`）ため、依存が欠けると今は `deps._stop` の 3 で終わり、`drive.py` はそれを ci-code-fail と取り違えて最終スイープへ進む。69 の後は `must` が `Stop`（`state.py merge-fix が終了コード 69 で止まった`）で止まり、取り違えが消える |
 | `uv` / `依存` / `外部パッケージ` と「終了コード 3」の近接 | `plugins/`・`docs/` の `.md`（`CHANGELOG.md` と開発履歴を除く） | README の `deps.py` の行と、実験版の台帳 `docs/ndf-experiments.md` の `deps-trial.py` の行だけ |
 
 `skip_to` / `実行の条件` が打つ 5 つのコマンドのうち、`deps.require` を呼ぶのは `refactor.py assess` だけである。`check-trigger.py`（`eval` / `changed` / `finish`）は `deps.require` を呼ばず、import する `lib/` のモジュールも import の時点では呼ばない。`procedures.py` の `_skip_condition` は `exit 3` を打つだけである。
@@ -145,8 +146,8 @@ graph LR
 | 名前 | `deps.require(<グループ>, ...)` を呼ぶすべてのエントリポイントの、依存の欠けのときの終わり方 |
 | 入力 | 変わらない（グループの名前・`project=`・環境変数 `NDF_DEPS_REEXEC` / `NDF_DEPS_VENV`） |
 | 出力 | 成功: 変わらない（戻るか、uv の環境で起動し直す）。失敗: 標準エラーに `❌ [ndf deps] <理由>` の 1 行、標準出力は空 |
-| 失敗の形 | 起動し直した後も import できない・`pyproject.toml` と `uv.lock` が無い・uv を入れられない の 3 つとも終了コード **69**（今は 3） |
-| 互換性 | 3 を依存の欠けと読む呼び手は無い（上の検索）。3 を「飛ばしてよい」と読む supervise は、依存の欠けを飛ばさなくなる（直したい振る舞い）。0 以外を失敗と読む呼び手は変わらない |
+| 失敗の形 | 起動し直した後も import できない・`pyproject.toml` と `uv.lock` が無い・uv を入れられない の 3 つとも終了コード **69**（今は 3）。**uv はあるが `uv run` 自身が失敗する**（ネットワークが無い・lock を解決できない）ときは、`os.execve` で `uv run` に置き換わった後のため `deps._stop` を通らず、uv の終了コード **1** と uv の `error:` の行で終わる（69 にも `❌ [ndf deps]` の行にもならない。決定 6） |
+| 互換性 | 3 を依存の欠けと意図して読む呼び手は無い（上の検索）。3 を「飛ばしてよい」と読む supervise は、依存の欠けを飛ばさなくなる（直したい振る舞い）。`drive.py:336` は依存の欠けを ci-code-fail と取り違えなくなり、止まる（直したい振る舞い）。0 以外を失敗と読む呼び手は変わらない |
 
 共通の終了コードの表（`plugins/ndf/scripts/lib/README.md`）は次の形になる。3 の行は今のまま（依存の欠けを含まない）。
 
@@ -160,7 +161,7 @@ graph LR
 | 20〜29 | `gate` | LLM の判断待ち |
 | 69 | `stopped` | 依存の欠け。`deps.require` が外部パッケージを用意できずに止まった。手順は何も判定していない。「飛ばしてよい」とも 3 とも読まない（値の持ち主は `deps.py`） |
 
-`refactor.py assess` の終了コードは次の 4 つになる。
+`refactor.py assess` の終了コードは次の 4 つと、`uv run` 自身の失敗の 1 になる。SKILL.md の「前提」の節にも 5 行とも書く。
 
 | 終了コード | 意味 | cross-refactoring を |
 | --- | --- | --- |
@@ -168,6 +169,7 @@ graph LR
 | 3 | 差分が無い（飛ばしてよい） | 起動しない |
 | 2 | `<base>` を解けない（判定できない） | 飛ばしてよいとは読まない。起点を直して打ち直す |
 | 69 | 依存が欠けた（判定していない） | 起動するかを決めない。標準エラーの理由を見て依存を入れ、打ち直す |
+| 1 | `uv run` 自身が失敗した（ネットワークが無い・lock を解決できない。判定していない）。標準エラーは uv の `error:` の行 | 69 と同じに扱う。supervise は `skip_code` と読まず `on_fail` へ進む |
 
 ## 処理の流れ
 
@@ -184,6 +186,8 @@ sequenceDiagram
     else import できず uv がある
         D->>D: uv run で起動し直す（NDF_DEPS_REEXEC=自分）
         D->>A: 起動し直した assess
+    else uv run 自身が失敗する（ネットワークが無い・lock を解決できない）
+        D-->>S: 1（標準エラーに uv の error: の行）
     else 起動し直した後も import できない・宣言が無い・uv を入れられない
         D-->>S: 69（標準エラーに ❌ [ndf deps]）
     end
@@ -193,7 +197,7 @@ sequenceDiagram
         S->>S: 承認ゲート
     else 0
         S->>S: next（refactor）へ
-    else 2・69・ほか
+    else 1・2・69・ほか
         S->>S: on_fail（refactor）へ。on_fail が無ければ 結果: 止まった
     end
 ```
@@ -205,7 +209,7 @@ sequenceDiagram
 | 大項目 | 要求の条件 | 実現方式 | 確かめ方 |
 | --- | --- | --- | --- |
 | 運用・保守性 | 依存の欠けの終了コードを持つのは `deps.py` の定数 1 つだけにする。値を写した定数を Skill ごとに置かない（Value 6） | `deps.py` に `EXIT_DEPS_MISSING = 69` を置き、`step_result.py` は `deps.EXIT_DEPS_MISSING` を参照する。SKILL.md と help は値を文で書くが、コードの定数は増やさない | `step_result.EXIT_DEPS_MISSING is deps.EXIT_DEPS_MISSING` のテスト（I4）と、テストを除く `plugins/ndf` で `= 69` を書くのが `deps.py` の 1 行だけ |
-| 移行性 | 依存の欠けを 3 と読んでいた呼び手は前提 4 のとおりテストだけで、利用者の側の移行の作業は要らない | 「`deps.require` を呼ぶ側」の 3 つの検索で、読む側がテストだけと確かめた。テストの期待値を同じ変更で直す | 全体テストが通る |
+| 移行性 | 依存の欠けを 3 と意図して読む呼び手は前提 4 のとおりテストだけで、利用者の側の移行の作業は要らない。3 を自前の意味で読んで依存の欠けを取り違えていた `drive.py:336` は、69 で止まるようになる（この経路も 69 で解消される） | 「`deps.require` を呼ぶ側」の 3 つの検索で確かめた。テストの期待値を同じ変更で直す。`relay_lib/runtime.py` は `step_result.EXIT_PRECONDITION` へ替えて 3 を保つ | 全体テストが通る（`test_relay.py` の終了コード 3 の期待値を含む） |
 
 ## 決定の記録
 
@@ -221,7 +225,7 @@ sequenceDiagram
 
 依存の欠けを出すのは `deps._stop` の 1 か所で、値を決める責務もそこにある。`step_result.py` は `import deps`（同じ `lib/` にあり、標準ライブラリだけで、import の時点では何もしない）で値を受け、`code_matches` の `stopped` の組へ足す。表の正本の README は値と持ち主を書く。
 
-`step_result.py` に定数を置いて `deps.py` から import する形は採らない。`deps.py` はラッパー（`relay_lib/runtime.py`）にも `find_uv` などを使われる最下層で、`proc` を import する `step_result.py` へ依存させると、最下層が上の層を引き込む。両方に 69 を書く形は、要求の「値を写した定数を置かない」に反する。
+`step_result.py` に定数を置いて `deps.py` から import する形は採らない。`deps.py` はラッパー（`relay_lib/runtime.py`）にも `find_uv`・`install_uv`・`venv_dir`・`GROUPS` などを使われる最下層で（今は `EXIT_PRECONDITION` も使われる。決定 5 で外す）、`proc` を import する `step_result.py` へ依存させると、最下層が上の層を引き込む。両方に 69 を書く形は、要求の「値を写した定数を置かない」に反する。
 
 根拠: Value 6（MVV 版 2）
 
@@ -239,6 +243,20 @@ sequenceDiagram
 
 根拠: Value 1 / Value 9（MVV 版 2）
 
+### 決定 5: ラッパーの環境が無いときの終了コードは 3 のまま保ち、参照先を `step_result.EXIT_PRECONDITION` へ替える
+
+`relay_lib/runtime.py` の 2 か所（環境を作れない・環境が無い）は、`deps.require` の経路ではなく、ラッパー（ndf-relay）自身の「前提が無い」で、`install` の lock の取り合いや設定ディレクトリを作れないときの 3 と同じ契約に属する（`test_relay.py` が 3 を縛る）。supervise もほかのスクリプトもこの 3 を「飛ばしてよい」と読まない。69 へ替えるとラッパーの契約の中で値が割れるため、値は 3 のまま、共通の契約の定数（`step_result.EXIT_PRECONDITION`。標準ライブラリと `proc` だけを import する）を参照する。これで `deps.py` から `EXIT_PRECONDITION` を外しても AttributeError にならない。
+
+根拠: Value 1 / Value 6（MVV 版 2）
+
+### 決定 6: `uv run` 自身の失敗は 69 へ揃えず、uv の終了コード 1 のまま読み方を書く
+
+`deps.require` は `os.execve` で `uv run --frozen` に置き換わるため、uv が環境を作れない（ネットワークが無い・lock を解決できない）ときは uv の終了コードで終わる。2026-10-03 に、解けない依存を持つ project で `uv run --offline --project . python -c 1` を打って `exit=1` と `error: No solution found when resolving dependencies` を確かめた。1 は `skip_code`（3）とも承認ゲートとも一致しないため、supervise は飛ばさず `on_fail` へ進み、#1654 の現象（黙って飛ばされる）は起きない。
+
+69 へ揃えるには、`execve` をやめて子プロセスで待つ・先に `uv sync` を打つなどで起動の形を変えることになり、プロセスが 1 段増え、終了シグナルと標準入出力の受け渡しを作り直す必要がある。直したい現象には要らないため採らず、入出力の契約と SKILL.md の「前提」の節に「1 は uv run 自身の失敗で、判定していない。69 と同じに扱う」と書く。
+
+根拠: Value 1 / Value 3（MVV 版 2）
+
 ## テスト設計
 
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
@@ -252,6 +270,7 @@ sequenceDiagram
 | 受け入れ条件 7・I3 | `code_matches("stopped", 69)` が真、`code_matches("ok", 69)` と `code_matches("gate", 69)` が偽 | `code_matches` の `stopped` の組から 69 を外す |
 | I2 | `deps.EXIT_DEPS_MISSING` が 0〜3 と 10〜29 のどれでもない | 値を 3 や 10〜29 の値に変える |
 | I4 | `step_result.EXIT_DEPS_MISSING` が `deps.EXIT_DEPS_MISSING` と同じもの | `step_result.py` に 69 を直に書いて片方だけ変える |
+| 決定 5 | ラッパーの環境を作れないときの `install` が終了コード 3 で止まる（既存の `test_install_stops_when_env_cannot_be_made`） | `runtime.py` が `deps.EXIT_PRECONDITION` を参照したまま残る（AttributeError） |
 | 受け入れ条件 8・9 | テストを書かない（`.md` の文言を照合しない）。レビューで SKILL.md の「前提」の節と `refactor.py` の説明を読む | — |
 | 受け入れ条件 10 | 全体テスト・`python3 scripts/check-skill-frontmatter.py`・`claude plugin validate .` が 0 で終わる | — |
 
@@ -259,7 +278,7 @@ sequenceDiagram
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #1654 | 実装する | — | `plugins/ndf/scripts/lib/deps.py`、`plugins/ndf/scripts/lib/step_result.py`、`plugins/ndf/scripts/lib/README.md`、`plugins/ndf/skills/cross-refactoring/SKILL.md`、`plugins/ndf/skills/cross-refactoring/scripts/refactor.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/assess.py`、`plugins/ndf/scripts/tests/`、`docs/glossary/glossary.json`、`docs/glossary.md` |
+| #1654 | 実装する | — | `plugins/ndf/scripts/lib/deps.py`、`plugins/ndf/scripts/lib/step_result.py`、`plugins/ndf/scripts/lib/README.md`、`plugins/ndf/scripts/relay_lib/runtime.py`、`plugins/ndf/skills/cross-refactoring/SKILL.md`、`plugins/ndf/skills/cross-refactoring/scripts/refactor.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/assess.py`、`plugins/ndf/scripts/tests/`、`docs/glossary/glossary.json`、`docs/glossary.md` |
 
 ## 未確認のまま残ること
 
@@ -268,5 +287,6 @@ sequenceDiagram
 | 受け入れ条件 1 の自動テストの形 | 全体テストの venv には `md` / `mdtable` が入っているため、依存の欠けた python の用意の仕方（`/usr/bin/python3` の有無に頼らない形）は `tdd-cycle` で走らせて決める。手で打つ確かめは要求の「検証手段」の起動の行で行う |
 | assess の `on_fail` の先 | 依存が欠けた環境では、`on_fail` の refactor（cross-refactoring の駆動）も同じ依存を要るため止まる。受け入れ条件 3 は `on_fail` へ進むことまでを求め、その先の止まり方は今の振る舞いのままである |
 | mcp-serena の `serena_lsp/env.py` | 依存を用意できないときに終了コード 3 で終わり、docstring が「NDF の `deps.require()` と同じ契約」と書く。この変更の後は契約が食い違う。今その 3 を「飛ばしてよい」と読む呼び手は無い。別の課題にするかを conductor が決める（決定 4） |
+| cross-review の `drive.py:336` の経路の自動テスト | 依存の欠けた環境で `state.py merge-fix` が 69 で終わり `drive.py` が `sweep-start` へ進まず止まることは、この変更では自動テストで縛らない（受け入れ条件に無い）。`must` の既存の分岐（`ok=(0,)` 以外は `Stop`）に頼る |
 | 終了コード 3 の 2 つの意味の分離（要求の前提 5） | 別の課題として起こすかを conductor が決める（要求の「未決」） |
 | 実験版の `deps-trial.py`・`hook-trial.py` | 依存の欠けを 3 で返す。実験版は既定の振る舞いに入らず、台帳の行き先は「L0 へ移したら消す」。この変更では触らない |
