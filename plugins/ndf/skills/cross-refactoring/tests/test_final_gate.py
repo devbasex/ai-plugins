@@ -637,6 +637,7 @@ def test_a_caused_failure_after_the_deadline_reverts_the_deferred_items_newest_f
 
     patch_lib("drop", fake_drop)
     patch_lib("push_with_retry_marker", lambda *a, **k: pushed.append(True))
+    patch_lib("_dirty_paths", lambda state, work: [])  # 作業ツリーは git でない（drop を差し替える）
     state_path = _ci_whole_state(
         tmp_path,
         workflow_step=False,
@@ -683,6 +684,7 @@ def test_the_deferred_revert_reverts_the_culprit_named_by_the_failure_not_the_fl
 
     patch_lib("drop", fake_drop)
     patch_lib("push_with_retry_marker", lambda *a, **k: None)
+    patch_lib("_dirty_paths", lambda state, work: [])
     culprit = sys.modules["refactor_lib.culprit"]
     monkeypatch.setattr(culprit, "_changed_by", lambda work, item: {"I2": ["src/i2.py"]}.get(item["id"], [f"src/{item['id']}.py"]))
     items = [_item("I1", 1), {**_item("I2", 2), "danger": []}, _item("I3", 3)]

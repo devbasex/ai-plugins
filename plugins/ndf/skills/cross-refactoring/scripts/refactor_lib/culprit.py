@@ -187,6 +187,12 @@ def rerun_of(verdict: dict[str, Any]) -> list[str]:
     return commands or ([verdict["rerun_command"]] if verdict.get("rerun_command") else [])
 
 
+def one_command(rerun: Any) -> str:
+    """走らせ直すコマンドの並びを、suite の区切りを残した 1 本にする（launch-cli.sh は並びを空白で連結するため）。"""
+    commands = [rerun] if isinstance(rerun, str) else [str(c) for c in rerun]
+    return commands[0] if len(commands) == 1 else " && ".join(f"( {c} )" for c in commands)
+
+
 def rerun_passes(state: dict[str, Any], rerun: Any, deadline: Optional[_dt.datetime] = None) -> Callable[[], bool]:
     """落ちたテストを走らせ直し、時間内に通ったかを返す関数を作る（revert_in_order へ渡す）。
 
@@ -225,6 +231,7 @@ def revert_in_order(
 
     通った時点で、修正へ回していた（`failing`）残りの項目は `verified` へ戻す。`on_conflict="raise"` なら積み直しの
     衝突で止めて `cut="conflict"` を返す。`deadline` を過ぎたら次の取り消しを始めず `cut="deadline"` を返す。
+    最初の取り消しの前に未コミットの変更があれば、`drop` の `reset --hard` が消すため捨てずに終了コード 4 で止まる。
     """
     queue = list(order) + [i["id"] for i in newest_first(live_items(state)) if i["id"] not in order]
     reverted: list[str] = []
@@ -234,6 +241,8 @@ def revert_in_order(
             continue
         if _past(deadline):
             return Narrowed(reverted, False, CUT_DEADLINE)
+        if not reverted:
+            worktree.stop_if_dirty(state, work_dir(state), "項目を取り消す")
         item["failure_reason"] = reason
         try:
             drop(path, state, [item_id], reason, on_conflict=on_conflict)

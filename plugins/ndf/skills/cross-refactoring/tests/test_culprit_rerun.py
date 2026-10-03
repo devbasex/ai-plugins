@@ -8,6 +8,7 @@
 | 見分けの記録 | 単数しか持たない旧い記録は単数を使う |
 | 検証の走らせ直し | 修正の後の確かめは変更起因の suite のすべてを走らせる |
 | 寄せた項目の取り消し | 取り消しの順と走らせ直しの両方が打ち切りの後の取り消しの締め切りで止まる |
+| 取り消しの前の未コミットの変更 | 案 A・寄せた項目・絞り込みが共通に使う取り消しは、`drop` を呼ばずに終了コード 4 で止まる |
 """
 
 from __future__ import annotations
@@ -116,3 +117,19 @@ def test_deferred_revert_stops_at_the_stop_revert_deadline(refactor, tmp_path, m
 
     assert gate_ci.revert_deferred(tmp_path / "state.json", state, gate) is False
     assert seen == {"passes": end, "order": end}
+
+
+def test_revert_in_order_stops_before_discarding_uncommitted_changes(refactor, tmp_path, monkeypatch):
+    culprit = _culprit(refactor)
+    dropped: list = []
+    monkeypatch.setattr(culprit.worktree, "_dirty_paths", lambda state, work: ["src/calc.py"])
+    monkeypatch.setattr(culprit, "drop", lambda *a, **kw: dropped.append(a))
+    state = {**_state(tmp_path), "items": [{"id": "I1", "status": "verified"}]}
+
+    try:
+        culprit.revert_in_order(tmp_path / "state.json", state, ["I1"], "r", lambda: True)
+        code = 0
+    except SystemExit as e:
+        code = e.code
+
+    assert code == 4 and dropped == []

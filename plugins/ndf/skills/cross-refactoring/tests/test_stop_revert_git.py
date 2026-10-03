@@ -212,3 +212,19 @@ def test_plan_b_stops_without_discarding_uncommitted_changes(flow, cmd_setup, cm
 
     assert code == 4 and _head(work) == head
     assert "# 待機中に加えた変更" in open(f"{work}/{target}", encoding="utf-8").read()
+
+
+def test_plan_a_stops_without_discarding_uncommitted_changes(flow, cmd_setup, cmd_implement, cmd_converge, cmd_gate, capsys):
+    """案 A の取り消し（drop の reset --hard）も、未コミットの変更があれば捨てずに終了コード 4 で止まる。"""
+    work = flow["work"]
+    _verified_run(flow, cmd_setup, cmd_implement, cmd_converge)
+    head = _head(work)
+    _cut_off(flow, minutes_ago=61)
+    target = next(p for p in git("ls-files", cwd=work).stdout.split() if p.endswith(".py"))
+    with open(f"{work}/{target}", "a", encoding="utf-8") as f:
+        f.write("# 待機中に加えた変更\n")
+
+    code, _ = _gate(cmd_gate, capsys)
+
+    assert code == 4 and _head(work) == head
+    assert "# 待機中に加えた変更" in open(f"{work}/{target}", encoding="utf-8").read()
