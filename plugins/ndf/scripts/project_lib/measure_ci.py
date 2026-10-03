@@ -14,6 +14,7 @@ import statistics
 import subprocess
 import time
 
+import ci_workflows
 import junit
 import repo as repo_id
 import run_metrics
@@ -81,23 +82,9 @@ def _span(start, end) -> float | None:
 
 
 def workflow_jobs(tree: Tree) -> dict[str, int]:
-    """ワークフローのファイル → `jobs:` の直下の job の数（YAML を読まずに字下げで拾う）。"""
-    out = {}
-    for f in sorted(p for p in tree.files if re.match(r"\.github/workflows/[^/]+\.ya?ml$", p)):
-        n, inside, indent = 0, False, None
-        for line in (tree.read(f) or "").splitlines():
-            if not line.strip() or line.lstrip().startswith("#"):
-                continue
-            lead = len(line) - len(line.lstrip())
-            if lead == 0:
-                inside = line.rstrip() == "jobs:"
-                continue
-            if inside:
-                indent = lead if indent is None else indent
-                if lead == indent and line.strip().endswith(":"):
-                    n += 1
-        out[f] = n
-    return out
+    """ワークフローのファイル → `jobs:` の直下の job の数（YAML を読まずに字下げで拾う。`ci_workflows.job_ids`）。"""
+    files = sorted(p for p in tree.files if ci_workflows.WORKFLOW_PATH.match(p))
+    return {f: len(ci_workflows.job_ids(tree.read(f) or "")) for f in files}
 
 
 def _junit_of_run(gh: Gh, run: dict) -> dict | None:
