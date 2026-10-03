@@ -242,6 +242,7 @@
 | テストの追加・実装の終わり | 最後の項目の完了期限 | `timeline._completion` |
 | 直しの試行の打ち切り | 開始 + B − `danger_whole_test` − `final_whole_test` − `final_fix`（バッファの `fix` は引かない） | `budget.fix_end` |
 | 最終ゲート修正の打ち切り | 開始 + B。1 回目は打ち切らない | `final_end_at` / `gate._final_fix_stop` |
+| 打ち切りの後の取り消しの締め切り | 開始 + B + 0.20·B（既定の 30 分で打ち切りから 6 分）。理由は [検証と最終ゲートの確定仕様](cross-refactoring-verify-and-final-gate.md#決定と理由) の #1649 の決定 8 | `STOP_REVERT_SHARE` / `stop_revert_end_at` |
 | 最終ゲート修正の 1 回目の長さの下限 | バッファの `final_fix` を秒へ直した値 | `final_fix_seconds` |
 
 **提案とリファクタリング計画の枠を予算の比率にしたのは**、#917 を 60 分に当てた例（提案 4.5 分・リファクタリング計画 3 分）の
@@ -384,7 +385,7 @@
 | --- | --- |
 | `budget_minutes` / `margin_seconds` / `init_test_timeout` / `test_timeout` | `init`（リファクタリング計画の前に予算を置き換えた再開も組み直す） |
 | `propose_end_at` / `plan_end_at` / `final_end_at` | `init` |
-| `add_tests_end_at` / `implement_end_at` / `fix_end_at` / `final_fix_seconds` | `merge-plan`（リファクタリング計画の前は `null`） |
+| `add_tests_end_at` / `implement_end_at` / `fix_end_at` / `stop_revert_end_at` / `final_fix_seconds` | `merge-plan`（リファクタリング計画の前は `null`） |
 
 ### 旧い状態ファイルと再開
 
