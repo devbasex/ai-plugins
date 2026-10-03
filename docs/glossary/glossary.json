@@ -3016,12 +3016,6 @@
       "pending_source": "issues/issue-1649-requirements.md"
     },
     {
-      "term": "変更起因",
-      "context": "ndf-cross-refactoring",
-      "meaning": "全体テストで落ちたテストのうち、今の HEAD で再び落ち、着手前の HEAD では通るもの。フレーキー・既存失敗と分ける",
-      "pending_source": "issues/issue-1649-requirements.md"
-    },
-    {
       "term": "原因の手がかり",
       "context": "ndf-cross-refactoring",
       "meaning": "原因の項目を決めた根拠。path（落ちたテストの出力に項目の変えたファイルのパスが現れた）・isolate（項目を外した走らせ直しで通った）・undetermined（どちらでも決まらない）の 3 つ",
