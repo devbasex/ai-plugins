@@ -3026,62 +3026,59 @@
       "term": "リファクタリング計画のコメント",
       "context": "ndf-cross-refactoring",
       "meaning": "cross-refactoring が対象の Pull Request に 1 件だけ置き、結果の出口のたびに同じものを編集するリファクタリング計画の記録。目印 `<!-- cross-refactoring plan rf<ID> -->` で引き当てる",
-      "pending_source": "issues/issue-1692-requirements.md"
+      "source": "docs/specifications/cross-refactoring-plan-comment-at-exits.md"
     },
     {
       "term": "結果の出口",
       "context": "ndf-cross-refactoring",
       "meaning": "リファクタリング計画ができた後に、cross-refactoring のスクリプトがその時点の結果を確定させて終了コードを返す地点（push の成功と失敗・最終ゲートの判定・打ち切り・取り消し・中断・finalize）",
-      "pending_source": "issues/issue-1692-requirements.md"
+      "source": "docs/specifications/cross-refactoring-plan-comment-at-exits.md"
     },
     {
       "term": "未確認",
       "context": "ndf-cross-refactoring",
       "meaning": "取り消されずに残ったが、最終ゲートが passed になっていない改善項目の状態。採用とは数えない",
       "code": "unconfirmed",
-      "pending_source": "issues/issue-1692-design.md"
+      "source": "docs/specifications/cross-refactoring-plan-comment-at-exits.md"
     },
     {
       "term": "プランの外の取り消し",
       "context": "ndf-cross-refactoring",
       "meaning": "cross-refactoring のスクリプトが終わった後に、conductor が改善項目のコミットを git revert で取り消すこと",
-      "pending_source": "issues/issue-1692-requirements.md"
+      "source": "docs/specifications/cross-refactoring-plan-comment-at-exits.md"
     },
     {
       "term": "公開の結果",
       "context": "ndf-cross-refactoring",
       "meaning": "最後に試みた head ブランチへの push の結果（通った地点の SHA か、落ちた理由）。状態ファイルの publication に残す",
       "code": "publication",
-      "pending_source": "issues/issue-1692-design.md"
+      "source": "docs/specifications/cross-refactoring-plan-comment-at-exits.md"
     },
     {
       "term": "未公開の改善項目",
       "context": "ndf-cross-refactoring",
       "meaning": "手元の HEAD が、公開した地点から到達できないコミットを持つこと。結果 JSON の metrics.unpublished",
       "code": "unpublished",
-      "pending_source": "issues/issue-1692-design.md"
+      "source": "docs/specifications/cross-refactoring-plan-comment-at-exits.md"
     },
     {
       "term": "ジョブの識別子",
       "context": "ndf-workflow",
       "meaning": "継続的統合のジョブを指す `<ワークフローのファイルのパス>#<job id>`。`#<job id>` を省くとそのファイルのジョブすべてを指す。宣言の suites[].ci_jobs と test.ci_exempt が使う",
-      "source": "",
-      "pending_source": "issues/issue-464-design.md"
+      "source": "docs/specifications/cross-refactoring-lint-suite-and-ci-coverage.md"
     },
     {
       "term": "除外したジョブ",
       "context": "ndf-workflow",
       "meaning": "手元の検証で走らせないと宣言したジョブ。宣言の test.ci_exempt に理由と組で書く",
       "code": "ci_exempt",
-      "source": "",
-      "pending_source": "issues/issue-464-design.md"
+      "source": "docs/specifications/cross-refactoring-lint-suite-and-ci-coverage.md"
     },
     {
       "term": "宣言に無いジョブ",
       "context": "ndf-cross-refactoring",
       "meaning": "継続的統合のジョブのうち、どの suite の ci_jobs にも除外したジョブにも当たらないもの。cross-refactoring の init が知らせ、状態ファイルの ci_coverage.undeclared に残す",
-      "source": "",
-      "pending_source": "issues/issue-464-design.md"
+      "source": "docs/specifications/cross-refactoring-lint-suite-and-ci-coverage.md"
     }
   ]
 }
