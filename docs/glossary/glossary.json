@@ -3021,6 +3021,28 @@
       "meaning": "工程の 1 つとして起動した cross-refactoring が、最終ゲート修正を打ち切った後に、原因の項目を取り消すか（案 A）、着手前の木へ戻すコミットを積む（案 B）処理",
       "code": "stop_revert",
       "source": "docs/specifications/cross-refactoring-verify-and-final-gate.md"
+    },
+    {
+      "term": "ジョブの識別子",
+      "context": "ndf-workflow",
+      "meaning": "継続的統合のジョブを指す `<ワークフローのファイルのパス>#<job id>`。`#<job id>` を省くとそのファイルのジョブすべてを指す。宣言の suites[].ci_jobs と test.ci_exempt が使う",
+      "source": "",
+      "pending_source": "issues/issue-464-design.md"
+    },
+    {
+      "term": "除外したジョブ",
+      "context": "ndf-workflow",
+      "meaning": "手元の検証で走らせないと宣言したジョブ。宣言の test.ci_exempt に理由と組で書く",
+      "code": "ci_exempt",
+      "source": "",
+      "pending_source": "issues/issue-464-design.md"
+    },
+    {
+      "term": "宣言に無いジョブ",
+      "context": "ndf-cross-refactoring",
+      "meaning": "継続的統合のジョブのうち、どの suite の ci_jobs にも除外したジョブにも当たらないもの。cross-refactoring の init が知らせ、状態ファイルの ci_coverage.undeclared に残す",
+      "source": "",
+      "pending_source": "issues/issue-464-design.md"
     }
   ]
 }
