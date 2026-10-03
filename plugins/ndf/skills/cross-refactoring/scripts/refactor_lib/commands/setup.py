@@ -30,6 +30,7 @@ import worktree_deps
 
 from .. import ABORT, die, info
 from .. import baseline as baseline_lib
+from .. import ci_coverage
 from .. import runtime_decl
 from .. import timeline
 from ..paths import (
@@ -464,6 +465,7 @@ class _InitPreparation:
     state_file: pathlib.Path
     strategy: ts.Strategy
     decl: dict[str, Any]
+    ci_coverage: dict[str, Any]
 
 
 def _resolve_init_inputs(args: argparse.Namespace) -> Optional[_InitInputs]:
@@ -488,7 +490,8 @@ def _resolve_init_inputs(args: argparse.Namespace) -> Optional[_InitInputs]:
 
 
 def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
-    """Pull Request の文脈を取り、作業ディレクトリを用意して `--scope` の関門を通し、テストの戦略を解く。"""
+    """Pull Request の文脈を取り、作業ディレクトリを用意して `--scope` の関門を通し、テストの戦略を解く。
+    継続的統合のジョブのうち宣言に無いものは知らせるだけで止めない（#464 E2）。状態には新しい実行だけが書く。"""
     # リポジトリ名は git の設定から求め、Pull Request の応答で確かめる（#271）。
     repo, base_branch, head_branch, is_own_pr, author = _fetch_pr_context(args.pr)
     if is_own_pr:
@@ -518,6 +521,8 @@ def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
     info(f"🧭 テストの戦略: {strategy.name}（根拠 {strategy.source}）")
     for note in strategy.notes:
         info(f"   ℹ {note}")
+    for line in (coverage := ci_coverage.compare_jobs(decl, work)).lines():
+        info(line)
 
     # **`--scope` の関門は戦略を解いてから通す**（#436 決定 5・#1483 I9）。テストの置き場所が範囲に無いまま進むと、
     # テスト整備ラウンドが足したテストが検証に効かない。案内だけでは同じ失敗を繰り返すため、**止める**。
@@ -540,6 +545,7 @@ def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
         state_file=state_path(tmp_dir, args.pr),
         strategy=strategy,
         decl=decl,
+        ci_coverage=coverage.as_state(),
     )
 
 
@@ -655,6 +661,7 @@ def _save_initial_state(
     state = _build_initial_state(args, context)
     # **実行時の値を書き出す**（決定 24）。改修計画の後の値は `merge-plan` が足す。
     state["limits"] = timeline.of_state(state)
+    state["ci_coverage"] = prep.ci_coverage
     info(f"   実装担当: {context.implementer}（{context.implementer_reason}）")
     # GitHub は自分の Pull Request への `APPROVE` と `REQUEST_CHANGES` を
     # `HTTP 422` で拒む。判定はそのまま結果ファイルへ残し、**投稿の event だけ**

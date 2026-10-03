@@ -1673,3 +1673,56 @@ def test_run_baseline_stops_on_a_launch_failure(refactor, monkeypatch, tmp_path)
 
     assert stopped[0][2:4] == ("baseline", "missing-cmd")
     assert stopped[0][5] == tmp_path / "init-whole-0.log"
+
+
+def _declare_ci(origin_repo, workflow: str, **test_over):
+    """`ci.provider: github-actions` の宣言と、ワークフロー `ci.yml` を置く（#464）。"""
+    suite = {"name": "pytest", "runner": "pytest", "command": "true", "scope_command": "true {paths}", "paths": ["."]}
+    decl = {
+        "version": 1,
+        "test": {"suites": [{**suite, **test_over.pop("suite", {})}], **test_over},
+        "ci": {"provider": "github-actions", "workflows": [{"path": ".github/workflows/ci.yml", "jobs": 2}]},
+    }
+    # ワークフローは作業ディレクトリ（origin の head）から読むので、head へ積んで push する
+    _git("checkout", "-qb", "ci-wf", f"origin/{HEAD_BRANCH}", cwd=origin_repo)
+    (origin_repo / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
+    (origin_repo / ".github" / "workflows" / "ci.yml").write_text(workflow, encoding="utf-8")
+    _git("add", "-A", cwd=origin_repo)
+    _git("commit", "-qm", "ci", cwd=origin_repo)
+    _git("push", "-q", "origin", f"ci-wf:{HEAD_BRANCH}", cwd=origin_repo)
+    _git("checkout", "-q", "main", cwd=origin_repo)
+    _git("branch", "-qD", "ci-wf", cwd=origin_repo)
+    (origin_repo / ".ndf").mkdir(exist_ok=True)
+    (origin_repo / ".ndf" / "project.json").write_text(json.dumps(decl), encoding="utf-8")
+
+
+CI_WORKFLOW = "on: push\njobs:\n  test:\n    runs-on: x\n  docs:\n    runs-on: x\n"
+
+
+def test_init_names_the_ci_jobs_missing_from_the_declaration(run_init, tmp_path, origin_repo, capsys):
+    """#464 AC5 — 宣言に無いジョブを識別子で知らせ、状態ファイルに残し、止まらない。"""
+    _declare_ci(origin_repo, CI_WORKFLOW, suite={"ci_jobs": [".github/workflows/ci.yml#test"]})
+    run_init(_args(tmp_path, round_test=None, baseline_test=None))
+    err = capsys.readouterr().err
+    assert "宣言に無いもの 1 件" in err and ".github/workflows/ci.yml#docs" in err
+    assert ".github/workflows/ci.yml#test" not in err
+    _, state = _state_of(tmp_path)
+    assert state["ci_coverage"] == {"status": "compared", "reason": "", "jobs": 2, "undeclared": [".github/workflows/ci.yml#docs"]}
+
+
+def test_init_is_silent_when_the_declaration_covers_every_ci_job(run_init, tmp_path, origin_repo, capsys):
+    """#464 AC6 — ジョブを `ci_jobs` と `ci_exempt` で覆えば知らせない。"""
+    exempt = [{"job": ".github/workflows/ci.yml#docs", "reason": "Pull Request の本文を見る"}]
+    _declare_ci(origin_repo, CI_WORKFLOW, suite={"ci_jobs": [".github/workflows/ci.yml#test"]}, ci_exempt=exempt)
+    run_init(_args(tmp_path, round_test=None, baseline_test=None))
+    assert "継続的統合のジョブ" not in capsys.readouterr().err
+    _, state = _state_of(tmp_path)
+    assert state["ci_coverage"]["status"] == "compared" and state["ci_coverage"]["undeclared"] == []
+
+
+def test_init_keeps_going_when_the_ci_cannot_be_compared(run_init, tmp_path, origin_repo, capsys):
+    """#464 AC7 — 宣言に `ci` が無ければ突き合わせられなかったと知らせ、続ける。"""
+    run_init(_args(tmp_path))
+    assert "突き合わせられませんでした（ci が無い）" in capsys.readouterr().err
+    _, state = _state_of(tmp_path)
+    assert state["ci_coverage"]["status"] == "skipped"
