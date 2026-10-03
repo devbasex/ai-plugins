@@ -337,12 +337,12 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 原因の項目 | — | 全体テストで変更起因として落ちたテストを、その変更で落とした改善項目。危険フラグの有無とは関係しない | — | — | `docs/specifications/cross-refactoring-verify-and-final-gate.md` |
 | 原因の手がかり | `basis` | 原因の項目を決めた根拠。path（落ちたテストの出力に項目の変えたファイルのパスが現れた）・isolate（項目を外した走らせ直しで通った）・undetermined（どちらでも決まらない）の 3 つ | — | — | `docs/specifications/cross-refactoring-verify-and-final-gate.md` |
 | 打ち切りの後の取り消し | `stop_revert` | 工程の 1 つとして起動した cross-refactoring が、最終ゲート修正を打ち切った後に、原因の項目を取り消すか（案 A）、着手前の木へ戻すコミットを積む（案 B）処理 | — | — | `docs/specifications/cross-refactoring-verify-and-final-gate.md` |
-| リファクタリング計画のコメント | — | cross-refactoring が対象の Pull Request に 1 件だけ置き、結果の出口のたびに同じものを編集するリファクタリング計画の記録。目印 `<!-- cross-refactoring plan rf<ID> -->` で引き当てる | — | — | — |
-| 結果の出口 | — | リファクタリング計画ができた後に、cross-refactoring のスクリプトがその時点の結果を確定させて終了コードを返す地点（push の成功と失敗・最終ゲートの判定・打ち切り・取り消し・中断・finalize） | — | — | — |
-| 未確認 | `unconfirmed` | 取り消されずに残ったが、最終ゲートが passed になっていない改善項目の状態。採用とは数えない | — | — | — |
-| プランの外の取り消し | — | cross-refactoring のスクリプトが終わった後に、conductor が改善項目のコミットを git revert で取り消すこと | — | — | — |
-| 公開の結果 | `publication` | 最後に試みた head ブランチへの push の結果（通った地点の SHA か、落ちた理由）。状態ファイルの publication に残す | — | — | — |
-| 未公開の改善項目 | `unpublished` | 手元の HEAD が、公開した地点から到達できないコミットを持つこと。結果 JSON の metrics.unpublished | — | — | — |
+| リファクタリング計画のコメント | — | cross-refactoring が対象の Pull Request に 1 件だけ置き、結果の出口のたびに同じものを編集するリファクタリング計画の記録。目印 `<!-- cross-refactoring plan rf<ID> -->` で引き当てる | — | — | `docs/specifications/cross-refactoring-plan-comment-at-exits.md` |
+| 結果の出口 | — | リファクタリング計画ができた後に、cross-refactoring のスクリプトがその時点の結果を確定させて終了コードを返す地点（push の成功と失敗・最終ゲートの判定・打ち切り・取り消し・中断・finalize） | — | — | `docs/specifications/cross-refactoring-plan-comment-at-exits.md` |
+| 未確認 | `unconfirmed` | 取り消されずに残ったが、最終ゲートが passed になっていない改善項目の状態。採用とは数えない | — | — | `docs/specifications/cross-refactoring-plan-comment-at-exits.md` |
+| プランの外の取り消し | — | cross-refactoring のスクリプトが終わった後に、conductor が改善項目のコミットを git revert で取り消すこと | — | — | `docs/specifications/cross-refactoring-plan-comment-at-exits.md` |
+| 公開の結果 | `publication` | 最後に試みた head ブランチへの push の結果（通った地点の SHA か、落ちた理由）。状態ファイルの publication に残す | — | — | `docs/specifications/cross-refactoring-plan-comment-at-exits.md` |
+| 未公開の改善項目 | `unpublished` | 手元の HEAD が、公開した地点から到達できないコミットを持つこと。結果 JSON の metrics.unpublished | — | — | `docs/specifications/cross-refactoring-plan-comment-at-exits.md` |
 | 宣言に無いジョブ | — | 継続的統合のジョブのうち、どの suite の ci_jobs にも除外したジョブにも当たらないもの。cross-refactoring の init が知らせ、状態ファイルの ci_coverage.undeclared に残す | — | — | `docs/specifications/cross-refactoring-lint-suite-and-ci-coverage.md` |
 
 ## NDF のラッパー（`ndf-relay`）
