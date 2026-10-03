@@ -81,10 +81,18 @@ def test_classify_returns_the_rerun_text_of_each_caused_test(tmp_path):
         (out / "junit.xml").write_text(f"<testsuite>{case if failing else ''}</testsuite>", encoding="utf-8")
         return (1 if failing else 0), False
 
-    strategy = ts.Strategy("local-full", "test.strategy", [ts.Suite("py", "pytest -q", "pytest -q {paths}", junit="out/junit.xml", paths=["."])])
+    strategy = ts.Strategy(
+        "local-full", "test.strategy", [ts.Suite("py", "pytest -q", "pytest -q {paths}", junit="out/junit.xml", paths=["."])]
+    )
     out = test_triage.classify(
-        work=str(work), strategy=strategy, failed=["tests/test_b.py::c::t"], fallback_reason=None, base_sha=base, timeout=30,
-        log_dir=tmp_path / "logs", run=run,
+        work=str(work),
+        strategy=strategy,
+        failed=["tests/test_b.py::c::t"],
+        fallback_reason=None,
+        base_sha=base,
+        timeout=30,
+        log_dir=tmp_path / "logs",
+        run=run,
     )
     assert out["caused"] == ["tests/test_b.py::c::t"]
     assert "src/z.py broke" in out["caused_output"]["tests/test_b.py::c::t"]

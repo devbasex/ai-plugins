@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 from typing import Iterable
 
+
 def _pattern(path: str) -> "re.Pattern[str]":
     # 前は識別子の文字・`.`・`-` でない（`/` は絶対パスの区切りとして許す）。後ろは識別子の文字・`/`・`-`・拡張子の続きでない
     return re.compile(rf"(?<![\w.-]){re.escape(path)}(?![\w/-]|\.\w)")
