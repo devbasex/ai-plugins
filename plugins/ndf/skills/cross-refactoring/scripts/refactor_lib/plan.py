@@ -18,7 +18,7 @@ from typing import Any, Optional
 
 import mdtable
 
-from . import die, info
+from . import die, info, timeline
 from .codemetrics_view import record_lines
 from .paths import sh
 from .items import item_label
@@ -236,7 +236,7 @@ _LIMIT_ROWS = (
     ("final_end_at", "最終ゲートの修正の打ち切り（想定最大時間の終わり）"),
     (
         "stop_revert_end_at",
-        "打ち切りの後の取り消し（案 A）の締め切り = 最終ゲートの修正の打ち切り + 0.20·B（工程の 1 つとして起動したとき）",
+        f"打ち切りの後の取り消し（案 A）の締め切り = 最終ゲートの修正の打ち切り + {timeline.STOP_REVERT_SHARE:.2f}·B（工程の 1 つとして起動したとき）",
     ),
     ("final_fix_seconds", "最終ゲートの修正の 1 回目に必ず渡す長さ（秒。予備時間の final_fix）"),
     ("measure_timeout", "指標の測定の上限（秒。提案の枠の中から割く）"),
