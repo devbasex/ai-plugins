@@ -22,6 +22,7 @@ import statefile
 from . import culprit, die, info, ledger, timeline
 from .items import live_items
 from .paths import git_out, work_dir
+from .undo import ON_CONFLICT_RAISE
 from .worktree import reset_hard
 
 REASON_A = "最終ゲート修正を打ち切った後に、原因の項目として取り消した"
@@ -55,7 +56,7 @@ def _plan_a(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]) -> 
         return "落ちたテストを走らせ直す語が無い（変更起因を挙げられない）"
     found = culprit.judge(state, gate, verdict, end)
     narrowed = culprit.revert_in_order(
-        path, state, found.order, REASON_A, culprit.rerun_passes(state, rerun), on_conflict="raise", deadline=end
+        path, state, found.order, REASON_A, culprit.rerun_passes(state, rerun), on_conflict=ON_CONFLICT_RAISE, deadline=end
     )
     record["reverted"] = narrowed.reverted
     statefile.save(path, state)
@@ -63,8 +64,8 @@ def _plan_a(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]) -> 
         info(f"↩ 打ち切りの後に原因の項目を取り消し、落ちたテストが通りました（{', '.join(narrowed.reverted)}）")
         return None
     return {
-        "conflict": "取り消しの積み直しが衝突した",
-        "deadline": "打ち切りの後の取り消しの締め切りを過ぎた",
+        culprit.CUT_CONFLICT: "取り消しの積み直しが衝突した",
+        culprit.CUT_DEADLINE: "打ち切りの後の取り消しの締め切りを過ぎた",
     }.get(str(narrowed.cut), "候補を取り消し尽くしても落ちたテストが通らない")
 
 

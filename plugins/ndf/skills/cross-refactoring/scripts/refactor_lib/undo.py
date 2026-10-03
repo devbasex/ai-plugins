@@ -34,6 +34,9 @@ from .items import find_item, item_shas
 from .paths import full_commit, git_out, work_dir
 from .worktree import replay_commits, reset_hard, revert_range
 
+ON_CONFLICT_STOP = "stop"  # 積み直しの衝突で取り消しを止め、作業を打ち切る
+ON_CONFLICT_RAISE = "raise"  # 積み直しの衝突を DropConflict で呼ぶ側へ返す
+
 
 class DropConflict(Exception):
     """広げても積み直せなかった（`on_conflict="raise"` のとき）。HEAD は取り消しの前へ戻してある（#1669 決定 11）。"""
@@ -162,19 +165,21 @@ def _record(
 
 
 def _restore_and_stop(
-    path: pathlib.Path, state: dict[str, Any], plan: ledger.RebuildPlan, conflict: str, on_conflict: str = "stop"
+    path: pathlib.Path, state: dict[str, Any], plan: ledger.RebuildPlan, conflict: str, on_conflict: str = ON_CONFLICT_STOP
 ) -> None:
     """広げても積み直せないとき。HEAD は `_execute` が取り消しの前へ戻してある。`on_conflict="raise"` なら例外で返す。"""
     state["pending_drop"] = None
     statefile.save(path, state)
     widened = ", ".join(plan.widened) or "なし"
     message = f"同じファイルを触った項目まで広げても積み直せません: {conflict[:12]}（広げた項目: {widened}）。HEAD を {plan.before[:12]} へ戻しました"
-    if on_conflict == "raise":
+    if on_conflict == ON_CONFLICT_RAISE:
         raise DropConflict(message)
     die(message)
 
 
-def _rebuild(path: pathlib.Path, state: dict[str, Any], targets: list[str], reason: str, on_conflict: str = "stop") -> dict[str, Any]:
+def _rebuild(
+    path: pathlib.Path, state: dict[str, Any], targets: list[str], reason: str, on_conflict: str = ON_CONFLICT_STOP
+) -> dict[str, Any]:
     work = work_dir(state)
     plan = ledger.plan_rebuild(state, work, targets)
     if plan.error:
@@ -199,7 +204,9 @@ def _rebuild(path: pathlib.Path, state: dict[str, Any], targets: list[str], reas
     return _record(path, state, plan, outcome, targets, reason)
 
 
-def drop(path: pathlib.Path, state: dict[str, Any], item_ids: list[str], reason: str, on_conflict: str = "stop") -> dict[str, Any]:
+def drop(
+    path: pathlib.Path, state: dict[str, Any], item_ids: list[str], reason: str, on_conflict: str = ON_CONFLICT_STOP
+) -> dict[str, Any]:
     """改善項目（と、どの項目にも属さないコミット）を取り消す。
 
     広げても積み直せなければ、既定（`stop`）は終了コード 4 で止まり、`raise` なら `DropConflict` を投げる。

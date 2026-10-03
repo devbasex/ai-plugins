@@ -33,7 +33,7 @@ from . import budget, clock, info, ledger, timeline, triage, worktree
 from .gitfacts import commit_files, run_with_timeout
 from .items import find_item, item_shas, live_items, newest_first
 from .paths import work_dir
-from .undo import DropConflict, drop
+from .undo import ON_CONFLICT_STOP, DropConflict, drop
 
 PATH = "path"
 ISOLATE = "isolate"
@@ -163,9 +163,13 @@ def fixable(record: dict[str, Any]) -> bool:
     return (record.get("culprit") or {}).get("basis") != UNDETERMINED
 
 
+CUT_CONFLICT = "conflict"  # 積み直しの衝突で止まった
+CUT_DEADLINE = "deadline"  # 締め切りを過ぎて止まった
+
+
 @dataclasses.dataclass
 class Narrowed:
-    """`revert_in_order` の結果。`cut` は止まった理由（`conflict` / `deadline`）で、尽きた・通ったときは `None`。"""
+    """`revert_in_order` の結果。`cut` は止まった理由（`CUT_CONFLICT` / `CUT_DEADLINE`）で、尽きた・通ったときは `None`。"""
 
     reverted: list[str]
     passed: bool
@@ -190,7 +194,7 @@ def revert_in_order(
     reason: str,
     passes: Callable[[], bool],
     *,
-    on_conflict: str = "stop",
+    on_conflict: str = ON_CONFLICT_STOP,
     deadline: Optional[_dt.datetime] = None,
 ) -> Narrowed:
     """`order` の順に、続けて残りの項目を新しい順に 1 件ずつ取り消し、`passes()` が真になった時点で止める（I2）。
@@ -205,14 +209,14 @@ def revert_in_order(
         if not ledger.is_live(item):
             continue
         if _past(deadline):
-            return Narrowed(reverted, False, "deadline")
+            return Narrowed(reverted, False, CUT_DEADLINE)
         item["failure_reason"] = reason
         try:
             drop(path, state, [item_id], reason, on_conflict=on_conflict)
         except DropConflict as exc:
             item.pop("failure_reason", None)
             info(f"⚠ {exc}")
-            return Narrowed(reverted, False, "conflict")
+            return Narrowed(reverted, False, CUT_CONFLICT)
         reverted.append(item_id)
         if passes():
             for rest in live_items(state):
