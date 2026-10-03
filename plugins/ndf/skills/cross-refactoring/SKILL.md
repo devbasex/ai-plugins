@@ -100,6 +100,12 @@ allowed-tools:
 **テストの走らせ方は宣言（`.ndf/project.json` の `test`）の戦略で決まる**（[docs/01](docs/01-state-and-propose.md) の「テストの戦略」）。
 `init` は `STRATEGY` / `STRATEGY_SOURCE` を返し、コマンドの文字列を解析しない。
 
+**継続的統合のジョブのうち宣言に無いものは、`init` が知らせる（止めない）**。宣言の `ci.provider` が `github-actions` のとき、
+作業ディレクトリの `.github/workflows/` のジョブを、suite の `ci_jobs` と `test.ci_exempt` に照らす。どちらにも無いジョブは
+手元の検証で走らないため、識別子（`<ワークフローのパス>#<job id>`）を挙げて状態ファイルの `ci_coverage` にも残す。
+手元で同じ検査を走らせる suite の `ci_jobs` に書くか、走らせない理由を添えて `test.ci_exempt`（`{"job", "reason"}`）に書く。
+識別子から `#<job id>` を省くと、そのファイルのジョブすべてを指す。照合は文字列の一致だけで、glob は使わない。
+
 **実際に動いたモデルは、`--model` を指定しなくても claude と codex なら記録される**。
 claude は出力の `modelUsage`、codex はセッションの記録（`$CODEX_HOME/sessions`）から取り、状態ファイルの
 `implementer_model.observed` に入れる。取れなければ取れなかった理由を `implementer_model.unobserved` に残す。
@@ -209,7 +215,30 @@ bash ../../scripts/lib/bg-wait.sh wait "$RC"   # 1 回 540 秒以内。124 = ま
 
 再開は同じコマンドを打ち直すだけである。進みは耐久の記録（既定の置き場は `~/.local/state/ndf/dbos/refactor-<鍵>.sqlite` ）が持ち、
 記録のある手順は流し直さない。`metrics` は状態ファイルから数えた件数（`items` / `adopted` / `reverted` /
-`deferred` / `fix_rounds` / `final_gate` / `review_status`）である。
+`deferred` / `fix_rounds` / `final_gate` / `review_status`）と、最終ゲートを経ていない実行の `unconfirmed`、手元の HEAD が
+公開した地点より進んでいるかの `unpublished`（真偽。判定できなければ `null`）である。
+
+### リファクタリング計画のコメントを書き直す時点
+
+駆動は done・中断・最終ゲートの止まり（23）の各出口で、結果 JSON を組む前に `refactor.py plan-comment <PR>` を 1 度だけ
+打ち、Pull Request のリファクタリング計画のコメントを書き直す。push が落ちた実行でもコメントができ、公開の行に落ちた理由と
+未公開の改善項目があることが載る。コメントの件数（採用・未確認・取り消し・見送り）は結果 JSON の `metrics` と同じ集計から出る。
+投稿に失敗しても駆動の結果と終了コードは変わらない。リファクタリング計画ができる前に止まった実行と、置き場所が
+`--plan-file` か「記録しない」の実行ではコメントを作らない。
+
+駆動が終わった後に項目のコミットを `git revert` で取り消して push したとき（プランの外の取り消し）は、次の 1 行を打つ。
+origin の head ブランチの `This reverts commit <SHA>` を読み、実装コミットが取り消されたままの項目を「取り消し」に、
+取り消しが取り消された項目を元の状態へ戻してから書き直す。状態ファイルは環境変数・現在地に無ければ既定の worktree の置き場から探す。
+
+```bash
+python3 scripts/refactor.py plan-comment <PR> --scan-reverts
+```
+
+| 終了コード | 意味 |
+| --- | --- |
+| 0 | 書き直した・書く対象が無い（`PLAN_COMMENT=skipped`） |
+| 1 | 投稿・編集に失敗した（`PLAN_COMMENT=failed`） |
+| 4 | 状態ファイルが無い・origin を取り込めない（コメントも状態も変えない） |
 
 最終ゲートの判定の相手は起動のされ方で変わる（[docs/04-verify-and-report.md](docs/04-verify-and-report.md)）。
 `--workflow-step` なら全体テスト（CI に任せる戦略か `--ci-check` なら継続的統合）で判定して finalize まで進み、単独起動なら
@@ -239,7 +268,7 @@ cross-review の最終ステータスを受けてから finalize を呼ぶ。最
 
 - 手順ごとの所要と、想定最大時間との差（`cross-review` を除く）
 - 改善項目の表（**`<ファイル>#<シンボル>`**・兆候・手法・グレード・見積り・状態・危険フラグ・修正の回数）
-- 採用・取り消し・見送りの件数と、**見送りの理由別の件数**。内訳は**リファクタリング計画の生の URL**
+- 採用・未確認・取り消し・見送りの件数（リファクタリング計画のコメントと同じ集計）と、**見送りの理由別の件数**。内訳は**リファクタリング計画の生の URL**
 - 着手前の全体テストの結果（通過か失敗・秒・HEAD）と、検証の中で全体テストを走らせたか、走らせた理由（危険フラグ）、落ちたときの見分け（フレーキー・既存失敗・変更起因）とその結果
 - 判断に Jev を使ったか（使わなかった理由・呼び出しの失敗の数）
 - 最終ゲートの結果（`cross-review` の収束、または全体テスト／継続的統合の合否）

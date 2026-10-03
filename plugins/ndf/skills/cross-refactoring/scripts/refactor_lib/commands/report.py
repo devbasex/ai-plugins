@@ -16,7 +16,7 @@ from ..codemetrics_view import record_lines
 from ..items import item_label
 from ..measure import summary_extra
 from ..outbound import plan_reference
-from ..plan import baseline_line, existing_failures_line, strategy_lines
+from ..plan import baseline_line, counts_line, existing_failures_line, status_label, strategy_lines
 from ..paths import load_state
 from ..phases import phase_record
 from ..vocabulary import DEFER_REASONS
@@ -190,6 +190,7 @@ def _print_header(state: dict[str, Any]) -> None:
     gate = state.get("final_gate") or {}
     print(f"# cross-refactoring 実行報告 — {state['repo']} #{state['current_pr']}")
     print()
+    print(f"- 件数: {counts_line(state)}")
     print(f"- 対象範囲: {', '.join(state['target_scope']) or '（未指定）'}")
     print(
         f"- 想定最大時間: {state.get('budget_minutes')} 分 / 所要: {elapsed / 60:.1f} 分"
@@ -283,7 +284,7 @@ def _item_table(state: dict[str, Any]) -> str:
                 str(item.get("technique")),
                 str(item.get("tier")),
                 f"{estimate:.1f}",
-                str(item.get("status")),
+                status_label(state, item),
                 ", ".join(item.get("danger") or []) or "—",
                 str(item.get("fix_count", 0)),
             )
@@ -337,15 +338,12 @@ def _print_deferred(state: dict[str, Any]) -> None:
     """見送りの件数（理由別）。**内訳は改修計画にある**（#436 決定 6-b）。"""
     deferred = state.get("deferred_items") or []
     counts = Counter(d.get("defer_reason") for d in deferred)
-    reverted = [i for i in state.get("items") or [] if i.get("status") == "reverted"]
+    t = ledger.tally(state)
     print("## 見送った提案と取り消した項目")
     print()
-    # 最終ゲートを経ていない実行は、残った改善項目を採用と表さない（I8）
-    if ledger.adoption_confirmed(state):
-        adopted = f"{sum(1 for i in state.get('items') or [] if i.get('status') == 'verified')} 件"
-    else:
-        adopted = f"未確定（最終ゲートを経ていない。残った改善項目 {ledger.remaining_count(state)} 件）"
-    print(f"- 採用: {adopted} / 取り消し: {len(reverted)} 件 / 見送り: {len(deferred)} 件")
+    # 最終ゲートを経ていない実行は、残った改善項目を採用と表さない（I8）。数え方は `ledger.tally` が持つ
+    adopted = f"{t.adopted} 件" if t.confirmed else f"未確定（最終ゲートを経ていない。残った改善項目 {t.unconfirmed} 件）"
+    print(f"- 採用: {adopted} / 取り消し: {t.reverted} 件 / 見送り: {len(deferred)} 件")
     print("- 見送りの理由別: " + " / ".join(f"{r} {counts.get(r, 0)}" for r in DEFER_REASONS))
     print(f"- 内訳: 改修計画にある — {plan_reference(state)}")
 

@@ -116,6 +116,29 @@
       "title": "Ci",
       "type": "object"
     },
+    "CiExempt": {
+      "additionalProperties": false,
+      "description": "手元の検証で走らせないと宣言した継続的統合のジョブ（除外したジョブ）。`reason` は空にしない（I2）。",
+      "properties": {
+        "job": {
+          "pattern": "^[^#\\s]+\\.ya?ml(#[^#\\s]+)?$",
+          "title": "Job",
+          "type": "string"
+        },
+        "reason": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job",
+        "reason"
+      ],
+      "title": "CiExempt",
+      "type": "object"
+    },
     "Container": {
       "additionalProperties": false,
       "description": "suite を走らせるコンテナ。書いた suite は、テストを走らせる前にそのサービスのコンテナが worktree を見ているかを\n確かめ（`lib/container_reach.py`）、テスト環境の値を足して走らせる。見ていなければ走らせない。\n`compose_files` はテスト環境の割り当てが `COMPOSE_FILE` を持たないときだけ使う。",
@@ -392,7 +415,7 @@
     },
     "Suite": {
       "additionalProperties": false,
-      "description": "テストの 1 まとまり。`scope_command` の `{paths}`（引用の外の、空白で区切った 1 語）に、シェルの引用で守った範囲の\nパスが入る。`command` と `scope_command` はシェルで走らせる。\n`junit` はコマンドが JUnit XML を書く作業ディレクトリからの相対パス（無ければ落ちたテストの見分けは走らせ直しへ落ちる）。\n`kind` は種別で、`test`（テスト）か `lint`（静的解析。整形の検査を含む）。書かなければ `test`。静的解析の suite の範囲は\n変更したファイルのうち `paths` に当たるもの。`paths` の要素は接頭辞（ディレクトリ）か glob（`*.sh` など）で、空ならすべて。",
+      "description": "テストの 1 まとまり。`scope_command` の `{paths}`（引用の外の、空白で区切った 1 語）に、シェルの引用で守った範囲の\nパスが入る。`command` と `scope_command` はシェルで走らせる。\n`junit` はコマンドが JUnit XML を書く作業ディレクトリからの相対パス（無ければ落ちたテストの見分けは走らせ直しへ落ちる）。\n`kind` は種別で、`test`（テスト）か `lint`（静的解析。整形の検査を含む）。書かなければ `test`。静的解析の suite の範囲は\n変更したファイルのうち `paths` に当たるもの。`paths` の要素は接頭辞（ディレクトリ）か glob（`*.sh` など）で、空ならすべて。\n`ci_jobs` はこの suite が同じ検査を手元で走らせる継続的統合のジョブの識別子で、cross-refactoring の `init` が\n宣言に無いジョブを知らせるときに見る。",
       "properties": {
         "name": {
           "title": "Name",
@@ -465,6 +488,15 @@
           ],
           "title": "Kind",
           "type": "string"
+        },
+        "ci_jobs": {
+          "default": [],
+          "items": {
+            "pattern": "^[^#\\s]+\\.ya?ml(#[^#\\s]+)?$",
+            "type": "string"
+          },
+          "title": "Ci Jobs",
+          "type": "array"
         }
       },
       "required": [
@@ -477,7 +509,7 @@
     },
     "Test": {
       "additionalProperties": false,
-      "description": "テストの戦略（#1334）。`strategy` が空なら所要と suite から導く（`test_strategy.propose`）。",
+      "description": "テストの戦略（#1334）。`strategy` が空なら所要と suite から導く（`test_strategy.propose`）。\n`ci_exempt` は手元の検証で走らせない継続的統合のジョブと、その理由。",
       "properties": {
         "strategy": {
           "anyOf": [
@@ -512,6 +544,14 @@
             "$ref": "#/$defs/Suite"
           },
           "title": "Suites",
+          "type": "array"
+        },
+        "ci_exempt": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/CiExempt"
+          },
+          "title": "Ci Exempt",
           "type": "array"
         }
       },

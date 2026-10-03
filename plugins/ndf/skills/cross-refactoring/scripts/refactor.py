@@ -62,6 +62,7 @@ from refactor_lib.commands.implement import (  # noqa: E402
 )
 from refactor_lib.commands.measure import cmd_measure  # noqa: E402
 from refactor_lib.commands.plan import cmd_merge_plan  # noqa: E402
+from refactor_lib.commands.plan_comment import cmd_plan_comment  # noqa: E402
 from refactor_lib.commands.propose import cmd_merge_proposals  # noqa: E402
 from refactor_lib.commands.report import (  # noqa: E402
     cmd_finalize,
@@ -246,6 +247,18 @@ def add_id_commands(sub: argparse._SubParsersAction) -> None:
     sp.add_argument("id", type=int)
     sp.add_argument("phase", choices=list(PHASE_NAMES))
     sp.set_defaults(func=cmd_start_phase)
+
+    sp = sub.add_parser(
+        "plan-comment",
+        help="リファクタリング計画のコメントを状態ファイルから書き直す。0 = 書いた・対象なし / 1 = 投稿に失敗 / 4 = 状態ファイルが無い・origin を取り込めない",
+    )
+    sp.add_argument("id", type=int, help="実行の ID（対象の Pull Request の番号）")
+    sp.add_argument(
+        "--scan-reverts",
+        action="store_true",
+        help="origin の head ブランチの `This reverts commit` を読み、プランの外で取り消した項目を取り消しにしてから書き直す",
+    )
+    sp.set_defaults(func=cmd_plan_comment)
 
     sp = sub.add_parser("finalize", help="最終ゲートが通った実行だけ配分の履歴へ 1 行追記する（失敗しても 0）")
     sp.add_argument("id", type=int)

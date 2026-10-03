@@ -302,7 +302,8 @@ def test_a_declaration_without_kind_resolves_as_before():
         suite = decl["test"]["suites"][0]
         state = _without_kind(s.as_state())
         assert state["suites"][0] == {k: suite.get(k) for k in ("name", "command", "scope_command", "junit")} | {
-            "paths": suite.get("paths") or []
+            "paths": suite.get("paths") or [],
+            "ci_jobs": [],
         }
         assert all(x.kind == "test" for x in s.suites)
         assert s.whole_commands() == [suite["command"]]
@@ -310,6 +311,17 @@ def test_a_declaration_without_kind_resolves_as_before():
         assert [shlex.split(r.command) for r in runs] == [
             [w if w != "{paths}" else "tests/a.py" for w in shlex.split(suite["scope_command"])]
         ]
+
+
+def test_ci_jobs_survive_the_state_and_an_old_state_reads_as_empty():
+    """#464 — 宣言の `ci_jobs` が状態ファイルを往復し、`ci_jobs` を持たない旧い状態も読める。"""
+    jobs = [".github/workflows/lint.yml", ".github/workflows/pytest.yml#pytest"]
+    decl = {"test": {"suites": [{**LINT_ONLY["test"]["suites"][0], "ci_jobs": jobs}]}}
+    state = ts.resolve(decl).as_state()
+    assert ts.Strategy.from_state(state).suites[0].ci_jobs == jobs
+    for s in state["suites"]:
+        del s["ci_jobs"]
+    assert ts.Strategy.from_state(state).suites[0].ci_jobs == []
 
 
 def test_the_kind_survives_the_state_and_an_old_state_reads_as_test():
