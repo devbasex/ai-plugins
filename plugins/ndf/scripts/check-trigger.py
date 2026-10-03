@@ -298,10 +298,8 @@ def range_start(root: Path, events: list[dict], since: str | None, review: bool 
     return sha, commit_at(root, sha), f"origin/{base} との分岐点"
 
 
-def merged_prs(root: Path, frm: str, to: str, decl: dict, skip: set[int] = frozenset()) -> tuple[list[dict], list[str]]:
-    """(範囲へ入った PR, 外した PR のコミット)。merge commit と squash merge（件名の末尾 `(#N)`）を数える。squash の
-    件名にはブランチ名が残らないため、ブランチは GitHub から読んで `SKIP_BRANCHES` を当てる。検査の PR は記録の番号
-    （skip）でも外す。外したコミットは行数からも差し引くために返す。"""
+def _scan_log(root: Path, frm: str, to: str, skip: set[int]) -> tuple[list[tuple], list[str]]:
+    """範囲の first-parent のログから (sha, PR 番号, ブランチ名 or None) を拾い、skip の PR のコミットを外す。"""
     found = []
     excluded = []
     for line in git_or_stop(root, "log", "--first-parent", "--format=%H%x09%P%x09%s", f"{frm}..{to}").splitlines():
@@ -311,11 +309,22 @@ def merged_prs(root: Path, frm: str, to: str, decl: dict, skip: set[int] = froze
             excluded.append(sha)
         elif m:
             found.append((sha, int(m.group(1)), m.group(2) if m.re is MERGE_SUBJECT else None))
+    return found, excluded
+
+
+def _resolve_branches(found: list[tuple], root: Path) -> dict:
+    """squash の PR（ブランチ名が None）のブランチ名を GitHub から読む。"""
     squashed = [n for _, n, branch in found if branch is None]
     heads, err = gh_rest.pr_head_branches(squashed, cwd=str(root)) if squashed else ({}, "")
     if heads is None:
         raise Stop(f"squash merge の PR のブランチを読めない: {err}", EXIT_VIOLATION)
+    return heads
+
+
+def _score_prs(found: list[tuple], heads: dict, root: Path, decl: dict) -> tuple[list[dict], list[str]]:
+    """`SKIP_BRANCHES` のブランチを外し、残りの PR に共通層の判定と点数を付ける。"""
     out = []
+    excluded = []
     for sha, n, branch in found:
         branch = heads.get(n, "") if branch is None else branch
         if branch.startswith(SKIP_BRANCHES):
@@ -325,6 +334,16 @@ def merged_prs(root: Path, frm: str, to: str, decl: dict, skip: set[int] = froze
         common = any(area_of(f, decl)[1] for f in files)
         out.append({"pr": n, "branch": branch, "common": common, "points": decl["triggers"]["common_weight"] if common else 1})
     return out, excluded
+
+
+def merged_prs(root: Path, frm: str, to: str, decl: dict, skip: set[int] = frozenset()) -> tuple[list[dict], list[str]]:
+    """(範囲へ入った PR, 外した PR のコミット)。merge commit と squash merge（件名の末尾 `(#N)`）を数える。squash の
+    件名にはブランチ名が残らないため、ブランチは GitHub から読んで `SKIP_BRANCHES` を当てる。検査の PR は記録の番号
+    （skip）でも外す。外したコミットは行数からも差し引くために返す。"""
+    found, excluded = _scan_log(root, frm, to, skip)
+    heads = _resolve_branches(found, root)
+    out, skipped = _score_prs(found, heads, root, decl)
+    return out, excluded + skipped
 
 
 def changed_lines(root: Path, frm: str, to: str, excluded: list[str] = ()) -> int:
