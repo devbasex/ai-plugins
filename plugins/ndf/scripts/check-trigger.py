@@ -54,11 +54,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import operator
 import os
 import re
 import sys
 from datetime import datetime, timezone
+from operator import ge, gt
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
@@ -366,12 +366,7 @@ def escapes_since(events: list[dict], since: datetime) -> dict[str, int]:
 
 
 # しきい値で立つトリガー: (metrics と triggers のキー, 立つ比較, PR が 1 本以上要るか)。上から順に判定する
-THRESHOLD_TRIGGERS = (
-    ("score", operator.ge, False),
-    ("lines", operator.gt, False),
-    ("escapes", operator.ge, False),
-    ("hours", operator.ge, True),
-)
+THRESHOLD_TRIGGERS = (("score", ge, False), ("lines", gt, False), ("escapes", ge, False), ("hours", ge, True))
 
 
 def evaluate(root: Path, final: bool, since: str | None, to_ref: str | None = None, review: bool = False) -> dict:
