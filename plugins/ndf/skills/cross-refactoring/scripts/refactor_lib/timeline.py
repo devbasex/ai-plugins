@@ -27,6 +27,7 @@ PLAN_SHARE = 0.10  # 改修計画の枠の終わり = 提案の枠の終わり +
 MARGIN_SHARE = 0.05  # 余裕 = 0.05·B（手順の上限と CLI の上限に足す）
 MEASURE_SHARE = 0.05  # 指標の測定の上限 = 0.05·B（提案の枠の中から割く。#1319 の決定 7）
 MEASURE_PROPOSE_CAP = 0.5  # 測定に使える時間は、提案の枠の終わりまでの残りの半分まで
+STOP_REVERT_SHARE = 0.20  # 打ち切りの後の取り消し（案 A）の締め切り = 最終ゲートの修正の打ち切り + 0.20·B（#1669 決定 8）
 # テストと CI の待ちの係数は `test_strategy` が持つ（cross-refactoring と supervise で同じ値）。
 INIT_TEST_SHARE = ts.INIT_TEST_SHARE
 TEST_FACTOR = ts.TEST_FACTOR
@@ -155,6 +156,7 @@ def compute(
         "implement_end_at": _iso(_completion(list(items or []), "start_deadline", "implement")),
         "fix_end_at": _iso(budget.fix_end(started_at, b, reserve)) if planned else None,
         "final_end_at": _iso(started_at + _dt.timedelta(minutes=b)),
+        "stop_revert_end_at": _iso(started_at + _dt.timedelta(minutes=b * (1 + STOP_REVERT_SHARE))) if planned else None,
         # 最終ゲートの修正の 1 回目に必ず渡す長さ（決定 26）。予備時間の `final_fix`。
         "final_fix_seconds": (math.ceil(float(reserve.get("final_fix") or 0.0) * 60) if planned else None),
     }
@@ -175,6 +177,14 @@ def of_state(state: dict[str, Any]) -> dict[str, Any]:
 def limits_of(state: dict[str, Any]) -> dict[str, Any]:
     """書き出した表。無ければ（書き出す前の状態ファイル）その場で組む。"""
     return state.get("limits") or of_state(state)
+
+
+def stop_revert_end(state: dict[str, Any]) -> Optional[_dt.datetime]:
+    """打ち切りの後の取り消し（案 A）の締め切り。書き出す前の状態ファイルはその場で組む（#1669 I9）。"""
+    value = limits_of(state).get("stop_revert_end_at")
+    if value is None and state.get("plan") and state.get("started_at"):
+        value = of_state(state).get("stop_revert_end_at")
+    return clock.parse(value)
 
 
 def state_test_timeout(state: dict[str, Any]) -> int:

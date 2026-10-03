@@ -158,7 +158,7 @@ def test_a_flaky_failure_is_not_reverted(flow, cmd_setup, cmd_implement, cmd_con
     assert record["status"] == "fail"
     # ID は JUnit（xunit1）の `file::classname::name`（#1334 決定 5）。
     assert record["flaky"] == ["tests/test_flaky.py::tests.test_flaky::test_once"]
-    assert record["caused"] == [] and record["reverted"] is False
+    assert record["caused"] == [] and record["reverted"] is False and "culprit" not in record
     assert _items(flow)["I-001"]["status"] == "verified"
 
 
@@ -176,7 +176,7 @@ def test_a_failure_already_present_at_the_start_is_not_reverted(flow, cmd_setup,
     assert _emitted(capsys, "VERIFY") == "done"
     record = read_state(flow["path"])["whole_test"]
     assert record["preexisting"] == ["tests/test_env.py::tests.test_env::test_env"]
-    assert record["caused"] == [] and record["reverted"] is False
+    assert record["caused"] == [] and record["reverted"] is False and "culprit" not in record
     assert _items(flow)["I-001"]["status"] == "verified"
     # 着手前の HEAD は一時の作業ツリーで走らせ、作業ディレクトリは動かさず、後で消す
     assert len(_worktrees(flow["work"])) == 1
@@ -233,9 +233,11 @@ def test_without_time_to_fix_the_newest_flagged_items_are_reverted_until_it_pass
 
     assert _emitted(capsys, "VERIFY") == "done"
     items = _items(flow)
+    # 修正の締め切りの後は外す走らせ直しをせず、本文にパスも無いので原因は決まらない（#1649）。
     # 新しい順に取り消し、I-001（原因）を取り消した時点で通るまで 1 件ずつ
     assert [items[i]["status"] for i in ("I-003", "I-002", "I-001")] == ["reverted", "reverted", "reverted"]
     record = read_state(flow["path"])["whole_test"]
+    assert record["culprit"]["basis"] == "undetermined"
     assert record["resolution"] == "narrowed" and record["reverted"] is True
     assert "return result + 1" not in (work / "src" / "calc.py").read_text()
 
@@ -259,11 +261,13 @@ def test_narrowing_stops_as_soon_as_the_failed_tests_pass(flow, cmd_setup, cmd_i
 
 
 def test_without_junit_the_whole_test_is_rerun_and_a_green_baseline_sends_it_to_fix(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
-    """AC6 — JUnit が無いときは見分けを全体の走らせ直しに落とし、落としたことが結果に出る。着手前が green なら変更起因。"""
+    """AC6 — JUnit が無いときは見分けを全体の走らせ直しに落とし、落としたことが結果に出る。着手前が green なら変更起因。
+
+    原因の項目は走らせ直しのログに現れるパスで決め、その項目だけを修正へ回す（#1649）。
+    """
     _existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
-    _implement(
-        flow, cmd_setup, cmd_implement, {"I-001": _touch_other("other"), "I-002": _break_total}, strategy=strategy_state(junit=False)
-    )
+    raises = lambda w: _write(w, "src/calc.py", CALC.replace("    return result\n", "    raise RuntimeError('broke')\n"))  # noqa: E731
+    _implement(flow, cmd_setup, cmd_implement, {"I-001": _touch_other("other"), "I-002": raises}, strategy=strategy_state(junit=False))
     capsys.readouterr()
 
     _call(cmd_converge, "cmd_verify")
@@ -272,8 +276,9 @@ def test_without_junit_the_whole_test_is_rerun_and_a_green_baseline_sends_it_to_
     record = read_state(flow["path"])["whole_test"]
     assert record["fallback_reason"] and record["fallback_rerun"] == "fail"
     assert record["resolution"] == "fixing" and record["failed_tests"] is None
+    assert record["culprit"]["culprits"] == ["I-002"] and record["culprit"]["basis"] == "path"
     items = _items(flow)
-    assert items["I-001"]["status"] == "failing" and items["I-002"]["status"] == "failing"
+    assert items["I-001"]["status"] == "verified" and items["I-002"]["status"] == "failing"
 
 
 def test_without_junit_and_a_red_baseline_the_flagged_items_are_reverted_together(flow, cmd_setup, cmd_implement, cmd_converge, capsys):

@@ -2,7 +2,7 @@
 
 全体テストを CI に任せる戦略（`local-scoped-ci-whole`）か `--ci-check` のとき、push 済みの HEAD のチェックを
 `limits.ci_wait_timeout` まで待ち、落ちたら run の成果物の JUnit を落として見分けの材料にする。検証で最終ゲートへ
-寄せた危険フラグの項目は、変更起因が残って締め切りを過ぎたとき新しい順に取り消す。
+寄せた危険フラグの全体テストで変更起因が残って締め切りを過ぎたときは、原因の項目から順に取り消す（#1649）。
 """
 
 from __future__ import annotations
@@ -13,13 +13,12 @@ from typing import Any, Optional
 import gh_checks
 import test_triage
 
-from . import die, info, timeline
+from . import culprit, die, info, timeline
 from .github import gh_api_get
 from .gitfacts import run_with_timeout
-from .items import live_items, newest_first
+from .items import live_items
 from .outbound import plan_line
 from .paths import git_out, work_dir
-from .undo import drop
 
 
 def ci_mode(state: dict[str, Any]) -> bool:
@@ -80,31 +79,27 @@ def ci_gate(state: dict[str, Any]) -> tuple[bool, str, Optional[dict[str, Any]]]
 
 
 def revert_deferred(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]) -> bool:
-    """検証で最終ゲートへ寄せた危険フラグの項目を、変更起因のとき新しい順に取り消す（#1334 決定 7・AC8）。
+    """検証で最終ゲートへ寄せた危険フラグの全体テストで変更起因の失敗が出て締め切りを過ぎたとき、原因の項目から取り消す（#1649）。
 
-    取り消すたびに変更起因のファイルを手元で走らせ直し、通った時点で止める。取り消したら真。
-    寄せた項目が無い・変更起因でない・走らせ直す語が無いときは何もせず偽。
+    取り消す対象は寄せた危険フラグの項目ではなく、原因の判定（`culprit.judge`。締め切りは打ち切りの後の取り消しと同じ
+    `limits.stop_revert_end_at`）の順である。取り消すたびに変更起因のファイルを手元で走らせ直し、通った時点で止める。
+    取り消したら真。寄せた項目が無い・変更起因でない・走らせ直す語が無い・残る項目が無いときは何もせず偽。
     """
     deferred = (state.get("whole_test") or {}).get("deferred") or {}
-    ids = [i for i in deferred.get("items") or [] if i not in (gate.get("reverted_deferred") or [])]
     verdict = gate.get("triage") or {}
     rerun = verdict.get("rerun_command")
-    if not ids or not verdict.get("caused") or not rerun:
+    if not deferred.get("items") or not verdict.get("caused") or not rerun or not live_items(state):
         return False
-    live = {i["id"]: i for i in live_items(state)}
+    found = culprit.judge(state, gate, verdict, timeline.stop_revert_end(state))
     reason = "最終ゲートへ寄せた危険フラグの全体テストで変更起因の失敗が出て、締め切りを過ぎた"
-    reverted: list[str] = []
-    for item in newest_first([live[i] for i in ids if i in live]):
-        item_id = item["id"]
-        item["failure_reason"] = reason
-        drop(path, state, [item_id], reason)
-        reverted.append(item_id)
-        code, timed_out = run_with_timeout(
-            rerun if isinstance(rerun, str) else list(rerun), work_dir(state), timeline.state_test_timeout(state)
-        )
-        if not timed_out and code == 0:
-            break
+    work, limit = work_dir(state), timeline.state_test_timeout(state)
+
+    def passes() -> bool:
+        code, timed_out = run_with_timeout(rerun if isinstance(rerun, str) else list(rerun), work, limit)
+        return not timed_out and code == 0
+
+    reverted = culprit.revert_in_order(path, state, found.order, reason, passes).reverted
     gate["reverted_deferred"] = list(gate.get("reverted_deferred") or []) + reverted
     if reverted:
-        info(f"↩ 寄せた危険フラグの項目を新しい順に取り消しました（{', '.join(reverted)}）。{plan_line(state)}")
+        info(f"↩ 原因の項目から順に取り消しました（{', '.join(reverted)}）。{plan_line(state)}")
     return bool(reverted)

@@ -11,7 +11,7 @@ import models as models_lib
 import run_metrics
 import statefile
 
-from .. import allocation, clock, info, launch, ledger, timeline
+from .. import allocation, clock, culprit, info, launch, ledger, stop_revert, timeline
 from ..codemetrics_view import record_lines
 from ..items import item_label
 from ..measure import summary_extra
@@ -174,9 +174,15 @@ def _print_header(state: dict[str, Any]) -> None:
         )
     else:
         print("- 検証の中の全体のテスト: 走らせなかった（危険フラグが立たなかった）")
+    if whole.get("culprit"):
+        print(f"- 検証の中の全体のテストの原因の項目: {culprit.line(whole['culprit'])}")
     triage = gate.get("triage") or {}
     if triage:
         print(f"- 最終ゲートの見分け: {_triage_line(triage)}")
+    if gate.get("culprit"):
+        print(f"- 最終ゲートの原因の項目: {culprit.line(gate['culprit'])}")
+    if gate.get("stop_revert"):
+        print(f"- 打ち切りの後の取り消し: {stop_revert.line(gate['stop_revert'])}")
     print(
         f"- 最終ゲート: {gate.get('mode') or '—'}（{gate.get('status') or '未実行'}"
         f"{' / 検証の結果を使い回した' if gate.get('whole_test_reused') else ''}"
@@ -214,7 +220,7 @@ _RESOLUTIONS = {
     "kept": "変更が原因の失敗は無く、取り消さなかった",
     "fixing": "直しの途中",
     "fixed": "直して通った",
-    "narrowed": "直らず、危険フラグの項目を新しい順に取り消した",
+    "narrowed": "直らず、原因の項目から順に取り消した",
     "reverted_all": "落ちたテストを見分けられず、危険フラグの項目をまとめて取り消した",
     "deferred": "全体テストを CI に任せる戦略のため、最終ゲートへ寄せた",
 }

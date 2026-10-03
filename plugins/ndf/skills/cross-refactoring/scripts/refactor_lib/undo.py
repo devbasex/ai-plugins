@@ -35,6 +35,10 @@ from .paths import full_commit, git_out, work_dir
 from .worktree import replay_commits, reset_hard, revert_range
 
 
+class DropConflict(Exception):
+    """広げても積み直せなかった（`on_conflict="raise"` のとき）。HEAD は取り消しの前へ戻してある（#1669 決定 11）。"""
+
+
 @dataclass
 class _Outcome:
     mapping: dict[str, str] = field(default_factory=dict)  # 積み直した {元の SHA: 新しい SHA}
@@ -157,17 +161,20 @@ def _record(
     return record
 
 
-def _restore_and_stop(path: pathlib.Path, state: dict[str, Any], plan: ledger.RebuildPlan, conflict: str) -> None:
-    """広げても積み直せないとき。HEAD は `_execute` が取り消しの前へ戻してある。"""
+def _restore_and_stop(
+    path: pathlib.Path, state: dict[str, Any], plan: ledger.RebuildPlan, conflict: str, on_conflict: str = "stop"
+) -> None:
+    """広げても積み直せないとき。HEAD は `_execute` が取り消しの前へ戻してある。`on_conflict="raise"` なら例外で返す。"""
     state["pending_drop"] = None
     statefile.save(path, state)
     widened = ", ".join(plan.widened) or "なし"
-    die(
-        f"同じファイルを触った項目まで広げても積み直せません: {conflict[:12]}（広げた項目: {widened}）。HEAD を {plan.before[:12]} へ戻しました"
-    )
+    message = f"同じファイルを触った項目まで広げても積み直せません: {conflict[:12]}（広げた項目: {widened}）。HEAD を {plan.before[:12]} へ戻しました"
+    if on_conflict == "raise":
+        raise DropConflict(message)
+    die(message)
 
 
-def _rebuild(path: pathlib.Path, state: dict[str, Any], targets: list[str], reason: str) -> dict[str, Any]:
+def _rebuild(path: pathlib.Path, state: dict[str, Any], targets: list[str], reason: str, on_conflict: str = "stop") -> dict[str, Any]:
     work = work_dir(state)
     plan = ledger.plan_rebuild(state, work, targets)
     if plan.error:
@@ -184,16 +191,18 @@ def _rebuild(path: pathlib.Path, state: dict[str, Any], targets: list[str], reas
     if outcome.conflict:
         wide = ledger.plan_rebuild(state, work, targets, widen=True)
         if not wide.widened:
-            _restore_and_stop(path, state, wide, outcome.conflict)
+            _restore_and_stop(path, state, wide, outcome.conflict, on_conflict)
         info(f"⚠ 積み直しが衝突したため、同じファイルを触った {len(wide.widened)} 件（{', '.join(wide.widened)}）も取り消します")
         plan, outcome = wide, _execute(work, wide)
         if outcome.conflict:
-            _restore_and_stop(path, state, plan, outcome.conflict)
+            _restore_and_stop(path, state, plan, outcome.conflict, on_conflict)
     return _record(path, state, plan, outcome, targets, reason)
 
 
-def drop(path: pathlib.Path, state: dict[str, Any], item_ids: list[str], reason: str) -> dict[str, Any]:
+def drop(path: pathlib.Path, state: dict[str, Any], item_ids: list[str], reason: str, on_conflict: str = "stop") -> dict[str, Any]:
     """改善項目（と、どの項目にも属さないコミット）を取り消す。
+
+    広げても積み直せなければ、既定（`stop`）は終了コード 4 で止まり、`raise` なら `DropConflict` を投げる。
 
     戻り値は `{"mode", "dropped", "removed", "replayed", "reverted", ...}`。取り消した項目は
     `status: reverted`、`failure_reason` に理由を持つ。**見送り（`deferred_items`）へ入れるかは
@@ -201,7 +210,7 @@ def drop(path: pathlib.Path, state: dict[str, Any], item_ids: list[str], reason:
     """
     targets = [i for i in item_ids if ledger.is_live(find_item(state, i, required=False))]
     targets = _close_commitless(state, targets, reason)
-    return _rebuild(path, state, targets, reason)
+    return _rebuild(path, state, targets, reason, on_conflict)
 
 
 def discard_range(path: pathlib.Path, state: dict[str, Any], reason: str) -> dict[str, Any]:
