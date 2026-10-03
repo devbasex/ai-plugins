@@ -175,16 +175,19 @@ def slug_of(root: Path) -> str:
     return found.replace("/", "__", 1)
 
 
+# 置き場の候補: (環境変数, その値からの置き場)。設定されている最初の環境変数で決める
+STATE_BASES = (
+    ("CLAUDE_PLUGIN_DATA", Path),
+    ("XDG_STATE_HOME", lambda v: Path(v) / "ndf"),
+    ("HOME", lambda v: Path(v) / ".local" / "state" / "ndf"),
+)
+
+
 def state_base() -> Path:
     """通過記録と同じ順で置き場を決める。"""
     fallback = Path(os.environ.get("TMPDIR", "/tmp")) / "ndf-checks"
-    if os.environ.get("CLAUDE_PLUGIN_DATA"):
-        base = Path(os.environ["CLAUDE_PLUGIN_DATA"])
-    elif os.environ.get("XDG_STATE_HOME"):
-        base = Path(os.environ["XDG_STATE_HOME"]) / "ndf"
-    elif os.environ.get("HOME"):
-        base = Path(os.environ["HOME"]) / ".local" / "state" / "ndf"
-    else:
+    base = next((make(os.environ[name]) for name, make in STATE_BASES if os.environ.get(name)), None)
+    if base is None:
         return fallback
     try:
         (base / "checks").mkdir(parents=True, exist_ok=True)
