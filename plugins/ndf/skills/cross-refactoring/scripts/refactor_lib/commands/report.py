@@ -16,10 +16,10 @@ from ..codemetrics_view import record_lines
 from ..items import item_label
 from ..measure import summary_extra
 from ..outbound import plan_reference
-from ..plan import baseline_line, counts_line, existing_failures_line, strategy_lines
+from ..plan import baseline_line, counts_line, existing_failures_line, status_label, strategy_lines
 from ..paths import load_state
 from ..phases import phase_record
-from ..vocabulary import DEFER_REASONS, ITEM_STATUS_LABELS
+from ..vocabulary import DEFER_REASONS
 
 # `cross-review` の最終ステータスのうち、追記してよいもの。
 APPROVED = "approved"
@@ -284,7 +284,7 @@ def _item_table(state: dict[str, Any]) -> str:
                 str(item.get("technique")),
                 str(item.get("tier")),
                 f"{estimate:.1f}",
-                ITEM_STATUS_LABELS.get(shown := ledger.display_status(state, item), shown),
+                status_label(state, item),
                 ", ".join(item.get("danger") or []) or "—",
                 str(item.get("fix_count", 0)),
             )

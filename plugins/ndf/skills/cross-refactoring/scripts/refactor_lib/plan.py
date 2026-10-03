@@ -333,10 +333,15 @@ def _plan_deferred_section(state: dict[str, Any]) -> list[str]:
     return lines
 
 
+def status_label(state: dict[str, Any], item: dict[str, Any]) -> str:
+    """項目の表示の状態（`ledger.display_status`）を読む側の語へ直す。語の無い状態はそのまま返す。"""
+    shown = ledger.display_status(state, item)
+    return ITEM_STATUS_LABELS.get(shown, shown)
+
+
 def _plan_item_section(state: dict[str, Any], item: dict[str, Any]) -> list[str]:
     """項目 1 件の見出し・要約表・理由・手順。状態は表示の状態（`ledger.display_status`）で書く。"""
-    shown = ledger.display_status(state, item)
-    status = ITEM_STATUS_LABELS.get(shown, shown or "—")
+    status = status_label(state, item) or "—"
     commits = item.get("commits") or {}
     count = len([s for s in (commits.get("test"), commits.get("implement"), *(commits.get("fix") or [])) if s])
     lines = [
