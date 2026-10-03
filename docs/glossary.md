@@ -229,6 +229,8 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | hook の締め切り | — | NDF の hook が自分で決める 1 回の実行の時間の上限（3.5 秒）。hook の上限より短く、過ぎたら残りの判定を飛ばして通し、標準エラーへ 1 行残す | — | — | `docs/specifications/cross-review-reopen-and-hook-deadline.md` |
 | 適用範囲 | — | 設計した変更が働く範囲。このリポジトリだけで働くのか配布先のリポジトリでも働くのか、プロジェクトごとに違うものを設定か引数のどちらで受けるのか。設計文書の節と承認資料の行に書く | — | — | `docs/specifications/ndf-design-phase.md` |
 | あるべき姿の根拠 | — | 変更後の形が適切だと言える根拠。外部の一次情報・実測・利用者の指示の原文のどれか。設計文書の節と承認資料の行に書き、無ければ「無し（理由）」。MVV の根拠の項目とは別のもの | — | — | `docs/specifications/ndf-design-phase.md` |
+| ジョブの識別子 | — | 継続的統合のジョブを指す `<ワークフローのファイルのパス>#<job id>`。`#<job id>` を省くとそのファイルのジョブすべてを指す。宣言の suites[].ci_jobs と test.ci_exempt が使う | — | — | — |
+| 除外したジョブ | `ci_exempt` | 手元の検証で走らせないと宣言したジョブ。宣言の test.ci_exempt に理由と組で書く | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 
@@ -335,6 +337,7 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 原因の項目 | — | 全体テストで変更起因として落ちたテストを、その変更で落とした改善項目。危険フラグの有無とは関係しない | — | — | `docs/specifications/cross-refactoring-verify-and-final-gate.md` |
 | 原因の手がかり | `basis` | 原因の項目を決めた根拠。path（落ちたテストの出力に項目の変えたファイルのパスが現れた）・isolate（項目を外した走らせ直しで通った）・undetermined（どちらでも決まらない）の 3 つ | — | — | `docs/specifications/cross-refactoring-verify-and-final-gate.md` |
 | 打ち切りの後の取り消し | `stop_revert` | 工程の 1 つとして起動した cross-refactoring が、最終ゲート修正を打ち切った後に、原因の項目を取り消すか（案 A）、着手前の木へ戻すコミットを積む（案 B）処理 | — | — | `docs/specifications/cross-refactoring-verify-and-final-gate.md` |
+| 宣言に無いジョブ | — | 継続的統合のジョブのうち、どの suite の ci_jobs にも除外したジョブにも当たらないもの。cross-refactoring の init が知らせ、状態ファイルの ci_coverage.undeclared に残す | — | — | — |
 
 ## NDF のラッパー（`ndf-relay`）
 
