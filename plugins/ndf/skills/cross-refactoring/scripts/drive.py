@@ -46,9 +46,13 @@ import durable  # noqa: E402
 from drive_pause import Stop  # noqa: E402
 from loop_drive import call, durable_identity, parse_vars, review_status  # noqa: E402,F401  テストは `call` をこのモジュールの上で差し替える
 
+if str(HERE) not in sys.path:
+    sys.path.append(str(HERE))
+from refactor_lib.vocabulary import PHASES  # noqa: E402
+
 TOOL = "cross-refactoring-drive"
 KIND = "refactor"  # 耐久の記録の種類
-ORDER = ("propose", "plan", "add-tests", "implement", "verify", "final", "done")
+ORDER = PHASES  # 手順の順序の定義元は状態側の手順一覧（`refactor_lib.vocabulary.PHASES`）
 # 修正の手順は検証の繰り返しの中にある。そこで止まった実行は検証から再開する（提案以降の CLI を起動し直さない）
 RESUME_AS = {"fix": "verify", "final-fix": "final"}
 # 監視が手順の上限で CLI を止めたときの終了コード（2 = TIMEOUT・5 = STALLED。表は monitor.py の冒頭）
