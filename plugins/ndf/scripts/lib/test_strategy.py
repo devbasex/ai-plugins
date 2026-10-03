@@ -63,7 +63,8 @@ class StrategyError(Exception):
 
 @dataclass
 class Suite:
-    """宣言の suite の写し。`scope_command` を持たない suite は範囲テストに使わない。`kind` は `test` か `lint`。"""
+    """宣言の suite の写し。`scope_command` を持たない suite は範囲テストに使わない。`kind` は `test` か `lint`。
+    `ci_jobs` はこの suite が受け持つ継続的統合のジョブの識別子（#464）。"""
 
     name: str
     command: str
@@ -71,6 +72,7 @@ class Suite:
     junit: Optional[str] = None
     paths: list[str] = field(default_factory=list)
     kind: str = TEST
+    ci_jobs: list[str] = field(default_factory=list)
 
     def covers(self, path: str) -> bool:
         """`path`（`::` 付きの対象も可）をこの suite が受け持つか。glob の要素は `fnmatchcase`、ほかは接頭辞の一致。"""
@@ -84,6 +86,7 @@ class Suite:
             "junit": self.junit,
             "paths": list(self.paths),
             "kind": self.kind,
+            "ci_jobs": list(self.ci_jobs),
         }
 
 
@@ -215,12 +218,13 @@ class Strategy:
 
     @classmethod
     def from_state(cls, data: dict[str, Any]) -> "Strategy":
-        """状態ファイルの戦略。`kind` を持たない suite（旧形）はテストとして読む（I3）。"""
+        """状態ファイルの戦略。`kind` を持たない suite（旧形）はテストとして読む（I3）。`ci_jobs` が無ければ空。"""
         suites = [
             Suite(
                 **{k: s.get(k) for k in ("name", "command", "scope_command", "junit")},
                 paths=list(s.get("paths") or []),
                 kind=str(s.get("kind") or TEST),
+                ci_jobs=list(s.get("ci_jobs") or []),
             )
             for s in data.get("suites") or []
         ]
@@ -332,6 +336,7 @@ def _suites_of(test: dict[str, Any]) -> list[Suite]:
                 junit=str(s["junit"]) if s.get("junit") else None,
                 paths=[str(p) for p in s.get("paths") or []],
                 kind=str(s.get("kind") or TEST),
+                ci_jobs=[str(j) for j in s.get("ci_jobs") or []],
             )
         )
     return out
