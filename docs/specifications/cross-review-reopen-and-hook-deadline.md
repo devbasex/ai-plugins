@@ -40,9 +40,9 @@
 
 | 扱う | 扱わない |
 | --- | --- |
-| `final` が確定したレビューの状態ファイルにラウンドを足す入口（`state.py init`） | worktree の guard の誤検知（#734） |
-| `drive.py` が前回の結果を返すか、新しい実行の回を始めるかの判定 | `NDF_SKIP_AUTH_CHECK=1` による認証確認の回避（#461） |
-| 確定した `final` を振動検知が上書きしないこと | `supervise.py run --from` の流し直しと、cross-refactoring の駆動の完了済みの扱い（#1263） |
+| `final` が確定したレビューの状態ファイルにラウンドを足す入口（`state.py init`） | worktree の guard の誤検知（関連: #734） |
+| `drive.py` が前回の結果を返すか、新しい実行の回を始めるかの判定 | `NDF_SKIP_AUTH_CHECK=1` による認証確認の回避（関連: #461） |
+| 確定した `final` を振動検知が上書きしないこと | `supervise.py run --from` の流し直しと、cross-refactoring の駆動の完了済みの扱い（関連: #1263） |
 | ホストが自分で直したときの修正の記録の入口（`state.py record-fix`）と、`merge-fix` の取り込みの段階 | 振動検知の判定の基準（重なり 50%・3 つの一致） |
 | PreToolUse と userPromptSubmit の hook の締め切り（Claude Code・Codex・agy・Kiro） | hook の上限（各ランタイムの `timeout`）を上げること |
 
@@ -222,7 +222,7 @@ Tool の事象（`tool_kind` がある）と userPromptSubmit だけで、待ち
 
 ## テスト観点
 
-`.md` の文言は固定しない（#885）。
+`.md` の文言は固定しない（関連: #885）。
 
 | 観点 | 確かめ方 |
 | --- | --- |

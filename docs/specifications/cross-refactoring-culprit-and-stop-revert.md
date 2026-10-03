@@ -53,9 +53,9 @@ cross-refactoring の側は構造チェックのために何も持たない。�
 | 項目 | 内容 |
 | --- | --- |
 | 位置引数 | 0 個以上のファイル。根からの相対パスか根の下の絶対パスで、無いファイル（項目が消したファイル）とディレクトリも受ける |
-| 検査 | 指定に関わらず木全体で 1 回行い、指定は `items` と合否を絞るだけにする |
-| 出力 | `items` は指定に関わる違反だけ。`metrics` に `targets`（指定の数）と `outside`（指定に関わらず外した違反の数）を足す |
-| 終了コード | 0 = 関わる違反なし / 1 = 関わる違反あり / 2 = 例外リストを読めない・形の誤り（指定に関わらず 2） |
+| 検査 | 指定の有無を問わず木全体で 1 回行い、指定は `items` と合否を絞るだけにする |
+| 出力 | `items` は指定に関わる違反だけ。`metrics` に `targets`（指定の数）と `outside`（指定の有無を問わず外した違反の数）を足す |
+| 終了コード | 0 = 関わる違反なし / 1 = 関わる違反あり / 2 = 例外リストを読めない・形の誤り（指定の有無を問わず 2） |
 | 位置引数が無いとき | 木全体の違反で合否を決め、`metrics` に `targets` / `outside` を足さない。継続的統合はこの形で呼ぶ |
 
 違反が指定に「関わる」とき:
@@ -97,7 +97,7 @@ stateDiagram-v2
   取り消した項目の `failure_reason` は「最終ゲート修正を打ち切った後に、原因の項目として取り消した」
 - **起点への戻し**は、`plan.base_sha` の木へ worktree と index を合わせ（`git read-tree -u --reset`）、
   `Revert: cross-refactoring の改善を着手前の木へ戻す（<理由>）` を 1 本コミットする。台帳にはオーケストレーターのコミットとして記録し
-  （`ledger.note_orchestrator_commit`）、残った項目をすべて取り消した記録にする（`failure_reason` は「最終ゲート修正を打ち切った後に、着手前の木へ戻した（案 B）」）。
+  （`ledger.note_orchestrator_commit`）、残った項目をすべて取り消した記録にする（`failure_reason` は `stop_revert.REASON_B` の文）。
   コミットを作れなければ HEAD を戻して終了コード 4 で止まる
 - どちらも、積んだ後の公開と、起点（`final_gate.fix_base_sha`）の置き直しは `gate.cmd_final_gate` が行う
 - 確かめ直しの最終ゲートが通れば `final_gate.status` は `passed` になり、駆動は残った項目（`verified`）の数を `adopted` にして完了で終える（`unconfirmed` は出ない）。
