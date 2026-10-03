@@ -281,17 +281,18 @@ class Drive:
             self.propose()
             go_final = self.rf("merge-proposals", i, ok=(0, 2))[0] == 2
         if not go_final:
-            if self.todo("plan"):
-                self.impl_phase("plan")
-            go_final = self.rf("merge-plan", i, ok=(0, 2))[0] == 2
+            go_final = self._phase_step("plan", "merge-plan")
         if not go_final and self.v.get("TESTS_NEEDED") == "1" and self.todo("add-tests"):
-            self.impl_phase("add-tests")
-            go_final = self.rf("merge-tests", i, ok=(0, 2))[0] == 2
+            go_final = self._phase_step("add-tests", "merge-tests")
         if not go_final:
-            if self.todo("implement"):
-                self.impl_phase("implement")
-            go_final = self.rf("merge-implement", i, ok=(0, 2))[0] == 2
+            go_final = self._phase_step("implement", "merge-implement")
         return go_final
+
+    def _phase_step(self, phase: str, merge_cmd: str) -> bool:
+        """未了なら担当の工程を打ち、続けて取り込みを打つ。最終ゲートへ直に進むなら真を返す。"""
+        if self.todo(phase):
+            self.impl_phase(phase)
+        return self.rf(merge_cmd, self.v["ID"], ok=(0, 2))[0] == 2
 
     def verify_round(self) -> bool:
         """検証を 1 回打ち、修正が要れば修正と取り込みまで進める。修正したなら真を返す。"""
