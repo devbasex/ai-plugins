@@ -54,6 +54,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections import Counter
 import os
 import re
 import sys
@@ -766,32 +767,19 @@ def check_row(c: dict, linked: dict[int, list[int]]) -> dict:
     }
 
 
-def _fired_counts(evals: list[dict]) -> dict[str, int]:
-    """トリガー別に立った回数を数える。"""
-    fired: dict[str, int] = {}
-    for e in evals:
-        for t in e.get("fired") or []:
-            fired[t] = fired.get(t, 0) + 1
-    return fired
-
-
 def _check_rows(checks: list[dict], windows: list[dict], escapes: list[dict], linked) -> list[dict]:
     """検査ごとの行に、窓を切る検査なら窓の中の逃げた不具合を足す。"""
-    rows = []
-    for c in checks:
-        row = check_row(c, linked)
-        i = next((k for k, w in enumerate(windows) if w is c), None)
-        if i is not None:
-            row["escapes_after"] = escapes_in_window(c, i, windows, escapes)
-        rows.append(row)
-    return rows
+    at = {id(w): i for i, w in enumerate(windows)}
+    return [
+        check_row(c, linked) | ({"escapes_after": escapes_in_window(c, at[id(c)], windows, escapes)} if id(c) in at else {}) for c in checks
+    ]
 
 
 def _stats_metrics(root: Path, evals: list[dict], checks: list[dict], escapes: list[dict], unlinked) -> dict:
     return {
         "evals": len(evals),
         "fired": sum(1 for e in evals if e.get("fired")),
-        "by_trigger": _fired_counts(evals),
+        "by_trigger": dict(Counter(t for e in evals for t in e.get("fired") or [])),
         "checks": len(checks),
         "checks_pr": sum(1 for c in checks if c.get("scope") == "pr"),
         "failed": sum(1 for c in checks if c.get("result") == "failed"),
@@ -805,21 +793,17 @@ def _stats_metrics(root: Path, evals: list[dict], checks: list[dict], escapes: l
 
 def cmd_stats(a, root: Path) -> tuple[dict, int]:
     events = read_events(root)
-    evals = [e for e in events if e["kind"] == "eval"]
-    checks = [e for e in events if e["kind"] == "check"]
-    escapes = [e for e in events if e["kind"] == "escape"]
-    ended = [e for e in checks if e.get("result") in ENDED]
+    evals, checks, escapes = ([e for e in events if e["kind"] == kind] for kind in ("eval", "check", "escape"))
     linked, unlinked = link_escapes(escapes, checks)
     # 時刻の窓を切るのは範囲が時刻で連続する検査（scope: since）だけ。PR を指す検査は窓を切らない
-    windows = [e for e in ended if e.get("scope", "since") == "since"]
-    rows = _check_rows(checks, windows, escapes, linked)
+    windows = [e for e in checks if e.get("result") in ENDED and e.get("scope", "since") == "since"]
     metrics = _stats_metrics(root, evals, checks, escapes, unlinked)
     return result(
         TOOL,
         "ok",
         f"評価 {metrics['evals']} 回（立った {metrics['fired']}）・検査 {len(checks)} 回（PR を指す {metrics['checks_pr']}）"
         f"・逃げた不具合 {metrics['escapes']} 件（結び付いた {metrics['escapes_linked']}）",
-        rows,
+        _check_rows(checks, windows, escapes, linked),
         metrics,
     ), EXIT_OK
 
