@@ -15,7 +15,6 @@ import test_triage
 
 from . import culprit, die, info, timeline
 from .github import gh_api_get
-from .gitfacts import run_with_timeout
 from .items import live_items
 from .outbound import plan_line
 from .paths import git_out, work_dir
@@ -92,13 +91,7 @@ def revert_deferred(path: pathlib.Path, state: dict[str, Any], gate: dict[str, A
         return False
     found = culprit.judge(state, gate, verdict, timeline.stop_revert_end(state))
     reason = "最終ゲートへ寄せた危険フラグの全体テストで変更起因の失敗が出て、締め切りを過ぎた"
-    work, limit = work_dir(state), timeline.state_test_timeout(state)
-
-    def passes() -> bool:
-        code, timed_out = run_with_timeout(rerun if isinstance(rerun, str) else list(rerun), work, limit)
-        return not timed_out and code == 0
-
-    reverted = culprit.revert_in_order(path, state, found.order, reason, passes).reverted
+    reverted = culprit.revert_in_order(path, state, found.order, reason, culprit.rerun_passes(state, rerun)).reverted
     gate["reverted_deferred"] = list(gate.get("reverted_deferred") or []) + reverted
     if reverted:
         info(f"↩ 原因の項目から順に取り消しました（{', '.join(reverted)}）。{plan_line(state)}")

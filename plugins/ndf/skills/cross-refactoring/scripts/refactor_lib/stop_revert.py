@@ -20,7 +20,6 @@ from typing import Any, Optional
 import statefile
 
 from . import culprit, die, info, ledger, timeline
-from .gitfacts import run_with_timeout
 from .items import live_items
 from .paths import git_out, work_dir
 from .worktree import reset_hard
@@ -55,13 +54,9 @@ def _plan_a(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]) -> 
     if not verdict.get("caused") or not rerun:
         return "落ちたテストを走らせ直す語が無い（変更起因を挙げられない）"
     found = culprit.judge(state, gate, verdict, end)
-    work, limit = work_dir(state), timeline.state_test_timeout(state)
-
-    def passes() -> bool:
-        code, timed_out = run_with_timeout(rerun if isinstance(rerun, str) else list(rerun), work, limit)
-        return not timed_out and code == 0
-
-    narrowed = culprit.revert_in_order(path, state, found.order, REASON_A, passes, on_conflict="raise", deadline=end)
+    narrowed = culprit.revert_in_order(
+        path, state, found.order, REASON_A, culprit.rerun_passes(state, rerun), on_conflict="raise", deadline=end
+    )
     record["reverted"] = narrowed.reverted
     statefile.save(path, state)
     if narrowed.passed:

@@ -30,7 +30,7 @@ import statefile
 import test_triage
 
 from . import budget, clock, info, ledger, timeline, triage, worktree
-from .gitfacts import commit_files
+from .gitfacts import commit_files, run_with_timeout
 from .items import find_item, item_shas, live_items, newest_first
 from .paths import work_dir
 from .undo import DropConflict, drop
@@ -170,6 +170,17 @@ class Narrowed:
     reverted: list[str]
     passed: bool
     cut: Optional[str] = None
+
+
+def rerun_passes(state: dict[str, Any], rerun: Any) -> Callable[[], bool]:
+    """落ちたテストを走らせ直し、時間内に通ったかを返す関数を作る（revert_in_order へ渡す）。"""
+    work, limit = work_dir(state), timeline.state_test_timeout(state)
+
+    def passes() -> bool:
+        code, timed_out = run_with_timeout(rerun if isinstance(rerun, str) else list(rerun), work, limit)
+        return not timed_out and code == 0
+
+    return passes
 
 
 def revert_in_order(
