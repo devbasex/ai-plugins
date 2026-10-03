@@ -13,7 +13,7 @@ import re
 import subprocess
 from typing import Optional
 
-from .publish import credential_fallback_args, gh_available
+from .publish import git_with_credential_fallback
 
 _REVERTS = re.compile(r"^This reverts commit ([0-9a-f]{7,40})", re.MULTILINE)
 _RECORD = "\x1e"
@@ -27,7 +27,7 @@ def still_reverted(entries: list[tuple[str, str]]) -> dict[str, str]:
     reverters: dict[str, list[str]] = {}
     for sha, body in entries:
         for target in _REVERTS.findall(body):
-            reverters.setdefault(_expand(target, entries), []).append(sha)
+            reverters.setdefault(_full_sha(target, entries), []).append(sha)
     memo: dict[str, Optional[str]] = {}
 
     def effective_reverter(sha: str) -> Optional[str]:
@@ -39,7 +39,7 @@ def still_reverted(entries: list[tuple[str, str]]) -> dict[str, str]:
     return {sha: r for sha in reverters if (r := effective_reverter(sha)) is not None}
 
 
-def _expand(target: str, entries: list[tuple[str, str]]) -> str:
+def _full_sha(target: str, entries: list[tuple[str, str]]) -> str:
     """短い SHA を、読んだ範囲のコミットの完全な SHA へ広げる。範囲に無ければそのまま返す。"""
     return next((sha for sha, _ in entries if sha.startswith(target)), target)
 
@@ -51,17 +51,9 @@ def reverter_of(reverted: dict[str, str], sha: str) -> Optional[str]:
     return next((r for target, r in reverted.items() if target.startswith(sha) or sha.startswith(target)), None)
 
 
-def _git(work: str, *args: str) -> subprocess.CompletedProcess:
-    p = subprocess.run(["git", *args], cwd=work, capture_output=True, text=True)
-    if p.returncode != 0 and gh_available():
-        # push と同じく、認証で落ちたときは helper を退避して 1 度だけやり直す
-        p = subprocess.run(["git", *credential_fallback_args(), *args], cwd=work, capture_output=True, text=True)
-    return p
-
-
-def scan(work: str, base_sha: str, head_branch: str) -> Optional[tuple[str, dict[str, str]]]:
+def read_origin_reverts(work: str, base_sha: str, head_branch: str) -> Optional[tuple[str, dict[str, str]]]:
     """origin の head ブランチを取り込み、`(FETCH_HEAD の SHA, 取り消されたままのコミット)` を返す。取り込めなければ `None`。"""
-    if _git(work, "fetch", "origin", head_branch).returncode != 0:
+    if git_with_credential_fallback(work, "fetch", "origin", head_branch).returncode != 0:
         return None
     tip = subprocess.run(["git", "rev-parse", "FETCH_HEAD"], cwd=work, capture_output=True, text=True)
     log = subprocess.run(

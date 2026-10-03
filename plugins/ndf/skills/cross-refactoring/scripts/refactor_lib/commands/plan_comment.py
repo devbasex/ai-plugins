@@ -68,7 +68,7 @@ def cmd_plan_comment(args: argparse.Namespace) -> None:
     point = None
     extra: dict[str, Any] = {}
     if args.scan_reverts:
-        scanned = outside_reverts.scan(state["worktrees"]["work"], state["plan"].get("base_sha") or "", state["head_branch"])
+        scanned = outside_reverts.read_origin_reverts(state["worktrees"]["work"], state["plan"].get("base_sha") or "", state["head_branch"])
         if scanned is None:
             die(f"origin の {state['head_branch']} を取り込めないため、コメントも状態も変えません")
         point, reverted = scanned
