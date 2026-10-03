@@ -54,6 +54,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import operator
 import os
 import re
 import sys
@@ -365,6 +366,15 @@ def escapes_since(events: list[dict], since: datetime) -> dict[str, int]:
     return counts
 
 
+# しきい値で立つトリガー: (metrics と triggers のキー, 立つ比較, PR が 1 本以上要るか)。上から順に判定する
+THRESHOLD_TRIGGERS = (
+    ("score", operator.ge, False),
+    ("lines", operator.gt, False),
+    ("escapes", operator.ge, False),
+    ("hours", operator.ge, True),
+)
+
+
 def evaluate(root: Path, final: bool, since: str | None, to_ref: str | None = None, review: bool = False) -> dict:
     decl = load_decl(root)
     events = read_events(root)
@@ -388,14 +398,9 @@ def evaluate(root: Path, final: bool, since: str | None, to_ref: str | None = No
         if prs:
             fired.append({"trigger": "review", "value": len(prs), "threshold": 1})
         return {"decl": decl, "fired": fired, "metrics": metrics, "escape_areas": esc, "how": how, "prs": [p["pr"] for p in prs]}
-    if metrics["score"] >= t["score"]:
-        fired.append({"trigger": "score", "value": metrics["score"], "threshold": t["score"]})
-    if metrics["lines"] > t["lines"]:
-        fired.append({"trigger": "lines", "value": metrics["lines"], "threshold": t["lines"]})
-    if metrics["escapes"] >= t["escapes"]:
-        fired.append({"trigger": "escapes", "value": metrics["escapes"], "threshold": t["escapes"]})
-    if hours >= t["hours"] and prs:
-        fired.append({"trigger": "hours", "value": hours, "threshold": t["hours"]})
+    for name, reached, needs_prs in THRESHOLD_TRIGGERS:
+        if reached(metrics[name], t[name]) and (prs or not needs_prs):
+            fired.append({"trigger": name, "value": metrics[name], "threshold": t[name]})
     if final and prs:
         fired.append({"trigger": "final", "value": len(prs), "threshold": 1})
     return {"decl": decl, "fired": fired, "metrics": metrics, "escape_areas": esc, "how": how, "prs": [p["pr"] for p in prs]}
