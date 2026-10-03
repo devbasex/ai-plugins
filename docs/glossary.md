@@ -225,8 +225,8 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 取り込んだ課題 | — | 設計で、受け入れ内容を別の課題の実装へ含めると決めた課題。自分の実装のプランは残すが、`実行の条件` で飛ばして実行しない | — | — | — |
 | 手動確認の行 | — | 要求の検証手段の表で、項目が「手動確認」で始まる行。項目が「手動確認（マージ前）」ならマージ前、それ以外はリリース後テストに確かめる | — | — | — |
 | 設計の結果 | — | 設計文書の「設計の結果」の節の表。課題ごとに扱い（実装する / 取り込む / 閉じる）・取り込み先・触るファイルを書き、実装のステージの前に機械が読む | — | — | — |
-| hook の上限 | — | ランタイムの hook の定義（hooks/*.json・dev.agy/hooks.json）の timeout。過ぎるとランタイムが hook を打ち切る | — | — | — |
-| hook の締め切り | — | NDF の hook が自分で決める 1 回の実行の時間の上限（3.5 秒）。hook の上限より短く、過ぎたら残りの判定を飛ばして通し、標準エラーへ 1 行残す | — | — | — |
+| hook の上限 | — | ランタイムの hook の定義（hooks/*.json・dev.agy/hooks.json）の timeout。過ぎるとランタイムが hook を打ち切る | — | — | `docs/specifications/cross-review-reopen-and-hook-deadline.md` |
+| hook の締め切り | — | NDF の hook が自分で決める 1 回の実行の時間の上限（3.5 秒）。hook の上限より短く、過ぎたら残りの判定を飛ばして通し、標準エラーへ 1 行残す | — | — | `docs/specifications/cross-review-reopen-and-hook-deadline.md` |
 | 適用範囲 | — | 設計した変更が働く範囲。このリポジトリだけで働くのか配布先のリポジトリでも働くのか、プロジェクトごとに違うものを設定か引数のどちらで受けるのか。設計文書の節と承認資料の行に書く | — | — | — |
 | あるべき姿の根拠 | — | 変更後の形が適切だと言える根拠。外部の一次情報・実測・利用者の指示の原文のどれか。設計文書の節と承認資料の行に書き、無ければ「無し（理由）」。MVV の根拠の項目とは別のもの | — | — | — |
 
@@ -295,9 +295,9 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 見送りの返信 | — | 修正担当が minor / nit の指摘を直さずに閉じるときに書く返信。雛形から組み、理由の種類（見送りの種類の名前）と直す条件（使って困る場面が出たら直す）を定型文で書く | — | — | — |
 | 見送りの種類 | — | 見送りの返信の括弧に書く、指摘の基準に当たらない理由の 5 分類（waive_kind） | — | — | — |
 | 最終スイープ | — | 収束ループを抜けた後に /ndf:fix を通し、open thread を 0 にする工程 | — | — | — |
-| レビューの状態ファイル | — | cross-review が <worktree>/.cross_review/cross-review-pr<PR>-state.json に置く、ラウンドの履歴（rounds）と終わり方（final）の記録 | — | — | — |
-| 修正の記録 | — | 修正の工程が作る戻り値ファイル（fix-pr<PR>-result.json）を merge-fix がレビューの状態ファイルへ取り込んだもの。ホストが自分で直したときは state.py record-fix が同じ形で作る。修正必須のラウンドの次のラウンドを始める条件 | — | — | — |
-| ラウンドを足す | — | final が確定したレビューの状態ファイルの final を外し、履歴を残したまま次の番号のラウンドから収束ループを続けること。state.py init の再開の経路が行い、reopens に 1 件残す | — | — | — |
+| レビューの状態ファイル | — | cross-review が <worktree>/.cross_review/cross-review-pr<PR>-state.json に置く、ラウンドの履歴（rounds）と終わり方（final）の記録 | — | — | `docs/specifications/cross-review-reopen-and-hook-deadline.md` |
+| 修正の記録 | — | 修正の工程が作る戻り値ファイル（fix-pr<PR>-result.json）を merge-fix がレビューの状態ファイルへ取り込んだもの。ホストが自分で直したときは state.py record-fix が同じ形で作る。修正必須のラウンドの次のラウンドを始める条件 | — | — | `docs/specifications/cross-review-reopen-and-hook-deadline.md` |
+| ラウンドを足す | — | final が確定したレビューの状態ファイルの final を外し、履歴を残したまま次の番号のラウンドから収束ループを続けること。state.py init の再開の経路が行い、reopens に 1 件残す | — | — | `docs/specifications/cross-review-reopen-and-hook-deadline.md` |
 
 ## NDF の cross-refactoring（`ndf-cross-refactoring`）
 
