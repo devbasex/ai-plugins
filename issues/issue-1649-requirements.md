@@ -4,56 +4,56 @@
 
 ## 依頼（原文）
 
-起票時の本文を、見出しの深さだけを 1 段下げてそのまま残す。
+起票時の本文を、見出しの深さだけを 1 段下げ、引用としてそのまま残す。
 
-### 何を見つけたか
-
-cross-refactoring は、危険フラグが立ったときの全体テストで変更起因の失敗が出ると、**危険フラグの付いた項目だけ**を修正と取り消しの対象にする。失敗の原因が危険フラグの無い項目にあると、無関係な項目をすべて取り消し、原因の項目は残る。
-
-PR #1634（スプリント m1340）で観測した。
-
-| 項目 | 危険フラグ | 最終の状態 | 全体テストとの関係 |
-| --- | --- | --- | --- |
-| I-002・I-003・I-004・I-008・I-009・I-010 | あり（D1・D3・D4・D5） | reverted | 修正担当がすべて `not_caused`（「落ちた 2 件はこの項目の変更に由来しない」）と返した |
-| I-005（31205640） | 無し | verified | `participants.py` に足した `_rebuild_participants` が、cross-refactoring の `setup.py` の同名関数と衝突した → `scripts/tests/test_check_script_structure.py::test_repository_matches_its_allow_list` |
-| I-006（598cc492） | 無し | verified | `claude.py` が 499 → 509 行 → `test_supervise_layout.py::test_no_file_exceeds_500_lines[claude.py]` |
-
-修正担当は原因を特定していた: 「HEAD から 598cc492 と 31205640 を戻すと 100 passed。I-005/I-006 は直す項目に含まれないため変更していない」（`.cross_refactoring/claude-fix-rf1634-result.json`）。それでも修正の 2 回目の後、危険フラグの項目 6 件を新しい順に全件取り消した。原因の 2 項目は残ったため、最終ゲートは通らず `refactor.py verify` が終了コード 4 で止まった（`adopted 0 / reverted 7 / deferred 1`）。
-
-着手前の失敗 9 件（`plugins/mcp/mcp-serena/tests/test_serena_lsp_check.py`・`test_serena_lsp_hooks.py`）は既存失敗として正しく除けていた。この件には関わらない。
-
-### どこで見つけたか
-
-- PR #1634（https://github.com/devbasex/ai-plugins/pull/1634 ）の検査の refactor のステップ（2026-10-03 00:32〜01:03 JST）
-- 記録: `/tmp/ndf-worktrees/devbasex--ai-plugins/rf1634/work/.cross_refactoring/`（`verify-whole-test.log`・`claude-fix-rf1634-result.json`・`cross-refactoring-rf1634-state.json`）、`~/.local/state/ndf/sv/sprint-m1340/6-check-state/04-refactor.out`
-- 利用者の問い（2026-10-03）: 取り消しがなぜ起きたのか
-
-### なぜこの変更の範囲外なのか
-
-スプリント m725（#725・#1289・#842・#824）の受け入れ条件に、cross-refactoring の取り消しの対象の決め方は入っていない。CLAUDE.md の「直らなければ危険フラグの項目を新しい順に取り消す」という方針そのものを変えることになり、即時修正の 4 条件の 3 つ目を満たさない。根拠: Value 2（MVV 版 2）。
-
-### 直さないと何が起きるか
-
-- 行数の上限・構造の許可リストのように、危険フラグ（D1〜D5）に当たらない変更でも全体テストは落ちる。そのたびに、テストを壊していない改善が全件消える
-- 原因の項目が残るため最終ゲートが通らず、予算（30 分）と提案者の費用を使っても採用は 0 件になる
-- 修正担当が原因を特定しても、対象外の項目には手を出さない。その判断は結果に残るが、取り消しの対象に反映されない
-
-### 由来
-
-PR #1634（スプリント m1340。issue #1340 #1484 #1435 #581）。記録が残らない件は #1648
-
-
-### 再発: スプリント m725（2026-10-03）
-
-PR https://github.com/devbasex/ai-plugins/pull/1663 の検査で同じ経路を通った。変更起因は今回も `scripts/tests/test_check_script_structure.py::test_repository_matches_its_allow_list` の 1 件。
-
-- 原因: 危険フラグの無い項目 8 件（`transcript_agents.py`・`upkeep.py`・`trash.py` を触った抽出・定数化）
-- 修正と取り消しが向いた先: 危険フラグの項目 4 件（I-001 `supervise.py#main`・I-014 `release-steps.py#cmd_release`・I-016 `projects-sync.sh#update`・I-023 `upkeep_rank_cmd.py#_build_board`）。7 件を取り消しても直らなかった
-- 結果: `items 23 / adopted 0 / reverted 7 / unconfirmed 16 / final_gate failing`。原因の 8 件は手で取り消した（3 ファイルを触ったコミットを revert すると構造検査も全体テストも通った）
-
-**2 回とも、落ちたテストの出力に違反したファイルの名前が出ている。** 落ちたテストの出力に現れるパス、または「項目を 1 件ずつ外して落ちたテストを走らせ直す」（このテストは 3 秒）で、原因の項目は機械で決められる。
-
-構造検査の失敗をそもそも項目の範囲テストで捕まえる手当ては #1668、最終ゲートの打ち切りで未確認のコミットが残る件は #1669 にある。
+> ### 何を見つけたか
+>
+> cross-refactoring は、危険フラグが立ったときの全体テストで変更起因の失敗が出ると、**危険フラグの付いた項目だけ**を修正と取り消しの対象にする。失敗の原因が危険フラグの無い項目にあると、無関係な項目をすべて取り消し、原因の項目は残る。
+>
+> PR #1634（スプリント m1340）で観測した。
+>
+> | 項目 | 危険フラグ | 最終の状態 | 全体テストとの関係 |
+> | --- | --- | --- | --- |
+> | I-002・I-003・I-004・I-008・I-009・I-010 | あり（D1・D3・D4・D5） | reverted | 修正担当がすべて `not_caused`（「落ちた 2 件はこの項目の変更に由来しない」）と返した |
+> | I-005（31205640） | 無し | verified | `participants.py` に足した `_rebuild_participants` が、cross-refactoring の `setup.py` の同名関数と衝突した → `scripts/tests/test_check_script_structure.py::test_repository_matches_its_allow_list` |
+> | I-006（598cc492） | 無し | verified | `claude.py` が 499 → 509 行 → `test_supervise_layout.py::test_no_file_exceeds_500_lines[claude.py]` |
+>
+> 修正担当は原因を特定していた: 「HEAD から 598cc492 と 31205640 を戻すと 100 passed。I-005/I-006 は直す項目に含まれないため変更していない」（`.cross_refactoring/claude-fix-rf1634-result.json`）。それでも修正の 2 回目の後、危険フラグの項目 6 件を新しい順に全件取り消した。原因の 2 項目は残ったため、最終ゲートは通らず `refactor.py verify` が終了コード 4 で止まった（`adopted 0 / reverted 7 / deferred 1`）。
+>
+> 着手前の失敗 9 件（`plugins/mcp/mcp-serena/tests/test_serena_lsp_check.py`・`test_serena_lsp_hooks.py`）は既存失敗として正しく除けていた。この件には関わらない。
+>
+> ### どこで見つけたか
+>
+> - PR #1634（https://github.com/devbasex/ai-plugins/pull/1634 ）の検査の refactor のステップ（2026-10-03 00:32〜01:03 JST）
+> - 記録: `/tmp/ndf-worktrees/devbasex--ai-plugins/rf1634/work/.cross_refactoring/`（`verify-whole-test.log`・`claude-fix-rf1634-result.json`・`cross-refactoring-rf1634-state.json`）、`~/.local/state/ndf/sv/sprint-m1340/6-check-state/04-refactor.out`
+> - 利用者の問い（2026-10-03）: 取り消しがなぜ起きたのか
+>
+> ### なぜこの変更の範囲外なのか
+>
+> スプリント m725（#725・#1289・#842・#824）の受け入れ条件に、cross-refactoring の取り消しの対象の決め方は入っていない。CLAUDE.md の「直らなければ危険フラグの項目を新しい順に取り消す」という方針そのものを変えることになり、即時修正の 4 条件の 3 つ目を満たさない。根拠: Value 2（MVV 版 2）。
+>
+> ### 直さないと何が起きるか
+>
+> - 行数の上限・構造の許可リストのように、危険フラグ（D1〜D5）に当たらない変更でも全体テストは落ちる。そのたびに、テストを壊していない改善が全件消える
+> - 原因の項目が残るため最終ゲートが通らず、予算（30 分）と提案者の費用を使っても採用は 0 件になる
+> - 修正担当が原因を特定しても、対象外の項目には手を出さない。その判断は結果に残るが、取り消しの対象に反映されない
+>
+> ### 由来
+>
+> PR #1634（スプリント m1340。issue #1340 #1484 #1435 #581）。記録が残らない件は #1648
+>
+>
+> ### 再発: スプリント m725（2026-10-03）
+>
+> PR https://github.com/devbasex/ai-plugins/pull/1663 の検査で同じ経路を通った。変更起因は今回も `scripts/tests/test_check_script_structure.py::test_repository_matches_its_allow_list` の 1 件。
+>
+> - 原因: 危険フラグの無い項目 8 件（`transcript_agents.py`・`upkeep.py`・`trash.py` を触った抽出・定数化）
+> - 修正と取り消しが向いた先: 危険フラグの項目 4 件（I-001 `supervise.py#main`・I-014 `release-steps.py#cmd_release`・I-016 `projects-sync.sh#update`・I-023 `upkeep_rank_cmd.py#_build_board`）。7 件を取り消しても直らなかった
+> - 結果: `items 23 / adopted 0 / reverted 7 / unconfirmed 16 / final_gate failing`。原因の 8 件は手で取り消した（3 ファイルを触ったコミットを revert すると構造検査も全体テストも通った）
+>
+> **2 回とも、落ちたテストの出力に違反したファイルの名前が出ている。** 落ちたテストの出力に現れるパス、または「項目を 1 件ずつ外して落ちたテストを走らせ直す」（このテストは 3 秒）で、原因の項目は機械で決められる。
+>
+> 構造検査の失敗をそもそも項目の範囲テストで捕まえる手当ては #1668、最終ゲートの打ち切りで未確認のコミットが残る件は #1669 にある。
 
 ## 目的
 

@@ -4,39 +4,39 @@
 
 ## 依頼（原文）
 
-起票時の本文を、見出しの深さだけを 1 段下げてそのまま残す。
+起票時の本文を、見出しの深さだけを 1 段下げ、引用としてそのまま残す。
 
-### 何が起きたか
-
-スプリント m725 の検査（スプリント PR https://github.com/devbasex/ai-plugins/pull/1663 、2026-10-03 06:36〜07:46 JST）で、cross-refactoring の改善項目 16 件のうち 3 ファイルを触った 8 件が、スクリプトの構造検査（`scripts/check-script-structure.py`）に違反した。
-
-| ファイル | 違反 |
-| --- | --- |
-| `plugins/ndf/scripts/lib/transcript_agents.py` | 861 行。例外リストの 853 行を超えた（抽出系の項目 3 件で増えた） |
-| `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | 636 行。例外リストの 614 行を超えた（3 件） |
-| `plugins/ndf/scripts/merged_lib/trash.py` | `_remove` を足し、`relay_lib/accounts.py` の同名関数と本体が違う（2 件） |
-
-違反は項目の範囲テストでは見えず、危険フラグの全体テスト（`scripts/tests/test_check_script_structure.py::test_repository_matches_its_allow_list`）で初めて出た。そこからは #1649 の経路に入り、危険フラグの無関係な項目 7 件が取り消され、原因の 8 件は未確認のまま push された。最終ゲートは打ち切りで止まり、conductor が worker に 8 件を手で取り消させた。
-
-PR https://github.com/devbasex/ai-plugins/pull/1634 （スプリント m1340）でも同じ検査で I-005・I-006 が落ちている（#1649 の本文）。**構造改善のたびに、このテストが全体テストでしか落ちない。**
-
-### 原因
-
-- cross-refactoring は、**静的解析の suite**（`.ndf/project.json` の `test.suites[]` で `kind: lint`）を項目のコミットが変えたファイルにかけて、項目の単位で検証する（`plugins/ndf/scripts/lib/test_strategy.py` の `scope_runs`）。落ちた項目は修正か取り消しに回り、ほかの項目を巻き込まない
-- このリポジトリの宣言には pytest の suite しかない。構造検査は pytest のテストとして全体テストの中にだけある
-- `scripts/check-script-structure.py` はファイルの指定を受け取らない（`--root` と `--allow` だけ）。根全体を 2.6 秒で検査する
-
-### 受け入れ条件（案）
-
-1. `scripts/check-script-structure.py` が位置引数でファイルを受け取り、検査は木全体で行ったうえで、**指定したファイルに関わる違反だけ**で合否を決める（同名の違反は、どちらかのファイルが指定に入っていれば数える）。引数が無いときの振る舞いは今と同じ
-2. `.ndf/project.json` に静的解析の suite（構造検査）を宣言し、`scope_command` が `{paths}` を受け取る。受け持つ `paths` は検査の対象（`plugins/ndf/scripts`・`plugins/ndf/skills/*/scripts`・`scripts` など、検査が実際に読む範囲）に合わせる
-3. 上の 8 件と同じ変更（行数の上限を超える抽出・同名関数の追加）を項目として通すと、その項目の範囲テストが落ち、ほかの項目は取り消されない（再現テスト）
-4. 宣言を解析し直しても（`project-decl.py`）、足した suite が残る
-
-### 関連
-
-- #1649: 全体テストの失敗を危険フラグの項目だけに帰す。この課題は、構造検査の失敗をそもそも全体テストへ持ち込まない側の手当て。#1649 は構造検査以外の失敗でも起きるので、両方要る
-- #464: 整形の違反で push が落ちる。`ruff format --check` も同じ形で静的解析の suite にできる（この課題の範囲には入れない）
+> ### 何が起きたか
+>
+> スプリント m725 の検査（スプリント PR https://github.com/devbasex/ai-plugins/pull/1663 、2026-10-03 06:36〜07:46 JST）で、cross-refactoring の改善項目 16 件のうち 3 ファイルを触った 8 件が、スクリプトの構造検査（`scripts/check-script-structure.py`）に違反した。
+>
+> | ファイル | 違反 |
+> | --- | --- |
+> | `plugins/ndf/scripts/lib/transcript_agents.py` | 861 行。例外リストの 853 行を超えた（抽出系の項目 3 件で増えた） |
+> | `plugins/ndf/skills/backlog-refinement/scripts/upkeep.py` | 636 行。例外リストの 614 行を超えた（3 件） |
+> | `plugins/ndf/scripts/merged_lib/trash.py` | `_remove` を足し、`relay_lib/accounts.py` の同名関数と本体が違う（2 件） |
+>
+> 違反は項目の範囲テストでは見えず、危険フラグの全体テスト（`scripts/tests/test_check_script_structure.py::test_repository_matches_its_allow_list`）で初めて出た。そこからは #1649 の経路に入り、危険フラグの無関係な項目 7 件が取り消され、原因の 8 件は未確認のまま push された。最終ゲートは打ち切りで止まり、conductor が worker に 8 件を手で取り消させた。
+>
+> PR https://github.com/devbasex/ai-plugins/pull/1634 （スプリント m1340）でも同じ検査で I-005・I-006 が落ちている（#1649 の本文）。**構造改善のたびに、このテストが全体テストでしか落ちない。**
+>
+> ### 原因
+>
+> - cross-refactoring は、**静的解析の suite**（`.ndf/project.json` の `test.suites[]` で `kind: lint`）を項目のコミットが変えたファイルにかけて、項目の単位で検証する（`plugins/ndf/scripts/lib/test_strategy.py` の `scope_runs`）。落ちた項目は修正か取り消しに回り、ほかの項目を巻き込まない
+> - このリポジトリの宣言には pytest の suite しかない。構造検査は pytest のテストとして全体テストの中にだけある
+> - `scripts/check-script-structure.py` はファイルの指定を受け取らない（`--root` と `--allow` だけ）。根全体を 2.6 秒で検査する
+>
+> ### 受け入れ条件（案）
+>
+> 1. `scripts/check-script-structure.py` が位置引数でファイルを受け取り、検査は木全体で行ったうえで、**指定したファイルに関わる違反だけ**で合否を決める（同名の違反は、どちらかのファイルが指定に入っていれば数える）。引数が無いときの振る舞いは今と同じ
+> 2. `.ndf/project.json` に静的解析の suite（構造検査）を宣言し、`scope_command` が `{paths}` を受け取る。受け持つ `paths` は検査の対象（`plugins/ndf/scripts`・`plugins/ndf/skills/*/scripts`・`scripts` など、検査が実際に読む範囲）に合わせる
+> 3. 上の 8 件と同じ変更（行数の上限を超える抽出・同名関数の追加）を項目として通すと、その項目の範囲テストが落ち、ほかの項目は取り消されない（再現テスト）
+> 4. 宣言を解析し直しても（`project-decl.py`）、足した suite が残る
+>
+> ### 関連
+>
+> - #1649: 全体テストの失敗を危険フラグの項目だけに帰す。この課題は、構造検査の失敗をそもそも全体テストへ持ち込まない側の手当て。#1649 は構造検査以外の失敗でも起きるので、両方要る
+> - #464: 整形の違反で push が落ちる。`ruff format --check` も同じ形で静的解析の suite にできる（この課題の範囲には入れない）
 
 ## 目的
 
