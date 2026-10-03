@@ -673,7 +673,7 @@ def test_the_deferred_revert_reverts_the_culprit_named_by_the_failure_not_the_fl
     patch_lib("drop", fake_drop)
     patch_lib("push_with_retry_marker", lambda *a, **k: None)
     culprit = sys.modules["refactor_lib.culprit"]
-    monkeypatch.setattr(culprit, "_files", lambda work, item: {"I2": ["src/i2.py"]}.get(item["id"], [f"src/{item['id']}.py"]))
+    monkeypatch.setattr(culprit, "_changed_by", lambda work, item: {"I2": ["src/i2.py"]}.get(item["id"], [f"src/{item['id']}.py"]))
     items = [_item("I1", 1), {**_item("I2", 2), "danger": []}, _item("I3", 3)]
     state_path = _ci_whole_state(
         tmp_path,

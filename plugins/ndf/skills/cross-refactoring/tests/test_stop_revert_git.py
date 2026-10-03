@@ -184,7 +184,7 @@ def test_after_plan_b_a_failing_gate_stops_without_reverting_again(refactor, tmp
     stop_revert = sys.modules["refactor_lib.stop_revert"]
     gate = {"stop_revert": {"plan": "B"}}
     with pytest.raises(SystemExit) as e:
-        stop_revert.run(tmp_path / "state.json", {}, gate)
+        stop_revert.revert_after_cutoff(tmp_path / "state.json", {}, gate)
     assert e.value.code == 4
 
 

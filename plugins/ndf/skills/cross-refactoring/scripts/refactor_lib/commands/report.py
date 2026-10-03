@@ -175,14 +175,14 @@ def _print_header(state: dict[str, Any]) -> None:
     else:
         print("- 検証の中の全体のテスト: 走らせなかった（危険フラグが立たなかった）")
     if whole.get("culprit"):
-        print(f"- 検証の中の全体のテストの原因の項目: {culprit.line(whole['culprit'])}")
+        print(f"- 検証の中の全体のテストの原因の項目: {culprit.verdict_line(whole['culprit'])}")
     triage = gate.get("triage") or {}
     if triage:
         print(f"- 最終ゲートの見分け: {_triage_line(triage)}")
     if gate.get("culprit"):
-        print(f"- 最終ゲートの原因の項目: {culprit.line(gate['culprit'])}")
+        print(f"- 最終ゲートの原因の項目: {culprit.verdict_line(gate['culprit'])}")
     if gate.get("stop_revert"):
-        print(f"- 打ち切りの後の取り消し: {stop_revert.line(gate['stop_revert'])}")
+        print(f"- 打ち切りの後の取り消し: {stop_revert.record_line(gate['stop_revert'])}")
     print(
         f"- 最終ゲート: {gate.get('mode') or '—'}（{gate.get('status') or '未実行'}"
         f"{' / 検証の結果を使い回した' if gate.get('whole_test_reused') else ''}"

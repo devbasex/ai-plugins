@@ -109,7 +109,7 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
         return
 
     stop = _final_fix_stop(state, gate)
-    if stop and (revert_deferred(path, state, gate) if standalone else stop_revert.run(path, state, gate)):
+    if stop and (revert_deferred(path, state, gate) if standalone else stop_revert.revert_after_cutoff(path, state, gate)):
         # 原因の項目を取り消した（単独は寄せた危険フラグの全体テスト、工程の 1 つは打ち切りの後の取り消し）。公開して確かめ直す。
         # **修正の依頼ではない（`recheck`）。** 駆動は修正の CLI を起動せずに `final-gate` を打ち直す。
         # 起点を取り消し後の HEAD へ置き直すのは、取り消しのコミットを後の `merge-final-fix` の範囲へ

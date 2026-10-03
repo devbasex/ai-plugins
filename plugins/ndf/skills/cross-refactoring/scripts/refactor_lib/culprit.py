@@ -54,7 +54,7 @@ class Verdict:
         return dataclasses.asdict(self)
 
 
-def _files(work: str, item: dict[str, Any]) -> list[str]:
+def _changed_by(work: str, item: dict[str, Any]) -> list[str]:
     out: list[str] = []
     for sha in item_shas(item):
         out.extend(f for f in commit_files(work, sha) if f not in out)
@@ -83,7 +83,7 @@ def _by_paths(
     return left
 
 
-def _git(work: str, args: list[str]) -> bool:
+def git_ok(work: str, args: list[str]) -> bool:
     return subprocess.run(["git", *args], cwd=work, capture_output=True, text=True).returncode == 0
 
 
@@ -102,14 +102,14 @@ def _isolate(
         if not shas:
             continue
         try:
-            if not _git(work, ["revert", "--no-commit", *shas]):
+            if not git_ok(work, ["revert", "--no-commit", *shas]):
                 continue  # 外せない（衝突）。この項目は飛ばす
             limit = timeline.state_test_timeout(state)
             if deadline is not None:
                 limit = max(1, min(limit, int((deadline - clock.now()).total_seconds())))
             still, _, _ = test_triage.failing_in(work, strategy, tests, limit, log_dir, f"isolate-{item['id']}", triage.run_test)
         finally:
-            _git(work, ["revert", "--quit"])
+            git_ok(work, ["revert", "--quit"])
             worktree._discard_worktree_changes(work)
         passed = [t for t in tests if t not in still]
         if passed:
@@ -118,14 +118,14 @@ def _isolate(
     return tests
 
 
-def decide(
+def determine(
     state: dict[str, Any], caused: list[str], texts: dict[str, str], deadline: Optional[_dt.datetime], isolate: bool = True
 ) -> Verdict:
     """変更起因の ID（`caused`）と本文（`texts`）から原因の項目を決める。`isolate=False` なら手がかり 1 だけを試す。"""
     started = time.monotonic()
     work = work_dir(state)
     candidates = newest_first(live_items(state))
-    files = {i["id"]: _files(work, i) for i in candidates}
+    files = {i["id"]: _changed_by(work, i) for i in candidates}
     evidence: dict[str, dict[str, list[str]]] = {}
     left = _by_paths(candidates, files, list(caused), texts or {}, evidence)
     basis = PATH
@@ -150,7 +150,7 @@ def judge(
     state: dict[str, Any], holder: dict[str, Any], verdict_of: dict[str, Any], deadline: Optional[_dt.datetime], isolate: bool = True
 ) -> Verdict:
     """見分けの結果（`verdict_of` の `caused`・`caused_output`）から原因を決め、`holder` の `culprit` と `items` に残す。"""
-    verdict = decide(state, list(verdict_of.get("caused") or []), dict(verdict_of.get("caused_output") or {}), deadline, isolate)
+    verdict = determine(state, list(verdict_of.get("caused") or []), dict(verdict_of.get("caused_output") or {}), deadline, isolate)
     holder["culprit"] = verdict.as_dict()
     holder["items"] = list(verdict.order)
     named = ", ".join(verdict.culprits) or "なし"
@@ -223,7 +223,7 @@ def narrow(path: pathlib.Path, state: dict[str, Any], record: dict[str, Any], st
 _BASIS_TEXT = {PATH: "落ちたテストの出力に現れたパス", ISOLATE: "項目を外した走らせ直し", UNDETERMINED: "決まらず"}
 
 
-def line(record: dict[str, Any]) -> str:
+def verdict_line(record: dict[str, Any]) -> str:
     """報告の 1 行。原因の項目と手がかり（`path` / `isolate` / `undetermined`）。"""
     basis = str(record.get("basis") or "")
     named = ", ".join(record.get("culprits") or []) or "なし"

@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 import pathlib
-import subprocess
 from typing import Any, Optional
 
 import statefile
@@ -30,7 +29,7 @@ REASON_A = "最終ゲート修正を打ち切った後に、原因の項目と�
 REASON_B = "最終ゲート修正を打ち切った後に、着手前の木へ戻した（案 B）"
 
 
-def run(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]) -> bool:
+def revert_after_cutoff(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]) -> bool:
     """案 A、だめなら案 B を積む。積んだら真（呼ぶ側が push して確かめ直す）。案 B を使った後なら終了コード 4 で止まる。"""
     record = gate.get("stop_revert") or {}
     if record.get("plan") == "B":
@@ -74,10 +73,6 @@ def _plan_a(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]) -> 
     }.get(str(narrowed.cut), "候補を取り消し尽くしても落ちたテストが通らない")
 
 
-def _git(work: str, args: list[str]) -> bool:
-    return subprocess.run(["git", *args], cwd=work, capture_output=True, text=True).returncode == 0
-
-
 def _plan_b(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], why: str) -> None:
     """案 B。`plan.base_sha` の木へ戻すコミットを 1 本積み、残った項目をすべて取り消した記録にする。"""
     work = work_dir(state)
@@ -88,7 +83,11 @@ def _plan_b(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], why
     info(f"⚠ 案 A で通せませんでした（{why}）。着手前の木（{base[:12] or '不明'}）へ戻すコミットを積みます")
     head = git_out(work, ["rev-parse", "HEAD"]) or ""
     message = f"Revert: cross-refactoring の改善を着手前の木へ戻す（{why}）"
-    if not base or not _git(work, ["read-tree", "-u", "--reset", base]) or not _git(work, ["commit", "-q", "-m", message]):
+    if (
+        not base
+        or not culprit.git_ok(work, ["read-tree", "-u", "--reset", base])
+        or not culprit.git_ok(work, ["commit", "-q", "-m", message])
+    ):
         reset_hard(work, head)
         die(f"着手前の木（{base[:12] or '不明'}）へ戻すコミットを作れませんでした。判断が要ります")
     sha = git_out(work, ["rev-parse", "HEAD"]) or ""
@@ -101,7 +100,7 @@ def _plan_b(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], why
     statefile.save(path, state)
 
 
-def line(record: dict[str, Any]) -> str:
+def record_line(record: dict[str, Any]) -> str:
     """報告の 1 行。打ち切りの後の取り消しの案と、取り消した項目。"""
     text = f"案 {record.get('plan')}・取り消した項目 {', '.join(record.get('reverted') or []) or 'なし'}"
     if record.get("fallback_reason"):
