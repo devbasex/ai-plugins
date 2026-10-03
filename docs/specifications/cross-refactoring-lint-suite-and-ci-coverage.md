@@ -36,17 +36,17 @@
 
 | 扱う | 扱わない |
 | --- | --- |
-| このリポジトリの宣言の lint の suite と、`check-lint.sh` がパスを受けること | 言語別の整形・静的解析の規約を NDF が持ち、規約の無いリポジトリへ移植すること（#1691） |
-| 宣言のキー `test.suites[].ci_jobs`・`test.ci_exempt`（NDF を使うすべてのリポジトリ） | cross-review の修正コミットが整形を通さないこと（#1507） |
-| cross-refactoring の `init` の突き合わせ | 最終ゲート修正のコミットが push 前の検査で拒まれる経路（#1693。最終ゲートは入口で push してから静的解析を走らせる） |
-| | `runtime-plugin-validate.yml` のジョブを suite にするか（#1694） |
+| このリポジトリの宣言の lint の suite と、`check-lint.sh` がパスを受けること | 言語別の整形・静的解析の規約を NDF が持ち、規約の無いリポジトリへ移植すること |
+| 宣言のキー `test.suites[].ci_jobs`・`test.ci_exempt`（NDF を使うすべてのリポジトリ） | cross-review の修正コミットが整形を通さないこと |
+| cross-refactoring の `init` の突き合わせ | 最終ゲート修正のコミットが push 前の検査で拒まれる経路（最終ゲートは入口で push してから静的解析を走らせる） |
+| | `runtime-plugin-validate.yml` のジョブを suite にするか |
 
 ## 背景
 
-宣言の suite は種別 `kind`（`test` / `lint`）を持ち、静的解析の suite は変更したファイルのうち `paths` に当たるものを範囲にする
-（#1483）。このリポジトリの宣言は pytest と構造チェック（#1668）だけで、`check-lint.sh` は範囲を受けなかった。
-そのため項目の違反は項目の検証でも手元の最終ゲートでも拾えず、2026-09-30（PR 1564）と 2026-10-02（PR #1634）に
-refactor が push 前の検査で止まった。
+宣言の suite は種別 `kind`（`test` / `lint`）を持ち、静的解析の suite は変更したファイルのうち `paths` に当たるものを範囲にする。
+宣言に整形・静的解析の suite が無いと、項目の違反は項目の検証でも手元の最終ゲートでも拾えず、push 前の検査で refactor が止まる
+（2026-09-30 と 2026-10-02 のスプリントで起きた）。`check-lint.sh` が範囲を受けることで、同じ検査をそのまま
+範囲テストの suite にできる。
 
 ## 決定と理由
 
@@ -148,7 +148,7 @@ cross-refactoring は範囲テストを作業ディレクトリの根で走ら�
 `runtime-plugin-validate.yml` のジョブはどこにも書かない。生成物の同期・frontmatter・リンクなど項目の変更で壊れうる検査で、
 宣言に無いと知らせるのが正しいためである（扱いは #1694）。
 
-`analysis.written.test` の指紋は宣言の値と一致しない（#1668 で手で suite を足したため）。解析の書き出し（`merge.merge_item`）は
+`analysis.written.test` の指紋は宣言の値と一致しない（suite を手で足したため）。解析の書き出し（`merge.merge_item`）は
 一致しない項目を書き換えずに残すため、手で足した値は解析で消えない。
 
 解析（`project-decl.py write`）が新しく作る宣言は `ci_jobs` を持たず、`init` はすべてのジョブを宣言に無いとして知らせる。
