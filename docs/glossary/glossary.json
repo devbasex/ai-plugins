@@ -2106,8 +2106,8 @@
       "term": "構造チェック",
       "code": "structure_check",
       "context": "ndf-workflow",
-      "meaning": "テストを除くスクリプトの行数と、本体の同じ関数・同じ名前で本体の違う関数を構文木で数える継続的統合のチェック",
-      "pending_source": "issues/issue-1142-design.md"
+      "meaning": "テストを除くスクリプトの行数と、本体の同じ関数・同じ名前で本体の違う関数を構文木で数える継続的統合のチェック。ファイルを指定すると、検査は木全体で行い、合否を指定したファイルに関わる違反だけで決める",
+      "pending_source": "issues/issue-1649-design.md"
     },
     {
       "term": "指摘の基準",
@@ -3008,6 +3008,26 @@
       "meaning": "変更後の形が適切だと言える根拠。外部の一次情報・実測・利用者の指示の原文のどれか。設計文書の節と承認資料の行に書き、無ければ「無し（理由）」。MVV の根拠の項目とは別のもの",
       "source": "",
       "pending_source": "issues/issue-1289-requirements.md"
+    },
+    {
+      "term": "原因の項目",
+      "context": "ndf-cross-refactoring",
+      "meaning": "全体テストで変更起因として落ちたテストを、その変更で落とした改善項目。危険フラグの有無とは関係しない",
+      "pending_source": "issues/issue-1649-requirements.md"
+    },
+    {
+      "term": "原因の手がかり",
+      "context": "ndf-cross-refactoring",
+      "meaning": "原因の項目を決めた根拠。path（落ちたテストの出力に項目の変えたファイルのパスが現れた）・isolate（項目を外した走らせ直しで通った）・undetermined（どちらでも決まらない）の 3 つ",
+      "pending_source": "issues/issue-1649-design.md",
+      "code": "basis"
+    },
+    {
+      "term": "打ち切りの後の取り消し",
+      "context": "ndf-cross-refactoring",
+      "meaning": "工程の 1 つとして起動した cross-refactoring が、最終ゲート修正を打ち切った後に、原因の項目を取り消すか（案 A）、着手前の木へ戻すコミットを積む（案 B）処理",
+      "pending_source": "issues/issue-1649-design.md",
+      "code": "stop_revert"
     }
   ]
 }
