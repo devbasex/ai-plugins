@@ -271,10 +271,11 @@ def _fix_or_narrow(
     """締め切りの内で原因が決まっていれば原因の項目を修正へ回し（真）、でなければ原因の項目から絞って取り消す（偽）。
 
     **1 回の修正 = 実装担当の 1 起動である。** 次の試行の前にここで時計を見るため、締め切りを担当の申告に頼らない。
-    走らせ直すのは変更起因のファイルだけ（`rerun_command`）で、無ければ全体テストのコマンドで確かめる。
+    走らせ直すのは変更起因の suite ごとのファイル（`culprit.rerun_of`）で、すべて通ったときだけ通ったとする。無ければ
+    全体テストのコマンドで確かめる。
     """
     items = _whole_items(state, record)
-    rerun = record.get("rerun_command") or wholetest.whole_fallback_command(state)
+    rerun = culprit.rerun_of(record) or wholetest.whole_fallback_command(state)
     if items and culprit.fixable(record) and not _fix_stop(state):
         for item in items:
             item["status"] = FAILING
@@ -282,7 +283,7 @@ def _fix_or_narrow(
             item["whole_test_command"] = [str(rerun)] if isinstance(rerun, str) else list(rerun)
         info(f"🔧 変更起因の失敗を直しに回します（原因の項目 {len(items)} 件）")
         return True
-    narrow_log, whole = pathlib.Path(state["tmp_dir"]) / "verify-whole-narrow.log", not record.get("rerun_command")
+    narrow_log, whole = pathlib.Path(state["tmp_dir"]) / "verify-whole-narrow.log", not culprit.rerun_of(record)
     passed = culprit.narrow(path, state, record, STOP_REASON, lambda: targets.run_or_stop(path, state, rerun, narrow_log, whole=whole))
     info(f"↩ 原因の項目から順に取り消しました（{'落ちたテストが通った時点で止めた' if passed else '全件'}）。{plan_line(state)}")
     return False
@@ -295,8 +296,8 @@ def _recheck_whole(path: pathlib.Path, state: dict[str, Any], record: dict[str, 
         record["resolution"] = "narrowed"
         return False
     log = pathlib.Path(state["tmp_dir"]) / "verify-whole-rerun.log"
-    rerun = record.get("rerun_command") or wholetest.whole_fallback_command(state)
-    if targets.run_or_stop(path, state, rerun, log, whole=not record.get("rerun_command"), phase="whole"):
+    rerun = culprit.rerun_of(record) or wholetest.whole_fallback_command(state)
+    if targets.run_or_stop(path, state, rerun, log, whole=not culprit.rerun_of(record), phase="whole"):
         record["resolution"] = "fixed"
         for item in items:
             item.pop("whole_test_command", None)

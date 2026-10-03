@@ -81,7 +81,7 @@ def revert_deferred(path: pathlib.Path, state: dict[str, Any], gate: dict[str, A
     """検証で最終ゲートへ寄せた危険フラグの全体テストで変更起因の失敗が出て締め切りを過ぎたとき、原因の項目から取り消す（#1649）。
 
     取り消す対象は寄せた危険フラグの項目ではなく、原因の判定（`culprit.judge`。締め切りは打ち切りの後の取り消しと同じ
-    `limits.stop_revert_end_at`）の順である。取り消すたびに変更起因のファイルを手元で走らせ直し、通った時点で止める。
+    `limits.stop_revert_end_at`）の順である。取り消すたびに変更起因のファイルを手元で走らせ直し、通った時点か締め切りで止める。
     取り消したら真。寄せた項目が無い・変更起因でない・走らせ直す語が無い・残る項目が無いときは何もせず偽。
     """
     deferred = (state.get("whole_test") or {}).get("deferred") or {}
@@ -89,9 +89,11 @@ def revert_deferred(path: pathlib.Path, state: dict[str, Any], gate: dict[str, A
     rerun = culprit.rerun_of(verdict)
     if not deferred.get("items") or not verdict.get("caused") or not rerun or not live_items(state):
         return False
-    found = culprit.judge(state, gate, verdict, timeline.stop_revert_end(state))
+    end = timeline.stop_revert_end(state)
+    found = culprit.judge(state, gate, verdict, end)
     reason = "最終ゲートへ寄せた危険フラグの全体テストで変更起因の失敗が出て、締め切りを過ぎた"
-    reverted = culprit.revert_in_order(path, state, found.order, reason, culprit.rerun_passes(state, rerun)).reverted
+    passes = culprit.rerun_passes(state, rerun, end)
+    reverted = culprit.revert_in_order(path, state, found.order, reason, passes, deadline=end).reverted
     gate["reverted_deferred"] = list(gate.get("reverted_deferred") or []) + reverted
     if reverted:
         info(f"↩ 原因の項目から順に取り消しました（{', '.join(reverted)}）。{plan_line(state)}")

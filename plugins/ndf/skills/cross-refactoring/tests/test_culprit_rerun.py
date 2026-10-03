@@ -6,6 +6,8 @@
 | 締め切り | 走らせ直しの上限を締め切りまでの残りで切り詰め、過ぎていれば走らせない |
 | 複数の suite | 変更起因の suite のすべてが通ったときだけ通ったとする |
 | 見分けの記録 | 単数しか持たない旧い記録は単数を使う |
+| 検証の走らせ直し | 修正の後の確かめは変更起因の suite のすべてを走らせる |
+| 寄せた項目の取り消し | 取り消しの順と走らせ直しの両方が打ち切りの後の取り消しの締め切りで止まる |
 """
 
 from __future__ import annotations
@@ -83,3 +85,34 @@ def test_rerun_of_prefers_every_suite_and_falls_back_to_the_single_command(refac
     assert culprit.rerun_of({"rerun_commands": ["a", "b"], "rerun_command": "a"}) == ["a", "b"]
     assert culprit.rerun_of({"rerun_command": "a"}) == ["a"]
     assert culprit.rerun_of({}) == []
+
+
+def test_whole_recheck_runs_every_caused_suite(refactor, tmp_path, monkeypatch):
+    converge = sys.modules["refactor_lib.commands.converge"]
+    seen: list = []
+    monkeypatch.setattr(converge, "_whole_items", lambda state, record: [{"id": "I1"}])
+    monkeypatch.setattr(converge.targets, "run_or_stop", lambda path, state, rerun, log, **kw: seen.append((rerun, kw["whole"])) or True)
+    record = {"rerun_command": "a", "rerun_commands": ["a", "b"]}
+
+    assert converge._recheck_whole(tmp_path / "state.json", _state(tmp_path), record) is False
+    assert seen == [(["a", "b"], False)]
+    assert record["resolution"] == "fixed"
+
+
+def test_deferred_revert_stops_at_the_stop_revert_deadline(refactor, tmp_path, monkeypatch):
+    gate_ci = sys.modules["refactor_lib.gate_ci"]
+    culprit = _culprit(refactor)
+    end = NOW + dt.timedelta(seconds=5)
+    seen: dict = {}
+    monkeypatch.setattr(gate_ci, "live_items", lambda state: [{"id": "I1"}])
+    monkeypatch.setattr(gate_ci.timeline, "stop_revert_end", lambda state: end)
+    monkeypatch.setattr(culprit, "judge", lambda state, gate, verdict, deadline: type("F", (), {"order": ["I1"]})())
+    monkeypatch.setattr(culprit, "rerun_passes", lambda state, rerun, deadline=None: seen.setdefault("passes", deadline))
+    monkeypatch.setattr(
+        culprit, "revert_in_order", lambda *a, deadline=None, **kw: seen.setdefault("order", deadline) and culprit.Narrowed([], False)
+    )
+    state = {"whole_test": {"deferred": {"items": ["I1"]}}}
+    gate = {"triage": {"caused": ["t"], "rerun_commands": ["a"]}}
+
+    assert gate_ci.revert_deferred(tmp_path / "state.json", state, gate) is False
+    assert seen == {"passes": end, "order": end}
