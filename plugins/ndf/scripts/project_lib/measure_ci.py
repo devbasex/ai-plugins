@@ -156,6 +156,31 @@ def _required_checks(gh: Gh, branch: str | None) -> list[str]:
     return sorted(set(out))
 
 
+def _test_duration(durations: list[dict], ci_reason: str | None) -> dict:
+    """測れた所要の候補があれば measured、無ければ unknown。"""
+    if durations:
+        return measured({"measured": durations})
+    return unknown(ci_reason or "CI に JUnit もテストの step も無く、NDF の実行の記録も無い")
+
+
+def _measure_merges(gh: Gh, repo: str) -> tuple[dict[str, int], list[str]]:
+    """閉じた PR の宛先別のマージ数と、本文に出たホスト名。"""
+    pulls = gh.get(f"repos/{repo}/pulls?state=closed&per_page=100") or []
+    merges: dict[str, int] = {}
+    hosts: set[str] = set()
+    for pr in pulls:
+        if pr.get("merged_at"):
+            ref = (pr.get("base") or {}).get("ref")
+            merges[ref] = merges.get(ref, 0) + 1
+        hosts |= url_hosts(pr.get("body") or "")
+    return merges, sorted(hosts)
+
+
+def _measure_github_issues(gh: Gh, repo: str) -> int:
+    issues = gh.get(f"repos/{repo}/issues?state=all&per_page=100") or []
+    return sum(1 for i in issues if "pull_request" not in i)
+
+
 def measure_ci(tree: Tree, repo: str | None, head: str | None, deadline: float) -> dict:
     """P3・P4 と、P6・P8 の GitHub の分を測る。返すのは `{"ci", "test_duration", "merges", "github_issues", "hosts", "notes"}`。"""
     record = ndf_record(repo)
@@ -165,7 +190,7 @@ def measure_ci(tree: Tree, repo: str | None, head: str | None, deadline: float) 
     if not repo:
         reason = "origin が GitHub のリポジトリを指していない"
         out["ci"] = unknown(reason)
-        out["test_duration"] = measured({"measured": durations}) if durations else unknown(reason)
+        out["test_duration"] = _test_duration(durations, reason)
         return out
     gh = Gh(tree.root, repo, deadline)
     try:
@@ -175,22 +200,10 @@ def measure_ci(tree: Tree, repo: str | None, head: str | None, deadline: float) 
     except GhUnavailable as e:
         out["ci"] = unknown(str(e))
         out["notes"].append(f"CI を測れない: {e}")
-    out["test_duration"] = (
-        measured({"measured": durations})
-        if durations
-        else unknown(out["ci"].get("reason") or "CI に JUnit もテストの step も無く、NDF の実行の記録も無い")
-    )
+    out["test_duration"] = _test_duration(durations, out["ci"].get("reason"))
     try:
-        pulls = gh.get(f"repos/{repo}/pulls?state=closed&per_page=100") or []
-        merges: dict[str, int] = {}
-        for pr in pulls:
-            if pr.get("merged_at"):
-                ref = (pr.get("base") or {}).get("ref")
-                merges[ref] = merges.get(ref, 0) + 1
-            out["hosts"] = sorted(set(out["hosts"]) | url_hosts(pr.get("body") or ""))
-        out["merges"] = merges
-        issues = gh.get(f"repos/{repo}/issues?state=all&per_page=100") or []
-        out["github_issues"] = sum(1 for i in issues if "pull_request" not in i)
+        out["merges"], out["hosts"] = _measure_merges(gh, repo)
+        out["github_issues"] = _measure_github_issues(gh, repo)
     except GhUnavailable as e:
         out["notes"].append(f"PR の宛先と GitHub Issues を測れない: {e}")
     return out
