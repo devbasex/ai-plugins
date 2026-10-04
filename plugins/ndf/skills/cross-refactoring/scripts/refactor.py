@@ -270,7 +270,8 @@ def add_id_commands(sub: argparse._SubParsersAction) -> None:
 def add_assess_parser(sub: argparse._SubParsersAction) -> None:
     """`assess` を登録する。"""
     ap = sub.add_parser(
-        "assess", help="構造改善を飛ばしてよいかを差分から判定する。終了コード 0 = 通す / 3 = 飛ばしてよい / 2 = 判定できない"
+        "assess",
+        help="構造改善を飛ばしてよいかを差分から判定する。終了コード 0 = 通す / 3 = 飛ばしてよい / 2 = 判定できない / 69 = 依存が欠けた（判定していない）",
     )
     ap.add_argument("--base", required=True, help="起点の ref。`<base>...HEAD` の差分を見る")
     ap.add_argument(
