@@ -6,7 +6,7 @@
 | 終了コード | 意味 | 出力の行 |
 | ---: | --- | --- |
 | 0 | 結果なしとして扱わない（結果がある・上限での打ち切り `timeout` / `stalled`。決定 8） | `REASSIGN=none` |
-| 7 | 同じ工程を起動する（`propose` / `plan` / `add-tests` / `implement`） | `IMPL=<席>`（提案は `PROPOSERS`。実装担当のランタイムが外れて選び直したら `IMPL` も）、振り替えなら `REASSIGNED` |
+| 7 | 同じ工程を起動する（`propose` / `plan` / `add-tests` / `implement`） | `IMPL=<席>`（提案は `PROPOSERS`。実装担当のランタイムが外れて選び直したか、claude のアカウントを合わせたら `IMPL` も）、振り替えなら `REASSIGNED` |
 | 2 | 次の起動から担当を替えた、または今のまま起動し直す（`fix` / `final-fix`） | `IMPL=<席>`、振り替えなら `REASSIGNED` |
 | 3 | 振り替え先が無い（`abort`） | `REASSIGN=abort` |
 | 4 | 範囲を確定できない | — |
@@ -189,11 +189,24 @@ def _reassign_implementer(path: pathlib.Path, state: dict[str, Any], step: str) 
 
 
 def _repick_implementer(state: dict[str, Any]) -> Optional[str]:
-    """提案の振り替えで実装担当のランタイムが外れたら、外した後の参加者から実装担当を選び直す。替えたら新しい席。"""
+    """提案の振り替えで実装担当のランタイムが外れたら、外した後の参加者から実装担当を選び直す。替えたら新しい席。
+
+    外れていなくても、実装担当が claude で claude の今のアカウントが替わっていれば、アカウントだけを合わせて席を返す
+    （利用上限に当たった元のアカウントで次の工程を起動しない）。
+    """
     log = list(state.get("no_results") or [])
     current = str(state.get("implementer") or "")
-    if not current or assignment.seat_runtime(current) not in assignment.excluded_runtimes(log):
+    if not current:
         return None
+    if assignment.seat_runtime(current) not in assignment.excluded_runtimes(log):
+        if assignment.seat_runtime(current) != "claude":
+            return None
+        account = assignment.current_account(log, "claude", assignee_env.initial_account())
+        if account == (state.get("implementer_account") or None):
+            return None
+        _set_implementer(state, assignment.Assignee(current, account), "propose")
+        info(f"↪ 実装担当のアカウントを合わせます: {current} → {_target_label(assignment.Assignee(current, account))}")
+        return current
     available = list((state.get("participants") or {}).get("available") or state.get("runtimes") or [])
     pool = assignment.seats_pool(available, log)
     if not pool:

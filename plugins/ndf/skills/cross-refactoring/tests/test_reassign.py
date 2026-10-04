@@ -277,8 +277,13 @@ def test_a_claude_proposer_moves_to_another_account(cmd_reassign, tmp_path, env_
 
     assert _run(cmd_reassign, "propose", ["claude"]) == 7
 
-    assert "PROPOSERS=claude" in capsys.readouterr().out
-    assert read_state(path)["proposer_accounts"] == {"claude": "work2"}
+    out = capsys.readouterr().out
+    assert "PROPOSERS=claude" in out
+    st = read_state(path)
+    assert st["proposer_accounts"] == {"claude": "work2"}
+    # 実装担当の claude も同じアカウントへ合わせ、利用上限に当たった元のアカウントで plan を起動しない
+    assert "IMPL=claude" in out
+    assert (st["implementer"], st["implementer_account"]) == ("claude", "work2")
 
 
 def test_the_report_lists_each_reassignment(cmd_report, tmp_path, env_tmp_dir, capsys):

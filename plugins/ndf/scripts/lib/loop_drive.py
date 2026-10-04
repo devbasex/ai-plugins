@@ -69,6 +69,26 @@ def parse_vars(text: str) -> dict:
     return out
 
 
+def reassigned_seat(src: str, to: str) -> str:
+    """`REASSIGNED` の 1 件（`<元の席>=<宛先>`）から起動する席を引く（#919）。
+
+    `claude@<名前>` は、元の席が claude ならアカウントだけを替えた振り替えで元の席（`claude-2` など）を起動し直す。
+    別のランタイムからの振り替えなら宛先の席（`claude`）を起動する（judge が記録した席と同じ）。
+    """
+    import assignment  # 同じ lib の置き場。読み込みは使うときだけにする
+
+    seat = to.split("@", 1)[0]
+    if "@" in to and assignment.seat_runtime(src) == assignment.seat_runtime(seat):
+        return src
+    return seat
+
+
+def relaunch_seats(jv: dict) -> list[str]:
+    """judge の出力から起動し直す席を並べる。`RELAUNCH_AGENTS` の後に `REASSIGNED` の振り替え先の席を足す。"""
+    moved = [m.split(":")[0].split("=", 1) for m in jv.get("REASSIGNED", "").split()]
+    return jv.get("RELAUNCH_AGENTS", "").split() + [reassigned_seat(src, to) for src, to in moved]
+
+
 def review_status(state: dict) -> str:
     """最後の HEAD が承認されたなら approved、それ以外は final の値（cross-refactoring の finalize が読む）。"""
     sw = state.get("sweep") or {}

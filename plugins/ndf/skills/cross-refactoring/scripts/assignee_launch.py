@@ -71,3 +71,5 @@ class AssigneeLaunch:
             if rrc == 0:
                 return
             wanted = vs.get("PROPOSERS", "").split()
+            if vs.get("IMPL"):
+                self.v["IMPL"] = vs["IMPL"]  # 実装担当を選び直したら、続く plan から使う

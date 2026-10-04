@@ -354,6 +354,6 @@ def test_the_report_lists_reassignments_and_dropped_agents(tmp_dir, capsys):
 )
 def test_drive_launches_the_seat_of_the_reassignment(src, to, seat):
     """`claude@<名前>` は元の席が claude のときだけ元の席を起動し直し、別のランタイムからなら宛先の席を起動する。"""
-    import test_review_drive_resume as resume
+    import loop_drive
 
-    assert resume.cr._reassigned_seat(src, to) == seat
+    assert loop_drive.reassigned_seat(src, to) == seat
