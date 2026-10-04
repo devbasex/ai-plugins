@@ -147,8 +147,8 @@ agy と kiro は取れないため、モデルを比べたいなら `--model agy
 
 ```bash
 <入口を探すコマンド>   # scripts-lookup.md の「入口を探すコマンド」の for 文。$R を決める
-[ -n "$R" ] || exit 3
-RF=$(bash "$R/scripts/resolve.sh" scripts cross-refactoring) || exit 3
+[ -n "$R" ] || exit 2   # 入口を探せない = 判定できない（3 の「飛ばしてよい」と取り違えない）
+RF=$(bash "$R/scripts/resolve.sh" scripts cross-refactoring) || exit 2
 BASE="<開発の起点>"   # worktree-setup.sh check の「開発の起点:」の行の名前
 python3 "$RF/refactor.py" assess --base "origin/$BASE"; echo "exit=$?"
 ```
