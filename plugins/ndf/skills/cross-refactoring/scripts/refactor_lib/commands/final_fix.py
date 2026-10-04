@@ -230,7 +230,7 @@ def cmd_merge_final_fix(args: argparse.Namespace) -> None:
         # 最終ゲートが見た地点へ戻り、公開済みの内容と食い違わない。手順の検証で取り消したときは静的解析を走らせない。
         discard_unverified(path, state, scope, ordered_range)
     else:
-        lint = prepush_lint.check(state, changed_files(work, ordered_range), f"final-fix{safe_int(gate.get('fix_rounds'))}-lint")
+        lint = prepush_lint.check_files(state, changed_files(work, ordered_range), f"final-fix{safe_int(gate.get('fix_rounds'))}-lint")
         if lint.launch_failure is not None:
             failure = lint.launch_failure
             launch.stop(path, state, "prepush", failure.command, failure.outcome, failure.log)
@@ -248,4 +248,3 @@ def cmd_merge_final_fix(args: argparse.Namespace) -> None:
     # 公開しないと Pull Request の内容と手元の HEAD が食い違ったまま次の判定へ入る。
     # CI で見る実行では、push しないと読む対象のチェックそのものが動かない。
     push_with_retry_marker(path, state, gate)
-

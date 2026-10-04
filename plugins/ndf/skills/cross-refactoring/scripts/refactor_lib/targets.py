@@ -183,6 +183,14 @@ def run_commands(commands: list[str], work: str, timeout: int, log: pathlib.Path
     return result, last
 
 
+def log_text(log: pathlib.Path) -> str:
+    """範囲テストのログの本文（落ちたファイルの手がかり）。読めなければ空。"""
+    try:
+        return log.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
 def round_runs(strategy: Optional[ts.Strategy]) -> Optional[list[ts.ScopeRun]]:
     """`round-only` のラウンドテスト（suite ごとに 1 本。I6）。ほかの戦略・無ければ `None`。"""
     if strategy is None or strategy.name != ts.ROUND_ONLY:

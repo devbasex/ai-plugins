@@ -54,19 +54,12 @@ class PrepushResult:
     launch_failure: Optional[LaunchFailure] = None
 
 
-def _read(log: pathlib.Path) -> str:
-    try:
-        return log.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return ""
-
-
 def _files_of(run: ts.ScopeRun, strategy: ts.Strategy, files: list[str]) -> list[str]:
     suite = next((s for s in strategy.scoped_suites(ts.LINT) if s.name == run.suite), None)
     return [f for f in files if suite is None or suite.covers(f)]
 
 
-def check(state: dict[str, Any], files: list[str], label: str) -> PrepushResult:
+def check_files(state: dict[str, Any], files: list[str], label: str) -> PrepushResult:
     """`files` へ静的解析の範囲テストを当てる。通れば `passed`。ログは `tmp_dir/<label>-<suite>.log`。"""
     runs = targets.lint_runs_for(state, files)
     started = time.monotonic()
@@ -87,7 +80,7 @@ def check(state: dict[str, Any], files: list[str], label: str) -> PrepushResult:
         if outcome.status == ts.PASSED:
             continue
         given = _files_of(run, strategy, files)
-        named = failure_paths.mentioned(_read(log), given)
+        named = failure_paths.mentioned(targets.log_text(log), given)
         reason = f"{limit} 秒の上限で打ち切った" if outcome.status == ts.TIMED_OUT else outcome.reason
         rejections.append(LintRejection(run.suite, run.command, named or given, reason, str(log)))
     return PrepushResult(not rejections, rejections, round(time.monotonic() - started, 1))
@@ -118,7 +111,9 @@ def fix_request(gate: dict[str, Any]) -> str:
     # 直前のラウンドの差し戻しだけを載せる（`_gate_failing` はラウンドを進めてから呼ぶ）
     if last and int(last.get("round") or 0) >= int(gate.get("fix_rounds") or 0) - 1:
         lines.append("")
-        lines.append(f"直前の最終ゲート修正（ラウンド {last.get('round')}）は公開前の静的解析で落ち、取り消しました。同じ違反を入れないこと:")
+        lines.append(
+            f"直前の最終ゲート修正（ラウンド {last.get('round')}）は公開前の静的解析で落ち、取り消しました。同じ違反を入れないこと:"
+        )
         for r in last.get("rejections") or []:
             files = ", ".join(f"`{f}`" for f in r.get("files") or []) or "（ファイル不明）"
             lines.append(f"- 静的解析 `{r.get('suite')}`: {files} — `{r.get('command')}`（{r.get('reason')}。ログ: {r.get('log')}）")
