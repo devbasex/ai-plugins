@@ -34,7 +34,7 @@ from ..gitfacts import (
     safe_int,
 )
 from ..intake import IntakeScope, already_closed, close_without_result, discard_unverified
-from ..paths import git_out, load_state, work_dir
+from ..paths import head_sha, load_state, work_dir
 from ..verify import unassigned_fix_commits, verify_final_fix_commit
 
 
@@ -101,7 +101,7 @@ def _collect_final_fix_range(
     if outcome.payload is None:
         _close_failed_final_fix(path, state, gate, scope, outcome)
     payload = outcome.payload
-    head_now = git_out(work, ["rev-parse", "HEAD"]) or ""
+    head_now = head_sha(work) or ""
     ordered_range = commits_in_range(work, gate.get("fix_base_sha"), head_now)
     if ordered_range is None:
         statefile.save(path, state)

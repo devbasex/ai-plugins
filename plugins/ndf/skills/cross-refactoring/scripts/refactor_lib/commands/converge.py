@@ -41,7 +41,7 @@ from ..items import (
     newest_first,
 )
 from ..outbound import item_lines, plan_line
-from ..paths import git_out, load_state, work_dir
+from ..paths import head_sha, load_state, work_dir
 from ..phases import add_phase_seconds, finish_phase, phase_record
 from ..undo import discard_range, drop, resume_pending_drop
 from ..verify import (
@@ -222,7 +222,7 @@ def _run_whole_locally(
             "commands": commands,
             "status": "pass" if passed else "fail",
             "seconds": round(time.monotonic() - started, 1),
-            "head": git_out(work_dir(state), ["rev-parse", "HEAD"]),
+            "head": head_sha(work_dir(state)),
             "reverted": False,
         }
     )
@@ -371,7 +371,7 @@ def _to_fix(
     """落ちた項目を修正へ回す（`VERIFY=fix`）。修正の起点は今の HEAD。"""
     state["fix"] = {
         "items": [i["id"] for i in failing],
-        "base_sha": git_out(work_dir(state), ["rev-parse", "HEAD"]),
+        "base_sha": head_sha(work_dir(state)),
         "attempt": int((state.get("fix_stats") or {}).get("launches") or 0) + 1,
     }
     _account(state, started)
@@ -421,7 +421,7 @@ def _inspect_fix_commits(
     fix_items: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """修正の起点からコミットを集め、取り込み可否の材料を返す。"""
-    head = git_out(work, ["rev-parse", "HEAD"]) or ""
+    head = head_sha(work) or ""
     ordered = commits_in_range(work, fix.get("base_sha"), head)
     if ordered is None:
         return {

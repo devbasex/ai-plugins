@@ -152,6 +152,11 @@ def git_out(work: str, args: list[str], strip: bool = True) -> Optional[str]:
     return r.stdout.strip() if strip else r.stdout.rstrip("\n")
 
 
+def head_sha(work: str) -> Optional[str]:
+    """`work` の HEAD のコミット。読めなければ `None`。"""
+    return git_out(work, ["rev-parse", "HEAD"])
+
+
 def resolve_commit(work: str, sha: str) -> Optional[str]:
     """SHA（短縮形を含む）をコミットの完全な SHA へ解決する。解決できなければ `None`。"""
     return git_out(work, ["rev-parse", "--verify", f"{sha}^{{commit}}"])

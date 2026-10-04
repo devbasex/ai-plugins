@@ -33,7 +33,7 @@ import test_triage
 from .. import clock, gate_lint, info, launch, prepush_lint, publish, stop_revert, timeline, triage
 from ..gitfacts import push_with_retry_marker, run_with_timeout, safe_int
 from ..gate_ci import ci_checks, ci_gate, ci_mode, revert_deferred
-from ..paths import git_out, load_state, work_dir
+from ..paths import head_sha, load_state, work_dir
 
 
 def cmd_final_gate(args: argparse.Namespace) -> None:
@@ -121,7 +121,7 @@ def _remember_failure(state: dict[str, Any], gate: dict[str, Any], passed: bool,
     if passed:
         gate.pop("last_failing", None)
         return
-    gate["last_failing"] = {"head": git_out(work_dir(state), ["rev-parse", "HEAD"]), "detail": detail, "fix_commits": _fix_marker(gate)}
+    gate["last_failing"] = {"head": head_sha(work_dir(state)), "detail": detail, "fix_commits": _fix_marker(gate)}
 
 
 def _reusable_failure(state: dict[str, Any], gate: dict[str, Any]) -> Optional[str]:
@@ -133,7 +133,7 @@ def _reusable_failure(state: dict[str, Any], gate: dict[str, Any]) -> Optional[s
     last = gate.get("last_failing") or {}
     if not last.get("head") or not gate.get("lint_rejections"):
         return None
-    head = git_out(work_dir(state), ["rev-parse", "HEAD"])
+    head = head_sha(work_dir(state))
     if head != last["head"] or _fix_marker(gate) != safe_int(last.get("fix_commits")):
         return None
     detail = f"{last.get('detail')}（HEAD が前回の判定と同じため使い回した）"
@@ -172,7 +172,7 @@ def _reusable_whole_test(state: dict[str, Any]) -> bool:
     record = state.get("whole_test") or {}
     if not (record.get("ran") and record.get("status") == "pass") or record.get("reverted"):
         return False
-    head = git_out(work_dir(state), ["rev-parse", "HEAD"])
+    head = head_sha(work_dir(state))
     return bool(head) and head == record.get("head")
 
 
@@ -257,7 +257,7 @@ def _gate_recheck(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any
     # 起点を取り消し後の HEAD へ置き直すのは、取り消しのコミットを後の `merge-final-fix` の範囲へ
     # 入れないためである。入れると未申告として取り消され、取り消した項目が PR へ戻る。
     gate["status"] = "recheck"
-    gate["fix_base_sha"] = git_out(work_dir(state), ["rev-parse", "HEAD"])
+    gate["fix_base_sha"] = head_sha(work_dir(state))
     statefile.save(path, state)
     push_with_retry_marker(path, state, gate)
     info(f"↩ 最終ゲートを落とした原因の項目を取り消しました（{detail}）。次の最終ゲートが確かめます")
@@ -289,7 +289,7 @@ def _gate_failing(
     # `fix_base_sha` を流用することもできない。あれは最後の群の検証が落ちた地点で
     # あり、そこから HEAD までには**検証を通った正常なコミット**が並ぶ。範囲に含めると
     # 未申告として扱われ、その全部が取り消される。
-    gate["fix_base_sha"] = git_out(work_dir(state), ["rev-parse", "HEAD"])
+    gate["fix_base_sha"] = head_sha(work_dir(state))
     # 修正の依頼に載せる内容（落ちた検査と直前の差し戻し）。`launch-cli.sh` が `RF_FINAL_FIX_REQUEST` で渡す（F2）
     request = prepush_lint.fix_request(gate)
     if request:
