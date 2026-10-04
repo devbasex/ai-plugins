@@ -40,9 +40,8 @@ from ..items import (
     live_items,
     newest_first,
 )
-from ..paths import work_dir
 from ..outbound import item_lines, plan_line
-from ..paths import git_out, load_state
+from ..paths import git_out, load_state, work_dir
 from ..phases import add_phase_seconds, finish_phase, phase_record
 from ..undo import discard_range, drop, resume_pending_drop
 from ..verify import (
@@ -409,7 +408,7 @@ def _inspect_fix_commits(
     state: dict[str, Any],
     work: str,
     fix: dict[str, Any],
-    targets: list[dict[str, Any]],
+    fix_items: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """修正の起点からコミットを集め、取り込み可否の材料を返す。"""
     head = git_out(work, ["rev-parse", "HEAD"]) or ""
@@ -424,7 +423,7 @@ def _inspect_fix_commits(
     return {
         "head": head,
         "ordered": ordered,
-        "problems": _fix_problems(state, facts, {t["id"] for t in targets}),
+        "problems": _fix_problems(state, facts, {t["id"] for t in fix_items}),
     }
 
 
@@ -452,9 +451,9 @@ def _apply_fix_result(
                 item["commits"]["fix"].append(sha)
 
 
-def _account_fix(state: dict[str, Any], targets: list[dict[str, Any]]) -> None:
+def _account_fix(state: dict[str, Any], fix_items: list[dict[str, Any]]) -> None:
     """修正回数、項目状態、修正手順の所要時間を更新する。"""
-    for item in targets:
+    for item in fix_items:
         item["fix_count"] = int(item.get("fix_count") or 0) + 1
         if item.get("status") == FAILING:
             item["status"] = IMPLEMENTED
@@ -483,11 +482,11 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         return
     record_observed_model(state, str(state["implementer"]), "fix")
     note_stopped(state, str(state["implementer"]), "fix")
-    targets = [find_item(state, i, required=False) for i in fix.get("items") or []]
-    targets = [t for t in targets if t is not None]
-    result = _inspect_fix_commits(state, work, fix, targets)
+    fix_items = [find_item(state, i, required=False) for i in fix.get("items") or []]
+    fix_items = [t for t in fix_items if t is not None]
+    result = _inspect_fix_commits(state, work, fix, fix_items)
     _apply_fix_result(path, state, work, result)
-    _account_fix(state, targets)
+    _account_fix(state, fix_items)
     state["fix"] = None
     statefile.save(path, state)
-    info(f"修正を取り込みました（{len(result['ordered'])} コミット / 対象 {len(targets)} 件）。{plan_line(state)}")
+    info(f"修正を取り込みました（{len(result['ordered'])} コミット / 対象 {len(fix_items)} 件）。{plan_line(state)}")
