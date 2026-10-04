@@ -2260,15 +2260,13 @@
       "term": "ジョブを飛ばした run",
       "context": "ndf-workflow",
       "meaning": "CI の成功した run のうち、conclusion が skipped のジョブを 1 つ以上含むもの。宣言の解析は CI の所要を測る代表に採らない",
-      "source": "",
-      "pending_source": "issues/issue-1664-design.md"
+      "source": "docs/specifications/project-decl-ci-representative-run.md"
     },
     {
       "term": "代表の run",
       "context": "ndf-workflow",
       "meaning": "宣言の解析がワークフローごとに壁時計とテストの所要を測る 1 件の run。取得した候補（ワークフローごとに新しい順の成功の run を最大 5 件）のうち、ジョブを飛ばしていない最新のもの",
-      "source": "",
-      "pending_source": "issues/issue-1664-design.md"
+      "source": "docs/specifications/project-decl-ci-representative-run.md"
     },
     {
       "term": "入力の指紋",
@@ -3141,50 +3139,50 @@
       "term": "担当",
       "context": "ndf-agent-cli",
       "meaning": "レビュー・提案・実装を受け持つ CLI の起動の単位。ランタイムと、claude ではアカウントで決まる",
-      "pending_source": "issues/issue-919-requirements.md"
+      "source": "docs/specifications/cross-assignee-reassignment-on-no-result.md"
     },
     {
       "term": "席",
       "context": "ndf-cross-review",
       "meaning": "cross-review の 1 ラウンドの 2 つの担当の枠。名前は kiro / kiro-2 の形（SEAT_PATTERN）",
-      "pending_source": "issues/issue-919-requirements.md"
+      "source": "docs/specifications/cross-assignee-reassignment-on-no-result.md"
     },
     {
       "term": "結果なし",
       "context": "ndf-agent-cli",
       "meaning": "担当が結果ファイルを残さずに終わったこと（judge の verdict = no_result、cross-refactoring の failed_attempts）",
-      "pending_source": "issues/issue-919-requirements.md"
+      "source": "docs/specifications/cross-assignee-reassignment-on-no-result.md"
     },
     {
       "term": "利用上限",
       "context": "ndf-agent-cli",
       "meaning": "担当の CLI が使用量の上限に当たって止まったこと（起動結果の理由 usage_limit）",
-      "pending_source": "issues/issue-919-requirements.md"
+      "source": "docs/specifications/cross-assignee-reassignment-on-no-result.md"
     },
     {
       "term": "振り替え",
       "context": "ndf-agent-cli",
       "meaning": "結果なしの担当の役割を、同じ実行の中で別の担当へ移すこと。同じ担当で起動し直すことは含まない",
-      "pending_source": "issues/issue-919-requirements.md"
+      "source": "docs/specifications/cross-assignee-reassignment-on-no-result.md"
     },
     {
       "term": "結果なしの記録",
       "code": "no_results",
       "context": "ndf-agent-cli",
       "meaning": "状態ファイルの no_results。結果なしの 1 回ごとに、担当・理由・振り替えの規則の答え（relaunch / reassign / abort）・振り替え先を追記だけで積む",
-      "pending_source": "issues/issue-919-design.md"
+      "source": "docs/specifications/cross-assignee-reassignment-on-no-result.md"
     },
     {
       "term": "外した担当",
       "context": "ndf-agent-cli",
       "meaning": "結果なしの記録から導く、同じ実行の残りで割り当てないランタイム（claude ではアカウント）",
-      "pending_source": "issues/issue-919-design.md"
+      "source": "docs/specifications/cross-assignee-reassignment-on-no-result.md"
     },
     {
       "term": "提案担当",
       "context": "ndf-cross-refactoring",
       "meaning": "cross-refactoring の propose で改善の提案を出す参加者",
-      "pending_source": "issues/issue-919-requirements.md"
+      "source": "docs/specifications/cross-assignee-reassignment-on-no-result.md"
     },
     {
       "term": "着手前のテスト",
