@@ -20,7 +20,7 @@ def test_seats_without_an_account_keep_the_base_environment():
     assert assignee_env.env_for("claude", None, base) is not base
 
 
-def test_an_account_seat_gets_only_the_account_environment(accounts):
+def test_an_account_seat_gets_only_the_account_environment(accounts):  # noqa: F811
     accounts.add("work2")
     base = {"PATH": "/bin", ca.TOKEN_ENV: "secret", ca.SCOPES_ENV: "user:inference"}
     env = assignee_env.env_for("claude-2", "work2", base)
@@ -28,7 +28,7 @@ def test_an_account_seat_gets_only_the_account_environment(accounts):
     assert ca.TOKEN_ENV not in env and ca.SCOPES_ENV not in env
 
 
-def test_pick_account_skips_tried_accounts_and_returns_only_a_name(accounts):
+def test_pick_account_skips_tried_accounts_and_returns_only_a_name(accounts):  # noqa: F811
     accounts.add("a", util5=10, util7=10)
     accounts.add("b", util5=20, util7=20)
     assert assignee_env.pick_account(frozenset({"a"})) == "b"

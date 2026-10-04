@@ -31,7 +31,9 @@ def _run(cmd_reassign, phase, seats=None) -> int:
 
 
 def _monitor(state_path, stem, reason, ended_at="2000-01-01T00:00:00"):
-    (state_path.parent / f"{stem}-monitor.json").write_text(json.dumps({"reason": reason, "detail": "d", "ended_at": ended_at}), encoding="utf-8")
+    (state_path.parent / f"{stem}-monitor.json").write_text(
+        json.dumps({"reason": reason, "detail": "d", "ended_at": ended_at}), encoding="utf-8"
+    )
 
 
 @pytest.fixture
@@ -161,7 +163,10 @@ def test_claude_moves_to_another_account_and_keeps_only_the_name(cmd_reassign, t
 def test_a_fix_without_a_candidate_raises_only_the_fix_flag(cmd_reassign, cmd_converge, tmp_path, env_tmp_dir, undo_spy):
     """決定 14: `fix` の中断は `fix_no_relaunch` だけを立て、最終ゲートの旗は立てない。範囲は取り消さない。"""
     path = _implement_state(
-        tmp_path, phase="verify", fix={"items": ["R2"], "base_sha": "BASE", "attempt": 2}, participants={"pool": ["claude"], "available": ["claude"]}
+        tmp_path,
+        phase="verify",
+        fix={"items": ["R2"], "base_sha": "BASE", "attempt": 2},
+        participants={"pool": ["claude"], "available": ["claude"]},
     )
     env_tmp_dir(path)
     _monitor(path, f"claude-fix-rf{ID}", "usage_limit")
@@ -241,8 +246,28 @@ def test_a_claude_proposer_moves_to_another_account(cmd_reassign, tmp_path, env_
 def test_the_report_lists_each_reassignment(cmd_report, tmp_path, env_tmp_dir, capsys):
     """AC15・F7: 報告に振り替えの行（工程・試行・元の担当 → 振り替え先・理由）が出る。"""
     log = [
-        {"step": "implement", "attempt": 1, "seat": "claude", "account": "", "reason": "usage_limit", "decision": "reassign", "to": "codex", "to_account": "", "at": "t"},
-        {"step": "fix", "attempt": 2, "seat": "codex", "account": "", "reason": "stalled", "decision": "relaunch", "to": "", "to_account": "", "at": "t"},
+        {
+            "step": "implement",
+            "attempt": 1,
+            "seat": "claude",
+            "account": "",
+            "reason": "usage_limit",
+            "decision": "reassign",
+            "to": "codex",
+            "to_account": "",
+            "at": "t",
+        },
+        {
+            "step": "fix",
+            "attempt": 2,
+            "seat": "codex",
+            "account": "",
+            "reason": "stalled",
+            "decision": "relaunch",
+            "to": "",
+            "to_account": "",
+            "at": "t",
+        },
     ]
     lines = cmd_report._reassigned_lines({"no_results": log})
     assert lines == ["- 振り替え: implement（試行 1）: claude → codex（usage_limit）"]

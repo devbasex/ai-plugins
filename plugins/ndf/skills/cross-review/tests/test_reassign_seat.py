@@ -210,7 +210,19 @@ def test_claude_moves_to_another_account_on_the_same_seat(tmp_dir, monkeypatch):
 
 def test_a_dropped_runtime_is_left_out_of_later_rounds(tmp_dir):
     """AC8・AC2: 利用上限で外したランタイムは、以後のラウンドの席に出ない（-2 の席も）。"""
-    log = [{"step": "review", "attempt": 1, "seat": "kiro", "account": "", "reason": "usage_limit", "decision": "reassign", "to": "claude", "to_account": "", "at": "t"}]
+    log = [
+        {
+            "step": "review",
+            "attempt": 1,
+            "seat": "kiro",
+            "account": "",
+            "reason": "usage_limit",
+            "decision": "reassign",
+            "to": "claude",
+            "to_account": "",
+            "at": "t",
+        }
+    ]
     st = _state([], no_results=log)
     for round_no in range(1, 6):
         seats = review_lib.participants._round_reviewers(st, round_no)
@@ -224,7 +236,19 @@ def test_pinned_seats_are_not_used_once_one_side_was_replaced(tmp_dir):
     policy = {"allowed": THREE, "review_seats": ["claude", "kiro"], "path": ".ndf/runtimes.json"}
     st = _state([], participants=_participants(THREE, policy=policy))
     assert review_lib.participants._round_reviewers(st, 1) == ["claude", "kiro"]
-    st["no_results"] = [{"step": "review", "attempt": 1, "seat": "kiro", "account": "", "reason": "usage_limit", "decision": "reassign", "to": "codex", "to_account": "", "at": "t"}]
+    st["no_results"] = [
+        {
+            "step": "review",
+            "attempt": 1,
+            "seat": "kiro",
+            "account": "",
+            "reason": "usage_limit",
+            "decision": "reassign",
+            "to": "codex",
+            "to_account": "",
+            "at": "t",
+        }
+    ]
     assert review_lib.participants._round_reviewers(st, 2) == ["claude", "codex"]
 
 
@@ -293,8 +317,23 @@ def test_the_report_lists_reassignments_and_dropped_agents(tmp_dir, capsys):
     """F7: 完了報告に振り替えの行と外した担当の行が出る。"""
     import review_lib.commands.report
 
-    log = [{"step": "review", "attempt": 2, "seat": "kiro", "account": "", "reason": "usage_limit", "decision": "reassign", "to": "claude", "to_account": "", "at": "t"}]
-    _write(tmp_dir, _state([_round(["codex", "claude"], codex=_approve(), claude=_approve(), verdict="approved")], final="approved", no_results=log))
+    log = [
+        {
+            "step": "review",
+            "attempt": 2,
+            "seat": "kiro",
+            "account": "",
+            "reason": "usage_limit",
+            "decision": "reassign",
+            "to": "claude",
+            "to_account": "",
+            "at": "t",
+        }
+    ]
+    _write(
+        tmp_dir,
+        _state([_round(["codex", "claude"], codex=_approve(), claude=_approve(), verdict="approved")], final="approved", no_results=log),
+    )
 
     review_lib.commands.report.cmd_report(argparse.Namespace(pr=PR))
 
