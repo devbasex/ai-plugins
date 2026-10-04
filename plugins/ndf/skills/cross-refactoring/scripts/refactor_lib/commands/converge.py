@@ -100,6 +100,11 @@ def _fix_stop(state: dict[str, Any]) -> bool:
 STOP_REASON = scope_verdict.STOP_REASON
 
 
+def _items_in(state: dict[str, Any], status: str) -> list[dict[str, Any]]:
+    """生きている項目のうち、状態が `status` のもの。"""
+    return [i for i in live_items(state) if i.get("status") == status]
+
+
 def _give_up(path: pathlib.Path, state: dict[str, Any]) -> bool:
     """修正に使える時間が尽きたら、落ちた項目を取り消す（設計の「検証と修正の繰り返し」2）。取り消したら真。
 
@@ -108,9 +113,8 @@ def _give_up(path: pathlib.Path, state: dict[str, Any]) -> bool:
     if not _fix_stop(state):
         return False
     groups: dict[tuple[str, ...], list[dict[str, Any]]] = {}
-    for item in live_items(state):
-        if item.get("status") == FAILING:
-            groups.setdefault(targets.command_key(item), []).append(item)
+    for item in _items_in(state, FAILING):
+        groups.setdefault(targets.command_key(item), []).append(item)
     for group in groups.values():
         _revert_shared(path, state, group, scope_verdict.reason)
     return bool(groups)
@@ -121,7 +125,7 @@ def _settle_scope(path: pathlib.Path, state: dict[str, Any]) -> None:
 
     取り消しが無くなるまで繰り返す。取り消すたびに項目が減るため、項目の数の回数の内で終わる。
     """
-    scope_verdict.judge_items(path, state, [i for i in live_items(state) if i.get("status") == IMPLEMENTED])
+    scope_verdict.judge_items(path, state, _items_in(state, IMPLEMENTED))
     statefile.save(path, state)
     for _ in range(len(state.get("items") or []) + 1):
         if not _give_up(path, state):
@@ -335,13 +339,13 @@ def cmd_verify(args: argparse.Namespace) -> None:
     state.pop("launch_failure", None)
     _settle_scope(path, state)
 
-    failing = [i for i in live_items(state) if i.get("status") == FAILING]
+    failing = _items_in(state, FAILING)
     if failing:
         _to_fix(path, state, failing, started, "範囲テストが落ちた項目")
         return
 
     if _whole_test(path, state, _flag_items(state)):
-        failing = [i for i in live_items(state) if i.get("status") == FAILING]
+        failing = _items_in(state, FAILING)
         _to_fix(path, state, failing, started, "全体のテストを落とした原因の項目")
         return
     _account(state, started)
