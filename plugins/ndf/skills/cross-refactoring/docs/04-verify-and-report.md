@@ -290,8 +290,11 @@ rf_eval start-phase "$ID" final-fix                        # PHASE_TIMEOUT = 想
 "$LIB/monitor.py" "$ID" --agents "$FINAL_FIX_IMPL" --tmp-dir "$TMP_DIR" \
     --stem-template "{agent}-final-fix" --phase final-fix \
     --timeout "$PHASE_TIMEOUT" --stall-timeout "$PHASE_TIMEOUT"
-"$SCRIPTS/refactor.py" merge-final-fix "$ID"                 # 2 = 結果なし / 範囲が確定しない
+"$SCRIPTS/refactor.py" merge-final-fix "$ID"                 # 2 = 結果なし / 範囲が確定しない / 公開前の静的解析で差し戻した
 ```
+
+**最終ゲート修正は push の前に、変えたファイルで静的解析を通す。** 落ちたら修正の範囲を取り消し、push せずに
+`FINAL_FIX=lint_rejected` と終了コード 2 で最終ゲートへ戻す。次の最終ゲートは違反を修正の依頼に載せて差し戻す。
 
 **`fix` 手順と `merge-fix` は使い回せない。** どちらも落ちた項目の記録を読み、
 `Item-Id` で修正を項目へ結ぶ。最終ゲートが直すのは**全体テストの失敗**で、どの項目にも
