@@ -150,6 +150,34 @@ def presentation_dir() -> Path:
     return d
 
 
+def _validate_present_args(targets, consent, rollback: str) -> None:
+    if not targets:
+        raise ValueError("targets が空")
+    if not consent:
+        raise ValueError("consent が空")
+    if not rollback or not rollback.strip():
+        raise ValueError("rollback が空（戻し方を必ず示す）")
+
+
+def _targets_lines(targets) -> list[str]:
+    """「対象を開くためのもの」節の箇条（URL は生のまま書く）。"""
+    lines = []
+    for t in targets:
+        url = t["url"]
+        lines.append(f"- {url}" + (f"  {t['title']}" if t.get("title") else ""))
+        if t.get("base_head"):
+            lines.append(f"  - ベースと head: {t['base_head']}")
+    return lines
+
+
+def _judge_table(judge) -> list[str]:
+    """「判断に使うもの」の表。"""
+    lines = ["| 項目 | 内容 |", "| --- | --- |"]
+    for k, v in judge:
+        lines.append(f"| {k} | {str(v).replace('|', chr(92) + '|').replace(chr(10), '<br>')} |")
+    return lines
+
+
 def approval_present(tool: str, name: str, *, title: str, targets, change: str, judge, consent, rollback: str, path=None) -> str:
     """approval-request.md の 2 層の形で提示物の Markdown を書き出し、パスを返す。
 
@@ -159,21 +187,11 @@ def approval_present(tool: str, name: str, *, title: str, targets, change: str, 
     consent: 同意を求める項目の列
     rollback: 戻し方（配布では取り消しの手段とその限界）
     """
-    if not targets:
-        raise ValueError("targets が空")
-    if not consent:
-        raise ValueError("consent が空")
-    if not rollback or not rollback.strip():
-        raise ValueError("rollback が空（戻し方を必ず示す）")
+    _validate_present_args(targets, consent, rollback)
     lines = [f"# {title}", "", "## 1. 対象を開くためのもの", ""]
-    for t in targets:
-        url = t["url"]
-        lines.append(f"- {url}" + (f"  {t['title']}" if t.get("title") else ""))
-        if t.get("base_head"):
-            lines.append(f"  - ベースと head: {t['base_head']}")
-    lines += [f"- 変更量: {change}", "", "## 2. 承認の判断に使うもの", "", "| 項目 | 内容 |", "| --- | --- |"]
-    for k, v in judge:
-        lines.append(f"| {k} | {str(v).replace('|', chr(92) + '|').replace(chr(10), '<br>')} |")
+    lines += _targets_lines(targets)
+    lines += [f"- 変更量: {change}", "", "## 2. 承認の判断に使うもの", ""]
+    lines += _judge_table(judge)
     lines += ["", "## 同意を求めること", ""]
     lines += [f"- [ ] {c}" for c in consent]
     lines += ["", "## 戻し方", "", rollback.strip(), ""]
