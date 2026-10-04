@@ -1,7 +1,7 @@
 """収束ループの drive が使う部品（#1142 の L0）。cross-review と cross-refactoring の `drive.py` が共有する。
 
 止まるときの JSON の形と終了コードの表は `drive_pause.py` が持ち、ここは子のスクリプトの起動・
-KEY=VALUE の読み取り・最終ステータスの決定だけを持つ。
+KEY=VALUE の読み取り・最終ステータスの決定・回答ファイルの中身だけを持つ。
 """
 
 from __future__ import annotations
@@ -81,3 +81,11 @@ def review_status(state: dict) -> str:
     if state.get("final") == "approved":
         return "unverified"  # 最後の HEAD（スイープの修正・残り・未検証）は承認されていない
     return state.get("final") or "unknown"
+
+
+def review_answer(metrics: dict | None) -> dict:
+    """最終ゲートの回答ファイルの中身。結果 JSON の `metrics.review_status`（`review_status` の値）を写し、無ければ unknown。
+
+    回答ファイルを書くのは cross-review の駆動（`--result-file`）と supervise の `worker_steps` で、どちらもこの形だけを書く（#1655 の I2）。
+    """
+    return {"review_status": (metrics or {}).get("review_status") or "unknown"}
