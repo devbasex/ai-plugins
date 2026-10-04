@@ -155,3 +155,77 @@ def test_build_row_without_stats_writes_zeros(allocation):
     row = allocation.build_row(state)
     assert row["verify"] == {"items": 0, "seconds": 0}
     assert row["fix"] == {"launches": 0, "seconds": 0}
+
+
+# ---------- 着手前のテストの行（#1385 決定 3・4・6、I7〜I9） ----------
+
+CI = "local-scoped-ci-whole"
+
+
+def _init_row(allocation, seconds, locations=("plugins/ndf",), strategy=CI, timed_out=False, mode="scope"):
+    baseline = {
+        "mode": mode,
+        "locations": list(locations) if mode == "scope" else None,
+        "seconds": seconds,
+        "timed_out": timed_out,
+        "checked_at": "2026-10-04T08:00:00",
+    }
+    return allocation.init_test_row(baseline, strategy, 30, 1554)
+
+
+def test_the_init_test_row_keeps_the_strategy_the_locations_and_the_seconds(allocation, tmp_path):
+    """AC11: 着手前のテストの実測と範囲と戦略が履歴に残る。置き場所は並べ替えた集合で残す。"""
+    row = _init_row(allocation, 320.0, locations=("tests", "plugins/ndf", "tests"))
+    assert row == {
+        "schema": 2,
+        "kind": "init_test",
+        "at": "2026-10-04T08:00:00",
+        "pr": 1554,
+        "budget_minutes": 30,
+        "strategy": CI,
+        "mode": "scope",
+        "locations": ["plugins/ndf", "tests"],
+        "seconds": 320.0,
+        "timed_out": False,
+    }
+    assert _init_row(allocation, 600.0, mode="whole")["locations"] is None
+    path = allocation.history_path(tmp_path, "acme/demo")
+    allocation.append_row(path, row)
+    assert allocation.scope_seconds(allocation.read_history(path), CI, ["tests", "plugins/ndf"]) == 320.0
+
+
+def test_scope_seconds_takes_the_largest_of_the_last_ten_matching_rows(allocation):
+    """I7: 同じ戦略・同じ置き場所の集合の直近 10 行の最大。打ち切りの行（上限の秒）も混ぜて大きい側を採る。"""
+    rows = [_init_row(allocation, 999.0)]  # 11 行前は使わない
+    rows += [_init_row(allocation, float(s)) for s in (300, 310, 180, 320, 305, 300, 301, 302, 303)]
+    rows += [_init_row(allocation, 180.0, timed_out=True)]
+    rows += [_init_row(allocation, 5000.0, strategy="local-full")]  # 戦略が違う
+    rows += [_init_row(allocation, 5000.0, locations=("plugins/ndf/scripts",))]  # 置き場所が違う
+    assert allocation.scope_seconds(rows, CI, ["plugins/ndf"]) == 320.0
+    assert allocation.scope_seconds(rows, CI, ["plugins"]) is None
+    assert allocation.scope_seconds(rows, CI, []) is None
+
+
+def test_old_rows_are_read_as_runs_and_not_used_for_the_scope(allocation):
+    """I9: schema 1 の行と kind の無い行は実行の行として読み、範囲の一致には使わない。"""
+    legacy = {"schema": 1, "strategy": CI, "mode": "scope", "locations": ["plugins/ndf"], "seconds": 900.0}
+    no_kind = dict(legacy, schema=2)
+    assert allocation.scope_seconds([legacy, no_kind], CI, ["plugins/ndf"]) is None
+    assert allocation.run_rows([legacy, no_kind]) == [legacy, no_kind]
+
+
+def test_the_table_ignores_the_init_test_rows(allocation):
+    """I8: 着手前のテストの行を混ぜても配分テーブルの値と source は変わらない。"""
+    runs = [allocation.build_row(_state())]
+    mixed = [_init_row(allocation, 320.0), *runs, _init_row(allocation, 180.0, timed_out=True)]
+    assert allocation.build_table(mixed, DEFAULTS) == allocation.build_table(runs, DEFAULTS)
+    assert allocation.build_table([_init_row(allocation, 320.0)], DEFAULTS)["source"] == "defaults"
+
+
+def test_a_scope_run_does_not_write_the_whole_test_seconds(allocation):
+    """決定 6: 範囲テストだけを着手前に走らせた実行の行は whole_test.init を持たない。"""
+    state = _state()
+    state["baseline_test"] = {"mode": "scope", "command": "pytest plugins/ndf", "seconds": 320.0}
+    assert allocation.build_row(state)["whole_test"]["init"] is None
+    state["baseline_test"]["mode"] = "round"
+    assert allocation.build_row(state)["whole_test"]["init"] == 320.0

@@ -80,3 +80,131 @@ def test_the_phase_timeout_is_the_time_left_plus_the_margin(timeline):
     assert timeline.phase_timeout(end, START, 90) == 600 + 90
     # 終わりを過ぎていれば余裕だけ
     assert timeline.phase_timeout(end, end + 5 * M, 90) == 90
+
+
+# ---------- 手順の枠は着手前のテストの終わりから数える（#1385） ----------
+
+S = dt.timedelta(seconds=1)
+
+
+def _ts():
+    import sys
+
+    return sys.modules["test_strategy"]
+
+
+def _at(value):
+    return dt.datetime.fromisoformat(value)
+
+
+def _local_full(x):
+    return _ts().limits(_ts().Strategy("local-full", "args"), 30, measured_seconds=x)
+
+
+def test_the_windows_start_after_the_init_test(timeline):
+    """AC1・I1・I2: 着手前のテスト 357 秒の後でも、提案は 0.20·B・計画は 0.10·B の枠を持ち、全体の終わりは動かない。"""
+    got = timeline.compute(START, 30, _local_full(357.0), offset_seconds=357.0)
+    assert _at(got["propose_end_at"]) == START + 717 * S
+    assert _at(got["plan_end_at"]) == START + 897 * S
+    assert _at(got["final_end_at"]) == START + 1800 * S
+    # AC2: テストの直後の提案の監視の上限は 0.20·B + 余裕
+    assert timeline.phase_timeout(_at(got["propose_end_at"]), START + 357 * S, got["margin_seconds"]) == 450
+    # AC3: テストの直後の指標の測定は上限の 90 秒を使える
+    assert timeline.measure_deadline(START + 357 * S, got) == 90
+
+
+@pytest.mark.parametrize("x", [None, 0.0])
+def test_a_short_init_test_keeps_the_windows(timeline, x):
+    """AC4: テストが無い・ごく短いなら今と同じ。"""
+    got = timeline.compute(START, 30, _local_full(x), offset_seconds=x)
+    assert _at(got["propose_end_at"]) == START + 360 * S
+    assert _at(got["plan_end_at"]) == START + 540 * S
+
+
+def test_the_deadlines_after_the_plan_do_not_move(timeline):
+    """AC5・I3: 計画の後の直しと取り消しの締め切りは started_at から数え、x に依らない。"""
+    items = _items([(15, 12)])
+    short = timeline.compute(START, 30, _local_full(0.0), items, RESERVE, offset_seconds=0.0)
+    long = timeline.compute(START, 30, _local_full(357.0), items, RESERVE, offset_seconds=357.0)
+    for key in ("fix_end_at", "stop_revert_end_at", "final_end_at", "add_tests_end_at", "implement_end_at"):
+        assert long[key] == short[key], key
+
+
+def _state(seconds=357.0, **over):
+    state = {
+        "started_at": START.isoformat(),
+        "budget_minutes": 30,
+        "strategy": {"name": "local-full", "source": "args", "suites": []},
+        "baseline_test": {"mode": "whole", "seconds": seconds},
+    }
+    state.update(over)
+    return state
+
+
+def test_of_state_offsets_the_windows_by_the_measured_test(timeline):
+    got = timeline.of_state(_state())
+    assert _at(got["propose_end_at"]) == START + 717 * S
+    # 旧い状態（seconds が無い）は今と同じ
+    old = timeline.of_state(_state(seconds=None))
+    assert _at(old["propose_end_at"]) == START + 360 * S
+
+
+def test_a_restart_after_the_stop_starts_the_windows_at_the_restart(timeline):
+    """I2: 止めた後の打ち直し（resumed_at）があれば o = max(x, resumed_at − started_at)。"""
+    state = _state(seconds=1300.0, budget_minutes=39, resumed_at=(START + 1360 * S).isoformat())
+    assert timeline.window_offset(state) == 1360
+    assert _at(timeline.of_state(state)["propose_end_at"]) == START + 1828 * S
+    assert timeline.window_offset(_state(seconds=1300.0, resumed_at=(START + 10 * S).isoformat())) == 1300
+
+
+@pytest.mark.parametrize(
+    "seconds, budget, resumed, needed",
+    [
+        (1300.0, 30, None, 39),  # ceil((1300 + 300) / 42)
+        (1300.0, 39, 1700, 48),  # 打ち直しが遅れて o が伸びた
+        (1300.0, 39, 1360, None),  # 下限の予算で 1 分後に打ち直せば収まる
+        (1300.0, 39, 1600, None),  # 300 秒以内なら収まる
+        (1260.0, 30, None, None),  # 0.70·B ちょうどは収まる
+    ],
+)
+def test_window_problem_stops_when_the_windows_do_not_fit(timeline, seconds, budget, resumed, needed):
+    """AC6・I4: 計画の枠の終わりが想定最大時間を越えるなら、要る想定最大時間の下限つきの文を返す。"""
+    over = {"resumed_at": (START + resumed * S).isoformat()} if resumed else {}
+    problem = timeline.window_problem(timeline.of_state(_state(seconds=seconds, budget_minutes=budget, **over)))
+    if needed is None:
+        assert problem is None
+    else:
+        assert f"--budget-minutes を {needed} 以上" in problem
+
+
+def test_the_required_budget_adds_the_restart_grace(timeline):
+    assert timeline.required_budget_minutes(1300) == 39
+    assert timeline.required_budget_minutes(1700) == 48
+    assert timeline.RESUME_GRACE_SECONDS == 300
+
+
+def test_the_rebuilt_limits_carry_the_scope_test(timeline):
+    """I6・AC10: 状態に残った範囲テストの所要から同じ上限を組み直し、basis に写す。予算を置き換えれば組み直した値になる。"""
+    state = _state(
+        seconds=320.0,
+        strategy={"name": "local-scoped-ci-whole", "source": "args", "suites": []},
+        baseline_test={"mode": "scope", "seconds": 320.0, "scope_seconds": 320.0, "scope_source": "history"},
+    )
+    got = timeline.of_state(state)
+    assert got["init_test_timeout"] == 960
+    assert (got["basis"]["scope_seconds"], got["basis"]["scope_source"]) == (320.0, "history")
+    unknown = _state(strategy=state["strategy"], baseline_test={"mode": "scope", "seconds": 100.0}, budget_minutes=60)
+    assert timeline.of_state(unknown)["init_test_timeout"] == 360
+
+
+def test_the_plan_comment_shows_the_scope_test(timeline):
+    """F5・AC10: 計画のコメントの入力の行に範囲テストの所要と出所が出る。"""
+    plan = importlib.import_module("refactor_lib.plan")
+    limits = timeline.of_state(
+        _state(
+            strategy={"name": "local-scoped-ci-whole", "source": "args", "suites": []},
+            baseline_test={"mode": "scope", "seconds": 320.0, "scope_seconds": 320.0, "scope_source": "history"},
+        )
+    )
+    line = next(text for text in plan.limits_section(limits) if text.startswith("入力:"))
+    assert "s 320.0（history）" in line
