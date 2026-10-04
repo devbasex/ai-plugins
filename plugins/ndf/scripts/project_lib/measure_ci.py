@@ -215,7 +215,7 @@ def measure_ci(tree: Tree, repo: str | None, head: str | None, deadline: float) 
     return out
 
 
-def _skipped(jobs: list[dict]) -> bool:
+def _has_skipped_job(jobs: list[dict]) -> bool:
     """ジョブを飛ばした run か（conclusion が `skipped` のジョブがある）。名前・イベントでは判定しない（I2）。"""
     return any(job.get("conclusion") == "skipped" for job in jobs)
 
@@ -226,7 +226,7 @@ def _representative(gh: Gh, candidates: list[dict]) -> tuple[dict | None, list[d
     for run in candidates[:CANDIDATE_RUNS]:
         seen += 1
         jobs = (gh.get(f"repos/{gh.repo}/actions/runs/{run['id']}/jobs?per_page=100") or {}).get("jobs") or []
-        if not _skipped(jobs):
+        if not _has_skipped_job(jobs):
             return run, jobs, seen
     return None, [], seen
 
