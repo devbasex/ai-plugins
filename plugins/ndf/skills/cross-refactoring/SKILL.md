@@ -135,12 +135,23 @@ agy と kiro は取れないため、モデルを比べたいなら `--model agy
   （確認コマンドは claude: `claude auth status` / codex: `codex login status` / agy: `agy models` /
   kiro: `kiro-cli whoami`。誤検知するときは `NDF_SKIP_AUTH_CHECK=1`）
 - 対象の Pull Request が Draft で開いている（未作成なら `/ndf:pr` で先に作る）
-- プロダクションコードの差分がある。起動の前に Skill のディレクトリで `assess` を打ち、飛ばしてよいかを見る。**終了コード 3 なら
+- 対象のリポジトリ（またはその worktree）の中で会話を始めている。単独起動のコマンドは**すべてそこで打ち**、Skill の
+  ディレクトリへ移らない。対象のリポジトリは打った場所が属する git の作業ツリーの根で決まり、git の作業ツリーでない
+  場所では assess も drive も「対象のリポジトリを決められない」と出して止まる
+- プロダクションコードの差分がある。起動の前に `assess` を打ち、飛ばしてよいかを見る。**終了コード 3 なら
   起動しない**（2 は判定できなかったことを示し、飛ばしてよいとは読まない）
 
+シェルの変数は呼び出しをまたいで残らないため、この節と「実行」の各ブロックを 1 回の呼び出しとし、先頭で毎回 `$R` を
+決め直す。`<入口を探すコマンド>` の行は [scripts-lookup.md](../development-workflow/references/scripts-lookup.md) の
+「入口を探すコマンド」の for 文である（Codex / Kiro / agy では `${CLAUDE_PLUGIN_ROOT}` が置き換わらないため、この for 文で探す）。
+スクリプトの位置は解決の入口（`resolve.sh`）が導入先から求める。
+
 ```bash
+<入口を探すコマンド>   # scripts-lookup.md の「入口を探すコマンド」の for 文。$R を決める
+[ -n "$R" ] || exit 3
+RF=$(bash "$R/scripts/resolve.sh" scripts cross-refactoring) || exit 3
 BASE="<開発の起点>"   # worktree-setup.sh check の「開発の起点:」の行の名前
-python3 scripts/refactor.py assess --base "origin/$BASE"; echo "exit=$?"
+python3 "$RF/refactor.py" assess --base "origin/$BASE"; echo "exit=$?"
 ```
 
 - Jev を使うには、環境変数 `AI_GATEWAY_API_KEY` があり、対象が公開リポジトリであること。
@@ -185,21 +196,38 @@ flowchart TD
 
 ## 実行
 
-メインが決めるのは `--scope` / `--sync-command`（宣言に `test` が無ければ `--round-test`）である。決めたら Skill の
-ディレクトリで次の 1 行を打ち、最後の行の結果 JSON の `status` と終了コードを見る。
+メインが決めるのは `--scope` / `--sync-command`（宣言に `test` が無ければ `--round-test`）である。決めたら「前提」と
+同じ対象のリポジトリの中で次のブロックを打ち、最後の行の結果 JSON の `status` と終了コードを見る。
+
+待ちはコマンドの中で行う。Claude Code では `run_in_background` で起動し、完了通知を 1 回受ける。
 
 ```bash
-python3 scripts/drive.py <PR> --scope <範囲...> [「引数」の表のうち値のあるもの]
+<入口を探すコマンド>   # scripts-lookup.md の「入口を探すコマンド」の for 文。$R を決める
+[ -n "$R" ] || exit 3
+RF=$(bash "$R/scripts/resolve.sh" scripts cross-refactoring) || exit 3
+python3 "$RF/drive.py" <PR> --scope <範囲...> [「引数」の表のうち値のあるもの]
 ```
 
-待ちはコマンドの中で行う。Claude Code では `run_in_background` で起動し、完了通知を 1 回受ける。Codex / Kiro /
-agy では共通ライブラリの `scripts/lib/bg-wait.sh` で背景に起動し、区切った待ちを 124 が返るあいだ**別の呼び出しとして**
-打ち直す。終わると駆動の出力の全体を出し、駆動の終了コードで終わる。
+Codex / Kiro / agy では共通ライブラリの `bg-wait.sh` で背景に起動し、区切った待ちを 124 が返るあいだ**別の呼び出しとして**
+打ち直す。終わると駆動の出力の全体を出し、駆動の終了コードで終わる。`RC` は run と wait で同じ文字列にする。
 
 ```bash
+# 起動（1 回の呼び出し）
+<入口を探すコマンド>   # scripts-lookup.md の「入口を探すコマンド」の for 文。$R を決める
+[ -n "$R" ] || exit 3
+RF=$(bash "$R/scripts/resolve.sh" scripts cross-refactoring) || exit 3
+LIB=$(bash "$R/scripts/resolve.sh" scripts)/lib || exit 3
 RC="${TMPDIR:-/tmp}/cross-refactoring-drive-pr<PR>.rc"
-bash ../../scripts/lib/bg-wait.sh run "$RC" -- python3 scripts/drive.py <PR> --scope <範囲...> [上と同じ引数]
-bash ../../scripts/lib/bg-wait.sh wait "$RC"   # 1 回 540 秒以内。124 = まだ終わっていない
+bash "$LIB/bg-wait.sh" run "$RC" -- python3 "$RF/drive.py" <PR> --scope <範囲...> [上と同じ引数]
+```
+
+```bash
+# 待ち（124 が返るあいだ、別の呼び出しとして打ち直す）
+<入口を探すコマンド>   # scripts-lookup.md の「入口を探すコマンド」の for 文。$R を決める
+[ -n "$R" ] || exit 3
+LIB=$(bash "$R/scripts/resolve.sh" scripts)/lib || exit 3
+RC="${TMPDIR:-/tmp}/cross-refactoring-drive-pr<PR>.rc"
+bash "$LIB/bg-wait.sh" wait "$RC"   # 1 回 540 秒以内。124 = まだ終わっていない
 ```
 
 待ち方の規約は [waiting.md](../development-workflow/references/waiting.md)、待ちから戻った後に同じ応答で次の手順へ
@@ -210,7 +238,7 @@ bash ../../scripts/lib/bg-wait.sh wait "$RC"   # 1 回 540 秒以内。124 = ま
 | 終了コード（`items[0].pause`） | 止まった地点 | すること |
 | --- | --- | --- |
 | 0 | finalize まで終わった | `items[0].report`（`refactor.py report` の出力）と `metrics` を「完了報告」へ写す |
-| 23（`cross-review`） | 単独起動の最終ゲート | `prompt_file` を読み、`items[0].command`（cross-review の駆動）を回して `result_file` へ最終ステータスを書く。同じコマンドを打ち直し、続けて Draft を解除する |
+| 23（`cross-review`） | 単独起動の最終ゲート | `prompt_file` を読み、`items[0].cwd`（対象のリポジトリの根）で `items[0].command`（cross-review の駆動）を回す。最終ステータスは cross-review の駆動が `result_file` へ書き、自分では書かない。同じコマンドを打ち直し、結果 JSON の `metrics.review_status` が `approved` のときだけ Draft を解除する。それ以外は Draft のまま最終ステータスを報告して止まる |
 | 1 | 中断（`metrics.exit` に元の終了コード。4 = 予算の指定の誤り・`--round-test` が要る・旧い状態ファイル・取り消しの失敗・同じファイルまで広げても積み直せない・打ち切りの後の取り消しで起点へ戻した後でも最終ゲートが落ちた・push の直前に残すコミットでないもの（見放した担当の残留コミットなど）がある・範囲を確定できない など。最終ゲートを経ずに終わった実行もここで、`metrics.adopted` は 0・`metrics.unconfirmed` に残った項目の数） | `summary` を報告して止まる。**握り潰さない**（検証を通っていない変更が残る） |
 
 再開は同じコマンドを打ち直すだけである。進みは耐久の記録（既定の置き場は `~/.local/state/ndf/dbos/refactor-<鍵>.sqlite` ）が持ち、
@@ -229,9 +257,13 @@ bash ../../scripts/lib/bg-wait.sh wait "$RC"   # 1 回 540 秒以内。124 = ま
 駆動が終わった後に項目のコミットを `git revert` で取り消して push したとき（プランの外の取り消し）は、次の 1 行を打つ。
 origin の head ブランチの `This reverts commit <SHA>` を読み、実装コミットが取り消されたままの項目を「取り消し」に、
 取り消しが取り消された項目を元の状態へ戻してから書き直す。状態ファイルは環境変数・現在地に無ければ既定の worktree の置き場から探す。
+「前提」と同じく対象のリポジトリの中で打つ（既定の置き場は対象のリポジトリの origin から決まる）。
 
 ```bash
-python3 scripts/refactor.py plan-comment <PR> --scan-reverts
+<入口を探すコマンド>   # scripts-lookup.md の「入口を探すコマンド」の for 文。$R を決める
+[ -n "$R" ] || exit 3
+RF=$(bash "$R/scripts/resolve.sh" scripts cross-refactoring) || exit 3
+python3 "$RF/refactor.py" plan-comment <PR> --scan-reverts
 ```
 
 | 終了コード | 意味 |
