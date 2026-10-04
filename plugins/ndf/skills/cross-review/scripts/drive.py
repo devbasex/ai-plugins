@@ -480,10 +480,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("pr", type=int)
     ap.add_argument("--rotate-mode", choices=["light", "squash"], default="light")
     ap.add_argument("--reopen", action="store_true", help="差分を足さずに、終わった収束ループへラウンドを足す")
-    ap.add_argument(
-        "--result-file",
-        help="ok で終わったとき最終ステータスを書く回答ファイル（loop_drive.write_review_answer。単独起動の cross-refactoring の最終ゲートが読む。#1656）",
-    )
+    ap.add_argument("--result-file", help="ok で終わったとき最終ステータスを書く回答ファイル（loop_drive.write_review_answer。#1656）")
     a, rest = ap.parse_known_args(argv)
     d = Drive(a.pr, a.rotate_mode, rest, reopen=a.reopen)
     try:
