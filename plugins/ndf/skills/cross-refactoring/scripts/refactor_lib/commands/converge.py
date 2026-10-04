@@ -60,15 +60,13 @@ def _revert_shared(
     state: dict[str, Any],
     group: list[dict[str, Any]],
     reason: Any,
-    command: Any = None,
-    whole: bool = False,
 ) -> bool:
     """同じ語の並びを共有した項目を、新しい方から 1 件ずつ取り消す（AC15）。
 
     `reason` は理由の文か、項目から理由を作る関数（落ちた検査を理由に入れる。#1688 I6）。
     取り消すたびに共有したコマンドを走らせ直し、通った時点で止める。通る前に取り消した
     項目だけが見送り（`reverted`）になり、古い項目のコミットは残る。走らせ直すのは
-    範囲テスト（`command` を渡せば全体のテストで落ちたテストだけ）で、全体のテストではない。
+    範囲テストで、全体のテストではない。
     通った時点で止めたら真、全件を取り消したら偽を返す。
     """
     remaining = newest_first(group)
@@ -80,8 +78,8 @@ def _revert_shared(
         remaining = [i for i in remaining if i.get("status") in (FAILING, IMPLEMENTED, VERIFIED)]
         if not remaining:
             return False
-        words = command if command else [r.command for r in targets.verify_runs(state, remaining[0])]
-        if targets.run_or_stop(path, state, words, scope_verdict.verify_log(state, remaining[0]["id"]), whole=bool(command) and whole):
+        words = [r.command for r in targets.verify_runs(state, remaining[0])]
+        if targets.run_or_stop(path, state, words, scope_verdict.verify_log(state, remaining[0]["id"])):
             for item in remaining:
                 item["status"] = VERIFIED
             return True
