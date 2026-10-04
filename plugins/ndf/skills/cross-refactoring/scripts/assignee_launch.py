@@ -19,6 +19,14 @@ LOOP_LIMIT = 100  # 検証と修正・最終ゲートの繰り返しの上限。
 class AssigneeLaunch:
     """`Drive` に混ぜる。`self.v`・`self.rf`・`self.monitor`・`self.launch` を使う。"""
 
+    def start_phase(self, phase: str) -> None:
+        """起動の直前に `start-phase` を打つ。起動し直すたびに打ち、工程の終わりの時刻から残りの上限を出し直す。
+
+        工程の起点（`started_at`・`base_sha`）は最初の 1 回だけ記録され、締め切りは振り替えの後も延びない。
+        """
+        self.v.pop("PHASE_TIMEOUT", None)
+        self.rf("start-phase", self.v["ID"], phase)
+
     def impl_phase(self, phase: str, impl: str | None = None, stem: str | None = None) -> None:
         """担当 1 者の工程。起動の失敗では止める。
 
@@ -28,10 +36,9 @@ class AssigneeLaunch:
         それ以外の非ゼロでは `reassign` を打つ。7 なら返された担当で同じ工程を起動し直し、2（修正の工程）は担当を
         替えて取り込みへ、3（振り替え先が無い）は `plan` / `add-tests` / `implement` では止まり、修正の工程では取り込みへ進む。
         """
-        self.v.pop("PHASE_TIMEOUT", None)
-        self.rf("start-phase", self.v["ID"], phase)
         impl = impl or self.v["IMPL"]
         for _ in range(LOOP_LIMIT):
+            self.start_phase(phase)
             if (lrc := self.launch(impl, phase)) != 0:
                 raise Stop(f"launch-cli.sh（{impl}・{phase}）が終了コード {lrc} で止まった", lrc)
             rc, _ = self.monitor(impl, phase, stem or f"{{agent}}-{phase}-rf{self.v['ID']}")
@@ -51,6 +58,7 @@ class AssigneeLaunch:
         i = self.v["ID"]
         wanted = self.v.get("RUNTIMES", "").split()
         for _ in range(LOOP_LIMIT):
+            self.start_phase("propose")
             launched = [a for a in wanted if self.launch(a, "propose") == 0]
             if not launched:
                 raise Stop("提案の CLI を 1 者も起動できなかった", 1)

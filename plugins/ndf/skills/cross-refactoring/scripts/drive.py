@@ -140,9 +140,15 @@ class Drive(AssigneeLaunch):
         return rc, out
 
     def launch(self, seat: str, phase: str) -> int:
-        """担当の CLI を起動する。claude のアカウントは状態ファイルの記録（実装担当・提案担当）から引く（#919）。"""
+        """担当の CLI を起動する。claude のアカウントは状態ファイルの記録から引く（#919）。
+
+        提案は席が実装担当と同じでも提案担当の記録（`proposer_accounts`）を読む。提案の振り替えはそこへだけ書く。
+        """
         s = self.state()
-        account = s.get("implementer_account") if seat == s.get("implementer") else (s.get("proposer_accounts") or {}).get(seat)
+        if phase == "propose" or seat != s.get("implementer"):
+            account = (s.get("proposer_accounts") or {}).get(seat)
+        else:
+            account = s.get("implementer_account")
         return _call_step(["bash", str(HERE / "launch-cli.sh"), seat, phase, self.v["ID"]], dict(self.extra_env), seat, account or "")[0]
 
     def rf(self, *args: str, ok=(0,)) -> tuple[int, dict]:
@@ -277,7 +283,6 @@ class Drive(AssigneeLaunch):
             self.sh("prepare-worktrees.sh sync", ["bash", str(HERE / "prepare-worktrees.sh"), i, "sync", head.strip()])
             # 提案の前に指標を 1 回だけ測る（#1319）。測定の失敗では止めない（4 だけが中断）。
             self.rf("measure", i, ok=(0, 1))
-            self.rf("start-phase", i, "propose")
             self.propose()
             go_final = self.rf("merge-proposals", i, ok=(0, GO_FINAL))[0] == GO_FINAL
         if not go_final:

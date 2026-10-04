@@ -6,7 +6,7 @@
 | 終了コード | 意味 | 出力の行 |
 | ---: | --- | --- |
 | 0 | 結果なしとして扱わない（結果がある・上限での打ち切り `timeout` / `stalled`。決定 8） | `REASSIGN=none` |
-| 7 | 同じ工程を起動する（`propose` / `plan` / `add-tests` / `implement`） | `IMPL=<席>`（提案は `PROPOSERS`）、振り替えなら `REASSIGNED` |
+| 7 | 同じ工程を起動する（`propose` / `plan` / `add-tests` / `implement`） | `IMPL=<席>`（提案は `PROPOSERS`。実装担当のランタイムが外れて選び直したら `IMPL` も）、振り替えなら `REASSIGNED` |
 | 2 | 次の起動から担当を替えた、または今のまま起動し直す（`fix` / `final-fix`） | `IMPL=<席>`、振り替えなら `REASSIGNED` |
 | 3 | 振り替え先が無い（`abort`） | `REASSIGN=abort` |
 | 4 | 範囲を確定できない | — |
@@ -33,8 +33,9 @@ import statefile
 
 from .. import clock, die, info
 from ..intake import IntakeScope, close_without_result
-from ..paths import load_state
+from ..paths import load_state, work_dir
 from ..results import STOPPED_REASONS, read_result
+from ..worktree import discard_impl_leftovers
 
 STEPS = ("propose", "plan", "add-tests", "implement", "fix", "final-fix")
 RELAUNCH_IN_PLACE = ("propose", "plan", "add-tests", "implement")  # 同じ工程の中で起動し直す工程（7）
@@ -166,6 +167,8 @@ def _reassign_implementer(path: pathlib.Path, state: dict[str, Any], step: str) 
     if entry is not None:
         _emit_decision(step, failed, reason, _decision_of(entry))
     if step in UNDO_STEPS:
+        # コミットせずに止まった担当の未コミットの変更を、次の担当へ渡さない（検証を受けていない）
+        discard_impl_leftovers(state, work_dir(state))
         record = state.setdefault("phases", {}).setdefault(step, {})
         scope = IntakeScope(
             holder=record,
@@ -183,6 +186,23 @@ def _reassign_implementer(path: pathlib.Path, state: dict[str, Any], step: str) 
     _apply(state, step, d)
     statefile.save(path, state)
     _emit_decision(step, failed, reason, d)
+
+
+def _repick_implementer(state: dict[str, Any]) -> Optional[str]:
+    """提案の振り替えで実装担当のランタイムが外れたら、外した後の参加者から実装担当を選び直す。替えたら新しい席。"""
+    log = list(state.get("no_results") or [])
+    current = str(state.get("implementer") or "")
+    if not current or assignment.seat_runtime(current) not in assignment.excluded_runtimes(log):
+        return None
+    available = list((state.get("participants") or {}).get("available") or state.get("runtimes") or [])
+    pool = assignment.seats_pool(available, log)
+    if not pool:
+        return None  # 選べる者がいなければ今のまま。計画の結果なしが振り替えか中断を決める
+    pick, _ = assignment.choose_implementer(pool, str(state.get("host") or ""))
+    account = assignment.current_account(log, pick, assignee_env.initial_account()) if pick == "claude" else None
+    _set_implementer(state, assignment.Assignee(pick, account), "propose")
+    info(f"↪ 実装担当を選び直します: {current} → {pick}（提案の振り替えで外れたため）")
+    return pick
 
 
 def _reassign_proposers(path: pathlib.Path, state: dict[str, Any], seats: list[str]) -> None:
@@ -214,12 +234,15 @@ def _reassign_proposers(path: pathlib.Path, state: dict[str, Any], seats: list[s
             moved.append(f"{seat}={_target_label(d.to)}:{reason}")
     if any(accounts.values()):
         state["proposer_accounts"] = {k: v for k, v in accounts.items() if v}
+    impl = _repick_implementer(state) if targets else None
     statefile.save(path, state)
     if not targets:
         info("⚠ 提案担当の全員が結果を残さず、振り替え先もありません")
         statefile.emit(REASSIGN="abort")
         sys.exit(3)
     lines = {"PROPOSERS": " ".join(dict.fromkeys(t.seat for t in targets))}
+    if impl is not None:
+        lines["IMPL"] = impl
     if moved:
         lines["REASSIGNED"] = " ".join(moved)
     statefile.emit(**lines)

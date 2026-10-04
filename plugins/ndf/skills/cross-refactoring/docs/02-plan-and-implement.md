@@ -160,10 +160,12 @@ rf reassign "$ID" implement      # 工程は propose / plan / add-tests / implem
 | 終了コード | 意味 | 駆動がすること |
 | ---: | --- | --- |
 | 0 | 結果なしとして扱わない（結果がある・上限での打ち切り） | そのまま取り込みへ |
-| 7 | 同じ工程を起動する（`IMPL` / 提案は `PROPOSERS`、振り替えなら `REASSIGNED`） | 返された担当で同じ工程を起動し、監視へ戻る |
+| 7 | 同じ工程を起動する（`IMPL` / 提案は `PROPOSERS`、振り替えなら `REASSIGNED`） | 返された担当で同じ工程を起動し、監視へ戻る。起動のたびに `start-phase` を打ち直し、工程の終わりの時刻から残りの上限を出し直す（締め切りは延ばさない） |
 | 2 | 次の起動から担当を替えた、または今のまま起動し直す（`fix` / `final-fix`） | 取り込み（`merge-fix` / `merge-final-fix`）へ |
 | 3 | 振り替え先が無い（`REASSIGN=abort`） | `plan` / `add-tests` / `implement` は止まる。`fix` / `final-fix` は取り込みへ（修正は打ち切り） |
 | 4 | 範囲を確定できない | 中断 |
+
+`plan` / `add-tests` / `implement` では、範囲を取り消す前に担当が残した未コミットの変更を捨てる（検証を受けていない変更を次の担当へ渡さない）。
 
 規則は上から順に当てる。
 

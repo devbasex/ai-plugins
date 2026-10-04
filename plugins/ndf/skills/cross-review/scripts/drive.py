@@ -35,6 +35,7 @@ deps.require("durable")
 import drive_pause as dp  # noqa: E402
 import durable  # noqa: E402
 import assignee_env  # noqa: E402
+import assignment  # noqa: E402
 import step_result as sr  # noqa: E402
 from drive_pause import Stop  # noqa: E402
 from loop_drive import call, durable_identity, keep_finished, parse_vars, review_status, write_review_answer  # noqa: E402,F401  テストは `call` をこのモジュールの上で差し替える
@@ -78,6 +79,18 @@ def sweep_verify_lines(worktree) -> str:
         "- 修正をコミットしたら、検証は次のコマンドを作業ディレクトリで順に走らせる（.ndf/project.json の test）。"
         f"Step 7.5 の探し方は使わない:\n{listed}\n"
     )
+
+
+def _reassigned_seat(src: str, to: str) -> str:
+    """`REASSIGNED` の 1 件（`<元の席>=<宛先>`）から起動する席を引く。
+
+    `claude@<名前>` は、元の席が claude ならアカウントだけを替えた振り替えで元の席（`claude-2` など）を起動し直す。
+    別のランタイムからの振り替えなら宛先の席（`claude`）を起動する（judge が記録した席と同じ）。
+    """
+    seat = to.split("@", 1)[0]
+    if "@" in to and assignment.seat_runtime(src) == assignment.seat_runtime(seat):
+        return src
+    return seat
 
 
 class Held(Exception):
@@ -304,7 +317,7 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
         return jrc, jout
 
     def collect_reviews(self, rv: dict) -> tuple[int, str]:
-        """結果を集めて judge する。7 の間、起動し直す席と `REASSIGNED` の振り替え先（`claude@<名前>` は元の席）を起動し直す（#919）。"""
+        """結果を集めて judge する。7 の間、起動し直す席と `REASSIGNED` の振り替え先（`claude@<名前>` は元の席が claude なら元の席）を起動し直す（#919）。"""
         rnd = rv.get("ROUND", "")
         agents = rv.get("REVIEWERS", "").split()
         while True:
@@ -312,7 +325,7 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
             jrc, jout = self.judge()
             jv = parse_vars(jout)
             moved = [m.split(":")[0].split("=", 1) for m in jv.get("REASSIGNED", "").split()]
-            agents = jv.get("RELAUNCH_AGENTS", "").split() + [src if "@" in to else to for src, to in moved]
+            agents = jv.get("RELAUNCH_AGENTS", "").split() + [_reassigned_seat(src, to) for src, to in moved]
             if jrc != 7 or not agents:
                 return jrc, jout
 

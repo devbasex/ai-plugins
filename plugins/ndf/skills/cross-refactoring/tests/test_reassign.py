@@ -231,6 +231,44 @@ def test_all_no_result_in_propose_without_a_candidate_stops(cmd_reassign, tmp_pa
     assert "REASSIGN=abort" in capsys.readouterr().out
 
 
+def test_a_proposer_reassignment_that_drops_the_implementer_picks_it_again(cmd_reassign, tmp_path, env_tmp_dir, capsys):
+    """提案の振り替えで実装担当のランタイムが外れたら、外した後の参加者から実装担当を選び直して `IMPL` で返す。"""
+    path = _implement_state(tmp_path, phase="propose")
+    env_tmp_dir(path)
+    _monitor(path, f"claude-propose-rf{ID}", "usage_limit")
+    _monitor(path, f"codex-propose-rf{ID}", "usage_limit")
+
+    assert _run(cmd_reassign, "propose", ["claude", "codex"]) == 7
+
+    out = capsys.readouterr().out
+    assert "PROPOSERS=kiro" in out and "IMPL=kiro" in out
+    st = read_state(path)
+    assert (st["implementer"], st["implementer_reason"]) == ("kiro", "reassigned")
+
+
+def test_a_proposer_relaunch_keeps_the_implementer(cmd_reassign, tmp_path, env_tmp_dir, capsys):
+    path = _implement_state(tmp_path, phase="propose")
+    env_tmp_dir(path)
+    _monitor(path, f"claude-propose-rf{ID}", "early_error")
+
+    assert _run(cmd_reassign, "propose", ["claude"]) == 7
+
+    assert "IMPL=" not in capsys.readouterr().out
+    assert read_state(path)["implementer"] == "claude"
+
+
+def test_a_no_result_in_implement_discards_uncommitted_changes_first(cmd_reassign, tmp_path, env_tmp_dir, undo_spy, monkeypatch):
+    """コミットせずに止まった担当の未コミットの変更を、次の担当へ渡す前に捨てる。"""
+    discarded = []
+    monkeypatch.setattr(cmd_reassign, "discard_impl_leftovers", lambda state, work: discarded.append(work))
+    path = _implement_state(tmp_path)
+    env_tmp_dir(path)
+    _monitor(path, f"claude-implement-rf{ID}", "usage_limit")
+
+    assert _run(cmd_reassign, "implement") == 7
+    assert discarded == [str(tmp_path / "work")]
+
+
 def test_a_claude_proposer_moves_to_another_account(cmd_reassign, tmp_path, env_tmp_dir, monkeypatch, capsys):
     monkeypatch.setattr(cmd_reassign.assignee_env, "account_picker", lambda base=None: lambda tried: "work2")
     path = _implement_state(tmp_path, phase="propose")

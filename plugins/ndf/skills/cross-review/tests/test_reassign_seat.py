@@ -340,3 +340,20 @@ def test_the_report_lists_reassignments_and_dropped_agents(tmp_dir, capsys):
     out = capsys.readouterr().out
     assert "round 2: kiro → claude（usage_limit）" in out
     assert "- 外した担当: kiro" in out
+
+
+@pytest.mark.parametrize(
+    ("src", "to", "seat"),
+    [
+        ("kiro", "claude@work1", "claude"),
+        ("claude-2", "claude@work2", "claude-2"),
+        ("claude", "claude@work2", "claude"),
+        ("kiro", "codex", "codex"),
+    ],
+    ids=["other-runtime-to-claude-account", "claude-seat-keeps-its-seat", "claude-account", "other-runtime"],
+)
+def test_drive_launches_the_seat_of_the_reassignment(src, to, seat):
+    """`claude@<名前>` は元の席が claude のときだけ元の席を起動し直し、別のランタイムからなら宛先の席を起動する。"""
+    import test_review_drive_resume as resume
+
+    assert resume.cr._reassigned_seat(src, to) == seat

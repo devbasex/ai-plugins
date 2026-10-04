@@ -364,7 +364,8 @@ def test_a_reassigned_implementer_runs_the_same_phase_and_merges(tmp_path, monke
     code, out = run_main(ARGV, capsys)
     assert code == 0, out
     assert [c[1:3] for c in fake.calls if c[0] == "launch-cli.sh"] == [("codex", "implement"), ("claude", "implement")]
-    assert [c[:3] for c in fake.calls if c[:2] == ("refactor.py", "start-phase")] == [("refactor.py", "start-phase", "7")]
+    # 起動のたびに start-phase を打ち、工程の終わりの時刻から残りの上限を出し直す（締め切りは延ばさない）
+    assert [c[:4] for c in fake.calls if c[:2] == ("refactor.py", "start-phase")] == [("refactor.py", "start-phase", "7", "implement")] * 2
     assert sum(1 for c in fake.calls if c[:2] == ("refactor.py", "merge-implement")) == 1
 
 
@@ -515,3 +516,20 @@ def test_propose_continues_when_one_participant_finished(tmp_path, monkeypatch, 
     monkeypatch.setattr(rf, "call", call)
     code, _ = run_main(ARGV, capsys)
     assert code == 0 and any(c[:2] == ("refactor.py", "merge-proposals") for c in fake.calls)
+
+
+@pytest.mark.parametrize(
+    ("seat", "phase", "account"),
+    [("claude", "propose", "work2"), ("claude", "implement", "work1"), ("codex", "propose", "")],
+    ids=["propose-reads-proposers", "implement-reads-implementer", "other-seat"],
+)
+def test_launch_reads_the_account_of_the_phase(monkeypatch, seat, phase, account):
+    """提案は席が実装担当と同じでも提案担当の記録からアカウントを引く（実装担当の記録は提案の振り替えで変わらない）。"""
+    d = rf.Drive(1, [])
+    d.v = {"ID": "7"}
+    state = {"implementer": "claude", "implementer_account": "work1", "proposer_accounts": {"claude": "work2"}}
+    monkeypatch.setattr(rf.Drive, "state", lambda self: state)
+    seen = []
+    monkeypatch.setattr(rf, "_call_step", lambda cmd, env, s="", a="": seen.append((s, a)) or (0, ""))
+    assert d.launch(seat, phase) == 0
+    assert seen == [(seat, account)]

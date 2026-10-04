@@ -331,7 +331,7 @@ eval "$JUDGE_VARS"
 | 答え | 出力と記録 |
 | --- | --- |
 | 起動し直す | `RELAUNCH_AGENTS='<席> ...'`・`RELAUNCH_AGENTS_CSV`・`RELAUNCH_TARGET` の 3 行。対象を `rounds[-1].relaunched` へ |
-| 振り替える | `REASSIGNED='<元の席>=<振り替え先>:<理由> ...'` の 1 行。アカウントへの振り替えは振り替え先を `claude@<アカウント>` と書く。`rounds[-1].reviewers` / `seats` を振り替え先へ書き換え、`rounds[-1].reassigned` に写す。元の席の欄（`rounds[-1].<元の席>`）は残す |
+| 振り替える | `REASSIGNED='<元の席>=<振り替え先>:<理由> ...'` の 1 行。アカウントへの振り替えは振り替え先を `claude@<アカウント>` と書く。駆動は、元の席が claude なら元の席を、別のランタイムからなら振り替え先の席（`claude`）を起動する。`rounds[-1].reviewers` / `seats` を振り替え先へ書き換え、`rounds[-1].reassigned` に写す。元の席の欄（`rounds[-1].<元の席>`）は残す |
 | 中断 | `final=error`・終了コード 1。標準エラーに、このラウンドで試した担当・理由・答えと `monitor_detail` |
 
 どれかの席が中断なら終了コード 1、そうでなければ 7 で、駆動は `RELAUNCH_AGENTS` の席と
