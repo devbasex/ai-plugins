@@ -332,7 +332,8 @@ class Drive:
             # 寄せた危険フラグの項目を取り消しただけで、修正の依頼ではない。修正の CLI を起動せずに確かめ直す。
             return False
         self.impl_phase("final-fix", self.v.get("FINAL_FIX_IMPL"), "{agent}-final-fix")
-        self.rf("merge-final-fix", i)
+        # 2 = 取り込めなかった（公開前の静的解析で差し戻した・結果なし）。どちらも final-gate へ戻り、そこが打ち切りを見る（#1693）
+        self.rf("merge-final-fix", i, ok=(0, 2))
         return False
 
     def report(self) -> Path:

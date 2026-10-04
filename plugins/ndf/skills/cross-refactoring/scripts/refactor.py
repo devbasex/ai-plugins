@@ -55,7 +55,8 @@ from refactor_lib.commands.converge import (  # noqa: E402
     cmd_merge_fix,
     cmd_verify,
 )
-from refactor_lib.commands.gate import cmd_final_gate, cmd_merge_final_fix  # noqa: E402
+from refactor_lib.commands.final_fix import cmd_merge_final_fix  # noqa: E402
+from refactor_lib.commands.gate import cmd_final_gate  # noqa: E402
 from refactor_lib.commands.implement import (  # noqa: E402
     cmd_merge_implement,
     cmd_merge_tests,
