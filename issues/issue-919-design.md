@@ -127,7 +127,7 @@
 | `skills/cross-refactoring/scripts/refactor_lib/commands/reassign.py` | 新規 | 副命令 `reassign <ID> <工程>`。起動結果を読み、範囲を取り消し、規則の答えを記録して実装担当・提案担当を書き換え、出力と終了コードで `drive.py` へ返す |
 | `skills/cross-refactoring/scripts/refactor.py` | 変更 | `reassign` を登録する |
 | `skills/cross-refactoring/scripts/drive.py` | 変更 | `impl_phase` と `propose` が、監視の非ゼロ（上限での打ち切りを除く）で `reassign` を打ち、7 なら同じ工程を返された担当で起動する。起動の環境を `assignee_env` で組む |
-| `refactor_lib/intake.py`・`refactor_lib/commands/final_fix.py`・`refactor_lib/commands/gate.py`・`refactor_lib/commands/converge.py` | 変更 | `ClosedAttempt.relaunch_same_agent` を消す。旗を立てるのは `reassign` の答え `abort` だけにする（`final-fix` は今の `final_gate.no_relaunch`、`fix` は新しい欄 `fix_no_relaunch`）。`verify` は `fix_no_relaunch` が立っていれば修正を求めず、落ちた項目を締め切りのときと同じ経路（`_give_up`）で取り消してから進む。`final_gate.no_relaunch` は `fix` では立てない |
+| `refactor_lib/intake.py`・`refactor_lib/commands/final_fix.py`・`refactor_lib/commands/gate.py`・`refactor_lib/commands/converge.py` | 変更 | `ClosedAttempt.relaunch_same_agent` を消す。旗を立てるのは `reassign` の答え `abort` だけにする（`final-fix` は今の `final_gate.no_relaunch`、`fix` は新しい欄 `fix_no_relaunch`）。旗を読むのは `converge.py` の `_fix_stop` の 1 か所にし、`fix_no_relaunch` が立っていれば時計によらず真を返す。範囲テストの経路（`_settle_scope` の `_give_up`）も全体テストの経路（`_fix_or_narrow`）も同じ判定で止まる（cross-refactoring の決定 22 と同じ形）ため、`cmd_verify` は `VERIFY=fix` をどちらの出口からも出さず、落ちた項目を締め切りのときと同じく取り消して `VERIFY=done` で進む。`final_gate.no_relaunch` は `fix` では立てない |
 | `refactor_lib/commands/setup.py` | 変更 | `_recheck_implementer` が結果なしの記録の外した担当を参加者から引く。`implementer_account` を初期化する |
 | `skills/cross-refactoring/scripts/drive.py` の `counts`・`refactor_lib/commands/report.py` | 変更 | `metrics.reassigned` と報告の行 |
 | 文書 | 変更 | cross-review の `docs/01-state-and-review.md`（結果を残さなかったレビュアーの扱い）・`docs/04-contracts.md`（状態の欄）・`SKILL.md`（同じラウンドで 1 度だけ起動し直す、の段落）、cross-refactoring の `SKILL.md` と契約の文書、`scripts/lib/README.md`、`docs/glossary.md`（`glossary.py render`） |
@@ -224,7 +224,7 @@ classDiagram
 | cross-review | `rounds[].reassigned` | そのラウンドで振り替えた `{from, to, to_account, reason}` の並び（報告と judge の出力の元。正は `no_results`） |
 | cross-refactoring | `implementer_account` | 実装担当の claude のアカウント名。空はアカウントを選んでいない |
 | cross-refactoring | `implementer_reason` | 既存の値（`named` / `host` / `first`）に `reassigned` を足す |
-| cross-refactoring | `fix_no_relaunch` | bool。`fix` 工程の `reassign` が `abort` を返したときだけ真にする。`verify` が読み、真なら修正を求めない。最終ゲートの `final_gate.no_relaunch`（既存）とは別の欄で、互いに立て合わない |
+| cross-refactoring | `fix_no_relaunch` | bool。`fix` 工程の `reassign` が `abort` を返したときだけ真にする。`verify` が `_fix_stop` で読み、真なら範囲テスト・全体テストのどちらの修正も求めない。最終ゲートの `final_gate.no_relaunch`（既存）とは別の欄で、互いに立て合わない |
 | cross-refactoring | `proposer_accounts` | 提案担当のランタイムごとのアカウント名（振り替えた者だけ） |
 
 `rounds[].reviewers` / `rounds[].seats` は振り替え先へ書き換える。書き換える前の席の結果なしの欄（`rounds[].<元の席>`）は残す。
