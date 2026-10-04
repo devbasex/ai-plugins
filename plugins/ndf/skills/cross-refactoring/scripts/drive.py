@@ -74,8 +74,6 @@ FOCUS = (
 
 def _ledger_module():
     """取り消しの判定（`refactor_lib.ledger`）。報告と同じ判定で採用を数える（I8）。"""
-    if str(HERE) not in sys.path:
-        sys.path.append(str(HERE))
     from refactor_lib import ledger
 
     return ledger
@@ -114,8 +112,6 @@ def _unlink_step(path: str) -> None:
 
 def _target_root() -> Path:
     """対象のリポジトリの根。決められなければ `Stop`（2）。"""
-    if str(HERE) not in sys.path:
-        sys.path.append(str(HERE))
     from refactor_lib import paths
 
     try:
@@ -153,8 +149,6 @@ class Drive:
 
     def known_tmp(self) -> Path | None:
         """init を打たずに、`refactor.py init` と同じ規則で状態の置き場を求める。求まらなければ None。"""
-        if str(HERE) not in sys.path:
-            sys.path.append(str(HERE))
         from refactor_lib import paths
 
         ap = argparse.ArgumentParser(add_help=False)
