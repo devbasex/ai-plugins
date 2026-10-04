@@ -150,7 +150,7 @@ x は着手前に手元で走らせたテストの実測秒（`baseline_test.sec
 
 ## 結果を残さなかった担当の振り替え
 
-**監視が非ゼロ（手順の上限での打ち切り `timeout` / `stalled` を除く）で終わったら、取り込みの前に `reassign` を打つ**（#919）。
+**監視が非ゼロ（手順の上限での打ち切り `timeout` / `stalled` を除く）で終わったら、取り込みの前に `reassign` を打つ**。
 起動し直すか・誰へ振り替えるかは共通ライブラリの規則（`assignment.after_no_result`）だけが決める。
 
 ```bash
@@ -177,7 +177,7 @@ rf reassign "$ID" implement      # 工程は propose / plan / add-tests / implem
 | 工程 | 範囲の取り消し | 振り替えた後 | 振り替え先が無いとき |
 | --- | --- | --- | --- |
 | `plan` / `add-tests` / `implement` | `reassign` が工程の起点から HEAD までを取り消してから答えを求める | 同じ工程を振り替え先が続ける。採用済みの項目のコミットは起点より前にあり触らず、未確認の項目（`implement` なら `planned` / `tested`）から続ける | 止まる |
-| `fix` | 取り消さない（`merge-fix` が `Item-Id` で受け取り、次の `verify` が見直す） | 次の修正から振り替え先 | `fix_no_relaunch` を立て、`verify` は時計によらず修正を求めずに落ちた項目を取り消す |
+| `fix` | 取り消さない（`merge-fix` が `Item-Id` で受け取り、次の `verify` が見直す） | 次の修正から振り替え先 | `fix_no_relaunch` を立て、`verify` は時計を見ずに、修正を求めずに落ちた項目を取り消す |
 | `final-fix` | 今の `merge-final-fix` が取り消す | `final_gate.impl` も替え、次の修正ラウンドから振り替え先 | `final_gate.no_relaunch` を立て、次の最終ゲートが打ち切る |
 | `propose` | 範囲は無い | 全員が結果なしのときだけ、提案を出していない担当で集め直す | 止まる |
 

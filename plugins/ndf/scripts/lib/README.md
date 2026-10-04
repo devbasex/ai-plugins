@@ -36,8 +36,8 @@
 | [statefile.py](statefile.py) | 状態ファイルの読み書きと KEY=VALUE 出力、保存の後の差し込み口、再開で渡した引数の反映。`now`・`die`・`info`・`write_json_atomic` は `clock`・`proc`・`jsonio` の再エクスポート | 同上 |
 | [auth.py](auth.py) | 参加する CLI の認証の確認。止めずに結果だけを返す形を持つ（#727） | 同上 |
 | [run_metrics.py](run_metrics.py) | 実行の要約をworktree の外へ書き、集計して出す（`aggregate`、#662） | 同上 |
-| [assignment.py](assignment.py) | ホスト判定、母集合の確定、使える者の解決、席の埋め方と席の名前、担当の輪番（#727）、結果を残さなかった担当を起動し直すか振り替えるかの規則（`after_no_result`。リトライ可否 `relaunch_same_agent` と、結果なしの記録から導く外した担当・今のアカウントを含む。#919） | 同上 |
-| [assignee_env.py](assignee_env.py) | 担当の起動の環境（claude の席にアカウントがあれば `claude_accounts.account_env` の環境）と、振り替え先のアカウントを選ぶ `pick_account`（`claude_accounts.choose_env` を包み、名前だけを返す）。状態ファイルへは名前だけを書く（#919） | 収束ループの 2 つ |
+| [assignment.py](assignment.py) | ホスト判定、母集合の確定、使える者の解決、席の埋め方と席の名前、担当の輪番、結果を残さなかった担当を起動し直すか振り替えるかの規則（`after_no_result`。リトライ可否 `relaunch_same_agent` と、結果なしの記録から導く外した担当・今のアカウントを含む） | 同上 |
+| [assignee_env.py](assignee_env.py) | 担当の起動の環境（claude の席にアカウントがあれば `claude_accounts.account_env` の環境）と、振り替え先のアカウントを選ぶ `pick_account`（`claude_accounts.choose_env` を包み、名前だけを返す）。状態ファイルへは名前だけを書く | 収束ループの 2 つ |
 | [models.py](models.py) | `--model` の解析、フラグ生成、実測値の突き合わせ | `cross-refactoring` / `external-ai.py` / `metrics.py` |
 | [metrics.py](metrics.py) | 担当ごとの指標算出と報告の整形 | テストだけ（収束ループの 2 つはまだ読まない） |
 | [post_queue.py](post_queue.py) | 上限のときに投稿を積む待ち行列と、上限の見分け | `cross-review`（`review_lib/` / `rotate-pr.sh`） |
