@@ -626,7 +626,7 @@
     {
       "term": "リトライ可否",
       "context": "ndf-agent-cli",
-      "meaning": "同じ担当を同じ条件で起動し直せば解ける起動結果か（relaunch_same_agent）",
+      "meaning": "同じ担当を同じ条件で起動し直せば解ける理由か（assignment.relaunch_same_agent）。起動結果ではなく振り替えの規則が持つ",
       "source": "docs/specifications/cross-review-launch-outcome.md",
       "deprecated": [
         "起動し直しの可否"
@@ -3122,6 +3122,55 @@
       "context": "ndf-cross-review",
       "meaning": "駆動が止まりで示す items[0].result_file。止まりへの答えを書き、同じコマンドの打ち直しが読む。担当 CLI の結果ファイルとは別",
       "source": ""
+    },
+    {
+      "term": "担当",
+      "context": "ndf-agent-cli",
+      "meaning": "レビュー・提案・実装を受け持つ CLI の起動の単位。ランタイムと、claude ではアカウントで決まる",
+      "pending_source": "issues/issue-919-requirements.md"
+    },
+    {
+      "term": "席",
+      "context": "ndf-cross-review",
+      "meaning": "cross-review の 1 ラウンドの 2 つの担当の枠。名前は kiro / kiro-2 の形（SEAT_PATTERN）",
+      "pending_source": "issues/issue-919-requirements.md"
+    },
+    {
+      "term": "結果なし",
+      "context": "ndf-agent-cli",
+      "meaning": "担当が結果ファイルを残さずに終わったこと（judge の verdict = no_result、cross-refactoring の failed_attempts）",
+      "pending_source": "issues/issue-919-requirements.md"
+    },
+    {
+      "term": "利用上限",
+      "context": "ndf-agent-cli",
+      "meaning": "担当の CLI が使用量の上限に当たって止まったこと（起動結果の理由 usage_limit）",
+      "pending_source": "issues/issue-919-requirements.md"
+    },
+    {
+      "term": "振り替え",
+      "context": "ndf-agent-cli",
+      "meaning": "結果なしの担当の役割を、同じ実行の中で別の担当へ移すこと。同じ担当で起動し直すことは含まない",
+      "pending_source": "issues/issue-919-requirements.md"
+    },
+    {
+      "term": "結果なしの記録",
+      "code": "no_results",
+      "context": "ndf-agent-cli",
+      "meaning": "状態ファイルの no_results。結果なしの 1 回ごとに、担当・理由・振り替えの規則の答え（relaunch / reassign / abort）・振り替え先を追記だけで積む",
+      "pending_source": "issues/issue-919-design.md"
+    },
+    {
+      "term": "外した担当",
+      "context": "ndf-agent-cli",
+      "meaning": "結果なしの記録から導く、同じ実行の残りで割り当てないランタイム（claude ではアカウント）",
+      "pending_source": "issues/issue-919-design.md"
+    },
+    {
+      "term": "提案担当",
+      "context": "ndf-cross-refactoring",
+      "meaning": "cross-refactoring の propose で改善の提案を出す参加者",
+      "pending_source": "issues/issue-919-requirements.md"
     }
   ]
 }
