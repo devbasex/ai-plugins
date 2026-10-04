@@ -51,7 +51,7 @@
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
 | I1 | 実行の状態 | `final_end_at = started_at + B`。着手前のテストの所要に左右されない | 単体テストで落とす |
-| I2 | 実行の状態 | `propose_end_at = started_at + o + 0.20·B`、`plan_end_at = propose_end_at + 0.10·B`。o は枠の起点のずれで、新規の `init` では x（`baseline_test.seconds`。無ければ 0）、再開では `max(x, resumed_at − started_at)`（`resumed_at` は `init` を打ち直した時刻） | 単体テストで落とす |
+| I2 | 実行の状態 | `propose_end_at = started_at + o + 0.20·B`、`plan_end_at = propose_end_at + 0.10·B`。o は枠の起点のずれで、新規の `init` では x（`baseline_test.seconds`。無ければ 0）。`resumed_at` が状態にあれば `max(x, resumed_at − started_at)`。`resumed_at` は、U1 で止めた印（`window_stopped_at`。止めた `init` が状態に残し、提案者は起動していない）を持つ状態からの再開でだけ、打ち直した時刻へ書き換える。印の無い再開は `resumed_at` を変えず、o も前のまま（止めたことが無ければ x）。計画を取り込んだ後の再開は `limits` を組み直さず、保存した期限で続ける | 単体テストで落とす |
 | I3 | 実行の状態 | `fix_end_at`・`stop_revert_end_at`・項目の締め切りは `started_at` から数えた今の式のまま | 単体テストで落とす |
 | I4 | 実行の状態 | `plan_end_at > final_end_at` の状態で提案者を起動しない。`init` が状態を保存して終了コード 4 で止まり、要る想定最大時間の下限を出す | `init` のテストで落とす |
 | I5 | 実行の状態 | CI に任せる戦略の `init_test_timeout` は、範囲テストの所要 s が分かれば `max(0.10·B, 3·s)`、分からなければ `0.10·B`。ほかの戦略と予算なしの値は今と同じ | 単体テストで落とす |
@@ -81,7 +81,7 @@ E1〜E8 は要求の番号を引き継ぐ。E9 はこの設計で足す。E3 の
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
 | 着手前のテスト | `init` が改修の前に 1 回走らせるテスト。CI に任せる戦略では `--scope` のテストの置き場所の範囲テスト、ほかは全体テスト（`round-only` はラウンドテストも） | 追加（`ndf-cross-refactoring`） |
-| 手順の枠 | 提案とリファクタリング計画に充てる時間。着手前のテストの終わり（`started_at + x`）から `0.20·B` と `0.10·B`。`init` の打ち直しでは打ち直した時刻から数える | 追加（`ndf-cross-refactoring`） |
+| 手順の枠 | 提案とリファクタリング計画に充てる時間。着手前のテストの終わり（`started_at + x`）から `0.20·B` と `0.10·B`。枠が想定最大時間に収まらずに止めた後の `init` の打ち直しでは打ち直した時刻から数える | 追加（`ndf-cross-refactoring`） |
 | 範囲テストの所要 | CI に任せる戦略で、着手前に走らせる範囲テストの所要の見込み（秒）。履歴の実測か、範囲が全体を覆うときの w | 追加（`ndf-cross-refactoring`） |
 
 ## 機能一覧
@@ -100,11 +100,11 @@ E1〜E8 は要求の番号を引き継ぐ。E9 はこの設計で足す。E3 の
 | --- | --- | --- |
 | `plugins/ndf/scripts/lib/test_strategy.py` の `limits` | 上限の表。キーワード引数 `scope_seconds` / `scope_source` を受け、CI に任せる戦略の `init_test_timeout` を I5 で出す。`basis` に `scope_seconds` / `scope_source` を足す | 変える |
 | 同 `covers_whole(strategy, locations)` | テストの種別の suite の `paths` の全要素を、テストの置き場所のどれかが覆うか（純粋。glob の要素は `.` の置き場所だけが覆う） | 足す |
-| `refactor_lib/timeline.py` の `compute` / `test_limits` | 枠の起点を `started_at + o` にする（I2。o は新規で x、再開で `max(x, resumed_at − started_at)`）。`test_limits` は `baseline_test.scope_seconds` / `scope_source` を `limits` へ渡す（I6） | 変える |
-| 同 `window_problem(limits)` | `plan_end_at > final_end_at` なら止める理由の文（要る想定最大時間の下限 `ceil(o / (60 · (1 − PROPOSE_SHARE − PLAN_SHARE)))` 分つき。再開では o が打ち直した時刻までの経過になる）、収まれば `None`（純粋） | 足す |
+| `refactor_lib/timeline.py` の `compute` / `test_limits` | 枠の起点を `started_at + o` にする（I2。o は `resumed_at` が無ければ x、あれば `max(x, resumed_at − started_at)`）。`test_limits` は `baseline_test.scope_seconds` / `scope_source` を `limits` へ渡す（I6） | 変える |
+| 同 `window_problem(limits)` | `plan_end_at > final_end_at` なら止める理由の文（要る想定最大時間の下限 `ceil((o + RESUME_GRACE_SECONDS) / (60 · (1 − PROPOSE_SHARE − PLAN_SHARE)))` 分つき。`RESUME_GRACE_SECONDS` = 300 は人が文を読んで打ち直すまでの見込み。止めた印から再開すると o が打ち直した時刻までの経過になる）、収まれば `None`（純粋） | 足す |
 | `refactor_lib/allocation.py` | `ROW_SCHEMA = 2`。実行の行に `kind: run`、`whole_test.init` は全体テストのときだけ（I8）。`init_test_row(...)` と `scope_seconds(rows, strategy, locations)`（I7）を足す。`build_table` は実行の行だけを集計する | 変える |
 | `refactor_lib/baseline.py` | `locations_of(strategy, scope, work)` を足し、`commands_of` と共有する。打ち切りで止めずに記録を返し（`timed_out: true`・`seconds` は上限）、記録に `locations` を残す | 変える |
-| `refactor_lib/commands/setup.py` の `_verify_init` / `_save_initial_state` / `_resume` | 範囲テストの所要を求めて上限に渡す（F3）。着手前のテストの後に履歴へ 1 行足し（F4）、打ち切りならそこで止める。`limits` を書いた後に `window_problem` を見て、保存してから止める（F2。新規と再開の両方）。`_resume` は打ち直した時刻を状態の `resumed_at` に残してから `limits` を組み直す | 変える |
+| `refactor_lib/commands/setup.py` の `_verify_init` / `_save_initial_state` / `_resume` | 範囲テストの所要を求めて上限に渡す（F3）。着手前のテストの後に履歴へ 1 行足し（F4）、打ち切りならそこで止める。`limits` を書いた後に `window_problem` を見て、止めるときは止めた印 `window_stopped_at` を状態に残して保存してから止める（F2。新規と、計画の前の再開）。`_resume` は、止めた印があるときだけ打ち直した時刻を `resumed_at` に残す。計画の前の再開は（印の有無によらず）予算を置き換えて `limits` を組み直し `window_problem` を見て、収まれば印を消す。計画を取り込んだ後の再開は `resumed_at` も `limits` も変えず、`window_problem` も見ずに保存した期限で続ける（予算は知らせるだけ） | 変える |
 | `refactor_lib/plan.py` の `limits_section` | 入力の行に範囲テストの所要と出所を出す（F5） | 変える |
 | `plugins/ndf/scripts/project_lib/measure_ci.py` の `ndf_record` | `kind: init_test` の行を読まない（I8） | 変える |
 | `skills/cross-refactoring/docs/02-plan-and-implement.md` の「締め切り」 | 表の 3 行（着手前の上限・提案の枠・計画の枠）と、U1 の止まり方 | 変える |
@@ -219,13 +219,15 @@ erDiagram
 
 ```text
 着手前のテストに <x> 秒かかり、提案とリファクタリング計画の枠（0.30·B = <秒> 秒）が想定最大時間 <B> 分に収まりません。
---budget-minutes を <下限> 以上にして init を打ち直すと、着手前のテストを走らせ直さずに続けます（下限では実装の時間が残りません）
+--budget-minutes を <下限> 以上にして 5 分以内に init を打ち直すと、着手前のテストを走らせ直さずに続けます（下限では実装の時間が残りません。打ち直しが 5 分より 1 分遅れるごとに、要る下限は約 1.43 分増えます）
 ```
 
-下限は `ceil(o / (60 · (1 − PROPOSE_SHARE − PLAN_SHARE)))` 分（新規の `init` では o = x。x = 1300 秒なら 31 分）。再開では o が
-打ち直した時刻までの経過（`resumed_at − started_at`）になり、枠は打ち直した時刻から数える。止まってから打ち直すまでの経過が
-提案の枠から引かれないため、提案者は常に `0.20·B` の枠で起動される。打ち直すまでの経過で o が下限を越えたときは、その時点の
-下限を出して再び止まる（提案者は起動しない）。
+下限は `ceil((o + RESUME_GRACE_SECONDS) / (60 · (1 − PROPOSE_SHARE − PLAN_SHARE)))` 分（`RESUME_GRACE_SECONDS` = 300。新規の
+`init` では o = x。x = 1300 秒なら `ceil(1600 / 42)` = 39 分）。止めた印から再開すると o が打ち直した時刻までの経過
+（`resumed_at − started_at`）になり、枠は打ち直した時刻から数える。止まってから打ち直すまでの経過が提案の枠から引かれないため、
+提案者は常に `0.20·B` の枠で起動される。下限には打ち直すまでの 300 秒を足してあるため、出した下限で 300 秒以内に打ち直せば
+o が伸びても収まる（o の 1 秒は下限の `1 / 42` 分にあたり、1 分の遅れで約 1.43 分増える）。打ち直しが 300 秒より遅れて o が
+`0.70·B` を越えたときは、その時点の o から同じ式で下限を出して再び止まる（提案者は起動しない）。
 
 ## 処理の流れ
 
@@ -260,8 +262,10 @@ sequenceDiagram
   end
 ```
 
-再開（`init` の打ち直し）は E1〜E3・E9 を通らず、打ち直した時刻を `resumed_at` に残し、o = `max(x, resumed_at − started_at)` で
-`limits` を組み直した後に `window_problem` だけを見る。範囲テストの所要は
+再開（`init` の打ち直し）は E1〜E3・E9 を通らない。U1 で止めた印（`window_stopped_at`）があれば打ち直した時刻を `resumed_at` に
+残し、o = `max(x, resumed_at − started_at)` にする。印が無ければ `resumed_at` を変えず o は前のまま（止めたことが無ければ x）。
+計画の前の再開は、予算を置き換えて `limits` を組み直した後に `window_problem` だけを見る（止めるなら印を残して止め、収まれば
+印を消す）。計画を取り込んだ後の再開は `limits` を組み直さず、`window_problem` も見ずに保存した期限で続ける。範囲テストの所要は
 CI に任せる戦略のときだけ求め、ほかの戦略では履歴を読まない。
 
 ## 非機能の実現方式
@@ -287,7 +291,9 @@ CI に任せる戦略のときだけ求め、ほかの戦略では履歴を読�
 
 `plan_end_at > final_end_at`（x > 0.70·B）なら、状態を保存してから終了コード 4 で止まり、要る想定最大時間の下限を出す。
 保存しておくと、利用者が予算を広げて `init` を打ち直したとき、着手前のテストを走らせ直さずに続く（再開は計画の前なら予算を
-置き換え、`limits` を組み直す）。再開では枠の起点を打ち直した時刻へずらし、下限も打ち直した時刻までの経過から出す。起点を
+置き換え、`limits` を組み直す）。U1 で止めた後の再開でだけ枠の起点を打ち直した時刻へずらし、下限には人が打ち直すまでの
+300 秒を足す。ずらすのを止めた後の再開に限るのは、提案や計画の途中で落ちた再開までずらすと、提案が揃っているのに枠が
+想定最大時間を越えて止まるためである。計画を取り込んだ後は、採った件数が期限に合わせてあるため保存した期限で続ける。起点を
 `started_at + x` のまま残すと、止まってから人が打ち直すまでの数分が提案の枠から引かれ、下限どおりの予算で提案者が余裕だけの
 上限で起動されて #1385 と同じ打ち切りになるためである。枠を残りの時間へ縮めて起動する案は、縮めた枠（90 秒）で提案 0 件になった実測があり、
 採らなかった。予算を自動で広げる案は、想定最大時間が利用者の与えた上限であるため採らなかった。
@@ -354,7 +360,7 @@ w は CI の step の合計（`ci-steps`）などで、手元の並列数で走�
 | AC3 | 同じ時刻の `measure_deadline` が 90 | 起点を戻す（0 になる） |
 | AC4 | x が 0 と無い（`None`）とき、枠の終わりが開始 + 0.20·B / + 0.30·B | x の欠けで例外にする・既定を 0 以外にする |
 | AC5・I3 | 計画の後の `fix_end_at`・`stop_revert_end_at`・項目の締め切りが x に依らない | `budget.fix_end` の起点を枠と同じにずらす |
-| AC6・I4 | x 1300・B 30 の `init` が状態を保存して終了コード 4、文に下限 31 分、提案者を起動しない。開始 + 1300 秒の時刻に B 31 で打ち直すと着手前のテストを走らせずに `limits` を組み直して進み、開始 + 1500 秒の時刻に B 31 で打ち直すと文に下限 36 分を出して止まる。B 40 で開始 + 1500 秒に打ち直すと、提案の枠の終わりが打ち直した時刻 + 480 秒になる | `window_problem` を呼ばない・保存の前に止める・再開で見ない・再開で起点と下限を `started_at + x` のまま数える |
+| AC6・I4 | x 1300・B 30 の `init` が状態を保存して止めた印を残し、終了コード 4、文に下限 39 分、提案者を起動しない。開始 + 1360 秒（止まって 1 分後）に B 39 で打ち直すと着手前のテストを走らせずに `limits` を組み直して進み、提案の枠の終わりが開始 + 1828 秒になり、印が消える。開始 + 1600 秒に B 39 で打ち直しても進む。開始 + 1700 秒に B 39 で打ち直すと文に下限 48 分を出して止まる。B 40 で開始 + 1500 秒に打ち直すと、提案の枠の終わりが打ち直した時刻 + 480 秒になる。B 30・x 200 で印の無い状態を計画の手順中に開始 + 1300 秒で打ち直すと、o = 200 のまま止まらずに続く。B 30 で計画を取り込んだ後に開始 + 1500 秒で打ち直すと、`limits` を変えず `window_problem` を見ずに続く | `window_problem` を呼ばない・保存の前に止める・再開で見ない・止めた印から再開して起点と下限を `started_at + x` のまま数える・下限に打ち直しの 300 秒を足さない・印の無い再開や計画の後の再開で起点をずらす・計画の後に `limits` を組み直す |
 | AC7・I5 | CI に任せる戦略・B 30・`scope_seconds` 320 の `limits` が `init_test_timeout` 960 | 戦略の分岐で s を無視する |
 | AC8・I7 | 置き場所が suite の `paths` を覆い履歴に一致が無いとき、s = w 424 で 1272。glob の `paths` は `.` の置き場所だけが覆う | 覆いを接頭辞の片側だけで判定する・glob を接頭辞として読む |
 | AC9・I5 | s が分からなければ 180 | 分からないときに w を使う |

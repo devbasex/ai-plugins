@@ -3132,7 +3132,7 @@
     {
       "term": "手順の枠",
       "context": "ndf-cross-refactoring",
-      "meaning": "`cross-refactoring` で提案とリファクタリング計画に充てる時間。着手前のテストの終わり（started_at + 実測）から 0.20·B と 0.10·B。init の打ち直しでは打ち直した時刻から数える",
+      "meaning": "`cross-refactoring` で提案とリファクタリング計画に充てる時間。着手前のテストの終わり（started_at + 実測）から 0.20·B と 0.10·B。枠が想定最大時間に収まらずに止めた後の init の打ち直しでは打ち直した時刻から数える",
       "source": ""
     },
     {
