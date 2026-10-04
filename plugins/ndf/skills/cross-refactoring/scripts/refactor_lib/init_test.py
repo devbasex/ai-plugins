@@ -20,7 +20,7 @@ def history_file(repo: str) -> pathlib.Path:
     return allocation.history_path(run_metrics.metrics_dir(), repo)
 
 
-def scope_seconds(prep: Any, scope: list[str], w: Optional[float]) -> tuple[Optional[float], Optional[str]]:
+def resolve_scope_seconds(prep: Any, scope: list[str], w: Optional[float]) -> tuple[Optional[float], Optional[str]]:
     """CI に任せる戦略の範囲テストの所要 s と出所（I7・決定 5）。履歴の同じ戦略・同じ置き場所の実測（`history`）→
     置き場所が全体テストの suite のパスを覆うときの w（`whole`）→ 無し。ほかの戦略では履歴を読まない。"""
     if not prep.strategy.whole_on_ci:

@@ -581,7 +581,7 @@ def _verify_init(
     # 着手前のテストの上限は予算と宣言の所要から導く（決定 8）。CI に任せる戦略は範囲テストの所要 s も入れる（#1555）。
     w, w_source = ts.whole_seconds(prep.decl)
     c = ts.ci_wall_seconds(prep.decl, (prep.strategy.ci or {}).get("check") if prep.strategy.ci else None)
-    s, s_source = init_test.scope_seconds(prep, list(args.scope), w)
+    s, s_source = init_test.resolve_scope_seconds(prep, list(args.scope), w)
     kw: dict[str, Any] = {"whole_seconds_value": w, "whole_source": w_source, "ci_seconds": c, "scope_seconds": s, "scope_source": s_source}
     timeout = ts.limits(prep.strategy, int(args.budget_minutes), **kw)["init_test_timeout"]
     if s is not None:

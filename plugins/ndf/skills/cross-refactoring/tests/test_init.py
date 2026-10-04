@@ -1958,5 +1958,5 @@ def test_the_whole_test_covers_the_scope(verify_init):
         [sys.modules["test_strategy"].Suite("unit", "pytest .", scope_command="pytest {paths}", paths=["tests"])],
     )
     prep.strategy, prep.work = strategy, verify_init.history.parents[2] / "work"
-    assert sys.modules["refactor_lib.init_test"].scope_seconds(prep, ["tests"], 424.0) == (424.0, "whole")
-    assert sys.modules["refactor_lib.init_test"].scope_seconds(prep, ["tests"], None) == (None, None)
+    assert sys.modules["refactor_lib.init_test"].resolve_scope_seconds(prep, ["tests"], 424.0) == (424.0, "whole")
+    assert sys.modules["refactor_lib.init_test"].resolve_scope_seconds(prep, ["tests"], None) == (None, None)
