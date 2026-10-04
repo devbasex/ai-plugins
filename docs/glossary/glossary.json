@@ -3005,8 +3005,20 @@
     {
       "term": "原因の項目",
       "context": "ndf-cross-refactoring",
-      "meaning": "全体テストで変更起因として落ちたテストを、その変更で落とした改善項目。危険フラグの有無とは関係しない",
+      "meaning": "全体テストか範囲テストで変更起因として落ちたテストを、その変更で落とした改善項目。危険フラグの有無とは関係しない",
       "source": "docs/specifications/cross-refactoring-verify-and-final-gate.md"
+    },
+    {
+      "term": "巻き込まれた項目",
+      "context": "ndf-cross-refactoring",
+      "meaning": "範囲テストが落ち、原因の項目が自分以外だけに決まった改善項目。取り消さず、原因が片づいてから走らせ直す",
+      "source": ""
+    },
+    {
+      "term": "公開前の静的解析",
+      "context": "ndf-cross-refactoring",
+      "meaning": "最終ゲート修正の取り込みで、push の前に、修正のコミットが変えたファイルへ当てる静的解析の範囲テスト",
+      "source": ""
     },
     {
       "term": "原因の手がかり",
