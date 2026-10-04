@@ -114,7 +114,7 @@
 - [ ] 確認のスクリプトは、同意の印（引数）を受け取らない限り `npm install -g` を実行しない。`gws auth login` はどの引数でも実行しない（自動テストで、スタブの npm・gws が呼ばれた引数を記録して確かめる）
 - [ ] npm が無い環境で、確認のスクリプトが導入できない理由を返し、0 以外の終了コードで終わる
 - [ ] `git grep -E "google-auth|google-drive|gdrive_fetch|google_auth"` が、履歴の文書（`CHANGELOG.md`・`docs/development-history/`・`issues/`・`docs/ndf-version-decisions.md`）・`plugins/ndf/scripts/tests/fixtures/wait_notice_corpus.json`・`.ndf/pace.json`（未決の扱いが決まるまで）以外で 0 件（playwright-kit を含む）
-- [ ] playwright-kit の Skill（description を含む）・README・テンプレートに、Drive への保管の手順が残らない（`git grep -niE "drive" plugins/playwright-kit` の残りが Drive 連携の案内でない）
+- [ ] playwright-kit の Skill（description を含む）・README・テンプレートと、playwright-kit を紹介する `.claude-plugin/marketplace.json` の description・根の `README.md` の行に、Drive への保管の手順と案内が残らない（`git grep -niE "drive" plugins/playwright-kit .claude-plugin/marketplace.json README.md` の残りが playwright-kit の Drive 連携の案内でない）
 - [ ] `plugins/ndf/manifests/*-skills.txt` の 4 つに `google-workspace` が 1 行ずつあり、`google-auth` と `google-drive` が無い
 - [ ] `python3 scripts/check-skill-frontmatter.py`、`claude plugin validate .`、`uv run --with pytest pytest scripts/tests plugins/ndf -q`、playwright-kit のテスト（`plugins/playwright-kit/skills/playwright-kit-ops/tests`）が通る
 
