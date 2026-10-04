@@ -106,13 +106,13 @@ playwright-kit は、この変更の後は Google Workspace のどのコンテ�
 | Skill 間の参照の検査（`scripts/check-cross-skill-refs.py` と、共配布のテスト） | `google-drive` → `google-auth` の例外（#116）と `test_google_auth_codistribution.py` を消し、2 つを例に挙げた説明（`test_cross_skill_refs.py`・`test_refactoring_codistribution.py`）を直す |
 | `document-systems`（本文と `references/system-gdrive.md`）・`document-sources` | スクリプトの経路を gws へ、参照先の Skill の名前を `google-workspace` へ。MCP の `read_file_content` の経路は変えない |
 | リポジトリの文書（`README.md`・`plugins/ndf/README.md`・`docs/ndf-plugin-reference.md`・`docs/specifications/ndf-skill-inventory/01-ledger-and-criteria.md`・`docs/specifications/ndf-documentation-mode.md`） | Skill の一覧・数・判定・Drive の取得を持つ Skill の名前を直す |
-| playwright-kit の Drive への保管（削除） | `scripts/` の `_drive_auth.py`・`gdrive_upload_dir.py`・`build_gdoc_with_drive_links.py`・`upload_evidence.py`・`upload_md_as_gdoc.py`、`playwright_kit/uploaders/`、`pytest_plugin.py` の `--pwk-drive-folder` と `pytest_sessionfinish` の保管、`pyproject.toml` の `drive` の extra、`templates/pyproject.toml.runtime` の Google の依存 |
+| playwright-kit の Drive への保管（削除） | `scripts/` の `_drive_auth.py`・`gdrive_upload_dir.py`・`build_gdoc_with_drive_links.py`・`upload_evidence.py`・`upload_md_as_gdoc.py`、`playwright_kit/uploaders/`、`pytest_plugin.py` の `--pwk-drive-folder` と `pytest_sessionfinish` の保管、`pyproject.toml` の `drive` の extra（とその説明のコメント）と description の「Google Drive 連携を提供」、`templates/pyproject.toml.runtime` の Google の依存（とその説明のコメント） |
 | playwright-kit の依存の固定（`plugins/playwright-kit/skills/playwright-kit-ops/uv.lock`・根の `uv.lock`） | `drive` の extra を外した形で作り直す |
 | playwright-kit のテスト | Drive の経路のテスト（`test_drive_auth_candidates.py`・`test_build_gdoc_with_drive_links.py`・`test_upload_evidence.py`・`test_script_json_output.py`、`test_pytest_terminal_summary.py` の保管の 2 件）を消し、`test_pytest_plugin_bootstrap.py` を `--pwk-drive-folder` が無い形へ直す |
-| playwright-kit の案内 | `playwright-evidence` / `playwright-kit-ops` / `playwright-authoring` / `playwright-planning`（本文と `docs/04`・`05`・`06`）の Skill、`templates/` の `run.sh`・`run.bat`・`runtime-README.md`、`playwright_kit/fixtures/__init__.py` と `pytest_report.py` の docstring、`README.md`、2 つの `plugin.json` の description から Drive への保管の手順と案内を外す |
+| playwright-kit の案内 | `playwright-evidence` / `playwright-kit-ops` / `playwright-authoring` / `playwright-planning`（本文と `docs/04`・`05`・`06`）の Skill、`templates/` の `run.sh`・`run.bat`・`runtime-README.md`、`playwright_kit/fixtures/__init__.py` と `pytest_report.py` の docstring、`README.md`、2 つの `plugin.json` の description から Drive への保管の手順と案内を外す。`plugins/playwright-kit/` の外で利用者がプラグインを選ぶときに読む、`.claude-plugin/marketplace.json` の playwright-kit の description（「report generation with Drive archiving」）と根の `README.md` の playwright-kit の行（「レポート生成と Drive 保管」）からも外す |
 | 実装の Pull Request の本文 | 利用者向けの変更に、移行の手順（`gws auth login` で認証し直す・Drive への保管は `gws drive +upload` を手で使う）を書く。`release` がこれを CHANGELOG へ写す |
 
-**手を入れないもの**: `playwright_kit/video.py`・`config.py`・`templates/scenario.config.yaml` にある「Drive のプレイヤと互換の mp4」の説明（動画の符号化の理由で、保管の案内ではない。決定 8）、`document-systems` のシステムの識別子 `gdrive`、`.ndf/pace.json`（未確認のまま残ること）。
+**手を入れないもの**: `playwright_kit/video.py`・`config.py`・`templates/scenario.config.yaml`・`pyproject.toml`・`templates/pyproject.toml.runtime` にある「Drive のプレイヤと互換の mp4」の説明（動画の符号化の理由で、保管の案内ではない。決定 8）、`document-systems` のシステムの識別子 `gdrive`、`.ndf/pace.json`（未確認のまま残ること）。
 
 ### 構成要素図
 
@@ -399,7 +399,7 @@ npm の全体インストールの置き場所が `PATH` に無い環境（`npm 
 
 ### 決定 8: 差分を Drive への保管に絞るため、動画を mp4 にする理由の「Drive のプレイヤと互換」の説明は残す
 
-`video.py`・`config.py`・`templates/scenario.config.yaml` の説明は、動画の符号化の設定の理由で、Drive へ保管する手順ではない。mp4 の設定はブラウザでの再生にも効くため、設定はそのまま使い続ける。受け入れ条件 7 の `git grep -niE "drive" plugins/playwright-kit` の残りは、この 3 ファイルの説明だけになる。
+`video.py`・`config.py`・`templates/scenario.config.yaml`・`pyproject.toml`（mp4 へ変換する依存の理由のコメント）・`templates/pyproject.toml.runtime`（同じ理由のコメント）の説明は、動画の符号化の設定の理由で、Drive へ保管する手順ではない。mp4 の設定はブラウザでの再生にも効くため、設定はそのまま使い続ける。受け入れ条件 7 の `git grep -niE "drive" plugins/playwright-kit` の残りは、この 5 ファイルの mp4 の理由の説明だけになる（`pyproject.toml` の description の「Google Drive 連携を提供」と `drive` の extra のコメントは保管の案内なので消す）。
 
 説明を書き換える案は、振る舞いの変わらない行を差分に載せる。
 
@@ -425,7 +425,7 @@ npm の全体インストールの置き場所が `PATH` に無い環境（`npm 
 | I4（資格情報を写さない） | スタブの gws の JSON に余分のキー（資格情報に見立てた値）を混ぜても、結果の JSON にその値が現れない | gws の出力を丸ごと `metrics` へ写すと落ちる |
 | 受け入れ条件 5・I5（npm が無い） | gws も npm も無いとき、`uninstallable`・`stopped`・終了コード 3 | 0 で終えると落ちる |
 | 受け入れ条件 6（旧名の `git grep`） | 受け入れ条件の `git grep` を実装 PR の検証で打つ | 旧名の行が 1 つでも残れば件数が 0 でなくなる |
-| 受け入れ条件 7・I7（playwright-kit） | `pytest --help` に `--pwk-drive-folder` が無く、渡すと未知の引数で止まる（`test_pytest_plugin_bootstrap.py` を直す）。`git grep -niE "drive" plugins/playwright-kit` の残りが決定 8 の 3 ファイルだけ | オプションを残すと bootstrap のテストが落ちる |
+| 受け入れ条件 7・I7（playwright-kit） | `pytest --help` に `--pwk-drive-folder` が無く、渡すと未知の引数で止まる（`test_pytest_plugin_bootstrap.py` を直す）。`git grep -niE "drive" plugins/playwright-kit` の残りが決定 8 の 5 ファイルの mp4 の理由の説明だけ。`.claude-plugin/marketplace.json` の playwright-kit の description と根の `README.md` の playwright-kit の行に `Drive` が無い（`plugins/playwright-kit` だけの `git grep` では見えないため、この 2 か所は別に読む） | オプションを残すと bootstrap のテストが落ちる |
 | 受け入れ条件 8・I6（manifests） | 既存の配布の検査（manifests と `plugin.json` の突き合わせ）と受け入れ条件の `git grep` | 片方の `plugin.json` に旧名を残すと既存の検査が落ちる |
 | 受け入れ条件 9（既存の検査） | `check-skill-frontmatter.py`・`claude plugin validate .`・全体テスト・playwright-kit のテストを実装 PR の検証で通す | — |
 
@@ -433,7 +433,7 @@ npm の全体インストールの置き場所が `PATH` に無い環境（`npm 
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #744 | 実装する | — | `plugins/ndf/skills/google-auth/`、`plugins/ndf/skills/google-drive/`、`plugins/ndf/skills/google-workspace/`、`plugins/ndf/manifests/`、`plugins/ndf/.claude-plugin/plugin.json`、`plugins/ndf/.codex-plugin/plugin.json`、`plugins/ndf/skills/document-systems/`、`plugins/ndf/skills/document-sources/SKILL.md`、`plugins/ndf/README.md`、`scripts/check-cross-skill-refs.py`、`scripts/tests/test_google_auth_codistribution.py`、`scripts/tests/test_cross_skill_refs.py`、`scripts/tests/test_refactoring_codistribution.py`、`README.md`、`docs/ndf-plugin-reference.md`、`docs/specifications/ndf-skill-inventory/01-ledger-and-criteria.md`、`docs/specifications/ndf-documentation-mode.md`、`plugins/playwright-kit/`、`uv.lock` |
+| #744 | 実装する | — | `plugins/ndf/skills/google-auth/`、`plugins/ndf/skills/google-drive/`、`plugins/ndf/skills/google-workspace/`、`plugins/ndf/manifests/`、`plugins/ndf/.claude-plugin/plugin.json`、`plugins/ndf/.codex-plugin/plugin.json`、`plugins/ndf/skills/document-systems/`、`plugins/ndf/skills/document-sources/SKILL.md`、`plugins/ndf/README.md`、`scripts/check-cross-skill-refs.py`、`scripts/tests/test_google_auth_codistribution.py`、`scripts/tests/test_cross_skill_refs.py`、`scripts/tests/test_refactoring_codistribution.py`、`README.md`、`docs/ndf-plugin-reference.md`、`docs/specifications/ndf-skill-inventory/01-ledger-and-criteria.md`、`docs/specifications/ndf-documentation-mode.md`、`plugins/playwright-kit/`、`.claude-plugin/marketplace.json`、`uv.lock` |
 
 ## 未確認のまま残ること
 
