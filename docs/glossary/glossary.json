@@ -626,7 +626,7 @@
     {
       "term": "リトライ可否",
       "context": "ndf-agent-cli",
-      "meaning": "同じ担当を同じ条件で起動し直せば解ける起動結果か（relaunch_same_agent）",
+      "meaning": "同じ担当を同じ条件で起動し直せば解ける理由か（assignment.relaunch_same_agent）。起動結果ではなく振り替えの規則が持つ",
       "source": "docs/specifications/cross-review-launch-outcome.md",
       "deprecated": [
         "起動し直しの可否"
@@ -3152,6 +3152,19 @@
       "context": "ndf-agent-cli",
       "meaning": "結果なしの担当の役割を、同じ実行の中で別の担当へ移すこと。同じ担当で起動し直すことは含まない",
       "pending_source": "issues/issue-919-requirements.md"
+    },
+    {
+      "term": "結果なしの記録",
+      "code": "no_results",
+      "context": "ndf-agent-cli",
+      "meaning": "状態ファイルの no_results。結果なしの 1 回ごとに、担当・理由・振り替えの規則の答え（relaunch / reassign / abort）・振り替え先を追記だけで積む",
+      "pending_source": "issues/issue-919-design.md"
+    },
+    {
+      "term": "外した担当",
+      "context": "ndf-agent-cli",
+      "meaning": "結果なしの記録から導く、同じ実行の残りで割り当てないランタイム（claude ではアカウント）",
+      "pending_source": "issues/issue-919-design.md"
     },
     {
       "term": "提案担当",
