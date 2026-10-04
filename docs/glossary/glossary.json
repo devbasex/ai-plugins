@@ -2260,15 +2260,13 @@
       "term": "ジョブを飛ばした run",
       "context": "ndf-workflow",
       "meaning": "CI の成功した run のうち、conclusion が skipped のジョブを 1 つ以上含むもの。宣言の解析は CI の所要を測る代表に採らない",
-      "source": "",
-      "pending_source": "issues/issue-1664-design.md"
+      "source": "docs/specifications/project-decl-ci-representative-run.md"
     },
     {
       "term": "代表の run",
       "context": "ndf-workflow",
       "meaning": "宣言の解析がワークフローごとに壁時計とテストの所要を測る 1 件の run。取得した候補（ワークフローごとに新しい順の成功の run を最大 5 件）のうち、ジョブを飛ばしていない最新のもの",
-      "source": "",
-      "pending_source": "issues/issue-1664-design.md"
+      "source": "docs/specifications/project-decl-ci-representative-run.md"
     },
     {
       "term": "入力の指紋",
