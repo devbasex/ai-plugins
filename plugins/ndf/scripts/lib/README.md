@@ -28,7 +28,7 @@
 | [monitor_types.py](monitor_types.py) | 監視の既定値（上限の表の別名）・一時ディレクトリ・設定と状態の型 | `monitor.py` / `monitor_outcome.py` |
 | [monitor_loop.py](monitor_loop.py) | 担当 1 者の監視ループ（上限・無進捗・早期のエラー・プロセスの終了から結末を決める） | `monitor.py` |
 | [limits.py](limits.py) | 監視の上限（工程ごと）・無進捗の許容（担当ごと）・CLI の上限（監視の上限 + 120 秒）の表。既定値はここだけが持つ（#598 / #537）。CLI の上限の上書きは `resolve_cli_timeout` と `cli-timeout --override N [--no-floor]` の 1 つで決める（既定では導いた値より短くできない） | 同上 |
-| [monitor_outcome.py](monitor_outcome.py) | 監視の結果の理由の語彙（9 語）と起動し直しの可否、結果ファイル・監視の記録の読み書き、起動 1 回の結末を 1 つの値として読む `read_launch_outcome`、担当 1 者の結末を書く `_record_outcome` | 同上 |
+| [monitor_outcome.py](monitor_outcome.py) | 監視の結果の理由の語彙（9 語）、結果ファイル・監視の記録の読み書き、起動 1 回の結末を 1 つの値として読む `read_launch_outcome`、担当 1 者の結末を書く `_record_outcome` | 同上 |
 | [bg-wait.sh](bg-wait.sh) | 600 秒を超える待ちを、背景の起動（`run`）と 540 秒以内に区切った待ち（`wait`）に分ける。終了コードは rc ファイルに残る | 収束ループの 2 つ（Codex / Kiro / agy で `drive.py` を待つ）/ `cross-review` の手順の監視 |
 | [launch-cli.sh](launch-cli.sh) | claude / codex / agy / kiro をランタイム名で分岐して背景起動する。起動の直前に `runtime_policy.py check` で作業ディレクトリのリポジトリの宣言と照らし、外なら起動せずに終了コード 3 | 同上 |
 | （`skills/external-ai/scripts/external-ai.py`） | 上の 2 つと `auth.py` / `limits.py` を束ね、外部 CLI 1 回の起動・上限つきの待ち・回収（結果ファイル → stdout → stderr）を 1 本で行う。結果は `step_result` の形 | `external-ai` / `corder` / supervisor の worker |
@@ -36,7 +36,8 @@
 | [statefile.py](statefile.py) | 状態ファイルの読み書きと KEY=VALUE 出力、保存の後の差し込み口、再開で渡した引数の反映。`now`・`die`・`info`・`write_json_atomic` は `clock`・`proc`・`jsonio` の再エクスポート | 同上 |
 | [auth.py](auth.py) | 参加する CLI の認証の確認。止めずに結果だけを返す形を持つ（#727） | 同上 |
 | [run_metrics.py](run_metrics.py) | 実行の要約をworktree の外へ書き、集計して出す（`aggregate`、#662） | 同上 |
-| [assignment.py](assignment.py) | ホスト判定、母集合の確定、使える者の解決、席の埋め方と席の名前、担当の輪番（#727） | 同上 |
+| [assignment.py](assignment.py) | ホスト判定、母集合の確定、使える者の解決、席の埋め方と席の名前、担当の輪番（#727）、結果を残さなかった担当を起動し直すか振り替えるかの規則（`after_no_result`。リトライ可否 `relaunch_same_agent` と、結果なしの記録から導く外した担当・今のアカウントを含む。#919） | 同上 |
+| [assignee_env.py](assignee_env.py) | 担当の起動の環境（claude の席にアカウントがあれば `claude_accounts.account_env` の環境）と、振り替え先のアカウントを選ぶ `pick_account`（`claude_accounts.choose_env` を包み、名前だけを返す）。状態ファイルへは名前だけを書く（#919） | 収束ループの 2 つ |
 | [models.py](models.py) | `--model` の解析、フラグ生成、実測値の突き合わせ | `cross-refactoring` / `external-ai.py` / `metrics.py` |
 | [metrics.py](metrics.py) | 担当ごとの指標算出と報告の整形 | テストだけ（収束ループの 2 つはまだ読まない） |
 | [post_queue.py](post_queue.py) | 上限のときに投稿を積む待ち行列と、上限の見分け | `cross-review`（`review_lib/` / `rotate-pr.sh`） |
@@ -186,7 +187,7 @@ Skill の下にライブラリを置くと、その Skill を配らない配布�
 | `_tmpdir.sh` | 使わない（一時ディレクトリは `refactor_lib/paths.py` が決める） | `scripts/_tmpdir.sh` が固有の名前をまとめてライブラリを読む |
 | `launch-cli.sh` | `scripts/launch-cli.sh` が委譲する | `launch-reviewer.sh` / `critique.sh` が使う（`launch-codex.sh` / `launch-agy.sh` は `launch-reviewer.sh` へ委譲する） |
 | `limits.py` | 使う | `critique.sh` が使う（監視の上限は `monitor.py` がライブラリの表から引く） |
-| `assignment.py` / `auth.py` / `statefile.py` / `run_metrics.py` / `monitor_outcome.py` | 使う | 使う（`review_lib/`） |
+| `assignment.py` / `auth.py` / `statefile.py` / `run_metrics.py` / `monitor_outcome.py` / `assignee_env.py` | 使う | 使う（`review_lib/` / `drive.py`） |
 | `models.py` | 使う | 未移行 |
 | `metrics.py` | 未移行 | 未移行 |
 | `post_queue.py` / `result_posts.py` | 未移行（リファクタリング計画のコメントは `refactor_lib/plan.py` が `gh` で書く） | 使う（`review_lib/` / `rotate-pr.sh` / `drive.py`） |

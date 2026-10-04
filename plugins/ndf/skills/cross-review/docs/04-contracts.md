@@ -183,6 +183,13 @@
   いたそのラウンドの目印を外す**（取り直しの後も目印が残ると、出力と実際の数え方が食い違う）
 - `rounds[].critique_relaunched` — 反証を取り直した担当（#549 レビュー対応）。
   **同じラウンドで 1 度だけ取り直す**ための記録である
+- `no_results` — 結果なしの記録（#919）。結果なしの 1 回ごとに `step`（`review`）/ `attempt`（ラウンドの番号）/
+  `seat` / `account`（claude のアカウントの名前。空は選んでいない）/ `reason` / `decision`（`relaunch` / `reassign` /
+  `abort`）/ `to` / `to_account` / `at` の 1 件を**追記だけ**で積む。外した担当・今のアカウント・起動し直し済みかは
+  この記録から導き、別の欄に持たない。この項目を持たない状態ファイルは 0 件として読む
+- `rounds[].reassigned` — そのラウンドで振り替えた `{from, to, to_account, reason}` の並び（報告と judge の出力の写し。
+  正は `no_results`）。振り替えた後の `rounds[].reviewers` / `seats` は振り替え先を指し、元の席の欄は残る
+- `rounds[].seats[].account` — 席の claude のアカウントの名前（振り替えで選んだときだけ持つ）
 - `rejected_findings` — 却下した指摘を **per-item** で蓄積する。`rounds[].fix.rejected` は
   ラウンドごとの件数で、こちらは理由と位置を持つ。**両方を持つのは、件数だけが返る劣化表現
   （`fix` が int を返す経路）があるためである。** そのときは記録が空になり、件数だけが残る。
