@@ -86,16 +86,7 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
     stop = _final_fix_stop(state, gate)
     if stop and (revert_deferred(path, state, gate) if standalone else stop_revert.revert_after_cutoff(path, state, gate)):
         # 原因の項目を取り消した（単独は寄せた危険フラグの全体テスト、工程の 1 つは打ち切りの後の取り消し）。公開して確かめ直す。
-        # **修正の依頼ではない（`recheck`）。** 駆動は修正の CLI を起動せずに `final-gate` を打ち直す。
-        # 起点を取り消し後の HEAD へ置き直すのは、取り消しのコミットを後の `merge-final-fix` の範囲へ
-        # 入れないためである。入れると未申告として取り消され、取り消した項目が PR へ戻る。
-        gate["status"] = "recheck"
-        gate["fix_base_sha"] = git_out(work_dir(state), ["rev-parse", "HEAD"])
-        statefile.save(path, state)
-        push_with_retry_marker(path, state, gate)
-        info(f"↩ 最終ゲートを落とした原因の項目を取り消しました（{detail}）。次の最終ゲートが確かめます")
-        statefile.emit(FINAL_GATE="recheck")
-        sys.exit(2)
+        _gate_recheck(path, state, gate, detail)
     if stop:
         _gate_limit_reached(path, state, gate, detail, stop)
         return
@@ -259,6 +250,19 @@ def _gate_passed(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]
     statefile.save(path, state)
     info(f"✅ 最終ゲートを通過しました（{detail}）")
     statefile.emit(FINAL_GATE="passed")
+
+
+def _gate_recheck(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], detail: str) -> None:
+    # **修正の依頼ではない（`recheck`）。** 駆動は修正の CLI を起動せずに `final-gate` を打ち直す。
+    # 起点を取り消し後の HEAD へ置き直すのは、取り消しのコミットを後の `merge-final-fix` の範囲へ
+    # 入れないためである。入れると未申告として取り消され、取り消した項目が PR へ戻る。
+    gate["status"] = "recheck"
+    gate["fix_base_sha"] = git_out(work_dir(state), ["rev-parse", "HEAD"])
+    statefile.save(path, state)
+    push_with_retry_marker(path, state, gate)
+    info(f"↩ 最終ゲートを落とした原因の項目を取り消しました（{detail}）。次の最終ゲートが確かめます")
+    statefile.emit(FINAL_GATE="recheck")
+    sys.exit(2)
 
 
 def _gate_limit_reached(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], detail: str, why: str) -> None:
