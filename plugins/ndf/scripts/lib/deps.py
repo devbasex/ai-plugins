@@ -133,6 +133,23 @@ def reexec_argv(uv: str, groups: str | Sequence[str], script: str, args: list[st
     return [uv, "run", "--quiet", "--frozen", "--project", str(root), *extras, "python", script, *args]
 
 
+def _normalize_groups(group: str, more: tuple[str, ...]) -> list[str]:
+    """重複を除いたグループの並び。外部パッケージのグループに無いものがあれば ValueError。"""
+    groups = list(dict.fromkeys((group, *more)))
+    unknown = [g for g in groups if g not in GROUPS]
+    if unknown:
+        raise ValueError(f"外部パッケージのグループに無い: {', '.join(unknown)}（{' / '.join(GROUPS)}）")
+    return groups
+
+
+def _resolve_uv_or_stop() -> str:
+    """uv を探し、無ければ入れる。入れられなければ止める。"""
+    uv = ensure_uv("[ndf deps]")
+    if not uv:
+        _stop(f"uv を入れられない（ネットワークか権限が無い）。手で入れてから打ち直す: {INSTALL_HINT}")
+    return uv
+
+
 def require(group: str, *more: str, project: Path | None = None) -> None:
     """渡したグループのパッケージが import できる環境で動いていることを保証する。できなければ、足りないグループを
     すべて `--extra` に並べた uv の環境で 1 回だけ起動し直す。
@@ -140,10 +157,7 @@ def require(group: str, *more: str, project: Path | None = None) -> None:
     `project` は宣言と lock を持つ根（既定はプラグインの根）。リポジトリの根の `scripts/` は根を渡し、環境は
     `<根>/.venv`（全体テストと同じ環境）に置く。"""
     root = PLUGIN_ROOT if project is None else Path(project).resolve()
-    groups = list(dict.fromkeys((group, *more)))
-    unknown = [g for g in groups if g not in GROUPS]
-    if unknown:
-        raise ValueError(f"外部パッケージのグループに無い: {', '.join(unknown)}（{' / '.join(GROUPS)}）")
+    groups = _normalize_groups(group, more)
     missing = [g for g in groups if not importable(g)]
     if not missing:
         # 起動し直した印は子のプロセス（別のグループを要るエントリポイント）へ継がせない。継ぐと子は起動し直さずに止まる
@@ -158,9 +172,7 @@ def require(group: str, *more: str, project: Path | None = None) -> None:
         )
     if not (root / "pyproject.toml").is_file() or not (root / "uv.lock").is_file():
         _stop(f"外部パッケージの宣言が無い: {root}/pyproject.toml と uv.lock")
-    uv = ensure_uv("[ndf deps]")
-    if not uv:
-        _stop(f"uv を入れられない（ネットワークか権限が無い）。手で入れてから打ち直す: {INSTALL_HINT}")
+    uv = _resolve_uv_or_stop()
     venv = venv_dir() if root == PLUGIN_ROOT else str(root / ".venv")
     env = dict(os.environ, **{REEXEC_ENV: script, "UV_PROJECT_ENVIRONMENT": venv})
     os.execve(uv, reexec_argv(uv, groups, script, sys.argv[1:], root), env)
