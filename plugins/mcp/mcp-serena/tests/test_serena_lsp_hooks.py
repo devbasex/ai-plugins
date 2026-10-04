@@ -40,13 +40,11 @@ def _env(tmp_path, plugins=(PY_PLUGIN,), binaries=("pyright-langserver", "shellc
 
 
 def _session_start(root, env, client="claude-code"):
-    import os
-
-    full = {k: v for k, v in os.environ.items() if k != "CLAUDE_PLUGIN_ROOT"}
-    full.update(env)
     import subprocess
     import sys
-    from serena_lsp_testlib import CLI
+    from serena_lsp_testlib import CLI, child_env
+
+    full = child_env(env, drop=("CLAUDE_PLUGIN_ROOT",))
 
     proc = subprocess.run(
         [sys.executable, str(CLI), "hook", "session-start", "--client", client],
@@ -88,6 +86,13 @@ def test_missing_install_is_reported(tmp_path, pyrepo):
 
 
 def test_all_present_prints_nothing(tmp_path, pyrepo):
+    _yml(pyrepo, ["python"], [])
+    assert _session_start(pyrepo, _env(tmp_path)) == ""
+
+
+def test_parent_claude_config_dir_does_not_reach_session_start(tmp_path, pyrepo, monkeypatch):
+    # 利用者のシェルの CLAUDE_CONFIG_DIR は子プロセスへ渡さない（#1689）
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "no-such-config"))
     _yml(pyrepo, ["python"], [])
     assert _session_start(pyrepo, _env(tmp_path)) == ""
 
