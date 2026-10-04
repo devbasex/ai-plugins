@@ -72,6 +72,11 @@ FOCUS = (
 )
 
 
+def _refactor_cmd(*args: str) -> list[str]:
+    """`refactor.py` の副コマンドを打つコマンド列。"""
+    return [sys.executable, str(HERE / "refactor.py"), *args]
+
+
 def _ledger_module():
     """取り消しの判定（`refactor_lib.ledger`）。報告と同じ判定で採用を数える（I8）。"""
     from refactor_lib import ledger
@@ -136,7 +141,7 @@ class Drive:
         return rc, out
 
     def rf(self, *args: str, ok=(0,)) -> tuple[int, dict]:
-        rc, out = self.call([sys.executable, str(HERE / "refactor.py"), *args])
+        rc, out = self.call(_refactor_cmd(*args))
         if rc == ABORT or rc not in ok:
             raise Stop(f"refactor.py {args[0]} が終了コード {rc} で止まった", rc)
         vs = parse_vars(out)
@@ -202,7 +207,7 @@ class Drive:
         """
         if not self.has_state():
             return
-        rc, out = self.call([sys.executable, str(HERE / "refactor.py"), "plan-comment", self.v["ID"]])
+        rc, out = self.call(_refactor_cmd("plan-comment", self.v["ID"]))
         self.v.update({k: v for k, v in parse_vars(out).items() if k in ("PLAN_COMMENT", "UNPUBLISHED", "PLAN_URL")})
         if rc != 0:
             print(f"⚠ リファクタリング計画のコメントを書き直せなかった（plan-comment の終了コード {rc}。結果は変えない）", file=sys.stderr)
@@ -351,7 +356,7 @@ class Drive:
         return False
 
     def report(self) -> Path:
-        _, out = self.call([sys.executable, str(HERE / "refactor.py"), "report", self.v["ID"]])
+        _, out = self.call(_refactor_cmd("report", self.v["ID"]))
         rp = self.tmp / f"drive-rf{self.v['ID']}-report.md"
         _write_step(str(rp), out)
         return rp
