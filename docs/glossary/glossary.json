@@ -3096,8 +3096,7 @@
       "term": "依存の欠け",
       "context": "ndf-workflow",
       "meaning": "手順のスクリプトが deps.require で外部パッケージを用意できずに止まったこと。終了コード 69 で終わり、status は stopped。「飛ばしてよい」とも「前提が無い（3）」とも読まない",
-      "source": "",
-      "pending_source": "issues/issue-1654-design.md"
+      "source": "docs/specifications/ndf-deps-missing-exit-code.md"
     },
     {
       "term": "単独起動",
