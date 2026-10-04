@@ -3122,6 +3122,42 @@
       "context": "ndf-cross-review",
       "meaning": "駆動が止まりで示す items[0].result_file。止まりへの答えを書き、同じコマンドの打ち直しが読む。担当 CLI の結果ファイルとは別",
       "source": ""
+    },
+    {
+      "term": "担当",
+      "context": "ndf-agent-cli",
+      "meaning": "レビュー・提案・実装を受け持つ CLI の起動の単位。ランタイムと、claude ではアカウントで決まる",
+      "pending_source": "issues/issue-919-requirements.md"
+    },
+    {
+      "term": "席",
+      "context": "ndf-cross-review",
+      "meaning": "cross-review の 1 ラウンドの 2 つの担当の枠。名前は kiro / kiro-2 の形（SEAT_PATTERN）",
+      "pending_source": "issues/issue-919-requirements.md"
+    },
+    {
+      "term": "結果なし",
+      "context": "ndf-agent-cli",
+      "meaning": "担当が結果ファイルを残さずに終わったこと（judge の verdict = no_result、cross-refactoring の failed_attempts）",
+      "pending_source": "issues/issue-919-requirements.md"
+    },
+    {
+      "term": "利用上限",
+      "context": "ndf-agent-cli",
+      "meaning": "担当の CLI が使用量の上限に当たって止まったこと（起動結果の理由 usage_limit）",
+      "pending_source": "issues/issue-919-requirements.md"
+    },
+    {
+      "term": "振り替え",
+      "context": "ndf-agent-cli",
+      "meaning": "結果なしの担当の役割を、同じ実行の中で別の担当へ移すこと。同じ担当で起動し直すことは含まない",
+      "pending_source": "issues/issue-919-requirements.md"
+    },
+    {
+      "term": "提案担当",
+      "context": "ndf-cross-refactoring",
+      "meaning": "cross-refactoring の propose で改善の提案を出す参加者",
+      "pending_source": "issues/issue-919-requirements.md"
     }
   ]
 }
