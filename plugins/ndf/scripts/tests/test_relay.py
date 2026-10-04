@@ -4271,3 +4271,43 @@ def test_last_start_readers_without_log_file(tmp_path):
     assert relay_record.current_section(str(tmp_path / "missing")) is None
     assert relay_record.running_version_dir(str(tmp_path)) == (False, None)
     assert relay_record.running_version_dir(str(tmp_path / "missing")) == (False, None)
+
+
+# ---------- runtime.uv_path の現状固定 ----------
+
+
+def test_uv_path_prefers_forced_env(monkeypatch):
+    from relay_lib import runtime as relay_runtime
+
+    monkeypatch.setenv(relay_runtime.UV_ENV, "/forced/uv")
+    monkeypatch.setattr(relay_runtime.deps, "find_uv", lambda: pytest.fail("探さない"))
+    assert relay_runtime.uv_path() == "/forced/uv"
+
+
+def test_uv_path_uses_found_uv_without_installing(monkeypatch):
+    from relay_lib import runtime as relay_runtime
+
+    monkeypatch.delenv(relay_runtime.UV_ENV, raising=False)
+    monkeypatch.setattr(relay_runtime.deps, "find_uv", lambda: "/found/uv")
+    monkeypatch.setattr(relay_runtime.deps, "install_uv", lambda: pytest.fail("入れない"))
+    assert relay_runtime.uv_path() == "/found/uv"
+
+
+def test_uv_path_installs_when_missing(monkeypatch, capsys):
+    from relay_lib import runtime as relay_runtime
+
+    monkeypatch.delenv(relay_runtime.UV_ENV, raising=False)
+    monkeypatch.setattr(relay_runtime.deps, "find_uv", lambda: None)
+    monkeypatch.setattr(relay_runtime.deps, "install_uv", lambda: "/installed/uv")
+    assert relay_runtime.uv_path() == "/installed/uv"
+    assert "uv が無いため" in capsys.readouterr().err
+
+
+def test_uv_path_raises_when_install_fails(monkeypatch):
+    from relay_lib import runtime as relay_runtime
+
+    monkeypatch.delenv(relay_runtime.UV_ENV, raising=False)
+    monkeypatch.setattr(relay_runtime.deps, "find_uv", lambda: None)
+    monkeypatch.setattr(relay_runtime.deps, "install_uv", lambda: None)
+    with pytest.raises(relay_runtime.EnvUnavailable):
+        relay_runtime.uv_path()
