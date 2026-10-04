@@ -246,4 +246,4 @@ def run_or_stop(
     result, last = run_commands([str(c) for c in commands or []], work_dir(state), limit, log)
     if result.launch_failed:
         launch.stop(path, state, phase, last, result, log)
-    return result.status == "passed"
+    return result.status == ts.PASSED
