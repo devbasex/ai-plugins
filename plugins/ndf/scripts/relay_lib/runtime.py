@@ -21,7 +21,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 import os
 import subprocess
 import sys
@@ -53,7 +52,7 @@ class EnvUnavailable(OSError):
 def ready() -> bool:
     """今の python で、ラッパーの使うパッケージがすべて import できるか。"""
     try:
-        return all(importlib.util.find_spec(m) is not None for g in GROUPS for m in deps.GROUPS[g])
+        return all(deps.importable(g) for g in GROUPS)
     except (ImportError, ValueError):
         return False
 
