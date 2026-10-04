@@ -98,7 +98,9 @@ def _item(item_id, rank, path, test_target):
     }
 
 
-def _setup(flow, cmd_setup, cmd_implement, *, whole="tests/test_layout.py", name="test_layout", x_text=OVER, y_text="Y = 1\n", lint=True, **over):
+def _setup(
+    flow, cmd_setup, cmd_implement, *, whole="tests/test_layout.py", name="test_layout", x_text=OVER, y_text="Y = 1\n", lint=True, **over
+):
     work = flow["work"]
     _write(work, "size_check.py", SIZE_CHECK)
     _write(work, "src/big.py", AT_LIMIT)

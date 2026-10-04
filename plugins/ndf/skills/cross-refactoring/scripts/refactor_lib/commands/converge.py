@@ -81,7 +81,7 @@ def _revert_shared(
         if not remaining:
             return False
         words = command if command else [r.command for r in targets.verify_runs(state, remaining[0])]
-        if targets.run_or_stop(path, state, words, scope_verdict.log_path(state, remaining[0]["id"]), whole=bool(command) and whole):
+        if targets.run_or_stop(path, state, words, scope_verdict.verify_log(state, remaining[0]["id"]), whole=bool(command) and whole):
             for item in remaining:
                 item["status"] = VERIFIED
             return True
@@ -124,7 +124,7 @@ def _settle_scope(path: pathlib.Path, state: dict[str, Any]) -> None:
 
     取り消しが無くなるまで繰り返す。取り消すたびに項目が減るため、項目の数の回数の内で終わる。
     """
-    scope_verdict.run(path, state, [i for i in live_items(state) if i.get("status") == IMPLEMENTED])
+    scope_verdict.judge_items(path, state, [i for i in live_items(state) if i.get("status") == IMPLEMENTED])
     statefile.save(path, state)
     for _ in range(len(state.get("items") or []) + 1):
         if not _give_up(path, state):
@@ -132,7 +132,7 @@ def _settle_scope(path: pathlib.Path, state: dict[str, Any]) -> None:
         waiting = scope_verdict.waiting(state)
         if not waiting:
             return
-        scope_verdict.run(path, state, waiting)
+        scope_verdict.judge_items(path, state, waiting)
         statefile.save(path, state)
 
 

@@ -29,7 +29,7 @@ from .paths import work_dir
 STOP_REASON = "修正に使える時間の内に通らなかった"
 
 
-def log_path(state: dict[str, Any], item_id: str) -> pathlib.Path:
+def verify_log(state: dict[str, Any], item_id: str) -> pathlib.Path:
     return pathlib.Path(state["tmp_dir"]) / f"verify-{item_id}.log"
 
 
@@ -72,7 +72,7 @@ def _read_failures(state: dict[str, Any], run: _Run) -> None:
     run.tests = ids
 
 
-def _execute(path: pathlib.Path, state: dict[str, Any], runs: list[ts.ScopeRun], log: pathlib.Path) -> _Run:
+def _run_scope(path: pathlib.Path, state: dict[str, Any], runs: list[ts.ScopeRun], log: pathlib.Path) -> _Run:
     """範囲テストを 1 本ずつ走らせる（`targets.run_or_stop` と同じ上限と止め方）。落ちた 1 本を残す。"""
     strategy = timeline.strategy_of(state)
     test_triage.clear_junit(work_dir(state), strategy)
@@ -125,7 +125,9 @@ def _blocked(item: dict[str, Any], verdict: Optional[culprit.Verdict]) -> bool:
     return verdict is not None and verdict.basis != culprit.UNDETERMINED and bool(verdict.culprits) and item["id"] not in verdict.culprits
 
 
-def _mark_culprits(state: dict[str, Any], item: dict[str, Any], run: _Run, verdict: culprit.Verdict, marks: dict[str, dict[str, Any]]) -> None:
+def _mark_culprits(
+    state: dict[str, Any], item: dict[str, Any], run: _Run, verdict: culprit.Verdict, marks: dict[str, dict[str, Any]]
+) -> None:
     """巻き込んだ原因の項目へ付ける印を集める（検証の 1 回を終えてから付ける。後の項目の通過で上書きしない）。"""
     for culprit_id in verdict.culprits:
         evidence = verdict.evidence.get(culprit_id) or {}
@@ -142,7 +144,7 @@ def _mark_culprits(state: dict[str, Any], item: dict[str, Any], run: _Run, verdi
         )
 
 
-def _settle(state: dict[str, Any], item: dict[str, Any], run: _Run, marks: dict[str, dict[str, Any]]) -> None:
+def _settle_item(state: dict[str, Any], item: dict[str, Any], run: _Run, marks: dict[str, dict[str, Any]]) -> None:
     item["last_log"] = str(run.log)
     # 全体のテストの直しで渡したコマンドは、範囲テストの結果で置き換わる。
     item.pop("whole_test_command", None)
@@ -158,7 +160,9 @@ def _settle(state: dict[str, Any], item: dict[str, Any], run: _Run, marks: dict[
         item["status"] = IMPLEMENTED
         item["blocked_by"] = {"items": list(verdict.culprits), "tests": list(run.tests), "basis": verdict.basis}
         _mark_culprits(state, item, run, verdict, marks)
-        info(f"⏸ {item['id']} の範囲テストは {', '.join(verdict.culprits)} の変更で落ちました（手がかり {verdict.basis}）。取り消さずに待ちます")
+        info(
+            f"⏸ {item['id']} の範囲テストは {', '.join(verdict.culprits)} の変更で落ちました（手がかり {verdict.basis}）。取り消さずに待ちます"
+        )
         return
     item["status"] = FAILING
     item.pop("blocked_by", None)
@@ -171,8 +175,8 @@ def _run_once(path: pathlib.Path, state: dict[str, Any], items: list[dict[str, A
         runs = targets.verify_runs(state, item)
         key = targets.run_key(runs)
         if key not in results:
-            results[key] = _execute(path, state, runs, log_path(state, item["id"]))
-        _settle(state, item, results[key], marks)
+            results[key] = _run_scope(path, state, runs, verify_log(state, item["id"]))
+        _settle_item(state, item, results[key], marks)
     for culprit_id, check in marks.items():
         target = find_item(state, culprit_id, required=False)
         if target is None or target.get("status") not in (VERIFIED, IMPLEMENTED, FAILING):
@@ -197,7 +201,7 @@ def waiting(state: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
-def run(path: pathlib.Path, state: dict[str, Any], items: list[dict[str, Any]]) -> None:
+def judge_items(path: pathlib.Path, state: dict[str, Any], items: list[dict[str, Any]]) -> None:
     """項目を範囲テストで判定し、原因の項目が同じ回で片づいた巻き込まれた項目を走らせ直す（I5）。
 
     走らせ直すたびに対象は前の回の部分集合になるため、項目の数の回数の内で終わる。
@@ -216,7 +220,9 @@ def reason(item: dict[str, Any]) -> str:
     files = ", ".join(check.get("files") or [])
     if check.get("by_item"):
         tests = ", ".join((check.get("tests") or [])[:3])
-        return f"範囲テスト {check.get('suite')} で {check['by_item']} のテスト {tests} を落とし（{files or 'ファイル不明'}）、{STOP_REASON}"
+        return (
+            f"範囲テスト {check.get('suite')} で {check['by_item']} のテスト {tests} を落とし（{files or 'ファイル不明'}）、{STOP_REASON}"
+        )
     if check.get("kind") == ts.LINT and check.get("suite"):
         return f"静的解析 {check['suite']} が {files or 'ファイル不明'} で落ち、{STOP_REASON}"
     if check.get("kind") == ts.TEST and check.get("suite"):
