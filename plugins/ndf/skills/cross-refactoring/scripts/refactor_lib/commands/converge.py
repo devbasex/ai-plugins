@@ -259,6 +259,12 @@ def _whole_items(state: dict[str, Any], record: dict[str, Any]) -> list[dict[str
     return [i for i in live_items(state) if i["id"] in ids]
 
 
+def _rerun_plan(state: dict[str, Any], record: dict[str, Any]) -> tuple[Any, bool]:
+    """走らせ直すコマンドと、全体テストの上限を使うか。変更起因の suite が無ければ全体テストのコマンドで確かめる。"""
+    rerun = culprit.rerun_of(record)
+    return rerun or wholetest.whole_fallback_command(state), not rerun
+
+
 def _fix_or_narrow(
     path: pathlib.Path,
     state: dict[str, Any],
@@ -272,7 +278,7 @@ def _fix_or_narrow(
     全体テストのコマンドで確かめる。
     """
     items = _whole_items(state, record)
-    rerun = culprit.rerun_of(record) or wholetest.whole_fallback_command(state)
+    rerun, whole = _rerun_plan(state, record)
     if items and culprit.fixable(record) and not _fix_stop(state):
         for item in items:
             item["status"] = FAILING
@@ -280,7 +286,7 @@ def _fix_or_narrow(
             item["whole_test_command"] = [culprit.one_command(rerun)]
         info(f"🔧 変更起因の失敗を直しに回します（原因の項目 {len(items)} 件）")
         return True
-    narrow_log, whole = pathlib.Path(state["tmp_dir"]) / "verify-whole-narrow.log", not culprit.rerun_of(record)
+    narrow_log = pathlib.Path(state["tmp_dir"]) / "verify-whole-narrow.log"
     passed = culprit.narrow(path, state, record, STOP_REASON, lambda: targets.run_or_stop(path, state, rerun, narrow_log, whole=whole))
     info(f"↩ 原因の項目から順に取り消しました（{'落ちたテストが通った時点で止めた' if passed else '全件'}）。{plan_line(state)}")
     return False
@@ -293,8 +299,8 @@ def _recheck_whole(path: pathlib.Path, state: dict[str, Any], record: dict[str, 
         record["resolution"] = "narrowed"
         return False
     log = pathlib.Path(state["tmp_dir"]) / "verify-whole-rerun.log"
-    rerun = culprit.rerun_of(record) or wholetest.whole_fallback_command(state)
-    if targets.run_or_stop(path, state, rerun, log, whole=not culprit.rerun_of(record), phase="whole"):
+    rerun, whole = _rerun_plan(state, record)
+    if targets.run_or_stop(path, state, rerun, log, whole=whole, phase="whole"):
         record["resolution"] = "fixed"
         for item in items:
             item.pop("whole_test_command", None)
