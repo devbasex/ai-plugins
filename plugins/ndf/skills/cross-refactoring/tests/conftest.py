@@ -55,6 +55,7 @@ _MODULES = (
     "commands.plan",
     "commands.phases",
     "commands.propose",
+    "commands.reassign",
     "commands.report",
     "commands.setup",
     "commands.measure",
@@ -211,3 +212,6 @@ def _isolate_outside_world(tmp_path, monkeypatch):
     """
     monkeypatch.delenv("AI_GATEWAY_API_KEY", raising=False)
     monkeypatch.setenv("NDF_METRICS_DIR", str(tmp_path / "ndf-metrics"))
+    # 振り替えのアカウントの選び方（#919）が利用者の登録済みアカウントを読まない
+    monkeypatch.setenv("NDF_ACCOUNTS_DIR", str(tmp_path / "ndf-accounts"))
+    monkeypatch.delenv("NDF_CLAUDE_ACCOUNT", raising=False)

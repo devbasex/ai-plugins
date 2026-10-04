@@ -759,11 +759,12 @@ def _recheck_implementer(state: dict[str, Any]) -> None:
     担った者が途中で替わると、見積りの前提と、項目とコミットの対応を読む者が食い違う。
     """
     current = state.get("implementer")
-    if current in state["runtimes"]:
+    pool = {**state["participants"], "available": assignment.seats_pool(state["participants"]["available"], state.get("no_results") or [])}
+    if current in state["runtimes"] and current in pool["available"]:  # 結果なしの記録で外した担当（#919）は戻さない
         return
     if not _before_plan(state):
         die(f"実装担当 {current} が参加者から外れました。改修計画の後は実装担当を替えられません")
-    implementer, reason = _choose_implementer(state["participants"], str(state["host"]), state.get("implementer_named"))
+    implementer, reason = _choose_implementer(pool, str(state["host"]), state.get("implementer_named"))
     state.setdefault("resume_changes", []).append(
         {
             "at": statefile.now(),
@@ -772,7 +773,7 @@ def _recheck_implementer(state: dict[str, Any]) -> None:
             "to": f"{implementer}（{reason}）",
         }
     )
-    state["implementer"], state["implementer_reason"] = implementer, reason
+    state["implementer"], state["implementer_reason"], state["implementer_account"] = implementer, reason, ""
     state["implementer_model"] = models_lib.model_record((state.get("models") or {}).get(implementer))
     info(f"↻ 実装担当を {implementer} へ替えました（{reason}）")
 
