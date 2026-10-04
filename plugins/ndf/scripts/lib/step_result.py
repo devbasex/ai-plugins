@@ -26,6 +26,7 @@ from pathlib import Path
 
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
+import deps  # noqa: E402
 import proc  # noqa: E402
 
 # 子プロセスと git の起動は `proc` が持つ（#1142 の L0）。ここの名前は同じものを指す
@@ -45,6 +46,8 @@ EXIT_PRECONDITION = 3  # 前提が無い（宣言・認証・対象のファイ�
 # （立たない・変更なし・飛ばしてよい）。読めないときは 2 で返し、3 と混ぜない
 EXIT_GATE = 10  # 10〜19: 関門（人の同意が要る）
 EXIT_PAUSE = 20  # 20〜29: LLM の判断待ち
+# 依存の欠け（`deps.require` が外部パッケージを用意できずに止まった。何も判定していない）。値の持ち主は deps.py
+EXIT_DEPS_MISSING = deps.EXIT_DEPS_MISSING
 
 GATE_CODES = range(10, 20)
 PAUSE_CODES = range(20, 30)
@@ -60,7 +63,7 @@ def code_matches(status: str, code: int) -> bool:
         return code == EXIT_OK
     if status == "gate":
         return code in GATE_CODES or code in PAUSE_CODES
-    return code in (EXIT_VIOLATION, EXIT_UNREADABLE, EXIT_PRECONDITION)
+    return code in (EXIT_VIOLATION, EXIT_UNREADABLE, EXIT_PRECONDITION, EXIT_DEPS_MISSING)
 
 
 def _check_item_types(obj: dict, errs: list[str]) -> None:

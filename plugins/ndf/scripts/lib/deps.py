@@ -15,14 +15,19 @@
 
 1. 渡したグループのパッケージがすべて import できる → `NDF_DEPS_REEXEC` を環境から外して戻る（uv の環境の中で
    起動されたとき）。外すのは、子のプロセスが別のグループを要るときに起動し直せるようにするため
-2. 環境変数 `NDF_DEPS_REEXEC` が自分のスクリプトのパス → 起動し直したのに import できない。理由を出して終了コード 3。
+2. 環境変数 `NDF_DEPS_REEXEC` が自分のスクリプトのパス → 起動し直したのに import できない。理由を出して終了コード 69。
    印の値は起動し直したスクリプトのパスで、別のパス（印を外す前の版の親から継いだ `1` など）なら 3 へ進む
 3. uv が見つかる（`PATH`・`~/.local/bin`・`~/.cargo/bin`）→ `uv run --frozen --project <プラグインの根> --extra <グループ> ...
    python <パス> <引数>` で自分を起動し直す（`os.execve`）。環境は `UV_PROJECT_ENVIRONMENT` で
    `~/.cache/ndf/venv/<版>` に置く（`NDF_DEPS_VENV` で変えられる）。プラグインのキャッシュの中には作らない
 4. uv が無い → 版を固定した公式のインストーラで `~/.local/bin` へ入れ（`UV_NO_MODIFY_PATH=1`）、標準エラーに 1 行を
    出してから 3 へ進む。curl が無ければ `python3 -m pip install --user uv==<版>` を使う
-5. 入れられない（ネットワークが無い・権限が無い）→ 何が無いかと、手で入れるコマンドを出して終了コード 3
+5. 入れられない（ネットワークが無い・権限が無い）→ 何が無いかと、手で入れるコマンドを出して終了コード 69
+
+依存の欠け（2・5 と、`pyproject.toml` と `uv.lock` が無いとき）の終了コードは `EXIT_DEPS_MISSING`（69。`sysexits.h` の
+`EX_UNAVAILABLE`）で、値の持ち主はこのファイルだけである（#1654）。共通の契約の 3（前提が無い・飛ばしてよい）とは
+分け、supervise の `skip_code` に読ませない。`uv run` 自身が環境を作れないときは `os.execve` の後なので uv の終了コード
+（1）で終わる。
 
 hook とラッパーは `require()` を呼ばない（I13・決定 20）。ラッパー（`relay_lib/runtime.py`）は `find_uv`・`install_uv`・`venv_dir` だけを使う。
 """
@@ -58,7 +63,7 @@ GROUPS = {
     "terminal": ["ptyprocess"],
     "durable": ["dbos", "filelock"],
 }
-EXIT_PRECONDITION = 3
+EXIT_DEPS_MISSING = 69  # 依存の欠け（sysexits.h の EX_UNAVAILABLE）。共通の契約の 0〜3・10〜29 と重ねない
 REEXEC_ENV = "NDF_DEPS_REEXEC"
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 INSTALL_HINT = f"curl -LsSf https://astral.sh/uv/{UV_VERSION}/install.sh | sh"
@@ -66,7 +71,7 @@ INSTALL_HINT = f"curl -LsSf https://astral.sh/uv/{UV_VERSION}/install.sh | sh"
 
 def _stop(msg: str) -> NoReturn:
     print(f"❌ [ndf deps] {msg}", file=sys.stderr)
-    sys.exit(EXIT_PRECONDITION)
+    sys.exit(EXIT_DEPS_MISSING)
 
 
 def importable(group: str) -> bool:

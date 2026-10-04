@@ -40,6 +40,10 @@ PREPARE = {"install", "uninstall", "status", "startup", "stop", "account"}
 # hook の副命令が環境の無いときに返す終了コード（is-child の 1 は「ラッパーの直接の子でない」）
 PASS = {"mark": 0, "limit": 0, "question": 0, "is-child": 1, "notice": 0}
 MANIFEST = "MANIFEST"
+# ラッパーの環境を作れない・環境が無いときの終わり方。共通の契約の 3（前提が無い。`lib/step_result.py` の
+# `EXIT_PRECONDITION`）と同じ値で、依存の欠け（`deps.EXIT_DEPS_MISSING`）ではない。バージョンディレクトリは
+# `step_result.py` を持たない（`version_dir.LIB_FILES`）ため import せずに値を置く（#1654）
+EXIT_PRECONDITION = 3
 
 
 class EnvUnavailable(OSError):
@@ -128,7 +132,7 @@ def enter(argv: list[str], launcher: str, root: str = PKG_ROOT) -> int | None:
             python = sync(root if own else str(deps.PLUGIN_ROOT), venv, inexact=not own)
         except EnvUnavailable as e:
             print(f"ndf-relay: {e}", file=sys.stderr)
-            return deps.EXIT_PRECONDITION
+            return EXIT_PRECONDITION
         os.environ.pop(REEXEC_ENV, None)
         _reexec(python, launcher, argv)
     reason = f"ラッパーの環境（{venv}）が無い。/ndf:install-wrapper を打ち直す"
@@ -141,4 +145,4 @@ def enter(argv: list[str], launcher: str, root: str = PKG_ROOT) -> int | None:
             cl.passthrough(claude, argv[1:])
         return 127
     print(f"ndf-relay: {reason}", file=sys.stderr)
-    return deps.EXIT_PRECONDITION
+    return EXIT_PRECONDITION
