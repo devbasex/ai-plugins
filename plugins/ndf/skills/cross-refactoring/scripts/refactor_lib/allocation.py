@@ -5,6 +5,10 @@
 ごとに 1 ファイルに分ける。テストの所要はリポジトリで大きく違い、混ぜると見積りが
 外れる。
 
+履歴の行は 2 種類ある（#1385 決定 3）。`report` が最終ゲートを通った実行ごとに書く実行の行（`kind: run`）と、`init` が
+着手前のテストの後に成否を問わず書く着手前のテストの行（`kind: init_test`）である。配分テーブルは実行の行だけを集計し、
+着手前のテストの行は CI に任せる戦略の着手前の上限（範囲テストの所要）にだけ使う。`kind` を持たない旧い行は実行の行として読む。
+
 **根（`base`）は必ず引数で受ける。** ここで `run_metrics.metrics_dir()` を呼ぶと、
 テストが利用者の `~/.local/state` を読み書きする。根を決めるのは呼ぶ側である。
 """
@@ -28,8 +32,11 @@ DEFAULTS_PATH = pathlib.Path(__file__).resolve().parents[2] / "data" / "allocati
 # 遡れる（設計の「データ構造: 履歴と配分テーブル」）。
 WINDOW = 10
 
-# 履歴の行の形の版。形を変えたら上げる。
-ROW_SCHEMA = 1
+# 履歴の行の形の版。形を変えたら上げる。2 で `kind` と着手前のテストの行を足した（#1385）。
+ROW_SCHEMA = 2
+
+RUN_KIND = "run"
+INIT_TEST_KIND = "init_test"
 
 _STRUCTURE_PREFIX = "structure/"
 
@@ -69,6 +76,11 @@ def read_history(path: pathlib.Path) -> list[dict[str, Any]]:
         if isinstance(row, dict):
             rows.append(row)
     return rows
+
+
+def run_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """実行の行だけ。`kind` を持たない旧い行も実行の行として読む（I9）。"""
+    return [row for row in rows if row.get("kind", RUN_KIND) == RUN_KIND]
 
 
 def _num(value: Any) -> float:
@@ -135,6 +147,8 @@ def build_table(rows: list[dict[str, Any]], defaults: dict[str, float]) -> dict[
 
     def pick(value: Optional[float], name: str) -> float:
         return float(defaults[name]) if value is None else value
+
+    rows = run_rows(rows)
 
     kinds: dict[str, float] = {}
     names = sorted(
@@ -249,8 +263,10 @@ def build_row(state: dict[str, Any]) -> dict[str, Any]:
     verify = state.get("verify_stats") or {}
     fix = state.get("fix_stats") or {}
     whole = state.get("whole_test") or {}
+    baseline = state.get("baseline_test") or {}
     return {
         "schema": ROW_SCHEMA,
+        "kind": RUN_KIND,
         "run": _run_id(state),
         "at": at,
         # 状態は Pull Request の番号を `current_pr` に持つ。`pr` があればそちらを使う。
@@ -263,11 +279,52 @@ def build_row(state: dict[str, Any]) -> dict[str, Any]:
         "verify": {"items": verify.get("items", 0), "seconds": verify.get("seconds", 0)},
         "fix": {"launches": fix.get("launches", 0), "seconds": fix.get("seconds", 0)},
         "whole_test": {
-            "init": (state.get("baseline_test") or {}).get("seconds"),
+            # 全体テストを走らせたときだけ。範囲テストの秒を全体テストの所要として読ませない（#1385 決定 6）。
+            "init": baseline.get("seconds") if baseline.get("mode") != "scope" else None,
             "danger": whole.get("seconds") if whole.get("ran") else None,
             "final": (state.get("final_gate") or {}).get("whole_test_seconds"),
         },
     }
+
+
+def init_test_row(baseline: dict[str, Any], strategy: str, budget_minutes: Optional[int], pr: Optional[int]) -> dict[str, Any]:
+    """着手前のテストの行（`kind: init_test`）。打ち切りなら `seconds` は上限の秒（下限の実測）で `timed_out` が真。"""
+    mode = baseline.get("mode")
+    locations = baseline.get("locations") if mode == "scope" else None
+    return {
+        "schema": ROW_SCHEMA,
+        "kind": INIT_TEST_KIND,
+        "at": baseline.get("checked_at"),
+        "pr": pr,
+        "budget_minutes": budget_minutes,
+        "strategy": strategy,
+        "mode": mode,
+        "locations": sorted({str(p) for p in locations}) if locations is not None else None,
+        "seconds": baseline.get("seconds"),
+        "timed_out": bool(baseline.get("timed_out")),
+    }
+
+
+def scope_seconds(rows: list[dict[str, Any]], strategy: str, locations: list[str]) -> Optional[float]:
+    """同じ戦略・同じテストの置き場所の集合の着手前のテストの行のうち、直近 `WINDOW` 行の秒の最大（I7・決定 4）。
+    一致する行が無ければ `None`。`schema` が 2 未満の行と `kind` の無い行は使わない（I9）。"""
+    want = sorted({str(p) for p in locations or []})
+    if not want:
+        return None
+    values: list[float] = []
+    for row in rows:
+        if _num(row.get("schema")) < 2 or row.get("kind") != INIT_TEST_KIND:
+            continue
+        if row.get("strategy") != strategy or row.get("mode") != "scope":
+            continue
+        locs = row.get("locations")
+        if not isinstance(locs, list) or sorted({str(p) for p in locs}) != want:
+            continue
+        value = _num(row.get("seconds"))
+        if value > 0:
+            values.append(value)
+    values = values[-WINDOW:]
+    return max(values) if values else None
 
 
 def append_row(path: pathlib.Path, row: dict[str, Any]) -> None:

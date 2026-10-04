@@ -229,6 +229,8 @@ def test_carmo_limits_with_a_30_minute_budget():
         "x": 12.0,
         "strategy": "local-scoped-ci-whole",
         "unknown_duration": False,
+        "scope_seconds": None,
+        "scope_source": None,
     }
     assert ts.reserve_seconds(s, w, c, True) == (0.0, 360.0), "バッファに w を入れない"
 
@@ -521,3 +523,80 @@ def test_a_declared_whole_test_wins_over_the_template(kind):
     if kind == "lint":
         lints = [x.command for x in s.suites if x.kind == "lint" and x.command]
         assert lints == ["uvx --from shellcheck-py shellcheck -s bash images/redmine7/postresync.sh"]
+
+
+# --- #1555: CI に任せる戦略の着手前の上限は範囲テストの所要 s を下回らない -----------------------
+
+
+def _ci_strategy(paths=("plugins/ndf",)):
+    return ts.Strategy(
+        ts.LOCAL_SCOPED_CI_WHOLE,
+        "args",
+        [ts.Suite("unit", "pytest .", scope_command="pytest {paths}", paths=list(paths))],
+    )
+
+
+@pytest.mark.parametrize(
+    "scope_seconds, source, expected",
+    [
+        (320.0, "history", 960),  # AC7: max(0.10·B, 3·s)
+        (424.0, "whole", 1272),  # AC8: 置き場所が suite のパスを覆うときの w
+        (None, None, 180),  # AC9: 分からなければ 0.10·B のまま
+        (30.0, "history", 180),  # 3·s が 0.10·B を下回るなら 0.10·B
+    ],
+)
+def test_the_ci_strategy_init_limit_does_not_fall_below_the_scope_test(scope_seconds, source, expected):
+    got = ts.limits(_ci_strategy(), 30, whole_seconds_value=3827.0, scope_seconds=scope_seconds, scope_source=source)
+    assert got["init_test_timeout"] == expected
+    # AC10: 上限の入力に s と出所が残る
+    assert (got["basis"]["scope_seconds"], got["basis"]["scope_source"]) == (scope_seconds, source)
+
+
+def test_the_scope_test_does_not_change_the_other_limits():
+    """範囲テスト 1 回・全体テスト・CI の待ちの上限は s で変わらない（対象範囲の外）。"""
+    base = ts.limits(_ci_strategy(), 30, whole_seconds_value=3827.0, ci_seconds=360.0)
+    with_s = ts.limits(_ci_strategy(), 30, whole_seconds_value=3827.0, ci_seconds=360.0, scope_seconds=320.0, scope_source="history")
+    for key in ("test_timeout", "whole_timeout", "ci_wait_timeout"):
+        assert with_s[key] == base[key], key
+
+
+@pytest.mark.parametrize("name", [ts.LOCAL_FULL, ts.ROUND_ONLY])
+def test_other_strategies_ignore_the_scope_test(name):
+    """AC12: local-full / round-only は max(0.10·B, 3·w) のまま。s を渡しても使わない。"""
+    strategy = ts.Strategy(
+        name, "args", [ts.Suite("unit", "pytest .", paths=["."])], round_command="pytest ." if name == ts.ROUND_ONLY else None
+    )
+    assert ts.limits(strategy, 30, whole_seconds_value=424.0, scope_seconds=900.0, scope_source="history")["init_test_timeout"] == 1272
+    assert ts.limits(strategy, 30, scope_seconds=900.0, scope_source="history")["init_test_timeout"] == 180
+
+
+def test_supervise_limits_stay_the_same():
+    """AC12: 予算なし（supervise）の表は s を渡しても変わらず、basis の形も変えない。"""
+    plain = ts.limits(_ci_strategy(), None, whole_seconds_value=424.0, ci_seconds=60.0)
+    with_s = ts.limits(_ci_strategy(), None, whole_seconds_value=424.0, ci_seconds=60.0, scope_seconds=900.0, scope_source="history")
+    assert with_s == plain
+    assert "scope_seconds" not in plain["basis"]
+
+
+@pytest.mark.parametrize(
+    "paths, locations, expected",
+    [
+        (["plugins/ndf"], ["plugins/ndf"], True),
+        (["plugins/ndf/scripts", "plugins/ndf/skills"], ["plugins/ndf"], True),  # 祖先が覆う
+        (["plugins/ndf/scripts", "plugins/ndf/skills"], ["plugins/ndf/scripts"], False),  # 片方だけ
+        (["plugins/ndf"], ["plugins/ndf/scripts"], False),  # 子は親を覆わない
+        (["plugins/ndf"], ["./plugins/ndf/"], True),  # 正規化して比べる
+        (["."], ["plugins/ndf"], False),  # 全体は . の置き場所だけが覆う
+        (["."], ["."], True),
+        (["tests/*_test.py"], ["tests"], False),  # glob は接頭辞として読まない
+        (["tests/*_test.py"], ["."], True),
+        (["plugins/ndf"], [], False),
+    ],
+)
+def test_covers_whole(paths, locations, expected):
+    assert ts.covers_whole(_ci_strategy(paths), locations) is expected
+
+
+def test_covers_whole_needs_a_test_suite():
+    lint_only = ts.Strategy(ts.LOCAL_SCOPED_CI_WHOLE, "args", [ts.Suite("lint", "ruff .", paths=["."], kind=ts.LINT)])
+    assert ts.covers_whole(lint_only, ["."]) is False

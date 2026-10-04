@@ -121,9 +121,12 @@ def _round_reviewers(st: dict[str, Any], round_no: int) -> list[str]:
     | ---: | --- | --- |
     | 1 | ラウンドに `reviewers` がある | その値 |
     | 2 | `only` がある | `[only]` |
-    | 3 | `participants` がある | `assignment.review_seats(round_no, available, fallback)` |
+    | 3 | `participants` がある | `assignment.review_seats(round_no, available − 外した担当, fallback)` |
     | 4 | `host` がある | `assignment.review_seats(round_no, 全ランタイム − ホスト, [])`（#892 の前の母集合。変更前の輪番と同じ値） |
     | 5 | どれも無い（古い状態ファイル） | `LEGACY_AGENTS` |
+
+    順 3 は結果なしの記録（`no_results`。#919）の外した担当を引き、固定の組は `pinned_in_force` が
+    どちらかのランタイムを振り替えの元と読めば渡さない。席を選べなければ `AssignmentError`。
     """
     for entry in st.get("rounds") or []:
         if entry.get("round") == round_no and entry.get("reviewers"):
@@ -140,10 +143,11 @@ def _round_reviewers(st: dict[str, Any], round_no: int) -> list[str]:
         return [only]
     participants = st.get("participants")
     if participants:
-        pinned = (participants.get("policy") or {}).get("review_seats")
+        log = st.get("no_results") or []
+        pinned = assignment.pinned_in_force((participants.get("policy") or {}).get("review_seats"), log)
         return assignment.review_seats(
             max(round_no, 1),
-            list(participants.get("available") or []),
+            assignment.seats_pool(participants.get("available") or [], log),
             list(participants.get("fallback") or []),
             pinned=pinned,
         )
@@ -188,7 +192,7 @@ def _reselect_open_round(st: dict[str, Any]) -> None:
         return
     old = list(last["reviewers"])
     last["reviewers"] = _round_reviewers(st, int(last.get("round") or 1))
-    last["seats"] = seat_records(last["reviewers"])
+    last["seats"] = seat_records(last["reviewers"], round_accounts(st, last["reviewers"]))
     st.setdefault("resume_changes", []).append(
         {"at": statefile.now(), "field": f"round{last.get('round')}:reviewers", "from": old, "to": last["reviewers"]}
     )
@@ -197,18 +201,38 @@ def _reselect_open_round(st: dict[str, Any]) -> None:
     )
 
 
-def seat_records(reviewers: list[str]) -> list[dict[str, Any]]:
-    """ラウンドの席ごとの記録（席・ランタイム・モデル・組の相手）。モデルは `read-result` が埋める（#1598 の AC13）。"""
+def seat_records(reviewers: list[str], accounts: dict[str, str | None] | None = None) -> list[dict[str, Any]]:
+    """ラウンドの席ごとの記録（席・ランタイム・モデル・組の相手）。モデルは `read-result` が埋める（#1598 の AC13）。
+
+    `accounts` は席ごとの claude のアカウントの名前（#919）。名前のある席だけが `account` を持ち、無い席は
+    アカウントを選んでいない（起動した環境のまま）。"""
     pair = len(reviewers) == 2
-    return [
-        {
+    records = []
+    for i, seat in enumerate(reviewers):
+        rec: dict[str, Any] = {
             "seat": seat,
             "runtime": assignment.seat_runtime(seat),
             "model": None,
             "partner": reviewers[1 - i] if pair else None,
         }
-        for i, seat in enumerate(reviewers)
-    ]
+        account = (accounts or {}).get(seat)
+        if account:
+            rec["account"] = account
+        records.append(rec)
+    return records
+
+
+def round_accounts(st: dict[str, Any], reviewers: list[str]) -> dict[str, str | None]:
+    """新しいラウンドの席ごとの claude のアカウント。結果なしの記録の最後の振り替え先のアカウント（#919）。"""
+    account = assignment.current_account(st.get("no_results") or [], "claude", None)
+    if not account:
+        return {}
+    return {s: account for s in reviewers if assignment.SEAT_PATTERN.match(s) and assignment.seat_runtime(s) == "claude"}
+
+
+def seat_accounts(round_entry: dict[str, Any]) -> dict[str, str | None]:
+    """ラウンドの席の記録から、席ごとの claude のアカウントを引く。"""
+    return {rec["seat"]: rec.get("account") or None for rec in round_entry.get("seats") or [] if rec.get("seat")}
 
 
 # ---------- 参加者の引数と使える者の解決（#727） ----------

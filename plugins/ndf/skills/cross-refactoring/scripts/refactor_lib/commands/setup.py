@@ -27,7 +27,7 @@ import test_strategy as ts
 import tool_paths
 import worktree_deps
 
-from .. import ABORT, die, info
+from .. import ABORT, die, info, init_test
 from .. import baseline as baseline_lib
 from .. import ci_coverage
 from .. import runtime_decl
@@ -407,6 +407,9 @@ def cmd_init(args: argparse.Namespace) -> None:
 
     participants, baseline, round_record = _verify_init(args, inputs, prep)
     state = _save_initial_state(args, inputs, prep, participants, baseline, round_record, started_at)
+    # **手順の枠が想定最大時間に収まらなければ、提案者を起動せずに止める**（#1385 I4・決定 2）。状態は保存してあるため、
+    # 予算を広げて打ち直すと着手前のテストを走らせ直さずに続く。
+    init_test.stop_if_window_short(prep.state_file, state)
     # **出力は入口から直接呼ぶ。** 手順書の変数の出所のチェック
     # （`scripts/check-skill-shell-vars.py`）は `cmd_*` からヘルパーを 1 階層だけたどる。
     _emit_init(state)
@@ -575,14 +578,19 @@ def _verify_init(
     participants = resolve_participants(inputs.host, inputs.include or [], inputs.exclude or [], bool(getattr(args, "require_all", None)))
     _warn_unmeasurable_models(inputs.model_spec, participants["available"])
 
-    # 着手前のテストの上限は予算と宣言の所要から導く（決定 8）。
+    # 着手前のテストの上限は予算と宣言の所要から導く（決定 8）。CI に任せる戦略は範囲テストの所要 s も入れる（#1555）。
     w, w_source = ts.whole_seconds(prep.decl)
     c = ts.ci_wall_seconds(prep.decl, (prep.strategy.ci or {}).get("check") if prep.strategy.ci else None)
-    timeout = ts.limits(prep.strategy, int(args.budget_minutes), whole_seconds_value=w, whole_source=w_source, ci_seconds=c)[
-        "init_test_timeout"
-    ]
+    s, s_source = init_test.resolve_scope_seconds(prep, list(args.scope), w)
+    kw: dict[str, Any] = {"whole_seconds_value": w, "whole_source": w_source, "ci_seconds": c, "scope_seconds": s, "scope_source": s_source}
+    timeout = ts.limits(prep.strategy, int(args.budget_minutes), **kw)["init_test_timeout"]
+    if s is not None:
+        info(f"   着手前のテストの上限: {timeout} 秒（範囲テストの所要 {s} 秒 / {s_source}）")
     baseline = baseline_lib.run_baseline(prep.strategy, prep.work, timeout, list(args.scope), prep.tmp_dir)
-    baseline.update({"whole_seconds": w, "whole_source": w_source, "ci_seconds": c})
+    baseline.update({"whole_seconds": w, "whole_source": w_source, "ci_seconds": c, "scope_seconds": s, "scope_source": s_source})
+    init_test.append_init_test(prep, int(args.budget_minutes), args.pr, baseline)
+    if baseline.get("timed_out"):
+        init_test.abort_timed_out(prep.strategy, int(args.budget_minutes), baseline, timeout)
     return participants, baseline, baseline_lib.round_record(prep.strategy, baseline)
 
 
@@ -728,9 +736,13 @@ def _resume(
         _recheck_implementer(state)
 
     _apply_post_event(state, is_own_pr)
-    # **予算を置き換えたら上限の表を組み直す**（改修計画の前だけ。改修計画の後は表を変えない）。
+    # **予算を置き換えたら上限の表を組み直す**（改修計画の前だけ。改修計画の後は表を変えず、保存した期限で続ける）。
     if not state.get("plan"):
+        # 枠が収まらずに止めた後の打ち直しだけ、枠の起点を打ち直した時刻へずらす（#1385 I2・決定 2）。
+        if state.get("window_stopped_at"):
+            state["resumed_at"] = statefile.now()
         state["limits"] = timeline.of_state(state)
+        init_test.stop_if_window_short(state_file, state)
     statefile.save(state_file, state)
     _emit_init(state)
 
@@ -747,11 +759,12 @@ def _recheck_implementer(state: dict[str, Any]) -> None:
     担った者が途中で替わると、見積りの前提と、項目とコミットの対応を読む者が食い違う。
     """
     current = state.get("implementer")
-    if current in state["runtimes"]:
+    pool = {**state["participants"], "available": assignment.seats_pool(state["participants"]["available"], state.get("no_results") or [])}
+    if current in state["runtimes"] and current in pool["available"]:  # 結果なしの記録で外した担当（#919）は戻さない
         return
     if not _before_plan(state):
         die(f"実装担当 {current} が参加者から外れました。改修計画の後は実装担当を替えられません")
-    implementer, reason = _choose_implementer(state["participants"], str(state["host"]), state.get("implementer_named"))
+    implementer, reason = _choose_implementer(pool, str(state["host"]), state.get("implementer_named"))
     state.setdefault("resume_changes", []).append(
         {
             "at": statefile.now(),
@@ -760,7 +773,7 @@ def _recheck_implementer(state: dict[str, Any]) -> None:
             "to": f"{implementer}（{reason}）",
         }
     )
-    state["implementer"], state["implementer_reason"] = implementer, reason
+    state["implementer"], state["implementer_reason"], state["implementer_account"] = implementer, reason, ""
     state["implementer_model"] = models_lib.model_record((state.get("models") or {}).get(implementer))
     info(f"↻ 実装担当を {implementer} へ替えました（{reason}）")
 

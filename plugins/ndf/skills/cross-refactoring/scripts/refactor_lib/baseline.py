@@ -5,10 +5,13 @@
 全体テストは戦略に関わらず手元で走らせる（#1483 決定 7）。**落ちても止めない。** suite ごとの成否を
 `baseline_test.suites` に書き（最終ゲートの静的解析の判定に使う。I12）、落ちたテストは JUnit から読んで既存失敗として書く。
 最終ゲートは既存失敗の外で新しく落ちたテストが無ければ通る（I5）。起動の失敗なら止める（#1483 E7）。
+上限を超えたときは止めずに打ち切りの記録（`timed_out` が真、`seconds` は上限）を返し、`init` が履歴へ 1 行足してから
+止める（#1385 E9）。
 """
 
 from __future__ import annotations
 
+import os
 import pathlib
 import time
 from typing import Any
@@ -17,7 +20,7 @@ import statefile
 import test_strategy as ts
 import test_triage
 
-from . import ABORT, die, info, launch
+from . import info, launch
 from .gitfacts import run_with_timeout
 from .paths import git_out
 from .scope import test_locations
@@ -31,6 +34,13 @@ def _whole_runs(strategy: ts.Strategy, kind: Any = None) -> list[ts.ScopeRun]:
     return [ts.ScopeRun("round", strategy.round_kind, c) for c in strategy.whole_commands(kind)]
 
 
+def locations_of(strategy: ts.Strategy, scope: list[str], work: pathlib.Path) -> list[str]:
+    """CI に任せる戦略で着手前に走らせる範囲テストのテストの置き場所（正規化して並べ替えた集合）。ほかの戦略は空。"""
+    if not strategy.whole_on_ci or strategy.name == ts.ROUND_ONLY:
+        return []
+    return sorted({os.path.normpath(str(p)) for p in test_locations(scope, str(work))})
+
+
 def commands_of(strategy: ts.Strategy, scope: list[str], work: pathlib.Path) -> tuple[str, list[ts.ScopeRun]]:
     """着手前に走らせるもの。`(mode, 範囲テストか全体テストの並び)`。mode は `whole` / `scope` / `round`。"""
     if strategy.name == ts.ROUND_ONLY:
@@ -41,7 +51,7 @@ def commands_of(strategy: ts.Strategy, scope: list[str], work: pathlib.Path) -> 
             runs.append(ts.ScopeRun("round", strategy.round_kind, strategy.round_command))
         return "round", runs
     if strategy.whole_on_ci:
-        locations = test_locations(scope, str(work))
+        locations = locations_of(strategy, scope, work)
         runs = ts.scope_runs(strategy, locations, []) if locations else []
         return "scope", runs + _whole_runs(strategy, ts.LINT)
     return "whole", _whole_runs(strategy)
@@ -49,8 +59,8 @@ def commands_of(strategy: ts.Strategy, scope: list[str], work: pathlib.Path) -> 
 
 def _run_suites(
     runs: list[ts.ScopeRun], mode: str, timeout: int, started: float, work: pathlib.Path, tmp_dir: pathlib.Path
-) -> tuple[str, dict[str, str]]:
-    """runs を走らせて `(テストの成否, suite ごとの成否)` を返す。上限を超えたときと起動の失敗のときは止める。"""
+) -> tuple[str, dict[str, str], bool]:
+    """runs を走らせて `(テストの成否, suite ごとの成否, 打ち切ったか)` を返す。上限を超えたらそこで打ち切り、起動の失敗のときは止める。"""
     status = "green"
     suites: dict[str, str] = {}
     for i, run in enumerate(runs):
@@ -61,15 +71,15 @@ def _run_suites(
         )
         result = ts.outcome(code, timed_out)
         if result.status == ts.TIMED_OUT:
-            die(f"着手前のテストが {timeout} 秒で終わりませんでした（{run.command}）。打ち切りました")
-            raise SystemExit(ABORT)
+            info(f"⚠ 着手前のテストが {timeout} 秒で終わりませんでした（{run.command}）。打ち切りました")
+            return status, suites, True
         if result.launch_failed:
             launch.stop(None, {}, "baseline", run.command, result, log)
         passed = result.status == ts.PASSED
         suites[run.suite] = "green" if passed and suites.get(run.suite) != "red" else "red"
         if not passed and run.kind == ts.TEST:
             status = "red"
-    return status, suites
+    return status, suites, False
 
 
 def _report_baseline(record: dict[str, Any], runs: list[ts.ScopeRun], lint_red: list[str], seconds: float, mode: str) -> None:
@@ -88,14 +98,18 @@ def _report_baseline(record: dict[str, Any], runs: list[ts.ScopeRun], lint_red: 
 
 
 def run_baseline(strategy: ts.Strategy, work: pathlib.Path, timeout: int, scope: list[str], tmp_dir: pathlib.Path) -> dict[str, Any]:
-    """着手前のテストを戦略に沿って実行して記録する。上限を超えたときと起動の失敗のときだけ止める。"""
+    """着手前のテストを戦略に沿って実行して記録する。起動の失敗のときだけ止める。
+
+    上限を超えたら打ち切りの記録（`timed_out` が真、`seconds` は上限の秒）を返す。止めるのは呼び手（`init`）。"""
     mode, runs = commands_of(strategy, scope, work)
     test_triage.clear_junit(str(work), strategy)
     started = time.monotonic()
-    status, suites = _run_suites(runs, mode, timeout, started, work, tmp_dir)
-    seconds = round(time.monotonic() - started, 1)
+    status, suites, timed_out = _run_suites(runs, mode, timeout, started, work, tmp_dir)
+    seconds = float(timeout) if timed_out else round(time.monotonic() - started, 1)
     record: dict[str, Any] = {
         "mode": mode,
+        "locations": locations_of(strategy, scope, work) if mode == "scope" else None,
+        "timed_out": timed_out,
         "command": " && ".join(r.command for r in runs) or None,
         "status": status,
         "suites": suites,
@@ -106,6 +120,8 @@ def run_baseline(strategy: ts.Strategy, work: pathlib.Path, timeout: int, scope:
         "existing_failures": [],
         "existing_failures_reason": None,
     }
+    if timed_out:
+        return record
     lint_red = sorted(r.suite for r in runs if r.kind == ts.LINT and suites.get(r.suite) == "red")
     if status == "red":
         record["existing_failures"], record["existing_failures_reason"] = test_triage.read_junit(str(work), strategy)

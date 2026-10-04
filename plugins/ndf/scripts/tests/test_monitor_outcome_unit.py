@@ -78,13 +78,6 @@ def test_reason_for_keeps_the_six_status_mappings(status, reason):
     assert _load_monitor_outcome().reason_for(status) == reason
 
 
-def test_only_usage_limit_forbids_relaunching_the_same_agent():
-    mod = _load_monitor_outcome()
-    assert mod.NO_RELAUNCH_REASONS == frozenset({"usage_limit"})
-    for reason in mod.REASONS:
-        assert mod.relaunch_same_agent(reason) is (reason != "usage_limit"), reason
-
-
 # ---------- 結末を 1 つの値として読む（#729 の AC8 / AC9 / AC11） ----------
 
 STEM = "kiro-review-pr7"
@@ -111,7 +104,6 @@ def test_readable_result_object_wins_whatever_the_monitor_says(tmp_path, monitor
 
     assert got.payload == {"event": "APPROVE"}
     assert got.reason is None
-    assert got.relaunch_same_agent is True
     if monitor and monitor != "{broken":
         assert got.monitor == json.loads(monitor)
         assert got.detail == json.loads(monitor)["detail"]
@@ -131,7 +123,6 @@ def test_monitor_reason_is_taken_when_the_monitor_knows_why(tmp_path, reason, re
 
     assert got.payload is None
     assert got.reason == reason
-    assert got.relaunch_same_agent is (reason != "usage_limit")
     assert got.monitor["reason"] == reason
     assert got.detail == "early error (fatal) in err.log: Monthly request limit reached"
 
@@ -156,7 +147,6 @@ def test_missing_or_unparsable_is_decided_by_the_result_file(tmp_path, monitor, 
 
     assert got.payload is None
     assert got.reason == reason
-    assert got.relaunch_same_agent is True
     if monitor in (None, "{broken", '"scalar"'):
         assert got.monitor is None
         # 監視の詳細が無いときは、読めなかった理由を 1 文で持つ

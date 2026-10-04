@@ -41,6 +41,8 @@ if path.startswith(R + "actions/runs?"):
 if path.startswith(R + "actions/runs/7/jobs"):
     steps = [{{"name": "Run phpunit", "started_at": "2026-09-01T00:01:00Z", "completed_at": "2026-09-01T00:05:00Z"}},
              {{"name": "Check out latest", "started_at": "2026-09-01T00:00:00Z", "completed_at": "2026-09-01T00:01:00Z"}}]
+    if os.environ.get("FAKE_GH_SKIP"):
+        out({{"jobs": [{{"steps": steps, "conclusion": "success"}}, {{"steps": [], "conclusion": "skipped"}}]}})
     out({{"jobs": [{{"steps": steps}}] * 3}})
 if path.startswith(R + "actions/runs/7/artifacts"):
     out({{"artifacts": [{{"id": 9, "name": "junit-1", "size_in_bytes": 100}}, {{"id": 10, "name": "coverage", "size_in_bytes": 100}}]}})
@@ -257,6 +259,21 @@ def test_ndf_record_is_listed_as_a_source(plain, env, tmp_path):
     ]
 
 
+def test_ndf_record_skips_the_init_test_rows_and_scope_runs(plain, env, tmp_path):
+    """#1385 I8: 着手前のテストの行（kind: init_test）と、範囲テストだけを走らせた実行の行（init が null）を数えない。"""
+    rec = Path(env["NDF_METRICS_DIR"]) / "acme--app" / "cross-refactoring-allocation.jsonl"
+    rec.parent.mkdir(parents=True)
+    rows = [{"whole_test": {"init": s}} for s in (130, 140.2, 150)]
+    rows += [{"schema": 2, "kind": "init_test", "mode": "scope", "seconds": 900.0}] * 3
+    rows += [{"schema": 2, "kind": "run", "whole_test": {"init": None}}]
+    rec.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    env["FAKE_GH_MODE"] = "fail"
+    _, m = measure(env, plain, tmp_path)
+    assert m["items"]["test_duration"]["value"]["measured"] == [
+        {"seconds": 140.2, "source": "ndf-record", "detail": "NDF の実行の記録の直近 3 件の中央値"}
+    ]
+
+
 # --- AC4・I8: 新しい宣言では解析しない ------------------------------------------------
 
 
@@ -382,6 +399,35 @@ def test_unknown_does_not_replace_previous_analysis_value(laravel, env, tmp_path
     assert decl(laravel)["ci"] == ci
     row = next(i for i in out["items"] if i["key"] == "ci")
     assert row["kind"] == "unknown" and row["kept_previous"] is True
+
+
+def test_workflow_wall_is_kept_when_the_new_analysis_has_only_skipped_runs(laravel, env, tmp_path):
+    """#1664 の AC3・AC7・I6: 飛ばした run しか無いワークフローは、前の解析の壁時計を残し、注記と出力の行に出る。"""
+    analyze(env, laravel, tmp_path, LARAVEL_ANSWERS)
+    path = ".github/workflows/test.yml"
+    assert next(w for w in decl(laravel)["ci"]["workflows"] if w["path"] == path)["wall_seconds"] == 390.0
+    env["FAKE_GH_SKIP"] = "1"
+    code, out, text, m = analyze(env, laravel, tmp_path, LARAVEL_ANSWERS)
+    assert code == 0, text
+    assert f"飛ばしていない run が無い: {path}（候補 1 件）" in m["notes"]
+    measured = m["items"]["ci"]["value"]["workflows"]
+    assert "wall_seconds" not in next(w for w in measured if w["path"] == path)
+    assert next(w for w in decl(laravel)["ci"]["workflows"] if w["path"] == path)["wall_seconds"] == 390.0
+    row = next(i for i in out["items"] if i["key"] == f"ci#{path}")
+    assert row["kind"] == "unknown" and row["kept_previous"] is True
+    assert "前の値を残した" in text
+
+
+def test_carry_walls_only_fills_the_same_path_of_an_analysis_value():
+    """#1664 の I6: 同じパスの前の壁時計だけを引き継ぎ、手で書いた値（指紋が違う）には触らない。"""
+    merge = _project_lib("merge")
+    cur = {"provider": "github-actions", "workflows": [{"path": "a.yml", "jobs": 1, "wall_seconds": 500.0}], "required_checks": []}
+    new = {"provider": "github-actions", "workflows": [{"path": "a.yml", "jobs": 1}, {"path": "b.yml", "jobs": 1}], "required_checks": []}
+    value, rows, ours = merge.merge_item("ci", cur, True, new, "測った", {"ci": merge.value_digest(cur)})
+    assert ours and value["workflows"] == [{"path": "a.yml", "jobs": 1, "wall_seconds": 500.0}, {"path": "b.yml", "jobs": 1}]
+    assert [r["key"] for r in rows if r.get("kept_previous")] == ["ci#a.yml"]
+    value, rows, ours = merge.merge_item("ci", cur, True, new, "測った", {})
+    assert not ours and value == cur and rows[0]["kind"] == "mismatch"
 
 
 # --- I4: 値と不明の両方を持つ項目を拒む -----------------------------------------------------

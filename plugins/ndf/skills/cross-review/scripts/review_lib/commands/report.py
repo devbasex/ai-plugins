@@ -13,6 +13,7 @@ import sys
 from typing import Any
 
 import review_lib  # noqa: E402
+import assignment  # noqa: E402
 import mdtable  # noqa: E402  使う側（state.py）が deps.require("mdtable") を先に呼ぶ
 import run_metrics  # noqa: E402
 from review_lib import github, participants as participants_mod, posts, store  # noqa: E402
@@ -180,6 +181,7 @@ def _print_participants(st: dict) -> None:
     print(f"- --include で足した者: {_names(p.get('included'))}")
     print(f"- 確認を通らなかった者: {failed}")
     print(f"- 席の埋め合わせ: {_names(p.get('fallback'))}")
+    _print_reassigned(st)
 
     changes = st.get("resume_changes") or []
     if not changes:
@@ -189,6 +191,20 @@ def _print_participants(st: dict) -> None:
         for c in changes:
             print(f"  - {c.get('at')} {c.get('field')}: {_resume_value(c.get('from'))} → {_resume_value(c.get('to'))}")
     print()
+
+
+def _print_reassigned(st: dict) -> None:
+    """結果なしの記録（`no_results`。#919）の振り替えと中断を 1 行ずつ、外した担当を 1 行。記録が無ければ出さない。"""
+    rows = [e for e in st.get("no_results") or [] if e.get("decision") in (assignment.REASSIGN, assignment.ABORT)]
+    if not rows:
+        return
+    print("- 振り替え:")
+    for e in rows:
+        src = assignment.Assignee(e.get("seat") or "", e.get("account") or None).label()
+        dst = assignment.Assignee(e["to"], e.get("to_account") or None).label() if e.get("to") else "なし（中断）"
+        print(f"  - round {e.get('attempt')}: {src} → {dst}（{e.get('reason')}）")
+    gone = sorted(assignment.excluded_runtimes(st.get("no_results") or []))
+    print(f"- 外した担当: {', '.join(gone) or 'なし'}")
 
 
 def _resume_value(value: object) -> str:

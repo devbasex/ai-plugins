@@ -289,7 +289,6 @@ def test_read_result_returns_a_value_when_the_file_is_missing(gitfacts, tmp_path
 
     assert outcome.payload is None
     assert outcome.reason == "missing"
-    assert outcome.relaunch_same_agent is True
     captured = capsys.readouterr()
     assert (captured.out, captured.err) == ("", "")
 

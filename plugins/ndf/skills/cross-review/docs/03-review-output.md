@@ -140,8 +140,9 @@ PR メタデータ系の check（Assignees / Reviewers / Labels）は **継続**
 | `$TMP_DIR/monitor-outcomes.jsonl` | 起動ごとに 1 行が追記だけで積まれる。起動し直した担当の **1 回目の理由**はここに残る（`<stem>-monitor.json` は 2 回目で上書きされる）。`reason` と `ended_at` で並べて読む |
 | 状態ファイルの `rounds[-1].<agent>.no_result_reason` / `monitor_detail` | `read-result` が写した値。`state.py report` のラウンド表には `<agent>=NO_RESULT(<理由>)` の形で出る |
 
-`usage_limit` は起動し直しても解けないため、判定は同じラウンドで起動し直さず終了コード 1
-で終える。枠が戻るまで待つか、その担当を外して回すかはオーケストレーターが決める。
+`usage_limit` は起動し直しても解けないため、判定は同じラウンドで起動し直さず、claude なら登録済みの別のアカウント、
+それ以外は残りの参加者へ振り替える。振り替え先が無いときだけ終了コード 1 で終える。誰へ振り替えたかは状態ファイルの
+`no_results` と完了報告の「振り替え」の行に残る（[01-state-and-review.md](01-state-and-review.md) の「結果を残さなかったレビュアーの扱い」）。
 - ❌ **fix サブエージェントが Resolve をスキップ** — reply だけでは未対応扱い。Resolve まで実行
 - ❌ **review body に identifier prefix を付け忘れる** — GitHub UI 上で誰のレビューか不明になる
 
