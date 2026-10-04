@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """drive.py: cross-review の収束ループを、LLM の判断が要る地点まで進めて止まる。
 
-    drive.py <PR> [--rotate-mode light|squash] [--reopen] [state.py init の引数...]
+    drive.py <PR> [--rotate-mode light|squash] [--reopen] [--result-file PATH] [state.py init の引数...]
 
 init → ラウンド（起動・監視・取り込み・根拠の検証・判定）→ 振動の検知 → 修正 → 巻き直し →
 最終スイープ → 検証 → 報告を順に進める。LLM が要る地点（fix / sweep / newtext）で止まる。
@@ -14,8 +14,7 @@ init → ラウンド（起動・監視・取り込み・根拠の検証・判�
 
 止まるときの JSON の形と終了コードの表は `scripts/lib/drive_pause.py` にある。
 
-件数（metrics）は状態ファイルから数える: rounds / prs / findings / fixed / deferred / rejected /
-unresolved / final / review_status。
+件数（metrics）は状態ファイルから数える: rounds / prs / findings / fixed / deferred / rejected / unresolved / final / review_status。
 """
 
 from __future__ import annotations
@@ -37,7 +36,7 @@ import drive_pause as dp  # noqa: E402
 import durable  # noqa: E402
 import step_result as sr  # noqa: E402
 from drive_pause import Stop  # noqa: E402
-from loop_drive import call, durable_identity, keep_finished, parse_vars, review_status  # noqa: E402,F401  テストは `call` をこのモジュールの上で差し替える
+from loop_drive import call, durable_identity, keep_finished, parse_vars, review_status, write_review_answer  # noqa: E402,F401  テストは `call` をこのモジュールの上で差し替える
 
 TOOL = "cross-review-drive"
 DOCS02 = SKILL / "docs" / "02-fix-and-rotation.md"
@@ -481,12 +480,15 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("pr", type=int)
     ap.add_argument("--rotate-mode", choices=["light", "squash"], default="light")
     ap.add_argument("--reopen", action="store_true", help="差分を足さずに、終わった収束ループへラウンドを足す")
+    ap.add_argument("--result-file", help="ok で終わったとき最終ステータスを書く回答ファイル（loop_drive.write_review_answer。#1656）")
     a, rest = ap.parse_known_args(argv)
     d = Drive(a.pr, a.rotate_mode, rest, reopen=a.reopen)
     try:
         out, code = d.run()
     except (Stop, durable.DurableError) as e:
         out, code = dp.stopped(TOOL, str(e), {}, getattr(e, "code", 1)), dp.EXIT_STOPPED
+    if a.result_file:
+        write_review_answer(Path(a.result_file), out)
     try:
         sr.emit(out, code)
     except SystemExit as e:

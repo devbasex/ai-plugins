@@ -1726,3 +1726,26 @@ def test_init_keeps_going_when_the_ci_cannot_be_compared(run_init, tmp_path, ori
     assert "突き合わせられませんでした（ci が無い）" in capsys.readouterr().err
     _, state = _state_of(tmp_path)
     assert state["ci_coverage"]["status"] == "skipped"
+
+
+def test_init_takes_the_pull_request_of_the_repository_it_is_run_in(refactor, patch_lib, tmp_path, monkeypatch):
+    """AC3（#1655）: ai-plugins の外のリポジトリの中（下位のディレクトリを含む）で打つと、そのリポジトリの PR を取る。"""
+    repo = tmp_path / "sample"
+    (repo / "src").mkdir(parents=True)
+    _git("init", "-q", cwd=repo)
+    _git("remote", "add", "origin", "https://github.com/example/sample.git", cwd=repo)
+    asked: list[list[str]] = []
+
+    def fake_sh(cmd, cwd=None, check=True):
+        asked.append(cmd)
+        if cmd[:3] == ["gh", "api", "user"]:
+            return "me"
+        if cmd == ["gh", "api", "repos/example/sample/pulls/12"]:
+            return json.dumps({"number": 12, "user": {"login": "me"}, "head": {"ref": "feat/x"}, "base": {"ref": "main"}})
+        raise AssertionError(f"想定外の呼び出し: {cmd}")
+
+    patch_lib("sh", fake_sh)
+    monkeypatch.chdir(repo / "src")
+    setup = sys.modules["refactor_lib.commands.setup"]
+    assert setup._fetch_pr_context(12) == ("example/sample", "main", "feat/x", True, "me")
+    assert not any("nameWithOwner" in c for c in asked)

@@ -4,7 +4,8 @@
 
 ## 駆動の準備
 
-この Skill のディレクトリの解決と、副コマンドを呼ぶ `rf` / `rf_eval` の定義は SKILL.md の
+スクリプトの位置は SKILL.md の「前提」の入口のブロック（解決の入口 `resolve.sh` が返す絶対パス）で求め、
+対象のリポジトリの中から打つ。Skill のディレクトリへは移らない。副コマンドを呼ぶ `rf` / `rf_eval` の定義は SKILL.md の
 「実行」の先頭にある。**出力を `eval` する呼び出し**（`init` / `start-phase` / `merge-plan` /
 `merge-implement` / `verify` / `final-gate`）は `rf_eval` を使う。`eval "$(rf ...)"` と
 書くと `rf` はコマンド置換のサブシェルで動くため、`exit 4` はサブシェルしか終わらせず、

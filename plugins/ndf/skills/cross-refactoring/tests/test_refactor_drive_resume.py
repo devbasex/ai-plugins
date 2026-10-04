@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -148,6 +149,59 @@ def test_rerun_without_the_result_pauses_again_with_a_larger_number(tmp_path, mo
     code, out = run_main(ARGV, capsys)
     assert code == 0 and out["metrics"]["review_status"] == "approved"
     assert fake.inits() == 1 and not (tmp_path / "drive-rf7.json").exists()
+
+
+def _repo_with_subdir(tmp_path: Path) -> tuple[Path, Path]:
+    """ai-plugins の外の git リポジトリと、その下位のディレクトリ（Skill のディレクトリにあたる）。"""
+    repo = tmp_path / "sample"
+    sub = repo / "skills" / "cross-refactoring"
+    sub.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    return repo.resolve(), sub
+
+
+def test_the_final_gate_names_the_target_repository_and_the_answer_file(tmp_path, monkeypatch, capsys):
+    """AC5・AC12（#1655）: 最終ゲートの止まりは cross-review の駆動を打つ場所（対象のリポジトリの根）と回答ファイルの引数を示す。"""
+    monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path))
+    repo, sub = _repo_with_subdir(tmp_path)
+    monkeypatch.chdir(sub)
+    monkeypatch.setattr(rf, "call", FakeRefactor(tmp_path, gate="cross-review"))
+    code, out = run_main(ARGV, capsys)
+    item = out["items"][0]
+    assert code == 23 and item["cwd"] == str(repo)
+    words = shlex.split(item["command"])
+    assert words[words.index("--result-file") + 1] == item["result_file"]
+    prompt = Path(item["prompt_file"]).read_text()
+    assert str(repo) in prompt and item["command"] in prompt
+
+
+def test_an_unverified_answer_is_finalized_as_unverified(tmp_path, monkeypatch, capsys):
+    """AC8（#1656）: 回答が unverified なら、finalize へそのまま渡し、結果の review_status も unverified。"""
+    monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path))
+    fake = FakeRefactor(tmp_path, gate="cross-review")
+    monkeypatch.setattr(rf, "call", fake)
+    code, out = run_main(ARGV, capsys)
+    assert code == 23
+    Path(out["items"][0]["result_file"]).write_text('{"review_status": "unverified"}')
+    code, out = run_main(ARGV, capsys)
+    assert code == 0 and out["metrics"]["review_status"] == "unverified"
+    assert ("refactor.py", "finalize", "7", "--review-status", "unverified") in fake.calls
+
+
+def test_outside_a_repository_the_drive_stops_before_anything_runs(tmp_path, monkeypatch, capsys):
+    """AC4（#1655）: git の作業ツリーでない場所で打つと、子を打たずに中断し（metrics.exit 2）、耐久の記録を開かない。"""
+    nogit = tmp_path / "nogit"
+    nogit.mkdir()
+    monkeypatch.chdir(nogit)
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path))
+    fake = FakeRefactor(tmp_path)
+    monkeypatch.setattr(rf, "call", fake)
+    rf.durable.close()
+    code, out = run_main(ARGV, capsys)
+    assert (code, out["status"], out["metrics"]["exit"]) == (1, "stopped", 2)
+    assert "対象のリポジトリを決められない" in out["summary"]
+    assert fake.calls == [] and rf.durable.launched() is None
 
 
 # 別のプロセスで drive.py の main を打つ。偽物の refactor.py は状態ファイルを読み直し、呼び出しをファイルへ残す

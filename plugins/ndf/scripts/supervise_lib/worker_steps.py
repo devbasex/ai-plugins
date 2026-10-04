@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 
 import gh_rest
+from loop_drive import review_answer
 from supervise_lib import paths
 from supervise_lib.claude import TAIL, WORK_TOOLS, run_ticking
 from supervise_lib.prompts import FULL_SYSTEM, PROGRESS_PROMPT, REPORT_DONE, REPORT_NOT_DONE, RESUME_PROMPT, WORK_SYSTEM, WORKDIR_PROMPT
@@ -171,7 +172,7 @@ class DriveStep:
                 texts.append(sub_text)
                 if not ok:
                     return False, sub, "\n".join(texts) + f"\n{kind} の駆動が止まった"
-                res_file.write_text(json.dumps({"review_status": (sub.get("metrics") or {}).get("review_status") or "unknown"}))
+                res_file.write_text(json.dumps(review_answer(sub.get("metrics"))))
                 continue
             pf = item.get("prompt_file")
             if not pf or not Path(pf).is_file():

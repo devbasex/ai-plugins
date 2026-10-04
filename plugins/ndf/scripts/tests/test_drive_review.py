@@ -292,3 +292,60 @@ def test_the_sweep_keeps_the_search_without_a_declaration(tmp_path):
     """AC20 — 宣言が無ければ、検証のコマンドの段落を足さない（今の探し方のまま）。"""
     prompt = _sweep_prompt(tmp_path, None)
     assert "Step 7.5 の探し方は使わない" not in prompt and ".ndf/project.json の test" not in prompt
+
+
+# --- cross-review の回答ファイル（--result-file。#1655 #1656） ---------------------------------
+
+
+class FakeEnding(FakeReview):
+    """判定がすぐ通り、スイープの検証が `final` と `sweep` を与えた形にする。"""
+
+    def __init__(self, tmp: Path, final: str, sweep: dict):
+        super().__init__(tmp, judges=[0])
+        self.final_state, self.sweep_state = final, sweep
+
+    def __call__(self, cmd, env=None, cwd=None):
+        name = Path(cmd[1]).name if cmd[0] in (PY, "bash") else cmd[0]
+        if name == "state.py" and cmd[2] == "verify-sweep":
+            self.calls.append((name, *cmd[2:]))
+            self.state.update(final=self.final_state, sweep=self.sweep_state)
+            self.save()
+            return 0, ""
+        return super().__call__(cmd, env, cwd)
+
+
+@pytest.mark.parametrize(
+    ("final", "sweep", "want"),
+    [
+        ("approved", {"verified": True, "remaining_open": 0, "commit": None}, "approved"),
+        ("approved", {"verified": False, "remaining_open": 0, "commit": None}, "unverified"),
+        ("approved", {"verified": True, "remaining_open": 0, "commit": "abc"}, "unverified"),
+        ("max_rounds", {"verified": True, "remaining_open": 0, "commit": None}, "max_rounds"),
+    ],
+    ids=["a-approved", "b-unverified-sweep", "c-sweep-commit", "d-max-rounds"],
+)
+def test_the_answer_file_holds_the_review_status_of_the_state(tmp_path, monkeypatch, capsys, final, sweep, want):
+    """AC6: 回答ファイルの値は終わった状態の `review_status()` と一致する。gate では書かず、init へは渡さない。"""
+    fake = FakeEnding(tmp_path, final, sweep)
+    monkeypatch.setattr(cr, "call", fake)
+    answer = tmp_path / "answer.json"
+    argv = ["5", "--result-file", str(answer)]
+    code, out = run_main(cr, argv, capsys)
+    assert code == 21 and not answer.exists()  # 止まり（gate）では書かない
+    assert ("state.py", "init", "5") in fake.calls
+    Path(out["items"][0]["result_file"]).write_text("{}")
+    code, out = run_main(cr, argv, capsys)
+    assert code == 0 and out["metrics"]["review_status"] == want
+    assert json.loads(answer.read_text()) == {"review_status": want}
+    assert json.loads(answer.read_text())["review_status"] == cr.review_status(fake.state)
+    # 終わった収束ループを打ち直すと記録した結果を返し、その経路でも書く
+    answer.unlink()
+    code, out = run_main(cr, argv, capsys)
+    assert code == 0 and json.loads(answer.read_text()) == {"review_status": want}
+
+
+def test_a_stopped_drive_writes_no_answer(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cr, "call", lambda cmd, env=None, cwd=None: (3, ""))
+    answer = tmp_path / "answer.json"
+    code, out = run_main(cr, ["5", "--result-file", str(answer)], capsys)
+    assert code == 1 and out["status"] == "stopped" and not answer.exists()

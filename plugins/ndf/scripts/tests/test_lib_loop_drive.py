@@ -47,8 +47,23 @@ def test_same_behavior_as_both_drives(path):
     drive = load(path)
     text = "A=1 B='x y'\nnot-an-id=3\n"
     assert drive.parse_vars(text) == loop_drive.parse_vars(text)
+    if not hasattr(drive, "review_status"):
+        return  # cross-refactoring の駆動は最終ステータスを決めない（cross-review の駆動が回答ファイルへ書く。#1656）
     for state in ({"final": "approved"}, {"final": "approved", "sweep": {"verified": True}}, {}):
         assert drive.review_status(state) == loop_drive.review_status(state)
+
+
+@pytest.mark.parametrize(
+    ("metrics", "want"),
+    [
+        ({"review_status": "unverified", "rounds": 2}, {"review_status": "unverified"}),
+        ({}, {"review_status": "unknown"}),
+        (None, {"review_status": "unknown"}),
+    ],
+)
+def test_review_answer_has_only_the_review_status(metrics, want):
+    """回答ファイルの形は `{"review_status": ...}` だけで、値が無ければ unknown（#1655 の I2）。"""
+    assert loop_drive.review_answer(metrics) == want
 
 
 def test_call_returns_code_and_stdout_and_passes_stderr(capsys):

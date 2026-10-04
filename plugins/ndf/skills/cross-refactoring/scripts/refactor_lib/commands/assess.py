@@ -6,9 +6,11 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 
+import proc
+
+from .. import paths
 from ..gitfacts import production_code_changes
 
 DEFAULT_MAX_LINES = 10
@@ -21,14 +23,19 @@ UNDECIDABLE = 2
 def cmd_assess(args: argparse.Namespace) -> None:
     """`<base>...HEAD` の本番コードの差分から、構造改善を通すか飛ばしてよいかを出す。
 
-    終了コード: 0 = 通す / 3 = 飛ばしてよい / 2 = `<base>` を解けない /
+    終了コード: 0 = 通す / 3 = 飛ばしてよい / 2 = 対象のリポジトリか `<base>` を解けない /
     69 = 依存が欠けた（`deps.require` が `refactor.py` の import の時点で止めた。判定していない）。
     **2 を飛ばしてよいと読まない。** 判定できないことは飛ばす理由にならない。
 
     退避の 3 条件（テストが無い・CLI が使えない・範囲を絞れない）は見ない。それらは
     `init` が止めて知らせる。
     """
-    changes = production_code_changes(os.getcwd(), args.base)
+    try:
+        root = paths.target_repo_root()
+    except proc.StepError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(UNDECIDABLE)
+    changes = production_code_changes(str(root), args.base)
     if changes is None:
         print(f"ERROR: 起点 {args.base} から HEAD までの差分を取れません", file=sys.stderr)
         sys.exit(UNDECIDABLE)
