@@ -48,12 +48,12 @@ class ClosedAttempt:
 
     `range_unknown` が真のときは取り消しも記録も行っていない。**何で終わるかは
     呼び出し側が決める。** 適用は中断、修正と最終ゲートは既存の扱いへ戻す。
+    起動し直すか・振り替えるかはここでは決めない（`reassign` が規則に求める。#919）。
     """
 
     reason: str
     detail: str
     reverted: int = 0
-    relaunch_same_agent: bool = True
     range_unknown: bool = False
     tried: list[str] = field(default_factory=list)
 
@@ -128,7 +128,6 @@ def close_without_result(
         return ClosedAttempt(
             reason=reason,
             detail=detail,
-            relaunch_same_agent=bool(outcome.relaunch_same_agent),
             range_unknown=True,
         )
     reverted = discard_unverified(path, state, scope, ordered_range)
@@ -149,6 +148,15 @@ def close_without_result(
         reason=reason,
         detail=detail,
         reverted=reverted,
-        relaunch_same_agent=bool(outcome.relaunch_same_agent),
         tried=failed_impls(scope),
     )
+
+
+def ran_seat(state: dict[str, Any], step: str, attempt: int, current: str) -> str:
+    """その工程・試行で実際に起動した担当の席。振り替えの後なら記録の元の席、無ければ `current`。
+
+    `merge-fix` / `merge-final-fix` は担当を書き換えた後に打たれるため、結果を読む席をここで引く。"""
+    for e in reversed(state.get("no_results") or []):
+        if e.get("step") == step and e.get("attempt") == attempt and e.get("decision") == "reassign":
+            return str(e.get("seat") or current)
+    return current

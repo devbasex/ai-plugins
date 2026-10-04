@@ -116,7 +116,7 @@ CLI 自身の上限で結果を書かずに終わったときは `NO_RESULT` の
 
 結果の取り込みは結果ファイルを自前で開かず、共通ライブラリの `monitor_outcome.read_launch_outcome(tmp_dir,
 "<agent>-review-pr<PR>", result_path)` が返す値（使える結果 `payload` / 理由 `reason` / 監視の詳細
-`detail` / リトライ可否 `relaunch_same_agent`）を読む。結果なしのときは
+`detail`）を読む。起動し直すか振り替えるかは判定が規則（`assignment.after_no_result`）に求める。結果なしのときは
 `rounds[-1].<agent>` に `intent: "NO_RESULT"`、`no_result_reason: <reason>`、監視結果ファイルが
 あれば `monitor_detail: <detail>` を書く（**鍵が無い** = 監視結果ファイルが無かった。空文字は
 書かない）。理由の一覧は [01-state-and-review.md](01-state-and-review.md) の「結果を残さなかった

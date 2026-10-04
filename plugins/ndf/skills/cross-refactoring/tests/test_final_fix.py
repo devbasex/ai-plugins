@@ -423,14 +423,44 @@ def test_the_next_gate_does_not_see_the_reverted_commits(cmd_final_fix, patch_li
     assert gate["status"] == "passed"
 
 
-def test_a_usage_limit_on_the_final_fix_stops_the_fix(cmd_final_fix, cmd_gate, tmp_path, env_tmp_dir, merge_spy):
-    """AC30 決定 23: 起動し直しても解けない結末では、次の最終ゲートで修正を打ち切るフラグを立てる。"""
-    state_path = _failing_gate_state(tmp_path)
-    env_tmp_dir(state_path)
+def _usage_limit(state_path):
     (state_path.parent / "codex-final-fix-monitor.json").write_text(
         __import__("json").dumps({"reason": "usage_limit", "detail": "上限"}), encoding="utf-8"
     )
 
+
+def _reassign(cmd_reassign, step="final-fix") -> int:
+    with pytest.raises(SystemExit) as e:
+        cmd_reassign.cmd_reassign(type("A", (), {"id": 130, "phase": step, "seats": None})())
+    return int(e.value.code or 0)
+
+
+def test_a_usage_limit_on_the_final_fix_moves_to_another_participant(cmd_final_fix, cmd_reassign, tmp_path, env_tmp_dir, merge_spy):
+    """#919 の AC13: 利用上限でも振り替え先があれば打ち切らず、次の修正ラウンドから振り替え先が直す。"""
+    state_path = _failing_gate_state(tmp_path)
+    env_tmp_dir(state_path)
+    _usage_limit(state_path)
+
+    assert _reassign(cmd_reassign) == 2
+    with pytest.raises(SystemExit) as e:
+        cmd_final_fix.cmd_merge_final_fix(_args())
+
+    assert e.value.code == 2
+    st = read_state(state_path)
+    assert "no_relaunch" not in st["final_gate"]
+    assert st["final_gate"]["impl"] == "claude"
+    assert (st["implementer"], st["implementer_reason"]) == ("claude", "reassigned")
+    # 取り込みは結果を残さなかった元の担当（codex）の試行として閉じる
+    assert st["final_gate"]["failed_attempts"][-1]["impl"] == "codex"
+
+
+def test_a_usage_limit_without_a_candidate_stops_the_fix(cmd_final_fix, cmd_reassign, tmp_path, env_tmp_dir, merge_spy):
+    """AC30 決定 23・#919 の AC13: 振り替え先が無いときだけ、次の最終ゲートで修正を打ち切るフラグを立てる。"""
+    state_path = _failing_gate_state(tmp_path, participants={"pool": ["codex"], "available": ["codex"]})
+    env_tmp_dir(state_path)
+    _usage_limit(state_path)
+
+    assert _reassign(cmd_reassign) == 3
     with pytest.raises(SystemExit) as e:
         cmd_final_fix.cmd_merge_final_fix(_args())
 
@@ -438,13 +468,14 @@ def test_a_usage_limit_on_the_final_fix_stops_the_fix(cmd_final_fix, cmd_gate, t
     assert read_state(state_path)["final_gate"]["no_relaunch"] is True
 
 
-def test_the_gate_after_the_cap_reports_without_reverting(cmd_final_fix, cmd_gate, tmp_path, env_tmp_dir, merge_spy, gate_spy):
+def test_the_gate_after_the_cap_reports_without_reverting(
+    cmd_final_fix, cmd_gate, cmd_reassign, tmp_path, env_tmp_dir, merge_spy, gate_spy
+):
     """AC30: 単独で起動したとき、上限に達した後の最終ゲートは、落ちても取り消さず報告で終わる（#1669 AC9）。"""
-    state_path = _failing_gate_state(tmp_path, workflow_step=False)
+    state_path = _failing_gate_state(tmp_path, workflow_step=False, participants={"pool": ["codex"], "available": ["codex"]})
     env_tmp_dir(state_path)
-    (state_path.parent / "codex-final-fix-monitor.json").write_text(
-        __import__("json").dumps({"reason": "usage_limit", "detail": "上限"}), encoding="utf-8"
-    )
+    _usage_limit(state_path)
+    _reassign(cmd_reassign)
     with pytest.raises(SystemExit):
         cmd_final_fix.cmd_merge_final_fix(_args())
 

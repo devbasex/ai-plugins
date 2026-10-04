@@ -15,14 +15,13 @@ import pytest
 from crossref_helpers import make_state_v2, read_state
 
 
-def _outcome(reason=None, payload=None, detail="", relaunch=True):
-    """`LaunchOutcome` と同じ欄を持つ値。読む側は 5 つの欄しか見ない。"""
+def _outcome(reason=None, payload=None, detail=""):
+    """`LaunchOutcome` と同じ欄を持つ値。読む側は 4 つの欄しか見ない。"""
     return types.SimpleNamespace(
         payload=payload,
         reason=reason,
         detail=detail,
         monitor=None,
-        relaunch_same_agent=relaunch,
     )
 
 
@@ -48,8 +47,8 @@ def test_a_missing_result_file_is_read_as_a_value(gitfacts, tmp_path, capsys):
     assert capsys.readouterr() == ("", "")
 
 
-def test_the_monitor_reason_decides_whether_the_same_agent_can_be_relaunched(gitfacts, tmp_path):
-    """AC2: 無進捗は起動し直せる。利用上限は起動し直せない。"""
+def test_the_monitor_reason_is_read_from_the_monitor_outcome(gitfacts, tmp_path):
+    """AC2: 監視が書いた理由をそのまま読む。起動し直せるかは振り替えの規則が決める（#919）。"""
     state = {"id": 130, "tmp_dir": str(tmp_path)}
     state_path = tmp_path / "dummy"
 
@@ -59,8 +58,8 @@ def test_the_monitor_reason_decides_whether_the_same_agent_can_be_relaunched(git
     (tmp_path / "claude-final-fix-monitor.json").write_text(json.dumps({"reason": "usage_limit", "detail": "上限"}), encoding="utf-8")
     limited = gitfacts.read_result(state, "claude", "final-fix")
 
-    assert (stalled.reason, stalled.relaunch_same_agent) == ("stalled", True)
-    assert (limited.reason, limited.relaunch_same_agent) == ("usage_limit", False)
+    assert stalled.reason == "stalled"
+    assert limited.reason == "usage_limit"
     assert state_path.exists() is False
 
 

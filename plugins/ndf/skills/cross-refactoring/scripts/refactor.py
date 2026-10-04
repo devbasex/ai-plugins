@@ -56,6 +56,7 @@ from refactor_lib.commands.measure import cmd_measure  # noqa: E402
 from refactor_lib.commands.plan import cmd_merge_plan  # noqa: E402
 from refactor_lib.commands.plan_comment import cmd_plan_comment  # noqa: E402
 from refactor_lib.commands.propose import cmd_merge_proposals  # noqa: E402
+from refactor_lib.commands.reassign import STEPS as REASSIGN_STEPS, cmd_reassign  # noqa: E402
 from refactor_lib.commands.report import (  # noqa: E402
     cmd_finalize,
     cmd_report,
@@ -234,6 +235,12 @@ def add_id_commands(sub: argparse._SubParsersAction) -> None:
         sp = sub.add_parser(name, help=help_)
         sp.add_argument("id", type=int)
         sp.set_defaults(func=func)
+
+    sp = sub.add_parser("reassign", help="結果を残さなかった担当を規則どおりに起動し直すか振り替える（#919）。7 / 2 / 3 / 0")
+    sp.add_argument("id", type=int)
+    sp.add_argument("phase", choices=list(REASSIGN_STEPS))
+    sp.add_argument("--seats", nargs="*", default=None, help="提案で起動した担当（propose だけ。省くと参加者の全員）")
+    sp.set_defaults(func=cmd_reassign)
 
     sp = sub.add_parser("start-phase", help="手順の開始を記録し、上限（PHASE_TIMEOUT）を返す")
     sp.add_argument("id", type=int)

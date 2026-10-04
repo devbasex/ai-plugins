@@ -151,7 +151,7 @@ def test_the_metrics_keep_their_keys_and_values_after_a_passed_final_gate(refact
     items = [_item("I-001"), {**_item("I-002", "reverted"), "fix_count": 2}, _item("I-003", "deferred")]
     path, _ = _state(tmp_path, items=items, final_gate={"status": "passed"})
     m = _drive_counts(monkeypatch, path)
-    assert m == {"items": 3, "adopted": 1, "reverted": 1, "deferred": 1, "fix_rounds": 2, "final_gate": "passed"}
+    assert m == {"items": 3, "adopted": 1, "reverted": 1, "deferred": 1, "fix_rounds": 2, "final_gate": "passed", "reassigned": 0}
 
 
 @pytest.mark.parametrize(

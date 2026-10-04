@@ -288,9 +288,13 @@ class FakeFrom(FakeRefactor):
         self.state["phase"] = phase
         self.save()
         self.fail, self.monitor_out = fail or {}, monitor_out
+        self.reassigns: list[tuple[int, str]] = []  # `refactor.py reassign` の応答の並び（#919）
 
     def __call__(self, cmd, env=None, cwd=None):
         name = Path(cmd[1]).name if cmd[0] in (PY, "bash") else cmd[0]
+        if name == "refactor.py" and cmd[2] == "reassign" and self.reassigns:
+            self.calls.append((name, *cmd[2:]))
+            return self.reassigns.pop(0)
         if name in self.fail:
             self.calls.append((name, *cmd[2:]))
             return self.fail[name], ""
@@ -334,10 +338,34 @@ def test_monitor_failure_in_implement_stops_before_merge(tmp_path, monkeypatch, 
     """結果が無いまま異常に終わった（結果なし・早期の異常・起動失敗）ときは取り込みへ進まない。"""
     monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path))
     fake = FakeFrom(tmp_path, "implement", fail={"monitor.py": rc})
+    fake.reassigns = [(3, "REASSIGN=abort\n")]  # 振り替え先が無い（#919）
     monkeypatch.setattr(rf, "call", fake)
     code, out = run_main(ARGV, capsys)
     assert code != 0 and "monitor.py" in out["summary"]
+    assert any(c[:3] == ("refactor.py", "reassign", "7") for c in fake.calls)
     assert not any(c[:2] == ("refactor.py", "merge-implement") for c in fake.calls)
+
+
+def test_a_reassigned_implementer_runs_the_same_phase_and_merges(tmp_path, monkeypatch, capsys):
+    """#919 の AC11・AC16: 実装担当が結果を残さなければ、`reassign` が返した担当で同じ工程を起動し、取り込みへ進む。"""
+    monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path))
+    fake = FakeFrom(tmp_path, "implement")
+    fake.reassigns = [(7, "IMPL=claude\nREASSIGNED='codex=claude:usage_limit'\n")]
+    real = fake.__call__
+    monitors = [6, 0]
+
+    def call(cmd, env=None, cwd=None):
+        if Path(cmd[1]).name == "monitor.py" and monitors:
+            fake.calls.append(("monitor.py", *cmd[2:]))
+            return monitors.pop(0), ""
+        return real(cmd, env, cwd)
+
+    monkeypatch.setattr(rf, "call", call)
+    code, out = run_main(ARGV, capsys)
+    assert code == 0, out
+    assert [c[1:3] for c in fake.calls if c[0] == "launch-cli.sh"] == [("codex", "implement"), ("claude", "implement")]
+    assert [c[:3] for c in fake.calls if c[:2] == ("refactor.py", "start-phase")] == [("refactor.py", "start-phase", "7")]
+    assert sum(1 for c in fake.calls if c[:2] == ("refactor.py", "merge-implement")) == 1
 
 
 @pytest.mark.parametrize("rc", [2, 5])
@@ -444,10 +472,33 @@ def test_propose_stops_when_no_participant_finished(tmp_path, monkeypatch, capsy
     """全員が欠けた提案を候補 0 件の完了として扱わない。"""
     monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path))
     fake = FakeFrom(tmp_path, "propose", fail={"monitor.py": 2})
+    fake.reassigns = [(3, "REASSIGN=abort\n")]  # 振り替え先が無い（#919）
     monkeypatch.setattr(rf, "call", fake)
     code, out = run_main(ARGV, capsys)
     assert code != 0 and "提案" in out["summary"]
+    assert any(c[:4] == ("refactor.py", "reassign", "7", "propose") for c in fake.calls)
     assert not any(c[:2] == ("refactor.py", "merge-proposals") for c in fake.calls)
+
+
+def test_propose_gathers_again_from_the_reassigned_proposer(tmp_path, monkeypatch, capsys):
+    """#919 の AC14: 提案担当の全員が結果なしなら、`reassign` が返した担当で提案を集め直す。"""
+    monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path))
+    fake = FakeFrom(tmp_path, "propose")
+    fake.reassigns = [(7, "PROPOSERS=kiro\nREASSIGNED='codex=kiro:usage_limit'\n")]
+    real = fake.__call__
+    monitors = [6]
+
+    def call(cmd, env=None, cwd=None):
+        if Path(cmd[1]).name == "monitor.py" and monitors:
+            fake.calls.append(("monitor.py", *cmd[2:]))
+            return monitors.pop(0), ""
+        return real(cmd, env, cwd)
+
+    monkeypatch.setattr(rf, "call", call)
+    code, _ = run_main(ARGV, capsys)
+    assert code == 0
+    assert [c[1] for c in fake.calls if c[0] == "launch-cli.sh" and c[2] == "propose"] == ["codex", "kiro"]
+    assert any(c[:2] == ("refactor.py", "merge-proposals") for c in fake.calls)
 
 
 def test_propose_continues_when_one_participant_finished(tmp_path, monkeypatch, capsys):

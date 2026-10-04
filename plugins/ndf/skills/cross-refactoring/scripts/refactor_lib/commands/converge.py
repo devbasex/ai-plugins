@@ -21,7 +21,7 @@ from typing import Any, Optional
 
 import statefile
 
-from .. import budget, clock, culprit, danger, info, publish, scope_verdict, targets, timeline, triage, wholetest
+from .. import budget, clock, culprit, danger, info, intake, publish, scope_verdict, targets, timeline, triage, wholetest
 from ..gitfacts import (
     collect_commit_facts,
     commit_files,
@@ -94,7 +94,7 @@ def _fix_stop(state: dict[str, Any]) -> bool:
     """
     reserve = (state.get("plan") or {}).get("reserve") or {}
     left = budget.fix_time_left(clock.parse(state["started_at"]), int(state["budget_minutes"]), reserve, clock.now())
-    return left < float(reserve.get("fix") or 0.0)
+    return bool(state.get("fix_no_relaunch")) or left < float(reserve.get("fix") or 0.0)  # 旗は振り替え先の無い修正（#919）
 
 
 STOP_REASON = scope_verdict.STOP_REASON
@@ -488,8 +488,8 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     if not fix:
         info("↻ 取り込む修正はありません")
         return
-    record_observed_model(state, str(state["implementer"]), "fix")
-    note_stopped(state, str(state["implementer"]), "fix")
+    record_observed_model(state, ran := intake.ran_seat(state, "fix", int(fix.get("attempt") or 1), str(state["implementer"])), "fix")
+    note_stopped(state, ran, "fix")
     fix_items = [find_item(state, i, required=False) for i in fix.get("items") or []]
     fix_items = [t for t in fix_items if t is not None]
     result = _inspect_fix_commits(state, work, fix, fix_items)

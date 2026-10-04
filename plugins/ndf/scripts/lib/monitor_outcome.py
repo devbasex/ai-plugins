@@ -16,8 +16,9 @@
 
 **起動 1 回の結末を 1 つの値として読むのもここである（#729）。** `read_launch_outcome` が
 結果ファイルの有無・読めるかと監視の結果を突き合わせ、使える結果（`payload`）か理由
-（`reason`）と起動し直しの可否（`relaunch_same_agent`）を返す。結果なしの判断と可否の表を
-cross-review / cross-refactoring がそれぞれ持つと、語彙を足すたびに片方が古くなる。
+（`reason`）を返す。結果なしの判断を cross-review / cross-refactoring がそれぞれ持つと、
+語彙を足すたびに片方が古くなる。理由ごとに起動し直すか・振り替えるかの規則（リトライ可否）は
+ここに置かず、`assignment.after_no_result` が持つ（#919）。
 """
 
 # `from __future__ import annotations` を置かない。注釈が文字列になると `dataclass` が
@@ -51,11 +52,6 @@ REASONS = (
     "cli_timeout",
     "unparsable",
 )
-
-# 同じ担当を同じ条件で起動し直しても解けない理由。利用上限は起動のたびに待ちと相手の
-# 枠を使うだけで直らない（#619）。それ以外は対象や負荷で変わりうるので 1 度は起動し直せる。
-# **理由を足すときはこの集合だけを見直す。** 偽のときに何をするかは Skill が決める。
-NO_RELAUNCH_REASONS = frozenset({"usage_limit"})
 
 # 監視がこの理由を書いていれば、監視が止めたか、結果を書けない終わり方をしたと分かっている。
 # 結果ファイルの状態を見ずにその値を採る（`ok` / `missing` は結果ファイルの側で決め直す）。
@@ -107,11 +103,6 @@ def reason_for(status: str) -> str:
         raise ValueError(f"監視の状態として知らない値です: {status!r}") from None
 
 
-def relaunch_same_agent(reason: Optional[str]) -> bool:
-    """同じ担当を同じ条件で起動し直せば解けるか。`NO_RELAUNCH_REASONS` に無ければ可。"""
-    return reason not in NO_RELAUNCH_REASONS
-
-
 def outcome_path(tmp_dir: os.PathLike[str] | str, stem: str) -> pathlib.Path:
     return pathlib.Path(tmp_dir) / f"{stem}-monitor.json"
 
@@ -154,7 +145,6 @@ class LaunchOutcome:
     reason: Optional[str]
     detail: str
     monitor: Optional[dict[str, Any]]
-    relaunch_same_agent: bool
 
 
 def _read_result_file(path: pathlib.Path) -> tuple[Optional[dict[str, Any]], str]:
@@ -188,11 +178,11 @@ def read_launch_outcome(tmp_dir: os.PathLike[str] | str, stem: str, result_path:
     monitor = read_outcome(tmp_dir, stem)
     monitor_detail = str(monitor.get("detail") or "") if monitor else ""
     if payload is not None:
-        return LaunchOutcome(payload=payload, reason=None, detail=monitor_detail, monitor=monitor, relaunch_same_agent=True)
+        return LaunchOutcome(payload=payload, reason=None, detail=monitor_detail, monitor=monitor)
     monitor_reason = monitor.get("reason") if monitor else None
     reason = monitor_reason if monitor_reason in _MONITOR_DECIDED_REASONS else result_reason
     detail = monitor_detail or _unusable_detail(path, result_reason)
-    return LaunchOutcome(payload=None, reason=reason, detail=detail, monitor=monitor, relaunch_same_agent=relaunch_same_agent(reason))
+    return LaunchOutcome(payload=None, reason=reason, detail=detail, monitor=monitor)
 
 
 def _unusable_detail(path: pathlib.Path, result_reason: str) -> str:

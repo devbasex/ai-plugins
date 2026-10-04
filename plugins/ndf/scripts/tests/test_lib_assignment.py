@@ -270,3 +270,184 @@ def test_recorded_exclusions_restores_both_kinds_unless_newly_named(assignment, 
 def test_recorded_exclusions_of_an_old_state_is_empty(assignment):
     """記録を持たない状態ファイル（`participants` が空）でも空で返す。"""
     assert assignment.recorded_exclusions({}, []) == []
+
+
+# ---------- 結果なしの後の規則（#919） ----------
+
+THREE = ["claude", "codex", "kiro"]
+
+
+def _decide(assignment, seat, reason, *, log=(), available=THREE, host="claude", **kw):
+    account = kw.pop("account", None)
+    return assignment.after_no_result(
+        assignment.Assignee(seat, account),
+        reason,
+        available=available,
+        log=list(log),
+        step=kw.pop("step", "review"),
+        attempt=kw.pop("attempt", 1),
+        host=host,
+        **kw,
+    )
+
+
+def _entry(assignment, seat, reason, decision, *, account=None, step="review", attempt=1):
+    return assignment.no_result_entry(step, attempt, assignment.Assignee(seat, account), reason, decision, "2026-10-04T00:00:00Z")
+
+
+def test_first_no_result_other_than_usage_limit_relaunches_the_same_agent(assignment):
+    got = _decide(assignment, "kiro", "stalled", busy=["codex"])
+    assert (got.action, got.to, got.drop) == ("relaunch", assignment.Assignee("kiro"), False)
+
+
+def test_usage_limit_reassigns_without_relaunching(assignment):
+    got = _decide(assignment, "kiro", "usage_limit", busy=["codex"])
+    assert (got.action, got.to.seat, got.drop) == ("reassign", "claude", True)
+
+
+def test_no_result_after_a_relaunch_reassigns(assignment):
+    first = _decide(assignment, "kiro", "stalled", busy=["codex"])
+    log = [_entry(assignment, "kiro", "stalled", first)]
+    got = _decide(assignment, "kiro", "stalled", log=log, busy=["codex"])
+    assert (got.action, got.to.seat) == ("reassign", "claude")
+
+
+def test_excluded_and_busy_runtimes_are_never_the_target(assignment):
+    gone = _decide(assignment, "claude", "usage_limit", busy=["kiro"])
+    log = [_entry(assignment, "claude", "usage_limit", gone)]
+    assert gone.to.seat == "codex"
+    # claude は外れ、codex は今の席にいる。kiro が落ちても候補は残らない
+    got = _decide(assignment, "kiro", "usage_limit", log=log, busy=["codex"])
+    assert (got.action, got.to) == ("abort", None)
+    assert got.drop is True
+
+
+def test_running_out_of_candidates_aborts(assignment):
+    got = _decide(assignment, "kiro", "usage_limit", available=["codex", "kiro"], busy=["codex"])
+    assert got.action == "abort"
+
+
+def test_a_runtime_dropped_by_usage_limit_is_out_including_its_second_seat(assignment):
+    d = _decide(assignment, "kiro", "usage_limit", busy=["codex"])
+    log = [_entry(assignment, "kiro", "usage_limit", d)]
+    assert assignment.excluded_runtimes(log) == {"kiro"}
+    assert assignment.seats_pool(THREE, log) == ["claude", "codex"]
+    got = _decide(assignment, "codex", "usage_limit", log=log, busy=["claude"])
+    assert got.action == "abort"
+    for round_no in range(1, 4):
+        assert all(assignment.seat_runtime(s) != "kiro" for s in assignment.review_seats(round_no, ["claude"], []))
+
+
+def test_the_target_comes_only_from_the_available_participants(assignment):
+    got = _decide(assignment, "kiro", "usage_limit", available=["codex", "kiro"], host="agy")
+    assert got.to.seat == "codex"
+    got = _decide(assignment, "kiro", "usage_limit", available=["kiro"], host="agy")
+    assert got.action == "abort"
+
+
+def test_claude_usage_limit_moves_to_another_account_first(assignment):
+    seen = []
+
+    def pick(tried):
+        seen.append(tried)
+        return "work2"
+
+    got = _decide(assignment, "claude", "usage_limit", account="work1", busy=["codex"], pick_account=pick)
+    assert (got.action, got.to, got.drop) == ("reassign", assignment.Assignee("claude", "work2"), False)
+    assert seen == [frozenset({"work1"})]
+    log = [_entry(assignment, "claude", "usage_limit", got, account="work1")]
+    assert assignment.excluded_runtimes(log) == set()
+    assert assignment.current_account(log, "claude", "work1") == "work2"
+    # 次の上限では試したアカウントがどちらも渡る
+    _decide(assignment, "claude", "usage_limit", account="work2", log=log, busy=["codex"], pick_account=pick)
+    assert seen[-1] == frozenset({"work1", "work2"})
+
+
+def test_claude_without_a_spare_account_moves_to_another_runtime(assignment):
+    got = _decide(assignment, "claude", "usage_limit", busy=["codex"], pick_account=lambda tried: None)
+    assert (got.action, got.to.seat) == ("reassign", "kiro")
+
+
+def test_accounts_are_not_tried_for_reasons_other_than_usage_limit(assignment):
+    called = []
+    first = _decide(assignment, "claude", "stalled", busy=["codex"])
+    log = [_entry(assignment, "claude", "stalled", first)]
+    got = _decide(assignment, "claude", "stalled", log=log, busy=["codex"], pick_account=lambda t: called.append(t) or "work2")
+    assert called == []
+    assert got.to.seat == "kiro"
+
+
+def test_only_never_reassigns(assignment):
+    got = _decide(assignment, "kiro", "usage_limit", available=["kiro"], only=True, pick_account=lambda t: "x")
+    assert got.action == "abort"
+    got = _decide(assignment, "claude", "usage_limit", available=THREE, only=True, pick_account=lambda t: "x")
+    assert got.action == "abort"
+
+
+def test_an_agent_on_a_new_account_may_relaunch_once_more(assignment):
+    log = [
+        _entry(assignment, "claude", "stalled", _decide(assignment, "claude", "stalled"), account="work1"),
+    ]
+    assert _decide(assignment, "claude", "stalled", log=log, account="work1").action == "reassign"
+    assert _decide(assignment, "claude", "stalled", log=log, account="work2").action == "relaunch"
+
+
+def test_reassignments_never_exceed_participants_plus_accounts(assignment):
+    accounts = ["a1", "a2"]
+    log: list = []
+    failed = assignment.Assignee("claude", None)
+    reassigned = 0
+    for _ in range(20):
+        d = assignment.after_no_result(
+            failed,
+            "usage_limit",
+            available=THREE,
+            log=log,
+            step="implement",
+            attempt=1,
+            host="claude",
+            pick_account=lambda tried: next((a for a in accounts if a not in tried), None),
+        )
+        log.append(assignment.no_result_entry("implement", 1, failed, "usage_limit", d, "t"))
+        if d.action != "reassign":
+            break
+        reassigned += 1
+        failed = d.to
+    assert d.action == "abort"
+    assert reassigned <= len(THREE) + len(accounts)
+
+
+def test_the_reassignment_rule_follows_the_relaunch_set(assignment, monkeypatch):
+    monkeypatch.setattr(assignment, "NO_RELAUNCH_REASONS", frozenset({"stalled"}))
+    assert _decide(assignment, "kiro", "stalled", busy=["codex"]).action == "reassign"
+    assert _decide(assignment, "kiro", "usage_limit", busy=["codex"]).action == "relaunch"
+
+
+def test_pinned_seats_are_dropped_once_either_runtime_was_replaced(assignment):
+    pinned = ["claude", "claude-2"]
+    assert assignment.pinned_in_force(pinned, []) == pinned
+    d = _decide(assignment, "claude", "usage_limit", pick_account=lambda t: "w2")
+    assert assignment.pinned_in_force(pinned, [_entry(assignment, "claude", "usage_limit", d)]) is None
+    other = _decide(assignment, "kiro", "usage_limit", busy=["codex"])
+    assert assignment.pinned_in_force(pinned, [_entry(assignment, "kiro", "usage_limit", other)]) == pinned
+
+
+def test_the_entry_holds_only_names(assignment):
+    d = _decide(assignment, "claude", "usage_limit", account="w1", pick_account=lambda t: "w2")
+    entry = _entry(assignment, "claude", "usage_limit", d, account="w1")
+    assert entry == {
+        "step": "review",
+        "attempt": 1,
+        "seat": "claude",
+        "account": "w1",
+        "reason": "usage_limit",
+        "decision": "reassign",
+        "to": "claude",
+        "to_account": "w2",
+        "at": "2026-10-04T00:00:00Z",
+    }
+
+
+def test_a_bad_seat_name_is_rejected(assignment):
+    with pytest.raises(assignment.AssignmentError):
+        _decide(assignment, "gpt", "usage_limit")

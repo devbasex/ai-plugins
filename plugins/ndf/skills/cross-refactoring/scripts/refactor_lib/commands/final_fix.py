@@ -33,7 +33,7 @@ from ..gitfacts import (
     reported_shas,
     safe_int,
 )
-from ..intake import IntakeScope, already_closed, close_without_result, discard_unverified
+from ..intake import IntakeScope, already_closed, close_without_result, discard_unverified, ran_seat
 from ..paths import head_sha, load_state, work_dir
 from ..verify import unassigned_fix_commits, verify_final_fix_commit
 
@@ -66,8 +66,8 @@ def _close_failed_final_fix(
     """最終ゲートの修正担当が結果を残さなかったときに、取り消して判定へ戻す。
 
     **修正ラウンドは進めない。** 進めるのは次の最終ゲートで、そこが打ち切りを見る。
-    起動し直しても解けない結末（利用上限）だけはフラグ（`no_relaunch`）を立て、次の最終
-    ゲートを「取り消さず報告」で終わらせる（#728 の決定 11）。
+    打ち切りのフラグ（`no_relaunch`）はここでは立てない。立てるのは振り替え先が無いと規則が答えたときの
+    `reassign` だけである（#919）。
     """
     closed = close_without_result(path, state, scope, outcome)
     if closed.range_unknown:
@@ -76,8 +76,6 @@ def _close_failed_final_fix(
             f"最終ゲートの修正の範囲を確定できませんでした（起点 {gate.get('fix_base_sha')}）。検証できない修正は採りません",
             code=2,
         )
-    if not closed.relaunch_same_agent:
-        gate["no_relaunch"] = True
     statefile.save(path, state)
     if closed.reverted:
         # 最終ゲートは push 済みの地点を判定する。取り消した後の HEAD を公開してから判定へ戻す
@@ -199,7 +197,8 @@ def cmd_merge_final_fix(args: argparse.Namespace) -> None:
     """
     path, state = load_state(args.id)
     gate = state.setdefault("final_gate", {"fix_rounds": 0, "checks": []})
-    impl = str(gate.get("impl") or "")
+    # 振り替えの後（#919）は担当が書き換わっている。この修正ラウンドで起動した担当の結果を読む
+    impl = ran_seat(state, "final-fix", safe_int(gate.get("fix_rounds")), str(gate.get("impl") or ""))
     if not impl:
         die(
             "最終ゲートの修正担当が記録されていません。先に `final-gate` を実行してください",
