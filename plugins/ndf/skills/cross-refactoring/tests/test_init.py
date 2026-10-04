@@ -1407,8 +1407,8 @@ PLANNED = {
 @pytest.mark.parametrize(
     "phase, planned, expected",
     [
-        ("propose", False, 12 * 60 + 180),  # 提案の枠の終わり 10:12
-        ("plan", False, 18 * 60 + 180),  # 改修計画の枠の終わり 10:18
+        ("propose", False, 6 + 12 * 60 + 180),  # 提案の枠の終わり 10:12 + 着手前のテスト 6 秒（#1385）
+        ("plan", False, 6 + 18 * 60 + 180),  # 改修計画の枠の終わり 10:18 + 6 秒
         ("add-tests", True, 23 * 60 + 180),  # 最後の項目の完了の締め切り 10:20 + 3 分
         ("implement", True, 32 * 60 + 180),  # 10:30 + 2 分
         ("fix", True, 58 * 60 + 180),  # 開始 + 60 − 全体のテストの予備時間 2 分
@@ -1582,6 +1582,8 @@ def test_run_baseline_records_a_green_run_of_test_and_lint_suites(refactor, monk
     assert isinstance(seconds, float)
     assert record == {
         "mode": "whole",
+        "locations": None,
+        "timed_out": False,
         "command": "run unit && run lint",
         "status": "green",
         "suites": {"unit": "green", "lint": "green"},
@@ -1749,3 +1751,212 @@ def test_init_takes_the_pull_request_of_the_repository_it_is_run_in(refactor, pa
     setup = sys.modules["refactor_lib.commands.setup"]
     assert setup._fetch_pr_context(12) == ("example/sample", "main", "feat/x", True, "me")
     assert not any("nameWithOwner" in c for c in asked)
+
+
+# ---------- #1385: 手順の枠が想定最大時間に収まらなければ提案者を起動せずに止める（AC6・I4） ----------
+
+
+@pytest.fixture
+def init_clock(monkeypatch, refactor):
+    """`statefile.now` を開始からの秒で動かす。"""
+    import datetime as dt
+
+    statefile = sys.modules["statefile"]
+    base = dt.datetime(2026, 10, 4, 8, 0, 0)
+    current = {"t": base}
+    monkeypatch.setattr(statefile, "now", lambda: current["t"].isoformat(timespec="seconds"))
+
+    def at(seconds):
+        current["t"] = base + dt.timedelta(seconds=seconds)
+
+    return at
+
+
+@pytest.fixture
+def slow_baseline(monkeypatch, refactor):
+    """着手前のテストの実測を `seconds` に置き換え、走らせた回数を数える。"""
+    setup = sys.modules["refactor_lib.commands.setup"]
+    real = setup.baseline_lib.run_baseline
+    box = {"seconds": 1300.0, "calls": 0}
+
+    def fake(*a, **k):
+        box["calls"] += 1
+        return {**real(*a, **k), "seconds": box["seconds"]}
+
+    monkeypatch.setattr(setup.baseline_lib, "run_baseline", fake)
+    return box
+
+
+def _window_seconds(state, key):
+    clock = sys.modules["refactor_lib.clock"]
+    return (clock.parse(state["limits"][key]) - clock.parse(state["started_at"])).total_seconds()
+
+
+def _stopped_init(run_init, tmp_path, init_clock, capsys):
+    init_clock(0)
+    with pytest.raises(SystemExit) as e:
+        run_init(_args(tmp_path, budget_minutes="30"))
+    assert e.value.code == refactor_abort()
+    captured = capsys.readouterr()
+    return captured
+
+
+def test_init_stops_before_the_proposers_when_the_windows_do_not_fit(run_init, tmp_path, init_clock, slow_baseline, capsys):
+    captured = _stopped_init(run_init, tmp_path, init_clock, capsys)
+    assert "--budget-minutes を 39 以上" in captured.err
+    assert "PHASE=" not in captured.out, "提案へ進む出力を出さない"
+    _, state = _state_of(tmp_path)
+    assert state["window_stopped_at"] and "resumed_at" not in state
+
+    # 1 分後に下限の予算で打ち直すと、着手前のテストを走らせずに枠を打ち直した時刻から数えて進む
+    init_clock(1360)
+    run_init(_args(tmp_path, budget_minutes="39"))
+    _, state = _state_of(tmp_path)
+    assert slow_baseline["calls"] == 1
+    assert "window_stopped_at" not in state and state["resumed_at"]
+    assert _window_seconds(state, "propose_end_at") == 1828
+    assert "PHASE=" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "restart, budget, propose_end",
+    [(1600, "39", 1600 + 468), (1500, "40", 1500 + 480)],
+)
+def test_a_restart_within_the_grace_continues(run_init, tmp_path, init_clock, slow_baseline, capsys, restart, budget, propose_end):
+    _stopped_init(run_init, tmp_path, init_clock, capsys)
+    init_clock(restart)
+    run_init(_args(tmp_path, budget_minutes=budget))
+    _, state = _state_of(tmp_path)
+    assert _window_seconds(state, "propose_end_at") == propose_end
+
+
+def test_a_late_restart_stops_again_with_a_new_lower_bound(run_init, tmp_path, init_clock, slow_baseline, capsys):
+    _stopped_init(run_init, tmp_path, init_clock, capsys)
+    init_clock(1700)
+    with pytest.raises(SystemExit) as e:
+        run_init(_args(tmp_path, budget_minutes="39"))
+    assert e.value.code == refactor_abort()
+    assert "--budget-minutes を 48 以上" in capsys.readouterr().err
+    _, state = _state_of(tmp_path)
+    assert state["window_stopped_at"] and slow_baseline["calls"] == 1
+
+
+def test_a_restart_without_the_stop_keeps_the_windows(run_init, tmp_path, init_clock, slow_baseline):
+    """印の無い再開（計画の手順の途中で落ちた）は起点をずらさず、止めない。"""
+    slow_baseline["seconds"] = 200.0
+    init_clock(0)
+    run_init(_args(tmp_path, budget_minutes="30"))
+    _, state = _state_of(tmp_path)
+    state["phase"] = "plan"
+    _overwrite_state(tmp_path, state)
+    init_clock(1300)
+    run_init(_args(tmp_path))
+    _, state = _state_of(tmp_path)
+    assert "resumed_at" not in state
+    assert _window_seconds(state, "propose_end_at") == 560
+
+
+def test_a_restart_after_the_plan_keeps_the_saved_deadlines(run_init, tmp_path, init_clock, slow_baseline, capsys):
+    """計画を取り込んだ後の再開は limits を組み直さず、window_problem も見ずに続く。"""
+    _stopped_init(run_init, tmp_path, init_clock, capsys)
+    _, state = _state_of(tmp_path)
+    state["phase"], state["plan"] = "implement", {"end_at": "2026-10-04T08:30:00"}
+    before = dict(state["limits"])
+    _overwrite_state(tmp_path, state)
+    init_clock(1500)
+    run_init(_args(tmp_path, budget_minutes="39"))
+    _, state = _state_of(tmp_path)
+    assert state["limits"] == before and state["budget_minutes"] == 30 and "resumed_at" not in state
+
+
+# ---------- #1555: CI に任せる戦略の着手前の上限と、着手前のテストの行（AC7・AC10・AC11・I6） ----------
+
+
+@pytest.fixture
+def verify_init(refactor, monkeypatch, tmp_path):
+    """`_verify_init` を CI に任せる戦略で呼ぶ。着手前のテストは渡された上限と `run` の値を返す。"""
+    setup = sys.modules["refactor_lib.commands.setup"]
+    ts = sys.modules["test_strategy"]
+    monkeypatch.setenv("NDF_METRICS_DIR", str(tmp_path / "metrics"))
+    work = tmp_path / "work"
+    (work / "tests").mkdir(parents=True)
+    (work / "tests" / "test_a.py").write_text("def test_a():\n    pass\n")
+    strategy = ts.Strategy(
+        ts.LOCAL_SCOPED_CI_WHOLE, "args", [ts.Suite("unit", "pytest .", scope_command="pytest {paths}", paths=["tests"])]
+    )
+    prep = types.SimpleNamespace(strategy=strategy, work=work, tmp_dir=tmp_path, decl={}, repo="acme/demo")
+    given: list[int] = []
+    run = {"seconds": 320.0, "timed_out": False}
+
+    def fake_run(strategy, work, timeout, scope, tmp_dir):
+        given.append(timeout)
+        seconds = float(timeout) if run["timed_out"] else run["seconds"]
+        return {
+            "mode": "scope",
+            "locations": ["tests"],
+            "timed_out": run["timed_out"],
+            "command": "pytest tests",
+            "status": "green",
+            "suites": {"unit": "green"},
+            "checked_at": "2026-10-04T08:05:00",
+            "seconds": seconds,
+        }
+
+    monkeypatch.setattr(setup, "resolve_participants", lambda *a, **k: {"available": ["claude"]})
+    monkeypatch.setattr(setup.baseline_lib, "run_baseline", fake_run)
+    args = types.SimpleNamespace(budget_minutes=30, scope=["tests"], pr=1554, require_all=None)
+    inputs = types.SimpleNamespace(host="claude", include=[], exclude=[], model_spec={})
+
+    def call():
+        return setup._verify_init(args, inputs, prep)
+
+    history = sys.modules["refactor_lib.allocation"].history_path(tmp_path / "metrics", "acme/demo")
+    return types.SimpleNamespace(call=call, given=given, run=run, history=history, setup=setup, strategy=strategy)
+
+
+def _history(path):
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def test_the_scope_test_seconds_feed_the_next_init_limit(verify_init):
+    """AC11・AC7: 着手前の範囲テストの実測が履歴に残り、次の実行の上限は 3·s になる。"""
+    _, baseline, _ = verify_init.call()
+    assert verify_init.given == [180], "初回は所要が分からず 0.10·B"
+    assert (baseline["scope_seconds"], baseline["scope_source"]) == (None, None)
+    rows = _history(verify_init.history)
+    assert [(r["kind"], r["strategy"], r["locations"], r["seconds"]) for r in rows] == [
+        ("init_test", "local-scoped-ci-whole", ["tests"], 320.0)
+    ]
+    _, baseline, _ = verify_init.call()
+    assert verify_init.given[-1] == 960
+    assert (baseline["scope_seconds"], baseline["scope_source"]) == (320.0, "history")
+    # I6: 状態に残る入力から組み直した上限が、着手前のテストに使った上限と一致する
+    timeline = sys.modules["refactor_lib.timeline"]
+    state = {"budget_minutes": 30, "strategy": verify_init.strategy.as_state(), "baseline_test": baseline}
+    assert timeline.test_limits(state)["init_test_timeout"] == 960
+
+
+def test_a_timed_out_init_test_is_recorded_before_stopping(verify_init, capsys):
+    """AC11・E9: 打ち切りでも上限の秒で 1 行足してから止め、次の上限は 3 倍になる。"""
+    verify_init.run["timed_out"] = True
+    with pytest.raises(SystemExit) as e:
+        verify_init.call()
+    assert e.value.code == refactor_abort()
+    assert "次の実行の上限は 540 秒" in capsys.readouterr().err
+    assert [(r["seconds"], r["timed_out"]) for r in _history(verify_init.history)] == [(180.0, True)]
+    verify_init.run["timed_out"] = False
+    verify_init.call()
+    assert verify_init.given[-1] == 540
+
+
+def test_the_whole_test_covers_the_scope(verify_init):
+    """AC8: 履歴に一致が無く、置き場所が suite のパスを覆えば w を使う。"""
+    prep = types.SimpleNamespace(strategy=None, work=None, repo="acme/demo")
+    strategy = sys.modules["test_strategy"].Strategy(
+        "local-scoped-ci-whole",
+        "args",
+        [sys.modules["test_strategy"].Suite("unit", "pytest .", scope_command="pytest {paths}", paths=["tests"])],
+    )
+    prep.strategy, prep.work = strategy, verify_init.history.parents[2] / "work"
+    assert sys.modules["refactor_lib.init_test"].resolve_scope_seconds(prep, ["tests"], 424.0) == (424.0, "whole")
+    assert sys.modules["refactor_lib.init_test"].resolve_scope_seconds(prep, ["tests"], None) == (None, None)

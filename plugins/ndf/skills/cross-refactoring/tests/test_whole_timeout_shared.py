@@ -67,9 +67,9 @@ def test_run_baseline_shares_the_limit_across_suites(refactor, monkeypatch, tmp_
     monkeypatch.setattr(baseline.test_triage, "clear_junit", lambda work, strategy: None)
     run, given = _clock(monkeypatch, 60)
     monkeypatch.setattr(baseline, "run_with_timeout", run)
-    with pytest.raises(SystemExit):
-        baseline.run_baseline(types.SimpleNamespace(), tmp_path, 100, [], tmp_path)
-    assert given == [100, 40], "2 本目で合計の上限に届いて止まる（suite ごとに 100 秒を渡さない）"
+    record = baseline.run_baseline(types.SimpleNamespace(), tmp_path, 100, [], tmp_path)
+    assert given == [100, 40], "2 本目で合計の上限に届いて打ち切る（suite ごとに 100 秒を渡さない）"
+    assert record["timed_out"] is True and record["seconds"] == 100.0
 
 
 def test_a_derived_round_command_does_not_run_the_suites_twice(refactor, tmp_path):

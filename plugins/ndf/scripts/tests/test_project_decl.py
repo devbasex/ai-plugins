@@ -257,6 +257,21 @@ def test_ndf_record_is_listed_as_a_source(plain, env, tmp_path):
     ]
 
 
+def test_ndf_record_skips_the_init_test_rows_and_scope_runs(plain, env, tmp_path):
+    """#1385 I8: 着手前のテストの行（kind: init_test）と、範囲テストだけを走らせた実行の行（init が null）を数えない。"""
+    rec = Path(env["NDF_METRICS_DIR"]) / "acme--app" / "cross-refactoring-allocation.jsonl"
+    rec.parent.mkdir(parents=True)
+    rows = [{"whole_test": {"init": s}} for s in (130, 140.2, 150)]
+    rows += [{"schema": 2, "kind": "init_test", "mode": "scope", "seconds": 900.0}] * 3
+    rows += [{"schema": 2, "kind": "run", "whole_test": {"init": None}}]
+    rec.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    env["FAKE_GH_MODE"] = "fail"
+    _, m = measure(env, plain, tmp_path)
+    assert m["items"]["test_duration"]["value"]["measured"] == [
+        {"seconds": 140.2, "source": "ndf-record", "detail": "NDF の実行の記録の直近 3 件の中央値"}
+    ]
+
+
 # --- AC4・I8: 新しい宣言では解析しない ------------------------------------------------
 
 
