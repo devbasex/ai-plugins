@@ -93,7 +93,8 @@ def _run(tmp_path, runtime, mode, *args, **extra):
 @pytest.mark.parametrize("runtime", ["codex", "agy", "kiro", "claude"])
 def test_success_returns_file(tmp_path, runtime):
     code, out = _run(tmp_path, runtime, "ok")
-    assert code == 0 and out["status"] == "ok"
+    # CI でだけ codex がまれに落ちる（develop の run 37176848993 でも）。原因を追えるよう結果を出す
+    assert code == 0 and out["status"] == "ok", out
     m = out["metrics"]
     assert (m["outcome"], m["source"], m["runtime"]) == ("ok", "file", runtime)
     assert pathlib.Path(m["result"]).read_text(encoding="utf-8").strip() == "レビューの結果"

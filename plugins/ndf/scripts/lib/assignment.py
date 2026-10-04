@@ -438,23 +438,27 @@ def after_no_result(
     only: bool = False,
     initial_account: Optional[str] = None,
     pick_account: Optional[Callable[[frozenset[str]], Optional[str]]] = None,
+    relaunch_next_attempt: bool = False,
 ) -> NoResultDecision:
     """結果なしの担当を、同じ担当で起動し直す / 振り替える / 中断するのどれにするかを決める（規則の正本。#919）。
 
     上から順に、最初に当たった行の答えを返す。副作用を持たず、記録は呼ぶ側が書く。
+    `relaunch_next_attempt` は、起動し直しが次の試行として起動される工程（試行番号が起動ごとに進む修正）で真にする。
+    偽のままだと試行番号の一致が毎回外れ、同じ担当を締め切りまで起動し直し続ける。
 
     | 順 | 条件 | 答え |
     | ---: | --- | --- |
-    | 1 | リトライ可否が真で、記録に同じ工程・試行・席・アカウントの `relaunch` が無い | `relaunch` |
+    | 1 | リトライ可否が真で、記録に同じ工程・試行・席・アカウントの `relaunch` が無い（`relaunch_next_attempt` なら 1 つ前の試行の `relaunch` も同じ件として照合する） | `relaunch` |
     | 2 | `only`（1 者指定） | `abort` |
     | 3 | claude の `usage_limit` で、`pick_account(試したアカウント)` が名前を返す | 同じ席のそのアカウントへ `reassign` |
     | 4 | 候補 = `available` −（外した担当 ∪ 結果なしのランタイム）− `busy`（同じラウンドのほかの席）が 1 者以上 | `choose_implementer(候補, host)` へ |
     | 5 | どれにも当たらない | `abort` |
     """
     runtime, log = failed.runtime(), list(log or ())
+    attempts = {attempt, attempt - 1} if relaunch_next_attempt else {attempt}
     relaunched = any(
-        (e.get("decision"), e.get("step"), e.get("attempt"), e.get("seat"), e.get("account") or None)
-        == (RELAUNCH, step, attempt, failed.seat, failed.account)
+        (e.get("decision"), e.get("step"), e.get("seat"), e.get("account") or None) == (RELAUNCH, step, failed.seat, failed.account)
+        and e.get("attempt") in attempts
         for e in log
     )
     if relaunch_same_agent(reason) and not relaunched:

@@ -312,6 +312,17 @@ def test_no_result_after_a_relaunch_reassigns(assignment):
     assert (got.action, got.to.seat) == ("reassign", "claude")
 
 
+def test_a_relaunch_carried_to_the_next_attempt_counts_as_the_same_relaunch(assignment):
+    """修正の起動し直しは次の試行で起動される。2 度続けて結果なしなら振り替える（PR 1732 の指摘）。"""
+    first = _decide(assignment, "kiro", "stalled", step="fix", attempt=1, relaunch_next_attempt=True)
+    log = [_entry(assignment, "kiro", "stalled", first, step="fix", attempt=1)]
+    got = _decide(assignment, "kiro", "stalled", log=log, step="fix", attempt=2, relaunch_next_attempt=True)
+    assert (first.action, got.action) == ("relaunch", "reassign")
+    # 間に結果を残した試行があれば連続ではない
+    again = _decide(assignment, "kiro", "stalled", log=log, step="fix", attempt=3, relaunch_next_attempt=True)
+    assert again.action == "relaunch"
+
+
 def test_excluded_and_busy_runtimes_are_never_the_target(assignment):
     gone = _decide(assignment, "claude", "usage_limit", busy=["kiro"])
     log = [_entry(assignment, "claude", "usage_limit", gone)]

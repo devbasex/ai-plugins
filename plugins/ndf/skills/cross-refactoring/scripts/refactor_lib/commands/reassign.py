@@ -107,6 +107,8 @@ def _decide(
         busy=busy,
         initial_account=assignee_env.initial_account(),
         pick_account=assignee_env.account_picker(),
+        # fix / final-fix の起動し直しは次の試行（修正の試行番号・修正ラウンドが進んだ後）として起動される
+        relaunch_next_attempt=step not in RELAUNCH_IN_PLACE,
     )
     log.append(assignment.no_result_entry(step, attempt, failed, reason, d, statefile.now()))
     return d
