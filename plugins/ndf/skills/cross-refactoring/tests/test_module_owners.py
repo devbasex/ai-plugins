@@ -1,7 +1,7 @@
 """#1142 の C4: cross-refactoring の定義が、設計の決めたモジュールに 1 つずつある。
 
 - `refactor_lib/gitfacts.py` はコミットの事実だけを定義し、分けた先（6 本）の名前を再エクスポートする
-- `drive.py` の `call`・`parse_vars`・`review_status` は `lib/loop_drive.py` のもの
+- `drive.py` の `call`・`parse_vars` は `lib/loop_drive.py` のもの（最終ステータスは決めない）
 - `refactor_lib/clock.py` の時刻の関数は `lib/clock.py` のもの
 - worktree の置き場の slug は `lib/repo.py` のもの
 """
@@ -107,8 +107,10 @@ def _load(name: str, path: Path):
 
 def test_drive_uses_the_loop_drive_library():
     rf = _load("rf_drive_owners", SKILL / "scripts" / "drive.py")
-    for name in ("call", "parse_vars", "review_status"):
+    for name in ("call", "parse_vars"):
         assert getattr(rf, name).__module__ == "loop_drive", name
+    # 最終ステータスは cross-review の駆動が決めて回答ファイルへ書く。cross-refactoring の駆動は決めない（#1656）
+    assert not hasattr(rf, "review_status")
 
 
 @pytest.mark.parametrize("name", ("now", "iso", "parse", "seconds_between"))

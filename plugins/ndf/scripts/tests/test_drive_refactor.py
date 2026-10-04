@@ -121,9 +121,9 @@ def test_refactor_drive_stops_on_abort(tmp_path, monkeypatch, capsys):
 
 def test_review_status_requires_clean_sweep():
     ok = {"final": "approved", "sweep": {"verified": True, "remaining_open": 0, "commit": None}}
-    assert rf.review_status(ok) == cr.review_status(ok) == "approved"
+    assert cr.review_status(ok) == "approved"
     swept = {**ok, "sweep": {**ok["sweep"], "commit": "abc"}}  # スイープが直した HEAD は承認されていない
-    assert rf.review_status(swept) == cr.review_status(swept) == "unverified"
+    assert cr.review_status(swept) == "unverified"
     assert cr.review_status({"final": "max_rounds"}) == "max_rounds"
 
 

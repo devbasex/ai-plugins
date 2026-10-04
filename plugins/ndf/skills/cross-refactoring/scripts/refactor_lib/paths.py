@@ -42,6 +42,18 @@ def state_path(tmp_dir: pathlib.Path, state_id: int) -> pathlib.Path:
     return tmp_dir / f"cross-refactoring-rf{state_id}-state.json"
 
 
+# 対象のリポジトリを決められないときの案内。単独起動で利用者が打つ assess と drive が同じ文を出す
+TARGET_REPO_HINT = "対象のリポジトリを決められない。対象のリポジトリの中で打つ"
+
+
+def target_repo_root() -> pathlib.Path:
+    """対象のリポジトリ（現在のディレクトリが属する git の作業ツリーの根）。
+
+    決められなければ `proc.StepError`（2）。別のリポジトリを黙って対象にしない（#1655 の I5）。
+    """
+    return proc.git_root(hint=TARGET_REPO_HINT)
+
+
 def github_repo_from_origin() -> Optional[str]:
     """カレントの origin の URL から `owner/repo` を求める（GitHub の URL だけ）。求まらなければ `None`。
 
@@ -138,6 +150,11 @@ def git_out(work: str, args: list[str], strip: bool = True) -> Optional[str]:
     if r.returncode != 0:
         return None
     return r.stdout.strip() if strip else r.stdout.rstrip("\n")
+
+
+def head_sha(work: str) -> Optional[str]:
+    """`work` の HEAD のコミット。読めなければ `None`。"""
+    return git_out(work, ["rev-parse", "HEAD"])
 
 
 def resolve_commit(work: str, sha: str) -> Optional[str]:

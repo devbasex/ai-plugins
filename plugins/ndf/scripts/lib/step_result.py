@@ -26,6 +26,7 @@ from pathlib import Path
 
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
+import deps  # noqa: E402
 import proc  # noqa: E402
 
 # 子プロセスと git の起動は `proc` が持つ（#1142 の L0）。ここの名前は同じものを指す
@@ -45,6 +46,8 @@ EXIT_PRECONDITION = 3  # 前提が無い（宣言・認証・対象のファイ�
 # （立たない・変更なし・飛ばしてよい）。読めないときは 2 で返し、3 と混ぜない
 EXIT_GATE = 10  # 10〜19: 関門（人の同意が要る）
 EXIT_PAUSE = 20  # 20〜29: LLM の判断待ち
+# 依存の欠け（`deps.require` が外部パッケージを用意できずに止まった。何も判定していない）。値の持ち主は deps.py
+EXIT_DEPS_MISSING = deps.EXIT_DEPS_MISSING
 
 GATE_CODES = range(10, 20)
 PAUSE_CODES = range(20, 30)
@@ -60,7 +63,7 @@ def code_matches(status: str, code: int) -> bool:
         return code == EXIT_OK
     if status == "gate":
         return code in GATE_CODES or code in PAUSE_CODES
-    return code in (EXIT_VIOLATION, EXIT_UNREADABLE, EXIT_PRECONDITION)
+    return code in (EXIT_VIOLATION, EXIT_UNREADABLE, EXIT_PRECONDITION, EXIT_DEPS_MISSING)
 
 
 def _check_item_types(obj: dict, errs: list[str]) -> None:
@@ -147,6 +150,34 @@ def presentation_dir() -> Path:
     return d
 
 
+def _validate_present_args(targets, consent, rollback: str) -> None:
+    if not targets:
+        raise ValueError("targets が空")
+    if not consent:
+        raise ValueError("consent が空")
+    if not rollback or not rollback.strip():
+        raise ValueError("rollback が空（戻し方を必ず示す）")
+
+
+def _targets_lines(targets) -> list[str]:
+    """「対象を開くためのもの」節の箇条（URL は生のまま書く）。"""
+    lines = []
+    for t in targets:
+        url = t["url"]
+        lines.append(f"- {url}" + (f"  {t['title']}" if t.get("title") else ""))
+        if t.get("base_head"):
+            lines.append(f"  - ベースと head: {t['base_head']}")
+    return lines
+
+
+def _judge_table(judge) -> list[str]:
+    """「判断に使うもの」の表。"""
+    lines = ["| 項目 | 内容 |", "| --- | --- |"]
+    for k, v in judge:
+        lines.append(f"| {k} | {str(v).replace('|', chr(92) + '|').replace(chr(10), '<br>')} |")
+    return lines
+
+
 def approval_present(tool: str, name: str, *, title: str, targets, change: str, judge, consent, rollback: str, path=None) -> str:
     """approval-request.md の 2 層の形で提示物の Markdown を書き出し、パスを返す。
 
@@ -156,21 +187,11 @@ def approval_present(tool: str, name: str, *, title: str, targets, change: str, 
     consent: 同意を求める項目の列
     rollback: 戻し方（配布では取り消しの手段とその限界）
     """
-    if not targets:
-        raise ValueError("targets が空")
-    if not consent:
-        raise ValueError("consent が空")
-    if not rollback or not rollback.strip():
-        raise ValueError("rollback が空（戻し方を必ず示す）")
+    _validate_present_args(targets, consent, rollback)
     lines = [f"# {title}", "", "## 1. 対象を開くためのもの", ""]
-    for t in targets:
-        url = t["url"]
-        lines.append(f"- {url}" + (f"  {t['title']}" if t.get("title") else ""))
-        if t.get("base_head"):
-            lines.append(f"  - ベースと head: {t['base_head']}")
-    lines += [f"- 変更量: {change}", "", "## 2. 承認の判断に使うもの", "", "| 項目 | 内容 |", "| --- | --- |"]
-    for k, v in judge:
-        lines.append(f"| {k} | {str(v).replace('|', chr(92) + '|').replace(chr(10), '<br>')} |")
+    lines += _targets_lines(targets)
+    lines += [f"- 変更量: {change}", "", "## 2. 承認の判断に使うもの", ""]
+    lines += _judge_table(judge)
     lines += ["", "## 同意を求めること", ""]
     lines += [f"- [ ] {c}" for c in consent]
     lines += ["", "## 戻し方", "", rollback.strip(), ""]

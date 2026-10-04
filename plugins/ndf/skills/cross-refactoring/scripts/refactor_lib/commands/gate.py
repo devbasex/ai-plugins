@@ -30,28 +30,10 @@ import statefile
 import test_strategy as ts
 import test_triage
 
-from .. import clock, die, gate_lint, info, launch, publish, stop_revert, timeline, triage
-from ..gitfacts import (
-    discard_impl_leftovers,
-    flush_pending_push,
-    push_with_retry_marker,
-    read_result,
-    reported_shas,
-    run_with_timeout,
-    safe_int,
-    collect_commit_facts,
-    commits_in_range,
-)
-from ..intake import (
-    IntakeScope,
-    already_closed,
-    close_without_result,
-    discard_unverified,
-)
-from ..paths import git_out, load_state, work_dir
-from ..verify import verify_final_fix_commit
-from ..verify import unassigned_fix_commits
+from .. import clock, gate_lint, info, launch, prepush_lint, publish, stop_revert, timeline, triage
+from ..gitfacts import push_with_retry_marker, run_with_timeout, safe_int
 from ..gate_ci import ci_checks, ci_gate, ci_mode, revert_deferred
+from ..paths import head_sha, load_state, work_dir
 
 
 def cmd_final_gate(args: argparse.Namespace) -> None:
@@ -82,20 +64,12 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
     # 手元でテストの全体テストを走らせたときは、静的解析もテストの実行秒数を差し引いた上限で数える（1 回の全体検証を
     # 1 つの `whole_timeout` に収める。test-run.py の whole と同じ）。落ちたテストの見分けの時間は上限の外に置く。
     # 使い回し・CI で見るときは手元で走らないので渡さない。
-    whole_started: Optional[float] = None
-    gate.pop("triage", None)  # 前回の見分けを残さない（今回のテストが通り静的解析だけが落ちたとき、古い変更起因で取り消さない）
-    if _reusable_whole_test(state):
-        gate["whole_test_reused"] = True
-        passed, detail = True, "検証の中で通った全体テストを使い回しました（HEAD は進んでいません）"
-        gate["mode"] = "test"
+    reused = _reusable_failure(state, gate)
+    if reused is not None:
+        passed, detail = False, reused
     else:
-        passed, detail, test_seconds = _run_and_record_gate_check(path, state, gate)
-        if gate.get("mode") == "test":
-            whole_started = time.monotonic() - test_seconds
-    lint_passed, lint_detail = gate_lint.lint_gate(path, state, gate, started=whole_started)
-    if lint_detail:
-        detail = f"{detail} / {lint_detail}"
-    passed = passed and lint_passed
+        passed, detail = _run_gate_checks(path, state, gate)
+        _remember_failure(state, gate, passed, detail)
 
     if passed and standalone:
         _emit_cross_review(
@@ -112,20 +86,59 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
     stop = _final_fix_stop(state, gate)
     if stop and (revert_deferred(path, state, gate) if standalone else stop_revert.revert_after_cutoff(path, state, gate)):
         # 原因の項目を取り消した（単独は寄せた危険フラグの全体テスト、工程の 1 つは打ち切りの後の取り消し）。公開して確かめ直す。
-        # **修正の依頼ではない（`recheck`）。** 駆動は修正の CLI を起動せずに `final-gate` を打ち直す。
-        # 起点を取り消し後の HEAD へ置き直すのは、取り消しのコミットを後の `merge-final-fix` の範囲へ
-        # 入れないためである。入れると未申告として取り消され、取り消した項目が PR へ戻る。
-        gate["status"] = "recheck"
-        gate["fix_base_sha"] = git_out(work_dir(state), ["rev-parse", "HEAD"])
-        statefile.save(path, state)
-        push_with_retry_marker(path, state, gate)
-        info(f"↩ 最終ゲートを落とした原因の項目を取り消しました（{detail}）。次の最終ゲートが確かめます")
-        statefile.emit(FINAL_GATE="recheck")
-        sys.exit(2)
+        _gate_recheck(path, state, gate, detail)
     if stop:
         _gate_limit_reached(path, state, gate, detail, stop)
         return
     _gate_failing(path, state, gate, detail)
+
+
+def _run_gate_checks(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]) -> tuple[bool, str]:
+    """全体テスト（か継続的統合）と静的解析の全体テストを走らせ、合否と記録の 1 行を返す。"""
+    whole_started: Optional[float] = None
+    gate.pop("triage", None)  # 前回の見分けを残さない（今回のテストが通り静的解析だけが落ちたとき、古い変更起因で取り消さない）
+    if _reusable_whole_test(state):
+        gate["whole_test_reused"] = True
+        passed, detail = True, "検証の中で通った全体テストを使い回しました（HEAD は進んでいません）"
+        gate["mode"] = "test"
+    else:
+        passed, detail, test_seconds = _run_and_record_gate_check(path, state, gate)
+        if gate.get("mode") == "test":
+            whole_started = time.monotonic() - test_seconds
+    lint_passed, lint_detail = gate_lint.lint_gate(path, state, gate, started=whole_started)
+    if lint_detail:
+        detail = f"{detail} / {lint_detail}"
+    return passed and lint_passed, detail
+
+
+def _fix_marker(gate: dict[str, Any]) -> int:
+    """取り込んだ最終ゲート修正の数。判定の後に取り込みがあったかを見分ける。"""
+    return len(gate.get("fix_commits") or [])
+
+
+def _remember_failure(state: dict[str, Any], gate: dict[str, Any], passed: bool, detail: str) -> None:
+    """落ちた判定を HEAD と結んで残す（決定 5）。通ったら消す。"""
+    if passed:
+        gate.pop("last_failing", None)
+        return
+    gate["last_failing"] = {"head": head_sha(work_dir(state)), "detail": detail, "fix_commits": _fix_marker(gate)}
+
+
+def _reusable_failure(state: dict[str, Any], gate: dict[str, Any]) -> Optional[str]:
+    """差し戻しの後の同じ HEAD なら、前回の失敗の判定（`detail`）を返す（#1693 F3・決定 5）。使い回せなければ `None`。
+
+    HEAD が前回落ちた地点と同じで、その後に取り込みも取り消しも無いときだけ使い回す。取り込めば HEAD が進み、
+    取り消しはコミットを積むため、どちらも HEAD が変わる。取り込みの数（`fix_commits`）も合わせて見る。
+    """
+    last = gate.get("last_failing") or {}
+    if not last.get("head") or not gate.get("lint_rejections"):
+        return None
+    head = head_sha(work_dir(state))
+    if head != last["head"] or _fix_marker(gate) != safe_int(last.get("fix_commits")):
+        return None
+    detail = f"{last.get('detail')}（HEAD が前回の判定と同じため使い回した）"
+    _record_gate_check(gate, "", False, detail, 0.0, mode="reused")
+    return detail
 
 
 def _final_fix_stop(state: dict[str, Any], gate: dict[str, Any]) -> Optional[str]:
@@ -159,7 +172,7 @@ def _reusable_whole_test(state: dict[str, Any]) -> bool:
     record = state.get("whole_test") or {}
     if not (record.get("ran") and record.get("status") == "pass") or record.get("reverted"):
         return False
-    head = git_out(work_dir(state), ["rev-parse", "HEAD"])
+    head = head_sha(work_dir(state))
     return bool(head) and head == record.get("head")
 
 
@@ -218,12 +231,12 @@ def _emit_cross_review(path: pathlib.Path, state: dict[str, Any], gate: dict[str
     statefile.emit(FINAL_GATE="cross-review")
 
 
-def _record_gate_check(gate: dict[str, Any], command: str, passed: bool, detail: str, seconds: float) -> None:
+def _record_gate_check(gate: dict[str, Any], command: str, passed: bool, detail: str, seconds: float, mode: Optional[str] = None) -> None:
     """最終ゲートのチェック 1 件を `checks` へ追記する。"""
     gate.setdefault("checks", []).append(
         {
             "at": statefile.now(),
-            "mode": gate["mode"],
+            "mode": mode or gate["mode"],
             "command": command,
             "status": "pass" if passed else "fail",
             "detail": detail,
@@ -237,6 +250,19 @@ def _gate_passed(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]
     statefile.save(path, state)
     info(f"✅ 最終ゲートを通過しました（{detail}）")
     statefile.emit(FINAL_GATE="passed")
+
+
+def _gate_recheck(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], detail: str) -> None:
+    # **修正の依頼ではない（`recheck`）。** 駆動は修正の CLI を起動せずに `final-gate` を打ち直す。
+    # 起点を取り消し後の HEAD へ置き直すのは、取り消しのコミットを後の `merge-final-fix` の範囲へ
+    # 入れないためである。入れると未申告として取り消され、取り消した項目が PR へ戻る。
+    gate["status"] = "recheck"
+    gate["fix_base_sha"] = head_sha(work_dir(state))
+    statefile.save(path, state)
+    push_with_retry_marker(path, state, gate)
+    info(f"↩ 最終ゲートを落とした原因の項目を取り消しました（{detail}）。次の最終ゲートが確かめます")
+    statefile.emit(FINAL_GATE="recheck")
+    sys.exit(2)
 
 
 def _gate_limit_reached(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], detail: str, why: str) -> None:
@@ -263,7 +289,13 @@ def _gate_failing(
     # `fix_base_sha` を流用することもできない。あれは最後の群の検証が落ちた地点で
     # あり、そこから HEAD までには**検証を通った正常なコミット**が並ぶ。範囲に含めると
     # 未申告として扱われ、その全部が取り消される。
-    gate["fix_base_sha"] = git_out(work_dir(state), ["rev-parse", "HEAD"])
+    gate["fix_base_sha"] = head_sha(work_dir(state))
+    # 修正の依頼に載せる内容（落ちた検査と直前の差し戻し）。`launch-cli.sh` が `RF_FINAL_FIX_REQUEST` で渡す（F2）
+    request = prepush_lint.fix_request(gate)
+    if request:
+        gate["fix_request"] = request
+    else:
+        gate.pop("fix_request", None)
     impl = _final_fix_impl(state, gate)
     statefile.save(path, state)
     info(f"❌ 最終ゲートが落ちました（{detail}）。修正ラウンド {gate['fix_rounds']} — 修正担当は {impl} です")
@@ -276,203 +308,6 @@ def _final_fix_impl(state: dict[str, Any], gate: dict[str, Any]) -> str:
     impl = str(gate.get("impl") or state.get("implementer") or "")
     gate["impl"] = impl
     return impl
-
-
-def _final_fix_scope(gate: dict[str, Any], impl: str) -> IntakeScope:
-    """最終ゲートの修正の取り込み 1 回分の範囲の値。
-
-    起点も結末の記録も最終ゲートの記録が持つ。改善項目にも提案ラウンドにも
-    属さないため、群は関わらない。
-    """
-    rounds = safe_int(gate.get("fix_rounds"))
-    return IntakeScope(
-        holder=gate,
-        base_key="fix_base_sha",
-        records=gate,
-        phase="final-fix",
-        attempt=rounds,
-        impl=impl,
-        label=f"final-gate-fix{rounds}",
-    )
-
-
-def _close_failed_final_fix(
-    path: pathlib.Path,
-    state: dict[str, Any],
-    gate: dict[str, Any],
-    scope: IntakeScope,
-    outcome: Any,
-) -> None:
-    """最終ゲートの修正担当が結果を残さなかったときに、取り消して判定へ戻す。
-
-    **修正ラウンドは進めない。** 進めるのは次の最終ゲートで、そこが打ち切りを見る。
-    起動し直しても解けない結末（利用上限）だけはフラグ（`no_relaunch`）を立て、次の最終
-    ゲートを「取り消さず報告」で終わらせる（#728 の決定 11）。
-    """
-    closed = close_without_result(path, state, scope, outcome)
-    if closed.range_unknown:
-        statefile.save(path, state)
-        die(
-            f"最終ゲートの修正の範囲を確定できませんでした（起点 {gate.get('fix_base_sha')}）。検証できない修正は採りません",
-            code=2,
-        )
-    if not closed.relaunch_same_agent:
-        gate["no_relaunch"] = True
-    statefile.save(path, state)
-    if closed.reverted:
-        # 最終ゲートは push 済みの地点を判定する。取り消した後の HEAD を公開してから判定へ戻す
-        push_with_retry_marker(path, state, gate)
-    sys.exit(2)
-
-
-def _collect_final_fix_range(
-    path: pathlib.Path,
-    state: dict[str, Any],
-    gate: dict[str, Any],
-    scope: IntakeScope,
-    impl: str,
-    work: str,
-) -> tuple[dict[str, Any], str, list[str]]:
-    """修正担当の結果と、取り込む範囲（HEAD と起点からのコミット）を確定する。
-
-    結果が無いとき・範囲を確定できないときは、ここで終了する。
-    """
-    outcome = read_result(state, impl, "final-fix")
-    if outcome.payload is None:
-        _close_failed_final_fix(path, state, gate, scope, outcome)
-    payload = outcome.payload
-    head_now = git_out(work, ["rev-parse", "HEAD"]) or ""
-    ordered_range = commits_in_range(work, gate.get("fix_base_sha"), head_now)
-    if ordered_range is None:
-        statefile.save(path, state)
-        die(
-            "最終ゲートの修正の範囲を確定できませんでした"
-            f"（起点 {gate.get('fix_base_sha')} / HEAD {head_now}）。"
-            "検証できない修正は採りません",
-            code=2,
-        )
-    return payload, head_now, ordered_range
-
-
-def _verify_final_fix_commits(
-    state: dict[str, Any],
-    work: str,
-    payload: dict[str, Any],
-    ordered_range: list[str],
-) -> tuple[list[str], list[str]]:
-    """申告されたコミットを検証し、未申告のコミットと問題の一覧を返す。"""
-    claimed_shas = reported_shas(payload)
-    unassigned = unassigned_fix_commits(work, claimed_shas, ordered_range)
-    # **テストコマンドは渡さない。** 合否は `final-gate` が採った側で 1 度だけ見る
-    # （CI で見る実行で手元のテストを走らせないため）。
-    facts = collect_commit_facts(
-        work,
-        claimed_shas,
-        set(ordered_range),
-        "",
-        state["head_branch"],
-    )
-    problems = [p for p in (verify_final_fix_commit(c, state.get("target_scope") or []) for c in facts) if p]
-    return unassigned, problems
-
-
-def _apply_final_fix_verdict(
-    path: pathlib.Path,
-    state: dict[str, Any],
-    gate: dict[str, Any],
-    scope: IntakeScope,
-    head_now: str,
-    ordered_range: list[str],
-    unassigned: list[str],
-    problems: list[str],
-) -> None:
-    """検証の結果に応じて、修正を取り消すか最終ゲートの記録へ取り込む。"""
-    if unassigned:
-        info(f"❌ どの申告にも含まれていない修正コミットが {len(unassigned)} 件あります（{', '.join(s[:7] for s in unassigned[:5])}）")
-    for problem in problems:
-        info(f"❌ {problem}")
-
-    if unassigned or problems:
-        # **ここは取り消す。** 「上限に達しても取り消さない」のは*採用した改善項目*
-        # の話で、検証を受けていない修正コミットは別である。取り消せば HEAD は
-        # 最終ゲートが見た地点へ戻り、公開済みの内容と食い違わない。
-        discard_unverified(path, state, scope, ordered_range)
-    else:
-        gate["fix_base_sha"] = head_now
-        gate.setdefault("fix_commits", []).extend(ordered_range)
-        info(f"修正を取り込みました（{len(ordered_range)} コミット）")
-
-
-def cmd_merge_final_fix(args: argparse.Namespace) -> None:
-    """Step 7 — 最終ゲートの修正結果を取り込む。
-
-    **`merge-fix` では代用できない。** あちらは適用ラウンド（群）の記録を読み、
-    範囲の起点・担当・改善項目の 3 つをそこから取る。最終ゲートにはそのどれも無い。
-    実際に流用すると次の 3 つが起きる。
-
-    | 流用したときに起きること | なぜ |
-    | --- | --- |
-    | 「起点 None」で止まり修正を取り込めない | 最後の群が検証を通っていれば `fix_base_sha` が無い |
-    | 正常なコミットまで取り消される | 古い起点が残っていると、そこから HEAD までが範囲になる |
-    | トレーラーが揃わず全件が不正になる | `Item-Id` を要求するが、最終ゲートの修正は項目に属さない |
-
-    終了コード: 0 = 取り込んだ / 2 = 取り込めなかった（範囲を確定できない、または
-    担当が結果を残さなかった）。合否そのものは判定せず、**次の `final-gate` が
-    採った側で 1 度だけ見る**。
-
-    **結果を残さなかったときも、作られたコミットは取り消す。** 取り消さずに抜けると、
-    次の最終ゲートがそのコミットを含む先端でテストし、落ちれば起点をそこへ置き直す。
-    未検証の差分が Pull Request に残る（#674）。
-    """
-    path, state = load_state(args.id)
-    gate = state.setdefault("final_gate", {"fix_rounds": 0, "checks": []})
-    impl = str(gate.get("impl") or "")
-    if not impl:
-        die(
-            "最終ゲートの修正担当が記録されていません。先に `final-gate` を実行してください",
-            code=4,
-        )
-
-    work = work_dir(state)
-    discard_impl_leftovers(state, work)
-    flush_pending_push(path, state, gate)
-
-    scope = _final_fix_scope(gate, impl)
-    if already_closed(scope):
-        info("↻ この最終ゲートの修正の試行は結果なしとして記録済みです")
-        sys.exit(2)
-
-    payload, head_now, ordered_range = _collect_final_fix_range(
-        path,
-        state,
-        gate,
-        scope,
-        impl,
-        work,
-    )
-    unassigned, problems = _verify_final_fix_commits(
-        state,
-        work,
-        payload,
-        ordered_range,
-    )
-    _apply_final_fix_verdict(
-        path,
-        state,
-        gate,
-        scope,
-        head_now,
-        ordered_range,
-        unassigned,
-        problems,
-    )
-
-    gate.setdefault("durations", {})["fix"] = gate.get("durations", {}).get("fix", 0) + safe_int(payload.get("elapsed_seconds"))
-    statefile.save(path, state)
-    # **取り消したかどうかに関わらず公開する。** 最終ゲートは push 済みの地点なので、
-    # 公開しないと Pull Request の内容と手元の HEAD が食い違ったまま次の判定へ入る。
-    # CI で見る実行では、push しないと読む対象のチェックそのものが動かない。
-    push_with_retry_marker(path, state, gate)
 
 
 def _local_gate(path: pathlib.Path, state: dict[str, Any]) -> tuple[bool, str, Optional[dict[str, Any]]]:

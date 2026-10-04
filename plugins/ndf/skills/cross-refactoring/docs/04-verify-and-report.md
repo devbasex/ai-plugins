@@ -351,14 +351,15 @@ Pull Request に残る。**修正の回数はここでは進めない。** 進�
 /ndf:cross-review "$PR" --focus "項目をまたいだ整合を見る。個々の改善項目の妥当性は範囲テストで判定済みのため対象外とする。複数の項目で触った箇所の重複・打ち消し・命名の揺れ、取り消した項目の残骸、生成物と配布物の同期を確かめる"
 ```
 
-**cross-review が終わったら、その最終ステータスを渡して `finalize` を呼ぶ。** 読むのは
-cross-review の状態ファイルで、`state.py report` の Markdown は読まない。`final` が `approved` で、最終スイープが
-検証済み（`sweep.verified`）・残り 0・修正のコミット無し（`sweep.commit` が null）のときだけ `approved` を渡す。
-`final` が `approved` でもそれ以外なら `unverified`（最後の HEAD は承認されていない）、他は `final` の値を渡す。
-cross-review の駆動は、この値を結果の `metrics.review_status` に載せる。
+**cross-review が終わったら、その最終ステータスを渡して `finalize` を呼ぶ。** 最終ステータスは
+`scripts/lib/loop_drive.py` の `review_status` だけが cross-review の状態ファイルから決め、cross-review の駆動が
+結果の `metrics.review_status` に載せる。`finalize` は `approved` のときだけ配分の履歴へ 1 行を足す。
 
-`drive.py` はこの地点で `pause: cross-review` を返して止まる。結果ファイルへ `{"review_status": "<値>"}` を書いて
-打ち直すと、`finalize <ID> --review-status <値>` を呼んで終わる。
+`drive.py` はこの地点で `pause: cross-review` を返して止まる。`items[0].command` は cross-review の駆動に
+`--result-file <回答ファイル>` を付けたもので、`items[0].cwd`（対象のリポジトリの根）で打つ。駆動が ok で終わると、
+その最終ステータスを回答ファイル（`items[0].result_file`）へ `{"review_status": "<値>"}` として書く（LLM は書かない）。打ち直すと
+`finalize <ID> --review-status <値>` を呼んで終わる。Draft を解除するのは、結果 JSON の `metrics.review_status` が
+`approved` のときだけである。
 
 ## 配分テーブル
 
