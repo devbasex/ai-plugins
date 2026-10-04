@@ -2257,6 +2257,20 @@
       "pending_source": "issues/issue-1333-design.md"
     },
     {
+      "term": "ジョブを飛ばした run",
+      "context": "ndf-workflow",
+      "meaning": "CI の成功した run のうち、conclusion が skipped のジョブを 1 つ以上含むもの。宣言の解析は CI の所要を測る代表に採らない",
+      "source": "",
+      "pending_source": "issues/issue-1664-design.md"
+    },
+    {
+      "term": "代表の run",
+      "context": "ndf-workflow",
+      "meaning": "宣言の解析がワークフローごとに壁時計とテストの所要を測る 1 件の run。取得した候補（ワークフローごとに新しい順の成功の run を最大 5 件）のうち、ジョブを飛ばしていない最新のもの",
+      "source": "",
+      "pending_source": "issues/issue-1664-design.md"
+    },
+    {
       "term": "入力の指紋",
       "context": "ndf-workflow",
       "meaning": "解析が読んだファイルの、HEAD の木での blob の SHA と、ブランチの構成の組。プロジェクトの宣言の新しさの判定に使う",
@@ -3171,6 +3185,24 @@
       "context": "ndf-cross-refactoring",
       "meaning": "cross-refactoring の propose で改善の提案を出す参加者",
       "pending_source": "issues/issue-919-requirements.md"
+    },
+    {
+      "term": "着手前のテスト",
+      "context": "ndf-cross-refactoring",
+      "meaning": "`cross-refactoring` の init が改修の前に 1 回走らせるテスト。CI に任せる戦略では --scope のテストの置き場所の範囲テスト、ほかは全体テスト（round-only はラウンドテストも）",
+      "source": ""
+    },
+    {
+      "term": "手順の枠",
+      "context": "ndf-cross-refactoring",
+      "meaning": "`cross-refactoring` で提案とリファクタリング計画に充てる時間。着手前のテストの終わり（started_at + 実測）から 0.20·B と 0.10·B。枠が想定最大時間に収まらずに止めた後の init の打ち直しでは打ち直した時刻から数える",
+      "source": ""
+    },
+    {
+      "term": "範囲テストの所要",
+      "context": "ndf-cross-refactoring",
+      "meaning": "CI に任せる戦略で、着手前に走らせる範囲テストの所要の見込み（秒）。同じ範囲の履歴の実測か、範囲が全体テストの suite のパスを覆うときの w",
+      "source": ""
     }
   ]
 }
