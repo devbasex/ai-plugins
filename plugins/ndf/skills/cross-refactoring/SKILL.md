@@ -28,7 +28,7 @@ allowed-tools:
 - [docs/02-plan-and-implement.md](docs/02-plan-and-implement.md) — リファクタリング計画・テスト追加・実装
 - [docs/03-review-viewpoints.md](docs/03-review-viewpoints.md) — 最終ゲートの `cross-review` へ渡す観点
 - [docs/04-verify-and-report.md](docs/04-verify-and-report.md) — 検証/修正・危険フラグ・最終ゲート・配分テーブル・報告
-- [scripts/refactor.py](scripts/refactor.py) — 状態管理（uv 自己完結、標準ライブラリのみ）
+- [scripts/refactor.py](scripts/refactor.py) — 状態管理。外部パッケージ（`md` / `mdtable` のグループ）を import の前に `deps.require` で用意する（import できなければ uv の環境で起動し直す）
 - [scripts/prepare-worktrees.sh](scripts/prepare-worktrees.sh) — 作業ディレクトリ準備と Skill 配置
 - [scripts/launch-cli.sh](scripts/launch-cli.sh) — 手順ごとのプロンプト組み立てと CLI 起動
 - 監視と CLI 起動の実体は `../../scripts/lib/`（プラグインルート直下の収束ループの共通ライブラリ）
@@ -138,8 +138,7 @@ agy と kiro は取れないため、モデルを比べたいなら `--model agy
 - 対象のリポジトリ（またはその worktree）の中で会話を始めている。単独起動のコマンドは**すべてそこで打ち**、Skill の
   ディレクトリへ移らない。対象のリポジトリは打った場所が属する git の作業ツリーの根で決まり、git の作業ツリーでない
   場所では assess も drive も「対象のリポジトリを決められない」と出して止まる
-- プロダクションコードの差分がある。起動の前に `assess` を打ち、飛ばしてよいかを見る。**終了コード 3 なら
-  起動しない**（2 は判定できなかったことを示し、飛ばしてよいとは読まない）
+- プロダクションコードの差分がある。起動の前に `assess` を打ち、飛ばしてよいかを見る（読み方は下の終了コードの表）
 
 シェルの変数は呼び出しをまたいで残らないため、この節と「実行」の各ブロックを 1 回の呼び出しとし、先頭で毎回 `$R` を
 決め直す。`<入口を探すコマンド>` の行は [scripts-lookup.md](../development-workflow/references/scripts-lookup.md) の
@@ -153,6 +152,14 @@ RF=$(bash "$R/scripts/resolve.sh" scripts cross-refactoring) || exit 3
 BASE="<開発の起点>"   # worktree-setup.sh check の「開発の起点:」の行の名前
 python3 "$RF/refactor.py" assess --base "origin/$BASE"; echo "exit=$?"
 ```
+
+| 終了コード | 意味 | cross-refactoring を |
+| --- | --- | --- |
+| 0 | プロダクションコードの差分がある | 起動する |
+| 3 | 差分が無い（飛ばしてよい） | 起動しない |
+| 2 | 対象のリポジトリか `<base>` を解けない（判定できない） | 飛ばしてよいとは読まない。対象のリポジトリの中で、起点を直して打ち直す |
+| 69 | 依存が欠けた（`deps.require` が外部パッケージを用意できずに止めた。判定していない）。標準エラーに `❌ [ndf deps]` の行 | 起動するかを決めない（起動しないとも飛ばしてよいとも読まない）。理由を見て依存を入れ、打ち直す |
+| 1 | `uv run` 自身が失敗した（ネットワークが無い・lock を解決できない。判定していない）。標準エラーは uv の `error:` の行 | 69 と同じに扱う |
 
 - Jev を使うには、環境変数 `AI_GATEWAY_API_KEY` があり、対象が公開リポジトリであること。
   `NDF_JEV=0` で使わない。使えなければ実装担当が同じ判断をする（止まらない）

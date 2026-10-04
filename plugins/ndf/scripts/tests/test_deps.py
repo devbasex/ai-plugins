@@ -90,9 +90,9 @@ def test_several_importable_groups_return_without_reexec(tmp_path):
     assert not (tmp_path / "uv.log").exists()
 
 
-def test_after_reexec_a_missing_group_among_several_stops_with_code_3(tmp_path):
+def test_after_reexec_a_missing_group_among_several_stops_as_deps_missing(tmp_path):
     p = run_entry(tmp_path, ["json"], uv=True, more={"u": ["ndf_no_such_module"]}, NDF_DEPS_REEXEC=str((tmp_path / "entry.py").resolve()))
-    assert p.returncode == 3 and "after" not in p.stdout
+    assert p.returncode == deps.EXIT_DEPS_MISSING and "after" not in p.stdout
     assert "u のパッケージ（ndf_no_such_module）" in p.stderr
 
 
@@ -124,9 +124,9 @@ def test_reexec_argv_keeps_the_single_group_form():
     assert deps.reexec_argv("uv", "md", "s.py", ["a"], Path("/p")) == deps.reexec_argv("uv", ["md"], "s.py", ["a"], Path("/p"))
 
 
-def test_after_reexec_a_missing_package_stops_with_code_3(tmp_path):
+def test_after_reexec_a_missing_package_stops_as_deps_missing(tmp_path):
     p = run_entry(tmp_path, ["ndf_no_such_module"], uv=True, NDF_DEPS_REEXEC=str((tmp_path / "entry.py").resolve()))
-    assert p.returncode == 3 and "after" not in p.stdout
+    assert p.returncode == deps.EXIT_DEPS_MISSING and "after" not in p.stdout
     assert "import できない" in p.stderr
     assert not (tmp_path / "uv.log").exists()
 
@@ -172,8 +172,36 @@ def test_uv_that_cannot_be_installed_stops_with_the_manual_command(monkeypatch, 
     monkeypatch.setitem(deps.GROUPS, "t", ["ndf_no_such_module"])
     with pytest.raises(SystemExit) as e:
         deps.require("t")
-    assert e.value.code == 3
+    assert e.value.code == deps.EXIT_DEPS_MISSING
     assert deps.INSTALL_HINT in capsys.readouterr().err
+
+
+def test_a_project_without_its_declaration_stops_as_deps_missing(monkeypatch, tmp_path, capsys):
+    """pyproject.toml と uv.lock が無い根は、uv を探さずに依存の欠けで止まる（#1654）。"""
+    monkeypatch.delenv("NDF_DEPS_REEXEC", raising=False)
+    monkeypatch.setitem(deps.GROUPS, "t", ["ndf_no_such_module"])
+    monkeypatch.setattr(deps, "find_uv", lambda: pytest.fail("宣言が無いのに uv を探した"))
+    with pytest.raises(SystemExit) as e:
+        deps.require("t", project=tmp_path)
+    assert e.value.code == deps.EXIT_DEPS_MISSING
+    assert capsys.readouterr().err.startswith("❌ [ndf deps] 外部パッケージの宣言が無い")
+
+
+def test_deps_missing_does_not_overlap_the_common_codes():
+    """依存の欠けは 0〜3（3 は飛ばしてよい）と 10〜29（承認ゲート・判断待ち）のどれとも重ならない（#1654 の I2）。"""
+    assert deps.EXIT_DEPS_MISSING not in (*range(0, 4), *range(10, 30))
+
+
+def test_refactor_assess_without_its_packages_stops_as_deps_missing(tmp_path):
+    """依存の欠けた python（-S で site-packages を外す）で起動し直した後の assess は、飛ばしてよい（3）でなく
+    依存の欠けで終わる（#1654 の受け入れ条件 1）。"""
+    script = PLUGIN / "skills" / "cross-refactoring" / "scripts" / "refactor.py"
+    env = dict(os.environ, NDF_DEPS_REEXEC=str(script.resolve()))
+    p = subprocess.run(
+        [sys.executable, "-S", str(script), "assess", "--base", "HEAD"], capture_output=True, text=True, env=env, cwd=tmp_path
+    )
+    assert p.returncode == deps.EXIT_DEPS_MISSING, p.stderr
+    assert p.stderr.startswith("❌ [ndf deps]") and p.stdout == ""
 
 
 def test_install_uv_uses_pip_without_curl(monkeypatch):
