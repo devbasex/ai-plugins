@@ -344,8 +344,7 @@ def cmd_verify(args: argparse.Namespace) -> None:
         return
 
     if _whole_test(path, state, _flag_items(state)):
-        failing = _items_in(state, FAILING)
-        _to_fix(path, state, failing, started, "全体のテストを落とした原因の項目")
+        _to_fix(path, state, _items_in(state, FAILING), started, "全体のテストを落とした原因の項目")
         return
     _account(state, started)
     finish_phase(state, "verify")
