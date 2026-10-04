@@ -90,7 +90,7 @@ def _ledger_module():
 def _call_step(cmd: list[str], extra_env: dict, seat: str = "", account: str = "") -> tuple[int, str]:
     """子のスクリプトを 1 本打つ。環境は今のプロセスの環境に `extra_env` を足したもの（記録には足した分だけが残る）。
     担当の起動では claude のアカウントの環境をこの中で名前から組む（記録に残るのは席とアカウントの名前だけ。#919）。"""
-    return call(cmd, assignee_env.env_for(seat, account or None, {**os.environ, **extra_env}))
+    return call(cmd, assignee_env.seat_env(seat, account or None, {**os.environ, **extra_env}))
 
 
 @durable.step(name="refactor_drive.read_json")

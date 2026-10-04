@@ -5,7 +5,7 @@ cross-review と cross-refactoring の担当は CLI プロセスとして起動�
 設定ディレクトリへ向け、トークンとスコープの変数を外したもの）で起動する。それ以外は元の環境のまま。
 
 **状態ファイルと耐久の記録へは環境ではなくアカウントの名前だけを書く。** 環境は起動のたびに
-`env_for` で名前から組み直す。認証の情報のファイルはここから開かない（開くのは `claude_accounts` の中だけ）。
+`seat_env` で名前から組み直す。認証の情報のファイルはここから開かない（開くのは `claude_accounts` の中だけ）。
 
 `claude_accounts` は使うときだけ import する。読む側の多くはアカウントを使わずにこのモジュールを読む。
 """
@@ -29,7 +29,7 @@ def initial_account(environ: Optional[Mapping[str, str]] = None) -> Optional[str
     return environ.get(NAME_ENV) or None
 
 
-def env_for(seat: str, account: Optional[str], base: Optional[Mapping[str, str]] = None) -> dict[str, str]:
+def seat_env(seat: str, account: Optional[str], base: Optional[Mapping[str, str]] = None) -> dict[str, str]:
     """担当の起動の環境。claude の席にアカウントがあればその環境、無い・用意できなければ元の環境の写し。"""
     env = dict(os.environ if base is None else base)
     if not account or not seat.startswith("claude"):

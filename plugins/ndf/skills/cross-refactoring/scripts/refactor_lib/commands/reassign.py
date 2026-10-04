@@ -136,7 +136,7 @@ def _target_label(to: assignment.Assignee) -> str:
     return f"claude@{to.account}" if to.account else to.seat
 
 
-def _emit(step: str, failed: assignment.Assignee, reason: str, d: assignment.NoResultDecision) -> None:
+def _emit_decision(step: str, failed: assignment.Assignee, reason: str, d: assignment.NoResultDecision) -> None:
     if d.action == assignment.ABORT:
         info(f"⚠ {failed.label()} は結果を残さず、振り替え先もありません（{reason}）")
         statefile.emit(REASSIGN="abort")
@@ -164,7 +164,7 @@ def _reassign_implementer(path: pathlib.Path, state: dict[str, Any], step: str) 
     reason = str(outcome.reason or "missing")
     entry = _recorded(state, step, attempt, failed, (outcome.monitor or {}).get("ended_at"))
     if entry is not None:
-        _emit(step, failed, reason, _decision_of(entry))
+        _emit_decision(step, failed, reason, _decision_of(entry))
     if step in UNDO_STEPS:
         record = state.setdefault("phases", {}).setdefault(step, {})
         scope = IntakeScope(
@@ -182,7 +182,7 @@ def _reassign_implementer(path: pathlib.Path, state: dict[str, Any], step: str) 
     d = _decide(state, failed, reason, step, attempt, busy=[])
     _apply(state, step, d)
     statefile.save(path, state)
-    _emit(step, failed, reason, d)
+    _emit_decision(step, failed, reason, d)
 
 
 def _reassign_proposers(path: pathlib.Path, state: dict[str, Any], seats: list[str]) -> None:

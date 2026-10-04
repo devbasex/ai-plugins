@@ -283,7 +283,7 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
         last = (self.state().get("rounds") or [{}])[-1]
         accounts = {r.get("seat"): r.get("account") for r in last.get("seats") or []}  # claude のアカウント（名前から環境を組む）
         for a in agents:
-            self.sh("launch-reviewer.sh", a, str(self.pr), rnd, env=assignee_env.env_for(a, accounts.get(a), self.env))
+            self.sh("launch-reviewer.sh", a, str(self.pr), rnd, env=assignee_env.seat_env(a, accounts.get(a), self.env))
         call(
             [sys.executable, str(HERE / "monitor.py"), str(self.pr), "--phase", "review", "--agents", ",".join(agents)],
             self.env,
