@@ -14,12 +14,7 @@ init → ラウンド（起動・監視・取り込み・根拠の検証・判�
 
 止まるときの JSON の形と終了コードの表は `scripts/lib/drive_pause.py` にある。
 
-件数（metrics）は状態ファイルから数える: rounds / prs / findings / fixed / deferred / rejected /
-unresolved / final / review_status。
-
-`--result-file PATH` を渡すと、ok で終わったとき（終わった収束ループの結果をそのまま返すときを含む）だけ、
-最終ステータスを回答ファイルへ `{"review_status": "<metrics.review_status>"}` として書く（形は `loop_drive.review_answer`）。
-cross-refactoring の単独起動の最終ゲートが、この値を finalize へ渡す（#1656）。gate と stopped では書かない。
+件数（metrics）は状態ファイルから数える: rounds / prs / findings / fixed / deferred / rejected / unresolved / final / review_status。
 """
 
 from __future__ import annotations
@@ -41,7 +36,7 @@ import drive_pause as dp  # noqa: E402
 import durable  # noqa: E402
 import step_result as sr  # noqa: E402
 from drive_pause import Stop  # noqa: E402
-from loop_drive import call, durable_identity, keep_finished, parse_vars, review_answer, review_status  # noqa: E402,F401  テストは `call` をこのモジュールの上で差し替える
+from loop_drive import call, durable_identity, keep_finished, parse_vars, review_status, write_review_answer  # noqa: E402,F401  テストは `call` をこのモジュールの上で差し替える
 
 TOOL = "cross-review-drive"
 DOCS02 = SKILL / "docs" / "02-fix-and-rotation.md"
@@ -480,22 +475,12 @@ def review_drive(pr: int, rotate_mode: str, init_args: list[str]) -> dict:
     return outcome(ok(act(d, "stopped", "段階の数が上限を超えた", 1)))
 
 
-def write_answer(path: Path, out: dict) -> None:
-    """ok の結果なら最終ステータスを回答ファイルへ書く。書けなくても結果と終了コードは変えない（読む側が無しとして扱う）。"""
-    if out.get("status") != "ok":
-        return
-    try:
-        path.write_text(json.dumps(review_answer(out.get("metrics"))))
-    except OSError as e:
-        print(f"⚠ 回答ファイル {path} を書けなかった: {e}", file=sys.stderr)
-
-
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("pr", type=int)
     ap.add_argument("--rotate-mode", choices=["light", "squash"], default="light")
     ap.add_argument("--reopen", action="store_true", help="差分を足さずに、終わった収束ループへラウンドを足す")
-    ap.add_argument("--result-file", help="ok で終わったとき最終ステータスを書く回答ファイル（state.py init へは渡さない）")
+    ap.add_argument("--result-file", help="ok で終わったとき最終ステータスを書く回答ファイル（loop_drive.write_review_answer。単独起動の cross-refactoring の最終ゲートが読む。#1656）")
     a, rest = ap.parse_known_args(argv)
     d = Drive(a.pr, a.rotate_mode, rest, reopen=a.reopen)
     try:
@@ -503,7 +488,7 @@ def main(argv: list[str] | None = None) -> None:
     except (Stop, durable.DurableError) as e:
         out, code = dp.stopped(TOOL, str(e), {}, getattr(e, "code", 1)), dp.EXIT_STOPPED
     if a.result_file:
-        write_answer(Path(a.result_file), out)
+        write_review_answer(Path(a.result_file), out)
     try:
         sr.emit(out, code)
     except SystemExit as e:

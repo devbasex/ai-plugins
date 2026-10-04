@@ -6,6 +6,7 @@ KEY=VALUE の読み取り・最終ステータスの決定・回答ファイル�
 
 from __future__ import annotations
 
+import json
 import shlex
 import subprocess
 import sys
@@ -89,3 +90,16 @@ def review_answer(metrics: dict | None) -> dict:
     回答ファイルを書くのは cross-review の駆動（`--result-file`）と supervise の `worker_steps` で、どちらもこの形だけを書く（#1655 の I2）。
     """
     return {"review_status": (metrics or {}).get("review_status") or "unknown"}
+
+
+def write_review_answer(path: Path, out: dict) -> None:
+    """ok の結果（終わった収束ループの結果をそのまま返すときを含む）なら `review_answer` を回答ファイルへ書く。
+
+    gate と stopped では書かない。書けなくても結果と終了コードは変えない（読む側が無しとして扱う）。
+    """
+    if out.get("status") != "ok":
+        return
+    try:
+        path.write_text(json.dumps(review_answer(out.get("metrics"))))
+    except OSError as e:
+        print(f"⚠ 回答ファイル {path} を書けなかった: {e}", file=sys.stderr)
