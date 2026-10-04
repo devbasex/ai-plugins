@@ -19,7 +19,8 @@ init → 提案 → 改修計画 → テスト追加 → 実装 → 検証と修
 駆動が `--result-file` で回答ファイルへ書いた値（`loop_drive.review_status` が決めたもの）をそのまま finalize へ渡す（#1656）。
 対象のリポジトリは打った場所（現在のディレクトリが属する git の作業ツリーの根）で決まる。決められなければ耐久の記録を開かずに
 中断する（`metrics.exit` 2。#1655）。根は耐久ワークフローの入力として 1 度だけ記録し、最終ゲートの止まりの `items[0].cwd` に載せる。
-件数（metrics）は状態ファイルから数える: items / adopted / reverted / deferred / fix_rounds（項目の修正の回数の和）/ final_gate。
+件数（metrics）は状態ファイルから数える: items / adopted / reverted / deferred / fix_rounds（項目の修正の回数の和）/ final_gate / reassigned（振り替えの回数。#919）。
+担当の工程の起動と、結果を残さなかった担当の振り替えは `assignee_launch.py` にある。
 採用（adopted）は最終ゲートが `passed` のときだけ数え、通っていなければ 0 にして残った改善項目の数を unconfirmed に出す。
 unpublished は手元の HEAD が公開した地点より進んでいるか（plan-comment が判定できなければ null）。
 done・stopped・pause の各出口で、結果 JSON を組む前に `refactor.py plan-comment` を 1 度だけ打ち、リファクタリング計画のコメントを書き直す（#1692）。
@@ -46,6 +47,7 @@ deps.require("md", "mdtable", "durable")
 
 import drive_pause as dp  # noqa: E402
 import durable  # noqa: E402
+import assignee_env  # noqa: E402
 from drive_pause import Stop  # noqa: E402
 import proc  # noqa: E402
 from loop_drive import call, durable_identity, parse_vars  # noqa: E402  テストは `call` をこのモジュールの上で差し替える
@@ -53,18 +55,15 @@ from loop_drive import call, durable_identity, parse_vars  # noqa: E402  テス�
 if str(HERE) not in sys.path:
     sys.path.append(str(HERE))
 from refactor_lib.vocabulary import PHASES  # noqa: E402
+from assignee_launch import FIX_PHASES, LOOP_LIMIT, MONITOR_STOPPED, AssigneeLaunch  # noqa: E402,F401
 
 TOOL = "cross-refactoring-drive"
 KIND = "refactor"  # 耐久の記録の種類
 ORDER = PHASES  # 手順の順序の定義元は状態側の手順一覧（`refactor_lib.vocabulary.PHASES`）
 # 修正の手順は検証の繰り返しの中にある。そこで止まった実行は検証から再開する（提案以降の CLI を起動し直さない）
 RESUME_AS = {"fix": "verify", "final-fix": "final"}
-# 監視が手順の上限で CLI を止めたときの終了コード（2 = TIMEOUT・5 = STALLED。表は monitor.py の冒頭）
-MONITOR_STOPPED = (2, 5)
 GO_FINAL = 2  # refactor.py の終了コード: 最終ゲートへ直に進む
 ABORT = 4  # refactor.py の終了コード: 中断
-FIX_PHASES = ("fix", "final-fix")  # 修正の工程
-LOOP_LIMIT = 100  # 検証と修正・最終ゲートの繰り返しの上限。締め切りは verify が時計で見る
 CR_DRIVE = HERE.parents[1] / "cross-review" / "scripts" / "drive.py"
 FOCUS = (
     "項目をまたいだ整合を見る。個々の改善項目の妥当性は範囲テストで判定済みのため対象外とする。"
@@ -88,10 +87,10 @@ def _ledger_module():
 
 
 @durable.step(name="refactor_drive.call")
-def _call_step(cmd: list[str], extra_env: dict) -> tuple[int, str]:
-    """子のスクリプトを 1 本打つ。環境は今のプロセスの環境に `extra_env` を足したもの（記録には足した分だけが残る）。"""
-    rc, out = call(cmd, {**os.environ, **extra_env})
-    return rc, out
+def _call_step(cmd: list[str], extra_env: dict, seat: str = "", account: str = "") -> tuple[int, str]:
+    """子のスクリプトを 1 本打つ。環境は今のプロセスの環境に `extra_env` を足したもの（記録には足した分だけが残る）。
+    担当の起動では claude のアカウントの環境をこの中で名前から組む（記録に残るのは席とアカウントの名前だけ。#919）。"""
+    return call(cmd, assignee_env.seat_env(seat, account or None, {**os.environ, **extra_env}))
 
 
 @durable.step(name="refactor_drive.read_json")
@@ -125,7 +124,7 @@ def _target_root() -> Path:
         raise Stop(str(e), e.code) from None
 
 
-class Drive:
+class Drive(AssigneeLaunch):
     def __init__(self, pr: int, init_args: list[str], root: str | None = None):
         self.pr = pr
         self.init_args = init_args
@@ -139,6 +138,18 @@ class Drive:
     def call(self, cmd: list[str]) -> tuple[int, str]:
         rc, out = _call_step(cmd, dict(self.extra_env))
         return rc, out
+
+    def launch(self, seat: str, phase: str) -> int:
+        """担当の CLI を起動する。claude のアカウントは状態ファイルの記録から引く（#919）。
+
+        提案は席が実装担当と同じでも提案担当の記録（`proposer_accounts`）を読む。提案の振り替えはそこへだけ書く。
+        """
+        s = self.state()
+        if phase == "propose" or seat != s.get("implementer"):
+            account = (s.get("proposer_accounts") or {}).get(seat)
+        else:
+            account = s.get("implementer_account")
+        return _call_step(["bash", str(HERE / "launch-cli.sh"), seat, phase, self.v["ID"]], dict(self.extra_env), seat, account or "")[0]
 
     def rf(self, *args: str, ok=(0,)) -> tuple[int, dict]:
         rc, out = self.call(_refactor_cmd(*args))
@@ -193,6 +204,7 @@ class Drive:
             **t,
             "fix_rounds": sum(int(it.get("fix_count") or 0) for it in items),
             "final_gate": self.v.get("FINAL_GATE") or (s.get("final_gate") or {}).get("status"),
+            "reassigned": sum(1 for e in s.get("no_results") or [] if e.get("decision") == "reassign"),  # 振り替えの回数（#919）
         }
         c.update(rest)
         if "PLAN_COMMENT" in self.v:
@@ -253,39 +265,6 @@ class Drive:
                 rows.append(row)
         return rc, rows
 
-    def impl_phase(self, phase: str, impl: str | None = None, stem: str | None = None) -> None:
-        """担当 1 者の工程。起動の失敗では止める。
-
-        **監視が手順の上限で CLI を止めたとき（`timeout` / `stalled`）は止めない。** 上限での打ち切りは
-        設計どおりの結末で（決定 23）、続く `merge-*` が止めたことを記録し（`note_stopped`）、
-        結果なしの記録と取り消しを持つ。ここで止めると、打ち直しが同じ CLI を余裕の分だけの上限で
-        起動し直して打ち切られ続け、`final-fix` では担当の途中のコミットを含む頭を最終ゲートへ渡す。
-
-        **修正の工程（`fix` / `final-fix`）は監視のどの非ゼロ終了でも止めない。** 結果なしの取り込みが
-        取り消しを持つためである。
-        """
-        self.v.pop("PHASE_TIMEOUT", None)
-        self.rf("start-phase", self.v["ID"], phase)
-        impl = impl or self.v["IMPL"]
-        self.sh(f"launch-cli.sh（{impl}・{phase}）", ["bash", str(HERE / "launch-cli.sh"), impl, phase, self.v["ID"]])
-        rc, _ = self.monitor(impl, phase, stem or f"{{agent}}-{phase}-rf{self.v['ID']}")
-        if rc != 0 and rc not in MONITOR_STOPPED and phase not in FIX_PHASES:
-            raise Stop(f"monitor.py（{impl}・{phase}）が終了コード {rc} で止まった（結果なし・起動失敗・早期の異常）", rc)
-
-    def propose(self) -> None:
-        """全参加者の提案。1 者が欠けても続ける（`merge-proposals` が除く）が、全員が欠けたら止める。"""
-        i = self.v["ID"]
-        launched = []
-        for a in self.v.get("RUNTIMES", "").split():
-            rc, _ = self.call(["bash", str(HERE / "launch-cli.sh"), a, "propose", i])
-            if rc == 0:
-                launched.append(a)
-        if not launched:
-            raise Stop("提案の CLI を 1 者も起動できなかった", 1)
-        rc, rows = self.monitor(",".join(launched), "propose", f"{{agent}}-propose-rf{i}")
-        if rc != 0 and not any(r.get("exit_code") == 0 for r in rows):
-            raise Stop(f"monitor.py（propose）が終了コード {rc} で止まり、提案を終えた参加者がいない", rc)
-
     # --- 進行（繰り返しは耐久ワークフロー `refactor_drive` が持つ） ---
     def start(self) -> None:
         """init（1 つの実行の回で 1 回だけ。I19）と worktree の用意。"""
@@ -304,7 +283,6 @@ class Drive:
             self.sh("prepare-worktrees.sh sync", ["bash", str(HERE / "prepare-worktrees.sh"), i, "sync", head.strip()])
             # 提案の前に指標を 1 回だけ測る（#1319）。測定の失敗では止めない（4 だけが中断）。
             self.rf("measure", i, ok=(0, 1))
-            self.rf("start-phase", i, "propose")
             self.propose()
             go_final = self.rf("merge-proposals", i, ok=(0, GO_FINAL))[0] == GO_FINAL
         if not go_final:

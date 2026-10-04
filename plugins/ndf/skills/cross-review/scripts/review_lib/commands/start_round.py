@@ -6,6 +6,7 @@ import argparse
 from typing import Any
 
 import review_lib  # noqa: E402
+import assignment  # noqa: E402
 from review_lib import (  # noqa: E402
     github,
     participants as participants_mod,
@@ -154,14 +155,24 @@ def cmd_start_round(args: argparse.Namespace) -> None:
     # 収束の判定が同じ値を読むためである。**2 本が同じ値を別々に取っていた分が 0 になる。**
     # **担当はラウンドを開くときに決めて残す。** 後から輪番を引き直すと、状態ファイルの
     # 記録と実際に起動した担当がずれる。
-    reviewers = participants_mod._round_reviewers(st, round_no)
+    # 振り替え（#919）は引き直しではない。judge が席を書き換え、結果なしの記録（`no_results`）に残す。
+    # 外した担当を引いて席を選べなければ、ラウンドを開かずに中断する。
+    try:
+        reviewers = participants_mod._round_reviewers(st, round_no)
+    except assignment.AssignmentError as e:
+        st["final"] = "error"
+        st["ended_at"] = review_lib._now()
+        store._save(args.pr, st)
+        gone = ", ".join(sorted(assignment.excluded_runtimes(st.get("no_results") or []))) or "なし"
+        review_lib.die(f"席を選べません（外した担当: {gone}）: {e}", code=1)
+        raise
     entry: dict[str, Any] = {
         "round": round_no,
         "pr": pr,
         "started_at": review_lib._now(),
         "reviewers": reviewers,
         # 席ごとの記録（席・ランタイム・モデル・組の相手。#1598 の AC13）。`reviewers` と同じ並び。
-        "seats": participants_mod.seat_records(reviewers),
+        "seats": participants_mod.seat_records(reviewers, participants_mod.round_accounts(st, reviewers)),
     }
     if head is not None:
         entry["head_sha"] = head.oid

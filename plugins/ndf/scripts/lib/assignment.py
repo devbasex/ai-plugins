@@ -338,3 +338,160 @@ def choose_implementer(
     if host in participants:
         return host, "host"
     return participants[0], "first"
+
+
+# ---------------------------------------------------------------- 結果なしの後の規則（#919）
+
+# 同じ担当を同じ条件で起動し直しても解けない理由（利用上限は待ちと相手の枠を使うだけで直らない。#619）。
+# **理由を足すときはこの集合だけを見直す。** 偽のときの扱い（振り替え・中断）は `after_no_result` が決める。
+NO_RELAUNCH_REASONS = frozenset({"usage_limit"})
+RELAUNCH, REASSIGN, ABORT = "relaunch", "reassign", "abort"  # 規則の答え: 同じ担当で起動し直す / 振り替える / 中断する
+
+
+def relaunch_same_agent(reason: Optional[str]) -> bool:
+    """同じ担当を同じ条件で起動し直せば解けるか（リトライ可否）。`NO_RELAUNCH_REASONS` に無ければ可。"""
+    return reason not in NO_RELAUNCH_REASONS
+
+
+@dataclass(frozen=True)
+class Assignee:
+    """担当。席の名前（`SEAT_PATTERN`）と、claude ではアカウントの名前（無ければ共有の設定）。"""
+
+    seat: str
+    account: Optional[str] = None
+
+    def runtime(self) -> str:
+        return seat_runtime(self.seat)
+
+    def label(self) -> str:  # 報告の形。アカウントがあれば `claude@<アカウント>`
+        return f"{self.seat}@{self.account}" if self.account else self.seat
+
+
+@dataclass(frozen=True)
+class NoResultDecision:
+    """`after_no_result` の答え。`to` は relaunch なら元の担当、reassign なら振り替え先、abort なら None。`drop` は元の担当を外したか。"""
+
+    action: str
+    to: Optional[Assignee]
+    drop: bool
+    note: str
+
+
+def _entry_runtime(seat: Any) -> Optional[str]:
+    m = SEAT_PATTERN.match(str(seat or ""))
+    return m.group(1) if m else None
+
+
+def excluded_runtimes(log: Iterable[Mapping[str, Any]]) -> set[str]:
+    """結果なしの記録（`no_results`）から導く外した担当: 中断した件と、別のランタイムへ振り替えた件の元のランタイム。"""
+    out: set[str] = set()
+    for e in log or ():
+        runtime = _entry_runtime(e.get("seat"))
+        if runtime and (e.get("decision") == ABORT or (e.get("decision") == REASSIGN and _entry_runtime(e.get("to")) != runtime)):
+            out.add(runtime)
+    return out
+
+
+def current_account(log: Iterable[Mapping[str, Any]], runtime: str, initial: Optional[str]) -> Optional[str]:
+    """ランタイムの今のアカウント。記録の最後の、そのランタイムへの振り替えの `to_account`。無ければ `initial`。"""
+    account = initial
+    for e in log or ():
+        if e.get("decision") == REASSIGN and _entry_runtime(e.get("to")) == runtime:
+            account = e.get("to_account") or None
+    return account
+
+
+def seats_pool(available: Iterable[str], log: Iterable[Mapping[str, Any]]) -> list[str]:
+    """席と実装担当を選ぶ母集合。利用可能な参加者から外した担当を引く（`-2` の席も同じランタイムで外れる）。"""
+    gone = excluded_runtimes(log)
+    return [r for r in available if r not in gone]
+
+
+def pinned_in_force(pinned: Optional[Iterable[str]], log: Iterable[Mapping[str, Any]]) -> Optional[list[str]]:
+    """固定の組を今も使うか。どちらかのランタイムが振り替えか中断の元になっていれば None（前提 6・決定 10）。"""
+    seats = list(pinned or [])
+    runtimes = {seat_runtime(s) for s in seats}
+    if not seats or any(e.get("decision") in (REASSIGN, ABORT) and _entry_runtime(e.get("seat")) in runtimes for e in log or ()):
+        return None
+    return seats
+
+
+def _tried_accounts(failed: Assignee, log: list[Mapping[str, Any]], initial: Optional[str] = None) -> frozenset[str]:
+    # 席にアカウントが無ければ、起動した CLI は環境から継承した initial を使っている
+    used = failed.account or initial
+    tried = {used} if used else set()
+    for e in log:
+        tried |= {str(e[k]) for s, k in (("seat", "account"), ("to", "to_account")) if _entry_runtime(e.get(s)) == "claude" and e.get(k)}
+    return frozenset(tried)
+
+
+def after_no_result(
+    failed: Assignee,
+    reason: Optional[str],
+    *,
+    available: Iterable[str],
+    log: Iterable[Mapping[str, Any]],
+    step: str,
+    attempt: int,
+    host: str,
+    busy: Iterable[str] = (),
+    only: bool = False,
+    initial_account: Optional[str] = None,
+    pick_account: Optional[Callable[[frozenset[str]], Optional[str]]] = None,
+    relaunch_next_attempt: bool = False,
+) -> NoResultDecision:
+    """結果なしの担当を、同じ担当で起動し直す / 振り替える / 中断するのどれにするかを決める（規則の正本。#919）。
+
+    上から順に、最初に当たった行の答えを返す。副作用を持たず、記録は呼ぶ側が書く。
+    `relaunch_next_attempt` は、起動し直しが次の試行として起動される工程（試行番号が起動ごとに進む修正）で真にする。
+    偽のままだと試行番号の一致が毎回外れ、同じ担当を締め切りまで起動し直し続ける。
+
+    | 順 | 条件 | 答え |
+    | ---: | --- | --- |
+    | 1 | リトライ可否が真で、記録に同じ工程・試行・席・アカウントの `relaunch` が無い（`relaunch_next_attempt` なら 1 つ前の試行の `relaunch` も同じ件として照合する） | `relaunch` |
+    | 2 | `only`（1 者指定） | `abort` |
+    | 3 | claude の `usage_limit` で、`pick_account(試したアカウント)` が名前を返す | 同じ席のそのアカウントへ `reassign` |
+    | 4 | 候補 = `available` −（外した担当 ∪ 結果なしのランタイム）− `busy`（同じラウンドのほかの席）が 1 者以上 | `choose_implementer(候補, host)` へ |
+    | 5 | どれにも当たらない | `abort` |
+    """
+    runtime, log = failed.runtime(), list(log or ())
+    attempts = {attempt, attempt - 1} if relaunch_next_attempt else {attempt}
+    relaunched = any(
+        (e.get("decision"), e.get("step"), e.get("seat"), e.get("account") or None) == (RELAUNCH, step, failed.seat, failed.account)
+        and e.get("attempt") in attempts
+        for e in log
+    )
+    if relaunch_same_agent(reason) and not relaunched:
+        return NoResultDecision(RELAUNCH, failed, False, f"{failed.label()} を 1 度だけ起動し直す（{reason}）")
+    if only:
+        return NoResultDecision(ABORT, None, True, f"{failed.label()} は 1 者指定のため振り替えない（{reason}）")
+    if runtime == "claude" and reason == "usage_limit" and pick_account is not None:
+        name = pick_account(_tried_accounts(failed, log, initial_account))
+        if name:
+            to = Assignee(failed.seat, name)
+            return NoResultDecision(REASSIGN, to, False, f"{failed.label()} → {to.label()}（{reason}）")
+    gone = excluded_runtimes(log) | {runtime} | {seat_runtime(b) for b in busy}
+    candidates = [r for r in available if r not in gone]
+    if not candidates:
+        return NoResultDecision(ABORT, None, True, f"{failed.label()} の振り替え先がありません（{reason}）")
+    pick, _ = choose_implementer(candidates, host)
+    to = Assignee(pick, current_account(log, pick, initial_account) if pick == "claude" else None)
+    return NoResultDecision(REASSIGN, to, True, f"{failed.label()} → {to.label()}（{reason}）")
+
+
+def no_result_entry(
+    step: str, attempt: int, failed: Assignee, reason: Optional[str], decision: NoResultDecision, at: str
+) -> dict[str, Any]:
+    """結果なしの記録（`no_results`）の 1 件。2 つの Skill で同じ形にする。"""
+    to = decision.to if decision.action == REASSIGN else None
+    return {
+        "step": step,
+        "attempt": int(attempt),
+        "seat": failed.seat,
+        "account": failed.account or "",
+        "reason": str(reason or ""),
+        "decision": decision.action,
+        "to": to.seat if to else "",
+        "to_account": (to.account or "") if to else "",
+        "at": at,
+    }

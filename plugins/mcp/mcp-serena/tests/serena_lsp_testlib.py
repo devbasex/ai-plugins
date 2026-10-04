@@ -36,9 +36,19 @@ def files_of(**counts) -> dict:
     return out
 
 
+# 利用者のシェルから子プロセスへ渡さない変数。テストは HOME で設定の置き場所を隔てる（#1689）
+INHERIT_DROP = ("CLAUDE_CONFIG_DIR",)
+
+
+def child_env(env=None, drop=()) -> dict:
+    """os.environ の写しから INHERIT_DROP と drop を外し、env を重ねる。env に書いた値は外さない。"""
+    full = {k: v for k, v in os.environ.items() if k not in INHERIT_DROP and k not in drop}
+    full.update(env or {})
+    return full
+
+
 def run_cli(*args, env=None, cwd=None, stdin=None):
-    full_env = dict(os.environ)
-    full_env.update(env or {})
+    full_env = child_env(env)
     return subprocess.run([sys.executable, str(CLI), *args], capture_output=True, text=True, env=full_env, cwd=cwd, input=stdin)
 
 

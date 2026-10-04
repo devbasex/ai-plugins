@@ -124,7 +124,8 @@ PR を**既定の参加者プール（claude / codex / kiro とホスト）か�
 
 1 ラウンドは「2 スロットの並列レビュー → 根拠の検証 → 判定（`intent` ベース）」で、一方でも REQUEST_CHANGES なら
 修正 → 収束チェック（`max-rounds`・振動・CI の失敗・`rotate-after` の巻き直し）→ 次のラウンドへ進む。結果を残さなかった
-スロットは同じラウンドで 1 度だけ起動し直す。ループを抜けたら（`final` がどの値でも）最終スイープで open thread を 0 にし、
+スロットは、振り替えの規則（`assignment.after_no_result`）の答えどおりに同じラウンドで 1 度だけ起動し直すか、利用上限と
+2 度目の結果なしでは別のアカウントか残りの参加者へ振り替える（振り替え先が無ければ中断）。ループを抜けたら（`final` がどの値でも）最終スイープで open thread を 0 にし、
 `verify-sweep` が GitHub 側の実数で確かめる。担当が書くのは指摘の基準（`references/design-principles.md` の「指摘の基準」）に
 当たる `critical` / `major` だけで、修正と最終スイープがコードを直すのも `major` 以上だけである。`minor` / `nit` は見送りの返信を付けて閉じる。
 

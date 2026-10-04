@@ -626,7 +626,7 @@
     {
       "term": "リトライ可否",
       "context": "ndf-agent-cli",
-      "meaning": "同じ担当を同じ条件で起動し直せば解ける起動結果か（relaunch_same_agent）",
+      "meaning": "同じ担当を同じ条件で起動し直せば解ける理由か（assignment.relaunch_same_agent）。起動結果ではなく振り替えの規則が持つ",
       "source": "docs/specifications/cross-review-launch-outcome.md",
       "deprecated": [
         "起動し直しの可否"
@@ -2257,6 +2257,20 @@
       "pending_source": "issues/issue-1333-design.md"
     },
     {
+      "term": "ジョブを飛ばした run",
+      "context": "ndf-workflow",
+      "meaning": "CI の成功した run のうち、conclusion が skipped のジョブを 1 つ以上含むもの。宣言の解析は CI の所要を測る代表に採らない",
+      "source": "",
+      "pending_source": "issues/issue-1664-design.md"
+    },
+    {
+      "term": "代表の run",
+      "context": "ndf-workflow",
+      "meaning": "宣言の解析がワークフローごとに壁時計とテストの所要を測る 1 件の run。取得した候補（ワークフローごとに新しい順の成功の run を最大 5 件）のうち、ジョブを飛ばしていない最新のもの",
+      "source": "",
+      "pending_source": "issues/issue-1664-design.md"
+    },
+    {
       "term": "入力の指紋",
       "context": "ndf-workflow",
       "meaning": "解析が読んだファイルの、HEAD の木での blob の SHA と、ブランチの構成の組。プロジェクトの宣言の新しさの判定に使う",
@@ -3096,8 +3110,7 @@
       "term": "依存の欠け",
       "context": "ndf-workflow",
       "meaning": "手順のスクリプトが deps.require で外部パッケージを用意できずに止まったこと。終了コード 69 で終わり、status は stopped。「飛ばしてよい」とも「前提が無い（3）」とも読まない",
-      "source": "",
-      "pending_source": "issues/issue-1654-design.md"
+      "source": "docs/specifications/ndf-deps-missing-exit-code.md"
     },
     {
       "term": "単独起動",
@@ -3122,6 +3135,73 @@
       "term": "回答ファイル",
       "context": "ndf-cross-review",
       "meaning": "駆動が止まりで示す items[0].result_file。止まりへの答えを書き、同じコマンドの打ち直しが読む。担当 CLI の結果ファイルとは別",
+      "source": ""
+    },
+    {
+      "term": "担当",
+      "context": "ndf-agent-cli",
+      "meaning": "レビュー・提案・実装を受け持つ CLI の起動の単位。ランタイムと、claude ではアカウントで決まる",
+      "pending_source": "issues/issue-919-requirements.md"
+    },
+    {
+      "term": "席",
+      "context": "ndf-cross-review",
+      "meaning": "cross-review の 1 ラウンドの 2 つの担当の枠。名前は kiro / kiro-2 の形（SEAT_PATTERN）",
+      "pending_source": "issues/issue-919-requirements.md"
+    },
+    {
+      "term": "結果なし",
+      "context": "ndf-agent-cli",
+      "meaning": "担当が結果ファイルを残さずに終わったこと（judge の verdict = no_result、cross-refactoring の failed_attempts）",
+      "pending_source": "issues/issue-919-requirements.md"
+    },
+    {
+      "term": "利用上限",
+      "context": "ndf-agent-cli",
+      "meaning": "担当の CLI が使用量の上限に当たって止まったこと（起動結果の理由 usage_limit）",
+      "pending_source": "issues/issue-919-requirements.md"
+    },
+    {
+      "term": "振り替え",
+      "context": "ndf-agent-cli",
+      "meaning": "結果なしの担当の役割を、同じ実行の中で別の担当へ移すこと。同じ担当で起動し直すことは含まない",
+      "pending_source": "issues/issue-919-requirements.md"
+    },
+    {
+      "term": "結果なしの記録",
+      "code": "no_results",
+      "context": "ndf-agent-cli",
+      "meaning": "状態ファイルの no_results。結果なしの 1 回ごとに、担当・理由・振り替えの規則の答え（relaunch / reassign / abort）・振り替え先を追記だけで積む",
+      "pending_source": "issues/issue-919-design.md"
+    },
+    {
+      "term": "外した担当",
+      "context": "ndf-agent-cli",
+      "meaning": "結果なしの記録から導く、同じ実行の残りで割り当てないランタイム（claude ではアカウント）",
+      "pending_source": "issues/issue-919-design.md"
+    },
+    {
+      "term": "提案担当",
+      "context": "ndf-cross-refactoring",
+      "meaning": "cross-refactoring の propose で改善の提案を出す参加者",
+      "pending_source": "issues/issue-919-requirements.md"
+    },
+    {
+      "term": "着手前のテスト",
+      "context": "ndf-cross-refactoring",
+      "meaning": "`cross-refactoring` の init が改修の前に 1 回走らせるテスト。CI に任せる戦略では --scope のテストの置き場所の範囲テスト、ほかは全体テスト（round-only はラウンドテストも）",
+      "source": ""
+    },
+    {
+      "term": "手順の枠",
+      "context": "ndf-cross-refactoring",
+      "meaning": "`cross-refactoring` で提案とリファクタリング計画に充てる時間。着手前のテストの終わり（started_at + 実測）から 0.20·B と 0.10·B。枠が想定最大時間に収まらずに止めた後の init の打ち直しでは打ち直した時刻から数える",
+      "source": ""
+    },
+    {
+      "term": "範囲テストの所要",
+      "context": "ndf-cross-refactoring",
+      "meaning": "CI に任せる戦略で、着手前に走らせる範囲テストの所要の見込み（秒）。同じ範囲の履歴の実測か、範囲が全体テストの suite のパスを覆うときの w",
       "source": ""
     }
   ]

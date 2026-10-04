@@ -334,7 +334,7 @@ import は名前が当たらず見落とす。見落としは最終ゲートが�
 | 起動のされ方 | `finalize` を呼ぶ時点 | 追記する条件 |
 | --- | --- | --- |
 | 工程の 1 つ | `final-gate` の直後 | 最終ゲートが通った |
-| 単独 | `cross-review` の最終スイープと確かめが終わった後。駆動は cross-review の状態ファイルを読み、`final` が `approved`・`sweep.verified` が真・`sweep.remaining_open` が 0・`sweep.commit` が無いときだけ `--review-status approved` を渡す | 最終ゲートのチェックが通り、`--review-status` が `approved` |
+| 単独 | `cross-review` の最終スイープと確かめが終わった後。駆動は cross-review の駆動が `--result-file` で回答ファイルへ書いた値（`loop_drive.review_status` が決めたもの）を `--review-status` に渡す（[cross-refactoring-standalone-run-and-final-status.md](cross-refactoring-standalone-run-and-final-status.md)） | 最終ゲートのチェックが通り、`--review-status` が `approved` |
 
 **単独起動で `final-gate` の直後に追記しない。** その時点では `cross-review` の合否が決まって
 おらず、収束しなかった実行が履歴に混ざる。`--review-status` を渡さずに単独起動の状態で
