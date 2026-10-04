@@ -110,6 +110,12 @@ def lints_scoped(state: dict[str, Any]) -> bool:
     return bool(strategy.scoped_suites(ts.LINT)) and not (strategy.name == ts.ROUND_ONLY and not strategy.round_command)
 
 
+def lint_files(state: dict[str, Any], suite_name: str, files: list[str]) -> list[str]:
+    """静的解析の suite `suite_name` が覆う `files`。その suite が見つからなければ全件。"""
+    suite = next((s for s in strategy_of(state).scoped_suites(ts.LINT) if s.name == suite_name), None)
+    return [f for f in files if suite is None or suite.covers(f)]
+
+
 def lint_runs_for(state: dict[str, Any], files: list[str]) -> list[ts.ScopeRun]:
     """ファイルの並びから組む静的解析の範囲テスト。suite の `paths` に当たるものだけを入れる（I10。#1693 決定 7）。
 

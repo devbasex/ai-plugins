@@ -54,18 +54,13 @@ class PrepushResult:
     launch_failure: Optional[LaunchFailure] = None
 
 
-def _files_of(run: ts.ScopeRun, strategy: ts.Strategy, files: list[str]) -> list[str]:
-    suite = next((s for s in strategy.scoped_suites(ts.LINT) if s.name == run.suite), None)
-    return [f for f in files if suite is None or suite.covers(f)]
-
-
 def check_files(state: dict[str, Any], files: list[str], label: str) -> PrepushResult:
     """`files` へ静的解析の範囲テストを当てる。通れば `passed`。ログは `tmp_dir/<label>-<suite>.log`。"""
     runs = targets.lint_runs_for(state, files)
     started = time.monotonic()
     if not runs:
         return PrepushResult(True, [], 0.0)
-    strategy, work = timeline.strategy_of(state), work_dir(state)
+    work = work_dir(state)
     limit = timeline.state_test_timeout(state)
     rejections: list[LintRejection] = []
     for run in runs:
@@ -79,7 +74,7 @@ def check_files(state: dict[str, Any], files: list[str], label: str) -> PrepushR
             return PrepushResult(False, rejections, round(time.monotonic() - started, 1), LaunchFailure(run.command, outcome, log))
         if outcome.status == ts.PASSED:
             continue
-        given = _files_of(run, strategy, files)
+        given = targets.lint_files(state, run.suite, files)
         named = failure_paths.mentioned(targets.log_text(log), given)
         reason = f"{limit} 秒の上限で打ち切った" if outcome.status == ts.TIMED_OUT else outcome.reason
         rejections.append(LintRejection(run.suite, run.command, named or given, reason, str(log)))
