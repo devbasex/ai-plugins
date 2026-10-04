@@ -228,7 +228,10 @@ def _reassign_proposers(path: pathlib.Path, state: dict[str, Any], seats: list[s
         sys.exit(0)
     targets: list[assignment.Assignee] = []
     moved: list[str] = []
+    stopped = [s for s, o in outcomes.items() if o.reason in STOPPED_REASONS]
     for seat, outcome in outcomes.items():
+        if seat in stopped:
+            continue  # 監視が上限で止めた担当は起動し直さず振り替えない（実装担当と同じ。提案の期限を過ぎて動かさない）
         failed = assignment.Assignee(seat, accounts.get(seat) or None)
         reason = str(outcome.reason or "missing")
         entry = _recorded(state, "propose", 1, failed, (outcome.monitor or {}).get("ended_at"))
@@ -250,7 +253,10 @@ def _reassign_proposers(path: pathlib.Path, state: dict[str, Any], seats: list[s
     impl = _repick_implementer(state) if targets else None
     statefile.save(path, state)
     if not targets:
-        info("⚠ 提案担当の全員が結果を残さず、振り替え先もありません")
+        if len(stopped) == len(outcomes):
+            info(f"⚠ 提案担当の全員を監視が上限で止めました（{' '.join(stopped)}）。起動し直さずに中断します")
+        else:
+            info("⚠ 提案担当の全員が結果を残さず、振り替え先もありません")
         statefile.emit(REASSIGN="abort")
         sys.exit(3)
     lines = {"PROPOSERS": " ".join(dict.fromkeys(t.seat for t in targets))}

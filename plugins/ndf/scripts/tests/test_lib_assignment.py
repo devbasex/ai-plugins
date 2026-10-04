@@ -363,6 +363,13 @@ def test_claude_usage_limit_moves_to_another_account_first(assignment):
     assert seen[-1] == frozenset({"work1", "work2"})
 
 
+def test_an_inherited_account_counts_as_tried(assignment):
+    """席にアカウントが無ければ、継承した initial_account を試したアカウントに含める（同じアカウントへ振り替えない）。"""
+    seen = []
+    _decide(assignment, "claude", "usage_limit", busy=["codex"], initial_account="work1", pick_account=lambda t: seen.append(t) or "work2")
+    assert seen == [frozenset({"work1"})]
+
+
 def test_claude_without_a_spare_account_moves_to_another_runtime(assignment):
     got = _decide(assignment, "claude", "usage_limit", busy=["codex"], pick_account=lambda tried: None)
     assert (got.action, got.to.seat) == ("reassign", "kiro")

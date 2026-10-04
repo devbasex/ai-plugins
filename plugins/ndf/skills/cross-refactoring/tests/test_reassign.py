@@ -231,6 +231,18 @@ def test_all_no_result_in_propose_without_a_candidate_stops(cmd_reassign, tmp_pa
     assert "REASSIGN=abort" in capsys.readouterr().out
 
 
+def test_all_proposers_stopped_at_the_limit_abort_without_relaunch(cmd_reassign, tmp_path, env_tmp_dir, capsys):
+    """全員を監視が上限で止めたら、起動し直さず振り替えずに中断する（提案の期限を過ぎて CLI を動かさない）。"""
+    path = _implement_state(tmp_path, phase="propose")
+    env_tmp_dir(path)
+    _monitor(path, f"claude-propose-rf{ID}", "timeout")
+    _monitor(path, f"codex-propose-rf{ID}", "stalled")
+
+    assert _run(cmd_reassign, "propose", ["claude", "codex"]) == 3
+    assert "REASSIGN=abort" in capsys.readouterr().out
+    assert "no_results" not in read_state(path)
+
+
 def test_a_proposer_reassignment_that_drops_the_implementer_picks_it_again(cmd_reassign, tmp_path, env_tmp_dir, capsys):
     """提案の振り替えで実装担当のランタイムが外れたら、外した後の参加者から実装担当を選び直して `IMPL` で返す。"""
     path = _implement_state(tmp_path, phase="propose")

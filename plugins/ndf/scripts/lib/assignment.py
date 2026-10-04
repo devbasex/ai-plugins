@@ -416,8 +416,10 @@ def pinned_in_force(pinned: Optional[Iterable[str]], log: Iterable[Mapping[str, 
     return seats
 
 
-def _tried_accounts(failed: Assignee, log: list[Mapping[str, Any]]) -> frozenset[str]:
-    tried = {failed.account} if failed.account else set()
+def _tried_accounts(failed: Assignee, log: list[Mapping[str, Any]], initial: Optional[str] = None) -> frozenset[str]:
+    # 席にアカウントが無ければ、起動した CLI は環境から継承した initial を使っている
+    used = failed.account or initial
+    tried = {used} if used else set()
     for e in log:
         tried |= {str(e[k]) for s, k in (("seat", "account"), ("to", "to_account")) if _entry_runtime(e.get(s)) == "claude" and e.get(k)}
     return frozenset(tried)
@@ -460,7 +462,7 @@ def after_no_result(
     if only:
         return NoResultDecision(ABORT, None, True, f"{failed.label()} は 1 者指定のため振り替えない（{reason}）")
     if runtime == "claude" and reason == "usage_limit" and pick_account is not None:
-        name = pick_account(_tried_accounts(failed, log))
+        name = pick_account(_tried_accounts(failed, log, initial_account))
         if name:
             to = Assignee(failed.seat, name)
             return NoResultDecision(REASSIGN, to, False, f"{failed.label()} → {to.label()}（{reason}）")

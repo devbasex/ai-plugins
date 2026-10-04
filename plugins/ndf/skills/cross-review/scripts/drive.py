@@ -293,7 +293,9 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
         if not missing:
             # 結果の欠けた担当がいれば、検証と反証は judge の後へ回す（先に通すと起動し直した後に全担当分をもう一度通す）。
             self.st("verify-findings", str(self.pr))
-            self.sh("critique-round.sh", str(self.pr), rnd, *(last.get("reviewers") or reviewers))
+            targets = last.get("reviewers") or reviewers  # 反証の claude も席のアカウントで起動する（ほかの担当は claude の変数を読まない）
+            seat = next((s for s in targets if s.startswith("claude") and accounts.get(s)), "")
+            self.sh("critique-round.sh", str(self.pr), rnd, *targets, env=assignee_env.seat_env(seat, accounts.get(seat), self.env))
 
     def judge(self) -> tuple[int, str]:
         """judge を打つ。8 なら flush してからもう一度打つ。"""
