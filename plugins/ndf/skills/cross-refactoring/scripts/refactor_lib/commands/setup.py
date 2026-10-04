@@ -22,13 +22,12 @@ import models as models_lib
 import project_mvv
 import project_decl
 import repo as repo_lib
-import run_metrics
 import statefile
 import test_strategy as ts
 import tool_paths
 import worktree_deps
 
-from .. import ABORT, allocation, die, info
+from .. import ABORT, die, info, init_test
 from .. import baseline as baseline_lib
 from .. import ci_coverage
 from .. import runtime_decl
@@ -410,7 +409,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     state = _save_initial_state(args, inputs, prep, participants, baseline, round_record, started_at)
     # **手順の枠が想定最大時間に収まらなければ、提案者を起動せずに止める**（#1385 I4・決定 2）。状態は保存してあるため、
     # 予算を広げて打ち直すと着手前のテストを走らせ直さずに続く。
-    _stop_if_window_short(prep.state_file, state)
+    init_test.stop_if_window_short(prep.state_file, state)
     # **出力は入口から直接呼ぶ。** 手順書の変数の出所のチェック
     # （`scripts/check-skill-shell-vars.py`）は `cmd_*` からヘルパーを 1 階層だけたどる。
     _emit_init(state)
@@ -582,76 +581,17 @@ def _verify_init(
     # 着手前のテストの上限は予算と宣言の所要から導く（決定 8）。CI に任せる戦略は範囲テストの所要 s も入れる（#1555）。
     w, w_source = ts.whole_seconds(prep.decl)
     c = ts.ci_wall_seconds(prep.decl, (prep.strategy.ci or {}).get("check") if prep.strategy.ci else None)
-    s, s_source = _scope_seconds(prep, list(args.scope), w)
-    timeout = ts.limits(
-        prep.strategy,
-        int(args.budget_minutes),
-        whole_seconds_value=w,
-        whole_source=w_source,
-        ci_seconds=c,
-        scope_seconds=s,
-        scope_source=s_source,
-    )["init_test_timeout"]
+    s, s_source = init_test.scope_seconds(prep, list(args.scope), w)
+    kw: dict[str, Any] = {"whole_seconds_value": w, "whole_source": w_source, "ci_seconds": c, "scope_seconds": s, "scope_source": s_source}
+    timeout = ts.limits(prep.strategy, int(args.budget_minutes), **kw)["init_test_timeout"]
     if s is not None:
         info(f"   着手前のテストの上限: {timeout} 秒（範囲テストの所要 {s} 秒 / {s_source}）")
     baseline = baseline_lib.run_baseline(prep.strategy, prep.work, timeout, list(args.scope), prep.tmp_dir)
     baseline.update({"whole_seconds": w, "whole_source": w_source, "ci_seconds": c, "scope_seconds": s, "scope_source": s_source})
-    _append_init_test(prep, args, baseline)
+    init_test.append_init_test(prep, int(args.budget_minutes), args.pr, baseline)
     if baseline.get("timed_out"):
-        _abort_timed_out(prep.strategy, int(args.budget_minutes), baseline, timeout)
+        init_test.abort_timed_out(prep.strategy, int(args.budget_minutes), baseline, timeout)
     return participants, baseline, baseline_lib.round_record(prep.strategy, baseline)
-
-
-def _history_file(repo: str) -> pathlib.Path:
-    return allocation.history_path(run_metrics.metrics_dir(), repo)
-
-
-def _scope_seconds(prep: _InitPreparation, scope: list[str], w: Optional[float]) -> tuple[Optional[float], Optional[str]]:
-    """CI に任せる戦略の範囲テストの所要 s と出所（I7・決定 5）。履歴の同じ戦略・同じ置き場所の実測（`history`）→
-    置き場所が全体テストの suite のパスを覆うときの w（`whole`）→ 無し。ほかの戦略では履歴を読まない。"""
-    if not prep.strategy.whole_on_ci:
-        return None, None
-    locations = baseline_lib.locations_of(prep.strategy, scope, prep.work)
-    if not locations:
-        return None, None
-    measured = allocation.scope_seconds(allocation.read_history(_history_file(prep.repo)), prep.strategy.name, locations)
-    if measured is not None:
-        return measured, "history"
-    if w is not None and ts.covers_whole(prep.strategy, locations):
-        return float(w), "whole"
-    return None, None
-
-
-def _append_init_test(prep: _InitPreparation, args: argparse.Namespace, baseline: dict[str, Any]) -> None:
-    """着手前のテストの行を履歴へ 1 行足す（E9）。打ち切りでも足す。書けなければ知らせて続ける。"""
-    try:
-        target = _history_file(prep.repo)
-        allocation.append_row(target, allocation.init_test_row(baseline, prep.strategy.name, int(args.budget_minutes), args.pr))
-    except OSError as exc:
-        info(f"⚠ 着手前のテストの所要を配分の履歴へ追記できませんでした（{exc}）。進行は止めません")
-
-
-def _abort_timed_out(strategy: ts.Strategy, budget_minutes: int, baseline: dict[str, Any], timeout: int) -> None:
-    """着手前のテストの打ち切りで止める。履歴に残したことと、次の実行の上限の見込みを添える。"""
-    lines = [f"着手前のテストが {timeout} 秒で終わりませんでした（{baseline.get('command')}）。打ち切りました"]
-    if baseline.get("mode") == "scope" and strategy.whole_on_ci:
-        following = ts.limits(strategy, budget_minutes, scope_seconds=float(timeout), scope_source="history")["init_test_timeout"]
-        lines.append(f"打ち切りを配分の履歴に残しました。同じ範囲の次の実行の上限は {following} 秒の見込みです")
-    else:
-        lines.append("打ち切りを配分の履歴に残しました")
-    die("\n".join(lines))
-
-
-def _stop_if_window_short(state_file: pathlib.Path, state: dict[str, Any]) -> None:
-    """手順の枠が想定最大時間に収まらなければ、止めた印を残して保存し、終了コード 4 で止める。収まれば印を消す。"""
-    problem = timeline.window_problem(state["limits"])
-    if problem is None:
-        if state.pop("window_stopped_at", None) is not None:
-            statefile.save(state_file, state)
-        return
-    state["window_stopped_at"] = statefile.now()
-    statefile.save(state_file, state)
-    die(problem)
 
 
 def _choose_implementer(
@@ -802,7 +742,7 @@ def _resume(
         if state.get("window_stopped_at"):
             state["resumed_at"] = statefile.now()
         state["limits"] = timeline.of_state(state)
-        _stop_if_window_short(state_file, state)
+        init_test.stop_if_window_short(state_file, state)
     statefile.save(state_file, state)
     _emit_init(state)
 

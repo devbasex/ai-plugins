@@ -1952,12 +1952,11 @@ def test_a_timed_out_init_test_is_recorded_before_stopping(verify_init, capsys):
 def test_the_whole_test_covers_the_scope(verify_init):
     """AC8: 履歴に一致が無く、置き場所が suite のパスを覆えば w を使う。"""
     prep = types.SimpleNamespace(strategy=None, work=None, repo="acme/demo")
-    setup = verify_init.setup
     strategy = sys.modules["test_strategy"].Strategy(
         "local-scoped-ci-whole",
         "args",
         [sys.modules["test_strategy"].Suite("unit", "pytest .", scope_command="pytest {paths}", paths=["tests"])],
     )
     prep.strategy, prep.work = strategy, verify_init.history.parents[2] / "work"
-    assert setup._scope_seconds(prep, ["tests"], 424.0) == (424.0, "whole")
-    assert setup._scope_seconds(prep, ["tests"], None) == (None, None)
+    assert sys.modules["refactor_lib.init_test"].scope_seconds(prep, ["tests"], 424.0) == (424.0, "whole")
+    assert sys.modules["refactor_lib.init_test"].scope_seconds(prep, ["tests"], None) == (None, None)
