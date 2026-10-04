@@ -69,7 +69,7 @@
 | I4 | 結果なしの記録 | 同じ工程・同じ試行で、同じ担当（席とアカウント）の答えが `relaunch` になるのは 1 度だけ | 実装の誤り。テストで落とす |
 | I5 | 結果なしの記録 | 1 回の実行の答え `reassign` の件数は、参加者の数と登録済みアカウントの数の和を超えない | 実装の誤り。テストで落とす |
 | I6 | ラウンドの席 | 振り替えは、同じラウンドの 2 つの席のランタイムを新たに重ねない。振り替えの前から同じランタイムの 2 席（利用可能な参加者が 1 者のときの `<その者>-2`、固定の組の `claude` / `claude-2`）は、同じ席のままアカウントだけを替える振り替え（規則の順 3）に限って重なりを保ってよい。別のランタイムへの振り替え（順 4）は、もう一方の席のランタイムを `busy` に入れて選ぶ | 振り替え先の候補から外す（I6 を守れる候補が無ければ `abort`） |
-| I7 | 実装担当 | 振り替え先を起動する前に、結果を残さなかった起動の範囲（工程の起点から HEAD）を取り消す。取り消すのは、`plan` / `add-tests` / `implement` では `reassign`（規則に答えを求める前）、`fix` / `final-fix` では担当を書き換えた後の今の `merge-fix` / `merge-final-fix` で、`reassign` は取り消さない（決定 7・14。取り消しは 1 回だけ）。採用済みの項目のコミットは範囲に入らない | `reassign` が範囲を確定できなければ振り替えず、今の中断（終了コード 4）にする。`merge-fix` / `merge-final-fix` の側は今の扱いのまま |
+| I7 | 実装担当 | 振り替え先を起動する前に、結果を残さなかった起動の範囲（工程の起点から HEAD）を取り消す。取り消すのは、`plan` / `add-tests` / `implement` では `reassign`（規則に答えを求める前）、`final-fix` では担当を書き換えた後の今の `merge-final-fix`（`close_without_result`）で、`reassign` は取り消さない（決定 7・14。取り消しは 1 回だけ）。`fix` は範囲を取り消さない。今の `merge-fix` は範囲の取り消しを持たず、修正の起点から HEAD のコミットを `Item-Id` で受け取り（手順を外れたら範囲ごと `discard_range`）、受け取った項目は次の `verify` が範囲テストで見直す。採用済みの項目のコミットは範囲に入らない | `reassign` が範囲を確定できなければ振り替えず、今の中断（終了コード 4）にする。`merge-fix` / `merge-final-fix` の側は今の扱いのまま |
 | I8 | 結果なしの記録 | `--only` の実行では答えが `reassign` にならない | 実装の誤り。テストで落とす |
 | I9 | 担当 | 子の環境へトークン・スコープの変数を渡さない。アカウントの環境は `claude_accounts.account_env` の作るもの（`CLAUDE_CONFIG_DIR` を向ける）だけで、状態ファイルと耐久の記録へは環境ではなくアカウントの名前だけを書く | 実装の誤り。テストで落とす |
 
@@ -84,7 +84,7 @@
 | E5 | 担当を同じ実行の残りから外した | `after_no_result`（答えに含まれる） | 結果なしの記録。以後の席の選択（`_round_reviewers`）と振り替え先の候補が読む |
 | E6 | 振り替え先を選んだ | `after_no_result` | `judge` / `reassign` |
 | E7 | 振り替え先の担当を起動した | 2 つの `drive.py` | 監視（E2 へ戻る） |
-| E8 | 結果なしの起動の範囲を取り消した | `plan` / `add-tests` / `implement` は `reassign`（`intake.close_without_result`。E6 より前）、`fix` / `final-fix` は `merge-fix` / `merge-final-fix`（E6 の後） | 振り替え先の起動（E7 より前） |
+| E8 | 結果なしの起動の範囲を取り消した | `plan` / `add-tests` / `implement` は `reassign`（`intake.close_without_result`。E6 より前）、`final-fix` は `merge-final-fix`（E6 の後）。`fix` は取り消さない（I7。今の `merge-fix` の受け取りと次の `verify` の見直しに任せる） | 振り替え先の起動（E7 より前） |
 | E9 | 振り替え先が無いため中断した | `judge`（`final = error`）/ `reassign`（終了コード 3） | `drive.py` |
 | E10 | 振り替えの事実を記録した | `judge` / `reassign` | 状態ファイル・judge の出力 `REASSIGNED`・報告・`metrics.reassigned` |
 
@@ -127,7 +127,7 @@
 | `skills/cross-refactoring/scripts/refactor_lib/commands/reassign.py` | 新規 | 副命令 `reassign <ID> <工程>`。起動結果を読み、範囲を取り消し、規則の答えを記録して実装担当・提案担当を書き換え、出力と終了コードで `drive.py` へ返す |
 | `skills/cross-refactoring/scripts/refactor.py` | 変更 | `reassign` を登録する |
 | `skills/cross-refactoring/scripts/drive.py` | 変更 | `impl_phase` と `propose` が、監視の非ゼロ（上限での打ち切りを除く）で `reassign` を打ち、7 なら同じ工程を返された担当で起動する。起動の環境を `assignee_env` で組む |
-| `refactor_lib/intake.py`・`refactor_lib/commands/final_fix.py`・`refactor_lib/commands/gate.py`・`refactor_lib/commands/converge.py` | 変更 | `ClosedAttempt.relaunch_same_agent` を消す。`no_relaunch` を立てるのは `reassign` の答え `abort` だけにする。`verify` は `no_relaunch` が立っていれば修正を求めない |
+| `refactor_lib/intake.py`・`refactor_lib/commands/final_fix.py`・`refactor_lib/commands/gate.py`・`refactor_lib/commands/converge.py` | 変更 | `ClosedAttempt.relaunch_same_agent` を消す。旗を立てるのは `reassign` の答え `abort` だけにする（`final-fix` は今の `final_gate.no_relaunch`、`fix` は新しい欄 `fix_no_relaunch`）。`verify` は `fix_no_relaunch` が立っていれば修正を求めず、落ちた項目を締め切りのときと同じ経路（`_give_up`）で取り消してから進む。`final_gate.no_relaunch` は `fix` では立てない |
 | `refactor_lib/commands/setup.py` | 変更 | `_recheck_implementer` が結果なしの記録の外した担当を参加者から引く。`implementer_account` を初期化する |
 | `skills/cross-refactoring/scripts/drive.py` の `counts`・`refactor_lib/commands/report.py` | 変更 | `metrics.reassigned` と報告の行 |
 | 文書 | 変更 | cross-review の `docs/01-state-and-review.md`（結果を残さなかったレビュアーの扱い）・`docs/04-contracts.md`（状態の欄）・`SKILL.md`（同じラウンドで 1 度だけ起動し直す、の段落）、cross-refactoring の `SKILL.md` と契約の文書、`scripts/lib/README.md`、`docs/glossary.md`（`glossary.py render`） |
@@ -224,20 +224,22 @@ classDiagram
 | cross-review | `rounds[].reassigned` | そのラウンドで振り替えた `{from, to, to_account, reason}` の並び（報告と judge の出力の元。正は `no_results`） |
 | cross-refactoring | `implementer_account` | 実装担当の claude のアカウント名。空はアカウントを選んでいない |
 | cross-refactoring | `implementer_reason` | 既存の値（`named` / `host` / `first`）に `reassigned` を足す |
+| cross-refactoring | `fix_no_relaunch` | bool。`fix` 工程の `reassign` が `abort` を返したときだけ真にする。`verify` が読み、真なら修正を求めない。最終ゲートの `final_gate.no_relaunch`（既存）とは別の欄で、互いに立て合わない |
 | cross-refactoring | `proposer_accounts` | 提案担当のランタイムごとのアカウント名（振り替えた者だけ） |
 
 `rounds[].reviewers` / `rounds[].seats` は振り替え先へ書き換える。書き換える前の席の結果なしの欄（`rounds[].<元の席>`）は残す。
 
 ### CRUD 図
 
-| 機能 | `no_results` | `rounds[].reviewers`・`seats` | `rounds[].reassigned` | `implementer`・`implementer_account` | `final_gate.no_relaunch` |
-| --- | --- | --- | --- | --- | --- |
-| F1 規則 | R | — | — | — | — |
-| F2 席の振り替え（judge） | C | U | C | — | — |
-| F3 以後の席（start-round） | R | C | — | — | — |
-| F4 実装担当の振り替え（reassign） | C | — | — | U | U（`abort` のとき） |
-| F5 提案の振り替え（reassign） | C | — | — | — | — |
-| F7 報告・結果 JSON | R | R | R | R | — |
+| 機能 | `no_results` | `rounds[].reviewers`・`seats` | `rounds[].reassigned` | `implementer`・`implementer_account` | `final_gate.no_relaunch` | `fix_no_relaunch` |
+| --- | --- | --- | --- | --- | --- | --- |
+| F1 規則 | R | — | — | — | — | — |
+| F2 席の振り替え（judge） | C | U | C | — | — | — |
+| F3 以後の席（start-round） | R | C | — | — | — | — |
+| F4 実装担当の振り替え（reassign） | C | — | — | U | U（`final-fix` の `abort` のとき） | U（`fix` の `abort` のとき） |
+| F5 提案の振り替え（reassign） | C | — | — | — | — | — |
+| F4 の続き（`verify`） | — | — | — | — | — | R |
+| F7 報告・結果 JSON | R | R | R | R | — | — |
 
 ## 入出力の契約
 
@@ -285,7 +287,7 @@ classDiagram
 | 0 | 結果なしとして扱わない（結果がある・上限での打ち切り `timeout` / `stalled`） | `REASSIGN=none` | 今のまま次へ進む |
 | 7 | 同じ工程を起動する（`propose` / `plan` / `add-tests` / `implement`） | `IMPL=<席>`（提案は `PROPOSERS='<席> ...'`）、振り替えなら `REASSIGNED='...'` | 返された担当で同じ工程を起動し、監視へ戻る |
 | 2 | 次の起動から担当を替えた、または今のまま起動し直す（`fix` / `final-fix`） | `IMPL=<席>`、振り替えなら `REASSIGNED='...'` | 今のまま `merge-fix` / `merge-final-fix` へ進む |
-| 3 | 振り替え先が無い（`abort`） | `REASSIGN=abort` | `propose` / `plan` / `add-tests` / `implement` は今の止まり方（`Stop`、終了コードは監視の値）。`fix` / `final-fix` は取り込みへ進む（`no_relaunch` が修正を打ち切る） |
+| 3 | 振り替え先が無い（`abort`） | `REASSIGN=abort` | `propose` / `plan` / `add-tests` / `implement` は今の止まり方（`Stop`、終了コードは監視の値）。`fix` / `final-fix` は取り込みへ進む（`fix` は `fix_no_relaunch`、`final-fix` は `final_gate.no_relaunch` が修正を打ち切る） |
 | 4 | 範囲を確定できない | — | 今の中断（`ABORT`） |
 
 工程ごとの扱い:
@@ -293,8 +295,8 @@ classDiagram
 | 工程 | 範囲の取り消し | `relaunch` | `reassign` | `abort` |
 | --- | --- | --- | --- | --- |
 | `plan` / `add-tests` / `implement` | `reassign` が `close_without_result`（工程の起点から HEAD） | 同じ担当で同じ工程を起動（7） | 実装担当を替え、同じ工程を起動（7） | 今の止まり方（3） |
-| `fix` | 今の `merge-fix` | 次の `verify` の修正で同じ担当（2。今と同じ） | 実装担当を替え、次の修正から振り替え先（2） | `no_relaunch` を立て、以後の修正を求めない（3） |
-| `final-fix` | 今の `merge-final-fix`（`close_without_result`） | 次の修正ラウンドで同じ担当（2。今と同じ） | `final_gate.impl` と実装担当を替え、次の修正ラウンドから振り替え先（2） | `no_relaunch` を立てる。次の最終ゲートが今の打ち切り（3） |
+| `fix` | 取り消さない（今の `merge-fix` が `Item-Id` で受け取り、次の `verify` が見直す） | 次の `verify` の修正で同じ担当（2。今と同じ） | 実装担当を替え、次の修正から振り替え先（2） | `fix_no_relaunch` を立て、以後の修正を求めない（3） |
+| `final-fix` | 今の `merge-final-fix`（`close_without_result`） | 次の修正ラウンドで同じ担当（2。今と同じ） | `final_gate.impl` と実装担当を替え、次の修正ラウンドから振り替え先（2） | `final_gate.no_relaunch` を立てる。次の最終ゲートが今の打ち切り（3） |
 | `propose` | 範囲は無い | 結果なしの者だけを同じ担当で起動（7） | 提案を出していない担当で起動（7） | 今の止まり方（3） |
 
 `propose` で `reassign` を打つのは、提案担当の全員が結果なしのときだけである（前提 9）。候補の `busy` には、既に提案を出した担当と、同じ呼び出しで振り替え先に選んだ担当を入れる。
@@ -352,7 +354,7 @@ flowchart TB
   R -->|4| X
 ```
 
-`reassign` の中の順序: 起動結果を読む（`read_result`）→ 結果ありか `STOPPED_REASONS` なら 0 → `close_without_result`（`plan` / `add-tests` / `implement` のみ。範囲を確定できなければ 4）→ `after_no_result` → `no_results` へ追記 → 担当の書き換えと `no_relaunch` → 保存 → 出力。**保存は出力の前に行う。** 出力の後に落ちると、打ち直しの `reassign` が同じ件をもう一度記録する。打ち直しで同じ `step`・`attempt`・`seat` の件が既にあれば、記録した答えを出力し直すだけにする。
+`reassign` の中の順序: 起動結果を読む（`read_result`）→ 結果ありか `STOPPED_REASONS` なら 0 → `close_without_result`（`plan` / `add-tests` / `implement` のみ。範囲を確定できなければ 4）→ `after_no_result` → `no_results` へ追記 → 担当の書き換えと旗（`abort` のとき。`fix` は `fix_no_relaunch`、`final-fix` は `final_gate.no_relaunch`）→ 保存 → 出力。**保存は出力の前に行う。** 出力の後に落ちると、打ち直しの `reassign` が同じ件をもう一度記録する。打ち直しで同じ `step`・`attempt`・`seat` の件が既にあれば、記録した答えを出力し直すだけにする。
 
 **採用済みの項目は取り消さない。** 取り消す範囲は今の工程の起点から HEAD までで、前の工程で採った項目のコミットは起点より前にある（I7）。振り替え先は `live_items` のうち今の工程が扱う状態の項目（`implement` なら `planned` / `tested`）から続ける。
 
