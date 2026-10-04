@@ -75,6 +75,11 @@
       "id": "ndf-training-optout",
       "name": "NDF の学習の設定",
       "meaning": "LLM のアカウントが入力を学習に使う設定かを確かめ、NDF のセッションの開始で Off にするときの語"
+    },
+    {
+      "id": "ndf-google-workspace",
+      "name": "NDF の Google Workspace の操作",
+      "meaning": "google-workspace の Skill が Google Workspace（Drive・Docs など）を操作するときの語"
     }
   ],
   "terms": [
@@ -3201,6 +3206,12 @@
       "context": "ndf-cross-refactoring",
       "meaning": "CI に任せる戦略で、着手前に走らせる範囲テストの所要の見込み（秒）。同じ範囲の履歴の実測か、範囲が全体テストの suite のパスを覆うときの w",
       "source": ""
+    },
+    {
+      "term": "gws",
+      "context": "ndf-google-workspace",
+      "meaning": "Google Workspace CLI（npm の @googleworkspace/cli）。Google の公式サポート外の CLI で、NDF の Google Workspace の操作はすべてこれで行う",
+      "pending_source": "issues/issue-744-requirements.md"
     }
   ]
 }
