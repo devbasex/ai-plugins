@@ -19,6 +19,7 @@ import project_mvv
 # worker 1 回の上限（秒）と、駆動が pause で止まってよい回数の既定
 DEFAULT_TIMEOUT = 1800
 DEFAULT_MAX_PAUSES = 12
+TICK_GRACE = 120  # worker 自身の上限に、外側で打ち切るまで足す余裕（秒）
 
 
 def _timeout(step: dict) -> int:
@@ -81,7 +82,7 @@ class WorkStep:
             str(_timeout(step)),
         ]
         try:
-            p = run_ticking(cmd, ctx.tick, ctx.state.every, cwd=cwd, timeout=_timeout(step) + 120)
+            p = run_ticking(cmd, ctx.tick, ctx.state.every, cwd=cwd, timeout=_timeout(step) + TICK_GRACE)
             out = last_json(p.stdout) or {}
         except subprocess.TimeoutExpired:
             out = {"status": "stopped", "summary": "打ち切り"}
