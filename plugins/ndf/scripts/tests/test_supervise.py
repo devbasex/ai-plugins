@@ -165,6 +165,20 @@ def test_skip_to_jumps_over_steps(tmp_path):
     assert [e["id"] for e in s.state.log] == ["assess", "review"]
 
 
+def test_skip_to_does_not_jump_when_deps_are_missing(tmp_path):
+    """依存の欠け（deps の 69）は飛ばしてよい（skip_code の既定 3）と読まず、on_fail へ進む（#1654）。"""
+    import deps
+
+    steps = [
+        {"id": "assess", "type": "run", "cmd": f"exit {deps.EXIT_DEPS_MISSING}", "skip_to": "review", "on_fail": "refactor"},
+        {"id": "refactor", "type": "run", "cmd": "true"},
+        {"id": "review", "type": "run", "cmd": "true", "next": "end"},
+    ]
+    s, _ = run_plan(tmp_path, steps)
+    assert [e["id"] for e in s.state.log] == ["assess", "refactor", "review"]
+    assert not s.state.log[0].get("skipped")
+
+
 def test_skip_to_passes_through_on_zero(tmp_path):
     steps = [
         {"id": "assess", "type": "run", "cmd": "true", "skip_to": "review"},

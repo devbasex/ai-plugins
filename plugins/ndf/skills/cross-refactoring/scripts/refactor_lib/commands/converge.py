@@ -21,7 +21,7 @@ from typing import Any, Optional
 
 import statefile
 
-from .. import budget, clock, culprit, danger, info, publish, targets, timeline, triage, wholetest
+from .. import budget, clock, culprit, danger, info, publish, scope_verdict, targets, timeline, triage, wholetest
 from ..gitfacts import (
     collect_commit_facts,
     commit_files,
@@ -40,9 +40,8 @@ from ..items import (
     live_items,
     newest_first,
 )
-from ..paths import work_dir
 from ..outbound import item_lines, plan_line
-from ..paths import git_out, load_state
+from ..paths import head_sha, load_state, work_dir
 from ..phases import add_phase_seconds, finish_phase, phase_record
 from ..undo import discard_range, drop, resume_pending_drop
 from ..verify import (
@@ -55,54 +54,31 @@ from ..verify import (
 # ---------- 範囲テスト ----------
 
 
-def _log_path(state: dict[str, Any], item_id: str) -> pathlib.Path:
-    return pathlib.Path(state["tmp_dir"]) / f"verify-{item_id}.log"
-
-
-def _run_limited(path: pathlib.Path, state: dict[str, Any], items: list[dict[str, Any]]) -> None:
-    """項目ごとに範囲テスト（テストの種別と静的解析）を走らせ、`verified` / `failing` にする。同じコマンドの並びは 1 回だけ。
-
-    起動の失敗なら、その項目の状態を変えずに止まる（先に `verified` にした項目はそのまま残る。I8）。
-    """
-    results: dict[tuple[str, ...], tuple[bool, pathlib.Path]] = {}
-    for item in items:
-        key = targets.run_key(targets.verify_runs(state, item))
-        if key not in results:
-            log = _log_path(state, item["id"])
-            results[key] = (targets.run_or_stop(path, state, list(key), log), log)
-        passed, log = results[key]
-        item["status"] = VERIFIED if passed else FAILING
-        item["last_log"] = str(log)
-        # 全体のテストの直しで渡したコマンドは、範囲テストの結果で置き換わる。
-        item.pop("whole_test_command", None)
-        item["verify_runs"] = int(item.get("verify_runs") or 0) + 1
-
-
 def _revert_shared(
     path: pathlib.Path,
     state: dict[str, Any],
     group: list[dict[str, Any]],
-    reason: str,
-    command: Any = None,
-    whole: bool = False,
+    reason: Any,
 ) -> bool:
     """同じ語の並びを共有した項目を、新しい方から 1 件ずつ取り消す（AC15）。
 
+    `reason` は理由の文か、項目から理由を作る関数（落ちた検査を理由に入れる。#1688 I6）。
     取り消すたびに共有したコマンドを走らせ直し、通った時点で止める。通る前に取り消した
     項目だけが見送り（`reverted`）になり、古い項目のコミットは残る。走らせ直すのは
-    範囲テスト（`command` を渡せば全体のテストで落ちたテストだけ）で、全体のテストではない。
+    範囲テストで、全体のテストではない。
     通った時点で止めたら真、全件を取り消したら偽を返す。
     """
     remaining = newest_first(group)
     while remaining:
         target = remaining.pop(0)
-        target["failure_reason"] = reason
-        drop(path, state, [target["id"]], reason)
+        why = reason(target) if callable(reason) else reason
+        target["failure_reason"] = why
+        drop(path, state, [target["id"]], why)
         remaining = [i for i in remaining if i.get("status") in (FAILING, IMPLEMENTED, VERIFIED)]
         if not remaining:
             return False
-        words = command if command else [r.command for r in targets.verify_runs(state, remaining[0])]
-        if targets.run_or_stop(path, state, words, _log_path(state, remaining[0]["id"]), whole=bool(command) and whole):
+        words = [r.command for r in targets.verify_runs(state, remaining[0])]
+        if targets.run_or_stop(path, state, words, scope_verdict.verify_log(state, remaining[0]["id"])):
             for item in remaining:
                 item["status"] = VERIFIED
             return True
@@ -121,19 +97,44 @@ def _fix_stop(state: dict[str, Any]) -> bool:
     return left < float(reserve.get("fix") or 0.0)
 
 
-STOP_REASON = "修正に使える時間の内に通らなかった"
+STOP_REASON = scope_verdict.STOP_REASON
 
 
-def _give_up(path: pathlib.Path, state: dict[str, Any]) -> None:
-    """修正に使える時間が尽きたら、落ちた項目を取り消す（設計の「検証と修正の繰り返し」2）。"""
+def _items_in(state: dict[str, Any], status: str) -> list[dict[str, Any]]:
+    """生きている項目のうち、状態が `status` のもの。"""
+    return [i for i in live_items(state) if i.get("status") == status]
+
+
+def _give_up(path: pathlib.Path, state: dict[str, Any]) -> bool:
+    """修正に使える時間が尽きたら、落ちた項目を取り消す（設計の「検証と修正の繰り返し」2）。取り消したら真。
+
+    理由には落ちた検査（suite・ファイル）を入れる（`scope_verdict.reason`。#1688 I6）。
+    """
     if not _fix_stop(state):
-        return
+        return False
     groups: dict[tuple[str, ...], list[dict[str, Any]]] = {}
-    for item in live_items(state):
-        if item.get("status") == FAILING:
-            groups.setdefault(targets.command_key(item), []).append(item)
+    for item in _items_in(state, FAILING):
+        groups.setdefault(targets.command_key(item), []).append(item)
     for group in groups.values():
-        _revert_shared(path, state, group, f"範囲テストが{STOP_REASON}")
+        _revert_shared(path, state, group, scope_verdict.reason)
+    return bool(groups)
+
+
+def _settle_scope(path: pathlib.Path, state: dict[str, Any]) -> None:
+    """範囲テストで判定し、締め切りなら取り消し、取り消した後に巻き込まれた項目を走らせ直す（#1688 の順序 1〜4）。
+
+    取り消しが無くなるまで繰り返す。取り消すたびに項目が減るため、項目の数の回数の内で終わる。
+    """
+    scope_verdict.judge_items(path, state, _items_in(state, IMPLEMENTED))
+    statefile.save(path, state)
+    for _ in range(len(state.get("items") or []) + 1):
+        if not _give_up(path, state):
+            return
+        waiting = scope_verdict.waiting(state)
+        if not waiting:
+            return
+        scope_verdict.judge_items(path, state, waiting)
+        statefile.save(path, state)
 
 
 # ---------- 危険フラグ ----------
@@ -221,7 +222,7 @@ def _run_whole_locally(
             "commands": commands,
             "status": "pass" if passed else "fail",
             "seconds": round(time.monotonic() - started, 1),
-            "head": git_out(work_dir(state), ["rev-parse", "HEAD"]),
+            "head": head_sha(work_dir(state)),
             "reverted": False,
         }
     )
@@ -262,6 +263,12 @@ def _whole_items(state: dict[str, Any], record: dict[str, Any]) -> list[dict[str
     return [i for i in live_items(state) if i["id"] in ids]
 
 
+def _rerun_plan(state: dict[str, Any], record: dict[str, Any]) -> tuple[Any, bool]:
+    """走らせ直すコマンドと、全体テストの上限を使うか。変更起因の suite が無ければ全体テストのコマンドで確かめる。"""
+    rerun = culprit.rerun_of(record)
+    return rerun or wholetest.whole_fallback_command(state), not rerun
+
+
 def _fix_or_narrow(
     path: pathlib.Path,
     state: dict[str, Any],
@@ -271,11 +278,10 @@ def _fix_or_narrow(
     """締め切りの内で原因が決まっていれば原因の項目を修正へ回し（真）、でなければ原因の項目から絞って取り消す（偽）。
 
     **1 回の修正 = 実装担当の 1 起動である。** 次の試行の前にここで時計を見るため、締め切りを担当の申告に頼らない。
-    走らせ直すのは変更起因の suite ごとのファイル（`culprit.rerun_of`）で、すべて通ったときだけ通ったとする。無ければ
-    全体テストのコマンドで確かめる。
+    走らせ直すコマンドは `_rerun_plan` が決め、すべて通ったときだけ通ったとする。
     """
     items = _whole_items(state, record)
-    rerun = culprit.rerun_of(record) or wholetest.whole_fallback_command(state)
+    rerun, whole = _rerun_plan(state, record)
     if items and culprit.fixable(record) and not _fix_stop(state):
         for item in items:
             item["status"] = FAILING
@@ -283,7 +289,7 @@ def _fix_or_narrow(
             item["whole_test_command"] = [culprit.one_command(rerun)]
         info(f"🔧 変更起因の失敗を直しに回します（原因の項目 {len(items)} 件）")
         return True
-    narrow_log, whole = pathlib.Path(state["tmp_dir"]) / "verify-whole-narrow.log", not culprit.rerun_of(record)
+    narrow_log = pathlib.Path(state["tmp_dir"]) / "verify-whole-narrow.log"
     passed = culprit.narrow(path, state, record, STOP_REASON, lambda: targets.run_or_stop(path, state, rerun, narrow_log, whole=whole))
     info(f"↩ 原因の項目から順に取り消しました（{'落ちたテストが通った時点で止めた' if passed else '全件'}）。{plan_line(state)}")
     return False
@@ -296,8 +302,8 @@ def _recheck_whole(path: pathlib.Path, state: dict[str, Any], record: dict[str, 
         record["resolution"] = "narrowed"
         return False
     log = pathlib.Path(state["tmp_dir"]) / "verify-whole-rerun.log"
-    rerun = culprit.rerun_of(record) or wholetest.whole_fallback_command(state)
-    if targets.run_or_stop(path, state, rerun, log, whole=not culprit.rerun_of(record), phase="whole"):
+    rerun, whole = _rerun_plan(state, record)
+    if targets.run_or_stop(path, state, rerun, log, whole=whole, phase="whole"):
         record["resolution"] = "fixed"
         for item in items:
             item.pop("whole_test_command", None)
@@ -330,18 +336,15 @@ def cmd_verify(args: argparse.Namespace) -> None:
     state["phase"] = "verify"
     started = time.monotonic()
     state.pop("launch_failure", None)
-    _run_limited(path, state, [i for i in live_items(state) if i.get("status") == IMPLEMENTED])
-    statefile.save(path, state)
-    _give_up(path, state)
+    _settle_scope(path, state)
 
-    failing = [i for i in live_items(state) if i.get("status") == FAILING]
+    failing = _items_in(state, FAILING)
     if failing:
         _to_fix(path, state, failing, started, "範囲テストが落ちた項目")
         return
 
     if _whole_test(path, state, _flag_items(state)):
-        failing = [i for i in live_items(state) if i.get("status") == FAILING]
-        _to_fix(path, state, failing, started, "全体のテストを落とした原因の項目")
+        _to_fix(path, state, _items_in(state, FAILING), started, "全体のテストを落とした原因の項目")
         return
     _account(state, started)
     finish_phase(state, "verify")
@@ -366,7 +369,7 @@ def _to_fix(
     """落ちた項目を修正へ回す（`VERIFY=fix`）。修正の起点は今の HEAD。"""
     state["fix"] = {
         "items": [i["id"] for i in failing],
-        "base_sha": git_out(work_dir(state), ["rev-parse", "HEAD"]),
+        "base_sha": head_sha(work_dir(state)),
         "attempt": int((state.get("fix_stats") or {}).get("launches") or 0) + 1,
     }
     _account(state, started)
@@ -413,10 +416,10 @@ def _inspect_fix_commits(
     state: dict[str, Any],
     work: str,
     fix: dict[str, Any],
-    targets: list[dict[str, Any]],
+    fix_items: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """修正の起点からコミットを集め、取り込み可否の材料を返す。"""
-    head = git_out(work, ["rev-parse", "HEAD"]) or ""
+    head = head_sha(work) or ""
     ordered = commits_in_range(work, fix.get("base_sha"), head)
     if ordered is None:
         return {
@@ -428,7 +431,7 @@ def _inspect_fix_commits(
     return {
         "head": head,
         "ordered": ordered,
-        "problems": _fix_problems(state, facts, {t["id"] for t in targets}),
+        "problems": _fix_problems(state, facts, {t["id"] for t in fix_items}),
     }
 
 
@@ -456,9 +459,9 @@ def _apply_fix_result(
                 item["commits"]["fix"].append(sha)
 
 
-def _account_fix(state: dict[str, Any], targets: list[dict[str, Any]]) -> None:
+def _account_fix(state: dict[str, Any], fix_items: list[dict[str, Any]]) -> None:
     """修正回数、項目状態、修正手順の所要時間を更新する。"""
-    for item in targets:
+    for item in fix_items:
         item["fix_count"] = int(item.get("fix_count") or 0) + 1
         if item.get("status") == FAILING:
             item["status"] = IMPLEMENTED
@@ -487,11 +490,11 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         return
     record_observed_model(state, str(state["implementer"]), "fix")
     note_stopped(state, str(state["implementer"]), "fix")
-    targets = [find_item(state, i, required=False) for i in fix.get("items") or []]
-    targets = [t for t in targets if t is not None]
-    result = _inspect_fix_commits(state, work, fix, targets)
+    fix_items = [find_item(state, i, required=False) for i in fix.get("items") or []]
+    fix_items = [t for t in fix_items if t is not None]
+    result = _inspect_fix_commits(state, work, fix, fix_items)
     _apply_fix_result(path, state, work, result)
-    _account_fix(state, targets)
+    _account_fix(state, fix_items)
     state["fix"] = None
     statefile.save(path, state)
-    info(f"修正を取り込みました（{len(result['ordered'])} コミット / 対象 {len(targets)} 件）。{plan_line(state)}")
+    info(f"修正を取り込みました（{len(result['ordered'])} コミット / 対象 {len(fix_items)} 件）。{plan_line(state)}")

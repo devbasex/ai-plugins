@@ -15,16 +15,21 @@
 
 1. 渡したグループのパッケージがすべて import できる → `NDF_DEPS_REEXEC` を環境から外して戻る（uv の環境の中で
    起動されたとき）。外すのは、子のプロセスが別のグループを要るときに起動し直せるようにするため
-2. 環境変数 `NDF_DEPS_REEXEC` が自分のスクリプトのパス → 起動し直したのに import できない。理由を出して終了コード 3。
+2. 環境変数 `NDF_DEPS_REEXEC` が自分のスクリプトのパス → 起動し直したのに import できない。理由を出して終了コード 69。
    印の値は起動し直したスクリプトのパスで、別のパス（印を外す前の版の親から継いだ `1` など）なら 3 へ進む
 3. uv が見つかる（`PATH`・`~/.local/bin`・`~/.cargo/bin`）→ `uv run --frozen --project <プラグインの根> --extra <グループ> ...
    python <パス> <引数>` で自分を起動し直す（`os.execve`）。環境は `UV_PROJECT_ENVIRONMENT` で
    `~/.cache/ndf/venv/<版>` に置く（`NDF_DEPS_VENV` で変えられる）。プラグインのキャッシュの中には作らない
 4. uv が無い → 版を固定した公式のインストーラで `~/.local/bin` へ入れ（`UV_NO_MODIFY_PATH=1`）、標準エラーに 1 行を
    出してから 3 へ進む。curl が無ければ `python3 -m pip install --user uv==<版>` を使う
-5. 入れられない（ネットワークが無い・権限が無い）→ 何が無いかと、手で入れるコマンドを出して終了コード 3
+5. 入れられない（ネットワークが無い・権限が無い）→ 何が無いかと、手で入れるコマンドを出して終了コード 69
 
-hook とラッパーは `require()` を呼ばない（I13・決定 20）。ラッパー（`relay_lib/runtime.py`）は `find_uv`・`install_uv`・`venv_dir` だけを使う。
+依存の欠け（2・5 と、`pyproject.toml` と `uv.lock` が無いとき）の終了コードは `EXIT_DEPS_MISSING`（69。`sysexits.h` の
+`EX_UNAVAILABLE`）で、値の持ち主はこのファイルだけである（#1654）。共通の契約の 3（前提が無い・飛ばしてよい）とは
+分け、supervise の `skip_code` に読ませない。`uv run` 自身が環境を作れないときは `os.execve` の後なので uv の終了コード
+（1）で終わる。
+
+hook とラッパーは `require()` を呼ばない（I13・決定 20）。ラッパー（`relay_lib/runtime.py`）は `ensure_uv`・`venv_dir` だけを使う。
 """
 
 from __future__ import annotations
@@ -58,7 +63,7 @@ GROUPS = {
     "terminal": ["ptyprocess"],
     "durable": ["dbos", "filelock"],
 }
-EXIT_PRECONDITION = 3
+EXIT_DEPS_MISSING = 69  # 依存の欠け（sysexits.h の EX_UNAVAILABLE）。共通の契約の 0〜3・10〜29 と重ねない
 REEXEC_ENV = "NDF_DEPS_REEXEC"
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 INSTALL_HINT = f"curl -LsSf https://astral.sh/uv/{UV_VERSION}/install.sh | sh"
@@ -66,7 +71,7 @@ INSTALL_HINT = f"curl -LsSf https://astral.sh/uv/{UV_VERSION}/install.sh | sh"
 
 def _stop(msg: str) -> NoReturn:
     print(f"❌ [ndf deps] {msg}", file=sys.stderr)
-    sys.exit(EXIT_PRECONDITION)
+    sys.exit(EXIT_DEPS_MISSING)
 
 
 def importable(group: str) -> bool:
@@ -101,6 +106,15 @@ def install_uv() -> str | None:
     return find_uv()
 
 
+def ensure_uv(label: str) -> str | None:
+    """`find_uv` で探し、無ければ `label` 付きの 1 行を標準エラーへ出して `install_uv` で入れる。入れられなければ None。"""
+    uv = find_uv()
+    if not uv:
+        print(f"{label} uv が無いため {UV_VERSION} を ~/.local/bin へ入れる", file=sys.stderr)
+        uv = install_uv()
+    return uv
+
+
 def venv_version(root: Path = PLUGIN_ROOT) -> str:
     """環境の置き場所の名前に使う版（`.claude-plugin/plugin.json` の version。読めなければ `dev`）。"""
     try:
@@ -119,6 +133,23 @@ def reexec_argv(uv: str, groups: str | Sequence[str], script: str, args: list[st
     return [uv, "run", "--quiet", "--frozen", "--project", str(root), *extras, "python", script, *args]
 
 
+def _normalize_groups(group: str, more: tuple[str, ...]) -> list[str]:
+    """重複を除いたグループの並び。外部パッケージのグループに無いものがあれば ValueError。"""
+    groups = list(dict.fromkeys((group, *more)))
+    unknown = [g for g in groups if g not in GROUPS]
+    if unknown:
+        raise ValueError(f"外部パッケージのグループに無い: {', '.join(unknown)}（{' / '.join(GROUPS)}）")
+    return groups
+
+
+def _resolve_uv_or_stop() -> str:
+    """uv を探し、無ければ入れる。入れられなければ止める。"""
+    uv = ensure_uv("[ndf deps]")
+    if not uv:
+        _stop(f"uv を入れられない（ネットワークか権限が無い）。手で入れてから打ち直す: {INSTALL_HINT}")
+    return uv
+
+
 def require(group: str, *more: str, project: Path | None = None) -> None:
     """渡したグループのパッケージが import できる環境で動いていることを保証する。できなければ、足りないグループを
     すべて `--extra` に並べた uv の環境で 1 回だけ起動し直す。
@@ -126,10 +157,7 @@ def require(group: str, *more: str, project: Path | None = None) -> None:
     `project` は宣言と lock を持つ根（既定はプラグインの根）。リポジトリの根の `scripts/` は根を渡し、環境は
     `<根>/.venv`（全体テストと同じ環境）に置く。"""
     root = PLUGIN_ROOT if project is None else Path(project).resolve()
-    groups = list(dict.fromkeys((group, *more)))
-    unknown = [g for g in groups if g not in GROUPS]
-    if unknown:
-        raise ValueError(f"外部パッケージのグループに無い: {', '.join(unknown)}（{' / '.join(GROUPS)}）")
+    groups = _normalize_groups(group, more)
     missing = [g for g in groups if not importable(g)]
     if not missing:
         # 起動し直した印は子のプロセス（別のグループを要るエントリポイント）へ継がせない。継ぐと子は起動し直さずに止まる
@@ -144,12 +172,7 @@ def require(group: str, *more: str, project: Path | None = None) -> None:
         )
     if not (root / "pyproject.toml").is_file() or not (root / "uv.lock").is_file():
         _stop(f"外部パッケージの宣言が無い: {root}/pyproject.toml と uv.lock")
-    uv = find_uv()
-    if not uv:
-        print(f"[ndf deps] uv が無いため {UV_VERSION} を ~/.local/bin へ入れる", file=sys.stderr)
-        uv = install_uv()
-    if not uv:
-        _stop(f"uv を入れられない（ネットワークか権限が無い）。手で入れてから打ち直す: {INSTALL_HINT}")
+    uv = _resolve_uv_or_stop()
     venv = venv_dir() if root == PLUGIN_ROOT else str(root / ".venv")
     env = dict(os.environ, **{REEXEC_ENV: script, "UV_PROJECT_ENVIRONMENT": venv})
     os.execve(uv, reexec_argv(uv, groups, script, sys.argv[1:], root), env)

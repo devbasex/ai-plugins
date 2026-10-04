@@ -9,11 +9,22 @@ import time
 from pathlib import Path
 
 import gh_rest
+from loop_drive import review_answer
 from supervise_lib import paths
 from supervise_lib.claude import TAIL, WORK_TOOLS, run_ticking
 from supervise_lib.prompts import FULL_SYSTEM, PROGRESS_PROMPT, REPORT_DONE, REPORT_NOT_DONE, RESUME_PROMPT, WORK_SYSTEM, WORKDIR_PROMPT
 from supervise_lib.steps import RunStep, last_json
 import project_mvv
+
+# worker 1 回の上限（秒）と、駆動が pause で止まってよい回数の既定
+DEFAULT_TIMEOUT = 1800
+DEFAULT_MAX_PAUSES = 12
+TICK_GRACE = 120  # worker 自身の上限に、外側で打ち切るまで足す余裕（秒）
+
+
+def _timeout(step: dict) -> int:
+    return step.get("timeout", DEFAULT_TIMEOUT)
+
 
 CONCURRENT_FILES = (
     "並行の触るファイル"  # 実行中のプランへ queue が入れる、同時に流れる他のプランの 触るファイル（プランの JSON には書かない）
@@ -50,7 +61,7 @@ class WorkStep:
         rt = step.get("runtime")
         system = WORK_SYSTEM + self.mvv_system(ctx)
         if not rt or rt == "claude-p":
-            return ctx.claude.call(system, prompt, WORK_TOOLS, cwd, step.get("timeout", 1800), serena=bool(step.get("serena")))
+            return ctx.claude.call(system, prompt, WORK_TOOLS, cwd, _timeout(step), serena=bool(step.get("serena")))
         pf, of = ctx.state.dir / f"{name}-prompt.md", ctx.state.dir / f"{name}-output.md"
         pf.write_text(system + "\n\n" + prompt)
         started = time.time()
@@ -68,10 +79,10 @@ class WorkStep:
             "--workdir",
             cwd,
             "--timeout",
-            str(step.get("timeout", 1800)),
+            str(_timeout(step)),
         ]
         try:
-            p = run_ticking(cmd, ctx.tick, ctx.state.every, cwd=cwd, timeout=step.get("timeout", 1800) + 120)
+            p = run_ticking(cmd, ctx.tick, ctx.state.every, cwd=cwd, timeout=_timeout(step) + TICK_GRACE)
             out = last_json(p.stdout) or {}
         except subprocess.TimeoutExpired:
             out = {"status": "stopped", "summary": "打ち切り"}
@@ -112,7 +123,7 @@ class WorkStep:
         full = bool(step.get("full"))
         system = FULL_SYSTEM + self.mvv_system(ctx)
         if full:
-            res = ctx.claude.call(system, prompt, WORK_TOOLS, cwd, step.get("timeout", 1800), full=True)
+            res = ctx.claude.call(system, prompt, WORK_TOOLS, cwd, _timeout(step), full=True)
         else:
             res = self.call_worker(ctx, step, prompt, cwd, step["id"])
         ctx.claude.record_usage("work", res)
@@ -121,7 +132,7 @@ class WorkStep:
         for _ in range(3):
             if not full or REPORT_DONE.search(res["text"] or "") or not res.get("session"):
                 break
-            res = ctx.claude.call(system, RESUME_PROMPT, WORK_TOOLS, cwd, step.get("timeout", 1800), full=True, resume=res["session"])
+            res = ctx.claude.call(system, RESUME_PROMPT, WORK_TOOLS, cwd, _timeout(step), full=True, resume=res["session"])
             ctx.claude.record_usage("work", res)
         if (full and not REPORT_DONE.search(res["text"] or "")) or REPORT_NOT_DONE.search(res["text"] or ""):
             res["ok"] = False
@@ -150,7 +161,8 @@ class DriveStep:
         入れ子の駆動（最終ゲートの item.command）の metrics は `inner` へ足す（外側の結果は内側の件数を持たない）。"""
         cwd = step.get("cwd", ctx.cwd)
         texts = []
-        for _ in range(step.get("max_pauses", 12) + 1):
+        max_pauses = step.get("max_pauses", DEFAULT_MAX_PAUSES)
+        for _ in range(max_pauses + 1):
             code, text = self.run.run_cmd(ctx, {**step, "cmd": cmd})
             texts.append(text)
             out = last_json(text)
@@ -171,7 +183,7 @@ class DriveStep:
                 texts.append(sub_text)
                 if not ok:
                     return False, sub, "\n".join(texts) + f"\n{kind} の駆動が止まった"
-                res_file.write_text(json.dumps({"review_status": (sub.get("metrics") or {}).get("review_status") or "unknown"}))
+                res_file.write_text(json.dumps(review_answer(sub.get("metrics"))))
                 continue
             pf = item.get("prompt_file")
             if not pf or not Path(pf).is_file():
@@ -183,7 +195,7 @@ class DriveStep:
             texts.append(f"## {kind} の worker\n{res['text'][-TAIL:]}")
             if not res_file.is_file():
                 return False, out, "\n".join(texts) + f"\n{kind} の worker が結果ファイルを書かなかった"
-        return False, None, "\n".join(texts) + f"\npause が上限 {step.get('max_pauses', 12)} を超えた"
+        return False, None, "\n".join(texts) + f"\npause が上限 {max_pauses} を超えた"
 
     def execute(self, ctx, step: dict) -> tuple[bool, str]:
         started = time.time()

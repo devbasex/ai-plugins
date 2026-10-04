@@ -104,15 +104,33 @@ def item_runs(item: dict[str, Any]) -> list[ts.ScopeRun]:
     return [ts.ScopeRun("legacy", ts.TEST, c) for c in _legacy_commands(item.get("command"))]
 
 
-def lint_runs(state: dict[str, Any], item: dict[str, Any]) -> list[ts.ScopeRun]:
-    """静的解析の範囲テスト。項目のコミットが変えたファイルのうち suite の `paths` に当たるものを入れる（I10）。
-
-    宣言から導いた `round-only` はラウンドテストが静的解析の全体を兼ねるため組まない。
-    """
+def lints_scoped(state: dict[str, Any]) -> bool:
+    """静的解析の範囲テストを組むか。宣言から導いた `round-only` はラウンドテストが静的解析の全体を兼ねるため組まない。"""
     strategy = strategy_of(state)
-    if not strategy.scoped_suites(ts.LINT) or (strategy.name == ts.ROUND_ONLY and not strategy.round_command):
+    return bool(strategy.scoped_suites(ts.LINT)) and not (strategy.name == ts.ROUND_ONLY and not strategy.round_command)
+
+
+def suite_lint_files(state: dict[str, Any], suite_name: str, files: list[str]) -> list[str]:
+    """静的解析の suite `suite_name` が覆う `files`。その suite が見つからなければ全件。"""
+    suite = next((s for s in strategy_of(state).scoped_suites(ts.LINT) if s.name == suite_name), None)
+    return [f for f in files if suite is None or suite.covers(f)]
+
+
+def lint_runs_for(state: dict[str, Any], files: list[str]) -> list[ts.ScopeRun]:
+    """ファイルの並びから組む静的解析の範囲テスト。suite の `paths` に当たるものだけを入れる（I10。#1693 決定 7）。
+
+    項目の検証と最終ゲート修正の公開前の静的解析が同じ組み方を使う。
+    """
+    if not lints_scoped(state):
         return []
-    return ts.scope_runs(strategy, [], changed_files(work_dir(state), item_shas(item)))
+    return [r for r in ts.scope_runs(strategy_of(state), [], list(files)) if r.kind == ts.LINT]
+
+
+def lint_runs(state: dict[str, Any], item: dict[str, Any]) -> list[ts.ScopeRun]:
+    """静的解析の範囲テスト。項目のコミットが変えたファイルから組む（`lint_runs_for`）。"""
+    if not lints_scoped(state):
+        return []
+    return lint_runs_for(state, changed_files(work_dir(state), item_shas(item)))
 
 
 def verify_runs(state: dict[str, Any], item: dict[str, Any]) -> list[ts.ScopeRun]:
@@ -171,6 +189,14 @@ def run_commands(commands: list[str], work: str, timeout: int, log: pathlib.Path
     return result, last
 
 
+def log_text(log: pathlib.Path) -> str:
+    """範囲テストのログの本文（落ちたファイルの手がかり）。読めなければ空。"""
+    try:
+        return log.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
 def round_runs(strategy: Optional[ts.Strategy]) -> Optional[list[ts.ScopeRun]]:
     """`round-only` のラウンドテスト（suite ごとに 1 本。I6）。ほかの戦略・無ければ `None`。"""
     if strategy is None or strategy.name != ts.ROUND_ONLY:
@@ -226,4 +252,4 @@ def run_or_stop(
     result, last = run_commands([str(c) for c in commands or []], work_dir(state), limit, log)
     if result.launch_failed:
         launch.stop(path, state, phase, last, result, log)
-    return result.status == "passed"
+    return result.status == ts.PASSED

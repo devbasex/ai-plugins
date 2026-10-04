@@ -49,6 +49,7 @@ def refactor() -> types.ModuleType:
 
 _MODULES = (
     "commands.converge",
+    "commands.final_fix",
     "commands.gate",
     "commands.implement",
     "commands.plan",

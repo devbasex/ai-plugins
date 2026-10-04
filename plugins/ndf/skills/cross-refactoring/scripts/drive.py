@@ -15,7 +15,10 @@ init → 提案 → 改修計画 → テスト追加 → 実装 → 検証と修
 `<作業ディレクトリ>#<PR>`）。done で終わり、状態ファイルが残る実行の回は、打ち直すと記録した結果をそのまま返す。
 
 止まるときの JSON の形と終了コードの表はライブラリの `scripts/lib/drive_pause.py` にある（使うのは 23 だけ。中断の `metrics.exit` が 4 なら refactor.py の中断）。
-子の起動・KEY=VALUE の読み取り・最終ステータスの決定は `scripts/lib/loop_drive.py` にある。
+子の起動・KEY=VALUE の読み取りは `scripts/lib/loop_drive.py` にある。最終ステータスは決めない。最終ゲートの cross-review の
+駆動が `--result-file` で回答ファイルへ書いた値（`loop_drive.review_status` が決めたもの）をそのまま finalize へ渡す（#1656）。
+対象のリポジトリは打った場所（現在のディレクトリが属する git の作業ツリーの根）で決まる。決められなければ耐久の記録を開かずに
+中断する（`metrics.exit` 2。#1655）。根は耐久ワークフローの入力として 1 度だけ記録し、最終ゲートの止まりの `items[0].cwd` に載せる。
 件数（metrics）は状態ファイルから数える: items / adopted / reverted / deferred / fix_rounds（項目の修正の回数の和）/ final_gate。
 採用（adopted）は最終ゲートが `passed` のときだけ数え、通っていなければ 0 にして残った改善項目の数を unconfirmed に出す。
 unpublished は手元の HEAD が公開した地点より進んでいるか（plan-comment が判定できなければ null）。
@@ -44,7 +47,8 @@ deps.require("md", "mdtable", "durable")
 import drive_pause as dp  # noqa: E402
 import durable  # noqa: E402
 from drive_pause import Stop  # noqa: E402
-from loop_drive import call, durable_identity, parse_vars, review_status  # noqa: E402,F401  テストは `call` をこのモジュールの上で差し替える
+import proc  # noqa: E402
+from loop_drive import call, durable_identity, parse_vars  # noqa: E402  テストは `call` をこのモジュールの上で差し替える
 
 if str(HERE) not in sys.path:
     sys.path.append(str(HERE))
@@ -57,6 +61,9 @@ ORDER = PHASES  # 手順の順序の定義元は状態側の手順一覧（`refa
 RESUME_AS = {"fix": "verify", "final-fix": "final"}
 # 監視が手順の上限で CLI を止めたときの終了コード（2 = TIMEOUT・5 = STALLED。表は monitor.py の冒頭）
 MONITOR_STOPPED = (2, 5)
+GO_FINAL = 2  # refactor.py の終了コード: 最終ゲートへ直に進む
+ABORT = 4  # refactor.py の終了コード: 中断
+FIX_PHASES = ("fix", "final-fix")  # 修正の工程
 LOOP_LIMIT = 100  # 検証と修正・最終ゲートの繰り返しの上限。締め切りは verify が時計で見る
 CR_DRIVE = HERE.parents[1] / "cross-review" / "scripts" / "drive.py"
 FOCUS = (
@@ -65,10 +72,13 @@ FOCUS = (
 )
 
 
+def _refactor_cmd(*args: str) -> list[str]:
+    """`refactor.py` の副コマンドを打つコマンド列。"""
+    return [sys.executable, str(HERE / "refactor.py"), *args]
+
+
 def _ledger_module():
     """取り消しの判定（`refactor_lib.ledger`）。報告と同じ判定で採用を数える（I8）。"""
-    if str(HERE) not in sys.path:
-        sys.path.append(str(HERE))
     from refactor_lib import ledger
 
     return ledger
@@ -105,10 +115,21 @@ def _unlink_step(path: str) -> None:
     Path(path).unlink(missing_ok=True)
 
 
+def _target_root() -> Path:
+    """対象のリポジトリの根。決められなければ `Stop`（2）。"""
+    from refactor_lib import paths
+
+    try:
+        return paths.target_repo_root()
+    except proc.StepError as e:
+        raise Stop(str(e), e.code) from None
+
+
 class Drive:
-    def __init__(self, pr: int, init_args: list[str]):
+    def __init__(self, pr: int, init_args: list[str], root: str | None = None):
         self.pr = pr
         self.init_args = init_args
+        self.root = root  # 対象のリポジトリの根（耐久ワークフローの入力。古い記録では None）
         self.extra_env: dict = {}  # 子へ足す環境変数
         self.v: dict = {}
         self.final_rc = 1  # 最後に打った final-gate の終了コード
@@ -120,8 +141,8 @@ class Drive:
         return rc, out
 
     def rf(self, *args: str, ok=(0,)) -> tuple[int, dict]:
-        rc, out = self.call([sys.executable, str(HERE / "refactor.py"), *args])
-        if rc == 4 or rc not in ok:
+        rc, out = self.call(_refactor_cmd(*args))
+        if rc == ABORT or rc not in ok:
             raise Stop(f"refactor.py {args[0]} が終了コード {rc} で止まった", rc)
         vs = parse_vars(out)
         self.v.update(vs)
@@ -133,8 +154,6 @@ class Drive:
 
     def known_tmp(self) -> Path | None:
         """init を打たずに、`refactor.py init` と同じ規則で状態の置き場を求める。求まらなければ None。"""
-        if str(HERE) not in sys.path:
-            sys.path.append(str(HERE))
         from refactor_lib import paths
 
         ap = argparse.ArgumentParser(add_help=False)
@@ -188,7 +207,7 @@ class Drive:
         """
         if not self.has_state():
             return
-        rc, out = self.call([sys.executable, str(HERE / "refactor.py"), "plan-comment", self.v["ID"]])
+        rc, out = self.call(_refactor_cmd("plan-comment", self.v["ID"]))
         self.v.update({k: v for k, v in parse_vars(out).items() if k in ("PLAN_COMMENT", "UNPUBLISHED", "PLAN_URL")})
         if rc != 0:
             print(f"⚠ リファクタリング計画のコメントを書き直せなかった（plan-comment の終了コード {rc}。結果は変えない）", file=sys.stderr)
@@ -250,7 +269,7 @@ class Drive:
         impl = impl or self.v["IMPL"]
         self.sh(f"launch-cli.sh（{impl}・{phase}）", ["bash", str(HERE / "launch-cli.sh"), impl, phase, self.v["ID"]])
         rc, _ = self.monitor(impl, phase, stem or f"{{agent}}-{phase}-rf{self.v['ID']}")
-        if rc != 0 and rc not in MONITOR_STOPPED and phase not in ("fix", "final-fix"):
+        if rc != 0 and rc not in MONITOR_STOPPED and phase not in FIX_PHASES:
             raise Stop(f"monitor.py（{impl}・{phase}）が終了コード {rc} で止まった（結果なし・起動失敗・早期の異常）", rc)
 
     def propose(self) -> None:
@@ -287,7 +306,7 @@ class Drive:
             self.rf("measure", i, ok=(0, 1))
             self.rf("start-phase", i, "propose")
             self.propose()
-            go_final = self.rf("merge-proposals", i, ok=(0, 2))[0] == 2
+            go_final = self.rf("merge-proposals", i, ok=(0, GO_FINAL))[0] == GO_FINAL
         if not go_final:
             go_final = self._phase_step("plan", "merge-plan")
         if not go_final and self.v.get("TESTS_NEEDED") == "1" and self.todo("add-tests"):
@@ -300,7 +319,7 @@ class Drive:
         """未了なら担当の工程を打ち、続けて取り込みを打つ。最終ゲートへ直に進むなら真を返す。"""
         if self.todo(phase):
             self.impl_phase(phase)
-        return self.rf(merge_cmd, self.v["ID"], ok=(0, 2))[0] == 2
+        return self.rf(merge_cmd, self.v["ID"], ok=(0, GO_FINAL))[0] == GO_FINAL
 
     def verify_round(self) -> bool:
         """検証を 1 回打ち、修正が要れば修正と取り込みまで進める。修正したなら真を返す。"""
@@ -332,11 +351,12 @@ class Drive:
             # 寄せた危険フラグの項目を取り消しただけで、修正の依頼ではない。修正の CLI を起動せずに確かめ直す。
             return False
         self.impl_phase("final-fix", self.v.get("FINAL_FIX_IMPL"), "{agent}-final-fix")
-        self.rf("merge-final-fix", i)
+        # 2 = 取り込めなかった（公開前の静的解析で差し戻した・結果なし）。どちらも final-gate へ戻り、そこが打ち切りを見る（#1693）
+        self.rf("merge-final-fix", i, ok=(0, 2))
         return False
 
     def report(self) -> Path:
-        _, out = self.call([sys.executable, str(HERE / "refactor.py"), "report", self.v["ID"]])
+        _, out = self.call(_refactor_cmd("report", self.v["ID"]))
         rp = self.tmp / f"drive-rf{self.v['ID']}-report.md"
         _write_step(str(rp), out)
         return rp
@@ -363,20 +383,20 @@ class Drive:
         return self.tmp / f"drive-rf{self.v['ID']}-cross-review.json"
 
     def pause_review(self, res: Path) -> dict:
+        """最終ゲートの止まり。cross-review の駆動を対象のリポジトリで打たせ、最終ステータスはその駆動に書かせる（#1656）。"""
         pf = self.tmp / f"drive-rf{self.v['ID']}-cross-review-prompt.md"
-        cmd = f"python3 {CR_DRIVE} {self.pr} --focus {shlex.quote(FOCUS)}"
+        cwd = self.root or str(Path.cwd())
+        cmd = f"python3 {CR_DRIVE} {self.pr} --focus {shlex.quote(FOCUS)} --result-file {shlex.quote(str(res))}"
         _write_step(
             str(pf),
             f"""最終ゲート: Pull Request #{self.pr} 全体を cross-review で承認収束にかける。
 
-1. `{cmd}` を打ち、結果 JSON の status を見る（gate なら items[0] の prompt_file の指示を行い、同じコマンドを打ち直す）
-2. 終わったら、cross-review の状態ファイル（`<cross-review の作業ツリー>/.cross_review/cross-review-pr{self.pr}-state.json`）から
-   最終ステータスを決める: final が approved で sweep.verified が true・sweep.remaining_open が 0・
-   sweep.commit が null なら approved、それ以外は final の値
-3. 結果ファイルへ `{{"review_status": "<最終ステータス>"}}` を書く: {res}
+1. 作業ディレクトリ `{cwd}` で `{cmd}` を打つ（gate なら items[0] の prompt_file の指示を行い、同じコマンドを打ち直す）
+2. 駆動が ok で終わると、最終ステータスを回答ファイル {res} へ書く。自分では書かない
+3. この駆動を起動したコマンドを打ち直す
 """,
         )
-        return dp.pause(TOOL, "cross-review", pf, res, 0, self.counts(), command=cmd)
+        return dp.pause(TOOL, "cross-review", pf, res, 0, self.counts(), command=cmd, cwd=cwd)
 
     def review_result(self, res: Path) -> str | None:
         """最終ゲートの cross-review の結果ファイルの最終ステータス。まだ書かれていなければ None。"""
@@ -389,6 +409,7 @@ class Drive:
 
     # --- main の側（耐久の記録を開き、耐久ワークフローを始めるか続ける） ---
     def run(self) -> dict:
+        self.root = self.root or str(_target_root())  # 耐久の記録を開く前に確かめる（I5）
         identity = self.identity()
         try:
             opened = durable.launched()
@@ -402,7 +423,7 @@ class Drive:
         if ref.action == "done":
             return ref.output["result"]
         after = durable.resume_paused(ref)
-        wid = durable.start(ref, refactor_drive, self.pr, self.init_args)
+        wid = durable.start(ref, refactor_drive, self.pr, self.init_args, self.root)
         out = durable.wait(wid, "pause", after=after)
         if out.kind == "event":
             self.paused = True
@@ -420,9 +441,9 @@ def finished(out: object) -> bool:
 
 
 @durable.workflow(name="refactor_drive")
-def refactor_drive(pr: int, init_args: list[str]) -> dict:
+def refactor_drive(pr: int, init_args: list[str], root: str | None = None) -> dict:
     """1 回の改修計画の実行。出力は `{"result": <結果 JSON>, "state_file": <状態ファイル>}`。"""
-    d = Drive(pr, init_args)
+    d = Drive(pr, init_args, root)
     try:
         d.start()
         go_final = d.phases()

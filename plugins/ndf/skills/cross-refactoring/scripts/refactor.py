@@ -41,21 +41,13 @@ deps.require("md", "mdtable")
 # スクリプトの位置と揃わない。
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-# **呼び名の表は `refactoring` が持つ**（#444）。読めないと兆候と手法の名前が決まらず、
-# 重複排除が効かない。取り込みの時点で読むため、ここで捕まえて理由だけを出す
-# （トレースバックを見せても、直す手がかりにならない）。
-try:
-    pass  # noqa: E402
-except Exception as _exc:  # 取り込みそのものが失敗した
-    print(f"ERROR: {_exc}", file=sys.stderr)
-    sys.exit(4)
-
 from refactor_lib.commands.assess import DEFAULT_MAX_LINES, cmd_assess  # noqa: E402
 from refactor_lib.commands.converge import (  # noqa: E402
     cmd_merge_fix,
     cmd_verify,
 )
-from refactor_lib.commands.gate import cmd_final_gate, cmd_merge_final_fix  # noqa: E402
+from refactor_lib.commands.final_fix import cmd_merge_final_fix  # noqa: E402
+from refactor_lib.commands.gate import cmd_final_gate  # noqa: E402
 from refactor_lib.commands.implement import (  # noqa: E402
     cmd_merge_implement,
     cmd_merge_tests,
@@ -269,7 +261,8 @@ def add_id_commands(sub: argparse._SubParsersAction) -> None:
 def add_assess_parser(sub: argparse._SubParsersAction) -> None:
     """`assess` を登録する。"""
     ap = sub.add_parser(
-        "assess", help="構造改善を飛ばしてよいかを差分から判定する。終了コード 0 = 通す / 3 = 飛ばしてよい / 2 = 判定できない"
+        "assess",
+        help="構造改善を飛ばしてよいかを差分から判定する。終了コード 0 = 通す / 3 = 飛ばしてよい / 2 = 判定できない / 69 = 依存が欠けた（判定していない）",
     )
     ap.add_argument("--base", required=True, help="起点の ref。`<base>...HEAD` の差分を見る")
     ap.add_argument(

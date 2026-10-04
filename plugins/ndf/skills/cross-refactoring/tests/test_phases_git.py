@@ -463,6 +463,8 @@ def test_standalone_runs_cross_review_and_appends_history_only_when_approved(flo
     assert not history.exists()
     _call(cmd_report, "cmd_finalize", review_status="max_rounds")
     assert not history.exists()
+    _call(cmd_report, "cmd_finalize", review_status="unverified")  # スイープが未検証の承認は通った実行にしない（#1656）
+    assert not history.exists()
     _call(cmd_report, "cmd_finalize", review_status="approved")
     assert len(history.read_text(encoding="utf-8").splitlines()) == 1
     row = json.loads(history.read_text(encoding="utf-8"))
