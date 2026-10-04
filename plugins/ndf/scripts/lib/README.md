@@ -70,7 +70,7 @@
 | [project_mvv_signals.py](project_mvv_signals.py) | 改訂の兆候（覆し・「判定できない」・流出不具合）の記録と集計、「判定できない」の連続 | `project-mvv.py` / `mvv-gate.py` / `sprint-state.py` |
 | [sprint_mvv.py](sprint_mvv.py) | `sprint-state.py init --pace fast` のスプリント MVV の写し（マイルストーンの説明から）と、プロジェクト MVV への照合 | `sprint-state.py` |
 | [loop_drive.py](loop_drive.py) | 収束ループの drive の部品（`call`・`parse_vars`・`review_status`） | 収束ループの 2 つの `drive.py` |
-| [deps.py](deps.py) | 外部パッケージを使うエントリポイントが最初に呼ぶ `require("<グループ>")`。import できなければ uv の環境（宣言と版の固定はプラグインルートの `pyproject.toml` と `uv.lock`。`project=` を渡せばその根の 1 組と `<根>/.venv`）で起動し直し、uv が無ければ版を固定して入れる。入れられなければ終了コード 3。hook とラッパーは `require()` を呼ばない（ラッパーの環境は `relay_lib/runtime.py` が `find_uv`・`install_uv`・`venv_dir` で用意する） | 外部パッケージを使うエントリポイント・根の `scripts/`（`scripts/lib/ndf_wrappers.py` を通す）・`relay_lib/runtime.py` |
+| [deps.py](deps.py) | 外部パッケージを使うエントリポイントが最初に呼ぶ `require("<グループ>")`。import できなければ uv の環境（宣言と版の固定はプラグインルートの `pyproject.toml` と `uv.lock`。`project=` を渡せばその根の 1 組と `<根>/.venv`）で起動し直し、uv が無ければ版を固定して入れる。用意できなければ（起動し直しても import できない・宣言が無い・uv を入れられない）依存の欠けとして終了コード 69（定数 `EXIT_DEPS_MISSING`。値の持ち主はここだけ）。hook とラッパーは `require()` を呼ばない（ラッパーの環境は `relay_lib/runtime.py` が `find_uv`・`install_uv`・`venv_dir` で用意する） | 外部パッケージを使うエントリポイント・根の `scripts/`（`scripts/lib/ndf_wrappers.py` を通す）・`relay_lib/runtime.py` |
 | [md.py](md.py) | Markdown の構造の読み取り（囲み・見出し・節・表・地の文・リンクとアンカー）。markdown-it-py を呼ぶのはここだけ。書き込みは読み取った行の区間で呼び出し側が行う | `cross-refactoring`（`refactor_lib/vocabulary.py`）・`relay_lib/mark.py`。ほかは D1〜D8 が呼び出し側を置き換える |
 | [mdtable.py](mdtable.py) | Markdown の表の組み立て（列の幅を揃えない行・セルの縦棒のエスケープ・数の列の右寄せ）。tabulate を呼ぶのはここだけ | `cross-refactoring`（`refactor_lib/plan.py`・`commands/report.py`）。ほかは D1〜D8 が呼び出し側を置き換える |
 | [handoff_doc.py](handoff_doc.py) | 引継ぎ文書の節の読み書き（見出しに語を含む節の位置・見出しの文・節の本文の置き換え・深さごとの見出しの並び）。囲みの中の `#` を見出しと数えない | `handoff.py` / `sprint-state.py` |
@@ -125,6 +125,7 @@ Skill から呼ぶ手順のスクリプト（`scripts/*-steps.py`）は、最後
 | 3 | `stopped` | 前提が無い（宣言・認証・対象のファイル）、または各スクリプトが定めた正常な否定の結果（立たない・変更なし・飛ばしてよい。例 `check-trigger.py eval`・`refactor.py assess`）。読めないときは 2 で返し、3 と混ぜない |
 | 10〜19 | `gate` | 承認ゲート。人の同意が要る |
 | 20〜29 | `gate` | LLM の判断待ち |
+| 69 | `stopped` | 依存の欠け。`deps.require` が外部パッケージを用意できずに止まった。手順は何も判定していない。「飛ばしてよい」とも 3 とも読まない（値の持ち主は `deps.py` の `EXIT_DEPS_MISSING`） |
 
 承認資料は `development-workflow/references/approval-request.md` の 2 層（対象を開くもの・判断に
 使うもの）に、同意を求めること・戻し方を足した形で書く。置き場所は `NDF_PRESENTATION_DIR`

@@ -420,6 +420,21 @@ def test_condition_zero_runs_and_other_codes_stop(tmp_path):
     assert got == {"ok": "完了", "bad": "止まった"} and (tmp_path / "ran").exists()
 
 
+def test_condition_that_stops_on_missing_deps_is_not_done(tmp_path):
+    """実行の条件のコマンドが依存の欠け（69）で終わると、完了でなく止まった（#1654）。"""
+    import deps
+
+    plan = plan_file(
+        tmp_path,
+        "deps",
+        [{"id": "t", "type": "run", "cmd": f"touch {tmp_path}/ran", "next": "end"}],
+        **{"実行の条件": {"cmd": f"exit {deps.EXIT_DEPS_MISSING}", "skip_code": 3}},
+    )
+    res = queue.cmd_queue([plan], 3, poll=0.05)
+    assert [i["result"] for i in res["items"]] == ["止まった"] and not (tmp_path / "ran").exists()
+    assert "- 結果: 止まった" in (paths.state_dir_of(plan) / "report.md").read_text()
+
+
 def test_then_stages_run_in_order_and_stop_after_a_failed_stage(tmp_path):
     a = plan_file(tmp_path, "a", [{"id": "t", "type": "run", "cmd": f"date +%s.%N > {tmp_path}/a", "next": "end"}])
     b = plan_file(tmp_path, "b", [{"id": "t", "type": "run", "cmd": f"sleep 0.2; date +%s.%N > {tmp_path}/b", "next": "end"}])
