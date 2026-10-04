@@ -81,10 +81,7 @@ def uv_path() -> str:
     forced = os.environ.get(UV_ENV)
     if forced:
         return forced
-    uv = deps.find_uv()
-    if not uv:
-        print(f"[ndf relay] uv が無いため {deps.UV_VERSION} を ~/.local/bin へ入れる", file=sys.stderr)
-        uv = deps.install_uv()
+    uv = deps.ensure_uv("[ndf relay]")
     if not uv:
         raise EnvUnavailable(f"uv を入れられない（ネットワークか権限が無い）。手で入れてから打ち直す: {deps.INSTALL_HINT}")
     return uv

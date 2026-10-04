@@ -29,7 +29,7 @@
 分け、supervise の `skip_code` に読ませない。`uv run` 自身が環境を作れないときは `os.execve` の後なので uv の終了コード
 （1）で終わる。
 
-hook とラッパーは `require()` を呼ばない（I13・決定 20）。ラッパー（`relay_lib/runtime.py`）は `find_uv`・`install_uv`・`venv_dir` だけを使う。
+hook とラッパーは `require()` を呼ばない（I13・決定 20）。ラッパー（`relay_lib/runtime.py`）は `ensure_uv`・`venv_dir` だけを使う。
 """
 
 from __future__ import annotations
@@ -106,6 +106,15 @@ def install_uv() -> str | None:
     return find_uv()
 
 
+def ensure_uv(label: str) -> str | None:
+    """`find_uv` で探し、無ければ `label` 付きの 1 行を標準エラーへ出して `install_uv` で入れる。入れられなければ None。"""
+    uv = find_uv()
+    if not uv:
+        print(f"{label} uv が無いため {UV_VERSION} を ~/.local/bin へ入れる", file=sys.stderr)
+        uv = install_uv()
+    return uv
+
+
 def venv_version(root: Path = PLUGIN_ROOT) -> str:
     """環境の置き場所の名前に使う版（`.claude-plugin/plugin.json` の version。読めなければ `dev`）。"""
     try:
@@ -149,10 +158,7 @@ def require(group: str, *more: str, project: Path | None = None) -> None:
         )
     if not (root / "pyproject.toml").is_file() or not (root / "uv.lock").is_file():
         _stop(f"外部パッケージの宣言が無い: {root}/pyproject.toml と uv.lock")
-    uv = find_uv()
-    if not uv:
-        print(f"[ndf deps] uv が無いため {UV_VERSION} を ~/.local/bin へ入れる", file=sys.stderr)
-        uv = install_uv()
+    uv = ensure_uv("[ndf deps]")
     if not uv:
         _stop(f"uv を入れられない（ネットワークか権限が無い）。手で入れてから打ち直す: {INSTALL_HINT}")
     venv = venv_dir() if root == PLUGIN_ROOT else str(root / ".venv")
