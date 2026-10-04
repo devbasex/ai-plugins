@@ -1407,8 +1407,8 @@ PLANNED = {
 @pytest.mark.parametrize(
     "phase, planned, expected",
     [
-        ("propose", False, 12 * 60 + 180),  # 提案の枠の終わり 10:12
-        ("plan", False, 18 * 60 + 180),  # 改修計画の枠の終わり 10:18
+        ("propose", False, 6 + 12 * 60 + 180),  # 提案の枠の終わり 10:12 + 着手前のテスト 6 秒（#1385）
+        ("plan", False, 6 + 18 * 60 + 180),  # 改修計画の枠の終わり 10:18 + 6 秒
         ("add-tests", True, 23 * 60 + 180),  # 最後の項目の完了の締め切り 10:20 + 3 分
         ("implement", True, 32 * 60 + 180),  # 10:30 + 2 分
         ("fix", True, 58 * 60 + 180),  # 開始 + 60 − 全体のテストの予備時間 2 分
@@ -1582,6 +1582,8 @@ def test_run_baseline_records_a_green_run_of_test_and_lint_suites(refactor, monk
     assert isinstance(seconds, float)
     assert record == {
         "mode": "whole",
+        "locations": None,
+        "timed_out": False,
         "command": "run unit && run lint",
         "status": "green",
         "suites": {"unit": "green", "lint": "green"},

@@ -22,11 +22,13 @@ import test_strategy as ts
 from . import budget, clock
 
 # 手順の枠の係数（決定 24）。B に掛ける比率で、秒や分の固定値は持たない。
-PROPOSE_SHARE = 0.20  # 提案の枠の終わり = 開始 + 0.20·B
+PROPOSE_SHARE = 0.20  # 提案の枠の終わり = 開始 + o + 0.20·B（o は着手前のテストの実測 x。#1385）
 PLAN_SHARE = 0.10  # 改修計画の枠の終わり = 提案の枠の終わり + 0.10·B
 MARGIN_SHARE = 0.05  # 余裕 = 0.05·B（手順の上限と CLI の上限に足す）
 MEASURE_SHARE = 0.05  # 指標の測定の上限 = 0.05·B（提案の枠の中から割く。#1319 の決定 7）
 MEASURE_PROPOSE_CAP = 0.5  # 測定に使える時間は、提案の枠の終わりまでの残りの半分まで
+# 枠が想定最大時間に収まらずに止めた後、人が `init` を打ち直すまでの見込み（秒）。要る想定最大時間の下限に足す（#1385 決定 2）。
+RESUME_GRACE_SECONDS = 300
 STOP_REVERT_SHARE = 0.20  # 打ち切りの後の取り消し（案 A）の締め切り = 最終ゲートの修正の打ち切り + 0.20·B（#1669 決定 8）
 # テストと CI の待ちの係数は `test_strategy` が持つ（cross-refactoring と supervise で同じ値）。
 INIT_TEST_SHARE = ts.INIT_TEST_SHARE
@@ -98,7 +100,7 @@ def strategy_of(state: dict[str, Any]) -> ts.Strategy:
 
 
 def test_limits(state: dict[str, Any]) -> dict[str, Any]:
-    """テストと CI の待ちの上限（`test_strategy.limits`）。入力は着手前の記録から取る。"""
+    """テストと CI の待ちの上限（`test_strategy.limits`）。入力は着手前の記録から取る（範囲テストの所要 s を含む。I6）。"""
     baseline = state.get("baseline_test") or {}
     return ts.limits(
         strategy_of(state),
@@ -107,7 +109,20 @@ def test_limits(state: dict[str, Any]) -> dict[str, Any]:
         whole_source=baseline.get("whole_source"),
         ci_seconds=baseline.get("ci_seconds"),
         measured_seconds=baseline.get("seconds"),
+        scope_seconds=baseline.get("scope_seconds"),
+        scope_source=baseline.get("scope_source"),
     )
+
+
+def window_offset(state: dict[str, Any]) -> float:
+    """手順の枠の起点のずれ o（秒）。着手前のテストの実測 x（無ければ 0）。枠が収まらずに止めた後の打ち直し
+    （`resumed_at`）があれば `max(x, resumed_at − started_at)`（I2）。"""
+    x = float((state.get("baseline_test") or {}).get("seconds") or 0.0)
+    started = clock.parse(state.get("started_at"))
+    resumed = clock.parse(state.get("resumed_at"))
+    if started is not None and resumed is not None:
+        x = max(x, (resumed - started).total_seconds())
+    return max(0.0, x)
 
 
 def _completion(items: list[dict[str, Any]], start_key: str, estimate_key: str) -> Optional[_dt.datetime]:
@@ -132,13 +147,18 @@ def compute(
     tests: Any,
     items: Optional[list[dict[str, Any]]] = None,
     reserve: Optional[dict[str, Any]] = None,
+    offset_seconds: Optional[float] = None,
 ) -> dict[str, Any]:
     """実行時の値の表。`tests` は `test_strategy.limits` の表（数値か `None` なら、着手前の実測として `local-full` の表を組む）。
-    `items` と `reserve`（改修計画の後）が無ければ、その行は `None`。"""
+    `items` と `reserve`（改修計画の後）が無ければ、その行は `None`。
+
+    提案と改修計画の枠は `started_at + offset_seconds`（o。着手前のテストの終わり）から数える（#1385 I2）。
+    `final_end_at` と `fix_end_at`・`stop_revert_end_at` は `started_at` から数える（I1・I3）。"""
     b = int(budget_minutes)
     if not isinstance(tests, dict):
         tests = ts.limits(ts.Strategy(ts.LOCAL_FULL, "args"), b, measured_seconds=tests)
-    propose_end = started_at + _dt.timedelta(minutes=b * PROPOSE_SHARE)
+    origin = started_at + _dt.timedelta(seconds=max(0.0, float(offset_seconds or 0.0)))
+    propose_end = origin + _dt.timedelta(minutes=b * PROPOSE_SHARE)
     plan_end = propose_end + _dt.timedelta(minutes=b * PLAN_SHARE)
     planned = reserve is not None
     return {
@@ -171,6 +191,37 @@ def of_state(state: dict[str, Any]) -> dict[str, Any]:
         test_limits(state),
         state.get("items") if plan else None,
         (plan or {}).get("reserve") if plan else None,
+        window_offset(state),
+    )
+
+
+def required_budget_minutes(offset_seconds: float) -> int:
+    """枠の起点が o のとき、提案と改修計画の枠が収まる想定最大時間の下限（分）。人が打ち直すまでの見込みを足す。"""
+    share = round(1.0 - PROPOSE_SHARE - PLAN_SHARE, 9)
+    return math.ceil(round((float(offset_seconds) + RESUME_GRACE_SECONDS) / (60 * share), 9))
+
+
+def window_problem(limits: dict[str, Any]) -> Optional[str]:
+    """提案と改修計画の枠の終わり（`plan_end_at`）が想定最大時間の終わり（`final_end_at`）を越えるなら止める理由の文。
+    収まれば `None`（#1385 I4・決定 2）。"""
+    plan_end = clock.parse(limits.get("plan_end_at"))
+    final_end = clock.parse(limits.get("final_end_at"))
+    if plan_end is None or final_end is None or plan_end <= final_end:
+        return None
+    b = int(limits["budget_minutes"])
+    started = final_end - _dt.timedelta(minutes=b)
+    offset = max(0.0, (plan_end - started).total_seconds() - b * 60 * (PROPOSE_SHARE + PLAN_SHARE))
+    x = (limits.get("basis") or {}).get("x")
+    spent = f"{x} 秒" if x is not None else "時間が"
+    later = f"（打ち直した時刻は開始から {math.ceil(offset)} 秒）" if x is None or offset > float(x) + 1 else ""
+    window = _seconds(b, PROPOSE_SHARE + PLAN_SHARE)
+    per_minute = round(60 / (60 * round(1.0 - PROPOSE_SHARE - PLAN_SHARE, 9)), 2)
+    return (
+        f"着手前のテストに {spent}かかり{later}、提案とリファクタリング計画の枠（0.30·B = {window} 秒）が"
+        f"想定最大時間 {b} 分に収まりません。\n"
+        f"--budget-minutes を {required_budget_minutes(offset)} 以上にして {RESUME_GRACE_SECONDS // 60} 分以内に init を打ち直すと、"
+        f"着手前のテストを走らせ直さずに続けます（下限では実装の時間が残りません。打ち直しが {RESUME_GRACE_SECONDS // 60} 分より"
+        f" 1 分遅れるごとに、要る下限は約 {per_minute} 分増えます）"
     )
 
 

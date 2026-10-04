@@ -110,7 +110,7 @@ def _state():
 
 def test_build_row_and_append_round_trip(allocation, tmp_path):
     row = allocation.build_row(_state())
-    assert row["schema"] == 1
+    assert row["schema"] == 2 and row["kind"] == "run"
     assert row["run"] == "rf917-20260923T142912Z"
     assert row["pr"] == 917
     assert row["elapsed_seconds"] == 3200

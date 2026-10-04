@@ -229,6 +229,8 @@ def test_carmo_limits_with_a_30_minute_budget():
         "x": 12.0,
         "strategy": "local-scoped-ci-whole",
         "unknown_duration": False,
+        "scope_seconds": None,
+        "scope_source": None,
     }
     assert ts.reserve_seconds(s, w, c, True) == (0.0, 360.0), "バッファに w を入れない"
 

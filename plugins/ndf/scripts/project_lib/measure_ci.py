@@ -114,7 +114,7 @@ def _steps_of(jobs: list[dict], run: dict) -> dict | None:
 
 
 def ndf_record(repo: str | None) -> dict | None:
-    """同じ機械の NDF の実行の記録の `whole_test.init` の直近 10 件の中央値（決定 9）。"""
+    """同じ機械の NDF の実行の記録の、実行の行の `whole_test.init` の直近 10 件の中央値（決定 9）。"""
     if not repo:
         return None
     f = run_metrics.metrics_dir() / repo_id.slug(repo) / RECORD_NAME
@@ -125,7 +125,11 @@ def ndf_record(repo: str | None) -> dict | None:
         return None
     for line in lines:
         try:
-            v = (json.loads(line).get("whole_test") or {}).get("init")
+            row = json.loads(line)
+            # 着手前のテストの行（`kind: init_test`。cross-refactoring の #1385）は全体テストの所要に数えない
+            if row.get("kind", "run") != "run":
+                continue
+            v = (row.get("whole_test") or {}).get("init")
         except (ValueError, AttributeError):
             continue
         if isinstance(v, (int, float)) and v > 0:

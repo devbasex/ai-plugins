@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import fnmatch
 import math
+import posixpath
 import shlex
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -41,7 +42,7 @@ DURATION_SOURCES = ("ndf-record", "ci-junit", "ci-steps")
 CI_WHOLE_THRESHOLD_SECONDS = 600.0
 
 # 時間の係数（決定 8）。B は予算（分）、w は全体テストの所要、x は着手前に手元で走らせたテストの実測、c は CI の壁時計。
-INIT_TEST_SHARE = 0.10  # 着手前のテスト 1 回の上限 = max(0.10·B, 3·w)（CI に任せる戦略は 0.10·B）
+INIT_TEST_SHARE = 0.10  # 着手前のテスト 1 回の上限 = max(0.10·B, 3·w)（CI に任せる戦略は max(0.10·B, 3·s)。s が分からなければ 0.10·B）
 TEST_FACTOR = 3.0  # テスト 1 回の上限 = max(3·x, 0.01·B)
 TEST_FLOOR_SHARE = 0.01
 CI_WAIT_SHARE = 0.05  # CI の待ちの上限 = max(3·c, 0.05·B)
@@ -285,6 +286,28 @@ def suite_for(strategy: Strategy, path: str, kind: str = TEST) -> Optional[Suite
         if n is not None and n > best_len:
             best, best_len = suite, n
     return best
+
+
+def covers_whole(strategy: Strategy, locations: list[str], kind: str = TEST) -> bool:
+    """テストの置き場所（`locations`）が、`kind` の suite の `paths` の全要素を覆うか（#1555 の前提 3）。
+
+    要素は置き場所のどれかが同じか祖先なら覆う。glob の要素と `.` は置き場所 `.` だけが覆う。`kind` の suite が
+    無いか、置き場所が無ければ覆わない。"""
+    suites = [s for s in strategy.suites if s.kind == kind]
+    locs = [posixpath.normpath(str(p).split("::", 1)[0]) for p in locations or [] if str(p).strip()]
+    if not suites or not locs:
+        return False
+    whole = "." in locs
+    for suite in suites:
+        for root in suite.paths or ["."]:
+            r = posixpath.normpath(str(root)) if str(root).strip() else "."
+            if whole:
+                continue
+            if r == "." or any(c in r for c in _GLOB_CHARS):
+                return False
+            if not any(r == loc or r.startswith(loc + "/") for loc in locs):
+                return False
+    return True
 
 
 def suite_groups(strategy: Strategy, targets: list[str]) -> list[tuple[Suite, list[str]]]:
@@ -613,8 +636,13 @@ def limits(
     whole_source: Optional[str] = None,
     ci_seconds: Optional[float] = None,
     measured_seconds: Optional[float] = None,
+    scope_seconds: Optional[float] = None,
+    scope_source: Optional[str] = None,
 ) -> dict[str, Any]:
     """時間の上限（秒）の表（決定 8）。`basis` に入力を並べる。
+
+    `scope_seconds` は CI に任せる戦略で着手前に走らせる範囲テストの所要の見込み s（`scope_source` はその出所。
+    `history` / `whole`）。分かれば着手前の上限を `max(0.10·B, 3·s)` にする（#1555）。ほかの戦略と予算なしでは使わない。
 
     予算が無い（supervise）ときは `3·w` と `3·c` を上限にし、所要も無ければ `UNKNOWN_DURATION_LIMITS` を使って
     `basis.unknown_duration` を真にする。
@@ -646,15 +674,21 @@ def limits(
             "basis": basis,
         }
     seconds = float(budget_minutes) * 60
+    # 範囲テストの所要は予算を持つ呼び出し（cross-refactoring）だけが渡す。supervise の表の形は変えない（AC12）。
+    basis["scope_seconds"] = scope_seconds
+    basis["scope_source"] = scope_source if scope_seconds is not None else None
     if strategy.whole_on_ci or w is None:
-        init_timeout = _ceil(seconds * INIT_TEST_SHARE)
+        base_timeout = _ceil(seconds * INIT_TEST_SHARE)
     else:
-        init_timeout = _ceil(max(seconds * INIT_TEST_SHARE, TEST_FACTOR * w))
+        base_timeout = _ceil(max(seconds * INIT_TEST_SHARE, TEST_FACTOR * w))
+    init_timeout = base_timeout
+    if strategy.whole_on_ci and scope_seconds is not None:
+        init_timeout = _ceil(max(seconds * INIT_TEST_SHARE, TEST_FACTOR * float(scope_seconds)))
     if x is None:
-        test_timeout = init_timeout
+        test_timeout = base_timeout
     else:
         test_timeout = _ceil(max(TEST_FACTOR * float(x), seconds * TEST_FLOOR_SHARE))
-    whole_timeout = _ceil(max(TEST_FACTOR * float(w), seconds * TEST_FLOOR_SHARE)) if w is not None else init_timeout
+    whole_timeout = _ceil(max(TEST_FACTOR * float(w), seconds * TEST_FLOOR_SHARE)) if w is not None else base_timeout
     ci_wait = _ceil(max(TEST_FACTOR * c, seconds * CI_WAIT_SHARE)) if c is not None else _ceil(seconds * CI_WAIT_UNKNOWN_SHARE)
     return {
         "init_test_timeout": init_timeout,
