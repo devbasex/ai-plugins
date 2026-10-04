@@ -61,6 +61,9 @@ ORDER = PHASES  # 手順の順序の定義元は状態側の手順一覧（`refa
 RESUME_AS = {"fix": "verify", "final-fix": "final"}
 # 監視が手順の上限で CLI を止めたときの終了コード（2 = TIMEOUT・5 = STALLED。表は monitor.py の冒頭）
 MONITOR_STOPPED = (2, 5)
+GO_FINAL = 2  # refactor.py の終了コード: 最終ゲートへ直に進む
+ABORT = 4  # refactor.py の終了コード: 中断
+FIX_PHASES = ("fix", "final-fix")  # 修正の工程
 LOOP_LIMIT = 100  # 検証と修正・最終ゲートの繰り返しの上限。締め切りは verify が時計で見る
 CR_DRIVE = HERE.parents[1] / "cross-review" / "scripts" / "drive.py"
 FOCUS = (
@@ -138,7 +141,7 @@ class Drive:
 
     def rf(self, *args: str, ok=(0,)) -> tuple[int, dict]:
         rc, out = self.call([sys.executable, str(HERE / "refactor.py"), *args])
-        if rc == 4 or rc not in ok:
+        if rc == ABORT or rc not in ok:
             raise Stop(f"refactor.py {args[0]} が終了コード {rc} で止まった", rc)
         vs = parse_vars(out)
         self.v.update(vs)
@@ -267,7 +270,7 @@ class Drive:
         impl = impl or self.v["IMPL"]
         self.sh(f"launch-cli.sh（{impl}・{phase}）", ["bash", str(HERE / "launch-cli.sh"), impl, phase, self.v["ID"]])
         rc, _ = self.monitor(impl, phase, stem or f"{{agent}}-{phase}-rf{self.v['ID']}")
-        if rc != 0 and rc not in MONITOR_STOPPED and phase not in ("fix", "final-fix"):
+        if rc != 0 and rc not in MONITOR_STOPPED and phase not in FIX_PHASES:
             raise Stop(f"monitor.py（{impl}・{phase}）が終了コード {rc} で止まった（結果なし・起動失敗・早期の異常）", rc)
 
     def propose(self) -> None:
@@ -304,7 +307,7 @@ class Drive:
             self.rf("measure", i, ok=(0, 1))
             self.rf("start-phase", i, "propose")
             self.propose()
-            go_final = self.rf("merge-proposals", i, ok=(0, 2))[0] == 2
+            go_final = self.rf("merge-proposals", i, ok=(0, GO_FINAL))[0] == GO_FINAL
         if not go_final:
             go_final = self._phase_step("plan", "merge-plan")
         if not go_final and self.v.get("TESTS_NEEDED") == "1" and self.todo("add-tests"):
@@ -317,7 +320,7 @@ class Drive:
         """未了なら担当の工程を打ち、続けて取り込みを打つ。最終ゲートへ直に進むなら真を返す。"""
         if self.todo(phase):
             self.impl_phase(phase)
-        return self.rf(merge_cmd, self.v["ID"], ok=(0, 2))[0] == 2
+        return self.rf(merge_cmd, self.v["ID"], ok=(0, GO_FINAL))[0] == GO_FINAL
 
     def verify_round(self) -> bool:
         """検証を 1 回打ち、修正が要れば修正と取り込みまで進める。修正したなら真を返す。"""
