@@ -91,7 +91,7 @@ def _run_scope(path: pathlib.Path, state: dict[str, Any], runs: list[ts.ScopeRun
 def _given(state: dict[str, Any], item: dict[str, Any], run: ts.ScopeRun) -> list[str]:
     """その suite に渡したファイル（静的解析は項目の変えたファイル、テストは対象）。"""
     if run.kind == ts.LINT:
-        return targets.lint_files(state, run.suite, changed_files(work_dir(state), item_shas(item)))
+        return targets.suite_lint_files(state, run.suite, changed_files(work_dir(state), item_shas(item)))
     return [str(t).split("::", 1)[0] for t in item.get("test_targets") or []]
 
 

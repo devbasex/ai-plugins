@@ -74,7 +74,7 @@ def check_files(state: dict[str, Any], files: list[str], label: str) -> PrepushR
             return PrepushResult(False, rejections, round(time.monotonic() - started, 1), LaunchFailure(run.command, outcome, log))
         if outcome.status == ts.PASSED:
             continue
-        given = targets.lint_files(state, run.suite, files)
+        given = targets.suite_lint_files(state, run.suite, files)
         named = failure_paths.mentioned(targets.log_text(log), given)
         reason = f"{limit} 秒の上限で打ち切った" if outcome.status == ts.TIMED_OUT else outcome.reason
         rejections.append(LintRejection(run.suite, run.command, named or given, reason, str(log)))
