@@ -41,15 +41,6 @@ deps.require("md", "mdtable")
 # スクリプトの位置と揃わない。
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-# **呼び名の表は `refactoring` が持つ**（#444）。読めないと兆候と手法の名前が決まらず、
-# 重複排除が効かない。取り込みの時点で読むため、ここで捕まえて理由だけを出す
-# （トレースバックを見せても、直す手がかりにならない）。
-try:
-    pass  # noqa: E402
-except Exception as _exc:  # 取り込みそのものが失敗した
-    print(f"ERROR: {_exc}", file=sys.stderr)
-    sys.exit(4)
-
 from refactor_lib.commands.assess import DEFAULT_MAX_LINES, cmd_assess  # noqa: E402
 from refactor_lib.commands.converge import (  # noqa: E402
     cmd_merge_fix,
