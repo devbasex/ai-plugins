@@ -208,7 +208,22 @@ def test_a_missing_result_after_the_relaunch_stops_the_review(tmp_dir, state_mod
     """起動し直した後も結果が残らなければ、`final = error` で中断する。"""
     _write(
         tmp_dir,
-        _state([_round(codex=_approve(), relaunched=["agy"])]),
+        _state(
+            [_round(codex=_approve(), relaunched=["agy"])],
+            no_results=[
+                {
+                    "step": "review",
+                    "attempt": 1,
+                    "seat": "agy",
+                    "account": "",
+                    "reason": "missing",
+                    "decision": "relaunch",
+                    "to": "",
+                    "to_account": "",
+                    "at": "t",
+                }
+            ],
+        ),
     )
 
     with pytest.raises(SystemExit) as e:

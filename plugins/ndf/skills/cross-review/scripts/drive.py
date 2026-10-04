@@ -34,6 +34,7 @@ import deps  # noqa: E402
 deps.require("durable")
 import drive_pause as dp  # noqa: E402
 import durable  # noqa: E402
+import assignee_env  # noqa: E402
 import step_result as sr  # noqa: E402
 from drive_pause import Stop  # noqa: E402
 from loop_drive import call, durable_identity, keep_finished, parse_vars, review_status, write_review_answer  # noqa: E402,F401  テストは `call` をこのモジュールの上で差し替える
@@ -101,8 +102,8 @@ class Drive:
     def st(self, *args: str) -> tuple[int, str]:
         return call([sys.executable, str(HERE / "state.py"), *args], self.env, self.v.get("WORKTREE"))
 
-    def sh(self, name: str, *args: str) -> tuple[int, str]:
-        return call(["bash", str(HERE / name), *args], self.env, self.v.get("WORKTREE"))
+    def sh(self, name: str, *args: str, env: dict | None = None) -> tuple[int, str]:
+        return call(["bash", str(HERE / name), *args], self.env if env is None else env, self.v.get("WORKTREE"))
 
     def must(self, rc_out: tuple[int, str], what: str, ok=(0,)) -> str:
         rc, out = rc_out
@@ -278,9 +279,11 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
         return self.after_judge(jrc, jout)
 
     def run_reviewers(self, agents: list[str], rnd: str, reviewers: list[str]) -> None:
-        """担当を起動して監視し、結果が揃っていれば検証と反証まで通す。"""
+        """担当を起動して監視し、結果が揃っていれば検証と反証まで通す。席は judge の振り替えの後の記録から読む（#919）。"""
+        last = (self.state().get("rounds") or [{}])[-1]
+        accounts = {r.get("seat"): r.get("account") for r in last.get("seats") or []}  # claude のアカウント（名前から環境を組む）
         for a in agents:
-            self.sh("launch-reviewer.sh", a, str(self.pr), rnd)
+            self.sh("launch-reviewer.sh", a, str(self.pr), rnd, env=assignee_env.env_for(a, accounts.get(a), self.env))
         call(
             [sys.executable, str(HERE / "monitor.py"), str(self.pr), "--phase", "review", "--agents", ",".join(agents)],
             self.env,
@@ -288,10 +291,9 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
         )
         missing = [a for a in agents if self.st("read-result", str(self.pr), a)[0] != 0]
         if not missing:
-            # 結果の欠けた担当がいれば、検証と反証は judge の起動し直し・中断の後へ回す。
-            # 先に通すと、起動し直した後に全担当分をもう一度通すため 1 回分が捨てられる。
+            # 結果の欠けた担当がいれば、検証と反証は judge の後へ回す（先に通すと起動し直した後に全担当分をもう一度通す）。
             self.st("verify-findings", str(self.pr))
-            self.sh("critique-round.sh", str(self.pr), rnd, *reviewers)
+            self.sh("critique-round.sh", str(self.pr), rnd, *(last.get("reviewers") or reviewers))
 
     def judge(self) -> tuple[int, str]:
         """judge を打つ。8 なら flush してからもう一度打つ。"""
@@ -302,19 +304,17 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
         return jrc, jout
 
     def collect_reviews(self, rv: dict) -> tuple[int, str]:
-        """担当の結果を集めて judge する。judge が 7 なら 1 度だけ指名された担当を起動し直す。"""
+        """結果を集めて judge する。7 の間、起動し直す席と `REASSIGNED` の振り替え先（`claude@<名前>` は元の席）を起動し直す（#919）。"""
         rnd = rv.get("ROUND", "")
         agents = rv.get("REVIEWERS", "").split()
-        relaunched = False
         while True:
             self.run_reviewers(agents, rnd, rv.get("REVIEWERS", "").split())
             jrc, jout = self.judge()
-            if jrc == 7 and not relaunched:
-                agents = parse_vars(jout).get("RELAUNCH_AGENTS", "").split()
-                relaunched = True
-                if agents:
-                    continue
-            return jrc, jout
+            jv = parse_vars(jout)
+            moved = [m.split(":")[0].split("=", 1) for m in jv.get("REASSIGNED", "").split()]
+            agents = jv.get("RELAUNCH_AGENTS", "").split() + [src if "@" in to else to for src, to in moved]
+            if jrc != 7 or not agents:
+                return jrc, jout
 
     def after_judge(self, jrc: int, jout: str) -> str:
         """judge の終了コードから done / round / fix を決める。"""
