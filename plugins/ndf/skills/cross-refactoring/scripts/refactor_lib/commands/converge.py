@@ -21,7 +21,7 @@ from typing import Any, Optional
 
 import statefile
 
-from .. import budget, clock, culprit, danger, info, publish, targets, timeline, triage, wholetest
+from .. import budget, clock, culprit, danger, info, publish, scope_verdict, targets, timeline, triage, wholetest
 from ..gitfacts import (
     collect_commit_facts,
     commit_files,
@@ -55,39 +55,17 @@ from ..verify import (
 # ---------- 範囲テスト ----------
 
 
-def _log_path(state: dict[str, Any], item_id: str) -> pathlib.Path:
-    return pathlib.Path(state["tmp_dir"]) / f"verify-{item_id}.log"
-
-
-def _run_limited(path: pathlib.Path, state: dict[str, Any], items: list[dict[str, Any]]) -> None:
-    """項目ごとに範囲テスト（テストの種別と静的解析）を走らせ、`verified` / `failing` にする。同じコマンドの並びは 1 回だけ。
-
-    起動の失敗なら、その項目の状態を変えずに止まる（先に `verified` にした項目はそのまま残る。I8）。
-    """
-    results: dict[tuple[str, ...], tuple[bool, pathlib.Path]] = {}
-    for item in items:
-        key = targets.run_key(targets.verify_runs(state, item))
-        if key not in results:
-            log = _log_path(state, item["id"])
-            results[key] = (targets.run_or_stop(path, state, list(key), log), log)
-        passed, log = results[key]
-        item["status"] = VERIFIED if passed else FAILING
-        item["last_log"] = str(log)
-        # 全体のテストの直しで渡したコマンドは、範囲テストの結果で置き換わる。
-        item.pop("whole_test_command", None)
-        item["verify_runs"] = int(item.get("verify_runs") or 0) + 1
-
-
 def _revert_shared(
     path: pathlib.Path,
     state: dict[str, Any],
     group: list[dict[str, Any]],
-    reason: str,
+    reason: Any,
     command: Any = None,
     whole: bool = False,
 ) -> bool:
     """同じ語の並びを共有した項目を、新しい方から 1 件ずつ取り消す（AC15）。
 
+    `reason` は理由の文か、項目から理由を作る関数（落ちた検査を理由に入れる。#1688 I6）。
     取り消すたびに共有したコマンドを走らせ直し、通った時点で止める。通る前に取り消した
     項目だけが見送り（`reverted`）になり、古い項目のコミットは残る。走らせ直すのは
     範囲テスト（`command` を渡せば全体のテストで落ちたテストだけ）で、全体のテストではない。
@@ -96,13 +74,14 @@ def _revert_shared(
     remaining = newest_first(group)
     while remaining:
         target = remaining.pop(0)
-        target["failure_reason"] = reason
-        drop(path, state, [target["id"]], reason)
+        why = reason(target) if callable(reason) else reason
+        target["failure_reason"] = why
+        drop(path, state, [target["id"]], why)
         remaining = [i for i in remaining if i.get("status") in (FAILING, IMPLEMENTED, VERIFIED)]
         if not remaining:
             return False
         words = command if command else [r.command for r in targets.verify_runs(state, remaining[0])]
-        if targets.run_or_stop(path, state, words, _log_path(state, remaining[0]["id"]), whole=bool(command) and whole):
+        if targets.run_or_stop(path, state, words, scope_verdict.verify_log(state, remaining[0]["id"]), whole=bool(command) and whole):
             for item in remaining:
                 item["status"] = VERIFIED
             return True
@@ -121,19 +100,40 @@ def _fix_stop(state: dict[str, Any]) -> bool:
     return left < float(reserve.get("fix") or 0.0)
 
 
-STOP_REASON = "修正に使える時間の内に通らなかった"
+STOP_REASON = scope_verdict.STOP_REASON
 
 
-def _give_up(path: pathlib.Path, state: dict[str, Any]) -> None:
-    """修正に使える時間が尽きたら、落ちた項目を取り消す（設計の「検証と修正の繰り返し」2）。"""
+def _give_up(path: pathlib.Path, state: dict[str, Any]) -> bool:
+    """修正に使える時間が尽きたら、落ちた項目を取り消す（設計の「検証と修正の繰り返し」2）。取り消したら真。
+
+    理由には落ちた検査（suite・ファイル）を入れる（`scope_verdict.reason`。#1688 I6）。
+    """
     if not _fix_stop(state):
-        return
+        return False
     groups: dict[tuple[str, ...], list[dict[str, Any]]] = {}
     for item in live_items(state):
         if item.get("status") == FAILING:
             groups.setdefault(targets.command_key(item), []).append(item)
     for group in groups.values():
-        _revert_shared(path, state, group, f"範囲テストが{STOP_REASON}")
+        _revert_shared(path, state, group, scope_verdict.reason)
+    return bool(groups)
+
+
+def _settle_scope(path: pathlib.Path, state: dict[str, Any]) -> None:
+    """範囲テストで判定し、締め切りなら取り消し、取り消した後に巻き込まれた項目を走らせ直す（#1688 の順序 1〜4）。
+
+    取り消しが無くなるまで繰り返す。取り消すたびに項目が減るため、項目の数の回数の内で終わる。
+    """
+    scope_verdict.judge_items(path, state, [i for i in live_items(state) if i.get("status") == IMPLEMENTED])
+    statefile.save(path, state)
+    for _ in range(len(state.get("items") or []) + 1):
+        if not _give_up(path, state):
+            return
+        waiting = scope_verdict.waiting(state)
+        if not waiting:
+            return
+        scope_verdict.judge_items(path, state, waiting)
+        statefile.save(path, state)
 
 
 # ---------- 危険フラグ ----------
@@ -330,9 +330,7 @@ def cmd_verify(args: argparse.Namespace) -> None:
     state["phase"] = "verify"
     started = time.monotonic()
     state.pop("launch_failure", None)
-    _run_limited(path, state, [i for i in live_items(state) if i.get("status") == IMPLEMENTED])
-    statefile.save(path, state)
-    _give_up(path, state)
+    _settle_scope(path, state)
 
     failing = [i for i in live_items(state) if i.get("status") == FAILING]
     if failing:

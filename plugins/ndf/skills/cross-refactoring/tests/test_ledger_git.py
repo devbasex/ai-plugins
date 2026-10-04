@@ -340,7 +340,7 @@ def test_the_first_push_comes_at_the_final_gate(cmd_converge, cmd_gate, publish,
     monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(path.parent))
     calls: list[str] = []
     patch_lib("push_head", lambda state: calls.append(state["phase"]))
-    patch_lib("_run_limited", lambda path, state, items: None)
+    patch_lib("_settle_scope", lambda path, state: None)
     patch_lib("_whole_test", lambda path, state, flags: False)
 
     cmd_converge.cmd_verify(type("A", (), {"id": 130})())

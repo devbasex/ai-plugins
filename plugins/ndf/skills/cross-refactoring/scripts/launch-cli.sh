@@ -133,7 +133,8 @@ case "$PHASE" in
          test_command: (if .whole_test_command then (.whole_test_command | join(" "))
                         elif .scope_commands then (.scope_commands | map(.command) | join(" ; "))
                         else ((.command // []) | if ((.[0] // "") | type) == "array" then map(join(" ")) | join(" ; ") else join(" ") end) end),
-         test_log: .last_log}]' "$STATE")
+         test_log: .last_log}
+      + (if .failed_check then {failed_check} else {} end)]' "$STATE")
     ;;
   *)
     ITEMS_JSON='[]'
@@ -211,6 +212,10 @@ export RF_BUDGET_MINUTES=$BUDGET_MINUTES RF_END_AT=$END_AT
 export RF_VOCAB_SMELLS=$VOCAB_SMELLS RF_VOCAB_TECHNIQUES=$VOCAB_TECHNIQUES
 export RF_VOCAB_SEVERITIES=$VOCAB_SEVERITIES RF_VOCAB_VIEWPOINTS=$VOCAB_VIEWPOINTS
 export RF_METRICS_BLOCK=$METRICS_BLOCK RF_MVV=$MVV_BLOCK
+# 最終ゲート修正の依頼に載せる内容（落ちた検査と直前の差し戻し。#1693 F2）。無ければ「無し」
+FINAL_FIX_REQUEST=
+[ "$PHASE" = "final-fix" ] && FINAL_FIX_REQUEST=$(jq -r '.final_gate.fix_request // ""' "$STATE")
+export RF_FINAL_FIX_REQUEST=${FINAL_FIX_REQUEST:-（無し）}
 }
 
 collect_items
