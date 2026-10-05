@@ -34,6 +34,13 @@
 指定できる）からの差分にあるプラグインのうち、差分の中でまだ版を上げていないものである。開発版の
 プランは他のプラグインの版を上げない。他のプラグインのタグは打たない。
 
+**本番のリリースプランは、本番の配布（`release`）の後に `record` のステップで本番のリリースの PR
+（`release/v<版>` → ベースブランチ）へリリース記録をコメントで書く。** 並びは `release` → `record` → `verify` →
+`cleanup` で、`record` は `release-steps.py record` を打つ。タグと GitHub Release が無ければ書かずに止まり、同じ記録が
+既にあれば書かない。落ちたときは `judge-record` が `record` のやり直しか停止だけを選び、配布はやり直さない。書けたら
+本番のリリースの PR がプランの報告の `Pull Request` に載り、まとめの `close` ステップが `--record-pr` に受け取る。
+開発版のプランは記録を書かない。
+
 **配布の手順（`release-steps.py`・`release-verification-steps.py`）は、次の値を宣言と origin から読む。** リポジトリごとの値を
 スクリプトに埋め込まない。
 
