@@ -116,3 +116,22 @@ def append_line(body: str, line: str) -> str:
             lines.append(SECTION_END)
     head = "\n".join(lines).rstrip("\n")
     return (head + "\n\n" if head else "") + line + "\n"
+
+
+NO_ITEMS = ("無し", "なし")  # 節の箇条で「何も無い」を示す語
+
+
+def section_items(body: str, heading: str, n: int) -> list[str]:
+    """節の箇条を `<本文>（#n）` で返す（本文に `#n` があれば付けない）。続きの行（字下げ）は前の項目へつなぐ。
+    節が無い・「無し」だけなら空。PR 本文の「利用者向けの変化」「未検証・残る危険」「移行の手順」を読む。"""
+    items: list[str] = []
+    for line in (get_section(body or "", heading) or "").splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        bullet = re.match(r"^[-*]\s+(.*)$", text)
+        if bullet or not items or not line[:1].isspace():
+            items.append((bullet.group(1) if bullet else text).strip())
+        else:
+            items[-1] += " " + text
+    return [i if f"#{n}" in i else f"{i}（#{n}）" for i in items if i and i not in NO_ITEMS]

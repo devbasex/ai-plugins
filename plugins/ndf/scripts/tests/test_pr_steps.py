@@ -418,7 +418,8 @@ def test_template_has_user_changes_section(repo, env, tmp_path):
     assert code == 0, err
     check_shape(out)
     heads = [l for l in out_file.read_text(encoding="utf-8").splitlines() if l.startswith("## ")]
-    assert heads == ["## Summary", "## 利用者向けの変化", "## Test plan"]
+    assert heads == ["## Summary", "## 利用者向けの変化", "## 移行の手順", "## Test plan"]
+    assert "## 移行の手順" in out["metrics"]["sections"]  # 受け入れ条件 8（#1752）
     code, out, _ = call(["template", "--out", str(out_file)], env, repo)
     assert code == 3
 

@@ -310,6 +310,19 @@ def test_sprint_pr_collects_changes_closes_design_and_manual(tmp_path, monkeypat
     assert manual.splitlines()[2:] == ["- [x] #11 マージ前: 実機で欄を見る", "- #11 リリース後テストへ回す: 進行を見る"]
 
 
+def test_sprint_pr_collects_the_migration_steps(tmp_path, monkeypatch):
+    """#1752 の受け入れ条件 9: スプリント PR の collect は実装の PR の「移行の手順」を PR 番号つきで集める。"""
+    fake_gh(
+        monkeypatch,
+        [
+            {"number": 31, "body": "## 利用者向けの変化\n\n- 外した\n\n## 移行の手順\n\n- playwright-kit の引数を外す\n"},
+            {"number": 32, "body": "## 利用者向けの変化\n\n- 足した\n\n## 移行の手順\n\n- 無し\n"},
+        ],
+    )
+    got = pr_materials.gather_materials(str(tmp_path), [11], procedures.sprint_materials("sprint/m", str(tmp_path / "none.json"), [11]))
+    assert got.migration == ["playwright-kit の引数を外す（#31）"]
+
+
 def test_no_design_and_no_manual_rows(tmp_path, monkeypatch):
     """AC11: 設計の課題が無ければ「設計なし」。AC19: 手動確認の行が無ければ節を置かない。"""
     fake_gh(monkeypatch, [])
@@ -328,7 +341,7 @@ def test_release_notes_read_the_collected_changes(tmp_path):
     sys.modules["release_steps"] = rs
     spec.loader.exec_module(rs)
     body = pr_materials.CHANGES_HEADING + "\n\n- 進行が記録される（#21）\n\n## 課題と設計\n"
-    assert rs.change_items(rs.section_lines(body, rs.CHANGES_HEADING), 50) == ["進行が記録される（#21）（#50）"]
+    assert rs.gh_sections.section_items(body, rs.CHANGES_HEADING, 50) == ["進行が記録される（#21）（#50）"]
 
 
 def test_sprint_check_plan_uses_the_shared_pr_and_record(tmp_path):
@@ -345,7 +358,8 @@ def test_sprint_check_plan_uses_the_shared_pr_and_record(tmp_path):
     llm = [s for s in check["steps"] if s["type"] in ("work", "judge", "drive")]
     assert [s["id"] for s in llm] == ["refactor", "review", "judge", "fix"]
     impl = load(waves["実装"]["plans"][0])
-    assert "materials" not in next(s for s in impl["steps"] if s["id"] == "pr")
+    # 手動確認は載せず、要求の移行性の行は常に材料にする（#1752）
+    assert next(s for s in impl["steps"] if s["id"] == "pr")["materials"] == {"manual": False, "migration": True}
     fast = new_sprint(tmp_path / "f", "fast")
     fimpl = load(fast["実装"]["plans"][0])
-    assert next(s for s in fimpl["steps"] if s["id"] == "pr")["materials"] == {"manual": True}
+    assert next(s for s in fimpl["steps"] if s["id"] == "pr")["materials"] == {"manual": True, "migration": True}

@@ -416,7 +416,7 @@ def test_notes_fills_approval_cells(repo, tmp_path):
     text = approval.read_text(encoding="utf-8")
     assert "| 配る中身 | - 計画を課題番号だけで作れる（#11）<br>- ステップの順が変わる （続き）（#11）<br>- 題名 B（#12） |" in text
     assert "| 検証への配布で確かめたこと | Claude Code・Codex・Kiro の 3 経路で develop から ndf 1.2.3-dev.1 を導入し" in text
-    assert "## 未検証・残る危険\n\n- 実機の CI とは未照合（#11）\n\n## 同意を求めること" in text
+    assert "## 未検証・残る危険\n\n- 実機の CI とは未照合（#11）\n\n## 移行の手順\n\n- 無し\n\n## 同意を求めること" in text
     assert (repo / "CHANGELOG.md").read_text(encoding="utf-8") == before
 
 
@@ -650,11 +650,15 @@ def _release_prod(monkeypatch, root: Path, wt: dict, plugin: str):
     monkeypatch.setattr(mod, "changelog_section", lambda r, ver, plugin: "")
     monkeypatch.setattr(mod, "run_checks", lambda r: [])
     monkeypatch.setattr(mod, "create_pr", lambda r, base, head, title, body: created.append((base, head, title)) or len(created))
-    monkeypatch.setattr(mod, "wait_and_merge", lambda r, n: f"m-{n}")
+    monkeypatch.setattr(mod, "wait_and_merge", lambda r, n, expect=None: f"m-{n}")
+    monkeypatch.setattr(mod.approval, "release_pr_allowed", lambda r, n, view: None)
+    monkeypatch.setattr(
+        mod.approval, "check_approved", lambda r, approved, base, allowed: mod.ac.Verdict(True, approved, "b" * 40, "match")
+    )
     monkeypatch.setattr(mod.gh_parts, "gh", lambda args, cwd=None: subprocess.CompletedProcess(args, 0, "", ""))
     monkeypatch.setattr(mod, "emit", lambda obj, *a, **k: (_ for _ in ()).throw(SystemExit(obj)))
     with pytest.raises(SystemExit) as e:
-        mod.cmd_release(argparse.Namespace(root=str(root), version="1.2.3", plugins=None, channel="prod"))
+        mod.cmd_release(argparse.Namespace(root=str(root), version="1.2.3", plugins=None, channel="prod", approved_sha="a" * 40))
     return found, created, calls, e.value.code
 
 
@@ -673,3 +677,285 @@ def test_release_with_the_ai_plugins_declaration_keeps_its_values(monkeypatch, t
     assert found == [("release/v1.2.3", "develop"), ("develop", "main")]
     assert created == [("develop", "release/v1.2.3", "Release: ndf v1.2.3"), ("main", "develop", "Release: ndf v1.2.3 を main へ")]
     assert out["metrics"]["tag"] == "ndf--v1.2.3"
+
+
+# --- 他のプラグインの上げ幅と移行の手順（#1752） ---------------------------------------------
+
+
+def fake_gh_views(tmp_path: Path, views: dict) -> dict:
+    """gh <pr|issue> view N --json ... に views["<pr|issue>:N"] を返す偽の gh（無ければ 1 で終える）を置いた環境。"""
+    import os
+
+    bin_dir = tmp_path / "bin-views"
+    bin_dir.mkdir()
+    data = tmp_path / "views.json"
+    data.write_text(json.dumps(views, ensure_ascii=False), encoding="utf-8")
+    gh = bin_dir / "gh"
+    gh.write_text(
+        f"#!{PY}\nimport json, sys\nd = json.load(open({str(data)!r})).get(sys.argv[1] + ':' + sys.argv[3])\n"
+        "if d is None:\n    print('not found', file=sys.stderr); sys.exit(1)\nprint(json.dumps(d))\n",
+        encoding="utf-8",
+    )
+    gh.chmod(0o755)
+    return {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+
+
+def merged_change(root: Path, rel: str) -> str:
+    """rel を変えたブランチを --no-ff でマージし、マージのコミットを返す。"""
+    git(root, "checkout", "-q", "-b", f"feat-{rel.replace('/', '-')}")
+    f = root / rel
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text("changed\n", encoding="utf-8")
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "change")
+    git(root, "checkout", "-q", "-")
+    git(root, "merge", "--no-ff", "-q", f"feat-{rel.replace('/', '-')}", "-m", "merge")
+    return subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+
+
+ISSUE_744 = (
+    "## 影響\n\n| 対象 | 影響 |\n| --- | --- |\n"
+    "| 公開インタフェース | 変わる。playwright-kit の `--pwk-drive-folder` を外す。互換の経路は持たない |\n| データ | 無し |\n"
+)
+APPROVAL = "# t\n\n## 2. 承認の判断に使うもの\n\n| 項目 | 内容 |\n| --- | --- |\n| 版数 | 10.17.61 |\n\n## 同意を求めること\n\n- [ ] x\n\n## 戻し方\n\ny\n"
+
+
+def m744_repo(root: Path) -> tuple[Path, str]:
+    """m744 を再現する: ndf--v10.17.60 の後に playwright-kit 2.0.6 を変えたスプリント PR #1745 がマージされた。"""
+    plugin_json(root, "plugins/ndf", "10.17.60")
+    plugin_json(root, "plugins/playwright-kit", "2.0.6")
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "base")
+    git(root, "tag", "ndf--v10.17.60")
+    oid = merged_change(root, "plugins/playwright-kit/skills/x.md")
+    (root / "issues").mkdir()
+    (root / "issues" / "approval.md").write_text(APPROVAL, encoding="utf-8")
+    return root, oid
+
+
+def others_run(root: Path, env: dict, *args: str) -> tuple[int, dict]:
+    p = subprocess.run([PY, str(SCRIPT), "changed-plugins", "--root", str(root), *args], capture_output=True, text=True, env=env)
+    return p.returncode, json.loads(p.stdout.strip().splitlines()[-1])
+
+
+def m744_views(oid: str, issue: str = ISSUE_744, pr_body: str = "要約\n\n## 閉じる課題\n\nCloses #744\n") -> dict:
+    return {"pr:1745": {"body": pr_body, "state": "MERGED", "mergeCommit": {"oid": oid}}, "issue:744": {"body": issue}}
+
+
+def test_changed_plugins_m744_candidate_is_major_and_lands_in_the_approval(repo, tmp_path):
+    """受け入れ条件 1・2・3 と I9: m744 の入力で playwright-kit の候補は MAJOR・3.0.0 になり、承認資料の表に載る。"""
+    root, oid = m744_repo(repo)
+    env = fake_gh_views(tmp_path, m744_views(oid))
+    code, res = others_run(root, env, "--prs", "1745", "--approval", "issues/approval.md")
+    assert code == 0, res
+    (it,) = res["items"]
+    assert (it["name"], it["from"], it["level"], it["to"]) == ("playwright-kit", "2.0.6", "major", "3.0.0")
+    assert it["basis"] == ["#1745 が閉じる #744 の公開インタフェース: 互換の経路は持たない"]
+    text = (root / "issues" / "approval.md").read_text(encoding="utf-8")
+    sec = text[text.index("## 版を上げる他のプラグイン") : text.index("## 同意を求めること")]
+    row = next(l for l in sec.splitlines() if l.startswith("| playwright-kit"))
+    assert [c.strip() for c in row.strip("|").split("|")] == [
+        "playwright-kit",
+        "2.0.6",
+        "MAJOR",
+        "3.0.0",
+        "#1745 が閉じる #744 の公開インタフェース: 互換の経路は持たない",
+    ]
+    assert "| ndf" not in sec  # 主のプラグインは載らない（I9）
+    assert text.count("- [ ] 「版を上げる他のプラグイン」") == 1
+    others_run(root, env, "--prs", "1745", "--approval", "issues/approval.md")  # 走らせ直しても重ならない
+    again = (root / "issues" / "approval.md").read_text(encoding="utf-8")
+    assert again.count("## 版を上げる他のプラグイン") == 1 and again.count("- [ ] 「版を上げる他のプラグイン」") == 1
+
+
+@pytest.mark.parametrize(
+    "issue, pr_body, level, basis",
+    [
+        # 否定の文は印でない（受け入れ条件 4）
+        (
+            "## 影響\n\n| 対象 | 影響 |\n| --- | --- |\n| 公開インタフェース | 変わる。互換の無い削除はしない |\n",
+            None,
+            "patch",
+            ["材料に互換の無い変更の記述が無い"],
+        ),
+        # 移行の手順がプラグインの名前に触れれば MAJOR（I3）
+        (
+            "本文\n",
+            "## 移行の手順\n\n- playwright-kit の `--pwk-drive-folder` を外す\n",
+            "major",
+            ["#1745 の移行の手順が playwright-kit に触れる"],
+        ),
+        # 名前の一部だけの一致は触れたことにしない
+        ("本文\n", "## 移行の手順\n\n- playwright-kit-extra を入れ直す\n", "patch", ["材料に互換の無い変更の記述が無い"]),
+    ],
+)
+def test_changed_plugins_candidate_follows_the_words_of_the_materials(repo, tmp_path, issue, pr_body, level, basis):
+    root, oid = m744_repo(repo)
+    views = m744_views(oid, issue, (pr_body or "") + "\nCloses #744\n")
+    env = fake_gh_views(tmp_path, views)
+    _, plain = others_run(root, env)
+    code, res = others_run(root, env, "--prs", "1745")
+    assert code == 0 and res["items"][0]["level"] == level and res["items"][0]["basis"] == basis
+    if level == "patch":  # 材料に印が無いなら今の changed-plugins と同じ版（受け入れ条件 4）
+        assert res["items"][0]["to"] == plain["items"][0]["to"] == "2.0.7"
+    assert plain["items"][0]["level"] == "patch" and plain["items"][0]["basis"] == ["材料を渡していない"]
+
+
+def test_changed_plugins_unreadable_material_is_patch_with_the_reason(repo, tmp_path):
+    """I4: マージのコミットを読めない PR は候補を PATCH にし、根拠に読めなかったことを書く。"""
+    root, _ = m744_repo(repo)
+    views = {"pr:1745": {"body": "Closes #744\n", "state": "MERGED", "mergeCommit": None}, "issue:744": {"body": ISSUE_744}}
+    code, res = others_run(root, fake_gh_views(tmp_path, views), "--prs", "1745", "1746")
+    assert code == 0, res
+    it = res["items"][0]
+    assert it["level"] == "patch" and it["to"] == "2.0.7"
+    assert it["basis"][0] == "#1745 を読めない（マージのコミットが無い）" and it["basis"][1].startswith("#1746 を読めない")
+
+
+def test_changed_plugins_without_other_plugins_writes_none(repo, tmp_path):
+    """受け入れ条件 1: 他のプラグインが 0 件なら節は「- 無し」で、同意の行を足さない。"""
+    plugin_json(repo, "plugins/ndf", "1.0.0")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "base")
+    git(repo, "tag", "ndf--v1.0.0")
+    oid = merged_change(repo, "plugins/ndf/x.py")
+    (repo / "issues").mkdir()
+    (repo / "issues" / "approval.md").write_text(APPROVAL, encoding="utf-8")
+    env = fake_gh_views(tmp_path, {"pr:5": {"body": "x", "state": "MERGED", "mergeCommit": {"oid": oid}}})
+    code, res = others_run(repo, env, "--prs", "5", "--approval", "issues/approval.md")
+    assert code == 0 and res["items"] == []
+    text = (repo / "issues" / "approval.md").read_text(encoding="utf-8")
+    assert "## 版を上げる他のプラグイン\n\n- 無し\n\n## 同意を求めること\n\n- [ ] x\n\n## 戻し方" in text
+    # 本番: 0 件なら承認資料を読まずに通る（決定 3）
+    code, res = others_run(repo, env, "--decided", "issues/missing.md")
+    assert code == 0 and res["items"] == []
+
+
+def test_bump_others_takes_the_decided_level(repo, tmp_path):
+    """受け入れ条件 5・F2: 承認資料の表が MAJOR なら --decided は 3.0.0 を返し、--set で変えた上げ幅も通る。"""
+    root, oid = m744_repo(repo)
+    env = fake_gh_views(tmp_path, m744_views(oid))
+    others_run(root, env, "--prs", "1745", "--approval", "issues/approval.md")
+    code, res = others_run(root, env, "--decided", "issues/approval.md")
+    assert code == 0, res
+    assert [(i["name"], i["to"]) for i in res["items"]] == [("playwright-kit", "3.0.0")]
+    assert res["metrics"]["decided"].endswith("issues/approval.md")
+    code, res = others_run(root, env, "--approval", "issues/approval.md", "--set", "playwright-kit=minor")
+    assert code == 0 and res["items"][0]["to"] == "2.1.0"
+    assert res["items"][0]["basis"][0] == "承認ゲート 2 で MINOR に決めた"
+    code, res = others_run(root, env, "--decided", "issues/approval.md")
+    assert code == 0 and res["items"][0]["to"] == "2.1.0"
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        lambda t: None,  # 承認資料が無い
+        lambda t: t.replace("| MAJOR |", "| BIG |"),  # 上げ幅を読めない
+        lambda t: t.replace("| 3.0.0 |", "| 2.0.7 |"),  # 上げた後の版が合わない（I1）
+        lambda t: t.replace("| playwright-kit |", "| mcp-other |"),  # 差分と表が合わない（I2）
+        lambda t: t.replace("## 版を上げる他のプラグイン", "## 別の節"),  # 節が無い
+    ],
+)
+def test_bump_others_stops_when_the_decided_level_is_unreadable(repo, tmp_path, edit):
+    """受け入れ条件 6: 決まった上げ幅を読めなければ PATCH へ倒さずに 1 で落ちる。"""
+    root, oid = m744_repo(repo)
+    env = fake_gh_views(tmp_path, m744_views(oid))
+    others_run(root, env, "--prs", "1745", "--approval", "issues/approval.md")
+    path = root / "issues" / "approval.md"
+    new = edit(path.read_text(encoding="utf-8"))
+    path.unlink() if new is None else path.write_text(new, encoding="utf-8")
+    code, res = others_run(root, env, "--decided", "issues/approval.md")
+    assert code == 1 and res["status"] == "stopped" and res["items"] == []
+
+
+def test_changed_plugins_keeps_already_bumped_plugins(repo, tmp_path):
+    """受け入れ条件 7: 前のタグから版が変わったプラグインは上げ直さず、表では「上げ済み」の行で --decided も上げない。"""
+    root, oid = m744_repo(repo)
+    plugin_json(root, "plugins/playwright-kit", "3.0.0")
+    git(root, "commit", "-q", "-am", "bump pwk")
+    env = fake_gh_views(tmp_path, m744_views(oid))
+    code, res = others_run(root, env, "--prs", "1745", "--approval", "issues/approval.md")
+    assert code == 0 and res["items"] == [] and res["metrics"]["already"] == ["playwright-kit"]
+    text = (root / "issues" / "approval.md").read_text(encoding="utf-8")
+    assert "上げ済み" in text and "- [ ] 「版を上げる他のプラグイン」" not in text
+    code, res = others_run(root, env, "--decided", "issues/approval.md")
+    assert code == 0 and res["items"] == [] and res["metrics"]["already"] == ["playwright-kit"]
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ("--decided", "issues/approval.md", "--prs", "1745"),
+        ("--set", "playwright-kit=MAJOR"),
+        ("--approval", "issues/approval.md", "--set", "nothing=MAJOR"),
+        ("--approval", "issues/approval.md", "--set", "playwright-kit=HUGE"),
+    ],
+)
+def test_changed_plugins_rejects_wrong_arguments(repo, tmp_path, args):
+    root, oid = m744_repo(repo)
+    env = fake_gh_views(tmp_path, m744_views(oid))
+    others_run(root, env, "--prs", "1745", "--approval", "issues/approval.md")
+    code, res = others_run(root, env, *args)
+    assert code == 2 and res["status"] == "stopped"
+
+
+MIGRATION_BODIES = {
+    **PR_BODIES,
+    13: {
+        "title": "題名 C",
+        "body": "## 利用者向けの変化\n\n- Drive の保管を外した\n\n## 移行の手順\n\n- playwright-kit の `--pwk-drive-folder` を外す\n",
+    },
+}
+
+
+def test_notes_copy_the_migration_steps_under_their_heading(repo, tmp_path):
+    """受け入れ条件 10・11 と I6・I7: 移行の手順は版の節と更新の節の `### 移行の手順` の下と、承認資料の節へ PR 番号つきで写る。"""
+    pdir = notes_repo(repo)
+    env = fake_gh(tmp_path, MIGRATION_BODIES)
+    p = subprocess.run(
+        [PY, str(SCRIPT), "notes", "--root", str(repo), "--version", "1.2.3-dev.1", "--prs", "12", "13"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert p.returncode == 0, p.stdout + p.stderr
+    want = "- 題名 B（#12）\n- Drive の保管を外した（#13）\n\n### 移行の手順\n\n- playwright-kit の `--pwk-drive-folder` を外す（#13）\n"
+    assert f"## [ndf 1.2.3] - 2026-01-01\n\n{want}\n## [ndf 1.2.2]" in (repo / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert f"## v1.2.3-dev.1 へ更新するとき\n\n{want}\n## 使い方" in (pdir / "README.md").read_text(encoding="utf-8")
+    approval = repo / "issues" / "approval.md"
+    approval.parent.mkdir()
+    approval.write_text(
+        "# t\n\n| 項目 | 内容 |\n| --- | --- |\n| 配る中身 | x |\n| 検証への配布で確かめたこと | x |\n\n## 同意を求めること\n\n- [ ] x\n",
+        encoding="utf-8",
+    )
+    args = [PY, str(SCRIPT), "notes", "--root", str(repo), "--version", "1.2.3-dev.1", "--prs", "12", "13", "--approval", str(approval)]
+    assert subprocess.run(args, capture_output=True, text=True, env=env).returncode == 0
+    text = approval.read_text(encoding="utf-8")
+    assert "## 移行の手順\n\n- playwright-kit の `--pwk-drive-folder` を外す（#13）\n\n## 同意を求めること" in text
+
+
+def test_notes_without_migration_steps_add_no_heading(repo, tmp_path):
+    """I6・受け入れ条件 12: 移行の手順を持つ PR が無ければ版の節に見出しを作らない。"""
+    notes_repo(repo)
+    env = fake_gh(tmp_path, PR_BODIES)
+    p = subprocess.run(
+        [PY, str(SCRIPT), "notes", "--root", str(repo), "--version", "1.2.3", "--prs", "11", "12"], capture_output=True, text=True, env=env
+    )
+    assert p.returncode == 0 and json.loads(p.stdout.strip().splitlines()[-1])["metrics"]["migration"] == 0
+    assert "移行の手順" not in (repo / "CHANGELOG.md").read_text(encoding="utf-8")
+
+
+def test_decided_versions_resumes_after_a_partial_bump():
+    """版上げが途中で止まり上げた分がコミットされた後の再実行: HEAD の版が表の「上げた後の版」と同じ行は
+    上げ終えたものとして外し、残りだけを上げる。HEAD の版が表と違えば合わないとして止める。"""
+    scripts = Path(__file__).resolve().parents[1]
+    sys.path[:0] = [str(scripts), str(scripts / "lib")]
+    from release_lib import others
+
+    rows = [others.OtherPlugin("a", "1.0.0", "PATCH", "1.0.1", []), others.OtherPlugin("b", "2.0.0", "MAJOR", "3.0.0", [])]
+    assert others.decided_versions(rows, {"b": "2.0.0"}, {"a": "1.0.1"}) == {"b": "3.0.0"}
+    with pytest.raises(ValueError, match="差分に無い: a"):
+        others.decided_versions(rows, {"b": "2.0.0"}, {"a": "1.1.0"})
+    with pytest.raises(ValueError, match="差分に無い: a"):
+        others.decided_versions(rows, {"b": "2.0.0"})

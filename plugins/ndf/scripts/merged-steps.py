@@ -5,7 +5,7 @@
     python3 merged-steps.py sweep-trash --ref <本番に出たコミット> [--yes --only <退避先>...] [--root <dir>]
     python3 merged-steps.py merge-gate (--base <宛先> | --pr <PR番号>) [--pr <PR番号>] [--root <dir>]
     python3 merged-steps.py merge-when-green <PR番号> [--gate-approved user|mvv] [--method merge|squash|rebase]
-                            [--interval 秒] [--timeout 秒] [--stale-after 秒] [--no-cleanup] [--root <dir>]
+                            [--interval 秒] [--timeout 秒] [--stale-after 秒] [--no-cleanup] [--expect-head <SHA>] [--root <dir>]
     python3 merged-steps.py promote --head <ベースブランチ> --base <本番チャネル> [--prepare] [--gate-approved user|mvv]
 
 cleanup: マージ済みの PR の作業ツリーとローカルブランチを外し、主ディレクトリを取り込む。
@@ -13,18 +13,17 @@ cleanup: マージ済みの PR の作業ツリーとローカルブランチを�
 （`.venv`・`node_modules`・`__pycache__`・`target` など）は退避せずに捨てる（merged_lib/trash.py）。
 sweep-trash: 本番に出たコミット（--ref）に含まれるブランチの退避先を回収の候補として挙げる。消すのは、人が候補を見て
 承認した後に --yes と --only <承認した退避先>... を付けたときの、その名前の退避先だけ（消すと戻せない利用者のファイル）。
-merge-when-green: PR が draft なら `gh pr ready` で外し、CI のチェックが全部通るまで待ち
-（push で先頭のコミットが変われば待ち直す）、
-失敗があれば止まり、通れば `gh pr merge --admin` でマージして cleanup まで行う。
+merge-when-green: PR が draft なら `gh pr ready` で外し、CI のチェックが全部通るまで待ち（push で先頭のコミットが
+変われば待ち直す）、失敗があれば止まり、通れば `gh pr merge --admin` でマージして cleanup まで行う。--expect-head を
+渡すと、PR を読むたびに先端をその SHA と比べ、違えば待ち直さず（マージ済みでも）止まる（items[].result: head_moved。#815）。
 最初の読みで宛先（baseRefName）を判定し、自動反映の本番チャネルか判定できない宛先なら、--gate-approved が無い限り
 CI を待たずに承認ゲート 2 で止まる（status: gate・metrics.gate: production-merge。判定は lib/delivery.py。#1336）。
 merge-gate: 宛先の判定だけを行う（0 = 進めてよい / 10 = 承認ゲート 2）。
 promote: 昇格の Pull Request（ベースブランチ → 本番チャネル）を探すか作り、merge-when-green と同じ判定と待ちで
 マージする（後片付けはしない）。--prepare は用意して承認資料を書くところで 0 で終える。
 実行が終わったのにチェックが pending のまま --stale-after 秒続けば、そのジョブを 1 度だけ
-`gh run rerun --job` で再実行し、再実行でも取り残されれば止まる。実行が終わりジョブに結論が
-あれば、チェックの表示が pending のままでも待たずにその結論で扱う。ジョブがランナーを待つ間は、
-待ち行列の件数を待ちの 1 周ごとに stderr へ 1 行出す。
+`gh run rerun --job` で再実行し、再実行でも取り残されれば止まる。実行が終わりジョブに結論があれば、チェックの表示が
+pending のままでも待たずにその結論で扱う。ジョブがランナーを待つ間は、待ち行列の件数を待ちの 1 周ごとに stderr へ 1 行出す。
 
     python3 merged-steps.py probe (--pr N | --head <ブランチ>...) [--act] [--root <dir>]
 
@@ -42,7 +41,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -68,6 +66,7 @@ import repo  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from merged_lib import merge, trash  # noqa: E402
+from merged_lib.pull import blocking_local_changes, same_untracked  # noqa: E402,F401
 from merged_lib.checks import (
     FAIL_CONCLUSIONS,
     check_states,
@@ -117,18 +116,6 @@ def remove_worktree(root, path, label, merge_commit=None):
         return False, f"worktree remove --force が失敗: {p.stderr.strip()[:300]}"
     why = f"退避先 {dest}" if dest else "退避するものは無かった"
     return True, why + (f"（捨てた: {', '.join(discarded)}）" if discarded else "")
-
-
-def same_untracked(main_dir, pull):
-    """pull を止めた未追跡のファイルが、すべて上流とバイト列で同じ（CRLF と LF も別物）ならその一覧を返す。1 つでも違えば空。"""
-    if "untracked working tree files would be overwritten" not in pull.stderr:
-        return []
-    rels = [l.strip() for l in pull.stderr.splitlines() if l.startswith("\t")]
-    for rel in rels:
-        up = subprocess.run(["git", "-C", str(main_dir), "show", f"@{{u}}:{rel}"], capture_output=True)
-        if up.returncode != 0 or not (path := Path(main_dir) / rel).is_file() or path.read_bytes() != up.stdout:
-            return []
-    return rels
 
 
 def _recorder():
@@ -230,6 +217,11 @@ def _update_main_dir(main_dir, add):
             (Path(main_dir) / rel).unlink()
             add("untracked", rel, "removed", "取り込む内容と同じ")
         pull = run(["git", "-C", main_dir, "pull", "--ff-only"], check=False)
+    if pull.returncode != 0 and (dirty := blocking_local_changes(main_dir, pull)):
+        # マージは済んでいる。利用者の手元の変更には触れず（stash も checkout もしない）、取り込みだけを見送る
+        names = ", ".join(dirty[:5]) + ("…" if len(dirty) > 5 else "")
+        add("main_dir", main_dir, "kept", f"未コミットの変更（{names}）が git pull --ff-only を塞いだため取り込まない")
+        return None
     if pull.returncode != 0:
         pull_err = f"主ディレクトリの git pull --ff-only が失敗: {pull.stderr.strip()[:300]}"
         add("main_dir", main_dir, "stopped", pull_err)
@@ -470,6 +462,7 @@ def build_parser():
     m.add_argument("pr", type=int, metavar="PR番号")
     merge.add_wait_args(m)
     m.add_argument("--no-cleanup", action="store_true", help="マージだけ行い、後片付けをしない")
+    m.add_argument("--expect-head", metavar="SHA", help="この SHA が PR の先端のときだけマージする（違えば result: head_moved で止まる）")
     m.set_defaults(func=cmd_merge_when_green)
     pm = sub.add_parser(
         "promote",

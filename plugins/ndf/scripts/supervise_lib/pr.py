@@ -9,8 +9,10 @@ import tempfile
 from pathlib import Path
 
 import gh_call
+import gh_sections
 import mdtable
 from pr_mode import with_mode_line
+from release_lib.others import MIGRATION_HEADING
 from supervise_lib.claude import TAIL
 from supervise_lib.paths import DECISIONS_SH
 from supervise_lib.pr_materials import CHANGES_HEADING, Materials, gather_materials
@@ -27,6 +29,28 @@ def user_changes(step: dict, title: str) -> str:
     lines = [l.strip() for l in text.splitlines() if l.strip()] or ["無し"]
     items = [l if l.startswith(("- ", "* ")) else f"- {l}" for l in lines]
     return CHANGES_HEADING + "\n\n" + "\n".join(items)
+
+
+def migration_section(items: list[str] | None) -> str:
+    """PR 本文の「移行の手順」の節。箇条が無ければ「- 無し」。"""
+    return MIGRATION_HEADING + "\n\n" + ("\n".join(f"- {i}" for i in items or []) or "- 無し")
+
+
+def with_migration(body: str, section: str, required: bool) -> str:
+    """LLM の本文の「移行の手順」の節を確かめる。節が無ければ「利用者向けの変化」の節の後へ置き、required（要求の
+    移行性の行か集めた移行の手順がある）なのに節が「無し」だけなら機械の節で差し替える（#1752 の I8）。"""
+    found = re.search(rf"^{MIGRATION_HEADING}\s*$", body, re.M)
+    if found and not (required and not gh_sections.section_items(body, MIGRATION_HEADING, 0)):
+        return body
+    if found:
+        return gh_sections.replace_section(body, MIGRATION_HEADING, section)
+    at = re.search(rf"^{CHANGES_HEADING}\s*$", body, re.M)
+    cut = 0  # 「利用者向けの変化」の節が無ければ先頭へ置く
+    if at:
+        nxt = re.search(r"^## ", body[at.end() :], re.M)
+        cut = at.end() + nxt.start() if nxt else len(body)
+    head, tail = body[:cut].rstrip(), body[cut:].lstrip("\n")
+    return (head + "\n\n" if head else "") + section + ("\n\n" + tail if tail else "\n")
 
 
 def design_title(path: Path) -> str | None:
@@ -130,7 +154,7 @@ class PrStep:
         # 設計 PR の題は設計文書の H1（#1289 の決定 1）。読めなければ title のまま出し、既存の PR の題は書き直さない
         doc_title = design_title(Path(ctx.cwd) / step["title_doc"]) if step.get("title_doc") else None
         if step.get("body", "llm") == "llm":
-            body = self._llm_body(ctx, step, body, changes, issues)
+            body = self._llm_body(ctx, step, body, changes, issues, mats)
         body = self.with_appended(ctx, body, step, mats.sections)
         body = with_mode_line(body, ctx.plan.get("モード"), self.passed_stages(ctx, step))
         if step.get("decisions"):
@@ -182,6 +206,8 @@ class PrStep:
 
 {changes}
 
+{migration_section(mats.migration)}
+
 ## 課題と設計
 
 - 課題: {issues}
@@ -205,8 +231,9 @@ class PrStep:
 """
         return title, changes, issues, body
 
-    def _llm_body(self, ctx, step: dict, body: str, changes: str, issues: str) -> str:
+    def _llm_body(self, ctx, step: dict, body: str, changes: str, issues: str, mats: Materials | None = None) -> str:
         """LLM で本文を補う。使えない応答のときは機械生成の本文を返す。"""
+        mats = mats or Materials()
         design = ""
         for d in step.get("docs", []):
             f = Path(ctx.cwd) / d
@@ -214,7 +241,9 @@ class PrStep:
                 design += f"\n### {d}\n" + f.read_text()[:TAIL]
         res = ctx.claude.call(
             PR_SYSTEM,
-            f"課題: {issues}\n要約の手がかり: {step.get('summary', '')}\n\n## 材料\n{body}\n## 設計文書（抜粋）{design or ' 無し'}",
+            f"課題: {issues}\n要約の手がかり: {step.get('summary', '')}\n"
+            + "".join(f"{n}\n" for n in mats.migration_notes)
+            + f"\n## 材料\n{body}\n## 設計文書（抜粋）{design or ' 無し'}",
             None,
             ctx.cwd,
             step.get("timeout", 600),
@@ -224,6 +253,7 @@ class PrStep:
             body = res["text"].strip() + "\n"
             if not re.search(rf"^{CHANGES_HEADING}\s*$", body, re.M):
                 body = changes + "\n\n" + body
+            body = with_migration(body, migration_section(mats.migration), bool(mats.migration))
             if PR_FOOTER not in body:
                 body = body.rstrip() + f"\n\n{PR_FOOTER}\n"
         return body

@@ -139,6 +139,10 @@ Pull Request が最後かどうかを判断できない。
 **Claude Code のプラグインの形では、承認資料の機械で作れる部分を `release-steps.py approval-facts` が
 書き出す。** 打ち方と `status` の読み方は [references/release-steps.md](references/release-steps.md) にある。
 
+**承認の対象は承認資料の「承認したコミット」（ベースブランチの先端の 40 桁）である。** 承認を得たら `release-steps.py approve`
+で承認の記録を書く（`--approved-sha` は提示の時点で控えた `approval-facts` の `metrics.approved_sha`。資料を読み直した値は
+渡さない）。MVV 判定で通したときは `mvv-gate.py` が書く。承認の記録の無い承認資料では本番の配布が通らない。
+
 **本番リリースの承認は、この工程の中で必ず求める。** 前の工程（コードレビュー・完了判定）を
 通ったことは承認の代わりにならない。それらは取り込んでよいかの判断で、利用者へ出してよいかの
 判断ではない。
@@ -194,7 +198,7 @@ Pull Request が最後かどうかを判断できない。
 リポジトリに版を上げる手順があればそれに従う。
 
 **更新案内と変更履歴の本文は `release-steps.py notes` が各 PR の本文の `## 利用者向けの変化` から組む。**
-`changelog` が並べた PR のタイトルを `notes` が差し替える。説明の質は実装の PR の本文で決まる（`pr` の Skill）。
+`changelog` の題名を `notes` が差し替え、PR 本文の `## 移行の手順` も版の節へ写す。質は実装の PR の本文で決まる（`pr` の Skill）。
 
 **LLM が確かめ、書くのは次の 2 つである。**
 
@@ -236,6 +240,9 @@ Pull Request に入れる。`guide:` の行が出たら、その手引きに従�
 **Claude Code のプラグインの形では、公開を `release-steps.py release --channel dev|prod` が行う**
 （打ち方は [references/release-steps.md](references/release-steps.md)）。**`--channel prod` は
 「公開前の提示と承認」で承認を得るまで打たない。** `stopped` なら `summary` を報告して止まる。
+
+**`--channel prod` には承認したコミットを渡す**（`--approved-sha <SHA>` か `--approval <承認資料>`）。承認の外の変更が入って
+いれば `gate`（10）で止まり、本番チャネルの PR もタグも作られていない。読み方は同じ references にある。MVV 判定で通さず人へ戻す。
 
 **提出は公開ではない形がある。** ストアの審査を経るものは、審査を通って初めて利用者へ届く。
 待っている間はこの工程が続いている状態で、`release-verification` はまだ始められない。

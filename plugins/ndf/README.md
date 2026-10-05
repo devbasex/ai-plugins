@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.61）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.62）
 ```
 
 ### agy
@@ -119,11 +119,20 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.61 へ更新するとき
+## v10.17.62 へ更新するとき
 
-- Google の認証と Drive の操作には、gws を使う google-workspace Skill を使います（#1744）（#1745）
-- playwright-kit は、証跡を Drive へ保管しません（#1744）（#1745）
-- Fix: playwright-kit を 3.0.0 へ上げ、CHANGELOG に移行手順を足す（#1747）
+- 本番の配布は承認したコミットを受け取り、そのコミットを基準に進みます。（#1759）（#1763）
+- 承認した範囲の外の変更があると、本番の配布は承認ゲートで止まります。（#1759）（#1763）
+- 本番のリリースプランは承認資料を渡し、MVV 判定は承認の記録を書きます。（#1759）（#1763）
+- 承認したコミットの渡し方と、承認ゲートで止まったときの読み方を release の Skill の文書に載せています。（#1759）（#1763）
+- 本番の配布を終えると、`release-steps.py record` がリリース記録を書きます。（#1760）（#1763）
+- 本番のリリースプラン（`plans/close/3-release-prod.json`）は、release の後に record を流します。（#1760）（#1763）
+- 本番のリリースの報告に、そのリリースの PR が残ります。（#1760）（#1763）
+- release の `form-package-plugin.md` に、本番のリリースプランの record と、リリース記録の書き手を記載しています。（#1760）（#1763）
+- 主ディレクトリに未コミットの変更があって pull が通らないときも、マージ後の後片付けは ok で終わります（#1761）（#1763）
+- リリースの承認資料に、他のプラグインの上げ幅の候補が表で載る。本番の配布では、承認した上げ幅で他のプラグインのバージョンが上がる（#1762）（#1763）
+- 移行の手順が CHANGELOG と承認資料に写される。PR 本文にも移行の手順の節が入る（#1762）（#1763）
+- 開発版の配布でも、他のプラグインが配布の対象に入る（#1762）（#1763）
 
 ## Playwright テストについて
 
@@ -414,7 +423,7 @@ agy models   # 認証確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.61/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.62/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -436,14 +445,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.61/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.62/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.61  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.62  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。

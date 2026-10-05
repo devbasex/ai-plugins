@@ -41,6 +41,7 @@ from step_result import (
     run,
 )
 import gh_parts  # noqa: E402
+from closing import closing_issues, closing_words  # noqa: E402
 import repo  # noqa: E402
 import tool_paths  # noqa: E402
 from pr_mode import needs_review, pr_target, split_stages, with_mode_line  # noqa: E402
@@ -48,14 +49,10 @@ from pr_mode import needs_review, pr_target, split_stages, with_mode_line  # noq
 TOOL = "pr"
 SCRIPTS = Path(__file__).resolve().parent
 REVIEW_MARK = "<!-- I want to review in Japanese. -->"
-CLOSING = re.compile(
-    r"\b(close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s*"
-    r"(https?://github\.com/[\w.-]+/[\w.-]+/issues/\d+|[\w.-]+/[\w.-]+#\d+|#\d+)",
-    re.I,
-)
 # credential helper が応答しない環境の退避（lib/git-credential.sh と同じ値）
 CREDENTIAL_FALLBACK = ["-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential"]
-CHANGES_HEADING = "## 利用者向けの変化"  # 配布の CHANGELOG と更新案内の材料（release-steps.py notes が読む）
+CHANGES_HEADING = "## 利用者向けの変化"  # 配布の CHANGELOG と更新案内の材料（release-steps.py notes が読む）。正本は release_lib/others.py（lib だけを読むため写す）
+MIGRATION_HEADING = "## 移行の手順"  # CHANGELOG の版の節の「### 移行の手順」と承認資料の材料（release-steps.py notes が読む）
 BODY_TEMPLATE = f"""<何を変えたかを 1〜3 文>
 
 ## Summary
@@ -65,6 +62,10 @@ BODY_TEMPLATE = f"""<何を変えたかを 1〜3 文>
 {CHANGES_HEADING}
 
 - <利用者に何ができるようになるか・使い方が変わる点。今の決まりだけを書く。見える変化が無ければ「無し」>
+
+{MIGRATION_HEADING}
+
+- <利用者が新しい版へ移るときに自分で行う操作（引数の置き換え・認証のし直し・導入し直し）。プラグインの名前を書く。無ければ「無し」>
 
 ## Test plan
 
@@ -89,14 +90,6 @@ def compare_ref(root, base):
         if git(root, "rev-parse", "--verify", "--quiet", ref, check=False).returncode == 0:
             return ref
     raise StepError(f"起点 {base} が無い（git fetch origin {base} を先に打つ）", EXIT_PRECONDITION)
-
-
-def closing_words(text):
-    return [m.group(0) for m in CLOSING.finditer(text or "")]
-
-
-def closing_issues(text):
-    return [m.group(2) for m in CLOSING.finditer(text or "")]
 
 
 def repo_owner_name(root):

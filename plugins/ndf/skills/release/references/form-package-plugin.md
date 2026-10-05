@@ -29,10 +29,23 @@
 パッケージごとに分ける。
 
 **本番のリリースプラン（`supervise.py new release --channel prod`）は、宣言の `release.plugin` の後に、
-差分のある他のプラグインの PATCH を上げる（`bump-others` のステップ）。** 対象は
-`release-steps.py changed-plugins` が返す。前の本番のタグ（`<release.plugin>--v<版>`。`--prev-tag` で
-指定できる）からの差分にあるプラグインのうち、差分の中でまだ版を上げていないものである。開発版の
-プランは他のプラグインの版を上げない。他のプラグインのタグは打たない。
+差分のある他のプラグインの版を、承認資料の「版を上げる他のプラグイン」の表の上げ幅で上げる（`bump-others`
+のステップ。`release-steps.py changed-plugins --decided`）。** 対象は前の本番のタグ（`<release.plugin>--v<版>`。
+`--prev-tag` で指定できる）からの差分にあるプラグインのうち、差分の中でまだ版を上げていないものである。表を
+読めない・表と差分が合わないときは PATCH へ倒さずに止まる。他のプラグインのタグは打たない。
+
+**開発版のプランは他のプラグインの版を上げず、承認資料へ上げ幅の候補を書く（`others` のステップ。
+`changed-plugins --prs --approval`）。** 候補は版に含む PR の材料から機械で決まる。PR の閉じる語が指す課題の
+要求の「影響」の「公開インタフェース」の行に互換なしの印があるか、PR 本文の `## 移行の手順` がプラグインの名前に
+触れれば MAJOR、無ければ PATCH である。承認ゲート 2 で上げ幅を変えるときは、承認の前に
+`changed-plugins --approval <承認資料> --set <名前>=<上げ幅>` で表を書き直す（表を手で直さない）。
+
+**本番のリリースプランは、本番の配布（`release`）の後に `record` のステップで本番のリリースの PR
+（`release/v<版>` → ベースブランチ）へリリース記録をコメントで書く。** 並びは `release` → `record` → `verify` →
+`cleanup` で、`record` は `release-steps.py record` を打つ。タグと GitHub Release が無ければ書かずに止まり、同じ記録が
+既にあれば書かない。落ちたときは `judge-record` が `record` のやり直しか停止だけを選び、配布はやり直さない。書けたら
+本番のリリースの PR がプランの報告の `Pull Request` に載り、まとめの `close` ステップが `--record-pr` に受け取る。
+開発版のプランは記録を書かない。
 
 **配布の手順（`release-steps.py`・`release-verification-steps.py`）は、次の値を宣言と origin から読む。** リポジトリごとの値を
 スクリプトに埋め込まない。

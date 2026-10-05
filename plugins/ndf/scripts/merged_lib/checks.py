@@ -269,12 +269,30 @@ class GreenWatch:
                 items.append(item)
         return (stale, queued)
 
+    def _check_expected(self, sha, state):
+        """--expect-head を渡したとき、読んだ先端がその SHA と違えば、待ち続けず・マージ済みでもそこで止める（#815 の I5）。
+        待つ間に別の先端でマージされた PR を成功として返さない（release が承認していないマージへタグを打たない）。"""
+        expect = getattr(self.a, "expect_head", None)
+        if not expect or sha == expect:
+            return
+        n = self.n
+        emit(
+            result(
+                TOOL,
+                "stopped",
+                f"#{n} の先端が {expect[:8]} でない（今は {str(sha)[:8]}・{state}）。マージしない",
+                self.items + [{"kind": "pr", "name": f"#{n}", "result": "head_moved", "head": sha, "expected": expect}],
+                {"waits": self.waits},
+            )
+        )
+
     def poll(self):
         """1 回読む。終われば ("done", 理由)、待つなら ("wait", 読んだ中身)。止めるときは emit で抜ける。"""
         root, a, n, items, waits = self.root, self.a, self.n, self.items, self.waits
         info = pr_state(root, n)
         state, sha = info.get("state"), info.get("headRefOid")
         self.recheck = False
+        self._check_expected(sha, state)
         if state == "MERGED":
             items.append({"kind": "pr", "name": f"#{n}", "result": "already_merged"})
             return ("done", "merged")

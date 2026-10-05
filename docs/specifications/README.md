@@ -50,5 +50,6 @@
 | [cross-refactoring-init-test-and-phase-windows.md](cross-refactoring-init-test-and-phase-windows.md) | cross-refactoring の手順の枠を着手前のテストの後から数えること（提案と計画の枠・`window_offset`・枠が足りないときの停止と要る予算）、範囲テストの所要が分かれば着手前のテストの上限をそれより下げないこと（`init_test` の行・`resolve_scope_seconds`）、再開の規則と決定の理由。式と止まり方は `cross-refactoring` の SKILL.md と `docs/02-plan-and-implement.md`・`docs/04-verify-and-report.md` が正 |
 | [project-decl-ci-representative-run.md](project-decl-ci-representative-run.md) | 宣言の解析が CI の所要に採る代表の run（重いジョブを飛ばした run を採らず、テストを走らせた run から CI 待ちとテストの上限を出すこと・解析器の版 2 と再解析）、常に成り立つ条件と部品の契約、決定の理由。手順は `development-workflow` の `references/project-analysis.md` が正 |
 | [cross-assignee-reassignment-on-no-result.md](cross-assignee-reassignment-on-no-result.md) | cross-review / cross-refactoring で結果を残さなかった担当を、利用上限か 2 度目の結果なしで別の claude のアカウントか残りの参加者へ振り替えること（`assignment`・`assignee_env`・`reassign`・`assignee_launch`）、常に成り立つ条件と部品の契約、決定の理由。規則の表と手順は `cross-refactoring`・`cross-review` の SKILL.md と `docs/`、`plugins/ndf/scripts/lib/README.md` が正 |
+| [ndf-google-workspace-gws.md](ndf-google-workspace-gws.md) | Google Workspace の操作の gws への一本化（`gws-check.py` の 4 つの状態と終了コード・失敗の形・導入の承認資料、常に成り立つ条件、`google-auth` / `google-drive` と playwright-kit の Drive への保管の消えた約束、決定の理由）。手順と操作の対応表は `google-workspace` の SKILL.md が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。

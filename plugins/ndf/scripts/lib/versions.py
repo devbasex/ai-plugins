@@ -5,7 +5,7 @@
 接尾辞なし、`dev.10` は `dev.9` より後である（接尾辞の数の要素は数として比べる）。
 
 - 比較: `version_order(v)`（並べ替えの鍵。読めなければ None）・`compare_versions(a, b)`
-- 形: `release_base(v)`（`X.Y.Z`）・`dev_number(v)`・`next_dev(v)`・`next_patch(v)`
+- 形: `release_base(v)`（`X.Y.Z`）・`dev_number(v)`・`next_dev(v)`・`next_patch(v)`・`next_version(v, 上げ幅)`
 - 書き換え: `bump_replace(config, current, new, cwd)` が bump-my-version の `replace` を 1 回流す
   （版数を持つ箇所の表は `config` の TOML が持つ。手で直す箇所の報告と check-doc-staleness.py は呼び出し側に残る）
 
@@ -98,6 +98,25 @@ def next_patch(v: str) -> str:
     if ver is None:
         raise ValueError(f"版の形が違う: {v}")
     return str(ver.finalize_version()) if ver.prerelease else str(ver.bump_patch())
+
+
+LEVELS = ("major", "minor", "patch")
+
+
+def next_version(v: str, level: str) -> str:
+    """`level`（major / minor / patch。大文字も可）の桁を上げた正式版。接尾辞付きはその基底から上げる
+    （patch だけは `next_patch` と同じく基底を次の版にする）。知らない上げ幅・読めない版は `ValueError`。"""
+    ver = parse_version(v)
+    if ver is None:
+        raise ValueError(f"版の形が違う: {v}")
+    lv = (level or "").lower()
+    if lv == "patch":
+        return next_patch(v)
+    if lv == "minor":
+        return str(ver.finalize_version().bump_minor())
+    if lv == "major":
+        return str(ver.finalize_version().bump_major())
+    raise ValueError(f"上げ幅が違う: {level}（{' / '.join(LEVELS)}）")
 
 
 def _bump_cli() -> list[str]:
