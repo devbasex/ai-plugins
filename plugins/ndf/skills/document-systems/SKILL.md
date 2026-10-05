@@ -104,8 +104,7 @@ allowed-tools:
 
 | 既存の Skill | 持っているもの |
 | --- | --- |
-| `google-drive` | Google Drive / Docs の取得・アップロード・共有 |
-| `google-auth` | Google API の OAuth2 の設定 |
+| `google-workspace` | gws の導入・認証の案内と、Google Drive / Docs の取得・アップロード・共有 |
 | `notion-writing` | Notion のページの書き方（表・子ページの扱い） |
 
 ## 実測していないシステムがある
@@ -117,6 +116,6 @@ SharePoint は別のリポジトリにある実装の知識から書いており
 ## 関連
 
 - `/ndf:release` — 生成と提出（形ごとの手順は `form-<出力の形>.md`）
-- `/ndf:google-drive` — Google Drive / Docs の取得とアップロード
+- `/ndf:google-workspace` — gws での Google Drive / Docs の取得とアップロード
 - `/ndf:notion-writing` — Notion のページの書き方
 - `/ndf:development-workflow` — 提出先の設定（`references/document-destinations.md`）

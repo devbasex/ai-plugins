@@ -4,7 +4,7 @@ rem
 rem 使い方:
 rem   run.bat                                 全テスト実行
 rem   run.bat -k test_login                   nodeid フィルタ
-rem   run.bat --pwk-overlay --pwk-drive-folder=<id>
+rem   run.bat --pwk-overlay                   動画に赤丸カーソル + 字幕
 rem   run.bat --help                          help を表示
 rem
 rem 動作:
@@ -44,7 +44,6 @@ echo   --pwk-no-evidence        HAR / trace / 動画 を OFF
 echo   --pwk-har-mode {minimal,full,none}
 echo                            HAR 録画モード (default: minimal)
 echo   --pwk-overlay            動画に赤丸カーソル + 字幕 (旧名 HUD) を焼き込む
-echo   --pwk-drive-folder ^<id^>  終了後に成果物を Google Drive にアップロード
 echo   -k ^<expr^>                nodeid 部分一致フィルタ
 echo   -m ^<expr^>                marker フィルタ (page_role / role / phase 等)
 echo   --headed                 ブラウザを画面表示 (debug 用)

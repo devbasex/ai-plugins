@@ -14,8 +14,8 @@ NDF プラグイン v6.1.0 までは NDF に同梱していました。**Skill �
 | --- | --- |
 | `playwright-planning` | ページ役割を判定し、チェックリストとテスト技法を選ぶ |
 | `playwright-authoring` | E2E スクリプトを書き、動画 / trace 付きで実行する |
-| `playwright-evidence` | テスト報告書を生成し、証跡を Google Drive へ保管する |
-| `playwright-kit-ops` | `playwright_kit` のスクリプト（init、ページ役割分類、a11y / CWV スキャン、Drive アップロード）を実行する |
+| `playwright-evidence` | テスト報告書を生成し、証跡を `reports/<run-id>/` にまとめる |
+| `playwright-kit-ops` | `playwright_kit` のスクリプト（init、ページ役割分類、a11y / CWV スキャン）を実行する |
 
 `playwright-kit-ops` は Python パッケージ本体（`pyproject.toml` / `uv.lock` / `tests/`）を
 同梱しており、この 4 個のうち最も大きい配布物です。

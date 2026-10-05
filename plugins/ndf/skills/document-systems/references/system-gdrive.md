@@ -7,12 +7,12 @@
 | 経路 | 出所 |
 | --- | --- |
 | MCP | 利用者のセッションが持つ。設定は要らない |
-| スクリプト（`google-drive` の `gdrive_fetch.py`） | OAuth2 のトークン。置き場所と作り方は `google-auth` が持つ |
+| gws（`google-workspace`） | gws が自分の設定ディレクトリに持つ。導入と認証の案内は `google-workspace` が持つ |
 
 **値は設定に書かない。** `.ndf/document.json` の `auth` に書くのは環境変数の名前だけである。
 
-**スクリプトの経路はトークンが無いと動かない。** 実測ではトークンが未設定で失敗した。
-継続的統合で動かすなら、その前提を先に用意する。
+**gws の経路は認証が済んでいないと動かない。** 利用者が `gws auth login` でブラウザから承認する。
+継続的統合で動かすなら、gws にトークンを渡す前提を先に用意する。
 
 ## 取り込みの手段と取れないもの
 
@@ -21,7 +21,7 @@
 | Google スライド | MCP の `read_file_content` |
 | Google ドキュメント | 同上 |
 | Google スプレッドシート | 同上 |
-| PDF へ変換して取得 | `gdrive_fetch.py --mime application/pdf` |
+| PDF へ変換して取得 | `google-workspace` の対応表のエクスポート（`mimeType` は `application/pdf`） |
 
 **取れないもの。**
 
@@ -38,10 +38,10 @@
 ## 投稿の手段
 
 **Markdown から Google スライド / ドキュメントを作る手段は、この Skill には無い。**
-`google-drive` が持つのはアップロードと共有で、変換は持たない。生成の経路は
+`google-workspace` が持つのはアップロードと共有で、変換は持たない。生成の経路は
 `release` の `form-<出力の形>.md` が決める（変換器を使うか、AI エージェントが組むか）。
 
-**アップロードと共有は `google-drive` が持つ。** 内容をここへ写さない。
+**アップロードと共有は `google-workspace` が持つ。** 内容をここへ写さない。
 
 ## 本文の表現
 
@@ -59,13 +59,13 @@ Google のネイティブ形式（スライド / ドキュメント / スプレ�
 
 ## 描画して見る手段
 
-`gdrive_fetch.py --mime application/pdf` で PDF にしてから、ページを画像へ変換する。
+`google-workspace` の対応表のエクスポート（`mimeType` は `application/pdf`）で PDF にしてから、ページを画像へ変換する。
 **体裁レビューはこの経路を使う。**
 
 ## 既知の失敗
 
 | 事象 | 対処 |
 | --- | --- |
-| `gdrive_fetch.py` がトークンの不在で失敗する | `google-auth` の手順でトークンを作る |
+| gws が未認証で失敗する | `google-workspace` の手順で確かめ、利用者に `gws auth login` を頼む |
 | 取り込んだテキストがほぼ 1 行になる | 正規化する（[import.md](import.md)） |
 | ページ番号が本文へ連結する | 同上 |
