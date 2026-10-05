@@ -96,6 +96,29 @@ def test_a_failed_run_step_is_not_rerun_by_the_engine(tmp_path):
     assert [e["id"] for e in s.state.log] == ["t", "after"]
 
 
+RECORD_OUT = json.dumps(
+    {"tool": "release", "status": "ok", "summary": "s", "items": [], "metrics": {"release_pr_url": "https://github.com/o/r/pull/40"}}
+)
+
+
+@pytest.mark.parametrize(("code", "want"), [(0, "https://github.com/o/r/pull/40"), (1, "無し")])
+def test_pr_from_takes_the_pull_request_from_a_successful_run_step(tmp_path, code, want):
+    """#1273 の I5: pr_from の run のステップが 0 で終わると、報告の Pull Request が metrics の URL になる。落ちたら書き換えない。"""
+    steps = [
+        {"id": "record", "type": "run", "cmd": f"echo '{RECORD_OUT}'; exit {code}", "pr_from": "release_pr_url", "next": "end"},
+    ]
+    s, text = run_plan(tmp_path, steps)
+    assert f"- Pull Request: {want}" in text
+
+
+def test_pr_from_without_the_key_keeps_the_pull_request(tmp_path):
+    """#1273 の I5: metrics に鍵が無ければ Pull Request を書き換えない。"""
+    out = json.dumps({"tool": "t", "status": "ok", "summary": "s", "items": [], "metrics": {}})
+    steps = [{"id": "record", "type": "run", "cmd": f"echo '{out}'", "pr_from": "release_pr_url", "next": "end"}]
+    s, text = run_plan(tmp_path, steps)
+    assert "- Pull Request: 無し" in text
+
+
 @pytest.mark.parametrize(
     ("failing", "visits"),
     [
@@ -1375,10 +1398,12 @@ def test_new_release_dev_and_prod(tmp_path):
         "snapshot",
         "sync",
         "release",
+        "record",
         "verify",
         "cleanup",
         "judge",
         "fix",
+        "judge-record",
     ]
     assert "--ref main" in st["verify"]["cmd"] and st["verify"]["stage"] == "リリース後テスト"
     assert st["verify"]["next"] == "cleanup" and "facts" not in st

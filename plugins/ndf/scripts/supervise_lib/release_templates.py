@@ -176,7 +176,7 @@ def _release_step(a, v: str, dev: bool, repo: str | None, approval: str) -> dict
         "timeout": 2400 if dev else 3000,
         "cmd": f"{STEPS_PY} release --version {v} --channel {a.channel}",
         "on_fail": "judge",
-        "next": "verify",
+        "next": "verify" if dev else "record",
         # 配布の PR（release/v<版> → 起点）と、本番では続く 起点 → 本番 の PR のチェックを調べる
         "probe": {"cmd": f"{MERGED_PY} probe --head {{branch}} --head {{base}} --act"},
     }
@@ -186,10 +186,38 @@ def _release_step(a, v: str, dev: bool, repo: str | None, approval: str) -> dict
     return step
 
 
-def _release_verify_steps(a, v: str, dev: bool, repo: str | None, ref: str, rts: str, approval: str) -> list[dict]:
-    """release と verify（導入の確かめ）のステップ。"""
+def _record_step(v: str, prs: str) -> dict:
+    """本番の配布の後に、本番のリリースの PR へリリース記録を書くステップ（#1273）。落ちたら judge-record へ回し、
+    配布（release）へは戻らない。書けたら本番のリリースの PR を計画の Pull Request にする（まとめの close が読む）。"""
+    return {
+        "id": "record",
+        "type": "run",
+        "stage": "配布",
+        "timeout": 300,
+        "cmd": f"{STEPS_PY} record --version {v} --prs {prs}",
+        "pr_from": "release_pr_url",
+        "on_fail": "judge-record",
+        "next": "verify",
+    }
+
+
+def _judge_record_step() -> dict:
+    """record が落ちたときの判断。選べるのは record のやり直しか停止だけ（fix は配布へ戻るため置かない）。"""
+    return {
+        "id": "judge-record",
+        "type": "judge",
+        "inputs": ["record"],
+        "question": "リリース記録の書き込み（record）が落ちた。本番の配布は済んでいる。GitHub の揺れなら record をもう一度、"
+        "権限の不足・本番のリリースの PR が無いなら止める（stop）",
+        "choices": ["record", "stop"],
+    }
+
+
+def _release_verify_steps(a, v: str, dev: bool, repo: str | None, ref: str, rts: str, approval: str, prs: str) -> list[dict]:
+    """release と verify（導入の確かめ）のステップ。本番は間に record（リリース記録）を挟む。"""
     return [
         _release_step(a, v, dev, repo, approval),
+        *([] if dev else [_record_step(v, prs)]),
         {
             "id": "verify",
             "type": "run",
@@ -232,7 +260,8 @@ def plan_release_package_plugin(a) -> dict:
     dev: bump → changelog → 説明文 → sync-check → release → verify-install（起点のブランチ）→ approval-facts
     → 提示物の欄。prod: bump → bump-others（前のタグからの差分のある他のプラグインの PATCH。
     release-steps.py changed-plugins）→ changelog → 説明文 → 消費の記録 → sync-check → release → verify-install
-    （本番のブランチ）→ 後片付け。sync-check は同期とチェックの宣言があるときだけ置く。
+    （本番のブランチ）→ 後片付け。本番は release の後に record（本番のリリースの PR へリリース記録）を挟み、落ちたら
+    judge-record（record か stop）へ回す。sync-check は同期とチェックの宣言があるときだけ置く。
     説明文と提示物の欄は release-steps.py notes が PR 本文の「利用者向けの変化」から組む（LLM を使わない）。"""
     v, dev = a.version, a.channel == "dev"
     plugin, runtimes = _validate_release_decl(a.release, dev, a)
@@ -255,7 +284,7 @@ def plan_release_package_plugin(a) -> dict:
     if sync:
         steps.append({"id": "sync", "type": "run", "preset": "sync-check", "on_fail": "judge", "next": "release"})
     approval = f"issues/approval-{plugin}-v{base}.md"
-    steps += _release_verify_steps(a, v, dev, repo, ref, rts, approval)
+    steps += _release_verify_steps(a, v, dev, repo, ref, rts, approval, prs)
     if not dev:
         # 後片付け: 配布の PR（head が release/v{v} で始まる。開発版の release/v{v}-dev.N も含む。宛先は起点のブランチ）と
         # スプリントの PR（--prs）のブランチと作業ツリー
@@ -265,6 +294,8 @@ def plan_release_package_plugin(a) -> dict:
     if dev:
         steps += _dev_approval_steps(a, repo, approval, prs, rts)
     steps += _judge_fix_steps(run_ids, after_notes)
+    if not dev:
+        steps.append(_judge_record_step())
     if mvv and not dev:
         _add_prod_mvv_gate(steps, a, repo, approval, prs)
     rule = RULE_RELEASE_DEV if dev else RULE_RELEASE_PROD_MVV if mvv else RULE_RELEASE_PROD
