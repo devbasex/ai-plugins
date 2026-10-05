@@ -5,7 +5,7 @@
     python3 merged-steps.py sweep-trash --ref <本番に出たコミット> [--yes --only <退避先>...] [--root <dir>]
     python3 merged-steps.py merge-gate (--base <宛先> | --pr <PR番号>) [--pr <PR番号>] [--root <dir>]
     python3 merged-steps.py merge-when-green <PR番号> [--gate-approved user|mvv] [--method merge|squash|rebase]
-                            [--interval 秒] [--timeout 秒] [--stale-after 秒] [--no-cleanup] [--root <dir>]
+                            [--interval 秒] [--timeout 秒] [--stale-after 秒] [--no-cleanup] [--expect-head <SHA>] [--root <dir>]
     python3 merged-steps.py promote --head <ベースブランチ> --base <本番チャネル> [--prepare] [--gate-approved user|mvv]
 
 cleanup: マージ済みの PR の作業ツリーとローカルブランチを外し、主ディレクトリを取り込む。
@@ -13,18 +13,17 @@ cleanup: マージ済みの PR の作業ツリーとローカルブランチを�
 （`.venv`・`node_modules`・`__pycache__`・`target` など）は退避せずに捨てる（merged_lib/trash.py）。
 sweep-trash: 本番に出たコミット（--ref）に含まれるブランチの退避先を回収の候補として挙げる。消すのは、人が候補を見て
 承認した後に --yes と --only <承認した退避先>... を付けたときの、その名前の退避先だけ（消すと戻せない利用者のファイル）。
-merge-when-green: PR が draft なら `gh pr ready` で外し、CI のチェックが全部通るまで待ち
-（push で先頭のコミットが変われば待ち直す）、
-失敗があれば止まり、通れば `gh pr merge --admin` でマージして cleanup まで行う。
+merge-when-green: PR が draft なら `gh pr ready` で外し、CI のチェックが全部通るまで待ち（push で先頭のコミットが
+変われば待ち直す）、失敗があれば止まり、通れば `gh pr merge --admin` でマージして cleanup まで行う。--expect-head を
+渡すと、緑を確かめた先端がその SHA のときだけマージし、違えばマージせずに止まる（items[].result: head_moved。#815）。
 最初の読みで宛先（baseRefName）を判定し、自動反映の本番チャネルか判定できない宛先なら、--gate-approved が無い限り
 CI を待たずに承認ゲート 2 で止まる（status: gate・metrics.gate: production-merge。判定は lib/delivery.py。#1336）。
 merge-gate: 宛先の判定だけを行う（0 = 進めてよい / 10 = 承認ゲート 2）。
 promote: 昇格の Pull Request（ベースブランチ → 本番チャネル）を探すか作り、merge-when-green と同じ判定と待ちで
 マージする（後片付けはしない）。--prepare は用意して承認資料を書くところで 0 で終える。
 実行が終わったのにチェックが pending のまま --stale-after 秒続けば、そのジョブを 1 度だけ
-`gh run rerun --job` で再実行し、再実行でも取り残されれば止まる。実行が終わりジョブに結論が
-あれば、チェックの表示が pending のままでも待たずにその結論で扱う。ジョブがランナーを待つ間は、
-待ち行列の件数を待ちの 1 周ごとに stderr へ 1 行出す。
+`gh run rerun --job` で再実行し、再実行でも取り残されれば止まる。実行が終わりジョブに結論があれば、チェックの表示が
+pending のままでも待たずにその結論で扱う。ジョブがランナーを待つ間は、待ち行列の件数を待ちの 1 周ごとに stderr へ 1 行出す。
 
     python3 merged-steps.py probe (--pr N | --head <ブランチ>...) [--act] [--root <dir>]
 
@@ -470,6 +469,7 @@ def build_parser():
     m.add_argument("pr", type=int, metavar="PR番号")
     merge.add_wait_args(m)
     m.add_argument("--no-cleanup", action="store_true", help="マージだけ行い、後片付けをしない")
+    m.add_argument("--expect-head", metavar="SHA", help="この SHA が PR の先端のときだけマージする（違えば result: head_moved で止まる）")
     m.set_defaults(func=cmd_merge_when_green)
     pm = sub.add_parser(
         "promote",

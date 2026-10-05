@@ -340,6 +340,22 @@ def test_merge_when_green_rewaits_on_push_and_merges(repo, gh):
     assert merges == [["pr", "merge", "5", "--admin", "--merge", "--match-head-commit", "bbb"]]  # 緑を確かめた先頭に限る
 
 
+@pytest.mark.parametrize("expect, code", [("bbb", 0), ("aaa", 1)])
+def test_merge_when_green_expect_head_merges_only_the_compared_head(repo, gh, expect, code):
+    """#815 の I5: --expect-head の SHA が緑を確かめた先端と違えば、gh pr merge を呼ばずに head_moved で止まる。"""
+    gh.set(pr_seq={"5": [passed_pr("bbb"), passed_pr("bbb")]})
+    code_, out, err = call(
+        "merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--no-cleanup", "--expect-head", expect], gh.env, repo
+    )
+    assert code_ == code, (out, err)
+    merges = [c for c in gh.get()["calls"] if c[:2] == ["pr", "merge"]]
+    if code == 0:
+        assert merges == [["pr", "merge", "5", "--admin", "--merge", "--match-head-commit", "bbb"]]
+    else:
+        assert merges == [] and out["status"] == "stopped"
+        assert {"kind": "pr", "name": "#5", "result": "head_moved", "head": "bbb", "expected": "aaa"} in out["items"]
+
+
 def pr_views(gh):
     return [c for c in gh.get()["calls"] if c[:2] == ["pr", "view"]]
 

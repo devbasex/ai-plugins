@@ -26,9 +26,14 @@
     python3 release-steps.py changed-plugins [--since <タグ>] [--plugin <名前>] [--root <dir>]  # 差分のある他のプラグイン
     python3 release-steps.py changelog      --version <版> --prs <PR番号>... [--plugin <名前>] [--root <dir>]
     python3 release-steps.py release        --version <版> --channel dev|prod [--plugins <名前>,...] [--root <dir>]
+                                            [--approved-sha <SHA> | --approval <承認資料>]   # prod はどちらかが要る
+    python3 release-steps.py approve        --approval <承認資料> --approved-sha <SHA> --by user|mvv [--root <dir>]
     python3 release-steps.py approval-facts --version <版> --prs <PR番号>... [--prev-tag <タグ>] [--plugin <名前>] [--root <dir>]
     python3 release-steps.py notes          --version <版> --prs <PR番号>... [--approval <提示物>]
                                             [--verified claude,codex,kiro] [--ref <ブランチ>] [--plugin <名前>] [--root <dir>]
+
+release --channel prod は承認したコミットを受け取り、配布の PR をマージした後の `origin/<ベースブランチ>` の先端と比べ、
+承認の外の変更があれば本番チャネルの PR もタグも作らずに承認ゲート（10）で止まる（release_lib/approval.py。#815）。
 
 ブランチ（ベースブランチ・本番チャネル）は `.ndf/worktree.json` の base_branch・production_branch（無ければ既定ブランチ）、
 プラグイン（タグ `<名前>--v<版>`・題 `Release: <名前> v<版>`）は引数 → `.ndf/supervise.json` の release.plugin から読む（#1336）。
@@ -61,13 +66,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
 
 deps.require("schema", "versions", "bump", "md", "mdtable", "durable")
+import approved_commit as ac  # noqa: E402
 import mdtable  # noqa: E402
 import schema  # noqa: E402
 import versions  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from merged_lib import trash  # noqa: E402
-from release_lib import bump, deploy, step_run  # noqa: E402
+from release_lib import approval, bump, deploy, step_run  # noqa: E402
+from release_lib.approval import HeadMoved  # noqa: E402
 from release_lib.names import changelog_section, changelog_span, h2_lines, next_h2, plugin_of, release_decl  # noqa: E402
 from step_result import (
     EXIT_GATE,
@@ -643,20 +650,24 @@ def pr_check_buckets(root, n):
         return []
 
 
-def wait_and_merge(root, n):
+def wait_and_merge(root, n, expect=None):
     """PR のチェックを merge-when-green で待ってマージする。止まったらその summary で止める。
 
     merge-when-green は待ちの上限を持ち、実行が終わったのに pending のまま取り残されたチェックを
     1 度だけ再実行する（`gh pr checks --watch` は上限が無く、取り残されたチェックを待ち続けた）。
-    後片付けは配布の手順が持つので行わせない。
+    後片付けは配布の手順が持つので行わせない。expect を渡すと、PR の先端がその SHA のときだけマージし、
+    違えば HeadMoved を投げる。
     """
     script = Path(__file__).resolve().parent / "merged-steps.py"
-    p = run([sys.executable, str(script), "merge-when-green", str(n), "--no-cleanup", "--interval", "5"], cwd=root, check=False)
+    cmd = [sys.executable, str(script), "merge-when-green", str(n), "--no-cleanup", "--interval", "5"]
+    p = run(cmd + (["--expect-head", expect] if expect else []), cwd=root, check=False)
     try:
         out = json.loads((p.stdout or "").strip().splitlines()[-1])
     except (ValueError, IndexError):
         out = {}
     if p.returncode != 0:
+        if any(isinstance(i, dict) and i.get("result") == "head_moved" for i in out.get("items") or []):
+            raise HeadMoved(out.get("summary") or "")
         raise StepError(f"PR #{n} をマージできない: {out.get('summary') or p.stderr.strip()[:300]}")
     return merge_commit_of(root, n)
 
@@ -670,6 +681,10 @@ def cmd_release(a):
     root = git_root(a.root)
     ver = a.version
     base, prod, plugin = release_decl(root, a)
+    try:
+        approved = approval.approved_of(root, a, plugin)
+    except approval.Gate as g:
+        emit(g.out, EXIT_GATE)
     plugins = [s.strip() for s in (a.plugins or plugin).split(",") if s.strip()]
     if (branch := git(root, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()) != f"release/v{ver}":
         raise StepError(f"作業ツリーのブランチが release/v{ver} でない: {branch}", EXIT_PRECONDITION)
@@ -725,6 +740,12 @@ def cmd_release(a):
     git(root, "fetch", "-q", "origin", "--tags")
     if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode == 0:
         raise StepError(f"タグ {tag} は既にある")
+    # 承認したコミットの後に、配布の PR の外の変更がベースブランチへ入っていないか（#815）
+    allowed = approval.release_pr_allowed(root, release_pr, pr_view)
+    verdict = approval.check_approved(root, approved, base, allowed)
+    if not verdict.ok:
+        emit(approval.gate(root, a, plugin, base, verdict, items, metrics), EXIT_GATE)
+    metrics.update({"approved_sha": approved, "compared_head": verdict.tip})
     mp = find_pr(root, base, prod, states=("OPEN",))
     main_pr = (
         mp["number"]
@@ -737,7 +758,11 @@ def cmd_release(a):
             f"{plugin} v{ver} を {prod} へ出す（開発版の PR #{release_pr}）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)",
         )
     )
-    merge = wait_and_merge(root, main_pr)
+    try:
+        merge = wait_and_merge(root, main_pr, expect=verdict.tip)  # 比べた先端だけを本番チャネルへ入れる
+    except HeadMoved:
+        moved = approval.check_approved(root, approved, base, allowed)
+        emit(approval.gate(root, a, plugin, base, moved, items, metrics, moved=True), EXIT_GATE)
     git(root, "fetch", "-q", "origin")
     if not merge:
         merge = git(root, "rev-parse", f"origin/{prod}").stdout.strip()
@@ -819,6 +844,7 @@ def cmd_approval_facts(a):
         targets=[{"url": compare, "title": f"{prev} → {base}（{dev[:8]}）", "base_head": f"{prod} ← {base}"}],
         change=f"`{prod}...{base}` の差分 {files} ファイル / +{ins} / −{dels}",
         judge=[
+            ac.material_row(dev),
             ("版数", a.version),
             ("含む PR", "\n".join(rows) or "—"),
             ("配る中身", NOTES_PENDING),
@@ -836,12 +862,17 @@ def cmd_approval_facts(a):
             "gate",
             f"{plugin} v{a.version} の本番承認の提示物を書いた（PR {len(a.prs)} 件）",
             items,
-            {"files": files, "insertions": ins, "deletions": dels, "prev_tag": prev, "compare": compare},
+            {"files": files, "insertions": ins, "deletions": dels, "prev_tag": prev, "compare": compare, "approved_sha": dev},
             path,
-            f"利用者の承認を得たら release-steps.py release --version {a.version} --channel prod",
+            f"利用者の承認を得たら release-steps.py release --version {a.version} --channel prod --approved-sha {dev}",
         ),
         EXIT_GATE,
     )
+
+
+def cmd_approve(a):
+    """ゲート 2 の承認を承認資料へ記録する（#815 の I10。本体は release_lib/approval.py の approve）。"""
+    emit(approval.approve(git_root(a.root), a))
 
 
 CHANGES_HEADING = "## 利用者向けの変化"
@@ -1041,7 +1072,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--version", required=True, type=version_arg)
     p.add_argument("--channel", required=True, choices=("dev", "prod"))
     p.add_argument("--plugins", help="カンマ区切り（例 ndf,mcp-serena。既定は宣言の release.plugin。先頭がタグと題に使うプラグイン）")
+    g = p.add_mutually_exclusive_group()
+    g.add_argument("--approved-sha", metavar="SHA", help="prod: 承認したコミット（approval-facts の metrics.approved_sha。40 桁）")
+    g.add_argument("--approval", help="prod: 承認資料（「承認したコミット」と「承認の記録」の欄を読む）")
     p.set_defaults(func=cmd_release)
+
+    p = sub.add_parser("approve", parents=[common], help="本番への配布の承認（ゲート 2）を承認資料へ記録する")
+    p.add_argument("--approval", required=True, help="承認資料")
+    p.add_argument("--approved-sha", required=True, metavar="SHA", help="提示した承認資料を書いた approval-facts の metrics.approved_sha")
+    p.add_argument("--by", required=True, choices=("user", "mvv"), help="承認した者")
+    p.set_defaults(func=cmd_approve)
 
     p = sub.add_parser("approval-facts", parents=[common], help="本番承認の提示物のうち機械で作れる部分を書き出す")
     p.add_argument("--version", required=True, type=version_arg)

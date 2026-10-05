@@ -491,7 +491,7 @@ def plugin_repo(tmp_path):
     return root
 
 
-def release_steps_of(root, tmp_path, channel, version):
+def release_steps_of(root, tmp_path, channel, version, *extra):
     out = tmp_path / f"rel-{channel}.json"
     p = cli(
         "new",
@@ -508,10 +508,26 @@ def release_steps_of(root, tmp_path, channel, version):
         str(root),
         "--out",
         str(out),
+        *extra,
         cwd=root,
     )
     assert p.returncode == 0, p.stderr
     return {s["id"]: s for s in json.loads(out.read_text())["steps"]}
+
+
+@pytest.mark.parametrize("mvv", [False, True])
+def test_prod_release_passes_the_approval_material_and_stops_at_the_gate(tmp_path, mvv):
+    """#815 の受け入れ条件 8・I7: 本番の release は承認資料を --approval で渡し、承認ゲート（10）なら verify へ進まない。
+    MVV 判定のプランは handoff（by: mvv の記録を外す）、それ以外は end で終える。"""
+    root = plugin_repo(tmp_path)
+    extra = ("--mvv", str(tmp_path / "s.json")) if mvv else ()
+    steps = release_steps_of(root, tmp_path, "prod", "1.0.1", *extra)
+    rel = steps["release"]
+    assert rel["cmd"].endswith(f"--channel prod --approval {root}/issues/approval-ndf-v1.0.1.md")
+    assert rel["gate_next"] == ("handoff" if mvv else "end") and rel["next"] == "verify"
+    assert ("handoff" in steps) == mvv
+    dev = release_steps_of(root, tmp_path, "dev", "1.0.1-dev.1")["release"]
+    assert "--approval" not in dev["cmd"] and "gate_next" not in dev
 
 
 def test_prod_release_bumps_other_changed_plugins_after_ndf(tmp_path):
