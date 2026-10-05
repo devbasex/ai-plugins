@@ -9,7 +9,9 @@
 #
 # **ボードの宣言が無いリポジトリでも進行が残る。** 記録先は issue の本文の `## 進行` の節で、
 # 節の外は書き換えない（更新のたびに本文を取得し、その節だけを差し替える）。人が本文へ
-# 書いた内容を消さないためである。
+# 書いた内容を消さないためである。差し替えは `lib/gh_sections.py` の `replace_section` が行い、
+# 節の終わりへ目印 `<!-- ndf:section-end -->` を置く。目印より後ろ（振り返りが本文末尾へ足す
+# 1 行など）は節の外として残る（#659）。
 #
 # **通過記録へ積むのもこのスクリプトである（#725）。** 引数のチェックを通った呼び出しごとに、
 # `--mode` / `--pace` / 工程名（`-` でないとき）を 1 件ずつ、本文を書く前に積む。本文の書き換えが
@@ -104,11 +106,16 @@ fi
 # 一覧の残りは空欄のまま残し、飛ばした工程がチェックの穴として見えるようにする。
 STAMP=$(date '+%Y-%m-%d %H:%M')
 STAGES=$(wf_stages)
-export STAGES SECTION_HEADING STAGE STAMP MODE PACE WORKTREE PLAN NOTE
+export STAGES SECTION_HEADING STAGE STAMP MODE PACE WORKTREE PLAN NOTE SCRIPT_DIR
 python3 - "$BODY_FILE" > "$NEW_FILE" <<'PY' || exit 0
 import os
 import re
 import sys
+
+# 節の差し替えは共通の部品が持つ（#659・#849）。書いた節の終わりへ目印を置き、目印より後ろ
+# （振り返りが末尾へ足す 1 行など）を節の外として残す。
+sys.path.insert(0, os.path.join(os.environ["SCRIPT_DIR"], "lib"))
+from gh_sections import SECTION_END, get_section, replace_section  # noqa: E402
 
 body = open(sys.argv[1], encoding="utf-8").read()
 heading = os.environ["SECTION_HEADING"]
@@ -116,21 +123,27 @@ stages = os.environ["STAGES"].split("\n")
 stage = os.environ["STAGE"]
 stamp = os.environ["STAMP"]
 
+# **目印の無い節（目印を置く前に書いた本文）は、工程の行の並びの後ろで閉じる。** 節が本文の最後に
+# あると「次の見出しまで」は末尾までになり、チェックリストの後ろへ人や振り返りが足した行も節に入る。
+# 見出し・モードの行・チェックリストの行の最後の行の後ろへ目印を置き、残りを節の外へ出す。
+lines = body.replace("\r\n", "\n").split("\n")
+head_at = next((i for i, x in enumerate(lines) if x.rstrip() == heading), None)
+if head_at is not None:
+    nxt = next((j for j in range(head_at + 1, len(lines)) if re.match(r"^#{1,2}[ \t]+\S", lines[j])), len(lines))
+    own = [k for k in range(head_at + 1, nxt) if re.match(r"^(- \[[ x]\] |モード: )", lines[k].strip())]
+    has_marker = any(lines[k].strip() == SECTION_END for k in range(head_at + 1, nxt))
+    if own and not has_marker and any(lines[k].strip() for k in range(own[-1] + 1, nxt)):
+        lines.insert(own[-1] + 1, SECTION_END)
+        body = "\n".join(lines)
+
 # すでにある節から、済んだ工程とその記録を読み取る。**書き直すのは節だけである。**
 done: dict[str, str] = {}
 mode = os.environ.get("MODE", "")
 pace = os.environ.get("PACE", "")
 worktree = os.environ.get("WORKTREE", "")
 plan = os.environ.get("PLAN", "")
-# **見出しは行頭の単独の行として探す。** 部分一致で探すと、本文中の「## 進行状況」や
-# 引用の中の同じ語に当たり、そこから次の見出しまでを節として差し替えてしまう。
-found = re.search(r"^" + re.escape(heading) + r"[ \t]*$", body, re.M)
-start = found.start() if found else -1
-if start != -1:
-    rest = body[start + len(heading):]
-    m = re.search(r"^## ", rest, re.M)
-    section = rest if m is None else rest[:m.start()]
-    end = len(body) if m is None else start + len(heading) + m.start()
+section = get_section(body, heading)
+if section is not None:
     for line in section.split("\n"):
         hit = re.match(r"- \[x\] (.+?)(?: — (.*))?$", line.strip())
         if hit:
@@ -142,8 +155,6 @@ if start != -1:
         pace = pace or (meta.group(2) or "")
         worktree = worktree or (meta.group(3) or "")
         plan = plan or (meta.group(4) or "")
-else:
-    end = None
 
 # **記録するのは「工程に入った時点」である。** 同じ工程を再び呼んでも時刻を書き換えない。
 # 書き換えると、途中で止まった実行を再開したときに最初に入った時刻が失われる。
@@ -166,20 +177,13 @@ if worktree:
 if plan:
     meta_parts.append(f"計画: `{plan}`")
 
-lines = [heading, "", " / ".join(meta_parts), ""]
+lines = [" / ".join(meta_parts), ""]
 for name in stages:
     if name in done:
         lines.append(f"- [x] {name} — {done[name]}" if done[name] else f"- [x] {name}")
     else:
         lines.append(f"- [ ] {name}")
-section_text = "\n".join(lines) + "\n"
-
-if start == -1:
-    updated = body.rstrip("\n") + "\n\n" + section_text
-else:
-    tail = "" if end is None else body[end:]
-    updated = body[:start] + section_text + ("\n" + tail.lstrip("\n") if tail.strip() else "")
-sys.stdout.write(updated)
+sys.stdout.write(replace_section(body, heading, "\n".join(lines)))
 PY
 
 [ -s "$NEW_FILE" ] || exit 0
