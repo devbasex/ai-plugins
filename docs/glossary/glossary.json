@@ -3284,6 +3284,18 @@
       "context": "ndf-workflow",
       "meaning": "結論が `cancelled` で、ジョブのステップが 0 件、Runner の名前が空の CI のジョブ。GitHub Actions の障害や Runner 不足で起き、REST のジョブの照会で見分ける",
       "pending_source": "issues/issue-1645-design.md"
+    },
+    {
+      "term": "push 前の検査",
+      "context": "ndf-workflow",
+      "meaning": "`core.hooksPath` の `pre-push` フックが `git push` の前に打つ検査。不合格なら push が拒まれる。中身はプロジェクトごとに違う",
+      "pending_source": "issues/issue-1767-design.md"
+    },
+    {
+      "term": "push の修正",
+      "context": "ndf-workflow",
+      "meaning": "実装のプランで、push 前の検査の不合格を直してコミットし、`pr` のステップを打ち直させる修正の worker（`fix-push` のステップ）",
+      "pending_source": "issues/issue-1767-design.md"
     }
   ]
 }
