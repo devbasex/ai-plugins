@@ -27,6 +27,7 @@
     python3 release-steps.py changelog      --version <版> --prs <PR番号>... [--plugin <名前>] [--root <dir>]
     python3 release-steps.py release        --version <版> --channel dev|prod [--plugins <名前>,...] [--root <dir>]
                                             [--approved-sha <SHA> | --approval <承認資料>]   # prod はどちらかが要る
+    python3 release-steps.py record         --version <版> --prs <PR番号>... [--plugin <名前>] [--root <dir>]   # prod の後
     python3 release-steps.py approve        --approval <承認資料> --approved-sha <SHA> --by user|mvv [--root <dir>]
     python3 release-steps.py approval-facts --version <版> --prs <PR番号>... [--prev-tag <タグ>] [--plugin <名前>] [--root <dir>]
     python3 release-steps.py notes          --version <版> --prs <PR番号>... [--approval <提示物>]
@@ -34,6 +35,11 @@
 
 release --channel prod は承認したコミットを受け取り、配布の PR をマージした後の `origin/<ベースブランチ>` の先端と比べ、
 承認の外の変更があれば本番チャネルの PR もタグも作らずに承認ゲート（10）で止まる（release_lib/approval.py。#815）。
+
+record は release --channel prod の後に、本番のリリースの PR（release/v<版> → ベースブランチ）へリリース記録
+（`## 配布の記録`。形は lib/dist_record.py）をコメントで 1 件書く。タグと GitHub Release が無ければ書かずに 3 で止まり、
+同じ記録が既にあれば書かずに ok を返す。投稿の失敗は 1、PR を読めなければ 2。metrics.release_pr_url を
+プランの `pr_from` が報告の Pull Request へ移す（#1273）。
 
 ブランチ（ベースブランチ・本番チャネル）は `.ndf/worktree.json` の base_branch・production_branch（無ければ既定ブランチ）、
 プラグイン（タグ `<名前>--v<版>`・題 `Release: <名前> v<版>`）は引数 → `.ndf/supervise.json` の release.plugin から読む（#1336）。
@@ -59,6 +65,7 @@ import re
 import sys
 import tempfile
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
@@ -67,6 +74,7 @@ import deps  # noqa: E402
 
 deps.require("schema", "versions", "bump", "md", "mdtable", "durable")
 import approved_commit as ac  # noqa: E402
+import dist_record  # noqa: E402
 import mdtable  # noqa: E402
 import schema  # noqa: E402
 import versions  # noqa: E402
@@ -797,6 +805,77 @@ def cmd_release(a):
     emit(result(TOOL, "ok", f"{plugin} v{ver} を {prod} へ出し、{tag} と GitHub Release を作った", items, metrics, None, nxt))
 
 
+JST = timezone(timedelta(hours=9))
+
+
+def tag_time_jst(root, tag):
+    """注釈付きタグの作成時刻（軽量タグはコミットの時刻）を JST の `YYYY-MM-DD HH:MM` で返す。読めなければ None。"""
+    out = git(root, "for-each-ref", "--format=%(creatordate:unix)", f"refs/tags/{tag}", check=False).stdout.strip()
+    return datetime.fromtimestamp(int(out), JST).strftime("%Y-%m-%d %H:%M") if out.isdigit() else None
+
+
+def release_pr_text(root, n):
+    """本番のリリースの PR の本文とコメントを投稿の順に 1 つの文字列にし、URL と並べて返す。読めなければ 2 で止める。"""
+    r = gh_parts.view_json("pr", n, "body,comments,url", cwd=str(root))
+    if r.returncode != 0:
+        raise StepError(f"gh pr view {n} が失敗: {r.stderr.strip()[:300]}", 2)
+    try:
+        d = json.loads(r.stdout or "null") or {}
+    except ValueError:
+        raise StepError(f"gh pr view {n} の出力を読めない", 2)
+    parts = [d.get("body") or ""] + [(c or {}).get("body") or "" for c in d.get("comments") or []]
+    return "\n".join(parts), d.get("url") or ""
+
+
+def cmd_record(a):
+    """本番の配布の後に、本番のリリースの PR（release/v<版> → ベースブランチ）へリリース記録を 1 件コメントで書く（#1273）。
+
+    タグ <plugin>--v<版> が origin に無い・同じタグの GitHub Release が無い・マージ済みの PR が無いなら、書かずに 3 で止まる
+    （記録の `段階: 本番` は配布が終わった事実を表す）。PR の最後のリリース記録が同じ版・同じスプリントの PR の本番の記録なら
+    書かずに ok（exists）を返す。形は lib/dist_record.py が持つ。
+    """
+    root = git_root(a.root)
+    ver = a.version
+    base, _prod, plugin = release_decl(root, a)
+    tag = f"{plugin}--v{ver}"
+    if git(root, "ls-remote", "--exit-code", "--tags", "origin", f"refs/tags/{tag}", check=False).returncode != 0:
+        raise StepError(f"origin にタグ {tag} が無い（本番の配布が済んでいない）", EXIT_PRECONDITION)
+    git(root, "fetch", "-q", "origin", "--tags", check=False)  # 直前の正式版とタグの時刻を読む
+    if gh_parts.gh(["release", "view", tag, "--json", "tagName"], cwd=root).returncode != 0:
+        raise StepError(f"GitHub Release {tag} が無い（本番の配布が済んでいない）", EXIT_PRECONDITION)
+    pr = find_pr(root, f"release/v{ver}", base, states=("MERGED",))
+    if pr is None:
+        raise StepError(f"release/v{ver} → {base} のマージ済みの PR が無い", EXIT_PRECONDITION)
+    n = pr["number"]
+    prev_tag = release_tag_before(root, plugin, current=tag)
+    prev = prev_tag[len(f"{plugin}--v") :] if prev_tag else None
+    at = tag_time_jst(root, tag)
+    body = dist_record.format_record(
+        prev,
+        ver,
+        a.prs,
+        stage_note=f"承認ゲート 2 の承認の後、{at + ' に ' if at else ''}{tag} を出した",
+        version_note=f"タグ {tag}。直前はタグ {prev_tag}" if prev_tag else f"タグ {tag}。直前の正式版のタグは無い",
+    )
+    text, url = release_pr_text(root, n)
+    last = dist_record.parse_record(text)
+    metrics = {"release_pr": n, "release_pr_url": url, "version": ver, "prev_version": prev, "sprint_prs": list(a.prs)}
+    if last["found"] and (last["stage"] or "").startswith("本番") and last["version"] == ver and last["sprint_prs"] == list(a.prs):
+        items = [{"kind": "comment", "name": f"#{n}", "result": "exists"}]
+        emit(result(TOOL, "ok", f"#{n} に v{ver} のリリース記録は既にある", items, metrics))
+    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as f:
+        f.write(body)
+        body_file = f.name
+    try:
+        p = gh_parts.gh(["pr", "comment", str(n), "--body-file", body_file], cwd=root)
+    finally:
+        os.unlink(body_file)
+    if p.returncode != 0:
+        raise StepError(f"gh pr comment {n} が失敗: {p.stderr.strip()[:300]}")
+    items = [{"kind": "comment", "name": f"#{n}", "result": "posted"}]
+    emit(result(TOOL, "ok", f"#{n} へ v{ver} のリリース記録を書いた", items, metrics))
+
+
 def cmd_approval_facts(a):
     root = git_root(a.root)
     repo = repo_lib.owner_repo(root)
@@ -1076,6 +1155,12 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--approved-sha", metavar="SHA", help="prod: 承認したコミット（approval-facts の metrics.approved_sha。40 桁）")
     g.add_argument("--approval", help="prod: 承認資料（「承認したコミット」と「承認の記録」の欄を読む）")
     p.set_defaults(func=cmd_release)
+
+    p = sub.add_parser("record", parents=[common], help="本番の配布の後に、本番のリリースの PR へリリース記録（## 配布の記録）を書く")
+    p.add_argument("--version", required=True, type=version_arg)
+    p.add_argument("--prs", nargs="+", required=True, type=int, metavar="PR番号", help="スプリントの PR（`スプリント:` の行に並べる）")
+    p.add_argument("--plugin", help="配るプラグイン（既定は宣言の release.plugin。タグ <名前>--v<版> に使う）")
+    p.set_defaults(func=cmd_record)
 
     p = sub.add_parser("approve", parents=[common], help="本番への配布の承認（ゲート 2）を承認資料へ記録する")
     p.add_argument("--approval", required=True, help="承認資料")
