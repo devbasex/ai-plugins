@@ -250,7 +250,7 @@ matrix の組は、一覧の値を持つキーの直積から `exclude` に当�
 
 ### 共有の関数: `ci_workflows.required_contexts(rules) -> list[str]`
 
-`rules/branches/<branch>` の応答（規則の配列）から `required_status_checks` の `context` を重複なく整列して返す。配列でなければ `ValueError`、`required_status_checks` の規則が無ければ `None` を返す（突き合わせのスクリプトは `None` を読めないとして 2、解析は空として扱う）。
+`rules/branches/<branch>` の応答（規則の配列）から `required_status_checks` の `context` を重複なく整列して返す。配列でなければ `ValueError`、`required_status_checks` の規則が無ければ `None` を返す（突き合わせのスクリプトは `None` を受けたら `GET branches/<branch>` へ進み、200 なら対象外として 0、404 か失敗なら読めないとして 2。解析は空として扱う）。
 
 ## 処理の流れ
 
@@ -314,11 +314,15 @@ stateDiagram-v2
 
 1. 実装の Pull Request と #1645 の修正が `develop` に入っていることを確かめる
 2. `python3 scripts/check-required-checks.py --repo devbasex/ai-plugins --branch develop` の「追加待ち」の行を、足す名前の一覧として承認資料に載せる（#1645 が未なら `pr-body-decisions-check` を一覧から除く）
-3. `PUT` の本文を作り、取得した ruleset との差が足す名前だけであることを確かめて承認資料に添える。本文は取得した ruleset の書き込める欄（`name`・`target`・`enforcement`・`conditions`・`bypass_actors`・`rules`）をすべて持ち、`rules` の `required_status_checks` だけに足す。`bypass_actors` を落とすと、`develop` / `main` のリリースの Pull Request を管理者の bypass でマージする運用（`docs/versioning-and-distribution.md`）が壊れる。下の `diff` の出力が空であることが `PUT` を打つ前提で、承認する人はこれを見てから承認する
+3. `PUT` の本文を作り、取得した ruleset との差が足す名前だけであることを確かめて承認資料に添える。本文は取得した ruleset の書き込める欄（`name`・`target`・`enforcement`・`conditions`・`bypass_actors`・`rules`）をすべて持ち、`rules` の `required_status_checks` だけに足す。`bypass_actors` を落とすと、`develop` / `main` のリリースの Pull Request を管理者の bypass でマージする運用（`docs/versioning-and-distribution.md`）が壊れる。下の `diff` の出力が空であることが `PUT` を打つ前提で、承認する人はこれを見てから承認する。ruleset への書き込み権限が無いトークン（AI の作業用トークンなど）で取得すると、応答に `bypass_actors` が含まれず、本文にも比較の両側にも `null` が入って `diff` が空のまま通る。そこで取得の直後に `bypass_actors` が空でない配列で `conditions` がオブジェクトであることを `jq -e` で確かめ、満たさなければ本文を作らずに止め、管理者のトークンで取り直す
 
    ```bash
    ADD='["doc-line-limit-check", "..."]'
    gh api repos/devbasex/ai-plugins/rulesets/22332172 > /tmp/ruleset-before.json
+   # 前提: 管理者のトークンで取得した応答である（満たさなければ本文を作らずに止める）
+   jq -e '(.bypass_actors|type=="array" and length>0) and (.conditions|type=="object")' \
+     /tmp/ruleset-before.json > /dev/null \
+     || { echo "bypass_actors か conditions が取得できない。管理者のトークンで取り直す" >&2; exit 1; }
    jq --argjson add "$ADD" \
      '{name, target, enforcement, conditions, bypass_actors,
        rules: [.rules[] | if .type == "required_status_checks"
@@ -432,7 +436,7 @@ API の失敗を空の一覧として続ける解析（`measure_ci.py`）の振�
 
 突き合わせのスクリプトは読むだけにし、足す名前の一覧（追加待ちの行）を出すところまでを受け持つ。書き換えは管理者の権限で 1 回打つ `PUT` で、承認の後に行う。
 
-`PUT` の本文は取得した ruleset の書き込める欄をすべて持たせ、取得した ruleset との差が足す名前だけであることを `PUT` の前に確かめて承認資料へ添える（F4 の手順 3）。書き換えの後に前後を比べる順では、`bypass_actors`・`conditions`・`enforcement` を落とした本文が先に本番の保護へ効き、気づく前にリリースの Pull Request のマージの運用が壊れる（C2・C4）。
+`PUT` の本文は取得した ruleset の書き込める欄をすべて持たせ、取得した ruleset との差が足す名前だけであることを `PUT` の前に確かめて承認資料へ添える（F4 の手順 3）。書き換えの後に前後を比べる順では、`bypass_actors`・`conditions`・`enforcement` を落とした本文が先に本番の保護へ効き、気づく前にリリースの Pull Request のマージの運用が壊れる（C2・C4）。ruleset への書き込み権限が無いトークンの取得は `bypass_actors` を含まず、本文と前後の比較がどちらも `null` で揃って食い違いを見逃すため、取得の直後に `bypass_actors` が空でない配列で `conditions` がオブジェクトであることを確かめ、満たさなければ本文を作らずに止めて管理者のトークンで取り直す（F4 の手順 3）。
 
 スクリプトに書き換えの副コマンドを持たせる案は採らない。管理者の権限を持つトークンが要り、ruleset の書き換えが承認の外で走る経路ができる。
 
