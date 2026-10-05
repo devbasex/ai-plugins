@@ -328,7 +328,7 @@ def test_release_notes_read_the_collected_changes(tmp_path):
     sys.modules["release_steps"] = rs
     spec.loader.exec_module(rs)
     body = pr_materials.CHANGES_HEADING + "\n\n- 進行が記録される（#21）\n\n## 課題と設計\n"
-    assert rs.change_items(rs.section_lines(body, rs.CHANGES_HEADING), 50) == ["進行が記録される（#21）（#50）"]
+    assert rs.gh_sections.section_items(body, rs.CHANGES_HEADING, 50) == ["進行が記録される（#21）（#50）"]
 
 
 def test_sprint_check_plan_uses_the_shared_pr_and_record(tmp_path):

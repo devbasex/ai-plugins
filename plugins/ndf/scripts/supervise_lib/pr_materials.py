@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass, field
 
 import design_results
@@ -21,7 +20,6 @@ from supervise_lib.procedures import requirements_path
 CHANGES_HEADING = "## 利用者向けの変化"  # 配布の説明文（release-steps.py notes）の材料になる PR 本文の節
 COLLECTED_HEADING = "## 集めた実装の PR"
 CLOSES_HEADING = "## 閉じる課題"
-NO_CHANGE = ("無し", "なし")
 
 
 @dataclass
@@ -29,21 +27,6 @@ class Materials:
     changes: list[str] | None = None  # 「利用者向けの変化」の箇条（collect のときだけ。None なら今の本文のまま）
     design: list[str] = field(default_factory=list)  # 「課題と設計」へ足す行
     sections: list[str] = field(default_factory=list)  # 署名の前へ足す節
-
-
-def change_lines_of(body: str, n: int) -> list[str]:
-    """PR 本文の「利用者向けの変化」の箇条を `<本文>（#n）` で返す。続きの行は前の項目へつなぐ。「無し」だけなら空。"""
-    items: list[str] = []
-    for line in (gh_sections.get_section(body or "", CHANGES_HEADING) or "").splitlines():
-        text = line.strip()
-        if not text:
-            continue
-        bullet = re.match(r"^[-*]\s+(.*)$", text)
-        if bullet or not items or not line[:1].isspace():
-            items.append((bullet.group(1) if bullet else text).strip())
-        else:
-            items[-1] += " " + text
-    return [i if f"#{n}" in i else f"{i}（#{n}）" for i in items if i and i not in NO_CHANGE]
 
 
 def collect_changes(cwd: str, branch: str) -> tuple[list[str], list[str]]:
@@ -61,7 +44,7 @@ def collect_changes(cwd: str, branch: str) -> tuple[list[str], list[str]]:
         if not isinstance(body, str) or not body.strip():
             rows.append(f"- #{n}: 本文を読めなかった")
             continue
-        items = change_lines_of(body, n)
+        items = gh_sections.section_items(body, CHANGES_HEADING, n)
         changes += items
         rows.append(f"- #{n}: {'変化あり' if items else '利用者向けの変化なし'}")
     return changes, rows
