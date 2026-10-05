@@ -165,20 +165,31 @@ def _prepare_steps(a, plugin: str, v: str, prs: str, dev: bool, after_notes: str
     return steps
 
 
-def _release_verify_steps(a, v: str, dev: bool, repo: str | None, ref: str, rts: str) -> list[dict]:
+def _release_step(a, v: str, dev: bool, repo: str | None, approval: str) -> dict:
+    """release のステップ。本番は承認資料を --approval で渡し（承認したコミットはステップの実行時に資料から読む）、
+    承認の外の変更で承認ゲート（10）になったら verify へ進まない。MVV 判定のプランは handoff で関門 2 の by: mvv の
+    記録を外して人へ戻し、それ以外は end で終える（#815 の I7）。"""
+    step = {
+        "id": "release",
+        "type": "run",
+        "stage": "配布",
+        "timeout": 2400 if dev else 3000,
+        "cmd": f"{STEPS_PY} release --version {v} --channel {a.channel}",
+        "on_fail": "judge",
+        "next": "verify",
+        # 配布の PR（release/v<版> → 起点）と、本番では続く 起点 → 本番 の PR のチェックを調べる
+        "probe": {"cmd": f"{MERGED_PY} probe --head {{branch}} --head {{base}} --act"},
+    }
+    if not dev:
+        step["cmd"] += f" --approval {shlex.quote(_material_path(repo, approval))}"
+        step["gate_next"] = "handoff" if getattr(a, "mvv", None) else "end"
+    return step
+
+
+def _release_verify_steps(a, v: str, dev: bool, repo: str | None, ref: str, rts: str, approval: str) -> list[dict]:
     """release と verify（導入の確かめ）のステップ。"""
     return [
-        {
-            "id": "release",
-            "type": "run",
-            "stage": "配布",
-            "timeout": 2400 if dev else 3000,
-            "cmd": f"{STEPS_PY} release --version {v} --channel {a.channel}",
-            "on_fail": "judge",
-            "next": "verify",
-            # 配布の PR（release/v<版> → 起点）と、本番では続く 起点 → 本番 の PR のチェックを調べる
-            "probe": {"cmd": f"{MERGED_PY} probe --head {{branch}} --head {{base}} --act"},
-        },
+        _release_step(a, v, dev, repo, approval),
         {
             "id": "verify",
             "type": "run",
@@ -243,13 +254,13 @@ def plan_release_package_plugin(a) -> dict:
     ref = a.base if dev else a.production_branch
     if sync:
         steps.append({"id": "sync", "type": "run", "preset": "sync-check", "on_fail": "judge", "next": "release"})
-    steps += _release_verify_steps(a, v, dev, repo, ref, rts)
+    approval = f"issues/approval-{plugin}-v{base}.md"
+    steps += _release_verify_steps(a, v, dev, repo, ref, rts, approval)
     if not dev:
         # 後片付け: 配布の PR（head が release/v{v} で始まる。開発版の release/v{v}-dev.N も含む。宛先は起点のブランチ）と
         # スプリントの PR（--prs）のブランチと作業ツリー
         run_ids.append("cleanup")
         steps.append(_cleanup_step(v, prs, repo))
-    approval = f"issues/approval-{plugin}-v{base}.md"
     mvv = getattr(a, "mvv", None)
     if dev:
         steps += _dev_approval_steps(a, repo, approval, prs, rts)

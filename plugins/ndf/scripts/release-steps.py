@@ -56,7 +56,6 @@ ok を返す。起点の版がすでに `--to` なら（同じ版を出し直そ
 from __future__ import annotations
 
 import argparse
-import datetime
 import json
 import os
 import re
@@ -71,6 +70,7 @@ import deps  # noqa: E402
 
 deps.require("schema", "versions", "bump", "md", "mdtable", "durable")
 import approved_commit as ac  # noqa: E402
+import clock  # noqa: E402
 import mdtable  # noqa: E402
 import schema  # noqa: E402
 import versions  # noqa: E402
@@ -1008,7 +1008,7 @@ def cmd_approve(a):
         sha = ac.parse_sha(a.approved_sha)
     except ValueError as e:
         raise StepError(str(e), EXIT_UNREADABLE)
-    at = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    at = clock.now_iso("utc")
     try:
         ac.record(path, sha, a.by, at)
     except ac.Unapproved as e:

@@ -22,7 +22,9 @@ PR の先頭のコミットの中身も足す）を最小構成の claude -p に
 「従う / 従わない / 判定できない」と理由と越えない線と根拠の項目（`basis`）を JSON で返させる。
 
 - 従う（越えない線なし）: `sprint-state.py gate` で関門の記録（`by: mvv`・判定・理由・ログ）を書き、
-  status ok（終了コード 0）。記録を書けなければ関門へ戻す
+  status ok（終了コード 0）。記録を書けなければ関門へ戻す。`--gate release` では、判定に読んだ承認資料（`--material`）の
+  「承認したコミット」で承認資料へ承認の記録（`by: mvv`）も書く（`lib/approved_commit.py`。判定の後に資料が書き直されて
+  いれば書かず、`items` に `result: not_recorded` を載せる。#815）。`--advise` では書かない
 - それ以外（従わない・判定できない・越えない線・判定を読めない・材料を取れない）: status gate（終了コード 10）。
   利用者の承認を求める
 
@@ -58,6 +60,7 @@ import deps  # noqa: E402
 
 deps.require("schema", "procs")  # schema は supervise_lib.paths → decl、procs は ask() の supervise_lib.claude が使う
 from step_result import EXIT_GATE, emit, result  # noqa: E402
+import approved_commit as ac  # noqa: E402
 import clock  # noqa: E402
 import legacy_names  # noqa: E402
 import gh_call  # noqa: E402
@@ -361,6 +364,11 @@ def machine_checks(a, root: Path, project: pm.ProjectMvv, record: dict) -> tuple
         if not Path(m).is_file():
             raise Back(f"材料のファイルが無い: {m}")
         materials.append(f"## {m}\n\n{Path(m).read_text(encoding='utf-8')}")
+        if a.gate == "release":
+            try:  # 判定に読んだ承認資料の承認したコミット（従うときに承認の記録を書く。#815 の I10）
+                a.approved[m] = ac.material_sha(m)
+            except ValueError:
+                pass
     materials += [pr_material(n, info) for n, info in infos.items()]
     if a.gate == "design":
         for n, info in infos.items():
@@ -406,8 +414,25 @@ def passed(a, root: Path, project, record: dict, usage: dict) -> tuple[dict, int
     if a.note:
         write_note(a.note, a, record)
     return result(
-        TOOL, "ok", f"{GATES[a.gate]}: MVV に従う。関門を省いて進めてよい", [record, *revise_items(a, root, project)], usage
+        TOOL,
+        "ok",
+        f"{GATES[a.gate]}: MVV に従う。関門を省いて進めてよい",
+        [record, *approval_records(a), *revise_items(a, root, project)],
+        usage,
     ), None
+
+
+def approval_records(a) -> list[dict]:
+    """関門 2 を MVV 判定で通したとき、判定に読んだ承認資料へ承認の記録（by: mvv）を書く（#815 の I10）。
+    判定の後に資料が書き直されていれば書かない（本番の配布は承認の記録が無いとして承認ゲートで止まる）。"""
+    items = []
+    for path, sha in getattr(a, "approved", {}).items():
+        try:
+            ac.record(path, sha, "mvv", clock.now_iso("utc"))
+            items.append({"kind": "approval", "name": path, "result": "recorded", "approved_sha": sha})
+        except ValueError as e:
+            items.append({"kind": "approval", "name": path, "result": "not_recorded", "approved_sha": sha, "reason": str(e)})
+    return items
 
 
 def cmd_check(a) -> tuple[dict, int | None]:
@@ -489,6 +514,7 @@ def main() -> int:
         "--advise", action="store_true", help="助言の MVV 判定: 承認ゲートの記録を書かず、どの判定でも 0 で返す（pace: normal。#1400）"
     )
     a = ap.parse_args(legacy_names.rewrite_argv("mvv-gate.py", sys.argv[1:]))
+    a.approved = {}
     out, code = cmd_check(a)
     emit(out, code)
 

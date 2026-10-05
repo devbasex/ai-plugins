@@ -148,6 +148,26 @@ def test_follow_passes_the_gate_and_is_recorded(sprint):
     assert "速くする" in (sprint["tmp"] / "prompt.txt").read_text()
 
 
+APPROVED = "a" * 40
+MATERIAL = f"# 配布\n\n## 2. 承認の判断に使うもの\n\n| 項目 | 内容 |\n| --- | --- |\n| 承認したコミット | {APPROVED} |\n"
+
+
+@pytest.mark.parametrize(
+    "text, extra, recorded",
+    [(FOLLOW, (), APPROVED), ('{"verdict": "unknown", "reasons": ["x"], "boundary": []}', (), None), (FOLLOW, ("--advise",), None)],
+)
+def test_release_follow_records_the_approved_commit_in_the_material(sprint, text, extra, recorded):
+    """#815 の I10: 関門 2 を MVV 判定で通したときだけ、承認資料へ承認の記録（by: mvv）を書く。助言では書かない。"""
+    sys.path.insert(0, str(SCRIPT.parent / "lib"))
+    import approved_commit as ac
+
+    sprint["material"].write_text(MATERIAL)
+    run(sprint, text, "--pr", "5", *extra)
+    assert ac.recorded_sha(sprint["material"]) == recorded
+    if recorded:
+        assert ac.from_material(sprint["material"]) == APPROVED and " を mvv が " in sprint["material"].read_text()
+
+
 def test_design_gate_is_recorded_as_gate_1(sprint):
     tmp = sprint["tmp"]
     env = {"PATH": f"{fake_gh(tmp, ['issues/x.md'])}:/usr/bin:/bin", "HOME": str(tmp), "NDF_MVV_CLAUDE": fake_claude(tmp, FOLLOW)}
