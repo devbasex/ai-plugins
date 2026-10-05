@@ -56,7 +56,7 @@
 | I7 | 3 つにまたがる | 必須にしないジョブは必須のチェックに載らない | 両方に載った名前を「宣言と ruleset の食い違い」として出して失敗（1） |
 | I8 | 3 つにまたがる | 追加待ちのチェックが必須のチェックに載ったら、宣言から外す | 「追加済み。宣言から外す」と知らせて成功（0）のまま |
 | I9 | 3 つにまたがる | `pull_request` の起動を `paths` / `paths-ignore` で絞ったワークフローのジョブは、必須のチェックにも追加待ちのチェックにも置かない | その名前を「絞り込みのあるジョブ」として出して失敗（1） |
-| I10 | ブランチの必須のチェック | 必須の一覧を読めないとき、突き合わせのチェックは成功で終わらない | 読めなかった理由を出して失敗（2） |
+| I10 | ブランチの必須のチェック | 必須の一覧を読めないとき（宛先のブランチが存在しないときを含む）、突き合わせのチェックは成功で終わらない。実在するが `required_status_checks` の規則を持たないブランチ（`sprint/*` など）は突き合わせの対象外とする | 読めなかった理由を出して失敗（2）。規則を持たない実在のブランチは「対象外」と知らせて成功（0） |
 
 ### ドメインイベント
 
@@ -94,7 +94,7 @@
 | 要素 | 責務 |
 | --- | --- |
 | 名前を分けたジョブ（`.github/workflows/pr-body-decisions.yml`・`glossary.yml`・`script-structure.yml` の job id、`pytest.yml`・`runtime-plugin-smoke.yml` の `ci-scope` の `name:`） | 一意のチェックの名前で結果を返す（I1） |
-| 突き合わせのジョブ（`.github/workflows/runtime-plugin-validate.yml` の `required-checks-check`） | Pull Request ごとに突き合わせのスクリプトを、宛先のブランチと `contents: read` の権限で起動する |
+| 突き合わせのジョブ（`.github/workflows/runtime-plugin-validate.yml` の `required-checks-check`） | Pull Request ごとに突き合わせのスクリプトを、宛先のブランチと `contents: read` の権限で起動する。ジョブに `if: github.event_name == 'pull_request'` を置き、同じワークフローの `push`（`main`・`develop`）では起動しない（`push` では `GITHUB_BASE_REF` が空で宛先のブランチが決まらない） |
 | 突き合わせのスクリプト（`scripts/check-required-checks.py`） | ワークフローを読みチェックの名前を決め、必須の一覧と宣言を突き合わせ、差を出して終了コードを返す。ruleset へ書き込まない |
 | 必須のチェックの宣言（`scripts/required-checks-allow.json`） | 必須にしないジョブと追加待ちのチェックを、理由と組で持つ |
 | 必須の一覧の解釈（`plugins/ndf/scripts/lib/ci_workflows.py` の `required_contexts`） | `rules/branches/<branch>` の応答から必須のチェックの名前を取り出す。突き合わせのスクリプトと解析（`measure_ci.py`）が共有する |
@@ -193,7 +193,7 @@ classDiagram
 | 入力 | `--root`（既定 `.`）・`--repo <owner>/<name>`（既定は環境変数 `GITHUB_REPOSITORY`）・`--branch <名前>`（既定は環境変数 `GITHUB_BASE_REF`）・`--workflows`（既定 `.github/workflows`）・`--allow`（既定 `scripts/required-checks-allow.json`）・`--rules-file <path>`（`rules/branches` の応答の JSON を API の代わりに読む。テストと手元の確かめ用） |
 | 出力 | 標準出力へ 1 件 1 行で `<種類>: <チェックの名前>（<ワークフローのパス>#<job id>）→ <直し方>`。最後に件数の行 |
 | 終了コード | 0: 失敗の種類が無い（知らせだけはあってよい）/ 1: 失敗の種類が 1 件以上 / 2: 読めない（必須の一覧・ワークフロー・宣言）。2 は差を出さない |
-| 書き込み | しない。`gh api` は `--method GET` だけを打つ |
+| 書き込み | しない。`gh api` は `--method GET` だけを打つ（`rules/branches/<branch>` と、規則が無いときだけ `branches/<branch>`） |
 | 互換性 | 新設。既存の呼び出し元は無い |
 
 種類（`Finding.kind`）:
@@ -210,8 +210,11 @@ classDiagram
 | 絞り込みのあるジョブ | 失敗 | I9 | `paths` の絞り込みを外すか、必須にしないジョブとして宣言する |
 | 追加待ち | 知らせ | — | 承認ゲート 2 で ruleset へ足す |
 | 追加済み | 知らせ | I8 | 追加待ちの宣言から外す |
+| 対象外 | 知らせ | I10 | 何もしない（宛先のブランチは必須のチェックを持たない。差を作らず 0 で終える） |
 
-読めない（終了コード 2）の理由: `gh` が無い・未認証・API の失敗（終了コードと標準エラーの先頭）・30 秒の時間切れ・応答が JSON の配列でない・応答に `required_status_checks` の規則が無い（ブランチ名の誤りを含む）・ワークフローか宣言が YAML / JSON として読めない・宣言に未知のキーがある。
+読めない（終了コード 2）の理由: `gh` が無い・未認証・API の失敗（終了コードと標準エラーの先頭）・30 秒の時間切れ・応答が JSON の配列でない・`--branch` が空（`GITHUB_BASE_REF` も空）・応答に `required_status_checks` の規則が無く、`GET branches/<branch>` が 404（ブランチ名の誤り）か失敗・ワークフローか宣言が YAML / JSON として読めない・宣言に未知のキーがある。
+
+応答に `required_status_checks` の規則が無く、`GET branches/<branch>` が 200 のときは、規則を持たない実在のブランチ（`sprint/*` など）として「対象外」を知らせて 0 で終える。`--rules-file` を渡したときもブランチの有無は API で確かめる。
 
 ### チェックの名前の決め方
 
@@ -262,9 +265,16 @@ sequenceDiagram
     S->>S: 宣言を読む（読めなければ 2）
     S->>S: ワークフローを読み、チェックの名前を決める
     S->>G: GET rules/branches/<branch>
-    alt 失敗・時間切れ・規則が無い
+    alt 失敗・時間切れ
         G-->>S: 失敗
         S-->>J: 理由を出して 2
+    else required_status_checks の規則が無い
+        S->>G: GET branches/<branch>
+        alt 200
+            S-->>J: 「対象外」を知らせて 0
+        else 404・失敗
+            S-->>J: 理由を出して 2
+        end
     else 読めた
         G-->>S: 規則の配列
         S->>S: I1〜I9 を当てて差を作る
@@ -304,18 +314,31 @@ stateDiagram-v2
 
 1. 実装の Pull Request と #1645 の修正が `develop` に入っていることを確かめる
 2. `python3 scripts/check-required-checks.py --repo devbasex/ai-plugins --branch develop` の「追加待ち」の行を、足す名前の一覧として承認資料に載せる（#1645 が未なら `pr-body-decisions-check` を一覧から除く）
-3. 承認を得てから ruleset を書き換える。ほかの規則を変えないよう、読んだ規則の配列の `required_status_checks` だけに足して戻す
+3. `PUT` の本文を作り、取得した ruleset との差が足す名前だけであることを確かめて承認資料に添える。本文は取得した ruleset の書き込める欄（`name`・`target`・`enforcement`・`conditions`・`bypass_actors`・`rules`）をすべて持ち、`rules` の `required_status_checks` だけに足す。`bypass_actors` を落とすと、`develop` / `main` のリリースの Pull Request を管理者の bypass でマージする運用（`docs/versioning-and-distribution.md`）が壊れる。下の `diff` の出力が空であることが `PUT` を打つ前提で、承認する人はこれを見てから承認する
 
    ```bash
+   ADD='["doc-line-limit-check", "..."]'
    gh api repos/devbasex/ai-plugins/rulesets/22332172 > /tmp/ruleset-before.json
-   jq --argjson add '["doc-line-limit-check", "..."]' \
-     '{rules: [.rules[] | if .type == "required_status_checks"
-       then .parameters.required_status_checks += [$add[] | {context: .}] else . end]}' \
+   jq --argjson add "$ADD" \
+     '{name, target, enforcement, conditions, bypass_actors,
+       rules: [.rules[] | if .type == "required_status_checks"
+         then .parameters.required_status_checks += [$add[] | {context: .}] else . end]}' \
      /tmp/ruleset-before.json > /tmp/ruleset-put.json
+   # 前提: 足した名前を除くと、本文は取得した ruleset の書き込める欄と同じ（出力が空）
+   diff <(jq -S '{name, target, enforcement, conditions, bypass_actors, rules}' /tmp/ruleset-before.json) \
+        <(jq -S --argjson add "$ADD" \
+            '.rules |= map(if .type == "required_status_checks"
+              then .parameters.required_status_checks |= map(select(.context as $c | $add | index($c) | not)) else . end)' \
+            /tmp/ruleset-put.json)
+   ```
+
+4. 承認を得て、3 の `diff` が空のときだけ ruleset を書き換える
+
+   ```bash
    gh api --method PUT repos/devbasex/ai-plugins/rulesets/22332172 --input /tmp/ruleset-put.json
    ```
 
-4. `gh api repos/devbasex/ai-plugins/rules/branches/develop` と `.../main` で必須のチェックが 19 個（#1645 が未なら 18 個）であることと、ほかの規則が `ruleset-before.json` と同じであることを確かめる（AC3）
+   書き換えの後、`gh api repos/devbasex/ai-plugins/rules/branches/develop` と `.../main` で必須のチェックが 19 個（#1645 が未なら 18 個）であること（AC3）と、`gh api repos/devbasex/ai-plugins/rulesets/22332172` の `bypass_actors`・`conditions`・`enforcement` が `ruleset-before.json` と同じであることを確かめる
 5. 突き合わせのチェックが「追加済み」を知らせる。追加待ちの宣言から外す Pull Request（`light`）を出す
 
 ## 非機能の実現方式
@@ -361,9 +384,13 @@ NDF の配布物として最初から出す案は採らない。使われ方を�
 
 根拠: Value 2 / Value 4（MVV 版 2）
 
-### 決定 5: 読めなかった場合を「差が無い」と取り違えないため、必須の一覧を読めないときと規則が無いときは終了コード 2 で終える
+### 決定 5: 読めなかった場合を「差が無い」と取り違えないため、必須の一覧を読めないときと宛先のブランチが無いときは終了コード 2 で終え、規則を持たない実在のブランチは対象外として 0 で終える
 
-存在しないブランチの `rules/branches` は `[]` を終了コード 0 で返す（実測）。空の一覧として扱うと、ブランチ名の誤りがすべてのジョブの未登録として現れ、原因が読めない。応答に `required_status_checks` の規則が無いことを読めない理由の 1 つとして出す。
+存在しないブランチの `rules/branches` は `[]` を終了コード 0 で返す（実測）。空の一覧として扱うと、ブランチ名の誤りがすべてのジョブの未登録として現れ、原因が読めない。
+
+ただし規則を持たない実在のブランチ（宛先が `sprint/*` のスプリントの子の Pull Request）も `[]` を返す。これを 2 にすると、スプリントの子の Pull Request すべてで突き合わせのチェックが落ち、`merge-when-green` が止まる。そこで応答に `required_status_checks` の規則が無いときだけ `GET branches/<branch>` を打ち、200 なら「対象外」を知らせて 0、404 か失敗なら読めない理由として 2 にする。2 はブランチが存在しないときと読めないときに限る。
+
+ジョブに宛先のブランチの条件（`develop`・`main` だけで起動）を置く案は採らない。ブランチの名前をワークフローへ埋め込むことになり、ruleset の対象を変えたときに追従を忘れる（Value 5）。
 
 API の失敗を空の一覧として続ける解析（`measure_ci.py`）の振る舞いは、そのまま残す。解析は測れたものだけで宣言を作る用途で、止まらないことを優先する。
 
@@ -405,6 +432,8 @@ API の失敗を空の一覧として続ける解析（`measure_ci.py`）の振�
 
 突き合わせのスクリプトは読むだけにし、足す名前の一覧（追加待ちの行）を出すところまでを受け持つ。書き換えは管理者の権限で 1 回打つ `PUT` で、承認の後に行う。
 
+`PUT` の本文は取得した ruleset の書き込める欄をすべて持たせ、取得した ruleset との差が足す名前だけであることを `PUT` の前に確かめて承認資料へ添える（F4 の手順 3）。書き換えの後に前後を比べる順では、`bypass_actors`・`conditions`・`enforcement` を落とした本文が先に本番の保護へ効き、気づく前にリリースの Pull Request のマージの運用が壊れる（C2・C4）。
+
 スクリプトに書き換えの副コマンドを持たせる案は採らない。管理者の権限を持つトークンが要り、ruleset の書き換えが承認の外で走る経路ができる。
 
 根拠: Value 2（MVV 版 2）
@@ -412,6 +441,8 @@ API の失敗を空の一覧として続ける解析（`measure_ci.py`）の振�
 ### 決定 11: 宣言に無いワークフローを増やさないため、突き合わせのジョブは `runtime-plugin-validate.yml` に置く
 
 `runtime-plugin-validate.yml` はほかの `scripts/check-*.py` のジョブを持つ。新しいワークフローのファイルを足すと、cross-refactoring の `init` が宣言に無いジョブとして数え、`.ndf/project.json` の `test.ci_exempt` への追記（C7）が要る。ジョブには `permissions: contents: read` を置き、ワークフロー全体の権限は変えない。
+
+このワークフローは `push`（`main`・`develop`）でも走り、そのとき `GITHUB_BASE_REF` は空で宛先のブランチが決まらない。ジョブに `if: github.event_name == 'pull_request'` を置き、`push` では起動しない。`push` で起動してスクリプトが `--branch` の空を 2 で返すと、`develop` / `main` へのマージのたびに落ちる。
 
 新しいワークフロー `required-checks.yml` を足す案は採らない。上の理由による。
 
@@ -428,7 +459,9 @@ API の失敗を空の一覧として続ける解析（`measure_ci.py`）の振�
 | AC5 / I4 | どのジョブにも当たらない必須のチェックが「消えた必須」で 1 | 必須の側からの差を見ない |
 | AC6 / I2 | 2026-10-05 の 12 個の応答（`--rules-file`）と改名後のワークフロー、`not_required` だけの宣言で、未登録が 6 つと `required-checks-check` の 7 つだけ。`runtime-smoke (claude)` などの 4 つと `pytest` は出ない | matrix の値を名前に付けない・`name:` の式を置き換えない |
 | I2 | `name:` に matrix 以外の式・`uses:`・式の matrix で「名前を決められない」が 1 | 決められないジョブを飛ばす |
-| AC7 / I10 | API の失敗・時間切れ・`gh` が無い・`[]`・`required_status_checks` の無い応答で、理由を出して 2。差の行は出ない | 読めないときに空の一覧で続ける |
+| AC7 / I10 | API の失敗・時間切れ・`gh` が無い・`--branch` が空、および `[]`・`required_status_checks` の無い応答で `GET branches/<branch>` が 404 か失敗のとき、理由を出して 2。差の行は出ない | 読めないときに空の一覧で続ける |
+| I10 | `[]`・`required_status_checks` の無い応答で `GET branches/<branch>` が 200（`gh` を差し替えて返す）のとき、「対象外」を知らせて 0。差の行は出ない | 規則の無い実在のブランチ（`sprint/*`）を 2 にする・ブランチの有無を見ずに 0 にする |
+| 決定 11 | `runtime-plugin-validate.yml` を `yamlio` で読み、`required-checks-check` が `if: github.event_name == 'pull_request'` を持つ。実装の Pull Request をマージした後の `develop` の `push` の実行で、このジョブが skipped になる（手動） | `if:` を外す |
 | I5 | 理由が空・無い宣言で「理由の無い宣言」が 1 | 理由の欠けた行を受け入れる |
 | I6 | どのジョブにも当たらない宣言の行で「古い宣言」が 1 | 宣言の名前を照らさない |
 | I7 | `not_required` と必須の両方に載った名前で「宣言と ruleset の食い違い」が 1 | 必須にしないジョブを先に除いてから必須を見る |
@@ -450,7 +483,7 @@ API の失敗を空の一覧として続ける解析（`measure_ci.py`）の振�
 | --- | --- |
 | matrix のキーが 2 つ以上のときの名前の値の並び | GitHub が付ける ` (<値>, <値>)` の並びと、`include` で足したキーの値が名前に入るかは、このリポジトリに例が無く実測していない。実装（`tdd-cycle`）で GitHub の文書と照らし、確かめられなければ「名前を決められない」に倒す |
 | `GITHUB_TOKEN`（`contents: read`）で `rules/branches` を読めるか | 未認証の `curl` で 200 が返ることは要求の前提 2 で確かめたが、`gh` に `GITHUB_TOKEN` を渡した Actions の中では走らせていない。実装の Pull Request の `required-checks-check` の結果で確かめる |
-| ruleset の `PUT` が `rules` だけの本文を受け、ほかの欄を変えないか | 書き込みは承認の前に試せない。承認ゲート 2 の手順 4 で前後の規則を比べて確かめる |
+| ruleset の `PUT` が取得した欄だけの本文を受け、ほかの欄を変えないか | 書き込みは承認の前に試せない。本文と取得した ruleset の差が足す名前だけであることは承認ゲート 2 の手順 3 で `PUT` の前に確かめ、書き換えの後の `bypass_actors`・`conditions`・`enforcement` は手順 4 で比べる。手順 3 の `jq` と `diff` は、取得の応答と同じ形の手元の JSON で走らせて確かめた |
 | 追加済みの宣言を外す Pull Request の時期 | 承認ゲート 2 の後に `light` で出す。出すまで突き合わせのチェックは「追加済み」を知らせ続ける |
 | `.ndf/project.json` の `ci.required_checks` | 解析が書いた 12 個の写しで、ruleset を変えた後は古くなる。書き換えは C7 のため、この変更では触らず、次の解析（`project-decl.py`）で作り直す |
 | AC9 の読み方 | 決定 9 で数の写しを消して満たすとした。数を 19 に書き換える読み方を求めるかは承認ゲート 1 で承認する人が決める |
