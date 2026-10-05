@@ -48,7 +48,7 @@
 
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
-| I1 | 本番のリリース | リリース記録は本番の配布（タグ `<plugin>--v<版>` が origin にある）より後にだけ書く | `record` は投稿せずに終了コード 3（前提が無い）で止まる |
+| I1 | 本番のリリース | リリース記録は本番の配布（タグ `<plugin>--v<版>` が origin にあり、同じタグの GitHub Release がある）より後にだけ書く。`release` はタグを送った後に GitHub Release を作るため、タグだけでは配布の完了と見なさない | `record` は投稿せずに終了コード 3（前提が無い）で止まる |
 | I2 | 本番のリリース | 書いたリリース記録は `parse_record` で読むと `found` が真・`stage` が `本番` で始まり・`version` が出した版・`sprint_prs` が受けた PR の並びになる | 書く側と読む側が同じモジュールの形を使う。形が食い違えば契約のテストが落ちる |
 | I3 | 本番のリリース | 同じ版の同じ内容の記録は PR に 2 件以上増えない | `record` は投稿の前に最後の記録を読み、同じなら投稿せずに `ok` を返す |
 | I4 | リリースプランの実行 | 記録を書くステップの失敗から、本番の配布（タグ・GitHub Release・本番チャネルへのマージ）へ戻る経路が無い | 記録の失敗は専用の判断（`judge-record`）へ回し、選べるのは `record` のやり直しか停止だけにする |
@@ -195,11 +195,11 @@ python3 release-steps.py record --version <版> --prs <PR番号>... [--plugin <�
 
 | 項目 | 内容 |
 | --- | --- |
-| 前提 | タグ `<plugin>--v<版>` が origin にある（`git fetch --tags` の後に確かめる）。`release/v<版>` → ベースブランチの PR がマージ済み |
+| 前提 | タグ `<plugin>--v<版>` が origin にある（`git fetch --tags` の後に確かめる）。同じタグの GitHub Release がある（`gh release view <タグ>` が 0 で終わる）。`release/v<版>` → ベースブランチの PR がマージ済み |
 | 書くもの | 本番のリリースの PR（`release/v<版>` → ベースブランチ、MERGED）へコメント 1 件（`gh pr comment <番号> --body-file <一時ファイル>`） |
 | 書かないとき | PR の本文とコメントの最後のリリース記録が、`stage` が `本番` で始まり `version` と `sprint_prs` が同じなら投稿しない（I3） |
 | 結果 JSON | `lib/step_result.py` の形。`items` は `{kind: "comment", name: "#<番号>", result: "posted" / "exists"}`。`metrics` は `release_pr`・`release_pr_url`・`version`・`prev_version`・`sprint_prs` |
-| 終了コード | 0 = 書いた・既にある / 1 = 投稿が失敗した（`gh pr comment` が非 0） / 2 = PR を読めない / 3 = 前提が無い（タグが無い・マージ済みの PR が無い） |
+| 終了コード | 0 = 書いた・既にある / 1 = 投稿が失敗した（`gh pr comment` が非 0） / 2 = PR を読めない / 3 = 前提が無い（タグが無い・GitHub Release が無い・マージ済みの PR が無い） |
 
 ブランチとプラグイン名は `cmd_release` と同じく `release_decl` から読む。
 
@@ -314,9 +314,9 @@ stateDiagram-v2
 
 根拠: Value 6 / Value 7（MVV 版 2）
 
-### 決定 4: 記録が事実と食い違わないよう、記録はタグがあるときだけ書き、記録を書くステップを `release` の直後に置く
+### 決定 4: 記録が事実と食い違わないよう、記録はタグと GitHub Release があるときだけ書き、記録を書くステップを `release` の直後に置く
 
-記録の `段階: 本番` は配布が終わった事実を表す。タグの有無を `record` 自身が確かめれば、プランの外から打たれても配布の前には書かない（I1）。`verify` の後に置くと、導入の確かめが落ちて止まったときに、配布は終わっているのに記録が無く、閉じる条件 1 を満たせない。
+記録の `段階: 本番` は配布が終わった事実を表す。タグと GitHub Release の有無を `record` 自身が確かめれば、プランの外から打たれても配布の前には書かない（I1）。`release` はタグを送った後に `gh release create` を打ち、そこで失敗し得るため、タグだけを確かめると、Release が無いまま `record` を単独で、または `--from record` で再開して打ったときに `段階: 本番` を書き、閉じる条件 1 を通してしまう。`verify` の後に置くと、導入の確かめが落ちて止まったときに、配布は終わっているのに記録が無く、閉じる条件 1 を満たせない。
 
 根拠: Value 7 / C4（MVV 版 2）
 
@@ -334,7 +334,7 @@ stateDiagram-v2
 | --- | --- | --- |
 | AC1・I6 | 本番の `new release` のプランが `release` → `record` → `verify` の順に進み、`record` が `pr_from` を持つ。開発版のプランに `record` と `judge-record` が無い | `record` を開発版にも足す・`release` の `next` を戻す |
 | AC2・AC7・I2 | `format_record` の出力を `parse_record` に通すと、`found`・`stage`・`version`・`sprint_prs` が期待どおりになる | 書く側の見出しか行の名前を変える・`版:` に `v` を付ける |
-| AC3・I1 | 偽の `gh` で、タグがあると `record` が本番のリリースの PR へコメントを 1 件投稿する。タグが無いと投稿せず 3 で終わる | タグの確かめを外す・PR の宛先をスプリントの PR にする |
+| AC3・I1 | 偽の `gh` で、タグと GitHub Release があると `record` が本番のリリースの PR へコメントを 1 件投稿する。タグが無い、またはタグはあり GitHub Release が無いと、投稿せず 3 で終わる | タグか GitHub Release の確かめを外す・PR の宛先をスプリントの PR にする |
 | I3 | 同じ記録を持つ PR に `record` を 2 度打っても、投稿は 1 件で 2 度目は `exists` | 既にある記録の確かめを外す |
 | AC4・I4 | `gh pr comment` が非 0 なら `record` が 1 で終わり、プランは `judge-record` へ進み、選べるのは `record` と `stop` だけ。`judge` の `choices` に `record` が無い | `record` の `on_fail` を `judge` にする・`judge-record` に `fix` を入れる |
 | I5 | `pr_from` の run のステップが 0 で終わると報告の `Pull Request` が `metrics` の URL になり、`{queue_pr:release-prod}` がその番号に置き換わる。`metrics` に鍵が無ければ書き換えない | `pr_from` を読まない・失敗の終了コードでも埋める |
