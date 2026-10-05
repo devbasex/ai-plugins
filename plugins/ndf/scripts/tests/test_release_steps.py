@@ -650,11 +650,13 @@ def _release_prod(monkeypatch, root: Path, wt: dict, plugin: str):
     monkeypatch.setattr(mod, "changelog_section", lambda r, ver, plugin: "")
     monkeypatch.setattr(mod, "run_checks", lambda r: [])
     monkeypatch.setattr(mod, "create_pr", lambda r, base, head, title, body: created.append((base, head, title)) or len(created))
-    monkeypatch.setattr(mod, "wait_and_merge", lambda r, n: f"m-{n}")
+    monkeypatch.setattr(mod, "wait_and_merge", lambda r, n, expect=None: f"m-{n}")
+    monkeypatch.setattr(mod, "release_pr_allowed", lambda r, n: None)
+    monkeypatch.setattr(mod, "check_approved", lambda r, approved, base, allowed: mod.ac.Verdict(True, approved, "b" * 40, "match"))
     monkeypatch.setattr(mod.gh_parts, "gh", lambda args, cwd=None: subprocess.CompletedProcess(args, 0, "", ""))
     monkeypatch.setattr(mod, "emit", lambda obj, *a, **k: (_ for _ in ()).throw(SystemExit(obj)))
     with pytest.raises(SystemExit) as e:
-        mod.cmd_release(argparse.Namespace(root=str(root), version="1.2.3", plugins=None, channel="prod"))
+        mod.cmd_release(argparse.Namespace(root=str(root), version="1.2.3", plugins=None, channel="prod", approved_sha="a" * 40))
     return found, created, calls, e.value.code
 
 

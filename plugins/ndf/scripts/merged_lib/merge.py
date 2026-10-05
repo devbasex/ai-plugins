@@ -151,6 +151,21 @@ def merge_gate(a):
 # --- merge-when-green ---------------------------------------------------------
 
 
+def head_moved(n, expect, last_sha, items, waits) -> None:
+    """--expect-head を渡したとき、緑を確かめた先端が渡した SHA と違えばマージせずに止める（#815 の I5）。"""
+    if last_sha and last_sha == expect:
+        return
+    emit(
+        result(
+            TOOL,
+            "stopped",
+            f"#{n} の先端が {expect[:8]} でない（今は {str(last_sha)[:8]}）。マージしない",
+            items + [{"kind": "pr", "name": f"#{n}", "result": "head_moved", "head": last_sha, "expected": expect}],
+            {"waits": waits},
+        )
+    )
+
+
 def merge_when_green(a, cleanup, next_cmd=None, plan_step="merge-approved"):
     root = git_root(a.root)
     n = a.pr
@@ -172,7 +187,11 @@ def merge_when_green(a, cleanup, next_cmd=None, plan_step="merge-approved"):
     gate_metrics = {"verdict": verdict.value, "target": verdict.target} if verdict else {}
 
     if not any(i["kind"] == "pr" and i["result"] == "already_merged" for i in items):
-        pin = ["--match-head-commit", watch.last_sha] if watch.last_sha else []  # 緑を確かめた先頭だけをマージする
+        expect = getattr(a, "expect_head", None)
+        if expect:
+            head_moved(n, expect, watch.last_sha, items, waits)
+        sha = expect or watch.last_sha
+        pin = ["--match-head-commit", sha] if sha else []  # 緑を確かめた先頭（--expect-head なら比べた先端）だけをマージする
         p = gh_parts.gh(["pr", "merge", str(n), "--admin", f"--{a.method}", *pin], cwd=root)
         if p.returncode != 0:
             emit(
@@ -184,7 +203,7 @@ def merge_when_green(a, cleanup, next_cmd=None, plan_step="merge-approved"):
                     {"waits": waits},
                 )
             )
-        merged = {"kind": "pr", "name": f"#{n}", "result": "merged", "method": a.method, "head": watch.last_sha}
+        merged = {"kind": "pr", "name": f"#{n}", "result": "merged", "method": a.method, "head": sha}
         if a.gate_approved:
             merged["gate_approved"] = a.gate_approved  # 誰が承認ゲート 2 を通したか（監査で辿る。#1336 の I8）
         items.append(merged)
