@@ -106,6 +106,8 @@ run のステップ:
 - `cmd` の `{base}` は起点のブランチ（計画か .ndf/worktree.json の `base_branch`）に置き換わる。
   `{state_dir}` は計画の状態ディレクトリに置き換わる
 - `"gate_as_ok": true`: 終了コード 10〜19 を関門として数えず、提示物だけを写して `next` へ進む
+- `"pr_from": "<鍵>"`: 終了コード 0 で終わったとき、出力の最後の JSON の `metrics.<鍵>` が空でなければ、計画の
+  `"Pull Request"` をその値（URL）にする。報告の `Pull Request` に載り、queue の `{queue_pr:<計画名>}` が読む
 
 実行の条件（計画の `"実行の条件": {"cmd": "...", "skip_code": 3}`）: run と queue が作業ツリーを作る前に
 元のリポジトリで打つ。0 なら流す。`skip_code` なら作業ツリーを作らず、報告を `結果: 完了`・

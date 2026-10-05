@@ -322,11 +322,22 @@ class Engine:
             gnext = step.get("gate_next")
             return ((None if gnext == "end" else gnext) if gnext else self.next_of(sid, step)), None, None
         if ok:
+            if is_run and step.get("pr_from"):
+                self.take_pr(step["pr_from"])
             return self.back_or_next(sid, step), None, None
         if step.get("on_fail"):
             st.failed_step = sid
             return step["on_fail"], None, None
         return None, "止まった", f"ステップ {sid} が失敗した（exit={st.cur['exit']}）"
+
+    def take_pr(self, key: str) -> None:
+        """run のステップの `pr_from`: 終了コード 0 の出力の最後の JSON の `metrics.<key>` が空でなければ、
+        計画の Pull Request をその値にする（本番のリリースプランの record が本番のリリースの PR を渡す。#1273）。"""
+        if self.state.cur.get("exit") != 0:
+            return
+        metrics = (last_json(self.state.cur.get("text", "")) or {}).get("metrics") or {}
+        if metrics.get(key):
+            self.plan["Pull Request"] = str(metrics[key])
 
     def back_or_next(self, sid: str, step: dict) -> str | None:
         """成功したときの次のステップ。`"back_to_failed": true` のステップ（judge の後の fix）は、最後に落ちた
