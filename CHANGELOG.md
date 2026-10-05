@@ -13,12 +13,7 @@
 
 - Google の認証と Drive の操作には、gws を使う google-workspace Skill を使います（#1744）（#1745）
 - playwright-kit は、証跡を Drive へ保管しません（#1744）（#1745）
-
-### 移行
-
-- `/ndf:google-auth` と `/ndf:google-drive` は無くなりました。`/ndf:google-workspace` を使います
-- 旧 Skill のトークンは移しません。`gws auth login` で認証し直します。gws が無ければ、Skill の
-  手順が同意を得てから `npm install -g @googleworkspace/cli` で入れます
+- Fix: playwright-kit を 3.0.0 へ上げ、CHANGELOG に移行手順を足す（#1747）
 
 ## [playwright-kit 3.0.0] - 2026-10-05
 
