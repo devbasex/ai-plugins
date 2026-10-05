@@ -130,6 +130,15 @@ def same_untracked(main_dir, pull):
     return rels
 
 
+def blocking_local_changes(main_dir, pull):
+    """pull を止めたのが追跡ファイルの未コミットの変更なら、そのファイルの一覧を返す。別の理由なら空。"""
+    if "Your local changes to the following files would be overwritten" not in pull.stderr:
+        return []
+    return [l.strip() for l in pull.stderr.splitlines() if l.startswith("\t")] or [
+        line[3:] for line in git(main_dir, "status", "--porcelain=v1", "--untracked-files=no").stdout.splitlines()
+    ]
+
+
 def _recorder():
     """後片付けの記録（items）と、1 件を足す add を返す。"""
     items = []
@@ -229,6 +238,11 @@ def _update_main_dir(main_dir, add):
             (Path(main_dir) / rel).unlink()
             add("untracked", rel, "removed", "取り込む内容と同じ")
         pull = run(["git", "-C", main_dir, "pull", "--ff-only"], check=False)
+    if pull.returncode != 0 and (dirty := blocking_local_changes(main_dir, pull)):
+        # マージは済んでいる。利用者の手元の変更には触れず（stash も checkout もしない）、取り込みだけを見送る
+        names = ", ".join(dirty[:5]) + ("…" if len(dirty) > 5 else "")
+        add("main_dir", main_dir, "kept", f"未コミットの変更（{names}）が git pull --ff-only を塞いだため取り込まない")
+        return None
     if pull.returncode != 0:
         pull_err = f"主ディレクトリの git pull --ff-only が失敗: {pull.stderr.strip()[:300]}"
         add("main_dir", main_dir, "stopped", pull_err)
