@@ -78,6 +78,7 @@
 | `plugins/playwright-kit/skills/playwright-kit-ops/tests/test_drive_auth_candidates.py` `test_build_gdoc_with_drive_links.py` `test_upload_evidence.py` ほか Drive 連携のテスト | 削除か、Drive の経路を外した形へ直す |
 | `plugins/playwright-kit/skills/playwright-evidence/SKILL.md`（description の「store its evidence on Google Drive」、Drive への保管の手順・`--pwk-drive-folder`・環境変数とトラブルシュートの Drive の行）、`playwright-kit-ops/SKILL.md` と `templates/runtime-README.md` の Drive 連携の節、`plugins/playwright-kit/README.md` の Skill の表 | 手順と案内を外す |
 | `plugins/ndf/scripts/tests/fixtures/wait_notice_corpus.json` | 過去の通知の文面を集めたテストの素材。変えない（受け入れ条件 3 の除外に入れる） |
+| `.ndf/pace.json` の `boundary_paths` | `plugins/ndf/skills/google-auth/**` を `plugins/ndf/skills/google-workspace/**` へ置き換える（2026-10-05 ゲート 1 で利用者が決定。C7 の確認は済み） |
 
 含まない:
 
@@ -85,7 +86,6 @@
 - playwright-kit の Drive 連携を gws へ移すこと（#745 は not planned）
 - gws の版の固定・gws の不具合の回避策
 - `issues/` の過去の課題の記録（`issues/issue-1078-pace-fast-design.md` `issues/issue-1142-design-migration.md` など）と `CHANGELOG.md`・`docs/development-history/`・`docs/ndf-version-decisions.md` の書き換え
-- `.ndf/pace.json` の `boundary_paths` の変更（C7。下の「未決」）
 
 ## ドメインイベント
 
@@ -113,7 +113,7 @@
 - [ ] 確認のスクリプトが、`PATH` に gws が無いとき・未認証の gws のとき・認証済みの gws のときに、それぞれ別の状態と次の手を JSON で返す（gws をスタブに置き換えた自動テストで確かめる）
 - [ ] 確認のスクリプトは、同意の印（引数）を受け取らない限り `npm install -g` を実行しない。`gws auth login` はどの引数でも実行しない（自動テストで、スタブの npm・gws が呼ばれた引数を記録して確かめる）
 - [ ] npm が無い環境で、確認のスクリプトが導入できない理由を返し、0 以外の終了コードで終わる
-- [ ] `git grep -E "google-auth|google-drive|gdrive_fetch|google_auth"` が、履歴の文書（`CHANGELOG.md`・`docs/development-history/`・`issues/`・`docs/ndf-version-decisions.md`）・`plugins/ndf/scripts/tests/fixtures/wait_notice_corpus.json`・`.ndf/pace.json`（未決の扱いが決まるまで）以外で 0 件（playwright-kit を含む）
+- [ ] `git grep -E "google-auth|google-drive|gdrive_fetch|google_auth"` が、履歴の文書（`CHANGELOG.md`・`docs/development-history/`・`issues/`・`docs/ndf-version-decisions.md`・`docs/ndf-version-decisions-v6-v10.5.md`）・`plugins/ndf/scripts/tests/fixtures/wait_notice_corpus.json` 以外で 0 件（playwright-kit を含む）
 - [ ] playwright-kit の Skill（description を含む）・README・テンプレートと、playwright-kit を紹介する `.claude-plugin/marketplace.json` の description・根の `README.md` の行に、Drive への保管の手順と案内が残らない（`git grep -niE "drive" plugins/playwright-kit .claude-plugin/marketplace.json README.md` の残りが playwright-kit の Drive 連携の案内でない）
 - [ ] `plugins/ndf/manifests/*-skills.txt` の 4 つに `google-workspace` が 1 行ずつあり、`google-auth` と `google-drive` が無い
 - [ ] `python3 scripts/check-skill-frontmatter.py`、`claude plugin validate .`、`uv run --with pytest pytest scripts/tests plugins/ndf -q`、playwright-kit のテスト（`plugins/playwright-kit/skills/playwright-kit-ops/tests`）が通る
@@ -163,5 +163,4 @@
 
 | 項目 | 誰が決めるか | 期限 |
 | --- | --- | --- |
-| `.ndf/pace.json` の `boundary_paths` にある `plugins/ndf/skills/google-auth/**` を、`plugins/ndf/skills/google-workspace/**` へ置き換えるか、消すか。`.ndf/` の書き換えは C7 に当たる。推奨は置き換え（認証の案内と外部 CLI の導入を持つ Skill なので、境界の扱いを保つ） | 利用者 | 設計の承認 |
 | playwright-kit の版の上げ幅（機能の削除を MAJOR とするか） | `release` の配布の工程 | 配布 |

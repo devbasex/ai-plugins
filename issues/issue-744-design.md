@@ -110,9 +110,10 @@ playwright-kit は、この変更の後は Google Workspace のどのコンテ�
 | playwright-kit の依存の固定（`plugins/playwright-kit/skills/playwright-kit-ops/uv.lock`・根の `uv.lock`） | `drive` の extra を外した形で作り直す |
 | playwright-kit のテスト | Drive の経路のテスト（`test_drive_auth_candidates.py`・`test_build_gdoc_with_drive_links.py`・`test_upload_evidence.py`・`test_script_json_output.py`、`test_pytest_terminal_summary.py` の保管の 2 件）を消し、`test_pytest_plugin_bootstrap.py` を `--pwk-drive-folder` が無い形へ直す |
 | playwright-kit の案内 | `playwright-evidence` / `playwright-kit-ops` / `playwright-authoring` / `playwright-planning`（本文と `docs/04`・`05`・`06`）の Skill、`templates/` の `run.sh`・`run.bat`・`runtime-README.md`、`playwright_kit/fixtures/__init__.py` と `pytest_report.py` の docstring、`README.md`、2 つの `plugin.json` の description から Drive への保管の手順と案内を外す。`plugins/playwright-kit/` の外で利用者がプラグインを選ぶときに読む、`.claude-plugin/marketplace.json` の playwright-kit の description（「report generation with Drive archiving」）と根の `README.md` の playwright-kit の行（「レポート生成と Drive 保管」）からも外す |
+| `.ndf/pace.json` の `boundary_paths` | `plugins/ndf/skills/google-auth/**` を `plugins/ndf/skills/google-workspace/**` へ置き換える（2026-10-05 ゲート 1 で利用者が決定） |
 | 実装の Pull Request の本文 | 利用者向けの変更に、移行の手順（`gws auth login` で認証し直す・Drive への保管は `gws drive +upload` を手で使う）を書く。`release` がこれを CHANGELOG へ写す |
 
-**手を入れないもの**: `playwright_kit/video.py`・`config.py`・`templates/scenario.config.yaml`・`pyproject.toml`・`templates/pyproject.toml.runtime` にある「Drive のプレイヤと互換の mp4」の説明（動画の符号化の理由で、保管の案内ではない。決定 8）、`document-systems` のシステムの識別子 `gdrive`、`.ndf/pace.json`（未確認のまま残ること）。
+**手を入れないもの**: `playwright_kit/video.py`・`config.py`・`templates/scenario.config.yaml`・`pyproject.toml`・`templates/pyproject.toml.runtime` にある「Drive のプレイヤと互換の mp4」の説明（動画の符号化の理由で、保管の案内ではない。決定 8）、`document-systems` のシステムの識別子 `gdrive`。
 
 ### 構成要素図
 
@@ -440,8 +441,6 @@ npm の全体インストールの置き場所が `PATH` に無い環境（`npm 
 | 項目 | 内容 |
 | --- | --- |
 | `gws auth login` の後の `credential_source` の値 | 実測できたのは `none` と `token_env_var` だけである。ログインした後の値は `none` 以外になる前提で判定を組んだ（決定 2）。リリース後テストで、ログインした環境の値を確かめる |
-| 受け入れ条件 6 の除外に `docs/ndf-version-decisions-v6-v10.5.md` が無い | このファイルは `docs/ndf-version-decisions.md` から退避した版ごとの判断の記録（履歴の文書）で、292〜293 行が `google-drive` と `google-auth` を指す。履歴の文書は書き換えない方針のため、除外に足す要求の改訂が要る。ゲート 1 で利用者が決める |
-| `.ndf/pace.json` の `boundary_paths` | `plugins/ndf/skills/google-auth/**` を `plugins/ndf/skills/google-workspace/**` へ置き換えるか消すか（C7）。推奨は置き換え（外部 CLI の導入と認証の案内を持つ Skill の境界の扱いを保つ）。ゲート 1 で利用者が決め、決まるまで受け入れ条件 6 の除外に残す |
 | `permissions create` の引数の渡し方 | gws 0.22.5 での `--params` と `--json` の分け方は実装で打って確かめてから対応表に書く |
 | playwright-kit の版の上げ幅 | 機能の削除を MAJOR とするかは配布（`release`）で決める（要求の未決） |
 | gws の版の変化 | gws は 0.x で、`auth status` の JSON のキーが変わりうる。変わったときはスクリプトが終了コード 2 で止まり、状態を誤らない（I3）。版の固定は範囲外 |
