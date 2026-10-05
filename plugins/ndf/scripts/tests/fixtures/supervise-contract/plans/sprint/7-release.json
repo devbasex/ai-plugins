@@ -72,6 +72,14 @@
       "cwd": "<TMP>/repo",
       "cmd": "python3 <NDF>/scripts/release-steps.py notes --version 1.2.0-dev.1 --prs {queue_prs} --approval issues/approval-foo-v1.2.0.md --verified claude --ref main",
       "on_fail": "judge",
+      "next": "others"
+    },
+    {
+      "id": "others",
+      "type": "run",
+      "cwd": "<TMP>/repo",
+      "cmd": "python3 <NDF>/scripts/release-steps.py changed-plugins --plugin foo --prs {queue_prs} --approval issues/approval-foo-v1.2.0.md",
+      "on_fail": "judge",
       "next": "end"
     },
     {
@@ -84,7 +92,8 @@
         "release",
         "verify",
         "facts",
-        "explain"
+        "explain",
+        "others"
       ],
       "question": "落ちたステップを直す（fix）か、同じステップをもう一度（retry）か、止める（stop）か。retry なら decision に落ちたステップの id を返す",
       "choices": [
@@ -96,6 +105,7 @@
         "verify",
         "facts",
         "explain",
+        "others",
         "stop"
       ]
     },
@@ -110,7 +120,8 @@
         "release",
         "verify",
         "facts",
-        "explain"
+        "explain",
+        "others"
       ],
       "prompt": "落ちたステップの出力を読み、原因を直してコミットする（push しない）。直したら次は落ちたステップからやり直す。",
       "back_to_failed": true,

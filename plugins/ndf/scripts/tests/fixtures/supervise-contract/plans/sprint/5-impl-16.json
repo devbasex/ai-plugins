@@ -62,7 +62,11 @@
       "title": "#16 を実装する（スプリント m9）",
       "summary": "#16（スプリント m9 のブランチへ集める）",
       "changes": "",
-      "next": "test-all"
+      "next": "test-all",
+      "materials": {
+        "manual": false,
+        "migration": true
+      }
     },
     {
       "id": "test-all",

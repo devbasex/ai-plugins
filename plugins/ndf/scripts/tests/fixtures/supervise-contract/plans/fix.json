@@ -53,7 +53,8 @@
       "changes": "",
       "next": "test-all",
       "materials": {
-        "manual": true
+        "manual": true,
+        "migration": true
       }
     },
     {

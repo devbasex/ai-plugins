@@ -329,7 +329,12 @@ def test_normal_sprint_with_a_state_puts_the_advice_before_both_gates(tmp_path):
     assert (ds["mvv"]["on_fail"], ds["mvv-note"]["on_fail"], ds["mvv-note"]["next"]) == ("mvv-note", "gate", "gate")
     assert "mvv" in ds["gate"]["inputs"] and "gate_next" not in ds["mvv"]
     rel = steps_of(load(waves["配布"]["plans"][0]))
-    assert rel["explain"]["next"] == "mvv" and rel["mvv"]["next"] == "mvv-note" and rel["mvv-note"]["next"] == "end"
+    assert (
+        rel["explain"]["next"] == "others"
+        and rel["others"]["next"] == "mvv"
+        and rel["mvv"]["next"] == "mvv-note"
+        and rel["mvv-note"]["next"] == "end"
+    )
     assert "--gate release" in rel["mvv"]["cmd"] and rel["mvv"]["cmd"].endswith("--advise") and "gate_as_ok" not in rel["facts"]
     for w in manifest["ステージ"]:
         for path in w.get("plans", []):

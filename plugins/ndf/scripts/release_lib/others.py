@@ -18,7 +18,6 @@ import closing
 import gh_sections
 import md
 import mdtable
-import versions
 from release_lib.names import h2_lines, next_h2
 
 OTHERS_HEADING = "## 版を上げる他のプラグイン"
@@ -64,6 +63,8 @@ class OtherPlugin:
 
 def bumped(current: str, level: str) -> str:
     """今の版を上げ幅で上げた正式版（接尾辞付きは基底から上げる）。読めなければ ValueError。"""
+    import versions  # semver は版を上げる側（release-steps.py）だけが読む。PR 本文を書く supervise.py の経路で読み込まない
+
     return versions.next_version(versions.release_base(current), level)
 
 

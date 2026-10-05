@@ -120,7 +120,8 @@ def plan_to_merge(a, head: list[dict]) -> dict:
             a.summary or "",
             getattr(a, "changes", None) or "",
             "test-all",
-            {"manual": True} if getattr(a, "manual", True) else None,
+            # 要求の移行性の行は常に材料にする（互換なしの印があれば「移行の手順」の箇条になる。#1752）
+            {"manual": bool(getattr(a, "manual", True)), "migration": True},
         ),
         {
             "id": "test-all",

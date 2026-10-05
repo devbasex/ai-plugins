@@ -77,7 +77,7 @@ def _cleanup_step(v: str, prs: str, repo: str | None) -> dict:
 
 
 def _dev_approval_steps(a, repo: str | None, approval: str, prs: str, rts: str) -> list[dict]:
-    """開発版の approval-facts → 提示物の欄（→ 助言の MVV 判定）のステップ。"""
+    """開発版の approval-facts → 提示物の欄 → 他のプラグインの上げ幅（→ 助言の MVV 判定）のステップ。"""
     v = a.version
     base = re.sub(r"-.*$", "", v)
     advise = getattr(a, "advise", None)  # 助言の MVV 判定を置くスプリントの状態（pace: normal。#1400）
@@ -101,6 +101,16 @@ def _dev_approval_steps(a, repo: str | None, approval: str, prs: str, rts: str) 
             "type": "run",
             "cwd": repo,
             "cmd": f"{STEPS_PY} notes --version {v} --prs {prs} --approval {approval} --verified {rts} --ref {a.base}",
+            "on_fail": "judge",
+            "next": "others",
+        },
+        {
+            # 版を上げる他のプラグインと上げ幅の候補を承認資料へ書く（#1752。本番の bump-others が同じ表を読む）
+            "id": "others",
+            "type": "run",
+            "cwd": repo,
+            "cmd": f"{STEPS_PY} changed-plugins --plugin {a.release['plugin']}{prev.replace('--prev-tag', '--since')} "
+            f"--prs {prs} --approval {approval}",
             "on_fail": "judge",
             "next": "mvv" if advise else "end",
         },
@@ -127,7 +137,7 @@ def _add_prod_mvv_gate(steps: list[dict], a, repo: str | None, approval: str, pr
     steps.append(handoff_step(state, "関門 2", "判定のコメント"))
 
 
-def _prepare_steps(a, plugin: str, v: str, prs: str, dev: bool, after_notes: str) -> list[dict]:
+def _prepare_steps(a, plugin: str, v: str, prs: str, dev: bool, after_notes: str, repo: str | None, approval: str) -> list[dict]:
     """bump から説明文まで（本番は bump-others と消費の記録を挟む）のステップ。"""
     # 説明文は PR 本文の「利用者向けの変化」から機械で組む（節が無い PR は題名）
     notes = (
@@ -151,7 +161,7 @@ def _prepare_steps(a, plugin: str, v: str, prs: str, dev: bool, after_notes: str
                     "id": "bump-others",
                     "type": "run",
                     "stage": "配布",
-                    "cmd": bump_others_cmd(a, plugin),
+                    "cmd": bump_others_cmd(a, plugin, _material_path(repo, approval)),
                     "on_fail": "judge",
                     "next": "changelog",
                 }
@@ -258,8 +268,8 @@ def plan_release_package_plugin(a) -> dict:
     """Claude Code のプラグインを配る形（package-plugin）の計画。宣言の release は
     {"form": "package-plugin", "plugin": <名前>, "runtimes": [<導入を確かめるランタイム>...]}。
     dev: bump → changelog → 説明文 → sync-check → release → verify-install（起点のブランチ）→ approval-facts
-    → 提示物の欄。prod: bump → bump-others（前のタグからの差分のある他のプラグインの PATCH。
-    release-steps.py changed-plugins）→ changelog → 説明文 → 消費の記録 → sync-check → release → verify-install
+    → 提示物の欄 → 他のプラグインの上げ幅の候補（changed-plugins --prs --approval）。prod: bump → bump-others
+    （前のタグからの差分のある他のプラグインを、承認資料の表の上げ幅で上げる。changed-plugins --decided）→ changelog → 説明文 → 消費の記録 → sync-check → release → verify-install
     （本番のブランチ）→ 後片付け。本番は release の後に record（本番のリリースの PR へリリース記録）を挟み、落ちたら
     judge-record（record か stop）へ回す。sync-check は同期とチェックの宣言があるときだけ置く。
     説明文と提示物の欄は release-steps.py notes が PR 本文の「利用者向けの変化」から組む（LLM を使わない）。"""
@@ -277,13 +287,13 @@ def plan_release_package_plugin(a) -> dict:
         + ([] if dev else ["snapshot"])
         + (["sync"] if sync else [])
         + ["release", "verify"]
-        + (["facts", "explain"] if dev else [])
+        + (["facts", "explain", "others"] if dev else [])
     )
-    steps = _prepare_steps(a, plugin, v, prs, dev, after_notes)
+    approval = f"issues/approval-{plugin}-v{base}.md"
+    steps = _prepare_steps(a, plugin, v, prs, dev, after_notes, repo, approval)
     ref = a.base if dev else a.production_branch
     if sync:
         steps.append({"id": "sync", "type": "run", "preset": "sync-check", "on_fail": "judge", "next": "release"})
-    approval = f"issues/approval-{plugin}-v{base}.md"
     steps += _release_verify_steps(a, v, dev, repo, ref, rts, approval, prs)
     if not dev:
         # 後片付け: 配布の PR（head が release/v{v} で始まる。開発版の release/v{v}-dev.N も含む。宛先は起点のブランチ）と
@@ -356,12 +366,13 @@ PICK_BUMPS = (
 )
 
 
-def bump_others_cmd(a, plugin: str) -> str:
+def bump_others_cmd(a, plugin: str, material: str) -> str:
     """本番のリリースプランの bump-others（不足 c）。前のタグからの差分のある、宣言の release.plugin 以外の
-    プラグインを changed-plugins で列挙し、1 つずつ PATCH を 1 つ上げる。どれかが落ちたら止まる。"""
+    プラグインを changed-plugins で列挙し、承認資料（material）の表の上げ幅で 1 つずつ上げる（#1752）。
+    表を読めない・どれかが落ちたら止まる（PATCH へ倒さない）。"""
     since = f" --since {shlex.quote(a.prev_tag)}" if getattr(a, "prev_tag", None) else ""
     return (
-        f'out=$({STEPS_PY} changed-plugins --plugin {plugin}{since}) || {{ printf "%s\\n" "$out"; exit 1; }}; '
+        f'out=$({STEPS_PY} changed-plugins --plugin {plugin}{since} --decided {shlex.quote(material)}) || {{ printf "%s\\n" "$out"; exit 1; }}; '
         f'printf "%s\\n" "$out"; printf "%s\\n" "$out" | python3 -c "{PICK_BUMPS}" | while read -r n to; do '
         f'{STEPS_PY} bump --plugin "$n" --to "$to" --base {a.base} || exit 1; done'
     )
