@@ -1,6 +1,6 @@
 ---
 name: playwright-evidence
-description: "Generate the Playwright test report and collect its evidence files under reports/<run-id>/. Use when summarizing or sharing E2E results（テスト報告書・エビデンス・trace・動画）."
+description: "Generate the Playwright test report and collect its evidence files under reports/{run-id}/. Use when summarizing or sharing E2E results（テスト報告書・エビデンス・trace・動画）."
 allowed-tools:
   - Read
   - Bash(python *)
