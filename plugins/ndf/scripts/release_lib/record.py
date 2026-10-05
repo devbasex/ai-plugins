@@ -56,7 +56,7 @@ def exists(text, ver, prs):
     return bool(last["found"] and (last["stage"] or "").startswith("本番") and last["version"] == ver and last["sprint_prs"] == list(prs))
 
 
-def post(root, n, body):
+def post_comment(root, n, body):
     """PR へ本文をコメントで書く。失敗は 1 で止める。"""
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as f:
         f.write(body)

@@ -831,7 +831,7 @@ def cmd_record(a):
     if record.exists(text, ver, a.prs):
         items = [{"kind": "comment", "name": f"#{n}", "result": "exists"}]
         emit(result(TOOL, "ok", f"#{n} に v{ver} のリリース記録は既にある", items, metrics))
-    record.post(root, n, body)
+    record.post_comment(root, n, body)
     items = [{"kind": "comment", "name": f"#{n}", "result": "posted"}]
     emit(result(TOOL, "ok", f"#{n} へ v{ver} のリリース記録を書いた", items, metrics))
 
