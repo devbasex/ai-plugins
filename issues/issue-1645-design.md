@@ -57,7 +57,7 @@
 | I5 | チェックの読み | 最新の項目に取り消しが 1 件も無ければ、ジョブの照会をしない | `gh` の呼び出しを数えるテストが落ちる（AC14） |
 | I6 | 基盤待ちの見張り | 中身の失敗が 1 件でもある読み直しでは、再実行も待ち直しもせず中身の失敗で止まる | テストが落ちる（AC10） |
 | I7 | 基盤待ちの見張り | 同じ実行の再実行は `--infra-reruns` 回まで。再実行はその実行が終わってから `--infra-gap` 秒たった後に、失敗したジョブだけを打つ | テストが落ちる（AC6・AC7） |
-| I8 | 基盤待ちの見張り | 基盤待ちの停止は終了コード 75 で、summary に「CI が失敗」の語を使わない。中身の失敗の停止は今のとおり 1 | テストが落ちる（AC7・AC11） |
+| I8 | 基盤待ちの見張り | 基盤待ちの停止は終了コード 75 で、summary に「CI が失敗」の語を使わない。中身の失敗の停止は今のとおり 1。待ちの上限に達したとき、その回の読み直しに Runner の付かない取り消しがあるか、`InfraWatch.reruns` に記録のある実行の項目が pending に残っていれば（再実行したジョブが Runner を待っている）、基盤待ちとして 75 で止まる | テストが落ちる（AC7・AC11） |
 | I9 | `release` のプラン | `release` のステップは終了コード 75 で judge を通らず止まる。ステップの `timeout` は、`release` が `merge-when-green` へ渡す待ちの上限の合計より長い | テストが落ちる（AC12） |
 
 ### ドメインイベント
@@ -170,6 +170,7 @@ classDiagram
     +reruns
     +done_since
     +step(root, reading, now)
+    +pending_reruns(reading)
   }
   CheckReading "1" --> "*" CheckItem
   GreenWatch "1" --> "1" InfraWatch
@@ -180,7 +181,7 @@ classDiagram
 | --- | --- |
 | `CheckItem` | rollup の 1 件。`key` は I2 の鍵、`label` は `<workflowName> / <name>`（StatusContext は `context`）、`state` は `pending` / `failed` / `passed` / `cancelled`、`run` と `job` は `detailsUrl` から読む（無ければ `None`） |
 | `CheckReading` | 1 回の読み直しの結果。`failed` は中身の失敗（ステップのある取り消しと照会できない取り消しを含む。後者は `reason` を持つ）、`infra` は Runner が付かなかった取り消し、`superseded` は置き換わった失敗。`stale` と `queued` は今の `probe_checks` の 2 つ |
-| `InfraWatch` | `reruns`（run の番号 → 再実行した回数）と `done_since`（run の番号 → 実行が終わったのを見た時刻）。1 回の読み直しごとに `step` が「待つ」「再実行した」「止まる」を返す |
+| `InfraWatch` | `reruns`（run の番号 → 再実行した回数）と `done_since`（run の番号 → 実行が終わったのを見た時刻）。1 回の読み直しごとに `step` が「待つ」「再実行した」「止まる」を返す。`pending_reruns` は、`reruns` に記録のある実行のうち、その回の読み直しで pending の項目を持つものを返す（待ちの上限での判定に使う） |
 | `GreenWatch` | 既存。`_settle_pending` を消し、`read_checks` の結果で分岐する。`InfraWatch` を 1 つ持ち、先頭のコミットが変わったら作り直す |
 
 ## 入出力の契約
@@ -192,7 +193,7 @@ classDiagram
 | 入力（足す） | `--infra-reruns <回>`（既定 3。同じ実行の再実行の上限）、`--infra-gap <秒>`（既定 300。実行が終わってから再実行するまでの間）。`--timeout` は今のとおり待ち全体の上限で、基盤待ちもこの中で待つ |
 | 出力（成功） | 今のとおり `status: ok`。items に足す: `{"kind": "check", "name": "<label>", "result": "superseded", "run": "<run>", "job": "<job>"}`（置き換わった失敗 1 件につき 1 件）、`{"kind": "check", "name": "<label>", "result": "infra_rerun", "run": "<run>", "rerun": <回目>}`（再実行 1 回につき 1 件） |
 | 中身の失敗 | 終了コード 1（今のとおり）。summary `#<PR> の CI が失敗: <label>（run <run>）, …`。items の `result: failed` に `run`・`job` を足し、照会できなかった取り消しは `reason: 取り消しのジョブを照会できない` を持つ。置き換わった失敗の items も添える。`next` は今のとおり |
-| 基盤待ちの停止 | 終了コード 75。summary は次の 3 つのどれか。`#<PR> の CI の基盤待ち: Runner が付かずに取り消された（<label>, …）。再実行 <N> 回で解けない` / `… <timeout> 秒で解けない` / `… gh run rerun <run> --failed が失敗: <stderr>`。items は `{"kind": "check", "name": "<label>", "result": "infra_wait", "run": "<run>", "job": "<job>", "reruns": <回>}`。metrics に `infra`（件数）。`next` は `GitHub Actions の復旧の後に打ち直す: merged-steps.py merge-when-green <PR>` |
+| 基盤待ちの停止 | 終了コード 75。summary は次の 3 つのどれか。`#<PR> の CI の基盤待ち: Runner が付かずに取り消された（<label>, …）。再実行 <N> 回で解けない` / `… <timeout> 秒で解けない`（再実行したジョブが Runner を待って pending のまま上限に達したときも、この文面で `infra_wait` の items にそのジョブを載せる） / `… gh run rerun <run> --failed が失敗: <stderr>`。items は `{"kind": "check", "name": "<label>", "result": "infra_wait", "run": "<run>", "job": "<job>", "reruns": <回>}`。metrics に `infra`（件数）。`next` は `GitHub Actions の復旧の後に打ち直す: merged-steps.py merge-when-green <PR>` |
 | マージの拒否 | 今のとおり終了コード 1・`gh pr merge --admin が失敗: …`。置き換わった失敗があれば `next` を `置き換わった失敗を通し直してから打ち直す: gh run rerun <run>; gh run rerun <run>; merged-steps.py merge-when-green <PR>` にする |
 | 互換性 | 終了コード 0・1・10 の意味は変えない。summary のチェックの名前に workflow の名前が付く（読む側はプランの judge と人で、文字列を照合するスクリプトは無い。`release-steps.py` は summary を写すだけ） |
 
@@ -265,7 +266,7 @@ sequenceDiagram
   else
     G-->>G: 今のとおり通る（確かめ直しの後にマージ）
   end
-  G-->>G: 上限を過ぎた: infra があれば 75、無ければ今の「終わらない」
+  G-->>G: 上限を過ぎた: infra があるか、W.pending_reruns(reading) が空でなければ 75、どちらも無ければ今の「終わらない」
 ```
 
 ### 基盤待ちの実行 1 つの状態
@@ -281,6 +282,7 @@ stateDiagram-v2
   再実行した --> 止まった: gh run rerun が失敗
   走っている --> 止まった: 待ちの上限
   終わった --> 止まった: 待ちの上限
+  再実行した --> 止まった: 待ちの上限（再実行したジョブが Runner を待って pending のまま）
   止まった --> [*]
 ```
 
@@ -379,7 +381,7 @@ githubstatus は github.com だけが持ち、GitHub Enterprise Server とネッ
 | AC4 | 置き換わった失敗があり `gh pr merge --admin` が拒まれると、`next` に `gh run rerun <run>` が run ごとにある | 拒否の経路で置き換わった失敗を読まない |
 | AC5 | 中身の失敗の summary と items が `<workflowName> / <name>` と run の番号を持つ | ラベルを名前だけにする・run を落とす |
 | AC6・I7 | PR #1765 の形（`Lint` / `lint` の取り消し・ステップ 0・Runner 空）で、実行が終わり gap を過ぎた読み直しで `gh run rerun <run> --failed` が 1 回打たれ、止まらずに待つ | 取り消しを失敗に数える・実行が走っている間に再実行する・`--failed` を落とす |
-| AC7・I8 | 再実行を上限まで続けても取り消しが残ると、終了コード 75・summary に「基盤待ち」があり「CI が失敗」が無い・items に `infra_wait`・`next` が打ち直しのコマンド。待ちの上限でも同じ | 上限を数えない・終了コードを 1 にする・上限の到達で「終わらない」と書く |
+| AC7・I8 | 再実行を上限まで続けても取り消しが残ると、終了コード 75・summary に「基盤待ち」があり「CI が失敗」が無い・items に `infra_wait`・`next` が打ち直しのコマンド。待ちの上限でも同じで、上限の時点で取り消しが無くても、再実行した実行の項目が pending に残っていれば同じ（既定値で 19 分に取り消し → 24 分に再実行 → 43 分に取り消し → 48 分に再実行 → 60 分の上限、の筋書き） | 上限を数えない・終了コードを 1 にする・上限の到達で「終わらない」と書く・上限で `reading.infra` だけを見る |
 | AC8・I4 | 取り消しでステップが 1 件以上のジョブは失敗として止まり、再実行しない | ステップの数を見ない |
 | AC9・I4 | ジョブの照会が失敗すると失敗として止まり、items に照会できなかったことがある | 照会の失敗を基盤待ちへ倒す |
 | AC10・I6 | 基盤待ちと中身の失敗が同時にあると、再実行せず終了コード 1 で止まる | 基盤待ちの分岐を中身の失敗より先に置く |
