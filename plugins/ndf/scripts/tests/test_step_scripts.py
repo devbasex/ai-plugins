@@ -554,6 +554,31 @@ def test_cleanup_pull_removes_untracked_file_equal_to_upstream(repo, env, tmp_pa
         assert (main / "a.md").read_text(encoding="utf-8") == "別の中身\n"
 
 
+@pytest.mark.parametrize("cause", ["local_change", "diverged"])
+def test_cleanup_pull_blocked_by_local_change_keeps_main_dir(repo, env, tmp_path, cause):
+    # 未コミットの変更が pull を塞いだら、手元に触れず main_dir だけを kept にして ok で終える（#1685）
+    main = clone_with_upstream(tmp_path, repo)
+    write(repo, "keep.txt", "上流\n")
+    git(repo, "commit", "-q", "-am", "up")
+    if cause == "local_change":
+        write(main, "keep.txt", "手元\n")
+    else:
+        write(main, "b.md", "手元のコミット\n")
+        git(main, "add", "-A")
+        git(main, "commit", "-q", "-m", "local")
+    env["FAKE_GH_PRS"] = json.dumps({"1": {"headRefName": "feature/gone", "state": "MERGED"}})
+    code, out, err = call("merged-steps.py", ["cleanup", "1", "--root", str(main)], env)
+    item = {(i["kind"], i["name"]): i for i in out["items"]}[("main_dir", str(main))]
+    if cause == "local_change":
+        assert code == 0 and out["status"] == "ok", err
+        assert item["result"] == "kept" and "未コミットの変更（keep.txt）" in item["reason"]
+        assert (main / "keep.txt").read_text(encoding="utf-8") == "手元\n"
+        assert git(main, "stash", "list") == ""
+    else:
+        assert code != 0 and out["status"] == "stopped"
+        assert item["result"] == "stopped"
+
+
 def clone_with_main_and_develop(tmp_path, cur):
     """origin の HEAD が main で develop もある上流を clone し、主ディレクトリを `cur` に置く（宣言は無い）。"""
     up = tmp_path / "up"

@@ -41,7 +41,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -67,6 +66,7 @@ import repo  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from merged_lib import merge, trash  # noqa: E402
+from merged_lib.pull import blocking_local_changes, same_untracked  # noqa: E402,F401
 from merged_lib.checks import (
     FAIL_CONCLUSIONS,
     check_states,
@@ -116,18 +116,6 @@ def remove_worktree(root, path, label, merge_commit=None):
         return False, f"worktree remove --force が失敗: {p.stderr.strip()[:300]}"
     why = f"退避先 {dest}" if dest else "退避するものは無かった"
     return True, why + (f"（捨てた: {', '.join(discarded)}）" if discarded else "")
-
-
-def same_untracked(main_dir, pull):
-    """pull を止めた未追跡のファイルが、すべて上流とバイト列で同じ（CRLF と LF も別物）ならその一覧を返す。1 つでも違えば空。"""
-    if "untracked working tree files would be overwritten" not in pull.stderr:
-        return []
-    rels = [l.strip() for l in pull.stderr.splitlines() if l.startswith("\t")]
-    for rel in rels:
-        up = subprocess.run(["git", "-C", str(main_dir), "show", f"@{{u}}:{rel}"], capture_output=True)
-        if up.returncode != 0 or not (path := Path(main_dir) / rel).is_file() or path.read_bytes() != up.stdout:
-            return []
-    return rels
 
 
 def _recorder():
@@ -229,6 +217,11 @@ def _update_main_dir(main_dir, add):
             (Path(main_dir) / rel).unlink()
             add("untracked", rel, "removed", "取り込む内容と同じ")
         pull = run(["git", "-C", main_dir, "pull", "--ff-only"], check=False)
+    if pull.returncode != 0 and (dirty := blocking_local_changes(main_dir, pull)):
+        # マージは済んでいる。利用者の手元の変更には触れず（stash も checkout もしない）、取り込みだけを見送る
+        names = ", ".join(dirty[:5]) + ("…" if len(dirty) > 5 else "")
+        add("main_dir", main_dir, "kept", f"未コミットの変更（{names}）が git pull --ff-only を塞いだため取り込まない")
+        return None
     if pull.returncode != 0:
         pull_err = f"主ディレクトリの git pull --ff-only が失敗: {pull.stderr.strip()[:300]}"
         add("main_dir", main_dir, "stopped", pull_err)
