@@ -101,14 +101,22 @@ python3 "$SCRIPTS/release-steps.py" notes     --version <版> --prs <PR番号>..
 # 手順 2 の承認資料の欄を埋める（検証リリースの後）
 python3 "$SCRIPTS/release-steps.py" notes     --version <版> --prs <PR番号>... --approval <承認資料> \
   --verified claude,codex,kiro --ref develop --root .
+# 承認を得たら、承認資料へ承認の記録を書く（<SHA> は提示した資料を書いた approval-facts の metrics.approved_sha）
+python3 "$SCRIPTS/release-steps.py" approve --approval <承認資料> --approved-sha <SHA> --by user --root .
 # 手順 4: 公開する（bump と changelog の変更をコミットしてから）
 python3 "$SCRIPTS/release-steps.py" release --version <版> --channel dev --root .   # 検証リリース
-python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --root .  # 本番リリース（承認を得てから）
+python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --approved-sha <SHA> --root .  # 本番リリース（承認を得てから）
+python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --approval <承認資料> --root .  # 本番のリリースプランの形
 ```
 
 - `approval-facts`: `gate` なら `presentation_path` の承認資料の「`配る中身`」と「`検証への配布で確かめたこと`」を
   `notes --approval` で埋めて利用者へ示し、承認を得てから `next` のコマンドを打つ。`stopped`
-  （3 = 前のタグを決められない）なら `--prev-tag` を渡して打ち直す
+  （3 = 前のタグを決められない）なら `--prev-tag` を渡して打ち直す。`metrics.approved_sha` と承認資料の
+  「`承認したコミット`」が承認の対象（打った時点の `origin/<ベースブランチ>` の 40 桁）で、`next` の
+  `--approved-sha` も同じ値である。資料を書き直すと承認の記録は消える
+- `approve`: 承認資料の「`承認したコミット`」の行の直後へ「`承認の記録`」（SHA・承認した者・時刻）を書く。
+  `--approved-sha` が資料の今の値と違えば（提示の後に書き直された）書かずに `stopped`（1）で止まるので、
+  資料を提示し直して承認を取り直す。形の誤りは 2、資料・欄が無いと 3
 - `bump`: `items[]` に手で直す箇所が載っていれば直す
 - `changelog`: 見出しと PR のタイトルを並べるだけで、本文は書かない。未マージの PR は載せず、番号を
   `metrics.unmerged` へ出す。すべて未マージなら `stopped`（3）で止まるので、マージしてから打ち直すか `--prs` を直す
@@ -125,6 +133,23 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --roo
   `metrics.sweep_candidates` に載せる。消すのは人の承認を得た後である（下の節）。
   どちらの Pull Request でも pytest と runtime smoke は省かれて成功（skipping / pass）を返す
   （[版と配布](../../../../../docs/versioning-and-distribution.md#正式版を出す)）。待ちはそれを通ったものとして扱う
+- `release --channel prod` の承認したコミット: `--approved-sha <SHA>` か `--approval <承認資料>` のどちらかが要る
+  （どちらも無い・形の誤りは 2、資料・欄が無いと 3。どれも何もマージしない）。`--approval` は承認の記録の SHA が
+  承認したコミットと同じときだけ受け取り、違えば何もマージせずに `gate`（10・`result: not_approved`）で止まる。
+  配布の PR をマージした後、`origin/<ベースブランチ>` の先端（比べた先端）までに配布の PR の外のコミットか中身が
+  あれば、本番チャネルの PR・タグ・GitHub Release を作らずに `gate`（10）で止まる。本番チャネルへは比べた先端だけを
+  マージし（`merged-steps.py merge-when-green --expect-head`）、CI 待ちの間に先端が進んでも `gate` で止まる。
+  `--channel dev` には渡さない（2）
+
+  `gate` の読み方（git を照会し直さずに、結果 JSON だけで読める）:
+
+  | 欄 | 中身 |
+  | --- | --- |
+  | `metrics.reason` | `outside_commits`（承認の外のコミットがある）・`tree_differs`（中身が違う）・`not_ancestor` / `unknown_commit`（承認したコミットが先端の祖先でない・無い）・`undecidable`（判定できない）・`head_moved`・`not_approved` |
+  | `metrics.approved_sha` / `metrics.compared_head` | 承認したコミット / 比べた先端 |
+  | `items[]` の `result: unapproved` | 承認の外のコミット（`name` が SHA、`subject`、分かれば `pr`） |
+
+  承認の外の変更を含めて `approval-facts` で承認資料を作り直し、承認を取り直して `next` のとおり打ち直す
 
 ## 退避先の回収
 
