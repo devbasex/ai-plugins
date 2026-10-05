@@ -43,8 +43,7 @@
     "./skills/tdd-cycle",
     "./skills/worktree",
     "./skills/release",
-    "./skills/google-auth",
-    "./skills/google-drive",
+    "./skills/google-workspace",
     "./skills/ml-model-structure",
     "./skills/skill-stats"
   ],

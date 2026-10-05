@@ -39,7 +39,6 @@ progress-tracking
 release-verification
 retrospective
 release
-google-auth
-google-drive
+google-workspace
 ml-model-structure
 skill-stats

@@ -47,11 +47,6 @@ IGNORED_DIRS = {"__pycache__", ".pytest_cache", "tests"}
 # 移すだけでは解けない。解くには双方の Skill の設計が要る（#344）。
 EXCEPTIONS: dict[tuple[str, str], str] = {
     ("plugins/ndf/skills/cross-review/scripts/review_lib/github.py", "fix"): "#344",
-    # `google-drive` は `google-auth` の資格情報を使う。**4 つの manifest すべてが
-    # 両方を載せている**ため、配る先で相手が欠けることが起きない。その条件は
-    # `scripts/tests/test_google_auth_codistribution.py` が固定する。参照は候補の
-    # 3 番目で、環境変数と `~/.claude/skills/` を先に見るため、隣に無い配置でも動く。
-    ("plugins/ndf/skills/google-drive/scripts/gdrive_fetch.py", "google-auth"): "#116",
     # `cross-refactoring` は兆候と手法の呼び名を持たず、`refactoring` の表を読む
     # （#444）。**4 つの manifest すべてが両方を載せている**ため、配る先で相手が
     # 欠けることが起きない。その条件は

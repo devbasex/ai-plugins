@@ -70,9 +70,8 @@ python3 plugins/ndf/skills/skill-stats/scripts/skill-stats.py \
 | `fix` | CXK | 303 | 34 | wtu / 引数 / tools | 300 | 236 | 64 | 0 | 統合先 | `review-pr-comments` と `resolve-pr-comments` を吸収。起動 300 回で最多 |
 | `gemini` | C | 444 | 51 | wtu | 1 | 1 | 0 | 4 | 統合元 | 本文の大半が共通。`external-ai` へ統合し、ツール差分を `references/` へ分離 |
 | `git-gh-operations` | CXK | 228 | 44 | wtu / tools | 0 | 0 | 0 | 1840 | 削除 | 例外（モデルの標準能力で足りる）。機会 1,840 は `git add` `git commit` という広すぎるトリガによる誤検出で需要ではない。一般的な Git 操作に Skill 固有の知識が残らない |
-| `google-auth` | — | 173 | 29 | wtu / tools | 4 | 4 | 0 | 157 | 維持 | 起動 4 回 |
 | `google-chat` | — | 153 | 37 | wtu / tools | 0 | 0 | 0 | 16 | 削除 | 例外（モデルの標準能力で足りる）。機会 16 は通知先の言及にとどまり、手順は汎用の HTTP 呼び出しで代替できる |
-| `google-drive` | — | 111 | 55 | wtu / tools | 1 | 1 | 0 | 104 | 維持 | 起動 1 回だが、認証情報の取り回しに Skill 固有の知識がある |
+| `google-workspace` | CXK | 81 | 233 | tools | 5 | 5 | 0 | 261 | 統合先 | 測定の時点では Google API の認証（起動 4 回・機会 157）と Drive の操作（起動 1 回・機会 104）の 2 つの Skill だった。gws の 1 経路へ置き換えて 1 つにした（#744）。行数と desc は置き換えた後の値 |
 | `implementation-plan` | CXK | 98 | 43 | wtu | 24 | 24 | 0 | 344 | 維持 | 起動 24 回が全数自動起動。現在の `when_to_use` が機能している |
 | `investigation-rules` | CXK | 105 | 54 | wtu | 25 | 25 | 0 | 1271 | 維持 | 起動 25 回が全数自動起動。ただしトリガ `調査` が広すぎるため具体化する |
 | `issue-plan-strategy` | CXK | 358 | 52 | wtu / 引数 / tools | 141 | 38 | 103 | 142 | 維持 | 起動 141 回 |

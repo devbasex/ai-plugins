@@ -125,7 +125,7 @@ frontmatter は生成の経路で落ち、別ファイルは生成物に含ま�
 
 ### 取得の手段を作らない
 
-`google-drive` が Drive の取得を持ち、システムごとの手順は `document-systems` が持つ。
+`google-workspace` が Drive の取得を持ち、システムごとの手順は `document-systems` が持つ。
 `document-sources` が決めるのは**出所の残し方だけ**である。取得の手段を持つと、システムが
 増えるたびに太る。
 
