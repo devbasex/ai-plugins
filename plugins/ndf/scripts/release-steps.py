@@ -65,7 +65,6 @@ import re
 import sys
 import tempfile
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
@@ -74,14 +73,13 @@ import deps  # noqa: E402
 
 deps.require("schema", "versions", "bump", "md", "mdtable", "durable")
 import approved_commit as ac  # noqa: E402
-import dist_record  # noqa: E402
 import mdtable  # noqa: E402
 import schema  # noqa: E402
 import versions  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from merged_lib import trash  # noqa: E402
-from release_lib import approval, bump, deploy, step_run  # noqa: E402
+from release_lib import approval, bump, deploy, record, step_run  # noqa: E402
 from release_lib.approval import HeadMoved  # noqa: E402
 from release_lib.names import changelog_section, changelog_span, h2_lines, next_h2, plugin_of, release_decl  # noqa: E402
 from step_result import (
@@ -805,34 +803,12 @@ def cmd_release(a):
     emit(result(TOOL, "ok", f"{plugin} v{ver} を {prod} へ出し、{tag} と GitHub Release を作った", items, metrics, None, nxt))
 
 
-JST = timezone(timedelta(hours=9))
-
-
-def tag_time_jst(root, tag):
-    """注釈付きタグの作成時刻（軽量タグはコミットの時刻）を JST の `YYYY-MM-DD HH:MM` で返す。読めなければ None。"""
-    out = git(root, "for-each-ref", "--format=%(creatordate:unix)", f"refs/tags/{tag}", check=False).stdout.strip()
-    return datetime.fromtimestamp(int(out), JST).strftime("%Y-%m-%d %H:%M") if out.isdigit() else None
-
-
-def release_pr_text(root, n):
-    """本番のリリースの PR の本文とコメントを投稿の順に 1 つの文字列にし、URL と並べて返す。読めなければ 2 で止める。"""
-    r = gh_parts.view_json("pr", n, "body,comments,url", cwd=str(root))
-    if r.returncode != 0:
-        raise StepError(f"gh pr view {n} が失敗: {r.stderr.strip()[:300]}", 2)
-    try:
-        d = json.loads(r.stdout or "null") or {}
-    except ValueError:
-        raise StepError(f"gh pr view {n} の出力を読めない", 2)
-    parts = [d.get("body") or ""] + [(c or {}).get("body") or "" for c in d.get("comments") or []]
-    return "\n".join(parts), d.get("url") or ""
-
-
 def cmd_record(a):
     """本番の配布の後に、本番のリリースの PR（release/v<版> → ベースブランチ）へリリース記録を 1 件コメントで書く（#1273）。
 
     タグ <plugin>--v<版> が origin に無い・同じタグの GitHub Release が無い・マージ済みの PR が無いなら、書かずに 3 で止まる
     （記録の `段階: 本番` は配布が終わった事実を表す）。PR の最後のリリース記録が同じ版・同じスプリントの PR の本番の記録なら
-    書かずに ok（exists）を返す。形は lib/dist_record.py が持つ。
+    書かずに ok（exists）を返す。組み立てと投稿は release_lib/record.py、形は lib/dist_record.py が持つ。
     """
     root = git_root(a.root)
     ver = a.version
@@ -849,29 +825,13 @@ def cmd_record(a):
     n = pr["number"]
     prev_tag = release_tag_before(root, plugin, current=tag)
     prev = prev_tag[len(f"{plugin}--v") :] if prev_tag else None
-    at = tag_time_jst(root, tag)
-    body = dist_record.format_record(
-        prev,
-        ver,
-        a.prs,
-        stage_note=f"承認ゲート 2 の承認の後、{at + ' に ' if at else ''}{tag} を出した",
-        version_note=f"タグ {tag}。直前はタグ {prev_tag}" if prev_tag else f"タグ {tag}。直前の正式版のタグは無い",
-    )
-    text, url = release_pr_text(root, n)
-    last = dist_record.parse_record(text)
+    body = record.body_of(root, plugin, ver, tag, prev_tag, a.prs)
+    text, url = record.release_pr_text(root, n)
     metrics = {"release_pr": n, "release_pr_url": url, "version": ver, "prev_version": prev, "sprint_prs": list(a.prs)}
-    if last["found"] and (last["stage"] or "").startswith("本番") and last["version"] == ver and last["sprint_prs"] == list(a.prs):
+    if record.exists(text, ver, a.prs):
         items = [{"kind": "comment", "name": f"#{n}", "result": "exists"}]
         emit(result(TOOL, "ok", f"#{n} に v{ver} のリリース記録は既にある", items, metrics))
-    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as f:
-        f.write(body)
-        body_file = f.name
-    try:
-        p = gh_parts.gh(["pr", "comment", str(n), "--body-file", body_file], cwd=root)
-    finally:
-        os.unlink(body_file)
-    if p.returncode != 0:
-        raise StepError(f"gh pr comment {n} が失敗: {p.stderr.strip()[:300]}")
+    record.post(root, n, body)
     items = [{"kind": "comment", "name": f"#{n}", "result": "posted"}]
     emit(result(TOOL, "ok", f"#{n} へ v{ver} のリリース記録を書いた", items, metrics))
 
