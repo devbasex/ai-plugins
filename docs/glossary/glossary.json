@@ -3223,49 +3223,49 @@
       "term": "他のプラグイン",
       "context": "ndf-release",
       "meaning": "配布の宣言の release.plugin 以外で、前のタグからの差分にファイルがあるプラグイン。release-steps.py changed-plugins が列挙する",
-      "pending_source": "issues/issue-1752-requirements.md"
+      "source": "docs/specifications/ndf-release-other-plugin-levels-and-migration.md"
     },
     {
       "term": "上げ幅",
       "context": "ndf-release",
       "meaning": "版数のどの桁を上げるか（MAJOR / MINOR / PATCH）。セマンティックバージョニングに従う",
-      "pending_source": "issues/issue-1752-requirements.md"
+      "source": "docs/specifications/ndf-release-other-plugin-levels-and-migration.md"
     },
     {
       "term": "移行の手順",
       "context": "ndf-release",
       "meaning": "利用者が新しい版へ移るときに自分で行う操作（引数の置き換え・認証のし直し・導入し直しなど）。PR 本文の「移行の手順」の節が正",
-      "pending_source": "issues/issue-1752-requirements.md"
+      "source": "docs/specifications/ndf-release-other-plugin-levels-and-migration.md"
     },
     {
       "term": "互換なしの印",
       "context": "ndf-release",
       "meaning": "要求の「影響」の表の「公開インタフェース」の行に書く、互換の経路を持たないことを示す語（互換なし / 互換の経路は持たない）。release-steps.py changed-plugins が上げ幅の候補を MAJOR にする材料",
-      "pending_source": "issues/issue-1752-design.md"
+      "source": "docs/specifications/ndf-release-other-plugin-levels-and-migration.md"
     },
     {
       "term": "承認したコミット",
       "context": "ndf-release",
       "meaning": "ゲート 2 の承認資料が対象にした、ベースブランチの先端のコミットの SHA（40 桁）。本番チャネルへ入れてよい中身の上限を示す",
-      "pending_source": "issues/issue-815-design.md"
+      "source": "docs/specifications/ndf-release-approved-commit.md"
     },
     {
       "term": "比べた先端",
       "context": "ndf-release",
       "meaning": "本番の配布が承認したコミットと比べた時点の、ベースブランチの先端のコミットの SHA。本番チャネルへマージしてよいのはこのコミットだけである",
-      "pending_source": "issues/issue-815-design.md"
+      "source": "docs/specifications/ndf-release-approved-commit.md"
     },
     {
       "term": "承認の外のコミット",
       "context": "ndf-release",
       "meaning": "承認したコミットから比べた先端までに入ったコミットのうち、この版の配布の PR のものでないもの。あれば本番の配布は承認ゲートで止まる",
-      "pending_source": "issues/issue-815-design.md"
+      "source": "docs/specifications/ndf-release-approved-commit.md"
     },
     {
       "term": "承認の記録",
       "context": "ndf-release",
       "meaning": "承認資料の欄の 1 つ。ゲート 2 を承認したときの承認したコミットの SHA と、承認した者・時刻を持つ。承認資料を書き直すと消え、承認し直すまで本番の配布は通らない",
-      "pending_source": "issues/issue-815-design.md"
+      "source": "docs/specifications/ndf-release-approved-commit.md"
     }
   ]
 }
