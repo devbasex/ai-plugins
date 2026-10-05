@@ -25,7 +25,7 @@ run.bat
 ```
 scenario-test/
 ├── playwright_kit/         ← Python パッケージ本体
-├── scripts/                ← 補助 CLI (classify_page_role / accessibility / web_vitals / drive 等)
+├── scripts/                ← 補助 CLI (classify_page_role / accessibility / web_vitals 等)
 ├── tests/                  ← 利用者が書く pytest テスト
 │   ├── conftest.py
 │   └── test_*.py
@@ -85,7 +85,6 @@ web vitals (LCP/CLS/TTFB) が **autouse で自動実行** されます。
   --pwk-config=./scenario.config.yaml \
   --pwk-out-dir=./reports/manual-run/ \
   --pwk-overlay \
-  --pwk-drive-folder=<DRIVE_FOLDER_ID> \
   -k test_admin -m page_role
 ```
 
@@ -94,20 +93,6 @@ web vitals (LCP/CLS/TTFB) が **autouse で自動実行** されます。
 - `--pwk-no-evidence`: HAR / trace / 動画を OFF
 - `--pwk-har-mode {minimal,full,none}`: HAR 録画モード
 - `--pwk-overlay`: 動画に赤丸カーソル + 字幕を焼き込む
-- `--pwk-drive-folder <id>`: 終了後に成果物を Google Drive にアップロード
-
-Drive 連携は optional dependency です。`google-auth` skill は NDF の 4 つの manifest すべてに
-載っていますが、playwright-kit とは別のプラグインです。`--pwk-drive-folder` や Drive 系スクリプトは
-各ランタイムの標準の導入先 (`~/.claude/skills/google-auth/scripts` など) と、Claude Code の
-プラグインのキャッシュ (`~/.claude/plugins/cache/<取得元>/ndf/<版>/skills/google-auth/scripts` の最新の版) を探します。
-見つからないときは `GOOGLE_AUTH_SCRIPTS` を `google-auth/scripts` へ設定してから
-Drive extra を同期してください。
-
-```bash
-# 例: ai-plugins を clone した先の google-auth を使う
-export GOOGLE_AUTH_SCRIPTS=<ai-plugins のパス>/plugins/ndf/skills/google-auth/scripts
-uv sync --extra drive
-```
 
 ## 補助スクリプト
 
@@ -116,7 +101,6 @@ uv sync --extra drive
 - `scripts/classify_page_role.py <url>`: accessibility tree から page role を推定
 - `scripts/run_a11y_scan.py <url>`: axe-core で違反を検出
 - `scripts/check_cwv.py <url>`: Core Web Vitals を計測
-- `scripts/upload_evidence.py <path>`: trace / HAR / 動画を Drive にアップ
 
 ## トラブルシューティング
 
