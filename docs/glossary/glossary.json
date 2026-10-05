@@ -3266,6 +3266,18 @@
       "context": "ndf-release",
       "meaning": "承認資料の欄の 1 つ。ゲート 2 を承認したときの承認したコミットの SHA と、承認した者・時刻を持つ。承認資料を書き直すと消え、承認し直すまで本番の配布は通らない",
       "source": "docs/specifications/ndf-release-approved-commit.md"
+    },
+    {
+      "term": "置き換わった失敗",
+      "context": "ndf-workflow",
+      "meaning": "PR の先頭のコミットで、同じチェック（`workflowName` と `name` の組）により新しい項目があるときの古い項目の失敗。CI のチェックの結論に数えない",
+      "pending_source": "issues/issue-1645-requirements.md"
+    },
+    {
+      "term": "基盤待ち",
+      "context": "ndf-workflow",
+      "meaning": "Runner が付かずに取り消された CI のジョブ（結論 `cancelled`・ステップ 0 件・Runner の名前が空）があり、ほかに中身の失敗が無い状態。修正へ回さず、再実行して待ち直す",
+      "pending_source": "issues/issue-1645-requirements.md"
     }
   ]
 }
