@@ -139,11 +139,9 @@ Pull Request が最後かどうかを判断できない。
 **Claude Code のプラグインの形では、承認資料の機械で作れる部分を `release-steps.py approval-facts` が
 書き出す。** 打ち方と `status` の読み方は [references/release-steps.md](references/release-steps.md) にある。
 
-**承認の対象は承認資料の「承認したコミット」（ベースブランチの先端の 40 桁）である。** 承認を得たら、
-`release-steps.py approve --approval <承認資料> --approved-sha <SHA> --by user` で承認資料へ承認の記録を書く。
-`<SHA>` は提示した承認資料を書いた `approval-facts` の結果の `metrics.approved_sha` を提示の時点で控えた値で、
-資料を読み直した値を渡さない（読み直すと、提示の後に資料が書き直されたことを拾えない）。MVV 判定で通したときは
-`mvv-gate.py` が `by: mvv` で書く。承認の記録の無い承認資料では本番の配布が通らない。
+**承認の対象は承認資料の「承認したコミット」（ベースブランチの先端の 40 桁）である。** 承認を得たら `release-steps.py approve`
+で承認の記録を書く（`--approved-sha` は提示の時点で控えた `approval-facts` の `metrics.approved_sha`。資料を読み直した値は
+渡さない）。MVV 判定で通したときは `mvv-gate.py` が書く。承認の記録の無い承認資料では本番の配布が通らない。
 
 **本番リリースの承認は、この工程の中で必ず求める。** 前の工程（コードレビュー・完了判定）を
 通ったことは承認の代わりにならない。それらは取り込んでよいかの判断で、利用者へ出してよいかの
@@ -243,12 +241,8 @@ Pull Request に入れる。`guide:` の行が出たら、その手引きに従�
 （打ち方は [references/release-steps.md](references/release-steps.md)）。**`--channel prod` は
 「公開前の提示と承認」で承認を得るまで打たない。** `stopped` なら `summary` を報告して止まる。
 
-**`--channel prod` には承認したコミットを渡す**（承認資料の `next` のコマンドの `--approved-sha <SHA>`、
-本番のリリースプランは `--approval <承認資料>`）。配布の PR をマージした後、本番チャネルへ入れる直前に、
-承認したコミットの後へ配布の PR の外の変更が入っていないかを比べる。**`gate`（終了コード 10）で止まったら、
-本番チャネルの PR もタグも作られていない。** `items[]` の `result: unapproved` が承認の外のコミット（SHA・件名・
-PR 番号）で、`metrics.reason` が止まった理由である。その変更を含めて承認資料を作り直し（`next` のコマンド）、
-承認を取り直してから打ち直す。MVV 判定の承認では通さず、人へ戻す。
+**`--channel prod` には承認したコミットを渡す**（`--approved-sha <SHA>` か `--approval <承認資料>`）。承認の外の変更が入って
+いれば `gate`（10）で止まり、本番チャネルの PR もタグも作られていない。読み方は同じ references にある。MVV 判定で通さず人へ戻す。
 
 **提出は公開ではない形がある。** ストアの審査を経るものは、審査を通って初めて利用者へ届く。
 待っている間はこの工程が続いている状態で、`release-verification` はまだ始められない。

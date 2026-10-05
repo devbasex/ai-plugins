@@ -32,11 +32,8 @@
     python3 release-steps.py notes          --version <版> --prs <PR番号>... [--approval <提示物>]
                                             [--verified claude,codex,kiro] [--ref <ブランチ>] [--plugin <名前>] [--root <dir>]
 
-release --channel prod は承認したコミット（approval-facts の metrics.approved_sha・承認資料の「承認したコミット」）を
-受け取り、配布の PR をマージした後に `origin/<ベースブランチ>` の先端と比べる（`lib/approved_commit.py`。#815）。
-配布の PR の外のコミット・中身があれば、本番チャネルの PR もタグも作らずに承認ゲート（10）で止まり、比べた先端だけを
-本番チャネルへマージする（merge-when-green --expect-head）。--approval の資料は approve か mvv-gate.py が書く
-「承認の記録」の SHA が承認したコミットと同じときだけ受け取る。
+release --channel prod は承認したコミットを受け取り、配布の PR をマージした後の `origin/<ベースブランチ>` の先端と比べ、
+承認の外の変更があれば本番チャネルの PR もタグも作らずに承認ゲート（10）で止まる（release_lib/approval.py。#815）。
 
 ブランチ（ベースブランチ・本番チャネル）は `.ndf/worktree.json` の base_branch・production_branch（無ければ既定ブランチ）、
 プラグイン（タグ `<名前>--v<版>`・題 `Release: <名前> v<版>`）は引数 → `.ndf/supervise.json` の release.plugin から読む（#1336）。
@@ -70,19 +67,18 @@ import deps  # noqa: E402
 
 deps.require("schema", "versions", "bump", "md", "mdtable", "durable")
 import approved_commit as ac  # noqa: E402
-import clock  # noqa: E402
 import mdtable  # noqa: E402
 import schema  # noqa: E402
 import versions  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from merged_lib import trash  # noqa: E402
-from release_lib import bump, deploy, step_run  # noqa: E402
+from release_lib import approval, bump, deploy, step_run  # noqa: E402
+from release_lib.approval import HeadMoved  # noqa: E402
 from release_lib.names import changelog_section, changelog_span, h2_lines, next_h2, plugin_of, release_decl  # noqa: E402
 from step_result import (
     EXIT_GATE,
     EXIT_PRECONDITION,
-    EXIT_UNREADABLE,
     StepError,
     approval_present,
     base_of,  # noqa: E402
@@ -654,10 +650,6 @@ def pr_check_buckets(root, n):
         return []
 
 
-class HeadMoved(Exception):
-    """--expect-head の SHA と PR の先端が違い、merge-when-green がマージしなかった（#815 の I5）。"""
-
-
 def wait_and_merge(root, n, expect=None):
     """PR のチェックを merge-when-green で待ってマージする。止まったらその summary で止める。
 
@@ -685,134 +677,14 @@ def merge_commit_of(root, n):
     return ((d.get("mergeCommit") or {}).get("oid")) or None
 
 
-def approved_of(root, a, plugin):
-    """本番の配布が受け取る承認したコミット（#815 の I1・I10）。dev は None。何もマージする前に呼ぶ。
-
-    --approved-sha の形の誤り・どちらも無い・dev に渡した → 2。--approval の資料・欄が無い・形の誤り → 3。
-    --approval の資料に承認の記録が無いか SHA が違う → 承認ゲート（10）。"""
-    sha, material = getattr(a, "approved_sha", None), getattr(a, "approval", None)
-    if a.channel == "dev":
-        if sha or material:
-            raise StepError("--channel dev には --approved-sha も --approval も渡さない", EXIT_UNREADABLE)
-        return None
-    if sha:
-        try:
-            return ac.parse_sha(sha)
-        except ValueError as e:
-            raise StepError(str(e), EXIT_UNREADABLE)
-    if not material:
-        raise StepError(
-            "--channel prod には --approved-sha か --approval が要る（承認資料の next のコマンドをそのまま打つ）", EXIT_UNREADABLE
-        )
-    path = Path(material)
-    path = path if path.is_absolute() else root / path
-    try:
-        return ac.from_material(path)
-    except ac.Unapproved as e:
-        item = {"kind": "commit", "name": e.sha, "result": "not_approved", "recorded": e.recorded}
-        metrics = {"channel": a.channel, "version": a.version, "approved_sha": e.sha, "compared_head": None, "reason": "not_approved"}
-        emit(
-            result(
-                TOOL,
-                "gate",
-                f"{plugin} v{a.version} の本番への配布を止めた: 承認資料の承認したコミット {e.sha[:8]} に"
-                + ("承認の記録が無い" if e.recorded is None else f"承認の記録 {e.recorded[:8]} と違う"),
-                [item],
-                metrics,
-                str(path),
-                f"承認資料を提示して承認を得てから、release-steps.py approve --approval {path} --approved-sha <提示した承認したコミット> "
-                f"--by user で承認の記録を書き、release-steps.py release --version {a.version} --channel prod --approval {path} を打ち直す",
-            ),
-            EXIT_GATE,
-        )
-    except ValueError as e:
-        raise StepError(str(e), EXIT_PRECONDITION)
-
-
-def release_pr_allowed(root, n):
-    """配布の PR の先端・コミット・mergeCommit（承認したコミットの後に入ってよいもの）。読めなければ None。"""
-    try:
-        d = pr_view(root, n, "headRefOid,commits,mergeCommit") or {}
-    except StepError:
-        return None
-    head = d.get("headRefOid") or ""
-    commits = [c.get("oid") for c in d.get("commits") or [] if isinstance(c, dict) and c.get("oid")]
-    if not head or not commits:
-        return None
-    if git(root, "cat-file", "-e", f"{head}^{{commit}}", check=False).returncode != 0:
-        git(root, "fetch", "-q", "origin", head, check=False)
-    return ac.AllowedPR(n, head, commits, (d.get("mergeCommit") or {}).get("oid"))
-
-
-def check_approved(root, approved, base, allowed):
-    """origin/<base> の先端を読み直し、承認したコミットと比べた判定（Verdict）を返す。"""
-    git(root, "fetch", "-q", "origin", base)
-    tip = git(root, "rev-parse", f"origin/{base}").stdout.strip()
-    if allowed is None:
-        return ac.Verdict(False, approved, tip, ac.UNDECIDABLE)
-    return ac.compare(root, approved, tip, [allowed])
-
-
-def commit_pr(root, sha):
-    """コミットを入れた PR の番号（止まったときの表示にだけ使う）。読めなければ None。"""
-    slug = repo_lib.owner_repo(root)
-    p = gh_parts.gh(["api", f"repos/{slug}/commits/{sha}/pulls"], cwd=root) if slug else None
-    try:
-        found = json.loads(p.stdout) if p is not None and p.returncode == 0 else []
-        return found[0].get("number") if found else None
-    except (ValueError, AttributeError, IndexError, TypeError):
-        return None
-
-
-GATE_LEADS = {
-    ac.UNKNOWN_COMMIT: "承認したコミット {a} を読めない",
-    ac.NOT_ANCESTOR: "承認したコミット {a} が {base} の先端 {t} の祖先でない",
-    ac.OUTSIDE_COMMITS: "承認したコミット {a} の後に承認の外のコミットが {n} 件ある",
-    ac.TREE_DIFFERS: "{base} の先端 {t} の中身が、承認したコミット {a} に配布の PR を足したものと違う",
-    ac.UNDECIDABLE: "承認したコミット {a} の後に承認の外の変更が無いかを判定できない",
-    "head_moved": "{base} の先端が比べた後に {t} へ進んだ",
-}
-
-
-def approval_gate(root, a, plugin, base, verdict, items, metrics, moved=False):
-    """承認の外の変更で本番への配布を止める（status: gate・終了コード 10。#815 の I2〜I6）。"""
-    reason = "head_moved" if moved and verdict.ok else verdict.reason
-    out = []
-    for o in verdict.outside:
-        it = {"kind": "commit", "name": o.sha, "result": "unapproved", "subject": o.subject}
-        if (n := commit_pr(root, o.sha)) is not None:
-            it["pr"] = n
-        out.append(it)
-    if reason == ac.TREE_DIFFERS:
-        out.append(
-            {"kind": "tree", "name": verdict.tip, "result": "differs", "expected": verdict.expected_tree, "actual": verdict.actual_tree}
-        )
-    elif reason in (ac.NOT_ANCESTOR, ac.UNKNOWN_COMMIT):
-        out.append({"kind": "commit", "name": verdict.approved, "result": "not_ancestor" if reason == ac.NOT_ANCESTOR else "unknown"})
-    metrics.update({"approved_sha": verdict.approved, "compared_head": verdict.tip, "reason": reason, "outside": len(verdict.outside)})
-    lead = GATE_LEADS.get(reason, GATE_LEADS[ac.UNDECIDABLE]).format(
-        a=verdict.approved[:8], t=(verdict.tip or "?")[:8], base=base, n=len(verdict.outside)
-    )
-    emit(
-        result(
-            TOOL,
-            "gate",
-            f"{plugin} v{a.version} の本番への配布を止めた: {lead}",
-            items + out,
-            metrics,
-            None,
-            f"承認資料を作り直して（release-steps.py approval-facts --version {a.version} --prs <PR番号>...）承認を取り直し、"
-            f"release-steps.py release --version {a.version} --channel prod --approved-sha <新しい承認したコミット> を打ち直す",
-        ),
-        EXIT_GATE,
-    )
-
-
 def cmd_release(a):
     root = git_root(a.root)
     ver = a.version
     base, prod, plugin = release_decl(root, a)
-    approved = approved_of(root, a, plugin)
+    try:
+        approved = approval.approved_of(root, a, plugin)
+    except approval.Gate as g:
+        emit(g.out, EXIT_GATE)
     plugins = [s.strip() for s in (a.plugins or plugin).split(",") if s.strip()]
     if (branch := git(root, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()) != f"release/v{ver}":
         raise StepError(f"作業ツリーのブランチが release/v{ver} でない: {branch}", EXIT_PRECONDITION)
@@ -869,10 +741,10 @@ def cmd_release(a):
     if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode == 0:
         raise StepError(f"タグ {tag} は既にある")
     # 承認したコミットの後に、配布の PR の外の変更がベースブランチへ入っていないか（#815）
-    allowed = release_pr_allowed(root, release_pr)
-    verdict = check_approved(root, approved, base, allowed)
+    allowed = approval.release_pr_allowed(root, release_pr, pr_view)
+    verdict = approval.check_approved(root, approved, base, allowed)
     if not verdict.ok:
-        approval_gate(root, a, plugin, base, verdict, items, metrics)
+        emit(approval.gate(root, a, plugin, base, verdict, items, metrics), EXIT_GATE)
     metrics.update({"approved_sha": approved, "compared_head": verdict.tip})
     mp = find_pr(root, base, prod, states=("OPEN",))
     main_pr = (
@@ -889,8 +761,8 @@ def cmd_release(a):
     try:
         merge = wait_and_merge(root, main_pr, expect=verdict.tip)  # 比べた先端だけを本番チャネルへ入れる
     except HeadMoved:
-        moved = check_approved(root, approved, base, allowed)
-        approval_gate(root, a, plugin, base, moved, items, metrics, moved=True)
+        moved = approval.check_approved(root, approved, base, allowed)
+        emit(approval.gate(root, a, plugin, base, moved, items, metrics, moved=True), EXIT_GATE)
     git(root, "fetch", "-q", "origin")
     if not merge:
         merge = git(root, "rev-parse", f"origin/{prod}").stdout.strip()
@@ -999,35 +871,8 @@ def cmd_approval_facts(a):
 
 
 def cmd_approve(a):
-    """ゲート 2 の承認を承認資料へ記録する（#815 の I10）。--approved-sha は提示した資料を書いた approval-facts の
-    metrics.approved_sha（資料を読み直した値ではない）。資料がその後に書き直されていれば書かずに止まる。"""
-    root = git_root(a.root)
-    path = Path(a.approval)
-    path = path if path.is_absolute() else root / path
-    try:
-        sha = ac.parse_sha(a.approved_sha)
-    except ValueError as e:
-        raise StepError(str(e), EXIT_UNREADABLE)
-    at = clock.now_iso("utc")
-    try:
-        ac.record(path, sha, a.by, at)
-    except ac.Unapproved as e:
-        raise StepError(
-            f"承認資料の承認したコミットが {e.sha[:8]} で、提示した {sha[:8]} と違う（提示の後に書き直された）。"
-            "資料を提示し直して承認を取り直す"
-        )
-    except ValueError as e:
-        raise StepError(str(e), EXIT_PRECONDITION)
-    emit(
-        result(
-            TOOL,
-            "ok",
-            f"承認資料に承認の記録（{sha[:8]}・{a.by}）を書いた",
-            [{"kind": "cell", "name": ac.RECORD, "result": "written"}],
-            {"approved_sha": sha, "by": a.by, "at": at},
-            str(path),
-        )
-    )
+    """ゲート 2 の承認を承認資料へ記録する（#815 の I10。本体は release_lib/approval.py の approve）。"""
+    emit(approval.approve(git_root(a.root), a))
 
 
 CHANGES_HEADING = "## 利用者向けの変化"

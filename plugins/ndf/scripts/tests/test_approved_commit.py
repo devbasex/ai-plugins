@@ -72,7 +72,7 @@ def test_only_the_release_pr_after_approval_matches(repo, method):
     approved = git(repo, "rev-parse", "HEAD")
     rel = release_branch(repo, approved)
     mc = land(repo, method)
-    v = ac.compare(repo, approved, git(repo, "rev-parse", "HEAD"), [rel.pr(mc)])
+    v = ac.compare_approved(repo, approved, git(repo, "rev-parse", "HEAD"), [rel.pr(mc)])
     assert (v.ok, v.reason, v.outside) == (True, ac.MATCH, [])
 
 
@@ -83,7 +83,7 @@ def test_an_outside_change_after_the_release_pr_is_caught(repo, method):
     rel = release_branch(repo, approved)
     mc = land(repo, method)
     other = commit(repo, "statusline.txt", "x\n", "statusline (#806)")
-    v = ac.compare(repo, approved, other, [rel.pr(mc)])
+    v = ac.compare_approved(repo, approved, other, [rel.pr(mc)])
     assert not v.ok and v.reason == ac.OUTSIDE_COMMITS
     assert [(o.sha, o.subject) for o in v.outside] == [(other, "statusline (#806)")]
 
@@ -94,7 +94,7 @@ def test_an_outside_change_before_the_release_branch_is_caught(repo):
     other = commit(repo, "statusline.txt", "x\n", "statusline (#806)")
     rel = release_branch(repo, other)
     mc = land(repo, "merge")
-    v = ac.compare(repo, approved, git(repo, "rev-parse", "HEAD"), [rel.pr(mc)])
+    v = ac.compare_approved(repo, approved, git(repo, "rev-parse", "HEAD"), [rel.pr(mc)])
     assert v.reason == ac.OUTSIDE_COMMITS and [o.sha for o in v.outside] == [other]
 
 
@@ -106,7 +106,7 @@ def test_an_outside_change_and_its_revert_are_caught_although_the_tree_matches(r
     other = commit(repo, "statusline.txt", "x\n")
     git(repo, "revert", "--no-edit", other)
     tip = git(repo, "rev-parse", "HEAD")
-    v = ac.compare(repo, approved, tip, [rel.pr(mc)])
+    v = ac.compare_approved(repo, approved, tip, [rel.pr(mc)])
     assert v.reason == ac.OUTSIDE_COMMITS and len(v.outside) == 2
 
 
@@ -119,7 +119,7 @@ def test_a_merge_commit_carrying_an_outside_change_differs_in_tree(repo):
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "Merge pull request #1")
     tip = git(repo, "rev-parse", "HEAD")
-    v = ac.compare(repo, approved, tip, [rel.pr(tip)])
+    v = ac.compare_approved(repo, approved, tip, [rel.pr(tip)])
     assert v.reason == ac.TREE_DIFFERS and v.expected_tree != v.actual_tree
 
 
@@ -130,9 +130,9 @@ def test_not_ancestor_and_unknown_commits(repo):
     side = commit(repo, "s.txt", "s\n")
     git(repo, "checkout", "-q", "develop")
     tip = commit(repo, "t.txt", "t\n")
-    assert ac.compare(repo, side, tip).reason == ac.NOT_ANCESTOR
-    assert ac.compare(repo, "f" * 40, tip).reason == ac.UNKNOWN_COMMIT
-    assert ac.compare(repo, base, "e" * 40).reason == ac.UNDECIDABLE
+    assert ac.compare_approved(repo, side, tip).reason == ac.NOT_ANCESTOR
+    assert ac.compare_approved(repo, "f" * 40, tip).reason == ac.UNKNOWN_COMMIT
+    assert ac.compare_approved(repo, base, "e" * 40).reason == ac.UNDECIDABLE
 
 
 def test_merge_tree_conflict_is_undecidable(repo):
@@ -142,16 +142,16 @@ def test_merge_tree_conflict_is_undecidable(repo):
     git(repo, "checkout", "-q", "-b", "release", root_c)
     head = commit(repo, "a.txt", "release\n")
     git(repo, "checkout", "-q", "develop")
-    v = ac.compare(repo, approved, approved, [ac.AllowedPR(1, head, [head])])
+    v = ac.compare_approved(repo, approved, approved, [ac.AllowedPR(1, head, [head])])
     assert (v.ok, v.reason) == (False, ac.UNDECIDABLE)
 
 
 def test_without_allowed_prs_the_tip_must_keep_the_approved_tree(repo):
     """昇格の経路の形: allowed が空なら、先端に入ったコミットは承認の外。同じなら match。"""
     approved = git(repo, "rev-parse", "HEAD")
-    assert ac.compare(repo, approved, approved).ok
+    assert ac.compare_approved(repo, approved, approved).ok
     tip = commit(repo, "b.txt", "b\n")
-    assert ac.compare(repo, approved, tip).reason == ac.OUTSIDE_COMMITS
+    assert ac.compare_approved(repo, approved, tip).reason == ac.OUTSIDE_COMMITS
 
 
 MATERIAL = "# t\n\n## 2. 承認の判断に使うもの\n\n| 項目 | 内容 |\n| --- | --- |\n| {row} | {sha} |\n| 版数 | 1.0.0 |\n"
@@ -167,10 +167,10 @@ def test_material_read_record_and_rewrite(tmp_path):
         ac.from_material(path)
     assert e.value.recorded is None
     with pytest.raises(ac.Unapproved):
-        ac.record(path, b, "user", "2026-10-05T00:00:00Z")
+        ac.record_approval(path, b, "user", "2026-10-05T00:00:00Z")
     assert ac.recorded_sha(path) is None
-    ac.record(path, a, "mvv", "2026-10-05T00:00:00Z")
-    ac.record(path, a, "user", "2026-10-05T00:00:01Z")  # 置き換える（2 行にならない）
+    ac.record_approval(path, a, "mvv", "2026-10-05T00:00:00Z")
+    ac.record_approval(path, a, "user", "2026-10-05T00:00:01Z")  # 置き換える（2 行にならない）
     assert path.read_text().count(ac.RECORD) == 1
     assert ac.from_material(path) == a
     path.write_text(MATERIAL.format(row=ac.ROW, sha=b))  # approval-facts の書き直しで記録が消える

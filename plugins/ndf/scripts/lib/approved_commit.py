@@ -1,9 +1,9 @@
 """承認したコミット（本番への配布の承認ゲート 2 が対象にしたベースブランチの先端）の扱い（#815）。
 
 - 承認資料（`release-steps.py approval-facts` が書く Markdown）の欄の名前・SHA の形の検査・読み取り・承認の記録の書き込み
-- 承認したコミットから比べた先端までに、許したもの（配布の PR）の外のコミットや中身が無いかの比較（`compare`）
+- 承認したコミットから比べた先端までに、許したもの（配布の PR）の外のコミットや中身が無いかの比較（`compare_approved`）
 
-`compare` は git を読むだけで書かず、終了コードも出力も持たずに判定（`Verdict`）を値で返す。読み替えは呼び手が行う。
+`compare_approved` は git を読むだけで書かず、終了コードも出力も持たずに判定（`Verdict`）を値で返す。読み替えは呼び手が行う。
 ブランチ名は受け取らず SHA だけを受け取る。`allowed` を空にすると、先端の木が承認したコミットの木と等しいかの判定になる
 （昇格の経路 `merged-steps.py promote` から使う形）。
 """
@@ -111,7 +111,7 @@ def from_material(path) -> str:
     return sha
 
 
-def record(path, sha: str, by: str, at: str) -> None:
+def record_approval(path, sha: str, by: str, at: str) -> None:
     """承認資料の「承認したコミット」の行の直後へ承認の記録を書く（あれば置き換える）。
     sha が資料の承認したコミットと違えば書かずに Unapproved（提示の後に資料が書き直された）。"""
     sha = parse_sha(sha)
@@ -125,6 +125,27 @@ def record(path, sha: str, by: str, at: str) -> None:
     else:
         lines.insert(rows[ROW][0] + 1, row)
     Path(path).write_text("\n".join(lines), encoding="utf-8")
+
+
+def material_sha_or_none(path) -> str | None:
+    """material_sha と同じ。読めなければ None（承認資料でない材料を許す呼び手のため）。"""
+    try:
+        return material_sha(path)
+    except ValueError:
+        return None
+
+
+def record_all(approved: dict[str, str], by: str, at: str) -> list[dict]:
+    """{承認資料: 承認したコミット} のそれぞれへ承認の記録を書き、結果の items を返す（mvv-gate.py の関門 2。I10）。
+    判定の後に資料が書き直されていれば書かず result: not_recorded（本番の配布は記録が無いとして承認ゲートで止まる）。"""
+    items = []
+    for path, sha in approved.items():
+        try:
+            record_approval(path, sha, by, at)
+            items.append({"kind": "approval", "name": path, "result": "recorded", "approved_sha": sha})
+        except ValueError as e:
+            items.append({"kind": "approval", "name": path, "result": "not_recorded", "approved_sha": sha, "reason": str(e)})
+    return items
 
 
 def material_row(sha: str) -> tuple[str, str]:
@@ -174,7 +195,7 @@ def _expected_tree(root, approved, allowed) -> str | None:
     return out.split()[0] if out else None
 
 
-def compare(root, approved: str, tip: str, allowed: list[AllowedPR] = ()) -> Verdict:
+def compare_approved(root, approved: str, tip: str, allowed: list[AllowedPR] = ()) -> Verdict:
     """承認したコミット approved から比べた先端 tip までを比べる（#815 の設計の「compare の中の順序」）。
 
     1. 読めない approved は unknown_commit、読めない tip・配布の PR の先端は undecidable
