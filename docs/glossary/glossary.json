@@ -3223,25 +3223,25 @@
       "term": "他のプラグイン",
       "context": "ndf-release",
       "meaning": "配布の宣言の release.plugin 以外で、前のタグからの差分にファイルがあるプラグイン。release-steps.py changed-plugins が列挙する",
-      "pending_source": "issues/issue-1752-requirements.md"
+      "source": "docs/specifications/ndf-release-other-plugin-levels-and-migration.md"
     },
     {
       "term": "上げ幅",
       "context": "ndf-release",
       "meaning": "版数のどの桁を上げるか（MAJOR / MINOR / PATCH）。セマンティックバージョニングに従う",
-      "pending_source": "issues/issue-1752-requirements.md"
+      "source": "docs/specifications/ndf-release-other-plugin-levels-and-migration.md"
     },
     {
       "term": "移行の手順",
       "context": "ndf-release",
       "meaning": "利用者が新しい版へ移るときに自分で行う操作（引数の置き換え・認証のし直し・導入し直しなど）。PR 本文の「移行の手順」の節が正",
-      "pending_source": "issues/issue-1752-requirements.md"
+      "source": "docs/specifications/ndf-release-other-plugin-levels-and-migration.md"
     },
     {
       "term": "互換なしの印",
       "context": "ndf-release",
       "meaning": "要求の「影響」の表の「公開インタフェース」の行に書く、互換の経路を持たないことを示す語（互換なし / 互換の経路は持たない）。release-steps.py changed-plugins が上げ幅の候補を MAJOR にする材料",
-      "pending_source": "issues/issue-1752-design.md"
+      "source": "docs/specifications/ndf-release-other-plugin-levels-and-migration.md"
     },
     {
       "term": "承認したコミット",
