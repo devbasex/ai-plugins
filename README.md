@@ -112,7 +112,7 @@ hook を効かせる手順と、新しい版へ入れ替える手順は
 | プラグイン名 | バージョン | 説明 | 詳細 |
 |------------|----------|------|------|
 | **ndf** | 10.17.61-dev.1 | Claude Code / Codex / Kiro CLI / agy へ 1 ディレクトリから配布する NDF プラグイン。8個の専門エージェントと 3 層の worker の定義 1 個（Claude版）、公開Skills（Claude Code向け core 47個、Kiro向け core 44個、Codex向け core 43個、agy向け core 43個）、4ランタイム共通の worktree 運用フック（PreToolUse / SessionStart / userPromptSubmit / agentSpawn / PreInvocation）、Claude Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [README](./plugins/ndf/README.md) |
-| **playwright-kit** | 2.0.6 | Playwright による E2E テストの計画・実装・証跡管理を提供するプラグイン。ページ役割からのテスト計画、動画 / trace 付きスクリプト実装、レポート生成と証跡の取りまとめ、playwright_kit ランタイム（init、a11y / CWV スキャン）の 4 Skill。NDF v7.0.0 で分離。 | [README](./plugins/playwright-kit/README.md) |
+| **playwright-kit** | 3.0.0 | Playwright による E2E テストの計画・実装・証跡管理を提供するプラグイン。ページ役割からのテスト計画、動画 / trace 付きスクリプト実装、レポート生成と証跡の取りまとめ、playwright_kit ランタイム（init、a11y / CWV スキャン）の 4 Skill。NDF v7.0.0 で分離。 | [README](./plugins/playwright-kit/README.md) |
 
 ### 変更履歴
 

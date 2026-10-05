@@ -14,6 +14,25 @@
 - Google の認証と Drive の操作には、gws を使う google-workspace Skill を使います（#1744）（#1745）
 - playwright-kit は、証跡を Drive へ保管しません（#1744）（#1745）
 
+### 移行
+
+- `/ndf:google-auth` と `/ndf:google-drive` は無くなりました。`/ndf:google-workspace` を使います
+- 旧 Skill のトークンは移しません。`gws auth login` で認証し直します。gws が無ければ、Skill の
+  手順が同意を得てから `npm install -g @googleworkspace/cli` で入れます
+
+## [playwright-kit 3.0.0] - 2026-10-05
+
+### 削除
+
+- 証跡の Drive への保管（`--pwk-drive-folder`、Drive のアップロードのスクリプト、`drive` の
+  extra）を外しました（#744）（#1745）
+
+### 移行
+
+- `--pwk-drive-folder` を渡すと、pytest が未知の引数として止まります。テストの起動から外します
+- Drive へ上げたいときは、NDF の `google-workspace` Skill の `gws drive +upload` を手で使います。
+  認証は `gws auth login` で行います（旧 `google-auth` のトークンは移しません）
+
 ## [ndf 10.17.60] - 2026-10-04
 
 - cross-refactoring の手順の枠は、着手前のテストが終わった時点から数える（#1729）（#1732）

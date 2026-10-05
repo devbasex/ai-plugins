@@ -22,7 +22,7 @@
     {
       "name": "playwright-kit",
       "source": "./plugins/playwright-kit",
-      "description": "Claude Code plugin (v2.0.6): 4 Playwright E2E skills — test planning by page role, script authoring with video / trace evidence, report generation with collected evidence, and the playwright_kit runtime (init, a11y / CWV scans).",
+      "description": "Claude Code plugin (v3.0.0): 4 Playwright E2E skills — test planning by page role, script authoring with video / trace evidence, report generation with collected evidence, and the playwright_kit runtime (init, a11y / CWV scans).",
       "policy": {
         "installation": "AVAILABLE",
         "authentication": "ON_INSTALL"
