@@ -3218,6 +3218,12 @@
       "context": "ndf-google-workspace",
       "meaning": "google-workspace の確認のスクリプト（gws-check.py）が返す 4 つの値（authenticated / missing / unauthenticated / uninstallable）。状態ごとに次の手が 1 つに決まる",
       "source": "docs/specifications/ndf-google-workspace-gws.md"
+    },
+    {
+      "term": "承認したコミット",
+      "context": "ndf-release",
+      "meaning": "ゲート 2 の承認資料が対象にした、ベースブランチの先端のコミットの SHA（40 桁）。本番チャネルへ入れてよい中身の上限を示す",
+      "pending_source": "issues/issue-815-requirements.md"
     }
   ]
 }
