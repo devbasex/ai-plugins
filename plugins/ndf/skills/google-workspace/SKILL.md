@@ -57,10 +57,13 @@ gws は Google の公式サポート外の CLI で、版は 0.x である。
 | --- | --- |
 | Doc・Slides・Sheets のエクスポート | `gws drive files export --params '{"fileId":"<ID>","mimeType":"<MIME>"}' --output <ファイル>` |
 | ファイルのダウンロード | `gws drive files get --params '{"fileId":"<ID>","alt":"media"}' --output <ファイル>` |
-| アップロード（既定は非公開） | `gws drive +upload <ファイル>`（フォルダへは `--parent <フォルダの ID>`、名前は `--name <名前>`） |
+| アップロード（フォルダを指定しなければ非公開） | `gws drive +upload <ファイル>`（フォルダへは `--parent <フォルダの ID>`、名前は `--name <名前>`） |
+| フォルダの共有範囲の確認（`--parent` を付ける前に必ず） | `gws drive permissions list --params '{"fileId":"<フォルダの ID>","supportsAllDrives":true,"fields":"permissions(type,role,domain,emailAddress)"}'` |
 | 公開リンクの付与（利用者が公開を明示したときだけ） | `gws drive permissions create --params '{"fileId":"<ID>"}' --json '{"type":"anyone","role":"reader"}'` |
 
-- **アップロードの既定は非公開である。** 公開リンクは、利用者が公開を明示したときだけ、アップロードの応答の `id` に付ける。付与が失敗したら、ファイルは非公開のまま残ると伝える
+- **フォルダを指定しないアップロードは非公開である。** フォルダへ入れたファイルは、そのフォルダの共有権限を引き継ぐ。`permissions create` を打たなくても、公開のフォルダへ入れれば公開になる
+- **`--parent` を付ける前に、フォルダの共有範囲を確かめる。** 上の `permissions list` の応答に、利用者が承認した範囲を超える共有（`type` が `anyone`、承認していない `domain`・`group`・`user`）があれば、アップロードせずに止まり、その共有を示して利用者の判断を待つ。共有範囲を読めない（終了コードが 0 でない）ときも止まる
+- 公開リンクは、利用者が公開を明示したときだけ、アップロードの応答の `id` に付ける。付与が失敗したら、ファイルの共有範囲はアップロード先のまま（フォルダを指定しなければ非公開、指定したらそのフォルダから引き継いだ範囲）と伝える
 - 打つ前に要求の形だけを確かめたいときは `--dry-run` を付ける
 - 対応表の外の操作（Sheets の編集・Gmail・Calendar など）は `gws <サービス> --help` で引数を確かめてから打つ
 
