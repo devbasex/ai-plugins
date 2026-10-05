@@ -92,18 +92,16 @@
 addopts = "--tracing retain-on-failure --video retain-on-failure --screenshot only-on-failure"
 ```
 
-### trace.zip の閲覧 URL 化
+### trace.zip の閲覧
 
-`playwright-kit-ops/scripts/upload_evidence.py --kind trace --public` が trace.zip を Google Drive に
-アップロードし、`https://trace.playwright.dev/?trace=<URL>` 形式の閲覧 URL を
-生成する (HAR / video の Drive アップロードも同スクリプトで可能、`--kind har/video`)。
-bug report に必ずこの URL を貼る (zip 単体だと開発者の手元で展開が必要)。
+trace.zip は `playwright show-trace <trace.zip>` で開ける。bug report には `reports/<run-id>/` の
+中のパスで trace / HAR / video を添え、共有の手段（課題への添付・ストレージなど）は利用者が選ぶ。
+trace と HAR には Cookie や入力値が含まれうるため、共有先は非公開に限る。
 
 ## 6. bug report テンプレート (Markdown)
 
 以下を bug 起票時の雛形として使用する (`reports/<run-id>/<TC-ID>/log.txt` と
-trace/HAR を `upload_evidence.py` でアップロードしたあと、生成された Drive リンクを
-本テンプレートに差し込む運用)。
+trace/HAR のパスを本テンプレートに差し込む運用)。
 
 ```markdown
 # BUG-2026-04-25-001 — 詳細ページの編集ボタンが他者所有データで非表示にならない
@@ -148,10 +146,10 @@ trace/HAR を `upload_evidence.py` でアップロードしたあと、生成さ
 - データ汚染が発生した場合、監査ログから復旧する必要あり。
 
 ## エビデンス
-- Trace: https://trace.playwright.dev/?trace=https://drive.google.com/.../trace.zip
-- Video: https://drive.google.com/.../TC-30-edit-permission.mp4
-- Screenshot: https://drive.google.com/.../03-detail-with-edit-btn.png
-- HAR: https://drive.google.com/.../trace.har
+- Trace: reports/20260425-143201/TC-30/trace.zip
+- Video: reports/20260425-143201/TC-30/TC-30-edit-permission.mp4
+- Screenshot: reports/20260425-143201/TC-30/03-detail-with-edit-btn.png
+- HAR: reports/20260425-143201/TC-30/trace.har
 - Console: (エラーなし)
 
 ## 再現コマンド

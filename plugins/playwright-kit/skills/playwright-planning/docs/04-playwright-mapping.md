@@ -137,7 +137,7 @@ playwright show-trace test-results/<test>/trace.zip
 https://trace.playwright.dev/?trace=<URL>
 ```
 
-bug report に **trace.zip の playwright.dev リンク** を必ず付与する (`playwright-kit-ops/scripts/upload_evidence.py --kind trace --public`)。
+bug report に **trace.zip** を必ず添える (置き場所は `reports/<run-id>/<case>/trace.zip`。`playwright show-trace` で開ける)。
 
 ### page.pause()
 
@@ -235,7 +235,7 @@ page.on("pageerror", lambda exc: errors.append(str(exc)))
 | trace | `--tracing retain-on-failure` | 同等 | Python |
 | merge-reports | `pytest_terminal_summary` で集計 | builtin | Python (`playwright_kit/pytest_report.py`) |
 
-**結論**: Python `pytest-playwright` を採用。理由は (1) overlay (旧名 HUD) / 字幕焼き込み / accessibility / web_vitals / Drive 連携を pytest plugin として一体化済み、(2) `def test_xxx(page, pwk_role_admin): ...` を直接書く設計のため pytest fixture / marker と相性が良い、(3) merge-reports は `pytest_terminal_summary` hook で同等機能を提供.
+**結論**: Python `pytest-playwright` を採用。理由は (1) overlay (旧名 HUD) / 字幕焼き込み / accessibility / web_vitals / report.md の生成を pytest plugin として一体化済み、(2) `def test_xxx(page, pwk_role_admin): ...` を直接書く設計のため pytest fixture / marker と相性が良い、(3) merge-reports は `pytest_terminal_summary` hook で同等機能を提供.
 
 ## 参考文献
 

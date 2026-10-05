@@ -745,9 +745,6 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "axe-playwright-python", specifier = ">=0.1.4" },
-    { name = "google-api-python-client", marker = "extra == 'drive'", specifier = ">=2.0" },
-    { name = "google-auth", marker = "extra == 'drive'", specifier = ">=2.0" },
-    { name = "google-auth-oauthlib", marker = "extra == 'drive'", specifier = ">=1.0" },
     { name = "imageio-ffmpeg", specifier = ">=0.4" },
     { name = "playwright", specifier = ">=1.50,<2.0" },
     { name = "pydantic", specifier = ">=2.7,<3" },
@@ -757,7 +754,7 @@ requires-dist = [
     { name = "pytest-xdist", specifier = ">=3.0" },
     { name = "pyyaml", specifier = ">=6.0" },
 ]
-provides-extras = ["drive", "dev"]
+provides-extras = ["dev"]
 
 [[package]]
 name = "pluggy"
