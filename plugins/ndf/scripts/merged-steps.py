@@ -15,7 +15,7 @@ sweep-trash: 本番に出たコミット（--ref）に含まれるブランチ�
 承認した後に --yes と --only <承認した退避先>... を付けたときの、その名前の退避先だけ（消すと戻せない利用者のファイル）。
 merge-when-green: PR が draft なら `gh pr ready` で外し、CI のチェックが全部通るまで待ち（push で先頭のコミットが
 変われば待ち直す）、失敗があれば止まり、通れば `gh pr merge --admin` でマージして cleanup まで行う。--expect-head を
-渡すと、緑を確かめた先端がその SHA のときだけマージし、違えばマージせずに止まる（items[].result: head_moved。#815）。
+渡すと、PR を読むたびに先端をその SHA と比べ、違えば待ち直さず（マージ済みでも）止まる（items[].result: head_moved。#815）。
 最初の読みで宛先（baseRefName）を判定し、自動反映の本番チャネルか判定できない宛先なら、--gate-approved が無い限り
 CI を待たずに承認ゲート 2 で止まる（status: gate・metrics.gate: production-merge。判定は lib/delivery.py。#1336）。
 merge-gate: 宛先の判定だけを行う（0 = 進めてよい / 10 = 承認ゲート 2）。

@@ -491,7 +491,7 @@ def cmd_changed_plugins(a):
     skipped, decided = [], None
     if a.decided and pending:
         decided = changed.approval_path(root, a.decided)
-        rows = changed.decided_rows(decided, pending)
+        rows = changed.decided_rows(decided, pending, already)
     elif a.prs:
         rows = changed.candidate_rows(root, a.prs, pending, lambda n: pr_view(root, n, "body,state,mergeCommit"), skipped)
     else:

@@ -944,3 +944,18 @@ def test_notes_without_migration_steps_add_no_heading(repo, tmp_path):
     )
     assert p.returncode == 0 and json.loads(p.stdout.strip().splitlines()[-1])["metrics"]["migration"] == 0
     assert "移行の手順" not in (repo / "CHANGELOG.md").read_text(encoding="utf-8")
+
+
+def test_decided_versions_resumes_after_a_partial_bump():
+    """版上げが途中で止まり上げた分がコミットされた後の再実行: HEAD の版が表の「上げた後の版」と同じ行は
+    上げ終えたものとして外し、残りだけを上げる。HEAD の版が表と違えば合わないとして止める。"""
+    scripts = Path(__file__).resolve().parents[1]
+    sys.path[:0] = [str(scripts), str(scripts / "lib")]
+    from release_lib import others
+
+    rows = [others.OtherPlugin("a", "1.0.0", "PATCH", "1.0.1", []), others.OtherPlugin("b", "2.0.0", "MAJOR", "3.0.0", [])]
+    assert others.decided_versions(rows, {"b": "2.0.0"}, {"a": "1.0.1"}) == {"b": "3.0.0"}
+    with pytest.raises(ValueError, match="差分に無い: a"):
+        others.decided_versions(rows, {"b": "2.0.0"}, {"a": "1.1.0"})
+    with pytest.raises(ValueError, match="差分に無い: a"):
+        others.decided_versions(rows, {"b": "2.0.0"})

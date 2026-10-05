@@ -378,6 +378,18 @@ def test_merge_when_green_expect_head_merges_only_the_compared_head(repo, gh, ex
         assert {"kind": "pr", "name": "#5", "result": "head_moved", "head": "bbb", "expected": "aaa"} in out["items"]
 
 
+def test_merge_when_green_expect_head_stops_when_merged_at_other_head(repo, gh):
+    """#815 の I5: 待つ間に別の先端でマージされた PR も、成功にせず head_moved で止まる（読んだ直後に比べる）。"""
+    merged = {"state": "MERGED", "headRefOid": "bbb", "mergeCommit": {"oid": "c"}}
+    gh.set(pr_seq={"5": [merged]})
+    code, out, err = call(
+        "merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--no-cleanup", "--expect-head", "aaa"], gh.env, repo
+    )
+    assert code == 1 and out["status"] == "stopped", (out, err)
+    assert {"kind": "pr", "name": "#5", "result": "head_moved", "head": "bbb", "expected": "aaa"} in out["items"]
+    assert not [c for c in gh.get()["calls"] if c[:2] == ["pr", "merge"]]
+
+
 def pr_views(gh):
     return [c for c in gh.get()["calls"] if c[:2] == ["pr", "view"]]
 

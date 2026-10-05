@@ -48,11 +48,12 @@ def read_approval(path):
     return path.read_text(encoding="utf-8").split("\n")
 
 
-def decided_rows(path, pending):
-    """承認資料の表の行のうち本番で上げるもの。読めない・合わないなら 1 で止める（PATCH へ倒さない。I1・I2）。"""
+def decided_rows(path, pending, already=()):
+    """承認資料の表の行のうち本番で上げるもの。読めない・合わないなら 1 で止める（PATCH へ倒さない。I1・I2）。
+    already（前のタグから版が変わった行）の HEAD の版が表の「上げた後の版」と同じ行は、上げ終えたものとして外す。"""
     try:
         table = others.read_section("\n".join(read_approval(path)))
-        tos = others.decided_versions(table, pending)
+        tos = others.decided_versions(table, pending, {r.name: r.to for r in already})
     except ValueError as e:
         raise StepError(f"承認資料の上げ幅を読めない: {e}")
     return [r for r in table if r.name in tos]

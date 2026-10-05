@@ -192,10 +192,13 @@ def set_level(rows: list[OtherPlugin], name: str, level: str) -> OtherPlugin:
     return row
 
 
-def decided_versions(rows: list[OtherPlugin], pending: dict[str, str]) -> dict[str, str]:
-    """本番で上げる版（名前 → 版）。pending は差分にあってまだ上げていないプラグインの今の版。
-    表の上げ済みでない行の集合が pending と合わない（I2）・上げ幅を読めない・版が合わない（I1）なら ValueError。"""
-    table = {r.name: r for r in rows if r.level != ALREADY}
+def decided_versions(rows: list[OtherPlugin], pending: dict[str, str], done: dict[str, str] | None = None) -> dict[str, str]:
+    """本番で上げる版（名前 → 版）。pending は差分にあってまだ上げていないプラグインの今の版、done は前のタグから
+    版が変わったプラグインの HEAD の版。表の上げ済みでない行のうち HEAD の版が表の「上げた後の版」と同じものは、
+    途中まで進んだ版上げで上げ終えた行として外す（再開できるように）。
+    残りの行の集合が pending と合わない（I2）・上げ幅を読めない・版が合わない（I1）なら ValueError。"""
+    done = done or {}
+    table = {r.name: r for r in rows if r.level != ALREADY and not (r.name not in pending and done.get(r.name) == r.to)}
     missing, extra = sorted(pending.keys() - table.keys()), sorted(table.keys() - pending.keys())
     if missing or extra:
         raise ValueError(
