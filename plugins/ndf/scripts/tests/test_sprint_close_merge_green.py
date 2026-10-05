@@ -340,6 +340,56 @@ def test_merge_when_green_rewaits_on_push_and_merges(repo, gh):
     assert merges == [["pr", "merge", "5", "--admin", "--merge", "--match-head-commit", "bbb"]]  # 緑を確かめた先頭に限る
 
 
+def test_merge_when_green_ok_when_local_change_blocks_pull(repo, gh, tmp_path):
+    # マージの後の取り込みが未コミットの変更に塞がれても、マージは済んでいるので ok・0 で終える（#1685）
+    main = tmp_path / "main"
+    git(tmp_path, "clone", "-q", "-b", "develop", str(repo), str(main))
+    git(main, "remote", "set-head", "origin", "main")  # 既定ブランチは main。develop 宛ては承認ゲート 2 に当たらない
+    (main / ".ndf").mkdir()
+    (main / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "develop"}), encoding="utf-8")
+    (repo / "keep.txt").write_text("上流\n", encoding="utf-8")
+    git(repo, "commit", "-q", "-am", "up")
+    (main / "keep.txt").write_text("手元\n", encoding="utf-8")
+    merged = {"headRefName": "feat/x", "state": "MERGED", "mergeCommit": {"oid": "c"}}
+    gh.set(pr_seq={"5": [{"state": "OPEN", "headRefOid": "a", "statusCheckRollup": [run_("t")]}] * 2 + [merged]})
+    code, out, err = call(
+        "merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--recheck", "0", "--root", str(main)], gh.env, main
+    )
+    assert code == 0 and out["status"] == "ok", (out, err)
+    item = {(i["kind"], i["name"]): i for i in out["items"]}[("main_dir", str(main))]
+    assert item["result"] == "kept" and "未コミットの変更" in item["reason"]
+    assert (main / "keep.txt").read_text(encoding="utf-8") == "手元\n"
+    assert git(main, "stash", "list") == ""
+
+
+@pytest.mark.parametrize("expect, code", [("bbb", 0), ("aaa", 1)])
+def test_merge_when_green_expect_head_merges_only_the_compared_head(repo, gh, expect, code):
+    """#815 の I5: --expect-head の SHA が緑を確かめた先端と違えば、gh pr merge を呼ばずに head_moved で止まる。"""
+    gh.set(pr_seq={"5": [passed_pr("bbb"), passed_pr("bbb")]})
+    code_, out, err = call(
+        "merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--no-cleanup", "--expect-head", expect], gh.env, repo
+    )
+    assert code_ == code, (out, err)
+    merges = [c for c in gh.get()["calls"] if c[:2] == ["pr", "merge"]]
+    if code == 0:
+        assert merges == [["pr", "merge", "5", "--admin", "--merge", "--match-head-commit", "bbb"]]
+    else:
+        assert merges == [] and out["status"] == "stopped"
+        assert {"kind": "pr", "name": "#5", "result": "head_moved", "head": "bbb", "expected": "aaa"} in out["items"]
+
+
+def test_merge_when_green_expect_head_stops_when_merged_at_other_head(repo, gh):
+    """#815 の I5: 待つ間に別の先端でマージされた PR も、成功にせず head_moved で止まる（読んだ直後に比べる）。"""
+    merged = {"state": "MERGED", "headRefOid": "bbb", "mergeCommit": {"oid": "c"}}
+    gh.set(pr_seq={"5": [merged]})
+    code, out, err = call(
+        "merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--no-cleanup", "--expect-head", "aaa"], gh.env, repo
+    )
+    assert code == 1 and out["status"] == "stopped", (out, err)
+    assert {"kind": "pr", "name": "#5", "result": "head_moved", "head": "bbb", "expected": "aaa"} in out["items"]
+    assert not [c for c in gh.get()["calls"] if c[:2] == ["pr", "merge"]]
+
+
 def pr_views(gh):
     return [c for c in gh.get()["calls"] if c[:2] == ["pr", "view"]]
 

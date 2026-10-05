@@ -38,7 +38,7 @@
       "id": "bump-others",
       "type": "run",
       "stage": "配布",
-      "cmd": "out=$(python3 <NDF>/scripts/release-steps.py changed-plugins --plugin foo) || { printf \"%s\\n\" \"$out\"; exit 1; }; printf \"%s\\n\" \"$out\"; printf \"%s\\n\" \"$out\" | python3 -c \"import json,sys; [print(i[\\\"name\\\"], i[\\\"to\\\"]) for i in json.loads(sys.stdin.read().strip().splitlines()[-1])[\\\"items\\\"]]\" | while read -r n to; do python3 <NDF>/scripts/release-steps.py bump --plugin \"$n\" --to \"$to\" --base main || exit 1; done",
+      "cmd": "out=$(python3 <NDF>/scripts/release-steps.py changed-plugins --plugin foo --decided <TMP>/repo/issues/approval-foo-v1.2.0.md) || { printf \"%s\\n\" \"$out\"; exit 1; }; printf \"%s\\n\" \"$out\"; printf \"%s\\n\" \"$out\" | python3 -c \"import json,sys; [print(i[\\\"name\\\"], i[\\\"to\\\"]) for i in json.loads(sys.stdin.read().strip().splitlines()[-1])[\\\"items\\\"]]\" | while read -r n to; do python3 <NDF>/scripts/release-steps.py bump --plugin \"$n\" --to \"$to\" --base main || exit 1; done",
       "on_fail": "judge",
       "next": "changelog"
     },
@@ -71,12 +71,23 @@
       "type": "run",
       "stage": "配布",
       "timeout": 3000,
-      "cmd": "python3 <NDF>/scripts/release-steps.py release --version 1.2.0 --channel prod",
+      "cmd": "python3 <NDF>/scripts/release-steps.py release --version 1.2.0 --channel prod --approval <TMP>/repo/issues/approval-foo-v1.2.0.md",
       "on_fail": "judge",
-      "next": "verify",
+      "next": "record",
       "probe": {
         "cmd": "python3 <NDF>/scripts/merged-steps.py probe --head {branch} --head {base} --act"
-      }
+      },
+      "gate_next": "handoff"
+    },
+    {
+      "id": "record",
+      "type": "run",
+      "stage": "配布",
+      "timeout": 300,
+      "cmd": "python3 <NDF>/scripts/release-steps.py record --version 1.2.0 --prs {queue_prs}",
+      "pr_from": "release_pr_url",
+      "on_fail": "judge-record",
+      "next": "verify"
     },
     {
       "id": "verify",
@@ -141,6 +152,18 @@
       "prompt": "落ちたステップの出力を読み、原因を直してコミットする（push しない）。直したら次は落ちたステップからやり直す。",
       "back_to_failed": true,
       "next": "release"
+    },
+    {
+      "id": "judge-record",
+      "type": "judge",
+      "inputs": [
+        "record"
+      ],
+      "question": "リリース記録の書き込み（record）が落ちた。本番の配布は済んでいる。GitHub の揺れなら record をもう一度、権限の不足・本番のリリースの PR が無いなら止める（stop）",
+      "choices": [
+        "record",
+        "stop"
+      ]
     },
     {
       "id": "handoff",

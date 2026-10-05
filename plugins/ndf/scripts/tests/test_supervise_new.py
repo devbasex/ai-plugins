@@ -491,7 +491,7 @@ def plugin_repo(tmp_path):
     return root
 
 
-def release_steps_of(root, tmp_path, channel, version):
+def release_steps_of(root, tmp_path, channel, version, *extra):
     out = tmp_path / f"rel-{channel}.json"
     p = cli(
         "new",
@@ -508,21 +508,98 @@ def release_steps_of(root, tmp_path, channel, version):
         str(root),
         "--out",
         str(out),
+        *extra,
         cwd=root,
     )
     assert p.returncode == 0, p.stderr
     return {s["id"]: s for s in json.loads(out.read_text())["steps"]}
 
 
-def test_prod_release_bumps_other_changed_plugins_after_ndf(tmp_path):
+@pytest.mark.parametrize("mvv", [False, True])
+def test_prod_release_records_after_the_release_and_never_goes_back_to_it(tmp_path, mvv):
+    """#1273 の AC1・AC4・I4・I6: 本番は release → record → verify。record の失敗は judge-record（record か stop）へ回り、
+    配布へ戻る選択肢を持たない。共有の judge は record を選べない。開発版は record を持たない。"""
+    root = plugin_repo(tmp_path)
+    extra = ("--mvv", str(tmp_path / "s.json")) if mvv else ()
+    steps = release_steps_of(root, tmp_path, "prod", "1.0.1", *extra)
+    rec = steps["record"]
+    assert steps["release"]["next"] == "record" and rec["next"] == "verify"
+    assert rec["cmd"].endswith("release-steps.py record --version 1.0.1 --prs 1") and rec["pr_from"] == "release_pr_url"
+    assert rec["on_fail"] == "judge-record" and steps["judge-record"]["choices"] == ["record", "stop"]
+    assert "record" not in steps["judge"]["choices"] and "record" not in steps["fix"]["inputs"]
+    dev = release_steps_of(root, tmp_path, "dev", "1.0.1-dev.1")
+    assert "record" not in dev and "judge-record" not in dev and dev["release"]["next"] == "verify"
+
+
+@pytest.mark.parametrize("mvv", [False, True])
+def test_prod_release_passes_the_approval_material_and_stops_at_the_gate(tmp_path, mvv):
+    """#815 の受け入れ条件 8・I7: 本番の release は承認資料を --approval で渡し、承認ゲート（10）なら verify へ進まない。
+    MVV 判定のプランは handoff（by: mvv の記録を外す）、それ以外は end で終える。"""
+    root = plugin_repo(tmp_path)
+    extra = ("--mvv", str(tmp_path / "s.json")) if mvv else ()
+    steps = release_steps_of(root, tmp_path, "prod", "1.0.1", *extra)
+    rel = steps["release"]
+    assert rel["cmd"].endswith(f"--channel prod --approval {root}/issues/approval-ndf-v1.0.1.md")
+    assert rel["gate_next"] == ("handoff" if mvv else "end") and rel["next"] == "record"
+    assert ("handoff" in steps) == mvv
+    dev = release_steps_of(root, tmp_path, "dev", "1.0.1-dev.1")["release"]
+    assert "--approval" not in dev["cmd"] and "gate_next" not in dev
+
+
+def approved_others(root, *sets):
+    """開発版の others のステップと同じく承認資料へ他のプラグインの表を書き、--set で上げ幅を決める（#1752）。"""
+    (root / "issues").mkdir(exist_ok=True)
+    (root / "issues" / "approval-ndf-v1.0.1.md").write_text("# t\n\n## 同意を求めること\n\n- [ ] x\n")
+    for args in ((), *(("--set", s) for s in sets)):
+        p = subprocess.run(
+            [
+                PY,
+                str(SCRIPTS / "release-steps.py"),
+                "changed-plugins",
+                "--root",
+                str(root),
+                "--approval",
+                "issues/approval-ndf-v1.0.1.md",
+                *args,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert p.returncode == 0, p.stdout + p.stderr
+
+
+@pytest.mark.parametrize("sets, want", [((), "2.3.5"), (("mcp-serena=MAJOR",), "3.0.0")])
+def test_prod_release_bumps_other_changed_plugins_after_ndf(tmp_path, sets, want):
+    """#1752 の受け入れ条件 5: 本番の bump-others は承認資料の表の上げ幅で他のプラグインを上げる。"""
     root = plugin_repo(tmp_path)
     steps = release_steps_of(root, tmp_path, "prod", "1.0.1")
     assert steps["bump"]["next"] == "bump-others" and steps["bump-others"]["next"] == "changelog"
     assert "bump-others" in steps["judge"]["choices"]
+    approved_others(root, *sets)
     p = subprocess.run(steps["bump-others"]["cmd"], shell=True, cwd=root, capture_output=True, text=True)
     assert p.returncode == 0, p.stdout + p.stderr
     got = json.loads((root / "plugins/mcp/mcp-serena/.claude-plugin/plugin.json").read_text())["version"]
-    assert got == "2.3.5"
+    assert got == want
+
+
+def test_bump_others_stops_without_the_approved_table(tmp_path):
+    """#1752 の受け入れ条件 6: 承認資料の表が無ければ PATCH へ倒さずに落ちる。"""
+    root = plugin_repo(tmp_path)
+    steps = release_steps_of(root, tmp_path, "prod", "1.0.1")
+    p = subprocess.run(steps["bump-others"]["cmd"], shell=True, cwd=root, capture_output=True, text=True)
+    assert p.returncode != 0
+    got = json.loads((root / "plugins/mcp/mcp-serena/.claude-plugin/plugin.json").read_text())["version"]
+    assert got == "2.3.4"
+
+
+def test_dev_release_lists_other_plugins_into_the_approval(tmp_path):
+    """#1752 の受け入れ条件 1: 開発版のプランは explain の後に others で他のプラグインを承認資料へ書く。"""
+    root = plugin_repo(tmp_path)
+    steps = release_steps_of(root, tmp_path, "dev", "1.0.1-dev.1")
+    oth = steps["others"]
+    assert steps["explain"]["next"] == "others" and oth["next"] == "end" and oth["on_fail"] == "judge"
+    assert "changed-plugins --plugin ndf --prs 1 --approval issues/approval-ndf-v1.0.1.md" in oth["cmd"]
+    assert "others" in steps["judge"]["choices"] and "others" in steps["fix"]["inputs"]
     ndf = json.loads((root / "plugins/ndf/.claude-plugin/plugin.json").read_text())["version"]
     assert ndf == "1.0.0"  # ndf は bump のステップが上げる
 
