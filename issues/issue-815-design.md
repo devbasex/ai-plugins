@@ -37,7 +37,7 @@
 
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
-| 承認資料 | `release-steps.py approval-facts`（書く）。`notes --approval` は既存の欄だけを書く | 承認資料（`issues/approval-<プラグイン>-v<版>.md`） | — | 承認したコミット・前のタグ・比較の URL |
+| 承認資料 | `release-steps.py approval-facts`（書く）。`notes --approval` は既存の欄だけを書く。承認の記録の欄だけは E2 の発生元（`release-steps.py approve` / `mvv-gate.py check --gate release`）が書く | 承認資料（`issues/approval-<プラグイン>-v<版>.md`） | — | 承認したコミット・承認の記録・前のタグ・比較の URL |
 | 本番の配布 | `release-steps.py release --channel prod` | 本番の配布（版 1 つ） | 配布の PR・本番チャネルの PR | 承認したコミット・比べた先端・承認の外のコミット |
 
 本番の配布は承認資料を承認したコミットの値として受け取るだけで、承認資料を書き換えない（集約の間は値で参照する）。
@@ -50,19 +50,21 @@
 | I2 | 本番の配布 | 承認したコミットは比べた先端の祖先である | `gate`・終了コード 10。本番チャネルの PR をマージしない |
 | I3 | 本番の配布 | 承認したコミットから配布の PR の先端までのコミットは、すべて配布の PR のコミットである | `gate`・終了コード 10。外のコミットを `items[]` に並べる |
 | I4 | 本番の配布 | 比べた先端の木は、承認したコミットに配布の PR の変更だけを足した木（`merge-tree` の結果）と等しい | `gate`・終了コード 10。外のコミットを `items[]` に並べる |
-| I5 | 本番の配布 | 本番チャネルへマージするのは比べた先端のコミットだけである | マージしない。先端が進んでいれば進んだ分で I4 を判定し直し、`gate`・終了コード 10 |
+| I5 | 本番の配布 | 本番チャネルへマージするのは比べた先端のコミットだけである | マージしない。先端が進んでいれば進んだ先端で I4・I9 を判定し直し、`gate`・終了コード 10 |
 | I6 | 本番の配布 | 判定できない（`merge-tree` が衝突する・コミットを読めない・配布の PR のコミットを読めない）ときは通さない | `gate`・終了コード 10 |
 | I7 | 本番の配布 | MVV 判定の承認では、I2〜I6 の承認ゲートを通さない | 本番のリリースプランは承認ゲート 2 の記録（`by: mvv`）を外して承認ゲートで終える |
 | I8 | 承認資料 | 承認資料の「承認したコミット」は、`approval-facts` を打った時点の `origin/<ベースブランチ>` の SHA（40 桁）で、比較の URL と題の SHA と同じ | 書く側が 1 か所でしか値を作らない（構成要素の表）。テストで縛る |
+| I9 | 本番の配布 | 承認したコミットから比べた先端までのコミットは、すべて配布の PR のもの（そのコミット・squash の `mergeCommit`・rebase で作り直したもの）である。木が一致しても（外の変更とその revert が入った場合も）この条件は別に確かめる | `gate`・終了コード 10。外のコミットを `items[]` に並べる |
+| I10 | 本番の配布 | 本番の配布が受け取る承認したコミットは、E2 で承認したときの承認したコミットと同じである。`--approval` で受け取るときは、承認資料の「承認の記録」の SHA が同じ資料の「承認したコミット」と等しい。承認資料を `approval-facts` で書き直すと承認の記録は消え、承認し直すまで本番の配布は通らない | `gate`・終了コード 10。最初（何もマージする前）に止まる |
 
 ### ドメインイベント
 
 | # | イベント | 発生元 | 受け手 |
 | --- | --- | --- | --- |
 | E1 | 承認資料を書いた（承認したコミットを含む） | `approval-facts` | 承認する人・MVV 判定（`mvv-gate.py`）・本番のリリースプラン（`--approval` で読む） |
-| E2 | ゲート 2 を承認した | 人か MVV 判定（`pace: fast` / `auto`） | conductor（本番のリリースプランを流す） |
+| E2 | ゲート 2 を承認した（承認資料に承認の記録を書いた） | 人（conductor が `release-steps.py approve --by user` で書く）か MVV 判定（`pace: fast` / `auto`。`mvv-gate.py check --gate release` が書く） | conductor（本番のリリースプランを流す）・本番の配布（E4 で承認の記録を読む） |
 | E3 | ほかの変更がベースブランチへマージされた | 利用者か別のプラン | 本番の配布（E6 で見つける） |
-| E4 | 本番の配布が承認したコミットを受け取った | `release --channel prod` の引数の解釈 | 本番の配布（E6 で使う） |
+| E4 | 本番の配布が承認したコミットを受け取った（`--approval` では承認の記録と照らした。I10） | `release --channel prod` の引数の解釈 | 本番の配布（E6 で使う） |
 | E5 | この版の配布の PR をベースブランチへマージした | `release --channel prod` | 本番の配布（E6 の配布の PR の先端とコミットを読む） |
 | E6 | 承認したコミットからベースブランチの先端までを比べた | `lib/approved_commit.py` の `compare` | `release --channel prod`（一致なら E7、不一致なら承認ゲート） |
 | E7 | 比べた先端を本番チャネルへマージした | `merged-steps.py merge-when-green --expect-head` | `release --channel prod`（E8 へ進む） |
@@ -75,6 +77,7 @@
 | 承認したコミット | ゲート 2 の承認資料が対象にした、ベースブランチの先端のコミットの SHA（40 桁）。本番チャネルへ入れてよい中身の上限を示す | 追加（`ndf-release`。要求の工程で足した。出所をこの設計文書へ移す） |
 | 比べた先端 | 本番の配布が承認したコミットと比べた時点の `origin/<ベースブランチ>` の SHA。本番チャネルへマージしてよいのはこのコミットだけである | 追加（`ndf-release`） |
 | 承認の外のコミット | 承認したコミットから比べた先端までに入ったコミットのうち、この版の配布の PR のものでないもの | 追加（`ndf-release`） |
+| 承認の記録 | 承認資料の欄の 1 つ。ゲート 2 を承認したときの承認したコミットの SHA と、承認した者（`user` / `mvv`）・時刻を持つ。`approval-facts` が資料を書き直すと消える | 追加（`ndf-release`） |
 
 ## 機能一覧
 
@@ -90,13 +93,15 @@
 
 | 要素 | 責務 |
 | --- | --- |
-| `lib/approved_commit.py`（新規） | 承認したコミットの値の扱いを 1 か所に持つ。承認資料の欄の名前（`承認したコミット`）、SHA の形の検査（`parse_sha`）、承認資料からの読み取り（`from_material`）、比較（`compare`）。`compare` は git を読むだけで書かず、終了コードも出力も持たずに判定（`Verdict`）を値で返す。`parse_sha` と `from_material` は読めないときに `ValueError` を投げ、終了コード（2 / 3）への読み替えは `release` が行う。昇格の経路（`merged-steps.py promote`）からも後で呼べる形にする |
+| `lib/approved_commit.py`（新規） | 承認したコミットの値の扱いを 1 か所に持つ。承認資料の欄の名前（`承認したコミット`・`承認の記録`）、SHA の形の検査（`parse_sha`）、承認資料からの読み取り（`from_material`。承認の記録が無い・SHA が承認したコミットと違えば `Unapproved` を投げる。I10）、承認の記録の書き込み（`record`。渡された SHA が資料の承認したコミットと違えば書かずに `Unapproved`）、比較（`compare`）。`compare` は git を読むだけで書かず、終了コードも出力も持たずに判定（`Verdict`）を値で返す。`parse_sha` と `from_material` は読めないときに `ValueError` を投げ、終了コード（2 / 3）への読み替えは `release` が行う。昇格の経路（`merged-steps.py promote`）からも後で呼べる形にする |
 | `release-steps.py` の `cmd_approval_facts` | 承認したコミットを `metrics.approved_sha` と承認資料の「2. 承認の判断に使うもの」の表の行に書き、`next` に `--approved-sha <SHA>` を添える。SHA は今の `dev` の変数 1 つから作る（I8） |
-| `release-steps.py` の `cmd_release` | `--channel prod` のとき、最初に承認したコミットを `--approved-sha` か `--approval` から受け取る（無ければ 2 / 3）。配布の PR のマージの後に `compare` を呼び、不一致なら `gate`（10）で止まる。一致なら比べた先端を `merge-when-green --expect-head` へ渡す。マージが先端の移動で止まったら、進んだ先端で `compare` をやり直して `gate` で止まる |
-| `release-steps.py` の `build_parser` | `release` に `--approved-sha` と `--approval` を足す（排他）。`--channel dev` で渡したら 2 |
+| `release-steps.py` の `cmd_approve`（新規） | 人がゲート 2 を承認したとき、conductor が `approve --approval <承認資料> --approved-sha <提示した SHA> --by user` で承認の記録を書く（`record` を呼ぶ）。提示した後に資料が書き直されていれば書かずに止まる（I10） |
+| `mvv-gate.py` の `check --gate release` | 承認と判定したとき、判定に読んだ承認資料の承認したコミットで承認の記録を書く（`record`。`by: mvv`）。判定の後に資料が書き直されていれば書かない |
+| `release-steps.py` の `cmd_release` | `--channel prod` のとき、最初に承認したコミットを `--approved-sha` か `--approval` から受け取る（無ければ 2 / 3。`--approval` で承認の記録が無いか SHA が違えば、何もマージせずに 10。I10）。配布の PR のマージの後に `compare` を呼び、不一致なら `gate`（10）で止まる。一致なら比べた先端を `merge-when-green --expect-head` へ渡す。マージが先端の移動で止まったら、進んだ先端で `compare` をやり直して `gate` で止まる |
+| `release-steps.py` の `build_parser` | `release` に `--approved-sha` と `--approval` を足す（排他）。`--channel dev` で渡したら 2。`approve`（`--approval`・`--approved-sha`・`--by user\|mvv`。どれも必須）を足す |
 | `merged_lib/merge.py` の `merge_when_green` と `merged-steps.py` の `build_parser` | `merge-when-green` に `--expect-head <SHA>` を足す。渡されたら、マージの直前の PR の先端が SHA と違えばマージせずに `stopped`（1）・`items[]` の `result: head_moved` で止まり、`gh pr merge --match-head-commit` に SHA を渡す |
 | `supervise_lib/release_templates.py` の `_release_verify_steps` | 本番の `release` のステップのコマンドに `--approval <承認資料>` を足し、`gate_next` を置く（`--mvv` 付きは `handoff`、無しは `end`） |
-| `skills/release/SKILL.md` と `skills/release/references/release-steps.md` | 公開前の提示と承認・手順 4 に、承認したコミットを渡すことと、終了コード 10 で止まったときの読み方を書く |
+| `skills/release/SKILL.md` と `skills/release/references/release-steps.md` | 公開前の提示と承認・手順 4 に、承認を得たら `approve` で承認の記録を書くこと、承認したコミットを渡すことと、終了コード 10 で止まったときの読み方を書く |
 | `skills/development-workflow/references/approval-request.md` | リリースの「対象を開くもの」に承認したコミットを足す |
 
 ```mermaid
@@ -124,7 +129,7 @@ graph LR
   rel -->|10| handoff
 ```
 
-図に含めない要素: `build_parser`（引数の定義で、`release` と `merge-when-green` の一部として描く）と、文書 3 つ（`SKILL.md`・`release-steps.md`・`approval-request.md`）。
+図に含めない要素: `build_parser`（引数の定義で、`release` と `merge-when-green` の一部として描く）と、承認の記録を書く 2 つ（`approve` と `mvv-gate.py check --gate release`。どちらも `approved_commit.record` を通して承認資料の 1 行を書くだけで、本番のリリースプランの外の E2 で動く）と、文書 3 つ（`SKILL.md`・`release-steps.md`・`approval-request.md`）。
 
 システムの文脈と配置は変わらない。スクリプトは今と同じく作業場所（`release/v<版>` の worktree）で動き、git と `gh` だけを外部に持つ。
 
@@ -172,16 +177,24 @@ classDiagram
   Verdict "1" o-- "0..*" Outside
   class approved_commit {
     +ROW: str
+    +RECORD: str
     +parse_sha(text) str
     +from_material(path) str
+    +record(path, sha, by, at) None
     +compare(root, approved, tip, allowed) Verdict
   }
+  class Unapproved {
+    +sha: str
+    +recorded: str
+  }
+  approved_commit ..> Unapproved
   approved_commit ..> Verdict
   approved_commit ..> AllowedPR
 ```
 
 - `reason` は `match` / `not_ancestor` / `unknown_commit` / `outside_commits` / `tree_differs` / `undecidable` のどれか。`ok` は `match` のときだけ真
 - `allowed` は 0 個以上の `AllowedPR`。本番の配布は配布の PR の 1 つを渡す。昇格の経路は 0 個を渡す（先端の木が承認したコミットの木と等しいかになる）
+- `Unapproved` は `ValueError` の子で、承認の記録が無い（`recorded` が空）か、記録の SHA（`recorded`）が承認したコミット（`sha`）と違うことを表す。`release` は 10、`approve` は 1 に読み替える
 - `pr` は分かったときだけ入る。`compare` は git だけを読むため空で返し、`release` が止まるときに `gh api repos/<owner>/<name>/commits/<SHA>/pulls` の先頭で埋める（読めなければ空のまま）
 
 ## 入出力の契約
@@ -193,9 +206,18 @@ API を持たないため、コマンドの約束を表で書く（`interface-ap
 | 項目 | 書くこと |
 | --- | --- |
 | 入力 | 変わらない |
-| 出力（`gate`・10） | `metrics.approved_sha` を足す（40 桁）。承認資料の「2. 承認の判断に使うもの」の表の先頭に `\| 承認したコミット \| <40 桁> \|` を足す。題の先頭 8 桁と比較の URL は今のまま。`next` は `利用者の承認を得たら release-steps.py release --version <版> --channel prod --approved-sha <40 桁>` |
+| 出力（`gate`・10） | `metrics.approved_sha` を足す（40 桁）。承認資料の「2. 承認の判断に使うもの」の表の先頭に `\| 承認したコミット \| <40 桁> \|` を足す。題の先頭 8 桁と比較の URL は今のまま。資料を書き直すとき、承認の記録の行は書かない（I10）。`next` は `利用者の承認を得たら release-steps.py release --version <版> --channel prod --approved-sha <40 桁>` |
 | 失敗の形 | 変わらない（前のタグを決められない → 3） |
 | 互換性 | `metrics` と表に行が増えるだけで、既存の読み手（`notes --approval`・`mvv-gate.py`）は欄の名前で読むため壊れない |
+
+### `release-steps.py approve`（新規）
+
+| 項目 | 書くこと |
+| --- | --- |
+| 入力 | `--approval <承認資料>`・`--approved-sha <40 桁>`（人へ提示した承認資料の承認したコミット）・`--by user\|mvv` |
+| 出力（`ok`・0） | 承認資料の「2. 承認の判断に使うもの」の表の「承認したコミット」の行の直後に `\| 承認の記録 \| <40 桁> を <by> が <ISO 8601> に承認 \|` を書く（既にあれば置き換える）。`metrics.approved_sha` |
+| 失敗の形 | `--approved-sha` の形の誤り → 2。資料が無い・欄が無い → 3。資料の承認したコミットが `--approved-sha` と違う（提示の後に書き直された）→ 1（`stopped`。`summary` に資料を提示し直して承認を取り直す） |
+| 互換性 | 新しいコマンドで、既存の読み手は変わらない。`mvv-gate.py` は同じ `record` を呼ぶ |
 
 ### `release-steps.py release`
 
@@ -215,8 +237,9 @@ API を持たないため、コマンドの約束を表で書く（`interface-ap
 | `--approved-sha` が 40 桁の 16 進でない | 2 | `stopped` | 最初 |
 | `--approval` のファイルが無い・「承認したコミット」の欄が無い・欄の値が 40 桁でない | 3 | `stopped` | 最初 |
 | `--channel dev` に `--approved-sha` か `--approval` を渡した | 2 | `stopped` | 最初 |
+| `--approval` の資料に承認の記録が無い・記録の SHA が承認したコミットと違う（I10） | 10 | `gate` | 最初（何もマージしない）。`items[]` に `{"kind": "commit", "name": <承認したコミット>, "result": "not_approved", "recorded": <記録の SHA か null>}` |
 | 承認したコミットを読めない・比べた先端の祖先でない（I2） | 10 | `gate` | 配布の PR のマージの後、本番チャネルの PR の前 |
-| 承認の外のコミットがある（I3・I4） | 10 | `gate` | 同上 |
+| 承認の外のコミットがある（I3・I4・I9） | 10 | `gate` | 同上 |
 | 判定できない（I6） | 10 | `gate` | 同上 |
 | CI 待ちの間に先端が進んだ（I5） | 10 | `gate` | 本番チャネルの PR のマージの直前 |
 
@@ -226,7 +249,7 @@ API を持たないため、コマンドの約束を表で書く（`interface-ap
 | --- | --- |
 | `summary` | `<プラグイン> v<版> の本番への配布を止めた: 承認したコミット <先頭 8 桁> の後に承認の外のコミットが <N> 件ある`（理由ごとに文を変える） |
 | `items[]` | 承認の外のコミット 1 件につき `{"kind": "commit", "name": <40 桁>, "result": "unapproved", "subject": <件名>, "pr": <番号か省く>}`。木だけが違うときは `{"kind": "tree", "name": <比べた先端>, "result": "differs", "expected": <木>, "actual": <木>}`。祖先でない・読めないときは `{"kind": "commit", "name": <承認したコミット>, "result": "not_ancestor" か "unknown"}`。配布の PR の `{"kind": "pr", ..., "result": "merged"}` は今のまま先頭に残る |
-| `metrics` | 今の欄に `approved_sha`・`compared_head`・`reason`（`Verdict.reason`）・`outside`（件数）を足す。`main_pr` と `tag` は `null` |
+| `metrics` | 今の欄に `approved_sha`・`compared_head`・`reason`（`Verdict.reason`。I10 で最初に止まったときは `not_approved`）・`outside`（件数）を足す。`main_pr` と `tag` は `null` |
 | `next` | `承認資料を作り直して（release-steps.py approval-facts --version <版> --prs <PR番号>...）承認を取り直し、release-steps.py release --version <版> --channel prod --approved-sha <新しい承認したコミット> を打ち直す` |
 
 ### `merged-steps.py merge-when-green`
@@ -255,7 +278,7 @@ sequenceDiagram
   participant M as merge-when-green
   participant G as GitHub
   P->>R: --approval <承認資料>
-  R->>A: from_material（無い・形が違う → 2 / 3）
+  R->>A: from_material（無い・形が違う → 2 / 3。承認の記録が無い・違う → 10）
   R->>G: 配布の PR をマージ（今のまま。マージ済みなら続きから）
   R->>G: 配布の PR の先端・コミット・mergeCommit を読む
   R->>A: compare(承認したコミット, origin/<base>, 配布の PR)
@@ -283,8 +306,8 @@ sequenceDiagram
 1. A と T と H を `git cat-file -e <SHA>^{commit}` で確かめる。A を読めなければ `unknown_commit`、T か H を読めなければ `undecidable`
 2. `git merge-base --is-ancestor A T` が 0 でなければ `not_ancestor`
 3. `git rev-list A..H` のコミットのうち、配布の PR のコミット（`gh pr view --json commits`）に無いものを集める。あれば `outside_commits`（配布のブランチが承認の後の先端から切られた場合を拾う。決定 2）
-4. `git merge-tree --write-tree A H` の木と `T^{tree}` を比べる。`merge-tree` が 0 以外なら `undecidable`、等しければ `match`
-5. 等しくなければ、`git rev-list --no-merges A..T --not H` から配布の PR の `mergeCommit`（squash の 1 コミット）と、`git patch-id` が配布の PR のコミットと同じもの（rebase で作り直されたコミット）を除いて `outside_commits` に並べる。並ぶものが無ければ `tree_differs`
+4. `git rev-list --no-merges A..T --not H` から配布の PR の `mergeCommit`（squash の 1 コミット）と、`git patch-id` が配布の PR のコミットと同じもの（rebase で作り直されたコミット）を除く。残りがあれば `outside_commits`（I9。木の比較の結果によらない。外の変更とその revert が配布の PR の後に入ると木は一致するため、ここで拾う）
+5. `git merge-tree --write-tree A H` の木と `T^{tree}` を比べる。`merge-tree` が 0 以外なら `undecidable`、等しければ `match`、等しくなければ `tree_differs`（コミットの外に差がある。例: 外の変更を入れたマージコミット）
 
 ## 非機能の実現方式
 
@@ -300,7 +323,7 @@ sequenceDiagram
 
 ### 決定 1: マージの方法によらず判定するため、コミットではなく木で比べる
 
-比べた先端の木が「承認したコミットに配布の PR の先端を `merge-tree` で合わせた木」と等しいかで判定する。merge / squash / rebase のどれで配布の PR を入れても、外の変更が無ければ木は一致し（実測: 3 方式とも同じ木 `daeb6458…`）、外の変更が配布の PR の前に入っても後に入っても一致しない。利用者へ届くのは木の中身であり、コミットの形ではない。
+比べた先端の木が「承認したコミットに配布の PR の先端を `merge-tree` で合わせた木」と等しいかで判定する。merge / squash / rebase のどれで配布の PR を入れても、外の変更が無ければ木は一致し（実測: 3 方式とも同じ木 `daeb6458…`）、外の変更が配布の PR の前に入っても後に入っても一致しない。利用者へ届くのは木の中身であり、コミットの形ではない。ただし外の変更とその revert が入ると木は一致するため、木の比較だけでは「承認の外のコミット」を止められない。コミットの確かめ（I3・I9）を木の比較と別に置く（決定 9）。
 
 本線（first-parent）のコミットを配布の PR の `mergeCommit` と突き合わせる案は採らない。rebase では 1 つの PR が本線に複数のコミットを作り、方法ごとの分岐が要る。コミットごとに GitHub の PR を照会して判定する案も採らない。直接 push されたコミットは PR を持たず、照会の上限に判定が左右される（PR 番号の照会は、止まったときの表示にだけ使う）。
 
@@ -354,6 +377,22 @@ MVV 判定が承認したのは承認資料の中身であり、承認の外の�
 
 根拠: Value 2 / 共通原則の優先順位（MVV 版 2）
 
+### 決定 9: 用語集の「承認の外のコミット」をそのまま止めるため、コミットの確かめを木の一致と別の不変条件にする
+
+配布の PR の後に外の変更とその revert が入ると、比べた先端の木は承認したコミットに配布の PR を足した木と等しくなり、I3（配布の PR の先端まで）と I4（木）は両方成り立つ。用語集は承認の外のコミットがあれば止まると定めるため、承認したコミットから比べた先端までのコミットがすべて配布の PR のものであること（I9）を、木の比較の結果によらず確かめる。
+
+木が一致すれば通す案は採らない。届く中身は同じでも、承認していないコミットが本番チャネルの履歴に入り、用語の定義と実装が食い違う。
+
+根拠: Value 8 / Value 6（MVV 版 2）
+
+### 決定 10: 承認したものと本番へ届けるものを結ぶため、承認資料に承認の記録を書き、資料の書き直しで消す
+
+I8 は承認資料を書いた時点の整合しか保証しない。承認の後に同じ版の承認資料を `approval-facts` で書き直すと、`--approval` は新しい SHA を承認したコミットとして受け取り、承認していない変更を通せる。そこで E2 の発生元が、承認した時点の承認したコミットを承認資料の「承認の記録」の欄へ書き（人の承認は conductor が `approve` で、MVV 判定は `mvv-gate.py` が書く）、`release --approval` は記録の SHA と資料の承認したコミットが等しいときだけ受け取る（I10）。`approval-facts` は資料を書き直すときに記録を書かないため、書き直した資料は承認し直すまで通らない。`approve` は人へ提示した SHA を受け取り、資料の今の値と違えば書かない（提示と記録の間の書き直しを拾う）。`--approved-sha` で手で渡すときは、打った人が承認した SHA そのものを渡すため記録を見ない。
+
+承認の記録をスプリントの状態（`sprint-state.py gate`）へ置く案は採らない。スプリントの外で本番の配布を打つ経路で記録が無くなり、承認資料と状態ファイルの 2 か所に承認したコミットができる（決定 3 と同じ理由）。資料の書き直しを禁じる案も採らない。承認の前に流し直して資料を新しくするのは正しい使い方である。
+
+根拠: 共通原則の上位の原則（利用者の承認を守る）/ Value 7 / Value 2（MVV 版 2）
+
 ## テスト設計
 
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
@@ -362,7 +401,8 @@ MVV 判定が承認したのは承認資料の中身であり、承認の外の�
 | 受け入れ条件 2 | 承認資料に「承認したコミット」の欄があり `from_material` で読み戻せる。`next` に `--approved-sha <40 桁>` がある | 欄の名前を書く側だけ変える・`next` から引数を落とす |
 | 受け入れ条件 3 | 承認したコミットの後が配布の PR だけのとき、merge / squash / rebase のそれぞれで `ok`（0）・本番チャネルの PR をマージ・`metrics.approved_sha` が入る | 比較を merge の方法でしか通らないように壊す（squash で `mergeCommit` を除かない等） |
 | 受け入れ条件 4・I1 | `--channel prod` で承認したコミットが無い・形が違う・資料に欄が無いと、`gh pr merge` も `git push` も呼ばれずに 2 / 3、`summary` に `--approved-sha` | 引数の検査を配布の PR のマージの後へ動かす |
-| 受け入れ条件 5・I3・I4 | 外の PR が配布の PR の前に入った場合と後に入った場合の両方で `gate`（10）、`items[]` に外のコミットの SHA、タグも Release も作らない、`next` に承認資料の作り直し | 木の比較を外す・I3 の確かめを外す（前に入った場合が通る） |
+| 受け入れ条件 5・I3・I4・I9 | 外の PR が配布の PR の前に入った場合・後に入った場合・後に外の変更とその revert が入った場合（木は一致する）のどれでも `gate`（10）、`items[]` に外のコミットの SHA、タグも Release も作らない、`next` に承認資料の作り直し | 木の比較を外す・I3 の確かめを外す（前に入った場合が通る）・I9 を木が違うときだけ確かめる（revert の場合が通る） |
+| I10 | 承認の記録の後に `approval-facts` で資料を書き直すと、`release --approval` が何もマージせずに `gate`（10）・`items[]` の `not_approved`。`approve` は提示した SHA と資料が違えば記録を書かずに 1。記録があり SHA が同じなら先へ進む | `approval-facts` が承認の記録を残したまま書き直す・`from_material` が記録を見ない・`approve` が資料の今の SHA で記録する |
 | 受け入れ条件 6・I5 | 比べた後に先端が進むと、本番チャネルの PR をマージせず `gate`（10）。`merge-when-green --expect-head` は先端が違えば `head_moved` で止まり `gh pr merge` を呼ばない | `--expect-head` を渡さない・`merge-when-green` が緑の先端で上書きする |
 | 受け入れ条件 7・I2・I6 | 履歴にない SHA・祖先でない SHA・`merge-tree` が衝突する場合に `gate`（10）。形の誤りは 2 | 読めない SHA を 1（失敗）で返す・衝突を一致として扱う |
 | 受け入れ条件 8・I7 | 本番のリリースプランの `release` のステップが `--approval <承認資料>` を持ち、`--mvv` 付きは `gate_next: handoff`、無しは `gate_next: end`。終了コード 10 でプランの結果が承認ゲートになり `verify` へ進まない | `gate_next` を落とす（`verify` へ進む）・`--mvv` 付きで `end` にする（`by: mvv` が残る） |
@@ -375,13 +415,12 @@ MVV 判定が承認したのは承認資料の中身であり、承認の外の�
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #815 | 実装する | — | `plugins/ndf/scripts/lib/approved_commit.py`、`plugins/ndf/scripts/release-steps.py`、`plugins/ndf/scripts/merged-steps.py`、`plugins/ndf/scripts/merged_lib/merge.py`、`plugins/ndf/scripts/supervise_lib/release_templates.py`、`plugins/ndf/scripts/tests/`、`plugins/ndf/skills/release/`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`docs/glossary/glossary.json`、`docs/glossary.md` |
+| #815 | 実装する | — | `plugins/ndf/scripts/lib/approved_commit.py`、`plugins/ndf/scripts/release-steps.py`、`plugins/ndf/scripts/merged-steps.py`、`plugins/ndf/scripts/merged_lib/merge.py`、`plugins/ndf/scripts/supervise_lib/release_templates.py`、`plugins/ndf/scripts/mvv-gate.py`、`plugins/ndf/scripts/tests/`、`plugins/ndf/skills/release/`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`docs/glossary/glossary.json`、`docs/glossary.md` |
 
 ## 未確認のまま残ること
 
 | 項目 | 内容 |
 | --- | --- |
-| 承認の後の承認資料の書き換え | 承認の後に同じ版の開発版のリリースプランを流し直すと、`approval-facts` が承認資料を新しい SHA で書き直す。その場合は新しい承認ゲート 2 が出るが、承認を取らずに本番のリリースプランを流すと新しい SHA で比べる。承認資料の書き換えを止める仕組みはこの変更に入れない |
 | rebase で入れた配布の PR の `mergeCommit` | rebase のときに GitHub が返す `mergeCommit` を実物で確かめていない。判定（木の比較）は `mergeCommit` を使わず、外のコミットの一覧から除くのにだけ使う。違っていても一覧に配布の PR のコミットが余分に並ぶだけで、通す・止めるは変わらない |
 | 配布の PR のコミット数の上限 | `gh pr view --json commits` が返すコミットの上限（GitHub の PR のコミット一覧は 250 件まで）を超える配布の PR では I3 が外のコミットと誤る。配布の PR は bump・changelog・説明文・消費の記録の数件である |
 | 昇格の経路の課題 | `merged-steps.py promote` を直す課題を起こすかは、ゲート 1 の承認で決める（要求の未決）。承認を得たら `out-of-scope` で起こす |
