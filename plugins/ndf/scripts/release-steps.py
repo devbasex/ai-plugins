@@ -937,7 +937,7 @@ def cmd_approve(a):
     emit(approval.approve(git_root(a.root), a))
 
 
-CHANGES_HEADING = "## 利用者向けの変化"
+CHANGES_HEADING = others.CHANGES_HEADING
 RISKS_HEADING = "## 未検証・残る危険"
 NOTES_PENDING = "（release-steps.py notes --approval が PR 本文の「利用者向けの変化」から書く）"
 RUNTIME_NAMES = {"claude": "Claude Code", "codex": "Codex", "kiro": "Kiro", "agy": "Antigravity"}

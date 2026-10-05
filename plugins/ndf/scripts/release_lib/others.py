@@ -21,6 +21,7 @@ import mdtable
 from release_lib.names import h2_lines, next_h2
 
 OTHERS_HEADING = "## 版を上げる他のプラグイン"
+CHANGES_HEADING = "## 利用者向けの変化"  # 配布の説明文（release-steps.py notes）の材料になる PR 本文の節
 MIGRATION_HEADING = "## 移行の手順"  # PR 本文の節・承認資料の節（CHANGELOG の版の節の中では `### 移行の手順`）
 CONSENT_HEADING = "## 同意を求めること"
 CONSENT_LINE = "- [ ] 「版を上げる他のプラグイン」の表の上げ幅で、他のプラグインの版を上げる"

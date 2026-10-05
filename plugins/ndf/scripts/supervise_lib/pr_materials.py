@@ -18,10 +18,9 @@ import design_results
 import gh_call
 import gh_sections
 import manual_checks
-from release_lib.others import IMPACT, PUBLIC, breaking, migration_items, row_value
+from release_lib.others import CHANGES_HEADING, IMPACT, PUBLIC, breaking, migration_items, row_value
 from supervise_lib.procedures import requirements_path
 
-CHANGES_HEADING = "## 利用者向けの変化"  # 配布の説明文（release-steps.py notes）の材料になる PR 本文の節
 COLLECTED_HEADING = "## 集めた実装の PR"
 CLOSES_HEADING = "## 閉じる課題"
 NONFUNCTIONAL, MIGRATION_ROW = "非機能の条件", "移行性"
