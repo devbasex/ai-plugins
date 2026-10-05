@@ -3247,25 +3247,25 @@
       "term": "承認したコミット",
       "context": "ndf-release",
       "meaning": "ゲート 2 の承認資料が対象にした、ベースブランチの先端のコミットの SHA（40 桁）。本番チャネルへ入れてよい中身の上限を示す",
-      "pending_source": "issues/issue-815-design.md"
+      "source": "docs/specifications/ndf-release-approved-commit.md"
     },
     {
       "term": "比べた先端",
       "context": "ndf-release",
       "meaning": "本番の配布が承認したコミットと比べた時点の、ベースブランチの先端のコミットの SHA。本番チャネルへマージしてよいのはこのコミットだけである",
-      "pending_source": "issues/issue-815-design.md"
+      "source": "docs/specifications/ndf-release-approved-commit.md"
     },
     {
       "term": "承認の外のコミット",
       "context": "ndf-release",
       "meaning": "承認したコミットから比べた先端までに入ったコミットのうち、この版の配布の PR のものでないもの。あれば本番の配布は承認ゲートで止まる",
-      "pending_source": "issues/issue-815-design.md"
+      "source": "docs/specifications/ndf-release-approved-commit.md"
     },
     {
       "term": "承認の記録",
       "context": "ndf-release",
       "meaning": "承認資料の欄の 1 つ。ゲート 2 を承認したときの承認したコミットの SHA と、承認した者・時刻を持つ。承認資料を書き直すと消え、承認し直すまで本番の配布は通らない",
-      "pending_source": "issues/issue-815-design.md"
+      "source": "docs/specifications/ndf-release-approved-commit.md"
     }
   ]
 }
