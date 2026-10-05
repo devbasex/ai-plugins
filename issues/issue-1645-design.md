@@ -407,4 +407,4 @@ githubstatus は github.com だけが持ち、GitHub Enterprise Server とネッ
 | 人が開始前に取り消したジョブ | ステップ 0 件・Runner 空で、障害と同じ形になる。同じチェックに新しい項目があれば置き換わるが、無ければ再実行される。再実行は上限 3 回で止まる |
 | `gh run rerun --failed` が取り消しのジョブを打ち直すこと | #1768 の再開で conductor が打って通ったことだけを根拠にしている。リリース後テストで次の障害のときの items を読む |
 | `release` の雛形で `ci_wait_timeout` を引けるか | `plan_limits` は宣言のテストの戦略から出す。配布のプランの引数に戦略が載らないときは所要が不明のときの値（3600 秒）になる。実装で確かめる |
-| 結論の集合の重複 | `lib/gh_checks.py` の `FAILED_CONCLUSIONS`（取り消しを含まない）と `merged_lib/checks.py` の `FAIL_CONCLUSIONS`（含む）が別にある。この変更の範囲外として起票する |
+| 結論の集合の重複 | `lib/gh_checks.py` の `FAILED_CONCLUSIONS`（取り消しを含まない）と `merged_lib/checks.py` の `FAIL_CONCLUSIONS`（含む）が別にある。この変更の範囲外として #1774 に起票した |
