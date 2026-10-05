@@ -95,13 +95,13 @@
 | --- | --- |
 | `lib/approved_commit.py`（新規） | 承認したコミットの値の扱いを 1 か所に持つ。承認資料の欄の名前（`承認したコミット`・`承認の記録`）、SHA の形の検査（`parse_sha`）、承認資料からの読み取り（`from_material`。承認の記録が無い・SHA が承認したコミットと違えば `Unapproved` を投げる。I10）、承認の記録の書き込み（`record`。渡された SHA が資料の承認したコミットと違えば書かずに `Unapproved`）、比較（`compare`）。`compare` は git を読むだけで書かず、終了コードも出力も持たずに判定（`Verdict`）を値で返す。`parse_sha` と `from_material` は読めないときに `ValueError` を投げ、終了コード（2 / 3）への読み替えは `release` が行う。昇格の経路（`merged-steps.py promote`）からも後で呼べる形にする |
 | `release-steps.py` の `cmd_approval_facts` | 承認したコミットを `metrics.approved_sha` と承認資料の「2. 承認の判断に使うもの」の表の行に書き、`next` に `--approved-sha <SHA>` を添える。SHA は今の `dev` の変数 1 つから作る（I8） |
-| `release-steps.py` の `cmd_approve`（新規） | 人がゲート 2 を承認したとき、conductor が `approve --approval <承認資料> --approved-sha <提示した SHA> --by user` で承認の記録を書く（`record` を呼ぶ）。提示した後に資料が書き直されていれば書かずに止まる（I10） |
-| `mvv-gate.py` の `check --gate release` | 承認と判定したとき、判定に読んだ承認資料の承認したコミットで承認の記録を書く（`record`。`by: mvv`）。判定の後に資料が書き直されていれば書かない |
+| `release-steps.py` の `cmd_approve`（新規） | 人がゲート 2 を承認したとき、conductor が `approve --approval <承認資料> --approved-sha <提示した SHA> --by user` で承認の記録を書く（`record` を呼ぶ）。`--approved-sha` に渡すのは、利用者へ提示した承認資料を書いた `approval-facts` の結果の `metrics.approved_sha`（提示の時点で控えた値）である。承認資料を読み直して得た値は渡さない（読み直した値は `record` の照合と常に一致し、提示の後の書き直しを拾えない。決定 10）。提示した後に資料が書き直されていれば書かずに止まる（I10） |
+| `mvv-gate.py` の `check --gate release` | `--advise` が無く承認と判定したときだけ、判定に読んだ承認資料の承認したコミットで承認の記録を書く（`record`。`by: mvv`）。`--advise`（`pace: normal` の助言の判定）のときは判定によらず書かない（助言は利用者の承認に代わらない）。判定の後に資料が書き直されていれば書かない |
 | `release-steps.py` の `cmd_release` | `--channel prod` のとき、最初に承認したコミットを `--approved-sha` か `--approval` から受け取る（無ければ 2 / 3。`--approval` で承認の記録が無いか SHA が違えば、何もマージせずに 10。I10）。配布の PR のマージの後に `compare` を呼び、不一致なら `gate`（10）で止まる。一致なら比べた先端を `merge-when-green --expect-head` へ渡す。マージが先端の移動で止まったら、進んだ先端で `compare` をやり直して `gate` で止まる |
 | `release-steps.py` の `build_parser` | `release` に `--approved-sha` と `--approval` を足す（排他）。`--channel dev` で渡したら 2。`approve`（`--approval`・`--approved-sha`・`--by user\|mvv`。どれも必須）を足す |
 | `merged_lib/merge.py` の `merge_when_green` と `merged-steps.py` の `build_parser` | `merge-when-green` に `--expect-head <SHA>` を足す。渡されたら、マージの直前の PR の先端が SHA と違えばマージせずに `stopped`（1）・`items[]` の `result: head_moved` で止まり、`gh pr merge --match-head-commit` に SHA を渡す |
 | `supervise_lib/release_templates.py` の `_release_verify_steps` | 本番の `release` のステップのコマンドに `--approval <承認資料>` を足し、`gate_next` を置く（`--mvv` 付きは `handoff`、無しは `end`） |
-| `skills/release/SKILL.md` と `skills/release/references/release-steps.md` | 公開前の提示と承認・手順 4 に、承認を得たら `approve` で承認の記録を書くこと、承認したコミットを渡すことと、終了コード 10 で止まったときの読み方を書く |
+| `skills/release/SKILL.md` と `skills/release/references/release-steps.md` | 公開前の提示と承認・手順 4 に、承認を得たら `approve` で承認の記録を書くこと（`--approved-sha` には提示した承認資料を書いた `approval-facts` の結果の `metrics.approved_sha` を控えて渡し、資料を読み直した値を渡さない）、承認したコミットを渡すことと、終了コード 10 で止まったときの読み方を書く |
 | `skills/development-workflow/references/approval-request.md` | リリースの「対象を開くもの」に承認したコミットを足す |
 
 ```mermaid
@@ -214,7 +214,7 @@ API を持たないため、コマンドの約束を表で書く（`interface-ap
 
 | 項目 | 書くこと |
 | --- | --- |
-| 入力 | `--approval <承認資料>`・`--approved-sha <40 桁>`（人へ提示した承認資料の承認したコミット）・`--by user\|mvv` |
+| 入力 | `--approval <承認資料>`・`--approved-sha <40 桁>`（人へ提示した承認資料を書いた `approval-facts` の結果の `metrics.approved_sha`。提示の時点で控えた値で、資料を読み直した値ではない）・`--by user\|mvv` |
 | 出力（`ok`・0） | 承認資料の「2. 承認の判断に使うもの」の表の「承認したコミット」の行の直後に `\| 承認の記録 \| <40 桁> を <by> が <ISO 8601> に承認 \|` を書く（既にあれば置き換える）。`metrics.approved_sha` |
 | 失敗の形 | `--approved-sha` の形の誤り → 2。資料が無い・欄が無い → 3。資料の承認したコミットが `--approved-sha` と違う（提示の後に書き直された）→ 1（`stopped`。`summary` に資料を提示し直して承認を取り直す） |
 | 互換性 | 新しいコマンドで、既存の読み手は変わらない。`mvv-gate.py` は同じ `record` を呼ぶ |
@@ -387,7 +387,7 @@ MVV 判定が承認したのは承認資料の中身であり、承認の外の�
 
 ### 決定 10: 承認したものと本番へ届けるものを結ぶため、承認資料に承認の記録を書き、資料の書き直しで消す
 
-I8 は承認資料を書いた時点の整合しか保証しない。承認の後に同じ版の承認資料を `approval-facts` で書き直すと、`--approval` は新しい SHA を承認したコミットとして受け取り、承認していない変更を通せる。そこで E2 の発生元が、承認した時点の承認したコミットを承認資料の「承認の記録」の欄へ書き（人の承認は conductor が `approve` で、MVV 判定は `mvv-gate.py` が書く）、`release --approval` は記録の SHA と資料の承認したコミットが等しいときだけ受け取る（I10）。`approval-facts` は資料を書き直すときに記録を書かないため、書き直した資料は承認し直すまで通らない。`approve` は人へ提示した SHA を受け取り、資料の今の値と違えば書かない（提示と記録の間の書き直しを拾う）。`--approved-sha` で手で渡すときは、打った人が承認した SHA そのものを渡すため記録を見ない。
+I8 は承認資料を書いた時点の整合しか保証しない。承認の後に同じ版の承認資料を `approval-facts` で書き直すと、`--approval` は新しい SHA を承認したコミットとして受け取り、承認していない変更を通せる。そこで E2 の発生元が、承認した時点の承認したコミットを承認資料の「承認の記録」の欄へ書き（人の承認は conductor が `approve` で、MVV 判定は `mvv-gate.py` が書く）、`release --approval` は記録の SHA と資料の承認したコミットが等しいときだけ受け取る（I10）。`approval-facts` は資料を書き直すときに記録を書かないため、書き直した資料は承認し直すまで通らない。`approve` は人へ提示した SHA（提示した資料を書いた `approval-facts` の結果の `metrics.approved_sha` を控えた値）を受け取り、資料の今の値と違えば書かない（提示と記録の間の書き直しを拾う。資料を読み直した値を渡すと照合が常に一致するため渡さない）。`mvv-gate.py` は `--advise` のとき記録を書かない（助言の判定は利用者の承認に代わらない）。`--approved-sha` で手で渡すときは、打った人が承認した SHA そのものを渡すため記録を見ない。
 
 承認の記録をスプリントの状態（`sprint-state.py gate`）へ置く案は採らない。スプリントの外で本番の配布を打つ経路で記録が無くなり、承認資料と状態ファイルの 2 か所に承認したコミットができる（決定 3 と同じ理由）。資料の書き直しを禁じる案も採らない。承認の前に流し直して資料を新しくするのは正しい使い方である。
 
@@ -403,6 +403,8 @@ I8 は承認資料を書いた時点の整合しか保証しない。承認の�
 | 受け入れ条件 4・I1 | `--channel prod` で承認したコミットが無い・形が違う・資料に欄が無いと、`gh pr merge` も `git push` も呼ばれずに 2 / 3、`summary` に `--approved-sha` | 引数の検査を配布の PR のマージの後へ動かす |
 | 受け入れ条件 5・I3・I4・I9 | 外の PR が配布の PR の前に入った場合・後に入った場合・後に外の変更とその revert が入った場合（木は一致する）のどれでも `gate`（10）、`items[]` に外のコミットの SHA、タグも Release も作らない、`next` に承認資料の作り直し | 木の比較を外す・I3 の確かめを外す（前に入った場合が通る）・I9 を木が違うときだけ確かめる（revert の場合が通る） |
 | I10 | 承認の記録の後に `approval-facts` で資料を書き直すと、`release --approval` が何もマージせずに `gate`（10）・`items[]` の `not_approved`。`approve` は提示した SHA と資料が違えば記録を書かずに 1。記録があり SHA が同じなら先へ進む | `approval-facts` が承認の記録を残したまま書き直す・`from_material` が記録を見ない・`approve` が資料の今の SHA で記録する |
+| I10（MVV 判定） | `pace: fast` / `auto` の本番のリリースプランで `mvv-gate.py check --gate release` が follow と判定すると、承認資料に `by: mvv` の承認の記録が書かれ、続く `release --approval` が I10 を通る | `mvv-gate.py` が承認の記録を書かない（MVV 判定に任せたプランが毎回 10 で止まる） |
+| I10（助言） | `mvv-gate.py check --gate release --advise` が follow と判定しても承認の記録は書かれず、続く `release --approval` は `gate`（10）・`not_approved` | `mvv-gate.py` が `--advise` でも承認の記録を書く（利用者の承認なしに I10 を通る） |
 | 受け入れ条件 6・I5 | 比べた後に先端が進むと、本番チャネルの PR をマージせず `gate`（10）。`merge-when-green --expect-head` は先端が違えば `head_moved` で止まり `gh pr merge` を呼ばない | `--expect-head` を渡さない・`merge-when-green` が緑の先端で上書きする |
 | 受け入れ条件 7・I2・I6 | 履歴にない SHA・祖先でない SHA・`merge-tree` が衝突する場合に `gate`（10）。形の誤りは 2 | 読めない SHA を 1（失敗）で返す・衝突を一致として扱う |
 | 受け入れ条件 8・I7 | 本番のリリースプランの `release` のステップが `--approval <承認資料>` を持ち、`--mvv` 付きは `gate_next: handoff`、無しは `gate_next: end`。終了コード 10 でプランの結果が承認ゲートになり `verify` へ進まない | `gate_next` を落とす（`verify` へ進む）・`--mvv` 付きで `end` にする（`by: mvv` が残る） |
