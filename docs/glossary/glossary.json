@@ -3211,13 +3211,13 @@
       "term": "gws",
       "context": "ndf-google-workspace",
       "meaning": "Google Workspace CLI（npm の @googleworkspace/cli）。Google の公式サポート外の CLI で、NDF の Google Workspace の操作はすべてこれで行う",
-      "pending_source": "issues/issue-744-requirements.md"
+      "source": "docs/specifications/ndf-google-workspace-gws.md"
     },
     {
       "term": "gws の状態",
       "context": "ndf-google-workspace",
       "meaning": "google-workspace の確認のスクリプト（gws-check.py）が返す 4 つの値（authenticated / missing / unauthenticated / uninstallable）。状態ごとに次の手が 1 つに決まる",
-      "pending_source": "issues/issue-744-design.md"
+      "source": "docs/specifications/ndf-google-workspace-gws.md"
     }
   ]
 }
