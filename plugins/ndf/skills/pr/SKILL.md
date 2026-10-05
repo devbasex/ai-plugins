@@ -86,13 +86,18 @@ credential helper が応答しない環境の退避（`gh auth git-credential` �
 ### 4. PR の作成・更新
 
 本文を日本語で書いてファイルに置く。`.github/pull_request_template.md` があればその構造に従い、
-`## Summary`・`## 利用者向けの変化`・`## Test plan` を持ち、機密情報を含めない。更新のときはブランチの全コミット
+`## Summary`・`## 利用者向けの変化`・`## 移行の手順`・`## Test plan` を持ち、機密情報を含めない。更新のときはブランチの全コミット
 （`git log origin/<base>..HEAD`）を反映し、既存の関連リンクを保つ。雛形は
 `python3 "$SCRIPTS/pr-steps.py" template --out /tmp/pr-body.md` が書く。
 
 **`## 利用者向けの変化` はリリースの CHANGELOG と更新案内へそのまま載る**（`release-steps.py notes` が組む）。
 利用者に何ができるようになるか・使い方が変わる点を箇条書きにし、今の決まりだけを書く。見える変化が無ければ
 「- 無し」と書く（リリースの説明文は題名で代わる）。節の無い本文では、`create` / `update` の `next` が節を足すよう求める。
+
+**`## 移行の手順` は CHANGELOG の版の節の `### 移行の手順` へ載る。** 利用者が新しい版へ移るときに自分で行う操作
+（引数の置き換え・認証のし直し・導入し直し）を、プラグインの名前を添えて箇条書きにする。操作が要らなければ
+「- 無し」と書く。プラグインの名前に触れる箇条は、配布でそのプラグインの上げ幅の候補を MAJOR にする。要求の
+「公開インタフェース」の行に互換なしの印がある課題では、要求の移行性の行を手順にする。
 
 ```bash
 python3 "$SCRIPTS/pr-steps.py" create --title "<タイトル>" --body-file /tmp/pr-body.md [--draft] [--base <base>] \

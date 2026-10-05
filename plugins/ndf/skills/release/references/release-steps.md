@@ -101,6 +101,10 @@ python3 "$SCRIPTS/release-steps.py" notes     --version <版> --prs <PR番号>..
 # 手順 2 の承認資料の欄を埋める（検証リリースの後）
 python3 "$SCRIPTS/release-steps.py" notes     --version <版> --prs <PR番号>... --approval <承認資料> \
   --verified claude,codex,kiro --ref develop --root .
+# 版を上げる他のプラグインと上げ幅の候補を承認資料へ書く（変えるなら --set <名前>=MAJOR|MINOR|PATCH で書き直す）
+python3 "$SCRIPTS/release-steps.py" changed-plugins --prs <PR番号>... --approval <承認資料> [--since <タグ>] --root .
+# 本番: 承認資料の表の上げ幅で上げる版を返す（items の name と to を bump --plugin <name> --to <to> へ渡す）
+python3 "$SCRIPTS/release-steps.py" changed-plugins --decided <承認資料> [--since <タグ>] --root .
 # 承認を得たら、承認資料へ承認の記録を書く（<SHA> は提示した資料を書いた approval-facts の metrics.approved_sha）
 python3 "$SCRIPTS/release-steps.py" approve --approval <承認資料> --approved-sha <SHA> --by user --root .
 # 手順 4: 公開する（bump と changelog の変更をコミットしてから）
@@ -123,9 +127,19 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
 - `notes`: 各 PR の本文の `## 利用者向けの変化` の箇条（末尾に `（#番号）`）で、CHANGELOG.md の版の節と
   plugin の README の `## v<版> へ更新するとき` の節を組み直す。節が無い・「無し」の PR は題名で代える
   （`metrics.fallback` が件数）。`--approval` を渡すと CHANGELOG と README は変えず、承認資料の 2 つの欄と、
-  PR の本文の `## 未検証・残る危険` を集めた節を書く。未マージの PR は載せず、番号を `metrics.unmerged` へ出す。
+  PR の本文の `## 未検証・残る危険` を集めた節と `## 移行の手順` の節（0 件なら「- 無し」）を書く。PR の本文の
+  `## 移行の手順` の箇条は、CHANGELOG.md の版の節と README の更新の節では `### 移行の手順` の下へ `（#番号）` つきで
+  並ぶ（0 件なら見出しを作らない）。未マージの PR は載せず、番号を `metrics.unmerged` へ出す。
   `stopped`（3）は changelog や approval-facts を先に打つ。渡した PR がすべて未マージのときも 3 で止まるので、
   マージしてから打ち直すか `--prs` を直す
+- `changed-plugins`: 前のタグからの差分にある、宣言の `release.plugin` 以外のプラグインを `items[]`（`from`・`to`・
+  `level`・`basis`）へ返す。前のタグから版が変わったものは `metrics.already` へ入れ、上げ直さない。`--prs` は PR の
+  本文の閉じる語が指す課題の `## 影響` の「公開インタフェース」の行に互換なしの印（`互換なし` か `互換の経路は持たない`）
+  があるか、PR の本文の `## 移行の手順` がプラグインの名前に触れれば、そのパスに触れた PR のプラグインの候補を
+  MAJOR、無ければ PATCH にする（MINOR の候補は出さない）。材料を読めない PR は根拠の欄に書く。`--approval` は承認
+  資料の `## 版を上げる他のプラグイン` の節（0 件なら「- 無し」）と同意の行を書き、`--set` は承認ゲート 2 で決めた
+  上げ幅へ行を書き直す（表に無い名前・知らない上げ幅は 2）。`--decided` は表の上げ幅で `to` を決め、表が無い・
+  上げ幅を読めない・版や集合が差分と合わないときは PATCH へ倒さずに 1 で止まる。他のプラグインが 0 件なら表を読まない
 - `release`: `dev` は `release/v<版>` → `develop` の Pull Request を作り、チェックを待ってマージする。
   `prod` は続けて `develop` → `main` をマージし、タグと GitHub Release を作る。`items[]`
   （マージした Pull Request・タグ・GitHub Release）がリリース完了の確認で照会した結果である。

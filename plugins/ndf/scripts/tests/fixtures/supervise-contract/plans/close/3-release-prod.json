@@ -38,7 +38,7 @@
       "id": "bump-others",
       "type": "run",
       "stage": "配布",
-      "cmd": "out=$(python3 <NDF>/scripts/release-steps.py changed-plugins --plugin foo) || { printf \"%s\\n\" \"$out\"; exit 1; }; printf \"%s\\n\" \"$out\"; printf \"%s\\n\" \"$out\" | python3 -c \"import json,sys; [print(i[\\\"name\\\"], i[\\\"to\\\"]) for i in json.loads(sys.stdin.read().strip().splitlines()[-1])[\\\"items\\\"]]\" | while read -r n to; do python3 <NDF>/scripts/release-steps.py bump --plugin \"$n\" --to \"$to\" --base main || exit 1; done",
+      "cmd": "out=$(python3 <NDF>/scripts/release-steps.py changed-plugins --plugin foo --decided <TMP>/repo/issues/approval-foo-v1.2.0.md) || { printf \"%s\\n\" \"$out\"; exit 1; }; printf \"%s\\n\" \"$out\"; printf \"%s\\n\" \"$out\" | python3 -c \"import json,sys; [print(i[\\\"name\\\"], i[\\\"to\\\"]) for i in json.loads(sys.stdin.read().strip().splitlines()[-1])[\\\"items\\\"]]\" | while read -r n to; do python3 <NDF>/scripts/release-steps.py bump --plugin \"$n\" --to \"$to\" --base main || exit 1; done",
       "on_fail": "judge",
       "next": "changelog"
     },

@@ -23,7 +23,8 @@ from step_result import validate_result  # noqa: E402
 import claude_accounts as ca  # noqa: E402
 
 sys.path.insert(0, str(SCRIPTS))
-from supervise_lib import claude, commands, engine, flow, paths, plan, pr as pr_step, queue  # noqa: E402
+from supervise_lib import claude, commands, engine, flow, paths, plan, pr as pr_step, procedures, queue  # noqa: E402
+from supervise_lib.prompts import PR_SYSTEM  # noqa: E402
 import gh_call  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -1366,7 +1367,7 @@ def test_new_release_dev_and_prod(tmp_path):
     assert p.returncode == 0, p.stderr
     plan = json.loads((tmp_path / "d.json").read_text())
     ids = [s["id"] for s in plan["steps"]]
-    assert ids == ["bump", "changelog", "notes", "sync", "release", "verify", "facts", "explain", "judge", "fix"]
+    assert ids == ["bump", "changelog", "notes", "sync", "release", "verify", "facts", "explain", "others", "judge", "fix"]
     st = {s["id"]: s for s in plan["steps"]}
     assert plan["branch"] == "release/v10.17.11-dev.1" and plan["リポジトリ"] == "/r"
     assert "approval-facts --version 10.17.11 --prs 995 997" in st["facts"]["cmd"]
@@ -2116,6 +2117,65 @@ def test_pr_body_from_llm_keeps_user_changes_section(tmp_path, monkeypatch):
     assert "結果: 完了" in engine.Engine(plan, tmp_path / "state").run()
     got = body.read_text()
     assert "## 利用者向けの変化\n\n- 題名だけ" in got and "本文。" in got
+    assert "## 利用者向けの変化\n\n- 題名だけ\n\n## 移行の手順\n\n- 無し\n\n## 概要" in got  # 節が無ければ置く（#1752）
+
+
+def _migration_pr(tmp_path, monkeypatch, public: str, migration: str, llm_section: str = "- 無し"):
+    """要求の写し（移行性の行と公開インタフェースの行）を持つ課題 1 の実装の pr を、移行の手順を「llm_section」と書く
+    偽の LLM で流し、(PR 本文, LLM へ渡したプロンプト) を返す。"""
+    root, body = pr_repo(tmp_path, monkeypatch)
+    (root / "issues").mkdir()
+    (root / "issues" / "issue-1-requirements.md").write_text(
+        f"## 非機能の条件\n\n| 大項目 | 条件 |\n| --- | --- |\n| 移行性 | {migration} |\n\n"
+        f"## 影響\n\n| 対象 | 影響 |\n| --- | --- |\n| 公開インタフェース | {public} |\n",
+        encoding="utf-8",
+    )
+    prompt = tmp_path / "prompt.txt"
+    reply = f"## 利用者向けの変化\n\n- 変えた\n\n## 移行の手順\n\n{llm_section}\n\n## 変更の要点\n\n本文。"
+    fake = tmp_path / "claude.py"
+    fake.write_text(
+        f"import json, sys\nopen({str(prompt)!r}, 'w').write(sys.stdin.read() + ' '.join(sys.argv))\n"
+        f"print(json.dumps({{'result': {reply!r}, 'usage': {{}}, 'total_cost_usd': 0}}))\n"
+    )
+    monkeypatch.setenv("NDF_SUPERVISE_CLAUDE", f"{PY} {fake}")
+    step = procedures.pr_step("develop", "T", "", "", "end", {"manual": False, "migration": True})
+    plan = {"フェーズ": "実装", "課題": [1], "作業場所": str(root), "steps": [step]}
+    assert "結果: 完了" in engine.Engine(plan, tmp_path / "state").run()
+    return body.read_text(), prompt.read_text()
+
+
+def test_pr_body_takes_the_migration_row_of_a_breaking_requirement(tmp_path, monkeypatch):
+    """受け入れ条件 9・I8（#1752）: 要求に移行性の行と互換なしの印があれば、LLM が「- 無し」と書いても節は要求の行になる。"""
+    got, prompt = _migration_pr(tmp_path, monkeypatch, "変わる。互換の経路は持たない", "`--pwk-drive-folder` を外す案内を書く")
+    assert "## 移行の手順\n\n- `--pwk-drive-folder` を外す案内を書く（#1の要求の移行性）" in got
+    assert "## 移行の手順\n\n- 無し" not in got and "#1 の要求の移行性:" in prompt
+
+
+def test_pr_body_keeps_none_for_a_requirement_without_the_breaking_mark(tmp_path, monkeypatch):
+    """受け入れ条件 9・I8（#1752）: 印の無い課題の移行性の行は材料に渡るだけで、節は「- 無し」を許す。"""
+    got, prompt = _migration_pr(tmp_path, monkeypatch, "変わる。互換の無い削除はしない", "利用者の操作は要らない")
+    assert "## 移行の手順\n\n- 無し" in got and "（#1の要求の移行性）" not in got
+    assert "#1 の要求の移行性: 利用者の操作は要らない" in prompt
+
+
+def test_pr_body_keeps_the_steps_the_llm_wrote(tmp_path, monkeypatch):
+    """決定 8（#1752）: LLM が書いた具体的な手順は「無し」でない限り残す。"""
+    got, _ = _migration_pr(tmp_path, monkeypatch, "互換なし", "手順を書く", "- playwright-kit を入れ直す")
+    assert "## 移行の手順\n\n- playwright-kit を入れ直す" in got and "（#1の要求の移行性）" not in got
+
+
+def test_pr_machine_body_has_the_migration_section(tmp_path, monkeypatch):
+    """受け入れ条件 8（#1752）: 機械の本文も「移行の手順」の節を持ち、無ければ「- 無し」と書く。"""
+    root, body = pr_repo(tmp_path, monkeypatch)
+    plan = {
+        "フェーズ": "実装",
+        "課題": [1],
+        "作業場所": str(root),
+        "steps": [{**procedures.pr_step("develop", "T", "", "x", "end"), "body": "template"}],
+    }
+    assert "結果: 完了" in engine.Engine(plan, tmp_path / "state").run()
+    assert "## 利用者向けの変化\n\n- x\n\n## 移行の手順\n\n- 無し\n" in body.read_text()
+    assert "## 移行の手順" in PR_SYSTEM and "- 無し" in PR_SYSTEM
 
 
 def test_run_from_restores_pr_from_previous_report(tmp_path):
