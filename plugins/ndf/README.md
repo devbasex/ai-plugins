@@ -8,10 +8,10 @@ PR 運用、レビュー、調査、実装計画、仕様書化、開発方法�
 
 | ランタイム | 公開 Skill | マニフェスト |
 | --- | --- | --- |
-| Claude Code | 48 個 | `.claude-plugin/plugin.json` |
-| Codex | 44 個 | `.codex-plugin/plugin.json` |
-| Kiro CLI | 45 個 | `dev.kiro/install.sh`（プラグイン機構が無いため installer で導入） |
-| agy | 44 個 | `dev.agy/plugin.json`（取得元の登録が無いため clone から導入） |
+| Claude Code | 47 個 | `.claude-plugin/plugin.json` |
+| Codex | 43 個 | `.codex-plugin/plugin.json` |
+| Kiro CLI | 44 個 | `dev.kiro/install.sh`（プラグイン機構が無いため installer で導入） |
+| agy | 43 個 | `dev.agy/plugin.json`（取得元の登録が無いため clone から導入） |
 
 ## レイアウト
 
@@ -19,7 +19,7 @@ PR 運用、レビュー、調査、実装計画、仕様書化、開発方法�
 plugins/ndf/
 ├── .claude-plugin/plugin.json   # Claude Code のマニフェスト
 ├── .codex-plugin/plugin.json    # Codex のマニフェスト
-├── skills/                      # 配布 Skill の唯一の実体（48 個）
+├── skills/                      # 配布 Skill の唯一の実体（47 個）
 ├── skills/AUTHORING.md          # Skill 執筆の規約
 ├── manifests/                   # ランタイム別の配布 Skill 一覧
 ├── agents/                      # Claude Code のサブエージェント定義（専門 8 個と、3 層の定義 3 個（supervisor 2・worker 1））
@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.60）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.61）
 ```
 
 ### agy
@@ -102,7 +102,7 @@ agy plugin install plugins/ndf/dev.agy                               # 初回
 agy plugin uninstall ndf && agy plugin install plugins/ndf/dev.agy   # 新しい版へ
 ```
 
-導入すると `manifests/agy-skills.txt` に載る Skill 44 個と、エージェント 11 個（専門 8 個と、3 層の定義 3 個（supervisor 2・worker 1））、hook 1 個が
+導入すると `manifests/agy-skills.txt` に載る Skill 43 個と、エージェント 11 個（専門 8 個と、3 層の定義 3 個（supervisor 2・worker 1））、hook 1 個が
 `~/.gemini/config/plugins/ndf/` へコピーされます。symlink は実体へ解決されてコピーされるため、
 clone を消しても導入した内容は残ります。
 
@@ -119,16 +119,11 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.60 へ更新するとき
+## v10.17.61 へ更新するとき
 
-- cross-refactoring の手順の枠は、着手前のテストが終わった時点から数える（#1729）（#1732）
-- CI に任せる戦略では、着手前の上限に範囲テストの所要時間を含める（#1729）（#1732）
-- 締め切りの表と配分の履歴の説明は、枠の起点と着手前のテストの行に沿って読める（#1729）（#1732）
-- `project-decl` が記録する CI の所要時間は、ジョブを飛ばしていない代表の run から測った値になります。（#1730）（#1732）
-- ジョブを飛ばしていない run が見つからないときは、前回記録した壁時計の値がそのまま残ります。（#1730）（#1732）
-- cross-review で結果を残さなかった席があると、`after_no_result` の規則に従ってその席を振り替え、judge まで処理を続けます。（#1731）（#1732）
-- cross-refactoring で結果を残さなかった実装担当・提案担当は reassign で振り替わり、まだ確認していない項目から作業を続けます。（#1731）（#1732）
-- 振り替えの規則と、そのために状態へ追加した欄を、2 つの Skill の文書とライブラリの文書に記載しています。（#1731）（#1732）
+- Google の認証と Drive の操作には、gws を使う google-workspace Skill を使います（#1744）（#1745）
+- playwright-kit は、証跡を Drive へ保管しません（#1744）（#1745）
+- Fix: playwright-kit を 3.0.0 へ上げ、CHANGELOG に移行手順を足す（#1747）
 
 ## Playwright テストについて
 
@@ -419,7 +414,7 @@ agy models   # 認証確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.60/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.61/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -441,14 +436,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.60/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.61/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.60  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.61  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。

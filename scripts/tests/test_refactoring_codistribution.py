@@ -3,8 +3,6 @@
 **`cross-refactoring` は兆候と手法の呼び名を `refactoring` から読む。** 片方だけを配る
 配布先があると、読む側は表を解決できずに止まる。**配る基準は manifest が持つ**ため、
 そちらを固定する。
-
-`google-drive` が `google-auth` を読む形と同じ条件である（#116）。
 """
 
 from __future__ import annotations

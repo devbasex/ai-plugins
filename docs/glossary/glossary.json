@@ -75,6 +75,11 @@
       "id": "ndf-training-optout",
       "name": "NDF の学習の設定",
       "meaning": "LLM のアカウントが入力を学習に使う設定かを確かめ、NDF のセッションの開始で Off にするときの語"
+    },
+    {
+      "id": "ndf-google-workspace",
+      "name": "NDF の Google Workspace の操作",
+      "meaning": "google-workspace の Skill が Google Workspace（Drive・Docs など）を操作するときの語"
     }
   ],
   "terms": [
@@ -2260,15 +2265,13 @@
       "term": "ジョブを飛ばした run",
       "context": "ndf-workflow",
       "meaning": "CI の成功した run のうち、conclusion が skipped のジョブを 1 つ以上含むもの。宣言の解析は CI の所要を測る代表に採らない",
-      "source": "",
-      "pending_source": "issues/issue-1664-design.md"
+      "source": "docs/specifications/project-decl-ci-representative-run.md"
     },
     {
       "term": "代表の run",
       "context": "ndf-workflow",
       "meaning": "宣言の解析がワークフローごとに壁時計とテストの所要を測る 1 件の run。取得した候補（ワークフローごとに新しい順の成功の run を最大 5 件）のうち、ジョブを飛ばしていない最新のもの",
-      "source": "",
-      "pending_source": "issues/issue-1664-design.md"
+      "source": "docs/specifications/project-decl-ci-representative-run.md"
     },
     {
       "term": "入力の指紋",
@@ -3141,50 +3144,50 @@
       "term": "担当",
       "context": "ndf-agent-cli",
       "meaning": "レビュー・提案・実装を受け持つ CLI の起動の単位。ランタイムと、claude ではアカウントで決まる",
-      "pending_source": "issues/issue-919-requirements.md"
+      "source": "docs/specifications/cross-assignee-reassignment-on-no-result.md"
     },
     {
       "term": "席",
       "context": "ndf-cross-review",
       "meaning": "cross-review の 1 ラウンドの 2 つの担当の枠。名前は kiro / kiro-2 の形（SEAT_PATTERN）",
-      "pending_source": "issues/issue-919-requirements.md"
+      "source": "docs/specifications/cross-assignee-reassignment-on-no-result.md"
     },
     {
       "term": "結果なし",
       "context": "ndf-agent-cli",
       "meaning": "担当が結果ファイルを残さずに終わったこと（judge の verdict = no_result、cross-refactoring の failed_attempts）",
-      "pending_source": "issues/issue-919-requirements.md"
+      "source": "docs/specifications/cross-assignee-reassignment-on-no-result.md"
     },
     {
       "term": "利用上限",
       "context": "ndf-agent-cli",
       "meaning": "担当の CLI が使用量の上限に当たって止まったこと（起動結果の理由 usage_limit）",
-      "pending_source": "issues/issue-919-requirements.md"
+      "source": "docs/specifications/cross-assignee-reassignment-on-no-result.md"
     },
     {
       "term": "振り替え",
       "context": "ndf-agent-cli",
       "meaning": "結果なしの担当の役割を、同じ実行の中で別の担当へ移すこと。同じ担当で起動し直すことは含まない",
-      "pending_source": "issues/issue-919-requirements.md"
+      "source": "docs/specifications/cross-assignee-reassignment-on-no-result.md"
     },
     {
       "term": "結果なしの記録",
       "code": "no_results",
       "context": "ndf-agent-cli",
       "meaning": "状態ファイルの no_results。結果なしの 1 回ごとに、担当・理由・振り替えの規則の答え（relaunch / reassign / abort）・振り替え先を追記だけで積む",
-      "pending_source": "issues/issue-919-design.md"
+      "source": "docs/specifications/cross-assignee-reassignment-on-no-result.md"
     },
     {
       "term": "外した担当",
       "context": "ndf-agent-cli",
       "meaning": "結果なしの記録から導く、同じ実行の残りで割り当てないランタイム（claude ではアカウント）",
-      "pending_source": "issues/issue-919-design.md"
+      "source": "docs/specifications/cross-assignee-reassignment-on-no-result.md"
     },
     {
       "term": "提案担当",
       "context": "ndf-cross-refactoring",
       "meaning": "cross-refactoring の propose で改善の提案を出す参加者",
-      "pending_source": "issues/issue-919-requirements.md"
+      "source": "docs/specifications/cross-assignee-reassignment-on-no-result.md"
     },
     {
       "term": "着手前のテスト",
@@ -3203,6 +3206,18 @@
       "context": "ndf-cross-refactoring",
       "meaning": "CI に任せる戦略で、着手前に走らせる範囲テストの所要の見込み（秒）。同じ範囲の履歴の実測か、範囲が全体テストの suite のパスを覆うときの w",
       "source": ""
+    },
+    {
+      "term": "gws",
+      "context": "ndf-google-workspace",
+      "meaning": "Google Workspace CLI（npm の @googleworkspace/cli）。Google の公式サポート外の CLI で、NDF の Google Workspace の操作はすべてこれで行う",
+      "pending_source": "issues/issue-744-requirements.md"
+    },
+    {
+      "term": "gws の状態",
+      "context": "ndf-google-workspace",
+      "meaning": "google-workspace の確認のスクリプト（gws-check.py）が返す 4 つの値（authenticated / missing / unauthenticated / uninstallable）。状態ごとに次の手が 1 つに決まる",
+      "pending_source": "issues/issue-744-design.md"
     }
   ]
 }

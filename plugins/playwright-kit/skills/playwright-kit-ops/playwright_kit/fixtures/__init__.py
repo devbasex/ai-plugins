@@ -2,7 +2,7 @@
 
 利用者は通常の pytest テストを書き、`pwk_config` / `pwk_role_<id>` 等の
 fixture をパラメタ宣言するだけで NDF の機能 (config / 認証 / evidence /
-accessibility / web vitals / overlay / Drive) を享受できる。
+accessibility / web vitals / overlay) を享受できる。
 
 各 fixture の実体はサブモジュールに分離する:
 - ``auth``          : ``pwk_config`` / ``pwk_role_<id>`` (login 済 storage_state)

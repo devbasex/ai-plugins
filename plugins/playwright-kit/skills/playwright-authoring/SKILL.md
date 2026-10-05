@@ -182,7 +182,6 @@ scripts/app_ready.sh https://localhost:8443/ --insecure
 | `--pwk-no-evidence` | HAR / trace / video の収集を全て OFF |
 | `--pwk-har-mode {minimal,full,none}` | HAR 録画モード (default: minimal) |
 | `--pwk-overlay` | overlay (赤丸カーソル + 字幕) を ON |
-| `--pwk-drive-folder=<ID>` | 実行後に Drive へ自動アップロード (→ `/playwright-kit:playwright-evidence`) |
 
 ### エビデンス種別と成果物
 

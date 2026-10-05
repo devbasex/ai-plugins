@@ -25,14 +25,6 @@ dependencies = [
     "pydantic>=2.7,<3",
 ]
 
-[project.optional-dependencies]
-# Drive 連携: scripts/upload_evidence.py / gdrive_upload_dir.py 等が使用
-drive = [
-    "google-api-python-client>=2.0",
-    "google-auth>=2.0",
-    "google-auth-oauthlib>=1.0",
-]
-
 [project.entry-points."pytest11"]
 # pytest が auto-discover する plugin entry-point。
 # `uv sync` 完了後 (editable install) は `pytest` 起動だけで playwright_kit

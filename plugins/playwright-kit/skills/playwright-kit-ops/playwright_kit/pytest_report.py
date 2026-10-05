@@ -1,7 +1,6 @@
 """pytest hook で集めた test result から Markdown レポートを生成する。
 
 ``pytest_terminal_summary`` から呼ばれ、``reports/<run-id>/report.md`` を生成する。
-``--pwk-drive-folder`` 指定時は Drive アップロードと URL 差し込みも担当。
 """
 
 from __future__ import annotations
