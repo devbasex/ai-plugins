@@ -48,7 +48,13 @@ def _commit(work, rel, index, text, item_id=None):
 
 
 def _item(item_id, rank, implement, test=None, status="verified"):
-    return {"id": item_id, "rank": rank, "path": "src/foo.py", "status": status, "commits": {"test": test, "implement": implement, "fix": []}}
+    return {
+        "id": item_id,
+        "rank": rank,
+        "path": "src/foo.py",
+        "status": status,
+        "commits": {"test": test, "implement": implement, "fix": []},
+    }
 
 
 def _abcd(tmp_path, phase="verify"):
@@ -182,7 +188,13 @@ def test_the_report_reads_an_old_widened_record(tmp_path, cmd_report, env_tmp_di
         tmp_path,
         tmp_path / "work",
         items=[
-            {"id": "I-001", "path": "src/a.py", "symbol": "f", "status": "reverted", "failure_reason": "x（widened の取り消しに巻き込まれた）"},
+            {
+                "id": "I-001",
+                "path": "src/a.py",
+                "symbol": "f",
+                "status": "reverted",
+                "failure_reason": "x（widened の取り消しに巻き込まれた）",
+            },
         ],
         drops=[{"at": "2026-10-06T11:04:35", "mode": "widened", "reason": "x", "dropped": ["I-001"], "extra": [], "removed": 2}],
     )

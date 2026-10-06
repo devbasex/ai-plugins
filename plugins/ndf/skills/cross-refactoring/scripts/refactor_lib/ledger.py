@@ -1,7 +1,7 @@
 """取り消しの判定（#1482）。改善項目を取り消したかと、各コミットを残すか・消すか・戻すか・公開してよいかを決める。
 
 **判定はここ 1 か所に置く。** 取り消しの 4 つの経路（`undo.drop` / `intake.discard_unverified` /
-`converge._apply_fix_result` / 最終ゲート修正のマージ処理）と push の直前の照合が、どれもここを呼ぶ。
+`fix_intake._apply_fix_result` / 最終ゲート修正のマージ処理）と push の直前の照合が、どれもここを呼ぶ。
 git を書き換えるのは `undo`、push するのは `publish` で、どちらも判定の結果に従うだけである。
 
 **git を書き換えず、終了もしない。** 読むのは `rev-parse`・`rev-list`・`show --name-only`・`log` だけ。

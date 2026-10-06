@@ -198,7 +198,14 @@ def test_items_failing_the_same_structure_check_are_dropped_after_one_fix(
             changes[item_id] = (name, _module(name, 1) + f"\n\nX = {n}\n")
     big_ids = [i for i, (name, _) in changes.items() if name == "big"]
     assert len(big_ids) == 8
-    _implement(flow, cmd_setup, cmd_implement, [f"m{n:02d}" for n in range(1, 11)], changes, extra={"src/big.py": "VALUE = 0\n", "tests/test_big.py": limit})
+    _implement(
+        flow,
+        cmd_setup,
+        cmd_implement,
+        [f"m{n:02d}" for n in range(1, 11)],
+        changes,
+        extra={"src/big.py": "VALUE = 0\n", "tests/test_big.py": limit},
+    )
     state = read_state(flow["path"])
     for item in state["items"]:
         if item["id"] in big_ids:
