@@ -3388,25 +3388,25 @@
       "term": "積み直し",
       "context": "ndf-cross-refactoring",
       "meaning": "取り消しで、取り消しの起点から HEAD までの残すコミット（未公開のもの）を cherry-pick で順に積み直すこと。項目に属するコミットが衝突したら、その項目だけを外して続ける",
-      "pending_source": "issues/issue-1793-requirements.md"
+      "source": "docs/specifications/cross-refactoring-failed-item-rules.md"
     },
     {
       "term": "外した項目",
       "context": "ndf-cross-refactoring",
       "meaning": "cross-refactoring の取り消しの積み直しで、自分のコミットが衝突したために取り消した改善項目。外した理由（どの項目の取り消しで、どのコミットが衝突したか）を持つ",
-      "pending_source": "issues/issue-1793-design.md"
+      "source": "docs/specifications/cross-refactoring-failed-item-rules.md"
     },
     {
       "term": "直さなかった項目",
       "context": "ndf-cross-refactoring",
       "meaning": "cross-refactoring で、結果を残して終わった修正の起動の後、修正の範囲に自分の Item-Id のコミットが 1 つも無い改善項目。次の検証の最初に取り消す",
-      "pending_source": "issues/issue-1793-design.md"
+      "source": "docs/specifications/cross-refactoring-failed-item-rules.md"
     },
     {
       "term": "確かめ直し",
       "context": "ndf-cross-refactoring",
       "meaning": "cross-refactoring で、最終ゲートより前の取り消しで HEAD が変わった後、残った改善項目を新しい HEAD の範囲テストで判定し直すこと",
-      "pending_source": "issues/issue-1793-design.md"
+      "source": "docs/specifications/cross-refactoring-failed-item-rules.md"
     }
   ]
 }
