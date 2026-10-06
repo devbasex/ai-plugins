@@ -30,6 +30,7 @@ import worktree_deps
 from .. import ABORT, die, info, init_test
 from .. import baseline as baseline_lib
 from .. import ci_coverage
+from .. import pr_gate
 from .. import runtime_decl
 from .. import timeline
 from ..paths import (
@@ -219,10 +220,11 @@ def _pr_payload(repo: str, pr: int) -> Optional[dict[str, Any]]:
     return body if isinstance(body, dict) and body.get("number") else None
 
 
-def _fetch_pr_context(pr: int, repo: Optional[str] = None) -> tuple[str, str, str, bool, str]:
+def _fetch_pr_context(pr: int, repo: Optional[str] = None) -> tuple[str, str, str, bool, str, pr_gate.PrStatus]:
     """GitHub から Pull Request のメタデータを取り、自分の Pull Request かを判定する。
 
-    返すのは `(repo, base_branch, head_branch, is_own_pr, author)`。
+    返すのは `(repo, base_branch, head_branch, is_own_pr, author, status)`。`status` は同じ応答から読んだ
+    Pull Request の状態で、入口の検査に使う（#1658。呼び出しを増やさない）。
 
     **作成者・head・base は REST の 1 回でまとめて取る**（#271）。項目ごとに
     `gh pr view` を投げると、同じ Pull Request へ GraphQL を 3 点使う。尽きるのは
@@ -256,7 +258,7 @@ def _fetch_pr_context(pr: int, repo: Optional[str] = None) -> tuple[str, str, st
     is_own_pr = bool(viewer) and viewer == author
     head_branch = str((body.get("head") or {}).get("ref") or "")
     base_branch = str((body.get("base") or {}).get("ref") or "")
-    return resolved, base_branch, head_branch, is_own_pr, author
+    return resolved, base_branch, head_branch, is_own_pr, author, pr_gate.PrStatus.of(body)
 
 
 def _plan_mode_of(plan_file: Optional[str]) -> str:
@@ -461,6 +463,8 @@ class _InitPreparation:
     strategy: ts.Strategy
     decl: dict[str, Any]
     ci_coverage: dict[str, Any]
+    # 再開する前回の状態（`_pending_state` の結果）。新しい実行なら `None`。
+    pending: Optional[dict[str, Any]] = None
 
 
 def _resolve_init_inputs(args: argparse.Namespace) -> Optional[_InitInputs]:
@@ -488,7 +492,7 @@ def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
     """Pull Request の文脈を取り、作業ディレクトリを用意して `--scope` の関門を通し、テストの戦略を解く。
     継続的統合のジョブのうち宣言に無いものは知らせるだけで止めない（#464 E2）。状態には新しい実行だけが書く。"""
     # リポジトリ名は git の設定から求め、Pull Request の応答で確かめる（#271）。
-    repo, base_branch, head_branch, is_own_pr, author = _fetch_pr_context(args.pr)
+    repo, base_branch, head_branch, is_own_pr, author, status = _fetch_pr_context(args.pr)
     if is_own_pr:
         info(f"⚠ 自分の Pull Request です（作成者 {author}）— 投稿は COMMENT へ倒します")
 
@@ -496,6 +500,13 @@ def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
         pathlib.Path(args.worktree_root).resolve() if args.worktree_root else default_worktree_base() / repo_lib.slug(repo) / f"rf{args.pr}"
     )
     work = root / "work"
+    # **Pull Request の状態は作業ディレクトリを用意する前に確かめる**（#1658 I4）。止まった実行は何も作らない。
+    # 置き場は求めるだけで作らない。Draft を求めるのは新しい実行だけである（要求の前提 1）。
+    state_file = state_path(tmp_dir_for(work), args.pr)
+    pending = _pending_state(work, state_file)
+    reason = pr_gate.refusal(args.pr, repo, status, resuming=pending is not None)
+    if reason:
+        die(reason)
     _ensure_work_worktree(work, head_branch)
 
     # **テストの戦略は宣言（`.ndf/project.json` の `test`）と引数から解く**（#1334 E1）。コマンドの文字列は
@@ -537,38 +548,51 @@ def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
         root=root,
         work=work,
         tmp_dir=tmp_dir,
-        state_file=state_path(tmp_dir, args.pr),
+        state_file=state_file,
         strategy=strategy,
         decl=decl,
         ci_coverage=coverage.as_state(),
+        pending=pending,
     )
 
 
-def _resume_if_pending(args: argparse.Namespace, inputs: _InitInputs, prep: _InitPreparation) -> bool:
-    """終わっていない前回の状態があれば再開し、`True` を返す。
+def _pending_state(work: pathlib.Path, state_file: pathlib.Path) -> Optional[dict[str, Any]]:
+    """終わっていない前回の状態を 1 度だけ読んで返す。新しく始めるなら `None`。
 
     | 前回の状態 | 扱い |
     | --- | --- |
     | 無い | 新しく始める |
+    | `work` の中にあり、`work` が登録された worktree でない | 新しく始める（`_ensure_work_worktree` が退避する） |
     | 版 2 で `phase` が `done` | 新しく始める（状態を作り直す） |
     | 版 2 で終わっていない | 再開する |
     | 旧い形（`schema` を持たず `rounds` を持つ）で `final` が空 | **止める**（決定 18） |
     | 旧い形で `final` が入っている | 新しく始める（版 2 の形で作り直す） |
+
+    入口の検査（`pr_gate.refusal`）と再開（`_resume_if_pending`）がこの結果を共に使う（#1658 の決定 3）。
     """
-    if not prep.state_file.exists():
-        return False
-    state = statefile.load(prep.state_file)
+    if not state_file.exists():
+        return None
+    if work in state_file.parents and work.exists() and not _is_registered_worktree(work):
+        return None
+    state = statefile.load(state_file)
     if state.get("schema") != SCHEMA:
         if "rounds" in state and state.get("final") is None:
             die(
                 "旧い版（ラウンド制）の状態ファイルが途中のまま残っています。"
-                f"旧い版（v10.17.5 以前）で終えるか、{prep.state_file} を消して始め直してください"
+                f"旧い版（v10.17.5 以前）で終えるか、{state_file} を消して始め直してください"
             )
         info(f"ℹ 旧い版の終わった状態ファイルを版 {SCHEMA} の形で作り直します")
-        return False
+        return None
     if state.get("phase") == "done":
+        return None
+    return state
+
+
+def _resume_if_pending(args: argparse.Namespace, inputs: _InitInputs, prep: _InitPreparation) -> bool:
+    """終わっていない前回の状態（`prep.pending`）があれば再開し、`True` を返す。"""
+    if prep.pending is None:
         return False
-    _resume(prep.state_file, state, args, inputs, prep.is_own_pr)
+    _resume(prep.state_file, prep.pending, args, inputs, prep.is_own_pr)
     return True
 
 
