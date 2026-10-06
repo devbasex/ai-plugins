@@ -137,7 +137,7 @@ graph LR
 graph TD
   subgraph host[利用者のホスト]
     drv[駆動 drive.py<br/>catch-up・readopt を打つ] -->|サブコマンド| rf[refactor.py]
-    drv -->|monitor.py --alive-file| cli[作業の CLI のプロセス]
+    drv -->|"monitor.py --alive-file"| cli[作業の CLI のプロセス]
     rf -->|テストの実行| tp[テストのプロセス]
     subgraph wd[作業ディレクトリ .cross_refactoring/]
       st[(状態ファイル)]
