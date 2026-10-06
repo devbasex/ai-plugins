@@ -564,6 +564,8 @@ ai-plugins の開発で formatter と静的解析を手元と CI で走らせる
 | 検査のコマンド | — | 手元で formatter の確認と静的解析を、CI と同じ版・同じ設定で走らせる 1 つのコマンド | — | — | — |
 | 一括の自動修正 | — | リポジトリの全対象へ ruff check --fix を掛け、結果を 1 つのコミットにしたもの。一括の整形と同じく .git-blame-ignore-revs に載せる | — | — | — |
 | 抑止 | — | 静的解析の指摘を、行のコメント（# noqa・# shellcheck disable=）か設定の除外で出さなくすること。理由を添える | — | — | — |
+| 古いバイトコード | — | Python が、書き換えたソースを、前の内容から作った .pyc で読むこと。.pyc はソースの更新時刻（秒）と大きさだけで新しさを照らすため、同じ秒に同じ大きさで書き換えると見分けられない | — | — | — |
+| git を使うテストの土台 | — | cross-refactoring のテストで、git のリポジトリの作業ディレクトリ・pytest の起動口・状態ファイルを用意する補助（crossref_helpers.build_git_flow） | — | — | — |
 
 ## NDF の学習の設定（`ndf-training-optout`）
 
