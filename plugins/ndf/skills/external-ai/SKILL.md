@@ -110,7 +110,11 @@ LLM が決めるのは **どの CLI に渡すか**（上の表）と **プロン
 | `stopped` | `policy` | リポジトリのランタイムの宣言（`.ndf/runtimes.json`）の外。CLI を起動していない。`metrics.reason` を読み、宣言の中の CLI へ渡す（終了コード 3） |
 | `stopped` | `early_error` / `launch_failed` | `metrics.detail` を読む |
 
-- 使えるかだけを先に知りたいときは `external-ai.py check <runtime>`（CLI の有無と認証）
+- 使えるかだけを先に知りたいときは `external-ai.py check <runtime>`（CLI の有無・認証・モデルを 1 回引けるか。
+  cross-review / cross-refactoring の `init` と同じ確認）。通らなければ `auth` で終わり、`metrics.reason` に理由の語
+  （`auth_expired` / `model_unavailable` など）が入る。設定のモデルを引けず既定のモデルで通ったときは
+  `metrics.default_model` にその名前が入るので、続く `run` に `--model <その名前>` を渡す（`next` に案内が出る）。
+  `run` は起動の前に認証確認だけを行う
 - 上限は `limits.py` の工程の値（`--phase`）で、`--timeout` / `--stall-timeout` で狭められる。
   上限を超えると CLI を止めて必ず終わる
 - 回収は結果ファイル → stdout（claude は JSON の `result`、kiro は ANSI を除く） → stderr の末尾の順で、
@@ -206,6 +210,7 @@ CLI 固有の症状（サンドボックス失敗、承認モードによるハ�
 | `timeout` / `stalled` で終わる | 調査範囲が広すぎる、探索ループに入った | 読むべきファイルを明示リスト化し、スコープ外を明記して渡し直す |
 | 「ファイルを読めません」と返る | 相対パス指定で cwd が想定と違う | プロンプトには**絶対パス**を書き、`--workdir` を渡す |
 | `auth` で終わる | ログインセッション失効 | 各 CLI のログイン手順をやり直す（補助ファイル参照） |
+| `check` が `auth` で `metrics.reason` が `model_unavailable` | 設定のモデルをその利用者か CLI の版が使えず、既定のモデルでも引けない | CLI を更新するか、設定のモデルを直す |
 
 ## 既知の制約とコスト
 
