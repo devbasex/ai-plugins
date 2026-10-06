@@ -20,6 +20,7 @@ jobs:
   # 配布の PR（版数と説明だけの差分、または develop で通ったコミットを進めるだけの main 宛の
   # PR）では smoke を省く（#1055）。判定は scripts/ci-heavy-skip.py が行う。push では常に回す
   ci-scope:
+    name: runtime-smoke-scope
     runs-on: ubuntu-latest
     permissions:
       actions: read
