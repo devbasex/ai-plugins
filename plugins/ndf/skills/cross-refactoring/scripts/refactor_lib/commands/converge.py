@@ -10,7 +10,7 @@
 | 返す値 | 意味 | 駆動がすること |
 | --- | --- | --- |
 | `VERIFY=fix` | 直す項目が残った | 修正を 1 回起動し、`merge-fix` の後に `verify` へ戻る |
-| `VERIFY=done` | 残った項目の範囲テストがすべて通った | 最終ゲートへ |
+| `VERIFY=done` | 残った項目の範囲テストがすべて通った | 採り直しの判定（`readopt`）へ。push は最終ゲートの入口の 1 度だけ |
 """
 
 from __future__ import annotations
@@ -22,9 +22,9 @@ from typing import Any, Optional
 
 import statefile
 
-from .. import budget, clock, culprit, danger, info, publish, scope_verdict, targets, timeline, triage, wholetest
+from .. import budget, clock, culprit, danger, info, scope_verdict, targets, timeline, triage, wholetest
 from ..gitfacts import commit_files, discard_impl_leftovers
-from ..items import FAILING, IMPLEMENTED, VERIFIED, item_shas, live_items, newest_first
+from ..items import FAILING, IMPLEMENTED, VERIFIED, in_current_round, item_shas, live_items, newest_first
 from ..outbound import item_lines, plan_line
 from ..paths import head_sha, load_state, work_dir
 from ..phases import add_phase_seconds, finish_phase
@@ -69,12 +69,12 @@ def _revert_shared(
 def _fix_stop(state: dict[str, Any]) -> bool:
     """修正の試行を打ち切るか。**回数ではなく時計で決める**（決定 23）。
 
-    修正に使える残り（`budget.fix_time_left`）が予備時間の `fix`（修正 1 回の見積り）に
-    足りなければ打ち切る。範囲テストの修正と全体のテストの直しが同じ判定を使う
+    修正に使える残り（上限の表の `fix_end_at` までの `budget.fix_time_left`。再開でずれた値）が予備時間の `fix`
+    （修正 1 回の見積り）に足りなければ打ち切る。範囲テストの修正と全体のテストの直しが同じ判定を使う
     （決定 22）。1 回の修正 = 実装担当の 1 起動で、次の試行の前にここで時計を見る。
     """
     reserve = (state.get("plan") or {}).get("reserve") or {}
-    left = budget.fix_time_left(clock.parse(state["started_at"]), int(state["budget_minutes"]), reserve, clock.now())
+    left = budget.fix_time_left(culprit.fix_deadline(state), clock.now())
     return bool(state.get("fix_no_relaunch")) or left < float(reserve.get("fix") or 0.0)  # 旗は振り替え先の無い修正（#919）
 
 
@@ -98,6 +98,9 @@ def _give_up(path: pathlib.Path, state: dict[str, Any]) -> bool:
         groups.setdefault(targets.command_key(item), []).append(item)
     for group in groups.values():
         _revert_shared(path, state, group, scope_verdict.reason)
+    if groups:
+        # 時間で直しの試行を打ち切ったこと（報告の「省いたもの」。#1743）
+        state.setdefault("fix_stats", {})["cut_off"] = True
     return bool(groups)
 
 
@@ -166,7 +169,10 @@ def _d5(item: dict[str, Any]) -> bool:
 
 
 def _flag_items(state: dict[str, Any]) -> list[str]:
-    """検証を通った項目に危険フラグを付け、立った危険フラグの集合を返す。**付け済みの項目は見直さない。**"""
+    """検証を通った項目に危険フラグを付け、今の巡で採った項目に立った危険フラグの集合を返す。**付け済みの項目は見直さない。**
+
+    前の巡の項目のフラグは、その巡の全体テストか最終ゲートへ寄せた記録が持つ（#1743 決定 10）。
+    """
     work = work_dir(state)
     scope = list(state.get("target_scope") or [])
     flags: list[str] = []
@@ -177,12 +183,13 @@ def _flag_items(state: dict[str, Any]) -> list[str]:
             found = danger.item_flags(work, item, item_shas(item), _item_files(work, item), scope, _test_files(state, item), _d5(item))
             item["danger"], item["danger_hits"] = found["flags"], found["hits"]
             item["danger_checked"] = True
-        flags.extend(f for f in item.get("danger") or [] if f not in flags)
+        if in_current_round(state, item):
+            flags.extend(f for f in item.get("danger") or [] if f not in flags)
     return sorted(flags)
 
 
 def _whole_test(path: pathlib.Path, state: dict[str, Any], flags: list[str]) -> bool:
-    """危険フラグが立ったら全体テストを 1 度だけ走らせる（AC13 AC14）。
+    """危険フラグが立ったら全体テストを巡ごとに 1 度だけ走らせる（AC13 AC14。前の巡の記録は `whole_test_history` にある）。
 
     落ちたら落ちたテストを見分け（決定 22）、変更起因のものがあれば修正へ回す。
     修正へ回したら真を返す。直しの途中（`resolution: fixing`）なら、全体テストは
@@ -235,7 +242,7 @@ def _triage_whole(
     log: pathlib.Path,
 ) -> bool:
     """落ちた全体テストを見分け、変更起因のものがあれば修正へ回す。修正へ回したら真。"""
-    flagged = [i for i in newest_first(live_items(state)) if i.get("danger")]
+    flagged = [i for i in newest_first(live_items(state)) if i.get("danger") and in_current_round(state, i)]
     record["items"] = [i["id"] for i in flagged]
     record.update(triage.classify(state, timed_out))
     statefile.save(path, state)
@@ -346,10 +353,9 @@ def cmd_verify(args: argparse.Namespace) -> None:
             break
     _account(state, started)
     finish_phase(state, "verify")
-    state["phase"] = "final"
+    # 次は採り直しの判定。公開は最終ゲートの入口の 1 度だけで、巡ごとに push しない（#1399・#1743 決定 10）
+    state["phase"] = "readopt"
     statefile.save(path, state)
-    # 最終ゲートへ入る時点の公開が、実行で最初の push になる（#1399）
-    publish.enter_final_gate(path, state)
     kept = [i["id"] for i in live_items(state)]
     info(f"✅ 検証を終えました（残った項目 {len(kept)} 件）。{plan_line(state)}")
     for line in item_lines(state, kept):

@@ -127,7 +127,8 @@ DEFER_REASONS = (
 )
 
 # 手順の名前（#933）。**状態・履歴・`launch-cli.sh`・`limits.py`・雛形で同じ語を使う。**
-PHASES = ("propose", "plan", "add-tests", "implement", "verify", "final", "done")
+# `readopt` は検証の後・最終ゲートの前の採り直しの判定（#1743 決定 10）
+PHASES = ("propose", "plan", "add-tests", "implement", "verify", "readopt", "final", "done")
 
 # テストの追加・実装・修正のコミットに必須のトレーラー。1 つでも欠けたら当該項目を
 # 失敗にする。自由文で「codex が実装」と書かせると集計に使えないため、必ずトレーラー

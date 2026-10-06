@@ -23,14 +23,10 @@ RESERVE = {"danger_whole_test": 1.0, "final_whole_test": 1.0, "fix": 5.5, "final
 
 
 def _items(start_offsets):
-    """着手の締め切り（開始からの分）と見積り（分）を持つ項目。"""
+    """採っていて未検証の項目（見積りは分）。"""
     return [
-        {
-            "start_deadline": (START + a * M).isoformat(),
-            "test_start_deadline": (START + t * M).isoformat() if t is not None else None,
-            "estimate": {"test": 2.7 if t is not None else 0.0, "implement": 1.3, "verify": 0.2},
-        }
-        for a, t in start_offsets
+        {"status": "planned", "estimate": {"test": 2.7 if t is not None else 0.0, "implement": 1.3, "verify": 0.2}}
+        for _a, t in start_offsets
     ]
 
 
@@ -45,9 +41,10 @@ def test_every_limit_follows_the_budget(timeline, budget_minutes):
     assert got["test_timeout"] == max(60, round(b * 60 * 0.01))  # 3 × 20 秒と 0.01·B の大きい方
     assert got["propose_end_at"] == (START + b * 0.2 * M).isoformat(timespec="seconds")
     assert got["plan_end_at"] == (START + b * 0.3 * M).isoformat(timespec="seconds")
-    # 手順の終わり = 最後の項目の完了の締め切り（着手の締め切り + 見積り）
-    assert got["add_tests_end_at"] == (START + (b * 0.4 + 2.7) * M).isoformat(timespec="seconds")
-    assert got["implement_end_at"] == (START + (b * 0.6 + 1.3) * M).isoformat(timespec="seconds")
+    # 実装の終わり = 打ち切り − R − Σ verify、テストの追加の終わり = 実装の終わり − Σ implement（#1743 I13）
+    implement_end = START + (b - 13.0 - 0.4) * M
+    assert got["implement_end_at"] == implement_end.isoformat(timespec="seconds")
+    assert got["add_tests_end_at"] == (implement_end - 2.6 * M).isoformat(timespec="seconds")
     # 直しの試行の打ち切り = 開始 + B − 全体のテストの予備時間 2 つ − 最終ゲートの修正の予備時間（決定 26）
     assert got["fix_end_at"] == (START + (b - 2 - 5.5) * M).isoformat(timespec="seconds")
     assert got["final_end_at"] == (START + b * M).isoformat(timespec="seconds")

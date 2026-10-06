@@ -131,7 +131,12 @@ def test_the_five_phases_run_once_and_append_one_history_row(
     _call(cmd_converge, "cmd_verify")
     state = read_state(path)
     assert state["items"][0]["status"] == "verified"
-    assert state["phase"] == "final"
+    assert state["phase"] == "readopt"
+    # 採り直す候補が無ければ最終ゲートへ移す（#1743 決定 10）
+    readopt = __import__("refactor_lib.commands.readopt", fromlist=["cmd_readopt"])
+    with pytest.raises(SystemExit) as e:
+        _call(readopt, "cmd_readopt")
+    assert e.value.code == 2 and read_state(path)["phase"] == "final"
 
     _call(cmd_gate, "cmd_final_gate")
     _call(cmd_report, "cmd_finalize", review_status=None)

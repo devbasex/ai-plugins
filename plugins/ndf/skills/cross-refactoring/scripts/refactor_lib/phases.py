@@ -46,6 +46,22 @@ def add_phase_seconds(state: dict[str, Any], name: str, seconds: float) -> None:
     record["seconds"] = round(float(record.get("seconds") or 0.0) + max(seconds, 0.0), 1)
 
 
+def phase_seconds(state: dict[str, Any]) -> dict[str, Any]:
+    """手順ごとの秒。採り直しが前の巡の記録を移した `phases_history` の同じ名前の秒を足す（#1743）。"""
+    totals: dict[str, Any] = {}
+    spans = [(e.get("name"), e.get("record")) for e in state.get("phases_history") or []]
+    spans += list((state.get("phases") or {}).items())
+    for name, span in spans:
+        if not isinstance(span, dict) or not name:
+            continue
+        seconds = span.get("seconds")
+        if seconds is None:
+            totals.setdefault(name, None)
+            continue
+        totals[name] = round(float(totals.get(name) or 0.0) + float(seconds), 1)
+    return totals
+
+
 def elapsed_minutes(state: dict[str, Any]) -> float:
     """実行の開始からの経過（分）。"""
     seconds = clock.seconds_between(state.get("started_at"), clock.now())

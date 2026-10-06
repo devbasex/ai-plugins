@@ -76,8 +76,10 @@ def test_items_carry_rank_estimate_tests_and_targets(planned, cmd_plan, capsys):
     # 範囲テストは戦略の雛形の `{paths}` を対象へ置き換えたもの（#1334 AC2）。語は雛形の語の並びから `{paths}` を除いたものを含む。
     assert items[0]["scope_commands"] == [{"suite": "pytest", "kind": "test", "command": shlex.join(SCOPE_WORDS + ["tests/test_new.py"])}]
     assert items[0]["estimate"] == {"test": 2.7, "implement": 1.3, "verify": 0.2}
-    assert items[0]["test_start_deadline"] is not None
-    assert items[1]["test_start_deadline"] is None
+    # 項目は期限を持たず、巡の番号を持つ（#1743 I13）
+    assert all("start_deadline" not in i and "test_start_deadline" not in i and i["round"] == 1 for i in items)
+    assert state["readopt"] == {"round": 1, "events": []}
+    assert state["pause"] == {"seconds": 0, "shifted_seconds": 0, "legacy": False, "events": []}
     assert state["plan"]["table_source"] == "defaults"
     assert "TESTS_NEEDED=1" in capsys.readouterr().out
 
@@ -85,7 +87,8 @@ def test_items_carry_rank_estimate_tests_and_targets(planned, cmd_plan, capsys):
 def test_items_that_do_not_fit_are_skipped_and_the_rest_packed(planned, cmd_plan):
     """AC8 / 決定 10: 入らない項目は飛ばし、後ろの小さな項目を詰める。"""
     big, small = _candidate(1, "big"), _candidate(2, "small")
-    # 使える時間 = 20 − 経過 5 − 予備時間（0.1 + 0.1 + 5.5 + 最終ゲートの修正 5.5）≒ 3.8 分。
+    # 使える時間 = 20 − 経過 5 − 予備時間（最終ゲートの全体テスト 0.1 + 5.5 + 最終ゲートの修正 5.5）≒ 3.9 分。
+    # 危険フラグの全体テストは最終ゲートと兼ねるため数えない（#1743 決定 1）。
     # big は 4.2 分、small は 1.5 分。
     path = planned(
         [big, small],
@@ -100,7 +103,7 @@ def test_items_that_do_not_fit_are_skipped_and_the_rest_packed(planned, cmd_plan
     assert [i["candidate_id"] for i in state["items"]] == ["C-002"]
     assert [(d["path"], d["symbol"], d["defer_reason"]) for d in state["deferred_items"]] == [("src/a.py", "big", "budget")]
     reserve = state["plan"]["reserve"]
-    assert reserve["danger_whole_test"] == pytest.approx(0.1)
+    assert reserve["danger_whole_test"] == 0.0
     assert reserve["final_whole_test"] == pytest.approx(0.1)
     assert reserve["fix"] == pytest.approx(5.5)
     assert reserve["final_fix"] == pytest.approx(5.5)
@@ -251,7 +254,7 @@ def test_the_plan_writes_every_runtime_value_to_the_state(planned, cmd_plan):
     ):
         assert limits[key] is not None, key
     for item in state["items"]:
-        assert item["start_deadline"] and "public_io" in item
+        assert "public_io" in item
 
 
 def test_d5_is_decided_by_jev_at_the_plan(planned, cmd_plan, monkeypatch):

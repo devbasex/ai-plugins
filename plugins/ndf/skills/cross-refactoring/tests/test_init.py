@@ -930,10 +930,10 @@ def test_init_records_the_vocabulary_for_the_prompt(run_init, tmp_path, vocabula
 def test_resume_before_the_plan_rebuilds_the_limits_from_the_new_budget(run_init, tmp_path):
     """決定 24 — 改修計画の前に予算を置き換えた再開は、上限の表を新しい予算で組み直す。"""
     run_init(_args(tmp_path, budget_minutes="30"))
-    run_init(_args(tmp_path, budget_minutes="10"))
+    run_init(_args(tmp_path, budget_minutes="20"))
     _, after = _state_of(tmp_path)
-    assert after["budget_minutes"] == 10
-    assert after["limits"]["init_test_timeout"] == 60 and after["limits"]["margin_seconds"] == 30
+    assert after["budget_minutes"] == 20
+    assert after["limits"]["init_test_timeout"] == 120 and after["limits"]["margin_seconds"] == 60
 
 
 @pytest.mark.parametrize(
@@ -1502,13 +1502,7 @@ def test_start_phase_rewrites_the_launch_start_for_fix(phase_state, start_phase)
 # 予算 60 分・開始 10:00。余裕は 0.05·B = 180 秒（決定 24）。
 PLANNED = {
     "plan": {"reserve": {"danger_whole_test": 1.0, "final_whole_test": 1.0, "fix": 5.5}},
-    "items": [
-        {
-            "start_deadline": "2026-09-24T10:30:00+09:00",
-            "test_start_deadline": "2026-09-24T10:20:00+09:00",
-            "estimate": {"test": 3.0, "implement": 2.0, "verify": 0.2},
-        }
-    ],
+    "items": [{"status": "planned", "estimate": {"test": 3.0, "implement": 2.0, "verify": 0.2}}],
 }
 
 
@@ -1517,8 +1511,8 @@ PLANNED = {
     [
         ("propose", False, 6 + 12 * 60 + 180),  # 提案の枠の終わり 10:12 + 着手前のテスト 6 秒（#1385）
         ("plan", False, 6 + 18 * 60 + 180),  # 改修計画の枠の終わり 10:18 + 6 秒
-        ("add-tests", True, 23 * 60 + 180),  # 最後の項目の完了の締め切り 10:20 + 3 分
-        ("implement", True, 32 * 60 + 180),  # 10:30 + 2 分
+        ("add-tests", True, round(50.3 * 60) + 180),  # 実装の終わり − Σ implement（#1743 I13）
+        ("implement", True, round(52.3 * 60) + 180),  # 11:00 − R 7.5 分 − Σ verify 0.2 分
         ("fix", True, 58 * 60 + 180),  # 開始 + 60 − 全体のテストの予備時間 2 分
         ("final-fix", False, 60 * 60 + 180),  # 想定最大時間の終わり 11:00
     ],
@@ -1922,24 +1916,25 @@ def _stopped_init(run_init, tmp_path, init_clock, capsys):
 
 def test_init_stops_before_the_proposers_when_the_windows_do_not_fit(run_init, tmp_path, init_clock, slow_baseline, capsys):
     captured = _stopped_init(run_init, tmp_path, init_clock, capsys)
-    assert "--budget-minutes を 39 以上" in captured.err
+    # 下限 = ceil(((o + 300) / 60 + R + L) / 0.70)。R = 21.67 + 5.5 + 5.5、L = 1.5（配分の初期値。#1743 I8）
+    assert "--budget-minutes を 87 以上" in captured.err
     assert "PHASE=" not in captured.out, "提案へ進む出力を出さない"
     _, state = _state_of(tmp_path)
     assert state["window_stopped_at"] and "resumed_at" not in state
 
     # 1 分後に下限の予算で打ち直すと、着手前のテストを走らせずに枠を打ち直した時刻から数えて進む
     init_clock(1360)
-    run_init(_args(tmp_path, budget_minutes="39"))
+    run_init(_args(tmp_path, budget_minutes="87"))
     _, state = _state_of(tmp_path)
     assert slow_baseline["calls"] == 1
     assert "window_stopped_at" not in state and state["resumed_at"]
-    assert _window_seconds(state, "propose_end_at") == 1828
+    assert _window_seconds(state, "propose_end_at") == 1360 + 1044
     assert "PHASE=" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
     "restart, budget, propose_end",
-    [(1600, "39", 1600 + 468), (1500, "40", 1500 + 480)],
+    [(1600, "87", 1600 + 1044), (1500, "88", 1500 + 1056)],
 )
 def test_a_restart_within_the_grace_continues(run_init, tmp_path, init_clock, slow_baseline, capsys, restart, budget, propose_end):
     _stopped_init(run_init, tmp_path, init_clock, capsys)
@@ -1953,9 +1948,9 @@ def test_a_late_restart_stops_again_with_a_new_lower_bound(run_init, tmp_path, i
     _stopped_init(run_init, tmp_path, init_clock, capsys)
     init_clock(1700)
     with pytest.raises(SystemExit) as e:
-        run_init(_args(tmp_path, budget_minutes="39"))
+        run_init(_args(tmp_path, budget_minutes="87"))
     assert e.value.code == refactor_abort()
-    assert "--budget-minutes を 48 以上" in capsys.readouterr().err
+    assert "--budget-minutes を 97 以上" in capsys.readouterr().err
     _, state = _state_of(tmp_path)
     assert state["window_stopped_at"] and slow_baseline["calls"] == 1
 

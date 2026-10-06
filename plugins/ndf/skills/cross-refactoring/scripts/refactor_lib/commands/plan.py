@@ -2,8 +2,8 @@
 
 実装担当の改修計画（等級・足すテスト・範囲テストの対象・同じ変更か・公開の入出力が
 変わりうるか）を読み、Jev が使えるときは等級と「同じ変更か」を Jev に問う。そのうえで
-順位を決め、配分テーブルで見積もり、想定最大時間に収まる件数を選び、項目ごとの
-締め切りを出す。**数え上げと比較はスクリプトが行う**（決定 11）。
+順位を決め、配分テーブルで見積もり、想定最大時間に収まる件数を選び、実装の終わりを
+出す（項目ごとの期限は持たない。#1743 決定 9）。**数え上げと比較はスクリプトが行う**（決定 11）。
 """
 
 from __future__ import annotations
@@ -15,13 +15,12 @@ from typing import Any, Optional
 
 import jev
 import project_mvv
-import run_metrics
 import statefile
 import test_strategy as ts
 
-from .. import allocation, budget, clock, info, targets, timeline
+from .. import budget, forecast, info, pause, targets, timeline
 from ..gitfacts import read_result, record_observed_model
-from ..items import PLANNED, defer, group_key, item_kind, item_label, key_text
+from ..items import defer, group_key, item_label, key_text, new_items
 from ..paths import git_out, load_state, work_dir
 from ..phases import elapsed_minutes, finish_phase
 from ..vocabulary import (
@@ -228,16 +227,6 @@ def _decide_public_io(state: dict[str, Any], items: list[dict[str, Any]]) -> Non
             item["public_io"], item["public_io_source"] = bool(result[0]), "jev"
 
 
-def _allocation_table(state: dict[str, Any]) -> dict[str, Any]:
-    """配分テーブルを履歴から集計する（決定 7）。読めなければ初期値で、1 行知らせる（AC20）。"""
-    base = run_metrics.metrics_dir()
-    rows = allocation.read_history(allocation.history_path(base, str(state["repo"])))
-    table = allocation.build_table(rows, allocation.load_defaults())
-    if table.get("source") != "history":
-        info("ℹ 配分の履歴が無いか読めないため、初期値（#917 の実測）で改修計画します")
-    return table
-
-
 NO_TEST_SUITE_NOTE = "テストの種別の suite が無いため、テスト整備ラウンドと --scope のテストの置き場所の検査を行わない"
 
 
@@ -272,65 +261,14 @@ def _limited_commands(state: dict[str, Any], items: list[dict[str, Any]]) -> lis
     return kept
 
 
-def _plan_items(
-    state: dict[str, Any],
-    selected: list[dict[str, Any]],
-    end: Any,
-) -> list[dict[str, Any]]:
-    """採った候補から項目（`items[]`）を作る。"""
-    deadlines = budget.deadlines(selected, end)
-    items = []
-    for rank, (candidate, deadline) in enumerate(zip(selected, deadlines), start=1):
-        test_deadline = deadline.get("test_start_deadline")
-        items.append(
-            {
-                **{
-                    k: candidate.get(k)
-                    for k in (
-                        "path",
-                        "symbol",
-                        "smell",
-                        "technique",
-                        "severity",
-                        "rationale",
-                        "plan",
-                        "estimated_diff_lines",
-                        "proposed_by",
-                        "tier",
-                        "tier_source",
-                        "risk",
-                        "tests",
-                        "test_targets",
-                        "scope_commands",
-                        "command_source",
-                        "mvv_basis",
-                    )
-                },
-                "id": f"I-{rank:03d}",
-                "candidate_id": candidate["id"],
-                "rank": rank,
-                "kind": item_kind(candidate),
-                "estimate": candidate["estimate"],
-                "start_deadline": clock.iso(deadline["start_deadline"]),
-                "test_start_deadline": clock.iso(test_deadline) if test_deadline else None,
-                "status": PLANNED,
-                "commits": {"test": None, "implement": None, "fix": []},
-                "seconds": {},
-                "fix_count": 0,
-                "danger": [],
-            }
-        )
-    return items
-
-
 def cmd_merge_plan(args: argparse.Namespace) -> None:
     """改修計画を取り込み、時間に収まる項目と締め切りを決める。
 
     終了コード: 0 = 項目あり / 2 = 残る項目 0 件（最終ゲートへ）/ 4 = 中断。
     出力: `TESTS_NEEDED=0|1`（テストを足す項目があるか）。
 
-    **叩き直しても改修計画を作り直さない。** 採用の件数・締め切り・予備時間はこの時点の予算で
-    固定する（再開で予算を変えても食い違わない）。
+    **叩き直しても改修計画を作り直さない。** 採用の件数・実装の終わり・予備時間はこの時点の予算で
+    固定する（再開で予算を変えても食い違わない）。採る件数を増やすのは検証の後の `readopt` だけである。
     """
     path, state = load_state(args.id)
     if state.get("plan"):
@@ -342,32 +280,22 @@ def cmd_merge_plan(args: argparse.Namespace) -> None:
     remaining = _merge_duplicates(state)
     remaining = _limited_commands(state, remaining)
 
-    table = _allocation_table(state)
-    baseline = state.get("baseline_test") or {}
+    table = forecast.allocation_table(state)
     # 項目の検証の見積りは、配分の `verify` と着手前に手元で走らせた範囲テストの実測の大きい方（#1334 決定 8）。
-    measured_verify = float(baseline.get("seconds") or 0.0) / 60 if baseline.get("mode") == "scope" else 0.0
+    measured_verify = budget.measured_verify_minutes(state)
     for item in remaining:
         item["estimate"] = budget.item_estimate(table, str(item.get("technique")), bool(item["tests"]))
         item["estimate"]["verify"] = max(float(item["estimate"]["verify"]), measured_verify)
     ranked = sorted(remaining, key=budget.rank_key)
 
-    strategy = timeline.strategy_of(state)
-    whole_seconds = baseline.get("seconds") if baseline.get("mode") in ("whole", "round") else baseline.get("whole_seconds")
-    reserve = budget.reserve(
-        strategy,
-        whole_seconds,
-        baseline.get("ci_seconds"),
-        strategy.whole_on_ci or bool(state.get("ci_check")),
-        float(table["fix"]),
-    )
+    reserve = budget.plan_reserve(state, table)
     elapsed = elapsed_minutes(state)
     available = budget.available_minutes(int(state["budget_minutes"]), elapsed, reserve)
     selected, skipped = budget.select(ranked, available)
     for item in skipped:
         defer(state, item, DEFER_BUDGET, f"見積り {budget.estimate_total(item['estimate']):.1f} 分が残りに入らない")
 
-    end = budget.end_time(clock.parse(state["started_at"]), int(state["budget_minutes"]), budget.reserve_total(reserve))
-    state["items"] = _plan_items(state, selected, end)
+    state["items"] = new_items(selected)
     _decide_public_io(state, state["items"])
     state["plan"] = {
         "base_sha": git_out(work_dir(state), ["rev-parse", "HEAD"]),
@@ -377,13 +305,16 @@ def cmd_merge_plan(args: argparse.Namespace) -> None:
         "table_source": table.get("source"),
         "table": table,
         "selected": [i["id"] for i in state["items"]],
-        "end_at": clock.iso(end),
     }
+    # 止まっていた時間の記録（#1491）と採り直しの記録（#1743 決定 10）を空で作る。
+    state["pause"] = pause.empty()
+    state["readopt"] = {"round": 1, "events": []}
     # **実行時の値をすべて書き出す**（決定 24）。以後の手順は、この表と時計の比較だけで進む。
     state["limits"] = timeline.of_state(state)
     finish_phase(state, "plan")
     if not state["items"]:
-        state["phase"] = "final"
+        # 最終ゲートへ移すのは `readopt` の `no_fit` だけにする（#1743 決定 10）。
+        state["phase"] = "readopt"
     statefile.save(path, state)
     _report(state, available, len(skipped))
     _emit_and_exit(state)
@@ -394,12 +325,13 @@ def _report(state: dict[str, Any], available: float, skipped: int) -> None:
         f"使える時間 {available:.1f} 分 → 採用 {len(state['items'])} 件 / 時間で見送り {skipped} 件"
         f"（配分: {state['plan']['table_source']}）"
     )
+    if state["items"]:
+        info(f"  実装の終わり {state['limits'].get('implement_end_at')}（項目ごとの期限は持たない）")
     for item in state["items"]:
         tests = f" + テスト {len(item['tests'])}" if item["tests"] else ""
         info(
             f"  {item['id']} [{item['tier']}] {item_label(item)} {item['technique']}"
-            f"（見積り {budget.estimate_total(item['estimate']):.1f} 分{tests} / "
-            f"着手の締め切り {item['start_deadline']}）"
+            f"（見積り {budget.estimate_total(item['estimate']):.1f} 分{tests}）"
         )
 
 

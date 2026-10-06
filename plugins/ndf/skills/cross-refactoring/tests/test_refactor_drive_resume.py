@@ -68,8 +68,8 @@ class FakeRefactor:
             return 0, (
                 f"ID=7\nTMP_DIR={self.tmp}\nPHASE={self.state['phase']}\nIMPL=codex\nRUNTIMES=codex\nRUNTIMES_CSV=codex\nWORK={self.tmp}\n"
             )
-        if sub == "merge-proposals":
-            return 2, ""
+        if sub in ("merge-proposals", "readopt"):
+            return 2, ""  # 採り直しは入る候補が無い（最終ゲートへ）
         if sub == "final-gate":
             # 実機と同じく、通った最終ゲートは状態の `final_gate.status` を `passed` にする（採用を数える条件）
             self.state["final_gate"] = {"status": "passed" if self.gate in ("passed", "cross-review") else self.gate}

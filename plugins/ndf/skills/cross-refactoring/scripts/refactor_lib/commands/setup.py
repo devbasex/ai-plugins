@@ -27,7 +27,7 @@ import test_strategy as ts
 import tool_paths
 import worktree_deps
 
-from .. import ABORT, die, info, init_test
+from .. import ABORT, die, forecast, info, init_test, pause
 from .. import baseline as baseline_lib
 from .. import ci_coverage
 from .. import pr_gate
@@ -412,11 +412,9 @@ def cmd_init(args: argparse.Namespace) -> None:
 
     participants, baseline, round_record = _verify_init(args, inputs, prep)
     state = _save_initial_state(args, inputs, prep, participants, baseline, round_record, started_at)
-    # **手順の枠が想定最大時間に収まらなければ、提案者を起動せずに止める**（#1385 I4・決定 2）。状態は保存してあるため、
-    # 予算を広げて打ち直すと着手前のテストを走らせ直さずに続く。
+    # **手順の枠と計画の後の見込みが想定最大時間に収まらなければ、提案者を起動せずに止める**（#1385 I4・#1743 I8）。
     init_test.stop_if_window_short(prep.state_file, state)
-    # **出力は入口から直接呼ぶ。** 手順書の変数の出所のチェック
-    # （`scripts/check-skill-shell-vars.py`）は `cmd_*` からヘルパーを 1 階層だけたどる。
+    # **出力は入口から直接呼ぶ。** 手順書の変数の出所のチェック（`scripts/check-skill-shell-vars.py`）は 1 階層だけたどる。
     _emit_init(state)
 
 
@@ -686,12 +684,11 @@ def _save_initial_state(
     )
     state = _build_initial_state(args, context)
     # **実行時の値を書き出す**（決定 24）。改修計画の後の値は `merge-plan` が足す。
-    state["limits"] = timeline.of_state(state)
+    state["limits"] = timeline.of_state(state, forecast.after_plan(state))
     state["ci_coverage"] = prep.ci_coverage
     info(f"   実装担当: {context.implementer}（{context.implementer_reason}）")
-    # GitHub は自分の Pull Request への `APPROVE` と `REQUEST_CHANGES` を
-    # `HTTP 422` で拒む。判定はそのまま結果ファイルへ残し、**投稿の event だけ**
-    # を倒す。収束判定は結果ファイルの判定を見るので、倒しても進行は変わらない。
+    # GitHub は自分の Pull Request への `APPROVE` と `REQUEST_CHANGES` を `HTTP 422` で拒む。判定はそのまま結果ファイルへ
+    # 残し、**投稿の event だけ**を倒す。収束判定は結果ファイルの判定を見るので、倒しても進行は変わらない。
     _apply_post_event(state, prep.is_own_pr)
     statefile.save(prep.state_file, state)
     info(f"✅ 状態を初期化しました: {prep.state_file}")
@@ -766,13 +763,15 @@ def _resume(
         _recheck_implementer(state)
 
     _apply_post_event(state, is_own_pr)
-    # **予算を置き換えたら上限の表を組み直す**（改修計画の前だけ。改修計画の後は表を変えず、保存した期限で続ける）。
+    # **予算を置き換えたら上限の表を組み直す**（改修計画の前だけ。改修計画の後は止まっていた時間の分だけ締め切りをずらす。#1491）。
     if not state.get("plan"):
         # 枠が収まらずに止めた後の打ち直しだけ、枠の起点を打ち直した時刻へずらす（#1385 I2・決定 2）。
         if state.get("window_stopped_at"):
             state["resumed_at"] = statefile.now()
-        state["limits"] = timeline.of_state(state)
+        state["limits"] = timeline.of_state(state, forecast.after_plan(state))
         init_test.stop_if_window_short(state_file, state)
+    else:
+        pause.resume(state_file, state)
     statefile.save(state_file, state)
     _emit_init(state)
 
