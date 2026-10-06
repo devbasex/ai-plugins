@@ -697,7 +697,7 @@
     {
       "term": "改善項目",
       "context": "ndf-cross-refactoring",
-      "meaning": "リファクタリング計画が採った改善候補。I-001 の形の ID を持ち、1 改善項目 = 1 コミット（テストを足す項目は 2 コミット）",
+      "meaning": "リファクタリング計画が採った改善候補。I-001 の形の ID を持ち、Item-Id の同じコミットを何件でも持てる（テストを足すコミットは 1 件）",
       "source": "docs/specifications/cross-refactoring-time-budget.md"
     },
     {
@@ -3419,6 +3419,36 @@
       "context": "ndf-cross-refactoring",
       "meaning": "cross-refactoring で、最終ゲートより前の取り消しで HEAD が変わった後、残った改善項目を新しい HEAD の範囲テストで判定し直すこと",
       "source": "docs/specifications/cross-refactoring-failed-item-rules.md"
+    },
+    {
+      "term": "新しいファイル",
+      "context": "ndf-cross-refactoring",
+      "meaning": "cross-refactoring の実行で、リファクタリング計画の起点（plan.base_sha）のツリーに無かったパス。置き場所によらず範囲の中として扱う",
+      "source": ""
+    },
+    {
+      "term": "呼び手の書き換え",
+      "context": "ndf-cross-refactoring",
+      "meaning": "cross-refactoring で、範囲の外の既存のファイルのうち、項目が変えた名前の読み込み・呼び出しだけを書き換える変更。ハンクごとに機械で判定し、通したファイルは最終ゲートのレビューへ引き継ぐ",
+      "source": ""
+    },
+    {
+      "term": "変えた名前",
+      "context": "ndf-cross-refactoring",
+      "meaning": "cross-refactoring の判定の単位のコミットが、範囲の中のファイルと新しいファイルで変えた行に現れる識別子と、作った・消した・移したパスの語幹とディレクトリ名から、ありふれた語を除いたもの（修正・最終ゲート修正の単位では、その項目（最終ゲート修正なら採った全項目）の実装・修正のコミットが変えた名前も含める）",
+      "source": ""
+    },
+    {
+      "term": "判定の単位",
+      "context": "ndf-cross-refactoring",
+      "meaning": "cross-refactoring の取り込みが 1 度に同じ規則へ掛けるコミットの組。実装は項目ごとの全コミット、修正は修正の範囲の項目ごと、最終ゲート修正は修正の全コミット",
+      "source": ""
+    },
+    {
+      "term": "代表の兆候",
+      "context": "ndf-cross-refactoring",
+      "meaning": "cross-refactoring の提案の smell に観点の識別子が書かれたとき、写す先の兆候",
+      "source": ""
     },
     {
       "term": "使える時間",
