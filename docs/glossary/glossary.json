@@ -3407,6 +3407,18 @@
       "context": "ndf-cross-refactoring",
       "meaning": "cross-refactoring で、最終ゲートより前の取り消しで HEAD が変わった後、残った改善項目を新しい HEAD の範囲テストで判定し直すこと",
       "source": "docs/specifications/cross-refactoring-failed-item-rules.md"
+    },
+    {
+      "term": "使える時間",
+      "context": "ndf-cross-refactoring",
+      "meaning": "`cross-refactoring` のリファクタリング計画の時点で、採る改善項目の見積りを収める時間（想定最大時間 − 経過 − バッファ）。`state.plan.available_minutes`",
+      "pending_source": "issues/issue-1743-requirements.md"
+    },
+    {
+      "term": "止まっていた時間",
+      "context": "ndf-cross-refactoring",
+      "meaning": "`cross-refactoring` を中断してから、同じ init を打ち直して再開するまでの時間。想定最大時間に数えない",
+      "pending_source": "issues/issue-1743-requirements.md"
     }
   ]
 }
