@@ -20,7 +20,7 @@ RESERVE_LABELS = {
 WHOLE_KEYS = ("danger_whole_test", "final_whole_test")
 
 
-def _minutes(seconds: float) -> str:
+def _as_minutes(seconds: float) -> str:
     return f"{float(seconds) / 60:.1f}"
 
 
@@ -29,16 +29,16 @@ def reserve_line(state: dict[str, Any]) -> Optional[str]:
     usage = reserve_usage(state)
     if not usage:
         return None
-    parts = " / ".join(f"{RESERVE_LABELS[k]} {_minutes(usage[k]['unused_seconds'])}" for k in RESERVE_KEYS)
+    parts = " / ".join(f"{RESERVE_LABELS[k]} {_as_minutes(usage[k]['unused_seconds'])}" for k in RESERVE_KEYS)
     total = sum(usage[k]["unused_seconds"] for k in RESERVE_KEYS)
-    return f"- バッファのうち使わずに残った時間: {parts} 分（計 {_minutes(total)} 分）"
+    return f"- バッファのうち使わずに残った時間: {parts} 分（計 {_as_minutes(total)} 分）"
 
 
 def over_line(state: dict[str, Any]) -> Optional[str]:
     """バッファを越えた全体テストの 1 行。越えた区分が無ければ `None`。"""
     usage = reserve_usage(state)
     over = [
-        f"{RESERVE_LABELS[k]} {_minutes(usage[k]['used_seconds'] - usage[k]['reserved_seconds'])} 分"
+        f"{RESERVE_LABELS[k]} {_as_minutes(usage[k]['used_seconds'] - usage[k]['reserved_seconds'])} 分"
         for k in WHOLE_KEYS
         if k in usage and usage[k]["used_seconds"] > usage[k]["reserved_seconds"]
     ]
@@ -63,6 +63,6 @@ def readopt_line(state: dict[str, Any]) -> Optional[str]:
 
 def lines(state: dict[str, Any]) -> list[str]:
     """報告へ出す行（無いものは出さない）。"""
-    pause_line = pause.report_line(state)
+    pause_line = pause.pause_report_line(state)
     found = [reserve_line(state), over_line(state), f"- {pause_line}" if pause_line else None, readopt_line(state)]
     return [line for line in found if line]

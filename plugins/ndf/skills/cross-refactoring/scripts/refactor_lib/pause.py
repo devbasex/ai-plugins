@@ -7,7 +7,7 @@
 最後の動きの時刻は、作業ディレクトリの直下のファイルのうち最も新しい更新時刻である（決定 3）。状態ファイル・
 CLI とテストのログ・結果ファイルのほかに、待つ側が 15 秒ごとに更新する心拍のファイル（`paths.alive_path`）を含む。
 
-ファイルの更新時刻を読むのは `last_activity` だけで、`catch_up` は時刻を引数で受ける純粋な処理である。
+ファイルの更新時刻を読むのは `last_activity` だけで、`shift_for_pause` は時刻を引数で受ける純粋な処理である。
 """
 
 from __future__ import annotations
@@ -61,7 +61,7 @@ def _event(now: _dt.datetime, last_at: Optional[_dt.datetime], seconds: float, s
     }
 
 
-def catch_up(state: dict[str, Any], now: _dt.datetime, last_at: Optional[_dt.datetime]) -> Optional[dict[str, Any]]:
+def shift_for_pause(state: dict[str, Any], now: _dt.datetime, last_at: Optional[_dt.datetime]) -> Optional[dict[str, Any]]:
     """止まっていた時間を測り、状態の辞書を書き換えて、記録した 1 件を返す。記録しなければ `None`。
 
     - 計画の前（`plan` が無い）と最終ゲートに入った後（`final_gate` がある）は記録しない（I7）
@@ -106,7 +106,7 @@ def event_line(event: dict[str, Any]) -> str:
     return f"止まっていた時間: {minutes:.1f} 分（余裕以下のため締め切りをずらさなかった）"
 
 
-def report_line(state: dict[str, Any]) -> Optional[str]:
+def pause_report_line(state: dict[str, Any]) -> Optional[str]:
     """報告の 1 行。`pause.events[]` が無ければ `None`。"""
     record = state.get("pause") or {}
     events = record.get("events") or []
@@ -127,12 +127,12 @@ def shifted_seconds(state: dict[str, Any]) -> float:
     return float((state.get("pause") or {}).get("shifted_seconds") or 0.0)
 
 
-def resume(state_file: pathlib.Path, state: dict[str, Any]) -> Optional[dict[str, Any]]:
+def resume_after_pause(state_file: pathlib.Path, state: dict[str, Any]) -> Optional[dict[str, Any]]:
     """再開の入口（`init` の再開と `catch-up`）。最後の動きの時刻を読んでずらし、記録した 1 件を知らせて返す。
 
     **状態を書く前に呼ぶ。** 書いた後だと状態ファイルの更新時刻が最後の動きの時刻になる。保存は呼ぶ側が行う。
     """
-    event = catch_up(state, clock.now(), last_activity(pathlib.Path(state_file).parent))
+    event = shift_for_pause(state, clock.now(), last_activity(pathlib.Path(state_file).parent))
     if event is not None:
         info(f"↻ {event_line(event)}")
     return event

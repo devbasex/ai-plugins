@@ -1,7 +1,7 @@
 """再開で止まっていた時間の分だけ締め切りをずらす（`catch-up`、#1491）。
 
 drive.py が打ち直しのたびに、耐久ワークフローを続ける前に 1 度打つ。`init` の再開（`setup._resume`）も同じ
-`pause.resume` を呼ぶ（決定 6）。
+`pause.resume_after_pause` を呼ぶ（決定 6）。
 """
 
 from __future__ import annotations
@@ -23,5 +23,5 @@ def cmd_catch_up(args: argparse.Namespace) -> None:
     if path is None:
         return
     state = statefile.load(path)
-    if pause.resume(path, state) is not None:
+    if pause.resume_after_pause(path, state) is not None:
         statefile.save(path, state)

@@ -162,7 +162,7 @@ def _at(state, key):
 def test_a_pause_shifts_only_the_deadlines_still_ahead(mods):
     """I4: 最後の動きの時刻より後の締め切りだけが止まっていた秒だけずれ、前に過ぎていた締め切りは開き直さない。"""
     state = _planned_state()
-    event = mods["pause"].catch_up(state, START + 22 * M, START + 10 * M)
+    event = mods["pause"].shift_for_pause(state, START + 22 * M, START + 10 * M)
     assert event["reason"] == "shifted" and event["seconds"] == 720
     assert _at(state, "add_tests_end_at") == START + 8 * M  # 中断の前に過ぎていた
     assert _at(state, "implement_end_at") == START + 30 * M
@@ -176,25 +176,25 @@ def test_a_pause_shifts_only_the_deadlines_still_ahead(mods):
 
 def test_a_past_implement_end_is_not_reopened(mods):
     state = _planned_state()
-    mods["pause"].catch_up(state, START + 40 * M, START + 20 * M)
+    mods["pause"].shift_for_pause(state, START + 40 * M, START + 20 * M)
     assert _at(state, "implement_end_at") == START + 18 * M
 
 
 def test_a_pause_within_the_margin_does_not_shift(mods):
     """I5: 余裕（0.05·B = 90 秒）以下ならずらさず、`within_margin` を 1 件残す。境界を含む。"""
     state = _planned_state()
-    event = mods["pause"].catch_up(state, START + 10 * M + dt.timedelta(seconds=90), START + 10 * M)
+    event = mods["pause"].shift_for_pause(state, START + 10 * M + dt.timedelta(seconds=90), START + 10 * M)
     assert event["reason"] == "within_margin" and not event["shifted"]
     assert _at(state, "final_end_at") == START + 30 * M
     assert len(state["pause"]["events"]) == 1
-    event = mods["pause"].catch_up(state, START + 12 * M + dt.timedelta(seconds=91), START + 12 * M)
+    event = mods["pause"].shift_for_pause(state, START + 12 * M + dt.timedelta(seconds=91), START + 12 * M)
     assert event["reason"] == "shifted"
 
 
 def test_two_pauses_add_up(mods):
     state = _planned_state()
-    mods["pause"].catch_up(state, START + 15 * M, START + 10 * M)
-    mods["pause"].catch_up(state, START + 23 * M, START + 16 * M)
+    mods["pause"].shift_for_pause(state, START + 15 * M, START + 10 * M)
+    mods["pause"].shift_for_pause(state, START + 23 * M, START + 16 * M)
     assert state["pause"]["shifted_seconds"] == 720
     assert _at(state, "final_end_at") == START + 42 * M
 
@@ -203,19 +203,19 @@ def test_a_legacy_state_is_not_shifted(mods):
     """I6: `pause` を持たない状態はずらさず 1 度だけ記録し、2 回目の再開でもずらさない。"""
     state = _planned_state()
     del state["pause"]
-    first = mods["pause"].catch_up(state, START + 22 * M, START + 10 * M)
+    first = mods["pause"].shift_for_pause(state, START + 22 * M, START + 10 * M)
     assert first["reason"] == "legacy"
-    assert mods["pause"].catch_up(state, START + 40 * M, START + 23 * M) is None
+    assert mods["pause"].shift_for_pause(state, START + 40 * M, START + 23 * M) is None
     assert _at(state, "final_end_at") == START + 30 * M
-    assert mods["pause"].report_line(state).startswith("止まっていた時間: 計測しない")
+    assert mods["pause"].pause_report_line(state).startswith("止まっていた時間: 計測しない")
 
 
 def test_nothing_is_recorded_before_the_plan_or_after_the_final_gate(mods):
     """I7"""
     before = _planned_state(plan=None)
-    assert mods["pause"].catch_up(before, START + 22 * M, START + 10 * M) is None
+    assert mods["pause"].shift_for_pause(before, START + 22 * M, START + 10 * M) is None
     after = _planned_state(final_gate={"status": "failing"})
-    assert mods["pause"].catch_up(after, START + 22 * M, START + 10 * M) is None
+    assert mods["pause"].shift_for_pause(after, START + 22 * M, START + 10 * M) is None
     assert after["pause"]["events"] == []
 
 
@@ -249,7 +249,7 @@ def test_catch_up_twice_shifts_once(mods, tmp_path, monkeypatch):
     reasons = [e["reason"] for e in saved["pause"]["events"]]
     assert reasons[0] == "shifted" and all(r == "within_margin" for r in reasons[1:])
     assert saved["pause"]["shifted_seconds"] == pytest.approx(600, abs=5)
-    assert mods["pause"].report_line(saved).startswith("止まっていた時間:")
+    assert mods["pause"].pause_report_line(saved).startswith("止まっていた時間:")
 
 
 def test_catch_up_without_a_state_file_does_nothing(mods, tmp_path, monkeypatch):
@@ -262,7 +262,7 @@ def test_catch_up_without_a_state_file_does_nothing(mods, tmp_path, monkeypatch)
 def test_the_fix_deadline_is_read_from_the_shifted_table(mods):
     """決定 5: 直しの試行の打ち切りは表の `fix_end_at` から読む（ずらした値を検証と原因の判定が同じに読む）。"""
     state = _planned_state(started_at=START.isoformat())
-    mods["pause"].catch_up(state, START + 22 * M, START + 10 * M)
+    mods["pause"].shift_for_pause(state, START + 22 * M, START + 10 * M)
     assert mods["culprit"].fix_deadline(state) == START + 34 * M
 
 

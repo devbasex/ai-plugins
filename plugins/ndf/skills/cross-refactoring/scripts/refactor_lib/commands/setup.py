@@ -771,7 +771,7 @@ def _resume(
         state["limits"] = timeline.of_state(state, forecast.after_plan(state))
         init_test.stop_if_window_short(state_file, state)
     else:
-        pause.resume(state_file, state)
+        pause.resume_after_pause(state_file, state)
     statefile.save(state_file, state)
     _emit_init(state)
 
