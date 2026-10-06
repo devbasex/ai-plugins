@@ -267,6 +267,29 @@ def test_wait_and_merge_stops_with_the_summary_of_merge_when_green(monkeypatch):
         mod.wait_and_merge(".", 5)
 
 
+def test_wait_and_merge_passes_the_ci_wait_as_the_timeout(monkeypatch):
+    """release の --ci-wait は merge-when-green の --timeout へ渡す（ステップの timeout より先に止まる。#1645 の決定 7）。"""
+    mod = _release_steps_module(monkeypatch)
+    calls = []
+    out = json.dumps({"tool": "merged", "status": "ok", "summary": "#5 をマージした", "items": []})
+    monkeypatch.setattr(mod, "run", lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, out, ""))
+    monkeypatch.setattr(mod, "merge_commit_of", lambda root, n: "c")
+    mod.wait_and_merge(".", 5, ci_wait=1800.0)
+    assert calls[0][calls[0].index("--timeout") + 1] == "1800"
+
+
+@pytest.mark.parametrize("code,expected", [(75, 75), (1, 1)])
+def test_wait_and_merge_returns_infra_wait_as_75(monkeypatch, code, expected):
+    """AC11: merge-when-green の基盤待ち（75）は 75 で、中身の失敗（1）は今のとおり 1 で止まる。"""
+    mod = _release_steps_module(monkeypatch)
+    summary = "#5 の CI の基盤待ち: Runner が付かずに取り消された（Lint / lint）。再実行 3 回で解けない"
+    out = json.dumps({"tool": "merged", "status": "stopped", "summary": summary, "items": []})
+    monkeypatch.setattr(mod, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, code, out, ""))
+    with pytest.raises(mod.StepError) as e:
+        mod.wait_and_merge(".", 5)
+    assert e.value.code == expected and str(e.value) == f"PR #5 をマージできない: {summary}"
+
+
 @pytest.mark.parametrize("in_develop", [True, False])
 def test_release_remakes_the_pr_when_merged_pr_misses_new_commits(monkeypatch, in_develop):
     """release/v<版> の PR がマージ済みでも、後から積んだコミットが develop に無ければ PR を作り直してマージする。"""
@@ -288,11 +311,11 @@ def test_release_remakes_the_pr_when_merged_pr_misses_new_commits(monkeypatch, i
     monkeypatch.setattr(mod, "changelog_section", lambda root, ver, plugin: "")
     monkeypatch.setattr(mod, "run_checks", lambda root: [])
     monkeypatch.setattr(mod, "create_pr", lambda *a: 9)
-    monkeypatch.setattr(mod, "wait_and_merge", lambda root, n: f"new-{n}")
+    monkeypatch.setattr(mod, "wait_and_merge", lambda root, n, **kw: f"new-{n}")
     monkeypatch.setattr(mod, "merge_commit_of", lambda root, n: f"old-{n}")
     monkeypatch.setattr(mod, "emit", lambda obj, *a, **k: (_ for _ in ()).throw(SystemExit(obj)))
     with pytest.raises(SystemExit) as e:
-        mod.cmd_release(argparse.Namespace(root=".", version="1.2.3", plugins="ndf", channel="dev"))
+        mod.cmd_release(argparse.Namespace(root=".", version="1.2.3", plugins="ndf", channel="dev", ci_wait=3600.0))
     out = e.value.code
     assert ("merge-base", "--is-ancestor", "HEAD", "origin/develop") in calls
     assert (out["metrics"]["release_pr"], out["metrics"]["merge_commit"]) == ((7, "old-7") if in_develop else (9, "new-9"))
@@ -317,7 +340,7 @@ def test_release_stops_before_the_pr_when_plugin_json_is_not_bumped(monkeypatch,
     )
     monkeypatch.setattr(mod, "find_pr", lambda r, head, base, states: (_ for _ in ()).throw(SystemExit("pr")))
     with pytest.raises((mod.StepError, SystemExit)) as e:
-        mod.cmd_release(argparse.Namespace(root=str(repo), version="1.2.3", plugins=None, channel="dev"))
+        mod.cmd_release(argparse.Namespace(root=str(repo), version="1.2.3", plugins=None, channel="dev", ci_wait=3600.0))
     if version == "1.2.3":
         assert e.value.args == ("pr",) and pushed
     else:
@@ -650,7 +673,7 @@ def _release_prod(monkeypatch, root: Path, wt: dict, plugin: str):
     monkeypatch.setattr(mod, "changelog_section", lambda r, ver, plugin: "")
     monkeypatch.setattr(mod, "run_checks", lambda r: [])
     monkeypatch.setattr(mod, "create_pr", lambda r, base, head, title, body: created.append((base, head, title)) or len(created))
-    monkeypatch.setattr(mod, "wait_and_merge", lambda r, n, expect=None: f"m-{n}")
+    monkeypatch.setattr(mod, "wait_and_merge", lambda r, n, expect=None, **kw: f"m-{n}")
     monkeypatch.setattr(mod.approval, "release_pr_allowed", lambda r, n, view: None)
     monkeypatch.setattr(
         mod.approval, "check_approved", lambda r, approved, base, allowed: mod.ac.Verdict(True, approved, "b" * 40, "match")
@@ -658,7 +681,9 @@ def _release_prod(monkeypatch, root: Path, wt: dict, plugin: str):
     monkeypatch.setattr(mod.gh_parts, "gh", lambda args, cwd=None: subprocess.CompletedProcess(args, 0, "", ""))
     monkeypatch.setattr(mod, "emit", lambda obj, *a, **k: (_ for _ in ()).throw(SystemExit(obj)))
     with pytest.raises(SystemExit) as e:
-        mod.cmd_release(argparse.Namespace(root=str(root), version="1.2.3", plugins=None, channel="prod", approved_sha="a" * 40))
+        mod.cmd_release(
+            argparse.Namespace(root=str(root), version="1.2.3", plugins=None, channel="prod", approved_sha="a" * 40, ci_wait=3600.0)
+        )
     return found, created, calls, e.value.code
 
 

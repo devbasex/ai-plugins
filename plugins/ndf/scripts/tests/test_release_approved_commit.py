@@ -82,7 +82,7 @@ def run_release(monkeypatch, w, *, outside_after=False, move_head=False, **extra
     monkeypatch.setattr(mod, "run_checks", lambda r: [])
     monkeypatch.setattr(mod, "create_pr", lambda r, base, head, title, body: 1 if base == "trunk" else 2)
 
-    def wait_and_merge(r, n, expect=None):
+    def wait_and_merge(r, n, expect=None, ci_wait=3600.0):
         merged.append((n, expect))
         if n == 1:
             git(other, "fetch", "-q", "origin")
@@ -112,7 +112,16 @@ def run_release(monkeypatch, w, *, outside_after=False, move_head=False, **extra
         lambda args, cwd=None: ghcalls.append(args) or subprocess.CompletedProcess(args, 0, '[{"number": 806}]', ""),
     )
     monkeypatch.setattr(mod.trash, "sweep", lambda r, m: ([], {}))
-    ns = {"root": str(work), "version": VER, "plugins": None, "channel": "prod", "approved_sha": None, "approval": None, **extra}
+    ns = {
+        "root": str(work),
+        "version": VER,
+        "plugins": None,
+        "channel": "prod",
+        "approved_sha": None,
+        "approval": None,
+        "ci_wait": 3600.0,
+        **extra,
+    }
     with pytest.raises(SystemExit) as e:
         mod.cmd_release(argparse.Namespace(**ns))
     out, code = e.value.code
@@ -177,7 +186,15 @@ def test_release_without_an_approved_commit_merges_nothing(monkeypatch, world, e
     mod = load(monkeypatch)
     calls = []
     monkeypatch.setattr(mod, "git", lambda *a, **k: calls.append(a) or (_ for _ in ()).throw(AssertionError("git")))
-    ns = {"root": str(world["work"]), "version": VER, "plugins": None, "channel": "prod", "approved_sha": None, "approval": None}
+    ns = {
+        "root": str(world["work"]),
+        "version": VER,
+        "plugins": None,
+        "channel": "prod",
+        "approved_sha": None,
+        "approval": None,
+        "ci_wait": 3600.0,
+    }
     with pytest.raises(mod.StepError) as e:
         mod.cmd_release(argparse.Namespace(**{**ns, **extra}))
     assert e.value.code == code and text in str(e.value) and not calls
@@ -186,7 +203,9 @@ def test_release_without_an_approved_commit_merges_nothing(monkeypatch, world, e
 def test_release_dev_rejects_an_approved_commit(monkeypatch, world):
     """受け入れ条件 9: dev には承認したコミットを渡さない。"""
     mod = load(monkeypatch)
-    ns = argparse.Namespace(root=str(world["work"]), version=VER, plugins=None, channel="dev", approved_sha="a" * 40, approval=None)
+    ns = argparse.Namespace(
+        root=str(world["work"]), version=VER, plugins=None, channel="dev", approved_sha="a" * 40, approval=None, ci_wait=3600.0
+    )
     with pytest.raises(mod.StepError) as e:
         mod.cmd_release(ns)
     assert e.value.code == 2

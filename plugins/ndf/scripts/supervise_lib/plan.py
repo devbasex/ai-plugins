@@ -105,6 +105,10 @@ run のステップ:
 - テストの成果物を作らない（計画の `no_reports` を `PYTEST_ADDOPTS` に足す）。作らせるときは `"reports": true`
 - `cmd` の `{base}` は起点のブランチ（計画か .ndf/worktree.json の `base_branch`）に置き換わる。
   `{state_dir}` は計画の状態ディレクトリに置き換わる
+- `"on_exit": {"<終了コード>": "<ステップの id> | end | stop"}`: 終了コードを読んだら `skip_to` の次・関門（10〜19）の
+  前に見る。当たれば `on_fail` へ行かない。`stop` は `結果: 止まった`・`理由: ステップ <id> が終了コード <n> で止めた:
+  <出力の最後の JSON の summary>`（release とマージのステップが CI の基盤待ち 75 で judge を通らずに止まる）。
+  鍵が整数でない・行き先が知らないステップの id なら、ステップを流す前に `結果: 止まった`
 - `"gate_as_ok": true`: 終了コード 10〜19 を関門として数えず、提示物だけを写して `next` へ進む
 - `"pr_from": "<鍵>"`: 終了コード 0 で終わったとき、出力の最後の JSON の `metrics.<鍵>` が空でなければ、計画の
   `"Pull Request"` をその値（URL）にする。報告の `Pull Request` に載り、queue の `{queue_pr:<計画名>}` が読む
@@ -119,8 +123,8 @@ queue の置き換え: `{queue_prs}` は前のすべてのステージの Pull R
 
 ステップの遷移:
 - `next` に `end` を書くと、そこでフェーズを完了として終える
-- run: 終了コード 0 なら `next`（無ければ次のステップ）。10〜19 は関門として `gate_next` か `next`。
-  それ以外の 0 以外なら `on_fail`（無ければ止まる）
+- run: 終了コード 0 なら `next`（無ければ次のステップ）。`on_exit` に当たればその行き先。10〜19 は関門として
+  `gate_next` か `next`。それ以外の 0 以外なら `on_fail`（無ければ止まる）
 - work: 終了後に `next`（無ければ次のステップ）。`"back_to_failed": true` なら、最後に落ちて `on_fail` へ回った
   ステップが `next` より並びで前のとき、そのステップからやり直す（judge の後の fix で使う）
 - judge: 答えの `decision` がステップの id ならそのステップへ、`next` なら次のステップへ、`stop` なら止まる、
@@ -206,6 +210,23 @@ def expand_parts(steps: list[dict]) -> list[dict]:
                 if t.get(key) == s["id"]:
                     t[key] = f"{s['id']}-1"
     return out
+
+
+def on_exit_error(steps: list[dict]) -> str | None:
+    """run のステップの `on_exit` の誤り（鍵が整数でない・行き先が知らないステップの id）。無ければ None。"""
+    ids = {s.get("id") for s in steps}
+    for s in steps:
+        table = s.get("on_exit")
+        if table is None:
+            continue
+        if not isinstance(table, dict):
+            return f"ステップ {s.get('id')} の on_exit が対応表でない"
+        for code, dest in table.items():
+            if not re.fullmatch(r"-?\d+", str(code)):
+                return f"ステップ {s.get('id')} の on_exit の鍵が終了コードでない: {code}"
+            if dest not in ("end", "stop") and dest not in ids:
+                return f"ステップ {s.get('id')} の on_exit の行き先が知らないステップ: {dest}"
+    return None
 
 
 # 計画の旧いキー（持ち場）を今のキー（フェーズ）へ読み替える。旧い計画の JSON も読めるようにする

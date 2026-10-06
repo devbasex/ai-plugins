@@ -589,6 +589,17 @@ def test_merge_when_green_merge_failure_stops(repo, gh):
     assert code == 1 and "gh pr merge" in out["summary"]
 
 
+def test_merge_when_green_refused_merge_points_to_superseded_runs(repo, gh):
+    """AC4: マージが拒まれ、置き換わった失敗があれば、next に run ごとの gh run rerun が載る。"""
+    old = {**run_("check", "FAILURE"), "workflowName": "PR body decisions", "startedAt": "2026-10-05T04:44:10Z"}
+    old["detailsUrl"] = "https://github.com/o/r/actions/runs/37264758029/job/1"
+    new = {**run_("check"), "workflowName": "PR body decisions", "startedAt": "2026-10-05T04:46:35Z"}
+    gh.set(merge_code=1, pr_seq={"5": [{"state": "OPEN", "headRefOid": "a", "statusCheckRollup": [old, new]}]})
+    code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--recheck", "0"], gh.env, repo)
+    assert code == 1 and "gh pr merge" in out["summary"]
+    assert out["next"] == "置き換わった失敗を通し直してから打ち直す: gh run rerun 37264758029; merged-steps.py merge-when-green 5"
+
+
 def test_merge_when_green_readies_draft_before_merge(repo, gh):
     draft = {"state": "OPEN", "isDraft": True, "headRefOid": "a", "statusCheckRollup": [run_("t")]}
     merged = {"headRefName": "feat/x", "state": "MERGED", "mergeCommit": {"oid": "c"}}

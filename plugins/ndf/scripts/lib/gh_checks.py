@@ -69,35 +69,52 @@ def _page_runs(resp) -> list[dict[str, Any]] | None:
     return [r for r in chunk if isinstance(r, dict)]
 
 
-def _run_order(indexed: tuple[int, dict[str, Any]]) -> tuple[str, int, int]:
-    i, run = indexed
+def newness(completed: Any, started: Any, number: Any, index: int) -> tuple[int, str, int, int]:
+    """チェックの項目の新しさ（大きいほど新しい。#632）。マージの待ちと test-run.py が同じ規則を使う。
+
+    終わった時刻と始まった時刻の新しい方 → 番号（実行・ジョブの番号は増える一方）→ 一覧の中の順で決める。
+    時刻がどちらも無い項目（まだ始まっていない）は最も新しいとみなす。ISO 8601 の UTC（`Z` 付き）は
+    文字列の比較で時刻の順になる。
+    """
     try:
-        run_id = int(run.get("id") or 0)
+        num = int(number or 0)
     except (TypeError, ValueError):
-        run_id = 0
-    # ISO 8601 の UTC（`Z` 付き）は文字列の比較で時刻の順になる。
-    stamp = max(str(run.get("completed_at") or ""), str(run.get("started_at") or ""))
-    return (stamp, run_id, i)
+        num = 0
+    stamp = max(str(completed or ""), str(started or ""))
+    return (0 if stamp else 1, stamp, num, index)
+
+
+def fold_latest(items: list[Any], key: Callable[[Any], Any], stamps: Callable[[Any], tuple[Any, Any, Any]]) -> tuple[list[Any], list[Any]]:
+    """項目を鍵ごとの最新の 1 件へ畳み、(最新の並び, 置き換わった古い項目の並び) を返す。
+
+    `key` は項目から鍵を、`stamps` は (終わった時刻, 始まった時刻, 番号) を返す。新しさは `newness`。
+    最新の並びは最初に現れた鍵の順、古い項目の並びは一覧の順を保つ。
+    """
+    latest: dict[Any, tuple[tuple, int]] = {}
+    order: list[Any] = []
+    for i, item in enumerate(items):
+        k = key(item)
+        rank = newness(*stamps(item), i)
+        if k not in latest:
+            order.append(k)
+            latest[k] = (rank, i)
+        elif rank >= latest[k][0]:
+            latest[k] = (rank, i)
+    keep = {latest[k][1] for k in order}
+    return [items[latest[k][1]] for k in order], [item for i, item in enumerate(items) if i not in keep]
+
+
+def _rest_stamps(run: dict[str, Any]) -> tuple[Any, Any, Any]:
+    return run.get("completed_at"), run.get("started_at"), run.get("id")
 
 
 def fold_check_runs(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """同名のチェックジョブを、名前ごとの最新の実行 1 件へ畳む（#632）。
 
-    再実行で `failure` → `success` になったチェックは `success` として返す。新しさは
-    `completed_at` と `started_at` の新しい方 → 実行の番号（`id` は増える一方）→
-    一覧の中の順で決める。
-    並びは最初に現れた名前の順を保つ。
+    再実行で `failure` → `success` になったチェックは `success` として返す。新しさは `newness`。
+    REST の check run は workflow の名前を持たないため、名前だけで束ねる。並びは最初に現れた名前の順を保つ。
     """
-    latest: dict[str, tuple[int, dict[str, Any]]] = {}
-    order: list[str] = []
-    for indexed in enumerate(runs):
-        name = str(indexed[1].get("name") or "")
-        if name not in latest:
-            order.append(name)
-            latest[name] = indexed
-        elif _run_order(indexed) >= _run_order(latest[name]):
-            latest[name] = indexed
-    return [latest[n][1] for n in order]
+    return fold_latest(runs, lambda r: str(r.get("name") or ""), _rest_stamps)[0]
 
 
 def run_result(run: dict[str, Any]) -> str:

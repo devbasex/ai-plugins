@@ -70,8 +70,11 @@
       "id": "release",
       "type": "run",
       "stage": "配布",
-      "timeout": 3000,
-      "cmd": "python3 <NDF>/scripts/release-steps.py release --version 1.2.0 --channel prod --approval <TMP>/repo/issues/approval-foo-v1.2.0.md",
+      "timeout": 7920,
+      "cmd": "python3 <NDF>/scripts/release-steps.py release --version 1.2.0 --ci-wait 3600 --channel prod --approval <TMP>/repo/issues/approval-foo-v1.2.0.md",
+      "on_exit": {
+        "75": "stop"
+      },
       "on_fail": "judge",
       "next": "record",
       "probe": {

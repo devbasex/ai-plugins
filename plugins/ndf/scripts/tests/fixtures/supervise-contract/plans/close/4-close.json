@@ -54,6 +54,9 @@
       "probe": {
         "cmd": "python3 <NDF>/scripts/merged-steps.py probe --pr {pr} --act"
       },
+      "on_exit": {
+        "75": "stop"
+      },
       "next": "close"
     },
     {
@@ -63,6 +66,9 @@
       "cmd": "python3 <NDF>/scripts/merged-steps.py merge-when-green {pr} --timeout 3600 --gate-approved user",
       "probe": {
         "cmd": "python3 <NDF>/scripts/merged-steps.py probe --pr {pr} --act"
+      },
+      "on_exit": {
+        "75": "stop"
       },
       "next": "close"
     },
