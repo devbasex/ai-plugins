@@ -175,8 +175,12 @@ I-014 自身の検証で静的解析が組まれなかったのは、`init` が�
 `verified` か `implemented` なら `failed_check`（`by_item` つき）を書き換えて `blocked_by` を消し、`failing` にする。
 検証を通った項目が `failing` へ戻るのはこの経路だけである。
 
-`converge.py` の `_settle_scope` は `judge_items` の後、締め切り（`_give_up`）で `failing` の項目を取り消したら `waiting` の項目を
-走らせ直し、取り消しが無くなるまで繰り返す（項目の数 + 1 回の内）。巻き込まれた項目は修正へ回さない（`fix` の手順は `failing` の項目だけを渡す）。
+`converge.py` の `_settle_scope` は、最初に直さなかった項目を取り消し（`_drop_unfixed`）、判定を待つ項目
+（`scope_verdict.pending`）を範囲テストで判定する（`judge_items`）。続けて、締め切り（`_give_up`）で `failing` の
+項目を取り消したら `pending` を判定し直すことを、取り消しが無くなるまで繰り返す（項目の数 + 1 回の内）。
+`pending` には `waiting` の項目に加えて、取り消しで HEAD が変わったため `verified` から `implemented` へ戻した
+確かめ直しの項目も入る（規則は [cross-refactoring-failed-item-rules.md](cross-refactoring-failed-item-rules.md) の
+R3・決定 2・決定 3）。巻き込まれた項目は修正へ回さない（`fix` の手順は `failing` の項目だけを渡す）。
 
 `reason(item)` が作る理由（末尾はどれも「修正に使える時間の内に通らなかった」）:
 
