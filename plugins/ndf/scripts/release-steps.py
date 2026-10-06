@@ -19,8 +19,8 @@
 `git status --porcelain -uall` に出たパスの内容の要約（`git hash-object`）を比べて決める。
 
 配布の決まった手順（#862。試作は #827 の phase-steps.py）も同じスクリプトに置く。結果は
-`lib/step_result.py` の形の 1 行の JSON で、終了コードは 0 = ok / 1 = 失敗（stopped）/
-2 = 読めない / 3 = 前提が無い / 10 = 本番への配布の承認が要る（approval-facts）。
+`lib/step_result.py` の形の 1 行の JSON で、終了コードは 0 = ok / 1 = 失敗（stopped）/ 2 = 読めない / 3 = 前提が無い /
+10 = 本番への配布の承認が要る（approval-facts）/ 75 = 待つ PR の CI の基盤待ち（中身の失敗ではない）。
 
     python3 release-steps.py bump           --plugin <名前> --to <版> [--base <ベースブランチ>] [--root <dir>]
     python3 release-steps.py changed-plugins [--since <タグ>] [--plugin <名前>] [--root <dir>]  # 差分のある他のプラグイン
@@ -85,6 +85,7 @@ from release_lib.approval import HeadMoved  # noqa: E402
 from release_lib.names import changelog_section, changelog_span, h2_lines, next_h2, plugin_of, release_decl  # noqa: E402
 from step_result import (
     EXIT_GATE,
+    EXIT_INFRA_WAIT,
     EXIT_PRECONDITION,
     StepError,
     approval_present,
@@ -679,16 +680,13 @@ def pr_check_buckets(root, n):
         return []
 
 
-def wait_and_merge(root, n, expect=None):
-    """PR のチェックを merge-when-green で待ってマージする。止まったらその summary で止める。
-
-    merge-when-green は待ちの上限を持ち、実行が終わったのに pending のまま取り残されたチェックを
-    1 度だけ再実行する（`gh pr checks --watch` は上限が無く、取り残されたチェックを待ち続けた）。
-    後片付けは配布の手順が持つので行わせない。expect を渡すと、PR の先端がその SHA のときだけマージし、
-    違えば HeadMoved を投げる。
+def wait_and_merge(root, n, expect=None, ci_wait=3600.0):
+    """PR のチェックを merge-when-green で待って（上限 ci_wait 秒）マージする。止まったらその summary で止める。
+    CI の基盤待ち（75）は同じ 75 で、中身の失敗は 1 で止める（#1645）。後片付けは行わせない。expect を渡すと、
+    PR の先端がその SHA のときだけマージし、違えば HeadMoved を投げる。
     """
     script = Path(__file__).resolve().parent / "merged-steps.py"
-    cmd = [sys.executable, str(script), "merge-when-green", str(n), "--no-cleanup", "--interval", "5"]
+    cmd = [sys.executable, str(script), "merge-when-green", str(n), "--no-cleanup", "--interval", "5", "--timeout", f"{ci_wait:g}"]
     p = run(cmd + (["--expect-head", expect] if expect else []), cwd=root, check=False)
     try:
         out = json.loads((p.stdout or "").strip().splitlines()[-1])
@@ -697,7 +695,8 @@ def wait_and_merge(root, n, expect=None):
     if p.returncode != 0:
         if any(isinstance(i, dict) and i.get("result") == "head_moved" for i in out.get("items") or []):
             raise HeadMoved(out.get("summary") or "")
-        raise StepError(f"PR #{n} をマージできない: {out.get('summary') or p.stderr.strip()[:300]}")
+        code = EXIT_INFRA_WAIT if p.returncode == EXIT_INFRA_WAIT else 1
+        raise StepError(f"PR #{n} をマージできない: {out.get('summary') or p.stderr.strip()[:300]}", code)
     return merge_commit_of(root, n)
 
 
@@ -749,7 +748,7 @@ def cmd_release(a):
         )
         pr = {"number": create_pr(root, base, branch, f"Release: {plugin} v{ver}", body), "state": "OPEN"}
     release_pr = pr["number"]
-    release_commit = wait_and_merge(root, release_pr) if pr["state"] == "OPEN" else merge_commit_of(root, release_pr)
+    release_commit = wait_and_merge(root, release_pr, ci_wait=a.ci_wait) if pr["state"] == "OPEN" else merge_commit_of(root, release_pr)
 
     metrics = {
         "channel": a.channel,
@@ -788,7 +787,7 @@ def cmd_release(a):
         )
     )
     try:
-        merge = wait_and_merge(root, main_pr, expect=verdict.tip)  # 比べた先端だけを本番チャネルへ入れる
+        merge = wait_and_merge(root, main_pr, expect=verdict.tip, ci_wait=a.ci_wait)  # 比べた先端だけを本番チャネルへ入れる
     except HeadMoved:
         moved = approval.check_approved(root, approved, base, allowed)
         emit(approval.gate(root, a, plugin, base, moved, items, metrics, moved=True), EXIT_GATE)
@@ -1135,6 +1134,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--version", required=True, type=version_arg)
     p.add_argument("--channel", required=True, choices=("dev", "prod"))
     p.add_argument("--plugins", help="カンマ区切り（例 ndf,mcp-serena。既定は宣言の release.plugin。先頭がタグと題に使うプラグイン）")
+    p.add_argument("--ci-wait", type=float, default=3600.0, help="待つ PR ごとの CI の待ちの上限（秒）")
     g = p.add_mutually_exclusive_group()
     g.add_argument("--approved-sha", metavar="SHA", help="prod: 承認したコミット（approval-facts の metrics.approved_sha。40 桁）")
     g.add_argument("--approval", help="prod: 承認資料（「承認したコミット」と「承認の記録」の欄を読む）")

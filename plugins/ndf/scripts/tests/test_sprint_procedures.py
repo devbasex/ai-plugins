@@ -32,6 +32,10 @@ RECORD = str(HERE / "projects-sync.sh")
 PACE = {"enabled": True, "modes": ["light", "standard", "legacy-refactor"], "verify": "true"}
 
 
+# new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える
+pytestmark = pytest.mark.usefixtures("issue_bodies")
+
+
 def load(path) -> dict:
     return json.loads(Path(path).read_text())
 
@@ -101,6 +105,7 @@ def test_single_plans_keep_their_step_order_and_gain_the_record(tmp_path):
         "judge",
         "fix",
         "pr",
+        "fix-push",
         "test-all",
         "doc-lint",
         "fix-doc",

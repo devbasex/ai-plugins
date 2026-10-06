@@ -24,6 +24,10 @@ sys.path.insert(0, str(SCRIPTS))
 from supervise_lib import engine, flow, paths, queue  # noqa: E402
 
 
+# new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える
+pytestmark = pytest.mark.usefixtures("issue_bodies")
+
+
 def cli(*args, cwd=None):
     return subprocess.run([PY, str(SUPERVISE), *args], capture_output=True, text=True, cwd=cwd or REPO)
 

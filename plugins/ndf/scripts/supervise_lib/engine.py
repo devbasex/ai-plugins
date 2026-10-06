@@ -22,7 +22,7 @@ import runtime_policy
 import slow_step as ss
 from supervise_lib import decl, paths
 from supervise_lib.claude import AuthUnavailable, ClaudeCall, ClaudeRunner, UsageLimit, claude_kind
-from supervise_lib.plan import expand_parts, normalize_plan
+from supervise_lib.plan import expand_parts, fail_kind_matches, normalize_plan, on_exit_error
 from supervise_lib.pr import PrStep
 from supervise_lib.slow import SLOW_EXIT, SlowAction, SlowWatch
 from supervise_lib.state import RunState
@@ -171,6 +171,9 @@ class Engine:
             self.slow.cfg = self.slow.resolve_slow()
         except ss.SlowConfigError as e:
             return "止まった", f"slow の設定が読めない（{e.args[0]}）"
+        bad = on_exit_error(self.plan["steps"])
+        if bad:
+            return "止まった", bad
         return self.check_runtimes()
 
     def check_runtimes(self) -> tuple[str, str] | None:
@@ -312,6 +315,8 @@ class Engine:
         if is_run and self.run_step.is_skip(step, st.cur.get("exit")):
             st.cur["skipped"] = True
             return (None if step["skip_to"] == "end" else step["skip_to"]), None, None
+        if is_run and step.get("on_exit") and str(st.cur.get("exit")) in step["on_exit"]:
+            return self._next_on_exit(sid, step)
         if is_run and is_gate(st.cur.get("exit")) and step.get("gate_as_ok"):
             # 関門として数えない（MVV 判定が前もって通した関門 2 の提示物など）。提示物だけを写す
             st.cur["presentation"] = self.copy_presentation(step)
@@ -325,10 +330,20 @@ class Engine:
             if is_run and step.get("pr_from"):
                 self.take_pr(step["pr_from"])
             return self.back_or_next(sid, step), None, None
-        if step.get("on_fail"):
+        if step.get("on_fail") and fail_kind_matches(step, st.cur):
             st.failed_step = sid
             return step["on_fail"], None, None
         return None, "止まった", f"ステップ {sid} が失敗した（exit={st.cur['exit']}）"
+
+    def _next_on_exit(self, sid: str, step: dict) -> tuple[str | None, str | None, str | None]:
+        """run のステップの `on_exit`（終了コード → ステップの id / end / stop）の行き先。`on_fail` と judge を通らない
+        （release とマージのステップが CI の基盤待ち 75 で止まる。#1645 の決定 6）。"""
+        code = self.state.cur.get("exit")
+        dest = step["on_exit"][str(code)]
+        if dest == "stop":
+            summary = (last_json(self.state.cur.get("text", "")) or {}).get("summary") or ""
+            return None, "止まった", f"ステップ {sid} が終了コード {code} で止めた: {summary}"
+        return (None if dest == "end" else dest), None, None
 
     def take_pr(self, key: str) -> None:
         """run のステップの `pr_from`: 終了コード 0 の出力の最後の JSON の `metrics.<key>` が空でなければ、

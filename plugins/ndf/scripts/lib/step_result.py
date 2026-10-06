@@ -48,6 +48,9 @@ EXIT_GATE = 10  # 10〜19: 関門（人の同意が要る）
 EXIT_PAUSE = 20  # 20〜29: LLM の判断待ち
 # 依存の欠け（`deps.require` が外部パッケージを用意できずに止まった。何も判定していない）。値の持ち主は deps.py
 EXIT_DEPS_MISSING = deps.EXIT_DEPS_MISSING
+# CI の基盤待ち（Runner が付かずに取り消されたジョブが再実行でも解けない。sysexits.h の EX_TEMPFAIL。
+# 中身の失敗ではなく、後で打ち直せば通りうる。merge-when-green と release が返す。#1645）
+EXIT_INFRA_WAIT = 75
 
 GATE_CODES = range(10, 20)
 PAUSE_CODES = range(20, 30)
@@ -63,7 +66,7 @@ def code_matches(status: str, code: int) -> bool:
         return code == EXIT_OK
     if status == "gate":
         return code in GATE_CODES or code in PAUSE_CODES
-    return code in (EXIT_VIOLATION, EXIT_UNREADABLE, EXIT_PRECONDITION, EXIT_DEPS_MISSING)
+    return code in (EXIT_VIOLATION, EXIT_UNREADABLE, EXIT_PRECONDITION, EXIT_DEPS_MISSING, EXIT_INFRA_WAIT)
 
 
 def _check_item_types(obj: dict, errs: list[str]) -> None:

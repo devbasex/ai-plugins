@@ -38,8 +38,11 @@
       "id": "release",
       "type": "run",
       "stage": "配布",
-      "timeout": 2400,
-      "cmd": "python3 <NDF>/scripts/release-steps.py release --version 1.2.0-dev.1 --channel dev",
+      "timeout": 3960,
+      "cmd": "python3 <NDF>/scripts/release-steps.py release --version 1.2.0-dev.1 --ci-wait 3600 --channel dev",
+      "on_exit": {
+        "75": "stop"
+      },
       "on_fail": "judge",
       "next": "verify",
       "probe": {

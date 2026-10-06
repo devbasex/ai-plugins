@@ -66,7 +66,19 @@
       "materials": {
         "manual": false,
         "migration": true
-      }
+      },
+      "on_fail": "fix-push",
+      "on_fail_only": "push-check"
+    },
+    {
+      "id": "fix-push",
+      "type": "work",
+      "kind": "修正",
+      "inputs": [
+        "pr"
+      ],
+      "prompt": "入力は push 前の検査で拒まれた push の出力である。落ちた検査の指摘を直してコミットする（push しない）。検査はリポジトリの pre-push フック（git config core.hooksPath）が打つものなので、直した後に同じコマンドを手元で打って通ることを確かめる。変更に起因しない失敗は直さない。",
+      "next": "pr"
     },
     {
       "id": "test-all",
@@ -117,6 +129,9 @@
       "probe": {
         "cmd": "python3 <NDF>/scripts/merged-steps.py probe --pr {pr} --act"
       },
+      "on_exit": {
+        "75": "stop"
+      },
       "next": "end"
     },
     {
@@ -126,6 +141,9 @@
       "cmd": "python3 <NDF>/scripts/merged-steps.py merge-when-green {pr} --timeout 3600 --gate-approved user",
       "probe": {
         "cmd": "python3 <NDF>/scripts/merged-steps.py probe --pr {pr} --act"
+      },
+      "on_exit": {
+        "75": "stop"
       },
       "next": "end"
     }

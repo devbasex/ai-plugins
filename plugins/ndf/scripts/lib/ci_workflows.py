@@ -45,3 +45,23 @@ def job_ids(text: str) -> list[str]:
             if lead == indent and line.endswith(":"):
                 out.append(line.strip()[:-1].strip().strip("\"'"))
     return out
+
+
+def required_contexts(rules: object) -> list[str] | None:
+    """`rules/branches/<branch>` の応答（規則の配列）→ 必須のチェックの名前（重複なく整列）。
+
+    `required_status_checks` の規則が 1 つも無ければ None（規則を持たないブランチと、存在しないブランチの
+    どちらでもあり得る。見分けは呼ぶ側が持つ）。配列でなければ ValueError。突き合わせのチェック
+    （`scripts/check-required-checks.py`）と解析（`project_lib/measure_ci.py`）が使う（#653 の決定 6）。
+    """
+    if not isinstance(rules, list):
+        raise ValueError(f"規則の配列でない: {type(rules).__name__}")
+    found, out = False, set()
+    for r in rules:
+        if not isinstance(r, dict) or r.get("type") != "required_status_checks":
+            continue
+        found = True
+        for c in (r.get("parameters") or {}).get("required_status_checks") or []:
+            if isinstance(c, dict) and c.get("context"):
+                out.add(c["context"])
+    return sorted(out) if found else None

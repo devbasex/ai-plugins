@@ -27,6 +27,10 @@ AUTO = {"enabled": True, "modes": ["light", "standard", "legacy-refactor"], "ver
 STAGES = ["設計", "関門 1", "設計の結果", "スプリントブランチ", "実装", "検査", "開発版", "本番"]
 
 
+# new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える
+pytestmark = pytest.mark.usefixtures("issue_bodies")
+
+
 def load(path) -> dict:
     return json.loads(Path(path).read_text())
 
