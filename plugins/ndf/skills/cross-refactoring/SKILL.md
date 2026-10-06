@@ -258,7 +258,7 @@ bash "$LIB/bg-wait.sh" wait "$RC"   # 1 回 540 秒以内。124 = まだ終わ�
 
 再開は同じコマンドを打ち直すだけである。進みは耐久の記録（既定の置き場は `~/.local/state/ndf/dbos/refactor-<鍵>.sqlite` ）が持ち、
 記録のある手順は流し直さない。`metrics` は状態ファイルから数えた件数（`items` / `adopted` / `reverted` /
-`deferred`（見送った改善項目の数。見送った提案の数ではない） / `fix_rounds` / `final_gate` / `reassigned`（結果を残さなかった担当を振り替えた回数。0 でも出す） / `review_status`）と、最終ゲートを経ていない実行の `unconfirmed`、手元の HEAD が
+`deferred`（見送った改善項目の数） / `fix_rounds` / `final_gate` / `reassigned`（結果を残さなかった担当を振り替えた回数。0 でも出す） / `review_status`）と、最終ゲートを経ていない実行の `unconfirmed`、手元の HEAD が
 公開した地点より進んでいるかの `unpublished`（真偽。判定できなければ `null`）である。
 
 ### リファクタリング計画のコメントを書き直す時点
