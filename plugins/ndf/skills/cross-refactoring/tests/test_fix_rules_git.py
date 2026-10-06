@@ -165,13 +165,15 @@ def test_an_item_whose_fix_was_discarded_for_breaking_the_rules_is_not_unfixed(f
     _implement(flow, cmd_setup, cmd_implement, ["a", "b"], {"I-001": ("a", _module("a", 2)), "I-002": ("b", _module("b", 2))})
     _call(cmd_converge, "cmd_verify")
     _call(cmd_setup, "cmd_start_phase", phase="fix")
-    _write(flow["work"], "docs/outside.md", "範囲の外\n")
+    # 範囲の外の既存のファイルを、項目が変えた名前と関係なく変える（新しいファイルは範囲の中として扱うため使わない。#1814）
+    ignore = flow["work"] / ".gitignore"
+    _write(flow["work"], ".gitignore", ignore.read_text(encoding="utf-8") + "build/\n")
     commit_with_trailers(flow["work"], "Fix I-001", item_trailers("I-001"))
     write_result(flow["path"], FIX_STEM, {"items": []})
     _call(cmd_merge_fix, "cmd_merge_fix")
 
     items = _items(flow)
-    assert not (flow["work"] / "docs" / "outside.md").exists(), "手順を外れた修正は範囲ごと捨てる"
+    assert "build/" not in ignore.read_text(encoding="utf-8"), "手順を外れた修正は範囲ごと捨てる"
     assert "unfixed" not in items["I-001"]
     assert items["I-002"]["unfixed"] == 1
 

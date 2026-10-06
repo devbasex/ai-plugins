@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 import pathlib
-from typing import Any
+from typing import Any, Optional
 
 import statefile
 
@@ -27,12 +27,13 @@ from .gitfacts import (
     note_stopped,
     record_observed_model,
 )
-from .items import FAILING, IMPLEMENTED, find_item
+from .items import FAILING, IMPLEMENTED, find_item, implement_shas
 from .outbound import plan_line
 from .paths import head_sha, load_state, work_dir
 from .phases import add_phase_seconds, phase_record
 from .results import read_result
 from .undo import discard_range
+from .scope_check import judge_commits
 from .verify import collect_test_changes, verify_commit_basics, verify_test_changes
 
 UNFIXED_REASON = "修正担当が直さなかった（修正の範囲にこの項目のコミットが無い）"
@@ -42,19 +43,36 @@ def _fix_problems(
     state: dict[str, Any],
     facts: list[dict[str, Any]],
     allowed: set[str],
+    rewrites: Optional[dict[str, list[dict[str, str]]]] = None,
 ) -> list[str]:
-    """修正のコミットが手順を満たすか。**1 件でも外れたら修正の範囲ごと取り消す。**"""
-    scope = list(state.get("target_scope") or [])
+    """修正のコミットが手順を満たすか。**1 件でも外れたら修正の範囲ごと取り消す。**
+
+    範囲と期待値は `Item-Id` ごとの単位（その項目の修正のコミットの組）で見る（#1814 決定 5・11）。
+    変えた名前は、その項目の実装とそれより前に採った修正のコミットからも集める（実装が移した名前の
+    呼び手を修正で追従させる経路を取り消さない。決定 2）。`facts` は新しい順。呼び手の書き換えとして通したファイルは
+    `rewrites` へ項目ごとに集め、修正を採るときだけ `review_scope_judgements` へ書く（I5）。
+    """
     problems = []
-    for fact in facts:
+    units: dict[str, list[dict[str, Any]]] = {}
+    for fact in reversed(facts):
         item_id = str((fact.get("trailers") or {}).get("Item-Id") or "")
         if item_id not in allowed:
             problems.append(f"コミット {fact['sha'][:7]} の Item-Id（{item_id or 'なし'}）は修正の対象ではありません")
             continue
-        problem = verify_commit_basics(fact, scope, "コミットが範囲にありません", check_test=False)
-        problem = problem or verify_test_changes(collect_test_changes([fact]))
+        problem = verify_commit_basics(fact, "コミットが範囲にありません", check_test=False)
         if problem:
             problems.append(problem)
+            continue
+        units.setdefault(item_id, []).append(fact)
+    for item_id, unit in units.items():
+        item = find_item(state, item_id, required=False) or {}
+        context = [*implement_shas(item), *((item.get("commits") or {}).get("fix") or [])]
+        verdict = judge_commits(state, [f["sha"] for f in unit], context)
+        problem = verdict.problem or verify_test_changes(collect_test_changes(unit))
+        if problem:
+            problems.append(problem)
+        elif verdict.rewrites and rewrites is not None:
+            rewrites[item_id] = verdict.rewrites
     return problems
 
 
@@ -75,11 +93,13 @@ def _inspect_fix_commits(
             "problems": [f"修正の範囲を確定できません（起点 {fix.get('base_sha')}）"],
         }
     facts = collect_commit_facts(work, ordered, set(ordered), "", state["head_branch"])
+    rewrites: dict[str, list[dict[str, str]]] = {}
     return {
         "head": head,
         "ordered": ordered,
         "known": True,
-        "problems": _fix_problems(state, facts, {t["id"] for t in fix_items}),
+        "problems": _fix_problems(state, facts, {t["id"] for t in fix_items}, rewrites),
+        "rewrites": rewrites,
     }
 
 
@@ -105,6 +125,10 @@ def _apply_fix_result(
             item = find_item(state, item_id, required=False)
             if item is not None:
                 item["commits"]["fix"].append(sha)
+        for item_id, found in (result.get("rewrites") or {}).items():
+            item = find_item(state, item_id, required=False)
+            if item is not None:
+                item.setdefault("review_scope_judgements", []).extend(found)
 
 
 def _mark_unfixed(

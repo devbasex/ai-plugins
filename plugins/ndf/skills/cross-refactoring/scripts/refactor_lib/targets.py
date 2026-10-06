@@ -34,7 +34,17 @@ from .timeline import state_test_timeout, state_whole_timeout, strategy_of
 _SHELL_CHARS = frozenset(";&|$`<>()\n")
 
 
-def _target_ok(target: object, work: str, locations: list[str], planned_paths: set[str]) -> bool:
+# 範囲テストの対象が無くても見送らない手法。死んだコードには呼ぶテストが無い（#1814 決定 7）
+DELETION_TECHNIQUES = frozenset({"remove_dead_code"})
+
+
+def _target_ok(
+    target: object,
+    work: str,
+    locations: list[str],
+    planned_paths: set[str],
+    strategy: Optional[ts.Strategy] = None,
+) -> bool:
     """`test_targets` の 1 つが組み立てに使えるか（条件は `valid_targets` の説明）。"""
     if not isinstance(target, str) or not target:
         return False
@@ -48,8 +58,11 @@ def _target_ok(target: object, work: str, locations: list[str], planned_paths: s
         return False
     if not (pathlib.Path(work) / normalized).exists() and normalized not in planned_paths:
         return False
-    # `covered_by_roots` は起点が空なら全てを入れるため、空の場合は呼び出し元で弾いてある。
-    return covered_by_roots(normalized, locations)
+    if normalized in planned_paths and strategy is not None and any(s.covers(normalized) for s in strategy.scoped_suites(ts.TEST)):
+        # 項目が足すテストは、テストの種別の suite が覆えば置き場所の外でもよい（#1814 決定 8）
+        return True
+    # `covered_by_roots` は起点が空なら全てを入れるため、空の場合は弾く。
+    return bool(locations) and covered_by_roots(normalized, locations)
 
 
 def valid_targets(
@@ -57,6 +70,7 @@ def valid_targets(
     work: str,
     scope: list[str],
     planned: Iterable[str] = (),
+    strategy: Optional[ts.Strategy] = None,
 ) -> bool:
     """`test_targets` が組み立てに使えるか。1 つでも満たさなければ偽。
 
@@ -64,15 +78,15 @@ def valid_targets(
     - `::` より前のパスが作業ディレクトリの中に実在する（絶対パスと `..` で外へ出るものは不可）。
       **ただし、その項目が足すテスト（`planned` = 改修計画の `tests`）は実在しなくてよい**
       （改修計画の時点ではまだ無い。足さなければ項目ごと `not_done` で見送られる。実装計画 I11）
-    - `--scope` のテストの置き場所の中にある
+    - `--scope` のテストの置き場所の中にある。**ただし、その項目が足すテストは、`strategy` のテストの種別の
+      suite のどれかの `paths` が覆えば置き場所の外でもよい**（#1814 決定 8。範囲テストは suite の雛形で組むため、
+      suite が覆わないパスは組んでも走らない）
     """
     planned_paths = {os.path.normpath(p) for p in planned if isinstance(p, str) and p}
     if not targets:
         return False
     locations = [os.path.normpath(loc) for loc in test_locations(list(scope), work)]
-    if not locations:
-        return False
-    return all(_target_ok(target, work, locations, planned_paths) for target in targets)
+    return all(_target_ok(target, work, locations, planned_paths, strategy) for target in targets)
 
 
 def scope_runs_for(strategy: ts.Strategy, paths: list[str]) -> Optional[list[ts.ScopeRun]]:
@@ -212,14 +226,17 @@ def limited_runs(
     test_targets: list[str],
     work: str,
     planned: Iterable[str] = (),
+    technique: Optional[str] = None,
 ) -> tuple[Optional[list[ts.ScopeRun]], str]:
-    """項目の検証に使うテストの種別の範囲テストと、その由来（`targets` / `round_test` / `lint` / `none`）。
+    """項目の検証に使うテストの種別の範囲テストと、その由来（`targets` / `round_test` / `lint` / `deletion` / `none`）。
 
     対象が複数の suite にまたがるときは、suite ごとにその雛形で組んだ範囲テストを全て返す。
 
     `round-only` はラウンドテストをそのまま走らせる。テストの種別の suite が無い戦略は空の並び（`lint`。
     静的解析の範囲テストは検証のたびに組む）。ほかの戦略は `test_targets` を雛形の `{paths}` へ入れ、
-    入れられなければ `none`（呼ぶ側が `no_target` で見送る）。**全体テストを項目の検証に使うことはない。**
+    入れられなければ `none`（呼ぶ側が `no_target` で見送る）。ただし手法が `remove_dead_code` なら空の並び
+    （`deletion`）を返し、静的解析の範囲テストと危険フラグ D4 の全体テスト 1 回で検証する（#1814 決定 7）。
+    **全体テストを項目の範囲テストに使うことはない。**
     """
     strategy = strategy_of(state_like)
     runs = round_runs(strategy)
@@ -229,10 +246,12 @@ def limited_runs(
         return [], "lint"
     scope = state_like.get("target_scope") or state_like.get("scope") or []
     targets = list(test_targets or [])
-    if valid_targets(targets, work, scope, planned):
+    if valid_targets(targets, work, scope, planned, strategy):
         built = scope_runs_for(strategy, targets)
         if built:
             return built, "targets"
+    if technique in DELETION_TECHNIQUES:
+        return [], "deletion"
     return None, "none"
 
 

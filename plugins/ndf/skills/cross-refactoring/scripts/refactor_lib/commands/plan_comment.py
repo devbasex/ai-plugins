@@ -23,6 +23,7 @@ from typing import Any, Optional
 import statefile
 
 from .. import die, ledger, outside_reverts
+from ..items import implement_shas
 from ..paths import full_commit, load_state
 from ..plan import PLAN_COMMENT, plan_mode, write_plan_comment
 
@@ -49,8 +50,9 @@ def apply_outside_reverts(state: dict[str, Any], reverted: dict[str, str]) -> tu
     marked: list[str] = []
     restored: list[str] = []
     for item in state.get("items") or []:
-        impl = (item.get("commits") or {}).get("implement")
-        reverter = outside_reverts.reverter_of(reverted, full_commit(work, impl) if impl else "")
+        reverter = next(
+            (r for r in (outside_reverts.reverter_of(reverted, full_commit(work, sha)) for sha in implement_shas(item)) if r), None
+        )
         if reverter and ledger.is_live(item):
             ledger.mark_outside_revert(item, reverter)
             marked.append(str(item.get("id")))

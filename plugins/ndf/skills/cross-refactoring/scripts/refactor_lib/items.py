@@ -109,10 +109,20 @@ def find_item(state: dict[str, Any], item_id: Optional[str], required: bool = Tr
     return None
 
 
+def implement_shas(item: dict[str, Any]) -> list[str]:
+    """項目の実装のコミットを古い順に返す。同じ `Item-Id` のコミットを何件でも持つ（#1814 決定 6）。
+
+    `commits.implement` は並びで書く。この変更より前の状態ファイルの文字列は 1 件の並びとして読む。
+    """
+    value = (item.get("commits") or {}).get("implement")
+    shas = value if isinstance(value, list) else [value]
+    return [s for s in shas if isinstance(s, str) and s]
+
+
 def item_shas(item: dict[str, Any]) -> list[str]:
-    """項目が持つコミット（テスト・実装・修正）を古い順に返す。"""
+    """項目が持つコミット（テスト・実装の全件・修正）を古い順に返す。取り消しはこの全件を戻す（#1814 I8）。"""
     commits = item.get("commits") or {}
-    shas = [commits.get("test"), commits.get("implement"), *(commits.get("fix") or [])]
+    shas = [commits.get("test"), *implement_shas(item), *(commits.get("fix") or [])]
     return [s for s in shas if isinstance(s, str) and s]
 
 
@@ -161,7 +171,7 @@ def new_items(selected: list[dict[str, Any]], first_rank: int = 1, round_no: int
                 "estimate": candidate["estimate"],
                 "round": round_no,
                 "status": PLANNED,
-                "commits": {"test": None, "implement": None, "fix": []},
+                "commits": {"test": None, "implement": [], "fix": []},
                 "seconds": {},
                 "fix_count": 0,
                 "danger": [],

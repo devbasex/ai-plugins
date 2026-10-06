@@ -13,6 +13,8 @@
 
 from __future__ import annotations
 
+import types
+
 import pytest
 
 from crossref_helpers import make_state_v2, read_state, write_result
@@ -204,8 +206,16 @@ def test_a_missing_impl_trailer_reverts_the_range(cmd_final_fix, refactor, cmd_g
 def test_an_out_of_scope_final_fix_reverts_the_range(
     cmd_final_fix, patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, merge_spy, monkeypatch
 ):
-    """**最終ゲートでも `--scope` の外を触ってよい理由は無い。**"""
+    """**最終ゲートでも `--scope` の外の既存のファイルを勝手に触ってよい理由は無い。** 判定は修正の全コミットを
+    1 つの単位として `scope_check.judge_commits` が行う（#1814。分類そのものは `test_scope_check_git.py` が確かめる）。"""
     state_path = _failing_gate_state(tmp_path)
+    seen = []
+
+    def judged(state, shas, context=()):
+        seen.append(list(shas))
+        return types.SimpleNamespace(problem="対象範囲の外の既存のファイルを変更しています: docs/other.md", rewrites=[])
+
+    monkeypatch.setattr(cmd_final_fix, "judge_commits", judged)
     env_tmp_dir(state_path)
     patch_lib(
         "collect_commit_facts",
@@ -226,6 +236,7 @@ def test_an_out_of_scope_final_fix_reverts_the_range(
     cmd_final_fix.cmd_merge_final_fix(_args())
 
     assert len(merge_spy["reverted"]) == 1
+    assert seen, "最終ゲート修正も同じ範囲の判定を通る"
 
 
 def test_an_unreported_commit_reverts_the_range(

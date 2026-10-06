@@ -20,7 +20,7 @@ import json
 import pathlib
 from typing import Any, Optional
 
-from .items import DEFERRED, REVERTED
+from .items import DEFERRED, REVERTED, implement_shas
 from .phases import phase_seconds
 from .rounds import whole_records
 
@@ -234,7 +234,7 @@ def _kind_seconds(state: dict[str, Any]) -> dict[str, dict[str, float]]:
         seconds = item.get("seconds") or {}
         if commits.get("test"):
             add("test", seconds.get("test"))
-        if commits.get("implement") and item.get("kind"):
+        if implement_shas(item) and item.get("kind"):
             add(str(item["kind"]), seconds.get("implement"))
     return kinds
 

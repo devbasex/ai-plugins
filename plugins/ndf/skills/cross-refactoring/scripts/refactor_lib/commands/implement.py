@@ -7,9 +7,12 @@
 | 見つけたもの | 扱い |
 | --- | --- |
 | どの項目にも属さないコミット（`Item-Id` が無い・改修計画に無い） | そのコミットだけを取り消す |
-| 手順を外れたコミット（範囲の外・トレーラー欠け・2 コミット以上・差分予算・文言固定テスト・期待値の変更） | 項目を取り消す（`status: reverted`。見送りには入れない。I5） |
+| 手順を外れたコミット（範囲の外の既存のファイル・トレーラー欠け・文言固定テスト・期待値の変更） | 項目を取り消す（`status: reverted`。見送りには入れない。I5） |
 | コミットの無い項目 | 持ち越し（`carried`）にして項目のコミットを取り消す。次の `readopt` が採り直すか `not_done` で見送る（I15） |
 | 足したテストが今のコードで落ちた項目 | `test_failed` で見送り、テストのコミットを取り消す（決定 13） |
+
+実装の項目は同じ `Item-Id` のコミットを何件でも 1 項目として採り、所要は最後のコミットの時刻で測る（#1814 決定 6）。
+範囲は項目の全コミットを 1 つの単位として `scope_check` が判定する（#1814 決定 11）。
 
 取り込みの対象は今の巡（`readopt.round`）の未了の項目だけで、取り消し済みの判定も巡ごとに働く（#1743 決定 10）。
 """
@@ -53,10 +56,10 @@ from ..items import (
 from ..paths import work_dir
 from ..paths import git_out, load_state
 from ..phases import finish_phase, phase_record
+from ..scope_check import judge_commits
 from ..undo import drop, resume_pending_drop
 from ..verify import (
     verify_commit_basics,
-    verify_diff_budget,
     collect_test_changes,
     doc_wording_tests,
     pending_test_judgements,
@@ -73,7 +76,8 @@ class Intake:
     rejected: dict[str, str] = field(default_factory=dict)  # 項目 → 手順を外れた理由
     carried: dict[str, str] = field(default_factory=dict)  # 項目 → 持ち越しの理由（コミットが無い）
     test_failed: dict[str, str] = field(default_factory=dict)  # 項目 → テストの結果
-    accepted: dict[str, dict[str, Any]] = field(default_factory=dict)  # 項目 → コミットの事実
+    accepted: dict[str, list[dict[str, Any]]] = field(default_factory=dict)  # 項目 → コミットの事実（古い順）
+    rewrites: dict[str, list[dict[str, str]]] = field(default_factory=dict)  # 項目 → 呼び手の書き換えとして通したファイル
 
 
 def _phase_commits(state: dict[str, Any], phase: str) -> list[str]:
@@ -121,15 +125,18 @@ def _record_seconds(
     state: dict[str, Any],
     phase: str,
     key: str,
-    accepted: dict[str, dict[str, Any]],
+    accepted: dict[str, list[dict[str, Any]]],
 ) -> None:
-    """項目の所要。起点は最初の項目なら手順の開始、2 件目からは直前の項目のコミット（設計）。"""
+    """項目の所要。起点は最初の項目なら手順の開始、2 件目からは直前の項目のコミット（設計）。
+
+    終わりは項目の**最後のコミット**の時刻（#1814 AC6a）。2 件目以降の作業も所要に数える。
+    """
     previous = phase_record(state, phase).get("started_at")
-    ordered = sorted(accepted.items(), key=lambda kv: clock.parse(kv[1]["time"]) or clock.now())
-    for item_id, fact in ordered:
-        seconds = clock.seconds_between(previous, fact["time"])
+    ends = {item_id: commits[-1]["time"] for item_id, commits in accepted.items()}
+    for item_id, at in sorted(ends.items(), key=lambda kv: clock.parse(kv[1]) or clock.now()):
+        seconds = clock.seconds_between(previous, at)
         find_item(state, item_id)["seconds"][key] = None if seconds is None else round(max(seconds, 0.0), 1)
-        previous = fact["time"]
+        previous = at
 
 
 def _settle(
@@ -230,7 +237,7 @@ def _added_test_commands(state: dict[str, Any], item: dict[str, Any], files: lis
         return own
     work = work_dir(state)
     strategy = timeline.strategy_of(state)
-    tests = [f for f in files if targets.valid_targets([f], work, list(state.get("target_scope") or []))]
+    tests = [f for f in files if targets.valid_targets([f], work, list(state.get("target_scope") or []), item.get("tests") or [], strategy)]
     if tests:
         built = targets.scope_runs_for(strategy, tests)
         if built:
@@ -246,7 +253,8 @@ def _run_added_tests(path: pathlib.Path, state: dict[str, Any], intake: Intake) 
     work = work_dir(state)
     timeout = timeline.state_test_timeout(state)
     results: dict[tuple[str, ...], bool] = {}
-    for item_id, fact in intake.accepted.items():
+    for item_id, commits in intake.accepted.items():
+        fact = commits[0]
         commands = _added_test_commands(state, find_item(state, item_id), list(fact.get("files") or []))
         if not commands:
             continue
@@ -285,7 +293,7 @@ def _intake_phase(
         if problem:
             intake.rejected[item["id"]] = problem
         else:
-            intake.accepted[item["id"]] = commits[0]
+            intake.accepted[item["id"]] = commits
             continue
         # 採らないコミットは項目の記録に載らない。取り消しの対象として明示する。
         intake.extra.extend(c["sha"] for c in commits)
@@ -294,13 +302,12 @@ def _intake_phase(
 
 def _intake_tests(state: dict[str, Any]) -> Intake:
     intake = Intake()
-    scope = list(state.get("target_scope") or [])
     tracked = tracked_markdown(work_dir(state))
     return _intake_phase(
         state,
         # 今の巡で採った、テストを足す未了の項目だけ。前の巡で検証を終えた項目のコミットに触れない（#1743）
         lambda item: bool(item.get("tests")) and item.get("status") == PLANNED and in_current_round(state, item),
-        lambda _item, commits: _test_commit_problem(commits, scope, tracked, state),
+        lambda _item, commits: _test_commit_problem(commits, tracked, state),
         "add-tests",
         intake,
     )
@@ -308,17 +315,17 @@ def _intake_tests(state: dict[str, Any]) -> Intake:
 
 def _test_commit_problem(
     commits: list[dict[str, Any]],
-    scope: list[str],
     tracked: list[str],
     state: dict[str, Any],
 ) -> Optional[str]:
-    """テストの追加のコミットが手順を満たすか。**テスト以外のファイルを触らない。**"""
+    """テストの追加のコミットが手順を満たすか。**テスト以外のファイルを触らない。** テストの追加は 1 項目 1 コミット。"""
     from ..gitfacts import is_test_path
 
     if len(commits) > 1:
         return f"テストの追加が {len(commits)} コミットあります（1 項目 = 1 コミット）"
     commit = commits[0]
-    problem = verify_commit_basics(commit, scope, "コミットが範囲にありません", check_test=False)
+    problem = verify_commit_basics(commit, "コミットが範囲にありません", check_test=False)
+    problem = problem or judge_commits(state, [commit["sha"]]).problem
     if problem:
         return problem
     others = [f for f in commit.get("files") or [] if not is_test_path(f)]
@@ -348,11 +355,11 @@ def cmd_merge_tests(args: argparse.Namespace) -> None:
         note_stopped(state, str(state["implementer"]), "add-tests")
         intake = _intake_tests(state)
         _run_added_tests(path, state, intake)
-        for item_id, fact in intake.accepted.items():
+        for item_id, commits in intake.accepted.items():
             if item_id in intake.test_failed:
                 continue
             item = find_item(state, item_id)
-            item["commits"]["test"] = fact["sha"]
+            item["commits"]["test"] = commits[0]["sha"]
             item["status"] = TESTED
         _record_seconds(state, "add-tests", "test", {k: v for k, v in intake.accepted.items() if k not in intake.test_failed})
         _remember(path, state, "add-tests", intake)
@@ -385,34 +392,39 @@ def _doc_wording_reason(hits: list[tuple[str, int]]) -> str:
 def _implement_problem(
     item: dict[str, Any],
     commits: list[dict[str, Any]],
-    scope: list[str],
     tracked: list[str],
     state: dict[str, Any],
+    intake: Optional[Intake] = None,
 ) -> Optional[str]:
-    """実装のコミットが手順を満たすか。適用のチェック（v10.17.x）を項目の単位で掛ける。"""
-    if len(commits) > 1:
-        return f"実装が {len(commits)} コミットあります（1 改善項目 = 1 コミット）"
-    problem = verify_commit_basics(commits[0], scope, "コミットが範囲にありません", check_test=False)
-    if problem:
-        return problem
+    """実装のコミット（同じ `Item-Id` の全件）が手順を満たすか。項目の全コミットを 1 つの単位として判定する。
+
+    実差分の行数では取り消さない（#1814 決定 4）。範囲の逸脱は `scope_check` が直接見る。
+    """
+    for commit in commits:
+        problem = verify_commit_basics(commit, "コミットが範囲にありません", check_test=False)
+        if problem:
+            return problem
+    verdict = judge_commits(state, [c["sha"] for c in commits])
+    if verdict.problem:
+        return verdict.problem
     problem = verify_test_changes(collect_test_changes(commits))
     if problem:
         return problem
     hits = _wording_hits(commits, tracked, state)
     if hits:
         return _doc_wording_reason(hits)
-    return verify_diff_budget([item], commits)
+    if verdict.rewrites and intake is not None:
+        intake.rewrites[item["id"]] = verdict.rewrites
+    return None
 
 
 def _intake_implement(state: dict[str, Any]) -> Intake:
     intake = Intake()
-    work = work_dir(state)
-    scope = list(state.get("target_scope") or [])
-    tracked = tracked_markdown(work)
+    tracked = tracked_markdown(work_dir(state))
     return _intake_phase(
         state,
         lambda item: item.get("status") in (PLANNED, TESTED),
-        lambda item, commits: _implement_problem(item, commits, scope, tracked, state),
+        lambda item, commits: _implement_problem(item, commits, tracked, state, intake),
         "implement",
         intake,
     )
@@ -438,14 +450,17 @@ def cmd_merge_implement(args: argparse.Namespace) -> None:
         record_observed_model(state, str(state["implementer"]), "implement")
         note_stopped(state, str(state["implementer"]), "implement")
         intake = _intake_implement(state)
-        for item_id, fact in intake.accepted.items():
+        for item_id, commits in intake.accepted.items():
             item = find_item(state, item_id)
-            item["commits"]["implement"] = fact["sha"]
+            item["commits"]["implement"] = [c["sha"] for c in commits]
             item["status"] = IMPLEMENTED
-            item["diff_lines"] = safe_int(fact.get("diff_lines"))
-            pending = pending_test_judgements([fact])
+            # 実差分は記録だけ（判定に使わない。#1814 決定 4）
+            item["diff_lines"] = sum(safe_int(c.get("diff_lines")) for c in commits)
+            pending = pending_test_judgements(commits)
             if pending:
                 item["review_test_judgements"] = pending
+            if intake.rewrites.get(item_id):
+                item["review_scope_judgements"] = intake.rewrites[item_id]
         _record_seconds(state, "implement", "implement", intake.accepted)
         _remember(path, state, "implement", intake)
     else:

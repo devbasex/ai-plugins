@@ -85,7 +85,7 @@ def test_a_distant_or_separate_change_is_dropped_alone(tmp_path, undo, line, fil
     assert items["I-001"]["status"] == "reverted"
     assert items["I-002"]["status"] == "implemented"
     # 積み直した SHA を記録へ書き戻す。
-    new_sha = items["I-002"]["commits"]["implement"]
+    [new_sha] = items["I-002"]["commits"]["implement"]
     assert new_sha != c2
     assert git("rev-parse", "HEAD", cwd=work).stdout.strip() == new_sha
     assert read_state(path)["pending_drop"] is None
@@ -149,8 +149,8 @@ def test_an_unowned_extra_commit_is_removed_and_older_commits_are_kept(tmp_path,
     }
     assert not (work / "src" / "extra.py").exists()
     items = {i["id"]: i for i in read_state(path)["items"]}
-    assert items["I-001"]["commits"]["implement"] == c1
-    assert items["I-002"]["commits"]["implement"] == c2
+    assert items["I-001"]["commits"]["implement"] == [c1]
+    assert items["I-002"]["commits"]["implement"] == [c2]
     assert git("rev-parse", "HEAD", cwd=work).stdout.strip() == c2
     assert read_state(path)["pending_drop"] is None
 
@@ -190,10 +190,10 @@ def test_a_drop_interrupted_after_replay_keeps_the_remaining_item_on_resume(tmp_
     items = {i["id"]: i for i in resumed["items"]}
     assert items["I-001"]["status"] == "reverted"
     assert items["I-002"]["status"] == "implemented"
-    assert git("rev-parse", "HEAD", cwd=work).stdout.strip() == items["I-002"]["commits"]["implement"]
+    assert git("rev-parse", "HEAD", cwd=work).stdout.strip() == items["I-002"]["commits"]["implement"][-1]
     assert (
         git("rev-parse", "HEAD^{tree}", cwd=work).stdout.strip()
-        == git("rev-parse", f"{finished['items'][1]['commits']['implement']}^{{tree}}", cwd=work).stdout.strip()
+        == git("rev-parse", f"{finished['items'][1]['commits']['implement'][-1]}^{{tree}}", cwd=work).stdout.strip()
     )
     assert len(resumed["drops"]) == 1
     assert resumed["pending_drop"] is None
@@ -252,8 +252,8 @@ def test_remap_rewrites_item_commits_and_saved_points_through_full_shas(tmp_path
 
     undo._remap(state, str(work), mapping, points)
 
-    assert state["items"][0]["commits"] == {"test": "new-c1", "implement": "new-c2", "fix": ["new-c1", "unknown"]}
-    assert state["items"][1]["commits"] == {"test": None, "implement": base, "fix": []}
+    assert state["items"][0]["commits"] == {"test": "new-c1", "implement": ["new-c2"], "fix": ["new-c1", "unknown"]}
+    assert state["items"][1]["commits"] == {"test": None, "implement": [base], "fix": []}
     assert state["items"][2] == {"id": "I-003"}
     assert state["phases"] == {"a": {"base_sha": "point-c1"}, "b": {"base_sha": ""}, "c": "not-a-dict", "d": {"base_sha": c2}}
     assert state["fix"] == {"base_sha": "point-base"}

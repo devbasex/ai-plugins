@@ -49,8 +49,8 @@ def _propose(flow):
     other = {
         "path": "src/calc.py",
         "symbol": "add",
-        "smell": "dead_code",
-        "technique": "remove_dead_code",
+        "smell": "long_method",
+        "technique": "extract_method",
         "severity": "minor",
         "rationale": "r",
         "plan": "p",
@@ -77,7 +77,7 @@ def _plan(flow, **total_answer):
         {
             "items": [
                 answer,
-                {"key": "src/calc.py#add#dead_code", "tier": "low", "tests": [], "test_targets": [], "merge_into": None, "risk": False},
+                {"key": "src/calc.py#add#long_method", "tier": "low", "tests": [], "test_targets": [], "merge_into": None, "risk": False},
             ]
         },
     )
@@ -126,7 +126,7 @@ def test_the_five_phases_run_once_and_append_one_history_row(
     _call(cmd_implement, "cmd_merge_implement")
     state = read_state(path)
     assert state["items"][0]["status"] == "implemented"
-    assert state["items"][0]["commits"]["implement"] == impl_sha
+    assert state["items"][0]["commits"]["implement"] == [impl_sha]
 
     _call(cmd_converge, "cmd_verify")
     state = read_state(path)
