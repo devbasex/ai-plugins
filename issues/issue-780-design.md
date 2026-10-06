@@ -453,7 +453,7 @@ vmstat は同じファイルを 2 回読むため、検査が固定のファイ�
 | `memory_pressure_some_avg10` / `swap_io_pages` が読めないと `None` | 無いファイル・行の欠けたファイル | 例外を外へ出す |
 | 2026-09-17 の例（空き 9742）の期待値の更新 | `test_capacity_reports_the_measured_values` が新しい `limited_by` と 15 キー | — |
 | `concurrency` の検査が変わらない | 既存の検査が無変更で通る | — |
-| I6: `--per-lane-min-mib 0` と `--peak-factor 0` は終了コード 2 | CLI の終了コード | 0 を受けて割る |
+| I6: `--per-lane-min-mib 0` と `--per-lane-mib 0` と `--peak-factor 0` は終了コード 2 | CLI の終了コード | 0 を受けて割る |
 | I10: anon の起点を oom で更新しない | `execution-plan.md` の手順を読んで確かめる（文言を照合する検査は書かない） | — |
 | 手順と確定仕様の書き換え（要求の「手順と仕様」の 4 項目） | 文書を読んで確かめる | — |
 
