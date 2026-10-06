@@ -303,7 +303,7 @@ def _verify_phase(flow, cmd_setup, cmd_implement, *items, change=_refactor_total
     _call(cmd_implement, "cmd_merge_implement")
 
 
-def test_a_failing_item_goes_to_fix_and_returns_after_the_fix(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+def test_a_failing_item_goes_to_fix_and_returns_after_the_fix(flow, cmd_setup, cmd_implement, cmd_converge, cmd_merge_fix, capsys):
     work = flow["work"]
     _verify_phase(
         flow,
@@ -322,7 +322,7 @@ def test_a_failing_item_goes_to_fix_and_returns_after_the_fix(flow, cmd_setup, c
     _call(cmd_setup, "cmd_start_phase", phase="fix")
     _write(work, "src/calc.py", CALC)
     commit_with_trailers(work, "Fix", item_trailers("I-001"))
-    _call(cmd_converge, "cmd_merge_fix")
+    _call(cmd_merge_fix, "cmd_merge_fix")
     items = _items(flow)
     assert items["I-001"]["fix_count"] == 1
     assert len(items["I-001"]["commits"]["fix"]) == 1

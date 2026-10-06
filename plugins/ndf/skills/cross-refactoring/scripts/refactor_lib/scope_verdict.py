@@ -200,6 +200,15 @@ def waiting(state: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+def pending(state: dict[str, Any]) -> list[dict[str, Any]]:
+    """判定を待つ項目: `implemented` で、`blocked_by` の原因の項目がどれも `failing` でないもの（#1793 の I3）。
+
+    実装を取り込んだ項目・修正を取り込んだ項目・取り消しの後に確かめ直す項目（`verified` から戻した項目）と、
+    原因が片づいた巻き込まれた項目（`waiting`）が入る。"""
+    waiting_ids = {i["id"] for i in waiting(state)}
+    return [i for i in live_items(state) if i.get("status") == IMPLEMENTED and (not i.get("blocked_by") or i["id"] in waiting_ids)]
+
+
 def judge_items(path: pathlib.Path, state: dict[str, Any], items: list[dict[str, Any]]) -> None:
     """項目を範囲テストで判定し、原因の項目が同じ回で片づいた巻き込まれた項目を走らせ直す（I5）。
 
