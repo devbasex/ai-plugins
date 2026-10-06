@@ -546,6 +546,16 @@ def test_prod_release_passes_the_approval_material_and_stops_at_the_gate(tmp_pat
     assert "--approval" not in dev["cmd"] and "gate_next" not in dev
 
 
+@pytest.mark.parametrize(("channel", "version", "prs"), [("dev", "1.0.1-dev.1", 1), ("prod", "1.0.1", 2)])
+def test_release_step_stops_on_infra_wait_and_outlasts_the_ci_wait(tmp_path, channel, version, prs):
+    """#1645 の AC12・I9: release のステップは 75 で judge を通らず止まり、timeout は 待つ PR の数 × --ci-wait より長い。"""
+    root = plugin_repo(tmp_path)
+    rel = release_steps_of(root, tmp_path, channel, version)["release"]
+    assert rel["on_exit"] == {"75": "stop"} and rel["on_fail"] == "judge"
+    ci_wait = int(rel["cmd"].split("--ci-wait ", 1)[1].split()[0])
+    assert rel["timeout"] > prs * ci_wait
+
+
 def approved_others(root, *sets):
     """開発版の others のステップと同じく承認資料へ他のプラグインの表を書き、--set で上げ幅を決める（#1752）。"""
     (root / "issues").mkdir(exist_ok=True)
@@ -631,6 +641,7 @@ def test_merge_steps_gate_then_merge_and_approved_only_by_from(tmp_path):
     assert "merge-gate --pr {pr}" in gate["cmd"] and gate["gate_next"] == "end" and gate["next"] == "merge"
     assert "--gate-approved" not in merge["cmd"] and approved["cmd"] == merge["cmd"] + " --gate-approved user"
     assert approved["next"] == merge["next"] == "end"
+    assert merge["on_exit"] == approved["on_exit"] == {"75": "stop"}  # CI の基盤待ちは judge を通らずに止まる（#1645）
 
 
 def test_plan_promote_with_mvv_judges_before_merging(tmp_path):

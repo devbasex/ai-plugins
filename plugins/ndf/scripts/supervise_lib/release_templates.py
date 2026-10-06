@@ -9,7 +9,7 @@ from pathlib import Path
 from supervise_lib.decl import WORKTREE_DECL, DeclError, with_decls
 from supervise_lib.paths import MERGED_PY, MVV_PY, STEPS_PY, VERIFY_PY
 from supervise_lib.plan import QUEUE_PRS
-from supervise_lib.verify_steps import handoff_step
+from supervise_lib.verify_steps import INFRA_WAIT_STOP, handoff_step, plan_limits, with_margin
 from supervise_lib.procedures import with_record
 
 
@@ -178,13 +178,19 @@ def _prepare_steps(a, plugin: str, v: str, prs: str, dev: bool, after_notes: str
 def _release_step(a, v: str, dev: bool, repo: str | None, approval: str) -> dict:
     """release のステップ。本番は承認資料を --approval で渡し（承認したコミットはステップの実行時に資料から読む）、
     承認の外の変更で承認ゲート（10）になったら verify へ進まない。MVV 判定のプランは handoff で関門 2 の by: mvv の
-    記録を外して人へ戻し、それ以外は end で終える（#815 の I7）。"""
+    記録を外して人へ戻し、それ以外は end で終える（#815 の I7）。
+
+    待つ PR ごとの CI の待ちの上限は `ci_wait_timeout`（マージのプランと同じ値）を `--ci-wait` で渡し、ステップの
+    `timeout` は 待つ PR の数（開発版 1・本番 2）× その上限 に余裕を足したものと今の値の大きい方にする（基盤待ちの
+    75 が実行器の打ち切りより先に出る）。75 は `on_exit` で judge を通らずに止まる（#1645 の決定 6・7）。"""
+    ci_wait = int(plan_limits(a)["ci_wait_timeout"])
     step = {
         "id": "release",
         "type": "run",
         "stage": "配布",
-        "timeout": 2400 if dev else 3000,
-        "cmd": f"{STEPS_PY} release --version {v} --channel {a.channel}",
+        "timeout": max(2400 if dev else 3000, with_margin((1 if dev else 2) * ci_wait)),
+        "cmd": f"{STEPS_PY} release --version {v} --ci-wait {ci_wait} --channel {a.channel}",
+        "on_exit": dict(INFRA_WAIT_STOP),
         "on_fail": "judge",
         "next": "verify" if dev else "record",
         # 配布の PR（release/v<版> → 起点）と、本番では続く 起点 → 本番 の PR のチェックを調べる

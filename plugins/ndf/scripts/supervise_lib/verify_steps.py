@@ -14,6 +14,10 @@ import test_strategy as ts
 from supervise_lib.decl import scope_paths, test_kind
 from supervise_lib.paths import MERGE_CMD, MERGE_GATE_CMD, MERGE_PROBE, SPRINT_STATE_PY, TEST_RUN_PY
 
+# merge-when-green と release が CI の基盤待ち（75。lib/step_result.py の EXIT_INFRA_WAIT）で止まったら、judge を通らず
+# プランを止める（修正へ回さない。#1645 の決定 6）
+INFRA_WAIT_STOP = {"75": "stop"}
+
 # ステップの `timeout` に足す余裕（上限の 1 割。下限は監視の 1 周期の 2 倍）
 MARGIN_SHARE = 0.1
 MARGIN_FLOOR = 30
@@ -92,6 +96,8 @@ def merge_steps(a, **extra) -> list[dict]:
     - `merge`: CI を待ってマージする。CI の待ちの上限を `--timeout` で渡し、ステップの `timeout` はそれに余裕を足す
     - `merge-approved`: `merge` に `--gate-approved user` を足したもの。通常の流れからは入らず、承認の後に `--from merge-approved` でだけ入る
 
+    `merge` と `merge-approved` は CI の基盤待ち（75）で judge を通らずに止まる（`on_exit`）。
+
     `extra` の `next`（と `on_fail`）は `merge` と `merge-approved` に付ける。`next` が無いと `merge` が並びの次の
     `merge-approved` へ流れるため、必ず渡す。
     """
@@ -104,6 +110,7 @@ def merge_steps(a, **extra) -> list[dict]:
         "timeout": with_margin(ci_wait),
         "cmd": f"{MERGE_CMD} --timeout {ci_wait}",
         "probe": MERGE_PROBE,
+        "on_exit": dict(INFRA_WAIT_STOP),
         **extra,
     }
     gate = {"id": "merge-gate", "type": "run", "timeout": 120, "cmd": MERGE_GATE_CMD, "gate_next": "end", "next": "merge"}

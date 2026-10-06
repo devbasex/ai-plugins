@@ -97,6 +97,45 @@ def test_a_failed_run_step_is_not_rerun_by_the_engine(tmp_path):
     assert [e["id"] for e in s.state.log] == ["t", "after"]
 
 
+INFRA_OUT = json.dumps(
+    {"tool": "release", "status": "stopped", "summary": "PR #5 をマージできない: #5 の CI の基盤待ち", "items": [], "metrics": {}}
+)
+
+
+def test_on_exit_stop_skips_on_fail_and_judge(tmp_path):
+    """#1645 の AC12・決定 6: on_exit の 75 → stop は on_fail（judge）へ行かず、summary を理由に止まる。ほかの失敗は on_fail へ。"""
+    steps = [
+        {"id": "release", "type": "run", "cmd": f"echo '{INFRA_OUT}'; exit 75", "on_exit": {"75": "stop"}, "on_fail": "judge"},
+        {"id": "judge", "type": "run", "cmd": "true", "next": "end"},
+    ]
+    s, text = run_plan(tmp_path, steps)
+    assert [e["id"] for e in s.state.log] == ["release"]
+    assert "結果: 止まった" in text
+    assert "ステップ release が終了コード 75 で止めた: PR #5 をマージできない: #5 の CI の基盤待ち" in text
+    steps[0]["cmd"] = "exit 1"
+    s, _ = run_plan(tmp_path / "other", steps)
+    assert [e["id"] for e in s.state.log] == ["release", "judge"]
+
+
+def test_on_exit_goes_to_a_step(tmp_path):
+    steps = [
+        {"id": "a", "type": "run", "cmd": "exit 75", "on_exit": {"75": "c"}, "on_fail": "b"},
+        {"id": "b", "type": "run", "cmd": "true", "next": "end"},
+        {"id": "c", "type": "run", "cmd": "true", "next": "end"},
+    ]
+    s, text = run_plan(tmp_path, steps)
+    assert [e["id"] for e in s.state.log] == ["a", "c"] and "結果: 完了" in text
+
+
+@pytest.mark.parametrize(
+    ("table", "why"),
+    [({"x": "stop"}, "鍵が終了コードでない: x"), ({"75": "nowhere"}, "行き先が知らないステップ: nowhere")],
+)
+def test_on_exit_with_a_bad_table_stops_before_any_step(tmp_path, table, why):
+    s, text = run_plan(tmp_path, [{"id": "a", "type": "run", "cmd": "true", "on_exit": table, "next": "end"}])
+    assert s.state.log == [] and "結果: 止まった" in text and why in text
+
+
 RECORD_OUT = json.dumps(
     {"tool": "release", "status": "ok", "summary": "s", "items": [], "metrics": {"release_pr_url": "https://github.com/o/r/pull/40"}}
 )
