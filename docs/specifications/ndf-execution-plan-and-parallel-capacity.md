@@ -27,8 +27,8 @@
 変わった。触る箇所の変更重複は「別の節」「足すだけ」「書き換え」の 3 区分で、前の 2 つは並行し、
 書き換えだけ実装を順にする。
 
-**本数は空きメモリから導き、スワップと OOM Killer で下げ、上限で抑える。** 測定はコマンドが行い、
-起動の拒否はしない。初期値はコマンドの定数だけが持ち、文書は引数の名前だけを書く。
+**本数は空きメモリと 1 本の重さの実測から導き、いまのメモリの圧で足すのを止め、OOM Killer で下げる。**
+総本数の上限は測定が持ち、固定の上限は渡したときだけ掛かる。測定はコマンドが行い、起動の拒否はしない。初期値はコマンドの定数だけが持ち、文書は引数の名前だけを書く。
 
 **実行計画はメインディレクトリの `issues/` に 1 ファイルで持ち、開いている間はコミットしない。** 閉じる
 ときに全文をスプリントで最後にマージした Pull Request へコメントとして投稿し、ファイルを消す。
@@ -44,8 +44,11 @@
 | 課題グループ | マイルストーンの説明に書く、触る場所の見込みと依存で分けた課題の集合。実行計画のバンドルの初期値 |
 | 変更重複 | 2 つの Pull Request が同じファイルを触ること。節（見出し）・関数の単位で程度を分ける |
 | 並行度 | 対象の Pull Request のうち、2 本以上が同時に開いていた時間の割合 |
-| 予備メモリ | オーケストレーターの本体と同じ VM に常駐する他のプロセスの揺れのために空けておくメモリ |
-| 1 本の見込み | supervisor 1 本が使うメモリの見込み。CLI・テスト・コンテナの山を含む |
+| 予備メモリ | 同じ VM に常駐する他のプロセスの揺れのために空けておくメモリ。既に動いているオーケストレーターの本体と supervisor は `MemAvailable` から引かれているため含めない |
+| 1 本の重さ | supervisor 1 本が使う cgroup の `anon` の量。実測（`per_lane_observed_mib`）と、判定に使った値（`per_lane_used_mib`）を分けて出す |
+| 1 本の見込み | 1 本の重さを測れないとき（0 本・起点なし・`anon` を読めない）に使う値 |
+| anon の起点 | 実行計画の開始時（動いている本数が 0）に測った cgroup の `anon`。1 本の重さを測る差の基準 |
+| 判定の区分 | `capacity` が本数を決めた理由の区分。`grow`（足してよい）/ `hold`（今の本数を超えて足さない）/ `shrink`（1 本減らす） |
 
 ## 背景
 
@@ -84,19 +87,46 @@ Pull Request を通すと、計画の更新がマージを待ち、進み具合�
 設計文書の決定が持つため、着手の時点では書けない。本数に数えるのは `動いている` だけで、承認待ちの
 supervisor は報告を返して終わっており CLI もテストも動かしていない。
 
-**本数は `min(上限, 動いている本数 + ⌊(空きメモリ − 予備メモリ) ÷ 1 本の見込み⌋)` で出す。** 空きは動いて
-いる supervisor の使用量を引いた後の値なので、割った値は追加できる本数であり、動いている本数を足して総本数に
+**本数は「動いている本数 + min(1 回に足す数, ⌊(空きメモリ − 予備メモリ) ÷ 1 本の重さ⌋)」で出す。** 空きは
+動いている supervisor の使用量を引いた後の値なので、割った値は追加できる本数であり、動いている本数を足して総本数に
 する。空きメモリは VM 全体の空き（`MemAvailable`）と cgroup の残り（`memory.max − memory.current`）の
-小さい方を使う。**OOM Killer の回数が増えた見直しを除き、1 を下回らない。** 0 本では進行が止まり、
-逐次で進めた過去 11 版で本体は落ちていない。増えた見直しは 0 を許し、起点をその見直しで今の値へ
-更新するため、次の見直しで 1 以上に戻る。
+小さい方を使う。**予備メモリに、既に動いている本体と supervisor を含めない。** どちらも `MemAvailable` から
+既に引かれており、予備で引くと同じものを 2 度引く（#780 で、空き 5.8GiB のホストが 1 本に固定された原因の 1 つ）。
+
+**1 本の重さは動いている supervisor から測る。** cgroup の `memory.stat` の `anon` の、開始時（0 本）の値からの
+増分を動いている本数で割り、山への余裕を掛ける。`memory.current` はページキャッシュを含み、テストや git の操作で
+膨らんで戻るため使わない。同じコンテナで動く無関係のセッションは `anon` を増やすが本数に数えないため、実測を
+重く見せる側（安全側）に外れる。
+
+**総本数の上限は測定が持つ。** 1 本の重さを測れるなら、上限は `空き ÷ 重さ` が決める。代わりに 1 回の見直しで
+足す数を抑える。担当の重さは動き出すまで測れないため、足したら次の見直しで測ってからまた足す。#621 で 5〜6 本が
+落ちたのは、1 本の重さを測らずに一度に起動したためで、足す数の制限と見直しごとの実測がこれを受ける。
+
+**判定は 3 つの区分のうち最初に当たったものにする。** `oom_kill` が起点より増えたら `shrink`（落ちたことは圧より
+強い事実）、いまメモリの圧が閾値を超えていたら `hold`（圧は空きより新しい事実）、それ以外は `grow` である。
+**圧は PSI（`/proc/pressure/memory` の `some avg10`）で見て、スワップの残量は見ない。** 一度スワップへ追い出された
+冷たいページは触られるか持ち主が終わるまで戻らないため、`SwapFree` は今の圧ではなく過去の履歴である（#780 の
+ホストは PSI 0.00 で `SwapFree` 0 だった）。PSI が無いカーネルでは `/proc/vmstat` の `pswpin + pswpout` を間隔を
+挟んで 2 回読み、毎秒のスワップ I/O で見る。どちらも読めなければ圧は判定できないとして `grow` で続ける。`hold` で
+今の本数から減らさないのは、動いている supervisor を止める手順は `shrink` だけが持つためである。
+
+**OOM Killer の回数が増えた見直しを除き、1 を下回らない。** 0 本では進行が止まり、逐次で進めた過去 11 版で本体は
+落ちていない。増えた見直しは 0 を許し、`oom_kill` の起点をその見直しで今の値へ更新するため、次の見直しで 1 以上に
+戻る。anon の起点は更新しない（落ちた supervisor の分は `anon` から抜けるため、起点を動かす理由が無い）。
 
 | 値 | 初期値 | 根拠 |
 | --- | ---: | --- |
-| 予備メモリ | 2048 MiB | オーケストレーターの claude 本体（約 470MiB）と、同じ VM に常駐する他のプロセスの揺れ |
-| 1 本の見込み | 2048 MiB | 5〜6 本で落ちた後の `memory.peak` 7.4GiB。1 本あたり約 1.2GiB に、テストとコンテナの山を足した |
-| 上限 | 3 | 5〜6 本で 2 回落ち、3 本では落ちなかった。収束レビューが共有する CLI も同じ上限で抑える |
-| スワップの閾値 | 25% | 2026-09-17 の値（空き 9.5GiB・スワップの空き 15%）で 2 本になり、オーケストレーターが実際に選んだ本数と一致する |
+| 予備メモリ | 1024 MiB | 同じ VM に常駐する他のプロセスの揺れ。既に動いているものは含めない |
+| 1 本の見込み | 1536 MiB | #621 の実測（1 本あたり約 1.2GiB）に余裕を足した暫定値。「測った値」の表の 1 本の実測が溜まるまで使う |
+| 1 本の下限 | 512 MiB | 実測が小さく出ても割らない値 |
+| 山への余裕 | 1.5 | 実測の平均に掛け、テストやビルドの山を見込む |
+| 1 回に足す数 | 2 | 測る前に足す数の制限。0 本からの初回だけ見込みで 2 本を許す |
+| PSI の閾値 | 10（`some avg10`） | 少なくとも 1 つのタスクがメモリ待ちで止まった時間の割合。#780 のホストは 0.00 |
+| スワップ I/O の閾値 | 512 ページ/秒 | PSI が無いときだけ使う。#780 のホストは 10 秒で 6 ページ |
+| 標本の間隔 | 2 秒 | スワップ I/O の 2 回の読み取りの間 |
+
+総本数の上限の初期値は持たない。すべて暫定の値で、「測った値」の表の実測が 1 スプリント分溜まった後の振り返りで
+見直す。
 
 **初期値はコマンドの定数だけが持ち、引数で上書きできる。** 文書は値を写さず、実行計画の「測った値」の
 表が起動のたびの値と結果を残して初期値を直す根拠になる。
@@ -119,7 +149,8 @@ supervisor の使用量として測れず、1 本の見込みの外側で空き�
 
 ### 常に成り立つ条件
 
-- 本数の初期値（予備メモリ・1 本の見込み・上限・スワップの閾値）を持つのは `parallel-measure.py` の定数だけで、
+- 本数の初期値（予備メモリ・1 本の見込み・1 本の下限・山への余裕・1 回に足す数・PSI の閾値・スワップ I/O の閾値・
+  標本の間隔）を持つのは `parallel-measure.py` の定数だけで、
   `parallel-work.md` と `execution-plan.md` に数値が現れない
 - 測定のコマンドは読み取りだけを行い、GitHub へ書き込まない。出力は数値と時刻だけである
 - 実行計画を書くのはオーケストレーターだけで、supervisor は絶対パスで読むだけである
@@ -131,7 +162,7 @@ supervisor の使用量として測れず、1 本の見込みの外側で空き�
 | 項目 | 値 |
 | --- | --- |
 | 場所と名前 | メインディレクトリの `issues/execution-plan-<キー>.md`。キーはマイルストーンの名前の先頭の 2 桁の連番、無ければ `issue-<バンドルの課題の最小の番号>` |
-| 節 | `## 行` / `## 重なり` / `## 測った値` / `## 見直し` / `## 閉じたときの測定`。冒頭に状態・開始・`oom_kill の起点` |
+| 節 | `## 行` / `## 重なり` / `## 測った値` / `## 見直し` / `## 閉じたときの測定`。冒頭に状態・開始・`oom_kill の起点`・`anon の起点` |
 | 行の列 | 行 / バンドル / 種類 / 課題 / モード / 触るファイルと節 / 確度 / 設計の依存 / 実装の依存 / 状態 / Pull Request |
 | 確度 | `見込み` / `確定`。設計のレビューが収束した見直しで、そのバンドルの行を `確定` にする |
 | 状態 | `待ち` / `着手できる` / `動いている` / `承認待ち` / `止まった` / `マージ済み` |
@@ -142,7 +173,8 @@ supervisor の使用量として測れず、1 本の見込みの外側で空き�
 実装の行の追加 → `確定` の行どうしの変更重複の突き合わせ → 依存が済んだ行を `着手できる` に →
 `capacity` の実行と測った値の記録 → 空きの数だけ `着手できる` の行を上から起動 → バンドル・順序・依存を
 変えたら見直しの表へ 1 行、の順で行う。`capacity` が終了コード 3（測れない）なら本数を 1 として扱う。
-`oom_kill_increased=yes` の見直しでは起動せず、起点を今の値へ更新して見直しの表へ 1 行足す。減らす分は
+`oom_kill_increased=yes` の見直しでは起動せず、`oom_kill` の起点だけを今の値へ更新して（anon の起点は変えない）
+見直しの表へ 1 行足す。減らす分は
 動いている supervisor を止めずに終わるのを待つ。
 
 すべての行が `マージ済み` になったら、`concurrency` を実行して閉じたときの測定へ写し、状態を `閉じた`
@@ -182,27 +214,48 @@ URL を確かめてからファイルを消す。GitHub のコメントの上限
 | --- | --- |
 | `--running N` | いま動いている supervisor の数（既定 0） |
 | `--oom-baseline N` | 実行計画に控えた `oom_kill` の起点。渡さなければ増えたかを判定しない |
-| `--reserve-mib N` / `--per-lane-mib N` / `--max N` / `--swap-free-min-pct N` | 予備メモリ / 1 本の見込み / 上限 / スワップの空きの閾値（%）。既定はスクリプトの定数。`--per-lane-mib 0` は引数の誤り |
+| `--anon-baseline-mib N` | 実行計画に控えた anon の起点（MiB）。渡さなければ 1 本の重さは見込みを使う |
+| `--reserve-mib N` / `--per-lane-mib N` / `--per-lane-min-mib N` | 予備メモリ / 1 本の見込み / 1 本の下限。`--per-lane-mib 0` と `--per-lane-min-mib 0` は引数の誤り |
+| `--peak-factor X` | 実測に掛ける山への余裕（0 より大きい小数。0 以下は引数の誤り） |
+| `--max-add N` / `--max N` | 1 回の見直しで足す数の上限 / 総本数の上限。`--max` は既定を持たず、渡したときだけ効く |
+| `--psi-some-max X` / `--swap-io-max-pages-per-sec N` / `--sample-seconds X` | PSI の `some avg10` の閾値 / スワップ I/O の閾値（ページ/秒）/ vmstat の 2 回の読み取りの間隔（秒） |
 | `--meminfo PATH` | 空きとスワップを読む元（既定 `/proc/meminfo`） |
-| `--cgroup-dir DIR` | `memory.events`・`memory.max`・`memory.current` を読む元。既定は `/sys/fs/cgroup`、そこに `memory.events` が無ければ `/proc/self/cgroup` の `0::<path>` から導いた先、それも読めなければ根へ戻す |
+| `--cgroup-dir DIR` | `memory.events`・`memory.max`・`memory.current`・`memory.stat` を読む元。既定は `/sys/fs/cgroup`、そこに `memory.events` が無ければ `/proc/self/cgroup` の `0::<path>` から導いた先、それも読めなければ根へ戻す |
+| `--psi PATH` / `--vmstat PATH` / `--vmstat-after PATH` | PSI / スワップ I/O の 1 回目 / 2 回目を読む元。既定は `/proc/pressure/memory` / `/proc/vmstat` / `--vmstat` と同じ。`--vmstat-after` は検査が待たずにスワップ I/O の差を作るための差し替え口 |
+| `--swap-free-min-pct V` | 廃止。値を問わず受け、標準エラーへ 1 行知らせて無視する |
 
-出力は標準出力に `キー=値` を `mem_available_mib` / `swap_total_mib` / `swap_free_mib` /
-`cgroup_available_mib` / `oom_kill` / `oom_kill_increased` / `running` / `by_memory` / `allowed` /
-`limited_by` の順で出す。`cgroup_available_mib` は `memory.max` が数値なら残り（負なら 0）、`max` なら
-`max`、読めなければ `unknown`。`oom_kill` は読めなければ `unknown`。
+既定はスクリプトの定数（初期値は「決定と理由」の表）。出力は標準出力に `キー=値` を `mem_available_mib` /
+`swap_total_mib` / `swap_free_mib` / `cgroup_available_mib` / `oom_kill` / `oom_kill_increased` / `running` /
+`by_memory` / `allowed` / `limited_by` / `cgroup_anon_mib` / `per_lane_observed_mib` / `per_lane_used_mib` /
+`verdict` / `pressure` の順で出す。`cgroup_available_mib` は `memory.max` が数値なら残り（負なら 0）、`max` なら
+`max`、読めなければ `unknown`。`oom_kill` と `cgroup_anon_mib`（`anon` を MiB へ切り捨て）は読めなければ
+`unknown`。`pressure` は `psi:<some avg10 の原文>` / `swap_io:<ページ/秒、小数 1 桁>` / `unknown` である。
 
 ```text
-by_memory = running + max(0, ⌊(min(mem_available, cgroup_available) − reserve) ÷ per_lane⌋)
-allowed   = min(max, by_memory)
-swap_total > 0 かつ swap_free × 100 < swap_total × swap_free_min_pct なら allowed −= 1
-oom_kill_increased = yes なら allowed = max(0, min(allowed, running − 1))
-それ以外なら allowed = max(allowed, 1)
+空き          = min(mem_available, cgroup_available)   （cgroup_available が数値のときだけ）
+実測を使える  = running ≥ 1 かつ anon の起点がある かつ anon を読めた
+増分          = max(0, anon − anon の起点)
+per_lane_observed = 実測を使えるなら ⌈増分 ÷ running⌉、使えなければ unknown
+per_lane_used     = 実測を使えるなら max(per_lane_min, ⌈増分 × peak_factor ÷ running⌉)、使えなければ per_lane
+by_memory     = running + max(0, ⌊(空き − reserve) ÷ per_lane_used⌋)
+足せる数      = by_memory − running
+区分          = oom_kill_increased = yes なら shrink、圧が閾値を超えたなら hold、それ以外は grow
+仮の本数      = shrink: max(0, running − 1) / hold: running / grow: running + min(max_add, 足せる数)
+--max を渡し、仮の本数 > max なら max へ下げる
+区分が shrink でなく本数 < 1 なら 1 へ上げる
 ```
 
-`limited_by` には `memory`（`by_memory ≤ max`）/ `max`（`max ≤ by_memory`）/ `swap_low` / `oom_kill_increased`
-（値が下がった）/ `floor`（1 へ上げた）のうち当たったものをこの順で `,` で並べる。終了コードは 0 = 測れた
-（`unknown` を含む）、2 = 引数の誤り、3 = `--meminfo` を読めない、または `MemAvailable` が無い（標準出力に
-何も出さず、標準エラーに理由を 1 行）。
+1 本の重さの実測と使う値はどちらも切り上げ、丸める前の増分から計算する（軽く見積もらない向き）。小数の計算は
+`Decimal` で行う。圧は「`some avg10` > `--psi-some-max`」、PSI が読めないときは「(2 回目 − 1 回目) ÷ 間隔 >
+`--swap-io-max-pages-per-sec`」で超えたとし、等しいときは超えない。間隔 0 では差をそのまま毎秒の値とする。PSI が
+読めれば vmstat を読まずに待たずに返る。
+
+`limited_by` には次のうち付いたものをこの順で `,` で並べる。`memory`（区分が `grow`）/ `max_add`（区分が `grow` で、
+`--max-add` が足せる数より小さい。等しいときは付けない）/ `max`（`--max` で本数を下げた）/ `hold_psi` /
+`hold_swap_io`（区分が `hold`。圧の源で分ける）/ `oom_kill_increased`（区分が `shrink`）/ `floor`（1 へ上げた）。
+スワップの残量（`swap_free_mib`）は本数を変えない。終了コードは 0 = 測れた（`unknown` を含む。PSI も vmstat も
+読めないときも 0 で `verdict=grow`・`pressure=unknown`）、2 = 引数の誤り、3 = `--meminfo` を読めない、または
+`MemAvailable` が無い（標準出力に何も出さず、標準エラーに理由を 1 行）。
 
 ### `parallel-measure.py concurrency`
 
@@ -218,30 +271,37 @@ oom_kill_increased = yes なら allowed = max(0, min(allowed, running − 1))
 ### 測った値の書き写し方
 
 実行計画の「測った値」の表には `capacity` の出力のうち `mem_available_mib` / `cgroup_available_mib` /
-`swap_free_mib` / `oom_kill` / `running` / `allowed` / `limited_by` を写す。`swap_total_mib` /
-`oom_kill_increased` / `by_memory` は写さない（起動のたびに変わらないか、他の列から導ける）。測れなかった
-行は空きの列に `測れない` と書く。閉じたときの測定は `concurrency` の出力と、`oom_kill` の最後の値 −
-最初の行の `oom_kill` である。
+`swap_free_mib` / `oom_kill` / `running` / `allowed` / `limited_by` / `cgroup_anon_mib` / `per_lane_observed_mib` /
+`per_lane_used_mib` を写す。`swap_total_mib` / `oom_kill_increased` / `by_memory` / `verdict` / `pressure` は写さない
+（起動のたびに変わらないか、他の列から導ける。区分は `limited_by` から一意に読める）。測れなかった行は空きの列に
+`測れない` と書く。閉じたときの測定は `concurrency` の出力と、`oom_kill` の最後の値 − 最初の行の `oom_kill` と、
+「測った値」の表の 1 本の実測の最大（数値の行が無ければ `—`）である。1 本の実測の最大は、次のスプリントの
+1 本の見込みの根拠になる。
 
 ## テスト観点
 
 | 観点 | 確かめ方 |
 | --- | --- |
-| `capacity` が空き・cgroup の残り・スワップ・`oom_kill`・本数を出し、`--running` を総本数に足し、引数で上書きでき、cgroup の残りが小さければそちらで決まる | `plugins/ndf/scripts/tests/test_parallel_measure.py` |
-| 測れない環境で本数を出さず終了コード 3。`memory.events` が無ければ `oom_kill=unknown` で 0 | 同上 |
-| スワップの空きが少ないと 1 減る。`oom_kill` が増えていれば「今の本数 − 1」以下で、`--running 0` / `1` では 0 になり `floor` が付かない | 同上 |
+| `capacity` が空き・cgroup の残り・`oom_kill`・anon・本数を 15 キーで出し、`--running` を総本数に足し、初期値を引数で上書きでき、cgroup の残りが小さければそちらで決まる | `plugins/ndf/scripts/tests/test_parallel_measure.py` |
+| #780 の試算の 3 行が 2・3・3 本になり、スワップの残量が本数を変えず `swap_low` が出ない。`--max` が無ければ総本数の上限が掛からず、足す数を `--max-add` が抑える | 同上 |
+| 1 本の重さが起点からの増分で測られ、負の増分は 0、下限で抑えられ、測れなければ見込みになる | 同上 |
+| PSI か、PSI が無いときのスワップ I/O が閾値を超えると `hold`、どちらも読めなければ `grow` と `pressure=unknown`。`oom_kill` が増えていれば圧に関わらず `shrink` で「今の本数 − 1」、`--running 0` / `1` では 0 になり `floor` が付かない | 同上 |
+| 測れない環境で本数を出さず終了コード 3。`memory.events` が無ければ `oom_kill=unknown` で 0。廃止した `--swap-free-min-pct` は終了コード 0 で知らせて無視する | 同上 |
+| `procs` が `memory.stat` の `anon`・PSI の `some avg10`・vmstat のスワップ I/O を読み、読めなければ `None` | `plugins/ndf/scripts/tests/test_lib_procs.py` |
 | `concurrency` が変更重複・並行度・最大同時本数を出し、端が接するだけの対は重ならない。偽の `gh` が受けた引数が `pr view` だけ | 同上 |
 | 必須ルール 4・5・6 の文言、必須ルール 6 の理由に「メモリ」と「21GiB」、コンテナを起動する supervisor は 1 本、変更重複の目安の 3 区分と列 | 文書を読んで確かめる（照合するテストは持たない） |
-| `execution-plan.md` に置き場所・コミットしないこと・行の列・確度と状態の値・契機 5 つ・閉じる手順・課題グループを読むこと・`capacity` を起動の前に実行することがあり、初期値の数値（2048・25%）が無い | 文書を読んで確かめる（照合するテストは持たない） |
+| `execution-plan.md` に置き場所・コミットしないこと・行の列・確度と状態の値・契機 5 つ・閉じる手順・課題グループを読むこと・`capacity` を起動の前に実行すること・anon の起点と 1 本の重さの 3 列があり、初期値の数値が無い | 文書を読んで確かめる（照合するテストは持たない） |
 | `milestones.md` に「並列の組（見込み）」の節と列、手順 2A から写す文、見込みであり確定は実行計画が持つ文があり、手順 2A の控える項目が 6 行のまま、既存の名前と連番のテストが通る。0 件になった課題グループの行削除で番号を詰めない | `plugins/ndf/skills/backlog-refinement/tests/test_issue_upkeep_layout.py` |
 | 閉じた実行計画のコメントと振り返りが読める | リリース後テスト（次に複数のバンドルを持つスプリントを進めたとき） |
 
 ## 運用
 
-**1 本の見込み 2048MiB が CLI を起動した supervisor の実際に合うかは、実行計画の「測った値」の表から直す。**
-5〜6 本のときの cgroup の最大使用量からの推定で、CLI ごとの常駐の値は測っていない。
+**暫定の初期値（1 本の見込み・山への余裕・PSI の閾値など）が実際に合うかは、実行計画の「測った値」の表から直す。**
+表の 1 本の実測と、閉じたときの測定の 1 本の実測の最大が根拠になる。CLI の worker（#760）での 1 本の重さは
+まだ測っていない。
 
-**メモリを測る手段は Linux の `/proc/meminfo` と cgroup v2 である。** 無い環境（macOS など）では
+**メモリを測る手段は Linux の `/proc/meminfo`・cgroup v2・PSI（無ければ `/proc/vmstat`）である。** `/proc/meminfo` が
+無い環境（macOS など）では
 終了コード 3 になり、実行計画に「測れない」と書いて 1 本で進める。
 
 **`issue-plan-strategy` の `description` に `実行計画を作って` / `複数の課題をまとめて進めて` の
@@ -253,6 +313,8 @@ oom_kill_increased = yes なら allowed = max(0, min(allowed, running − 1))
 - [issue #540](https://github.com/devbasex/ai-plugins/issues/540) — 実行計画
 - [issue #541](https://github.com/devbasex/ai-plugins/issues/541) — マイルストーンの課題グループ
 - [issue #621](https://github.com/devbasex/ai-plugins/issues/621) — 本数とメモリ
+- [issue #780](https://github.com/devbasex/ai-plugins/issues/780) — 1 本の重さの実測といまの圧で本数を決める（`swap_low` の廃止）
+- [PR #1791](https://github.com/devbasex/ai-plugins/pull/1791) — #780 の設計
 - [PR #741](https://github.com/devbasex/ai-plugins/pull/741) — 要求と設計
 - [PR #751](https://github.com/devbasex/ai-plugins/pull/751) / [PR #758](https://github.com/devbasex/ai-plugins/pull/758) / [PR #761](https://github.com/devbasex/ai-plugins/pull/761) — 実装
 - [ndf-agent-layers-unattended-run.md](ndf-agent-layers-unattended-run.md) — 本数の 1 本 = supervisor 1 つ
