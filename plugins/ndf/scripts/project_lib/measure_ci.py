@@ -148,17 +148,16 @@ def ndf_record(repo: str | None) -> dict | None:
 def _required_checks(gh: Gh, branch: str | None) -> list[str]:
     if not branch:
         return []
-    out = []
     try:
         rules = gh.get(f"repos/{gh.repo}/rules/branches/{branch}") or []
     except GhUnavailable as e:
         if str(e) == "時間切れ":
             raise
         rules = []
-    for r in rules if isinstance(rules, list) else []:
-        if r.get("type") == "required_status_checks":
-            out += [c.get("context") for c in (r.get("parameters") or {}).get("required_status_checks") or [] if c.get("context")]
-    return sorted(set(out))
+    try:
+        return ci_workflows.required_contexts(rules) or []
+    except ValueError:
+        return []
 
 
 def _test_duration(durations: list[dict], ci_reason: str | None) -> dict:

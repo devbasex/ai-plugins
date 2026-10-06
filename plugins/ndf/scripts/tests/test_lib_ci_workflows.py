@@ -78,3 +78,25 @@ def test_workflow_jobs_counts_this_repository_like_job_ids():
 def test_job_ids_reads_keys_with_trailing_comments():
     text = 'jobs: # CI\n  lint: # 静的解析\n    run: echo "#x"\n  "a#b": # q\n    x: 1\n'
     assert ci_workflows.job_ids(text) == ["lint", "a#b"]
+
+
+def _rule(*contexts):
+    return {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": c} for c in contexts]}}
+
+
+def test_required_contexts_sorts_and_dedups_across_rules():
+    rules = [{"type": "deletion"}, _rule("pytest", "guard"), _rule("guard", "lint")]
+    assert ci_workflows.required_contexts(rules) == ["guard", "lint", "pytest"]
+
+
+def test_required_contexts_without_the_rule_is_none():
+    assert ci_workflows.required_contexts([]) is None
+    assert ci_workflows.required_contexts([{"type": "deletion"}]) is None
+    assert ci_workflows.required_contexts([_rule()]) == []
+
+
+def test_required_contexts_rejects_non_list():
+    import pytest
+
+    with pytest.raises(ValueError):
+        ci_workflows.required_contexts({"message": "Not Found"})
