@@ -3423,7 +3423,13 @@
     {
       "term": "最後の動きの時刻",
       "context": "ndf-cross-refactoring",
-      "meaning": "`cross-refactoring` の作業ディレクトリ（`.cross_refactoring/`）の直下のファイルのうち、最も新しい更新時刻。状態ファイル・CLI のログ・テストのログ・結果ファイルを含む。止まっていた時間の起点",
+      "meaning": "`cross-refactoring` の作業ディレクトリ（`.cross_refactoring/`）の直下のファイルのうち、最も新しい更新時刻。状態ファイル・CLI のログ・テストのログ・結果ファイルと、心拍のファイルを含む。止まっていた時間の起点",
+      "pending_source": "issues/issue-1743-design.md"
+    },
+    {
+      "term": "心拍のファイル",
+      "context": "ndf-cross-refactoring",
+      "meaning": "`cross-refactoring` の作業ディレクトリ直下の `cross-refactoring-rf<ID>-alive`。出力の有無によらず、CLI の監視とテストの実行が待っている間、15 秒ごとに更新時刻を今にする。中断で止まると更新も止まり、最後の動きの時刻が稼働の終わりを指す",
       "pending_source": "issues/issue-1743-design.md"
     }
   ]

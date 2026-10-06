@@ -40,7 +40,7 @@
 
 | コンテキスト | 何の語が 1 つの意味に決まるか |
 | --- | --- |
-| `ndf-cross-refactoring`（時間の配分） | 想定最大時間・バッファ・使える時間・締め切り・止まっていた時間・最後の動きの時刻 |
+| `ndf-cross-refactoring`（時間の配分） | 想定最大時間・バッファ・使える時間・締め切り・止まっていた時間・最後の動きの時刻・心拍のファイル |
 
 共通ライブラリ `test_strategy` は戦略の語（`local-full` など）とバッファに入れる全体テストの秒を供給する側で、この変更は供給される値の 1 つ（危険フラグの秒）の決め方を変える。関係は「供給者 − 顧客」のまま変えない。
 
@@ -56,16 +56,17 @@
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
 | I1 | 実行の状態 | 最終ゲート修正の打ち切り `limits.final_end_at` = `開始 + B + ずらした秒の和`。ずらしていなければ `開始 + B` | テストで落とす |
-| I2 | 実行の状態 | バッファには最終ゲートの全体テスト（手元なら w、CI で見るなら c）と最終ゲート修正 1 回分（`final_fix`）が必ず入る | テストで落とす |
+| I2 | 実行の状態 | バッファには最終ゲートの全体テスト（手元なら w、CI で見るなら c）・検証の直し 1 回分（`fix`）・最終ゲート修正 1 回分（`final_fix`）の 3 区分が必ず入る（どれも 0 にしない） | テストで落とす |
 | I3 | 実行の状態 | バッファの危険フラグの全体テストは、最終ゲートが検証の中の全体テストを使い回せる戦略（手元で最終ゲートを見る `local-full` / `round-only`）と全体テストを CI に任せる戦略で 0、手元の戦略に `--ci-check` を付けたときだけ w | テストで落とす |
 | I4 | 実行の状態 | 再開でずらすのは、最後の動きの時刻より後に来る締め切りだけである。項目は完了期限（着手期限 + 見積り）で比べる。前に来る締め切りは変えない | テストで落とす |
 | I5 | 実行の状態 | 止まっていた時間が余裕（`0.05·B`）以下ならずらさない。ずらさなかったことも `pause.events[]` に 1 件残る | テストで落とす |
 | I6 | 実行の状態 | `pause` を持たない状態ファイル（この変更より前の版で `merge-plan` を通したもの）はずらさない。`pause.legacy` を真にして 1 件残し、以後もずらさない | テストで落とす |
 | I7 | 実行の状態 | ずらすのはリファクタリング計画の後（`plan` がある）で、最終ゲートに入る前（`final_gate` が無い）だけである | テストで落とす |
-| I8 | 実行の状態 | `init` が提案者を起動しないで止まるのは `plan_end_at + after_plan_minutes > final_end_at` のときに限る。止まる文の下限 `required` で打ち直すと、その時点の起点で同じ不等式が成り立つ | テストで落とす |
+| I8 | 実行の状態 | `init` が提案者を起動しないで止まるのは `plan_end_at + after_plan_minutes > final_end_at` のときに限る。止まる文の下限 `required` 以上で打ち直すと、その時点の起点（打ち直しの o）で `plan_end_at + after_plan_minutes ≤ final_end_at` が成り立ち、提案へ進む | テストで落とす |
 | I9 | 実行の状態 | 時間の数値は B・w・x・c・s・o・時計・作業ディレクトリのファイルの更新時刻からの算術だけで決まる。LLM へ問わない | レビューで見る（式の置き場は `budget` / `timeline` / `pause` だけ） |
 | I10 | 実行の状態 | 再開の処理を続けて 2 度打っても、ずれるのは 1 度だけである（1 度目の保存で最後の動きの時刻が今になる） | テストで落とす |
 | I11 | 配分の履歴 | 新しいキー（`reserve`・`paused_seconds`）を持たない行を読んでも、`allocation.build_table` の値は変わらない | テストで落とす |
+| I12 | 実行の状態 | CLI の監視かテストの実行が待っている間は、出力が無くても、最後の動きの時刻が今から 30 秒（心拍の間隔 15 秒の 2 倍）より前にならない。中断で止まった区間だけが止まっていた時間になる | テストで落とす |
 
 ### ドメインイベント
 
@@ -89,7 +90,8 @@
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
 | 止まっていた時間 | `cross-refactoring` をリファクタリング計画の後に中断してから、`init` か drive.py を打ち直して再開するまでの時間。再開の時刻 − 最後の動きの時刻で測る。想定最大時間に数えない | 意味の変更 |
-| 最後の動きの時刻 | `cross-refactoring` の作業ディレクトリ（`.cross_refactoring/`）の直下のファイルのうち、最も新しい更新時刻。状態ファイル・CLI のログ・テストのログ・結果ファイルを含む | 追加 |
+| 最後の動きの時刻 | `cross-refactoring` の作業ディレクトリ（`.cross_refactoring/`）の直下のファイルのうち、最も新しい更新時刻。状態ファイル・CLI のログ・テストのログ・結果ファイルと、心拍のファイルを含む | 追加 |
+| 心拍のファイル | `cross-refactoring` の作業ディレクトリ直下の `cross-refactoring-rf<ID>-alive`。出力の有無によらず、CLI の監視とテストの実行が待っている間、15 秒ごとに更新時刻を今にする。中断で止まると更新も止まり、最後の動きの時刻が稼働の終わりを指す | 追加 |
 | バッファ | `cross-refactoring` の見積りで、想定最大時間から経過を引いた後に残しておく時間。最終ゲートの全体テスト・修正 1 回・最終ゲート修正 1 回と、最終ゲートと兼ねられないときだけ危険フラグの全体テスト | 意味の変更 |
 | 使える時間 | 要求の定義のまま（`state.plan.available_minutes`） | 変更なし（要求で追加済み） |
 
@@ -111,6 +113,8 @@
 | `refactor_lib/budget.py` | バッファ・使える時間・締め切りの純粋な計算 | `plan_reserve(state, table)`（`merge-plan` にあった、状態から w と c を選んで `reserve` を呼ぶ処理を移す）と `shortest_item_minutes(table, measured_verify)`（1 件の長さ L）を足す。`fix_end` は残し、`fix_time_left` は上限の表の `fix_end_at` から測る形へ変える |
 | `refactor_lib/timeline.py` | 上限の表と、枠の判定 | `compute` に `after_plan_minutes`（R の見込み + L）を受けて表へ書く。`window_problem` を `plan_end_at + after_plan_minutes > final_end_at` で止める形に広げ、`required_budget_minutes(offset, after_plan)` で下限を出す |
 | `refactor_lib/pause.py`（新規） | 最後の動きの時刻を読み、止まっていた時間を測って締め切りをずらす | `last_activity(tmp_dir)`（ファイルの更新時刻を読む。I/O はここだけ）と `catch_up(state, now, last_at)`（純粋。状態の辞書を書き換え、記録した 1 件を返す） |
+| `refactor_lib/process.py` の `run_with_timeout`・`run_capture` | テストと指標の実行 | 引数 `alive`（心拍のファイルのパス。省けば今のまま）を足す。`communicate` を 15 秒ずつ区切って待ち、区切りごとに `alive` の更新時刻を今にする。上限の秒と打ち切りの扱いは変えない。cross-refactoring の呼び出し元は `paths` から心拍のファイルのパスを渡す |
+| `scripts/lib/monitor.py` | CLI の監視 | 引数 `--alive-file`（省けば今のまま。cross-review など他の呼び出し元は変わらない）を足し、見回りの 1 周期（15 秒）ごとに更新時刻を今にする。cross-refactoring の文書の起動の行に `--alive-file "$TMP_DIR/cross-refactoring-rf$ID-alive"` を足す |
 | `refactor_lib/commands/setup.py` | `init` と再開 | 新しく始めるときと計画の前の再開で、配分テーブルから `after_plan_minutes` を求めて `timeline.of_state` へ渡す。計画の後の再開では、状態を書く前に `pause.catch_up` を呼ぶ。サブコマンド `catch-up` を足す（引数の定義は `refactor.py`） |
 | `refactor_lib/init_test.py` | 着手前のテストの後の止まり | `stop_if_window_short` は広げた `window_problem` をそのまま使う（呼び方は変えない） |
 | `refactor_lib/commands/plan.py`（`merge-plan`） | 採る項目と締め切りを決める | バッファを `budget.plan_reserve` で出す。`state.pause = {"seconds": 0, "shifted_seconds": 0, "legacy": false, "events": []}` を作る |
@@ -334,11 +338,11 @@ stateDiagram-v2
 
 根拠: Value 2 / Value 6（MVV 版 2）
 
-### 決定 3: 実行中の CLI を中断と取り違えないため、止まっていた時間を作業ディレクトリの直下のファイルの最後の更新時刻から測る
+### 決定 3: 実行中の CLI とテストを中断と取り違えないため、止まっていた時間を作業ディレクトリの直下のファイルの最後の更新時刻から測り、待つ側が心拍のファイルを 15 秒ごとに更新する
 
-要求の前提 2 は「状態ファイルに残った最後の記録の時刻」で測るとしたが、状態ファイルは CLI の起動の前（`start-phase`）と取り込みの後にしか書かれない。実装の CLI が 10 分走っている間に中断すると、状態ファイルの時刻からは CLI が働いた 10 分も止まっていた時間に数え、締め切りを延ばしすぎる。CLI のログ・テストのログ・結果ファイルは作業ディレクトリの直下にあり、働いている間は更新され続けるため、その最も新しい時刻が動いていた最後の時刻になる。新しい書き手（心拍のファイル）を足さずに済む。前提 2 の「最後の記録の時刻を持たない状態ファイル」は、「止まっていた時間を記録しない版で計画した状態ファイル（`pause` が無い）」として扱う。
+要求の前提 2 は「状態ファイルに残った最後の記録の時刻」で測るとしたが、状態ファイルは CLI の起動の前（`start-phase`）と取り込みの後にしか書かれない。実装の CLI が 10 分走っている間に中断すると、状態ファイルの時刻からは CLI が働いた 10 分も止まっていた時間に数え、締め切りを延ばしすぎる。CLI のログ・テストのログ・結果ファイルも、出力の無い間（考えている CLI、`-q` で黙って走る全体テスト、出力を溜めて最後に書くテスト）は更新されないため、それだけでは同じ取り違えが残る。そこで、処理の終わりを待つ 2 か所（CLI の監視 `monitor.py` と、テストを走らせる `process.run_with_timeout` / `run_capture`）が、待つ間 15 秒ごとに心拍のファイルの更新時刻を今にする。中断でプロセスが止まると心拍も止まるため、最も新しい更新時刻は「動いていた最後の時刻」から 15 秒以内になり、止まっていた時間に数える稼働の分は余裕（`0.05·B`。B = 30 分で 90 秒）より小さい。前提 2 の「最後の記録の時刻を持たない状態ファイル」は、「止まっていた時間を記録しない版で計画した状態ファイル（`pause` が無い）」として扱う。
 
-状態ファイルの保存のたびに時刻を書く案は、上の取り違えが残るため採らない。耐久の記録のステップの時刻を使う案は、手で `init` を打ち直す経路に記録が無いため採らない。
+状態ファイルの保存のたびに時刻を書く案は、上の取り違えが残るため採らない。耐久の記録のステップの時刻を使う案は、手で `init` を打ち直す経路に記録が無いため採らない。ログのファイルの更新時刻だけで測る案は、出力の無いテストと CLI の稼働を止まっていた時間に数えるため採らない。心拍をテストのコマンドや CLI の側に書かせる案は、プロジェクトごとのコマンドを変えることになるため採らない（待つ側はどのプロジェクトでも NDF のスクリプトである）。
 
 根拠: Value 3 / Value 4（MVV 版 2）
 
@@ -382,7 +386,7 @@ drive.py は `init` を耐久ステップとして 1 回だけ打ち（I19）、
 | --- | --- | --- |
 | 実装へ回す時間: PR 1801 の入力で使える時間が 7.0 分以上 | `budget.plan_reserve` と `available_minutes` に PR 1801 の値を与え、使える時間が 7.9 分前後になる | 危険フラグの w をバッファへ戻す |
 | 同じ入力で `final_end_at` が `開始 + 30 分`（I1） | `timeline.compute` に計画の後の値を与える | `final_end_at` をバッファで前へ寄せる |
-| 同じ入力で最終ゲートの全体テストと `final_fix` がバッファに残る（I2） | `plan_reserve` の戻り値の 2 区分 | 最終ゲートの w か `final_fix` を 0 にする |
+| 同じ入力で最終ゲートの全体テスト・`fix`・`final_fix` がバッファに残る（I2） | `plan_reserve` の戻り値の 3 区分 | 最終ゲートの w・`fix`・`final_fix` のどれかを 0 にする |
 | 危険フラグが立てば全体テストを走らせる | `converge._whole_test` が手元の戦略で全体テストを 1 度走らせる（既存テストのまま） | バッファが 0 のときに全体テストを飛ばす |
 | 危険フラグの全体テストと最終ゲートの両方に時間が無くても止まらず、何を省いたかが 1 行出る | 時計を打ち切りの後に置いて検証から最終ゲートまで進め、最終ゲート修正の 1 回目が起動し、報告に「バッファを越えた全体テスト」の行が出る | 時間切れで止める・報告の行を出さない |
 | CI に任せる戦略でバッファと使える時間が変わらない（I3） | `reserve_seconds` が `local-scoped-ci-whole` で `(0, c)`、`--ci-check` の手元で `(w, c)` | どちらかの戻り値を変える |
@@ -398,6 +402,7 @@ drive.py は `init` を耐久ステップとして 1 回だけ打ち（I19）、
 | 計画の前・最終ゲートの後はずらさない（I7） | `plan` の無い状態・`final_gate` のある状態で `catch_up` が何も書かない | 段階を見ずにずらす |
 | 続けて 2 度打っても 1 度だけずれる（I10） | 1 度目の保存の後に `last_activity` を読み直すと止まっていた秒が余裕以下になる | `catch-up` が保存しない |
 | 最後の動きの時刻に CLI のログが入る（決定 3） | 状態ファイルより新しいログのファイルがあると、その時刻を返す | 状態ファイルの時刻だけを読む |
+| 出力の無いテストの稼働を止まっていた時間に数えない（I12・決定 3） | `run_with_timeout` に `alive` を渡して 40 秒黙って眠るコマンドを走らせ、走っている間に `alive` の更新時刻が今から 30 秒以内に保たれる。`monitor.py --alive-file` も見回りのたびに更新する | 心拍を書かない・最初の 1 回だけ書く |
 | `fix_end_at` を 1 か所から読む（決定 5） | 表の `fix_end_at` をずらすと `_fix_stop` と `culprit.fix_deadline` の両方がずれた値で判定する | どちらかが開始から計算し直す |
 | 報告にバッファの区分ごとの残りが出る | PR 1801 の形の状態から報告の行が 4 区分の分を持つ | 区分を落とす |
 | 実行の行に `reserve` と `paused_seconds` が残る | `build_row` の戻り値 | キーを書かない |
@@ -410,7 +415,7 @@ drive.py は `init` を耐久ステップとして 1 回だけ打ち（I19）、
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #1743 | 実装する | — | `plugins/ndf/scripts/lib/test_strategy.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/`、`plugins/ndf/skills/cross-refactoring/scripts/drive.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor.py`、`plugins/ndf/skills/cross-refactoring/docs/`、`plugins/ndf/skills/cross-refactoring/tests/`、`plugins/ndf/scripts/tests/` |
+| #1743 | 実装する | — | `plugins/ndf/scripts/lib/test_strategy.py`、`plugins/ndf/scripts/lib/monitor.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/`、`plugins/ndf/skills/cross-refactoring/scripts/drive.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor.py`、`plugins/ndf/skills/cross-refactoring/docs/`、`plugins/ndf/skills/cross-refactoring/tests/`、`plugins/ndf/scripts/tests/` |
 | #1491 | 取り込む | #1743 | — |
 
 ## 未確認のまま残ること
