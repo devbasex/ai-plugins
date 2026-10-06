@@ -167,7 +167,9 @@ def test_no_fit_defers_the_carried_items_and_goes_to_the_final_gate(flow, cmd_se
 def test_the_readopt_takes_budget_candidates_in_rank_order_without_an_llm(flow, readopt, cmd_plan, monkeypatch):
     """I14: 残った時間 3.8 分に 2.1・2.0・1.1 分の候補（順位の順）なら 2.1 と 1.1 を採り、2.0 を飛ばす。ほかの理由の見送りは採らない。"""
     done = _entry("I-001", 1, "total", status="verified")
-    big, mid, small = (_entry(f"C-{n}", 0, s, minutes=m, tier=t) for n, s, m, t in ((1, "a", 2.1, "high"), (2, "b", 2.0, "medium"), (3, "c", 1.1, "low")))
+    big, mid, small = (
+        _entry(f"C-{n}", 0, s, minutes=m, tier=t) for n, s, m, t in ((1, "a", 2.1, "high"), (2, "b", 2.0, "medium"), (3, "c", 1.1, "low"))
+    )
     ranked_out = _entry("C-4", 0, "d", minutes=0.5, tier="high")
     deferred = [_budget(c) for c in (big, mid, small)] + [{"item_id": "C-4", "defer_reason": "rank"}]
     _plan(flow, [done], [big, mid, small, ranked_out], deferred, left_minutes=3.8, phase="readopt")

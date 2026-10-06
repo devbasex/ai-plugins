@@ -84,9 +84,10 @@ def test_the_final_end_stays_at_the_budget(mods):
 def test_the_implement_end_ignores_the_item_estimates(mods):
     """rf1718 の形（B = 60）: 実装の終わりは打ち切り − R − Σ（未検証の verify）で、項目の実装の見積りを引かない。"""
     reserve = {"danger_whole_test": 0.0, "final_whole_test": 6.6, "fix": 1.3, "final_fix": 1.3}
-    items = [
-        {"status": "planned", "estimate": {"test": 0.0, "implement": 3.0, "verify": 0.5}} for _ in range(10)
-    ] + [{"status": "verified", "estimate": {"test": 0.0, "implement": 3.0, "verify": 9.0}}, {"status": "carried", "estimate": {"verify": 9.0}}]
+    items = [{"status": "planned", "estimate": {"test": 0.0, "implement": 3.0, "verify": 0.5}} for _ in range(10)] + [
+        {"status": "verified", "estimate": {"test": 0.0, "implement": 3.0, "verify": 9.0}},
+        {"status": "carried", "estimate": {"verify": 9.0}},
+    ]
     limits = mods["timeline"].compute(START, 60, 20.0, items, reserve)
     implement_end = START + (60 - 9.2 - 5.0) * M
     assert limits["implement_end_at"] == implement_end.isoformat(timespec="seconds")
@@ -333,7 +334,9 @@ def test_the_unused_buffer_is_reported_per_category(mods):
     assert usage["fix"]["unused_seconds"] == usage["final_fix"]["unused_seconds"] == 78
     assert usage["danger_whole_test"]["reserved_seconds"] == 0
     lines = mods["time_report"].lines(_finished_state())
-    assert lines[0].startswith("- バッファのうち使わずに残った時間: 危険フラグの全体テスト 0.0 / 最終ゲートの全体テスト 0.7 / 修正 1.3 / 最終ゲート修正 1.3 分")
+    assert lines[0].startswith(
+        "- バッファのうち使わずに残った時間: 危険フラグの全体テスト 0.0 / 最終ゲートの全体テスト 0.7 / 修正 1.3 / 最終ゲート修正 1.3 分"
+    )
     assert any(line.startswith("- 止まっていた時間: 12.0 分（1 回。締め切りを 12.0 分ずらした）") for line in lines)
     assert not any("バッファを越えた" in line for line in lines)
 

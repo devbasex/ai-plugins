@@ -82,7 +82,9 @@ def _adopt(state: dict[str, Any], selected: list[dict[str, Any]], carried: list[
         items.append(item)
         ids.append(item["id"])
         state["deferred_items"] = [
-            d for d in state.get("deferred_items") or [] if not (d.get("item_id") == candidate["id"] and d.get("defer_reason") == DEFER_BUDGET)
+            d
+            for d in state.get("deferred_items") or []
+            if not (d.get("item_id") == candidate["id"] and d.get("defer_reason") == DEFER_BUDGET)
         ]
     return ids
 
@@ -163,5 +165,7 @@ def cmd_readopt(args: argparse.Namespace) -> None:
     state["phase"] = "add-tests" if tests_needed else "implement"
     statefile.save(path, state)
     left = len(_budget_candidates(state))
-    info(f"採り直し: 残った時間 {available:.1f} 分に {len(ids)} 件（{', '.join(ids)}）を採りました（巡 {round_no + 1}。採らずに残った budget の候補 {left} 件）")
+    info(
+        f"採り直し: 残った時間 {available:.1f} 分に {len(ids)} 件（{', '.join(ids)}）を採りました（巡 {round_no + 1}。採らずに残った budget の候補 {left} 件）"
+    )
     statefile.emit(TESTS_NEEDED=1 if tests_needed else 0)
