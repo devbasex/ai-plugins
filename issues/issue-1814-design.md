@@ -106,6 +106,33 @@
 | F7 | 語彙に手法 5 つと兆候 3 つを足し、観点を語彙の表へ移して代表の兆候へ写す | 提案の統合 |
 | F8 | プロンプトと文書が、新しいファイル・呼び手の書き換え・複数コミットを許すと書く | 実装担当・修正担当・読み手 |
 
+## システム構成
+
+**文脈**: 変わるのは、同じホストで動く cross-refactoring の取り込みの判定・プロンプト・状態ファイルの形だけである。外部の系（GitHub・各ランタイムの CLI）との出入りは変えない。
+
+```mermaid
+graph LR
+  dev[開発者・conductor] -->|/ndf:cross-refactoring| body[cross-refactoring<br/>このリポジトリの配布物]
+  body -->|プロンプト| cli[実装担当・修正担当の CLI<br/>claude / codex / kiro]
+  cli -->|Item-Id のコミット| body
+  body -->|最終ゲートの入口で push| gh[GitHub<br/>Pull Request・CI]
+  gh -->|レビューの結果| body
+```
+
+**配置**: すべて利用者のホスト（端末かコンテナ）の 1 つのプロセス群で動く。範囲の判定は作業用の worktree の git の事実だけを読み、ネットワークを使わない。
+
+```mermaid
+graph TD
+  subgraph host[利用者のホスト]
+    drv[駆動 drive.py] -->|サブコマンド| rf[refactor.py<br/>取り込み・範囲の判定・検証]
+    drv -->|起動と監視| cli[作業の CLI のプロセス]
+    cli -->|コミット| wt[(作業用の worktree)]
+    rf -->|差分・起点のツリー| wt
+    rf -->|commits.implement の並び| st[(状態ファイル)]
+  end
+  rf -->|push（最終ゲートの入口だけ）| gh[GitHub]
+```
+
 ## 構成要素
 
 | 要素 | 責務 |
@@ -114,7 +141,7 @@
 | `refactor_lib/verify.py` | `verify_commit_basics` をトレーラーと実在の検査だけに減らし、範囲は `scope_check` へ渡す。`verify_scope` / `out_of_scope_files` / `verify_diff_budget` / `diff_budget_factor` を消す。`collect_test_changes` を「最初の前・最後の後」で組み、`verify_test_changes` を和集合で判定する（F3） |
 | `refactor_lib/gitfacts.py` | `commit_diff_lines` に `-M` を付ける。コミットのファイルごとの状態（`A` / `M` / `D`）と `-U0` のハンクを返す関数を足す |
 | `refactor_lib/items.py` | `implement_shas(item)`（`commits.implement` が文字列でも並びでも並びで返す）を足し、`item_shas` がそれを使う |
-| `refactor_lib/commands/implement.py` | 実装の 2 コミット以上の拒否を外す（F2）。単位の判定・期待値の和集合・`review_scope_judgements` の記録。所要と締め切りは最後のコミットの時刻で測る。差分予算の呼び出しを消す。テストの追加の取り込みも同じ `judge_unit` を通す（1 コミットの規則とテスト以外を変えない規則は今のまま） |
+| `refactor_lib/commands/implement.py` | 実装の 2 コミット以上の拒否を外す（F2）。単位の判定・期待値の和集合・`review_scope_judgements` の記録。所要は最後のコミットの時刻で測る。項目の期限の判定（`_deadline_passed`）には触れない（前提 7。#1743 の決定 9 が外す）。差分予算の呼び出しを消す。テストの追加の取り込みも同じ `judge_unit` を通す（1 コミットの規則とテスト以外を変えない規則は今のまま） |
 | `refactor_lib/fix_intake.py` | 修正の範囲を項目ごとの単位に分けて `scope_check` と期待値の和集合に掛ける。手順を外れたら今と同じく修正の範囲ごと取り消す |
 | `refactor_lib/commands/final_fix.py` | 最終ゲート修正の全コミットを 1 つの単位として `scope_check` に掛ける |
 | `refactor_lib/targets.py` | 項目が足すテスト（`planned`）は、テストの suite の `paths` が覆えば `--scope` のテストの置き場所の外でも通す（F6）。`remove_dead_code` の対象無しを `deletion` で返す（F5） |
@@ -198,6 +225,41 @@ classDiagram
 
 `FileVerdict.kind` は `in_scope` / `new` / `rewrite` / `outside` の 4 つ。`UnitVerdict.problem` は `outside` が 1 件でもあれば理由の文、無ければ空。`rewrites` は `rewrite` のパスで、呼ぶ側が `review_scope_judgements` へ書く。型は `dataclass` で持ち、状態ファイルへは書かない。
 
+## パッケージ・モジュール構成
+
+新設は `scope_check.py` の 1 つで、ほかは既存のファイルの変更である（「構成要素」の表と同じ範囲）。
+
+```text
+plugins/ndf/skills/
+├── cross-refactoring/
+│   ├── SKILL.md                         # 変更（制約の説明）
+│   ├── docs/01〜04                       # 変更
+│   ├── references/design-principles.md  # 変更
+│   ├── prompts/
+│   │   ├── implement.md                 # 変更（決定 10）
+│   │   ├── fix.md                       # 変更
+│   │   └── final-fix.md                 # 変更
+│   ├── scripts/refactor_lib/
+│   │   ├── scope_check.py               # 新設（judge_unit。決定 11）
+│   │   ├── verify.py                    # 変更（範囲・差分予算の関数を消す・期待値を和集合へ）
+│   │   ├── gitfacts.py                  # 変更（-M・ファイルの状態とハンク）
+│   │   ├── items.py                     # 変更（implement_shas）
+│   │   ├── fix_intake.py                # 変更
+│   │   ├── targets.py                   # 変更（planned の置き場所・deletion）
+│   │   ├── plan.py / undo.py / allocation.py  # 変更（implement_shas で読む）
+│   │   ├── vocabulary.py / proposals.py # 変更（観点と代表の兆候）
+│   │   └── commands/
+│   │       ├── implement.py             # 変更（複数コミット・judge_unit）
+│   │       ├── final_fix.py             # 変更
+│   │       ├── plan.py / plan_comment.py  # 変更
+│   │       └── converge.py              # 変更（deletion の範囲テストのファイルを None）
+│   └── tests/                           # 変更・追加
+└── refactoring/references/
+    ├── vocabulary.md                    # 変更（手法 5・兆候 3・観点の節）
+    ├── refactoring-catalog.md           # 変更
+    └── code-smells.md                   # 変更
+```
+
 ## データ構造
 
 状態ファイル（`statefile`）の改善項目の 2 か所が変わる。新しい集計・比較の単位は増やさない。
@@ -279,7 +341,7 @@ sequenceDiagram
 | --- | --- | --- |
 | 振り分け | `Item-Id` で項目へ | 同じ |
 | コミットの数 | 2 件以上で取り消し | 何件でも受け入れる（テストの追加は今のまま 1 件） |
-| 締め切り | 最初のコミットの時刻 | 最後のコミットの時刻（完了の時刻） |
+| 締め切り | 最初のコミットの時刻で完了期限と比べる | 変えない（前提 7）。#1743 の決定 9 が項目の完了期限（`_deadline_passed`）を外した後は、この判定そのものが無くなる。#1743 より先に入る間も最初のコミットの時刻のまま比べ、2 件目以降のコミットで判定を厳しくしない |
 | 所要 | 最初のコミットの時刻 | 最後のコミットの時刻（AC6a） |
 | 記録 | `commits.implement = sha` | `commits.implement = [sha, ...]` |
 | 取り消し | `item_shas` の全件 | 同じ（`item_shas` が実装の全件を返す。I8） |
@@ -306,7 +368,7 @@ stateDiagram-v2
 | --- | --- | --- |
 | 運用・保守性 | 範囲・期待値・コミットの数の判定を 1 つの関数に通す | 範囲は `scope_check.judge_unit`、期待値は `verify.verify_test_changes` を実装・修正（・最終ゲート修正の範囲）で共有する。経路ごとの判定を持たない（I13） |
 | セキュリティ | 判定の事実を git から取り、申告を使わない | `scope_check` の入力は SHA・範囲・起点だけ。結果ファイルの欄を読まない（I1） |
-| 性能 | 全体テストが増えるのは D1 の項目と 6b の項目の 1 回ずつ | 全体テストは今の危険フラグの経路（1 実行に 1 度）だけを使い、新しい全体テストの起動を足さない。ありふれた語の表は 1 実行に 1 度の `git grep -o -w`（起点のツリーの走査 1 回）で作って使い回し、候補の語ごと・取り込みごとに起動しない |
+| 性能 | 全体テストが増えるのは D1 の項目と 6b の項目の 1 回ずつ | 全体テストは今の危険フラグの経路（1 実行に 1 度）だけを使い、新しい全体テストの起動を足さない。#1743 の決定 1 の後のバッファでの数え方は決定 7 に書いた。ありふれた語の表は 1 実行に 1 度の `git grep -o -w`（起点のツリーの走査 1 回）で作って使い回し、候補の語ごと・取り込みごとに起動しない |
 
 ## テスト設計
 
@@ -339,6 +401,18 @@ stateDiagram-v2
 | --- | --- | --- | --- |
 | #1814 | 実装する | — | `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/`、`plugins/ndf/skills/cross-refactoring/tests/`、`plugins/ndf/skills/cross-refactoring/prompts/`、`plugins/ndf/skills/cross-refactoring/docs/`、`plugins/ndf/skills/cross-refactoring/SKILL.md`、`plugins/ndf/skills/cross-refactoring/references/design-principles.md`、`plugins/ndf/skills/refactoring/references/`、`docs/specifications/`、`docs/glossary/glossary.json`、`docs/glossary.md`、`CLAUDE.md` |
 
+## 並行する設計との関係
+
+同じスプリントの #1743・#1658 の実装と、どの順で入っても成り立つように、相手の決定を前提として次のとおり扱う。
+
+| 相手の決定 | 内容 | この設計の扱い |
+| --- | --- | --- |
+| #1743 の決定 9 | 項目ごとの着手期限・完了期限と `_deadline_passed` を外し、実装を止める時刻を実装の終わりの 1 つにする | 項目の期限の判定は変えない（前提 7）。#1743 の後は複数コミットの項目にも期限は掛からない。#1743 より先に入る間は、判定に渡す時刻を今の最初のコミットのまま残し、2 件目以降のコミットで判定を厳しくしない（「複数コミットの項目の取り込み」の表） |
+| #1743 の決定 1 | 手元で最終ゲートを見る戦略では、危険フラグの全体テストを最終ゲートと兼ねてバッファに数えない | 決定 7 の `deletion` の項目は D4 を必ず立てる。D4 の全体テストが落ちたとき・HEAD が進んで最終ゲートが使い回せないときの超過は、#1743 の「未確認のまま残ること」の「危険フラグが立ったときの所要の伸び」に従い、バッファに `deletion` の分を足さない（決定 7） |
+| #1743 の決定 10 | 検証の後に見送った候補を採り直し、項目に `round` を持たせ、取り込みを巡ごとに行う | 採り直しで足す項目も `merge-plan` と同じ形で `commits` を作るため、`commits.implement` は空の並びで始まり、`items.implement_shas` が読む。判定の単位は今の巡の取り込みに入る項目ごとの全コミットで、前の巡のコミットを含めない |
+| #1743 の決定 11 | `CLAUDE.md` の cross-refactoring の節を C7 として、実装の PR で別に承認を取ってから書く | 決定 12 と同じ扱い。同じ節を 2 本が直すため、後に入る実装の PR が先の差分の上に書き、承認はそれぞれの PR で取る |
+| #1658 の用語「見送った改善項目」「見送った提案」 | `not_done`・`test_failed` の改善項目と、計画に入らなかった提案を `deferred_items` で数える | 決定 7 で `remove_dead_code` の `no_target` の見送りが減るだけで、#1658 の数え方（`ledger.tally`・`deferred_items`）は変えない |
+
 ## 未確認のまま残ること
 
 | 項目 | 内容 |
@@ -347,5 +421,6 @@ stateDiagram-v2
 | 呼び手の書き換えの取りこぼし | 動的な読み込み・文字列で組み立てた名前・識別子の規則に当たらない言語の呼び手は H1 で落ちる（項目は取り消される。今の振る舞いと同じ側に倒れる） |
 | 呼び手の書き換えの通しすぎ | 変えた名前を含む行の値（リテラル）だけを変えたハンクは H1・H2 を通る。D1 の全体テストと最終ゲートのレビュー（I5）が拾う前提である |
 | 生成物を新しいファイルとして作る | 新しいファイルを置き場所によらず許すため、実装担当が生成物の置き場所へ新しいファイルを作っても範囲の判定では落ちない。プロンプトの「同期をしない」と、公開直前の同期（同期の結果が差分になる）で拾う前提である |
-| `CLAUDE.md` の書き換え | C7 に当たる。設計の承認とは別に、実装の PR で人の承認を取ってから書く |
+| `CLAUDE.md` の書き換え | C7 に当たる。設計の承認とは別に、実装の PR で人の承認を取ってから書く（#1743 の決定 11 も同じ節を同じ扱いで直す） |
+| `deletion` の項目の全体テストの超過 | 決定 7 で D4 の全体テストが走る実行が増える。#1743 の決定 1 の後は、それが落ちたとき・同期のコミットで HEAD が進んだときに最終ゲートの全体テストがバッファの外で 2 回目になり、想定最大時間を越えうる。扱いと実測は #1743 の「未確認のまま残ること」の「危険フラグが立ったときの所要の伸び」に寄せ、報告の「バッファを越えた全体テスト」の行で `deletion` の項目の有無と合わせて見る（リリース後テスト） |
 | #622 | 呼び手の書き換えはハンク単位で縛るため悪化しない見込み（決定 3）。実測は次の実行で `review_scope_judgements` の件数として見る |
