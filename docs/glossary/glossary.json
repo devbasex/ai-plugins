@@ -3385,6 +3385,12 @@
       "context": "ndf-workflow",
       "meaning": "parallel-measure.py capacity が本数を決めた理由の区分。grow（足してよい）/ hold（今の本数を超えて足さない）/ shrink（1 本減らす）",
       "pending_source": "issues/issue-780-requirements.md"
+    },
+    {
+      "term": "積み直し",
+      "context": "ndf-cross-refactoring",
+      "meaning": "取り消しで、取り消しの起点から HEAD までの残すコミット（未公開のもの）を cherry-pick で順に積み直すこと。項目に属するコミットが衝突したら、その項目だけを外して続ける",
+      "pending_source": "issues/issue-1793-requirements.md"
     }
   ]
 }
