@@ -226,7 +226,7 @@ stateDiagram-v2
 - 見分けが、終了コード 1 のフックの不合格（前に `fatal:` の行があっても）を真、`! [rejected]`・`! [remote rejected]`・
   終了コード 128 を偽とすること
 - `on_fail_only` を持たない `pr` は、どの失敗でも `on_fail` へ回ること
-- `new impl` と `new fix` のプランが、`sync_checks` の有無によらず `pr` の `on_fail`・`on_fail_only` と `fix-push` を
+- `new impl` と `new fix` のプランが、`sync_checks` があってもなくても `pr` の `on_fail`・`on_fail_only` と `fix-push` を
   持つこと
 - `supervise_lib/` のコードに `validate-runtime-plugins.sh` と `check-lint.sh` の語が無いこと
 - このリポジトリの `.ndf/supervise.json` の `sync_checks` に 2 本のコマンドがあること
