@@ -52,25 +52,16 @@ import procs  # noqa: E402
 import gh_parts  # noqa: E402  GitHub の読み取り（#1142 の L0）
 
 # --- 既定値（ここだけが持つ） -----------------------------------------------
-# 予備: 同じ VM に常駐する他のプロセスの揺れ。既に動いている進行側の本体と担当は
-# MemAvailable から引かれているため含めない（#780）。
+# 予備: 同じ VM の他のプロセスの揺れ。動いている本体と担当は MemAvailable が既に引いているため含めない（#780）。
 DEFAULT_RESERVE_MIB = 1024
-# 1 本の見込み: 実測を使えない（0 本・起点なし・anon を読めない）ときの値。#621 の実測
-# 約 1.2GiB に余裕を足した暫定値で、「測った値」の表の 1 本の実測が溜まったら直す。
+# 1 本の見込み: 実測を使えないときの暫定値（#621 の実測約 1.2GiB に余裕を足した）。「測った値」の表から直す。
 DEFAULT_PER_LANE_MIB = 1536
-# 1 本の重さの下限: 実測が小さく出ても、これを割らない。
-DEFAULT_PER_LANE_MIN_MIB = 512
-# 山への余裕: 実測の平均に掛け、テストやビルドの山を見込む。
-DEFAULT_PEAK_FACTOR = Decimal("1.5")
-# 1 回の見直しで足す数の上限: 担当の重さは動き出すまで測れないため、足したら次の見直しで
-# 測ってからまた足す。総本数の上限ではない。
-DEFAULT_MAX_ADD = 2
-# 圧の閾値: PSI の some avg10（%）。超えたら hold。
-DEFAULT_PSI_SOME_MAX = Decimal("10")
-# PSI が無いときのスワップ I/O の閾値（pswpin + pswpout のページ/秒）。超えたら hold。
-DEFAULT_SWAP_IO_MAX_PAGES_PER_SEC = 512
-# スワップ I/O の 2 回の読み取りの間隔（秒）。
-DEFAULT_SAMPLE_SECONDS = Decimal("2")
+DEFAULT_PER_LANE_MIN_MIB = 512  # 1 本の重さの下限
+DEFAULT_PEAK_FACTOR = Decimal("1.5")  # 実測の平均に掛ける山への余裕
+DEFAULT_MAX_ADD = 2  # 1 回の見直しで足す数（総本数の上限ではない。足したら次の見直しで測ってから足す）
+DEFAULT_PSI_SOME_MAX = Decimal("10")  # PSI の some avg10 の閾値。超えたら hold
+DEFAULT_SWAP_IO_MAX_PAGES_PER_SEC = 512  # PSI が無いときの pswpin + pswpout の閾値（ページ/秒）
+DEFAULT_SAMPLE_SECONDS = Decimal("2")  # スワップ I/O の 2 回の読み取りの間隔（秒）
 
 DEFAULT_MEMINFO = "/proc/meminfo"
 GH_JSON_FIELDS = "number,createdAt,mergedAt,closedAt"
@@ -87,45 +78,25 @@ class NotMeasurable(Exception):
     """測る元を読めない（終了コード 3）。"""
 
 
-def non_negative_int(value: str) -> int:
-    try:
-        parsed = int(value)
-    except ValueError:
-        raise argparse.ArgumentTypeError(f"整数ではない: {value}")
-    if parsed < 0:
-        raise argparse.ArgumentTypeError(f"負の値は受け取らない: {value}")
-    return parsed
+def _number(parse, minimum, *, strict: bool = False):
+    """`parse` で読み、`minimum` 未満（`strict` なら以下）と有限でない値を引数の誤りにする argparse の型を作る。"""
+
+    def convert(value: str):
+        try:
+            parsed = parse(value)
+        except (ValueError, InvalidOperation):
+            raise argparse.ArgumentTypeError(f"数ではない: {value}")
+        if (isinstance(parsed, Decimal) and not parsed.is_finite()) or parsed < minimum or (strict and parsed == minimum):
+            raise argparse.ArgumentTypeError(f"{minimum} {'より大きい' if strict else '以上の'}値である: {value}")
+        return parsed
+
+    return convert
 
 
-def positive_int(value: str) -> int:
-    parsed = non_negative_int(value)
-    if parsed == 0:
-        raise argparse.ArgumentTypeError(f"1 以上である: {value}")
-    return parsed
-
-
-def _decimal(value: str) -> Decimal:
-    try:
-        parsed = Decimal(value)
-    except InvalidOperation:
-        raise argparse.ArgumentTypeError(f"数ではない: {value}")
-    if not parsed.is_finite():
-        raise argparse.ArgumentTypeError(f"有限の数ではない: {value}")
-    return parsed
-
-
-def non_negative_decimal(value: str) -> Decimal:
-    parsed = _decimal(value)
-    if parsed < 0:
-        raise argparse.ArgumentTypeError(f"負の値は受け取らない: {value}")
-    return parsed
-
-
-def positive_decimal(value: str) -> Decimal:
-    parsed = _decimal(value)
-    if parsed <= 0:
-        raise argparse.ArgumentTypeError(f"0 より大きい値である: {value}")
-    return parsed
+non_negative_int = _number(int, 0)
+positive_int = _number(int, 1)
+non_negative_decimal = _number(Decimal, 0)
+positive_decimal = _number(Decimal, 0, strict=True)
 
 
 def emit_pairs(pairs: list[tuple[str, object]]) -> None:
@@ -216,78 +187,44 @@ def _ceil(value: Decimal) -> int:
     return int(value.to_integral_value(rounding=ROUND_CEILING))
 
 
-def per_lane_weight(
-    anon_mib: Optional[Decimal],
-    baseline_mib: Optional[int],
-    running: int,
-    *,
-    peak_factor: Decimal,
-    min_mib: int,
-    default_mib: int,
-) -> PerLane:
-    """1 本の重さ。実測は起点からの anon の増分を本数で割って切り上げ、使う値は丸める前の差に
-    山への余裕を掛けてから切り上げる（決定 3）。差が負なら 0 とする。実測を使えなければ見込み。"""
-    if anon_mib is None or baseline_mib is None or running < 1:
-        return PerLane(None, default_mib)
-    growth = max(Decimal(0), anon_mib - baseline_mib)
-    observed = _ceil(growth / running)
-    used = max(min_mib, _ceil(growth * peak_factor / running))
-    return PerLane(observed, used)
+def per_lane_weight(anon_mib: Optional[Decimal], args: argparse.Namespace) -> PerLane:
+    """1 本の重さ。実測は起点からの anon の増分を本数で割って切り上げ、使う値は丸める前の増分に山への余裕を
+    掛けてから切り上げる（決定 3）。増分が負なら 0 とする。実測を使えなければ見込み（`--per-lane-mib`）。"""
+    if anon_mib is None or args.anon_baseline_mib is None or args.running < 1:
+        return PerLane(None, args.per_lane_mib)
+    growth = max(Decimal(0), anon_mib - args.anon_baseline_mib)
+    return PerLane(_ceil(growth / args.running), max(args.per_lane_min_mib, _ceil(growth * args.peak_factor / args.running)))
 
 
-def read_pressure(
-    psi_path: Path,
-    vmstat_path: Path,
-    vmstat_after_path: Path,
-    *,
-    psi_some_max: Decimal,
-    swap_io_max_pages_per_sec: int,
-    sample_seconds: Decimal,
-) -> Pressure:
+def read_pressure(args: argparse.Namespace) -> Pressure:
     """いまの圧。PSI が読めればそれだけを見て待たずに返し、無ければ vmstat を間隔を挟んで 2 回読む。"""
-    avg10 = procs.memory_pressure_some_avg10(psi_path)
+    avg10 = procs.memory_pressure_some_avg10(Path(args.psi))
     if avg10 is not None:
-        exceeded = "hold_psi" if Decimal(avg10) > psi_some_max else None
-        return Pressure("psi", f"psi:{avg10}", exceeded)
-    before = procs.swap_io_pages(vmstat_path)
-    if before is None:
-        return Pressure(UNKNOWN, UNKNOWN, None)
-    if sample_seconds > 0:
-        time.sleep(float(sample_seconds))
-    after = procs.swap_io_pages(vmstat_after_path)
-    if after is None:
+        return Pressure("psi", f"psi:{avg10}", "hold_psi" if Decimal(avg10) > args.psi_some_max else None)
+    before = procs.swap_io_pages(Path(args.vmstat))
+    if before is not None and args.sample_seconds > 0:
+        time.sleep(float(args.sample_seconds))
+    after = None if before is None else procs.swap_io_pages(Path(args.vmstat_after or args.vmstat))
+    if before is None or after is None:
         return Pressure(UNKNOWN, UNKNOWN, None)
     # 間隔 0 は検査だけが渡す。差をそのまま毎秒の値として扱う（決定 6）。
-    rate = Decimal(max(0, after - before)) / (sample_seconds if sample_seconds > 0 else 1)
-    exceeded = "hold_swap_io" if rate > swap_io_max_pages_per_sec else None
+    rate = Decimal(max(0, after - before)) / (args.sample_seconds or 1)
+    exceeded = "hold_swap_io" if rate > args.swap_io_max_pages_per_sec else None
     return Pressure("swap_io", f"swap_io:{rate.quantize(Decimal('0.1'), rounding=ROUND_HALF_UP)}", exceeded)
 
 
-def decide(
-    running: int,
-    addable: int,
-    *,
-    oom_kill_increased: str,
-    pressure: Pressure,
-    max_add: int,
-    max_lanes: Optional[int],
-) -> Decision:
+def decide_lanes(addable: int, oom_kill_increased: str, pressure: Pressure, args: argparse.Namespace) -> Decision:
     """区分を shrink → hold → grow の順に 1 つ決め、その後に --max と下限 1 を共通に当てる（決定 2）。"""
-    limited_by: list[str] = []
+    running, limited_by = args.running, []
     if oom_kill_increased == "yes":
-        verdict = "shrink"
-        allowed = max(0, running - 1)
+        verdict, allowed = "shrink", max(0, running - 1)
     elif pressure.exceeded is not None:
-        verdict = "hold"
-        allowed = running
+        verdict, allowed = "hold", running
     else:
-        verdict = "grow"
-        allowed = running + min(max_add, addable)
-        limited_by.append("memory")
-        if max_add < addable:
-            limited_by.append("max_add")
-    if max_lanes is not None and allowed > max_lanes:
-        allowed = max_lanes
+        verdict, allowed = "grow", running + min(args.max_add, addable)
+        limited_by += ["memory"] + (["max_add"] if args.max_add < addable else [])
+    if args.max_lanes is not None and allowed > args.max_lanes:
+        allowed = args.max_lanes
         limited_by.append(NO_LIMIT)
     if verdict == "hold":
         limited_by.append(pressure.exceeded)
@@ -322,31 +259,10 @@ def run_capacity(args: argparse.Namespace) -> int:
     if isinstance(cgroup_available, int):
         budget_mib = min(budget_mib, cgroup_available)
 
-    per_lane = per_lane_weight(
-        anon_mib,
-        args.anon_baseline_mib,
-        args.running,
-        peak_factor=args.peak_factor,
-        min_mib=args.per_lane_min_mib,
-        default_mib=args.per_lane_mib,
-    )
-    pressure = read_pressure(
-        Path(args.psi),
-        Path(args.vmstat),
-        Path(args.vmstat if args.vmstat_after is None else args.vmstat_after),
-        psi_some_max=args.psi_some_max,
-        swap_io_max_pages_per_sec=args.swap_io_max_pages_per_sec,
-        sample_seconds=args.sample_seconds,
-    )
+    per_lane = per_lane_weight(anon_mib, args)
+    pressure = read_pressure(args)
     by_memory = lanes_by_memory(budget_mib, args.running, args.reserve_mib, per_lane.used_mib)
-    decision = decide(
-        args.running,
-        by_memory - args.running,
-        oom_kill_increased=oom_kill_increased,
-        pressure=pressure,
-        max_add=args.max_add,
-        max_lanes=args.max_lanes,
-    )
+    decision = decide_lanes(by_memory - args.running, oom_kill_increased, pressure, args)
 
     emit_pairs(
         [
