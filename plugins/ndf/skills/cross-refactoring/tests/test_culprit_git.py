@@ -6,6 +6,7 @@
 | 締め切りの後 | 原因の項目だけを取り消し、危険フラグの項目は残る（AC2） |
 | 外す走らせ直し（`isolate`） | 本文にパスが無ければ、項目を 1 件ずつ外して通るようになった項目が原因になる。HEAD と worktree は動かない（AC3・I4） |
 | 原因が 2 件 | 別々のテストを別々の項目が落とすと、両方が原因になり、ほかの項目は触らない（AC4） |
+| 同じ秒の外す走らせ直し | 外す書き換えが項目の書き込みと同じ秒に入っても、古いバイトコードを読まずに両方が原因になる（AC4・#1806） |
 | #1634 #1663 の形 | 危険フラグの項目は無関係で、危険フラグの無い項目が行数の上限と同名の関数の検査を落とす。危険フラグの項目は 1 件も取り消されない（AC8） |
 | 報告 | 原因の項目と手がかりが状態ファイルと `refactor.py report` に出る（AC7） |
 """
@@ -13,6 +14,8 @@
 from __future__ import annotations
 
 import argparse
+import os
+import sys
 
 import pytest
 
@@ -207,6 +210,39 @@ def test_two_items_breaking_two_tests_are_both_culprits(flow, cmd_setup, cmd_imp
         cmd_implement,
         {"I-001": _flagged("other"), "I-002": _calc(CALC_RAISES), "I-003": lambda w: _write(w, "src/shared.py", "X = 2\n")},
     )
+
+    verify, record = _verify(flow, cmd_converge, capsys)
+
+    assert verify == "fix"
+    assert sorted(record["culprit"]["culprits"]) == ["I-002", "I-003"]
+    assert record["culprit"]["basis"] == "isolate"
+    assert sorted(read_state(flow["path"])["fix"]["items"]) == ["I-002", "I-003"]
+    assert _items(flow)["I-001"]["status"] == "verified"
+
+
+def test_two_culprits_are_found_when_the_isolation_lands_in_the_second_of_the_write(
+    flow, cmd_setup, cmd_implement, cmd_converge, capsys, monkeypatch
+):
+    """AC4・#1806 — 外す走らせ直しが I-003 の書き込みと同じ秒に入っても（古いバイトコードを読まずに）両方が原因になる。"""
+    culprit = sys.modules["refactor_lib.culprit"]
+    shared = flow["work"] / "src" / "shared.py"
+    written: dict = {}
+
+    def i003(w):
+        _write(w, "src/shared.py", "X = 2\n")
+        written["ns"] = shared.stat().st_mtime_ns
+
+    real_git_ok = culprit.git_ok
+
+    def git_ok(work, args):
+        ok = real_git_ok(work, args)
+        if ok and args[:2] == ["revert", "--no-commit"]:
+            os.utime(shared, ns=(written["ns"], written["ns"]))  # 外した書き換えを I-003 の書き込みと同じ秒に揃える
+        return ok
+
+    monkeypatch.setattr(culprit, "git_ok", git_ok)
+    _existing(flow, {"tests/test_total.py": TEST_TOTAL, "src/shared.py": "X = 1\n", "tests/test_shared.py": OTHER_TEST})
+    _implement(flow, cmd_setup, cmd_implement, {"I-001": _flagged("other"), "I-002": _calc(CALC_RAISES), "I-003": i003})
 
     verify, record = _verify(flow, cmd_converge, capsys)
 

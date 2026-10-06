@@ -109,13 +109,17 @@ def _isolate(
         try:
             if not git_ok(work, ["revert", "--no-commit", *shas]):
                 continue  # 外せない（衝突）。この項目は飛ばす
+            worktree.mark_rewritten()
             limit = timeline.state_test_timeout(state)
             if deadline is not None:
                 limit = max(1, min(limit, int((deadline - clock.now()).total_seconds())))
             still, _, _ = test_triage.failing_in(work, strategy, tests, limit, log_dir, f"isolate-{item['id']}", triage.run_test)
         finally:
+            # 外した後の内容で走らせ直したキャッシュを、項目の内容へ戻した後に読ませない（#1806 決定 6）
+            worktree.wait_past_rewrite()
             git_ok(work, ["revert", "--quit"])
             worktree._discard_worktree_changes(work)
+            worktree.mark_rewritten()
         passed = [t for t in tests if t not in still]
         if passed:
             evidence.setdefault(item["id"], {})["tests"] = passed

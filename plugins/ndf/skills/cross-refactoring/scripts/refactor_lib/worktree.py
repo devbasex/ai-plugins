@@ -2,14 +2,43 @@
 
 from __future__ import annotations
 
+import math
 import pathlib
 import subprocess
+import time
 from typing import Any, Optional
 
 import tool_paths
 
 from . import ABORT, die, info
 from .paths import git_out, resolve_commit
+
+# このプロセスが最後に worktree を書き換え終えた時刻（書き換えの印。#1806 決定 6）。プロセスの中だけに持つ
+_last_rewrite: Optional[float] = None
+# 時刻と待ち。テストが差し替える
+_clock = time.time
+_sleep = time.sleep
+
+
+def wait_past_rewrite() -> None:
+    """書き換えの印の秒が終わっていなければ、次の秒の頭まで待つ。worktree を書き換える前に呼ぶ。
+
+    Python の `.pyc` などのキャッシュは、ソースの更新時刻（秒）と大きさで新しさを照らす。直前の書き換えと同じ秒に
+    同じ大きさで書き換えると、続く走らせ直しやテストが前の内容から作ったキャッシュを新しいとみなして読む。待てば
+    書き換えの更新時刻（秒）が直前より必ず後になる。締め切りを過ぎていても待つ（戻さないと worktree が残る）。
+    """
+    if _last_rewrite is None:
+        return
+    next_second = math.floor(_last_rewrite) + 1
+    left = next_second - _clock()
+    if left > 0:
+        _sleep(left)
+
+
+def mark_rewritten() -> None:
+    """書き換えの印を今の時刻にする。worktree を書き換え終えたら呼ぶ。"""
+    global _last_rewrite
+    _last_rewrite = _clock()
 
 
 def reset_hard(work: str, sha: Optional[str]) -> None:

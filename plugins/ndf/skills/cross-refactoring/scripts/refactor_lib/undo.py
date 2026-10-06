@@ -35,7 +35,7 @@ from typing import Any, Optional
 
 import statefile
 
-from . import die, info, ledger
+from . import die, info, ledger, worktree
 from .items import find_item, item_shas
 from .paths import full_commit, git_out, work_dir
 from .worktree import replay_commits, reset_hard, revert_range
@@ -261,7 +261,12 @@ def drop(
     """
     targets = [i for i in item_ids if ledger.is_live(find_item(state, i, required=False))]
     targets = _close_commitless(state, targets, reason)
-    return _rebuild(path, state, targets, reason, on_conflict)
+    # 直前の書き換えの後に走らせ直したキャッシュを、取り消した後に読ませない（#1806 決定 6）
+    worktree.wait_past_rewrite()
+    try:
+        return _rebuild(path, state, targets, reason, on_conflict)
+    finally:
+        worktree.mark_rewritten()
 
 
 def discard_range(path: pathlib.Path, state: dict[str, Any], reason: str) -> dict[str, Any]:
