@@ -166,7 +166,10 @@ plugins/ndf/scripts/lib/
 plugins/ndf/skills/
 ├── cross-review/scripts/{review_lib/participants.py, launch-reviewer.sh, critique.sh}
 ├── cross-refactoring/scripts/{refactor_lib/commands/setup.py, launch-cli.sh}
-└── external-ai/scripts/external-ai.py
+└── external-ai/
+    ├── scripts/external-ai.py
+    └── SKILL.md         # 変更: check が metrics.default_model を返したら run へ --model を渡す（決定 9）
+plugins/ndf/agents/corder.md  # 変更: 同上（check の結果から run を組み立てる手順）
 scripts/script-structure-allow/  # 追加: assignment.py の行数の例外（決定 12）
 ```
 
@@ -386,6 +389,8 @@ kiro-cli 2.24.1 は `--model` を受けず、警告だけ出して既定のモ�
 
 `run` は状態ファイルを持たず、`--model` が無ければ設定のモデルのまま起動する。このため `check` が既定のモデルへの切り替えで通ったとき、`outcome=ok` だけを返すと、続く `run` が #461 と同じ形で落ちる。`check` は切り替えを止めず（`init` と同じ確認を保つ）、`metrics.default_model` に既定のモデルの名前・`metrics.from_model` に引けなかった元のモデルの名前を入れ、`next` に `run --model <既定の名前>` を案内する。`check` で切り替えを使わずに `model_unavailable` で落とす形は採らなかった。`init` と `check` の答えが食い違い、利用者の指示（#461・#1589「既定のモデルを選ぶ」）にも反するためである。
 
+`check` の結果から `run` を組み立てる呼び手（`plugins/ndf/skills/external-ai/SKILL.md` の「CLI の有無と認証」の行と `plugins/ndf/agents/corder.md` の `check codex` の行）も同じ PR で書き換え、`check` が `metrics.default_model` を返したら `run` に `--model <その名前>` を渡す手順にする。呼び手が案内を読まなければ、`check` の答えが正しくても続く `run` が落ちるためである。
+
 根拠: Value 1 / Value 6（MVV 版 2）
 
 ### 決定 10: 起動のモデルの決め方を 3 つの起動側で揃えるため、状態ファイルの 2 つの欄を 1 つの式で読む
@@ -444,7 +449,7 @@ kiro-cli 2.24.1 は `--model` を受けず、警告だけ出して既定のモ�
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #1290 | 実装する | — | `plugins/ndf/scripts/lib/auth.py`、`plugins/ndf/scripts/lib/assignment.py`、`plugins/ndf/scripts/lib/monitor_patterns.py`、`plugins/ndf/scripts/lib/monitor_scan.py`、`plugins/ndf/scripts/lib/monitor_outcome.py`、`plugins/ndf/scripts/tests/`、`plugins/ndf/skills/cross-review/`、`plugins/ndf/skills/cross-refactoring/`、`plugins/ndf/skills/external-ai/`、`scripts/script-structure-allow/`、`docs/glossary/glossary.json`、`docs/glossary.md` |
+| #1290 | 実装する | — | `plugins/ndf/scripts/lib/auth.py`、`plugins/ndf/scripts/lib/assignment.py`、`plugins/ndf/scripts/lib/monitor_patterns.py`、`plugins/ndf/scripts/lib/monitor_scan.py`、`plugins/ndf/scripts/lib/monitor_outcome.py`、`plugins/ndf/scripts/tests/`、`plugins/ndf/skills/cross-review/`、`plugins/ndf/skills/cross-refactoring/`、`plugins/ndf/skills/external-ai/`、`plugins/ndf/agents/corder.md`、`scripts/script-structure-allow/`、`docs/glossary/glossary.json`、`docs/glossary.md` |
 | #461 | 取り込む | #1290 | — |
 | #1589 | 取り込む | #1290 | — |
 
