@@ -132,13 +132,15 @@
 | `refactor_lib/commands/setup.py` | `init` と再開 | 新しく始めるときと計画の前の再開で、配分テーブルから `after_plan_minutes` を求めて `timeline.of_state` へ渡す。計画の後の再開では、状態を書く前に `pause.catch_up` を呼ぶ。サブコマンド `catch-up` を足す（引数の定義は `refactor.py`） |
 | `refactor_lib/init_test.py` | 着手前のテストの後の止まり | `stop_if_window_short` は広げた `window_problem` をそのまま使う（呼び方は変えない） |
 | `refactor_lib/commands/plan.py`（`merge-plan`） | 採る項目と締め切りを決める | バッファを `budget.plan_reserve` で出す。`state.pause = {"seconds": 0, "shifted_seconds": 0, "legacy": false, "events": []}` と `state.readopt = {"round": 1, "events": []}` を作る。`_plan_items` は `start_deadline` / `test_start_deadline` を書かず、項目に `round: 1` を書く。`refactor_lib/plan.py` のリファクタリング計画のコメントから項目ごとの「締め切り」の行を外し、時間の上限の表の「実装の終わり」の説明を I13 の式へ直す |
-| `refactor_lib/commands/implement.py`（`merge-implement`・`merge-tests`） | コミットの取り込み | `_deadline_passed`（コミットの時刻を完了期限と比べて `not_done` にする判定）を外す。コミットの無い項目は `not_done` で見送らず、状態 `carried`（持ち越し）にして変更を捨てる。手順違反・差分予算・テストの失敗の判定は変えない |
-| `refactor_lib/commands/readopt.py`（新規。サブコマンド `readopt`） | 採り直し | 持ち越しの項目と `budget` で見送った候補（`state.candidates` のうち `deferred_items[]` の理由が `budget` のもの。見積り・範囲テスト・`risk` は計画の時点の値）を `rank_key` で並べ、`readopt_available` に入るものを `select` で採る。採ったら `budget` の見送りを外して項目（続きの ID、`round` = n + 1、`public_io` は実装担当の `risk`）を足し、上限の表の `add_tests_end_at` / `implement_end_at` を書き直す。入らなければ持ち越しの項目を `not_done`（「実装の終わりまでにコミットが無く、残った時間に入らない」）で見送り、`phase` を `final` にする |
+| `refactor_lib/commands/implement.py`（`merge-implement`・`merge-tests`） | コミットの取り込み | `_deadline_passed`（コミットの時刻を完了期限と比べて `not_done` にする判定）を外す。コミットの無い項目は `not_done` で見送らず、状態 `carried`（持ち越し）にして変更を捨てる。取り込みの末尾（`_finish`）は残る項目が 0 件のとき `phase` を `final` でなく `readopt` にして終了コード 2（検証を飛ばす）を返す。最終ゲートへ移すのは `readopt` の `no_fit` だけにし、全項目が持ち越しになった実行（rf1718 の形の遅い実装担当）でも採り直しに届かせる。「取り込み済み」の判定は今の巡の `phases[<手順名>]` を見る（前の巡の記録は `readopt` が `phases_history` へ移すため、2 巡目は新しい `base_sha` から取り込む）。手順違反・差分予算・テストの失敗の判定は変えない |
+| `refactor_lib/commands/readopt.py`（新規。サブコマンド `readopt`） | 採り直し | 持ち越しの項目と `budget` で見送った候補（`state.candidates` のうち `deferred_items[]` の理由が `budget` のもの。見積り・範囲テスト・`risk` は計画の時点の値）を `rank_key` で並べ、`readopt_available` に入るものを `select` で採る。採ったら `budget` の見送りを外して項目（続きの ID、`round` = n + 1、`public_io` は実装担当の `risk`）を足し、上限の表の `add_tests_end_at` / `implement_end_at` を書き直す。採ったら前の巡の手順の記録（`phases` の `add-tests`・`implement`・`verify`・`fix`）と全体テストの記録（`whole_test`。`resolution` が `fixing` でないとき）を `phases_history[]` / `whole_test_history[]` へ `round` を付けて移し、`state.phase` を `add-tests`（`TESTS_NEEDED=1`）か `implement` へ戻す。次の `start-phase` は新しい `started_at` / `base_sha`（今の HEAD）で記録を作り、`finish_phase` と取り込み済みの判定は巡ごとに働く。入らなければ持ち越しの項目を `not_done`（「実装の終わりまでにコミットが無く、残った時間に入らない」）で見送り、`phase` を `final` にする。`phase` を `final` にするのは実行全体でここだけである（最終ゲートの入口の `gate.py` は今のまま）。`plan` の無い状態（提案が 0 件で計画の前に最終ゲートへ来た）では記録せずに終了コード 2 を返す |
+| `refactor_lib/commands/converge.py` の検証の終わり | 検証 | 終わりで `phase` を `final` にせず `readopt` にし、`publish.enter_final_gate` を呼ばない。公開は最終ゲートの入口（`gate.py` の既存の `enter_final_gate`）の 1 度だけにし、採り直す巡ごとの push と CI の起動を作らない。`_whole_test` の「1 度だけ」は今の巡の `whole_test` で数え、危険フラグはその巡で採った項目（`items[].round` が今の巡）のものだけを見る。前の巡の `ran` は `whole_test_history` にあり、新しいコミットの全体テストを省かない |
+| `refactor_lib/phases.py`・`refactor_lib/allocation.py` の手順ごとの秒 | 所要の集計 | 手順ごとの秒と `danger_whole_test` の使った秒は、`phases_history` / `whole_test_history` の同じ名前の秒を足して数える |
 | `refactor_lib/commands/converge.py` の `_fix_stop`・`refactor_lib/culprit.py` の `fix_deadline` | 直しの試行の打ち切り | `budget.fix_end(started_at, …)` で開始から計算し直さず、上限の表の `fix_end_at` を読む（ずれた値を 1 か所から読む） |
 | `refactor_lib/commands/report.py` | 報告 | 「バッファのうち使わずに残った時間」「バッファを越えた全体テスト」「止まっていた時間」の行を足す。所要からずらした秒を除く |
 | `refactor_lib/allocation.py` の `build_row` | 実行の行 | `reserve`（区分ごとの `reserved_seconds` / `used_seconds` / `unused_seconds`）と `paused_seconds` を足す。`elapsed_seconds` の意味は変えない |
 | `scripts/drive.py` の `Drive.run` | 打ち直しの入口 | 耐久の記録が `start` でない（打ち直し）とき、耐久ワークフローを始める前に `refactor.py catch-up <ID>` を 1 度打つ。耐久ステップにしない |
-| `scripts/drive.py` の `refactor_drive` | 工程の順序 | 検証の繰り返しの後、最終ゲートの前に `readopt` を打つ。終了コード 0 なら `add-tests`（`TESTS_NEEDED=1` のとき）・`implement`・検証の繰り返しを回し直し、終了コード 2（`GO_FINAL`）なら最終ゲートへ進む。回し直しは `LOOP_LIMIT` で抑え、耐久ステップの名前に巡の番号 `round` を付ける |
+| `scripts/drive.py` の `refactor_drive` | 工程の順序 | 検証の繰り返しの後、最終ゲートの前に `readopt` を打つ。取り込みや提案の取り込みが `GO_FINAL` を返して検証を飛ばしたときも、最終ゲートの前に必ず `readopt` を打つ。終了コード 0 なら `add-tests`（`TESTS_NEEDED=1` のとき）・`implement`・検証の繰り返しを回し直し、終了コード 2（`GO_FINAL`）なら最終ゲートへ進む。回し直しは `LOOP_LIMIT` で抑え、耐久ステップの名前に巡の番号 `round` を付ける（同じ名前のステップを耐久の記録から返さないため）。手順の順序 `ORDER` に `verify` と `final` の間の `readopt` を足す。`readopt` が `state.phase` を `add-tests` / `implement` へ戻すため、再開の `todo()` は巡をまたいでも今の巡の未了の手順を返す |
 | `docs/01-state-and-propose.md`・`docs/02-plan-and-implement.md`・`docs/04-verify-and-report.md` | 文書 | 「再開」の表に計画の後の行、「締め切り」の R と `fix_end` の式と止まる条件、報告の行を書き直す。「締め切り」の節の項目ごとの式 2 行と表の「テストの追加の終わり」「実装の終わり」を I13 の式へ、取り込みの表の「締め切り」の行を外し、「コミットが無い」の行を持ち越しへ直し、採り直しの節を足す。`CLAUDE.md` の cross-refactoring の節の見送りの理由の説明も合わせる |
 
 ```mermaid
@@ -193,7 +195,10 @@ graph LR
 | `pause.legacy` | 真偽 | `pause.catch_up`（`pause` を持たない状態で初めて呼ばれたとき真で作る） | 偽 |
 | `pause.events[]` | `{"at", "last_activity_at", "seconds", "shifted", "reason"}` | `pause.catch_up` | 空 |
 | `readopt.round` | 数 | `merge-plan`（1）・`readopt`（採るたびに + 1） | 無ければ 1（この変更より前の状態） |
-| `readopt.events[]` | `{"at", "available_minutes", "selected": [項目 ID], "carried": [項目 ID], "reason"}` | `readopt` | 空。`reason` は `selected`（採った）か `no_fit`（入らなかった） |
+| `readopt.events[]` | `{"at", "round", "available_minutes", "selected": [項目 ID], "carried": [項目 ID], "reason"}` | `readopt` | 空。`reason` は `selected`（採った）か `no_fit`（入らなかった）。`round` は採ったときは新しい巡の番号、入らなかったときは今の巡の番号 |
+| `phases_history[]` | `{"round", "name", "record"}`（`record` は前の巡の `phases[name]` そのまま） | `readopt`（採ったとき） | 空 |
+| `whole_test_history[]` | `{"round", "record"}`（`record` は前の巡の `whole_test` そのまま） | `readopt`（採ったとき） | 空 |
+| `phase` の `readopt` | 文字列 | 検証の終わり・`merge-implement` / `merge-tests`（残る項目が 0 件） | 検証の巡が終わり、採り直しの判定を待つ。`final` にするのは `readopt` の `no_fit` だけ |
 | `items[].round` | 数 | `merge-plan`・`readopt` | 無ければ 1 |
 | `items[].status` の `carried` | 文字列 | `merge-implement` / `merge-tests` | 実装の終わりまでにコミットが無かった項目。次の `readopt` で採り直すか `not_done` にする |
 
@@ -224,7 +229,7 @@ graph LR
 
 | 区分 | 使った秒の出所 |
 | --- | --- |
-| `danger_whole_test` | `whole_test.seconds`（`whole_test.ran` が真のときだけ。それ以外は 0） |
+| `danger_whole_test` | `whole_test.seconds` と `whole_test_history[].record.seconds` の和（`ran` が真の記録だけ。それ以外は 0） |
 | `final_whole_test` | `final_gate.checks[]` のうちテストの判定（手元の全体テストか CI の待ち）の秒の和。使い回したら 0 |
 | `fix` | `fix_stats.seconds` |
 | `final_fix` | `phases["final-fix"].seconds` |
@@ -249,7 +254,7 @@ graph LR
 | 2 | 入る候補が無い（持ち越しの項目を `not_done` にした）。最終ゲートへ | 残った時間と最も短い候補の見積りの 1 行 |
 | 4 | 中断（今の `merge-plan` と同じ扱い） | — |
 
-叩き直したときは `readopt.events[]` の最後の 1 件を返し、採り直しを重ねない（検証の後に 1 度だけ働く）。
+叩き直しの判定は巡で決める。`state.phase` が `readopt`（今の巡の検証が終わった）なら次の採り直しを行う。そうでなく、最後の記録が `selected` でその `round` が `readopt.round`（採った巡の検証がまだ終わっていない）なら、その記録を返して採り直しを重ねない。最後の記録が `no_fit`（`phase` が `final`）ならその記録を返す（終了コード 2）。
 
 ### `init` の終了コード 4（止まる場面を 1 つ広げる）
 
@@ -360,21 +365,27 @@ sequenceDiagram
   D->>D: implement（監視の上限 = implement_end_at − 今 + 余裕）
   D->>MI: merge-implement
   MI->>MI: コミットのある項目を取り込む・無い項目を carried にする
-  D->>V: 検証の繰り返し（fix_end_at まで）
+  alt 残る項目がある
+    MI-->>D: 0
+    D->>V: 検証の繰り返し（fix_end_at まで。終わりで phase = readopt、push しない）
+  else 残る項目が 0 件（全項目が carried など）
+    MI-->>D: 2（phase = readopt。検証を飛ばす）
+  end
   D->>RD: readopt
   RD->>RD: 残った時間 = final_end_at − 今 − Σ plan.reserve
   alt carried と budget の候補のうち入るものがある
     RD->>RD: rank_key の順に select。項目を足し、add_tests_end_at・implement_end_at を書き直す
+    RD->>RD: 前の巡の phases と whole_test を履歴へ移し、phase を add-tests か implement へ戻す
     RD-->>D: 0（TESTS_NEEDED）
     D->>D: add-tests・implement・検証の繰り返しへ戻る
   else 入らない
-    RD->>RD: carried を not_done にする
+    RD->>RD: carried を not_done にし、phase = final
     RD-->>D: 2
-    D->>D: 最終ゲートへ
+    D->>D: 最終ゲートへ（入口で 1 度だけ push）
   end
 ```
 
-実装の終わりを過ぎても危険フラグの全体テストと最終ゲートの時間はバッファに残っている（I13 の式がバッファを引く）。採り直しの巡の検証で危険フラグが立てば、その巡の検証で全体テストを走らせ、通って HEAD が進んでいなければ最終ゲートが使い回す（決定 1 と同じ）。
+実装の終わりを過ぎても危険フラグの全体テストと最終ゲートの時間はバッファに残っている（I13 の式がバッファを引く）。全体テストの記録（`whole_test`）は巡ごとに持ち、`readopt` が採るときに前の巡の記録を `whole_test_history` へ移す。そのため採り直しの巡で、その巡に採った項目に危険フラグが立てば、前の巡の `ran` に省かれずにその巡の検証で全体テストを走らせ、通って HEAD が進んでいなければ最終ゲートが使い回す（決定 1 と同じ）。
 
 ## 非機能の実現方式
 
@@ -478,7 +489,9 @@ drive.py は `init` を耐久ステップとして 1 回だけ打ち（I19）、
 - **候補**: `budget` で見送った候補と、実装の終わりまでにコミットが無かった持ち越しの項目（I15）。ほかの理由の見送りは時間と関係が無いため採らない
 - **順序と選び方**: 計画と同じ `rank_key` と `select`（入らない候補は飛ばして次を見る）
 - **値**: 見積り・範囲テスト・グレード・`risk` は `merge-plan` が計画の時点で `state.candidates` に書いた値を使う。D5（`public_io`）は Jev に問わず実装担当の `risk` を使う。計画の後に LLM を動かすのは作業の CLI だけ、という今の取り決めを保つためである
-- **時点**: 検証の繰り返しが終わった後、最終ゲートの前に 1 度。採ったらテストの追加・実装・検証を回し直し、また `readopt` を打つ。入らなくなった時点で最終ゲートへ進む
+- **時点**: 検証の繰り返しが終わった後、最終ゲートの前に 1 度。採ったらテストの追加・実装・検証を回し直し、また `readopt` を打つ。入らなくなった時点で最終ゲートへ進む。取り込みで残る項目が 0 件になったときも検証を飛ばして `readopt` を打ち、最終ゲートへ移す判定を `readopt` の `no_fit` の 1 か所に寄せる
+- **巡の記録**: 手順の記録・全体テストの記録は巡ごとに持ち、採るときに前の巡の分を履歴へ移す。今の取り込み・`finish_phase`・`_whole_test` は「書き済みなら何もしない」形のため、1 つの記録を巡で共有すると 2 巡目が取り込まれず、全体テストも省かれる
+- **公開**: 検証の終わりでは push せず、最終ゲートの入口の 1 度にまとめる（#1399 と同じ）。巡ごとに push すると、巡の数だけ CI が起動する
 - **バッファ**: 残った時間からは計画と同じ `Σ plan.reserve` を引く。採り直した巡の直しと最終ゲートの時間を残すためである
 
 実装担当の CLI に計画し直させる案（提案者を起動し直す・実装担当に新しい計画を書かせる）は、LLM の起動と計画の時間を使い、余った数分を計画が食うため採らない。実装の CLI に予備の候補を初めから渡して早く終われば続けさせる案は、実装の CLI が時間を見て項目を選ぶことになり、時間の数値を算術だけで決める取り決め（I9）を破るため採らない。
@@ -515,6 +528,11 @@ drive.py は `init` を耐久ステップとして 1 回だけ打ち（I19）、
 | 採り直しの後に入らなければ最終ゲート（I14） | 残った時間が最も短い候補の見積りより短いと終了コード 2、`readopt.events[]` に `no_fit` が 1 件 | 入らないのに 0 を返す |
 | 採り直しは LLM を呼ばない（I14・決定 10） | Jev の呼び出しを差し替えて、`readopt` で 1 度も呼ばれない。`public_io` が `risk` から決まる | Jev へ D5 を問う |
 | 叩き直しても採り直しを重ねない | `readopt` を続けて 2 度打つと、2 度目は最後の記録を返し項目が増えない | 2 度目で候補をまた採る |
+| 巡の検証を終えた後の `readopt` は次を採る | 1 巡目で採った後、`phase` を `readopt`（2 巡目の検証の終わり）にして `readopt` を打つと、残った候補から次を採り `readopt.round` が 3 になる | `readopt.events[]` があれば常に最後の記録を返す |
+| 全項目が持ち越しでも採り直しに届く（I15） | コミットの無い計画で `merge-implement` が全項目を `carried` にし、`phase` を `readopt` にして終了コード 2 を返す。drive が検証を飛ばして `readopt` を打ち、残った時間に入れば採り直し、入らなければ `not_done` にして最終ゲートへ進む | 終了コード 2 で `phase` を `final` にする・drive が `GO_FINAL` の後に `readopt` を打たない |
+| 2 巡目の取り込みが新しい起点から働く | 1 巡目の `implement` を取り込んだ状態で `readopt` が採り、2 巡目の `start-phase`・`merge-implement` を打つと、新しい `base_sha` からのコミットが取り込まれ、採った項目が `planned` のまま残らない。1 巡目の記録は `phases_history` に残り、手順ごとの秒に足される | 前の巡の `ended_at` を見て取り込み済みとして返す |
+| 採り直す巡の検証では push しない | 検証の終わりで `publish.enter_final_gate` が呼ばれず、push は最終ゲートの入口の 1 度だけになる | 検証の終わりで公開する |
+| 前の巡の全体テストが次の巡を省かない | 1 巡目で危険フラグの全体テストを走らせた（`ran`）状態から採り直し、2 巡目に採った項目に危険フラグが立つと、2 巡目の検証で全体テストを走らせる。2 巡目に危険フラグの項目が無ければ走らせない | 実行全体の `ran` で 2 回目を省く・前の巡の項目のフラグで走らせ直す |
 | 報告にバッファの区分ごとの残りが出る | PR 1801 の形の状態から報告の行が 4 区分の分を持つ | 区分を落とす |
 | 実行の行に `reserve` と `paused_seconds` が残る | `build_row` の戻り値 | キーを書かない |
 | 旧い行で `build_table` が変わらない（I11） | 新しいキーを持つ行と持たない行で `build_table` が同じ値を返す | `build_table` が `reserve` を読む |
@@ -538,5 +556,4 @@ drive.py は `init` を耐久ステップとして 1 回だけ打ち（I19）、
 | drive.py の打ち直しで中断した手順の CLI を起動し直すか | 中断した監視の耐久ステップを流し直したとき、起動の耐久ステップは記録から返る。止まった CLI の代わりを起動するのは振り替え（`reassign`）の既存の経路で、ずれた締め切りから監視の上限を出し直すのは次の `start-phase` である。受け入れ条件は締め切りの値とコミットの判定で確かめ、起動し直しの経路は既存の振る舞いのまま扱う |
 | 要求の前提 2 の文面 | 決定 3 で、測る時刻を作業ディレクトリのファイルの更新時刻へ広げた。課題の本文の前提 2 を同じ形に直すかは、承認ゲート 1 で承認する人が決める |
 | 採り直しの巡の起動の費用 | 巡ごとに実装担当の CLI を起動し直す。起動の所要は配分テーブルの見積りに入っていないため、残った時間が見積りぎりぎりの候補は実装の終わりに届かず持ち越しになりうる。`readopt.events[]` と報告の行で実測し、要れば起動の所要を配分の履歴に足す（リリース後テスト） |
-| 耐久ステップの名前 | drive.py の工程の繰り返しは、耐久の記録で同じ名前のステップを返さないよう巡の番号を付ける。今の `RESUME_AS` と `todo()`（手順の順序で未了を判定）が巡をまたいで正しく働くかは実装（`tdd-cycle`）で確かめる |
 | 手で作業ディレクトリのファイルを触ったとき | 中断の間に利用者が `.cross_refactoring/` 直下のファイルを開いて保存すると、最後の動きの時刻が進み、止まっていた時間が短く数えられる（ずれが小さくなる側で、締め切りは延びすぎない） |
