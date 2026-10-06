@@ -874,20 +874,22 @@
     {
       "term": "利用可能な参加者",
       "context": "ndf-agent-cli",
-      "meaning": "参加者のうち認証確認を通った者（participants.available）",
+      "meaning": "参加者のうち参加の確認を通った者（participants.available）",
       "source": "docs/specifications/cross-review-participants-and-seats.md",
       "deprecated": [
         "使える者"
-      ]
+      ],
+      "pending_source": "issues/issue-1290-design.md"
     },
     {
       "term": "認証確認",
       "context": "ndf-agent-cli",
-      "meaning": "確認コマンドを走らせ、止めずに結果だけを返す参加者ごとの確認（probe_auth）",
+      "meaning": "参加の確認の最初の種類。確認コマンド（AUTH_PROBES）を走らせ、認証を通っているかだけを見る",
       "source": "docs/specifications/cross-review-participants-and-seats.md",
       "deprecated": [
         "認証の確認"
-      ]
+      ],
+      "pending_source": "issues/issue-1290-design.md"
     },
     {
       "term": "スロット",
@@ -3338,6 +3340,33 @@
       "context": "ndf-agent-cli",
       "meaning": "利用者の CLI の設定も引数の指定も無いときに、CLI が使うモデル",
       "pending_source": "issues/issue-1290-requirements.md"
+    },
+    {
+      "term": "参加の確認",
+      "context": "ndf-agent-cli",
+      "meaning": "参加者ごとに、認証確認・最小の呼び出し・（設定のモデルを引けなければ）既定のモデルでの引き直しを順に行い、担当に入れるかと理由を決めること（auth.probe_auth が走らせ、assignment.admit が判断する）",
+      "pending_source": "issues/issue-1290-design.md"
+    },
+    {
+      "term": "モデルを引けない",
+      "code": "model_unavailable",
+      "context": "ndf-agent-cli",
+      "meaning": "担当の CLI が、指定か設定のモデルを使えないと返したこと（参加の確認と起動結果の理由 model_unavailable）",
+      "pending_source": "issues/issue-1290-design.md"
+    },
+    {
+      "term": "認証の失効",
+      "code": "auth_expired",
+      "context": "ndf-agent-cli",
+      "meaning": "認証の状態確認は通るが、更新トークンの失効などで実行のときに認証を作り直せないこと（参加の確認と起動結果の理由 auth_expired）",
+      "pending_source": "issues/issue-1290-design.md"
+    },
+    {
+      "term": "既定のモデルへの切り替え",
+      "code": "default_models",
+      "context": "ndf-agent-cli",
+      "meaning": "引数で明示していないモデルを引けない CLI を、既定のモデルで担当に入れること（participants.default_models）",
+      "pending_source": "issues/issue-1290-design.md"
     }
   ]
 }
