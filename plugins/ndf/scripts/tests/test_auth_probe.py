@@ -407,6 +407,29 @@ def test_claude_minimal_call_carries_the_metered_settings(auth, monkeypatch):
     assert calls[1][:3] == ["claude", "--settings", "{}"]
 
 
+def test_the_minimal_call_does_not_read_the_instruction_files(auth, monkeypatch):
+    """プロジェクトの設定は継ぐが、指示書は読ませない（claude は環境変数、codex は設定の上書き）。"""
+    seen: list[tuple[list[str], object]] = []
+
+    def run(cmd, **kw):
+        seen.append((list(cmd), kw.get("env")))
+        if cmd[0] == "claude":
+            return _completed(cmd, 0, stdout='{"type":"result","modelUsage":{"claude-x":{}}}')
+        return _completed(cmd, 0, stdout="OK", stderr="model: gpt-6.1-sol\n")
+
+    monkeypatch.setattr(auth.subprocess, "run", run)
+    monkeypatch.setattr(auth.claude_settings, "metered_settings", lambda args, env, cwd, keep=0: list(args))
+
+    auth.probe_auth(["claude"], info=lambda _m: None, env={})
+    auth.probe_auth(["codex"], info=lambda _m: None, env={})
+
+    claude_auth, claude_model, codex_auth, codex_model = seen
+    assert claude_auth[1] is None
+    assert claude_model[1]["CLAUDE_CODE_DISABLE_CLAUDE_MDS"] == "1"
+    assert "project_doc_max_bytes=0" in codex_model[0]
+    assert codex_model[1] is None
+
+
 def test_claude_falls_back_with_model_default(auth, monkeypatch):
     """決定 2: claude は `--model default` で引き直し、起動の引数も `default` にする。"""
 

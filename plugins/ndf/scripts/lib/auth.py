@@ -41,6 +41,10 @@ AUTH_PROBES: dict[str, tuple[str, ...]] = {
 # 最小の呼び出し（種類 `model`）。担当の起動と同じ CLI で、`PROBE_PROMPT` を標準入力から 1 回答えさせる。
 # 応答の中身は見ない。claude は道具・MCP・Skill・会話の保存を切って費用を下げる（2026-10-06 の実測で
 # 0.44 → 0.02 米ドル）。codex の `{workdir}` は確認を走らせるディレクトリ（担当と同じプロジェクト）に置き換える。
+# 確認はプロジェクトのディレクトリで走らせて設定を継ぐが、指示書は読ませない（`PROBE_ENV` と codex の
+# `project_doc_max_bytes=0`）。2026-10-06 の実測（ai-plugins で 1 回、キャッシュ無し）で、claude は CLAUDE.md を
+# 読むと 0.114 米ドル（キャッシュ書き込み 14.3k）、読ませないと 0.020 米ドル（2.4k）。codex は 10.7k → 6.1k トークン。
+# kiro の steering を外す引数は無いため、kiro だけは指示書を読む。
 # agy はこの表に無い（応答の形を測れていない。#1290 の決定 1）ため、認証確認だけで担当に入る。
 MODEL_PROBES: dict[str, tuple[str, ...]] = {
     "claude": (
@@ -56,9 +60,22 @@ MODEL_PROBES: dict[str, tuple[str, ...]] = {
         "--disable-slash-commands",
         "--no-session-persistence",
     ),
-    "codex": ("codex", "exec", "--skip-git-repo-check", "--ephemeral", "-s", "read-only", "-C", "{workdir}"),
+    "codex": (
+        "codex",
+        "exec",
+        "--skip-git-repo-check",
+        "--ephemeral",
+        "-s",
+        "read-only",
+        "-c",
+        "project_doc_max_bytes=0",
+        "-C",
+        "{workdir}",
+    ),
     "kiro": ("kiro-cli", "chat", "--no-interactive"),
 }
+# 最小の呼び出しに足す環境変数。claude にプロジェクトの CLAUDE.md を読ませない（設定は読む）
+PROBE_ENV: dict[str, dict[str, str]] = {"claude": {"CLAUDE_CODE_DISABLE_CLAUDE_MDS": "1"}}
 # 明示のモデルを渡す引数（種類 `model` に足す）
 MODEL_FLAG = "--model"
 # 既定のモデルで引き直す引数（種類 `default`。種類 `model` に足す）。どれも利用者の設定ファイルを
@@ -204,7 +221,8 @@ def run_check(
 
     環境は親から継承し、引数でも環境変数でも認証の情報を渡さない。種類 `model` / `default` は
     担当と同じ設定で確かめるため `cwd`（省けば今のディレクトリ。担当のプロジェクト）で走らせ、
-    claude には担当の起動と同じ設定の上書き（`claude_settings.metered_settings`）を足す。
+    claude には担当の起動と同じ設定の上書き（`claude_settings.metered_settings`）を足す。指示書は
+    読ませない（claude は `PROBE_ENV`、codex は `project_doc_max_bytes=0`）。
     どの確認も道具を持たないか読み取りだけで、利用者の CLI の設定ファイルを書き換えない（I6）。
     codex の種類 `default` は、読めた既定のモデルを利用者の設定のまま引き直して確かめる（`CONFIRM_DEFAULT`）。
     """
@@ -241,6 +259,7 @@ def _probe_once(step: str, runtime: str, model: Optional[str], cmd: tuple[str, .
             text=True,
             timeout=max(deadline - time.monotonic(), 0.1),
             cwd=workdir if step != "auth" else None,
+            env={**os.environ, **PROBE_ENV[runtime]} if step != "auth" and runtime in PROBE_ENV else None,
         )
     except FileNotFoundError:
         return done("missing_cli", "コマンドが見つかりません")
