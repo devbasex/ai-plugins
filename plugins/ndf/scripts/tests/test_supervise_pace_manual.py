@@ -29,6 +29,10 @@ PRD = {"target": "production", "kind": "manual", "trigger": "cdk deploy Prd", "b
 AUTO_MAIN = {"target": "web", "kind": "auto", "trigger": "push", "branch": "main", "versioned": False}
 
 
+# new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える
+pytestmark = pytest.mark.usefixtures("issue_bodies")
+
+
 def make_repo(tmp_path: Path, rows, verify: str = "echo stack-ok") -> Path:
     """起点も本番チャネルも main の git リポジトリ（carmo-cdk の形）。rows が ... なら delivery を書かない。"""
     repo = tmp_path / "repo"

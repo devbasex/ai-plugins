@@ -32,6 +32,10 @@ KINDS = ["sprint", "impl", "fix", "check", "release", "close"]
 USAGE_OF = [[s] for s in SUBCOMMANDS] + [["new", k] for k in KINDS] + [["history", "import"]]
 
 
+# new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える
+pytestmark = pytest.mark.usefixtures("issue_bodies")
+
+
 def cli(*args: str, cwd: Path, timeout: float = 120) -> subprocess.CompletedProcess:
     env = dict(os.environ, COLUMNS="200")
     return subprocess.run([PY, str(SUPERVISE), *args], capture_output=True, text=True, cwd=cwd, env=env, timeout=timeout)

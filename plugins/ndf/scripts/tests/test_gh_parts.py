@@ -197,6 +197,12 @@ def test_fold_uses_run_order_when_times_are_missing():
     assert gp.check_result(None, "t") is None
 
 
+def test_fold_takes_a_run_without_times_as_the_newest():
+    """時刻がどちらも無い項目（まだ始まっていない再実行）は最も新しい。マージの待ちと同じ規則（#1645）。"""
+    runs = [_run("t", "failure", "2026-09-25T02:00:00Z", 9), {"id": 1, "name": "t", "status": "queued", "conclusion": None}]
+    assert [gp.run_result(r) for r in gp.fold_check_runs(runs)] == ["pending"]
+
+
 def test_failed_check_logs_are_saved_to_files_not_embedded(fake, tmp_path):
     fake.on("pr", "view", out=json.dumps(GRAPHQL_PR))
     fake.on(

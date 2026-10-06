@@ -92,6 +92,16 @@ def sync_title(cwd: str, pr: int, doc: str) -> dict:
     return result("supervise-sync-title", "ok", f"PR #{pr} の題を H1 に合わせた", [], {"changed": 1})
 
 
+_REJECTED = re.compile(r"^\s*! \[", re.M)  # 相手が拒んだ ref の行（`! [rejected]`・`! [remote rejected]`）
+
+
+def is_push_check_failure(returncode: int, output: str) -> bool:
+    """push の失敗が push 前の検査（`pre-push` フック）の不合格か。終了コードが 1 で、相手が拒んだ ref の行が無いもの。
+    先行の拒否（`! [rejected]`）と接続・相手のリポジトリの失敗（128）はコミットを直しても通らない。`fatal:` の行は
+    資格情報の補助もフックの前に書くため、見分けに使わない（設計の「push の失敗の形」）。"""
+    return returncode == 1 and not _REJECTED.search(output)
+
+
 class PrStep:
     """push して Draft の Pull Request を作る。既にあれば本文だけを書き直す（`title_doc` の H1 を読めたときは題も）。
     本文は LLM に書かせてよい。"""
@@ -162,13 +172,22 @@ class PrStep:
         return self._publish(ctx, base, branch, doc_title or title, body, retitle=doc_title is not None)
 
     def _push(self, ctx) -> tuple[str, str | None]:
-        """HEAD を push する。`(ブランチ, 失敗の出力 | None)`。"""
+        """HEAD を push する。`(ブランチ, 失敗の出力 | None)`。結果に押したコミット（`head`）を残し、失敗なら標準出力と
+        標準エラーを続けた出力と、push 前の検査の不合格か（`push_check`。#1751 の決定 3・5・8）を残す。"""
         branch = self.git(ctx, "rev-parse", "--abbrev-ref", "HEAD")
+        head = self.git(ctx, "rev-parse", "HEAD")
+        ctx.state.cur["head"] = head
         push = subprocess.run(["git", "push", "-q", "-u", "origin", "HEAD"], cwd=ctx.cwd, capture_output=True, text=True)
-        if push.returncode != 0:
-            ctx.state.cur.update(exit=push.returncode, text=push.stderr)
-            return branch, push.stderr
-        return branch, None
+        if push.returncode == 0:
+            return branch, None
+        text = "\n".join(x for x in (push.stdout.strip(), push.stderr.strip()) if x) + "\n"
+        check = is_push_check_failure(push.returncode, push.stdout + "\n" + push.stderr)
+        prev = ctx.state.results.get(ctx.state.cur.get("id", "pr")) or {}
+        if check and prev.get("push_check") and prev.get("head") == head:
+            check = False
+            text += f"同じコミット（{head[:12]}）で 2 回続けて push 前の検査に落ちた。修正へ回さずに止める\n"
+        ctx.state.cur.update(exit=push.returncode, text=text, push_check=check)
+        return branch, text
 
     def _materials(self, ctx, step: dict, branch: str) -> Materials:
         """ステップの `materials` から本文の材料を集める。手動確認の印は今の PR 本文から引き継ぐ。"""
