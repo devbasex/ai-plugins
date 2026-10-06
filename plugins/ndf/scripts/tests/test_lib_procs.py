@@ -60,6 +60,42 @@ def test_memory_and_cgroup(tmp_path: Path):
     assert procs.cgroup_memory(tmp_path / "none") == procs.CgroupMemory(None, None, None, False)
 
 
+def test_cgroup_anon(tmp_path: Path):
+    """`memory.stat` の anon をバイトで返す。読めない・行が無い・数値でなければ None で、ほかの 4 つは変わらない。"""
+    (tmp_path / "memory.max").write_text("1048576\n")
+    (tmp_path / "memory.current").write_text("524288\n")
+    (tmp_path / "memory.events").write_text("oom_kill 2\n")
+    assert procs.cgroup_memory(tmp_path).anon is None
+    (tmp_path / "memory.stat").write_text("file 4096\nanon 2299527168\nanon_thp 0\n")
+    assert procs.cgroup_memory(tmp_path) == procs.CgroupMemory(1048576, 524288, 2, False, 2299527168)
+    (tmp_path / "memory.stat").write_text("file 4096\n")
+    assert procs.cgroup_memory(tmp_path).anon is None
+    (tmp_path / "memory.stat").write_text("anon x\n")
+    assert procs.cgroup_memory(tmp_path).anon is None
+
+
+def test_memory_pressure_some_avg10(tmp_path: Path):
+    path = tmp_path / "psi"
+    path.write_text("some avg10=0.05 avg60=0.83 avg300=1.18 total=1\nfull avg10=0.04 avg60=0.80 avg300=1.10 total=1\n")
+    assert procs.memory_pressure_some_avg10(path) == "0.05"
+    path.write_text("full avg10=0.04 avg60=0.80 avg300=1.10 total=1\n")
+    assert procs.memory_pressure_some_avg10(path) is None
+    path.write_text("some avg10=x avg60=0.83 avg300=1.18 total=1\n")
+    assert procs.memory_pressure_some_avg10(path) is None
+    assert procs.memory_pressure_some_avg10(tmp_path / "none") is None
+
+
+def test_swap_io_pages(tmp_path: Path):
+    path = tmp_path / "vmstat"
+    path.write_text("nr_free_pages 1\npswpin 1147782\npswpout 2990899\n")
+    assert procs.swap_io_pages(path) == 1147782 + 2990899
+    path.write_text("pswpin 1\n")
+    assert procs.swap_io_pages(path) is None
+    path.write_text("pswpin 1\npswpout x\n")
+    assert procs.swap_io_pages(path) is None
+    assert procs.swap_io_pages(tmp_path / "none") is None
+
+
 def test_cgroup_dir_inside_a_container_and_on_a_host(tmp_path: Path):
     root, own = tmp_path / "cg", tmp_path / "self"
     root.mkdir()
