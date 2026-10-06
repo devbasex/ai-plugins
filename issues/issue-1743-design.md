@@ -118,6 +118,40 @@
 | F6 | 項目ごとの着手期限・完了期限を外し、実装を止める時刻を実装の終わりの 1 つにする | `merge-plan`・`merge-implement`・`start-phase` |
 | F7 | 検証の後に時間が残っていれば、見送った候補を順位の順に採り直す | drive.py の `readopt`（採る件数が増える） |
 
+## システム構成
+
+**文脈**: 変わるのは cross-refactoring の時間の計算・再開・採り直しで、外部の系（GitHub・各ランタイムの CLI）との出入りは変えない。push は今までどおり最終ゲートの入口の 1 度だけである。
+
+```mermaid
+graph LR
+  dev[conductor・検査のプラン] -->|打つ・打ち直す| body[cross-refactoring<br/>このリポジトリの配布物]
+  body -->|プロンプト| cli[実装担当の CLI<br/>claude / codex / kiro]
+  cli -->|コミット| body
+  body -->|最終ゲートの入口で push| gh[GitHub<br/>Pull Request・CI]
+  body -->|実行の行| hist[(配分の履歴<br/>~/.local/state/ndf/metrics)]
+```
+
+**配置**: すべて利用者のホスト（端末かコンテナ）で動く。止まっていた時間は、同じホストの作業ディレクトリのファイルの更新時刻だけから測る（決定 3）。
+
+```mermaid
+graph TD
+  subgraph host[利用者のホスト]
+    drv[駆動 drive.py<br/>catch-up・readopt を打つ] -->|サブコマンド| rf[refactor.py]
+    drv -->|monitor.py --alive-file| cli[作業の CLI のプロセス]
+    rf -->|テストの実行| tp[テストのプロセス]
+    subgraph wd[作業ディレクトリ .cross_refactoring/]
+      st[(状態ファイル)]
+      logs[(CLI・テストのログ・結果ファイル)]
+      alive[(心拍のファイル)]
+    end
+    rf --> st
+    cli --> logs
+    drv -->|15 秒ごと| alive
+    rf -->|15 秒ごと| alive
+  end
+  rf -->|push（最終ゲートの入口だけ）| gh[GitHub]
+```
+
 ## 構成要素
 
 | 要素 | 責務 | 変更 |
@@ -132,8 +166,8 @@
 | `refactor_lib/commands/setup.py` | `init` と再開 | 新しく始めるときと計画の前の再開で、配分テーブルから `after_plan_minutes` を求めて `timeline.of_state` へ渡す。計画の後の再開では、状態を書く前に `pause.catch_up` を呼ぶ。サブコマンド `catch-up` を足す（引数の定義は `refactor.py`） |
 | `refactor_lib/init_test.py` | 着手前のテストの後の止まり | `stop_if_window_short` は広げた `window_problem` をそのまま使う（呼び方は変えない） |
 | `refactor_lib/commands/plan.py`（`merge-plan`） | 採る項目と締め切りを決める | バッファを `budget.plan_reserve` で出す。`state.pause = {"seconds": 0, "shifted_seconds": 0, "legacy": false, "events": []}` と `state.readopt = {"round": 1, "events": []}` を作る。`_plan_items` は `start_deadline` / `test_start_deadline` を書かず、項目に `round: 1` を書く。`refactor_lib/plan.py` のリファクタリング計画のコメントから項目ごとの「締め切り」の行を外し、時間の上限の表の「実装の終わり」の説明を I13 の式へ直す |
-| `refactor_lib/commands/implement.py`（`merge-implement`・`merge-tests`） | コミットの取り込み | `_deadline_passed`（コミットの時刻を完了期限と比べて `not_done` にする判定）を外す。コミットの無い項目は `not_done` で見送らず、状態 `carried`（持ち越し）にして変更を捨てる。取り込みの末尾（`_finish`）は残る項目が 0 件のとき `phase` を `final` でなく `readopt` にして終了コード 2（検証を飛ばす）を返す。最終ゲートへ移すのは `readopt` の `no_fit` だけにし、全項目が持ち越しになった実行（rf1718 の形の遅い実装担当）でも採り直しに届かせる。「取り込み済み」の判定は今の巡の `phases[<手順名>]` を見る（前の巡の記録は `readopt` が `phases_history` へ移すため、2 巡目は新しい `base_sha` から取り込む）。取り込みの対象は今の巡の未了の項目に限る: `_intake_tests` の対象を「`tests` を持つ生きた項目」から「`tests` を持ち、`round` が今の巡（`readopt.round`）で状態が `planned` の項目」へ狭め（`_intake_implement` は今のまま `planned` / `tested` だけを見る）、前の巡で `verified` になった項目とそのコミットをコミットが無いとして持ち越し・取り消しにしない。取り消し済みの判定（`_settle` の `done`）も巡ごとに分け、`drop` が `drops[]` に今の巡の `round` を書き、`done` は同じ取り込み名かつ同じ `round` の記録があるときだけ真にする（`round` の無い旧い記録は 1 巡目として読む）。そのため 1 巡目で取り消しがあった実行でも、2 巡目の手順違反・失敗したテストのコミットは取り消され、同じ巡の打ち直しでは 2 度取り消さない。手順違反・差分予算・テストの失敗の判定は変えない |
-| `refactor_lib/commands/readopt.py`（新規。サブコマンド `readopt`） | 採り直し | 持ち越しの項目と `budget` で見送った候補（`state.candidates` のうち `deferred_items[]` の理由が `budget` のもの。見積り・範囲テスト・`risk` は計画の時点の値）を `rank_key` で並べ、`readopt_available` に入るものを `select` で採る。採ったら `budget` の見送りを外して項目（続きの ID、`round` = n + 1、`public_io` は実装担当の `risk`）を足し、上限の表の `add_tests_end_at` / `implement_end_at` を書き直す。採ったら前の巡の手順の記録（`phases` の `add-tests`・`implement`・`verify`・`fix`）と全体テストの記録（`whole_test`。`resolution` が `fixing` でないとき）を `phases_history[]` / `whole_test_history[]` へ `round` を付けて移し、`state.phase` を `add-tests`（`TESTS_NEEDED=1`）か `implement` へ戻す。次の `start-phase` は新しい `started_at` / `base_sha`（今の HEAD）で記録を作り、`finish_phase` と取り込み済みの判定は巡ごとに働く。入らなければ持ち越しの項目を `not_done`（「実装の終わりまでにコミットが無く、残った時間に入らない」）で見送り、`phase` を `final` にする。`phase` を `final` にするのは実行全体でここだけである（最終ゲートの入口の `gate.py` は今のまま）。`plan` の無い状態（提案が 0 件で計画の前に最終ゲートへ来た）では記録せずに終了コード 2 を返す |
+| `refactor_lib/commands/implement.py`（`merge-implement`・`merge-tests`） | コミットの取り込み | `_deadline_passed`（コミットの時刻を完了期限と比べて `not_done` にする判定）を外す。コミットの無い項目は `not_done` で見送らず、状態 `carried`（持ち越し）にして変更を捨てる。取り込みの末尾（`_finish`）は残る項目が 0 件のとき `phase` を `final` でなく `readopt` にして終了コード 2（検証を飛ばす）を返す。最終ゲートへ移すのは `readopt` の `no_fit` だけにし、全項目が持ち越しになった実行（rf1718 の形の遅い実装担当）でも採り直しに届かせる。項目のコミットは `items.item_shas`（#1814 の決定 6 の後は `implement_shas` を通す）で読み、`commits.implement` を文字列と決めて読まない。「取り込み済み」の判定は今の巡の `phases[<手順名>]` を見る（前の巡の記録は `readopt` が `phases_history` へ移すため、2 巡目は新しい `base_sha` から取り込む）。取り込みの対象は今の巡の未了の項目に限る: `_intake_tests` の対象を「`tests` を持つ生きた項目」から「`tests` を持ち、`round` が今の巡（`readopt.round`）で状態が `planned` の項目」へ狭め（`_intake_implement` は今のまま `planned` / `tested` だけを見る）、前の巡で `verified` になった項目とそのコミットをコミットが無いとして持ち越し・取り消しにしない。取り消し済みの判定（`_settle` の `done`）も巡ごとに分け、`drop` が `drops[]` に今の巡の `round` を書き、`done` は同じ取り込み名かつ同じ `round` の記録があるときだけ真にする（`round` の無い旧い記録は 1 巡目として読む）。そのため 1 巡目で取り消しがあった実行でも、2 巡目の手順違反・失敗したテストのコミットは取り消され、同じ巡の打ち直しでは 2 度取り消さない。手順違反・差分予算・テストの失敗の判定は変えない |
+| `refactor_lib/commands/readopt.py`（新規。サブコマンド `readopt`） | 採り直し | 持ち越しの項目と `budget` で見送った候補（`state.candidates` のうち `deferred_items[]` の理由が `budget` のもの。見積り・範囲テスト・`risk` は計画の時点の値）を `rank_key` で並べ、`readopt_available` に入るものを `select` で採る。採ったら `budget` の見送りを `deferred_items` から外して項目（続きの ID、`round` = n + 1、`public_io` は実装担当の `risk`。`commits` は `merge-plan` の `_plan_items` と同じ作り方）を足し、上限の表の `add_tests_end_at` / `implement_end_at` を書き直す。採ったら前の巡の手順の記録（`phases` の `add-tests`・`implement`・`verify`・`fix`）と全体テストの記録（`whole_test`。`resolution` が `fixing` でないとき）を `phases_history[]` / `whole_test_history[]` へ `round` を付けて移し、`state.phase` を `add-tests`（`TESTS_NEEDED=1`）か `implement` へ戻す。次の `start-phase` は新しい `started_at` / `base_sha`（今の HEAD）で記録を作り、`finish_phase` と取り込み済みの判定は巡ごとに働く。入らなければ持ち越しの項目を `not_done`（「実装の終わりまでにコミットが無く、残った時間に入らない」）で見送る。見送るときは `_settle` と同じく `ledger.defer` を理由 `not_done` で呼んでから状態を変える（#1658 の I7）。そのうえで `phase` を `final` にする。`phase` を `final` にするのは実行全体でここだけである（最終ゲートの入口の `gate.py` は今のまま）。`plan` の無い状態（提案が 0 件で計画の前に最終ゲートへ来た）では記録せずに終了コード 2 を返す |
 | `refactor_lib/commands/converge.py` の検証の終わり | 検証 | 終わりで `phase` を `final` にせず `readopt` にし、`publish.enter_final_gate` を呼ばない。公開は最終ゲートの入口（`gate.py` の既存の `enter_final_gate`）の 1 度だけにし、採り直す巡ごとの push と CI の起動を作らない。`_whole_test` の「1 度だけ」は今の巡の `whole_test` で数え、危険フラグはその巡で採った項目（`items[].round` が今の巡）のものだけを見る。前の巡の `ran` は `whole_test_history` にあり、新しいコミットの全体テストを省かない |
 | `refactor_lib/wholetest.py`・`refactor_lib/gate_ci.py` の `revert_deferred`・`refactor_lib/commands/report.py` | CI へ寄せた危険フラグの記録 | `wholetest.py` に `deferred_union(state)`（今の `whole_test.deferred` と `whole_test_history[].record.deferred` の `flags` / `items` を巡の順に重複なく合わせて返す）を足す。最終ゲートの `revert_deferred` と報告の「最終ゲートへ寄せた」の行は `whole_test.deferred` を直接読まずにこれを読む。そのため 1 巡目で CI へ寄せた危険フラグ（`resolution` が `deferred`）は、`readopt` が記録を履歴へ移した後も、2 巡目に危険フラグが無くても、CI が落ちたときの原因の項目からの取り消しの対象に残る。取り消した項目（生きていない項目）は今のまま `live_items` で外れる |
 | `refactor_lib/phases.py`・`refactor_lib/allocation.py` の手順ごとの秒 | 所要の集計 | 手順ごとの秒と `danger_whole_test` の使った秒は、`phases_history` / `whole_test_history` の同じ名前の秒を足して数える |
@@ -142,7 +176,8 @@
 | `refactor_lib/allocation.py` の `build_row` | 実行の行 | `reserve`（区分ごとの `reserved_seconds` / `used_seconds` / `unused_seconds`）と `paused_seconds` を足す。`elapsed_seconds` の意味は変えない |
 | `scripts/drive.py` の `Drive.run` | 打ち直しの入口 | 耐久の記録が `start` でない（打ち直し）とき、耐久ワークフローを始める前に `refactor.py catch-up <ID>` を 1 度打つ。耐久ステップにしない |
 | `scripts/drive.py` の `refactor_drive` | 工程の順序 | 検証の繰り返しの後、最終ゲートの前に `readopt` を打つ。取り込みや提案の取り込みが `GO_FINAL` を返して検証を飛ばしたときも、最終ゲートの前に必ず `readopt` を打つ。終了コード 0 なら `add-tests`（`TESTS_NEEDED=1` のとき）・`implement`・検証の繰り返しを回し直し、終了コード 2（`GO_FINAL`）なら最終ゲートへ進む。回し直しは `LOOP_LIMIT` で抑え、耐久ステップの名前に巡の番号 `round` を付ける（同じ名前のステップを耐久の記録から返さないため）。手順の順序 `ORDER` に `verify` と `final` の間の `readopt` を足す。`readopt` が `state.phase` を `add-tests` / `implement` へ戻すため、再開の `todo()` は巡をまたいでも今の巡の未了の手順を返す |
-| `docs/01-state-and-propose.md`・`docs/02-plan-and-implement.md`・`docs/04-verify-and-report.md` | 文書 | 「再開」の表に計画の後の行、「締め切り」の R と `fix_end` の式と止まる条件、報告の行を書き直す。「締め切り」の節の項目ごとの式 2 行と表の「テストの追加の終わり」「実装の終わり」を I13 の式へ、取り込みの表の「締め切り」の行を外し、「コミットが無い」の行を持ち越しへ直し、採り直しの節を足す。`CLAUDE.md` の cross-refactoring の節の見送りの理由の説明も合わせる |
+| `docs/01-state-and-propose.md`・`docs/02-plan-and-implement.md`・`docs/04-verify-and-report.md` | 文書 | 「再開」の表に計画の後の行、「締め切り」の R と `fix_end` の式と止まる条件、報告の行を書き直す。「締め切り」の節の項目ごとの式 2 行と表の「テストの追加の終わり」「実装の終わり」を I13 の式へ、取り込みの表の「締め切り」の行を外し、「コミットが無い」の行を持ち越しへ直し、採り直しの節を足す |
+| `CLAUDE.md` の cross-refactoring の節 | 指示書 | 見送りの理由の説明（`not_done` の意味）と時間の数値の段落を決定 9・10 に合わせる。C7 に当たるため、設計の承認と別に実装の PR で人の承認を取ってから書く（決定 11。#1814 の決定 12 と同じ扱い） |
 
 ```mermaid
 graph LR
@@ -182,6 +217,100 @@ graph LR
 ```
 
 `P → MP` の辺は、`pause` が `merge-plan` と `readopt` の書いた `limits` を書き換えることを表す。`IM → RD` の辺は、`merge-implement` が持ち越しにした項目を `readopt` が読むことを表す（どちらも呼び出しではない）。文書（`docs/`）と `refactor.py` の引数の定義は図に含めない。
+
+## 構造
+
+変更が触る型を描く。cross-refactoring は状態を辞書で持つため、モジュールは関数の集まり（`<<module>>`）として、状態ファイルの値は辞書の形として描く。
+
+```mermaid
+classDiagram
+  class pause {
+    <<module・新設>>
+    +last_activity(tmp_dir) datetime
+    +catch_up(state, now, last_at) dict
+  }
+  class readopt {
+    <<module・新設 commands/readopt.py>>
+    +cmd_readopt(args) None
+  }
+  class budget {
+    <<module>>
+    +plan_reserve(state, table) dict
+    +shortest_item_minutes(table, measured_verify) float
+    +implement_end(final_end, reserve, items) datetime
+    +add_tests_end(implement_end, items) datetime
+    +readopt_available(final_end, reserve, now) float
+    +rank_key(candidate)
+    +select(candidates, minutes)
+  }
+  class timeline {
+    <<module>>
+    +compute(..., after_plan_minutes) dict
+    +window_problem(limits) str
+    +required_budget_minutes(offset, after_plan) int
+  }
+  class Limits {
+    +add_tests_end_at
+    +implement_end_at
+    +fix_end_at
+    +final_end_at
+    +stop_revert_end_at
+    +after_plan_minutes
+  }
+  class Pause {
+    +seconds
+    +shifted_seconds
+    +legacy
+    +events
+  }
+  class Readopt {
+    +round
+    +events
+  }
+  class Item {
+    +id
+    +round
+    +status
+    +commits
+  }
+  pause ..> Limits : ずらす
+  pause ..> Pause : 記録する
+  readopt ..> budget : 選ぶ
+  readopt ..> Readopt : 記録する
+  readopt ..> Item : 足す・not_done にする
+  readopt ..> Limits : 書き直す
+  timeline ..> budget
+  timeline ..> Limits : 作る
+```
+
+`timeline.window_problem` は止める理由の文か `None` を返す。`Item.commits` の `implement` の形（文字列か並び）は #1814 の決定 6 が決め、この設計は形に依らない読み方をする（「並行する設計との関係」）。
+
+## パッケージ・モジュール構成
+
+```text
+plugins/ndf/
+├── scripts/lib/
+│   ├── test_strategy.py                 # 変更（reserve_seconds の危険フラグ）
+│   ├── monitor_types.py                 # 変更（HEARTBEAT_SECONDS）
+│   └── monitor.py                       # 変更（--alive-file）
+└── skills/cross-refactoring/
+    ├── docs/01・02・04                   # 変更
+    ├── scripts/
+    │   ├── drive.py                     # 変更（catch-up・readopt を打つ）
+    │   ├── refactor.py                  # 変更（サブコマンド catch-up・readopt、ALIVE_FILE の設定）
+    │   └── refactor_lib/
+    │       ├── pause.py                 # 新設（last_activity / catch_up）
+    │       ├── budget.py / timeline.py  # 変更
+    │       ├── process.py               # 変更（ALIVE_FILE）
+    │       ├── init_test.py / culprit.py / wholetest.py / gate_ci.py  # 変更
+    │       ├── phases.py / allocation.py  # 変更
+    │       └── commands/
+    │           ├── readopt.py           # 新設（readopt）
+    │           ├── setup.py             # 変更（再開で catch_up）
+    │           ├── plan.py / implement.py / converge.py / report.py  # 変更
+    └── tests/                           # 変更・追加
+CLAUDE.md                                # 変更（C7。決定 11 の承認の後）
+```
 
 ## データ構造
 
@@ -402,7 +531,7 @@ sequenceDiagram
 
 ### 決定 1: 走らない見込みの時間を実装へ回すため、危険フラグの全体テストを最終ゲートの全体テストと兼ねてバッファに 1 回だけ数える
 
-手元で最終ゲートを見る戦略では、検証の中の全体テストが通って HEAD が進んでいなければ、最終ゲートは全体テストを走らせない（`_reusable_whole_test`）。危険フラグが立って通れば 1 回、立たなければ最終ゲートの 1 回で、どちらも全体テストは 1 回である。2 回走るのは危険フラグの全体テストが落ちて直した後か、同期のコミットで HEAD が進んだときだけで、その分はバッファの外になり、直しの試行の時間と、最終ゲートの全体テストが想定最大時間の終わりを越える分で吸収する。PR 1780・1799・1801 では危険フラグの全体テストは 1 度も走っていない。`--ci-check` を付けた手元の戦略は最終ゲートが CI を見て使い回せないため、危険フラグの w を残す。
+手元で最終ゲートを見る戦略では、検証の中の全体テストが通って HEAD が進んでいなければ、最終ゲートは全体テストを走らせない（`_reusable_whole_test`）。危険フラグが立って通れば 1 回、立たなければ最終ゲートの 1 回で、どちらも全体テストは 1 回である。2 回走るのは危険フラグの全体テストが落ちて直した後か、同期のコミットで HEAD が進んだときだけで、その分はバッファの外になり、直しの試行の時間と、最終ゲートの全体テストが想定最大時間の終わりを越える分で吸収する。PR 1780・1799・1801 では危険フラグの全体テストは 1 度も走っていない。#1814 の決定 7 の後は、範囲テストの対象の無い `remove_dead_code` の項目（`deletion`）を採るたびに D4 が立ち、危険フラグの全体テストが走る実行が増える。それでも通って HEAD が進まなければ 1 回で済むため、`deletion` の項目の分もバッファに足さない。落ちたとき・HEAD が進んだときの超過は「未確認のまま残ること」の 1 行目と同じ扱いで、`deletion` の項目はその頻度を上げる。`--ci-check` を付けた手元の戦略は最終ゲートが CI を見て使い回せないため、危険フラグの w を残す。
 
 履歴の直近 10 回で危険フラグが走った割合を w に掛ける案は、行に新しいキーが溜まるまで今の値（w）のままで、受け入れ条件の値に届くのが数回先になるため採らない。計画の時点の `public_io` で危険フラグを予測する案は、D1〜D4 が実装の差分から決まり予測できないため採らない。最終ゲートの全体テストを省いて時間を作る案は、要求の境界（行わない）に当たるため採らない。
 
@@ -500,6 +629,14 @@ drive.py は `init` を耐久ステップとして 1 回だけ打ち（I19）、
 
 根拠: Value 3 / Value 4 / 利用者の指示「無意味な制約はどんどん外す」（2026-10-07）
 
+### 決定 11: 指示書の書き換えを人の承認に掛けるため、`CLAUDE.md` の cross-refactoring の節は設計の承認と別に、実装の PR で承認を取ってから書く
+
+`CLAUDE.md` の cross-refactoring の節は、見送りの理由の説明（`not_done` の意味）と時間の数値の段落が決定 9・10 と食い違うため直す。指示書の運用の節の書き換えは共通原則の C7 に当たり、設計の承認では代えられない。実装の PR で差分を示して承認を取り、承認の後にコミットする。#1814 の決定 12 も同じ節（「1 改善項目 = 1 コミット」）を同じ扱いで直す。後に入る実装の PR が先の差分の上に書き、承認はそれぞれの PR で取る。用語集の変更は指示書ではないため、設計の変更に含める。
+
+`CLAUDE.md` を直さずに `docs/` だけを直す案は、全セッションが読む指示書に外した期限の説明が残り、読み手が古い規則で判断するため採らない。
+
+根拠: C7（MVV 版 2）
+
 ## テスト設計
 
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
@@ -549,16 +686,29 @@ drive.py は `init` を耐久ステップとして 1 回だけ打ち（I19）、
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #1743 | 実装する | — | `plugins/ndf/scripts/lib/test_strategy.py`、`plugins/ndf/scripts/lib/monitor.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/`、`plugins/ndf/skills/cross-refactoring/scripts/drive.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor.py`、`plugins/ndf/skills/cross-refactoring/docs/`、`plugins/ndf/skills/cross-refactoring/tests/`、`plugins/ndf/scripts/tests/` |
+| #1743 | 実装する | — | `plugins/ndf/scripts/lib/test_strategy.py`、`plugins/ndf/scripts/lib/monitor_types.py`、`plugins/ndf/scripts/lib/monitor.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/`、`plugins/ndf/skills/cross-refactoring/scripts/drive.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor.py`、`plugins/ndf/skills/cross-refactoring/docs/`、`plugins/ndf/skills/cross-refactoring/tests/`、`plugins/ndf/scripts/tests/`、`docs/glossary/glossary.json`、`docs/glossary.md`、`CLAUDE.md`（C7。決定 11 の承認の後） |
 | #1491 | 取り込む | #1743 | — |
+
+## 並行する設計との関係
+
+同じスプリントの #1814・#1658 の実装と、どの順で入っても成り立つように、相手の決定を前提として次のとおり扱う。
+
+| 相手の決定 | 内容 | この設計の扱い |
+| --- | --- | --- |
+| #1814 の決定 6 | 実装の項目は同じ `Item-Id` のコミットを何件でも持ち、`commits.implement` を文字列から並びへ変える（読む側は `items.implement_shas`） | 項目のコミットを読む箇所（巡ごとの取り込み・取り消し・持ち越し）は、`commits.implement` を文字列と決めて読まず、`items.item_shas`（#1814 の後は `implement_shas` を通す）で読む。採り直しで足す項目の `commits` は `merge-plan` の `_plan_items` と同じ作り方にし、形はどちらの順でも `merge-plan` の項目と揃う。`items[].round` は項目の単位で持ち、項目の全コミットがその巡に属する |
+| #1814 の決定 6（締め切り） | 複数コミットの項目の締め切りの扱い | 決定 9 で項目の期限の判定（`_deadline_passed`）そのものを外すため、#1814 の前後で取り込みの判定は変わらない。#1814 は所要だけを最後のコミットの時刻で測る |
+| #1814 の決定 7 | 範囲テストの対象の無い `remove_dead_code` の項目を `deletion` として採り、D4 で全体テストを 1 度走らせる | 決定 1 のとおりバッファに数えず、最終ゲートと兼ねる。落ちたとき・HEAD が進んだときの超過は「未確認のまま残ること」の 1 行目に含め、`deletion` の項目の分を別に足さない |
+| #1814 の決定 12 | `CLAUDE.md` の cross-refactoring の節を C7 として、実装の PR で別に承認を取ってから書く | 決定 11 で同じ扱いにする |
+| #1658 の用語「見送った改善項目」「見送った提案」と I7 | `metrics.deferred` は状態が見送りの改善項目の数（`not_done`・`test_failed`）。状態を見送りにする経路はどれも `deferred_items` へ `defer` する | `not_done` は、実装の終わりまでにコミットが無く、採り直しでも残った時間に入らなかった項目にだけ付く（I15）。`readopt` が持ち越しの項目を見送りにするときも `defer` を理由 `not_done` で呼んでから状態を変え、I7 を保つ。採り直した `budget` の候補は `deferred_items` から外れるため、#1658 の「見送った提案」の件数は採り直しの後の値になる |
 
 ## 未確認のまま残ること
 
 | 項目 | 内容 |
 | --- | --- |
-| 危険フラグが立ったときの所要の伸び | 危険フラグの全体テストが通って最終ゲートが使い回せれば伸びない。落ちたとき・同期のコミットで HEAD が進んだときは、最終ゲートの全体テストの終わりが想定最大時間の終わりを約 `w − 修正 − 最終ゲート修正`（PR 1801 の入力で約 4 分）越え、落ちたときは原因の項目を決める走らせ直しと最終ゲート修正の 1 回目がさらに足される見込みである。報告の「バッファを越えた全体テスト」の行と所要の行で実測する（リリース後テスト） |
+| 危険フラグが立ったときの所要の伸び | 危険フラグの全体テストが通って最終ゲートが使い回せれば伸びない。落ちたとき・同期のコミットで HEAD が進んだときは、最終ゲートの全体テストの終わりが想定最大時間の終わりを約 `w − 修正 − 最終ゲート修正`（PR 1801 の入力で約 4 分）越え、落ちたときは原因の項目を決める走らせ直しと最終ゲート修正の 1 回目がさらに足される見込みである。報告の「バッファを越えた全体テスト」の行と所要の行で実測する（リリース後テスト）。#1814 の決定 7 の `deletion` の項目は D4 を必ず立てるため、この超過の頻度を上げる。実測では、超過した実行に `deletion` の項目があったかを合わせて見る |
 | 生成物の同期のコミットの時点 | このリポジトリは `--sync-command` で生成物を同期する。同期のコミットが危険フラグの全体テストの後に積まれると、最終ゲートは使い回せず 2 回目を走らせる。どの時点で積まれるかは実装（`tdd-cycle`）で確かめる |
 | drive.py の打ち直しで中断した手順の CLI を起動し直すか | 中断した監視の耐久ステップを流し直したとき、起動の耐久ステップは記録から返る。止まった CLI の代わりを起動するのは振り替え（`reassign`）の既存の経路で、ずれた締め切りから監視の上限を出し直すのは次の `start-phase` である。受け入れ条件は締め切りの値とコミットの判定で確かめ、起動し直しの経路は既存の振る舞いのまま扱う |
 | 要求の前提 2 の文面 | 決定 3 で、測る時刻を作業ディレクトリのファイルの更新時刻へ広げた。課題の本文の前提 2 を同じ形に直すかは、承認ゲート 1 で承認する人が決める |
 | 採り直しの巡の起動の費用 | 巡ごとに実装担当の CLI を起動し直す。起動の所要は配分テーブルの見積りに入っていないため、残った時間が見積りぎりぎりの候補は実装の終わりに届かず持ち越しになりうる。`readopt.events[]` と報告の行で実測し、要れば起動の所要を配分の履歴に足す（リリース後テスト） |
+| `CLAUDE.md` の書き換え | C7 に当たる。設計の承認とは別に、実装の PR で人の承認を取ってから書く（決定 11。#1814 の決定 12 も同じ節を直す） |
 | 手で作業ディレクトリのファイルを触ったとき | 中断の間に利用者が `.cross_refactoring/` 直下のファイルを開いて保存すると、最後の動きの時刻が進み、止まっていた時間が短く数えられる（ずれが小さくなる側で、締め切りは延びすぎない） |
