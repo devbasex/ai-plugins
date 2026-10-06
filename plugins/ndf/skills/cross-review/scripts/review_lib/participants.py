@@ -327,7 +327,7 @@ def _resolve_reviewers(
         review_lib.die(
             f"1 者指定の {only} が確認を通りません"
             f"（{resolved.unavailable.get(only, '')}）。"
-            f"{only} で認証し直すか、1 者指定を外して再実行してください",
+            f"{only} の CLI を確認が通る状態に直すか、1 者指定を外して再実行してください",
             code=1,
         )
     if only is None and not available:

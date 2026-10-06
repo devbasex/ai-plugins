@@ -96,11 +96,13 @@ def default_pool(host: str) -> list[str]:
 
 @dataclass
 class Participants:
-    """使える者の解決の結果。状態ファイルの `participants` のうち `fallback` を除く 9 項目。
+    """使える者の解決の結果。状態ファイルの `participants` のうち `fallback` を除く 11 項目。
 
     `fallback`（席の埋め合わせに使える者）は cross-review だけが持つため、呼び出し側が
     `to_state()` の辞書へ足す。`ignored_exclude` は「外す指定をしたが母集合に無かったため
     無視した者」で、外した者（`excluded`）とは別に持つ（#786 の決定 2）。
+    `unavailable` の値は `<理由>: <詳細>`、`checks` は名前 → 参加の確認の結果、`default_models` は
+    既定のモデルへ切り替えた者 → 起動の引数のモデル（#1290）。
     """
 
     pool: list[str]
@@ -113,6 +115,8 @@ class Participants:
     require_all: bool = False
     # 決めた時点のランタイムの宣言の写し（`RuntimePolicy.to_state()`）。宣言が無ければ `None`（#1598）。
     policy: Optional[dict[str, Any]] = None
+    checks: dict[str, dict[str, Any]] = field(default_factory=dict)
+    default_models: dict[str, str] = field(default_factory=dict)
 
     def to_state(self) -> dict[str, Any]:
         return {
@@ -125,12 +129,92 @@ class Participants:
             "probe_skipped": self.probe_skipped,
             "require_all": self.require_all,
             "policy": dict(self.policy) if self.policy is not None else None,
+            "checks": {n: dict(c) for n, c in self.checks.items()},
+            "default_models": dict(self.default_models),
         }
 
 
 # 止めない確認の形。`auth.probe_auth` を `functools.partial(auth.probe_auth, info=info)`
-# のように包んで渡す。返り値は `(名前 → {"command", "ok", "detail"}, 飛ばしたか)`。
+# のように包んで渡す。返り値は `(名前 → Admission.to_probe() の辞書, 飛ばしたか)`。
 Probe = Callable[[list[str]], tuple[dict[str, dict[str, Any]], bool]]
+
+# 参加の確認の理由の語（`checks[].result`）。`ok` 以外は外した理由（#1290 のデータ構造）。
+CHECK_REASONS = ("ok", "unauthenticated", "auth_expired", "model_unavailable", "timeout", "missing_cli", "probe_failed")
+
+
+@dataclass(frozen=True)
+class Admission:
+    """1 者の参加の確認の合否。`level` は通った確認の種類（`model` / `auth`）。"""
+
+    runtime: str
+    ok: bool
+    reason: str
+    detail: str
+    level: Optional[str]
+    seconds: float
+    command: str = ""
+    model: Optional[str] = None
+    default_model: Optional[str] = None
+    from_model: Optional[str] = None
+
+    def to_probe(self) -> dict[str, Any]:
+        """`auth.probe_auth` の 1 者の辞書。今の 3 キー（`command` / `ok` / `detail`）を保つ。"""
+        return {
+            "command": self.command,
+            "ok": self.ok,
+            "detail": self.detail,
+            "reason": self.reason,
+            "level": self.level,
+            "seconds": self.seconds,
+            "model": self.model,
+            "default_model": self.default_model,
+            "from_model": self.from_model,
+        }
+
+
+def admit(runtime: str, *, explicit_model: Optional[str], check: Callable[[str, str, Optional[str]], Any]) -> Admission:
+    """1 者の確認の進め方と合否、既定のモデルへ切り替えるかを決める（#1290 の決定 4）。
+
+    `check(step, runtime, model)` は 1 回の確認（`auth.Check` の形）を返し、その CLI が種類を
+    持たなければ `None` を返す。この関数は自分では CLI を呼ばない。
+
+    1. 種類 `auth` が通らなければその理由で外す（種類 `model` を走らせない。I5）
+    2. 種類 `model` を持たなければ `level=auth` で入れる。通れば `level=model` で入れる
+    3. `model_unavailable` 以外で通らなければその理由で外す
+    4. `model_unavailable` のとき、モデルを引数で明示していれば切り替えずに外す（前提 4・I3）。
+       種類 `default` を持たなければ外す
+    5. 種類 `default` が通り起動の引数のモデルが読めれば、`default_models` に記録して入れる。
+       通らなければ種類 `model` の理由と詳細で外す（直す対象は設定のモデル）
+    """
+    done: list[Any] = []
+
+    def run(step: str, model: Optional[str]) -> Any:
+        c = check(step, runtime, model)
+        if c is not None:
+            done.append(c)
+        return c
+
+    def result(ok: bool, last: Any, level: Optional[str] = None, **extra: Any) -> Admission:
+        seconds = round(sum(c.seconds for c in done), 1)
+        commands = " && ".join(c.command for c in done)
+        return Admission(runtime, ok, "ok" if ok else last.reason, last.detail, level, seconds, commands, **extra)
+
+    auth = run("auth", explicit_model)
+    if auth is None or not auth.ok:
+        if auth is None:
+            return Admission(runtime, False, "missing_cli", "確認のコマンドがありません", None, 0.0)
+        return result(False, auth)
+    model = run("model", explicit_model)
+    if model is None:
+        return result(True, auth, "auth")
+    if model.ok:
+        return result(True, model, "model", model=model.model)
+    if model.reason != "model_unavailable" or explicit_model:
+        return result(False, model, from_model=model.model)
+    fallback = run("default", None)
+    if fallback is None or not fallback.ok or not fallback.model:
+        return result(False, model, from_model=model.model)
+    return result(True, fallback, "model", model=fallback.model, default_model=fallback.model, from_model=model.model)
 
 
 def _validate_names(include: list[str], exclude: list[str], only: Optional[str]) -> None:
@@ -147,13 +231,29 @@ def _validate_names(include: list[str], exclude: list[str], only: Optional[str])
         raise AssignmentError(f"--only と --exclude が矛盾しています: {only}")
 
 
-def _split_by_probe(participants: list[str], probe: Probe) -> tuple[list[str], dict[str, str], bool]:
-    """probe の結果で参加者を（通った者, 通らなかった者と理由, 飛ばされたか）に分ける。"""
+def _split_by_probe(
+    participants: list[str], probe: Probe
+) -> tuple[list[str], dict[str, str], bool, dict[str, dict[str, Any]], dict[str, str]]:
+    """probe の結果で参加者を（通った者, 通らなかった者と理由, 飛ばされたか, 確認の結果, 既定のモデル）に分ける。"""
     results, skipped = probe(list(participants))
     if skipped:
-        return list(participants), {}, skipped
-    unavailable = {n: str(results.get(n, {}).get("detail", "")) for n in participants if not results.get(n, {}).get("ok", False)}
-    return [n for n in participants if n not in unavailable], unavailable, skipped
+        return list(participants), {}, skipped, {}, {}
+    unavailable: dict[str, str] = {}
+    checks: dict[str, dict[str, Any]] = {}
+    default_models: dict[str, str] = {}
+    for n in participants:
+        r = results.get(n, {})
+        ok = bool(r.get("ok", False))
+        reason = r.get("reason") or ("ok" if ok else "")
+        detail = str(r.get("detail", ""))
+        if not ok:
+            unavailable[n] = f"{reason}: {detail}" if reason else detail
+        if "reason" in r:
+            checks[n] = {k: r.get(k) for k in ("level", "seconds", "model", "from_model")}
+            checks[n]["result"] = reason
+        if ok and r.get("default_model"):
+            default_models[n] = str(r["default_model"])
+    return [n for n in participants if n not in unavailable], unavailable, skipped, checks, default_models
 
 
 def resolve_participants(
@@ -180,7 +280,8 @@ def resolve_participants(
     3. `only` があれば、参加者に含まれ `exclude` に無いことを確かめ、参加者をその 1 者にする
     4. `probe(参加者)` で確かめる。飛ばされたら全員を通ったものとし `probe_skipped` を真にする
     5. `require_all` が真で通らない者がいれば `AssignmentError`（欠けた者と理由を並べる）
-    6. 通った者を `available`、通らなかった者と理由を `unavailable` として返す
+    6. 通った者を `available`、通らなかった者と `<理由>: <詳細>` を `unavailable`、1 者ごとの確認の
+       結果を `checks`、既定のモデルへ切り替えた者を `default_models` として返す（1 者の合否は `admit`）
 
     名前の綴りのチェック（argparse の型）はこの前段で済んでいる前提だが、ここでも
     `ALL_RUNTIMES` に無い名前は弾く。
@@ -215,14 +316,14 @@ def resolve_participants(
             raise AssignmentError(f"--only は参加者のいずれかを指定してください: {only}（参加者: {', '.join(participants)}）")
         participants = [only]
 
-    available, unavailable, skipped = _split_by_probe(participants, probe)
+    available, unavailable, skipped, checks, default_models = _split_by_probe(participants, probe)
 
     if require_all and unavailable:
         failed = " / ".join(f"{n}（{d}）" for n, d in unavailable.items())
         raise AssignmentError(
-            "認証されていない CLI があります: " + failed + "。"
+            "確認を通らない CLI があります: " + failed + "。"
             "参加者が欠けたまま進むと、その者のレビューが無いまま収束します。"
-            "各 CLI でログインしてから再実行してください"
+            "各 CLI を確認が通る状態に直してから再実行してください"
         )
 
     return Participants(
@@ -235,6 +336,8 @@ def resolve_participants(
         probe_skipped=skipped,
         require_all=require_all,
         policy=policy.to_state() if policy is not None else None,
+        checks=checks,
+        default_models=default_models,
     )
 
 
@@ -342,9 +445,10 @@ def choose_implementer(
 
 # ---------------------------------------------------------------- 結果なしの後の規則（#919）
 
-# 同じ担当を同じ条件で起動し直しても解けない理由（利用上限は待ちと相手の枠を使うだけで直らない。#619）。
+# 同じ担当を同じ条件で起動し直しても解けない理由（利用上限は待ちと相手の枠を使うだけで直らない。#619。
+# 認証の失効は再ログインでしか解けず、モデルを引けないのは同じ実行の中では解けない。#1290 の前提 6）。
 # **理由を足すときはこの集合だけを見直す。** 偽のときの扱い（振り替え・中断）は `after_no_result` が決める。
-NO_RELAUNCH_REASONS = frozenset({"usage_limit"})
+NO_RELAUNCH_REASONS = frozenset({"usage_limit", "model_unavailable", "auth_expired"})
 RELAUNCH, REASSIGN, ABORT = "relaunch", "reassign", "abort"  # 規則の答え: 同じ担当で起動し直す / 振り替える / 中断する
 
 

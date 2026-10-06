@@ -76,7 +76,7 @@ def test_require_all_fails_with_the_missing_name_and_reason(assignment):
 
     assert "agy" in str(exc.value)
     assert "コマンドが見つかりません" in str(exc.value)
-    assert "認証されていない CLI があります" in str(exc.value)
+    assert "確認を通らない CLI があります" in str(exc.value)
 
 
 # ---------- AC3: 確認の相手は exclude を除き include を含む ----------
@@ -231,7 +231,7 @@ def test_skipped_probe_satisfies_require_all(assignment):
 # ---------- 記録の形 ----------
 
 
-def test_to_state_has_the_nine_keys_without_fallback(assignment):
+def test_to_state_has_the_eleven_keys_without_fallback(assignment):
     p = assignment.resolve_participants(
         ["codex", "agy", "kiro"],
         host="claude",
@@ -250,6 +250,8 @@ def test_to_state_has_the_nine_keys_without_fallback(assignment):
         "probe_skipped": False,
         "require_all": False,
         "policy": None,
+        "checks": {},
+        "default_models": {},
     }
 
 

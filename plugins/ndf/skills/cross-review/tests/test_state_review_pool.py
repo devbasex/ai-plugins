@@ -637,7 +637,7 @@ def test_init_starts_when_a_probe_cannot_be_launched(new_init, state_mod, monkey
     st = new_init(real_probe=True)
 
     assert st["participants"]["available"] == ["claude", "codex"]
-    assert st["participants"]["unavailable"] == {"kiro": "コマンドを実行できません（Permission denied）"}
+    assert st["participants"]["unavailable"] == {"kiro": "missing_cli: コマンドを実行できません（Permission denied）"}
 
 
 @pytest.mark.parametrize(

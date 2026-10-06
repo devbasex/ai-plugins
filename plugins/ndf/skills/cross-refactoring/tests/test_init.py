@@ -86,6 +86,7 @@ def run_init(refactor_lib, paths, patch_lib, refactor, origin_repo, monkeypatch)
     """
     refactor_lib = sys.modules["refactor_lib"]
     probed: list[list[str]] = []
+    probed_models: list[dict] = []
 
     def _run(args, viewer="someone-else", probe=None, real_probe=False):
         """`probe` を渡すと確認を差し替える。`{ランタイム: 理由}` の者だけが通らない。
@@ -134,15 +135,17 @@ def run_init(refactor_lib, paths, patch_lib, refactor, origin_repo, monkeypatch)
             cmd_setup = sys.modules["refactor_lib.commands.setup"]
             probed.clear()
 
-            def fake_probe(runtimes, *, info, env=None):
+            def fake_probe(runtimes, *, info, env=None, models=None, level="model"):
                 names = list(runtimes)
                 probed.append(names)
+                probed_models.append(dict(models or {}))
                 return {n: {"command": n, "ok": n not in probe, "detail": probe.get(n, "")} for n in names}, False
 
             monkeypatch.setattr(cmd_setup.auth, "probe_auth", fake_probe)
         refactor.cmd_init(args)
 
     _run.probed = probed
+    _run.probed_models = probed_models
     return _run
 
 
@@ -253,6 +256,8 @@ def test_init_starts_when_an_unreadable_path_hides_a_missing_cli(run_init, tmp_p
             "kiro": ("ndf-stub-missing",),
         },
     )
+    # 最小の呼び出しは本物の CLI を呼ばないよう外す（この試験の主題は認証確認の起動の失敗）
+    monkeypatch.setattr(cmd_setup.auth, "MODEL_PROBES", {})
     monkeypatch.setenv("PATH", f"{os.environ['PATH']}:{bin_dir}:{unreadable}")
     try:
         run_init(_args(tmp_path), real_probe=True)
@@ -281,7 +286,7 @@ def test_init_starts_when_a_probe_cannot_be_launched(run_init, tmp_path, monkeyp
 
     _, state = _state_of(tmp_path)
     assert state["runtimes"] == ["claude", "codex"]
-    assert state["participants"]["unavailable"] == {"kiro": "コマンドを実行できません（Permission denied）"}
+    assert state["participants"]["unavailable"] == {"kiro": "missing_cli: コマンドを実行できません（Permission denied）"}
 
 
 def test_require_all_stops_without_writing_the_state(run_init, tmp_path):
