@@ -109,6 +109,9 @@ run のステップ:
   前に見る。当たれば `on_fail` へ行かない。`stop` は `結果: 止まった`・`理由: ステップ <id> が終了コード <n> で止めた:
   <出力の最後の JSON の summary>`（release とマージのステップが CI の基盤待ち 75 で judge を通らずに止まる）。
   鍵が整数でない・行き先が知らないステップの id なら、ステップを流す前に `結果: 止まった`
+- `"on_fail_only": "push-check"`: 失敗のうち `on_fail` へ回すものを絞る。`push-check` は pr のステップの push が
+  push 前の検査（`pre-push` フック）で拒まれたとき（終了コード 1 で `! [` の拒否の行が無い）だけを回し、同じコミットで
+  2 回続けて落ちたとき・先行の拒否・接続の失敗・Pull Request の作成の失敗は止まる。無ければすべての失敗を回す
 - `"gate_as_ok": true`: 終了コード 10〜19 を関門として数えず、提示物だけを写して `next` へ進む
 - `"pr_from": "<鍵>"`: 終了コード 0 で終わったとき、出力の最後の JSON の `metrics.<鍵>` が空でなければ、計画の
   `"Pull Request"` をその値（URL）にする。報告の `Pull Request` に載り、queue の `{queue_pr:<計画名>}` が読む
@@ -210,6 +213,16 @@ def expand_parts(steps: list[dict]) -> list[dict]:
                 if t.get(key) == s["id"]:
                     t[key] = f"{s['id']}-1"
     return out
+
+
+# `on_fail_only` の値 → その種類の失敗のときにハンドラーが結果へ true で残すキー
+ON_FAIL_ONLY = {"push-check": "push_check"}
+
+
+def fail_kind_matches(step: dict, cur: dict) -> bool:
+    """失敗を `on_fail` へ回すか。`on_fail_only` が無ければすべての失敗、あれば宣言した種類の失敗だけ（#1751 の決定 4）。"""
+    only = step.get("on_fail_only")
+    return not only or bool(cur.get(ON_FAIL_ONLY.get(only, ""), False))
 
 
 def on_exit_error(steps: list[dict]) -> str | None:

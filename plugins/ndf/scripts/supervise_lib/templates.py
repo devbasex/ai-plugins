@@ -11,7 +11,7 @@ from step_result import result
 from supervise_lib import release_templates
 from supervise_lib.decl import with_decls
 from supervise_lib.paths import CHECK_PY, DRIVES, REFACTOR_SCOPE_PY
-from supervise_lib.procedures import pr_step, record_steps, with_record, with_touched
+from supervise_lib.procedures import pr_step, push_fix_steps, record_steps, with_record, with_touched
 from supervise_lib.verify_steps import merge_steps, refactor_template_arg, scope_cmd, scope_timeout, test_meta, whole_cmd, whole_timeout
 
 
@@ -88,6 +88,15 @@ def plan_to_merge(a, head: list[dict]) -> dict:
     if head:
         head[-1]["next"] = "sync" if sync else "test-limited"
     steps = list(head)
+    pr = pr_step(
+        a.base,
+        a.title,
+        a.summary or "",
+        getattr(a, "changes", None) or "",
+        "test-all",
+        # 要求の移行性の行は常に材料にする（互換なしの印があれば「移行の手順」の箇条になる。#1752）
+        {"manual": bool(getattr(a, "manual", True)), "migration": True},
+    )
     if sync:  # 同期とチェックの宣言が無いプロジェクトではステップを置かない
         steps += [
             {"id": "sync", "type": "run", "preset": "sync-check", "stage": "実装", "on_fail": "fix-sync", "next": "test-limited"},
@@ -114,15 +123,8 @@ def plan_to_merge(a, head: list[dict]) -> dict:
         {"id": "fix", "type": "work", "kind": "修正", "inputs": ["test-limited", "test-all"], "prompt": FIX_PROMPT, "next": "test-limited"},
         # Draft の PR を全体テストの前に出し、CI と手元の全体テストを並べる。直した後は pr のステップが push して本文を更新する
         # 手動確認の節は課題の PR に載せる（スプリントブランチへ集める実装の PR は載せず、スプリント PR に載せる）
-        pr_step(
-            a.base,
-            a.title,
-            a.summary or "",
-            getattr(a, "changes", None) or "",
-            "test-all",
-            # 要求の移行性の行は常に材料にする（互換なしの印があれば「移行の手順」の箇条になる。#1752）
-            {"manual": bool(getattr(a, "manual", True)), "migration": True},
-        ),
+        pr,
+        *push_fix_steps(pr),  # push 前の検査で拒まれたら直して打ち直す（#1751）
         {
             "id": "test-all",
             "type": "run",

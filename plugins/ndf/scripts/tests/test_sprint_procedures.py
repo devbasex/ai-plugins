@@ -105,6 +105,7 @@ def test_single_plans_keep_their_step_order_and_gain_the_record(tmp_path):
         "judge",
         "fix",
         "pr",
+        "fix-push",
         "test-all",
         "doc-lint",
         "fix-doc",

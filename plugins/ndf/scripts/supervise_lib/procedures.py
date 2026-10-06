@@ -53,6 +53,20 @@ def pr_step(base: str, title: str, summary: str, changes: str, next: str, materi
     return step
 
 
+PUSH_FIX_PROMPT = (
+    "入力は push 前の検査で拒まれた push の出力である。落ちた検査の指摘を直してコミットする（push しない）。"
+    "検査はリポジトリの pre-push フック（git config core.hooksPath）が打つものなので、直した後に同じコマンドを手元で打って"
+    "通ることを確かめる。変更に起因しない失敗は直さない。"
+)
+
+
+def push_fix_steps(pr: dict) -> list[dict]:
+    """`pr` のステップの push が push 前の検査で拒まれたときに直して打ち直す経路（#1751 の決定 3〜6）。
+    `pr` のステップへ `on_fail` と `on_fail_only` を足し、修正の worker（`fix-push`）のステップを返す。"""
+    pr.update(on_fail="fix-push", on_fail_only="push-check")
+    return [{"id": "fix-push", "type": "work", "kind": "修正", "inputs": [pr["id"]], "prompt": PUSH_FIX_PROMPT, "next": pr["id"]}]
+
+
 def sprint_materials(collect: str, design_results: str, closes: list[int]) -> dict:
     """スプリント PR の材料。`collect` へマージした実装の PR・設計の結果・スプリントの課題の Closes・手動確認。"""
     return {"manual": True, "collect": collect, "design_results": design_results, "closes": list(closes)}
