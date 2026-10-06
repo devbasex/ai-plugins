@@ -244,9 +244,9 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | Runner が付かなかった取り消し | — | 結論が `cancelled` で、ジョブのステップが 0 件、Runner の名前が空の CI のジョブ。GitHub Actions の障害や Runner 不足で起き、REST のジョブの照会で見分ける | — | — | `docs/specifications/ndf-ci-wait-superseded-failures-and-infra-wait.md` |
 | push 前の検査 | — | `core.hooksPath` の `pre-push` フックが `git push` の前に打つ検査。不合格なら push が拒まれる。中身はプロジェクトごとに違う | — | — | `docs/specifications/ndf-sprint-acceptance-check-and-prepush-fix.md` |
 | push の修正 | — | 実装のプランで、push 前の検査の不合格を直してコミットし、`pr` のステップを打ち直させる修正の worker（`fix-push` のステップ） | — | — | `docs/specifications/ndf-sprint-acceptance-check-and-prepush-fix.md` |
-| 1 本の重さ | — | 担当 1 つ（worktree 1 つ分）が使う cgroup の anon の量。実測（per_lane_observed_mib）と、本数の判定に使った値（per_lane_used_mib）を分けて出す | — | — | — |
-| anon の起点 | — | 実行計画の開始時（動いている本数が 0）に測った cgroup の anon。1 本の重さを測る差の基準 | — | — | — |
-| 判定の区分 | — | parallel-measure.py capacity が本数を決めた理由の区分。grow（足してよい）/ hold（今の本数を超えて足さない）/ shrink（1 本減らす） | — | — | — |
+| 1 本の重さ | — | 担当 1 つ（worktree 1 つ分）が使う cgroup の anon の量。実測（per_lane_observed_mib）と、本数の判定に使った値（per_lane_used_mib）を分けて出す | — | — | `docs/specifications/ndf-execution-plan-and-parallel-capacity.md` |
+| anon の起点 | — | 実行計画の開始時（動いている本数が 0）に測った cgroup の anon。1 本の重さを測る差の基準 | — | — | `docs/specifications/ndf-execution-plan-and-parallel-capacity.md` |
+| 判定の区分 | — | parallel-measure.py capacity が本数を決めた理由の区分。grow（足してよい）/ hold（今の本数を超えて足さない）/ shrink（1 本減らす） | — | — | `docs/specifications/ndf-execution-plan-and-parallel-capacity.md` |
 
 ## NDF の Slack 通知（`ndf-notification`）
 
@@ -275,8 +275,8 @@ cross-review / cross-refactoring が参加者の CLI を選び、起動し、監
 | ホスト | `host` | 収束ループを起動している CLI のランタイム（host） | — | — | `docs/specifications/cross-review-participants-and-seats.md` |
 | 参加者プール | — | Skill ごとに決まる参加者の出発点。cross-review と cross-refactoring で共通の claude / codex / kiro とホスト（default_pool） | 参加の母集合 | — | `docs/specifications/cross-review-participants-and-seats.md` |
 | 参加者 | `participant` | 参加者プールに --include の者を加え、--exclude の者を除いた一覧。認証確認の対象 | — | — | `docs/specifications/cross-review-participants-and-seats.md` |
-| 利用可能な参加者 | — | 参加者のうち参加の確認を通った者（participants.available） | 使える者 | — | `docs/specifications/cross-review-participants-and-seats.md` |
-| 認証確認 | — | 参加の確認の最初の種類。確認コマンド（AUTH_PROBES）を走らせ、認証を通っているかだけを見る | 認証の確認 | — | `docs/specifications/cross-review-participants-and-seats.md` |
+| 利用可能な参加者 | — | 参加者のうち参加の確認を通った者（participants.available） | 使える者 | — | `docs/specifications/cross-participant-admission-check.md` |
+| 認証確認 | — | 参加の確認の最初の種類。確認コマンド（AUTH_PROBES）を走らせ、認証を通っているかだけを見る | 認証の確認 | — | `docs/specifications/cross-participant-admission-check.md` |
 | スロット | `slot` | 1 ラウンドで 1 つの CLI プロセスが占める枠 | — | — | `docs/specifications/cross-review-participants-and-seats.md` |
 | フォールバック | `fallback` | 利用可能な参加者が 2 者に満たないとき、足りない分を埋める参加者（participants.fallback） | 埋め合わせ | — | `docs/specifications/cross-review-participants-and-seats.md` |
 | 実測値 | `observed_model` | CLI の出力かランタイムのセッションの記録から取った、実際に動いたモデル名。状態ファイルの observed | — | — | — |
@@ -294,12 +294,12 @@ cross-review / cross-refactoring が参加者の CLI を選び、起動し、監
 | 振り替え | — | 結果なしの担当の役割を、同じ実行の中で別の担当へ移すこと。同じ担当で起動し直すことは含まない | — | — | `docs/specifications/cross-assignee-reassignment-on-no-result.md` |
 | 結果なしの記録 | `no_results` | 状態ファイルの no_results。結果なしの 1 回ごとに、担当・理由・振り替えの規則の答え（relaunch / reassign / abort）・振り替え先を追記だけで積む | — | — | `docs/specifications/cross-assignee-reassignment-on-no-result.md` |
 | 外した担当 | — | 結果なしの記録から導く、同じ実行の残りで割り当てないランタイム（claude ではアカウント） | — | — | `docs/specifications/cross-assignee-reassignment-on-no-result.md` |
-| 最小の呼び出し | — | 担当を起動するときと同じモデルの指定で、短い固定の問いを 1 回投げて応答が返るかを見る確認。認証の確認に続けて行う | — | — | — |
-| 既定のモデル | — | 利用者の CLI の設定も引数の指定も無いときに、CLI が使うモデル | — | — | — |
-| 参加の確認 | — | 参加者ごとに、認証確認・最小の呼び出し・（設定のモデルを引けなければ）既定のモデルでの引き直しを順に行い、担当に入れるかと理由を決めること（auth.probe_auth が走らせ、assignment.admit が判断する） | — | — | — |
-| モデルを引けない | `model_unavailable` | 担当の CLI が、指定か設定のモデルを使えないと返したこと（参加の確認と起動結果の理由 model_unavailable） | — | — | — |
-| 認証の失効 | `auth_expired` | 認証の状態確認は通るが、更新トークンの失効などで実行のときに認証を作り直せないこと（参加の確認と起動結果の理由 auth_expired） | — | — | — |
-| 既定のモデルへの切り替え | `default_models` | 引数で明示していないモデルを引けない CLI を、既定のモデルで担当に入れること（participants.default_models） | — | — | — |
+| 最小の呼び出し | — | 担当を起動するときと同じモデルの指定で、短い固定の問いを 1 回投げて応答が返るかを見る確認。認証の確認に続けて行う | — | — | `docs/specifications/cross-participant-admission-check.md` |
+| 既定のモデル | — | 利用者の CLI の設定も引数の指定も無いときに、CLI が使うモデル | — | — | `docs/specifications/cross-participant-admission-check.md` |
+| 参加の確認 | — | 参加者ごとに、認証確認・最小の呼び出し・（設定のモデルを引けなければ）既定のモデルでの引き直しを順に行い、担当に入れるかと理由を決めること（auth.probe_auth が走らせ、assignment.admit が判断する） | — | — | `docs/specifications/cross-participant-admission-check.md` |
+| モデルを引けない | `model_unavailable` | 担当の CLI が、指定か設定のモデルを使えないと返したこと（参加の確認と起動結果の理由 model_unavailable） | — | — | `docs/specifications/cross-participant-admission-check.md` |
+| 認証の失効 | `auth_expired` | 認証の状態確認は通るが、更新トークンの失効などで実行のときに認証を作り直せないこと（参加の確認と起動結果の理由 auth_expired） | — | — | `docs/specifications/cross-participant-admission-check.md` |
+| 既定のモデルへの切り替え | `default_models` | 引数で明示していないモデルを引けない CLI を、既定のモデルで担当に入れること（participants.default_models） | — | — | `docs/specifications/cross-participant-admission-check.md` |
 
 ## NDF の cross-review（`ndf-cross-review`）
 
