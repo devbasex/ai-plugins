@@ -153,7 +153,6 @@ def _record(
     state: dict[str, Any],
     plan: ledger.RebuildPlan,
     outcome: _Outcome,
-    targets: list[str],
     reason: str,
     ejected: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -245,7 +244,7 @@ def _rebuild(
             die(plan.error)
     if outcome.conflict:
         _restore_and_stop(path, state, plan, outcome, on_conflict)
-    return _record(path, state, plan, outcome, targets, reason, ejected)
+    return _record(path, state, plan, outcome, reason, ejected)
 
 
 def drop(
