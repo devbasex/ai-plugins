@@ -24,8 +24,6 @@ FIX_STEM = "claude-fix-rf130"
 
 @pytest.fixture
 def flow(tmp_path, monkeypatch, refactor, patch_lib, env_tmp_dir):
-    # 同じ秒に同じ大きさで書き換えたモジュールを古い .pyc から読まない
-    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
     return build_git_flow(tmp_path, monkeypatch, patch_lib, env_tmp_dir)
 
 
