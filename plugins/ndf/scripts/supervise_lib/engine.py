@@ -22,7 +22,7 @@ import runtime_policy
 import slow_step as ss
 from supervise_lib import decl, paths
 from supervise_lib.claude import AuthUnavailable, ClaudeCall, ClaudeRunner, UsageLimit, claude_kind
-from supervise_lib.plan import expand_parts, normalize_plan, on_exit_error
+from supervise_lib.plan import expand_parts, fail_kind_matches, normalize_plan, on_exit_error
 from supervise_lib.pr import PrStep
 from supervise_lib.slow import SLOW_EXIT, SlowAction, SlowWatch
 from supervise_lib.state import RunState
@@ -330,7 +330,7 @@ class Engine:
             if is_run and step.get("pr_from"):
                 self.take_pr(step["pr_from"])
             return self.back_or_next(sid, step), None, None
-        if step.get("on_fail"):
+        if step.get("on_fail") and fail_kind_matches(step, st.cur):
             st.failed_step = sid
             return step["on_fail"], None, None
         return None, "止まった", f"ステップ {sid} が失敗した（exit={st.cur['exit']}）"

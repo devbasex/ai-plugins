@@ -47,6 +47,10 @@ print(json.dumps({{"result": "## 作業の報告\\n- 結果: 完了", "usage": {
 """
 
 
+# new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える
+pytestmark = pytest.mark.usefixtures("issue_bodies")
+
+
 @pytest.fixture
 def fakes(tmp_path, monkeypatch):
     bindir = tmp_path / "bin"

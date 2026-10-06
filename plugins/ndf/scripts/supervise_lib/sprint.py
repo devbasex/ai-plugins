@@ -10,6 +10,7 @@ from pathlib import Path
 import project_mvv
 from pace import PaceError
 from step_result import result
+from supervise_lib import sprint_inputs
 from supervise_lib.decl import decl_roots, with_decls
 from supervise_lib.sprint_waves import (
     sprint_branch,
@@ -351,12 +352,15 @@ def normal_gate_2(a) -> str:
     )
 
 
-def normal_command(a) -> str:
-    """断ったときに示す normal の起動の形（sprint が受ける引数をすべて写し、--pace と --state だけを外す）。"""
+def sprint_command(a, drop: tuple[str, ...] = (), design: list[int] | None = None) -> str:
+    """sprint が受ける引数をすべて写した起動の形。drop の引数を外し、design を渡せば --design へ足す。
+    進め方を断ったときは --pace と --state を外した normal の形を示す。"""
     words = ["python3", str(SELF), "new", "sprint"]
     for name, _, allowed in NEW_ARGS:
         value = getattr(a, name.lstrip("-").replace("-", "_"), None)
-        if "sprint" not in allowed.split() or name in ("--pace", "--state") or value in (None, [], False):
+        if name == "--design" and design:
+            value = [*(value or []), *(n for n in design if n not in (value or []))]
+        if "sprint" not in allowed.split() or name in drop or value in (None, [], False):
             continue
         words += [name, *map(str, value)] if isinstance(value, list) else [name] if value is True else [name, str(value)]
     return " ".join(map(shlex.quote, words))
@@ -386,9 +390,11 @@ def cmd_new_sprint(a, waves: list[dict] | None = None) -> dict:
                 f"pace: {pace} を使えない: {why}。計画を書かない",
                 [],
                 {"pace": pace},
-                next=f"normal で進める（{normal_command(a)}）か、条件を満たしてから打ち直す",
+                next=f"normal で進める（{sprint_command(a, drop=('--pace', '--state'))}）か、条件を満たしてから打ち直す",
             )
     closing = waves is not None
+    if not closing and (stop := sprint_inputs.criteria_refusal(a, lambda design=None: sprint_command(a, design=design))):
+        return stop
     waves = waves if waves is not None else sprint_plans(a)
     if getattr(a, "state", None):
         # worker と judge がスプリント MVV を状態から読む（#1400 の決定 12）

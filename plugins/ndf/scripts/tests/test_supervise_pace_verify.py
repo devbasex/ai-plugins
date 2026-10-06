@@ -30,6 +30,10 @@ PRD = {"target": "prd", "kind": "auto", "trigger": "main へのマージ", "bran
 API = {"target": "api", "kind": "manual", "trigger": "sam deploy", "versioned": False}
 
 
+# new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える
+pytestmark = pytest.mark.usefixtures("issue_bodies")
+
+
 def make_repo(tmp_path: Path, rows, auto: str = "echo check-stg", fast: str = "echo smoke-stg") -> Path:
     """起点 develop・本番 main の git リポジトリ。宣言はコミットして、確認するworktreeを先頭に揃える。"""
     repo = tmp_path / "repo"
