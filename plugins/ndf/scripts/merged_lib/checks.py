@@ -1,7 +1,8 @@
 """PR のチェックの読み取りと merge-when-green の待ち（`merged-steps.py` から分けた。#1142 の D7）。
 
-チェックの状態の分類（pending・失敗・通過）、実行とジョブの結論の読み取り、取り残されたチェックの再実行、
-merge-when-green の 1 回の読み直し（`GreenWatch.poll`）を持つ。待ちの間隔は
+チェックの読み（同じチェックを束ねて最新の項目だけで数える `read_checks`。新しさは lib/gh_checks.py の `newness`）、
+実行とジョブの結論の読み取り、取り残されたチェックの再実行、Runner が付かずに取り消されたジョブの再実行と
+待ち直し（`InfraWatch`。#1645）、merge-when-green の 1 回の読み直し（`GreenWatch.poll`）を持つ。待ちの間隔は
 lib/waits.py の `wait_until` で回す（`GreenWatch.wait`）。
 """
 
@@ -11,68 +12,148 @@ import json
 import re
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
+import gh_checks
 import gh_parts
 import waits
-from step_result import emit, gh_json, result
+from step_result import EXIT_INFRA_WAIT, emit, gh_json, result
 
 TOOL = "merged"
 
 
 FAIL_CONCLUSIONS = {"FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE", "STALE"}
 FAIL_STATES = {"FAILURE", "ERROR"}
-
-
-def check_states(rollup):
-    """statusCheckRollup を (pending, failed, passed) の名前の並びに分ける。"""
-    pending, failed, passed = [], [], []
-    for c in rollup or []:
-        if c.get("__typename") == "StatusContext" or ("state" in c and "status" not in c):
-            name, st = c.get("context") or "?", (c.get("state") or "").upper()
-            if st in FAIL_STATES:
-                failed.append(name)
-            elif st == "SUCCESS":
-                passed.append(name)
-            else:
-                pending.append(name)
-            continue
-        name = c.get("name") or c.get("workflowName") or "?"
-        if (c.get("status") or "").upper() != "COMPLETED":
-            pending.append(name)
-        elif (c.get("conclusion") or "").upper() in FAIL_CONCLUSIONS:
-            failed.append(name)
-        else:
-            passed.append(name)  # SUCCESS / NEUTRAL / SKIPPED
-    return pending, failed, passed
-
-
 RUN_JOB_RE = re.compile(r"/actions/runs/(\d+)/job/(\d+)")
+UNREADABLE_JOB = "取り消しのジョブを照会できない"
 
 
-def pending_check_runs(rollup):
-    """pending の CheckRun のうち、detailsUrl から実行とジョブの番号が取れるものを (名前, run, job) で返す。"""
-    out = []
-    for c in rollup or []:
-        if c.get("__typename") != "CheckRun" or (c.get("status") or "").upper() == "COMPLETED":
-            continue
-        m = RUN_JOB_RE.search(c.get("detailsUrl") or "")
-        if m:
-            out.append((c.get("name") or c.get("workflowName") or "?", m.group(1), m.group(2)))
-    return out
+@dataclass
+class CheckItem:
+    """statusCheckRollup の 1 件。`key` は同じチェックの鍵（CheckRun は workflow の名前と名前の組、StatusContext は
+    context）、`label` は `<workflowName> / <name>`（workflow の名前が無ければ名前）。`state` は
+    pending / failed / passed / cancelled。`run` と `job` は detailsUrl から読む（無ければ None）。"""
+
+    key: tuple
+    label: str
+    state: str
+    run: str | None = None
+    job: str | None = None
+    started: str | None = None
+    completed: str | None = None
+    reason: str | None = None
+
+    def item(self, result_word, **extra) -> dict:
+        """結果の items の 1 件。"""
+        d = {"kind": "check", "name": self.label, "result": result_word}
+        d.update({k: v for k, v in (("run", self.run), ("job", self.job), ("reason", self.reason)) if v})
+        d.update(extra)
+        return d
+
+    def shown(self) -> str:
+        """summary に書く形（run の番号があれば添える）。"""
+        return f"{self.label}（run {self.run}）" if self.run else self.label
 
 
-def probe_checks(root, rollup):
-    """pending の CheckRun ごとに、属する実行とジョブの状態を読む。
+def _conclusion_state(conclusion: str) -> str:
+    c = (conclusion or "").upper()
+    if c == "CANCELLED":
+        return "cancelled"
+    return "failed" if c in FAIL_CONCLUSIONS else "passed"  # SUCCESS / NEUTRAL / SKIPPED は通過
+
+
+def to_item(c: dict) -> CheckItem:
+    """rollup の 1 件を CheckItem にする。"""
+    if c.get("__typename") == "StatusContext" or ("state" in c and "status" not in c):
+        name, st = c.get("context") or "?", (c.get("state") or "").upper()
+        state = "failed" if st in FAIL_STATES else "passed" if st == "SUCCESS" else "pending"
+        return CheckItem(("context", name), name, state, started=c.get("startedAt") or c.get("createdAt"))
+    name = c.get("name") or c.get("workflowName") or "?"
+    workflow = c.get("workflowName") or ""
+    label = f"{workflow} / {name}" if workflow and c.get("name") else name
+    if (c.get("status") or "").upper() != "COMPLETED":
+        state = "pending"
+    else:
+        state = _conclusion_state(c.get("conclusion") or "")
+    m = RUN_JOB_RE.search(c.get("detailsUrl") or "")
+    run, job = (m.group(1), m.group(2)) if m else (None, None)
+    return CheckItem(("run", workflow, name), label, state, run, job, c.get("startedAt"), c.get("completedAt"))
+
+
+def fold_rollup(rollup):
+    """rollup を同じチェックごとの最新の項目へ束ねる（純粋）。(最新の並び, 置き換わった失敗の並び) を返す。
+    新しさは lib/gh_checks.py の `newness`（test-run.py の畳み方と同じ規則）。"""
+    items = [to_item(c) for c in rollup or [] if isinstance(c, dict)]
+    latest, older = gh_checks.fold_latest(items, lambda i: i.key, lambda i: (i.completed, i.started, i.job))
+    return latest, [i for i in older if i.state in ("failed", "cancelled")]
+
+
+@dataclass
+class CheckReading:
+    """1 回の読み直しの結果。`failed` は中身の失敗（ステップのある取り消しと照会できない取り消しを含む）、
+    `infra` は Runner が付かなかった取り消し、`superseded` は置き換わった失敗。`stale` / `queued` / `settled` は
+    `probe_checks` の 3 つ（pending の項目だけを見る）。"""
+
+    pending: list = field(default_factory=list)
+    failed: list = field(default_factory=list)
+    passed: list = field(default_factory=list)
+    infra: list = field(default_factory=list)
+    superseded: list = field(default_factory=list)
+    stale: list = field(default_factory=list)
+    queued: list = field(default_factory=list)
+    settled: list = field(default_factory=list)
+
+
+def runner_never_came(root, item: CheckItem) -> bool:
+    """取り消しのジョブを REST で照会し、ステップが 0 件で Runner の名前が空なら真（Runner が付かなかった取り消し）。
+    照会できなければ item.reason に書いて偽を返す（基盤待ちへ倒さない）。"""
+    job = None
+    if item.job:
+        p = gh_parts.gh(["api", f"repos/{{owner}}/{{repo}}/actions/jobs/{item.job}"], cwd=root)
+        try:
+            job = json.loads(p.stdout) if p.returncode == 0 else None
+        except ValueError:
+            job = None
+    if not isinstance(job, dict):
+        item.reason = UNREADABLE_JOB
+        return False
+    return not (job.get("steps") or []) and not (job.get("runner_name") or "")
+
+
+def read_checks(root, rollup) -> CheckReading:
+    """rollup を束ねて最新の項目で分ける。pending の項目は実行とジョブを読み（`probe_checks`）、実行が終わって
+    結論のあるものは結論で扱う。取り消しの項目にだけジョブの照会を打つ（取り消しが無ければ gh を足さない）。"""
+    latest, superseded = fold_rollup(rollup)
+    r = CheckReading(superseded=superseded)
+    pending = [i for i in latest if i.state == "pending"]
+    if pending:
+        r.stale, r.queued, r.settled = probe_checks(root, pending)
+        done = {(run, job): conclusion for _label, run, job, conclusion in r.settled}
+        for i in pending:
+            if (i.run, i.job) in done:
+                i.state = _conclusion_state(done[(i.run, i.job)])
+    for i in latest:
+        if i.state == "cancelled":
+            (r.infra if runner_never_came(root, i) else r.failed).append(i)
+        else:
+            {"pending": r.pending, "failed": r.failed, "passed": r.passed}[i.state].append(i)
+    return r
+
+
+def probe_checks(root, pending):
+    """pending の CheckItem ごとに、属する実行とジョブの状態を読む。
 
     返り値: (stale, queued, settled)。stale は実行が completed なのにチェックが pending で、ジョブの結論も
-    無い (名前, run, job, attempt)。attempt は実行の試行の番号で、2 以上なら既に再実行している。
-    settled は実行が completed でジョブに結論がある (名前, run, job, 結論) で、
+    無い (ラベル, run, job, attempt)。attempt は実行の試行の番号で、2 以上なら既に再実行している。
+    settled は実行が completed でジョブに結論がある (ラベル, run, job, 結論) で、
     チェックの表示が更新されていないだけなので結論で扱う。queued はジョブが queued のままランナーを
-    待つチェックの名前。読めない実行は飛ばす。
+    待つチェックのラベル。実行とジョブの番号が無い項目・読めない実行は飛ばす。
     """
     stale, queued, settled, runs = [], [], [], {}
-    for name, run_id, job_id in pending_check_runs(rollup):
+    for item in pending:
+        name, run_id, job_id = item.label, item.run, item.job
+        if not run_id or not job_id:
+            continue
         if run_id not in runs:
             p = gh_parts.gh(["run", "view", run_id, "--json", "status,attempt,jobs"], cwd=root)
             try:
@@ -92,6 +173,54 @@ def probe_checks(root, rollup):
         elif job is not None and (job.get("status") or "").lower() == "queued":
             queued.append(name)
     return stale, queued, settled
+
+
+class InfraWatch:
+    """基盤待ちの見張り（1 回の merge-when-green の間だけ生きる）。`reruns` は実行ごとの再実行の回数、
+    `done_since` は実行が終わったのを見た時刻。同じ実行の再実行は `--infra-reruns` 回まで、実行が終わってから
+    `--infra-gap` 秒たった後に、失敗したジョブだけを打つ（`gh run rerun <run> --failed`）。"""
+
+    def __init__(self, a):
+        self.limit = int(getattr(a, "infra_reruns", 3))
+        self.gap = float(getattr(a, "infra_gap", 300.0))
+        self.reruns: dict[str, int] = {}
+        self.done_since: dict[str, float] = {}
+        self.log: list[dict] = []  # 再実行した 1 回ごとの結果の items
+
+    def _run_done(self, root, run_id) -> bool:
+        p = gh_parts.gh(["run", "view", run_id, "--json", "status"], cwd=root)
+        try:
+            info = json.loads(p.stdout) if p.returncode == 0 else {}
+        except ValueError:
+            info = {}
+        return isinstance(info, dict) and (info.get("status") or "").lower() == "completed"
+
+    def step(self, root, reading: CheckReading, now: float) -> tuple[str, str]:
+        """1 回の読み直しの分。("wait", "") で待つ、("reruns", "") は回数を使い切った、
+        ("rerun_failed", "<run>: <stderr>") は再実行が失敗した。"""
+        for i in [i for i in reading.infra if i.run]:
+            if any(x.run == i.run for x in reading.infra[: reading.infra.index(i)]):
+                continue  # 同じ実行は 1 度だけ見る
+            run_id = i.run
+            if not self._run_done(root, run_id):
+                self.done_since.pop(run_id, None)
+                continue
+            if self.reruns.get(run_id, 0) >= self.limit:
+                return "reruns", ""
+            since = self.done_since.setdefault(run_id, now)
+            if now - since < self.gap:
+                continue
+            p = gh_parts.gh(["run", "rerun", run_id, "--failed"], cwd=root)
+            if p.returncode != 0:
+                return "rerun_failed", f"{run_id}: {p.stderr.strip()[:300]}"
+            self.reruns[run_id] = self.reruns.get(run_id, 0) + 1
+            del self.done_since[run_id]
+            self.log.append({"kind": "check", "name": i.label, "result": "infra_rerun", "run": run_id, "rerun": self.reruns[run_id]})
+        return "wait", ""
+
+    def pending_reruns(self, reading: CheckReading) -> list:
+        """再実行した実行のうち、この読み直しで pending の項目（再実行したジョブが Runner を待っている）。"""
+        return [i for i in reading.pending if i.run and i.run in self.reruns]
 
 
 def queued_run_count(root):
@@ -205,7 +334,8 @@ class GreenWatch:
         self.pending_sha = None  # pending を見た先頭のコミット。見た後に全部が通ればチェックは走り終えている
         self.empty_since = None  # rollup が空のままになった時刻（チェックが載る前か、CI の無いリポジトリか）
         self.last_sha, self.recheck = None, False
-        self.stale_since, self.rerun_done = {}, set()  # 取り残しを見た時刻（チェックの名前ごと）/ 再実行したチェック
+        self.stale_since, self.rerun_done = {}, set()  # 取り残しを見た時刻（チェックのラベルごと）/ 再実行したチェック
+        self.infra = InfraWatch(a)  # Runner が付かなかった取り消しの再実行と待ち直し（先頭のコミットごと）
         self.on_open = None  # 開いた PR を最初に読んだとき、draft を外す前に 1 度だけ呼ぶ（承認ゲート 2 の判定。#1336）
 
     def wait(self):
@@ -254,20 +384,65 @@ class GreenWatch:
         )
         self.green_sha = self.pending_sha = self.empty_since = None
         self.stale_since, self.rerun_done = {}, set()
+        self.infra = InfraWatch(self.a)
 
-    def _settle_pending(self, info, pending, failed, passed):
-        """実行が終わってジョブに結論があるのに表示が pending のままのチェックは、結論で扱う（待たない）。(stale, queued) を返す。"""
-        items = self.items
-        stale, queued, settled = probe_checks(self.root, info.get("statusCheckRollup"))
-        for name, run_id, job_id, conclusion in settled:
-            if name not in pending:
-                continue
-            pending.remove(name)
-            (failed if conclusion.upper() in FAIL_CONCLUSIONS else passed).append(name)
-            item = {"kind": "check", "name": name, "result": "settled", "run": run_id, "job": job_id, "conclusion": conclusion}
-            if item not in items:
-                items.append(item)
-        return (stale, queued)
+    def _note(self, reading: CheckReading):
+        """置き換わった失敗と、表示が pending のまま結論の出たチェックを items に 1 度ずつ残す。"""
+        new = [i.item("superseded") for i in reading.superseded]
+        new += [
+            {"kind": "check", "name": name, "result": "settled", "run": run_id, "job": job_id, "conclusion": conclusion}
+            for name, run_id, job_id, conclusion in reading.settled
+        ]
+        self.items += [i for i in new if i not in self.items]
+
+    def _stop_failed(self, reading: CheckReading):
+        """中身の失敗で止まる（終了コード 1）。基盤待ちがあっても再実行しない。"""
+        n = self.n
+        emit(
+            result(
+                TOOL,
+                "stopped",
+                f"#{n} の CI が失敗: {', '.join(i.shown() for i in reading.failed)}",
+                self.items + [i.item("failed") for i in reading.failed],
+                {
+                    "failed": len(reading.failed),
+                    "pending": len(reading.pending),
+                    "passed": len(reading.passed),
+                    "infra": len(reading.infra),
+                    "waits": self.waits,
+                },
+                next=f"gh pr checks {n} で失敗を読み、直して push してから打ち直す",
+            )
+        )
+
+    def _stop_infra(self, reading: CheckReading, why: str, detail: str = ""):
+        """基盤待ちで止まる（終了コード 75）。summary に「CI が失敗」の語を使わない。"""
+        n, infra = self.n, self.infra
+        stuck = reading.infra + [i for i in infra.pending_reruns(reading) if i not in reading.infra]
+        labels = ", ".join(dict.fromkeys(i.label for i in stuck))
+        tail = {
+            "reruns": f"再実行 {infra.limit} 回で解けない",
+            "timeout": f"{self.a.timeout:g} 秒で解けない",
+            "rerun_failed": f"gh run rerun {detail.split(':', 1)[0]} --failed が失敗: {detail.split(': ', 1)[-1]}",
+        }[why]
+        emit(
+            result(
+                TOOL,
+                "stopped",
+                f"#{n} の CI の基盤待ち: Runner が付かずに取り消された（{labels}）。{tail}",
+                self.items + [i.item("infra_wait", reruns=infra.reruns.get(i.run or "", 0)) for i in stuck],
+                {
+                    "failed": 0,
+                    "pending": len(reading.pending),
+                    "passed": len(reading.passed),
+                    "infra": len(stuck),
+                    "waits": self.waits,
+                    "queued_runs": self.queued_runs,
+                },
+                next=f"GitHub Actions の復旧の後に打ち直す: merged-steps.py merge-when-green {n}",
+            ),
+            EXIT_INFRA_WAIT,
+        )
 
     def _check_expected(self, sha, state):
         """--expect-head を渡したとき、読んだ先端がその SHA と違えば、待ち続けず・マージ済みでもそこで止める（#815 の I5）。
@@ -312,26 +487,25 @@ class GreenWatch:
             self._ensure_ready()
         self._reset_on_new_sha(sha)
         self.last_sha = sha
-        pending, failed, passed = check_states(info.get("statusCheckRollup"))
-        probed = self._settle_pending(info, pending, failed, passed) if pending else None
-        if failed:
-            emit(
-                result(
-                    TOOL,
-                    "stopped",
-                    f"#{n} の CI が失敗: {', '.join(failed)}",
-                    items + [{"kind": "check", "name": f, "result": "failed"} for f in failed],
-                    {"failed": len(failed), "pending": len(pending), "passed": len(passed), "waits": waits},
-                    next=f"gh pr checks {n} で失敗を読み、直して push してから打ち直す",
-                )
-            )
-        if not pending and not passed:
+        reading = read_checks(root, info.get("statusCheckRollup"))
+        self._note(reading)
+        if reading.failed:
+            self._stop_failed(reading)
+        if reading.infra:
+            why, detail = self.infra.step(root, reading, time.monotonic())
+            items += self.infra.log
+            self.infra.log.clear()
+            if why != "wait":
+                self._stop_infra(reading, why, detail)
+        pending = [i.label for i in reading.pending]
+        passed = [i.label for i in reading.passed]
+        if not pending and not passed and not reading.infra:
             # チェックがまだ載っていない。--no-checks-after 秒を過ぎても空なら CI の無いリポジトリとみなす
             self.empty_since = self.empty_since if self.empty_since is not None else time.monotonic()
             if time.monotonic() - self.empty_since >= a.no_checks_after:
                 items.append({"kind": "check", "name": "(none)", "result": "no_checks"})
                 return ("done", "no_checks")
-        elif not pending:
+        elif not pending and not reading.infra:
             if sha in (self.pending_sha, self.green_sha):
                 items += [{"kind": "check", "name": c, "result": "passed"} for c in passed]
                 return ("done", "green")
@@ -339,10 +513,14 @@ class GreenWatch:
             self.recheck = True
         else:
             self.green_sha, self.pending_sha, self.empty_since = None, sha, None
-            count = watch_stuck_checks(root, probed, a, StuckWatch(n, items, waits, self.stale_since, self.rerun_done))
-            if count is not None:
-                self.queued_runs = count  # 最後に見た待ち行列の件数
+            if pending:
+                probed = (reading.stale, reading.queued)
+                count = watch_stuck_checks(root, probed, a, StuckWatch(n, items, waits, self.stale_since, self.rerun_done))
+                if count is not None:
+                    self.queued_runs = count  # 最後に見た待ち行列の件数
         if time.monotonic() >= self.deadline:
+            if reading.infra or self.infra.pending_reruns(reading):
+                self._stop_infra(reading, "timeout")
             emit(
                 result(
                     TOOL,
@@ -353,4 +531,5 @@ class GreenWatch:
                     next=f"打ち直す: merged-steps.py merge-when-green {n}",
                 )
             )
-        return ("wait", (sha, tuple(sorted(pending)), tuple(sorted(passed)), self.recheck))
+        infra = tuple(sorted(i.label for i in reading.infra))
+        return ("wait", (sha, tuple(sorted(pending)), tuple(sorted(passed)), infra, self.recheck))

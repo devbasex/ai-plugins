@@ -24,16 +24,21 @@ promote: 昇格の Pull Request（ベースブランチ → 本番チャネル�
 実行が終わったのにチェックが pending のまま --stale-after 秒続けば、そのジョブを 1 度だけ
 `gh run rerun --job` で再実行し、再実行でも取り残されれば止まる。実行が終わりジョブに結論があれば、チェックの表示が
 pending のままでも待たずにその結論で扱う。ジョブがランナーを待つ間は、待ち行列の件数を待ちの 1 周ごとに stderr へ 1 行出す。
+同じチェック（workflow の名前と名前の組）は最新の項目だけで数え、古い項目の失敗は items に result: superseded で残す。
+Runner が付かずに取り消されたジョブ（ステップ 0 件・Runner の名前が空）は CI の基盤待ちとし、実行が終わって
+--infra-gap 秒の後に `gh run rerun <run> --failed` で打ち直して待ち直す（--infra-reruns 回まで）。使い切るか待ちの上限に
+達すると終了コード 75 で止まる（items[].result: infra_wait）。中身の失敗が同時にあれば中身の失敗で止まる。
 
     python3 merged-steps.py probe (--pr N | --head <ブランチ>...) [--act] [--root <dir>]
 
 probe: 開いた PR のチェックを読み、強い順に failed（fix）/ stale（取り残し。--act なら再実行して remedied）/
-stale_again（再実行しても取り残し）/ settled・queued・running（wait）/ passed・none（judge）の 1 つに分ける。
+stale_again（再実行しても取り残し）/ infra（Runner が付かずに取り消された。CI の基盤待ち）・settled・queued・running（wait）/
+passed・none（judge）の 1 つに分ける。置き換わった失敗は分類に数えず、items に result: superseded で載せる。
 `metrics` に class・action・prs・queued_runs を持つ。書き込みは --act の再実行だけ。終了コードは 0 = 調べた。
 
 結果は lib/step_result.py の形の 1 行の JSON。終了コードは 0 = ok / 10 = 承認ゲート 2（metrics.gate が
 production-merge）か、`git branch -D` が要るブランチがある（同意が要る。どちらも提示物を書く）/
-1 = 取り込み・CI・マージが失敗 / 2 = 読めない。
+1 = 取り込み・CI・マージが失敗 / 2 = 読めない / 75 = CI の基盤待ち（merge-when-green・promote）。
 """
 
 from __future__ import annotations
@@ -67,12 +72,7 @@ import repo  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from merged_lib import merge, trash  # noqa: E402
 from merged_lib.pull import blocking_local_changes, same_untracked  # noqa: E402,F401
-from merged_lib.checks import (
-    FAIL_CONCLUSIONS,
-    check_states,
-    probe_checks,  # noqa: E402
-    queued_run_count,
-)
+from merged_lib.checks import queued_run_count, read_checks  # noqa: E402
 
 TOOL = "merged"
 
@@ -318,11 +318,12 @@ def cmd_promote(a):
 # --- probe --------------------------------------------------------------------
 
 # 分類は強い順。PR が 2 つ以上に当たれば上を採り、複数の PR は最も上の分類で全体を表す
-PROBE_CLASSES = ("failed", "stale", "stale_again", "settled", "queued", "running", "passed", "none")
+PROBE_CLASSES = ("failed", "stale", "stale_again", "infra", "settled", "queued", "running", "passed", "none")
 PROBE_ACTIONS = {
     "failed": "fix",
     "stale": "judge",
     "stale_again": "judge",
+    "infra": "wait",  # Runner が付かずに取り消された（CI の基盤待ち）。再実行は merge-when-green が持つ
     "settled": "wait",
     "queued": "wait",
     "running": "wait",
@@ -351,22 +352,29 @@ def _check_item(n, name, result, **extra) -> dict:
 
 
 def _classify_checks(root, n, rollup):
-    """rollup のチェックを分類する。(分類, 根拠) を返す。stale の根拠は取り残された初回のチェックそのもの。"""
-    pending, failed, passed = check_states(rollup)
-    stale, queued, settled = probe_checks(root, rollup) if pending else ([], [], [])
-    failed += [name for name, _run, _job, conclusion in settled if conclusion.upper() in FAIL_CONCLUSIONS]
-    first = [s for s in stale if s[3] <= 1]  # s[3] は試行回数
-    again = [(name, run, job, attempt) for name, run, job, attempt in stale if attempt > 1]
+    """rollup のチェックを分類する（数え方は merged_lib/checks.py の read_checks。同じチェックは最新の項目だけで数える）。
+    (分類, 根拠, 置き換わった失敗の根拠) を返す。stale の根拠は取り残された初回のチェックそのもの。"""
+    r = read_checks(root, rollup)
+    first = [s for s in r.stale if s[3] <= 1]  # s[3] は試行回数
+    again = [s for s in r.stale if s[3] > 1]
+    superseded = [_check_item(n, i.label, "superseded", **_run_job(i)) for i in r.superseded]
     # 優先順に並べ、根拠が空でない最初の分類を返す
     ranked = (
-        ("failed", [_check_item(n, f, "failed") for f in failed]),
+        ("failed", [_check_item(n, i.label, "failed", **_run_job(i)) for i in r.failed]),
         ("stale", first),
         ("stale_again", [_probe_item(n, s, "stale_again", "attempt") for s in again]),
-        ("settled", [_probe_item(n, s, "settled", "conclusion") for s in settled]),
-        ("queued", [_check_item(n, q, "queued") for q in queued]),
-        ("running", [_check_item(n, c, "running") for c in pending]),
+        ("infra", [_check_item(n, i.label, "infra_wait", **_run_job(i)) for i in r.infra]),
+        ("settled", [_probe_item(n, s, "settled", "conclusion") for s in r.settled]),
+        ("queued", [_check_item(n, q, "queued") for q in r.queued]),
+        ("running", [_check_item(n, i.label, "running") for i in r.pending]),
     )
-    return next(((kind, items) for kind, items in ranked if items), ("passed", []))
+    cls, found = next(((kind, items) for kind, items in ranked if items), ("passed", []))
+    return cls, found, superseded
+
+
+def _run_job(item) -> dict:
+    """CheckItem の run・job・reason のうち、値のあるもの。"""
+    return {k: v for k, v in (("run", item.run), ("job", item.job), ("reason", item.reason)) if v}
 
 
 def _probe_item(n, probe, result, last):
@@ -398,11 +406,11 @@ def probe_one(root, n, act, items):
         info = None
     if not isinstance(info, dict) or info.get("state") != "OPEN":
         return None
-    cls, found = _classify_checks(root, n, info.get("statusCheckRollup"))
+    cls, found, superseded = _classify_checks(root, n, info.get("statusCheckRollup"))
     action = PROBE_ACTIONS[cls]
     if cls == "stale":
         found, action = _rerun_stale(root, n, found, act)
-    items += found
+    items += found + superseded
     return cls, action
 
 
@@ -422,11 +430,12 @@ def cmd_probe(a):
         _, cls, action = min(found, key=lambda f: PROBE_CLASSES.index(f[1]))
     queued_runs = (queued_run_count(root) or 0) if cls == "queued" else 0
     prs = [f[0] for f in found]
-    names = ", ".join(i["name"] for i in items if i.get("kind") == "check") or "無し"
+    names = ", ".join(i["name"] for i in items if i.get("kind") == "check" and i.get("result") != "superseded") or "無し"
     summary = {
         "failed": f"失敗したチェックがある: {names}",
         "stale": ("取り残されたチェックを再実行した: " if action == "remedied" else "取り残されたチェックがある: ") + names,
         "stale_again": f"再実行したチェックが再び取り残された: {names}",
+        "infra": f"Runner が付かずに取り消されたジョブがある（CI の基盤待ち）: {names}",
         "settled": f"実行は終わりジョブに結論がある（表示だけが pending）: {names}",
         "queued": f"ジョブがランナーを待っている（待ち行列 {queued_runs} 件）: {names}",
         "running": f"実行中のチェックがある: {names}",

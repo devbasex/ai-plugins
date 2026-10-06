@@ -33,6 +33,18 @@ def add_wait_args(m):
         help="実行が終わったのにチェックが pending のまま続けば、ジョブを 1 度だけ再実行するまでの秒数",
     )
     m.add_argument(
+        "--infra-reruns",
+        type=int,
+        default=3,
+        help="Runner が付かずに取り消されたジョブ（CI の基盤待ち）の実行を、再実行する回数の上限（同じ実行ごと）",
+    )
+    m.add_argument(
+        "--infra-gap",
+        type=float,
+        default=300.0,
+        help="基盤待ちの実行が終わってから、失敗したジョブを再実行するまでの秒数",
+    )
+    m.add_argument(
         "--gate-approved",
         choices=("user", "mvv"),
         help="承認ゲート 2 を通した担い手（利用者 / MVV 判定）。自動反映の本番チャネルへのマージは、これが無ければ止まる",
@@ -151,6 +163,15 @@ def merge_gate(a):
 # --- merge-when-green ---------------------------------------------------------
 
 
+def _rerun_superseded_next(n, items):
+    """マージが拒まれたとき、置き換わった失敗があれば run ごとに通し直す案内（無ければ None。#1645 の決定 8）。"""
+    runs = list(dict.fromkeys(i["run"] for i in items if i.get("result") == "superseded" and i.get("run")))
+    if not runs:
+        return None
+    cmds = "; ".join([*(f"gh run rerun {r}" for r in runs), f"merged-steps.py merge-when-green {n}"])
+    return f"置き換わった失敗を通し直してから打ち直す: {cmds}"
+
+
 def merge_when_green(a, cleanup, next_cmd=None, plan_step="merge-approved"):
     root = git_root(a.root)
     n = a.pr
@@ -183,6 +204,7 @@ def merge_when_green(a, cleanup, next_cmd=None, plan_step="merge-approved"):
                     f"gh pr merge --admin が失敗: {p.stderr.strip()[:300]}",
                     items + [{"kind": "pr", "name": f"#{n}", "result": "stopped", "reason": p.stderr.strip()[:300]}],
                     {"waits": waits},
+                    next=_rerun_superseded_next(n, items),
                 )
             )
         merged = {"kind": "pr", "name": f"#{n}", "result": "merged", "method": a.method, "head": sha}
