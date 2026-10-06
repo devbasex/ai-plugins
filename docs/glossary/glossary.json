@@ -3372,19 +3372,19 @@
       "term": "1 本の重さ",
       "context": "ndf-workflow",
       "meaning": "担当 1 つ（worktree 1 つ分）が使う cgroup の anon の量。実測（per_lane_observed_mib）と、本数の判定に使った値（per_lane_used_mib）を分けて出す",
-      "pending_source": "issues/issue-780-requirements.md"
+      "source": "docs/specifications/ndf-execution-plan-and-parallel-capacity.md"
     },
     {
       "term": "anon の起点",
       "context": "ndf-workflow",
       "meaning": "実行計画の開始時（動いている本数が 0）に測った cgroup の anon。1 本の重さを測る差の基準",
-      "pending_source": "issues/issue-780-requirements.md"
+      "source": "docs/specifications/ndf-execution-plan-and-parallel-capacity.md"
     },
     {
       "term": "判定の区分",
       "context": "ndf-workflow",
       "meaning": "parallel-measure.py capacity が本数を決めた理由の区分。grow（足してよい）/ hold（今の本数を超えて足さない）/ shrink（1 本減らす）",
-      "pending_source": "issues/issue-780-requirements.md"
+      "source": "docs/specifications/ndf-execution-plan-and-parallel-capacity.md"
     },
     {
       "term": "積み直し",
