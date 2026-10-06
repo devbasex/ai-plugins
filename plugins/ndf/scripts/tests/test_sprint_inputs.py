@@ -108,8 +108,8 @@ def test_the_section_needs_one_non_blank_line(body, lacks):
 def test_the_plans_are_the_same_as_without_the_check(tmp_path, issue_bodies, monkeypatch, pace):
     args, cwd = sprint_args(tmp_path, pace=pace)
     out = tmp_path / "m"
-    real = sprint_inputs.refusal
-    monkeypatch.setattr(sprint_inputs, "refusal", lambda a, command: None)
+    real = sprint_inputs.criteria_refusal
+    monkeypatch.setattr(sprint_inputs, "criteria_refusal", lambda a, command: None)
     monkeypatch.setattr(sys, "argv", ["supervise.py", *args])
     monkeypatch.chdir(cwd)
     with pytest.raises(SystemExit) as e:
@@ -118,7 +118,7 @@ def test_the_plans_are_the_same_as_without_the_check(tmp_path, issue_bodies, mon
     unchecked = written(out)
     assert unchecked
     shutil.rmtree(out)
-    monkeypatch.setattr(sprint_inputs, "refusal", real)
+    monkeypatch.setattr(sprint_inputs, "criteria_refusal", real)
     issue_bodies.body(12, "## 受け入れ条件\n\n- [ ] 1. 動く\n")
     p, res = run(args, cwd)
     assert res["status"] == "ok", p.stdout + p.stderr

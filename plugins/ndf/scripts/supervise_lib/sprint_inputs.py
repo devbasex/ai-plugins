@@ -33,7 +33,7 @@ class Lack(NamedTuple):
         return {"issue": self.issue, "reason": self.reason, **({"gh": self.gh} if self.gh else {})}
 
 
-def targets(issues: list[int], design: list[int]) -> list[int]:
+def criteria_targets(issues: list[int], design: list[int]) -> list[int]:
     """確かめる課題（--issue から --design を除いたもの。順序を保ち、重複を除く）。"""
     seen = set(design)
     out = []
@@ -70,7 +70,7 @@ def read_body(n: int, cwd: str | None) -> tuple[str | None, dict | None]:
 def lacking(issues: list[int], design: list[int], cwd: str | None = None) -> list[Lack]:
     """受け入れ条件を持たない課題と、本文を取れない課題を全部返す（無ければ空）。"""
     out = []
-    for n in targets(issues, design):
+    for n in criteria_targets(issues, design):
         body, err = read_body(n, cwd)
         lack = Lack(n, UNREADABLE, err) if body is None else body_lack(n, body)
         if lack:
@@ -78,7 +78,7 @@ def lacking(issues: list[int], design: list[int], cwd: str | None = None) -> lis
     return out
 
 
-def next_text(lacks: list[Lack], design_command: str, same_command: str) -> str:
+def lack_next_text(lacks: list[Lack], design_command: str, same_command: str) -> str:
     """止まったときの次の手（--design へ入れて打ち直す・本文を書いて打ち直す・gh を確かめて打ち直す）。"""
     nums = lambda rows: " ".join(f"#{x.issue}" for x in rows)  # noqa: E731
     missing = [x for x in lacks if x.reason != UNREADABLE]
@@ -95,7 +95,7 @@ def next_text(lacks: list[Lack], design_command: str, same_command: str) -> str:
     return " ".join(steps)
 
 
-def refusal(a, command: Callable[..., str]) -> dict | None:
+def criteria_refusal(a, command: Callable[..., str]) -> dict | None:
     """--design に無い課題の本文が受け入れ条件を持たない・読めないとき、計画を書かずに止める結果。
     command(design=[番号]) は今の引数を写して --design へ番号を足した起動の形、command() は今の起動の形。"""
     lacks = lacking(list(a.issue), list(getattr(a, "design", None) or []), cwd=str(Path(a.worktree).resolve()))
@@ -109,5 +109,5 @@ def refusal(a, command: Callable[..., str]) -> dict | None:
         f"実装の入力が足りない課題がある（{nums}: {reasons}）。計画を書かない",
         [x.row() for x in lacks],
         {"issues": [x.issue for x in lacks]},
-        next=next_text(lacks, command(design=[x.issue for x in lacks]), command()),
+        next=lack_next_text(lacks, command(design=[x.issue for x in lacks]), command()),
     )

@@ -393,7 +393,7 @@ def cmd_new_sprint(a, waves: list[dict] | None = None) -> dict:
                 next=f"normal で進める（{sprint_command(a, drop=('--pace', '--state'))}）か、条件を満たしてから打ち直す",
             )
     closing = waves is not None
-    if not closing and (stop := sprint_inputs.refusal(a, lambda design=None: sprint_command(a, design=design))):
+    if not closing and (stop := sprint_inputs.criteria_refusal(a, lambda design=None: sprint_command(a, design=design))):
         return stop
     waves = waves if waves is not None else sprint_plans(a)
     if getattr(a, "state", None):
