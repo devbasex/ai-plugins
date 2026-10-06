@@ -54,7 +54,7 @@ Pull Request の状態（`state` / `draft` / `merged_at`）は GitHub の語を�
 | I7 | 実行の状態 | 状態が見送りの改善項目の数は、`deferred_items` のうち理由が `not_done` か `test_failed` の記録の数と等しい | 完了報告の理由別の件数と `metrics.deferred` が食い違う |
 | I8 | 実行の状態 | 完了報告の「見送った提案」の理由別の件数の和は、「見送った提案」の総数（`deferred_items` の数）と等しい | 理由別の内訳が総数と合わない |
 
-**I7 が成り立つ根拠**: 改善項目の状態を見送りにする経路は `commands/implement.py` の `_settle` の 1 つだけで、そこで `defer` を呼んで同じ項目を `not_done` か `test_failed` で `deferred_items` へ足してから状態を見送りにする（`git grep -n '\["status"\] = '` で `DEFERRED` を代入する行はここだけ）。プランの外の取り消し（`ledger.mark_outside_revert`）は取り消されていない項目（`is_live`）だけに当たり、見送りの項目は触らない。`defer` の重複除けは項目 ID（`I-<順位>`）で見るが、計画に入らなかった提案の ID は `C-<番号>` で名前の空間が分かれており、改善項目の見送りが既存の記録に吸われることはない。要求の前提 5 はこのまま成り立ち、受け入れ条件 12 は直さない。
+**I7 が成り立つ根拠**: 改善項目の状態を見送りにする経路は `commands/implement.py` の `_settle` の 1 つだけで、そこで `defer` を呼んで同じ項目を `not_done` か `test_failed` で `deferred_items` へ足してから状態を見送りにする（`git grep -n '\["status"\] = '` で `DEFERRED` を代入する行はここだけ）。プランの外の取り消し（`ledger.mark_outside_revert`）は取り消されていない項目（`is_live`）だけに当たり、見送りの項目は触らない。`defer` の重複除けは項目 ID（`I-<順位>`）で見るが、計画に入らなかった提案の ID は `C-<番号>` で名前の空間が分かれており、改善項目の見送りが既存の記録に吸われることはない。要求の前提 5 はこのまま成り立ち、受け入れ条件 12 は直さない。#1743 の決定 10 の後は、採り直し（`commands/readopt.py`）が持ち越しの項目を `not_done` で見送る経路が加わるが、#1743 の設計でこの経路も `defer` を呼んでから状態を変えるため、I7 はどちらの順で入っても成り立つ。
 
 ### ドメインイベント
 
@@ -65,7 +65,7 @@ Pull Request の状態（`state` / `draft` / `merged_at`）は GitHub の語を�
 | E3 | `init` が Pull Request の状態を判定した | `pr_gate.refusal` | `setup._prepare_init`（止める理由があれば `die`。駆動は終了コード 4 を中断として受ける） |
 | E4 | `init` が作業ディレクトリと状態ファイルを用意した | `setup._prepare_init` 以降 | 後続の手順 |
 | E5 | リファクタリング計画が提案を見送った | `commands/plan.py`・`commands/propose.py`（`defer`） | 状態ファイルの `deferred_items` |
-| E6 | 実装の取り込みが改善項目を見送った | `commands/implement.py` の `_settle` | `items[].status` と `deferred_items` |
+| E6 | 実装の取り込みか採り直しが改善項目を見送った | `commands/implement.py` の `_settle`（#1743 の後は `commands/readopt.py` も） | `items[].status` と `deferred_items` |
 | E7 | 駆動が結果 JSON の `metrics` を数えた | `drive.py`（`Drive.counts`） | supervisor・利用者 |
 | E8 | 完了報告を出した | `commands/report.py`（`_print_deferred`） | supervisor・利用者 |
 
@@ -73,7 +73,7 @@ Pull Request の状態（`state` / `draft` / `merged_at`）は GitHub の語を�
 
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
-| 見送った改善項目 | リファクタリング計画が採った改善項目のうち、表示の状態が見送り（期限までに終わらない・足したテストが落ちた）のもの。結果 JSON の `metrics.deferred` の数 | 追加（要求の差分で反映済み） |
+| 見送った改善項目 | リファクタリング計画が採った改善項目のうち、表示の状態が見送りのもの（時間内に実装を終えなかった `not_done`・足したテストが落ちた `test_failed`）。結果 JSON の `metrics.deferred` の数。`not_done` が指す項目は #1743 の決定 9・10 で変わる（「並行する設計との関係」） | 追加（要求の差分で反映済み。#1743 に合わせて直した） |
 | 見送った提案 | 計画に入らなかった提案と見送った改善項目を合わせたもの。理由を 1 つ持つ。状態ファイルの `deferred_items` | 追加（要求の差分で反映済み） |
 
 ## 機能一覧
@@ -85,6 +85,28 @@ Pull Request の状態（`state` / `draft` / `merged_at`）は GitHub の語を�
 | F3 | 応答から状態を判定できないときに続けず、読めなかった項目名を示す | 単独起動の利用者、工程の supervisor |
 | F4 | 完了報告の件数の行の「見送り」を、結果 JSON と計画のコメントと同じ値で出す | 完了報告を写す supervisor、振り返る人 |
 | F5 | 完了報告で「見送った提案」の総数と理由別の件数を、見送りの件数と別の行に出す | 完了報告を写す supervisor、振り返る人 |
+
+## システム構成
+
+**文脈**: 外部の系との出入りは、`init` が既に読んでいる GitHub の Pull Request の応答 1 回だけで、増やさない（I5）。完了報告と結果 JSON を読む側（supervisor・利用者）への出力の形も変えない。
+
+```mermaid
+graph LR
+  user[単独起動の利用者・工程の supervisor] -->|drive.py| body[cross-refactoring<br/>このリポジトリの配布物]
+  body -->|repos/.../pulls/番号 を 1 回読む| gh[GitHub<br/>Pull Request]
+  body -->|結果 JSON・完了報告| user
+```
+
+**配置**: 判定も件数の数え方も、利用者のホスト（端末かコンテナ）の `refactor.py` のプロセスの中で完結する。
+
+```mermaid
+graph TD
+  subgraph host[利用者のホスト]
+    drv[駆動 drive.py] -->|init・report| rf[refactor.py]
+    rf --> st[(状態ファイル<br/>items / deferred_items)]
+  end
+  rf -->|gh api（1 回）| gh[GitHub]
+```
 
 ## 構成要素
 
@@ -173,6 +195,22 @@ classDiagram
 
 `PrStatus` の 3 つの値は応答の値をそのまま持つ（型を直さない）。想定の値かどうかを決めるのは `refusal` だけにし、判定の規則を 1 か所に置く。
 
+## パッケージ・モジュール構成
+
+```text
+plugins/ndf/
+├── skills/cross-refactoring/
+│   ├── SKILL.md                         # 変更（前提・metrics の説明・完了報告の節）
+│   ├── docs/04-verify-and-report.md     # 変更
+│   ├── scripts/refactor_lib/
+│   │   ├── pr_gate.py                   # 新設（PrStatus / refusal）
+│   │   └── commands/
+│   │       ├── setup.py                 # 変更（_pending_state・_prepare_init）
+│   │       └── report.py                # 変更（_print_deferred）
+│   └── tests/                           # 変更（偽の応答・報告の期待）
+└── scripts/tests/test_drive_refactor.py # 変更
+```
+
 ## 入出力の契約
 
 ### `refactor.py init` の止め方
@@ -202,7 +240,7 @@ classDiagram
 
 理由の並びと名前は `vocabulary.DEFER_REASONS` のまま（8 つ、件数 0 も出す）。件数の行の「見送り」は計画のコメントの件数の行（`plan.counts_line` の `見送り {t.deferred}`）と同じ値になる。
 
-結果 JSON の `metrics` のキーと値の意味は変えない（`deferred` は見送った改善項目の数のまま）。
+結果 JSON の `metrics` のキーと値の意味は変えない（`deferred` は見送った改善項目の数のまま）。#1743 の採り直しの後は、どの値も採り直しの後の状態ファイルから数える（「並行する設計との関係」）。
 
 ## 処理の流れ
 
@@ -366,6 +404,16 @@ GitHub の応答は 3 項目を必ず持つ（実測）。欠けている・型�
 | --- | --- | --- | --- |
 | #1658 | 実装する | — | `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/pr_gate.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/setup.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/report.py`、`plugins/ndf/skills/cross-refactoring/SKILL.md`、`plugins/ndf/skills/cross-refactoring/docs/04-verify-and-report.md`、`plugins/ndf/skills/cross-refactoring/tests/`、`plugins/ndf/scripts/tests/test_drive_refactor.py` |
 | #1660 | 取り込む | #1658 | — |
+
+## 並行する設計との関係
+
+同じスプリントの #1743・#1814 の実装と、どの順で入っても成り立つように、相手の決定を前提として次のとおり扱う。
+
+| 相手の決定 | 内容 | この設計の扱い |
+| --- | --- | --- |
+| #1743 の決定 9 | 項目ごとの着手期限・完了期限と `_deadline_passed` を外す | 「見送った改善項目」の `not_done` を「期限までに終わらない」と書かず、「時間内に実装を終えなかった」と書く。#1743 の前は完了期限を過ぎた・コミットが無い項目、#1743 の後は実装の終わりまでにコミットが無く、採り直しでも残った時間に入らなかった項目を指す。どちらでも `metrics.deferred`・`ledger.tally` の数え方は変わらない |
+| #1743 の決定 10 | 検証の後に `budget` で見送った候補と持ち越しの項目を採り直す（`readopt`） | 状態を見送りにする経路に `readopt` が加わる。#1743 の設計で `readopt` も `defer` を理由 `not_done` で呼んでから状態を変えるため、I7 は保たれる。採り直した `budget` の候補は `deferred_items` から外れるため、完了報告の「見送った提案」の総数と理由別の件数は採り直しの後の値になる（完了報告は `readopt` の後に出るため、持ち越しの状態 `carried` は残らない） |
+| #1814 の決定 7 | 範囲テストの対象の無い `remove_dead_code` を `deletion` として採る | `no_target` の見送りが減るだけで、件数の数え方は変えない |
 
 ## 未確認のまま残ること
 

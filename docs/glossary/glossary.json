@@ -3411,7 +3411,7 @@
     {
       "term": "見送った改善項目",
       "context": "ndf-cross-refactoring",
-      "meaning": "リファクタリング計画が採った改善項目のうち、表示の状態が見送り（期限までに終わらない・足したテストが落ちた）のもの。結果 JSON の metrics.deferred の数",
+      "meaning": "リファクタリング計画が採った改善項目のうち、表示の状態が見送りのもの（時間内に実装を終えなかった not_done・足したテストが落ちた test_failed）。結果 JSON の metrics.deferred の数",
       "source": "",
       "pending_source": "issues/issue-1658-requirements.md"
     },
