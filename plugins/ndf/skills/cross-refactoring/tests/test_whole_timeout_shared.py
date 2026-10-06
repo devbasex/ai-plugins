@@ -102,7 +102,7 @@ def test_targets_across_suites_run_each_suite_with_its_own_template(refactor, mo
     runs, origin = targets.limited_runs({"target_scope": ["tests"]}, ["tests/a/test_t.py", "tests/b/test_t.py::y"], str(tmp_path))
     assert origin == "targets"
     commands = [r.command for r in runs]
-    assert commands == ["run-a tests/a/test_t.py", "run-b tests/b/test_t.py::y"]
+    assert commands == ["run-a tests/a/test_t.py", "run-b tests/b/test_t.py"]
     assert targets.command_key({"scope_commands": targets.runs_state(runs)}) == tuple(commands)
 
     single, _ = targets.limited_runs({"target_scope": ["tests"]}, ["tests/a/test_t.py"], str(tmp_path))
@@ -115,6 +115,30 @@ def test_targets_across_suites_run_each_suite_with_its_own_template(refactor, mo
     assert result.status == "passed"
     assert seen == commands
     assert given == [100, 70], "suite 群で 1 つの上限を分け合う"
+
+
+_UNITTEST_WRAPPER = """import sys
+bad = [a for a in sys.argv[1:] if "::" in a]
+if bad:
+    print("unittest cannot select: " + bad[0])
+    sys.exit(2)
+"""
+
+
+def test_a_unittest_wrapper_does_not_reject_node_ids_from_the_plan(refactor, monkeypatch, tmp_path):
+    """#1793 の R5（PR 254 の形）— unittest の包みの雛形と `::` 付きの `test_targets` で、範囲テストが選択子を拒まない。"""
+    targets = sys.modules["refactor_lib.targets"]
+    ts = targets.ts
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_episodes_pipeline.py").write_text("", encoding="utf-8")
+    (tmp_path / "unit.py").write_text(_UNITTEST_WRAPPER, encoding="utf-8")
+    strategy = ts.Strategy("local-full", "test", [ts.Suite("unit", "python3 unit.py", f"{sys.executable} unit.py {{paths}}")])
+    monkeypatch.setattr(targets, "strategy_of", lambda state: strategy)
+    runs, origin = targets.limited_runs({"target_scope": ["tests"]}, ["tests/test_episodes_pipeline.py::Check"], str(tmp_path))
+    assert origin == "targets" and all("::" not in r.command for r in runs)
+    result, _ = targets.run_commands([r.command for r in runs], str(tmp_path), 60, tmp_path / "verify.log")
+    assert result.status == "passed"
+    assert "cannot select" not in (tmp_path / "verify.log").read_text(encoding="utf-8")
 
 
 def test_whole_fallback_reruns_every_suite(refactor, monkeypatch, tmp_path):
