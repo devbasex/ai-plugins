@@ -1153,7 +1153,7 @@
     {
       "term": "予備メモリ",
       "context": "ndf-workflow",
-      "meaning": "オーケストレーターと同じ VM に常駐する他のプロセスの変動のために空けておくメモリ",
+      "meaning": "同じ VM に常駐する他のプロセスの揺れのために空けておくメモリ。既に動いているオーケストレーターの本体と担当は MemAvailable から引かれているため含めない",
       "source": "docs/specifications/ndf-execution-plan-and-parallel-capacity.md"
     },
     {
