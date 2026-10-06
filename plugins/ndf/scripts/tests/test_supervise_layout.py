@@ -57,6 +57,7 @@ MODULES = [
     "delivery_templates",
     "sprint_waves",
     "sprint_routes",
+    "sprint_inputs",  # new sprint が計画を書く前に課題の受け入れ条件を確かめる（#1767）
     "sprint",
     "queue",
     "commands",
@@ -78,6 +79,7 @@ NO_ENGINE = [
     "delivery_templates",
     "sprint_waves",
     "sprint_routes",
+    "sprint_inputs",
     "sprint",
     "queue",
     "new_args",
@@ -88,6 +90,10 @@ NO_ENGINE = [
 # 関数の中の import で、モジュールの循環にしない辺（Engine.run と cmd_queue が耐久ワークフローを始める。
 # flow は Engine と、queue のファイルだけに触る関数を import する）
 LAZY = {("engine", "flow"), ("queue", "flow")}
+
+
+# new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える
+pytestmark = pytest.mark.usefixtures("issue_bodies")
 
 
 def run(*args: str) -> subprocess.CompletedProcess:
