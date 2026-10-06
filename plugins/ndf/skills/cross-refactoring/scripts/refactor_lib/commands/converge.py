@@ -1,10 +1,11 @@
-"""検証と修正（`verify` / `merge-fix`、#933 の F6 F7）。
+"""検証（`verify`、#933 の F6・#1793 の R3）。修正の取り込み（`merge-fix`）は `fix_intake.py` にある。
 
 **検証は HEAD で項目ごとの範囲テストを走らせる**（決定 14）。同じ語の並びの項目は
 1 回だけ走らせて結果を共有する。全体のテストは、危険フラグが立ったときに検証の中で
 1 度だけ走らせる。落ちたら落ちたテストだけを走らせ直して揺れ・元からの失敗・変更が
 原因を見分け、変更が原因なら修正へ回す。修正の締め切りまでに通らなければ、
 危険フラグの項目を新しい順に 1 件ずつ取り消し、通った時点で止める（決定 22。決定 15 を改めた）。
+修正担当が直さなかった項目は、締め切りを待たずに検証の最初に取り消す（#1793 の R3）。
 
 | 返す値 | 意味 | 駆動がすること |
 | --- | --- | --- |
@@ -21,34 +22,14 @@ from typing import Any, Optional
 
 import statefile
 
-from .. import budget, clock, culprit, danger, info, intake, publish, scope_verdict, targets, timeline, triage, wholetest
-from ..gitfacts import (
-    collect_commit_facts,
-    commit_files,
-    commit_trailers,
-    commits_in_range,
-    discard_impl_leftovers,
-    note_stopped,
-    record_observed_model,
-)
-from ..items import (
-    FAILING,
-    IMPLEMENTED,
-    VERIFIED,
-    find_item,
-    item_shas,
-    live_items,
-    newest_first,
-)
+from .. import budget, clock, culprit, danger, info, publish, scope_verdict, targets, timeline, triage, wholetest
+from ..gitfacts import commit_files, discard_impl_leftovers
+from ..items import FAILING, IMPLEMENTED, VERIFIED, item_shas, live_items, newest_first
 from ..outbound import item_lines, plan_line
 from ..paths import head_sha, load_state, work_dir
-from ..phases import add_phase_seconds, finish_phase, phase_record
-from ..undo import discard_range, drop, resume_pending_drop
-from ..verify import (
-    verify_commit_basics,
-    collect_test_changes,
-    verify_test_changes,
-)
+from ..phases import add_phase_seconds, finish_phase
+from ..undo import drop, resume_pending_drop
+from ..fix_intake import UNFIXED_REASON, merge as merge_fix
 
 
 # ---------- 範囲テスト ----------
@@ -120,20 +101,35 @@ def _give_up(path: pathlib.Path, state: dict[str, Any]) -> bool:
     return bool(groups)
 
 
+def _drop_unfixed(path: pathlib.Path, state: dict[str, Any]) -> None:
+    """直さなかった項目（`merge-fix` が `unfixed` を付けた生きている項目）を 1 回の取り消しでまとめて取り消す（#1793 の R3）。
+
+    締め切りを待たない。同じ項目を同じ状態で修正へ渡し直しても結果は変わらないためである。"""
+    unfixed = [i for i in live_items(state) if i.get("unfixed")]
+    if not unfixed:
+        return
+    for item in unfixed:
+        item["failure_reason"] = UNFIXED_REASON
+    info(f"↩ 修正担当が直さなかった項目 {len(unfixed)} 件（{', '.join(i['id'] for i in unfixed)}）を取り消します")
+    drop(path, state, [i["id"] for i in unfixed], UNFIXED_REASON)
+
+
 def _settle_scope(path: pathlib.Path, state: dict[str, Any]) -> None:
-    """範囲テストで判定し、締め切りなら取り消し、取り消した後に巻き込まれた項目を走らせ直す（#1688 の順序 1〜4）。
+    """直さなかった項目を取り消し、判定を待つ項目を範囲テストで判定し、締め切りなら取り消して判定し直す
+    （#1688 の順序 1〜4・#1793 の R3 と確かめ直し）。
 
     取り消しが無くなるまで繰り返す。取り消すたびに項目が減るため、項目の数の回数の内で終わる。
     """
-    scope_verdict.judge_items(path, state, _items_in(state, IMPLEMENTED))
+    _drop_unfixed(path, state)
+    scope_verdict.judge_items(path, state, scope_verdict.pending(state))
     statefile.save(path, state)
     for _ in range(len(state.get("items") or []) + 1):
         if not _give_up(path, state):
             return
-        waiting = scope_verdict.waiting(state)
-        if not waiting:
+        pending = scope_verdict.pending(state)
+        if not pending:
             return
-        scope_verdict.judge_items(path, state, waiting)
+        scope_verdict.judge_items(path, state, pending)
         statefile.save(path, state)
 
 
@@ -330,22 +326,24 @@ def cmd_verify(args: argparse.Namespace) -> None:
         # **取り込んでいない修正を先に取り込む。** 修正の後に落ちて再開すると、修正の
         # コミットが項目に結ばれないまま HEAD に残り、検証だけが先に進む。
         info("↻ 取り込んでいない修正があります。先に取り込みます")
-        cmd_merge_fix(args)
+        merge_fix(args.id)
         path, state = load_state(args.id)
     _prepare(path, state)
     state["phase"] = "verify"
     started = time.monotonic()
     state.pop("launch_failure", None)
-    _settle_scope(path, state)
-
-    failing = _items_in(state, FAILING)
-    if failing:
-        _to_fix(path, state, failing, started, "範囲テストが落ちた項目")
-        return
-
-    if _whole_test(path, state, _flag_items(state)):
-        _to_fix(path, state, _items_in(state, FAILING), started, "全体のテストを落とした原因の項目")
-        return
+    for _ in range(len(state.get("items") or []) + 1):
+        _settle_scope(path, state)
+        failing = _items_in(state, FAILING)
+        if failing:
+            _to_fix(path, state, failing, started, "範囲テストが落ちた項目")
+            return
+        if _whole_test(path, state, _flag_items(state)):
+            _to_fix(path, state, _items_in(state, FAILING), started, "全体のテストを落とした原因の項目")
+            return
+        # 全体テストの取り消しで確かめ直す項目が残ったら、範囲テストの判定へ戻る（全体テストは走らせ直さない）
+        if not scope_verdict.pending(state):
+            break
     _account(state, started)
     finish_phase(state, "verify")
     state["phase"] = "final"
@@ -387,114 +385,3 @@ def _account(state: dict[str, Any], started: float) -> None:
     stats["seconds"] = round(float(stats.get("seconds") or 0.0) + seconds, 1)
     stats["items"] = sum(1 for i in state.get("items") or [] if int(i.get("verify_runs") or 0) > 0)
     add_phase_seconds(state, "verify", seconds)
-
-
-# ---------- merge-fix ----------
-
-
-def _fix_problems(
-    state: dict[str, Any],
-    facts: list[dict[str, Any]],
-    allowed: set[str],
-) -> list[str]:
-    """修正のコミットが手順を満たすか。**1 件でも外れたら修正の範囲ごと取り消す。**"""
-    scope = list(state.get("target_scope") or [])
-    problems = []
-    for fact in facts:
-        item_id = str((fact.get("trailers") or {}).get("Item-Id") or "")
-        if item_id not in allowed:
-            problems.append(f"コミット {fact['sha'][:7]} の Item-Id（{item_id or 'なし'}）は修正の対象ではありません")
-            continue
-        problem = verify_commit_basics(fact, scope, "コミットが範囲にありません", check_test=False)
-        problem = problem or verify_test_changes(collect_test_changes([fact]))
-        if problem:
-            problems.append(problem)
-    return problems
-
-
-def _inspect_fix_commits(
-    state: dict[str, Any],
-    work: str,
-    fix: dict[str, Any],
-    fix_items: list[dict[str, Any]],
-) -> dict[str, Any]:
-    """修正の起点からコミットを集め、取り込み可否の材料を返す。"""
-    head = head_sha(work) or ""
-    ordered = commits_in_range(work, fix.get("base_sha"), head)
-    if ordered is None:
-        return {
-            "head": head,
-            "ordered": [],
-            "problems": [f"修正の範囲を確定できません（起点 {fix.get('base_sha')}）"],
-        }
-    facts = collect_commit_facts(work, ordered, set(ordered), "", state["head_branch"])
-    return {
-        "head": head,
-        "ordered": ordered,
-        "problems": _fix_problems(state, facts, {t["id"] for t in fix_items}),
-    }
-
-
-def _apply_fix_result(
-    path: pathlib.Path,
-    state: dict[str, Any],
-    work: str,
-    result: dict[str, Any],
-) -> None:
-    """違反した修正を取り消し、または採用したコミットを項目へ関連付ける。"""
-    ordered = result["ordered"]
-    problems = result["problems"]
-    if problems and ordered:
-        for problem in problems:
-            info(f"❌ {problem}")
-        # 修正のコミットはどの改善項目にも記録されていないため、取り消しの判定が消す
-        discard_range(path, state, "手順を外れた修正")
-        info(f"↩ 修正の範囲 {len(ordered)} コミットを取り消しました")
-        return
-    if ordered:
-        for sha in reversed(ordered):
-            item_id = str(commit_trailers(work, sha).get("Item-Id") or "").strip()
-            item = find_item(state, item_id, required=False)
-            if item is not None:
-                item["commits"]["fix"].append(sha)
-
-
-def _account_fix(state: dict[str, Any], fix_items: list[dict[str, Any]]) -> None:
-    """修正回数、項目状態、修正手順の所要時間を更新する。"""
-    for item in fix_items:
-        item["fix_count"] = int(item.get("fix_count") or 0) + 1
-        if item.get("status") == FAILING:
-            item["status"] = IMPLEMENTED
-    stats = state.setdefault("fix_stats", {"launches": 0, "seconds": 0.0})
-    started = phase_record(state, "fix").get("launch_started_at")
-    seconds = max(clock.seconds_between(started, clock.now()) or 0.0, 0.0)
-    stats["launches"] = int(stats.get("launches") or 0) + 1
-    stats["seconds"] = round(float(stats.get("seconds") or 0.0) + seconds, 1)
-    add_phase_seconds(state, "fix", seconds)
-
-
-def cmd_merge_fix(args: argparse.Namespace) -> None:
-    """修正の結果を取り込む。取り込んだ項目は `implemented` へ戻り、次の `verify` が見直す。
-
-    **結果ファイルの申告は使わない。** 修正の起点から HEAD までのコミットを `Item-Id`
-    で読み、修正の対象の項目のものだけを受け取る。1 件でも手順を外れたら範囲ごと
-    取り消す（どのコミットが安全かを決められないため）。どちらの場合も修正の回数は
-    数える（報告に出す）。往復を止めるのは締め切りである（決定 23）。
-    """
-    path, state = load_state(args.id)
-    work = work_dir(state)
-    discard_impl_leftovers(state, work)
-    fix = state.get("fix")
-    if not fix:
-        info("↻ 取り込む修正はありません")
-        return
-    record_observed_model(state, ran := intake.ran_seat(state, "fix", int(fix.get("attempt") or 1), str(state["implementer"])), "fix")
-    note_stopped(state, ran, "fix")
-    fix_items = [find_item(state, i, required=False) for i in fix.get("items") or []]
-    fix_items = [t for t in fix_items if t is not None]
-    result = _inspect_fix_commits(state, work, fix, fix_items)
-    _apply_fix_result(path, state, work, result)
-    _account_fix(state, fix_items)
-    state["fix"] = None
-    statefile.save(path, state)
-    info(f"修正を取り込みました（{len(result['ordered'])} コミット / 対象 {len(fix_items)} 件）。{plan_line(state)}")

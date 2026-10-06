@@ -42,12 +42,10 @@ deps.require("md", "mdtable")
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 from refactor_lib.commands.assess import DEFAULT_MAX_LINES, cmd_assess  # noqa: E402
-from refactor_lib.commands.converge import (  # noqa: E402
-    cmd_merge_fix,
-    cmd_verify,
-)
+from refactor_lib.commands.converge import cmd_verify  # noqa: E402
 from refactor_lib.commands.final_fix import cmd_merge_final_fix  # noqa: E402
 from refactor_lib.commands.gate import cmd_final_gate  # noqa: E402
+from refactor_lib.commands.merge_fix import cmd_merge_fix  # noqa: E402
 from refactor_lib.commands.implement import (  # noqa: E402
     cmd_merge_implement,
     cmd_merge_tests,
