@@ -1155,7 +1155,7 @@
     {
       "term": "予備メモリ",
       "context": "ndf-workflow",
-      "meaning": "オーケストレーターと同じ VM に常駐する他のプロセスの変動のために空けておくメモリ",
+      "meaning": "同じ VM に常駐する他のプロセスの揺れのために空けておくメモリ。既に動いているオーケストレーターの本体と担当は MemAvailable から引かれているため含めない",
       "source": "docs/specifications/ndf-execution-plan-and-parallel-capacity.md"
     },
     {
@@ -3367,6 +3367,24 @@
       "context": "ndf-agent-cli",
       "meaning": "引数で明示していないモデルを引けない CLI を、既定のモデルで担当に入れること（participants.default_models）",
       "pending_source": "issues/issue-1290-design.md"
+    },
+    {
+      "term": "1 本の重さ",
+      "context": "ndf-workflow",
+      "meaning": "担当 1 つ（worktree 1 つ分）が使う cgroup の anon の量。実測（per_lane_observed_mib）と、本数の判定に使った値（per_lane_used_mib）を分けて出す",
+      "pending_source": "issues/issue-780-requirements.md"
+    },
+    {
+      "term": "anon の起点",
+      "context": "ndf-workflow",
+      "meaning": "実行計画の開始時（動いている本数が 0）に測った cgroup の anon。1 本の重さを測る差の基準",
+      "pending_source": "issues/issue-780-requirements.md"
+    },
+    {
+      "term": "判定の区分",
+      "context": "ndf-workflow",
+      "meaning": "parallel-measure.py capacity が本数を決めた理由の区分。grow（足してよい）/ hold（今の本数を超えて足さない）/ shrink（1 本減らす）",
+      "pending_source": "issues/issue-780-requirements.md"
     }
   ]
 }
