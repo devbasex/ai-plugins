@@ -524,3 +524,24 @@ def test_the_check_and_the_monitor_classify_the_same_line_alike(auth, tmp_path, 
 
     assert check[0] == reason
     assert fatal is not None and fatal.reason == reason
+
+
+# ---------- 判断の置き場所（AC13） ----------
+
+_CALLERS = [
+    LIB.parents[1] / "skills" / "cross-review" / "scripts" / "review_lib" / "participants.py",
+    LIB.parents[1] / "skills" / "cross-refactoring" / "scripts" / "refactor_lib" / "commands" / "setup.py",
+    LIB.parents[1] / "skills" / "external-ai" / "scripts" / "external-ai.py",
+]
+
+
+@pytest.mark.parametrize("path", _CALLERS, ids=lambda p: p.name)
+def test_callers_go_through_one_check_and_hold_no_admission_branch(path):
+    """3 つの呼び手は同じ `auth.probe_auth` を通り、理由の語で合否や切り替えを分けない（判断は `assignment.admit`）。"""
+    src = path.read_text(encoding="utf-8")
+    assert "auth.probe_auth" in src
+    words = ["model_unavailable", "unauthenticated", "MODEL_PROBES", "DEFAULT_MODEL_ARGS"]
+    # external-ai は監視の理由 `auth_expired` を結末の `auth` へ写す（起動後の結末の語彙で、担当に入れる判断ではない）
+    words += [] if path.name == "external-ai.py" else ["auth_expired"]
+    for word in words:
+        assert word not in src, f"{path.name} が {word} を見ている"

@@ -33,9 +33,7 @@ REFRESH_401 = (
     'ERROR codex_login::auth::manager: Failed to refresh token: 401 Unauthorized: {"error": '
     '{"message": "Your session has ended. Please log in again.", "code": "refresh_token_invalidated"}}'
 )
-REVOKED = (
-    "ERROR: Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again."
-)
+REVOKED = "ERROR: Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again."
 # #1589（PR #1588）
 ERROR_400 = (
     'ERROR: {"type":"error","status":400,"error":{"type":"invalid_request_error","message":'

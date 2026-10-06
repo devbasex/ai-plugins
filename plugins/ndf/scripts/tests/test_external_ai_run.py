@@ -208,6 +208,62 @@ def test_missing_cli(tmp_path):
     assert p.returncode == 3 and json.loads(p.stdout)["metrics"]["outcome"] == "missing_cli"
 
 
+# ---------- check は init と同じ参加の確認を通る（#1290 の AC4・AC5） ----------
+
+# 認証確認は通り、最小の呼び出しが FAKE_CHECK の形で答える偽の codex（#461・#1589 の実物の行）
+FAKE_CODEX_CHECK = r"""#!/bin/sh
+if [ "$1 $2" = "login status" ]; then echo "Logged in using ChatGPT"; exit 0; fi
+cat > /dev/null
+case " $* " in
+  *" --ignore-user-config "*) echo "model: gpt-6-astra" >&2; echo OK; exit 0;;
+esac
+echo "model: gpt-5.5" >&2
+case "$FAKE_CHECK" in
+  404) echo 'ERROR: unexpected status 404 Not Found: The model `gpt-5.5` does not exist or you do not have access to it.' >&2
+       [ -n "$FAKE_NO_DEFAULT" ] || exit 1;;
+  revoked) echo "ERROR: Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again." >&2;;
+  *) echo OK; exit 0;;
+esac
+exit 1
+"""
+
+
+def _check_codex(tmp_path, mode):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    stub = bin_dir / "codex"
+    stub.write_text(FAKE_CODEX_CHECK, encoding="utf-8")
+    stub.chmod(0o755)
+    env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "FAKE_CHECK": mode}
+    env.pop("NDF_SKIP_AUTH_CHECK", None)
+    p = subprocess.run([sys.executable, str(SCRIPT), "check", "codex"], env=env, capture_output=True, text=True, cwd=tmp_path)
+    return p.returncode, json.loads(p.stdout), p.stderr
+
+
+def test_check_rejects_a_cli_with_a_revoked_refresh_token(tmp_path):
+    """AC4: 認証の状態確認は通っても、最小の呼び出しが失効を返せば失敗と理由を返す。"""
+    code, out, err = _check_codex(tmp_path, "revoked")
+    assert code == step_result.EXIT_PRECONDITION
+    assert (out["metrics"]["outcome"], out["metrics"]["reason"]) == ("auth", "auth_expired")
+    assert "auth_expired" in out["summary"]
+    assert "❌ codex: auth_expired" in err
+
+
+def test_check_falls_back_to_the_default_model_and_guides_run(tmp_path):
+    """AC5・決定 9: 設定のモデルを引けず既定のモデルで通れば ok と既定のモデルの名前・run の案内を返す。"""
+    code, out, _ = _check_codex(tmp_path, "404")
+    assert code == 0
+    m = out["metrics"]
+    assert (m["outcome"], m["default_model"], m["from_model"]) == ("ok", "gpt-6-astra", "gpt-5.5")
+    assert "--model gpt-6-astra" in out["next"]
+
+
+def test_check_without_a_switch_returns_no_default_model(tmp_path):
+    code, out, err = _check_codex(tmp_path, "ok")
+    assert code == 0 and out["metrics"]["default_model"] is None
+    assert "✅ codex: 認証とモデル" in err
+
+
 # ---------- cmd_run の前提の確かめとモデルの記録（現状固定） ----------
 
 
