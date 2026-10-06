@@ -17,12 +17,12 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Iterable, Mapping, NamedTuple, Optional
 
 import assignment
+import claude_settings
 import monitor_patterns
 import secret_redact
 
@@ -40,7 +40,7 @@ AUTH_PROBES: dict[str, tuple[str, ...]] = {
 
 # 最小の呼び出し（種類 `model`）。担当の起動と同じ CLI で、`PROBE_PROMPT` を標準入力から 1 回答えさせる。
 # 応答の中身は見ない。claude は道具・MCP・Skill・会話の保存を切って費用を下げる（2026-10-06 の実測で
-# 0.44 → 0.02 米ドル）。codex の `{workdir}` は確認ごとの一時ディレクトリに置き換える。
+# 0.44 → 0.02 米ドル）。codex の `{workdir}` は確認を走らせるディレクトリ（担当と同じプロジェクト）に置き換える。
 # agy はこの表に無い（応答の形を測れていない。#1290 の決定 1）ため、認証確認だけで担当に入る。
 MODEL_PROBES: dict[str, tuple[str, ...]] = {
     "claude": (
@@ -63,10 +63,15 @@ MODEL_PROBES: dict[str, tuple[str, ...]] = {
 MODEL_FLAG = "--model"
 # 既定のモデルで引き直す引数（種類 `default`。種類 `model` に足す）。どれも利用者の設定ファイルを
 # 書き換えない（C6）。kiro は `--model` を受けず自ら既定のモデルで答えるため持たない（決定 2・決定 3）。
+# codex の `--ignore-user-config` は提供元（`model_provider` など）も外すが、担当は利用者の設定のまま
+# `--model <既定のモデル>` で起動する。そのため codex は、読めた既定のモデルを利用者の設定のまま
+# `--model` で引き直して通ったときだけ通す（`CONFIRM_DEFAULT`）。
 DEFAULT_MODEL_ARGS: dict[str, tuple[str, ...]] = {
     "claude": ("--model", "default"),
     "codex": ("--ignore-user-config",),
 }
+# 既定のモデルを、担当の起動と同じ形（利用者の設定のまま `--model <名前>`）で確かめ直す CLI
+CONFIRM_DEFAULT = frozenset({"codex"})
 # claude は `--model default` を起動の引数としてそのまま受ける（決定 2）
 CLAUDE_DEFAULT_MODEL = "default"
 PROBE_PROMPT = "Reply with the single word OK."
@@ -182,56 +187,82 @@ def _classify_output(step: str, runtime: str, model: Optional[str], rc: int, std
     return "ok", None
 
 
-def run_check(step: str, runtime: str, model: Optional[str] = None, *, timeout: float = AUTH_PROBE_TIMEOUT) -> Optional[Check]:
+def _launch_args(runtime: str, cmd: tuple[str, ...], cwd: str) -> list[str]:
+    """担当の起動と同じ設定の上書きを足した引数。claude には従量の接続の宣言を `--settings` でも渡す（#1543）。"""
+    if runtime != "claude":
+        return list(cmd)
+    return claude_settings.metered_settings(list(cmd), dict(os.environ), cwd, 1)
+
+
+def run_check(
+    step: str, runtime: str, model: Optional[str] = None, *, timeout: float = AUTH_PROBE_TIMEOUT, cwd: Optional[str] = None
+) -> Optional[Check]:
     """確認を 1 回走らせて分類する。その CLI が種類を持たなければ `None`。例外は上げない。
 
     **起動できない理由が何であっても「通らない」として返す**（#813）。PATH に読めない
     ディレクトリがあると、コマンドがどこにも無いときに権限の例外が上がる。
 
-    環境は親から継承し、引数でも環境変数でも認証の情報を渡さない。書くのは一時ディレクトリだけで、
-    利用者の CLI の設定ファイルを書き換えない（I6）。
+    環境は親から継承し、引数でも環境変数でも認証の情報を渡さない。種類 `model` / `default` は
+    担当と同じ設定で確かめるため `cwd`（省けば今のディレクトリ。担当のプロジェクト）で走らせ、
+    claude には担当の起動と同じ設定の上書き（`claude_settings.metered_settings`）を足す。
+    どの確認も道具を持たないか読み取りだけで、利用者の CLI の設定ファイルを書き換えない（I6）。
+    codex の種類 `default` は、読めた既定のモデルを利用者の設定のまま引き直して確かめる（`CONFIRM_DEFAULT`）。
     """
-    with tempfile.TemporaryDirectory(prefix="ndf-probe-") as workdir:
-        cmd = _command(step, runtime, model, workdir)
-        if cmd is None:
-            return None
-        shown = " ".join(a if a != workdir else "<tmp>" for a in cmd)
-        started = time.monotonic()
-
-        def done(reason: str, detail: str, found_model: Optional[str] = None) -> Check:
-            seconds = round(time.monotonic() - started, 1)
-            return Check(step, reason == "ok", reason, _detail(detail), seconds, found_model, shown)
-
-        try:
-            r = subprocess.run(
-                list(cmd),
-                input=None if step == "auth" else PROBE_PROMPT,
-                capture_output=True,
-                text=True,
-                timeout=max(timeout, 0.1),
-                cwd=workdir if step != "auth" else None,
-            )
-        except FileNotFoundError:
-            return done("missing_cli", "コマンドが見つかりません")
-        except subprocess.TimeoutExpired:
-            return done("timeout", f"{AUTH_PROBE_TIMEOUT} 秒の持ち時間で応答しませんでした")
-        except OSError as exc:
-            return done("missing_cli", f"コマンドを実行できません（{exc.strerror or exc}）")
-        stdout = monitor_patterns._strip_ansi(r.stdout or "")
-        stderr = monitor_patterns._strip_ansi(r.stderr or "")
-        reason, hit = _classify_output(step, runtime, model, r.returncode, stdout, stderr)
-        found = _observed_model(step, runtime, stdout, stderr)
-        return done(reason, hit or stderr.strip() or stdout.strip(), found)
+    workdir = os.path.abspath(cwd or os.getcwd())
+    cmd = _command(step, runtime, model, workdir)
+    if cmd is None:
+        return None
+    deadline = time.monotonic() + max(timeout, 0.1)
+    first = _probe_once(step, runtime, model, cmd, workdir, deadline)
+    if step != "default" or runtime not in CONFIRM_DEFAULT or not first.ok or not first.model:
+        return first
+    confirm = _probe_once("model", runtime, first.model, _command("model", runtime, first.model, workdir) or (), workdir, deadline)
+    seconds = round(first.seconds + confirm.seconds, 1)
+    command = f"{first.command} && {confirm.command}"
+    if not confirm.ok:
+        return confirm._replace(step=step, seconds=seconds, command=command)
+    return first._replace(seconds=seconds, command=command)
 
 
-def _budgeted_check(level: str) -> Callable[[str, str, Optional[str]], Optional[Check]]:
+def _probe_once(step: str, runtime: str, model: Optional[str], cmd: tuple[str, ...], workdir: str, deadline: float) -> Check:
+    """確認のコマンドを 1 回走らせて分類する（`run_check` の 1 回分）。"""
+    shown = " ".join(a if a != workdir else "<cwd>" for a in cmd)
+    started = time.monotonic()
+
+    def done(reason: str, detail: str, found_model: Optional[str] = None) -> Check:
+        seconds = round(time.monotonic() - started, 1)
+        return Check(step, reason == "ok", reason, _detail(detail), seconds, found_model, shown)
+
+    try:
+        r = subprocess.run(
+            _launch_args(runtime, cmd, workdir) if step != "auth" else list(cmd),
+            input=None if step == "auth" else PROBE_PROMPT,
+            capture_output=True,
+            text=True,
+            timeout=max(deadline - time.monotonic(), 0.1),
+            cwd=workdir if step != "auth" else None,
+        )
+    except FileNotFoundError:
+        return done("missing_cli", "コマンドが見つかりません")
+    except subprocess.TimeoutExpired:
+        return done("timeout", f"{AUTH_PROBE_TIMEOUT} 秒の持ち時間で応答しませんでした")
+    except OSError as exc:
+        return done("missing_cli", f"コマンドを実行できません（{exc.strerror or exc}）")
+    stdout = monitor_patterns._strip_ansi(r.stdout or "")
+    stderr = monitor_patterns._strip_ansi(r.stderr or "")
+    reason, hit = _classify_output(step, runtime, model, r.returncode, stdout, stderr)
+    found = _observed_model(step, runtime, stdout, stderr)
+    return done(reason, hit or stderr.strip() or stdout.strip(), found)
+
+
+def _budgeted_check(level: str, cwd: Optional[str] = None) -> Callable[[str, str, Optional[str]], Optional[Check]]:
     """1 者の確認の実行。持ち時間を 3 種類で共有し、`level="auth"` なら種類 `auth` だけを走らせる。"""
     deadline = time.monotonic() + AUTH_PROBE_TIMEOUT
 
     def check(step: str, runtime: str, model: Optional[str]) -> Optional[Check]:
         if level == "auth" and step != "auth":
             return None
-        return run_check(step, runtime, model, timeout=deadline - time.monotonic())
+        return run_check(step, runtime, model, timeout=deadline - time.monotonic(), cwd=cwd)
 
     return check
 
@@ -256,12 +287,14 @@ def probe_auth(
     env: Optional[Mapping[str, str]] = None,
     models: Optional[Mapping[str, str]] = None,
     level: str = "model",
+    cwd: Optional[str] = None,
 ) -> tuple[ProbeResult, bool]:
     """参加の確認を参加者ごとに並行に走らせ、結果だけを返す（止めない確認。#727）。
 
     返り値は `(結果, 飛ばしたか)`。結果は名前 → `assignment.Admission.to_probe()` の辞書
     （`command` / `ok` / `detail` に `reason` / `level` / `seconds` / `default_model` / `from_model` / `model`）。
     `models` はランタイム → 引数で明示したモデル。`level="auth"` は認証確認だけを走らせる（external-ai の `run`）。
+    `cwd` は確認を走らせるディレクトリで、省けば今のディレクトリ（担当と同じプロジェクトの設定を読む）。
 
     **例外を上げず、呼び出し側も中断させない。** 通らなかった者を外して続けるか、全員を要して
     止めるかは `assignment.resolve_participants` が決める。出力の 1 行は全員の確認が終わってから
@@ -277,7 +310,7 @@ def probe_auth(
     if not targets:
         return {}, False
     with ThreadPoolExecutor(max_workers=len(targets)) as pool:
-        futures = {r: pool.submit(assignment.admit, r, explicit_model=explicit.get(r), check=_budgeted_check(level)) for r in targets}
+        futures = {r: pool.submit(assignment.admit, r, explicit_model=explicit.get(r), check=_budgeted_check(level, cwd)) for r in targets}
         admissions = {r: f.result() for r, f in futures.items()}
     for runtime in targets:
         info(_line(runtime, admissions[runtime]))

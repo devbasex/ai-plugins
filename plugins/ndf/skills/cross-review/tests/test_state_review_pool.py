@@ -650,7 +650,7 @@ esac
 cat > /dev/null
 [ "$name" = codex ] || { echo OK; exit 0; }
 case " $* " in
-  *" --ignore-user-config "*) [ "$FAKE_CODEX" = 404all ] || { echo "model: gpt-6-astra" >&2; echo OK; exit 0; };;
+  *" --ignore-user-config "*|*" --model gpt-6-astra "*) [ "$FAKE_CODEX" = 404all ] || { echo "model: gpt-6-astra" >&2; echo OK; exit 0; };;
 esac
 echo "model: gpt-5.5" >&2
 case "$FAKE_CODEX" in

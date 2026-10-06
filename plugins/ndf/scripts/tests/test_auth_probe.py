@@ -347,7 +347,11 @@ def test_a_configured_model_falls_back_to_the_cli_default(auth, monkeypatch):
         auth,
         monkeypatch,
         _codex(
-            lambda cmd: _completed(cmd, 1, stderr="model: gpt-6.1-sol\n" + LINE_400 + "\n"),
+            lambda cmd: (
+                _completed(cmd, 0, stdout="OK", stderr="model: gpt-6-astra\n")
+                if cmd[-2:] == ["--model", "gpt-6-astra"]
+                else _completed(cmd, 1, stderr="model: gpt-6.1-sol\n" + LINE_400 + "\n")
+            ),
             lambda cmd: _completed(cmd, 0, stdout="OK", stderr="model: gpt-6-astra\n"),
         ),
     )
@@ -357,7 +361,50 @@ def test_a_configured_model_falls_back_to_the_cli_default(auth, monkeypatch):
 
     r = results["codex"]
     assert (r["ok"], r["default_model"], r["from_model"], r["level"]) == (True, "gpt-6-astra", "gpt-6.1-sol", "model")
+    assert r["command"].endswith("--model gpt-6-astra")
     assert messages[0].startswith("↪ codex: 設定のモデル gpt-6.1-sol を引けないため、既定のモデル gpt-6-astra で担当に入れる")
+
+
+def test_a_codex_default_model_that_fails_with_the_user_config_is_not_switched(auth, monkeypatch):
+    """`--ignore-user-config` は提供元も外す。読めた既定のモデルを利用者の設定のまま引けなければ外す。"""
+    fail = lambda cmd: _completed(cmd, 1, stderr="model: gpt-6.1-sol\n" + LINE_400 + "\n")  # noqa: E731
+    calls = _fake_run(auth, monkeypatch, _codex(fail, lambda cmd: _completed(cmd, 0, stdout="OK", stderr="model: gpt-6-astra\n")))
+
+    results, _ = auth.probe_auth(["codex"], info=lambda _m: None, env={})
+
+    assert (results["codex"]["ok"], results["codex"]["reason"], results["codex"]["default_model"]) == (False, "model_unavailable", None)
+    assert calls[-1][-2:] == ["--model", "gpt-6-astra"]
+    assert "--ignore-user-config" not in calls[-1]
+
+
+def test_the_minimal_call_runs_in_the_project_directory(auth, monkeypatch, tmp_path):
+    """担当と同じプロジェクトの設定を読むため、最小の呼び出しは渡したディレクトリで走る。認証確認は場所を問わない。"""
+    seen: list[tuple[list[str], object]] = []
+
+    def run(cmd, **kw):
+        seen.append((list(cmd), kw.get("cwd")))
+        return _completed(cmd, 0, stdout="OK", stderr="model: gpt-6.1-sol\n")
+
+    monkeypatch.setattr(auth.subprocess, "run", run)
+
+    auth.probe_auth(["codex"], info=lambda _m: None, env={}, cwd=str(tmp_path))
+
+    assert seen[0][1] is None
+    assert seen[1][1] == str(tmp_path)
+    assert seen[1][0][seen[1][0].index("-C") + 1] == str(tmp_path)
+
+
+def test_claude_minimal_call_carries_the_metered_settings(auth, monkeypatch):
+    """従量の接続の区間では、担当の起動と同じく宣言の変数を `--settings` でも渡す（#1543）。"""
+    calls = _fake_run(auth, monkeypatch, lambda cmd: _completed(cmd, 0, stdout='{"type":"result","modelUsage":{"claude-x":{}}}'))
+    monkeypatch.setattr(
+        auth.claude_settings, "metered_settings", lambda args, env, cwd, keep=0: [*args[:keep], "--settings", "{}", *args[keep:]]
+    )
+
+    auth.probe_auth(["claude"], info=lambda _m: None, env={})
+
+    assert calls[0] == ["claude", "auth", "status"]
+    assert calls[1][:3] == ["claude", "--settings", "{}"]
 
 
 def test_claude_falls_back_with_model_default(auth, monkeypatch):
@@ -385,7 +432,7 @@ def _write_fake_codex(bin_dir: pathlib.Path, log: pathlib.Path) -> None:
         if [ "$1" = login ]; then echo "Logged in using ChatGPT"; exit 0; fi
         cat >/dev/null
         case " $* " in
-          *" --ignore-user-config "*) echo "model: gpt-6-astra" >&2; echo OK; exit 0 ;;
+          *" --ignore-user-config "*|*" --model gpt-6-astra "*) echo "model: gpt-6-astra" >&2; echo OK; exit 0 ;;
         esac
         echo "model: gpt-5.5" >&2
         echo '{LINE_404}' >&2

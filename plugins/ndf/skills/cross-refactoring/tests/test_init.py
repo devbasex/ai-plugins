@@ -281,7 +281,7 @@ cat > /dev/null
 echo "$name $*" >> "$FAKE_CALLS"
 [ "$name" = codex ] || { echo OK; exit 0; }
 case " $* " in
-  *" --ignore-user-config "*) [ "$FAKE_CODEX" = 404all ] || { echo "model: gpt-6-astra" >&2; echo OK; exit 0; };;
+  *" --ignore-user-config "*|*" --model gpt-6-astra "*) [ "$FAKE_CODEX" = 404all ] || { echo "model: gpt-6-astra" >&2; echo OK; exit 0; };;
 esac
 case " $* " in
   *" --model explicit-model "*) echo 'ERROR: unexpected status 404 Not Found: The model `explicit-model` does not exist or you do not have access to it.' >&2; exit 1;;

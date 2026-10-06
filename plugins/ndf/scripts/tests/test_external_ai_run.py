@@ -215,7 +215,7 @@ FAKE_CODEX_CHECK = r"""#!/bin/sh
 if [ "$1 $2" = "login status" ]; then echo "Logged in using ChatGPT"; exit 0; fi
 cat > /dev/null
 case " $* " in
-  *" --ignore-user-config "*) echo "model: gpt-6-astra" >&2; echo OK; exit 0;;
+  *" --ignore-user-config "*|*" --model gpt-6-astra "*) echo "model: gpt-6-astra" >&2; echo OK; exit 0;;
 esac
 echo "model: gpt-5.5" >&2
 case "$FAKE_CHECK" in

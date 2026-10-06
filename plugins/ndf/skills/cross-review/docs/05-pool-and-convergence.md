@@ -35,8 +35,8 @@ Step 1（ラウンドの開始）と Step 3（判定）が読む基準を持つ�
 | 種類 | 何をするか |
 | --- | --- |
 | 認証確認 | `claude auth status` / `codex login status` / `agy models` / `kiro-cli whoami`。通らなければ最小の呼び出しを走らせずに外す |
-| 最小の呼び出し | 担当の起動と同じ CLI で短い固定の問いを 1 回答えさせる（agy は持たない） |
-| 既定のモデルでの引き直し | 最小の呼び出しがモデルを引けず、モデルを引数で明示していないときだけ、claude は `--model default`、codex は `--ignore-user-config` で引き直す。通れば既定のモデルで担当に入り、`participants.default_models` に残る。利用者の設定ファイルは書き換えない |
+| 最小の呼び出し | 担当の起動と同じ CLI・同じプロジェクトのディレクトリ・同じ設定の上書き（claude の従量の接続の `--settings`）で、短い固定の問いを 1 回答えさせる（agy は持たない） |
+| 既定のモデルでの引き直し | 最小の呼び出しがモデルを引けず、モデルを引数で明示していないときだけ、claude は `--model default`、codex は `--ignore-user-config` で引き直す。codex はこれで読めた既定のモデルを、担当の起動と同じ形（利用者の設定のまま `--model <名前>`）でもう 1 回引き、通ったときだけ通す（`--ignore-user-config` は提供元の設定も外すため）。通れば既定のモデルで担当に入り、`participants.default_models` に残る。利用者の設定ファイルは書き換えない |
 
 1 者の持ち時間は 3 種類で共有して 120 秒。外した理由は `participants.unavailable` の値の先頭
 （`model_unavailable: ERROR: ...` など）と `participants.checks[<名前>].result` に語で残る
