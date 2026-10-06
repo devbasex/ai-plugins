@@ -181,6 +181,7 @@ class GreenWatch:
         self.empty_since = None  # rollup が空のままになった時刻（チェックが載る前か、CI の無いリポジトリか）
         self.last_sha, self.recheck = None, False
         self.stale_since, self.rerun_done = {}, set()  # 取り残しを見た時刻（チェックのラベルごと）/ 再実行したチェック
+        self.seen_jobs = {}  # 照会できた取り消しのジョブの判定（(root, job ID) ごと）。読み直しのたびに照会し直さない
         self.infra = InfraWatch(a)  # Runner が付かなかった取り消しの再実行と待ち直し（先頭のコミットごと）
         self.on_open = None  # 開いた PR を最初に読んだとき、draft を外す前に 1 度だけ呼ぶ（承認ゲート 2 の判定。#1336）
 
@@ -333,7 +334,7 @@ class GreenWatch:
             self._ensure_ready()
         self._reset_on_new_sha(sha)
         self.last_sha = sha
-        reading = read_checks(root, info.get("statusCheckRollup"))
+        reading = read_checks(root, info.get("statusCheckRollup"), self.seen_jobs)
         self._note(reading)
         if reading.failed:
             self._stop_failed(reading)

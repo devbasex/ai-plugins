@@ -97,9 +97,13 @@ class CheckReading:
     settled: list = field(default_factory=list)
 
 
-def runner_never_came(root, item: CheckItem) -> bool:
+def runner_never_came(root, item: CheckItem, seen: dict | None = None) -> bool:
     """取り消しのジョブを REST で照会し、ステップが 0 件で Runner の名前が空なら真（Runner が付かなかった取り消し）。
-    照会できなければ item.reason に書いて偽を返す（基盤待ちへ倒さない）。"""
+    照会できなければ item.reason に書いて偽を返す（基盤待ちへ倒さない）。`seen` を渡すと、照会できた判定を
+    (root, job ID) を鍵に保存し、同じジョブを読み直す間は照会しない（再実行で新しい job ID が出たときだけ照会する）。"""
+    key = (str(root), item.job)
+    if seen is not None and item.job and key in seen:
+        return seen[key]
     job = None
     if item.job:
         p = gh_parts.gh(["api", f"repos/{{owner}}/{{repo}}/actions/jobs/{item.job}"], cwd=root)
@@ -110,12 +114,16 @@ def runner_never_came(root, item: CheckItem) -> bool:
     if not isinstance(job, dict):
         item.reason = UNREADABLE_JOB
         return False
-    return not (job.get("steps") or []) and not (job.get("runner_name") or "")
+    never = not (job.get("steps") or []) and not (job.get("runner_name") or "")
+    if seen is not None:
+        seen[key] = never
+    return never
 
 
-def read_checks(root, rollup) -> CheckReading:
+def read_checks(root, rollup, seen_jobs: dict | None = None) -> CheckReading:
     """rollup を束ねて最新の項目で分ける。pending の項目は実行とジョブを読み（`probe_checks`）、実行が終わって
-    結論のあるものは結論で扱う。取り消しの項目にだけジョブの照会を打つ（取り消しが無ければ gh を足さない）。"""
+    結論のあるものは結論で扱う。取り消しの項目にだけジョブの照会を打つ（取り消しが無ければ gh を足さない）。
+    `seen_jobs` は読み直しをまたいでジョブの照会の結果を保存する辞書（`runner_never_came` の `seen`）。"""
     latest, superseded = fold_rollup(rollup)
     r = CheckReading(superseded=superseded)
     pending = [i for i in latest if i.state == "pending"]
@@ -127,7 +135,7 @@ def read_checks(root, rollup) -> CheckReading:
                 i.state = _conclusion_state(done[(i.run, i.job)])
     for i in latest:
         if i.state == "cancelled":
-            (r.infra if runner_never_came(root, i) else r.failed).append(i)
+            (r.infra if runner_never_came(root, i, seen_jobs) else r.failed).append(i)
         else:
             {"pending": r.pending, "failed": r.failed, "passed": r.passed}[i.state].append(i)
     return r

@@ -205,6 +205,15 @@ def test_rerun_waits_until_the_run_is_done_and_the_gap_has_passed(checks, gh, cl
     assert len(gh.called("run", "rerun")) == 1
 
 
+def test_cancelled_job_is_queried_once_while_it_stays(checks, gh, clock, monkeypatch):
+    """同じ取り消しのジョブが残る間は、読み直しのたびにジョブを照会し直さない（照会は job ID ごとに 1 回）。"""
+    infra_routes(gh, run_status="in_progress")
+    watch = watch_of(checks, monkeypatch, [PR1765], infra_gap=300.0)
+    for _ in range(3):
+        assert watch.poll()[0] == "wait"
+    assert len(gh.called("api", f"repos/{{owner}}/{{repo}}/actions/jobs/{LINT_JOB}")) == 1
+
+
 def test_infra_wait_stops_with_75_after_the_rerun_limit(checks, gh, clock, monkeypatch, capsys):
     """AC7: 再実行を上限まで続けても取り消しが残ると、終了コード 75・基盤待ちの summary・infra_wait の items で止まる。"""
     infra_routes(gh)
