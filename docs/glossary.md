@@ -239,9 +239,9 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 突き合わせのチェック | — | ワークフローのジョブから決まるチェックの名前と、宛先のブランチの必須のチェックと、必須のチェックの宣言を突き合わせ、差があれば落ちるチェック | — | — | `docs/specifications/ci-required-checks-reconcile.md` |
 | 追加待ちのチェック | — | 必須にすると決めたが、ruleset へ足す承認（承認ゲート 2）を待っているチェック。突き合わせのチェックは差に数えない | — | — | `docs/specifications/ci-required-checks-reconcile.md` |
 | 依存の欠け | — | 手順のスクリプトが deps.require で外部パッケージを用意できずに止まったこと。終了コード 69 で終わり、status は stopped。「飛ばしてよい」とも「前提が無い（3）」とも読まない | — | — | `docs/specifications/ndf-deps-missing-exit-code.md` |
-| 置き換わった失敗 | — | PR の先頭のコミットで、同じチェック（`workflowName` と `name` の組）により新しい項目があるときの古い項目の失敗。CI のチェックの結論に数えない | — | — | — |
-| 基盤待ち | — | Runner が付かずに取り消された CI のジョブ（Runner が付かなかった取り消し）があり、ほかに中身の失敗が無い状態。修正へ回さず、再実行して待ち直す。待ち切れなければ `merge-when-green` は終了コード 75 で止まる | — | — | — |
-| Runner が付かなかった取り消し | — | 結論が `cancelled` で、ジョブのステップが 0 件、Runner の名前が空の CI のジョブ。GitHub Actions の障害や Runner 不足で起き、REST のジョブの照会で見分ける | — | — | — |
+| 置き換わった失敗 | — | PR の先頭のコミットで、同じチェック（`workflowName` と `name` の組）により新しい項目があるときの古い項目の失敗。CI のチェックの結論に数えない | — | — | `docs/specifications/ndf-ci-wait-superseded-failures-and-infra-wait.md` |
+| 基盤待ち | — | Runner が付かずに取り消された CI のジョブ（Runner が付かなかった取り消し）があり、ほかに中身の失敗が無い状態。修正へ回さず、再実行して待ち直す。待ち切れなければ `merge-when-green` は終了コード 75 で止まる | — | — | `docs/specifications/ndf-ci-wait-superseded-failures-and-infra-wait.md` |
+| Runner が付かなかった取り消し | — | 結論が `cancelled` で、ジョブのステップが 0 件、Runner の名前が空の CI のジョブ。GitHub Actions の障害や Runner 不足で起き、REST のジョブの照会で見分ける | — | — | `docs/specifications/ndf-ci-wait-superseded-failures-and-infra-wait.md` |
 | push 前の検査 | — | `core.hooksPath` の `pre-push` フックが `git push` の前に打つ検査。不合格なら push が拒まれる。中身はプロジェクトごとに違う | — | — | `docs/specifications/ndf-sprint-acceptance-check-and-prepush-fix.md` |
 | push の修正 | — | 実装のプランで、push 前の検査の不合格を直してコミットし、`pr` のステップを打ち直させる修正の worker（`fix-push` のステップ） | — | — | `docs/specifications/ndf-sprint-acceptance-check-and-prepush-fix.md` |
 

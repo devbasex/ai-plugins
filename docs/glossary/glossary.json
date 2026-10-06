@@ -3301,19 +3301,19 @@
       "term": "置き換わった失敗",
       "context": "ndf-workflow",
       "meaning": "PR の先頭のコミットで、同じチェック（`workflowName` と `name` の組）により新しい項目があるときの古い項目の失敗。CI のチェックの結論に数えない",
-      "pending_source": "issues/issue-1645-design.md"
+      "source": "docs/specifications/ndf-ci-wait-superseded-failures-and-infra-wait.md"
     },
     {
       "term": "基盤待ち",
       "context": "ndf-workflow",
       "meaning": "Runner が付かずに取り消された CI のジョブ（Runner が付かなかった取り消し）があり、ほかに中身の失敗が無い状態。修正へ回さず、再実行して待ち直す。待ち切れなければ `merge-when-green` は終了コード 75 で止まる",
-      "pending_source": "issues/issue-1645-design.md"
+      "source": "docs/specifications/ndf-ci-wait-superseded-failures-and-infra-wait.md"
     },
     {
       "term": "Runner が付かなかった取り消し",
       "context": "ndf-workflow",
       "meaning": "結論が `cancelled` で、ジョブのステップが 0 件、Runner の名前が空の CI のジョブ。GitHub Actions の障害や Runner 不足で起き、REST のジョブの照会で見分ける",
-      "pending_source": "issues/issue-1645-design.md"
+      "source": "docs/specifications/ndf-ci-wait-superseded-failures-and-infra-wait.md"
     },
     {
       "term": "push 前の検査",
