@@ -3326,6 +3326,18 @@
       "context": "ndf-workflow",
       "meaning": "実装のプランで、push 前の検査の不合格を直してコミットし、`pr` のステップを打ち直させる修正の worker（`fix-push` のステップ）",
       "source": "docs/specifications/ndf-sprint-acceptance-check-and-prepush-fix.md"
+    },
+    {
+      "term": "最小の呼び出し",
+      "context": "ndf-agent-cli",
+      "meaning": "担当を起動するときと同じモデルの指定で、短い固定の問いを 1 回投げて応答が返るかを見る確認。認証の確認に続けて行う",
+      "pending_source": "issues/issue-1290-requirements.md"
+    },
+    {
+      "term": "既定のモデル",
+      "context": "ndf-agent-cli",
+      "meaning": "利用者の CLI の設定も引数の指定も無いときに、CLI が使うモデル",
+      "pending_source": "issues/issue-1290-requirements.md"
     }
   ]
 }
