@@ -50,9 +50,9 @@
 | I1 | 本数の判定 | 区分が `shrink` でなければ `allowed ≥ 1` | 1 へ上げ、`limited_by` に `floor` を付ける |
 | I2 | 本数の判定 | 区分が `shrink` なら `allowed ≤ max(0, running − 1)` | 起こらない形にする（区分の優先で `shrink` を先に決める） |
 | I3 | 本数の判定 | 区分が `hold` なら `allowed ≤ max(running, 1)`（足さない） | 同上 |
-| I4 | 本数の判定 | 区分が `grow` なら `allowed − running ≤ --max-add` | 同上 |
+| I4 | 本数の判定 | 区分が `grow` なら `allowed ≤ max(running + --max-add, 1)`（`--max-add` は足す数の上限で、I1 の下限 1 を優先する。`--running 0 --max-add 0` は `floor` で 1） | 同上 |
 | I5 | 本数の判定 | `swap_free_mib` の値が `allowed` を変えない | 同上 |
-| I6 | 本数の判定 | `per_lane_used_mib ≥ --per-lane-min-mib ≥ 1` | `--per-lane-min-mib 0` は引数の誤り（終了コード 2） |
+| I6 | 本数の判定 | 実測を使えるとき `per_lane_used_mib ≥ --per-lane-min-mib ≥ 1`、使えないとき `per_lane_used_mib = --per-lane-mib ≥ 1`（下限を当てない） | `--per-lane-min-mib 0` と `--per-lane-mib 0` は引数の誤り（終了コード 2） |
 | I7 | 本数の判定 | `--max` を渡したときだけ `allowed ≤ max(--max, 1)`、渡さなければ総本数の上限が掛からない | 同上 |
 | I8 | 本数の判定 | 出力の既存の 10 キーが同じ名前・同じ順で先に並び、新しいキーは末尾 | 同上 |
 | I9 | 本数の判定 | 初期値（8 つ）を持つのは `parallel-measure.py` の定数だけ | 文書に数値を写さない |
