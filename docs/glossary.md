@@ -244,6 +244,9 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | Runner が付かなかった取り消し | — | 結論が `cancelled` で、ジョブのステップが 0 件、Runner の名前が空の CI のジョブ。GitHub Actions の障害や Runner 不足で起き、REST のジョブの照会で見分ける | — | — | `docs/specifications/ndf-ci-wait-superseded-failures-and-infra-wait.md` |
 | push 前の検査 | — | `core.hooksPath` の `pre-push` フックが `git push` の前に打つ検査。不合格なら push が拒まれる。中身はプロジェクトごとに違う | — | — | `docs/specifications/ndf-sprint-acceptance-check-and-prepush-fix.md` |
 | push の修正 | — | 実装のプランで、push 前の検査の不合格を直してコミットし、`pr` のステップを打ち直させる修正の worker（`fix-push` のステップ） | — | — | `docs/specifications/ndf-sprint-acceptance-check-and-prepush-fix.md` |
+| 1 本の重さ | — | 担当 1 つ（worktree 1 つ分）が使う cgroup の anon の量。実測（per_lane_observed_mib）と、本数の判定に使った値（per_lane_used_mib）を分けて出す | — | — | — |
+| anon の起点 | — | 実行計画の開始時（動いている本数が 0）に測った cgroup の anon。1 本の重さを測る差の基準 | — | — | — |
+| 判定の区分 | — | parallel-measure.py capacity が本数を決めた理由の区分。grow（足してよい）/ hold（今の本数を超えて足さない）/ shrink（1 本減らす） | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 
