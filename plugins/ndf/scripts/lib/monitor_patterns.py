@@ -40,6 +40,37 @@ USAGE_LIMIT_FATAL = [
     re.compile(r"^(?:ERROR:\s*)?exceeded retry limit, last status: 429\b", re.MULTILINE),
 ]
 
+# **認証の失効** の文言（kill 対象。理由は `auth_expired`）。認証の状態確認は通るが、更新トークンが
+# 失効していて実行のときに認証を作り直せない。利用者の再ログインでしか解けない（#461）。
+# **行頭（`ERROR:` の前置きを許す）から文言までを 1 つの一致にする。** 引用の除外は一致の始まりより
+# 前の引用符を数えるため、行頭から一致させれば文言の中の引用符で除外されない（#1290 の決定 5）。
+# 参加の確認（`auth.run_check`）も同じ表で分類する（#1290 の I8）。
+AUTH_EXPIRED_FATAL = [
+    # codex の実物（#461 の PR #661・#665・#666）
+    re.compile(
+        r"^(?:ERROR:\s*)?Your access token could not be refreshed because your refresh token was (?:revoked|invalidated)",
+        re.MULTILINE,
+    ),
+]
+
+# **モデルを引けない** 文言（kill 対象。理由は `model_unavailable`）。指定か設定のモデルを、その
+# 利用者か CLI の版が使えない（#461・#1589）。照合の形は `AUTH_EXPIRED_FATAL` と同じ。
+MODEL_UNAVAILABLE_FATAL = [
+    # codex の実物（#461 の PR #460）。モデル名は逆引用符で囲まれる
+    re.compile(
+        r"^(?:ERROR:\s*)?unexpected status 404 Not Found: The model [^\n]*? does not exist or you do not have access to it",
+        re.MULTILINE,
+    ),
+    # codex の実物（#1589 の PR #1588）。`{` で始まる JSON の誤りで、文言は JSON の文字列の中にある
+    re.compile(r'^(?:ERROR:\s*)?\{[^\n]*?"status"\s*:\s*400\b[^\n]*?model is not supported', re.MULTILINE),
+]
+
+# claude の `--output-format json` の標準出力に出るモデルを引けない形（2026-10-06 の実測）。
+# 利用上限の 429 と同じく `{` で始まる JSON の行だけを読む。
+CLAUDE_STDOUT_MODEL_UNAVAILABLE = [
+    re.compile(r'^\{.*?"api_error_status"\s*:\s*404\b', re.MULTILINE),
+]
+
 # err.log の行頭に近い形で出る **明確な致命** パターン (kill 対象。理由は `early_error`)。
 # auth / sandbox / HTTP 401-403 など、プロセスが続行しても result を生成できないと
 # 判明しているケースだけを入れる。利用上限は `USAGE_LIMIT_FATAL` の側。
@@ -184,4 +215,13 @@ CLAUDE_STDOUT_FATAL = [
 # どちらに出るか未確認のため両方を見る（#729 の決定 6）。JSON 向けの照合で除外を掛けない。
 CLAUDE_STDOUT_USAGE_LIMIT = [
     re.compile(r'"api_error_status"\s*:\s*429'),
+]
+
+# **理由つきの致命の表。** `(理由, err.log の表, claude の標準出力の表)` を上から照らし、最初に
+# 当たった理由を付ける。利用上限を先に置くのは #729 の決定 6 のまま（上限で落ちた後に別の
+# 致命が続く形が普通で、上限のほうが原因）。
+REASONED_FATAL = [
+    ("usage_limit", USAGE_LIMIT_FATAL, CLAUDE_STDOUT_USAGE_LIMIT),
+    ("auth_expired", AUTH_EXPIRED_FATAL, []),
+    ("model_unavailable", MODEL_UNAVAILABLE_FATAL, CLAUDE_STDOUT_MODEL_UNAVAILABLE),
 ]

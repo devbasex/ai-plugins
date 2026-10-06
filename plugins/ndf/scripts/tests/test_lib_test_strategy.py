@@ -389,6 +389,25 @@ def test_scope_runs_give_targets_to_tests_and_changed_files_to_lint():
     assert ts.scope_runs(s, [], ["README.md"]) == []
 
 
+@pytest.mark.parametrize(
+    "template",
+    [
+        "pytest {paths}",
+        "npx jest {paths}",
+        "npx vitest run {paths}",
+        "python3 scripts/unit.py {paths}",
+    ],
+)
+def test_scope_targets_reach_paths_as_file_paths_without_node_ids(template):
+    """#1793 の R5 — `{paths}` へは `::` より前のパスだけを、重なりを 1 つにまとめ、最初に現れた順で渡す。"""
+    decl = {"test": {"suites": [{"name": "unit", "runner": "custom", "command": "x", "scope_command": template}]}}
+    s = ts.resolve(decl)
+    targets = ["tests/test_a.py::Check", "tests/test_a.py", "tests/test_b.py::test_x"]
+    [run] = ts.scope_runs(s, targets, [])
+    assert run.command == template.replace("{paths}", "tests/test_a.py tests/test_b.py")
+    assert "::" not in run.command
+
+
 def test_the_kind_comes_only_from_the_declaration_or_the_argument():
     """I1 — 同じ雛形でも種別の引数で種別が変わり、雛形の語を変えても種別は変わらない。"""
     for template in ("shellcheck {paths}", "ruff check {paths}", "pytest {paths}"):

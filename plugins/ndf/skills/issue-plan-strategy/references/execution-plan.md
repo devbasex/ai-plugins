@@ -36,6 +36,7 @@
 状態: 進行中
 開始: 2026-09-17T03:00Z
 oom_kill の起点: 1
+anon の起点: 2193
 
 ## 行
 
@@ -52,9 +53,9 @@ oom_kill の起点: 1
 
 ## 測った値
 
-| 時刻 | 空き（MiB） | cgroup の残り（MiB） | スワップの空き（MiB） | oom_kill | 動いている本数 | 起動してよい本数 | 決めた条件 | 起動した行 |
-| --- | ---: | ---: | ---: | --- | ---: | ---: | --- | --- |
-| 2026-09-17T03:00Z | 9742 | max | 310 | 1 | 0 | 2 | memory,max,swap_low | G2-設計 |
+| 時刻 | 空き（MiB） | cgroup の残り（MiB） | スワップの空き（MiB） | oom_kill | 動いている本数 | 起動してよい本数 | 決めた条件 | anon（MiB） | 1 本の実測（MiB） | 1 本の見込み（MiB） | 起動した行 |
+| --- | ---: | ---: | ---: | --- | ---: | ---: | --- | ---: | ---: | ---: | --- |
+| 2026-09-17T03:00Z | 9742 | max | 310 | 1 | 0 | 2 | memory,max_add | 2193 | unknown | 1536 | G2-設計 |
 
 ## 見直し
 
@@ -64,8 +65,8 @@ oom_kill の起点: 1
 
 ## 閉じたときの測定
 
-| 対象の Pull Request | 期間（分） | 重なり（分） | 並行度 | 最大同時 | oom_kill の増分 |
-| --- | ---: | ---: | ---: | ---: | ---: |
+| 対象の Pull Request | 期間（分） | 重なり（分） | 並行度 | 最大同時 | oom_kill の増分 | 1 本の実測の最大（MiB） |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
 ```
 
 **1 行が `動いている` とき、その行に当たる supervisor は 1 つ（worktree 1 つ分）である。**
@@ -124,14 +125,25 @@ gh api "repos/{owner}/{repo}/milestones" --jq '.[] | select(.title | startswith(
 
 ```bash
 python3 "$SCRIPTS/parallel-measure.py" capacity \
-  --running <動いている行の数> --oom-baseline <oom_kill の起点>
+  --running <動いている行の数> --oom-baseline <oom_kill の起点> --anon-baseline-mib <anon の起点>
 ```
 
 `$SCRIPTS` の決め方は
 [scripts-lookup.md](../../development-workflow/references/scripts-lookup.md) にある。
-予備メモリ・1 本あたりの見込み・上限・スワップの閾値は引数（`--reserve-mib` / `--per-lane-mib` /
-`--max` / `--swap-free-min-pct`）で上書きできる。**既定値はコマンドだけが持つ。** この文書は
-値を写さない。測った値の表が、初期値を直す根拠になる。
+**開始時の最初の測定**（`--running 0`）では起点の 2 つをまだ持たないため渡さず、出力の `oom_kill` を
+「oom_kill の起点」へ、`cgroup_anon_mib` を「anon の起点」へ写す。`cgroup_anon_mib` が `unknown` なら
+「anon の起点」に `unknown` と書き、以後 `--anon-baseline-mib` を渡さない。「anon の起点」の行が無い
+実行計画（この形より前に作ったもの）でも渡さない。渡さなければ、1 本の重さは見込みで決まる。
+
+`capacity` は区分を 3 つに分けて本数を出す。`oom_kill` が起点より増えたら `shrink`（1 本減らす）、
+いまメモリの圧が閾値を超えていたら `hold`（今の本数を超えて足さない）、それ以外は `grow`（空きと
+1 本の重さから足す）。1 本の重さは anon の起点からの増分を動いている本数で割って測る。
+
+予備メモリ・1 本の見込み・1 本の下限・山への余裕・1 回の見直しで足す数・総本数の上限・圧の閾値・
+標本の間隔は引数（`--reserve-mib` / `--per-lane-mib` / `--per-lane-min-mib` / `--peak-factor` /
+`--max-add` / `--max` / `--psi-some-max` / `--swap-io-max-pages-per-sec` / `--sample-seconds`）で
+上書きできる。総本数の上限（`--max`）は渡したときだけ掛かる。**既定値はコマンドだけが持つ。** この
+文書は値を写さない。測った値の表が、初期値を直す根拠になる。
 
 | 出力のキー | 写す列 |
 | --- | --- |
@@ -142,9 +154,13 @@ python3 "$SCRIPTS/parallel-measure.py" capacity \
 | `running` | 動いている本数 |
 | `allowed` | 起動してよい本数 |
 | `limited_by` | 決めた条件 |
+| `cgroup_anon_mib` | anon（MiB） |
+| `per_lane_observed_mib` | 1 本の実測（MiB） |
+| `per_lane_used_mib` | 1 本の見込み（MiB） |
 
-`swap_total_mib`・`oom_kill_increased`・`by_memory` は写さない。起動のたびに変わらないか、
-他の列から導ける。
+`swap_total_mib`・`oom_kill_increased`・`by_memory`・`verdict`・`pressure` は写さない。起動のたびに
+変わらないか、他の列から導ける（区分は決めた条件の `hold_psi` / `hold_swap_io` / `oom_kill_increased`
+から読め、どれも無ければ `grow` である）。
 
 | 終了コード | 扱い |
 | --- | --- |
@@ -194,7 +210,8 @@ python3 "$SCRIPTS/parallel-measure.py" capacity \
 `capacity` の出力が `oom_kill_increased=yes` のときは、**その見直しでは新しい supervisor を起動しない**
 （手順 5 を行わない）。同じ見直しで次の 2 つを行う。
 
-1. 文書の先頭の「oom_kill の起点」を、いま測った値へ更新する
+1. 文書の先頭の「oom_kill の起点」を、いま測った値へ更新する。「anon の起点」は変えない（落ちた担当の
+   分は anon から抜けるため、起点を動かす理由が無い）
 2. 「見直し」の表へ 1 行足す（契機: OOM Killer の回数が増えた、変えたこと: 起点を N へ更新、理由）
 
 **起点を更新しないと、以後の見直しがすべて「増えた」になり、進行が再開しない。** 次の見直しからは
@@ -212,9 +229,10 @@ gh pr comment <最後にマージした Pull Request の番号> --body-file issu
 
 | 順 | 行うこと |
 | ---: | --- |
-| 1 | `concurrency` を実行し、並行度・最大同時本数・対象の期間を「閉じたときの測定」の表へ写す。`oom_kill の増分` は、いま測った値 − 「測った値」の表の**最初の行**の `oom_kill`（起点は見直しで更新されるため、開始時の値から数える） |
+| 1 | `concurrency` を実行し、並行度・最大同時本数・対象の期間を「閉じたときの測定」の表へ写す。`oom_kill の増分` は、いま測った値 − 「測った値」の表の**最初の行**の `oom_kill`（起点は見直しで更新されるため、開始時の値から数える）。`1 本の実測の最大` は「測った値」の表の `1 本の実測` の最大で、数値の行が無ければ `—` と書く |
 | 2 | 先頭の「状態」を `閉じた` にする |
 | 3 | 全文を、スプリントで**最後にマージした Pull Request** へコメントとして投稿する |
 | 4 | 投稿の URL を確かめてから、**ファイルを消す** |
 
 **振り返りはこのコメントを読む。** 並行度と最大同時本数は、次のスプリントの本数の判断の材料になる。
+1 本の実測の最大は、1 本の見込み（`--per-lane-mib`）の初期値を直す根拠になる。

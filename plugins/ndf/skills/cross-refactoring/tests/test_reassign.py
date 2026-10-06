@@ -57,17 +57,23 @@ def _implement_state(tmp_path, **over):
     return make_state_v2(tmp_path, tmp_path / "work", phases={"implement": {"base_sha": "BASE"}}, **over)
 
 
-def test_a_usage_limit_in_implement_reverts_the_range_and_moves_the_implementer(cmd_reassign, tmp_path, env_tmp_dir, undo_spy, capsys):
-    """AC11・AC12・I7: 範囲を取り消してから、計画の後でも止めずに実装担当を振り替えて 7。採用済みの項目は触らない。"""
+@pytest.mark.parametrize("reason", ["usage_limit", "model_unavailable", "auth_expired"])
+def test_a_usage_limit_in_implement_reverts_the_range_and_moves_the_implementer(
+    cmd_reassign, tmp_path, env_tmp_dir, undo_spy, capsys, reason
+):
+    """AC11・AC12・I7: 範囲を取り消してから、計画の後でも止めずに実装担当を振り替えて 7。採用済みの項目は触らない。
+
+    モデルを引けない・認証の失効（#1290 の AC12）も、起動し直さずに同じ経路で振り替わる。
+    """
     path = _implement_state(tmp_path)
     env_tmp_dir(path)
-    _monitor(path, f"claude-implement-rf{ID}", "usage_limit")
+    _monitor(path, f"claude-implement-rf{ID}", reason)
 
     assert _run(cmd_reassign, "implement") == 7
 
     out = capsys.readouterr().out
     assert "IMPL=codex" in out
-    assert "REASSIGNED=claude=codex:usage_limit" in out
+    assert f"REASSIGNED=claude=codex:{reason}" in out
     st = read_state(path)
     assert (st["implementer"], st["implementer_reason"]) == ("codex", "reassigned")
     assert undo_spy["reverted"] == ["implement-no-result"]
@@ -80,7 +86,7 @@ def test_a_usage_limit_in_implement_reverts_the_range_and_moves_the_implementer(
             "attempt": 1,
             "seat": "claude",
             "account": "",
-            "reason": "usage_limit",
+            "reason": reason,
             "decision": "reassign",
             "to": "codex",
             "to_account": "",
@@ -223,12 +229,16 @@ def test_a_partial_no_result_in_propose_goes_on(cmd_reassign, tmp_path, env_tmp_
     assert "no_results" not in read_state(path)
 
 
-def test_all_no_result_in_propose_gathers_from_a_participant_that_did_not_propose(cmd_reassign, tmp_path, env_tmp_dir, capsys):
-    """全員が結果なしなら、提案を出していない担当（ここでは起動しなかった kiro）へ振り替える。"""
+@pytest.mark.parametrize("reason", ["usage_limit", "model_unavailable", "auth_expired"])
+def test_all_no_result_in_propose_gathers_from_a_participant_that_did_not_propose(cmd_reassign, tmp_path, env_tmp_dir, capsys, reason):
+    """全員が結果なしなら、提案を出していない担当（ここでは起動しなかった kiro）へ振り替える。
+
+    モデルを引けない・認証の失効（#1290 の AC12）も起動し直さずに同じ経路で続く。
+    """
     path = _implement_state(tmp_path, phase="propose")
     env_tmp_dir(path)
-    _monitor(path, f"claude-propose-rf{ID}", "usage_limit")
-    _monitor(path, f"codex-propose-rf{ID}", "usage_limit")
+    _monitor(path, f"claude-propose-rf{ID}", reason)
+    _monitor(path, f"codex-propose-rf{ID}", reason)
 
     assert _run(cmd_reassign, "propose", ["claude", "codex"]) == 7
 

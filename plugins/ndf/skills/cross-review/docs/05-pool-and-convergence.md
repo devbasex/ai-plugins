@@ -28,6 +28,31 @@ Step 1（ラウンドの開始）と Step 3（判定）が読む基準を持つ�
 なく「誰が使えるかを把握する手順」であり、通らなかった者は理由とともに状態ファイルの
 `participants.unavailable` へ残して先へ進む。
 
+**確認は認証だけでなく、モデルを 1 回引くところまで行う**（参加の確認。`lib/auth.py` の `probe_auth` が
+参加者ごとに並行に走らせ、合否は `lib/assignment.py` の `admit` が決める）。認証の状態確認が通っても、
+設定のモデルを引けない CLI や更新トークンが失効した CLI は結果を残さずに終わるためである。
+
+| 種類 | 何をするか |
+| --- | --- |
+| 認証確認 | `claude auth status` / `codex login status` / `agy models` / `kiro-cli whoami`。通らなければ最小の呼び出しを走らせずに外す |
+| 最小の呼び出し | 担当の起動と同じ CLI・同じプロジェクトのディレクトリ・同じ設定の上書き（claude の従量の接続の `--settings`）で、短い固定の問いを 1 回答えさせる（agy は持たない） |
+| 既定のモデルでの引き直し | 最小の呼び出しがモデルを引けず、モデルを引数で明示していないときだけ、claude は `--model default`、codex は `--ignore-user-config` で引き直す。codex はこれで読めた既定のモデルを、担当の起動と同じ形（利用者の設定のまま `--model <名前>`）でもう 1 回引き、通ったときだけ通す（`--ignore-user-config` は提供元の設定も外すため）。通れば既定のモデルで担当に入り、`participants.default_models` に残る。利用者の設定ファイルは書き換えない |
+
+1 者の持ち時間は 3 種類で共有して 120 秒。外した理由は `participants.unavailable` の値の先頭
+（`model_unavailable: ERROR: ...` など）と `participants.checks[<名前>].result` に語で残る
+（`unauthenticated` / `auth_expired` / `model_unavailable` / `timeout` / `missing_cli` / `probe_failed`）。
+`init` は参加者ごとに次の形の 1 行を出す。
+
+```text
+✅ claude: 認証とモデル（4.9 秒）
+↪ codex: 設定のモデル gpt-5.5 を引けないため、既定のモデル gpt-6.1-sol で担当に入れる（9.1 秒）
+❌ kiro: auth_expired — ERROR: Your access token could not be refreshed ...（5.0 秒）
+```
+
+確認の後に同じ形（モデルを引けない・認証の失効）が起きたときは、監視が `err.log` の文言で理由を付けて止め、
+同じ担当で起動し直さずに振り替える（`assignment.NO_RELAUNCH_REASONS`）。確認の結果は再開で使い回し、
+参加者に関わる引数を渡した再開だけ確かめ直す。
+
 | 引数 | 何をするか |
 | --- | --- |
 | `--exclude NAMES` | 参加者プールから外す。今は呼びたくない相手を、確認の前に落とす。**参加者プール（既定 + `--include`）に無い者の指定は止めずに無視する** |

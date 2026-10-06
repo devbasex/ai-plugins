@@ -167,7 +167,7 @@ def test_failing_test_is_detected_by_running_it(gitfacts, work):
     assert base != sha
 
 
-def test_fix_commits_pass_verification_through_real_git(cmd_converge, gitfacts, work):
+def test_fix_commits_pass_verification_through_real_git(fix_intake, gitfacts, work):
     """修正コミットが git 経由の検証を通ること（`merge-fix` のチェック）。
 
     範囲に空集合を渡していた頃は、全ての修正コミットが必ず不正扱いになっていた。
@@ -177,9 +177,9 @@ def test_fix_commits_pass_verification_through_real_git(cmd_converge, gitfacts, 
     ordered = gitfacts.commits_in_range(str(work), base, "HEAD")
     facts = gitfacts.collect_commit_facts(str(work), [sha], set(ordered), "true", "main")
     state = {"target_scope": ["src", "tests"]}
-    assert cmd_converge._fix_problems(state, facts, {"I-001"}) == []
+    assert fix_intake._fix_problems(state, facts, {"I-001"}) == []
     # 修正の対象でない項目のコミットは弾く（`Item-Id` だけで対応づける。I4）
-    assert cmd_converge._fix_problems(state, facts, {"I-002"})
+    assert fix_intake._fix_problems(state, facts, {"I-002"})
 
 
 def test_revert_order_comes_from_history_not_from_the_claim(gitfacts, work):

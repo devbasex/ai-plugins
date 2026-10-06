@@ -36,8 +36,8 @@ def revert_range(work: str, ordered: list[str]) -> Optional[str]:
 def replay_commits(work: str, shas: list[str]) -> tuple[dict[str, str], Optional[str]]:
     """コミットを**古い順に**積み直し、`({元の SHA: 新しい SHA}, 積み直せなかったコミット)` を返す。
 
-    競合したら `git cherry-pick --abort` だけを打って返す。**ここで中断しない。** 同じファイルを
-    触った項目まで広げるかは呼び出し側（`undo`）が決める。
+    競合したら `git cherry-pick --abort` だけを打って返す。**ここで中断しない。** 衝突したコミットの
+    項目を外すか止まるかは呼び出し側（`undo`）が決める。
     """
     mapping: dict[str, str] = {}
     for sha in shas:

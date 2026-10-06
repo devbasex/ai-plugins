@@ -6,13 +6,5 @@
     {"name": "pytest-scope", "reason": "重いジョブを省くかの判定だけで、結果は後の pytest が返す"},
     {"name": "runtime-smoke-scope", "reason": "重いジョブを省くかの判定だけで、結果は後の runtime-smoke (*) が返す"}
   ],
-  "awaiting": [
-    {"name": "doc-line-limit-check", "reason": "#653 で必須にすると決めた。承認ゲート 2 で ruleset へ足す"},
-    {"name": "skill-shell-vars-check", "reason": "#653 で必須にすると決めた。承認ゲート 2 で ruleset へ足す"},
-    {"name": "lint", "reason": "#653 で必須にすると決めた。承認ゲート 2 で ruleset へ足す"},
-    {"name": "pr-body-decisions-check", "reason": "#653 で必須にすると決めた。承認ゲート 2 で ruleset へ足す（#1645 の修正が develop に入った後）"},
-    {"name": "glossary-check", "reason": "#653 で必須にすると決めた。承認ゲート 2 で ruleset へ足す"},
-    {"name": "script-structure-check", "reason": "#653 で必須にすると決めた。承認ゲート 2 で ruleset へ足す"},
-    {"name": "required-checks-check", "reason": "#653 で必須にすると決めた。承認ゲート 2 で ruleset へ足す"}
-  ]
+  "awaiting": []
 }

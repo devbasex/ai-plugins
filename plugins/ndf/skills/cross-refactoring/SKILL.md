@@ -87,7 +87,7 @@ allowed-tools:
 
 **値を使わない引数**: `--max-test-rounds` / `--max-outer-rounds` / `--max-items-per-round` /
 `--max-fix-rounds` / `--test-timeout` は、渡すと使わないことを知らせる 1 行を出して**値を使わずに続ける**。
-回数と所要は `--budget-minutes` が決める（修正は締め切りまで試み、テスト 1 回の上限は想定最大時間から導く）。
+回数と所要は `--budget-minutes` が決める（修正は締め切りまで試み（コミットしなかった項目はその回で取り消す）、テスト 1 回の上限は想定最大時間から導く）。
 
 ```text
 /ndf:cross-refactoring 130 --scope src/services tests/services
@@ -135,9 +135,10 @@ agy と kiro は取れないため、モデルを比べたいなら `--model agy
 ## 前提
 
 - `gh` CLI が認証済みで、`jq` と `uv`（または Python 3.10 以上）が使える
-- 参加者の CLI がログイン済みである。`init` が認証状態を確認し、通らない者を外して続ける
-  （確認コマンドは claude: `claude auth status` / codex: `codex login status` / agy: `agy models` /
-  kiro: `kiro-cli whoami`。誤検知するときは `NDF_SKIP_AUTH_CHECK=1`）
+- 参加者の CLI がログイン済みで、モデルを引ける。`init` が認証確認（claude: `claude auth status` /
+  codex: `codex login status` / agy: `agy models` / kiro: `kiro-cli whoami`）と、担当の起動と同じ
+  モデルの指定での 1 回の呼び出しで確かめ、通らない者を理由を出して外して続ける。`--model` で明示して
+  いないモデルを引けないときは既定のモデルで担当に入れる（誤検知するときは `NDF_SKIP_AUTH_CHECK=1`）
 - 対象の Pull Request が Draft で開いている（未作成なら `/ndf:pr` で先に作る）
 - 対象のリポジトリ（またはその worktree）の中で会話を始めている。単独起動のコマンドは**すべてそこで打ち**、Skill の
   ディレクトリへ移らない。対象のリポジトリは打った場所が属する git の作業ツリーの根で決まり、git の作業ツリーでない
@@ -182,9 +183,9 @@ flowchart TD
     T -->|ある| AT["テスト追加（実装担当）"]:::phase --> Impl
     T -->|無い| Impl["実装（実装担当）<br/>順位の順に 1 項目 = 1 コミット"]:::phase
     Impl --> V{"範囲テストが通る ?"}
-    V -->|いいえ| Fix["修正（実装担当）"] --> Cap{"上限・残り時間 ?"}
-    Cap -->|未達| V
-    Cap -->|到達| Drop["その項目だけ取り消す<br/>全体テストなら危険フラグの項目を新しい順に絞る"]:::stop --> V
+    V -->|いいえ| Fix["修正（実装担当）"] --> Cap{"コミットした・残り時間 ?"}
+    Cap -->|コミットし 時間が残る| V
+    Cap -->|コミットしない・時間切れ| Drop["その項目を取り消す（衝突した項目だけを外す）<br/>残った項目は範囲テストで確かめ直す"]:::stop --> V
     V -->|はい| D{"危険フラグ ?"}
     D -->|立った| W{"全体テストを 1 度"}
     W -->|通る・フレーキー・既存失敗| Gate
@@ -250,7 +251,7 @@ bash "$LIB/bg-wait.sh" wait "$RC"   # 1 回 540 秒以内。124 = まだ終わ�
 | --- | --- | --- |
 | 0 | finalize まで終わった | `items[0].report`（`refactor.py report` の出力）と `metrics` を「完了報告」へ写す |
 | 23（`cross-review`） | 単独起動の最終ゲート | `prompt_file` を読み、`items[0].cwd`（対象のリポジトリの根）で `items[0].command`（cross-review の駆動）を回す。最終ステータスは cross-review の駆動が `result_file` へ書き、自分では書かない。同じコマンドを打ち直し、結果 JSON の `metrics.review_status` が `approved` のときだけ Draft を解除する。それ以外は Draft のまま最終ステータスを報告して止まる |
-| 1 | 中断（`metrics.exit` に元の終了コード。4 = 予算の指定の誤り・着手前のテストが長く手順の枠が想定最大時間に収まらない（要る `--budget-minutes` の下限を出す。下限以上で `init` を打ち直すと着手前のテストを走らせずに続く）・着手前のテストの打ち切り・`--round-test` が要る・旧い状態ファイル・取り消しの失敗・同じファイルまで広げても積み直せない・打ち切りの後の取り消しで起点へ戻した後でも最終ゲートが落ちた・push の直前に残すコミットでないもの（見放した担当の残留コミットなど）がある・範囲を確定できない など。最終ゲートを経ずに終わった実行もここで、`metrics.adopted` は 0・`metrics.unconfirmed` に残った項目の数） | `summary` を報告して止まる。**握り潰さない**（検証を通っていない変更が残る） |
+| 1 | 中断（`metrics.exit` に元の終了コード。4 = 予算の指定の誤り・着手前のテストが長く手順の枠が想定最大時間に収まらない（要る `--budget-minutes` の下限を出す。下限以上で `init` を打ち直すと着手前のテストを走らせずに続く）・着手前のテストの打ち切り・`--round-test` が要る・旧い状態ファイル・取り消しの失敗（項目に属さないコミットの積み直しか公開済みの revert が衝突した）・打ち切りの後の取り消しで起点へ戻した後でも最終ゲートが落ちた・push の直前に残すコミットでないもの（見放した担当の残留コミットなど）がある・範囲を確定できない など。最終ゲートを経ずに終わった実行もここで、`metrics.adopted` は 0・`metrics.unconfirmed` に残った項目の数） | `summary` を報告して止まる。**握り潰さない**（検証を通っていない変更が残る） |
 
 再開は同じコマンドを打ち直すだけである。進みは耐久の記録（既定の置き場は `~/.local/state/ndf/dbos/refactor-<鍵>.sqlite` ）が持ち、
 記録のある手順は流し直さない。`metrics` は状態ファイルから数えた件数（`items` / `adopted` / `reverted` /

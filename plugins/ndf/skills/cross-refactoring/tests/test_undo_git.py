@@ -3,12 +3,12 @@
 | 位置関係 | 結果 |
 | --- | --- |
 | 別ファイル / 離れた行 | 項目だけを取り消し、残す項目は積み直せる（`item`） |
-| 同一ファイルの隣接行 | 積み直せない。同じファイルを触った項目まで広げる（`widened`） |
-| 広げた後も隣接が残る | 取り消しの前の HEAD へ戻して終了コード 4（全件の取り消しへは進まない。#1237） |
+| 同一ファイルの隣接行 | 積み直せない。衝突したコミットの項目だけを外す（`ejected`。#1793 の R2） |
+| 外した項目に依存する項目 | 同じく衝突して外れる。止まらずに続ける |
 
 **隣接する変更は git だけでは分離できない。** 取り消した側の行が消えると、残す側の
-パッチが前提にしている文脈も消えるためである。広げてでも Pull Request を決定的な
-状態に保つことを優先する。
+パッチが前提にしている文脈も消えるためである。外すのは衝突したコミットの項目だけで、
+ファイルが同じというだけでは外さない（`test_undo_eject_git.py`）。
 """
 
 from __future__ import annotations
@@ -91,18 +91,23 @@ def test_a_distant_or_separate_change_is_dropped_alone(tmp_path, undo, line, fil
     assert read_state(path)["pending_drop"] is None
 
 
-def test_an_adjacent_change_widens_to_the_items_touching_the_same_file(tmp_path, undo):
+def test_an_adjacent_change_ejects_the_item_whose_commit_conflicted(tmp_path, undo):
+    """I2: 衝突したコミットの項目を外し、理由に取り消した項目と衝突したコミットの 12 桁を残す。"""
     work, base, c1, c2 = _repo(tmp_path, 3)
     path = _state(tmp_path, work, base, c1, c2)
     state = read_state(path)
+    state["items"][1]["failure_reason"] = "自分の範囲テストで落ちた"
 
     record = undo.drop(path, state, ["I-001"], "テスト")
 
-    assert record["mode"] == "widened"
+    assert record["mode"] == "ejected"
+    assert record["ejected"] == [{"item": "I-002", "commit": c2, "by": ["I-001"]}]
     assert (work / "src" / "foo.py").read_text(encoding="utf-8") == "".join(LINES)
-    items = {i["id"]: i for i in read_state(path)["items"]}
+    saved = read_state(path)
+    items = {i["id"]: i for i in saved["items"]}
     assert items["I-002"]["status"] == "reverted"
-    assert "巻き込まれた" in items["I-002"]["failure_reason"]
+    assert items["I-002"]["failure_reason"] == f"I-001 の取り消しで {c2[:12]} の積み直しが衝突したため外した"
+    assert [d["mode"] for d in saved["drops"]] == ["ejected"]
 
 
 def test_an_item_without_commits_is_closed_without_touching_git(tmp_path, undo):
@@ -133,6 +138,8 @@ def test_an_unowned_extra_commit_is_removed_and_older_commits_are_kept(tmp_path,
         "mode": "item",
         "reason": "改修計画外",
         "dropped": [],
+        "ejected": [],
+        "recheck": [],
         "extra": [extra],
         "origin": c2,
         "removed": 1,
@@ -191,12 +198,9 @@ def test_a_drop_interrupted_after_replay_keeps_the_remaining_item_on_resume(tmp_
     assert resumed["pending_drop"] is None
 
 
-def test_a_conflict_left_after_widening_restores_head_and_stops(tmp_path, undo, capsys):
-    """同じファイルまで広げても積み直せなければ、全件を取り消さずに取り消しの前へ戻して止まる（AC-1237-4）。
-
-    I-002 は I-001 の隣の行（foo.py）と bar.py を触り、I-003 は I-002 の bar.py の隣の行を触る。I-001 を
-    取り消すと I-002 が衝突して広がり、広げた後は I-003 が衝突する。I-003 は foo.py を触らないため広がらない。
-    """
+def test_items_depending_on_an_ejected_item_are_ejected_in_turn(tmp_path, undo):
+    """依存の連なり: I-002 は I-001 の隣の行、I-003 は I-002 の bar.py の隣の行を触る。I-001 を取り消すと
+    I-002 が外れ、続けて I-003 も外れる。終了コード 4 で止まらない。"""
     work, base, c1, _ = _repo(tmp_path, 30)
     git("reset", "-q", "--hard", c1, cwd=work)
     foo = (work / "src" / "foo.py").read_text(encoding="utf-8").splitlines(keepends=True)
@@ -215,16 +219,13 @@ def test_a_conflict_left_after_widening_restores_head_and_stops(tmp_path, undo, 
         {"id": "I-003", "rank": 3, "path": "src/bar.py", "status": "implemented", "commits": {"test": None, "implement": c3, "fix": []}}
     )
 
-    with pytest.raises(SystemExit) as e:
-        undo.drop(path, state, ["I-001"], "テスト")
+    record = undo.drop(path, state, ["I-001"], "テスト")
 
-    assert e.value.code == 4
-    assert git("rev-parse", "HEAD", cwd=work).stdout.strip() == c3
-    err = capsys.readouterr().err
-    assert c3[:12] in err and "I-002" in err
+    assert record["ejected"] == [{"item": "I-002", "commit": c2, "by": ["I-001"]}, {"item": "I-003", "commit": c3, "by": ["I-001"]}]
+    assert record["dropped"] == ["I-001", "I-002", "I-003"]
+    assert git("rev-parse", "HEAD", cwd=work).stdout.strip() == base
     items = {i["id"]: i for i in read_state(path)["items"]}
-    assert [items[i]["status"] for i in ("I-001", "I-002", "I-003")] == ["implemented"] * 3
-    assert not read_state(path).get("drops")
+    assert [items[i]["status"] for i in ("I-001", "I-002", "I-003")] == ["reverted"] * 3
 
 
 def test_remap_rewrites_item_commits_and_saved_points_through_full_shas(tmp_path, undo):

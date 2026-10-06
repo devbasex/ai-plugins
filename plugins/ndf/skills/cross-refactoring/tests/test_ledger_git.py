@@ -281,7 +281,7 @@ def _expected_tree(work: pathlib.Path, base: str, shas: list[str]) -> str:
 
 
 def test_repeated_drops_do_not_grow_the_history(undo, tmp_path, repo):
-    """AC-1399-1〜3: 5 回の取り消し（うち 1 回は広がる）で revert を打たず、コミット数も内容も定義どおり。"""
+    """AC-1399-1〜3: 5 回の取り消し（うち 1 回は衝突した項目を外す）で revert を打たず、コミット数も内容も定義どおり。"""
     path, base, originals = _thirteen_items(tmp_path, repo)
     work = repo["work"]
     for target in ("I-012", "I-005", "I-009", "I-002", "I-013"):
@@ -298,27 +298,28 @@ def test_repeated_drops_do_not_grow_the_history(undo, tmp_path, repo):
         assert _run("rev-parse", "HEAD^{tree}", cwd=work) == _expected_tree(work, base, [originals[i] for i in live])
 
     items = {i["id"]: i for i in read_state(path)["items"]}
-    assert items["I-006"]["status"] == "reverted", "I-005 と同じファイルの隣の行を触った I-006 は広がる"
-    assert [d["mode"] for d in read_state(path)["drops"]].count("widened") == 1
+    assert items["I-006"]["status"] == "reverted", "I-005 と同じファイルの隣の行を触った I-006 は衝突して外れる"
+    assert [d["mode"] for d in read_state(path)["drops"]].count("ejected") == 1
     assert _origin_tip(repo) == base, "取り消しは push を伴わない（AC-1399-5）"
 
 
 def test_a_failed_drop_leaves_origin_untouched(undo, tmp_path, repo):
-    """AC-1399-5 / AC-1237-4: 広げても積み直せない取り消しは中断し、origin の head は開始時のまま。"""
+    """AC-1399-5 / #1793 の I4: 項目に属さないコミット（オーケストレーター）の積み直しが衝突した取り消しは中断し、
+    origin の head は開始時のまま。"""
     work = repo["work"]
     base = _base(work, ["src/foo.py", "src/bar.py"])
     _change(work, "src/foo.py", 2, "by-I-001")
     c1 = commit_with_trailers(work, "I-001", item_trailers("I-001"))
-    _change(work, "src/foo.py", 3, "by-I-002")
-    _change(work, "src/bar.py", 2, "by-I-002")
-    c2 = commit_with_trailers(work, "I-002", item_trailers("I-002"))
+    _change(work, "src/foo.py", 3, "by-orchestrator")
+    c2 = commit_with_trailers(work, "sync", {})
     _change(work, "src/bar.py", 3, "by-I-003")
     c3 = commit_with_trailers(work, "I-003", item_trailers("I-003"))
     path = _state(
         tmp_path,
         work,
         base,
-        [_item("I-001", 1, "src/foo.py", c1), _item("I-002", 2, "src/foo.py", c2), _item("I-003", 3, "src/bar.py", c3)],
+        [_item("I-001", 1, "src/foo.py", c1), _item("I-003", 3, "src/bar.py", c3)],
+        ledger={"orchestrator_commits": [c2]},
     )
 
     with pytest.raises(SystemExit) as e:
@@ -348,7 +349,7 @@ def test_the_first_push_comes_at_the_final_gate(cmd_converge, cmd_gate, publish,
     assert calls == ["final"]
 
 
-# ---------- #1237: 広げるのは同じファイルまで ----------
+# ---------- #1237・#1793: 外すのは衝突したコミットの項目だけ ----------
 
 FILES_1237 = {
     "I-002": "cross-refactoring/scripts/drive.py",
@@ -372,28 +373,29 @@ def _six_items(tmp_path, repo):
     return _state(tmp_path, work, base, items), base
 
 
-def test_a_conflict_widens_only_to_the_items_touching_the_same_file(undo, ledger, tmp_path, repo):
-    """AC-1237-1 / AC-1237-2 / AC-1237-5: I-002 を取り消すと I-004 だけが広がり、I-003・I-005・I-006 は残る。"""
+def test_a_conflict_ejects_only_the_item_whose_commit_conflicted(undo, ledger, tmp_path, repo):
+    """AC-1237-1 / AC-1237-2 / AC-1237-5: I-002 を取り消すと I-004 だけが外れ、I-003・I-005・I-006 は残って確かめ直しを待つ。"""
     path, _ = _six_items(tmp_path, repo)
     work = repo["work"]
 
     record = undo.drop(path, read_state(path), ["I-002"], "範囲テストが落ちた")
 
-    assert (record["mode"], record["dropped"]) == ("widened", ["I-002", "I-004"])
+    assert (record["mode"], record["dropped"]) == ("ejected", ["I-002", "I-004"])
+    assert record["recheck"] == ["I-003", "I-005", "I-006"]
     state = read_state(path)
     items = {i["id"]: i for i in state["items"]}
     assert [items[i]["status"] for i in ("I-002", "I-004")] == ["reverted", "reverted"]
     for kept in ("I-003", "I-005", "I-006"):
-        assert items[kept]["status"] == "verified"
-        assert "巻き込まれた" not in str(items[kept].get("failure_reason") or "")
+        assert items[kept]["status"] == "implemented", "最終ゲートより前の取り消しの後は範囲テストで確かめ直す"
+        assert not items[kept].get("failure_reason")
         assert f"by-{kept}" in (work / FILES_1237[kept]).read_text(encoding="utf-8")
-    assert "巻き込まれた" in items["I-004"]["failure_reason"]
+    assert "I-002 の取り消しで" in items["I-004"]["failure_reason"]
     state["final_gate"]["status"] = "passed"
     assert ledger.adoption_confirmed(state) and ledger.remaining_count(state) == 3
 
 
-def test_drops_after_a_widened_drop_keep_the_history_bounded(undo, tmp_path, repo):
-    """AC-1237-3: 広げた取り消しの後に 2 件を続けて取り消しても、コミット数が上限を超えない。"""
+def test_drops_after_an_ejecting_drop_keep_the_history_bounded(undo, tmp_path, repo):
+    """AC-1237-3: 項目を外した取り消しの後に 2 件を続けて取り消しても、コミット数が上限を超えない。"""
     path, base = _six_items(tmp_path, repo)
     work = repo["work"]
     for target in ("I-002", "I-005", "I-003"):

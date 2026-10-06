@@ -160,5 +160,7 @@ PRINT_TIMEOUT=${LIMITS_OUT##*$'\n'}
 # **接頭辞は絶対パスで渡す。** `launch-cli.sh` は作業ツリーへ `cd` してから
 # `<stem>.pid` と `<stem>-stdout.log` を作る。相対の値を渡すと、作業ツリーの直下に
 # 成果物が落ちて差分に現れる。記録は `$TMP_DIR` の下へ集める。
+# 起動のモデル: 引数の明示 → 既定のモデルへの切り替え（参加の確認。#1290）→ 空（CLI の設定のまま）
+MODEL=$(jq -r --arg rt "$RUNTIME" '(.models // {})[$rt] // (.participants.default_models // {})[$rt] // ""' "$STATE")
 "$SCRIPT_DIR/../../../scripts/lib/launch-cli.sh" "$RUNTIME" "$WORKTREE" "$PROMPT" \
-  "$STEM" "" "$TMP_DIR" "$PRINT_TIMEOUT"
+  "$STEM" "$MODEL" "$TMP_DIR" "$PRINT_TIMEOUT"

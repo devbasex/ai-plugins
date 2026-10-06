@@ -311,15 +311,25 @@ def covers_whole(strategy: Strategy, locations: list[str], kind: str = TEST) -> 
 
 
 def suite_groups(strategy: Strategy, targets: list[str]) -> list[tuple[Suite, list[str]]]:
-    """テストの対象を受け持つテストの suite ごとに分ける。受け持つ suite の無いものは最初のテストの suite へ。"""
+    """テストの対象を受け持つテストの suite ごとに分ける。受け持つ suite の無いものは最初のテストの suite へ。
+
+    雛形の `{paths}` の約束はパスなので、対象は `::` より前のパスへ直し、重なりを 1 つにまとめ、最初に現れた順を
+    保つ（#1793 の R5）。`::` を受け付けるかはランナーごとに違い、宣言の `runner` からは見分けられない。"""
     groups: dict[str, tuple[Suite, list[str]]] = {}
     scoped = strategy.scoped_suites(TEST)
-    for t in targets:
-        suite = suite_for(strategy, str(t), TEST) or (scoped[0] if scoped else None)
+    for path in dict.fromkeys(target_path(t) for t in targets):
+        if not path:
+            continue
+        suite = suite_for(strategy, path, TEST) or (scoped[0] if scoped else None)
         if suite is None:
             continue
-        groups.setdefault(suite.name, (suite, []))[1].append(str(t))
+        groups.setdefault(suite.name, (suite, []))[1].append(path)
     return list(groups.values())
+
+
+def target_path(target: object) -> str:
+    """テストの対象（`tests/x.py::Check` の形も可）の `::` より前のパス。"""
+    return str(target).split("::", 1)[0].strip()
 
 
 def scope_runs(strategy: Strategy, targets: list[str], changed: list[str]) -> list[ScopeRun]:

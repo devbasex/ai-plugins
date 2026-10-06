@@ -245,7 +245,9 @@ esac
 
 # 実行時間の上限は工程名で渡す。共通層が上限の表から「監視の上限 + 120 秒」を導き、
 # 打ち切りの判断を監視の側へ一本化する（#598 / #537）。
-"$SCRIPT_DIR/../../../scripts/lib/launch-cli.sh" "$RUNTIME" "$WORKTREE_ABS" "$PROMPT" "$STEM" "" \
+# 起動のモデル: 引数の明示 → 既定のモデルへの切り替え（参加の確認。#1290）→ 空（CLI の設定のまま）
+MODEL=$(jq -r --arg rt "$RUNTIME" '(.models // {})[$rt] // (.participants.default_models // {})[$rt] // ""' "$STATE")
+"$SCRIPT_DIR/../../../scripts/lib/launch-cli.sh" "$RUNTIME" "$WORKTREE_ABS" "$PROMPT" "$STEM" "$MODEL" \
   "$EXTRA_DIR" review
 }
 
