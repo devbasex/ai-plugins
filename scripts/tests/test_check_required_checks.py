@@ -36,6 +36,17 @@ REQUIRED_12 = [
     "markdown-link-check",
     "instruction-files-check",
 ]
+# 承認ゲート 2 で ruleset へ足した 7 つ（#653）。足した後の必須は 19 個
+ADDED_7 = [
+    "doc-line-limit-check",
+    "glossary-check",
+    "lint",
+    "pr-body-decisions-check",
+    "required-checks-check",
+    "script-structure-check",
+    "skill-shell-vars-check",
+]
+REQUIRED_19 = REQUIRED_12 + ADDED_7
 
 
 def rules(*contexts: str) -> list[dict]:
@@ -389,7 +400,7 @@ def test_the_job_runs_only_on_pull_requests():
 
 def test_cli_runs_as_a_script(tmp_path):
     rules_file = tmp_path / "rules.json"
-    rules_file.write_text(json.dumps(rules(*REQUIRED_12)), encoding="utf-8")
+    rules_file.write_text(json.dumps(rules(*REQUIRED_19)), encoding="utf-8")
     p = subprocess.run(
         [sys.executable, str(CHECK), "--root", str(REPO), "--repo", "o/r", "--branch", "develop", "--rules-file", str(rules_file)],
         capture_output=True,
@@ -397,4 +408,4 @@ def test_cli_runs_as_a_script(tmp_path):
         timeout=120,
     )
     assert p.returncode == 0, p.stdout + p.stderr
-    assert p.stdout.splitlines()[-1] == "失敗 0 件・知らせ 7 件"
+    assert p.stdout.splitlines()[-1] == "失敗 0 件・知らせ 0 件"
