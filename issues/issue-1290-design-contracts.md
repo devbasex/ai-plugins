@@ -57,6 +57,7 @@
 - 呼び手が続けて出す `⚠ <名前> を担当から外しました（<理由>: <詳細>）` は今のまま（`unavailable` の値が理由を含むようになる）
 - `--require-all` の中断の文を「確認を通らない CLI があります」に直す（理由は未認証に限らない）
 - `external-ai.py check` は、確認を通らなければ理由に依らず今の `outcome` の `auth` と終了コード `EXIT_PRECONDITION` で終え、`metrics.reason` に理由の語、`summary` に詳細を入れる（`outcome` の語彙は増やさない）
+- `external-ai.py check` が既定のモデルへの切り替え（`↪`）で通ったときは、`outcome` の `ok` に加えて `metrics.default_model` に既定のモデルの名前、`metrics.from_model` に引けなかった元のモデルの名前（読めた場合）を入れ、`next` に `external-ai.py run <名前> --model <既定の名前> ...` を案内する。`run` は状態ファイルを持たず、`--model` が無ければ設定のモデルのまま起動するためである（決定 9）。切り替えが無いときは `metrics.default_model` を `null` にする
 
 ### 呼び出しの形
 

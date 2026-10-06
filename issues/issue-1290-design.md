@@ -384,6 +384,8 @@ kiro-cli 2.24.1 は `--model` を受けず、警告だけ出して既定のモ�
 
 `run` は確認の直後に同じ CLI を起動するため、最小の呼び出しは起動 1 回分の費用と時間を足すだけになる。起動後の失敗は監視の理由（`auth_expired` は `outcome` の `auth`）で返る。`check` は「使えるか」を問う入口なので、`init` と同じ確認を通る（#852 の決定どおり 2 つ目の確認を作らない）。
 
+`run` は状態ファイルを持たず、`--model` が無ければ設定のモデルのまま起動する。このため `check` が既定のモデルへの切り替えで通ったとき、`outcome=ok` だけを返すと、続く `run` が #461 と同じ形で落ちる。`check` は切り替えを止めず（`init` と同じ確認を保つ）、`metrics.default_model` に既定のモデルの名前・`metrics.from_model` に引けなかった元のモデルの名前を入れ、`next` に `run --model <既定の名前>` を案内する。`check` で切り替えを使わずに `model_unavailable` で落とす形は採らなかった。`init` と `check` の答えが食い違い、利用者の指示（#461・#1589「既定のモデルを選ぶ」）にも反するためである。
+
 根拠: Value 1 / Value 6（MVV 版 2）
 
 ### 決定 10: 起動のモデルの決め方を 3 つの起動側で揃えるため、状態ファイルの 2 つの欄を 1 つの式で読む
@@ -418,7 +420,7 @@ kiro-cli 2.24.1 は `--model` を受けず、警告だけ出して既定のモ�
 | AC2 | 同じく更新トークンの失効の行を返す偽の codex で `auth_expired` が入る | 分類の順で失効より先に未認証を照らす |
 | AC3 | `init` の出力に `❌ codex: model_unavailable` の行と、通った者の `認証とモデル` の行が出る | 行に理由を入れない |
 | AC4 | `external-ai.py check codex` が同じ偽の CLI で 0 以外を返し理由を出す。`check` と `init` が `auth.probe_auth` を通る | `check` だけ認証確認に戻す |
-| AC5 | 明示なしで設定のモデルが 400 を返し、`--ignore-user-config` では通る偽の codex が `available` に入り、`default_models` と `checks.codex.from_model` と `↪` の行が残る | 種類 `default` を呼ばない |
+| AC5 | 明示なしで設定のモデルが 400 を返し、`--ignore-user-config` では通る偽の codex が `available` に入り、`default_models` と `checks.codex.from_model` と `↪` の行が残る。同じ偽の codex で `external-ai.py check codex` が `outcome=ok` と `metrics.default_model` を返し、`next` が `run --model <既定の名前>` を案内する | 種類 `default` を呼ばない・`check` が `metrics.default_model` を返さない |
 | AC6 | `default_models` のある状態ファイルで、3 つの起動側が `--model <既定の名前>` を CLI へ渡し、実測のモデルが設定のモデルと違う値で記録される | 起動側が `default_models` を読まない |
 | AC7 | `--model codex=<名前>` で 404 を返す偽の codex は、種類 `default` を呼ばずに外れる。kiro に明示して `failed to set model` が出れば外れる | 明示でも種類 `default` へ進む |
 | AC8・I6 | 確認の前後で偽の HOME の `~/.codex/config.toml`・`settings.json` の中身が同じ | 種類 `default` が設定を書き換える |
