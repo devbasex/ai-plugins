@@ -112,7 +112,7 @@ PR を**既定の参加者プール（claude / codex / kiro とホスト）か�
 ## 前提
 
 - `/ndf:fix` が **サブエージェント起動 + 重要度ベース自動修正 + Resolve Conversation** に対応
-- `gh` CLI が認証済み。担当になる CLI は `init` が起動前に確かめ、通らない者は外して続ける（誤検知するときは `NDF_SKIP_AUTH_CHECK=1`）
+- `gh` CLI が認証済み。担当になる CLI は `init` が起動前に認証とモデルの 1 回の呼び出しまで確かめ、通らない者は理由を出して外して続ける。設定のモデルを引けないだけなら既定のモデルで担当に入れる（誤検知するときは `NDF_SKIP_AUTH_CHECK=1`）
 - worker（`general-purpose` のサブエージェント）を起こせる
 
 ## 事前確認

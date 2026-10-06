@@ -357,8 +357,12 @@ def test_the_retry_limit_with_another_status_is_not_a_usage_limit(tmp_path):
 
 
 def test_quoted_measured_lines_do_not_stop_the_agent(tmp_path):
-    """AC5: 引用・差分・文の途中に出た実物の文言では止まらない。"""
-    stem = _finished(tmp_path, "codex", err="\n".join(line for _label, line in NOT_USAGE_LIMIT_LINES), result=True)
+    """AC5: 引用・差分・文の途中に出た実物の文言では止まらない。
+
+    codex の 400 の行は利用上限ではないが、モデルを引けない致命（`model_unavailable`。#1290）として止まるため除く。
+    """
+    lines = [line for label, line in NOT_USAGE_LIMIT_LINES if label != "codex 400 の行"]
+    stem = _finished(tmp_path, "codex", err="\n".join(lines), result=True)
 
     proc = _run_monitor(tmp_path, "codex")
 

@@ -110,23 +110,27 @@ def _judge() -> tuple[int, str, str]:
 # ---------------- judge ----------------
 
 
-def test_a_usage_limit_seat_moves_to_the_remaining_participant(tmp_dir):
-    """AC6・AC10・I6: 3 者で 1 席が利用上限なら、残りの 1 者へ振り替えて 7。席が重ならない。"""
-    _write(tmp_dir, _state([_round(["codex", "kiro"], codex=_approve(), kiro=_no_result("usage_limit"))]))
+@pytest.mark.parametrize("reason", ["usage_limit", "model_unavailable", "auth_expired"])
+def test_a_usage_limit_seat_moves_to_the_remaining_participant(tmp_dir, reason):
+    """AC6・AC10・I6: 3 者で 1 席が利用上限なら、残りの 1 者へ振り替えて 7。席が重ならない。
+
+    モデルを引けない・認証の失効（#1290 の AC10・AC11）も、起動し直さずに同じ形で振り替わる。
+    """
+    _write(tmp_dir, _state([_round(["codex", "kiro"], codex=_approve(), kiro=_no_result(reason))]))
 
     code, out, _ = _judge()
 
     assert code == 7
-    assert "REASSIGNED='kiro=claude:usage_limit'" in out
+    assert f"REASSIGNED='kiro=claude:{reason}'" in out
     assert "RELAUNCH_AGENTS" not in out
     st = _read(tmp_dir)
     last = st["rounds"][-1]
     assert last["reviewers"] == ["codex", "claude"]
     assert [s["seat"] for s in last["seats"]] == ["codex", "claude"]
     assert last["kiro"]["intent"] == "NO_RESULT"  # 元の席の欄は残す
-    assert last["reassigned"] == [{"from": "kiro", "to": "claude", "to_account": "", "reason": "usage_limit"}]
+    assert last["reassigned"] == [{"from": "kiro", "to": "claude", "to_account": "", "reason": reason}]
     assert st["final"] is None
-    assert [(e["seat"], e["reason"], e["decision"], e["to"]) for e in st["no_results"]] == [("kiro", "usage_limit", "reassign", "claude")]
+    assert [(e["seat"], e["reason"], e["decision"], e["to"]) for e in st["no_results"]] == [("kiro", reason, "reassign", "claude")]
 
 
 def test_a_first_relaunchable_no_result_relaunches_the_same_seat(tmp_dir):
@@ -287,8 +291,14 @@ class FakeLaunches:
 
 @pytest.mark.parametrize(
     ("kiro_reads", "decisions"),
-    [([_no_result("usage_limit")], ["reassign"]), ([_no_result("stalled"), _no_result("stalled")], ["relaunch", "reassign"])],
-    ids=["usage-limit", "stalled-twice"],
+    [
+        ([_no_result("usage_limit")], ["reassign"]),
+        ([_no_result("stalled"), _no_result("stalled")], ["relaunch", "reassign"]),
+        # #1290 の AC11: 監視がモデルを引けない・認証の失効で止めた席は起動し直さずに振り替わる
+        ([_no_result("model_unavailable")], ["reassign"]),
+        ([_no_result("auth_expired")], ["reassign"]),
+    ],
+    ids=["usage-limit", "stalled-twice", "model-unavailable", "auth-expired"],
 )
 def test_drive_runs_the_reassigned_seat_and_moves_on(tmp_dir, monkeypatch, kiro_reads, decisions):
     """AC6・AC7: drive は振り替え先の席を起動して judge し直し、`final = error` にならずに先へ進む。"""

@@ -8,10 +8,12 @@
 
 問いは標準入力から渡す（`Reply with the single word OK.`）。応答の中身は見ない。
 
+確認は担当と同じプロジェクトのディレクトリで走らせ、プロジェクトの設定を継ぐ。指示書は読ませない（claude は環境変数 `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1`、codex は `-c project_doc_max_bytes=0`。kiro の steering を外す引数は無いため kiro だけは読む）。claude には担当の起動と同じ設定の上書き（`claude_settings.metered_settings`。`NDF_CLAUDE_ACCOUNT=metered` の区間で `--settings` を足す）を渡す。
+
 | ランタイム | 種類 `model`（明示のモデルがあれば `--model <名前>` を足す） | 種類 `default` | 実測（所要・費用） |
 | --- | --- | --- | --- |
-| claude 2.1.291 | `claude -p --output-format json --tools "" --system-prompt "Answer briefly." --strict-mcp-config --disable-slash-commands --no-session-persistence` | 種類 `model` に `--model default` | 5.3 秒・0.020 米ドル（既定の起動の形は 4.7 秒・0.44 米ドル）。存在しないモデルは終了コード 1、JSON の `"api_error_status":404` |
-| codex 0.160.0 | `codex exec --skip-git-repo-check --ephemeral -s read-only -C <一時ディレクトリ>` | 種類 `model` に `--ignore-user-config` | 3.8〜5.0 秒。標準エラーの見出しに `model: <名前>`。使えないモデルは終了コード 1 と `ERROR: {..."status":400,..."model is not supported ..."}` |
+| claude 2.1.291 | `claude -p --output-format json --tools "" --system-prompt "Answer briefly." --strict-mcp-config --disable-slash-commands --no-session-persistence` | 種類 `model` に `--model default` | 5.3 秒・0.020 米ドル（既定の起動の形は 4.7 秒・0.44 米ドル。プロジェクトのディレクトリで CLAUDE.md を読ませると 0.114 米ドル・キャッシュ書き込み 14.3k、読ませないと 0.020 米ドル・2.4k）。存在しないモデルは終了コード 1、JSON の `"api_error_status":404` |
+| codex 0.160.0 | `codex exec --skip-git-repo-check --ephemeral -s read-only -c project_doc_max_bytes=0 -C <担当のプロジェクトのディレクトリ>` | 種類 `model` に `--ignore-user-config`。通って既定のモデルの名前を読めたら、利用者の設定のまま種類 `model` に `--model <その名前>` を足して引き直し、通ったときだけ採る（`CONFIRM_DEFAULT`。担当は利用者の設定のまま `--model <名前>` で起動するため） | 3.8〜5.0 秒。AGENTS.md を読ませると 10.7k トークン、読ませないと 6.1k。標準エラーの見出しに `model: <名前>`。使えないモデルは終了コード 1 と `ERROR: {..."status":400,..."model is not supported ..."}` |
 | kiro-cli 2.24.1 | `kiro-cli chat --no-interactive` | 持たない | 5.2〜7.1 秒。`--model` は `[warn] failed to set model '<名前>': Method not found` を出して既定のモデルで答える（`auto` でも同じ） |
 | agy 1.2.11 | 持たない（認証確認 `agy models` だけ） | 持たない | この環境が未認証で測れない（未確認のまま残ること） |
 

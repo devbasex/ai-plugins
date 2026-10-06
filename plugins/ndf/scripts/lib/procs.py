@@ -1,7 +1,8 @@
 """プロセスの生死・親子・木の停止・メモリの包み（#1142 の決定 19・種類 6）。psutil を呼ぶのはこのモジュールだけである。
 
 `/proc/` を読むのもこのモジュールだけである（構造チェックの I14）。psutil に無い cgroup のメモリ
-（`memory.max`・`memory.current`・`memory.events`）の読み取りはここに残す。
+（`memory.max`・`memory.current`・`memory.events`・`memory.stat`）と、メモリの圧（PSI の
+`/proc/pressure/memory`・`/proc/vmstat` のスワップ I/O）の読み取りはここに残す。
 
 - 生死はゾンビを死んだとみなす（`os.kill(pid, 0)` はゾンビにも成功するため）
 - 停止は SIGTERM の後、猶予を過ぎても残れば SIGKILL を送る。対象がプロセスグループの先頭で、呼んだ側と
@@ -22,6 +23,8 @@ import psutil
 
 CGROUP_ROOT = Path("/sys/fs/cgroup")
 PROC_SELF_CGROUP = Path("/proc/self/cgroup")
+PROC_PRESSURE_MEMORY = Path("/proc/pressure/memory")
+PROC_VMSTAT = Path("/proc/vmstat")
 
 
 class CgroupMemory(NamedTuple):
@@ -29,6 +32,7 @@ class CgroupMemory(NamedTuple):
     current: int | None  # バイト。読めなければ None
     oom_kill: int | None  # `memory.events` の oom_kill。読めなければ None
     unlimited: bool  # `memory.max` が `max`
+    anon: int | None = None  # `memory.stat` の anon（バイト）。読めなければ None
 
 
 def _process(pid: int) -> psutil.Process | None:
@@ -184,7 +188,7 @@ def _read_int(path: Path) -> int | None:
 
 
 def cgroup_memory(directory: Path | None = None) -> CgroupMemory:
-    """cgroup の上限・使用量・oom_kill の回数。"""
+    """cgroup の上限・使用量・oom_kill の回数・anon。"""
     d = cgroup_dir() if directory is None else Path(directory)
     try:
         raw_limit = (d / "memory.max").read_text(encoding="utf-8").strip()
@@ -200,7 +204,51 @@ def cgroup_memory(directory: Path | None = None) -> CgroupMemory:
                 oom = int(fields[1])
     except OSError:
         pass
-    return CgroupMemory(limit, _read_int(d / "memory.current"), oom, unlimited)
+    return CgroupMemory(limit, _read_int(d / "memory.current"), oom, unlimited, _stat_values(d / "memory.stat", "anon")[0])
+
+
+def _stat_values(path: Path, *keys: str) -> list[int | None]:
+    """`<キー> <整数>` の行が並ぶファイルを 1 回読み、`keys` の値を順に返す。読めない・行が無い・数値でなければ None。"""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return [None] * len(keys)
+    found: dict[str, int | None] = {}
+    for line in text.splitlines():
+        fields = line.split()
+        if len(fields) == 2 and fields[0] in keys and fields[0] not in found:
+            found[fields[0]] = int(fields[1]) if fields[1].isdigit() else None
+    return [found.get(key) for key in keys]
+
+
+def memory_pressure_some_avg10(path: Path = PROC_PRESSURE_MEMORY) -> str | None:
+    """PSI の `some` の行の `avg10=` の値（原文の文字列）。読めない・行が無い・小数でなければ None。"""
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except OSError:
+        return None
+    for line in text.splitlines():
+        fields = line.split()
+        if not fields or fields[0] != "some":
+            continue
+        for field in fields[1:]:
+            name, _, value = field.partition("=")
+            if name == "avg10":
+                try:
+                    float(value)
+                except ValueError:
+                    return None
+                return value
+        return None
+    return None
+
+
+def swap_io_pages(path: Path = PROC_VMSTAT) -> int | None:
+    """vmstat の `pswpin + pswpout`（ページ）。読めない・どちらかの行が無い・数値でなければ None。"""
+    pages_in, pages_out = _stat_values(Path(path), "pswpin", "pswpout")
+    if pages_in is None or pages_out is None:
+        return None
+    return pages_in + pages_out
 
 
 def wait_gone(pid: int, timeout: float, poll: float = 0.1) -> bool:

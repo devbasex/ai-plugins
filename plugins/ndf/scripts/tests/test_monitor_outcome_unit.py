@@ -46,10 +46,19 @@ def test_append_journal_preserves_order_and_utf8_content(tmp_path):
 
 import pytest  # noqa: E402
 
-MONITOR_REASONS = ("timeout", "stalled", "early_error", "usage_limit", "cli_timeout", "pidfile_bad")
+MONITOR_REASONS = (
+    "timeout",
+    "stalled",
+    "early_error",
+    "usage_limit",
+    "cli_timeout",
+    "model_unavailable",
+    "auth_expired",
+    "pidfile_bad",
+)
 
 
-def test_reasons_are_the_nine_words():
+def test_reasons_are_the_eleven_words():
     assert _load_monitor_outcome().REASONS == (
         "ok",
         "timeout",
@@ -59,6 +68,8 @@ def test_reasons_are_the_nine_words():
         "pidfile_bad",
         "usage_limit",
         "cli_timeout",
+        "model_unavailable",
+        "auth_expired",
         "unparsable",
     )
 

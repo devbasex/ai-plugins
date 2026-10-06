@@ -353,7 +353,6 @@ def agents_md(tree: Path) -> Path:
     ("mark", "document", "before", "after"),
     [
         ("G", "README.md", "**NDFプラグイン v9.3.0**", "**NDFプラグイン v9.2.1**"),
-        ("I", "AGENTS.md", "主要プラグインです（v9.3.0）", "主要プラグインです（v9.2.1）"),
         ("K", "plugins/ndf/README.md", "Kiro CLI用 / v9.3.0）", "Kiro CLI用 / v9.2.1）"),
         (
             "M",
@@ -391,7 +390,6 @@ def test_codex_cache_path_partial_stale_fails(tree: Path) -> None:
     ("mark", "document", "fragment", "occurrences"),
     [
         ("G", "README.md", "**NDFプラグイン v9.3.0** のチェック用の最小構成です。\n", 1),
-        ("I", "AGENTS.md", "主要プラグインです（v9.3.0）", 1),
         ("K", "plugins/ndf/README.md", "# => NDF統合開発エージェント（Kiro CLI用 / v9.3.0）\n", 1),
         ("L", "plugins/ndf/README.md", "~/.codex/plugins/cache/ai-plugins/ndf/9.3.0/skills/deploy/SKILL.md", 2),
         ("M", "plugins/ndf/README.md", "# => ndf@ai-plugins  installed, enabled  9.3.0  <path>\n", 1),
@@ -532,7 +530,7 @@ def test_missing_versioning_document_fails(tree: Path) -> None:
 def test_versions_after_the_section_do_not_fail(tree: Path) -> None:
     """章 2 より後ろの章に囲んだ古い版数があっても落ちない（節は次の同位の見出しで閉じる）。"""
     body = versioning_md(tree).read_text(encoding="utf-8")
-    assert "`8.4.0`" in body.split("## 版数を持つ 15 箇所", 1)[1]
+    assert "`8.4.0`" in body.split("## 版数を持つ箇所", 1)[1]
     result = run_check(tree)
     assert result.returncode == 0, output_of(result)
 
@@ -543,7 +541,7 @@ def test_version_section_stops_at_a_higher_level_heading(tree: Path) -> None:
     自身と同じ深さの見出しだけで区切ると、次が上位の見出しのときに節が閉じない。閉じなければ
     走査は文書の末尾まで続き、後ろの章に並ぶ前の版の版数を現行版と比べてしまう。
     """
-    edit(versioning_md(tree), "## 版数を持つ 15 箇所\n", "# 版数を持つ 15 箇所\n")
+    edit(versioning_md(tree), "## 版数を持つ箇所\n", "# 版数を持つ箇所\n")
     result = run_check(tree)
     assert result.returncode == 0, output_of(result)
 
@@ -844,7 +842,7 @@ def test_versions_outside_the_section_do_not_fail(tree: Path) -> None:
 
 
 def test_bumping_only_the_plugin_version_reports_every_body_claim(tree: Path) -> None:
-    """この課題が起きた経路そのもの。説明文書を直さずに版だけ上げると 7 種類が挙がる。"""
+    """この課題が起きた経路そのもの。説明文書を直さずに版だけ上げると 6 種類が挙がる。"""
     bump_plugin_version(tree, "9.4.0")
     result = run_check(tree)
     assert result.returncode != 0
@@ -852,7 +850,6 @@ def test_bumping_only_the_plugin_version_reports_every_body_claim(tree: Path) ->
     for subject in (
         "概要の版数",
         "プラグイン一覧表の ndf の版数",
-        "「主要プラグインです（v<版>）」の版数",
         "版の付け方の節の版数",
         "Kiro の確認例の版数",
         "Codex のキャッシュパスの例の版数",
@@ -880,12 +877,20 @@ def test_count_failure_output_is_unchanged(tree: Path) -> None:
     assert ("ERROR: README.md: 公開Skills の Claude Code の数が食い違う（記載: 9 / plugins/ndf/manifests/claude-skills.txt: 5）") in out
 
 
-def test_missing_agents_md_fails(tree: Path) -> None:
-    """チェックの対象の説明文書が無いこと自体を失敗として扱う。"""
+def test_agents_md_is_not_a_version_claim(tree: Path) -> None:
+    """指示書（`AGENTS.md`）は版数を持たない。食い違う版数を書いても、無くても突き合わせない。
+
+    開発版の配布の `bump` が指示書の版数を書き換えると、Pull Request で通った読み込み量が配布の
+    時点で伸びる（#1739）。チェックが `AGENTS.md` の版数を求めると、版数を書き戻す理由になる。
+    """
+    edit(agents_md(tree), "主要プラグインです。", "主要プラグインです（v9.2.1）。")
+    result = run_check(tree)
+    assert result.returncode == 0, output_of(result)
+    assert "AGENTS.md" not in output_of(result)
+
     agents_md(tree).unlink()
     result = run_check(tree)
-    assert result.returncode != 0
-    assert "AGENTS.md" in output_of(result)
+    assert result.returncode == 0, output_of(result)
 
 
 # --- base_of: バージョン文字列を基底タプルへ分解する（単体）---

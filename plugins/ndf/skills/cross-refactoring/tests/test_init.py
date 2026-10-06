@@ -86,6 +86,7 @@ def run_init(refactor_lib, paths, patch_lib, refactor, origin_repo, monkeypatch)
     """
     refactor_lib = sys.modules["refactor_lib"]
     probed: list[list[str]] = []
+    probed_models: list[dict] = []
 
     def _run(args, viewer="someone-else", probe=None, real_probe=False):
         """`probe` を渡すと確認を差し替える。`{ランタイム: 理由}` の者だけが通らない。
@@ -134,15 +135,17 @@ def run_init(refactor_lib, paths, patch_lib, refactor, origin_repo, monkeypatch)
             cmd_setup = sys.modules["refactor_lib.commands.setup"]
             probed.clear()
 
-            def fake_probe(runtimes, *, info, env=None):
+            def fake_probe(runtimes, *, info, env=None, models=None, level="model"):
                 names = list(runtimes)
                 probed.append(names)
+                probed_models.append(dict(models or {}))
                 return {n: {"command": n, "ok": n not in probe, "detail": probe.get(n, "")} for n in names}, False
 
             monkeypatch.setattr(cmd_setup.auth, "probe_auth", fake_probe)
         refactor.cmd_init(args)
 
     _run.probed = probed
+    _run.probed_models = probed_models
     return _run
 
 
@@ -253,6 +256,8 @@ def test_init_starts_when_an_unreadable_path_hides_a_missing_cli(run_init, tmp_p
             "kiro": ("ndf-stub-missing",),
         },
     )
+    # 最小の呼び出しは本物の CLI を呼ばないよう外す（この試験の主題は認証確認の起動の失敗）
+    monkeypatch.setattr(cmd_setup.auth, "MODEL_PROBES", {})
     monkeypatch.setenv("PATH", f"{os.environ['PATH']}:{bin_dir}:{unreadable}")
     try:
         run_init(_args(tmp_path), real_probe=True)
@@ -263,6 +268,94 @@ def test_init_starts_when_an_unreadable_path_hides_a_missing_cli(run_init, tmp_p
     assert state["runtimes"] == ["claude", "codex"]
     assert list(state["participants"]["unavailable"]) == ["kiro"]
     assert "kiro を担当から外しました" in capsys.readouterr().err
+
+
+# 参加の確認の最小の呼び出しまで答える偽の CLI（#1290）。codex は FAKE_CODEX の形で答える:
+# 404 = 設定のモデルを引けないが既定のモデルでは引ける / 404all = 既定のモデルでも引けない / revoked = 認証の失効
+FAKE_PARTICIPANT_CLI = r"""#!/bin/sh
+name=$(basename "$0")
+case "$name $1 $2" in
+  "claude auth status"|"codex login status"|"kiro-cli whoami ") echo ok; exit 0;;
+esac
+cat > /dev/null
+echo "$name $*" >> "$FAKE_CALLS"
+[ "$name" = codex ] || { echo OK; exit 0; }
+case " $* " in
+  *" --ignore-user-config "*|*" --model gpt-6-astra "*) [ "$FAKE_CODEX" = 404all ] || { echo "model: gpt-6-astra" >&2; echo OK; exit 0; };;
+esac
+case " $* " in
+  *" --model explicit-model "*) echo 'ERROR: unexpected status 404 Not Found: The model `explicit-model` does not exist or you do not have access to it.' >&2; exit 1;;
+esac
+echo "model: gpt-5.5" >&2
+case "$FAKE_CODEX" in
+  404|404all) echo 'ERROR: unexpected status 404 Not Found: The model `gpt-5.5` does not exist or you do not have access to it.' >&2; exit 1;;
+  revoked) echo "ERROR: Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again." >&2; exit 1;;
+esac
+echo OK
+"""
+
+
+def _fake_participants(tmp_path, monkeypatch, codex_mode):
+    bin_dir = tmp_path / "fake-bin"
+    bin_dir.mkdir()
+    for name in ("claude", "codex", "kiro-cli"):
+        (bin_dir / name).write_text(FAKE_PARTICIPANT_CLI, encoding="utf-8")
+        (bin_dir / name).chmod(0o755)
+    calls = tmp_path / "fake-calls.log"
+    calls.write_text("", encoding="utf-8")
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    monkeypatch.setenv("FAKE_CODEX", codex_mode)
+    monkeypatch.setenv("FAKE_CALLS", str(calls))
+    return calls
+
+
+@pytest.mark.parametrize(("mode", "reason"), [("404all", "model_unavailable"), ("revoked", "auth_expired")])
+def test_init_drops_a_cli_that_cannot_reach_its_model(run_init, tmp_path, monkeypatch, capsys, mode, reason):
+    """#1290 の AC1・AC2・AC3: 認証は通るがモデルを引けない・認証が失効した codex は外れ、理由が出る。"""
+    _fake_participants(tmp_path, monkeypatch, mode)
+
+    run_init(_args(tmp_path), real_probe=True)
+
+    _, state = _state_of(tmp_path)
+    p = state["participants"]
+    assert p["available"] == ["claude", "kiro"]
+    assert p["unavailable"]["codex"].startswith(f"{reason}: ERROR:")
+    assert p["checks"]["codex"]["result"] == reason
+    assert p["checks"]["claude"]["result"] == "ok" and p["checks"]["claude"]["level"] == "model"
+    err = capsys.readouterr().err
+    assert f"❌ codex: {reason}" in err
+    assert "✅ claude: 認証とモデル" in err
+
+
+def test_init_switches_a_configured_model_to_the_default(run_init, tmp_path, monkeypatch, capsys):
+    """#1290 の AC5・AC6: 設定のモデルを引けない codex は既定のモデルで入り、起動の式がそのモデルを指す。"""
+    _fake_participants(tmp_path, monkeypatch, "404")
+
+    run_init(_args(tmp_path), real_probe=True)
+
+    path, state = _state_of(tmp_path)
+    p = state["participants"]
+    assert "codex" in p["available"]
+    assert p["default_models"] == {"codex": "gpt-6-astra"}
+    assert (p["checks"]["codex"]["from_model"], p["checks"]["codex"]["model"]) == ("gpt-5.5", "gpt-6-astra")
+    assert "↪ codex: 設定のモデル gpt-5.5 を引けないため、既定のモデル gpt-6-astra で担当に入れる" in capsys.readouterr().err
+    expr = '(.models // {})[$rt] // (.participants.default_models // {})[$rt] // ""'
+    got = subprocess.run(["jq", "-r", "--arg", "rt", "codex", expr, str(path)], capture_output=True, text=True, check=True)
+    assert got.stdout.strip() == "gpt-6-astra"
+
+
+def test_init_does_not_switch_an_explicit_model(run_init, tmp_path, monkeypatch):
+    """#1290 の AC7: `--model codex=<名前>` で明示したモデルを引けなければ、切り替えずに外す。"""
+    calls = _fake_participants(tmp_path, monkeypatch, "ok")
+
+    run_init(_args(tmp_path, model=["codex=explicit-model"]), real_probe=True)
+
+    _, state = _state_of(tmp_path)
+    p = state["participants"]
+    assert p["unavailable"]["codex"].startswith("model_unavailable:")
+    assert p["default_models"] == {}
+    log = calls.read_text(encoding="utf-8")
+    assert "--model explicit-model" in log and "--ignore-user-config" not in log
 
 
 def test_init_starts_when_a_probe_cannot_be_launched(run_init, tmp_path, monkeypatch):
@@ -281,7 +374,7 @@ def test_init_starts_when_a_probe_cannot_be_launched(run_init, tmp_path, monkeyp
 
     _, state = _state_of(tmp_path)
     assert state["runtimes"] == ["claude", "codex"]
-    assert state["participants"]["unavailable"] == {"kiro": "コマンドを実行できません（Permission denied）"}
+    assert state["participants"]["unavailable"] == {"kiro": "missing_cli: コマンドを実行できません（Permission denied）"}
 
 
 def test_require_all_stops_without_writing_the_state(run_init, tmp_path):

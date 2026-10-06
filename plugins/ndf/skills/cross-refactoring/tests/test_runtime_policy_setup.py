@@ -18,7 +18,7 @@ def _declare(root, body):
 def probe_calls(cmd_setup, monkeypatch):
     calls: list[str] = []
 
-    def probe(names, *, info, env=None):
+    def probe(names, *, info, env=None, models=None, level="model"):
         calls.extend(names)
         return {n: {"command": n, "ok": True, "detail": ""} for n in names}, False
 

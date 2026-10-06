@@ -83,12 +83,16 @@ def _scan_patterns(
 
 
 def _scan_early_fatal(path: pathlib.Path) -> Optional[str]:
-    """err.log の致命の一致（kill 対象）。**利用上限も含む。**
+    """err.log の致命の一致（kill 対象）。**理由つきの致命（利用上限・認証の失効・モデルを引けない）も含む。**
 
-    理由（`usage_limit` か `early_error` か）の区別はここでは行わず、`_early_error` が
-    `USAGE_LIMIT_FATAL` を先に照合して決める。この関数は「止めるべき文言があるか」だけを返す。
+    理由の区別はここでは行わず、`_early_error` が `REASONED_FATAL` を先に照合して決める。
+    この関数は「止めるべき文言があるか」だけを返す。
     """
-    hit = _scan_patterns(path, monitor_patterns.USAGE_LIMIT_FATAL) or _scan_patterns(path, monitor_patterns.EARLY_ERROR_FATAL)
+    for _reason, err_patterns, _stdout_patterns in monitor_patterns.REASONED_FATAL:
+        hit = _scan_patterns(path, err_patterns)
+        if hit:
+            return hit
+    hit = _scan_patterns(path, monitor_patterns.EARLY_ERROR_FATAL)
     if hit:
         return hit
     return _scan_patterns(
@@ -167,20 +171,25 @@ def _tail_last_nonempty_line(path: pathlib.Path, limit: int = 4096) -> str:
     return ""
 
 
-def _scan_usage_limit(paths: monitor_types.AgentPaths, agent: str) -> EarlyFatal | None:
-    """利用上限の文言。err.log は全担当、stdout.log は claude だけ JSON 向けの照合で見る。"""
-    hit = _scan_patterns(paths.err_log, monitor_patterns.USAGE_LIMIT_FATAL)
-    if hit:
-        return EarlyFatal("err.log", hit, "usage_limit")
-    if monitor_types._agent_runtime(agent) == "claude":
-        hit = _scan_claude_stdout_usage_limit(paths.stdout_log)
+def _scan_reasoned_fatal(paths: monitor_types.AgentPaths, agent: str) -> EarlyFatal | None:
+    """理由つきの致命の表（`REASONED_FATAL`）を上から照らし、最初に当たった理由を付ける。
+
+    err.log は全担当、stdout.log は claude だけ JSON 向けの照合で見る。同じ理由の中では err.log を先に見る。
+    """
+    is_claude = monitor_types._agent_runtime(agent) == "claude"
+    for reason, err_patterns, stdout_patterns in monitor_patterns.REASONED_FATAL:
+        hit = _scan_patterns(paths.err_log, err_patterns)
         if hit:
-            return EarlyFatal("stdout.log", hit, "usage_limit")
+            return EarlyFatal("err.log", hit, reason)
+        if is_claude and stdout_patterns:
+            hit = _scan_claude_stdout(paths.stdout_log, stdout_patterns)
+            if hit:
+                return EarlyFatal("stdout.log", hit, reason)
     return None
 
 
 def _scan_fatal(paths: monitor_types.AgentPaths, agent: str) -> EarlyFatal | None:
-    """利用上限以外の致命（理由は `early_error`）。致命 → 警告の見た目の致命の順。"""
+    """理由つきの表に当たらない致命（理由は `early_error`）。致命 → 警告の見た目の致命の順。"""
     hit = _scan_early_fatal(paths.err_log)
     if hit:
         return EarlyFatal("err.log", hit)
@@ -196,12 +205,12 @@ def _early_error(
     agent: str,
     disabled: bool,
 ) -> tuple[EarlyFatal | None, str | None]:
-    """早期の致命と警告。**照合の順序は利用上限 → 致命 → 警告の見た目の致命。**
+    """早期の致命と警告。**照合の順序は理由つきの致命（利用上限 → 認証の失効 → モデルを引けない）→ 致命 → 警告の見た目の致命。**
 
     同じ err.log に利用上限と他の致命が並んでいれば理由は `usage_limit` になる（#729 の
-    決定 6）。`disabled`（`--no-early-error`）は利用上限の検知も一緒に無効にする。
+    決定 6）。`disabled`（`--no-early-error`）は理由つきの致命の検知も一緒に無効にする。
     """
     if disabled:
         return None, None
-    fatal = _scan_usage_limit(paths, agent) or _scan_fatal(paths, agent)
+    fatal = _scan_reasoned_fatal(paths, agent) or _scan_fatal(paths, agent)
     return fatal, _scan_early_warn(paths.err_log)
