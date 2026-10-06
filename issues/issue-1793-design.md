@@ -277,7 +277,8 @@ sequenceDiagram
 stateDiagram-v2
     [*] --> implemented
     implemented --> verified: 範囲テストが通る
-    implemented --> failing: 範囲テストが落ちる
+    implemented --> failing: 自分の変更で範囲テストが落ちる
+    implemented --> implemented: 他の項目の変更で範囲テストが落ちる（blocked_by を付けて待つ）
     failing --> implemented: 修正を取り込んだ（直さなかった項目を除く）
     failing --> reverted: 直さなかった / 締め切り
     verified --> implemented: 確かめ直し
@@ -286,7 +287,7 @@ stateDiagram-v2
     failing --> reverted: 外した
 ```
 
-`verified --> implemented`（確かめ直し）と、`failing --> reverted` の「直さなかった」が新しい遷移である。`widened` による `reverted` は「外した」に置き換わる。
+`verified --> implemented`（確かめ直し）と、`failing --> reverted` の「直さなかった」が新しい遷移である。`implemented` からの判定は I3 の 3 つに分かれ、他の項目の変更で落ちた項目（巻き込まれた項目）は `failing` にせず、`blocked_by` を付けて `implemented` のまま待つ（今の規則のまま。確かめ直しの項目にも同じく効く）。`widened` による `reverted` は「外した」に置き換わる。
 
 ## 非機能の実現方式
 
@@ -304,7 +305,7 @@ stateDiagram-v2
 | I2・R2 の AC 2 | 上の B の `failure_reason` に A の ID と衝突したコミットの 12 桁が入り、`drops[-1].ejected` に B の行があり、`mode` が `ejected` | 理由を `setdefault` のままにすると、先に理由を持つ B で落ちる。`mode` に `widened` を書くと落ちる |
 | 外した項目の前のコミットも消える | テストと実装の 2 コミットの項目の実装のコミットが衝突すると、テストのコミットも HEAD から消える | 衝突したコミットだけを抜くと、テストのコミットが残って落ちる |
 | 依存の連なり | B が A に、E が B に依存する 3 件で A を取り消すと B と E が外れ、`ejected` が 2 行（`by` はどちらも A） | 1 回の衝突で止めて終了コード 4 にすると落ちる |
-| I3・R2 の AC 3 | 最終ゲートより前の取り消しの後、残った `verified` の項目が `implemented` になり、次の判定で範囲テストを走らせ、通れば `verified`・自分の変更で落ちれば `failing`・他の項目の変更で落ちれば `blocked_by` を付けて `implemented` のまま待つ | 確かめ直しを付けないと、範囲テストを落とす残りの項目が `verified` のまま最終ゲートへ進んで落ちる |
+| I3・R2 の AC 3 | 最終ゲートより前の取り消しの後、残った `verified` の項目が `implemented` になり、次の判定で範囲テストを走らせ、通れば `verified`・自分の変更で落ちれば `failing`・他の項目の変更で落ちれば `blocked_by` を付けて `implemented` のまま待つ | 確かめ直しを付けないと、範囲テストを落とす残りの項目が `verified` のまま最終ゲートへ進んで落ちる。確かめ直しの項目の範囲テストが他の項目の変更で落ちる場合を 1 件置き、その項目が `failing` でなく `blocked_by`（原因の項目の ID）を持つ `implemented` で残ることを確かめる。自分の変更か他の項目の変更かを見ずに `failing` にすると落ちる |
 | 最終ゲートの中の取り消し | `phase` が `final` の取り消しでは `verified` の項目は `verified` のまま、`recheck` は空 | 最終ゲートの中でも `implemented` へ戻すと、最終ゲートが通っても採用が 0 になって落ちる |
 | I4・R2 の AC 4・5 | 項目のコミットの衝突では HEAD が取り消しの前に戻らず終了コード 4 にならない。オーケストレーターのコミットの衝突と公開済みの revert の衝突では HEAD が戻り、終了コード 4（`raise` なら `DropConflict`） | 項目に属さないコミットの持ち主を探して外そうとすると、後者で落ちる |
 | I8・R2 の AC 6 | `pending_drop` を残して止めた実行を再開すると、外した項目と残す項目が止めずに通した実行と同じ | 外した項目を `pending_drop.items` へ書き足すと、再開で指定の項目が変わって理由が変わり落ちる |
