@@ -12,7 +12,7 @@ from typing import Any, Optional
 
 @dataclass(frozen=True)
 class PrStatus:
-    """Pull Request の応答の 3 項目。値は応答のまま持ち、想定の値かは `refusal` だけが決める。"""
+    """Pull Request の応答の 3 項目。値は応答のまま持ち、想定の値かは `init_refusal` だけが決める。"""
 
     state: Any
     draft: Any
@@ -23,7 +23,7 @@ class PrStatus:
         return cls(state=body.get("state"), draft=body.get("draft"), merged_at=body.get("merged_at"))
 
 
-def refusal(pr: int, repo: str, status: PrStatus, resuming: bool) -> Optional[str]:
+def init_refusal(pr: int, repo: str, status: PrStatus, resuming: bool) -> Optional[str]:
     """止める理由の 1 行を返す。続けてよければ `None`。
 
     判定は上から順に当て、最初に当たった行で止める（設計の「`refactor.py init` の止め方」）。

@@ -1,4 +1,4 @@
-"""入口の判定（`pr_gate.refusal`）の表（#1658 の設計「`refactor.py init` の止め方」）。git も GitHub も使わない。"""
+"""入口の判定（`pr_gate.init_refusal`）の表（#1658 の設計「`refactor.py init` の止め方」）。git も GitHub も使わない。"""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def gate(refactor):
     ],
 )
 def test_refusal_follows_the_table(gate, state, draft, merged_at, resuming, words):
-    reason = gate.refusal(7, "acme/demo", gate.PrStatus(state, draft, merged_at), resuming=resuming)
+    reason = gate.init_refusal(7, "acme/demo", gate.PrStatus(state, draft, merged_at), resuming=resuming)
     if words is None:
         assert reason is None
     else:
@@ -35,7 +35,7 @@ def test_refusal_follows_the_table(gate, state, draft, merged_at, resuming, word
 
 def test_state_is_checked_before_draft(gate):
     """閉じた Draft でない Pull Request は「閉じている」で止まる（`draft` を先に見ると語が変わる）。"""
-    reason = gate.refusal(7, "acme/demo", gate.PrStatus("closed", False, None), resuming=False)
+    reason = gate.init_refusal(7, "acme/demo", gate.PrStatus("closed", False, None), resuming=False)
     assert "閉じている" in reason and "Draft" not in reason.split("。")[0]
 
 

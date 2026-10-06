@@ -504,7 +504,7 @@ def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
     # 置き場は求めるだけで作らない。Draft を求めるのは新しい実行だけである（要求の前提 1）。
     state_file = state_path(tmp_dir_for(work), args.pr)
     pending = _pending_state(work, state_file)
-    reason = pr_gate.refusal(args.pr, repo, status, resuming=pending is not None)
+    reason = pr_gate.init_refusal(args.pr, repo, status, resuming=pending is not None)
     if reason:
         die(reason)
     _ensure_work_worktree(work, head_branch)
@@ -568,7 +568,7 @@ def _pending_state(work: pathlib.Path, state_file: pathlib.Path) -> Optional[dic
     | 旧い形（`schema` を持たず `rounds` を持つ）で `final` が空 | **止める**（決定 18） |
     | 旧い形で `final` が入っている | 新しく始める（版 2 の形で作り直す） |
 
-    入口の検査（`pr_gate.refusal`）と再開（`_resume_if_pending`）がこの結果を共に使う（#1658 の決定 3）。
+    入口の検査（`pr_gate.init_refusal`）と再開（`_resume_if_pending`）がこの結果を共に使う（#1658 の決定 3）。
     """
     if not state_file.exists():
         return None
