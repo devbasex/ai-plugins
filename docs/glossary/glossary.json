@@ -2220,6 +2220,18 @@
       "pending_source": "issues/issue-1323-design.md"
     },
     {
+      "term": "古いバイトコード",
+      "context": "repo-dev-checks",
+      "meaning": "Python が、書き換えたソースを、前の内容から作った .pyc で読むこと。.pyc はソースの更新時刻（秒）と大きさだけで新しさを照らすため、同じ秒に同じ大きさで書き換えると見分けられない",
+      "pending_source": "issues/issue-1806-design.md"
+    },
+    {
+      "term": "git を使うテストの土台",
+      "context": "repo-dev-checks",
+      "meaning": "cross-refactoring のテストで、git のリポジトリの作業ディレクトリ・pytest の起動口・状態ファイルを用意する補助（crossref_helpers.build_git_flow）",
+      "pending_source": "issues/issue-1806-design.md"
+    },
+    {
       "term": "プロジェクトの宣言",
       "context": "ndf-workflow",
       "meaning": "リポジトリの根の `.ndf/` に置く、そのプロジェクトの形（言語・テスト・CI・ブランチ・配布・課題の正本など）を表すファイルの集まり。機能ごとの JSON と、解析が書く `project.json` からなる",
