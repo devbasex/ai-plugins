@@ -66,7 +66,7 @@
 | I9 | 実行の状態 | 時間の数値は B・w・x・c・s・o・時計・作業ディレクトリのファイルの更新時刻からの算術だけで決まる。LLM へ問わない | レビューで見る（式の置き場は `budget` / `timeline` / `pause` だけ） |
 | I10 | 実行の状態 | 再開の処理を続けて 2 度打っても、ずれるのは 1 度だけである（1 度目の保存で最後の動きの時刻が今になる） | テストで落とす |
 | I11 | 配分の履歴 | 新しいキー（`reserve`・`paused_seconds`）を持たない行を読んでも、`allocation.build_table` の値は変わらない | テストで落とす |
-| I12 | 実行の状態 | CLI の監視かテストの実行が待っている間は、出力が無くても、最後の動きの時刻が今から 30 秒（心拍の間隔 15 秒の 2 倍）より前にならない。中断で止まった区間だけが止まっていた時間になる | テストで落とす |
+| I12 | 実行の状態 | CLI の監視かテストの実行が待っている間は、出力が無くても、最後の動きの時刻が今から心拍の間隔（`HEARTBEAT_SECONDS`、15 秒）の 2 倍（30 秒）より前にならない。心拍の間隔は monitor.py の見回りの間隔（`--poll` / `MONITOR_POLL`）に依らない。中断で止まった区間だけが止まっていた時間になる | テストで落とす |
 
 ### ドメインイベント
 
@@ -91,7 +91,7 @@
 | --- | --- | --- |
 | 止まっていた時間 | `cross-refactoring` をリファクタリング計画の後に中断してから、`init` か drive.py を打ち直して再開するまでの時間。再開の時刻 − 最後の動きの時刻で測る。想定最大時間に数えない | 意味の変更 |
 | 最後の動きの時刻 | `cross-refactoring` の作業ディレクトリ（`.cross_refactoring/`）の直下のファイルのうち、最も新しい更新時刻。状態ファイル・CLI のログ・テストのログ・結果ファイルと、心拍のファイルを含む | 追加 |
-| 心拍のファイル | `cross-refactoring` の作業ディレクトリ直下の `cross-refactoring-rf<ID>-alive`。出力の有無によらず、CLI の監視とテストの実行が待っている間、15 秒ごとに更新時刻を今にする。中断で止まると更新も止まり、最後の動きの時刻が稼働の終わりを指す | 追加 |
+| 心拍のファイル | `cross-refactoring` の作業ディレクトリ直下の `cross-refactoring-rf<ID>-alive`。出力の有無によらず、CLI の監視とテストの実行が待っている間、心拍の間隔（15 秒。見回りの間隔に依らない）ごとに更新時刻を今にする。中断で止まると更新も止まり、最後の動きの時刻が稼働の終わりを指す | 追加 |
 | バッファ | `cross-refactoring` の見積りで、想定最大時間から経過を引いた後に残しておく時間。最終ゲートの全体テスト・修正 1 回・最終ゲート修正 1 回と、最終ゲートと兼ねられないときだけ危険フラグの全体テスト | 意味の変更 |
 | 使える時間 | 要求の定義のまま（`state.plan.available_minutes`） | 変更なし（要求で追加済み） |
 
@@ -113,8 +113,9 @@
 | `refactor_lib/budget.py` | バッファ・使える時間・締め切りの純粋な計算 | `plan_reserve(state, table)`（`merge-plan` にあった、状態から w と c を選んで `reserve` を呼ぶ処理を移す）と `shortest_item_minutes(table, measured_verify)`（1 件の長さ L）を足す。`fix_end` は残し、`fix_time_left` は上限の表の `fix_end_at` から測る形へ変える |
 | `refactor_lib/timeline.py` | 上限の表と、枠の判定 | `compute` に `after_plan_minutes`（R の見込み + L）を受けて表へ書く。`window_problem` を `plan_end_at + after_plan_minutes > final_end_at` で止める形に広げ、`required_budget_minutes(offset, after_plan)` で下限を出す |
 | `refactor_lib/pause.py`（新規） | 最後の動きの時刻を読み、止まっていた時間を測って締め切りをずらす | `last_activity(tmp_dir)`（ファイルの更新時刻を読む。I/O はここだけ）と `catch_up(state, now, last_at)`（純粋。状態の辞書を書き換え、記録した 1 件を返す） |
-| `refactor_lib/process.py` の `run_with_timeout`・`run_capture` | テストと指標の実行 | 引数 `alive`（心拍のファイルのパス。省けば今のまま）を足す。`communicate` を 15 秒ずつ区切って待ち、区切りごとに `alive` の更新時刻を今にする。上限の秒と打ち切りの扱いは変えない。cross-refactoring の呼び出し元は `paths` から心拍のファイルのパスを渡す |
-| `scripts/lib/monitor.py` | CLI の監視 | 引数 `--alive-file`（省けば今のまま。cross-review など他の呼び出し元は変わらない）を足し、見回りの 1 周期（15 秒）ごとに更新時刻を今にする。cross-refactoring の文書の起動の行に `--alive-file "$TMP_DIR/cross-refactoring-rf$ID-alive"` を足す |
+| `refactor_lib/process.py` の `run_with_timeout`・`run_capture` | テストと指標の実行 | 心拍のファイルのパスを呼び出し元ごとに渡さず、モジュール変数 `ALIVE_FILE`（既定 `None` = 今のまま）を 1 か所で持つ。`refactor.py` の `main` が引数を読んだ直後、`id` を持つサブコマンドなら `paths` から心拍のファイルのパスを 1 度だけ設定する。そのため `run_with_timeout`・`run_capture`・`run_test_at` を呼ぶ側（`baseline`・`wholetest`・`targets`・`gate_lint`・`culprit`・`triage`・`publish`・`measure` ほか）は引数を変えず、渡し忘れが起きない。`ALIVE_FILE` があれば `communicate` を `HEARTBEAT_SECONDS` ずつ区切って待ち、区切りごとにその更新時刻を今にする。上限の秒と打ち切りの扱いは変えない |
+| `scripts/lib/monitor_types.py` | 監視の定数 | 心拍の間隔の定数 `HEARTBEAT_SECONDS = 15` を足す。見回りの間隔 `DEFAULT_POLL` / `MONITOR_POLL` とは別の定数で、`monitor.py` と `refactor_lib/process.py` の両方がここから読む（同じ役割の定数を 2 か所に置かない） |
+| `scripts/lib/monitor.py` | CLI の監視 | 引数 `--alive-file`（省けば今のまま。cross-review など他の呼び出し元は変わらない）を足す。見回りの間の待ちを `min(poll, HEARTBEAT_SECONDS)` ずつに区切り、区切りごとに更新時刻を今にする（`MONITOR_POLL` を 15 秒より大きくしても心拍は 15 秒以内に来る）。cross-refactoring の文書では、止まっていた時間を測る間に走る monitor.py の待ちのすべて、すなわち `docs/02-plan-and-implement.md` の plan・add-tests・implement と `docs/04-verify-and-report.md` の検証の直し（`--phase fix`）の 4 か所に `--alive-file "$TMP_DIR/cross-refactoring-rf$ID-alive"` を足す。最終ゲート修正（`--phase final-fix`）は最終ゲートの後の意図した待ちで、締め切りをずらさない（I7）ため足さない |
 | `refactor_lib/commands/setup.py` | `init` と再開 | 新しく始めるときと計画の前の再開で、配分テーブルから `after_plan_minutes` を求めて `timeline.of_state` へ渡す。計画の後の再開では、状態を書く前に `pause.catch_up` を呼ぶ。サブコマンド `catch-up` を足す（引数の定義は `refactor.py`） |
 | `refactor_lib/init_test.py` | 着手前のテストの後の止まり | `stop_if_window_short` は広げた `window_problem` をそのまま使う（呼び方は変えない） |
 | `refactor_lib/commands/plan.py`（`merge-plan`） | 採る項目と締め切りを決める | バッファを `budget.plan_reserve` で出す。`state.pause = {"seconds": 0, "shifted_seconds": 0, "legacy": false, "events": []}` を作る |
@@ -402,7 +403,7 @@ drive.py は `init` を耐久ステップとして 1 回だけ打ち（I19）、
 | 計画の前・最終ゲートの後はずらさない（I7） | `plan` の無い状態・`final_gate` のある状態で `catch_up` が何も書かない | 段階を見ずにずらす |
 | 続けて 2 度打っても 1 度だけずれる（I10） | 1 度目の保存の後に `last_activity` を読み直すと止まっていた秒が余裕以下になる | `catch-up` が保存しない |
 | 最後の動きの時刻に CLI のログが入る（決定 3） | 状態ファイルより新しいログのファイルがあると、その時刻を返す | 状態ファイルの時刻だけを読む |
-| 出力の無いテストの稼働を止まっていた時間に数えない（I12・決定 3） | `run_with_timeout` に `alive` を渡して 40 秒黙って眠るコマンドを走らせ、走っている間に `alive` の更新時刻が今から 30 秒以内に保たれる。`monitor.py --alive-file` も見回りのたびに更新する | 心拍を書かない・最初の 1 回だけ書く |
+| 出力の無いテストの稼働を止まっていた時間に数えない（I12・決定 3） | `HEARTBEAT_SECONDS` を 0.1 秒へ差し替え、`process.ALIVE_FILE` を設定して 0.5 秒黙って眠るコマンドを `run_with_timeout` で走らせ、走っている間に心拍のファイルの更新時刻が今から 0.2 秒（間隔の 2 倍）以内に保たれる。`refactor.py` の `main` が `id` を持つサブコマンドで `ALIVE_FILE` を設定する。`monitor.py --alive-file` は見回りの間隔を心拍の間隔より大きくしても、心拍の間隔ごとに更新する | 心拍を書かない・最初の 1 回だけ書く・呼び出し元が設定を落とす・見回りの間隔に乗る |
 | `fix_end_at` を 1 か所から読む（決定 5） | 表の `fix_end_at` をずらすと `_fix_stop` と `culprit.fix_deadline` の両方がずれた値で判定する | どちらかが開始から計算し直す |
 | 報告にバッファの区分ごとの残りが出る | PR 1801 の形の状態から報告の行が 4 区分の分を持つ | 区分を落とす |
 | 実行の行に `reserve` と `paused_seconds` が残る | `build_row` の戻り値 | キーを書かない |
