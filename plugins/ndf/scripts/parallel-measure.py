@@ -13,12 +13,18 @@
 数えられないものを拒否の条件にすると、止める必要の無い起動を止めるか、止めないまま
 「機械が見ている」と読まれる。
 
-**本数の既定値（予備・1 本の見込み・上限・スワップの閾値）を持つのはこのファイルだけである**
+**本数の既定値（予備・1 本の見込み・1 本の下限・山への余裕・足す数・圧の閾値・標本の間隔）を
+持つのはこのファイルだけである**
 （設計の決定 7）。文書は値を写さず、引数の名前だけを書く。実際に測った値は実行計画の
 「測った値」の表が残し、初期値を直す根拠になる。
 
 **1 本は担当 1 つ（作業ツリー 1 つ、G3 の supervisor 1 つ）である。** その中で動く worker は
-1 本の見込みに含め、`--running` には数えない。
+1 本の重さに含め、`--running` には数えない。
+
+`capacity` は判定の区分を 3 つに分ける（#780）: `oom_kill` が起点より増えたら `shrink`（1 本減らす）、
+いまメモリの圧（PSI の `some avg10`、無ければスワップ I/O）が閾値を超えていたら `hold`（足さない）、
+それ以外は `grow`（空きと 1 本の重さから足す）。1 本の重さは cgroup の `anon` の起点からの増分を
+動いている本数で割って測り、測れないときだけ見込みを使う。総本数の上限は `--max` を渡したときだけ掛かる。
 
 終了コード:
 
@@ -32,9 +38,10 @@ import argparse
 import datetime as _dt
 import json
 import sys
-from decimal import Decimal, ROUND_HALF_UP
+import time
+from decimal import ROUND_CEILING, ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
-from typing import Optional
+from typing import NamedTuple, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import clock  # noqa: E402  時刻の読み取り（#1142 の L0）
@@ -45,16 +52,25 @@ import procs  # noqa: E402
 import gh_parts  # noqa: E402  GitHub の読み取り（#1142 の L0）
 
 # --- 既定値（ここだけが持つ） -----------------------------------------------
-# 予備: 進行側の claude 本体（約 470MiB）と、同じ VM に常駐する他のプロセスの揺れ。
-DEFAULT_RESERVE_MIB = 2048
-# 1 本の見込み: 5〜6 本で落ちた後の cgroup の最大使用量 7.4GiB（#621）から、
-# 1 本あたり約 1.2GiB に、テストとコンテナの山を足した。
-DEFAULT_PER_LANE_MIB = 2048
-# 上限: 5〜6 本で 2 回落ち、3 本では落ちなかった（#621）。収束レビューが共有する CLI も
-# 同じ上限で抑える。
-DEFAULT_MAX_LANES = 3
-# スワップの空きの閾値（%）。下回れば 1 減らす。
-DEFAULT_SWAP_FREE_MIN_PCT = 25
+# 予備: 同じ VM に常駐する他のプロセスの揺れ。既に動いている進行側の本体と担当は
+# MemAvailable から引かれているため含めない（#780）。
+DEFAULT_RESERVE_MIB = 1024
+# 1 本の見込み: 実測を使えない（0 本・起点なし・anon を読めない）ときの値。#621 の実測
+# 約 1.2GiB に余裕を足した暫定値で、「測った値」の表の 1 本の実測が溜まったら直す。
+DEFAULT_PER_LANE_MIB = 1536
+# 1 本の重さの下限: 実測が小さく出ても、これを割らない。
+DEFAULT_PER_LANE_MIN_MIB = 512
+# 山への余裕: 実測の平均に掛け、テストやビルドの山を見込む。
+DEFAULT_PEAK_FACTOR = Decimal("1.5")
+# 1 回の見直しで足す数の上限: 担当の重さは動き出すまで測れないため、足したら次の見直しで
+# 測ってからまた足す。総本数の上限ではない。
+DEFAULT_MAX_ADD = 2
+# 圧の閾値: PSI の some avg10（%）。超えたら hold。
+DEFAULT_PSI_SOME_MAX = Decimal("10")
+# PSI が無いときのスワップ I/O の閾値（pswpin + pswpout のページ/秒）。超えたら hold。
+DEFAULT_SWAP_IO_MAX_PAGES_PER_SEC = 512
+# スワップ I/O の 2 回の読み取りの間隔（秒）。
+DEFAULT_SAMPLE_SECONDS = Decimal("2")
 
 DEFAULT_MEMINFO = "/proc/meminfo"
 GH_JSON_FIELDS = "number,createdAt,mergedAt,closedAt"
@@ -78,6 +94,37 @@ def non_negative_int(value: str) -> int:
         raise argparse.ArgumentTypeError(f"整数ではない: {value}")
     if parsed < 0:
         raise argparse.ArgumentTypeError(f"負の値は受け取らない: {value}")
+    return parsed
+
+
+def positive_int(value: str) -> int:
+    parsed = non_negative_int(value)
+    if parsed == 0:
+        raise argparse.ArgumentTypeError(f"1 以上である: {value}")
+    return parsed
+
+
+def _decimal(value: str) -> Decimal:
+    try:
+        parsed = Decimal(value)
+    except InvalidOperation:
+        raise argparse.ArgumentTypeError(f"数ではない: {value}")
+    if not parsed.is_finite():
+        raise argparse.ArgumentTypeError(f"有限の数ではない: {value}")
+    return parsed
+
+
+def non_negative_decimal(value: str) -> Decimal:
+    parsed = _decimal(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError(f"負の値は受け取らない: {value}")
+    return parsed
+
+
+def positive_decimal(value: str) -> Decimal:
+    parsed = _decimal(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError(f"0 より大きい値である: {value}")
     return parsed
 
 
@@ -130,15 +177,8 @@ def resolve_cgroup_dir(given: Optional[str], *, root: Optional[Path] = None, pro
     )
 
 
-def read_oom_kill(cgroup_dir: Path) -> object:
-    """`memory.events` の `oom_kill`。読めなければ `unknown` で続ける。"""
-    oom = procs.cgroup_memory(cgroup_dir).oom_kill
-    return UNKNOWN if oom is None else oom
-
-
-def read_cgroup_available_mib(cgroup_dir: Path) -> object:
+def cgroup_available_mib(mem: procs.CgroupMemory) -> object:
     """cgroup の残り。上限が無ければ `max`、読めなければ `unknown`。"""
-    mem = procs.cgroup_memory(cgroup_dir)
     if mem.unlimited:
         return NO_LIMIT
     if mem.limit is None or mem.current is None:
@@ -155,17 +195,122 @@ def lanes_by_memory(available_mib: int, running: int, reserve_mib: int, per_lane
     return running + max(0, (available_mib - reserve_mib) // per_lane_mib)
 
 
+class PerLane(NamedTuple):
+    observed_mib: Optional[int]  # 実測。使えなければ None
+    used_mib: int  # 判定に使った 1 本の重さ
+
+
+class Pressure(NamedTuple):
+    source: str  # psi / swap_io / unknown
+    value: str  # 出力の pressure の値
+    exceeded: Optional[str]  # 超えたときの limited_by の値。超えなければ None
+
+
+class Decision(NamedTuple):
+    verdict: str  # grow / hold / shrink
+    allowed: int
+    limited_by: list[str]
+
+
+def _ceil(value: Decimal) -> int:
+    return int(value.to_integral_value(rounding=ROUND_CEILING))
+
+
+def per_lane_weight(
+    anon_mib: Optional[Decimal],
+    baseline_mib: Optional[int],
+    running: int,
+    *,
+    peak_factor: Decimal,
+    min_mib: int,
+    default_mib: int,
+) -> PerLane:
+    """1 本の重さ。実測は起点からの anon の増分を本数で割って切り上げ、使う値は丸める前の差に
+    山への余裕を掛けてから切り上げる（決定 3）。差が負なら 0 とする。実測を使えなければ見込み。"""
+    if anon_mib is None or baseline_mib is None or running < 1:
+        return PerLane(None, default_mib)
+    growth = max(Decimal(0), anon_mib - baseline_mib)
+    observed = _ceil(growth / running)
+    used = max(min_mib, _ceil(growth * peak_factor / running))
+    return PerLane(observed, used)
+
+
+def read_pressure(
+    psi_path: Path,
+    vmstat_path: Path,
+    vmstat_after_path: Path,
+    *,
+    psi_some_max: Decimal,
+    swap_io_max_pages_per_sec: int,
+    sample_seconds: Decimal,
+) -> Pressure:
+    """いまの圧。PSI が読めればそれだけを見て待たずに返し、無ければ vmstat を間隔を挟んで 2 回読む。"""
+    avg10 = procs.memory_pressure_some_avg10(psi_path)
+    if avg10 is not None:
+        exceeded = "hold_psi" if Decimal(avg10) > psi_some_max else None
+        return Pressure("psi", f"psi:{avg10}", exceeded)
+    before = procs.swap_io_pages(vmstat_path)
+    if before is None:
+        return Pressure(UNKNOWN, UNKNOWN, None)
+    if sample_seconds > 0:
+        time.sleep(float(sample_seconds))
+    after = procs.swap_io_pages(vmstat_after_path)
+    if after is None:
+        return Pressure(UNKNOWN, UNKNOWN, None)
+    # 間隔 0 は検査だけが渡す。差をそのまま毎秒の値として扱う（決定 6）。
+    rate = Decimal(max(0, after - before)) / (sample_seconds if sample_seconds > 0 else 1)
+    exceeded = "hold_swap_io" if rate > swap_io_max_pages_per_sec else None
+    return Pressure("swap_io", f"swap_io:{rate.quantize(Decimal('0.1'), rounding=ROUND_HALF_UP)}", exceeded)
+
+
+def decide(
+    running: int,
+    addable: int,
+    *,
+    oom_kill_increased: str,
+    pressure: Pressure,
+    max_add: int,
+    max_lanes: Optional[int],
+) -> Decision:
+    """区分を shrink → hold → grow の順に 1 つ決め、その後に --max と下限 1 を共通に当てる（決定 2）。"""
+    limited_by: list[str] = []
+    if oom_kill_increased == "yes":
+        verdict = "shrink"
+        allowed = max(0, running - 1)
+    elif pressure.exceeded is not None:
+        verdict = "hold"
+        allowed = running
+    else:
+        verdict = "grow"
+        allowed = running + min(max_add, addable)
+        limited_by.append("memory")
+        if max_add < addable:
+            limited_by.append("max_add")
+    if max_lanes is not None and allowed > max_lanes:
+        allowed = max_lanes
+        limited_by.append(NO_LIMIT)
+    if verdict == "hold":
+        limited_by.append(pressure.exceeded)
+    if verdict == "shrink":
+        limited_by.append("oom_kill_increased")
+    elif allowed < 1:
+        allowed = 1
+        limited_by.append("floor")
+    return Decision(verdict, allowed, limited_by)
+
+
 def run_capacity(args: argparse.Namespace) -> int:
-    if args.per_lane_mib <= 0:
-        raise Usage("--per-lane-mib は 1 以上である")
+    if args.swap_free_min_pct is not None:
+        print("--swap-free-min-pct は廃止した（#780）。スワップの残量は判定に使わず、値を無視する", file=sys.stderr)
     mem = read_meminfo(Path(args.meminfo))
     mem_available_mib = mem["MemAvailable"] // 1024
     swap_total_mib = mem.get("SwapTotal", 0) // 1024
     swap_free_mib = mem.get("SwapFree", 0) // 1024
 
-    cgroup_dir = resolve_cgroup_dir(args.cgroup_dir)
-    cgroup_available = read_cgroup_available_mib(cgroup_dir)
-    oom_kill = read_oom_kill(cgroup_dir)
+    cgroup = procs.cgroup_memory(resolve_cgroup_dir(args.cgroup_dir))
+    cgroup_available = cgroup_available_mib(cgroup)
+    oom_kill = UNKNOWN if cgroup.oom_kill is None else cgroup.oom_kill
+    anon_mib = None if cgroup.anon is None else Decimal(cgroup.anon) / (1024 * 1024)
 
     if oom_kill == UNKNOWN or args.oom_baseline is None:
         oom_kill_increased = UNKNOWN
@@ -177,29 +322,31 @@ def run_capacity(args: argparse.Namespace) -> int:
     if isinstance(cgroup_available, int):
         budget_mib = min(budget_mib, cgroup_available)
 
-    by_memory = lanes_by_memory(budget_mib, args.running, args.reserve_mib, args.per_lane_mib)
-    allowed = min(args.max_lanes, by_memory)
-    limited_by: list[str] = []
-    if by_memory <= args.max_lanes:
-        limited_by.append("memory")
-    if args.max_lanes <= by_memory:
-        limited_by.append(NO_LIMIT)
-
-    if swap_total_mib > 0 and swap_free_mib * 100 < swap_total_mib * args.swap_free_min_pct:
-        allowed -= 1
-        limited_by.append("swap_low")
-
-    if oom_kill_increased == "yes":
-        # 増えた見直しだけは 0 を許す。`running` が 0 か 1 のとき、下限の 1 を当てると
-        # 「今の本数 − 1 以下」を満たせない。
-        lowered = max(0, min(allowed, args.running - 1))
-        if lowered < allowed:
-            limited_by.append("oom_kill_increased")
-        allowed = lowered
-    else:
-        if allowed < 1:
-            allowed = 1
-            limited_by.append("floor")
+    per_lane = per_lane_weight(
+        anon_mib,
+        args.anon_baseline_mib,
+        args.running,
+        peak_factor=args.peak_factor,
+        min_mib=args.per_lane_min_mib,
+        default_mib=args.per_lane_mib,
+    )
+    pressure = read_pressure(
+        Path(args.psi),
+        Path(args.vmstat),
+        Path(args.vmstat if args.vmstat_after is None else args.vmstat_after),
+        psi_some_max=args.psi_some_max,
+        swap_io_max_pages_per_sec=args.swap_io_max_pages_per_sec,
+        sample_seconds=args.sample_seconds,
+    )
+    by_memory = lanes_by_memory(budget_mib, args.running, args.reserve_mib, per_lane.used_mib)
+    decision = decide(
+        args.running,
+        by_memory - args.running,
+        oom_kill_increased=oom_kill_increased,
+        pressure=pressure,
+        max_add=args.max_add,
+        max_lanes=args.max_lanes,
+    )
 
     emit_pairs(
         [
@@ -211,8 +358,13 @@ def run_capacity(args: argparse.Namespace) -> int:
             ("oom_kill_increased", oom_kill_increased),
             ("running", args.running),
             ("by_memory", by_memory),
-            ("allowed", allowed),
-            ("limited_by", ",".join(limited_by)),
+            ("allowed", decision.allowed),
+            ("limited_by", ",".join(decision.limited_by)),
+            ("cgroup_anon_mib", UNKNOWN if cgroup.anon is None else cgroup.anon // (1024 * 1024)),
+            ("per_lane_observed_mib", UNKNOWN if per_lane.observed_mib is None else per_lane.observed_mib),
+            ("per_lane_used_mib", per_lane.used_mib),
+            ("verdict", decision.verdict),
+            ("pressure", pressure.value),
         ]
     )
     return 0
@@ -364,12 +516,29 @@ def build_parser() -> argparse.ArgumentParser:
     cap = sub.add_parser("capacity", help="起動してよい本数を出す")
     cap.add_argument("--running", type=non_negative_int, default=0, help="いま動いている担当（作業ツリー 1 つ分）の数")
     cap.add_argument("--oom-baseline", type=non_negative_int, default=None, help="実行計画に控えた oom_kill の起点")
-    cap.add_argument("--reserve-mib", type=non_negative_int, default=DEFAULT_RESERVE_MIB)
-    cap.add_argument("--per-lane-mib", type=non_negative_int, default=DEFAULT_PER_LANE_MIB)
-    cap.add_argument("--max", dest="max_lanes", type=non_negative_int, default=DEFAULT_MAX_LANES)
-    cap.add_argument("--swap-free-min-pct", type=non_negative_int, default=DEFAULT_SWAP_FREE_MIN_PCT)
+    cap.add_argument("--anon-baseline-mib", type=non_negative_int, default=None, help="実行計画に控えた anon の起点（MiB）")
+    cap.add_argument("--reserve-mib", type=non_negative_int, default=DEFAULT_RESERVE_MIB, help="予備メモリ（MiB）")
+    cap.add_argument("--per-lane-mib", type=positive_int, default=DEFAULT_PER_LANE_MIB, help="実測を使えないときの 1 本の見込み（MiB）")
+    cap.add_argument("--per-lane-min-mib", type=positive_int, default=DEFAULT_PER_LANE_MIN_MIB, help="1 本の重さの下限（MiB）")
+    cap.add_argument("--peak-factor", type=positive_decimal, default=DEFAULT_PEAK_FACTOR, help="実測に掛ける山への余裕")
+    cap.add_argument("--max-add", type=non_negative_int, default=DEFAULT_MAX_ADD, help="1 回の見直しで足す数の上限")
+    cap.add_argument("--max", dest="max_lanes", type=non_negative_int, default=None, help="総本数の上限。渡したときだけ効く")
+    cap.add_argument("--psi-some-max", type=non_negative_decimal, default=DEFAULT_PSI_SOME_MAX, help="PSI の some avg10 の閾値")
+    cap.add_argument(
+        "--swap-io-max-pages-per-sec",
+        type=non_negative_int,
+        default=DEFAULT_SWAP_IO_MAX_PAGES_PER_SEC,
+        help="スワップ I/O の閾値（ページ/秒）",
+    )
+    cap.add_argument(
+        "--sample-seconds", type=non_negative_decimal, default=DEFAULT_SAMPLE_SECONDS, help="vmstat の 2 回の読み取りの間隔（秒）"
+    )
     cap.add_argument("--meminfo", default=DEFAULT_MEMINFO)
     cap.add_argument("--cgroup-dir", default=None)
+    cap.add_argument("--psi", default=str(procs.PROC_PRESSURE_MEMORY), help="PSI を読む元")
+    cap.add_argument("--vmstat", default=str(procs.PROC_VMSTAT), help="スワップ I/O の 1 回目を読む元")
+    cap.add_argument("--vmstat-after", default=None, help="スワップ I/O の 2 回目を読む元（既定は --vmstat と同じ）")
+    cap.add_argument("--swap-free-min-pct", default=None, help=argparse.SUPPRESS)  # 廃止（#780）。知らせて無視する
     cap.set_defaults(handler=run_capacity)
 
     con = sub.add_parser("concurrency", help="並行度と最大同時本数を出す")

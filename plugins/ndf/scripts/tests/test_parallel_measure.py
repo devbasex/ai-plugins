@@ -1,7 +1,7 @@
 """並列の本数と並行度の測定（`parallel-measure.py`、#621）。
 
-入力のファイル（`--meminfo`・`--cgroup-dir`・`--input`）を差し替えて値を固定する。
-**このホストの `/proc/meminfo` も cgroup も読まない。** 読むと、走らせた時刻の空きで
+入力のファイル（`--meminfo`・`--cgroup-dir`・`--psi`・`--vmstat`・`--input`）を差し替えて値を固定する。
+**このホストの `/proc/meminfo` も cgroup も PSI も読まない。** 読むと、走らせた時刻の空きで
 期待値が動く。
 
 `concurrency` の `gh` は `PATH` の先頭へ置いた偽物に差し替え、受けた引数を記録する
@@ -53,7 +53,13 @@ def meminfo(tmp_path: Path, *, available_mib: int, swap_total_mib: int, swap_fre
 
 
 def cgroup(
-    tmp_path: Path, *, oom_kill: int | None = None, memory_max: str | None = None, memory_current: int | None = None, name: str = "cgroup"
+    tmp_path: Path,
+    *,
+    oom_kill: int | None = None,
+    memory_max: str | None = None,
+    memory_current: int | None = None,
+    anon_mib: int | None = None,
+    name: str = "cgroup",
 ) -> Path:
     path = tmp_path / name
     path.mkdir(parents=True, exist_ok=True)
@@ -64,6 +70,26 @@ def cgroup(
         (path / "memory.max").write_text(f"{memory_max}\n", encoding="utf-8")
     if memory_current is not None:
         (path / "memory.current").write_text(f"{memory_current}\n", encoding="utf-8")
+    if anon_mib is not None:
+        # 実物は `anon` の前後に `file` などの行を持つ。
+        (path / "memory.stat").write_text(f"anon {anon_mib * 1024 * 1024}\nfile 4096\nkernel 0\n", encoding="utf-8")
+    return path
+
+
+def psi(tmp_path: Path, avg10: str, *, name: str = "psi") -> Path:
+    """`/proc/pressure/memory` の体裁の入力。"""
+    path = tmp_path / name
+    path.write_text(
+        f"some avg10={avg10} avg60=0.00 avg300=0.00 total=1\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def vmstat(tmp_path: Path, pages: int, *, name: str) -> Path:
+    """`/proc/vmstat` の体裁の入力。`pswpin + pswpout` が `pages` になる。"""
+    path = tmp_path / name
+    path.write_text(f"nr_free_pages 1\npswpin {pages // 2}\npswpout {pages - pages // 2}\npgfault 9\n", encoding="utf-8")
     return path
 
 
@@ -94,70 +120,129 @@ def capacity(
     oom_kill: int | None = 1,
     memory_max: str | None = "max",
     memory_current: int | None = 0,
+    anon_mib: int | None = 2193,
+    psi_avg10: str | None = "0.00",
+    swap_io: tuple[int, int] | None = None,
 ) -> subprocess.CompletedProcess:
+    """圧の元（PSI・vmstat）も必ず差し替える。`psi_avg10=None` は PSI を読めない入力、
+    `swap_io=(1 回目, 2 回目)` は vmstat の 2 回の読み取り（間隔 0）である。"""
     mem = meminfo(tmp_path, available_mib=available_mib, swap_total_mib=swap_total_mib, swap_free_mib=swap_free_mib)
-    cg = cgroup(tmp_path, oom_kill=oom_kill, memory_max=memory_max, memory_current=memory_current)
-    return run("capacity", "--meminfo", str(mem), "--cgroup-dir", str(cg), *args)
+    cg = cgroup(tmp_path, oom_kill=oom_kill, memory_max=memory_max, memory_current=memory_current, anon_mib=anon_mib)
+    pressure = ["--psi", str(psi(tmp_path, psi_avg10) if psi_avg10 is not None else tmp_path / "no-psi")]
+    if swap_io is None:
+        pressure += ["--vmstat", str(tmp_path / "no-vmstat")]
+    else:
+        pressure += [
+            "--vmstat",
+            str(vmstat(tmp_path, swap_io[0], name="vmstat-before")),
+            "--vmstat-after",
+            str(vmstat(tmp_path, swap_io[1], name="vmstat-after")),
+            "--sample-seconds",
+            "0",
+        ]
+    return run("capacity", "--meminfo", str(mem), "--cgroup-dir", str(cg), *pressure, *args)
 
 
-# --- capacity: 空きメモリから本数を出す（AC31 / AC33） -----------------------
+# --- capacity: 空きと 1 本の重さから本数を出す（grow） ------------------------
 
 
 def test_capacity_reports_the_measured_values(tmp_path: Path) -> None:
-    """2026-09-17 のこのホストの値での出力（契約の文書の例）。"""
+    """2026-09-17 のこのホストの値での出力（契約の文書の例）。既存の 10 キーが先に、新しい 5 キーが末尾に並ぶ。"""
     proc = capacity(tmp_path)
     assert proc.returncode == 0, proc.stderr
-    assert keys(proc.stdout) == {
-        "mem_available_mib": "9742",
-        "swap_total_mib": "2047",
-        "swap_free_mib": "310",
-        "cgroup_available_mib": "max",
-        "oom_kill": "1",
-        "oom_kill_increased": "unknown",
-        "running": "0",
-        "by_memory": "3",
-        "allowed": "2",
-        "limited_by": "memory,max,swap_low",
-    }
+    assert list(keys(proc.stdout).items()) == [
+        ("mem_available_mib", "9742"),
+        ("swap_total_mib", "2047"),
+        ("swap_free_mib", "310"),
+        ("cgroup_available_mib", "max"),
+        ("oom_kill", "1"),
+        ("oom_kill_increased", "unknown"),
+        ("running", "0"),
+        ("by_memory", "5"),  # ⌊(9742 − 1024) ÷ 1536⌋
+        ("allowed", "2"),
+        ("limited_by", "memory,max_add"),
+        ("cgroup_anon_mib", "2193"),
+        ("per_lane_observed_mib", "unknown"),
+        ("per_lane_used_mib", "1536"),
+        ("verdict", "grow"),
+        ("pressure", "psi:0.00"),
+    ]
 
 
-def test_capacity_allows_three_when_swap_is_free(tmp_path: Path) -> None:
-    proc = capacity(tmp_path, swap_free_mib=2047)
-    assert proc.returncode == 0
-    assert keys(proc.stdout)["allowed"] == "3"
-    assert "swap_low" not in keys(proc.stdout)["limited_by"]
+# 依頼（#780）の試算の 3 行。起点 2193、担当 1 本が 1.2GiB を使ったと仮定した見直しの列。
+TRIAL_ROWS = [
+    # running, anon, 空き, observed, used, allowed, limited_by
+    ("0", 2193, 5793, "unknown", "1536", "2", "memory,max_add"),
+    ("2", 4650, 3336, "1229", "1843", "3", "memory"),
+    ("3", 5880, 2106, "1229", "1844", "3", "memory"),
+]
 
 
-def test_capacity_does_not_limit_swap_at_the_free_percentage_boundary(tmp_path: Path) -> None:
-    """現状固定: 空き swap が閾値と等しい場合は swap_low にしない。"""
+@pytest.mark.parametrize("running,anon,available,observed,used,allowed,limited_by", TRIAL_ROWS)
+def test_capacity_follows_the_trial_rows(
+    tmp_path: Path, running: str, anon: int, available: int, observed: str, used: str, allowed: str, limited_by: str
+) -> None:
+    """PSI 0.00・SwapFree 0 でも swap_low が付かず、開始は 2 本、見直しで 3 本まで伸びる。"""
     proc = capacity(
         tmp_path,
-        "--swap-free-min-pct",
-        "25",
-        swap_total_mib=2000,
-        swap_free_mib=500,
+        "--running",
+        running,
+        "--anon-baseline-mib",
+        "2193",
+        available_mib=available,
+        swap_free_mib=0,
+        anon_mib=anon,
     )
-
     assert proc.returncode == 0, proc.stderr
     values = keys(proc.stdout)
-    assert values["allowed"] == "3"
-    assert values["limited_by"] == "memory,max"
+    assert values["per_lane_observed_mib"] == observed
+    assert values["per_lane_used_mib"] == used
+    assert values["allowed"] == allowed
+    assert values["limited_by"] == limited_by
+    assert values["verdict"] == "grow"
 
 
-def test_capacity_skips_swap_check_when_swap_total_is_zero(tmp_path: Path) -> None:
-    """現状固定: SwapTotal が 0 のときはスワップ判定を省き、allowed を減らさない。"""
-    proc = capacity(tmp_path, swap_total_mib=0, swap_free_mib=0)
+@pytest.mark.parametrize("swap_total_mib,swap_free_mib", [(2047, 0), (2047, 2047), (0, 0)])
+def test_capacity_ignores_the_free_swap(tmp_path: Path, swap_total_mib: int, swap_free_mib: int) -> None:
+    """スワップの残量は過去の履歴で、いまの圧ではない。どの値でも本数を変えない。"""
+    proc = capacity(tmp_path, swap_total_mib=swap_total_mib, swap_free_mib=swap_free_mib)
     assert proc.returncode == 0, proc.stderr
     values = keys(proc.stdout)
-    assert values["cgroup_available_mib"] == "max"
-    assert values["oom_kill"] == "1"
-    assert values["allowed"] == "3"
-    assert values["limited_by"] == "memory,max"
+    assert values["allowed"] == "2"
+    assert values["limited_by"] == "memory,max_add"
+    assert "swap_low" not in proc.stdout
+
+
+def test_capacity_has_no_total_cap_without_max(tmp_path: Path) -> None:
+    """空き 12GiB・3 本・1 本の重さ 1843 なら 5 本。足す数は --max-add が抑える。"""
+    proc = capacity(tmp_path, "--running", "3", "--anon-baseline-mib", "2000", available_mib=12288, anon_mib=2000 + 3686)
+    assert proc.returncode == 0, proc.stderr
+    values = keys(proc.stdout)
+    assert values["per_lane_used_mib"] == "1843"
+    assert values["by_memory"] == "9"  # 3 + ⌊(12288 − 1024) ÷ 1843⌋
+    assert values["allowed"] == "5"
+    assert values["limited_by"] == "memory,max_add"
+
+
+def test_capacity_caps_the_total_only_when_max_is_given(tmp_path: Path) -> None:
+    proc = capacity(tmp_path, "--running", "3", "--max", "4", available_mib=12288)
+    assert proc.returncode == 0, proc.stderr
+    values = keys(proc.stdout)
+    assert values["allowed"] == "4"
+    assert values["limited_by"] == "memory,max_add,max"
+
+
+def test_capacity_does_not_mark_max_add_when_it_equals_the_addable(tmp_path: Path) -> None:
+    """足せる数と --max-add が等しいときは、--max-add を上げても増えないため max_add を付けない。"""
+    proc = capacity(tmp_path, available_mib=1024 + 1536 * 2)
+    values = keys(proc.stdout)
+    assert values["allowed"] == "2"
+    assert values["limited_by"] == "memory"
 
 
 def test_capacity_never_goes_below_one_lane(tmp_path: Path) -> None:
     """空きが 1 本分に足りなくても 1 を下回らない。0 本では進行が止まる。"""
-    proc = capacity(tmp_path, available_mib=3000, swap_free_mib=2047)
+    proc = capacity(tmp_path, available_mib=2000)
     assert proc.returncode == 0
     values = keys(proc.stdout)
     assert values["by_memory"] == "0"
@@ -166,45 +251,147 @@ def test_capacity_never_goes_below_one_lane(tmp_path: Path) -> None:
 
 
 def test_capacity_accepts_zero_max_but_floors_allowed_at_one(tmp_path: Path) -> None:
-    """現状固定: 上限 0 も受理するが、通常時の allowed は 1 を下回らない。"""
-    proc = capacity(
-        tmp_path,
-        "--max",
-        "0",
-        available_mib=2048,
-        swap_free_mib=2047,
-    )
-
+    """上限 0 も受理するが、shrink でなければ allowed は 1 を下回らない。"""
+    proc = capacity(tmp_path, "--max", "0")
     assert proc.returncode == 0, proc.stderr
     values = keys(proc.stdout)
-    assert values["by_memory"] == "0"
     assert values["allowed"] == "1"
-    assert values["limited_by"] == "memory,max,floor"
+    assert values["limited_by"] == "memory,max_add,max,floor"
 
 
-def test_capacity_counts_running_lanes_into_the_total(tmp_path: Path) -> None:
-    """空きは動いている担当の使用量を引いた後の値なので、`running` を足して総本数にする。"""
-    proc = capacity(tmp_path, "--running", "2", available_mib=6144, swap_free_mib=2047)
-    assert proc.returncode == 0
+def test_capacity_floors_zero_max_add_at_one(tmp_path: Path) -> None:
+    proc = capacity(tmp_path, "--max-add", "0")
     values = keys(proc.stdout)
-    assert values["running"] == "2"
-    assert values["by_memory"] == "4"
-    assert values["allowed"] == "3"  # 上限。追加できるのは 1 本
-    assert values["limited_by"] == "max"
+    assert values["allowed"] == "1"
+    assert values["limited_by"] == "memory,max_add,floor"
 
 
-def test_capacity_takes_the_defaults_from_the_arguments(tmp_path: Path) -> None:
-    proc = capacity(tmp_path, "--per-lane-mib", "1024", "--max", "8", swap_free_mib=2047)
-    assert proc.returncode == 0
+@pytest.mark.parametrize(
+    "args,key,expected",
+    [
+        (("--reserve-mib", "0"), "by_memory", "6"),  # ⌊9742 ÷ 1536⌋
+        (("--per-lane-mib", "1024"), "by_memory", "8"),  # ⌊(9742 − 1024) ÷ 1024⌋
+        (("--max-add", "4"), "allowed", "4"),
+        (("--running", "1", "--anon-baseline-mib", "2093", "--per-lane-min-mib", "100"), "per_lane_used_mib", "150"),
+        (("--running", "1", "--anon-baseline-mib", "2093", "--peak-factor", "8"), "per_lane_used_mib", "800"),
+        (("--psi-some-max", "0"), "verdict", "hold"),
+    ],
+)
+def test_capacity_takes_the_defaults_from_the_arguments(tmp_path: Path, args: tuple[str, ...], key: str, expected: str) -> None:
+    """初期値はスクリプトの定数が持ち、引数で上書きできる。"""
+    proc = capacity(tmp_path, *args, psi_avg10="0.01")
+    assert proc.returncode == 0, proc.stderr
+    assert keys(proc.stdout)[key] == expected
+
+
+# --- capacity: 1 本の重さ ---------------------------------------------------
+
+
+def test_capacity_floors_the_lane_weight_at_the_minimum(tmp_path: Path) -> None:
+    proc = capacity(tmp_path, "--running", "1", "--anon-baseline-mib", "2093")
     values = keys(proc.stdout)
-    assert values["by_memory"] == "7"  # ⌊(9742 − 2048) ÷ 1024⌋
-    assert values["allowed"] == "7"
-    assert values["limited_by"] == "memory"
+    assert values["per_lane_observed_mib"] == "100"
+    assert values["per_lane_used_mib"] == "512"  # 100 × 1.5 は下限を割る
 
 
-def test_capacity_takes_the_reserve_from_the_argument(tmp_path: Path) -> None:
-    proc = capacity(tmp_path, "--reserve-mib", "0", swap_free_mib=2047)
-    assert keys(proc.stdout)["by_memory"] == "4"
+def test_capacity_treats_a_negative_growth_as_zero(tmp_path: Path) -> None:
+    """起点の後に同じコンテナの他のセッションが終わると、差が負になる。"""
+    proc = capacity(tmp_path, "--running", "1", "--anon-baseline-mib", "3000", anon_mib=1000)
+    values = keys(proc.stdout)
+    assert values["per_lane_observed_mib"] == "0"
+    assert values["per_lane_used_mib"] == "512"
+
+
+@pytest.mark.parametrize(
+    "args,anon_mib",
+    [
+        (("--running", "2"), 4650),  # 起点が無い（既存の実行計画）
+        (("--running", "0", "--anon-baseline-mib", "2193"), 4650),  # 0 本
+        (("--running", "2", "--anon-baseline-mib", "2193"), None),  # anon を読めない
+    ],
+)
+def test_capacity_uses_the_estimate_when_the_weight_cannot_be_measured(tmp_path: Path, args: tuple[str, ...], anon_mib: int | None) -> None:
+    proc = capacity(tmp_path, *args, anon_mib=anon_mib)
+    assert proc.returncode == 0, proc.stderr
+    values = keys(proc.stdout)
+    assert values["cgroup_anon_mib"] == ("unknown" if anon_mib is None else str(anon_mib))
+    assert values["per_lane_observed_mib"] == "unknown"
+    assert values["per_lane_used_mib"] == "1536"
+
+
+@pytest.mark.parametrize("option", ["--per-lane-mib", "--per-lane-min-mib", "--peak-factor"])
+def test_capacity_rejects_a_zero_lane_weight(tmp_path: Path, option: str) -> None:
+    """1 本の重さが 0 になる引数は割れないため、引数の誤り（終了コード 2）にする。"""
+    proc = capacity(tmp_path, option, "0")
+    assert proc.returncode == 2
+    assert proc.stdout.strip() == ""
+    assert option in proc.stderr
+
+
+# --- capacity: いまの圧（hold） ---------------------------------------------
+
+
+@pytest.mark.parametrize("running,allowed,limited_by", [("0", "1", "hold_psi,floor"), ("2", "2", "hold_psi")])
+def test_capacity_holds_when_psi_exceeds_the_threshold(tmp_path: Path, running: str, allowed: str, limited_by: str) -> None:
+    """圧があれば今の本数を超えて足さない。減らすのは shrink だけである。"""
+    proc = capacity(tmp_path, "--running", running, psi_avg10="10.01")
+    assert proc.returncode == 0, proc.stderr
+    values = keys(proc.stdout)
+    assert values["verdict"] == "hold"
+    assert values["allowed"] == allowed
+    assert values["limited_by"] == limited_by
+    assert values["pressure"] == "psi:10.01"
+
+
+def test_capacity_does_not_hold_when_psi_equals_the_threshold(tmp_path: Path) -> None:
+    proc = capacity(tmp_path, psi_avg10="10.00")
+    assert keys(proc.stdout)["verdict"] == "grow"
+
+
+def test_capacity_holds_when_swap_io_exceeds_the_threshold_without_psi(tmp_path: Path) -> None:
+    proc = capacity(tmp_path, "--running", "2", psi_avg10=None, swap_io=(1000, 1513))
+    assert proc.returncode == 0, proc.stderr
+    values = keys(proc.stdout)
+    assert values["verdict"] == "hold"
+    assert values["allowed"] == "2"
+    assert values["limited_by"] == "hold_swap_io"
+    assert values["pressure"] == "swap_io:513.0"
+
+
+def test_capacity_does_not_hold_when_swap_io_equals_the_threshold(tmp_path: Path) -> None:
+    proc = capacity(tmp_path, psi_avg10=None, swap_io=(1000, 1512))
+    values = keys(proc.stdout)
+    assert values["verdict"] == "grow"
+    assert values["pressure"] == "swap_io:512.0"
+
+
+def test_capacity_divides_the_swap_io_by_the_interval(tmp_path: Path) -> None:
+    """60 ページを 0.1 秒で割ると毎秒 600 ページで、閾値を超える。"""
+    proc = capacity(tmp_path, "--sample-seconds", "0.1", psi_avg10=None, swap_io=(1000, 1060))
+    values = keys(proc.stdout)
+    assert values["verdict"] == "hold"
+    assert values["pressure"] == "swap_io:600.0"
+
+
+def test_capacity_grows_when_the_pressure_is_unknown(tmp_path: Path) -> None:
+    """PSI も vmstat も読めなければ圧は判定できないが、測定は拒否しない。"""
+    proc = capacity(tmp_path, psi_avg10=None)
+    assert proc.returncode == 0, proc.stderr
+    values = keys(proc.stdout)
+    assert values["verdict"] == "grow"
+    assert values["pressure"] == "unknown"
+    assert values["allowed"] == "2"
+
+
+def test_capacity_ignores_the_retired_swap_free_option(tmp_path: Path) -> None:
+    """廃止した --swap-free-min-pct は値を問わず受け、標準エラーへ 1 行知らせて無視する。"""
+    plain = capacity(tmp_path, swap_free_mib=0)
+    for value in ("25", "not-a-number"):
+        proc = capacity(tmp_path, "--swap-free-min-pct", value, swap_free_mib=0)
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout == plain.stdout
+        assert len(proc.stderr.strip().splitlines()) == 1
+        assert "--swap-free-min-pct" in proc.stderr
 
 
 # --- capacity: cgroup の残り（AC31 / AC33） ---------------------------------
@@ -212,56 +399,55 @@ def test_capacity_takes_the_reserve_from_the_argument(tmp_path: Path) -> None:
 
 def test_capacity_uses_the_cgroup_limit_when_it_is_smaller(tmp_path: Path) -> None:
     """cgroup に上限があるホストでは、VM の空きではなく cgroup の残りが決める。"""
-    proc = capacity(tmp_path, swap_free_mib=2047, memory_max=str(8 * 1024 * 1024 * 1024), memory_current=4 * 1024 * 1024 * 1024)
+    proc = capacity(tmp_path, memory_max=str(8 * 1024 * 1024 * 1024), memory_current=4 * 1024 * 1024 * 1024)
     assert proc.returncode == 0
     values = keys(proc.stdout)
     assert values["cgroup_available_mib"] == "4096"
-    assert values["by_memory"] == "1"  # ⌊(4096 − 2048) ÷ 2048⌋
+    assert values["by_memory"] == "2"  # ⌊(4096 − 1024) ÷ 1536⌋
 
 
 def test_capacity_ignores_the_cgroup_limit_when_it_is_max(tmp_path: Path) -> None:
-    proc = capacity(tmp_path, swap_free_mib=2047, memory_max="max", memory_current=0)
+    proc = capacity(tmp_path, memory_max="max", memory_current=0)
     values = keys(proc.stdout)
     assert values["cgroup_available_mib"] == "max"
-    assert values["by_memory"] == "3"
+    assert values["by_memory"] == "5"
 
 
 def test_capacity_continues_when_the_cgroup_files_are_absent(tmp_path: Path) -> None:
-    proc = capacity(tmp_path, swap_free_mib=2047, memory_max=None, memory_current=None)
+    proc = capacity(tmp_path, memory_max=None, memory_current=None, anon_mib=None)
     assert proc.returncode == 0
     values = keys(proc.stdout)
     assert values["cgroup_available_mib"] == "unknown"
-    assert values["by_memory"] == "3"
+    assert values["cgroup_anon_mib"] == "unknown"
+    assert values["by_memory"] == "5"
 
 
 def test_capacity_continues_when_memory_max_is_not_numeric(tmp_path: Path) -> None:
-    """現状固定: memory.max が数値でないときは unknown として継続する。"""
-    proc = capacity(tmp_path, swap_free_mib=2047, memory_max="not-a-number")
+    """memory.max が数値でないときは unknown として継続する。"""
+    proc = capacity(tmp_path, memory_max="not-a-number")
     assert proc.returncode == 0, proc.stderr
     values = keys(proc.stdout)
     assert values["cgroup_available_mib"] == "unknown"
     assert values["oom_kill"] == "1"
-    assert values["allowed"] == "3"
-    assert values["limited_by"] == "memory,max"
+    assert values["allowed"] == "2"
+    assert values["limited_by"] == "memory,max_add"
 
 
 def test_capacity_continues_when_memory_current_is_not_numeric(tmp_path: Path) -> None:
-    """現状固定: memory.current が数値でないときは unknown として継続する。"""
+    """memory.current が数値でないときは unknown として継続する。"""
     cg = cgroup(tmp_path, oom_kill=1, memory_max=str(8 * 1024 * 1024 * 1024))
     (cg / "memory.current").write_text("not-a-number\n", encoding="utf-8")
-    mem = meminfo(tmp_path, available_mib=9742, swap_total_mib=2047, swap_free_mib=2047)
-    proc = run("capacity", "--meminfo", str(mem), "--cgroup-dir", str(cg))
+    proc = capacity(tmp_path, memory_max=None, memory_current=None)
     assert proc.returncode == 0, proc.stderr
     values = keys(proc.stdout)
     assert values["cgroup_available_mib"] == "unknown"
     assert values["oom_kill"] == "1"
-    assert values["allowed"] == "3"
-    assert values["limited_by"] == "memory,max"
+    assert values["allowed"] == "2"
 
 
 def test_capacity_floors_the_cgroup_remainder_at_zero(tmp_path: Path) -> None:
     """使用量が上限を超えている（負の残り）ときも 0 として扱い、落ちない。"""
-    proc = capacity(tmp_path, swap_free_mib=2047, memory_max=str(1024 * 1024 * 1024), memory_current=2 * 1024 * 1024 * 1024)
+    proc = capacity(tmp_path, memory_max=str(1024 * 1024 * 1024), memory_current=2 * 1024 * 1024 * 1024)
     assert proc.returncode == 0
     assert keys(proc.stdout)["cgroup_available_mib"] == "0"
 
@@ -365,26 +551,25 @@ def test_capacity_exits_three_when_mem_available_is_missing(tmp_path: Path) -> N
 
 
 def test_capacity_continues_when_memory_events_is_absent(tmp_path: Path) -> None:
-    proc = capacity(tmp_path, swap_free_mib=2047, oom_kill=None)
+    proc = capacity(tmp_path, oom_kill=None)
     assert proc.returncode == 0
     values = keys(proc.stdout)
     assert values["oom_kill"] == "unknown"
     assert values["oom_kill_increased"] == "unknown"
-    assert values["allowed"] == "3"
+    assert values["allowed"] == "2"
 
 
 def test_capacity_continues_when_oom_kill_is_not_numeric(tmp_path: Path) -> None:
-    """現状固定: memory.events の oom_kill が数値でないときは unknown として継続する。"""
+    """memory.events の oom_kill が数値でないときは unknown として継続する。"""
     cg = cgroup(tmp_path, memory_max="max", memory_current=0)
     (cg / "memory.events").write_text("oom_kill not-a-number\n", encoding="utf-8")
-    mem = meminfo(tmp_path, available_mib=9742, swap_total_mib=2047, swap_free_mib=2047)
-    proc = run("capacity", "--meminfo", str(mem), "--cgroup-dir", str(cg))
+    proc = capacity(tmp_path, oom_kill=None)
     assert proc.returncode == 0, proc.stderr
     values = keys(proc.stdout)
     assert values["cgroup_available_mib"] == "max"
     assert values["oom_kill"] == "unknown"
-    assert values["allowed"] == "3"
-    assert values["limited_by"] == "memory,max"
+    assert values["allowed"] == "2"
+    assert values["limited_by"] == "memory,max_add"
 
 
 def test_capacity_rejects_a_negative_argument(tmp_path: Path) -> None:
@@ -402,33 +587,30 @@ def test_capacity_rejects_an_unknown_argument(tmp_path: Path) -> None:
     assert proc.returncode == 2
 
 
-def test_capacity_rejects_per_lane_mib_zero(tmp_path: Path) -> None:
-    """現状固定: 型検査を通る --per-lane-mib 0 は run_capacity が拒否する。
-
-    `non_negative_int` は 0 を通すため、0 を弾くのは run_capacity の
-    `--per-lane-mib は 1 以上である` である。終了コード 2・標準出力は空・
-    エラーが当該引数を識別できることを固定する。
-    """
-    proc = capacity(tmp_path, "--per-lane-mib", "0")
-    assert proc.returncode == 2
-    assert proc.stdout.strip() == ""
-    assert "--per-lane-mib" in proc.stderr
-
-
-# --- capacity: OOM Killer の回数（AC35） ------------------------------------
+# --- capacity: OOM Killer の回数（shrink、AC35） ----------------------------
 
 
 def test_capacity_lowers_the_count_when_oom_kill_increased(tmp_path: Path) -> None:
-    proc = capacity(tmp_path, "--oom-baseline", "1", "--running", "3", oom_kill=2, swap_free_mib=2047)
+    proc = capacity(tmp_path, "--oom-baseline", "1", "--running", "3", oom_kill=2)
     assert proc.returncode == 0
     values = keys(proc.stdout)
     assert values["oom_kill_increased"] == "yes"
+    assert values["verdict"] == "shrink"
     assert values["allowed"] == "2"  # 今の本数 − 1
-    assert "oom_kill_increased" in values["limited_by"]
+    assert values["limited_by"] == "oom_kill_increased"
+
+
+def test_capacity_shrinks_even_when_the_pressure_is_high(tmp_path: Path) -> None:
+    """落ちたことは圧より強い事実である。"""
+    proc = capacity(tmp_path, "--oom-baseline", "1", "--running", "3", oom_kill=2, psi_avg10="50.00")
+    values = keys(proc.stdout)
+    assert values["verdict"] == "shrink"
+    assert values["allowed"] == "2"
+    assert values["limited_by"] == "oom_kill_increased"
 
 
 def test_capacity_says_no_when_oom_kill_did_not_increase(tmp_path: Path) -> None:
-    proc = capacity(tmp_path, "--oom-baseline", "1", "--running", "3", oom_kill=1, swap_free_mib=2047)
+    proc = capacity(tmp_path, "--oom-baseline", "1", "--running", "3", oom_kill=1)
     values = keys(proc.stdout)
     assert values["oom_kill_increased"] == "no"
     assert "oom_kill_increased" not in values["limited_by"]
@@ -437,18 +619,18 @@ def test_capacity_says_no_when_oom_kill_did_not_increase(tmp_path: Path) -> None
 @pytest.mark.parametrize("running", ["0", "1"])
 def test_capacity_allows_zero_only_on_the_review_that_saw_the_increase(tmp_path: Path, running: str) -> None:
     """`running` が 0 か 1 のとき、下限の 1 を当てると「今の本数 − 1 以下」を満たせない。"""
-    proc = capacity(tmp_path, "--oom-baseline", "1", "--running", running, oom_kill=2, swap_free_mib=2047)
+    proc = capacity(tmp_path, "--oom-baseline", "1", "--running", running, oom_kill=2)
     values = keys(proc.stdout)
     assert values["allowed"] == "0"
     assert "floor" not in values["limited_by"]
 
 
 def test_capacity_without_a_baseline_does_not_judge(tmp_path: Path) -> None:
-    proc = capacity(tmp_path, oom_kill=5, swap_free_mib=2047)
+    proc = capacity(tmp_path, oom_kill=5)
     values = keys(proc.stdout)
     assert values["oom_kill"] == "5"
     assert values["oom_kill_increased"] == "unknown"
-    assert values["allowed"] == "3"
+    assert values["allowed"] == "2"
 
 
 # --- concurrency（AC40） -----------------------------------------------------
