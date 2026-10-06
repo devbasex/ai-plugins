@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 jobs:
-  check:
+  glossary-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

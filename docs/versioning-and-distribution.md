@@ -163,8 +163,10 @@ agy plugin uninstall ndf && agy plugin install <clone>/plugins/ndf/dev.agy
 
 **`git push origin develop:main` は使えない。** `main` / `develop` を守る ruleset の bypass は
 `pull_request` で作ってあり、**このモードは Pull Request のマージだけを通し、直接 push は
-管理者でも拒む**。必須のチェック 12 個は Pull Request で走るため、`develop` の先端のコミットには
-`push` 起動の 1 個しか結果が付いていない。
+管理者でも拒む**。必須のチェックは Pull Request で走るため、`develop` の先端のコミットには
+`push` 起動の 1 個しか結果が付いていない。必須のチェックの一覧は
+`gh api repos/<owner>/<repo>/rules/branches/develop` で読み、ワークフローのジョブとの食い違いは
+突き合わせのチェック（`required-checks-check`、`scripts/check-required-checks.py`）が Pull Request ごとに知らせる。
 
 ```console
 $ git push origin develop:main
@@ -174,8 +176,8 @@ remote:
  ! [remote rejected] develop -> main (push declined due to repository rule violations)
 ```
 
-この例は必須のチェックが 11 個だったときの観測である。`instruction-files-check` を足して 12 個に
-なった後は `11 of 12` になる。
+この例は必須のチェックが 11 個だったときの観測である。必須のチェックの数を N とすると、
+`N-1 of N` になる。
 
 **この手順では `main` に `develop` へ無いマージコミットが 1 つ積まれる。** そのため `main` は
 `develop` の fast-forward から外れる。**それでよい。** リリースした版を指すのは `main` の先端で
@@ -195,8 +197,8 @@ git fetch origin && git diff --stat origin/develop origin/main   # 空である�
 は指定しないと `main` を宛先にする。**`--base develop` を必ず付ける。**
 
 **リリースの Pull Request では、重いチェック（`pytest` と `runtime-smoke (*)`）を省く。** 同じ中身を
-2 度試さないためである。判定は各 workflow の `ci-scope` のジョブが `scripts/ci-heavy-skip.py` で
-行い、次のどちらかのときだけ省く。
+2 度試さないためである。判定は各 workflow の `ci-scope` のジョブ（チェックの名前は `pytest-scope`・
+`runtime-smoke-scope`）が `scripts/ci-heavy-skip.py` で行い、次のどちらかのときだけ省く。
 
 - 差分が版数と説明だけ（版上げの `release/v<版>` → `develop`）。説明は `CHANGELOG.md`・
   `README.md`・`AGENTS.md`・`plugins/**/README.md`・この文書・`docs/metrics/ndf-token-usage/`
