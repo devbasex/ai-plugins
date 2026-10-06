@@ -92,7 +92,7 @@ Pull Request の状態（`state` / `draft` / `merged_at`）は GitHub の語を�
 | --- | --- |
 | `refactor_lib/pr_gate.py`（新規） | 応答から `PrStatus` を読み出す（`PrStatus.of`）。`PrStatus` と再開かどうかから、止める理由の 1 行か `None` を返す（`refusal`）。**git も GitHub も呼ばず、終了もしない** |
 | `commands/setup.py` の `_fetch_pr_context` | 既に読んでいる応答から `PrStatus` を作り、6 つ目の値として返す。`gh` の呼び出しは変えない |
-| `commands/setup.py` の `_pending_state`（新規） | 状態ファイルを 1 度だけ読み、再開する状態（版が今の形で `phase` が `done` でない）ならその状態を、そうでなければ `None` を返す。旧い形で途中のまま残ったものは今と同じ文で止める |
+| `commands/setup.py` の `_pending_state`（新規） | 状態ファイルを 1 度だけ読み、再開する状態（版が今の形で `phase` が `done` でない）ならその状態を、そうでなければ `None` を返す。環境変数 `CROSS_REFACTORING_TMP_DIR` が無く、`work` が存在して登録された worktree でない（`_is_registered_worktree` が偽。`_ensure_work_worktree` が退避する）ときは、状態ファイルを読まずに `None`（新しい実行）を返す。旧い形で途中のまま残ったものは今と同じ文で止める |
 | `commands/setup.py` の `_prepare_init` | 状態ファイルの置き場を（作らずに）求め、`_pending_state` と `pr_gate.refusal` を呼び、止める理由があれば `die` する。**この後で初めて作業ディレクトリを用意する** |
 | `commands/setup.py` の `_InitPreparation` / `_resume_if_pending` | 準備に `pending`（`_pending_state` の結果）を持たせ、再開の判定は状態ファイルを読み直さずにそれを使う |
 | `commands/report.py` の `_print_deferred` | 件数の行の「見送り」を `ledger.tally(state).deferred` から出す。「見送った提案」の行に `deferred_items` の総数と理由別の件数を出す |
@@ -242,8 +242,10 @@ sequenceDiagram
 
 ```mermaid
 stateDiagram-v2
+    [*] --> 退避される: 環境変数が無く、work が登録された worktree でない
     [*] --> 無い: 状態ファイルが無い
     [*] --> 読む: 状態ファイルがある
+    退避される --> 新しい実行
     読む --> 旧い形の途中: schema が今の版でなく rounds があり final が空
     読む --> 新しい実行: schema が今の版でない（上以外）
     読む --> 新しい実行: phase が done
@@ -255,6 +257,8 @@ stateDiagram-v2
 ```
 
 この区別は `_resume_if_pending` が今使っている規則そのものであり、`_pending_state` へ移して判定と再開の両方がそれを使う。
+
+「退避される」の行は、判定を用意より前へ移したために足す規則である。環境変数 `CROSS_REFACTORING_TMP_DIR` が無いと状態ファイルは `<work>/.cross_refactoring/` にあり、`work` が登録された worktree でなければ `_ensure_work_worktree` がそのディレクトリを `work.stale-<時刻>` へ退避して作り直す。今は退避の後に状態ファイルを読むため新しい実行になる。退避される状態ファイルで再開すると、この振る舞いが変わり、Draft の検査も外れる。そのため `_pending_state` は、退避されるディレクトリの状態ファイルを読まずに新しい実行として扱う。環境変数があるときは状態ファイルが `work` の外にあり退避されないため、この行は当たらない。
 
 ### 完了報告の件数
 
@@ -296,7 +300,7 @@ graph LR
 
 ### 決定 3: Draft の検査を新しい実行だけに当てるため、再開の区別は `_resume_if_pending` と同じ規則を `_pending_state` 1 つで持つ
 
-単独起動は最終ゲートの承認の後に Draft を外すため、Draft の検査を再開にも当てると、その後の打ち直しが止まる（要求の前提 1）。再開かどうかを状態ファイルの有無だけで決めると、`phase: done` の状態ファイルが残った新しい実行で Draft の検査が外れる。規則を判定用と再開用で 2 つ書くと、片方だけ直されて食い違う。状態ファイルを 1 度だけ読み、その結果を `_InitPreparation.pending` で再開へ渡す。
+単独起動は最終ゲートの承認の後に Draft を外すため、Draft の検査を再開にも当てると、その後の打ち直しが止まる（要求の前提 1）。再開かどうかを状態ファイルの有無だけで決めると、`phase: done` の状態ファイルが残った新しい実行で Draft の検査が外れる。規則を判定用と再開用で 2 つ書くと、片方だけ直されて食い違う。状態ファイルを 1 度だけ読み、その結果を `_InitPreparation.pending` で再開へ渡す。読むのが用意より前になるため、`_ensure_work_worktree` が退避する作業ディレクトリの状態ファイルは読まずに新しい実行とする（用意の後で読み直す案は、1 度だけ読む規則を崩すため採らない）。
 
 根拠: Value 6（MVV 版 2）
 
@@ -340,6 +344,7 @@ GitHub の応答は 3 項目を必ず持つ（実測）。欠けている・型�
 | 4 | `state: open`・`draft: true` の応答で、今までどおり状態ファイルができる（既存の `init` のテストが偽の応答の 3 項目を足しただけで通る） | `draft: true` でも止めるように壊すと既存のテストが落ちる |
 | 5・I2・I4 | 終わっていない状態ファイルがあると、`state: open`・`draft: false` で続き、`state: closed` で止まり状態ファイルの中身が変わらない | 再開にも Draft の検査を当てると落ちる。再開で `state` を見ないと落ちる。判定を `_resume` の後へ動かすと状態ファイルが書き換わって落ちる |
 | 5（`phase: done`） | `phase: done` の状態ファイルが残った実行は新しい実行として扱われ、`draft: false` で止まる | 再開の区別を状態ファイルの有無だけにすると落ちる |
+| 5（退避される作業ディレクトリ） | 環境変数 `CROSS_REFACTORING_TMP_DIR` が無く、登録された worktree でない `work` に終わっていない状態ファイルがあると、新しい実行として扱われ、`draft: false` で止まる | `_pending_state` が退避されるディレクトリの状態ファイルを読んで再開すると落ちる |
 | 6・I3 | `state` が `merged` などの値・`state` が無い・新しい実行で `draft` が無いか文字列の応答で、終了コード 4 と「判定できない」と項目名（`state` / `draft`）が出る | 欠けた項目を既定の値で埋めて続けると落ちる |
 | 6（判定の表） | `pr_gate.refusal` を入出力の契約の表の 7 行で呼び、止める行は理由の 1 行、止めない行は `None` が返る | 表の順を入れ替える（`draft` を `state` より先に見る）と、閉じた Draft でない Pull Request で語が変わって落ちる |
 | 7 | 駆動の `init` が終了コード 4 で終わると、駆動は終了コード 1・`metrics.exit` 4 で終わり、`prepare-worktrees.sh` と担当の CLI を起動しない | 駆動が `init` の 4 を中断と扱わなくなると落ちる（既存の振る舞いの縛り） |
