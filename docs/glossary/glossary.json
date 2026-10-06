@@ -442,7 +442,7 @@
     {
       "term": "バッファ",
       "context": "ndf-workflow",
-      "meaning": "`cross-refactoring` の見積りで、想定最大時間から経過を引いた後に残しておく時間",
+      "meaning": "`cross-refactoring` の見積りで、想定最大時間から経過を引いた後に残しておく時間。最終ゲートの全体テスト・修正 1 回・最終ゲート修正 1 回と、最終ゲートと兼ねられないときだけ危険フラグの全体テスト",
       "deprecated": [
         "予備時間"
       ],
@@ -3419,6 +3419,43 @@
       "context": "ndf-cross-refactoring",
       "meaning": "cross-refactoring で、最終ゲートより前の取り消しで HEAD が変わった後、残った改善項目を新しい HEAD の範囲テストで判定し直すこと",
       "source": "docs/specifications/cross-refactoring-failed-item-rules.md"
+    },
+    {
+      "term": "使える時間",
+      "context": "ndf-cross-refactoring",
+      "meaning": "`cross-refactoring` のリファクタリング計画の時点で、採る改善項目の見積りを収める時間（想定最大時間 − 経過 − バッファ）。`state.plan.available_minutes`",
+      "pending_source": "issues/issue-1743-requirements.md"
+    },
+    {
+      "term": "止まっていた時間",
+      "context": "ndf-cross-refactoring",
+      "meaning": "`cross-refactoring` をリファクタリング計画の後に中断してから、init か drive.py を打ち直して再開するまでの時間。再開の時刻 − 最後の動きの時刻で測り、想定最大時間に数えない",
+      "pending_source": "issues/issue-1743-design.md"
+    },
+    {
+      "term": "最後の動きの時刻",
+      "context": "ndf-cross-refactoring",
+      "meaning": "`cross-refactoring` の作業ディレクトリ（`.cross_refactoring/`）の直下のファイルのうち、最も新しい更新時刻。状態ファイル・CLI のログ・テストのログ・結果ファイルと、心拍のファイルを含む。止まっていた時間の起点",
+      "pending_source": "issues/issue-1743-design.md"
+    },
+    {
+      "term": "心拍のファイル",
+      "context": "ndf-cross-refactoring",
+      "meaning": "`cross-refactoring` の作業ディレクトリ直下の `cross-refactoring-rf<ID>-alive`。出力の有無によらず、CLI の監視とテストの実行が待っている間、心拍の間隔（15 秒。見回りの間隔に依らない）ごとに更新時刻を今にする。中断で止まると更新も止まり、最後の動きの時刻が稼働の終わりを指す",
+      "pending_source": "issues/issue-1743-design.md"
+    },
+    {
+      "term": "実装の終わり",
+      "context": "ndf-cross-refactoring",
+      "meaning": "`cross-refactoring` で実装の CLI を止める唯一の時刻。最終ゲート修正の打ち切り − バッファ − 採っていて未検証の改善項目の検証の見積り。項目ごとの見積りでは止めない",
+      "code": "implement_end_at",
+      "pending_source": "issues/issue-1743-design.md"
+    },
+    {
+      "term": "採り直し",
+      "context": "ndf-cross-refactoring",
+      "meaning": "`cross-refactoring` で検証の後に時間が残ったとき、budget で見送った候補と実装の終わりまでにコミットが無かった改善項目から、残った時間に入るものを順位の順に採り、テストの追加・実装・検証をもう 1 巡回すこと。計画し直さない",
+      "pending_source": "issues/issue-1743-design.md"
     },
     {
       "term": "見送った改善項目",

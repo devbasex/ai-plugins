@@ -53,7 +53,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | リファクタリング | — | 振る舞いを変えずに構造を直す工程 | 構造改善 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | コードレビュー | — | 実装の差分をレビューし、新しい指摘が出なくなるまで直す工程 | 実装レビュー | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | リファクタリング計画 | — | `cross-refactoring` が採る改善項目を決め、見送った提案と理由を残す出力 | 改修計画 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| バッファ | — | `cross-refactoring` の見積りで、想定最大時間から経過を引いた後に残しておく時間 | 予備時間 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| バッファ | — | `cross-refactoring` の見積りで、想定最大時間から経過を引いた後に残しておく時間。最終ゲートの全体テスト・修正 1 回・最終ゲート修正 1 回と、最終ゲートと兼ねられないときだけ危険フラグの全体テスト | 予備時間 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | ラウンドテスト | `round_test` | `cross-refactoring` で、`--scope` のテストの置き場所を走らせるコマンド | ラウンドのテスト | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | グレード | — | `cross-refactoring` が候補ごとに付ける適用の価値（high / medium / low） | 等級 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 指摘ファイル | — | `cross-review` の担当が書く、指摘の全件と総評のファイル | 指摘のファイル | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
@@ -387,6 +387,12 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 外した項目 | — | cross-refactoring の取り消しの積み直しで、自分のコミットが衝突したために取り消した改善項目。外した理由（どの項目の取り消しで、どのコミットが衝突したか）を持つ | — | — | `docs/specifications/cross-refactoring-failed-item-rules.md` |
 | 直さなかった項目 | — | cross-refactoring で、結果を残して終わった修正の起動の後、修正の範囲に自分の Item-Id のコミットが 1 つも無い改善項目。次の検証の最初に取り消す | — | — | `docs/specifications/cross-refactoring-failed-item-rules.md` |
 | 確かめ直し | — | cross-refactoring で、最終ゲートより前の取り消しで HEAD が変わった後、残った改善項目を新しい HEAD の範囲テストで判定し直すこと | — | — | `docs/specifications/cross-refactoring-failed-item-rules.md` |
+| 使える時間 | — | `cross-refactoring` のリファクタリング計画の時点で、採る改善項目の見積りを収める時間（想定最大時間 − 経過 − バッファ）。`state.plan.available_minutes` | — | — | — |
+| 止まっていた時間 | — | `cross-refactoring` をリファクタリング計画の後に中断してから、init か drive.py を打ち直して再開するまでの時間。再開の時刻 − 最後の動きの時刻で測り、想定最大時間に数えない | — | — | — |
+| 最後の動きの時刻 | — | `cross-refactoring` の作業ディレクトリ（`.cross_refactoring/`）の直下のファイルのうち、最も新しい更新時刻。状態ファイル・CLI のログ・テストのログ・結果ファイルと、心拍のファイルを含む。止まっていた時間の起点 | — | — | — |
+| 心拍のファイル | — | `cross-refactoring` の作業ディレクトリ直下の `cross-refactoring-rf<ID>-alive`。出力の有無によらず、CLI の監視とテストの実行が待っている間、心拍の間隔（15 秒。見回りの間隔に依らない）ごとに更新時刻を今にする。中断で止まると更新も止まり、最後の動きの時刻が稼働の終わりを指す | — | — | — |
+| 実装の終わり | `implement_end_at` | `cross-refactoring` で実装の CLI を止める唯一の時刻。最終ゲート修正の打ち切り − バッファ − 採っていて未検証の改善項目の検証の見積り。項目ごとの見積りでは止めない | — | — | — |
+| 採り直し | — | `cross-refactoring` で検証の後に時間が残ったとき、budget で見送った候補と実装の終わりまでにコミットが無かった改善項目から、残った時間に入るものを順位の順に採り、テストの追加・実装・検証をもう 1 巡回すこと。計画し直さない | — | — | — |
 | 見送った改善項目 | — | リファクタリング計画が採った改善項目のうち、表示の状態が見送りのもの（時間内に実装を終えなかった not_done・足したテストが落ちた test_failed）。結果 JSON の metrics.deferred の数 | — | — | — |
 | 見送った提案 | `deferred_items` | 計画に入らなかった提案と見送った改善項目を合わせたもの。理由を 1 つ持つ。状態ファイルの deferred_items | — | — | — |
 
