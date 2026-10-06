@@ -109,6 +109,6 @@ def test_a_baseline_cut_off_by_the_shared_limit_is_not_counted_as_caused(monkeyp
 
 
 def test_rerun_groups_split_targets_with_a_node_id_by_suite():
-    """`::` 付きの対象も、パスの部分で受け持つ suite を決める（#1354）。"""
+    """`::` 付きの対象も、パスの部分で受け持つ suite を決め、`{paths}` へはパスだけを渡す（#1354・#1793 の R5）。"""
     groups = test_triage.rerun_groups(_suites(), ["a/t.py::x", "b/t.py::y"])
-    assert [(suite.name, paths) for suite, paths in groups] == [("a", ["a/t.py::x"]), ("b", ["b/t.py::y"])]
+    assert [(suite.name, paths) for suite, paths in groups] == [("a", ["a/t.py"]), ("b", ["b/t.py"])]

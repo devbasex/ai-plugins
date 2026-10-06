@@ -183,7 +183,9 @@ def test_a_failure_already_present_at_the_start_is_not_reverted(flow, cmd_setup,
     assert git("status", "--porcelain", cwd=flow["work"]).stdout.strip() == ""
 
 
-def test_a_failure_caused_by_the_change_goes_to_fix_and_is_kept_when_fixed(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+def test_a_failure_caused_by_the_change_goes_to_fix_and_is_kept_when_fixed(
+    flow, cmd_setup, cmd_implement, cmd_converge, cmd_merge_fix, capsys
+):
     work = flow["work"]
     _existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
     _implement(flow, cmd_setup, cmd_implement, {"I-001": _break_total})
@@ -205,7 +207,7 @@ def test_a_failure_caused_by_the_change_goes_to_fix_and_is_kept_when_fixed(flow,
     _call(cmd_setup, "cmd_start_phase", phase="fix")
     _write(work, "src/calc.py", CALC)
     commit_with_trailers(work, "Fix", item_trailers("I-001"))
-    _call(cmd_converge, "cmd_merge_fix")
+    _call(cmd_merge_fix, "cmd_merge_fix")
     capsys.readouterr()
     _call(cmd_converge, "cmd_verify")
 

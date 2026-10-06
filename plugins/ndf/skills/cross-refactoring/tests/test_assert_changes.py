@@ -232,7 +232,7 @@ def test_the_implement_intake_rejects_a_changed_expectation(cmd_implement, tmp_p
     assert "期待" in problem
 
 
-def test_the_fix_intake_rejects_a_changed_expectation(cmd_converge) -> None:
+def test_the_fix_intake_rejects_a_changed_expectation(fix_intake) -> None:
     """修正の取り込みのチェックも、同じ基準で期待値の変更を落とすこと。"""
     facts = [
         {
@@ -244,7 +244,7 @@ def test_the_fix_intake_rejects_a_changed_expectation(cmd_converge) -> None:
             "test_changes": {"tests/test_a.py": (["    assert f(1) == 3\n"], ["    assert f(1) == 4\n"])},
         }
     ]
-    problems = cmd_converge._fix_problems({"target_scope": ["tests"]}, facts, {"I-001"})
+    problems = fix_intake._fix_problems({"target_scope": ["tests"]}, facts, {"I-001"})
     assert len(problems) == 1 and "期待" in problems[0]
 
 

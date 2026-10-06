@@ -5,15 +5,21 @@
 （共通原則 C4）。前の取り消しの積み直しは「残すコミット」として置き換わるだけなので、取り消しを
 何度くり返してもコミット数は伸びない（#1399）。
 
-積み直しが衝突したら、消す・戻すコミットが触ったファイルを触った改善項目まで 1 段だけ広げる
-（`widened`。#1237）。広げても衝突したら、HEAD を取り消しの前へ戻して終了コード 4 で止まる。
-全件の取り消しへは進まない。
+**積み直しで項目に属するコミット（テスト・実装・修正）が衝突したら、そのコミットを持つ項目だけを外し、
+計画を作り直して起点から積み直す**（外した項目。#1793 の R2）。外した項目に依存して後で衝突した項目も同じく
+外れる。ファイルが同じというだけでは外さない。公開済みのコミットの revert と、どの項目にも属さないコミット
+（オーケストレーター・最終ゲート修正）の積み直しが衝突したときだけ、HEAD を取り消しの前へ戻して終了コード 4 で止まる。
+
+**最終ゲートより前の取り消しで HEAD が変わったら、残った `verified` の項目を `implemented` へ戻す**（確かめ直し。
+`recheck`）。検証が新しい HEAD の範囲テストで判定し直す。最終ゲートの中では最終ゲートが HEAD を確かめ直すため戻さない。
 
 | `mode` | 何を取り消したか |
 | --- | --- |
 | `item` | 指定した項目と、どの項目にも属さないコミット |
-| `widened` | 上に加えて、同じファイルを触った項目 |
+| `ejected` | 上に加えて、積み直しで自分のコミットが衝突した項目（`ejected[]` に `item`・`commit`・`by`） |
 | `skip` | 取り消すコミットが無かった（git に触れない） |
+
+旧い状態ファイルの `widened`（同じファイルを触った項目まで広げた記録）は読めるが、新しくは書かない。
 
 **中断しても再開できる形で記録する。** 着手の前に取り消しの前の HEAD（`pending_drop.before`）を保存し、
 記録を終えたら消す。残ったまま再開したら、その HEAD へ戻してから計画を作り直す。
@@ -39,7 +45,8 @@ ON_CONFLICT_RAISE = "raise"  # 積み直しの衝突を DropConflict で呼ぶ�
 
 
 class DropConflict(Exception):
-    """広げても積み直せなかった（`on_conflict="raise"` のとき）。HEAD は取り消しの前へ戻してある（#1669 決定 11）。"""
+    """項目に属さないコミットの積み直しか公開済みの revert が衝突した（`on_conflict="raise"` のとき）。
+    HEAD は取り消しの前へ戻してある（#1669 決定 11）。"""
 
 
 @dataclass
@@ -47,6 +54,7 @@ class _Outcome:
     mapping: dict[str, str] = field(default_factory=dict)  # 積み直した {元の SHA: 新しい SHA}
     reverts: list[str] = field(default_factory=list)  # 作った revert のコミット
     conflict: Optional[str] = None  # 積み直せなかった・戻せなかったコミット
+    in_replay: bool = False  # 衝突が積み直しで起きたか（偽なら公開済みの revert）
 
 
 def _execute(work: str, plan: ledger.RebuildPlan) -> _Outcome:
@@ -55,6 +63,7 @@ def _execute(work: str, plan: ledger.RebuildPlan) -> _Outcome:
     if plan.remove:
         reset_hard(work, plan.origin)
         outcome.mapping, outcome.conflict = replay_commits(work, plan.replay)
+        outcome.in_replay = outcome.conflict is not None
     if outcome.conflict is None:
         for sha in plan.revert:
             outcome.conflict = revert_range(work, [sha])
@@ -127,13 +136,25 @@ def _close_commitless(state: dict[str, Any], targets: list[str], reason: str) ->
     return remaining
 
 
+def _ejected_reason(entry: dict[str, Any], reason: str) -> str:
+    by = ", ".join(entry.get("by") or []) or reason
+    return f"{by} の取り消しで {str(entry['commit'])[:12]} の積み直しが衝突したため外した"
+
+
+def _recheck(state: dict[str, Any], plan: ledger.RebuildPlan) -> list[str]:
+    """最終ゲートより前の取り消しで HEAD が変わったら、残った検証済みの項目を確かめ直しへ戻す（I3）。"""
+    if ledger.in_final_gate(state) or plan.empty():
+        return []
+    return ledger.mark_recheck(state)
+
+
 def _record(
     path: pathlib.Path,
     state: dict[str, Any],
     plan: ledger.RebuildPlan,
     outcome: _Outcome,
-    targets: list[str],
     reason: str,
+    ejected: list[dict[str, Any]],
 ) -> dict[str, Any]:
     work = work_dir(state)
     head = git_out(work, ["rev-parse", "HEAD"]) or ""
@@ -141,16 +162,24 @@ def _record(
     _remap(state, work, outcome.mapping, _point_map(plan, outcome.mapping, head))
     for sha in outcome.reverts:
         ledger.note_orchestrator_commit(state, sha)
-    mode = "widened" if plan.widened else "item"
+    mode = "ejected" if ejected else "item"
+    for entry in ejected:
+        item = find_item(state, entry["item"], required=False)
+        if item is not None and ledger.is_live(item):
+            # 前の理由（自分の範囲テストの失敗）を残すと、取り消しの理由（衝突）を読み違える（決定 7）
+            item["failure_reason"] = _ejected_reason(entry, reason)
+            ledger.mark_dropped(item, item["failure_reason"])
     for item_id in plan.dropped:
         item = find_item(state, item_id, required=False)
         if item is not None and ledger.is_live(item):
-            ledger.mark_dropped(item, reason if item_id in targets else f"{reason}（{mode} の取り消しに巻き込まれた）")
+            ledger.mark_dropped(item, reason)
     record = {
         "at": statefile.now(),
         "mode": mode,
         "reason": reason,
         "dropped": plan.dropped,
+        "ejected": ejected,
+        "recheck": _recheck(state, plan),
         "extra": plan.stray,
         "origin": plan.origin,
         "removed": len(plan.remove),
@@ -161,17 +190,20 @@ def _record(
     state["pending_drop"] = None
     statefile.save(path, state)
     info(f"↩ 取り消し: 消した {record['removed']} / 積み直した {record['replayed']} / 戻した {record['reverted']} コミット（{mode}）")
+    if record["recheck"]:
+        info(f"↻ 残った {len(record['recheck'])} 件（{', '.join(record['recheck'])}）を新しい HEAD の範囲テストで確かめ直します")
     return record
 
 
 def _restore_and_stop(
-    path: pathlib.Path, state: dict[str, Any], plan: ledger.RebuildPlan, conflict: str, on_conflict: str = ON_CONFLICT_STOP
+    path: pathlib.Path, state: dict[str, Any], plan: ledger.RebuildPlan, outcome: _Outcome, on_conflict: str = ON_CONFLICT_STOP
 ) -> None:
-    """広げても積み直せないとき。HEAD は `_execute` が取り消しの前へ戻してある。`on_conflict="raise"` なら例外で返す。"""
+    """項目に属さないコミットの積み直しか公開済みの revert が衝突したとき。HEAD は `_execute` が取り消しの前へ
+    戻してある。`on_conflict="raise"` なら例外で返す。"""
     state["pending_drop"] = None
     statefile.save(path, state)
-    widened = ", ".join(plan.widened) or "なし"
-    message = f"同じファイルを触った項目まで広げても積み直せません: {conflict[:12]}（広げた項目: {widened}）。HEAD を {plan.before[:12]} へ戻しました"
+    what = "項目に属さないコミットを積み直せません" if outcome.in_replay else "公開済みのコミットを戻せません"
+    message = f"{what}: {str(outcome.conflict)[:12]}。HEAD を {plan.before[:12]} へ戻しました"
     if on_conflict == ON_CONFLICT_RAISE:
         raise DropConflict(message)
     die(message)
@@ -180,6 +212,9 @@ def _restore_and_stop(
 def _rebuild(
     path: pathlib.Path, state: dict[str, Any], targets: list[str], reason: str, on_conflict: str = ON_CONFLICT_STOP
 ) -> dict[str, Any]:
+    """`targets` を取り消す。積み直しで項目のコミットが衝突したら、その項目を外して計画を作り直す（R2）。
+
+    1 回の衝突で 1 件を外すため、繰り返しは生きている項目の数の内で終わる。"""
     work = work_dir(state)
     plan = ledger.plan_rebuild(state, work, targets)
     if plan.error:
@@ -190,18 +225,26 @@ def _rebuild(
         statefile.save(path, state)
         return {"mode": "skip", "dropped": sorted(targets), "removed": 0, "replayed": 0, "reverted": 0}
 
+    # 再開で外す項目を計算し直すため、指定した項目だけを残す（I8）
     state["pending_drop"] = {"items": targets, "reason": reason, "before": plan.before}
     statefile.save(path, state)
-    outcome = _execute(work, plan)
+    ejected: list[dict[str, Any]] = []
+    for _ in range(len(state.get("items") or []) + 1):
+        outcome = _execute(work, plan)
+        if not outcome.conflict:
+            break
+        owner = ledger.live_owner(state, work, outcome.conflict) if outcome.in_replay else ""
+        if not owner or owner in plan.dropped:
+            _restore_and_stop(path, state, plan, outcome, on_conflict)
+        commit = full_commit(work, outcome.conflict)
+        ejected.append({"item": owner, "commit": commit, "by": list(targets)})
+        info(f"⚠ {owner} の積み直しが衝突したため外します（{', '.join(targets) or reason} の取り消し・{commit[:12]}）")
+        plan = ledger.plan_rebuild(state, work, targets + [e["item"] for e in ejected])
+        if plan.error:
+            die(plan.error)
     if outcome.conflict:
-        wide = ledger.plan_rebuild(state, work, targets, widen=True)
-        if not wide.widened:
-            _restore_and_stop(path, state, wide, outcome.conflict, on_conflict)
-        info(f"⚠ 積み直しが衝突したため、同じファイルを触った {len(wide.widened)} 件（{', '.join(wide.widened)}）も取り消します")
-        plan, outcome = wide, _execute(work, wide)
-        if outcome.conflict:
-            _restore_and_stop(path, state, plan, outcome.conflict, on_conflict)
-    return _record(path, state, plan, outcome, targets, reason)
+        _restore_and_stop(path, state, plan, outcome, on_conflict)
+    return _record(path, state, plan, outcome, reason, ejected)
 
 
 def drop(
@@ -209,7 +252,8 @@ def drop(
 ) -> dict[str, Any]:
     """改善項目（と、どの項目にも属さないコミット）を取り消す。
 
-    広げても積み直せなければ、既定（`stop`）は終了コード 4 で止まり、`raise` なら `DropConflict` を投げる。
+    積み直しで項目のコミットが衝突したらその項目を外して続ける。項目に属さないコミットの積み直しか公開済みの
+    revert が衝突したら、既定（`stop`）は終了コード 4 で止まり、`raise` なら `DropConflict` を投げる。
 
     戻り値は `{"mode", "dropped", "removed", "replayed", "reverted", ...}`。取り消した項目は
     `status: reverted`、`failure_reason` に理由を持つ。**見送り（`deferred_items`）へ入れるかは
