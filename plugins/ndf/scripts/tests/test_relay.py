@@ -56,7 +56,10 @@ def fake_uv(tmp_path):
             "#!/bin/sh\n"
             '[ -z "$FAKE_UV_LOG" ] || echo "$*" >> "$FAKE_UV_LOG"\n'
             '[ "${FAKE_UV_EXIT:-0}" = 0 ] || { echo "fake uv: no network" >&2; exit "$FAKE_UV_EXIT"; }\n'
+            'case " $* " in *" --no-managed-python "*) [ -z "$FAKE_UV_NO_SYSTEM" ] || '
+            '{ echo "fake uv: no system python" >&2; exit 2; };; esac\n'
             'mkdir -p "$UV_PROJECT_ENVIRONMENT/bin"\n'
+            'rm -f "$UV_PROJECT_ENVIRONMENT/bin/python"\n'  # 本物の uv もリンク切れの python を作り直す
             'printf \'#!/bin/sh\\n[ -z "$FAKE_PY_LOG" ] || echo "$0" >> "$FAKE_PY_LOG"\\nexec %s "$@"\\n\' '
             f"'{sys.executable}' > \"$UV_PROJECT_ENVIRONMENT/bin/python\"\n"
             'chmod 755 "$UV_PROJECT_ENVIRONMENT/bin/python"\n'
@@ -2763,6 +2766,62 @@ def test_install_prepares_env_then_copy_runs_in_it(tmp_path, home):
     p = bare(tmp_path, "is-child", relay=cfg(tmp_path) / "relay.py", FAKE_PY_LOG=pylog)
     assert p.returncode == 1, p.stderr
     assert pylog.read_text().splitlines() == [str(vdir / ".venv" / "bin" / "python")]
+
+
+def test_env_is_made_from_system_python(tmp_path, home):
+    """環境はシステムの python で作る。uv 管理の python（~/.local/share/uv）はコンテナごとに在ったり無かったりし、
+    共有の ~/.claude に置いた環境がそれを指すと、別のコンテナや作り直したコンテナでリンクが切れる。"""
+    (home / ".bashrc").write_text("")
+    log = tmp_path / "uv.log"
+    p = bare(tmp_path, "install", FAKE_UV_LOG=log)
+    assert p.returncode == 0, p.stdout + p.stderr
+    syncs = log.read_text().splitlines()
+    assert len(syncs) == 2 and all("--no-managed-python" in s for s in syncs)
+
+
+def test_env_falls_back_to_managed_python(tmp_path, home):
+    """要件を満たすシステムの python が無ければ（macOS の 3.9 など）、uv に選ばせて作り直す。"""
+    (home / ".bashrc").write_text("")
+    log = tmp_path / "uv.log"
+    p = bare(tmp_path, "install", FAKE_UV_LOG=log, FAKE_UV_NO_SYSTEM=1)
+    assert p.returncode == 0, p.stdout + p.stderr
+    syncs = log.read_text().splitlines()
+    assert ["--no-managed-python" in s for s in syncs] == [True, False, True, False]
+
+
+def test_run_remakes_env_whose_python_is_gone(tmp_path, home):
+    """複製の環境の python が無い（別のコンテナで作った環境のリンク切れ）ときは、素通しせずに作り直して起動する。"""
+    (home / ".bashrc").write_text("")
+    assert bare(tmp_path, "install").returncode == 0
+    vdir = cfg(tmp_path) / current_of(cfg(tmp_path))
+    py = vdir / ".venv" / "bin" / "python"
+    py.unlink()
+    py.symlink_to(tmp_path / "gone" / "python3.11")
+    claude = tmp_path / "bin" / "claude"
+    claude.parent.mkdir()
+    claude.write_text('#!/bin/sh\necho "args:$*"\nexit 7\n')
+    claude.chmod(0o755)
+    log, pylog = tmp_path / "uv.log", tmp_path / "py.log"
+    p = bare(tmp_path, "run -c", relay=cfg(tmp_path) / "relay.py", NDF_RELAY_CLAUDE=claude, FAKE_UV_LOG=log, FAKE_PY_LOG=pylog)
+    assert (p.returncode, p.stdout) == (7, "args:-c\n"), p.stderr
+    assert "ラッパーを始めない" not in p.stderr, p.stderr
+    assert len(log.read_text().splitlines()) == 1
+    assert pylog.read_text().splitlines() == [str(py)]
+
+
+def test_run_passes_through_when_env_cannot_be_remade(tmp_path, home):
+    """作り直せなければ、これまでどおり理由を出して本物の claude を素通しで起動する。"""
+    (home / ".bashrc").write_text("")
+    assert bare(tmp_path, "install").returncode == 0
+    py = cfg(tmp_path) / current_of(cfg(tmp_path)) / ".venv" / "bin" / "python"
+    py.unlink()
+    claude = tmp_path / "bin" / "claude"
+    claude.parent.mkdir()
+    claude.write_text('#!/bin/sh\necho "args:$*"\nexit 7\n')
+    claude.chmod(0o755)
+    p = bare(tmp_path, "run -c", relay=cfg(tmp_path) / "relay.py", NDF_RELAY_CLAUDE=claude, FAKE_UV_EXIT=2)
+    assert (p.returncode, p.stdout) == (7, "args:-c\n")
+    assert "ラッパーを始めない（ラッパーの環境" in p.stderr, p.stderr
 
 
 def test_install_stops_when_env_cannot_be_made(tmp_path, home):
