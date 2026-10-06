@@ -133,6 +133,7 @@ def resolve_participants(
     include: list[str],
     exclude: list[str],
     require_all: bool,
+    models: Optional[dict[str, Optional[str]]] = None,
 ) -> dict[str, Any]:
     """参加者を決め、状態ファイルの `participants` を返す（#727 の決定 2〜5）。
 
@@ -143,8 +144,10 @@ def resolve_participants(
     この関数の後に書かれるため、失敗したときは作られも書き換えられもしない。
 
     ランタイムの宣言（#1598）があれば、母集合をその `allowed` で絞り、宣言の外の `include` を止める。
+    `models` は `--model` で明示したモデルで、参加の確認はそのモデルで引く（明示のモデルは既定のモデルへ切り替えない）。
     """
     policy = runtime_decl.load_policy()
+    explicit = {k: v for k, v in (models or {}).items() if v}
     try:
         pool = assignment.default_pool(host)
         resolved = assignment.resolve_participants(
@@ -152,7 +155,7 @@ def resolve_participants(
             host=host,
             include=include,
             exclude=exclude,
-            probe=lambda names: auth.probe_auth(names, info=info),
+            probe=lambda names: auth.probe_auth(names, info=info, models=explicit),
             require_all=require_all,
             policy=policy,
         )
@@ -575,7 +578,9 @@ def _verify_init(
     """参加者を確定し、戦略に沿った着手前のテストを実行する。"""
     # **確認は着手前のテストより先に行う。** 使える者がいなければ、テストに時間を
     # 使わずに止める。
-    participants = resolve_participants(inputs.host, inputs.include or [], inputs.exclude or [], bool(getattr(args, "require_all", None)))
+    participants = resolve_participants(
+        inputs.host, inputs.include or [], inputs.exclude or [], bool(getattr(args, "require_all", None)), inputs.model_spec
+    )
     _warn_unmeasurable_models(inputs.model_spec, participants["available"])
 
     # 着手前のテストの上限は予算と宣言の所要から導く（決定 8）。CI に任せる戦略は範囲テストの所要 s も入れる（#1555）。
@@ -691,6 +696,7 @@ def _rebuild_participants(
         include_eff,
         exclude_eff,
         bool(require_all) if require_all is not None else bool(recorded.get("require_all")),
+        state.get("models"),
     )
     state.setdefault("resume_changes", []).append(
         {

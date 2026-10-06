@@ -40,7 +40,8 @@ load_common_state() {
   HEAD_BRANCH=$(jq -r '.head_branch' "$STATE")
   BASE_BRANCH=$(jq -r '.base_branch' "$STATE")
   SCOPE=$(jq -r '.target_scope | join(" ")' "$STATE")
-  MODEL=$(jq -r --arg rt "$RUNTIME" '.models[$rt] // ""' "$STATE")
+  # 起動のモデル: 引数の明示 → 既定のモデルへの切り替え（参加の確認。#1290）→ 空（CLI の設定のまま）
+  MODEL=$(jq -r --arg rt "$RUNTIME" '(.models // {})[$rt] // (.participants.default_models // {})[$rt] // ""' "$STATE")
   BASELINE_TEST=$(jq -r '.baseline_test.command // ""' "$STATE")
   # ラウンドのテスト。省いた実行では空で、項目の検証は全体のテストから組み立てた語の並びを使う。
   ROUND_TEST=$(jq -r '.round_test.command // ""' "$STATE")

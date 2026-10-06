@@ -91,35 +91,46 @@ def policy_reason(runtime: str, workdir: pathlib.Path) -> str | None:
     return None
 
 
-def precheck(runtime: str, skip_auth: bool, workdir: pathlib.Path | None = None) -> tuple[str, str] | None:
-    """前提を確かめる。通らなければ `(結末, 理由)` を返す。宣言の確かめは `which` と認証確認より前に行う。"""
+def precheck(
+    runtime: str, skip_auth: bool, workdir: pathlib.Path | None = None, level: str = "auth"
+) -> tuple[tuple[str, str, dict] | None, dict]:
+    """前提を確かめ、`(通らなければ (結末, 理由, metrics), 参加の確認の結果)` を返す。
+
+    宣言の確かめは `which` と参加の確認より前に行う。参加の確認は `init` と同じ `auth.probe_auth` を通り、
+    `level="auth"` は認証確認だけ（`run`。起動の直前に二重に呼ばない。#1290 の決定 9）。
+    確認を通らなければ理由に依らず結末 `auth` とし、`metrics.reason` に理由の語を入れる。
+    """
     reason = policy_reason(runtime, workdir or pathlib.Path.cwd())
     if reason:
-        return "policy", reason
+        return ("policy", reason, {"reason": reason}), {}
     if shutil.which(EXECUTABLE[runtime]) is None:
-        return "missing_cli", f"{EXECUTABLE[runtime]} が PATH に無い"
+        return ("missing_cli", f"{EXECUTABLE[runtime]} が PATH に無い", {}), {}
     if skip_auth:
-        return None
-    results, skipped = auth.probe_auth([runtime], info=lambda m: print(m, file=sys.stderr))
-    if skipped:
-        return None
-    r = results.get(runtime)
+        return None, {}
+    results, skipped = auth.probe_auth([runtime], info=lambda m: print(m, file=sys.stderr), level=level)
+    r = {} if skipped else results.get(runtime) or {}
     if r and not r["ok"]:
-        return "auth", f"{r['command']} が通らない: {r['detail']}"
-    return None
+        return ("auth", f"{r.get('reason') or r['command']}: {r['detail']}", {"reason": r.get("reason")}), r
+    return None, r
 
 
-def finish_precheck(runtime: str, pre: tuple[str, str], summary: str):
-    """前提が通らなかった結末で終える。理由を metrics へ入れるのは宣言（policy）のときだけ。"""
-    metrics = {"reason": pre[1]} if pre[0] == "policy" else {}
-    finish(runtime, pre[0], summary, metrics, sr.EXIT_PRECONDITION)
+def finish_precheck(runtime: str, pre: tuple[str, str, dict], summary: str):
+    """前提が通らなかった結末で終える。"""
+    finish(runtime, pre[0], summary, pre[2], sr.EXIT_PRECONDITION)
 
 
 def cmd_check(a) -> None:
-    pre = precheck(a.runtime, False)
+    pre, r = precheck(a.runtime, False, level="model")
     if pre:
         finish_precheck(a.runtime, pre, f"{a.runtime} は使えない（{pre[1]}）")
-    finish(a.runtime, "ok", f"{a.runtime} は使える", {})
+    # 既定のモデルへの切り替えで通ったら、続く `run` に `--model` を渡すよう案内する（`run` は状態を持たない。決定 9）
+    default_model = r.get("default_model")
+    metrics = {"default_model": default_model, "from_model": r.get("from_model") if default_model else None}
+    if not default_model:
+        finish(a.runtime, "ok", f"{a.runtime} は使える", metrics)
+    origin = f"設定のモデル {metrics['from_model']}" if metrics["from_model"] else "設定のモデル"
+    next_ = f"external-ai.py run {a.runtime} --model {default_model} --prompt-file P --output-file O"
+    finish(a.runtime, "ok", f"{a.runtime} は使える（{origin} を引けないため既定のモデル {default_model} で）", metrics, next_=next_)
 
 
 def read_stdout(runtime: str, path: pathlib.Path) -> str:
@@ -209,7 +220,7 @@ def run_outcome(runtime: str, rec: dict, source: str | None, path: str | None) -
     outcome = MONITOR_OUTCOME.get(mstatus, "launch_failed")
     if reason == "usage_limit":
         outcome = "usage_limit"
-    elif outcome == "early_error" and AUTH_DETAIL.search(rec.get("detail", "")):
+    elif reason == "auth_expired" or (outcome == "early_error" and AUTH_DETAIL.search(rec.get("detail", ""))):
         outcome = "auth"
     return outcome, f"{runtime} を止めた（{mstatus} / 理由: {reason}）", hint
 
@@ -225,7 +236,7 @@ def cmd_run(a) -> None:
     if not workdir.is_dir():
         finish(runtime, "launch_failed", f"作業ディレクトリが無い: {workdir}", {}, sr.EXIT_PRECONDITION)
     skip_auth = a.no_auth_check or bool(os.environ.get(auth.SKIP_ENV))
-    pre = precheck(runtime, skip_auth, workdir)
+    pre, _ = precheck(runtime, skip_auth, workdir)
     if pre:
         finish_precheck(runtime, pre, f"{runtime} を起動しない（{pre[1]}）")
 

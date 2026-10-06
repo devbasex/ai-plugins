@@ -469,3 +469,131 @@ def test_the_entry_holds_only_names(assignment):
 def test_a_bad_seat_name_is_rejected(assignment):
     with pytest.raises(assignment.AssignmentError):
         _decide(assignment, "gpt", "usage_limit")
+
+
+# ---------- 新しい 2 つの理由は起動し直さない（#1290 の AC10・AC17・I9） ----------
+
+
+@pytest.mark.parametrize("reason", ["model_unavailable", "auth_expired"])
+def test_model_unavailable_and_auth_expired_reassign_without_relaunch(assignment, reason):
+    got = _decide(assignment, "codex", reason, busy=["kiro"])
+    assert (got.action, got.to, got.drop) == ("reassign", assignment.Assignee("claude"), True)
+
+
+@pytest.mark.parametrize("reason", ["model_unavailable", "auth_expired"])
+def test_model_unavailable_and_auth_expired_abort_without_a_candidate(assignment, reason):
+    assert _decide(assignment, "codex", reason, available=["codex", "kiro"], busy=["kiro"]).action == "abort"
+
+
+def test_claude_auth_expired_does_not_switch_accounts(assignment):
+    """前提 7: アカウントへの振り替えは `usage_limit` だけ。"""
+    got = _decide(assignment, "claude", "auth_expired", busy=["kiro"], pick_account=lambda t: "w2")
+    assert (got.action, got.to) == ("reassign", assignment.Assignee("codex"))
+
+
+@pytest.mark.parametrize("reason", ["missing", "stalled", "timeout", "early_error"])
+def test_other_first_no_results_still_relaunch_once(assignment, reason):
+    assert _decide(assignment, "codex", reason, busy=["kiro"]).action == "relaunch"
+
+
+# ---------- 担当に入れる判断 `admit`（#1290 の AC13・I2〜I5） ----------
+
+
+class _C:
+    """偽の 1 回の確認（`auth.Check` の形）。"""
+
+    def __init__(self, step, ok=True, reason=None, model=None, detail="", seconds=1.0):
+        self.step, self.ok, self.model, self.detail, self.seconds = step, ok, model, detail, seconds
+        self.reason = reason or ("ok" if ok else "probe_failed")
+        self.command = f"{step}-cmd"
+
+
+def _checker(**answers):
+    """種類 → 確認（`None` ならその種類を持たない）。呼ばれた `(種類, モデル)` を `calls` に残す。"""
+    calls: list[tuple[str, object]] = []
+
+    def check(step, runtime, model):
+        calls.append((step, model))
+        return answers.get(step)
+
+    check.calls = calls
+    return check
+
+
+def test_admit_stops_at_a_failing_auth_step(assignment):
+    check = _checker(auth=_C("auth", False, "unauthenticated", detail="Not logged in"), model=_C("model"))
+    got = assignment.admit("codex", explicit_model=None, check=check)
+    assert (got.ok, got.reason, got.detail) == (False, "unauthenticated", "Not logged in")
+    assert [s for s, _ in check.calls] == ["auth"]
+
+
+def test_admit_without_a_model_step_admits_at_the_auth_level(assignment):
+    got = assignment.admit("agy", explicit_model=None, check=_checker(auth=_C("auth")))
+    assert (got.ok, got.level, got.reason) == (True, "auth", "ok")
+
+
+def test_admit_with_a_passing_model_step_admits_at_the_model_level(assignment):
+    check = _checker(auth=_C("auth"), model=_C("model", model="gpt-x"))
+    got = assignment.admit("codex", explicit_model="gpt-x", check=check)
+    assert (got.ok, got.level, got.model, got.default_model, got.seconds) == (True, "model", "gpt-x", None, 2.0)
+    assert check.calls == [("auth", "gpt-x"), ("model", "gpt-x")]
+
+
+@pytest.mark.parametrize("reason", ["auth_expired", "timeout", "probe_failed"])
+def test_admit_rejects_other_model_step_failures_without_the_default_step(assignment, reason):
+    check = _checker(auth=_C("auth"), model=_C("model", False, reason), default=_C("default", model="d"))
+    got = assignment.admit("codex", explicit_model=None, check=check)
+    assert (got.ok, got.reason) == (False, reason)
+    assert "default" not in [s for s, _ in check.calls]
+
+
+def test_admit_does_not_switch_an_explicit_model(assignment):
+    check = _checker(auth=_C("auth"), model=_C("model", False, "model_unavailable"), default=_C("default", model="d"))
+    got = assignment.admit("codex", explicit_model="gpt-x", check=check)
+    assert (got.ok, got.reason, got.default_model) == (False, "model_unavailable", None)
+    assert "default" not in [s for s, _ in check.calls]
+
+
+def test_admit_rejects_when_the_cli_has_no_default_step(assignment):
+    check = _checker(auth=_C("auth"), model=_C("model", False, "model_unavailable"))
+    got = assignment.admit("kiro", explicit_model=None, check=check)
+    assert (got.ok, got.reason) == (False, "model_unavailable")
+
+
+def test_admit_switches_a_configured_model_to_the_default(assignment):
+    check = _checker(
+        auth=_C("auth"),
+        model=_C("model", False, "model_unavailable", model="gpt-old", detail="404"),
+        default=_C("default", model="gpt-new"),
+    )
+    got = assignment.admit("codex", explicit_model=None, check=check)
+    assert (got.ok, got.level, got.default_model, got.from_model) == (True, "model", "gpt-new", "gpt-old")
+    assert check.calls[-1] == ("default", None)
+
+
+@pytest.mark.parametrize("default", [_C("default", False, "model_unavailable", detail="again"), _C("default", model=None)])
+def test_admit_keeps_the_model_step_reason_when_the_default_fails(assignment, default):
+    check = _checker(auth=_C("auth"), model=_C("model", False, "model_unavailable", detail="404"), default=default)
+    got = assignment.admit("codex", explicit_model=None, check=check)
+    assert (got.ok, got.reason, got.detail, got.default_model) == (False, "model_unavailable", "404", None)
+
+
+def _probe_with(results):
+    return lambda names: ({n: results[n] for n in names if n in results}, False)
+
+
+def test_resolve_records_reasons_checks_and_default_models(assignment):
+    """I1・I3・I4: 理由は `<理由>: <詳細>`、切り替えた者は `available` と `default_models` にだけ入る。"""
+    ok = assignment.Admission("claude", True, "ok", "", "model", 4.9, "c", model="opus").to_probe()
+    switched = assignment.Admission("codex", True, "ok", "", "model", 9.1, "c", "new", "new", "old").to_probe()
+    expired = assignment.Admission("kiro", False, "auth_expired", "ERROR: Your access token", None, 5.0, "c").to_probe()
+    p = assignment.resolve_participants(
+        ["claude", "codex", "kiro"], host="claude", probe=_probe_with({"claude": ok, "codex": switched, "kiro": expired})
+    )
+    assert p.available == ["claude", "codex"]
+    assert p.unavailable == {"kiro": "auth_expired: ERROR: Your access token"}
+    assert set(p.available).isdisjoint(p.unavailable) and set(p.available) | set(p.unavailable) == {"claude", "codex", "kiro"}
+    assert p.default_models == {"codex": "new"}
+    assert p.checks["codex"] == {"result": "ok", "level": "model", "seconds": 9.1, "model": "new", "from_model": "old"}
+    assert p.checks["kiro"]["result"] == "auth_expired"
+    assert all(p.checks[n]["result"] == "ok" for n in p.available)

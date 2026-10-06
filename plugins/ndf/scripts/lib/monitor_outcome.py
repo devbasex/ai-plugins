@@ -38,8 +38,8 @@ if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 import clock  # noqa: E402  時刻の書き出し（#1142 の L0）
 
-# 理由の語彙。先頭の 6 語は監視の状態（`status`）から決まる。`usage_limit` / `cli_timeout` は
-# 監視が文言の照合で結末に添えたときだけ現れ、`unparsable` は読む側（`read_launch_outcome`）
+# 理由の語彙。先頭の 6 語は監視の状態（`status`）から決まる。`usage_limit` / `cli_timeout` /
+# `model_unavailable` / `auth_expired` は監視が文言の照合で結末に添えたときだけ現れ、`unparsable` は読む側（`read_launch_outcome`）
 # だけが書く（#729 の決定 7）。
 REASONS = (
     "ok",
@@ -50,12 +50,16 @@ REASONS = (
     "pidfile_bad",
     "usage_limit",
     "cli_timeout",
+    "model_unavailable",
+    "auth_expired",
     "unparsable",
 )
 
 # 監視がこの理由を書いていれば、監視が止めたか、結果を書けない終わり方をしたと分かっている。
 # 結果ファイルの状態を見ずにその値を採る（`ok` / `missing` は結果ファイルの側で決め直す）。
-_MONITOR_DECIDED_REASONS = frozenset({"timeout", "stalled", "early_error", "usage_limit", "cli_timeout", "pidfile_bad"})
+_MONITOR_DECIDED_REASONS = frozenset(
+    {"timeout", "stalled", "early_error", "usage_limit", "cli_timeout", "model_unavailable", "auth_expired", "pidfile_bad"}
+)
 
 _STATUS_REASON = {
     "OK": "ok",

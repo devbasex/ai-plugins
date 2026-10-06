@@ -135,9 +135,10 @@ agy と kiro は取れないため、モデルを比べたいなら `--model agy
 ## 前提
 
 - `gh` CLI が認証済みで、`jq` と `uv`（または Python 3.10 以上）が使える
-- 参加者の CLI がログイン済みである。`init` が認証状態を確認し、通らない者を外して続ける
-  （確認コマンドは claude: `claude auth status` / codex: `codex login status` / agy: `agy models` /
-  kiro: `kiro-cli whoami`。誤検知するときは `NDF_SKIP_AUTH_CHECK=1`）
+- 参加者の CLI がログイン済みで、モデルを引ける。`init` が認証確認（claude: `claude auth status` /
+  codex: `codex login status` / agy: `agy models` / kiro: `kiro-cli whoami`）と、担当の起動と同じ
+  モデルの指定での 1 回の呼び出しで確かめ、通らない者を理由を出して外して続ける。`--model` で明示して
+  いないモデルを引けないときは既定のモデルで担当に入れる（誤検知するときは `NDF_SKIP_AUTH_CHECK=1`）
 - 対象の Pull Request が Draft で開いている（未作成なら `/ndf:pr` で先に作る）
 - 対象のリポジトリ（またはその worktree）の中で会話を始めている。単独起動のコマンドは**すべてそこで打ち**、Skill の
   ディレクトリへ移らない。対象のリポジトリは打った場所が属する git の作業ツリーの根で決まり、git の作業ツリーでない
