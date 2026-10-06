@@ -350,7 +350,11 @@ def _change_value(value: Any) -> str:
 
 
 def _print_deferred(state: dict[str, Any]) -> None:
-    """見送りの件数（理由別）。**内訳は改修計画にある**（#436 決定 6-b）。"""
+    """件数の行と、見送った提案の総数と理由別の件数。**内訳は改修計画にある**（#436 決定 6-b）。
+
+    件数の行の「見送り」は見送った改善項目の数で、結果 JSON の `metrics.deferred` と同じ `ledger.tally` から出す。
+    計画に入らなかった提案を含む数（`deferred_items`）は「見送った提案」として別の行に出す（#1660）。
+    """
     deferred = state.get("deferred_items") or []
     counts = Counter(d.get("defer_reason") for d in deferred)
     t = ledger.tally(state)
@@ -358,8 +362,9 @@ def _print_deferred(state: dict[str, Any]) -> None:
     print()
     # 最終ゲートを経ていない実行は、残った改善項目を採用と表さない（I8）。数え方は `ledger.tally` が持つ
     adopted = f"{t.adopted} 件" if t.confirmed else f"未確定（最終ゲートを経ていない。残った改善項目 {t.unconfirmed} 件）"
-    print(f"- 採用: {adopted} / 取り消し: {t.reverted} 件 / 見送り: {len(deferred)} 件")
-    print("- 見送りの理由別: " + " / ".join(f"{r} {counts.get(r, 0)}" for r in DEFER_REASONS))
+    print(f"- 採用: {adopted} / 取り消し: {t.reverted} 件 / 見送り: {t.deferred} 件")
+    by_reason = " / ".join(f"{r} {counts.get(r, 0)}" for r in DEFER_REASONS)
+    print(f"- 見送った提案: {len(deferred)} 件（理由別: {by_reason}）")
     print(f"- 内訳: 改修計画にある — {plan_reference(state)}")
 
 
