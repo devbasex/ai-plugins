@@ -215,7 +215,7 @@ def test_green_watch_stretches_the_interval_while_nothing_changes(monkeypatch):
 
     monkeypatch.syspath_prepend(str(SCRIPTS / "lib"))
     monkeypatch.syspath_prepend(str(SCRIPTS))
-    from merged_lib import checks
+    from merged_lib import checks, reading
 
     pending = {"__typename": "CheckRun", "name": "t", "status": "IN_PROGRESS", "conclusion": None}
     done = {"__typename": "CheckRun", "name": "t", "status": "COMPLETED", "conclusion": "SUCCESS"}
@@ -228,7 +228,7 @@ def test_green_watch_stretches_the_interval_while_nothing_changes(monkeypatch):
 
     slept = []
     monkeypatch.setattr(checks, "pr_state", view)
-    monkeypatch.setattr(checks, "probe_checks", lambda _root, _rollup: ([], [], []))
+    monkeypatch.setattr(reading, "probe_checks", lambda _root, _pending: ([], [], []))
     monkeypatch.setattr(checks.time, "sleep", slept.append)
     a = argparse.Namespace(pr=5, timeout=3600.0, interval=10.0, recheck=1.0, no_checks_after=60.0, stale_after=300.0)
     watch = checks.GreenWatch(".", a)

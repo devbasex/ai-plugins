@@ -145,10 +145,12 @@ def test_newer_failure_is_not_hidden_by_older_success(checks, gh, clock, monkeyp
 
 
 def test_long_failure_finishing_later_is_newer_than_short_success(checks):
+    from merged_lib import reading
+
     """#632 の規則: 早く始まって後に終わった失敗は、後に始まって先に終わった成功より新しい。"""
     long_failure = cr("W", "t", "FAILURE", "1", "10", "2026-10-05T01:00:00Z", "2026-10-05T03:00:00Z")
     short_success = cr("W", "t", "SUCCESS", "2", "20", "2026-10-05T02:00:00Z", "2026-10-05T02:10:00Z")
-    latest, superseded = checks.fold_rollup([long_failure, short_success])
+    latest, superseded = reading.fold_rollup([long_failure, short_success])
     assert [i.state for i in latest] == ["failed"] and superseded == []
 
 
@@ -219,7 +221,10 @@ def test_infra_wait_stops_with_75_when_rerun_job_stays_pending_at_the_deadline(c
     """AC7・I8: 待ちの上限の時点で取り消しが無くても、再実行した実行のジョブが Runner を待って pending なら 75。"""
     infra_routes(gh)
     queued = cr("Lint", "lint", "", LINT_RUN, "111944000002", status="QUEUED")
-    gh.on(["run", "view", LINT_RUN, "--json", "status,attempt,jobs"], {"status": "queued", "jobs": [{"databaseId": 111944000002, "status": "queued"}]})
+    gh.on(
+        ["run", "view", LINT_RUN, "--json", "status,attempt,jobs"],
+        {"status": "queued", "jobs": [{"databaseId": 111944000002, "status": "queued"}]},
+    )
     gh.on(["run", "list"], [])
     watch = watch_of(checks, monkeypatch, [PR1765, [ok("Glossary", "1", "11"), CANCELLED_LINT, queued]], timeout=30.0)
     code, out = stopped(capsys, watch.wait)
@@ -252,7 +257,14 @@ def test_unreadable_job_is_a_failure_with_the_reason(checks, gh, clock, monkeypa
     assert code == 1
     failed = [i for i in out["items"] if i["result"] == "failed"]
     assert failed == [
-        {"kind": "check", "name": "Lint / lint", "result": "failed", "run": LINT_RUN, "job": LINT_JOB, "reason": "取り消しのジョブを照会できない"}
+        {
+            "kind": "check",
+            "name": "Lint / lint",
+            "result": "failed",
+            "run": LINT_RUN,
+            "job": LINT_JOB,
+            "reason": "取り消しのジョブを照会できない",
+        }
     ]
 
 

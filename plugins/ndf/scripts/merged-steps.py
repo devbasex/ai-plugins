@@ -72,7 +72,8 @@ import repo  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from merged_lib import merge, trash  # noqa: E402
 from merged_lib.pull import blocking_local_changes, same_untracked  # noqa: E402,F401
-from merged_lib.checks import queued_run_count, read_checks  # noqa: E402
+from merged_lib.checks import queued_run_count  # noqa: E402
+from merged_lib.reading import read_checks  # noqa: E402
 
 TOOL = "merged"
 
@@ -357,24 +358,19 @@ def _classify_checks(root, n, rollup):
     r = read_checks(root, rollup)
     first = [s for s in r.stale if s[3] <= 1]  # s[3] は試行回数
     again = [s for s in r.stale if s[3] > 1]
-    superseded = [_check_item(n, i.label, "superseded", **_run_job(i)) for i in r.superseded]
+    superseded = [i.item("superseded", pr=int(n)) for i in r.superseded]
     # 優先順に並べ、根拠が空でない最初の分類を返す
     ranked = (
-        ("failed", [_check_item(n, i.label, "failed", **_run_job(i)) for i in r.failed]),
+        ("failed", [i.item("failed", pr=int(n)) for i in r.failed]),
         ("stale", first),
         ("stale_again", [_probe_item(n, s, "stale_again", "attempt") for s in again]),
-        ("infra", [_check_item(n, i.label, "infra_wait", **_run_job(i)) for i in r.infra]),
+        ("infra", [i.item("infra_wait", pr=int(n)) for i in r.infra]),
         ("settled", [_probe_item(n, s, "settled", "conclusion") for s in r.settled]),
         ("queued", [_check_item(n, q, "queued") for q in r.queued]),
         ("running", [_check_item(n, i.label, "running") for i in r.pending]),
     )
     cls, found = next(((kind, items) for kind, items in ranked if items), ("passed", []))
     return cls, found, superseded
-
-
-def _run_job(item) -> dict:
-    """CheckItem の run・job・reason のうち、値のあるもの。"""
-    return {k: v for k, v in (("run", item.run), ("job", item.job), ("reason", item.reason)) if v}
 
 
 def _probe_item(n, probe, result, last):
