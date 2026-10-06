@@ -47,7 +47,7 @@
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
 | I1 | 指示書の集合 | 開発版の `bump` の前と後で、宣言した指示書（`.ndf/instructions.json` の `files` と取り込み先）の内容が 1 バイトも変わらない。したがって読み込み量の判定は `bump` の前後で同じになる | 全体テストが落ち、Pull Request が赤になる（配布の時点まで持ち越さない） |
-| I2 | 版数を持つ箇所の一覧 | 正本の一覧・`plan_bump` が書き換える箇所・`check-doc-staleness.py` が突き合わせる箇所が同じ集合である。`AGENTS.md` は 3 つのどれにも無い | `check-doc-staleness.py` か全体テストが落ちる |
+| I2 | 版数を持つ箇所の一覧 | 正本の一覧・`plan_bump` が書き換える箇所・検査が突き合わせる箇所が同じ集合である。検査が突き合わせる箇所は、`validate-runtime-plugins.sh` が束ねる 2 つの検査の和集合を指す（定義ファイルの `version`・`description` と `marketplace.json` は `scripts/lib/validate_manifests.py`、説明文書は `check-doc-staleness.py`）。`check-doc-staleness.py` へ定義ファイルの照合を足さない。`AGENTS.md` は 3 つのどれにも無い | `validate-runtime-plugins.sh`（どちらかの検査）か全体テストが落ちる |
 | I3 | 指示書の集合 | 版数と無関係に上限を超えた指示書は、これまでどおり `read-size-budget` で終了コード 1 になる | 全体テストが落ちる |
 
 ### ドメインイベント
