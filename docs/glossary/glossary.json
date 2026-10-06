@@ -442,7 +442,7 @@
     {
       "term": "バッファ",
       "context": "ndf-workflow",
-      "meaning": "`cross-refactoring` の見積りで、想定最大時間から経過を引いた後に残しておく時間",
+      "meaning": "`cross-refactoring` の見積りで、想定最大時間から経過を引いた後に残しておく時間。最終ゲートの全体テスト・修正 1 回・最終ゲート修正 1 回と、最終ゲートと兼ねられないときだけ危険フラグの全体テスト",
       "deprecated": [
         "予備時間"
       ],
@@ -2220,6 +2220,18 @@
       "pending_source": "issues/issue-1323-design.md"
     },
     {
+      "term": "古いバイトコード",
+      "context": "repo-dev-checks",
+      "meaning": "Python が、書き換えたソースを、前の内容から作った .pyc で読むこと。.pyc はソースの更新時刻（秒）と大きさだけで新しさを照らすため、同じ秒に同じ大きさで書き換えると見分けられない",
+      "pending_source": "issues/issue-1806-design.md"
+    },
+    {
+      "term": "git を使うテストの土台",
+      "context": "repo-dev-checks",
+      "meaning": "cross-refactoring のテストで、git のリポジトリの作業ディレクトリ・pytest の起動口・状態ファイルを用意する補助（crossref_helpers.build_git_flow）",
+      "pending_source": "issues/issue-1806-design.md"
+    },
+    {
       "term": "プロジェクトの宣言",
       "context": "ndf-workflow",
       "meaning": "リポジトリの根の `.ndf/` に置く、そのプロジェクトの形（言語・テスト・CI・ブランチ・配布・課題の正本など）を表すファイルの集まり。機能ごとの JSON と、解析が書く `project.json` からなる",
@@ -3437,6 +3449,58 @@
       "context": "ndf-cross-refactoring",
       "meaning": "cross-refactoring の提案の smell に観点の識別子が書かれたとき、写す先の兆候",
       "source": ""
+    },
+    {
+      "term": "使える時間",
+      "context": "ndf-cross-refactoring",
+      "meaning": "`cross-refactoring` のリファクタリング計画の時点で、採る改善項目の見積りを収める時間（想定最大時間 − 経過 − バッファ）。`state.plan.available_minutes`",
+      "pending_source": "issues/issue-1743-requirements.md"
+    },
+    {
+      "term": "止まっていた時間",
+      "context": "ndf-cross-refactoring",
+      "meaning": "`cross-refactoring` をリファクタリング計画の後に中断してから、init か drive.py を打ち直して再開するまでの時間。再開の時刻 − 最後の動きの時刻で測り、想定最大時間に数えない",
+      "pending_source": "issues/issue-1743-design.md"
+    },
+    {
+      "term": "最後の動きの時刻",
+      "context": "ndf-cross-refactoring",
+      "meaning": "`cross-refactoring` の作業ディレクトリ（`.cross_refactoring/`）の直下のファイルのうち、最も新しい更新時刻。状態ファイル・CLI のログ・テストのログ・結果ファイルと、心拍のファイルを含む。止まっていた時間の起点",
+      "pending_source": "issues/issue-1743-design.md"
+    },
+    {
+      "term": "心拍のファイル",
+      "context": "ndf-cross-refactoring",
+      "meaning": "`cross-refactoring` の作業ディレクトリ直下の `cross-refactoring-rf<ID>-alive`。出力の有無によらず、CLI の監視とテストの実行が待っている間、心拍の間隔（15 秒。見回りの間隔に依らない）ごとに更新時刻を今にする。中断で止まると更新も止まり、最後の動きの時刻が稼働の終わりを指す",
+      "pending_source": "issues/issue-1743-design.md"
+    },
+    {
+      "term": "実装の終わり",
+      "context": "ndf-cross-refactoring",
+      "meaning": "`cross-refactoring` で実装の CLI を止める唯一の時刻。最終ゲート修正の打ち切り − バッファ − 採っていて未検証の改善項目の検証の見積り。項目ごとの見積りでは止めない",
+      "code": "implement_end_at",
+      "pending_source": "issues/issue-1743-design.md"
+    },
+    {
+      "term": "採り直し",
+      "context": "ndf-cross-refactoring",
+      "meaning": "`cross-refactoring` で検証の後に時間が残ったとき、budget で見送った候補と実装の終わりまでにコミットが無かった改善項目から、残った時間に入るものを順位の順に採り、テストの追加・実装・検証をもう 1 巡回すこと。計画し直さない",
+      "pending_source": "issues/issue-1743-design.md"
+    },
+    {
+      "term": "見送った改善項目",
+      "context": "ndf-cross-refactoring",
+      "meaning": "リファクタリング計画が採った改善項目のうち、表示の状態が見送りのもの（時間内に実装を終えなかった not_done・足したテストが落ちた test_failed）。結果 JSON の metrics.deferred の数",
+      "source": "",
+      "pending_source": "issues/issue-1658-requirements.md"
+    },
+    {
+      "term": "見送った提案",
+      "context": "ndf-cross-refactoring",
+      "meaning": "計画に入らなかった提案と見送った改善項目を合わせたもの。理由を 1 つ持つ。状態ファイルの deferred_items",
+      "code": "deferred_items",
+      "source": "",
+      "pending_source": "issues/issue-1658-requirements.md"
     }
   ]
 }
