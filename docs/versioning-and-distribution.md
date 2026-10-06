@@ -229,9 +229,9 @@ claude plugin tag plugins/ndf --push      # ndf--v<版> を作って origin へ�
 `{プラグイン名}--v{版}` の形で作られ、打つ前に `plugin.json` の版とマーケットプレイスの項目が
 食い違っていないかをチェックする。
 
-## 版数を持つ 15 箇所
+## 版数を持つ箇所
 
-**版数を持つ箇所は 2 種類ある。** チェックが突き合わせる 15 箇所と、**チェックに載らず手で直す箇所**である。
+**版数を持つ箇所は 2 種類ある。** チェックが突き合わせる箇所と、**チェックに載らず手で直す箇所**である。
 
 揃っていないと `scripts/check-doc-staleness.py` と `scripts/validate-runtime-plugins.sh` が
 落ちる。**記載を消してもチェックは通らない。** 位置を決める語が見つからなければ、読み取れない
@@ -251,14 +251,17 @@ claude plugin tag plugins/ndf --push      # ndf--v<版> を作って origin へ�
 | `.claude-plugin/marketplace.json` の該当プラグインの `description` | 同上 |
 | `plugins/ndf/README.md` の更新案内の見出し | `## vX.Y.Z へ更新するとき` |
 
-**説明文書の本文が 7 箇所である。** いずれも利用者が読む入口にあり、古いまま残ると現行版を
+**説明文書の本文が 6 箇所である。** いずれも利用者が読む入口にあり、古いまま残ると現行版を
 誤って伝えるか、書かれたとおりに実行できない。
+
+**指示書（`AGENTS.md` / `CLAUDE.md`）には版数を書かない。** 開発版の配布の `bump` が版数を
+`-dev.<連番>` 付きへ書き換えると、Pull Request で上限に収まった指示書の読み込み量が配布の時点で
+伸び、指示書のチェックで止まるためである。
 
 | 箇所 | 何を書くか | 突き合わせ先 |
 | --- | --- | --- |
 | `README.md` の概要 | `**NDFプラグイン vX.Y.Z**` | `ndf` の `plugin.json` |
 | `README.md` のプラグイン一覧表 | 版数の列 | 行ごとに `plugins/<名前>/.claude-plugin/plugin.json` |
-| `AGENTS.md` の「NDFプラグインについて」 | 「主要プラグインです（vX.Y.Z）」 | `ndf` の `plugin.json` |
 | `docs/versioning-and-distribution.md` の「版の付け方と開発版の配布」章 | 版数の例 | `ndf` の `plugin.json`（基底の比較） |
 | `plugins/ndf/README.md` の Kiro の確認例 | 期待出力の版数 | `ndf` の `plugin.json` |
 | `plugins/ndf/README.md` の Codex のパス例 | `~/.codex/plugins/cache/.../ndf/X.Y.Z/`（2 箇所） | `ndf` の `plugin.json` |
@@ -289,7 +292,7 @@ claude plugin tag plugins/ndf --push      # ndf--v<版> を作って origin へ�
 表を章へ足すと、同じ行が複数あるとして落ちる。コードの囲みの中の表と文は、実行例か出力例として数えない。
 
 **版を決めるのは `plugins/ndf/.claude-plugin/plugin.json` の `version` だけである。** 他の
-14 箇所は読み手向けの記載とチェックのための突き合わせ先で、取得する版を変えない。
+箇所は読み手向けの記載とチェックのための突き合わせ先で、取得する版を変えない。
 `.claude-plugin/marketplace.json` に `version` フィールドは置かない。
 
 **版を持つのは `plugins/<名前>/.claude-plugin/plugin.json` だけである。**
@@ -298,8 +301,8 @@ claude plugin tag plugins/ndf --push      # ndf--v<版> を作って origin へ�
 両方に版を持たせると `plugin.json` が無警告で優先され、食い違いに気づけなくなる。
 
 `scripts/validate-runtime-plugins.sh` が突き合わせるのは、説明文書に書かれた Skill の数と、
-**版数を書いた 15 箇所**です。定義ファイルと更新案内の見出しが 8 箇所、説明文書の本文が
-7 箇所あります（`README.md` の概要とプラグイン一覧表、`AGENTS.md` と正本に 1 箇所ずつ、
+**版数を書いた箇所**です。定義ファイルと更新案内の見出しが 8 箇所、説明文書の本文が
+6 箇所あります（`README.md` の概要とプラグイン一覧表、正本に 1 箇所、
 `plugins/ndf/README.md` の Kiro と Codex の確認例 3 種類）。**記載を消してもチェックは通りません。**
 一覧は上の 2 つの表にあります。
 

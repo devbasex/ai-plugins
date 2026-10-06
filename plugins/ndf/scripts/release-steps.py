@@ -386,7 +386,6 @@ def plan_bump(root, pdir, plugin, old, new):
         ed.manual.append(f"README.md のプラグイン一覧表に {plugin} の行が無い")
     if plugin == "ndf":
         ed.sub(readme, r"\*\*NDFプラグイン v", "README.md の概要の版")
-        ed.sub(root / "AGENTS.md", r"主要プラグインです（v", "AGENTS.md の版")
         nr = pdir / "README.md"
         ed.sub(nr, r"（Kiro CLI用 / v", "plugins/ndf/README.md の Kiro の確認例")
         ed.sub(nr, r"/plugins/cache/ai-plugins/ndf/", "plugins/ndf/README.md の Codex のパス例", count=2)

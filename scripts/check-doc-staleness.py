@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """説明文書に書かれた Skill 数と版数を、実体・マニフェスト・plugin.json と突き合わせる。
 
-対象は利用者が読む 4 本の説明文書（`README.md` / `AGENTS.md` /
-`docs/versioning-and-distribution.md` / `plugins/ndf/README.md`）である。
+対象は利用者が読む 3 本の説明文書（`README.md` / `docs/versioning-and-distribution.md` /
+`plugins/ndf/README.md`）である。指示書（`AGENTS.md`）は版数を持たない。開発版の配布で版数を
+書き換えると、Pull Request で通った指示書の読み込み量が配布の時点で変わるためである。
 
 配布する Skill の数はランタイムごとに違い、その数が `README.md` と `plugins/ndf/README.md`
 に書かれている。数を機械的に突き合わせるチェックはプラグインの定義ファイルにしか届いていな
@@ -11,7 +12,7 @@
 
 版数も同じことが起きる。チェックしていたのは更新案内の見出し（`## v<版> へ更新するとき`）
 だけで、概要・期待出力・キャッシュパスの例に書かれた版数は古いまま残った。周囲の固定の語で
-位置を決めた 7 種類を突き合わせの対象へ入れる。
+位置を決めた 6 種類を突き合わせの対象へ入れる。
 
 **すべての版数を現行版へ揃えるわけではない。** 変更履歴・履歴の説明・意図的に前の版を指す
 記載は、前の版のまま残すのが正しい。位置を決めてから照合する形にしているため、それらは
@@ -39,7 +40,6 @@ from pathlib import Path
 # 始めたときに対象を広げる。
 FAMILY = "ndf"
 ROOT_README = "README.md"
-AGENTS_MD = "AGENTS.md"
 # 版数と配布の扱いの正本（#499）。版の付け方の章（J）はここにある。
 VERSIONING_MD = "docs/versioning-and-distribution.md"
 PLUGIN_README = f"plugins/{FAMILY}/README.md"
@@ -229,7 +229,7 @@ class RepositoryMetrics:
     source: str
 
 
-# 点で照合する版数記載（G・I・K・L・M）の一覧。点の照合を足すときはここへ 1 行足す。
+# 点で照合する版数記載（G・K・L・M）の一覧。点の照合を足すときはここへ 1 行足す。
 # 同じ文書の中では並びの順に報告する。
 POINT_VERSION_SPECS: list[PointVersionSpec] = [
     PointVersionSpec(
@@ -238,12 +238,6 @@ POINT_VERSION_SPECS: list[PointVersionSpec] = [
         "**NDFプラグイン v<版>**",
         re.compile(r"\*\*NDFプラグイン v" + VERSION + r"\*\*"),
     ),  # G
-    PointVersionSpec(
-        AGENTS_MD,
-        "「主要プラグインです（v<版>）」の版数",
-        "主要プラグインです（v<版>）",
-        re.compile(r"主要プラグインです（v" + VERSION + r"）"),
-    ),  # I
     PointVersionSpec(
         PLUGIN_README,
         "Kiro の確認例の版数",
@@ -814,12 +808,6 @@ def main() -> int:
         check_point_versions(ROOT_README, root_body, version, report)
         check_root_readme_versions(root, root_body, report)
 
-    agents_body = read_document(root, AGENTS_MD, report)
-    if agents_body is not None:
-        check_point_versions(AGENTS_MD, agents_body, version, report)
-
-    # チェック I（`AGENTS.md`）とチェック J（正本）は別の文書を読む。本文を共有すると、正本の記載が
-    # 古いことを `AGENTS.md` の失敗として報告してしまう。
     versioning_body = read_document(root, VERSIONING_MD, report)
     if versioning_body is not None and check_version_section(versioning_body, version, report):
         check_version_examples(versioning_body, report)
