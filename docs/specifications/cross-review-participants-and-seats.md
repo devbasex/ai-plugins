@@ -33,8 +33,8 @@ cross-refactoring の実装担当は、ライブラリの `choose_implementer` �
 | ホスト | `host` | 収束ループを起動している CLI |
 | 参加者プール | `default_pool(host)` | 参加者の出発点。cross-review と cross-refactoring で共通の claude / codex / kiro とホスト（agy は `--include agy` で戻す。ホストが agy なら 4 者） |
 | 参加者 | — | 参加者プールに足す者を加え、外す者を除いた一覧。認証確認の対象 |
-| 利用可能な参加者 | `participants.available` | 参加者のうち認証確認を通った者 |
-| 認証確認 | `probe_auth` | 確認コマンドを走らせ、止めずに結果だけを返すライブラリの関数 |
+| 利用可能な参加者 | `participants.available` | 参加者のうち参加の確認（認証確認とモデルの 1 回の呼び出し。[参加の確認](cross-participant-admission-check.md)）を通った者 |
+| 認証確認 | `probe_auth` | 参加の確認を走らせ、止めずに結果だけを返すライブラリの関数（最初の種類が認証確認） |
 | 利用可能な参加者の解決 | `resolve_participants` | 参加者プール・足す者・外す者・1 者指定・確認の結果から利用可能な参加者を決めるライブラリの関数 |
 | 参加者の記録 | `participants` | 利用可能な参加者の解決の結果を持つ状態ファイルの項目 |
 | スロット | — | 1 ラウンドで 1 つの CLI プロセスが占める枠 |
