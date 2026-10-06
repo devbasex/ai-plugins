@@ -25,7 +25,7 @@ from typing import Any, Optional
 import statefile
 
 from . import gitfacts  # 属性は呼ぶ時点で引く（gitfacts → publish → ledger の循環を避ける）
-from .items import DEFERRED, LIVE, REVERTED, VERIFIED, item_shas
+from .items import DEFERRED, IMPLEMENTED, LIVE, REVERTED, VERIFIED, item_shas
 from .paths import full_commit, git_out
 
 ITEM = "item"
@@ -56,7 +56,6 @@ class RebuildPlan:
     replay: list[str] = field(default_factory=list)  # 起点の後に積み直すコミット（古い順）
     revert: list[str] = field(default_factory=list)  # 公開済みの範囲で戻すコミット（新しい順）
     dropped: list[str] = field(default_factory=list)  # 取り消す改善項目
-    widened: list[str] = field(default_factory=list)  # 同じファイルを触ったため広げた改善項目
     stray: list[str] = field(default_factory=list)  # 消すコミットのうち、どの項目にも記録されていないもの
     span: list[str] = field(default_factory=list)  # 起点より後の元の履歴（古い順）。保存済みの地点の書き直しに使う
     error: str = ""  # 計画を作れなかった理由（`undo` が終了コード 4 で止まる）
@@ -77,6 +76,18 @@ def mark_dropped(item: dict[str, Any], reason: str) -> None:
     """改善項目を取り消した記録にする。**`reverted` へ落とす遷移はここだけが持つ。**"""
     item["status"] = REVERTED
     item.setdefault("failure_reason", reason)
+
+
+def mark_recheck(state: dict[str, Any]) -> list[str]:
+    """残った `verified` の項目を `implemented` へ戻し（確かめ直し。#1793 の I3）、その ID を返す。
+
+    取り消しで HEAD の木が変わったため、検証が新しい HEAD の範囲テストで判定し直す。"""
+    back = []
+    for item in state.get("items") or []:
+        if is_live(item) and item.get("status") == VERIFIED:
+            item["status"] = IMPLEMENTED
+            back.append(str(item["id"]))
+    return back
 
 
 def adoption_confirmed(state: dict[str, Any]) -> bool:
@@ -302,25 +313,22 @@ def _split(
     return remove, revert, stray
 
 
-def _widen(state: dict[str, Any], work: str, touched: list[str], dropped: set[str]) -> list[str]:
-    """消す・戻すコミットが触ったファイルを触った、取り消されていない改善項目（1 段だけ）。"""
-    files: set[str] = set()
-    for sha in touched:
-        files.update(gitfacts.commit_files(work, sha))
-    widened: list[str] = []
-    for item in state.get("items") or []:
-        if not is_live(item) or item["id"] in dropped:
-            continue
-        if any(files & set(gitfacts.commit_files(work, sha)) for sha in item_shas(item)):
-            widened.append(item["id"])
-    return widened
+def live_owner(state: dict[str, Any], work: str, sha: str) -> str:
+    """`sha` が取り消されていない改善項目に記録されたコミット（`kind` が `item`）ならその項目の ID、ほかは空（#1793 の R2）。
+
+    `orchestrator`・`final_fix`・`stray` のコミットは項目に属さないため空を返す。git を書き換えない。"""
+    full = full_commit(work, sha)
+    if keepers(state, work).get(full) != ITEM:
+        return ""
+    owner = _owners(state, work).get(full)
+    return str(owner["id"]) if is_live(owner) else ""
 
 
-def plan_rebuild(state: dict[str, Any], work: str, targets: list[str], widen: bool = False) -> RebuildPlan:
+def plan_rebuild(state: dict[str, Any], work: str, targets: list[str]) -> RebuildPlan:
     """改善項目 `targets` を取り消す git の並びを決める（設計の「`plan_rebuild` の決め方」）。
 
-    未公開のコミットは積み直しで除き、公開済みのコミットだけを revert する。`widen` なら、消す・戻す
-    コミットが触ったファイルを触った改善項目まで 1 段だけ広げる。
+    未公開のコミットは積み直しで除き、公開済みのコミットだけを revert する。積み直しが衝突したときに外す項目は
+    `undo` が `live_owner` で引き、`targets` へ足して作り直す（#1793 の R2）。
     """
     before = git_out(work, ["rev-parse", "HEAD"]) or ""
     point = published_point(state)
@@ -337,10 +345,6 @@ def plan_rebuild(state: dict[str, Any], work: str, targets: list[str], widen: bo
     published = (_oldest_first(work, [f"{full_commit(work, base)}..{point}"]) or []) if base else []
     dropped = set(targets)
     remove, revert, stray = _split(state, work, unpublished, published, dropped)
-    if widen:
-        plan.widened = _widen(state, work, remove + revert, dropped)
-        dropped |= set(plan.widened)
-        remove, revert, stray = _split(state, work, unpublished, published, dropped)
     plan.dropped = sorted(dropped)
     plan.remove, plan.revert, plan.stray = remove, revert, stray
     if remove:
