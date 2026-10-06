@@ -1,21 +1,22 @@
 """テストの追加と実装の取り込み（`merge-tests` / `merge-implement`、#933 の F4 F5）。
 
 **検証の材料は git から取る。** 結果ファイルの申告は使わない。項目とコミットの対応は
-トレーラー `Item-Id` だけで決め（実装計画 I4）、所要と締め切りはコミットの時刻で
-判定する（決定 8・決定 12）。
+トレーラー `Item-Id` だけで決め（実装計画 I4）、所要はコミットの時刻で測る（決定 8）。
+**コミットの時刻で項目を見送らない**（項目ごとの期限は持たない。#1743 決定 9）。
 
 | 見つけたもの | 扱い |
 | --- | --- |
 | どの項目にも属さないコミット（`Item-Id` が無い・改修計画に無い） | そのコミットだけを取り消す |
 | 手順を外れたコミット（範囲の外・トレーラー欠け・2 コミット以上・差分予算・文言固定テスト・期待値の変更） | 項目を取り消す（`status: reverted`。見送りには入れない。I5） |
-| コミットの無い項目・完了の締め切りを過ぎてコミットした項目 | `not_done` で見送り、項目のコミットを取り消す（AC12） |
+| コミットの無い項目 | 持ち越し（`carried`）にして項目のコミットを取り消す。次の `readopt` が採り直すか `not_done` で見送る（I15） |
 | 足したテストが今のコードで落ちた項目 | `test_failed` で見送り、テストのコミットを取り消す（決定 13） |
+
+取り込みの対象は今の巡（`readopt.round`）の未了の項目だけで、取り消し済みの判定も巡ごとに働く（#1743 決定 10）。
 """
 
 from __future__ import annotations
 
 import argparse
-import datetime as _dt
 import pathlib
 import sys
 from dataclasses import dataclass, field
@@ -37,12 +38,15 @@ from ..gitfacts import (
     tracked_markdown,
 )
 from ..items import (
+    CARRIED,
     DEFERRED,
     IMPLEMENTED,
     PLANNED,
     TESTED,
+    current_round,
     defer,
     find_item,
+    in_current_round,
     item_label,
     live_items,
 )
@@ -58,7 +62,7 @@ from ..verify import (
     pending_test_judgements,
     verify_test_changes,
 )
-from ..vocabulary import DEFER_NOT_DONE, DEFER_TEST_FAILED
+from ..vocabulary import DEFER_TEST_FAILED
 
 
 @dataclass
@@ -67,7 +71,7 @@ class Intake:
 
     extra: list[str] = field(default_factory=list)  # どの項目にも属さないコミット
     rejected: dict[str, str] = field(default_factory=dict)  # 項目 → 手順を外れた理由
-    not_done: dict[str, str] = field(default_factory=dict)  # 項目 → 締め切りの理由
+    carried: dict[str, str] = field(default_factory=dict)  # 項目 → 持ち越しの理由（コミットが無い）
     test_failed: dict[str, str] = field(default_factory=dict)  # 項目 → テストの結果
     accepted: dict[str, dict[str, Any]] = field(default_factory=dict)  # 項目 → コミットの事実
 
@@ -113,19 +117,6 @@ def _group_by_item(
     return by_item
 
 
-def _deadline_passed(item: dict[str, Any], key: str, estimate_key: str, when: Optional[str]) -> bool:
-    """完了の締め切り（着手の締め切り + その項目の見積り）を過ぎてコミットしたか（AC12）。
-
-    **着手の時刻は git から求められないため、完了の時刻で保守的に判定する**（設計）。
-    """
-    start = clock.parse(item.get(key))
-    done = clock.parse(when)
-    if start is None or done is None:
-        return False
-    limit = start + _dt.timedelta(minutes=float((item.get("estimate") or {}).get(estimate_key) or 0))
-    return done > limit
-
-
 def _record_seconds(
     state: dict[str, Any],
     phase: str,
@@ -150,22 +141,25 @@ def _settle(
     """取り消しと見送りを 1 度にまとめて行う。"""
     for item_id, reason in intake.rejected.items():
         find_item(state, item_id)["failure_reason"] = reason
-    for item_id, reason in {**intake.not_done, **intake.test_failed}.items():
+    for item_id, reason in {**intake.carried, **intake.test_failed}.items():
         find_item(state, item_id)["failure_reason"] = reason
-    targets = sorted({*intake.rejected, *intake.not_done, *intake.test_failed})
-    # **同じ取り込みの取り消しを 2 度行わない。** 途中で落ちた取り消しは入口の
+    targets = sorted({*intake.rejected, *intake.carried, *intake.test_failed})
+    # **同じ巡の同じ取り込みの取り消しを 2 度行わない。** 途中で落ちた取り消しは入口の
     # `resume_pending_drop` がやり直している。済んだ取り消しをもう一度行うと、範囲の
-    # 逆再生と積み直しで履歴だけが伸びる。
-    done = any(d.get("reason") == label for d in state.get("drops") or [])
+    # 逆再生と積み直しで履歴だけが伸びる。巡が違えば別の取り込みである（#1743）。
+    this_round = current_round(state)
+    done = any(d.get("reason") == label and int(d.get("round") or 1) == this_round for d in state.get("drops") or [])
     if (targets or intake.extra) and not done:
         drop(path, state, targets, label)
     # 見送った項目は `drop` が付けた `reverted` を `deferred` へ改める。取り消しと見送りの
     # 両方に数えると、報告の件数の和が項目の数を超える（設計の状態遷移）。
-    for reason_code, found in ((DEFER_NOT_DONE, intake.not_done), (DEFER_TEST_FAILED, intake.test_failed)):
-        for item_id, reason in found.items():
-            item = find_item(state, item_id)
-            defer(state, item, reason_code, reason)
-            item["status"] = DEFERRED
+    for item_id, reason in intake.test_failed.items():
+        item = find_item(state, item_id)
+        defer(state, item, DEFER_TEST_FAILED, reason)
+        item["status"] = DEFERRED
+    # コミットの無い項目は見送らずに持ち越す（`readopt` が採り直すか `not_done` にする。I15）
+    for item_id in intake.carried:
+        find_item(state, item_id)["status"] = CARRIED
     for item_id, reason in intake.rejected.items():
         info(f"❌ {item_id} {item_label(find_item(state, item_id))}: {reason}")
     if intake.extra:
@@ -183,7 +177,7 @@ def _remember(path: pathlib.Path, state: dict[str, Any], phase: str, intake: Int
     record["intake"] = {
         "extra": list(intake.extra),
         "rejected": dict(intake.rejected),
-        "not_done": dict(intake.not_done),
+        "carried": dict(intake.carried),
         "test_failed": dict(intake.test_failed),
     }
     statefile.save(path, state)
@@ -196,7 +190,7 @@ def _recalled(state: dict[str, Any], phase: str) -> Optional[Intake]:
     return Intake(
         extra=list(saved.get("extra") or []),
         rejected=dict(saved.get("rejected") or {}),
-        not_done=dict(saved.get("not_done") or {}),
+        carried=dict(saved.get("carried") or {}),
         test_failed=dict(saved.get("test_failed") or {}),
     )
 
@@ -211,12 +205,13 @@ def _prepare(path: pathlib.Path, state: dict[str, Any]) -> None:
 
 
 def _finish(path: pathlib.Path, state: dict[str, Any], phase: str) -> None:
+    """残る項目が 0 件なら検証を飛ばして採り直しの判定へ移す（終了コード 2）。最終ゲートへ移すのは `readopt` だけ。"""
     finish_phase(state, phase)
     if not live_items(state):
-        state["phase"] = "final"
+        state["phase"] = "readopt"
     statefile.save(path, state)
     if not live_items(state):
-        info("残る項目が 0 件のため、最終ゲートへ進みます")
+        info("残る項目が 0 件のため、検証を飛ばして採り直しの判定へ進みます")
         sys.exit(2)
 
 
@@ -271,12 +266,10 @@ def _intake_phase(
     state: dict[str, Any],
     live_predicate: Any,
     problem_fn: Any,
-    start_key: str,
-    estimate_key: str,
+    phase: str,
     intake: Intake,
 ) -> Intake:
-    phase = "add-tests" if estimate_key == "test" else "implement"
-    label = "テストの追加" if estimate_key == "test" else "実装"
+    label = "テストの追加" if phase == "add-tests" else "実装"
     facts = _facts(state, _phase_commits(state, phase))
     for fact in facts:
         fact["time"] = commit_time(work_dir(state), fact["sha"])
@@ -286,13 +279,11 @@ def _intake_phase(
             continue
         commits = by_item.get(item["id"]) or []
         if not commits:
-            intake.not_done[item["id"]] = f"{label}の締め切りまでにコミットが無い"
+            intake.carried[item["id"]] = f"{label}の終わりまでにコミットが無い"
             continue
         problem = problem_fn(item, commits)
         if problem:
             intake.rejected[item["id"]] = problem
-        elif _deadline_passed(item, start_key, estimate_key, commits[0]["time"]):
-            intake.not_done[item["id"]] = f"{label}の完了の締め切りを過ぎてコミットした"
         else:
             intake.accepted[item["id"]] = commits[0]
             continue
@@ -307,10 +298,10 @@ def _intake_tests(state: dict[str, Any]) -> Intake:
     tracked = tracked_markdown(work_dir(state))
     return _intake_phase(
         state,
-        lambda item: bool(item.get("tests")),
+        # 今の巡で採った、テストを足す未了の項目だけ。前の巡で検証を終えた項目のコミットに触れない（#1743）
+        lambda item: bool(item.get("tests")) and item.get("status") == PLANNED and in_current_round(state, item),
         lambda _item, commits: _test_commit_problem(commits, scope, tracked, state),
-        "test_start_deadline",
-        "test",
+        "add-tests",
         intake,
     )
 
@@ -342,7 +333,7 @@ def _test_commit_problem(
 def cmd_merge_tests(args: argparse.Namespace) -> None:
     """テストの追加を取り込む。
 
-    終了コード: 0 = 取り込んだ / 2 = 残る項目 0 件（最終ゲートへ）/ 4 = 範囲を確定できない。
+    終了コード: 0 = 取り込んだ / 2 = 残る項目 0 件（採り直しの判定へ）/ 4 = 範囲を確定できない。
     """
     path, state = load_state(args.id)
     _prepare(path, state)
@@ -371,7 +362,7 @@ def cmd_merge_tests(args: argparse.Namespace) -> None:
     kept = [i for i in live_items(state) if i.get("status") == TESTED]
     info(
         f"テストの追加: 採用 {len(kept)} 件 / test_failed {len(intake.test_failed)} 件 / "
-        f"not_done {len(intake.not_done)} 件 / 手順違反 {len(intake.rejected)} 件"
+        f"持ち越し {len(intake.carried)} 件 / 手順違反 {len(intake.rejected)} 件"
     )
     _finish(path, state, "add-tests")
 
@@ -422,7 +413,6 @@ def _intake_implement(state: dict[str, Any]) -> Intake:
         state,
         lambda item: item.get("status") in (PLANNED, TESTED),
         lambda item, commits: _implement_problem(item, commits, scope, tracked, state),
-        "start_deadline",
         "implement",
         intake,
     )
@@ -431,7 +421,7 @@ def _intake_implement(state: dict[str, Any]) -> Intake:
 def cmd_merge_implement(args: argparse.Namespace) -> None:
     """実装を取り込む。
 
-    終了コード: 0 = 取り込んだ / 2 = 残る項目 0 件（最終ゲートへ）/ 4 = 範囲を確定できない。
+    終了コード: 0 = 取り込んだ / 2 = 残る項目 0 件（採り直しの判定へ）/ 4 = 範囲を確定できない。
 
     **テストの差分のうち一次の判定で決まらないものは、最終ゲートのレビューへ引き継ぐ**
     （`review_test_judgements`。決定 25）。改修計画の後に判断のために LLM を起動しない。
@@ -462,7 +452,7 @@ def cmd_merge_implement(args: argparse.Namespace) -> None:
         info("↻ 実装の結論は記録済みです。取り消しと見送りだけをやり直します")
     _settle(path, state, intake, "実装の取り込み")
     carried = [i["id"] for i in live_items(state) if i.get("review_test_judgements")]
-    info(f"実装: 採用 {len(intake.accepted)} 件 / not_done {len(intake.not_done)} 件 / 手順違反 {len(intake.rejected)} 件")
+    info(f"実装: 採用 {len(intake.accepted)} 件 / 持ち越し {len(intake.carried)} 件 / 手順違反 {len(intake.rejected)} 件")
     if carried:
         info(
             f"{len(carried)} 件のテストの差分は機械で決まらないため、最終ゲートのレビューへ"

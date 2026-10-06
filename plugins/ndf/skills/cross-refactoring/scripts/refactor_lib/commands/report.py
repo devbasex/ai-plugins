@@ -12,14 +12,14 @@ import models as models_lib
 import run_metrics
 import statefile
 
-from .. import allocation, clock, culprit, info, launch, ledger, stop_revert, timeline
+from .. import allocation, clock, culprit, info, launch, ledger, pause, rounds, stop_revert, time_report, timeline
 from ..codemetrics_view import record_lines
 from ..items import item_label
 from ..measure import summary_extra
 from ..outbound import plan_reference
 from ..plan import baseline_line, counts_line, existing_failures_line, status_label, strategy_lines
 from ..paths import load_state
-from ..phases import phase_record
+from ..phases import phase_record, phase_seconds
 from ..vocabulary import DEFER_REASONS
 
 # `cross-review` の最終ステータスのうち、追記してよいもの。
@@ -143,16 +143,18 @@ def _implementer_model_text(state: dict[str, Any]) -> str:
     return f"{requested}（指定。実測できず）"
 
 
-def _whole_test_lines(whole: dict[str, Any]) -> list[str]:
-    """検証の中の全体のテストと、その原因の項目の行。"""
+def _whole_test_lines(state: dict[str, Any]) -> list[str]:
+    """検証の中の全体のテストと、その原因の項目の行。採り直しの巡があれば、最後に走らせた巡の記録を出す。"""
     lines: list[str] = []
+    ran = [r for r in rounds.whole_records(state) if r.get("ran")]
+    whole = ran[-1] if ran else (state.get("whole_test") or {})
+    deferred = rounds.deferred_union(state)
     if whole.get("ran"):
         lines.append(
             f"- 検証の中の全体のテスト: 走らせた（危険フラグ {', '.join(whole.get('flags') or [])} / "
             f"{whole.get('status')}{_whole_detail(whole)}）"
         )
-    elif whole.get("deferred"):
-        deferred = whole["deferred"]
+    elif deferred:
         lines.append(
             f"- 検証の中の全体のテスト: 最終ゲートへ寄せた（危険フラグ {', '.join(deferred.get('flags') or [])} / 項目 {', '.join(deferred.get('items') or [])}）"
         )
@@ -197,9 +199,11 @@ def _reassigned_lines(state: dict[str, Any]) -> list[str]:
 
 def _print_header(state: dict[str, Any]) -> None:
     budget_seconds = int(state.get("budget_minutes") or 0) * 60
-    elapsed = _elapsed_seconds(state)
+    # 止まっていた時間の分だけ締め切りをずらしたなら、所要からその秒を除いて想定最大時間と比べる（#1491・決定 8）
+    shifted = pause.shifted_seconds(state)
+    elapsed = max(_elapsed_seconds(state) - shifted, 0.0)
+    paused = f"止まっていた {shifted / 60:.1f} 分を除く。" if shifted else ""
     judge = state.get("judge") or {}
-    whole = state.get("whole_test") or {}
     gate = state.get("final_gate") or {}
     print(f"# cross-refactoring 実行報告 — {state['repo']} #{state['current_pr']}")
     print()
@@ -207,7 +211,7 @@ def _print_header(state: dict[str, Any]) -> None:
     print(f"- 対象範囲: {', '.join(state['target_scope']) or '（未指定）'}")
     print(
         f"- 想定最大時間: {state.get('budget_minutes')} 分 / 所要: {elapsed / 60:.1f} 分"
-        f"（差 {(budget_seconds - elapsed) / 60:+.1f} 分。cross-review を除く）"
+        f"（差 {(budget_seconds - elapsed) / 60:+.1f} 分。{paused}cross-review を除く）"
     )
     print(f"- 実装担当: {state.get('implementer')}（{state.get('implementer_reason')}） / モデル: {_implementer_model_text(state)}")
     jev_line = "使った" if judge.get("kind") == "jev" else f"使わなかった（{judge.get('reason')}）"
@@ -216,7 +220,7 @@ def _print_header(state: dict[str, Any]) -> None:
         print(line)
     baseline = state.get("baseline_test") or {}
     print(f"- 着手前のテスト（{baseline.get('mode') or 'whole'}）: {baseline_line(baseline)} / 既存失敗 {existing_failures_line(baseline)}")
-    for line in _whole_test_lines(whole) + _final_gate_lines(gate):
+    for line in _whole_test_lines(state) + _final_gate_lines(gate) + time_report.lines(state):
         print(line)
     if state.get("launch_failure"):
         print(f"- {launch.line(state['launch_failure'])}")
@@ -277,9 +281,7 @@ def _phase_table(state: dict[str, Any]) -> str:
     def minutes(seconds: Any) -> str:
         return "—" if seconds is None else f"{seconds / 60:.1f}"
 
-    rows = [
-        (name, minutes(phase_record(state, name).get("seconds"))) for name in ("propose", "plan", "add-tests", "implement", "verify", "fix")
-    ]
+    rows = [(name, minutes(phase_seconds(state).get(name))) for name in ("propose", "plan", "add-tests", "implement", "verify", "fix")]
     rows.append(("最終ゲートの全体のテスト", minutes((state.get("final_gate") or {}).get("whole_test_seconds"))))
     return mdtable.table_markdown(["手順", "所要（分）"], rows, align=["left", "right"])
 

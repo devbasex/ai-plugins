@@ -177,6 +177,8 @@ def _record(
         "at": statefile.now(),
         "mode": mode,
         "reason": reason,
+        # 採り直しの巡（#1743）。取り込みの取り消し済みの判定は取り込み名と巡の組で見る
+        "round": int((state.get("readopt") or {}).get("round") or 1),
         "dropped": plan.dropped,
         "ejected": ejected,
         "recheck": _recheck(state, plan),

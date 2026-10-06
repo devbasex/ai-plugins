@@ -707,24 +707,6 @@
       "source": "docs/specifications/cross-refactoring-time-budget.md"
     },
     {
-      "term": "着手期限",
-      "context": "ndf-cross-refactoring",
-      "meaning": "実装・テスト追加でその改善項目に着手してよい最後の時刻（start_deadline）",
-      "source": "docs/specifications/cross-refactoring-time-budget.md",
-      "deprecated": [
-        "着手の締め切り"
-      ]
-    },
-    {
-      "term": "完了期限",
-      "context": "ndf-cross-refactoring",
-      "meaning": "着手期限にその改善項目の見積りを足した時刻。マージ処理はコミットの時刻をこれと比べる",
-      "source": "docs/specifications/cross-refactoring-time-budget.md",
-      "deprecated": [
-        "完了の締め切り"
-      ]
-    },
-    {
       "term": "範囲テスト",
       "context": "ndf-workflow",
       "meaning": "変更が触った範囲に限って走らせるテスト",
@@ -3490,7 +3472,7 @@
     {
       "term": "見送った改善項目",
       "context": "ndf-cross-refactoring",
-      "meaning": "リファクタリング計画が採った改善項目のうち、表示の状態が見送りのもの（時間内に実装を終えなかった not_done・足したテストが落ちた test_failed）。結果 JSON の metrics.deferred の数",
+      "meaning": "リファクタリング計画が採った改善項目のうち、表示の状態が見送りのもの（実装の終わりまでにコミットが無く採り直しにも入らなかった not_done・足したテストが落ちた test_failed）。結果 JSON の metrics.deferred の数",
       "source": "",
       "pending_source": "issues/issue-1658-requirements.md"
     },

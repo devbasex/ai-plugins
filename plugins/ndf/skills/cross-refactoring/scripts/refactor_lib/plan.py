@@ -20,7 +20,7 @@ import mdtable
 
 import statefile
 
-from . import die, info, ledger, timeline
+from . import die, info, ledger, rounds, timeline
 from .codemetrics_view import record_lines
 from .paths import sh
 from .items import item_label
@@ -209,7 +209,7 @@ def strategy_lines(state: dict[str, Any]) -> list[str]:
         for s in strategy.get("suites") or []
         if s.get("scope_command")
     ]
-    deferred = (state.get("whole_test") or {}).get("deferred") or {}
+    deferred = rounds.deferred_union(state)
     lines = [
         f"- テストの戦略: {strategy.get('name') or '—'}（根拠 {strategy.get('source') or '—'}）",
         f"- 範囲テストの雛形: {' / '.join(templates) or (strategy.get('round_command') or '—')}",
@@ -270,8 +270,8 @@ def format_plan(state: dict[str, Any], head: Optional[list[str]] = None) -> str:
 _LIMIT_ROWS = (
     ("propose_end_at", "提案の枠の終わり（監視の上限 = 残り + 余裕）"),
     ("plan_end_at", "改修計画の枠の終わり（同上）"),
-    ("add_tests_end_at", "テストの追加の終わり = 最後の項目の完了の締め切り"),
-    ("implement_end_at", "実装の終わり = 最後の項目の完了の締め切り"),
+    ("add_tests_end_at", "テストの追加の終わり = 実装の終わり − Σ（採っていて未検証の項目の実装の見積り）"),
+    ("implement_end_at", "実装の終わり = 最終ゲートの修正の打ち切り − バッファ − Σ（採っていて未検証の項目の検証の見積り）"),
     ("fix_end_at", "直しの試行の打ち切り"),
     ("final_end_at", "最終ゲートの修正の打ち切り（想定最大時間の終わり）"),
     (
@@ -307,7 +307,7 @@ def limits_section(limits: dict[str, Any]) -> list[str]:
                 f" / 範囲テストの所要 s {basis.get('scope_seconds')}（{basis.get('scope_source') or '—'}） / 戦略 {basis.get('strategy')}",
             ]
         )
-    lines.extend(["", "無音の打ち切りは手順の監視の上限と同じ値である。項目ごとの締め切りは各項目の節にある。", ""])
+    lines.extend(["", "無音の打ち切りは手順の監視の上限と同じ値である。項目ごとの期限は持たない（実装を止めるのは実装の終わりだけ）。", ""])
     return lines
 
 
@@ -370,13 +370,6 @@ def _plan_item_section(state: dict[str, Any], item: dict[str, Any]) -> list[str]
         f"**手順**: {item.get('plan') or '（記録なし）'}",
         "",
     ]
-    deadlines = [
-        f"{label} {item[key]}"
-        for key, label in (("test_start_deadline", "テストの追加の着手"), ("start_deadline", "実装の着手"))
-        if item.get(key)
-    ]
-    if deadlines:
-        lines.extend([f"**締め切り**: {' / '.join(deadlines)}", ""])
     if item.get("review_test_judgements"):
         paths = ", ".join(f"`{p}`" for p in item["review_test_judgements"])
         lines.extend([f"**レビューで確かめるテストの差分**: {paths}（機械で期待値が変わったか決まらなかった）", ""])

@@ -242,7 +242,8 @@ def test_local_full_limits_grow_with_the_declared_duration():
     assert got["whole_timeout"] == 1272
     assert got["test_timeout"] == 1272  # x が無ければ着手前の上限
     assert got["ci_wait_timeout"] == 888
-    assert ts.reserve_seconds(s, 424.0, 296.0, False) == (424.0, 424.0)
+    # 手元で最終ゲートを見るなら危険フラグの全体テストは最終ゲートと兼ねる（#1743 決定 1）
+    assert ts.reserve_seconds(s, 424.0, 296.0, False) == (0.0, 424.0)
     assert ts.reserve_seconds(s, 424.0, 296.0, True) == (424.0, 296.0)
 
 

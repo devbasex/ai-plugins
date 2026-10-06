@@ -51,6 +51,8 @@ def test_final_gate_pause_exits_with_the_shared_code(tmp_path, monkeypatch, caps
             sub = cmd[2]
             if sub == "init":
                 return 0, f"ID=7\nTMP_DIR={tmp_path}\nPHASE=final\nWORK={tmp_path}\n"
+            if sub == "readopt":
+                return 2, ""  # 計画の無い状態の採り直し（最終ゲートへ）
             if sub == "final-gate":
                 return 0, "FINAL_GATE=cross-review\n"
         return 0, ""

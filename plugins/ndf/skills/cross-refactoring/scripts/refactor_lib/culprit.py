@@ -150,9 +150,12 @@ def determine(
 
 
 def fix_deadline(state: dict[str, Any]) -> _dt.datetime:
-    """検証の修正の締め切り（`budget.fix_end`）。原因を決める走らせ直しはこの内に数える（#1649 前提 6）。"""
-    reserve = (state.get("plan") or {}).get("reserve") or {}
-    return budget.fix_end(clock.parse(state["started_at"]), int(state["budget_minutes"]), reserve)
+    """検証の修正の締め切り（上限の表の `fix_end_at`。再開でずれた値。#1743 決定 5）。原因を決める走らせ直しはこの内に数える（#1649 前提 6）。"""
+    end = timeline.fix_end_at(state)
+    if end is None:
+        reserve = (state.get("plan") or {}).get("reserve") or {}
+        return budget.fix_end(clock.parse(state["started_at"]), int(state["budget_minutes"]), reserve)
+    return end
 
 
 def judge(

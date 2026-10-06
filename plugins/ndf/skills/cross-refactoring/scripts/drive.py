@@ -3,7 +3,7 @@
 
     drive.py <PR> --scope ... [refactor.py init の引数...]   # テストの走らせ方は .ndf/project.json の test の戦略で決まる
 
-init → 提案 → 改修計画 → テスト追加 → 実装 → 検証と修正 → 最終ゲート → finalize を順に進める。
+init → 提案 → 改修計画 → テスト追加 → 実装 → 検証と修正 → 採り直し（採ればテスト追加から回し直す）→ 最終ゲート → finalize を順に進める。
 参加者は全て CLI なので、止まるのは単独起動の最終ゲート（cross-review）だけである。
 
 進みは耐久の記録（`lib/durable.py`。#1142 の決定 32）に持つ。1 回の実行は耐久ワークフロー `refactor_drive` の
@@ -54,12 +54,15 @@ from loop_drive import call, durable_identity, parse_vars  # noqa: E402  テス�
 
 if str(HERE) not in sys.path:
     sys.path.append(str(HERE))
+from refactor_lib import ledger  # noqa: E402  報告と同じ判定で採用を数える（I8）
+from refactor_lib.paths import alive_path  # noqa: E402
 from refactor_lib.vocabulary import PHASES  # noqa: E402
 from assignee_launch import FIX_PHASES, LOOP_LIMIT, MONITOR_STOPPED, AssigneeLaunch  # noqa: E402,F401
 
 TOOL = "cross-refactoring-drive"
 KIND = "refactor"  # 耐久の記録の種類
 ORDER = PHASES  # 手順の順序の定義元は状態側の手順一覧（`refactor_lib.vocabulary.PHASES`）
+ALIVE_PHASES = ("plan", "add-tests", "implement", "fix")  # 監視が心拍のファイルを更新する手順（最終ゲート修正は除く。#1743 決定 3）
 # 修正の手順は検証の繰り返しの中にある。そこで止まった実行は検証から再開する（提案以降の CLI を起動し直さない）
 RESUME_AS = {"fix": "verify", "final-fix": "final"}
 GO_FINAL = 2  # refactor.py の終了コード: 最終ゲートへ直に進む
@@ -74,13 +77,6 @@ FOCUS = (
 def _refactor_cmd(*args: str) -> list[str]:
     """`refactor.py` の副コマンドを打つコマンド列。"""
     return [sys.executable, str(HERE / "refactor.py"), *args]
-
-
-def _ledger_module():
-    """取り消しの判定（`refactor_lib.ledger`）。報告と同じ判定で採用を数える（I8）。"""
-    from refactor_lib import ledger
-
-    return ledger
 
 
 # --- 耐久ステップ（外の世界に触るものはすべてここを通す。耐久ワークフローの本体は記録から決まる値だけを読む） ---
@@ -197,7 +193,7 @@ class Drive(AssigneeLaunch):
         """結果 JSON の件数。4 つの件数は `ledger.tally`（コメントの件数の行と同じ集計。I1）から数える。"""
         s = self.state()
         items = s.get("items") or []
-        t = _ledger_module().tally(s).as_metrics()
+        t = ledger.tally(s).as_metrics()
         # unconfirmed は結果 JSON の末尾側に置く（キーの並びを変えない）
         rest = {"unconfirmed": t.pop("unconfirmed")} if "unconfirmed" in t else {}
         c = {
@@ -239,6 +235,7 @@ class Drive(AssigneeLaunch):
     def monitor(self, agents: str, phase: str, stem: str) -> tuple[int, list[dict]]:
         """監視を打ち、終了コードと担当ごとの最終ステータス（1 行 1 JSON）を返す。"""
         extra = ["--timeout", self.v["PHASE_TIMEOUT"], "--stall-timeout", self.v["PHASE_TIMEOUT"]] if self.v.get("PHASE_TIMEOUT") else []
+        extra += ["--alive-file", str(alive_path(self.tmp, int(self.v["ID"])))] if phase in ALIVE_PHASES else []
         rc, out = self.call(
             [
                 sys.executable,
@@ -298,6 +295,34 @@ class Drive(AssigneeLaunch):
         if self.todo(phase):
             self.impl_phase(phase)
         return self.rf(merge_cmd, self.v["ID"], ok=(0, GO_FINAL))[0] == GO_FINAL
+
+    def verify_rounds(self) -> None:
+        """検証を繰り返す（修正したらもう一度検証する）。"""
+        for _ in range(LOOP_LIMIT):
+            if not self.verify_round():
+                return
+
+    def readopt_rounds(self) -> None:
+        """採り直しを打ち、採ったらテストの追加・実装・検証をもう 1 巡回す。入らなくなったら抜ける（#1743 決定 10）。"""
+        i = self.v["ID"]
+        for _ in range(LOOP_LIMIT):
+            if self.rf("readopt", i, ok=(0, GO_FINAL))[0] == GO_FINAL:
+                return
+            go_final = False
+            if self.v.get("TESTS_NEEDED") == "1":
+                self.impl_phase("add-tests")
+                go_final = self.rf("merge-tests", i, ok=(0, GO_FINAL))[0] == GO_FINAL
+            if not go_final:
+                self.impl_phase("implement")
+                go_final = self.rf("merge-implement", i, ok=(0, GO_FINAL))[0] == GO_FINAL
+            if not go_final:
+                self.verify_rounds()
+
+    def catch_up(self) -> None:
+        """打ち直しで耐久ワークフローを続ける前に 1 度打ち、止まっていた時間の分だけ締め切りをずらす（#1491。耐久ステップにしない）。"""
+        tmp = self.known_tmp()
+        env = {**os.environ, **({"CROSS_REFACTORING_TMP_DIR": str(tmp)} if tmp else {})}
+        call(_refactor_cmd("catch-up", str(self.pr)), env)
 
     def verify_round(self) -> bool:
         """検証を 1 回打ち、修正が要れば修正と取り込みまで進める。修正したなら真を返す。"""
@@ -400,6 +425,8 @@ class Drive(AssigneeLaunch):
         ref = durable.resolve(durable.launch_key(KIND, identity), finished=finished)
         if ref.action == "done":
             return ref.output["result"]
+        if ref.action == "continue":
+            self.catch_up()
         after = durable.resume_paused(ref)
         wid = durable.start(ref, refactor_drive, self.pr, self.init_args, self.root)
         out = durable.wait(wid, "pause", after=after)
@@ -424,10 +451,10 @@ def refactor_drive(pr: int, init_args: list[str], root: str | None = None) -> di
     d = Drive(pr, init_args, root)
     try:
         d.start()
-        go_final = d.phases()
-        for _ in range(LOOP_LIMIT):
-            if go_final or not d.verify_round():
-                break
+        if not d.phases():
+            d.verify_rounds()
+        # 取り込みや提案の取り込みが検証を飛ばしたときも、最終ゲートの前に必ず採り直しを打つ（最終ゲートへ移すのは readopt だけ）
+        d.readopt_rounds()
         d.merge_open_final_fix()
         for _ in range(LOOP_LIMIT):
             if d.final_gate():
