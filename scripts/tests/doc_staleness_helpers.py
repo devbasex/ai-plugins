@@ -60,7 +60,7 @@ ROOT_README = """# Fixture Marketplace
 - v4.0.0 で古い経路を廃止しました。それより前の版（8.5.4 以前）には戻せません
 """
 
-# I: 「主要プラグインです（v<版>）」。版数の例は置かない（J は正本の側が持つ）
+# 指示書は版数を持たない（開発版の配布で読み込み量が伸びないようにする。J は正本の側が持つ）
 AGENTS_MD = """# Fixture Guidelines
 
 ## ポリシー
@@ -71,7 +71,7 @@ AGENTS_MD = """# Fixture Guidelines
 
 ## NDFプラグインについて
 
-**NDFプラグイン**は、このマーケットプレイスの主要プラグインです（v9.3.0）。
+**NDFプラグイン**は、このマーケットプレイスの主要プラグインです。
 
 ## 変更の履歴
 
@@ -102,7 +102,7 @@ VERSIONING_MD = """# Fixture Versioning
 
 - 接尾辞は次に出す正式版の版数へ付ける。`9.3.0` の次を開発するなら `9.4.0-dev.1`
 
-## 版数を持つ 15 箇所
+## 版数を持つ箇所
 
 版数の基準は `plugins/ndf/.claude-plugin/plugin.json` の `version` である。
 
@@ -248,9 +248,6 @@ def retarget_version(root: Path, version: str) -> None:
     readme = root / "README.md"
     edit(readme, f"**NDFプラグイン v{VERSION}**", f"**NDFプラグイン v{version}**")
     edit(readme, f"| **ndf** | {VERSION} |", f"| **ndf** | {version} |")
-
-    agents = root / "AGENTS.md"
-    edit(agents, f"主要プラグインです（v{VERSION}）", f"主要プラグインです（v{version}）")
 
     # 版の付け方の章は基底で比べる。例に並ぶ版数の基底が現行版より古ければ落ちるため、
     # 現行版の例も次の版の例も、新しい基底へ寄せる。次の版の例（開発版の行と次の開発の例の
