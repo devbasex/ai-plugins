@@ -140,7 +140,15 @@ def _thread_items(slug: str, pr: int) -> tuple[list[dict[str, Any]], int | None]
         except (TypeError, ValueError):
             line = None
         items.append(
-            {"kind": "thread", "name": t["thread_id"], "result": "unresolved", "thread_id": t["thread_id"], "path": t["path"], "line": line}
+            {
+                "kind": "thread",
+                "name": t["thread_id"],
+                "result": "unresolved",
+                "thread_id": t["thread_id"],
+                "path": t["path"],
+                "line": line,
+                "body": t.get("body", ""),
+            }
         )
     return items, len(threads)
 

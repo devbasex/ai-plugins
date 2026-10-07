@@ -304,13 +304,13 @@ def test_checks_outcome_edge_cases_are_fixed():
 
 
 def test_unresolved_threads_carry_thread_id(fake):
-    fake.on("api", "graphql", out="PRRT_a\tsrc/foo.py\t42\nPRRT_b\tdocs/bar.md\t\n")
+    fake.on("api", "graphql", out="PRRT_a\tsrc/foo.py\t42\t[major] 空を弾く\nPRRT_b\tdocs/bar.md\t\t\n")
 
     threads = gp.unresolved_threads(REPO, PR)
 
     assert threads == [
-        {"thread_id": "PRRT_a", "path": "src/foo.py", "line": "42"},
-        {"thread_id": "PRRT_b", "path": "docs/bar.md", "line": ""},
+        {"thread_id": "PRRT_a", "path": "src/foo.py", "line": "42", "body": "[major] 空を弾く"},
+        {"thread_id": "PRRT_b", "path": "docs/bar.md", "line": "", "body": ""},
     ]
     joined = fake.argvs()[0]
     assert "owner=o" in joined and "name=r" in joined and f"pr={PR}" in joined

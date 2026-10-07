@@ -18,7 +18,7 @@ query($owner: String!, $name: String!, $pr: Int!, $endCursor: String) {
     pullRequest(number: $pr) {
       reviewThreads(first: 100, after: $endCursor) {
         pageInfo { hasNextPage endCursor }
-        nodes { id isResolved path line }
+        nodes { id isResolved path line comments(first: 1) { nodes { body } } }
       }
     }
   }
@@ -28,7 +28,8 @@ query($owner: String!, $name: String!, $pr: Int!, $endCursor: String) {
 UNRESOLVED_THREADS_JQ = (
     ".data.repository.pullRequest.reviewThreads.nodes[]"
     " | select(.isResolved == false)"
-    ' | [.id, (.path // ""), (.line // "" | tostring)] | @tsv'
+    ' | [.id, (.path // ""), (.line // "" | tostring),'
+    ' ((.comments.nodes[0].body // "") | gsub("[\\r\\n\\t]+"; " ") | .[0:200])] | @tsv'
 )
 
 
@@ -56,7 +57,7 @@ def unresolved_threads_argv(repo: str, pr: int, jq: str) -> list[str] | None:
 
 
 def unresolved_threads(repo: str, pr: int, output: Callable[[list[str]], str | None] | None = None) -> list[dict[str, str]] | None:
-    """未解決のレビュースレッドを `thread_id` つきで返す。0 件は空の一覧、取得できなければ `None`。
+    """未解決のレビュースレッドを `thread_id` と最初のコメントの本文（改行を空白へ畳んだ先頭 200 字）つきで返す。0 件は空の一覧、取得できなければ `None`。
 
     `output` は `gh` の argv を受けて標準出力（失敗は `None`）を返す関数。省くと `RUNNER` を使う。
     Resolve の状態は REST から読めないため、上限のときは退避せず `None` を返す。
@@ -77,6 +78,7 @@ def unresolved_threads(repo: str, pr: int, output: Callable[[list[str]], str | N
                 "thread_id": cols[0],
                 "path": cols[1] if len(cols) > 1 else "",
                 "line": cols[2] if len(cols) > 2 else "",
+                "body": cols[3] if len(cols) > 3 else "",
             }
         )
     return threads

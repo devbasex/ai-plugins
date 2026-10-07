@@ -7,6 +7,7 @@ GitHub を呼ぶのは `gh_*` のモジュールだけにする。
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -85,6 +86,49 @@ def default_branch(root) -> str | None:
 def base_branch(root) -> str | None:
     """開発の起点。`.ndf/worktree.json` の `base_branch` → 既定ブランチ（`default_branch`）の順。決まらなければ `None`。"""
     return declared_base(root) or default_branch(root)
+
+
+def _ref_exists(root, ref: str) -> bool:
+    return proc.git_out(root, "show-ref", "--verify", "--quiet", ref) is not None
+
+
+def _remote_has_branch(root, remote: str, name: str) -> bool:
+    """`git ls-remote --heads` の行の参照名が `refs/heads/<name>` と完全に一致するか。
+
+    `ls-remote` のパターンは参照名の末尾に一致するため、`refs/heads/x/refs/heads/<name>` のような
+    別のブランチでも行が返る。問い合わせの成功ではなく、返った行の参照名そのものを照合する。
+    """
+    want = f"refs/heads/{name}"
+    try:
+        p = proc.run(
+            ["git", "-C", str(root), "ls-remote", "--heads", remote, want],
+            check=False,
+            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+        )
+    except OSError:
+        return False
+    if p.returncode != 0:
+        return False
+    return any(line.split("\t", 1)[-1].strip() == want for line in p.stdout.splitlines() if "\t" in line)
+
+
+def existing_base_branch(root, remote: str = "origin") -> tuple[str | None, str]:
+    """差分の起点にするベースブランチと、その出所（または決まらない理由）。
+
+    宣言（`.ndf/worktree.json` の `base_branch`）があれば、取得済みの参照 → `remote` への問い合わせの順に
+    実在を確かめ、無ければ既定ブランチへ落とさずに `(None, 理由)` を返す。宣言が無ければ `default_branch`。
+    """
+    name = declared_base(root)
+    if name:
+        if _ref_exists(root, f"refs/remotes/{remote}/{name}") or _ref_exists(root, f"refs/heads/{name}"):
+            return name, "宣言（取得済みの参照）"
+        if _remote_has_branch(root, remote, name):
+            return name, f"宣言（{remote} へ問い合わせ）"
+        return None, f"{name} は {remote} にもローカルにも無い"
+    d = default_branch(root)
+    if d:
+        return d, "既定ブランチ"
+    return None, f"宣言も {remote} の HEAD も main / master も無い"
 
 
 def production_branch(root, decl: dict | None = None) -> tuple[str | None, str]:
