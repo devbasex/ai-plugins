@@ -344,7 +344,8 @@ def _gate(repo: str, title: str, body: str, labels: list[str], digest: str, othe
     )
 
 
-def cmd_create(a) -> None:
+def _create_inputs(a) -> tuple[str, str, tuple[str, int] | None, str, str, list[str]]:
+    """起票の入力 `(起票先, 由来, 相手の課題, 題, 本文, ラベル)` を確かめて確定する。骨格が欠ければ 1 で終える。"""
     repo = _require_form(a.repo, REPO_RE, "起票先")
     origin = _require_form(a.origin, ORIGIN_RE, "由来")
     counterpart = _counterpart(a.counterpart) if a.counterpart else None
@@ -356,18 +357,29 @@ def cmd_create(a) -> None:
     if gaps:
         names = "・".join(g["heading"] for g in gaps)
         _stop_with(f"本文の骨格が欠ける: {names}。課題は作っていない", EXIT_VIOLATION, gaps)
-    digest = digest_of(repo, a.title, body, labels)
+    return repo, origin, counterpart, a.title, body, labels
+
+
+def _create_gate_or_check(repo: str, title: str, body: str, labels: list[str], approved: str | None) -> tuple[str, bool]:
+    """承認が無ければゲートへ回し、あれば要約値を照合する。`(要約値, 開発対象リポジトリと別か)`。"""
+    digest = digest_of(repo, title, body, labels)
     target = development_repo()
     other = target is None or target.lower() != repo.lower()
-    if not a.approved:
-        _gate(repo, a.title, body, labels, digest, other)
-    if a.approved != digest:
+    if not approved:
+        _gate(repo, title, body, labels, digest, other)
+    if approved != digest:
         _stop_with(
             "提示の要約値が合わない（示した後に起票先・題・本文・ラベルが変わった）。課題は作っていない",
             EXIT_VIOLATION,
             metrics={"digest": digest},
         )
-    made = gh_rest.issue_create(repo, a.title, body, labels or None)
+    return digest, other
+
+
+def cmd_create(a) -> None:
+    repo, _origin, counterpart, title, body, labels = _create_inputs(a)
+    digest, other = _create_gate_or_check(repo, title, body, labels, a.approved)
+    made = gh_rest.issue_create(repo, title, body, labels or None)
     if not made.ok:
         _stop_with(f"{repo} への起票が失敗した: {made.error[:ERROR_EXCERPT]}", EXIT_VIOLATION)
     number, url = made.value.get("number"), made.value.get("url", "")
