@@ -249,7 +249,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 判定の区分 | — | parallel-measure.py capacity が本数を決めた理由の区分。grow（足してよい）/ hold（今の本数を超えて足さない）/ shrink（1 本減らす） | — | — | `docs/specifications/ndf-execution-plan-and-parallel-capacity.md` |
 | 未解決のスレッド | — | Pull Request のレビュースレッドのうち、解決済みの印が付いていないもの。`gh_parts.py pr-info --with threads` が返す | — | — | — |
 | 本来の判定 | `intent` | レビューの指摘から決めた event（APPROVE / REQUEST_CHANGES / COMMENT）。自分の Pull Request へ COMMENT で送っても結果に残し、収束や報告はこちらを読む | — | — | — |
-| レビューの文脈ファイル | — | `pr-review-steps.py collect` が書く、レビューの対象・差分の在りか・未解決のスレッドの位置・指摘ファイルの書き方をまとめたファイル。外部 AI へのプロンプトはこれに観点と委譲の決まりを足して組む | — | — | — |
+| レビューの文脈ファイル | — | `pr-review-steps.py collect` が書く、レビューの対象・差分の在りか・未解決のスレッド（位置と最初のコメントの本文）・指摘ファイルの書き方をまとめたファイル。外部 AI へのプロンプトはこれに観点と委譲の決まりを足して組む | — | — | — |
 | 仕様適合 | — | レビューの第 1 段。受け入れ条件・不変条件・対象範囲・テストが仕様を表すかを見る。満たさない指摘は指摘ファイルで段 `spec` を持つ | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）

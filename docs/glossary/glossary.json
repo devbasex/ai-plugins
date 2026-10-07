@@ -3524,7 +3524,7 @@
     {
       "term": "レビューの文脈ファイル",
       "context": "ndf-workflow",
-      "meaning": "`pr-review-steps.py collect` が書く、レビューの対象・差分の在りか・未解決のスレッドの位置・指摘ファイルの書き方をまとめたファイル。外部 AI へのプロンプトはこれに観点と委譲の決まりを足して組む",
+      "meaning": "`pr-review-steps.py collect` が書く、レビューの対象・差分の在りか・未解決のスレッド（位置と最初のコメントの本文）・指摘ファイルの書き方をまとめたファイル。外部 AI へのプロンプトはこれに観点と委譲の決まりを足して組む",
       "pending_source": "issues/issue-860-design.md"
     },
     {
