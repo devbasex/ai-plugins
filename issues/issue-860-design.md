@@ -113,8 +113,9 @@ LLM 自身がレビューするとき（第二引数なし）は、1 が `collec
 | `plugins/ndf/scripts/lib/repo.py` の `existing_base_branch` | 宣言のベースブランチの実在の確認（取得済みの参照 → `git ls-remote` の参照名の照合）と、宣言が無いときの既定ブランチへの落とし方 | 変更（関数を 1 つ足す。既存の関数は変えない） |
 | `plugins/ndf/skills/pr-review/SKILL.md` | 引数・2 つのモード・観点（第 1 段・第 2 段・重要度）・指摘の振り分け・スクリプトの呼び方・報告 | 変更（10,240 B 以下へ） |
 | `plugins/ndf/skills/external-ai/SKILL.md` | pr-review への言及 2 か所を「`pr-review-steps.py delegate` が `run --phase review` で呼ぶ」に合わせる | 変更 |
-| `gh_parts.py pr-info` / `review-post` | PR のメタ・差分・未解決のスレッドの取得 / 投稿・格下げ・位置の拒否の退避 | 既存（変えない） |
-| `plugins/ndf/scripts/lib/gh_graphql.py` の `unresolved_threads` | 未解決のスレッドの各要素に、最初のコメントの本文 `body`（改行を空白へ畳み、先頭 200 字）を足す。`pr-info --with threads` と `unresolved-threads` はこの関数を通るため、そのまま本文が載る | 変更（鍵を 1 つ足す。既存の鍵 `thread_id` / `path` / `line` は変えない） |
+| `gh_parts.py pr-info` / `review-post` | PR のメタ・差分・未解決のスレッドの取得 / 投稿・格下げ・位置の拒否の退避 | 既存（引数は変えない。`pr-info --with threads` の thread item に `body` が増える。下の `gh_pr_info.py` の行） |
+| `plugins/ndf/scripts/lib/gh_graphql.py` の `unresolved_threads` | 未解決のスレッドの各要素に、最初のコメントの本文 `body`（改行を空白へ畳み、先頭 200 字）を足す。`unresolved-threads` 経路は要素を `**t` で写すため、そのまま本文が載る | 変更（鍵を 1 つ足す。既存の鍵 `thread_id` / `path` / `line` は変えない） |
+| `plugins/ndf/scripts/lib/gh_pr_info.py` の `_thread_items` | `pr-info --with threads` 経路（delegate の主経路）。thread item を `kind` / `name` / `result` / `thread_id` / `path` / `line` の鍵で明示して組み直すため、`unresolved_threads` が返す `body` はここで落ちる。thread item に `body` を写す | 変更（鍵を 1 つ足す。既存の鍵は変えない） |
 | `external-ai.py run` | 外部 CLI の起動・上限つきの待ち・回収 | 既存（変えない） |
 | `plugins/ndf/skills/pr-review/tests/` | F1〜F6 と I1〜I7 のテスト | 新規 |
 
@@ -275,7 +276,7 @@ def existing_base_branch(root, remote: str = "origin") -> tuple[str | None, str]
 
 `ls-remote` は `GIT_TERMINAL_PROMPT=0` で呼ぶ（今の SKILL.md と `worktree-branch.sh` の `wt_branch_exists` と同じ）。宣言を読むのは既存の `declared_base` で、`.ndf/worktree.json` を読むコードは `repo.py` の外に増えない。
 
-**互換性**: 既存の関数・CLI・結果の形は変えない。`review-post` と `pr-info` と `run` は引数も結果も今のまま使う。
+**互換性**: 既存の関数・CLI・結果の形は変えない。`review-post` と `pr-info` と `run` は引数も結果も今のまま使う。例外は `pr-info --with threads` の thread item と `unresolved_threads` の要素に `body` の鍵が 1 つ増えることだけで、既存の鍵は変えない。
 
 ## 処理の流れ
 
@@ -340,7 +341,7 @@ graph TD
 | ベースブランチの 5 通り（I1） | `existing_base_branch` が要求の 5 通り（「`repo.py` の追加」の表の 1・2・3・4・5 行目）で表のとおりを返し、6 行目の場合は `None` を返す。どこにも無いとき `collect --branch` は 3 で終わり、文脈ファイルを書かない | 実在の確認を外して宣言をそのまま返す／無いときに `default_branch` へ落とす |
 | `ls-remote` が別のブランチだけを返すと「無い」（I2） | `refs/heads/x/refs/heads/<名前>` だけを持つ origin で `None` が返る | 照合を終了コードだけ・末尾一致に変える |
 | `.ndf/worktree.json` を読むコードが `repo.py` だけ | `pr-review-steps.py` と SKILL.md に `worktree.json` の語が無い（`grep` のテスト。振る舞いでなくコードの写しの検査として置く） | スクリプトに宣言の読み込みを書く |
-| 未解決のスレッドが `pr-info --with threads` からプロンプトへ渡る（I7） | 偽の `gh_parts.py` が返したスレッドの `path:line` と本文が文脈ファイルとプロンプトに載る。スレッドが取れない結果のときは 2 で止まる。`unresolved_threads` が偽の GraphQL の応答から `body` を返し、既存の鍵は変わらない | スレッドを渡さない／本文を落として位置だけを渡す／取れないときに「なし」で進める |
+| 未解決のスレッドが `pr-info --with threads` からプロンプトへ渡る（I7） | `gh_pr_info._thread_items` の出力（`unresolved_threads` を偽にして呼ぶ）の thread item に `body` が載り、それが文脈ファイルとプロンプトに `path:line` と本文として載る。スレッドが取れない結果のときは 2 で止まる。`unresolved_threads` が偽の GraphQL の応答から `body` を返し、既存の鍵は変わらない | スレッドを渡さない／本文を落として位置だけを渡す／取れないときに「なし」で進める |
 | SKILL.md に `pulls/<番号>/comments`・`jq -n`・`-X POST .../reviews`・プロンプトの雛形・起動フラグ・結果サマリが無い | — （文言の検査は書かない。完了判定で `grep` の証跡を取る） | — |
 | event の表（I4） | `decide_event` が表の 3 行を返す。段 `spec` の `minor` 1 件だけでも `REQUEST_CHANGES` | `spec` を見落とす／`minor` を `REQUEST_CHANGES` にする |
 | 重要度が 4 つのどれでもない（I3） | `finish` が 2 で終わり、`review-post` を呼ばない。段が `spec` / `quality` 以外でも同じ | 不明な重要度を `minor` とみなす |
@@ -358,7 +359,7 @@ graph TD
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #860 | 実装する | — | `plugins/ndf/skills/pr-review/`、`plugins/ndf/scripts/lib/repo.py`、`plugins/ndf/scripts/lib/gh_graphql.py`、`plugins/ndf/skills/external-ai/SKILL.md`、`plugins/ndf/skills/development-workflow/references/glossary.md`、`docs/glossary/glossary.json`、`docs/glossary.md` |
+| #860 | 実装する | — | `plugins/ndf/skills/pr-review/`、`plugins/ndf/scripts/lib/repo.py`、`plugins/ndf/scripts/lib/gh_graphql.py`、`plugins/ndf/scripts/lib/gh_pr_info.py`、`plugins/ndf/skills/external-ai/SKILL.md`、`plugins/ndf/skills/development-workflow/references/glossary.md`、`docs/glossary/glossary.json`、`docs/glossary.md` |
 
 ## 未確認のまま残ること
 
