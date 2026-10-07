@@ -270,9 +270,7 @@ def collect_pr(a, root: Path, pr: int) -> tuple[dict, list[str], Path]:
         "## 受け入れ条件の在りか\n\nPR の本文（下にそのまま載せる）。本文にもプランにも無ければ、その不在を指摘する。\n\n"
         + (str(meta.get("body") or "").strip() or "（本文なし）"),
         f"## 差分\n\n- 差分のファイル: `{diff_path}`\n- 変更ファイル（{len(files)}）:\n" + "\n".join(f"  - `{f}`" for f in files),
-        "## 未解決のスレッド\n\n"
-        + _thread_lines(threads)
-        + "\n\n同じ位置へ本文と同じ趣旨の指摘を出さない。同じ位置でも趣旨が違えば出す。",
+        "## 未解決のスレッド\n\n" + _thread_lines(threads) + "\n\n同じ位置へ本文と同じ趣旨の指摘を出さない。同じ位置でも趣旨が違えば出す。",
     ]
     metrics = {
         "mode": "pr",
@@ -365,7 +363,12 @@ def finish(findings: Path, pr: int | None, reviewer: str, d: Path, repo: str | N
     data, errs = load_findings(findings)
     if data is None:
         emit(
-            result(TOOL, "stopped", f"指摘ファイルを読めない（投稿しない）: {errs[0]}", [{"kind": "finding", "name": e, "result": "invalid"} for e in errs]),
+            result(
+                TOOL,
+                "stopped",
+                f"指摘ファイルを読めない（投稿しない）: {errs[0]}",
+                [{"kind": "finding", "name": e, "result": "invalid"} for e in errs],
+            ),
             EXIT_UNREADABLE,
         )
     verdict = decide_event(data["comments"])
@@ -376,8 +379,23 @@ def finish(findings: Path, pr: int | None, reviewer: str, d: Path, repo: str | N
         emit(result(TOOL, "ok", f"本来の判定 {verdict['intent']}（投稿しない）: {report}", metrics={**metrics, "report": str(report)}), 0)
     payload, res = d / "payload.json", d / "result.json"
     payload.write_text(json.dumps(build_payload(data), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    res.write_text(json.dumps({"event": verdict["intent"], "by_severity": verdict["by_severity"]}, ensure_ascii=False) + "\n", encoding="utf-8")
-    argv = [GH_PARTS, "review-post", "--payload", payload, "--result", res, "--pr", str(pr), "--round", "0", "--seat", f"pr-review-{reviewer}"]
+    res.write_text(
+        json.dumps({"event": verdict["intent"], "by_severity": verdict["by_severity"]}, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    argv = [
+        GH_PARTS,
+        "review-post",
+        "--payload",
+        payload,
+        "--result",
+        res,
+        "--pr",
+        str(pr),
+        "--round",
+        "0",
+        "--seat",
+        f"pr-review-{reviewer}",
+    ]
     posted, code = _child([*argv, *(["--repo", repo] if repo else [])])
     items = [i for i in posted.get("items") or [] if isinstance(i, dict)]
     review = next((i for i in items if i.get("kind") == "review"), {})
@@ -413,13 +431,28 @@ def cmd_delegate(a) -> None:
     prompt = d / "prompt.md"
     prompt.write_text(build_prompt(Path(metrics["context"]).read_text(encoding="utf-8")), encoding="utf-8")
     findings = Path(metrics["findings"])
-    argv = [EXTERNAL_AI, "run", a.cli, "--phase", "review", "--prompt-file", prompt, "--output-file", findings, "--workdir", metrics["root"]]
+    argv = [
+        EXTERNAL_AI,
+        "run",
+        a.cli,
+        "--phase",
+        "review",
+        "--prompt-file",
+        prompt,
+        "--output-file",
+        findings,
+        "--workdir",
+        metrics["root"],
+    ]
     argv += [*(["--timeout", str(a.timeout)] if a.timeout else []), *(["--poll", str(a.poll)] if a.poll else [])]
     ran, _ = _child(argv)
     rm = ran.get("metrics") or {}
     if rm.get("outcome") != "ok":
         item = {"kind": "cli", "name": a.cli, "result": str(rm.get("outcome") or "unknown"), "reason": str(rm.get("reason") or "")}
-        emit(result(TOOL, "stopped", f"{a.cli} の指摘ファイルを回収できない（投稿しない）: {ran.get('summary')}", [item], metrics), EXIT_VIOLATION)
+        emit(
+            result(TOOL, "stopped", f"{a.cli} の指摘ファイルを回収できない（投稿しない）: {ran.get('summary')}", [item], metrics),
+            EXIT_VIOLATION,
+        )
     finish(findings, metrics["pr"], a.cli, d, a.repo)
 
 

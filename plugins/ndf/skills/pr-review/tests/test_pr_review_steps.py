@@ -422,7 +422,15 @@ def test_thread_items_carry_the_body(monkeypatch):
     )
     items, count = gh_pr_info._thread_items("o/r", PR)
     assert count == 1
-    assert items[0] == {"kind": "thread", "name": "T1", "result": "unresolved", "thread_id": "T1", "path": "a.py", "line": 3, "body": "空を弾く"}
+    assert items[0] == {
+        "kind": "thread",
+        "name": "T1",
+        "result": "unresolved",
+        "thread_id": "T1",
+        "path": "a.py",
+        "line": 3,
+        "body": "空を弾く",
+    }
 
 
 @pytest.mark.skipif(shutil.which("jq") is None, reason="jq が無い")
