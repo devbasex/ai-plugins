@@ -57,6 +57,11 @@ EXCEPTIONS: dict[tuple[str, str], str] = {
     # 欠けることが起きない。その条件は
     # `scripts/tests/test_cross_review_codistribution.py` が固定する。
     ("plugins/ndf/skills/cross-refactoring/scripts/drive.py", "cross-review"): "#870",
+    # `pr-review` の delegate は外部 CLI の起動と上限つきの待ちを `external-ai.py run` に任せる
+    # （#860）。**4 つの manifest すべてが両方を載せている**ため、配る先で相手が
+    # 欠けることが起きない。その条件は
+    # `scripts/tests/test_external_ai_codistribution.py` が固定する。
+    ("plugins/ndf/skills/pr-review/scripts/pr-review-steps.py", "external-ai"): "#860",
 }
 
 # Markdown の行内リンクの飛び先。読み手への案内であるため走査から外す。

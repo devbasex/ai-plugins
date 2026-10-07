@@ -143,7 +143,7 @@ def _prefixed(c: dict) -> str:
     return f"[{sev} / {cat}] {body}" if cat else f"[{sev}] {body}"
 
 
-def _where(c: dict) -> str:
+def _finding_place(c: dict) -> str:
     path, line = c.get("path"), c.get("line")
     return f"`{path}:{line}` " if path and line is not None else (f"`{path}` " if path else "")
 
@@ -154,7 +154,7 @@ def build_payload(data: dict) -> dict:
     spec = [c for c in comments if c.get("stage", "quality") == "spec"]
     parts = []
     if spec:
-        parts.append("### 仕様適合（満たさない）\n\n" + "\n".join(f"- {_where(c)}{_prefixed(c)}" for c in spec))
+        parts.append("### 仕様適合（満たさない）\n\n" + "\n".join(f"- {_finding_place(c)}{_prefixed(c)}" for c in spec))
     if str(data.get("summary") or "").strip():
         parts.append(data["summary"].strip())
     out = []
@@ -202,7 +202,7 @@ def _child(argv: list[str], cwd: Path | None = None) -> tuple[dict, int]:
 # ---------------- collect ----------------
 
 
-def _slug(repo: str | None, root: Path | None) -> str:
+def _out_slug(repo: str | None, root: Path | None) -> str:
     return repo_lib.slug(repo or (repo_lib.owner_repo(root) if root else None) or gh_call.resolve_repo(None)) or "local"
 
 
@@ -211,12 +211,12 @@ def out_dir(a, pr: int | None, branch: str | None, root: Path | None) -> Path:
         d = Path(a.out_dir)
     else:
         tail = f"pr{pr}" if pr is not None else "branch-" + (branch or "HEAD").replace("/", "-")
-        d = Path(tempfile.gettempdir()) / "ndf" / "pr-review" / f"{_slug(a.repo, root)}-{tail}"
+        d = Path(tempfile.gettempdir()) / "ndf" / "pr-review" / f"{_out_slug(a.repo, root)}-{tail}"
     d.mkdir(parents=True, exist_ok=True)
     return d.resolve()
 
 
-def current_pr(root: Path, repo: str | None) -> int:
+def pr_of_current_branch(root: Path, repo: str | None) -> int:
     """今のブランチを head とする開いた PR（決定 14）。無ければ 3。"""
     branch = git(root, "rev-parse", "--abbrev-ref", "HEAD", check=False).stdout.strip()
     args = ["pr", "view", *([branch, "--repo", repo] if repo else []), "--json", "number,state"]
@@ -317,7 +317,7 @@ def collect(a) -> tuple[dict, Path]:
     if a.branch:
         metrics, sections, d = collect_branch(a, root)
     else:
-        pr = a.pr if a.pr is not None else current_pr(root, a.repo)
+        pr = a.pr if a.pr is not None else pr_of_current_branch(root, a.repo)
         metrics, sections, d = collect_pr(a, root, pr)
     findings = d / "findings.json"
     findings.unlink(missing_ok=True)  # 前回の指摘を今回のものとして投稿しない
@@ -338,11 +338,11 @@ def cmd_collect(a) -> None:
 # ---------------- finish ----------------
 
 
-def _report(data: dict, verdict: dict) -> str:
+def branch_report(data: dict, verdict: dict) -> str:
     comments = data["comments"]
 
     def lines(pick) -> str:
-        got = [f"- {_where(c)}{_prefixed(c)}" for c in comments if pick(c)]
+        got = [f"- {_finding_place(c)}{_prefixed(c)}" for c in comments if pick(c)]
         return "\n".join(got) or "- なし"
 
     by = verdict["by_severity"]
@@ -358,7 +358,7 @@ def _report(data: dict, verdict: dict) -> str:
     )
 
 
-def finish(findings: Path, pr: int | None, reviewer: str, d: Path, repo: str | None) -> None:
+def finish_review(findings: Path, pr: int | None, reviewer: str, d: Path, repo: str | None) -> None:
     """E8〜E9。指摘ファイルを検査し、本来の判定を決め、PR なら投稿し `--branch` なら報告を書く。"""
     data, errs = load_findings(findings)
     if data is None:
@@ -375,7 +375,7 @@ def finish(findings: Path, pr: int | None, reviewer: str, d: Path, repo: str | N
     metrics = {**verdict, "findings": len(data["comments"]), "reviewer": reviewer}
     if pr is None:
         report = d / "report.md"
-        report.write_text(_report(data, verdict), encoding="utf-8")
+        report.write_text(branch_report(data, verdict), encoding="utf-8")
         emit(result(TOOL, "ok", f"本来の判定 {verdict['intent']}（投稿しない）: {report}", metrics={**metrics, "report": str(report)}), 0)
     payload, res = d / "payload.json", d / "result.json"
     payload.write_text(json.dumps(build_payload(data), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -408,7 +408,7 @@ def finish(findings: Path, pr: int | None, reviewer: str, d: Path, repo: str | N
 def cmd_finish(a) -> None:
     d = Path(a.out_dir) if a.out_dir else Path(a.findings).resolve().parent  # 既定は指摘ファイルの隣（collect の置き場）
     d.mkdir(parents=True, exist_ok=True)
-    finish(Path(a.findings), None if a.branch else a.pr, a.reviewer, d, a.repo)
+    finish_review(Path(a.findings), None if a.branch else a.pr, a.reviewer, d, a.repo)
 
 
 # ---------------- delegate ----------------
@@ -422,14 +422,14 @@ def perspectives() -> str:
     return text
 
 
-def build_prompt(context: str) -> str:
+def delegate_prompt(context: str) -> str:
     return f"{DELEGATE_RULES}\n{PERSPECTIVE_HEADING}\n\n{perspectives().strip()}\n\n{context.strip()}\n"
 
 
 def cmd_delegate(a) -> None:
     metrics, d = collect(a)
     prompt = d / "prompt.md"
-    prompt.write_text(build_prompt(Path(metrics["context"]).read_text(encoding="utf-8")), encoding="utf-8")
+    prompt.write_text(delegate_prompt(Path(metrics["context"]).read_text(encoding="utf-8")), encoding="utf-8")
     findings = Path(metrics["findings"])
     argv = [
         EXTERNAL_AI,
@@ -453,7 +453,7 @@ def cmd_delegate(a) -> None:
             result(TOOL, "stopped", f"{a.cli} の指摘ファイルを回収できない（投稿しない）: {ran.get('summary')}", [item], metrics),
             EXIT_VIOLATION,
         )
-    finish(findings, metrics["pr"], a.cli, d, a.repo)
+    finish_review(findings, metrics["pr"], a.cli, d, a.repo)
 
 
 # ---------------- CLI ----------------
@@ -467,7 +467,7 @@ def _target_args(sp: argparse.ArgumentParser) -> None:
     sp.add_argument("--repo")
 
 
-def parser() -> argparse.ArgumentParser:
+def steps_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="pr-review-steps.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     sp = sub.add_parser("collect", help="対象を集めて文脈ファイルを書く")
@@ -493,7 +493,7 @@ def parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> None:
     os.environ.setdefault("GIT_TERMINAL_PROMPT", "0")
-    main_with(parser(), lambda _a: TOOL, argv)
+    main_with(steps_parser(), lambda _a: TOOL, argv)
 
 
 if __name__ == "__main__":
