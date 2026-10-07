@@ -1,7 +1,7 @@
 """適用結果の検証。
 
-対象範囲の逸脱・コミットのトレーラー・差分予算・コミット粒度を判定する。判定に
-使う事実は git から取った値で、結果ファイルの申告は使わない。
+コミットのトレーラーとテストの期待値を判定する。範囲の判定は `scope_check.judge_unit` が持つ（#1814 決定 11）。
+判定に使う事実は git から取った値で、結果ファイルの申告は使わない。
 """
 
 from __future__ import annotations
@@ -14,14 +14,7 @@ import re
 from typing import Any, Iterable, Optional
 
 from .paths import git_out, resolve_commit
-from .gitfacts import safe_int
-from .vocabulary import (
-    DIFF_BUDGET_FACTOR,
-    EXTRACTION_DIFF_BUDGET_FACTOR,
-    EXTRACTION_TECHNIQUES,
-    FINAL_FIX_TRAILERS,
-    REQUIRED_TRAILERS,
-)
+from .vocabulary import FINAL_FIX_TRAILERS, REQUIRED_TRAILERS
 
 
 # **結果ファイルの申告は検証の材料にしない。** 実装担当は自分の成果を報告する側なので、
@@ -29,59 +22,6 @@ from .vocabulary import (
 # ここで使う事実（コミットの実在 / トレーラー / 差分行数 / テストの成否）は、すべて
 # **git と実際のテスト実行**から取る。結果ファイルから使うのは「どのコミットが
 # どの項目のものか」という対応付けの手がかりだけである。
-
-
-def path_in_scope(path: str, scope: Iterable[str]) -> bool:
-    """`path` が対象範囲の中にあるか。判定は**前方一致だけ**で行う。
-
-    除外規則を足さない。規則を書けるようにすると、規則を 1 行足すだけで
-    範囲のチェックを骨抜きにできてしまう。
-
-    突き合わせる前に `./` を落とす。シェルの補完で `--scope ./src` の形になることが
-    多い一方、git が出すのは `src/foo.py` なので、**そのまま比べると全てのコミットが
-    範囲外**になり、適用が必ず失敗する。`.` と `./` はリポジトリ全体を指す。
-    """
-    for entry in scope:
-        raw = str(entry).strip()
-        if not raw:
-            continue
-        prefix = raw
-        while prefix.startswith("./"):
-            prefix = prefix[2:]
-        prefix = prefix.rstrip("/")
-        if prefix in {"", "."}:
-            return True
-        if path == prefix or path.startswith(prefix + "/"):
-            return True
-    return False
-
-
-def out_of_scope_files(commit: dict[str, Any], scope: Iterable[str]) -> list[str]:
-    """コミットが触った**対象範囲の外**のファイル。範囲が空ならチェックしない。"""
-    paths = list(scope)
-    if not paths:
-        return []
-    return sorted(p for p in (commit.get("files") or []) if not path_in_scope(p, paths))
-
-
-def verify_scope(commit: dict[str, Any], scope: Iterable[str]) -> Optional[str]:
-    """対象範囲の外を触っていれば理由を返す。
-
-    範囲を必須にした目的は**提案の発散と変更の肥大を防ぐ**ことなので、指定を
-    検証に反映しないと目的を果たせない。実測では、生成物を同期する規約に従った
-    結果として範囲外が 3 系統変更され、差分が 4 倍に膨らんで差分予算を超えた。
-    生成物の同期が要る構成では、**同期は進行側の責務**として分離する。
-    """
-    outside = out_of_scope_files(commit, scope)
-    if not outside:
-        return None
-    shown = ", ".join(outside[:5])
-    more = f" ほか {len(outside) - 5} 件" if len(outside) > 5 else ""
-    return (
-        f"コミット {commit.get('sha', '?')} が対象範囲の外を変更しています"
-        f"（{shown}{more}）。生成物の同期は進行側が公開の直前に行います。"
-        "現状固定テストの置き場所が範囲外なら、`--scope` に含めてから実行してください"
-    )
 
 
 def verify_commit_trailers(commit: dict[str, Any], required: Iterable[str] = REQUIRED_TRAILERS) -> Optional[str]:
@@ -102,7 +42,6 @@ def verify_commit_trailers(commit: dict[str, Any], required: Iterable[str] = REQ
 
 def verify_commit_basics(
     commit: dict[str, Any],
-    scope: Optional[Iterable[str]],
     missing_reason: str,
     check_test: bool = True,
     required_trailers: Iterable[str] = REQUIRED_TRAILERS,
@@ -111,7 +50,8 @@ def verify_commit_basics(
 
     実装・テストの追加（`commands/implement.py`）と修正（`commands/converge.py`）で
     **同じ基準**を使う。
-    片方だけ直されると基準が食い違い、緩い側から手順を外れた変更が入る。
+    片方だけ直されると基準が食い違い、緩い側から手順を外れた変更が入る。範囲は単位（コミットの組）で
+    `scope_check.judge_unit` が見る（#1814 決定 11）。
 
     実体が無いときの理由文だけは呼び出し側から渡す。
 
@@ -124,15 +64,12 @@ def verify_commit_basics(
     problem = verify_commit_trailers(commit, required_trailers)
     if problem:
         return problem
-    problem = verify_scope(commit, scope or [])
-    if problem:
-        return problem
     if check_test and commit.get("test_status") != "pass":
         return f"コミット {commit.get('sha', '?')} でテストが成功していません ({commit.get('test_status')})"
     return None
 
 
-def verify_final_fix_commit(commit: dict[str, Any], scope: Optional[Iterable[str]] = None) -> Optional[str]:
+def verify_final_fix_commit(commit: dict[str, Any]) -> Optional[str]:
     """最終ゲート（Step 7）の修正コミットを検証する。問題があれば理由を返す。
 
     実装と修正の取り込みと**見る先が 2 つだけ違う**。
@@ -144,42 +81,15 @@ def verify_final_fix_commit(commit: dict[str, Any], scope: Optional[Iterable[str
     - **`Item-Id` を求めない**。最終ゲートの失敗は全体のテストのもので、
       どの改善項目にも紐づかない。
 
-    **対象範囲は見る。** 最終ゲートでも `--scope` の外を触ってよい理由は無い。
+    **対象範囲は見る。** 最終ゲートでも `--scope` の外を触ってよい理由は無い。範囲は修正の全コミットを
+    1 つの単位として `scope_check.judge_unit` が見る（#1814 決定 11）。
     """
     return verify_commit_basics(
         commit,
-        scope,
         f"コミット {commit.get('sha', '?')} が最終ゲートの修正の範囲に存在しません",
         check_test=False,
         required_trailers=FINAL_FIX_TRAILERS,
     )
-
-
-def diff_budget_factor(technique: Optional[str]) -> int:
-    """その手法に許す差分予算の倍率。
-
-    抽出系だけ広げる。全体を広げると、範囲外を触った変更まで通ってしまう。
-    """
-    if technique in EXTRACTION_TECHNIQUES:
-        return EXTRACTION_DIFF_BUDGET_FACTOR
-    return DIFF_BUDGET_FACTOR
-
-
-def verify_diff_budget(
-    items: list[dict[str, Any]],
-    facts: list[dict[str, Any]],
-) -> Optional[str]:
-    """実差分が、見積の行数から決まる差分予算に収まっているか。"""
-    estimated = sum(safe_int(i.get("estimated_diff_lines")) for i in items)
-    factor = max(
-        (diff_budget_factor(i.get("technique")) for i in items),
-        default=DIFF_BUDGET_FACTOR,
-    )
-    budget = estimated * factor
-    actual = sum(int(c.get("diff_lines") or 0) for c in facts)
-    if budget and actual > budget:
-        return f"実差分 {actual} 行が差分予算 {budget} 行（見積 {estimated} 行 × {factor}）を超えました（範囲の逸脱）"
-    return None
 
 
 def unassigned_fix_commits(work: str, reported_shas: list[str], ordered_range: list[str]) -> list[str]:
@@ -261,14 +171,33 @@ def assertion_change(before: Iterable[str], after: Iterable[str]) -> str:
     return "undecidable"
 
 
+def _lost_values(changes: dict[str, tuple[list[str], list[str]]]) -> set[str]:
+    """単位が変えたテストのファイルの和集合で、前にあった値のうち後のどこにも無いもの（#1814 決定 5）。"""
+    before = set().union(*(_values(b) for b, _ in changes.values())) if changes else set()
+    after = set().union(*(_values(a) for _, a in changes.values())) if changes else set()
+    return before - after
+
+
+def _changed_paths(changes: dict[str, tuple[list[str], list[str]]]) -> list[str]:
+    """和集合で消えた値を前に持っていたファイル。**値を別のテストのファイルへ移しただけなら空。**"""
+    lost = _lost_values(changes)
+    if not lost:
+        return []
+    return sorted(path for path, (before, _) in changes.items() if _values(before) & lost)
+
+
 def undecidable_test_changes(
     changes: dict[str, tuple[list[str], list[str]]],
 ) -> list[str]:
     """機械では判定できないテストの差分を、ファイルの順で返す。
 
+    ファイルごとには値が消えていても、単位の和集合で値が残っているもの（値を補助のファイルへ移したなど）も含める。
     **呼ぶ側はこれを最終ゲートのレビューへ引き継ぐ。** 空でないまま通さない。
     """
-    return sorted(path for path, (before, after) in changes.items() if assertion_change(before, after) == "undecidable")
+    changed = set(_changed_paths(changes))
+    return sorted(
+        path for path, (before, after) in changes.items() if path not in changed and assertion_change(before, after) != "unchanged"
+    )
 
 
 def _changed_test_message(changed: list[str]) -> str:
@@ -282,13 +211,15 @@ def _changed_test_message(changed: list[str]) -> str:
 def collect_test_changes(
     facts: Iterable[dict[str, Any]],
 ) -> dict[str, tuple[list[str], list[str]]]:
-    """コミット単位の `test_changes` を 1 つの辞書へまとめる。
+    """コミット単位の `test_changes` を 1 つの辞書へまとめる（`facts` は古い順）。
 
-    後のコミットの値が前のコミットの値を上書きする（同じファイルなら最後の状態を採る）。
+    前はそのファイルを最初に触ったコミットの前、後は最後に触ったコミットの後を採る（#1814 決定 5）。
     """
     changes: dict[str, tuple[list[str], list[str]]] = {}
     for commit in facts:
-        changes.update(commit.get("test_changes") or {})
+        for path, (before, after) in (commit.get("test_changes") or {}).items():
+            first = changes.get(path, (before, after))[0]
+            changes[path] = (first, after)
     return changes
 
 
@@ -297,10 +228,12 @@ def verify_test_changes(
 ) -> Optional[str]:
     """テストの差分に、期待値の変更が含まれていないかを見る。
 
+    値の消失は単位（項目の全コミット）が変えたテストのファイルの**和集合**で見る（#1814 決定 5）。
+    テストの値を同じ単位で変えた・作った別のテストのファイルへ移しただけなら取り消さない。
     **判定できないものはここでは落とさない。** `undecidable_test_changes` が集め、
     呼ぶ側がレビューへ引き継ぐ。
     """
-    changed = sorted(path for path, (before, after) in changes.items() if assertion_change(before, after) == "changed")
+    changed = _changed_paths(changes)
     if not changed:
         return None
     return _changed_test_message(changed)

@@ -7,6 +7,7 @@
 | 案 B の後 | 最終ゲートでも落ちたら終了コード 4 で止まり、取り消しを重ねない（AC5・I7） |
 | 履歴 | 送ったコミットは前に送った HEAD の子孫である（AC7・C4） |
 | 上限 | 打ち切りの後の取り消しの締め切りが、計画の上限の表に載る（AC6） |
+| 同じ秒の書き換え | 案 A の最後の走らせ直しが直前の書き換えの秒の内に終わったら、案 B は着手前の木へ戻す前に次の秒まで待つ（#1806 決定 6） |
 """
 
 from __future__ import annotations
@@ -228,3 +229,26 @@ def test_plan_a_stops_without_discarding_uncommitted_changes(flow, cmd_setup, cm
 
     assert code == 4 and _head(work) == head
     assert "# 待機中に加えた変更" in open(f"{work}/{target}", encoding="utf-8").read()
+
+
+def test_plan_b_waits_for_the_next_second_before_restoring_the_planned_tree(refactor, tmp_path, monkeypatch):
+    """#1806 決定 6 — 案 A の最後の走らせ直しが直前の書き換えの秒の内に終わったら、read-tree の前に次の秒まで待つ。"""
+    stop_revert, worktree = sys.modules["refactor_lib.stop_revert"], sys.modules["refactor_lib.worktree"]
+    now, events = [100.45], []
+
+    def sleep(seconds):
+        events.append(f"sleep {round(seconds, 3)}")
+        now[0] += seconds
+
+    monkeypatch.setattr(worktree, "_last_rewrite", 100.2)
+    monkeypatch.setattr(worktree, "_clock", lambda: now[0])
+    monkeypatch.setattr(worktree, "_sleep", sleep)
+    monkeypatch.setattr(worktree, "stop_if_dirty", lambda state, work, what: None)
+    monkeypatch.setattr(stop_revert.culprit, "git_ok", lambda work, args: events.append(" ".join(args[:2])) or True)
+    monkeypatch.setattr(stop_revert, "git_out", lambda work, args: "f" * 40)
+    state = {"worktrees": {"work": str(tmp_path)}, "plan": {"base_sha": "b" * 40}, "items": []}
+
+    stop_revert._plan_b(tmp_path / "state.json", state, {}, "締め切りを過ぎた")
+
+    assert events == ["sleep 0.55", "read-tree -u", "commit -q"]
+    assert worktree._last_rewrite == 101.0

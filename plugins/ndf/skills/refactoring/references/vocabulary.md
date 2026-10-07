@@ -1,6 +1,6 @@
-# 兆候と手法の呼び名
+# 兆候・手法・観点の呼び名
 
-**このファイルが呼び名を持つ唯一の場所である。** 兆候と手法は、`refactoring` を単独で使う
+**このファイルが呼び名を持つ唯一の場所である。** 兆候・手法・観点は、`refactoring` を単独で使う
 ときにも、`cross-refactoring` が複数の CLI へ提案させるときにも同じ名前で指す。
 
 **識別子を持つのは、複数の CLI が同じ箇所を同じ名前で呼ぶためである。** 呼び名が揃わないと、
@@ -34,6 +34,9 @@
 | `test_coupled_to_internals` | テストが内部の詳細に依存している |
 | `test_bypasses_module_boundary` | テストが 1 つの入口から全部を引く |
 | `mock_targets_implementation_detail` | モックの対象が実装の詳細 |
+| `divergent_change` | 変更の理由が 1 つに定まらない |
+| `hidden_dependency` | 隠れた依存 |
+| `data_clump` | いつも一緒に渡る値の組 |
 
 ## 手法
 
@@ -57,34 +60,25 @@
 | `propagate_exception` | 呼び出し元へ伝える |
 | `centralize_configuration` | 定義を 1 箇所へ寄せる |
 | `validate_at_boundary` | スキーマと版を与え、読み込み境界で検証する |
+| `extract_class` | クラスの抽出 |
+| `split_module` | モジュールの分割 |
+| `inline` | インライン化 |
+| `change_signature` | シグネチャの変更 |
+| `extract_test_helper` | テストの共通化 |
 
-## 手法ごとの差分予算の倍率
+## 観点
 
-**手法によって固定費が違う。** 新しい定義を作って呼び出し側を書き換える手法は、抽出した
-本体に加えて呼び出し側の書き換え・取り込みの追加・引数の受け渡しが固定費として乗る。
-提案の時点では見えにくい。
+**観点は兆候を探す入口で、兆候とは別の集まりである。** 提案の `smell` は兆候から選ぶ。観点の識別子を
+`smell` に書いた提案は、代表の兆候へ写して扱う（重複排除の鍵を兆候に揃えるため）。識別子は兆候・手法と
+重ならない。
 
-**倍率は見積に掛ける。** 予算超過として落ちた 4 件はいずれも抽出で、見積の 2.03〜2.31 倍
-だった。範囲の逸脱ではなく、倍率 2 をわずかに超えただけである。範囲外を触った実測例は
-見積の 4 倍であるため、倍率 3 でも逸脱を取り逃がさない。
-
-| 識別子 | 倍率 |
-| --- | ---: |
-| `extract_method` | 3 |
-| `rename` | 2 |
-| `introduce_parameter_object` | 3 |
-| `introduce_value_object` | 3 |
-| `flatten_conditional` | 2 |
-| `replace_conditional_with_polymorphism` | 2 |
-| `replace_with_lookup_table` | 2 |
-| `replace_with_bulk_operation` | 2 |
-| `extract_strategy` | 3 |
-| `move_responsibility` | 3 |
-| `fix_dependency_direction` | 2 |
-| `split_into_pipeline` | 3 |
-| `remove_dead_code` | 2 |
-| `consolidate_duplication` | 3 |
-| `introduce_named_constant` | 2 |
-| `propagate_exception` | 2 |
-| `centralize_configuration` | 2 |
-| `validate_at_boundary` | 2 |
+| 識別子 | 説明 | 代表の兆候 |
+| --- | --- | --- |
+| `duplicated_knowledge` | 重複 — 同じ知識・同じ手順が 2 か所以上にある | `duplication` |
+| `mixed_responsibility` | 責務の混在 — 1 つの関数・クラスが別々の理由で変わる | `divergent_change` |
+| `branching` | 分岐の表し方 — 同じ条件の分岐が散らばる・種類ごとの分岐が伸び続ける | `conditional_chain` |
+| `naming` | 名前 — 名前が中身と食い違う・同じものを別の名前で呼ぶ | `inconsistent_naming` |
+| `dependency_direction` | 依存の向き — 下の層が上の層を読む・循環する・知りすぎる | `circular_dependency` |
+| `testability` | テストの書きにくさ — 外部への依存や隠れた状態のせいで単体で試せない | `hidden_dependency` |
+| `data_shape` | データの形 — 基本型の羅列・いつも一緒に渡る引数の組 | `data_clump` |
+| `size` | 大きさ — 長すぎる関数・大きすぎるクラス・長い引数の列 | `long_method` |

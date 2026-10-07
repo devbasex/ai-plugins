@@ -20,7 +20,9 @@ import json
 import pathlib
 from typing import Any, Optional
 
-from .items import DEFERRED, REVERTED
+from .items import DEFERRED, REVERTED, implement_shas
+from .phases import phase_seconds
+from .rounds import whole_records
 
 HISTORY_NAME = "cross-refactoring-allocation.jsonl"
 
@@ -232,7 +234,7 @@ def _kind_seconds(state: dict[str, Any]) -> dict[str, dict[str, float]]:
         seconds = item.get("seconds") or {}
         if commits.get("test"):
             add("test", seconds.get("test"))
-        if commits.get("implement") and item.get("kind"):
+        if implement_shas(item) and item.get("kind"):
             add(str(item["kind"]), seconds.get("implement"))
     return kinds
 
@@ -246,6 +248,40 @@ def _seconds_from_start(state: dict[str, Any], at: Any) -> Optional[int]:
     if started and ended:
         return int((ended.astimezone(_dt.timezone.utc) - started.astimezone(_dt.timezone.utc)).total_seconds())
     return None
+
+
+# バッファの区分（`plan.reserve` のキー。#1743 の F4）。報告と実行の行が同じ順で読む。
+RESERVE_KEYS = ("danger_whole_test", "final_whole_test", "fix", "final_fix")
+
+
+def danger_seconds(state: dict[str, Any]) -> Optional[float]:
+    """危険フラグの全体テストを走らせた秒の和（全巡）。走らせていなければ `None`。"""
+    ran = [_num(r.get("seconds")) for r in whole_records(state) if r.get("ran")]
+    return round(sum(ran), 1) if ran else None
+
+
+def reserve_usage(state: dict[str, Any]) -> dict[str, dict[str, int]]:
+    """バッファの区分ごとの「取った・使った・残った」秒（決定 8）。`plan.reserve` が無ければ空。
+
+    使った秒の出所: 危険フラグの全体テストは検証の中の全体テストの秒、最終ゲートの全体テストは最終ゲートのテストの判定
+    （手元の全体テストか CI の待ち。使い回したら 0）、修正は `fix_stats.seconds`、最終ゲート修正は `final-fix` の手順の秒。
+    """
+    reserve = (state.get("plan") or {}).get("reserve") or {}
+    if not reserve:
+        return {}
+    checks = (state.get("final_gate") or {}).get("checks") or []
+    used = {
+        "danger_whole_test": danger_seconds(state) or 0.0,
+        "final_whole_test": sum(_num(c.get("seconds")) for c in checks if c.get("mode") in ("test", "ci")),
+        "fix": _num((state.get("fix_stats") or {}).get("seconds")),
+        "final_fix": _num(phase_seconds(state).get("final-fix")),
+    }
+    usage = {}
+    for key in RESERVE_KEYS:
+        reserved = round(_num(reserve.get(key)) * 60)
+        spent = round(used[key])
+        usage[key] = {"reserved_seconds": reserved, "used_seconds": spent, "unused_seconds": max(0, reserved - spent)}
+    return usage
 
 
 def build_row(state: dict[str, Any]) -> dict[str, Any]:
@@ -262,7 +298,6 @@ def build_row(state: dict[str, Any]) -> dict[str, Any]:
     elapsed = _seconds_from_start(state, at)
     verify = state.get("verify_stats") or {}
     fix = state.get("fix_stats") or {}
-    whole = state.get("whole_test") or {}
     baseline = state.get("baseline_test") or {}
     return {
         "schema": ROW_SCHEMA,
@@ -274,16 +309,19 @@ def build_row(state: dict[str, Any]) -> dict[str, Any]:
         "implementer": state.get("implementer"),
         "budget_minutes": state.get("budget_minutes"),
         "elapsed_seconds": elapsed,
-        "phases": {name: span.get("seconds") for name, span in (state.get("phases") or {}).items() if isinstance(span, dict)},
+        "phases": phase_seconds(state),
         "kinds": kinds,
         "verify": {"items": verify.get("items", 0), "seconds": verify.get("seconds", 0)},
         "fix": {"launches": fix.get("launches", 0), "seconds": fix.get("seconds", 0)},
         "whole_test": {
             # 全体テストを走らせたときだけ。範囲テストの秒を全体テストの所要として読ませない（#1385 決定 6）。
             "init": baseline.get("seconds") if baseline.get("mode") != "scope" else None,
-            "danger": whole.get("seconds") if whole.get("ran") else None,
+            "danger": danger_seconds(state),
             "final": (state.get("final_gate") or {}).get("whole_test_seconds"),
         },
+        # バッファの使われ方と止まっていた秒（#1743 の F4・F5）。`build_table` は読まない（I11）
+        "reserve": reserve_usage(state),
+        "paused_seconds": (state.get("pause") or {}).get("seconds"),
     }
 
 

@@ -119,6 +119,16 @@ def test_refactor_drive_stops_on_abort(tmp_path, monkeypatch, capsys):
     assert code == 1 and out["metrics"]["exit"] == 4
 
 
+def test_refactor_drive_stops_when_init_refuses_the_pull_request(tmp_path, monkeypatch, capsys):
+    """#1658 の AC7: init が Pull Request の状態で止まる（終了コード 4）と、駆動は 1・metrics.exit 4 で終わり、
+    作業ツリーの用意も担当の CLI も起動しない（push もしない）。"""
+    fake = FakeRefactor(tmp_path, "passed", rc={"init": 4})
+    monkeypatch.setattr(rf, "call", fake)
+    code, out = run_main(rf, ["5", "--scope", "src", "--baseline-test", "pytest"], capsys)
+    assert code == 1 and out["metrics"]["exit"] == 4
+    assert [c[:2] for c in fake.calls] == [("refactor.py", "init")]
+
+
 def test_review_status_requires_clean_sweep():
     ok = {"final": "approved", "sweep": {"verified": True, "remaining_open": 0, "commit": None}}
     assert cr.review_status(ok) == "approved"

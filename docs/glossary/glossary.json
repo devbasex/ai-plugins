@@ -442,7 +442,7 @@
     {
       "term": "バッファ",
       "context": "ndf-workflow",
-      "meaning": "`cross-refactoring` の見積りで、想定最大時間から経過を引いた後に残しておく時間",
+      "meaning": "`cross-refactoring` の見積りで、想定最大時間から経過を引いた後に残しておく時間。最終ゲートの全体テスト・修正 1 回・最終ゲート修正 1 回と、最終ゲートと兼ねられないときだけ危険フラグの全体テスト",
       "deprecated": [
         "予備時間"
       ],
@@ -697,7 +697,7 @@
     {
       "term": "改善項目",
       "context": "ndf-cross-refactoring",
-      "meaning": "リファクタリング計画が採った改善候補。I-001 の形の ID を持ち、1 改善項目 = 1 コミット（テストを足す項目は 2 コミット）",
+      "meaning": "リファクタリング計画が採った改善候補。I-001 の形の ID を持ち、Item-Id の同じコミットを何件でも持てる（テストを足すコミットは 1 件）",
       "source": "docs/specifications/cross-refactoring-time-budget.md"
     },
     {
@@ -705,24 +705,6 @@
       "context": "ndf-cross-refactoring",
       "meaning": "種類ごとの 1 件あたりの所要（分）。履歴の直近からリファクタリング計画のたびに集計し、保存しない（plan.table）",
       "source": "docs/specifications/cross-refactoring-time-budget.md"
-    },
-    {
-      "term": "着手期限",
-      "context": "ndf-cross-refactoring",
-      "meaning": "実装・テスト追加でその改善項目に着手してよい最後の時刻（start_deadline）",
-      "source": "docs/specifications/cross-refactoring-time-budget.md",
-      "deprecated": [
-        "着手の締め切り"
-      ]
-    },
-    {
-      "term": "完了期限",
-      "context": "ndf-cross-refactoring",
-      "meaning": "着手期限にその改善項目の見積りを足した時刻。マージ処理はコミットの時刻をこれと比べる",
-      "source": "docs/specifications/cross-refactoring-time-budget.md",
-      "deprecated": [
-        "完了の締め切り"
-      ]
     },
     {
       "term": "範囲テスト",
@@ -875,21 +857,19 @@
       "term": "利用可能な参加者",
       "context": "ndf-agent-cli",
       "meaning": "参加者のうち参加の確認を通った者（participants.available）",
-      "source": "docs/specifications/cross-review-participants-and-seats.md",
+      "source": "docs/specifications/cross-participant-admission-check.md",
       "deprecated": [
         "使える者"
-      ],
-      "pending_source": "issues/issue-1290-design.md"
+      ]
     },
     {
       "term": "認証確認",
       "context": "ndf-agent-cli",
       "meaning": "参加の確認の最初の種類。確認コマンド（AUTH_PROBES）を走らせ、認証を通っているかだけを見る",
-      "source": "docs/specifications/cross-review-participants-and-seats.md",
+      "source": "docs/specifications/cross-participant-admission-check.md",
       "deprecated": [
         "認証の確認"
-      ],
-      "pending_source": "issues/issue-1290-design.md"
+      ]
     },
     {
       "term": "スロット",
@@ -2222,6 +2202,18 @@
       "pending_source": "issues/issue-1323-design.md"
     },
     {
+      "term": "古いバイトコード",
+      "context": "repo-dev-checks",
+      "meaning": "Python が、書き換えたソースを、前の内容から作った .pyc で読むこと。.pyc はソースの更新時刻（秒）と大きさだけで新しさを照らすため、同じ秒に同じ大きさで書き換えると見分けられない",
+      "pending_source": "issues/issue-1806-design.md"
+    },
+    {
+      "term": "git を使うテストの土台",
+      "context": "repo-dev-checks",
+      "meaning": "cross-refactoring のテストで、git のリポジトリの作業ディレクトリ・pytest の起動口・状態ファイルを用意する補助（crossref_helpers.build_git_flow）",
+      "pending_source": "issues/issue-1806-design.md"
+    },
+    {
       "term": "プロジェクトの宣言",
       "context": "ndf-workflow",
       "meaning": "リポジトリの根の `.ndf/` に置く、そのプロジェクトの形（言語・テスト・CI・ブランチ・配布・課題の正本など）を表すファイルの集まり。機能ごとの JSON と、解析が書く `project.json` からなる",
@@ -3333,82 +3325,170 @@
       "term": "最小の呼び出し",
       "context": "ndf-agent-cli",
       "meaning": "担当を起動するときと同じモデルの指定で、短い固定の問いを 1 回投げて応答が返るかを見る確認。認証の確認に続けて行う",
-      "pending_source": "issues/issue-1290-requirements.md"
+      "source": "docs/specifications/cross-participant-admission-check.md"
     },
     {
       "term": "既定のモデル",
       "context": "ndf-agent-cli",
       "meaning": "利用者の CLI の設定も引数の指定も無いときに、CLI が使うモデル",
-      "pending_source": "issues/issue-1290-requirements.md"
+      "source": "docs/specifications/cross-participant-admission-check.md"
     },
     {
       "term": "参加の確認",
       "context": "ndf-agent-cli",
       "meaning": "参加者ごとに、認証確認・最小の呼び出し・（設定のモデルを引けなければ）既定のモデルでの引き直しを順に行い、担当に入れるかと理由を決めること（auth.probe_auth が走らせ、assignment.admit が判断する）",
-      "pending_source": "issues/issue-1290-design.md"
+      "source": "docs/specifications/cross-participant-admission-check.md"
     },
     {
       "term": "モデルを引けない",
       "code": "model_unavailable",
       "context": "ndf-agent-cli",
       "meaning": "担当の CLI が、指定か設定のモデルを使えないと返したこと（参加の確認と起動結果の理由 model_unavailable）",
-      "pending_source": "issues/issue-1290-design.md"
+      "source": "docs/specifications/cross-participant-admission-check.md"
     },
     {
       "term": "認証の失効",
       "code": "auth_expired",
       "context": "ndf-agent-cli",
       "meaning": "認証の状態確認は通るが、更新トークンの失効などで実行のときに認証を作り直せないこと（参加の確認と起動結果の理由 auth_expired）",
-      "pending_source": "issues/issue-1290-design.md"
+      "source": "docs/specifications/cross-participant-admission-check.md"
     },
     {
       "term": "既定のモデルへの切り替え",
       "code": "default_models",
       "context": "ndf-agent-cli",
       "meaning": "引数で明示していないモデルを引けない CLI を、既定のモデルで担当に入れること（participants.default_models）",
-      "pending_source": "issues/issue-1290-design.md"
+      "source": "docs/specifications/cross-participant-admission-check.md"
     },
     {
       "term": "1 本の重さ",
       "context": "ndf-workflow",
       "meaning": "担当 1 つ（worktree 1 つ分）が使う cgroup の anon の量。実測（per_lane_observed_mib）と、本数の判定に使った値（per_lane_used_mib）を分けて出す",
-      "pending_source": "issues/issue-780-requirements.md"
+      "source": "docs/specifications/ndf-execution-plan-and-parallel-capacity.md"
     },
     {
       "term": "anon の起点",
       "context": "ndf-workflow",
       "meaning": "実行計画の開始時（動いている本数が 0）に測った cgroup の anon。1 本の重さを測る差の基準",
-      "pending_source": "issues/issue-780-requirements.md"
+      "source": "docs/specifications/ndf-execution-plan-and-parallel-capacity.md"
     },
     {
       "term": "判定の区分",
       "context": "ndf-workflow",
       "meaning": "parallel-measure.py capacity が本数を決めた理由の区分。grow（足してよい）/ hold（今の本数を超えて足さない）/ shrink（1 本減らす）",
-      "pending_source": "issues/issue-780-requirements.md"
+      "source": "docs/specifications/ndf-execution-plan-and-parallel-capacity.md"
     },
     {
       "term": "積み直し",
       "context": "ndf-cross-refactoring",
       "meaning": "取り消しで、取り消しの起点から HEAD までの残すコミット（未公開のもの）を cherry-pick で順に積み直すこと。項目に属するコミットが衝突したら、その項目だけを外して続ける",
-      "pending_source": "issues/issue-1793-requirements.md"
+      "source": "docs/specifications/cross-refactoring-failed-item-rules.md"
     },
     {
       "term": "外した項目",
       "context": "ndf-cross-refactoring",
       "meaning": "cross-refactoring の取り消しの積み直しで、自分のコミットが衝突したために取り消した改善項目。外した理由（どの項目の取り消しで、どのコミットが衝突したか）を持つ",
-      "pending_source": "issues/issue-1793-design.md"
+      "source": "docs/specifications/cross-refactoring-failed-item-rules.md"
     },
     {
       "term": "直さなかった項目",
       "context": "ndf-cross-refactoring",
       "meaning": "cross-refactoring で、結果を残して終わった修正の起動の後、修正の範囲に自分の Item-Id のコミットが 1 つも無い改善項目。次の検証の最初に取り消す",
-      "pending_source": "issues/issue-1793-design.md"
+      "source": "docs/specifications/cross-refactoring-failed-item-rules.md"
     },
     {
       "term": "確かめ直し",
       "context": "ndf-cross-refactoring",
       "meaning": "cross-refactoring で、最終ゲートより前の取り消しで HEAD が変わった後、残った改善項目を新しい HEAD の範囲テストで判定し直すこと",
-      "pending_source": "issues/issue-1793-design.md"
+      "source": "docs/specifications/cross-refactoring-failed-item-rules.md"
+    },
+    {
+      "term": "新しいファイル",
+      "context": "ndf-cross-refactoring",
+      "meaning": "cross-refactoring の実行で、リファクタリング計画の起点（plan.base_sha）のツリーに無かったパス。置き場所によらず範囲の中として扱う",
+      "source": "docs/specifications/cross-refactoring-verify-and-final-gate.md"
+    },
+    {
+      "term": "呼び手の書き換え",
+      "context": "ndf-cross-refactoring",
+      "meaning": "cross-refactoring で、範囲の外の既存のファイルのうち、項目が変えた名前の読み込み・呼び出しだけを書き換える変更。ハンクごとに機械で判定し、通したファイルは最終ゲートのレビューへ引き継ぐ",
+      "source": "docs/specifications/cross-refactoring-verify-and-final-gate.md"
+    },
+    {
+      "term": "変えた名前",
+      "context": "ndf-cross-refactoring",
+      "meaning": "cross-refactoring の判定の単位のコミットが、範囲の中のファイルと新しいファイルで変えた行に現れる識別子と、作った・消した・移したパスの語幹とディレクトリ名から、ありふれた語を除いたもの（修正・最終ゲート修正の単位では、その項目（最終ゲート修正なら採った全項目）の実装・修正のコミットが変えた名前も含める）",
+      "source": "docs/specifications/cross-refactoring-verify-and-final-gate.md"
+    },
+    {
+      "term": "判定の単位",
+      "context": "ndf-cross-refactoring",
+      "meaning": "cross-refactoring の取り込みが 1 度に同じ規則へ掛けるコミットの組。実装は項目ごとの全コミット、修正は修正の範囲の項目ごと、最終ゲート修正は修正の全コミット",
+      "source": "docs/specifications/cross-refactoring-verify-and-final-gate.md"
+    },
+    {
+      "term": "代表の兆候",
+      "context": "ndf-cross-refactoring",
+      "meaning": "cross-refactoring の提案の smell に観点の識別子が書かれたとき、写す先の兆候",
+      "source": "docs/specifications/cross-refactoring-verify-and-final-gate.md"
+    },
+    {
+      "term": "ありふれた語",
+      "context": "ndf-cross-refactoring",
+      "meaning": "cross-refactoring の呼び手の書き換えの判定で、リファクタリング計画の起点のツリーのコードのファイルの 20% 以上かつ 3 ファイル以上に現れる識別子。変えた名前から除き、追加の行に現れてよい",
+      "source": "docs/specifications/cross-refactoring-verify-and-final-gate.md"
+    },
+    {
+      "term": "使える時間",
+      "context": "ndf-cross-refactoring",
+      "meaning": "`cross-refactoring` のリファクタリング計画の時点で、採る改善項目の見積りを収める時間（想定最大時間 − 経過 − バッファ）。`state.plan.available_minutes`",
+      "pending_source": "issues/issue-1743-requirements.md"
+    },
+    {
+      "term": "止まっていた時間",
+      "context": "ndf-cross-refactoring",
+      "meaning": "`cross-refactoring` をリファクタリング計画の後に中断してから、init か drive.py を打ち直して再開するまでの時間。再開の時刻 − 最後の動きの時刻で測り、想定最大時間に数えない",
+      "pending_source": "issues/issue-1743-design.md"
+    },
+    {
+      "term": "最後の動きの時刻",
+      "context": "ndf-cross-refactoring",
+      "meaning": "`cross-refactoring` の作業ディレクトリ（`.cross_refactoring/`）の直下のファイルのうち、最も新しい更新時刻。状態ファイル・CLI のログ・テストのログ・結果ファイルと、心拍のファイルを含む。止まっていた時間の起点",
+      "pending_source": "issues/issue-1743-design.md"
+    },
+    {
+      "term": "心拍のファイル",
+      "context": "ndf-cross-refactoring",
+      "meaning": "`cross-refactoring` の作業ディレクトリ直下の `cross-refactoring-rf<ID>-alive`。出力の有無によらず、CLI の監視とテストの実行が待っている間、心拍の間隔（15 秒。見回りの間隔に依らない）ごとに更新時刻を今にする。中断で止まると更新も止まり、最後の動きの時刻が稼働の終わりを指す",
+      "pending_source": "issues/issue-1743-design.md"
+    },
+    {
+      "term": "実装の終わり",
+      "context": "ndf-cross-refactoring",
+      "meaning": "`cross-refactoring` で実装の CLI を止める唯一の時刻。最終ゲート修正の打ち切り − バッファ − 採っていて未検証の改善項目の検証の見積り。項目ごとの見積りでは止めない",
+      "code": "implement_end_at",
+      "pending_source": "issues/issue-1743-design.md"
+    },
+    {
+      "term": "採り直し",
+      "context": "ndf-cross-refactoring",
+      "meaning": "`cross-refactoring` で検証の後に時間が残ったとき、budget で見送った候補と実装の終わりまでにコミットが無かった改善項目から、残った時間に入るものを順位の順に採り、テストの追加・実装・検証をもう 1 巡回すこと。計画し直さない",
+      "pending_source": "issues/issue-1743-design.md"
+    },
+    {
+      "term": "見送った改善項目",
+      "context": "ndf-cross-refactoring",
+      "meaning": "リファクタリング計画が採った改善項目のうち、表示の状態が見送りのもの（実装の終わりまでにコミットが無く採り直しにも入らなかった not_done・足したテストが落ちた test_failed）。結果 JSON の metrics.deferred の数",
+      "source": "",
+      "pending_source": "issues/issue-1658-requirements.md"
+    },
+    {
+      "term": "見送った提案",
+      "context": "ndf-cross-refactoring",
+      "meaning": "計画に入らなかった提案と見送った改善項目を合わせたもの。理由を 1 つ持つ。状態ファイルの deferred_items",
+      "code": "deferred_items",
+      "source": "",
+      "pending_source": "issues/issue-1658-requirements.md"
     }
   ]
 }

@@ -22,6 +22,7 @@ from .vocabulary import (
     SEVERITY_ORDER,
     SMELLS,
     TECHNIQUES,
+    VIEWPOINT_SMELLS,
 )
 
 
@@ -75,6 +76,8 @@ def _normalize_proposal(raw: dict[str, Any], source: str) -> Optional[dict[str, 
         return None
 
     smell = str(raw.get("smell") or "").strip()
+    # 観点の識別子を兆候に書いた提案は代表の兆候へ写す（語彙外として降格しない。#1814 決定 9）
+    smell = VIEWPOINT_SMELLS.get(smell, smell)
     technique = str(raw.get("technique") or "").strip()
     severity = str(raw.get("severity") or "").strip().lower()
     smell, smell_degraded = _degrade_if_unknown(smell, SMELLS, source, "兆候", f"{path}#{symbol}")

@@ -51,6 +51,8 @@ def test_final_gate_pause_exits_with_the_shared_code(tmp_path, monkeypatch, caps
             sub = cmd[2]
             if sub == "init":
                 return 0, f"ID=7\nTMP_DIR={tmp_path}\nPHASE=final\nWORK={tmp_path}\n"
+            if sub == "readopt":
+                return 2, ""  # 計画の無い状態の採り直し（最終ゲートへ）
             if sub == "final-gate":
                 return 0, "FINAL_GATE=cross-review\n"
         return 0, ""
@@ -73,3 +75,34 @@ def test_abort_keeps_the_original_code_in_metrics(tmp_path, monkeypatch, capsys)
         rf.main(["5"])
     out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert e.value.code == drive_pause.EXIT_STOPPED and out["metrics"]["exit"] == 4
+
+
+def _readopt_drive(statuses_after_merge_tests: list[str]):
+    """採り直しの 1 巡を、子の手順を呼ばずに打つ駆動（打った手順の名前を `calls` に積む）。"""
+    d = object.__new__(rf.Drive)
+    d.v = {"ID": "7", "TESTS_NEEDED": "1"}
+    calls: list[str] = []
+    rounds = iter([0, rf.GO_FINAL])  # 1 巡だけ採り、次の採り直しで最終ゲートへ
+
+    def fake_rf(sub, *args, ok=(0,)):
+        calls.append(sub)
+        return (next(rounds) if sub == "readopt" else 0), {}
+
+    d.rf = fake_rf
+    d.impl_phase = lambda phase, *a: calls.append(f"cli:{phase}")
+    d.verify_rounds = lambda: calls.append("verify")
+    d.state = lambda: {"items": [{"status": s} for s in statuses_after_merge_tests]}
+    return d, calls
+
+
+def test_readopt_round_skips_the_implement_cli_when_nothing_is_left_to_implement():
+    """前の巡の検証済みの項目だけが残ったら実装担当を起動せず、取り消しの後の検証は行う（#1825 の指摘）。"""
+    d, calls = _readopt_drive(["verified", "carried", "deferred"])
+    d.readopt_rounds()
+    assert calls == ["readopt", "cli:add-tests", "merge-tests", "verify", "readopt"]
+
+
+def test_readopt_round_launches_the_implement_cli_for_tested_items():
+    d, calls = _readopt_drive(["verified", "tested"])
+    d.readopt_rounds()
+    assert calls == ["readopt", "cli:add-tests", "merge-tests", "cli:implement", "merge-implement", "verify", "readopt"]

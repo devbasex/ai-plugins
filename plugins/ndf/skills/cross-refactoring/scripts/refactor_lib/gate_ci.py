@@ -13,7 +13,7 @@ from typing import Any, Optional
 import gh_checks
 import test_triage
 
-from . import culprit, die, info, timeline
+from . import culprit, die, info, rounds, timeline
 from .github import gh_api_get
 from .items import live_items
 from .outbound import plan_line
@@ -84,7 +84,7 @@ def revert_deferred(path: pathlib.Path, state: dict[str, Any], gate: dict[str, A
     `limits.stop_revert_end_at`）の順である。取り消すたびに変更起因のファイルを手元で走らせ直し、通った時点か締め切りで止める。
     取り消したら真。寄せた項目が無い・変更起因でない・走らせ直す語が無い・残る項目が無いときは何もせず偽。
     """
-    deferred = (state.get("whole_test") or {}).get("deferred") or {}
+    deferred = rounds.deferred_union(state)
     verdict = gate.get("triage") or {}
     rerun = culprit.rerun_of(verdict)
     if not deferred.get("items") or not verdict.get("caused") or not rerun or not live_items(state):

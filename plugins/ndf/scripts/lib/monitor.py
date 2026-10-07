@@ -243,6 +243,12 @@ def main() -> None:
     p.add_argument("--poll", type=int, default=poll_default, help=f"poll interval in seconds (default: {poll_default})")
     p.add_argument("--no-require-result", action="store_true", help="プロセス終了後に result.json が無くても OK 扱い")
     p.add_argument(
+        "--alive-file",
+        default=None,
+        help="監視の間、心拍の間隔（monitor_types.HEARTBEAT_SECONDS）ごとに更新時刻を今にするファイル。省けば書かない"
+        "（cross-refactoring が止まっていた時間を測るのに使う。#1743）",
+    )
+    p.add_argument(
         "--no-early-error",
         action="store_true",
         default=DEFAULT_NO_EARLY_ERROR,
@@ -263,7 +269,8 @@ def main() -> None:
     if args.tmp_dir:
         monitor_types._TMP_DIR_OVERRIDE = pathlib.Path(args.tmp_dir).resolve()
 
-    results = _run_all(agents, args, phase)
+    with monitor_types.heartbeat(args.alive_file):
+        results = _run_all(agents, args, phase)
     _emit_results(agents, results)
 
     # exit code: 全エージェントの最大値（OK=0 が最良、それ以外は失敗）

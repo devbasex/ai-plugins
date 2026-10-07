@@ -243,6 +243,12 @@ def build_git_flow(tmp_path: pathlib.Path, monkeypatch: Any, patch_lib: Any, env
     runner.write_text(f'#!/bin/sh\nexec {sys.executable} -m pytest -p no:cacheprovider "$@"\n', encoding="utf-8")
     runner.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    # 古いバイトコード（#1806）: 項目の書き込みから取り消しまでを 1 秒弱で通すため、同じ秒に同じ大きさで
+    # 書き換えたモジュールを、子の Python が前の内容から作った .pyc で読みうる。バイトコードを書かせない
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    # 書き換えの印（#1806 決定 6）は worktree ごとのもの。前のテストの worktree の印で待たない
+    if "refactor_lib.worktree" in sys.modules:
+        monkeypatch.setattr(sys.modules["refactor_lib.worktree"], "_last_rewrite", None)
     metrics = tmp_path / "metrics"
     monkeypatch.setenv("NDF_METRICS_DIR", str(metrics))
 

@@ -151,7 +151,7 @@ grep -rn "relaunch_same_agent\|NO_RELAUNCH_REASONS" plugins/ndf/scripts/lib/moni
 
 | 関数・定数 | 契約 |
 | --- | --- |
-| `NO_RELAUNCH_REASONS` | 同じ担当で起動し直しても解けない理由の集合（`usage_limit`）。理由を足すときはこの集合だけを見直す |
+| `NO_RELAUNCH_REASONS` | 同じ担当で起動し直しても解けない理由の集合（`usage_limit` / `model_unavailable` / `auth_expired`。後の 2 つは[参加の確認](cross-participant-admission-check.md)）。理由を足すときはこの集合だけを見直す |
 | `relaunch_same_agent(reason)` | リトライ可否。`reason` が `NO_RELAUNCH_REASONS` に無ければ真 |
 | `after_no_result(failed, reason, *, available, log, step, attempt, host, busy=(), only=False, initial_account=None, pick_account=None, relaunch_next_attempt=False)` → `NoResultDecision` | 規則の正本。副作用を持たず、記録は呼ぶ側が書く。例外を出さない（`failed.seat` が `SEAT_PATTERN` に合わないときだけ `AssignmentError`）。`busy` は同じラウンドのほかの席（実装担当では空）。`pick_account` が無ければアカウントへ振り替えない |
 | `excluded_runtimes(log)` | 外した担当: `decision` が `abort` の件と、`to` のランタイムが `seat` のランタイムと違う `reassign` の件の、`seat` のランタイム |

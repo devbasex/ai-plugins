@@ -27,9 +27,10 @@ import test_strategy as ts
 import tool_paths
 import worktree_deps
 
-from .. import ABORT, die, info, init_test
+from .. import ABORT, die, forecast, info, init_test, pause
 from .. import baseline as baseline_lib
 from .. import ci_coverage
+from .. import pr_gate
 from .. import runtime_decl
 from .. import timeline
 from ..paths import (
@@ -219,10 +220,11 @@ def _pr_payload(repo: str, pr: int) -> Optional[dict[str, Any]]:
     return body if isinstance(body, dict) and body.get("number") else None
 
 
-def _fetch_pr_context(pr: int, repo: Optional[str] = None) -> tuple[str, str, str, bool, str]:
+def _fetch_pr_context(pr: int, repo: Optional[str] = None) -> tuple[str, str, str, bool, str, pr_gate.PrStatus]:
     """GitHub から Pull Request のメタデータを取り、自分の Pull Request かを判定する。
 
-    返すのは `(repo, base_branch, head_branch, is_own_pr, author)`。
+    返すのは `(repo, base_branch, head_branch, is_own_pr, author, status)`。`status` は同じ応答から読んだ
+    Pull Request の状態で、入口の検査に使う（#1658。呼び出しを増やさない）。
 
     **作成者・head・base は REST の 1 回でまとめて取る**（#271）。項目ごとに
     `gh pr view` を投げると、同じ Pull Request へ GraphQL を 3 点使う。尽きるのは
@@ -256,7 +258,7 @@ def _fetch_pr_context(pr: int, repo: Optional[str] = None) -> tuple[str, str, st
     is_own_pr = bool(viewer) and viewer == author
     head_branch = str((body.get("head") or {}).get("ref") or "")
     base_branch = str((body.get("base") or {}).get("ref") or "")
-    return resolved, base_branch, head_branch, is_own_pr, author
+    return resolved, base_branch, head_branch, is_own_pr, author, pr_gate.PrStatus.of(body)
 
 
 def _plan_mode_of(plan_file: Optional[str]) -> str:
@@ -410,11 +412,9 @@ def cmd_init(args: argparse.Namespace) -> None:
 
     participants, baseline, round_record = _verify_init(args, inputs, prep)
     state = _save_initial_state(args, inputs, prep, participants, baseline, round_record, started_at)
-    # **手順の枠が想定最大時間に収まらなければ、提案者を起動せずに止める**（#1385 I4・決定 2）。状態は保存してあるため、
-    # 予算を広げて打ち直すと着手前のテストを走らせ直さずに続く。
+    # **手順の枠と計画の後の見込みが想定最大時間に収まらなければ、提案者を起動せずに止める**（#1385 I4・#1743 I8）。
     init_test.stop_if_window_short(prep.state_file, state)
-    # **出力は入口から直接呼ぶ。** 手順書の変数の出所のチェック
-    # （`scripts/check-skill-shell-vars.py`）は `cmd_*` からヘルパーを 1 階層だけたどる。
+    # **出力は入口から直接呼ぶ。** 手順書の変数の出所のチェック（`scripts/check-skill-shell-vars.py`）は 1 階層だけたどる。
     _emit_init(state)
 
 
@@ -488,7 +488,7 @@ def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
     """Pull Request の文脈を取り、作業ディレクトリを用意して `--scope` の関門を通し、テストの戦略を解く。
     継続的統合のジョブのうち宣言に無いものは知らせるだけで止めない（#464 E2）。状態には新しい実行だけが書く。"""
     # リポジトリ名は git の設定から求め、Pull Request の応答で確かめる（#271）。
-    repo, base_branch, head_branch, is_own_pr, author = _fetch_pr_context(args.pr)
+    repo, base_branch, head_branch, is_own_pr, author, status = _fetch_pr_context(args.pr)
     if is_own_pr:
         info(f"⚠ 自分の Pull Request です（作成者 {author}）— 投稿は COMMENT へ倒します")
 
@@ -496,6 +496,10 @@ def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
         pathlib.Path(args.worktree_root).resolve() if args.worktree_root else default_worktree_base() / repo_lib.slug(repo) / f"rf{args.pr}"
     )
     work = root / "work"
+    # **Pull Request の状態は作業ディレクトリを用意する前に確かめる**（#1658 I4）。止まった実行は何も作らない。
+    reason = pr_gate.init_refusal(args.pr, repo, status)
+    if reason:
+        die(reason)
     _ensure_work_worktree(work, head_branch)
 
     # **テストの戦略は宣言（`.ndf/project.json` の `test`）と引数から解く**（#1334 E1）。コマンドの文字列は
@@ -662,12 +666,11 @@ def _save_initial_state(
     )
     state = _build_initial_state(args, context)
     # **実行時の値を書き出す**（決定 24）。改修計画の後の値は `merge-plan` が足す。
-    state["limits"] = timeline.of_state(state)
+    state["limits"] = timeline.of_state(state, forecast.after_plan(state))
     state["ci_coverage"] = prep.ci_coverage
     info(f"   実装担当: {context.implementer}（{context.implementer_reason}）")
-    # GitHub は自分の Pull Request への `APPROVE` と `REQUEST_CHANGES` を
-    # `HTTP 422` で拒む。判定はそのまま結果ファイルへ残し、**投稿の event だけ**
-    # を倒す。収束判定は結果ファイルの判定を見るので、倒しても進行は変わらない。
+    # GitHub は自分の Pull Request への `APPROVE` と `REQUEST_CHANGES` を `HTTP 422` で拒む。判定はそのまま結果ファイルへ
+    # 残し、**投稿の event だけ**を倒す。収束判定は結果ファイルの判定を見るので、倒しても進行は変わらない。
     _apply_post_event(state, prep.is_own_pr)
     statefile.save(prep.state_file, state)
     info(f"✅ 状態を初期化しました: {prep.state_file}")
@@ -742,13 +745,15 @@ def _resume(
         _recheck_implementer(state)
 
     _apply_post_event(state, is_own_pr)
-    # **予算を置き換えたら上限の表を組み直す**（改修計画の前だけ。改修計画の後は表を変えず、保存した期限で続ける）。
+    # **予算を置き換えたら上限の表を組み直す**（改修計画の前だけ。改修計画の後は止まっていた時間の分だけ締め切りをずらす。#1491）。
     if not state.get("plan"):
         # 枠が収まらずに止めた後の打ち直しだけ、枠の起点を打ち直した時刻へずらす（#1385 I2・決定 2）。
         if state.get("window_stopped_at"):
             state["resumed_at"] = statefile.now()
-        state["limits"] = timeline.of_state(state)
+        state["limits"] = timeline.of_state(state, forecast.after_plan(state))
         init_test.stop_if_window_short(state_file, state)
+    else:
+        pause.resume_after_pause(state_file, state)
     statefile.save(state_file, state)
     _emit_init(state)
 

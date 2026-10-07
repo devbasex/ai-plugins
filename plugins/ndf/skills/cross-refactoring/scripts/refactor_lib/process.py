@@ -1,4 +1,8 @@
-"""テストのプロセスの実行と打ち切り。プロセスグループごと止める。"""
+"""テストのプロセスの実行と打ち切り。プロセスグループごと止める。
+
+待つ間は心拍のファイル（`ALIVE_FILE`）の更新時刻を心拍の間隔ごとに今にする（#1743 決定 3）。パスは `refactor.py` の
+`main` が `id` を持つサブコマンドで 1 度だけ設定し、呼び出し元ごとに渡さない。`None` なら書かない。
+"""
 
 from __future__ import annotations
 
@@ -10,9 +14,13 @@ import time
 from typing import Optional
 
 import container_reach
+import monitor_types
 
 from . import info
 from .paths import git_out
+
+# 心拍のファイル（`paths.alive_path`）。`refactor.py` の `main` が設定する。
+ALIVE_FILE: Optional[pathlib.Path] = None
 
 
 def run_with_timeout(
@@ -60,7 +68,8 @@ def run_with_timeout(
             sink.close()
         return 127, False
     try:
-        proc.communicate(timeout=timeout)
+        with monitor_types.heartbeat(ALIVE_FILE):
+            proc.communicate(timeout=timeout)
         return proc.returncode, False
     except subprocess.TimeoutExpired:
         _kill_process_group(proc, kill_grace)
@@ -103,7 +112,8 @@ def run_capture(
     except OSError as exc:
         return 127, "", f"起動できませんでした: {exc}", False
     try:
-        out, err = proc.communicate(timeout=max(float(timeout), 0.0))
+        with monitor_types.heartbeat(ALIVE_FILE):
+            out, err = proc.communicate(timeout=max(float(timeout), 0.0))
     except subprocess.TimeoutExpired:
         _kill_process_group(proc, kill_grace)
         for pipe in (proc.stdout, proc.stderr):

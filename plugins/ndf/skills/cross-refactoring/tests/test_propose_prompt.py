@@ -127,21 +127,21 @@ def test_plan_receives_every_candidate_by_its_key(render):
     assert "$RF_" not in text
 
 
-def test_add_tests_passes_only_items_with_tests_and_their_test_deadline(render):
-    """AC12: テストの追加の締め切り（`test_start_deadline`）を項目ごとに渡す。"""
+def test_add_tests_passes_only_items_with_tests_without_item_deadlines(render):
+    """項目ごとの期限は渡さない（#1743 決定 9）。旧い状態に `test_start_deadline` が残っていても渡さない。"""
     _render, _ = render
     text = _render("add-tests")
-    assert "I-017" in text and TEST_DEADLINE in text
+    assert "I-017" in text and TEST_DEADLINE not in text and "start_deadline" not in text
     assert "I-042" not in text  # 足すテストの無い項目は渡さない
     assert "$RF_" not in text
 
 
-def test_implement_passes_each_item_with_its_deadline_and_command(render):
-    """AC12: 実装の締め切り（`start_deadline`）と、検証に使う語の並びを項目ごとに渡す。"""
+def test_implement_passes_each_item_with_its_command_without_item_deadlines(render):
+    """検証に使う語の並びを項目ごとに渡し、項目ごとの期限は渡さない（#1743 決定 9。旧い状態からの再開を含む）。"""
     _render, _ = render
     text = _render("implement")
-    assert "I-017" in text and DEADLINE in text
-    assert "I-042" in text and "2026-09-24T10:43:00+00:00" in text
+    assert "I-017" in text and "I-042" in text
+    assert DEADLINE not in text and "2026-09-24T10:43:00+00:00" not in text and "start_deadline" not in text
     assert "pytest -q tests/test_a.py" in text and "pytest -q tests/test_b.py" in text
     assert "$RF_" not in text
 

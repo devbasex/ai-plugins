@@ -4,7 +4,7 @@
 | --- | --- |
 | AC10 | 足したテストが今のコードで落ちた項目は `test_failed`、項目に紐づかないコミットは取り消す |
 | AC11 | 1 改善項目 = 1 コミット（テストを足す項目は 2 コミット）。2 コミット以上は取り消す |
-| AC12 | コミットの無い項目・完了の締め切りを過ぎた項目は `not_done`。テストのコミットも取り消す |
+| AC12 | コミットの無い項目は持ち越し（`carried`。#1743 I15）。テストのコミットも取り消す。コミットの時刻では見送らない |
 | AC13 AC14 | 検証は範囲テストだけ。全体のテストは危険フラグが立ったときに 1 度だけ（落ちたときの扱いは `test_whole_test_triage_git.py`） |
 | AC15 AC16 | 修正の締め切りで項目だけを取り消す。共有した項目は新しい方から 1 件ずつ |
 | AC16b | 最終ゲートは、検証の中の全体のテストが通り HEAD が進んでいなければ使い回す |
@@ -29,7 +29,6 @@ from crossref_helpers import (
     write_state,
 )
 
-FAR = "2099-01-01T00:00:00+00:00"
 PAST = "2000-01-01T00:00:00+00:00"
 
 
@@ -45,8 +44,6 @@ def _item(
     *,
     tests=(),
     targets=("tests/test_calc.py",),
-    deadline=FAR,
-    test_deadline=FAR,
     estimated_diff_lines=20,
     technique="extract_method",
 ):
@@ -66,8 +63,7 @@ def _item(
         "command": ["pytest", "-q", *targets],
         "command_source": "targets",
         "estimate": {"test": 2.7 if tests else 0.0, "implement": 1.3, "verify": 0.2},
-        "start_deadline": deadline,
-        "test_start_deadline": test_deadline if tests else None,
+        "round": 1,
         "status": "planned",
         "commits": {"test": None, "implement": None, "fix": []},
         "seconds": {},
@@ -83,7 +79,6 @@ def _plan(flow, *items, **plan_overrides):
     state["plan"] = {
         "base_sha": git("rev-parse", "HEAD", cwd=flow["work"]).stdout.strip(),
         "reserve": {"danger_whole_test": 0.1, "final_whole_test": 0.1, "fix": 5.5},
-        "end_at": FAR,
         "table_source": "defaults",
         **plan_overrides,
     }
@@ -149,33 +144,31 @@ def test_a_test_failing_on_the_current_code_defers_the_item_as_test_failed(flow,
     assert not (work / "tests" / "test_total.py").exists()
 
 
-def test_an_item_without_a_test_commit_is_not_done(flow, cmd_setup, cmd_implement):
-    """AC12: テストを足すはずの項目にコミットが無ければ `not_done`。"""
+def test_an_item_without_a_test_commit_is_carried(flow, cmd_setup, cmd_implement):
+    """AC12・I15: テストを足すはずの項目にコミットが無ければ持ち越し、見送りには入れない（採り直しの候補へ戻る）。"""
     _plan(flow, _item("I-001", 1, tests=["tests/test_total.py"], targets=["tests/test_total.py"]), _item("I-002", 2, symbol="add"))
     _call(cmd_setup, "cmd_start_phase", phase="add-tests")
 
     _call(cmd_implement, "cmd_merge_tests")
 
-    assert _deferred(flow) == {"I-001": "not_done"}
+    assert _deferred(flow) == {}
+    assert _items(flow)["I-001"]["status"] == "carried"
 
 
-def test_a_test_commit_after_its_completion_deadline_is_not_done(flow, cmd_setup, cmd_implement):
-    """AC12: 完了の締め切り（着手の締め切り + 見積り）を過ぎたコミットは取り込まない。"""
+def test_a_late_test_commit_is_taken_in(flow, cmd_setup, cmd_implement):
+    """I13: 旧い状態ファイルの項目の着手期限を過ぎていても、コミットの時刻では見送らない。"""
     work = flow["work"]
-    _plan(
-        flow,
-        _item("I-001", 1, tests=["tests/test_total.py"], targets=["tests/test_total.py"], test_deadline=PAST),
-        _item("I-002", 2, symbol="add"),
-    )
+    late = {**_item("I-001", 1, tests=["tests/test_total.py"], targets=["tests/test_total.py"]), "test_start_deadline": PAST}
+    _plan(flow, late, _item("I-002", 2, symbol="add"))
     _call(cmd_setup, "cmd_start_phase", phase="add-tests")
     _write(work, "tests/test_total.py", TEST_TOTAL)
     commit_with_trailers(work, "Test", item_trailers("I-001"))
 
     _call(cmd_implement, "cmd_merge_tests")
 
-    assert _deferred(flow) == {"I-001": "not_done"}
-    assert _items(flow)["I-001"]["status"] == "deferred"
-    assert not (work / "tests" / "test_total.py").exists()
+    assert _deferred(flow) == {}
+    assert _items(flow)["I-001"]["status"] == "tested"
+    assert (work / "tests" / "test_total.py").exists()
 
 
 def test_a_commit_without_a_planned_item_is_reverted_alone(flow, cmd_setup, cmd_implement):
@@ -227,8 +220,8 @@ def _implement_phase(flow, cmd_setup, *items):
     _call(cmd_setup, "cmd_start_phase", phase="implement")
 
 
-def test_one_commit_per_item_and_a_missing_item_is_not_done(flow, cmd_setup, cmd_implement):
-    """AC11 AC12: 1 項目 = 1 コミット。コミットの無い項目は `not_done`。"""
+def test_one_commit_per_item_and_a_missing_item_is_carried(flow, cmd_setup, cmd_implement):
+    """AC11 AC12: 1 項目 = 1 コミット。コミットの無い項目は持ち越す（I15）。"""
     work = flow["work"]
     _implement_phase(flow, cmd_setup, _item("I-001", 1), _item("I-002", 2, symbol="add"))
     _refactor_total(work)
@@ -238,37 +231,38 @@ def test_one_commit_per_item_and_a_missing_item_is_not_done(flow, cmd_setup, cmd
 
     items = _items(flow)
     assert items["I-001"]["status"] == "implemented"
-    assert items["I-001"]["commits"]["implement"] == sha
+    assert items["I-001"]["commits"]["implement"] == [sha]
     assert items["I-001"]["seconds"]["implement"] is not None
-    assert _deferred(flow) == {"I-002": "not_done"}
-    assert items["I-002"]["status"] == "deferred"
+    assert _deferred(flow) == {}
+    assert items["I-002"]["status"] == "carried"
 
 
-def test_two_commits_for_one_item_reject_it(flow, cmd_setup, cmd_implement):
+def test_two_commits_for_one_item_are_taken_as_one_item(flow, cmd_setup, cmd_implement):
+    """#1814 AC6a: 同じ `Item-Id` の 2 コミット（改名と中身の変更など）を 1 項目として採る。所要は最後のコミットまで。"""
     work = flow["work"]
     _implement_phase(flow, cmd_setup, _item("I-001", 1), _item("I-002", 2, symbol="add"))
     _refactor_total(work)
-    commit_with_trailers(work, "Refactor 1", item_trailers("I-001"))
+    first = commit_with_trailers(work, "Refactor 1", item_trailers("I-001"))
     _write(work, "src/calc.py", (work / "src" / "calc.py").read_text() + "\n")
-    commit_with_trailers(work, "Refactor 2", item_trailers("I-001"))
+    second = commit_with_trailers(work, "Refactor 2", item_trailers("I-001"))
     _write(work, "src/other.py", "X = 1\n")
     commit_with_trailers(work, "Refactor add", item_trailers("I-002"))
 
     _call(cmd_implement, "cmd_merge_implement")
 
     items = _items(flow)
-    assert items["I-001"]["status"] == "reverted"
-    assert "2 コミット" in items["I-001"]["failure_reason"]
+    assert items["I-001"]["status"] == "implemented"
+    assert items["I-001"]["commits"]["implement"] == [first, second]
     assert items["I-002"]["status"] == "implemented"
-    assert "sum(values)" not in (work / "src" / "calc.py").read_text()
-    assert (work / "src" / "other.py").exists()
+    assert "sum(values)" in (work / "src" / "calc.py").read_text()
 
 
 def test_a_commit_outside_the_scope_rejects_the_item(flow, cmd_setup, cmd_implement):
     work = flow["work"]
     _implement_phase(flow, cmd_setup, _item("I-001", 1), _item("I-002", 2, symbol="add"))
     _refactor_total(work)
-    _write(work, "docs/note.txt", "x\n")
+    # 範囲の外の既存のファイルを、項目と関係なく変える（新しいファイルは範囲の中として扱う。#1814）
+    _write(work, ".gitignore", (work / ".gitignore").read_text() + "build/\n")
     commit_with_trailers(work, "Refactor", item_trailers("I-001"))
 
     with pytest.raises(SystemExit) as exc:
@@ -506,11 +500,11 @@ def test_a_resumed_intake_reuses_its_conclusion_and_does_not_drop_twice(flow, cm
 # ---------- 監視が手順の上限で CLI を止めたとき（決定 23 / I15） ----------
 
 
-def test_a_phase_stopped_by_the_monitor_is_taken_in_by_the_deadline_and_reported(flow, cmd_setup, cmd_implement, cmd_report, capsys):
-    """止めたときは未コミットの変更を捨て、コミット済みの項目は git の時刻で判定し、報告に出す。"""
+def test_a_phase_stopped_by_the_monitor_takes_in_every_commit_and_reports_it(flow, cmd_setup, cmd_implement, cmd_report, capsys):
+    """止めたときは未コミットの変更を捨て、コミット済みの項目は時刻に依らず取り込み、報告に出す（#1743 I13）。"""
     work = flow["work"]
     done = _item("I-001", 1, symbol="add")
-    late = _item("I-002", 2, deadline=PAST)
+    late = {**_item("I-002", 2), "start_deadline": PAST}  # 旧い状態ファイルの着手期限は読まない
     _implement_phase(flow, cmd_setup, done, late)
     _write(work, "src/other.py", "X = 1\n")
     commit_with_trailers(work, "Refactor add", item_trailers("I-001"))
@@ -527,7 +521,8 @@ def test_a_phase_stopped_by_the_monitor_is_taken_in_by_the_deadline_and_reported
     assert state["phases"]["implement"]["stopped"]["reason"] == "timeout"
     assert not (work / "src" / "half.py").exists()
     assert _items(flow)["I-001"]["status"] == "implemented"
-    assert _deferred(flow).get("I-002") == "not_done"
+    assert _items(flow)["I-002"]["status"] == "implemented"
+    assert "I-002" not in _deferred(flow)
     capsys.readouterr()
     _call(cmd_report, "cmd_report", metrics=False)
     assert "implement（上限" in capsys.readouterr().out

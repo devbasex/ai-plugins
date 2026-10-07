@@ -49,11 +49,11 @@ def _strategy(name):
 
 def test_reserve_matches_the_917_example(budget):
     r = budget.reserve(_strategy("local-full"), 60, None, False, 5.5)
-    # 最終ゲートの修正 1 回分（final_fix）も改修計画の時点で差し引く（決定 26）
-    assert r == {"danger_whole_test": 1.0, "final_whole_test": 1.0, "fix": 5.5, "final_fix": 5.5}
-    assert budget.reserve_total(r) == pytest.approx(13.0)
-    # 経過 9 分で使える時間は 60 − 9 − 13 = 38 分
-    assert budget.available_minutes(60, 9, r) == pytest.approx(38.0)
+    # 最終ゲートの修正 1 回分（final_fix）も改修計画の時点で差し引く（決定 26）。危険フラグの全体テストは最終ゲートと兼ねる（#1743 決定 1）
+    assert r == {"danger_whole_test": 0.0, "final_whole_test": 1.0, "fix": 5.5, "final_fix": 5.5}
+    assert budget.reserve_total(r) == pytest.approx(12.0)
+    # 経過 9 分で使える時間は 60 − 9 − 12 = 39 分
+    assert budget.available_minutes(60, 9, r) == pytest.approx(39.0)
 
 
 def test_reserve_with_a_ci_gate_and_a_missing_baseline(budget):
@@ -100,29 +100,26 @@ def test_select_accepts_exact_fit_despite_float_error(budget):
     assert len(selected) == 29 and skipped == []
 
 
-def test_end_time_and_deadlines(budget):
-    T = budget.end_time(START, 60, 7.5)
-    assert T == START + dt.timedelta(minutes=52.5)
+def test_the_implement_end_and_the_test_end(budget):
+    """I13: 実装の終わり = 打ち切り − R − Σ verify、テストの追加の終わり = 実装の終わり − Σ implement。"""
+    final_end = START + dt.timedelta(minutes=60)
     a = {"estimate": {"test": 2.0, "implement": 3.0, "verify": 1.0}}
     b = {"estimate": {"test": 0.0, "implement": 4.0, "verify": 1.0}}
-    out = budget.deadlines([a, b], T)
+    end = budget.implement_end(final_end, {"final_whole_test": 1.0, "fix": 5.5, "final_fix": 1.0}, [a, b])
     m = dt.timedelta(minutes=1)
-    # 実装: T − Σ_{j≥i} implement − Σ verify
-    assert out[0]["start_deadline"] == T - (3 + 4 + 2) * m
-    assert out[1]["start_deadline"] == T - (4 + 2) * m
-    # テストの追加: T − Σ(implement + verify) − Σ_{j≥i} test。足さない項目は None
-    assert out[0]["test_start_deadline"] == T - (9 + 2) * m
-    assert out[1]["test_start_deadline"] is None
+    assert end == final_end - (7.5 + 2) * m
+    assert budget.add_tests_end(end, [a, b]) == end - 7 * m
+    assert budget.readopt_available(final_end, {"fix": 1.0}, START + 55 * m) == pytest.approx(4.0)
 
 
 def test_fix_time_left_does_not_subtract_fix_reserve(budget):
     r = {"danger_whole_test": 1.0, "final_whole_test": 1.0, "fix": 5.5}
     now = START + dt.timedelta(minutes=50)
-    assert budget.fix_time_left(START, 60, r, now) == pytest.approx(8.0)
+    assert budget.fix_time_left(budget.fix_end(START, 60, r), now) == pytest.approx(8.0)
 
 
 def test_fix_time_left_keeps_the_final_fix_reserve_for_the_final_gate(budget):
     """決定 26: 検証の直しは、最終ゲートの修正 1 回分の予備時間まで食わない。"""
     r = {"danger_whole_test": 1.0, "final_whole_test": 1.0, "fix": 5.5, "final_fix": 5.5}
     now = START + dt.timedelta(minutes=50)
-    assert budget.fix_time_left(START, 60, r, now) == pytest.approx(2.5)
+    assert budget.fix_time_left(budget.fix_end(START, 60, r), now) == pytest.approx(2.5)

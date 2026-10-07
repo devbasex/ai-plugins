@@ -227,7 +227,7 @@ def test_the_implement_intake_rejects_a_changed_expectation(cmd_implement, tmp_p
             "test_changes": {"tests/test_a.py": (["    assert f(1) == 3\n"], ["    assert f(1) == 4\n"])},
         }
     ]
-    problem = cmd_implement._implement_problem(item, facts, [], [], {"worktrees": {"work": str(tmp_path)}})
+    problem = cmd_implement._implement_problem(item, facts, [], {"worktrees": {"work": str(tmp_path)}})
     assert problem is not None
     assert "期待" in problem
 
@@ -244,7 +244,7 @@ def test_the_fix_intake_rejects_a_changed_expectation(fix_intake) -> None:
             "test_changes": {"tests/test_a.py": (["    assert f(1) == 3\n"], ["    assert f(1) == 4\n"])},
         }
     ]
-    problems = fix_intake._fix_problems({"target_scope": ["tests"]}, facts, {"I-001"})
+    problems = fix_intake._fix_problems({}, facts, {"I-001"})
     assert len(problems) == 1 and "期待" in problems[0]
 
 

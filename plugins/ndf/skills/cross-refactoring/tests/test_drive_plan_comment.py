@@ -64,6 +64,8 @@ class Fake:
             return self.init_rc, f"ID=7\nTMP_DIR={self.tmp}\nPHASE={self.phase}\nIMPL=codex\nRUNTIMES=codex\nWORK={self.tmp}\n"
         if sub == "plan-comment":
             return self.comment
+        if sub == "readopt":
+            return 2, ""  # 入る候補が無い（最終ゲートへ）
         if sub == "final-gate":
             self.state["final_gate"] = {"status": "passed" if self.gate in ("passed", "cross-review") else self.gate}
             self.save()

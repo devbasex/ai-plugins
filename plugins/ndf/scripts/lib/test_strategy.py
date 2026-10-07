@@ -710,9 +710,16 @@ def limits(
 
 
 def reserve_seconds(strategy: Strategy, whole: Optional[float], ci: Optional[float], ci_gate: bool) -> tuple[float, float]:
-    """バッファに入れる全体テストの秒（危険フラグ, 最終ゲート）。CI に任せる戦略は危険フラグ 0・最終ゲート c（決定 8）。"""
+    """バッファに入れる全体テストの秒（危険フラグ, 最終ゲート）。
+
+    CI に任せる戦略は危険フラグ 0・最終ゲート c（決定 8）。手元で最終ゲートを見る戦略は、検証の中の全体テストを最終ゲートが
+    使い回すため、危険フラグの全体テストを最終ゲートの w と兼ねて 0 にする（#1743 決定 1）。`--ci-check` を付けた手元の戦略は
+    最終ゲートが CI を見て使い回せないため、危険フラグ w・最終ゲート c のまま。
+    """
     w = float(whole or 0.0)
     c = float(ci or 0.0)
     if strategy.whole_on_ci:
         return 0.0, c
-    return w, (c if ci_gate else w)
+    if ci_gate:
+        return w, c
+    return 0.0, w

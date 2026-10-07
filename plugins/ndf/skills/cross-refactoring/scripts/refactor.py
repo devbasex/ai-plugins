@@ -53,6 +53,7 @@ from refactor_lib.commands.implement import (  # noqa: E402
 from refactor_lib.commands.measure import cmd_measure  # noqa: E402
 from refactor_lib.commands.plan import cmd_merge_plan  # noqa: E402
 from refactor_lib.commands.plan_comment import cmd_plan_comment  # noqa: E402
+from refactor_lib.commands.readopt import cmd_readopt  # noqa: E402
 from refactor_lib.commands.propose import cmd_merge_proposals  # noqa: E402
 from refactor_lib.commands.reassign import STEPS as REASSIGN_STEPS, cmd_reassign  # noqa: E402
 from refactor_lib.commands.report import (  # noqa: E402
@@ -61,6 +62,7 @@ from refactor_lib.commands.report import (  # noqa: E402
     cmd_status,
 )
 from refactor_lib.commands.phases import PHASE_NAMES, cmd_start_phase  # noqa: E402
+from refactor_lib.commands.catch_up import cmd_catch_up  # noqa: E402
 from refactor_lib.commands.setup import cmd_init, runtime_list  # noqa: E402
 from refactor_lib.measure import summary_extra  # noqa: E402
 
@@ -221,11 +223,13 @@ def add_id_commands(sub: argparse._SubParsersAction) -> None:
     for name, func, help_ in (
         ("measure", cmd_measure, "提案の前に指標を 1 回だけ測り、指標のファイルを書く（失敗しても 0）"),
         ("merge-proposals", cmd_merge_proposals, "提案の統合・語彙としきい値・候補の切り出し（30 組 × 組の中 3 件）"),
-        ("merge-plan", cmd_merge_plan, "改修計画の取り込み・等級と同じ変更か（Jev）・見積り・件数・締め切り"),
-        ("merge-tests", cmd_merge_tests, "テストの追加の取り込み（test_failed / not_done）"),
-        ("merge-implement", cmd_merge_implement, "実装の取り込み（1 項目 = 1 コミット / not_done）"),
+        ("merge-plan", cmd_merge_plan, "改修計画の取り込み・等級と同じ変更か（Jev）・見積り・件数・実装の終わり"),
+        ("merge-tests", cmd_merge_tests, "テストの追加の取り込み（test_failed / コミットの無い項目は持ち越し）"),
+        ("merge-implement", cmd_merge_implement, "実装の取り込み（1 項目 = 1 コミット / コミットの無い項目は持ち越し）"),
         ("verify", cmd_verify, "項目ごとの範囲テストと危険フラグ。VERIFY=done|fix"),
         ("merge-fix", cmd_merge_fix, "修正の取り込み"),
+        ("readopt", cmd_readopt, "検証の後、残った時間に入る見送りの候補を採り直す。0 = 採った / 2 = 入らない（最終ゲートへ）"),
+        ("catch-up", cmd_catch_up, "再開で止まっていた時間を測り、まだ来ていない締め切りをずらす（常に 0）"),
         ("final-gate", cmd_final_gate, "最終ゲート。--ci-check があれば継続的統合、無ければ全体のテスト"),
         ("merge-final-fix", cmd_merge_final_fix, "最終ゲートの修正結果の取り込み"),
         ("status", cmd_status, "現在の状態を人が読む形で出す"),
@@ -287,6 +291,18 @@ def add_report_parser(sub: argparse._SubParsersAction) -> None:
     rp.set_defaults(func=cmd_report)
 
 
+def _set_alive_file(args: argparse.Namespace) -> None:
+    """`id` を持つサブコマンドなら、テストの待ちが更新する心拍のファイルを 1 度だけ設定する（#1743 決定 3）。"""
+    from refactor_lib import paths, process
+
+    state_id = getattr(args, "id", None)
+    if not isinstance(state_id, int):
+        return
+    found = paths.existing_state(state_id)
+    if found is not None:
+        process.ALIVE_FILE = paths.alive_path(found.parent, state_id)
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -296,6 +312,7 @@ def main() -> None:
     add_report_parser(sub)
 
     args = p.parse_args()
+    _set_alive_file(args)
     try:
         args.func(args)
     except container_reach.Unreachable as e:

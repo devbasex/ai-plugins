@@ -331,8 +331,8 @@ def test_a_failed_drop_leaves_origin_untouched(undo, tmp_path, repo):
     assert all(i["status"] == "implemented" for i in read_state(path)["items"])
 
 
-def test_the_first_push_comes_at_the_final_gate(cmd_converge, cmd_gate, publish, patch_lib, tmp_path, repo, monkeypatch):
-    """AC-1399-4: 検証を終えて最終ゲートへ入る時点の push が、実行で最初の push になる。"""
+def test_the_verify_does_not_push(cmd_converge, cmd_gate, publish, patch_lib, tmp_path, repo, monkeypatch):
+    """AC-1399-4・#1743 決定 10: 検証の終わりでは push せず、採り直しの判定へ移る（最初の push は最終ゲートの入口）。"""
     work = repo["work"]
     base = _base(work, ["src/a.py"])
     _change(work, "src/a.py", 2, "by-I-001")
@@ -346,7 +346,8 @@ def test_the_first_push_comes_at_the_final_gate(cmd_converge, cmd_gate, publish,
 
     cmd_converge.cmd_verify(type("A", (), {"id": 130})())
 
-    assert calls == ["final"]
+    assert calls == []
+    assert read_state(path)["phase"] == "readopt"
 
 
 # ---------- #1237・#1793: 外すのは衝突したコミットの項目だけ ----------

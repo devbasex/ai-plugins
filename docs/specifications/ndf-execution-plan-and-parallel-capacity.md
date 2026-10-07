@@ -131,6 +131,16 @@ supervisor は報告を返して終わっており CLI もテストも動かし�
 **初期値はコマンドの定数だけが持ち、引数で上書きできる。** 文書は値を写さず、実行計画の「測った値」の
 表が起動のたびの値と結果を残して初期値を直す根拠になる。
 
+**`/proc/` と cgroup の読み取りは `lib/procs.py` が持つ。** PSI（`memory_pressure_some_avg10`）・vmstat
+（`swap_io_pages`）・`memory.stat` の `anon`（`cgroup_memory` が返す `CgroupMemory.anon`）はどれも procs に置き、
+既定のパスも procs の定数（`PROC_PRESSURE_MEMORY` / `PROC_VMSTAT`）が持つ。`/proc/` の文字列を procs だけに許す
+構造チェックの例外を増やさないためである。psutil の `swap_memory()` は読む元を差し替えられず、検査が実ホストの
+`/proc` に依らずに区分を作れないため使わない。`CgroupMemory.anon` は既定値 `None` の 5 つ目の欄で、4 引数の構築は
+変わらない。
+
+**`--swap-free-min-pct` は値を問わず受けて知らせ、無視する。** 値の型を検査すると、廃止した引数に誤った値を
+渡した既存の呼び出しだけが終了コード 2 で止まる。
+
 **測定はコマンドが行い、起動の拒否はしない。** supervisor は Agent ツールで起動され、サブエージェントは本体の
 プロセスの中で動くため、フックで本数を数える手がかりが無い。数えられないものを拒否の条件にすると、
 止める必要の無い起動を止めるか、止めないまま「機械が見ている」と読まれる。

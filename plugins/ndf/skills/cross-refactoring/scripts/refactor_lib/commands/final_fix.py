@@ -33,6 +33,8 @@ from ..gitfacts import (
     reported_shas,
     safe_int,
 )
+from ..items import implement_shas, live_items
+from ..scope_check import judge_commits
 from ..intake import IntakeScope, already_closed, close_without_result, discard_unverified, ran_seat
 from ..paths import head_sha, load_state, work_dir
 from ..verify import unassigned_fix_commits, verify_final_fix_commit
@@ -117,8 +119,8 @@ def _verify_final_fix_commits(
     work: str,
     payload: dict[str, Any],
     ordered_range: list[str],
-) -> tuple[list[str], list[str]]:
-    """申告されたコミットを検証し、未申告のコミットと問題の一覧を返す。"""
+) -> tuple[list[str], list[str], list[dict[str, str]]]:
+    """申告されたコミットを検証し、未申告のコミット・問題の一覧・呼び手の書き換えとして通したファイルを返す。"""
     claimed_shas = reported_shas(payload)
     unassigned = unassigned_fix_commits(work, claimed_shas, ordered_range)
     # **テストコマンドは渡さない。** テストの合否は `final-gate` が採った側で 1 度だけ見る
@@ -130,8 +132,18 @@ def _verify_final_fix_commits(
         "",
         state["head_branch"],
     )
-    problems = [p for p in (verify_final_fix_commit(c, state.get("target_scope") or []) for c in facts) if p]
-    return unassigned, problems
+    problems = [p for p in (verify_final_fix_commit(c) for c in facts) if p]
+    rewrites: list[dict[str, str]] = []
+    if not problems and ordered_range:
+        # 修正の全コミットを 1 つの単位にする（`Item-Id` を持たない。#1814 決定 11）。変えた名前は採った全項目の
+        # 実装・修正と、前の最終ゲート修正のコミットからも集める（決定 2）
+        context = [s for item in live_items(state) for s in (*implement_shas(item), *((item.get("commits") or {}).get("fix") or []))]
+        context += list((state.get("final_gate") or {}).get("fix_commits") or [])
+        verdict = judge_commits(state, list(reversed(ordered_range)), context)
+        if verdict.problem:
+            problems.append(verdict.problem)
+        rewrites = verdict.rewrites
+    return unassigned, problems, rewrites
 
 
 def _report_problems(unassigned: list[str], problems: list[str]) -> None:
@@ -219,7 +231,7 @@ def cmd_merge_final_fix(args: argparse.Namespace) -> None:
         sys.exit(2)
 
     payload, head_now, ordered_range = _collect_final_fix_range(path, state, gate, scope, impl, work)
-    unassigned, problems = _verify_final_fix_commits(state, work, payload, ordered_range)
+    unassigned, problems, rewrites = _verify_final_fix_commits(state, work, payload, ordered_range)
     _report_problems(unassigned, problems)
     _add_fix_seconds(gate, payload)
 
@@ -240,6 +252,9 @@ def cmd_merge_final_fix(args: argparse.Namespace) -> None:
             sys.exit(2)
         gate["fix_base_sha"] = head_now
         gate.setdefault("fix_commits", []).extend(ordered_range)
+        if rewrites:
+            # 呼び手の書き換えとして通したファイルを最終ゲートのレビューへ引き継ぐ（#1814 I5）
+            gate.setdefault("review_scope_judgements", []).extend(rewrites)
         info(f"修正を取り込みました（{len(ordered_range)} コミット）")
 
     statefile.save(path, state)
