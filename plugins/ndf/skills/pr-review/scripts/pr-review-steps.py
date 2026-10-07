@@ -56,6 +56,7 @@ EXTERNAL_AI = PLUGIN_ROOT / "skills" / "external-ai" / "scripts" / "external-ai.
 SEVERITIES = ("critical", "major", "minor", "nit")
 BLOCKING = ("critical", "major")
 STAGES = ("spec", "quality")
+DEFAULT_STAGE = "quality"  # 段を書かない指摘の段
 DELEGATES = ("codex", "agy")
 PERSPECTIVE_HEADING = "## 観点"
 DIFF_FILE = re.compile(r"^diff --git a/.+? b/(.+)$", re.MULTILINE)
@@ -100,6 +101,11 @@ DELEGATE_RULES = """# レビューの依頼
 # ---------------- 指摘ファイル・本来の判定 ----------------
 
 
+def _stage(c: dict) -> str:
+    """指摘の段。書かれていなければ DEFAULT_STAGE。"""
+    return c.get("stage", DEFAULT_STAGE)
+
+
 def check_findings(data) -> list[str]:
     """指摘ファイルの中身の誤り（I3）。空なら読める。"""
     if not isinstance(data, dict):
@@ -116,7 +122,7 @@ def check_findings(data) -> list[str]:
             continue
         if c.get("severity") not in SEVERITIES:
             errs.append(f"comments[{n}]: 重要度 {c.get('severity')!r} は {' / '.join(SEVERITIES)} のどれでもない")
-        if c.get("stage", "quality") not in STAGES:
+        if _stage(c) not in STAGES:
             errs.append(f"comments[{n}]: 段 {c.get('stage')!r} は {' / '.join(STAGES)} のどれでもない")
         if not isinstance(c.get("body"), str) or not c["body"].strip():
             errs.append(f"comments[{n}]: body が空")
@@ -126,7 +132,7 @@ def check_findings(data) -> list[str]:
 def decide_event(comments: list[dict]) -> dict:
     """指摘の集合から本来の判定を決める（I4）。副作用を持たない。"""
     by_severity = {s: sum(1 for c in comments if c.get("severity") == s) for s in SEVERITIES}
-    spec_unmet = sum(1 for c in comments if c.get("stage", "quality") == "spec")
+    spec_unmet = sum(1 for c in comments if _stage(c) == "spec")
     if spec_unmet or any(by_severity[s] for s in BLOCKING):
         intent = "REQUEST_CHANGES"
     elif comments:
@@ -151,7 +157,7 @@ def _finding_place(c: dict) -> str:
 def build_payload(data: dict) -> dict:
     """指摘ファイルから `review-post` へ渡す payload を組む。指摘ファイルは書き換えない（決定 9）。"""
     comments = data["comments"]
-    spec = [c for c in comments if c.get("stage", "quality") == "spec"]
+    spec = [c for c in comments if _stage(c) == "spec"]
     parts = []
     if spec:
         parts.append("### 仕様適合（満たさない）\n\n" + "\n".join(f"- {_finding_place(c)}{_prefixed(c)}" for c in spec))
@@ -159,7 +165,7 @@ def build_payload(data: dict) -> dict:
         parts.append(data["summary"].strip())
     out = []
     for c in comments:
-        if c.get("stage", "quality") == "spec" and not (c.get("path") and c.get("line") is not None):
+        if _stage(c) == "spec" and not (c.get("path") and c.get("line") is not None):
             continue
         item = {"severity": c["severity"], "body": _prefixed(c)}
         for k in ("path", "line"):
@@ -349,10 +355,10 @@ def branch_report(data: dict, verdict: dict) -> str:
     return (
         "## レビュー結果\n\n"
         "### 概要\n\n- 件数: " + " / ".join(f"{s} {by[s]}" for s in SEVERITIES) + "\n\n"
-        "### 第 1 段: 仕様適合（満たさない）\n\n" + lines(lambda c: c.get("stage", "quality") == "spec") + "\n\n"
-        "### 第 2 段: Issues（要修正）\n\n" + lines(lambda c: c.get("stage", "quality") == "quality" and c["severity"] in BLOCKING) + "\n\n"
+        "### 第 1 段: 仕様適合（満たさない）\n\n" + lines(lambda c: _stage(c) == "spec") + "\n\n"
+        "### 第 2 段: Issues（要修正）\n\n" + lines(lambda c: _stage(c) == "quality" and c["severity"] in BLOCKING) + "\n\n"
         "### 第 2 段: Suggestions（改善提案）\n\n"
-        + lines(lambda c: c.get("stage", "quality") == "quality" and c["severity"] not in BLOCKING)
+        + lines(lambda c: _stage(c) == "quality" and c["severity"] not in BLOCKING)
         + "\n\n"
         + (f"### 総評\n\n{data['summary'].strip()}\n" if str(data.get("summary") or "").strip() else "")
     )
