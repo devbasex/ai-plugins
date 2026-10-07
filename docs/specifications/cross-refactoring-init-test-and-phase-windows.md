@@ -117,8 +117,8 @@ init が終了コード 4 で止まった。同じ範囲の実測は 320 秒（6
 | I1 | `final_end_at = started_at + B`。着手前のテストの所要に左右されない | 単体テストで落とす |
 | I2 | `propose_end_at = started_at + o + 0.20·B`、`plan_end_at = propose_end_at + 0.10·B`。o は `resumed_at` が無ければ x（`baseline_test.seconds`。無ければ 0）、あれば `max(x, resumed_at − started_at)` | 単体テストで落とす |
 | I3 | `resumed_at` を書くのは、止めた印（`window_stopped_at`）を持つ状態をリファクタリング計画の前に打ち直したときだけである。印の無い再開と計画を取り込んだ後の再開は `resumed_at` を変えない | `init` のテストで落とす |
-| I4 | `fix_end_at`・`stop_revert_end_at`・項目の締め切りは `started_at` から数え、x に依らない | 単体テストで落とす |
-| I5 | `plan_end_at > final_end_at` の状態で提案者を起動しない。`init`（新規と、計画の前の再開）は止めた印を残して状態を保存し、要る想定最大時間の下限を出して終了コード 4 で止まる。収まれば印を消す | `init` のテストで落とす |
+| I4 | `fix_end_at`・`stop_revert_end_at`・実装の終わりは `started_at` から数え、x に依らない（項目ごとの期限は持たない） | 単体テストで落とす |
+| I5 | `plan_end_at` に計画の後の見込み（`after_plan_minutes`。バッファの見込みと最短の項目 1 件）を足した時刻が `final_end_at` を越える状態で提案者を起動しない。`init`（新規と、計画の前の再開）は止めた印を残して状態を保存し、要る想定最大時間の下限を出して終了コード 4 で止まる。収まれば印を消す | `init` のテストで落とす |
 | I6 | 計画を取り込んだ後の再開は `limits` を組み直さず、`window_problem` も見ない | `init` のテストで落とす |
 | I7 | CI に任せる戦略の `init_test_timeout` は、範囲テストの所要 s が分かれば `max(0.10·B, 3·s)`、分からなければ `0.10·B`。ほかの戦略と予算なしの値は s を渡しても変わらない | 単体テストで落とす |
 | I8 | s は、同じ戦略・同じ置き場所の集合の `init_test` 行の直近 10 行の秒の最大 → 置き場所が全体テストの suite の `paths` を覆うときの w → 無し、の順に採る。CI に任せる戦略でなければ履歴を読まない | 単体テストで落とす |
@@ -141,8 +141,8 @@ init が終了コード 4 で止まった。同じ範囲の実測は 320 秒（6
 | `window_offset(state)` | o（秒）。I2 の式で、状態の `baseline_test.seconds`・`started_at`・`resumed_at` だけを読む |
 | `of_state(state)` | `window_offset(state)` を `compute` へ渡す。`test_limits(state)` は `baseline_test.scope_seconds` / `scope_source` を `limits` へ渡す（I9） |
 | `RESUME_GRACE_SECONDS` | 300。人が文を読んで打ち直すまでの見込み |
-| `required_budget_minutes(offset_seconds)` | `ceil((o + RESUME_GRACE_SECONDS) / (60 · (1 − PROPOSE_SHARE − PLAN_SHARE)))`。o = 1300 なら 39、1700 なら 48 |
-| `window_problem(limits)` | `plan_end_at > final_end_at` なら止める理由の文（`limits` から o を逆算し、下限を `required_budget_minutes` で出す）、収まれば `None`（純粋） |
+| `required_budget_minutes(offset_seconds, after_plan=0)` | `ceil(((o + RESUME_GRACE_SECONDS) / 60 + after_plan) / (1 − PROPOSE_SHARE − PLAN_SHARE))`（分）。見込みが 0 なら o = 1300 で 39、1700 で 48 |
+| `window_problem(limits)` | `plan_end_at + after_plan_minutes > final_end_at` なら止める理由の文（`limits` から o を逆算し、下限を `required_budget_minutes` で出す）、収まれば `None`（純粋）。見込みの出し方は [実装の時間と採り直しの確定仕様](cross-refactoring-implementation-window-and-readopt.md) にある |
 
 ### 着手前のテスト（`refactor_lib/baseline.py`・`refactor_lib/init_test.py`）
 
