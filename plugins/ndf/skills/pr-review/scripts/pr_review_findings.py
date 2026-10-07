@@ -1,4 +1,4 @@
-"""pr_review_findings.py: `pr-review-steps.py` の指摘ファイルの検査・本来の判定・payload の組み立て（#860）。
+"""pr_review_findings.py: `pr-review-steps.py` の指摘ファイルの検査・本来の判定・payload と報告の組み立て（#860）。
 
 外部へアクセスしない。指摘ファイルは書き換えない（決定 9）。
 """
@@ -95,6 +95,26 @@ def build_payload(data: dict) -> dict:
     comments = data["comments"]
     spec = [c for c in comments if _stage(c) == "spec"]
     return {"summary": _payload_summary(data, spec), "comments": [_payload_comment(c) for c in comments if not _skip_in_payload(c)]}
+
+
+def branch_report(data: dict, verdict: dict) -> str:
+    comments = data["comments"]
+
+    def lines(pick) -> str:
+        got = [f"- {_finding_place(c)}{_prefixed(c)}" for c in comments if pick(c)]
+        return "\n".join(got) or "- なし"
+
+    by = verdict["by_severity"]
+    return (
+        "## レビュー結果\n\n"
+        "### 概要\n\n- 件数: " + " / ".join(f"{s} {by[s]}" for s in SEVERITIES) + "\n\n"
+        "### 第 1 段: 仕様適合（満たさない）\n\n" + lines(lambda c: _stage(c) == "spec") + "\n\n"
+        "### 第 2 段: Issues（要修正）\n\n" + lines(lambda c: _stage(c) == "quality" and c["severity"] in BLOCKING) + "\n\n"
+        "### 第 2 段: Suggestions（改善提案）\n\n"
+        + lines(lambda c: _stage(c) == "quality" and c["severity"] not in BLOCKING)
+        + "\n\n"
+        + (f"### 総評\n\n{data['summary'].strip()}\n" if str(data.get("summary") or "").strip() else "")
+    )
 
 
 def load_findings(path: Path) -> tuple[dict | None, list[str]]:
