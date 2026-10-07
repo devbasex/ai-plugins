@@ -59,9 +59,10 @@ from step_result import EXIT_GATE, EXIT_OK, EXIT_PAUSE, EXIT_UNREADABLE, EXIT_VI
 from step_result import approval_present, emit, presentation_dir, result  # noqa: E402
 
 TOOL = "issue-file"
-REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+_REPO_FORM = r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+"  # <所有者>/<リポジトリ>
+REPO_RE = re.compile(rf"^{_REPO_FORM}$")
 ORIGIN_RE = re.compile(r"^(PR|issue) #[1-9][0-9]*$")
-COUNTERPART_RE = re.compile(r"^(?P<repo>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#(?P<number>[1-9][0-9]*)$")
+COUNTERPART_RE = re.compile(rf"^(?P<repo>{_REPO_FORM})#(?P<number>[1-9][0-9]*)$")
 GITHUB_URL_RE = re.compile(r"github\.com[:/]")
 SKELETON = ("何を見つけたか", "どこで見つけたか", "なぜこの変更の範囲外なのか", "直さないと何が起きるか", "由来")
 ORIGIN_HEADING = "## 由来"
