@@ -125,16 +125,13 @@ def window_offset(state: dict[str, Any]) -> float:
     return max(0.0, x)
 
 
-def _completion(items: list[dict[str, Any]], start_key: str, estimate_key: str) -> Optional[_dt.datetime]:
-    """その手順の最後の項目の完了の締め切り（着手の締め切り + 見積り）。項目が無ければ `None`。"""
-    ends = []
-    for item in items:
-        start = clock.parse(item.get(start_key))
-        if start is None:
-            continue
-        minutes = float((item.get("estimate") or {}).get(estimate_key) or 0.0)
-        ends.append(start + _dt.timedelta(minutes=minutes))
-    return max(ends) if ends else None
+# 実装の終わりに検証の見積りを引く「採っていて未検証」の項目の状態（I13）。
+UNVERIFIED = ("planned", "tested", "implemented", "failing")
+
+
+def pending_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """採っていて未検証の項目。前の巡で検証を終えた・取り消した・見送った・持ち越した項目は数えない。"""
+    return [i for i in items if i.get("status", "planned") in UNVERIFIED]
 
 
 def _iso(value: Optional[_dt.datetime]) -> Optional[str]:
@@ -148,9 +145,14 @@ def compute(
     items: Optional[list[dict[str, Any]]] = None,
     reserve: Optional[dict[str, Any]] = None,
     offset_seconds: Optional[float] = None,
+    after_plan: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """実行時の値の表。`tests` は `test_strategy.limits` の表（数値か `None` なら、着手前の実測として `local-full` の表を組む）。
-    `items` と `reserve`（改修計画の後）が無ければ、その行は `None`。
+    `items` と `reserve`（改修計画の後）が無ければ、その行は `None`。`after_plan` は計画の後に要る時間の見込み
+    （`{"reserve_minutes", "item_minutes", "table_source"}`。#1743 の F2）で、無ければ 0 分として扱う。
+
+    実装の終わりは `final_end − R − Σ（採っていて未検証の項目の verify）`、テストの追加の終わりはそこから同じ項目の
+    implement を引いた時刻である（I13）。項目ごとの期限は持たない。
 
     提案と改修計画の枠は `started_at + offset_seconds`（o。着手前のテストの終わり）から数える（#1385 I2）。
     `final_end_at` と `fix_end_at`・`stop_revert_end_at` は `started_at` から数える（I1・I3）。"""
@@ -161,6 +163,13 @@ def compute(
     propose_end = origin + _dt.timedelta(minutes=b * PROPOSE_SHARE)
     plan_end = propose_end + _dt.timedelta(minutes=b * PLAN_SHARE)
     planned = reserve is not None
+    final_end = started_at + _dt.timedelta(minutes=b)
+    pending = pending_items(list(items or []))
+    implement_end = budget.implement_end(final_end, reserve, pending) if planned else None
+    add_tests_end = budget.add_tests_end(implement_end, pending) if implement_end is not None else None
+    basis = dict(tests.get("basis") or {})
+    if after_plan:
+        basis["after_plan"] = dict(after_plan)
     return {
         "budget_minutes": b,
         "margin_seconds": margin(b),
@@ -169,22 +178,33 @@ def compute(
         "test_timeout": int(tests["test_timeout"]),
         "whole_timeout": int(tests["whole_timeout"]),
         "ci_wait_timeout": int(tests["ci_wait_timeout"]),
-        "basis": dict(tests.get("basis") or {}),
+        "basis": basis,
         "propose_end_at": _iso(propose_end),
         "plan_end_at": _iso(plan_end),
-        "add_tests_end_at": _iso(_completion(list(items or []), "test_start_deadline", "test")),
-        "implement_end_at": _iso(_completion(list(items or []), "start_deadline", "implement")),
+        "add_tests_end_at": _iso(add_tests_end),
+        "implement_end_at": _iso(implement_end),
         "fix_end_at": _iso(budget.fix_end(started_at, b, reserve)) if planned else None,
-        "final_end_at": _iso(started_at + _dt.timedelta(minutes=b)),
+        "final_end_at": _iso(final_end),
         "stop_revert_end_at": _iso(started_at + _dt.timedelta(minutes=b * (1 + STOP_REVERT_SHARE))) if planned else None,
         # 最終ゲートの修正の 1 回目に必ず渡す長さ（決定 26）。予備時間の `final_fix`。
         "final_fix_seconds": (math.ceil(float(reserve.get("final_fix") or 0.0) * 60) if planned else None),
+        # 計画の後に要る時間の見込み（バッファの見込み R + 1 件の長さ L）。提案の前に止まる判定に使う（I8）。
+        "after_plan_minutes": after_plan_minutes(after_plan),
     }
 
 
-def of_state(state: dict[str, Any]) -> dict[str, Any]:
-    """状態の値から表を組む。改修計画の後なら項目と予備時間も使う。"""
+def after_plan_minutes(after_plan: Optional[dict[str, Any]]) -> float:
+    """見込みの分（R + L）。無ければ 0（この変更より前の表。今の振る舞い）。"""
+    if not after_plan:
+        return 0.0
+    return round(float(after_plan.get("reserve_minutes") or 0.0) + float(after_plan.get("item_minutes") or 0.0), 2)
+
+
+def of_state(state: dict[str, Any], after_plan: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """状態の値から表を組む。改修計画の後なら項目と予備時間も使う。`after_plan` が無ければ、書き出した表の見込みを引き継ぐ。"""
     plan = state.get("plan") or None
+    if after_plan is None:
+        after_plan = ((state.get("limits") or {}).get("basis") or {}).get("after_plan")
     return compute(
         clock.parse(state["started_at"]),
         int(state["budget_minutes"]),
@@ -192,21 +212,24 @@ def of_state(state: dict[str, Any]) -> dict[str, Any]:
         state.get("items") if plan else None,
         (plan or {}).get("reserve") if plan else None,
         window_offset(state),
+        after_plan,
     )
 
 
-def required_budget_minutes(offset_seconds: float) -> int:
-    """枠の起点が o のとき、提案と改修計画の枠が収まる想定最大時間の下限（分）。人が打ち直すまでの見込みを足す。"""
+def required_budget_minutes(offset_seconds: float, after_plan: float = 0.0) -> int:
+    """枠の起点が o のとき、提案と改修計画の枠の後に見込み（R + L）が収まる想定最大時間の下限（分）。
+    人が打ち直すまでの見込みを足す（I8）。見込みが 0 なら枠だけが収まる下限である。"""
     share = round(1.0 - PROPOSE_SHARE - PLAN_SHARE, 9)
-    return math.ceil(round((float(offset_seconds) + RESUME_GRACE_SECONDS) / (60 * share), 9))
+    return math.ceil(round(((float(offset_seconds) + RESUME_GRACE_SECONDS) / 60 + float(after_plan or 0.0)) / share, 9))
 
 
 def window_problem(limits: dict[str, Any]) -> Optional[str]:
-    """提案と改修計画の枠の終わり（`plan_end_at`）が想定最大時間の終わり（`final_end_at`）を越えるなら止める理由の文。
-    収まれば `None`（#1385 I4・決定 2）。"""
+    """提案と改修計画の枠の終わり（`plan_end_at`）に、計画の後に要る時間の見込み（`after_plan_minutes`）を足した時刻が
+    想定最大時間の終わり（`final_end_at`）を越えるなら止める理由の文。収まれば `None`（#1385 I4・#1743 I8）。"""
     plan_end = clock.parse(limits.get("plan_end_at"))
     final_end = clock.parse(limits.get("final_end_at"))
-    if plan_end is None or final_end is None or plan_end <= final_end:
+    after = float(limits.get("after_plan_minutes") or 0.0)
+    if plan_end is None or final_end is None or plan_end + _dt.timedelta(minutes=after) <= final_end:
         return None
     b = int(limits["budget_minutes"])
     started = final_end - _dt.timedelta(minutes=b)
@@ -216,11 +239,20 @@ def window_problem(limits: dict[str, Any]) -> Optional[str]:
     later = f"（打ち直した時刻は開始から {math.ceil(offset)} 秒）" if x is None or offset > float(x) + 1 else ""
     window = _seconds(b, PROPOSE_SHARE + PLAN_SHARE)
     per_minute = round(60 / (60 * round(1.0 - PROPOSE_SHARE - PLAN_SHARE, 9)), 2)
+    detail = ((limits.get("basis") or {}).get("after_plan")) or {}
+    if after > 0:
+        what = (
+            f"提案とリファクタリング計画の枠（0.30·B = {window} 秒）の後に、バッファの見込み "
+            f"{float(detail.get('reserve_minutes') or 0.0):.1f} 分と最短の項目 1 件 {float(detail.get('item_minutes') or 0.0):.1f} 分が"
+        )
+        floor = "下限では 1 件だけが入ります"
+    else:
+        what = f"提案とリファクタリング計画の枠（0.30·B = {window} 秒）が"
+        floor = "下限では実装の時間が残りません"
     return (
-        f"着手前のテストに {spent}かかり{later}、提案とリファクタリング計画の枠（0.30·B = {window} 秒）が"
-        f"想定最大時間 {b} 分に収まりません。\n"
-        f"--budget-minutes を {required_budget_minutes(offset)} 以上にして {RESUME_GRACE_SECONDS // 60} 分以内に init を打ち直すと、"
-        f"着手前のテストを走らせ直さずに続けます（下限では実装の時間が残りません。打ち直しが {RESUME_GRACE_SECONDS // 60} 分より"
+        f"着手前のテストに {spent}かかり{later}、{what}想定最大時間 {b} 分に収まりません。\n"
+        f"--budget-minutes を {required_budget_minutes(offset, after)} 以上にして {RESUME_GRACE_SECONDS // 60} 分以内に init を打ち直すと、"
+        f"着手前のテストを走らせ直さずに続けます（{floor}。打ち直しが {RESUME_GRACE_SECONDS // 60} 分より"
         f" 1 分遅れるごとに、要る下限は約 {per_minute} 分増えます）"
     )
 
@@ -230,12 +262,22 @@ def limits_of(state: dict[str, Any]) -> dict[str, Any]:
     return state.get("limits") or of_state(state)
 
 
-def stop_revert_end(state: dict[str, Any]) -> Optional[_dt.datetime]:
-    """打ち切りの後の取り消し（案 A）の締め切り。書き出す前の状態ファイルはその場で組む（#1669 I9）。"""
-    value = limits_of(state).get("stop_revert_end_at")
+def _limit_at(state: dict[str, Any], key: str) -> Optional[_dt.datetime]:
+    """上限の表の時刻。書き出す前の状態ファイルはその場で組む（#1669 I9）。再開でずれた値もここから読む（#1743 決定 5）。"""
+    value = limits_of(state).get(key)
     if value is None and state.get("plan") and state.get("started_at"):
-        value = of_state(state).get("stop_revert_end_at")
+        value = of_state(state).get(key)
     return clock.parse(value)
+
+
+def stop_revert_end(state: dict[str, Any]) -> Optional[_dt.datetime]:
+    """打ち切りの後の取り消し（案 A）の締め切り。"""
+    return _limit_at(state, "stop_revert_end_at")
+
+
+def fix_end_at(state: dict[str, Any]) -> Optional[_dt.datetime]:
+    """直しの試行の打ち切り（`limits.fix_end_at`）。開始から計算し直さず、表の 1 か所から読む（決定 5）。"""
+    return _limit_at(state, "fix_end_at")
 
 
 def state_test_timeout(state: dict[str, Any]) -> int:

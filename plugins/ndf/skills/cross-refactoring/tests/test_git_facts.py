@@ -176,7 +176,7 @@ def test_fix_commits_pass_verification_through_real_git(fix_intake, gitfacts, wo
     sha = _commit(work, "Fix: レビュー指摘の反映" + TRAILERS, {"src/foo.py": "def f():\n    return 1  # 直した\n"})
     ordered = gitfacts.commits_in_range(str(work), base, "HEAD")
     facts = gitfacts.collect_commit_facts(str(work), [sha], set(ordered), "true", "main")
-    state = {"target_scope": ["src", "tests"]}
+    state = {"target_scope": ["src", "tests"], "worktrees": {"work": str(work)}}
     assert fix_intake._fix_problems(state, facts, {"I-001"}) == []
     # 修正の対象でない項目のコミットは弾く（`Item-Id` だけで対応づける。I4）
     assert fix_intake._fix_problems(state, facts, {"I-002"})

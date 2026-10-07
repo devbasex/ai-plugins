@@ -181,7 +181,7 @@ def test_drive_measures_once_before_the_proposal(tmp_path, monkeypatch, capsys, 
             return 0, (f"ID=7\nTMP_DIR={tmp_path}\nPHASE=propose\nIMPL=codex\nRUNTIMES=codex\nRUNTIMES_CSV=codex\nWORK={tmp_path}\n")
         if sub == "measure":
             return measure_rc, "CODE_METRICS=written\n"
-        if sub == "merge-proposals":
+        if sub in ("merge-proposals", "readopt"):
             return 2, ""
         if sub == "final-gate":
             return 0, "FINAL_GATE=passed\n"

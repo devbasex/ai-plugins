@@ -18,10 +18,22 @@ IMPLEMENTED = "implemented"
 FAILING = "failing"
 VERIFIED = "verified"
 REVERTED = "reverted"
-DEFERRED = "deferred"  # 締め切り・足したテストの失敗で見送った（取り消しと別に数える）
+DEFERRED = "deferred"  # 時間に入らなかった・足したテストの失敗で見送った（取り消しと別に数える）
+# 実装の終わりまでにコミットが無かった（持ち越し。#1743 I15）。次の `readopt` で採り直すか `not_done` で見送る
+CARRIED = "carried"
 
 # 取り消しの対象になりうる（コミットを持ちうる）状態。
 LIVE = (PLANNED, TESTED, IMPLEMENTED, FAILING, VERIFIED)
+
+
+def current_round(state: dict[str, Any]) -> int:
+    """今の採り直しの巡（`readopt.round`）。記録が無ければ 1（この変更より前の状態。#1743）。"""
+    return int((state.get("readopt") or {}).get("round") or 1)
+
+
+def in_current_round(state: dict[str, Any], item: dict[str, Any]) -> bool:
+    """項目が今の巡で採ったものか。`round` の無い項目は 1 巡目として読む。"""
+    return int(item.get("round") or 1) == current_round(state)
 
 
 def item_key(item: dict[str, Any]) -> tuple[str, str, str]:
@@ -97,10 +109,20 @@ def find_item(state: dict[str, Any], item_id: Optional[str], required: bool = Tr
     return None
 
 
+def implement_shas(item: dict[str, Any]) -> list[str]:
+    """項目の実装のコミットを古い順に返す。同じ `Item-Id` のコミットを何件でも持つ（#1814 決定 6）。
+
+    `commits.implement` は並びで書く。この変更より前の状態ファイルの文字列は 1 件の並びとして読む。
+    """
+    value = (item.get("commits") or {}).get("implement")
+    shas = value if isinstance(value, list) else [value]
+    return [s for s in shas if isinstance(s, str) and s]
+
+
 def item_shas(item: dict[str, Any]) -> list[str]:
-    """項目が持つコミット（テスト・実装・修正）を古い順に返す。"""
+    """項目が持つコミット（テスト・実装の全件・修正）を古い順に返す。取り消しはこの全件を戻す（#1814 I8）。"""
     commits = item.get("commits") or {}
-    shas = [commits.get("test"), commits.get("implement"), *(commits.get("fix") or [])]
+    shas = [commits.get("test"), *implement_shas(item), *(commits.get("fix") or [])]
     return [s for s in shas if isinstance(s, str) and s]
 
 
@@ -112,3 +134,47 @@ def live_items(state: dict[str, Any]) -> list[dict[str, Any]]:
 def newest_first(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """新しい項目から。実装は順位の順に積まれるため、順位の大きい方が新しい。"""
     return sorted(items, key=lambda i: int(i.get("rank") or 0), reverse=True)
+
+
+def new_items(selected: list[dict[str, Any]], first_rank: int = 1, round_no: int = 1) -> list[dict[str, Any]]:
+    """採った候補から改善項目（`items[]`）を作る。`merge-plan` と採り直し（`readopt`）が同じ形で作る（#1743）。"""
+    items = []
+    for rank, candidate in enumerate(selected, start=first_rank):
+        items.append(
+            {
+                **{
+                    k: candidate.get(k)
+                    for k in (
+                        "path",
+                        "symbol",
+                        "smell",
+                        "technique",
+                        "severity",
+                        "rationale",
+                        "plan",
+                        "estimated_diff_lines",
+                        "proposed_by",
+                        "tier",
+                        "tier_source",
+                        "risk",
+                        "tests",
+                        "test_targets",
+                        "scope_commands",
+                        "command_source",
+                        "mvv_basis",
+                    )
+                },
+                "id": f"I-{rank:03d}",
+                "candidate_id": candidate["id"],
+                "rank": rank,
+                "kind": item_kind(candidate),
+                "estimate": candidate["estimate"],
+                "round": round_no,
+                "status": PLANNED,
+                "commits": {"test": None, "implement": [], "fix": []},
+                "seconds": {},
+                "fix_count": 0,
+                "danger": [],
+            }
+        )
+    return items

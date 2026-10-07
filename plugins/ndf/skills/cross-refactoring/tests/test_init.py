@@ -17,6 +17,8 @@ import pytest
 
 
 HEAD_BRANCH = "refactor/target"
+# 応答から項目を外す印（`run_init` の `pr_status`）
+MISSING = object()
 
 
 def _git(*args, cwd):
@@ -88,15 +90,20 @@ def run_init(refactor_lib, paths, patch_lib, refactor, origin_repo, monkeypatch)
     probed: list[list[str]] = []
     probed_models: list[dict] = []
 
-    def _run(args, viewer="someone-else", probe=None, real_probe=False):
+    def _run(args, viewer="someone-else", probe=None, real_probe=False, pr_status=None):
         """`probe` を渡すと確認を差し替える。`{ランタイム: 理由}` の者だけが通らない。
+
+        `pr_status` は Pull Request の応答の `state` / `draft` / `merged_at` を上書きする（#1658）。
+        値に `MISSING` を渡すとその項目を応答から外す。
 
         `real_probe` を立てると差し替えず、止めない確認をそのまま走らせる（#813）。
         """
         real_sh = paths.sh
+        _run.gh_calls = []
 
         def fake_sh(cmd, cwd=None, check=True):
             if cmd[0] == "gh":
+                _run.gh_calls.append(list(cmd))
                 if "nameWithOwner" in cmd:
                     return "acme/demo"
                 if cmd[:3] == ["gh", "api", "user"]:
@@ -110,14 +117,22 @@ def run_init(refactor_lib, paths, patch_lib, refactor, origin_repo, monkeypatch)
                 if len(cmd) == 3 and cmd[:2] == ["gh", "api"] and cmd[2].startswith("repos/"):
                     if cmd[2] != f"repos/acme/demo/pulls/{args.pr}":
                         return ""
-                    return json.dumps(
-                        {
-                            "number": args.pr,
-                            "user": {"login": "me"},
-                            "head": {"ref": HEAD_BRANCH, "repo": {"full_name": "acme/demo"}},
-                            "base": {"ref": "main"},
-                        }
-                    )
+                    body = {
+                        "number": args.pr,
+                        "user": {"login": "me"},
+                        "head": {"ref": HEAD_BRANCH, "repo": {"full_name": "acme/demo"}},
+                        "base": {"ref": "main"},
+                        # 実際の応答は必ずこの 3 項目を持つ（#1658 の決定 5）
+                        "state": "open",
+                        "draft": True,
+                        "merged_at": None,
+                    }
+                    for key, value in (pr_status or {}).items():
+                        if value is MISSING:
+                            body.pop(key, None)
+                        else:
+                            body[key] = value
+                    return json.dumps(body)
                 raise AssertionError(f"想定外の gh 呼び出し: {cmd}")
             return real_sh(cmd, cwd=cwd, check=check)
 
@@ -915,10 +930,10 @@ def test_init_records_the_vocabulary_for_the_prompt(run_init, tmp_path, vocabula
 def test_resume_before_the_plan_rebuilds_the_limits_from_the_new_budget(run_init, tmp_path):
     """決定 24 — 改修計画の前に予算を置き換えた再開は、上限の表を新しい予算で組み直す。"""
     run_init(_args(tmp_path, budget_minutes="30"))
-    run_init(_args(tmp_path, budget_minutes="10"))
+    run_init(_args(tmp_path, budget_minutes="20"))
     _, after = _state_of(tmp_path)
-    assert after["budget_minutes"] == 10
-    assert after["limits"]["init_test_timeout"] == 60 and after["limits"]["margin_seconds"] == 30
+    assert after["budget_minutes"] == 20
+    assert after["limits"]["init_test_timeout"] == 120 and after["limits"]["margin_seconds"] == 60
 
 
 @pytest.mark.parametrize(
@@ -1487,13 +1502,7 @@ def test_start_phase_rewrites_the_launch_start_for_fix(phase_state, start_phase)
 # 予算 60 分・開始 10:00。余裕は 0.05·B = 180 秒（決定 24）。
 PLANNED = {
     "plan": {"reserve": {"danger_whole_test": 1.0, "final_whole_test": 1.0, "fix": 5.5}},
-    "items": [
-        {
-            "start_deadline": "2026-09-24T10:30:00+09:00",
-            "test_start_deadline": "2026-09-24T10:20:00+09:00",
-            "estimate": {"test": 3.0, "implement": 2.0, "verify": 0.2},
-        }
-    ],
+    "items": [{"status": "planned", "estimate": {"test": 3.0, "implement": 2.0, "verify": 0.2}}],
 }
 
 
@@ -1502,8 +1511,8 @@ PLANNED = {
     [
         ("propose", False, 6 + 12 * 60 + 180),  # 提案の枠の終わり 10:12 + 着手前のテスト 6 秒（#1385）
         ("plan", False, 6 + 18 * 60 + 180),  # 改修計画の枠の終わり 10:18 + 6 秒
-        ("add-tests", True, 23 * 60 + 180),  # 最後の項目の完了の締め切り 10:20 + 3 分
-        ("implement", True, 32 * 60 + 180),  # 10:30 + 2 分
+        ("add-tests", True, round(50.3 * 60) + 180),  # 実装の終わり − Σ implement（#1743 I13）
+        ("implement", True, round(52.3 * 60) + 180),  # 11:00 − R 7.5 分 − Σ verify 0.2 分
         ("fix", True, 58 * 60 + 180),  # 開始 + 60 − 全体のテストの予備時間 2 分
         ("final-fix", False, 60 * 60 + 180),  # 想定最大時間の終わり 11:00
     ],
@@ -1836,13 +1845,24 @@ def test_init_takes_the_pull_request_of_the_repository_it_is_run_in(refactor, pa
         if cmd[:3] == ["gh", "api", "user"]:
             return "me"
         if cmd == ["gh", "api", "repos/example/sample/pulls/12"]:
-            return json.dumps({"number": 12, "user": {"login": "me"}, "head": {"ref": "feat/x"}, "base": {"ref": "main"}})
+            return json.dumps(
+                {
+                    "number": 12,
+                    "user": {"login": "me"},
+                    "head": {"ref": "feat/x"},
+                    "base": {"ref": "main"},
+                    "state": "open",
+                    "draft": True,
+                    "merged_at": None,
+                }
+            )
         raise AssertionError(f"想定外の呼び出し: {cmd}")
 
     patch_lib("sh", fake_sh)
     monkeypatch.chdir(repo / "src")
     setup = sys.modules["refactor_lib.commands.setup"]
-    assert setup._fetch_pr_context(12) == ("example/sample", "main", "feat/x", True, "me")
+    gate = sys.modules["refactor_lib.pr_gate"]
+    assert setup._fetch_pr_context(12) == ("example/sample", "main", "feat/x", True, "me", gate.PrStatus("open", True, None))
     assert not any("nameWithOwner" in c for c in asked)
 
 
@@ -1896,24 +1916,25 @@ def _stopped_init(run_init, tmp_path, init_clock, capsys):
 
 def test_init_stops_before_the_proposers_when_the_windows_do_not_fit(run_init, tmp_path, init_clock, slow_baseline, capsys):
     captured = _stopped_init(run_init, tmp_path, init_clock, capsys)
-    assert "--budget-minutes を 39 以上" in captured.err
+    # 下限 = ceil(((o + 300) / 60 + R + L) / 0.70)。R = 21.67 + 5.5 + 5.5、L = 1.5（配分の初期値。#1743 I8）
+    assert "--budget-minutes を 87 以上" in captured.err
     assert "PHASE=" not in captured.out, "提案へ進む出力を出さない"
     _, state = _state_of(tmp_path)
     assert state["window_stopped_at"] and "resumed_at" not in state
 
     # 1 分後に下限の予算で打ち直すと、着手前のテストを走らせずに枠を打ち直した時刻から数えて進む
     init_clock(1360)
-    run_init(_args(tmp_path, budget_minutes="39"))
+    run_init(_args(tmp_path, budget_minutes="87"))
     _, state = _state_of(tmp_path)
     assert slow_baseline["calls"] == 1
     assert "window_stopped_at" not in state and state["resumed_at"]
-    assert _window_seconds(state, "propose_end_at") == 1828
+    assert _window_seconds(state, "propose_end_at") == 1360 + 1044
     assert "PHASE=" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
     "restart, budget, propose_end",
-    [(1600, "39", 1600 + 468), (1500, "40", 1500 + 480)],
+    [(1600, "87", 1600 + 1044), (1500, "88", 1500 + 1056)],
 )
 def test_a_restart_within_the_grace_continues(run_init, tmp_path, init_clock, slow_baseline, capsys, restart, budget, propose_end):
     _stopped_init(run_init, tmp_path, init_clock, capsys)
@@ -1927,9 +1948,9 @@ def test_a_late_restart_stops_again_with_a_new_lower_bound(run_init, tmp_path, i
     _stopped_init(run_init, tmp_path, init_clock, capsys)
     init_clock(1700)
     with pytest.raises(SystemExit) as e:
-        run_init(_args(tmp_path, budget_minutes="39"))
+        run_init(_args(tmp_path, budget_minutes="87"))
     assert e.value.code == refactor_abort()
-    assert "--budget-minutes を 48 以上" in capsys.readouterr().err
+    assert "--budget-minutes を 97 以上" in capsys.readouterr().err
     _, state = _state_of(tmp_path)
     assert state["window_stopped_at"] and slow_baseline["calls"] == 1
 
@@ -2053,3 +2074,83 @@ def test_the_whole_test_covers_the_scope(verify_init):
     prep.strategy, prep.work = strategy, verify_init.history.parents[2] / "work"
     assert sys.modules["refactor_lib.init_test"].resolve_scope_seconds(prep, ["tests"], 424.0) == (424.0, "whole")
     assert sys.modules["refactor_lib.init_test"].resolve_scope_seconds(prep, ["tests"], None) == (None, None)
+
+
+# ---------- #1658: 閉じた・マージ済み・（新しい実行で）Draft でない Pull Request で止める ----------
+
+
+def _stopped(run_init, tmp_path, capsys, pr_status):
+    capsys.readouterr()
+    with pytest.raises(SystemExit) as e:
+        run_init(_args(tmp_path), pr_status=pr_status)
+    assert e.value.code == refactor_abort()
+    return capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "pr_status, words",
+    [
+        ({"state": "closed", "merged_at": None}, ["#130", "閉じている"]),
+        ({"state": "closed", "merged_at": "2026-10-06T15:44:18Z"}, ["#130", "マージ済み"]),
+        ({"state": "open", "draft": False}, ["#130", "Draft でない", "gh pr ready 130 --undo"]),
+        ({"state": "merged"}, ["判定できない", "state"]),
+        ({"state": MISSING}, ["判定できない", "state"]),
+        ({"draft": MISSING}, ["判定できない", "draft"]),
+        ({"draft": "false"}, ["判定できない", "draft"]),
+    ],
+)
+def test_init_stops_before_preparing_the_work_dir_for_a_pull_request_it_must_not_touch(run_init, tmp_path, capsys, pr_status, words):
+    """AC1〜3・6（#1658）: 終了コード 4 で止まり、理由が出て、作業ディレクトリも状態ファイルも作らない。"""
+    err = _stopped(run_init, tmp_path, capsys, pr_status)
+    assert all(w in err for w in words), err
+    assert not (tmp_path / "rf130" / "work").exists()
+    assert not _state_path(tmp_path).exists()
+
+
+def test_a_resumed_run_continues_on_an_open_pull_request_that_is_no_longer_draft(run_init, tmp_path):
+    """AC5（#1658）: 終わっていない状態ファイルがあれば、Draft を外した開いた Pull Request でも続ける。"""
+    run_init(_args(tmp_path))
+    run_init(_args(tmp_path), pr_status={"draft": False})
+    _, state = _state_of(tmp_path)
+    assert state["phase"] == "propose"
+
+
+@pytest.mark.parametrize("merged_at, word", [(None, "閉じている"), ("2026-10-06T15:44:18Z", "マージ済み")])
+def test_a_resumed_run_stops_on_a_closed_pull_request_without_touching_the_state(run_init, tmp_path, capsys, merged_at, word):
+    """AC5（#1658）: 再開でも閉じた・マージ済みなら止まり、状態ファイルを書き換えない。"""
+    run_init(_args(tmp_path))
+    path = _state_path(tmp_path)
+    before = path.read_text(encoding="utf-8")
+    err = _stopped(run_init, tmp_path, capsys, {"state": "closed", "merged_at": merged_at})
+    assert word in err
+    assert path.read_text(encoding="utf-8") == before
+
+
+def test_a_done_state_does_not_skip_the_draft_check(run_init, tmp_path, capsys):
+    """AC5（#1658 の決定 3）: `phase: done` の状態ファイルが残った実行は新しい実行であり、Draft でなければ止まる。"""
+    run_init(_args(tmp_path))
+    _, state = _state_of(tmp_path)
+    state["phase"] = "done"
+    path = _overwrite_state(tmp_path, state)
+    before = path.read_text(encoding="utf-8")
+    assert "Draft でない" in _stopped(run_init, tmp_path, capsys, {"draft": False})
+    assert path.read_text(encoding="utf-8") == before
+
+
+def test_a_state_in_a_work_dir_that_will_be_moved_aside_is_a_new_run(run_init, tmp_path, capsys):
+    """AC5（#1658 の決定 3）: 登録された worktree でない work の状態ファイルは退避されるため、新しい実行として Draft を求める。"""
+    work = tmp_path / "rf130" / "work"
+    state = work / ".cross_refactoring" / "cross-refactoring-rf130-state.json"
+    state.parent.mkdir(parents=True)
+    state.write_text(json.dumps({"schema": 2, "id": 130, "phase": "propose"}), encoding="utf-8")
+    assert "Draft でない" in _stopped(run_init, tmp_path, capsys, {"draft": False})
+    assert state.exists()
+
+
+def test_the_pull_request_check_adds_no_gh_call(run_init, tmp_path, capsys):
+    """AC8（#1658 I5）: 止まる実行も続く実行も、`gh` の呼び出しの並びは同じ（応答 1 回から判定する）。"""
+    _stopped(run_init, tmp_path, capsys, {"draft": False})
+    stopped = list(run_init.gh_calls)
+    run_init(_args(tmp_path))
+    assert stopped == run_init.gh_calls
+    assert sum(1 for c in stopped if c[2:3] and c[2].startswith("repos/")) == 1

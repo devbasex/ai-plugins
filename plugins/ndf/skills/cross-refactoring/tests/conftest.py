@@ -84,6 +84,7 @@ _MODULES = (
     "publish",
     "results",
     "scope",
+    "scope_check",
     "targets",
     "triage",
     "undo",

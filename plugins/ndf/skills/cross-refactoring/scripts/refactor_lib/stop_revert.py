@@ -80,13 +80,18 @@ def _plan_b(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], why
     info(f"⚠ 案 A で通せませんでした（{why}）。着手前の木（{base[:12] or '不明'}）へ戻すコミットを積みます")
     head = git_out(work, ["rev-parse", "HEAD"]) or ""
     message = f"Revert: cross-refactoring の改善を着手前の木へ戻す（{why}）"
-    if (
-        not base
-        or not culprit.git_ok(work, ["read-tree", "-u", "--reset", base])
-        or not culprit.git_ok(work, ["commit", "-q", "-m", message])
-    ):
-        reset_hard(work, head)
-        die(f"着手前の木（{base[:12] or '不明'}）へ戻すコミットを作れませんでした。判断が要ります")
+    # 案 A の最後の走らせ直しのキャッシュを、戻した後に読ませない（#1806 決定 6）
+    worktree.wait_past_rewrite()
+    try:
+        if (
+            not base
+            or not culprit.git_ok(work, ["read-tree", "-u", "--reset", base])
+            or not culprit.git_ok(work, ["commit", "-q", "-m", message])
+        ):
+            reset_hard(work, head)
+            die(f"着手前の木（{base[:12] or '不明'}）へ戻すコミットを作れませんでした。判断が要ります")
+    finally:
+        worktree.mark_rewritten()
     sha = git_out(work, ["rev-parse", "HEAD"]) or ""
     record["commit"] = sha
     ledger.note_orchestrator_commit(state, sha)

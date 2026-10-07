@@ -42,6 +42,11 @@ def state_path(tmp_dir: pathlib.Path, state_id: int) -> pathlib.Path:
     return tmp_dir / f"cross-refactoring-rf{state_id}-state.json"
 
 
+def alive_path(tmp_dir: pathlib.Path, state_id: int) -> pathlib.Path:
+    """心拍のファイル。待つ側が心拍の間隔ごとに更新時刻を今にする（#1743 決定 3）。"""
+    return pathlib.Path(tmp_dir) / f"cross-refactoring-rf{state_id}-alive"
+
+
 # 対象のリポジトリを決められないときの案内。単独起動で利用者が打つ assess と drive が同じ文を出す
 TARGET_REPO_HINT = "対象のリポジトリを決められない。対象のリポジトリの中で打つ"
 
@@ -78,7 +83,16 @@ def default_tmp_dir(state_id: int) -> Optional[pathlib.Path]:
 
 
 def _find_state(state_id: int) -> pathlib.Path:
-    """状態ファイルを探す。見つからなければ終了する。
+    """状態ファイルを探す。見つからなければ終了する。"""
+    found = existing_state(state_id)
+    if found is not None:
+        return found
+    die(f"状態ファイルが見つかりません（rf{state_id}）。CROSS_REFACTORING_TMP_DIR を export してから実行してください")
+    raise SystemExit(1)  # die が抜けることはないが型のために置く
+
+
+def existing_state(state_id: int) -> Optional[pathlib.Path]:
+    """状態ファイルを探す。見つからなければ `None`。
 
     環境変数 → 現在の作業ディレクトリの `.cross_refactoring/` → 既定の worktree の置き場の順に探す。
     駆動が終わった後の conductor は環境変数を持たないため、既定の置き場からも探す（#1692 の決定 5）。
@@ -95,8 +109,7 @@ def _find_state(state_id: int) -> pathlib.Path:
     fallback = default_tmp_dir(state_id)
     if fallback is not None and state_path(fallback, state_id).exists():
         return state_path(fallback, state_id)
-    die(f"状態ファイルが見つかりません（rf{state_id}）。CROSS_REFACTORING_TMP_DIR を export してから実行してください")
-    raise SystemExit(1)  # die が抜けることはないが型のために置く
+    return None
 
 
 def load_state(state_id: int) -> tuple[pathlib.Path, dict[str, Any]]:

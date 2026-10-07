@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+import re
+import sys
 
 from crossref_helpers import make_state_v2, read_state
 
@@ -114,8 +116,9 @@ def test_the_report_does_not_list_the_deferred_breakdown(refactor, tmp_path, env
     env_tmp_dir(path)
     refactor.cmd_report(type("A", (), {"id": 130, "metrics": False})())
     out = capsys.readouterr().out
-    assert "見送り: 1 件" in out
-    assert "budget 1" in out  # 理由別の件数（AC26）
+    # 計画に入らなかった提案は見送った改善項目に数えず、見送った提案の行に出す（#1660）
+    assert "見送り: 0 件" in out
+    assert "- 見送った提案: 1 件（理由別: budget 1 " in out  # 理由別の件数（AC26）
     assert "src/bar.py#Bar.run" not in out, "内訳を書いている"
     assert "想定最大時間に収まらない" not in out, "内訳を書いている"
     assert COMMENT_URL in out, "改修計画の生の URL が無い"
@@ -188,3 +191,91 @@ def test_an_unknown_item_id_is_returned_without_a_label(outbound, tmp_path):
     """
     _, state = _state(tmp_path, items=[])
     assert outbound.item_lines(state, ["I-099"]) == ["I-099"]
+
+
+# ---------- #1660: 見送りの件数を結果 JSON・計画のコメント・完了報告で揃える ----------
+
+
+def _mixed_deferred_state(tmp_path):
+    """見送った改善項目 1 件（not_done）と、計画に入らなかった提案 2 件（budget・duplicate）。"""
+    return _state(
+        tmp_path,
+        items=[_item(id="I-001", status="verified"), _item(id="I-002", status="deferred", failure_reason="時間内に終わらない")],
+        deferred_items=[
+            {
+                "item_id": "I-002",
+                "path": "src/foo.py",
+                "symbol": "Foo.handle",
+                "smell": "long_method",
+                "defer_reason": "not_done",
+                "detail": "時間内に終わらない",
+            },
+            {
+                "item_id": "C-003",
+                "path": "src/bar.py",
+                "symbol": "Bar.run",
+                "smell": "duplication",
+                "defer_reason": "budget",
+                "detail": "予算",
+            },
+            {
+                "item_id": "C-004",
+                "path": "src/baz.py",
+                "symbol": "Baz.go",
+                "smell": "duplication",
+                "defer_reason": "duplicate",
+                "detail": "重複",
+            },
+        ],
+        final_gate={"fix_rounds": 0, "checks": [], "status": "passed"},
+    )
+
+
+def _report_lines(refactor, path, env_tmp_dir, capsys):
+    env_tmp_dir(path)
+    refactor.cmd_report(type("A", (), {"id": 130, "metrics": False})())
+    return capsys.readouterr().out.splitlines()
+
+
+def _deferred_in(line, sep):
+    return int(re.match(r"\d+", line.split(f"見送り{sep}")[1]).group())
+
+
+def test_the_deferred_count_agrees_across_metrics_plan_and_report(refactor, tmp_path, env_tmp_dir, capsys):
+    """AC10・AC12（#1660）: metrics.deferred・計画の件数の行・完了報告の件数の行の「見送り」がどれも 1。"""
+    ledger, plan = sys.modules["refactor_lib.ledger"], sys.modules["refactor_lib.plan"]
+    path, state = _mixed_deferred_state(tmp_path)
+    metrics = ledger.tally(state).as_metrics()
+    lines = _report_lines(refactor, path, env_tmp_dir, capsys)
+    counts = next(line for line in lines if line.startswith("- 採用: "))
+    assert metrics["deferred"] == 1
+    assert _deferred_in(plan.counts_line(state), " ") == 1
+    assert _deferred_in(counts, ": ") == 1
+    proposals = next(line for line in lines if line.startswith("- 見送った提案: "))
+    by_reason = dict(part.rsplit(" ", 1) for part in proposals.split("理由別: ")[1].rstrip("）").split(" / "))
+    assert int(by_reason["not_done"]) + int(by_reason["test_failed"]) == metrics["deferred"]
+
+
+def test_the_report_states_the_deferred_proposals_on_their_own_line(refactor, tmp_path, env_tmp_dir, capsys):
+    """AC11（#1660）: 見送った提案の総数 3 と理由別の件数を件数の行と別の行に出し、和が総数と等しい。"""
+    DEFER_REASONS = sys.modules["refactor_lib.vocabulary"].DEFER_REASONS
+    path, _ = _mixed_deferred_state(tmp_path)
+    lines = _report_lines(refactor, path, env_tmp_dir, capsys)
+    proposals = next(line for line in lines if line.startswith("- 見送った提案: "))
+    assert not proposals.startswith("- 採用: ")
+    total = int(proposals.split("- 見送った提案: ")[1].split(" 件")[0])
+    by_reason = {k: int(v) for k, v in (part.rsplit(" ", 1) for part in proposals.split("理由別: ")[1].rstrip("）").split(" / "))}
+    assert total == 3
+    assert list(by_reason) == list(DEFER_REASONS)
+    assert by_reason == {r: (1 if r in ("budget", "duplicate", "not_done") else 0) for r in DEFER_REASONS}
+    assert sum(by_reason.values()) == total
+
+
+def test_the_report_counts_line_does_not_follow_the_deferred_proposals(refactor, tmp_path, env_tmp_dir, capsys):
+    """AC13（#1660）: 見送った提案だけを増やしても、件数の行の「見送り」は変わらない。"""
+    path, state = _mixed_deferred_state(tmp_path)
+    before = _deferred_in(next(line for line in _report_lines(refactor, path, env_tmp_dir, capsys) if line.startswith("- 採用: ")), ": ")
+    extra = {"item_id": "C-005", "path": "src/q.py", "symbol": "Q.x", "smell": "duplication", "defer_reason": "rank", "detail": "順位"}
+    path, _ = _state(tmp_path, items=state["items"], deferred_items=[*state["deferred_items"], extra], final_gate=state["final_gate"])
+    after = _deferred_in(next(line for line in _report_lines(refactor, path, env_tmp_dir, capsys) if line.startswith("- 採用: ")), ": ")
+    assert before == after == 1

@@ -35,8 +35,8 @@ from typing import Any, Optional
 
 import statefile
 
-from . import die, info, ledger
-from .items import find_item, item_shas
+from . import die, info, ledger, worktree
+from .items import find_item, implement_shas, item_shas
 from .paths import full_commit, git_out, work_dir
 from .worktree import replay_commits, reset_hard, revert_range
 
@@ -121,9 +121,10 @@ def _remap_many(work: str, table: dict[str, str], shas: list[Any]) -> list[Any]:
 def _remap_commits(work: str, item: dict[str, Any], mapping: dict[str, str]) -> None:
     """項目のコミット（test / implement / fix）を書き戻す。"""
     commits = item.get("commits") or {}
-    for key in ("test", "implement"):
-        if commits.get(key):
-            commits[key] = _remap_one(work, mapping, commits[key])
+    if commits.get("test"):
+        commits["test"] = _remap_one(work, mapping, commits["test"])
+    if "implement" in commits:
+        commits["implement"] = _remap_many(work, mapping, implement_shas(item))
     commits["fix"] = _remap_many(work, mapping, commits.get("fix") or [])
 
 
@@ -177,6 +178,8 @@ def _record(
         "at": statefile.now(),
         "mode": mode,
         "reason": reason,
+        # 採り直しの巡（#1743）。取り込みの取り消し済みの判定は取り込み名と巡の組で見る
+        "round": int((state.get("readopt") or {}).get("round") or 1),
         "dropped": plan.dropped,
         "ejected": ejected,
         "recheck": _recheck(state, plan),
@@ -261,7 +264,12 @@ def drop(
     """
     targets = [i for i in item_ids if ledger.is_live(find_item(state, i, required=False))]
     targets = _close_commitless(state, targets, reason)
-    return _rebuild(path, state, targets, reason, on_conflict)
+    # 直前の書き換えの後に走らせ直したキャッシュを、取り消した後に読ませない（#1806 決定 6）
+    worktree.wait_past_rewrite()
+    try:
+        return _rebuild(path, state, targets, reason, on_conflict)
+    finally:
+        worktree.mark_rewritten()
 
 
 def discard_range(path: pathlib.Path, state: dict[str, Any], reason: str) -> dict[str, Any]:

@@ -1,10 +1,10 @@
-"""想定最大時間から、採る項目と項目ごとの締め切りを決める（#933 の「時間の決め方」）。
+"""想定最大時間から、採る項目と実装の終わりを決める（#933 の「時間の決め方」、#1743）。
 
 **純粋な処理だけを置く。** 今の時刻は内部で取らず、引数で受ける。時刻を内部で取ると、
 締め切りの計算がテストで再現できない。値の単位は、断りの無い限り分である。
 
-改修計画で見積りを収め、実装の中は項目ごとの締め切りで着手を止める。手順の監視の上限は
-`timeline` がこの締め切りから導く（決定 23。決定 4 の「実行中の CLI を止めない」を改めた）。
+改修計画で見積りを収め、実装を止める時刻は「実装の終わり」の 1 つだけにする（#1743 決定 9）。
+項目ごとの期限は持たない。検証の後に時間が残れば、見送った候補を採り直す（決定 10）。
 """
 
 from __future__ import annotations
@@ -99,41 +99,60 @@ def select(ranked: list[dict[str, Any]], available_minutes: float) -> tuple[list
     return selected, skipped
 
 
-def end_time(started_at: _dt.datetime, budget_minutes: int, reserve_total_minutes: float) -> _dt.datetime:
-    """終わり T = started_at + budget − R。締め切りはここから逆算する。"""
-    return started_at + _dt.timedelta(minutes=budget_minutes - reserve_total_minutes)
+def plan_reserve(state: dict[str, Any], table: dict[str, Any]) -> dict[str, float]:
+    """状態から w と c を選んでバッファ R を出す。`init` の見込みと `merge-plan` が同じ式を使う（#1743 の F1・F2）。"""
+    from . import timeline
+
+    baseline = state.get("baseline_test") or {}
+    strategy = timeline.strategy_of(state)
+    whole_seconds = baseline.get("seconds") if baseline.get("mode") in ("whole", "round") else baseline.get("whole_seconds")
+    return reserve(
+        strategy,
+        whole_seconds,
+        baseline.get("ci_seconds"),
+        strategy.whole_on_ci or bool(state.get("ci_check")),
+        float(table["fix"]),
+    )
 
 
-def deadlines(selected: list[dict[str, Any]], T: _dt.datetime) -> list[dict[str, Optional[_dt.datetime]]]:
-    """採用の順（1..n）に、実装とテストの追加の着手の締め切りを返す。
+def measured_verify_minutes(state: dict[str, Any]) -> float:
+    """着手前に手元で走らせた範囲テストの実測（分）。範囲テストでなければ 0（#1334 決定 8）。"""
+    baseline = state.get("baseline_test") or {}
+    return float(baseline.get("seconds") or 0.0) / 60 if baseline.get("mode") == "scope" else 0.0
 
-    - 実装 i: `T − Σ_{j≥i} implement_j − Σ_{全件} verify_j`。検証は実装の手順の
-      後に全件をまとめて走らせるため、i より前の項目の検証も末尾の側に残る
-    - テストの追加 i: `T − Σ_{全件}(implement_j + verify_j) − Σ_{j≥i} test_j`。
-      テストの追加は実装より前の手順なので、実装と検証の全件を先に差し引く。
-      足すテストが無い項目（test が 0）は `None`
+
+def shortest_item_minutes(table: dict[str, Any], measured_verify: float) -> float:
+    """1 件の長さ L（分）。配分テーブルの手法のうち最も短い実装と検証の和（テストの追加を除く。#1743 決定 2）。"""
+    implement = min([float(table["structure"]), *(float(v) for v in (table.get("kinds") or {}).values())])
+    return implement + max(float(table["verify"]), float(measured_verify))
+
+
+def _sum_part(items: list[dict[str, Any]], name: str) -> float:
+    return sum(float((i.get("estimate") or {}).get(name) or 0.0) for i in items)
+
+
+def implement_end(final_end: _dt.datetime, reserve_minutes: dict[str, Any], items: list[dict[str, Any]]) -> _dt.datetime:
+    """実装の終わり = 最終ゲート修正の打ち切り − バッファ − Σ（採っていて未検証の項目の検証の見積り）（I13）。
+
+    呼ぶ側が採っていて未検証の項目だけを渡す。項目の実装の見積りは引かない（実装担当の速さで止めない）。
     """
-    estimates = [c.get("estimate") or {} for c in selected]
+    return final_end - _dt.timedelta(minutes=reserve_total(reserve_minutes) + _sum_part(items, "verify"))
 
-    def part(name: str, e: dict[str, Any]) -> float:
-        return float(e.get(name) or 0.0)
 
-    verify_all = sum(part("verify", e) for e in estimates)
-    impl_verify_all = sum(part("implement", e) + part("verify", e) for e in estimates)
-    result = []
-    for i, e in enumerate(estimates):
-        impl_after = sum(part("implement", x) for x in estimates[i:])
-        test_after = sum(part("test", x) for x in estimates[i:])
-        start = T - _dt.timedelta(minutes=impl_after + verify_all)
-        test_start = T - _dt.timedelta(minutes=impl_verify_all + test_after) if part("test", e) > 0 else None
-        result.append({"start_deadline": start, "test_start_deadline": test_start})
-    return result
+def add_tests_end(implement_end_at: _dt.datetime, items: list[dict[str, Any]]) -> _dt.datetime:
+    """テストの追加の終わり = 実装の終わり − Σ（同じ項目の実装の見積り）（I13）。"""
+    return implement_end_at - _dt.timedelta(minutes=_sum_part(items, "implement"))
+
+
+def readopt_available(final_end: _dt.datetime, reserve_minutes: dict[str, Any], now: _dt.datetime) -> float:
+    """採り直しに使える残り（分）= 最終ゲート修正の打ち切り − 今 − バッファ（I14）。負にもなる。"""
+    return (final_end - now).total_seconds() / 60 - reserve_total(reserve_minutes)
 
 
 def fix_end(started_at: _dt.datetime, budget_minutes: int, reserve: dict[str, Any]) -> _dt.datetime:
-    """修正に使える終わりの時刻。
+    """修正に使える終わりの時刻。上限の表の `fix_end_at` の元で、`merge-plan` の時点に 1 度だけ出す。
 
-    **予備時間の `fix` は引かない。** T から測ると、控えておいた修正 1 回分が使われない。
+    **予備時間の `fix` は引かない。** 控えておいた修正 1 回分を使えるようにするためである。
     全体のテストの予備時間 2 つと、最終ゲートの修正の予備時間（`final_fix`。決定 26）を差し引いた
     終わりである。`final_fix` を引かないと、検証の直しが最終ゲートの修正の時間まで使う。
     """
@@ -145,9 +164,9 @@ def fix_end(started_at: _dt.datetime, budget_minutes: int, reserve: dict[str, An
     )
 
 
-def fix_time_left(started_at: _dt.datetime, budget_minutes: int, reserve: dict[str, Any], now: _dt.datetime) -> float:
-    """修正に使える残り（分）。終わりは `fix_end`。"""
-    return (fix_end(started_at, budget_minutes, reserve) - now).total_seconds() / 60
+def fix_time_left(fix_end_at: _dt.datetime, now: _dt.datetime) -> float:
+    """修正に使える残り（分）。終わりは上限の表の `fix_end_at`（再開でずれた値。#1743 決定 5）。"""
+    return (fix_end_at - now).total_seconds() / 60
 
 
 def available_minutes(budget_minutes: int, elapsed_minutes: float, reserve: dict[str, Any]) -> float:
