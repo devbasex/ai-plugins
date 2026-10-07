@@ -26,7 +26,7 @@
 ## 例: `/ndf:pr-review 1836 codex` を、変えた後の形で通すと
 
 1. LLM が `python3 "$SKILL_SCRIPTS/pr-review-steps.py" delegate codex 1836` を 1 回打つ
-2. スクリプトが `gh_parts.py pr-info 1836 --with diff,threads` で PR のメタ・差分・未解決のスレッド（位置だけ）を取り、レビューの文脈ファイル `context.md` を書く
+2. スクリプトが `gh_parts.py pr-info 1836 --with diff,threads` で PR のメタ・差分・未解決のスレッド（位置と最初のコメントの本文）を取り、レビューの文脈ファイル `context.md` を書く
 3. スクリプトが SKILL.md の `## 観点` の節を読み、文脈ファイルと委譲の決まり（投稿しない・編集しない・指摘ファイルの置き場）を足してプロンプトを書く
 4. スクリプトが `external-ai.py run codex --phase review --output-file findings.json` を前景で呼ぶ。上限（1,200 秒。`MONITOR_TIMEOUT` で変えられる）を越えたら非 0 で終わり、投稿しない
 5. codex は差分を読んで `findings.json` だけを書く。3 件（`major` 1・`minor` 2）
@@ -50,12 +50,12 @@ LLM 自身がレビューするとき（第二引数なし）は、1 が `collec
 
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
-| レビューの実行 | `pr-review-steps.py`（文脈ファイル・payload・判定のファイルを書く） | レビューの対象（PR 番号 / `--branch`） | — | ベースブランチ・差分の在りか・未解決のスレッドの位置の組 |
-| 指摘ファイル | レビューする者（LLM か外部 AI）が書き、`pr-review-steps.py` は読むだけ | 指摘ファイル | 指摘（1 件） | 重要度・段（`spec` / `quality`）・位置（path・line） |
-| 投稿 | `gh_parts.py review-post`（既存。変えない） | 1 件のレビュー | — | 本来の判定・送った判定 |
+| レビューの実行 | `pr-review-steps.py`（文脈ファイル・payload・判定のファイルを書く） | レビューの対象（PR 番号 / `--branch`） | — | ベースブランチ・差分の在りか・未解決のスレッド（位置と最初のコメントの本文）の組・本来の判定（I4 で決め、`<D>/result.json` の `event` に書く） |
+| 指摘ファイル | 中身を書くのはレビューする者（LLM か外部 AI）だけ。`pr-review-steps.py` は `collect` が実行の始めに前回のファイルを消すことと、`finish` が読むことだけを行う | 指摘ファイル | 指摘（1 件） | 重要度・段（`spec` / `quality`）・位置（path・line） |
+| 投稿 | `gh_parts.py review-post`（既存。変えない） | 1 件のレビュー | — | 送った判定（`posted_as`）。本来の判定は決めず、`result.json` の `event` を読んで `intent` として写すだけ |
 | ベースブランチの解決 | `lib/repo.py` | — | — | ベースブランチの名前と出所 |
 
-**指摘ファイルを書き換えるのはレビューする者だけである。** スクリプトは指摘ファイルから別の payload を作り、`review-post` が送れた先を書き戻すのは payload の側になる。
+**指摘ファイルの中身を書くのはレビューする者だけである。** スクリプトが指摘ファイルに行う操作は、`collect` が実行の始めに前回のファイルを消す（前回の指摘を今回の結果として投稿しない）ことと、`finish` が読むことの 2 つに限る。スクリプトは指摘ファイルから別の payload を作り、`review-post` が送れた先を書き戻すのは payload の側になる。
 
 ### 不変条件
 
@@ -89,7 +89,7 @@ LLM 自身がレビューするとき（第二引数なし）は、1 が `collec
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
 | 指摘ファイル | レビューする者（`cross-review` の担当・`pr-review` の LLM か外部 AI）が書く、指摘の全件と総評のファイル | 意味の変更（`ndf-workflow`。語の正本 `development-workflow/references/glossary.md` の行は実装で合わせる） |
-| レビューの文脈ファイル | `pr-review-steps.py collect` が書く、レビューの対象・差分の在りか・未解決のスレッドの位置・指摘ファイルの書き方をまとめたファイル。外部 AI へのプロンプトはこれに観点と委譲の決まりを足して組む | 追加（`ndf-workflow`） |
+| レビューの文脈ファイル | `pr-review-steps.py collect` が書く、レビューの対象・差分の在りか・未解決のスレッド（位置と本文）・指摘ファイルの書き方をまとめたファイル。外部 AI へのプロンプトはこれに観点と委譲の決まりを足して組む | 追加（`ndf-workflow`） |
 | 仕様適合 | レビューの第 1 段。受け入れ条件・不変条件・対象範囲・テストが仕様を表すかを見る。満たさない指摘は指摘ファイルで段 `spec` を持つ | 追加（`ndf-workflow`） |
 | 未解決のスレッド | 要求で追加済み（意味は変えない） | — |
 | 本来の判定 | 要求で追加済み（意味は変えない） | — |
@@ -114,6 +114,7 @@ LLM 自身がレビューするとき（第二引数なし）は、1 が `collec
 | `plugins/ndf/skills/pr-review/SKILL.md` | 引数・2 つのモード・観点（第 1 段・第 2 段・重要度）・指摘の振り分け・スクリプトの呼び方・報告 | 変更（10,240 B 以下へ） |
 | `plugins/ndf/skills/external-ai/SKILL.md` | pr-review への言及 2 か所を「`pr-review-steps.py delegate` が `run --phase review` で呼ぶ」に合わせる | 変更 |
 | `gh_parts.py pr-info` / `review-post` | PR のメタ・差分・未解決のスレッドの取得 / 投稿・格下げ・位置の拒否の退避 | 既存（変えない） |
+| `plugins/ndf/scripts/lib/gh_graphql.py` の `unresolved_threads` | 未解決のスレッドの各要素に、最初のコメントの本文 `body`（改行を空白へ畳み、先頭 200 字）を足す。`pr-info --with threads` と `unresolved-threads` はこの関数を通るため、そのまま本文が載る | 変更（鍵を 1 つ足す。既存の鍵 `thread_id` / `path` / `line` は変えない） |
 | `external-ai.py run` | 外部 CLI の起動・上限つきの待ち・回収 | 既存（変えない） |
 | `plugins/ndf/skills/pr-review/tests/` | F1〜F6 と I1〜I7 のテスト | 新規 |
 
@@ -252,7 +253,7 @@ classDiagram
 | 対象 | repo・PR 番号・URL・題・head の SHA・ベースブランチ・作業ディレクトリ | ブランチ名・ベースブランチ（`origin/<名前>`）・作業ディレクトリ |
 | 受け入れ条件の在りか | PR の本文（そのまま載せる） | 「`issues/` の実装計画か要求のコピーから取る」の 1 行 |
 | 差分 | `pr-info` が保存した差分のファイルのパスと、変更ファイルの一覧 | `git diff origin/<base> --name-only` と `--stat` の出力、`git log origin/<base>..HEAD --oneline`、差分を保存したファイルのパス |
-| 未解決のスレッド | `path:line` の一覧（無ければ「なし」）と、「同じ位置へ同じ趣旨の指摘を出さない」の 1 行 | 節を作らない |
+| 未解決のスレッド | `path:line` と最初のコメントの本文（`body`）の一覧（無ければ「なし」）と、「同じ位置へ本文と同じ趣旨の指摘を出さない。同じ位置でも趣旨が違えば出す」の 1 行 | 節を作らない |
 | 重点 | `--focus` の値（無ければ節を作らない） | 同じ |
 | 指摘ファイルの書き方 | 置き場のパス・上の JSON の形・鍵の規則。**この節の文は `pr-review-steps.py` だけが持つ** | 同じ |
 
@@ -339,7 +340,7 @@ graph TD
 | ベースブランチの 5 通り（I1） | `existing_base_branch` が要求の 5 通り（「`repo.py` の追加」の表の 1・2・3・4・5 行目）で表のとおりを返し、6 行目の場合は `None` を返す。どこにも無いとき `collect --branch` は 3 で終わり、文脈ファイルを書かない | 実在の確認を外して宣言をそのまま返す／無いときに `default_branch` へ落とす |
 | `ls-remote` が別のブランチだけを返すと「無い」（I2） | `refs/heads/x/refs/heads/<名前>` だけを持つ origin で `None` が返る | 照合を終了コードだけ・末尾一致に変える |
 | `.ndf/worktree.json` を読むコードが `repo.py` だけ | `pr-review-steps.py` と SKILL.md に `worktree.json` の語が無い（`grep` のテスト。振る舞いでなくコードの写しの検査として置く） | スクリプトに宣言の読み込みを書く |
-| 未解決のスレッドが `pr-info --with threads` からプロンプトへ渡る（I7） | 偽の `gh_parts.py` が返したスレッドの `path:line` が文脈ファイルとプロンプトに載る。スレッドが取れない結果のときは 2 で止まる | スレッドを渡さない／取れないときに「なし」で進める |
+| 未解決のスレッドが `pr-info --with threads` からプロンプトへ渡る（I7） | 偽の `gh_parts.py` が返したスレッドの `path:line` と本文が文脈ファイルとプロンプトに載る。スレッドが取れない結果のときは 2 で止まる。`unresolved_threads` が偽の GraphQL の応答から `body` を返し、既存の鍵は変わらない | スレッドを渡さない／本文を落として位置だけを渡す／取れないときに「なし」で進める |
 | SKILL.md に `pulls/<番号>/comments`・`jq -n`・`-X POST .../reviews`・プロンプトの雛形・起動フラグ・結果サマリが無い | — （文言の検査は書かない。完了判定で `grep` の証跡を取る） | — |
 | event の表（I4） | `decide_event` が表の 3 行を返す。段 `spec` の `minor` 1 件だけでも `REQUEST_CHANGES` | `spec` を見落とす／`minor` を `REQUEST_CHANGES` にする |
 | 重要度が 4 つのどれでもない（I3） | `finish` が 2 で終わり、`review-post` を呼ばない。段が `spec` / `quality` 以外でも同じ | 不明な重要度を `minor` とみなす |
@@ -357,7 +358,7 @@ graph TD
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #860 | 実装する | — | `plugins/ndf/skills/pr-review/`、`plugins/ndf/scripts/lib/repo.py`、`plugins/ndf/skills/external-ai/SKILL.md`、`plugins/ndf/skills/development-workflow/references/glossary.md`、`docs/glossary/glossary.json`、`docs/glossary.md` |
+| #860 | 実装する | — | `plugins/ndf/skills/pr-review/`、`plugins/ndf/scripts/lib/repo.py`、`plugins/ndf/scripts/lib/gh_graphql.py`、`plugins/ndf/skills/external-ai/SKILL.md`、`plugins/ndf/skills/development-workflow/references/glossary.md`、`docs/glossary/glossary.json`、`docs/glossary.md` |
 
 ## 未確認のまま残ること
 
@@ -365,6 +366,6 @@ graph TD
 | --- | --- |
 | SKILL.md の大きさ | 配分は見込みで、観点を変えずに 10,240 B へ収まるかは書いて測るまで分からない。収まらないときは指摘の振り分けの表を短くし、観点の中身は削らない（削るなら要求へ戻す） |
 | `review-post` の `--round 0` | `result_posts` と `post_queue` が 0 を拒まないことはコードを読んで確かめたが、実行では確かめていない。実装の最初のテストで確かめる |
-| 未解決のスレッドの位置だけでの重複防止 | `pr-info --with threads` は本文を持たないため、外部 AI は位置しか分からない。同じ位置の別の趣旨の指摘を出さなくなるおそれがある。リリース後テストで重複と取りこぼしを見る |
+| 未解決のスレッドの本文での重複防止 | 本文の先頭 200 字で趣旨を見分けられるかは実測していない。リリース後テストで重複と取りこぼしを見る |
 | 外部 AI の stdout からの回収 | `run` は結果ファイルが無いと stdout を出力のファイルへ写す。codex が JSON を地の文に包んで出したときは読めずに 2 で終わる。リリース後テストで回数を見る |
 | 開発版での手動確認 | 要求の検証手段の「手動確認」（`/ndf:pr-review <PR番号>` と `codex` を 1 回ずつ）は配布の後に行う |
