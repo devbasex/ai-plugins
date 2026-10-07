@@ -233,3 +233,96 @@ def test_graphql_via_githubkit_is_fixed(fake, monkeypatch):
     monkeypatch.setattr(gh_call, "client", lambda: Client(ValueError()))
     assert gh_graphql.graphql("q").error == "ValueError: "
     assert fake.calls == []
+
+
+def _edit_routes(fake, failures):
+    """REST の編集の呼び出しを (メソッド, パス) で振り分ける。`failures` に載ったものだけ失敗を返す。"""
+    from gh_call import GhResult
+
+    def respond(args, stdin):
+        key = (args[3], args[5]) if args[1] == "-i" else (args[2], args[4])
+        if key in failures:
+            return GhResult(1, "", failures[key])
+        return GhResult(0, rest_out({}), "")
+
+    fake.on_fn("api", fn=respond)
+    fake.on("pr", "edit", out="ok\n")
+    fake.on("issue", "edit", out="ok\n")
+
+
+def _edit_calls(fake):
+    out = []
+    for args, stdin in fake.calls:
+        if args[0] == "api":
+            i = 3 if args[1] == "-i" else 2
+            out.append((args[i], args[i + 2], json.loads(stdin) if stdin else None))
+        else:
+            out.append((args, stdin))
+    return out
+
+
+def test_pr_edit_by_rest_sends_fields_then_labels_is_fixed(fake):
+    """現状固定（I-010）: PATCH（pulls）→ ラベルの追加 → 外す、の順。ラベルは issues のパス。"""
+    _edit_routes(fake, {})
+    a = gh_rest.pr_edit(REPO, "3", title="題", body="本文", add_labels=["a", "b"], remove_labels=["x y", "z"])
+    assert a == gh_rest.Attempt(True, "", "rest")
+    assert _edit_calls(fake) == [
+        ("PATCH", f"repos/{REPO}/pulls/3", {"title": "題", "body": "本文"}),
+        ("POST", f"repos/{REPO}/issues/3/labels", {"labels": ["a", "b"]}),
+        ("DELETE", f"repos/{REPO}/issues/3/labels/x%20y", None),
+        ("DELETE", f"repos/{REPO}/issues/3/labels/z", None),
+    ]
+
+
+def test_edit_with_nothing_to_change_calls_nothing_is_fixed(fake):
+    """現状固定（I-010）: 変える項目が無ければ何も呼ばずに成功。空文字の title は変える項目に入る。"""
+    _edit_routes(fake, {})
+    assert gh_rest.issue_edit(REPO, 3) == gh_rest.Attempt(True, "", "rest")
+    assert gh_rest.issue_edit(REPO, 3, add_labels=[], remove_labels=[]) == gh_rest.Attempt(True, "", "rest")
+    assert fake.calls == []
+    gh_rest.issue_edit(REPO, 3, title="")
+    assert _edit_calls(fake) == [("PATCH", f"repos/{REPO}/issues/3", {"title": ""})]
+
+
+def test_edit_rest_failures_stop_at_the_first_failure_is_fixed(fake):
+    """現状固定（I-010）: 上限以外の失敗はそこで止まり、GraphQL へ代わらない。外すラベルの 404 だけは飛ばす。"""
+    _edit_routes(fake, {("POST", f"repos/{REPO}/issues/3/labels"): "HTTP 422: Unprocessable"})
+    a = gh_rest.issue_edit(REPO, 3, body="b", add_labels=["a"], remove_labels=["x"])
+    assert not a.ok and "422" in a.error and a.via == "rest"
+    assert [c[:2] for c in _edit_calls(fake)] == [("PATCH", f"repos/{REPO}/issues/3"), ("POST", f"repos/{REPO}/issues/3/labels")]
+
+    fake.calls.clear()
+    fake.routes.clear()
+    _edit_routes(fake, {("DELETE", f"repos/{REPO}/issues/3/labels/x"): "HTTP 404: Not Found"})
+    assert gh_rest.issue_edit(REPO, 3, remove_labels=["x", "y"]) == gh_rest.Attempt(True, "", "rest")
+    assert [c[1] for c in _edit_calls(fake)] == [f"repos/{REPO}/issues/3/labels/x", f"repos/{REPO}/issues/3/labels/y"]
+
+    fake.calls.clear()
+    fake.routes.clear()
+    _edit_routes(fake, {("DELETE", f"repos/{REPO}/issues/3/labels/x"): "HTTP 500: boom"})
+    a = gh_rest.issue_edit(REPO, 3, remove_labels=["x", "y"])
+    assert not a.ok and "500" in a.error
+    assert len(fake.calls) == 1
+
+
+def test_edit_falls_back_to_the_cli_with_every_field_is_fixed(fake):
+    """現状固定（I-010）: 途中で上限になると、残りではなく全項目を gh <kind> edit で送り直す。本文は標準入力。"""
+    _edit_routes(fake, {("DELETE", f"repos/{REPO}/issues/4/labels/x"): REST_RATE})
+    a = gh_rest.issue_edit(REPO, 4, title="題", body="本文", add_labels=["a"], remove_labels=["x"])
+    assert a == gh_rest.Attempt(True, "", "graphql")
+    assert _edit_calls(fake)[-1] == (
+        ["issue", "edit", "4", "--repo", REPO, "--title", "題", "--body-file", "-", "--add-label", "a", "--remove-label", "x"],
+        "本文",
+    )
+    assert len(fake.calls) == 4
+
+
+def test_edit_cli_failure_is_returned_is_fixed(fake):
+    """現状固定（I-010）: CLI の失敗は標準エラーの文で返し、本文なしなら標準入力は渡さない。"""
+    from gh_call import GhResult
+
+    fake.on("api", rc=1, err=REST_RATE)
+    fake.on_fn("pr", "edit", fn=lambda args, stdin: GhResult(1, "", " no permission \n"))
+    a = gh_rest.pr_edit(REPO, 3, title="t")
+    assert a == gh_rest.Attempt(None, "no permission", "graphql")
+    assert fake.calls[-1] == (["pr", "edit", "3", "--repo", REPO, "--title", "t"], None)
