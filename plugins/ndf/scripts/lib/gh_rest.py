@@ -212,6 +212,24 @@ def issue_list(repo: str | None, fields: str, state: str = "open", labels: list[
     return _list("issue", repo, fields, state, labels, limit)
 
 
+ISSUE_SEARCH_FIELDS = "number,title,url,state"
+
+
+def issue_search(repo: str, query: str, state: str = "open", limit: int = 30) -> Attempt:
+    """`gh issue list --search <query>` を 1 回呼び、`[{"number", "title", "url", "state"}]` を返す。
+
+    `state` は open / closed / all。検索の語は GitHub の検索の構文のまま渡す（句を引用符で囲むと句で当たる）。
+    0 件は空の並び、読めない・失敗は `error` を持つ（0 件と取り違えない）。
+    """
+    if state not in ("open", "closed", "all"):
+        raise ValueError(f"state は open / closed / all のどれか: {state}")
+    args = ["issue", "list", "--repo", repo, "--state", state, "--search", query, "--limit", str(int(limit))]
+    a = _graphql_cli(args + ["--json", ISSUE_SEARCH_FIELDS])
+    if a.ok and not isinstance(a.value, list):
+        return Attempt(None, "gh issue list の出力が並びでない", a.via)
+    return a
+
+
 def _created(a: Attempt) -> Attempt:
     """作成の結果を `{"number", "url"}` に揃える（REST は本文、GraphQL の CLI は URL の 1 行）。"""
     if not a.ok:

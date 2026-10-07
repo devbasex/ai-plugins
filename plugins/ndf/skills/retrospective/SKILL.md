@@ -2,6 +2,7 @@
 name: retrospective
 description: "Record what to change in how the work was done, and pick up findings that were never filed. Use when a change has been released and verified（振り返り・進め方の見直し・起票の取りこぼしを拾う）."
 allowed-tools:
+  - Bash(python3 *)
   - Bash(gh *)
   - Bash(git *)
   - Read
@@ -61,17 +62,13 @@ Pull Request と違う場所へ記録が残り得る。`gh repo view` が別の�
 ここで行うのは、残っていないものを探すことである。
 
 ```bash
-# その変更から出た課題の一覧（本文とコメントの両方を対象にする）
-gh issue list --repo "$RECORD_REPO" --state all --search "<由来>"   # 例: "PR #177" / "issue #175"
+# その変更から出た課題の一覧（本文とコメントの両方・open と closed・記録先と上流リポジトリの両方を検索する）
+python3 "$SCRIPTS/issue-file.py" by-origin --origin "issue #<起点>" --origin "PR #<番号>" --repo "$RECORD_REPO" --with-upstream
 ```
 
-`<由来>` は `out-of-scope` が起票のときに書いたものと同じ形にする。Pull Request を作る前に
-見つけた課題は起点の issue の番号で残るため、`PR #<番号>` だけで探すと漏れる。**起点の
-issue と Pull Request の両方で検索する。**
-
-起票先が 2 つのリポジトリへ分かれた変更では、`--repo` を上流リポジトリへ替えてもう一度検索する。
-上流リポジトリへ回した課題は、開発対象リポジトリの検索には出ない。**替えるのは検索の
-`--repo` だけで、記録の投稿先は変わらない。**
+**起点の issue と Pull Request の両方を `--origin` に渡す。** Pull Request を作る前に見つけた課題は起点の issue の
+番号で残る。結果の `items` は課題ごとに 1 件（`repo`・`number`・`origins`）で、終了コード 2 は検索の失敗であり 0 件と
+読まない。上流リポジトリを検索に足しても、記録の投稿先は変わらない。
 
 次の 3 か所と突き合わせる。番号が無いものが取りこぼしである。
 
