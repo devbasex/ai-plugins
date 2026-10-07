@@ -236,7 +236,13 @@ def cmd_by_origin(a) -> None:
     merged, searches = _merge_origin_hits(repos, origins)
     items = list(merged.values())
     metrics = {"searches": searches, "count": len(items), "upstream": upstream}
-    emit(result(TOOL, "ok", f"{len(repos)} リポジトリ × {len(origins)} 由来で {len(items)} 件", items, metrics), EXIT_OK)
+    summary = f"{len(repos)} リポジトリ × {len(origins)} 由来で {len(items)} 件"
+    nxt = None
+    if a.with_upstream and upstream is None:
+        # 止めない（設計 #851 の AC8）。ただし上流を外した検索を「取りこぼし 0 件」と読ませない
+        summary += "。上流リポジトリを決められず、上流は検索していない"
+        nxt = "上流リポジトリを --repo で名指しして打ち直す"
+    emit(result(TOOL, "ok", summary, items, metrics, next=nxt), EXIT_OK)
 
 
 # --- 書き込み -------------------------------------------------------------------------

@@ -412,6 +412,14 @@ def test_by_origin_continues_when_the_upstream_is_undecided(fake):
     fake.on("issue", "list", out=found(4))
     code, obj = run("by-origin", "--origin", "PR #9", "--repo", "o/r", "--with-upstream")
     assert code == 0 and obj["metrics"]["upstream"] is None and obj["metrics"]["searches"] == 1
+    # 上流を外した検索を「取りこぼし 0 件」と読ませない
+    assert "上流は検索していない" in obj["summary"] and "--repo" in obj["next"]
+
+
+def test_by_origin_without_upstream_does_not_mention_the_upstream(fake):
+    fake.on("issue", "list", out="[]")
+    _, obj = run("by-origin", "--origin", "PR #9", "--repo", "o/r")
+    assert "上流" not in obj["summary"] and obj.get("next") is None
 
 
 def test_by_origin_needs_a_repository(fake):

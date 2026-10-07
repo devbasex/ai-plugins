@@ -253,7 +253,7 @@ classDiagram
 | --- | --- | --- |
 | 対象 | repo・PR 番号・URL・題・head の SHA・ベースブランチ・作業ディレクトリ | ブランチ名・ベースブランチ（`origin/<名前>`）・作業ディレクトリ |
 | 受け入れ条件の在りか | PR の本文（そのまま載せる） | 「`issues/` の実装計画か要求のコピーから取る」の 1 行 |
-| 差分 | `pr-info` が保存した差分のファイルのパスと、変更ファイルの一覧 | `git diff origin/<base> --name-only` と `--stat` の出力、`git log origin/<base>..HEAD --oneline`、差分を保存したファイルのパス |
+| 差分 | `pr-info` が保存した差分のファイルのパスと、変更ファイルの一覧 | `git merge-base origin/<base> HEAD` を起点にした `git diff <起点> --name-only` と `--stat` の出力（分岐の後に起点へ入った変更を混ぜない）、`git log origin/<base>..HEAD --oneline`、差分を保存したファイルのパス |
 | 未解決のスレッド | `path:line` と最初のコメントの本文（`body`）の一覧（無ければ「なし」）と、「同じ位置へ本文と同じ趣旨の指摘を出さない。同じ位置でも趣旨が違えば出す」の 1 行 | 節を作らない |
 | 重点 | `--focus` の値（無ければ節を作らない） | 同じ |
 | 指摘ファイルの書き方 | 置き場のパス・上の JSON の形・鍵の規則。**この節の文は `pr-review-steps.py` だけが持つ** | 同じ |

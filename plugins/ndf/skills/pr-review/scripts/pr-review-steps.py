@@ -63,6 +63,7 @@ GH_PARTS = LIB / "gh_parts.py"
 EXTERNAL_AI = PLUGIN_ROOT / "skills" / "external-ai" / "scripts" / "external-ai.py"
 DELEGATES = ("codex", "agy")
 PERSPECTIVE_HEADING = "## 観点"
+TARGET_FILE = "target.json"  # collect が書き finish が読む、レビューした PR と head の SHA
 DIFF_FILE = re.compile(r"^diff --git a/.+? b/(.+)$", re.MULTILINE)
 
 FINDINGS_GUIDE = """## 指摘ファイルの書き方
@@ -187,16 +188,21 @@ def collect_branch(a, root: Path) -> tuple[dict, list[str], Path]:
     if f.returncode != 0:
         raise StepError(f"git fetch origin {base} が失敗: {f.stderr.strip()[:300]}", EXIT_UNREADABLE)
     ref = f"origin/{base}"
+    # 起点は merge-base。origin/<base> と 2 点で比べると、分岐の後に起点へ入った変更が「消した変更」として混ざる
+    mb = git(root, "merge-base", ref, "HEAD", check=False)
+    fork = mb.stdout.strip()
+    if mb.returncode != 0 or not fork:
+        raise StepError(f"{ref} と HEAD の merge-base を決められない: {mb.stderr.strip()[:300]}", EXIT_UNREADABLE)
     branch = git(root, "rev-parse", "--abbrev-ref", "HEAD", check=False).stdout.strip()
     d = out_dir(a, None, branch, root)
-    names = git(root, "diff", ref, "--name-only").stdout.strip()
-    stat = git(root, "diff", ref, "--stat").stdout.rstrip()
+    names = git(root, "diff", fork, "--name-only").stdout.strip()
+    stat = git(root, "diff", fork, "--stat").stdout.rstrip()
     log = git(root, "log", f"{ref}..HEAD", "--oneline").stdout.rstrip()
     diff_path = d / "branch.diff"
-    diff_path.write_text(git(root, "diff", ref).stdout, encoding="utf-8")
+    diff_path.write_text(git(root, "diff", fork).stdout, encoding="utf-8")
     files = [n for n in names.splitlines() if n.strip()]
     sections = [
-        f"## 対象\n\n- ブランチ: {branch}\n- ベースブランチ: `{ref}`（{why}）\n- 作業ディレクトリ: {root}",
+        f"## 対象\n\n- ブランチ: {branch}\n- ベースブランチ: `{ref}`（{why}）\n- 差分の起点: merge-base `{fork[:12]}`\n- 作業ディレクトリ: {root}",
         "## 受け入れ条件の在りか\n\n`issues/` の実装計画か要求のコピーから取る。見つからなければ「受け入れ条件が見つからない」と書き、推測で埋めない。",
         f"## 差分\n\n- 差分のファイル: `{diff_path}`\n\n変更ファイル:\n\n```text\n{names}\n```\n\n統計:\n\n```text\n{stat}\n```\n\n"
         f"コミット履歴:\n\n```text\n{log}\n```",
@@ -217,6 +223,8 @@ def collect(a) -> tuple[dict, Path]:
         metrics, sections, d = collect_pr(a, root, pr)
     findings = d / "findings.json"
     findings.unlink(missing_ok=True)  # 前回の指摘を今回のものとして投稿しない
+    # レビューした commit を finish まで固定する（収集と投稿の間の push で、指摘が未レビューの commit に付かない）
+    (d / TARGET_FILE).write_text(json.dumps({"pr": metrics["pr"], "head_sha": metrics["head_sha"]}) + "\n", encoding="utf-8")
     if a.focus:
         sections.append(f"## 重点\n\n`{a.focus}`。該当する観点を優先し、他の観点は重大なものだけを指摘する。")
     sections.append(FINDINGS_GUIDE.format(path=findings))
@@ -241,6 +249,18 @@ def _finish_branch(data: dict, verdict: dict, metrics: dict, d: Path) -> "NoRetu
     emit(result(TOOL, "ok", f"本来の判定 {verdict['intent']}（投稿しない）: {report}", metrics={**metrics, "report": str(report)}), 0)
 
 
+def _collected_head(d: Path, pr: int) -> str | None:
+    """collect が固定した head の SHA。同じ PR の収集が無ければ `None`（`review-post` が今の head を使う）。"""
+    try:
+        target = json.loads((d / TARGET_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(target, dict) or target.get("pr") != pr:
+        return None
+    sha = target.get("head_sha")
+    return sha if isinstance(sha, str) and sha else None
+
+
 def _post_review(data: dict, verdict: dict, metrics: dict, pr: int, reviewer: str, d: Path, repo: str | None) -> "NoReturn":  # noqa: F821
     """PR の経路。payload と result を書き、`review-post` で投稿して終える。"""
     payload, res = d / "payload.json", d / "result.json"
@@ -262,10 +282,14 @@ def _post_review(data: dict, verdict: dict, metrics: dict, pr: int, reviewer: st
         "--seat",
         f"pr-review-{reviewer}",
     ]
+    head_sha = _collected_head(d, pr)
+    argv += ["--head-sha", head_sha] if head_sha else []
     posted, code = _child([*argv, *(["--repo", repo] if repo else [])])
     items = [i for i in posted.get("items") or [] if isinstance(i, dict)]
     review = next((i for i in items if i.get("kind") == "review"), {})
-    metrics.update({"posted_as": review.get("posted_as"), "review_url": review.get("review_url"), "payload": str(payload)})
+    metrics.update(
+        {"posted_as": review.get("posted_as"), "review_url": review.get("review_url"), "payload": str(payload), "head_sha": head_sha}
+    )
     if code != 0:
         emit(result(TOOL, "stopped", f"投稿できない（指摘ファイルと payload を残した）: {posted.get('summary')}", items, metrics), code)
     emit(result(TOOL, "ok", f"PR #{pr} へ {review.get('posted_as')} で投稿した（本来の判定 {verdict['intent']}）", items, metrics), 0)

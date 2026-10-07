@@ -390,6 +390,28 @@ def test_collect_branch_reports_base_files_stat_and_log(tmp_path, monkeypatch, c
     assert "new.py" in ctx and "1 file changed" in ctx and "足した" in ctx and "origin/develop" in ctx
 
 
+def test_collect_branch_diffs_from_the_merge_base_not_the_moved_base(tmp_path, monkeypatch, capsys):
+    """分岐の後に起点へ入った変更を、このブランチが消した変更として差分へ混ぜない。"""
+    origin, clone = _origin_and_clone(tmp_path)
+    _declare(clone, "develop")
+    _git(clone, "switch", "-q", "-c", "feat/x", "origin/develop")
+    (clone / "new.py").write_text("print(1)\n", encoding="utf-8")
+    _git(clone, "add", "new.py")
+    _git(clone, "commit", "-q", "-m", "足した")
+    other = tmp_path / "other"
+    _git(tmp_path, "clone", "-q", "-b", "develop", str(origin), str(other))
+    (other / "later.py").write_text("x = 1\n", encoding="utf-8")
+    _git(other, "add", "later.py")
+    _git(other, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "後から")
+    _git(other, "push", "-q", "origin", "develop")
+    monkeypatch.chdir(clone)
+    code, out = _main(capsys, "collect", "--branch", "--out-dir", tmp_path / "out")
+    assert code == 0, out
+    assert out["metrics"]["changed_files"] == 1
+    diff = (tmp_path / "out" / "branch.diff").read_text(encoding="utf-8")
+    assert "new.py" in diff and "later.py" not in diff
+
+
 def test_collect_branch_stops_when_the_declared_base_is_missing(tmp_path, monkeypatch, capsys):
     _, clone = _origin_and_clone(tmp_path, branches=())
     _declare(clone, "develop")
@@ -474,6 +496,22 @@ def test_delegate_builds_the_prompt_from_the_skill_and_posts(fakes, monkeypatch,
     post = fakes.posts()
     assert len(post) == 1 and post[0][post[0].index("--seat") + 1] == "pr-review-codex"
     assert out["metrics"]["intent"] == "COMMENT"
+
+
+def test_delegate_posts_on_the_collected_head(fakes, monkeypatch, capsys):
+    """収集した commit に固定して投稿する（レビュー中の push で未レビューの commit に付けない）。"""
+    fakes.fake_external_ai(monkeypatch, {"comments": []})
+    code, out = _main(capsys, "delegate", "codex", PR, "--out-dir", fakes.out)
+    assert code == 0, out
+    (post,) = fakes.posts()
+    assert post[post.index("--head-sha") + 1] == "abc"
+
+
+def test_finish_without_a_collect_of_the_same_pr_leaves_the_head_to_review_post(fakes, tmp_path, capsys):
+    fakes.out.mkdir(parents=True, exist_ok=True)
+    (fakes.out / "target.json").write_text(json.dumps({"pr": PR + 1, "head_sha": "zzz"}), encoding="utf-8")
+    code, _ = _main(capsys, "finish", "--findings", _findings(tmp_path, {"comments": []}), "--pr", PR, "--out-dir", fakes.out)
+    assert code == 0 and "--head-sha" not in fakes.posts()[0]
 
 
 def test_delegate_does_not_post_unreadable_output(fakes, monkeypatch, capsys):

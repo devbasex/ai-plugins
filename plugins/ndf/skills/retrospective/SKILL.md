@@ -68,7 +68,8 @@ python3 "$SCRIPTS/issue-file.py" by-origin --origin "issue #<起点>" --origin "
 
 **起点の issue と Pull Request の両方を `--origin` に渡す。** Pull Request を作る前に見つけた課題は起点の issue の
 番号で残る。結果の `items` は課題ごとに 1 件（`repo`・`number`・`origins`）で、終了コード 2 は検索の失敗であり 0 件と
-読まない。上流リポジトリを検索に足しても、記録の投稿先は変わらない。
+読まない。**`metrics.upstream` が `null` なら上流リポジトリは検索されていない。** 上流リポジトリを `--repo` で名指しして
+打ち直す（名前が分からなければ利用者に聞く）。上流リポジトリを検索に足しても、記録の投稿先は変わらない。
 
 次の 3 か所と突き合わせる。番号が無いものが取りこぼしである。
 
