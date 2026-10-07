@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.65）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.66-dev.1）
 ```
 
 ### agy
@@ -119,18 +119,20 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.65 へ更新するとき
+## v10.17.66-dev.1 へ更新するとき
 
-- ndf の参加の確認では、各 CLI について認証・最小の呼び出し・既定のモデルを確かめます。（#1794）（#1799）
-- モデルを呼び出せない CLI と、認証が失効した CLI は担当から外れます。外れた席は残りの参加者へ振り替わります。（#1794）（#1799）
-- ndf の check の結果に、既定のモデル（`default_model`）が出ます。（#1794）（#1799）
-- ndf の並列本数は、1 本の重さの実測といまのメモリの圧から決まる（#1796）（#1799）
-- 実行計画に「anon の起点」と「1 本の重さ」の列がある。起点が無い実行計画では、1 本の見込みを使って本数を決める（#1796）（#1799）
-- `--swap-free-min-pct` は廃止済みで、渡しても終了コード 0 で動く（#1796）（#1799）
-- ndf プラグインのリリース手順で開発版の版数を上げても、AGENTS.md の版数は書き換えられません（#1797）（#1799）
-- ndf の cross-refactoring：積み直しが衝突したときは、衝突したコミットの項目だけを外します。残った項目は確かめ直して続けます。（#1798）（#1801）
-- ndf の cross-refactoring：修正担当が直さなかった項目は、次の検証の最初に取り消します。（#1798）（#1801）
-- ndf の test-strategy：範囲テストの `{paths}` には、test_targets の各項目のうち `::` より前のパスだけが入ります。（#1798）（#1801）
+- cross-refactoring は、同じ秒のうちに書き換えたファイルでも古いバイトコードを読まず、書き換え後の内容で確かめる（#1820）（#1825）
+- cross-refactoring の init は、対象の Pull Request が閉じている・マージ済み・Draft でない場合に処理を止める（#1821）（#1825）
+- cross-refactoring の完了報告では、見送りの件数が metrics.deferred の値と一致する（#1821）（#1825）
+- cross-refactoring の完了報告では、見送った提案を別の行に出す（#1821）（#1825）
+- cross-refactoring は、走る見込みの手順にだけ時間を配る（#1823）（#1825）
+- cross-refactoring が実装を止める時刻は「実装の終わり」の 1 つ（#1823）（#1825）
+- cross-refactoring は、時間が余ると見送った候補を採り直す（#1823）（#1825）
+- cross-refactoring は、止まっていた時間の分だけ締め切りを後ろへずらす（#1823）（#1825）
+- cross-refactoring で、分割・抽出・移動・改名・インライン化・テストの共通化を適用できます。（#1824）（#1825）
+- cross-refactoring の項目では、新しいファイルの作成と呼び手の書き換えを含められます。（#1824）（#1825）
+- cross-refactoring では、複数コミットにまたがる項目を 1 つの項目として扱います。（#1824）（#1825）
+- cross-refactoring は、適用した項目を差分で取り消しません。（#1824）（#1825）
 
 ## Playwright テストについて
 
@@ -421,7 +423,7 @@ agy models   # 認証確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.65/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.66-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -443,14 +445,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.65/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.66-dev.1/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.65  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.66-dev.1  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
