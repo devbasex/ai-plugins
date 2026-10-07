@@ -1598,6 +1598,19 @@
       "source": "plugins/ndf/skills/out-of-scope/references/issue-target.md"
     },
     {
+      "term": "由来",
+      "context": "ndf-issue-upkeep",
+      "meaning": "範囲外の課題を見つけた元。PR #<番号> か issue #<番号> の形で書く。Pull Request がまだ無ければ起点の issue",
+      "source": "plugins/ndf/skills/out-of-scope/SKILL.md"
+    },
+    {
+      "term": "本文の骨格",
+      "context": "ndf-issue-upkeep",
+      "meaning": "範囲外の課題の本文が持つ 5 項目の見出し（何を見つけたか・どこで見つけたか・なぜこの変更の範囲外なのか・直さないと何が起きるか・由来）",
+      "source": "",
+      "pending_source": "issues/issue-851-requirements.md"
+    },
+    {
       "term": "上流リポジトリ",
       "context": "ndf-issue-upkeep",
       "meaning": "NDF の Skill・エージェント・hook の実体を持つリポジトリ",
