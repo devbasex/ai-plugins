@@ -106,6 +106,7 @@ EXCLUSIONS: dict[str, str] = {
     "supervise.py は .ndf/supervise.json の release.form が package-plugin のときだけ呼ぶ",
     "plugins/ndf/scripts/release-verification-steps.py": "配布の形が package-plugin のときの導入の確かめ（ランタイムごとの導入の経路）。形で分岐済み",
     "plugins/ndf/scripts/lib/step_result.py": "release-steps.py が使うプラグインの置き場（plugin_dir）。package-plugin の形の中だけで使う",
+    "plugins/ndf/scripts/issue-file.py": "上流リポジトリ（NDF の実体を持つ clone）を plugins/ndf/ で見分ける部品。対象リポジトリを指していない",
     "plugins/ndf/scripts/worktree-setup.sh": "NDF 自身の宣言の形（worktree.schema.json）の URL。対象リポジトリを指していない",
     "plugins/ndf/scripts/project_lib/model.py": "NDF 自身の宣言の形（project.schema.json）の URL。対象リポジトリを指していない",
 }
