@@ -183,7 +183,8 @@ def _dedupe(repos: list[str]) -> list[str]:
     return out
 
 
-def cmd_by_origin(a) -> None:
+def _targets_for_by_origin(a) -> tuple[list[str], list[str], str | None]:
+    """by-origin の検索対象 `(由来, リポジトリ, 上流リポジトリ)`。リポジトリが無ければ 2 で終える。"""
     origins = _dedupe([_require_form(o, ORIGIN_RE, "由来") for o in a.origin])
     repos = [_require_form(r, REPO_RE, "リポジトリ") for r in a.repo or []]
     upstream = None
@@ -193,6 +194,22 @@ def cmd_by_origin(a) -> None:
     repos = _dedupe(repos)
     if not repos:
         _stop_with("検索するリポジトリが無い（--repo か、決まる --with-upstream を渡す）", EXIT_UNREADABLE)
+    return origins, repos, upstream
+
+
+def _merge_row(merged: dict[tuple[str, int], dict], repo: str, origin: str, d: dict) -> None:
+    """検索の 1 件を `merged` へ足す。同じ課題なら由来だけを足す。"""
+    key = (repo, int(d.get("number")))
+    row = merged.setdefault(
+        key,
+        {"repo": repo, "number": key[1], "title": d.get("title"), "url": d.get("url"), "state": d.get("state"), "origins": []},
+    )
+    if origin not in row["origins"]:
+        row["origins"].append(origin)
+
+
+def _merge_origin_hits(repos: list[str], origins: list[str]) -> tuple[dict[tuple[str, int], dict], int]:
+    """リポジトリ × 由来で検索して課題ごとにまとめる。`(まとめた結果, 検索の回数)`。"""
     merged: dict[tuple[str, int], dict] = {}
     searches = 0
     for repo in repos:
@@ -202,13 +219,13 @@ def cmd_by_origin(a) -> None:
             if not found.ok:
                 _stop_with(f"{repo} で {origin} の検索が失敗した: {found.error[:300]}", EXIT_UNREADABLE)
             for d in found.value:
-                key = (repo, int(d.get("number")))
-                row = merged.setdefault(
-                    key,
-                    {"repo": repo, "number": key[1], "title": d.get("title"), "url": d.get("url"), "state": d.get("state"), "origins": []},
-                )
-                if origin not in row["origins"]:
-                    row["origins"].append(origin)
+                _merge_row(merged, repo, origin, d)
+    return merged, searches
+
+
+def cmd_by_origin(a) -> None:
+    origins, repos, upstream = _targets_for_by_origin(a)
+    merged, searches = _merge_origin_hits(repos, origins)
     items = list(merged.values())
     metrics = {"searches": searches, "count": len(items), "upstream": upstream}
     emit(result(TOOL, "ok", f"{len(repos)} リポジトリ × {len(origins)} 由来で {len(items)} 件", items, metrics), EXIT_OK)
