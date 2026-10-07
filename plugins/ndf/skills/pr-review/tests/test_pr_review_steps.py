@@ -285,6 +285,96 @@ def test_collect_stops_without_threads(fakes, capsys):
     assert code == 2 and "threads" in out["summary"]
 
 
+def _stub_pr_info(monkeypatch, info, code=0):
+    """`collect_pr` が起動する子スクリプトを、決まった結果を返す関数へ差し替える。呼んだ argv を返す。"""
+    calls: list[list] = []
+
+    def child(argv, cwd=None):
+        calls.append([str(x) for x in argv])
+        return info, code
+
+    monkeypatch.setattr(steps, "_child", child)
+    return calls
+
+
+def test_collect_pr_metrics_and_sections_are_fixed(tmp_path, monkeypatch):
+    """現状固定（I-007）: pr-info の結果から metrics と文脈の節を組む形。"""
+    diff = tmp_path / "pr.diff"
+    diff.write_text("diff --git a/a.py b/a.py\n+x\ndiff --git a/d/b.md b/d/b.md\n+y\n", encoding="utf-8")
+    meta = {
+        "kind": "pr",
+        "repo": "o/r",
+        "url": "https://x/pull/7",
+        "title": "題",
+        "head_sha": "abc",
+        "base_branch": "develop",
+        "body": "  本文  ",
+    }
+    threads = [
+        {"kind": "thread", "path": "a.py", "line": 3, "body": " 指摘 "},
+        {"kind": "thread", "path": None, "line": None, "body": None},
+    ]
+    info = {"status": "ok", "items": [meta, {"kind": "diff", "path": str(diff)}, *threads], "metrics": {}}
+    calls = _stub_pr_info(monkeypatch, info)
+    a = steps.argparse.Namespace(out_dir=str(tmp_path / "out"), repo="o/r")
+
+    metrics, sections, d = steps.collect_pr(a, tmp_path, 7)
+
+    assert d == (tmp_path / "out").resolve() and d.is_dir()
+    assert calls == [[str(steps.GH_PARTS), "pr-info", "7", "--with", "diff,threads", "--out-dir", str(d), "--repo", "o/r"]]
+    assert metrics == {"mode": "pr", "pr": 7, "head_sha": "abc", "base_branch": "develop", "changed_files": 2, "unresolved_threads": 2}
+    assert len(sections) == 4
+    assert sections[0] == "\n".join(
+        [
+            "## 対象\n",
+            "- repo: o/r",
+            "- PR: #7 https://x/pull/7",
+            "- 題: 題",
+            "- head の SHA: abc",
+            "- ベースブランチ: develop",
+            f"- 作業ディレクトリ: {tmp_path}",
+        ]
+    )
+    assert sections[1].endswith("\n\n本文")
+    assert sections[2] == f"## 差分\n\n- 差分のファイル: `{diff}`\n- 変更ファイル（2）:\n  - `a.py`\n  - `d/b.md`"
+    assert sections[3].startswith("## 未解決のスレッド\n\n- `a.py:3` 指摘\n- `(位置なし):-` \n\n")
+
+
+def test_collect_pr_without_diff_threads_or_body_is_fixed(tmp_path, monkeypatch):
+    """現状固定（I-007）: 差分・スレッド・本文が無いとき、--repo を渡さないとき。"""
+    calls = _stub_pr_info(monkeypatch, {"status": "ok", "items": [{"kind": "pr"}], "metrics": {"unavailable": []}})
+    a = steps.argparse.Namespace(out_dir=str(tmp_path / "out"), repo=None)
+
+    metrics, sections, _ = steps.collect_pr(a, tmp_path, 7)
+
+    assert "--repo" not in calls[0]
+    assert metrics == {"mode": "pr", "pr": 7, "head_sha": None, "base_branch": None, "changed_files": 0, "unresolved_threads": 0}
+    assert sections[0].splitlines()[2:4] == ["- repo: ", "- PR: #7 "]
+    assert sections[1].endswith("\n\n（本文なし）")
+    assert sections[2] == "## 差分\n\n- 差分のファイル: `None`\n- 変更ファイル（0）:\n"
+    assert sections[3].startswith("## 未解決のスレッド\n\nなし\n\n")
+
+
+@pytest.mark.parametrize(
+    "info, code, message",
+    [
+        ({"status": "stopped", "summary": "読めない"}, 2, "PR #7 を取得できない: 読めない"),
+        ({"status": "ok", "summary": "s"}, 1, "PR #7 を取得できない: s"),
+        ({"status": "gate"}, 0, "PR #7 を取得できない: None"),
+        ({"status": "ok", "items": [], "metrics": {"unavailable": ["diff", "threads"]}}, 0, "PR #7 の diff, threads を取得できない"),
+    ],
+)
+def test_collect_pr_stops_are_fixed(tmp_path, monkeypatch, info, code, message):
+    """現状固定（I-007）: pr-info の失敗・取得できない部分は読めない（2）として止まる。"""
+    _stub_pr_info(monkeypatch, info, code)
+    a = steps.argparse.Namespace(out_dir=str(tmp_path / "out"), repo=None)
+
+    with pytest.raises(steps.StepError) as e:
+        steps.collect_pr(a, tmp_path, 7)
+
+    assert (str(e.value), e.value.code) == (message, steps.EXIT_UNREADABLE)
+
+
 def test_collect_branch_reports_base_files_stat_and_log(tmp_path, monkeypatch, capsys):
     _, clone = _origin_and_clone(tmp_path)
     _declare(clone, "develop")
