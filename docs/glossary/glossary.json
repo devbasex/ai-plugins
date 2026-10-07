@@ -2205,13 +2205,13 @@
       "term": "古いバイトコード",
       "context": "repo-dev-checks",
       "meaning": "Python が、書き換えたソースを、前の内容から作った .pyc で読むこと。.pyc はソースの更新時刻（秒）と大きさだけで新しさを照らすため、同じ秒に同じ大きさで書き換えると見分けられない",
-      "pending_source": "issues/issue-1806-design.md"
+      "source": "docs/specifications/cross-refactoring-test-stale-bytecode.md"
     },
     {
       "term": "git を使うテストの土台",
       "context": "repo-dev-checks",
       "meaning": "cross-refactoring のテストで、git のリポジトリの作業ディレクトリ・pytest の起動口・状態ファイルを用意する補助（crossref_helpers.build_git_flow）",
-      "pending_source": "issues/issue-1806-design.md"
+      "source": "docs/specifications/cross-refactoring-test-stale-bytecode.md"
     },
     {
       "term": "プロジェクトの宣言",
