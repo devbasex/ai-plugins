@@ -27,7 +27,7 @@ LIB = ROOT / "plugins" / "ndf" / "scripts" / "lib" / "worktree-common.sh"
 SKILLS = ROOT / "plugins" / "ndf" / "skills"
 
 # 起点を解決する手順を持つ Skill と、その手順を見分ける目印。
-INLINE_SKILLS = ("cherry-pick-pr", "deploy", "merged", "pr-review", "retrospective")
+INLINE_SKILLS = ("cherry-pick-pr", "deploy", "merged", "retrospective")
 MARKER = "dev_base=$(jq"
 
 
