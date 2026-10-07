@@ -15,7 +15,8 @@ import pytest
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from gh_fake import fake, rest_out  # noqa: E402,F401
+from gh_fake import FakeGh, rest_out  # noqa: E402
+import gh_call  # noqa: E402
 import step_result  # noqa: E402
 
 SCRIPT = HERE.parent / "issue-file.py"
@@ -42,6 +43,13 @@ BODY = """## 何を見つけたか
 
 ## 由来
 """
+
+
+@pytest.fixture()
+def fake(monkeypatch):
+    f = FakeGh()
+    monkeypatch.setattr(gh_call, "RUNNER", f)
+    return f
 
 
 @pytest.fixture(autouse=True)
@@ -138,7 +146,7 @@ def test_dup_searches_open_issues_once(fake):
     assert [i["number"] for i in obj["items"]] == [3, 4]
     assert set(obj["items"][0]) == {"number", "title", "url"}
     assert obj["metrics"]["count"] == 2
-    (args, _), = fake.calls
+    ((args, _),) = fake.calls
     assert args[args.index("--state") + 1] == "open"
     assert args[args.index("--search") + 1] == "起票先 解決"
     assert args[args.index("--repo") + 1] == REPO
@@ -230,12 +238,35 @@ def test_create_with_the_shown_digest_files_the_issue_with_the_origin(fake, tmp_
     origin = payload["body"].split("## 由来", 1)[1]
     assert origin.count("PR #1900") == 1
     assert payload["body"].split("## 由来")[0] == BODY.split("## 由来")[0]
+    assert "ndf:section-end" not in payload["body"]
+
+
+def test_sections_after_the_origin_are_kept(fake, tmp_path):
+    target_is(fake, REPO)
+    text = BODY + "\n## 補足\n\nほか\n"
+    _, gate = run("create", "--repo", REPO, "--title", "t", "--body-file", body_file(tmp_path, text), "--origin", "PR #1")
+    body = Path(gate["metrics"]["body_path"]).read_text(encoding="utf-8")
+    assert body.endswith("## 由来\n\nPR #1\n\n## 補足\n\nほか\n")
 
 
 def test_create_passes_only_the_labels_it_was_given(fake, tmp_path):
     target_is(fake, REPO)
     created(fake)
-    args = ["create", "--repo", REPO, "--title", "題", "--body-file", body_file(tmp_path), "--origin", "issue #3", "--label", "b", "--label", "a"]
+    args = [
+        "create",
+        "--repo",
+        REPO,
+        "--title",
+        "題",
+        "--body-file",
+        body_file(tmp_path),
+        "--origin",
+        "issue #3",
+        "--label",
+        "b",
+        "--label",
+        "a",
+    ]
     _, gate = run(*args)
     run(*args, "--approved", gate["metrics"]["digest"])
     assert posted(fake)[0]["labels"] == ["b", "a"]
@@ -341,8 +372,6 @@ def test_a_create_failure_is_one(fake, tmp_path):
 def _by_query(answers: dict[tuple[str, str], str]):
     def answer(args, stdin):
         key = (args[args.index("--repo") + 1], args[args.index("--search") + 1])
-        from gh_fake import gh_call
-
         return gh_call.GhResult(0, answers[key], "") if answers[key] != "FAIL" else gh_call.GhResult(1, "", "HTTP 502")
 
     return answer

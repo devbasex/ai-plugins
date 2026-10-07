@@ -78,20 +78,20 @@ class _Parser(argparse.ArgumentParser):
         emit(result(TOOL, "stopped", f"引数の誤り: {message}"), EXIT_UNREADABLE)
 
 
-def _stop(summary: str, code: int, items=None, metrics=None) -> "NoReturn":  # noqa: F821
+def _stop_with(summary: str, code: int, items=None, metrics=None) -> "NoReturn":  # noqa: F821
     emit(result(TOOL, "stopped", summary, items, metrics), code)
 
 
-def _check(value: str, pattern: re.Pattern, what: str) -> str:
+def _require_form(value: str, pattern: re.Pattern, what: str) -> str:
     if not pattern.match(value or ""):
-        _stop(f"{what}の形が違う: {value!r}", EXIT_UNREADABLE)
+        _stop_with(f"{what}の形が違う: {value!r}", EXIT_UNREADABLE)
     return value
 
 
 def _counterpart(value: str) -> tuple[str, int]:
     m = COUNTERPART_RE.match(value or "")
     if not m:
-        _stop(f"相手の課題の形が違う（<所有者>/<リポジトリ>#<番号>）: {value!r}", EXIT_UNREADABLE)
+        _stop_with(f"相手の課題の形が違う（<所有者>/<リポジトリ>#<番号>）: {value!r}", EXIT_UNREADABLE)
     return m.group("repo"), int(m.group("number"))
 
 
@@ -123,7 +123,7 @@ def resolve_upstream() -> tuple[str | None, str, list[dict]]:
     """上流リポジトリを `(名前か None, 決めた手段, 候補)` で返す。`NDF_SKILL_REPO` の形の誤りは 2 で終える。"""
     env = os.environ.get("NDF_SKILL_REPO") or ""
     if env:
-        return _check(env, REPO_RE, "NDF_SKILL_REPO "), "env", []
+        return _require_form(env, REPO_RE, "NDF_SKILL_REPO "), "env", []
     items: list[dict] = []
     for clone in _clone_candidates():
         if not (clone / NDF_MARK).is_dir():
@@ -167,10 +167,10 @@ def cmd_resolve_target(a) -> None:
 
 
 def cmd_dup(a) -> None:
-    repo = _check(a.repo, REPO_RE, "起票先")
+    repo = _require_form(a.repo, REPO_RE, "起票先")
     found = gh_rest.issue_search(repo, a.query, "open", 30)
     if not found.ok:
-        _stop(f"{repo} の検索が失敗した: {found.error[:300]}", EXIT_UNREADABLE)
+        _stop_with(f"{repo} の検索が失敗した: {found.error[:300]}", EXIT_UNREADABLE)
     items = [{"number": d.get("number"), "title": d.get("title"), "url": d.get("url")} for d in found.value]
     emit(result(TOOL, "ok", f"{repo} の open の課題で {len(items)} 件が当たった", items, {"count": len(items)}), EXIT_OK)
 
@@ -184,15 +184,15 @@ def _dedupe(repos: list[str]) -> list[str]:
 
 
 def cmd_by_origin(a) -> None:
-    origins = _dedupe([_check(o, ORIGIN_RE, "由来") for o in a.origin])
-    repos = [_check(r, REPO_RE, "リポジトリ") for r in a.repo or []]
+    origins = _dedupe([_require_form(o, ORIGIN_RE, "由来") for o in a.origin])
+    repos = [_require_form(r, REPO_RE, "リポジトリ") for r in a.repo or []]
     upstream = None
     if a.with_upstream:
         upstream = resolve_upstream()[0]
         repos += [upstream] if upstream else []
     repos = _dedupe(repos)
     if not repos:
-        _stop("検索するリポジトリが無い（--repo か、決まる --with-upstream を渡す）", EXIT_UNREADABLE)
+        _stop_with("検索するリポジトリが無い（--repo か、決まる --with-upstream を渡す）", EXIT_UNREADABLE)
     merged: dict[tuple[str, int], dict] = {}
     searches = 0
     for repo in repos:
@@ -200,11 +200,12 @@ def cmd_by_origin(a) -> None:
             found = gh_rest.issue_search(repo, f'"{origin}"', "all", SEARCH_LIMIT)
             searches += 1
             if not found.ok:
-                _stop(f"{repo} で {origin} の検索が失敗した: {found.error[:300]}", EXIT_UNREADABLE)
+                _stop_with(f"{repo} で {origin} の検索が失敗した: {found.error[:300]}", EXIT_UNREADABLE)
             for d in found.value:
                 key = (repo, int(d.get("number")))
                 row = merged.setdefault(
-                    key, {"repo": repo, "number": key[1], "title": d.get("title"), "url": d.get("url"), "state": d.get("state"), "origins": []}
+                    key,
+                    {"repo": repo, "number": key[1], "title": d.get("title"), "url": d.get("url"), "state": d.get("state"), "origins": []},
                 )
                 if origin not in row["origins"]:
                     row["origins"].append(origin)
@@ -218,26 +219,26 @@ def cmd_by_origin(a) -> None:
 
 def _note_line(a) -> str:
     if bool(a.origin) == bool(a.counterpart):
-        _stop("--origin と --counterpart のどちらか 1 つを渡す", EXIT_UNREADABLE)
+        _stop_with("--origin と --counterpart のどちらか 1 つを渡す", EXIT_UNREADABLE)
     if a.origin:
-        return f"同じ事象を {_check(a.origin, ORIGIN_RE, '由来')} の作業中に確認した。"
+        return f"同じ事象を {_require_form(a.origin, ORIGIN_RE, '由来')} の作業中に確認した。"
     _counterpart(a.counterpart)
     return f"開発対象の側は {a.counterpart} として残した。"
 
 
 def cmd_note(a) -> None:
-    repo = _check(a.repo, REPO_RE, "リポジトリ")
+    repo = _require_form(a.repo, REPO_RE, "リポジトリ")
     if a.number < 1:
-        _stop(f"番号の形が違う: {a.number}", EXIT_UNREADABLE)
+        _stop_with(f"番号の形が違う: {a.number}", EXIT_UNREADABLE)
     line = _note_line(a)
     done = gh_rest.comment(repo, a.number, line)
     if not done.ok:
-        _stop(f"{repo}#{a.number} へのコメントが失敗した: {done.error[:300]}", EXIT_VIOLATION)
+        _stop_with(f"{repo}#{a.number} へのコメントが失敗した: {done.error[:300]}", EXIT_VIOLATION)
     item = {"repo": repo, "number": a.number, "url": done.value.get("url", "")}
     emit(result(TOOL, "ok", f"{repo}#{a.number} へ 1 行を足した", [item], {}), EXIT_OK)
 
 
-def _mentions(lines: list[str], text: str) -> int | None:
+def _line_with(lines: list[str], text: str) -> int | None:
     """`text` を含む最初の行の位置（`PR #19` が `PR #190` に当たらないよう、後ろの数字を見る）。"""
     pat = re.compile(re.escape(text) + r"(?!\d)")
     return next((i for i, line in enumerate(lines) if pat.search(line)), None)
@@ -250,14 +251,19 @@ def assemble(body: str, origin: str, counterpart: str | None = None) -> str:
         return body
     lines = section.split("\n") if section.strip() else []
     changed = False
-    at = _mentions(lines, origin)
+    at = _line_with(lines, origin)
     if at is None:
         lines.insert(0, origin)
         at, changed = 0, True
-    if counterpart and _mentions(lines, counterpart) is None:
+    if counterpart and _line_with(lines, counterpart) is None:
         lines.insert(at + 1, f"上流リポジトリの側: {counterpart}")
         changed = True
-    return gh_sections.replace_section(body, ORIGIN_HEADING, "\n".join(lines)) if changed else body
+    if not changed:
+        return body
+    out = gh_sections.replace_section(body, ORIGIN_HEADING, "\n".join(lines))
+    if gh_sections.SECTION_END not in body:  # 置換が足す節の終わりの目印は、元の本文に無ければ残さない（本文の形を変えない）
+        out = "\n".join(line for line in out.split("\n") if line.strip() != gh_sections.SECTION_END)
+    return out
 
 
 def skeleton_gaps(body: str) -> list[dict]:
@@ -277,11 +283,11 @@ def digest_of(repo: str, title: str, body: str, labels: list[str]) -> str:
     return hashlib.sha256(json.dumps(shown, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
-def _read_body(path: str) -> str:
+def _read_body_file(path: str) -> str:
     try:
         return Path(path).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
-        _stop(f"本文のファイルを読めない: {path}（{exc}）", EXIT_UNREADABLE)
+        _stop_with(f"本文のファイルを読めない: {path}（{exc}）", EXIT_UNREADABLE)
 
 
 def _gate(repo: str, title: str, body: str, labels: list[str], digest: str, other: bool) -> "NoReturn":  # noqa: F821
@@ -319,27 +325,31 @@ def _gate(repo: str, title: str, body: str, labels: list[str], digest: str, othe
 
 
 def cmd_create(a) -> None:
-    repo = _check(a.repo, REPO_RE, "起票先")
-    origin = _check(a.origin, ORIGIN_RE, "由来")
+    repo = _require_form(a.repo, REPO_RE, "起票先")
+    origin = _require_form(a.origin, ORIGIN_RE, "由来")
     counterpart = _counterpart(a.counterpart) if a.counterpart else None
     if not a.title.strip():
-        _stop("題が空", EXIT_UNREADABLE)
+        _stop_with("題が空", EXIT_UNREADABLE)
     labels = list(a.label or [])
-    body = assemble(_read_body(a.body_file), origin, a.counterpart)
+    body = assemble(_read_body_file(a.body_file), origin, a.counterpart)
     gaps = skeleton_gaps(body)
     if gaps:
         names = "・".join(g["heading"] for g in gaps)
-        _stop(f"本文の骨格が欠ける: {names}。課題は作っていない", EXIT_VIOLATION, gaps)
+        _stop_with(f"本文の骨格が欠ける: {names}。課題は作っていない", EXIT_VIOLATION, gaps)
     digest = digest_of(repo, a.title, body, labels)
     target = development_repo()
     other = target is None or target.lower() != repo.lower()
     if not a.approved:
         _gate(repo, a.title, body, labels, digest, other)
     if a.approved != digest:
-        _stop("提示の要約値が合わない（示した後に起票先・題・本文・ラベルが変わった）。課題は作っていない", EXIT_VIOLATION, metrics={"digest": digest})
+        _stop_with(
+            "提示の要約値が合わない（示した後に起票先・題・本文・ラベルが変わった）。課題は作っていない",
+            EXIT_VIOLATION,
+            metrics={"digest": digest},
+        )
     made = gh_rest.issue_create(repo, a.title, body, labels or None)
     if not made.ok:
-        _stop(f"{repo} への起票が失敗した: {made.error[:300]}", EXIT_VIOLATION)
+        _stop_with(f"{repo} への起票が失敗した: {made.error[:300]}", EXIT_VIOLATION)
     number, url = made.value.get("number"), made.value.get("url", "")
     nxt = None
     if counterpart:
