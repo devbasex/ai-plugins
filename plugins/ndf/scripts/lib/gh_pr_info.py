@@ -153,6 +153,29 @@ def _thread_items(slug: str, pr: int) -> tuple[list[dict[str, Any]], int | None]
     return items, len(threads)
 
 
+def _diff_part(slug: str, pr: int, out: pathlib.Path) -> tuple[list[dict[str, Any]], dict[str, Any], str | None, str | None]:
+    """差分の部品。`(items, metrics, 取得できない部品の名前, note)`。"""
+    path, why = _save_diff(slug, pr, out)
+    item = {"kind": "diff", "name": "diff", "result": "saved" if path else "unavailable", "path": path, **({"reason": why} if why else {})}
+    return [item], {}, None if path else "diff", None
+
+
+def _checks_part(
+    slug: str, meta: dict[str, Any], parts: set[str], out: pathlib.Path
+) -> tuple[list[dict[str, Any]], dict[str, Any], str | None, str | None]:
+    """checks の部品。`(items, metrics, 取得できない部品の名前, note)`。"""
+    items, metrics, note = _check_items(slug, meta, parts, out)
+    return items, metrics, "checks" if note is None else None, note
+
+
+def _threads_part(slug: str, pr: int) -> tuple[list[dict[str, Any]], dict[str, Any], str | None, str | None]:
+    """未解決のスレッドの部品。`(items, metrics, 取得できない部品の名前, note)`。"""
+    items, count = _thread_items(slug, pr)
+    if count is None:
+        return items, {"unresolved_threads": None}, "threads", None
+    return items, {"unresolved_threads": count}, None, f"未解決 {count}"
+
+
 def pr_info(
     pr: int, repo: str | None = None, with_parts: set[str] | None = None, out_dir: pathlib.Path | None = None
 ) -> tuple[dict[str, Any], int]:
@@ -181,31 +204,22 @@ def pr_info(
     unavailable: list[str] = []
     notes: list[str] = []
 
-    if "diff" in parts:
-        path, why = _save_diff(slug, pr, out)
-        items.append(
-            {"kind": "diff", "name": "diff", "result": "saved" if path else "unavailable", "path": path, **({"reason": why} if why else {})}
-        )
-        if not path:
-            unavailable.append("diff")
-
-    if "checks" in parts or "logs" in parts:
-        check_items, check_metrics, note = _check_items(slug, meta, parts, out)
-        items.extend(check_items)
-        metrics.update(check_metrics)
-        if note is None:
-            unavailable.append("checks")
-        else:
+    # 取得の順序は diff → checks → threads。左はその部品を取る --with の値
+    collectors = (
+        ({"diff"}, lambda: _diff_part(slug, pr, out)),
+        ({"checks", "logs"}, lambda: _checks_part(slug, meta, parts, out)),
+        ({"threads"}, lambda: _threads_part(slug, pr)),
+    )
+    for triggers, collect in collectors:
+        if not triggers & parts:
+            continue
+        part_items, part_metrics, missing, note = collect()
+        items.extend(part_items)
+        metrics.update(part_metrics)
+        if missing:
+            unavailable.append(missing)
+        if note:
             notes.append(note)
-
-    if "threads" in parts:
-        thread_items, count = _thread_items(slug, pr)
-        items.extend(thread_items)
-        metrics["unresolved_threads"] = count
-        if count is None:
-            unavailable.append("threads")
-        else:
-            notes.append(f"未解決 {count}")
 
     if unavailable:
         metrics["unavailable"] = unavailable
