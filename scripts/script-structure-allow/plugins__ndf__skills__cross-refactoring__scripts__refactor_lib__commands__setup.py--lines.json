@@ -1,1 +1,1 @@
-{"path": "plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/setup.py", "name": "", "kind": "lines", "reason": "L0 の時点で 913 行。C4 は重複だけをライブラリへ置き換える。触って 500 行以下にしたら消す。#1290（参加の確認へ --model の明示を渡す）で増えた。#1658（入口で Pull Request の状態を確かめる）で増えた", "lines": 943}
+{"path": "plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/setup.py", "name": "", "kind": "lines", "reason": "L0 の時点で 913 行。C4 は重複だけをライブラリへ置き換える。触って 500 行以下にしたら消す。#1290（参加の確認へ --model の明示を渡す）で増えた。#1658（入口で Pull Request の状態を確かめる）で増えた", "lines": 924}

@@ -1,10 +1,12 @@
-# cross-refactoring: 閉じた・マージ済み・Draft でない Pull Request にも提案から push まで進み、見送りの件数が結果 JSON と完了報告で食い違う → 入口で Pull Request の状態を確かめて止め、見送りの件数を 3 つの出力で揃える（#1658 #1660）
+# cross-refactoring: 閉じた・マージ済みの Pull Request にも提案から push まで進み、見送りの件数が結果 JSON と完了報告で食い違う → 入口で Pull Request の状態を確かめて止め、見送りの件数を 3 つの出力で揃える（#1658 #1660）
+
+**2026-10-07 の改訂**: 本番配布の承認ゲート 2 で、利用者が「Draft でない Pull Request の cross-refactoring を止める必要はない」と差し戻した。Draft の判定は `SKILL.md` の前提「Draft で開いている」を守らせるために起票で足したもので、利用者の決定ではなかった。Draft の判定を外し、Draft のためだけにあった新しい実行と再開の区別（`_pending_state`）も外した。以下はこの改訂の後の形である。
 
 ## 目的
 
-- **何が壊れているか**: `refactor.py init` は Pull Request の応答の `state` / `draft` / `merged_at` を読まず、閉じた・マージ済み・Draft でない Pull Request にも提案・実装・push まで進む（#1658）。同じ実行の「見送り」の件数が、結果 JSON の `metrics.deferred` と完了報告（`refactor.py report`）の件数の行で別のものを数えている（#1660）
-- **誰が困るか**: マージ済みの head ブランチや、レビュー中の Pull Request へ予告なくコミットを積まれる利用者。完了報告と `metrics` を写す supervisor と、振り返りで件数を数える人
-- **直すと何が成り立つか**: `init` が作業ディレクトリを用意する前に、閉じた・マージ済み・（新しい実行で）Draft でない Pull Request を理由つきで止める。「見送り」は 3 つの出力で同じ値になり、計画に入らなかった提案を含む数は「見送った提案」として別の行に出る
+- **何が壊れているか**: `refactor.py init` は Pull Request の応答の `state` / `merged_at` を読まず、閉じた・マージ済みの Pull Request にも提案・実装・push まで進む（#1658）。同じ実行の「見送り」の件数が、結果 JSON の `metrics.deferred` と完了報告（`refactor.py report`）の件数の行で別のものを数えている（#1660）
+- **誰が困るか**: マージ済み・閉じた Pull Request の head ブランチへ予告なくコミットを積まれる利用者。完了報告と `metrics` を写す supervisor と、振り返りで件数を数える人
+- **直すと何が成り立つか**: `init` が作業ディレクトリを用意する前に、閉じた・マージ済みの Pull Request を理由つきで止める。Draft かどうかは問わない。「見送り」は 3 つの出力で同じ値になり、計画に入らなかった提案を含む数は「見送った提案」として別の行に出る
 
 ## 適用範囲
 
@@ -16,9 +18,9 @@
 
 | 根拠 | 種類 | 何を示すか |
 | --- | --- | --- |
-| `gh api repos/devbasex/ai-plugins/pulls/1805` → `{"state":"closed","draft":false,"merged_at":"2026-10-06T15:44:18Z"}`、`pulls/1387` → `{"state":"open","draft":false,"merged_at":null}`（2026-10-06 に実測） | 実測 | 判定に要る 3 項目は、`init` が既に打っている応答に必ず載る。マージ済みは `state: closed` と `merged_at` の時刻で表れる |
-| `plugins/ndf/skills/cross-refactoring/SKILL.md` の前提「対象の Pull Request が Draft で開いている」 | 外部の一次情報（Skill の約束） | 受け付ける Pull Request の範囲は既に約束されており、実装がそれを確かめていない |
-| `plugins/ndf/scripts/supervise_lib/pr.py` の `_publish`（無ければ `gh pr create --draft`） | 外部の一次情報（工程の実装） | 工程が作る Pull Request は Draft で始まり、入口の検査で止まらない |
+| `gh api repos/devbasex/ai-plugins/pulls/1805` → `{"state":"closed","draft":false,"merged_at":"2026-10-06T15:44:18Z"}`、`pulls/1387` → `{"state":"open","draft":false,"merged_at":null}`（2026-10-06 に実測） | 実測 | 判定に要る項目（`state` / `merged_at`）は、`init` が既に打っている応答に必ず載る。マージ済みは `state: closed` と `merged_at` の時刻で表れる |
+| 2026-10-07 の本番配布の承認ゲート 2 での利用者の差し戻し「Draft でない PR の cross-refactoring を止める必要はない」 | 利用者の決定 | 受け付ける Pull Request は開いているものすべてで、Draft かどうかは問わない |
+| `plugins/ndf/scripts/supervise_lib/pr.py` の `_publish`（無ければ `gh pr create --draft`） | 外部の一次情報（工程の実装） | 工程が作る Pull Request は Draft で始まり、Draft を外した後も開いていれば入口の検査で止まらない |
 | 「どちらも cross-refactoring の入口の検査と結果の報告の整合の問題として 1 本の設計で扱う」（2026-10-06、conductor の起動指示） | 利用者の指示の原文 | 2 つの課題を 1 本の設計で扱う |
 
 要求と受け入れ条件は #1658 の本文にある（コピーは `issues/issue-1658-requirements.md`）。この文書は「どう作るか」だけを扱う。
@@ -32,22 +34,22 @@
 | --- | --- |
 | cross-refactoring の実行 | 新しい実行・再開・見送った改善項目・見送った提案・件数の行 |
 
-Pull Request の状態（`state` / `draft` / `merged_at`）は GitHub の語をそのまま読む。GitHub との関係は**順応者**（GitHub の応答の形に合わせ、こちらから形を求めない）である。
+Pull Request の状態（`state` / `merged_at`）は GitHub の語をそのまま読む。GitHub との関係は**順応者**（GitHub の応答の形に合わせ、こちらから形を求めない）である。
 
 ### 集約
 
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
 | 実行の状態（状態ファイル） | `refactor.py` の各コマンド。`init` は判定が「続ける」のときだけ作る | 状態（`state`） | 改善項目（`items`）・見送った提案（`deferred_items`） | 表示の状態の件数（`ledger.Tally`） |
-| Pull Request の状態 | GitHub（この変更は読むだけ） | — | — | `pr_gate.PrStatus`（`state` / `draft` / `merged_at`） |
+| Pull Request の状態 | GitHub（この変更は読むだけ） | — | — | `pr_gate.PrStatus`（`state` / `merged_at`） |
 
 ### 不変条件
 
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
-| I1 | Pull Request の状態 | 新しい実行が作業ディレクトリを用意するのは、`state` が `open` かつ `draft` が `true` のときだけである | `init` が終了コード 4 で止まる |
-| I2 | Pull Request の状態 | 再開が続くのは `state` が `open` のときだけである。`draft` の値は見ない | `init` が終了コード 4 で止まる |
-| I3 | Pull Request の状態 | 判定に使う項目が想定の値でなければ続けない（`state` が `open` / `closed` 以外、新しい実行で `draft` が真偽値以外） | 「判定できない」と項目名を出して終了コード 4 |
+| I1 | Pull Request の状態 | 作業ディレクトリを用意するのも再開するのも、`state` が `open` のときだけである | `init` が終了コード 4 で止まる |
+| I2 | Pull Request の状態 | `draft` の値は判定に使わない。新しい実行と再開は同じ判定を受ける | Draft でない Pull Request で止まる |
+| I3 | Pull Request の状態 | 判定に使う項目が想定の値でなければ続けない（`state` が `open` / `closed` 以外、または無い） | 「判定できない」と項目名を出して終了コード 4 |
 | I4 | 実行の状態 | 判定で止まった `init` は、作業ディレクトリ・状態の置き場・状態ファイルのどれも作らず、書き換えない | 判定を作業ディレクトリの用意より前に置く（処理の流れ） |
 | I5 | Pull Request の状態 | 判定は `init` が既に読んでいる `repos/{repo}/pulls/{pr}` の応答 1 回から行う | `gh` の呼び出しの回数が変わる |
 | I6 | 実行の状態 | 結果 JSON の `metrics.deferred`・計画のコメントの件数の行の「見送り」・完了報告の件数の行の「見送り」は、どれも `ledger.tally(state).deferred` である | 件数が食い違う |
@@ -62,7 +64,7 @@ Pull Request の状態（`state` / `draft` / `merged_at`）は GitHub の語を�
 | --- | --- | --- | --- |
 | E1 | 駆動が `refactor.py init` を呼んだ | `drive.py`（`Drive.start`） | `refactor.py init` |
 | E2 | `init` が Pull Request の応答を読んだ | `setup._fetch_pr_context` | `setup._prepare_init` |
-| E3 | `init` が Pull Request の状態を判定した | `pr_gate.refusal` | `setup._prepare_init`（止める理由があれば `die`。駆動は終了コード 4 を中断として受ける） |
+| E3 | `init` が Pull Request の状態を判定した | `pr_gate.init_refusal` | `setup._prepare_init`（止める理由があれば `die`。駆動は終了コード 4 を中断として受ける） |
 | E4 | `init` が作業ディレクトリと状態ファイルを用意した | `setup._prepare_init` 以降 | 後続の手順 |
 | E5 | リファクタリング計画が提案を見送った | `commands/plan.py`・`commands/propose.py`（`defer`） | 状態ファイルの `deferred_items` |
 | E6 | 実装の取り込みか採り直しが改善項目を見送った | `commands/implement.py` の `_settle`（#1743 の後は `commands/readopt.py` も） | `items[].status` と `deferred_items` |
@@ -81,7 +83,7 @@ Pull Request の状態（`state` / `draft` / `merged_at`）は GitHub の語を�
 | # | 機能 | 誰が使うか |
 | --- | --- | --- |
 | F1 | 閉じた・マージ済みの Pull Request で cross-refactoring を始めない・続けない | 単独起動の利用者、工程の supervisor |
-| F2 | 新しい実行で、Draft でない Pull Request を Draft に戻す手順つきで止める | 単独起動の利用者 |
+| F2 | （欠番。2026-10-07 の改訂で Draft の判定を外した） | — |
 | F3 | 応答から状態を判定できないときに続けず、読めなかった項目名を示す | 単独起動の利用者、工程の supervisor |
 | F4 | 完了報告の件数の行の「見送り」を、結果 JSON と計画のコメントと同じ値で出す | 完了報告を写す supervisor、振り返る人 |
 | F5 | 完了報告で「見送った提案」の総数と理由別の件数を、見送りの件数と別の行に出す | 完了報告を写す supervisor、振り返る人 |
@@ -112,15 +114,14 @@ graph TD
 
 | 要素 | 責務 |
 | --- | --- |
-| `refactor_lib/pr_gate.py`（新規） | 応答から `PrStatus` を読み出す（`PrStatus.of`）。`PrStatus` と再開かどうかから、止める理由の 1 行か `None` を返す（`refusal`）。**git も GitHub も呼ばず、終了もしない** |
+| `refactor_lib/pr_gate.py`（新規） | 応答から `PrStatus` を読み出す（`PrStatus.of`）。`PrStatus` から、止める理由の 1 行か `None` を返す（`init_refusal`）。新しい実行か再開かは受け取らない。**git も GitHub も呼ばず、終了もしない** |
 | `commands/setup.py` の `_fetch_pr_context` | 既に読んでいる応答から `PrStatus` を作り、6 つ目の値として返す。`gh` の呼び出しは変えない |
-| `commands/setup.py` の `_pending_state`（新規） | 状態ファイルを 1 度だけ読み、再開する状態（版が今の形で `phase` が `done` でない）ならその状態を、そうでなければ `None` を返す。環境変数 `CROSS_REFACTORING_TMP_DIR` が無く、`work` が存在して登録された worktree でない（`_is_registered_worktree` が偽。`_ensure_work_worktree` が退避する）ときは、状態ファイルを読まずに `None`（新しい実行）を返す。旧い形で途中のまま残ったものは今と同じ文で止める |
-| `commands/setup.py` の `_prepare_init` | 状態ファイルの置き場を（作らずに）求め、`_pending_state` と `pr_gate.refusal` を呼び、止める理由があれば `die` する。**この後で初めて作業ディレクトリを用意する** |
-| `commands/setup.py` の `_InitPreparation` / `_resume_if_pending` | 準備に `pending`（`_pending_state` の結果）を持たせ、再開の判定は状態ファイルを読み直さずにそれを使う |
+| `commands/setup.py` の `_prepare_init` | `pr_gate.init_refusal` を呼び、止める理由があれば `die` する。**この後で初めて作業ディレクトリを用意する** |
+| `commands/setup.py` の `_InitPreparation` / `_resume_if_pending` | 変えない。再開の判定は今どおり作業ディレクトリの用意の後で状態ファイルを読む |
 | `commands/report.py` の `_print_deferred` | 件数の行の「見送り」を `ledger.tally(state).deferred` から出す。「見送った提案」の行に `deferred_items` の総数と理由別の件数を出す |
-| `cross-refactoring/SKILL.md` | 前提（閉じた・マージ済み・新しい実行で Draft でないと `init` が止まる）、終了コード 1 の行の `metrics.exit` 4 の理由、`metrics` の説明（`deferred` は見送った改善項目）、完了報告の節（見送った改善項目と見送った提案の書き分け） |
+| `cross-refactoring/SKILL.md` | 前提（閉じた・マージ済み・状態を判定できないと `init` が止まる。Draft かどうかは問わない）、終了コード 1 の行の `metrics.exit` 4 の理由、`metrics` の説明（`deferred` は見送った改善項目）、完了報告の節（見送った改善項目と見送った提案の書き分け） |
 | `cross-refactoring/docs/04-verify-and-report.md` | 完了報告の段落の「見送りの理由別の件数」を「見送った提案の総数と理由別の件数」へ |
-| `cross-refactoring/tests/` | 偽の `pulls/{pr}` の応答に `state: open`・`draft: true`・`merged_at: null` を足す。報告の期待を新しい行へ |
+| `cross-refactoring/tests/` | 偽の `pulls/{pr}` の応答に `state: open`・`draft: true`・`merged_at: null` を足す（`draft` は判定に使わず、Draft でない応答でも続くことを縛る）。報告の期待を新しい行へ |
 
 図は呼び出しの関係だけを描き、`SKILL.md`・`docs/04-verify-and-report.md`・`tests/` と `_InitPreparation`（`_prepare_init` が返す値）は含めない。
 
@@ -134,11 +135,10 @@ graph LR
     end
     subgraph setup["commands/setup.py"]
         fetch["_fetch_pr_context"]
-        pending["_pending_state（新規）"]
         prep["_prepare_init"]
         resume["_resume_if_pending"]
     end
-    gate["pr_gate.py（新規）<br/>PrStatus / refusal"]
+    gate["pr_gate.py（新規）<br/>PrStatus / init_refusal"]
     subgraph report["commands/report.py"]
         pdef["_print_deferred"]
     end
@@ -149,7 +149,6 @@ graph LR
     prep --> fetch
     fetch --> gh
     fetch --> gate
-    prep --> pending
     prep --> gate
     prep --> resume
     counts --> ledger
@@ -165,17 +164,15 @@ graph LR
 classDiagram
     class PrStatus {
         +state: Any
-        +draft: Any
         +merged_at: Any
         +of(body) PrStatus
     }
     class pr_gate {
-        +refusal(pr, status, resuming) str | None
+        +init_refusal(pr, repo, status) str | None
     }
     class _InitPreparation {
         +repo
         +state_file
-        +pending: dict | None
     }
     class Tally {
         +items
@@ -193,7 +190,7 @@ classDiagram
     report ..> Tally : 件数の行
 ```
 
-`PrStatus` の 3 つの値は応答の値をそのまま持つ（型を直さない）。想定の値かどうかを決めるのは `refusal` だけにし、判定の規則を 1 か所に置く。
+`PrStatus` の 2 つの値は応答の値をそのまま持つ（型を直さない）。想定の値かどうかを決めるのは `init_refusal` だけにし、判定の規則を 1 か所に置く。
 
 ## パッケージ・モジュール構成
 
@@ -203,9 +200,9 @@ plugins/ndf/
 │   ├── SKILL.md                         # 変更（前提・metrics の説明・完了報告の節）
 │   ├── docs/04-verify-and-report.md     # 変更
 │   ├── scripts/refactor_lib/
-│   │   ├── pr_gate.py                   # 新設（PrStatus / refusal）
+│   │   ├── pr_gate.py                   # 新設（PrStatus / init_refusal）
 │   │   └── commands/
-│   │       ├── setup.py                 # 変更（_pending_state・_prepare_init）
+│   │       ├── setup.py                 # 変更（_prepare_init）
 │   │       └── report.py                # 変更（_print_deferred）
 │   └── tests/                           # 変更（偽の応答・報告の期待）
 └── scripts/tests/test_drive_refactor.py # 変更
@@ -217,15 +214,12 @@ plugins/ndf/
 
 終了コードは既存の中断（4）、結果 JSON と標準出力の変数は出さない（今の中断と同じ）。標準エラーへ `die` の 1 行（先頭 `❌ `）を出す。判定は上から順に当て、最初に当たった行で止める。
 
-| # | 応答（`resuming` は再開か） | 標準エラーの 1 行 | 受け入れ条件 |
+| # | 応答 | 標準エラーの 1 行 | 受け入れ条件 |
 | --- | --- | --- | --- |
-| 1 | `state` が `open` / `closed` のどちらでもない | `Pull Request #<PR> の状態を判定できない（state: <値>）。gh api repos/<repo>/pulls/<PR> の応答を確かめる` | 6 |
-| 2 | `state: closed`・`merged_at` が空でない | `Pull Request #<PR> はマージ済み（merged_at: <値>）。新しい Pull Request を Draft で作って打ち直す` | 2・5 |
-| 3 | `state: closed`・`merged_at` が空 | `Pull Request #<PR> は閉じている（state: closed）。開き直すか、新しい Pull Request を Draft で作って打ち直す` | 1・5 |
-| 4 | `state: open`・再開 | （止めない） | 5 |
-| 5 | `state: open`・新しい実行・`draft` が真偽値でない | `Pull Request #<PR> の状態を判定できない（draft: <値>）。gh api repos/<repo>/pulls/<PR> の応答を確かめる` | 6 |
-| 6 | `state: open`・新しい実行・`draft: false` | `Pull Request #<PR> は Draft でない（draft: false）。gh pr ready <PR> --undo で Draft に戻して打ち直す` | 3 |
-| 7 | `state: open`・新しい実行・`draft: true` | （止めない） | 4 |
+| 1 | `state` が `open` / `closed` のどちらでもない（無いを含む） | `Pull Request #<PR> の状態を判定できない（state: <値>）。gh api repos/<repo>/pulls/<PR> の応答を確かめる` | 6 |
+| 2 | `state: closed`・`merged_at` が空でない | `Pull Request #<PR> はマージ済み（merged_at: <値>）。新しい Pull Request を作って打ち直す` | 2・5 |
+| 3 | `state: closed`・`merged_at` が空 | `Pull Request #<PR> は閉じている（state: closed）。開き直すか、新しい Pull Request を作って打ち直す` | 1・5 |
+| 4 | `state: open`（`draft` の値を問わない。新しい実行も再開も） | （止めない） | 3・4・5 |
 
 `<repo>` は `_fetch_pr_context` が解決したリポジトリ名である。駆動（`drive.py <PR>`）はこの中断を既存どおり終了コード 1・`metrics.exit` 4 で返し、`init` の後の手順（`prepare-worktrees.sh` と担当の CLI）を起動しない。`init` が `TMP_DIR` を返さないため、計画のコメントも書き直さない（`refresh_plan_comment` は状態の無い実行を飛ばす）。
 
@@ -252,14 +246,13 @@ sequenceDiagram
     participant I as setup.cmd_init
     participant P as setup._prepare_init
     participant G as GitHub
-    participant R as pr_gate.refusal
+    participant R as pr_gate.init_refusal
     D->>I: refactor.py init PR …
     I->>P: _prepare_init(args)
     P->>G: gh api repos/{repo}/pulls/{pr}（今と同じ 1 回）
-    G-->>P: 応答（state / draft / merged_at を含む）
-    P->>P: root・work・状態ファイルの置き場を求める（作らない）
-    P->>P: _pending_state(状態ファイル)（読むだけ）
-    P->>R: refusal(PR, PrStatus, resuming)
+    G-->>P: 応答（state / merged_at を含む）
+    P->>P: root・work を求める（作らない）
+    P->>R: init_refusal(PR, repo, PrStatus)
     alt 止める理由がある
         R-->>P: 1 行の理由
         P-->>D: die → 終了コード 4（作業ディレクトリを作らない）
@@ -267,36 +260,16 @@ sequenceDiagram
     else 続ける
         R-->>P: None
         P->>P: _ensure_work_worktree・テストの戦略・--scope の関門・tmp を作る
-        P-->>I: _InitPreparation（pending を持つ）
-        I->>I: _resume_if_pending（pending を使う）か新しい実行
+        P-->>I: _InitPreparation
+        I->>I: _resume_if_pending（状態ファイルを読む）か新しい実行
     end
 ```
 
-**判定の位置を作業ディレクトリの用意（`_ensure_work_worktree`）より前に置く**ことで I4 が成り立つ。状態ファイルの置き場は `paths.tmp_dir_for(work)`（環境変数 `CROSS_REFACTORING_TMP_DIR` が先に効く）と `paths.state_path` で、どちらもファイルを作らずに求まる。
-
-旧い形で途中のまま残った状態ファイルは、今は作業ディレクトリの同期の後で止まっていたが、`_pending_state` が判定より前に読むため、同期の前に同じ文で止まる。止まることと文は変わらない。
+**判定の位置を作業ディレクトリの用意（`_ensure_work_worktree`）より前に置く**ことで I4 が成り立つ。判定は状態ファイルを読まないため、新しい実行と再開を区別しない。
 
 ### 再開か新しい実行かの判定
 
-```mermaid
-stateDiagram-v2
-    [*] --> 退避される: 環境変数が無く、work が登録された worktree でない
-    [*] --> 無い: 状態ファイルが無い
-    [*] --> 読む: 状態ファイルがある
-    退避される --> 新しい実行
-    読む --> 旧い形の途中: schema が今の版でなく rounds があり final が空
-    読む --> 新しい実行: schema が今の版でない（上以外）
-    読む --> 新しい実行: phase が done
-    読む --> 再開: 上のどれでもない
-    無い --> 新しい実行
-    旧い形の途中 --> [*]: 今と同じ文で止める（終了コード 4）
-    新しい実行 --> [*]: resuming = 偽
-    再開 --> [*]: resuming = 真
-```
-
-この区別は `_resume_if_pending` が今使っている規則そのものであり、`_pending_state` へ移して判定と再開の両方がそれを使う。
-
-「退避される」の行は、判定を用意より前へ移したために足す規則である。環境変数 `CROSS_REFACTORING_TMP_DIR` が無いと状態ファイルは `<work>/.cross_refactoring/` にあり、`work` が登録された worktree でなければ `_ensure_work_worktree` がそのディレクトリを `work.stale-<時刻>` へ退避して作り直す。今は退避の後に状態ファイルを読むため新しい実行になる。退避される状態ファイルで再開すると、この振る舞いが変わり、Draft の検査も外れる。そのため `_pending_state` は、退避されるディレクトリの状態ファイルを読まずに新しい実行として扱う。環境変数があるときは状態ファイルが `work` の外にあり退避されないため、この行は当たらない。
+変えない。`_resume_if_pending` が作業ディレクトリの用意の後で状態ファイルを読み、今の規則（無い・`phase: done`・旧い形は新しい実行、それ以外は再開、旧い形の途中は止める）で決める。入口の判定はこの区別を使わない（決定 3）。
 
 ### 完了報告の件数
 
@@ -332,25 +305,25 @@ graph LR
 
 ### 決定 2: 判定の規則を 1 か所に置いて git なしで縛れるよう、判定を新しいモジュール `refactor_lib/pr_gate.py` の純粋な関数にする
 
-判定は応答の 3 項目と再開かどうかだけで決まり、git も GitHub も要らない。純粋な関数にすると、受け入れ条件 1〜6 の組み合わせを作業ディレクトリなしで縛れる。`setup.py`（919 行）の中に置くと、関数を試すたびに `init` の偽の環境（git の worktree・`gh` の差し替え）を組むことになる。共通ライブラリ（`plugins/ndf/scripts/lib/`）へ置かないのは、要求が cross-review の入口を範囲から外しており、使う者が cross-refactoring だけだからである。
+判定は応答の 2 項目だけで決まり、git も GitHub も要らない。純粋な関数にすると、受け入れ条件 1・2・5・6 の組み合わせを作業ディレクトリなしで縛れる。`setup.py`（919 行）の中に置くと、関数を試すたびに `init` の偽の環境（git の worktree・`gh` の差し替え）を組むことになる。共通ライブラリ（`plugins/ndf/scripts/lib/`）へ置かないのは、要求が cross-review の入口を範囲から外しており、使う者が cross-refactoring だけだからである。
 
 根拠: Value 4 / Value 6（MVV 版 2）
 
-### 決定 3: Draft の検査を新しい実行だけに当てるため、再開の区別は `_resume_if_pending` と同じ規則を `_pending_state` 1 つで持つ
+### 決定 3: 入口の判定は新しい実行と再開を区別しない
 
-単独起動は最終ゲートの承認の後に Draft を外すため、Draft の検査を再開にも当てると、その後の打ち直しが止まる（要求の前提 1）。再開かどうかを状態ファイルの有無だけで決めると、`phase: done` の状態ファイルが残った新しい実行で Draft の検査が外れる。規則を判定用と再開用で 2 つ書くと、片方だけ直されて食い違う。状態ファイルを 1 度だけ読み、その結果を `_InitPreparation.pending` で再開へ渡す。読むのが用意より前になるため、`_ensure_work_worktree` が退避する作業ディレクトリの状態ファイルは読まずに新しい実行とする（用意の後で読み直す案は、1 度だけ読む規則を崩すため採らない）。
+閉じた・マージ済みは新しい実行でも再開でも止め、開いていればどちらも続けるため、判定に区別は要らない。改訂の前は Draft の検査を新しい実行だけに当てるため、状態ファイルを判定より前に 1 度読む `_pending_state` と `_InitPreparation.pending` を足していた。Draft の判定を外した後は、これらを残すと用意より前に状態ファイルを読む経路と、退避される作業ディレクトリの規則だけが残るため、改訂で外し、再開の判定を #1658 の前の形（用意の後で `_resume_if_pending` が読む）へ戻した。
 
 根拠: Value 6（MVV 版 2）
 
 ### 決定 4: 検査が黙って外れないよう、判定に使う項目が想定の値でなければ止める
 
-GitHub の応答は 3 項目を必ず持つ（実測）。欠けている・型が違うのは、偽の応答か API の形の変化であり、そのとき続けると検査が働かないまま push まで進む。`merged_at` は `state: closed` のときに「マージ済み」と「閉じている」の語を分けるだけで、どちらも止まるため、値の形を問わず空かどうかだけを見る。欠けた項目を `open`・Draft と見なして続ける形は採らない。
+GitHub の応答は `state` と `merged_at` を必ず持つ（実測）。欠けている・型が違うのは、偽の応答か API の形の変化であり、そのとき続けると検査が働かないまま push まで進む。`merged_at` は `state: closed` のときに「マージ済み」と「閉じている」の語を分けるだけで、どちらも止まるため、値の形を問わず空かどうかだけを見る。欠けた `state` を `open` と見なして続ける形は採らない。
 
 根拠: Value 4（MVV 版 2）
 
 ### 決定 5: テストの偽の応答を実際の API の形へ合わせ、`state` / `draft` / `merged_at` を足す
 
-既存のテストの `pulls/{pr}` の偽の応答（`tests/test_init.py` の 2 か所）は 3 項目を持たず、決定 4 のもとでは「判定できない」で止まる。実際の応答は必ず 3 項目を持つため、偽の応答の側を `state: open`・`draft: true`・`merged_at: null` に直す。`_fetch_pr_context` の戻り値が 6 つになるため、戻り値を比べるテスト（`test_init.py` の `test_init_takes_the_pull_request_of_the_repository_it_is_run_in`）の期待も直す。受け入れ条件 4 の「既存のテストがすべて通る」は、この 2 点を直したうえで他のテストの期待を変えずに通ることとして読む。
+既存のテストの `pulls/{pr}` の偽の応答（`tests/test_init.py` の 2 か所）は 3 項目を持たず、決定 4 のもとでは「判定できない」で止まる。実際の応答は必ず 3 項目を持つため（`draft` は判定に使わないが応答の形として残す）、偽の応答の側を `state: open`・`draft: true`・`merged_at: null` に直す。`_fetch_pr_context` の戻り値が 6 つになるため、戻り値を比べるテスト（`test_init.py` の `test_init_takes_the_pull_request_of_the_repository_it_is_run_in`）の期待も直す。受け入れ条件 4 の「既存のテストがすべて通る」は、この 2 点を直したうえで他のテストの期待を変えずに通ることとして読む。
 
 根拠: Value 3（MVV 版 2）
 
@@ -378,13 +351,11 @@ GitHub の応答は 3 項目を必ず持つ（実測）。欠けている・型�
 | --- | --- | --- |
 | 1・I1・I4 | 新しい実行で `state: closed`・`merged_at: null` の応答を返すと、`init` が終了コード 4 で止まり、標準エラーに `#<PR>` と「閉じている」が出て、作業ディレクトリと状態ファイルが無い | `state` を見ないようにすると落ちる。判定を `_ensure_work_worktree` の後へ動かすと落ちる |
 | 2 | `state: closed`・`merged_at` に時刻がある応答で、同じく止まり「マージ済み」が出る | `merged_at` を見ずに「閉じている」と出すと落ちる |
-| 3・I1・I4 | 新しい実行で `state: open`・`draft: false` の応答で止まり、「Draft でない」と `gh pr ready <PR> --undo` が出て、作業ディレクトリが無い | `draft` を見ないようにすると落ちる |
+| 3・I2 | 新しい実行で `state: open` かつ `draft` が `false`・無い・文字列の応答で、止まらずに状態ファイルができる | `draft` を見て止めるように戻すと落ちる |
 | 4 | `state: open`・`draft: true` の応答で、今までどおり状態ファイルができる（既存の `init` のテストが偽の応答の 3 項目を足しただけで通る） | `draft: true` でも止めるように壊すと既存のテストが落ちる |
-| 5・I2・I4 | 終わっていない状態ファイルがあると、`state: open`・`draft: false` で続き、`state: closed` で止まり状態ファイルの中身が変わらない | 再開にも Draft の検査を当てると落ちる。再開で `state` を見ないと落ちる。判定を `_resume` の後へ動かすと状態ファイルが書き換わって落ちる |
-| 5（`phase: done`） | `phase: done` の状態ファイルが残った実行は新しい実行として扱われ、`draft: false` で止まる | 再開の区別を状態ファイルの有無だけにすると落ちる |
-| 5（退避される作業ディレクトリ） | 環境変数 `CROSS_REFACTORING_TMP_DIR` が無く、登録された worktree でない `work` に終わっていない状態ファイルがあると、新しい実行として扱われ、`draft: false` で止まる | `_pending_state` が退避されるディレクトリの状態ファイルを読んで再開すると落ちる |
-| 6・I3 | `state` が `merged` などの値・`state` が無い・新しい実行で `draft` が無いか文字列の応答で、終了コード 4 と「判定できない」と項目名（`state` / `draft`）が出る | 欠けた項目を既定の値で埋めて続けると落ちる |
-| 6（判定の表） | `pr_gate.refusal` を入出力の契約の表の 7 行で呼び、止める行は理由の 1 行、止めない行は `None` が返る | 表の順を入れ替える（`draft` を `state` より先に見る）と、閉じた Draft でない Pull Request で語が変わって落ちる |
+| 5・I1・I2・I4 | 終わっていない状態ファイルがあると、`state: open`・`draft: false` で続き、`state: closed` で止まり状態ファイルの中身が変わらない | 再開で `state` を見ないと落ちる。判定を `_resume` の後へ動かすと状態ファイルが書き換わって落ちる |
+| 6・I3 | `state` が `merged` などの値・`state` が無い応答で、終了コード 4 と「判定できない」と項目名 `state` が出る | 欠けた項目を既定の値で埋めて続けると落ちる |
+| 6（判定の表） | `pr_gate.init_refusal` を入出力の契約の表の 4 行で呼び、止める行は理由の 1 行、止めない行は `None` が返る | `merged_at` を見ずに語を決めると落ちる |
 | 7 | 駆動の `init` が終了コード 4 で終わると、駆動は終了コード 1・`metrics.exit` 4 で終わり、`prepare-worktrees.sh` と担当の CLI を起動しない | 駆動が `init` の 4 を中断と扱わなくなると落ちる（既存の振る舞いの縛り） |
 | 8・I5 | 判定で止まる場合も続く場合も、`init` が打つ `gh` の呼び出しの並びが変更の前と同じ | 判定のために `gh pr view` などを打ち足すと落ちる |
 | 9 | `scripts/lib/drive_pause.py` に差分が無く、cross-review の駆動のテストが通る | 確かめ方は `git diff --stat` と受け入れ条件 16 のコマンド（テストを足さない） |
@@ -419,6 +390,4 @@ GitHub の応答は 3 項目を必ず持つ（実測）。欠けている・型�
 
 | 項目 | 内容 |
 | --- | --- |
-| 既存の Pull Request を使い回す工程 | 工程の `pr` のステップ（`supervise_lib/pr.py` の `_publish`）は、同じブランチの開いた Pull Request があれば作り直さずに本文だけ書き直す。その Pull Request が先に `gh pr ready` で Draft を外されていると、検査のプランのリファクタリングが新しい実行として止まる。今の雛形で、`ready` の後に同じブランチでリファクタリングを打ち直す経路があるかは確かめていない。止まったときは 1 行の理由に Draft へ戻すコマンドが出る。実装の後、スプリントの検査を 1 度通して確かめる |
-| `new check --pr <番号>` に渡す Pull Request | 検査のプランは利用者が渡した既存の Pull Request でリファクタリングを打つ。Draft でない Pull Request を渡すと止まるようになる。`SKILL.md` の前提どおりの振る舞いだが、検査の手順書が Draft を前提として書いているかは実装で読む |
 | `init` から push までの間の状態の変化 | 要求の「未決」のとおり扱わない。`init` の後に閉じられた・マージされた Pull Request へ push しうることは残る |

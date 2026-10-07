@@ -93,7 +93,7 @@ def run_init(refactor_lib, paths, patch_lib, refactor, origin_repo, monkeypatch)
     def _run(args, viewer="someone-else", probe=None, real_probe=False, pr_status=None):
         """`probe` を渡すと確認を差し替える。`{ランタイム: 理由}` の者だけが通らない。
 
-        `pr_status` は Pull Request の応答の `state` / `draft` / `merged_at` を上書きする（#1658）。
+        `pr_status` は Pull Request の応答の `state` / `draft` / `merged_at` を上書きする（#1658。`draft` は判定に使わない）。
         値に `MISSING` を渡すとその項目を応答から外す。
 
         `real_probe` を立てると差し替えず、止めない確認をそのまま走らせる（#813）。
@@ -1862,7 +1862,7 @@ def test_init_takes_the_pull_request_of_the_repository_it_is_run_in(refactor, pa
     monkeypatch.chdir(repo / "src")
     setup = sys.modules["refactor_lib.commands.setup"]
     gate = sys.modules["refactor_lib.pr_gate"]
-    assert setup._fetch_pr_context(12) == ("example/sample", "main", "feat/x", True, "me", gate.PrStatus("open", True, None))
+    assert setup._fetch_pr_context(12) == ("example/sample", "main", "feat/x", True, "me", gate.PrStatus("open", None))
     assert not any("nameWithOwner" in c for c in asked)
 
 
@@ -2076,7 +2076,7 @@ def test_the_whole_test_covers_the_scope(verify_init):
     assert sys.modules["refactor_lib.init_test"].resolve_scope_seconds(prep, ["tests"], None) == (None, None)
 
 
-# ---------- #1658: 閉じた・マージ済み・（新しい実行で）Draft でない Pull Request で止める ----------
+# ---------- #1658: 閉じた・マージ済み・状態を判定できない Pull Request で止める ----------
 
 
 def _stopped(run_init, tmp_path, capsys, pr_status):
@@ -2092,23 +2092,28 @@ def _stopped(run_init, tmp_path, capsys, pr_status):
     [
         ({"state": "closed", "merged_at": None}, ["#130", "閉じている"]),
         ({"state": "closed", "merged_at": "2026-10-06T15:44:18Z"}, ["#130", "マージ済み"]),
-        ({"state": "open", "draft": False}, ["#130", "Draft でない", "gh pr ready 130 --undo"]),
         ({"state": "merged"}, ["判定できない", "state"]),
         ({"state": MISSING}, ["判定できない", "state"]),
-        ({"draft": MISSING}, ["判定できない", "draft"]),
-        ({"draft": "false"}, ["判定できない", "draft"]),
     ],
 )
 def test_init_stops_before_preparing_the_work_dir_for_a_pull_request_it_must_not_touch(run_init, tmp_path, capsys, pr_status, words):
-    """AC1〜3・6（#1658）: 終了コード 4 で止まり、理由が出て、作業ディレクトリも状態ファイルも作らない。"""
+    """AC1・2・6（#1658）: 終了コード 4 で止まり、理由が出て、作業ディレクトリも状態ファイルも作らない。"""
     err = _stopped(run_init, tmp_path, capsys, pr_status)
     assert all(w in err for w in words), err
     assert not (tmp_path / "rf130" / "work").exists()
     assert not _state_path(tmp_path).exists()
 
 
-def test_a_resumed_run_continues_on_an_open_pull_request_that_is_no_longer_draft(run_init, tmp_path):
-    """AC5（#1658）: 終わっていない状態ファイルがあれば、Draft を外した開いた Pull Request でも続ける。"""
+@pytest.mark.parametrize("draft", [False, MISSING, "false"])
+def test_a_new_run_continues_on_an_open_pull_request_whatever_its_draft_is(run_init, tmp_path, draft):
+    """AC3（#1658・2026-10-07 の差し戻し）: 開いていれば `draft` の値にかかわらず新しい実行が続く。"""
+    run_init(_args(tmp_path), pr_status={"draft": draft})
+    _, state = _state_of(tmp_path)
+    assert state["phase"] == "propose"
+
+
+def test_a_resumed_run_continues_on_an_open_pull_request_that_is_not_draft(run_init, tmp_path):
+    """AC5（#1658）: 終わっていない状態ファイルがあれば、Draft でない開いた Pull Request でも続ける。"""
     run_init(_args(tmp_path))
     run_init(_args(tmp_path), pr_status={"draft": False})
     _, state = _state_of(tmp_path)
@@ -2126,30 +2131,9 @@ def test_a_resumed_run_stops_on_a_closed_pull_request_without_touching_the_state
     assert path.read_text(encoding="utf-8") == before
 
 
-def test_a_done_state_does_not_skip_the_draft_check(run_init, tmp_path, capsys):
-    """AC5（#1658 の決定 3）: `phase: done` の状態ファイルが残った実行は新しい実行であり、Draft でなければ止まる。"""
-    run_init(_args(tmp_path))
-    _, state = _state_of(tmp_path)
-    state["phase"] = "done"
-    path = _overwrite_state(tmp_path, state)
-    before = path.read_text(encoding="utf-8")
-    assert "Draft でない" in _stopped(run_init, tmp_path, capsys, {"draft": False})
-    assert path.read_text(encoding="utf-8") == before
-
-
-def test_a_state_in_a_work_dir_that_will_be_moved_aside_is_a_new_run(run_init, tmp_path, capsys):
-    """AC5（#1658 の決定 3）: 登録された worktree でない work の状態ファイルは退避されるため、新しい実行として Draft を求める。"""
-    work = tmp_path / "rf130" / "work"
-    state = work / ".cross_refactoring" / "cross-refactoring-rf130-state.json"
-    state.parent.mkdir(parents=True)
-    state.write_text(json.dumps({"schema": 2, "id": 130, "phase": "propose"}), encoding="utf-8")
-    assert "Draft でない" in _stopped(run_init, tmp_path, capsys, {"draft": False})
-    assert state.exists()
-
-
 def test_the_pull_request_check_adds_no_gh_call(run_init, tmp_path, capsys):
     """AC8（#1658 I5）: 止まる実行も続く実行も、`gh` の呼び出しの並びは同じ（応答 1 回から判定する）。"""
-    _stopped(run_init, tmp_path, capsys, {"draft": False})
+    _stopped(run_init, tmp_path, capsys, {"state": "closed"})
     stopped = list(run_init.gh_calls)
     run_init(_args(tmp_path))
     assert stopped == run_init.gh_calls
