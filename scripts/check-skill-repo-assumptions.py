@@ -280,8 +280,7 @@ def scan_family(skills_dir: pathlib.Path) -> tuple[set[str], list[Hit], str, lis
     scanned.update(canon(scripts_dir / rel) for rel in scripts)
     hits += scan(scripts_dir, scripts, SCRIPT_PATTERN_RE)
     report_line = (
-        f"{skills_dir}: 公開する Skill {len(names)} 個 / "
-        f"Markdown {len(docs)} 本 / スクリプト {len(scripts)} 本 / ヒット {len(hits)} 行"
+        f"{skills_dir}: 公開する Skill {len(names)} 個 / Markdown {len(docs)} 本 / スクリプト {len(scripts)} 本 / ヒット {len(hits)} 行"
     )
     return scanned, hits, report_line, unscanned
 
