@@ -182,6 +182,11 @@ def _rest_pages(base: str, keep: Callable[[Any], bool], shape: Callable[[Any], A
     return Attempt(out[:limit], "", "rest")
 
 
+def _flag_args(flag: str, names: list[str] | None) -> list[str]:
+    """名前の並びを `<flag> <名前>` の繰り返しの argv へ広げる。"""
+    return [arg for name in names or [] for arg in (flag, name)]
+
+
 def _list(kind: str, repo: str | None, fields: str, state: str, labels: list[str] | None, limit: int) -> Attempt:
     slug = _slug(repo)
     labels = list(labels or [])
@@ -195,9 +200,7 @@ def _list(kind: str, repo: str | None, fields: str, state: str, labels: list[str
             base, lambda d: _keep_list_item(kind, d, state, labels), lambda d: gh_fields.to_json_shape(kind, d, fields), limit
         )
 
-    args = [kind, "list", "--repo", slug, "--state", state, "--limit", str(limit), "--json", fields]
-    for name in labels:
-        args += ["--label", name]
+    args = [kind, "list", "--repo", slug, "--state", state, "--limit", str(limit), "--json", fields, *_flag_args("--label", labels)]
     graphql = lambda: _graphql_cli(args)  # noqa: E731
     return gh_quota.with_fallback(by_rest, graphql) if gh_fields.covers(kind, fields) else graphql()
 
@@ -255,9 +258,7 @@ def pr_create(repo: str | None, title: str, body: str, head: str, base: str, dra
 def issue_create(repo: str | None, title: str, body: str, labels: list[str] | None = None) -> Attempt:
     slug = _slug(repo)
     payload = {"title": title, "body": body, **({"labels": list(labels)} if labels else {})}
-    args = ["issue", "create", "--repo", slug, "--title", title, "--body-file", "-"]
-    for name in labels or []:
-        args += ["--label", name]
+    args = ["issue", "create", "--repo", slug, "--title", title, "--body-file", "-", *_flag_args("--label", labels)]
     return _created(gh_quota.with_fallback(lambda: _rest(f"repos/{slug}/issues", "POST", payload), lambda: _graphql_cli(args, body, False)))
 
 
@@ -301,11 +302,7 @@ def _edit_cli_args(kind: str, slug: str, n: int, edit: _Edit) -> list[str]:
     args = [kind, "edit", str(n), "--repo", slug]
     args += ["--title", edit.title] if edit.title is not None else []
     args += ["--body-file", "-"] if edit.body is not None else []
-    for name in edit.add_labels or []:
-        args += ["--add-label", name]
-    for name in edit.remove_labels or []:
-        args += ["--remove-label", name]
-    return args
+    return args + _flag_args("--add-label", edit.add_labels) + _flag_args("--remove-label", edit.remove_labels)
 
 
 def _edit(kind: str, repo: str | None, number: int, edit: _Edit) -> Attempt:
