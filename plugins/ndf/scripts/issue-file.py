@@ -69,7 +69,9 @@ ORIGIN_HEADING = "## 由来"
 # 取得元の clone の置き場所（HOME からの相対）。Claude Code と Codex の順
 MARKETPLACE_DIRS = (".claude/plugins/marketplaces", ".codex/.tmp/marketplaces")
 NDF_MARK = Path("plugins") / "ndf"
-SEARCH_LIMIT = 100  # by-origin の 1 回の検索で読む件数（dup は gh の既定と同じ 30）
+SEARCH_LIMIT = 100  # by-origin の 1 回の検索で読む件数
+DUP_LIMIT = 30  # dup の検索で読む件数（gh の既定と同じ）
+ERROR_EXCERPT = 300  # 失敗の理由を結果へ載せるときの最大の長さ
 
 
 class _Parser(argparse.ArgumentParser):
@@ -169,9 +171,9 @@ def cmd_resolve_target(a) -> None:
 
 def cmd_dup(a) -> None:
     repo = _require_form(a.repo, REPO_RE, "起票先")
-    found = gh_rest.issue_search(repo, a.query, "open", 30)
+    found = gh_rest.issue_search(repo, a.query, "open", DUP_LIMIT)
     if not found.ok:
-        _stop_with(f"{repo} の検索が失敗した: {found.error[:300]}", EXIT_UNREADABLE)
+        _stop_with(f"{repo} の検索が失敗した: {found.error[:ERROR_EXCERPT]}", EXIT_UNREADABLE)
     items = [{"number": d.get("number"), "title": d.get("title"), "url": d.get("url")} for d in found.value]
     emit(result(TOOL, "ok", f"{repo} の open の課題で {len(items)} 件が当たった", items, {"count": len(items)}), EXIT_OK)
 
@@ -218,7 +220,7 @@ def _merge_origin_hits(repos: list[str], origins: list[str]) -> tuple[dict[tuple
             found = gh_rest.issue_search(repo, f'"{origin}"', "all", SEARCH_LIMIT)
             searches += 1
             if not found.ok:
-                _stop_with(f"{repo} で {origin} の検索が失敗した: {found.error[:300]}", EXIT_UNREADABLE)
+                _stop_with(f"{repo} で {origin} の検索が失敗した: {found.error[:ERROR_EXCERPT]}", EXIT_UNREADABLE)
             for d in found.value:
                 _merge_row(merged, repo, origin, d)
     return merged, searches
@@ -251,7 +253,7 @@ def cmd_note(a) -> None:
     line = _note_line(a)
     done = gh_rest.comment(repo, a.number, line)
     if not done.ok:
-        _stop_with(f"{repo}#{a.number} へのコメントが失敗した: {done.error[:300]}", EXIT_VIOLATION)
+        _stop_with(f"{repo}#{a.number} へのコメントが失敗した: {done.error[:ERROR_EXCERPT]}", EXIT_VIOLATION)
     item = {"repo": repo, "number": a.number, "url": done.value.get("url", "")}
     emit(result(TOOL, "ok", f"{repo}#{a.number} へ 1 行を足した", [item], {}), EXIT_OK)
 
@@ -367,7 +369,7 @@ def cmd_create(a) -> None:
         )
     made = gh_rest.issue_create(repo, a.title, body, labels or None)
     if not made.ok:
-        _stop_with(f"{repo} への起票が失敗した: {made.error[:300]}", EXIT_VIOLATION)
+        _stop_with(f"{repo} への起票が失敗した: {made.error[:ERROR_EXCERPT]}", EXIT_VIOLATION)
     number, url = made.value.get("number"), made.value.get("url", "")
     nxt = None
     if counterpart:
