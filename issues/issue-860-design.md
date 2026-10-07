@@ -114,7 +114,7 @@ LLM 自身がレビューするとき（第二引数なし）は、1 が `collec
 | `plugins/ndf/skills/pr-review/SKILL.md` | 引数・2 つのモード・観点（第 1 段・第 2 段・重要度）・指摘の振り分け・スクリプトの呼び方・報告 | 変更（10,240 B 以下へ） |
 | `plugins/ndf/skills/external-ai/SKILL.md` | pr-review への言及 2 か所を「`pr-review-steps.py delegate` が `run --phase review` で呼ぶ」に合わせる | 変更 |
 | `gh_parts.py pr-info` / `review-post` | PR のメタ・差分・未解決のスレッドの取得 / 投稿・格下げ・位置の拒否の退避 | 既存（引数は変えない。`pr-info --with threads` の thread item に `body` が増える。下の `gh_pr_info.py` の行） |
-| `plugins/ndf/scripts/lib/gh_graphql.py` の `unresolved_threads` | 未解決のスレッドの各要素に、最初のコメントの本文 `body`（改行を空白へ畳み、先頭 200 字）を足す。`unresolved-threads` 経路は要素を `**t` で写すため、そのまま本文が載る | 変更（鍵を 1 つ足す。既存の鍵 `thread_id` / `path` / `line` は変えない） |
+| `plugins/ndf/scripts/lib/gh_graphql.py` の `UNRESOLVED_THREADS_QUERY` / `UNRESOLVED_THREADS_JQ` / `unresolved_threads` | 今のクエリは `nodes { id isResolved path line }` だけを取り、jq は 3 列の `@tsv` なので、本文はどこからも来ない。クエリの `nodes` に最初のコメントの本文 `comments(first: 1) { nodes { body } }` を足し、jq で本文の改行を空白へ畳み先頭 200 字にしてから第 4 列として出す（`@tsv` は改行を `\n` の 2 文字へエスケープするため、畳むのは jq の中で行う）。`unresolved_threads` は第 4 列を `body` の鍵として各要素に足す。`unresolved-threads` 経路は要素を `**t` で写すため、そのまま本文が載る | 変更（クエリに本文を足し、jq の列と要素の鍵を 1 つずつ足す。既存の鍵 `thread_id` / `path` / `line` は変えない） |
 | `plugins/ndf/scripts/lib/gh_pr_info.py` の `_thread_items` | `pr-info --with threads` 経路（delegate の主経路）。thread item を `kind` / `name` / `result` / `thread_id` / `path` / `line` の鍵で明示して組み直すため、`unresolved_threads` が返す `body` はここで落ちる。thread item に `body` を写す | 変更（鍵を 1 つ足す。既存の鍵は変えない） |
 | `external-ai.py run` | 外部 CLI の起動・上限つきの待ち・回収 | 既存（変えない） |
 | `plugins/ndf/skills/pr-review/tests/` | F1〜F6 と I1〜I7 のテスト | 新規 |
@@ -341,7 +341,7 @@ graph TD
 | ベースブランチの 5 通り（I1） | `existing_base_branch` が要求の 5 通り（「`repo.py` の追加」の表の 1・2・3・4・5 行目）で表のとおりを返し、6 行目の場合は `None` を返す。どこにも無いとき `collect --branch` は 3 で終わり、文脈ファイルを書かない | 実在の確認を外して宣言をそのまま返す／無いときに `default_branch` へ落とす |
 | `ls-remote` が別のブランチだけを返すと「無い」（I2） | `refs/heads/x/refs/heads/<名前>` だけを持つ origin で `None` が返る | 照合を終了コードだけ・末尾一致に変える |
 | `.ndf/worktree.json` を読むコードが `repo.py` だけ | `pr-review-steps.py` と SKILL.md に `worktree.json` の語が無い（`grep` のテスト。振る舞いでなくコードの写しの検査として置く） | スクリプトに宣言の読み込みを書く |
-| 未解決のスレッドが `pr-info --with threads` からプロンプトへ渡る（I7） | `gh_pr_info._thread_items` の出力（`unresolved_threads` を偽にして呼ぶ）の thread item に `body` が載り、それが文脈ファイルとプロンプトに `path:line` と本文として載る。スレッドが取れない結果のときは 2 で止まる。`unresolved_threads` が偽の GraphQL の応答から `body` を返し、既存の鍵は変わらない | スレッドを渡さない／本文を落として位置だけを渡す／取れないときに「なし」で進める |
+| 未解決のスレッドが `pr-info --with threads` からプロンプトへ渡る（I7） | `gh_pr_info._thread_items` の出力（`unresolved_threads` を偽にして呼ぶ）の thread item に `body` が載り、それが文脈ファイルとプロンプトに `path:line` と本文として載る。スレッドが取れない結果のときは 2 で止まる。`UNRESOLVED_THREADS_QUERY` が最初のコメントの本文（`comments(first: 1) { nodes { body } }`）を取り、`UNRESOLVED_THREADS_JQ` を実際の GraphQL 応答の形の JSON（改行を含む本文を持つ）に `jq` で当てると、改行を空白へ畳んだ本文が第 4 列に出る。`unresolved_threads` がその 4 列の出力から `body` を返し、既存の鍵は変わらない | スレッドを渡さない／本文を落として位置だけを渡す／取れないときに「なし」で進める |
 | SKILL.md に `pulls/<番号>/comments`・`jq -n`・`-X POST .../reviews`・プロンプトの雛形・起動フラグ・結果サマリが無い | — （文言の検査は書かない。完了判定で `grep` の証跡を取る） | — |
 | event の表（I4） | `decide_event` が表の 3 行を返す。段 `spec` の `minor` 1 件だけでも `REQUEST_CHANGES` | `spec` を見落とす／`minor` を `REQUEST_CHANGES` にする |
 | 重要度が 4 つのどれでもない（I3） | `finish` が 2 で終わり、`review-post` を呼ばない。段が `spec` / `quality` 以外でも同じ | 不明な重要度を `minor` とみなす |
