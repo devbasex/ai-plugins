@@ -24,47 +24,73 @@ PR_VIEW_FIELDS = (
 WITH_PARTS = ("checks", "threads", "diff", "logs")
 
 
-def _meta_from_graphql(d: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "number": d.get("number"),
-        "title": d.get("title") or "",
-        "body": d.get("body") or "",
-        "state": str(d.get("state") or "").lower(),
-        "draft": bool(d.get("isDraft")),
-        "author": str((d.get("author") or {}).get("login") or ""),
-        "head_branch": d.get("headRefName") or "",
-        "head_sha": d.get("headRefOid") or "",
-        "base_branch": d.get("baseRefName") or "",
-        "url": d.get("url") or "",
-        "is_fork": bool(d.get("isCrossRepository")),
-        "labels": [str(x.get("name")) for x in d.get("labels") or [] if isinstance(x, dict)],
-        "additions": d.get("additions"),
-        "deletions": d.get("deletions"),
-        "changed_files": d.get("changedFiles"),
-    }
+def _labels(seq: Any) -> list[str]:
+    return [str(x.get("name")) for x in seq or [] if isinstance(x, dict)]
 
 
-def _meta_from_rest(repo: str, d: dict[str, Any]) -> dict[str, Any]:
-    head = d.get("head") or {}
-    head_repo = (head.get("repo") or {}).get("full_name") or ""
-    state = "merged" if d.get("merged") or d.get("merged_at") else str(d.get("state") or "")
+def _build_meta(
+    d: dict[str, Any],
+    *,
+    state: str,
+    draft: bool,
+    author: str,
+    head_branch: str,
+    head_sha: str,
+    base_branch: str,
+    url: str,
+    is_fork: bool,
+    changed_files: Any,
+) -> dict[str, Any]:
+    """取得元によらない同じ形のメタ。number・title・body・labels・additions・deletions は両取得元で同じ鍵から取る。"""
     return {
         "number": d.get("number"),
         "title": d.get("title") or "",
         "body": d.get("body") or "",
         "state": state.lower(),
-        "draft": bool(d.get("draft")),
-        "author": str((d.get("user") or {}).get("login") or ""),
-        "head_branch": head.get("ref") or "",
-        "head_sha": head.get("sha") or "",
-        "base_branch": (d.get("base") or {}).get("ref") or "",
-        "url": d.get("html_url") or "",
-        "is_fork": bool(head_repo) and head_repo != repo,
-        "labels": [str(x.get("name")) for x in d.get("labels") or [] if isinstance(x, dict)],
+        "draft": draft,
+        "author": author,
+        "head_branch": head_branch,
+        "head_sha": head_sha,
+        "base_branch": base_branch,
+        "url": url,
+        "is_fork": is_fork,
+        "labels": _labels(d.get("labels")),
         "additions": d.get("additions"),
         "deletions": d.get("deletions"),
-        "changed_files": d.get("changed_files"),
+        "changed_files": changed_files,
     }
+
+
+def _meta_from_graphql(d: dict[str, Any]) -> dict[str, Any]:
+    return _build_meta(
+        d,
+        state=str(d.get("state") or ""),
+        draft=bool(d.get("isDraft")),
+        author=str((d.get("author") or {}).get("login") or ""),
+        head_branch=d.get("headRefName") or "",
+        head_sha=d.get("headRefOid") or "",
+        base_branch=d.get("baseRefName") or "",
+        url=d.get("url") or "",
+        is_fork=bool(d.get("isCrossRepository")),
+        changed_files=d.get("changedFiles"),
+    )
+
+
+def _meta_from_rest(repo: str, d: dict[str, Any]) -> dict[str, Any]:
+    head = d.get("head") or {}
+    head_repo = (head.get("repo") or {}).get("full_name") or ""
+    return _build_meta(
+        d,
+        state="merged" if d.get("merged") or d.get("merged_at") else str(d.get("state") or ""),
+        draft=bool(d.get("draft")),
+        author=str((d.get("user") or {}).get("login") or ""),
+        head_branch=head.get("ref") or "",
+        head_sha=head.get("sha") or "",
+        base_branch=(d.get("base") or {}).get("ref") or "",
+        url=d.get("html_url") or "",
+        is_fork=bool(head_repo) and head_repo != repo,
+        changed_files=d.get("changed_files"),
+    )
 
 
 def fetch_pr_meta(repo: str, pr: int) -> tuple[dict[str, Any] | None, str, str]:
