@@ -122,6 +122,11 @@ def _clone_candidates() -> list[Path]:
     return found
 
 
+def _candidate_names(items: list[dict]) -> list[str]:
+    """候補の clone が指すリポジトリ名（重複を除いて並べたもの）。"""
+    return sorted({it["repo"] for it in items})
+
+
 def resolve_upstream() -> tuple[str | None, str, list[dict]]:
     """上流リポジトリを `(名前か None, 決めた手段, 候補)` で返す。`NDF_SKILL_REPO` の形の誤りは 2 で終える。"""
     env = os.environ.get("NDF_SKILL_REPO") or ""
@@ -134,7 +139,7 @@ def resolve_upstream() -> tuple[str | None, str, list[dict]]:
         slug = _slug_of(proc.git_out(clone, "config", "--get", "remote.origin.url") or "")
         if slug:
             items.append({"repo": slug, "path": str(clone)})
-    names = sorted({it["repo"] for it in items})
+    names = _candidate_names(items)
     return (names[0] if len(names) == 1 else None), "clone", items
 
 
@@ -151,7 +156,7 @@ def cmd_resolve_target(a) -> None:
     same = bool(upstream and target and upstream.lower() == target.lower())
     metrics = {"upstream": upstream, "target": target, "same": same, "source": source}
     if upstream is None:
-        names = sorted({it["repo"] for it in items})
+        names = _candidate_names(items)
         emit(
             result(
                 TOOL,
