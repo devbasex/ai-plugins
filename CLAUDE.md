@@ -66,7 +66,7 @@ python3 plugins/ndf/scripts/instructions-check.py --root .
 /ndf:cross-refactoring 130 --scope src tests --budget-minutes 30
 ```
 
-- `--scope` は必須で**検証にも効く**。現状固定テストの置き場所も含める。新しいファイルは置き場所によらず範囲の中、範囲の外の既存のファイルは呼び手の書き換えだけを通す
+- `--scope` は必須で**検証にも効く**。現状固定テストの置き場所も含める。新しいファイルはどこに置いても範囲の中、範囲の外の既存のファイルは呼び手の書き換えだけを通す
 - テストは**宣言（`.ndf/project.json` の `test`）の戦略**で走らせる。無ければ `--round-test` を渡す
 - 計画は配分テーブル（直近 10 回の集計）で見積もり、「想定最大時間 − 経過 − バッファ」に収まる件数だけを採る。検証の後に時間が残れば、`budget` の見送りとコミットの無かった項目を計画の値のまま採り直す（LLM を呼ばない）。見送りは理由（`budget` / `rank` / `duplicate` / `vocabulary` / `threshold` / `no_target` / `test_failed` / `not_done`）とともに計画に残る
 - 項目の検証は**範囲テスト**（`scope_command` の `{paths}` へ計画の `test_targets`）で走らせる。全体テストは着手前・危険フラグ（D1〜D5）の 1 回・最終ゲートだけ。落ちたら落ちたテストを走らせ直してフレーキー・既存失敗を除き、変更起因なら締め切りまで直し、直らなければ原因の項目から取り消す
