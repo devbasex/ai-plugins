@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import re
 import urllib.parse
-from typing import Any, Callable
+from typing import Any, Callable, NamedTuple
 
 import gh_call
 import gh_fields
@@ -288,43 +288,42 @@ def _rest_remove_labels(slug: str, n: int, remove_labels: list[str] | None) -> A
     return None
 
 
-def _edit_cli_args(
-    kind: str, slug: str, n: int, title: str | None, body: str | None, add_labels: list[str] | None, remove_labels: list[str] | None
-) -> list[str]:
+class _Edit(NamedTuple):
+    """PR / 課題の編集内容。None（と空の並び）の項目は変えない。"""
+
+    title: str | None
+    body: str | None
+    add_labels: list[str] | None
+    remove_labels: list[str] | None
+
+
+def _edit_cli_args(kind: str, slug: str, n: int, edit: _Edit) -> list[str]:
     args = [kind, "edit", str(n), "--repo", slug]
-    args += ["--title", title] if title is not None else []
-    args += ["--body-file", "-"] if body is not None else []
-    for name in add_labels or []:
+    args += ["--title", edit.title] if edit.title is not None else []
+    args += ["--body-file", "-"] if edit.body is not None else []
+    for name in edit.add_labels or []:
         args += ["--add-label", name]
-    for name in remove_labels or []:
+    for name in edit.remove_labels or []:
         args += ["--remove-label", name]
     return args
 
 
-def _edit(
-    kind: str,
-    repo: str | None,
-    number: int,
-    title: str | None,
-    body: str | None,
-    add_labels: list[str] | None,
-    remove_labels: list[str] | None,
-) -> Attempt:
+def _edit(kind: str, repo: str | None, number: int, edit: _Edit) -> Attempt:
     slug = _slug(repo)
     n = int(number)
 
     def by_rest() -> Attempt:
         return (
-            _rest_patch_fields(kind, slug, n, title, body)
-            or _rest_add_labels(slug, n, add_labels)
-            or _rest_remove_labels(slug, n, remove_labels)
+            _rest_patch_fields(kind, slug, n, edit.title, edit.body)
+            or _rest_add_labels(slug, n, edit.add_labels)
+            or _rest_remove_labels(slug, n, edit.remove_labels)
             or Attempt(True, "", "rest")
         )
 
-    args = _edit_cli_args(kind, slug, n, title, body, add_labels, remove_labels)
+    args = _edit_cli_args(kind, slug, n, edit)
 
     def by_graphql() -> Attempt:
-        a = _graphql_cli(args, body, False)
+        a = _graphql_cli(args, edit.body, False)
         return a._replace(value=True) if a.ok else a
 
     return gh_quota.with_fallback(by_rest, by_graphql)
@@ -338,7 +337,7 @@ def pr_edit(
     add_labels: list[str] | None = None,
     remove_labels: list[str] | None = None,
 ) -> Attempt:
-    return _edit("pr", repo, number, title, body, add_labels, remove_labels)
+    return _edit("pr", repo, number, _Edit(title, body, add_labels, remove_labels))
 
 
 def issue_edit(
@@ -349,7 +348,7 @@ def issue_edit(
     add_labels: list[str] | None = None,
     remove_labels: list[str] | None = None,
 ) -> Attempt:
-    return _edit("issue", repo, number, title, body, add_labels, remove_labels)
+    return _edit("issue", repo, number, _Edit(title, body, add_labels, remove_labels))
 
 
 def comment(repo: str | None, number: int, body: str) -> Attempt:
