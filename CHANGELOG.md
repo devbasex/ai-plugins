@@ -12,7 +12,7 @@
 ## [ndf 10.17.66] - 2026-10-07
 
 - cross-refactoring は、同じ秒のうちに書き換えたファイルでも古いバイトコードを読まず、書き換え後の内容で確かめる（#1820）（#1825）
-- cross-refactoring の init は、対象の Pull Request が閉じている・マージ済み・状態を判定できない場合に処理を止める（Draft かどうかは問わない）（#1821）（#1825）
+- cross-refactoring の init は、対象の Pull Request が閉じている・マージ済み・Draft でない場合に処理を止める（#1821）（#1825）
 - cross-refactoring の完了報告では、見送りの件数が metrics.deferred の値と一致する（#1821）（#1825）
 - cross-refactoring の完了報告では、見送った提案を別の行に出す（#1821）（#1825）
 - cross-refactoring は、走る見込みの手順にだけ時間を配る（#1823）（#1825）
@@ -23,6 +23,7 @@
 - cross-refactoring の項目では、新しいファイルの作成と呼び手の書き換えを含められます。（#1824）（#1825）
 - cross-refactoring では、複数コミットにまたがる項目を 1 つの項目として扱います。（#1824）（#1825）
 - cross-refactoring は、適用した項目を差分で取り消しません。（#1824）（#1825）
+- cross-refactoring は、対象の Pull Request が Draft でなくても開いていれば始められる。閉じている・マージ済みの Pull Request では今どおり止まる（#1827）
 
 ## [ndf 10.17.65] - 2026-10-06
 
