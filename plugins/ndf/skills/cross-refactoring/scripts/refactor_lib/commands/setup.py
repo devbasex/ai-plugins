@@ -461,8 +461,6 @@ class _InitPreparation:
     strategy: ts.Strategy
     decl: dict[str, Any]
     ci_coverage: dict[str, Any]
-    # 再開する前回の状態（`_pending_state` の結果）。新しい実行なら `None`。
-    pending: Optional[dict[str, Any]] = None
 
 
 def _resolve_init_inputs(args: argparse.Namespace) -> Optional[_InitInputs]:
@@ -499,10 +497,7 @@ def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
     )
     work = root / "work"
     # **Pull Request の状態は作業ディレクトリを用意する前に確かめる**（#1658 I4）。止まった実行は何も作らない。
-    # 置き場は求めるだけで作らない。Draft を求めるのは新しい実行だけである（要求の前提 1）。
-    state_file = state_path(tmp_dir_for(work), args.pr)
-    pending = _pending_state(work, state_file)
-    reason = pr_gate.init_refusal(args.pr, repo, status, resuming=pending is not None)
+    reason = pr_gate.init_refusal(args.pr, repo, status)
     if reason:
         die(reason)
     _ensure_work_worktree(work, head_branch)
@@ -546,51 +541,38 @@ def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
         root=root,
         work=work,
         tmp_dir=tmp_dir,
-        state_file=state_file,
+        state_file=state_path(tmp_dir, args.pr),
         strategy=strategy,
         decl=decl,
         ci_coverage=coverage.as_state(),
-        pending=pending,
     )
 
 
-def _pending_state(work: pathlib.Path, state_file: pathlib.Path) -> Optional[dict[str, Any]]:
-    """終わっていない前回の状態を 1 度だけ読んで返す。新しく始めるなら `None`。
+def _resume_if_pending(args: argparse.Namespace, inputs: _InitInputs, prep: _InitPreparation) -> bool:
+    """終わっていない前回の状態があれば再開し、`True` を返す。
 
     | 前回の状態 | 扱い |
     | --- | --- |
     | 無い | 新しく始める |
-    | `work` の中にあり、`work` が登録された worktree でない | 新しく始める（`_ensure_work_worktree` が退避する） |
     | 版 2 で `phase` が `done` | 新しく始める（状態を作り直す） |
     | 版 2 で終わっていない | 再開する |
     | 旧い形（`schema` を持たず `rounds` を持つ）で `final` が空 | **止める**（決定 18） |
     | 旧い形で `final` が入っている | 新しく始める（版 2 の形で作り直す） |
-
-    入口の検査（`pr_gate.init_refusal`）と再開（`_resume_if_pending`）がこの結果を共に使う（#1658 の決定 3）。
     """
-    if not state_file.exists():
-        return None
-    if work in state_file.parents and work.exists() and not _is_registered_worktree(work):
-        return None
-    state = statefile.load(state_file)
+    if not prep.state_file.exists():
+        return False
+    state = statefile.load(prep.state_file)
     if state.get("schema") != SCHEMA:
         if "rounds" in state and state.get("final") is None:
             die(
                 "旧い版（ラウンド制）の状態ファイルが途中のまま残っています。"
-                f"旧い版（v10.17.5 以前）で終えるか、{state_file} を消して始め直してください"
+                f"旧い版（v10.17.5 以前）で終えるか、{prep.state_file} を消して始め直してください"
             )
         info(f"ℹ 旧い版の終わった状態ファイルを版 {SCHEMA} の形で作り直します")
-        return None
-    if state.get("phase") == "done":
-        return None
-    return state
-
-
-def _resume_if_pending(args: argparse.Namespace, inputs: _InitInputs, prep: _InitPreparation) -> bool:
-    """終わっていない前回の状態（`prep.pending`）があれば再開し、`True` を返す。"""
-    if prep.pending is None:
         return False
-    _resume(prep.state_file, prep.pending, args, inputs, prep.is_own_pr)
+    if state.get("phase") == "done":
+        return False
+    _resume(prep.state_file, state, args, inputs, prep.is_own_pr)
     return True
 
 
