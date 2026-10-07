@@ -62,5 +62,6 @@
 | [cross-refactoring-pr-gate-and-skip-counts.md](cross-refactoring-pr-gate-and-skip-counts.md) | cross-refactoring の init の入口で閉じた・マージ済みの Pull Request を止める判定と、見送りの件数の出どころ |
 | [cross-refactoring-test-stale-bytecode.md](cross-refactoring-test-stale-bytecode.md) | cross-refactoring のテストと製品の書き換えが同じ秒の古いバイトコードを読まない規則 |
 | [cross-refactoring-technique-intake-constraints.md](cross-refactoring-technique-intake-constraints.md) | cross-refactoring で分割・抽出・移動・改名・テストの共通化の項目が採用まで進むための取り込みの制約 |
+| [cross-refactoring-implementation-window-and-readopt.md](cross-refactoring-implementation-window-and-readopt.md) | cross-refactoring の実装の時間の配り方・採り直し・中断の後の締め切りのずらし |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
