@@ -175,3 +175,61 @@ def test_graphql_errors_and_limits_are_attempt_errors(fake):
     fake.on("api", "graphql", out=json.dumps({"errors": [{"message": "bad"}]}))
     a = gh_graphql.graphql("q")
     assert not a.ok and "bad" in a.error
+
+
+@pytest.mark.parametrize(
+    "rc, out, err, expected",
+    [
+        (0, json.dumps({"errors": [{"message": "bad"}]}), "", json.dumps([{"message": "bad"}])),
+        (1, json.dumps({"errors": [{"message": "bad"}]}), "warn\n", "warn"),
+        (1, "", "", "GraphQL の応答を読めない"),
+        (1, "", " boom \n", "boom"),
+        (0, "not json", "", "GraphQL の応答を読めない"),
+        (0, "[1]", "", "GraphQL の応答を読めない"),
+        (0, json.dumps({"errors": []}), "", ""),
+    ],
+)
+def test_graphql_via_gh_api_outcomes_are_fixed(fake, rc, out, err, expected):
+    """現状固定（I-009）: gh api の終了コード・errors・読めない応答から失敗の文を決める順。"""
+    fake.on("api", "graphql", rc=rc, out=out, err=err)
+    a = gh_graphql.graphql("q")
+    assert (a.error, a.via) == (expected, "graphql")
+    assert a.value is None
+    assert fake.calls[0] == (["api", "graphql", "--input", "-"], json.dumps({"query": "q", "variables": {}}))
+
+
+def test_graphql_via_gh_api_without_data_is_ok_with_none(fake):
+    """現状固定（I-009）: `data` の無い dict の応答は成功で値は None。"""
+    fake.on("api", "graphql", out="{}")
+    a = gh_graphql.graphql("q", {})
+    assert (a.value, a.error, a.via, a.ok) == (None, "", "graphql", True)
+
+
+def test_graphql_via_githubkit_is_fixed(fake, monkeypatch):
+    """現状固定（I-009）: githubkit が使えるときは gh を呼ばず、例外は型名つきの 500 字までの失敗の文になる。"""
+    import gh_call
+
+    class Client:
+        def __init__(self, result):
+            self.result = result
+            self.calls = []
+
+        def graphql(self, query, variables):
+            self.calls.append((query, variables))
+            if isinstance(self.result, Exception):
+                raise self.result
+            return self.result
+
+    ok = Client({"viewer": {"login": "me"}})
+    monkeypatch.setattr(gh_call, "client", lambda: ok)
+    assert gh_graphql.graphql("q") == gh_graphql.gh_quota.Attempt({"viewer": {"login": "me"}}, "", "graphql")
+    assert ok.calls == [("q", {})]
+
+    monkeypatch.setattr(gh_call, "client", lambda: Client(RuntimeError("x" * 600)))
+    a = gh_graphql.graphql("q", {"n": 1})
+    assert a.value is None and a.via == "graphql"
+    assert a.error == ("RuntimeError: " + "x" * 600)[:500]
+
+    monkeypatch.setattr(gh_call, "client", lambda: Client(ValueError()))
+    assert gh_graphql.graphql("q").error == "ValueError: "
+    assert fake.calls == []
