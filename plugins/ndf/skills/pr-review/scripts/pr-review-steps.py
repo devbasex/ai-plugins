@@ -364,25 +364,15 @@ def branch_report(data: dict, verdict: dict) -> str:
     )
 
 
-def finish_review(findings: Path, pr: int | None, reviewer: str, d: Path, repo: str | None) -> None:
-    """E8〜E9。指摘ファイルを検査し、本来の判定を決め、PR なら投稿し `--branch` なら報告を書く。"""
-    data, errs = load_findings(findings)
-    if data is None:
-        emit(
-            result(
-                TOOL,
-                "stopped",
-                f"指摘ファイルを読めない（投稿しない）: {errs[0]}",
-                [{"kind": "finding", "name": e, "result": "invalid"} for e in errs],
-            ),
-            EXIT_UNREADABLE,
-        )
-    verdict = decide_event(data["comments"])
-    metrics = {**verdict, "findings": len(data["comments"]), "reviewer": reviewer}
-    if pr is None:
-        report = d / "report.md"
-        report.write_text(branch_report(data, verdict), encoding="utf-8")
-        emit(result(TOOL, "ok", f"本来の判定 {verdict['intent']}（投稿しない）: {report}", metrics={**metrics, "report": str(report)}), 0)
+def _finish_branch(data: dict, verdict: dict, metrics: dict, d: Path) -> "NoReturn":  # noqa: F821
+    """`--branch` の経路。報告を書き、投稿せずに終える。"""
+    report = d / "report.md"
+    report.write_text(branch_report(data, verdict), encoding="utf-8")
+    emit(result(TOOL, "ok", f"本来の判定 {verdict['intent']}（投稿しない）: {report}", metrics={**metrics, "report": str(report)}), 0)
+
+
+def _post_review(data: dict, verdict: dict, metrics: dict, pr: int, reviewer: str, d: Path, repo: str | None) -> "NoReturn":  # noqa: F821
+    """PR の経路。payload と result を書き、`review-post` で投稿して終える。"""
     payload, res = d / "payload.json", d / "result.json"
     payload.write_text(json.dumps(build_payload(data), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     res.write_text(
@@ -409,6 +399,26 @@ def finish_review(findings: Path, pr: int | None, reviewer: str, d: Path, repo: 
     if code != 0:
         emit(result(TOOL, "stopped", f"投稿できない（指摘ファイルと payload を残した）: {posted.get('summary')}", items, metrics), code)
     emit(result(TOOL, "ok", f"PR #{pr} へ {review.get('posted_as')} で投稿した（本来の判定 {verdict['intent']}）", items, metrics), 0)
+
+
+def finish_review(findings: Path, pr: int | None, reviewer: str, d: Path, repo: str | None) -> None:
+    """E8〜E9。指摘ファイルを検査し、本来の判定を決め、PR なら投稿し `--branch` なら報告を書く。"""
+    data, errs = load_findings(findings)
+    if data is None:
+        emit(
+            result(
+                TOOL,
+                "stopped",
+                f"指摘ファイルを読めない（投稿しない）: {errs[0]}",
+                [{"kind": "finding", "name": e, "result": "invalid"} for e in errs],
+            ),
+            EXIT_UNREADABLE,
+        )
+    verdict = decide_event(data["comments"])
+    metrics = {**verdict, "findings": len(data["comments"]), "reviewer": reviewer}
+    if pr is None:
+        _finish_branch(data, verdict, metrics, d)
+    _post_review(data, verdict, metrics, pr, reviewer, d, repo)
 
 
 def cmd_finish(a) -> None:
