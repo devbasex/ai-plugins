@@ -24,7 +24,7 @@ PR_VIEW_FIELDS = (
 WITH_PARTS = ("checks", "threads", "diff", "logs")
 
 
-def _labels(seq: Any) -> list[str]:
+def _label_names(seq: Any) -> list[str]:
     return [str(x.get("name")) for x in seq or [] if isinstance(x, dict)]
 
 
@@ -54,7 +54,7 @@ def _build_meta(
         "base_branch": base_branch,
         "url": url,
         "is_fork": is_fork,
-        "labels": _labels(d.get("labels")),
+        "labels": _label_names(d.get("labels")),
         "additions": d.get("additions"),
         "deletions": d.get("deletions"),
         "changed_files": changed_files,
