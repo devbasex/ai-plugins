@@ -38,7 +38,17 @@ sys.path[:0] = [str(LIB), str(HERE)]
 import gh_call  # noqa: E402
 import gh_sections  # noqa: E402
 import repo as repo_lib  # noqa: E402
-from pr_review_findings import BLOCKING, SEVERITIES, _stage, check_findings, decide_event, load_findings  # noqa: E402, F401
+from pr_review_findings import (  # noqa: E402, F401
+    BLOCKING,
+    SEVERITIES,
+    _finding_place,
+    _prefixed,
+    _stage,
+    build_payload,
+    check_findings,
+    decide_event,
+    load_findings,
+)
 from step_result import (  # noqa: E402
     EXIT_PRECONDITION,
     EXIT_UNREADABLE,
@@ -96,48 +106,6 @@ DELEGATE_RULES = """# レビューの依頼
 
 
 # ---------------- 指摘ファイル・本来の判定 ----------------
-
-
-def _prefixed(c: dict) -> str:
-    sev, cat, body = c["severity"], str(c.get("category") or "").strip(), c["body"].strip()
-    if body.startswith((f"[{sev} /", f"[{sev}]")):
-        return body
-    return f"[{sev} / {cat}] {body}" if cat else f"[{sev}] {body}"
-
-
-def _finding_place(c: dict) -> str:
-    path, line = c.get("path"), c.get("line")
-    return f"`{path}:{line}` " if path and line is not None else (f"`{path}` " if path else "")
-
-
-def _payload_summary(data: dict, spec: list[dict]) -> str:
-    """payload の summary。仕様適合の見出しと一覧（あれば）に総評を続ける。"""
-    parts = []
-    if spec:
-        parts.append("### 仕様適合（満たさない）\n\n" + "\n".join(f"- {_finding_place(c)}{_prefixed(c)}" for c in spec))
-    if str(data.get("summary") or "").strip():
-        parts.append(data["summary"].strip())
-    return "\n\n".join(parts)
-
-
-def _skip_in_payload(c: dict) -> bool:
-    """位置を持たない仕様適合の指摘は summary にだけ載せ、comments から落とす。"""
-    return _stage(c) == "spec" and not (c.get("path") and c.get("line") is not None)
-
-
-def _payload_comment(c: dict) -> dict:
-    item = {"severity": c["severity"], "body": _prefixed(c)}
-    for k in ("path", "line"):
-        if c.get(k) is not None:
-            item[k] = c[k]
-    return item
-
-
-def build_payload(data: dict) -> dict:
-    """指摘ファイルから `review-post` へ渡す payload を組む。指摘ファイルは書き換えない（決定 9）。"""
-    comments = data["comments"]
-    spec = [c for c in comments if _stage(c) == "spec"]
-    return {"summary": _payload_summary(data, spec), "comments": [_payload_comment(c) for c in comments if not _skip_in_payload(c)]}
 
 
 # ---------------- 子のプロセス ----------------
