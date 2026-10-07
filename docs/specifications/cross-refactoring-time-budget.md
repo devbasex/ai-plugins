@@ -16,7 +16,8 @@
 
 **時間に関わる数値は、想定最大時間 B と着手前の全体テストの実測 w から算術だけで出す。**
 リファクタリング計画の終わりまでに状態ファイルとリファクタリング計画へ書き出し、以後の手順は書き出した値と時計の比較だけで
-進む。**リファクタリング計画の後で LLM が動くのは作業の CLI（テストの追加・実装・直し・最終ゲート修正）
+進む（書き出した値を書き換えるのは、採り直しの実装の終わりと、中断の後の再開のずらしだけである。
+[実装の時間の配分と採り直しの確定仕様](cross-refactoring-implementation-window-and-readopt.md)）。**リファクタリング計画の後で LLM が動くのは作業の CLI（テストの追加・実装・直し・最終ゲート修正）
 だけ**で、判断のために LLM へ問わない。
 
 **判断のうちグレード・同じ変更か・公開の入出力（D5）は、使えるときは Jev に問う。** 使えなければ
@@ -31,8 +32,8 @@
 | 提案（3 者が並行。律速は codex） | 約 4.5 分 | 6 分 |
 | リファクタリング計画（実装担当 claude が 1 回） | 約 3 分 | 9 分 |
 
-残り 51 分からバッファ（全体テスト 1 分 × 2、修正 5.5 分 × 2）の 13 分を引いた 38 分に、項目を
-順位の順に詰める。テストを足さない項目は 1.5 分、足す項目は 4.2 分で見積もるため、半分が
+残り 51 分からバッファ（最終ゲートの全体テスト 1 分、修正 5.5 分 × 2）の 12 分を引いた 39 分に、項目を
+順位の順に詰める（危険フラグの全体テストは最終ゲートの全体テストと兼ねて数えない）。テストを足さない項目は 1.5 分、足す項目は 4.2 分で見積もるため、半分が
 テストを足す項目なら 13 件前後が入る。変更の前（v10.17.5）の #917 は、テスト整備 2 ラウンドに
 約 36 分を使い、5 ラウンド・25 項目・約 71 分で提案ラウンドの上限に達して止まった。
 
@@ -57,9 +58,8 @@
 | 種類 | `test` / `structure/<technique>` / `verify` / `fix` | 配分テーブルの行の単位 |
 | 配分テーブル | `plan.table` | 種類ごとの 1 件あたりの所要（分）。履歴からリファクタリング計画のたびに集計し、保存しない |
 | 履歴 | `cross-refactoring-allocation.jsonl` | 1 回の実行ごとに種類ごとの件数と所要を残した 1 行 |
-| バッファ | `plan.reserve`（R） | 使える時間から先に差し引く 4 つの時間 |
-| 着手期限 | `items[].start_deadline` / `test_start_deadline` | 実装・テストの追加にその項目を着手してよい最後の時刻 |
-| 完了期限 | — | 着手期限 + その項目の見積り。マージ処理はコミットの時刻をこれと比べる |
+| バッファ | `plan.reserve`（R） | 使える時間から先に差し引く 4 区分の時間（危険フラグの全体テストは `--ci-check` を付けた手元の戦略だけ。ほかは 0） |
+| 実装の終わり | `limits.implement_end_at` | 実装の CLI を止める唯一の時刻。項目ごとの期限は持たない（[実装の時間の配分と採り直し](cross-refactoring-implementation-window-and-readopt.md)） |
 | 時間の上限の表 | `state["limits"]` | 余裕・テスト 1 回の上限・手順ごとの終わりの時刻。`init` と `merge-plan` が書く |
 | 手順の監視の上限 | `PHASE_TIMEOUT` / `phases.<手順>.timeout` | その手順の終わりまでの残り + 余裕。無音の打ち切りも同じ値 |
 | 判断の主 | `judge` | Jev を使うか（`kind`）、使わなかった理由（`reason`）、呼び出しの失敗の数（`failures`） |
@@ -128,13 +128,14 @@
 | 手順 | 誰が | 起動とマージ処理 | マージ処理の終了コード |
 | --- | --- | --- | --- |
 | 提案 | 参加者の全員（並行） | `start-phase propose` → CLI → `merge-proposals` | 0 / 2（改善候補 0 件。最終ゲートへ） |
-| リファクタリング計画 | 実装担当 | `start-phase plan` → CLI → `merge-plan`（`TESTS_NEEDED=0\|1`） | 0 / 2（項目 0 件。最終ゲートへ）/ 4 |
-| テスト追加 | 実装担当（足す項目があるときだけ） | `start-phase add-tests` → CLI → `merge-tests` | 0 / 2（残る項目 0 件） |
-| 実装 | 実装担当 | `start-phase implement` → CLI → `merge-implement` | 0 / 2（残る項目 0 件） |
+| リファクタリング計画 | 実装担当 | `start-phase plan` → CLI → `merge-plan`（`TESTS_NEEDED=0\|1`） | 0 / 2（項目 0 件。採り直しの判定を経て最終ゲートへ）/ 4 |
+| テスト追加 | 実装担当（足す項目があるときだけ） | `start-phase add-tests` → CLI → `merge-tests` | 0 / 2（残る項目 0 件。検証を飛ばして採り直しの判定へ） |
+| 実装 | 実装担当 | `start-phase implement` → CLI → `merge-implement` | 0 / 2（残る項目 0 件。検証を飛ばして採り直しの判定へ） |
 | 検証/修正 | オーケストレーターと実装担当 | `verify`（`VERIFY=done\|fix`）→ `start-phase fix` → CLI → `merge-fix` の繰り返し | 0 / 4 |
+| 採り直し | オーケストレーター | `readopt`（`TESTS_NEEDED=0\|1`）。採ったらテスト追加・実装・検証/修正をもう 1 巡回す | 0 / 2（入る候補が無い。最終ゲートへ） |
 
-**駆動の繰り返しは検証と修正の 1 つだけである。** 最終ゲート修正の繰り返しは最終ゲートの側に
-ある。`init` は再開の地点を `PHASE` として返し、駆動は終わった手順を飛ばす。各マージ処理は
+**駆動の繰り返しは、検証と修正と、採り直しの巡の 2 つである。** 最終ゲート修正の繰り返しは最終ゲートの側に
+ある。リファクタリング計画の後に最終ゲートへ移すのは採り直しの判定だけである（[実装の時間の配分と採り直しの確定仕様](cross-refactoring-implementation-window-and-readopt.md)）。`init` は再開の地点を `PHASE` として返し、駆動は終わった手順を飛ばす。各マージ処理は
 マージ処理済みのマーカーで冪等である。
 
 **手順の所要はオーケストレーターの時計で測る。** 開始は `start-phase` が CLI の起動の直前に書き
@@ -205,11 +206,12 @@
 | 4 | 見積もる。`test`（足すテストがあるときだけ）+ `structure/<手法>` + `verify` |
 | 5 | 順位を決める。（グレード, 賛同した者の数, 重要度）の降順、同じなら見積りの合計の昇順（`budget.rank_key`） |
 | 6 | 使える時間に収まる項目を選ぶ。入らない項目は飛ばして次を見る（`budget.select`。`budget` で見送る） |
-| 7 | 項目ごとの着手期限を出し、`I-001` の形の ID を振る |
+| 7 | `I-001` の形の ID を振る（項目ごとの期限は持たない） |
 | 8 | 採った項目ごとに D5 を決めて `items[].public_io`（出所は `public_io_source`）に残す |
 | 9 | 時間の上限の表を `state["limits"]` へ書き出す |
 
 **リファクタリング計画は叩き直しても作り直さない。** 採用の件数・締め切り・バッファは取り込んだ時点の予算で固定する。
+件数を増やすのは検証の後の採り直しだけで、締め切りが動くのは採り直しの実装の終わりと、中断の後の再開のずらしだけである。
 
 ### 時間の決め方
 
@@ -218,19 +220,19 @@
 バッファ R      = danger_whole_test + final_whole_test + fix + final_fix
 使える時間 A    = B − E − R
 項目 i の見積り = (tests があれば test) + structure/<technique> + verify
-終わり T        = started_at + B − R
+実装の終わり   = started_at + B − R − Σ（採っていて未検証の項目の verify）
 ```
 
 | バッファ（`plan.reserve`） | 値（分） |
 | --- | --- |
-| `danger_whole_test` | 着手前の全体テストの秒（`baseline_test.seconds`）。測れていなければ 0 |
-| `final_whole_test` | 同上。`--ci-check` があれば 0（継続的統合が想定最大時間の外で見る） |
+| `danger_whole_test` | 手元の戦略に `--ci-check` を付けたときだけ全体テストの所要 w。ほかは 0（手元で最終ゲートを見る戦略は最終ゲートの全体テストと兼ね、CI に任せる戦略は最終ゲートへ寄せる） |
+| `final_whole_test` | 手元で最終ゲートを見るなら w、CI で見る（戦略か `--ci-check`）なら CI の壁時計 c。測れていなければ 0 |
 | `fix` | 配分テーブルの `fix`（検証の直しの起動 1 回分） |
 | `final_fix` | 同じ値。最終ゲート修正 1 回分（決定 26） |
 
-締め切りは T から逆算する（`budget.deadlines`）。実装の締め切りは後順位ほど遅く、テストの
-追加の締め切りは実装と検証の全件を先に差し引いた時刻である。足すテストが無い項目の
-`test_start_deadline` は `null`。
+項目ごとの期限は持たない。実装を止める時刻は実装の終わりの 1 つだけで、テストの追加の終わりはそこから
+採っていて未検証の項目の implement の見積りを引いた時刻である（`budget.implement_end` / `add_tests_end`。
+理由は [実装の時間の配分と採り直しの確定仕様](cross-refactoring-implementation-window-and-readopt.md) の決定 9）。
 
 **時間の上限の表の要点**（係数は `refactor_lib/timeline.py` にだけ置く。式の正本は
 [docs/02 の「締め切り」](../../plugins/ndf/skills/cross-refactoring/docs/02-plan-and-implement.md#締め切り)）。
@@ -241,9 +243,9 @@
 | 着手前のテスト 1 回の上限 | 0.10·B（w はまだ無い） | `INIT_TEST_SHARE` |
 | テスト 1 回の上限 | max(3·w, 0.01·B) | `TEST_FACTOR` / `TEST_FLOOR_SHARE` |
 | 提案の枠の終わり / リファクタリング計画の枠の終わり | 開始 + 0.20·B / さらに + 0.10·B（開始 + 0.30·B） | `PROPOSE_SHARE` / `PLAN_SHARE` |
-| テストの追加・実装の終わり | 最後の項目の完了期限 | `timeline._completion` |
+| テストの追加・実装の終わり | 実装の終わり = 最終ゲート修正の打ち切り − R − Σ（採っていて未検証の項目の verify）。テストの追加の終わりはそこから同じ項目の implement を引く | `budget.implement_end` / `budget.add_tests_end` |
 | 直しの試行の打ち切り | 開始 + B − `danger_whole_test` − `final_whole_test` − `final_fix`（バッファの `fix` は引かない） | `budget.fix_end` |
-| 最終ゲート修正の打ち切り | 開始 + B。1 回目は打ち切らない | `final_end_at` / `gate._final_fix_stop` |
+| 最終ゲート修正の打ち切り | 開始 + B（中断の後の再開でずらした秒を足す）。1 回目は打ち切らない | `final_end_at` / `gate._final_fix_stop` |
 | 打ち切りの後の取り消しの締め切り | 開始 + B + 0.20·B（既定の 30 分で打ち切りから 6 分）。理由は [検証と最終ゲートの確定仕様](cross-refactoring-verify-and-final-gate.md#決定と理由) の #1649 の決定 8 | `STOP_REVERT_SHARE` / `stop_revert_end_at` |
 | 最終ゲート修正の 1 回目の長さの下限 | バッファの `final_fix` を秒へ直した値 | `final_fix_seconds` |
 
@@ -269,7 +271,7 @@
 である。締め切りが待ちの長さを上から抑える。
 
 **止めたときのマージ処理は変えない。** 未コミットの変更はマージ処理の前に捨て、コミット済みの
-項目は完了期限とコミットの時刻で判定する。止めたかは監視結果ファイルの `reason`
+項目はそのまま取り込み、コミットの無い項目は持ち越して採り直しの候補へ戻す（コミットの時刻では判定しない）。止めたかは監視結果ファイルの `reason`
 （`timeout` / `stalled`）から読み（`gitfacts.note_stopped`）、`phases.<手順>.stopped` に残して
 報告に「監視が止めた手順」の 1 行を出す。
 
@@ -347,8 +349,9 @@
 - 判断に Jev を使ったか（使わなかった理由・呼び出しの失敗の数）
 - 最終ゲートの結果、監視が止めた手順、固定のまま残した値
 
-リファクタリング計画のコメントには「時間の上限」の表と項目ごとの締め切りも載る。読み手は実行の前に
-すべての時刻を見られる。
+リファクタリング計画のコメントには「時間の上限」の表も載る（項目ごとの締め切りは無い）。読み手は実行の前に
+すべての時刻を見られる。報告の時間の配分の行（バッファの残り・止まっていた時間・採り直し）は
+[実装の時間の配分と採り直しの確定仕様](cross-refactoring-implementation-window-and-readopt.md) にある。
 
 ## データ・設定
 
@@ -360,13 +363,13 @@
 | キー | 中身 |
 | --- | --- |
 | `schema` / `budget_minutes` / `started_at` | 版・想定最大時間・`init` の開始 |
-| `phase` | `propose` / `plan` / `add-tests` / `implement` / `verify` / `final` / `done` |
+| `phase` | `propose` / `plan` / `add-tests` / `implement` / `verify` / `readopt` / `final` / `done` |
 | `phases.<名前>` | `started_at` / `ended_at` / `seconds`。起動する手順は `launch_started_at` / `base_sha` / `timeout` / `cli_timeout`、止めたら `stopped`（`reason` / `timeout` / `at`） |
 | `participants` / `runtimes` / `models` / `resume_changes` | 参加者（[参加者の確定仕様](cross-refactoring-participants.md)） |
 | `implementer` / `implementer_reason` / `implementer_named` / `implementer_model` | 実装担当と決め方・名指しの記録・要求と観測のモデル |
 | `judge` | `{kind: "jev" \| "runtime", reason, failures}` |
 | `candidates[]` | 統合した提案 |
-| `plan` | `base_sha`・`elapsed_minutes`・`available_minutes`・`reserve`（4 キー）・`table_source`・`table`・`selected[]`・`end_at` |
+| `plan` | `base_sha`・`elapsed_minutes`・`available_minutes`・`reserve`（4 キー）・`table_source`・`table`・`selected[]` |
 | `items[]` | 採った項目（下の表） |
 | `deferred_items[]` | 見送り。理由は `budget` / `rank` / `duplicate` / `vocabulary` / `threshold` / `no_target` / `test_failed` / `not_done` の 8 つ（`vocabulary.DEFER_REASONS`） |
 | `limits` | 時間の上限の表（下の表） |
@@ -377,7 +380,7 @@
 
 `items[]` の 1 件の主なキー: `id`・`rank`・`kind`（`structure/<technique>`）・`tier` と
 `tier_source`・`estimate`（`test` / `implement` / `verify` の分）・`tests[]`・`test_targets`・
-`command` と `command_source`・`start_deadline`・`test_start_deadline`・`public_io` と
+`command` と `command_source`・`round`（採った巡）・`public_io` と
 `public_io_source`・`status`・`commits`（`test` / `implement` / `fix[]`）・`seconds`
 （`test` / `implement`）・`fix_count`・`danger[]`・`review_test_judgements`・`failure_reason`。
 
@@ -387,7 +390,8 @@
 | --- | --- |
 | `budget_minutes` / `margin_seconds` / `init_test_timeout` / `test_timeout` | `init`（リファクタリング計画の前に予算を置き換えた再開も組み直す） |
 | `propose_end_at` / `plan_end_at` / `final_end_at` | `init` |
-| `add_tests_end_at` / `implement_end_at` / `fix_end_at` / `stop_revert_end_at` / `final_fix_seconds` | `merge-plan`（リファクタリング計画の前は `null`） |
+| `after_plan_minutes` | `init`（提案の前の判定に使う見込み） |
+| `add_tests_end_at` / `implement_end_at` / `fix_end_at` / `stop_revert_end_at` / `final_fix_seconds` | `merge-plan`（リファクタリング計画の前は `null`）。`add_tests_end_at` / `implement_end_at` は採り直しでも書き直す |
 
 ### 旧い状態ファイルと再開
 
@@ -400,7 +404,8 @@
 
 **再開で `--budget-minutes` を置き換えるのはリファクタリング計画の前だけである**（`phase` が `propose` か
 `plan` で `plan` が空）。置き換えたら時間の上限の表を組み直す。リファクタリング計画の後は知らせるだけにする。
-採用の件数・締め切り・バッファがリファクタリング計画の時点の予算で固定されているためである。
+採用の件数・バッファがリファクタリング計画の時点の予算で固定されているためである。リファクタリング計画の後の再開は、
+止まっていた時間の分だけまだ来ていない締め切りをずらして続ける（[実装の時間の配分と採り直しの確定仕様](cross-refactoring-implementation-window-and-readopt.md)）。
 
 ## テスト観点
 
@@ -411,7 +416,7 @@
 | 旧い形の状態ファイルで止まる・終わった旧い状態を作り直す・再開の地点を返すこと | 同 `test_init.py` |
 | 5 つの手順が 1 回ずつ走り、提案だけが全員で、履歴へ 1 行追記されること | 同 `tests/test_flow_git.py` |
 | 組の単位で 30 組・組の中の 3 件まで渡り、外れた提案が `rank` になること | 同 `tests/test_merge_proposals.py` |
-| 見積り・バッファ・飛ばして詰める・締め切り・直しの終わりが `fix` を引かず `final_fix` を引くこと | 同 `tests/test_budget.py` |
+| 見積り・バッファ・飛ばして詰める・実装の終わり・直しの終わりが `fix` を引かず `final_fix` を引くこと | 同 `tests/test_budget.py` |
 | リファクタリング計画のマージ処理が順位・見積り・テスト・対象を持ち、リファクタリング計画を読めなくても止まらず、叩き直しで作り直さず、実行時の値をすべて書き出すこと | 同 `tests/test_merge_plan.py` |
 | Jev のグレード・同じ変更か・D5 が確信度の下限で採られ、使えなければ実装担当の答えになること。非公開と鍵なしで Jev を使わないこと | 同 `test_merge_plan.py` / `test_init.py` |
 | 時間の上限がすべて予算に従い、テストの上限が w で伸び、手順の上限が残り + 余裕であること | 同 `tests/test_timeline.py` |
@@ -420,7 +425,7 @@
 | リファクタリング計画の後で Jev と判定の CLI が呼ばれないこと | 同 `tests/test_after_plan_no_llm_git.py` |
 | 履歴の置き場所・集計の窓と代わり・初期値と出所・取り消しと見送りを数えないこと | 同 `tests/test_allocation.py`（根を引数で渡し、利用者の手元を読み書きしない） |
 | 報告が手順・理由別の件数・全体テスト・Jev を持つこと | 同 `tests/test_report_phases.py` |
-| 雛形に観点の語彙・締め切り・対象の項目が渡ること | 同 `tests/test_propose_prompt.py` |
+| 雛形に観点の語彙・対象の項目が渡り、項目ごとの期限が渡らないこと | 同 `tests/test_propose_prompt.py` |
 
 ## 関連リンク
 
@@ -430,6 +435,7 @@
 - [issue #841](https://github.com/devbasex/ai-plugins/issues/841) — Jev
 - [#917 の実行の記録](https://github.com/devbasex/ai-plugins/pull/917#issuecomment-5796914428) — 初期値の出所
 - [検証と最終ゲートの確定仕様](cross-refactoring-verify-and-final-gate.md)
+- [実装の時間の配分・採り直し・中断の後の締め切りのずらし](cross-refactoring-implementation-window-and-readopt.md)（#1743 #1491）
 - [cross-refactoring の参加者](cross-refactoring-participants.md)
 - [ラウンドテストと assess](cross-refactoring-round-tests-and-assess.md)
 - [マージ処理の共通手順](cross-refactoring-apply-intake.md)
