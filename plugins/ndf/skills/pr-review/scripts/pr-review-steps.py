@@ -261,7 +261,21 @@ def collect_pr(a, root: Path, pr: int) -> tuple[dict, list[str], Path]:
     diff_path = next((i.get("path") for i in items if i.get("kind") == "diff"), None)
     threads = [i for i in items if i.get("kind") == "thread"]
     files = DIFF_FILE.findall(Path(diff_path).read_text(encoding="utf-8")) if diff_path else []
-    sections = [
+    sections = _pr_sections(root, pr, meta, diff_path, files, threads)
+    metrics = {
+        "mode": "pr",
+        "pr": pr,
+        "head_sha": meta.get("head_sha"),
+        "base_branch": meta.get("base_branch"),
+        "changed_files": len(files),
+        "unresolved_threads": len(threads),
+    }
+    return metrics, sections, d
+
+
+def _pr_sections(root: Path, pr: int, meta: dict, diff_path: str | None, files: list[str], threads: list[dict]) -> list[str]:
+    """PR のレビュー担当へ渡す文脈の節。取得済みの情報だけから組み、外部へアクセスしない。"""
+    return [
         "## 対象\n\n"
         + "\n".join(
             [
@@ -278,15 +292,6 @@ def collect_pr(a, root: Path, pr: int) -> tuple[dict, list[str], Path]:
         f"## 差分\n\n- 差分のファイル: `{diff_path}`\n- 変更ファイル（{len(files)}）:\n" + "\n".join(f"  - `{f}`" for f in files),
         "## 未解決のスレッド\n\n" + _thread_lines(threads) + "\n\n同じ位置へ本文と同じ趣旨の指摘を出さない。同じ位置でも趣旨が違えば出す。",
     ]
-    metrics = {
-        "mode": "pr",
-        "pr": pr,
-        "head_sha": meta.get("head_sha"),
-        "base_branch": meta.get("base_branch"),
-        "changed_files": len(files),
-        "unresolved_threads": len(threads),
-    }
-    return metrics, sections, d
 
 
 def collect_branch(a, root: Path) -> tuple[dict, list[str], Path]:
