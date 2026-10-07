@@ -152,8 +152,11 @@ def _test_files(state: dict[str, Any], item: dict[str, Any]) -> Optional[list[st
     """D4 で見る範囲テストのファイル（決定 21・#1334 決定 13）。
 
     対象から組み立てた項目は対象のパス、ラウンドテストをそのまま走らせる項目は `--scope` のテストの
-    置き場所の配下の追跡ファイル。コマンドの語からは読まない。
+    置き場所の配下の追跡ファイル。コマンドの語からは読まない。対象の無い不要コードの削除（`deletion`）は
+    ファイルを持たない（`None`）ので D4 が立ち、全体テストが 1 度走る（#1814 決定 7）。
     """
+    if item.get("command_source") == "deletion":
+        return None
     if item.get("command_source") == "targets":
         return danger.limited_test_files_from_targets(list(item.get("test_targets") or []))
     return danger.limited_test_files_from_scope(list(state.get("target_scope") or []), work_dir(state))

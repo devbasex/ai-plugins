@@ -23,7 +23,7 @@ import statefile
 from . import die, info, ledger, rounds, timeline
 from .codemetrics_view import record_lines
 from .paths import sh
-from .items import item_label
+from .items import item_label, item_shas
 from .vocabulary import ITEM_STATUS_LABELS
 
 # 置き場所の 3 態。**宣言の無い状態ファイルは書き出し先から読む**（この版より前で
@@ -260,6 +260,10 @@ def format_plan(state: dict[str, Any], head: Optional[list[str]] = None) -> str:
         lines.extend(["（採用した改善項目なし）", ""])
     for item in items:
         lines.extend(_plan_item_section(state, item))
+    gate_rewrites = (state.get("final_gate") or {}).get("review_scope_judgements") or []
+    if gate_rewrites:
+        paths = ", ".join(f"`{p}`" for p in dict.fromkeys(str(j.get("path")) for j in gate_rewrites))
+        lines.extend([f"**最終ゲート修正でレビューで確かめる呼び手の書き換え**: {paths}", ""])
     lines.extend(record_lines(state))
     lines.extend(limits_section(state.get("limits") or {}))
     lines.extend(_plan_deferred_section(state))
@@ -345,8 +349,7 @@ def status_label(state: dict[str, Any], item: dict[str, Any]) -> str:
 def _plan_item_section(state: dict[str, Any], item: dict[str, Any]) -> list[str]:
     """項目 1 件の見出し・要約表・理由・手順。状態は表示の状態（`ledger.display_status`）で書く。"""
     status = status_label(state, item) or "—"
-    commits = item.get("commits") or {}
-    count = len([s for s in (commits.get("test"), commits.get("implement"), *(commits.get("fix") or [])) if s])
+    count = len(item_shas(item))
     lines = [
         f"### {item['id']} — `{item_label(item)}`",
         "",
@@ -373,6 +376,9 @@ def _plan_item_section(state: dict[str, Any], item: dict[str, Any]) -> list[str]
     if item.get("review_test_judgements"):
         paths = ", ".join(f"`{p}`" for p in item["review_test_judgements"])
         lines.extend([f"**レビューで確かめるテストの差分**: {paths}（機械で期待値が変わったか決まらなかった）", ""])
+    if item.get("review_scope_judgements"):
+        paths = ", ".join(f"`{p}`" for p in dict.fromkeys(str(j.get("path")) for j in item["review_scope_judgements"]))
+        lines.extend([f"**レビューで確かめる呼び手の書き換え**: {paths}（範囲の外の既存のファイル。機械が呼び手の書き換えと判定した）", ""])
     if item.get("failure_reason"):
         lines.extend([f"**取り消した理由**: {item['failure_reason']}", ""])
     return lines

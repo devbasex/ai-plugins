@@ -233,6 +233,8 @@ NO_TEST_SUITE_NOTE = "テストの種別の suite が無いため、テスト整
 def _limited_commands(state: dict[str, Any], items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """項目ごとのテストの種別の範囲テストを、戦略の雛形の `{paths}` の置き換えで決める。決まらない項目は `no_target` で見送る（AC10b）。
 
+    対象の無い `remove_dead_code` の項目は見送らず `deletion` として残す（#1814 決定 7）。
+
     テストの種別の suite が無い戦略では、項目の `tests` を空にし（テスト整備ラウンドを行わない）、そのことを
     `plan_notes` に残す（#1483 I9・AC16）。静的解析の範囲テストは検証のたびに組む。
     """
@@ -246,7 +248,7 @@ def _limited_commands(state: dict[str, Any], items: list[dict[str, Any]]) -> lis
             item["tests"] = []
     kept = []
     for item in items:
-        runs, origin = targets.limited_runs(state, item.get("test_targets") or [], work, item.get("tests") or [])
+        runs, origin = targets.limited_runs(state, item.get("test_targets") or [], work, item.get("tests") or [], item.get("technique"))
         if runs is None:
             defer(
                 state,

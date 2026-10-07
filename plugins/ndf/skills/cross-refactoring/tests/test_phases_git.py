@@ -231,37 +231,38 @@ def test_one_commit_per_item_and_a_missing_item_is_carried(flow, cmd_setup, cmd_
 
     items = _items(flow)
     assert items["I-001"]["status"] == "implemented"
-    assert items["I-001"]["commits"]["implement"] == sha
+    assert items["I-001"]["commits"]["implement"] == [sha]
     assert items["I-001"]["seconds"]["implement"] is not None
     assert _deferred(flow) == {}
     assert items["I-002"]["status"] == "carried"
 
 
-def test_two_commits_for_one_item_reject_it(flow, cmd_setup, cmd_implement):
+def test_two_commits_for_one_item_are_taken_as_one_item(flow, cmd_setup, cmd_implement):
+    """#1814 AC6a: 同じ `Item-Id` の 2 コミット（改名と中身の変更など）を 1 項目として採る。所要は最後のコミットまで。"""
     work = flow["work"]
     _implement_phase(flow, cmd_setup, _item("I-001", 1), _item("I-002", 2, symbol="add"))
     _refactor_total(work)
-    commit_with_trailers(work, "Refactor 1", item_trailers("I-001"))
+    first = commit_with_trailers(work, "Refactor 1", item_trailers("I-001"))
     _write(work, "src/calc.py", (work / "src" / "calc.py").read_text() + "\n")
-    commit_with_trailers(work, "Refactor 2", item_trailers("I-001"))
+    second = commit_with_trailers(work, "Refactor 2", item_trailers("I-001"))
     _write(work, "src/other.py", "X = 1\n")
     commit_with_trailers(work, "Refactor add", item_trailers("I-002"))
 
     _call(cmd_implement, "cmd_merge_implement")
 
     items = _items(flow)
-    assert items["I-001"]["status"] == "reverted"
-    assert "2 コミット" in items["I-001"]["failure_reason"]
+    assert items["I-001"]["status"] == "implemented"
+    assert items["I-001"]["commits"]["implement"] == [first, second]
     assert items["I-002"]["status"] == "implemented"
-    assert "sum(values)" not in (work / "src" / "calc.py").read_text()
-    assert (work / "src" / "other.py").exists()
+    assert "sum(values)" in (work / "src" / "calc.py").read_text()
 
 
 def test_a_commit_outside_the_scope_rejects_the_item(flow, cmd_setup, cmd_implement):
     work = flow["work"]
     _implement_phase(flow, cmd_setup, _item("I-001", 1), _item("I-002", 2, symbol="add"))
     _refactor_total(work)
-    _write(work, "docs/note.txt", "x\n")
+    # 範囲の外の既存のファイルを、項目と関係なく変える（新しいファイルは範囲の中として扱う。#1814）
+    _write(work, ".gitignore", (work / ".gitignore").read_text() + "build/\n")
     commit_with_trailers(work, "Refactor", item_trailers("I-001"))
 
     with pytest.raises(SystemExit) as exc:

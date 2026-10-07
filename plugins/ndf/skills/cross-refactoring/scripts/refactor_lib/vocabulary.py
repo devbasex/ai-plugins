@@ -1,6 +1,6 @@
-"""兆候・手法・重要度の呼び名と、判断の基準になる定数。
+"""兆候・手法・観点・重要度の呼び名と、判断の基準になる定数。
 
-差分予算・コミット数の上限・テストの上限秒数など、工程の判断に使う値も持つ。
+見送りの理由・トレーラー・想定最大時間の既定など、工程の判断に使う値も持つ。
 """
 
 from __future__ import annotations
@@ -56,17 +56,28 @@ TECHNIQUES: dict[str, str] = _read_table("手法", "日本語の名前")
 
 # 提案の観点（#933 の AC5）。**「多面的に」を観点の一覧として示す。** 一覧が無いと、
 # 参加者は目についた兆候に偏る（#917 では `long_method` が 10 件）。観点は兆候の語彙を
-# 探す入口であって、語彙そのものではない（提案の `smell` は兆候の語彙から選ぶ）。
-VIEWPOINTS: dict[str, str] = {
-    "duplication": "重複 — 同じ知識・同じ手順が 2 か所以上にある",
-    "mixed_responsibility": "責務の混在 — 1 つの関数・クラスが別々の理由で変わる",
-    "branching": "分岐の表し方 — 同じ条件の分岐が散らばる・種類ごとの分岐が伸び続ける",
-    "naming": "名前 — 名前が中身と食い違う・同じものを別の名前で呼ぶ",
-    "dependency_direction": "依存の向き — 下の層が上の層を読む・循環する・知りすぎる",
-    "testability": "テストの書きにくさ — 外部への依存や隠れた状態のせいで単体で試せない",
-    "data_shape": "データの形 — 基本型の羅列・いつも一緒に渡る引数の組",
-    "size": "大きさ — 長すぎる関数・大きすぎるクラス・長い引数の列",
-}
+# 探す入口であって、語彙そのものではない。呼び名と代表の兆候は表が持つ（#1814 決定 9）。
+VIEWPOINTS: dict[str, str] = _read_table("観点", "説明")
+
+# 観点 → 代表の兆候。提案の `smell` に観点の識別子が書かれたら、この兆候へ写す（降格しない）。
+VIEWPOINT_SMELLS: dict[str, str] = {k: v.strip("`") for k, v in _read_table("観点", "代表の兆候").items()}
+
+
+def _check_disjoint() -> None:
+    """兆候・手法・観点の識別子が重ならず、代表の兆候が兆候の表にあること（I11・I12）。破れていれば止める。"""
+    for a, b, names in (
+        ("兆候", "手法", set(SMELLS) & set(TECHNIQUES)),
+        ("兆候", "観点", set(SMELLS) & set(VIEWPOINTS)),
+        ("手法", "観点", set(TECHNIQUES) & set(VIEWPOINTS)),
+    ):
+        if names:
+            raise VocabularyUnavailable(f"呼び名の表の{a}と{b}の識別子が重なっています: {', '.join(sorted(names))}")
+    missing = sorted(f"{k} → {v}" for k, v in VIEWPOINT_SMELLS.items() if v not in SMELLS)
+    if missing:
+        raise VocabularyUnavailable(f"観点の代表の兆候が兆候の表にありません: {', '.join(missing)}")
+
+
+_check_disjoint()
 
 # 重要度。語彙外の提案は `unknown` へ降格し、しきい値で自動的に落ちるようにする。
 SEVERITY_ORDER = {"unknown": 0, "minor": 1, "major": 2, "critical": 3}
@@ -179,22 +190,3 @@ ITEM_STATUS_LABELS = {
     "reverted": "取り消し",
     "deferred": "見送り",
 }
-
-# 実差分行数が見積りのこの倍数を超えたら範囲の逸脱とみなす。
-DIFF_BUDGET_FACTOR = 2
-
-# 新しい定義を作って呼び出し側を書き換える手法は、**見積より実差分が膨らむ**。
-# 抽出した本体に加えて、呼び出し側の書き換え・import の追加・引数の受け渡しが
-# 固定費として乗るためで、提案の時点では見えにくい。
-#
-# 実測で予算超過として落ちた 4 件はいずれも `long_method` の抽出で、見積の
-# 2.03〜2.31 倍に収まっていた（4 回目: 265/120 行・183/90 行、5 回目: 277/120 行・
-# 113/50 行）。範囲の逸脱ではなく、倍率 2 の予算をわずかに超えただけである。
-# 一方、範囲外の 3 系統を触った実測例は見積の 4 倍まで膨らんだので、倍率を 3 へ
-# 上げても逸脱は取り逃がさない。
-# 倍率 3 の手法は呼び名の表が持つ（#444）。**ここでは読むだけである。**
-EXTRACTION_DIFF_BUDGET_FACTOR = 3
-
-EXTRACTION_TECHNIQUES: frozenset[str] = frozenset(
-    name for name, factor in _read_table("手法ごとの差分予算の倍率", "倍率").items() if factor == str(EXTRACTION_DIFF_BUDGET_FACTOR)
-)

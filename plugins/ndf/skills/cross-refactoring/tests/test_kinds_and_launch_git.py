@@ -169,7 +169,7 @@ def test_a_launch_failure_in_the_test_round_stops_without_dropping_the_item(flow
     state = read_state(flow["path"])
     runs = [{"suite": "pytest", "kind": "test", "command": "nosuchcmd_1483 tests/test_calc.py"}]
     state["items"] = [_item("I-001", 1, scope_commands=runs)]
-    intake = implement.Intake(accepted={"I-001": {"sha": "x", "files": []}})
+    intake = implement.Intake(accepted={"I-001": [{"sha": "x", "files": []}]})
     with pytest.raises(SystemExit) as e:
         implement._run_added_tests(flow["path"], state, intake)
     assert e.value.code == 4 and intake.test_failed == {} and intake.extra == []

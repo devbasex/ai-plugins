@@ -36,7 +36,7 @@ from typing import Any, Optional
 import statefile
 
 from . import die, info, ledger, worktree
-from .items import find_item, item_shas
+from .items import find_item, implement_shas, item_shas
 from .paths import full_commit, git_out, work_dir
 from .worktree import replay_commits, reset_hard, revert_range
 
@@ -121,9 +121,10 @@ def _remap_many(work: str, table: dict[str, str], shas: list[Any]) -> list[Any]:
 def _remap_commits(work: str, item: dict[str, Any], mapping: dict[str, str]) -> None:
     """項目のコミット（test / implement / fix）を書き戻す。"""
     commits = item.get("commits") or {}
-    for key in ("test", "implement"):
-        if commits.get(key):
-            commits[key] = _remap_one(work, mapping, commits[key])
+    if commits.get("test"):
+        commits["test"] = _remap_one(work, mapping, commits["test"])
+    if "implement" in commits:
+        commits["implement"] = _remap_many(work, mapping, implement_shas(item))
     commits["fix"] = _remap_many(work, mapping, commits.get("fix") or [])
 
 

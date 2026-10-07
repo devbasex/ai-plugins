@@ -142,8 +142,8 @@ def test_the_second_round_takes_in_from_a_new_base(flow, cmd_setup, cmd_implemen
     _call(cmd_implement, "cmd_merge_implement")
 
     items = {i["id"]: i for i in read_state(flow["path"])["items"]}
-    assert items["I-002"]["status"] == "implemented" and items["I-002"]["commits"]["implement"] == second
-    assert items["I-001"]["status"] == "verified" and items["I-001"]["commits"]["implement"] == first
+    assert items["I-002"]["status"] == "implemented" and items["I-002"]["commits"]["implement"] == [second]
+    assert items["I-001"]["status"] == "verified" and items["I-001"]["commits"]["implement"] == [first]
     assert git("merge-base", "--is-ancestor", first, "HEAD", cwd=work).returncode == 0
 
 
@@ -204,8 +204,10 @@ def test_drops_are_judged_per_round(flow, cmd_setup, cmd_implement, readopt):
     work = flow["work"]
     _plan(flow, [_entry("I-001", 1, "total"), _entry("I-002", 2, "add")])
     _call(cmd_setup, "cmd_start_phase", phase="implement")
-    (work / "outside").mkdir()
-    (work / "outside" / "x.py").write_text("X = 1\n")
+    # 範囲の外の既存のファイルを項目と関係なく変える（新しいファイルは範囲の中として扱う。#1814）
+    ignore = work / ".gitignore"
+    original = ignore.read_text()
+    ignore.write_text(original + "build/\n")
     commit_with_trailers(work, "Out of scope", item_trailers("I-001"))
     assert _exit_code(cmd_implement, "cmd_merge_implement") == 2  # 残る項目 0 件（I-002 は持ち越し）
     assert [d.get("round") for d in read_state(flow["path"])["drops"]] == [1]
@@ -213,14 +215,13 @@ def test_drops_are_judged_per_round(flow, cmd_setup, cmd_implement, readopt):
 
     _call(readopt, "cmd_readopt")
     _call(cmd_setup, "cmd_start_phase", phase="implement")
-    (work / "outside").mkdir(exist_ok=True)  # 1 巡目の取り消しで消えている
-    (work / "outside" / "y.py").write_text("Y = 1\n")
+    ignore.write_text(ignore.read_text() + "dist/\n")
     commit_with_trailers(work, "Out of scope again", item_trailers("I-002"))
     assert _exit_code(cmd_implement, "cmd_merge_implement") == 2
 
     state = read_state(flow["path"])
     assert [d.get("round") for d in state["drops"]] == [1, 2]
-    assert not (work / "outside" / "y.py").exists()
+    assert ignore.read_text() == original
     assert {i["id"]: i["status"] for i in state["items"]}["I-002"] == "reverted"
 
 

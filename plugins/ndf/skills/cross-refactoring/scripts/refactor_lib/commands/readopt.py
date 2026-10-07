@@ -57,13 +57,13 @@ def _reopen(item: dict[str, Any], round_no: int) -> None:
         {
             "status": PLANNED,
             "round": round_no,
-            "commits": {"test": None, "implement": None, "fix": []},
+            "commits": {"test": None, "implement": [], "fix": []},
             "seconds": {},
             "fix_count": 0,
             "danger": [],
         }
     )
-    for key in ("failure_reason", "danger_checked", "danger_hits", "diff_lines", "review_test_judgements"):
+    for key in ("failure_reason", "danger_checked", "danger_hits", "diff_lines", "review_test_judgements", "review_scope_judgements"):
         item.pop(key, None)
 
 

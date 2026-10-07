@@ -177,7 +177,7 @@ graph TD
 | `scripts/drive.py` の `Drive.run` | 打ち直しの入口 | 耐久の記録が `start` でない（打ち直し）とき、耐久ワークフローを始める前に `refactor.py catch-up <ID>` を 1 度打つ。耐久ステップにしない |
 | `scripts/drive.py` の `refactor_drive` | 工程の順序 | 検証の繰り返しの後、最終ゲートの前に `readopt` を打つ。取り込みや提案の取り込みが `GO_FINAL` を返して検証を飛ばしたときも、最終ゲートの前に必ず `readopt` を打つ。終了コード 0 なら `add-tests`（`TESTS_NEEDED=1` のとき）・`implement`・検証の繰り返しを回し直し、終了コード 2（`GO_FINAL`）なら最終ゲートへ進む。回し直しは `LOOP_LIMIT` で抑え、耐久ステップの名前に巡の番号 `round` を付ける（同じ名前のステップを耐久の記録から返さないため）。手順の順序 `ORDER` に `verify` と `final` の間の `readopt` を足す。`readopt` が `state.phase` を `add-tests` / `implement` へ戻すため、再開の `todo()` は巡をまたいでも今の巡の未了の手順を返す |
 | `docs/01-state-and-propose.md`・`docs/02-plan-and-implement.md`・`docs/04-verify-and-report.md` | 文書 | 「再開」の表に計画の後の行、「締め切り」の R と `fix_end` の式と止まる条件、報告の行を書き直す。「締め切り」の節の項目ごとの式 2 行と表の「テストの追加の終わり」「実装の終わり」を I13 の式へ、取り込みの表の「締め切り」の行を外し、「コミットが無い」の行を持ち越しへ直し、採り直しの節を足す |
-| `CLAUDE.md` の cross-refactoring の節 | 指示書 | 見送りの理由の説明（`not_done` の意味）と時間の数値の段落を決定 9・10 に合わせる。C7 に当たるため、設計の承認と別に実装の PR で人の承認を取ってから書く（決定 11。#1814 の決定 12 と同じ扱い） |
+| `CLAUDE.md` の cross-refactoring の節 | 指示書 | 見送りの理由の説明（`not_done` の意味）と時間の数値の段落を決定 9・10 に合わせる。C7 に当たる。実装の中で書いてコミットし、承認ゲート 2（本番への配布）で人が差分を見る（決定 11。#1814 の決定 12 と同じ扱い） |
 
 ```mermaid
 graph LR
@@ -309,7 +309,7 @@ plugins/ndf/
     │           ├── setup.py             # 変更（再開で catch_up）
     │           ├── plan.py / implement.py / converge.py / report.py  # 変更
     └── tests/                           # 変更・追加
-CLAUDE.md                                # 変更（C7。決定 11 の承認の後）
+CLAUDE.md                                # 変更（C7。決定 11。承認ゲート 2 で人が見る）
 ```
 
 ## データ構造
@@ -629,9 +629,9 @@ drive.py は `init` を耐久ステップとして 1 回だけ打ち（I19）、
 
 根拠: Value 3 / Value 4 / 利用者の指示「無意味な制約はどんどん外す」（2026-10-07）
 
-### 決定 11: 指示書の書き換えを人の承認に掛けるため、`CLAUDE.md` の cross-refactoring の節は設計の承認と別に、実装の PR で承認を取ってから書く
+### 決定 11: 指示書の書き換えを人の目に掛けるため、`CLAUDE.md` の cross-refactoring の節は実装の中で書き、承認ゲート 2 で人が見る
 
-`CLAUDE.md` の cross-refactoring の節は、見送りの理由の説明（`not_done` の意味）と時間の数値の段落が決定 9・10 と食い違うため直す。指示書の運用の節の書き換えは共通原則の C7 に当たり、設計の承認では代えられない。実装の PR で差分を示して承認を取り、承認の後にコミットする。#1814 の決定 12 も同じ節（「1 改善項目 = 1 コミット」）を同じ扱いで直す。後に入る実装の PR が先の差分の上に書き、承認はそれぞれの PR で取る。用語集の変更は指示書ではないため、設計の変更に含める。
+`CLAUDE.md` の cross-refactoring の節は、見送りの理由の説明（`not_done` の意味）と時間の数値の段落が決定 9・10 と食い違うため直す。指示書の運用の節の書き換えは共通原則の C7 に当たる。承認ゲートは設計と本番への配布の 2 つだけで、`normal` の進め方では C7 は承認ゲート 2 で満たされる。実装の中で書いてコミットし、承認ゲート 2 で人が差分を見る。別の承認は足さない。#1814 の決定 12 も同じ節（「1 改善項目 = 1 コミット」）を同じ扱いで直す。後に入る実装が先の差分の上に書く。用語集の変更は指示書ではないため、設計の変更に含める。
 
 `CLAUDE.md` を直さずに `docs/` だけを直す案は、全セッションが読む指示書に外した期限の説明が残り、読み手が古い規則で判断するため採らない。
 
@@ -686,7 +686,7 @@ drive.py は `init` を耐久ステップとして 1 回だけ打ち（I19）、
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #1743 | 実装する | — | `plugins/ndf/scripts/lib/test_strategy.py`、`plugins/ndf/scripts/lib/monitor_types.py`、`plugins/ndf/scripts/lib/monitor.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/`、`plugins/ndf/skills/cross-refactoring/scripts/drive.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor.py`、`plugins/ndf/skills/cross-refactoring/docs/`、`plugins/ndf/skills/cross-refactoring/tests/`、`plugins/ndf/scripts/tests/`、`docs/glossary/glossary.json`、`docs/glossary.md`、`CLAUDE.md`（C7。決定 11 の承認の後） |
+| #1743 | 実装する | — | `plugins/ndf/scripts/lib/test_strategy.py`、`plugins/ndf/scripts/lib/monitor_types.py`、`plugins/ndf/scripts/lib/monitor.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/`、`plugins/ndf/skills/cross-refactoring/scripts/drive.py`、`plugins/ndf/skills/cross-refactoring/scripts/refactor.py`、`plugins/ndf/skills/cross-refactoring/docs/`、`plugins/ndf/skills/cross-refactoring/tests/`、`plugins/ndf/scripts/tests/`、`docs/glossary/glossary.json`、`docs/glossary.md`、`CLAUDE.md`（C7。決定 11。承認ゲート 2 で人が見る） |
 | #1491 | 取り込む | #1743 | — |
 
 ## 並行する設計との関係
@@ -698,7 +698,7 @@ drive.py は `init` を耐久ステップとして 1 回だけ打ち（I19）、
 | #1814 の決定 6 | 実装の項目は同じ `Item-Id` のコミットを何件でも持ち、`commits.implement` を文字列から並びへ変える（読む側は `items.implement_shas`） | 項目のコミットを読む箇所（巡ごとの取り込み・取り消し・持ち越し）は、`commits.implement` を文字列と決めて読まず、`items.item_shas`（#1814 の後は `implement_shas` を通す）で読む。採り直しで足す項目の `commits` は `merge-plan` の `_plan_items` と同じ作り方にし、形はどちらの順でも `merge-plan` の項目と揃う。`items[].round` は項目の単位で持ち、項目の全コミットがその巡に属する |
 | #1814 の決定 6（締め切り） | 複数コミットの項目の締め切りの扱い | 決定 9 で項目の期限の判定（`_deadline_passed`）そのものを外すため、#1814 の前後で取り込みの判定は変わらない。#1814 は所要だけを最後のコミットの時刻で測る |
 | #1814 の決定 7 | 範囲テストの対象の無い `remove_dead_code` の項目を `deletion` として採り、D4 で全体テストを 1 度走らせる | 決定 1 のとおりバッファに数えず、最終ゲートと兼ねる。落ちたとき・HEAD が進んだときの超過は「未確認のまま残ること」の 1 行目に含め、`deletion` の項目の分を別に足さない |
-| #1814 の決定 12 | `CLAUDE.md` の cross-refactoring の節を C7 として、実装の PR で別に承認を取ってから書く | 決定 11 で同じ扱いにする |
+| #1814 の決定 12 | `CLAUDE.md` の cross-refactoring の節を C7 として、実装の中で書き、承認ゲート 2 で人が見る | 決定 11 で同じ扱いにする |
 | #1658 の用語「見送った改善項目」「見送った提案」と I7 | `metrics.deferred` は状態が見送りの改善項目の数（`not_done`・`test_failed`）。状態を見送りにする経路はどれも `deferred_items` へ `defer` する | `not_done` は、実装の終わりまでにコミットが無く、採り直しでも残った時間に入らなかった項目にだけ付く（I15）。`readopt` が持ち越しの項目を見送りにするときも `defer` を理由 `not_done` で呼んでから状態を変え、I7 を保つ。採り直した `budget` の候補は `deferred_items` から外れるため、#1658 の「見送った提案」の件数は採り直しの後の値になる |
 
 ## 未確認のまま残ること
@@ -710,5 +710,5 @@ drive.py は `init` を耐久ステップとして 1 回だけ打ち（I19）、
 | drive.py の打ち直しで中断した手順の CLI を起動し直すか | 中断した監視の耐久ステップを流し直したとき、起動の耐久ステップは記録から返る。止まった CLI の代わりを起動するのは振り替え（`reassign`）の既存の経路で、ずれた締め切りから監視の上限を出し直すのは次の `start-phase` である。受け入れ条件は締め切りの値とコミットの判定で確かめ、起動し直しの経路は既存の振る舞いのまま扱う |
 | 要求の前提 2 の文面 | 決定 3 で、測る時刻を作業ディレクトリのファイルの更新時刻へ広げた。課題の本文の前提 2 を同じ形に直すかは、承認ゲート 1 で承認する人が決める |
 | 採り直しの巡の起動の費用 | 巡ごとに実装担当の CLI を起動し直す。起動の所要は配分テーブルの見積りに入っていないため、残った時間が見積りぎりぎりの候補は実装の終わりに届かず持ち越しになりうる。`readopt.events[]` と報告の行で実測し、要れば起動の所要を配分の履歴に足す（リリース後テスト） |
-| `CLAUDE.md` の書き換え | C7 に当たる。設計の承認とは別に、実装の PR で人の承認を取ってから書く（決定 11。#1814 の決定 12 も同じ節を直す） |
+| `CLAUDE.md` の書き換え | C7 に当たる。実装の中で書き、承認ゲート 2 で人が見る（決定 11。#1814 の決定 12 も同じ節を直す） |
 | 手で作業ディレクトリのファイルを触ったとき | 中断の間に利用者が `.cross_refactoring/` 直下のファイルを開いて保存すると、最後の動きの時刻が進み、止まっていた時間が短く数えられる（ずれが小さくなる側で、締め切りは延びすぎない） |
