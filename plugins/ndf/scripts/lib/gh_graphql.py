@@ -84,6 +84,16 @@ def unresolved_threads(repo: str, pr: int, output: Callable[[list[str]], str | N
     return threads
 
 
+def _graphql_failure(r: gh_call.GhResult, errors: Any) -> str:
+    """`gh api graphql` の失敗の理由。stderr を先に、無ければ GraphQL のエラー、どちらも無ければ読めないことを返す。"""
+    stderr = r.stderr.strip()
+    if stderr:
+        return stderr
+    if errors:
+        return json.dumps(errors, ensure_ascii=False)
+    return "GraphQL の応答を読めない"
+
+
 def graphql(query: str, variables: dict[str, Any] | None = None) -> gh_quota.Attempt:
     """GraphQL の 1 回の要求。値は応答の `data`。上限は `Attempt.limited` で分かる（代われないので待つのは呼び出し側）。
 
@@ -103,6 +113,5 @@ def graphql(query: str, variables: dict[str, Any] | None = None) -> gh_quota.Att
         d = None
     errors = (d or {}).get("errors") if isinstance(d, dict) else None
     if r.returncode != 0 or errors or not isinstance(d, dict):
-        why = (r.stderr.strip() or json.dumps(errors, ensure_ascii=False) if errors else r.stderr.strip()) or "GraphQL の応答を読めない"
-        return gh_quota.Attempt(None, why, "graphql")
+        return gh_quota.Attempt(None, _graphql_failure(r, errors), "graphql")
     return gh_quota.Attempt(d.get("data"), "", "graphql")
