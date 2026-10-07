@@ -304,13 +304,13 @@ def test_checks_outcome_edge_cases_are_fixed():
 
 
 def test_unresolved_threads_carry_thread_id(fake):
-    fake.on("api", "graphql", out="PRRT_a\tsrc/foo.py\t42\nPRRT_b\tdocs/bar.md\t\n")
+    fake.on("api", "graphql", out="PRRT_a\tsrc/foo.py\t42\t[major] 空を弾く\nPRRT_b\tdocs/bar.md\t\t\n")
 
     threads = gp.unresolved_threads(REPO, PR)
 
     assert threads == [
-        {"thread_id": "PRRT_a", "path": "src/foo.py", "line": "42"},
-        {"thread_id": "PRRT_b", "path": "docs/bar.md", "line": ""},
+        {"thread_id": "PRRT_a", "path": "src/foo.py", "line": "42", "body": "[major] 空を弾く"},
+        {"thread_id": "PRRT_b", "path": "docs/bar.md", "line": "", "body": ""},
     ]
     joined = fake.argvs()[0]
     assert "owner=o" in joined and "name=r" in joined and f"pr={PR}" in joined
@@ -331,6 +331,82 @@ def test_pr_info_with_threads_counts_and_lists_them(fake, tmp_path):
     thread = next(i for i in obj["items"] if i["kind"] == "thread")
     assert (thread["thread_id"], thread["line"]) == ("PRRT_a", 42)
     assert obj["metrics"]["unresolved_threads"] == 1
+
+
+def test_pr_info_with_all_parts_is_fixed(fake, tmp_path):
+    """現状固定（I-002）: diff → checks → threads の順に items と notes が並ぶ。"""
+    fake.on("pr", "view", out=json.dumps(GRAPHQL_PR))
+    fake.on("api", "-H", out="diff --git a/x b/x\n")
+    fake.on("api", "graphql", out="PRRT_a\tsrc/foo.py\tx\n")
+    fake.on("api", "-i", out=_checks(_run("pytest", "failure", "2026-09-25T01:00:00Z", 101)))
+
+    obj, code = gp.pr_info(PR, REPO, {"diff", "checks", "threads"}, tmp_path)
+
+    assert code == 0 and obj["status"] == "ok"
+    assert [i["kind"] for i in obj["items"]] == ["pr", "diff", "check", "thread"]
+    assert obj["items"][0]["name"] == f"#{PR}" and obj["items"][0]["repo"] == REPO and obj["items"][0]["result"] == "open"
+    assert obj["items"][1] == {"kind": "diff", "name": "diff", "result": "saved", "path": str(tmp_path / "pr.diff")}
+    assert "log_path" not in obj["items"][2]
+    assert obj["items"][3]["line"] is None
+    assert obj["metrics"] == {
+        "source": "graphql",
+        "additions": 10,
+        "deletions": 2,
+        "changed_files": 3,
+        "failed_checks": 1,
+        "pending_checks": 0,
+        "superseded_checks": 0,
+        "unresolved_threads": 1,
+    }
+    assert obj["summary"] == f"PR #{PR} open（graphql） / checks 失敗 1 / 保留 0 / 未解決 1"
+
+
+def test_pr_info_with_every_part_unavailable_is_fixed(fake, tmp_path):
+    """現状固定（I-002）: 取得できない部分は diff → checks → threads の順に unavailable へ入る。"""
+    fake.on("pr", "view", out=json.dumps(GRAPHQL_PR))
+    fake.on("api", "-H", rc=1, err="HTTP 500\n")
+    fake.on("api", "graphql", rc=1, err="boom")
+    fake.on("api", "-i", rc=1, err="HTTP 422")
+
+    obj, code = gp.pr_info(PR, REPO, {"diff", "logs", "threads"}, tmp_path)
+
+    assert code == 0 and obj["status"] == "ok"
+    assert obj["items"][1] == {
+        "kind": "diff",
+        "name": "diff",
+        "result": "unavailable",
+        "path": None,
+        "reason": "差分を取得できない: HTTP 500",
+    }
+    assert [i["kind"] for i in obj["items"]] == ["pr", "diff"]
+    assert obj["metrics"]["unavailable"] == ["diff", "checks", "threads"]
+    assert obj["metrics"]["failed_checks"] is None and obj["metrics"]["pending_checks"] is None
+    assert obj["metrics"]["unresolved_threads"] is None
+    assert obj["summary"] == f"PR #{PR} open（graphql） / 取得できない: diff, checks, threads"
+
+
+def test_pr_info_stops_when_the_repo_cannot_be_resolved(fake, tmp_path, monkeypatch):
+    """現状固定（I-002）: リポジトリを決められなければ前提の不足で止まる。"""
+    monkeypatch.setattr(gh_call, "resolve_repo", lambda repo=None: None)
+
+    obj, code = gp.pr_info(PR, None, set(), tmp_path)
+
+    assert (obj["status"], code, obj["summary"]) == ("stopped", gp.step_result.EXIT_PRECONDITION, "リポジトリを決められない")
+    assert obj["items"] == [] and obj["metrics"] == {}
+    assert fake.calls == []
+
+
+def test_pr_info_stop_summary_carries_the_reason_and_source(fake, tmp_path):
+    """現状固定（I-002）: メタを読めないときは理由と取得元を結果に残す。"""
+    fake.on("pr", "view", rc=1, err=RATE)
+    fake.on("api", "-i", f"repos/{REPO}/pulls/{PR}", out=_rest_out({}))
+
+    obj, code = gp.pr_info(PR, REPO, {"diff"}, tmp_path)
+
+    assert (obj["status"], code) == ("stopped", gp.step_result.EXIT_UNREADABLE)
+    assert obj["summary"] == f"PR #{PR} を取得できない: GraphQL が上限で、REST でも取得できない"
+    assert obj["metrics"] == {"source": "rest"} and obj["items"] == []
+    assert not any("-H" in a for a, _ in fake.calls)
 
 
 # ---------------- body-section ----------------

@@ -18,13 +18,13 @@ PR 差分、または `--branch` 指定時は現在のブランチの差分を�
 
 | 引数 | 意味 | 既定 |
 |---|---|---|
-| `[PR番号]` | レビュー対象の PR | 直前の PR |
+| `[PR番号]` | レビュー対象の PR | 今のブランチの PR |
 | `--branch` | PR ではなく **ローカルブランチの差分**をレビューする（PR 作成前のセルフレビュー） | OFF |
 | `[AIエージェント]` | `codex` / `agy` に委譲。省略時は Claude 自身 | Claude |
 | `--focus AREA` | 重点観点（`security` / `performance` / `tests` / 任意の文字列） | なし |
 
 ```
-/ndf:pr-review                       # 直前 PR をレビュー
+/ndf:pr-review                       # 今のブランチの PR をレビュー
 /ndf:pr-review 9352                  # PR 番号を指定
 /ndf:pr-review 9352 codex            # Codex CLI に委譲
 /ndf:pr-review --branch              # ローカルブランチをセルフレビュー
@@ -35,14 +35,14 @@ PR 差分、または `--branch` 指定時は現在のブランチの差分を�
 
 | 観点 | PR モード（既定） | `--branch` モード |
 |---|---|---|
-| 対象 | GitHub 上の PR 差分 | `git diff <既定ブランチ>` の差分 |
+| 対象 | GitHub 上の PR 差分 | `git diff origin/<ベースブランチ>` の差分 |
 | 出力先 | **PR 上にインラインコメント + 総評を投稿** | セッション上の報告のみ（投稿しない） |
-| 判定 | `APPROVE` / `REQUEST_CHANGES` | 判定を出さず改善提案を返す |
+| 判定 | `APPROVE` / `REQUEST_CHANGES` / `COMMENT` | 判定を出さず改善提案を返す |
 | 用途 | PR 作成後のレビュー | PR 作成前のセルフレビュー |
 
 **どちらのモードでもコード修正は行わない**（分析と指摘のみ。修正は `/ndf:fix`）。
 
-## 観点は 2 段に分ける
+## 観点
 
 **第 1 段（仕様適合）を先に通す。** コード品質だけを見ると、きれいに書かれた「仕様を
 満たさない実装」を通してしまう。
@@ -99,171 +99,7 @@ PR 差分、または `--branch` 指定時は現在のブランチの差分を�
 
 `--focus` が指定された場合は、該当する観点を優先し、他の観点は重大なもののみ指摘する。
 
-## `--branch` モードの手順
-
-### 1. 変更の把握
-
-```bash
-# 起点は開発の本流であって、既定ブランチとは限らない。宣言（`.ndf/worktree.json` の
-# `base_branch`）を先に読み、その名前が実在することを確かめる。取得済みの参照に無ければ
-# origin へ問い合わせる（取得していないだけの場合を「無い」と読まないため）。実在しなければ
-# 既定ブランチへ落とさずに止まる。宣言が無ければ origin の HEAD が指す先を使い、それも
-# 取れなければ慣例の名前のうちローカルにあるものへ落とす
-# （共通ライブラリ `wt_base_branch` と同じ順序）
-dev_base=$(jq -r 'select(.version == 1) | .base_branch | select(type == "string")' \
-  .ndf/worktree.json 2>/dev/null)
-if [ -n "$dev_base" ]; then
-  dev_base_found=0
-  if git show-ref --verify --quiet "refs/remotes/origin/$dev_base" ||
-     git show-ref --verify --quiet "refs/heads/$dev_base"; then
-    dev_base_found=1
-  else
-    # `git ls-remote` のパターンは参照名の末尾に一致する。問い合わせの成功だけを見ると
-    # `refs/heads/x/refs/heads/develop` のような別のブランチでも「ある」と読むため、
-    # 返った行の参照名そのものを照合する（共通ライブラリ `wt_branch_exists` と同じ形）
-    dev_base_listing=$(GIT_TERMINAL_PROMPT=0 git ls-remote --heads origin \
-      "refs/heads/$dev_base" 2>/dev/null)
-    while IFS= read -r line; do
-      case "$line" in *$'\t'"refs/heads/$dev_base") dev_base_found=1; break ;; esac
-    done <<<"$dev_base_listing"
-  fi
-  [ "$dev_base_found" -eq 1 ] || {
-    printf 'NOTE: .ndf/worktree.json の base_branch が指す %s は origin にもローカルにもありません\n' \
-      "$dev_base" >&2
-    exit 1
-  }
-else
-  dev_base=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
-  for candidate in main master; do
-    [ -n "$dev_base" ] && break
-    git show-ref --verify --quiet "refs/heads/$candidate" && dev_base=$candidate
-  done
-  dev_base=${dev_base:-main}
-fi
-```
-
-```bash
-# 起点はローカルに無いことがある（宣言した名前を clone していない、短命な worktree
-# で作業している等）。取得してからリモート追跡ブランチを比較元にする
-git fetch origin "$dev_base"
-git diff "origin/$dev_base" --name-only     # 変更ファイル一覧
-git diff "origin/$dev_base" --stat          # 差分の統計
-git log "origin/$dev_base"..HEAD --oneline  # コミット履歴
-```
-
-### 2. 分析
-
-**第 1 段（仕様適合）→ 第 2 段（コード品質）の順に見る。** 受け入れ条件は実装計画のファイル
-（`issues/` 配下）または PR 本文から取る。第 1 段で満たさない項目が出た時点で、第 2 段は
-「同じ箇所を直すときに一緒に直すもの」だけに絞る。
-
-### 3. 報告
-
-```markdown
-## レビュー結果
-
-### 概要
-- 変更ファイル数 / 追加行数 / 削除行数
-
-### 第 1 段: 仕様適合
-- 受け入れ条件 1〜3: 満たす（対応テスト: `tests/...`）
-- 受け入れ条件 4: **満たさない** — `path/to/file.ext:456` で条件と異なる並び順になっている
-- 範囲外の変更: なし
-
-### 第 2 段: Issues（要修正）
-- `path/to/file.ext:456` — 問題点と修正方針
-
-### 第 2 段: Suggestions（改善提案）
-- `path/to/file.ext:123` — 提案内容
-```
-
-受け入れ条件が見つからない場合は「受け入れ条件が見つからない」と書き、推測で埋めない。
-
-指摘は重要度の高いものから並べる。良い点の列挙は行わない。
-
-### 注意事項
-
-- 大量の変更がある場合、重要な変更から優先的にレビューする
-- 自動品質チェック（linter, formatter, type checker）は事前実行済みを前提とする
-- レビュー結果は提案であり、最終判断は開発者が行う
-
-## PR モードの手順
-
-レビュー結果は **GitHub の PR レビュー機能** を使って必ず PR 上に書き込む。
-個別指摘は **コード行に紐付くインラインコメント** が原則。総評（review body）にだけ
-書くのは避ける。
-
-`--branch` モードと同じく **第 1 段（仕様適合）→ 第 2 段（コード品質）** の順に見る。
-第 1 段で満たさない項目は、review body の冒頭に「仕様適合」として明示する（インライン
-コメントだけにすると、条件を満たしていないことが埋もれる）。
-
-- 第 1 段で満たさない項目がある、または第 2 段に要修正あり → `REQUEST_CHANGES`
-- 指摘なし → `APPROVE`
-
-### 指摘の振り分け
-
-| 指摘の種類 | 投稿先 |
-|---|---|
-| 特定ファイル・特定行への指摘 | **インラインコメント** (`comments[].path` + `line`) |
-| 複数ファイルにまたがる設計指摘 | 代表箇所にインラインコメント + review body に補足 |
-| 設計レベル・PR全体の所見 | review body（総評） |
-| ファイル単位の指摘（行を絞れない） | そのファイルの代表行にインラインコメント |
-| この PR の範囲外と判断したもの | `/ndf:out-of-scope` で起票し、番号を review body へ書く。**起票先のリポジトリはその Skill が決める** |
-
-### 投稿フロー（推奨: 1 リクエストで一括投稿）
-
-`gh api` の Reviews API を使い、**総評 + 複数のインラインコメント + 判定（event）を
-1 回で送信** する。
-
-```bash
-PR=<PR番号>
-OWNER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
-SHA=$(gh pr view "$PR" --json headRefOid -q .headRefOid)
-
-# インラインコメントを JSON 配列で組み立て
-#   （path / line / side / body の 4 つが必須。複数行レンジは start_line を併用）
-SUMMARY=$'## 総評\n\n... 全体所見をここに ...'
-jq -n \
-  --arg sha "$SHA" \
-  --arg event "REQUEST_CHANGES" \
-  --arg body "$SUMMARY" \
-  '{
-    commit_id: $sha,
-    event: $event,
-    body: $body,
-    comments: [
-      {path: "src/foo.py", line: 42, side: "RIGHT",
-       body: "[major / 可読性] この関数は 70 行ある。〇〇 と △△ に分割を推奨。"},
-      {path: "src/bar.py", start_line: 10, line: 25, side: "RIGHT",
-       body: "[minor / 性能] このループは内包表記化できる。"}
-    ]
-  }' > /tmp/review-payload.json
-
-gh api -X POST "repos/$OWNER_REPO/pulls/$PR/reviews" --input /tmp/review-payload.json
-```
-
-> 💡 **JSON 組み立てに heredoc (`<<JSON`) は使わない**: 変数展開は必要だが、`$SHA` 等に
-> 特殊文字が混入した場合 JSON が壊れる（あるいはクオート未エスケープで JSON injection に
-> なる）。`jq -n --arg` 経由なら値が自動で JSON エスケープされるため安全。クオート付き
-> heredoc (`<<'JSON'`) は逆に `$SHA` が展開されず使えない。
-
-**`event` の値**:
-- `APPROVE` — 指摘なし
-- `REQUEST_CHANGES` — 修正必須の指摘あり
-- `COMMENT` — 任意の指摘のみ（マージブロックしない）
-
-### インラインコメント本文の書式
-
-各 `comments[].body` の先頭に **`[重要度 / カテゴリ]`** を付けて視認性を上げる:
-
-```
-[critical / セキュリティ] SQL がエスケープなしで連結されている。プレースホルダ必須。
-[major / 可読性] 70 行関数。〇〇 と △△ に分割を推奨。
-[minor / 言語慣用性] Python なら内包表記で 1 行化可能。
-[nit / スタイル] スペースが揃っていない。
-```
-
-### 重要度の運用ガイド（auto-fix 判定に直結）
+### 重要度
 
 | 重要度 | 定義 | 後段（`/ndf:fix`）の扱い |
 |---|---|---|
@@ -274,152 +110,42 @@ gh api -X POST "repos/$OWNER_REPO/pulls/$PR/reviews" --input /tmp/review-payload
 
 過剰な nit 量産は避ける。critical / major で対応すべき真の問題に集中すること。
 
-### 既存コメントがある場合の重複防止
+## 指摘の振り分け
 
-同じ箇所への二重指摘を避けるため、投稿前に既存コメントを確認する:
+| 指摘の種類 | 指摘ファイルでの書き方 |
+|---|---|
+| 特定の行・ファイル単位（行を絞れなければ代表行） | `path` + `line`（インラインコメントになる） |
+| 複数ファイルにまたがる設計指摘 | 代表箇所に `path` + `line`、補足は `summary` |
+| 設計レベル・PR 全体の所見 | `summary`（総評。個別の指摘を繰り返さない） |
+| 第 1 段で満たさない項目 | `stage: "spec"`（総評の冒頭の「仕様適合」に載る） |
+| この PR の範囲外 | `/ndf:out-of-scope` で起票し、番号を `summary` へ書く（起票先はその Skill が決める） |
 
-```bash
-gh api "repos/$OWNER_REPO/pulls/$PR/comments" --paginate \
-  | jq -r '.[] | "\(.path):\(.line) \(.body | split("\n")[0])"'
-```
+## 手順
 
-すでに同種の指摘があれば、その指摘は省くか、reply（既存コメントへの返信）にする。
-
-### 補助コマンド
-
-```bash
-# review body 単体（インラインなし）で投稿したい場合
-gh pr review "$PR" --request-changes --body "..."
-gh pr review "$PR" --approve --body "..."
-
-# 会話タブへの普通のコメント（行に紐付かない）
-gh pr comment "$PR" --body "..."
-
-# 1 件だけインラインコメントを追加（既存 review に含めない）
-gh api -X POST "repos/$OWNER_REPO/pulls/$PR/comments" \
-  -F commit_id="$SHA" -F path="src/foo.py" -F line=42 -F side=RIGHT -F body="..."
-```
-
-## 外部 AI への委譲
-
-第二引数が指定された場合、上記「観点」「具体的なチェックポイント」「PR モードの手順」の
-内容を **レビュー指示プロンプト** として組み立て、指定された CLI に渡す。
-
-外部 CLI の**起動の約束**（フラグの並び・完了の検知・成果物の回収）は
-`/ndf:external-ai` skill が正本を持つ。その skill の「共通の実行手順」と
-`references/cli-codex.md` / `references/cli-agy.md` に従って起動する。**ここには写さない。**
-2 か所に置くと片方だけが実装から離れる（`--print-timeout` が実際に食い違っていた）。
-
-レビューという仕事に固有なのは、ファイル名の割り当てと出力の形式だけである。
-
-| CLI | プロンプト | 成果物 |
-|---|---|---|
-| codex | `/tmp/codex-review-pr<番号>-prompt.md` | `/tmp/codex-output-review-pr<番号>.md`（プロンプト内で `apply_patch` 書き出しを必須化） |
-| agy | `/tmp/agy-review-pr<番号>-prompt.md` | `/tmp/agy-review-pr<番号>-result.json`（stdout のサマリと併せて回収） |
-
-agy にはプロンプト側で **「リポジトリ内ファイルを編集してはならない。`gh api` で投稿する
-だけ」** を強く明示する。AI 直接投稿フローは `gh api -X POST` がシェル実行にあたるため、
-承認を飛ばすフラグを外すとブロックされる。
-
-> ⚠️ 承認・サンドボックスを飛ばすフラグは、**Docker / devcontainer / VM / CI ランナー等の
-> 外部隔離環境内でのみ**使う。プロンプトでの「編集禁止」明示は隔離の代替にならない。背景と
-> 代替策は `/ndf:external-ai` skill の `references/cli-codex.md`「サンドボックス制約」節と
-> `references/cli-agy.md` にある。
-
-### プロンプト組み立て
-
-1. `gh pr view <PR> --json title,body,baseRefName,headRefName,url,headRefOid` でメタ情報を取得
-2. `gh pr diff <PR>` で差分を取得
-3. 上記「観点」「PR モードの手順」をそのままプロンプトに転記
-4. PR タイトル・URL・差分を **対象情報** として明記
-5. **出力は Reviews API のペイロード形式（JSON）で出させ、外部 AI 自身に投稿させる**
-
-### 外部 AI に必須化する出力形式と直接投稿
-
-**外部 AI はペイロードを組み立てた後、自分自身で `gh api` を呼んで PR に投稿する。**
-メインに返すのは「投稿が成功したか」「最終 verdict」「review URL」「件数」の小さな
-結果サマリのみ。
-
-プロンプトに必ず含める指示:
-
-- 個別指摘は必ず `comments[]` のインラインコメントにする（行を絞れない場合はファイル代表行）
-- `body`（総評）には設計・横断的な所見のみ書く。個別指摘の繰り返しは禁止
-- 各 `comments[].body` の先頭に `[重要度 / カテゴリ]` を付ける
-- `path` は **PR 差分に登場するファイルのみ**（`gh pr diff <PR> --name-only` の一覧から選ぶ）
-- `line` は **差分に含まれる行**（追加行・コンテキスト行）に限る。`side=RIGHT` が既定
-- `commit_id` は `gh pr view <PR> --json headRefOid -q .headRefOid` の値を使う
-- 投稿後 `/tmp/<agent>-review-pr<番号>-result.json` に結果サマリを書き出す
-
-結果サマリの形式:
-
-```json
-{
-  "status": "posted",
-  "event": "REQUEST_CHANGES",
-  "posted_as": "COMMENT",
-  "review_url": "https://github.com/.../pull/<PR>#pullrequestreview-...",
-  "comments_count": 5,
-  "by_severity": {"critical": 0, "major": 2, "minor": 2, "nit": 1},
-  "payload_path": "/tmp/<agent>-review-pr<番号>-payload.json",
-  "error": null
-}
-```
-
-投稿失敗時は `status: "failed"`、`error` にエラーメッセージを入れ、`payload_path` に
-payload を残す（メイン側のフォールバック投稿で使う）。
-
-### `event` と `posted_as` の使い分け
-
-- `event` — **AI 本来の判定 (intent)**。ループ収束判定（`/ndf:cross-review`）はこれを見る
-- `posted_as` — **GitHub に実際投稿した event**。既定は `event` と同じ値
-
-GitHub は **自分の PR には `REQUEST_CHANGES` で投稿できない**
-（`HTTP 422: Can not request changes on your own pull request`）。自分の PR をレビュー
-する場合は次のダウングレードを行う。
-
-- `event = "REQUEST_CHANGES"` のままにしておく（intent 保持）
-- ペイロードの `event` だけ `"COMMENT"` にして投稿
-- `posted_as = "COMMENT"` を結果サマリに記録
-
-判定にあたっては事前に `gh api user --jq .login` と
-`gh pr view <PR> --json author --jq .author.login` を比較する。
-
-### メイン側の検証とフォールバック
-
-メインエージェントの責務は **結果サマリの読み込みと検証のみ**。
+集める・判定する・投稿するはスクリプトが行い、LLM はレビューだけを行う。`$R` の決め方は
+`development-workflow/references/scripts-lookup.md`。`status` が `stopped` なら `summary` と `items` を
+報告して止まる。
 
 ```bash
-AGENT=codex   # or agy
-RESULT=/tmp/$AGENT-review-pr$PR-result.json
-
-if [ ! -s "$RESULT" ]; then
-  echo "❌ $AGENT: 結果サマリ未生成。完了検知 or プロンプト指示に問題あり" >&2
-  exit 1
-fi
-
-if [ "$(jq -r '.status' "$RESULT")" = "failed" ]; then
-  echo "⚠️ $AGENT: 投稿失敗。payload からメインがフォールバック投稿します" >&2
-  PAYLOAD=$(jq -r '.payload_path' "$RESULT")
-  OWNER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
-  SHA=$(gh pr view "$PR" --json headRefOid -q .headRefOid)
-  jq --arg sha "$SHA" '.commit_id = $sha' "$PAYLOAD" > /tmp/review-fallback.json
-  gh api -X POST "repos/$OWNER_REPO/pulls/$PR/reviews" --input /tmp/review-fallback.json
-fi
+PRR=$(bash "$R/scripts/resolve.sh" scripts pr-review) || exit 3
 ```
 
-**Claude 自身による追加判定は行わず**、外部 AI の判定（`event`）と指摘内容をそのまま採用する。
+Claude 自身がレビューする（第二引数なし）:
+
+1. `python3 "$PRR/pr-review-steps.py" collect [<PR番号> | --branch] [--focus AREA]` で対象・差分・未解決のスレッドを文脈ファイル（`metrics.context`）に集める
+2. 文脈ファイルと差分を読み、「観点」で第 1 段 → 第 2 段の順に見る。第 1 段で満たさない項目が出たら、第 2 段は同じ箇所を直すときに一緒に直すものだけに絞る。未解決のスレッドと同じ趣旨の指摘は出さない。指摘は文脈ファイルの「指摘ファイルの書き方」に従い `metrics.findings` へ書く。重要度の高いものから並べ、良い点は列挙しない
+3. `python3 "$PRR/pr-review-steps.py" finish --findings <metrics.findings> (--pr <番号> | --branch)` で判定して投稿する。判定は指摘から決まる（`critical` / `major` / `spec` があれば `REQUEST_CHANGES`、`minor` / `nit` だけなら `COMMENT`、0 件なら `APPROVE`）。自分の PR は `COMMENT` で送られ、本来の判定は `metrics.intent` に残る。`--branch` は投稿せず `metrics.report` に報告を書く
+
+外部 AI への委譲（第二引数 `codex` / `agy`）は `python3 "$PRR/pr-review-steps.py" delegate <codex|agy> [<PR番号> | --branch] [--focus AREA]`
+の 1 回で、集める → 「観点」と文脈ファイルからプロンプトを組む → `external-ai.py run --phase review` で上限つきで待つ →
+判定して投稿する、を行う。外部 AI は指摘ファイルを書くだけで投稿しない。上限越え・結果なし・読めない指摘ファイルでは
+投稿せず非 0 で終わる。**Claude 自身による追加判定は行わず**、外部 AI の指摘と判定をそのまま採用する。
 
 ## 作業完了報告（必須）
 
-PR モードではレビュー結果が **PR 上に投稿済み** であることが前提。報告は以下に絞る。
-
-- 利用エージェント（claude / codex / agy）
-- 投稿結果（review URL、event）
-- 件数サマリ（インラインコメント数、重要度別内訳）
-- 総評の要約 / PR URL
-
-詳細な指摘内容は PR 上のインラインコメントに残っているため、報告では繰り返さない。
-`--branch` モードでは投稿先がないため、上記「報告」の書式でセッション上に出力する。
+結果の JSON から、利用エージェント（claude / codex / agy）・`metrics.review_url`・`metrics.intent` と `metrics.posted_as`・
+`metrics.by_severity`・総評の要約と PR URL を報告する。指摘の中身は PR 上にあるため繰り返さない。
+`--branch` では `metrics.report` の報告をセッション上に出す。レビュー結果は提案であり、最終判断は開発者が行う。
 
 この工程に入ったら進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "実装レビュー"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「進捗記録」を使う）。
 
@@ -427,5 +153,5 @@ PR モードではレビュー結果が **PR 上に投稿済み** であるこ�
 
 - `/ndf:fix` — レビュー指摘の分類と修正対応
 - `/ndf:cross-review` — codex + agy の収束レビュー
-- `/ndf:external-ai` — Codex / agy CLI の呼び出し手順（起動の約束の正本）
+- `/ndf:external-ai` — 外部 CLI の起動と上限つきの待ち
 - `/ndf:logging-guidelines` — ログ設計

@@ -1,0 +1,410 @@
+#!/usr/bin/env python3
+"""pr-review-steps.py: `/ndf:pr-review` の手順のうち、判断の要らない収集・判定・投稿を行う（#860）。
+
+    pr-review-steps.py collect  [<PR番号>] [--branch] [--focus AREA] [--out-dir D] [--repo R]
+    pr-review-steps.py finish   --findings F (--pr N | --branch) [--reviewer NAME] [--out-dir D] [--repo R]
+    pr-review-steps.py delegate <codex|agy> [<PR番号>] [--branch] [--focus AREA] [--out-dir D] [--repo R]
+                                [--timeout 秒]
+
+collect   レビューの対象を集め、レビューの文脈ファイル `<D>/context.md` を書く。PR モードは
+          `gh_parts.py pr-info --with diff,threads`、`--branch` は `repo.existing_base_branch` で起点を決めて
+          `git diff` / `git log` を集める。前回の指摘ファイル `<D>/findings.json` を消す
+finish    指摘ファイルを検査し（重要度・段）、本来の判定を決める。PR モードは `payload.json` と `result.json`
+          を書いて `gh_parts.py review-post --round 0 --seat pr-review-<レビューする者>` を 1 回呼ぶ。
+          `--branch` は投稿せず `<D>/report.md` を書く
+delegate  collect → 観点（SKILL.md の `## 観点`）と文脈ファイルからプロンプトを組む →
+          `external-ai.py run <CLI> --phase review`（上限つきの待ち）→ finish を 1 回で行う。
+          上限越え・結果なし・読めない指摘ファイルのときは投稿しない
+
+結果は 1 行の JSON（形は `scripts/lib/README.md`。`tool` は `pr-review`）。読み手は `status` を見る。
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+SKILL_MD = HERE.parent / "SKILL.md"
+PLUGIN_ROOT = HERE.parents[2]
+LIB = PLUGIN_ROOT / "scripts" / "lib"
+sys.path[:0] = [str(LIB), str(HERE)]
+import gh_call  # noqa: E402
+import gh_sections  # noqa: E402
+import repo as repo_lib  # noqa: E402
+from pr_review_findings import (  # noqa: E402, F401
+    branch_report,
+    build_payload,
+    check_findings,
+    decide_event,
+    load_findings,
+)
+from pr_review_context import _pr_sections  # noqa: E402
+from step_result import (  # noqa: E402
+    EXIT_PRECONDITION,
+    EXIT_UNREADABLE,
+    EXIT_VIOLATION,
+    StepError,
+    emit,
+    git,
+    git_root,
+    main_with,
+    result,
+)
+
+TOOL = "pr-review"
+GH_PARTS = LIB / "gh_parts.py"
+EXTERNAL_AI = PLUGIN_ROOT / "skills" / "external-ai" / "scripts" / "external-ai.py"
+DELEGATES = ("codex", "agy")
+PERSPECTIVE_HEADING = "## 観点"
+TARGET_FILE = "target.json"  # collect が書き finish が読む、レビューした PR と head の SHA
+DIFF_FILE = re.compile(r"^diff --git a/.+? b/(.+)$", re.MULTILINE)
+
+FINDINGS_GUIDE = """## 指摘ファイルの書き方
+
+指摘の全件と総評を `{path}` へ JSON で書く。**投稿しない**（判定と投稿はスクリプトが行う）。指摘が無ければ `comments` を空の配列にする。
+
+```json
+{{
+  "summary": "総評（設計・横断の所見だけ。個別の指摘を繰り返さない）",
+  "comments": [
+    {{"path": "src/foo.py", "line": 42, "severity": "major", "stage": "quality",
+     "category": "可読性", "body": "70 行の関数。〇〇 と △△ に分ける"}},
+    {{"severity": "major", "stage": "spec", "category": "受け入れ条件",
+     "body": "受け入れ条件 4 の並び順を満たすテストが無い"}}
+  ]
+}}
+```
+
+| 鍵 | 必須 | 規則 |
+| --- | --- | --- |
+| `summary` | 任意 | 文字列 |
+| `comments[].severity` | 必須 | `critical` / `major` / `minor` / `nit` のどれか |
+| `comments[].stage` | 任意 | 第 1 段（仕様適合）を満たさない指摘は `spec`、第 2 段は `quality`。省けば `quality` |
+| `comments[].category` | 任意 | 分類。本文の先頭に `[重要度 / 分類]` として付く |
+| `comments[].path` / `line` | 任意 | 差分に現れるファイルと、差分に含まれる行（追加行・コンテキスト行）。行を指せない指摘は省く（総評へ回る） |
+| `comments[].body` | 必須 | 空でない文字列。問題と直し方 |
+"""
+
+DELEGATE_RULES = """# レビューの依頼
+
+あなたはこの変更のレビューする者である。次を守る。
+
+- **投稿しない。** GitHub と git へ書かない（`gh api` / `gh pr review` / `gh pr comment` / `git commit` / `git push` を打たない）
+- **リポジトリのファイルを編集しない。** 書いてよいのは下の「指摘ファイルの書き方」が指すファイルだけ
+- 観点の第 1 段（仕様適合）→ 第 2 段（コード品質）の順に見る
+- 最後に指摘ファイルを書いて終える
+"""
+
+
+# ---------------- 子のプロセス ----------------
+
+
+def _child(argv: list[str], cwd: Path | None = None) -> tuple[dict, int]:
+    """`step_result` の 1 行を出すスクリプトを argv の配列で起動し、`(結果, 終了コード)` を返す。"""
+    p = subprocess.run([sys.executable, *map(str, argv)], cwd=cwd, capture_output=True, text=True)
+    lines = [ln for ln in p.stdout.splitlines() if ln.strip()]
+    try:
+        obj = json.loads(lines[-1]) if lines else None
+    except ValueError:
+        obj = None
+    if not isinstance(obj, dict):
+        why = (p.stderr.strip() or p.stdout.strip())[-300:]
+        return {"status": "stopped", "summary": f"{Path(str(argv[0])).name} の結果を読めない: {why}", "items": [], "metrics": {}}, (
+            p.returncode or EXIT_UNREADABLE
+        )
+    return obj, p.returncode
+
+
+# ---------------- collect ----------------
+
+
+def _out_slug(repo: str | None, root: Path | None) -> str:
+    return repo_lib.slug(repo or (repo_lib.owner_repo(root) if root else None) or gh_call.resolve_repo(None)) or "local"
+
+
+def out_dir(a, pr: int | None, branch: str | None, root: Path | None) -> Path:
+    if a.out_dir:
+        d = Path(a.out_dir)
+    else:
+        tail = f"pr{pr}" if pr is not None else "branch-" + (branch or "HEAD").replace("/", "-")
+        d = Path(tempfile.gettempdir()) / "ndf" / "pr-review" / f"{_out_slug(a.repo, root)}-{tail}"
+    d.mkdir(parents=True, exist_ok=True)
+    return d.resolve()
+
+
+def pr_of_current_branch(root: Path, repo: str | None) -> int:
+    """今のブランチを head とする開いた PR（決定 14）。無ければ 3。"""
+    branch = git(root, "rev-parse", "--abbrev-ref", "HEAD", check=False).stdout.strip()
+    args = ["pr", "view", *([branch, "--repo", repo] if repo else []), "--json", "number,state"]
+    r = gh_call.gh(args, cwd=str(root))
+    try:
+        d = json.loads(r.stdout) if r.returncode == 0 else {}
+    except ValueError:
+        d = {}
+    if not isinstance(d, dict) or str(d.get("state") or "").upper() != "OPEN" or not d.get("number"):
+        raise StepError(f"今のブランチ {branch or '(不明)'} に開いた PR が無い（PR 番号を渡す）", EXIT_PRECONDITION)
+    return int(d["number"])
+
+
+def collect_pr(a, root: Path, pr: int) -> tuple[dict, list[str], Path]:
+    d = out_dir(a, pr, None, root)
+    argv = [GH_PARTS, "pr-info", str(pr), "--with", "diff,threads", "--out-dir", d, *(["--repo", a.repo] if a.repo else [])]
+    info, code = _child(argv, cwd=root)
+    if code != 0 or info.get("status") != "ok":
+        raise StepError(f"PR #{pr} を取得できない: {info.get('summary')}", EXIT_UNREADABLE)
+    unavailable = (info.get("metrics") or {}).get("unavailable") or []
+    if unavailable:
+        # 重複防止なしでは進めない（I7）。差分が無ければレビューできない
+        raise StepError(f"PR #{pr} の {', '.join(unavailable)} を取得できない", EXIT_UNREADABLE)
+    items = info.get("items") or []
+    meta = next((i for i in items if i.get("kind") == "pr"), {})
+    diff_path = next((i.get("path") for i in items if i.get("kind") == "diff"), None)
+    threads = [i for i in items if i.get("kind") == "thread"]
+    files = DIFF_FILE.findall(Path(diff_path).read_text(encoding="utf-8")) if diff_path else []
+    sections = _pr_sections(root, pr, meta, diff_path, files, threads)
+    metrics = {
+        "mode": "pr",
+        "pr": pr,
+        "head_sha": meta.get("head_sha"),
+        "base_branch": meta.get("base_branch"),
+        "changed_files": len(files),
+        "unresolved_threads": len(threads),
+    }
+    return metrics, sections, d
+
+
+def collect_branch(a, root: Path) -> tuple[dict, list[str], Path]:
+    base, why = repo_lib.existing_base_branch(root)
+    if base is None:
+        raise StepError(f"ベースブランチを決められない: {why}", EXIT_PRECONDITION)
+    f = git(root, "fetch", "origin", base, check=False)
+    if f.returncode != 0:
+        raise StepError(f"git fetch origin {base} が失敗: {f.stderr.strip()[:300]}", EXIT_UNREADABLE)
+    ref = f"origin/{base}"
+    # 起点は merge-base。origin/<base> と 2 点で比べると、分岐の後に起点へ入った変更が「消した変更」として混ざる
+    mb = git(root, "merge-base", ref, "HEAD", check=False)
+    fork = mb.stdout.strip()
+    if mb.returncode != 0 or not fork:
+        raise StepError(f"{ref} と HEAD の merge-base を決められない: {mb.stderr.strip()[:300]}", EXIT_UNREADABLE)
+    branch = git(root, "rev-parse", "--abbrev-ref", "HEAD", check=False).stdout.strip()
+    d = out_dir(a, None, branch, root)
+    names = git(root, "diff", fork, "--name-only").stdout.strip()
+    stat = git(root, "diff", fork, "--stat").stdout.rstrip()
+    log = git(root, "log", f"{ref}..HEAD", "--oneline").stdout.rstrip()
+    diff_path = d / "branch.diff"
+    diff_path.write_text(git(root, "diff", fork).stdout, encoding="utf-8")
+    files = [n for n in names.splitlines() if n.strip()]
+    sections = [
+        f"## 対象\n\n- ブランチ: {branch}\n- ベースブランチ: `{ref}`（{why}）\n- 差分の起点: merge-base `{fork[:12]}`\n- 作業ディレクトリ: {root}",
+        "## 受け入れ条件の在りか\n\n`issues/` の実装計画か要求のコピーから取る。見つからなければ「受け入れ条件が見つからない」と書き、推測で埋めない。",
+        f"## 差分\n\n- 差分のファイル: `{diff_path}`\n\n変更ファイル:\n\n```text\n{names}\n```\n\n統計:\n\n```text\n{stat}\n```\n\n"
+        f"コミット履歴:\n\n```text\n{log}\n```",
+    ]
+    metrics = {"mode": "branch", "pr": None, "head_sha": None, "base_branch": base, "changed_files": len(files), "unresolved_threads": None}
+    return metrics, sections, d
+
+
+def collect(a) -> tuple[dict, Path]:
+    """E1〜E4。文脈ファイルを書き、`metrics` と出力の置き場を返す。"""
+    if a.branch and a.pr is not None:
+        raise StepError("PR 番号と --branch は同時に渡さない", EXIT_UNREADABLE)
+    root = git_root(None, "git の作業ツリーの中で呼ぶ")
+    if a.branch:
+        metrics, sections, d = collect_branch(a, root)
+    else:
+        pr = a.pr if a.pr is not None else pr_of_current_branch(root, a.repo)
+        metrics, sections, d = collect_pr(a, root, pr)
+    findings = d / "findings.json"
+    findings.unlink(missing_ok=True)  # 前回の指摘を今回のものとして投稿しない
+    # レビューした commit を finish まで固定する（収集と投稿の間の push で、指摘が未レビューの commit に付かない）
+    (d / TARGET_FILE).write_text(json.dumps({"pr": metrics["pr"], "head_sha": metrics["head_sha"]}) + "\n", encoding="utf-8")
+    if a.focus:
+        sections.append(f"## 重点\n\n`{a.focus}`。該当する観点を優先し、他の観点は重大なものだけを指摘する。")
+    sections.append(FINDINGS_GUIDE.format(path=findings))
+    context = d / "context.md"
+    context.write_text("# レビューの文脈\n\n" + "\n\n".join(s.rstrip() for s in sections) + "\n", encoding="utf-8")
+    return {**metrics, "context": str(context), "findings": str(findings), "root": str(root)}, d
+
+
+def cmd_collect(a) -> None:
+    metrics, _ = collect(a)
+    target = f"PR #{metrics['pr']}" if metrics["pr"] is not None else f"ブランチ（起点 origin/{metrics['base_branch']}）"
+    emit(result(TOOL, "ok", f"{target} の文脈ファイルを書いた: {metrics['context']}", metrics=metrics), 0)
+
+
+# ---------------- finish ----------------
+
+
+def _finish_branch(data: dict, verdict: dict, metrics: dict, d: Path) -> "NoReturn":  # noqa: F821
+    """`--branch` の経路。報告を書き、投稿せずに終える。"""
+    report = d / "report.md"
+    report.write_text(branch_report(data, verdict), encoding="utf-8")
+    emit(result(TOOL, "ok", f"本来の判定 {verdict['intent']}（投稿しない）: {report}", metrics={**metrics, "report": str(report)}), 0)
+
+
+def _collected_head(d: Path, pr: int) -> str | None:
+    """collect が固定した head の SHA。同じ PR の収集が無ければ `None`（`review-post` が今の head を使う）。"""
+    try:
+        target = json.loads((d / TARGET_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(target, dict) or target.get("pr") != pr:
+        return None
+    sha = target.get("head_sha")
+    return sha if isinstance(sha, str) and sha else None
+
+
+def _post_review(data: dict, verdict: dict, metrics: dict, pr: int, reviewer: str, d: Path, repo: str | None) -> "NoReturn":  # noqa: F821
+    """PR の経路。payload と result を書き、`review-post` で投稿して終える。"""
+    payload, res = d / "payload.json", d / "result.json"
+    payload.write_text(json.dumps(build_payload(data), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    res.write_text(
+        json.dumps({"event": verdict["intent"], "by_severity": verdict["by_severity"]}, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    argv = [
+        GH_PARTS,
+        "review-post",
+        "--payload",
+        payload,
+        "--result",
+        res,
+        "--pr",
+        str(pr),
+        "--round",
+        "0",
+        "--seat",
+        f"pr-review-{reviewer}",
+    ]
+    head_sha = _collected_head(d, pr)
+    argv += ["--head-sha", head_sha] if head_sha else []
+    posted, code = _child([*argv, *(["--repo", repo] if repo else [])])
+    items = [i for i in posted.get("items") or [] if isinstance(i, dict)]
+    review = next((i for i in items if i.get("kind") == "review"), {})
+    metrics.update(
+        {"posted_as": review.get("posted_as"), "review_url": review.get("review_url"), "payload": str(payload), "head_sha": head_sha}
+    )
+    if code != 0:
+        emit(result(TOOL, "stopped", f"投稿できない（指摘ファイルと payload を残した）: {posted.get('summary')}", items, metrics), code)
+    emit(result(TOOL, "ok", f"PR #{pr} へ {review.get('posted_as')} で投稿した（本来の判定 {verdict['intent']}）", items, metrics), 0)
+
+
+def finish_review(findings: Path, pr: int | None, reviewer: str, d: Path, repo: str | None) -> None:
+    """E8〜E9。指摘ファイルを検査し、本来の判定を決め、PR なら投稿し `--branch` なら報告を書く。"""
+    data, errs = load_findings(findings)
+    if data is None:
+        emit(
+            result(
+                TOOL,
+                "stopped",
+                f"指摘ファイルを読めない（投稿しない）: {errs[0]}",
+                [{"kind": "finding", "name": e, "result": "invalid"} for e in errs],
+            ),
+            EXIT_UNREADABLE,
+        )
+    verdict = decide_event(data["comments"])
+    metrics = {**verdict, "findings": len(data["comments"]), "reviewer": reviewer}
+    if pr is None:
+        _finish_branch(data, verdict, metrics, d)
+    _post_review(data, verdict, metrics, pr, reviewer, d, repo)
+
+
+def cmd_finish(a) -> None:
+    d = Path(a.out_dir) if a.out_dir else Path(a.findings).resolve().parent  # 既定は指摘ファイルの隣（collect の置き場）
+    d.mkdir(parents=True, exist_ok=True)
+    finish_review(Path(a.findings), None if a.branch else a.pr, a.reviewer, d, a.repo)
+
+
+# ---------------- delegate ----------------
+
+
+def perspectives() -> str:
+    """観点の正本（SKILL.md の `## 観点`）。写しを持たない（決定 6）。"""
+    text = gh_sections.get_section(SKILL_MD.read_text(encoding="utf-8"), PERSPECTIVE_HEADING)
+    if not text:
+        raise StepError(f"{SKILL_MD} に `{PERSPECTIVE_HEADING}` の節が無い", EXIT_UNREADABLE)
+    return text
+
+
+def delegate_prompt(context: str) -> str:
+    return f"{DELEGATE_RULES}\n{PERSPECTIVE_HEADING}\n\n{perspectives().strip()}\n\n{context.strip()}\n"
+
+
+def cmd_delegate(a) -> None:
+    metrics, d = collect(a)
+    prompt = d / "prompt.md"
+    prompt.write_text(delegate_prompt(Path(metrics["context"]).read_text(encoding="utf-8")), encoding="utf-8")
+    findings = Path(metrics["findings"])
+    argv = [
+        EXTERNAL_AI,
+        "run",
+        a.cli,
+        "--phase",
+        "review",
+        "--prompt-file",
+        prompt,
+        "--output-file",
+        findings,
+        "--workdir",
+        metrics["root"],
+    ]
+    argv += [*(["--timeout", str(a.timeout)] if a.timeout else []), *(["--poll", str(a.poll)] if a.poll else [])]
+    ran, _ = _child(argv)
+    rm = ran.get("metrics") or {}
+    if rm.get("outcome") != "ok":
+        item = {"kind": "cli", "name": a.cli, "result": str(rm.get("outcome") or "unknown"), "reason": str(rm.get("reason") or "")}
+        emit(
+            result(TOOL, "stopped", f"{a.cli} の指摘ファイルを回収できない（投稿しない）: {ran.get('summary')}", [item], metrics),
+            EXIT_VIOLATION,
+        )
+    finish_review(findings, metrics["pr"], a.cli, d, a.repo)
+
+
+# ---------------- CLI ----------------
+
+
+def _target_args(sp: argparse.ArgumentParser) -> None:
+    sp.add_argument("pr", nargs="?", type=int)
+    sp.add_argument("--branch", action="store_true", help="PR ではなく今のブランチの差分")
+    sp.add_argument("--focus", default="", help="重点の観点")
+    sp.add_argument("--out-dir")
+    sp.add_argument("--repo")
+
+
+def steps_parser() -> argparse.ArgumentParser:
+    ap = argparse.ArgumentParser(prog="pr-review-steps.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sp = sub.add_parser("collect", help="対象を集めて文脈ファイルを書く")
+    _target_args(sp)
+    sp.set_defaults(func=cmd_collect)
+    sp = sub.add_parser("finish", help="指摘ファイルから判定し、投稿か報告をする")
+    sp.add_argument("--findings", required=True)
+    target = sp.add_mutually_exclusive_group(required=True)
+    target.add_argument("--pr", type=int)
+    target.add_argument("--branch", action="store_true")
+    sp.add_argument("--reviewer", default="host", help="席の名前に入れるレビューする者（host / codex / agy）")
+    sp.add_argument("--out-dir")
+    sp.add_argument("--repo")
+    sp.set_defaults(func=cmd_finish)
+    sp = sub.add_parser("delegate", help="外部 AI にレビューさせて投稿する")
+    sp.add_argument("cli", choices=DELEGATES)
+    _target_args(sp)
+    sp.add_argument("--timeout", type=int, help="external-ai.py run の上限（秒）。既定は工程 review の値")
+    sp.add_argument("--poll", type=int, help="監視の周期（秒）。既定は external-ai.py の値")
+    sp.set_defaults(func=cmd_delegate)
+    return ap
+
+
+def main(argv: list[str] | None = None) -> None:
+    os.environ.setdefault("GIT_TERMINAL_PROMPT", "0")
+    main_with(steps_parser(), lambda _a: TOOL, argv)
+
+
+if __name__ == "__main__":
+    main()

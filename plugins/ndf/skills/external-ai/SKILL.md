@@ -28,7 +28,7 @@ description: "Delegate coding, review, or research to the codex, agy, kiro-cli, 
 ## NDF との関係
 
 - Claude Code 版の `corder` エージェントは Codex CLI を呼び出す
-- `/ndf:pr-review <PR番号> codex` / `/ndf:pr-review <PR番号> agy` の委譲先として利用される
+- `/ndf:pr-review <PR番号> codex` / `agy` は `pr-review-steps.py delegate` が `external-ai.py run --phase review` で起動する。外部 AI は指摘ファイルを書くだけで、投稿は `pr-review-steps.py` が行う
 - `/ndf:cross-review` は codex / agy を**並列に起動**して両者の APPROVE 収束を待つ
 - v4.0.0 で Codex MCP サーバは廃止。`mcp__codex__*` ツールは存在しない
 - agy 専用エージェントは未整備。委譲時はメインエージェントから本スキルを参照して直接 CLI を起動する
@@ -231,6 +231,6 @@ CLI 固有の症状（サンドボックス失敗、承認モードによるハ�
 - [references/cli-claude.md](references/cli-claude.md) — `claude -p` 固有の手順
 - `/ndf:cross-review` — codex / agy 両方を並列起動して APPROVE 収束まで回す
 - `/ndf:cross-refactoring` — 4 CLI を役割ごとに分担させ、リファクタリングを収束させる
-- `/ndf:pr-review` — 第二引数に `codex` / `agy` を指定すると本スキルの手順へ委譲する
+- `/ndf:pr-review` — 第二引数に `codex` / `agy` を指定すると、`pr-review-steps.py delegate` が本スキルの `run --phase review` を呼ぶ
 - Claude Code 版 `corder` エージェント — 本スキルの手順で Codex CLI を呼び出す独立レビュー担当
 - 他の AI CLI（`claude`, `ollama` 等）も同じパターンで利用できる

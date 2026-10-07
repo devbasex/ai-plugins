@@ -1,10 +1,7 @@
 # 起票先を決める
 
-**「起票する」を選んだときだけ読む。** 範囲内へ入れる場合と起票しない場合には、起票先が
-要らない。
-
-NDF を使う開発では、関わるリポジトリが 2 つになることがある。**どちらへ起票するかは、
-課題の性質が決める。** 見つけた場所は決め手にならない。
+**「起票する」を選んだときだけ読む。** NDF を使う開発では、関わるリポジトリが 2 つになることがある。
+**どちらへ起票するかは課題の性質が決める。** 見つけた場所は決め手にならない。
 
 ## 用語
 
@@ -12,10 +9,9 @@ NDF を使う開発では、関わるリポジトリが 2 つになることが�
 | --- | --- |
 | 上流リポジトリ | NDF の Skill・エージェント・hook の実体を持つリポジトリ |
 | 開発対象リポジトリ | NDF を使って開発している側のリポジトリ。`gh repo view` が返すもの |
-| 起票先 | `gh issue create` が issue を作るリポジトリ |
+| 起票先 | `issue-file.py create` が課題を作るリポジトリ |
 
-**1 つのリポジトリで開発していて、上流リポジトリを別に持たない場合はこの判断が要らない。**
-そのままそのリポジトリへ起票する。
+`resolve-target` の `metrics.same` が真なら、2 つは同じリポジトリでこの判断は要らない。
 
 ## 判断表
 
@@ -29,117 +25,17 @@ NDF を使う開発では、関わるリポジトリが 2 つになることが�
 次の利用者が同じ場所で止まる。逆に、開発対象の設定の誤りを上流リポジトリへ起票しても、上流リポジトリには
 直す対象が無い。
 
-## 起票先のリポジトリを決める
+## 上流リポジトリの名前
 
-上流リポジトリの名前を、3 つの手順で解決する。**上から順に見て、決まった時点で止める。**
-
-| 手順 | 何を見るか | 決まらないとき |
-| --- | --- | --- |
-| 1 | 環境変数 `NDF_SKILL_REPO`（`<所有者>/<リポジトリ>` の形） | 手順 2 へ |
-| 2 | `plugins/ndf/` を持つ取得元の clone の `remote.origin.url`。1 つに絞れたときだけ採る | 手順 3 へ |
-| 3 | 利用者に聞く | 推測で `--repo` を渡さず止まる |
-
-手順 2 の位置はランタイムで違う。
-
-| ランタイム | 取得元の clone の位置 |
-| --- | --- |
-| Claude Code | `~/.claude/plugins/marketplaces/<取得元>` |
-| Codex | `~/.codex/.tmp/marketplaces/<取得元>` |
-| Kiro / agy | clone した作業ディレクトリ |
-
-**取得元は 1 つとは限らない。** この位置には登録したすべての取得元の clone が並ぶ。
-
-```console
-$ ls -d ~/.claude/plugins/marketplaces/*/
-/home/ubuntu/.claude/plugins/marketplaces/ai-plugins/
-/home/ubuntu/.claude/plugins/marketplaces/anthropic-agent-skills/
-/home/ubuntu/.claude/plugins/marketplaces/claude-plugins-official/
-```
-
-**先頭から見て最初の GitHub の取得元を採ると、上流リポジトリと別のリポジトリが決まることがある。** 上の例で
-`anthropic-agent-skills` は `https://github.com/anthropics/skills.git` を指しており、条件を
-GitHub の取得元であることだけに置くと候補になる。並びは名前順であって、上流リポジトリが先に来る
-保証は無い。
-
-**NDF の実体を持つ clone だけを候補にする。** `plugins/ndf/` があることが、その clone が
-NDF の上流リポジトリであることの直接の証拠になる。取得元の名前や `marketplace.json` の `name` は、
-fork や登録名の変更で変わるうえ、同じ名前を別の取得元が名乗れる。
-
-**取得元を持たないランタイムでは、現在地の clone が候補になる。** Kiro と agy は clone した
-作業ディレクトリから導入するため、決まった置き場所が無い。**現在地は clone の根とは限らない**
-ため、`git rev-parse --show-toplevel` で根へ戻してから見る。
-
-**現在地にも同じ絞り込みを掛ける。** いま開いているリポジトリが上流リポジトリとは限らない。無条件に
-採ると、開発対象リポジトリが上流リポジトリとして決まる。
-
-```bash
-SKILL_REPO="${NDF_SKILL_REPO:-}"                                  # 手順 1
-
-if [ -z "$SKILL_REPO" ]; then                                     # 手順 2
-  found=""
-  candidates=(~/.claude/plugins/marketplaces/*/ ~/.codex/.tmp/marketplaces/*/)
-  here="$(git rev-parse --show-toplevel 2>/dev/null || true)"     # Kiro / agy は現在地の clone
-  if [ -n "$here" ]; then candidates+=("$here"); fi
-
-  for clone in "${candidates[@]}"; do
-    [ -d "$clone/plugins/ndf" ] || continue                       # NDF の実体を持つ clone だけを見る
-    url="$(git -C "$clone" config --get remote.origin.url 2>/dev/null || true)"
-    case "$url" in
-      *github.com[:/]*) found="$found${url%.git}
-" ;;
-    esac
-  done
-  found="$(printf '%s' "$found" | sed 's#.*github.com[:/]##' | sort -u)"
-  if [ "$(printf '%s' "$found" | grep -c .)" = 1 ]; then          # 1 つに絞れたときだけ採る
-    SKILL_REPO="$found"
-  fi
-fi
-```
-
-**絞っても複数残るときは手順 3 へ倒す。** fork と本家を両方登録した利用者では、どちらも
-`plugins/ndf/` を持つ。同じ名前が 2 つの取得元から出たときも、`sort -u` が 1 つにまとめる。
-
-**版ごとの配置からは読めない。** `~/.claude/plugins/cache/<取得元>/<名前>/<版>/` には `.git`
-が無く、git の作業ディレクトリとして扱えない。
-
-**手順 3 に達したら止まる。** 推測で `--repo` を渡すと、別のリポジトリへ issue が作られる。
-作った側からは成功したように見えるため、読む人のいない場所に残ったことに気づけない。
-
-手順 1 と手順 2 で決まった場合も、起票の前の提示に起票先を含める。取得元を分けた利用者や
-fork した利用者では、解決した名前が実際の上流リポジトリと違うことがある。
-
-## 重複の確認と起票
-
-**決めた起票先に対して行う。** `--repo` を省くと、いま作業しているリポジトリへ向かう。
-
-```bash
-ISSUE_REPO="$SKILL_REPO"                                          # 判断表で決めたほう
-
-gh issue list --repo "$ISSUE_REPO" --state open --search "<課題を表す語 2〜3 個>"
-gh issue create --repo "$ISSUE_REPO" --title "<何が起きるか>" --body-file <本文のファイル>
-```
-
-閉じるときも同じ形で渡す。
-
-```bash
-gh issue close <番号> --repo "$ISSUE_REPO"
-```
-
-`<所有者>/<リポジトリ>#<番号>` の表記は本文の中で相手を指すためのもので、`gh issue close`
-の引数としては受け付けられない。
+解決は `issue-file.py resolve-target` が行う。見る場所とその理由はスクリプトの冒頭の説明にある。
+**20 が返ったら推測せず、`items` の候補を示して利用者に聞く。** 0 で決まったときも、起票の前の提示に起票先を含める
+（fork した利用者では、解決した名前が実際の上流リポジトリと違うことがある）。
 
 ## 両方にまたがる課題
 
 **上流リポジトリを先に起票する。** 番号が先に決まれば、開発対象リポジトリの本文へその番号を書ける。
 逆順にすると、どちらの本文にも相手の番号が無い状態が一度できる。
 
-1. 上流リポジトリへ起票する
-2. 開発対象リポジトリへ起票し、本文の「由来」へ上流リポジトリの番号を `<所有者>/<リポジトリ>#<番号>` の形で書く
-3. 上流リポジトリの issue へ、開発対象リポジトリの番号をコメントで足す
-
-```bash
-gh issue comment <上流リポジトリの番号> --repo "$SKILL_REPO" \
-  --body "開発対象の側は <所有者>/<リポジトリ>#<番号> として残した。"
-```
-
-**2 件を同時に作って後から両方を編集しない。** 編集を忘れると、相互の参照が片方だけ残る。
+1. 上流リポジトリへ `create` で起票する
+2. 開発対象リポジトリへ `create --counterpart <上流の所有者>/<リポジトリ>#<番号>` で起票する（由来の節へ上流の番号が入る）
+3. 2 の結果の `next` にある `note --counterpart` を打ち、上流の課題へ開発対象の番号を足す

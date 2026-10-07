@@ -106,6 +106,7 @@ EXCLUSIONS: dict[str, str] = {
     "supervise.py は .ndf/supervise.json の release.form が package-plugin のときだけ呼ぶ",
     "plugins/ndf/scripts/release-verification-steps.py": "配布の形が package-plugin のときの導入の確かめ（ランタイムごとの導入の経路）。形で分岐済み",
     "plugins/ndf/scripts/lib/step_result.py": "release-steps.py が使うプラグインの置き場（plugin_dir）。package-plugin の形の中だけで使う",
+    "plugins/ndf/scripts/issue-file.py": "上流リポジトリ（NDF の実体を持つ clone）を plugins/ndf/ で見分ける部品。対象リポジトリを指していない",
     "plugins/ndf/scripts/worktree-setup.sh": "NDF 自身の宣言の形（worktree.schema.json）の URL。対象リポジトリを指していない",
     "plugins/ndf/scripts/project_lib/model.py": "NDF 自身の宣言の形（project.schema.json）の URL。対象リポジトリを指していない",
 }
@@ -159,17 +160,21 @@ def load_manifest_union(skills_dir: pathlib.Path) -> set[str]:
     return names
 
 
-def collect_documents(skills_dir: pathlib.Path) -> tuple[list[str], list[str]]:
+def collect_documents(skills_dir: pathlib.Path, names: set[str] | None = None) -> tuple[list[str], list[str]]:
     """走査する Markdown を、Skill ディレクトリからの相対パスで返す。
 
     第 2 の戻り値は、manifest に載っていながら走査できる本文を 1 本も持たない Skill 名で
     ある。ディレクトリが無い場合と、あっても対象の Markdown が無い場合のどちらも入る。
     **呼び出し側はこれをチェック成立不可として扱う**。読み飛ばすと、公開する Skill の本文が
     丸ごと未走査のままチェックが成功する。
+
+    `names` は読み込み済みの manifest の和集合。省くとここで読む。
     """
+    if names is None:
+        names = load_manifest_union(skills_dir)
     docs: list[str] = []
     unscanned: list[str] = []
-    for name in sorted(load_manifest_union(skills_dir)):
+    for name in sorted(names):
         root = skills_dir / name
         found = 0
         if root.is_dir():
@@ -252,6 +257,45 @@ def resolve_skills_dirs(given: list[str] | None) -> list[pathlib.Path]:
     return found
 
 
+def load_exclusions(path: str) -> tuple[dict[str, str] | None, str | None]:
+    """`--exclusions` の JSON を読む。読めないか形が違えば (None, 理由) を返す。"""
+    try:
+        loaded = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        return None, f"除外の宣言を読めない: {e}"
+    if not isinstance(loaded, dict):
+        return None, "除外の宣言は {相対パス: 理由} の対で書く"
+    return loaded, None
+
+
+def scan_family(skills_dir: pathlib.Path) -> tuple[set[str], list[Hit], str, list[pathlib.Path]]:
+    """1 つの family の本文とスクリプトを走査し、(走査した正規形, ヒット, 報告行, 走査できない Skill) を返す。"""
+    names = load_manifest_union(skills_dir)
+    docs, missing = collect_documents(skills_dir, names)
+    unscanned = [skills_dir / name for name in missing]
+    scanned = {canon(skills_dir / rel) for rel in docs}
+    hits = scan(skills_dir, docs)
+    scripts_dir = skills_dir.parent / "scripts"
+    scripts = collect_scripts(skills_dir)
+    scanned.update(canon(scripts_dir / rel) for rel in scripts)
+    hits += scan(scripts_dir, scripts, SCRIPT_PATTERN_RE)
+    report_line = (
+        f"{skills_dir}: 公開する Skill {len(names)} 個 / Markdown {len(docs)} 本 / スクリプト {len(scripts)} 本 / ヒット {len(hits)} 行"
+    )
+    return scanned, hits, report_line, unscanned
+
+
+def print_report(report_lines: list[str], exclusions: dict[str, str], all_hits: list[Hit], excluded_keys: set[str]) -> None:
+    """`--report` の走査の規模とヒットの一覧を出す。"""
+    outside = [h for h in all_hits if h.key not in excluded_keys]
+    for line in report_lines:
+        print(line)
+    print(f"除外の宣言 {len(exclusions)} 件 / ヒット {len(all_hits)} 行 （うち除外の外 {len(outside)} 行）")
+    for h in all_hits:
+        mark = "除外" if h.key in excluded_keys else "検知"
+        print(f"  [{mark}] {h}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument(
@@ -277,13 +321,9 @@ def main() -> int:
 
     exclusions = EXCLUSIONS
     if args.exclusions is not None:
-        try:
-            loaded = json.loads(pathlib.Path(args.exclusions).read_text(encoding="utf-8"))
-        except (OSError, ValueError) as e:
-            print(f"[check-skill-repo-assumptions] 除外の宣言を読めない: {e}", file=sys.stderr)
-            return 2
-        if not isinstance(loaded, dict):
-            print("[check-skill-repo-assumptions] 除外の宣言は {相対パス: 理由} の対で書く", file=sys.stderr)
+        loaded, error = load_exclusions(args.exclusions)
+        if loaded is None:
+            print(f"[check-skill-repo-assumptions] {error}", file=sys.stderr)
             return 2
         exclusions = loaded
 
@@ -292,19 +332,11 @@ def main() -> int:
     report_lines: list[str] = []
     unscanned: list[pathlib.Path] = []
     for skills_dir in skills_dirs:
-        docs, missing = collect_documents(skills_dir)
-        unscanned.extend(skills_dir / name for name in missing)
-        scanned.update(canon(skills_dir / rel) for rel in docs)
-        hits = scan(skills_dir, docs)
-        scripts_dir = skills_dir.parent / "scripts"
-        scripts = collect_scripts(skills_dir)
-        scanned.update(canon(scripts_dir / rel) for rel in scripts)
-        hits += scan(scripts_dir, scripts, SCRIPT_PATTERN_RE)
+        family_scanned, hits, report_line, family_unscanned = scan_family(skills_dir)
+        scanned |= family_scanned
         all_hits.extend(hits)
-        report_lines.append(
-            f"{skills_dir}: 公開する Skill {len(load_manifest_union(skills_dir))} 個 / "
-            f"Markdown {len(docs)} 本 / スクリプト {len(scripts)} 本 / ヒット {len(hits)} 行"
-        )
+        report_lines.append(report_line)
+        unscanned.extend(family_unscanned)
 
     # 走査の範囲が欠けたままの結果は、ヒットが 0 でも「無い」ことの根拠にならない。
     # 除外の宣言より先に見る。範囲が欠けていると、除外の実在の判定も当てにならない。
@@ -329,12 +361,7 @@ def main() -> int:
     # （rc=2）はこの手前で落としており、ヒットだけを 0 で返すと同じ実行の中で終了
     # コードの意味が 2 通りになる。README はこのコマンドをチェックの一覧として載せる。
     if args.report:
-        for line in report_lines:
-            print(line)
-        print(f"除外の宣言 {len(exclusions)} 件 / ヒット {len(all_hits)} 行 （うち除外の外 {len(outside)} 行）")
-        for h in all_hits:
-            mark = "除外" if h.key in excluded_keys else "検知"
-            print(f"  [{mark}] {h}")
+        print_report(report_lines, exclusions, all_hits, excluded_keys)
 
     if outside:
         print("[check-skill-repo-assumptions] 対象リポジトリを仮定した記述がある:", file=sys.stderr)
