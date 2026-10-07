@@ -61,5 +61,6 @@
 | [cross-refactoring-failed-item-rules.md](cross-refactoring-failed-item-rules.md) | 失敗した改善項目の扱いの規則（積み直しの衝突で衝突したコミットの項目だけを外す・取り消しの後の確かめ直し・直さなかった項目の取り消し・範囲テストの `{paths}` へ `::` より前のパスだけを渡す）の背景、決定と理由、常に成り立つ条件、状態遷移、既知の限界。手順と状態ファイルの鍵は `cross-refactoring` の `docs/04-verify-and-report.md` が正 |
 | [cross-refactoring-pr-gate-and-skip-counts.md](cross-refactoring-pr-gate-and-skip-counts.md) | cross-refactoring の init の入口で閉じた・マージ済みの Pull Request を止める判定と、見送りの件数の出どころ |
 | [cross-refactoring-test-stale-bytecode.md](cross-refactoring-test-stale-bytecode.md) | cross-refactoring のテストと製品の書き換えが同じ秒の古いバイトコードを読まない規則 |
+| [cross-refactoring-technique-intake-constraints.md](cross-refactoring-technique-intake-constraints.md) | cross-refactoring で分割・抽出・移動・改名・テストの共通化の項目が採用まで進むための取り込みの制約 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
