@@ -59,5 +59,6 @@
 | [ndf-ci-wait-superseded-failures-and-infra-wait.md](ndf-ci-wait-superseded-failures-and-infra-wait.md) | CI の待ちの数え方（同じチェックを最新の項目だけで数え古い失敗を置き換わった失敗として残すこと、新しさの規則を `lib/gh_checks.py` で共有すること、Runner の付かない取り消しを再実行・待ち直しし待ち切れなければ終了コード 75 の基盤待ちで止まること、`release --ci-wait` とプランの `on_exit` で judge と `fix` を通らずに止まること）、常に成り立つ条件、決定の理由。手順は `merged` の SKILL.md と `release` の `references/release-steps.md` が正 |
 | [cross-participant-admission-check.md](cross-participant-admission-check.md) | cross-review / cross-refactoring / external-ai の参加の確認（認証確認・最小の呼び出し・既定のモデルでの引き直しの契約、分類の順序、確認と監視が共有する致命の文言と理由 `model_unavailable` / `auth_expired`、状態ファイルの `checks` / `default_models`、起動のモデルの式）、常に成り立つ条件、決定の理由。手順と出力の読み方は `cross-review` の `docs/05-pool-and-convergence.md` と `external-ai` の SKILL.md が正 |
 | [cross-refactoring-failed-item-rules.md](cross-refactoring-failed-item-rules.md) | 失敗した改善項目の扱いの規則（積み直しの衝突で衝突したコミットの項目だけを外す・取り消しの後の確かめ直し・直さなかった項目の取り消し・範囲テストの `{paths}` へ `::` より前のパスだけを渡す）の背景、決定と理由、常に成り立つ条件、状態遷移、既知の限界。手順と状態ファイルの鍵は `cross-refactoring` の `docs/04-verify-and-report.md` が正 |
+| [cross-refactoring-pr-gate-and-skip-counts.md](cross-refactoring-pr-gate-and-skip-counts.md) | cross-refactoring の init の入口で閉じた・マージ済みの Pull Request を止める判定と、見送りの件数の出どころ |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
