@@ -105,7 +105,7 @@ PROMPT=$STEM-prompt.md
 TEMPLATE=$PROMPTS/$PHASE.md
 [ -f "$TEMPLATE" ] || { echo "プロンプト雛形がありません: $TEMPLATE" >&2; exit 1; }
 
-# 手順ごとに渡す項目。**締め切りは項目ごとの時刻で渡す**（AC12）。
+# 手順ごとに渡す項目。項目ごとの期限は渡さない（止めるのは工程の監視の上限だけ。#1743 決定 9）。
 collect_items() {
 case "$PHASE" in
   plan)
@@ -117,12 +117,12 @@ case "$PHASE" in
   add-tests)
     ITEMS_JSON=$(jq '[.items[] | select(.status == "planned" and ((.tests // []) | length) > 0)
       | {item_id: .id, path, symbol, smell, technique, tests, test_targets,
-         start_deadline: .test_start_deadline, estimate_minutes: .estimate.test}]' "$STATE")
+         estimate_minutes: .estimate.test}]' "$STATE")
     ;;
   implement)
     ITEMS_JSON=$(jq '[.items[] | select(.status == "planned" or .status == "tested")
       | {item_id: .id, rank, path, symbol, smell, technique, rationale, plan, tests,
-         start_deadline, estimate_minutes: .estimate.implement,
+         estimate_minutes: .estimate.implement,
          test_command: (if .scope_commands then (.scope_commands | map(.command) | join(" ; "))
                         else ((.command // []) | if ((.[0] // "") | type) == "array" then map(join(" ")) | join(" ; ") else join(" ") end) end)}]' "$STATE")
     ;;

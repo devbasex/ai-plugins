@@ -303,7 +303,7 @@ class Drive(AssigneeLaunch):
                 return
 
     def readopt_rounds(self) -> None:
-        """採り直しを打ち、採ったらテストの追加・実装・検証をもう 1 巡回す。入らなくなったら抜ける（#1743 決定 10）。"""
+        """採り直しを打ち、採ったらテストの追加・実装・検証をもう 1 巡回す。実装に渡す項目が無ければ実装担当を起動しない（#1743 決定 10）。"""
         i = self.v["ID"]
         for _ in range(LOOP_LIMIT):
             if self.rf("readopt", i, ok=(0, GO_FINAL))[0] == GO_FINAL:
@@ -312,7 +312,7 @@ class Drive(AssigneeLaunch):
             if self.v.get("TESTS_NEEDED") == "1":
                 self.impl_phase("add-tests")
                 go_final = self.rf("merge-tests", i, ok=(0, GO_FINAL))[0] == GO_FINAL
-            if not go_final:
+            if not go_final and any(it.get("status") in ("planned", "tested") for it in self.state().get("items") or []):
                 self.impl_phase("implement")
                 go_final = self.rf("merge-implement", i, ok=(0, GO_FINAL))[0] == GO_FINAL
             if not go_final:
