@@ -173,9 +173,9 @@ plugins/ndf/skills/out-of-scope/
 | 項目 | 内容 |
 | --- | --- |
 | 入力 | 無し。環境変数 `NDF_SKILL_REPO`・`HOME`・現在地を読む |
-| 出力（0） | `metrics`: `upstream`（`<所有者>/<リポジトリ>`）・`target`（開発対象リポジトリ）・`same`（2 つが同じか）・`source`（`env` / `clone`）。`items`: 候補ごとに `{repo, path}`（`env` のときは空） |
+| 出力（0） | `metrics`: `upstream`（`<所有者>/<リポジトリ>`）・`target`（開発対象リポジトリ。読めなければ `null`）・`same`（2 つが同じか。`target` が `null` なら `false`）・`source`（`env` / `clone`）。`items`: 候補ごとに `{repo, path}`（`env` のときは空） |
 | 出力（20） | `metrics.upstream` は `null`、`items` に見つけた候補（0 件なら空）。`next` は「候補を示して利用者に選んでもらう。推測で起票先を渡さない」 |
-| 失敗（2） | `NDF_SKILL_REPO` の形が違う。開発対象リポジトリを `gh repo view` で読めない |
+| 失敗（2） | `NDF_SKILL_REPO` の形が違う。**開発対象リポジトリを `gh repo view` で読めないことは失敗にしない**（`target: null`・`same: false` で 0 か 20。上流の解決は `gh repo view` を使わず、GitHub 以外に置いたプロジェクトや gh の認証が開発対象に届かない環境でも今の囲みの bash と同じく上流を返す） |
 | 解決の順 | 1. `NDF_SKILL_REPO` があれば上流とする。2. `~/.claude/plugins/marketplaces/*/`・`~/.codex/.tmp/marketplaces/*/`・現在地の clone の根（`git rev-parse --show-toplevel`）のうち `plugins/ndf/` を持つものの `remote.origin.url` を読み、GitHub の URL から `<所有者>/<リポジトリ>` を取り出して重複を除く。1 つなら採る |
 | 開発対象リポジトリ | `gh repo view --json nameWithOwner`（今の用語集の定義と同じ） |
 
@@ -218,8 +218,8 @@ plugins/ndf/skills/out-of-scope/
 | 項目 | 内容 |
 | --- | --- |
 | 入力 | `--origin <由来>`（1 回以上）・`--repo <リポジトリ>`（0 回以上）・`--with-upstream`（任意）。リポジトリが 1 つも決まらなければ 2 |
-| `--with-upstream` | `resolve-target` と同じ解決で上流リポジトリを足す。決まらなければ足さずに続け、`metrics.upstream` を `null` にする（止めない） |
-| 呼び出し | リポジトリ × 由来の組ごとに `gh issue list --repo <R> --state all --search '"<由来>"' --json number,title,url,state` を 1 回 |
+| `--with-upstream` | `resolve-target` と同じ解決で上流リポジトリを足す。決まらなければ足さずに続け、`metrics.upstream` を `null` にする（止めない）。開発対象リポジトリ（`target`）を読めなくても止めない（使わない） |
+| 呼び出し | 検索の前にリポジトリの一覧（`--repo` と上流）の重複を除く（`--repo` と上流が同じなら 1 つ）。そのうえで、リポジトリ × 由来の組ごとに `gh issue list --repo <R> --state all --search '"<由来>"' --json number,title,url,state` を 1 回 |
 | 出力（0） | `items`: `{repo, number, title, url, state, origins}`。同じリポジトリと番号の課題は 1 件にまとめ、当たった由来を `origins` に並べる。`metrics`: `searches`・`count`・`upstream` |
 | 失敗（2） | どれか 1 つの検索が失敗した（一部の結果だけを返さない） |
 
@@ -396,14 +396,14 @@ LLM が書いた由来の節を検査するだけの形は採らなかった。�
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
 | AC1 | 5 つのサブコマンドの成功・失敗のどの出口でも、標準出力が 1 行の結果 JSON で `validate_result` を通り、`status` と終了コードが合う | どれか 1 つの出口で JSON を出さずに終わらせる、`status` と終了コードを食い違わせる |
-| AC2・I5 | `NDF_SKILL_REPO` があればそれを返す。無ければ `plugins/ndf/` を持つ clone から 1 つに絞れたときだけ返し、0 件・2 件以上は 20 と候補。`target` と `same` を返す | `NDF_SKILL_REPO` を読まない、絞れないときに先頭を採る、20 でなく 0 か 2 を返す |
+| AC2・I5 | `NDF_SKILL_REPO` があればそれを返す。無ければ `plugins/ndf/` を持つ clone から 1 つに絞れたときだけ返し、0 件・2 件以上は 20 と候補。`target` と `same` を返し、`gh repo view` が失敗すれば `target: null`・`same: false` で 0 | `NDF_SKILL_REPO` を読まない、絞れないときに先頭を採る、20 でなく 0 か 2 を返す、開発対象を読めないと 2 で止まる |
 | AC2 | `NDF_SKILL_REPO` の形が違えば 2 | 形を見ずに採る |
 | AC3 | Claude Code・Codex・Kiro（現在地とその下のディレクトリ）の配置、`plugins/ndf/` を持たない GitHub の取得元が並ぶ配置、fork と本家、同じ名前が 2 か所から出る配置で、今の bash と同じ名前（か未決）を返す | `plugins/ndf/` の絞り込みを外す、現在地を根へ戻さない、重複を除かない、`.git` の落とし方を変える |
 | AC4・I6 | 0 件は 0 で空の配列、検索の失敗は 2。検索は open で 1 回 | 失敗を空の配列で返す、`--state all` で探す、2 回呼ぶ |
 | AC5・I1 | 5 つの見出しの 1 つが欠ける・中身が空白だけの本文は 1 で欠けた見出しを返し、`issue_create` を呼ばない。囲みの中の `## ` は見出しに数えない | 欠けを見ずに作る、空の節を通す、囲みの中の行を見出しとして数える |
 | AC6・I2 | 作った本文の「由来」の節に由来の 1 行が 1 回だけ入る（既にあれば足さない）。形の違う由来は 2 で、GitHub を呼ばない | 由来を入れない、2 回入れる、形を見ずに作る |
 | AC7・I3 | `--approved` 無しは 10 と承認資料（起票先・題・ラベル・本文のファイル）と `digest`。一致する `--approved` だけが作る。本文を 1 文字変えた後の古い `digest` は 1 で作らない | 承認資料の前に作る、要約値を本文より前に作る、不一致でも作る |
-| AC8 | 由来 2 つ × リポジトリ 2 つの 4 回を `--state all` と引用符つきの句で検索し、同じ課題を 1 件にまとめて `origins` を並べる。1 つでも失敗すれば 2。`--with-upstream` で上流が決まらなくても 0 | 組を 1 つ落とす、まとめない、一部の失敗を飲んで返す、上流が決まらないと止まる |
+| AC8 | 由来 2 つ × リポジトリ 2 つの 4 回を `--state all` と引用符つきの句で検索し、同じ課題を 1 件にまとめて `origins` を並べる。1 つでも失敗すれば 2。`--with-upstream` で上流が決まらなくても、開発対象リポジトリを読めなくても 0。`--repo` と上流が同じなら由来ごとに 1 回（由来 2 つで 2 回） | 組を 1 つ落とす、まとめない、一部の失敗を飲んで返す、上流が決まらないと止まる、同じリポジトリを 2 回検索する |
 | AC9 | `note --origin` が「同じ事象を <由来> の作業中に確認した。」の 1 行を、`--counterpart` が「開発対象の側は <相手> として残した。」をコメントする。両方・どちらも無しは 2 | 文を変える、両方を受ける |
 | AC10 | `out-of-scope` の `SKILL.md` と `issue-target.md` に、起票先の解決の bash・`gh issue list`・`gh issue create`・`gh issue comment` の囲みが無い。手順書に書いた `issue-file.py` の呼び出しを、書く前に一時の配置で実行して通す（`AGENTS.md` の DO） | — （文言のテストは書かない。実装の検証で `grep` と実行の結果を残す） |
 | AC11 | `retrospective` の手順 1 に `gh issue list` の囲みが無く、`by-origin` の呼び出しがある | — （同上） |
