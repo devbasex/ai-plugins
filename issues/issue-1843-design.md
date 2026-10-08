@@ -224,7 +224,7 @@ graph TD
     E -- 0（上限・読めない項目） --> J
     E -- 1 で 300 秒に達した --> J
     J --> K{終了コード}
-    K -- 8 以外 --> N[after_judge と同じ遷移<br/>done / fix / round]
+    K -- 8 以外 --> N[after_judge と同じ遷移<br/>done（sweep_start）/ fix / round（モデルの段の承認だけ）]
     K -- 8 --> S[投稿待ちとして止まる<br/>metrics.exit=8]
     S -. 再開 .-> A
 ```
@@ -243,9 +243,10 @@ stateDiagram-v2
     posts --> posts: 投稿待ちで止まり、再開
     posts --> fix: 流し切って judge が 2
     posts --> sweep_start: 流し切って judge が 0
+    posts --> round: 設計 PR のモデルの段が承認された
 ```
 
-`posts` から `init` と、`posts` から担当の起動（`run_reviewers`）への遷移は無い。
+`posts` から `init` と、`posts` から担当の起動（`run_reviewers`）への遷移は無い。`posts --> round` は、モデルの段が投稿待ち（8）で `posts` に入り、流し切った後の `judge` が `MODEL_CONFIRMED=1` と 2 を返したときの遷移で、`after_judge` が `round` を返す（#1111）。投稿が残っていない状態で詳細の段の次のラウンドを開くため、I5（投稿だけが残っているラウンドで新しいラウンドを開かない）に反しない。
 
 ## 非機能の実現方式
 
