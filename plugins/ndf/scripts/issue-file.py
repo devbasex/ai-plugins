@@ -4,6 +4,7 @@
     python3 issue-file.py resolve-target
     python3 issue-file.py dup       --repo <起票先> --query <語>
     python3 issue-file.py note      --repo <R> --number <N> (--origin <由来> | --counterpart <R>#<N>)
+                                    [--approved <提示の要約値>]
     python3 issue-file.py create    --repo <起票先> --title <題> --body-file <本文> --origin <由来>
                                     [--label <名前>]... [--counterpart <R>#<N>] [--approved <提示の要約値>]
     python3 issue-file.py by-origin --origin <由来>... [--repo <R>]... [--with-upstream]
@@ -13,7 +14,7 @@
     0   済んだ（0 件の検索も含む）
     1   本文の骨格が欠ける・提示の要約値が合わない・書き込みが失敗した（create / note）
     2   引数の形の誤り・GitHub か git を読めない
-    10  承認資料を書いた。同意の後に `--approved <metrics.digest>` を足して打ち直す（create）
+    10  承認資料を書いた。同意の後に `--approved <metrics.digest>` を足して打ち直す（create と、打つ先が開発対象リポジトリと別の note）
     20  上流リポジトリを 1 つに絞れない。候補を示して利用者に選んでもらう（resolve-target）
 
 由来は `PR #<番号>` か `issue #<番号>`、リポジトリは `<所有者>/<リポジトリ>`、相手の課題は `<所有者>/<リポジトリ>#<番号>`。
@@ -257,16 +258,66 @@ def _note_line(a) -> str:
     return f"開発対象の側は {a.counterpart} として残した。"
 
 
+def _is_other_repo(repo: str, target: str | None) -> bool:
+    """`repo` が開発対象リポジトリ `target` と別か。読めない（`None`）ときは別とみなす（C5 の側へ倒す）。"""
+    return target is None or target.lower() != repo.lower()
+
+
+def _note_gate(repo: str, number: int, line: str, target: str | None, digest: str) -> "NoReturn":  # noqa: F821
+    """別リポジトリへの 1 行の承認資料を書いて 10 で止まる。"""
+    where = f"{repo}#{number}"
+    path = approval_present(
+        TOOL,
+        f"note-{digest[:12]}",
+        title=f"既存の課題へのコメント: {where}",
+        targets=[{"url": f"https://github.com/{repo}/issues/{number}", "title": where}],
+        change="コメント 1 件（1 行）",
+        judge=[
+            ("打つ先", where),
+            ("コメントの 1 行", line),
+            ("開発対象リポジトリ", target or "読めない（別とみなす）"),
+            ("開発対象リポジトリと別か", "別（他のリポジトリへの公開に当たる）"),
+        ],
+        consent=[f"{where} へ、この 1 行をコメントとして公開する"],
+        rollback="書いた人が GitHub の画面からコメントを消せる。通知と検索の索引には残るため、公開しなかった状態へは戻らない",
+    )
+    emit(
+        result(
+            TOOL,
+            "gate",
+            f"{where} へのコメントの承認資料を書いた（開発対象リポジトリと別）",
+            [],
+            {"digest": digest, "other_repo": True},
+            presentation_path=path,
+            next=f"承認資料を示し、同意を得たら同じ引数に --approved {digest} を足して打ち直す",
+        ),
+        EXIT_GATE,
+    )
+
+
 def cmd_note(a) -> None:
     repo = _require_form(a.repo, REPO_RE, "リポジトリ")
     if a.number < 1:
         _stop_with(f"番号の形が違う: {a.number}", EXIT_UNREADABLE)
     line = _note_line(a)
+    target = development_repo()  # 形の検査の後に読む（形の誤りでは GitHub を呼ばない）
+    metrics: dict = {"other_repo": _is_other_repo(repo, target)}
+    if metrics["other_repo"]:  # 同じリポジトリなら --approved は照合しない
+        digest = _digest({"repo": repo, "number": a.number, "line": line})
+        if not a.approved:
+            _note_gate(repo, a.number, line, target, digest)
+        if a.approved != digest:
+            _stop_with(
+                "提示の要約値が合わない（示した後に打つ先・番号・1 行が変わった）。コメントは打っていない",
+                EXIT_VIOLATION,
+                metrics={"digest": digest},
+            )
+        metrics["digest"] = digest
     done = gh_rest.comment(repo, a.number, line)
     if not done.ok:
         _stop_with(f"{repo}#{a.number} へのコメントが失敗した: {done.error[:ERROR_EXCERPT]}", EXIT_VIOLATION)
     item = {"repo": repo, "number": a.number, "url": done.value.get("url", "")}
-    emit(result(TOOL, "ok", f"{repo}#{a.number} へ 1 行を足した", [item], {}), EXIT_OK)
+    emit(result(TOOL, "ok", f"{repo}#{a.number} へ 1 行を足した", [item], metrics), EXIT_OK)
 
 
 def _line_with(lines: list[str], text: str) -> int | None:
@@ -309,9 +360,13 @@ def skeleton_gaps(body: str) -> list[dict]:
     return gaps
 
 
-def digest_of(repo: str, title: str, body: str, labels: list[str]) -> str:
-    shown = {"repo": repo, "title": title, "body": body, "labels": sorted(labels)}
+def _digest(shown: dict) -> str:
+    """示した値の提示の要約値（`create` と `note` で共通）。"""
     return hashlib.sha256(json.dumps(shown, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def digest_of(repo: str, title: str, body: str, labels: list[str]) -> str:
+    return _digest({"repo": repo, "title": title, "body": body, "labels": sorted(labels)})
 
 
 def _read_body_file(path: str) -> str:
@@ -374,8 +429,7 @@ def _create_inputs(a) -> tuple[str, str, tuple[str, int] | None, str, str, list[
 def _create_gate_or_check(repo: str, title: str, body: str, labels: list[str], approved: str | None) -> tuple[str, bool]:
     """承認が無ければゲートへ回し、あれば要約値を照合する。`(要約値, 開発対象リポジトリと別か)`。"""
     digest = digest_of(repo, title, body, labels)
-    target = development_repo()
-    other = target is None or target.lower() != repo.lower()
+    other = _is_other_repo(repo, development_repo())
     if not approved:
         _gate(repo, title, body, labels, digest, other)
     if approved != digest:
@@ -417,6 +471,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--number", required=True, type=int)
     p.add_argument("--origin")
     p.add_argument("--counterpart")
+    p.add_argument("--approved")
     p.set_defaults(func=cmd_note)
     p = sub.add_parser("create", help="骨格を検査し、承認資料を示し、同意の後に由来を付けて起票する")
     p.add_argument("--repo", required=True)
