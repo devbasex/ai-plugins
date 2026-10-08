@@ -102,7 +102,7 @@ def _counterpart(value: str) -> tuple[str, int]:
 # --- 上流リポジトリと開発対象リポジトリ ------------------------------------------------
 
 
-def _slug_of(url: str) -> str | None:
+def _github_owner_repo_from_url(url: str) -> str | None:
     """GitHub の URL から `<所有者>/<リポジトリ>` を取る。GitHub でなければ `None`。"""
     if not GITHUB_URL_RE.search(url):
         return None
@@ -137,9 +137,9 @@ def resolve_upstream() -> tuple[str | None, str, list[dict]]:
     for clone in _clone_candidates():
         if not (clone / NDF_MARK).is_dir():
             continue
-        slug = _slug_of(proc.git_out(clone, "config", "--get", "remote.origin.url") or "")
-        if slug:
-            items.append({"repo": slug, "path": str(clone)})
+        owner_repo = _github_owner_repo_from_url(proc.git_out(clone, "config", "--get", "remote.origin.url") or "")
+        if owner_repo:
+            items.append({"repo": owner_repo, "path": str(clone)})
     names = _candidate_names(items)
     return (names[0] if len(names) == 1 else None), "clone", items
 
