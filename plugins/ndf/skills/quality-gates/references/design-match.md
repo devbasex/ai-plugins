@@ -14,7 +14,7 @@ python3 "$SCRIPTS/design-match.py" tests --issue 216
 # items: tests/ci/test_ci_workflow.py missing（構成要素）・test_pull_request_is_not_filtered_by_branch missing（テスト設計）…
 ```
 
-同じスプリントの #247 で版を固定した変更に確認 (b) を打つと、既存の確定仕様 `docs/specifications/base-image-shellcheck.md` が
+同じスプリントで shellcheck の版を固定した変更（devbasex/devbase の `4d82277`）に確認 (b) を打つと、既存の確定仕様 `docs/specifications/base-image-shellcheck.md` が
 一致した語 4 つ（変えたパス 3 つと `SHELLCHECK_VERSION`）で最上位に並び、「版は固定せず」と書いた行が出る。
 担い手はテストを作るか節に「作らなかった」と理由を並べ、確定仕様の記述を同じ PR で直す。
 
@@ -56,7 +56,7 @@ python3 "$SCRIPTS/design-match.py" specs --base origin/<起点のブランチ>
 並びは一致した語の種類の多い順で、1 文書の行は `--max-lines`（既定 10）まで出る。
 
 上から読み、変更後の振る舞いと合わない記述は同じ PR で直す。直せない記述は節に並べる。広く使われるパスは多くの
-文書に一致するため、一致した語がパス 1 つだけの文書は、その記述が今回の変更に触れているかを見るだけでよい。
+文書に一致するため、一致した語がパス 1 つだけの文書は、その記述がこの差分の変更に触れているかを見るだけでよい。
 
 ## 確認 (c): 設計の決定が実装と一致する
 
