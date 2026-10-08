@@ -2487,16 +2487,14 @@
       "deprecated": [
         "閉じる語"
       ],
-      "source": "",
-      "pending_source": "issues/issue-767-requirements.md"
+      "source": "docs/specifications/ndf-sprint-close-referenced-issues.md"
     },
     {
       "term": "参照だけの課題",
       "context": "ndf-workflow",
       "meaning": "スプリントの Pull Request の題か本文が番号で参照し、スプリント課題に入らない開いた課題",
       "code": "referenced_only",
-      "source": "",
-      "pending_source": "issues/issue-767-requirements.md"
+      "source": "docs/specifications/ndf-sprint-close-referenced-issues.md"
     },
     {
       "term": "スプリント MVV",
