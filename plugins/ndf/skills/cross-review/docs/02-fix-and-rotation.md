@@ -16,6 +16,8 @@
 | `scripts/state.py verify-sweep` | Step 7.5 後段 — 未解決の指摘が 0 件かを GitHub 側で確認 |
 | `scripts/state.py report` | Step 8 — deferred nit + ラウンドサマリ + スイープ結果 |
 
+**目次:** [Step 5: 修正 — 必ずサブエージェント経由](#step-5-修正--必ずサブエージェント経由) / [Step 6: PR ローテーション (prepare → Agent → execute の 3 ステップ)](#step-6-pr-ローテーション-prepare--agent--execute-の-3-ステップ) / [Step 7: 次ラウンドへ](#step-7-次ラウンドへ) / [Step 7.5: 最終スイープ（必須）— 取りこぼし防止](#step-75-最終スイープ必須-取りこぼし防止) / [Step 8: 終了処理 — ラウンドサマリ + 残 deferred の参考列挙](#step-8-終了処理--ラウンドサマリ--残-deferred-の参考列挙)
+
 ## Step 5: 修正 — **必ずサブエージェント経由**
 
 **メインセッションでは修正コードを書かない。** `/ndf:fix` を

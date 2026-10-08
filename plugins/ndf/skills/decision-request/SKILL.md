@@ -1,6 +1,6 @@
 ---
 name: decision-request
-description: "Before asking the user to decide or approve anything, lay out the findings, where the evidence is, what each option changes, and the recommendation with its reason. Use when a question, choice or approval is about to be put to the user（判断を仰ぐ・承認を求める・選択肢を示す・確認の質問）."
+description: "Before asking the user to decide or approve, lay out the findings, the evidence, what each option changes, and a recommendation with its reason. Use when a question, choice or approval is about to be put to the user（判断を仰ぐ・承認を求める・選択肢を示す・確認の質問）."
 ---
 
 # 判断を求める前に材料を示す

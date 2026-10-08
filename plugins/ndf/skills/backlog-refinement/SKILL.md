@@ -1,6 +1,6 @@
 ---
 name: backlog-refinement
-description: "Bring the existing issue list back in line with reality: fix stale bodies, assign milestones, close what is not worth doing, and rank what to start first. Use when a change is finished and the issue list has drifted（課題の棚卸しをするとき・issueの整理・やらないと決める・着手の順位を決める）."
+description: "Bring the issue list back in line with reality: fix stale bodies, set milestones, close what is not worth doing, rank what to start. Use when a change is finished and the issue list has drifted（課題の棚卸しをするとき・issueの整理・やらないと決める・着手の順位を決める）."
 argument-hint: "[--all] [--repo owner/repo]"
 allowed-tools:
   - Bash
