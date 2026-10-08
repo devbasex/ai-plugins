@@ -39,7 +39,7 @@
 | --- | --- | --- | --- | --- |
 | 突き合わせの結果 | `design-match.py` | 1 回の実行の結果（1 行の JSON） | 設計に名前の出るテスト・列挙した文書 | 名前の判定（ある / 無い / 確かめられなかった）・一致した語 |
 | 実装 PR の本文の「設計と違う点」の節 | 突き合わせの担い手（単発は conductor、3 層は `design-match` の work ステップ） | 節 | 違いの行 | 設計の箇所・違い・理由 |
-| 要求の文書 | 課題の本文（写しは `spec-copy.py write` が作る） | 課題の本文 | 受け入れ条件・前提 | 「実装で変えた」の印 |
+| 要求の文書 | `gh_parts.py body-section`（課題ごとの錠の中で節を差し替える。worker も進捗記録もここを通す。写しは `spec-copy.py write` が作る） | 課題の本文 | 受け入れ条件・前提 | 「実装で変えた」の印 |
 
 設計文書・既存の確定仕様・変更履歴は、突き合わせの担い手が同じ PR で直してよい（要求の前提 5）。`design-match.py` は読むだけで、どの文書も書き換えない。PR のステップ（`PrStep`）は節を本文へ置くだけで、中身を書かない。
 
@@ -53,9 +53,10 @@
 | I4 | 突き合わせの結果 | 設計に名前の出るテストが 0 件のとき、確認 (a) は 0 で終わり、`metrics.names` に 0 を残す | 0 件と「判定しなかった」を読み分けられない |
 | I5 | 突き合わせの結果 | 確認 (b) の列挙は、比べる起点との merge-base に無かった文書（同じ差分で足した文書）を含めない | 確定仕様化で足した文書が「既存」として並ぶ |
 | I6 | 突き合わせの結果 | 確認 (b) は、変更したファイルのパスか増減したシンボルの名前を含む既存の確定仕様と変更履歴を、ファイルと行で出す | 食い違う記述へ届かない |
-| I7 | 「設計と違う点」の節 | 3 層の `standard` の実装 PR の本文は `## 設計と違う点` を 1 つだけ持つ。突き合わせの結果が無ければ「該当なし（設計文書が無い）」 | 節が欠けるか 2 つ並ぶ |
+| I7 | 「設計と違う点」の節 | 3 層の `standard` の実装 PR の本文は `## 設計と違う点` を 1 つだけ持つ。「該当なし（設計文書が無い）」を置くのは `design-tests` が 3 で終わったときだけで、それ以外で節のファイルが無ければ `pr` は PR を作らずに止まり、judge へ戻す | 節が欠けるか 2 つ並ぶか、確かめていない突き合わせが「該当なし」として完了する |
 | I8 | 「設計と違う点」の節 | 単発の `pr-steps.py create` / `update` は、`--mode standard` で `design/` 以外のブランチの本文に節が無いと、`next` で足すよう求める | 節の無いまま実装 PR が出る |
 | I9 | 突き合わせの結果 | `standard` 以外のモードの実装プランには、突き合わせのステップが入らない | 設計文書の無い変更の手順と所要が変わる |
+| I10 | 要求の文書 | 課題の本文を書き換える者（`gh_parts.py body-section` と進捗記録の `progress-record.sh`）は、課題ごとの錠（`lib/locks.py` の `exclusive`。錠は `~/.claude/ndf/locks/issue-body/<owner>--<repo>--<番号>`）を取ってから本文を読み、書き終えてから放す。差し替えは節ごとに行い、本文全体を手元の写しで上書きしない | 後に書いた側が、受け入れ条件の変更か `## 進行` を消す |
 
 ### ドメインイベント
 
@@ -101,7 +102,9 @@
 | `plugins/ndf/scripts/supervise_lib/paths.py` | `DESIGN_MATCH_PY` を足す |
 | `plugins/ndf/scripts/supervise_lib/templates.py` | `plan_to_merge` が `standard` のとき、`test-limited` と `pr` の間へ `design-tests` → `design-specs` → `design-match` を入れ、`pr` のステップへ `diff_section` を足す |
 | `plugins/ndf/scripts/supervise_lib/prompts.py` | `design-match` の work ステップの指示文 `DESIGN_MATCH_PROMPT` |
-| `plugins/ndf/scripts/supervise_lib/pr.py` | `PrStep` が `diff_section` のファイルを `## 設計と違う点` として本文へ置く。ファイルが無ければ「該当なし（設計文書が無い）」。LLM の本文に同じ見出しがあれば置き換える |
+| `plugins/ndf/scripts/supervise_lib/pr.py` | `PrStep` が `diff_section` のファイルを `## 設計と違う点` として本文へ置く。ファイルが無いとき、`design-tests` が 3 で終わっていれば「該当なし（設計文書が無い）」を置き、それ以外は PR を作らずに止まる（I7）。LLM の本文に同じ見出しがあれば置き換える |
+| `plugins/ndf/scripts/lib/gh_parts.py` | `body-section` が課題ごとの錠の中で読みから書きまでを行う（I10）。錠を持ったままコマンドを走らせる `body-lock --issue <番号> -- <コマンド>` を足す |
+| `plugins/ndf/scripts/progress-record.sh` | `## 進行` の読みから書きまでを `gh_parts.py body-lock` の中で行う（I10） |
 | `plugins/ndf/scripts/pr-steps.py` | `template --mode standard` が節の雛形を書く。`create` / `update` が節の有無を `items` と `next` で返す |
 | `plugins/ndf/skills/quality-gates/references/design-match.md`（新設） | 確認 (a)(b)(c) の手順・終了コードの読み方・節の形・要求の文書の直し方 |
 | `plugins/ndf/skills/quality-gates/references/definition-of-done.md` | `standard` の完了の定義に確認 (a)(b)(c) と要求の前提の項目、設計文書が無いときの書き方を足す |
@@ -233,7 +236,7 @@ python3 design-match.py specs --base <ref> [--root <dir>] [--max-lines 10]
 
 ### 3 層の `pr` のステップの `diff_section`
 
-`diff_section` は `{state_dir}` を含むパスの文字列である。`PrStep` はそのファイルの中身（`## 設計と違う点` で始まる節）を、材料の節と同じ位置（署名の前）へ置く。ファイルが無ければ `## 設計と違う点\n\n- 該当なし（設計文書が無い）` を置く。LLM が書いた本文に同じ見出しがあれば、`gh_sections.replace_section` で置き換える。
+`diff_section` は `{state_dir}` を含むパスの文字列である。`PrStep` はそのファイルの中身（`## 設計と違う点` で始まる節）を、材料の節と同じ位置（署名の前）へ置く。ファイルが無いときは、`design-tests` のステップの終了コードを実行の記録から読み、3 なら `## 設計と違う点\n\n- 該当なし（設計文書が無い）` を置く。0 / 1 / 2 で終わっていた（突き合わせを行うはずだった）のにファイルが無ければ、worker が節を書かなかったものとして PR を作らずに `stopped` で止まり、judge へ戻す（I7）。「該当なし」と「確かめていない」を同じ節に畳まない。LLM が書いた本文に同じ見出しがあれば、`gh_sections.replace_section` で置き換える。
 
 ## 処理の流れ
 
@@ -287,7 +290,7 @@ graph LR
 1. 入力の `design-tests` の「無い」名前は、作るか、節に「作らなかった」と理由を並べる。「確かめられなかった」は自分で確かめ、確かめられなければ節に並べる
 2. 入力の `design-specs` の文書を上から読み、変更後の振る舞いと合わない記述を同じ PR で直す。直せなければ節に並べる
 3. 設計文書の `### 決定 N` を 1 件ずつ実装と照らし、違う・実装しなかった・判断できないを節に並べる
-4. 実装で受け入れ条件の前提を変えたなら、課題の本文の条件を `requirements-design` の「変更の途中で要求が変わったとき」の形に直し（`gh issue edit --body-file`）、`spec-copy.py write` で写しを作り直してコミットする
+4. 実装で受け入れ条件の前提を変えたなら、課題の本文の条件を `requirements-design` の「変更の途中で要求が変わったとき」の形に直し（直す節ごとに `gh_parts.py body-section replace --issue <番号> --heading <節の見出し>`。`gh issue edit --body-file` で本文全体を書き直さない。I10）、`spec-copy.py write` で写しを作り直してコミットする
 5. 違いが無ければ節を `- 無し` にする
 
 ## 非機能の実現方式
@@ -314,7 +317,8 @@ graph LR
 | 受け入れ条件 7・I5 | 同じ差分で足した確定仕様は、語を含んでいても出ない | merge-base にあるかを見ずに並べると落ちる |
 | 非機能（性能） | 確定仕様 70 文書・語 2,500 の一時リポジトリで `specs` が 10 秒以内 | 語ごとに走査すると落ちる |
 | 受け入れ条件 8・9・11・12 | `definition-of-done.md` と `design-match.md` の該当の節を読んで確かめ、節を証跡に書く（文言を照合するテストは書かない） | — |
-| 受け入れ条件 10・I7 | `standard` の `plan_to_merge` のプランで、`pr` のステップが `diff_section` を持ち、`PrStep` が節を 1 つだけ置く。ファイルが無ければ「該当なし」、LLM の本文に同じ見出しがあれば置き換える（`test_supervise_design_match.py`） | 節を足し忘れる、2 つ並べると落ちる |
+| 受け入れ条件 10・I7 | `standard` の `plan_to_merge` のプランで、`pr` のステップが `diff_section` を持ち、`PrStep` が節を 1 つだけ置く。ファイルが無いとき、`design-tests` が 3 なら「該当なし」、0 / 1 / 2 なら PR を作らずに止まる。LLM の本文に同じ見出しがあれば置き換える（`test_supervise_design_match.py`） | 節を足し忘れる、2 つ並べる、ファイルの欠落を「該当なし」へ畳むと落ちる |
+| I10 | 錠を持つ別のプロセスがあるあいだ `body-section replace` が本文を読まずに待ち、`progress-record.sh` の書き込みと並べても両方の節が残る（`test_gh_parts.py`・`test_progress_record.py`） | 錠を取らずに読む、本文全体を上書きすると落ちる |
 | 受け入れ条件 10・I8 | `pr-steps.py create --mode standard` で節の無い本文に `next` が節を求め、`template --mode standard` が節を書く（`test_pr_steps.py`） | 節の有無を見ないと落ちる |
 | 受け入れ条件 14・I9 | `light` の `plan_to_merge` のプランのステップの並びが変更前と同じ | `standard` 以外にもステップを入れると落ちる |
 | 3 層の経路（F5） | `standard` のプランで `test-limited` → `design-tests` → `design-specs` → `design-match` → `pr` の順につながり、`design-tests` の `skip_to` が `pr` | 順序か `skip_to` を崩すと落ちる |
@@ -325,7 +329,7 @@ graph LR
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #1241 | 実装する | — | `plugins/ndf/scripts/design-match.py`、`plugins/ndf/scripts/lib/repo.py`、`plugins/ndf/scripts/plan-to-spec-steps.py`、`plugins/ndf/scripts/pr-steps.py`、`plugins/ndf/scripts/supervise_lib/`、`plugins/ndf/scripts/tests/`、`plugins/ndf/skills/quality-gates/`、`plugins/ndf/skills/pr/SKILL.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`CHANGELOG.md` |
+| #1241 | 実装する | — | `plugins/ndf/scripts/design-match.py`、`plugins/ndf/scripts/lib/repo.py`、`plugins/ndf/scripts/plan-to-spec-steps.py`、`plugins/ndf/scripts/pr-steps.py`、`plugins/ndf/scripts/lib/gh_parts.py`、`plugins/ndf/scripts/progress-record.sh`、`plugins/ndf/scripts/supervise_lib/`、`plugins/ndf/scripts/tests/`、`plugins/ndf/skills/quality-gates/`、`plugins/ndf/skills/pr/SKILL.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`CHANGELOG.md` |
 
 ## 未確認のまま残ること
 
@@ -334,5 +338,5 @@ graph LR
 | 要求の前提 4 との差 | 拾う節に `## 構成要素` を、名前に `## テスト設計` の `test` で始まる識別子を足した（決定 2）。要求の前提 4 は 2 節のパスと `<パス>::<関数>` だけを挙げる。承認ゲート 1 で認められたら、実装 PR で課題の本文の前提 4 を「実装で変えた」の形に直す |
 | `specs` の誤検出の多さ | 広く使われるパス（`bin/devbase`・`CHANGELOG.md`）は多くの文書に一致する。`HEAD~60..HEAD` では 68 文書すべてが並んだ。並びと `--max-lines` で読む量を抑えるが、誤検出の多さが読む手間に見合うかは、次の `standard` の実装 PR の実測（読んだ文書の数・直した記述の数）で決める（リリース後テスト） |
 | 語の一致による関数の判定 | 名前がコメントや文字列にだけ現れると「ある」と判定する（見逃しの側に倒れる）。実物で見逃しが出たら、言語ごとの定義の形を足す |
-| 課題の本文の書き換えの競合 | 3 層の worker が課題の本文を直す間に進捗記録（`projects-sync.sh`）が `## 進行` を書くと、片方が消えうる。読んでから書くまでを短く保つが、排他はしない |
+| 課題の本文の書き換えの競合 | 同じ機械の worker と進捗記録は I10 の錠で直列にする。錠は機械ごとのファイルのため、別の機械からの書き込みと、人が GitHub の画面で直す書き込みは排他できない。節ごとの差し替えで、他の節を消す範囲を書き換えた節に限る |
 | スプリントブランチの設計文書 | 3 層のスプリントでは、設計 PR がベースブランチへマージされた後にスプリントブランチを切る前提で、実装のworktreeの HEAD に設計文書がある。前提が崩れると `tests` が 3（該当なし）を返し、突き合わせを飛ばす |
