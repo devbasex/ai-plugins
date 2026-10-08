@@ -169,23 +169,31 @@ def test_dup_rejects_a_malformed_repo_without_calling_github(fake):
     assert code == 2 and fake.calls == []
 
 
-# --- note（AC9） --------------------------------------------------------------------
+# --- note（AC9。#1847 の AC1〜AC8） ------------------------------------------------------
+
+OTHER = "B/y"
 
 
-def _commented(fake):
-    fake.on("api", "-X", "POST", out=rest_out({"html_url": f"https://github.com/{REPO}/issues/5#issuecomment-1"}, "201 Created"))
+def _commented(fake, repo: str = REPO):
+    fake.on("api", "-X", "POST", out=rest_out({"html_url": f"https://github.com/{repo}/issues/5#issuecomment-1"}, "201 Created"))
+
+
+def _comment_calls(fake) -> list[list[str]]:
+    return [args for args, _ in fake.calls if args[:3] == ["api", "-X", "POST"]]
 
 
 def test_note_with_an_origin_writes_the_fixed_line(fake):
+    target_is(fake, REPO)
     _commented(fake)
     code, obj = run("note", "--repo", REPO, "--number", "5", "--origin", "PR #1900")
     assert code == 0
     assert posted(fake) == [{"body": "同じ事象を PR #1900 の作業中に確認した。"}]
     assert obj["items"] == [{"repo": REPO, "number": 5, "url": f"https://github.com/{REPO}/issues/5#issuecomment-1"}]
-    assert "issues/5/comments" in " ".join(fake.calls[0][0])
+    assert "issues/5/comments" in " ".join(_comment_calls(fake)[0])
 
 
 def test_note_with_a_counterpart_writes_the_counterpart_line(fake):
+    target_is(fake, REPO)
     _commented(fake)
     code, _ = run("note", "--repo", REPO, "--number", "5", "--counterpart", "example/app#12")
     assert code == 0
@@ -196,15 +204,89 @@ def test_note_with_a_counterpart_writes_the_counterpart_line(fake):
     "extra",
     [[], ["--origin", "PR #1", "--counterpart", "a/b#1"], ["--origin", "PR 1"], ["--counterpart", "a/b#x"]],
 )
-def test_note_needs_exactly_one_well_formed_line(fake, extra):
-    code, _ = run("note", "--repo", REPO, "--number", "5", *extra)
+@pytest.mark.parametrize("repo", [REPO, OTHER])
+def test_note_needs_exactly_one_well_formed_line(fake, extra, repo):
+    code, _ = run("note", "--repo", repo, "--number", "5", *extra)
     assert code == 2 and fake.calls == []
 
 
 def test_note_write_failure_is_one(fake):
+    target_is(fake, REPO)
     fake.on("api", "-X", "POST", rc=1, err="gh: Not Found (HTTP 404)")
     code, obj = run("note", "--repo", REPO, "--number", "5", "--origin", "issue #3")
     assert code == 1 and obj["status"] == "stopped"
+
+
+@pytest.mark.parametrize("repo", [REPO, "O/R"])
+def test_note_to_the_development_repository_needs_no_consent(fake, repo):
+    target_is(fake, REPO)
+    _commented(fake)
+    code, obj = run("note", "--repo", repo, "--number", "5", "--origin", "PR #1")
+    assert code == 0 and obj["status"] == "ok"
+    assert obj["metrics"]["other_repo"] is False
+    assert len(posted(fake)) == 1
+    assert not (Path("present").exists() and any(Path("present").iterdir()))
+
+
+def _note_other(fake, *extra) -> tuple[int, dict]:
+    return run("note", "--repo", OTHER, "--number", "5", "--origin", "PR #1", *extra)
+
+
+@pytest.mark.parametrize("target", ["A/x", None])
+def test_note_to_another_repository_stops_with_the_approval_material(fake, target):
+    target_is(fake, target)
+    code, obj = _note_other(fake)
+    assert code == step_result.EXIT_GATE and obj["status"] == "gate"
+    assert obj["metrics"]["other_repo"] is True
+    assert len(obj["metrics"]["digest"]) == 64
+    assert f"--approved {obj['metrics']['digest']}" in obj["next"]
+    assert _comment_calls(fake) == []
+    material = Path(obj["presentation_path"]).read_text(encoding="utf-8")
+    for shown in (f"{OTHER}#5", "同じ事象を PR #1 の作業中に確認した。", "他のリポジトリへの公開"):
+        assert shown in material
+
+
+def test_note_to_another_repository_posts_with_the_shown_digest(fake):
+    target_is(fake, "A/x")
+    _commented(fake, OTHER)
+    _, gate = _note_other(fake)
+    code, obj = _note_other(fake, "--approved", gate["metrics"]["digest"])
+    assert code == 0
+    assert posted(fake) == [{"body": "同じ事象を PR #1 の作業中に確認した。"}]
+    assert obj["metrics"] == {"other_repo": True, "digest": gate["metrics"]["digest"]}
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        ["--number", "6", "--origin", "PR #1"],
+        ["--number", "5", "--origin", "PR #2"],
+        ["--number", "5", "--counterpart", "A/x#1"],
+    ],
+)
+def test_note_with_a_stale_digest_does_not_post(fake, changed):
+    target_is(fake, "A/x")
+    _, gate = _note_other(fake)
+    code, obj = run("note", "--repo", OTHER, *changed, "--approved", gate["metrics"]["digest"])
+    assert code == 1 and obj["status"] == "stopped"
+    assert _comment_calls(fake) == []
+
+
+def test_note_write_failure_after_consent_is_one(fake):
+    target_is(fake, "A/x")
+    fake.on("api", "-X", "POST", rc=1, err="gh: Not Found (HTTP 404)")
+    _, gate = _note_other(fake)
+    code, obj = _note_other(fake, "--approved", gate["metrics"]["digest"])
+    assert code == 1 and obj["status"] == "stopped"
+
+
+@pytest.mark.parametrize("target", [REPO, "A/x", None])
+def test_note_and_create_agree_on_the_other_repo_flag(fake, tmp_path, target):
+    target_is(fake, target)
+    _commented(fake)
+    _, made = run("create", "--repo", REPO, "--title", "題", "--body-file", body_file(tmp_path), "--origin", "PR #1")
+    _, noted = run("note", "--repo", REPO, "--number", "5", "--origin", "PR #1")
+    assert made["metrics"]["other_repo"] is noted["metrics"]["other_repo"]
 
 
 # --- create（AC5〜AC7・AC13） ---------------------------------------------------------
