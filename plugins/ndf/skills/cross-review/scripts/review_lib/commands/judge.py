@@ -136,8 +136,7 @@ def _apply_aborts(pr: int, st: dict[str, Any], last: dict[str, Any], aborted: li
     _abort_no_result_round(
         pr,
         st,
-        f"結果が残らず、振り替え先もありません: {_tried_line(st, round_no)}。"
-        " 中断します。最終スイープを通してから完了報告へ進んでください",
+        f"結果が残らず、振り替え先もありません: {_tried_line(st, round_no)}。 中断します。最終スイープを通してから完了報告へ進んでください",
     )
 
 
