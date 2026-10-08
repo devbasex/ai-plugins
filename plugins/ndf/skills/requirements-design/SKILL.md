@@ -152,6 +152,9 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 行わない      … 依頼範囲外のリファクタリング、生成物の手編集、無関係な整形
 ```
 
+「確認してから行う」は、承認ゲート 1・2 で人が見ることを指す。境界から承認の工程を足さない。共通原則の「必ず人の承認が要る操作」
+（C1〜C8）に当たる変更も同じで、承認ゲートの数と置き場所は `development-workflow` の「人手の承認を求める承認ゲート」だけが持つ。
+
 ### 7. 仕様として残す
 
 テンプレートは [references/spec-template.md](references/spec-template.md)。**仕様の正は課題の本文である。**
