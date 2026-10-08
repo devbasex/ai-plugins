@@ -88,7 +88,13 @@ credential helper が応答しない環境の退避（`gh auth git-credential` �
 本文を日本語で書いてファイルに置く。`.github/pull_request_template.md` があればその構造に従い、
 `## Summary`・`## 利用者向けの変化`・`## 移行の手順`・`## Test plan` を持ち、機密情報を含めない。更新のときはブランチの全コミット
 （`git log origin/<base>..HEAD`）を反映し、既存の関連リンクを保つ。テンプレートは
-`python3 "$SCRIPTS/pr-steps.py" template --out /tmp/pr-body.md` が書く。
+`python3 "$SCRIPTS/pr-steps.py" template --out /tmp/pr-body.md [--mode <モード>]` が書く。
+
+**`standard` の実装 PR は `## 設計と違う点` の節を持つ。** 完了判定の設計との突き合わせ（`quality-gates` の
+`references/design-match.md`）で見つけた、設計の決定・設計に名前の出るテスト・既存の確定仕様・受け入れ条件と実装の
+違いを「| 設計の箇所 | 違い | 理由 |」の表で並べる。違いが無ければ「- 無し」、設計文書が無ければ
+「- 該当なし（設計文書が無い）」と書く。`template --mode standard` が雛形を書き、`create` / `update` に
+`--mode standard` を渡すと、節の無い本文では `next` が節を足すよう求める（設計 PR は対象にしない）。
 
 **`## 利用者向けの変化` はリリースの CHANGELOG と更新案内へそのまま載る**（`release-steps.py notes` が組む）。
 利用者に何ができるようになるか・使い方が変わる点を箇条書きにし、今の決まりだけを書く。見える変化が無ければ
