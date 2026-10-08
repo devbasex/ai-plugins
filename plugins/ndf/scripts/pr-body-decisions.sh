@@ -9,7 +9,9 @@
 # （`origin/<起点>...HEAD` で変わった .md）から作った節を `sync` と同じ位置へ入れて標準出力へ出す。
 # 作る時点で本文が揃っていれば、後の `sync` は書き込まず、本文の編集で CI を 2 度起動しない。
 # GitHub を読まない。head のブランチが design/ で始まらなければ本文をそのまま出す。
-# **本文は決定の中身を持たず、設計文書の `## 決定の記録` の下の `### ` の見出しだけを写す。**
+# **本文は決定の中身を持たず、設計文書の決定の見出しだけを写す。** 決定の見出しは、`## 決定の記録` で
+# 始まる H2 の節の `### ` の行か、その節が無く H1 に「決定の記録」を含む文書の `## 決定 <数字>…` /
+# `### 決定 <数字>…` の行である（見出しの記号を除いて写す）。
 # 見出しだけであれば文字列の一致で食い違いを判定でき、`sync` は節の外を 1 バイトも変えずに
 # 書き直せる。
 #
@@ -22,7 +24,9 @@
 #
 # 終了コード:
 #   0  一致した（`sync` は書き込んだ後の突き合わせで一致した）。対象外も 0
-#   1  食い違った（`check` は差分を標準出力へ出す。`sync` は書き込んだ後も食い違った）
+#   1  食い違った（`check` は差分を標準出力へ出す。`sync` は書き込んだ後も食い違った）。または
+#      決定を読めない文書がある（`## 決定の記録` で始まる H2 を持つか名前が `-design-decisions.md` で
+#      終わるのに決定の見出しが 0 件。パスと理由を標準出力へ出し、`sync` は書き込まない）
 #   2  読めなかった（`gh` が無い・Pull Request が無い・API の失敗）、または書き込みに失敗した
 #   3  呼び出しの誤り（副コマンドが無い・未知の副コマンド・番号が数値でない）。GitHub を読まない
 #   `render` は 0（出した）か 2（git を読めなかった。標準出力へ何も出さない）か 3 を返す
@@ -154,18 +158,51 @@ def is_top_heading(line):
     return line.startswith("# ") or line.startswith("## ")
 
 
-def decision_headings(text):
-    found, inside = [], False
+DECISIONS_SECTION = "## 決定の記録"
+SPLIT_SUFFIX = "-design-decisions.md"
+SPLIT_NAME = re.compile(re.escape(SPLIT_SUFFIX) + r"(?![\w-])")
+DIRECT_DECISION = re.compile(r"#{2,3} (決定 \d.*)")
+
+
+def read_decisions(name, text):
+    """決定の見出しの並びと、決定を読めない理由（無ければ None）を 1 回の走査で返す。
+
+    (a) 「## 決定の記録」で始まる H2 の節の「### 」の行。(b) (a) の節が無く、最初の H1 に「決定の記録」を
+    含む文書の「## 決定 <数字>…」「### 決定 <数字>…」の行。囲みの中の行は読まない。
+    """
+    section_found, direct_found = [], []
+    first_section, h1, inside, names_split = None, None, False, False
     for _, line, outside in lines_outside_fences(text):
         if not outside:
             continue
-        if re.fullmatch(r"## 決定の記録[ \t]*", line):
+        if h1 is None and line.startswith("# "):
+            h1 = line
+        if line.startswith(DECISIONS_SECTION):
             inside = True
-        elif is_top_heading(line):
+            first_section = first_section or line.rstrip()
+            continue
+        m = DIRECT_DECISION.fullmatch(line.rstrip())
+        if m:
+            direct_found.append(m.group(1))
+        if is_top_heading(line):
             inside = False
         elif inside and line.startswith("### "):
-            found.append(line[4:].rstrip())
-    return found
+            section_found.append(line[4:].rstrip())
+        elif inside and SPLIT_NAME.search(line):
+            names_split = True
+    if first_section is not None:
+        found = section_found
+    else:
+        found = direct_found if h1 is not None and "決定の記録" in h1 else []
+    if found:
+        return found, None
+    is_split = name.endswith(SPLIT_SUFFIX)
+    if first_section is not None and not (names_split and not is_split):
+        return [], f"「{first_section}」の節に「### 」の見出しが無い"
+    if is_split:
+        return [], (f"決定を分けたファイルなのに決定の見出しが無い。"
+                    f"「{DECISIONS_SECTION}」の節の下に「### 決定 N: …」を置く")
+    return [], None
 
 
 def markdown_names(raw):
@@ -187,15 +224,24 @@ def markdown_names(raw):
 
 def changed_markdown(head_sha):
     names = markdown_names(gh("--paginate", f"repos/{repo}/pulls/{pr}/files?per_page=100"))
-    docs = []
+    docs, unreadable = [], []
     for name in names:
         quoted = urllib.parse.quote(name, safe="/")
         text = gh("-H", "Accept: application/vnd.github.raw",
                   f"repos/{repo}/contents/{quoted}?ref={head_sha}")
-        headings = decision_headings(text)
+        headings, reason = read_decisions(name, text)
         if headings:
             docs.append((name, headings))
-    return docs
+        if reason:
+            unreadable.append((name, reason))
+    return docs, unreadable
+
+
+def report_unreadable(unreadable):
+    print(f"止めた: 決定の見出しを読めない文書が {len(unreadable)} 本ある。"
+          f"本文の「{HEADING}」は突き合わせず、書き換えない")
+    for name, reason in unreadable:
+        print(f"- {name}: {reason}")
 
 
 def expected_section(docs):
@@ -245,7 +291,7 @@ def compare(body, docs):
 
 def report(actual, expected, docs):
     if expected is None:
-        print(f"食い違い: 変更したファイルに「## 決定の記録」を持つ設計文書が無いのに、本文に「{HEADING}」の節がある")
+        print(f"食い違い: 変更したファイルに決定の見出しを持つ設計文書が無いのに、本文に「{HEADING}」の節がある")
         return
     if actual is None:
         print(f"食い違い: 本文に「{HEADING}」の節が無い（{summary(docs)}）")
@@ -290,7 +336,10 @@ def sync_section(body, span, expected, docs, head_sha):
     _, new_sha, body = read_pr()
     # 書き込みの間に head が進んだら、進んだ先の設計文書と突き合わせる。古い決定を一致と報告しない。
     if new_sha != head_sha:
-        docs = changed_markdown(new_sha)
+        docs, unreadable = changed_markdown(new_sha)
+        if unreadable:
+            report_unreadable(unreadable)
+            return 1
     same, _, actual, expected = compare(body, docs)
     if same:
         print(f"書き直した: {summary(docs)}")
@@ -300,13 +349,17 @@ def sync_section(body, span, expected, docs, head_sha):
 
 
 def build_comparison(head_sha, body):
-    docs = changed_markdown(head_sha)
+    docs, unreadable = changed_markdown(head_sha)
     same, span, actual, expected = compare(body, docs)
-    return head_sha, body, docs, same, span, actual, expected
+    return head_sha, body, docs, unreadable, same, span, actual, expected
 
 
 def handle_comparison(sub, comparison):
-    head_sha, body, docs, same, span, actual, expected = comparison
+    head_sha, body, docs, unreadable, same, span, actual, expected = comparison
+    # 読めない文書があれば突き合わせず、sync も書き込まない。読めた文書だけで節を上書きしない。
+    if unreadable:
+        report_unreadable(unreadable)
+        return 1
     if same:
         print(f"一致: {summary(docs)}")
         return 0
@@ -335,7 +388,7 @@ def local_markdown():
     out = git("diff", "--name-only", "--no-renames", "--diff-filter=d", "-z", f"origin/{base}...HEAD")
     docs = []
     for name in sorted(n for n in out.split("\0") if n.endswith(".md")):
-        headings = decision_headings(git("show", f"HEAD:{name}"))
+        headings, _ = read_decisions(name, git("show", f"HEAD:{name}"))
         if headings:
             docs.append((name, headings))
     return docs
