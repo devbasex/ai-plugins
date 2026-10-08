@@ -377,7 +377,7 @@ def build_parser():
     g.add_argument("--design", nargs="+", help="設計文書のパス")
     p.set_defaults(func=cmd_tests)
     p = sub.add_parser("specs", parents=[common], help="確認 (b): 変えたものを参照する既存の確定仕様と変更履歴")
-    p.add_argument("--base", required=True, help="比べる起点（例: origin/develop）")
+    p.add_argument("--base", required=True, help="比べる起点（例: origin/<起点のブランチ>）")
     p.add_argument("--max-lines", type=int, default=10, help="1 文書に出す行の上限")
     p.set_defaults(func=cmd_specs)
     return ap
