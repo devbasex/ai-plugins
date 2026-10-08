@@ -193,20 +193,20 @@ python3 "$SCRIPTS/merged-steps.py" probe (--pr <PR番号> | --head <ブランチ
 
 ```bash
 # $SCRIPTS の決め方は development-workflow の references/scripts-lookup.md にある。
-# 閉じる語の読み取りは、どの Skill にも属さないライブラリ（$SCRIPTS/lib/）にある。
+# closing keywords（`Closes #N` などの記法）の読み取りは、どの Skill にも属さないライブラリ（$SCRIPTS/lib/）にある。
 # **gate も同じ実体を読む**ため、Skill の下にコピーは無い。
 CLOSING="$SCRIPTS/lib/closing-issues.sh"
 
-# 1. 本文から閉じる語が指す先を取り出す（<所有者>/<リポジトリ> と <番号> をタブ区切りで出す）
+# 1. 本文から closing keywords が指す先を取り出す（<所有者>/<リポジトリ> と <番号> をタブ区切りで出す）
 gh pr view <PR番号> --json body -q .body | bash "$CLOSING"
 
 # 2. まだ OPEN のものだけに絞り、報告へ載せる
 gh issue view <番号> --repo <所有者>/<リポジトリ> --json state -q .state    # OPEN / CLOSED
 ```
 
-- 閉じる語が 1 つも無ければ何もしない。スクリプトは何も出さずに終了コード 0 で終わる
+- GitHub の closing keywords（PR 本文に `Closes #123` のように書くと、マージ時にその課題を自動で閉じる機能）が 1 つも無ければ何もしない。スクリプトは何も出さずに終了コード 0 で終わる
 - **この一覧は、後片付けの進捗記録を書く先でもある**（`progress-tracking` の「工程の単位と
-  記録する課題」。後片付けは Pull Request 単位で、マージした側が本文の閉じる語が指す課題
+  記録する課題」。後片付けは Pull Request 単位で、マージした側が本文の closing keywords（`Closes #N` などの記法）が指す課題
   すべてへ書く）
 - 既定ブランチへマージしたリポジトリでは GitHub が先に閉じている。その場合はこの一覧が
   空になるだけで、扱いは変わらない
@@ -277,7 +277,7 @@ bash "$SCRIPTS/../skills/development-workflow/scripts/stage-check.sh" report <is
 | 対象外 | 名前と理由（起点 / 本番チャネル / 現在のブランチ / fork / 先端が `headRefOid` と違う / 対応する Pull Request が無い）。先端が違う・Pull Request が無いリモートブランチには、先端のハッシュと `headRefOid`、マージ後に積まれたコミット（`git log --oneline <headRefOid>..origin/<名前>`）を添える |
 | 止まった対象 | 「止まる条件」の「止まったときの一覧」と、同意の結果 |
 | 未完了 | 退避が失敗した worktreeのパス、退避先・退避済みのパス・失敗したパスと `mv` の出力（退避済みのものは退避先に残す。戻すなら同じ `mv` の逆）、「原因を取り除いた後に `/ndf:merged <PR番号>` をもう一度実行する」 |
-| スプリント課題 | このマージの閉じる語が指す課題のうち OPEN のもの。「閉じるのはスプリントの最終工程（`progress-tracking` の「スプリントを閉じる」）」と添える |
+| スプリント課題 | このマージの closing keywords（`Closes #N` などの記法）が指す課題のうち OPEN のもの。「閉じるのはスプリントの最終工程（`progress-tracking` の「スプリントを閉じる」）」と添える |
 | スプリントの最後か | 最後 / 残りあり / **判断できない** |
 
 あわせて次も載せる。

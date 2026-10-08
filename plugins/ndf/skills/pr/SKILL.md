@@ -60,7 +60,7 @@ python3 "$SCRIPTS/pr-steps.py" plan [--draft] [--base <base>] [--message "<コ�
   そこへ移ってから打ち直す（入れ子の worktree は作らない）
 - `metrics.redirect` が `cherry-pick-pr`: 起点が `main`/`master` でも設定のブランチでもない。警告を出して
   `/ndf:cherry-pick-pr <base>` へ誘導し、利用者が明示的に継続を指示したときだけ `--force` で進める
-- `metrics.closing_words_in_message` に語がある: メッセージから外す（「閉じる語は本文だけに書く」）
+- `metrics.closing_words_in_message` に語がある: メッセージから外す（「closing keywords は本文だけに書く」）
 - `metrics.existing_pr` が null なら新規作成、あれば更新になる
 
 ### 2. コミット
@@ -71,7 +71,7 @@ python3 "$SCRIPTS/pr-steps.py" plan [--draft] [--base <base>] [--message "<コ�
 python3 "$SCRIPTS/pr-steps.py" commit --message "<メッセージ>"
 ```
 
-閉じる語があるとコミットせずに `stopped` で止まる。上位階層を含むすべての変更をコミットする。
+メッセージに GitHub の closing keywords（PR 本文に `Closes #123` のように書くと、マージ時にその課題を自動で閉じる機能）があるとコミットせずに `stopped` で止まる。上位階層を含むすべての変更をコミットする。
 
 ### 3. 同意の確認と push
 
@@ -142,10 +142,10 @@ URL は最終行に生のまま置く（Markdown リンクにすると利用者�
 課題の Pull Request は `--base sprint/<名前>` で出す。スプリントの Pull Request は、
 スプリントブランチの worktree から `--base` を省いて出し、本文にスプリントが閉じる課題を番号ごとに書く。
 
-## 閉じる語は本文だけに書く
+## closing keywords は本文だけに書く
 
-**閉じる語（`Closes` / `Fixes` / `Resolves`）は Pull Request の本文だけに、番号ごとに書く。** コミット
-メッセージに書くと、マージでそのコミットが指す課題だけが先に閉じ、スプリントが割れる。**本文の閉じる語は
+**closing keywords（`Closes` / `Fixes` / `Resolves` の後に番号を書く記法）は Pull Request の本文だけに、番号ごとに書く。** コミット
+メッセージに書くと、マージでそのコミットが指す課題だけが先に閉じ、スプリントが割れる。**本文の closing keywords は
 外さない**（`stage-completeness.md` と `progress-tracking` の「スプリントを閉じる」が本文を入力にする）。
 
 ## 設計 Pull Request の本文
