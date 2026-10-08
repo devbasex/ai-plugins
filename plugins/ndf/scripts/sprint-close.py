@@ -266,9 +266,8 @@ def _referenced_items(root, repo, refs, issues):
     return items
 
 
-def _close_summary(items, prs, dry_run):
+def _close_summary(items, prs, dry_run, referenced):
     count = {k: sum(1 for i in items if i["result"] == k) for k in ("closed", "already_closed", "failed", "kept_open", "would_close")}
-    referenced = sum(1 for i in items if i["result"] == "kept_open" and NOT_GIVEN in i.get("reason", ""))
     metrics = {"issues": len(items), **count, "referenced_only": referenced, "prs": len(prs)}
     summary = (
         f"閉じた {count['closed']} 件・既に閉じていた {count['already_closed']} 件・"
@@ -338,9 +337,10 @@ def cmd_close(a):
     notes = ctx.notes
     for repo, n in issues:
         items.append(_close_item(a, ctx, repo, n, kept_all, verdicts))
-    items += _referenced_items(root, record_repo, refs, issues)
+    refs_items = _referenced_items(root, record_repo, refs, issues)
+    items += refs_items
 
-    count, metrics, summary = _close_summary(items, prs, a.dry_run)
+    count, metrics, summary = _close_summary(items, prs, a.dry_run, referenced=len(refs_items))
     if count["failed"]:
         emit(result(TOOL, "stopped", summary, items + notes, metrics, next="失敗した課題の cmd でやり直す。棚卸しへ進まない"))
     emit(result(TOOL, "ok", summary, items + notes, metrics))
