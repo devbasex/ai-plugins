@@ -39,7 +39,7 @@
 | --- | --- | --- | --- | --- |
 | 突き合わせの結果 | `design-match.py` | 1 回の実行の結果（1 行の JSON） | 設計に名前の出るテスト・列挙した文書 | 名前の判定（ある / 無い / 確かめられなかった）・一致した語 |
 | 実装 PR の本文の「設計と違う点」の節 | 突き合わせの担い手（単発は conductor、3 層は `design-match` の work ステップ） | 節 | 違いの行 | 設計の箇所・違い・理由 |
-| 要求の文書 | `gh_parts.py body-section`（課題ごとの錠の中で節を差し替える。worker も進捗記録もここを通す。写しは `spec-copy.py write` が作る） | 課題の本文 | 受け入れ条件・前提 | 「実装で変えた」の印 |
+| 要求の文書 | 書き換えの経路は `gh_parts.py body-section`（worker。錠の中で節を差し替える）と `gh_parts.py body-lock`（`progress-record.sh`。錠を持ったまま `## 進行` を読み書きする）の 2 つで、どちらも課題ごとの錠を取る（I10）。写しは `spec-copy.py write` が作る | 課題の本文 | 受け入れ条件・前提 | 「実装で変えた」の印 |
 
 設計文書・既存の確定仕様・変更履歴は、突き合わせの担い手が同じ PR で直してよい（要求の前提 5）。`design-match.py` は読むだけで、どの文書も書き換えない。PR のステップ（`PrStep`）は節を本文へ置くだけで、中身を書かない。
 
@@ -56,7 +56,7 @@
 | I7 | 「設計と違う点」の節 | 3 層の `standard` の実装 PR の本文は `## 設計と違う点` を 1 つだけ持つ。「該当なし（設計文書が無い）」を置くのは `design-tests` が 3 で終わったときだけで、それ以外で節のファイルが無ければ `pr` は PR を作らずに止まり、judge へ戻す | 節が欠けるか 2 つ並ぶか、確かめていない突き合わせが「該当なし」として完了する |
 | I8 | 「設計と違う点」の節 | 単発の `pr-steps.py create` / `update` は、`--mode standard` で `design/` 以外のブランチの本文に節が無いと、`next` で足すよう求める | 節の無いまま実装 PR が出る |
 | I9 | 突き合わせの結果 | `standard` 以外のモードの実装プランには、突き合わせのステップが入らない | 設計文書の無い変更の手順と所要が変わる |
-| I10 | 要求の文書 | 課題の本文を書き換える者（`gh_parts.py body-section` と進捗記録の `progress-record.sh`）は、課題ごとの錠（`lib/locks.py` の `exclusive`。錠は `~/.claude/ndf/locks/issue-body/<owner>--<repo>--<番号>`）を取ってから本文を読み、書き終えてから放す。差し替えは節ごとに行い、本文全体を手元の写しで上書きしない | 後に書いた側が、受け入れ条件の変更か `## 進行` を消す |
+| I10 | 要求の文書 | 課題の本文を書き換える者（`gh_parts.py body-section` と進捗記録の `progress-record.sh`）は、課題ごとの錠（`lib/locks.py` の `exclusive`。錠は `~/.claude/ndf/locks/issue-body/<owner>--<repo>--<番号>`）を取ってから本文を読み、書き終えてから放す。差し替えは節ごとに行い、本文全体を手元の写しで上書きしない。`progress-record.sh` は錠を 30 秒の待ち上限で取り、取れなければ `## 進行` を書かずに終了コード 0 で続ける（進行管理が理由で開発の工程を止めない） | 後に書いた側が、受け入れ条件の変更か `## 進行` を消す |
 
 ### ドメインイベント
 
@@ -103,8 +103,8 @@
 | `plugins/ndf/scripts/supervise_lib/templates.py` | `plan_to_merge` が `standard` のとき、`test-limited` と `pr` の間へ `design-tests` → `design-specs` → `design-match` を入れ、`pr` のステップへ `diff_section` を足す |
 | `plugins/ndf/scripts/supervise_lib/prompts.py` | `design-match` の work ステップの指示文 `DESIGN_MATCH_PROMPT` |
 | `plugins/ndf/scripts/supervise_lib/pr.py` | `PrStep` が `diff_section` のファイルを `## 設計と違う点` として本文へ置く。ファイルが無いとき、`design-tests` が 3 で終わっていれば「該当なし（設計文書が無い）」を置き、それ以外は PR を作らずに止まる（I7）。LLM の本文に同じ見出しがあれば置き換える |
-| `plugins/ndf/scripts/lib/gh_parts.py` | `body-section` が課題ごとの錠の中で読みから書きまでを行う（I10）。錠を持ったままコマンドを走らせる `body-lock --issue <番号> -- <コマンド>` を足す |
-| `plugins/ndf/scripts/progress-record.sh` | `## 進行` の読みから書きまでを `gh_parts.py body-lock` の中で行う（I10） |
+| `plugins/ndf/scripts/lib/gh_parts.py` | `body-section` が課題ごとの錠の中で読みから書きまでを行う（I10）。錠を持ったままコマンドを走らせる `body-lock --issue <番号> [--timeout <秒>] -- <コマンド>` を足す。`--timeout` の秒数で錠を取れなければコマンドを走らせずに終了コード 2（`EXIT_UNREADABLE`）で終わる |
+| `plugins/ndf/scripts/progress-record.sh` | `## 進行` の読みから書きまでを `gh_parts.py body-lock --timeout 30` の中で行う。錠を取れないときは記録を飛ばして終了コード 0 で終わる（I10） |
 | `plugins/ndf/scripts/pr-steps.py` | `template --mode standard` が節の雛形を書く。`create` / `update` が節の有無を `items` と `next` で返す |
 | `plugins/ndf/skills/quality-gates/references/design-match.md`（新設） | 確認 (a)(b)(c) の手順・終了コードの読み方・節の形・要求の文書の直し方 |
 | `plugins/ndf/skills/quality-gates/references/definition-of-done.md` | `standard` の完了の定義に確認 (a)(b)(c) と要求の前提の項目、設計文書が無いときの書き方を足す |
@@ -318,7 +318,7 @@ graph LR
 | 非機能（性能） | 確定仕様 70 文書・語 2,500 の一時リポジトリで `specs` が 10 秒以内 | 語ごとに走査すると落ちる |
 | 受け入れ条件 8・9・11・12 | `definition-of-done.md` と `design-match.md` の該当の節を読んで確かめ、節を証跡に書く（文言を照合するテストは書かない） | — |
 | 受け入れ条件 10・I7 | `standard` の `plan_to_merge` のプランで、`pr` のステップが `diff_section` を持ち、`PrStep` が節を 1 つだけ置く。ファイルが無いとき、`design-tests` が 3 なら「該当なし」、0 / 1 / 2 なら PR を作らずに止まる。LLM の本文に同じ見出しがあれば置き換える（`test_supervise_design_match.py`） | 節を足し忘れる、2 つ並べる、ファイルの欠落を「該当なし」へ畳むと落ちる |
-| I10 | 錠を持つ別のプロセスがあるあいだ `body-section replace` が本文を読まずに待ち、`progress-record.sh` の書き込みと並べても両方の節が残る（`test_gh_parts.py`・`test_progress_record.py`） | 錠を取らずに読む、本文全体を上書きすると落ちる |
+| I10 | 錠を持つ別のプロセスがあるあいだ `body-section replace` が本文を読まずに待ち、`progress-record.sh` の書き込みと並べても両方の節が残る。錠が待ち上限を超えて取れないとき `progress-record.sh` が本文を書かずに終了コード 0 で終わる（`test_gh_parts.py`・`test_progress_record.py`） | 錠を取らずに読む、本文全体を上書きすると落ちる |
 | 受け入れ条件 10・I8 | `pr-steps.py create --mode standard` で節の無い本文に `next` が節を求め、`template --mode standard` が節を書く（`test_pr_steps.py`） | 節の有無を見ないと落ちる |
 | 受け入れ条件 14・I9 | `light` の `plan_to_merge` のプランのステップの並びが変更前と同じ | `standard` 以外にもステップを入れると落ちる |
 | 3 層の経路（F5） | `standard` のプランで `test-limited` → `design-tests` → `design-specs` → `design-match` → `pr` の順につながり、`design-tests` の `skip_to` が `pr` | 順序か `skip_to` を崩すと落ちる |

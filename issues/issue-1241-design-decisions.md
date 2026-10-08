@@ -108,7 +108,7 @@ PR の本文の LLM（`PR_SYSTEM`）は Tool を持たず、材料の抜粋だ�
 
 ### 決定 13: 受け入れ条件の変更と進捗の記録を互いに消さないため、課題の本文を書く経路を `gh_parts.py body-section` と課題ごとの錠に寄せる
 
-3 層の worker（決定 11）と進捗記録（`progress-record.sh`）は、同じ課題の本文をそれぞれ読んで書き戻す。並べて走ると、後に書いた側が先の書き込み（受け入れ条件の変更か `## 進行`）を消す。書き換えの持ち主を `gh_parts.py body-section` にし、本文を読む前に課題ごとの錠（`lib/locks.py`）を取り、書き終えてから放す（I10）。`progress-record.sh` は節の中身を前の節から組むため、読みから書きまでを `gh_parts.py body-lock` の中で行う。worker は `gh issue edit --body-file` で本文全体を書き直さず、直す節だけを差し替える。
+3 層の worker（決定 11）と進捗記録（`progress-record.sh`）は、同じ課題の本文をそれぞれ読んで書き戻す。並べて走ると、後に書いた側が先の書き込み（受け入れ条件の変更か `## 進行`）を消す。書き換えの経路を `gh_parts.py body-section`（worker）と `gh_parts.py body-lock`（`progress-record.sh`）の 2 つにし、どちらも本文を読む前に課題ごとの錠（`lib/locks.py`）を取り、書き終えてから放す（I10）。`progress-record.sh` は節の中身を前の節から組むため、読みから書きまでを `gh_parts.py body-lock` の中で行う。`progress-record.sh` は「進行管理が理由で開発の工程を止めない」を守るため、錠を 30 秒の待ち上限で取り、取れなければ `## 進行` を書かずに終了コード 0 で続ける（`lib/locks.py` の `exclusive` の既定は無期限に待つ）。worker は `gh issue edit --body-file` で本文全体を書き直さず、直す節だけを差し替える。
 
 「読んでから書くまでを短く保ち、排他はしない」案は採らない。短くしても消える場面が残り、消えたことに誰も気づかない。
 
