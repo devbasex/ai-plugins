@@ -266,20 +266,106 @@ def test_4_no_changed_files_compares_against_zero_decisions(fake, body, expected
     assert out.returncode == expected_returncode, out.stdout + out.stderr
 
 
-def test_4_empty_decisions_without_subheadings_is_treated_as_zero_decisions(fake):
-    """現状固定: 「## 決定の記録」があっても「### 」見出しが無ければ決定 0 件として扱う。"""
+@pytest.mark.parametrize("sub", ["check", "sync"])
+def test_4_empty_decisions_without_subheadings_is_treated_as_zero_decisions(fake, sub):
+    """#635 で期待を書き換えた: 以前は決定 0 件の一致（0）として通していた。今は決定を読めない文書として
+    パスと理由を出して 1 で止まり、sync は本文を書き換えない。"""
     empty_design = "# 設計\n\n## 決定の記録\n\n決定事項はまだありません。\n\n## その他\n"
-    # 本文に「## 決めたこと」節がない状態で check を実行し、決定 0 件として一致（終了コード 0）
-    design_pr(fake, body="## Summary\n\n- 要約\n\n## Test plan\n", design=empty_design)
+    for body in ("## Summary\n\n- 要約\n\n## Test plan\n", f"## Summary\n\n{EXPECTED}\n## Test plan\n"):
+        design_pr(fake, body=body, design=empty_design)
+        out = fake.run(sub, "7", "--repo", REPO)
+        assert out.returncode == 1, out.stdout + out.stderr
+        assert "issues/issue-1-design.md" in out.stdout
+        assert "## 決定の記録" in out.stdout
+        assert not fake.writes()
+
+
+# --- 決定の見出しの形（#635） -----------------------------------------------------
+
+
+def one_doc_pr(fake, name, text, body="## Summary\n\n## Test plan\n", extra=None):
+    files = {name: "added", **{n: "added" for n in (extra or {})}}
+    fake.setup(body=body, files=files, contents={name: text, **(extra or {})})
+
+
+def synced_section(fake):
+    out = fake.run("sync", "7", "--repo", REPO)
+    assert out.returncode == 0, out.stdout + out.stderr
+    return out, fake.patched_body()
+
+
+def test_635_suffixed_section_is_read_and_check_after_sync_returns_0(fake):
+    text = "# 設計\n\n## 決定の記録（#610）\n\n### 決定 1: 一\n\n### 決定 2: 二\n\n## 配置\n\n### 数えない\n"
+    one_doc_pr(fake, "issues/issue-9-design.md", text)
+    out, body = synced_section(fake)
+    assert "設計文書 1 本 / 決定 2 件" in out.stdout
+    assert section(("issues/issue-9-design.md", ["決定 1: 一", "決定 2: 二"])) in body
+    one_doc_pr(fake, "issues/issue-9-design.md", text, body=body)
+    assert fake.run("check", "7", "--repo", REPO).returncode == 0
+
+
+def test_635_two_suffixed_sections_are_listed_in_document_order(fake):
+    text = (
+        "# 設計\n\n## 決定の記録（#444）\n\n### 決定 1: 甲\n\n## 中間\n\n### 数えない\n\n"
+        "## 決定の記録: テストの扱い（#443）\n\n### 決定 1: 乙\n"
+    )
+    one_doc_pr(fake, "issues/issue-9-design.md", text)
+    _, body = synced_section(fake)
+    assert section(("issues/issue-9-design.md", ["決定 1: 甲", "決定 1: 乙"])) in body
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("# #1482: 決定の記録\n\n## 決定 1: 一\n\n本文\n\n## 決定 2: 二\n", ["決定 1: 一", "決定 2: 二"]),
+        ("# #1142: 決定の記録\n\n### 決定 1: 一\n", ["決定 1: 一"]),
+        ("# #1429: 決定の記録\n\n## 決定 0b: 前置き\n\n## 決定 1: 一\n", ["決定 0b: 前置き", "決定 1: 一"]),
+        (
+            "# #1407: 決定の記録\n\n## 決定の記録\n\n### 決定 1: 一\n\n## 決定 2: 節の外\n",
+            ["決定 1: 一"],
+        ),
+    ],
+)
+def test_635_split_file_shapes_are_read_without_double_counting(fake, text, expected):
+    name = "issues/issue-9-design-decisions.md"
+    one_doc_pr(fake, name, text)
+    out, body = synced_section(fake)
+    assert section((name, expected)) in body
+    assert f"決定 {len(expected)} 件" in out.stdout
+
+
+@pytest.mark.parametrize("sub", ["check", "sync"])
+@pytest.mark.parametrize(
+    ("name", "text"),
+    [
+        ("issues/issue-9-design.md", "# 設計\n\n## 決定の記録（#9）\n\n本文だけ\n"),
+        ("issues/issue-9-design-decisions.md", "# #9 の決定\n\n本文だけ\n"),
+        ("issues/issue-9-design-decisions.md", "# 設計\n\n## 決定の記録\n\n`issues/issue-9-design-decisions.md` を見る\n"),
+    ],
+)
+def test_635_unreadable_document_stops_with_path_and_keeps_body(fake, sub, name, text):
+    body = f"## Summary\n\n{EXPECTED}\n## Test plan\n"
+    one_doc_pr(fake, name, text, body=body, extra={"issues/issue-1-design.md": DESIGN})
+    out = fake.run(sub, "7", "--repo", REPO)
+    assert out.returncode == 1, out.stdout + out.stderr
+    assert f"- {name}: " in out.stdout
+    assert "issues/issue-1-design.md:" not in out.stdout
+    assert not fake.writes()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "# 設計\n\n## 決定の記録\n\n決定は [分けたファイル](issue-9-design-decisions.md) にある。\n",
+        "# 決定の記録\n\n```markdown\n## 決定の記録（#1）\n\n### 決定 1: 例\n\n## 決定 2: 例\n```\n",
+        "# 雛形\n\n~~~\n## 決定の記録（#1）\n~~~\n",
+    ],
+)
+def test_635_head_file_template_and_fenced_headings_do_not_stop(fake, text):
+    one_doc_pr(fake, "issues/issue-9-design.md", text)
     out = fake.run("check", "7", "--repo", REPO)
     assert out.returncode == 0, out.stdout + out.stderr
     assert "設計文書 0 本 / 決定 0 件" in out.stdout
-
-    # 本文に「## 決めたこと」節がある状態で check を実行し、決定がないのに節が存在する食い違い（終了コード 1）
-    design_pr(fake, body=f"## Summary\n\n{EXPECTED}\n## Test plan\n", design=empty_design)
-    out_with_section = fake.run("check", "7", "--repo", REPO)
-    assert out_with_section.returncode == 1, out_with_section.stdout + out_with_section.stderr
-    assert "食い違い" in out_with_section.stdout
 
 
 def test_5_headings_inside_code_fences_are_not_counted(fake):
@@ -641,6 +727,20 @@ def test_30_render_places_section_like_sync_without_reading_github(fake, tmp_pat
     design_pr(fake, out.stdout)
     assert fake.run("sync", "7", "--repo", REPO).returncode == 0
     assert not fake.writes()
+
+
+def test_635_render_reads_new_shapes_and_does_not_stop(fake, tmp_path):
+    repo = design_checkout(tmp_path)
+    issues = repo / "issues"
+    (issues / "issue-1-design.md").write_text(DESIGN.replace("## 決定の記録", "## 決定の記録（#1）"), encoding="utf-8")
+    (issues / "issue-2-design-decisions.md").write_text("# #2: 決定の記録\n\n## 決定 1: 二\n", encoding="utf-8")
+    (issues / "issue-3-design-decisions.md").write_text("# 読めない\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "more"], check=True)
+    out = render(fake, repo, "## Summary\n")
+    assert out.returncode == 0, out.stderr
+    expected = EXPECTED.rstrip("\n") + "\n\n`issues/issue-2-design-decisions.md`\n\n- 決定 1: 二\n"
+    assert out.stdout == "## Summary\n\n" + expected
 
 
 def test_30_render_leaves_matching_body_unchanged(fake, tmp_path):

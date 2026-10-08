@@ -330,6 +330,10 @@ class Engine:
             if is_run and step.get("pr_from"):
                 self.take_pr(step["pr_from"])
             return self.back_or_next(sid, step), None, None
+        if step.get("on_section_missing") and st.cur.get("section_missing"):
+            # pr のステップが「設計と違う点」の節を欠いて PR を作らずに止まった（#1241 の I7）
+            st.failed_step = sid
+            return step["on_section_missing"], None, None
         if step.get("on_fail") and fail_kind_matches(step, st.cur):
             st.failed_step = sid
             return step["on_fail"], None, None

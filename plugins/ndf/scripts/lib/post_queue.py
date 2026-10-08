@@ -7,7 +7,8 @@
 
 GitHub の利用回数の上限に達すると投稿は失敗する。**失敗をそのまま止める側へ倒すと、
 レビューを 1 巡も進められない。** 上限のときだけ投稿する内容をローカルへ積み、回復した
-後に順に流す（#291）。
+後に順に流す（#291）。GitHub の一時的な失敗（5xx・本文の無い応答・ネットワークの失敗）も
+同じく積んで後で流す（#1843）。
 
 ## 用語
 
@@ -17,11 +18,12 @@ GitHub の利用回数の上限に達すると投稿は失敗する。**失敗�
 | 積む | 待ち行列へ項目を 1 件足すこと |
 | 流す | 待ち行列の項目を順に GitHub へ送り、送れたものを消すこと |
 | 上限 | GitHub の利用回数の上限。一次（毎時の総数）と二次（短時間の集中）を区別しない |
+| 一時的な失敗 | 送り直せば届く見込みのある失敗（HTTP 500・502・503・504、`(HTTP nnn)` の無い本文なしの応答、ネットワークの失敗）。上限とは別に見分ける |
 | 投稿 | GitHub の状態を変える呼び出し |
 
 ## この層が持つもの・持たないもの
 
-**持つのは、積む・流す・上限を見分けるところまでである。** どの投稿を積むか、積んだまま
+**持つのは、積む・流す・上限と一時的な失敗を見分けるところまでである。** どの投稿を積むか、積んだまま
 収束させてよいかは呼び出し側（`cross-review` の `state.py` / `cross-refactoring` の
 `refactor.py`）が決める。
 
@@ -40,6 +42,7 @@ GitHub の利用回数の上限に達すると投稿は失敗する。**失敗�
 | `repo` / `pr` | 宛先 |
 | `actor` | 投稿する主体のログイン名。冪等の照合で投稿者を見るために持つ |
 | `created_at` / `attempts` / `last_error` | 積んだ時刻と、送ろうとした回数と、最後の失敗 |
+| `last_transient` | 最後の送りが一時的な失敗で終わったか。真のときは、既投稿の照会ができないと送らない |
 | `request` | 送る内容。`method` / `path` / `fields`（GraphQL は `query`） |
 | `match` | 冪等の照会で「同じ」とみなす条件 |
 | `extra` | 呼び出し側が使う付随情報（担当・ラウンドなど）。この層は読まない |
@@ -68,6 +71,7 @@ import durable_keys  # noqa: E402  記録の有無を DBOS を読まずに確か
 import gh_graphql  # noqa: E402  未解決のスレッドの問い合わせ（#1142 の L0）
 import gh_quota  # noqa: E402  上限の語（#1142 の L0）
 import proc  # noqa: E402  子プロセスの起動（#1142 の L0）
+from post_requests import request_for  # noqa: E402  種別ごとの送る内容と冪等の照合条件
 
 # 積める種別。**この版で積む側があるのは `pr-comment` だけである。** ほかの 3 つは
 # 受け皿として持つ（投稿の責務を進行側へ移すのは次の変更、#350）。
@@ -94,15 +98,6 @@ FAILED = "failed"
 _UNRESOLVED_QUERY = gh_graphql.UNRESOLVED_THREADS_QUERY
 _UNRESOLVED_JQ = ".data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false) | .id"
 
-_RESOLVE_MUTATION = """
-mutation($threadId: ID!) {
-  resolveReviewThread(input: {threadId: $threadId}) {
-    thread { id isResolved }
-  }
-}
-"""
-
-
 # ---------------- 上限の見分け ----------------
 
 _HTTP_RE = re.compile(r"\(HTTP (\d{3})\)")
@@ -111,6 +106,13 @@ _RATE_WORDS = ("rate limit", "rate_limited", "abuse detection")
 # 指した位置を差分の中に見つけられないことを表す語。実測した応答は
 # `Line could not be resolved` と `Path could not be resolved` の 2 つ。
 _POSITION_WORD = "could not be resolved"
+# 一時的な失敗（#1843）: 状態、本文を読めなかった語（HTTP 500・本文なしの実例）、ネットワークの語（前 3 つは実測）。
+TRANSIENT_STATUSES = (500, 502, 503, 504)
+_EMPTY_BODY_WORDS = ("unexpected end of json input", "unexpected eof")
+_NETWORK_WORDS = ("error connecting to", "dial tcp", "connection refused", "connection reset", "i/o timeout", "tls handshake timeout")
+_NETWORK_WORDS += ("context deadline exceeded",)
+# 流し直す待ちの合計と間隔（秒）。上限の再実行の既定（900 秒・30 秒）を超えない（#1843 の決定 4）。
+TRANSIENT_MAX_WAIT, TRANSIENT_INTERVAL = 300.0, 30.0
 
 
 class Attempt(NamedTuple):
@@ -228,6 +230,17 @@ def is_position_unresolved(attempt: Attempt) -> bool:
     return _POSITION_WORD in f"{attempt.message} {attempt.stderr}".lower()
 
 
+def is_transient_failure(attempt: Attempt) -> bool:
+    """この失敗が一時的なもの（送り直せば届く見込みがある）か（#1843）。上限の語を持たず、状態が 5xx か、状態が無く
+    本文が空で応答を読めなかったか、状態が無くネットワークの失敗のとき真。`gh` を呼ばない（残り回数を引かない）。"""
+    if attempt.ok or _has_rate_words(f"{attempt.message} {attempt.stderr}"):
+        return False
+    if attempt.http is not None:
+        return attempt.http in TRANSIENT_STATUSES
+    err, empty = (attempt.stderr or "").lower(), not (attempt.stdout or "").strip()
+    return (empty and any(w in err for w in _EMPTY_BODY_WORDS)) or any(w in err for w in _NETWORK_WORDS)
+
+
 # 項目そのものが送れないことを表す状態。送り直しても同じ応答が返る（宛先が無い・
 # 要求が受け付けられない）。401 / 403 は項目ではなく認証か上限の問題であり、後ろの
 # 項目も同じく送れないため含めない。
@@ -245,75 +258,6 @@ def is_permanent_failure(item: dict[str, Any], attempt: Attempt) -> bool:
     if attempt.ok or item.get("kind") in _NOT_DROPPED_KINDS:
         return False
     return attempt.http in PERMANENT_STATUSES and not is_rate_limited(attempt)
-
-
-# ---------------- 送る内容の組み立て ----------------
-
-
-def _request_pr_comment(repo: str, pr: int, fields: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "request": {"method": "POST", "path": f"repos/{repo}/issues/{int(pr)}/comments", "fields": {"body": fields["body"]}},
-        "match": {"body": fields["body"]},
-    }
-
-
-def _request_review_post(repo: str, pr: int, fields: dict[str, Any]) -> dict[str, Any]:
-    body = {"body": fields.get("body", ""), "event": fields["event"]}
-    # **投稿先の commit は積んだ時点で決める。** Reviews API は `commit_id` を
-    # 省くと送った時点の head へ付けるため、積んでから流すまでに head が進むと、
-    # レビューが読んでいない commit に付く。行を指す `comments` はその commit の
-    # 差分で解決されるため、位置がずれるか 422 で落ちる。ラウンド開始時に読んだ
-    # `rounds[-1].head_sha` を呼び出し側が渡す。
-    if fields.get("commit_id"):
-        body["commit_id"] = fields["commit_id"]
-    if fields.get("comments"):
-        body["comments"] = fields["comments"]
-    match = {"event": fields["event"], "body": fields.get("body", "")}
-    # **照合をラウンドの開始より後へ絞る。** ラウンドの番号は実行ごとに 1 から数え
-    # 直すため、番号と席の鍵だけでは前の実行のレビューに一致する。
-    if fields.get("since"):
-        match["since"] = fields["since"]
-    return {
-        "request": {"method": "POST", "path": f"repos/{repo}/pulls/{int(pr)}/reviews", "fields": body},
-        "match": match,
-    }
-
-
-def _request_review_reply(repo: str, pr: int, fields: dict[str, Any]) -> dict[str, Any]:
-    target = int(fields["in_reply_to"])
-    return {
-        "request": {
-            "method": "POST",
-            "path": f"repos/{repo}/pulls/{int(pr)}/comments/{target}/replies",
-            "fields": {"body": fields["body"]},
-        },
-        "match": {"in_reply_to": target, "body": fields["body"]},
-    }
-
-
-def _request_thread_resolve(repo: str, pr: int, fields: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "request": {"method": "GRAPHQL", "path": "graphql", "query": _RESOLVE_MUTATION, "fields": {"threadId": fields["thread_id"]}},
-        "match": {"thread_id": fields["thread_id"]},
-    }
-
-
-# 種別ごとの組み立て。**網羅はこの表が持つ。** 制御構文に散らすと、種別を足したときに
-# どの枝を足し忘れたかが読めない。
-_REQUEST_BUILDERS = {
-    "pr-comment": _request_pr_comment,
-    "review-post": _request_review_post,
-    "review-reply": _request_review_reply,
-    "thread-resolve": _request_thread_resolve,
-}
-
-
-def request_for(kind: str, repo: str, pr: int, fields: dict[str, Any]) -> dict[str, Any]:
-    """種別ごとに、送る要求と冪等の照合条件を組む。"""
-    builder = _REQUEST_BUILDERS.get(kind)
-    if builder is None:
-        raise ValueError(f"未知の種別: {kind}")
-    return builder(repo, pr, fields)
 
 
 def send(item: dict[str, Any]) -> Attempt:
@@ -497,6 +441,12 @@ class FlushResult(NamedTuple):
     rate_limited: bool
     # 恒久的な失敗で飛ばし、`dropped/` へ控えを書いた項目（#962）。
     dropped: list[dict[str, Any]] = []
+    transient: bool = False  # 先頭で止まった項目の失敗が一時的なものか（#1843）。`rate_limited` と同時に立たない
+
+    @property
+    def waitable(self) -> bool:
+        """待てば流れる失敗（上限か一時的な失敗）か。呼び出し側が「失敗に数えない」を決める唯一の印。"""
+        return self.rate_limited or self.transient
 
 
 def _seq_order(name: str) -> tuple[int, str]:
@@ -512,11 +462,14 @@ def _aside(directory: pathlib.Path, name: str, item: dict[str, Any]) -> pathlib.
 
 
 def _try_once(directory: str, name: str, item: dict[str, Any]) -> dict[str, Any]:
-    """送りの試行 1 回。既投稿の照合 → 送る → 恒久の失敗の見分けの順で、項目の記録を返す。"""
+    """送りの試行 1 回。既投稿の照合 → 送る → 恒久の失敗の見分けの順で、項目の記録を返す。**前の送りが一時的な失敗で
+    照会もできない項目は送らない**（#1843 の決定 3。HTTP 500 は作られた後に返ることがあり、送ると 2 件並ぶ）。"""
     item = dict(item)
     found, row = posted_match(item)
     if found is True:
         return {"state": "skipped", "item": {**item, "response": row} if row is not None else item}
+    if found is None and item.get("last_transient"):
+        return {"state": "unsent", "item": item, "rate_limited": False, "transient": True}
     attempt = send(item)
     if attempt.ok:
         item["response"] = None
@@ -527,7 +480,9 @@ def _try_once(directory: str, name: str, item: dict[str, Any]) -> dict[str, Any]
     if is_permanent_failure(item, attempt):
         _aside(pathlib.Path(directory), name, item)
         return {"state": "dropped", "item": item}
-    return {"state": "unsent", "item": item, "rate_limited": is_rate_limited(attempt)}
+    limited = is_rate_limited(attempt)
+    item["last_transient"] = transient = not limited and is_transient_failure(attempt)
+    return {"state": "unsent", "item": item, "rate_limited": limited, "transient": transient}
 
 
 _FLOWS: dict[str, Any] = {}
@@ -673,7 +628,7 @@ class Queue:
         項目で止まると、後ろの決着とまとめが何度流しても送られない。
         """
         done: dict[str, list[dict[str, Any]]] = {"sent": [], "skipped": [], "dropped": []}
-        failed, rate_limited, remaining = None, False, 0
+        failed, rate_limited, transient, remaining = None, False, False, 0
         if not self._dormant():
             with self._session() as fl:
                 rows = [(f"{n}.json", n, nxt, item) for n, nxt, item in self._scan(fl)[0]]
@@ -685,10 +640,10 @@ class Queue:
                     if out["state"] in done:
                         done[out["state"]].append(out["item"])
                         continue
-                    failed, rate_limited = out["item"], bool(out.get("rate_limited"))
+                    failed, rate_limited, transient = out["item"], bool(out.get("rate_limited")), bool(out.get("transient"))
                     break
                 remaining = len(self._scan(fl)[0]) + len(self._left)
-        return FlushResult(done["sent"], done["skipped"], failed, remaining, rate_limited, done["dropped"])
+        return FlushResult(done["sent"], done["skipped"], failed, remaining, rate_limited, done["dropped"], transient)
 
 
 def enqueue(
@@ -701,6 +656,7 @@ def enqueue(
     extra: dict[str, Any] | None = None,
     last_error: str = "",
     attempts: int = 0,
+    last_transient: bool | None = None,
 ) -> dict[str, Any]:
     """投稿する内容を 1 件積み、連番を入れた項目を返す。"""
     if kind not in KINDS:
@@ -708,14 +664,14 @@ def enqueue(
     built = request_for(kind, repo, int(pr), fields)
     created = _dt.datetime.now(_dt.timezone.utc).astimezone().isoformat(timespec="seconds")
     item = {"seq": 0, "kind": kind, "repo": repo, "pr": int(pr), "actor": actor, "created_at": created, "attempts": attempts}
-    item.update(last_error=last_error, request=built["request"], match=built["match"], extra=extra or {})
+    item.update(last_error=last_error, request=built["request"], match=built["match"], extra=extra or {}, last_transient=last_transient)
     return queue.add(item, extra.get("ident") if extra else pr)
 
 
 def post(
     queue: Queue, kind: str, repo: str, pr: int, fields: dict[str, Any], actor: str | None = None, extra: dict[str, Any] | None = None
 ) -> tuple[str, Attempt | None]:
-    """投稿を 1 件行う。上限のときは積んで先へ進む。
+    """投稿を 1 件行う。上限か一時的な失敗のときは積んで先へ進む。
 
     **待ち行列に先客がいるときは、送らずに積む。** 先に流してから送らないと、
     Pull Request 上での順序が入れ替わる。
@@ -731,8 +687,9 @@ def post(
     attempt = send(item)
     if attempt.ok:
         return POSTED, attempt
-    if is_rate_limited(attempt):
-        enqueue(queue, kind, repo, pr, fields, actor=actor, extra=extra, last_error=attempt.summary(), attempts=1)
+    transient = not is_rate_limited(attempt) and is_transient_failure(attempt)
+    if transient or is_rate_limited(attempt):
+        enqueue(queue, kind, repo, pr, fields, actor=actor, extra=extra, last_error=attempt.summary(), attempts=1, last_transient=transient)
         return QUEUED, attempt
     return FAILED, attempt
 
@@ -759,6 +716,26 @@ def retry(cmd: list[str], max_wait: float = 900.0, interval: float = 30.0, stdin
     ).value
 
 
+_sleep = time.sleep  # `reflush` の待ち。テストが差し替える
+
+
+def reflush(flush: Any) -> dict[str, str]:
+    """`flush()`（`PENDING_REMAINING=` と `PENDING_TRANSIENT=` を読んだ dict）を、一時的な失敗で残る間だけ
+    `TRANSIENT_INTERVAL` 秒おきに合計 `TRANSIENT_MAX_WAIT` 秒まで打ち直し、最後の結果を返す。上限では待たない（#1843 の決定 4・5）。"""
+    import waits  # 読む側（state.py ほか）が tenacity を要しないよう、ここで読む
+
+    def announce(seconds: float, _next: int) -> None:
+        print(f"⏳ 一時的な失敗のため {seconds:g} 秒待って投稿キューを流し直します", file=sys.stderr)
+
+    left = lambda v: v.get("PENDING_REMAINING", "0") not in ("", "0") and v.get("PENDING_TRANSIENT") == "1"  # noqa: E731
+    return (
+        waits.retry_call(
+            flush, left, max_wait=TRANSIENT_MAX_WAIT, interval=TRANSIENT_INTERVAL, sleep=lambda s: _sleep(s), on_wait=announce
+        ).value
+        or {}
+    )
+
+
 # ---------------- CLI ----------------
 
 
@@ -771,7 +748,8 @@ def cmd_post(args: argparse.Namespace) -> int:
     outcome, attempt = post(q, args.kind, args.repo, args.pr, {"body": _read_body(args.body_file)}, actor=args.actor or None)
     print(f"QUEUED={'1' if outcome == QUEUED else '0'}")
     if outcome == QUEUED:
-        print(f"⏳ 上限のため待ち行列へ積みました（残り {q.count()} 件）", file=sys.stderr)
+        why = "先に積んだ投稿が残っている" if attempt is None else "一時的な失敗の" if is_transient_failure(attempt) else "上限の"
+        print(f"⏳ {why}ため待ち行列へ積みました（残り {q.count()} 件）", file=sys.stderr)
         return 0
     if outcome == FAILED:
         print(f"❌ 投稿に失敗しました: {attempt.summary() if attempt else ''}", file=sys.stderr)
@@ -786,6 +764,7 @@ def cmd_flush(args: argparse.Namespace) -> int:
     print(f"PENDING_SKIPPED={len(result.skipped)}")
     print(f"PENDING_DROPPED={len(result.dropped)}")
     print(f"PENDING_REMAINING={result.remaining}")
+    print(f"PENDING_TRANSIENT={'1' if result.transient else '0'}")
     for item in result.dropped:
         print(f"⚠️ 送れない項目を飛ばしました ({item.get('kind')} #{item.get('seq')}): {item.get('last_error') or ''}", file=sys.stderr)
     return 0
@@ -809,7 +788,7 @@ def main() -> None:
     p = argparse.ArgumentParser(description="投稿の待ち行列（#291）")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    sp = sub.add_parser("post", help="投稿する。上限のときは積んで終了コード 0")
+    sp = sub.add_parser("post", help="投稿する。上限か一時的な失敗のときは積んで終了コード 0")
     sp.add_argument("--dir", required=True)
     sp.add_argument("--kind", choices=list(KINDS), required=True)
     sp.add_argument("--repo", required=True)

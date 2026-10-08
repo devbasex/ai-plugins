@@ -54,6 +54,42 @@ def _prepare_deps(wt, **kw) -> str | None:
     return f"作業ツリーは作ったが依存の用意に失敗した: {err}" if err else None
 
 
+def _resolve_base(plan: dict, repo: str) -> tuple[str | None, str | None]:
+    """作業ツリーの起点（起点 → base_branch → 宣言の順）を決め、origin なら fetch する。(起点, 誤りの文) を返す。"""
+    base = plan.get("起点")
+    if not base:
+        b = plan.get("base_branch") or decl.declared_base_of([repo])
+        if not b:
+            return None, "作業ツリーの起点が分からない（計画の 起点 か base_branch、または .ndf/worktree.json の base_branch）"
+        base = f"origin/{b}"
+    if base.startswith("origin/"):
+        subprocess.run(["git", "-C", repo, "fetch", "-q", "origin"], capture_output=True, text=True)
+    return base, None
+
+
+def _add_worktree_with_retry(repo: str, wt: Path, branch: str, base: str, sleep) -> subprocess.CompletedProcess:
+    """作業ツリーを作る。.git/config の lock で落ちたら途中の生成物を片付けてやり直す。最後の結果を返す。"""
+    p = None
+    for i in range(WORKTREE_LOCK_RETRIES + 1):
+        if i:
+            sleep(WORKTREE_LOCK_WAIT)
+        has = (
+            subprocess.run(
+                ["git", "-C", repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], capture_output=True, text=True
+            ).returncode
+            == 0
+        )
+        cmd = ["git", "-C", repo, "worktree", "add", "-q"] + ([str(wt), branch] if has else ["-b", branch, str(wt), base])
+        p = subprocess.run(cmd, capture_output=True, text=True)
+        if p.returncode == 0 or not is_config_lock(p.stderr):
+            return p
+        # lock で途中まで作られた作業ツリーは、次のやり直しの前に片付ける
+        subprocess.run(["git", "-C", repo, "worktree", "prune"], capture_output=True, text=True)
+        if wt.exists() and not any(wt.iterdir()):
+            wt.rmdir()
+    return p
+
+
 def ensure_worktree(plan: dict, sleep=time.sleep) -> str | None:
     """計画に branch があり作業場所が無ければ、作業ツリーを作る。誤りの文を返す（無ければ None）。
 
@@ -71,34 +107,12 @@ def ensure_worktree(plan: dict, sleep=time.sleep) -> str | None:
     repo = plan.get("リポジトリ") or (str(wt).split("/.worktrees/")[0] if "/.worktrees/" in str(wt) else None)
     if not repo:
         return "作業ツリーの元のリポジトリが分からない（計画に リポジトリ を書く）"
-    base = plan.get("起点")
-    if not base:
-        b = plan.get("base_branch") or decl.declared_base_of([repo])
-        if not b:
-            return "作業ツリーの起点が分からない（計画の 起点 か base_branch、または .ndf/worktree.json の base_branch）"
-        base = f"origin/{b}"
-    if base.startswith("origin/"):
-        subprocess.run(["git", "-C", repo, "fetch", "-q", "origin"], capture_output=True, text=True)
-    p = None
-    for i in range(WORKTREE_LOCK_RETRIES + 1):
-        if i:
-            sleep(WORKTREE_LOCK_WAIT)
-        has = (
-            subprocess.run(
-                ["git", "-C", repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], capture_output=True, text=True
-            ).returncode
-            == 0
-        )
-        cmd = ["git", "-C", repo, "worktree", "add", "-q"] + ([str(wt), branch] if has else ["-b", branch, str(wt), base])
-        p = subprocess.run(cmd, capture_output=True, text=True)
-        if p.returncode == 0:
-            return _prepare_deps(wt, main_dir=repo)
-        if not is_config_lock(p.stderr):
-            break
-        # lock で途中まで作られた作業ツリーは、次のやり直しの前に片付ける
-        subprocess.run(["git", "-C", repo, "worktree", "prune"], capture_output=True, text=True)
-        if wt.exists() and not any(wt.iterdir()):
-            wt.rmdir()
+    base, err = _resolve_base(plan, repo)
+    if err:
+        return err
+    p = _add_worktree_with_retry(repo, wt, branch, base, sleep)
+    if p.returncode == 0:
+        return _prepare_deps(wt, main_dir=repo)
     return f"作業ツリーを作れない: {p.stderr.strip()[:300]}"
 
 
@@ -113,6 +127,8 @@ MVV_PY = f"python3 {HERE / 'mvv-gate.py'}"
 SPRINT_STATE_PY = f"python3 {HERE / 'sprint-state.py'}"
 GLOSSARY_PY = f"python3 {HERE / 'glossary.py'}"
 SPEC_COPY_PY = f"python3 {HERE / 'spec-copy.py'}"
+# 完了判定の設計との突き合わせ（確認 (a) tests・確認 (b) specs。#1241）
+DESIGN_MATCH_PY = f"python3 {HERE / 'design-match.py'}"
 DECISIONS_SH = HERE / "pr-body-decisions.sh"  # 設計の PR の本文の「決めたこと」を設計文書の決定へ合わせる
 # 設計の PR の本文の「決めたこと」を設計文書の決定へ合わせてから push する（CI の pr-body-decisions が見る）
 PUSH_DESIGN = f"git push -q && bash {DECISIONS_SH} sync {{pr}}"

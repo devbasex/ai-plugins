@@ -15,6 +15,8 @@ import proc
 
 ORIGIN_URL = re.compile(r"[:/](?P<owner>[^/:]+)/(?P<name>[^/]+?)(?:\.git)?/?$")
 WORKTREE_DECL = Path(".ndf") / "worktree.json"
+# 確定仕様の置き場（リポジトリの根からの相対）。確定仕様化と設計との突き合わせが同じものを読む
+SPEC_DIR = "docs/specifications"
 
 
 def main_dir(root) -> Path | None:

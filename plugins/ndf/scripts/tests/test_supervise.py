@@ -2074,7 +2074,8 @@ def test_new_impl_opens_pr_before_test_all(tmp_path):
     assert p.returncode == 0, p.stderr
     steps = json.loads(out.read_text())["steps"]
     st = {s["id"]: s for s in steps}
-    assert st["test-limited"]["next"] == "pr" and st["pr"]["next"] == "test-all"
+    # standard（既定）では範囲テストと PR の間に設計との突き合わせが入る（#1241）
+    assert st["test-limited"]["next"] == "design-tests" and st["design-match"]["next"] == "pr" and st["pr"]["next"] == "test-all"
     assert st["doc-lint"]["next"] == "ready" and st["ready"]["next"] == "merge-gate" and st["merge-gate"]["next"] == "merge"
     assert "git push" in st["ready"]["cmd"] and "gh pr ready {pr}" in st["ready"]["cmd"]
     assert st["fix"]["next"] == "test-limited"
