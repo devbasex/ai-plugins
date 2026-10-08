@@ -912,7 +912,7 @@
     {
       "term": "投稿キュー",
       "context": "ndf-cross-review",
-      "meaning": "送る前に投稿を積み、上限で送れなければ残す仕組み（lib/post_queue.py）。スプリント 2c の後、項目は耐久の記録に置く",
+      "meaning": "送る前に投稿を積み、上限か一時的な失敗で送れなければ残す仕組み（lib/post_queue.py。一時的な失敗は #1843）。スプリント 2c の後、項目は耐久の記録に置く",
       "code": "post_queue",
       "source": "docs/specifications/cross-review-writes-to-conductor.md",
       "deprecated": [
