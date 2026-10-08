@@ -320,7 +320,7 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 代表指摘 | — | 統合した組で判定が読む 1 件。統合された側は merged_into を持つ | — | — | `docs/specifications/cross-review-evidence-based.md` |
 | 新しい指摘 | — | 直前のラウンドの指摘と一致しない、そのラウンドの指摘。収束ループはこれが 0 件になるまで回す | — | — | `docs/specifications/cross-review-round-inputs.md` |
 | 修正担当 | — | 指摘を直してコミットするサブエージェント（/ndf:fix を実行する） | 修正の担当 | — | `docs/specifications/cross-review-writes-to-conductor.md` |
-| 投稿キュー | `post_queue` | 送る前に投稿を積み、上限で送れなければ残す仕組み（lib/post_queue.py）。スプリント 2c の後、項目は耐久の記録に置く | 投稿の待ち行列 | — | `docs/specifications/cross-review-writes-to-conductor.md` |
+| 投稿キュー | `post_queue` | 送る前に投稿を積み、上限か一時的な失敗で送れなければ残す仕組み（lib/post_queue.py。一時的な失敗は #1843）。スプリント 2c の後、項目は耐久の記録に置く | 投稿の待ち行列 | — | `docs/specifications/cross-review-writes-to-conductor.md` |
 | 重複投稿 | — | 送ろうとした投稿と同じものとして、すでに Pull Request にある投稿 | 先客 | — | `docs/specifications/cross-review-writes-to-conductor.md` |
 | 総評 | — | レビュー本体に書く文章（body）。インラインのコメントとは別に置く | — | — | `docs/specifications/cross-review-writes-to-conductor.md` |
 | drive の状態 | `drive_state` | 収束ループの drive.py が Pull Request ごとに持つ状態ファイル（drive-pr<N>.json / drive-rf<ID>.json）。stage と init_vars を持つ。スプリント 2c の Q3・Q4 で耐久の記録へ移して廃止する | — | — | — |
@@ -335,6 +335,8 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 最終ステータス | `review_status` | cross-review の収束の終わり方を表す 1 語（approved / unverified / final の値 / unknown）。loop_drive.review_status が状態ファイルから決める | — | — | — |
 | 回答ファイル | — | 駆動が止まりで示す items[0].result_file。止まりへの答えを書き、同じコマンドの打ち直しが読む。担当 CLI の結果ファイルとは別 | — | — | — |
 | 席 | — | cross-review の 1 ラウンドの 2 つの担当の枠。名前は kiro / kiro-2 の形（SEAT_PATTERN） | — | — | `docs/specifications/cross-assignee-reassignment-on-no-result.md` |
+| 一時的な失敗 | — | 送り直せば届く見込みのある投稿の失敗（HTTP 500・502・503・504、`(HTTP nnn)` の無い本文なしの応答、ネットワークの失敗）。上限とは別に見分け、投稿キューに残して後で流す（#1843） | — | — | — |
+| 投稿待ち | — | 担当の結果は記録へ取り込んであり、投稿だけが投稿キューに残っている状態。結果なし（NO_RESULT）とは別である（#1843） | — | — | — |
 
 ## NDF の cross-refactoring（`ndf-cross-refactoring`）
 
