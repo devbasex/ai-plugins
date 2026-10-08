@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import re
 import urllib.parse
-from typing import Any, Callable
+from typing import Any, Callable, NamedTuple
 
 import gh_call
 import gh_fields
@@ -182,6 +182,11 @@ def _rest_pages(base: str, keep: Callable[[Any], bool], shape: Callable[[Any], A
     return Attempt(out[:limit], "", "rest")
 
 
+def _flag_args(flag: str, names: list[str] | None) -> list[str]:
+    """名前の並びを `<flag> <名前>` の繰り返しの argv へ広げる。"""
+    return [arg for name in names or [] for arg in (flag, name)]
+
+
 def _list(kind: str, repo: str | None, fields: str, state: str, labels: list[str] | None, limit: int) -> Attempt:
     slug = _slug(repo)
     labels = list(labels or [])
@@ -195,9 +200,7 @@ def _list(kind: str, repo: str | None, fields: str, state: str, labels: list[str
             base, lambda d: _keep_list_item(kind, d, state, labels), lambda d: gh_fields.to_json_shape(kind, d, fields), limit
         )
 
-    args = [kind, "list", "--repo", slug, "--state", state, "--limit", str(limit), "--json", fields]
-    for name in labels:
-        args += ["--label", name]
+    args = [kind, "list", "--repo", slug, "--state", state, "--limit", str(limit), "--json", fields, *_flag_args("--label", labels)]
     graphql = lambda: _graphql_cli(args)  # noqa: E731
     return gh_quota.with_fallback(by_rest, graphql) if gh_fields.covers(kind, fields) else graphql()
 
@@ -210,6 +213,24 @@ def pr_list(repo: str | None, fields: str, state: str = "open", labels: list[str
 def issue_list(repo: str | None, fields: str, state: str = "open", labels: list[str] | None = None, limit: int = 30) -> Attempt:
     """`gh issue list --json` と同じ形の一覧（PR を含めない）。`state` は open / closed / all。"""
     return _list("issue", repo, fields, state, labels, limit)
+
+
+ISSUE_SEARCH_FIELDS = "number,title,url,state"
+
+
+def issue_search(repo: str, query: str, state: str = "open", limit: int = 30) -> Attempt:
+    """`gh issue list --search <query>` を 1 回呼び、`[{"number", "title", "url", "state"}]` を返す。
+
+    `state` は open / closed / all。検索の語は GitHub の検索の構文のまま渡す（句を引用符で囲むと句で当たる）。
+    0 件は空の並び、読めない・失敗は `error` を持つ（0 件と取り違えない）。
+    """
+    if state not in ("open", "closed", "all"):
+        raise ValueError(f"state は open / closed / all のどれか: {state}")
+    args = ["issue", "list", "--repo", repo, "--state", state, "--search", query, "--limit", str(int(limit))]
+    a = _graphql_cli(args + ["--json", ISSUE_SEARCH_FIELDS])
+    if a.ok and not isinstance(a.value, list):
+        return Attempt(None, "gh issue list の出力が並びでない", a.via)
+    return a
 
 
 def _created(a: Attempt) -> Attempt:
@@ -237,9 +258,7 @@ def pr_create(repo: str | None, title: str, body: str, head: str, base: str, dra
 def issue_create(repo: str | None, title: str, body: str, labels: list[str] | None = None) -> Attempt:
     slug = _slug(repo)
     payload = {"title": title, "body": body, **({"labels": list(labels)} if labels else {})}
-    args = ["issue", "create", "--repo", slug, "--title", title, "--body-file", "-"]
-    for name in labels or []:
-        args += ["--label", name]
+    args = ["issue", "create", "--repo", slug, "--title", title, "--body-file", "-", *_flag_args("--label", labels)]
     return _created(gh_quota.with_fallback(lambda: _rest(f"repos/{slug}/issues", "POST", payload), lambda: _graphql_cli(args, body, False)))
 
 
@@ -270,43 +289,38 @@ def _rest_remove_labels(slug: str, n: int, remove_labels: list[str] | None) -> A
     return None
 
 
-def _edit_cli_args(
-    kind: str, slug: str, n: int, title: str | None, body: str | None, add_labels: list[str] | None, remove_labels: list[str] | None
-) -> list[str]:
+class _Edit(NamedTuple):
+    """PR / 課題の編集内容。None（と空の並び）の項目は変えない。"""
+
+    title: str | None
+    body: str | None
+    add_labels: list[str] | None
+    remove_labels: list[str] | None
+
+
+def _edit_cli_args(kind: str, slug: str, n: int, edit: _Edit) -> list[str]:
     args = [kind, "edit", str(n), "--repo", slug]
-    args += ["--title", title] if title is not None else []
-    args += ["--body-file", "-"] if body is not None else []
-    for name in add_labels or []:
-        args += ["--add-label", name]
-    for name in remove_labels or []:
-        args += ["--remove-label", name]
-    return args
+    args += ["--title", edit.title] if edit.title is not None else []
+    args += ["--body-file", "-"] if edit.body is not None else []
+    return args + _flag_args("--add-label", edit.add_labels) + _flag_args("--remove-label", edit.remove_labels)
 
 
-def _edit(
-    kind: str,
-    repo: str | None,
-    number: int,
-    title: str | None,
-    body: str | None,
-    add_labels: list[str] | None,
-    remove_labels: list[str] | None,
-) -> Attempt:
+def _edit(kind: str, repo: str | None, number: int, edit: _Edit) -> Attempt:
     slug = _slug(repo)
     n = int(number)
 
     def by_rest() -> Attempt:
         return (
-            _rest_patch_fields(kind, slug, n, title, body)
-            or _rest_add_labels(slug, n, add_labels)
-            or _rest_remove_labels(slug, n, remove_labels)
+            _rest_patch_fields(kind, slug, n, edit.title, edit.body)
+            or _rest_add_labels(slug, n, edit.add_labels)
+            or _rest_remove_labels(slug, n, edit.remove_labels)
             or Attempt(True, "", "rest")
         )
 
-    args = _edit_cli_args(kind, slug, n, title, body, add_labels, remove_labels)
+    args = _edit_cli_args(kind, slug, n, edit)
 
     def by_graphql() -> Attempt:
-        a = _graphql_cli(args, body, False)
+        a = _graphql_cli(args, edit.body, False)
         return a._replace(value=True) if a.ok else a
 
     return gh_quota.with_fallback(by_rest, by_graphql)
@@ -320,7 +334,7 @@ def pr_edit(
     add_labels: list[str] | None = None,
     remove_labels: list[str] | None = None,
 ) -> Attempt:
-    return _edit("pr", repo, number, title, body, add_labels, remove_labels)
+    return _edit("pr", repo, number, _Edit(title, body, add_labels, remove_labels))
 
 
 def issue_edit(
@@ -331,7 +345,7 @@ def issue_edit(
     add_labels: list[str] | None = None,
     remove_labels: list[str] | None = None,
 ) -> Attempt:
-    return _edit("issue", repo, number, title, body, add_labels, remove_labels)
+    return _edit("issue", repo, number, _Edit(title, body, add_labels, remove_labels))
 
 
 def comment(repo: str | None, number: int, body: str) -> Attempt:

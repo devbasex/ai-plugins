@@ -2,72 +2,50 @@
 name: out-of-scope
 description: "Capture a finding outside the current scope as an issue at the moment it is found. Use when a defect or improvement appears outside what this change fixes（範囲外の課題・その場で起票・対象外と判断した指摘）."
 allowed-tools:
+  - Bash(python3 *)
   - Bash(gh *)
-  - Bash(git *)
   - Read
   - Grep
 ---
 
 # 範囲外の課題を、見つけたその場で起票する
 
-作業の途中で見つけた**この変更の範囲に含まれない課題**を、発見の瞬間に issue へ残す。
-
-**この手順は工程の外に置く。** 順序を持たず、モードごとの要否も持たない。実装・リファクタリング・
-レビュー・完了判定・原因の調査のいずれからも呼ばれる。範囲外の課題は見つかるか見つからないか
-であって、変更の重さが決めるものではない。
+作業の途中で見つけた**この変更の範囲に含まれない課題**を、発見の瞬間に issue へ残す。工程の外に置き、どの工程からも
+呼ぶ。決まった手順は `issue-file.py` が行い、1 行の JSON と終了コードで返す（`$SCRIPTS` は `development-workflow` の
+`references/scripts-lookup.md`）。
 
 ## 用語
 
 | 用語 | この文書での意味 |
 | --- | --- |
 | 範囲外の課題 | この変更の受け入れ条件にも、直す対象にも含まれない課題 |
-| 起票 | GitHub の issue を新しく作ること |
-| 由来 | その課題を見つけた元。Pull Request がまだ無ければ、起点の issue になる |
-| 起票先 | `gh issue create` が issue を作るリポジトリ |
+| 由来 | その課題を見つけた元。`PR #<番号>` か `issue #<番号>`。Pull Request がまだ無ければ起点の issue |
 
 ## いつ呼ぶか
 
 | 呼び出し元 | 呼ぶ場面 |
 | --- | --- |
-| `tdd-cycle` | 実装中に、対象の外で不具合や不整合に気づいたとき |
-| `refactoring` | 手を付ける範囲の外に、直したい兆候を見つけたとき |
+| `tdd-cycle` / `refactoring` | 対象・範囲の外で不具合や直したい兆候に気づいたとき |
 | `cross-review` / `pr-review` / `fix` | 指摘を範囲外と判断したとき |
 | `quality-gates` | 完了報告の「範囲外と判断したもの」を書くとき |
 | `problem-solving` | 根本原因がこの変更の範囲の外にあったとき |
-
-```mermaid
-flowchart TD
-    H[実装] -.-> S[起票]
-    R[リファクタリング] -.-> S
-    V[コードレビュー] -.-> S
-    K[完了判定] -.-> S
-    S -.番号.-> T[振り返り]
-```
 
 ## 手順
 
 ### 1. 範囲かを照合する
 
-**この手順は基準を新しく作らない。** 次の 2 つと突き合わせる。
-
-| 照合の相手 | 読む場所 |
-| --- | --- |
-| 受け入れ条件 | `requirements-design` が作った仕様（`issues/` 配下） |
-| やらないこと | `implementation-plan` の実装計画のファイルの「目的と非目的」 |
-
-どちらも無い変更では、依頼文が範囲を決める。
+**基準を新しく作らない。** 受け入れ条件（`requirements-design` の仕様、`issues/` 配下）と、やらないこと
+（`implementation-plan` の実装計画の「目的と非目的」）に照らす。どちらも無ければ依頼文が範囲を決める。
 
 ### 2. 3 択で決める
 
 **不具合が即時修正の 4 条件（`development-workflow` の SKILL.md の「即時修正」）をすべて満たすなら、起票せずに
-即時修正する。** この 3 択は、満たさないものと不具合でないものに使う。
+即時修正する。** この 3 択は、満たさないものと不具合でないものに使う。**迷ったら起票する側へ倒す。** 後で閉じるほうが、
+拾い直すより安い。
 
-判断は次の 3 つに限る。**迷ったら起票する側へ倒す。** 後で閉じるほうが、拾い直すより安い。
-
-**判断の前に判断の基準を読む。** `python3 "$SCRIPTS/project-mvv.py" context` が NDF の共通原則とプロジェクト MVV
-（無ければ「MVV なし」）の節を出す。3 択はこの基準に照らして選び、根拠にした項目の番号（`Value 3` / `C4` / `P1` など）と
-MVV の版（`project-mvv.py check` の `version`。無ければ「MVV なし」）を、起票の本文の「なぜこの変更の範囲外なのか」か、
-起票しないときの理由の 1 行に書く。手順は `development-workflow` の `references/project-mvv.md` にある。
+**判断の基準は `python3 "$SCRIPTS/project-mvv.py" context` で読む。** 根拠にした項目の番号と MVV の版（無ければ
+「MVV なし」）を、本文の「なぜこの変更の範囲外なのか」か起票しない理由に書く（`development-workflow` の
+`references/project-mvv.md`）。
 
 | 判断 | 選ぶ条件 | 残すもの |
 | --- | --- | --- |
@@ -75,43 +53,30 @@ MVV の版（`project-mvv.py check` の `version`。無ければ「MVV なし」
 | 範囲内へ入れる | この変更で直す対象と同じ原因・同じ形で、分けると片方だけが残る | 範囲を広げた事実と理由を実装計画のファイルへ 1 行 |
 | 起票しない | 変更前と同じ挙動で、直す価値が現時点で無い | 理由を 1 行（作業メモか完了報告） |
 
-3 つ目も理由を残す。理由が残っていないと、後から指摘されたときに「判断した」のか
-「気づかなかった」のかを区別できない。
-
 ### 3. 起票先を決める
 
-**「起票する」を選んだときだけ行う。** 残る 2 つの判断には起票先が要らない。
-
-NDF を使う開発では、Skill の実体を持つリポジトリと、開発している側のリポジトリが別に
-なることがある。**どちらへ起票するかは課題の性質が決める。** 判断表と、リポジトリの名前を
-解決する 3 つの手順は [references/issue-target.md](references/issue-target.md) にある。
-
-決まらないときは推測で起票せず、そこで止まって利用者に聞く。以降の手順の `gh` は、
-ここで決めた起票先に対して実行する。
+**「起票する」を選んだときだけ行う。**
 
 ```bash
-ISSUE_REPO=<所有者>/<リポジトリ>          # 判断表と 3 つの手順で決めたもの
+python3 "$SCRIPTS/issue-file.py" resolve-target
 ```
+
+0 なら `metrics.upstream` と `metrics.target` から [references/issue-target.md](references/issue-target.md) の判断表で
+起票先を選ぶ。20 なら推測せず `items` の候補を示して利用者に聞く。
 
 ### 4. 重複を確かめる
 
-同じ課題が既に open で残っていることがある。**検索は 1 回でよい。**
+検索は 1 回でよい。`items` に同じ課題があれば起票せず、`note` でそちらへ由来を 1 行足す。
 
 ```bash
-gh issue list --repo "$ISSUE_REPO" --state open --search "<課題を表す語 2〜3 個>"
+python3 "$SCRIPTS/issue-file.py" dup --repo <起票先> --query "<課題を表す語 2〜3 個>"
+python3 "$SCRIPTS/issue-file.py" note --repo <起票先> --number <番号> --origin "<由来>"
 ```
-
-見つかったら起票せず、そちらへ由来を 1 行足す。
-
-```bash
-gh issue comment <番号> --repo "$ISSUE_REPO" --body "同じ事象を <由来> の作業中に確認した。"
-```
-
-`<由来>` の形は「起票した課題の辿り方」にある。
 
 ### 5. 起票する
 
-本文は次の 5 項目で書く。項目を省かない。
+本文は 4 つの節と空の「由来」の見出しで書く（書式は `markdown-writing`）。**由来は `create` が入れ、5 つの見出しが
+そろい空でないかを確かめる**（欠ければ 1。欠けた見出しが `items` に返る）。
 
 ```markdown
 ## 何を見つけたか
@@ -127,58 +92,33 @@ gh issue comment <番号> --repo "$ISSUE_REPO" --body "同じ事象を <由来> 
 （影響と、その範囲）
 
 ## 由来
-（この変更の起点。形は「起票した課題の辿り方」）
 ```
-
-**起票の前に、起票先・本文・付ける label を提示して同意を取る。** issue は外部から見える
-場所へ書き込まれる。起票先を含めるのは、解決した名前が実際の上流リポジトリと違うときに、書き込む
-前に気づけるようにするためである。書式は `markdown-writing` に従う。
 
 ```bash
-gh issue create --repo "$ISSUE_REPO" --title "<何が起きるか>" --body-file <本文のファイル>
+python3 "$SCRIPTS/issue-file.py" create --repo <起票先> --title "<何が起きるか>" \
+  --body-file <本文のファイル> --origin "<由来>" [--label <名前>]...
 ```
 
-両方にまたがる課題では 2 件になる。順序と、互いの番号の結び方は
-[references/issue-target.md](references/issue-target.md) の「両方にまたがる課題」にある。
+**1 回目は承認資料（起票先・題・本文・ラベル）を書いて 10 で止まる。** 利用者に示して同意を取り、同じ引数に
+`--approved <metrics.digest>` を足して打ち直すと課題ができる（示した後に変えると 1 で作られない）。人に問えない起動
+では起動指示に従うが、**`metrics.other_repo` が真なら打ち直さず、承認資料を添えて人へ戻す**（他のリポジトリへの公開）。
+
+両方にまたがる課題の順序は [references/issue-target.md](references/issue-target.md) にある。
 
 ### 6. 由来を残す
 
-起票した番号を、元の場所へ戻す。**番号を書かずに閉じない。**
-
-| 見つけた場面 | 戻す先 |
-| --- | --- |
-| 実装・リファクタリング・原因の調査 | 元の Pull Request の本文か、実装計画のファイルの「やらないこと」 |
-| レビューの指摘 | その指摘への返信に番号を書いてから resolve する |
-
-レビューの指摘から出たものは、返信に番号が無いまま resolve すると、指摘した側からは
-無視されたことと区別できない。
+起票した番号を元の場所へ戻す。**番号を書かずに閉じない。** 実装・リファクタリング・原因の調査で見つけたものは元の
+Pull Request の本文か実装計画の「やらないこと」へ（Pull Request が無ければ起点の issue へ）、レビューの指摘は返信に
+番号を書いてから resolve する（無いと無視と区別できない）。
 
 ```bash
 gh pr comment <PR番号> --body "範囲外と判断し、#<起票した番号> として残した。"
 ```
 
-Pull Request がまだ無い段階では、起点の issue へ同じ 1 行を足す（由来と同じ扱い。「起票した課題の辿り方」）。
-
 ## 起票した課題の辿り方
 
-由来は**本文の参照だけ**で辿る。label は増やさない。
-
-**由来は `PR #<番号>` か `issue #<番号>` で書く。** 既存の課題へ足すコメント（手順 4）、
-起票の本文（手順 5）、下の検索の語のすべてで同じ形にする。**Pull Request を作る前に
-見つけた課題は、起点の issue の番号で書く。** `PR #<番号>` に決め打つと、Pull Request を
-作る前に起票した課題が後の検索から漏れる。
-
-```bash
-gh issue list --repo "$ISSUE_REPO" --state all --search "<由来>"   # 例: "PR #177" / "issue #175"
-```
-
-**起票先が 2 つに分かれた変更では、両方のリポジトリを検索する。** 片方だけを見ると、
-上流リポジトリへ回した課題が辿れない。
-
-**`in:body` で絞らない。** 既存の issue へコメントで由来を足した場合、本文には番号が
-無いため検索から漏れる。漏れた課題は、振り返りで取りこぼしとして扱われる。
-
-`retrospective` はこの検索で、その変更から出た課題の一覧を作る。
+由来は**本文とコメントの参照だけ**で辿り、label は増やさない。`retrospective` は
+`issue-file.py by-origin --origin "<由来>" ... --with-upstream` で、その変更から出た課題の一覧を作る。
 
 ## この手順が扱わないこと
 
@@ -188,25 +128,4 @@ gh issue list --repo "$ISSUE_REPO" --state all --search "<由来>"   # 例: "PR 
 | 手を付ける範囲そのものの決め方 | `refactoring` |
 | 受け入れ条件の作り方 | `requirements-design` |
 | 起票の取りこぼしを拾うこと | `retrospective` |
-
-## 蓄積した課題との境界
-
-| Skill | 扱うもの |
-| --- | --- |
-| `out-of-scope` | 範囲外の課題を、**見つけたその場で**起票する |
-| `retrospective` | **その変更の進め方**を見直し、起票の取りこぼしを拾う |
-| `backlog-refinement` | **蓄積した既存の課題**を棚卸しする |
-
-**ここでの 3 択は発見の瞬間の判断で、蓄積した課題には及ばない。** 蓄積した課題への判断は
-`backlog-refinement` が持つ。価値の判断は `backlog-refinement` の「やらない」、どこを直すかの構造の判断は
-`backlog-refinement` の「ルートコーズ」である（判断と見る対象の表の正本は
-[backlog-refinement の「既存の Skill との境界」](../backlog-refinement/SKILL.md)）。
-
-**発見の瞬間には、指摘の周辺しか見えていない。** 「範囲内へ入れる」は同じ原因・同じ形の
-指摘をこの変更へ取り込む判断で、溜まった課題の中から同じ原因を持つものを探す判断ではない。
-入口は「迷ったら起票する側へ倒す」ままにする。
-
-## 関連
-
-- `/ndf:retrospective` — 振り返りで、起票の取りこぼしを拾う
-- `/ndf:quality-gates` — 完了報告の「範囲外と判断したもの」
+| 蓄積した既存の課題への判断（ここの 3 択は発見の瞬間だけに効く） | `backlog-refinement`（「既存の Skill との境界」） |

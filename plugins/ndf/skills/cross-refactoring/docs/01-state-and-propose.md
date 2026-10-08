@@ -41,7 +41,7 @@
    （`named` / `host` / `first`）に残し、**再開しても変えない**。替わるのは同じ実行の中の振り替え（`reassigned`。#919）だけで、
    claude のアカウントへ振り替えたときはその名前を `implementer_account` に残す（空はアカウントを選んでいない）
 5. **モデルの確定** — `--model <ランタイム>=<モデル>` を受け取り、実行の間は固定する
-6. **書き込み用の作業ディレクトリ作成** — `<root>/work/` に `origin/<head>` を detach で展開する。
+6. **書き込み用の作業ディレクトリ作成** — 作る前に Pull Request の状態を確かめ、閉じている・マージ済み・状態を判定できないときは作らずに止める（終了コード 4。判定は `pr_gate.init_refusal`。Draft かどうかは問わない）。`<root>/work/` に `origin/<head>` を detach で展開する。
    head ブランチは開発用の worktree で checkout 済みのことが多く、git は同じブランチを 2 つの
    作業ツリーへ checkout できないためである。push は `HEAD:<head>` で行う。既にある場合は `origin/<head>` へ**早送りで同期**
    してから使い、早送りできない・取得に失敗したときは中断する

@@ -158,7 +158,7 @@ flowchart TB
 | 危険フラグ | `cross-refactoring` で、範囲テストでは覆えない変更（D1〜D5）。立てば全体テストを 1 度走らせる | D1〜D5 | [cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
 | グレード | `cross-refactoring` が候補ごとに付ける適用の価値（high / medium / low）。改善項目の順位の最初のキー | `tier` | [cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
 | コメントのスナップショット | `cross-review` が取る既存コメントの一覧。2 ラウンド目以降は取り直す | `state.py init` | [cross-review](../../cross-review/SKILL.md) |
-| 指摘ファイル | `cross-review` の担当が書く、指摘の全件と総評のファイル。オーケストレーターが読んで投稿する | `<席>-review-pr<番号>-round<R>-payload.json` | [cross-review](../../cross-review/SKILL.md) |
+| 指摘ファイル | レビューする者（`cross-review` の担当・`pr-review` の LLM か外部 AI）が書く、指摘の全件と総評のファイル。投稿は書いた者でなく、読む側のスクリプトが行う | `<席>-review-pr<番号>-round<R>-payload.json`、`pr-review-steps.py` の `findings.json` | [cross-review](../../cross-review/SKILL.md)、[pr-review](../../pr-review/SKILL.md) |
 | doc-lint | 追加した Markdown の行に、検討の痕跡・課題番号の由来・比較の語が無いかを見るチェック | `doc-lint.py`、プランの `doc-lint` のステップ | [doc-lint.py](../../../scripts/doc-lint.py) の docstring |
 | 用語チェック | プロジェクトの用語集の形と、文書の追加した行の廃止した語・未登録の語を見るチェック。LLM を使わない | `glossary.py check`、設計のフェーズの `glossary-check` のステップ | [glossary-format.md](../../requirements-design/references/glossary-format.md) |
 | モデルレビュー | 設計 Pull Request のレビューの 1 ラウンド目。ドメインモデルの節と用語集の差分だけを見る。承認されても抜けない | 状態ファイルの `rounds[].stage: "model"` | [04-contracts.md](../../cross-review/docs/04-contracts.md) |

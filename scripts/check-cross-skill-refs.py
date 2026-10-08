@@ -36,6 +36,7 @@ import sys
 from pathlib import Path
 
 SKILLS_REL = "plugins/ndf/skills"
+_OWNER_INDEX = len(Path(SKILLS_REL).parts)  # SKILLS_REL/<所有する Skill>/... の Skill 名の位置
 SUFFIXES = (".py", ".sh", ".md")
 # **テストは配らない。** 配布物に入るのは `SKILL.md` と `references/` と `scripts/` で、
 # `tests/` は含まれない（Claude Code のキャッシュで実測）。配る先で相手が欠けることが
@@ -57,6 +58,11 @@ EXCEPTIONS: dict[tuple[str, str], str] = {
     # 欠けることが起きない。その条件は
     # `scripts/tests/test_cross_review_codistribution.py` が固定する。
     ("plugins/ndf/skills/cross-refactoring/scripts/drive.py", "cross-review"): "#870",
+    # `pr-review` の delegate は外部 CLI の起動と上限つきの待ちを `external-ai.py run` に任せる
+    # （#860）。**4 つの manifest すべてが両方を載せている**ため、配る先で相手が
+    # 欠けることが起きない。その条件は
+    # `scripts/tests/test_external_ai_codistribution.py` が固定する。
+    ("plugins/ndf/skills/pr-review/scripts/pr-review-steps.py", "external-ai"): "#860",
 }
 
 # Markdown の行内リンクの飛び先。読み手への案内であるため走査から外す。
@@ -112,7 +118,7 @@ def find_references(root: Path) -> list[tuple[str, int, str, str]]:
     found: list[tuple[str, int, str, str]] = []
     for path in _files(root):
         rel = path.relative_to(root).as_posix()
-        owner = rel.split("/")[3]  # plugins/ndf/skills/<所有する Skill>/...
+        owner = rel.split("/")[_OWNER_INDEX]
         is_markdown = path.suffix == ".md"
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             body = _strip_links(line, is_markdown)
