@@ -184,7 +184,7 @@ FIX=$(bash "$R/scripts/resolve.sh" scripts fix) || exit 3
 - `thread_id` を持たない要素（レビュー本文の指摘）には返信を送らず、理由を PR のまとめへ
   載せる。GitHub はレビュー本文への返信を受け付けないためである
 - `ci_failed_checks` は `cross-review` 側で code-related と meta-only に分類され、メタチェックのみ
-  失敗ならループを継続する。code-related ではない失敗の補足はテンプレートの `ci_note` に書く
+  失敗ならループを継続する。meta-only の失敗の補足はテンプレートの `ci_note` に書く
 - まとめの参照（`summary_comment_url`）は投稿する側が記録へ書く
 
 ## 作業完了報告（必須）
