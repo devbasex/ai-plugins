@@ -2480,10 +2480,13 @@
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
-      "term": "閉じる語",
+      "term": "closing keywords",
       "context": "ndf-workflow",
-      "meaning": "Pull Request の本文で、マージのときに課題を閉じる語（Closes / Fixes / Resolves と活用形）に続く課題の参照",
+      "meaning": "GitHub の機能。Pull Request の本文に `Closes #123` のように書くと、マージのときにその課題を自動で閉じる。キーワードは Closes / Fixes / Resolves と活用形で、課題の参照が続く。GitHub を使う人なら誰でも知っている機能ではないため、文書では使う箇所ごとに説明を添える",
       "code": "closing_words",
+      "deprecated": [
+        "閉じる語"
+      ],
       "source": "",
       "pending_source": "issues/issue-767-requirements.md"
     },
