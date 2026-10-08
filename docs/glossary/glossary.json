@@ -2487,16 +2487,14 @@
       "deprecated": [
         "閉じる語"
       ],
-      "source": "",
-      "pending_source": "issues/issue-767-requirements.md"
+      "source": "docs/specifications/ndf-sprint-close-referenced-issues.md"
     },
     {
       "term": "参照だけの課題",
       "context": "ndf-workflow",
       "meaning": "スプリントの Pull Request の題か本文が番号で参照し、スプリント課題に入らない開いた課題",
       "code": "referenced_only",
-      "source": "",
-      "pending_source": "issues/issue-767-requirements.md"
+      "source": "docs/specifications/ndf-sprint-close-referenced-issues.md"
     },
     {
       "term": "スプリント MVV",
@@ -3015,22 +3013,19 @@
       "term": "決定の見出し",
       "context": "ndf-workflow",
       "meaning": "設計文書の囲みの外にある、決定 1 件を表す見出しの行。`## 決定の記録` で始まる H2 の節の `### ` の行か、H1 に「決定の記録」を含み `## 決定の記録` の節を持たない文書の `## 決定 <数字>…` / `### 決定 <数字>…` の行。pr-body-decisions.sh が設計 PR の本文の「決めたこと」へ写す",
-      "source": "",
-      "pending_source": "issues/issue-635-design.md"
+      "source": "docs/specifications/ndf-workflow-unit-and-gates.md"
     },
     {
       "term": "決定を分けたファイル",
       "context": "ndf-workflow",
       "meaning": "設計文書から決定の記録の節だけを別に置いたファイル。名前は `issue-<番号>-design-decisions.md`",
-      "source": "",
-      "pending_source": "issues/issue-635-design.md"
+      "source": "docs/specifications/ndf-workflow-unit-and-gates.md"
     },
     {
       "term": "決定を読めない文書",
       "context": "ndf-workflow",
       "meaning": "設計 PR で変更した .md のうち、`## 決定の記録` で始まる H2 を持つか決定を分けたファイルであるのに、決定の見出しが 0 件のもの。文書自身の名前が `-design-decisions.md` で終わらないときに限り、決定を分けたファイルの名前だけを示す節は除く。pr-body-decisions.sh の check / sync が 1 で止まる",
-      "source": "",
-      "pending_source": "issues/issue-635-design.md"
+      "source": "docs/specifications/ndf-workflow-unit-and-gates.md"
     },
     {
       "term": "レビューの状態ファイル",
@@ -3590,31 +3585,31 @@
       "term": "設計との突き合わせ",
       "context": "ndf-workflow",
       "meaning": "完了判定で、設計に名前の出るテスト・既存の確定仕様と変更履歴・設計の決定を実装と照らし、食い違いを残すこと。確認 (a)(b)(c) の 3 つからなる",
-      "pending_source": "issues/issue-1241-design.md"
+      "source": "docs/specifications/quality-gates-design-match.md"
     },
     {
       "term": "設計に名前の出るテスト",
       "context": "ndf-workflow",
       "meaning": "設計文書の「決定の記録」「テスト設計」「構成要素」に、バッククォートで囲んで書かれたテストファイルのパス・<パス>::<名前>・「テスト設計」の test で始まる識別子",
-      "pending_source": "issues/issue-1241-design.md"
+      "source": "docs/specifications/quality-gates-design-match.md"
     },
     {
       "term": "既存の確定仕様",
       "context": "ndf-workflow",
       "meaning": "比べるベースブランチとの merge-base の時点で確定仕様の置き場にあった文書。同じ差分で足した確定仕様は含まない",
-      "pending_source": "issues/issue-1241-design.md"
+      "source": "docs/specifications/quality-gates-design-match.md"
     },
     {
       "term": "設計の決定",
       "context": "ndf-workflow",
       "meaning": "設計文書の「決定の記録」の 1 件（### 決定 N）。judge のステップが返す「決定」とは別の語",
-      "pending_source": "issues/issue-1241-design.md"
+      "source": "docs/specifications/quality-gates-design-match.md"
     },
     {
       "term": "設計と違う点",
       "context": "ndf-workflow",
       "meaning": "実装 PR の本文の節。設計の決定・設計に名前の出るテスト・既存の確定仕様・受け入れ条件と実装の違いを、箇所・違い・理由の行で並べる",
-      "pending_source": "issues/issue-1241-design.md"
+      "source": "docs/specifications/quality-gates-design-match.md"
     }
   ]
 }
