@@ -657,3 +657,39 @@ def test_view_json_rest_failure_keeps_both_errors(fake):
     fake.on("api", rc=1, err="HTTP 403: API rate limit exceeded")
     r = gp.view_json("pr", 5, "title")
     assert r.returncode == 1 and RATE in r.stderr and "HTTP 403" in r.stderr
+
+
+# --- 課題ごとの錠（#1241 の I10）---
+
+
+def test_body_section_replace_waits_for_the_issue_lock_before_reading(monkeypatch):
+    import threading
+    import time
+
+    import locks
+
+    store = {"body": "# t\n\n## 受け入れ条件\n\n- a\n\n## 進行\n\n- [x] 設計\n"}
+    reads: list[int] = []
+    monkeypatch.setattr(gp.gh_rest, "fetch_body", lambda repo, n: reads.append(n) or store["body"])
+    monkeypatch.setattr(gp.gh_rest, "update_body", lambda repo, n, body: store.update(body=body) or True)
+    out: dict = {}
+    worker = threading.Thread(target=lambda: out.update(r=gp.body_section("replace", 7, REPO, "## 受け入れ条件", "- b")))
+    with locks.exclusive(gp.issue_lock_target(REPO, 7)):
+        worker.start()
+        time.sleep(0.3)
+        assert reads == []  # 錠を持つ者がいるあいだ本文を読まない
+        store["body"] = store["body"].replace("- [x] 設計", "- [x] 設計\n- [x] 実装")  # 錠の持ち主が書いた節
+    worker.join(10)
+    assert out["r"][1] == 0
+    assert "- b" in store["body"] and "- [x] 実装" in store["body"]  # 先に書いた節を消さない
+
+
+def test_body_lock_runs_the_command_under_the_lock_and_stops_on_timeout(tmp_path):
+    import locks
+
+    mark = tmp_path / "ran"
+    assert gp.body_lock(9, REPO, ["sh", "-c", f"touch {mark}; exit 4"], timeout=1) == 4 and mark.is_file()
+    mark.unlink()
+    with locks.exclusive(gp.issue_lock_target(REPO, 9)):
+        assert gp.body_lock(9, REPO, ["touch", str(mark)], timeout=0.2) == 2
+    assert not mark.exists()

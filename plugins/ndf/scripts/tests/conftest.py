@@ -76,3 +76,9 @@ def issue_bodies(tmp_path, monkeypatch) -> IssueBodies:
     gh.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}")
     return IssueBodies(bindir)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_issue_locks(tmp_path_factory, monkeypatch):
+    """課題ごとの錠（`gh_parts.issue_lock_target`）を利用者の `~/.claude/ndf/locks` へ作らない。"""
+    monkeypatch.setenv("NDF_LOCK_DIR", str(tmp_path_factory.mktemp("locks")))

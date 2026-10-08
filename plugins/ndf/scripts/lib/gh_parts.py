@@ -22,13 +22,20 @@ LLM が `gh` / `gh api` を手順の文どおりに組み立てていた取得�
     python3 gh_parts.py body-section get --issue 659 --heading "## 進行"
     python3 gh_parts.py body-section replace --issue 659 --heading "## 進行" --content-file s.md
     python3 gh_parts.py body-section append --issue 659 --line "振り返り: https://..."
+    python3 gh_parts.py body-lock --issue 659 --timeout 30 -- bash progress-record.sh 659 実装
     python3 gh_parts.py review-post --payload p.json --result r.json --pr 812 --round 1 --seat codex
 
 | 部品 | 返すもの |
 | --- | --- |
 | `pr-info` | メタ・本文・差分の統計・checks（名前ごとの最新の実行へ畳んだもの）・未解決のスレッド。差分とログはファイルへ書き、パスを返す |
 | `unresolved-threads` | 未解決のレビュースレッド（`thread_id` / `path` / `line`） |
-| `body-section` | 本文の指定の節の取得・置換と、末尾への 1 行の追記 |
+| `body-section` | 本文の指定の節の取得・置換と、末尾への 1 行の追記。置換と追記は課題ごとの錠の中で読みから書きまでを行う |
+| `body-lock` | 課題ごとの錠を取ったまま `--` の後のコマンドを走らせ、その終了コードで終わる。`--timeout` 秒で取れなければ走らせずに 2 |
+
+課題の本文を書き換える者（`body-section` と `progress-record.sh`）は、課題ごとの錠（`lib/locks.py` の `exclusive`。
+置き場は `~/.claude/ndf/locks/issue-body/<owner>--<repo>--<番号>`、環境変数 `NDF_LOCK_DIR` があればその下の
+`issue-body/`）を取ってから本文を読み、書き終えてから放す（#1241 の I10）。錠は機械ごとのファイルで、別の機械や
+GitHub の画面からの書き込みとは排他しない。
 | `review-post` | レビューの payload を 1 回で投稿する。自分の PR なら REQUEST_CHANGES を COMMENT へ下げる |
 
 結果は `step_result` の形（#846）で 1 行の JSON にして出す。**取得できなかった値は `null` にし、
@@ -41,8 +48,11 @@ LLM が `gh` / `gh api` を手順の文どおりに組み立てていた取得�
 from __future__ import annotations
 
 import argparse
+import os
 import pathlib
+import subprocess
 import sys
+from contextlib import nullcontext
 from typing import Any
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -55,6 +65,7 @@ import gh_pr_info  # noqa: E402
 import gh_quota  # noqa: E402
 import gh_rest  # noqa: E402
 import gh_sections  # noqa: E402
+import repo as repo_id  # noqa: E402
 import step_result  # noqa: E402
 
 # ---------------- 再エクスポート（`gh_parts.<名前>` で引く呼び出し側のため。RUNNER は除く） ----------------
@@ -119,6 +130,35 @@ replace_section = gh_sections.replace_section
 append_line = gh_sections.append_line
 
 
+# ---------------- 課題ごとの錠 ----------------
+
+
+def issue_lock_target(slug: str | None, number: int) -> pathlib.Path:
+    """課題 `number` の本文を守る錠の対象（`lib/locks.py` が `<対象>.lock` を錠にする）。リポジトリが分からなければ `local`。"""
+    base = pathlib.Path(os.environ.get("NDF_LOCK_DIR") or pathlib.Path.home() / ".claude" / "ndf" / "locks")
+    return base / "issue-body" / f"{(slug or 'local').replace('/', '--')}--{number}"
+
+
+def issue_lock(slug: str | None, number: int, timeout: float | None = None):
+    """課題ごとの錠を取る文脈（取れなければ `locks.LockTimeout`）。"""
+    import locks  # 使う側（main）が deps.require("locks") を済ませてから呼ぶ
+
+    return locks.exclusive(issue_lock_target(slug, number), timeout=timeout)
+
+
+def body_lock(number: int, repo: str | None, cmd: list[str], timeout: float | None) -> int:
+    """錠を取ったまま `cmd` を走らせ、その終了コードを返す。取れなければ走らせずに 2 を返す。"""
+    import locks
+
+    slug = repo or repo_id.owner_repo(".")
+    try:
+        with issue_lock(slug, number, timeout):
+            return subprocess.run(cmd).returncode
+    except locks.LockTimeout as e:
+        print(f"body-lock: {e}。走らせない", file=sys.stderr)
+        return step_result.EXIT_UNREADABLE
+
+
 # ---------------- body-section ----------------
 
 
@@ -130,6 +170,11 @@ def body_section(
     slug = gh_call.resolve_repo(repo)
     if not slug:
         return step_result.result(tool, "stopped", "リポジトリを決められない"), step_result.EXIT_PRECONDITION
+    with nullcontext() if op == "get" else issue_lock(slug, number):  # 書き換えは読みから書きまでを錠の中で行う
+        return _body_section_in(tool, op, slug, number, heading, content, line)
+
+
+def _body_section_in(tool: str, op: str, slug: str, number: int, heading: str, content: str, line: str) -> tuple[dict[str, Any], int]:
     body = gh_rest.fetch_body(slug, number)
     if body is None:
         return step_result.result(tool, "stopped", f"#{number} の本文を取得できない"), step_result.EXIT_UNREADABLE
@@ -246,6 +291,12 @@ def _parser() -> argparse.ArgumentParser:
     sp.add_argument("--content-file", help="置換する中身。`-` で標準入力")
     sp.add_argument("--line", default="")
 
+    sp = sub.add_parser("body-lock", help="課題ごとの錠を取ったまま `--` の後のコマンドを走らせる")
+    sp.add_argument("--issue", type=int, required=True)
+    sp.add_argument("--repo")
+    sp.add_argument("--timeout", type=float, help="錠を待つ上限の秒（既定は取れるまで待つ）")
+    sp.add_argument("command", nargs=argparse.REMAINDER, help="`--` の後に走らせるコマンド")
+
     sp = sub.add_parser("review-post", help="レビューの payload を 1 回で投稿する")
     sp.add_argument("--payload", required=True)
     sp.add_argument("--result", required=True)
@@ -303,7 +354,12 @@ _COMMANDS = {
 
 def main(argv: list[str] | None = None) -> None:
     args = _parser().parse_args(argv)
-    deps.require("durable")  # 投稿キュー（post-review）は耐久の記録を使う
+    deps.require("durable", "locks")  # 投稿キュー（post-review）は耐久の記録を、本文の書き換えは課題ごとの錠を使う
+    if args.cmd == "body-lock":
+        cmd = args.command[1:] if args.command[:1] == ["--"] else args.command
+        if not cmd:
+            step_result.emit(step_result.result("body-lock", "stopped", "`--` の後に走らせるコマンドを渡す"), 2)
+        sys.exit(body_lock(args.issue, args.repo, cmd, args.timeout))
     obj, code = _COMMANDS[args.cmd](args)
     step_result.emit(obj, code)
 
