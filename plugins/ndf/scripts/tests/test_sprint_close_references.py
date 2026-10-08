@@ -30,7 +30,11 @@ def issue_calls(gh, verb, n=None):
 
 
 def test_referenced_issue_is_kept_open_in_dry_run(repo, gh):
-    gh.set(records={"20": {"body": PROD_ONE, "comments": []}}, bodies={"11": "Closes #1\nRefs #2"}, issues={"o/r#1": ["OPEN"], "o/r#2": ["OPEN"]})
+    gh.set(
+        records={"20": {"body": PROD_ONE, "comments": []}},
+        bodies={"11": "Closes #1\nRefs #2"},
+        issues={"o/r#1": ["OPEN"], "o/r#2": ["OPEN"]},
+    )
     code, out, err = run(gh, repo, "--dry-run")
     res = issues_of(out)
     assert code == 0, (out, err)
@@ -40,7 +44,11 @@ def test_referenced_issue_is_kept_open_in_dry_run(repo, gh):
 
 
 def test_referenced_issue_is_not_closed(repo, gh):
-    gh.set(records={"20": {"body": PROD_ONE, "comments": []}}, bodies={"11": "Closes #1\nRefs #2"}, issues={"o/r#1": ["OPEN"], "o/r#2": ["OPEN"]})
+    gh.set(
+        records={"20": {"body": PROD_ONE, "comments": []}},
+        bodies={"11": "Closes #1\nRefs #2"},
+        issues={"o/r#1": ["OPEN"], "o/r#2": ["OPEN"]},
+    )
     code, out, err = run(gh, repo)
     res = issues_of(out)
     assert code == 0, (out, err)
@@ -68,7 +76,11 @@ def test_pull_requests_and_closed_issues_are_not_listed(repo, gh):
     gh.set(
         records={"20": {"body": PROD_ONE, "comments": []}},
         bodies={"11": "Closes #1 #5 #6"},
-        issues={"o/r#1": ["OPEN"], "o/r#5": ["MERGED\thttps://github.com/o/r/pull/5"], "o/r#6": ["CLOSED\thttps://github.com/o/r/issues/6"]},
+        issues={
+            "o/r#1": ["OPEN"],
+            "o/r#5": ["MERGED\thttps://github.com/o/r/pull/5"],
+            "o/r#6": ["CLOSED\thttps://github.com/o/r/issues/6"],
+        },
     )
     code, out, err = run(gh, repo)
     assert code == 0 and sorted(issues_of(out)) == ["o/r#1"]
@@ -121,7 +133,9 @@ def test_given_issue_avoids_the_stop(repo, gh):
 
 def test_before_production_keeps_references_open_and_closes_nothing(repo, gh):
     rec = "## 配布の記録\n段階: 検証\n版: 1.0.0 → 1.1.0-dev.1\nスプリント: PR #11\n"
-    gh.set(records={"20": {"body": rec, "comments": []}}, bodies={"11": "Closes #1\nRefs #2"}, issues={"o/r#1": ["OPEN"], "o/r#2": ["OPEN"]})
+    gh.set(
+        records={"20": {"body": rec, "comments": []}}, bodies={"11": "Closes #1\nRefs #2"}, issues={"o/r#1": ["OPEN"], "o/r#2": ["OPEN"]}
+    )
     code, out, err = run(gh, repo)
     res = issues_of(out)
     assert code == 0 and res["o/r#1"]["result"] == "kept_open" and res["o/r#2"]["result"] == "kept_open"

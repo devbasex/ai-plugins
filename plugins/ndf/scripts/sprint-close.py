@@ -366,7 +366,11 @@ def build_parser():
         "--record-pr", type=int, required=True, help="配布の記録を置いた PR の番号。0 は本番の記録なし（--issues と一緒に渡す）"
     )
     ap.add_argument("--prs", type=number_list, help="スプリントの PR の番号（カンマ区切り）。省けば配布の記録から読む")
-    ap.add_argument("--issues", type=number_list, help="閉じる課題の番号（カンマ区切り）。PR の閉じる語と和を取る")
+    ap.add_argument(
+        "--issues",
+        type=number_list,
+        help="閉じる課題の番号（カンマ区切り）。PR の closing keywords（GitHub が課題を自動で閉じるキーワード Closes / Fixes / Resolves）が指す課題と和を取る",
+    )
     ap.add_argument("--repo", help="記録のリポジトリ（owner/name）。省けば gh repo view で決める")
     ap.add_argument("--with-verification", action="store_true", help="リリース後テストを通る経路（閉じる条件 2 を見る）")
     ap.add_argument("--label", help="閉じるときのコメントに入れる「<マイルストーン>の<工程名>」")

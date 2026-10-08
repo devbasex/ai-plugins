@@ -14,17 +14,17 @@ CLOSING = re.compile(
 
 
 def closing_words(text):
-    """閉じる語の一致の字面（`Closes #12` など）。"""
+    """closing keywords の一致の字面（`Closes #12` など）。"""
     return [m.group(0) for m in CLOSING.finditer(text or "")]
 
 
 def closing_issues(text):
-    """閉じる語が指す課題の字面（`#12`・`owner/repo#12`・課題の URL）。"""
+    """closing keywords が指す課題の字面（`#12`・`owner/repo#12`・課題の URL）。"""
     return [m.group(2) for m in CLOSING.finditer(text or "")]
 
 
 def closing_numbers(text) -> list[int]:
-    """閉じる語が指す課題の番号を、重ねずに現れた順で返す。"""
+    """closing keywords が指す課題の番号を、重ねずに現れた順で返す。"""
     out: list[int] = []
     for ref in closing_issues(text):
         n = int(re.search(r"(\d+)$", ref).group(1))
