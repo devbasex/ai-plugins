@@ -187,6 +187,40 @@ import re
 QUEUE_PRS = "{queue_prs}"
 
 
+def _part_prompt(base_prompt: str, i: int, parts: list[dict]) -> str:
+    """i 番目（1 始まり）のパートの prompt。元の prompt へ、触るファイルと終え方を足す。"""
+    part = parts[i - 1]
+    return (
+        base_prompt + f"\n\n## このパート（{i}/{len(parts)}: {part['name']}）\n"
+        f"触るのは次のファイルだけ: {', '.join(part['files'])}。"
+        "他のパートは別の作業が受け持つ。前のパートの成果は git log と該当ファイルの要る範囲で確かめる。"
+        "このパートの変更をコミットして終える。"
+    )
+
+
+def _expand_one(step: dict, parts: list[dict]) -> list[dict]:
+    """1 つの work のステップをパートの数だけのステップへ展開する（id は `<元の id>-<番号>`、next で順につなぐ）。"""
+    out = []
+    for i in range(1, len(parts) + 1):
+        p = {k: v for k, v in step.items() if k not in ("parts", "id", "next")}
+        p["id"] = f"{step['id']}-{i}"
+        if i < len(parts):
+            p["next"] = f"{step['id']}-{i + 1}"
+        elif step.get("next"):
+            p["next"] = step["next"]
+        p["prompt"] = _part_prompt(step["prompt"], i, parts)
+        out.append(p)
+    return out
+
+
+def _rewire_transitions(steps: list[dict], old_id: str, first_id: str) -> None:
+    """元の id を指す遷移（next / on_fail）を最初のパートへ書き換える。"""
+    for t in steps:
+        for key in ("next", "on_fail"):
+            if t.get(key) == old_id:
+                t[key] = first_id
+
+
 def expand_parts(steps: list[dict]) -> list[dict]:
     """work のステップの `parts` を、パートごとに別の claude -p のステップへ展開する。
 
@@ -200,25 +234,8 @@ def expand_parts(steps: list[dict]) -> list[dict]:
         if s.get("type") != "work" or not parts:
             out.append(s)
             continue
-        for i, part in enumerate(parts, 1):
-            p = {k: v for k, v in s.items() if k not in ("parts", "id", "next")}
-            p["id"] = f"{s['id']}-{i}"
-            if i < len(parts):
-                p["next"] = f"{s['id']}-{i + 1}"
-            elif s.get("next"):
-                p["next"] = s["next"]
-            p["prompt"] = (
-                s["prompt"] + f"\n\n## このパート（{i}/{len(parts)}: {part['name']}）\n"
-                f"触るのは次のファイルだけ: {', '.join(part['files'])}。"
-                "他のパートは別の作業が受け持つ。前のパートの成果は git log と該当ファイルの要る範囲で確かめる。"
-                "このパートの変更をコミットして終える。"
-            )
-            out.append(p)
-        # 元の id を指す遷移は最初のパートへ
-        for t in steps:
-            for key in ("next", "on_fail"):
-                if t.get(key) == s["id"]:
-                    t[key] = f"{s['id']}-1"
+        out += _expand_one(s, parts)
+        _rewire_transitions(steps, s["id"], f"{s['id']}-1")
     return out
 
 
