@@ -3510,26 +3510,26 @@
       "term": "未解決のスレッド",
       "context": "ndf-workflow",
       "meaning": "Pull Request のレビュースレッドのうち、解決済みの印が付いていないもの。`gh_parts.py pr-info --with threads` が返す",
-      "pending_source": "issues/issue-860-requirements.md"
+      "source": "docs/specifications/pr-review-steps-script.md"
     },
     {
       "term": "本来の判定",
       "code": "intent",
       "context": "ndf-workflow",
       "meaning": "レビューの指摘から決めた event（APPROVE / REQUEST_CHANGES / COMMENT）。自分の Pull Request へ COMMENT で送っても結果に残し、収束や報告はこちらを読む",
-      "pending_source": "issues/issue-860-requirements.md"
+      "source": "docs/specifications/pr-review-steps-script.md"
     },
     {
       "term": "レビューの文脈ファイル",
       "context": "ndf-workflow",
       "meaning": "`pr-review-steps.py collect` が書く、レビューの対象・差分の在りか・未解決のスレッド（位置と最初のコメントの本文）・指摘ファイルの書き方をまとめたファイル。外部 AI へのプロンプトはこれに観点と委譲の決まりを足して組む",
-      "pending_source": "issues/issue-860-design.md"
+      "source": "docs/specifications/pr-review-steps-script.md"
     },
     {
       "term": "仕様適合",
       "context": "ndf-workflow",
       "meaning": "レビューの第 1 段。受け入れ条件・不変条件・対象範囲・テストが仕様を表すかを見る。満たさない指摘は指摘ファイルで段 `spec` を持つ",
-      "pending_source": "issues/issue-860-design.md"
+      "source": "docs/specifications/pr-review-steps-script.md"
     }
   ]
 }
