@@ -2477,6 +2477,22 @@
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
+      "term": "閉じる語",
+      "context": "ndf-workflow",
+      "meaning": "Pull Request の本文で、マージのときに課題を閉じる語（Closes / Fixes / Resolves と活用形）に続く課題の参照",
+      "code": "closing_words",
+      "source": "",
+      "pending_source": "issues/issue-767-requirements.md"
+    },
+    {
+      "term": "参照だけの課題",
+      "context": "ndf-workflow",
+      "meaning": "スプリントの Pull Request の題か本文が番号で参照し、スプリント課題に入らない開いた課題",
+      "code": "referenced_only",
+      "source": "",
+      "pending_source": "issues/issue-767-requirements.md"
+    },
+    {
       "term": "スプリント MVV",
       "context": "ndf-workflow",
       "meaning": "スプリント単位の MVV。プロジェクト MVV の範囲での具体化",
