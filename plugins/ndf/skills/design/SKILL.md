@@ -78,7 +78,7 @@ issue のことではない。
 
 ### 2. 設計文書を書く
 
-雛形は [references/design-template.md](references/design-template.md) にある。節の並びと、
+テンプレートは [references/design-template.md](references/design-template.md) にある。節の並びと、
 各節が `implementation-plan` のどのタスクへつながるかもそこにある。
 
 **H1 と承認する人が読む欄（目的・適用範囲・あるべき姿の根拠）を先に書き、続けてドメインモデルの節を書く。**
@@ -152,9 +152,9 @@ pr → cross-review → merged → worktree（実装用に作り直す）
 | 項目 | 設計 Pull Request |
 | --- | --- |
 | 載せるもの | 要求仕様と設計文書だけ。実装を含めない |
-| 本文 | 形は `/ndf:pr` の「設計 Pull Request の本文」に従う（決定の中身を写さない）。課題を自動で閉じる語（`Closes` / `Fixes` / `Resolves`）を書かない |
+| 本文 | 形は `/ndf:pr` の「設計 Pull Request の本文」に従う（決定の中身を写さない）。GitHub の closing keywords（`Closes` / `Fixes` / `Resolves` の後に課題の番号を書くと、マージ時にその課題を自動で閉じる機能）を書かない |
 
-**自動で閉じる語を書かないのは、実装が終わっていない段階でマージするためである。** 書くと、
+**closing keywords を書かないのは、実装が終わっていない段階でマージするためである。** 書くと、
 マージした時点で課題が閉じ、実装の工程が残っていることが課題の一覧から見えなくなる。課題を
 指すときは番号だけを書く。
 

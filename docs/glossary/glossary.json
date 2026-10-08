@@ -1955,7 +1955,7 @@
     {
       "term": "全体テスト",
       "context": "ndf-workflow",
-      "meaning": "リポジトリ全体を範囲にするテストか静的解析。テストは宣言の suites[].command、無ければ雛形の {paths} を . にしたもの（その旨を注記に残す）。静的解析は宣言の command、無ければ雛形の {paths} を範囲のパスで埋めたもの（範囲のパスが無ければ組まず、その旨を注記に残す）",
+      "meaning": "リポジトリ全体を範囲にするテストか静的解析。テストは宣言の suites[].command、無ければ範囲テストのテンプレートの {paths} を . にしたもの（その旨を注記に残す）。静的解析は宣言の command、無ければテンプレートの {paths} を範囲のパスで埋めたもの（範囲のパスが無ければ組まず、その旨を注記に残す）",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
       "deprecated": [
         "全体のテスト"
@@ -1998,7 +1998,7 @@
     {
       "term": "ndf-next",
       "context": "ndf-workflow",
-      "meaning": "次のセッションの最初の入力を置く、情報文字列 ndf-next の囲みのコードブロック。最後の応答に 1 つだけ置く",
+      "meaning": "次のセッションの最初の入力を置く、情報文字列が ndf-next のコードブロック。最後の応答に 1 つだけ置く",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
@@ -2301,12 +2301,15 @@
       "code": "strategy"
     },
     {
-      "term": "範囲テストの雛形",
+      "term": "範囲テストのテンプレート",
       "context": "ndf-workflow",
       "meaning": "{paths} を引用の外の 1 字句として含むテストのコマンド（宣言の scope_command か、{paths} を含む引数）。{paths} をシェルの引用で守った対象の並びへ置き換え、シェルで走らせる",
       "code": "scope_command",
       "source": "",
-      "pending_source": "issues/issue-1483-design.md"
+      "pending_source": "issues/issue-1483-design.md",
+      "deprecated": [
+        "範囲テストの雛形"
+      ]
     },
     {
       "term": "JUnit の置き場",
@@ -2469,7 +2472,7 @@
     {
       "term": "スプリント課題",
       "context": "ndf-workflow",
-      "meaning": "「スプリントを閉じる」が閉じる対象にする課題。スプリントの Pull Request の本文の閉じる語が指す課題と、--issues で渡した課題の和",
+      "meaning": "「スプリントを閉じる」が閉じる対象にする課題。スプリントの Pull Request の本文が GitHub の closing keywords（PR 本文に `Closes #123` のように書くと、マージ時にその課題を自動で閉じる機能）で指す課題と、--issues で渡した課題の和",
       "deprecated": [
         "ミッション課題",
         "ミッションの課題"
@@ -2477,10 +2480,13 @@
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
-      "term": "閉じる語",
+      "term": "closing keywords",
       "context": "ndf-workflow",
-      "meaning": "Pull Request の本文で、マージのときに課題を閉じる語（Closes / Fixes / Resolves と活用形）に続く課題の参照",
+      "meaning": "GitHub の機能。Pull Request の本文に `Closes #123` のように書くと、マージのときにその課題を自動で閉じる。キーワードは Closes / Fixes / Resolves と活用形で、課題の参照が続く。GitHub を使う人なら誰でも知っている機能ではないため、文書では使う箇所ごとに説明を添える",
       "code": "closing_words",
+      "deprecated": [
+        "閉じる語"
+      ],
       "source": "",
       "pending_source": "issues/issue-767-requirements.md"
     },

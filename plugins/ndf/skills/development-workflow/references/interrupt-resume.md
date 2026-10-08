@@ -18,7 +18,7 @@
 | 失敗の通知 | 配下の `<status>failed</status>` |
 | 自動継続 | リセット時刻に Claude Code が積む入力 |
 | 人の入力 | 「続けて」の 1 通 |
-| 背景の待ちの終わり | `wait-reset` の終わりの通知 |
+| バックグラウンドの待ちの終わり | `wait-reset` の終わりの通知 |
 
 **どの契機でも、行うのは同じ「中断の点検」1 回である。**
 
@@ -47,7 +47,7 @@ python3 "$SCRIPTS/lib/transcript_agents.py" interrupted \
 | worker | supervisor（失敗の通知）。supervisor も落ちていれば、起こされた supervisor が見る | supervisor（conductor が直接起動した worker なら conductor） | supervisor が動いていれば `SendMessage`。動いていなければ conductor → supervisor → worker の順 |
 | supervisor | conductor（失敗の通知） | conductor | `SendMessage`。続けられなければ `最後に記録した工程` の頭から新しい supervisor（`subagent_type` は起動の指示の `subagent_type` の欄で選ぶ） |
 | プラン | conductor（`wait` の終わり・キューの done・進捗ログ） | conductor | 進捗ログ（`<プラン>-state/progress.jsonl`）の最後のステップの id から `supervise.py run <プラン> --from <ステップの id>`。落ちたプランごとに打ち、終わったプランは流し直さない |
-| conductor | 人か Claude Code（自動継続） | conductor 自身 | 自動継続・人の 1 通・背景の待ちの終わり（「解除を待つ手段」） |
+| conductor | 人か Claude Code（自動継続） | conductor 自身 | 自動継続・人の 1 通・バックグラウンドの待ちの終わり（「解除を待つ手段」） |
 
 **3 層は同じ割り当てを共有するため、同時に落ちるのが普通である。** そのときは conductor が
 起きた後、上から順に 1 層ずつ再開する。
@@ -63,7 +63,7 @@ python3 "$SCRIPTS/lib/transcript_agents.py" interrupted \
 | 順 | 何が conductor を起こすか | いつ使うか |
 | ---: | --- | --- |
 | 1 | Claude Code の自動継続（リセット時刻に入力が積まれる） | conductor も上限に当たったとき。conductor は何もできないため、これに頼るしかない |
-| 2 | 背景で起動した待ち（`wait-reset`）の終わりの通知 | conductor は動けるが、配下だけが中断したとき |
+| 2 | バックグラウンドで起動した待ち（`wait-reset`）の終わりの通知 | conductor は動けるが、配下だけが中断したとき |
 | 3 | 人が送る 1 通（例:「続けて」） | 1 と 2 のどちらも起きなかったとき |
 
 **3 の 1 通は承認ゲートの数に数えない。**
@@ -77,10 +77,10 @@ python3 "$SCRIPTS/lib/transcript_agents.py" interrupted \
 | ---: | --- | --- |
 | 1 | 中断した supervisor と、自分が直接起動した worker を一覧する | `interrupted --session "$CLAUDE_CODE_SESSION_ID" --depth 1 --format json` |
 | 2 | `resets_passed` が真の記録ごとに `SendMessage` で続けさせる。supervisor へは「利用上限で中断していた。解除されたので続ける。書く前に既に書いたものを確かめる。自分の worker の中断も点検する」、直接起動した worker へは同じ作業を続ける指示を送る | 出力の `agent_id` |
-| 3 | 2 が失敗した相手の後段は層で分かれる。**supervisor** は `最後に記録した工程` の頭から、同じフェーズの名前で起動し直す（起動の指示へ旧 supervisor の `agent_id` を渡す。`subagent_type` は起動の指示の `subagent_type` の欄で、`最後に記録した工程` から選ぶ）。**直接起動した worker** は、同じ作業の起動の指示をもう一度組んで起動する。**失敗とは、`SendMessage` の結果が `"success": true` を持たないことである** | issue の `## 進行` |
-| 4 | まだリセット時刻を過ぎていない相手があれば、待ちを背景で起動して応答を終える | `wait-reset --session "$CLAUDE_CODE_SESSION_ID" --depth 1`（背景で実行する） |
+| 3 | 2 が失敗した相手のその後の扱いは層で分かれる。**supervisor** は `最後に記録した工程` の頭から、同じフェーズの名前で起動し直す（起動の指示へ旧 supervisor の `agent_id` を渡す。`subagent_type` は起動の指示の `subagent_type` の欄で、`最後に記録した工程` から選ぶ）。**直接起動した worker** は、同じ作業の起動の指示をもう一度組んで起動する。**失敗とは、`SendMessage` の結果が `"success": true` を持たないことである** | issue の `## 進行` |
+| 4 | まだリセット時刻を過ぎていない相手があれば、待ちをバックグラウンドで起動して応答を終える | `wait-reset --session "$CLAUDE_CODE_SESSION_ID" --depth 1`（バックグラウンドで実行する） |
 
-**手順 4 は `--max-sleep` を付けない。** 背景の待ちを数時間続けられないと分かったときだけ
+**手順 4 は `--max-sleep` を付けない。** バックグラウンドの待ちを数時間続けられないと分かったときだけ
 `--max-sleep 540` を付け、終了コード 3 で起きるたびに手順 1 と手順 4 だけを行う。
 **解除の前に `SendMessage` を送らない。**
 

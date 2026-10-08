@@ -264,7 +264,7 @@ git worktree add "$main_dir/.worktrees/feature/<PLAN-ID>-ui"     feature/<PLAN-I
 
 | 用途 | コマンド | 位置づけ |
 |---|---|---|
-| PR 作成前のセルフレビュー | `/ndf:pr-review --branch` | push / PR 化の前段。cross-review の代替にはしない |
+| PR 作成前のセルフレビュー | `/ndf:pr-review --branch` | push / PR 化の前に行う。cross-review の代替にはしない |
 | 個別 PR の収束レビュー (原則必須) | `/ndf:cross-review <PR番号>` | codex + agy 両方の APPROVE 収束を確認する本線 |
 | GitHub 上の例外的な単発確認 | `/ndf:pr-review <PR番号>` | ごく軽微な差分の単発確認に限定。cross-review の代替にはしない |
 | 指摘の修正 | `/ndf:fix <PR番号>` | cross-review ループ内・後で自動起動される |

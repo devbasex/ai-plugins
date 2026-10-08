@@ -6,6 +6,8 @@ worktree 運用の仕組みは、リポジトリごとの差を `.ndf/worktree.j
 定義は [`../schemas/worktree.schema.json`](../schemas/worktree.schema.json) にある。
 `$schema` を書いておくと編集時に補完が効く。読み取り側はこの項目を参照しない。
 
+**目次:** [この文書が受け取る値](#この文書が受け取る値) / [作る](#作る) / [最小の設定](#最小の設定) / [ツールが書き換えるファイルを追跡しているリポジトリ](#ツールが書き換えるファイルを追跡しているリポジトリ) / [開発の起点が既定ブランチと違うリポジトリ](#開発の起点が既定ブランチと違うリポジトリ) / [メインディレクトリのブランチを稼働中の worktree へ追従させる](#メインディレクトリのブランチを稼働中の-worktree-へ追従させる) / [ローカル環境を持つリポジトリ](#ローカル環境を持つリポジトリ) / [依存物を worktree へ用意するリポジトリ](#依存物を-worktree-へ用意するリポジトリ) / [テスト実行を分けるリポジトリ](#テスト実行を分けるリポジトリ) / [機械ごとに違う値は個人設定へ書く](#機械ごとに違う値は個人設定へ書く) / [確かめる](#確かめる) / [互換性の規則](#互換性の規則)
+
 ## この文書が受け取る値
 
 | 変数 | 値 | 決め方 |
@@ -233,10 +235,10 @@ worktree ごとにテスト環境を立てるなら、`testenv` を足す。
 | `golden_tag_paths` | データ構造を定める資産。**内容が同じなら基準を焼き直さない** |
 | `test_kinds` | 種類ごとの選別と実行。**書かなければテスト実行の仕組みは何もせずに終わる** |
 | `skip_reset` | 初期化を抑止する環境変数。渡さないと最初のテストが全体を作り直す構成がある |
-| `port_role` | 入口の URL を組み立てるときに使う `port_roles` の役割名。既定は `http` |
+| `port_role` | エントリポイントの URL を組み立てるときに使う `port_roles` の役割名。既定は `http` |
 | `service` | その種類のテストを走らせるコンテナのサービス名。書くと、走らせる前にそのコンテナが worktree を見ているかを確かめ、見ていなければ走らせずに 1 で終わる（[test-execution.md](test-execution.md) の到達の確認） |
 | `expose.enabled` | **既定は無効。** マスク済みデータが整い、明示的に有効化したときだけ公開する |
-| `expose.open_command` | 公開の口を開けるコマンド。**設定が無ければ公開しない。** `NDF_EXPOSE_URL` / `NDF_EXPOSE_HOST` / `NDF_EXPOSE_ENVIRONMENT` / `NDF_EXPOSE_SLOT` が渡る |
+| `expose.open_command` | 公開のエンドポイントを開けるコマンド。**設定が無ければ公開しない。** `NDF_EXPOSE_URL` / `NDF_EXPOSE_HOST` / `NDF_EXPOSE_ENVIRONMENT` / `NDF_EXPOSE_SLOT` が渡る |
 
 worktree レジストリの定義は [`../schemas/registry.schema.json`](../schemas/registry.schema.json) にある。
 

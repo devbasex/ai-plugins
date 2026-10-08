@@ -35,7 +35,7 @@
 読めない・表と差分が合わないときは PATCH へ倒さずに止まる。他のプラグインのタグは打たない。
 
 **開発版のプランは他のプラグインの版を上げず、承認資料へ上げ幅の候補を書く（`others` のステップ。
-`changed-plugins --prs --approval`）。** 候補は版に含む PR の材料から機械で決まる。PR の閉じる語が指す課題の
+`changed-plugins --prs --approval`）。** 候補は版に含む PR の材料から機械で決まる。PR の GitHub の closing keywords（PR 本文に `Closes #123` のように書くと、マージ時にその課題を自動で閉じる機能）が指す課題の
 要求の「影響」の「公開インタフェース」の行に互換なしの印があるか、PR 本文の `## 移行の手順` がプラグインの名前に
 触れれば MAJOR、無ければ PATCH である。承認ゲート 2 で上げ幅を変えるときは、承認の前に
 `changed-plugins --approval <承認資料> --set <名前>=<上げ幅>` で表を書き直す（表を手で直さない）。
@@ -58,7 +58,7 @@
 | 導入元の `owner/repo` | `origin` の URL |
 | マーケットプレイスの名前 | `.claude-plugin/marketplace.json` の `name`（無ければリポジトリ名） |
 
-**次の 3 つは、この形を選んだリポジトリが守る約束であり、宣言では変えない。** リポジトリの根の `CHANGELOG.md` と
+**次の 3 つは、この形を選んだリポジトリが守る約束であり、宣言では変えない。** リポジトリのルートの `CHANGELOG.md` と
 見出し `## [<プラグイン> <基底の版>]`、プラグインの置き場 `plugins/<名前>/.claude-plugin/plugin.json`（MCP は
 `plugins/mcp/<名前>/`）、版の形 `X.Y.Z[-dev.N]`。
 

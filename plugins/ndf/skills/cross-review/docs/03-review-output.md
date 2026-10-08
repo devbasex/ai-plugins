@@ -97,7 +97,7 @@ PR メタデータ系の check（Assignees / Reviewers / Labels）は **継続**
   ラウンドに残ったインラインコメント**はループ内 fix を通らないため取りこぼしやすい
 - ❌ **`max-rounds` なしで回す** — 無限ループの温床
 - ❌ **PR ローテーションを忘れる** — 100+ コメントの巨大 PR になる
-- ❌ **light モードで Agent (general-purpose) 呼び出しを省略する** — newtext.json が無いと `rotate-pr.sh execute --mode light` はエラーで止まる。prepare → Agent → execute の 3 段は不可分
+- ❌ **light モードで Agent (general-purpose) 呼び出しを省略する** — newtext.json が無いと `rotate-pr.sh execute --mode light` はエラーで止まる。prepare → Agent → execute の 3 ステップは不可分
 - ❌ **light モードで新 PR の title/body に内部用語を漏らす** — 「round N」「rotated」「cross-review」「レビュー指摘で〜」等は禁止 (Agent プロンプトで明示禁止)
 - ❌ **newtext.json に旧 PR の title/body をそのままコピーする** — 「現状の差分・実装を反映」が必須。古い説明が残ると後続 PR / 将来のレビュアーが混乱
 - ❌ **`rotate-pr.sh` 内から `claude` CLI を呼んで title/body を生成する** — 環境依存・コスト管理外。Agent tool でメイン側から呼ぶ
@@ -116,11 +116,11 @@ PR メタデータ系の check（Assignees / Reviewers / Labels）は **継続**
 
 1. **err.log の冒頭を確認**: 検知パターン (`fatal_err` の `early error (fatal) in err.log: ...`) が
    本当に致命なのか、それとも diff body の echo なのかを判別
-   - **v4.11.0 で benign 自動判定を強化**: `_match_is_quoted()` が backtick / 「」 に加え
+   - **benign の自動判定**: `_match_is_quoted()` が backtick / 「」 に加え
      **ダブル/シングルクォート文字列リテラル** (`"quota exceeded: ..."`) を、`EARLY_ERROR_BENIGN`
      が **grep 形式のソース引用行** (`path/to/file.py:22:    <code>`) を自動で benign 扱いする。
      codex が tests/*.py 等のテスト用文字列 (`"quota exceeded"`, `"sandbox error"`) を
-     レビュー中に echo しても誤 kill しなくなった（旧版で PR #23 round 2 に発生した事例）
+     レビュー中に echo しても誤 kill しない
 2. **誤検知が継続する場合**: `monitor.py --no-early-error` (もしくは `MONITOR_NO_EARLY_ERROR=1`
    環境変数) で EARLY_ERROR 検知自体を無効化し、hard timeout / stall / sentinel / result.json
    のみで判定するモードに切り替える
@@ -138,7 +138,7 @@ PR メタデータ系の check（Assignees / Reviewers / Labels）は **継続**
 | `$TMP_DIR/<agent>-review-pr<PR>-monitor.json` の `reason` | その担当の**最後の**起動の理由。`usage_limit` なら利用上限、`cli_timeout` なら CLI 自身の上限、`timeout` なら監視の上限、`missing` なら文言の無い結果なし |
 | 同じファイルの `detail` | 一致した文言を含む err.log / stdout.log の抜粋（最大 200 文字） |
 | `$TMP_DIR/monitor-outcomes.jsonl` | 起動ごとに 1 行が追記だけで積まれる。起動し直した担当の **1 回目の理由**はここに残る（`<stem>-monitor.json` は 2 回目で上書きされる）。`reason` と `ended_at` で並べて読む |
-| 状態ファイルの `rounds[-1].<agent>.no_result_reason` / `monitor_detail` | `read-result` が写した値。`state.py report` のラウンド表には `<agent>=NO_RESULT(<理由>)` の形で出る |
+| 状態ファイルの `rounds[-1].<agent>.no_result_reason` / `monitor_detail` | `read-result` がコピーした値。`state.py report` のラウンド表には `<agent>=NO_RESULT(<理由>)` の形で出る |
 
 `usage_limit` は起動し直しても解けないため、判定は同じラウンドで起動し直さず、claude なら登録済みの別のアカウント、
 それ以外は残りの参加者へ振り替える。振り替え先が無いときだけ終了コード 1 で終える。誰へ振り替えたかは状態ファイルの
