@@ -442,6 +442,33 @@ def test_user_changes_heading_inside_fence_does_not_count(repo, env, tmp_path):
     assert out["metrics"]["user_changes"] is False
 
 
+# --- 設計と違う点の節（#1241）---
+
+
+def test_template_writes_design_diff_section_only_for_standard(repo, env, tmp_path):
+    out_file = tmp_path / "std.md"
+    code, out, err = call(["template", "--out", str(out_file), "--mode", "standard"], env, repo)
+    assert code == 0, err
+    assert out["metrics"]["sections"][-1] == "## 設計と違う点"
+    code, out, err = call(["template", "--out", str(tmp_path / "light.md"), "--mode", "light"], env, repo)
+    assert code == 0, err
+    assert "## 設計と違う点" not in out["metrics"]["sections"]
+
+
+def test_create_standard_asks_for_design_diff_section(repo, env, tmp_path):
+    base = "## Summary\n\n- 要点\n\n## 利用者向けの変化\n\n- できること\n"
+    code, out, err = call(["create", "--title", "題", "--body-file", str(body_file(tmp_path, base)), "--mode", "standard"], env, repo)
+    assert code == 0, err
+    assert {"kind": "section", "name": "## 設計と違う点", "result": "missing"} in out["items"] and "設計と違う点" in out["next"]
+    b = body_file(tmp_path, base + "\n## 設計と違う点\n\n- 無し\n")
+    code, out, err = call(["create", "--title", "題", "--body-file", str(b), "--mode", "standard"], env, repo)
+    assert code == 0, err
+    assert "next" not in out
+    code, out, err = call(["create", "--title", "題", "--body-file", str(body_file(tmp_path, base)), "--mode", "light"], env, repo)
+    assert code == 0, err
+    assert "next" not in out and all(it["name"] != "## 設計と違う点" for it in out["items"])
+
+
 # --- 現状固定: cmd_plan の ok の出力の形（I-005） ------------------------------------
 
 
