@@ -1607,15 +1607,13 @@
       "term": "本文の骨格",
       "context": "ndf-issue-upkeep",
       "meaning": "範囲外の課題の本文が持つ 5 項目の見出し（何を見つけたか・どこで見つけたか・なぜこの変更の範囲外なのか・直さないと何が起きるか・由来）",
-      "source": "",
-      "pending_source": "issues/issue-851-requirements.md"
+      "source": "docs/specifications/out-of-scope-issue-file.md"
     },
     {
       "term": "提示の要約値",
       "context": "ndf-issue-upkeep",
       "meaning": "承認資料に載せた起票先・題・本文・ラベルから作る sha256。同意の後の issue-file.py create --approved に渡し、示した内容と作る内容が同じことを確かめる",
-      "source": "",
-      "pending_source": "issues/issue-851-design.md"
+      "source": "docs/specifications/out-of-scope-issue-file.md"
     },
     {
       "term": "上流リポジトリ",
