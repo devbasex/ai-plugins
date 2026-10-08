@@ -291,8 +291,8 @@ def post_review(
         posted_body=item["extra"]["body"] if done else 0,
         queued=0 if done else 1,
         findings=findings,
-        # 先客に止められた場合も、今回分は送れていない。上限だけは待てば流れる。
-        failed=bool(note_error) or bool(not done and flushed.failed is not None and not flushed.rate_limited),
+        # 先客に止められた場合も、今回分は送れていない。上限と一時的な失敗だけは待てば流れる。
+        failed=bool(note_error) or bool(not done and flushed.failed is not None and not flushed.waitable),
         posted_as=item["extra"]["posted_as"],
         intent=item["extra"]["intent"],
         detail=note_error or str((flushed.failed or {}).get("last_error") or ""),
@@ -435,7 +435,7 @@ def post_fix(
             response = done[seq].get("response")
             if isinstance(response, dict):
                 summary_url = response.get("html_url") or response.get("url")
-    failed = flushed.failed is not None and not flushed.rate_limited
+    failed = flushed.failed is not None and not flushed.waitable
     ours_dropped = [i for i in flushed.dropped if i.get("seq") is not None and int(i["seq"]) in seqs]
     detail = str((flushed.failed or {}).get("last_error") or "")
     if not detail and ours_dropped:

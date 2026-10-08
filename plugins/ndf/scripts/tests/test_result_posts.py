@@ -902,3 +902,55 @@ def test_the_standalone_command_stops_when_the_body_is_not_synced(tmp_path, monk
     assert result_posts.cmd_fix(args) == 1
     assert "揃えられない" in capsys.readouterr().err
     assert posted == []
+
+
+# ---------------- 一時的な失敗（#1843） ----------------
+
+# PR 1842 の round 1 の実例: HTTP 500・本文なしで `gh api` が応答を読めずに終わる。
+_SERVER_ERROR_NO_BODY = {"match": "pulls/730/reviews", "exit": 1, "stdout": "", "stderr": "unexpected end of JSON input\n"}
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        _SERVER_ERROR_NO_BODY,
+        {"match": "pulls/730/reviews", "exit": 1, "stdout": "", "stderr": "gh: Server Error (HTTP 500)\n"},
+        {"match": "pulls/730/reviews", "exit": 1, "stdout": "", "stderr": "error connecting to api.github.com\n"},
+    ],
+)
+def test_a_review_left_by_a_transient_failure_remains_queued_and_is_not_a_failure(tmp_path, fake_gh, failure) -> None:
+    """一時的な失敗は失敗にせず、投稿を積んだまま取り込みへ渡す（AC2）。"""
+    fake_gh.set_rules([{"match": "pulls/730/reviews?", "stdout": "[]"}, failure])
+
+    outcome, payload = _post_review(tmp_path)
+
+    assert outcome.failed is False and outcome.queued == 1 and outcome.findings == 2
+    assert outcome.review_url is None and outcome.posted_inline == 0
+    assert all("posted_to" not in c for c in json.loads(payload.read_text(encoding="utf-8"))["comments"])
+    [(_, item)] = _queue(tmp_path).items()
+    assert item["kind"] == "review-post" and item["last_transient"] is True
+
+
+def test_a_review_rejected_for_a_bad_request_still_fails(tmp_path, fake_gh) -> None:
+    """恒久の失敗は今までどおり失敗として返す（AC8）。"""
+    fake_gh.set_rules(
+        [
+            {"match": "pulls/730/reviews?", "stdout": "[]"},
+            {"match": "pulls/730/reviews", "exit": 1, "stdout": "", "stderr": "gh: Bad Request (HTTP 400)\n"},
+        ]
+    )
+
+    outcome, _ = _post_review(tmp_path)
+
+    assert outcome.failed is True
+
+
+def test_a_reply_left_by_a_transient_failure_remains_queued_and_is_not_a_failure(tmp_path, fake_gh) -> None:
+    """返信の送りも一時的な失敗なら失敗にせず残す（AC10）。"""
+    fake_gh.set_rules([{"match": "comments/111/replies", "exit": 1, "stdout": "", "stderr": "gh: Bad Gateway (HTTP 502)\n"}])
+
+    outcome = result_posts.post_fix(_queue(tmp_path), _fix_file(tmp_path), REPO, PR, round_no=ROUND, actor=ACTOR)
+
+    assert outcome.failed is False
+    assert outcome.queued >= 1
+    assert outcome.dropped == 0

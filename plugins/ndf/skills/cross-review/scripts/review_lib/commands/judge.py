@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import shlex
 import sys
 from typing import Any
 
@@ -32,14 +33,17 @@ def cmd_flush(args: argparse.Namespace) -> None:
     print(f"PENDING_SKIPPED={len(result.skipped)}")
     print(f"PENDING_DROPPED={len(result.dropped)}")
     print(f"PENDING_REMAINING={result.remaining}")
+    print(f"PENDING_RATE_LIMITED={'1' if result.rate_limited else '0'}")
+    print(f"PENDING_TRANSIENT={'1' if result.transient else '0'}")
+    # 止まった理由に最後の失敗を載せるため（drive.py の投稿待ち、#1843）。値は引用して 1 語にする。
+    print(f"PENDING_LAST_ERROR={shlex.quote(str((result.failed or {}).get('last_error') or ''))}")
     for item in result.dropped:
         review_lib.info(f"⚠️ 送れない項目を飛ばしました ({item.get('kind')} #{item.get('seq')}): {item.get('last_error') or ''}")
     if result.remaining:
         reason = (result.failed or {}).get("last_error", "")
+        why = "（まだ上限です）" if result.rate_limited else "（一時的な失敗です）" if result.transient else ""
         review_lib.info(
-            f"⏳ 待ち行列に {result.remaining} 件残っています"
-            f"{'（まだ上限です）' if result.rate_limited else ''}"
-            f"{f': {reason}' if reason and not result.rate_limited else ''}"
+            f"⏳ 待ち行列に {result.remaining} 件残っています{why}{f': {reason}' if reason and not result.rate_limited else ''}"
         )
     else:
         review_lib.info(f"✅ 待ち行列は空です（送った {len(result.sent)} 件）")
