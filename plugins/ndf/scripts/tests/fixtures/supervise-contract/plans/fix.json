@@ -15,19 +15,20 @@
       "timeout": 990,
       "cmd": "python3 <NDF>/scripts/test-run.py scope --paths tests/test_x.py",
       "on_fail": "judge",
-      "next": "pr"
+      "next": "design-tests"
     },
     {
       "id": "judge",
       "type": "judge",
       "inputs": [
         "test-limited",
-        "test-all"
+        "test-all",
+        "pr"
       ],
-      "question": "テストの失敗を直すか（fix）、範囲テストの失敗が変更に無関係なら PR へ（pr）、全体テストの失敗が変更に無関係なら文書のチェックへ（doc-lint）、止めるか（stop）",
+      "question": "テストの失敗を直すか（fix）、範囲テストの失敗が変更に無関係なら設計との突き合わせへ（design-tests）、PR が「設計と違う点」の節を欠いて止まったなら突き合わせをやり直すか（design-tests）、全体テストの失敗が変更に無関係なら文書のチェックへ（doc-lint）、止めるか（stop）",
       "choices": [
         "fix",
-        "pr",
+        "design-tests",
         "doc-lint",
         "stop"
       ]
@@ -44,6 +45,36 @@
       "next": "test-limited"
     },
     {
+      "id": "design-tests",
+      "type": "run",
+      "stage": "完了判定",
+      "cmd": "python3 <NDF>/scripts/design-match.py tests --issue 12 --root .",
+      "next": "design-specs",
+      "on_fail": "design-specs",
+      "skip_to": "pr"
+    },
+    {
+      "id": "design-specs",
+      "type": "run",
+      "stage": "完了判定",
+      "cmd": "python3 <NDF>/scripts/design-match.py specs --base origin/main --root .",
+      "next": "design-match",
+      "on_fail": "design-match"
+    },
+    {
+      "id": "design-match",
+      "type": "work",
+      "kind": "設計との突き合わせ",
+      "stage": "完了判定",
+      "serena": true,
+      "inputs": [
+        "design-tests",
+        "design-specs"
+      ],
+      "prompt": "完了判定の設計との突き合わせ（quality-gates の references/design-match.md）を行う。入力は\ndesign-match.py の tests（確認 (a)。設計に名前の出るテストの判定）と specs（確認 (b)。変えたファイル・シンボルを参照する\n既存の確定仕様と変更履歴）の出力である。\n1. tests の「無い」（missing）名前は作るか、節に「作らなかった」と理由を並べる。「確かめられなかった」（unverified）は\n   自分で確かめ、確かめられなければ節に並べる\n2. specs の文書を上から読み、変更後の振る舞いと合わない記述を同じ PR で直す。直せなければ節に並べる\n3. 設計文書（issues/ の課題の設計と決定の記録）の `### 決定 N` を 1 件ずつ実装と照らし、違う・実装しなかった・\n   判断できないを節に並べる\n4. 実装で受け入れ条件の前提を変えたなら、課題の本文の条件を requirements-design の「変更の途中で要求が変わったとき」の\n   形に直す。直す節ごとに `python3 <NDF>/scripts/lib/gh_parts.py body-section replace --issue <番号> --heading '<節の見出し>' --content-file <ファイル>`\n   を使い、gh issue edit --body-file で本文全体を書き直さない。続けて python3 <NDF>/scripts/spec-copy.py write <番号> <issues/ の写し> で写しを作り直す\n5. 直した文書はコミットする（push しない）\n6. 節を作業ディレクトリ（下の「作業ディレクトリ」）の design-diff.md へ書く（前の内容は上書きする）。\n   1 行目は `## 設計と違う点`。違いは「| 設計の箇所 | 違い | 理由 |」の表の行で並べ、同じ PR で直した箇所は並べない。\n   違いが無ければ `- 無し` の 1 行にする",
+      "next": "pr"
+    },
+    {
       "id": "pr",
       "type": "pr",
       "stage": "Pull Request",
@@ -56,6 +87,8 @@
         "manual": true,
         "migration": true
       },
+      "diff_section": "{state_dir}/work/design-diff.md",
+      "on_section_missing": "judge",
       "on_fail": "fix-push",
       "on_fail_only": "push-check"
     },

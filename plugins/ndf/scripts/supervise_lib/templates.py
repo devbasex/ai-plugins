@@ -11,7 +11,16 @@ from step_result import result
 from supervise_lib import release_templates
 from supervise_lib.decl import with_decls
 from supervise_lib.paths import CHECK_PY, DRIVES, REFACTOR_SCOPE_PY
-from supervise_lib.procedures import pr_step, push_fix_steps, record_steps, with_record, with_touched
+from supervise_lib.procedures import (
+    DESIGN_MATCH_MODES,
+    design_match_steps,
+    pr_step,
+    push_fix_steps,
+    record_steps,
+    design_diff_on_pr,
+    with_record,
+    with_touched,
+)
 from supervise_lib.verify_steps import merge_steps, refactor_template_arg, scope_cmd, scope_timeout, test_meta, whole_cmd, whole_timeout
 
 
@@ -97,6 +106,11 @@ def plan_to_merge(a, head: list[dict]) -> dict:
         # 要求の移行性の行は常に材料にする（互換なしの印があれば「移行の手順」の箇条になる。#1752）
         {"manual": bool(getattr(a, "manual", True)), "migration": True},
     )
+    # standard では範囲テストと PR の間で設計と突き合わせる（#1241 の決定 9）。修正のループのたびにやり直す
+    match = design_match_steps(a.issue, a.base, "pr") if a.mode in DESIGN_MATCH_MODES and a.issue else []
+    after_tests = match[0]["id"] if match else "pr"
+    if match:
+        design_diff_on_pr(pr, "judge")
     if sync:  # 同期とチェックの宣言が無いプロジェクトではステップを置かない
         steps += [
             {"id": "sync", "type": "run", "preset": "sync-check", "stage": "実装", "on_fail": "fix-sync", "next": "test-limited"},
@@ -110,19 +124,13 @@ def plan_to_merge(a, head: list[dict]) -> dict:
             "timeout": scope_timeout(a),
             "cmd": scope_cmd(a, tests),
             "on_fail": "judge",
-            "next": "pr",
+            "next": after_tests,
         },
-        {
-            "id": "judge",
-            "type": "judge",
-            "inputs": ["test-limited", "test-all"],
-            "question": "テストの失敗を直すか（fix）、範囲テストの失敗が変更に無関係なら PR へ（pr）、"
-            "全体テストの失敗が変更に無関係なら文書のチェックへ（doc-lint）、止めるか（stop）",
-            "choices": ["fix", "pr", "doc-lint", "stop"],
-        },
+        judge_step(after_tests, bool(match)),
         {"id": "fix", "type": "work", "kind": "修正", "inputs": ["test-limited", "test-all"], "prompt": FIX_PROMPT, "next": "test-limited"},
         # Draft の PR を全体テストの前に出し、CI と手元の全体テストを並べる。直した後は pr のステップが push して本文を更新する
         # 手動確認の節は課題の PR に載せる（スプリントブランチへ集める実装の PR は載せず、スプリント PR に載せる）
+        *match,
         pr,
         *push_fix_steps(pr),  # push 前の検査で拒まれたら直して打ち直す（#1751）
         {
@@ -169,6 +177,21 @@ def plan_to_merge(a, head: list[dict]) -> dict:
         plan["branch"] = a.branch
         plan["起点"] = f"origin/{a.base}"
     return plan
+
+
+def judge_step(after_tests: str, match: bool) -> dict:
+    """実装のプランの judge。範囲テストの失敗が変更に無関係なら `after_tests`（突き合わせがあれば design-tests、
+    無ければ pr）へ進む。突き合わせがあれば、PR の本文の節が欠けて pr が止まったときもここへ戻る。"""
+    to_next = "設計との突き合わせへ（design-tests）" if match else "PR へ（pr）"
+    pr_missing = "、PR が「設計と違う点」の節を欠いて止まったなら突き合わせをやり直すか（design-tests）" if match else ""
+    return {
+        "id": "judge",
+        "type": "judge",
+        "inputs": ["test-limited", "test-all", *(["pr"] if match else [])],
+        "question": f"テストの失敗を直すか（fix）、範囲テストの失敗が変更に無関係なら{to_next}{pr_missing}、"
+        "全体テストの失敗が変更に無関係なら文書のチェックへ（doc-lint）、止めるか（stop）",
+        "choices": ["fix", after_tests, "doc-lint", "stop"],
+    }
 
 
 # development-workflow の工程表で「構造改善」が「—」のモード

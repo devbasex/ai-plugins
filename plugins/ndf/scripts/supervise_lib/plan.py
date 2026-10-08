@@ -30,6 +30,13 @@ PR 本文の材料: pr のステップの `"materials"`（`supervise_lib/pr_mate
 `collect` のブランチへマージした実装の PR の利用者向けの変化・`design_results`（`design-results.json`）の設計 PR・
 `closes` と設計の結果の課題の `Closes` を本文へ集める。無ければ今の本文のまま。
 
+設計と違う点: pr のステップの `"diff_section"`（`{state_dir}` を含むパス）があれば、そのファイルの中身を
+`## 設計と違う点` の節として本文へ 1 つだけ置く（LLM の本文に同じ見出しがあれば置き換える）。ファイルが無いとき、
+`design-tests` のステップが 3（設計文書が無い）で終わっていれば「該当なし（設計文書が無い）」を置き、それ以外は
+push も PR の作成もせずに失敗し、`"on_section_missing"` のステップ（実装のプランでは judge）へ進む。
+`new impl` / `new fix` は `standard` のときだけ、範囲テストと pr の間に `design-tests` → `design-specs` →
+`design-match` の 3 ステップ（`design-match.py` の確認 (a)(b) と、確認 (c) の worker）を置く。
+
 Serena: work のステップに `"serena": true` を書くと Serena の MCP だけを載せる（大きなコードを何度も読む実装向け）。
 
 課題の本文: work のステップに `"issues": [858]`（`true` なら計画の `課題`）を書くと、`gh issue view` の題と本文を

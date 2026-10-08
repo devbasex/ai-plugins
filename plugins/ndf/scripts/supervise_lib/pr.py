@@ -16,7 +16,7 @@ from release_lib.others import MIGRATION_HEADING
 from supervise_lib.claude import TAIL
 from supervise_lib.paths import DECISIONS_SH
 from supervise_lib.pr_materials import CHANGES_HEADING, Materials, gather_materials
-from supervise_lib.prompts import PR_SYSTEM
+from supervise_lib.prompts import DESIGN_DIFF_HEADING, DESIGN_DIFF_NONE, PR_SYSTEM
 from step_result import result
 
 PR_FOOTER = "🤖 Generated with [Claude Code](https://claude.com/claude-code)"  # PR 本文の末尾の署名（1 度だけ）
@@ -51,6 +51,17 @@ def with_migration(body: str, section: str, required: bool) -> str:
         cut = at.end() + nxt.start() if nxt else len(body)
     head, tail = body[:cut].rstrip(), body[cut:].lstrip("\n")
     return (head + "\n\n" if head else "") + section + ("\n\n" + tail if tail else "\n")
+
+
+def with_design_diff(body: str, section: str) -> tuple[str, bool]:
+    """LLM の本文に「設計と違う点」の見出しがあれば `section` で置き換える（節を 2 つにしない。#1241 の決定 10）。
+    `(本文, 置いたか)`。見出しが無ければ本文を変えず、呼び手が材料の節と同じ位置へ置く。"""
+    if not re.search(rf"^{DESIGN_DIFF_HEADING}\s*$", body, re.M):
+        return body, False
+    out = gh_sections.replace_section(body, DESIGN_DIFF_HEADING, section)
+    if PR_FOOTER in body and PR_FOOTER not in out:  # 最後の節なら、署名まで節に含まれて消える
+        out = out.rstrip() + f"\n\n{PR_FOOTER}\n"
+    return out, True
 
 
 def design_title(path: Path) -> str | None:
@@ -125,6 +136,26 @@ class PrStep:
         head, tail = (body[:at], body[at:]) if at >= 0 else (body, "")
         return head.rstrip() + "\n\n" + "\n\n".join(extra) + "\n\n" + tail
 
+    def design_diff(self, ctx, step: dict) -> tuple[str | None, str | None]:
+        """`diff_section` の「設計と違う点」の節と、PR を作らずに止める理由（#1241 の I7・決定 14）。
+
+        ファイルがあればその中身。無ければ `design-tests` が 3（設計文書が無い）で終わったときだけ「該当なし」を置き、
+        0 / 1 / 2 で終わっていた（突き合わせを行うはずだった）なら止める。`diff_section` が無いステップは `(None, None)`。"""
+        raw = step.get("diff_section")
+        if not raw:
+            return None, None
+        f = Path(str(raw).replace("{state_dir}", str(ctx.state.dir)))
+        text = f.read_text(encoding="utf-8").strip() if f.is_file() else ""
+        if text:
+            return (text if text.startswith(DESIGN_DIFF_HEADING) else f"{DESIGN_DIFF_HEADING}\n\n{text}"), None
+        code = (ctx.state.results.get("design-tests") or {}).get("exit")
+        if code == 3:
+            return DESIGN_DIFF_NONE, None
+        return None, (
+            f"「{DESIGN_DIFF_HEADING[3:]}」の節のファイル（{f}）が無い。design-tests は終了コード {code} で終わっており、"
+            "突き合わせの結果が本文に載らないため PR を作らずに止める"
+        )
+
     def with_decisions(self, ctx, body: str, base: str) -> str:
         """設計の PR の本文へ「決めたこと」の節を作る時点で入れる（`pr-body-decisions.sh render`）。
 
@@ -156,6 +187,10 @@ class PrStep:
             msg = "PR の宛先（起点のブランチ）が分からない（ステップの base、計画か .ndf/worktree.json の base_branch）"
             ctx.state.cur.update(exit=2, text=msg)
             return False, msg
+        diff, err = self.design_diff(ctx, step)
+        if err is not None:
+            ctx.state.cur.update(exit=1, text=err, section_missing=True)
+            return False, err
         branch, err = self._push(ctx)
         if err is not None:
             return False, err
@@ -165,7 +200,11 @@ class PrStep:
         doc_title = design_title(Path(ctx.cwd) / step["title_doc"]) if step.get("title_doc") else None
         if step.get("body", "llm") == "llm":
             body = self._llm_body(ctx, step, body, changes, issues, mats)
-        body = self.with_appended(ctx, body, step, mats.sections)
+        sections = list(mats.sections)
+        if diff is not None:
+            body, placed = with_design_diff(body, diff)
+            sections += [] if placed else [diff]
+        body = self.with_appended(ctx, body, step, sections)
         body = with_mode_line(body, ctx.plan.get("モード"), self.passed_stages(ctx, step))
         if step.get("decisions"):
             body = self.with_decisions(ctx, body, base)
