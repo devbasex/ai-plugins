@@ -58,7 +58,7 @@
 | 導入元の `owner/repo` | `origin` の URL |
 | マーケットプレイスの名前 | `.claude-plugin/marketplace.json` の `name`（無ければリポジトリ名） |
 
-**次の 3 つは、この形を選んだリポジトリが守る約束であり、宣言では変えない。** リポジトリの根の `CHANGELOG.md` と
+**次の 3 つは、この形を選んだリポジトリが守る約束であり、宣言では変えない。** リポジトリのルートの `CHANGELOG.md` と
 見出し `## [<プラグイン> <基底の版>]`、プラグインの置き場 `plugins/<名前>/.claude-plugin/plugin.json`（MCP は
 `plugins/mcp/<名前>/`）、版の形 `X.Y.Z[-dev.N]`。
 

@@ -1955,7 +1955,7 @@
     {
       "term": "全体テスト",
       "context": "ndf-workflow",
-      "meaning": "リポジトリ全体を範囲にするテストか静的解析。テストは宣言の suites[].command、無ければ雛形の {paths} を . にしたもの（その旨を注記に残す）。静的解析は宣言の command、無ければ雛形の {paths} を範囲のパスで埋めたもの（範囲のパスが無ければ組まず、その旨を注記に残す）",
+      "meaning": "リポジトリ全体を範囲にするテストか静的解析。テストは宣言の suites[].command、無ければ範囲テストのテンプレートの {paths} を . にしたもの（その旨を注記に残す）。静的解析は宣言の command、無ければテンプレートの {paths} を範囲のパスで埋めたもの（範囲のパスが無ければ組まず、その旨を注記に残す）",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
       "deprecated": [
         "全体のテスト"
@@ -1998,7 +1998,7 @@
     {
       "term": "ndf-next",
       "context": "ndf-workflow",
-      "meaning": "次のセッションの最初の入力を置く、情報文字列 ndf-next の囲みのコードブロック。最後の応答に 1 つだけ置く",
+      "meaning": "次のセッションの最初の入力を置く、情報文字列が ndf-next のコードブロック。最後の応答に 1 つだけ置く",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
@@ -2301,12 +2301,15 @@
       "code": "strategy"
     },
     {
-      "term": "範囲テストの雛形",
+      "term": "範囲テストのテンプレート",
       "context": "ndf-workflow",
       "meaning": "{paths} を引用の外の 1 字句として含むテストのコマンド（宣言の scope_command か、{paths} を含む引数）。{paths} をシェルの引用で守った対象の並びへ置き換え、シェルで走らせる",
       "code": "scope_command",
       "source": "",
-      "pending_source": "issues/issue-1483-design.md"
+      "pending_source": "issues/issue-1483-design.md",
+      "deprecated": [
+        "範囲テストの雛形"
+      ]
     },
     {
       "term": "JUnit の置き場",

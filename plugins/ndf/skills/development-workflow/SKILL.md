@@ -34,7 +34,7 @@ hooks:
 **代わりに工程の順序が変わる。** スプリントに何が入るかが決まらないと判定できないため、
 **要求と受け入れ条件 → モード判定 → 作業場所の用意**の順になる。`light` にも要求と受け入れ条件が掛かる。
 その費用は受け入れる。判定の入力が無いまま判定する状態のほうが高くつく。
-要求と受け入れ条件は設計のプラン（`new sprint --design`）が持ち、課題の本文の写しが一致すれば飛ばす。`--design` を渡さないときだけ supervisor で回す。判定の後のフェーズはプランで流す（`agent-layers.md` の表）。
+要求と受け入れ条件は設計のプラン（`new sprint --design`）が持ち、課題の本文と仕様のコピーが一致すれば飛ばす。`--design` を渡さないときだけ supervisor で回す。判定の後のフェーズはプランで流す（`agent-layers.md` の表）。
 
 **モード判定は工程表の行を持たない。** ボードへ記録する工程の値を増やさないためである。
 
@@ -133,10 +133,10 @@ pace: fast
 基準ではない。
 **`次のコマンド:` の行は、判定の後に conductor が最初に打つコマンドである。** `normal` は [references/waiting.md](references/waiting.md) の
 「スプリントを流すコマンド」の 1 つ目（設計 Pull Request を出さないモードは `--design` を省く）、`pace: fast` と `pace: auto` は
-[references/pace.md](references/pace.md) の「スプリントを始める」のその進め方の 1 つ目を写す。雛形が無ければ `無し（supervisor で回す: <フェーズ>）`。
+[references/pace.md](references/pace.md) の「スプリントを始める」のその進め方の 1 つ目をコピーする。テンプレートが無ければ `無し（supervisor で回す: <フェーズ>）`。
 `pace:` の行は `fast` か `auto` を指定したときだけ出す（既定の `normal` では出さない）。
 
-判定基準の本文を出力へ貼らない。呼び出し側が基準を写し取ると、この Skill が唯一の
+判定基準の本文を出力へ貼らない。呼び出し側が基準をコピーすると、この Skill が唯一の
 置き場所である前提が崩れる。
 
 ## モードごとに起動する Skill
@@ -216,7 +216,7 @@ pace: fast
 
 **conductor は、`context-window.md` の 4 つのカットポイントとコンテキスト量の hook（`hook.py` の token の guard）に止められたときに、
 次の工程を始める再開コマンド（`/ndf:development-workflow #<課題>`。今のセッションを `/goal` で始めていたときだけ先頭に `/goal `）を、
-情報文字列 `ndf-next` の囲みのコードブロック 1 つで出す。** 3 層では conductor がフェーズレポート（`## フェーズの報告`）かキューの done を
+情報文字列が `ndf-next` のコードブロック 1 つで出す。** 3 層では conductor がフェーズレポート（`## フェーズの報告`）かキューの done を
 受け取った時点で出し（supervisor とプランは出さない）、`結果: 関門` なら承認ゲートの承認と取り込みの後に出す。
 出す時点・アナウンス・新しい会話が状態を戻す手順は `context-window.md` の「新しい会話で戻す」にある。出す前に引継ぎ文書（メインディレクトリの `.ndf/handoff/<名>.md`）を作るか更新し、対象の最後の工程（棚卸し。マイルストーンは閉じた後）の後に conductor が消す。規則は [references/handoff.md](references/handoff.md) にある。
 
@@ -370,7 +370,7 @@ Pull Request のマージ、制作物承認は本番の提出先への操作に�
   `operation` の実行も同じで、本番系へ届く単位は承認を得るまで実行しない
 
 **工程は 3 層（conductor / supervisor / worker）へ出し、既定はプラン（`supervise.py`）である。** conductor がフェーズごとにプランをキューで流し（[references/waiting.md](references/waiting.md) の「スプリントを流すコマンド」）、
-雛形か要る設定が無いときだけ `Agent` で supervisor を起動する（[references/agent-layers.md](references/agent-layers.md) の「プランで流すか supervisor で回すか」）。
+テンプレートか要る設定が無いときだけ `Agent` で supervisor を起動する（[references/agent-layers.md](references/agent-layers.md) の「プランで流すか supervisor で回すか」）。
 **承認ゲートで止まれるのは conductor だけである。** 起動の指示・報告の形・モデルの基準・到達点の置き直しも `agent-layers.md` にある。
 
 **supervisor を起動するときは `$SCRIPTS` を解き、起動指示の「進捗記録」へ絶対パスで書く。** supervisor はこの 1 行で
@@ -379,7 +379,7 @@ Pull Request のマージ、制作物承認は本番の提出先への操作に�
 **カットポイントの再起動はラッパーが自動で行う（Claude Code だけ）。** 利用者が `claude` と打つと
 alias がラッパーを挟み、conductor が出した `ndf-next` のブロックを拾って、`/exit`・プラグインの更新・
 次のセッションの起動を行う（始め方・止め方・上限は [references/relay.md](references/relay.md)）。
-**ブロックの前に次の Bash を 1 回実行し、2 行目（アナウンス）をブロックの直前へそのまま写す**（1 行目が `outside` か失敗ならラッパーの外。書き方は `context-window.md` の「新しい会話で戻す」）。
+**ブロックの前に次の Bash を 1 回実行し、2 行目（アナウンス）をブロックの直前へそのままコピーする**（1 行目が `outside` か失敗ならラッパーの外。書き方は `context-window.md` の「新しい会話で戻す」）。
 
 ```bash
 PLUGIN_ROOT='${CLAUDE_PLUGIN_ROOT}'; case "$PLUGIN_ROOT" in '$'*) PLUGIN_ROOT= ;; esac

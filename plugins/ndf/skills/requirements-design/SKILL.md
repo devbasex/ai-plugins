@@ -20,7 +20,7 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 受け入れ条件のない計画は、完了判定ができない。逆に、受け入れ条件だけあって分解がない
 状態は問題ない（分解は `implementation-plan` が続けて行う）。
 
-`tdd-cycle` / `quality-gates` は開発ループの後段を担う Skill で、順次追加している。
+`tdd-cycle` / `quality-gates` は開発ループの後半の工程を担う Skill で、順次追加している。
 導入されていない環境では、実装とテストは対象プロジェクトの既存手順に従う。
 
 ## 使う場面
@@ -154,7 +154,7 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 
 ### 7. 仕様として残す
 
-雛形は [references/spec-template.md](references/spec-template.md)。**仕様の正は課題の本文である。**
+テンプレートは [references/spec-template.md](references/spec-template.md)。**仕様の正は課題の本文である。**
 課題を読む人が GitHub の上で受け入れ条件を読めるように、要求の全文を本文へ書く
 （`gh issue edit <番号> --body-file <ファイル>`）。本文にファイルのパスだけを書かない。
 
@@ -199,7 +199,7 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 
 - [references/acceptance-criteria.md](references/acceptance-criteria.md) — 受け入れ条件の形式と性質
 - [references/nonfunctional-requirements.md](references/nonfunctional-requirements.md) — 非機能の 6 大項目の書き方・例・該当の判定
-- [references/spec-template.md](references/spec-template.md) — 仕様の雛形
+- [references/spec-template.md](references/spec-template.md) — 仕様のテンプレート
 - [references/glossary-format.md](references/glossary-format.md) — 用語集の設定・用語集・人が読む文書の形と、用語チェックの規則
 - [references/document-requirements.md](references/document-requirements.md) — 読み手へ渡す文書の受け入れ条件
 

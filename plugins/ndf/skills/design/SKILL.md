@@ -78,7 +78,7 @@ issue のことではない。
 
 ### 2. 設計文書を書く
 
-雛形は [references/design-template.md](references/design-template.md) にある。節の並びと、
+テンプレートは [references/design-template.md](references/design-template.md) にある。節の並びと、
 各節が `implementation-plan` のどのタスクへつながるかもそこにある。
 
 **H1 と承認する人が読む欄（目的・適用範囲・あるべき姿の根拠）を先に書き、続けてドメインモデルの節を書く。**

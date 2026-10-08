@@ -87,7 +87,7 @@ credential helper が応答しない環境の退避（`gh auth git-credential` �
 
 本文を日本語で書いてファイルに置く。`.github/pull_request_template.md` があればその構造に従い、
 `## Summary`・`## 利用者向けの変化`・`## 移行の手順`・`## Test plan` を持ち、機密情報を含めない。更新のときはブランチの全コミット
-（`git log origin/<base>..HEAD`）を反映し、既存の関連リンクを保つ。雛形は
+（`git log origin/<base>..HEAD`）を反映し、既存の関連リンクを保つ。テンプレートは
 `python3 "$SCRIPTS/pr-steps.py" template --out /tmp/pr-body.md` が書く。
 
 **`## 利用者向けの変化` はリリースの CHANGELOG と更新案内へそのまま載る**（`release-steps.py notes` が組む）。

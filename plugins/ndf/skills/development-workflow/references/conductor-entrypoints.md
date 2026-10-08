@@ -1,7 +1,7 @@
 # conductor が直に使うエントリポイント
 
 conductor が自分で打つ NDF のスクリプトはこの一覧に限る。**一覧にあるものは起動指示や引継ぎ文書に
-書き写さない。** ここに無い操作を手で組み立てそうになったら、先に一覧の中の近いプランを探す。
+コピーしない。** ここに無い操作を手で組み立てそうになったら、先に一覧の中の近いプランを探す。
 
 例: マージ済みの PR #1211 の不具合を即時修正すると決めたときは、`gh` を手で打たずに次の 3 行で流す。
 
@@ -28,7 +28,7 @@ python3 "$SCRIPTS/supervise.py" wait <プラン>-state/queue-done.json
 | `scripts/supervise.py new close` | スプリントを閉じるプランを作る |
 | `scripts/supervise.py queue` | プランを同時に `--max` 本まで順に流す |
 | `scripts/supervise.py wait` | queue の終わりか attention の行まで待つ。待ち方は [waiting.md](waiting.md) |
-| `scripts/supervise.py run` | プランを 1 本だけ前景で流す |
+| `scripts/supervise.py run` | プランを 1 本だけフォアグラウンドで流す |
 | `scripts/supervise.py note` | フェーズレポートから引継ぎ文書の表へ 1 行を足す |
 | `scripts/parallel-measure.py capacity` | 並列に起動してよい本数を出す |
 
@@ -41,10 +41,10 @@ python3 "$SCRIPTS/supervise.py" wait <プラン>-state/queue-done.json
 | `scripts/sprint-state.py gate` | 承認ゲートの判定（利用者か MVV）を状態ファイルへ書く。利用者の答えは `--what <要約> --by user [--pr <設計 PR>] --outcome approved\|rejected`（差し戻しは承認ゲートを通さず記録だけ残す） |
 | `scripts/project-mvv.py` | プロジェクト MVV の判定（`check`）・材料（`collect`）・候補（`propose`）・照合（`vet`）・承認の書き込み（`approve`）・版（`show`）・節（`context`）・改訂の兆候（`signals`）。手順は [project-mvv.md](project-mvv.md) |
 | `scripts/sprint-state.py status` | 今の状態を出す |
-| `scripts/sprint-state.py next` | 切れ目で引継ぎ文書へ置く ndf-next の囲みを作る |
+| `scripts/sprint-state.py next` | 切れ目で引継ぎ文書へ置く ndf-next のブロックを作る |
 | `scripts/sprint-state.py render` | 状態を表に書き出す |
 | `scripts/mvv-gate.py check` | 承認ゲートの前に MVV の判定を行う（`--advise` は `normal` の助言の MVV 判定。[pace.md](pace.md) の「MVV 判定」） |
-| `scripts/glossary.py gate` | 設計の工程の入口で用語集があるかを確かめる |
+| `scripts/glossary.py gate` | 設計の工程の始めに用語集があるかを確かめる |
 
 ## 検査・マージ・リリース
 
@@ -67,7 +67,7 @@ python3 "$SCRIPTS/supervise.py" wait <プラン>-state/queue-done.json
 | `scripts/relay.py notice` | 切り替えの前に、利用者へ出す案内を得る。仕組みは [relay.md](relay.md) |
 | `scripts/relay.py status` | ラッパーの導入の状態を確かめる |
 | `scripts/handoff.py path` | 引継ぎ文書の本体と履歴の、メインディレクトリの絶対パスを得る（`--exists` で本体の有無）。規則は [handoff.md](handoff.md) |
-| `scripts/handoff.py init` | 引継ぎ文書が無ければ雛形から作る |
+| `scripts/handoff.py init` | 引継ぎ文書が無ければテンプレートから作る |
 | `scripts/handoff.py find` | 名指しの無い再開で、入力の語に一致する引継ぎ文書を探す |
 | `scripts/handoff.py next` | 引継ぎ文書の「次に実行するコマンド」の節を再開コマンドで置き換える |
 | `scripts/handoff.py check` | 引継ぎ文書の節の形と行数を確かめる（`--trim` で「前の会話の進み」を履歴へ移す） |

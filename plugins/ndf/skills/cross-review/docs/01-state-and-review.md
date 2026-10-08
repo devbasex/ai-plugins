@@ -9,10 +9,10 @@
 |---|---|
 | `scripts/state.py init` | Step 0 — state 初期化 / 再開 + プリチェック |
 | `scripts/state.py start-round` | Step 1 — round 開始判定 |
-| `scripts/launch-reviewer.sh` | Step 2 — レビュワー起動の入口（4 ランタイム共通） |
+| `scripts/launch-reviewer.sh` | Step 2 — レビュワー起動のエントリポイント（4 ランタイム共通） |
 | `scripts/monitor.py` | Step 2 — レビュワーのプロセス多軸監視（`--agents` で担当を渡す） |
 | `scripts/wait-review.sh` | Step 2 — `monitor.py` の薄ラッパ（互換用） |
-| 共通ライブラリの `scripts/lib/bg-wait.sh` | Step 2 / 2.5 — Bash の 1 回（600 秒）に収まらない監視と反証を背景で起動し、540 秒以内の wait を 124 のあいだ**別の Bash の呼び出しで**呼び直す |
+| 共通ライブラリの `scripts/lib/bg-wait.sh` | Step 2 / 2.5 — Bash の 1 回（600 秒）に収まらない監視と反証をバックグラウンドで起動し、540 秒以内の wait を 124 のあいだ**別の Bash の呼び出しで**呼び直す |
 | `scripts/state.py read-result` | Step 2.4 — result.json マージ |
 | `scripts/state.py unresolved-threads` | PR 上の未解決の指摘を数える（順序を持たない補助） |
 | `scripts/state.py judge` | Step 3 — intent + 引き継いだ指摘の判定 |
@@ -296,7 +296,7 @@ eval "$JUDGE_VARS"
 `NO_RESULT` は `read-result` が書き込む。理由は `no_result_reason` に、監視が残した詳細（err.log の
 抜粋、最大 200 文字）は `monitor_detail` に残る（監視結果ファイルがあったときだけ）。理由の語彙を
 持つのは共通ライブラリの `monitor_outcome.py`、リトライ可否と振り替えの規則を持つのは
-`assignment.py`（`after_no_result`）だけで、`read-result` は理由を写し、判定は規則の答えに従う。
+`assignment.py`（`after_no_result`）だけで、`read-result` は理由をコピーし、判定は規則の答えに従う。
 
 | 理由 | 何が起きたか | 同じ席で起動し直し | `read-result` の終了コード |
 | --- | --- | --- | --- |

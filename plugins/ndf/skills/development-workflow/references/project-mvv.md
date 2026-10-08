@@ -25,7 +25,7 @@
 | --- | --- | --- |
 | NDF の共通原則（上位の原則・優先順位・AI の行動の 2 択・判断の範囲と記録・人と AI の対話・C1〜C8） | 配布物の `scripts/data/ndf-common-principles.md` | NDF のリリースだけ。プロジェクトは上書きも除外もできない |
 | プロジェクト MVV（Mission / Vision / Value・固有の操作 `P<番号>`） | `.ndf/mvv.md`（本文）と `.ndf/mvv.json`（版の履歴。形は `schemas/mvv.schema.json`） | `project-mvv.py approve` だけ（利用者の承認の後） |
-| スプリント MVV（`R<番号>` を含む） | スプリント状態ファイルの隣の `mvv.md` | `sprint-state.py init`（`fast` / `auto` は必須で、写せなければ止まる。`normal` は `--mvv` か `--milestone` から写せたときだけ写し、止めない。[pace.md](pace.md)） |
+| スプリント MVV（`R<番号>` を含む） | スプリント状態ファイルの隣の `mvv.md` | `sprint-state.py init`（`fast` / `auto` は必須で、コピーできなければ止まる。`normal` は `--mvv` か `--milestone` からコピーできたときだけコピーし、止めない。[pace.md](pace.md)） |
 
 判断の地点へ渡す MVV の節は、共通原則の本文全体 → プロジェクト MVV（無ければ「MVV なし」とその理由）→ スプリント MVV →
 判断の決まり（取れる行動は「進める」か「止めて人へ戻す（理由と根拠つき）」の 2 つ・根拠の項目の番号を返す）の順で、
@@ -35,7 +35,7 @@
 プロジェクト MVV だけの節になる。
 
 本文の形: `## Mission` / `## Vision` / `## Value`（番号つきの箇条 `1. ...`）は必須。固有の操作は `## 必ず人の承認が要る操作`
-の表に `| P1 | 操作 | 理由 |` で書く。共通原則の写し（`## 上位の原則`・`## 優先順位` の節・`| C<番号> |` の行）は持てない。
+の表に `| P1 | 操作 | 理由 |` で書く。共通原則のコピー（`## 上位の原則`・`## 優先順位` の節・`| C<番号> |` の行）は持てない。
 ほかの節（共通原則との関係・改訂など）は持ってよい。
 
 ## 手順 0 での扱い（`project-mvv.py check`）
@@ -53,7 +53,7 @@
 | --- | --- | --- |
 | 1 | `project-mvv.py collect [--request-file <依頼文>]` | 欠け（`git` が無い・`gh` が読めない）は `missing` に残り、集めた材料で進む。宣言の `settings` が壊れていれば 3 |
 | 2 | `project-mvv.py propose --materials <materials.json>` | 1: 候補の形が足りない・LLM が返さない。`materials.json` を示して利用者に直接問う |
-| 3 | `candidates.md` を示し、「利用者に決めてもらう点」を `AskUserQuestion` で問う（下の雛形の形） | 答えが割れたら問い直す |
+| 3 | `candidates.md` を示し、「利用者に決めてもらう点」を `AskUserQuestion` で問う（下のテンプレートの形） | 答えが割れたら問い直す |
 | 4 | 答えから本文を組み、作業ディレクトリ（リポジトリの外）に置く。候補ごとの本文の案は `candidate-<ID>.md` にある | — |
 | 5 | `project-mvv.py vet --kind candidate --body <本文>` | 10「反する疑い」: 箇所（`C4`・`priority` など）を示して本文を直し、5 をやり直す。10「判定できない」: 引き受けるかを利用者に問う |
 | 6 | 本文を示して承認を問う（`AskUserQuestion`） | 承認されない: 3 へ戻る。`approve` を打たない |
@@ -68,7 +68,7 @@
 `settings.trend_commits` / `trend_issues` か `--trend-commits` / `--trend-issues` で変える）に満たないと、
 README・指示書（`AGENTS.md` / `CLAUDE.md` など）・依頼文（`--request-file`）だけを材料にする。
 
-**Claude Code 以外のランタイム。** `AskUserQuestion` が無ければ、同じ雛形の文面を会話で示して問う。
+**Claude Code 以外のランタイム。** `AskUserQuestion` が無ければ、同じテンプレートの文面を会話で示して問う。
 
 ## 改訂
 
@@ -116,7 +116,7 @@ README・指示書（`AGENTS.md` / `CLAUDE.md` など）・依頼文（`--reques
 | `requirements-design` | 下の「工程での読み方」 | 反する疑いは作業の報告の理由（根拠の項目つき） |
 | `design` | 下の「工程での読み方」 | 設計文書の決定ごとの「根拠:」の行。反する疑いは作業の報告の理由 |
 | `tdd-cycle` | 下の「工程での読み方」 | 反する疑いは作業の報告の理由（根拠の項目つき） |
-| cross-review の担当・修正担当・見送りの返信 | `init` が状態ファイルの `review_criteria.mvv_block` へ写し、`reviewer_block` / `fixer_block` の後ろに付く | 状態の `review_criteria.project_mvv`。振り分けの `mvv_basis`・見送りの返信の末尾の「根拠: Value 1（MVV 版 1）」 |
+| cross-review の担当・修正担当・見送りの返信 | `init` が状態ファイルの `review_criteria.mvv_block` へコピーし、`reviewer_block` / `fixer_block` の後ろに付く | 状態の `review_criteria.project_mvv`。振り分けの `mvv_basis`・見送りの返信の末尾の「根拠: Value 1（MVV 版 1）」 |
 | cross-refactoring の提案と改修計画 | 状態の `project_mvv.block` を `RF_MVV` で | 状態の `project_mvv.ref`。候補・項目・見送りの `mvv_basis`（改修計画の見送りの表の「根拠（MVV）」） |
 | supervise の judge | プロンプトの先頭（`work` のステップと同じ節） | `state.json` の `project_mvv`・`log[].basis` |
 | 範囲外の起票（`out-of-scope`） | 3 択の前に `project-mvv.py context` を読む | 起票の本文の「なぜこの変更の範囲外なのか」の節に根拠の項目と版 |

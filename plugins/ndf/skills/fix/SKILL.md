@@ -56,7 +56,7 @@ FIX=$(bash "$R/scripts/resolve.sh" scripts fix) || exit 3
 
 1. **文脈を集める。** 未解決スレッド・3 種のコメント（インライン / レビュー body / PR レベル）・
    CI の現時点の状態（失敗した check と失敗ログの保存先）・本文の「やらないこと」「別 PR 対応」
-   の節を 1 ファイルへ書き、振り分けの雛形を書き出す。**CI の完了は待たない**
+   の節を 1 ファイルへ書き、振り分けのテンプレートを書き出す。**CI の完了は待たない**
 
    ```bash
    python3 "$FIX/fix-steps.py" context <PR番号> [--root <worktree>]
@@ -64,7 +64,7 @@ FIX=$(bash "$R/scripts/resolve.sh" scripts fix) || exit 3
 
    `items[].name` が `context` のファイルを読む。末尾の「指摘の基準」の節が振り分けの基準である
    （正本は `$R/scripts/lib/review_criteria.py`。プロジェクトのレビューの重点は `.ndf/review.json`
-   の宣言から入り、`/ndf:cross-review` の中では状態ファイルに写した重点を使う）。`review-focus` の
+   の宣言から入り、`/ndf:cross-review` の中では状態ファイルにコピーした重点を使う）。`review-focus` の
    項目が `unreadable` なら、宣言を読めずに基準 1・2・4 だけで続けたことを作業完了報告へ書く。`ci_failed` の項目があれば `ci_log` のログも
    読む。`metrics.unresolved` が対応の対象の全量である（レビュー結果の投稿数は使わない）
 2. **指摘を振り分ける**（「重要度の判定」）。`items[].name` が `decisions` の JSON の各要素へ
@@ -85,7 +85,7 @@ FIX=$(bash "$R/scripts/resolve.sh" scripts fix) || exit 3
    python3 "$FIX/fix-steps.py" finalize --decisions <雛形の JSON> [--root <worktree>]
    ```
 
-   `fix_commit` を省くと HEAD を採る。CI の失敗を直したコミットがあれば雛形の `ci_fixed` を `true` に
+   `fix_commit` を省くと HEAD を採る。CI の失敗を直したコミットがあればテンプレートの `ci_fixed` を `true` に
    する。`ci_fixed` が `true` なら CI を照会せず、`ci_status` を `PENDING`・`ci_failed_checks` を空にする
    （照会できるのは送信前の head で、直した失敗が残って見えるため）。`fixed` が 0 件で `ci_fixed` も `true` でなければ `fix_commit` を捨てて `null` にし（`items`
    の `fix-commit` が `dropped`）、送信も CI も起きない。振り分けが「重要度の判定」の規則を破れば
@@ -121,11 +121,11 @@ FIX=$(bash "$R/scripts/resolve.sh" scripts fix) || exit 3
   3 は重点の宣言があるときだけ
 - 見送りの種類（`waive_kind`）: `wording`（字句や言い回しの修正）/ `unlikely`（まず起きない条件での
   異常処理）/ `doc_mismatch`（実装に影響しない文書の食い違い）/ `alignment`（番号や表記の揃え）/
-  `preference`（好みの設計）。返信の本文は `finalize` が雛形
+  `preference`（好みの設計）。返信の本文は `finalize` がテンプレート
   （`scripts/lib/review_criteria.py` の `REPLY`）から組む。括弧の中は見送りの種類の名前で、重点の宣言が
   あるときだけ重点の名前を足す
 - ロジック・仕様逸脱・セキュリティ: コード / 仕様を確認してから修正可否を判断
-- bot 指摘が **明らかに誤読** している場合（例: 意図的な変数展開を「クオート不足」と指摘）:
+- bot 指摘が **誤読** している場合（例: 意図的な変数展開を「クオート不足」と指摘）:
   `rejected` に理由を書く。Resolve されない
 - 仕様判断が必要な指摘（API 変更、互換性破壊など）: ユーザ問い合わせ対象
 - **自動判断できない場合**（安易にユーザへ投げない）: 仕様文書（`docs/`, `README`）→ 既存
@@ -184,7 +184,7 @@ FIX=$(bash "$R/scripts/resolve.sh" scripts fix) || exit 3
 - `thread_id` を持たない要素（レビュー本文の指摘）には返信を送らず、理由を PR のまとめへ
   載せる。GitHub はレビュー本文への返信を受け付けないためである
 - `ci_failed_checks` は `cross-review` 側で code-related と meta-only に分類され、メタチェックのみ
-  失敗ならループを継続する。code-related ではない失敗の補足は雛形の `ci_note` に書く
+  失敗ならループを継続する。code-related ではない失敗の補足はテンプレートの `ci_note` に書く
 - まとめの参照（`summary_comment_url`）は投稿する側が記録へ書く
 
 ## 作業完了報告（必須）

@@ -21,7 +21,7 @@
 7. リリースの Pull Request の待ちが【スタックしたチェック】で止まる不具合は、起票せず【即時修正】すると決めた。
    修正の Pull Request #1101 を足して、開発版を `10.17.22-dev.2` として出し直した
 8. 【ゲート 2】で【MVV 判定】は【レッドライン】（`.github/workflows/` を触った）に当たり、利用者の承認へ戻った。利用者が承認した
-9. conductor は本番のキューと `sprint-state.py update → render → next` を 1 本の背景の Bash で流し、【本番】へ【正式版】 `10.17.22` をリリースした
+9. conductor は本番のキューと `sprint-state.py update → render → next` を 1 本のバックグラウンドの Bash で流し、【本番】へ【正式版】 `10.17.22` をリリースした
 10. 最後に `relay.py notice` の【アナウンス】と ndf-next を出して応答を終え、ラッパーが次のセッションを起動した
 
 ## 大きさの関係
@@ -96,7 +96,7 @@ flowchart TB
 | モード | 変更の目的物で決める工程の振り分け。上から `operation` / `documentation` / `standard` / `legacy-refactor` / `light` | モード判定の結果の `mode:` | [../SKILL.md](../SKILL.md) の「判定の手順」、[workflow-modes.md](workflow-modes.md) |
 | pace | モードとは別の軸で、工程をどう通すかを決める。ウォーターフォールで人の承認を取る `normal`（既定）、`normal` の承認だけを MVV 判定にする `auto`、実践投入の中で検証しながら MVV で自動に進める `fast` の 3 つ | `pace:`、`supervise.py new sprint --pace fast|auto`、`.ndf/pace.json` | [pace.md](pace.md) |
 | MVV | スプリントの Mission / Vision / Value。マイルストーンの説明からコピーし、利用者が 1 回承認する。`fast` と `auto` でゲート 1・2 の事前の許可になる | `mvv.md`、`mvv.sha256`、承認ゲートの記録 `MVV` | [pace.md](pace.md) の「スプリントを始める」 |
-| スプリント MVV | スプリント単位の MVV。プロジェクト MVV の範囲での具体化 | `sprint-state.py init --milestone` / `--mvv` で写す | [project-mvv.md](project-mvv.md) |
+| スプリント MVV | スプリント単位の MVV。プロジェクト MVV の範囲での具体化 | `sprint-state.py init --milestone` / `--mvv` でコピーする | [project-mvv.md](project-mvv.md) |
 | MVV 判定 | 承認ゲートのエビデンスが MVV に従うかの判定。「従う」でレッドラインが無いときだけ承認ゲートを省き、記録を残す | `mvv-gate.py check`、`verdict`（follow / not_follow / unknown）、終了コード 0 / 10 | [pace.md](pace.md) の「MVV 判定」 |
 | レッドライン | 当たれば MVV 判定が「従う」でも利用者の承認を求める範囲。秘密・認証認可・利用者のデータ・戻せない操作・他のリポジトリへの公開・対象外のモード・承認後に変わった MVV | `.ndf/pace.json` の `boundary_paths`、`boundary` | [pace.md](pace.md) の「レッドライン」 |
 | トリガー | `fast` でリファクタリングとコードレビューを流す条件。点数・行数・流出不具合・経過時間・最終の 5 つ | `check-trigger.py eval`（立つ 0 / 立たない 3 / 読めない 2）、`triggers.*` | [pace.md](pace.md) の「検査のトリガー」 |
@@ -150,11 +150,11 @@ flowchart TB
 | 完了判定 | コマンドの証跡で完了を判定する工程。スクラムの完了の定義に当たる | `/ndf:quality-gates` | [quality-gates](../../quality-gates/SKILL.md) |
 | 範囲テスト | 変更が触った範囲に限って走らせるテスト | `new impl --tests`、プランの `test-limited` のステップ、`cross-refactoring` の `test_targets` | [supervise.py](../../../scripts/supervise.py) の docstring、[cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
 | ラウンドテスト | `cross-refactoring` の `round-only` で、項目ごとにそのまま走らせるコマンド（`{paths}` を含まない `--round-test`、または `scope_command` の無い suite の `command`。suite ごとに別のシェルで 1 本ずつ走らせる） | `--round-test`、`round_test` | [cross-refactoring](../../cross-refactoring/SKILL.md) の「引数」 |
-| 範囲テストの雛形 | `{paths}` を引用の外の 1 字句として含むテストのコマンド（宣言の `scope_command` か、`{paths}` を含む引数）。`{paths}` をシェルの引用で守った対象の並びへ置き換え、シェルで走らせる | `scope_command` | [project-analysis.md](project-analysis.md) の P2 |
+| 範囲テストのテンプレート | `{paths}` を引用の外の 1 字句として含むテストのコマンド（宣言の `scope_command` か、`{paths}` を含む引数）。`{paths}` をシェルの引用で守った対象の並びへ置き換え、シェルで走らせる | `scope_command` | [project-analysis.md](project-analysis.md) の P2 |
 | suite の種別 | テストの宣言の suite がテスト（`test`）か静的解析（`lint`。整形の検査を含む）か。書かなければテスト。テストの suite の範囲は対象のテスト、静的解析の suite の範囲は変更したファイルのうち `paths` に当たるもの | `.ndf/project.json` の `test.suites[].kind`、引数 `--test-kind` | [project-analysis.md](project-analysis.md) の P2 |
 | 起動の失敗 | テストのコマンドのプロセスを起動できない、またはシェルが終了コード 126 / 127 を返したこと。テストが落ちたこととは別に扱い、その時点で止まる | `launch_failed`、`launch_failure` | [cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
 | JUnit の置き場 | テストのコマンドが JUnit XML を書くファイルの、作業ディレクトリからの相対パス（宣言の `suites[].junit`）。NDF はコマンドへ引数を足さず、このファイルから落ちたテストの ID を読む | `junit` | [project-analysis.md](project-analysis.md) の P2 |
-| 全体テスト | リポジトリ全体を範囲にするテストか静的解析。テストは宣言の `command`、無ければ範囲テストの雛形の `{paths}` を `.` にしたもの（その旨を注記 `WHOLE_FROM_TEMPLATE` に残す）。静的解析は宣言の `command`、無ければ雛形の `{paths}` を範囲のパスで埋めたもの（範囲のパスが無ければ組まず、注記 `NO_LINT_WHOLE` を残す）。戦略が `local-scoped-ci-whole` なら手元で走らせず CI の結果で見る | プランの `test-all` のステップ、`.ndf/project.json` の `test.suites[].command` | [supervise.py](../../../scripts/supervise.py) の docstring |
+| 全体テスト | リポジトリ全体を範囲にするテストか静的解析。テストは宣言の `command`、無ければ範囲テストのテンプレートの `{paths}` を `.` にしたもの（その旨を注記 `WHOLE_FROM_TEMPLATE` に残す）。静的解析は宣言の `command`、無ければテンプレートの `{paths}` を範囲のパスで埋めたもの（範囲のパスが無ければ組まず、注記 `NO_LINT_WHOLE` を残す）。戦略が `local-scoped-ci-whole` なら手元で走らせず CI の結果で見る | プランの `test-all` のステップ、`.ndf/project.json` の `test.suites[].command` | [supervise.py](../../../scripts/supervise.py) の docstring |
 | 危険フラグ | `cross-refactoring` で、範囲テストでは覆えない変更（D1〜D5）。立てば全体テストを 1 度走らせる | D1〜D5 | [cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
 | グレード | `cross-refactoring` が候補ごとに付ける適用の価値（high / medium / low）。改善項目の順位の最初のキー | `tier` | [cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
 | コメントのスナップショット | `cross-review` が取る既存コメントの一覧。2 ラウンド目以降は取り直す | `state.py init` | [cross-review](../../cross-review/SKILL.md) |
@@ -176,7 +176,7 @@ flowchart TB
 | 引継ぎ文書 | 会話を切って新しいセッションで続けるための文書。メインディレクトリに置き、コミットしない。1 本が 1 つの引継ぎの対象を受け持つ。「今の会話の進み」と「次に実行するコマンド」の節はスクリプトが書く | `.ndf/handoff/<名>.md`、`handoff.py`、`supervise.py note` | [handoff.md](handoff.md) |
 | 引継ぎの対象 | 引継ぎ文書 1 本が受け持つ仕事のまとまり（スプリント・マイルストーン・課題のどれか）。名の頭になる | `sprint-` / `milestone-` / `issue-` | [handoff.md](handoff.md) の「置き場と名」 |
 | 引継ぎの履歴 | 引継ぎ文書の本体から終わった項目を移す文書。本体と同じ場所に置く | `<名>-history.md`、`handoff.py check --trim` | [handoff.md](handoff.md) の「作る・更新する」 |
-| ndf-next | 次のセッションの最初の入力を置く、情報文字列 `ndf-next` の囲みのコードブロック。最後の応答に 1 つだけ置く | 囲みの情報文字列 `ndf-next` | [context-window.md](context-window.md) の「新しい会話で戻す」 |
+| ndf-next | 次のセッションの最初の入力を置く、情報文字列が `ndf-next` のコードブロック。最後の応答に 1 つだけ置く | フェンスの情報文字列 `ndf-next` | [context-window.md](context-window.md) の「新しい会話で戻す」 |
 | シグナルファイル | ラッパーへ知らせるファイル。Stop hook が最後の応答の ndf-next を移した `next.json` と、止める `stop`。ラッパーはこれを受けてセッションを切り替える | `next.json`、`stop`、`relay.py mark` | [relay.md](relay.md) の「承認ゲートを越えない守り」 |
 | アナウンス | ndf-next のブロックの直前にそのまま置く 1 文。1 行目がラッパーの内か外かを示す | `relay.py notice`（1 行目 `relay` / `outside`、2 行目がアナウンス） | [context-window.md](context-window.md) の「新しい会話で戻す」 |
 | アイドル | シグナルファイル・会話の記録・利用者の入力が動かない秒数。この秒数がたつまでラッパーは `/exit` を入力しない | `NDF_RELAY_QUIET`（既定 5） | [relay.md](relay.md) の「上限」 |

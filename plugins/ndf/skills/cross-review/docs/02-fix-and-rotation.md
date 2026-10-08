@@ -34,7 +34,7 @@
 | 前ラウンドのレビュー | `rounds[-1]` の担当ごとの `intent` / `posted_as` / `comments` / `review_url`。件数はそのラウンドで投稿した数で、対応の対象は `/ndf:fix` が PR の未解決のスレッドから数え直す |
 | コメントのスナップショット | `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt` |
 | 戻り値ファイル | `$TMP_DIR/fix-pr<PR>-result.json`。環境変数 `CROSS_REVIEW_TMP_DIR` を渡すと `/ndf:fix` がここへ書く |
-| 指摘の基準 | 環境変数 `CROSS_REVIEW_STATE=$TMP_DIR/cross-review-pr<STATE_PR>-state.json`。`fix-steps.py context` が状態ファイルの `review_criteria`（`init` が写した重点）を読み、担当と同じ基準で振り分ける |
+| 指摘の基準 | 環境変数 `CROSS_REVIEW_STATE=$TMP_DIR/cross-review-pr<STATE_PR>-state.json`。`fix-steps.py context` が状態ファイルの `review_criteria`（`init` がコピーした重点）を読み、担当と同じ基準で振り分ける |
 
 **送信・返信・決着・まとめは取り込み（`state.py merge-fix`）が行う**。worker は
 GitHub と git へ書かない。取り込みは現在の頭を指定して送り（`git push origin HEAD:<ブランチ名>`）、
@@ -89,16 +89,16 @@ lint や型検査の失敗は即中断してユーザ判断。
 **収束の判定（Step 3）も同じ振り分けを使う**（#327）。両方の AI が承認したラウンドは、
 収束を返す前に `commits/{HEAD_OID}/check-runs` を **1 度だけ** 照会する。code-related の
 失敗があれば**中断せず**終了コード 2 で修正のラウンドへ回す。収束の直前は修正の機会が
-残っている段であり、そこで中断すると直せる失敗まで人手へ戻すことになる。照会できない
+残っている段階であり、そこで中断すると直せる失敗まで人手へ戻すことになる。照会できない
 とき（`gh` の失敗 / `HTTP 422` / チェックジョブ 0 件）は収束させ、`rounds[-1].ci.verdict` へ
 `unverified` と理由を残す。**進行を止めない側へ倒す。** 同名のチェックジョブは名前ごとの
 最新の実行（`completed_at` と `started_at` の新しい方）へ畳んでから振り分ける。本文の編集や
 再実行で別の実行が成功したチェックの、前の実行の失敗は数えない。
 
-## Step 6: PR ローテーション (prepare → Agent → execute の 3 段)
+## Step 6: PR ローテーション (prepare → Agent → execute の 3 ステップ)
 
 `rotate-pr.sh` は **light モード (default) と squash モード (opt-in)** を持つ。
-両者ともメインからは `prepare → (light のみ Agent) → execute` の 3 段で呼ぶ。
+両者ともメインからは `prepare → (light のみ Agent) → execute` の 3 ステップで呼ぶ。
 
 ```bash
 if "$SCRIPTS/state.py" should-rotate "$STATE_PR"; then
@@ -250,7 +250,7 @@ Step 1 に戻る。
 - **ループ中に deferred 記録した nit**: `state.deferred_nits` に積まれたまま reply のみで
   Resolve されていないスレッド。
 
-これらを放置すると、PR レビュー画面に「Unresolved」スレッドが残り、人間のレビュアーや
+これらが残ったままだと、PR レビュー画面に「Unresolved」スレッドが残り、人間のレビュアーや
 後続作業者が「未対応の指摘がある」と誤認する。
 
 ### 実行（メインが Agent を駆動）

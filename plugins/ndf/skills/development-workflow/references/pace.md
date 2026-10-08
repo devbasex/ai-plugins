@@ -164,8 +164,8 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 | 開発版 | `release`（`facts` は `gate_as_ok`。出す版の Pull Request は検査のプランの PR） | 5 つ目の `--then` |
 | 本番 | `release-prod`（先頭が `mvv` → `note`（判定のコメントを検査の PR へ）→ `bump`） | 6 つ目の `--then` |
 
-`--design` を省くと設計・ゲート 1・設計の結果が無く、スプリントブランチのステージが `command` を持つ。リリースの経路が雛形で
-組むもの（`release.form` に雛形がある）でなければ、開発版と本番の代わりに下の「リリースの経路からステージを組む」のステージが入る。
+`--design` を省くと設計・ゲート 1・設計の結果が無く、スプリントブランチのステージが `command` を持つ。リリースの経路がテンプレートで
+組むもの（`release.form` にテンプレートがある）でなければ、開発版と本番の代わりに下の「リリースの経路からステージを組む」のステージが入る。
 `then_of` のステージはマニフェストに `resume`（そのステージから最後までを流す queue のコマンド）を持つ。
 
 **MVV 判定の後のステップ（`approve`・`merge`・本番の `note`）が落ちたら、`handoff` のステップが承認ゲートへ落とす。**
@@ -195,13 +195,13 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 --with-verification` で、本番が飛ばされたときは `--record-pr 0`（本番の記録なし）になる。`refine` は `close` が 0 で終わったときだけ届き（スプリントを閉じてから棚卸しへ進む）、棚卸しを無人で通す（承認の要る反映は
 行わず、承認資料のパスと番号を報告に載せて終える）。まとめのプランは課題すべてへ
 工程を記録するため、通過記録の報告が `まとめる:` から `記録あり:` へ移る。
-リリースの経路が雛形で組むものでなければ `--version`・`--prod` は要らず、開発版と本番の代わりに下の経路のステージが入り、
+リリースの経路がテンプレートで組むものでなければ `--version`・`--prod` は要らず、開発版と本番の代わりに下の経路のステージが入り、
 `close` のステップは `--record-pr 0` になる。
 
 ## リリースの経路からステージを組む
 
 **`new sprint` / `new close` は、リリースの経路（`lib/delivery.py` の `routes`）から検査の後のステージを組む。**
-`.ndf/supervise.json` に `release.form` があれば経路は雛形（`template`）で、今の開発版と本番のステージを置き、版数
+`.ndf/supervise.json` に `release.form` があれば経路はテンプレート（`template`）で、今の開発版と本番のステージを置き、版数
 （`--version`、`close` は `--prod` も）が要る。無ければ `.ndf/project.json` の `delivery` の行ごとに経路を決め、版数は要らない。
 選んだ経路は `sprint.json` の `リリースの経路` に並ぶ。
 
@@ -355,8 +355,8 @@ mvv-gate.py check --sprint <状態> --gate design|release [--material F...] [--p
 | ゲート 2 | 開発版のプランの `explain` → `mvv` → `mvv-note`（プランの結果は `facts` の関門のまま） | 承認資料（`issues/approval-<プラグイン>-v<版>.md`）の末尾 |
 
 判定の行は `mvv-gate.jsonl` に `pace: normal` として残り、改訂の兆候は `auto` / `fast` と分けずに数える。`sprint-state.py init` は
-どの進め方でも承認済みのプロジェクト MVV の参照を状態へ書き、`normal` でも `--mvv` か `--milestone` からスプリント MVV を写す
-（写せなくても止めず、照合もしない）。この参照を持たない `normal` の状態では、判定が「機械のチェックで外れた」になる。
+どの進め方でも承認済みのプロジェクト MVV の参照を状態へ書き、`normal` でも `--mvv` か `--milestone` からスプリント MVV をコピーする
+（コピーできなくても止めず、照合もしない）。この参照を持たない `normal` の状態では、判定が「機械のチェックで外れた」になる。
 `--state` を省いた `normal` のスプリントのプランは変わらない。
 
 ### レッドライン
@@ -396,7 +396,7 @@ Pull Request のコメント）の 3 つがそろったときに限る。** レ�
 | `check` | 検査の終わり | `result`（`merged` / `no_change` / `failed`）・`failed_at`・`scope`（`since` / `pr`。無い行は `since`）・`pr`（`since` の検査の PR）・`target_pr`（`pr` の検査した PR）・`prs`（範囲の PR）・`findings` |
 | `escape` | 流出不具合を直したマージの後 | `pr`・`of`（0 は不明）・`areas` |
 
-`findings` の件数は計画の `state.json` の `counts`（フェーズレポートと同じ出所）から写す。
+`findings` の件数は計画の `state.json` の `counts`（フェーズレポートと同じ出所）からコピーする。
 
 | キー | 単位 |
 | --- | --- |
