@@ -194,7 +194,7 @@ interim」）で行う。
 
 **supervisor が「2 回目の通知を待つ」で応答を終えると止まる。** supervisor が起動した worker
 は supervisor のバックグラウンドの子に数えられず、worker が後で終わっても、応答を終えた supervisor は
-起こされない（#901）。自分で起動したバックグラウンドの Bash の完了通知なら、supervisor は再開する。
+起こされない。自分で起動したバックグラウンドの Bash の完了通知なら、supervisor は再開する。
 
 **worker の規則 5（バックグラウンドの処理を残したまま応答を終えない）は保つ。** 規則を守る worker では
 中間通知は起きない。この手は、守れなかった worker（`Monitor` やバックグラウンドの待ちを残して応答を
