@@ -3542,6 +3542,36 @@
       "context": "ndf-cross-review",
       "meaning": "担当の結果は記録へ取り込んであり、投稿だけが投稿キューに残っている状態。結果なし（NO_RESULT）とは別である（#1843）",
       "source": ""
+    },
+    {
+      "term": "設計との突き合わせ",
+      "context": "ndf-workflow",
+      "meaning": "完了判定で、設計に名前の出るテスト・既存の確定仕様と変更履歴・設計の決定を実装と照らし、食い違いを残すこと。確認 (a)(b)(c) の 3 つからなる",
+      "pending_source": "issues/issue-1241-design.md"
+    },
+    {
+      "term": "設計に名前の出るテスト",
+      "context": "ndf-workflow",
+      "meaning": "設計文書の「決定の記録」「テスト設計」「構成要素」に、バッククォートで囲んで書かれたテストファイルのパス・<パス>::<名前>・「テスト設計」の test で始まる識別子",
+      "pending_source": "issues/issue-1241-design.md"
+    },
+    {
+      "term": "既存の確定仕様",
+      "context": "ndf-workflow",
+      "meaning": "比べるベースブランチとの merge-base の時点で確定仕様の置き場にあった文書。同じ差分で足した確定仕様は含まない",
+      "pending_source": "issues/issue-1241-design.md"
+    },
+    {
+      "term": "設計の決定",
+      "context": "ndf-workflow",
+      "meaning": "設計文書の「決定の記録」の 1 件（### 決定 N）。judge のステップが返す「決定」とは別の語",
+      "pending_source": "issues/issue-1241-design.md"
+    },
+    {
+      "term": "設計と違う点",
+      "context": "ndf-workflow",
+      "meaning": "実装 PR の本文の節。設計の決定・設計に名前の出るテスト・既存の確定仕様・受け入れ条件と実装の違いを、箇所・違い・理由の行で並べる",
+      "pending_source": "issues/issue-1241-design.md"
     }
   ]
 }
