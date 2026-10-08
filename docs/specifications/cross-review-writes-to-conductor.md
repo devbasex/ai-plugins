@@ -54,7 +54,7 @@
 | 修正の送信と、送り先に載ったことの確認 | 収束の判定・指摘区分と数え方（[証拠ベースのレビュー](cross-review-evidence-based.md)） |
 | 起動し直した担当を初回と同じ経路へ通すこと | 起動結果の語彙とリトライ可否（[起動結果](cross-review-launch-outcome.md)） |
 | 修正を単独で行うときの書き込み | スロットの決め方（[利用可能な参加者だけで始める収束ループ](cross-review-participants-and-seats.md)） |
-| — | 単発の `/ndf:pr-review` が担当に直接投稿させる流れ |
+| — | 単発の `/ndf:pr-review` の投稿（担当は投稿せず、`pr-review-steps.py` が `review-post` で送る。[pr-review-steps-script.md](pr-review-steps-script.md)） |
 
 ## 背景
 

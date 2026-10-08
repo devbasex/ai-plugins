@@ -63,5 +63,7 @@
 | [cross-refactoring-test-stale-bytecode.md](cross-refactoring-test-stale-bytecode.md) | cross-refactoring のテストと製品の書き換えが同じ秒の古いバイトコードを読まない規則 |
 | [cross-refactoring-technique-intake-constraints.md](cross-refactoring-technique-intake-constraints.md) | cross-refactoring で分割・抽出・移動・改名・テストの共通化の項目が採用まで進むための取り込みの制約 |
 | [cross-refactoring-implementation-window-and-readopt.md](cross-refactoring-implementation-window-and-readopt.md) | cross-refactoring の実装の時間の配り方・採り直し・中断の後の締め切りのずらし |
+| [out-of-scope-issue-file.md](out-of-scope-issue-file.md) | 範囲外の課題の起票を部品（`issue-file.py` の 5 つのサブコマンド）にした決定と理由、本文の骨格・由来・提示の要約値・上流リポジトリの解決で常に成り立つ条件、既知の限界。手順は `out-of-scope` / `retrospective` の SKILL.md と `issue-file.py` の冒頭の説明が正 |
+| [pr-review-steps-script.md](pr-review-steps-script.md) | `pr-review` の収集・判定・投稿・外部 AI への委譲を `pr-review-steps.py`（`collect` / `finish` / `delegate`）にした決定と理由、ベースブランチの実在の確認・指摘ファイルの段・本来の判定・投稿しない条件、既知の限界。手順と観点は `pr-review` の SKILL.md が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
