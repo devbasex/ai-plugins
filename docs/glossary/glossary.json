@@ -1612,7 +1612,7 @@
     {
       "term": "提示の要約値",
       "context": "ndf-issue-upkeep",
-      "meaning": "承認資料に載せた起票先・題・本文・ラベルから作る sha256。同意の後の issue-file.py create --approved に渡し、示した内容と作る内容が同じことを確かめる",
+      "meaning": "承認資料に載せた内容から作る sha256。issue-file.py の create では起票先・題・本文・ラベル、note では打つ先・番号・1 行から作り、同意の後の --approved に渡して、示した内容と打つ内容が同じことを確かめる",
       "source": "docs/specifications/out-of-scope-issue-file.md"
     },
     {
