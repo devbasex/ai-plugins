@@ -126,6 +126,39 @@ def _tried_line(st: dict[str, Any], round_no: int) -> str:
     )
 
 
+def _apply_aborts(pr: int, st: dict[str, Any], last: dict[str, Any], aborted: list, round_no: int) -> None:
+    """`abort` の席があれば理由を出し、試した担当と理由を並べて中断する（無ければ何もしない）。"""
+    if not aborted:
+        return
+    for failed, reason in aborted:
+        detail = (last.get(failed.seat) or {}).get("monitor_detail")
+        review_lib.info(f"  {failed.label()}: reason={reason}" + (f" detail={detail}" if detail else ""))
+    _abort_no_result_round(
+        pr,
+        st,
+        f"結果が残らず、振り替え先もありません: {_tried_line(st, round_no)}。"
+        " 中断します。最終スイープを通してから完了報告へ進んでください",
+    )
+
+
+def _apply_relaunch(last: dict[str, Any], pending: list[str]) -> None:
+    """同じ席で起動し直す担当を `relaunched` へ重ねずに足す。"""
+    if pending:
+        last["relaunched"] = (last.get("relaunched") or []) + [a for a in pending if a not in (last.get("relaunched") or [])]
+
+
+def _apply_reassign(last: dict[str, Any], moved: list, seats: list[str], accounts: dict) -> None:
+    """振り替えた席を担当と席の記録へ反映し、`reassigned` へ重ねずに足す。"""
+    if not moved:
+        return
+    last["reviewers"] = seats
+    last["seats"] = participants_mod.seat_records(seats, accounts)
+    done = {(m.get("from"), m.get("to"), m.get("to_account")) for m in last.get("reassigned") or []}
+    for f, to, r in moved:
+        if (f.seat, to.seat, to.account or "") not in done:
+            last.setdefault("reassigned", []).append({"from": f.seat, "to": to.seat, "to_account": to.account or "", "reason": r})
+
+
 def _handle_no_result_round(pr: int, st: dict[str, Any], last: dict[str, Any], no_result: list[str]) -> None:
     """結果なしの担当があるラウンドの出口を決める。
 
@@ -144,27 +177,11 @@ def _handle_no_result_round(pr: int, st: dict[str, Any], last: dict[str, Any], n
     round_no = int(last.get("round") or 1)
     seats, accounts, decisions = _decide_seats(st, last, no_result, reasons)
     aborted = [(f, r) for f, r, d in decisions if d.action == assignment.ABORT]
-    if aborted:
-        for failed, reason in aborted:
-            detail = (last.get(failed.seat) or {}).get("monitor_detail")
-            review_lib.info(f"  {failed.label()}: reason={reason}" + (f" detail={detail}" if detail else ""))
-        _abort_no_result_round(
-            pr,
-            st,
-            f"結果が残らず、振り替え先もありません: {_tried_line(st, round_no)}。"
-            " 中断します。最終スイープを通してから完了報告へ進んでください",
-        )
+    _apply_aborts(pr, st, last, aborted, round_no)
     pending = [f.seat for f, _, d in decisions if d.action == assignment.RELAUNCH]
     moved = [(f, d.to, r) for f, r, d in decisions if d.action == assignment.REASSIGN and d.to is not None]
-    if pending:
-        last["relaunched"] = (last.get("relaunched") or []) + [a for a in pending if a not in (last.get("relaunched") or [])]
-    if moved:
-        last["reviewers"] = seats
-        last["seats"] = participants_mod.seat_records(seats, accounts)
-        done = {(m.get("from"), m.get("to"), m.get("to_account")) for m in last.get("reassigned") or []}
-        for f, to, r in moved:
-            if (f.seat, to.seat, to.account or "") not in done:
-                last.setdefault("reassigned", []).append({"from": f.seat, "to": to.seat, "to_account": to.account or "", "reason": r})
+    _apply_relaunch(last, pending)
+    _apply_reassign(last, moved, seats, accounts)
     store._save(pr, st)
     if pending:
         _print_relaunch(pending)
