@@ -5,13 +5,16 @@
                              [--label "<マイルストーン>の<工程名>"] [--dry-run] [--root <dir>]
 
 1. 記録の PR の本文とコメントを読み、最後の「## 配布の記録」ブロックを取る
-2. スプリントの PR の一覧（--prs、無ければブロックの `スプリント:` の行）の本文から、閉じる語が
-   指す課題を集める（lib/closing-issues.sh）。--issues の課題（記録のリポジトリ）を足す
-   （`pace: fast` の実装 PR は閉じる語を持たない）
+2. スプリントの PR の一覧（--prs、無ければブロックの `スプリント:` の行）の本文から、closing keywords
+   （GitHub が課題を自動で閉じるキーワード Closes / Fixes / Resolves）が指す課題を集める
+   （lib/closing-issues.sh）。--issues の課題（記録のリポジトリ）を足す（`pace: fast` の実装 PR は
+   closing keywords を持たない）。PR を読んだのに集めた課題が 0 件なら、何も書かずに止まる（終了コード 2）
 3. 閉じる条件 1（本番への配布まで済んだ、または配布なし）と、--with-verification のときは
    条件 2（その課題の受け入れ条件がすべて合格）を課題ごとに判定する
 4. 条件を満たす課題ごとに (a) 状態を読む → (b) 記録のリポジトリの課題ならボードを Done →
    (c) 読み直して OPEN なら閉じる → (d) 読み直して CLOSED を確かめる
+5. スプリントの PR の題と本文が番号で参照し、2 で集めた課題に入らない開いた課題（参照だけの課題、
+   lib/closing.py の referenced_numbers）を kept_open で載せる。閉じず、ボードも書かない
 
 結果は lib/step_result.py の形の 1 行の JSON。items は課題ごとに
 {kind:"issue", repo, number, result, reason?, cmd?}。result は
@@ -20,7 +23,7 @@ closed / already_closed / failed / kept_open（--dry-run では would_close）�
 `--record-pr 0` は「本番の記録なし」（最終の検査で変更が無く本番を飛ばした）。配布の記録を読まず、
 閉じる条件も見ずに --issues の課題を閉じる。--issues と一緒のときだけ受ける。
 終了コード: 0 = 失敗なし / 1 = 失敗あり（棚卸しへ進まない）/ 2 = 一覧が取れない・
---record-pr 0 に --issues が無い / 3 = 呼び出しの誤り。
+閉じる課題が 0 件・--record-pr 0 に --issues が無い / 3 = 呼び出しの誤り。
 """
 
 from __future__ import annotations
@@ -49,6 +52,7 @@ from step_result import (
 )
 import gh_call  # noqa: E402
 import md  # noqa: E402
+from closing import referenced_numbers  # noqa: E402
 
 from dist_record import parse_record  # noqa: E402  記録の形は lib/dist_record.py が持つ（#1273）
 
@@ -96,14 +100,28 @@ def verification_verdicts(block, record_repo):
 # --- 課題の収集 -----------------------------------------------------------------
 
 
+def _read_sprint_pr(root, repo, n):
+    """スプリントの PR の題と本文を 1 回で読む。"""
+    p = gh_call.gh(["pr", "view", str(n), "--repo", repo, "--json", "title,body"], cwd=root)
+    if p.returncode != 0:
+        raise StepError(f"スプリントの PR #{n} を読めない: {p.stderr.strip()[:300]}", EXIT_UNREADABLE)
+    try:
+        d = json.loads(p.stdout)
+    except ValueError:
+        raise StepError(f"スプリントの PR #{n} の出力を読めない", EXIT_UNREADABLE)
+    return d.get("title") or "", d.get("body") or ""
+
+
 def sprint_issues(root, repo, prs):
-    seen, out = set(), []
+    """(closing keywords が指す課題, 題と本文が参照する記録のリポジトリの番号) を返す。
+
+    closing keywords は本文だけから読む（GitHub は題の closing keywords で課題を閉じない）。"""
+    seen, out, refs = set(), [], []
     for n in prs:
-        p = gh_call.gh(["pr", "view", str(n), "--repo", repo, "--json", "body", "-q", ".body"], cwd=root)
-        if p.returncode != 0:
-            raise StepError(f"スプリントの PR #{n} を読めない: {p.stderr.strip()[:300]}", EXIT_UNREADABLE)
+        title, body = _read_sprint_pr(root, repo, n)
+        refs += [r for r in referenced_numbers(title + "\n" + body, repo) if r not in refs]
         c = subprocess.run(
-            ["bash", str(HERE / "lib" / "closing-issues.sh"), "--repo", repo], cwd=root, input=p.stdout, capture_output=True, text=True
+            ["bash", str(HERE / "lib" / "closing-issues.sh"), "--repo", repo], cwd=root, input=body, capture_output=True, text=True
         )
         for ln in c.stdout.splitlines():
             if "\t" not in ln:
@@ -113,7 +131,7 @@ def sprint_issues(root, repo, prs):
             if key not in seen:
                 seen.add(key)
                 out.append(key)
-    return out
+    return out, refs
 
 
 # --- 閉じる ---------------------------------------------------------------------
@@ -229,16 +247,53 @@ def _close_item(a, ctx, repo, n, kept_all, verdicts):
     return close_one(ctx, repo, n)
 
 
+NOT_GIVEN = "closing keywords（GitHub が課題を自動で閉じるキーワード Closes / Fixes / Resolves）も --issues も無い参照"
+
+
+def _referenced_items(root, repo, refs, issues):
+    """参照だけの課題の行。1 番号につき状態と URL を 1 回読み、Pull Request と閉じた課題は行にしない。"""
+    items = []
+    for n in refs:
+        if (repo, n) in issues:
+            continue
+        p = gh_call.gh(["issue", "view", str(n), "--repo", repo, "--json", "state,url", "-q", "[.state, .url] | @tsv"], cwd=root)
+        state, _, url = p.stdout.strip().partition("\t")
+        base = {"kind": "issue", "repo": repo, "number": n, "result": "kept_open"}
+        if p.returncode != 0 or not state:
+            items.append({**base, "reason": f"状態を読めない（{NOT_GIVEN}）"})
+        elif "/pull/" not in url and state != "CLOSED":
+            items.append({**base, "reason": NOT_GIVEN})
+    return items
+
+
 def _close_summary(items, prs, dry_run):
     count = {k: sum(1 for i in items if i["result"] == k) for k in ("closed", "already_closed", "failed", "kept_open", "would_close")}
-    metrics = {"issues": len(items), **count, "prs": len(prs)}
+    referenced = sum(1 for i in items if i["result"] == "kept_open" and NOT_GIVEN in i.get("reason", ""))
+    metrics = {"issues": len(items), **count, "referenced_only": referenced, "prs": len(prs)}
     summary = (
         f"閉じた {count['closed']} 件・既に閉じていた {count['already_closed']} 件・"
-        f"失敗 {count['failed']} 件・開いたまま {count['kept_open']} 件"
+        f"失敗 {count['failed']} 件・開いたまま {count['kept_open']} 件（うち参照だけ {referenced} 件）"
     )
     if dry_run:
         summary += f"（試行。閉じる予定 {count['would_close']} 件）"
     return count, metrics, summary
+
+
+def _stop_no_issues(prs, refs):
+    """スプリントの PR を読んだのに閉じる課題が 0 件。課題もボードも書かずに止まる（参照の状態は読まない）。"""
+    seen = f"（PR が参照した番号: {' '.join(f'#{n}' for n in refs)}）" if refs else ""
+    emit(
+        result(
+            TOOL,
+            "stopped",
+            f"閉じる課題が 0 件（スプリントの PR {len(prs)} 本に closing keywords（GitHub が課題を自動で閉じるキーワード"
+            " Closes / Fixes / Resolves）が無く、--issues も無い）",
+            [],
+            {"issues": 0, "prs": len(prs)},
+            next=f"閉じる課題を --issues で渡して打ち直す{seen}",
+        ),
+        EXIT_UNREADABLE,
+    )
 
 
 def cmd_close(a):
@@ -270,8 +325,10 @@ def cmd_close(a):
             ),
             EXIT_UNREADABLE,
         )
-    issues = sprint_issues(root, record_repo, prs) if prs else []
+    issues, refs = sprint_issues(root, record_repo, prs) if prs else ([], [])
     issues += [k for k in given if k not in issues]
+    if not issues:
+        _stop_no_issues(prs, refs)
 
     kept_all, verdicts = _closing_blocker(a, rec, record_repo)
 
@@ -281,6 +338,7 @@ def cmd_close(a):
     notes = ctx.notes
     for repo, n in issues:
         items.append(_close_item(a, ctx, repo, n, kept_all, verdicts))
+    items += _referenced_items(root, record_repo, refs, issues)
 
     count, metrics, summary = _close_summary(items, prs, a.dry_run)
     if count["failed"]:
@@ -308,7 +366,11 @@ def build_parser():
         "--record-pr", type=int, required=True, help="配布の記録を置いた PR の番号。0 は本番の記録なし（--issues と一緒に渡す）"
     )
     ap.add_argument("--prs", type=number_list, help="スプリントの PR の番号（カンマ区切り）。省けば配布の記録から読む")
-    ap.add_argument("--issues", type=number_list, help="閉じる課題の番号（カンマ区切り）。PR の閉じる語と和を取る")
+    ap.add_argument(
+        "--issues",
+        type=number_list,
+        help="閉じる課題の番号（カンマ区切り）。PR の closing keywords（GitHub が課題を自動で閉じるキーワード Closes / Fixes / Resolves）が指す課題と和を取る",
+    )
     ap.add_argument("--repo", help="記録のリポジトリ（owner/name）。省けば gh repo view で決める")
     ap.add_argument("--with-verification", action="store_true", help="リリース後テストを通る経路（閉じる条件 2 を見る）")
     ap.add_argument("--label", help="閉じるときのコメントに入れる「<マイルストーン>の<工程名>」")
