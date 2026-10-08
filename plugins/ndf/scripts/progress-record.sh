@@ -23,6 +23,10 @@
 # `gh` が無い、issue を取得できないときは本文を書かずに終了コード 0 で終わる。
 # **進行管理が理由で開発の工程を止めない。**
 #
+# **本文の読みから書きまでは課題ごとの錠の中で行う（#1241 の I10）。** 錠は `lib/gh_parts.py body-lock` が取り、
+# その中でこのスクリプトをもう 1 度走らせる（`NDF_PROGRESS_LOCKED=1`。通過記録は外側だけが積む）。錠を
+# 30 秒（`NDF_PROGRESS_LOCK_TIMEOUT`）で取れなければ、`## 進行` を書かずに `NOTE:` を残して終了コード 0 で終わる。
+#
 # 呼び出し側の誤り（引数不足・知らない工程名）だけは 2 を返す。
 set -uo pipefail
 
@@ -41,6 +45,7 @@ usage() {
   printf 'usage: progress-record.sh <issue番号> <工程名> [--mode M] [--pace P] [--worktree P] [--plan P] [--repo R] [--note TEXT]\n' >&2
 }
 
+ARGS=("$@")
 ISSUE="${1:-}"
 STAGE="${2:-}"
 shift 2 2>/dev/null || true
@@ -88,9 +93,16 @@ else
 fi
 RECORD_STAGE=$STAGE
 [ "$RECORD_STAGE" != "-" ] || RECORD_STAGE=''
-wf_record_progress "$SLUG" "$ISSUE" "$RECORD_STAGE" "$MODE" "$PACE"
+[ -n "${NDF_PROGRESS_LOCKED:-}" ] || wf_record_progress "$SLUG" "$ISSUE" "$RECORD_STAGE" "$MODE" "$PACE"
 
 command -v gh >/dev/null 2>&1 || exit 0
+
+if [ -z "${NDF_PROGRESS_LOCKED:-}" ]; then
+  NDF_PROGRESS_LOCKED=1 python3 "$SCRIPT_DIR/lib/gh_parts.py" body-lock --issue "$ISSUE" ${REPO:+--repo "$REPO"} \
+    --timeout "${NDF_PROGRESS_LOCK_TIMEOUT:-30}" -- bash "${BASH_SOURCE[0]}" "${ARGS[@]}" \
+    || printf 'NOTE: #%s の本文の錠を取れない（または記録が失敗した）。進行を書かずに続ける\n' "$ISSUE" >&2
+  exit 0
+fi
 
 BODY_FILE=$(mktemp) || exit 0
 NEW_FILE=$(mktemp) || { rm -f "$BODY_FILE"; exit 0; }

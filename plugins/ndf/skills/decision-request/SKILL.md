@@ -1,6 +1,6 @@
 ---
 name: decision-request
-description: "Before asking the user to decide or approve anything, lay out the findings, where the evidence is, what each option changes, and the recommendation with its reason. Use when a question, choice or approval is about to be put to the user（判断を仰ぐ・承認を求める・選択肢を示す・確認の質問）."
+description: "Before asking the user to decide or approve, lay out the findings, the evidence, what each option changes, and a recommendation with its reason. Use when a question, choice or approval is about to be put to the user（判断を仰ぐ・承認を求める・選択肢を示す・確認の質問）."
 ---
 
 # 判断を求める前に材料を示す
@@ -82,7 +82,7 @@ description: "Before asking the user to decide or approve anything, lay out the 
 根拠: <測定の記録のパス> / <試行の Pull Request の URL>
 
 選択肢:
-- 置き換える: 自作が約 100 行減る。Y の名前が変わると費用が黙って 3 倍に戻るため、回帰テストで見張る必要がある
+- 置き換える: 自作が約 100 行減る。Y の名前が変わると費用が黙って 3 倍に戻るため、回帰テストで監視する必要がある
 - 置き換えない: 今の文書化された契約のまま。自作の 100 行が残る
 
 推奨: 置き換えない。減る自作が小さく、費用を守る手段が文書に無い値だけのため。

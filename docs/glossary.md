@@ -173,13 +173,13 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 検査 | — | リファクタリング・コードレビュー・完了判定・Pull Request を通すフェーズ。fast ではトリガーが立ったときだけ、前回の検査からの差分に流す。コードレビューだけは開発版ごとに流す（--review-only） | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | チェック | — | 機械が合否を返すもの。CI のジョブと、mvv-gate.py・doc-lint.py などのスクリプト | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 完了判定 | — | コマンドの証跡で完了を判定する工程。スクラムの完了の定義に当たる | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| 全体テスト | — | リポジトリ全体を範囲にするテストか静的解析。テストは宣言の suites[].command、無ければ雛形の {paths} を . にしたもの（その旨を注記に残す）。静的解析は宣言の command、無ければ雛形の {paths} を範囲のパスで埋めたもの（範囲のパスが無ければ組まず、その旨を注記に残す） | 全体のテスト | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| 全体テスト | — | リポジトリ全体を範囲にするテストか静的解析。テストは宣言の suites[].command、無ければ範囲テストのテンプレートの {paths} を . にしたもの（その旨を注記に残す）。静的解析は宣言の command、無ければテンプレートの {paths} を範囲のパスで埋めたもの（範囲のパスが無ければ組まず、その旨を注記に残す） | 全体のテスト | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | コメントのスナップショット | — | cross-review が取る既存コメントの一覧。2 ラウンド目以降は取り直す | 既存コメントのスナップショット | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | doc-lint | — | 追加した Markdown の行に、検討の痕跡・課題番号の由来・比較の語が無いかを見るチェック | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 引継ぎ文書 | `handoff` | 会話を切って新しいセッションで続けるための文書。メインディレクトリの .ndf/handoff/<名>.md に置き、コミットしない。1 本が 1 つの引継ぎの対象を受け持つ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 引継ぎの対象 | — | 引継ぎ文書 1 本が受け持つ仕事のまとまり（スプリント・マイルストーン・課題のどれか）。名の頭（sprint- / milestone- / issue-）になる | — | — | — |
 | 引継ぎの履歴 | — | 引継ぎ文書の本体から終わった項目を移す文書。本体と同じ場所の <名>-history.md | — | — | — |
-| ndf-next | — | 次のセッションの最初の入力を置く、情報文字列 ndf-next の囲みのコードブロック。最後の応答に 1 つだけ置く | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| ndf-next | — | 次のセッションの最初の入力を置く、情報文字列が ndf-next のコードブロック。最後の応答に 1 つだけ置く | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | step / alive / worker / attention | — | 進捗ログの行の種類。ステップの切り替わり・動きの無い間の生存・worker の進み・conductor の判断が要る出来事（止まった・承認ゲート・同じ失敗の繰り返し・judge のステップで stop が出そう） | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | done | — | キューが終わったときに書く結果の JSON。wait は done か attention の行まで待つ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 結果 JSON | `step_result` | 手順のスクリプトが返す 1 行の JSON。status で読む | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
@@ -201,12 +201,14 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 代表の run | — | 宣言の解析がワークフローごとに壁時計とテストの所要を測る 1 件の run。取得した候補（ワークフローごとに新しい順の成功の run を最大 5 件）のうち、ジョブを飛ばしていない最新のもの | — | — | `docs/specifications/project-decl-ci-representative-run.md` |
 | 入力の指紋 | — | 解析が読んだファイルの、HEAD の木での blob の SHA と、ブランチの構成の組。プロジェクトの宣言の新しさの判定に使う | — | — | — |
 | テストの戦略 | `strategy` | 範囲テストの走らせ方・全体テストの置き場（手元か CI か）・落ちたテストの見分け方の組。local-full / local-scoped-ci-whole / round-only の 3 つ。宣言の test.strategy か、同じ関数が所要から導く（#1334） | — | — | — |
-| 範囲テストの雛形 | `scope_command` | {paths} を引用の外の 1 字句として含むテストのコマンド（宣言の scope_command か、{paths} を含む引数）。{paths} をシェルの引用で守った対象の並びへ置き換え、シェルで走らせる | — | — | — |
+| 範囲テストのテンプレート | `scope_command` | {paths} を引用の外の 1 字句として含むテストのコマンド（宣言の scope_command か、{paths} を含む引数）。{paths} をシェルの引用で守った対象の並びへ置き換え、シェルで走らせる | 範囲テストの雛形 | — | — |
 | JUnit の置き場 | `junit` | テストのコマンドが JUnit XML を書くファイルの、作業ディレクトリからの相対パス（宣言の suites[].junit）。NDF はコマンドへ引数を足さず、このファイルを読む | — | — | — |
 | スプリント | `sprint` | 1 回のリリースとして出す課題と Pull Request のセット。版数を持つプロジェクトでは 1 つの版になる。期間ではなく、1 回のリリースとして出す中身で切る。工程はスプリント単位で 1 回ずつ通し、モードもスプリントで 1 つにする | ミッション | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | スプリント状態ファイル | `sprint_state` | スプリントのプラン・done・承認ゲートの記録・MVV・版を持つファイル（パスは呼ぶ側が決め、手順書の例は `sprint-state.json`。目録 `sprint.json` とは別のファイル） | ミッション状態ファイル、ミッションの状態 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | スプリントブランチ | — | 課題の Pull Request を集め、ベースブランチへの Pull Request をスプリントで 1 本にするブランチ（`sprint/<名前>`） | ミッションブランチ、ミッションのブランチ | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| スプリント課題 | — | スプリントに含まれる Pull Request の本文が、閉じる語で指す課題 | ミッション課題、ミッションの課題 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| スプリント課題 | — | 「スプリントを閉じる」が閉じる対象にする課題。スプリントの Pull Request の本文が GitHub の closing keywords（PR 本文に `Closes #123` のように書くと、マージ時にその課題を自動で閉じる機能）で指す課題と、--issues で渡した課題の和 | ミッション課題、ミッションの課題 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| closing keywords | `closing_words` | GitHub の機能。Pull Request の本文に `Closes #123` のように書くと、マージのときにその課題を自動で閉じる。キーワードは Closes / Fixes / Resolves と活用形で、課題の参照が続く。GitHub を使う人なら誰でも知っている機能ではないため、文書では使う箇所ごとに説明を添える | 閉じる語 | — | — |
+| 参照だけの課題 | `referenced_only` | スプリントの Pull Request の題か本文が番号で参照し、スプリント課題に入らない開いた課題 | — | — | — |
 | スプリント MVV | — | スプリント単位の MVV。プロジェクト MVV の範囲での具体化 | ミッション MVV | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 自動反映の本番チャネル | `auto_production_branch` | 本番チャネルのうち、マージ（push）で本番系への反映が自動で始まるもの。宣言の delivery に kind: auto で本番チャネルを branch に持つ行があるときに当たる。そこへのマージは承認ゲート 2 に当たる | — | — | — |
 | 手動反映の本番系 | `manual_production` | 配布の宣言の行のうち、production: true と宣言され、kind: manual（担い手が手で起こす）のもの。そこへ届ける操作の前に承認ゲート 2 を掛ける。自動反映の本番チャネルと対になる | — | — | — |
@@ -227,6 +229,9 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 取り込んだ課題 | — | 設計で、受け入れ内容を別の課題の実装へ含めると決めた課題。自分の実装のプランは残すが、`実行の条件` で飛ばして実行しない | — | — | — |
 | 手動確認の行 | — | 要求の検証手段の表で、項目が「手動確認」で始まる行。項目が「手動確認（マージ前）」ならマージ前、それ以外はリリース後テストに確かめる | — | — | — |
 | 設計の結果 | — | 設計文書の「設計の結果」の節の表。課題ごとに扱い（実装する / 取り込む / 閉じる）・取り込み先・触るファイルを書き、実装のステージの前に機械が読む | — | — | — |
+| 決定の見出し | — | 設計文書の囲みの外にある、決定 1 件を表す見出しの行。`## 決定の記録` で始まる H2 の節の `### ` の行か、H1 に「決定の記録」を含み `## 決定の記録` の節を持たない文書の `## 決定 <数字>…` / `### 決定 <数字>…` の行。pr-body-decisions.sh が設計 PR の本文の「決めたこと」へ写す | — | — | — |
+| 決定を分けたファイル | — | 設計文書から決定の記録の節だけを別に置いたファイル。名前は `issue-<番号>-design-decisions.md` | — | — | — |
+| 決定を読めない文書 | — | 設計 PR で変更した .md のうち、`## 決定の記録` で始まる H2 を持つか決定を分けたファイルであるのに、決定の見出しが 0 件のもの。文書自身の名前が `-design-decisions.md` で終わらないときに限り、決定を分けたファイルの名前だけを示す節は除く。pr-body-decisions.sh の check / sync が 1 で止まる | — | — | — |
 | hook の上限 | — | ランタイムの hook の定義（hooks/*.json・dev.agy/hooks.json）の timeout。過ぎるとランタイムが hook を打ち切る | — | — | `docs/specifications/cross-review-reopen-and-hook-deadline.md` |
 | hook の締め切り | — | NDF の hook が自分で決める 1 回の実行の時間の上限（3.5 秒）。hook の上限より短く、過ぎたら残りの判定を飛ばして通し、標準エラーへ 1 行残す | — | — | `docs/specifications/cross-review-reopen-and-hook-deadline.md` |
 | 適用範囲 | — | 設計した変更が働く範囲。このリポジトリだけで働くのか配布先のリポジトリでも働くのか、プロジェクトごとに違うものを設定か引数のどちらで受けるのか。設計文書の節と承認資料の行に書く | — | — | `docs/specifications/ndf-design-phase.md` |
@@ -247,10 +252,15 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 1 本の重さ | — | 担当 1 つ（worktree 1 つ分）が使う cgroup の anon の量。実測（per_lane_observed_mib）と、本数の判定に使った値（per_lane_used_mib）を分けて出す | — | — | `docs/specifications/ndf-execution-plan-and-parallel-capacity.md` |
 | anon の起点 | — | 実行計画の開始時（動いている本数が 0）に測った cgroup の anon。1 本の重さを測る差の基準 | — | — | `docs/specifications/ndf-execution-plan-and-parallel-capacity.md` |
 | 判定の区分 | — | parallel-measure.py capacity が本数を決めた理由の区分。grow（足してよい）/ hold（今の本数を超えて足さない）/ shrink（1 本減らす） | — | — | `docs/specifications/ndf-execution-plan-and-parallel-capacity.md` |
-| 未解決のスレッド | — | Pull Request のレビュースレッドのうち、解決済みの印が付いていないもの。`gh_parts.py pr-info --with threads` が返す | — | — | — |
-| 本来の判定 | `intent` | レビューの指摘から決めた event（APPROVE / REQUEST_CHANGES / COMMENT）。自分の Pull Request へ COMMENT で送っても結果に残し、収束や報告はこちらを読む | — | — | — |
-| レビューの文脈ファイル | — | `pr-review-steps.py collect` が書く、レビューの対象・差分の在りか・未解決のスレッド（位置と最初のコメントの本文）・指摘ファイルの書き方をまとめたファイル。外部 AI へのプロンプトはこれに観点と委譲の決まりを足して組む | — | — | — |
-| 仕様適合 | — | レビューの第 1 段。受け入れ条件・不変条件・対象範囲・テストが仕様を表すかを見る。満たさない指摘は指摘ファイルで段 `spec` を持つ | — | — | — |
+| 未解決のスレッド | — | Pull Request のレビュースレッドのうち、解決済みの印が付いていないもの。`gh_parts.py pr-info --with threads` が返す | — | — | `docs/specifications/pr-review-steps-script.md` |
+| 本来の判定 | `intent` | レビューの指摘から決めた event（APPROVE / REQUEST_CHANGES / COMMENT）。自分の Pull Request へ COMMENT で送っても結果に残し、収束や報告はこちらを読む | — | — | `docs/specifications/pr-review-steps-script.md` |
+| レビューの文脈ファイル | — | `pr-review-steps.py collect` が書く、レビューの対象・差分の在りか・未解決のスレッド（位置と最初のコメントの本文）・指摘ファイルの書き方をまとめたファイル。外部 AI へのプロンプトはこれに観点と委譲の決まりを足して組む | — | — | `docs/specifications/pr-review-steps-script.md` |
+| 仕様適合 | — | レビューの第 1 段。受け入れ条件・不変条件・対象範囲・テストが仕様を表すかを見る。満たさない指摘は指摘ファイルで段 `spec` を持つ | — | — | `docs/specifications/pr-review-steps-script.md` |
+| 設計との突き合わせ | — | 完了判定で、設計に名前の出るテスト・既存の確定仕様と変更履歴・設計の決定を実装と照らし、食い違いを残すこと。確認 (a)(b)(c) の 3 つからなる | — | — | — |
+| 設計に名前の出るテスト | — | 設計文書の「決定の記録」「テスト設計」「構成要素」に、バッククォートで囲んで書かれたテストファイルのパス・<パス>::<名前>・「テスト設計」の test で始まる識別子 | — | — | — |
+| 既存の確定仕様 | — | 比べるベースブランチとの merge-base の時点で確定仕様の置き場にあった文書。同じ差分で足した確定仕様は含まない | — | — | — |
+| 設計の決定 | — | 設計文書の「決定の記録」の 1 件（### 決定 N）。judge のステップが返す「決定」とは別の語 | — | — | — |
+| 設計と違う点 | — | 実装 PR の本文の節。設計の決定・設計に名前の出るテスト・既存の確定仕様・受け入れ条件と実装の違いを、箇所・違い・理由の行で並べる | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 
@@ -320,7 +330,7 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 代表指摘 | — | 統合した組で判定が読む 1 件。統合された側は merged_into を持つ | — | — | `docs/specifications/cross-review-evidence-based.md` |
 | 新しい指摘 | — | 直前のラウンドの指摘と一致しない、そのラウンドの指摘。収束ループはこれが 0 件になるまで回す | — | — | `docs/specifications/cross-review-round-inputs.md` |
 | 修正担当 | — | 指摘を直してコミットするサブエージェント（/ndf:fix を実行する） | 修正の担当 | — | `docs/specifications/cross-review-writes-to-conductor.md` |
-| 投稿キュー | `post_queue` | 送る前に投稿を積み、上限で送れなければ残す仕組み（lib/post_queue.py）。スプリント 2c の後、項目は耐久の記録に置く | 投稿の待ち行列 | — | `docs/specifications/cross-review-writes-to-conductor.md` |
+| 投稿キュー | `post_queue` | 送る前に投稿を積み、上限か一時的な失敗で送れなければ残す仕組み（lib/post_queue.py。一時的な失敗は #1843）。スプリント 2c の後、項目は耐久の記録に置く | 投稿の待ち行列 | — | `docs/specifications/cross-review-writes-to-conductor.md` |
 | 重複投稿 | — | 送ろうとした投稿と同じものとして、すでに Pull Request にある投稿 | 先客 | — | `docs/specifications/cross-review-writes-to-conductor.md` |
 | 総評 | — | レビュー本体に書く文章（body）。インラインのコメントとは別に置く | — | — | `docs/specifications/cross-review-writes-to-conductor.md` |
 | drive の状態 | `drive_state` | 収束ループの drive.py が Pull Request ごとに持つ状態ファイル（drive-pr<N>.json / drive-rf<ID>.json）。stage と init_vars を持つ。スプリント 2c の Q3・Q4 で耐久の記録へ移して廃止する | — | — | — |
@@ -335,6 +345,8 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 最終ステータス | `review_status` | cross-review の収束の終わり方を表す 1 語（approved / unverified / final の値 / unknown）。loop_drive.review_status が状態ファイルから決める | — | — | — |
 | 回答ファイル | — | 駆動が止まりで示す items[0].result_file。止まりへの答えを書き、同じコマンドの打ち直しが読む。担当 CLI の結果ファイルとは別 | — | — | — |
 | 席 | — | cross-review の 1 ラウンドの 2 つの担当の枠。名前は kiro / kiro-2 の形（SEAT_PATTERN） | — | — | `docs/specifications/cross-assignee-reassignment-on-no-result.md` |
+| 一時的な失敗 | — | 送り直せば届く見込みのある投稿の失敗（HTTP 500・502・503・504、`(HTTP nnn)` の無い本文なしの応答、ネットワークの失敗）。上限とは別に見分け、投稿キューに残して後で流す（#1843） | — | — | — |
+| 投稿待ち | — | 担当の結果は記録へ取り込んであり、投稿だけが投稿キューに残っている状態。結果なし（NO_RESULT）とは別である（#1843） | — | — | — |
 
 ## NDF の cross-refactoring（`ndf-cross-refactoring`）
 
@@ -503,8 +515,8 @@ backlog-refinement と out-of-scope が課題を分類し、起票するとき�
 | 再検討条件 | — | 「やらない」で閉じた課題を再び考える条件 | 再燃の条件 | — | `plugins/ndf/skills/backlog-refinement/SKILL.md` |
 | 起票先 | — | issue-file.py create が課題を作るリポジトリ | — | — | `plugins/ndf/skills/out-of-scope/references/issue-target.md` |
 | 由来 | — | 範囲外の課題を見つけた元。PR #<番号> か issue #<番号> の形で書く。Pull Request がまだ無ければ起点の issue | — | — | `plugins/ndf/skills/out-of-scope/SKILL.md` |
-| 本文の骨格 | — | 範囲外の課題の本文が持つ 5 項目の見出し（何を見つけたか・どこで見つけたか・なぜこの変更の範囲外なのか・直さないと何が起きるか・由来） | — | — | — |
-| 提示の要約値 | — | 承認資料に載せた起票先・題・本文・ラベルから作る sha256。同意の後の issue-file.py create --approved に渡し、示した内容と作る内容が同じことを確かめる | — | — | — |
+| 本文の骨格 | — | 範囲外の課題の本文が持つ 5 項目の見出し（何を見つけたか・どこで見つけたか・なぜこの変更の範囲外なのか・直さないと何が起きるか・由来） | — | — | `docs/specifications/out-of-scope-issue-file.md` |
+| 提示の要約値 | — | 承認資料に載せた内容から作る sha256。issue-file.py の create では起票先・題・本文・ラベル、note では打つ先・番号・1 行から作り、同意の後の --approved に渡して、示した内容と打つ内容が同じことを確かめる | — | — | `docs/specifications/out-of-scope-issue-file.md` |
 | 上流リポジトリ | — | NDF の Skill・エージェント・hook の実体を持つリポジトリ | 配布元のリポジトリ | — | `plugins/ndf/skills/out-of-scope/references/issue-target.md` |
 | 開発対象リポジトリ | — | NDF を使って開発している側のリポジトリ。gh repo view が返すもの | 開発対象のリポジトリ | — | `plugins/ndf/skills/out-of-scope/references/issue-target.md` |
 | プロダクトバックログ | — | open の課題を着手の順に並べた全体。マイルストーンの順（上の層）→ マイルストーンの中の順位（下の層）の辞書順で読む | — | — | — |

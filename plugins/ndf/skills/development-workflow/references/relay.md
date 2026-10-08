@@ -18,6 +18,8 @@
 
 ブロックの形は [context-window.md](context-window.md) の「新しい会話で戻す」が定める。
 
+**目次:** [始め方](#始め方) / [外し方・戻し方](#外し方戻し方) / [ラッパーを挟まない起動](#ラッパーを挟まない起動) / [止め方](#止め方) / [好きな時点で切り替える（/ndf:restart）](#好きな時点で切り替えるndfrestart) / [ラッパーの入れ替え](#ラッパーの入れ替え) / [承認ゲートを越えない守り](#承認ゲートを越えない守り) / [上限](#上限) / [利用上限でアカウントを替えて続ける](#利用上限でアカウントを替えて続ける) / [カットポイントの引継ぎ文書と ndf-next はスクリプトで作る](#カットポイントの引継ぎ文書と-ndf-next-はスクリプトで作る) / [落ちたときの続け方](#落ちたときの続け方) / [fork したセッションで進めたとき](#fork-したセッションで進めたとき) / [セッションをまたいで設定を保つ](#セッションをまたいで設定を保つ) / [記録の読み方](#記録の読み方) / [付則: /goal を付けた場合](#付則-goal-を付けた場合)
+
 ## 始め方
 
 **ラッパーを使うかは利用者が決める。** claude の中で `/ndf:install-wrapper` を 1 度打つ。SessionStart hook は
@@ -27,7 +29,7 @@
 | --- | --- |
 | コピーとコピーの版 | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/relay.py` と `relay.version` |
 | ラッパーの rc | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/shellrc`。`function claude { ... }` を定義する。関数は呼んだ時点でコピーが在ればラッパーを、無ければ素の `claude` を起こす |
-| 読み込みの 1 行 | `[ -f "$HOME/.claude/ndf/shellrc" ] && . "$HOME/.claude/ndf/shellrc"`。`DEVBASE_SHELLRC_DIR` がディレクトリを指せば `$DEVBASE_SHELLRC_DIR/ndf-relay.sh` に置き、無ければ `$SHELL` の設定（bash は `~/.bashrc`（macOS では `~/.bash_profile`）、zsh は `${ZDOTDIR:-~}/.zshrc`）の末尾へ囲み（`# >>> ndf relay >>>` 〜 `# <<< ndf relay <<<`）で足す。書く前に `<設定>.ndf-bak-<UTC の時刻>` へコピーを取る |
+| 読み込みの 1 行 | `[ -f "$HOME/.claude/ndf/shellrc" ] && . "$HOME/.claude/ndf/shellrc"`。`DEVBASE_SHELLRC_DIR` がディレクトリを指せば `$DEVBASE_SHELLRC_DIR/ndf-relay.sh` に置き、無ければ `$SHELL` の設定（bash は `~/.bashrc`（macOS では `~/.bash_profile`）、zsh は `${ZDOTDIR:-~}/.zshrc`）の末尾へブロック（`# >>> ndf relay >>>` 〜 `# <<< ndf relay <<<`）で足す。書く前に `<設定>.ndf-bak-<UTC の時刻>` へコピーを取る |
 
 - **次に開いたシェルから効く**
 - 既に `claude` の alias か関数がある（bash では `~/.bash_aliases` とログインシェルの設定 `~/.bash_profile`・`~/.bash_login`・`~/.profile` も見る）・bash と zsh 以外のシェルでは足さず、自分で置く 1 行を示す
@@ -131,10 +133,10 @@ claude が再開コマンドを `ndf-next` のブロックで出して応答を�
 | --- | --- |
 | 質問が表示されている | `AskUserQuestion` の `PreToolUse` hook が作業ディレクトリへ `question` を作り、`PostToolUse` と次の Stop（`mark`）が消す |
 | シグナルファイルを書いた後に質問が出た | `PreToolUse` hook が質問の時刻を `asked` へ書く。シグナルファイルの `written_at` 以後なら書かず、次のブロックの無い Stop がシグナルファイルを消す |
-| シグナルファイルを書いた後に利用者が入力した・背景の処理を起動した | 会話の記録に、シグナルファイルより後の利用者の入力の行か、`run_in_background` が真の Tool の呼び出しの行がある。次の Stop がシグナルファイルを書き直すまで待つ |
+| シグナルファイルを書いた後に利用者が入力した・バックグラウンドの処理を起動した | 会話の記録に、シグナルファイルより後の利用者の入力の行か、`run_in_background` が真の Tool の呼び出しの行がある。次の Stop がシグナルファイルを書き直すまで待つ |
 | シグナルファイルを書いた後に応答が再開した（目標が未達の判定が無いとき） | 会話の記録に、シグナルファイルより後の `assistant` か `user` の行がある。次の Stop がシグナルファイルを書き直すまで待つ |
 
-**シグナルファイルを書いた後は、切り替えを確定とする。** ブロックの無い Stop は、背景の処理が動いているときと
+**シグナルファイルを書いた後は、切り替えを確定とする。** ブロックの無い Stop は、バックグラウンドの処理が動いているときと
 シグナルファイルを書いた後に質問が出たときだけシグナルファイルを消し、それ以外は前のシグナルファイルを残す。
 
 - `/exit` と改行は 1 回の write で書く。確かめ直しと write は、質問の hook と同じロック（`question.lock`）の中で行い、書いた後も 1 秒持つ。**ロックを 3 秒以内に取れない質問の hook は、その質問を拒否する**（モデルが呼び直す）
@@ -152,7 +154,7 @@ claude が再開コマンドを `ndf-next` のブロックで出して応答を�
 **文脈の上限（`NDF_CONTEXT_LIMIT`、既定 200,000）はラッパーの下で強くなる。** ラッパーの直接の子の
 conductor では、コンテキスト量の hook が工程へ入る起動を 1 度の通しなしに止め続ける。conductor は動いて
 いる supervisor の報告を待ってから、引継ぎ文書を更新し、ブロックを出して終える
-（[context-window.md](context-window.md) の「上限を超えたら hook が止める」）。背景の処理
+（[context-window.md](context-window.md) の「上限を超えたら hook が止める」）。バックグラウンドの処理
 （supervisor を含む）が動いているあいだの応答ではシグナルファイルを書かない。
 
 ## 利用上限でアカウントを替えて続ける
@@ -238,7 +240,7 @@ symlink にする。会話の記録（`projects`）・設定（`settings.json`�
 
 起動の前に、ラッパーと `supervise.py` はアカウントの設定ディレクトリを用意する。共有側に増えた項目の symlink を足し、
 共有の `~/.claude.json` の `projects`（プロジェクトの信頼・MCP サーバーの許可）と `mcpServers` をアカウント側の `.claude.json` へ
-写す（`oauthAccount` はアカウントごとのまま）。ラッパーは、セッションの切れ目と終了時に、アカウント側で変わった分を共有の
+コピーする（`oauthAccount` はアカウントごとのまま）。ラッパーは、セッションの切れ目と終了時に、アカウント側で変わった分を共有の
 `~/.claude.json` へ書き戻す。claude.ai のコネクタは、claude が認証ファイルのスコープを自分で読んで取りに行く。従量の接続の子は
 共有の設定ディレクトリで起動する（`CLAUDE_CONFIG_DIR` を元の値へ戻す）。
 
@@ -253,7 +255,7 @@ symlink にする。会話の記録（`projects`）・設定（`settings.json`�
 
 アカウント側の `.claude.json` が JSON として読めないときは、NDF は直さない。アカウントの設定ディレクトリの
 `backups/.claude.json.backup.<ミリ秒>` のうち JSON として読める新しいものを `.claude.json` へ `cp` するか、`.claude.json` を
-消す（`oauthAccount` は claude が次の応答で取り直し、最初の案内の印は共有側から写る）。どちらの後も、次の起動で共有側の
+消す（`oauthAccount` は claude が次の応答で取り直し、最初の案内の印は共有側からコピーされる）。どちらの後も、次の起動で共有側の
 `projects` と `mcpServers` にそろう。
 
 **`/mcp` で OAuth 認証した MCP サーバー（claude.ai のコネクタでないもの）は、アカウントごとに認証が要る。** そのトークンは
@@ -268,7 +270,7 @@ symlink にする。会話の記録（`projects`）・設定（`settings.json`�
 | いつ | ラッパー | `supervise.py`（プランの claude -p） |
 | --- | --- | --- |
 | 起動 | 区間ごとに、上限に達していないアカウントのうち残りの量の最も大きいものを選ぶ。今のアカウントが閾値未満なら替えず、閾値を超えていても候補の残りの量が今以下なら替えない | 起動したときのアカウント（`NDF_CLAUDE_ACCOUNT`）で呼ぶ |
-| 利用上限（5 時間・7 日・支出上限） | 子の応答が上限で終わると（`StopFailure` hook の `limit.json`）、次の区間を別のアカウントで `claude --resume <会話> "<最初の入力>"` として起動する。最初の入力は `ndf-next` があればそれ、無ければ未達の `/goal <条件>`、それも無ければ切り替えの理由に合う定型の文（例: `利用上限でアカウントを替えた。中断したところから続ける`）。**背景の作業が残っている間は子を終えない** | 待たずに別のアカウントで同じ呼び出しをやり直す |
+| 利用上限（5 時間・7 日・支出上限） | 子の応答が上限で終わると（`StopFailure` hook の `limit.json`）、次の区間を別のアカウントで `claude --resume <会話> "<最初の入力>"` として起動する。最初の入力は `ndf-next` があればそれ、無ければ未達の `/goal <条件>`、それも無ければ切り替えの理由に合う定型の文（例: `利用上限でアカウントを替えた。中断したところから続ける`）。**バックグラウンドの作業が残っている間は子を終えない** | 待たずに別のアカウントで同じ呼び出しをやり直す |
 | 認証が通らなかった | 子の応答が認証の失敗で終わると、そのアカウントを 1 時間候補から外し、上限のときと同じく別のアカウントで次の区間を起動する（最初の入力は `認証が通らなかったためアカウントを替えた。中断したところから続ける`）。1 つの区間につき 1 度だけ | 結果が認証の失敗なら、そのアカウントを外して同じ呼び出しをやり直す |
 | 使用率が閾値を超えた | 定期の確認（推論なし）が 1 行を出し、**次のカットポイントで**替える | — |
 | すべて上限 | 宣言があれば従量の接続へ移る。無ければ 1 行を出して子を残す | 宣言があれば従量の接続へ移る。無ければ今と同じ上限待ち |
@@ -320,19 +322,19 @@ export NDF_SUPERVISE_CLAUDE_FALLBACK='CLAUDE_CODE_USE_BEDROCK=1 AWS_PROFILE=<名
 
 例: セッション 7 の実装 3 本と開発版・本番を流す。
 
-1. プランを作った後に 1 度: `sprint-state.py init ~/.local/state/ndf/sv/r7/sprint-state.json --name <スプリント> --milestone 26 --plan 実装=<plan.json> ... --plan 開発版=<plan.json> --plan 本番=<plan.json> --done <queue の done> --dev <開発版> --prod <本番> --goal @<雛形>`（雛形は次のセッションの `/goal` の文面。`{heading}`・`{dev}`・`{prod}`・`{milestone}`・`{name}`・`{issues}` を差し込む）。**雛形には「`.ndf/handoff/sprint-{name}.md` の続きから」**（スプリント名が `sprint-<名>` の形に合わなければ `.ndf/handoff/milestone-{milestone}.md`）**を差し込みの語で必ず書く。** 雛形は次のスプリントでも使うため、文書のパスを文字のまま書かない
+1. プランを作った後に 1 度: `sprint-state.py init ~/.local/state/ndf/sv/r7/sprint-state.json --name <スプリント> --milestone 26 --plan 実装=<plan.json> ... --plan 開発版=<plan.json> --plan 本番=<plan.json> --done <queue の done> --dev <開発版> --prod <本番> --goal @<テンプレート>`（テンプレートは次のセッションの `/goal` の文面。`{heading}`・`{dev}`・`{prod}`・`{milestone}`・`{name}`・`{issues}` を差し込む）。**テンプレートには「`.ndf/handoff/sprint-{name}.md` の続きから」**（スプリント名が `sprint-<名>` の形に合わなければ `.ndf/handoff/milestone-{milestone}.md`）**を差し込みの語で必ず書く。** テンプレートは次のスプリントでも使うため、文書のパスを文字のまま書かない
 2. 承認ゲートで承認を得たら: `sprint-state.py gate <sprint-state.json> "関門 2" --what "本番 <版>"`
    - `pace: fast` と `pace: auto` のスプリントは、1 に `--pace <値> --milestone <M>`（MVV のコピー元。`--mvv <ファイル>` でもよい）を足し、利用者が
      `mvv.md` を承認した後に `sprint-state.py gate <sprint-state.json> MVV --what <要約>` を打つ。ゲート 1・2 の記録は、MVV 判定が
      通したときは `mvv-gate.py` が `--by mvv --verdict --reasons --log` 付きで書く（`status` の行は「MVV 判定」）
 3. カットポイントでは、conductor が引継ぎ文書の「現在地」と「次にやること」を書き直してから、次の順に呼ぶ（`<名>` は `sprint-<スプリント名>` など。`<引継ぎ文書>` は `handoff.py path <名>` の `path`）:
-   - `handoff.py init <名> --title <表示名>`（無ければ雛形から作る。あれば変えない）
+   - `handoff.py init <名> --title <表示名>`（無ければテンプレートから作る。あれば変えない）
    - `sprint-state.py update <sprint-state.json> [--done <done>] [--next <plan.json>=<行の「次」>]`（done と報告から状態・PR・秒・費用を埋める。何度走らせても同じ）
    - `sprint-state.py render <sprint-state.json> <引継ぎ文書> --section 今の会話の進み`（節の本文だけを置き換える。新しいセッションなら `--demote 前の会話の進み --heading "今の会話の進み（<時刻>）"` で今の節を下げて新しい節を足す）
-   - `sprint-state.py next <sprint-state.json> --doc <引継ぎ文書> --replace`（「次に実行するコマンド」の節を置き換え、同じ `ndf-next` の囲みを最後の応答に出す）
+   - `sprint-state.py next <sprint-state.json> --doc <引継ぎ文書> --replace`（「次に実行するコマンド」の節を置き換え、同じ `ndf-next` のブロックを最後の応答に出す）
    - `handoff.py check <名> --trim`（「前の会話の進み」を履歴へ移し、節の形と 300 行の上限を確かめる。1 か 5 のときの扱いは [handoff.md](handoff.md) の「作る・更新する」）
 
-**本番へのリリースの後は、カットポイントの呼び出しを本番のキューと同じ背景の Bash で続けて流す。** 流す前に conductor が `handoff.py init` を打ち、本番の後の「現在地」と「次にやること」を文書へ書く（パイプラインの中では書き直せない）。`check` が 1 か 5 ならパイプラインはブロックを出さずに止まり、conductor が完了の通知で終了コードを受けて扱ってからブロックを出す。ゲート 2 の承認から次のセッションの起動までに、conductor が組み立てる文は無くなる。conductor は完了の通知を受けたら `relay.py notice` のアナウンスと、出力の `ndf-next` の囲みをそのまま出す。ラッパーがプラグインを本番の版へ更新し、次のセッションを起動する。
+**本番へのリリースの後は、カットポイントの呼び出しを本番のキューと同じバックグラウンドの Bash で続けて流す。** 流す前に conductor が `handoff.py init` を打ち、本番の後の「現在地」と「次にやること」を文書へ書く（パイプラインの中では書き直せない）。`check` が 1 か 5 ならパイプラインはブロックを出さずに止まり、conductor が完了の通知で終了コードを受けて扱ってからブロックを出す。ゲート 2 の承認から次のセッションの起動までに、conductor が組み立てる文は無くなる。conductor は完了の通知を受けたら `relay.py notice` のアナウンスと、出力の `ndf-next` のブロックをそのまま出す。ラッパーがプラグインを本番の版へ更新し、次のセッションを起動する。
 
 ```bash
 O=~/.local/state/ndf/sv/r7; M=plugins/ndf/scripts/sprint-state.py; H=plugins/ndf/scripts/handoff.py; N=sprint-<スプリント名>
@@ -346,7 +348,7 @@ python3 $M next $O/sprint-state.json --doc $DOC --replace >/dev/null &&
 python3 $H check $N --trim >/dev/null && sed -n '/^```ndf-next/,/^```$/p' $DOC
 ```
 
-**次のセッションを止めずに続けるには、`/goal` の雛形を特定の課題に縛らない。** 雛形には「効果の順の残りから次のスプリントを選び、同じパイプラインで流し、最後に同じ雛形で `ndf-next` を出す」ことを書く。止まるのは承認ゲート 2 つだけになる。
+**次のセッションを止めずに続けるには、`/goal` のテンプレートを特定の課題に縛らない。** テンプレートには「効果の順の残りから次のスプリントを選び、同じパイプラインで流し、最後に同じテンプレートで `ndf-next` を出す」ことを書く。止まるのは承認ゲート 2 つだけになる。
 
 `sprint-state.py status <sprint-state.json>` は端末向けに 1 行ずつ（スプリント・状態・次）を出す。
 節が見つからないときは文書を変えずに `"status": "stopped"` と理由を返す。
@@ -362,7 +364,7 @@ python3 $H check $N --trim >/dev/null && sed -n '/^```ndf-next/,/^```$/p' $DOC
 
 ## fork したセッションで進めたとき
 
-例: ラッパーがセッション 2 を子 pid 1883（セッション ID `ba764798`）で起動し、利用者が別の入口から同じ会話を
+例: ラッパーがセッション 2 を子 pid 1883（セッション ID `ba764798`）で起動し、利用者が別のエントリポイントから同じ会話を
 続けたため、会話が fork したセッション `38cf7ead`（`claude daemon` → `bg-pty-host … --fork-session`
 の下にあり、親はラッパーでない）で進んだ。
 
@@ -378,7 +380,7 @@ python3 $H check $N --trim >/dev/null && sed -n '/^```ndf-next/,/^```$/p' $DOC
 | --- | --- |
 | `NDF_RELAY_DIR` が無い | `/exit してから claude を起動し、下の中身を最初の入力として貼り付ける（/ndf:install-wrapper でラッパーを入れると自動になる）` |
 | ラッパーが動いていない | `ラッパーは既に終わっている。/exit してから claude を起動し、下の中身を最初の入力として貼り付ける` |
-| ラッパーの直接の子でない（fork したセッション・`bg-pty-host` の下・別の入口） | `ラッパーは元の会話（子 pid <child.pid>）しか見ていないため、この会話で出した ndf-next は自動では拾われない。元の会話へ戻って同じ ndf-next を出すか、元の会話を /exit してから claude を起動し、下の中身を最初の入力として貼り付ける` |
+| ラッパーの直接の子でない（fork したセッション・`bg-pty-host` の下・別のエントリポイント） | `ラッパーは元の会話（子 pid <child.pid>）しか見ていないため、この会話で出した ndf-next は自動では拾われない。元の会話へ戻って同じ ndf-next を出すか、元の会話を /exit してから claude を起動し、下の中身を最初の入力として貼り付ける` |
 
 **続け方は 2 つある。** 元の会話（ラッパーの画面）へ戻って同じ `ndf-next` のブロックを出せば、
 ラッパーが切り替える。戻れないときは、元の会話を `/exit` してから `claude` を起動し、ブロックの
@@ -423,5 +425,5 @@ cat ~/.local/state/ndf/relay/*/log.jsonl | jq -c 'select(.event == "stop")'
 | 項目 | 振る舞い |
 | --- | --- |
 | 次のセッションへ引き継ぐ | `ndf-next` のブロックの中身の先頭に `/goal ` を付ける（[context-window.md](context-window.md) の「新しい会話で戻す」） |
-| 目標が未達のとき | 判定が止めを拒んで応答が続く。カットポイントでは未達が当然なので、ラッパーは切り替える。シグナルファイルを書いた後に目標の判定（`goal_status` の `met: false`）の行があれば、会話の記録の更新をアイドルに数えず、利用者の入力のアイドルだけを待つ。Esc を 1 回書いて応答を止め、1 秒おいて `/exit` を書く。利用者の入力・質問・背景の処理の起動があれば切り替えない |
+| 目標が未達のとき | 判定が止めを拒んで応答が続く。カットポイントでは目標は未達のままなので、ラッパーは切り替える。シグナルファイルを書いた後に目標の判定（`goal_status` の `met: false`）の行があれば、会話の記録の更新をアイドルに数えず、利用者の入力のアイドルだけを待つ。Esc を 1 回書いて応答を止め、1 秒おいて `/exit` を書く。利用者の入力・質問・バックグラウンドの処理の起動があれば切り替えない |
 | `/ndf:restart` の引数が無いとき | 目標の入力をそのまま再開コマンドにする |

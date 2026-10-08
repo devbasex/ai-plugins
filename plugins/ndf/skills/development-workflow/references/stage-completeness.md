@@ -192,7 +192,7 @@ bash "$SCRIPTS/../skills/development-workflow/scripts/stage-check.sh" report <�
 
 ## Pull Request の作成の時点で見るもの
 
-**リリース（`配布`）の記録まで待たない。** `gh pr create` を観測し、本文の閉じる語が指す課題の通過記録を
+**リリース（`配布`）の記録まで待たない。** `gh pr create` を観測し、本文の GitHub の closing keywords（PR 本文に `Closes #123` のように書くと、マージ時にその課題を自動で閉じる機能）が指す課題の通過記録を
 読んで、記録の無い必須の工程を案内する（#424）。
 
 | 何を見るか | 出すもの |
@@ -202,7 +202,7 @@ bash "$SCRIPTS/../skills/development-workflow/scripts/stage-check.sh" report <�
 | 工程表で `Pull Request` より前にある必須の工程に記録が無い | 工程名の一覧 |
 | 閉じる課題どうしでモードが食い違う | 最も高いモードと、食い違っていること |
 
-- **拒否しない。** 判定できないとき（`jq` が無い・閉じる語を取れない・通過記録が読めない）も
+- **拒否しない。** 判定できないとき（`jq` が無い・closing keywords を取れない・通過記録が読めない）も
   何も出さずに通す
 - **チェックの終点は工程表の並びで決める。** 記録済みの最も先の工程に置くと、Pull Request を
   作る時点では常にその手前であるため、欠落が 1 件も出ない
@@ -213,7 +213,7 @@ bash "$SCRIPTS/../skills/development-workflow/scripts/stage-check.sh" report <�
 
 ### 本文を読み取れる形
 
-**閉じる語は Pull Request の本文にある。** 本文の渡し方によって、hook が受け取る未展開の
+**closing keywords（`Closes #N` などの記法）は Pull Request の本文にある。** 本文の渡し方によって、hook が受け取る未展開の
 コマンドから読み取れるかが変わる。
 
 | 形 | 読み取れるか |

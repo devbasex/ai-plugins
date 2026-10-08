@@ -9,10 +9,10 @@
 |---|---|
 | `scripts/state.py init` | Step 0 — state 初期化 / 再開 + プリチェック |
 | `scripts/state.py start-round` | Step 1 — round 開始判定 |
-| `scripts/launch-reviewer.sh` | Step 2 — レビュワー起動の入口（4 ランタイム共通） |
+| `scripts/launch-reviewer.sh` | Step 2 — レビュワー起動のエントリポイント（4 ランタイム共通） |
 | `scripts/monitor.py` | Step 2 — レビュワーのプロセス多軸監視（`--agents` で担当を渡す） |
 | `scripts/wait-review.sh` | Step 2 — `monitor.py` の薄ラッパ（互換用） |
-| 共通ライブラリの `scripts/lib/bg-wait.sh` | Step 2 / 2.5 — Bash の 1 回（600 秒）に収まらない監視と反証を背景で起動し、540 秒以内の wait を 124 のあいだ**別の Bash の呼び出しで**呼び直す |
+| 共通ライブラリの `scripts/lib/bg-wait.sh` | Step 2 / 2.5 — Bash の 1 回（600 秒）に収まらない監視と反証をバックグラウンドで起動し、540 秒以内の wait を 124 のあいだ**別の Bash の呼び出しで**呼び直す |
 | `scripts/state.py read-result` | Step 2.4 — result.json マージ |
 | `scripts/state.py unresolved-threads` | PR 上の未解決の指摘を数える（順序を持たない補助） |
 | `scripts/state.py judge` | Step 3 — intent + 引き継いだ指摘の判定 |
@@ -20,6 +20,8 @@
 
 このドキュメントは Step 0〜4 の**手順**を残す。状態ファイルの形式と AI への入出力の契約は
 [04-contracts.md](04-contracts.md) にある。スクリプト側の挙動はソースを直接参照のこと。
+
+**目次:** [Step 0: 準備 + 既存 state 引継ぎ](#step-0-準備--既存-state-引継ぎ) / [Step 1: Round 開始判定](#step-1-round-開始判定) / [Step 2: レビュー担当 2 者の並列レビュー](#step-2-レビュー担当-2-者の並列レビュー) / [Step 3: 判定（新規の指摘 + 引き継いだ指摘 + 結果なし）](#step-3-判定新規の指摘--引き継いだ指摘--結果なし) / [Step 4: 振動検知](#step-4-振動検知)
 
 ## Step 0: 準備 + 既存 state 引継ぎ
 
@@ -245,7 +247,7 @@ done
 
 | 止まった場所 | 投稿キューの項目 | 立て直し |
 | --- | --- | --- |
-| 送る前（上限などで送れていない） | 残る | 判定の終了コード 8 の枝が流し直す |
+| 送る前（上限か一時的な失敗で送れていない） | 残る | 取り込みは結果を記録して終了コード 0（`QUEUED=1`）で終わり、担当を結果なしに数えない。判定の終了コード 8 の枝が流し直す |
 | 送った後・記録の前 | 残らない | 取り込みをもう一度呼ぶ。照合（ラウンドとスロットまでの前方一致）が重複投稿を見つけ、増えない |
 
 本文の先頭行は `## 🤖 cross-review | round <R> | <席> | <本来の判定>` である。自分の
@@ -280,6 +282,20 @@ eval "$JUDGE_VARS"
 なる**ためである。呼び出し側は 8 を受けたら `flush` を試し、流し切れたら判定をもう一度
 実行する（`SKILL.md` のループ）。
 
+`drive.py` は 8 を受けると段階 `posts` へ移り、**担当を起動し直さず、新しいラウンドも開かずに**
+投稿キューを流し直す。
+
+| `state.py flush` の結果 | 扱い |
+| --- | --- |
+| 残りが 0 | 判定をもう一度打ち、修正（2）か収束（0）へ進む |
+| 一時的な失敗で残る（`PENDING_TRANSIENT=1`） | 30 秒おきに、合計 300 秒まで流し直す（`post_queue.TRANSIENT_INTERVAL` / `TRANSIENT_MAX_WAIT`）。その後に判定を打ち直す |
+| 上限か読めない項目で残る | 待たずに判定を打ち直す |
+
+打ち直した判定がなお 8 なら「投稿待ち」で止まる。止まりの結果は `status` が `stopped`、`summary` が
+`投稿待ち:` で始まり残りの件数と最後の失敗を含み、`metrics.exit` が 8 で、`final` は書かない
+（結果なしの中断の `final = error` と読み分ける）。同じコマンドを打ち直すと段階 `posts` から続け、
+送れたら同じラウンドの判定へ進む。
+
 ### 結果を残さなかったレビュアーの扱い
 
 **起動したのに使える結果が残らなかったレビュアーは、収束の側へ数えない。** レビューが
@@ -296,7 +312,7 @@ eval "$JUDGE_VARS"
 `NO_RESULT` は `read-result` が書き込む。理由は `no_result_reason` に、監視が残した詳細（err.log の
 抜粋、最大 200 文字）は `monitor_detail` に残る（監視結果ファイルがあったときだけ）。理由の語彙を
 持つのは共通ライブラリの `monitor_outcome.py`、リトライ可否と振り替えの規則を持つのは
-`assignment.py`（`after_no_result`）だけで、`read-result` は理由を写し、判定は規則の答えに従う。
+`assignment.py`（`after_no_result`）だけで、`read-result` は理由をコピーし、判定は規則の答えに従う。
 
 | 理由 | 何が起きたか | 同じ席で起動し直し | `read-result` の終了コード |
 | --- | --- | --- | --- |

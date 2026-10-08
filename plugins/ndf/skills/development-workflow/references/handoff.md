@@ -7,8 +7,8 @@
 会話を進めている conductor が、`/ndf:restart` を打たれた。
 
 1. 引継ぎの対象を「マイルストーン 26」と決め、`handoff.py init milestone-26 --title "マイルストーン 26"` を打つ。
-   メインディレクトリの `.ndf/handoff/milestone-26.md` が無ければ雛形から作る（worktree の `.ndf/` には書かない）
-2. 「現在地」と「次にやること」を書き直す。状態の写しは書かず、課題と Pull Request の URL を書く
+   メインディレクトリの `.ndf/handoff/milestone-26.md` が無ければテンプレートから作る（worktree の `.ndf/` には書かない）
+2. 「現在地」と「次にやること」を書き直す。状態のコピーは書かず、課題と Pull Request の URL を書く
 3. 再開コマンドを `/goal /ndf:development-workflow .ndf/handoff/milestone-26.md の続きから` と決め、
    `handoff.py next milestone-26` に標準入力で渡す。`handoff.py check milestone-26 --trim` で形と行数を確かめる
 4. 同じ中身の `ndf-next` のブロックを出して終える。次のセッションは文書の「次にやること」の 1 つ目から始める
@@ -37,7 +37,7 @@
 
 ## 節の形
 
-見出しと順の唯一の定義はプラグインの `scripts/data/handoff-template.md`（雛形）である。`handoff.py init` が写し、`check` が照らす。
+見出しと順の唯一の定義はプラグインの `scripts/data/handoff-template.md`（テンプレート）である。`handoff.py init` がコピーし、`check` が照らす。
 **節は見出しの頭で見分ける**（`## 現在地（2026-09-30 セッション 42）` は「現在地」の節）。
 
 | 節（見出しの頭） | 必須 | 書くこと | 書き手 |
@@ -48,9 +48,9 @@
 | 次にやること | ○ | 番号付き。1 つ目が次のセッションの最初の作業 | conductor が書き直す |
 | 今の会話の進み | — | プランごとの行の表 | `sprint-state.py render`・`supervise.py note` |
 | 運用の知見 | — | その対象で繰り返し効いた手順と落とし穴。対象をまたいで効くものは Skill か課題へ移す | conductor |
-| 次に実行するコマンド | ○ | `ndf-next` の囲み 1 つ（形は [context-window.md](context-window.md) の「新しい会話で戻す」） | `handoff.py next`・`sprint-state.py next --replace` |
+| 次に実行するコマンド | ○ | `ndf-next` のブロック 1 つ（形は [context-window.md](context-window.md) の「新しい会話で戻す」） | `handoff.py next`・`sprint-state.py next --replace` |
 
-任意の 2 節は、使わなければ見出しごと消してよい。雛形に無い節・同じ節の 2 つ目・順の逆は `check` が終了コード 1 で返す。
+任意の 2 節は、使わなければ見出しごと消してよい。テンプレートに無い節・同じ節の 2 つ目・順の逆は `check` が終了コード 1 で返す。
 
 ## 作る・更新する
 
@@ -65,8 +65,8 @@
 2. スプリント状態ファイルがあれば `sprint-state.py render` で「今の会話の進み」を置く（[relay.md](relay.md) のカットポイントの手順）
 3. 再開コマンドを「次に実行するコマンド」に置く。`handoff.py next <名>` に標準入力で渡すか、スプリント状態ファイルが
    あれば `sprint-state.py next --doc <本体> --replace`。**再開コマンドは文書のパス（`.ndf/handoff/<名>.md`）を含める。**
-   `sprint-state.py init --goal` の雛形には「`.ndf/handoff/sprint-{name}.md` の続きから」（スプリント名が名の形に合わなければ
-   `.ndf/handoff/milestone-{milestone}.md`）と差し込みの語で書く。雛形は次のスプリントでも使うため、パスを文字のまま書かない
+   `sprint-state.py init --goal` のテンプレートには「`.ndf/handoff/sprint-{name}.md` の続きから」（スプリント名が名の形に合わなければ
+   `.ndf/handoff/milestone-{milestone}.md`）と差し込みの語で書く。テンプレートは次のスプリントでも使うため、パスを文字のまま書かない
 4. `handoff.py check <名> --trim` を打つ。`--trim` は「前の会話の進み」の節を履歴の末尾へ移す
 
 | `check` の終了コード | conductor のすること |
@@ -85,7 +85,7 @@
   課題か Pull Request の URL と日時で書き、承認ゲートは次のセッションが課題と Pull Request から読み直す。文書は
   次のセッションが指示として読むため、許可を書くと承認ゲートを越える経路になる（`restart` の再開コマンドと同じ理由）
 - 認証情報・トークン
-- 課題の本文・Pull Request・`progress.jsonl` が既に持つ状態の写し。置き場所へのリンクだけを書く
+- 課題の本文・Pull Request・`progress.jsonl` が既に持つ状態のコピー。置き場所へのリンクだけを書く
 
 ## 読む
 

@@ -100,7 +100,7 @@ allowed-tools:
 
 ## 既にある Skill は指すだけにする
 
-**内容を写さない。** Google Drive の取得と Notion の記法は既に Skill がある。
+**内容をコピーしない。** Google Drive の取得と Notion の記法は既に Skill がある。
 
 | 既存の Skill | 持っているもの |
 | --- | --- |

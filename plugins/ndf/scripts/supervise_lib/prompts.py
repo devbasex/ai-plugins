@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from design_diff import DESIGN_DIFF_HEADING
+
 
 WORK_SYSTEM = """あなたは NDF の worker である。1 つの作業だけを行う。
 - 人間へ問わない。別のサブエージェントを起動しない。進行を記録しない
@@ -75,3 +77,20 @@ WORKDIR_PROMPT = """## 作業ディレクトリ
 作業ディレクトリ: {path}
 作業ファイル（スクリプト・初期化の出力・プロンプト・長い出力）はここに置く（ここだけは作業場所の外でも書いてよい）。
 共有の scratchpad や /tmp の直下には置かない（並行する計画と同じ名前で上書きし合う）。"""
+DESIGN_DIFF_NONE = DESIGN_DIFF_HEADING + "\n\n- 該当なし（設計文書が無い）"
+DESIGN_MATCH_PROMPT = """完了判定の設計との突き合わせ（quality-gates の references/design-match.md）を行う。入力は
+design-match.py の tests（確認 (a)。設計に名前の出るテストの判定）と specs（確認 (b)。変えたファイル・シンボルを参照する
+既存の確定仕様と変更履歴）の出力である。対象の課題は {issues} で、照合する設計文書は tests の summary の
+「設計文書 N 件（…）」に並ぶパスである（tests の items はテスト名だけで、空でも設計文書はある）。
+1. tests の「無い」（missing）名前は作るか、節に「作らなかった」と理由を並べる。「確かめられなかった」（unverified）は
+   自分で確かめ、確かめられなければ節に並べる
+2. specs の文書を上から読み、変更後の振る舞いと合わない記述を同じ PR で直す。直せなければ節に並べる
+3. 設計文書（issues/ の課題の設計と決定の記録）の `### 決定 N` を 1 件ずつ実装と照らし、違う・実装しなかった・
+   判断できないを節に並べる
+4. 実装で受け入れ条件の前提を変えたなら、課題の本文の条件を requirements-design の「変更の途中で要求が変わったとき」の
+   形に直す。直す節ごとに `python3 {gh_parts} body-section replace --issue <番号> --heading '<節の見出し>' --content-file <ファイル>`
+   を使い、gh issue edit --body-file で本文全体を書き直さない。続けて {spec_copy} write <番号> <issues/ の写し> で写しを作り直す
+5. 直した文書はコミットする（push しない）
+6. 節を作業ディレクトリ（下の「作業ディレクトリ」）の design-diff.md へ書く（前の内容は上書きする）。
+   1 行目は `## 設計と違う点`。違いは「| 設計の箇所 | 違い | 理由 |」の表の行で並べ、同じ PR で直した箇所は並べない。
+   違いが無ければ `- 無し` の 1 行にする"""

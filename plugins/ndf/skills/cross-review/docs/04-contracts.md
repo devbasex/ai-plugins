@@ -4,6 +4,8 @@
 レビューを行う CLI へ渡す入出力の取り決めである。**手順の途中では読まず、形式を確かめる
 ときだけ開く。** 手順は [01-state-and-review.md](01-state-and-review.md) にある。
 
+**目次:** [状態ファイル](#状態ファイル) / [再開で渡した引数の扱い](#再開で渡した引数の扱い) / [record-fix](#record-fix) / [AI への入出力契約（両 launcher 共通）](#ai-への入出力契約両-launcher-共通) / [AI が書き出すファイル契約](#ai-が書き出すファイル契約) / [投稿と監視の記録](#投稿と監視の記録) / [ラウンドの開始時に担当へ渡すもの](#ラウンドの開始時に担当へ渡すもの) / [`<worktree-base>` の解決順](#worktree-base-の解決順) / [事前確認](#事前確認) / [自動レビュー観点テンプレート](#自動レビュー観点テンプレート)
+
 ## 状態ファイル
 
 `$TMP_DIR/cross-review-pr<番号>-state.json`:
@@ -181,13 +183,13 @@
   ラウンドが絞り込みに掛かる）。目印を書くのは経路の最後（`collect-critiques`）で、**対象
   ごとに有効な反証が揃ったときだけである**。揃わないときは付けないだけでなく、**先に付いて
   いたそのラウンドの目印を外す**（取り直しの後も目印が残ると、出力と実際の数え方が食い違う）
-- `rounds[].critique_relaunched` — 反証を取り直した担当（#549 レビュー対応）。
+- `rounds[].critique_relaunched` — 反証を取り直した担当。
   **同じラウンドで 1 度だけ取り直す**ための記録である
 - `no_results` — 結果なしの記録。結果なしの 1 回ごとに `step`（`review`）/ `attempt`（ラウンドの番号）/
   `seat` / `account`（claude のアカウントの名前。空は選んでいない）/ `reason` / `decision`（`relaunch` / `reassign` /
   `abort`）/ `to` / `to_account` / `at` の 1 件を**追記だけ**で積む。外した担当・今のアカウント・起動し直し済みかは
   この記録から導き、別の欄に持たない。この項目を持たない状態ファイルは 0 件として読む
-- `rounds[].reassigned` — そのラウンドで振り替えた `{from, to, to_account, reason}` の並び（報告と judge の出力の写し。
+- `rounds[].reassigned` — そのラウンドで振り替えた `{from, to, to_account, reason}` の並び（報告と judge の出力のコピー。
   正は `no_results`）。振り替えた後の `rounds[].reviewers` / `seats` は振り替え先を指し、元の席の欄は残る
 - `rounds[].seats[].account` — 席の claude のアカウントの名前（振り替えで選んだときだけ持つ）
 - `rejected_findings` — 却下した指摘を **per-item** で蓄積する。`rounds[].fix.rejected` は
@@ -200,7 +202,7 @@
   この項目を持たない状態ファイルは空として読む）/ `available`（利用可能な参加者）/ `unavailable`（名前 → 確認が通らなかった理由）/
   `probe_skipped`（確認を飛ばしたか）/ `require_all` / `fallback`（スロットのフォールバックに使える
   相手。**#892 の後に作る状態では空**で、変更の前に作った状態だけがホストを持ちうる）/ `policy`（決めた時点の
-  ランタイムの宣言の写し `path` / `allowed` / `review_seats`。`null` は宣言が無かった。キーが無いのは #1598 の前の状態）の 10 項目。**この項目を持たない状態ファイルは、この変更の前に始めた実行である**
+  ランタイムの宣言のコピー `path` / `allowed` / `review_seats`。`null` は宣言が無かった。キーが無いのは #1598 の前の状態）の 10 項目。**この項目を持たない状態ファイルは、この変更の前に始めた実行である**
   （読み方は `05-pool-and-convergence.md`）。`unavailable` が空である理由は 2 つあり、
   `probe_skipped` がそれを分ける（全員が通った / 確認を飛ばした）
 - `resume_changes` — 再開で変えた値の記録（#727）。要素は `at` / `field` / `to` / `from` で、
@@ -327,12 +329,12 @@ python3 scripts/state.py record-fix <PR> [--commit <SHA>] [--resolved-thread <ID
 
 launcher が生成するプロンプトに以下を強制している:
 
-- **headRefOid (commit_id) を明示**: AI が自前で取得すると baseRefOid を誤って入れる事故が多発
+- **headRefOid (commit_id) を明示**: AI が自前で取得すると baseRefOid を誤って入れることがある
 - **作業 worktree の絶対パス**: 「ファイル読み取りは必ず worktree 配下の絶対パスを使う」（実 path は state.json の `worktree_path` を参照。`<worktree-base>` は `NDF_WORKTREE_BASE` env > `<システム tmpdir>/ndf-worktrees` の優先順で解決）
 - **投稿の手順を持たない**（#730）: 担当は投稿しない。判定の格下げ（`event_downgrade`）も
   担当へ渡さず、投稿する側が送信の時点で行う
 - **既存コメント差分**: `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt` を読んで重複指摘禁止。2 ラウンド目以降は `start-round` が取り直す（#542）
-- **出し切りと、起動しない処理**: 見つけた指摘はそのラウンドですべて出す。テストも背景の処理も起動しない（確かめる手順は `suggested_check` に書き、`verify-findings` が実行する。#542 #786）
+- **出し切りと、起動しない処理**: 見つけた指摘はそのラウンドですべて出す。テストもバックグラウンドの処理も起動しない（確かめる手順は `suggested_check` に書き、`verify-findings` が実行する。#542 #786）
 - **自動レビュー観点**: GitHub API の `pulls/<PR>/files --paginate` で変更ファイルを全件取得して分類し、`common` / `docs_only` / `design` / `code` / `db_migration` / `test` / `dependency` / `config_ci` / `api_contract` / `auth_security` / `frontend` / `performance` / `deletion_rename` / `generated` / `i18n` / `infra` の該当テンプレートを state.json の `auto_review_instructions` に保存する
 - **手動追加レビュー観点**: `--focus` / `--extra-instructions-file` が指定されていれば state.json の `manual_extra_review_instructions` に保存し、自動テンプレートの後ろに連結した `review_instructions` を codex / agy 両 launcher が同じ「追加レビュー観点」セクションとしてプロンプトに差し込む
 - **進捗マーカー**: agy には `$TMP_DIR/agy-review-pr<PR>-progress.log` へ短いフェーズ名を追記させ、monitor の heartbeat で表示する。内部推論や長文説明は書かせない
@@ -400,7 +402,7 @@ launcher が生成するプロンプトに以下を強制している:
 投稿の種別ごとの契約と、監視と計測が残すファイルは
 [07-posts-and-records.md](07-posts-and-records.md) にある。
 
-## ラウンドの開始時に担当へ渡すもの（#542）
+## ラウンドの開始時に担当へ渡すもの
 
 round エントリを状態ファイルへ保存する前に次を行う。**失敗してもラウンドを止めない**
 （`⚠` の 1 行を出して続ける。取得のスクリプトを起動できないときも同じ）。保存の前に行うのは、
@@ -423,8 +425,8 @@ round エントリを状態ファイルへ保存する前に次を行う。**失
    コンテナ再作成で自動消滅し、共有 volume を消費しない）
 
 worktree の実パスは `<base>/<owner>--<repo>/pr<PR>` 形式で、リポジトリ slug を含める
-ことで**他リポジトリの同一 PR 番号と衝突しない**。永続 volume（旧 `/work/worktrees`）を
-使っていた頃は別プロジェクトの残骸 worktree を誤って流用する事故があったため、
+ことで**他リポジトリの同一 PR 番号と衝突しない**。同じパスに別プロジェクトの残骸 worktree が
+残っていると誤って流用するため、
 パスが存在しても `git worktree list` に登録されていなければ `.stale-<timestamp>` に
 退避して作り直すガードも入っている。
 

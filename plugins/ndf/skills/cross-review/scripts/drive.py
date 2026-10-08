@@ -31,9 +31,10 @@ LIB = HERE.parents[2] / "scripts" / "lib"
 sys.path.insert(0, str(LIB))
 import deps  # noqa: E402
 
-deps.require("durable")
+deps.require("durable", "waits")
 import drive_pause as dp  # noqa: E402
 import durable  # noqa: E402
+import post_queue  # noqa: E402  一時的な失敗の流し直し（#1843）
 import assignee_env  # noqa: E402
 import step_result as sr  # noqa: E402
 from drive_pause import Stop  # noqa: E402
@@ -270,12 +271,21 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
         self.env["CROSS_REVIEW_TMP_DIR"] = self.v["TMP_DIR"]
 
     def review_round(self) -> str:
-        """1 ラウンド。戻り値: fix / round（修正を挟まずに次のラウンド）/ done。"""
+        """1 ラウンド。戻り値: fix / round（修正を挟まずに次のラウンド）/ posts（投稿だけが残った）/ done。"""
         rc, out = self.st("start-round", str(self.pr))
         if rc == 1:
             return "done"
         self.must((rc, out), "state.py start-round")
         jrc, jout = self.collect_reviews(parse_vars(out))
+        return "posts" if jrc == 8 else self.after_judge(jrc, jout)  # 8 は投稿だけが残った（#1843）
+
+    def flush_posts(self) -> str:
+        """段階 `posts`（#1843）: 担当を起動し直さずに流し直して判定を打ち直す。なお 8 なら投稿待ちで止まり、続きもこの段階から。"""
+        v = post_queue.reflush(lambda: parse_vars(self.st("flush", str(self.pr))[1]))
+        jrc, jout = self.st("judge", str(self.pr))
+        if jrc == 8:
+            n, err = v.get("PENDING_REMAINING", "?"), v.get("PENDING_LAST_ERROR", "")
+            raise Stop(f"投稿待ち: 投稿キューに {n} 件残っています（最後の失敗: {err}）。再開すると担当を起動し直さずに流し直します", 8)
         return self.after_judge(jrc, jout)
 
     def run_reviewers(self, agents: list[str], rnd: str, reviewers: list[str]) -> None:
@@ -297,21 +307,13 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
             seat = next((s for s in targets if s.startswith("claude") and accounts.get(s)), "")
             self.sh("critique-round.sh", str(self.pr), rnd, *targets, env=assignee_env.seat_env(seat, accounts.get(seat), self.env))
 
-    def judge(self) -> tuple[int, str]:
-        """judge を打つ。8 なら flush してからもう一度打つ。"""
-        jrc, jout = self.st("judge", str(self.pr))
-        if jrc == 8:
-            self.st("flush", str(self.pr))
-            jrc, jout = self.st("judge", str(self.pr))
-        return jrc, jout
-
     def collect_reviews(self, rv: dict) -> tuple[int, str]:
         """結果を集めて judge する。7 の間、起動し直す席と `REASSIGNED` の振り替え先（`claude@<名前>` は元の席が claude なら元の席）を起動し直す（#919）。"""
         rnd = rv.get("ROUND", "")
         agents = rv.get("REVIEWERS", "").split()
         while True:
             self.run_reviewers(agents, rnd, rv.get("REVIEWERS", "").split())
-            jrc, jout = self.judge()
+            jrc, jout = self.st("judge", str(self.pr))  # 8（投稿の残り）は review_round が段階 posts へ渡す
             agents = relaunch_seats(parse_vars(jout))
             if jrc != 7 or not agents:
                 return jrc, jout
@@ -352,10 +354,8 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
         return {"new_pr": rv.get("NEW_PR", ""), "new_branch": rv.get("NEW_BRANCH", "")}
 
     def set_current(self, rot: dict) -> None:
-        self.must(
-            self.st("set-current-pr", str(self.pr), rot.get("new_pr", ""), "--head-branch", rot.get("new_branch", "")),
-            "state.py set-current-pr",
-        )
+        got = self.st("set-current-pr", str(self.pr), rot.get("new_pr", ""), "--head-branch", rot.get("new_branch", ""))
+        self.must(got, "state.py set-current-pr")
 
     def finish(self) -> dict:
         s = self.state()
@@ -425,11 +425,11 @@ def advance(d: Drive, stage: str) -> tuple[str, tuple | None, dict | None]:
     if stage == "init":
         d.adopt(ok(act(d, "init")))
         return "round", None, None
-    if stage == "round":
-        nxt = ok(act(d, "review_round"))
+    if stage in ("round", "posts"):
+        nxt = ok(act(d, "review_round" if stage == "round" else "flush_posts"))
         if nxt == "fix":
             return "fix", ("fix", True), None
-        return ("round" if nxt == "round" else "sweep-start"), None, None
+        return (nxt if nxt in ("round", "posts") else "sweep-start"), None, None
     if stage == "sweep-start":
         return "sweep", ("sweep", True), None
     if stage == "rotate":

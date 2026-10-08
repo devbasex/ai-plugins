@@ -41,6 +41,10 @@ elif a[:2] == ["pr", "view"]:
     if "body,comments" in a:
         rec = st.get("records", {{}}).get(n)
         out, code = (json.dumps(rec), 0) if rec is not None else (None, 1)
+    elif "title,body" in a:
+        body = st.get("bodies", {{}}).get(n)
+        title = st.get("titles", {{}}).get(n, "")
+        out, code = (json.dumps({{"title": title, "body": body}}), 0) if body is not None else (None, 1)
     elif "-q" in a:
         body = st.get("bodies", {{}}).get(n)
         out, code = (body, 0) if body is not None else (None, 1)
@@ -191,7 +195,7 @@ def test_sprint_close_four_outcomes(repo, gh):
     assert res["o/r#3"]["result"] == "closed"
     assert res["other/x#4"]["result"] == "failed" and "before" in res["other/x#4"]["reason"]
     assert code == 1 and out["status"] == "stopped" and out["tool"] == "sprint-close"
-    assert ["pr", "view", "99", "--repo", "o/r", "--json", "body", "-q", ".body"] not in gh.get()["calls"]
+    assert ["pr", "view", "99", "--repo", "o/r", "--json", "title,body"] not in gh.get()["calls"]
 
 
 def test_sprint_close_failed_when_close_does_not_take(repo, gh):

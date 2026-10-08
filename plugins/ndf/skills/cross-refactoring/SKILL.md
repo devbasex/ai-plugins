@@ -47,7 +47,7 @@ allowed-tools:
 | グレード | 改善候補ごとに付ける適用の価値（`tier`: high / medium / low）。Jev か実装担当が付け、改善項目の順位の最初の鍵にする |
 | 配分テーブル | 種類（`test` / `structure/<手法>` / `verify` / `fix`）ごとの 1 件あたりの所要。履歴の直近 10 回からリファクタリング計画のたびに集計する |
 | テストの戦略 | 範囲テストの走らせ方・全体テストの置き場（手元か CI か）・落ちたテストの見分け方の組。`local-full` / `local-scoped-ci-whole` / `round-only`。宣言（`.ndf/project.json` の `test.strategy`）か、同じ関数が所要から導く |
-| 範囲テスト | 項目が触った箇所に限って走らせるテスト。宣言の `scope_command`（`{paths}` の雛形）に、テストの suite はリファクタリング計画の `test_targets` を、静的解析の suite は項目のコミットが変えたファイルを入れてオーケストレーターが組み立て、シェルで走らせる |
+| 範囲テスト | 項目が触った箇所に限って走らせるテスト。宣言の `scope_command`（`{paths}` のテンプレート）に、テストの suite はリファクタリング計画の `test_targets` を、静的解析の suite は項目のコミットが変えたファイルを入れてオーケストレーターが組み立て、シェルで走らせる |
 | suite の種別 | 宣言の suite がテスト（`test`）か静的解析（`lint`。整形の検査を含む）か。書かなければテスト。テスト整備ラウンドと `--scope` のテストの置き場所の検査はテストの suite があるときだけ行い、静的解析の全体テストはどの戦略でも着手前と最終ゲートで手元で走らせる |
 | 起動の失敗 | テストのコマンドを起動できない（終了コード 126 / 127）こと。落ちたとは扱わず、その時点で項目を取り消さずに中断（終了コード 4）し、報告にコマンドと理由を書く |
 | 危険フラグ | 範囲テストでは覆えない変更（D1〜D5）。立ったら全体テストを 1 度だけ走らせる（全体テストを CI に任せる戦略では最終ゲートへ寄せる）。全体テストを走らせる理由であって、失敗の原因を指さない |
@@ -77,9 +77,9 @@ allowed-tools:
 | `--include NAMES` | 参加者に足す者（例: `--include agy`） | なし |
 | `--require-all` | 確認を通らない者が 1 者でもいれば中断する（終了コード 4） | 外して続ける |
 | `--model RT=MODEL` | ランタイムごとのモデル。繰り返し指定できる | CLI の既定 |
-| `--baseline-test CMD` | 全体テスト。`{paths}` を含めば範囲テストの雛形（全体は宣言の同じ種別の `command`、無ければテストは `{paths}` を `.` にしたもの、静的解析は `{paths}` を `--scope` で埋めたもの）、含まなければ全体テストとしてそのまま走らせる（戦略は `round-only`）。文字列の中身は解析しない | 宣言の `test` を読む |
-| `--round-test CMD` | ラウンドテスト。`{paths}` を含めば範囲テストの雛形、含まなければ項目ごとにそのまま走らせる（戦略は `round-only`）。宣言に `test` が無いときの逃げ道 | なし |
-| `--test-kind test\|lint` | `--baseline-test` と `--round-test` の雛形の種別（`lint` = 静的解析）。雛形の語から種別を推測しない | `test` |
+| `--baseline-test CMD` | 全体テスト。`{paths}` を含めば範囲テストのテンプレート（全体は宣言の同じ種別の `command`、無ければテストは `{paths}` を `.` にしたもの、静的解析は `{paths}` を `--scope` で埋めたもの）、含まなければ全体テストとしてそのまま走らせる（戦略は `round-only`）。文字列の中身は解析しない | 宣言の `test` を読む |
+| `--round-test CMD` | ラウンドテスト。`{paths}` を含めば範囲テストのテンプレート、含まなければ項目ごとにそのまま走らせる（戦略は `round-only`）。宣言に `test` が無いときの逃げ道 | なし |
+| `--test-kind test\|lint` | `--baseline-test` と `--round-test` のテンプレートの種別（`lint` = 静的解析）。テンプレートの語から種別を推測しない | `test` |
 | `--ci-check NAME` | 最終ゲートで待つチェックの名前。宣言の `test.ci.check` より先に効き、`limits.ci_wait_timeout` まで待つ | 宣言の `test.ci.check` |
 | `--workflow-step` | `development-workflow` の 1 工程として起動したことを伝える。`cross-review` を省く | 単独起動 |
 | `--severity-threshold LEVEL` | この重要度未満は `threshold` で見送る | `minor` |
@@ -152,7 +152,7 @@ agy と kiro は取れないため、モデルを比べたいなら `--model agy
 シェルの変数は呼び出しをまたいで残らないため、この節と「実行」の各ブロックを 1 回の呼び出しとし、先頭で毎回 `$R` を
 決め直す。`<入口を探すコマンド>` の行は [scripts-lookup.md](../development-workflow/references/scripts-lookup.md) の
 「入口を探すコマンド」の for 文である（Codex / Kiro / agy では `${CLAUDE_PLUGIN_ROOT}` が置き換わらないため、この for 文で探す）。
-スクリプトの位置は解決の入口（`resolve.sh`）が導入先から求める。
+スクリプトの位置は解決のエントリポイント（`resolve.sh`）が導入先から求める。
 
 ```bash
 <入口を探すコマンド>   # scripts-lookup.md の「入口を探すコマンド」の for 文。$R を決める
@@ -224,7 +224,7 @@ RF=$(bash "$R/scripts/resolve.sh" scripts cross-refactoring) || exit 3
 python3 "$RF/drive.py" <PR> --scope <範囲...> [「引数」の表のうち値のあるもの]
 ```
 
-Codex / Kiro / agy では共通ライブラリの `bg-wait.sh` で背景に起動し、区切った待ちを 124 が返るあいだ**別の呼び出しとして**
+Codex / Kiro / agy では共通ライブラリの `bg-wait.sh` でバックグラウンドに起動し、区切った待ちを 124 が返るあいだ**別の呼び出しとして**
 打ち直す。終わると駆動の出力の全体を出し、駆動の終了コードで終わる。`RC` は run と wait で同じ文字列にする。
 
 ```bash

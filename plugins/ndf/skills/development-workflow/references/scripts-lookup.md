@@ -1,8 +1,8 @@
 # `$SCRIPTS` を決める
 
 プラグインの `scripts/` の位置は 4 ランタイムで別々である。**候補を順に試す処理は
-`scripts/resolve.sh`（解決の入口）1 本が持つ。** Skill はこの入口を探すコマンドだけを持ち、
-あとは入口に尋ねる。
+`scripts/resolve.sh`（解決のエントリポイント）1 本が持つ。** Skill はこの入口を探すコマンドだけを持ち、
+あとはエントリポイントに尋ねる。
 
 ```bash
 SCRIPTS=$(bash "$R/scripts/resolve.sh" scripts)              # プラグインルート直下の scripts/
@@ -19,27 +19,27 @@ conductor が `$SCRIPTS` の下で直に使うエントリポイントは [condu
 
 ## 候補の並び
 
-入口が次の順に試し、`scripts/projects-sync.sh` を持つ最初のものを物理的な絶対パスで採る。
+エントリポイントが次の順に試し、`scripts/projects-sync.sh` を持つ最初のものを物理的な絶対パスで採る。
 
 | 順 | 何を指すか | 手がかり |
 | --- | --- | --- |
 | 1 | **開発中のリポジトリ** | 現在地の git のトップの直下に `plugins/ndf/scripts/projects-sync.sh` がある |
-| 2 | Claude Code が読み込んだプラグイン | Claude Code の中（`CLAUDECODE` がある）でだけ見る。環境変数 `CLAUDE_PLUGIN_ROOT`、別ランタイムのコピーを通らずに届いた入口自身、`~/.claude/plugins/installed_plugins.json` の `ndf` の `installPath` の順 |
+| 2 | Claude Code が読み込んだプラグイン | Claude Code の中（`CLAUDECODE` がある）でだけ見る。環境変数 `CLAUDE_PLUGIN_ROOT`、別ランタイムのコピーを通らずに届いたエントリポイント自身、`~/.claude/plugins/installed_plugins.json` の `ndf` の `installPath` の順 |
 | 3 | Kiro CLI がインストーラで指したプラグインの `scripts` | `.kiro/skills/<Skill名>` がプラグインの `skills/<Skill名>` への symlink |
 | 4 | Codex のマーケットプレイスのコピー（`~/.codex/.tmp/marketplaces/<名前>/plugins/ndf/scripts`） | マーケットプレイス名だけが導入元で変わる |
 | 5 | agy がコピーした実体（`~/.gemini/config/plugins/ndf/scripts`） | 導入時にプラグインのディレクトリ全体をここへコピーする。取得元の登録が無いため位置は固定 |
 | 6 | 現在地からの相対（`plugins/ndf/scripts`） | git のトップを取れない場合の受け皿 |
 
-どれも当たらなければ、入口自身が置かれたプラグインを採る。
+どれも当たらなければ、エントリポイント自身が置かれたプラグインを採る。
 
 **開発中のリポジトリを先頭に置くのは、手元で直したスクリプトが実行されない状態を無くす
 ためである。** リリース済みのコピーが先に当たると、直したはずの不具合が再現し、実行しているのが
 リリース済みの版であることは出力からは分からない。判定は「現在地の git のトップが
 `plugins/ndf/scripts` を持つか」であるため、**配布物を使う利用者の側では当たらない**。
 
-**2 で入口自身の位置を条件付きで採るのは、参照ファイルの `${CLAUDE_PLUGIN_ROOT}` が
+**2 でエントリポイント自身の位置を条件付きで採るのは、参照ファイルの `${CLAUDE_PLUGIN_ROOT}` が
 置き換わらないためである**（#590）。Claude Code が置き換えるのは `SKILL.md` の本文だけで、
-参照ファイルを読んだ bash では下のコマンドが Codex のコピーの入口を拾うことがある。入口は
+参照ファイルを読んだ bash では下のコマンドが Codex のコピーのエントリポイントを拾うことがある。エントリポイントは
 自分へ届いた道が `~/.codex` / `~/.gemini` / `.kiro/skills` / `~/.claude/plugins/cache` を
 通ったかを見て、通っていれば自分を採らず Claude Code の導入の記録へ戻る。通っていなければ
 `claude --plugin-dir <パス>` で読み込んだ実体として採る。
@@ -50,10 +50,10 @@ conductor が `$SCRIPTS` の下で直に使うエントリポイントは [condu
 
 ## 入口を探すコマンド
 
-入口はプラグインルート直下の `scripts/` に置く。Skill の下に置くと、その Skill を配らない
+エントリポイントはプラグインルート直下の `scripts/` に置く。Skill の下に置くと、その Skill を配らない
 配布先（agy）で届かない（`scripts/lib/README.md` の「プラグインルート直下に置く理由」）。
-入口を探すコマンドは、上の候補から「入口が 1 つあればよい」ところまで削った形である。どの入口が
-当たっても、順序は入口の側が決め直す。
+入口を探すコマンドは、上の候補から「エントリポイントが 1 つあればよい」ところまで削った形である。どのエントリポイントが
+当たっても、順序はエントリポイントの側が決め直す。
 
 ```bash
 # 解決の入口を探す。Claude Code は SKILL.md の ${CLAUDE_PLUGIN_ROOT} を絶対パスへ置き換える。
@@ -68,7 +68,7 @@ SCRIPTS=$([ -n "$R" ] && bash "$R/scripts/resolve.sh" scripts) || SCRIPTS=
 
 `.kiro/skills/*/../..` の `..` はカーネルが symlink の指す先から解くため、Kiro CLI の
 リンクからでも実体のプラグインルートへ届く。`~/.claude/plugins/cache/*/ndf/*` はどの版が
-当たってもよい。入口は cache を通って届いた自分を採らず、`installed_plugins.json` の記録へ
+当たってもよい。エントリポイントは cache を通って届いた自分を採らず、`installed_plugins.json` の記録へ
 戻る（参照ファイルを読んで置き換わらなかったときの受け皿）。
 
 Skill の手順では、最後の行を「見つからなければ止まる」形にする。
@@ -92,6 +92,6 @@ SKILL_DIR=$(bash "$R/scripts/resolve.sh" skill fix) || exit 3
 「入口を探すコマンド」の bash はそのままテストの対象になっている。
 `development-workflow/tests/test_projects_scripts_lookup.py` と
 `worktree/tests/test_scripts_reference.py` がこの節の bash のコードブロックを読み出し、
-4 ランタイムの配置を作った上で実行する。入口そのものの順序は
+4 ランタイムの配置を作った上で実行する。エントリポイントそのものの順序は
 `scripts/tests/test_resolve.py` が 4 ランタイム × 開発中 / リリース済みの組み合わせで確かめる。
-**候補を足すときは入口とこのコマンドの両方を直し、3 つのテストへ配置を足す。**
+**候補を足すときはエントリポイントとこのコマンドの両方を直し、3 つのテストへ配置を足す。**

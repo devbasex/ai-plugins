@@ -32,7 +32,7 @@
 | `one_by_one_iteration` | 一件ずつの反復 |
 | `unvalidated_externalization` | 検証のない外部化 |
 | `test_coupled_to_internals` | テストが内部の詳細に依存している |
-| `test_bypasses_module_boundary` | テストが 1 つの入口から全部を引く |
+| `test_bypasses_module_boundary` | テストが 1 つのエントリポイントから全部を引く |
 | `mock_targets_implementation_detail` | モックの対象が実装の詳細 |
 | `divergent_change` | 変更の理由が 1 つに定まらない |
 | `hidden_dependency` | 隠れた依存 |
@@ -68,8 +68,8 @@
 
 ## 観点
 
-**観点は兆候を探す入口で、兆候とは別の集まりである。** 提案の `smell` は兆候から選ぶ。観点の識別子を
-`smell` に書いた提案は、代表の兆候へ写して扱う（重複排除の鍵を兆候に揃えるため）。識別子は兆候・手法と
+**観点は兆候を探す手がかりで、兆候とは別の集まりである。** 提案の `smell` は兆候から選ぶ。観点の識別子を
+`smell` に書いた提案は、代表の兆候へ対応付けて扱う（重複排除の鍵を兆候に揃えるため）。識別子は兆候・手法と
 重ならない。
 
 | 識別子 | 説明 | 代表の兆候 |
