@@ -499,7 +499,7 @@ def _posts_drive(tmp_path, monkeypatch, judges, flushes) -> FakePosts:
     monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
     fake = FakePosts(tmp_path, judges, flushes)
     monkeypatch.setattr(cr, "call", fake)
-    monkeypatch.setattr(cr, "_sleep", fake.sleep)
+    monkeypatch.setattr(cr.post_queue, "_sleep", fake.sleep)
     return fake
 
 

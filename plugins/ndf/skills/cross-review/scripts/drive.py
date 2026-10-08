@@ -5,8 +5,7 @@
 
 init → ラウンド（起動・監視・取り込み・根拠の検証・判定）→ 振動の検知 → 修正 → 巻き直し →
 最終スイープ → 検証 → 報告を順に進める。LLM が要る地点（fix / sweep / newtext）で止まる。
-判定が投稿の残り（8）を返したら、担当を起動し直さずに段階 `posts` で投稿キューを流し直す。一時的な失敗の間だけ
-間をあけて流し直し、上限を超えたら「投稿待ち」で止まる（#1843）。同じコマンドを打ち直すと続きから進む。収束ループが終わった後に打ち直すと、終わりの時点の PR の head と今の head が
+同じコマンドを打ち直すと続きから進む。収束ループが終わった後に打ち直すと、終わりの時点の PR の head と今の head が
 同じなら前回の結果を返し、違えば（または `--reopen` なら）新しい実行の回を始め、`state.py init` がラウンドを足す（#1340）。進みは耐久の記録（`lib/durable.py`、種類 `review`・鍵の元は状態の置き場）に
 あり、耐久ワークフロー `review_drive` の 1 回が収束ループの 1 回である。`state.py init` とラウンドは耐久ステップで、
 記録のある耐久ステップは打ち直しで流れない（init は 1 回の中で 1 回だけ。#1142 の I19）。止まりはイベント `pause` を
@@ -24,7 +23,6 @@ import argparse
 import json
 import os
 import sys
-import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -36,15 +34,13 @@ import deps  # noqa: E402
 deps.require("durable", "waits")
 import drive_pause as dp  # noqa: E402
 import durable  # noqa: E402
-import post_queue  # noqa: E402  一時的な失敗の流し直しの待ち（#1843 の決定 4）
-import waits  # noqa: E402
+import post_queue  # noqa: E402  一時的な失敗の流し直し（#1843）
 import assignee_env  # noqa: E402
 import step_result as sr  # noqa: E402
 from drive_pause import Stop  # noqa: E402
 from loop_drive import call, durable_identity, keep_finished, parse_vars, relaunch_seats, review_status, write_review_answer  # noqa: E402,F401  テストは `call` をこのモジュールの上で差し替える
 
 TOOL = "cross-review-drive"
-_sleep = time.sleep  # 流し直しの待ち。テストが差し替える
 DOCS02 = SKILL / "docs" / "02-fix-and-rotation.md"
 
 
@@ -281,39 +277,15 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
             return "done"
         self.must((rc, out), "state.py start-round")
         jrc, jout = self.collect_reviews(parse_vars(out))
-        if jrc == 8:
-            return "posts"
-        return self.after_judge(jrc, jout)
+        return "posts" if jrc == 8 else self.after_judge(jrc, jout)  # 8 は投稿だけが残った（#1843）
 
     def flush_posts(self) -> str:
-        """段階 `posts`: 担当を起動し直さずに投稿キューを流し直し、判定を打ち直す（#1843）。
-
-        一時的な失敗で残っている間だけ `post_queue.TRANSIENT_INTERVAL` 秒おきに、合計 `TRANSIENT_MAX_WAIT` 秒まで
-        流し直す。上限で残っているときは待たない。判定がなお 8 なら「投稿待ち」で止まり（`final` は書かない）、
-        打ち直すとこの段階から続ける。戻り値は `after_judge` と同じ。"""
-
-        def once() -> dict:
-            return parse_vars(self.st("flush", str(self.pr))[1])
-
-        def announce(seconds: float, _next: int) -> None:
-            print(f"⏳ 一時的な失敗のため {seconds:g} 秒待って投稿キューを流し直します", file=sys.stderr)
-
-        got = waits.retry_call(
-            once,
-            lambda v: v.get("PENDING_REMAINING", "0") not in ("", "0") and v.get("PENDING_TRANSIENT") == "1",
-            max_wait=post_queue.TRANSIENT_MAX_WAIT,
-            interval=post_queue.TRANSIENT_INTERVAL,
-            sleep=lambda seconds: _sleep(seconds),
-            on_wait=announce,
-        )
+        """段階 `posts`（#1843）: 担当を起動し直さずに流し直して判定を打ち直す。なお 8 なら投稿待ちで止まり、続きもこの段階から。"""
+        v = post_queue.reflush(lambda: parse_vars(self.st("flush", str(self.pr))[1]))
         jrc, jout = self.st("judge", str(self.pr))
         if jrc == 8:
-            v = got.value or {}
-            raise Stop(
-                f"投稿待ち: 投稿キューに {v.get('PENDING_REMAINING', '?')} 件残っています"
-                f"（最後の失敗: {v.get('PENDING_LAST_ERROR', '')}）。再開すると担当を起動し直さずに流し直します",
-                8,
-            )
+            n, err = v.get("PENDING_REMAINING", "?"), v.get("PENDING_LAST_ERROR", "")
+            raise Stop(f"投稿待ち: 投稿キューに {n} 件残っています（最後の失敗: {err}）。再開すると担当を起動し直さずに流し直します", 8)
         return self.after_judge(jrc, jout)
 
     def run_reviewers(self, agents: list[str], rnd: str, reviewers: list[str]) -> None:
@@ -335,17 +307,13 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
             seat = next((s for s in targets if s.startswith("claude") and accounts.get(s)), "")
             self.sh("critique-round.sh", str(self.pr), rnd, *targets, env=assignee_env.seat_env(seat, accounts.get(seat), self.env))
 
-    def judge(self) -> tuple[int, str]:
-        """judge を打つ。8（投稿が残っている）は呼び出し側が段階 `posts` で扱う。"""
-        return self.st("judge", str(self.pr))
-
     def collect_reviews(self, rv: dict) -> tuple[int, str]:
         """結果を集めて judge する。7 の間、起動し直す席と `REASSIGNED` の振り替え先（`claude@<名前>` は元の席が claude なら元の席）を起動し直す（#919）。"""
         rnd = rv.get("ROUND", "")
         agents = rv.get("REVIEWERS", "").split()
         while True:
             self.run_reviewers(agents, rnd, rv.get("REVIEWERS", "").split())
-            jrc, jout = self.judge()
+            jrc, jout = self.st("judge", str(self.pr))  # 8（投稿の残り）は review_round が段階 posts へ渡す
             agents = relaunch_seats(parse_vars(jout))
             if jrc != 7 or not agents:
                 return jrc, jout
@@ -386,10 +354,8 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
         return {"new_pr": rv.get("NEW_PR", ""), "new_branch": rv.get("NEW_BRANCH", "")}
 
     def set_current(self, rot: dict) -> None:
-        self.must(
-            self.st("set-current-pr", str(self.pr), rot.get("new_pr", ""), "--head-branch", rot.get("new_branch", "")),
-            "state.py set-current-pr",
-        )
+        got = self.st("set-current-pr", str(self.pr), rot.get("new_pr", ""), "--head-branch", rot.get("new_branch", ""))
+        self.must(got, "state.py set-current-pr")
 
     def finish(self) -> dict:
         s = self.state()
