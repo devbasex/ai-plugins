@@ -91,7 +91,7 @@
 | `issue-file.py` の冒頭の説明（変更） | `note` の使い方に `[--approved <提示の要約値>]` を足し、終了コード 10 の対象に `note`（別リポジトリのとき）を入れる（AC10） |
 | `plugins/ndf/skills/out-of-scope/SKILL.md` の手順 4（変更） | `note` が 10 を返したら承認資料を示して同意を取り、`--approved <metrics.digest>` を足して打ち直す。人に問えない起動では打ち直さず承認資料を添えて人へ戻す（AC9） |
 | `plugins/ndf/skills/out-of-scope/references/issue-target.md` の「両方にまたがる課題」の手順 3（変更） | 上流の課題への `note --counterpart` は開発対象と別のリポジトリへの 1 行なので、手順 4 と同じく 10 を受けて同意を取ることを書く（AC9） |
-| `docs/specifications/out-of-scope-issue-file.md` の「既知の限界」（変更） | 「既存の課題へのコメントと C5」の行を、決めた扱い（別リポジトリは同意つき、同じなら同意なし）へ置き換える（AC11） |
+| `docs/specifications/out-of-scope-issue-file.md` の「既知の限界」・「決定と理由」・「テスト観点」（変更） | 「既知の限界」の「既存の課題へのコメントと C5」の行を、決めた扱い（別リポジトリは同意つき、同じなら同意なし）へ置き換える（AC11）。「決定と理由」の決定 3 は、10 で止まり `--approved` を受けるサブコマンドに `note`（打つ先が開発対象と別のとき）を足す。決定 7 は対象を `create` と `note` にし、部品が判定するのは「打つ先が開発対象リポジトリと別か」だけで、その判定を部品が自分で読んだ開発対象で行う理由（呼ぶ側から渡させると渡し忘れや取り違えで判定が外れる。この設計の決定 2）を足す。人に問えない起動で進めてよいかを部品が判定しないことは残す。「テスト観点」の `note` の行へ、別リポジトリでは `--approved` 無しで 10・一致する要約値だけが打つこと・同じリポジトリでは同意なしで打つことを足す |
 | `docs/glossary/glossary.json` と `docs/glossary.md`（変更） | 「提示の要約値」の意味に `note` を足し、`glossary.py render` で文書を作り直す。**この設計の変更で反映済み**で、実装では触らない |
 | `plugins/ndf/scripts/tests/test_issue_file.py`（変更） | AC1〜AC8・AC12 と I1〜I5 を縛る。既存の `note` のテストは開発対象リポジトリの応答を足す（偽の `gh` は登録の無い呼び出しで落ちるため） |
 
