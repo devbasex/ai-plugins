@@ -84,7 +84,7 @@ flowchart LR
 | `light` | 3 | 変更箇所が読み込まれる経路を 1 度実行する |
 | `operation` | 3 | 実行の単位ごとのコマンド・出力・終了コード、反映を確かめた手段と結果 |
 | `legacy-refactor` | 1 → 2 → 3 | 現状固定テストの結果、公開インタフェースが不変であること |
-| `standard` | 1 → 2 → 3 → 4 | 受け入れ条件ごとの合否、契約・結合の結果、移行手順の実行確認 |
+| `standard` | 1 → 2 → 3 → 4 | 受け入れ条件ごとの合否、契約・結合の結果、移行手順の実行確認、設計との突き合わせ |
 | `documentation` | 3 | **事実確認**（書かれた値と出典の突き合わせ）、リンクと記法のチェック |
 
 `light` は振る舞いを変えない変更なので、段階 1 と 2 を必須にしない。代わりに変更箇所が
@@ -105,6 +105,11 @@ flowchart LR
 
 **一致しなかったときは「素材の収集と出典の確定」へ戻す。** 本文の値を出典に合わせて書き換え
 るのではなく、**出典を取り直してどちらが正しいかを決める**（`document-sources`）。
+
+**`standard` は設計との突き合わせを行う。** 設計に名前の出るテストの実在（a）・変えたものを参照する既存の確定仕様と
+変更履歴（b）・設計の決定と実装（c）を照らし、食い違いを実装 PR の本文の `## 設計と違う点` に並べるか、同じ PR で
+文書を直す。(a)(b) はスクリプト（`design-match.py`）が出し、(c) と記述が合うかの判断は担い手が行う。手順は
+[references/design-match.md](references/design-match.md) にある。ほかのモードは行わない。
 
 各モードの詳しい完了の定義は
 [references/definition-of-done.md](references/definition-of-done.md) に置く。
@@ -207,6 +212,7 @@ Skill 側に既定値を持たせると、プロジェクトの方針と食い�
 ## 参照
 
 - [references/definition-of-done.md](references/definition-of-done.md) — モード別の完了の定義
+- [references/design-match.md](references/design-match.md) — `standard` の設計との突き合わせと「設計と違う点」の節
 - `/ndf:release-verification` — リリースされた成果物を利用者の環境で確かめる工程
 - `/ndf:out-of-scope` — 範囲外と判断したものの起票と、起票先のリポジトリの判断
 

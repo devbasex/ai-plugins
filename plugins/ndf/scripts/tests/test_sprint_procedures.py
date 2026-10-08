@@ -104,6 +104,7 @@ def test_single_plans_keep_their_step_order_and_gain_the_record(tmp_path):
         "test-limited",
         "judge",
         "fix",
+        *["design-tests", "design-specs", "design-match"],  # standard（既定）の設計との突き合わせ（#1241）
         "pr",
         "fix-push",
         "test-all",

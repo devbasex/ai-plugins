@@ -220,3 +220,43 @@ def test_pace_normal_is_not_written_and_an_unknown_pace_is_rejected(fake_gh):
     run(fake_gh, "123", "設計", "--pace", "normal")
     assert "進め方" not in fake_gh.written.read_text(encoding="utf-8")
     assert run(fake_gh, "123", "-", "--pace", "slow").returncode == 2
+
+
+# --- 課題ごとの錠（#1241 の I10）---
+
+
+def _issue_lock(number):
+    import sys
+
+    sys.path.insert(0, str(SCRIPT.parent / "lib"))
+    import locks
+
+    return locks.exclusive(pathlib.Path(os.environ["NDF_LOCK_DIR"]) / "issue-body" / f"o--r--{number}")
+
+
+def test_progress_is_skipped_with_exit_0_when_the_lock_cannot_be_taken(fake_gh, monkeypatch):
+    fake_gh.body.write_text("# 課題\n\n本文\n", encoding="utf-8")
+    monkeypatch.setenv("NDF_PROGRESS_LOCK_TIMEOUT", "1")
+    with _issue_lock(123):
+        out = run(fake_gh, "123", "設計", "--repo", "o/r")
+    assert out.returncode == 0, out.stderr
+    assert not fake_gh.written.exists() and "NOTE:" in out.stderr
+
+
+def test_progress_waits_for_the_lock_and_then_writes(fake_gh):
+    import threading
+    import time
+
+    fake_gh.body.write_text("# 課題\n\n本文\n", encoding="utf-8")
+    taken = threading.Event()
+
+    def hold():  # 錠は取ったスレッドで放す
+        with _issue_lock(123):
+            taken.set()
+            time.sleep(1)
+
+    threading.Thread(target=hold).start()
+    taken.wait(5)
+    out = run(fake_gh, "123", "設計", "--repo", "o/r")
+    assert out.returncode == 0, out.stderr
+    assert "- [x] 設計 —" in fake_gh.written.read_text(encoding="utf-8")

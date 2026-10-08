@@ -9,7 +9,8 @@ from __future__ import annotations
 import shlex
 from pathlib import Path
 
-from supervise_lib.paths import CHECK_PY, HERE
+from supervise_lib.paths import CHECK_PY, DESIGN_MATCH_PY, HERE, SPEC_COPY_PY
+from supervise_lib.prompts import DESIGN_MATCH_PROMPT
 
 RECORD_SH = HERE / "projects-sync.sh"  # 課題の本文の「進行」へ工程を記録するスクリプト
 REQUIREMENTS = "issues/issue-{n}-requirements.md"  # 要求の写しの置き場（NDF の規約。決定 11）
@@ -58,6 +59,32 @@ PUSH_FIX_PROMPT = (
     "検査はリポジトリの pre-push フック（git config core.hooksPath）が打つものなので、直した後に同じコマンドを手元で打って"
     "通ることを確かめる。変更に起因しない失敗は直さない。"
 )
+
+
+DESIGN_DIFF = "{state_dir}/work/design-diff.md"  # design-match の worker が書く「設計と違う点」の節（#1241）
+DESIGN_MATCH_MODES = ("standard",)  # 突き合わせを入れるモード（設計文書を持つ変更。I9）
+
+
+def design_match_steps(issues, base: str | None, nxt: str) -> list[dict]:
+    """完了判定の設計との突き合わせ（#1241 の決定 9）。確認 (a) → 確認 (b) → 確認 (c) の worker → `nxt`。
+    設計文書が無ければ（tests が 3）`nxt` へ飛ぶ。`nxt` の pr のステップへは `design_diff_on_pr` で節を渡す。"""
+    nums = " ".join(str(int(n)) for n in issues)
+    ref = f"origin/{base}" if base else "origin/{base}"
+    prompt = DESIGN_MATCH_PROMPT.format(gh_parts=HERE / "lib" / "gh_parts.py", spec_copy=SPEC_COPY_PY)
+    return [
+        {"id": "design-tests", "type": "run", "stage": "完了判定", "cmd": f"{DESIGN_MATCH_PY} tests --issue {nums} --root .",
+         "next": "design-specs", "on_fail": "design-specs", "skip_to": nxt},
+        {"id": "design-specs", "type": "run", "stage": "完了判定", "cmd": f"{DESIGN_MATCH_PY} specs --base {shlex.quote(ref)} --root .",
+         "next": "design-match", "on_fail": "design-match"},
+        {"id": "design-match", "type": "work", "kind": "設計との突き合わせ", "stage": "完了判定", "serena": True,
+         "inputs": ["design-tests", "design-specs"], "prompt": prompt, "next": nxt},
+    ]  # fmt: skip
+
+
+def design_diff_on_pr(pr: dict, on_missing: str) -> dict:
+    """pr のステップへ「設計と違う点」の節のファイルと、節が無いときの行き先を持たせる（I7）。"""
+    pr.update(diff_section=DESIGN_DIFF, on_section_missing=on_missing)
+    return pr
 
 
 def push_fix_steps(pr: dict) -> list[dict]:

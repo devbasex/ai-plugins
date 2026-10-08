@@ -7,7 +7,7 @@
     python3 pr-steps.py create --title T --body-file F [--draft] [--base B] [--root DIR]
     python3 pr-steps.py update --body-file F [--title T] [--pr N] [--root DIR]
     python3 pr-steps.py report [PR番号] [--root DIR]
-    python3 pr-steps.py template --out F [--force]
+    python3 pr-steps.py template --out F [--mode standard] [--force]
 
 結果は lib/step_result.py の形の 1 行の JSON。終了コードは 0 = ok / 1 = 違反（閉じる語がコミット
 メッセージにある・push や作成が失敗）/ 2 = 読めない / 3 = 前提が無い（既定ブランチにいる・起点が
@@ -71,6 +71,10 @@ BODY_TEMPLATE = f"""<何を変えたかを 1〜3 文>
 
 - [x] `<実行したコマンド>` exit=0
 """
+DIFF_HEADING = "## 設計と違う点"  # standard の実装 PR の節（quality-gates の references/design-match.md）
+DIFF_TEMPLATE = (
+    f"\n{DIFF_HEADING}\n\n- <設計・既存の確定仕様・受け入れ条件と違う点を「| 設計の箇所 | 違い | 理由 |」の表で。無ければ「無し」>\n"
+)
 STAT_RE = re.compile(r"(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?")
 
 
@@ -409,6 +413,10 @@ def upsert(a, must_exist):
         items.append({"kind": "section", "name": CHANGES_HEADING, "result": "ok" if has else "missing"})
         if not has:
             nxt = f"本文に {CHANGES_HEADING} の節を足して update する（無いと配布の説明文が題名になる）"
+        if getattr(a, "mode", None) == "standard":  # 設計との突き合わせの結果の節（#1241 の I8）
+            diff = any(title == DIFF_HEADING[3:] for title, _ in h2_sections(body))
+            items.append({"kind": "section", "name": DIFF_HEADING, "result": "ok" if diff else "missing"})
+            nxt = nxt or (None if diff else f"本文に {DIFF_HEADING} の節を足して update する（無ければ「無し」と書く）")
     emit(result(TOOL, "ok", f"PR #{number} を{'更新した' if action == 'updated' else '作った'}: {url}", items, metrics, next=nxt))
 
 
@@ -427,14 +435,15 @@ def cmd_template(a):
     out = Path(a.out)
     if out.exists() and not a.force:
         raise StepError(f"{out} が既にある（書き直すなら --force）", EXIT_PRECONDITION)
-    out.write_text(BODY_TEMPLATE, encoding="utf-8")
+    text = BODY_TEMPLATE + (DIFF_TEMPLATE if a.mode == "standard" else "")
+    out.write_text(text, encoding="utf-8")
     emit(
         result(
             TOOL,
             "ok",
             f"PR 本文の雛形を書いた: {out}",
             [{"kind": "file", "name": str(out), "result": "written"}],
-            {"sections": [l for l in BODY_TEMPLATE.splitlines() if l.startswith("## ")]},
+            {"sections": [l for l in text.splitlines() if l.startswith("## ")]},
         )
     )
 
@@ -576,6 +585,7 @@ def build_parser():
     p.set_defaults(func=cmd_report)
     p = sub.add_parser("template", help=f"PR 本文の雛形（Summary・{CHANGES_HEADING}・Test plan）を書き出す")
     p.add_argument("--out", required=True)
+    p.add_argument("--mode", help=f"standard なら {DIFF_HEADING} の節も書く")
     p.add_argument("--force", action="store_true")
     p.set_defaults(func=cmd_template)
     return ap
