@@ -101,6 +101,7 @@ flowchart LR
 | 索引の遅れ | 由来をコメントに書いた直後（`note` の直後）に検索の索引へ載るまでの遅れは測っていない |
 | リポジトリに無いラベル | `issue_create` は REST を先に試し、上限なら `gh issue create` で代わる。リポジトリに無いラベルを渡したときの振る舞いが 2 つの経路で同じかは確かめていない |
 | 既存の課題へのコメントと C5 | 打つ先が開発対象リポジトリと別（読めないときも含む）の `note` は、承認資料を示して同意を得たときだけ打つ。同じリポジトリなら同意なしで打つ。打ったコメントは GitHub の画面から消せるが、通知と検索の索引には残る |
+| 別リポジトリへの `note` の実測 | 開発対象と上流リポジトリが別のプロジェクトで、別リポジトリへの `note` が承認資料で止まる回数と、`out-of-scope` を通して止まった後に同意で打てることは、単体テスト（偽の `gh`）でしか確かめていない |
 | fork した利用者 | `resolve-target` が 0 で決めた名前が実際の上流リポジトリと違うことがある。起票の前の提示に起票先を含めて人が確かめる |
 | 抜粋 | worker 向けの `out-of-scope` の抜粋（[ndf-worker-agent-and-skill-excerpts.md](ndf-worker-agent-and-skill-excerpts.md)）はまだ無い |
 
@@ -123,4 +124,4 @@ flowchart LR
 - [`retrospective` の SKILL.md](../../plugins/ndf/skills/retrospective/SKILL.md)（由来での検索を使う手順 1）
 - [`plugins/ndf/scripts/lib/README.md`](../../plugins/ndf/scripts/lib/README.md)（`gh_rest` と `step_result` の結果 JSON の形）
 - [ndf-issue-upkeep-root-cause.md](ndf-issue-upkeep-root-cause.md)（溜まった課題の判断。`out-of-scope` の 3 択は発見の瞬間だけに効く）
-- #851・#865（この形を決めた課題）、#845（トークン消費の削減の親）、#846（結果の契約）、#480（閉じた抽象化）
+- #851・#865（この形を決めた課題）、#1847（別リポジトリへの `note` を同意つきにした課題）、#845（トークン消費の削減の親）、#846（結果の契約）、#480（閉じた抽象化）
