@@ -464,3 +464,86 @@ def test_a_converged_round_does_not_run_the_oscillation_check(tmp_path, monkeypa
     monkeypatch.setattr(cr, "call", fake)
     run_main(["5"], capsys)
     assert not [c for c in fake.calls if c[:2] == ("state.py", "check-oscillation")]
+
+
+# ---- 投稿だけが残ったラウンド（#1843） ----
+
+_TRANSIENT_LEFT = (
+    "PENDING_REMAINING=2\nPENDING_RATE_LIMITED=0\nPENDING_TRANSIENT=1\nPENDING_LAST_ERROR='exit=1 unexpected end of JSON input'\n"
+)
+_LIMIT_LEFT = "PENDING_REMAINING=2\nPENDING_RATE_LIMITED=1\nPENDING_TRANSIENT=0\nPENDING_LAST_ERROR=''\n"
+_ALL_SENT = "PENDING_REMAINING=0\nPENDING_RATE_LIMITED=0\nPENDING_TRANSIENT=0\nPENDING_LAST_ERROR=''\n"
+
+
+class FakePosts(FakeReview):
+    """判定が投稿の残り（8）を返し、`state.py flush` が `flushes` の順に答える（尽きたら最後の答えを繰り返す）。"""
+
+    def __init__(self, tmp: Path, judges: list[int], flushes: list[str]):
+        super().__init__(tmp)
+        self.judges, self.flushes, self.sleeps = judges, flushes, []
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+
+    def __call__(self, cmd, env=None, cwd=None):
+        rc, out = super().__call__(cmd, env, cwd)
+        if self.calls[-1][:2] == ("state.py", "flush"):
+            return 0, self.flushes.pop(0) if len(self.flushes) > 1 else self.flushes[0]
+        return rc, out
+
+    def count(self, *head: str) -> int:
+        return sum(1 for c in self.calls if c[: len(head)] == head)
+
+
+def _posts_drive(tmp_path, monkeypatch, judges, flushes) -> FakePosts:
+    monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
+    fake = FakePosts(tmp_path, judges, flushes)
+    monkeypatch.setattr(cr, "call", fake)
+    monkeypatch.setattr(cr, "_sleep", fake.sleep)
+    return fake
+
+
+def test_posts_left_by_a_transient_failure_are_flushed_again_without_relaunching(tmp_path, monkeypatch, capsys):
+    """判定が 8 なら担当を起動し直さずに流し直し、送れたら判定へ進む（AC4）。"""
+    fake = _posts_drive(tmp_path, monkeypatch, [8, 0], [_TRANSIENT_LEFT, _ALL_SENT])
+
+    code, out = run_main(["5"], capsys)
+
+    assert code == 21 and out["items"][0]["pause"] == "sweep"
+    assert fake.count("launch-reviewer.sh") == 1
+    assert fake.count("state.py", "start-round") == 1
+    assert fake.count("state.py", "flush") == 2
+    assert fake.sleeps == [cr.post_queue.TRANSIENT_INTERVAL]
+
+
+def test_posts_that_stay_unsent_stop_as_waiting_and_resume_without_relaunching(tmp_path, monkeypatch, capsys):
+    """待ちの上限を超えたら「投稿待ち」で止まり（AC5）、打ち直すと担当を起動し直さずに流して判定へ進む（AC6）。"""
+    fake = _posts_drive(tmp_path, monkeypatch, [8, 8], [_TRANSIENT_LEFT])
+
+    code, out = run_main(["5"], capsys)
+
+    assert code == 1 and out["status"] == "stopped"
+    assert out["summary"].startswith("投稿待ち:")
+    assert "2 件" in out["summary"] and "unexpected end of JSON input" in out["summary"]
+    assert out["metrics"]["exit"] == 8 and out["metrics"]["final"] is None
+    assert sum(fake.sleeps) <= cr.post_queue.TRANSIENT_MAX_WAIT
+    assert sum(fake.sleeps) + cr.post_queue.TRANSIENT_INTERVAL > cr.post_queue.TRANSIENT_MAX_WAIT
+    assert fake.count("launch-reviewer.sh") == 1
+
+    fake.judges, fake.flushes = [0], [_ALL_SENT]
+    code, out = run_main(["5"], capsys)
+
+    assert code == 21 and out["items"][0]["pause"] == "sweep"
+    assert fake.count("launch-reviewer.sh") == 1
+    assert fake.count("state.py", "start-round") == 1
+    assert len(fake.state["rounds"]) == 1
+
+
+def test_posts_left_by_the_limit_are_not_waited_for(tmp_path, monkeypatch, capsys):
+    """上限で残っているときは待たずに 1 度だけ流し、なお 8 なら止まる。"""
+    fake = _posts_drive(tmp_path, monkeypatch, [8, 8], [_LIMIT_LEFT])
+
+    code, out = run_main(["5"], capsys)
+
+    assert code == 1 and out["summary"].startswith("投稿待ち:")
+    assert fake.sleeps == [] and fake.count("state.py", "flush") == 1
