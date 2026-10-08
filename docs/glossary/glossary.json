@@ -2469,7 +2469,7 @@
     {
       "term": "スプリント課題",
       "context": "ndf-workflow",
-      "meaning": "スプリントに含まれる Pull Request の本文が、閉じる語で指す課題",
+      "meaning": "「スプリントを閉じる」が閉じる対象にする課題。スプリントの Pull Request の本文の閉じる語が指す課題と、--issues で渡した課題の和",
       "deprecated": [
         "ミッション課題",
         "ミッションの課題"

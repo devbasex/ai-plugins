@@ -88,6 +88,7 @@
 - 参照だけの課題を閉じること（前提 2）
 - 他のリポジトリの課題の参照（前提 4）
 - `supervise_lib/sprint.py` の `close` のステップの引数の変更（`new close --issue` の全課題を既に `--issues` で渡している）
+- 設計のクラス図（型を足さず変えない。変えるのは `sprint-close.py` と `lib/closing.py` の関数だけである）
 
 ## ドメインイベント
 
