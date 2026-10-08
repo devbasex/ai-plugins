@@ -80,7 +80,8 @@ WORKDIR_PROMPT = """## 作業ディレクトリ
 DESIGN_DIFF_NONE = DESIGN_DIFF_HEADING + "\n\n- 該当なし（設計文書が無い）"
 DESIGN_MATCH_PROMPT = """完了判定の設計との突き合わせ（quality-gates の references/design-match.md）を行う。入力は
 design-match.py の tests（確認 (a)。設計に名前の出るテストの判定）と specs（確認 (b)。変えたファイル・シンボルを参照する
-既存の確定仕様と変更履歴）の出力である。
+既存の確定仕様と変更履歴）の出力である。対象の課題は {issues} で、照合する設計文書は tests の summary の
+「設計文書 N 件（…）」に並ぶパスである（tests の items はテスト名だけで、空でも設計文書はある）。
 1. tests の「無い」（missing）名前は作るか、節に「作らなかった」と理由を並べる。「確かめられなかった」（unverified）は
    自分で確かめ、確かめられなければ節に並べる
 2. specs の文書を上から読み、変更後の振る舞いと合わない記述を同じ PR で直す。直せなければ節に並べる

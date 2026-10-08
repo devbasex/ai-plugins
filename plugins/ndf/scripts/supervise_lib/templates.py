@@ -26,7 +26,7 @@ from supervise_lib.verify_steps import merge_steps, refactor_template_arg, scope
 
 RULE_IMPL = (
     "範囲テストや全体テストが落ちたら（落ちたテストだけの再実行でも落ちた後）、変更に起因するなら fix、"
-    "環境や変更に無関係なら次のステップ（範囲テストなら pr、全体テストなら doc-lint）。"
+    "環境や変更に無関係なら次のステップ（範囲テストなら {after_tests}、全体テストなら doc-lint）。"
     "2 回直しても同じ失敗なら stop。"
 )
 RULE_CHECK = (
@@ -165,7 +165,7 @@ def plan_to_merge(a, head: list[dict]) -> dict:
         "課題": a.issue,
         "モード": a.mode,
         "作業場所": a.worktree,
-        "規則": RULE_IMPL,
+        "規則": RULE_IMPL.format(after_tests=after_tests),
         "上限": 20,
         "steps": steps,
     }

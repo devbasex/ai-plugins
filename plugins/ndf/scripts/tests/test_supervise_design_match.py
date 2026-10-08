@@ -54,6 +54,8 @@ def test_standard_plan_runs_the_design_match_between_tests_and_pr(tmp_path):
     assert st["design-match"]["type"] == "work" and st["design-match"]["inputs"] == ["design-tests", "design-specs"]
     assert st["pr"]["diff_section"] == "{state_dir}/work/design-diff.md" and st["pr"]["on_section_missing"] == "judge"
     assert "design-tests" in st["judge"]["choices"] and "pr" not in st["judge"]["choices"]
+    assert "範囲テストなら design-tests" in plan["規則"]  # judge の選択肢と規則が同じ行き先を指す
+    assert "#1" in st["design-match"]["prompt"]  # 対象の課題を worker へ渡す
     assert st["fix"]["next"] == "test-limited"
 
 
@@ -64,6 +66,7 @@ def test_other_modes_keep_the_steps_unchanged(tmp_path, mode):
     assert not {"design-tests", "design-specs", "design-match"} & set(st)
     assert st["test-limited"]["next"] == "pr" and "diff_section" not in st["pr"]
     assert st["judge"]["choices"] == ["fix", "pr", "doc-lint", "stop"]
+    assert "範囲テストなら pr" in plan["規則"]
 
 
 def test_section_replaces_the_llm_heading_and_keeps_the_footer():

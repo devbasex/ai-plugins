@@ -70,7 +70,9 @@ def design_match_steps(issues, base: str | None, nxt: str) -> list[dict]:
     設計文書が無ければ（tests が 3）`nxt` へ飛ぶ。`nxt` の pr のステップへは `design_diff_on_pr` で節を渡す。"""
     nums = " ".join(str(int(n)) for n in issues)
     ref = f"origin/{base}" if base else "origin/{base}"
-    prompt = DESIGN_MATCH_PROMPT.format(gh_parts=HERE / "lib" / "gh_parts.py", spec_copy=SPEC_COPY_PY)
+    prompt = DESIGN_MATCH_PROMPT.format(
+        issues=" ".join(f"#{n}" for n in nums.split()), gh_parts=HERE / "lib" / "gh_parts.py", spec_copy=SPEC_COPY_PY
+    )
     return [
         {"id": "design-tests", "type": "run", "stage": "完了判定", "cmd": f"{DESIGN_MATCH_PY} tests --issue {nums} --root .",
          "next": "design-specs", "on_fail": "design-specs", "skip_to": nxt},

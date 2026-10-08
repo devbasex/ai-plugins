@@ -128,6 +128,7 @@ def test_tests_with_no_names_exits_0_and_counts_zero(tmp_path):
     root = repo(tmp_path, {"issues/issue-5-design-x.md": "# 設計\n\n## テスト設計\n\n散文だけで書く。\n"})
     code, out = run(root, "tests", "--issue", "5")
     assert code == 0 and out["metrics"]["names"] == 0 and out["metrics"]["designs"] == 1
+    assert "issues/issue-5-design-x.md" in out["summary"]  # items が空でも worker が設計文書を辿れる
 
 
 def test_tests_reads_every_design_of_the_issue_including_decisions(tmp_path):

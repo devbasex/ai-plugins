@@ -246,6 +246,7 @@ def cmd_tests(a):
         it.pop("_path")
         it.pop("_names")
     status, code, summary = tests_outcome(items)
+    summary = f"設計文書 {len(designs)} 件（{', '.join(doc for doc, _ in designs)}）。{summary}"
     metrics = {
         "designs": len(designs),
         "names": len(items),
