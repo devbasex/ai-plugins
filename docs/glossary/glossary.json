@@ -3530,6 +3530,18 @@
       "context": "ndf-workflow",
       "meaning": "レビューの第 1 段。受け入れ条件・不変条件・対象範囲・テストが仕様を表すかを見る。満たさない指摘は指摘ファイルで段 `spec` を持つ",
       "source": "docs/specifications/pr-review-steps-script.md"
+    },
+    {
+      "term": "一時的な失敗",
+      "context": "ndf-cross-review",
+      "meaning": "送り直せば届く見込みのある投稿の失敗（HTTP 5xx・本文の無い応答・ネットワークの失敗）。上限とは別に見分け、投稿キューに残して後で流す（#1843）",
+      "source": ""
+    },
+    {
+      "term": "投稿待ち",
+      "context": "ndf-cross-review",
+      "meaning": "担当の結果は記録へ取り込んであり、投稿だけが投稿キューに残っている状態。結果なし（NO_RESULT）とは別である（#1843）",
+      "source": ""
     }
   ]
 }
