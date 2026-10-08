@@ -44,6 +44,7 @@ import gh_parts  # noqa: E402
 from closing import closing_issues, closing_words  # noqa: E402
 import repo  # noqa: E402
 import tool_paths  # noqa: E402
+from design_diff import DESIGN_DIFF_HEADING  # noqa: E402
 from pr_mode import needs_review, pr_target, split_stages, with_mode_line  # noqa: E402
 
 TOOL = "pr"
@@ -71,9 +72,8 @@ BODY_TEMPLATE = f"""<何を変えたかを 1〜3 文>
 
 - [x] `<実行したコマンド>` exit=0
 """
-DIFF_HEADING = "## 設計と違う点"  # standard の実装 PR の節（quality-gates の references/design-match.md）
 DIFF_TEMPLATE = (
-    f"\n{DIFF_HEADING}\n\n- <設計・既存の確定仕様・受け入れ条件と違う点を「| 設計の箇所 | 違い | 理由 |」の表で。無ければ「無し」>\n"
+    f"\n{DESIGN_DIFF_HEADING}\n\n- <設計・既存の確定仕様・受け入れ条件と違う点を「| 設計の箇所 | 違い | 理由 |」の表で。無ければ「無し」>\n"
 )
 STAT_RE = re.compile(r"(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?")
 
@@ -414,9 +414,9 @@ def upsert(a, must_exist):
         if not has:
             nxt = f"本文に {CHANGES_HEADING} の節を足して update する（無いと配布の説明文が題名になる）"
         if getattr(a, "mode", None) == "standard":  # 設計との突き合わせの結果の節（#1241 の I8）
-            diff = any(title == DIFF_HEADING[3:] for title, _ in h2_sections(body))
-            items.append({"kind": "section", "name": DIFF_HEADING, "result": "ok" if diff else "missing"})
-            nxt = nxt or (None if diff else f"本文に {DIFF_HEADING} の節を足して update する（無ければ「無し」と書く）")
+            diff = any(title == DESIGN_DIFF_HEADING[3:] for title, _ in h2_sections(body))
+            items.append({"kind": "section", "name": DESIGN_DIFF_HEADING, "result": "ok" if diff else "missing"})
+            nxt = nxt or (None if diff else f"本文に {DESIGN_DIFF_HEADING} の節を足して update する（無ければ「無し」と書く）")
     emit(result(TOOL, "ok", f"PR #{number} を{'更新した' if action == 'updated' else '作った'}: {url}", items, metrics, next=nxt))
 
 
@@ -585,7 +585,7 @@ def build_parser():
     p.set_defaults(func=cmd_report)
     p = sub.add_parser("template", help=f"PR 本文の雛形（Summary・{CHANGES_HEADING}・Test plan）を書き出す")
     p.add_argument("--out", required=True)
-    p.add_argument("--mode", help=f"standard なら {DIFF_HEADING} の節も書く")
+    p.add_argument("--mode", help=f"standard なら {DESIGN_DIFF_HEADING} の節も書く")
     p.add_argument("--force", action="store_true")
     p.set_defaults(func=cmd_template)
     return ap

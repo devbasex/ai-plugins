@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from design_diff import DESIGN_DIFF_HEADING
+
 
 WORK_SYSTEM = """あなたは NDF の worker である。1 つの作業だけを行う。
 - 人間へ問わない。別のサブエージェントを起動しない。進行を記録しない
@@ -75,7 +77,6 @@ WORKDIR_PROMPT = """## 作業ディレクトリ
 作業ディレクトリ: {path}
 作業ファイル（スクリプト・初期化の出力・プロンプト・長い出力）はここに置く（ここだけは作業場所の外でも書いてよい）。
 共有の scratchpad や /tmp の直下には置かない（並行する計画と同じ名前で上書きし合う）。"""
-DESIGN_DIFF_HEADING = "## 設計と違う点"
 DESIGN_DIFF_NONE = DESIGN_DIFF_HEADING + "\n\n- 該当なし（設計文書が無い）"
 DESIGN_MATCH_PROMPT = """完了判定の設計との突き合わせ（quality-gates の references/design-match.md）を行う。入力は
 design-match.py の tests（確認 (a)。設計に名前の出るテストの判定）と specs（確認 (b)。変えたファイル・シンボルを参照する
