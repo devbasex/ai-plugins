@@ -55,7 +55,7 @@
 | I4 | 差し戻しの状態 | 差し戻すのはラッパーの直接の子の Stop だけ。ラッパーの外と `claude -p` の子では状態を読み書きしない | — |
 | I5 | 差し戻しの状態 | 差し戻した直後の同じ区間の Stop では差し戻さない（その応答が再び承認待ちの文で終わっても） | — |
 | I6 | 差し戻しの状態 | 応答の中で `AskUserQuestion` を出した（質問シグナルファイルが在る、または質問の時刻が前の Stop より後）ときは差し戻さない | — |
-| I7 | 差し戻しの状態 | `ndf-next` のブロックを含む応答では差し戻さず、シグナルファイルの扱い（書く・書かない・背景の作業での止め）は今と同じ | — |
+| I7 | 差し戻しの状態 | `ndf-next` のブロックを含む応答と、シグナルファイル（`next.json`）が保留中（在り、`asked_after` が偽）の Stop では差し戻さず、シグナルファイルの扱い（書く・書かない・残す・背景の作業での止め）は今と同じ。`/goal` の会話でブロックを出した後に目標が未達で続いた応答はブロックを持たないが、保留中のシグナルファイルで除く | — |
 | I8 | ラッパーの記録 | 差し戻すたびに `log.jsonl` へ `prose_wait` の行を 1 行足す。本文と抜粋は書かない | 記録に失敗しても差し戻しの判定は変えない |
 | I9 | 差し戻しの状態 | 判定・状態の読み書きが例外になったら差し戻さない（Stop を止めない） | 何も出さずに通す |
 | I10 | 差し戻しの状態 | `stop_hook_active` の値で判定を変えない（`/goal` の続きの Stop でも差し戻す） | — |
@@ -96,7 +96,7 @@
 | `plugins/ndf/scripts/hook_lib/goal_skill.py`（新規） | `UserPromptSubmit` の入力の `prompt` から条件の Skill と引数を読み、案内の文を返す。入出力を持たない純粋な処理 |
 | `plugins/ndf/scripts/hook.py` | 副命令 `goal-skill` を足す。標準入力の JSON を `goal_skill` へ渡し、案内があれば `hookSpecificOutput`（`hookEventName: UserPromptSubmit`・`additionalContext`）を出す。docstring の表に 1 行足す |
 | `plugins/ndf/hooks/claude.json` | `UserPromptSubmit` の hook を 1 つ足す（Stop の `hook.py` と同じ、hook の環境の python で `hook.py goal-skill` を打つ。`timeout` 5、`continueOnError`） |
-| `plugins/ndf/scripts/relay_lib/mark.py` | `cmd_mark` に承認待ちの差し戻しを足す（`prose_wait_reason`）。ブロックの無い応答だけで判定し、差し戻すなら `{"decision": "block", "reason": …}` を出す。差し戻しの文の唯一の定義を持つ |
+| `plugins/ndf/scripts/relay_lib/mark.py` | `cmd_mark` に承認待ちの差し戻しを足す（`prose_wait_reason`）。ブロックの無い応答で、シグナルファイル（`next.json`）が保留中でないときだけ判定し、差し戻すなら `{"decision": "block", "reason": …}` を出す。差し戻しの文の唯一の定義を持つ |
 | `plugins/ndf/scripts/relay_lib/common.py` | 差し戻しの状態のファイル名の定数 `WAIT_HELD_FILE = "wait-held.json"` を足す |
 | `plugins/ndf/scripts/relay_lib/record.py` | `RelayRecord.prose_wait(section, kind)` を足す（`log.jsonl` へ `prose_wait` の行を書く唯一の場所） |
 | `plugins/ndf/scripts/relay_lib/version_dir.py` | `LIB_FILES` に `lib/wait_notice.py` を足す（複製の `relay_lib/mark.py` が import するため） |
@@ -260,7 +260,9 @@ flowchart TD
   B -- ある --> K[シグナルファイルの扱い（既存。差し戻さない）]
   B -- 無い --> I[シグナルファイルの扱い（既存の idle / skip）]
   I --> P[prose_wait_reason]
-  P --> W[前の状態を読み、今の Stop の状態を書く]
+  P --> M{next.json が保留中<br/>（在り、asked_after が偽）}
+  M -- はい --> N
+  M -- いいえ --> W[前の状態を読み、今の Stop の状態を書く]
   W --> H{前の Stop で差し戻した<br/>（同じ区間）}
   H -- はい --> N[差し戻さない]
   H -- いいえ --> X{質問シグナルファイルが在った<br/>か、質問の時刻が前の Stop より後}
@@ -335,9 +337,9 @@ stateDiagram-v2
 
 根拠: Value 6（MVV 版 2）
 
-### 決定 6: 切り替えの判定を変えないため、差し戻しは `ndf-next` のブロックを含まない応答だけで判定する
+### 決定 6: 切り替えの判定を変えないため、差し戻しは `ndf-next` のブロックを含まず、シグナルファイルが保留中でない応答だけで判定する
 
-`ndf-next` を出した応答の本文の問いの扱いは #1286 の範囲で、そこで差し戻すとシグナルファイルを書いた応答の Stop を止め、切り替えの判定（`mark`）の結果が変わる。ブロックの無い応答だけを対象にすれば、シグナルファイルの扱いの入力と結果はどの場合も今と同じになる。
+`ndf-next` を出した応答の本文の問いの扱いは #1286 の範囲で、そこで差し戻すとシグナルファイルを書いた応答の Stop を止め、切り替えの判定（`mark`）の結果が変わる。`/goal` の会話では、ブロックを出した後も目標が未達のため応答が続き（[relay.md](../plugins/ndf/skills/development-workflow/references/relay.md) の付則）、続いた応答はブロックを持たない。その応答を差し戻すと、conductor が `AskUserQuestion` を出せば `asked_after` が真になり、作業を続けて背景の処理を起こしても、切り替えが取り消される。そこで、シグナルファイル（`next.json`）が保留中（在り、`asked_after` が偽）の Stop も差し戻さない。この 2 つの条件のどちらかに当たる応答を対象から外せば、シグナルファイルの扱いの入力と結果はどの場合も今と同じになる。
 
 根拠: Value 1（MVV 版 2）
 
@@ -359,6 +361,7 @@ stateDiagram-v2
 | 受け入れ条件 10 / I6 | 質問シグナルファイルが在る Stop と、`asked` の時刻が前の Stop より後の Stop では、承認待ちの文でも何も出ない | 質問の確かめを外すよう壊す |
 | 受け入れ条件 11 / I8 | 差し戻すと `log.jsonl` に `prose_wait` の行が 1 行足され、`section` と `kind` を持ち、本文を持たない | 行を書かないよう壊す・抜粋を書くよう壊す |
 | I7 | `ndf-next` のブロックと承認待ちの文を両方含む応答で、シグナルファイルが今と同じに書かれ、差し戻しの文が出ない。背景の作業が残る `ndf-next` の応答の止めの文が今と同じ | ブロックの有無を見ずに判定するよう壊す |
+| I7 | シグナルファイルの保留中（`next.json` が在り、`asked` の時刻がその `written_at` より前）に続いた、ブロックの無い応答が「設計 PR の承認を待ちます。」で終わっても、差し戻しの文が出ず、`next.json` が残る | 保留中の確かめを外すよう壊す |
 | I8 | `log.jsonl` に書けない（作業ディレクトリが読み取り専用）とき、差し戻しの文は出る | 記録の失敗で判定を変えるよう壊す |
 | I9 | `classify_text` が例外を出すとき、何も出さずに終了コード 0 | 例外を外へ出すよう壊す |
 | 受け入れ条件 12 | `uv run --frozen --project . --all-extras pytest . -q -n 4` の終了コード 0 | — |
