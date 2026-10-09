@@ -7,6 +7,7 @@ Google 公式のリモート BigQuery MCP サーバーで Google BigQuery のデ
 - gcloud CLI にユーザーとしてログインしていること（`gcloud auth login`）
 - 対象プロジェクトで `roles/mcp.toolUser`・`roles/bigquery.jobUser`・`roles/bigquery.dataViewer` があること
 - Kiro CLI のみ、起動前に `BIGQUERY_ACCESS_TOKEN` へ `gcloud auth print-access-token` の値を入れる（1 時間で切れる）
+- 読み取りだけで使うなら、書き込みの `execute_sql` をランタイムの設定で止める（手順は README の「書き込みの `execute_sql` を止める」）。認証は利用者本人のトークンなので、本人の権限で書き換え・削除ができる
 
 ## 主要ツール
 

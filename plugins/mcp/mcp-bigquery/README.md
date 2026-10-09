@@ -54,7 +54,25 @@ Claude Code・Codex・Kiro CLI から使うためのプラグインです。
 
 3. 対象プロジェクトで BigQuery API が有効（リモート MCP サーバーも一緒に有効になる）
 
-書き込みを止めたいときは、IAM の deny ポリシーで `execute_sql` を禁じてください。
+## 書き込みの `execute_sql` を止める
+
+**読み取りだけで使うなら、導入したら最初に `execute_sql` を止めてください。** 認証は利用者本人の
+トークンなので、本人が Editor や Owner を持つプロジェクトではエージェントがテーブルを書き換え・
+削除できます。止めても `execute_sql_readonly` は使えます。
+
+| ランタイム | 設定の場所 | 書く内容 |
+|---|---|---|
+| Claude Code | `~/.claude/settings.json`（またはプロジェクトの `.claude/settings.json`） | `"permissions": {"deny": ["mcp__plugin_mcp-bigquery_bigquery__execute_sql"]}` |
+| Codex | `~/.codex/config.toml` | 下の例 |
+| Kiro CLI | `.kiro/agents/default.json` の `mcpServers.bigquery` | `"disabledTools": ["execute_sql"]`（`install.sh` を流し直したら書き直す） |
+
+```toml
+[plugins."mcp-bigquery@ai-plugins".mcp_servers.bigquery]
+disabled_tools = ["execute_sql"]
+```
+
+どれもツールの一覧から `execute_sql` が消えます（Claude Code 2.1.295・Codex 0.160.0・
+kiro-cli 2.24.1 で確認）。組織として止めるときは、IAM の deny ポリシーで `execute_sql` を禁じます。
 
 ## ランタイムごとの認証
 
