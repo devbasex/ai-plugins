@@ -3622,6 +3622,12 @@
       "context": "ndf-release",
       "meaning": "版数を変えず、既定ブランチへのマージかコミットの反映で本番へ届ける配布",
       "pending_source": "issues/issue-1870-requirements.md"
+    },
+    {
+      "term": "配布の識別子",
+      "context": "ndf-release",
+      "meaning": "1 回の本番の配布を指す値。新しい版数があり前の版数と違えば新しい版数、そうでなければ `<本番のブランチ> <配布したコミットの先頭 7 文字>`。リリース記録の `版:` の `→` の右に書き、リリース後テストの記録の `対象の版:` へ写す",
+      "pending_source": "issues/issue-1870-design.md"
     }
   ]
 }
