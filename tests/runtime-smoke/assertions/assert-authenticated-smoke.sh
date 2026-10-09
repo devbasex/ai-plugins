@@ -15,25 +15,26 @@ fi
 
 auth_ran=false
 
+# プラグインは gcloud のアクセストークンでリモートの BigQuery MCP サーバーを呼ぶ。
+# 同じトークンで list_dataset_ids を 1 回呼び、認証が通ることを確かめる。
 run_bigquery_secret_check() {
+  [ -n "${BIGQUERY_ACCESS_TOKEN:-}" ] || return 1
   [ -n "${BIGQUERY_PROJECT:-}" ] || return 1
-  [ -n "${BIGQUERY_LOCATION:-}" ] || return 1
-  [ -n "${BIGQUERY_DATASET:-}" ] || return 1
-  [ -n "${BIGQUERY_KEY_FILE:-}" ] || return 1
-  case "$BIGQUERY_KEY_FILE" in
-    /tmp/runtime-secrets/*) ;;
-    *) echo "BIGQUERY_KEY_FILE is not inside /tmp/runtime-secrets" >&2; return 1 ;;
-  esac
-  test -f "$BIGQUERY_KEY_FILE"
-  python3 - "$BIGQUERY_KEY_FILE" >> "$log" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-path = Path(sys.argv[1])
-json.loads(path.read_text(encoding="utf-8"))
-print("bigquery credential json parsed")
-PY
+  local body status
+  body="$(jq -nc --arg p "$BIGQUERY_PROJECT" \
+    '{jsonrpc: "2.0", id: 1, method: "tools/call", params: {name: "list_dataset_ids", arguments: {projectId: $p}}}')"
+  # 呼び出し元が `|| true` で包むため set -e は効かない。失敗は return 1 で返す
+  status="$(curl -sS -m 60 -X POST https://bigquery.googleapis.com/mcp \
+    -H @- \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' \
+    -d "$body" -o /tmp/bigquery-mcp-response.json -w '%{http_code}' \
+    <<<"Authorization: Bearer $BIGQUERY_ACCESS_TOKEN")" || return 1
+  if [ "$status" != 200 ] || jq -e '.result.isError == true' /tmp/bigquery-mcp-response.json >/dev/null; then
+    echo "bigquery remote MCP call failed: HTTP $status" >> "$log"
+    return 1
+  fi
+  echo "bigquery remote MCP list_dataset_ids succeeded" >> "$log"
   auth_ran=true
 }
 
