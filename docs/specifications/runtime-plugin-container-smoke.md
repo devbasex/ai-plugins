@@ -102,7 +102,7 @@ Kiro adapter は以下を実行する。
 | `assert-hook-fixtures.sh` | fixture payload で Claude / Codex / Kiro の hook script を非認証実行できることを確認する |
 | `assert-hook-definitions.sh` | Claude Code / Codex に全プラグインの hooks 定義を読ませ、読み込みの報告（警告・誤り）が 1 件でもあれば落とす（「hooks 定義のチェック」） |
 | `assert-kiro-agent.sh` | Kiro の `ndf` エージェント定義と steering をチェックする。`kiro-cli` が使える場合は `agent list` に `ndf` が現れること、`--set-default` で既定が切り替わることも確認し、確認後に既定を元へ戻す。文脈ファイルの合計文字数が予算内であることもチェックする |
-| `assert-authenticated-smoke.sh` | `--with-secrets` が有効な場合に、利用可能な runtime / BigQuery secret で認証付き smoke を実行する。BigQuery は `BIGQUERY_ACCESS_TOKEN` でリモート MCP サーバーの `list_dataset_ids`（`BIGQUERY_PROJECT`）を 1 回呼び、HTTP 200 でツールの誤りが無いことを確かめる |
+| `assert-authenticated-smoke.sh` | `--with-secrets` が有効な場合に、利用可能な runtime / BigQuery secret で認証付き smoke を実行する。BigQuery は `BIGQUERY_ACCESS_TOKEN` でリモート MCP サーバーの `list_dataset_ids`（`BIGQUERY_PROJECT`）を 1 回呼び、HTTP 200 で id 1 の `result` があり、`error` と `isError` が無いことを確かめる（応答は JSON と SSE のどちらでもよい）。2 つの入力がそろって失敗したときは、ほかの認証の成否と `--with-secrets` の値にかかわらず非 0 で終える |
 | `assert-no-host-contamination.sh` | `HOME` と project が `/tmp/runtime-*` 配下であり、repo root や host-like credential path が汚染されていないことを確認する |
 
 hook fixture は `tests/runtime-smoke/fixtures/hook-session-start.json` と `tests/runtime-smoke/fixtures/hook-stop.json` を使用する。

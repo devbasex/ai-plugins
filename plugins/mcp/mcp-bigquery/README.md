@@ -62,7 +62,7 @@ Claude Code・Codex・Kiro CLI から使うためのプラグインです。
 
 | ランタイム | 設定の場所 | 書く内容 |
 |---|---|---|
-| Claude Code | `~/.claude/settings.json`（またはプロジェクトの `.claude/settings.json`） | `"permissions": {"deny": ["mcp__plugin_mcp-bigquery_bigquery__execute_sql"]}` |
+| Claude Code | `~/.claude/settings.json`（またはプロジェクトの `.claude/settings.json`） | `"permissions": {"deny": ["mcp__plugin_mcp-bigquery_bigquery__execute_sql", "mcp__bigquery__execute_sql"]}` |
 | Codex | `~/.codex/config.toml` | 下の例 |
 | Kiro CLI | `.kiro/agents/default.json` の `mcpServers.bigquery` | `"disabledTools": ["execute_sql"]`（`install.sh` を流し直したら書き直す） |
 
@@ -70,6 +70,10 @@ Claude Code・Codex・Kiro CLI から使うためのプラグインです。
 [plugins."mcp-bigquery@ai-plugins".mcp_servers.bigquery]
 disabled_tools = ["execute_sql"]
 ```
+
+Claude Code の 2 つ目の名前は、Kiro CLI の `install.sh` がプロジェクト直下の `.mcp.json` にも
+`bigquery` を書くためです。同じプロジェクトで Claude Code を使うと、プロジェクトのサーバーとして
+`mcp__bigquery__execute_sql` の名前で読まれ、1 つ目の名前の deny では止まりません。
 
 どれもツールの一覧から `execute_sql` が消えます（Claude Code 2.1.295・Codex 0.160.0・
 kiro-cli 2.24.1 で確認）。組織として止めるときは、IAM の deny ポリシーで `execute_sql` を禁じます。
