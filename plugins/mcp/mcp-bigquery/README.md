@@ -74,12 +74,12 @@ export BIGQUERY_ACCESS_TOKEN=$(gcloud auth print-access-token)
 
 `headersHelper` と `http_headers_helper` は、使わないランタイムでは読み飛ばされます。
 
-## v3.0.0 へ更新するとき
+## リモート MCP へ移ったときの変更
 
 v2 までのローカルサーバー（`mcp-server-bigquery`）をやめ、リモートの BigQuery MCP サーバーへ
 切り替えました。**後方互換はありません。**
 
-| 項目 | v2 | v3 |
+| 項目 | 以前 | 現在 |
 |---|---|---|
 | サーバー | `uvx mcp-server-bigquery`（stdio） | `https://bigquery.googleapis.com/mcp`（HTTP） |
 | 認証 | サービスアカウントの鍵ファイル | gcloud にログインした利用者のトークン |

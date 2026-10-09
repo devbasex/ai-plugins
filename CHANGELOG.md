@@ -9,23 +9,6 @@
 **開発版（接尾辞の付いた版）は載せない。** `9.8.0` は `9.8.0-dev.1` までしか出ておらず、
 その内容は `10.0.0` で届いている。
 
-## [mcp-bigquery 3.0.0] - 2026-10-09
-
-### 変更
-
-- **mcp-bigquery は Google 公式のリモート BigQuery MCP サーバー（`https://bigquery.googleapis.com/mcp`）へ接続します。**
-  v2 のローカルサーバー（`uvx mcp-server-bigquery@latest`）は、依存する `mcp` 2 系で起動できなくなっていました
-- 認証は gcloud にログインした利用者のアクセストークンです。Claude Code は `headersHelper`、Codex は
-  `http_headers_helper` で接続のたびに取り直します。Kiro CLI は起動前に `BIGQUERY_ACCESS_TOKEN` へ入れます（1 時間で切れる）
-- ツールは `execute_sql_readonly`・`execute_sql`・`list_dataset_ids`・`list_table_ids`・`get_dataset_info`・`get_table_info` ほかに変わります
-- ndf の data-analyst エージェントが挙げる BigQuery のツール名を、プラグインの実際の名前（`mcp__plugin_mcp-bigquery_bigquery__*`）に直しました
-
-### 移行の手順
-
-- 対象プロジェクトで、利用者のアカウントに `roles/mcp.toolUser` を付与する（BigQuery のロールには含まれない）
-- `gcloud auth login` でユーザーとしてログインする。`BIGQUERY_PROJECT`・`BIGQUERY_LOCATION`・`BIGQUERY_DATASET`・`BIGQUERY_KEY_FILE` は使わない
-- Kiro CLI では `dev.kiro/install.sh` を再実行し、起動前に `export BIGQUERY_ACCESS_TOKEN=$(gcloud auth print-access-token)` を実行する
-
 ## [ndf 10.17.68] - 2026-10-08
 
 - 共通原則の承認は、既存の承認ゲートで取ります。design と requirements-design の Skill は、共通原則のために承認の工程を新しく足しません（#1857）（#1863）
