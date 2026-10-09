@@ -1,26 +1,26 @@
-# sprint-close: 本番まで出たスプリントの課題が、リリース記録が読めない・版の書き方が食い違う・リリース後テストの記録が無いために閉じられず、conductor が手で閉じている → リリース記録とリリース後テストの記録を書く側が同じ規則で書き、まとめのプランが記録を置いた後に課題を閉じる（#1870 #837 #1789 #1683）
+# sprint-close: 昇格の後のリリース記録が無い・版の書き方が食い違う・リリース後テストの記録が無いため課題が閉じず、conductor が手で閉じている → 既存の record を昇格のプランに足し、読む側が版の食い違いを受け、まとめのプランがリリース後テストを置いてから閉じる（#1870 #837 #1789 #1683）
 
 ## 目的
 
-- **何が壊れているか**: `sprint-close.py` が読むリリース記録を、昇格（promote）の形は配布の後に書かず（#837）、版数を上げない配布ではリリース記録の `版:` とリリース後テストの記録の `対象の版:` が別の値になり（#1789）、まとめのプランはリリース後テストの記録を置かないまま `--with-verification` で閉じる（#1683）
-- **誰が困るか**: スプリントを閉じる conductor。課題が `kept_open` か「配布なし」で閉じるため、プランの外で `gh issue close` を打つ手当てが 4 スプリントで続いた（m1340・m1649・m815・m1847）
-- **直すと何が成り立つか**: 配布の形（package-plugin・promote）と版数を上げるか否かによらず、まとめのプランの `close` ステップが、リリース記録とリリース後テストの記録を読んで課題を閉じる
+- **何が壊れているか**: `sprint-close.py` が読むリリース記録を、昇格（promote）の形は配布の後に書かない（#837）。版数を上げない配布では、リリース記録の `版:` とリリース後テストの記録の `対象の版:` が別の値になり、読む側が記録を選べない（#1789）。まとめのプランはリリース後テストの記録を置かないまま `--with-verification` で閉じ、課題が `kept_open` に残る（#1683）
+- **誰が困るか**: スプリントを閉じる conductor。プランの外で `gh issue close` を打つ手当てが 4 スプリントで続いた（m1340・m1649・m815・m1847）
+- **直すと何が成り立つか**: package-plugin と昇格の経路で本番まで出たスプリントの課題が、まとめのプランの `close` ステップで閉じる。3 つの問題を、それぞれ既存の関数かステップの 1〜2 か所で直す
 
 ## 適用範囲
 
-- **働く範囲**: 配布先のリポジトリでも働く。リリース記録の形・`dist-record.py`・昇格のプラン・まとめのプラン・`release` / `release-verification` / `progress-tracking` の手順はすべて配布物である
-- **プロジェクトごとに違うもの**: 本番チャネルのブランチは `.ndf/worktree.json` の `production_branch` か `--production-branch`、ベースブランチは `base_branch` か `--base`、版数は引数（`--version` / `--prod`）から受ける。`main` / `develop`・`ndf--v<版数>` のタグを既定に埋め込まない
-- **当たるモード**: `pace: fast` / `auto` のスプリント（`supervise.py new close` のまとめのプランを持つ）。`normal` はまとめのプランを持たず、`release`・`release-verification`・`retrospective` の手順（LLM）が同じ形で書いて閉じる
+- **働く範囲**: 配布先のリポジトリでも働く。`lib/dist_record.py`・`release-steps.py record`・昇格のプラン・まとめのプラン・`release` の手順はすべて配布物である
+- **プロジェクトごとに違うもの**: 昇格の `record` に渡すベースブランチと本番チャネルは、`plan_promote` が今受けている値（`a.base` と宣言か引数の `production`）をそのまま渡す。ブランチ名を既定に埋め込まない
+- **当たるモード**: まとめのプランの変更は `pace: fast` / `auto`（`supervise.py new close` を使う）。昇格のプランの変更は昇格の経路を持つすべてのモード。`release` の手順の変更は、LLM が配布する形（`normal` を含む）
 
 ## あるべき姿の根拠
 
 | 根拠 | 種類 | 何を示すか |
 | --- | --- | --- |
-| devbasex/devbase PR #212 の本文の `段階: 検証（… 承認待ちのため未実施）` が、`main` へのマージの後も更新されなかった | 実測 | 承認の前に置いた記録を、配布の後に実施後の値で置き直す段が要る（#837） |
-| devbasex/devbase PR #432 の `版: 4.0.0 → 4.0.0（… main の c427284 で配布）` と `対象の版: main c427284（…）` | 実測 | 2 つの記録を別々の規則で書くと、同じ配布でも一致しない（#1789） |
-| m1340・m1649 で conductor が本番の直後に `gh issue close` を 4 回・3 回打った記録 | 実測 | 閉じる工程がプランのステップとして通らず、受け入れ条件を確かめないまま閉じた（#1683） |
-| 依頼の「統合: 記録の形を 1 か所で決め、release-verification はその値を写す」「移動: 課題を閉じる工程を、conductor の手から本番のプランのステップへ移す」 | 利用者の指示の原文 | 書く側の契約で直し、読む側の一致規則を緩めない |
-| `release` の SKILL.md の手順 2「版数を持たないリリースもある。何が出ているかを一意に指せる値（リビジョン・ビルド番号）を記録の対象にする」 | 既存の規約 | 版数を上げない配布の `版:` の右に、配布したコミットを書いてよい |
+| 「1876はこんなに複雑にする必要ある？もっと素直にできそう」（2026-10-09、承認ゲート 1） | 利用者の指示の原文 | 新しいスクリプト・記録の形の規則・用語を足さず、既存の関数とステップを直す形にする。読む側と書く側は、直す箇所の少ない方を選ぶ |
+| devbasex/devbase PR #432 の `版: 4.0.0 → 4.0.0（… main の c427284 で配布）` と `対象の版: main c427284（…）` | 実測 | 2 つの記録は別の手順が書き、自然な書き方が違う。値の規則を 2 つの手順へ足すより、読む側が「リリース記録より後の記録」を採る方が 1 か所で済む（#1789） |
+| devbasex/devbase PR #212 の本文の `段階: 検証（… 承認待ちのため未実施）` が、`main` へのマージの後も更新されなかった | 実測 | 配布の後に実施後の値で記録を置く段が、LLM の手順に無い（#837） |
+| `plan_promote` のステップ（`promote` → `promote-approved`）に記録の書き込みが無く、まとめの `close` は昇格の経路で `--record-pr 0` を打つ（`supervise_lib/sprint.py` の `close_plan`） | 実測（コード） | 昇格の経路は、package-plugin の `record` と同じ位置のステップが欠けている（#837 のプランの経路） |
+| m1340・m1649 で conductor が本番の直後に `gh issue close` を 4 回・3 回打った記録 | 実測 | まとめのプランの `close` は、リリース後テストの記録が無いため課題を閉じられない（#1683） |
 
 要求と受け入れ条件は #1870 の本文にある（コピーは `issues/issue-1870-requirements.md`）。この文書は「どう作るか」だけを扱う。
 
@@ -30,328 +30,232 @@
 
 | コンテキスト | 何の語が 1 つの意味に決まるか |
 | --- | --- |
-| NDF のリリース（`ndf-release`） | リリース記録・リリース後テストの記録・配布の識別子・版数を上げない配布 |
-| NDF の開発ワークフロー（`ndf-workflow`） | 昇格のプラン・まとめのプラン・スプリント課題・スプリントを閉じる |
+| NDF のリリース（`ndf-release`） | リリース記録・リリース後テストの記録・版数を上げない配布 |
+| NDF の開発ワークフロー（`ndf-workflow`） | 昇格のプラン・まとめのプラン・スプリントを閉じる |
 
-関係は**公開された言語**である。リリース記録とリリース後テストの記録は、`lib/dist_record.py` が定める文書化された形（見出し・行の名前・配布の識別子の規則）でやり取りし、書く側（`release-steps.py record`・`dist-record.py`・`release` / `release-verification` の手順）と読む側（`sprint-close.py`）はこの形だけを介して独立に変わる。受け手が 3 つ以上あり、LLM が書く経路もあるため、形を先に固める。
+関係は今のまま**公開された言語**である。形は `lib/dist_record.py` が持ち、この設計は形を変えない。
 
 ### 集約
 
-| 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
-| --- | --- | --- | --- | --- |
-| リリース記録 | `lib/dist_record.py`（形）。組んで投稿するのは `release-steps.py record`（package-plugin）と `dist-record.py`（promote と手順で書く形） | `## 配布の記録` のブロック | — | 段階・配布の識別子（`版:` の `→` の右）・前の版・スプリントの PR の並び |
-| リリース後テストの記録 | `lib/dist_record.py`（形）。書くのは `release-verification` の手順 | `## リリース後テスト` から `合否:` までのブロック | 課題ごとの行 | 対象の版（配布の識別子の写し）・合否 |
-| まとめのプラン | `supervise_lib/sprint.py` の `close_plan` | プラン | ステップ | 記録の PR の参照（`{queue_pr:<名>}` か `0`） |
-| 昇格のプラン | `supervise_lib/delivery_templates.py` の `plan_promote` | プラン | ステップ | — |
-
-2 つの記録は別の集約である。リリース後テストの記録はリリース記録を ID（配布の識別子）でだけ参照し、書き換えない。
+| 集約 | 持ち主 | 変えるもの |
+| --- | --- | --- |
+| リリース記録・リリース後テストの記録 | `lib/dist_record.py`（形と読み方） | 読み方の 1 つ（`_pick_verify_block`） |
+| 昇格のプラン | `supervise_lib/delivery_templates.py` の `plan_promote` | マージの後の `record` と `judge-record` |
+| まとめのプラン | `supervise_lib/sprint.py` の `close_plan` | 記録の PR の参照と、`close` の前の `release-verify` |
 
 ### 不変条件
 
-| # | 集約 | 条件 | 破れたときの扱い |
-| --- | --- | --- | --- |
-| I1 | リリース記録 | 見出し・行の名前（`## 配布の記録`・`## リリース後テスト`・`段階: `・`版: `・`スプリント: `・`対象の版: `）の文字列を定義するのは `lib/dist_record.py` だけである | 全体テストが落ちる（ほかのスクリプトに文字列の定義があれば検出する） |
-| I2 | リリース記録 | 配布の識別子は、新しい版数があり前の版数と違えば新しい版数、そうでなければ `<本番のブランチ> <配布したコミットの先頭 7 文字>` である。決めるのは `dist_record.dist_id` だけである | 書く側が誤った値を渡せない（関数の外で組まない） |
-| I3 | リリース後テストの記録 | `対象の版:` の値（括弧の注記を除く）は、同じ PR の最後のリリース記録の配布の識別子と同じ文字列である | 一致しなければ `sprint-close.py` が全課題を `kept_open` にする（読む側を緩めない） |
-| I4 | リリース記録 | `段階: 本番` の記録を書くのは、配布（タグ・昇格の PR のマージ・手動の反映）を実施した後だけである | 配布の経路ごとに、確かめる者と証拠が違う。package-plugin は `release-steps.py record` が origin のタグ・同じタグの GitHub Release・マージ済みの PR を確かめ、無ければ書かずに 3。昇格は `dist-record.py promoted` が `head → base` のマージ済みの昇格の PR とマージコミットを確かめ、無ければ書かずに 3。手順で配布する形（手動の反映を含む）は、配布を実施したことを `release` の手順（呼び手）が確かめてから `dist-record.py write` を打つ。`write` は配布済みかを検査せず呼び手の実施確認を信頼し、CLI が検査するのは引数（識別子がコミットの形なのに `--branch` か `--sha` が無ければ 3）だけである |
-| I5 | リリース記録 | 同じ PR に、承認の前に置いた記録（`段階: 検証`）があっても、配布の後に書いた記録が最後のブロックになる | 配布の後の記録はコメントで足す（本文を書き換えない）ため、投稿の順で最後になる |
-| I6 | 昇格のプラン | リリース記録の書き込みが落ちても、配布（マージ）をやり直さない | 落ちたら `judge-record`（`record` か `stop`）へ回す |
-| I7 | まとめのプラン | 雛形と昇格の経路では、`close` ステップの `--record-pr` が `0` になるのは、スプリントの中で本番の配布を実施したプランが 1 つも無いときだけである（merge・manual の経路は #1875） | 本番を実施したプランがあれば、その PR の番号が入る |
-| I8 | まとめのプラン | `close` は `--with-verification` で打ち、リリース後テストの記録が無い課題を閉じない | `sprint-close.py` の閉じる条件 2 のとおり `kept_open` |
+| # | 条件 | 破れたときの扱い |
+| --- | --- | --- |
+| I1 | リリース後テストの記録は、版の一致するブロックがあればそれを、無ければ最後のリリース記録より後の最後のブロックを使う。どちらも無ければ使わない | `sprint-close.py` が全課題を `kept_open` にする（今の閉じる条件 2） |
+| I2 | `段階: 本番` の記録を書くのは、配布を実施した後だけである。昇格の形は、`head → base` のマージ済みの PR があるときだけ書く | 無ければ書かずに 3 で止まり、`judge-record` へ回る |
+| I3 | 記録の書き込みが落ちても、配布（タグ・マージ）をやり直さない | `judge-record` の選択は `record` と `stop` だけ（今の package-plugin と同じ） |
+| I4 | 課題を閉じるのはまとめのプランの `close` だけで、`--with-verification` で打つ | リリース後テストの記録が無い課題は `kept_open` |
 
 ### ドメインイベント
 
 | # | イベント | 発生元 | 受け手 |
 | --- | --- | --- | --- |
-| E1 | 配布の承認を得た（承認ゲート 2） | 人か MVV 判定 | 本番のリリースプラン・昇格のプラン |
-| E2 | 本番へ配布した | `release-steps.py release`・`merged-steps.py promote`・手動の反映 | E3 のステップ |
-| E3 | 実施後の値でリリース記録を置いた | `record` のステップ（package-plugin・promote）か `release` の手順 | `release-verification`（配布の識別子を写す）・`sprint-close.py` |
-| E4 | 導入の確認をした | `verify`（verify-install / verify-facts） | プラン（落ちたら止まる） |
-| E5 | リリース後テストの記録を置いた | まとめのプランの `verify` ステップ（`/ndf:release-verification`） | `sprint-close.py` |
-| E6 | スプリントの課題を閉じた | まとめのプランの `close` ステップ | 振り返り（`retro`）・棚卸し（`refine`） |
+| E1 | 本番へ配布した | `release-steps.py release`・`merged-steps.py promote`・手の反映 | `record` ステップか `release` の手順 |
+| E2 | 実施後の値でリリース記録を置いた | `release-steps.py record`（package-plugin・昇格）か `release` の手順 | `sprint-close.py` |
+| E3 | リリース後テストの記録を置いた | まとめのプランの `release-verify`（`/ndf:release-verification`） | `sprint-close.py` |
+| E4 | スプリントの課題を閉じた | まとめのプランの `close` | 振り返り（`retro`） |
 
 ### 用語
 
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
-| 配布の識別子 | 1 回の本番の配布を指す値。新しい版数があり前の版数と違えば新しい版数、そうでなければ `<本番のブランチ> <配布したコミットの先頭 7 文字>`。リリース記録の `版:` の `→` の右に書き、リリース後テストの記録の `対象の版:` へ写す | 追加（`ndf-release`） |
 | リリース後テストの記録 | （要求で足した語のまま） | 変更なし |
 | 版数を上げない配布 | （要求で足した語のまま） | 変更なし |
 
+旧設計の「配布の識別子」は使わない。用語集から外した。
+
 ## 機能一覧
 
-| # | 機能 | 誰が使うか |
-| --- | --- | --- |
-| F1 | 配布の識別子を 1 つの規則で決め、リリース記録の `版:` の右に書く | `release-steps.py record`・`dist-record.py`・`release` の手順 |
-| F2 | リリース記録の PR から配布の識別子を読み出し、`対象の版:` に写す値として出す | `release-verification` の手順 |
-| F3 | 昇格の PR のマージの後に、実施後の値でリリース記録をその PR へ書く | 昇格のプラン |
-| F4 | 手順で配布する形でも、配布を実施した後に同じ形のリリース記録を書く | `release` の手順（LLM） |
-| F5 | まとめのプランが、本番を実施したプランの PR を記録の PR として読み、リリース後テストの記録を置いてから課題を閉じる | まとめのプラン（conductor が流す） |
+| # | 機能 | 誰が使うか | 直す問題 |
+| --- | --- | --- | --- |
+| F1 | 版の一致しないリリース後テストの記録も、リリース記録より後にあれば読む | `sprint-close.py`（`parse_record` 経由） | #1789 |
+| F2 | 昇格の PR のマージの後に、その PR へリリース記録を書く | 昇格のプラン | #837（プランの経路） |
+| F3 | LLM が配布する形でも、配布の後に実施後の値でリリース記録を置く | `release` の手順 | #837（devbase PR #212） |
+| F4 | まとめのプランが、リリース後テストの記録を置いてから課題を閉じる | まとめのプラン | #1683 |
 
 ## 構成要素
 
 | 要素 | 責務 | 変更 |
 | --- | --- | --- |
-| `scripts/lib/dist_record.py` | 2 つの記録の見出し・行の名前・配布の識別子の規則（`dist_id`）・組み立て（`format_record`）・読み取り（`parse_record`）を持つ唯一の場所 | `dist_id` を足す。`format_record` と `parse_record` は変えない |
-| `scripts/release_lib/record.py` | PR の本文とコメントの読み取り・同じ記録の有無の判定・コメントの投稿 | 判定の `exists` を版数でなく配布の識別子で比べる名前にそろえる。PR の読み取りを `dist-record.py` と共有する |
-| `scripts/dist-record.py`（新規） | `dist_record` の CLI。`write`（手順で配布する形がリリース記録を書く）・`promoted`（昇格の PR のマージの後に書く）・`target`（PR から配布の識別子を出す） | 新規 |
-| `scripts/release-steps.py` の `record` | package-plugin の本番の配布の後にリリース記録を書く（タグと GitHub Release を確かめる） | 識別子を `dist_id` で決める。出力は今と同じ |
-| `scripts/supervise_lib/delivery_templates.py` の `plan_promote` | 昇格のプランを組む | normal と fast / auto の両方で、マージの後に `record`（`dist-record.py promoted`）と `judge-record` を置く |
-| `scripts/supervise_lib/release_templates.py` の `_judge_record_step` | `record` が落ちたときの判断 | 問いの文を配布の形によらない語にし、昇格のプランからも使う |
-| `scripts/supervise_lib/sprint.py` の `close_plan` | まとめのプランを組む | 記録の PR の参照を経路から決め（`record_pr_ref`）、`close` の前に `has-record`（記録の PR が `0` なら飛ばす）と `verify`（`/ndf:release-verification`）を置く |
-| `scripts/supervise_lib/queue.py` の `fill_queue_pr` | `{queue_pr:<名>}` を PR の番号へ置き換える | 前のステージの同名のプランが PR を持たない（飛ばされた）とき、同じディレクトリの同名のプランの報告のうち最も新しい PR へ落ちる |
-| `skills/release/SKILL.md` | 配布の手順 | 手順 3 と「出力物」に「配布を実施した後に、実施後の値でリリース記録を置く」段を足す。スクリプトが書く形はそのステップを指し、それ以外は `dist-record.py write` を打つ |
-| `skills/release-verification/SKILL.md` | リリース後テストの手順 | 「出力物」の `対象の版:` を `dist-record.py target` の出力から写す |
-| `skills/progress-tracking/SKILL.md` | 記録の形の表（「配布の記録」） | `版:` の右を配布の識別子とし、`対象の版:` はそれを写すと書く |
-| `skills/development-workflow/references/pace.md`・`conductor-entrypoints.md` | まとめのプランの説明・conductor が打つスクリプトの一覧 | まとめのステップの並びと `dist-record.py` を足す。課題はまとめのプランが閉じ、conductor は手で閉じないと書く |
+| `scripts/lib/dist_record.py` の `_pick_verify_block` | 使うリリース後テストの記録を選ぶ | 本番で版の一致するブロックが無いとき、`配布なし` と同じく最後のリリース記録より後の最後のブロックを採る（数行） |
+| `scripts/release-steps.py` の `record` | 本番の配布の後に、配布の PR へリリース記録を書く | `--head <ベースブランチ> --base <本番チャネル>` を受けたら、タグと GitHub Release の代わりに `head → base` のマージ済みの PR を証拠にし、その PR へ書く。`版:` の右は `<本番チャネル> <マージコミットの先頭 7 文字>`。`--version` とどちらか一方を要る |
+| `scripts/release_lib/record.py` | 組み立て・同じ記録の有無の判定・投稿 | 昇格の形の `stage_note` / `version_note` を組む関数を 1 つ足す。`exists` と `post_comment` はそのまま使う |
+| `scripts/supervise_lib/delivery_templates.py` の `plan_promote` | 昇格のプランを組む | normal は `promote-approved` の、fast / auto は `promote` の `next` を `record` にし、`record` と `judge-record` を足す |
+| `scripts/supervise_lib/release_templates.py` の `_judge_record_step` | `record` が落ちたときの判断 | 昇格のプランからも使う。問いの文の「本番のリリースの PR」を「配布の PR」にする |
+| `scripts/supervise_lib/sprint.py` の `close_plan` | まとめのプランを組む | 昇格の経路の記録の PR を `{queue_pr:promote}` にする。記録の PR が `0` に固まらないとき、`close` の前に `release-verify` の work ステップを置く |
+| `skills/release/SKILL.md` | 配布の手順 | 手順 4 の「済んだことを確かめる」の後と「出力物」に、配布の後に `段階: 本番` の記録をコメントで置く段を足す。スクリプトが書く形（package-plugin・昇格）は `record` のステップが行うと書く |
 
 ```mermaid
 graph LR
-  subgraph 形
-    DR[lib/dist_record.py]
-  end
-  subgraph 書く側
-    RS[release-steps.py record]
-    DRC[dist-record.py]
-    RSK[release の手順]
-    RV[release-verification の手順]
-  end
-  subgraph プラン
-    PP[plan_promote]
-    CP[close_plan]
-    Q[queue.py fill_queue_pr]
-  end
-  subgraph 読む側
-    SC[sprint-close.py]
-  end
-  RS --> DR
-  DRC --> DR
-  RSK --> DRC
-  RV --> DRC
-  PP --> DRC
-  CP --> RV
-  CP --> SC
-  Q --> CP
+  PP[plan_promote] --> RS[release-steps.py record]
+  RS --> RR[release_lib/record.py]
+  RR --> DR[lib/dist_record.py]
+  CP[close_plan] --> RV["/ndf:release-verification"]
+  CP --> SC[sprint-close.py]
   SC --> DR
+  RSK[release の手順] --> PRC[PR のコメント]
 ```
 
-図に含めない要素: `release_lib/record.py`（`dist-record.py` と `release-steps.py record` の内部の部品）、`_judge_record_step`（昇格のプランと本番のリリースプランの中のステップ）、`progress-tracking`・`pace.md`・`conductor-entrypoints.md`（形と流れを説明する文書で、呼び出しの辺を持たない）。
+図に含めない要素: `_judge_record_step`（昇格のプランと本番のリリースプランの中のステップ）。
 
 ## 構造
 
-```mermaid
-classDiagram
-  class dist_record {
-    DIST
-    VERIFY
-    STAGE
-    VERSION
-    SPRINT
-    VERIFY_VERSION
-    dist_id(prev_version, new_version, branch, sha) str
-    format_record(prev, new, prs, stage_note, version_note) str
-    parse_record(text) dict
-  }
-  class dist_record_cli {
-    write(pr, prs, stage_note, prev_version, new_version, branch, sha)
-    promoted(head, base, prs)
-    target(pr)
-  }
-  class release_record {
-    release_pr_text(root, n)
-    exists(text, ident, prs) bool
-    post_comment(root, n, body)
-  }
-  dist_record_cli ..> dist_record
-  dist_record_cli ..> release_record
-  release_record ..> dist_record
-```
-
 ```text
 plugins/ndf/scripts/
-├── dist-record.py            # 新規。dist_record の CLI
-├── lib/dist_record.py        # 形と規則（dist_id を足す）
-├── release_lib/record.py     # 読み取り・判定・投稿（dist-record.py と共有）
-├── release-steps.py          # record が dist_id を使う
+├── lib/dist_record.py        # _pick_verify_block の落ち先
+├── release-steps.py          # record が --head / --base を受ける
+├── release_lib/record.py     # 昇格の形の注記
 └── supervise_lib/
     ├── delivery_templates.py # plan_promote に record・judge-record
-    ├── release_templates.py  # _judge_record_step の問いを形によらない語に
-    ├── sprint.py             # close_plan に has-record・verify、record_pr_ref
-    └── queue.py              # fill_queue_pr の落ち先
+    ├── release_templates.py  # _judge_record_step の問いの文
+    └── sprint.py             # close_plan の記録の PR と release-verify
+plugins/ndf/skills/release/SKILL.md
 ```
+
+新しいファイルは無い。
 
 ## 入出力の契約
 
-### リリース記録の形
+### `_pick_verify_block`
 
-```markdown
-## 配布の記録
-
-段階: 本番（<配布の事実。承認ゲート 2 の後、<時刻> に <タグ / 昇格の PR #N> を ...>）
-版: <前の版数か なし> → <配布の識別子>（<根拠の注記>）
-スプリント: PR #<番号> / #<番号>
-```
-
-| 配布 | `版:` の行の例 | 配布の識別子 |
+| 段階 | 今 | 直した後 |
 | --- | --- | --- |
-| 版数を上げる（package-plugin） | `版: 10.17.67 → 10.17.68（タグ ndf--v10.17.68。直前はタグ ndf--v10.17.67）` | `10.17.68`（今と同じ） |
-| 版数を上げない（手順で配布） | `版: 4.0.0 → main c427284（版数は上げない。main へのマージで配布）` | `main c427284` |
-| 昇格（promote） | `版: なし → main 1a2b3c4（昇格の PR #N のマージコミット）` | `main 1a2b3c4` |
+| `配布なし` | 最後のリリース記録より後の最後のブロック | 同じ |
+| `本番` | `対象の版:` が `版:` の右と一致する最後のブロック。無ければ None | 一致する最後のブロック。無ければ最後のリリース記録より後の最後のブロック。それも無ければ None |
 
-左は前の版数で、`parse_record` は読まない。リリース後テストの記録の形は変えず、`対象の版: <配布の識別子>（<配布した時刻>）` と書く。
+#1789 の組（`版: 4.0.0 → 4.0.0` の記録の後に `対象の版: main c427284` の記録）は、2 段目で選ばれる。版の一致するブロックがある PR では今と同じものを選ぶ（移行性）。
 
-### `dist-record.py`
+### `release-steps.py record`
 
-結果は `lib/step_result.py` の 1 行の JSON。終了コードは 0 = ok / 1 = 投稿の失敗 / 2 = PR を読めない / 3 = 前提が無い（配布の証拠が無い・引数が足りない）。
+| 形 | 引数 | 証拠（無ければ書かずに 3） | 書く先 | `版:` の行 |
+| --- | --- | --- | --- | --- |
+| package-plugin（今） | `--version V --prs ...` | origin のタグ・同じタグの GitHub Release・`release/v<V> → base` のマージ済みの PR | その PR | `版: <直前の版> → V（タグ …）` |
+| 昇格（足す） | `--head <ベースブランチ> --base <本番チャネル> --prs ...` | `head → base` のマージ済みの最新の PR とマージコミット | その PR | `版: なし → <本番チャネル> <マージコミットの先頭 7 文字>（昇格の PR #N のマージコミット）` |
 
-| 副コマンド | 引数 | 何をするか | `metrics` |
-| --- | --- | --- | --- |
-| `write` | `--pr N --prs a,b --stage-note <文> [--version-note <文>] [--prev-version V] [--new-version V] [--branch B --sha S] [--root]` | `dist_id` で識別子を決め、`format_record` で組んで PR へコメントで書く。同じ識別子・同じスプリントの PR の本番の記録が最後にあれば書かない（`exists`）。識別子がコミットの形になるのに `--branch` か `--sha` が無ければ 3 | `record_pr`・`record_pr_url`・`target`・`sprint_prs` |
-| `promoted` | `--head <ベースブランチ> --base <本番のブランチ> --prs <番号...> [--root]` | `head → base` のマージ済みの最新の昇格の PR とそのマージコミットを読み、`write` と同じ形でその PR へ書く。マージ済みの PR が無ければ書かずに 3 | 同上 |
-| `target` | `--pr N [--repo O/R] [--root]` | PR の最後のリリース記録を `parse_record` で読み、配布の識別子を出す。`段階:` が `本番` でなければ 3、`配布なし` なら 0 で `target` を空にする | `target`・`stage` |
-
-`write` の `--stage-note` は `段階: 本番（…）` の括弧の中だけで、`段階:` の値（`本番`）は CLI が決める。手順で書く LLM が段階の語を誤れないようにするためである。
+結果の `metrics` は今と同じ名前（`release_pr`・`release_pr_url`・`version`・`sprint_prs`）で、昇格の形では `release_pr` に昇格の PR を入れる。プランの `pr_from: release_pr_url` が、その PR を計画の Pull Request にする。
 
 ### プランのステップ
 
-| プラン | ステップ | `cmd` / `prompt` | 遷移 |
-| --- | --- | --- | --- |
-| 昇格（normal） | `promote` → `promote-approved` → `record` | `record`: `dist-record.py promoted --head <base> --base <production> --prs {queue_prs}`、`pr_from: record_pr_url` | `promote-approved` の `next` を `record` に。`record` の `on_fail` は `judge-record`、`next` は `end` |
-| 昇格（fast / auto） | `verify` → `prepare` → `mvv` → `note` → `promote` → `record` | 同上 | `promote` の `next` を `record` に（`gate_next` は `end` のまま） |
-| まとめ | `spec` → `pr` → `ready` → マージ → `has-record` → `verify` → `close` → `retro` → `refine` | `has-record`: `sh -c 'test "$1" != 0 \|\| exit 3' _ <記録の PR>`、`skip_to: close`。`verify`: `/ndf:release-verification` に記録の PR・課題・`dist-record.py target` を渡す work | 記録の PR の参照が `0` に固まる経路では 2 つを置かない |
+| プラン | 並び | 足すステップ |
+| --- | --- | --- |
+| 昇格（normal） | `promote` → `promote-approved` → `record` | `record`: `release-steps.py record --head <base> --base <production> --prs <前のステージの PR>`、`pr_from: release_pr_url`、`on_fail: judge-record`、`next: end` |
+| 昇格（fast / auto） | `verify` → `prepare` → `mvv` → `note` → `promote` → `record` | 同上。`gate_next` は今の `end` のまま |
+| まとめ | `spec` → `pr` → `ready` → マージ → `release-verify` → `close` → `retro` → `refine` | `release-verify`: work。`/ndf:release-verification` に記録の PR の番号とスプリントの課題を渡し、リリース後テストの記録をその PR へコメントで置かせる。記録の PR が `0` になったら何もせず終える |
 
-記録の PR の参照（`record_pr_ref`）は経路から決める。
+`--prs` には、同じ pace の雛形の本番のプランが `record` に渡す値（auto は `{queue_pr:check}`、それ以外は `{queue_prs}`）を渡す。
 
-| 経路 | 参照 |
-| --- | --- |
-| 雛形（`release.form`） | `{queue_pr:release-prod}` |
-| 昇格（promote） | `{queue_pr:promote}` |
-| それ以外（merge・manual・none） | `0`（今と同じ。merge と manual は #1875） |
+記録の PR の参照は経路から決める。
+
+| 経路 | 参照 | `release-verify` |
+| --- | --- | --- |
+| 雛形（`release.form`） | `{queue_pr:release-prod}`（今と同じ） | 置く |
+| 昇格（promote） | `{queue_pr:promote}`（`0` から変える） | 置く |
+| それ以外（merge・manual・none） | `0`（今と同じ。merge と manual は #1875） | 置かない |
 
 ## 処理の流れ
 
 ```mermaid
 sequenceDiagram
-  participant S as スプリントの queue
   participant P as 昇格 / 本番のプラン
+  participant R as release-steps.py record
   participant C as まとめのプラン
-  participant D as dist-record.py
   participant V as release-verification
   participant X as sprint-close.py
-  S->>P: 本番（承認ゲート 2 の後にマージ / タグ）
-  P->>D: record（promoted / release-steps record）
-  D-->>P: record_pr_url（pr_from）
-  C->>C: fill_queue_pr（自分の本番が飛んだら sprint の本番の報告）
-  C->>C: has-record（0 なら close へ）
-  C->>V: verify（記録の PR）
-  V->>D: target --pr
-  D-->>V: 配布の識別子
-  V->>V: 対象の版: <識別子> のブロックを PR へ
+  P->>P: 承認ゲート 2 の後にマージ / タグ
+  P->>R: record
+  R-->>P: release_pr_url（pr_from）
+  C->>C: fill_queue_pr（{queue_pr:promote} / {queue_pr:release-prod}）
+  C->>V: release-verify（記録の PR）
+  V->>V: リリース後テストの記録を PR へ
   C->>X: close --record-pr N --with-verification
   X-->>C: closed / kept_open
 ```
-
-`fill_queue_pr` の落ち先は、前のステージに同名のプランがあり PR を持たないときにも働く。まとめの queue の自分の「本番」が実行条件で飛ばされても、同じディレクトリにある `new sprint` の「本番」の報告の PR を読む。報告が複数あれば、報告のファイルの更新時刻が最も新しいものを採る。
 
 ## 非機能の実現方式
 
 | 大項目 | 実現方式 |
 | --- | --- |
-| 運用・保守性 | 文字列と規則は `lib/dist_record.py` だけに置き、書く側は `format_record` と `dist_id`、手順は `dist-record.py` を通す。形を変えるときに直すモジュールは 1 つ |
-| 移行性 | `format_record` と `parse_record` を変えない。版数を上げる配布の識別子は今の `版:` の右と同じ値で、改名の前の `スプリント:` の見出しも `legacy_names` で読み続ける |
-| システム環境 | 本番のブランチは `plan_promote` が受ける `production`（宣言か引数）を `--base` で渡し、`dist-record.py write` の `--branch` も呼び手が渡す。既定のブランチ名を持たない |
+| 移行性 | `format_record` と記録の形を変えない。`_pick_verify_block` は版の一致を先に見るため、今読めている記録は同じ結果になる |
+| システム環境 | 昇格の `record` のブランチは `plan_promote` が今 `merged-steps.py promote` へ渡している値と同じものを渡す |
 
 ## 決定の記録
 
-### 決定 1: 形の持ち主を 1 つに保つため、定数と規則を `lib/dist_record.py` に置いたままにする
+### 決定 1: 版の食い違い（#1789）は、読む側の `_pick_verify_block` がリリース記録より後の記録へ落ちて受ける
 
-読む側の `sprint-close.py` と書く側の `release_lib/` の両方が使うため、共通の層（`lib/`）に置く。`release_lib/record.py` へ移すと、読む側がリリースの書き手のパッケージに依存し、`release-verification` の手順から呼ぶ CLI もリリースの書き手を通ることになる。依頼の「`release_lib/record.py` の 1 か所」は、両ファイルの docstring のとおり形の持ち主を指すと読む（要求の前提 1）。
+直す箇所が 1 関数の数行で済み、2 つの記録を書く手順（`release`・`release-verification`）と記録の形を変えない。「リリース記録より後に置いたリリース後テストの記録」はその配布の確かめであり、`配布なし` の段階で今使っている規則と同じである。版の一致するブロックを先に見るため、今読めている記録の結果は変わらない。
 
-採らなかったのは `release_lib/record.py` へ移す形で、依存の向きが読む側から書く側へ逆になる。
+採らなかったのは旧設計の、配布の識別子の規則を決め（`dist_id`）、`対象の版:` をリリース記録から写す CLI（`dist-record.py target`）を足して 2 つの手順を揃える形である。新しいスクリプト・用語・2 つの Skill の文書の変更が要り、利用者の指摘（素直な形）に反する。依頼の「読む側を緩めるのは補助」より、利用者の 2026-10-09 の指摘を優先した（要求の前提 1）。
 
-根拠: Value 6（MVV 版 2）
+根拠: Value 6（MVV 版 2）・利用者の指示の原文
 
-### 決定 2: 版数を上げない配布を一意に指すため、配布の識別子を `<本番のブランチ> <コミットの先頭 7 文字>` にする
+### 決定 2: 昇格の後の記録（#837 のプランの経路）は、既存の `release-steps.py record` に昇格の形を足し、`plan_promote` のマージの後に置く
 
-版数を上げない配布では、版数は前の配布と同じで、同じ PR に別の配布の記録が並んだときに区別できない。コミットは利用者が実際に導入したものを指し、`release-verification` が確かめる対象とも一致する。ブランチを添えるのは、同じコミットを検証のチャネルと本番チャネルへ出したときに分けるためである。版数を上げる配布は今の値（版数）のままにし、直す前の記録と読み方を変えない（受け入れ条件 3）。
+package-plugin の `record` と同じステップ・同じ失敗の扱い（`judge-record` の `record` か `stop`）・同じ `pr_from` をそのまま使う。新しいスクリプトは作らない。`merged-steps.py promote` の中で書くと、書き込みの失敗がマージのステップの失敗になる。そのステップをやり直すと、開いた昇格の PR が無いため「昇格する変更が無い」で ok に終わり、記録を書かないまま進む（`merged_lib/merge.py` の `_find_or_create_promote_pr`）。そのため別のステップにする。まとめのプランは昇格の経路で記録の PR を `{queue_pr:promote}` にし、「本番まで出たのに配布なしで閉じる」を無くす。
 
-採らなかったのは、版数を上げない配布でも版数を書く形である。両方が写すなら一致はするが、同じ版数の前の配布のリリース後テストの記録を誤って選びうる。
-
-根拠: Value 5 / Value 6（MVV 版 2）
-
-### 決定 3: 2 つの記録の値を揃えるため、`対象の版:` はリリース記録から `dist-record.py target` で写す
-
-書き手が 2 つの手順で同じ規則を別々に当てると、#1789 のように自然な書き方が食い違う。写す形なら、規則を持つのはリリース記録を組む側の `dist_id` 1 つだけになる。`target` は `parse_record` の結果をそのまま出すため、読む側と同じ値になる。
-
-採らなかったのは、`_pick_verify_block` が一致しないときに後ろのブロックを採る形（読む側の緩和）で、要求が含まないとしている。
+採らなかったのは、旧設計の新しい CLI（`dist-record.py promoted` / `write`）と、`merged-steps.py promote` がマージの後に続けて書く形である。
 
 根拠: Value 4 / Value 6（MVV 版 2）
 
-### 決定 4: 昇格の形でも配布の後の記録をプランが書くため、`record` を昇格のプランのマージの後に置き、`judge-record` を共有する
+### 決定 3: LLM が配布する形（#837 の devbase PR #212）は、`release` の手順に「配布の後に記録をコメントで置く」段を足すだけにする
 
-package-plugin の `record` と同じ位置（配布の直後）と同じ失敗の扱い（`record` のやり直しか停止）にそろえる。`merged-steps.py promote` の中で書くと、書き込みの失敗がマージのステップの失敗になり、やり直しがマージへ戻る。`judge-record` は `release_templates.py` の 1 つを両方のプランが使う。
+#837 の案 A を採る。読む側は最後のリリース記録を読むため、承認の前に本文へ置いた `段階: 検証` の記録は残してよく、配布の後にコメントで足した記録が最後になる。スクリプトが書く形（package-plugin・昇格）は `record` のステップが行うと手順に書き、LLM は書かない。
 
-採らなかったのは、`merged-steps.py promote` がマージの後に続けて書く形である。
+採らなかったのは、旧設計の LLM が `dist-record.py write` を打つ形（新しい CLI が要る）と、承認の前に記録を置かない形（#837 の案 B。Draft の時点で本文を用意する運用を変える）である。
 
-根拠: Value 4 / Value 6（MVV 版 2）
+根拠: Value 1 / Value 4（MVV 版 2）
 
-### 決定 5: 閉じる工程を 1 か所に保つため、課題を閉じるステップは本番のプランに置かず、まとめのプランの入力を直す
+### 決定 4: 閉じる工程（#1683）は今のまとめのプランの `close` に残し、その前に `/ndf:release-verification` の work ステップを 1 つ置く
 
-まとめのプランは既に `close`（`--with-verification`）を持ち、最終の検査で直した変更の配布もその前に流れる。本番のプランに閉じるステップを足すと、閉じる場所が 2 つになり、最終の検査の前に閉じる経路ができる。まとめのプランが読む記録の PR を、自分の「本番」が飛ばされたときにスプリントの「本番」の報告から得るように `fill_queue_pr` の落ち先を広げ、「本番まで出たのに配布なしで閉じる」（#837 のプランの経路）を無くす。
+まとめのプランは既に `close`（`--with-verification`）を持つ。欠けているのはリリース後テストの記録だけなので、それを置くステップを 1 つ足す。受け入れ条件の確かめは判断を伴うため work にする。記録の PR が実行時に `0` になったとき（最終の検査で変更が無く本番を飛ばした）は、ステップの指示で何もせず終え、飛ばすための run ステップ（旧設計の `has-record`）を足さない。実施できない条件は `release-verification` の規則どおり保留で書き、その課題は `kept_open` になる。
 
-採らなかったのは、本番のプラン（`release-prod`・`promote`）の最後に `close` を置く形と、`new close` に記録の PR の番号を conductor が渡す形（プランの外の手当てが残る）である。
-
-根拠: Value 4 / Value 6（MVV 版 2）
-
-### 決定 6: リリース後テストの記録をプランの中で置くため、まとめのプランの `close` の前に `/ndf:release-verification` の work ステップを置く
-
-受け入れ条件の確かめは判断を伴うため LLM の work ステップにし、記録の PR が無い（`0`）ときに飛ばすのは run ステップの終了コード（`skip_to`）で決める。実施できない条件は `release-verification` の規則どおり保留で書き、`sprint-close.py` がその課題を `kept_open` にする。プランを止めて人か conductor が置くのを待つ形では、待つ間に conductor が手で閉じる経路が残る。
-
-採らなかったのは、プランを止めて記録を待つ形である。
+採らなかったのは、本番のプランに `close` を置く形（閉じる場所が 2 つになる）、プランを止めて人か conductor が記録を置くのを待つ形（待つ間に手で閉じる経路が残る）、旧設計の `fill_queue_pr` の落ち先を広げる形（下の「旧設計から外したもの」）である。
 
 根拠: Value 2 / Value 4（MVV 版 2）
 
-### 決定 7: 手順で配布する形の LLM が形を誤らないため、`release` の手順は `dist-record.py write` を打つ
+## 旧設計から外したもの
 
-#837 の案 A（配布の後に実施後の値で記録を置く段を足す）を採り、承認の前に本文へ置く記録は残してよい。配布の後の記録をコメントで足すと、最後のブロックが配布の後の記録になる（I5）。段階の語と識別子の規則は CLI が決め、LLM は配布の事実の注記とブランチ・コミットを渡すだけにする。
-
-採らなかったのは、承認の前に記録を置かない形（#837 の案 B）で、Draft の段階で本文を用意する運用を変えることになる。
-
-根拠: Value 1 / Value 4（MVV 版 2）
+| 旧設計にあったもの | 外した理由 |
+| --- | --- |
+| `dist-record.py`（`write` / `promoted` / `target`） | 昇格の記録は既存の `record` に引数を足せば書ける（決定 2）。`target` は決定 1 で要らない |
+| 用語「配布の識別子」と `dist_id` の規則 | `版:` の右の値が 2 つの記録で揃わなくても、決定 1 で読める。用語集から外した |
+| 見出しと行の名前の定数の集約（旧の受け入れ条件 1・不変条件 I1） | 今すでに `lib/dist_record.py` だけが定義している（要求の前提 2） |
+| `release-verification`・`progress-tracking`・`pace.md`・`conductor-entrypoints.md` の文書の変更 | 記録の形も conductor が打つスクリプトも変わらない |
+| まとめのプランの `has-record` ステップ | `release-verify` の指示で `0` を受ける（決定 4） |
+| `fill_queue_pr` の落ち先の拡張（まとめの queue の本番が飛ばされたとき、`new sprint` の本番の報告の PR へ落ちる） | 雛形の経路も今は同じ場面で `--record-pr 0` になっており、昇格だけの問題ではない。`{queue_pr:check}` など他の参照にも効くため、この課題では変えない（「未確認のまま残ること」） |
 
 ## テスト設計
 
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
-| 1・I1 | `plugins/ndf/scripts` の `.py`（`lib/dist_record.py` を除く）に、6 つの見出し・行の名前の文字列の定義（代入・引数の既定値）が無い | ほかのスクリプトに `"対象の版: "` などを定義すると落ちる |
-| I2 | `dist_id` が版数を上げる・同じ版数・版数なしの 3 つで、版数・`<ブランチ> <7 文字>`・`<ブランチ> <7 文字>` を返す | 同じ版数で版数を返すように壊すと落ちる |
-| 2・12（#1789） | 版数を上げない配布の記録を `format_record` + `dist_id` で組み、`target` の値を `対象の版:` へ写したブロックを並べると、`parse_record` の `verify_block` がそのブロックになる | `dist_id` か `target` が別の値を返すと落ちる |
-| 3 | package-plugin の `record` が組む `版: 10.17.67 → 10.17.68` と `対象の版: 10.17.68（…）` で、`parse_record` の結果が直す前と同じ | 版数を上げる配布でコミットの形を返すと落ちる |
-| 4・I3 | `dist-record.py target` の `metrics.target` を `対象の版:` へそのまま書いたブロックが、2 の規則で選ばれる | `target` が括弧の注記を残すと落ちる |
-| 5・12（#837） | `plan_promote` の normal と fast / auto の JSON に、マージの後の `record`（`dist-record.py promoted`・`pr_from`）があり、`promoted` が書いた記録を `parse_record` が `本番` で始まる段階として読む | `record` を外す・`promote` の `next` を `end` に戻すと落ちる |
-| 6・I6 | 昇格のプランの `record` の `on_fail` が `judge-record` で、その `choices` が `record` と `stop` だけ | `choices` に `promote` か `fix` を足すと落ちる |
-| 7・12・I7 | 昇格の経路のまとめの `close` の `--record-pr` が `{queue_pr:promote}` で、まとめの「本番」が飛ばされても同じディレクトリのスプリントの「本番」の報告の PR に置き換わる。どの報告にも PR が無いときだけ `0` | 落ち先を外すと、飛ばされたときに `0` になって落ちる |
-| 8・12（#837） | 本文に `段階: 検証（… 承認待ちのため未実施）` を置いた PR に、`promoted` か `record` がコメントで記録を足すと、`sprint-close.py` は `本番` として読む | 書き込みを本文の書き換えにする・最初のブロックを読むように壊すと落ちる |
-| 9 | `release` の手順の「配布を実施した後に記録を置く」段（文言は照合しない。`dist-record.py write` の引数の形を手順の例どおりに 1 度打って 0 で終わることを実装の検証で確かめる） | — |
-| 10・12（#1683） | package-plugin と promote の両方で、`new close` が書いたまとめのプランの JSON に `has-record` → `verify` → `close`（`--with-verification`）がこの順で並ぶ | `verify` を `close` の後へ置くと落ちる |
-| 11・I8 | リリース後テストの記録が無い PR で `sprint-close.py --with-verification` が全課題を `kept_open` にする（今のテストを残す） | 閉じる条件 2 を外すと落ちる |
-| I4 | `promoted` はマージ済みの昇格の PR が無ければ書かずに 3、`write` は識別子がコミットの形なのに `--branch` か `--sha` が無ければ 3（配布済みかは検査しない） | 証拠が無いのに書くと落ちる |
-| I5 | 同じ記録が最後にあれば `write` はコメントを足さない（`exists`）。別の記録が後ろにあれば足す | 毎回書く・最初の記録と比べると落ちる |
-| 13 | `uv run --frozen --project . --all-extras pytest plugins/ndf/scripts/tests -q -n 4` が通る | — |
+| 1・I1（#1789） | devbase PR #432 の形の組（`版: 4.0.0 → 4.0.0` の記録の後に `対象の版: main c427284` の記録）で、`parse_record` の `verify_block` がその記録になる。記録より前にだけ記録がある PR では None | 落ち先を外す・記録より前のブロックも採るように壊すと落ちる |
+| 7・I1 | 版の一致するブロックと、その後ろに別の版のブロックがある PR で、一致する方を選ぶ。`版: 10.17.67 → 10.17.68` の組で結果が直す前と同じ | 落ち先を先に見るように壊すと落ちる |
+| 2・I2 | `record --head --base` がマージ済みの PR があればその PR へ書き、無ければ書かずに 3。書いた記録を `parse_record` が `本番` で読む | 証拠が無いのに書くと落ちる |
+| 2・I3 | `plan_promote` の normal と fast / auto の JSON に、マージの後の `record`（`pr_from: release_pr_url`・`on_fail: judge-record`）があり、`judge-record` の `choices` が `record` と `stop` だけ | `record` を外す・`choices` に `promote` を足すと落ちる |
+| 3 | 昇格の経路の `new close` が書くまとめのプランの `close` が `--record-pr {queue_pr:promote}`、merge・manual・none は `0` | 昇格を `0` に戻すと落ちる |
+| 4（#837） | 本文に `段階: 検証（… 承認待ちのため未実施）` を置いた PR に `record` がコメントで記録を足すと、`sprint-close.py` は `本番` として読む | 本文を書き換える・最初のブロックを読むように壊すと落ちる |
+| 5 | `release` の手順の段（文言は照合しない。実装の検証で手順のとおりに 1 度置き、`sprint-close.py --dry-run` が `本番` として読むことを確かめる） | — |
+| 6・I4（#1683） | 雛形と昇格の経路のまとめのプランの JSON に、マージ → `release-verify` → `close`（`--with-verification`）がこの順で並び、`0` に固まる経路には `release-verify` が無い | `release-verify` を `close` の後へ置くと落ちる |
+| 7 | `uv run --frozen --project . --all-extras pytest plugins/ndf/scripts/tests -q -n 4` が通る | — |
 
 ## 設計の結果
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #1870 | 実装する | — | `plugins/ndf/scripts/lib/dist_record.py`、`plugins/ndf/scripts/release_lib/record.py`、`plugins/ndf/scripts/dist-record.py`、`plugins/ndf/scripts/release-steps.py`、`plugins/ndf/scripts/supervise_lib/`、`plugins/ndf/scripts/tests/`、`plugins/ndf/skills/release/`、`plugins/ndf/skills/release-verification/`、`plugins/ndf/skills/progress-tracking/`、`plugins/ndf/skills/development-workflow/references/` |
+| #1870 | 実装する | — | `plugins/ndf/scripts/lib/dist_record.py`、`plugins/ndf/scripts/release-steps.py`、`plugins/ndf/scripts/release_lib/record.py`、`plugins/ndf/scripts/supervise_lib/delivery_templates.py`、`plugins/ndf/scripts/supervise_lib/release_templates.py`、`plugins/ndf/scripts/supervise_lib/sprint.py`、`plugins/ndf/scripts/tests/`、`plugins/ndf/skills/release/SKILL.md` |
 
-子 issue（#837・#1789・#1683）はこの表に載せない。表の行はスプリント PR の closing keywords になり、子は閉じないためである（要求の前提 5）。
+子 issue（#837・#1789・#1683）はこの表に載せない。表の行はスプリント PR の closing keywords になり、子は閉じないためである（要求の前提 4）。
 
 ## 未確認のまま残ること
 
 | 項目 | 内容 |
 | --- | --- |
-| merge・manual の経路のまとめ | ベースブランチへのマージで本番へ届く経路と手で届ける経路では、リリース記録を置く PR をプランが知らず、`close` は今と同じ `--record-pr 0`（閉じる条件を見ない）で打つ。範囲外の課題として #1875 に起票した |
-| `fill_queue_pr` の落ち先を広げる影響 | `{queue_pr:check}`（auto のスプリントと手動反映の本番系の承認ゲート 2）も、前のステージの同名のプランが PR を持たないときに同じディレクトリの報告へ落ちる。同じスプリントのディレクトリの検査の PR を指すため誤りにならないと見ているが、実装で既存のテストを通して確かめる |
-| `verify` の work ステップの所要 | まとめのプランの上限（12）とステップの `timeout` に収まるかは、最初に流すスプリントで実測する |
-| 手動確認 | 次に promote の形か版数を上げない配布で本番まで出た devbasex/devbase のスプリントで、まとめの `close` が課題を `closed` にし、conductor が手で閉じていないことを、キューの記録と課題を閉じた主体で確かめる |
+| merge・manual の経路のまとめ | リリース記録を置く PR をプランが知らず、`close` は今と同じ `--record-pr 0` で打つ。範囲外の課題 #1875 にある |
+| まとめの queue の本番が飛ばされたとき | 最終の検査で変更が無いと、まとめの queue の `release-prod` / `promote` が飛ばされ、記録の PR が `0` になる。`new sprint` の本番で出た配布のリリース後テストは見ずに閉じる（雛形の経路の今の振る舞いと同じ）。困る例が出たら別の課題で `fill_queue_pr` の落ち先を考える |
+| `release-verify` の所要 | まとめのプランの上限（12）とステップの `timeout` に収まるかは、最初に流すスプリントで実測する |
+| 手動確認 | 次に昇格の形か版数を上げない配布で本番まで出た devbasex/devbase のスプリントで、まとめの `close` が課題を `closed` にし、conductor が手で閉じていないことを、キューの記録と課題を閉じた主体で確かめる |
