@@ -1,7 +1,7 @@
 {
   "name": "mcp-bigquery",
-  "version": "2.0.0",
-  "description": "BigQuery MCP server for data analysis and SQL queries",
+  "version": "3.0.0",
+  "description": "Google official remote BigQuery MCP server for data analysis and SQL queries",
   "author": {
     "name": "takemi-ohama",
     "url": "https://github.com/takemi-ohama"

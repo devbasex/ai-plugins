@@ -98,7 +98,7 @@ Kiro adapter は以下を実行する。
 | assertion | 内容 |
 |---|---|
 | `assert-plugin-files.sh` | runtime 側の install 先に plugin manifest、Skill、hook、agent / prompt / MCP runtime link が存在することを確認する |
-| `assert-mcp-config.sh` | `mcp-bigquery` config に `BIGQUERY_PROJECT`、`BIGQUERY_LOCATION`、`BIGQUERY_DATASET`、`BIGQUERY_KEY_FILE` の placeholder があり、secret 実値や `/tmp/runtime-secrets` が混入していないことを確認する |
+| `assert-mcp-config.sh` | `mcp-bigquery` config がリモートの `https://bigquery.googleapis.com/mcp` を指し、`headersHelper`（Claude Code）と `http_headers_helper`（Codex）が `gcloud auth print-access-token` でトークンを取り、`headers` に `Bearer ${BIGQUERY_ACCESS_TOKEN}`（Kiro CLI）の placeholder があり、トークンの実値や `/tmp/runtime-secrets` が混入していないことを確認する |
 | `assert-hook-fixtures.sh` | fixture payload で Claude / Codex / Kiro の hook script を非認証実行できることを確認する |
 | `assert-hook-definitions.sh` | Claude Code / Codex に全プラグインの hooks 定義を読ませ、読み込みの報告（警告・誤り）が 1 件でもあれば落とす（「hooks 定義のチェック」） |
 | `assert-kiro-agent.sh` | Kiro の `ndf` エージェント定義と steering をチェックする。`kiro-cli` が使える場合は `agent list` に `ndf` が現れること、`--set-default` で既定が切り替わることも確認し、確認後に既定を元へ戻す。文脈ファイルの合計文字数が予算内であることもチェックする |
