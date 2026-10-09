@@ -1,31 +1,32 @@
 # BigQuery MCP ガイド
 
-BigQuery MCPサーバーでGoogle BigQueryのデータ分析を行います。
+Google 公式のリモート BigQuery MCP サーバーで Google BigQuery のデータ分析を行います。
 
-## 環境変数（必須）
+## 認証（必須）
 
-| 変数 | 説明 |
-|------|------|
-| `BIGQUERY_PROJECT` | GCPプロジェクトID |
-| `BIGQUERY_LOCATION` | データセットのロケーション（例: `asia-northeast1`） |
-| `BIGQUERY_DATASET` | デフォルトデータセット名 |
-| `BIGQUERY_KEY_FILE` | サービスアカウントキーファイルのパス |
+- gcloud CLI にユーザーとしてログインしていること（`gcloud auth login`）
+- 対象プロジェクトで `roles/mcp.toolUser`・`roles/bigquery.jobUser`・`roles/bigquery.dataViewer` があること
+- Kiro CLI のみ、起動前に `BIGQUERY_ACCESS_TOKEN` へ `gcloud auth print-access-token` の値を入れる（1 時間で切れる）
+- 読み取りだけで使うなら、書き込みの `execute_sql` をランタイムの設定で止める（手順は README の「書き込みの `execute_sql` を止める」）。認証は利用者本人のトークンなので、本人の権限で書き換え・削除ができる
 
 ## 主要ツール
 
-- `execute-query` - SQLクエリを実行し結果を取得
-- `list-tables` - データセット内のテーブル一覧を取得
-- `describe-table` - テーブルのスキーマ情報を取得
+- `execute_sql_readonly` - 読み取り専用の SQL を実行し結果を取得（結果は 3,000 行まで、3 分で打ち切り）
+- `execute_sql` - 書き込みを含む SQL を実行
+- `list_dataset_ids` / `list_table_ids` - データセット・テーブルの一覧を取得
+- `get_dataset_info` / `get_table_info` - データセット・テーブルの情報（スキーマ）を取得
+
+どのツールも `projectId` を引数で受け取ります。SQL のテーブル名は `project.dataset.table` の完全修飾名で書きます。
 
 ## 使用例
 
 ```
 # テーブル一覧の取得
-mcp__plugin_mcp-bigquery_bigquery__list-tables
+mcp__plugin_mcp-bigquery_bigquery__list_table_ids projectId="my-project" datasetId="sales"
 
 # テーブルのスキーマ確認
-mcp__plugin_mcp-bigquery_bigquery__describe-table table_name="users"
+mcp__plugin_mcp-bigquery_bigquery__get_table_info projectId="my-project" datasetId="sales" tableId="users"
 
 # SQLクエリ実行
-mcp__plugin_mcp-bigquery_bigquery__execute-query query="SELECT * FROM users LIMIT 10"
+mcp__plugin_mcp-bigquery_bigquery__execute_sql_readonly projectId="my-project" query="SELECT * FROM `my-project.sales.users` LIMIT 10"
 ```

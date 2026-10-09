@@ -61,7 +61,7 @@
     {
       "name": "mcp-bigquery",
       "source": "./plugins/mcp/mcp-bigquery",
-      "description": "BigQuery MCP server for data analysis and SQL queries",
+      "description": "Google official remote BigQuery MCP server for data analysis and SQL queries",
       "policy": {
         "installation": "AVAILABLE",
         "authentication": "ON_INSTALL"

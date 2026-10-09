@@ -1,4 +1,2 @@
+BIGQUERY_ACCESS_TOKEN=<gcloud auth print-access-token の値>
 BIGQUERY_PROJECT=example-project
-BIGQUERY_LOCATION=US
-BIGQUERY_DATASET=example_dataset
-BIGQUERY_KEY_FILE=/tmp/runtime-secrets/bigquery-key-file
