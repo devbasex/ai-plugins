@@ -3348,9 +3348,9 @@
       "source": "docs/specifications/ndf-release-approved-commit.md"
     },
     {
-      "term": "更新の節",
+      "term": "更新情報の節",
       "context": "ndf-release",
-      "meaning": "plugin の README の `## v<版> へ更新するとき` の見出しから次の `## ` までの節。notes は版の節への案内と移行の手順の件数だけを書く",
+      "meaning": "plugin の README の `## 更新情報` の節。版を名乗らず、CHANGELOG.md の版の節を参照する固定の案内だけを持つ。配布の手順（bump・changelog・notes）は書かない",
       "pending_source": "issues/issue-1867-design.md"
     },
     {
