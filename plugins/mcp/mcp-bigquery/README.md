@@ -72,6 +72,15 @@ Kiro CLI では、起動の前に次を実行してください。1 時間たっ
 export BIGQUERY_ACCESS_TOKEN=$(gcloud auth print-access-token)
 ```
 
+Codex は `http_headers_helper` を、`HOME`・`PATH` など限られた環境変数だけを渡して実行します。
+`CLOUDSDK_CONFIG` で gcloud の設定の場所を変えていると、helper の中の gcloud は既定の場所
+（`~/.config/gcloud`）を見てしまい、`You do not currently have an active account selected.` で
+失敗して接続できません。その場合は、既定の場所から設定が見えるようにします。
+
+```bash
+ln -s "$CLOUDSDK_CONFIG" ~/.config/gcloud   # ~/.config/gcloud がまだ無いとき
+```
+
 `headersHelper` と `http_headers_helper` は、使わないランタイムでは読み飛ばされます。
 
 ## リモート MCP へ移ったときの変更
