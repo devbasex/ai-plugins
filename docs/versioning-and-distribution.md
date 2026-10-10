@@ -2,7 +2,7 @@
 
 NDF プラグインの版数の付け方と、正式版・開発版のリリースの手順・実測・一覧を持つ。**この主題の正本である。**
 判断の基準（何を選ぶか）は [AGENTS.md](../AGENTS.md) の「版と配布の方針」にあり、この文書は
-どう動くかとどう確かめるかを扱う。リリース済み版ごとの判断は [ndf-version-decisions.md](ndf-version-decisions.md) にある。
+どう動くかとどう確かめるかを扱う。リリース済み版ごとの判断は確定仕様（[specifications/](specifications/)）にある（v10.17.51 までは [ndf-version-decisions.md](ndf-version-decisions.md)）。
 
 ## チャネルと ref
 
@@ -325,17 +325,17 @@ CHANGELOG.md を参照する固定の「`## 更新情報`」の節だけを持�
 2. 変更内容をドキュメント化
 3. `CHANGELOG.md` の先頭へその版の節を足す。書式は Keep a Changelog に従い、変更点を
    `追加` / `変更` / `修正` / `削除` へ分類して 1〜2 行で書く。判断の理由は
-   `docs/ndf-version-decisions.md` へ置く
+   確定仕様（`docs/specifications/`）が持つ
 4. Skill の数が増減した場合は、`README.md` と `plugins/ndf/README.md` に書かれた数を書き直す
 5. `python3 scripts/check-doc-staleness.py --root .` を実行し、説明文書に残った古い版数を
    出力の行番号のとおりに直す
 6. `python3 plugins/ndf/scripts/instructions-check.py --root .` を実行し、リリース済み版の段落が
-   指示書に残っていないかを見る。落ちた段落は `docs/ndf-version-decisions.md` へ移す
+   指示書に残っていないかを見る。落ちた段落はその主題の確定仕様（`docs/specifications/`）へ移す
 7. 破壊的変更がある場合は明示
 8. テストを実行
 9. **正式版として `main` を進めた後、リリースタグを打つ**
 
-**すべての版数を機械的に置換しない。** 履歴（`docs/ndf-version-decisions.md`、`CLAUDE.md` の
+**すべての版数を機械的に置換しない。** 履歴（`docs/ndf-version-decisions.md`、確定仕様、`CLAUDE.md` の
 現行版の段落、`docs/development-history/`）、記録（`issues/`）、意図的に前の版を指す文（取り消しの説明）は
 そのまま残す。現行版を指しているかは文脈で決まる。**チェックが突き合わせるのは、周囲の固定の語で
 位置を決めた記載だけである。** 履歴と記録は最初から走査に入らない。
