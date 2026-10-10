@@ -41,6 +41,8 @@ QUESTION_LOCK = "question.lock"
 ASKED_FILE = "asked"
 # 背景の作業が残っていて Stop を止めた合図の候補（区間とハッシュ）。同じ候補では 2 度止めない
 HELD_FILE = "mark-held.json"
+# 承認待ちの差し戻しの状態（区間・前の Stop の時刻・差し戻したか）。差し戻した直後の Stop では差し戻さない（#1492）
+WAIT_HELD_FILE = "wait-held.json"
 
 BLOCK_OPEN = "# >>> ndf relay >>>"
 BLOCK_CLOSE = "# <<< ndf relay <<<"

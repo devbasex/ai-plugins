@@ -1259,8 +1259,8 @@ def test_make_relay_dir_is_new_each_time(mod, tmp_path, monkeypatch):
     assert pathlib.Path(b).stat().st_mode & 0o777 == 0o700
 
 
-def goal_row(sentinel=False, met=False, at=None):
-    a = {"type": "goal_status", "met": met, "condition": "c"}
+def goal_row(sentinel=False, met=False, at=None, condition="c"):
+    a = {"type": "goal_status", "met": met, "condition": condition}
     if sentinel:
         a["sentinel"] = True
     ts = at or time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
@@ -4370,3 +4370,159 @@ def test_uv_path_raises_when_install_fails(monkeypatch):
     monkeypatch.setattr(relay_runtime.deps, "install_uv", lambda: None)
     with pytest.raises(relay_runtime.EnvUnavailable):
         relay_runtime.uv_path()
+
+
+# ---------------------------------------------------------------- 条件の Skill の案内と承認待ちの差し戻し（#1492）
+
+
+def prompt_rows(t, n):
+    p = t.fake_dir / f"prompt-{t.starts()[n]['pid']}.jsonl"
+    return [json.loads(x) for x in p.read_text().splitlines()] if p.exists() else []
+
+
+def goal_context(t, n):
+    """区間 n の UserPromptSubmit hook（`hook.py goal-skill`）の案内の文。出なければ None。"""
+    rows = prompt_rows(t, n)
+    assert rows and all(r["code"] == 0 for r in rows)
+    out = rows[-1]["stdout"]
+    return json.loads(out)["hookSpecificOutput"]["additionalContext"] if out else None
+
+
+def test_cutpoint_next_section_is_told_to_load_the_condition_skill(term):
+    """受け入れ条件 1・4: ndf-next の中身の /goal の条件の Skill を、次の区間が読み込むよう案内される。最初の入力は同じ文面。"""
+    t = term()
+    t.wait_start(1)
+    t.type("mark /goal /ndf:development-workflow #895\r")
+    t.wait_start(2)
+    assert t.starts()[1]["argv"][-1] == "/goal /ndf:development-workflow #895"
+    assert events(t.rows(), "start")[1]["command"] == "/goal /ndf:development-workflow #895"
+    ctx = goal_context(t, 1)
+    assert ctx is not None and "`ndf:development-workflow`" in ctx and "`#895`" in ctx
+    t.type("quit 0\r")
+    t.finish()
+
+
+def test_limit_next_section_is_told_to_load_the_condition_skill(term, accounts):
+    """受け入れ条件 2・4: 未達の目標の会話が上限で切り替わると、--resume の最初の入力の /goal にも同じ案内が出る。"""
+    accounts.add("a", util5=10)
+    accounts.add("b", util5=30)
+    t = account_term(term, accounts)
+    t.wait_start(1)
+    t.type(f"tr {goal_row(met=False, at=iso_now(), condition='/ndf:development-workflow #895')}\r")
+    hit_limit(t, 0)
+    t.wait_start(2)
+    s0, s1 = t.starts()[:2]
+    assert s1["argv"][-3:] == ["--resume", f"s{s0['pid']}", "/goal /ndf:development-workflow #895"]
+    ctx = goal_context(t, 1)
+    assert ctx is not None and "`ndf:development-workflow`" in ctx and "`#895`" in ctx
+    no_secret(t)
+
+
+@pytest.mark.parametrize("body", ["/goal 引継ぎ文書の続きから", "/ndf:development-workflow #895"])
+def test_cutpoint_without_condition_skill_is_unchanged(term, body):
+    """受け入れ条件 5: 条件の先頭が Skill 名でない /goal と、/goal の無い ndf-next では、最初の入力も案内も今のまま。"""
+    t = term()
+    t.wait_start(1)
+    t.type(f"mark {body}\r")
+    t.wait_start(2)
+    assert t.starts()[1]["argv"] == [body]
+    assert goal_context(t, 1) is None
+    t.type("quit 0\r")
+    t.finish()
+
+
+def test_cutpoint_with_unknown_skill_still_starts(term):
+    """受け入れ条件 6: 導入されていない Skill でも次の区間は起動し、案内は見つからなければ続けると伝える。"""
+    t = term()
+    t.wait_start(1)
+    t.type("mark /goal /nosuch:skill #1\r")
+    t.wait_start(2)
+    assert t.starts()[1]["argv"] == ["/goal /nosuch:skill #1"]
+    ctx = goal_context(t, 1)
+    assert ctx is not None and "`nosuch:skill`" in ctx and "見つからなければ" in ctx
+    t.type("quit 0\r")
+    t.finish()
+
+
+WAIT_MSG = "設計 PR を作った。\n\n設計 PR の承認を待ちます。"
+
+
+def section_start(relay, section=1):
+    with open(relay.dir / "log.jsonl", "a") as f:
+        f.write(json.dumps({"event": "start", "at": iso_now(), "section": section}) + "\n")
+
+
+def held_reason(p):
+    assert p.returncode == 0, p.stderr
+    out = json.loads(p.stdout)
+    assert out["decision"] == "block"
+    return out["reason"]
+
+
+@pytest.mark.parametrize("active", [False, True])
+def test_prose_wait_holds_the_stop_once(relay, active):
+    """受け入れ条件 8・9・11: 本文の承認待ちで終えた応答を 1 度止め、直後の Stop は止めず、その次は再び止める。"""
+    section_start(relay, 3)
+    reason = held_reason(mark(relay.dir, stop_input(WAIT_MSG, stop_hook_active=active)))
+    assert reason == relay_mark.WAIT_REASON and "AskUserQuestion" in reason
+    quiet_ok(mark(relay.dir, stop_input(WAIT_MSG, stop_hook_active=True)))
+    held_reason(mark(relay.dir, stop_input("設計をマージしてよいでしょうか。", stop_hook_active=True)))
+    rows = log_rows(relay, "prose_wait")
+    assert [(r["section"], r["kind"]) for r in rows] == [(3, "承認待ち"), (3, "承認待ち")]
+    assert all(set(r) == {"event", "at", "section", "kind"} for r in rows)
+    assert not relay.next.exists()
+
+
+def test_prose_wait_does_nothing_outside_the_relay(relay):
+    """受け入れ条件 10: ラッパーの外と、直接の子でない会話では止めず、状態も作らない。"""
+    quiet_ok(mark(None, stop_input(WAIT_MSG)))
+    (relay.dir / "child.pid").write_text("1")
+    quiet_ok(mark(relay.dir, stop_input(WAIT_MSG)))
+    assert not (relay.dir / relay_common.WAIT_HELD_FILE).exists()
+    assert not log_rows(relay, "prose_wait")
+
+
+def test_prose_wait_ignores_a_reply_without_a_wait(relay):
+    section_start(relay)
+    quiet_ok(mark(relay.dir, stop_input("設計文書をコミットした。")))
+    assert not log_rows(relay, "prose_wait")
+
+
+def test_prose_wait_ignores_a_reply_that_asked(relay):
+    """受け入れ条件 10: 質問の合図が在る Stop と、前の Stop より後に質問を出した Stop では止めない。"""
+    section_start(relay)
+    (relay.dir / "question").write_text("")
+    quiet_ok(mark(relay.dir, stop_input(WAIT_MSG)))
+    time.sleep(0.01)
+    (relay.dir / "asked").write_text(json.dumps({"at": iso_now()}))
+    quiet_ok(mark(relay.dir, stop_input(WAIT_MSG)))
+    # 質問がその前の Stop より前なら、本文の待ちで止める
+    time.sleep(0.01)
+    held_reason(mark(relay.dir, stop_input(WAIT_MSG)))
+
+
+def test_prose_wait_leaves_the_mark_alone(relay):
+    """I7: ndf-next と承認待ちの文を両方含む応答は合図を書いて止めない。合図が保留中に続いた応答も止めず、合図を残す。"""
+    section_start(relay)
+    quiet_ok(mark(relay.dir, stop_input(WAIT_MSG + "\n\n" + fence("/goal x"))))
+    assert json.loads(relay.next.read_text())["command"] == "/goal x"
+    quiet_ok(mark(relay.dir, stop_input(WAIT_MSG)))
+    assert json.loads(relay.next.read_text())["command"] == "/goal x"
+    assert not log_rows(relay, "prose_wait")
+
+
+def test_prose_wait_holds_even_when_the_log_cannot_be_written(relay):
+    """I8: log.jsonl に書けなくても差し戻しの文は出る。"""
+    (relay.dir / "log.jsonl").mkdir()
+    assert held_reason(mark(relay.dir, stop_input(WAIT_MSG))) == relay_mark.WAIT_REASON
+
+
+def test_prose_wait_passes_when_the_judgement_fails(relay, monkeypatch):
+    """I9: 判定が例外になったら止めない。"""
+
+    def boom(text):
+        raise RuntimeError("x")
+
+    monkeypatch.setattr(relay_mark.wait_notice, "classify_text", boom)
+    record = relay_record.RelayRecord(str(relay.dir))
+    assert relay_mark.prose_wait_reason(str(relay.dir), record, {"last_assistant_message": WAIT_MSG}, False) is None
