@@ -558,28 +558,38 @@ def _update_changelog(root, a, items) -> dict:
     a.plugin = plugin_of(root, a)
     head, (at, end) = f"## [{a.plugin} {base_of(a.version)}]", changelog_span(lines, a.plugin, a.version)
     if at is None:
-        first = next((i for i in h2_lines(lines) if lines[i].startswith("## [")), len(lines))
-        block = [f"{head} - {today()}", ""] + [b for _, b in items] + [""]
-        if first == len(lines) and lines and lines[-1] != "":
-            block = [""] + block
-        lines[first:first] = block
-        section = {
-            "kind": "section",
-            "name": "CHANGELOG.md",
-            "result": "added",
-            "heading": block[0] or block[1],
-            "added": [n for n, _ in items],
-        }
+        section = _add_changelog_section(lines, head, items)
     else:
-        body = "\n".join(lines[at:end])
-        add = [(n, b) for n, b in items if f"#{n}）" not in body and f"#{n})" not in body]
-        ins = end
-        while ins - 1 > at and lines[ins - 1].strip() == "":
-            ins -= 1
-        lines[ins:ins] = [b for _, b in add]
-        section = {"kind": "section", "name": "CHANGELOG.md", "result": "added", "heading": lines[at], "added": [n for n, _ in add]}
+        section = _insert_into_changelog_section(lines, at, end, items)
     cl.write_text("\n".join(lines), encoding="utf-8")
     return section
+
+
+def _add_changelog_section(lines, head, items) -> dict:
+    """最初の版の節の前へ、この版の節を足す（lines をその場で書き換える）。"""
+    first = next((i for i in h2_lines(lines) if lines[i].startswith("## [")), len(lines))
+    block = [f"{head} - {today()}", ""] + [b for _, b in items] + [""]
+    if first == len(lines) and lines and lines[-1] != "":
+        block = [""] + block
+    lines[first:first] = block
+    return {
+        "kind": "section",
+        "name": "CHANGELOG.md",
+        "result": "added",
+        "heading": block[0] or block[1],
+        "added": [n for n, _ in items],
+    }
+
+
+def _insert_into_changelog_section(lines, at, end, items) -> dict:
+    """既存の節（lines[at:end]）の末尾へ、まだ載っていない PR だけを挿す（lines をその場で書き換える）。"""
+    body = "\n".join(lines[at:end])
+    add = [(n, b) for n, b in items if f"#{n}）" not in body and f"#{n})" not in body]
+    ins = end
+    while ins - 1 > at and lines[ins - 1].strip() == "":
+        ins -= 1
+    lines[ins:ins] = [b for _, b in add]
+    return {"kind": "section", "name": "CHANGELOG.md", "result": "added", "heading": lines[at], "added": [n for n, _ in add]}
 
 
 def cmd_changelog(a):
