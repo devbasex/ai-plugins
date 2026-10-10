@@ -44,7 +44,7 @@
 | --- | --- |
 | 配布の形が `package-plugin` のときの、他のプラグインの上げ幅の候補・承認資料の表・本番の上げ方 | 主のプラグインの上げ幅の決め方（配布のプランの `--version` で決まる） |
 | PR 本文の `## 移行の手順`（`pr-steps.py template` の雛形・実装のプランの `pr` のステップ・スプリント PR の `collect`） | 他のプラグイン自身の CHANGELOG の版の節（`## [playwright-kit 3.0.0]` のような節）の自動作成 |
-| `notes` が移行の手順を CHANGELOG と承認資料へ写すこと（plugin の README には写さない。#1867） | `package-plugin` 以外の配布の形 |
+| `notes` が移行の手順を CHANGELOG と承認資料へ写すこと（plugin の README には写さない） | `package-plugin` 以外の配布の形 |
 | | 上げ幅の規則（セマンティックバージョニング）・取得元・既定ブランチ |
 
 ## 背景
