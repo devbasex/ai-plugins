@@ -118,6 +118,8 @@ fi
 # 一覧の残りは空欄のまま残し、飛ばした工程がチェックの穴として見えるようにする。
 STAMP=$(date '+%Y-%m-%d %H:%M')
 STAGES=$(wf_stages)
+# モードで通らない工程の行を書かないため、分類の表を写さずに渡す（#1683 の決定 6）
+export WF_MODES WF_STAGE_MATRIX
 export STAGES SECTION_HEADING STAGE STAMP MODE PACE WORKTREE PLAN NOTE SCRIPT_DIR
 python3 - "$BODY_FILE" > "$NEW_FILE" <<'PY' || exit 0
 import os
@@ -189,8 +191,21 @@ if worktree:
 if plan:
     meta_parts.append(f"計画: `{plan}`")
 
+# **モードで通らない工程（`WF_STAGE_MATRIX` のその列が `-`）の行は、記録が無ければ書かない（#1683）。**
+# 記録の済んだ行は列に関わらず残す（モードを途中で変えた課題）。モードが `—` か知らない値なら全工程を書く。
+modes = os.environ.get("WF_MODES", "").split("\t")
+skipped: set[str] = set()
+if mode in modes:
+    col = modes.index(mode) + 1
+    for row in os.environ.get("WF_STAGE_MATRIX", "").split("\n"):
+        cells = row.split("\t")
+        if len(cells) > col and cells[col] == "-":
+            skipped.add(cells[0])
+
 lines = [" / ".join(meta_parts), ""]
 for name in stages:
+    if name in skipped and name not in done:
+        continue
     if name in done:
         lines.append(f"- [x] {name} — {done[name]}" if done[name] else f"- [x] {name}")
     else:

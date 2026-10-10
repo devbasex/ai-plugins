@@ -10,16 +10,20 @@
    （lib/closing-issues.sh）。--issues の課題（記録のリポジトリ）を足す（`pace: fast` の実装 PR は
    closing keywords を持たない）。PR を読んだのに集めた課題が 0 件なら、何も書かずに止まる（終了コード 2）
 3. 閉じる条件 1（本番への配布まで済んだ、または配布なし）と、--with-verification のときは
-   条件 2（その課題の受け入れ条件がすべて合格）を課題ごとに判定する
+   条件 2（その課題のリリース後テストの行がすべて合格で、本文の受け入れ条件の番号のすべてに合格の行がある）
+   を課題ごとに判定する。`課題` の列が課題を指さない行（`—`・`PR 1869` など）は飛ばす。条件 2 は課題ごとの錠
+   （lib/gh_parts.py の issue_lock）の中で状態と本文を 1 回で読んで判定し、満たした記録のリポジトリの課題は
+   本文の受け入れ条件に印（`[x]`）を付けてから閉じる（規則は lib/acceptance.py。#1683）
 4. 条件を満たす課題ごとに (a) 状態を読む → (b) 記録のリポジトリの課題ならボードを Done →
    (c) 読み直して OPEN なら閉じる → (d) 読み直して CLOSED を確かめる
 5. スプリントの PR の題と本文が番号で参照し、2 で集めた課題に入らない開いた課題（参照だけの課題、
    lib/closing.py の referenced_numbers）を kept_open で載せる。閉じず、ボードも書かない
 
 結果は lib/step_result.py の形の 1 行の JSON。items は課題ごとに
-{kind:"issue", repo, number, result, reason?, cmd?}。result は
-closed / already_closed / failed / kept_open（--dry-run では would_close）。ボードの NOTE は
-{kind:"board_note"} の項目に載る。
+{kind:"issue", repo, number, result, reason?, cmd?, checked?, would_check?}。result は
+closed / already_closed / failed / kept_open / closed_unverified（既に閉じていたが条件 2 を満たさない。
+開き直さない）（--dry-run では would_close）。checked は印を付けた受け入れ条件の番号、would_check は
+--dry-run で付ける予定の番号。ボードの NOTE は {kind:"board_note"} の項目に載る。
 `--record-pr 0` は「本番の記録なし」（最終の検査で変更が無く本番を飛ばした）。配布の記録を読まず、
 閉じる条件も見ずに --issues の課題を閉じる。--issues と一緒のときだけ受ける。
 終了コード: 0 = 失敗なし / 1 = 失敗あり（棚卸しへ進まない）/ 2 = 一覧が取れない・
@@ -31,15 +35,18 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shlex
 import subprocess
 import sys
+from contextlib import nullcontext
 from pathlib import Path
+from typing import NamedTuple
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "lib"))
 import deps  # noqa: E402
 
-deps.require("md")
+deps.require("md", "locks")
 from step_result import (
     EXIT_PRECONDITION,
     EXIT_UNREADABLE,
@@ -50,13 +57,19 @@ from step_result import (
     result,
     run,
 )
+import acceptance  # noqa: E402
 import gh_call  # noqa: E402
+import gh_parts  # noqa: E402
+import gh_rest  # noqa: E402
+import locks  # noqa: E402
 import md  # noqa: E402
 from closing import referenced_numbers  # noqa: E402
 
 from dist_record import parse_record  # noqa: E402  記録の形は lib/dist_record.py が持つ（#1273）
 
 TOOL = "sprint-close"
+LOCK_TIMEOUT = 30  # 課題ごとの錠の待ち（body-lock の既定と同じ）
+_ARGV: list[str] = []  # やり直しの cmd に並べる今の引数
 
 
 # --- 記録の読み取り -------------------------------------------------------------
@@ -75,10 +88,23 @@ def read_record(root, repo, n):
     return "\n".join(parts)
 
 
-def verification_verdicts(block, record_repo):
-    """表を課題でまとめ、{(repo, number): 全部合格か} を返す。表が読めなければ None。
+class IssueRows(NamedTuple):
+    """1 課題のリリース後テストの行のまとめ。passed は合格の行にあり、合格でない行に無い受け入れ条件の番号。"""
 
-    表は lib/md.py（GFM）で読む。欠けたセルは空として読むため、`結果` の欠けた行は合格でない。"""
+    all_pass: bool
+    passed: frozenset
+
+
+_ISSUE_CELL = re.compile(r"^(?:([A-Za-z0-9._-]+/[A-Za-z0-9._-]+))?#(\d+)")
+_CRITERION_CELL = re.compile(r"^(\d+)\.")
+
+
+def verification_verdicts(block, record_repo):
+    """表を課題でまとめ、{(repo, number): IssueRows} を返す。表が読めない・課題を指す行が無ければ None。
+
+    表は lib/md.py（GFM）で読む。欠けたセルは空として読むため、`結果` の欠けた行は合格でない。
+    `課題` の列の頭が課題の参照でない行（導入の確認の `—`・`PR 1869` など）は飛ばす（#1683 の I1）。
+    `受け入れ条件` の列の頭の `<番号>.` を受け入れ条件の番号として読む。"""
     found = md.tables(block)
     if not found:
         return None
@@ -86,15 +112,42 @@ def verification_verdicts(block, record_repo):
     if "課題" not in head or "結果" not in head:
         return None
     ci, ri = head.index("課題"), head.index("結果")
-    verdicts = {}
+    ai = head.index("受け入れ条件") if "受け入れ条件" in head else None
+    acc = {}
     for row in found[0].rows:
         cs = [c.strip() for c in row]  # md は行のセルを見出しの数へ揃える
-        m = re.search(r"(?:([A-Za-z0-9._-]+/[A-Za-z0-9._-]+))?#(\d+)", cs[ci])
+        m = _ISSUE_CELL.match(cs[ci])
         if not m:
-            return None
+            continue
         key = (m.group(1) or record_repo, int(m.group(2)))
-        verdicts[key] = verdicts.get(key, True) and cs[ri].startswith("合格")
-    return verdicts
+        ok = cs[ri].startswith("合格")
+        all_pass, passed, failed = acc.get(key, (True, set(), set()))
+        num = _CRITERION_CELL.match(cs[ai]) if ai is not None else None
+        if num:
+            (passed if ok else failed).add(int(num.group(1)))
+        acc[key] = (all_pass and ok, passed, failed)
+    if not acc:
+        return None
+    return {k: IssueRows(a, frozenset(p - f)) for k, (a, p, f) in acc.items()}
+
+
+NO_ROWS = "リリース後テストの行が無い"
+NOT_PASSED = "リリース後テストに合格でない条件がある（不合格・保留）"
+UNVERIFIED = "閉じているが閉じる条件 2 を満たさない: "
+
+
+def judge_acceptance(rows, criteria):
+    """閉じる条件 2 の判定。(満たすか, 満たさない理由, 印を付ける番号) を返す。
+
+    受け入れ条件が 0 個なら表の行の合否だけで決める。"""
+    if rows is None:
+        return False, NO_ROWS, []
+    if not rows.all_pass:
+        return False, NOT_PASSED, []
+    missing = [c.number for c in criteria if c.number not in rows.passed]
+    if missing:
+        return False, "合格の行が無い受け入れ条件: " + ", ".join(map(str, missing)), []
+    return True, None, [c.number for c in criteria if not c.checked]
 
 
 # --- 課題の収集 -----------------------------------------------------------------
@@ -230,13 +283,66 @@ def _closing_blocker(a, rec, record_repo):
     return kept_all, verdicts
 
 
+def _read_state_body(root, repo, n):
+    """状態と本文を 1 回で読む。読めなければ None。"""
+    p = gh_call.gh(["issue", "view", str(n), "--repo", repo, "--json", "state,body"], cwd=root)
+    try:
+        d = json.loads(p.stdout) if p.returncode == 0 else None
+    except ValueError:
+        d = None
+    if not isinstance(d, dict) or not d.get("state"):
+        return None
+    return d["state"], d.get("body") or ""
+
+
+def _retry_cmd():
+    return shlex.join(["python3", str(Path(__file__).resolve()), *_ARGV])
+
+
+def _judge_and_mark(a, ctx, repo, n, rows):
+    """錠の中で状態と本文を読み、条件 2 を判定し、満たせば印を書く。(結果の項目か None, 印を付けた番号) を返す。"""
+    base = {"kind": "issue", "repo": repo, "number": n}
+    got = _read_state_body(ctx.root, repo, n)
+    if got is None:
+        return {**base, "result": "failed", "reason": "本文を読めない", "cmd": _retry_cmd()}, []
+    state, body = got
+    ok, why, to_check = judge_acceptance(rows, acceptance.criteria(body))
+    own = repo == ctx.record_repo  # 他のリポジトリの課題の本文は書かない（I7）
+    if not ok:
+        if state == "CLOSED":
+            return {**base, "result": "closed_unverified", "reason": UNVERIFIED + why}, []
+        return {**base, "result": "kept_open", "reason": why}, []
+    if a.dry_run:
+        out = {**base, "result": "already_closed" if state == "CLOSED" else "would_close"}
+        return ({**out, "would_check": to_check} if own and to_check else out), []
+    if not (own and to_check):
+        return None, []
+    new = acceptance.check_criteria(body, to_check)
+    if not acceptance.only_marks(body, new) or not gh_rest.update_body(repo, n, new):
+        return {**base, "result": "failed", "reason": "受け入れ条件の印を書けない", "cmd": _retry_cmd()}, []
+    return None, to_check
+
+
+def _close_verified(a, ctx, repo, n, rows):
+    """--with-verification の 1 課題。本文の読みから書きまでを課題ごとの錠の中で行い、閉じるのは錠の外で行う。"""
+    lock = gh_parts.issue_lock(repo, n, LOCK_TIMEOUT) if repo == ctx.record_repo and not a.dry_run else nullcontext()
+    try:
+        with lock:
+            done, checked = _judge_and_mark(a, ctx, repo, n, rows)
+    except locks.LockTimeout:
+        return {"kind": "issue", "repo": repo, "number": n, "result": "failed", "reason": "本文の錠を取れない", "cmd": _retry_cmd()}
+    if done is not None:
+        return done
+    out = close_one(ctx, repo, n)
+    return {**out, "checked": checked} if checked else out
+
+
 def _close_item(a, ctx, repo, n, kept_all, verdicts):
     base = {"kind": "issue", "repo": repo, "number": n}
     if kept_all:
         return {**base, "result": "kept_open", "reason": kept_all}
-    if verdicts is not None and not verdicts.get((repo, n), False):
-        why = "リリース後テストの行が無い" if (repo, n) not in verdicts else "リリース後テストに合格でない条件がある（不合格・保留）"
-        return {**base, "result": "kept_open", "reason": why}
+    if verdicts is not None:
+        return _close_verified(a, ctx, repo, n, verdicts.get((repo, n)))
     if a.dry_run:
         st = issue_state(ctx.root, repo, n)
         return {
@@ -267,11 +373,13 @@ def _referenced_items(root, repo, refs, issues):
 
 
 def _close_summary(items, prs, dry_run, referenced):
-    count = {k: sum(1 for i in items if i["result"] == k) for k in ("closed", "already_closed", "failed", "kept_open", "would_close")}
+    kinds = ("closed", "already_closed", "failed", "closed_unverified", "kept_open", "would_close")
+    count = {k: sum(1 for i in items if i["result"] == k) for k in kinds}
     metrics = {"issues": len(items), **count, "referenced_only": referenced, "prs": len(prs)}
     summary = (
         f"閉じた {count['closed']} 件・既に閉じていた {count['already_closed']} 件・"
-        f"失敗 {count['failed']} 件・開いたまま {count['kept_open']} 件（うち参照だけ {referenced} 件）"
+        f"失敗 {count['failed']} 件・閉じているが条件を満たさない {count['closed_unverified']} 件・"
+        f"開いたまま {count['kept_open']} 件（うち参照だけ {referenced} 件）"
     )
     if dry_run:
         summary += f"（試行。閉じる予定 {count['would_close']} 件）"
@@ -381,6 +489,7 @@ def build_parser():
 
 
 def main(argv=None):
+    _ARGV[:] = list(sys.argv[1:] if argv is None else argv)
     return main_with(build_parser(), lambda a: TOOL, argv)
 
 

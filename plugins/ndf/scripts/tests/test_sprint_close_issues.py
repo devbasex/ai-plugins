@@ -47,8 +47,8 @@ def gh(tmp_path):
     f.write_text(harness.FAKE_GH.format(py=PY), encoding="utf-8")
     f.chmod(0o755)
     state = tmp_path / "gh-state.json"
-    env = {k: v for k, v in os.environ.items() if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")}
-    env.update(PATH=f"{bindir}{os.pathsep}{env['PATH']}", FAKE_GH_STATE=str(state))
+    env = {k: v for k, v in os.environ.items() if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GH_TOKEN", "GITHUB_TOKEN")}
+    env.update(PATH=f"{bindir}{os.pathsep}{env['PATH']}", FAKE_GH_STATE=str(state), NDF_LOCK_DIR=str(tmp_path / "locks"))
 
     class G:
         def set(self, **kw):

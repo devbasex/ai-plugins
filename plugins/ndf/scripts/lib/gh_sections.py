@@ -68,6 +68,21 @@ def get_section(body: str, heading: str) -> str | None:
     return "\n".join(lines[span.content : span.end]).strip("\n")
 
 
+def section_bounds(body: str, heading: str) -> tuple[int, int] | None:
+    """節の中身（見出しの次の行から節の終わりまで）を、元の本文の文字の位置 `(始め, 終わり)` で返す。
+
+    改行（`\\r\\n`）を正規化しない。節の外を 1 文字も変えずに中身だけを書き換える側が使う（#1683）。"""
+    raw = body.split("\n")
+    span = _find(_lines(body), heading)
+    if span is None:
+        return None
+    starts = [0]
+    for line in raw:
+        starts.append(starts[-1] + len(line) + 1)
+    at = lambda i: min(starts[i], len(body))  # noqa: E731
+    return at(span.content), at(span.end)
+
+
 def _section_block(heading: str, content: str) -> list[str]:
     text = content.replace("\r\n", "\n").strip("\n")
     first, _, rest = text.partition("\n")

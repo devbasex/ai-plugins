@@ -260,3 +260,50 @@ def test_progress_waits_for_the_lock_and_then_writes(fake_gh):
     out = run(fake_gh, "123", "設計", "--repo", "o/r")
     assert out.returncode == 0, out.stderr
     assert "- [x] 設計 —" in fake_gh.written.read_text(encoding="utf-8")
+
+
+LIGHT_SKIPPED = (
+    "素材の収集と出典の確定",
+    "ドキュメント再構成",
+    "ドキュメントレビュー",
+    "計画",
+    "構造改善",
+    "確定仕様化",
+    "体裁レビュー",
+    "リリース後テスト",
+    "振り返り",
+)
+
+
+def _rows(written):
+    return [ln for ln in written.splitlines() if ln.startswith("- [")]
+
+
+def test_light_mode_drops_the_rows_of_stages_it_does_not_pass(fake_gh):
+    """モード `light` の列が `-` の工程の行は書かず、`C` の工程の行は残す（#1683 の受け入れ条件 14）。"""
+    fake_gh.body.write_text("# 課題\n\n本文\n", encoding="utf-8")
+    out = run(fake_gh, "123", "実装", "--mode", "light")
+    assert out.returncode == 0, out.stderr
+    rows = _rows(fake_gh.written.read_text(encoding="utf-8"))
+    names = [r.split("] ", 1)[1].split(" — ")[0] for r in rows]
+    assert not set(LIGHT_SKIPPED) & set(names)
+    assert "作業場所の用意" in names and "設計" in names and "- [x] 実装" in "\n".join(rows)
+
+
+def test_a_recorded_row_stays_even_when_the_mode_skips_it(fake_gh):
+    """列が `-` の工程でも、記録が済んだ行は残る（受け入れ条件 15）。"""
+    fake_gh.body.write_text("# 課題\n\n## 進行\n\nモード: light\n\n- [x] 計画 — 2026-10-01 10:00\n- [ ] 実装\n", encoding="utf-8")
+    out = run(fake_gh, "123", "実装")
+    assert out.returncode == 0, out.stderr
+    written = fake_gh.written.read_text(encoding="utf-8")
+    assert "- [x] 計画 — 2026-10-01 10:00" in written
+    assert "構造改善" not in written
+
+
+def test_unrecorded_mode_keeps_every_stage_row(fake_gh):
+    """モードが `—` なら全工程の行を持つ（受け入れ条件 16）。"""
+    fake_gh.body.write_text("# 課題\n\n本文\n", encoding="utf-8")
+    out = run(fake_gh, "123", "設計")
+    assert out.returncode == 0, out.stderr
+    written = fake_gh.written.read_text(encoding="utf-8")
+    assert "モード: —" in written and len(_rows(written)) == 19
