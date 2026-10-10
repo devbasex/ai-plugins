@@ -3606,6 +3606,18 @@
       "source": "docs/specifications/quality-gates-design-match.md"
     },
     {
+      "term": "独立に求めた値",
+      "context": "ndf-workflow",
+      "meaning": "段階 4 のうち実データに対する結合確認で動かすコードを通さずに、設計・要求の段階で実データについて求めた件数・金額・行数などの値。出力から逆算した値は当たらない",
+      "source": "plugins/ndf/skills/quality-gates/references/definition-of-done.md"
+    },
+    {
+      "term": "独立に求めた値との突き合わせ",
+      "context": "ndf-workflow",
+      "meaning": "standard の完了判定で、段階 4 のうち実データに対する結合確認の出力を独立に求めた値と比べ、出所・期待値・出力の値・一致したかを証跡に残すこと。値が無ければ「突き合わせる値が無い」と書き、実データに対する結合確認が無ければ「対象が無い」と書く。フィクスチャで回す結合テストの出力は比べない。設計との突き合わせ (a)(b)(c) には含めない",
+      "source": "plugins/ndf/skills/quality-gates/references/definition-of-done.md"
+    },
+    {
       "term": "設計に名前の出るテスト",
       "context": "ndf-workflow",
       "meaning": "設計文書の「決定の記録」「テスト設計」「構成要素」に、バッククォートで囲んで書かれたテストファイルのパス・<パス>::<名前>・「テスト設計」の test で始まる識別子",
@@ -3640,6 +3652,18 @@
       "context": "ndf-release",
       "meaning": "版数を変えず、既定ブランチへのマージかコミットの反映で本番へ届ける配布",
       "source": "docs/specifications/ndf-production-release-record.md"
+    },
+    {
+      "term": "範囲の PR",
+      "context": "ndf-release",
+      "meaning": "直前の正式版のタグから承認したコミットまでに、ベースブランチへ merge commit か squash merge で入った PR。版上げの PR と、PR でない番号（squash の件名の `(#N)` が課題を指すもの）は含まない",
+      "pending_source": "issues/issue-1274-design.md"
+    },
+    {
+      "term": "版上げの PR",
+      "context": "ndf-release",
+      "meaning": "head のブランチが `release/` で始まる PR。版数と CHANGELOG だけを変え、中身の変更を持たない",
+      "pending_source": "issues/issue-1274-design.md"
     },
     {
       "term": "条件の Skill",
@@ -3679,6 +3703,24 @@
       "meaning": "リリース後テストの表で、`結果` の列が `合格` で始まる行",
       "source": "",
       "pending_source": "issues/issue-1683-design.md"
+    },
+    {
+      "term": "起票者の推定",
+      "context": "ndf-workflow",
+      "meaning": "課題の題・本文に、利用者の指示の原文に無く起票者（課題を書いた AI）が文書・コード・経緯から推して足した条件。承認ゲート 1 で利用者が確かめるまで、利用者の決定として扱わない",
+      "pending_source": "issues/issue-1833-requirements.md"
+    },
+    {
+      "term": "承認ゲートの差し戻し",
+      "context": "ndf-workflow",
+      "meaning": "承認ゲートで利用者が承認せず、対象を直すよう戻したこと。MVV 判定の有無を問わず 1 回を 1 件と数える。MVV 判定との食い違いである覆しとは別の数",
+      "pending_source": "issues/issue-1833-requirements.md"
+    },
+    {
+      "term": "差し戻しの記録",
+      "context": "ndf-workflow",
+      "meaning": "承認ゲートの差し戻しを 1 回 1 行で追記する JSONL（NDF_MVV_STATE_DIR の gate-rejections.jsonl）。pace と状態ファイルの有無によらず唯一の置き場で、覆しの記録とは別のファイル",
+      "pending_source": "issues/issue-1833-design.md"
     }
   ]
 }
