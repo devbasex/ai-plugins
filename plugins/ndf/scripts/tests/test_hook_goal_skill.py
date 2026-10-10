@@ -30,7 +30,7 @@ def _run(stdin: str) -> subprocess.CompletedProcess:
     ],
 )
 def test_parse_reads_the_condition_skill_and_the_rest(prompt, name, args):
-    got = goal_skill.parse(prompt)
+    got = goal_skill.parse_goal(prompt)
     assert got is not None and got.name == name and got.args == args
 
 
@@ -39,7 +39,7 @@ def test_parse_reads_the_condition_skill_and_the_rest(prompt, name, args):
     ["/goal 引継ぎ文書の続きから", "/ndf:development-workflow #895", "/goal ndf:x", "/goal /x", "", "/goal 続きは /ndf:development-workflow で", None],
 )
 def test_parse_ignores_other_prompts(prompt):
-    assert goal_skill.parse(prompt) is None
+    assert goal_skill.parse_goal(prompt) is None
 
 
 def test_the_hook_tells_to_load_the_skill_with_the_rest_as_arguments():

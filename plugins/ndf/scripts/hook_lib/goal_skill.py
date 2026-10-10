@@ -32,7 +32,7 @@ class GoalSkill:
         return f"{self.plugin}:{self.skill}"
 
 
-def parse(prompt) -> GoalSkill | None:
+def parse_goal(prompt) -> GoalSkill | None:
     """入力の文から条件の Skill と引数（条件の残り。2 行目以降を含む）を読む。当たらなければ None。"""
     if not isinstance(prompt, str):
         return None
@@ -48,7 +48,7 @@ def context(hook_input) -> str | None:
     """`UserPromptSubmit` の入力から案内の文を作る。案内しないときは None。"""
     if not isinstance(hook_input, dict):
         return None
-    got = parse(hook_input.get("prompt"))
+    got = parse_goal(hook_input.get("prompt"))
     if got is None:
         return None
     with_args = f"引数 `{got.args}` で" if got.args else ""
