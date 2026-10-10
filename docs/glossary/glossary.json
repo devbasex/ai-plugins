@@ -3642,6 +3642,18 @@
       "source": "docs/specifications/ndf-production-release-record.md"
     },
     {
+      "term": "範囲の PR",
+      "context": "ndf-release",
+      "meaning": "直前の正式版のタグから承認したコミットまでに、ベースブランチへ merge commit か squash merge で入った PR。版上げの PR と、PR でない番号（squash の件名の `(#N)` が課題を指すもの）は含まない",
+      "pending_source": "issues/issue-1274-design.md"
+    },
+    {
+      "term": "版上げの PR",
+      "context": "ndf-release",
+      "meaning": "head のブランチが `release/` で始まる PR。版数と CHANGELOG だけを変え、中身の変更を持たない",
+      "pending_source": "issues/issue-1274-design.md"
+    },
+    {
       "term": "条件の Skill",
       "context": "ndf-relay",
       "meaning": "`/goal` の条件の先頭の語が `/<プラグイン>:<Skill>` の形で名指しする Skill（例: `/ndf:development-workflow`）",
