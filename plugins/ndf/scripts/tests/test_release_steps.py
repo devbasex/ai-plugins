@@ -383,8 +383,10 @@ PR_BODIES = {
 }
 
 
-def test_notes_builds_changelog_and_readme_from_user_changes(repo, tmp_path):
+def test_notes_builds_the_changelog_and_leaves_the_readme(repo, tmp_path):
+    """I1: notes は CHANGELOG.md の版の節だけを書き、版ごとの更新の節が残る README にも触れない。"""
     pdir = notes_repo(repo)
+    before = (pdir / "README.md").read_bytes()
     env = fake_gh(tmp_path, PR_BODIES)
     p = subprocess.run(
         [PY, str(SCRIPT), "notes", "--root", str(repo), "--version", "1.2.3-dev.1", "--prs", "11", "12"],
@@ -399,8 +401,8 @@ def test_notes_builds_changelog_and_readme_from_user_changes(repo, tmp_path):
     cl = (repo / "CHANGELOG.md").read_text(encoding="utf-8")
     assert f"## [ndf 1.2.3] - 2026-01-01\n\n{want}\n## [ndf 1.2.2]" in cl
     assert "題名 A（#11）" not in cl and "- 前の版" in cl
-    readme = (pdir / "README.md").read_text(encoding="utf-8")
-    assert f"## v1.2.3-dev.1 へ更新するとき\n\n{want}\n## 使い方" in readme
+    assert (pdir / "README.md").read_bytes() == before
+    assert [i["name"] for i in res["items"]] == ["CHANGELOG.md"]
 
 
 def test_notes_fills_approval_cells(repo, tmp_path):
@@ -935,8 +937,9 @@ MIGRATION_BODIES = {
 
 
 def test_notes_copy_the_migration_steps_under_their_heading(repo, tmp_path):
-    """受け入れ条件 10・11 と I6・I7: 移行の手順は版の節と更新の節の `### 移行の手順` の下と、承認資料の節へ PR 番号つきで写る。"""
+    """受け入れ条件 3: 移行の手順は版の節の `### 移行の手順` の下と、承認資料の節へ PR 番号つきで写る。"""
     pdir = notes_repo(repo)
+    before = (pdir / "README.md").read_bytes()
     env = fake_gh(tmp_path, MIGRATION_BODIES)
     p = subprocess.run(
         [PY, str(SCRIPT), "notes", "--root", str(repo), "--version", "1.2.3-dev.1", "--prs", "12", "13"],
@@ -947,7 +950,7 @@ def test_notes_copy_the_migration_steps_under_their_heading(repo, tmp_path):
     assert p.returncode == 0, p.stdout + p.stderr
     want = "- 題名 B（#12）\n- Drive の保管を外した（#13）\n\n### 移行の手順\n\n- playwright-kit の `--pwk-drive-folder` を外す（#13）\n"
     assert f"## [ndf 1.2.3] - 2026-01-01\n\n{want}\n## [ndf 1.2.2]" in (repo / "CHANGELOG.md").read_text(encoding="utf-8")
-    assert f"## v1.2.3-dev.1 へ更新するとき\n\n{want}\n## 使い方" in (pdir / "README.md").read_text(encoding="utf-8")
+    assert (pdir / "README.md").read_bytes() == before
     approval = repo / "issues" / "approval.md"
     approval.parent.mkdir()
     approval.write_text(

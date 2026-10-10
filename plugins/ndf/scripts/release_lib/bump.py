@@ -15,7 +15,7 @@ import tempfile
 from pathlib import Path
 
 import versions
-from step_result import EXIT_PRECONDITION, StepError, base_of, plugin_dir
+from step_result import EXIT_PRECONDITION, StepError, plugin_dir
 
 
 def ver_pat(v):
@@ -121,27 +121,6 @@ class BumpPlan:
             res = versions.bump_replace(cfg, self.old, self.new, self.root)
         if not res.ok:
             raise StepError(f"bump-my-version が {self.old} → {self.new} を書き換えられない: {res.output.strip()[-300:]}")
-
-
-def bump_update_heading(ed, readme):
-    """README の更新案内の見出しを新しい版へ書き換える（チェックは見出しを現行の版の 1 つだけに求める）。"""
-    rel = readme.relative_to(ed.root).as_posix()
-    if not readme.is_file():
-        ed.manual.append(f"{rel} が無い（更新案内の見出し）")
-        return
-    lines = ed.lines(readme)
-    new_h = f"## v{ed.new} へ更新するとき"
-    if new_h in lines:
-        return
-    rx = re.compile(r"^## v\S+ へ更新するとき$")
-    at = next((i for i, l in enumerate(lines) if rx.match(l)), None)
-    if at is None:
-        ed.manual.append(f"{rel}: 更新案内の見出しが無い（「{new_h}」を手で足す）")
-        return
-    if not ed.place(readme, [at], braces(lines[at]), f"## v{NEW} へ更新するとき", "更新案内の見出し"):
-        return
-    if base_of(ed.old) != base_of(ed.new):
-        ed.manual.append(f"{rel}: 更新案内の本文を v{ed.new} の変更へ書き直す（changelog が PR の一覧へ差し替える）")
 
 
 def marketplace_range(lines, name):

@@ -50,8 +50,9 @@ record は release --channel prod の後に、本番のリリースの PR（rele
 プラグイン（タグ `<名前>--v<版>`・題 `Release: <名前> v<版>`）は引数 → `.ndf/supervise.json` の release.plugin から読む（#1336）。
 CHANGELOG.md の置き場と見出し・`plugins/<名前>/` の配置・版の形は、形 package-plugin の約束である（form-package-plugin.md）。
 
-notes は PR 本文の `## 利用者向けの変化` の節（無い・「無し」の PR は題名）から、CHANGELOG.md の版の節と
-plugin の README の `## v<版> へ更新するとき` の節を組み直す。`--approval` を渡すと、代わりに本番承認の提示物の
+notes は PR 本文の `## 利用者向けの変化` の節（無い・「無し」の PR は題名）から、CHANGELOG.md の版の節を
+組み直す。bump・changelog・notes は plugin の README に触れない（#1867。更新情報は CHANGELOG.md の版の節が正本）。
+`--approval` を渡すと、代わりに本番承認の提示物の
 「配る中身」「検証への配布で確かめたこと」の欄と、PR 本文の `## 未検証・残る危険` を集めた節を書く。
 changelog と notes は未マージの PR を載せず、番号を metrics.unmerged へ出す。渡した PR がすべて未マージなら
 書き込む前に 3（前提エラー）で止まる。PR の読み取り（`gh pr view --json`）は、GraphQL が上限なら REST で読み直す
@@ -395,7 +396,6 @@ def plan_bump(root, pdir, plugin, old, new):
         ed.sub(nr, r"ndf@ai-plugins\s+installed", "plugins/ndf/README.md の codex plugin list の出力例")
         bump_versioning_doc(ed)
 
-    bump.bump_update_heading(ed, pdir / "README.md")
     return ed
 
 
@@ -425,11 +425,7 @@ def cmd_bump(a):
     ed = plan_bump(root, pdir, a.plugin, old, new)
     ed.apply()
 
-    expected = []
-    if base_of(old) != base_of(new):
-        expected.append(f"更新案内の見出しが 2 個ある（v{new} / v{old}）")
-        ed.manual.append(f"{pdir.relative_to(root).as_posix()}/README.md: 更新案内の v{old} の節を片付ける（見出しを 1 つにする）")
-    ok, summary = run_staleness(root, expected)
+    ok, summary = run_staleness(root)
     if ok is None:
         ed.manual.append(summary)
     items = [{"kind": "file", "name": f, "result": "updated"} for f in ed.files] + [
@@ -586,34 +582,6 @@ def _update_changelog(root, a, items) -> dict:
     return section
 
 
-def _update_plugin_readme(root, a, items) -> dict | None:
-    """plugin の README の更新案内: 見出しから次の同じ深さの見出しまでを、この版の PR の一覧へ差し替える。"""
-    try:
-        pdir = plugin_dir(root, a.plugin)
-    except StepError:
-        pdir = None
-    readme = pdir / "README.md" if pdir else None
-    h = f"## v{a.version} へ更新するとき"
-    if not (readme and readme.is_file()):
-        return None
-    rl = readme.read_text(encoding="utf-8").split("\n")
-    i = next((j for j in h2_lines(rl) if rl[j] == h), None)
-    if i is None:
-        return None
-    end = next_h2(rl, i)
-    if any(f"（#{n}）" in l for l in rl[i:end] for n, _ in items):
-        return None
-    rl[i + 1 : end] = [""] + [b for _, b in items] + [""]
-    readme.write_text("\n".join(rl), encoding="utf-8")
-    return {
-        "kind": "section",
-        "name": readme.relative_to(root).as_posix(),
-        "result": "replaced",
-        "heading": h,
-        "added": [n for n, _ in items],
-    }
-
-
 def cmd_changelog(a):
     root = git_root(a.root)
     if not (root / "CHANGELOG.md").is_file():
@@ -621,11 +589,6 @@ def cmd_changelog(a):
     skipped = []
     items = pr_titles(root, a.prs, skipped)
     sections = [_update_changelog(root, a, items)]
-    readme_section = _update_plugin_readme(root, a, items)
-    if readme_section is not None:
-        sections.append(readme_section)
-
-    readme_done = any(s["result"] == "replaced" for s in sections)
     emit(
         result(
             TOOL,
@@ -633,7 +596,6 @@ def cmd_changelog(a):
             f"{len(items)} 件の PR を {len(sections)} 箇所へ並べた{unmerged_note(skipped)}",
             sections + unmerged_items(skipped),
             {"version": a.version, "prs": len(items), "unmerged": skipped},
-            next="更新案内の本文を利用者向けの説明へ書き直す" if readme_done else None,
         )
     )
 
@@ -977,9 +939,9 @@ def replace_lines_under(lines, at, block):
 
 
 def write_notes(root, version, plugin, bullets, migration=()):
-    """版の節と README の更新の節を箇条にする。移行の手順があれば `### 移行の手順` の下へ並べる（I6・I7）。"""
+    """CHANGELOG.md の版の節を箇条にする。移行の手順があれば `### 移行の手順` の下へ並べる（I6・I7）。
+    plugin の README は読まず書かない（#1867: 更新情報は CHANGELOG.md の版の節が正本）。"""
     bullets = [*bullets, *(["", "### 移行の手順", "", *migration] if migration else [])]
-    items = []
     cl = root / "CHANGELOG.md"
     if not cl.is_file():
         raise StepError("CHANGELOG.md が無い", EXIT_PRECONDITION)
@@ -990,23 +952,7 @@ def write_notes(root, version, plugin, bullets, migration=()):
         raise StepError(f"CHANGELOG.md に {head} の節が無い（先に changelog を走らせる）", EXIT_PRECONDITION)
     replace_lines_under(lines, at, bullets)
     cl.write_text("\n".join(lines), encoding="utf-8")
-    items.append({"kind": "section", "name": "CHANGELOG.md", "result": "replaced", "heading": lines[at], "lines": len(bullets)})
-    try:
-        pdir = plugin_dir(root, plugin)
-    except StepError:
-        pdir = None
-    readme = pdir / "README.md" if pdir else None
-    h = f"## v{version} へ更新するとき"
-    if readme and readme.is_file():
-        rl = readme.read_text(encoding="utf-8").split("\n")
-        ra = next((j for j in h2_lines(rl) if rl[j] == h), None)
-        if ra is not None:
-            replace_lines_under(rl, ra, bullets)
-            readme.write_text("\n".join(rl), encoding="utf-8")
-            items.append(
-                {"kind": "section", "name": readme.relative_to(root).as_posix(), "result": "replaced", "heading": h, "lines": len(bullets)}
-            )
-    return items
+    return [{"kind": "section", "name": "CHANGELOG.md", "result": "replaced", "heading": lines[at], "lines": len(bullets)}]
 
 
 def approval_cell(text):
@@ -1131,7 +1077,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--decided", help="承認資料の表の上げ幅で上げた版を返す（本番の bump-others）")
     p.set_defaults(func=cmd_changed_plugins)
 
-    p = sub.add_parser("changelog", parents=[common], help="CHANGELOG.md と plugin の README の更新案内へ PR のタイトルを並べる")
+    p = sub.add_parser("changelog", parents=[common], help="CHANGELOG.md の版の節へ PR のタイトルを並べる")
     p.add_argument("--version", required=True, type=version_arg)
     p.add_argument("--prs", nargs="+", required=True, type=int, metavar="PR番号")
     p.add_argument("--plugin", help="配るプラグイン（既定は宣言の release.plugin）")
@@ -1175,7 +1121,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_approval_facts)
 
     p = sub.add_parser(
-        "notes", parents=[common], help="PR 本文の「利用者向けの変化」から CHANGELOG と更新案内（--approval なら提示物の欄）を組む"
+        "notes", parents=[common], help="PR 本文の「利用者向けの変化」から CHANGELOG の版の節（--approval なら提示物の欄）を組む"
     )
     p.add_argument("--version", required=True, type=version_arg)
     p.add_argument("--prs", nargs="+", required=True, type=int, metavar="PR番号")
