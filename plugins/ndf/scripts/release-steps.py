@@ -852,14 +852,7 @@ def cmd_record(a):
     prev_tag = release_tag_before(root, plugin, current=tag)
     prev = prev_tag[len(f"{plugin}--v") :] if prev_tag else None
     body = record.body_of(root, plugin, ver, tag, prev_tag, a.prs)
-    text, url = record.release_pr_text(root, n)
-    metrics = {"release_pr": n, "release_pr_url": url, "version": ver, "prev_version": prev, "sprint_prs": list(a.prs)}
-    if record.exists(text, ver, a.prs):
-        items = [{"kind": "comment", "name": f"#{n}", "result": "exists"}]
-        emit(result(TOOL, "ok", f"#{n} に v{ver} のリリース記録は既にある", items, metrics))
-    record.post_comment(root, n, body)
-    items = [{"kind": "comment", "name": f"#{n}", "result": "posted"}]
-    emit(result(TOOL, "ok", f"#{n} へ v{ver} のリリース記録を書いた", items, metrics))
+    emit(result(TOOL, "ok", *record.write(root, n, ver, prev, body, a.prs, f"v{ver}")))
 
 
 def record_promote(root, a):
@@ -871,21 +864,9 @@ def record_promote(root, a):
     sha = merge_commit_of(root, pr["number"]) if pr else None
     if not sha:
         raise StepError(f"{a.head} → {a.base} のマージ済みの昇格の PR が無い（本番の配布が済んでいない）", EXIT_PRECONDITION)
-    n = pr["number"]
-    git(root, "fetch", "-q", "origin", a.base, check=False)  # 直前の版（マージのコミットの親）を読む
-    prev = git(root, "rev-parse", "--short", f"{sha}^1", check=False).stdout.strip() or None
-    ver = f"{a.base} {sha[:7]}"
+    n, prev, ver = pr["number"], record.parent_of(root, a.base, sha), f"{a.base} {sha[:7]}"
     body = record.promote_body_of(n, a.head, a.base, prev, sha[:7], a.prs)
-    text, url = record.release_pr_text(root, n)
-    metrics = {"release_pr": n, "release_pr_url": url, "version": ver, "prev_version": prev, "sprint_prs": list(a.prs)}
-    if record.exists(text, ver, a.prs):
-        emit(
-            result(
-                TOOL, "ok", f"#{n} に {ver} のリリース記録は既にある", [{"kind": "comment", "name": f"#{n}", "result": "exists"}], metrics
-            )
-        )
-    record.post_comment(root, n, body)
-    emit(result(TOOL, "ok", f"#{n} へ {ver} のリリース記録を書いた", [{"kind": "comment", "name": f"#{n}", "result": "posted"}], metrics))
+    emit(result(TOOL, "ok", *record.write(root, n, ver, prev, body, a.prs, ver)))
 
 
 def cmd_approval_facts(a):
