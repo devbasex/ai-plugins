@@ -253,7 +253,7 @@ def test_a_check_that_changes_more_than_the_marks_is_not_written(tmp_path, monke
     mod = load_sprint_close()
     monkeypatch.setenv("NDF_LOCK_DIR", str(tmp_path))
     monkeypatch.setattr(mod, "_read_state_body", lambda *a: ("OPEN", THREE))
-    monkeypatch.setattr(mod.acceptance, "check", lambda body, nums: body.replace("# 課題", "# 変えた"))
+    monkeypatch.setattr(mod.acceptance, "check_criteria", lambda body, nums: body.replace("# 課題", "# 変えた"))
     wrote = []
     monkeypatch.setattr(mod.gh_rest, "update_body", lambda *a: wrote.append(a) or True)
     it = mod._close_verified(_A(), mod.CloseContext(str(tmp_path), "o/r", "c"), "o/r", 1, mod.IssueRows(True, frozenset({1, 2, 3})))
@@ -267,6 +267,6 @@ def test_criteria_skip_fences_indented_boxes_and_strikethrough():
     body = "- [ ] 外\n## 受け入れ条件\n\n- [ ] 1. 一\n  - [ ] 子\n```\n- [ ] 囲みの中\n```\n- ~~旧~~ → 新\n- [x] 2. 二\n## 次\n- [ ] 外\n"
     assert acceptance.criteria(body) == [acceptance.Criterion(1, False), acceptance.Criterion(2, True)]
     assert acceptance.criteria("# 本文だけ\n") == []
-    new = acceptance.check(body, [1, 2, 9])
+    new = acceptance.check_criteria(body, [1, 2, 9])
     assert new == body.replace("- [ ] 1. 一", "- [x] 1. 一") and acceptance.only_marks(body, new)
     assert not acceptance.only_marks(body, body.replace("- [ ] 外\n## 受", "- [x] 外\n## 受"))

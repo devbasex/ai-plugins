@@ -55,7 +55,7 @@ def criteria(body: str) -> list[Criterion]:
     return [Criterion(b.number, b.checked) for b in _boxes(body)]
 
 
-def check(body: str, numbers) -> str:
+def check_criteria(body: str, numbers) -> str:
     """`numbers` の受け入れ条件の `[ ]` を `[x]` にした本文。既に印のある行・範囲外の番号は変えない。"""
     want = set(numbers)
     chars = list(body)

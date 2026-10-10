@@ -136,7 +136,7 @@ NOT_PASSED = "リリース後テストに合格でない条件がある（不合
 UNVERIFIED = "閉じているが閉じる条件 2 を満たさない: "
 
 
-def judge(rows, criteria):
+def judge_acceptance(rows, criteria):
     """閉じる条件 2 の判定。(満たすか, 満たさない理由, 印を付ける番号) を返す。
 
     受け入れ条件が 0 個なら表の行の合否だけで決める。"""
@@ -306,7 +306,7 @@ def _judge_and_mark(a, ctx, repo, n, rows):
     if got is None:
         return {**base, "result": "failed", "reason": "本文を読めない", "cmd": _retry_cmd()}, []
     state, body = got
-    ok, why, to_check = judge(rows, acceptance.criteria(body))
+    ok, why, to_check = judge_acceptance(rows, acceptance.criteria(body))
     own = repo == ctx.record_repo  # 他のリポジトリの課題の本文は書かない（I7）
     if not ok:
         if state == "CLOSED":
@@ -317,7 +317,7 @@ def _judge_and_mark(a, ctx, repo, n, rows):
         return ({**out, "would_check": to_check} if own and to_check else out), []
     if not (own and to_check):
         return None, []
-    new = acceptance.check(body, to_check)
+    new = acceptance.check_criteria(body, to_check)
     if not acceptance.only_marks(body, new) or not gh_rest.update_body(repo, n, new):
         return {**base, "result": "failed", "reason": "受け入れ条件の印を書けない", "cmd": _retry_cmd()}, []
     return None, to_check
