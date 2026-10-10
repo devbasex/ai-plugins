@@ -83,19 +83,26 @@ class BumpPlan:
             if not rx.search(lines[i]) or (self.rel(path), i) in self._taken:
                 continue
             if re.search(ver_pat(self.old), lines[i]):
-                twins = [j for j in range(i, stop) if lines[j] == lines[i] and rx.search(lines[j])][: count - done]
-                esc = braces(lines[i])
-                if self.place(path, twins, re.sub(ver_pat(self.old), CUR, esc), re.sub(ver_pat(self.old), NEW, esc), what):
-                    done += len(twins)
-                else:
+                placed = self._place_twins(path, lines, i, stop, rx, count - done, what)
+                if placed is None:
                     return done
+                done += placed
             elif re.search(ver_pat(self.new), lines[i]):
                 already += 1
         if required and done + already < count:
-            self.manual.append(
-                f"{self.rel(path)}: {what} の旧版 {self.old} が {count} 箇所見つからず {done + already} 箇所だけ（手で直す）"
-            )
+            self._record_shortfall(path, what, count, done + already)
         return done
+
+    def _place_twins(self, path, lines, i, stop, rx, limit, what):
+        """i 行目と同じ字面の行（limit 件まで）を 1 つの書き換えとして足す。足した行数を返し、足せなければ None。"""
+        twins = [j for j in range(i, stop) if lines[j] == lines[i] and rx.search(lines[j])][:limit]
+        esc = braces(lines[i])
+        if not self.place(path, twins, re.sub(ver_pat(self.old), CUR, esc), re.sub(ver_pat(self.old), NEW, esc), what):
+            return None
+        return len(twins)
+
+    def _record_shortfall(self, path, what, count, found):
+        self.manual.append(f"{self.rel(path)}: {what} の旧版 {self.old} が {count} 箇所見つからず {found} 箇所だけ（手で直す）")
 
     def config(self):
         head = [
