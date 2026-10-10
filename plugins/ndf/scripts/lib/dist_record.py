@@ -80,21 +80,24 @@ def _verify_blocks(lines, sections):
 
 
 def _pick_verify_block(blocks, stage, version, dist_start):
-    if stage.startswith("配布なし"):
-        after = [b for b in blocks if b["start"] > dist_start]
-        return "\n".join(after[-1]["lines"]) if after else None
-    if version:
+    """使うリリース後テストのブロック。本番は対象の版が一致する最後のブロック、無ければ（版数を上げない配布で
+    `版:` と `対象の版:` の書き方が違うとき。#1789）配布なしと同じく最後の配布の記録より後の最後のブロック。"""
+    after = [b for b in blocks if b["start"] > dist_start]
+    if stage.startswith("本番") and version:
         hit = [b for b in blocks if b["ver"] == version]
-        return "\n".join(hit[-1]["lines"]) if hit else None
-    return None
+        if hit:
+            return "\n".join(hit[-1]["lines"])
+    elif not stage.startswith("配布なし"):
+        return None
+    return "\n".join(after[-1]["lines"]) if after else None
 
 
 def parse_record(text):
     """最後の配布の記録と、使うリリース後テストのブロックを読む。
 
     戻り値: {"found", "stage", "version", "sprint_prs", "verify_block"}。
-    verify_block は本番なら対象の版が一致する最後のブロック、配布なしなら最後の配布の記録より
-    後の最後のブロック。無ければ None。
+    verify_block は本番なら対象の版が一致する最後のブロック（無ければ最後の配布の記録より後の最後のブロック）、
+    配布なしなら最後の配布の記録より後の最後のブロック。無ければ None。
     """
     lines = text.splitlines()
     sections = [s for s in md.md_sections(text) if lines[s.heading.line].startswith("#")]

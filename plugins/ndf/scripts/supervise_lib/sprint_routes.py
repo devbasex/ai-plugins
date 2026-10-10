@@ -53,6 +53,17 @@ def has_release_template(a) -> bool:
     return any(r.stage == delivery.STAGE_TEMPLATE for r in routes_of(a))
 
 
+def record_pr_ref(a) -> str:
+    """まとめの close が読む配布の記録の PR: 雛形の本番の PR か、昇格の PR（#837）。ほかの経路は記録を持たない
+    （0 = 本番の記録なし。#1336）。昇格は route_waves が昇格のプラン（計画名 promote）を置くときだけ。"""
+    if has_release_template(a):
+        return "{queue_pr:release-prod}"
+    manual_prod = getattr(a, "state", None) and dev_channel_of(a).value == delivery.MANUAL_PRODUCTION
+    if not manual_prod and any(r.stage == delivery.STAGE_PROMOTE for r in routes_of(a)):
+        return "{queue_pr:promote}"
+    return "0"
+
+
 def manual_release_wave(a) -> dict:
     """手で届ける経路のために最後に置く、手で行うリリースのステージ（プランを持たない）。note に経路ごとの理由を書く。"""
     notes = [r.note for r in routes_of(a) if r.stage == delivery.STAGE_MANUAL and r.note]

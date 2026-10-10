@@ -215,3 +215,90 @@ def test_sprint_close_closes_with_the_record_the_step_wrote(repo, gh, tmp_path):
     code, out, err = harness.call("sprint-close.py", ["--record-pr", "40", "--repo", "o/r", "--issues", "5", "--dry-run"], env, repo)
     assert code == 0, (out, err)
     assert harness.issues_of(out)["o/r#5"]["result"] == "would_close"
+
+
+# --- #1870: 版数を上げない配布・昇格の経路・本文の 段階: 検証 ------------------------------
+
+UNVERSIONED = """## 配布の記録
+
+段階: 本番（承認ゲート 2 の後、main へマージした）
+版: 3.9.0 → 4.0.0（main へのマージ）
+スプリント: PR #430 / #431
+
+## リリース後テスト
+
+対象の版: main c427284（2026-10-01 12:00）
+導入経路: main を pull
+
+| 課題 | 受け入れ条件 | 実行したこと | 実行時刻 | 結果 |
+| --- | --- | --- | --- | --- |
+| #5 | 1. 動く | `make check` | 2026-10-01 12:10 | 合格 |
+
+合否: 合格（1 件中 1 件）
+"""
+
+
+def test_an_unversioned_release_test_after_the_record_is_used():
+    """AC1: 版数を上げない配布で `版:` と `対象の版:` が違っても、記録より後のリリース後テストを選ぶ（devbase PR #432）。"""
+    got = dist_record.parse_record(UNVERSIONED)
+    assert got["stage"].startswith("本番") and got["version"] == "4.0.0"
+    assert got["verify_block"] and got["verify_block"].startswith("## リリース後テスト") and "main c427284" in got["verify_block"]
+
+
+def test_a_matching_release_test_still_wins_over_a_later_one():
+    """AC1・AC7: 版の一致するブロックがあれば、後ろに版の違うブロックがあってもそれを選ぶ。"""
+    text = dist_record.format_record("10.17.67", "10.17.68", [1], stage_note="承認の後", version_note="タグ")
+    text += "\n## リリース後テスト\n\n対象の版: 10.17.68（2026-10-01）\n合否: 合格（一致）\n"
+    text += "\n## リリース後テスト\n\n対象の版: 10.17.69-dev.1（2026-10-02）\n合否: 合格（後ろ）\n"
+    got = dist_record.parse_record(text)
+    assert got["version"] == "10.17.68" and got["verify_block"].endswith("合否: 合格（一致）")
+
+
+def test_a_release_test_before_the_record_is_not_used():
+    """AC1: 記録より前のリリース後テストは、版が違えば選ばない。"""
+    text = "## リリース後テスト\n\n対象の版: main abc1234\n合否: 合格\n\n" + UNVERSIONED.split("## リリース後テスト")[0]
+    assert dist_record.parse_record(text)["verify_block"] is None
+
+
+def test_a_record_comment_after_a_verification_body_reads_as_production():
+    """AC4: 本文が `段階: 検証（… 承認待ちのため未実施）` の PR に、配布の後の記録をコメントで足すと本番として読む（devbase PR #212）。"""
+    body = "## 配布の記録\n\n段階: 検証（本番は承認ゲート 2 の承認待ちのため未実施）\n版: 3.6.0 → 3.7.0\nスプリント: PR #210 / #211\n"
+    assert dist_record.parse_record(body)["stage"].startswith("検証")
+    comment = dist_record.format_record("3.6.0", "3.7.0", [210, 211], stage_note="承認の後", version_note="タグ")
+    got = dist_record.parse_record(body + "\n" + comment)
+    assert got["stage"].startswith("本番") and got["version"] == "3.7.0" and got["sprint_prs"] == [210, 211]
+
+
+def promote_state(repo: Path, gh, **kw):
+    """develop → main の昇格の PR #50 がマージ済み（マージのコミットは作業場所の HEAD）。"""
+    git(repo, "commit", "-q", "--allow-empty", "-m", "promote")
+    sha = git(repo, "rev-parse", "HEAD").strip()
+    rec = {"body": "develop → main", "comments": [], "url": "https://github.com/o/r/pull/50", "mergeCommit": {"oid": sha}}
+    gh.set(**{"prs": [{"number": 50, "state": "MERGED", "head": "develop", "base": "main"}], "records": {"50": rec}, **kw})
+    return sha
+
+
+def record_promote(repo: Path, env: dict) -> tuple[int, dict]:
+    args = ["record", "--root", str(repo), "--promote", "--head", "develop", "--base", "main", "--prs", "11", "12"]
+    p = subprocess.run([PY, str(SCRIPTS / "release-steps.py"), *args], capture_output=True, text=True, env=env)
+    return p.returncode, (json.loads(p.stdout.strip().splitlines()[-1]) if p.stdout.strip() else {})
+
+
+def test_record_promote_writes_a_production_record_to_the_promote_pr(repo, gh):
+    """AC2: record --promote は昇格の PR へ記録を 1 件書き、sprint-close は `段階: 本番` で読む。2 度目は書かない。"""
+    sha = promote_state(repo, gh)
+    code, out = record_promote(repo, gh.env)
+    assert code == 0 and [i["result"] for i in out["items"]] == ["posted"], out
+    assert out["metrics"]["release_pr_url"] == "https://github.com/o/r/pull/50"
+    (body,) = [c["body"] for c in gh.get()["records"]["50"]["comments"]]
+    got = dist_record.parse_record(body)
+    assert got["stage"].startswith("本番") and got["version"] == f"main {sha[:7]}" and got["sprint_prs"] == [11, 12]
+    code, out = record_promote(repo, gh.env)
+    assert code == 0 and [i["result"] for i in out["items"]] == ["exists"]
+
+
+def test_record_promote_without_a_merged_pr_posts_nothing(repo, gh):
+    """AC2: マージ済みの昇格の PR が無ければ書かずに 3 で止まる（プランは judge-record へ進む）。"""
+    promote_state(repo, gh, prs=[])
+    code, out = record_promote(repo, gh.env)
+    assert code == 3 and out["status"] == "stopped" and gh.get()["records"]["50"]["comments"] == []

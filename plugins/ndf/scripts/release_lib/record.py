@@ -50,6 +50,17 @@ def body_of(root, plugin, ver, tag, prev_tag, prs):
     )
 
 
+def promote_body_of(n, head, base, prev_sha, sha, prs):
+    """昇格の Pull Request（head → base）のマージで本番へ出たときのリリース記録の本文。版は `<本番チャネル> <短い SHA>`。"""
+    return dist_record.format_record(
+        f"{base} {prev_sha}" if prev_sha else None,
+        f"{base} {sha}",
+        prs,
+        stage_note=f"承認ゲート 2 の承認の後、昇格の Pull Request #{n}（{head} → {base}）をマージした",
+        version_note=f"#{n} のマージのコミット。直前は {base} の {prev_sha}" if prev_sha else f"#{n} のマージのコミット",
+    )
+
+
 def exists(text, ver, prs):
     """PR の最後のリリース記録が同じ版・同じスプリントの PR の本番の記録なら True。"""
     last = dist_record.parse_record(text)
