@@ -257,8 +257,8 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | レビューの文脈ファイル | — | `pr-review-steps.py collect` が書く、レビューの対象・差分の在りか・未解決のスレッド（位置と最初のコメントの本文）・指摘ファイルの書き方をまとめたファイル。外部 AI へのプロンプトはこれに観点と委譲の決まりを足して組む | — | — | `docs/specifications/pr-review-steps-script.md` |
 | 仕様適合 | — | レビューの第 1 段。受け入れ条件・不変条件・対象範囲・テストが仕様を表すかを見る。満たさない指摘は指摘ファイルで段 `spec` を持つ | — | — | `docs/specifications/pr-review-steps-script.md` |
 | 設計との突き合わせ | — | 完了判定で、設計に名前の出るテスト・既存の確定仕様と変更履歴・設計の決定を実装と照らし、食い違いを残すこと。確認 (a)(b)(c) の 3 つからなる | — | — | `docs/specifications/quality-gates-design-match.md` |
-| 独立に求めた値 | — | 段階 4 で動かすコードを通さずに、設計・要求の段階で求めた件数・金額・行数などの値。出力から逆算した値は当たらない | — | — | `plugins/ndf/skills/quality-gates/references/definition-of-done.md` |
-| 独立に求めた値との突き合わせ | — | standard の完了判定で、段階 4 の出力を独立に求めた値と比べ、出所・期待値・出力の値・一致したかを証跡に残すこと。値が無ければ「突き合わせる値が無い」と書く。設計との突き合わせ (a)(b)(c) には含めない | — | — | `plugins/ndf/skills/quality-gates/references/definition-of-done.md` |
+| 独立に求めた値 | — | 段階 4 のうち実データに対する結合確認で動かすコードを通さずに、設計・要求の段階で実データについて求めた件数・金額・行数などの値。出力から逆算した値は当たらない | — | — | `plugins/ndf/skills/quality-gates/references/definition-of-done.md` |
+| 独立に求めた値との突き合わせ | — | standard の完了判定で、段階 4 のうち実データに対する結合確認の出力を独立に求めた値と比べ、出所・期待値・出力の値・一致したかを証跡に残すこと。値が無ければ「突き合わせる値が無い」と書き、実データに対する結合確認が無ければ「対象が無い」と書く。フィクスチャで回す結合テストの出力は比べない。設計との突き合わせ (a)(b)(c) には含めない | — | — | `plugins/ndf/skills/quality-gates/references/definition-of-done.md` |
 | 設計に名前の出るテスト | — | 設計文書の「決定の記録」「テスト設計」「構成要素」に、バッククォートで囲んで書かれたテストファイルのパス・<パス>::<名前>・「テスト設計」の test で始まる識別子 | — | — | `docs/specifications/quality-gates-design-match.md` |
 | 既存の確定仕様 | — | 比べるベースブランチとの merge-base の時点で確定仕様の置き場にあった文書。同じ差分で足した確定仕様は含まない | — | — | `docs/specifications/quality-gates-design-match.md` |
 | 設計の決定 | — | 設計文書の「決定の記録」の 1 件（### 決定 N）。judge のステップが返す「決定」とは別の語 | — | — | `docs/specifications/quality-gates-design-match.md` |
