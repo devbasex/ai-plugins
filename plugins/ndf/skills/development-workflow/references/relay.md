@@ -137,7 +137,7 @@ claude が再開コマンドを `ndf-next` のブロックで出して応答を�
 | シグナルファイルを書いた後に応答が再開した（目標が未達の判定が無いとき） | 会話の記録に、シグナルファイルより後の `assistant` か `user` の行がある。次の Stop がシグナルファイルを書き直すまで待つ |
 
 **本文で承認を待って終えた応答は、1 度止めて `AskUserQuestion` へ戻す。** ラッパーの直接の子の応答が `AskUserQuestion` を呼ばずに
-承認待ちの文（判定は Slack の待ち通知と同じ `lib/wait_notice.py` の `classify_text` で、回答待ちか承認待ちに当たる文）で
+承認待ちの文（判定は `lib/wait_notice.py` の `classify_reply_wait` で、回答待ちか承認待ちに当たる文。Slack の待ち通知の `classify_text` より狭く、操作の案内は待ちに数えない）で
 終わると、Stop hook（`mark`）が Stop を止め、同じ問いを `AskUserQuestion` で出し直すよう伝える。`/goal` の判定は本文の待ちでは
 止まらないためである。次のときは止めない。
 

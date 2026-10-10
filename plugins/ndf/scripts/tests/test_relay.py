@@ -4496,6 +4496,26 @@ def test_prose_wait_ignores_an_operation_instruction(relay):
     held_reason(mark(relay.dir, stop_input("設計 PR を作った。承認をお願いします。")))
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "設計 PR の内容の確認をお願いします。",
+        "A と B のどちらで進めるか選んでください。",
+        "方針を教えてください。",
+        "次にどのファイルを直すか教えてください。",
+    ],
+)
+def test_reply_wait_keeps_requests_that_ask_for_an_answer(text):
+    """依頼の語だけの文でも、操作の案内でなく回答・確認を求める文は待ちに残す。"""
+    assert relay_mark.wait_notice.classify_reply_wait(text) == relay_mark.wait_notice.ANSWER
+
+
+def test_reply_wait_drops_only_operation_instructions():
+    """操作の動詞（再起動・インストールなど）だけを案内する文は待ちに数えない。"""
+    for text in ("更新を終えました。アプリを再起動してください。", "依存を入れました。uv sync でインストールしてください。"):
+        assert relay_mark.wait_notice.classify_reply_wait(text) == relay_mark.wait_notice.NONE
+
+
 def test_prose_wait_ignores_a_reply_that_asked(relay):
     """受け入れ条件 10: 質問の合図が在る Stop と、前の Stop より後に質問を出した Stop では止めない。"""
     section_start(relay)

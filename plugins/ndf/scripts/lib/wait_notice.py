@@ -191,19 +191,38 @@ def classify_text(text: str) -> tuple[str, str]:
 
 # 操作の案内（「アプリを再起動してください」）にだけ現れる依頼の語。回答・承認を待つ問いとは分ける
 INSTRUCTION_ONLY = ("ください", "お願いします")
+# 操作の案内と見なす動詞（許可リスト）。依頼の語だけの文は、これを含むときに限り待ちから外す
+OPERATION_VERBS = (
+    "再起動",
+    "起動し直",
+    "開き直",
+    "読み込み直",
+    "再読み込み",
+    "リロード",
+    "インストール",
+    "導入",
+    "実行して",
+    "ログインし直",
+    "再ログイン",
+)
+# 回答・判断を求める語。操作の動詞と並んでも待ちに残す
+REPLY_WORDS = ("確認", "選", "教え", "回答", "答え", "判断", "レビュー", "返事", "指示", "意見", "知らせ", "決め")
 
 
 def _asks_reply(sentence: str) -> bool:
-    """回答・承認を待つ問いか。依頼の語だけで待ちになった文（操作の案内）は、承認の語を含まなければ外す。"""
+    """回答・承認を待つ問いか。依頼の語だけで待ちになった文は、操作の案内（OPERATION_VERBS を含み、
+    回答・判断・承認の語を含まない）のときだけ外す。"""
     if not _is_wait(sentence):
         return False
     core = _core(sentence)
     if any(w in core for w in USER_WAIT_CONTAINS) or sentence.rstrip(_DECORATION).endswith(("?", "？")) or core.endswith(WAIT_ENDINGS):
         return True
     hits = [w for w in WAIT_CONTAINS if w in core]
-    if set(hits) <= set(INSTRUCTION_ONLY):
-        return any(w in core for w in APPROVAL_WORDS)
-    return True
+    if not set(hits) <= set(INSTRUCTION_ONLY):
+        return True
+    if not any(w in core for w in OPERATION_VERBS):
+        return True
+    return any(w in core for w in REPLY_WORDS + APPROVAL_WORDS)
 
 
 def classify_reply_wait(text: str) -> str:

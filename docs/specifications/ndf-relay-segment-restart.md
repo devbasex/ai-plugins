@@ -271,7 +271,7 @@ stateDiagram-v2
 | 6 | ブロックがちょうど 1 つ | シグナルファイルを書く（前のシグナルファイルは置き換わる） |
 | 7 | ブロックが 0 で、`asked` の時刻がシグナルファイルの `written_at` 以後 | シグナルファイルを消す（シグナルファイルの後に質問が出た） |
 | 8 | ブロックが 0 で、7 に当たらない | 前のシグナルファイルを残す。シグナルファイルを書いた後は切り替えを確定とする |
-| 9 | 7・8 の後でブロックが 0 で、シグナルファイルが保留中でなく（無いか、`asked` の時刻がその `written_at` 以後）、同じ区間の前の Stop で止めておらず（`wait-held.json` の `held`）、応答の中で質問を出しておらず（Stop の時点で `question` が在った・`asked` の時刻が前の Stop 以後のどちらでもない）、`last_assistant_message` が `lib/wait_notice.py` の `classify_text` で回答待ちか承認待ち | `wait-held.json` の `held` を真にし、`log.jsonl` に `{"event": "prose_wait", "at", "section", "kind"}` を足して、標準出力へ `{"decision": "block", "reason": …}`（同じ問いを `AskUserQuestion` で出し直す文）を出す（承認待ちの差し戻し）。`stop_hook_active` は読まない（`/goal` の続きでは常に真になる）。判定・状態の読み書きの失敗は止めない側へ倒し、記録の失敗では文を出す |
+| 9 | 7・8 の後でブロックが 0 で、シグナルファイルが保留中でなく（無いか、`asked` の時刻がその `written_at` 以後）、同じ区間の前の Stop で止めておらず（`wait-held.json` の `held`）、応答の中で質問を出しておらず（Stop の時点で `question` が在った・`asked` の時刻が前の Stop 以後のどちらでもない）、`last_assistant_message` が `lib/wait_notice.py` の `classify_reply_wait` で回答待ちか承認待ち（通知の `classify_text` より狭く、操作の案内（再起動・インストールなどの動詞を含み、回答・判断・承認の語を含まない依頼の文）は待ちに数えない） | `wait-held.json` の `held` を真にし、`log.jsonl` に `{"event": "prose_wait", "at", "section", "kind"}` を足して、標準出力へ `{"decision": "block", "reason": …}`（同じ問いを `AskUserQuestion` で出し直す文）を出す（承認待ちの差し戻し）。`stop_hook_active` は読まない（`/goal` の続きでは常に真になる）。判定・状態の読み書きの失敗は止めない側へ倒し、記録の失敗では文を出す |
 
 **前の Stop** は `wait-held.json` の `at`（直接の子の Stop のたびに書き直す）で、無い・区間が違うときは今の区間の `start` の `at` である。
 
