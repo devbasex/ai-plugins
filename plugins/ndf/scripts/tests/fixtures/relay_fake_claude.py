@@ -87,7 +87,13 @@ def do_fail(error):
 def prompt_hook(prompt):
     """区間のプロンプトを受けた `UserPromptSubmit` hook（`hook.py goal-skill`）を模す。"""
     hook = os.path.join(os.path.dirname(RELAY), "hook.py")
-    data = {"session_id": f"s{os.getpid()}", "transcript_path": transcript(), "cwd": os.getcwd(), "hook_event_name": "UserPromptSubmit", "prompt": prompt}
+    data = {
+        "session_id": f"s{os.getpid()}",
+        "transcript_path": transcript(),
+        "cwd": os.getcwd(),
+        "hook_event_name": "UserPromptSubmit",
+        "prompt": prompt,
+    }
     p = subprocess.run([sys.executable, hook, "goal-skill"], input=json.dumps(data), text=True, capture_output=True)
     log(f"prompt-{os.getpid()}.jsonl", {"prompt": prompt, "stdout": p.stdout, "code": p.returncode})
 

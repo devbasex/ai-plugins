@@ -23,7 +23,11 @@ def _run(stdin: str) -> subprocess.CompletedProcess:
     ("prompt", "name", "args"),
     [
         ("/goal /ndf:development-workflow #895", "ndf:development-workflow", "#895"),
-        ("/goal /ndf:development-workflow #928 .ndf/handoff/issue-928.md の続きから", "ndf:development-workflow", "#928 .ndf/handoff/issue-928.md の続きから"),
+        (
+            "/goal /ndf:development-workflow #928 .ndf/handoff/issue-928.md の続きから",
+            "ndf:development-workflow",
+            "#928 .ndf/handoff/issue-928.md の続きから",
+        ),
         ("/goal /ndf:restart", "ndf:restart", ""),
         ("/goal /ndf:development-workflow #1\n2 行目", "ndf:development-workflow", "#1\n2 行目"),
         ("/goal /nosuch:skill #1", "nosuch:skill", "#1"),
@@ -36,14 +40,26 @@ def test_parse_reads_the_condition_skill_and_the_rest(prompt, name, args):
 
 @pytest.mark.parametrize(
     "prompt",
-    ["/goal 引継ぎ文書の続きから", "/ndf:development-workflow #895", "/goal ndf:x", "/goal /x", "", "/goal 続きは /ndf:development-workflow で", None],
+    [
+        "/goal 引継ぎ文書の続きから",
+        "/ndf:development-workflow #895",
+        "/goal ndf:x",
+        "/goal /x",
+        "",
+        "/goal 続きは /ndf:development-workflow で",
+        None,
+    ],
 )
 def test_parse_ignores_other_prompts(prompt):
     assert goal_skill.parse_goal(prompt) is None
 
 
 def test_the_hook_tells_to_load_the_skill_with_the_rest_as_arguments():
-    out = _run(json.dumps({"hook_event_name": "UserPromptSubmit", "prompt": "/goal /ndf:development-workflow #928 .ndf/handoff/issue-928.md の続きから"}))
+    out = _run(
+        json.dumps(
+            {"hook_event_name": "UserPromptSubmit", "prompt": "/goal /ndf:development-workflow #928 .ndf/handoff/issue-928.md の続きから"}
+        )
+    )
     assert out.returncode == 0
     spec = json.loads(out.stdout)["hookSpecificOutput"]
     assert spec["hookEventName"] == "UserPromptSubmit"
@@ -56,7 +72,9 @@ def test_the_hook_drops_the_argument_part_when_the_rest_is_empty():
     assert ctx is not None and "引数" not in ctx
 
 
-@pytest.mark.parametrize("stdin", ["", "not json", "[]", json.dumps({"prompt": 1}), json.dumps({}), json.dumps({"prompt": "/goal 続きから"})])
+@pytest.mark.parametrize(
+    "stdin", ["", "not json", "[]", json.dumps({"prompt": 1}), json.dumps({}), json.dumps({"prompt": "/goal 続きから"})]
+)
 def test_the_hook_passes_silently(stdin):
     out = _run(stdin)
     assert out.returncode == 0 and out.stdout == ""
