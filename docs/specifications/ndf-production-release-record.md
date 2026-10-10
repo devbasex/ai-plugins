@@ -112,7 +112,7 @@ python3 release-steps.py record --version <版> --prs <PR番号>... [--plugin <�
 
 ブランチとプラグイン名は `release` と同じく `release_decl` が宣言から読む。
 
-昇格の経路（#837）は `record --promote --head <ベースブランチ> --base <本番チャネル> --prs <PR番号>...` を打つ。
+昇格の経路は `record --promote --head <ベースブランチ> --base <本番チャネル> --prs <PR番号>...` を打つ。
 前提は `head → base` のマージ済みの PR とそのマージのコミットで、無ければ書かずに 3。書く先はその PR、`版:` は
 `<本番チャネル> <直前の短い SHA> → <本番チャネル> <マージのコミットの短い SHA>`（直前はマージのコミットの 1 つ目の親。
 読めなければ `なし`）。結果 JSON・終了コード・書かないときは下の表と同じである。
