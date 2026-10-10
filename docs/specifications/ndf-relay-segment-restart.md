@@ -492,5 +492,6 @@ hook が止めるのは工程へ入る起動だけで、フェーズの中の Ba
 - [#928](https://github.com/devbasex/ai-plugins/issues/928) / [#936](https://github.com/devbasex/ai-plugins/issues/936) — 明示の導入・`/ndf:restart`・承認ゲートを越えない守り・起動オプションの引継ぎ（[ndf-relay-install-and-restart.md](ndf-relay-install-and-restart.md)）
 - [#827](https://github.com/devbasex/ai-plugins/issues/827) — supervisor の層のスクリプト駆動。「何が claude を起動し、状態をどこに持つか」の答え（スクリプトが起動し、正本は会話の外の記録、LLM の結果は hook がファイルへ写す）を共有する
 - [ndf-token-waits-and-context-cut.md](ndf-token-waits-and-context-cut.md) — コンテキスト量の hook と再開コマンド
+- [ndf-relay-goal-skill-and-prose-wait.md](ndf-relay-goal-skill-and-prose-wait.md) — `/goal` の条件の Skill の案内と承認待ちの差し戻し（「`mark` の判定」の 9）の決定と理由
 - [ndf-agent-layers-unattended-run.md](ndf-agent-layers-unattended-run.md) — 3 層の運転
 - [ndf-context-window-metrics.md](ndf-context-window-metrics.md) — 会話の記録からコンテキスト量を測る部品

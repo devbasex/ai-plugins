@@ -461,9 +461,9 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 同期の控え | — | 前の同期で両側へ書いた共有する設定の部分の写しと、その時点のアカウント側の userID（アカウントの設定ディレクトリの .ndf-shared-base.json） | — | — | — |
 | 更新の排他 | — | Claude Code がトークンを更新するときに設定ディレクトリの中に作る排他（.oauth_refresh.lock のディレクトリ） | — | — | — |
 | 認証の失敗の観測 | — | 子の claude の応答が認証の失敗で終わったことの記録（account.json の auth_failed）。後の使用量の取得が成功するか 1 時間で解ける | — | — | — |
-| 条件の Skill | — | `/goal` の条件の先頭の語が `/<プラグイン>:<Skill>` の形で名指しする Skill（例: `/ndf:development-workflow`） | — | — | — |
-| 承認待ちの文 | — | `AskUserQuestion` を呼ばずに、応答の本文で利用者の承認・判断を待つと書いた文。判定は `lib/wait_notice.py` の `classify_reply_wait` で、回答待ちか承認待ちに当たる文を指す。待ち通知の `classify_text` より狭く、操作の案内（再起動・インストールなど）は待ちに数えない | — | — | — |
-| 承認待ちの差し戻し | — | ラッパーの直接の子の応答が承認待ちの文で終わったとき、Stop hook が Stop を 1 度止め、`AskUserQuestion` で出し直すよう伝えること | — | — | — |
+| 条件の Skill | — | `/goal` の条件の先頭の語が `/<プラグイン>:<Skill>` の形で名指しする Skill（例: `/ndf:development-workflow`） | — | — | `docs/specifications/ndf-relay-goal-skill-and-prose-wait.md` |
+| 承認待ちの文 | — | `AskUserQuestion` を呼ばずに、応答の本文で利用者の承認・判断を待つと書いた文。判定は `lib/wait_notice.py` の `classify_reply_wait` で、回答待ちか承認待ちに当たる文を指す。待ち通知の `classify_text` より狭く、操作の案内（再起動・インストールなど）は待ちに数えない | — | — | `docs/specifications/ndf-relay-goal-skill-and-prose-wait.md` |
+| 承認待ちの差し戻し | — | ラッパーの直接の子の応答が承認待ちの文で終わったとき、Stop hook が Stop を 1 度止め、`AskUserQuestion` で出し直すよう伝えること | — | — | `docs/specifications/ndf-relay-goal-skill-and-prose-wait.md` |
 
 ## NDF のリリース（`ndf-release`）
 
@@ -485,11 +485,11 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | 比べた先端 | — | 本番の配布が承認したコミットと比べた時点の、ベースブランチの先端のコミットの SHA。本番チャネルへマージしてよいのはこのコミットだけである | — | — | `docs/specifications/ndf-release-approved-commit.md` |
 | 承認の外のコミット | — | 承認したコミットから比べた先端までに入ったコミットのうち、この版の配布の PR のものでないもの。あれば本番の配布は承認ゲートで止まる | — | — | `docs/specifications/ndf-release-approved-commit.md` |
 | 承認の記録 | — | 承認資料の欄の 1 つ。ゲート 2 を承認したときの承認したコミットの SHA と、承認した者・時刻を持つ。承認資料を書き直すと消え、承認し直すまで本番の配布は通らない | — | — | `docs/specifications/ndf-release-approved-commit.md` |
-| 更新情報の節 | — | plugin の README の `## 更新情報` の節。版を名乗らず、CHANGELOG.md の版の節を参照する固定の案内だけを持つ。配布の手順（bump・changelog・notes）は書かない | — | — | — |
-| 版の節 | — | CHANGELOG.md の `## [<plugin> <基底の版>]` の見出しから次の `## ` までの節。その版の利用者向けの変化と移行の手順の全件の正本 | — | — | — |
-| 子の箇条 | — | PR 本文の箇条書きで、前の項目より字下げした箇条。親の項目の一部として読む | — | — | — |
-| リリース後テストの記録 | — | release-verification が Pull Request へ残す、見出し `## リリース後テスト` から `合否:` までのブロック。`対象の版:` の行と課題ごとの表を持つ | — | — | — |
-| 版数を上げない配布 | — | 版数を変えず、既定ブランチへのマージかコミットの反映で本番へ届ける配布 | — | — | — |
+| 更新情報の節 | — | plugin の README の `## 更新情報` の節。版を名乗らず、CHANGELOG.md の版の節を参照する固定の案内だけを持つ。配布の手順（bump・changelog・notes）は書かない | — | — | `docs/specifications/ndf-release-readme-update-info.md` |
+| 版の節 | — | CHANGELOG.md の `## [<plugin> <基底の版>]` の見出しから次の `## ` までの節。その版の利用者向けの変化と移行の手順の全件の正本 | — | — | `docs/specifications/ndf-release-readme-update-info.md` |
+| 子の箇条 | — | PR 本文の箇条書きで、前の項目より字下げした箇条。親の項目の一部として読む | — | — | `docs/specifications/ndf-release-readme-update-info.md` |
+| リリース後テストの記録 | — | release-verification が Pull Request へ残す、見出し `## リリース後テスト` から `合否:` までのブロック。`対象の版:` の行と課題ごとの表を持つ | — | — | `docs/specifications/ndf-production-release-record.md` |
+| 版数を上げない配布 | — | 版数を変えず、既定ブランチへのマージかコミットの反映で本番へ届ける配布 | — | — | `docs/specifications/ndf-production-release-record.md` |
 
 ## NDF の指示書チェック（`ndf-instructions`）
 

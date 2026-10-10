@@ -280,6 +280,9 @@ sh -c 'R="${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/rc-added"; C="${XDG_DA
 
 ### 承認ゲートを越えない守り
 
+この節はラッパーが書く `/exit` が質問の答えにならない守りを扱う。conductor が `AskUserQuestion` を呼ばずに本文で承認を待って
+終えた応答を 1 度止める守り（承認待ちの差し戻し）は [ndf-relay-goal-skill-and-prose-wait.md](ndf-relay-goal-skill-and-prose-wait.md) にある。
+
 **質問シグナルファイル `question`**（作業ディレクトリのファイル。`next.json` の形は変えない）:
 
 | 書く側 | 条件 | すること |
@@ -440,3 +443,4 @@ G1〜G3 はこの課題で既存の `/exit` に入れた。G4〜G7 は入力注�
 - [#931](https://github.com/devbasex/ai-plugins/issues/931) — 入力注入の実装（G4〜G7 を入力にする）
 - [devbasex/devbase#253](https://github.com/devbasex/devbase/issues/253) — 永続化されたシェルの設定の読み込み
 - [ndf-relay-segment-restart.md](ndf-relay-segment-restart.md) — ラッパーの本体
+- [ndf-relay-goal-skill-and-prose-wait.md](ndf-relay-goal-skill-and-prose-wait.md) — `/goal` の条件の Skill の案内と承認待ちの差し戻し
