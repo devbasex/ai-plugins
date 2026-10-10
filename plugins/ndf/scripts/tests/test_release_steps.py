@@ -412,7 +412,7 @@ def test_notes_fills_approval_cells(repo, tmp_path):
     approval.parent.mkdir()
     approval.write_text(
         "# t\n\n## 2. 承認の判断に使うもの\n\n| 項目 | 内容 |\n| --- | --- |\n| 版数 | 1.2.3 |\n"
-        "| 配る中身 | （未記入） |\n| 検証への配布で確かめたこと | （未記入） |\n\n## 同意を求めること\n\n- [ ] x\n",
+        "| 含む PR | #11 題名 A<br>#12 題名 B |\n| 配る中身 | （未記入） |\n| 検証への配布で確かめたこと | （未記入） |\n\n## 同意を求めること\n\n- [ ] x\n",
         encoding="utf-8",
     )
     before = (repo / "CHANGELOG.md").read_text(encoding="utf-8")
@@ -486,7 +486,9 @@ def test_notes_and_changelog_stop_when_no_pr_is_merged(repo, tmp_path):
     env = fake_gh(tmp_path, {13: {"title": "未マージ", "body": "## 利用者向けの変化\n\n- 載らない\n", "state": "OPEN"}})
     approval = repo / "issues" / "approval.md"
     approval.parent.mkdir()
-    approval.write_text("| 配る中身 | 前の中身 |\n| 検証への配布で確かめたこと | 前の確認 |\n", encoding="utf-8")
+    approval.write_text(
+        "| 含む PR | #13 未マージ |\n| 配る中身 | 前の中身 |\n| 検証への配布で確かめたこと | 前の確認 |\n", encoding="utf-8"
+    )
     files = [repo / "CHANGELOG.md", pdir / "README.md", approval]
     before = [f.read_bytes() for f in files]
     base = ["--root", str(repo), "--version", "1.2.3-dev.1", "--prs", "13"]
@@ -954,7 +956,7 @@ def test_notes_copy_the_migration_steps_under_their_heading(repo, tmp_path):
     approval = repo / "issues" / "approval.md"
     approval.parent.mkdir()
     approval.write_text(
-        "# t\n\n| 項目 | 内容 |\n| --- | --- |\n| 配る中身 | x |\n| 検証への配布で確かめたこと | x |\n\n## 同意を求めること\n\n- [ ] x\n",
+        "# t\n\n| 項目 | 内容 |\n| --- | --- |\n| 含む PR | #12 題名 B<br>#13 移行 |\n| 配る中身 | x |\n| 検証への配布で確かめたこと | x |\n\n## 同意を求めること\n\n- [ ] x\n",
         encoding="utf-8",
     )
     args = [PY, str(SCRIPT), "notes", "--root", str(repo), "--version", "1.2.3-dev.1", "--prs", "12", "13", "--approval", str(approval)]

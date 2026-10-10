@@ -54,6 +54,9 @@ notes は PR 本文の `## 利用者向けの変化` の節（無い・「無し
 組み直す。bump・changelog・notes は plugin の README に触れない（#1867。更新情報は CHANGELOG.md の版の節が正本）。
 `--approval` を渡すと、代わりに本番承認の提示物の
 「配る中身」「検証への配布で確かめたこと」の欄と、PR 本文の `## 未検証・残る危険` を集めた節を書く。
+このとき PR は提示物の「含む PR」の欄から読み、`--prs` は欄にあることを確かめるだけにする（無ければ 3）。
+approval-facts の「含む PR」は、前のタグから承認したコミットまでにベースブランチへ入った PR（版上げの `release/` を除く）と
+`--prs` の和を番号の昇順に並べる（release_lib/included.py。#1274）。
 changelog と notes は未マージの PR を載せず、番号を metrics.unmerged へ出す。渡した PR がすべて未マージなら
 書き込む前に 3（前提エラー）で止まる。PR の読み取り（`gh pr view --json`）は、GraphQL が上限なら REST で読み直す
 （`lib/gh_parts.py` の `view_json`）。
@@ -84,7 +87,7 @@ import schema  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from merged_lib import trash  # noqa: E402
-from release_lib import approval, bump, changed, deploy, others, record, step_run  # noqa: E402
+from release_lib import approval, bump, changed, deploy, included, others, record, step_run  # noqa: E402
 from release_lib.approval import HeadMoved  # noqa: E402
 from release_lib.names import changelog_section, changelog_span, h2_lines, next_h2, plugin_of, release_decl  # noqa: E402
 from step_result import (
@@ -865,6 +868,7 @@ def cmd_approval_facts(a):
     if not prev:
         raise StepError("前のタグを決められない（--prev-tag を渡す）", EXIT_PRECONDITION)
     dev = git(root, "rev-parse", f"origin/{base}").stdout.strip()
+    prs = included.included_prs(included.range_prs(root, prev, dev), a.prs)  # 範囲の PR と --prs の和（#1274）
 
     stat = git(root, "diff", "--shortstat", f"origin/{prod}...origin/{base}").stdout.strip()
     files = int(m.group(1)) if (m := re.search(r"(\d+) files? changed", stat)) else 0
@@ -872,7 +876,7 @@ def cmd_approval_facts(a):
     dels = int(m.group(1)) if (m := re.search(r"(\d+) deletions?", stat)) else 0
 
     items, rows = [], []
-    for n in a.prs:
+    for n in prs:
         d = pr_view(root, n, "number,title,state,mergeCommit,url") or {}
         oid = (d.get("mergeCommit") or {}).get("oid") or ""
         checks = pr_check_buckets(root, n)
@@ -916,7 +920,7 @@ def cmd_approval_facts(a):
         result(
             TOOL,
             "gate",
-            f"{plugin} v{a.version} の本番承認の提示物を書いた（PR {len(a.prs)} 件）",
+            f"{plugin} v{a.version} の本番承認の提示物を書いた（PR {len(items)} 件）",
             items,
             {"files": files, "insertions": ins, "deletions": dels, "prev_tag": prev, "compare": compare, "approved_sha": dev},
             path,
@@ -1020,17 +1024,29 @@ def unmerged_note(skipped):
     return f"（マージされていない {' '.join(f'#{n}' for n in skipped)} は載せない）" if skipped else ""
 
 
+def notes_prs(root, a):
+    """notes が欄を書く PR。--approval なら承認資料の「含む PR」（--prs はそこに無い番号があれば止まる。#1274）。"""
+    if not a.approval:
+        return a.prs, None
+    path = Path(a.approval)
+    path = path if path.is_absolute() else root / path
+    listed = included.read_included(path)
+    if missing := [n for n in a.prs if n not in listed]:
+        names = " ".join(f"#{n}" for n in missing)
+        raise StepError(f"--prs の {names} が承認資料の「含む PR」に無い（approval-facts で承認資料を作り直す）", EXIT_PRECONDITION)
+    return listed, path
+
+
 def cmd_notes(a):
     root = git_root(a.root)
     skipped = []
-    notes = pr_notes(root, a.prs, skipped)
+    prs, path = notes_prs(root, a)
+    notes = pr_notes(root, prs, skipped)
     bullets = [f"- {i}" for _, items, *_ in notes for i in items]
     risks = [f"- {i}" for _, _, rs, *_ in notes for i in rs]
     migration = [f"- {i}" for *_, ms in notes for i in ms]
     fallback = sum(1 for *_, by_title, _ in notes if by_title)
-    if a.approval:
-        path = Path(a.approval)
-        path = path if path.is_absolute() else root / path
+    if path:
         verified = [r for r in (a.verified or "").split(",") if r]
         ref = a.ref or release_decl(root, a)[0]
         items = write_approval(path, a.version, bullets, risks, verified, ref, migration) + unmerged_items(skipped)
@@ -1137,7 +1153,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("approval-facts", parents=[common], help="本番承認の提示物のうち機械で作れる部分を書き出す")
     p.add_argument("--version", required=True, type=version_arg)
-    p.add_argument("--prs", nargs="+", required=True, type=int, metavar="PR番号")
+    p.add_argument(
+        "--prs",
+        nargs="+",
+        required=True,
+        type=int,
+        metavar="PR番号",
+        help="前のタグからベースブランチへ入った PR に足す PR（マージ前の PR など）",
+    )
     p.add_argument("--prev-tag")
     p.add_argument("--plugin", help="配るプラグイン（既定は宣言の release.plugin。タグ <名前>--v<版> に使う）")
     p.set_defaults(func=cmd_approval_facts)
@@ -1146,7 +1169,9 @@ def build_parser() -> argparse.ArgumentParser:
         "notes", parents=[common], help="PR 本文の「利用者向けの変化」から CHANGELOG の版の節（--approval なら提示物の欄）を組む"
     )
     p.add_argument("--version", required=True, type=version_arg)
-    p.add_argument("--prs", nargs="+", required=True, type=int, metavar="PR番号")
+    p.add_argument(
+        "--prs", nargs="+", required=True, type=int, metavar="PR番号", help="--approval なら提示物の「含む PR」にあることを確かめるだけ"
+    )
     p.add_argument("--plugin", help="配るプラグイン（既定は宣言の release.plugin）")
     p.add_argument("--approval", help="本番承認の提示物。渡すと「配る中身」「検証への配布で確かめたこと」の欄を書く")
     p.add_argument("--verified", default="", help="--approval: 導入を確かめた経路（カンマ区切り。例 claude,codex,kiro）")
