@@ -758,6 +758,22 @@ def cmd_release(a):
     git(root, "fetch", "-q", "origin")
     if not merge:
         merge = git(root, "rev-parse", f"origin/{prod}").stdout.strip()
+    _publish_tag_and_release(root, plugin, ver, tag, merge)
+
+    metrics.update({"main_pr": main_pr, "tag": tag, "merge_commit": merge})
+    items += [
+        {"kind": "pr", "name": f"#{main_pr}", "result": "merged", "base": prod},
+        {"kind": "tag", "name": tag, "result": "pushed"},
+        {"kind": "release", "name": tag, "result": "created"},
+    ]
+    swept, sweep_metrics, nxt = _sweep_candidates(root, merge)
+    items += swept
+    metrics.update(sweep_metrics)
+    emit(result(TOOL, "ok", f"{plugin} v{ver} を {prod} へ出し、{tag} と GitHub Release を作った", items, metrics, None, nxt))
+
+
+def _publish_tag_and_release(root, plugin, ver, tag, merge):
+    """本番チャネルへ入ったコミットにタグを打って push し、CHANGELOG.md の節を本文に GitHub Release を作る。"""
     git(root, "tag", "-a", tag, merge, "-m", f"{plugin} v{ver}")
     git(root, "push", "-q", "origin", tag)
 
@@ -772,21 +788,17 @@ def cmd_release(a):
     if p.returncode != 0:
         raise StepError(f"gh release create {tag} が失敗: {p.stderr.strip()[:300]}")
 
-    metrics.update({"main_pr": main_pr, "tag": tag, "merge_commit": merge})
-    items += [
-        {"kind": "pr", "name": f"#{main_pr}", "result": "merged", "base": prod},
-        {"kind": "tag", "name": tag, "result": "pushed"},
-        {"kind": "release", "name": tag, "result": "created"},
-    ]
-    # 後片付け: この版に入ったブランチの退避先（merged の worktree-trash）を回収の候補として挙げる（#824）。
-    # 退避先は Git にも本番のコミットにも無い利用者のファイルを含むため、本番の承認だけでは消さない（C3・C4）。
-    # 消すのは、候補を人へ示して承認を得た後に、承認した名前だけを --only で渡す sweep-trash である
+
+def _sweep_candidates(root, merge):
+    """後片付け: この版に入ったブランチの退避先（merged の worktree-trash）を回収の候補として挙げる（#824）。
+    退避先は Git にも本番のコミットにも無い利用者のファイルを含むため、本番の承認だけでは消さない（C3・C4）。
+    消すのは、候補を人へ示して承認を得た後に、承認した名前だけを --only で渡す sweep-trash である。
+    (items, metrics, next) を返す。
+    """
     swept, sweep_metrics = trash.sweep(root, merge)
-    items += swept
-    metrics.update(sweep_metrics)
     cmd = trash.sweep_command(merge, swept)
     nxt = cmd and f"回収の候補の退避先（items の kind: trash・result: candidate）を人へ示し、承認した名前だけを渡して消す: {cmd}"
-    emit(result(TOOL, "ok", f"{plugin} v{ver} を {prod} へ出し、{tag} と GitHub Release を作った", items, metrics, None, nxt))
+    return swept, sweep_metrics, nxt
 
 
 def cmd_record(a):
