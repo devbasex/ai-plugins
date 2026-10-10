@@ -94,6 +94,18 @@ elif a[:2] == ["issue", "view"]:
         out = seq.pop(0) if len(seq) > 1 else seq[0]
         if out is None:
             code = 1
+        elif "state,body" in a:
+            out = json.dumps({{"state": out, "body": st.get("issue_bodies", {{}}).get(key, "")}})
+elif a[:3] == ["api", "-X", "PATCH"]:
+    m = __import__("re").match(r"repos/(.+)/issues/(\d+)$", a[4])
+    key = f"{{m.group(1)}}#{{m.group(2)}}"
+    if st.get("write_code", 0):
+        code = 1
+        sys.stderr.write("write failed\n")
+    else:
+        st.setdefault("issue_bodies", {{}})[key] = json.load(sys.stdin)["body"]
+        st.setdefault("written", []).append(key)
+        out = "HTTP/2.0 200 OK\n\n{{}}"
 elif a[:2] == ["issue", "close"]:
     key = f"{{opt('--repo')}}#{{a[2]}}"
     st.setdefault("closed", []).append(key)
@@ -142,7 +154,8 @@ def gh(tmp_path):
     env["FAKE_GH_STATE"] = str(state)
     env["NDF_PRESENTATION_DIR"] = str(tmp_path / "pres")
     env["NDF_WORKTREE_BASE"] = str(tmp_path / "wtbase")
-    for k in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+    env["NDF_LOCK_DIR"] = str(tmp_path / "locks")
+    for k in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GH_TOKEN", "GITHUB_TOKEN"):  # REST も偽の gh を通す
         env.pop(k, None)
 
     class G:
@@ -712,7 +725,8 @@ def test_parse_record_skips_a_distribution_heading_inside_a_fence():
 def test_verification_verdicts_reads_a_missing_result_cell_as_not_passed():
     """GFM の表は欠けたセルを空として読む。`結果` の欠けた行は合格でない（前は表ごと読めない扱い）。"""
     block = "## リリース後テスト\n\n| 課題 | 条件 | 結果 |\n| --- | --- | --- |\n| #7 | a | 合格 |\n| #8 | b |\n\n合否: 不合格\n"
-    assert load_sprint_close().verification_verdicts(block, "o/r") == {("o/r", 7): True, ("o/r", 8): False}
+    got = load_sprint_close().verification_verdicts(block, "o/r")
+    assert {k: v.all_pass for k, v in got.items()} == {("o/r", 7): True, ("o/r", 8): False}
 
 
 # --- 承認ゲート 2（自動反映の本番チャネルへのマージ。#1336） ------------------------
