@@ -79,14 +79,25 @@ def _verify_blocks(lines, sections):
     return blocks
 
 
+_EXPLICIT_VERSION = re.compile(r"v?\d+\.\d+\.\d+")
+
+
+def _is_explicit_version(ver):
+    """`対象の版:` が版数（`10.17.69-dev.1` など）で書かれているか。コミットの表記（`main c427284`）は版数ではない。"""
+    return bool(ver) and _EXPLICIT_VERSION.match(ver) is not None
+
+
 def _pick_verify_block(blocks, stage, version, dist_start):
     """使うリリース後テストのブロック。本番は対象の版が一致する最後のブロック、無ければ（版数を上げない配布で
-    `版:` と `対象の版:` の書き方が違うとき。#1789）配布なしと同じく最後の配布の記録より後の最後のブロック。"""
+    `版:` と `対象の版:` の書き方が違うとき。#1789）最後の配布の記録より後で、対象の版が版数でない最後のブロック。
+    版数の違うテスト（本番 10.17.68 の後の 10.17.69-dev.1 など）は本番の検証に使わない。配布なしは最後の配布の
+    記録より後の最後のブロック。"""
     after = [b for b in blocks if b["start"] > dist_start]
     if stage.startswith("本番") and version:
         hit = [b for b in blocks if b["ver"] == version]
         if hit:
             return "\n".join(hit[-1]["lines"])
+        after = [b for b in after if not _is_explicit_version(b["ver"])]
     elif not stage.startswith("配布なし"):
         return None
     return "\n".join(after[-1]["lines"]) if after else None
@@ -96,7 +107,8 @@ def parse_record(text):
     """最後の配布の記録と、使うリリース後テストのブロックを読む。
 
     戻り値: {"found", "stage", "version", "sprint_prs", "verify_block"}。
-    verify_block は本番なら対象の版が一致する最後のブロック（無ければ最後の配布の記録より後の最後のブロック）、
+    verify_block は本番なら対象の版が一致する最後のブロック（無ければ最後の配布の記録より後で、対象の版が版数でない
+    最後のブロック）、
     配布なしなら最後の配布の記録より後の最後のブロック。無ければ None。
     """
     lines = text.splitlines()

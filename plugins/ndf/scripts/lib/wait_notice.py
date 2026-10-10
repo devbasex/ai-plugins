@@ -189,6 +189,33 @@ def classify_text(text: str) -> tuple[str, str]:
     return kind, " ".join(waits)[:EXCERPT_LIMIT]
 
 
+# 操作の案内（「アプリを再起動してください」）にだけ現れる依頼の語。回答・承認を待つ問いとは分ける
+INSTRUCTION_ONLY = ("ください", "お願いします")
+
+
+def _asks_reply(sentence: str) -> bool:
+    """回答・承認を待つ問いか。依頼の語だけで待ちになった文（操作の案内）は、承認の語を含まなければ外す。"""
+    if not _is_wait(sentence):
+        return False
+    core = _core(sentence)
+    if any(w in core for w in USER_WAIT_CONTAINS) or sentence.rstrip(_DECORATION).endswith(("?", "？")) or core.endswith(WAIT_ENDINGS):
+        return True
+    hits = [w for w in WAIT_CONTAINS if w in core]
+    if set(hits) <= set(INSTRUCTION_ONLY):
+        return any(w in core for w in APPROVAL_WORDS)
+    return True
+
+
+def classify_reply_wait(text: str) -> str:
+    """本文が回答・承認を待って終わったかの種類（ANSWER / APPROVAL / NONE）。通知の classify_text より狭く、
+    操作の案内の依頼形（「更新を終えました。アプリを再起動してください。」）は待ちに数えない。"""
+    sentences = _sentences(_last_lines(_prose_lines(text)))
+    waits = [s for s in sentences if _asks_reply(s)]
+    if not waits:
+        return NONE
+    return APPROVAL if any(any(w in s for w in APPROVAL_WORDS) for s in waits) else ANSWER
+
+
 def done_excerpt(text: str) -> str:
     """完了の通知の抜粋: 最後の段落の先頭 200 字（決定 7）。"""
     paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text or "") if p.strip()]

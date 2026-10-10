@@ -254,6 +254,13 @@ def test_a_matching_release_test_still_wins_over_a_later_one():
     assert got["version"] == "10.17.68" and got["verify_block"].endswith("合否: 合格（一致）")
 
 
+def test_a_release_test_of_another_version_is_not_used_for_production():
+    """AC1: 版の一致するブロックが無く、後ろが版数の違うテスト（10.17.69-dev.1）だけなら本番の検証に使わない。"""
+    text = dist_record.format_record("10.17.67", "10.17.68", [1], stage_note="承認の後", version_note="タグ")
+    text += "\n## リリース後テスト\n\n対象の版: 10.17.69-dev.1（2026-10-02）\n合否: 合格（開発版）\n"
+    assert dist_record.parse_record(text)["verify_block"] is None
+
+
 def test_a_release_test_before_the_record_is_not_used():
     """AC1: 記録より前のリリース後テストは、版が違えば選ばない。"""
     text = "## リリース後テスト\n\n対象の版: main abc1234\n合否: 合格\n\n" + UNVERSIONED.split("## リリース後テスト")[0]

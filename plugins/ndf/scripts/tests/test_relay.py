@@ -4488,6 +4488,14 @@ def test_prose_wait_ignores_a_reply_without_a_wait(relay):
     assert not log_rows(relay, "prose_wait")
 
 
+def test_prose_wait_ignores_an_operation_instruction(relay):
+    """操作の案内の依頼形（「…再起動してください」）は回答・承認の待ちではないので止めない。承認の依頼は止める。"""
+    section_start(relay)
+    quiet_ok(mark(relay.dir, stop_input("更新を終えました。アプリを再起動してください。")))
+    assert not log_rows(relay, "prose_wait")
+    held_reason(mark(relay.dir, stop_input("設計 PR を作った。承認をお願いします。")))
+
+
 def test_prose_wait_ignores_a_reply_that_asked(relay):
     """受け入れ条件 10: 質問の合図が在る Stop と、前の Stop より後に質問を出した Stop では止めない。"""
     section_start(relay)
@@ -4523,6 +4531,6 @@ def test_prose_wait_passes_when_the_judgement_fails(relay, monkeypatch):
     def boom(text):
         raise RuntimeError("x")
 
-    monkeypatch.setattr(relay_mark.wait_notice, "classify_text", boom)
+    monkeypatch.setattr(relay_mark.wait_notice, "classify_reply_wait", boom)
     record = relay_record.RelayRecord(str(relay.dir))
     assert relay_mark.prose_wait_reason(str(relay.dir), record, {"last_assistant_message": WAIT_MSG}, False) is None

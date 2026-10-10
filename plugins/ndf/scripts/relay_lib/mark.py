@@ -185,7 +185,7 @@ def prose_wait_reason(d: str, record: RelayRecord, data: dict, asked_open: bool)
         asked_at = parse_iso(asked.get("at")) if isinstance(asked, dict) else None
         if asked_open or (asked_at is not None and (prev_at is None or asked_at >= prev_at)):
             return None
-        kind, _ = wait_notice.classify_text(str(data.get("last_assistant_message") or ""))
+        kind = wait_notice.classify_reply_wait(str(data.get("last_assistant_message") or ""))
         if kind not in (wait_notice.ANSWER, wait_notice.APPROVAL):
             return None
         write_json_atomic(state_path, {**state, "held": True})
