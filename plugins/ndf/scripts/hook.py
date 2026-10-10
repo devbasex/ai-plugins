@@ -51,23 +51,30 @@ def _args(argv: list[str]) -> tuple[str, str]:
 
 def _merge(outs: list) -> dict | str | None:
     outs = [o for o in outs if o]
-    for o in outs:
-        if isinstance(o, dict) and o.get("hookSpecificOutput", {}).get("permissionDecision") == "deny":
-            return o
+    deny = next((o for o in outs if isinstance(o, dict) and o.get("hookSpecificOutput", {}).get("permissionDecision") == "deny"), None)
+    if deny is not None:
+        return deny
     if len(outs) <= 1:
         return outs[0] if outs else None
-    merged: dict = {}
-    contexts = []
-    for o in outs:
-        if not isinstance(o, dict):
-            continue
-        spec = o.get("hookSpecificOutput") or {}
-        if spec.get("additionalContext"):
-            contexts.append(spec["additionalContext"])
-        merged.update({k: v for k, v in o.items() if k != "hookSpecificOutput"})
-    if contexts:
+    merged = _merge_top_level(outs)
+    if contexts := _collect_contexts(outs):
         merged["hookSpecificOutput"] = {"hookEventName": "PreToolUse", "additionalContext": "\n\n".join(contexts)}
     return merged or None
+
+
+def _collect_contexts(outs: list) -> list:
+    """各出力の hookSpecificOutput.additionalContext を順に集める。"""
+    dicts = (o for o in outs if isinstance(o, dict))
+    return [spec["additionalContext"] for spec in ((o.get("hookSpecificOutput") or {}) for o in dicts) if spec.get("additionalContext")]
+
+
+def _merge_top_level(outs: list) -> dict:
+    """hookSpecificOutput 以外のキーを、後の出力が勝つ順で 1 つの辞書へ畳む。"""
+    merged: dict = {}
+    for o in outs:
+        if isinstance(o, dict):
+            merged.update({k: v for k, v in o.items() if k != "hookSpecificOutput"})
+    return merged
 
 
 def dispatch(command: str, runtime: str, raw: dict | None) -> dict | str | None:
