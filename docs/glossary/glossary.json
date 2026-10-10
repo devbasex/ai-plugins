@@ -3684,6 +3684,27 @@
       "source": "docs/specifications/ndf-relay-goal-skill-and-prose-wait.md"
     },
     {
+      "term": "受け入れ条件の番号",
+      "context": "ndf-workflow",
+      "meaning": "課題の本文の `## 受け入れ条件` の節で、コードブロックの外にある行頭のチェックボックスの行を上から数えた順（1 から）。リリース後テストの表の `受け入れ条件` の列は、セルの頭に `<番号>.` で書く",
+      "source": "",
+      "pending_source": "issues/issue-1683-design.md"
+    },
+    {
+      "term": "受け入れ条件の印",
+      "context": "ndf-workflow",
+      "meaning": "受け入れ条件の番号に合格の行がそろった課題を閉じるとき、sprint-close.py がその行のチェックボックスへ付ける `[x]`",
+      "source": "",
+      "pending_source": "issues/issue-1683-design.md"
+    },
+    {
+      "term": "合格の行",
+      "context": "ndf-release",
+      "meaning": "リリース後テストの表で、`結果` の列が `合格` で始まる行",
+      "source": "",
+      "pending_source": "issues/issue-1683-design.md"
+    },
+    {
       "term": "起票者の推定",
       "context": "ndf-workflow",
       "meaning": "課題の題・本文に、利用者の指示の原文に無く起票者（課題を書いた AI）が文書・コード・経緯から推して足した条件。承認ゲート 1 で利用者が確かめるまで、利用者の決定として扱わない",
