@@ -59,7 +59,7 @@
 | [gh_pr_info.py](gh_pr_info.py) | `pr-info` の組み立て | `gh_parts` |
 | [gh_sections.py](gh_sections.py) | 本文の節の取得・置換・末尾への 1 行の追記（GitHub を呼ばない） | `gh_parts` |
 | [clock.py](clock.py) | 今の時刻・ISO の書き出し（`local` / `utc` / `naive` / `z-ms` を引数で選ぶ）と読み取り（`Z` を含む）・秒の差。標準ライブラリだけ | `statefile.py` / `cross-review`（`review_lib/`） / `cross-refactoring`（`refactor_lib/clock.py`）（C1〜C7 で各スクリプト） |
-| [jsonio.py](jsonio.py) | JSON の読み（無い・壊れた・形が違うときの扱いを引数で選ぶ）と原子的な書き込み。標準ライブラリだけ | 同上 |
+| [jsonio.py](jsonio.py) | JSON の読み（無い・壊れた・形が違うときの扱いを引数で選ぶ）と原子的な書き込み、JSONL の読み（壊れた行を止めるか飛ばすかを引数で選ぶ）と追記。標準ライブラリだけ | 同上 |
 | [proc.py](proc.py) | 子プロセスと git の起動（失敗は `StepError(msg, code)`）・`die`・`info` | `step_result.py` / `statefile.py` / `repo.py` / `cross-review`（`review_lib/`） / `cross-refactoring`（`refactor_lib/paths.py`・`commands/setup.py`） |
 | [tool_paths.py](tool_paths.py) | ツールのパス（CLI が起動したツールが書き換える既知のパス）の定義（既定と `.ndf/worktree.json` の `tool_paths`）・分類・skip-worktree の印・index からの除外・push の直前の検査 | `cross-review`（`review_lib/workspace.py`） / `result_posts.py` / `cross-refactoring`（`worktree.py`・`publish.py`・`commands/setup.py`） / `pr-steps.py` |
 | [worktree_base.py](worktree_base.py) | 作業用 worktree の親ディレクトリの解決（`NDF_WORKTREE_BASE` → `<システム tmpdir>/ndf-worktrees`） | `cross-review`（`review_lib/workspace.py`） / `cross-refactoring`（`paths.py`） |
@@ -70,6 +70,7 @@
 | [project_mvv_body.py](project_mvv_body.py) | プロジェクト MVV の本文の解析（見出し・Value の番号・固有の操作の `P<番号>`）と形の誤り（共通原則の写しを含む）・版どうしの差分 | `project_mvv.py` / `project-mvv.py` |
 | [project_mvv_decl.py](project_mvv_decl.py) | `.ndf/mvv.json` の形（標準ライブラリの検査と pydantic の型）と設定の既定。`schemas/mvv.schema.json` の正本 | `project_mvv.py` / `project-mvv.py` |
 | [project_mvv_signals.py](project_mvv_signals.py) | 改訂の兆候（覆し・「判定できない」・流出不具合）の記録と集計、「判定できない」の連続 | `project-mvv.py` / `mvv-gate.py` / `sprint-state.py` |
+| [gate_rejections.py](gate_rejections.py) | 承認ゲートの差し戻しの記録（`gate-rejections.jsonl`。覆しの記録と同じ置き場）の 1 行の形・追記・読み取り・承認ゲート 1・2 ごとの件数 | `gate-rejections.py` / `sprint-state.py` |
 | [sprint_mvv.py](sprint_mvv.py) | `sprint-state.py init --pace fast` のスプリント MVV の写し（マイルストーンの説明から）と、プロジェクト MVV への照合 | `sprint-state.py` |
 | [loop_drive.py](loop_drive.py) | 収束ループの drive の部品（`call`・`parse_vars`・`review_status`） | 収束ループの 2 つの `drive.py` |
 | [deps.py](deps.py) | 外部パッケージを使うエントリポイントが最初に呼ぶ `require("<グループ>")`。import できなければ uv の環境（宣言と版の固定はプラグインルートの `pyproject.toml` と `uv.lock`。`project=` を渡せばその根の 1 組と `<根>/.venv`）で起動し直し、uv が無ければ版を固定して入れる。用意できなければ（起動し直しても import できない・宣言が無い・uv を入れられない）依存の欠けとして終了コード 69（定数 `EXIT_DEPS_MISSING`。値の持ち主はここだけ）。hook とラッパーは `require()` を呼ばない（ラッパーの環境は `relay_lib/runtime.py` が `find_uv`・`install_uv`・`venv_dir` で用意する） | 外部パッケージを使うエントリポイント・根の `scripts/`（`scripts/lib/ndf_wrappers.py` を通す）・`relay_lib/runtime.py` |
