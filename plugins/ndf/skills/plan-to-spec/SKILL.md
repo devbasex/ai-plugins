@@ -28,6 +28,9 @@ allowed-tools:
 
 引数は plan ファイルパス、issue 番号、PR 番号、または関連キーワードを受け付ける。引数がない場合は、現在ブランチの差分、`issues/`、`docs/`、`git log` から直近の plan を特定する。
 
+**呼ぶ側へ渡す抜粋は [references/excerpt.md](references/excerpt.md) にある。** supervisor が確定仕様化を
+worker へ委ねるときは、起動指示へこれをコピーし、本文を読ませない。
+
 ## 手順
 
 ### 1. 対象 plan と実装範囲を特定する
