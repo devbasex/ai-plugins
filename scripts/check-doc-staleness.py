@@ -106,8 +106,8 @@ require("md", "versions")
 import md  # noqa: E402  節と囲みは lib/md.py（markdown-it-py）で読む
 import versions  # noqa: E402  版の比較は lib/versions.py（semver）
 
-# F: plugin の README に置かない版ごとの更新の節の見出し。版数の書き方に依らず拾う。
-UPGRADE_HEADING = re.compile(r"^##\s+v\S+\s+へ更新するとき\s*$", re.MULTILINE)
+# F: plugin の README に置かない版ごとの更新の節の見出し。版数の書き方と前置き（`以前の版:` など）に依らず拾う。
+UPGRADE_HEADING = re.compile(r"^##[ \t]+(?:[^\n]*[ \t])?v\d\S*[ \t]+へ更新するとき[ \t]*$", re.MULTILINE)
 PLUGIN_READMES = ("plugins/*/README.md", "plugins/mcp/*/README.md")
 
 # --- 現行版を指す記載（G〜M）---

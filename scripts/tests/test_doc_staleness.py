@@ -227,12 +227,12 @@ def test_upgrade_section_in_plugin_readme_fails(tree: Path, readme: str) -> None
     path = tree / readme
     path.parent.mkdir(parents=True, exist_ok=True)
     body = path.read_text(encoding="utf-8") if path.is_file() else "# plugin\n"
-    path.write_text(body + "\n## v9.3.0-dev.1 へ更新するとき\n\n- 変わったこと\n", encoding="utf-8")
+    path.write_text(body + "\n## v9.3.0-dev.1 へ更新するとき\n\n- 変わったこと\n\n## 以前の版: v9.2.0 へ更新するとき\n\nx\n", encoding="utf-8")
     result = run_check(tree)
     assert result.returncode != 0
     out = output_of(result)
     assert readme in out
-    assert "v9.3.0-dev.1 へ更新するとき" in out
+    assert "v9.3.0-dev.1 へ更新するとき" in out and "以前の版: v9.2.0 へ更新するとき" in out
 
 
 @pytest.mark.parametrize("version", ["9.7.0-dev.1", "9.7.0-rc.1", "9.6.0"])
