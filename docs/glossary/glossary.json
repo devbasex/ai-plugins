@@ -3606,6 +3606,18 @@
       "source": "docs/specifications/quality-gates-design-match.md"
     },
     {
+      "term": "独立に求めた値",
+      "context": "ndf-workflow",
+      "meaning": "段階 4 で動かすコードを通さずに、設計・要求の段階で求めた件数・金額・行数などの値。出力から逆算した値は当たらない",
+      "source": "plugins/ndf/skills/quality-gates/references/definition-of-done.md"
+    },
+    {
+      "term": "独立に求めた値との突き合わせ",
+      "context": "ndf-workflow",
+      "meaning": "standard の完了判定で、段階 4 の出力を独立に求めた値と比べ、出所・期待値・出力の値・一致したかを証跡に残すこと。値が無ければ「突き合わせる値が無い」と書く。設計との突き合わせ (a)(b)(c) には含めない",
+      "source": "plugins/ndf/skills/quality-gates/references/definition-of-done.md"
+    },
+    {
       "term": "設計に名前の出るテスト",
       "context": "ndf-workflow",
       "meaning": "設計文書の「決定の記録」「テスト設計」「構成要素」に、バッククォートで囲んで書かれたテストファイルのパス・<パス>::<名前>・「テスト設計」の test で始まる識別子",
