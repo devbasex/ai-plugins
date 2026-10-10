@@ -117,7 +117,11 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
   `notes --approval` で埋めて利用者へ示し、承認を得てから `next` のコマンドを打つ。`stopped`
   （3 = 前のタグを決められない）なら `--prev-tag` を渡して打ち直す。`metrics.approved_sha` と承認資料の
   「`承認したコミット`」が承認の対象（打った時点の `origin/<ベースブランチ>` の 40 桁）で、`next` の
-  `--approved-sha` も同じ値である。資料を書き直すと承認の記録は消える
+  `--approved-sha` も同じ値である。資料を書き直すと承認の記録は消える。「`含む PR`」は、前のタグから
+  承認したコミットまでにベースブランチへ merge commit か squash merge で入った PR（head が `release/` の版上げの PR と、
+  件名の `(#N)` が課題を指す番号を除く）と `--prs` の和を、番号の昇順に並べる。`--prs` には範囲の外の PR
+  （マージ前の PR など）だけを渡せば足りる。範囲のログか squash の head を読めなければ、資料を書かずに
+  `stopped`（2 = git のログ・1 = GitHub）で止まる
 - `approve`: 承認資料の「`承認したコミット`」の行の直後へ「`承認の記録`」（SHA・承認した者・時刻）を書く。
   `--approved-sha` が資料の今の値と違えば（提示の後に書き直された）書かずに `stopped`（1）で止まるので、
   資料を提示し直して承認を取り直す。形の誤りは 2、資料・欄が無いと 3
@@ -131,7 +135,9 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
   PR は題名で代える（`metrics.fallback` が件数）。`--approval` を渡すと CHANGELOG は変えず、承認資料の 2 つの欄と、
   PR の本文の `## 未検証・残る危険` を集めた節と `## 移行の手順` の節（0 件なら「- 無し」）を書く。PR の本文の
   `## 移行の手順` の箇条は、CHANGELOG.md の版の節では `### 移行の手順` の下へ `（#番号）` つきで並ぶ（0 件なら
-  見出しを作らない）。未マージの PR は載せず、番号を `metrics.unmerged` へ出す。
+  見出しを作らない）。`--approval` のとき、欄を書く PR は承認資料の「`含む PR`」の欄の PR で、`--prs` は
+  欄に足さない。`--prs` に「`含む PR`」に無い番号があれば欄を書かずに `stopped`（3）で止まるので、
+  `approval-facts` で承認資料を作り直す。未マージの PR は載せず、番号を `metrics.unmerged` へ出す。
   `stopped`（3）は changelog や approval-facts を先に打つ。渡した PR がすべて未マージのときも 3 で止まるので、
   マージしてから打ち直すか `--prs` を直す
 - `changed-plugins`: 前のタグからの差分にある、宣言の `release.plugin` 以外のプラグインを `items[]`（`from`・`to`・
