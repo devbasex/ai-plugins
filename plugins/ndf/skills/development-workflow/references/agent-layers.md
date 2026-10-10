@@ -81,7 +81,7 @@ context window を埋めるときは、**読解だけを worker へ出す**（co
 | 設計 | `new sprint --design <課題>...` の設計のプラン（設計 Pull Request ごと）。終わりの judge が承認ゲート 1 を返す | 設計 → 関門 1 | `--design` を渡さないときの要求と受け入れ条件（`requirements-design`）の工程。設計のプランはこの工程を持つ（課題の本文と仕様のコピーが一致すれば飛ばす） |
 | 実装 | `new sprint` の実装のプラン（課題ごと。スプリントブランチ宛て）。スプリントブランチはその前のステージのプランが切る。単発は `new impl` | スプリントブランチ → 実装 | — |
 | 検査 | `new sprint` の検査のプラン（スプリントの Pull Request を出し、構造改善・コードレビュー・完了判定を通してマージする）。単発は `new check`、`pace: fast` は `new check --since-last` | 検査 | — |
-| 取り込み | スプリントの Pull Request のマージは検査のプランが、検証リリースは開発版のリリースプランが持つ（後片付けは本番のリリースプランの最後のステップ） | 配布（検査のキューが `--then` で流す） | 確定仕様化（`plan-to-spec`）。`normal` のプランはこの工程を持たない（`pace: fast` は `new close` が持つ） |
+| 取り込み | スプリントの Pull Request のマージは検査のプランが、検証リリースは開発版のリリースプランが持つ（後片付けは本番のリリースプランの最後のステップ） | 配布（検査のキューが `--then` で流す） | 確定仕様化（`plan-to-spec`）。worker へ委ねるときは全課題を 1 件の worker に委ね、起動指示の「手順」へ `plan-to-spec` の抜粋（`references/excerpt.md`）をコピーする。`normal` のプランはこの工程を持たない（`pace: fast` は `new close` が持つ） |
 | 仕上げ | 本番のリリースプラン `new release --channel prod`（本番へのリリース・リリース後テスト・後片付け） | 目録（`<out>/sprint.json`）のステージの外。ゲート 2 の承認の後に流す | 振り返り（`retrospective`）と棚卸し（`backlog-refinement`）。同じ supervisor が振り返りに続けて棚卸しを通す。`normal` のプランはこの 2 つの工程を持たない（`pace: fast` は `new close` が持つ） |
 | リリース | `new release --channel dev` / `--channel prod` | 配布 | —（プランだけが通す） |
 
