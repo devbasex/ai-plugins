@@ -121,15 +121,17 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
 - `approve`: 承認資料の「`承認したコミット`」の行の直後へ「`承認の記録`」（SHA・承認した者・時刻）を書く。
   `--approved-sha` が資料の今の値と違えば（提示の後に書き直された）書かずに `stopped`（1）で止まるので、
   資料を提示し直して承認を取り直す。形の誤りは 2、資料・欄が無いと 3
-- `bump`: `items[]` に手で直す箇所が載っていれば直す
-- `changelog`: 見出しと PR のタイトルを並べるだけで、本文は書かない。未マージの PR は載せず、番号を
+- `bump`: `items[]` に手で直す箇所が載っていれば直す。plugin の README には触れない
+- `changelog`: CHANGELOG.md の版の節へ見出しと PR のタイトルを並べるだけで、本文は書かない。plugin の README は
+  書かない。未マージの PR は載せず、番号を
   `metrics.unmerged` へ出す。すべて未マージなら `stopped`（3）で止まるので、マージしてから打ち直すか `--prs` を直す
-- `notes`: 各 PR の本文の `## 利用者向けの変化` の箇条（末尾に `（#番号）`）で、CHANGELOG.md の版の節と
-  plugin の README の `## v<版> へ更新するとき` の節を組み直す。節が無い・「無し」の PR は題名で代える
-  （`metrics.fallback` が件数）。`--approval` を渡すと CHANGELOG と README は変えず、承認資料の 2 つの欄と、
+- `notes`: 各 PR の本文の `## 利用者向けの変化` の箇条（1 行目の末尾に `（#番号）`）で、CHANGELOG.md の版の節を
+  組み直す。plugin の README は読まず書かない（README は CHANGELOG.md を参照する固定の「`## 更新情報`」の節だけを
+  持つ）。字下げした子の箇条は独立した項目にせず、親の項目の下に 1 段の入れ子（`  - `）で残す。節が無い・「無し」の
+  PR は題名で代える（`metrics.fallback` が件数）。`--approval` を渡すと CHANGELOG は変えず、承認資料の 2 つの欄と、
   PR の本文の `## 未検証・残る危険` を集めた節と `## 移行の手順` の節（0 件なら「- 無し」）を書く。PR の本文の
-  `## 移行の手順` の箇条は、CHANGELOG.md の版の節と README の更新の節では `### 移行の手順` の下へ `（#番号）` つきで
-  並ぶ（0 件なら見出しを作らない）。未マージの PR は載せず、番号を `metrics.unmerged` へ出す。
+  `## 移行の手順` の箇条は、CHANGELOG.md の版の節では `### 移行の手順` の下へ `（#番号）` つきで並ぶ（0 件なら
+  見出しを作らない）。未マージの PR は載せず、番号を `metrics.unmerged` へ出す。
   `stopped`（3）は changelog や approval-facts を先に打つ。渡した PR がすべて未マージのときも 3 で止まるので、
   マージしてから打ち直すか `--prs` を直す
 - `changed-plugins`: 前のタグからの差分にある、宣言の `release.plugin` 以外のプラグインを `items[]`（`from`・`to`・
@@ -164,6 +166,21 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
   | `items[]` の `result: unapproved` | 承認の外のコミット（`name` が SHA、`subject`、分かれば `pr`） |
 
   承認の外の変更を含めて `approval-facts` で承認資料を作り直し、承認を取り直して `next` のとおり打ち直す
+
+## 配布の後にリリース記録を置く
+
+**どの配布の形でも、本番への配布を実施した後に、実施後の値で `段階: 本番` のリリース記録を置く。**
+手順 3 で本文に置いたブロックは配布の前に書いたもので、本番が承認待ちなら `段階: 検証（…）` のままである。
+読む側は Pull Request の本文とコメントのうち最後の `## 配布の記録` を読むため、配布の後の記録が無いと
+本番まで出たスプリントの課題が閉じられない。
+
+| 形 | 置き方 |
+| --- | --- |
+| Claude Code のプラグイン | `release-steps.py record --version <版> --prs <PR番号>...` が本番のリリースの Pull Request へコメントで書く |
+| 昇格の Pull Request のマージで届くもの | `release-steps.py record --promote --head <ベースブランチ> --base <本番チャネル> --prs <PR番号>...` が昇格の Pull Request へコメントで書く。`版:` はマージのコミットである |
+| それ以外 | SKILL.md の「出力物」と同じ 3 行の `## 配布の記録` を、配布した値で記録の Pull Request へコメントで足す |
+
+スプリントのプランで配布するときは、プランの `record` のステップがこれを打つ。
 
 ## 退避先の回収
 

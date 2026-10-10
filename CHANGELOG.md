@@ -9,6 +9,30 @@
 **開発版（接尾辞の付いた版）は載せない。** `9.8.0` は `9.8.0-dev.1` までしか出ておらず、
 その内容は `10.0.0` で届いている。
 
+## [ndf 10.17.69] - 2026-10-10
+
+- ndf プラグインで /goal の条件に Skill の名前を書くと、その Skill を読み込むよう UserPromptSubmit hook が案内を出します。（#1879）（#1882）
+- ndf プラグインの relay では、ラッパーの直接の子が本文で承認を求めたまま応答を終えると、その応答を 1 度止めます。そのうえで AskUserQuestion で問うよう差し戻します。（#1879）（#1882）
+- 上の 2 つの振る舞いは、development-workflow の relay.md と context-window.md に書いてあります。（#1879）（#1882）
+- 昇格の後にリリース記録が書かれ、配布の後の実際の値が記録に残る（#1880）（#1882）
+- スプリントのまとめの前にリリース後テスト（release-verify）が実行される（#1880）（#1882）
+- 版の違うリリース後テストの記録も読み取れる（#1880）（#1882）
+- release の手順に、配布の後に実施後の値でリリース記録を置く手順がある（#1880）（#1882）
+- プラグインの README には固定の「更新情報」の節があり、版ごとの変更は CHANGELOG.md の版の節で確かめる（#1881）（#1882）
+- 新しい版を配布しても、プラグインの README は変わらない（#1881）（#1882）
+- CHANGELOG.md の版の節では、子の箇条が親の項目の中に入れ子で並ぶ（#1881）（#1882）
+- ndf の release・pr の手順書は、CHANGELOG.md の版の節を更新案内の正本とする（#1881）（#1882）
+- mcp-bigquery は Google 公式のリモート BigQuery MCP サーバーへ接続します。ローカルのサーバーは起動しません（#1869）
+- ツールが `execute_sql_readonly`・`execute_sql`・`list_dataset_ids`・`list_table_ids`・`get_dataset_info`・`get_table_info`・`get_job`・`get_query_results`・`cancel_job` に変わります。どれも `projectId` を引数で受け取ります（#1869）
+- クエリは既定で 3 分で打ち切られ、結果は 3,000 行までです（#1869）
+- ndf の data-analyst エージェントが挙げる BigQuery のツール名を、実際の名前（`mcp__plugin_mcp-bigquery_bigquery__*`）に直しました（#1869）
+
+### 移行の手順
+
+- mcp-bigquery: 対象プロジェクトで利用者のアカウントに `roles/mcp.toolUser` を付与する（BigQuery のロールには含まれない）（#1869）
+- mcp-bigquery: `gcloud auth login` でユーザーとしてログインする。`BIGQUERY_PROJECT`・`BIGQUERY_LOCATION`・`BIGQUERY_DATASET`・`BIGQUERY_KEY_FILE`（サービスアカウント鍵）は使わなくなる（#1869）
+- mcp-bigquery: Kiro CLI では `dev.kiro/install.sh` を再実行し、起動前に `export BIGQUERY_ACCESS_TOKEN=$(gcloud auth print-access-token)` を実行する（#1869）
+
 ## [ndf 10.17.68] - 2026-10-08
 
 - 共通原則の承認は、既存の承認ゲートで取ります。design と requirements-design の Skill は、共通原則のために承認の工程を新しく足しません（#1857）（#1863）
@@ -110,6 +134,9 @@
 - `--pwk-drive-folder` を渡すと、pytest が未知の引数として止まります。テストの起動から外します
 - Drive へ上げたいときは、NDF の `google-workspace` Skill の `gws drive +upload` を手で使います。
   認証は `gws auth login` で行います（旧 `google-auth` のトークンは移しません）
+- 証跡は今までどおり手元の出力先に残ります
+- Drive へのアップロードに使う NDF の Skill は `/ndf:google-workspace` で呼びます
+- Skill の名前と数は変えていません（4 個）
 
 ## [ndf 10.17.60] - 2026-10-04
 
@@ -131,6 +158,32 @@
 - cross-refactoring を単独で起動するときは、対象のリポジトリの中から絶対パスでコマンドを打ちます。対象のリポジトリは、コマンドを打った場所で確かめられます。（#1716）（#1718）
 - cross-refactoring の SKILL.md に、Draft を解除する条件を書きました。（#1716）（#1718）
 - 最終ステータスは cross-review の駆動が回答ファイルへ書きます。（#1716）（#1718）
+
+## [mcp-serena 2.1.6] - 2026-10-04
+
+### 変更
+
+- 正式版として `main` に載る版です（#818）。変わったことは次のとおりです
+  - **Serena の版を固定しました**: `uvx --from serena-agent==1.7.0` で起動します。以前は GitHub の最新を取っていました
+  - **起動の文脈を変えました**: Claude Code / Kiro CLI は `--context claude-code`、Codex は `--context codex`
+    （`.codex.mcp.json`）で起動し、`--project-from-cwd` で起動したディレクトリのプロジェクトを自動で有効にします。
+    `activate_project` を呼ぶ必要はありません
+  - **memory と onboarding のツールを出しません**: `--add-mode no-memories` / `no-onboarding` で起動します。
+    知識は `docs/` に、手順は `skills/` に置きます
+  - **言語サーバの設定の Skill を足しました**: `/mcp-serena:language-servers`。リポジトリごとに 1 度実行します
+  - **hook を入れ替えました**: SessionStart は設定の食い違いと導入の欠けだけを知らせます。PreToolUse は設定した言語の
+    ファイルの grep・読み込みが続くと 1 度だけ止め、シンボル単位の手順を示します
+
+### 移行の手順
+
+- **Codex では hook を信頼し直します。** 対話の Codex で `/hooks` を開いて mcp-serena の hook を信頼するまで動きません。
+  更新したあとは Claude Code / Codex を起動し直します
+- 手元で確かめるコマンドです。`$ROOT` は導入先の `mcp-serena` のディレクトリで、どれもファイルを書き換えません
+
+  ```bash
+  grep -qF 'serena-agent==1.7.0' "$ROOT/.mcp.json"; echo "exit=$?"   # 0 なら Serena の版が固定されている
+  python3 "$ROOT/scripts/serena-lsp.py" detect --json >/dev/null; echo "exit=$?"   # 0 なら 言語の検出が動く
+  ```
 
 ## [ndf 10.17.58] - 2026-10-03
 
@@ -416,6 +469,32 @@
 - new mission は、用語集の無いリポジトリでも使える（#1197）
 - new mission の help が、種別ごとに説明を示す（#1197）
 - 無し（検査の修正だけ）（#1198）
+
+## [mcp-redash 3.0.0] - 2026-09-26
+
+### 変更
+
+- **互換を壊す変更です。** `/redash-add` / `/redash-remove` / `/redash-list` / `/redash-status` の 4 つの Skill を
+  `/redash` の 1 本にまとめ、操作は最初の引数（`add` / `remove` / `list` / `status`）で選ぶようにしました。
+  旧名の Skill は無くなります（#1250）
+- 追加済みの `redash-*` MCP と MCP サーバの定義（`.mcp.json`）の内容は変えていません
+
+### 移行の手順
+
+操作は `/redash` の最初の引数で選ぶ。`/redash-add` / `/redash-remove` / `/redash-list` / `/redash-status` という名前の Skill は無い。
+
+| 呼んでいた名前 | 呼び方 |
+|-------------|-----------|
+| `/redash-add <suffix>` | `/redash add <suffix>` |
+| `/redash-remove <suffix>` | `/redash remove <suffix>` |
+| `/redash-list` | `/redash list` |
+| `/redash-status` | `/redash status` |
+
+追加済みの `redash-*` MCP と `.mcp.json` はそのまま使える。Kiro CLI で `dev.kiro/install.sh` を実行していた場合は、更新後に `.kiro/skills/` に残る `redash-add` / `redash-remove` / `redash-list` / `redash-status` の 4 つの symlink を消す（installer は今ある Skill の symlink を張るだけで、Skill の無い symlink は消さない）。
+
+```bash
+rm -f .kiro/skills/redash-add .kiro/skills/redash-remove .kiro/skills/redash-list .kiro/skills/redash-status
+```
 
 ## [ndf 10.17.26] - 2026-09-25
 
@@ -1313,6 +1392,28 @@
 - 計画と設計 9 本 2207 行を `docs/specifications/cross-review-evidence-based.md` 464 行の
   確定仕様 1 本へまとめた（#156）
 
+## [mcp-playwright 2.0.1] - 2026-09-12
+
+### 修正
+
+- Claude Code の起動時に出ていた `hooks.json: unknown key ... ignored` の警告を消しました（#568）。
+  hook が実行する内容は変えていません
+
+### 移行の手順
+
+- `claude plugin update mcp-playwright@ai-plugins` のあとに Claude Code を起動し直すと反映されます
+
+## [mcp-serena 2.0.1] - 2026-09-12
+
+### 修正
+
+- Claude Code の起動時に出ていた `hooks.json: unknown key ... ignored` の警告を消しました（#568）。
+  hook が実行する内容は変えていません
+
+### 移行の手順
+
+- `claude plugin update mcp-serena@ai-plugins` のあとに Claude Code を起動し直すと反映されます
+
 ## [ndf 10.9.1] - 2026-09-09
 
 ### 修正
@@ -1839,6 +1940,22 @@ done
   8 コミット古い作業ツリーがそのまま使われていた
 - Kiro の文脈量の上限を外し、`runtime-smoke (kiro)` の予算超過を解消した（#199）
 
+## [mcp-dbhub 2.0.1] - 2026-09-01
+
+### 修正
+
+- **MCP サーバが起動直後に落ちていた不具合を直しました（#206）。** `.mcp.json` が dbhub へ設定ファイルを
+  渡していませんでした。**dbhub 本体は cwd の `dbhub.toml` を自動検出しません**。`--config` / `--dsn` /
+  `DSN` / `.env` のいずれも無いと `ERROR: Database connection configuration is required` を出して終了します
+- `.mcp.json` の引数へ `--config=dbhub.toml` を足しました。相対パスなので、プロジェクトごとの `dbhub.toml` が
+  そのまま効きます
+- **`dbhub.toml` は自動検出される、という README の記述も誤りでした。** 実際は `.mcp.json` の `--config` で
+  読み込まれます
+
+### 移行の手順
+
+- 更新した後、MCP サーバを読み直すために再起動が要ります
+
 ## [ndf 9.4.0] - 2026-08-31
 
 ### 変更
@@ -1927,6 +2044,90 @@ done
 
 - Codex 用の `.agents/plugins/marketplace.json`。Codex は `.claude-plugin/marketplace.json` へ
   フォールバックする
+
+## [mcp-aws-docs 2.0.0] - 2026-08-28
+
+### 変更
+
+- 配布ディレクトリが `plugins/mcp/{shared,claude,codex,kiro}/mcp-aws-docs/` から `plugins/mcp/mcp-aws-docs/` へ変わりました。
+  Kiro CLI の installer は `dev.kiro/install.sh` へ移りました
+- MCP サーバの定義（`.mcp.json`）の内容は変えていません
+
+### 移行の手順
+
+- マーケットプレイスの参照先が変わるため、**導入済みの環境では再インストールが要ります**
+
+## [mcp-chrome-devtools 2.0.0] - 2026-08-28
+
+### 変更
+
+- 配布ディレクトリが `plugins/mcp/{shared,claude,codex,kiro}/mcp-chrome-devtools/` から `plugins/mcp/mcp-chrome-devtools/` へ変わりました。
+  Kiro CLI の installer は `dev.kiro/install.sh` へ移りました
+- MCP サーバの定義（`.mcp.json`）の内容は変えていません
+
+### 移行の手順
+
+- マーケットプレイスの参照先が変わるため、**導入済みの環境では再インストールが要ります**
+
+## [mcp-devin 2.0.0] - 2026-08-28
+
+### 変更
+
+- 配布ディレクトリが `plugins/mcp/{shared,claude,codex,kiro}/mcp-devin/` から `plugins/mcp/mcp-devin/` へ変わりました。
+  Kiro CLI の installer は `dev.kiro/install.sh` へ移りました
+- MCP サーバの定義（`.mcp.json`）の内容は変えていません
+
+### 移行の手順
+
+- マーケットプレイスの参照先が変わるため、**導入済みの環境では再インストールが要ります**
+
+## [mcp-markitdown 2.0.0] - 2026-08-28
+
+### 変更
+
+- 配布ディレクトリが `plugins/mcp/{shared,claude,codex,kiro}/mcp-markitdown/` から `plugins/mcp/mcp-markitdown/` へ変わりました。
+  Kiro CLI の installer は `dev.kiro/install.sh` へ移りました
+- MCP サーバの定義（`.mcp.json`）の内容は変えていません
+
+### 移行の手順
+
+- マーケットプレイスの参照先が変わるため、**導入済みの環境では再インストールが要ります**
+
+## [mcp-notion 2.0.0] - 2026-08-28
+
+### 変更
+
+- 配布ディレクトリが `plugins/mcp/{shared,claude,codex,kiro}/mcp-notion/` から `plugins/mcp/mcp-notion/` へ変わりました。
+  Kiro CLI の installer は `dev.kiro/install.sh` へ移りました
+- MCP サーバの定義（`.mcp.json`）の内容は変えていません
+
+### 移行の手順
+
+- マーケットプレイスの参照先が変わるため、**導入済みの環境では再インストールが要ります**
+
+## [mcp-playwright 2.0.0] - 2026-08-28
+
+### 変更
+
+- 配布ディレクトリが `plugins/mcp/{shared,claude,codex,kiro}/mcp-playwright/` から `plugins/mcp/mcp-playwright/` へ変わりました。
+  Kiro CLI の installer は `dev.kiro/install.sh` へ移りました
+- MCP サーバの定義（`.mcp.json`）の内容は変えていません
+
+### 移行の手順
+
+- マーケットプレイスの参照先が変わるため、**導入済みの環境では再インストールが要ります**
+
+## [mcp-serena 2.0.0] - 2026-08-28
+
+### 変更
+
+- 配布ディレクトリが `plugins/mcp/{shared,claude,codex,kiro}/mcp-serena/` から `plugins/mcp/mcp-serena/` へ変わりました。
+  Kiro CLI の installer は `dev.kiro/install.sh` へ移りました
+- MCP サーバの定義（`.mcp.json`）の内容は変えていません
+
+### 移行の手順
+
+- マーケットプレイスの参照先が変わるため、**導入済みの環境では再インストールが要ります**
 
 ## [ndf 8.6.0] - 2026-08-23
 

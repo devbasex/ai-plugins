@@ -24,14 +24,14 @@ Secret modes:
 
 `--keep-container` is local-debug only and is rejected with `auto` or `required` secret modes.
 
-File secrets are passed with allowlisted keys:
+The BigQuery check calls `list_dataset_ids` on the remote BigQuery MCP server with the gcloud access token. It needs `BIGQUERY_ACCESS_TOKEN` and `BIGQUERY_PROJECT`. The token expires in an hour, so run it locally rather than from the GitHub workflow:
 
 ```bash
-bash scripts/runtime-smoke-test.sh --runtime claude --with-secrets=auto \
-  --secret-file bigquery-key-file=/path/to/service-account.json
+BIGQUERY_ACCESS_TOKEN=$(gcloud auth print-access-token) BIGQUERY_PROJECT=<PROJECT_ID> \
+  bash scripts/runtime-smoke-test.sh --runtime claude --with-secrets=auto
 ```
 
-The authenticated GitHub workflow accepts `BIGQUERY_KEY_FILE_JSON` as a protected secret and writes it to a temporary file before passing it through `--secret-file`.
+The authenticated GitHub workflow passes only `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`.
 
 ## hooks 定義のチェック
 

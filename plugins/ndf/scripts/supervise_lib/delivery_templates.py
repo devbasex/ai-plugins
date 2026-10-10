@@ -10,7 +10,8 @@ from pathlib import Path
 
 from supervise_lib.decl import WORKTREE_DECL, DeclError, with_decls
 from supervise_lib.paths import MERGED_PY, MVV_PY, STEPS_PY
-from supervise_lib.release_templates import MVV_NOTE, mvv_gate_steps
+from supervise_lib.plan import QUEUE_PRS
+from supervise_lib.release_templates import MVV_NOTE, judge_record_step, mvv_gate_steps
 from supervise_lib.verify_steps import MARGIN_FLOOR, handoff_step
 
 
@@ -63,6 +64,8 @@ def plan_promote(
 ) -> dict:
     """昇格のプラン（#1336 の F5）: ベースブランチ（a.base）から本番チャネル（a.production_branch）への Pull Request を
     `merged-steps.py promote` が作り（あれば使い）、承認ゲート 2 の後にマージする。後片付けはしない（head はベースブランチ）。
+    マージの後に record（`release-steps.py record --promote`）が昇格の PR へリリース記録を書き、その PR を計画の
+    Pull Request にする（まとめの close が `{queue_pr:promote}` で読む。#837）。record が落ちたら judge-record へ進む。
 
     - normal（`mvv` 無し）: promote（承認の引数無し。承認ゲート 2 で終える）→ promote-approved（`--from` でだけ入る）
     - fast / auto（`mvv` にスプリントの状態）: verify（導入の確認。落ちたら止まる。#1457）→ prepare（PR と承認資料）→ mvv（承認ゲート 2 の MVV 判定）→ note（判定のコメント）→
@@ -80,12 +83,35 @@ def plan_promote(
         "stage": "配布",
         "timeout": timeout,
         "cmd": promote + wait + " --gate-approved user",
-        "next": "end",
+        "next": "record",
     }
+    record = [
+        {
+            "id": "record",
+            "type": "run",
+            "stage": "配布",
+            "timeout": 300,
+            "cwd": repo,
+            "cmd": f"{STEPS_PY} record --promote --head {shlex.quote(head)} --base {shlex.quote(base)} --prs {QUEUE_PRS}",
+            "pr_from": "release_pr_url",
+            "on_fail": "judge-record",
+            "next": "end",
+        },
+        judge_record_step(),
+    ]
     if not mvv:
         steps = [
-            {"id": "promote", "type": "run", "stage": "配布", "timeout": timeout, "cmd": promote + wait, "gate_next": "end", "next": "end"},
+            {
+                "id": "promote",
+                "type": "run",
+                "stage": "配布",
+                "timeout": timeout,
+                "cmd": promote + wait,
+                "gate_next": "end",
+                "next": "record",
+            },
             approved,
+            *record,
         ]
     else:
         if not verify:
@@ -117,9 +143,10 @@ def plan_promote(
                 "cmd": promote + wait + " --gate-approved mvv",
                 "on_fail": "handoff",
                 "gate_next": "end",
-                "next": "end",
+                "next": "record",
             },
             approved,
+            *record,
             handoff_step(state, "関門 2", "昇格のマージ"),
         ]
     return release_plan(a, repo, "配布（昇格）", RULE_PROMOTE, steps, condition)

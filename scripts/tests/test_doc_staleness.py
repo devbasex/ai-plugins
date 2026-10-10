@@ -215,72 +215,34 @@ def test_layout_counts_removed_fails(tree: Path) -> None:
     assert "plugins/ndf/README.md" in output_of(result)
 
 
-# --- F: 更新案内の見出しの版数 ---
+# --- F: plugin の README に版ごとの更新の節を置かない ---
 
 
-def test_upgrade_heading_version_stale_fails(tree: Path) -> None:
-    edit(plugin_readme(tree), "## v9.3.0 へ更新するとき", "## v9.2.1 へ更新するとき")
+@pytest.mark.parametrize(
+    "readme",
+    ["plugins/ndf/README.md", "plugins/playwright-kit/README.md", "plugins/mcp/mcp-serena/README.md"],
+)
+def test_upgrade_section_in_plugin_readme_fails(tree: Path, readme: str) -> None:
+    """どの plugin の README でも、版ごとの更新の節が戻れば落とす（更新情報は CHANGELOG.md が正本）。"""
+    path = tree / readme
+    path.parent.mkdir(parents=True, exist_ok=True)
+    body = path.read_text(encoding="utf-8") if path.is_file() else "# plugin\n"
+    path.write_text(
+        body + "\n## v9.3.0-dev.1 へ更新するとき\n\n- 変わったこと\n\n## 以前の版: v9.2.0 へ更新するとき\n\nx\n", encoding="utf-8"
+    )
     result = run_check(tree)
     assert result.returncode != 0
     out = output_of(result)
-    assert "plugins/ndf/README.md" in out
-    assert "9.2.1" in out and "9.3.0" in out
-
-
-def test_upgrade_heading_removed_fails(tree: Path) -> None:
-    edit(plugin_readme(tree), "## v9.3.0 へ更新するとき\n", "")
-    result = run_check(tree)
-    assert result.returncode != 0
-    assert "plugins/ndf/README.md" in output_of(result)
+    assert readme in out
+    assert "v9.3.0-dev.1 へ更新するとき" in out and "以前の版: v9.2.0 へ更新するとき" in out
 
 
 @pytest.mark.parametrize("version", ["9.7.0-dev.1", "9.7.0-rc.1", "9.6.0"])
-def test_upgrade_heading_matches_whole_version(tree: Path, version: str) -> None:
-    """見出しの版数を接尾辞まで 1 つの値として読む。
-
-    数字 3 つだけで拾うと、`## v9.7.0-dev.1 へ更新するとき` を見出しとして読めない。
-    接尾辞の無い版も同じ経路で通ることを、同じテストで確かめる。
-    """
+def test_plugin_readme_without_upgrade_section_passes(tree: Path, version: str) -> None:
+    """版ごとの更新の節が無ければ、版を上げても見出しを理由に落ちない。"""
     retarget_version(tree, version)
     result = run_check(tree)
     assert result.returncode == 0, output_of(result)
-
-
-def test_upgrade_heading_without_suffix_fails(tree: Path) -> None:
-    """接尾辞を落とした見出しは古い版として弾く。
-
-    見出しを読めない状態を直すだけでは足りない。接尾辞を外して書けば通るようにすると、
-    `plugin.json` と見出しが別の版を指したまま配布できてしまう。
-    """
-    retarget_version(tree, "9.7.0-dev.1")
-    edit(plugin_readme(tree), "## v9.7.0-dev.1 へ更新するとき", "## v9.7.0 へ更新するとき")
-    result = run_check(tree)
-    assert result.returncode != 0
-    out = output_of(result)
-    assert "plugins/ndf/README.md" in out
-    # 「見出しが無い」ではなく「版数が古い」として出す。読めていないのか食い違って
-    # いるのかで、直し方が変わる。
-    assert "見出し: v9.7.0 " in out
-    assert "9.7.0-dev.1" in out
-
-
-def test_upgrade_heading_stale_prerelease_fails(tree: Path) -> None:
-    """接尾辞の連番だけが古い見出しも拾う。"""
-    retarget_version(tree, "9.7.0-dev.2")
-    edit(plugin_readme(tree), "## v9.7.0-dev.2 へ更新するとき", "## v9.7.0-dev.1 へ更新するとき")
-    result = run_check(tree)
-    assert result.returncode != 0
-    out = output_of(result)
-    assert "9.7.0-dev.1" in out and "9.7.0-dev.2" in out
-
-
-def test_upgrade_heading_duplicated_fails(tree: Path) -> None:
-    """前の版の節を残したままにすると、どちらが現行かを読み手が決められない。"""
-    body = plugin_readme(tree).read_text(encoding="utf-8")
-    plugin_readme(tree).write_text(body + "\n## v9.2.1 へ更新するとき\n\n前の版の本文。\n", encoding="utf-8")
-    result = run_check(tree)
-    assert result.returncode != 0
-    assert "plugins/ndf/README.md" in output_of(result)
 
 
 # --- 失敗の出力に含めるもの ---

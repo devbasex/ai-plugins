@@ -326,32 +326,38 @@ def test_spec_finalize_missing_spec_is_precondition(repo, env):
 # --- bump / changelog（release-steps.py） ------------------------------------
 
 
-def plugin_repo(repo, name="mcp-x", version="1.0.0", heading="1.0.0"):
+README_BODY = "# {name}\n\n## 使い方\n\nx\n\n## 更新情報\n\n版ごとの変更は CHANGELOG.md の版の節にあります。\n"
+
+
+def plugin_repo(repo, name="mcp-x", version="1.0.0"):
     d = f"plugins/mcp/{name}"
     write(
         repo,
         f"{d}/.claude-plugin/plugin.json",
         json.dumps({"name": name, "version": version, "description": f"X (v{version})"}, indent=2) + "\n",
     )
-    write(repo, f"{d}/README.md", f"# {name}\n\n## v{heading} へ更新するとき\n\n前の版の説明\n\n## 使い方\n\nx\n")
+    write(repo, f"{d}/README.md", README_BODY.format(name=name))
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "plugin")
     return repo / d
 
 
-def test_bump_updates_manifest_and_update_heading(repo, env):
+def test_bump_updates_manifest_and_leaves_the_readme(repo, env):
+    """受け入れ条件 6: bump は plugin の README に触れず、版ごとの更新の節が無いことを manual に出さない。"""
     pdir = plugin_repo(repo)
+    before = (pdir / "README.md").read_bytes()
     code, out, err = call("release-steps.py", ["bump", "--plugin", "mcp-x", "--to", "1.1.0", "--root", str(repo)], env)
     assert code == 0, err
     check_shape(out)
     assert out["tool"] == "release" and out["status"] == "ok"
     pj = json.loads((pdir / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
     assert pj["version"] == "1.1.0" and pj["description"] == "X (v1.1.0)"
-    assert "## v1.1.0 へ更新するとき" in (pdir / "README.md").read_text(encoding="utf-8")
+    assert (pdir / "README.md").read_bytes() == before
     assert out["metrics"]["from"] == "1.0.0" and out["metrics"]["to"] == "1.1.0"
     files = [i["name"] for i in out["items"] if i["result"] == "updated"]
     assert "plugins/mcp/mcp-x/.claude-plugin/plugin.json" in files
-    assert any(i["result"] == "manual" for i in out["items"]) and out["next"]
+    assert "plugins/mcp/mcp-x/README.md" not in files
+    assert not [i for i in out["items"] if i["result"] == "manual" and "README.md:" in i["name"]]
 
 
 def test_bump_unknown_plugin_is_precondition(repo, env):
@@ -359,8 +365,11 @@ def test_bump_unknown_plugin_is_precondition(repo, env):
     assert code == 3 and out["status"] == "stopped"
 
 
-def test_changelog_adds_section_and_replaces_update_guide(repo, env):
-    pdir = plugin_repo(repo, heading="1.1.0")
+def test_changelog_adds_section_and_leaves_the_readme(repo, env):
+    """changelog は CHANGELOG.md の版の節だけを書き、版ごとの更新の節が残る README にも触れない。"""
+    pdir = plugin_repo(repo)
+    (pdir / "README.md").write_text("# mcp-x\n\n## v1.1.0 へ更新するとき\n\n前の版の説明\n\n## 使い方\n\nx\n", encoding="utf-8")
+    before = (pdir / "README.md").read_bytes()
     write(repo, "CHANGELOG.md", "# Changelog\n\n## [mcp-x 1.0.0] - 2026-01-01\n\n- old（#1）\n")
     env["FAKE_GH_PRS"] = json.dumps({"5": {"title": "Add: x"}, "6": {"title": "Fix: y"}})
     code, out, err = call(
@@ -371,10 +380,9 @@ def test_changelog_adds_section_and_replaces_update_guide(repo, env):
     cl = (repo / "CHANGELOG.md").read_text(encoding="utf-8")
     assert cl.index("## [mcp-x 1.1.0] - ") < cl.index("## [mcp-x 1.0.0]")
     assert "- Add: x（#5）\n- Fix: y（#6）" in cl
-    rd = (pdir / "README.md").read_text(encoding="utf-8")
-    assert "前の版の説明" not in rd and "- Add: x（#5）" in rd and "## 使い方" in rd
-    assert {i["result"] for i in out["items"]} == {"added", "replaced"}
-    assert out["next"]
+    assert (pdir / "README.md").read_bytes() == before
+    assert [i["name"] for i in out["items"]] == ["CHANGELOG.md"]
+    assert not out.get("next")
 
     # もう一度呼んでも同じ PR を重ねない
     code, out, _ = call(

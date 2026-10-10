@@ -65,5 +65,8 @@
 | [cross-refactoring-implementation-window-and-readopt.md](cross-refactoring-implementation-window-and-readopt.md) | cross-refactoring の実装の時間の配り方・採り直し・中断の後の締め切りのずらし |
 | [out-of-scope-issue-file.md](out-of-scope-issue-file.md) | 範囲外の課題の起票を部品（`issue-file.py` の 5 つのサブコマンド）にした決定と理由、本文の骨格・由来・提示の要約値・上流リポジトリの解決で常に成り立つ条件、既知の限界。手順は `out-of-scope` / `retrospective` の SKILL.md と `issue-file.py` の冒頭の説明が正 |
 | [pr-review-steps-script.md](pr-review-steps-script.md) | `pr-review` の収集・判定・投稿・外部 AI への委譲を `pr-review-steps.py`（`collect` / `finish` / `delegate`）にした決定と理由、ベースブランチの実在の確認・指摘ファイルの段・本来の判定・投稿しない条件、既知の限界。手順と観点は `pr-review` の SKILL.md が正 |
+| [quality-gates-design-match.md](quality-gates-design-match.md) | standard の完了判定で、設計に名前の出るテストの実在・既存の確定仕様と変更履歴・設計の決定を実装と突き合わせ、違いを実装 PR の「設計と違う点」に残す仕組み（design-match.py） |
+| [cross-review-transient-post-failure.md](cross-review-transient-post-failure.md) | cross-review で GitHub が一時的な失敗（5xx・本文なし・ネットワーク）を返したとき、投稿だけを投稿キューに積んで結果を取り込み、担当を起動し直さずに流し直す仕組み |
+| [ndf-sprint-close-referenced-issues.md](ndf-sprint-close-referenced-issues.md) | 「スプリントを閉じる」（sprint-close.py）が、スプリントの PR が番号で参照しただけの開いた課題を理由つきで kept_open に載せ、閉じる課題が 0 件なら何も書かずに止まる理由と境界 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。

@@ -54,17 +54,7 @@ bash plugins/playwright-kit/dev.kiro/install.sh --dry-run
 NDF の installer と違い、エージェント定義・常時指示・プロンプト・フックは扱いません
 （このプラグインは Skill だけを配ります）。
 
-## v3.0.0 へ更新するとき
-
-**証跡を Google Drive へ保管しません（#744）。** `--pwk-drive-folder` と、Drive のアップロードの
-スクリプト、`drive` の extra を外しました。
-
-- `--pwk-drive-folder` を渡すと、pytest が未知の引数として止まります。テストの起動から外してください
-- 証跡は今までどおり手元の出力先に残ります
-- Drive へ上げたいときは、NDF の `google-workspace` Skill の `gws drive +upload` を手で使います
-  （`/ndf:google-workspace`）
-
-Skill の名前と数は変えていません（4 個）。
+### 更新
 
 ```bash
 # Claude Code
@@ -78,6 +68,10 @@ codex plugin add playwright-kit@ai-plugins
 # Kiro CLI
 bash plugins/playwright-kit/dev.kiro/install.sh
 ```
+
+## 更新情報
+
+版ごとの変更と移行の手順は [CHANGELOG.md](https://github.com/devbasex/ai-plugins/blob/main/CHANGELOG.md) の `[playwright-kit <版>]` の節にあります。
 
 ## NDF との関係
 

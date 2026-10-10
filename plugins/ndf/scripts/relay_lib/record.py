@@ -46,6 +46,10 @@ class RelayRecord:
     def mark_skipped(self, section: int | None, reason: str, tasks: list[dict], held: bool) -> None:
         self.log(event="mark_skipped", section=section, reason=reason, tasks=tasks, held=held)
 
+    def prose_wait(self, section: int | None, kind: str) -> None:
+        """承認待ちの差し戻しの行（#1492）。本文と抜粋は書かない。"""
+        self.log(event="prose_wait", section=section, kind=kind)
+
     def read_mark(self):
         """合図。`command` の無いものや読めないものは None。"""
         m = load_json(self.path(MARK_FILE))
