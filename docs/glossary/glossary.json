@@ -3612,6 +3612,18 @@
       "source": "docs/specifications/quality-gates-design-match.md"
     },
     {
+      "term": "リリース後テストの記録",
+      "context": "ndf-release",
+      "meaning": "release-verification が Pull Request へ残す、見出し `## リリース後テスト` から `合否:` までのブロック。`対象の版:` の行と課題ごとの表を持つ",
+      "pending_source": "issues/issue-1870-requirements.md"
+    },
+    {
+      "term": "版数を上げない配布",
+      "context": "ndf-release",
+      "meaning": "版数を変えず、既定ブランチへのマージかコミットの反映で本番へ届ける配布",
+      "pending_source": "issues/issue-1870-requirements.md"
+    },
+    {
       "term": "条件の Skill",
       "context": "ndf-relay",
       "meaning": "`/goal` の条件の先頭の語が `/<プラグイン>:<Skill>` の形で名指しする Skill（例: `/ndf:development-workflow`）",
