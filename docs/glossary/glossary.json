@@ -3670,6 +3670,12 @@
       "context": "ndf-workflow",
       "meaning": "承認ゲートで利用者が承認せず、対象を直すよう戻したこと。MVV 判定の有無を問わず 1 回を 1 件と数える。MVV 判定との食い違いである覆しとは別の数",
       "pending_source": "issues/issue-1833-requirements.md"
+    },
+    {
+      "term": "差し戻しの記録",
+      "context": "ndf-workflow",
+      "meaning": "承認ゲートの差し戻しを 1 回 1 行で追記する JSONL（NDF_MVV_STATE_DIR の gate-rejections.jsonl）。pace と状態ファイルの有無によらず唯一の置き場で、覆しの記録とは別のファイル",
+      "pending_source": "issues/issue-1833-design.md"
     }
   ]
 }
