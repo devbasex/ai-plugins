@@ -29,11 +29,13 @@ from supervise_lib.sprint_waves import (
 from supervise_lib.new_args import NEW_ARGS
 from supervise_lib.paths import CHECK_PY, HERE, SELF
 from supervise_lib.procedures import sprint_out, with_record
+from supervise_lib.release_templates import release_verify_step
 from supervise_lib.sprint_routes import (
     MVV_PACES,
     dev_channel_of,
     has_release_template,
     pace_decl,
+    record_pr_ref,
     route_rows,
     route_waves,
 )
@@ -202,13 +204,12 @@ def _retro_refine_steps(a, refs: str, stats: str) -> list[dict]:
 
 
 def close_plan(a, repo: str) -> dict:
-    """スプリントの終わりのまとめ: 確定仕様化 → Pull Request → 課題を閉じる → 振り返り → 棚卸しを 1 回ずつ。"""
+    """まとめ: 確定仕様化 → Pull Request →（配布の記録があれば）リリース後テスト → 課題を閉じる → 振り返り → 棚卸し。"""
     issues = ",".join(map(str, a.issue))
     refs = " ".join(f"#{i}" for i in a.issue)
     branch = f"spec/{a.name}"
     stats = f"{CHECK_PY} stats --root {shlex.quote(repo)}"
-    # 配布の記録は雛形の本番の PR にある。雛形で組まない経路は記録を持たない（0 = 本番の記録なし。#1336）
-    record_pr = "{queue_pr:release-prod}" if has_release_template(a) else "0"
+    record_pr = record_pr_ref(a)
     plan = with_decls(
         {
             "フェーズ": "まとめ",
@@ -223,7 +224,8 @@ def close_plan(a, repo: str) -> dict:
             "進め方": "fast",
             "steps": [
                 *_spec_pr_steps(a, refs),
-                *merge_steps(a, next="close"),
+                *merge_steps(a, next="close" if record_pr == "0" else "release-verify"),
+                *([] if record_pr == "0" else [release_verify_step(a.name, refs, record_pr)]),
                 _close_step(a, repo, record_pr, issues),
                 *_retro_refine_steps(a, refs, stats),
             ],

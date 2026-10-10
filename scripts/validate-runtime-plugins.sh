@@ -88,9 +88,10 @@ done < <(find "$ROOT_DIR/plugins/mcp" -path '*/dev.kiro/install.sh' | sort)
 
 run python3 "$ROOT_DIR/scripts/check-markdown-links.py" --root "$ROOT_DIR"
 
-# 説明文書（README.md / plugins/ndf/README.md）に書かれた Skill 数と更新案内の版数を、
+# 説明文書（README.md / plugins/ndf/README.md）に書かれた Skill 数と版数を、
 # マニフェスト・実体・plugin.json と突き合わせる。上の Python ブロックがプラグインの定義
 # ファイルだけを見ているため、利用者が読む側の数は版を上げるたびに古くなっていた。
+# plugin の README に版ごとの更新の節（`## v<版> へ更新するとき`）が無いことも見る（更新情報は CHANGELOG.md）。
 run python3 "$ROOT_DIR/scripts/check-doc-staleness.py" --root "$ROOT_DIR"
 
 # Skill の境界をまたぐ実行の参照を数える。配る Skill を絞る配布先では、相手を

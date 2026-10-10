@@ -142,6 +142,10 @@ Kiro では repository clone 後、対象 plugin の installer を project root 
 bash plugins/mcp/mcp-bigquery/dev.kiro/install.sh
 ```
 
+## 更新情報
+
+版ごとの変更と移行の手順は [CHANGELOG.md](https://github.com/devbasex/ai-plugins/blob/main/CHANGELOG.md) の `[mcp-bigquery <版>]` の節にあります。
+
 ## 使用方法
 
 ```

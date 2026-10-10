@@ -136,6 +136,18 @@ claude が再開コマンドを `ndf-next` のブロックで出して応答を�
 | シグナルファイルを書いた後に利用者が入力した・バックグラウンドの処理を起動した | 会話の記録に、シグナルファイルより後の利用者の入力の行か、`run_in_background` が真の Tool の呼び出しの行がある。次の Stop がシグナルファイルを書き直すまで待つ |
 | シグナルファイルを書いた後に応答が再開した（目標が未達の判定が無いとき） | 会話の記録に、シグナルファイルより後の `assistant` か `user` の行がある。次の Stop がシグナルファイルを書き直すまで待つ |
 
+**本文で承認を待って終えた応答は、1 度止めて `AskUserQuestion` へ戻す。** ラッパーの直接の子の応答が `AskUserQuestion` を呼ばずに
+承認待ちの文（判定は `lib/wait_notice.py` の `classify_reply_wait` で、回答待ちか承認待ちに当たる文。Slack の待ち通知の `classify_text` より狭く、操作の案内は待ちに数えない）で
+終わると、Stop hook（`mark`）が Stop を止め、同じ問いを `AskUserQuestion` で出し直すよう伝える。`/goal` の判定は本文の待ちでは
+止まらないためである。次のときは止めない。
+
+- 止めた直後の、同じセッションの次の Stop（作業ディレクトリの `wait-held.json` で見分ける。`stop_hook_active` は `/goal` の続きで常に真になるため使わない）
+- 応答の中で質問を出した（`question` が在る・`asked` の時刻が前の Stop より後）
+- 応答が `ndf-next` のブロックを含む・シグナルファイルが保留中（在り、その後に質問が出ていない）
+- ラッパーの外の会話と `claude -p` の子
+
+止めるたびに `log.jsonl` へ `prose_wait` の行を足す。判定と記録が失敗しても Stop は止めない。
+
 **シグナルファイルを書いた後は、切り替えを確定とする。** ブロックの無い Stop は、バックグラウンドの処理が動いているときと
 シグナルファイルを書いた後に質問が出たときだけシグナルファイルを消し、それ以外は前のシグナルファイルを残す。
 
@@ -409,10 +421,12 @@ python3 $H check $N --trim >/dev/null && sed -n '/^```ndf-next/,/^```$/p' $DOC
 | `account` | アカウントを替えた・すべて上限で替えなかった | `section`・`reason`（`five_hour` / `seven_day` / `spend` / `unknown` / `auth` / `threshold` / `recovered` など）・`from`・`to`（替えなかったら null）・`earliest`（最も早く戻るアカウントと時刻）・`keys`（従量の接続へ移ったときの変数の名前）・`usage`（閾値のときの使用率） |
 | `metered_invalid` | 区間 1 の起動で、保存した従量の接続の宣言が壊れていた（宣言なしとして扱う） | `section`・`detail`（理由の 1 行） |
 | `end` | セッションが終わった | `seconds`（起動からシグナルファイルを書くまで。シグナルファイルなしなら終わりまで）・`ended_by`（`mark` / `no-mark` / `sigterm` / `sigkill`） |
+| `prose_wait` | 本文で承認を待って終えた応答の Stop を止めた（「承認ゲートを越えない守り」） | `section`・`kind`（`承認待ち` / `回答待ち`）。本文と抜粋は書かない |
 | `stop` | 次のセッションを起動しないと決めた | `reason`（`stop-file` / `max-starts` / `spin` / `update-failed` / `start-failed` / `error` / `handover`（入れ替えた後に申し送りを読めない）） |
 
 ```bash
 cat ~/.local/state/ndf/relay/*/log.jsonl | jq -c 'select(.event == "stop")'
+cat ~/.local/state/ndf/relay/*/log.jsonl | jq -c 'select(.event == "prose_wait")'   # 止めた回数
 ```
 
 入出力の契約と決定の理由は、ai-plugins の確定仕様 `docs/specifications/ndf-relay-segment-restart.md` にある。
@@ -427,3 +441,4 @@ cat ~/.local/state/ndf/relay/*/log.jsonl | jq -c 'select(.event == "stop")'
 | 次のセッションへ引き継ぐ | `ndf-next` のブロックの中身の先頭に `/goal ` を付ける（[context-window.md](context-window.md) の「新しい会話で戻す」） |
 | 目標が未達のとき | 判定が止めを拒んで応答が続く。カットポイントでは目標は未達のままなので、ラッパーは切り替える。シグナルファイルを書いた後に目標の判定（`goal_status` の `met: false`）の行があれば、会話の記録の更新をアイドルに数えず、利用者の入力のアイドルだけを待つ。Esc を 1 回書いて応答を止め、1 秒おいて `/exit` を書く。利用者の入力・質問・バックグラウンドの処理の起動があれば切り替えない |
 | `/ndf:restart` の引数が無いとき | 目標の入力をそのまま再開コマンドにする |
+| 次のセッションで条件の Skill を読み込む | 条件の先頭の語が `/<プラグイン>:<Skill>` のとき（`/goal /ndf:development-workflow #895`）、Claude Code の `/goal` はその Skill を展開しない。そこで `UserPromptSubmit` hook（`hook.py goal-skill`）が、作業の最初の Tool の呼び出しとして Skill ツールでその Skill を条件の残りを引数に読み込むよう案内する。最初の入力と目標の条件は前のセッションと同じ文面のままで、カットポイントの `ndf-next`・利用上限での切り替え（`--resume`）・`/ndf:restart` の再開コマンドのどれでも、ラッパーの外でも同じに働く。Skill が導入されていなければ、読み込まずに目標の条件のまま続ける |

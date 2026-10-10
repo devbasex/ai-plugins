@@ -96,7 +96,7 @@ credential helper が応答しない環境の退避（`gh auth git-credential` �
 「- 該当なし（設計文書が無い）」と書く。`template --mode standard` が雛形を書き、`create` / `update` に
 `--mode standard` を渡すと、節の無い本文では `next` が節を足すよう求める（設計 PR は対象にしない）。
 
-**`## 利用者向けの変化` はリリースの CHANGELOG と更新案内へそのまま載る**（`release-steps.py notes` が組む）。
+**`## 利用者向けの変化` はリリースの CHANGELOG の版の節へそのまま載る**（`release-steps.py notes` が組む）。
 利用者に何ができるようになるか・使い方が変わる点を箇条書きにし、今の決まりだけを書く。見える変化が無ければ
 「- 無し」と書く（リリースの説明文は題名で代わる）。節の無い本文では、`create` / `update` の `next` が節を足すよう求める。
 

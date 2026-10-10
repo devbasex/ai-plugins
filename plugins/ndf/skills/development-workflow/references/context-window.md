@@ -162,7 +162,8 @@ Codex / Kiro / agy には hook を置かない。4 つのカットポイント�
 - **中身は `development-workflow` を起動する 1 行である**（`/ndf:development-workflow #829 #830`）。
   工程 Skill はモードと worktree を戻す手順を持たないため、エントリポイントから入り直す。Codex と Kiro では、
   それぞれの README が示す Skill の起動の書き方に読み替える
-- **今のセッションを `/goal` で始めていたときだけ、中身の先頭を `/goal ` にする**
+- **今のセッションを `/goal` で始めていたときだけ、中身の先頭を `/goal ` にする**。次のセッションは作業の最初に、
+  条件の先頭の Skill（`/ndf:development-workflow`）を Skill ツールで読み込む（hook が案内する。[relay.md](relay.md) の付則「`/goal` を付けた場合」）
 - **3 層では、conductor がフェーズレポート（`## フェーズの報告`）を受け取った時点で出す**（supervisor は出さない）。
   フェーズの境がカットポイントに当たるためである。ただし報告が `結果: 関門` なら、承認ゲートの承認と取り込み
   （設計 Pull Request のマージなど）が済んだ後に出す。**承認ゲートの承認より前には出さない。** 出すと、

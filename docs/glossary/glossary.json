@@ -3651,7 +3651,7 @@
     {
       "term": "承認待ちの文",
       "context": "ndf-relay",
-      "meaning": "`AskUserQuestion` を呼ばずに、応答の本文で利用者の承認・判断を待つと書いた文。判定は待ち通知と同じで（`lib/wait_notice.py` の `classify_text`）、回答待ちか承認待ちに当たる文を指す",
+      "meaning": "`AskUserQuestion` を呼ばずに、応答の本文で利用者の承認・判断を待つと書いた文。判定は `lib/wait_notice.py` の `classify_reply_wait` で、回答待ちか承認待ちに当たる文を指す。待ち通知の `classify_text` より狭く、操作の案内（再起動・インストールなど）は待ちに数えない",
       "source": "",
       "pending_source": "issues/issue-1492-design.md"
     },

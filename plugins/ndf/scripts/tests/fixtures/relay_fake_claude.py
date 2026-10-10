@@ -29,7 +29,8 @@
 答えの後に働く形を模す）。このとき SIGTERM を受けたら `FAKE_DIR/sigterm-<pid>` を書いて 143 で終わる。
 受けたバイトは読んだ単位ごとに `FAKE_DIR/chunks-<pid>.jsonl` へも書く。
 
-最後の引数（区間のプロンプト）が `mark ` で始まれば、起動の直後にその行を 1 度実行する。
+起動の直後に、最後の引数（区間のプロンプト）を `UserPromptSubmit` の hook と同じ形で `hook.py goal-skill` へ渡し、
+入力と出力を `FAKE_DIR/prompt-<pid>.jsonl` へ書く（#1492）。最後の引数が `mark ` で始まれば、続けてその行を 1 度実行する。
 """
 
 import fcntl
@@ -81,6 +82,20 @@ def transcript():
 def do_fail(error):
     data = {"session_id": f"s{os.getpid()}", "transcript_path": transcript(), "cwd": os.getcwd(), "error": error}
     subprocess.run([sys.executable, RELAY, "limit"], input=json.dumps(data), text=True)
+
+
+def prompt_hook(prompt):
+    """区間のプロンプトを受けた `UserPromptSubmit` hook（`hook.py goal-skill`）を模す。"""
+    hook = os.path.join(os.path.dirname(RELAY), "hook.py")
+    data = {
+        "session_id": f"s{os.getpid()}",
+        "transcript_path": transcript(),
+        "cwd": os.getcwd(),
+        "hook_event_name": "UserPromptSubmit",
+        "prompt": prompt,
+    }
+    p = subprocess.run([sys.executable, hook, "goal-skill"], input=json.dumps(data), text=True, capture_output=True)
+    log(f"prompt-{os.getpid()}.jsonl", {"prompt": prompt, "stdout": p.stdout, "code": p.returncode})
 
 
 def do_mark(body):
@@ -168,6 +183,8 @@ def main():
         },
     )
     open(transcript(), "a").close()
+    if args:
+        prompt_hook(args[-1])
     if args and args[-1].startswith("mark "):
         do_mark(args[-1][5:])
     tty.setraw(0)

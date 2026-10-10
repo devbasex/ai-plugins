@@ -217,7 +217,7 @@ def _record_step(v: str, prs: str) -> dict:
     }
 
 
-def _judge_record_step() -> dict:
+def judge_record_step() -> dict:
     """record が落ちたときの判断。選べるのは record のやり直しか停止だけ（fix は配布へ戻るため置かない）。"""
     return {
         "id": "judge-record",
@@ -226,6 +226,22 @@ def _judge_record_step() -> dict:
         "question": "リリース記録の書き込み（record）が落ちた。本番の配布は済んでいる。GitHub の揺れなら record をもう一度、"
         "権限の不足・本番のリリースの PR が無いなら止める（stop）",
         "choices": ["record", "stop"],
+    }
+
+
+def release_verify_step(sprint: str, refs: str, record_pr: str) -> dict:
+    """リリース後テスト（/ndf:release-verification）。記録を配布の記録の PR へ置き、まとめの close がそれを読む（#1683）。"""
+    return {
+        "id": "release-verify",
+        "type": "work",
+        "full": True,
+        "kind": "リリース後テスト",
+        "stage": "リリース後テスト",
+        "timeout": 3600,
+        "prompt": f"/ndf:release-verification スプリント {sprint}（{refs}）。配布の記録は Pull Request #{record_pr} にある。"
+        "リリース後テストの記録をその Pull Request へコメントで書く。課題は閉じない（次の close が閉じる）。"
+        "番号が 0 なら本番へ出ていないため、何もせずに終える。",
+        "next": "close",
     }
 
 
@@ -311,7 +327,7 @@ def plan_release_package_plugin(a) -> dict:
         steps += _dev_approval_steps(a, repo, approval, prs, rts)
     steps += _judge_fix_steps(run_ids, after_notes)
     if not dev:
-        steps.append(_judge_record_step())
+        steps.append(judge_record_step())
     if mvv and not dev:
         _add_prod_mvv_gate(steps, a, repo, approval, prs)
     rule = RULE_RELEASE_DEV if dev else RULE_RELEASE_PROD_MVV if mvv else RULE_RELEASE_PROD

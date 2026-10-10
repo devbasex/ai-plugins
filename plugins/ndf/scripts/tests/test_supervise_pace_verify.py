@@ -112,9 +112,9 @@ def test_a_failed_verify_stops_before_the_promote_pr(tmp_path):
 
 
 def test_a_passed_verify_keeps_the_order(tmp_path):
-    """AC4: 確認が 0 なら今と同じ順で続く。"""
+    """AC4: 確認が 0 なら今と同じ順で続き、マージの後にリリース記録を書く（#1870）。"""
     res, ran = run_promote(tmp_path, "true")
-    assert ran == ["prepare", "mvv", "note", "promote"] and res["items"][0]["result"] == "完了", res
+    assert ran == ["prepare", "mvv", "note", "promote", "record"] and res["items"][0]["result"] == "完了", res
 
 
 @pytest.mark.parametrize("pace", ["auto", "fast"])
@@ -159,9 +159,10 @@ def test_close_without_verify_writes_no_plan(tmp_path):
 
 
 def test_normal_keeps_the_promote_plan(tmp_path):
-    """AC11・I6: --pace 無しの昇格のプランは promote → promote-approved のままで、確認のステップを持たない。"""
+    """AC11・I6: --pace 無しの昇格のプランは promote → promote-approved → record（#837）で、確認のステップを持たない。"""
     waves = new_sprint(tmp_path, make_repo(tmp_path, [STG, PRD]), None)
-    assert [s["id"] for s in load(wave(waves, "本番")["plans"][0])["steps"]] == ["promote", "promote-approved"]
+    ids = [s["id"] for s in load(wave(waves, "本番")["plans"][0])["steps"]]
+    assert ids == ["promote", "promote-approved", "record", "judge-record"]
     assert verify_steps(waves) == [] and "導入の確認" not in [w["name"] for w in waves]
 
 
@@ -214,3 +215,40 @@ def test_gate_2_and_the_template_keep_their_stages(tmp_path):
     assert p.returncode == 0, p.stdout + p.stderr
     waves = load(out / "sprint.json")["ステージ"]
     assert [w["name"] for w in waves] == pa.STAGES and verify_steps(waves) == []
+
+
+@pytest.mark.parametrize("pace", [None, "fast"])
+def test_the_promote_plan_records_after_the_merge(tmp_path, pace):
+    """#1870 AC2: 昇格の PR のマージ（promote / promote-approved）の後に record --promote を打ち、落ちたら judge-record へ進む。"""
+    waves = new_sprint(tmp_path, make_repo(tmp_path, [STG, PRD]), pace)
+    steps = {s["id"]: s for s in load(wave(waves, "本番")["plans"][0])["steps"]}
+    assert steps["promote"]["next"] == steps["promote-approved"]["next"] == "record"
+    rec = steps["record"]
+    assert "release-steps.py record --promote --head develop --base main --prs " in rec["cmd"]
+    assert rec["on_fail"] == "judge-record" and rec["pr_from"] == "release_pr_url"
+    assert steps["judge-record"]["choices"] == ["record", "stop"]
+
+
+def close_steps(tmp_path, rows) -> dict:
+    p, out = new_close(tmp_path, make_repo(tmp_path, rows))
+    assert p.returncode == 0, p.stdout + p.stderr
+    close = next(load(f) for f in sorted(out.glob("*.json")) if load(f).get("フェーズ") == "まとめ")
+    return close["steps"]
+
+
+def test_close_of_the_promote_route_reads_the_promote_pr(tmp_path):
+    """#1870 AC3・AC6: 昇格の経路のまとめは --record-pr {queue_pr:promote} を打ち、その前にリリース後テストを置く。"""
+    steps = close_steps(tmp_path, [STG, PRD])
+    ids = [s["id"] for s in steps]
+    close = next(s for s in steps if s["id"] == "close")
+    assert "--record-pr {queue_pr:promote} " in close["cmd"]
+    assert ids.index("release-verify") == ids.index("close") - 1
+    rv = steps[ids.index("release-verify")]
+    assert rv["type"] == "work" and rv["prompt"].startswith("/ndf:release-verification") and "{queue_pr:promote}" in rv["prompt"]
+
+
+def test_close_of_the_merge_route_keeps_record_pr_zero(tmp_path):
+    """#1870 AC3・AC6: 昇格の無い経路（ベースブランチへのマージで届く）は今と同じ --record-pr 0 で、リリース後テストを置かない。"""
+    steps = close_steps(tmp_path, [STG])
+    close = next(s for s in steps if s["id"] == "close")
+    assert "--record-pr 0 " in close["cmd"] and "release-verify" not in [s["id"] for s in steps]

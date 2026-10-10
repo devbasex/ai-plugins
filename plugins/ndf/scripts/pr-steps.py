@@ -52,7 +52,7 @@ SCRIPTS = Path(__file__).resolve().parent
 REVIEW_MARK = "<!-- I want to review in Japanese. -->"
 # credential helper が応答しない環境の退避（lib/git-credential.sh と同じ値）
 CREDENTIAL_FALLBACK = ["-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential"]
-CHANGES_HEADING = "## 利用者向けの変化"  # 配布の CHANGELOG と更新案内の材料（release-steps.py notes が読む）。正本は release_lib/others.py（lib だけを読むため写す）
+CHANGES_HEADING = "## 利用者向けの変化"  # 配布の CHANGELOG の版の節の材料（release-steps.py notes が読む）。正本は release_lib/others.py（lib だけを読むため写す）
 MIGRATION_HEADING = "## 移行の手順"  # CHANGELOG の版の節の「### 移行の手順」と承認資料の材料（release-steps.py notes が読む）
 BODY_TEMPLATE = f"""<何を変えたかを 1〜3 文>
 

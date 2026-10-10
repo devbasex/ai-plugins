@@ -188,6 +188,7 @@ cross-refactoring の駆動はこの判定を使っていない。
 
 `hook.py` の `dispatch` は事象を問わず `_guards` を通し、`_guards` が `Deadline` を掛けてから guard を打つ。guard を打つのは
 Tool の事象（`tool_kind` がある）と userPromptSubmit だけで、待ちの Slack 通知（`wait_notify`）は締め切りを外した後に打つ。
+副命令 `wait-notify` と `goal-skill`（Claude Code の `UserPromptSubmit` の `/goal` の条件の Skill の案内）は `_guards` を通さず、締め切りを掛けない。
 
 | 項目 | 振る舞い |
 | --- | --- |

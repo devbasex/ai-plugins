@@ -131,9 +131,9 @@ plugins/ndf/
 └── manifests/                   # ランタイム別の配布 Skill 一覧
 ```
 
-## v9.3.0 へ更新するとき
+## 更新情報
 
-**Skill が 1 個増えます。** 既存の Skill の手順は変わりません。
+版ごとの変更と移行の手順は CHANGELOG.md の `[ndf <版>]` の節にあります。
 
 ## Kiro CLI で確かめる
 
@@ -259,7 +259,6 @@ def retarget_version(root: Path, version: str) -> None:
     edit(versioning, f"`{old_next}-rc.1`", f"`{new_next}-rc.1`")
 
     plugin_readme = root / "plugins/ndf/README.md"
-    edit(plugin_readme, f"## v{VERSION} へ更新するとき", f"## v{version} へ更新するとき")
     edit(plugin_readme, f"Kiro CLI用 / v{VERSION}）", f"Kiro CLI用 / v{version}）")
     edit_all(plugin_readme, f"ndf/{VERSION}/skills/", f"ndf/{version}/skills/", 2)
     edit(plugin_readme, f"enabled  {VERSION}  <path>", f"enabled  {version}  <path>")

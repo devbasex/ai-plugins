@@ -43,8 +43,8 @@
 | 扱う | 扱わない |
 | --- | --- |
 | 配布の形が `package-plugin` のときの、他のプラグインの上げ幅の候補・承認資料の表・本番の上げ方 | 主のプラグインの上げ幅の決め方（配布のプランの `--version` で決まる） |
-| PR 本文の `## 移行の手順`（`pr-steps.py template` の雛形・実装のプランの `pr` のステップ・スプリント PR の `collect`） | 他のプラグイン自身の CHANGELOG の版の節（`## [playwright-kit 3.0.0]` のような節）と README の更新の節の自動作成 |
-| `notes` が移行の手順を CHANGELOG・主のプラグインの README・承認資料へ写すこと | `package-plugin` 以外の配布の形 |
+| PR 本文の `## 移行の手順`（`pr-steps.py template` の雛形・実装のプランの `pr` のステップ・スプリント PR の `collect`） | 他のプラグイン自身の CHANGELOG の版の節（`## [playwright-kit 3.0.0]` のような節）の自動作成 |
+| `notes` が移行の手順を CHANGELOG と承認資料へ写すこと（plugin の README には写さない） | `package-plugin` 以外の配布の形 |
 | | 上げ幅の規則（セマンティックバージョニング）・取得元・既定ブランチ |
 
 ## 背景
@@ -64,9 +64,9 @@
 | --- | --- |
 | [`release_lib/others.py`](../../plugins/ndf/scripts/release_lib/others.py) | 上げ幅の候補を材料の字面から決める処理、承認資料の `## 版を上げる他のプラグイン` の節の組み立て・読み取り・書き換え（`--set`）、本番で上げる版の確かめ（`decided_versions`） |
 | [`release_lib/changed.py`](../../plugins/ndf/scripts/release_lib/changed.py) | PR・課題・マージのコミットの読み取りと、承認資料のファイルの読み書き |
-| [`release-steps.py`](../../plugins/ndf/scripts/release-steps.py) の `changed-plugins` / `notes` | 他のプラグインの列挙と結果の出力。`notes` は移行の手順を版の節・README の更新の節・承認資料へ写す |
+| [`release-steps.py`](../../plugins/ndf/scripts/release-steps.py) の `changed-plugins` / `notes` | 他のプラグインの列挙と結果の出力。`notes` は移行の手順を版の節と承認資料へ写す |
 | [`lib/versions.py`](../../plugins/ndf/scripts/lib/versions.py) の `next_version` | 上げ幅で上げた正式版（接尾辞付きはその基底から上げる） |
-| [`lib/gh_sections.py`](../../plugins/ndf/scripts/lib/gh_sections.py) の `section_items` | 節の箇条を `<本文>（#n）` で返す。「利用者向けの変化」「未検証・残る危険」「移行の手順」の 3 つが同じ処理を使う |
+| [`lib/gh_sections.py`](../../plugins/ndf/scripts/lib/gh_sections.py) の `section_items` | 節の箇条を `<本文>（#n）` で返す。字下げした子の箇条は親の項目の中に 1 段の入れ子で残す。「利用者向けの変化」「未検証・残る危険」「移行の手順」の 3 つが同じ処理を使う |
 | [`lib/closing.py`](../../plugins/ndf/scripts/lib/closing.py) | 閉じる語（`Closes #n` など）の読み取り。`pr-steps.py` と `release-steps.py` が使う |
 | [`supervise_lib/release_templates.py`](../../plugins/ndf/scripts/supervise_lib/release_templates.py) | 開発版のプランの `others` のステップと、本番の `bump-others` に渡す `--decided <承認資料>` |
 | [`supervise_lib/pr_materials.py`](../../plugins/ndf/scripts/supervise_lib/pr_materials.py)・[`pr.py`](../../plugins/ndf/scripts/supervise_lib/pr.py)・[`prompts.py`](../../plugins/ndf/scripts/supervise_lib/prompts.py) の `PR_SYSTEM` | PR 本文の `## 移行の手順`（要求の移行性の行の読み取り・機械の節での差し替え・スプリント PR への集約） |
@@ -132,7 +132,7 @@ classDiagram
 | I3 | 承認資料 | 上げ幅の候補は材料の字面だけで決まり、LLM を挟まない（規則は「上げ幅の候補の規則」） | — （同じ材料からは同じ候補が出る） |
 | I4 | 承認資料 | 材料を読めない PR があれば、候補は PATCH のままで、根拠の欄に読めなかったことが書かれる | — |
 | I5 | 他のプラグインの版 | 前のタグから既に版が変わっているプラグインは上げ直さない（`上げ済み` の行・`metrics.already`） | — |
-| I6 | CHANGELOG の版の節 | 移行の手順を持つ PR が 0 件なら、版の節と主のプラグインの README の更新の節に `### 移行の手順` を作らない | — |
+| I6 | CHANGELOG の版の節 | 移行の手順を持つ PR が 0 件なら、版の節に `### 移行の手順` を作らない | — |
 | I7 | CHANGELOG の版の節 | 移行の手順の箇条は `### 移行の手順` の下にだけ並び、どの箇条にも PR 番号が付く | — |
 | I8 | PR 本文 | 要求の非機能の条件に「移行性」の行があり、同じ要求の「公開インタフェース」の行に互換なしの印がある課題の実装 PR の `## 移行の手順` は「無し」にならない | `pr` のステップが要求の行から組んだ箇条で節を差し替える |
 | I9 | 承認資料 | 主のプラグインは他のプラグインの行に載らない | — （列挙の段で除く） |
@@ -147,7 +147,7 @@ classDiagram
 | E4 | 承認資料に他のプラグインの表と移行の手順を書いた | `changed-plugins --approval`・`notes --approval` | 承認ゲート 2（人か MVV 判定） |
 | E5 | 承認ゲート 2 で上げ幅が決まった | 利用者の承認か MVV 判定（変えるときは `changed-plugins --approval --set`） | E6 |
 | E6 | 本番の配布で他のプラグインの版を決まった上げ幅で上げた | 本番のプランの `bump-others`（`changed-plugins --decided`） | `bump` |
-| E7 | CHANGELOG の主のプラグインの版の節に移行の手順を写した | 開発版と本番の `notes` | 利用者（CHANGELOG と README の更新の節） |
+| E7 | CHANGELOG の主のプラグインの版の節に移行の手順を写した | 開発版と本番の `notes` | 利用者（CHANGELOG の版の節） |
 
 `others` と `bump-others` は落ちたら judge へ進む。開発版の `others` は `explain`（`notes --approval`）の次に置かれ、
 助言の MVV 判定（`pace: normal`）はその後に走るため、他のプラグインの表も判定の材料に入る。
@@ -235,10 +235,11 @@ graph TD
 `notes --approval` は同じ位置へ `## 移行の手順` の節を置き、走らせ直したら差し替える。中身は PR ごとの箇条
 （`（#n）` つき）で、0 件なら「- 無し」である。
 
-### CHANGELOG と README の更新の節
+### CHANGELOG の版の節
 
-`notes` は版の節の中身を次の形に差し替える（版数と日付は例）。主のプラグインの README の
-`## v<版> へ更新するとき` の節にも同じ形で書く。移行の手順を持つ PR が 0 件なら `### 移行の手順` を作らない（I6）。
+`notes` は版の節の中身を次の形に差し替える（版数と日付は例）。plugin の README には書かない（README は
+CHANGELOG.md を参照する固定の「`## 更新情報`」の節だけを持つ）。移行の手順を持つ PR が 0 件なら `### 移行の手順` を
+作らない（I6）。
 
 ```markdown
 ## [ndf 10.17.62] - 2026-10-10
@@ -312,7 +313,7 @@ graph TD
 | 引数の組み合わせ | `--approval` の無い `--set`・表に無い名前・知らない上げ幅で終了コード 2 になること | 同上 |
 | PR 本文の節（I8） | 雛形と `PR_SYSTEM` と機械の本文が `## 移行の手順` を持つこと。互換なしの印がある要求で LLM が「無し」を返すと要求の行で差し替わり、印が無ければ「無し」のまま残り、LLM の書いた手順は残ること | `test_supervise.py`・`test_pr_steps.py` |
 | スプリント PR | `collect` が実装の PR の移行の手順を `（#n）` つきで集めること | `test_sprint_procedures.py` |
-| CHANGELOG への写し（I6・I7） | `notes` が移行の手順を `### 移行の手順` の下へ `（#n）` つきで写し、README の更新の節にも写ること。0 件なら見出しを作らないこと | `test_release_steps.py` |
+| CHANGELOG への写し（I6・I7） | `notes` が移行の手順を `### 移行の手順` の下へ `（#n）` つきで写し、plugin の README を変えないこと。0 件なら見出しを作らないこと | `test_release_steps.py`・`test_release_notes_changelog.py` |
 
 **リリース後テストで確かめる観点:** 次に他のプラグインを含む版を出すとき、承認ゲート 2 の承認資料に他のプラグインの表と
 移行の手順の節が載り、承認した上げ幅で本番の版が出ること。
