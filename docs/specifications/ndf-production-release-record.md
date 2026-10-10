@@ -51,8 +51,8 @@
 | 扱う | 扱わない |
 | --- | --- |
 | `supervise.py new release --channel prod` が `package-plugin` から組む本番のリリースプランと、それを使うスプリントのまとめ（配布先のリポジトリでも、同じ宣言を置けば働く） | 開発版のリリースプラン（`段階: 検証` の記録は書かない。`close` ステップは本番のリリースの PR しか読まない） |
-| `release-steps.py record`・`lib/dist_record.py`・`release_lib/record.py`・ステップの鍵 `pr_from` | リリース後テストのブロック（`## リリース後テスト`）の書き手（#1683）。本番のリリースプランはこれを書かない |
-| | 雛形で組まない経路（昇格のプラン・手で届ける経路・`--record-pr 0`）の記録 |
+| `release-steps.py record`・`lib/dist_record.py`・`release_lib/record.py`・ステップの鍵 `pr_from` | リリース後テストのブロック（`## リリース後テスト`）の中身。本番のリリースプランはこれを書かない（まとめの `release-verify` が `/ndf:release-verification` に書かせる。#1683・#1870） |
+| 昇格のプランの `record`（`record --promote`。#837・#1870） | 手で届ける経路・`--record-pr 0` の経路（merge・manual は #1875）の記録 |
 | | `sprint-close.py` の引数・結果 JSON・閉じる条件（変えていない） |
 
 プラグイン名・ベースブランチ・本番チャネルは `.ndf/supervise.json` の `release.plugin` と `.ndf/worktree.json` から
@@ -76,9 +76,9 @@
 | 要素 | 責務 |
 | --- | --- |
 | [`lib/dist_record.py`](../../plugins/ndf/scripts/lib/dist_record.py) | リリース記録の見出しと行の名前（`DIST`・`STAGE`・`VERSION`・`SPRINT` ほか）を 1 か所に持ち、組む（`format_record`）と読む（`parse_record`）を提供する |
-| [`release_lib/record.py`](../../plugins/ndf/scripts/release_lib/record.py) | タグの作成時刻（JST）・PR の本文とコメントの読み取り・同じ記録の有無の判定（`exists`）・コメントの投稿（`post_comment`）。結果を出す（emit）のは呼び手 |
+| [`release_lib/record.py`](../../plugins/ndf/scripts/release_lib/record.py) | タグの作成時刻（JST）・PR の本文とコメントの読み取り・同じ記録の有無の判定（`exists`）・コメントの投稿（`post_comment`）・判定と投稿をまとめて結果の値を返す（`write`）・昇格の形の本文（`promote_body_of`）と直前の版（`parent_of`）。結果を出す（emit）のは呼び手 |
 | [`release-steps.py`](../../plugins/ndf/scripts/release-steps.py) の `record` | 前提を確かめ、記録を組んで投稿し、PR の番号と URL を結果に出す |
-| [`supervise_lib/release_templates.py`](../../plugins/ndf/scripts/supervise_lib/release_templates.py) | 本番のプランにだけ `record`（`pr_from: release_pr_url`）と `judge-record` を組む |
+| [`supervise_lib/release_templates.py`](../../plugins/ndf/scripts/supervise_lib/release_templates.py) | 本番のプランに `record`（`pr_from: release_pr_url`）と `judge-record` を組む。昇格のプラン（`supervise_lib/delivery_templates.py` の `plan_promote`）も、マージの後に同じ `judge-record` と `record --promote` を組む |
 | [`supervise_lib/engine.py`](../../plugins/ndf/scripts/supervise_lib/engine.py) の `take_pr` | run のステップの `pr_from` を読み、プランの `Pull Request` を埋める |
 | [`sprint-close.py`](../../plugins/ndf/scripts/sprint-close.py) | `parse_record` を `lib/dist_record.py` から同じ名前で import する。読み方は変わらない |
 
@@ -111,6 +111,11 @@ python3 release-steps.py record --version <版> --prs <PR番号>... [--plugin <�
 ```
 
 ブランチとプラグイン名は `release` と同じく `release_decl` が宣言から読む。
+
+昇格の経路（#837）は `record --promote --head <ベースブランチ> --base <本番チャネル> --prs <PR番号>...` を打つ。
+前提は `head → base` のマージ済みの PR とそのマージのコミットで、無ければ書かずに 3。書く先はその PR、`版:` は
+`<本番チャネル> <直前の短い SHA> → <本番チャネル> <マージのコミットの短い SHA>`（直前はマージのコミットの 1 つ目の親。
+読めなければ `なし`）。結果 JSON・終了コード・書かないときは下の表と同じである。
 
 | 項目 | 内容 |
 | --- | --- |
@@ -195,4 +200,4 @@ stateDiagram-v2
 - [`release` の `references/form-package-plugin.md`](../../plugins/ndf/skills/release/references/form-package-plugin.md)
 - [後片付けを止めずに通し、スプリント課題を最終工程で閉じる](ndf-cleanup-and-bundle-closing.md)
 - [`lib/dist_record.py`](../../plugins/ndf/scripts/lib/dist_record.py) / [`release_lib/record.py`](../../plugins/ndf/scripts/release_lib/record.py) / [`release-steps.py`](../../plugins/ndf/scripts/release-steps.py)
-- 課題 [#1273](https://github.com/devbasex/ai-plugins/issues/1273)・リリース後テストの書き手は [#1683](https://github.com/devbasex/ai-plugins/issues/1683)
+- 課題 [#1273](https://github.com/devbasex/ai-plugins/issues/1273)・リリース後テストの書き手は [#1683](https://github.com/devbasex/ai-plugins/issues/1683)・昇格の記録と版の食い違いの読み方は [#1870](https://github.com/devbasex/ai-plugins/issues/1870)

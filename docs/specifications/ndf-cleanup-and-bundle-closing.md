@@ -274,7 +274,7 @@ Pull Request を選ぶため、別のスプリント課題を閉じうる。
 | `gh issue close` と `status "Done"` を持つ `SKILL.md` が `progress-tracking` だけ、承認ゲートが 2 つのまま | 文書を読んで確かめる |
 | 3 つの最終工程の Skill が棚卸しを呼ばず、「スプリントを閉じる → 棚卸し」の順序が `progress-tracking` の 1 か所にある | 同上 |
 | リリース記録の読み取りと閉じる手順が手順書のコード例のとおりに動く（本番の版のブロックの選択、`配布なし` の後のブロック、`スプリント:` の行の取り出し、ボード → close → 読み直しの順、一覧が空なら止まる、最初の読みに失敗したらボードを触らない） | `plugins/ndf/skills/development-workflow/tests/test_workflow_hooks.py`（`closing_step` / `record_reader` を名前に持つテスト。疑似 `gh` で呼び出しの順を固定する） |
-| `release/SKILL.md` の行数が上限（365 行）に収まる | `plugins/ndf/skills/release/tests/test_completion_check.py`（`test_the_skill_md_stays_within_its_budget`） |
+| `release/SKILL.md` の行数が上限（368 行）に収まる | `plugins/ndf/skills/release/tests/test_completion_check.py`（`test_the_skill_md_stays_within_its_budget`） |
 | frontmatter の `description` から "after listing them for approval" が消えている | `python3 scripts/check-skill-frontmatter.py` |
 | 退避のループが空白・改行・引用符・非 ASCII を含むパスと、追跡されたディレクトリの配下の無視されたパスを同じ相対パスで移す | 一時リポジトリでの実測（PR #747 の本文） |
 | 書けない退避先では 1 件目を退避した後に止まり、`git worktree remove` へ進まず worktree が残る | 同上 |
