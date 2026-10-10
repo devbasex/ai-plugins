@@ -26,7 +26,7 @@ def ledger_path() -> Path:
     return pm.mvv_state_base() / LEDGER_NAME
 
 
-def repo_key(root, repo: str | None = None) -> str:
+def ledger_repo(root, repo: str | None = None) -> str:
     """記録の `repo`。`repo` → `origin` の `owner/repo` → メインディレクトリの絶対パス → 根の絶対パス。
 
     worktree で書いた行とメインディレクトリで数える行が同じ値になるよう、根ではなくメインディレクトリを使う。
@@ -40,9 +40,7 @@ def repo_key(root, repo: str | None = None) -> str:
     return str(main if main is not None else Path(root).resolve())
 
 
-def make_row(
-    gate: str, what: str, *, repo: str, at: str, sprint=None, issues=(), prs=()
-) -> dict:
+def make_row(gate: str, what: str, *, repo: str, at: str, sprint=None, issues=(), prs=()) -> dict:
     """1 行を作る。承認ゲートの名前・要約が空か、範囲（sprint・issues・prs）が 1 つも無ければ ValueError。"""
     if not (gate or "").strip():
         raise ValueError("承認ゲートの名前が空")
@@ -70,7 +68,7 @@ def append(row: dict, path=None) -> Path:
     return target
 
 
-def read(path=None) -> list[dict]:
+def read_rejections(path=None) -> list[dict]:
     """記録を読む。無ければ空。読めない・壊れた行があれば `jsonio.JsonReadError`（件数を「不明」にする）。"""
     return jsonio.read_jsonl(Path(path) if path else ledger_path(), missing=[])
 
@@ -88,7 +86,7 @@ def in_scope(row: dict, *, repo: str, sprint=None, issues=(), prs=()) -> bool:
     return bool(set(prs) & set(row.get("prs") or []))
 
 
-def count(rows: list[dict]) -> dict:
+def count_by_gate(rows: list[dict]) -> dict:
     """承認ゲート 1・2・ほかに分けた件数。名前は `sprint-state.py` の記録の名前（`関門 1` / `関門 2`）で仕分ける。"""
     counts = dict.fromkeys(COUNT_KEYS, 0)
     for r in rows:

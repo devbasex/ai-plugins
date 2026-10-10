@@ -276,7 +276,7 @@ def gate_locked(a) -> dict:
     entry = {"name": a.name, "what": a.what, "at": at}
     if a.by == "user":
         root = Path(a.root or ".").resolve()
-        repo = gr.repo_key(root) if a.outcome == "rejected" else None  # 覆しを書く前に決める（落ちて打ち直すと覆しが重なる）
+        repo = gr.ledger_repo(root) if a.outcome == "rejected" else None  # 覆しを書く前に決める（落ちて打ち直すと覆しが重なる）
         override = pms.record_override(m, a.sprint, a.name, a.outcome, at, root, a.mvv_log, pr=a.pr)
         if a.outcome == "rejected":
             return reject_gate(a, m, repo, override, at)
@@ -301,14 +301,12 @@ def gate_locked(a) -> dict:
 def reject_gate(a, m: dict, repo: str, override: dict | None, at: str) -> dict:
     """利用者の差し戻しを差し戻しの記録（`lib/gate_rejections.py`）へ 1 行書く。関門は通さず、状態ファイルは変えない。"""
     extra = f"。覆しを記録した（{override['kind']}）" if override else ""
-    row = gr.make_row(a.name, a.what, repo=repo, at=at, sprint=a.sprint, issues=m.get("issues") or [], prs=[a.pr] if a.pr else [])
     try:
-        gr.append(row)
+        gr.append(gr.make_row(a.name, a.what, repo=repo, at=at, sprint=a.sprint, issues=m.get("issues") or [], prs=[a.pr] if a.pr else []))
+        status, summary = "ok", f"{a.name} の差し戻しを書いた（{at}。関門は通さない）"
     except OSError as e:
-        summary = f"{a.name} の差し戻しを記録できない（{gr.ledger_path()}: {e}）{extra}"
-        return outcome("stopped", summary, [override] if override else [], {"gates": len(m.get("gates", []))})
-    summary = f"{a.name} の差し戻しを書いた（{at}。関門は通さない）{extra}"
-    return outcome("ok", summary, [override] if override else [], {"gates": len(m.get("gates", []))})
+        status, summary = "stopped", f"{a.name} の差し戻しを記録できない（{gr.ledger_path()}: {e}）"
+    return outcome(status, summary + extra, [override] if override else [], {"gates": len(m.get("gates", []))})
 
 
 def mvv_sha(m: dict) -> str | None:

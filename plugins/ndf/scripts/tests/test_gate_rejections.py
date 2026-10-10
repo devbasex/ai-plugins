@@ -37,7 +37,7 @@ def ledger() -> Path:
 
 
 def rows() -> list[dict]:
-    return gr.read()
+    return gr.read_rejections()
 
 
 def record(*args: str, cwd: Path | None = None) -> tuple[int, dict]:
@@ -51,7 +51,16 @@ def git(cwd: Path, *args: str) -> None:
 def test_record_appends_one_row_with_gate_time_summary_repo_and_scope():
     code, out = record("--gate", "関門 1", "--what", "設計の条件が違う", "--issue", "5", "--issue", "3")
     assert (code, out["status"], out["metrics"]["path"]) == (0, "ok", str(ledger()))
-    expected = {"at": AT, "repo": "o/r", "gate": "関門 1", "what": "設計の条件が違う", "sprint": None, "issues": [3, 5], "prs": [], "by": "user"}
+    expected = {
+        "at": AT,
+        "repo": "o/r",
+        "gate": "関門 1",
+        "what": "設計の条件が違う",
+        "sprint": None,
+        "issues": [3, 5],
+        "prs": [],
+        "by": "user",
+    }
     assert out["items"] == [expected] and rows() == [expected]
     record("--gate", "関門 2", "--what", "本番", "--pr", "9")
     assert [r["gate"] for r in rows()] == ["関門 1", "関門 2"]  # 追記だけで、前の行は残る
@@ -129,7 +138,9 @@ def _state(tmp_path: Path, pace: str) -> Path:
 
 def _gate(tmp_path: Path, state: Path, *args: str) -> tuple[int, dict]:
     log = str(tmp_path / "mvv-gate.jsonl")
-    return run("gate", str(state), "関門 1", "--what", "設計", "--at", AT, "--mvv-log", log, "--root", str(tmp_path), *args, script=STATE_PY)
+    return run(
+        "gate", str(state), "関門 1", "--what", "設計", "--at", AT, "--mvv-log", log, "--root", str(tmp_path), *args, script=STATE_PY
+    )
 
 
 def test_sprint_state_rejection_on_a_normal_pace_writes_the_ledger(tmp_path):
@@ -138,7 +149,16 @@ def test_sprint_state_rejection_on_a_normal_pace_writes_the_ledger(tmp_path):
     code, _ = _gate(tmp_path, state, "--outcome", "rejected")
     assert code == 0 and state.read_text() == before  # 状態ファイルへ rejections を書かない（I6）
     assert rows() == [
-        {"at": AT, "repo": str(tmp_path.resolve()), "gate": "関門 1", "what": "設計", "sprint": str(state.resolve()), "issues": [4], "prs": [], "by": "user"}
+        {
+            "at": AT,
+            "repo": str(tmp_path.resolve()),
+            "gate": "関門 1",
+            "what": "設計",
+            "sprint": str(state.resolve()),
+            "issues": [4],
+            "prs": [],
+            "by": "user",
+        }
     ]
     _, out = run("count", "--sprint", str(state), "--root", str(tmp_path))
     assert out["metrics"]["gate_1"] == 1

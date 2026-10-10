@@ -569,7 +569,7 @@ def test_signals_do_not_change_when_gate_rejections_are_recorded(env):
     assert code == 0, text
     state = new_state(env, env["tmp"])
     assert sprint_gate(env, state, "--outcome", "rejected") == 0
-    assert len(gr.read(env["tmp"] / "state" / gr.LEDGER_NAME)) == 2
+    assert len(gr.read_rejections(env["tmp"] / "state" / gr.LEDGER_NAME)) == 2
     after = run(env, "signals", "--root", str(env["root"]), "--format", "json")
     assert (after[0], after[1]) == (before[0], before[1])
     assert len(signal_rows(env)) == 1
@@ -608,7 +608,7 @@ def test_gate_records_overrides_only_when_the_user_disagrees(env):
     assert [r["kind"] for r in signal_rows(env)] == ["override_pass", "override_reject"]
     m = json.loads(state.read_text())
     assert "rejections" not in m  # 差し戻しは差し戻しの記録へだけ書く（#1833）
-    assert [r["gate"] for r in gr.read(env["tmp"] / "state" / gr.LEDGER_NAME)] == ["関門 2"]
+    assert [r["gate"] for r in gr.read_rejections(env["tmp"] / "state" / gr.LEDGER_NAME)] == ["関門 2"]
     assert next(g for g in m["gates"] if g["name"] == "関門 2")["by"] == "mvv"  # 差し戻しは関門を通さない
     sprint_gate(env, state, "--by", "mvv", "--verdict", "follow", "--reasons", "[]")
     assert sprint_gate(env, state, "--outcome", "approved") == 0

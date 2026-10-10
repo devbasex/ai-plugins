@@ -33,7 +33,7 @@ def _scope_args(a) -> dict:
 
 
 def cmd_record(a) -> tuple[dict, int]:
-    repo = gr.repo_key(a.root, a.repo)
+    repo = gr.ledger_repo(a.root, a.repo)
     try:
         row = gr.make_row(a.gate, a.what, repo=repo, at=a.at or clock.now_iso("utc"), **_scope_args(a))
     except ValueError as e:
@@ -47,14 +47,14 @@ def cmd_record(a) -> tuple[dict, int]:
 
 
 def cmd_count(a) -> tuple[dict, int]:
-    repo = gr.repo_key(a.root, a.repo)
+    repo = gr.ledger_repo(a.root, a.repo)
     scope = _scope_args(a)
     try:
-        rows = [r for r in gr.read() if gr.in_scope(r, repo=repo, **scope)]
+        rows = [r for r in gr.read_rejections() if gr.in_scope(r, repo=repo, **scope)]
     except jsonio.JsonReadError as e:
         metrics = dict.fromkeys(gr.COUNT_KEYS)
         return step_result.result(TOOL, "stopped", f"承認ゲートの差し戻し: 不明（{e}）", [], metrics), step_result.EXIT_UNREADABLE
-    c = gr.count(rows)
+    c = gr.count_by_gate(rows)
     summary = f"承認ゲートの差し戻し: 関門 1 が {c['gate_1']} 件・関門 2 が {c['gate_2']} 件（ほか {c['other']} 件）"
     return step_result.result(TOOL, "ok", summary, rows, c), step_result.EXIT_OK
 

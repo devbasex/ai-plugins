@@ -14,11 +14,12 @@ import legacy_names
 import project_mvv as pm
 
 
-def read_jsonl(path) -> list[dict]:
+def _read_skipping_broken(path) -> list[dict]:
     """覆しと判定の記録を読む。無い・読めなければ空、壊れた行は飛ばす（集計を止めない）。"""
     return jsonio.read_jsonl(path, missing=[], broken=[], skip_broken=True)
 
 
+read_jsonl = _read_skipping_broken
 append_jsonl = jsonio.append_jsonl
 
 
