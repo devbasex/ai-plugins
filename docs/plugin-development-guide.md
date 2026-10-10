@@ -311,7 +311,8 @@ bash scripts/install-dev-hooks.sh
 **Q: バージョン更新が反映されない**
 - `plugins/<名前>/.claude-plugin/plugin.json` の `version` を更新（**版を持つのはここだけ**。
   `marketplace.json` に `version` フィールドは置かない）
-- 版数を書いた説明文書の記載（`description` の `(vX.Y.Z)`、更新案内の見出し）を揃える。
-  これは読み手向けの記載で、取得する版は変えない
+- 版数を書いた説明文書の記載（`description` の `(vX.Y.Z)`）を揃える。これは読み手向けの記載で、取得する版は
+  変えない。その版の変化と移行の手順は `CHANGELOG.md` の版の節へ書き、プラグインの README には版ごとの更新の節を
+  置かない（README は CHANGELOG.md を参照する「`## 更新情報`」の節だけを持つ）
 - 取得元が自動更新されるとは限らない。利用者側で `claude plugin marketplace update` を実行する
 - Claude Codeを再起動

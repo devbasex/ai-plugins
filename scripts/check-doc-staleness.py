@@ -10,9 +10,13 @@
 かったため、版を上げるたびに説明文書の側へ古い数が残った。ここでは説明文書の側を突き合わせの
 対象へ入れる。
 
-版数も同じことが起きる。チェックしていたのは更新案内の見出し（`## v<版> へ更新するとき`）
-だけで、概要・期待出力・キャッシュパスの例に書かれた版数は古いまま残った。周囲の固定の語で
-位置を決めた 6 種類を突き合わせの対象へ入れる。
+版数も同じことが起きる。概要・期待出力・キャッシュパスの例に書かれた版数は古いまま残った。
+周囲の固定の語で位置を決めた 6 種類を突き合わせの対象へ入れる。
+
+plugin の README（`plugins/*/README.md`・`plugins/mcp/*/README.md`）は版ごとの更新の節
+（`## v<版> へ更新するとき`）を持たない（F）。更新情報は CHANGELOG.md の版の節が正本で、README は
+現行版の説明と CHANGELOG.md を参照する固定の節だけを持つ（#1867）。配布の手順は README に触れない
+ため、人の手で戻った節は版を上げても古いまま残る。それをここで止める。
 
 **すべての版数を現行版へ揃えるわけではない。** 変更履歴・履歴の説明・意図的に前の版を指す
 記載は、前の版のまま残すのが正しい。位置を決めてから照合する形にしているため、それらは
@@ -102,10 +106,9 @@ require("md", "versions")
 import md  # noqa: E402  節と囲みは lib/md.py（markdown-it-py）で読む
 import versions  # noqa: E402  版の比較は lib/versions.py（semver）
 
-# F: 更新案内の見出し。版数の拾い方は `VERSION` へ揃える。数字 3 つだけで拾うと、接尾辞の
-# 付いた版（`9.7.0-dev.1`）では見出しを読み落とし、接尾辞を外して書けば今度は古いと判定
-# されるため、どちらの書き方でもチェックを通せない。
-UPGRADE_HEADING = re.compile(r"^##\s+v" + VERSION + r"\s+へ更新するとき\s*$", re.MULTILINE)
+# F: plugin の README に置かない版ごとの更新の節の見出し。版数の書き方と前置き（`以前の版:` など）に依らず拾う。
+UPGRADE_HEADING = re.compile(r"^##[ \t]+(?:[^\n]*[ \t])?v\d\S*[ \t]+へ更新するとき[ \t]*$", re.MULTILINE)
+PLUGIN_READMES = ("plugins/*/README.md", "plugins/mcp/*/README.md")
 
 # --- 現行版を指す記載（G〜M）---
 #
@@ -731,7 +734,7 @@ def check_category_breakdown(body: str, total: int | None, source: str, report: 
 
 
 def check_plugin_readme(body: str, metrics: RepositoryMetrics, report: Report) -> None:
-    """`plugins/ndf/README.md` の配布先の表（D）・レイアウト図（E）・更新案内（F）を見る。"""
+    """`plugins/ndf/README.md` の配布先の表（D）・レイアウト図（E）を見る。"""
     found = labelled_numbers(TABLE_ROW, body, PLUGIN_README_RUNTIMES)
     check_runtime_counts(
         RuntimeCountDocSpec(
@@ -756,34 +759,20 @@ def check_plugin_readme(body: str, metrics: RepositoryMetrics, report: Report) -
         ),
         report,
     )
-    check_upgrade_heading(body, metrics.version, report)
 
 
-def check_upgrade_heading(body: str, version: str | None, report: Report) -> None:
-    """更新案内の見出しの版数を `plugin.json` の版と突き合わせる（F）。
-
-    本文がその版の変更内容を説明しているかは機械では決められない。ここで見るのは見出しの
-    版数だけで、版を上げたときに必ずこの節へ触る状態を作ることを目的とする。本文を読み直す
-    機会は `docs/versioning-and-distribution.md` の「チェックに載らず手で直す箇所」が作る。
-    """
-    headings = UPGRADE_HEADING.findall(body)
-    if not headings:
-        report.add(
-            PLUGIN_README,
-            f"更新案内の見出しが無い（`## v<版> へ更新するとき` の形で書く。{PLUGIN_JSON}: v{version}）",
-        )
-        return
-    if len(headings) > 1:
-        report.add(
-            PLUGIN_README,
-            f"更新案内の見出しが {len(headings)} 個ある（v{' / v'.join(headings)}）。この節は現行の版の 1 つだけにする",
-        )
-        return
-    if version is not None and headings[0] != version:
-        report.add(
-            PLUGIN_README,
-            f"更新案内の見出しの版数が古い（見出し: v{headings[0]} / {PLUGIN_JSON}: v{version}）",
-        )
+def check_upgrade_heading(root: Path, report: Report) -> None:
+    """plugin の README に版ごとの更新の節（`## v<版> へ更新するとき`）があれば落とす（F）。"""
+    for pattern in PLUGIN_READMES:
+        for path in sorted(root.glob(pattern)):
+            body = path.read_text(encoding="utf-8")
+            for m in UPGRADE_HEADING.finditer(body):
+                line = body.count("\n", 0, m.start()) + 1
+                report.add(
+                    f"{path.relative_to(root).as_posix()}:{line}",
+                    f"版ごとの更新の節がある（{m.group(0).strip()}）。更新情報は CHANGELOG.md の版の節へ書き、"
+                    "README は CHANGELOG.md を参照する固定の節だけを持つ",
+                )
 
 
 def main() -> int:
@@ -816,6 +805,7 @@ def main() -> int:
     if plugin_body is not None:
         check_plugin_readme(plugin_body, metrics, report)
         check_point_versions(PLUGIN_README, plugin_body, version, report)
+    check_upgrade_heading(root, report)
 
     if report.errors:
         for error in report.errors:

@@ -123,15 +123,28 @@ NO_ITEMS = ("無し", "なし")  # 節の箇条で「何も無い」を示す語
 
 def section_items(body: str, heading: str, n: int) -> list[str]:
     """節の箇条を `<本文>（#n）` で返す（本文に `#n` があれば付けない）。続きの行（字下げ）は前の項目へつなぐ。
-    節が無い・「無し」だけなら空。PR 本文の「利用者向けの変化」「未検証・残る危険」「移行の手順」を読む。"""
+    字下げした箇条（子の箇条）は独立した項目にせず、前の項目の中へ改行と `  - <本文>` で残す（#1867）。
+    `（#n）` は項目の 1 行目にだけ付ける。節が無い・「無し」だけなら空。
+    PR 本文の「利用者向けの変化」「未検証・残る危険」「移行の手順」を読む。"""
     items: list[str] = []
     for line in (get_section(body or "", heading) or "").splitlines():
         text = line.strip()
         if not text:
             continue
         bullet = re.match(r"^[-*]\s+(.*)$", text)
-        if bullet or not items or not line[:1].isspace():
+        indented = line[:1].isspace()
+        if not items or not indented:
             items.append((bullet.group(1) if bullet else text).strip())
+        elif bullet:
+            items[-1] += "\n  - " + bullet.group(1).strip()
         else:
             items[-1] += " " + text
-    return [i if f"#{n}" in i else f"{i}（#{n}）" for i in items if i and i not in NO_ITEMS]
+    out: list[str] = []
+    for i in items:
+        if not i or i in NO_ITEMS:
+            continue
+        if f"#{n}" not in i:
+            first, sep, rest = i.partition("\n")
+            i = f"{first}（#{n}）{sep}{rest}"
+        out.append(i)
+    return out

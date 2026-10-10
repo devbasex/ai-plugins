@@ -14,34 +14,9 @@
 - データベース一覧の取得
 - 複数データベースへの同時接続（TOML設定）
 
-## v2.0.1 へ更新するとき
+## 更新情報
 
-**MCP サーバが起動直後に落ちていた不具合を直しました（#206）。**
-
-`.mcp.json` が dbhub へ設定ファイルを渡していませんでした。**dbhub 本体は cwd の
-`dbhub.toml` を自動検出しません**。`--config` / `--dsn` / `DSN` / `.env` のいずれも無いと
-`ERROR: Database connection configuration is required` を出して終了します。
-
-`.mcp.json` の引数へ `--config=dbhub.toml` を足しました。相対パスなので、プロジェクトごとの
-`dbhub.toml` がそのまま効きます。
-
-**`dbhub.toml` は自動検出される、という README の記述も誤りでした。** 実際は `.mcp.json` の
-`--config` で読み込まれます。この記述が誤解の元になっていました。
-
-```bash
-# Claude Code
-/plugin marketplace update ai-plugins
-/plugin update mcp-dbhub@ai-plugins
-
-# Codex
-codex plugin marketplace upgrade ai-plugins
-codex plugin add mcp-dbhub@ai-plugins
-
-# Kiro CLI
-bash plugins/mcp/mcp-dbhub/dev.kiro/install.sh
-```
-
-**更新した後、MCP サーバを読み直すために再起動が要ります。**
+版ごとの変更と移行の手順は [CHANGELOG.md](https://github.com/devbasex/ai-plugins/blob/main/CHANGELOG.md) の `[mcp-dbhub <版>]` の節にあります。
 
 ## インストール
 
@@ -68,6 +43,21 @@ bash plugins/mcp/mcp-dbhub/dev.kiro/install.sh
 ### 必要な環境変数
 
 - 追加の環境変数は不要です。
+
+### 更新
+
+```bash
+# Claude Code
+/plugin marketplace update ai-plugins
+/plugin update mcp-dbhub@ai-plugins
+
+# Codex
+codex plugin marketplace upgrade ai-plugins
+codex plugin add mcp-dbhub@ai-plugins
+
+# Kiro CLI
+bash plugins/mcp/mcp-dbhub/dev.kiro/install.sh
+```
 
 ## 設定
 

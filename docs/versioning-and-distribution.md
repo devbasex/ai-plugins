@@ -237,7 +237,7 @@ claude plugin tag plugins/ndf --push      # ndf--v<版> を作って origin へ�
 落ちる。**記載を消してもチェックは通らない。** 位置を決める語が見つからなければ、読み取れない
 こととして落ちる。
 
-**定義ファイルと更新案内の見出しが 8 箇所である。** 3 つの `plugin.json` はいずれも
+**定義ファイルが 7 箇所である。** 3 つの `plugin.json` はいずれも
 `version` と `description` の両方に版数を持つため、片方だけ直すとチェックで止まる。
 
 | 箇所 | 何を書くか |
@@ -249,7 +249,11 @@ claude plugin tag plugins/ndf --push      # ndf--v<版> を作って origin へ�
 | `plugins/ndf/dev.agy/plugin.json` の `version` | 版数そのもの |
 | `plugins/ndf/dev.agy/plugin.json` の `description` | `(vX.Y.Z)` の形で版数 |
 | `.claude-plugin/marketplace.json` の該当プラグインの `description` | 同上 |
-| `plugins/ndf/README.md` の更新案内の見出し | `## vX.Y.Z へ更新するとき` |
+
+**plugin の README は版ごとの更新の節（`## vX.Y.Z へ更新するとき`）を持たない。** README は現行版の説明と、
+CHANGELOG.md を参照する固定の「`## 更新情報`」の節だけを持ち、版ごとの変更と移行の手順は CHANGELOG.md の版の節に
+置く。配布の手順（`release-steps.py` の `bump`・`changelog`・`notes`）は README に触れない。節が戻ると
+`scripts/check-doc-staleness.py` が落とす（`plugins/*/README.md`・`plugins/mcp/*/README.md`）。
 
 **説明文書の本文が 6 箇所である。** いずれも利用者が読む入口にあり、古いまま残ると現行版を
 誤って伝えるか、書かれたとおりに実行できない。
@@ -301,37 +305,35 @@ claude plugin tag plugins/ndf --push      # ndf--v<版> を作って origin へ�
 両方に版を持たせると `plugin.json` が無警告で優先され、食い違いに気づけなくなる。
 
 `scripts/validate-runtime-plugins.sh` が突き合わせるのは、説明文書に書かれた Skill の数と、
-**版数を書いた箇所**です。定義ファイルと更新案内の見出しが 8 箇所、説明文書の本文が
+**版数を書いた箇所**です。定義ファイルが 7 箇所、説明文書の本文が
 6 箇所あります（`README.md` の概要とプラグイン一覧表、正本に 1 箇所、
 `plugins/ndf/README.md` の Kiro と Codex の確認例 3 種類）。**記載を消してもチェックは通りません。**
 一覧は上の 2 つの表にあります。
 
 ## チェックに載らず手で直す箇所
 
-**チェックが見るのは版数そのものの一致までで、記載の中身までは見ない。** 次の 3 つは版を
+**チェックが見るのは版数そのものの一致までで、記載の中身までは見ない。** 次の 2 つは版を
 上げるたびに人が読み直す。
 
 | 箇所 | 何を確かめるか |
 | --- | --- |
-| `plugins/ndf/README.md` の更新案内の本文 | その版の変更を説明しているか。見出しの版数はチェックが見るが、本文が何を説明しているかは機械では判定できない |
 | 接尾辞の付け忘れ・外し忘れ | 接尾辞の付いた版でもチェックは通る（形式としては妥当な版数のため）。出す前に版数を読み直す |
 | `CHANGELOG.md` の版の節 | その版で何が変わったかを書く。版数と日付は機械で確かめられるが、内容は書かないと残らない |
 
 **バージョン更新時の手順**:
 1. `plugin.json`のバージョンをインクリメント
 2. 変更内容をドキュメント化
-3. `plugins/ndf/README.md` の「v&lt;版&gt; へ更新するとき」の節を開き、**本文をその版の変更内容へ書き直す**。見出しの版数だけを置き換えて、本文を前の版の説明のまま残さない
-4. `CHANGELOG.md` の先頭へその版の節を足す。書式は Keep a Changelog に従い、変更点を
+3. `CHANGELOG.md` の先頭へその版の節を足す。書式は Keep a Changelog に従い、変更点を
    `追加` / `変更` / `修正` / `削除` へ分類して 1〜2 行で書く。判断の理由は
    `docs/ndf-version-decisions.md` へ置く
-5. Skill の数が増減した場合は、`README.md` と `plugins/ndf/README.md` に書かれた数を書き直す
-6. `python3 scripts/check-doc-staleness.py --root .` を実行し、説明文書に残った古い版数を
+4. Skill の数が増減した場合は、`README.md` と `plugins/ndf/README.md` に書かれた数を書き直す
+5. `python3 scripts/check-doc-staleness.py --root .` を実行し、説明文書に残った古い版数を
    出力の行番号のとおりに直す
-7. `python3 plugins/ndf/scripts/instructions-check.py --root .` を実行し、リリース済み版の段落が
+6. `python3 plugins/ndf/scripts/instructions-check.py --root .` を実行し、リリース済み版の段落が
    指示書に残っていないかを見る。落ちた段落は `docs/ndf-version-decisions.md` へ移す
-8. 破壊的変更がある場合は明示
-9. テストを実行
-10. **正式版として `main` を進めた後、リリースタグを打つ**
+7. 破壊的変更がある場合は明示
+8. テストを実行
+9. **正式版として `main` を進めた後、リリースタグを打つ**
 
 **すべての版数を機械的に置換しない。** 履歴（`docs/ndf-version-decisions.md`、`CLAUDE.md` の
 現行版の段落、`docs/development-history/`）、記録（`issues/`）、意図的に前の版を指す文（取り消しの説明）は
