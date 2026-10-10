@@ -7,33 +7,19 @@
 from __future__ import annotations
 
 import datetime
-import json
 from pathlib import Path
 
+import jsonio
 import legacy_names
 import project_mvv as pm
 
 
 def read_jsonl(path) -> list[dict]:
-    p = Path(path)
-    if not p.is_file():
-        return []
-    rows = []
-    for ln in p.read_text(encoding="utf-8").splitlines():
-        try:
-            d = json.loads(ln)
-        except ValueError:
-            continue
-        if isinstance(d, dict):
-            rows.append(d)
-    return rows
+    """覆しと判定の記録を読む。無い・読めなければ空、壊れた行は飛ばす（集計を止めない）。"""
+    return jsonio.read_jsonl(path, missing=[], broken=[], skip_broken=True)
 
 
-def append_jsonl(path, row: dict) -> None:
-    p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    with p.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+append_jsonl = jsonio.append_jsonl
 
 
 def _parse_at(s) -> datetime.datetime | None:

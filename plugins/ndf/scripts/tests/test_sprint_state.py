@@ -331,6 +331,25 @@ def gate(sprint: str, tmp: Path, *args: str) -> tuple[int, dict, dict]:
     return p.returncode, json.loads(p.stdout), json.loads(Path(sprint).read_text())
 
 
+def rejection_rows() -> list[dict]:
+    """差し戻しの記録（`NDF_MVV_STATE_DIR` は conftest が tmp へ向ける）の行。"""
+    path = Path(os.environ["NDF_MVV_STATE_DIR"]) / "gate-rejections.jsonl"
+    return [json.loads(ln) for ln in path.read_text().splitlines()] if path.exists() else []
+
+
+def rejection(sprint: str, tmp: Path, name: str, what: str, m: dict, prs=()) -> dict:
+    return {
+        "at": GATE_AT,
+        "repo": str(tmp.resolve()),
+        "gate": name,
+        "what": what,
+        "sprint": str(Path(sprint).resolve()),
+        "issues": sorted(m.get("issues") or []),
+        "prs": list(prs),
+        "by": "user",
+    }
+
+
 def stopped(summary: str) -> dict:
     return {"tool": "sprint-state", "status": "stopped", "summary": summary, "items": [], "metrics": {}}
 
@@ -354,11 +373,13 @@ def user_gate_paths(sprint: str, tmp: Path) -> None:
     g2a = {"name": "関門 2", "what": "本番", "at": GATE_AT, "outcome": "approved"}
     code, out, m = gate(sprint, tmp, "関門 2", "--what", "本番", "--outcome", "approved")
     assert (code, out["items"], m["gates"]) == (0, [g1, g2a], [g1, g2a])
-    # 差し戻しは関門を通さず rejections へだけ書く
-    code, out, m = gate(sprint, tmp, "関門 3", "--what", "配布", "--outcome", "rejected")
+    # 差し戻しは関門を通さず、状態ファイルを変えずに差し戻しの記録へ 1 行だけ書く（#1833）
+    before_reject = m
+    code, out, m = gate(sprint, tmp, "関門 3", "--what", "配布", "--outcome", "rejected", "--pr", "7")
     assert (code, out["summary"]) == (0, f"関門 3 の差し戻しを書いた（{GATE_AT}。関門は通さない）")
-    assert (out["items"], out["metrics"], m["gates"]) == ([], {"gates": 2}, [g1, g2a])
-    assert m["rejections"] == [{"name": "関門 3", "what": "配布", "at": GATE_AT, "by": "user", "outcome": "rejected"}]
+    assert (out["items"], out["metrics"], m) == ([], {"gates": 2}, before_reject)
+    assert "rejections" not in m
+    assert rejection_rows() == [rejection(sprint, tmp, "関門 3", "配布", m, prs=[7])]
     # --withdraw はほかの指定と併せると止まり、外す記録が無くても取り消しの時刻を残す
     for extra in (("--outcome", "approved"), ("--by", "mvv"), ("--by", "mvv", "--verdict", "follow")):
         assert gate(sprint, tmp, "関門 2", "--withdraw", *extra) == (
@@ -584,7 +605,8 @@ def test_mvv_approval_without_an_mvv_stops(r6):
     assert gate(sprint, tmp, "MVV", "--by", "mvv") == (2, stopped("--what が要る（--withdraw のときだけ省ける）"), before)
     code, out, m = gate(sprint, tmp, "MVV", "--what", "x", "--outcome", "rejected")
     assert (code, out["summary"], m["gates"]) == (0, f"MVV の差し戻しを書いた（{GATE_AT}。関門は通さない）", [])
-    assert m["rejections"] == [{"name": "MVV", "what": "x", "at": GATE_AT, "by": "user", "outcome": "rejected"}]
+    assert "rejections" not in m
+    assert rejection_rows() == [rejection(sprint, tmp, "MVV", "x", m)]
 
 
 def test_update_adds_plans_from_done_without_init_plan(r6):
