@@ -17,7 +17,6 @@ import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 SCRIPT = SCRIPTS / "sprint-state.py"
-RELAY = SCRIPTS / "relay.py"
 
 NO_GH: dict[str, str] = {}
 
@@ -418,10 +417,10 @@ def test_gate_and_status(r6):
 
 
 def load_relay():
-    spec = importlib.util.spec_from_file_location("relay_for_sprint", RELAY)
-    m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
-    return m
+    """next_blocks の定義元（relay_lib.mark）を直接読む。relay.py のランチャーは通らない。"""
+    if str(SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(SCRIPTS))
+    return importlib.import_module("relay_lib.mark")
 
 
 def test_next_is_ndf_next_block_for_relay(r6):
