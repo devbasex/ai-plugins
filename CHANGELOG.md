@@ -22,6 +22,16 @@
 - 新しい版を配布しても、プラグインの README は変わらない（#1881）（#1882）
 - CHANGELOG.md の版の節では、子の箇条が親の項目の中に入れ子で並ぶ（#1881）（#1882）
 - ndf の release・pr の手順書は、CHANGELOG.md の版の節を更新案内の正本とする（#1881）（#1882）
+- mcp-bigquery は Google 公式のリモート BigQuery MCP サーバーへ接続します。ローカルのサーバーは起動しません（#1869）
+- ツールが `execute_sql_readonly`・`execute_sql`・`list_dataset_ids`・`list_table_ids`・`get_dataset_info`・`get_table_info`・`get_job`・`get_query_results`・`cancel_job` に変わります。どれも `projectId` を引数で受け取ります（#1869）
+- クエリは既定で 3 分で打ち切られ、結果は 3,000 行までです（#1869）
+- ndf の data-analyst エージェントが挙げる BigQuery のツール名を、実際の名前（`mcp__plugin_mcp-bigquery_bigquery__*`）に直しました（#1869）
+
+### 移行の手順
+
+- mcp-bigquery: 対象プロジェクトで利用者のアカウントに `roles/mcp.toolUser` を付与する（BigQuery のロールには含まれない）（#1869）
+- mcp-bigquery: `gcloud auth login` でユーザーとしてログインする。`BIGQUERY_PROJECT`・`BIGQUERY_LOCATION`・`BIGQUERY_DATASET`・`BIGQUERY_KEY_FILE`（サービスアカウント鍵）は使わなくなる（#1869）
+- mcp-bigquery: Kiro CLI では `dev.kiro/install.sh` を再実行し、起動前に `export BIGQUERY_ACCESS_TOKEN=$(gcloud auth print-access-token)` を実行する（#1869）
 
 ## [ndf 10.17.68] - 2026-10-08
 
