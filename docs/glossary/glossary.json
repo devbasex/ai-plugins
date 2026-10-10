@@ -3351,19 +3351,19 @@
       "term": "更新情報の節",
       "context": "ndf-release",
       "meaning": "plugin の README の `## 更新情報` の節。版を名乗らず、CHANGELOG.md の版の節を参照する固定の案内だけを持つ。配布の手順（bump・changelog・notes）は書かない",
-      "pending_source": "issues/issue-1867-design.md"
+      "source": "docs/specifications/ndf-release-readme-update-info.md"
     },
     {
       "term": "版の節",
       "context": "ndf-release",
       "meaning": "CHANGELOG.md の `## [<plugin> <基底の版>]` の見出しから次の `## ` までの節。その版の利用者向けの変化と移行の手順の全件の正本",
-      "pending_source": "issues/issue-1867-design.md"
+      "source": "docs/specifications/ndf-release-readme-update-info.md"
     },
     {
       "term": "子の箇条",
       "context": "ndf-release",
       "meaning": "PR 本文の箇条書きで、前の項目より字下げした箇条。親の項目の一部として読む",
-      "pending_source": "issues/issue-1867-design.md"
+      "source": "docs/specifications/ndf-release-readme-update-info.md"
     },
     {
       "term": "置き換わった失敗",
