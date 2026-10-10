@@ -48,7 +48,7 @@
 | I2 | 承認資料 | 範囲の PR は、`<直前の正式版のタグ>..<承認したコミット>` の first-parent のログで merge commit か squash merge として入った PR のうち、版上げの PR と PR でない番号を除いたものである | 同上 |
 | I3 | 承認資料 | 範囲の PR の終点は承認したコミットで、compare の URL・変更量・`approved_sha` の範囲と同じである。この 3 つの値は変更の前と同じに出る | 同上 |
 | I4 | 承認資料 | 「含む PR」の行は番号の昇順に並ぶ | 同上 |
-| I5 | 承認資料 | 「配る中身」「未検証・残る危険」を書く PR は、承認資料の「含む PR」の PR と `notes --prs` の和のうち、マージ済みのものである | 同上 |
+| I5 | 承認資料 | 「配る中身」「未検証・残る危険」を書く PR は、承認資料の「含む PR」の PR のうち、マージ済みのものである。`notes --prs` は「含む PR」に足さず、「含む PR」に無い番号があれば欄を書かない | 3 で止まり、`summary` に「含む PR」に無い番号と `approval-facts` の打ち直しを出す。欄は書かない |
 | I6 | 承認資料 | 結果 JSON の `kind: pr` の items と要約の「PR N 件」は、「含む PR」の行と同じ番号・同じ件数である | 同上 |
 | I7 | 承認資料 | 範囲の PR を集められないとき（git のログ・GitHub の読み取りの失敗）、承認資料を書かない。`notes --approval` は「含む PR」の欄を読めないとき欄を書かない | 0 以外で止まり、`summary` に理由を出す。既存の承認資料はそのまま残る |
 | I8 | — | 検査（`check-trigger.py`）の範囲の PR・外すコミット・行数・終了コードは、部品の共有の前後で変わらない | 破れる経路を作らない（既存のテストと足すテストで縛る） |
@@ -60,7 +60,7 @@
 | E1 | 配布のプランが `approval-facts` を起動した | 開発版の配布のプランの `facts` のステップ、または conductor | `approval-facts` |
 | E2 | 直前の正式版のタグを決めた | `approval-facts`（`--prev-tag` か `release_tag_before`） | 範囲の PR の収集 |
 | E3 | タグからベースブランチの先頭までにマージされた PR を集めた | 範囲の PR の収集（`merged_range`） | 含む PR の組み立て（`included`） |
-| E4 | 集めた PR と `--prs` を合わせ、版上げの PR を外した | 含む PR の組み立て | `approval-facts` |
+| E4 | 集めた PR から版上げの PR を外し、`--prs` と合わせた | 含む PR の組み立て | `approval-facts` |
 | E5 | 承認資料の「含む PR」を書いた | `approval-facts` | `notes --approval`・MVV 判定・承認する人 |
 | E6 | `notes --approval` が「配る中身」「未検証・残る危険」を同じ集合から書いた | `notes --approval`（プランの `explain` のステップ） | 承認する人・MVV 判定 |
 | E7 | 利用者が承認資料を見て承認した | 承認する人（承認ゲート 2） | `approve`・本番の配布のプラン |
@@ -88,10 +88,10 @@
 | マージの拾い出し（`lib/merged_range.py`。新設） | `<起点>..<終点>` の first-parent のログから、merge commit（件名 `Merge pull request #N from <owner>/<branch>`）と squash merge（件名の末尾 `(#N)`）で入った PR を、コミット・番号・head のブランチの組で返す。squash の head は GitHub から 100 件ずつまとめて読む（`gh_rest.pr_head_branches`）。**外す規則は持たない** |
 | 含む PR の組み立て（`release_lib/included.py`。新設） | 範囲の PR（版上げの PR と PR でない番号を外す）・`--prs` との和と並び（番号の昇順）・承認資料の「含む PR」の欄からの番号の読み取り |
 | `approval-facts`（`release-steps.py` の `cmd_approval_facts`） | 「含む PR」・結果 JSON の items・要約の件数を、組み立てた集合から書く。compare・変更量・承認したコミットは今のまま |
-| `notes --approval`（`release-steps.py` の `cmd_notes`） | `--approval` のとき、承認資料の「含む PR」の番号と `--prs` の和から欄を書く。`--approval` なし（CHANGELOG の版の節）は今のまま |
+| `notes --approval`（`release-steps.py` の `cmd_notes`） | `--approval` のとき、承認資料の「含む PR」の番号から欄を書く。`--prs` に「含む PR」に無い番号があれば欄を書かずに止まる。`--approval` なし（CHANGELOG の版の節）は今のまま |
 | 検査（`check-trigger.py`） | `_scan_log` と squash の head の読み取りを、マージの拾い出しへ置き換える。外す規則（`SKIP_BRANCHES`・記録の番号）・点数・行数は今のまま |
 | 部品の一覧（`lib/README.md`） | マージの拾い出しの行を足す |
-| 手順書（`release` の `references/release-steps.md`・`release-steps.py` の使い方の説明） | `approval-facts` と `notes --approval` の `--prs` が「並べる PR のすべて」から「範囲の PR に足す PR」へ広がったことを書く |
+| 手順書（`release` の `references/release-steps.md`・`release-steps.py` の使い方の説明） | `approval-facts` の `--prs` が「並べる PR のすべて」から「範囲の PR に足す PR」へ広がったこと、`notes --approval` の `--prs` は「含む PR」に足さず、無い番号で止まることを書く |
 
 ```mermaid
 graph TD
@@ -200,9 +200,9 @@ classDiagram
 
 | 項目 | 書くこと |
 | --- | --- |
-| 入力 | 今のまま。`--prs` は承認資料の「含む PR」に足す PR になる |
-| 出力（ok・0） | 今のまま。`metrics.prs` と `unmerged` は、承認資料の「含む PR」と `--prs` の和から数える |
-| 失敗の形 | 承認資料が無い: 3（今のまま）。「含む PR」の欄が無い: 3。欄の行を読めない: 2。マージ済みが 0 件: 3（今のまま）。どれも欄を書かない |
+| 入力 | 今のまま。`--prs` は承認資料の「含む PR」に足さない。どれも「含む PR」にあることだけを確かめる |
+| 出力（ok・0） | 今のまま。`metrics.prs` と `unmerged` は、承認資料の「含む PR」から数える |
+| 失敗の形 | 承認資料が無い: 3（今のまま）。「含む PR」の欄が無い: 3。欄の行を読めない: 2。`--prs` に「含む PR」に無い番号がある: 3（`approval-facts` で承認資料を作り直す）。マージ済みが 0 件: 3（今のまま）。どれも欄を書かない |
 | 互換性 | `--approval` なし（CHANGELOG の版の節）は変わらない |
 
 ## 処理の流れ
@@ -249,8 +249,10 @@ sequenceDiagram
     alt 欄が無い・行を読めない
         INC-->>NA: StepError(3 / 2)（欄を書かない）
     end
-    NA->>INC: included_prs(欄の番号, --prs)
-    loop 番号の昇順
+    alt --prs に欄に無い番号がある
+        NA-->>NA: 3 で止まる（欄を書かない。approval-facts を打ち直す）
+    end
+    loop 欄の番号の昇順
         NA->>H: pr view（題・本文・状態）
     end
     NA-->>NA: マージ済みの PR から欄を書く
@@ -283,7 +285,7 @@ sequenceDiagram
 
 ### 決定 3: 欄どうしが同じ PR を指すため、`notes --approval` は承認資料の「含む PR」の欄から番号を読み、範囲を求め直さない
 
-`notes --approval` は承認資料の「含む PR」の行の先頭の `#N` を読み、`--prs` との和から欄を書く。「含む PR」と「配る中身」「未検証・残る危険」が同じ集合になることが、作り方から保たれる（I5）。配布のプランは `--prev-tag` を `facts` のステップにだけ渡し、`explain`（`notes --approval`）には渡さない。
+`notes --approval` は承認資料の「含む PR」の行の先頭の `#N` を読み、その番号だけから欄を書く。`--prs` は欄へ足さず、「含む PR」に無い番号があれば欄を書かずに 3 で止まり、`approval-facts` での作り直しを求める。足すと、本文の欄だけに「含む PR」に無い PR が載り、要求の前提 4 の「同じ集合」が破れる。「含む PR」と「配る中身」「未検証・残る危険」が同じ集合になることが、作り方から保たれる（I5）。配布のプランは `--prev-tag` を `facts` のステップにだけ渡し、`explain`（`notes --approval`）には渡さない。
 
 `notes` が前のタグと範囲を求め直す案は採らない。`--prev-tag` で起点を変えたときと、2 つのステップの間にベースブランチが進んだときに、欄どうしが別の集合を指す。範囲を別のファイル（JSON）へ書いて渡す案も採らない。承認資料のほかに、消える時点と置き場の規約を持つファイルが 1 つ増える。
 
@@ -328,6 +330,7 @@ head が `release/` で始まる PR（開発版と正式版の版上げ）は外
 | AC5・I2 | squash merge（件名の末尾 `(#N)`、親が 1 つ）で入った PR が並び、head が `release/` の squash の PR は並ばない。件名の `(#N)` が課題を指す（GitHub が head を返さない）番号は並ばない | merge commit の件名だけを照合すると落ちる。squash の head を読まずに並べると版上げの squash が並んで落ちる |
 | AC6・I6 | 結果 JSON の `kind: pr` の items の番号の並びが「含む PR」の行の番号の並びと等しく、要約の件数が items の件数と等しい | 件数を `len(a.prs)` のまま数えると落ちる |
 | AC7・I5 | AC1 の承認資料に対して `notes --prs B --approval <資料>` を打つと、「配る中身」と「未検証・残る危険」に A と B の本文の箇条が載る | `notes --approval` が `--prs` だけを読むと落ちる |
+| I5 | AC1 の承認資料に対して、「含む PR」に無いマージ済みの PR C を `notes --prs B C --approval <資料>` で渡すと、3 で止まり、`summary` に C が出て、欄の中身が変わらない | `--prs` を欄の番号に足すと、C の箇条が載って落ちる |
 | AC8・I7 | 範囲の git のログが失敗するとき（存在しない起点を `--prev-tag` に渡す）と squash の head の GitHub の読み取りが失敗するとき、`approval-facts` は 0 以外で終わり、承認資料のファイルを作らない（既にあれば中身が変わらない）。`notes --approval` は「含む PR」の欄が無い承認資料で 0 以外で終わり、欄を書かない | 失敗を空の一覧として扱い、欠けた承認資料を書くと落ちる |
 | AC9 | 正式版のタグが無く `--prev-tag` も無いと、3 で止まる | 範囲の収集を前のタグの判定より前に置くと、別の終了コードになって落ちる |
 | AC10・I3 | compare の URL・`metrics.files`・`insertions`・`deletions`・`approved_sha` が、範囲の PR が増えた後も変更前と同じ値になる | 変更量を範囲の PR から数え直す・終点を別の ref にすると落ちる |
