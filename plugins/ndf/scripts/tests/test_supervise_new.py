@@ -195,7 +195,7 @@ def test_samples_start_and_close_a_sprint_without_versions(tmp_path, name):
     assert names == ["スプリントブランチ", "実装", "検査", *stages]
     if "本番" in stages:
         promote = json.loads(Path(manifest["ステージ"][3]["plans"][0]).read_text())
-        cmds = {s["id"]: s["cmd"] for s in promote["steps"]}
+        cmds = {s["id"]: s.get("cmd") for s in promote["steps"]}
         assert "promote --head develop --base main" in cmds["promote"] and "--gate-approved" not in cmds["promote"]
         assert cmds["promote-approved"].endswith("--gate-approved user")
         assert manifest["ステージ"][3]["then_of"] == "検査"

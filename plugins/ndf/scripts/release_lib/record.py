@@ -50,6 +50,33 @@ def body_of(root, plugin, ver, tag, prev_tag, prs):
     )
 
 
+def promote_body_of(n, head, base, prev_sha, sha, prs):
+    """昇格の Pull Request（head → base）のマージで本番へ出たときのリリース記録の本文。版は `<本番チャネル> <短い SHA>`。"""
+    return dist_record.format_record(
+        f"{base} {prev_sha}" if prev_sha else None,
+        f"{base} {sha}",
+        prs,
+        stage_note=f"承認ゲート 2 の承認の後、昇格の Pull Request #{n}（{head} → {base}）をマージした",
+        version_note=f"#{n} のマージのコミット。直前は {base} の {prev_sha}" if prev_sha else f"#{n} のマージのコミット",
+    )
+
+
+def parent_of(root, base, sha):
+    """マージのコミットの 1 つ目の親（直前の版）の短い SHA。読めなければ None。"""
+    git(root, "fetch", "-q", "origin", base, check=False)
+    return git(root, "rev-parse", "--short", f"{sha}^1", check=False).stdout.strip() or None
+
+
+def write(root, n, ver, prev, body, prs, label):
+    """PR #n へリリース記録を書き、(要約, items, metrics) を返す。同じ記録が既にあれば書かない。"""
+    text, url = release_pr_text(root, n)
+    metrics = {"release_pr": n, "release_pr_url": url, "version": ver, "prev_version": prev, "sprint_prs": list(prs)}
+    if exists(text, ver, prs):
+        return f"#{n} に {label} のリリース記録は既にある", [{"kind": "comment", "name": f"#{n}", "result": "exists"}], metrics
+    post_comment(root, n, body)
+    return f"#{n} へ {label} のリリース記録を書いた", [{"kind": "comment", "name": f"#{n}", "result": "posted"}], metrics
+
+
 def exists(text, ver, prs):
     """PR の最後のリリース記録が同じ版・同じスプリントの PR の本番の記録なら True。"""
     last = dist_record.parse_record(text)

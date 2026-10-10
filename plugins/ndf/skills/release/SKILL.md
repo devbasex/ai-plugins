@@ -263,6 +263,9 @@ Pull Request に入れる。`guide:` の行が出たら、その手引きに従�
 [references/completion-check.md](references/completion-check.md) から読む。** 上限を決めずに
 待たないことと、照会のループに待機を置くことがそこにある。
 
+**どの配布の形でも、本番への配布を実施した後に、実施後の値で `段階: 本番` のリリース記録を置く。** 形ごとの置き方は
+[references/release-steps.md](references/release-steps.md) の「配布の後にリリース記録を置く」にある。
+
 ### 5. 届き方を示す
 
 **公開しただけでは、利用者の環境は前の版のままである形がある。** 完了報告に次を書く。
