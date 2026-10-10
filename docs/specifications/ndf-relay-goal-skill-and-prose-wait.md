@@ -3,7 +3,7 @@
 `/goal /ndf:development-workflow #<番号>` で始めた会話をラッパー（`plugins/ndf/scripts/relay.py`）が次のセッションへ
 切り替えても、次のセッションの conductor が作業の最初に条件の Skill を読み込み、Skill が定める承認ゲートの止まり方
 （`AskUserQuestion`）で止まるようにする。あわせて、ラッパーの直接の子の応答が `AskUserQuestion` を呼ばずに本文で承認を
-待って終わったら、Stop を 1 度止めて `AskUserQuestion` で出し直させる（#1492）。
+待って終わったら、Stop を 1 度止めて `AskUserQuestion` で出し直させる。
 
 例: `/goal /ndf:development-workflow #895` で始めた会話が、カットポイントで `ndf-next`（中身 `/goal /ndf:development-workflow #895`）を出したとき。
 
