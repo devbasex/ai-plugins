@@ -65,6 +65,7 @@
 | --- | --- |
 | `plugins/ndf/scripts/relay.py` | ラッパーの本体。副命令 `run` / `stop` / `mark`、導入の `install` / `uninstall` / `status` / `startup`、質問シグナルファイルの `question`、ラッパーの直接の子かを返す `is-child`、コンテキスト量の hook と `/ndf:restart` と conductor が使うカットポイントのアナウンス `notice`（[ndf-relay-segment-notice.md](ndf-relay-segment-notice.md)）を持つ。標準ライブラリだけで書く |
 | `plugins/ndf/hooks/claude.json` の `Stop` | `NDF_RELAY_DIR` があるときだけ `python3 <root>/scripts/relay.py mark` を呼ぶ（既存の Slack 通知の後、`timeout` 5 秒、`continueOnError: true`）。無ければ `python3` を起こさない |
+| `plugins/ndf/hooks/claude.json` の `UserPromptSubmit` | `hook.py goal-skill` を呼ぶ（`timeout` 5 秒、`continueOnError: true`）。ラッパーの有無に依らず、`/goal /<プラグイン>:<Skill>` の入力に条件の Skill を読み込む案内を足す（付則「`/goal` を付けた場合」） |
 | `plugins/ndf/hooks/claude.json` の `SessionStart`（`matcher: startup\|resume`） | コピーか記録があるときだけ `relay.py startup` を呼ぶ。シェルの設定は書かない（[導入の仕様](ndf-relay-install-and-restart.md)） |
 | `plugins/ndf/hooks/claude.json` の `PreToolUse` / `PostToolUse`（`matcher: AskUserQuestion`） | `NDF_RELAY_DIR` があるときだけ `relay.py question open` / `close` を呼ぶ（`timeout` 10 秒） |
 | `plugins/ndf/skills/install-wrapper/` / `restart/` | 明示の導入・取り外しと、好きな時点の切り替え（Claude Code だけ） |
@@ -138,7 +139,7 @@ graph TB
 ### 常に成り立つ条件
 
 - **`mark`・`startup`・`question` は常に終了コード 0 で終わる。** 例外も含めて Stop・SessionStart・
-  質問を止めない。`mark` は何も出力しない
+  質問を止めない。`mark` が出力するのは Stop を止める `{"decision": "block", "reason": …}` の 1 行（「`mark` の判定」の 5a と 9）だけである
 - **ラッパーは本体の例外で子の claude を巻き込まない。** ラッパーが落ちると擬似端末が閉じ、子は SIGHUP で
   終わる。カットポイントの判定の中の例外は `stop` の行（`error`）と `ndf-relay:` の 1 行に変え、子が終わる
   まで入出力の中継だけを続ける
@@ -164,7 +165,7 @@ graph TB
 | --- | --- | --- | --- |
 | `run` | `[claude の引数 ...]`。ラッパーは解釈しない | パススルーでは claude の終了コードそのもの（exec で置き換わる）。ラッパーでは最後のセッションの claude の終了コード（シグナルで終わったら 128 + 番号）/ 2: 次のセッションの更新か起動に失敗した / 127: 本物の claude が見つからない・起動の入れ子・1 つ目のセッションの exec の失敗 | 区切りの 1 行と `ndf-relay:` の 1 行。シグナルファイルなしで終わるときは何も出さない |
 | `stop` | 無し | 0: 動いているラッパーに停止シグナルファイルを置いた（1 つ以上）/ 1: 動いているラッパーが無い | 置いたラッパーの pid を 1 行ずつ |
-| `mark` | 標準入力に Stop hook の JSON | 常に 0 | 無し |
+| `mark` | 標準入力に Stop hook の JSON | 常に 0 | Stop を止めるときだけ `{"decision": "block", "reason": …}` の 1 行（「`mark` の判定」の 5a と 9）。それ以外は無し |
 | `install` / `uninstall` / `status` / `startup` / `question` | [導入の仕様](ndf-relay-install-and-restart.md)の副命令の表 | 同左 | 同左 |
 | `is-child` | 無し（内部用。`relay.md` に載せない） | 0: ラッパーが動いていて、呼んだ claude がラッパーの直接の子 / 1: それ以外 | 無し |
 | `notice` | 無し（内部用。コンテキスト量の hook・`/ndf:restart`・conductor が呼ぶ） | 常に 0 | 1 行目 `relay` / `outside`（`is-child` と同じ判定）、2 行目にアナウンスの 1 文。[アナウンスの仕様](ndf-relay-segment-notice.md)の契約の表 |
@@ -270,6 +271,9 @@ stateDiagram-v2
 | 6 | ブロックがちょうど 1 つ | シグナルファイルを書く（前のシグナルファイルは置き換わる） |
 | 7 | ブロックが 0 で、`asked` の時刻がシグナルファイルの `written_at` 以後 | シグナルファイルを消す（シグナルファイルの後に質問が出た） |
 | 8 | ブロックが 0 で、7 に当たらない | 前のシグナルファイルを残す。シグナルファイルを書いた後は切り替えを確定とする |
+| 9 | 7・8 の後でブロックが 0 で、シグナルファイルが保留中でなく（無いか、`asked` の時刻がその `written_at` 以後）、同じ区間の前の Stop で止めておらず（`wait-held.json` の `held`）、応答の中で質問を出しておらず（Stop の時点で `question` が在った・`asked` の時刻が前の Stop 以後のどちらでもない）、`last_assistant_message` が `lib/wait_notice.py` の `classify_text` で回答待ちか承認待ち | `wait-held.json` の `held` を真にし、`log.jsonl` に `{"event": "prose_wait", "at", "section", "kind"}` を足して、標準出力へ `{"decision": "block", "reason": …}`（同じ問いを `AskUserQuestion` で出し直す文）を出す（承認待ちの差し戻し）。`stop_hook_active` は読まない（`/goal` の続きでは常に真になる）。判定・状態の読み書きの失敗は止めない側へ倒し、記録の失敗では文を出す |
+
+**前の Stop** は `wait-held.json` の `at`（直接の子の Stop のたびに書き直す）で、無い・区間が違うときは今の区間の `start` の `at` である。
 
 **親のたどり** は Linux では `/proc/<pid>/stat`、それ以外では `ps -o ppid=,comm=` で行う。名前が
 `claude` か、子と同じ名前か、pid が `child.pid` のプロセスに当たった時点で決める（最大 64 階層、pid 1
@@ -317,6 +321,7 @@ hook が止めるのは工程へ入る起動だけで、フェーズの中の Ba
 | `next.json` | `mark` | シグナルファイル。権限 `0600` の一時ファイルに書いてから置き換える |
 | `question` / `question.lock` | `question open` / `close`・`mark`・`run` | 質問シグナルファイル（`0600`、空）と、質問の始まりと `/exit` の write を排他にするロック |
 | `asked` | `question open` | 最後に質問が出た時刻（`{"at": "<ISO 8601 UTC>"}`）。シグナルファイルより後に質問が出たかを `mark` と `run` が見る |
+| `wait-held.json` | `mark` | 承認待ちの差し戻しの状態（`{"section", "at": "<Stop の時刻>", "held": <差し戻したか>}`）。直接の子の Stop のうち 9 を判定したものごとに書き直す |
 | `stop` | `stop` か利用者 | 空。在れば停止シグナルファイル |
 | `log.jsonl` | `run` | 記録 |
 
@@ -335,7 +340,7 @@ hook が止めるのは工程へ入る起動だけで、フェーズの中の Ba
 
 | キー | 値 |
 | --- | --- |
-| `event` | `start`（セッションを起動した）/ `end`（セッションの claude が終わった）/ `stop`（次のセッションを起動しないと決めた） |
+| `event` | `start`（セッションを起動した）/ `end`（セッションの claude が終わった）/ `stop`（次のセッションを起動しないと決めた）/ `prose_wait`（承認待ちの差し戻しで Stop を止めた。「`mark` の判定」の 9） |
 | `at` | UTC の ISO 8601。`start` は同期のパイプを閉じた時刻 |
 | `section` | セッションの番号（ラッパーの中で 1 から） |
 | `pid` | セッションの claude の pid（`start`・`end`） |
@@ -346,6 +351,7 @@ hook が止めるのは工程へ入る起動だけで、フェーズの中の Ba
 | `cwd` / `cwd_fallback` | 起動した作業ディレクトリと、シグナルファイルの `cwd` が消えていたときの元の値（`start`。消えていなければ `cwd_fallback` は無い） |
 | `seconds` | セッションの長さ（`end`）。起動から、シグナルファイルの `written_at`（`mark` / `sigterm` / `sigkill`）か子の終わり（`no-mark`）まで |
 | `ended_by` | `mark`（`/exit` で終わった）/ `no-mark`（シグナルファイルなしで終わった）/ `sigterm` / `sigkill`（`end`） |
+| `kind` | `承認待ち` / `回答待ち`（`prose_wait`。本文と抜粋は書かない） |
 | `reason` | `stop-file` / `max-starts` / `spin` / `count-lock`（質問の後に `count.lock` を取り直せない）/ `update-failed` / `start-failed` / `error`（`stop`）。`start-failed` は `errno` も持つ |
 
 **`end` はセッションの claude が実際に終わったときだけ書く。** 落ちると決めたときは `stop` の行だけを書き、
@@ -419,7 +425,10 @@ hook が止めるのは工程へ入る起動だけで、フェーズの中の Ba
   `running` があるときとブロック 2 つのときは書かずに前のシグナルファイルを消すこと。`running` があるブロック 1 つの Stop は
   1 度だけ `decision: block` を出して id とコマンドの先頭 80 字（id が無ければ件数）を示し、同じ候補の 2 度目・
   `stop_hook_active` が真のときは出さず、別の候補では改めて出すこと。シグナルファイルを書かなかった Stop が `log.jsonl` に
-  `mark_skipped` を残し、ブロックの無い Stop では残さないこと
+  `mark_skipped` を残し、ブロックの無い Stop では残さないこと。ブロックもシグナルファイルも無い直接の子の Stop が
+  「設計 PR の承認を待ちます。」で終われば `stop_hook_active` が真でも `decision: block` を出して `prose_wait` を 1 行残し、
+  その直後の Stop では出さずに次の Stop で改めて出すこと。質問を出した応答・待ちでない応答・ブロックを含む応答・
+  保留中のシグナルファイルがある応答・ラッパーの外では出さないこと。記録が書けなくても文を出し、判定の例外では何も出さないこと
 - パススルー: `NDF_RELAY=0`・ラッパーの下・`-p`・`--help`・副命令・標準入力がパイプで、本物の claude のパスと元の
   引数が渡り、環境の差が `NDF_RELAY_DEPTH` だけで、何も出力しないこと。`pty` が読めない・`plugin list` の
   失敗・`ndf@` が無い・`plugin list` の打ち切りで、1 行を出してからパススルーすること。`claude` という名前の
@@ -469,6 +478,7 @@ hook が止めるのは工程へ入る起動だけで、フェーズの中の Ba
 | 次のセッションへ引き継ぐ | `ndf-next` のブロックの中身の先頭に `/goal ` を付ける（出す側の決まりは `context-window.md` の「新しい会話で戻す」）。位置引数 1 つで渡すため、複数行の中身も改行ごと 1 つの条件として目標になる |
 | 未達の判定 | 判定は Stop hook と並んで発火し、未達なら止めを拒んで応答が続く（2.1.280 で実測）。カットポイントでは未達が当然なので、ラッパーは切り替える。続いた応答の Stop にブロックが無くてもシグナルファイルは残る（「`mark` の判定」の 8） |
 | 判定の記録 | 目標の設定と判定は、会話の記録の `type: "attachment"` の行の `attachment.type: "goal_status"` に書かれる。判定の差し戻しは `isMeta: true` の `user` の行に書かれる。`/goal` の設定の行は `sentinel: true` を持ち、`/goal clear` は `met: true` と `sentinel: true` の両方を持つ（2.1.282）。ラッパーが未達と読むのは、シグナルファイルより後の `met: false` で `sentinel` の無い行だけである |
+| 次のセッションで条件の Skill を読み込む | Claude Code の `/goal` は条件の中の Skill を展開しない。条件の先頭の語が `/<プラグイン>:<Skill>` なら（`/goal /ndf:development-workflow #895`）、`UserPromptSubmit` hook の `hook.py goal-skill`（`hook_lib/goal_skill.py`）が、作業の最初の Tool の呼び出しとして Skill ツールでその Skill を条件の残りを引数に読み込む案内を `additionalContext` に足す。最初の入力と `ndf-next` の形は変えないので、カットポイント・利用上限での切り替え（`--resume`）・`/ndf:restart`・ラッパーの外のどこでも同じに働く。見るのは入力の 1 行目だけで、当たらない・読めない入力では何も出さずに終了コード 0 |
 | 未達の判定の後の切り替え | 会話の記録の更新をアイドルの判定に数えず、利用者の入力のアイドルだけを待つ。Esc を 1 回書いて応答を止め、1 秒おいて `/exit\r` を書く。利用者の入力・質問・背景の処理の起動があれば切り替えない |
 
 テスト観点: `/goal clear` の行（`met: true` と `sentinel: true` の両方）が会話の記録に残っても、アイドルだけで
