@@ -68,5 +68,6 @@
 | [quality-gates-design-match.md](quality-gates-design-match.md) | standard の完了判定で、設計に名前の出るテストの実在・既存の確定仕様と変更履歴・設計の決定を実装と突き合わせ、違いを実装 PR の「設計と違う点」に残す仕組み（design-match.py） |
 | [cross-review-transient-post-failure.md](cross-review-transient-post-failure.md) | cross-review で GitHub が一時的な失敗（5xx・本文なし・ネットワーク）を返したとき、投稿だけを投稿キューに積んで結果を取り込み、担当を起動し直さずに流し直す仕組み |
 | [ndf-sprint-close-referenced-issues.md](ndf-sprint-close-referenced-issues.md) | 「スプリントを閉じる」（sprint-close.py）が、スプリントの PR が番号で参照しただけの開いた課題を理由つきで kept_open に載せ、閉じる課題が 0 件なら何も書かずに止まる理由と境界 |
+| [ndf-relay-goal-skill-and-prose-wait.md](ndf-relay-goal-skill-and-prose-wait.md) | `/goal` の条件の先頭の Skill を次のセッションが読み込むよう UserPromptSubmit hook が案内する理由と、ラッパーの直接の子が本文で承認を待って終えた応答を 1 度止めて AskUserQuestion へ戻す（承認待ちの差し戻し）条件・境界・記録の形。手順と契約は `development-workflow` の `references/relay.md` と ndf-relay-segment-restart.md が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
