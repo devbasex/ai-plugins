@@ -9,7 +9,7 @@
 ## 適用範囲
 
 - **働く範囲**: 配布先のリポジトリでも働く。範囲外の課題の起票（`out-of-scope`・`retrospective`）、要求の仕様（`requirements-design`）、承認資料（`development-workflow` の `approval-request.md`）、差し戻しの記録と件数（`sprint-state.py` と新しい `gate-rejections.py`）
-- **プロジェクトごとに違うもの**: 記録の対象のリポジトリだけ。`--repo` の引数で受け、無ければ `origin` の URL から読む（`lib/repo.owner_repo`）。記録の置き場は既存の `NDF_MVV_STATE_DIR` を使い、新しい設定を足さない
+- **プロジェクトごとに違うもの**: 記録の対象のリポジトリだけ。`--repo` の引数で受け、無ければ `origin` の URL から読む（`lib/repo.owner_repo`）。`origin` から読めない（remote 名が違う・ローカルだけ）ときは止めずに、覆しの記録と同じ `mvv_repo_key(root)`（根の絶対パス）を使う。この解決は `lib/gate_rejections.py` の 1 か所に置き、`record`・`count`・`sprint-state.py gate` が同じ関数を使う。記録の置き場は既存の `NDF_MVV_STATE_DIR` を使い、新しい設定を足さない
 - **当たるモード**: 起票者の推定は起票と要求の工程を通るすべてのモード。承認資料の行は承認ゲート 1 を通る `standard`・`documentation`（と設計 PR を分けた `legacy-refactor`）。差し戻しの記録は承認ゲート 1・2 を通るすべてのモードと pace
 
 ## あるべき姿の根拠
@@ -37,7 +37,7 @@
 
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
-| 課題の本文 | 起票者（`issue-file.py create` が骨格を検査する） | 課題 | — | 起票者の推定の行（条件・推した出所） |
+| 課題の本文 | 起票するまでは起票者（`issue-file.py create` が骨格を検査する）。起票した後は要求の工程（`requirements-design`）だけで、書き換えるのは承認ゲート 1 で起票者の推定が差し戻されたときの、その推定の行の取り消し線と理由・日付だけ（手順 1a）。起票者は起票した後に本文を書き換えない | 課題 | — | 起票者の推定の行（条件・推した出所） |
 | 仕様のコピー | 要求の工程（`requirements-design`。`spec-copy.py write` が作る） | 仕様 | — | 依頼の原文（文・書き手・日付）、起票者の推定の行（条件・推した出所・この要求での扱い） |
 | 承認資料 | conductor（`approval-request.md` の形で組む） | 承認資料 | — | 承認の判断に使うものの行 |
 | 差し戻しの記録 | `lib/gate_rejections.py`（書くのは `append` だけ） | 差し戻し 1 件 | — | 承認ゲートの名前・日時・要約・範囲（リポジトリ・スプリント・課題・PR） |
@@ -233,7 +233,7 @@ erDiagram
 | 鍵 | 型 | 空を許すか | 意味 |
 | --- | --- | --- | --- |
 | `at` | 文字列（ISO 8601、UTC） | 許さない | 利用者が差し戻した日時。`--at` が無ければ書いた時刻 |
-| `repo` | 文字列（`<所有者>/<リポジトリ>`） | 許さない | 差し戻した対象のリポジトリ。`--repo` か `origin` の URL から読む |
+| `repo` | 文字列（`<所有者>/<リポジトリ>`、または根の絶対パス） | 許さない | 差し戻した対象のリポジトリ。`--repo` か `origin` の URL から読み、どちらも無ければ `mvv_repo_key(root)`（根の絶対パス） |
 | `gate` | 文字列 | 許さない | 承認ゲートの名前。`関門 1` / `関門 2`（`sprint-state.py` の記録の名前と同じ）。ほかの名前（`MVV` など）もそのまま書く |
 | `what` | 文字列 | 許さない | 何を差し戻したかの要約（`--what`） |
 | `sprint` | 文字列（絶対パス）か `null` | 許す | スプリントの状態ファイル。`null` は「状態ファイルを持たない進め方」であり、未入力ではない |
@@ -282,9 +282,9 @@ python3 gate-rejections.py record --gate <承認ゲートの名前> --what <要�
 
 | 項目 | 書くこと |
 | --- | --- |
-| 入力 | `--gate`（必須）・`--what`（必須、空白だけは不可）・範囲（`--sprint` / `--issue` / `--pr` のうち 1 つ以上。`--issue` と `--pr` は繰り返せる）・`--repo`（省くと現在地の `origin` の URL）・`--at` |
+| 入力 | `--gate`（必須）・`--what`（必須、空白だけは不可）・範囲（`--sprint` / `--issue` / `--pr` のうち 1 つ以上。`--issue` と `--pr` は繰り返せる）・`--repo`（省くと現在地の `origin` の URL、読めなければ `mvv_repo_key(root)`）・`--at`。`--gate` には `関門 1` / `関門 2`（`sprint-state.py` の記録の名前と同じ。`count` がこの文字列で仕分ける）を渡す。`承認ゲート 1` などの別の書き方は `other` に数えられる |
 | 出力（0） | `lib/step_result.py` の形の 1 行の JSON。`tool` は `gate-rejections`、`items` に書いた 1 行、`metrics.path` に記録のパス |
-| 失敗の形 | 1: 記録を書けない（`summary` に理由とパス）。2: 引数の形の誤り・範囲が無い・`--repo` が無く `origin` から読めない |
+| 失敗の形 | 1: 記録を書けない（`summary` に理由とパス）。2: 引数の形の誤り・範囲が無い。`origin` から読めないことでは止まらない |
 | 互換性 | 新設 |
 
 ### `gate-rejections.py count`（新設）
@@ -295,7 +295,7 @@ python3 gate-rejections.py count [--sprint <状態ファイル>] [--issue <N>]..
 
 | 項目 | 書くこと |
 | --- | --- |
-| 入力 | 範囲（`--sprint` / `--issue` / `--pr`）。渡した範囲のどれかに当たる行を数える（または）。`--repo` は必ず掛かる絞り込み（省くと `origin` の URL）。範囲を 1 つも渡さなければ、そのリポジトリのすべての行を数える |
+| 入力 | 範囲（`--sprint` / `--issue` / `--pr`）。渡した範囲のどれかに当たる行を数える（または）。`--repo` は必ず掛かる絞り込み（省くと `origin` の URL、読めなければ `mvv_repo_key(root)`。`record` と同じ解決）。範囲を 1 つも渡さなければ、そのリポジトリのすべての行を数える |
 | 出力（0） | `metrics` に `gate_1`・`gate_2`・`other`・`total`（整数）。`items` は数えた行。`summary` は `承認ゲートの差し戻し: 関門 1 が N 件・関門 2 が M 件（ほか K 件）` |
 | 失敗の形（2） | 記録を読めない・壊れた行がある: `metrics` の 4 つを `null`、`summary` を `承認ゲートの差し戻し: 不明（<理由>）`。引数の形の誤りも 2 |
 | ファイルが無いとき | 0 で、件数はすべて 0 |
@@ -307,8 +307,8 @@ python3 gate-rejections.py count [--sprint <状態ファイル>] [--issue <N>]..
 | --- | --- |
 | 入力 | 変えない |
 | 出力 | 変えない（`summary`・`items` の覆し・`metrics.gates`）。`sprint.json` に `rejections` を書かない |
-| 書く先 | 差し戻しの記録へ 1 行。`sprint` は状態ファイルの絶対パス、`prs` は `--pr`（無ければ空）、`issues` は状態ファイルの `issues`、`repo` は `--root`（既定はカレント）の `origin` の URL |
-| 失敗の形 | 記録を書けなければ `stopped`（終了コード 1）、`origin` からリポジトリを読めなければ `stopped`（終了コード 2）。どちらも `summary` に理由を出し、覆しの記録は書いた後でも書いたまま残す |
+| 書く先 | 差し戻しの記録へ 1 行。`sprint` は状態ファイルの絶対パス、`prs` は `--pr`（無ければ空）、`issues` は状態ファイルの `issues`、`repo` は `--root`（既定はカレント）の `origin` の URL、読めなければ `mvv_repo_key(root)`。リポジトリの解決は覆しの記録（`record_override`）より前に行う |
+| 失敗の形 | 記録を書けなければ `stopped`（終了コード 1）。`summary` に理由を出し、覆しの記録は書いた後でも書いたまま残す。`origin` からリポジトリを読めないことでは止まらない（根の絶対パスへ落とす）ため、`origin` の無いリポジトリで打ち直して覆しが重なることはない |
 | 互換性 | 承認（`--outcome approved` と省略）・MVV の承認・`--by mvv`・`--withdraw` は変えない（受け入れ条件 13） |
 
 ## 処理の流れ
@@ -399,7 +399,14 @@ sequenceDiagram
 
 ### 決定 6: 承認ゲートの数を変えないため、答えの記録は既存の承認ゲートの答えの直後に 1 行打つだけにする
 
-差し戻しを記録するスクリプトは、利用者の答えを受けた conductor が打ち、利用者へ新しい確認を求めない。打つ場所は `approval-request.md` の「答えを記録する」の節の 1 か所に置き、`pace.md` と `release` はそこを指す。
+差し戻しを記録するスクリプトは、利用者の答えを受けた conductor が打ち、利用者へ新しい確認を求めない。打つ場所は `approval-request.md` の「答えを記録する」の節の 1 か所に置き、`pace.md` と `release` はそこを指す。節には `--gate` に渡す名前を固定したコマンド例を置く:
+
+```text
+python3 gate-rejections.py record --gate "関門 1" --what <要約> --issue <N>   # 設計の承認の差し戻し
+python3 gate-rejections.py record --gate "関門 2" --what <要約> --pr <N>      # 本番への配布の承認の差し戻し
+```
+
+本文の語は「承認ゲート 1 / 2」のままでよいが、`--gate` の値は `関門 1` / `関門 2` だけを書く（`sprint-state.py` の記録の名前と同じで、`count` が `gate_1` / `gate_2` に仕分ける）。
 
 承認資料の提示と同じスクリプトで答えも受ける案は採らない。答えは `AskUserQuestion` で受けるため、スクリプトは答えを知らない。
 
