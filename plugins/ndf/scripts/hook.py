@@ -2,6 +2,7 @@
 """NDF の hook の 1 本のエントリポイント（#1142 の決定 20）。PreToolUse・Stop・Notification ほかを標準入力の JSON で受ける。
 
     <hook の環境の python> hook.py [worktree-guard | token-guard | wait-notify] [--runtime claude|codex|kiro]
+    <hook の環境の python> hook.py goal-skill  < UserPromptSubmit の JSON   # `/goal` の条件の Skill の案内（hook_lib/goal_skill.py）
     <hook の環境の python> hook.py words     < コマンドの本文   # 語の分割（workflow-guard.sh の wf_split）
     <hook の環境の python> hook.py merge-target --base <宛先> [--root <dir>]
         # マージの宛先の判定（workflow-merge.sh の wf_check_merge。lib/delivery.py。1 行目が判定、2 行目が理由）
@@ -14,6 +15,7 @@
 | PreToolUse（Bash・Read・Skill・Agent・Task。Claude Code だけ） | token の guard（`hook_lib/token_guard.py`） |
 | PreToolUse（AskUserQuestion）・Stop・Notification・PermissionRequest | 待ちの Slack 通知（`hook_lib/wait_notify.py`） |
 | userPromptSubmit（Kiro CLI） | worktree の guard の、パスを見ない案内 |
+| UserPromptSubmit（Claude Code。副命令 `goal-skill`） | `/goal /<プラグイン>:<Skill>` の条件の Skill を読み込む案内（`hook_lib/goal_skill.py`） |
 
 起動は `uv run` を挟まず、SessionStart が用意した環境の python を直に使う（`lib/hook_python.py`）。**どの失敗も
 終了コード 0 で、判定をせずに通す**（hook が止まると Tool の呼び出しが全部止まる）。PreToolUse と userPromptSubmit の
@@ -31,7 +33,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "lib"))
 sys.path.insert(0, str(HERE))
 
-COMMANDS = ("worktree-guard", "token-guard", "wait-notify", "words", "merge-target")
+COMMANDS = ("worktree-guard", "token-guard", "wait-notify", "goal-skill", "words", "merge-target")
 RUNTIMES = ("claude", "codex", "kiro")
 NOTIFY_EVENTS = ("Stop", "stop", "Notification", "PermissionRequest")
 
@@ -76,6 +78,11 @@ def dispatch(command: str, runtime: str, raw: dict | None) -> dict | str | None:
 
         wait_notify.hook(runtime, raw)
         return None
+    if command == "goal-skill":  # _merge を通さず、自分の出力 1 つを返す（hookEventName を UserPromptSubmit に保つ）
+        from hook_lib import goal_skill
+
+        text = goal_skill.context(raw)
+        return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": text}} if text else None
     if raw is None:
         return None
     ev = pl.event_of(raw)

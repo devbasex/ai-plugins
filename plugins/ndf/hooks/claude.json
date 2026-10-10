@@ -41,6 +41,19 @@
         ]
       }
     ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c '[ -x \"$0\" ] || exit 0; exec \"$0\" \"$@\"' \"$HOME/.cache/ndf/roots${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/bin/python\" \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/hook.py\" goal-skill",
+            "description": "NDF: when /goal names a Skill first (/<plugin>:<skill>), tell the session to load that Skill before working",
+            "timeout": 5,
+            "continueOnError": true
+          }
+        ]
+      }
+    ],
     "Notification": [
       {
         "matcher": "permission_prompt|elicitation_dialog|elicitation_url_dialog",

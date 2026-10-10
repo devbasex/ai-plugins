@@ -55,6 +55,7 @@ LIB_FILES = (
     "lib/md.py",
     "lib/procs.py",
     "lib/versions.py",
+    "lib/wait_notice.py",
 )
 # 環境の宣言と lock。プラグインではプラグインの根（scripts/ の 1 つ上）、バージョンディレクトリでは中にある
 PROJECT_FILES = ("pyproject.toml", "uv.lock")
