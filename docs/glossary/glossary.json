@@ -3658,6 +3658,27 @@
       "context": "ndf-relay",
       "meaning": "ラッパーの直接の子の応答が承認待ちの文で終わったとき、Stop hook が Stop を 1 度止め、`AskUserQuestion` で出し直すよう伝えること",
       "source": "docs/specifications/ndf-relay-goal-skill-and-prose-wait.md"
+    },
+    {
+      "term": "受け入れ条件の番号",
+      "context": "ndf-workflow",
+      "meaning": "課題の本文の `## 受け入れ条件` の節で、コードブロックの外にある行頭のチェックボックスの行を上から数えた順（1 から）。リリース後テストの表の `受け入れ条件` の列は、セルの頭に `<番号>.` で書く",
+      "source": "",
+      "pending_source": "issues/issue-1683-design.md"
+    },
+    {
+      "term": "受け入れ条件の印",
+      "context": "ndf-workflow",
+      "meaning": "受け入れ条件の番号に合格の行がそろった課題を閉じるとき、sprint-close.py がその行のチェックボックスへ付ける `[x]`",
+      "source": "",
+      "pending_source": "issues/issue-1683-design.md"
+    },
+    {
+      "term": "合格の行",
+      "context": "ndf-release",
+      "meaning": "リリース後テストの表で、`結果` の列が `合格` で始まる行",
+      "source": "",
+      "pending_source": "issues/issue-1683-design.md"
     }
   ]
 }
