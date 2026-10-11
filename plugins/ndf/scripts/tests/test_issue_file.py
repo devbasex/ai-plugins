@@ -41,6 +41,10 @@ BODY = """## 何を見つけたか
 
 利用者が止まる。
 
+## 起票者の推定
+
+無し
+
 ## 由来
 """
 
@@ -394,7 +398,7 @@ def test_a_stale_digest_does_not_file(fake, tmp_path):
     assert posted(fake) == []
 
 
-@pytest.mark.parametrize("heading", issue_file.SKELETON[:4])
+@pytest.mark.parametrize("heading", issue_file.SKELETON[:5])
 def test_a_missing_heading_stops_before_github(fake, tmp_path, heading):
     text = BODY.replace(f"## {heading}\n", "")
     code, obj = run("create", "--repo", REPO, "--title", "t", "--body-file", body_file(tmp_path, text), "--origin", "PR #1")
@@ -414,6 +418,18 @@ def test_an_empty_section_stops(fake, tmp_path):
     code, obj = run("create", "--repo", REPO, "--title", "t", "--body-file", body_file(tmp_path, text), "--origin", "PR #1")
     assert code == 1
     assert obj["items"] == [{"heading": "直さないと何が起きるか", "result": "empty"}]
+
+
+def test_an_empty_presumption_section_stops_before_github(fake, tmp_path):
+    text = BODY.replace("## 起票者の推定\n\n無し\n", "## 起票者の推定\n\n")
+    code, obj = run("create", "--repo", REPO, "--title", "t", "--body-file", body_file(tmp_path, text), "--origin", "PR #1")
+    assert (code, obj["items"], fake.calls) == (1, [{"heading": "起票者の推定", "result": "empty"}], [])
+
+
+def test_a_presumption_section_of_none_does_not_stop(fake, tmp_path):
+    target_is(fake, None)
+    code, obj = run("create", "--repo", REPO, "--title", "t", "--body-file", body_file(tmp_path), "--origin", "PR #1")
+    assert code == 10 and obj["status"] == "gate"
 
 
 def test_a_heading_inside_a_fence_is_not_counted(fake, tmp_path):

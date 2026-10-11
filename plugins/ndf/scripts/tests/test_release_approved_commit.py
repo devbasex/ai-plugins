@@ -243,6 +243,7 @@ def test_approval_facts_writes_the_approved_commit(monkeypatch, world, tmp_path)
     monkeypatch.setattr(mod.repo_lib, "owner_repo", lambda r: "o/n")
     monkeypatch.setattr(mod, "pr_view", lambda r, n, f: {"number": n, "title": "t", "state": "MERGED", "mergeCommit": {"oid": "c" * 40}})
     monkeypatch.setattr(mod, "pr_check_buckets", lambda r, n: [])
+    monkeypatch.setattr(mod.included.merged_range.gh_rest, "pr_head_branches", lambda ns, cwd=None: ({10: "feat/x"}, ""))
     with pytest.raises(SystemExit) as e:
         mod.cmd_approval_facts(argparse.Namespace(root=str(work), version=VER, prs=[10], prev_tag=None, plugin=None))
     out, code = e.value.code

@@ -26,6 +26,7 @@ sys.path.insert(0, str(SCRIPTS))
 import project_mvv as pm  # noqa: E402
 import project_mvv_decl as pmd  # noqa: E402
 import project_mvv_signals as pms  # noqa: E402
+import gate_rejections as gr  # noqa: E402
 from step_result import validate_result  # noqa: E402
 
 BODY = """# 例のプロジェクト MVV
@@ -557,6 +558,23 @@ def test_signals_count_after_the_current_version_and_suggest_revision(env):
     assert code == 0 and out["items"][0]["kind"] == "revise"
 
 
+def test_signals_do_not_change_when_gate_rejections_are_recorded(env):
+    """受け入れ条件 12・I5（#1833）: 差し戻しの記録を足しても、覆しの件数と閾値の判定は同じ入力で変わらない。"""
+    assert approve(env) == 0
+    mvv = pm.load_mvv(env["root"])
+    row = {"at": "2999-01-01T00:00:00Z", "repo": pm.mvv_repo_key(env["root"]), "kind": "override_pass", "project_sha256": mvv.sha256}
+    pms.append_jsonl(env["tmp"] / "state" / "project-mvv-signals.jsonl", row)
+    before = run(env, "signals", "--root", str(env["root"]), "--format", "json")
+    code, out, text = run(env, "record", "--gate", "関門 2", "--what", "本番", "--pr", "1", script=SCRIPTS / "gate-rejections.py")
+    assert code == 0, text
+    state = new_state(env, env["tmp"])
+    assert sprint_gate(env, state, "--outcome", "rejected") == 0
+    assert len(gr.read_rejections(env["tmp"] / "state" / gr.LEDGER_NAME)) == 2
+    after = run(env, "signals", "--root", str(env["root"]), "--format", "json")
+    assert (after[0], after[1]) == (before[0], before[1])
+    assert len(signal_rows(env)) == 1
+
+
 def test_signals_without_a_declaration_is_0(env):
     code, out, _ = run(env, "signals", "--root", str(env["root"]), "--format", "json")
     assert code == 0 and out["items"] == []
@@ -589,7 +607,8 @@ def test_gate_records_overrides_only_when_the_user_disagrees(env):
     assert sprint_gate(env, state, "--outcome", "rejected") == 0
     assert [r["kind"] for r in signal_rows(env)] == ["override_pass", "override_reject"]
     m = json.loads(state.read_text())
-    assert m["rejections"][0]["outcome"] == "rejected"
+    assert "rejections" not in m  # 差し戻しは差し戻しの記録へだけ書く（#1833）
+    assert [r["gate"] for r in gr.read_rejections(env["tmp"] / "state" / gr.LEDGER_NAME)] == ["関門 2"]
     assert next(g for g in m["gates"] if g["name"] == "関門 2")["by"] == "mvv"  # 差し戻しは関門を通さない
     sprint_gate(env, state, "--by", "mvv", "--verdict", "follow", "--reasons", "[]")
     assert sprint_gate(env, state, "--outcome", "approved") == 0

@@ -64,18 +64,17 @@ from operator import ge, gt
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
-from step_result import EXIT_OK, EXIT_PRECONDITION, EXIT_UNREADABLE, EXIT_VIOLATION, emit, result  # noqa: E402
+from step_result import EXIT_OK, EXIT_PRECONDITION, EXIT_UNREADABLE, EXIT_VIOLATION, StepError, emit, result  # noqa: E402
 from pace import PaceError, matches, read_pace  # noqa: E402
 import clock  # noqa: E402
 import gh_call  # noqa: E402
 import gh_rest  # noqa: E402
+import merged_range  # noqa: E402
 import jsonio  # noqa: E402
 import proc  # noqa: E402
 import repo  # noqa: E402
 
 TOOL = "check-trigger"
-MERGE_SUBJECT = re.compile(r"^Merge pull request #(\d+) from [^/\s]+/(\S+)")
-SQUASH_SUBJECT = re.compile(r"\(#(\d+)\)$")  # squash merge の既定の件名「<題> (#N)」
 SKIP_BRANCHES = ("release/", "check/")
 BASE_PREFIX = "check-base/"
 DONE_PREFIX = "check-done/"  # 見終えた位置を origin に残すブランチ（review = 実装レビュー、check = 構造改善を含む検査）
@@ -232,8 +231,8 @@ def range_base(root: Path) -> str:
     raise Stop("起点のブランチが分からない（.ndf/worktree.json の base_branch）")
 
 
-def release_tag_glob(root: Path) -> str | None:
-    """配布の宣言から正式版のタグの形を決める。package-plugin は `<plugin>--v*`。"""
+def release_tag_prefix(root: Path) -> str | None:
+    """配布の宣言から正式版のタグの接頭辞を決める。package-plugin は `<plugin>--v`（照合の `*` は呼び手が足す）。"""
     rel = optional_decl(root, "supervise.json").get("release") or {}
     if isinstance(rel, dict) and rel.get("form") == "package-plugin" and rel.get("plugin"):
         return f"{rel['plugin']}--v"
@@ -286,7 +285,7 @@ def range_start(root: Path, events: list[dict], since: str | None, review: bool 
     if since:
         sha = git_or_stop(root, "rev-parse", f"{since}^{{commit}}")
         return sha, commit_at(root, sha), f"--since {since}"
-    prefix = release_tag_glob(root)
+    prefix = release_tag_prefix(root)
     if prefix:
         for tag in git_or_stop(root, "tag", "--list", f"{prefix}*", "--sort=-v:refname").split():
             if "-" not in tag[len(prefix) :]:
@@ -297,43 +296,24 @@ def range_start(root: Path, events: list[dict], since: str | None, review: bool 
     return sha, commit_at(root, sha), f"origin/{base} との分岐点"
 
 
-def _scan_log(root: Path, frm: str, to: str, skip: set[int]) -> tuple[list[tuple], list[str]]:
-    """範囲の first-parent のログから (sha, PR 番号, ブランチ名 or None) を拾い、skip の PR のコミットを外す。"""
-    found, excluded = [], []
-    for line in git_or_stop(root, "log", "--first-parent", "--format=%H%x09%P%x09%s", f"{frm}..{to}").splitlines():
-        sha, parents, subject = line.split("\t", 2)
-        m = MERGE_SUBJECT.match(subject) if " " in parents else SQUASH_SUBJECT.search(subject.rstrip())
-        if m and int(m.group(1)) in skip:
-            excluded.append(sha)
-        elif m:
-            found.append((sha, int(m.group(1)), m.group(2) if m.re is MERGE_SUBJECT else None))
-    return found, excluded
-
-
-def _score_prs(found: list[tuple], root: Path, decl: dict) -> tuple[list[dict], list[str]]:
-    """squash の PR のブランチ名を GitHub から埋め、`SKIP_BRANCHES` のブランチを外し、残りに共通層の判定と点数を付ける。"""
-    squashed = [n for _, n, branch in found if branch is None]
-    heads, err = gh_rest.pr_head_branches(squashed, cwd=str(root)) if squashed else ({}, "")
-    if heads is None:
-        raise Stop(f"squash merge の PR のブランチを読めない: {err}", EXIT_VIOLATION)
-    out, excluded = [], []
-    for sha, n, branch in found:
-        branch = heads.get(n, "") if branch is None else branch
-        if branch.startswith(SKIP_BRANCHES):
-            excluded.append(sha)
-            continue
-        common = any(area_of(f, decl)[1] for f in git_or_stop(root, "diff", "--name-only", f"{sha}^1", sha).splitlines())
-        out.append({"pr": n, "branch": branch, "common": common, "points": decl["triggers"]["common_weight"] if common else 1})
-    return out, excluded
-
-
 def merged_prs(root: Path, frm: str, to: str, decl: dict, skip: set[int] = frozenset()) -> tuple[list[dict], list[str]]:
-    """(範囲へ入った PR, 外した PR のコミット)。merge commit と squash merge（件名の末尾 `(#N)`）を数える。squash の
-    件名にはブランチ名が残らないため、ブランチは GitHub から読んで `SKIP_BRANCHES` を当てる。検査の PR は記録の番号
-    （skip）でも外す。外したコミットは行数からも差し引くために返す。"""
-    found, excluded = _scan_log(root, frm, to, skip)
-    out, skipped = _score_prs(found, root, decl)
-    return out, excluded + skipped
+    """(範囲へ入った PR, 外した PR のコミット)。拾い出しは `lib/merged_range.py`（merge commit と squash merge）。
+    検査の PR は記録の番号（skip）で外し、残りの squash の PR だけブランチを GitHub から読んで `SKIP_BRANCHES` を
+    当てる。外したコミットは行数からも差し引くために返す。"""
+    try:
+        merges = merged_range.merges_in(root, frm, to)
+        kept = merged_range.with_heads(root, [m for m in merges if m.number not in skip])
+    except StepError as e:
+        raise Stop(str(e), e.code)
+    excluded = [m.sha for m in merges if m.number in skip]
+    out = []
+    for m in kept:
+        if m.branch.startswith(SKIP_BRANCHES):
+            excluded.append(m.sha)
+            continue
+        common = any(area_of(f, decl)[1] for f in git_or_stop(root, "diff", "--name-only", f"{m.sha}^1", m.sha).splitlines())
+        out.append({"pr": m.number, "branch": m.branch, "common": common, "points": decl["triggers"]["common_weight"] if common else 1})
+    return out, excluded
 
 
 def changed_lines(root: Path, frm: str, to: str, excluded: list[str] = ()) -> int:
