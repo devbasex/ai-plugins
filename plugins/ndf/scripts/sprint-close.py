@@ -69,7 +69,6 @@ from dist_record import parse_record  # noqa: E402  記録の形は lib/dist_rec
 
 TOOL = "sprint-close"
 LOCK_TIMEOUT = 30  # 課題ごとの錠の待ち（body-lock の既定と同じ）
-_ARGV: list[str] = []  # やり直しの cmd に並べる今の引数
 
 
 # --- 記録の読み取り -------------------------------------------------------------
@@ -196,11 +195,12 @@ def issue_state(root, repo, n):
 
 
 class CloseContext:
-    """全課題で一定の閉じる処理の材料。notes は課題ごとのボードの NOTE を溜める。"""
+    """全課題で一定の閉じる処理の材料。notes は課題ごとのボードの NOTE を溜める。retry_cmd は今の引数で組んだやり直しの cmd。"""
 
-    def __init__(self, root, record_repo, comment):
+    def __init__(self, root, record_repo, comment, argv=()):
         self.root, self.record_repo, self.comment = root, record_repo, comment
         self.notes = []
+        self.retry_cmd = shlex.join(["python3", str(Path(__file__).resolve()), *argv])
 
 
 def close_one(ctx, repo, n):
@@ -295,16 +295,12 @@ def _read_state_body(root, repo, n):
     return d["state"], d.get("body") or ""
 
 
-def _retry_cmd():
-    return shlex.join(["python3", str(Path(__file__).resolve()), *_ARGV])
-
-
 def _judge_and_mark(a, ctx, repo, n, rows):
     """錠の中で状態と本文を読み、条件 2 を判定し、満たせば印を書く。(結果の項目か None, 印を付けた番号) を返す。"""
     base = {"kind": "issue", "repo": repo, "number": n}
     got = _read_state_body(ctx.root, repo, n)
     if got is None:
-        return {**base, "result": "failed", "reason": "本文を読めない", "cmd": _retry_cmd()}, []
+        return {**base, "result": "failed", "reason": "本文を読めない", "cmd": ctx.retry_cmd}, []
     state, body = got
     ok, why, to_check = judge_acceptance(rows, acceptance.criteria(body))
     own = repo == ctx.record_repo  # 他のリポジトリの課題の本文は書かない（I7）
@@ -319,7 +315,7 @@ def _judge_and_mark(a, ctx, repo, n, rows):
         return None, []
     new = acceptance.check_criteria(body, to_check)
     if not acceptance.only_marks(body, new) or not gh_rest.update_body(repo, n, new):
-        return {**base, "result": "failed", "reason": "受け入れ条件の印を書けない", "cmd": _retry_cmd()}, []
+        return {**base, "result": "failed", "reason": "受け入れ条件の印を書けない", "cmd": ctx.retry_cmd}, []
     return None, to_check
 
 
@@ -330,7 +326,7 @@ def _close_verified(a, ctx, repo, n, rows):
         with lock:
             done, checked = _judge_and_mark(a, ctx, repo, n, rows)
     except locks.LockTimeout:
-        return {"kind": "issue", "repo": repo, "number": n, "result": "failed", "reason": "本文の錠を取れない", "cmd": _retry_cmd()}
+        return {"kind": "issue", "repo": repo, "number": n, "result": "failed", "reason": "本文の錠を取れない", "cmd": ctx.retry_cmd}
     if done is not None:
         return done
     out = close_one(ctx, repo, n)
@@ -441,7 +437,7 @@ def cmd_close(a):
 
     items = []
     comment = f"スプリント（{a.label}）を通りました" if a.label else "スプリントの終わりの工程を通りました"
-    ctx = CloseContext(root, record_repo, comment)
+    ctx = CloseContext(root, record_repo, comment, a.argv)
     notes = ctx.notes
     for repo, n in issues:
         items.append(_close_item(a, ctx, repo, n, kept_all, verdicts))
@@ -489,8 +485,9 @@ def build_parser():
 
 
 def main(argv=None):
-    _ARGV[:] = list(sys.argv[1:] if argv is None else argv)
-    return main_with(build_parser(), lambda a: TOOL, argv)
+    ap = build_parser()
+    ap.set_defaults(argv=list(sys.argv[1:] if argv is None else argv))  # やり直しの cmd に並べる今の引数
+    return main_with(ap, lambda a: TOOL, argv)
 
 
 if __name__ == "__main__":
