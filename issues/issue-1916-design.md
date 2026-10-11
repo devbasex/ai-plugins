@@ -85,7 +85,8 @@
 
 | 要素 | 責務 |
 | --- | --- |
-| 引数の表（`new_args.py` の `NEW_ARGS`・`DECL_WORDS`） | `--impl-timeout`（`impl` `sprint`）と `--refactor-budget-minutes`（`check` `sprint` `close`）を受け、1 以上の整数でなければ argparse の誤りで止める。2 つの宣言の項目の説明を `DECL_WORDS` に 1 か所だけ持ち、受ける種別の `--help` の「任意の設定」に出す |
+| 引数の表（`new_args.py` の `NEW_ARGS`・`DECL_WORDS`） | `--impl-timeout`（`impl` `sprint`）と `--refactor-budget-minutes`（`check` `sprint` `close`）を受け、1 以上の整数でなければ argparse の誤りで止める。2 つの宣言の項目の値の出どころの 1 行を `DECL_WORDS` に足し、受ける種別の `--help` の「任意の設定」に出す |
+| 宣言の形の正本（`plan.py` の docstring の「宣言」の節） | `supervise.json` の JSON の例に `impl_timeout`（1 以上の整数・秒）と `refactor_budget_minutes`（1 以上の整数・分）を足す（決定 6） |
 | 宣言の形（`decl.py` の新しい形 `StepBudgets`） | `.ndf/supervise.json` の `impl_timeout` と `refactor_budget_minutes` を、1 以上の厳密な整数か null（無い）として検査する。違えば項目の名前を含む `DeclError` |
 | 宣言の読み取り（`decl.py` の `apply_decls`） | 引数 → 宣言の順で `a.impl_timeout` と `a.refactor_budget_minutes` を 1 つに決める（I1）。宣言の形は引数の有無にかかわらず検査する |
 | 引き継ぐ値の一覧（`decl.py` の `decl_fields`） | 2 つの値を子のプランの引数へ引き継ぐ一覧に足す（I6） |
@@ -147,6 +148,7 @@ plugins/ndf/scripts/
 ├── supervise_lib/
 │   ├── decl.py        # 変える: StepBudgets を新設、apply_decls・decl_fields に 2 項目
 │   ├── new_args.py    # 変える: NEW_ARGS に 2 行、DECL_WORDS に 2 項目、正の整数の型
+│   ├── plan.py        # 変える: docstring の「宣言」の節に 2 項目の形
 │   └── templates.py   # 変える: plan_impl・_inspect_steps
 └── tests/
     └── test_supervise.py  # 足す: プランの値のテスト（置き場は tdd-cycle で決める）
@@ -202,7 +204,7 @@ classDiagram
 | `refactor_budget_minutes` | 1 以上の整数（分） | 値なし（`--budget-minutes` を足さない） | 同左（`supervise.json: refactor_budget_minutes: …`） |
 
 - 宣言の形は、`supervise.py new` のすべての種別で、引数の有無にかかわらず検査する（今の `test` の形の検査と同じ時点）
-- 説明は `new_args.py` の `DECL_WORDS` に 1 か所だけ置き、受ける種別の `new <種別> --help` の「任意の設定」に出す（決定 6）
+- 形の説明は `plan.py` の docstring の「宣言」の節に 1 か所だけ置き、`new_args.py` の `DECL_WORDS` は値の出どころの 1 行を受ける種別の `new <種別> --help` の「任意の設定」に出す（決定 6）
 - 互換性: 任意の項目の追加。書かない利用者のプランは変わらない
 
 ## 処理の流れ
@@ -238,7 +240,7 @@ ai-plugins の宣言は「supervise.json の 2 項目」として宣言の形へ
 
 | 大項目 | 要求の条件 | 実現方式 | 確かめ方 |
 | --- | --- | --- | --- |
-| 運用・保守性 | 宣言の新しい項目は、宣言の書き方を持つ文書に 1 か所だけ説明を置き、写さずに指す（Value 7） | `.ndf/supervise.json` の項目の説明は今も `new <種別> --help`（`DECL_WORDS`）が持つため、そこへ 2 項目を足す。引数の help は「既定は .ndf/supervise.json の <項目>」とだけ書いて指す | `supervise.py new sprint --help` と `new check --help` を打ち、「任意の設定」に 2 項目が出ること |
+| 運用・保守性 | 宣言の新しい項目は、宣言の書き方を持つ文書に 1 か所だけ説明を置き、写さずに指す（Value 7） | `.ndf/supervise.json` の形の正本は `plan.py` の docstring の「宣言」の節のため、そこへ 2 項目を足す。`new <種別> --help`（`DECL_WORDS`）は値の出どころの 1 行だけを出す。引数の help は「既定は .ndf/supervise.json の <項目>」とだけ書いて指す | `supervise.py new sprint --help` と `new check --help` を打ち、「任意の設定」に 2 項目が出ること。`supervise_lib.plan.__doc__` に 2 項目名が含まれること |
 | 移行性 | 既存の `.ndf/` の宣言はそのまま読める（新しい項目は任意）。宣言を足さない利用者のプランは変わらない | 2 項目とも任意で、無い・null は値なしとして扱う。値なしの雛形は今の固定値と cmd を書く | 宣言も引数も無いときのプランの `impl` / `refactor` を、変更前の値と比べるテスト（テスト設計の AC8） |
 
 ## 決定の記録
@@ -261,7 +263,7 @@ ai-plugins の宣言は「supervise.json の 2 項目」として宣言の形へ
 
 ### 決定 3: 想定どおりに終わる run を打ち切らないため、`refactor` の `timeout` を想定最大時間があれば `with_margin(N × 60)`、無ければ 3600 にする
 
-想定最大時間を渡したときは、merge・release のステップと同じ `with_margin` で余裕を足す（60 分 → 3960）。渡さないときは今の 3600 を保つ。cross-refactoring の既定 30 分（1800 秒）より 1800 秒長く、今通っている run の振る舞いを変えない（要求の前提 2・3。採否は承認ゲート 1 で利用者が決める）。
+想定最大時間を渡したときは、merge・release のステップと同じ `with_margin` で余裕を足す（60 分 → 3960）。ai-plugins の宣言（決定 7）では、検査のプランの `refactor` の `timeout` が今の手当ての 4200 秒から 3960 秒へ 240 秒縮む。想定最大時間は目安の上限で、cross-refactoring は実行中の CLI を止めないため、予算を超えて走った run は 3960 秒で打ち切られうる（#1336 の exit=124 と同じ形）。予算を超えた秒の実測は無く、3960 で足りるとは示せていないため、未確認のまま残すことに置き、リリース後テストで打ち切りが出ないかを見る。渡さないときは今の 3600 を保つ。cross-refactoring の既定 30 分（1800 秒）より 1800 秒長く、今通っている run の振る舞いを変えない（要求の前提 2・3。採否は承認ゲート 1 で利用者が決める）。
 
 渡さないときも `with_margin(1800)` = 1980 にそろえる案は採らない。今は 3600 で通っている run が打ち切られうる。渡したときにも 3600 を下限に掛ける案は採らない。短い想定最大時間を渡した側の意図（早く打ち切る）を消す。
 
@@ -283,17 +285,19 @@ ai-plugins の宣言は「supervise.json の 2 項目」として宣言の形へ
 
 根拠: Value 6（MVV 版 2）
 
-### 決定 6: 説明の正本を 1 か所にするため、2 項目の説明を `new <種別> --help` の「任意の設定」に置く
+### 決定 6: 説明の正本を 1 か所にするため、2 項目の形を `plan.py` の docstring の「宣言」の節に足し、`--help` からは 1 行で指す
 
-`.ndf/supervise.json` の項目（`test.command`・`release.form`）の説明は、今も `new_args.py` の `DECL_WORDS` が持ち、`--help` の「要る設定」「任意の設定」に出る。`.ndf/supervise.json` の形を持つ別の文書は無い（`decl.py` の注釈が指す「DECLARATIONS の節」も無い）。同じ所へ足せば、conductor がプランを作る時点で読む所と説明が一致する。
+`.ndf/supervise.json` の形（`test`・`sync_checks`・`release`）の正本は `plugins/ndf/scripts/supervise_lib/plan.py` の docstring の「宣言」の節にあり、`supervise.py` の epilog もそこを指す（`decl.py` の注釈の「DECLARATIONS の節」もこの節を指す）。`new_args.py` の `DECL_WORDS` は、項目ごとに「どこから値を取るか」の 1 行だけを持ち、`--help` の「要る設定」「任意の設定」に出す。この分担のまま、2 項目の形（型・単位・無いときの扱い）は「宣言」の節の JSON の例へ足し、`DECL_WORDS` には既存の項目と同じく値の出どころの 1 行（`--impl-timeout` か `.ndf/supervise.json` の `impl_timeout` など）を足す。形を書く所は 1 か所のままで、`--help` はそこを指す。`decl.py` の注釈は「`plan.py` の docstring の宣言の節」と書き直し、指す先を明らかにする。
 
-`development-workflow` の参照（`agent-layers.md`）に説明の節を新しく置く案は採らない。`supervise.json` の他の項目の説明が無い所に 2 項目だけを置くと、正本が 2 か所に分かれる。
+`DECL_WORDS` だけへ足す案は採らない。形の正本の一覧に 2 項目が載らず、説明が 2 か所に分かれる。「宣言」の節を `--help` へ寄せて片方を消す案も採らない。`test`・`sync_checks`・`release` の形の移し替えが #1916 の範囲を超える。
+
+`development-workflow` の参照（`agent-layers.md`）に説明の節を新しく置く案も採らない。`supervise.json` の他の項目の説明が無い所に 2 項目だけを置くと、正本が 2 か所に分かれる。
 
 根拠: Value 7（MVV 版 2）
 
 ### 決定 7: conductor の jq の手当てを無くすため、ai-plugins の `.ndf/supervise.json` に `impl_timeout: 5400` と `refactor_budget_minutes: 60` を書く
 
-目的の「手当てを無くす」は、ai-plugins が宣言を持って初めて成り立つ。値は conductor が手当てで使ってきた値（5400 秒・60 分）である。`.ndf/` の書き換えは C7 に当たるため、実装の Pull Request に含め、承認ゲート 2 で人が見る。NDF の既定（コード）には書かない（受け入れ条件 8）。
+目的の「手当てを無くす」は、ai-plugins が宣言を持って初めて成り立つ。値は conductor が手当てで使ってきた値（5400 秒・60 分）である。ただし `refactor` の `timeout` は手当ての 4200 秒を写さず、決定 3 の式で `with_margin(3600)` = 3960 秒になる（240 秒の短縮。打ち切りが出ないかは未確認のまま残すことに置く）。`.ndf/` の書き換えは C7 に当たるため、実装の Pull Request に含め、承認ゲート 2 で人が見る。NDF の既定（コード）には書かない（受け入れ条件 8）。
 
 宣言を書かず、毎回 `new sprint` の引数で渡す案は採らない。手当ての場所が jq から引数へ移るだけになる。
 
@@ -312,19 +316,20 @@ ai-plugins の宣言は「supervise.json の 2 項目」として宣言の形へ
 | AC7・I2 | 0・負・小数・文字列・真偽値を引数か宣言で渡すと、プランのファイルを書かずに 0 以外で終わり、出力に項目名（`--impl-timeout` / `impl_timeout` など）が出る。宣言の誤りは引数があっても止まる | 緩い整数で検査する（`"60"`・`true` が通る）・検査の前にファイルを書く・引数があると宣言を検査しない |
 | AC8 | 宣言も引数も無いときの `new impl` / `new check` / `new sprint` のプランの `impl` / `refactor` の `timeout` と cmd が、変更前と同じ | 既定に 5400 や 60 を書く・値なしでも cmd に足す |
 | AC9 | 既存のテストが通る（`uv run --frozen --project . --all-extras pytest plugins/ndf/scripts/tests -q -n 4`） | — |
-| 決定 6 | `new sprint --help` と `new check --help` の「任意の設定」に 2 項目が出る（出力に項目名が含まれること。`.md` の文言は照合しない） | `DECL_WORDS` に足さない・受ける種別の epilog に出さない |
+| 決定 6 | `new sprint --help` と `new check --help` の「任意の設定」に 2 項目が出る（出力に項目名が含まれること。`.md` の文言は照合しない） | `DECL_WORDS` に足さない・受ける種別の epilog に出さない・`plan.py` の「宣言」の節に足さない |
 
 ## 設計の結果
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #1916 | 実装する | — | `plugins/ndf/scripts/supervise_lib/decl.py`、`plugins/ndf/scripts/supervise_lib/new_args.py`、`plugins/ndf/scripts/supervise_lib/templates.py`、`plugins/ndf/scripts/tests/`、`.ndf/supervise.json` |
+| #1916 | 実装する | — | `plugins/ndf/scripts/supervise_lib/decl.py`、`plugins/ndf/scripts/supervise_lib/new_args.py`、`plugins/ndf/scripts/supervise_lib/plan.py`、`plugins/ndf/scripts/supervise_lib/templates.py`、`plugins/ndf/scripts/tests/`、`.ndf/supervise.json` |
 
 ## 未確認のまま残ること
 
 | 項目 | 内容 |
 | --- | --- |
 | 前提 2・3 の採否 | 想定最大時間が無いときに 3600 を保ち、あるときは下限を掛けない（決定 3）。承認ゲート 1 で利用者が決める |
-| 説明の置き場 | 要求の非機能の条件は「宣言の書き方を持つ文書」と書くが、`.ndf/supervise.json` の書き方を持つ文書は無く、`--help` に置く（決定 6）。文書を新設すべきかは承認ゲート 1 で利用者が決める |
+| 説明の置き場 | 要求の非機能の条件の「宣言の書き方を持つ文書」を `plan.py` の docstring の「宣言」の節と読み、そこへ形を足す（決定 6）。`.md` の文書を新設せず docstring に置き続けてよいかは承認ゲート 1 で利用者が決める |
+| `refactor` の `timeout` の 4200 → 3960 の短縮で打ち切りが出ないか | 今の手当ては `timeout` 4200 秒だが、決定 3 の式では 3960 秒になる。cross-refactoring は予算を超えても実行中の CLI を止めないため、予算を超えた秒が 360 秒を超える run は打ち切られる。超えた秒の実測は無い。次のスプリントのリリース後テストで exit=124 が出ないかを見て、出れば予算か余裕の式を見直す |
 | 5400 秒・60 分が ai-plugins に合うか | conductor の手当ての値を写すだけで、所要の実測から出した値ではない。次のスプリントのリリース後テストで、打ち切り（exit=124）が出ないかを見る |
 | cross-refactoring が `--workflow-step` で `--budget-minutes` を受けて想定最大時間どおりに動くか | conductor の手当て（#1370・m1693・m1385）で渡して動いた記録はあるが、この設計では走らせていない。実装の範囲テストか、リリース後テストで確かめる |
