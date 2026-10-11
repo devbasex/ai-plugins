@@ -304,13 +304,13 @@ def plan_sprint_check(a, repo: str) -> dict:
 
 
 def plan_sprint_release(a, repo: str, advise: bool = False) -> dict:
-    """開発版の配布。検査の queue が --then で流し、検査の PR を --prs へ渡す。`advise` なら承認資料の後に
-    助言の MVV 判定を置く（pace: normal と --state。#1400）。"""
+    """開発版の配布。出す PR は検査のプランのスプリントの PR（`{queue_pr:check}`）で、検査の queue の --then でも
+    単独で流し直しても埋まる（#1915）。`advise` なら承認資料の後に助言の MVV 判定を置く（pace: normal と --state。#1400）。"""
     ns = argparse.Namespace(
         **decl_fields(a),
         version=a.version,
-        prs=[],
-        prs_from_queue=True,
+        prs=["{queue_pr:check}"],
+        prs_from_queue=False,
         channel="dev",
         repo=repo,
         prev_tag=None,

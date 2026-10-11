@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -490,6 +491,34 @@ def test_queue_pr_placeholder_reads_a_sibling_plan_when_queued_alone(tmp_path):
     close = plan_file(tmp_path, "4-close", [{"id": "t", "type": "run", "cmd": "echo {queue_pr:release-prod}"}])
     assert queue.fill_queue_pr(close, []) is None
     assert load(close)["steps"][0]["cmd"] == "echo 91"
+
+
+@pytest.mark.parametrize("alone", [True, False])
+def test_normal_sprint_release_fills_the_check_pr_alone_or_after_check(tmp_path, monkeypatch, alone):
+    out = tmp_path / "m"
+    p = cli("new", "sprint", "--name", "m", "--worktree", str(tmp_path), "--issue", "1", "--version", "10.18.0-dev.1", "--out", str(out))
+    assert p.returncode == 0, p.stderr
+    waves = {w["name"]: w for w in load(out / "sprint.json")["ステージ"]}
+    check, release = waves["検査"]["plans"][0], waves["配布"]["plans"][0]
+    assert "{queue_prs}" not in Path(release).read_text()
+    seen = {}
+
+    def batch(plans, adm, args):
+        for q in plans:
+            if q == check:
+                report_with_pr(q, "https://github.com/o/r/pull/1915")
+            else:
+                seen.update(steps_of(load(q)))
+        return [{"plan": q, "result": "完了", "report": str(paths.state_dir_of(q) / "report.md")} for q in plans]
+
+    monkeypatch.setattr(flow, "run_stage", batch)
+    if alone:  # 検査の関門の後・開発版の出し直し: 検査の報告だけが残っている
+        report_with_pr(check, "https://github.com/o/r/pull/1915")
+        queue.cmd_queue([release], 3, poll=0.05)
+    else:
+        queue.cmd_queue([check], 3, poll=0.05, then=[[release]])
+    for sid in ("changelog", "notes", "facts", "explain", "others"):
+        assert re.search(r"--prs 1915(\s|$)", seen[sid]["cmd"]), (sid, seen[sid]["cmd"])
 
 
 def test_gate_as_ok_copies_the_presentation_and_goes_on(tmp_path):
