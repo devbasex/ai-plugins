@@ -5,7 +5,9 @@
 
 from __future__ import annotations
 
+import functools
 import hashlib
+import importlib.util
 import os
 import re
 import shutil
@@ -26,7 +28,23 @@ DRIVES = {
     "cross-review": SKILLS / "cross-review" / "scripts" / "drive.py",
     "cross-refactoring": SKILLS / "cross-refactoring" / "scripts" / "drive.py",
 }
+REFACTOR_VOCABULARY = DRIVES["cross-refactoring"].parent / "refactor_lib" / "vocabulary.py"
 EXTERNAL_AI = SKILLS / "external-ai" / "scripts" / "external-ai.py"
+
+
+@functools.cache
+def _refactor_vocabulary():
+    spec = importlib.util.spec_from_file_location("ndf_refactor_vocabulary", REFACTOR_VOCABULARY)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def default_refactor_budget_minutes() -> int:
+    """cross-refactoring の既定の想定最大時間（分）。値を写さず、cross-refactoring の定数を読む（#1916 の決定 8）。"""
+    return _refactor_vocabulary().DEFAULT_BUDGET_MINUTES
+
+
 HERE = SELF.parent  # 配布したスクリプトの置き場。計画のコマンドはここからの絶対パスで書く
 # run のステップの定型（"preset"）。作業場所（リポジトリの根）で動く。{base} は起点のブランチ
 PRESETS = {

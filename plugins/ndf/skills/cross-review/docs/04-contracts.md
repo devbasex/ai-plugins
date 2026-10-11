@@ -260,11 +260,12 @@
   モデルレビューの観点と手動の観点、`detail` は `review_instructions` と同じ値。`launch-reviewer.sh` がそのラウンドの
   `stage` の値を「追加レビュー観点」へ差し込み、この項目かレビューの種類の無い状態ファイルは `review_instructions` を使う
 - `review_criteria` — 指摘の基準。`init` が新規・再開のどちらでも PR の worktree の
-  `.ndf/review.json`（レビューの重点の宣言）を読んで書き直す。`status` は `declared` / `none` /
+  `.ndf/review.json`（レビューの宣言。下の「レビューの宣言」）を読んで書き直す。`status` は `declared` / `none` /
   `unreadable`（`error` に理由）、`focus` は重点の名前の列、`reviewer_block` はレビュー担当への節
   （正本 `scripts/lib/review_criteria.py` が組む）。`launch-reviewer.sh` が `reviewer_block` を指示へ
   差し込み、空なら宣言を読まない既定の節（基準 3 の無い形）を使う。修正担当は `drive.py` が渡す
-  `CROSS_REVIEW_STATE` から `status` と `focus` を読む。`init` の出力の `REVIEW_FOCUS=<status>` に同じ値が出る
+  `CROSS_REVIEW_STATE` から `status` と `focus` とプロファイルを読む。`init` の出力の `REVIEW_FOCUS=<status>` に同じ値が出る。プロファイルの項目（`profile_status` / `profile` / `profile_error`）と `REVIEW_PROFILE=` は [02-fix-and-rotation.md](02-fix-and-rotation.md) の「レビューの宣言」にある
+- `auto_review_categories` — 観点を渡した分類の名前の列。プロファイルの分類の名前を含み、`replace_auto_categories` が真なら既定の分類の名前を含まない。`review_kind` は既定の分類から決める
 - `deferred_nits[].waived` — `/ndf:fix` が基準外として見送った指摘の種類。見送りの返信（`reply`）を
   付けて決着したもので、`report` は残 deferred の一覧から外して件数だけを出す
 - `sweep` — 最終スイープ後の検証結果。`remaining_open` は GitHub 側で数え直した実数で、
@@ -335,7 +336,7 @@ launcher が生成するプロンプトに以下を強制している:
   担当へ渡さず、投稿する側が送信の時点で行う
 - **既存コメント差分**: `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt` を読んで重複指摘禁止。2 ラウンド目以降は `start-round` が取り直す（#542）
 - **出し切りと、起動しない処理**: 見つけた指摘はそのラウンドですべて出す。テストもバックグラウンドの処理も起動しない（確かめる手順は `suggested_check` に書き、`verify-findings` が実行する。#542 #786）
-- **自動レビュー観点**: GitHub API の `pulls/<PR>/files --paginate` で変更ファイルを全件取得して分類し、`common` / `docs_only` / `design` / `code` / `db_migration` / `test` / `dependency` / `config_ci` / `api_contract` / `auth_security` / `frontend` / `performance` / `deletion_rename` / `generated` / `i18n` / `infra` の該当テンプレートを state.json の `auto_review_instructions` に保存する
+- **自動レビュー観点**: GitHub API の `pulls/<PR>/files --paginate` で変更ファイルを全件取得して分類し、`common` / `docs_only` / `design` / `code` / `db_migration` / `test` / `dependency` / `config_ci` / `api_contract` / `auth_security` / `frontend` / `performance` / `deletion_rename` / `generated` / `i18n` / `infra` の該当テンプレートと、レビューのプロファイルの分類の観点を state.json の `auto_review_instructions` に保存する
 - **手動追加レビュー観点**: `--focus` / `--extra-instructions-file` が指定されていれば state.json の `manual_extra_review_instructions` に保存し、自動テンプレートの後ろに連結した `review_instructions` を codex / agy 両 launcher が同じ「追加レビュー観点」セクションとしてプロンプトに差し込む
 - **進捗マーカー**: agy には `$TMP_DIR/agy-review-pr<PR>-progress.log` へ短いフェーズ名を追記させ、monitor の heartbeat で表示する。内部推論や長文説明は書かせない
 - **review body 先頭 prefix**（投稿する側が組み立てる）:
@@ -467,7 +468,7 @@ GitHub は **自分の PR には `REQUEST_CHANGES` でレビューを投稿で�
 
 `state.py init` は GitHub API の `pulls/<PR>/files --paginate` で変更ファイルを全件取得して分類し、
 そのラウンドのレビュー担当に同じ追加観点を渡す。`--focus` /
-`--extra-instructions-file` は、この自動テンプレートの後ろに上乗せされる。
+`--extra-instructions-file` は、この自動テンプレートの後ろに上乗せされる（レビューのプロファイルの観点があっても同じ）。レビューのプロファイルの分類（[02-fix-and-rotation.md](02-fix-and-rotation.md) の「レビューの宣言」）に当たる変更ファイルがあれば、その観点を既定の観点の後ろに足し、`replace_auto_categories` が真なら既定の自動カテゴリ（`common` / `docs_only` を含むすべて）の観点を渡さない。
 
 自動カテゴリ:
 

@@ -2290,7 +2290,8 @@ def test_new_sprint_check_and_release_run_without_a_whole_skill(tmp_path):
         for path in waves[name]["plans"]:
             assert not [s for s in json.loads(Path(path).read_text())["steps"] if s.get("full")], path
     release = json.loads(Path(waves["配布"]["plans"][0]).read_text())
-    assert release["フェーズ"] == "配布（開発版）" and "{queue_prs}" in json.dumps(release, ensure_ascii=False)
+    assert release["フェーズ"] == "配布（開発版）"
+    assert "{queue_prs}" not in json.dumps(release) and "--prs {queue_pr:check}" in json.dumps(release, ensure_ascii=False)
     # 配布は検査の queue が --then で流す（検査の PR を --prs へ渡すため）
     assert waves["検査"]["command"].endswith("--then " + waves["配布"]["plans"][0])
     assert "command" not in waves["配布"] and waves["配布"]["then_of"] == "検査"
