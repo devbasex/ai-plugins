@@ -11,7 +11,6 @@ from typing import Any, NamedTuple
 
 import review_lib  # noqa: E402
 import assignment  # noqa: E402
-import project_mvv  # noqa: E402
 import review_criteria  # noqa: E402
 from classifications import default_max_rounds, review_kind  # noqa: E402
 from review_lib import (  # noqa: E402
@@ -46,6 +45,7 @@ class _InitResult(NamedTuple):
     carried_count: int
     resumed: bool
     review_focus: str = "none"
+    review_profile: str = "none"
 
 
 def _print_init_result(result: _InitResult) -> None:
@@ -66,46 +66,31 @@ def _print_init_result(result: _InitResult) -> None:
     print(f"CARRIED_OVER_THREADS={result.carried_count}")
     print(f"RESUMED={'1' if result.resumed else '0'}")
     print(f"REVIEW_FOCUS={result.review_focus}")
+    print(f"REVIEW_PROFILE={result.review_profile}")
 
 
-def _base_refs(base_branch: object) -> list[str]:
-    """base の宣言を引く ref の候補。取り込んだ remote の側を先に見る。"""
-    base = str(base_branch or "")
-    return [f"origin/{base}", base] if base else []
-
-
-def _review_criteria(worktree: object, base_branch: object = "") -> dict[str, Any]:
-    """重点の宣言（PR の head の作業ツリー）とプロジェクト MVV（base の側）を読み、状態ファイルの `review_criteria` を組む（#1287・#1366）。
-
-    プロジェクト MVV は base で承認済みのものだけを使う。PR の head が MVV を足す・書き換えても、
-    その PR 自身のレビューと修正の基準はマージの後まで変わらない。
-    読めなくても止めない。基準 1・2・4 の節で続け、読めなかったことを標準エラーへ出す。
-    """
-    focus = review_criteria.load_focus(worktree) if worktree else review_criteria.NO_FOCUS
-    if focus.status == "unreadable":
-        review_lib.info(f"⚠️ レビューの重点の宣言を読めないため、基準 1・2・4 だけで続ける: {focus.error}")
-    # プロジェクト MVV（#1366）は 1 回だけ読み、参照と MVV の節を写す。担当・修正担当・見送りの返信が同じ節を読む
-    mvv = project_mvv.load_mvv_at_ref(worktree, _base_refs(base_branch)) if worktree else project_mvv.ProjectMvv("none")
-    if mvv.status in ("unapproved", "mismatch", "unreadable"):
-        review_lib.info(f"⚠️ プロジェクト MVV が{project_mvv.STATUS_LABEL[mvv.status]}ため、MVV なしで続ける: {mvv.error}")
-    return review_criteria.as_state(focus, mvv)
-
-
-def _rewrite_review_criteria(state_file: pathlib.Path, worktree: object, base_branch: object = "") -> str:
-    """再開で、同期した後の作業ツリーから読み直して状態ファイルへ書く。
+def _rewrite_review_criteria(state_file: pathlib.Path, worktree: object, base_branch: object = "") -> tuple[str, str]:
+    """再開で、同期した後の作業ツリーから宣言を読み直し、指摘の基準と自動レビュー観点を組み直して、
+    保存した値と違うときだけ状態ファイルへ書く（I7）。(重点の状態, プロファイルの状態) を返す。
 
     待ち行列を流した結果は状態ファイルへ直接書かれているため、手元の `st` ではなく
     ファイルを読み直してから書く。
     """
-    crit = _review_criteria(worktree, base_branch)
+    decl = review_focus._read_review_decl(worktree)
+    crit = review_focus._review_criteria(worktree, base_branch, decl)
+    statuses = (crit["status"], review_focus._profile_status(crit))
     try:
         st = json.loads(state_file.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return crit["status"]
-    if isinstance(st, dict) and st.get("review_criteria") != crit:
-        st["review_criteria"] = crit
-        store._write_state(state_file, st)
-    return crit["status"]
+        return statuses
+    if not isinstance(st, dict):
+        return statuses
+    updated = json.loads(json.dumps(st))
+    updated["review_criteria"] = crit
+    review_focus._apply_auto_review(updated, categories_mod._classify_changed_files(updated.get("changed_files") or []), decl.profile)
+    if updated != st:
+        store._write_state(state_file, updated)
+    return statuses
 
 
 def _refresh_resume_state(
@@ -207,7 +192,7 @@ def _resume_from_state(
         review_lib.info("↻ 追加レビュー観点を state に反映して再開")
 
     tmp_dir = _sync_resume_worktree(st, pr, worktree)
-    focus_status = _rewrite_review_criteria(resume_state_file, st.get("worktree_path") or "", st.get("base_branch") or "")
+    focus_status, profile_status = _rewrite_review_criteria(resume_state_file, st.get("worktree_path") or "", st.get("base_branch") or "")
     review_lib.info(f"↻ 前回中断 state から再開（round={len(st.get('rounds', []))}）")
     _print_init_result(
         _InitResult(
@@ -223,6 +208,7 @@ def _resume_from_state(
             carried_count=(st.get("carried_over") or {}).get("count", 0),
             resumed=True,
             review_focus=focus_status,
+            review_profile=profile_status,
         )
     )
     return True
@@ -270,6 +256,8 @@ class _InitPRContext(NamedTuple):
 
 class _InitReviewContext(NamedTuple):
     changed_files: list[str]
+    # review_kind を決める既定の分類（決定 5）。観点を渡す分類（auto_review_categories）とは分ける
+    default_categories: list[str]
     auto_review_categories: list[str]
     auto_review: str
     review_instructions: str
@@ -319,7 +307,7 @@ def _build_initial_review_state(
     host, host_source, participants = ctx.assignment
     only, _include, _exclude = participants_mod._normalize_participant_args(args)
     # 分類（design / code）ごとに上限の既定を変える（#1005）。設計は 3 ラウンドで関門 1 へ渡す
-    kind = review_kind(ctx.pr_ctx.meta.head_branch, ctx.review_ctx.auto_review_categories)
+    kind = review_kind(ctx.pr_ctx.meta.head_branch, ctx.review_ctx.default_categories)
     return {
         "started_at": review_lib._now(),
         "host": host,
@@ -403,13 +391,16 @@ def _init_new_state(
             event_downgrade=event_downgrade,
         )
 
-    def _prepare_review_instructions(pr: object, repo: str, manual_extra_review: str) -> _InitReviewContext:
+    def _prepare_review_instructions(
+        pr: object, repo: str, manual_extra_review: str, profile: review_criteria.Profile
+    ) -> _InitReviewContext:
         changed_files = github._fetch_changed_files(pr, repo)
-        auto_review_categories = categories_mod._classify_changed_files(changed_files)
-        auto_review = review_focus._auto_review_instructions(auto_review_categories)
+        default_categories = categories_mod._classify_changed_files(changed_files)
+        auto_review_categories, auto_review = review_focus._auto_review(default_categories, changed_files, profile)
         review_instructions = review_focus._combined_review_instructions(auto_review, manual_extra_review)
         return _InitReviewContext(
             changed_files=changed_files,
+            default_categories=default_categories,
             auto_review_categories=auto_review_categories,
             auto_review=auto_review,
             review_instructions=review_instructions,
@@ -459,6 +450,7 @@ def _init_new_state(
         review_ctx: _InitReviewContext,
         ws_ctx: _InitWorkspaceContext,
         manual_extra_review: str,
+        decl: review_criteria.ReviewDecl,
     ) -> None:
         initial_assignment = _prepare_initial_assignment(args)
         context = _InitialStateContext(pr, pr_ctx, review_ctx, ws_ctx, initial_assignment, manual_extra_review)
@@ -469,7 +461,7 @@ def _init_new_state(
                 state["review_kind"], pr_ctx.worktree, review_ctx.changed_files, review_ctx.review_instructions, manual_extra_review
             )
         )
-        state["review_criteria"] = _review_criteria(pr_ctx.worktree, pr_ctx.meta.base_branch)
+        state["review_criteria"] = review_focus._review_criteria(pr_ctx.worktree, pr_ctx.meta.base_branch, decl)
         store._write_state(ws_ctx.state_file, state)
         review_lib.info(f"✅ state 初期化: {ws_ctx.state_file}")
         _print_init_result(
@@ -486,6 +478,7 @@ def _init_new_state(
                 carried_count=0,
                 resumed=False,
                 review_focus=state["review_criteria"]["status"],
+                review_profile=review_focus._profile_status(state["review_criteria"]),
             )
         )
 
@@ -493,6 +486,8 @@ def _init_new_state(
     if pr_ctx is None:
         return
 
-    review_ctx = _prepare_review_instructions(pr, pr_ctx.repo, manual_extra_review)
+    # 宣言は PR の head の worktree にあるため、worktree を用意してから読み、観点と指摘の基準の両方へ渡す（決定 6）
     ws_ctx = _prepare_worktree_and_comments(pr_ctx.worktree, pr, pr_ctx.meta.head_branch, pr_ctx.repo, is_fork=pr_ctx.meta.is_fork)
-    _finalize_initial_state(args, pr, pr_ctx, review_ctx, ws_ctx, manual_extra_review)
+    decl = review_focus._read_review_decl(pr_ctx.worktree)
+    review_ctx = _prepare_review_instructions(pr, pr_ctx.repo, manual_extra_review, decl.profile)
+    _finalize_initial_state(args, pr, pr_ctx, review_ctx, ws_ctx, manual_extra_review, decl)

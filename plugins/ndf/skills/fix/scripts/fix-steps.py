@@ -9,7 +9,8 @@ context   未解決のスレッド・3 種のコメント・CI の状態（失�
           本文の除外の節と「指摘の基準」の節（`scripts/lib/review_criteria.py`）を 1 つのファイルへ書き、
           振り分けの雛形（decisions）を書き出す。レビューの重点は、環境変数 `CROSS_REVIEW_STATE` が
           cross-review の状態ファイルを指し `review_criteria` を持てばそれを写し、無ければ `--root`
-          （既定はカレントの作業ツリーの根）の `.ndf/review.json` を読む
+          （既定はカレントの作業ツリーの根）の `.ndf/review.json` を読む。レビューのプロファイル（#1910）も同じ経路で得て、
+          節に効かせ、振り分けの雛形の `review_profile` へ写す
 finalize  振り分けの JSON から件数と by_severity を数え、`cross-review` の `state.py merge-fix`
           が読む戻り値ファイル `$TMP_DIR/fix-pr<PR>-result.json` を組む。`waived` は見送りの返信を
           組んで `deferred` へ `resolve: true` で載せ、`fixed` も CI の修正（`ci_fixed`）も無ければ `fix_commit` を捨てる。設計 PR の本文の
@@ -24,6 +25,7 @@ remaining 返信と決着の後に未解決のスレッドを数え直し、見�
 
     {"pr": 812, "fix_commit": "abc1234"（省くと HEAD）, "ci_fixed": false（CI の失敗を直したら true）, "ci_note": null,
      "review_focus": ["<重点の名前>"], "review_focus_status": "declared|none|unreadable",
+     "review_profile": {...}（プロファイルがあるときだけ。`finalize` はこの写しで検査し、返信を組む）,
      "decisions": [{"thread_id": "PRRT_...", "comment_id": 1, "path": "a.py", "line": 3,
                     "severity": "major", "category": "style", "summary": "...",
                     "decision": "fixed|waived|deferred|rejected|separate_pr", "reason": "...",
@@ -32,7 +34,8 @@ remaining 返信と決着の後に未解決のスレッドを数え直し、見�
                     "issue": "#123"（separate_pr のとき）}]}
 
 振り分けの規則（破れば finalize が止まる）: fixed は critical / major だけ。waived は minor / nit だけで、
-criterion を持たず、waive_kind が見送りの種類のどれか。criterion 3 は review_focus が空でないときだけ。
+criterion を持たず、waive_kind が見送りの種類のどれか。criterion は指摘の基準の番号のどれかで、3 は review_focus が
+空でないときだけ。見送りの種類と基準の番号は、review_profile があればそのプロファイルから組む。
 """
 
 from __future__ import annotations
@@ -208,23 +211,10 @@ def _root_or_cwd(root_arg) -> Path:
         return Path.cwd()
 
 
-def focus_for_context(root_arg) -> review_criteria.Focus:
-    """cross-review の中なら状態ファイルに写した重点（I8）、単独なら作業ツリーの宣言。"""
-    state = os.environ.get("CROSS_REVIEW_STATE")
-    if state:
-        try:
-            crit = json.loads(Path(state).read_text(encoding="utf-8")).get("review_criteria")
-        except (OSError, ValueError, AttributeError):
-            crit = None
-        if isinstance(crit, dict):
-            return review_criteria.focus_from(crit.get("status"), crit.get("focus"), crit.get("error"))
-    return review_criteria.load_focus(_root_or_cwd(root_arg))
-
-
 def cmd_context(a):
     pr = a.pr
     repo = repo_of(a)
-    focus = focus_for_context(a.root)
+    focus, profile = review_criteria.context_decl(os.environ.get("CROSS_REVIEW_STATE"), lambda: _root_or_cwd(a.root))
     mvv_ref, mvv_block = review_criteria.mvv_context(os.environ.get("CROSS_REVIEW_STATE"), lambda: _root_or_cwd(a.root))
     view = pr_for_fix(pr)
     threads = threads_with_first_comment(repo, pr)
@@ -255,7 +245,7 @@ def cmd_context(a):
     if log_path:
         lines += ["", f"失敗ログ: {log_path}"]
     lines += ["", f"## コメント（3 種、{comments_n} 行）", "", "```", comments_text.rstrip(), "```", ""]
-    lines += [review_criteria.fixer_block(focus, mvv_block), ""]
+    lines += [review_criteria.fixer_block(focus, mvv_block, profile), ""]
     ctx.write_text("\n".join(lines), encoding="utf-8")
 
     dec = d / f"fix-pr{pr}-decisions.json"
@@ -269,6 +259,7 @@ def cmd_context(a):
                 "review_focus": list(focus.names),
                 "review_focus_status": focus.status,
                 "project_mvv": mvv_ref,
+                **({"review_profile": profile.record()} if profile.status == "declared" else {}),
                 "decisions": [
                     {
                         "thread_id": t["thread_id"],
@@ -337,7 +328,7 @@ def load_decisions(path: str) -> dict:
     return d
 
 
-def _decision_problems(e: dict) -> list[str]:
+def _decision_problems(e: dict, profile: review_criteria.Profile = review_criteria.NO_PROFILE) -> list[str]:
     """振り分け 1 件の decision ごとの誤り。"""
     why = []
     if e.get("decision") not in DECISIONS:
@@ -358,29 +349,31 @@ def _decision_problems(e: dict) -> list[str]:
             why.append(f"waived は severity が {'/'.join(WAIVE_SEVERITIES)} のときだけ: {e.get('severity')!r}")
         if e.get("criterion") not in (None, ""):
             why.append("waived は criterion を持たない（基準に当たるなら major 以上で直す）")
-        if e.get("waive_kind") not in review_criteria.WAIVE_KINDS:
-            why.append(f"waived には waive_kind（{'/'.join(review_criteria.WAIVE_KINDS)}）が要る: {e.get('waive_kind')!r}")
+        kinds = review_criteria.waive_kinds(profile)
+        if e.get("waive_kind") not in kinds:
+            why.append(f"waived には waive_kind（{'/'.join(kinds)}）が要る: {e.get('waive_kind')!r}")
     return why
 
 
-def _criterion_problems(e: dict, focus_names=()) -> list[str]:
+def _criterion_problems(e: dict, focus_names=(), profile: review_criteria.Profile = review_criteria.NO_PROFILE) -> list[str]:
     """振り分け 1 件の criterion の誤り。"""
     c = e.get("criterion")
-    if c not in (None, "") and (isinstance(c, bool) or c not in review_criteria.CRITERION_NUMBERS):
-        return [f"criterion は {'/'.join(map(str, review_criteria.CRITERION_NUMBERS))} のどれか: {c!r}"]
+    numbers = review_criteria.criterion_numbers(profile)
+    if c not in (None, "") and (isinstance(c, bool) or c not in numbers):
+        return [f"criterion は {'/'.join(map(str, numbers))} のどれか: {c!r}"]
     if c == review_criteria.FOCUS_CRITERION and not focus_names:
         return ["criterion 3 はレビューの重点の宣言があるとき（review_focus が空でない）だけ"]
     return []
 
 
-def check_decisions(decs: list, focus_names=()) -> list[dict]:
+def check_decisions(decs: list, focus_names=(), profile: review_criteria.Profile = review_criteria.NO_PROFILE) -> list[dict]:
     """振り分けの誤りを items の形で返す。空なら通る（設計の不変条件 I1〜I3）。"""
     bad = []
     for i, e in enumerate(decs):
         if not isinstance(e, dict):
             bad.append({"index": i, "result": "invalid", "reason": "オブジェクトでない"})
             continue
-        why = _decision_problems(e) + _criterion_problems(e, focus_names)
+        why = _decision_problems(e, profile) + _criterion_problems(e, focus_names, profile)
         if why:
             bad.append(
                 {
@@ -400,6 +393,11 @@ def focus_names(d: dict) -> list[str]:
     return [n for n in names if isinstance(n, str) and n.strip()] if isinstance(names, list) else []
 
 
+def profile_of(d: dict) -> review_criteria.Profile:
+    """振り分けの JSON に `context` が写したプロファイル（決定 7）。無ければ既定。"""
+    return review_criteria.profile_from(d.get("review_profile"))
+
+
 def pick(e: dict, *keys) -> dict:
     return {k: e.get(k) for k in keys}
 
@@ -417,9 +415,10 @@ def build_result(pr: int, d: dict, commit: str | None, ci_status: str, failed_na
     resolved = [pick(e, "thread_id", "comment_id", "path", "line", "mvv_basis") for e in fixed]
     deferred = []
     names = focus_names(d)
+    profile = profile_of(d)
     for e in decs:
         if e["decision"] == "waived":
-            reply = review_criteria.waiver_reply(e["waive_kind"], names, project_mvv.basis_phrase(e["mvv_basis"], mvv))
+            reply = review_criteria.waiver_reply(e["waive_kind"], names, project_mvv.basis_phrase(e["mvv_basis"], mvv), profile)
             deferred.append({**pick(e, *ENTRY), "reason_for_deferral": reply, "reply": reply, "resolve": True, "waived": e["waive_kind"]})
         elif e["decision"] == "deferred":
             deferred.append({**pick(e, *ENTRY), "reason_for_deferral": e.get("reason")})
@@ -447,7 +446,7 @@ def cmd_finalize(a):
     pr = a.pr or d.get("pr")
     if not isinstance(pr, int):
         raise StepError("PR 番号が無い（--pr か JSON の pr）", EXIT_UNREADABLE)
-    bad = check_decisions(d["decisions"], focus_names(d))
+    bad = check_decisions(d["decisions"], focus_names(d), profile_of(d))
     if bad:
         emit(
             result(

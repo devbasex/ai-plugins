@@ -656,3 +656,103 @@ def test_context_in_cross_review_uses_the_state_file(env, monkeypatch):
     monkeypatch.setenv("CROSS_REVIEW_STATE", str(state))
     code, out, _ = run("context", PR, "--repo", "o/r", "--root", root)
     assert code == 0 and _context_decisions(out)["review_focus"] == ["状態ファイルの重点"]
+
+
+# --- レビューのプロファイル（#1910） -------------------------------------------------
+
+PROFILE = {
+    "criteria": {"1": "設定と本文が食い違う", "5": "人物の口調が設定とずれる"},
+    "waive_kinds": {"preference": "好みの文体", "out_of_scope": "設定を変える提案"},
+    "reply": "直しません。{inner}に当たるためです。",
+}
+
+
+def _declare_profile(root: Path, profile: dict, **extra) -> Path:
+    (root / ".ndf").mkdir(parents=True, exist_ok=True)
+    decl = {"version": 2, "profile": profile, **extra}
+    (root / ".ndf" / "review.json").write_text(json.dumps(decl, ensure_ascii=False), encoding="utf-8")
+    return root
+
+
+def _context_text(out) -> str:
+    return Path(next(i["path"] for i in out["items"] if i["name"] == "context")).read_text(encoding="utf-8")
+
+
+def test_context_with_a_profile_writes_its_block_and_copies_it(env):
+    """受け入れ条件 7・決定 7: 文脈の節はプロファイルの語で書き、振り分けの JSON へプロファイルを写す。"""
+    root = _declare_profile(env["root"] / "wt", PROFILE)
+    code, out, _ = run("context", PR, "--repo", "o/r", "--root", root)
+    assert code == 0
+    ctx = _context_text(out)
+    assert "コードを変え" not in ctx and "対象のファイルを変えずに" in ctx and "5. 人物の口調が設定とずれる" in ctx
+    assert _context_decisions(out)["review_profile"] == PROFILE
+
+
+def test_context_without_a_profile_does_not_copy_one(env):
+    root = env["root"] / "wt"
+    root.mkdir(parents=True)
+    code, out, _ = run("context", PR, "--repo", "o/r", "--root", root)
+    assert code == 0 and "review_profile" not in _context_decisions(out)
+    assert "コードを変えずに" in _context_text(out)
+
+
+def test_context_with_a_broken_profile_continues_with_defaults(env):
+    """受け入れ条件 8: 壊れたプロファイルは止めず、既定の節で続け、理由を標準エラーへ出す。"""
+    root = _declare_profile(env["root"] / "wt", {**PROFILE, "reply": "直しません。"})
+    code, out, err = run("context", PR, "--repo", "o/r", "--root", root)
+    assert code == 0 and "レビューのプロファイルを読めない" in err
+    assert "review_profile" not in _context_decisions(out) and "コードを変えずに" in _context_text(out)
+
+
+def test_context_in_cross_review_takes_the_profile_from_the_state_file(env, monkeypatch):
+    root = _declare_profile(env["root"] / "wt", {"criteria": {"1": "作業ツリーの基準"}})
+    state = env["root"] / "cr-state.json"
+    crit = review_criteria.as_state(review_criteria.NO_FOCUS, None, review_criteria.profile_from(PROFILE))
+    state.write_text(json.dumps({"review_criteria": crit}, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setenv("CROSS_REVIEW_STATE", str(state))
+    code, out, _ = run("context", PR, "--repo", "o/r", "--root", root)
+    assert code == 0 and _context_decisions(out)["review_profile"] == PROFILE
+    assert "作業ツリーの基準" not in _context_text(out)
+
+
+def _profile_waived(kind: str, **over):
+    d = _waived_only(review_profile=PROFILE, **over)
+    d["decisions"] = [{**d["decisions"][0], "waive_kind": kind}]
+    return d
+
+
+def test_finalize_builds_the_reply_from_the_profile(env):
+    """受け入れ条件 3・I8: 返信はプロファイルの雛形で組み、重点があっても重点の句を足さない。"""
+    code, out, err = _finalize(env, _profile_waived("preference", review_focus=["重点 A"], review_focus_status="declared"))
+    assert code == 0, err
+    res = json.loads((env["tmp"] / f"fix-pr{PR}-result.json").read_text())
+    reply = res["deferred"][0]["reply"]
+    assert reply.startswith("直しません。好みの文体に当たるためです。") and "重点 A" not in reply
+    assert "利用者が実際に使って困る不具合ではない" not in reply
+
+
+def test_finalize_with_a_profile_rejects_default_only_values(env):
+    """受け入れ条件 4・I5: プロファイルに無い見送りの種類と基準の番号を拒み、外せない基準 2 と重点の 3 は通す。"""
+    code, out, _ = _finalize(env, _profile_waived("wording"))
+    assert code == 1 and "preference/out_of_scope" in out["items"][0]["reason"]
+    fixed = {
+        "thread_id": "PRRT_1",
+        "comment_id": 11,
+        "path": "a.md",
+        "line": 3,
+        "severity": "major",
+        "category": "原稿",
+        "summary": "口調",
+        "decision": "fixed",
+        "reason": "",
+    }
+    code, out, _ = _finalize(env, _waived_only(review_profile=PROFILE, decisions=[{**fixed, "criterion": 4}]))
+    assert code == 1 and "criterion は 1/2/3/5" in out["items"][0]["reason"]
+    for n in (1, 2, 5):
+        code, _, err = _finalize(env, _waived_only(review_profile=PROFILE, decisions=[{**fixed, "criterion": n}]))
+        assert code == 0, err
+    code, out, _ = _finalize(env, _waived_only(review_profile=PROFILE, decisions=[{**fixed, "criterion": 3}]))
+    assert code == 1 and "criterion 3" in out["items"][0]["reason"]
+    focus = {"review_focus": ["重点 A"], "review_focus_status": "declared"}
+    code, _, _ = _finalize(env, _waived_only(review_profile=PROFILE, decisions=[{**fixed, "criterion": 3}], **focus))
+    assert code == 0

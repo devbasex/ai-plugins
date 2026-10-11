@@ -130,7 +130,7 @@ def test_resume_with_a_broken_declaration_continues(resumable, fake_gh, capsys):
 
 
 def test_new_state_criteria_without_declaration_has_no_criterion_3(tmp_path):
-    crit = review_lib.commands.init._review_criteria(tmp_path)
+    crit = review_lib.review_focus._review_criteria(tmp_path)
     assert crit["status"] == "none" and crit["focus"] == []
     assert "\n3. " not in crit["reviewer_block"] and "\n4. " in crit["reviewer_block"]
 
