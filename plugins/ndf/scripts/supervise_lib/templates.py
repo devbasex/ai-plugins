@@ -10,7 +10,7 @@ from pathlib import Path
 from step_result import result
 from supervise_lib import release_templates
 from supervise_lib.decl import with_decls
-from supervise_lib.paths import CHECK_PY, DRIVES, REFACTOR_SCOPE_PY, default_refactor_budget_minutes
+from supervise_lib.paths import CHECK_PY, DRIVES, READY, REFACTOR_SCOPE_PY, default_refactor_budget_minutes
 from supervise_lib.procedures import (
     DESIGN_MATCH_MODES,
     design_match_steps,
@@ -160,7 +160,7 @@ def plan_to_merge(a, head: list[dict]) -> dict:
             "prompt": "ヒットした行を今の決まりだけを書く形へ直してコミットする（push しない）。",
             "next": "doc-lint",
         },
-        {"id": "ready", "type": "run", "cmd": "sh -c 'git push -q && gh pr ready {pr}'", "next": "merge-gate"},
+        {"id": "ready", "type": "run", "cmd": READY, "next": "merge-gate"},
         *merge_steps(a, next="end"),
     ]
     if getattr(a, "escape_of", None) is not None:
@@ -308,7 +308,7 @@ def plan_check(a) -> dict:
                     "prompt": "失敗したテストを直してコミットし、git push する。",
                     "next": "test-all",
                 },
-                {"id": "ready", "type": "run", "cmd": f"git push -q; gh pr ready {pr}", "on_fail": "abort", "next": "merge-gate"},
+                {"id": "ready", "type": "run", "cmd": READY.replace("{pr}", str(pr)), "on_fail": "abort", "next": "merge-gate"},
                 *merge_steps(a, on_fail="abort", next="record"),
                 *record_steps(name, target_pr=pr, advance=getattr(a, "advance_done", False)),
             ],
@@ -422,7 +422,7 @@ def plan_check_since(a) -> dict:
             "on_fail": "abort",
             "next": "ready",
         },
-        {"id": "ready", "type": "run", "cmd": "sh -c 'git push -q && gh pr ready {pr}'", "on_fail": "abort", "next": "merge-gate"},
+        {"id": "ready", "type": "run", "cmd": READY, "on_fail": "abort", "next": "merge-gate"},
         *merge_steps(a, on_fail="abort", next="record"),
         *record_steps(name, review=review_only, pr=True),
     ]

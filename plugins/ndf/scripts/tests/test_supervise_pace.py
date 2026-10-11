@@ -130,7 +130,7 @@ def test_fast_sprint_puts_check_then_dev_then_prod_after_the_implementation(tmp_
     assert ds["review"]["next"] == "sync-review" and ds["push-glossary"]["next"] == "mvv"  # 用語チェックの後で判定する
     # 直し切れずに残った当たりは mvv を通さず、当たりを入力に持つ関門 1 の judge へ回る
     assert ds["glossary-recheck"]["on_fail"] == "push-glossary-gate" and ds["glossary-recheck"]["next"] == "push-glossary"
-    assert ds["push-glossary-gate"]["next"] == "gate" and "glossary-recheck" in ds["gate"]["inputs"]
+    assert ds["push-glossary-gate"]["next"] == "ready" and ds["ready"]["next"] == "gate" and "glossary-recheck" in ds["gate"]["inputs"]
     for i in ("push-glossary", "push-glossary-gate"):  # 本文の「決めたこと」を設計文書に合わせる
         assert ds[i]["cmd"].startswith("git push -q && ") and "pr-body-decisions.sh sync {pr}" in ds[i]["cmd"]
     approve_runs_with_or_without_note(tmp_path, ds["approve"]["cmd"])
@@ -249,6 +249,27 @@ def test_check_of_a_pr_records_every_ending_and_judge_stops_through_abort(tmp_pa
     s = steps_of(load(since))
     assert "stop" not in s["judge"]["choices"] and "abort" in s["judge"]["choices"]
     assert s["refactor"]["on_fail"] == "abort" and s["review"]["on_fail"] == "abort"
+
+
+@pytest.mark.parametrize("push", [0, 1])
+def test_ready_of_the_design_and_check_plans_stops_when_the_push_fails(tmp_path, push):
+    """設計のプラン（関門 1 の前）と PR を指す検査の ready は、push が落ちたら Draft を外さずに落ちる（#1908）。"""
+    out = tmp_path / "check.json"
+    assert cli("new", "check", "--pr", "5", "--worktree", str(tmp_path), "--out", str(out)).returncode == 0
+    _, sprint = new_fast_sprint(tmp_path, sprint_state(tmp_path))
+    design = load(load(sprint / "sprint.json")["ステージ"][0]["plans"][0])
+    cmds = [steps_of(load(out))["ready"]["cmd"], steps_of(design)["ready"]["cmd"]]
+    bin_dir, log = tmp_path / "fake-bin", tmp_path / "gh.log"
+    bin_dir.mkdir()
+    for name, code in (("git", push), ("gh", 0)):
+        (bin_dir / name).write_text(f'#!/bin/sh\necho "{name} $*" >> {log}\nexit {code}\n')
+        (bin_dir / name).chmod(0o755)
+    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+    for cmd in cmds:
+        log.unlink(missing_ok=True)
+        assert subprocess.run(cmd.replace("{pr}", "7"), shell=True, env=env).returncode == push
+        calls = [l.split()[:3] for l in log.read_text().splitlines()]
+        assert calls == [["git", "push", "-q"]] + ([["gh", "pr", "ready"]] if push == 0 else [])
 
 
 def test_since_ref_reaches_the_condition_and_prepare_but_not_record(tmp_path):
