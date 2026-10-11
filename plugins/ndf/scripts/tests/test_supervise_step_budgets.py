@@ -176,6 +176,10 @@ def test_a_bad_declaration_stops_without_writing_the_plan_even_with_the_argument
 
 
 def test_help_lists_the_optional_settings(tmp_path):
-    for kind, keys in {"sprint": ["impl_timeout", "refactor_budget_minutes"], "check": ["refactor_budget_minutes"], "impl": ["impl_timeout"]}.items():
+    for kind, keys in {
+        "sprint": ["impl_timeout", "refactor_budget_minutes"],
+        "check": ["refactor_budget_minutes"],
+        "impl": ["impl_timeout"],
+    }.items():
         out = subprocess.run([PY, str(SUPERVISE), "new", kind, "--help"], capture_output=True, text=True, cwd=tmp_path).stdout
         assert "任意の設定" in out and all(k in out for k in keys), kind
