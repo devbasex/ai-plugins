@@ -251,7 +251,7 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 | --- | --- |
 | 承認（ゲート 1） | `sprint-state.py gate <状態> "関門 1" --what <要約> --by user --outcome approved` → `supervise.py run <設計のプラン> --from approve` → マニフェストのスプリントブランチのステージの `resume` |
 | 承認（ゲート 2） | `sprint-state.py gate <状態> "関門 2" --what <要約> --by user --outcome approved` → `supervise.py run <本番のプラン> --from bump`（昇格のプランは `--from promote-approved`、マージの `merge-gate` で止まったプランは `--from merge-approved`。`gate-2` のプランは続きを流さず、手で行う「本番」のステージへ進む） |
-| 差し戻し | `sprint-state.py gate <状態> "関門 N" --what <要約> --by user --outcome rejected`。続きは流さない |
+| 差し戻し | `sprint-state.py gate <状態> "関門 N" --what <要約> --by user --outcome rejected`。続きは流さない。差し戻しは状態ファイルでなく差し戻しの記録（`gate-rejections.jsonl`）へ 1 行残る。状態ファイルの無い進め方の打ち方は [approval-request.md](approval-request.md) の「答えを記録する」 |
 
 **判定と食い違う答えは覆しとして残る。** 「従う」で自動に通った後の差し戻しは `override_reject`、「従わない」「判定できない」で
 止まった後の承認は `override_pass` になる（[project-mvv.md](project-mvv.md) の「改訂の兆候」）。`handoff` で止まった後は

@@ -257,10 +257,17 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | レビューの文脈ファイル | — | `pr-review-steps.py collect` が書く、レビューの対象・差分の在りか・未解決のスレッド（位置と最初のコメントの本文）・指摘ファイルの書き方をまとめたファイル。外部 AI へのプロンプトはこれに観点と委譲の決まりを足して組む | — | — | `docs/specifications/pr-review-steps-script.md` |
 | 仕様適合 | — | レビューの第 1 段。受け入れ条件・不変条件・対象範囲・テストが仕様を表すかを見る。満たさない指摘は指摘ファイルで段 `spec` を持つ | — | — | `docs/specifications/pr-review-steps-script.md` |
 | 設計との突き合わせ | — | 完了判定で、設計に名前の出るテスト・既存の確定仕様と変更履歴・設計の決定を実装と照らし、食い違いを残すこと。確認 (a)(b)(c) の 3 つからなる | — | — | `docs/specifications/quality-gates-design-match.md` |
+| 独立に求めた値 | — | 段階 4 のうち実データに対する結合確認で動かすコードを通さずに、設計・要求の段階で実データについて求めた件数・金額・行数などの値。出力から逆算した値は当たらない | — | — | `plugins/ndf/skills/quality-gates/references/definition-of-done.md` |
+| 独立に求めた値との突き合わせ | — | standard の完了判定で、段階 4 のうち実データに対する結合確認の出力を独立に求めた値と比べ、出所・期待値・出力の値・一致したかを証跡に残すこと。値が無ければ「突き合わせる値が無い」と書き、実データに対する結合確認が無ければ「対象が無い」と書く。フィクスチャで回す結合テストの出力は比べない。設計との突き合わせ (a)(b)(c) には含めない | — | — | `plugins/ndf/skills/quality-gates/references/definition-of-done.md` |
 | 設計に名前の出るテスト | — | 設計文書の「決定の記録」「テスト設計」「構成要素」に、バッククォートで囲んで書かれたテストファイルのパス・<パス>::<名前>・「テスト設計」の test で始まる識別子 | — | — | `docs/specifications/quality-gates-design-match.md` |
 | 既存の確定仕様 | — | 比べるベースブランチとの merge-base の時点で確定仕様の置き場にあった文書。同じ差分で足した確定仕様は含まない | — | — | `docs/specifications/quality-gates-design-match.md` |
 | 設計の決定 | — | 設計文書の「決定の記録」の 1 件（### 決定 N）。judge のステップが返す「決定」とは別の語 | — | — | `docs/specifications/quality-gates-design-match.md` |
 | 設計と違う点 | — | 実装 PR の本文の節。設計の決定・設計に名前の出るテスト・既存の確定仕様・受け入れ条件と実装の違いを、箇所・違い・理由の行で並べる | — | — | `docs/specifications/quality-gates-design-match.md` |
+| 受け入れ条件の番号 | — | 課題の本文の `## 受け入れ条件` の節で、コードブロックの外にある行頭のチェックボックスの行を上から数えた順（1 から）。リリース後テストの表の `受け入れ条件` の列は、セルの頭に `<番号>.` で書く | — | — | — |
+| 受け入れ条件の印 | — | 受け入れ条件の番号に合格の行がそろった課題を閉じるとき、sprint-close.py がその行のチェックボックスへ付ける `[x]` | — | — | — |
+| 起票者の推定 | — | 課題の題・本文に、利用者の指示の原文に無く起票者（課題を書いた AI）が文書・コード・経緯から推して足した条件。承認ゲート 1 で利用者が確かめるまで、利用者の決定として扱わない | — | — | — |
+| 承認ゲートの差し戻し | — | 承認ゲートで利用者が承認せず、対象を直すよう戻したこと。MVV 判定の有無を問わず 1 回を 1 件と数える。MVV 判定との食い違いである覆しとは別の数 | — | — | — |
+| 差し戻しの記録 | — | 承認ゲートの差し戻しを 1 回 1 行で追記する JSONL（NDF_MVV_STATE_DIR の gate-rejections.jsonl）。pace と状態ファイルの有無によらず唯一の置き場で、覆しの記録とは別のファイル | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 
@@ -461,9 +468,9 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 同期の控え | — | 前の同期で両側へ書いた共有する設定の部分の写しと、その時点のアカウント側の userID（アカウントの設定ディレクトリの .ndf-shared-base.json） | — | — | — |
 | 更新の排他 | — | Claude Code がトークンを更新するときに設定ディレクトリの中に作る排他（.oauth_refresh.lock のディレクトリ） | — | — | — |
 | 認証の失敗の観測 | — | 子の claude の応答が認証の失敗で終わったことの記録（account.json の auth_failed）。後の使用量の取得が成功するか 1 時間で解ける | — | — | — |
-| 条件の Skill | — | `/goal` の条件の先頭の語が `/<プラグイン>:<Skill>` の形で名指しする Skill（例: `/ndf:development-workflow`） | — | — | — |
-| 承認待ちの文 | — | `AskUserQuestion` を呼ばずに、応答の本文で利用者の承認・判断を待つと書いた文。判定は `lib/wait_notice.py` の `classify_reply_wait` で、回答待ちか承認待ちに当たる文を指す。待ち通知の `classify_text` より狭く、操作の案内（再起動・インストールなど）は待ちに数えない | — | — | — |
-| 承認待ちの差し戻し | — | ラッパーの直接の子の応答が承認待ちの文で終わったとき、Stop hook が Stop を 1 度止め、`AskUserQuestion` で出し直すよう伝えること | — | — | — |
+| 条件の Skill | — | `/goal` の条件の先頭の語が `/<プラグイン>:<Skill>` の形で名指しする Skill（例: `/ndf:development-workflow`） | — | — | `docs/specifications/ndf-relay-goal-skill-and-prose-wait.md` |
+| 承認待ちの文 | — | `AskUserQuestion` を呼ばずに、応答の本文で利用者の承認・判断を待つと書いた文。判定は `lib/wait_notice.py` の `classify_reply_wait` で、回答待ちか承認待ちに当たる文を指す。待ち通知の `classify_text` より狭く、操作の案内（再起動・インストールなど）は待ちに数えない | — | — | `docs/specifications/ndf-relay-goal-skill-and-prose-wait.md` |
+| 承認待ちの差し戻し | — | ラッパーの直接の子の応答が承認待ちの文で終わったとき、Stop hook が Stop を 1 度止め、`AskUserQuestion` で出し直すよう伝えること | — | — | `docs/specifications/ndf-relay-goal-skill-and-prose-wait.md` |
 
 ## NDF のリリース（`ndf-release`）
 
@@ -485,11 +492,14 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | 比べた先端 | — | 本番の配布が承認したコミットと比べた時点の、ベースブランチの先端のコミットの SHA。本番チャネルへマージしてよいのはこのコミットだけである | — | — | `docs/specifications/ndf-release-approved-commit.md` |
 | 承認の外のコミット | — | 承認したコミットから比べた先端までに入ったコミットのうち、この版の配布の PR のものでないもの。あれば本番の配布は承認ゲートで止まる | — | — | `docs/specifications/ndf-release-approved-commit.md` |
 | 承認の記録 | — | 承認資料の欄の 1 つ。ゲート 2 を承認したときの承認したコミットの SHA と、承認した者・時刻を持つ。承認資料を書き直すと消え、承認し直すまで本番の配布は通らない | — | — | `docs/specifications/ndf-release-approved-commit.md` |
-| 更新情報の節 | — | plugin の README の `## 更新情報` の節。版を名乗らず、CHANGELOG.md の版の節を参照する固定の案内だけを持つ。配布の手順（bump・changelog・notes）は書かない | — | — | — |
-| 版の節 | — | CHANGELOG.md の `## [<plugin> <基底の版>]` の見出しから次の `## ` までの節。その版の利用者向けの変化と移行の手順の全件の正本 | — | — | — |
-| 子の箇条 | — | PR 本文の箇条書きで、前の項目より字下げした箇条。親の項目の一部として読む | — | — | — |
-| リリース後テストの記録 | — | release-verification が Pull Request へ残す、見出し `## リリース後テスト` から `合否:` までのブロック。`対象の版:` の行と課題ごとの表を持つ | — | — | — |
-| 版数を上げない配布 | — | 版数を変えず、既定ブランチへのマージかコミットの反映で本番へ届ける配布 | — | — | — |
+| 更新情報の節 | — | plugin の README の `## 更新情報` の節。版を名乗らず、CHANGELOG.md の版の節を参照する固定の案内だけを持つ。配布の手順（bump・changelog・notes）は書かない | — | — | `docs/specifications/ndf-release-readme-update-info.md` |
+| 版の節 | — | CHANGELOG.md の `## [<plugin> <基底の版>]` の見出しから次の `## ` までの節。その版の利用者向けの変化と移行の手順の全件の正本 | — | — | `docs/specifications/ndf-release-readme-update-info.md` |
+| 子の箇条 | — | PR 本文の箇条書きで、前の項目より字下げした箇条。親の項目の一部として読む | — | — | `docs/specifications/ndf-release-readme-update-info.md` |
+| リリース後テストの記録 | — | release-verification が Pull Request へ残す、見出し `## リリース後テスト` から `合否:` までのブロック。`対象の版:` の行と課題ごとの表を持つ | — | — | `docs/specifications/ndf-production-release-record.md` |
+| 版数を上げない配布 | — | 版数を変えず、既定ブランチへのマージかコミットの反映で本番へ届ける配布 | — | — | `docs/specifications/ndf-production-release-record.md` |
+| 範囲の PR | — | 直前の正式版のタグから承認したコミットまでに、ベースブランチへ merge commit か squash merge で入った PR。版上げの PR と、PR でない番号（squash の件名の `(#N)` が課題を指すもの）は含まない | — | — | — |
+| 版上げの PR | — | head のブランチが `release/` で始まる PR。版数と CHANGELOG だけを変え、中身の変更を持たない | — | — | — |
+| 合格の行 | — | リリース後テストの表で、`結果` の列が `合格` で始まる行 | — | — | — |
 
 ## NDF の指示書チェック（`ndf-instructions`）
 
@@ -523,7 +533,7 @@ backlog-refinement と out-of-scope が課題を分類し、起票するとき�
 | 再検討条件 | — | 「やらない」で閉じた課題を再び考える条件 | 再燃の条件 | — | `plugins/ndf/skills/backlog-refinement/SKILL.md` |
 | 起票先 | — | issue-file.py create が課題を作るリポジトリ | — | — | `plugins/ndf/skills/out-of-scope/references/issue-target.md` |
 | 由来 | — | 範囲外の課題を見つけた元。PR #<番号> か issue #<番号> の形で書く。Pull Request がまだ無ければ起点の issue | — | — | `plugins/ndf/skills/out-of-scope/SKILL.md` |
-| 本文の骨格 | — | 範囲外の課題の本文が持つ 5 項目の見出し（何を見つけたか・どこで見つけたか・なぜこの変更の範囲外なのか・直さないと何が起きるか・由来） | — | — | `docs/specifications/out-of-scope-issue-file.md` |
+| 本文の骨格 | — | 範囲外の課題の本文が持つ 6 項目の見出し（何を見つけたか・どこで見つけたか・なぜこの変更の範囲外なのか・直さないと何が起きるか・起票者の推定・由来） | — | — | `docs/specifications/out-of-scope-issue-file.md` |
 | 提示の要約値 | — | 承認資料に載せた内容から作る sha256。issue-file.py の create では起票先・題・本文・ラベル、note では打つ先・番号・1 行から作り、同意の後の --approved に渡して、示した内容と打つ内容が同じことを確かめる | — | — | `docs/specifications/out-of-scope-issue-file.md` |
 | 上流リポジトリ | — | NDF の Skill・エージェント・hook の実体を持つリポジトリ | 配布元のリポジトリ | — | `plugins/ndf/skills/out-of-scope/references/issue-target.md` |
 | 開発対象リポジトリ | — | NDF を使って開発している側のリポジトリ。gh repo view が返すもの | 開発対象のリポジトリ | — | `plugins/ndf/skills/out-of-scope/references/issue-target.md` |

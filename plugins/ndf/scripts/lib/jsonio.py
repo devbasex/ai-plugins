@@ -6,6 +6,11 @@
     jsonio.read(path)                              # 無い・壊れた・形が違う → JsonReadError
     jsonio.read(path, missing=None)                # 無ければ None。壊れていれば JsonReadError
     jsonio.read(path, missing={}, broken={}, want=dict)  # どれでも {}
+
+JSONL（1 行 1 オブジェクトの追記の記録）は `read_jsonl` と `append_jsonl` で読み書きする。
+
+    jsonio.read_jsonl(path, missing=[])                          # 壊れた行があれば JsonReadError
+    jsonio.read_jsonl(path, missing=[], skip_broken=True)        # 壊れた行を飛ばす
 """
 
 from __future__ import annotations
@@ -61,3 +66,45 @@ def write_atomic(path: pathlib.Path | str, data: Any, indent: int | None = 2) ->
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
+
+
+def read_jsonl(path: pathlib.Path | str, *, missing: Any = RAISE, broken: Any = RAISE, skip_broken: bool = False) -> Any:
+    """`path` の JSONL を辞書の list で読む。
+
+    JSON でない行とオブジェクトでない行は壊れた行である。`skip_broken` なら飛ばし、そうでなければ
+    ファイルの読めないときと同じく `broken` の扱い（既定は `JsonReadError`）にする。空行は数えない。
+    """
+    path = pathlib.Path(path)
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        if missing is RAISE:
+            raise JsonReadError("missing", path) from None
+        return missing
+    except (OSError, ValueError) as e:
+        if broken is RAISE:
+            raise JsonReadError("broken", path, str(e)) from None
+        return broken
+    rows = []
+    for n, ln in enumerate(lines, 1):
+        if not ln.strip():
+            continue
+        try:
+            d = json.loads(ln)
+        except ValueError:
+            d = None
+        if isinstance(d, dict):
+            rows.append(d)
+        elif not skip_broken:
+            if broken is RAISE:
+                raise JsonReadError("broken", path, f"{n} 行目がオブジェクトの JSON でない")
+            return broken
+    return rows
+
+
+def append_jsonl(path: pathlib.Path | str, row: dict) -> None:
+    """JSONL の末尾へ 1 行足す。ディレクトリが無ければ作る。既存の行は書き換えない。"""
+    path = pathlib.Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(row, ensure_ascii=False) + "\n")

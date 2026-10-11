@@ -471,6 +471,18 @@ def test_heading_must_match_a_whole_line_outside_code_blocks():
     assert new.startswith(body.rstrip("\n")) and new.count("## 進行\n") == 2
 
 
+def test_heading_skips_tilde_mixed_unclosed_and_crlf_fences():
+    """現状固定（I-003）: `~~~` も囲み、違う種類の囲みは閉じず、閉じない囲みは末尾まで続き、CRLF でも同じ。"""
+    tilde = "## 進行\n\n~~~\n## 関連\n~~~\n\na\n\n## 関連\n\nb\n"
+    mixed = "## 進行\n\n```\n~~~\n## 関連\n```\n\na\n\n## 関連\n\nb\n"
+    unclosed = "## 進行\n\n```\n## 関連\n\nb\n"
+    crlf = "## 進行\r\n\r\n~~~\r\n## 関連\r\n~~~\r\na\r\n## 関連\r\nb\r\n"
+    assert gp.get_section(tilde, "## 進行") == "~~~\n## 関連\n~~~\n\na"
+    assert gp.get_section(mixed, "## 進行") == "```\n~~~\n## 関連\n```\n\na"
+    assert gp.get_section(unclosed, "## 進行") == "```\n## 関連\n\nb"
+    assert gp.get_section(crlf, "## 進行") == "~~~\n## 関連\n~~~\na"
+
+
 def test_subheadings_stay_inside_the_section():
     body = "## 進行\n\n### 細目\n\na\n\n## 関連\n\nb\n"
     assert gp.get_section(body, "## 進行") == "### 細目\n\na"

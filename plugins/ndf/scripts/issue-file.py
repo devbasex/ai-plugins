@@ -65,7 +65,7 @@ REPO_RE = re.compile(rf"^{_REPO_FORM}$")
 ORIGIN_RE = re.compile(r"^(PR|issue) #[1-9][0-9]*$")
 COUNTERPART_RE = re.compile(rf"^(?P<repo>{_REPO_FORM})#(?P<number>[1-9][0-9]*)$")
 GITHUB_URL_RE = re.compile(r"github\.com[:/]")
-SKELETON = ("何を見つけたか", "どこで見つけたか", "なぜこの変更の範囲外なのか", "直さないと何が起きるか", "由来")
+SKELETON = ("何を見つけたか", "どこで見つけたか", "なぜこの変更の範囲外なのか", "直さないと何が起きるか", "起票者の推定", "由来")
 ORIGIN_HEADING = "## 由来"
 # 取得元の clone の置き場所（HOME からの相対）。Claude Code と Codex の順
 MARKETPLACE_DIRS = (".claude/plugins/marketplaces", ".codex/.tmp/marketplaces")
@@ -349,7 +349,7 @@ def assemble(body: str, origin: str, counterpart: str | None = None) -> str:
 
 
 def skeleton_gaps(body: str) -> list[dict]:
-    """骨格の 5 つの見出しのうち、無いもの・中身が空のもの。囲みの中の `#` は見出しに数えない。"""
+    """骨格の 6 つの見出しのうち、無いもの・中身が空のもの。囲みの中の `#` は見出しに数えない。"""
     gaps = []
     for name in SKELETON:
         content = gh_sections.get_section(body, f"## {name}")

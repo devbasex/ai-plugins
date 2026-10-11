@@ -200,6 +200,7 @@ def test_squash_merged_prs_are_counted_and_recorded_check_prs_are_not(repo, env)
     append_event(env, repo, {"kind": "check", "at": iso(5), "id": "m-1", "from": "", "to": "", "result": "failed", "pr": 30})
     code, out, _ = call(repo, env, "eval", "--review")
     assert code == 0 and out["metrics"]["prs"] == 2
+    assert not any("p30:" in x for c in gh_calls(env) for x in c)  # 記録で外した番号は GitHub へ問わない（#1274 の I8）
     _, out, _ = call(repo, env, "eval")
     assert out["metrics"]["score"] == 3
 

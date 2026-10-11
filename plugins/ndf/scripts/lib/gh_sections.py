@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from typing import NamedTuple
 
 SECTION_END = "<!-- ndf:section-end -->"
@@ -27,9 +28,8 @@ def _lines(body: str) -> list[str]:
     return body.replace("\r\n", "\n").split("\n")
 
 
-def _heading_lines(lines: list[str]) -> list[tuple[int, int]]:
-    """コードブロックの外にある見出しの `(行, 段)`。"""
-    out: list[tuple[int, int]] = []
+def unfenced_lines(lines: list[str]) -> Iterator[tuple[int, str]]:
+    """コードブロックの外にある `(行番号, 行)`。囲みの行そのものも返さない。"""
     fence = None
     for i, line in enumerate(lines):
         m = _FENCE.match(line)
@@ -37,9 +37,16 @@ def _heading_lines(lines: list[str]) -> list[tuple[int, int]]:
             fence = None if fence == m.group(1) else (fence or m.group(1))
             continue
         if fence is None:
-            h = _HEADING.match(line)
-            if h:
-                out.append((i, len(h.group(1))))
+            yield i, line
+
+
+def _heading_lines(lines: list[str]) -> list[tuple[int, int]]:
+    """コードブロックの外にある見出しの `(行, 段)`。"""
+    out: list[tuple[int, int]] = []
+    for i, line in unfenced_lines(lines):
+        h = _HEADING.match(line)
+        if h:
+            out.append((i, len(h.group(1))))
     return out
 
 
@@ -66,6 +73,21 @@ def get_section(body: str, heading: str) -> str | None:
     if span is None:
         return None
     return "\n".join(lines[span.content : span.end]).strip("\n")
+
+
+def section_bounds(body: str, heading: str) -> tuple[int, int] | None:
+    """節の中身（見出しの次の行から節の終わりまで）を、元の本文の文字の位置 `(始め, 終わり)` で返す。
+
+    改行（`\\r\\n`）を正規化しない。節の外を 1 文字も変えずに中身だけを書き換える側が使う（#1683）。"""
+    raw = body.split("\n")
+    span = _find(_lines(body), heading)
+    if span is None:
+        return None
+    starts = [0]
+    for line in raw:
+        starts.append(starts[-1] + len(line) + 1)
+    at = lambda i: min(starts[i], len(body))  # noqa: E731
+    return at(span.content), at(span.end)
 
 
 def _section_block(heading: str, content: str) -> list[str]:

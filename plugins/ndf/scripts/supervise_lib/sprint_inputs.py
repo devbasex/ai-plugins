@@ -11,11 +11,12 @@ import json
 from pathlib import Path
 from typing import Callable, NamedTuple
 
+import acceptance
 import gh_rest
 import gh_sections
 from step_result import result
 
-HEADING = "## 受け入れ条件"
+HEADING = acceptance.HEADING  # 見出しの正本は lib/acceptance.py（#1683）
 NO_SECTION = "受け入れ条件の節が無い"
 EMPTY_SECTION = "受け入れ条件の節が空"
 UNREADABLE = "本文を取れない"

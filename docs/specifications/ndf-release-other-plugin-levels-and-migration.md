@@ -326,6 +326,7 @@ CHANGELOG.md を参照する固定の「`## 更新情報`」の節だけを持�
 - [`requirements-design` の要求の雛形](../../plugins/ndf/skills/requirements-design/references/spec-template.md)
 - [版と配布](../versioning-and-distribution.md)
 - [リリースコマンドの設定と、版ごとのトークン消費の記録](ndf-release-steps-and-token-usage-snapshot.md)
+- [README の更新情報の節と CHANGELOG の版の節](ndf-release-readme-update-info.md) — README に触れない配布の手順と子の箇条の読み方
 - 課題 [#1752](https://github.com/devbasex/ai-plugins/issues/1752)
 - [PR #1757](https://github.com/devbasex/ai-plugins/pull/1757) — 設計
 - [PR #1762](https://github.com/devbasex/ai-plugins/pull/1762) — 実装

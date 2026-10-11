@@ -82,3 +82,9 @@ def issue_bodies(tmp_path, monkeypatch) -> IssueBodies:
 def _isolated_issue_locks(tmp_path_factory, monkeypatch):
     """課題ごとの錠（`gh_parts.issue_lock_target`）を利用者の `~/.claude/ndf/locks` へ作らない。"""
     monkeypatch.setenv("NDF_LOCK_DIR", str(tmp_path_factory.mktemp("locks")))
+
+
+@pytest.fixture(autouse=True)
+def _isolated_mvv_state(tmp_path_factory, monkeypatch):
+    """差し戻し・覆し・MVV 判定の記録（`NDF_MVV_STATE_DIR`）を利用者の `~/.local/state/ndf` へ書かない（#1833）。"""
+    monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path_factory.mktemp("mvv-state")))
