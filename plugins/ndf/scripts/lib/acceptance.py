@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import re
+from itertools import accumulate
 from typing import NamedTuple
 
 import gh_sections
@@ -36,17 +37,12 @@ def _boxes(body: str) -> list[_Box]:
         return []
     start, end = bounds
     out: list[_Box] = []
-    fence = None
-    pos = start
-    for line in body[start:end].split("\n"):
-        m = gh_sections._FENCE.match(line)
-        if m:
-            fence = None if fence == m.group(1) else (fence or m.group(1))
-        elif fence is None:
-            b = _BOX.match(line)
-            if b:
-                out.append(_Box(len(out) + 1, b.group(1) != " ", pos + b.start(1)))
-        pos += len(line) + 1
+    lines = body[start:end].split("\n")
+    pos = list(accumulate((len(line) + 1 for line in lines), initial=start))  # 各行の始まりの位置（囲みの行も数える）
+    for i, line in gh_sections.unfenced_lines(lines):
+        b = _BOX.match(line)
+        if b:
+            out.append(_Box(len(out) + 1, b.group(1) != " ", pos[i] + b.start(1)))
     return out
 
 

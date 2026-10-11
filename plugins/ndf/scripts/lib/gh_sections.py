@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from typing import NamedTuple
 
 SECTION_END = "<!-- ndf:section-end -->"
@@ -27,9 +28,8 @@ def _lines(body: str) -> list[str]:
     return body.replace("\r\n", "\n").split("\n")
 
 
-def _heading_lines(lines: list[str]) -> list[tuple[int, int]]:
-    """コードブロックの外にある見出しの `(行, 段)`。"""
-    out: list[tuple[int, int]] = []
+def unfenced_lines(lines: list[str]) -> Iterator[tuple[int, str]]:
+    """コードブロックの外にある `(行番号, 行)`。囲みの行そのものも返さない。"""
     fence = None
     for i, line in enumerate(lines):
         m = _FENCE.match(line)
@@ -37,9 +37,16 @@ def _heading_lines(lines: list[str]) -> list[tuple[int, int]]:
             fence = None if fence == m.group(1) else (fence or m.group(1))
             continue
         if fence is None:
-            h = _HEADING.match(line)
-            if h:
-                out.append((i, len(h.group(1))))
+            yield i, line
+
+
+def _heading_lines(lines: list[str]) -> list[tuple[int, int]]:
+    """コードブロックの外にある見出しの `(行, 段)`。"""
+    out: list[tuple[int, int]] = []
+    for i, line in unfenced_lines(lines):
+        h = _HEADING.match(line)
+        if h:
+            out.append((i, len(h.group(1))))
     return out
 
 
