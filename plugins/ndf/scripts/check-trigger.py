@@ -231,8 +231,8 @@ def range_base(root: Path) -> str:
     raise Stop("起点のブランチが分からない（.ndf/worktree.json の base_branch）")
 
 
-def release_tag_glob(root: Path) -> str | None:
-    """配布の宣言から正式版のタグの形を決める。package-plugin は `<plugin>--v*`。"""
+def release_tag_prefix(root: Path) -> str | None:
+    """配布の宣言から正式版のタグの接頭辞を決める。package-plugin は `<plugin>--v`（照合の `*` は呼び手が足す）。"""
     rel = optional_decl(root, "supervise.json").get("release") or {}
     if isinstance(rel, dict) and rel.get("form") == "package-plugin" and rel.get("plugin"):
         return f"{rel['plugin']}--v"
@@ -285,7 +285,7 @@ def range_start(root: Path, events: list[dict], since: str | None, review: bool 
     if since:
         sha = git_or_stop(root, "rev-parse", f"{since}^{{commit}}")
         return sha, commit_at(root, sha), f"--since {since}"
-    prefix = release_tag_glob(root)
+    prefix = release_tag_prefix(root)
     if prefix:
         for tag in git_or_stop(root, "tag", "--list", f"{prefix}*", "--sort=-v:refname").split():
             if "-" not in tag[len(prefix) :]:
