@@ -118,8 +118,18 @@ fi
 # 一覧の残りは空欄のまま残し、飛ばした工程がチェックの穴として見えるようにする。
 STAMP=$(date '+%Y-%m-%d %H:%M')
 STAGES=$(wf_stages)
-# モードで通らない工程の行を書かないため、分類の表を写さずに渡す（#1683 の決定 6）
-export WF_MODES WF_STAGE_MATRIX
+# モードで通らない工程（分類が `-`）の行を書かないため、「モード<タブ>工程」を改行区切りで渡す（#1683 の決定 6）。
+# モードは本文から読み直すことがあるため、全モードの分を渡す。分類は wf_stage_class が持つ。
+SKIP_STAGES=''
+IFS=$'\t' read -r -a modes <<<"$WF_MODES"
+for m in "${modes[@]}"; do
+  while IFS= read -r s; do
+    if [ "$(wf_stage_class "$m" "$s")" = "-" ]; then
+      SKIP_STAGES+="$m"$'\t'"$s"$'\n'
+    fi
+  done <<<"$STAGES"
+done
+export SKIP_STAGES
 export STAGES SECTION_HEADING STAGE STAMP MODE PACE WORKTREE PLAN NOTE SCRIPT_DIR
 python3 - "$BODY_FILE" > "$NEW_FILE" <<'PY' || exit 0
 import os
@@ -191,16 +201,9 @@ if worktree:
 if plan:
     meta_parts.append(f"計画: `{plan}`")
 
-# **モードで通らない工程（`WF_STAGE_MATRIX` のその列が `-`）の行は、記録が無ければ書かない（#1683）。**
+# **モードで通らない工程（`SKIP_STAGES` のそのモードの行）は、記録が無ければ書かない（#1683）。**
 # 記録の済んだ行は列に関わらず残す（モードを途中で変えた課題）。モードが `—` か知らない値なら全工程を書く。
-modes = os.environ.get("WF_MODES", "").split("\t")
-skipped: set[str] = set()
-if mode in modes:
-    col = modes.index(mode) + 1
-    for row in os.environ.get("WF_STAGE_MATRIX", "").split("\n"):
-        cells = row.split("\t")
-        if len(cells) > col and cells[col] == "-":
-            skipped.add(cells[0])
+skipped = {s for m, _, s in (row.partition("\t") for row in os.environ.get("SKIP_STAGES", "").split("\n") if row) if m == mode}
 
 lines = [" / ".join(meta_parts), ""]
 for name in stages:
