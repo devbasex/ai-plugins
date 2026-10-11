@@ -14,7 +14,29 @@ DECL_WORDS = {
     "base": "起点のブランチ（--base か .ndf/worktree.json の base_branch）",
     "test": "テストの宣言（.ndf/project.json の test。無ければ --test-cmd か .ndf/supervise.json の test.command。{paths} を範囲に置き換える）",
     "release": "リリースの形（.ndf/supervise.json の release.form。雛形のある形: package-plugin）",
+    "impl_timeout": "実装の上限（--impl-timeout か .ndf/supervise.json の impl_timeout）",
+    "refactor_budget_minutes": "構造改善の想定最大時間（--refactor-budget-minutes か .ndf/supervise.json の refactor_budget_minutes）",
 }
+# 任意の設定（--help の「任意の設定」に出す。無くてもプランを書ける）
+OPTIONAL_DECLS = {
+    "impl": ("impl_timeout",),
+    "check": ("refactor_budget_minutes",),
+    "sprint": ("release", "impl_timeout", "refactor_budget_minutes"),
+    "close": ("release", "refactor_budget_minutes"),
+}
+
+
+def positive_int(text: str) -> int:
+    """1 以上の整数だけを受ける argparse の型。"""
+    try:
+        value = int(text)
+    except ValueError:
+        value = 0
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"1 以上の整数にする: {text!r}")
+    return value
+
+
 NEW_KINDS = {
     "impl": (
         "1 課題を実装するプラン",
@@ -135,6 +157,20 @@ NEW_ARGS = [
         {"nargs": "+", "default": [], "metavar": "PATH", "help": "構造改善の範囲に足すパス（PR の差分のファイルとテストの置き場所に足す）"},
         "check sprint",
     ),
+    (
+        "--impl-timeout",
+        {"type": positive_int, "metavar": "SECONDS", "help": "実装のステップの上限（秒）。既定は .ndf/supervise.json の impl_timeout"},
+        "impl sprint",
+    ),
+    (
+        "--refactor-budget-minutes",
+        {
+            "type": positive_int,
+            "metavar": "MINUTES",
+            "help": "構造改善の想定最大時間（分。cross-refactoring の --budget-minutes）。既定は .ndf/supervise.json の refactor_budget_minutes",
+        },
+        "check sprint close",
+    ),
     ("--title", {"help": "Pull Request の題名"}, "impl fix"),
     ("--summary", {"help": "Pull Request 本文の要約"}, "impl fix"),
     ("--prompt", {"help": "実装の指示文"}, "impl"),
@@ -251,13 +287,7 @@ def add_new_parsers(sub, epilog: str) -> None:
             kind,
             help=short,
             description=f"{short}。\n\n{steps}",
-            epilog=f"必須の引数: {NEW_REQUIRED[kind]}。\n"
-            + DECL_HELP.format(needs=needs)
-            + (
-                "。\n任意の設定: " + DECL_WORDS["release"] + "（無ければ .ndf/project.json の delivery からリリースの経路を導く）"
-                if kind in ("sprint", "close")
-                else ""
-            ),
+            epilog=f"必須の引数: {NEW_REQUIRED[kind]}。\n" + DECL_HELP.format(needs=needs) + optional_help(kind),
             formatter_class=argparse.RawDescriptionHelpFormatter,
         )
         for name, kw, allowed in NEW_ARGS:
@@ -265,6 +295,15 @@ def add_new_parsers(sub, epilog: str) -> None:
                 helps = kw.get("help")
                 extra = {"required": False} if (name, kind) == ("--worktree", "fix") else {}  # --branch でもよい
                 k.add_argument(name, **{**kw, **extra, "help": helps.get(kind, helps["*"]) if isinstance(helps, dict) else helps})
+
+
+def optional_help(kind: str) -> str:
+    """--help の「任意の設定」の 1 文（受ける種別だけ）。"""
+    words = [
+        DECL_WORDS[k] + ("（無ければ .ndf/project.json の delivery からリリースの経路を導く）" if k == "release" else "")
+        for k in OPTIONAL_DECLS.get(kind, ())
+    ]
+    return "。\n任意の設定: " + "・".join(words) if words else ""
 
 
 def fill_new_defaults(a) -> None:
