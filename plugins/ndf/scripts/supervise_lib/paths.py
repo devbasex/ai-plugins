@@ -152,6 +152,9 @@ DECISIONS_SH = HERE / "pr-body-decisions.sh"  # 設計の PR の本文の「決�
 PUSH_DESIGN = f"git push -q && bash {DECISIONS_SH} sync {{pr}}"
 # PR を送ってから Draft を外す。push が落ちたら gh pr ready へ進まず止まる（`;` でつなぐと落ちても ready になる。#1908）
 READY = "sh -c 'git push -q && gh pr ready {pr}'"
+# 設計のプランの Draft 外し。push は直前の push-glossary（on_fail 無し）が済ませ、落ちればここへ来ない。
+# レビューの駆動が落ちた経路では別の場所の直しに追いついていない HEAD を送らない
+DESIGN_READY = "gh pr ready {pr}"
 # PR を作った直後に本文の「決めたこと」を確かめる。pr のステップ（decisions）が作る時点で揃えるため、
 # 揃っていれば書き込まず（本文の編集で CI を再起動しない）、揃わなかったときだけ直す
 SYNC_DESIGN_BODY = f"bash {DECISIONS_SH} sync {{pr}}"

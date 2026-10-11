@@ -12,7 +12,7 @@ from pathlib import Path
 import legacy_names
 
 from supervise_lib.decl import decl_fields
-from supervise_lib.paths import GLOSSARY_PY, MVV_PY, PUSH_DESIGN, READY, SELF, SPEC_COPY_PY, SYNC_DESIGN_BODY, WORKTREE_SETUP
+from supervise_lib.paths import DESIGN_READY, GLOSSARY_PY, MVV_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, SYNC_DESIGN_BODY, WORKTREE_SETUP
 from supervise_lib.procedures import DESIGN_RESULTS, pr_step, requirements_path, sprint_materials, sprint_out, with_record
 from supervise_lib.release_templates import MVV_NOTE, advise_steps, plan_release
 from supervise_lib.templates import plan_check, plan_check_since, plan_impl
@@ -189,8 +189,8 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
             },
             {"id": "push-glossary", "type": "run", "stage": "ドキュメントレビュー", "timeout": 300, "cmd": push, "next": "ready"},
             # pr のステップは設計 PR を Draft で作る（レビュー中に CI と並べる）。関門 1 の前に Draft を外す。
-            # push が落ちたら gh pr ready へ進まず、プランを止める
-            {"id": "ready", "type": "run", "stage": "ドキュメントレビュー", "timeout": 300, "cmd": READY, "next": "gate"},
+            # push は直前の push-glossary が済ませ、落ちればプランが止まってここへ来ない
+            {"id": "ready", "type": "run", "stage": "ドキュメントレビュー", "timeout": 300, "cmd": DESIGN_READY, "next": "gate"},
             {
                 "id": "gate",
                 "type": "judge",

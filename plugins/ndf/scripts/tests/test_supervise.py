@@ -1533,7 +1533,9 @@ def test_new_sprint_writes_waves_in_order(tmp_path):
     assert ds["glossary-recheck"]["on_fail"] == ds["glossary-recheck"]["next"] == "push-glossary"
     # 設計 PR は Draft で作り、関門 1 の前に Draft を外す（#1908）。レビューの駆動が落ちても関門の前に通る
     assert ds["push-glossary"]["next"] == ds["review"]["on_fail"] == "ready" and ds["ready"]["next"] == "gate"
-    assert ds["ready"]["cmd"] == "sh -c 'git push -q && gh pr ready {pr}'" and "on_fail" not in ds["ready"]
+    # push は push-glossary（on_fail 無し）だけが行う。ready は送り直さない（重複の push と、レビューが落ちた経路で
+    # 直しに追いついていない HEAD を送る non-fast-forward を避ける）
+    assert ds["ready"]["cmd"] == "gh pr ready {pr}" and "on_fail" not in ds["ready"] and "on_fail" not in ds["push-glossary"]
     assert [s["id"] for s in design["steps"] if s["type"] == "judge"] == ["gate"]  # 関門の数は変わらない
     assert "glossary-recheck" in ds["gate"]["inputs"]
 

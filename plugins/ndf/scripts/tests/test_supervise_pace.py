@@ -252,13 +252,12 @@ def test_check_of_a_pr_records_every_ending_and_judge_stops_through_abort(tmp_pa
 
 
 @pytest.mark.parametrize("push", [0, 1])
-def test_ready_of_the_design_and_check_plans_stops_when_the_push_fails(tmp_path, push):
-    """設計のプラン（関門 1 の前）と PR を指す検査の ready は、push が落ちたら Draft を外さずに落ちる（#1908）。"""
+def test_ready_of_the_check_plan_stops_when_the_push_fails(tmp_path, push):
+    """PR を指す検査の ready は、push が落ちたら Draft を外さずに落ちる（#1908）。設計のプランの ready は push せず、
+    push-glossary が落ちればプランが止まって ready へ来ない（test_supervise の設計のプランの検査が見る）。"""
     out = tmp_path / "check.json"
     assert cli("new", "check", "--pr", "5", "--worktree", str(tmp_path), "--out", str(out)).returncode == 0
-    _, sprint = new_fast_sprint(tmp_path, sprint_state(tmp_path))
-    design = load(load(sprint / "sprint.json")["ステージ"][0]["plans"][0])
-    cmds = [steps_of(load(out))["ready"]["cmd"], steps_of(design)["ready"]["cmd"]]
+    cmds = [steps_of(load(out))["ready"]["cmd"]]
     bin_dir, log = tmp_path / "fake-bin", tmp_path / "gh.log"
     bin_dir.mkdir()
     for name, code in (("git", push), ("gh", 0)):
