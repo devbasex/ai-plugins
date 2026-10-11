@@ -270,3 +270,16 @@ def test_criteria_skip_fences_indented_boxes_and_strikethrough():
     new = acceptance.check_criteria(body, [1, 2, 9])
     assert new == body.replace("- [ ] 1. 一", "- [x] 1. 一") and acceptance.only_marks(body, new)
     assert not acceptance.only_marks(body, body.replace("- [ ] 外\n## 受", "- [x] 外\n## 受"))
+
+
+def test_criteria_skip_tilde_mixed_unclosed_fences_and_keep_crlf():
+    """現状固定（I-003）: `~~~`・違う種類の囲みの混在・閉じない囲みの中は数えず、CRLF の本文は印の 1 文字だけ変わる。"""
+    mixed = "## 受け入れ条件\n\n~~~\n- [ ] 囲み\n~~~\n- [ ] 1. 一\n```\n~~~\n- [ ] 混在\n```\n- [ ] 2. 二\n"
+    assert acceptance.criteria(mixed) == [acceptance.Criterion(1, False), acceptance.Criterion(2, False)]
+    assert acceptance.check_criteria(mixed, [1, 2]) == mixed.replace("- [ ] 1.", "- [x] 1.").replace("- [ ] 2.", "- [x] 2.")
+    unclosed = "## 受け入れ条件\n\n- [ ] 1. 一\n~~~\n- [ ] 閉じない\n"
+    assert acceptance.criteria(unclosed) == [acceptance.Criterion(1, False)]
+    assert acceptance.check_criteria(unclosed, [1, 2]) == unclosed.replace("- [ ] 1.", "- [x] 1.")
+    crlf = "## 受け入れ条件\r\n\r\n```\r\n- [ ] 囲み\r\n```\r\n- [ ] 1. 一\r\n- [x] 2. 二\r\n## 次\r\n"
+    assert acceptance.criteria(crlf) == [acceptance.Criterion(1, False), acceptance.Criterion(2, True)]
+    assert acceptance.check_criteria(crlf, [1, 2]) == crlf.replace("- [ ] 1.", "- [x] 1.")
