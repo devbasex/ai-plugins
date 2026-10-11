@@ -62,7 +62,7 @@
 | E3 | 指摘の基準の節と観点を状態ファイルへ写した | `init` | `launch-reviewer.sh`（E4）、`fix-steps.py context`（E5） |
 | E4 | レビュー担当がプロファイルの基準で指摘を書いた | `launch-reviewer.sh` が起動したレビュー担当 | 修正担当（E5） |
 | E5 | 修正担当が指摘を直すか、プロファイルの見送りの種類で見送ると振り分けた | 修正担当（`context` の文脈のファイルを読む） | `fix-steps.py finalize`（E6） |
-| E6 | 見送りの返信をプロファイルの返信の雛形から組んで投稿した | `fix-steps.py finalize` | cross-review の `merge-fix`（投稿） |
+| E6 | 見送りの返信をプロファイルの返信の雛形から組んで戻り値ファイルへ書いた（`finalize` は投稿しない） | `fix-steps.py finalize` | 戻り値ファイルを読む側が投稿する: cross-review の中では `state.py merge-fix`、単独で呼んだときは `result_posts.py fix`。投稿の経路は今の 2 つのままで足さない |
 | E7 | 再開のときにプロファイルを読み直し、変わっていれば状態ファイルを書き直した | 再開の `init` | `launch-reviewer.sh`（次のラウンドの E4） |
 
 ### 用語
