@@ -948,6 +948,16 @@ def test_merge_keeps_a_term_added_identically_on_both_sides_once(repo):
     assert "duplicate" not in [it["rule"] for it in out["items"]]
 
 
+def test_merge_stops_when_the_merged_glossary_reuses_a_code_without_writing(repo):
+    conflict(repo, lambda ts: ts + [dict(ADDED_OURS, code="drop_off")], lambda ts: ts + [dict(ADDED_THEIRS, code="drop_off")])
+    before, index_before = snapshot(repo), git(repo, "ls-files", "-u")
+    code, out, err = run(repo, "merge")
+    assert code == 1 and out["status"] == "stopped"
+    assert snapshot(repo) == before and git(repo, "ls-files", "-u") == index_before and merging(repo)
+    assert [it["term"] for it in out["items"] if it["kind"] == "schema"] == ["drop_off"]
+    assert "ERROR: schema: drop_off" in err
+
+
 def test_merge_with_other_conflicts_resolves_glossary_but_does_not_commit(repo):
     conflict(repo, lambda ts: ts + [ADDED_OURS], lambda ts: ts + [ADDED_THEIRS], extra=True)
     code, out, err = run(repo, "merge")
