@@ -3048,7 +3048,7 @@
     {
       "term": "実装の上限",
       "context": "ndf-workflow",
-      "meaning": "プランの impl のステップ（worker の実装）の timeout（秒）。.ndf/supervise.json の impl_timeout か supervise.py new の --impl-timeout で決め、無ければ 3600",
+      "meaning": "プランの impl のステップ（worker の実装）の timeout（秒）。.ndf/supervise.json の impl_timeout か supervise.py new の --impl-timeout で決め、無ければ雛形の既定の値",
       "code": "impl_timeout",
       "source": "",
       "pending_source": "issues/issue-1916-design.md"

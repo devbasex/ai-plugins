@@ -4,11 +4,11 @@
 
 - **何が壊れているか**: `supervise.py new` が書くプランの `impl` の `timeout`（3600 秒）と `refactor` の `timeout`（3600 秒）は固定値で、cross-refactoring の想定最大時間（`--budget-minutes`）も渡せない。conductor はスプリントのたびに jq で値を書き足しており（m1693・m1385 ほか計 9 回）、#1336 ではリファクタリングが 3600 秒ちょうどで exit=124 になり結果を失った（要求の「依頼」）
 - **誰が困るか**: スプリントを回す conductor（毎回の手当て）と、打ち切りで検査をやり直す利用者
-- **直すと何が成り立つか**: 値をプロジェクトの宣言か `new` の引数で 1 度決めれば、書き出すすべてのプランに同じ値が入り、リファクタリングのステップは想定最大時間より長く待つ
+- **直すと何が成り立つか**: 値をプロジェクトの宣言か `new` の引数で 1 度決めれば、書き出すすべてのプランに同じ値が入り、リファクタリングのステップは想定最大時間に 10% の余裕（`with_margin`）を足した秒まで待つ。想定最大時間を渡さないときも、cross-refactoring の既定の予算から同じ式で決まり、固定の秒を持たない
 
 ## 適用範囲
 
-- **働く範囲**: NDF を使うすべてのリポジトリ（`supervise.py new` は配布物）。ai-plugins は自分の `.ndf/supervise.json` に値を書く利用者の 1 つ
+- **働く範囲**: NDF を使うすべてのリポジトリ（`supervise.py new` は配布物）。ai-plugins もこの課題では自分の `.ndf/supervise.json` に値を書かない（決定 7）
 - **プロジェクトごとに違うもの**: 実装の上限と想定最大時間の値。宣言（`.ndf/supervise.json`）か引数で受け、NDF の既定には持たない
 - **当たるモード**: `supervise.py new impl` / `check` / `sprint` / `close` が書くプランを使うすべてのモード（リファクタリングのステップは工程表でリファクタリングを通るモードだけに現れる）
 
@@ -19,6 +19,7 @@
 | conductor が実装のプランへ `timeout` 3600 → 5400 を jq で書き足した記録（m1693・m1385・m744・m815・m653・m1290・m1743・m1847・m1683。#1334） | 実測 | 固定値ではプロジェクトの実装の所要に合わず、毎回の手当てになっている |
 | #1336 のリファクタリングが 3600 秒ちょうどで exit=124（要求の「依頼」の記録） | 実測 | 想定最大時間を延ばしても `timeout` が固定のままでは、run が想定どおりに進んでも打ち切られる |
 | merge・release のステップの `timeout` が `with_margin(上限)` を使う（`plugins/ndf/scripts/supervise_lib/verify_steps.py`） | 既存の形 | 上限のあるステップには余裕を足す形が既にある |
+| 承認ゲート 1 の利用者の指示（2026-10-11）「margin は 10% とし、紛らわしいので固定値は書かない」 | 利用者の指示の原文 | `refactor` の `timeout` は `with_margin`（10%）で想定最大時間から出し、予算を渡さないときも固定の秒を書かない。ai-plugins の宣言に固定値を書かない（決定 3・7・8） |
 
 要求と受け入れ条件は #1916 の本文にある（コピーは `issues/issue-1916-requirements.md`）。この文書は「どう作るか」だけを扱う。
 要求の「リファクタリングの予算」は、用語集の **想定最大時間**（cross-refactoring の `--budget-minutes`）と同じものを指す。この文書では想定最大時間と書く。
@@ -49,9 +50,9 @@
 | --- | --- | --- | --- |
 | I1 | プランの入力 | 値は「`new` の引数 → `.ndf/supervise.json` → 値なし」の順で 1 つに決まる | 起こさない（1 か所で決める。決定 4） |
 | I2 | プランの入力 | 値は 1 以上の整数（JSON の数の整数。文字列・小数・真偽値・0・負は違う） | プランを書かずに終了コード 2 で止まり、違う項目の名前を出す |
-| I3 | プラン | `impl` の `timeout` は、実装の上限があればその値、無ければ 3600 | — |
+| I3 | プラン | `impl` の `timeout` は、実装の上限があればその値、無ければ雛形の今の値（この課題で変えない） | — |
 | I4 | プラン | `refactor` の cmd が `--budget-minutes N` を含むのは想定最大時間があるときだけで、N は想定最大時間に等しい | — |
-| I5 | プラン | `refactor` の `timeout` は想定最大時間（無ければ cross-refactoring の既定 30 分）× 60 より大きい。想定最大時間があれば `with_margin(N × 60)`、無ければ 3600 | — |
+| I5 | プラン | `refactor` の `timeout` は `with_margin(M × 60)` で、M は想定最大時間があればその値、無ければ cross-refactoring の既定の予算（`refactor_lib/vocabulary.py` の `DEFAULT_BUDGET_MINUTES`）。`with_margin` が最低 30 秒を足すため、`timeout` は常に M × 60 より大きい | — |
 | I6 | プラン | `new sprint` / `new close` が書く課題ごとの実装のプランと検査のプランは、同じプランの入力から作られ、I3〜I5 の値がそろう | — |
 
 ### ドメインイベント
@@ -69,7 +70,7 @@
 
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
-| 実装の上限 | プランの `impl` のステップ（worker の実装）の `timeout`（秒）。`.ndf/supervise.json` の `impl_timeout` か `supervise.py new` の `--impl-timeout` で決め、無ければ 3600 | 追加（`ndf-workflow`） |
+| 実装の上限 | プランの `impl` のステップ（worker の実装）の `timeout`（秒）。`.ndf/supervise.json` の `impl_timeout` か `supervise.py new` の `--impl-timeout` で決め、無ければ雛形の既定の値 | 追加（`ndf-workflow`） |
 
 ## 機能一覧
 
@@ -90,12 +91,12 @@
 | 宣言の形（`decl.py` の新しい形 `StepBudgets`） | `.ndf/supervise.json` の `impl_timeout` と `refactor_budget_minutes` を、1 以上の厳密な整数か null（無い）として検査する。違えば項目の名前を含む `DeclError` |
 | 宣言の読み取り（`decl.py` の `apply_decls`） | 引数 → 宣言の順で `a.impl_timeout` と `a.refactor_budget_minutes` を 1 つに決める（I1）。宣言の形は引数の有無にかかわらず検査する |
 | 引き継ぐ値の一覧（`decl.py` の `decl_fields`） | 2 つの値を子のプランの引数へ引き継ぐ一覧に足す（I6） |
-| 実装のプランの雛形（`templates.py` の `plan_impl`） | `impl` の `timeout` を `a.impl_timeout` か 3600 にする（I3） |
-| 検査のステップの雛形（`templates.py` の `_inspect_steps`） | `a.refactor_budget_minutes` があれば cmd に `--budget-minutes N` を足し、`timeout` を `with_margin(N × 60)` にする。無ければ今の cmd と 3600（I4・I5） |
-| ai-plugins の宣言（`.ndf/supervise.json`） | `impl_timeout: 5400` と `refactor_budget_minutes: 60` を書く（決定 7） |
+| 実装のプランの雛形（`templates.py` の `plan_impl`） | `impl` の `timeout` を `a.impl_timeout` か、無ければ今の値にする（I3）。既定の値は今の雛形のまま動かし、固定値を足さない |
+| 検査のステップの雛形（`templates.py` の `_inspect_steps`） | `a.refactor_budget_minutes` があれば cmd に `--budget-minutes N` を足す。`timeout` は `with_margin(M × 60)` にし、M は `a.refactor_budget_minutes` か、無ければ既定の予算の読み取りが返す値（I4・I5）。無いときの cmd は今のまま |
+| 既定の予算の読み取り（`paths.py` の新しい関数） | `DRIVES` が指す cross-refactoring の置き場から `refactor_lib/vocabulary.py` を読み込み、`DEFAULT_BUDGET_MINUTES` を返す（決定 8）。値を写さない |
 | 用語集（`docs/glossary/glossary.json` と `docs/glossary.md`） | 「実装の上限」を足す（この設計の変更に含める） |
 
-変えないもの: スプリントの雛形（`sprint_waves.py` の `plan_sprint_impl`・`plan_sprint_check`・`plan_fast_impl`・`plan_fast_check`）は既に `**decl_fields(a)` で子のプランの引数を組むため、`decl_fields` に足せば引き継がれる。設計の結果のステージ（`design_stage.rewrite`）は `impl` の `prompt` だけを書き換え、`timeout` を残す。`with_margin` は `verify_steps.py` のものを使い、新しく作らない。
+変えないもの: cross-refactoring（`DEFAULT_BUDGET_MINUTES` を読むだけ）、`with_margin` の式と最低 30 秒（`MARGIN_FLOOR`）。スプリントの雛形（`sprint_waves.py` の `plan_sprint_impl`・`plan_sprint_check`・`plan_fast_impl`・`plan_fast_check`）は既に `**decl_fields(a)` で子のプランの引数を組むため、`decl_fields` に足せば引き継がれる。設計の結果のステージ（`design_stage.rewrite`）は `impl` の `prompt` だけを書き換え、`timeout` を残す。`with_margin` は `verify_steps.py` のものを使い、新しく作らない。
 
 ```mermaid
 graph TD
@@ -112,11 +113,14 @@ graph TD
         INSP[検査のステップの雛形]
         SPRINT[スプリントの雛形 変えない]
     end
-    DECL[(ai-plugins の宣言)]
+    DECL[(利用者の .ndf/supervise.json)]
+    DEF[既定の予算の読み取り]
+    VOC[(cross-refactoring の DEFAULT_BUDGET_MINUTES)]
     ARG --> APPLY
     DECL --> SHAPE --> APPLY
     APPLY --> IMPL
     APPLY --> INSP
+    VOC --> DEF --> INSP
     APPLY --> FIELDS --> SPRINT
     SPRINT --> IMPL
     SPRINT --> INSP
@@ -135,7 +139,7 @@ graph LR
     Q --> R[cross-refactoring の駆動]
 ```
 
-外部の系は利用者のリポジトリの宣言だけである。cross-refactoring は同じ配布物の中にあり、この変更では触らない（受け取る `--budget-minutes` の形は今のまま）。
+外部の系は利用者のリポジトリの宣言だけである。cross-refactoring は同じ配布物の中にあり、この変更では触らない（受け取る `--budget-minutes` の形は今のまま。既定の予算の定数は読むだけ）。
 
 ### 配置
 
@@ -148,11 +152,11 @@ plugins/ndf/scripts/
 ├── supervise_lib/
 │   ├── decl.py        # 変える: StepBudgets を新設、apply_decls・decl_fields に 2 項目
 │   ├── new_args.py    # 変える: NEW_ARGS に 2 行、DECL_WORDS に 2 項目、正の整数の型
+│   ├── paths.py       # 変える: 既定の予算の読み取り（cross-refactoring の定数を読む）
 │   ├── plan.py        # 変える: docstring の「宣言」の節に 2 項目の形
 │   └── templates.py   # 変える: plan_impl・_inspect_steps
 └── tests/
     └── test_supervise.py  # 足す: プランの値のテスト（置き場は tdd-cycle で決める）
-.ndf/supervise.json        # 変える: ai-plugins の値
 docs/glossary/glossary.json, docs/glossary.md  # この設計の変更で足す
 ```
 
@@ -183,7 +187,7 @@ classDiagram
 | 受ける種別 | `impl` `sprint` | `check` `sprint` `close` |
 | 入力 | 1 以上の整数（秒）。任意 | 1 以上の整数（分）。任意 |
 | 出力 | `impl` の `timeout` がその値になる | `refactor` の cmd に `--budget-minutes N`、`timeout` が `with_margin(N × 60)` |
-| 渡さないとき | 宣言の `impl_timeout`、それも無ければ 3600 | 宣言の `refactor_budget_minutes`、それも無ければ cmd に足さず `timeout` 3600 |
+| 渡さないとき | 宣言の `impl_timeout`、それも無ければ雛形の今の値 | 宣言の `refactor_budget_minutes`、それも無ければ cmd に足さず、`timeout` は `with_margin(既定の予算 × 60)` |
 | 失敗の形 | 整数でない・0 以下: argparse の誤り（終了コード 2、`argument --impl-timeout: …`）。プランを書かない | 同左（`argument --refactor-budget-minutes: …`） |
 | 互換性 | 任意の引数の追加。既存の引数の意味は変えない | 同左 |
 
@@ -191,17 +195,19 @@ classDiagram
 
 ### `.ndf/supervise.json` の項目（宣言の約束）
 
-```json
+```text
 {
-  "impl_timeout": 5400,
-  "refactor_budget_minutes": 60
+  "impl_timeout": <1 以上の整数・秒>,
+  "refactor_budget_minutes": <1 以上の整数・分>
 }
 ```
 
+値はプロジェクトの実測から利用者が決める。NDF は例の値を持たない。
+
 | 項目 | 型 | 無い・null | 違うとき |
 | --- | --- | --- | --- |
-| `impl_timeout` | 1 以上の整数（秒） | 値なし（3600） | `DeclError`（`supervise.json: impl_timeout: …`）→ `ap.error` で終了コード 2。プランを書かない |
-| `refactor_budget_minutes` | 1 以上の整数（分） | 値なし（`--budget-minutes` を足さない） | 同左（`supervise.json: refactor_budget_minutes: …`） |
+| `impl_timeout` | 1 以上の整数（秒） | 値なし（雛形の今の値） | `DeclError`（`supervise.json: impl_timeout: …`）→ `ap.error` で終了コード 2。プランを書かない |
+| `refactor_budget_minutes` | 1 以上の整数（分） | 値なし（`--budget-minutes` を足さず、`timeout` は既定の予算から出す） | 同左（`supervise.json: refactor_budget_minutes: …`） |
 
 - 宣言の形は、`supervise.py new` のすべての種別で、引数の有無にかかわらず検査する（今の `test` の形の検査と同じ時点）
 - 形の説明は `plan.py` の docstring の「宣言」の節に 1 か所だけ置き、`new_args.py` の `DECL_WORDS` は値の出どころの 1 行を受ける種別の `new <種別> --help` の「任意の設定」に出す（決定 6）
@@ -232,7 +238,7 @@ sequenceDiagram
     T-->>C: プランのファイル（impl・refactor の timeout と cmd）
 ```
 
-ai-plugins の宣言は「supervise.json の 2 項目」として宣言の形へ入る値で、参加者には置かない。用語集はプランの組み立てに乗らないため図に含めない。
+利用者の宣言は「supervise.json の 2 項目」として宣言の形へ入る値で、参加者には置かない。既定の予算の読み取りは雛形の中の呼び出しで、宣言の経路に乗らないため参加者に置かない。用語集はプランの組み立てに乗らないため図に含めない。
 
 順序の前提: 引数の形の検査（argparse）→ 宣言の形の検査 → 値の決定 → プランの書き出し。プランのファイルは最後に書くため、どちらの検査で止まってもファイルは残らない（`templates.cmd_new` と `sprint.cmd_new_sprint` は `apply_decls` の後に呼ばれる）。
 
@@ -241,7 +247,7 @@ ai-plugins の宣言は「supervise.json の 2 項目」として宣言の形へ
 | 大項目 | 要求の条件 | 実現方式 | 確かめ方 |
 | --- | --- | --- | --- |
 | 運用・保守性 | 宣言の新しい項目は、宣言の書き方を持つ文書に 1 か所だけ説明を置き、写さずに指す（Value 7） | `.ndf/supervise.json` の形の正本は `plan.py` の docstring の「宣言」の節のため、そこへ 2 項目を足す。`new <種別> --help`（`DECL_WORDS`）は値の出どころの 1 行だけを出す。引数の help は「既定は .ndf/supervise.json の <項目>」とだけ書いて指す | `supervise.py new sprint --help` と `new check --help` を打ち、「任意の設定」に 2 項目が出ること。`supervise_lib.plan.__doc__` に 2 項目名が含まれること |
-| 移行性 | 既存の `.ndf/` の宣言はそのまま読める（新しい項目は任意）。宣言を足さない利用者のプランは変わらない | 2 項目とも任意で、無い・null は値なしとして扱う。値なしの雛形は今の固定値と cmd を書く | 宣言も引数も無いときのプランの `impl` / `refactor` を、変更前の値と比べるテスト（テスト設計の AC8） |
+| 移行性 | 既存の `.ndf/` の宣言はそのまま読める（新しい項目は任意）。宣言を足さない利用者のプランは、`refactor` の `timeout` だけが変わる | 2 項目とも任意で、無い・null は値なしとして扱う。値なしの雛形は `impl` の `timeout` と `refactor` の cmd を今のまま書き、`refactor` の `timeout` だけを `with_margin(既定の予算 × 60)` にする | 宣言も引数も無いときのプランの `impl` の `timeout` と `refactor` の cmd を変更前の値と比べ、`refactor` の `timeout` を既定の予算の定数から出した値と比べるテスト（テスト設計の AC3・AC8） |
 
 ## 決定の記録
 
@@ -261,13 +267,17 @@ ai-plugins の宣言は「supervise.json の 2 項目」として宣言の形へ
 
 根拠: Value 8（MVV 版 2）
 
-### 決定 3: 想定どおりに終わる run を打ち切らないため、`refactor` の `timeout` を想定最大時間があれば `with_margin(N × 60)`、無ければ 3600 にする
+### 決定 3: 予算と打ち切りの秒を 1 つの式で結ぶため、`refactor` の `timeout` を常に `with_margin(M × 60)` にし、M は想定最大時間、無ければ cross-refactoring の既定の予算とする
 
-想定最大時間を渡したときは、merge・release のステップと同じ `with_margin` で余裕を足す（60 分 → 3960）。ai-plugins の宣言（決定 7）では、検査のプランの `refactor` の `timeout` が今の手当ての 4200 秒から 3960 秒へ 240 秒縮む。想定最大時間は目安の上限で、cross-refactoring は実行中の CLI を止めないため、予算を超えて走った run は 3960 秒で打ち切られうる（#1336 の exit=124 と同じ形）。予算を超えた秒の実測は無く、3960 で足りるとは示せていないため、未確認のまま残すことに置き、リリース後テストで打ち切りが出ないかを見る。渡さないときは今の 3600 を保つ。cross-refactoring の既定 30 分（1800 秒）より 1800 秒長く、今通っている run の振る舞いを変えない（要求の前提 2・3。採否は承認ゲート 1 で利用者が決める）。
+想定最大時間を渡したときは、merge・release のステップと同じ `with_margin`（10%、最低 30 秒）で余裕を足す。渡さないときも固定の秒を書かず、cross-refactoring が実際に使う既定の予算（`DEFAULT_BUDGET_MINUTES`。読み方は決定 8）に同じ式を掛ける。cmd に `--budget-minutes` を足さないときも cross-refactoring は同じ既定の予算で動くため、`timeout` は実際の予算より常に `with_margin` の分だけ長い。
 
-渡さないときも `with_margin(1800)` = 1980 にそろえる案は採らない。今は 3600 で通っている run が打ち切られうる。渡したときにも 3600 を下限に掛ける案は採らない。短い想定最大時間を渡した側の意図（早く打ち切る）を消す。
+承認ゲート 1 の利用者の指示（2026-10-11「margin は 10% とし、紛らわしいので固定値は書かない」）で変えた。承認の前の設計は、渡さないときに今の固定の秒を保ち、渡したときは下限を掛けない形（要求の旧前提 2・3）だった。固定の秒は予算と結び付かず、どの式から来た値かが読めないため外した。
 
-根拠: Value 1 / Value 3（MVV 版 2）
+予算を渡さないときに今の固定の秒を下限として残す案は採らない（承認の前の形）。予算との関係が読めない固定値が残る。余裕の割合を 10% より大きくする案も採らない。利用者の指示が 10% と決めた。
+
+想定最大時間は目安の上限で、cross-refactoring は予算を超えても実行中の CLI を止めないため、予算を `with_margin` の余裕より長く超えた run は打ち切られる（#1336 の exit=124 と同じ形）。予算を超えた秒の実測は無く、未確認のまま残すことに置く。
+
+根拠: 承認ゲート 1 の利用者の指示（2026-10-11）/ Value 1 / Value 3（MVV 版 2）
 
 ### 決定 4: 値を決める所を 1 つにするため、`apply_decls` が引数と宣言から決め、雛形は `a` だけを読む
 
@@ -295,26 +305,38 @@ ai-plugins の宣言は「supervise.json の 2 項目」として宣言の形へ
 
 根拠: Value 7（MVV 版 2）
 
-### 決定 7: conductor の jq の手当てを無くすため、ai-plugins の `.ndf/supervise.json` に `impl_timeout: 5400` と `refactor_budget_minutes: 60` を書く
+### 決定 7: 根拠の無い固定値をプロジェクトの宣言へ持ち込まないため、ai-plugins の `.ndf/supervise.json` には値を書かない
 
-目的の「手当てを無くす」は、ai-plugins が宣言を持って初めて成り立つ。値は conductor が手当てで使ってきた値（5400 秒・60 分）である。ただし `refactor` の `timeout` は手当ての 4200 秒を写さず、決定 3 の式で `with_margin(3600)` = 3960 秒になる（240 秒の短縮。打ち切りが出ないかは未確認のまま残すことに置く）。`.ndf/` の書き換えは C7 に当たるため、実装の Pull Request に含め、承認ゲート 2 で人が見る。NDF の既定（コード）には書かない（受け入れ条件 8）。
+承認ゲート 1 の利用者の指示（2026-10-11「margin は 10% とし、紛らわしいので固定値は書かない」）で変えた。承認の前の設計は、conductor が手当てで使ってきた実装の上限と想定最大時間の値を ai-plugins の宣言へ書くとしていた。その想定最大時間は cross-refactoring の既定の予算への根拠の無い上乗せで（既定の予算は中にバッファを持つ。#1522）、実装の上限も 1 回の実測を写しただけの固定値だった。ai-plugins の `.ndf/` へ値を書くことは要求の「含まない」に戻す。
 
-宣言を書かず、毎回 `new sprint` の引数で渡す案は採らない。手当ての場所が jq から引数へ移るだけになる。
+この課題が成り立たせるのは、宣言か引数の 1 か所で決められる仕組みまでである。ai-plugins の conductor は、値が要るときは `new` の引数で渡し、宣言に書くかは所要の実測が揃ってから別に決める。
 
-根拠: Value 4 / Value 5 / C7（MVV 版 2）
+承認の前の形（手当ての値を宣言へ書く）は採らない。根拠の無い固定値が利用者の設定に残り、`timeout` がどの式から来た値かが読めなくなる。
+
+根拠: 承認ゲート 1 の利用者の指示（2026-10-11）/ Value 5 / C7（MVV 版 2）
+
+### 決定 8: 既定の予算を 2 か所に持たないため、cross-refactoring の `refactor_lib/vocabulary.py` の `DEFAULT_BUDGET_MINUTES` を読み込んで使う
+
+`paths.py` に、`DRIVES` が指す cross-refactoring の置き場（同じ配布物の `skills/cross-refactoring/scripts/`）から `refactor_lib/vocabulary.py` を読み込み、`DEFAULT_BUDGET_MINUTES` を返す関数を置く。`_inspect_steps` は想定最大時間が無いときだけこれを呼ぶ。cross-refactoring が既定を変えれば、`refactor` の `timeout` も同じ値から追う。
+
+値を `supervise_lib` へ写す案は採らない。既定の予算が 2 か所になり、片方だけが変わると `timeout` が予算と食い違う（利用者の指示の「固定値は書かない」にも反する）。`vocabulary.py` の文を構文として読んで数を取り出す案も採らない。代入の形が変わると読めず、モジュールが持つ値そのものではない。定数を共通層（`plugins/ndf/scripts/lib`）へ移す案も採らない。cross-refactoring の持ち物を動かすことになり、#1916 の範囲を超える。
+
+`vocabulary.py` は読み込むときに `refactoring` の `references/vocabulary.md` を読む。同じ配布物にあり、cross-refactoring の駆動も同じ読み込みをするため、`new check` だけが止まる形は増えない。読めなければ例外のまま止まり、プランを書かない。
+
+根拠: 承認ゲート 1 の利用者の指示（2026-10-11）/ Value 7（MVV 版 2）
 
 ## テスト設計
 
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
-| AC1・I3 | `new impl` / `new sprint` に実装の上限を宣言か引数で渡すと、プランの `impl` の `timeout` がその値。どちらも無ければ 3600 | 雛形が 3600 を固定のまま書く・値を読み捨てる |
-| AC2・I4・I5 | 想定最大時間を宣言か引数（`new check` / `new sprint` / `new close`）で渡すと、`refactor` の cmd に `--budget-minutes N`、`timeout` が `with_margin(N × 60)`（60 → 3960） | cmd に足さない・`timeout` を N × 60 のままにする・3600 のままにする |
-| AC3・I5 | 想定最大時間が無いと、`refactor` の cmd に `--budget-minutes` が無く、`timeout` が 3600 | 既定の 30 分を cmd へ書く・`with_margin(1800)` にする |
+| AC1・I3 | `new impl` / `new sprint` に実装の上限を宣言か引数で渡すと、プランの `impl` の `timeout` がその値。どちらも無ければ変更前のプランと同じ値 | 雛形が既定の値を書いたまま渡した値を読み捨てる |
+| AC2・I4・I5 | 想定最大時間を宣言か引数（`new check` / `new sprint` / `new close`）で渡すと、`refactor` の cmd に `--budget-minutes N`、`timeout` が `with_margin(N × 60)`（期待値はテストの中で `with_margin` から出す） | cmd に足さない・`timeout` を N × 60 のままにする・変更前の固定の値のままにする |
+| AC3・I5・決定 8 | 想定最大時間が無いと、`refactor` の cmd に `--budget-minutes` が無く、`timeout` が `with_margin(DEFAULT_BUDGET_MINUTES × 60)`（期待値は `refactor_lib.vocabulary` の定数と `with_margin` から出す。定数を差し替えると `timeout` も追う） | 既定の予算を cmd へ書く・変更前の固定の値のままにする・既定の予算を数で写す（定数を差し替えても `timeout` が変わらない） |
 | AC4 | 値を既存の `.ndf/supervise.json` に書くとプランに入る（ほかのファイルを足さずに通る） | 読む宣言のファイルを取り違える |
 | AC5・I6 | `new sprint`（normal と `--pace fast`）と `new close` が書く課題ごとの実装のプランの `impl` と、検査のプラン（最終の検査を含む）の `refactor` に同じ値が入る | `decl_fields` から 1 項目を外す |
 | AC6・I1 | 引数と宣言の両方があると、引数の値が入る | 宣言を引数より先に効かせる |
 | AC7・I2 | 0・負・小数・文字列・真偽値を引数か宣言で渡すと、プランのファイルを書かずに 0 以外で終わり、出力に項目名（`--impl-timeout` / `impl_timeout` など）が出る。宣言の誤りは引数があっても止まる | 緩い整数で検査する（`"60"`・`true` が通る）・検査の前にファイルを書く・引数があると宣言を検査しない |
-| AC8 | 宣言も引数も無いときの `new impl` / `new check` / `new sprint` のプランの `impl` / `refactor` の `timeout` と cmd が、変更前と同じ | 既定に 5400 や 60 を書く・値なしでも cmd に足す |
+| AC8 | 宣言も引数も無いときの `new impl` / `new check` / `new sprint` のプランの `impl` の `timeout` と `refactor` の cmd が変更前と同じで、`refactor` の `timeout` だけが AC3 の値 | 既定に実装の上限や予算の固定値を足す・値なしでも cmd に足す |
 | AC9 | 既存のテストが通る（`uv run --frozen --project . --all-extras pytest plugins/ndf/scripts/tests -q -n 4`） | — |
 | 決定 6 | `new sprint --help` と `new check --help` の「任意の設定」に 2 項目が出る（出力に項目名が含まれること。`.md` の文言は照合しない） | `DECL_WORDS` に足さない・受ける種別の epilog に出さない・`plan.py` の「宣言」の節に足さない |
 
@@ -322,14 +344,14 @@ ai-plugins の宣言は「supervise.json の 2 項目」として宣言の形へ
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #1916 | 実装する | — | `plugins/ndf/scripts/supervise_lib/decl.py`、`plugins/ndf/scripts/supervise_lib/new_args.py`、`plugins/ndf/scripts/supervise_lib/plan.py`、`plugins/ndf/scripts/supervise_lib/templates.py`、`plugins/ndf/scripts/tests/`、`.ndf/supervise.json` |
+| #1916 | 実装する | — | `plugins/ndf/scripts/supervise_lib/decl.py`、`plugins/ndf/scripts/supervise_lib/new_args.py`、`plugins/ndf/scripts/supervise_lib/paths.py`、`plugins/ndf/scripts/supervise_lib/plan.py`、`plugins/ndf/scripts/supervise_lib/templates.py`、`plugins/ndf/scripts/tests/` |
 
 ## 未確認のまま残ること
 
 | 項目 | 内容 |
 | --- | --- |
-| 前提 2・3 の採否 | 想定最大時間が無いときに 3600 を保ち、あるときは下限を掛けない（決定 3）。承認ゲート 1 で利用者が決める |
 | 説明の置き場 | 要求の非機能の条件の「宣言の書き方を持つ文書」を `plan.py` の docstring の「宣言」の節と読み、そこへ形を足す（決定 6）。`.md` の文書を新設せず docstring に置き続けてよいかは承認ゲート 1 で利用者が決める |
-| `refactor` の `timeout` の 4200 → 3960 の短縮で打ち切りが出ないか | 今の手当ては `timeout` 4200 秒だが、決定 3 の式では 3960 秒になる。cross-refactoring は予算を超えても実行中の CLI を止めないため、予算を超えた秒が 360 秒を超える run は打ち切られる。超えた秒の実測は無い。次のスプリントのリリース後テストで exit=124 が出ないかを見て、出れば予算か余裕の式を見直す |
-| 5400 秒・60 分が ai-plugins に合うか | conductor の手当ての値を写すだけで、所要の実測から出した値ではない。次のスプリントのリリース後テストで、打ち切り（exit=124）が出ないかを見る |
+| 予算を `with_margin` の余裕より長く超える run があるか | `refactor` の `timeout` は `with_margin(M × 60)` になり（決定 3）、想定最大時間を渡さないプランでは今の固定の値より短くなる。cross-refactoring は予算を超えても実行中の CLI を止めないため、超えた秒が余裕より長い run は打ち切られる。超えた秒の実測は無い。次のスプリントのリリース後テストで exit=124 が出ないかを見て、出れば渡す想定最大時間を見直す（余裕の割合は利用者の指示の 10% のまま） |
+| 実装の上限・想定最大時間の値が ai-plugins に合うか | ai-plugins の宣言には書かない（決定 7）。値が要るかは、所要の実測が揃ってから別に決める |
+| `new check` の時点で `refactor_lib/vocabulary.py` を読み込めるか | 決定 8 の読み込みは、配布物の置き場（`DRIVES` と同じ位置）と、読み込み時の `vocabulary.md` の読み取りに頼る。実装のテストと、リリース後テストの `new sprint` で確かめる |
 | cross-refactoring が `--workflow-step` で `--budget-minutes` を受けて想定最大時間どおりに動くか | conductor の手当て（#1370・m1693・m1385）で渡して動いた記録はあるが、この設計では走らせていない。実装の範囲テストか、リリース後テストで確かめる |
