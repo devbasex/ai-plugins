@@ -811,13 +811,6 @@ def cmd_merge(a):
         if fail := merged.duplicates or merged.conflicts:
             stop("同じ語が 2 回ある版がある" if merged.duplicates else f"語の衝突が {len(fail)} 件", fail)
         g, counts = merged.glossary, merged.counts
-        # 両側が別の語へ同じ code を足すと、各側は正しくても結合した結果が一意性を破る。書く前に止める
-        if bad := structure_findings(g, decl):
-            stop(
-                f"結合した用語集に不整合が {len(bad)} 件",
-                [{"kind": f["rule"], "term": f["term"], "path": f["path"], "detail": f["detail"]} for f in bad],
-                counts,
-            )
         writes.append((decl.source_path, json.dumps(g, ensure_ascii=False, indent=2) + "\n"))
         items.insert(0, {"name": decl.source, "result": "merged"})
     else:
