@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""glossary.py: プロジェクトの用語集を扱う 6 つの副命令。
+"""glossary.py: プロジェクトの用語集を扱う 7 つの副命令。
 
     python3 glossary.py gate --mode M [--root DIR]
     python3 glossary.py init [--source P] [--document P] [--root DIR]
@@ -7,6 +7,7 @@
     python3 glossary.py render [--check] [--root DIR]
     python3 glossary.py check [--diff BASE | --file P...] [--rules all|structure] [--root DIR]
     python3 glossary.py diff --base REF [--head REF] [--root DIR]
+    python3 glossary.py merge [--root DIR]   # git merge の途中で用語集の衝突を語の単位で解く
 
 宣言は `<root>/.ndf/glossary.json`。宣言と用語集の形は
 `skills/requirements-design/references/glossary-format.md` にある。語はすべて用語集から読み、
@@ -20,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -37,6 +39,7 @@ from step_result import EXIT_UNREADABLE, EXIT_VIOLATION, StepError, emit, main_w
 import jsonio  # noqa: E402
 import proc  # noqa: E402
 from comment_mask import mask_comments  # noqa: E402
+import glossary_merge  # noqa: E402
 
 TOOL = "glossary"
 DECLARATION = ".ndf/glossary.json"
@@ -770,6 +773,65 @@ def cmd_diff(a):
     emit(result(TOOL, "ok", summary, items, counts))
 
 
+def cmd_merge(a):
+    root = Path(a.root)
+    decl = require_declaration(root)
+
+    def stop(summary, fail=(), metrics=None):
+        for it in fail:
+            print(glossary_merge.error_line(it), file=sys.stderr)
+        emit(result(TOOL, "stopped", summary, fail, metrics), EXIT_VIOLATION)
+
+    def unresolved():
+        out = git_checked(root, "diff", "-z", "--name-only", "--diff-filter=U").stdout
+        return [{"path": p, "result": "unresolved"} for p in out.split("\0") if p]
+
+    if git_checked(root, "rev-parse", "-q", "--verify", "MERGE_HEAD", check=False).returncode != 0:
+        stop("取り込みの途中でない（MERGE_HEAD が無い）")
+    stages = glossary_merge.unmerged_stages(git_checked(root, "ls-files", "-u", "-z", "--", decl.source, decl.document).stdout)
+    if not stages:
+        stop("用語集は衝突していない", unresolved())
+    items, counts, writes = [{"name": decl.document, "result": "rendered"}], {}, []
+    if decl.source in stages:
+        have = stages[decl.source]
+        if not {2, 3} <= have:
+            side = "ours" if 2 not in have else "theirs"
+            stop(f"{side} の側が {decl.source} を消した", [{"kind": "file_deleted", "side": side, "path": decl.source}])
+        versions = []
+        for n in (1, 2, 3):
+            text = git_checked(root, "show", f":{n}:./{decl.source}").stdout if n in have else '{"version": 1}'
+            try:
+                g = parse_glossary(json.loads(text), f"段 {n} の用語集")
+            except ValueError as e:
+                raise unreadable(f"段 {n} の用語集を読めない: {e}")
+            if bad := glossary_merge.bad_keys(g):
+                raise unreadable(f"段 {n} の用語集の {bad}")
+            versions.append(g)
+        merged = glossary_merge.merge_glossaries(*versions)
+        if fail := merged.duplicates or merged.conflicts:
+            stop("同じ語が 2 回ある版がある" if merged.duplicates else f"語の衝突が {len(fail)} 件", fail)
+        g, counts = merged.glossary, merged.counts
+        writes.append((decl.source_path, json.dumps(g, ensure_ascii=False, indent=2) + "\n"))
+        items.insert(0, {"name": decl.source, "result": "merged"})
+    else:
+        g = load_glossary(decl)
+    writes.append((decl.document_path, render_text(g, decl.source)))
+    try:
+        for path, text in writes:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+    except OSError as e:
+        raise unreadable(f"用語集を書けない: {e}")
+    git_checked(root, "add", "--", *[it["name"] for it in items])
+    if left := unresolved():
+        stop(f"用語集を解いた。用語集の外の衝突が {len(left)} 件残る", left, counts)
+    p = proc.run(["git", "-C", str(root), "commit", "--no-edit"], check=False, env={**os.environ, "GIT_EDITOR": "false"})
+    if p.returncode != 0:
+        stop("取り込みのコミットを作れなかった", [{**it, "detail": p.stderr.strip()[:300]} for it in items], counts)
+    done = "・".join(f"{c} {counts.get(c, 0)}" for c in glossary_merge.CHANGES)
+    emit(result(TOOL, "ok", f"用語集を取り込んだ（{done}）。取り込みのコミットを作った", items, counts))
+
+
 def build_parser():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -794,6 +856,7 @@ def build_parser():
     p = add("diff", cmd_diff)
     p.add_argument("--base", required=True)
     p.add_argument("--head")
+    add("merge", cmd_merge)
     return ap
 
 
