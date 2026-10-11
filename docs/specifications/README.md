@@ -72,5 +72,6 @@
 | [ndf-release-readme-update-info.md](ndf-release-readme-update-info.md) | plugin の README は版を名乗らない「更新情報」の節だけを持ち、bump・changelog・notes が README に触れない理由、CHANGELOG の版の節を正本にすること、子の箇条を親の項目の中に残す読み方の境界。手順と引数は `release` の SKILL.md と `release-steps.py` が正 |
 | [ndf-sprint-close-acceptance-criteria.md](ndf-sprint-close-acceptance-criteria.md) | 「スプリントを閉じる」（sprint-close.py）が、本文の受け入れ条件の番号のすべてにリリース後テストの合格の行がある課題だけを閉じて印を付け、課題を指さない表の行を読み飛ばし、工程表をモードで通る工程だけにする理由と境界。閉じる条件と結果の読み方は progress-tracking の SKILL.md が正 |
 | [ndf-release-approval-included-prs.md](ndf-release-approval-included-prs.md) | 本番への配布の承認資料の「含む PR」が、直前の正式版のタグから承認したコミットまでにベースブランチへ入った PR（版上げの PR を除く）と --prs の和を並べ、notes --approval が同じ欄から配る中身と残る危険を書く理由と部品の契約。打ち方と終了コードは release の references/release-steps.md が正 |
+| [ndf-gate-rejections-and-filer-assumptions.md](ndf-gate-rejections-and-filer-assumptions.md) | 起票者の推定を本文の節として承認ゲート 1 まで運ぶ理由と、承認ゲートの差し戻しを差し戻しの記録（gate-rejections.jsonl）へ 1 回 1 行で追記して承認ゲートごとに数える形（1 行の形・リポジトリの決め方・不明の扱い）。手順は out-of-scope・requirements-design・approval-request.md が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
