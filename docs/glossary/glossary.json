@@ -3657,13 +3657,13 @@
       "term": "範囲の PR",
       "context": "ndf-release",
       "meaning": "直前の正式版のタグから承認したコミットまでに、ベースブランチへ merge commit か squash merge で入った PR。版上げの PR と、PR でない番号（squash の件名の `(#N)` が課題を指すもの）は含まない",
-      "pending_source": "issues/issue-1274-design.md"
+      "source": "docs/specifications/ndf-release-approval-included-prs.md"
     },
     {
       "term": "版上げの PR",
       "context": "ndf-release",
       "meaning": "head のブランチが `release/` で始まる PR。版数と CHANGELOG だけを変え、中身の変更を持たない",
-      "pending_source": "issues/issue-1274-design.md"
+      "source": "docs/specifications/ndf-release-approval-included-prs.md"
     },
     {
       "term": "条件の Skill",

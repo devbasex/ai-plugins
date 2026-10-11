@@ -71,5 +71,6 @@
 | [ndf-relay-goal-skill-and-prose-wait.md](ndf-relay-goal-skill-and-prose-wait.md) | `/goal` の条件の先頭の Skill を次のセッションが読み込むよう UserPromptSubmit hook が案内する理由と、ラッパーの直接の子が本文で承認を待って終えた応答を 1 度止めて AskUserQuestion へ戻す（承認待ちの差し戻し）条件・境界・記録の形。手順と契約は `development-workflow` の `references/relay.md` と ndf-relay-segment-restart.md が正 |
 | [ndf-release-readme-update-info.md](ndf-release-readme-update-info.md) | plugin の README は版を名乗らない「更新情報」の節だけを持ち、bump・changelog・notes が README に触れない理由、CHANGELOG の版の節を正本にすること、子の箇条を親の項目の中に残す読み方の境界。手順と引数は `release` の SKILL.md と `release-steps.py` が正 |
 | [ndf-sprint-close-acceptance-criteria.md](ndf-sprint-close-acceptance-criteria.md) | 「スプリントを閉じる」（sprint-close.py）が、本文の受け入れ条件の番号のすべてにリリース後テストの合格の行がある課題だけを閉じて印を付け、課題を指さない表の行を読み飛ばし、工程表をモードで通る工程だけにする理由と境界。閉じる条件と結果の読み方は progress-tracking の SKILL.md が正 |
+| [ndf-release-approval-included-prs.md](ndf-release-approval-included-prs.md) | 本番への配布の承認資料の「含む PR」が、直前の正式版のタグから承認したコミットまでにベースブランチへ入った PR（版上げの PR を除く）と --prs の和を並べ、notes --approval が同じ欄から配る中身と残る危険を書く理由と部品の契約。打ち方と終了コードは release の references/release-steps.md が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
