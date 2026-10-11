@@ -36,7 +36,7 @@
 | 前ラウンドのレビュー | `rounds[-1]` の担当ごとの `intent` / `posted_as` / `comments` / `review_url`。件数はそのラウンドで投稿した数で、対応の対象は `/ndf:fix` が PR の未解決のスレッドから数え直す |
 | コメントのスナップショット | `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt` |
 | 戻り値ファイル | `$TMP_DIR/fix-pr<PR>-result.json`。環境変数 `CROSS_REVIEW_TMP_DIR` を渡すと `/ndf:fix` がここへ書く |
-| 指摘の基準 | 環境変数 `CROSS_REVIEW_STATE=$TMP_DIR/cross-review-pr<STATE_PR>-state.json`。`fix-steps.py context` が状態ファイルの `review_criteria`（`init` がコピーした重点）を読み、担当と同じ基準で振り分ける |
+| 指摘の基準 | 環境変数 `CROSS_REVIEW_STATE=$TMP_DIR/cross-review-pr<STATE_PR>-state.json`。`fix-steps.py context` が状態ファイルの `review_criteria`（`init` がコピーした重点とレビューのプロファイル）を読み、担当と同じ基準で振り分ける |
 
 **送信・返信・決着・まとめは取り込み（`state.py merge-fix`）が行う**。worker は
 GitHub と git へ書かない。取り込みは現在の頭を指定して送り（`git push origin HEAD:<ブランチ名>`）、
@@ -274,9 +274,9 @@ while ループ脱出後にメインが以下のプロンプトでサブエー�
 > PR の **全 open review thread**（インライン / レビュー body / PR レベルコメント）を
 > `gh api` で洗い出し、cross-review の codex/agy が残したものを中心に **すべて解消**せよ:
 > 振り分けは `/ndf:fix` の「重要度の判定」をそのまま使う（スイープ独自の重要度の規則を持たない）:
-> 1. `major` 以上（指摘の基準に当たる）→ コード修正 + コミット（**送らない**）し、`resolved_threads` へ入れる。
->    **コードを直すのは `major` 以上が残っていたときだけである**
-> 2. `minor` / `nit`（基準に当たらない）→ コードを変えず `waived` にする。`finalize` が見送りの返信と
+> 1. `major` 以上（指摘の基準に当たる）→ 対象のファイルを直してコミット（**送らない**）し、`resolved_threads` へ入れる。
+>    **ファイルを直すのは `major` 以上が残っていたときだけである**
+> 2. `minor` / `nit`（基準に当たらない）→ 対象のファイルを変えず `waived` にする。`finalize` が見送りの返信と
 >    `"resolve": true` を付けて `deferred` へ入れるので、そのまま結果ファイルへ写す
 > 3. 判断保留（`deferred`）と bot 誤指摘（`rejected`）→ 理由を添えて入れ、**`"resolve": true`** を付ける
 >    （スレッドを open のまま残さない）
@@ -393,3 +393,46 @@ GitHub 側で数え直した残件数と、0 件にできなかった場合の�
 > **Step 7.5 で全 open thread を Resolve する**ため、Step 8 のユーザ問い合わせは原則不要。
 > deferred は「対応見送りの記録」として report に **参考列挙**するに留める（再対応が要るものが
 > あればユーザがその場で指示できる）。`remaining_open > 0` の場合のみ、残った理由を添えて報告する。
+
+## レビューの宣言（`.ndf/review.json`）
+
+PR の head の worktree の `.ndf/review.json` を、`init`（新規は worktree を用意した後、再開は同期した後）が読む。
+読み取りと検査の正本は `scripts/lib/review_criteria.py`（`load_review_decl`）で、`/ndf:fix` も同じ部品で読む。
+
+| 鍵 | 型 | 規則 |
+| --- | --- | --- |
+| `version` | 数 | `1` か `2`。`1` は `focus` だけを読み、ほかの鍵を無視する。ほかの値は宣言全体が読めない（重点を `unreadable`、プロファイルなし） |
+| `focus` | 文字列の配列 | 重点の名前（基準 3）。`version: 1` では必須、`version: 2` では任意。形が違えば重点だけが `unreadable` |
+| `profile` | オブジェクト | `version: 2` だけで読むレビューのプロファイル。無いか `{}` ならプロファイルなし。下の鍵のどれか 1 つでも形が違う・知らない鍵があれば、プロファイル全体を捨てて既定の基準で続け、理由を標準エラーと `report` に出す（重点はそのまま効く） |
+| `profile.criteria` | オブジェクト（番号の文字列 → 文） | 1 件以上。既定の基準 1・4 と置き換わる。番号は 1 以上の整数で、`2`（外せない基準: 秘密・認証認可・利用者のデータ・戻せない操作）と `3`（重点）は使えない。基準 2 と、重点があるときの基準 3 はそのまま残る |
+| `profile.not_written` | 文字列の配列 | 「書かないもの」。`[]` なら行を出さない |
+| `profile.waive_kinds` | オブジェクト（種類 → 名前） | 1 件以上。種類は英小文字・数字・`_`。既定の見送りの種類と置き換わる |
+| `profile.reply` | 文字列 | 見送りの返信の雛形。`{inner}` をちょうど 1 回含み、そこへ見送りの種類の名前が入る。重点の句は足さない |
+| `profile.categories` | オブジェクト（名前 → `{paths, instructions}`） | `paths` は glob の配列で、`.ndf/pace.json` の `areas` と同じ規則（`*` と `?` は `/` をまたがず、`**` はまたぐ）。当たった分類の名前が `auto_review_categories` に、`instructions` が自動レビュー観点に入る |
+| `profile.replace_auto_categories` | 真偽値 | 真なら既定の自動カテゴリの観点を渡さない。既定は偽 |
+
+状態ファイルの `review_criteria` には、プロファイルがあるときだけ `profile_status`（`declared` / `unreadable`）を置き、
+`declared` では `profile`（検査を通ったプロファイルの写し。宣言の `profile` と同じ形）を、`unreadable` では
+`profile_error`（理由）を持つ。プロファイルが無ければこの 3 項目を置かない。`init` の出力の
+`REVIEW_PROFILE=<declared|none|unreadable>` に同じ値が出る。`fix-steps.py context` は `profile` を振り分けの JSON の
+`review_profile` へ写し、`finalize` はその写しで振り分けを検査して見送りの返信を組む。
+
+書いた鍵だけが既定を差し替え、書かない鍵は既定のまま。プロファイルがあると、修正担当への節の見送りの句は
+「対象のファイルを変えずに」になる。収束の判定・投稿の形・ラウンドの段・`review_kind` はプロファイルで変わらない。
+
+```json
+{
+  "version": 2,
+  "profile": {
+    "criteria": {"1": "設定（人物・世界観・年表）と本文が食い違う", "4": "文が日本語として不自然で読み手が引っかかる", "5": "人物の口調・呼び方が設定とずれる"},
+    "not_written": ["好みの文体", "設定に無い新しい案"],
+    "waive_kinds": {"preference": "好みの文体", "out_of_scope": "設定を変える提案"},
+    "reply": "直しません。{inner}に当たるためです。",
+    "categories": {"manuscript": {"paths": ["works/*/chapters/*/text.md"], "instructions": "## 自動追加レビュー観点: 原稿\n- ..."}},
+    "replace_auto_categories": true
+  }
+}
+```
+
+再開の前に宣言を書き換えると、`init` が保存した `changed_files` から観点と指摘の基準を組み直し、保存した値と違うときだけ
+状態ファイルを書き直す。次のラウンドから新しい宣言が効く。

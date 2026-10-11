@@ -119,7 +119,14 @@ def init_env(monkeypatch, state_mod, tmp_path, fake_gh):
         )
         review_lib.commands.init.cmd_init(
             argparse.Namespace(
-                pr=PR, max_rounds=None, rotate_after=None, only=None, worktree=str(worktree), focus=focus, extra_instructions_file=None, host="claude"
+                pr=PR,
+                max_rounds=None,
+                rotate_after=None,
+                only=None,
+                worktree=str(worktree),
+                focus=focus,
+                extra_instructions_file=None,
+                host="claude",
             )
         )
         return json.loads((tmp_path / f"cross-review-pr{PR}-state.json").read_text(encoding="utf-8"))
