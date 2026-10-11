@@ -119,16 +119,8 @@ fi
 STAMP=$(date '+%Y-%m-%d %H:%M')
 STAGES=$(wf_stages)
 # モードで通らない工程（分類が `-`）の行を書かないため、「モード<タブ>工程」を改行区切りで渡す（#1683 の決定 6）。
-# モードは本文から読み直すことがあるため、全モードの分を渡す。分類は wf_stage_class が持つ。
-SKIP_STAGES=''
-IFS=$'\t' read -r -a modes <<<"$WF_MODES"
-for m in "${modes[@]}"; do
-  while IFS= read -r s; do
-    if [ "$(wf_stage_class "$m" "$s")" = "-" ]; then
-      SKIP_STAGES+="$m"$'\t'"$s"$'\n'
-    fi
-  done <<<"$STAGES"
-done
+# モードは本文から読み直すことがあるため、全モードの分を渡す。分類は wf_skipped_stages が持つ。
+SKIP_STAGES=$(wf_skipped_stages)
 export SKIP_STAGES
 export STAGES SECTION_HEADING STAGE STAMP MODE PACE WORKTREE PLAN NOTE SCRIPT_DIR
 python3 - "$BODY_FILE" > "$NEW_FILE" <<'PY' || exit 0
