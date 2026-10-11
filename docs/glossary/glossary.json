@@ -2143,6 +2143,21 @@
       "pending_source": "issues/issue-1287-design.md"
     },
     {
+      "term": "レビューのプロファイル",
+      "code": "review_profile",
+      "context": "ndf-cross-review",
+      "meaning": "プロジェクトが .ndf/review.json の profile に書く、指摘の基準・書かないもの・見送りの種類・見送りの返信・自動レビュー観点の差し替えの組。書いた鍵だけが既定を差し替える。文中では「プロファイル」と略す",
+      "source": "",
+      "pending_source": "issues/issue-1910-requirements.md"
+    },
+    {
+      "term": "自動レビュー観点",
+      "context": "ndf-cross-review",
+      "meaning": "cross-review が変更ファイルの分類（自動カテゴリ）から選び、レビューの両スロットへ渡す観点の文。--focus と --extra-instructions-file の観点はこの後ろに足す",
+      "source": "",
+      "pending_source": "issues/issue-1910-requirements.md"
+    },
+    {
       "term": "最終スイープ",
       "context": "ndf-cross-review",
       "meaning": "収束ループを抜けた後に /ndf:fix を通し、open thread を 0 にする工程",
