@@ -280,5 +280,6 @@ git を読むだけで書かず、終了コードも出力も持たない。ブ�
 - [`supervise_lib/release_templates.py`](../../plugins/ndf/scripts/supervise_lib/release_templates.py)
 - [用語集](../glossary.md)
 - [版と配布](../versioning-and-distribution.md)
+- [承認資料の「含む PR」](ndf-release-approval-included-prs.md)（直前の正式版から後に入った PR の集め方）
 - [後片付けとスプリント課題を閉じる時点](ndf-cleanup-and-bundle-closing.md)（本番の配布の後の退避先の回収）
 - 課題 [#815](https://github.com/devbasex/ai-plugins/issues/815)、関連する昇格の経路の課題 [#1529](https://github.com/devbasex/ai-plugins/issues/1529)
