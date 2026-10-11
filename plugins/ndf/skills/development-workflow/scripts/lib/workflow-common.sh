@@ -156,24 +156,6 @@ wf_stage_class() {
   return 1
 }
 
-# どのモードで対象外（`-`）かを「モード<タブ>工程」の 1 行 1 件で、全モードの分を返す。
-# 工程の記録のたびに呼ばれるため、表を 1 回だけ走査し、外部コマンドを起動しない
-# （モード×工程ごとに wf_stage_class を呼ぶと列の解決のたびに tr が起動する。#1904）。
-wf_skipped_stages() {
-  local line name i
-  local -a modes cells
-  IFS=$'\t' read -r -a modes <<<"$WF_MODES"
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    name="${line%%$'\t'*}"
-    IFS=$'\t' read -r -a cells <<<"${line#*$'\t'}"
-    for i in "${!modes[@]}"; do
-      [ "${cells[$i]:-}" = "-" ] && printf '%s\t%s\n' "${modes[$i]}" "$name"
-    done
-  done <<<"$WF_STAGE_MATRIX"
-  return 0
-}
-
 # モードの高さを数で返す。知らないモードは 0 を返す。
 wf_mode_height() {
   local want="${1:-}" line name value

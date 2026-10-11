@@ -41,6 +41,25 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 SECTION_HEADING="## 進行"
 
+# どのモードで対象外（`-`）かを「モード<タブ>工程」の 1 行 1 件で、全モードの分を返す。
+# 工程の記録のたびに呼ばれるため、表を 1 回だけ走査し、外部コマンドを起動しない
+# （モード×工程ごとに wf_stage_class を呼ぶと列の解決のたびに tr が起動する。#1904）。
+# 呼ぶのはこのスクリプトだけで、workflow-common.sh の行数の上限（例外リストの 900 行）を超えないためここに置く。
+wf_skipped_stages() {
+  local line name i
+  local -a modes cells
+  IFS=$'\t' read -r -a modes <<<"$WF_MODES"
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    name="${line%%$'\t'*}"
+    IFS=$'\t' read -r -a cells <<<"${line#*$'\t'}"
+    for i in "${!modes[@]}"; do
+      [ "${cells[$i]:-}" = "-" ] && printf '%s\t%s\n' "${modes[$i]}" "$name"
+    done
+  done <<<"$WF_STAGE_MATRIX"
+  return 0
+}
+
 usage() {
   printf 'usage: progress-record.sh <issue番号> <工程名> [--mode M] [--pace P] [--worktree P] [--plan P] [--repo R] [--note TEXT]\n' >&2
 }
@@ -119,7 +138,7 @@ fi
 STAMP=$(date '+%Y-%m-%d %H:%M')
 STAGES=$(wf_stages)
 # モードで通らない工程（分類が `-`）の行を書かないため、「モード<タブ>工程」を改行区切りで渡す（#1683 の決定 6）。
-# モードは本文から読み直すことがあるため、全モードの分を渡す。分類は wf_skipped_stages が持つ。
+# モードは本文から読み直すことがあるため、全モードの分を渡す。分類は上の wf_skipped_stages が持つ。
 SKIP_STAGES=$(wf_skipped_stages)
 export SKIP_STAGES
 export STAGES SECTION_HEADING STAGE STAMP MODE PACE WORKTREE PLAN NOTE SCRIPT_DIR
