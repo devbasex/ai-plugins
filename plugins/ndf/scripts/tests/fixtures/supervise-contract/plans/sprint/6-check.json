@@ -103,7 +103,7 @@
     {
       "id": "ready",
       "type": "run",
-      "cmd": "git push -q; gh pr ready {pr}",
+      "cmd": "sh -c 'git push -q && gh pr ready {pr}'",
       "on_fail": "abort",
       "next": "merge-gate"
     },

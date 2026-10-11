@@ -1519,6 +1519,7 @@ def test_new_sprint_writes_waves_in_order(tmp_path):
         "fix-glossary",
         "glossary-recheck",
         "push-glossary",
+        "ready",
         "gate",
     ]
     assert "design-glossary --mode" in ds["glossary"]["cmd"] and "on_fail" not in ds["glossary"]
@@ -1530,7 +1531,9 @@ def test_new_sprint_writes_waves_in_order(tmp_path):
     assert "check --diff origin/develop" in ds["glossary-check"]["cmd"]
     assert ds["glossary-check"]["on_fail"] == "fix-glossary" and ds["fix-glossary"]["next"] == "glossary-recheck"
     assert ds["glossary-recheck"]["on_fail"] == ds["glossary-recheck"]["next"] == "push-glossary"
-    assert ds["push-glossary"]["next"] == "gate"
+    # 設計 PR は Draft で作り、関門 1 の前に Draft を外す（#1908）。レビューの駆動が落ちても関門の前に通る
+    assert ds["push-glossary"]["next"] == ds["review"]["on_fail"] == "ready" and ds["ready"]["next"] == "gate"
+    assert ds["ready"]["cmd"] == "sh -c 'git push -q && gh pr ready {pr}'" and "on_fail" not in ds["ready"]
     assert [s["id"] for s in design["steps"] if s["type"] == "judge"] == ["gate"]  # 関門の数は変わらない
     assert "glossary-recheck" in ds["gate"]["inputs"]
 
