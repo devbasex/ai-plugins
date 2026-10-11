@@ -265,7 +265,7 @@
   （正本 `scripts/lib/review_criteria.py` が組む）。`launch-reviewer.sh` が `reviewer_block` を指示へ
   差し込み、空なら宣言を読まない既定の節（基準 3 の無い形）を使う。修正担当は `drive.py` が渡す
   `CROSS_REVIEW_STATE` から `status` と `focus` とプロファイルを読む。`init` の出力の `REVIEW_FOCUS=<status>` に同じ値が出る。プロファイルの項目（`profile_status` / `profile` / `profile_error`）と `REVIEW_PROFILE=` は [02-fix-and-rotation.md](02-fix-and-rotation.md) の「レビューの宣言」にある
-- `auto_review_categories` — 観点を渡した分類の名前の列。プロファイルの分類の名前を含み、`replace_auto_categories` が真なら既定の分類の名前を含まない。`review_kind` はこの列ではなく既定の分類から決める
+- `auto_review_categories` — 観点を渡した分類の名前の列。プロファイルの分類の名前を含み、`replace_auto_categories` が真なら既定の分類の名前を含まない。`review_kind` は既定の分類から決める
 - `deferred_nits[].waived` — `/ndf:fix` が基準外として見送った指摘の種類。見送りの返信（`reply`）を
   付けて決着したもので、`report` は残 deferred の一覧から外して件数だけを出す
 - `sweep` — 最終スイープ後の検証結果。`remaining_open` は GitHub 側で数え直した実数で、
