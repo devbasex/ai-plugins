@@ -62,7 +62,11 @@ drive のステップ: `cmd`（または `"drive": "cross-review" | "cross-refac
        "test": {"command": "<テストのコマンド。{paths} を範囲に置き換える>", "all": "<全体の範囲（既定 .）>",
                 "no_reports": "<run のステップの PYTEST_ADDOPTS に足す。省略可>"},
        "sync_checks": [{"name": "<名前>", "command": "<同期かチェックのコマンド>"}, ...],   # 省略可。無ければ sync のステップを置かない
-       "release": {"form": "package-plugin", "plugin": "<名前>", "runtimes": ["claude", ...]}}
+       "release": {"form": "package-plugin", "plugin": "<名前>", "runtimes": ["claude", ...]},
+       "impl_timeout": <1 以上の整数>,              # 省略可。impl のステップの timeout（秒）。無ければ雛形の値
+       "refactor_budget_minutes": <1 以上の整数>}   # 省略可。構造改善の想定最大時間（分）。refactor に --budget-minutes で渡す
+  refactor の timeout は想定最大時間（無ければ cross-refactoring の既定の予算）に 10%（最低 30 秒）の余裕を足した秒。
+  impl_timeout と refactor_budget_minutes は --impl-timeout・--refactor-budget-minutes が先に効く
   テストの範囲の選び方（--tests）と配布してよいかの判断は、宣言にせず conductor と judge のステップに残す
 
 配布の雛形（new release）: 形（`release.form`）ごとにある。無い形は /ndf:release で配る（new sprint は配布の計画を
