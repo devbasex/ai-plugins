@@ -319,7 +319,7 @@ sequenceDiagram
 
 `paths.py` に、`DRIVES` が指す cross-refactoring の置き場（同じ配布物の `skills/cross-refactoring/scripts/`）から `refactor_lib/vocabulary.py` を読み込み、`DEFAULT_BUDGET_MINUTES` を返す関数を置く。`_inspect_steps` は想定最大時間が無いときだけこれを呼ぶ。cross-refactoring が既定を変えれば、`refactor` の `timeout` も同じ値から追う。
 
-値を `supervise_lib` へ写す案は採らない。既定の予算が 2 か所になり、片方だけが変わると `timeout` が予算と食い違う（利用者の指示の「固定値は書かない」にも反する）。`vocabulary.py` の文を構文として読んで数を取り出す案も採らない。代入の形が変わると読めず、モジュールが持つ値そのものではない。定数を共通層（`plugins/ndf/scripts/lib`）へ移す案も採らない。cross-refactoring の持ち物を動かすことになり、#1916 の範囲を超える。
+値を `supervise_lib` へ写す案は採らない。既定の予算が 2 か所になり、片方だけが変わると `timeout` が予算と食い違う（利用者の指示の「固定値は書かない」にも反する）。`vocabulary.py` の文を構文として読んで数を取り出す案も採らない。代入の形が変わると読めず、モジュールが持つ値そのものではない。定数を共通の部品の置き場（`plugins/ndf/scripts/lib`）へ移す案も採らない。cross-refactoring の持ち物を動かすことになり、#1916 の範囲を超える。
 
 `vocabulary.py` は読み込むときに `refactoring` の `references/vocabulary.md` を読む。同じ配布物にあり、cross-refactoring の駆動も同じ読み込みをするため、`new check` だけが止まる形は増えない。読めなければ例外のまま止まり、プランを書かない。
 
