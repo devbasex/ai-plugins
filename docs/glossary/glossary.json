@@ -3080,6 +3080,14 @@
       "source": "docs/specifications/cross-review-reopen-and-hook-deadline.md"
     },
     {
+      "term": "実装の上限",
+      "context": "ndf-workflow",
+      "meaning": "プランの impl のステップ（worker の実装）の timeout（秒）。.ndf/supervise.json の impl_timeout か supervise.py new の --impl-timeout で決め、無ければ雛形の既定の値",
+      "code": "impl_timeout",
+      "source": "",
+      "pending_source": "issues/issue-1916-design.md"
+    },
+    {
       "term": "ラウンドを足す",
       "context": "ndf-cross-review",
       "meaning": "final が確定したレビューの状態ファイルの final を外し、履歴を残したまま次の番号のラウンドから収束ループを続けること。state.py init の再開の経路が行い、reopens に 1 件残す",
