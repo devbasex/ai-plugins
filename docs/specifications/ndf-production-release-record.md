@@ -215,7 +215,7 @@ stateDiagram-v2
 | merge・manual の経路 | 記録を置く PR をプランが知らず、`close` は `--record-pr 0` で打つ。扱いは課題 #1875 にある |
 | まとめの queue の本番が飛ばされたとき | 最終の検査で変更が無いと、まとめの queue の `release-prod` / `promote` が飛ばされて記録の PR が `0` になり、`new sprint` の本番で出た配布のリリース後テストは見ずに閉じる |
 | `release-verify` の所要 | まとめのプランの上限とステップの `timeout`（3600 秒）に収まるかは、流したスプリントで測る |
-| 課題を閉じた後の本文 | 工程表のチェックボックスは更新しない（受け入れ条件の印は `--with-verification` の経路で閉じる前に付ける。#1683）。コミットの件名の closing keywords（`Closes #N` など、GitHub が課題を自動で閉じるキーワード）で GitHub が先に閉じる経路も塞がない |
+| 課題を閉じた後の本文 | 工程表のチェックボックスは更新しない（受け入れ条件の印は `--with-verification` の経路で閉じる前に付ける。[ndf-sprint-close-acceptance-criteria.md](ndf-sprint-close-acceptance-criteria.md)）。コミットの件名の closing keywords（`Closes #N` など、GitHub が課題を自動で閉じるキーワード）で GitHub が先に閉じる経路も塞がない |
 | 手で閉じていないことの確かめ | 昇格の形か版数を上げない配布で本番まで出たスプリントで、まとめの `close` が課題を `closed` にしたかを、キューの記録と課題を閉じた主体で確かめる（リリース後テスト） |
 
 ## 決定の理由
@@ -266,5 +266,6 @@ stateDiagram-v2
 - [`progress-tracking` の SKILL.md](../../plugins/ndf/skills/progress-tracking/SKILL.md)（「スプリントを閉じる」「配布の記録」）
 - [`release` の `references/form-package-plugin.md`](../../plugins/ndf/skills/release/references/form-package-plugin.md)
 - [後片付けを止めずに通し、スプリント課題を最終工程で閉じる](ndf-cleanup-and-bundle-closing.md)
+- [受け入れ条件の番号ごとの合格で閉じて本文に印を付ける](ndf-sprint-close-acceptance-criteria.md)（閉じる条件 2 と表の読み方）
 - [`lib/dist_record.py`](../../plugins/ndf/scripts/lib/dist_record.py) / [`release_lib/record.py`](../../plugins/ndf/scripts/release_lib/record.py) / [`release-steps.py`](../../plugins/ndf/scripts/release-steps.py)
 - 課題 [#1273](https://github.com/devbasex/ai-plugins/issues/1273)・リリース後テストの書き手は [#1683](https://github.com/devbasex/ai-plugins/issues/1683)・昇格の記録と版の食い違いの読み方は [#1870](https://github.com/devbasex/ai-plugins/issues/1870)
