@@ -401,8 +401,8 @@ PR の head の worktree の `.ndf/review.json` を、`init`（新規は worktre
 
 | 鍵 | 型 | 規則 |
 | --- | --- | --- |
-| `version` | 数 | `1` か `2`。`1` は `focus` だけを読み、ほかの鍵を無視する。ほかの値は宣言全体が読めない（重点を `unreadable`、プロファイルなし） |
-| `focus` | 文字列の配列 | 重点の名前（基準 3）。`version: 1` では必須、`version: 2` では任意。形が違えば重点だけが `unreadable` |
+| `version` | 数 | `1`・`2`・`3`。`1` は `focus` だけを読み、ほかの鍵を無視する。`2` はプロファイルを `profile` に 1 つ、`3` は `profiles` に名前つきで複数書く。ほかの値は宣言全体が読めない（重点を `unreadable`、プロファイルなし） |
+| `focus` | 文字列の配列 | 重点の名前（基準 3）。`version: 1` では必須、`version: 2`・`3` では任意で、`3` ではどのプロファイルを選んでも効く。形が違えば重点だけが `unreadable` |
 | `profile` | オブジェクト | `version: 2` だけで読むレビューのプロファイル。無いか `{}` ならプロファイルなし。下の鍵のどれか 1 つでも形が違う・知らない鍵があれば、プロファイル全体を捨てて既定の基準で続け、理由を標準エラーと `report` に出す（重点はそのまま効く） |
 | `profile.criteria` | オブジェクト（番号の文字列 → 文） | 1 件以上。既定の基準 1・4 と置き換わる。番号は 1 以上の整数で、`2`（外せない基準: 秘密・認証認可・利用者のデータ・戻せない操作）と `3`（重点）は使えない。基準 2 と、重点があるときの基準 3 はそのまま残る |
 | `profile.not_written` | 文字列の配列 | 「書かないもの」。`[]` なら行を出さない |
@@ -410,12 +410,43 @@ PR の head の worktree の `.ndf/review.json` を、`init`（新規は worktre
 | `profile.reply` | 文字列 | 見送りの返信の雛形。`{inner}` をちょうど 1 回含み、そこへ見送りの種類の名前が入る。重点の句は足さない |
 | `profile.categories` | オブジェクト（名前 → `{paths, instructions}`） | `paths` は glob の配列で、`.ndf/pace.json` の `areas` と同じ規則（`*` と `?` は `/` をまたがず、`**` はまたぐ）。当たった分類の名前が `auto_review_categories` に、`instructions` が自動レビュー観点に入る |
 | `profile.replace_auto_categories` | 真偽値 | 真なら既定の自動カテゴリの観点を渡さない。既定は偽 |
+| `profiles` | 配列 | `version: 3` だけで読む、名前つきのプロファイルの列。無いか `[]` ならどれも選ばない。`version: 3` で `profile` を書くと壊れている |
+| `profiles[].name` | 文字列 | 必須。英小文字・数字・`_`。宣言の中で重複しない |
+| `profiles[].paths` | 文字列の配列 | 任意。空でない glob の配列で、`profile.categories` の `paths` と同じ規則。書かないプロファイルはどの PR にも当たり、高々 1 つを末尾に置く |
+| `profiles[]` のほかの鍵 | — | `profile` の鍵（`criteria`・`not_written`・`waive_kinds`・`reply`・`categories`・`replace_auto_categories`）と同じ形と規則。知らない鍵があれば壊れている |
+| `criteria`（最上位） | オブジェクト（番号の文字列 → 文） | `version: 3` だけで読む、宣言の側で外せない基準。任意。形は `profile.criteria` と同じ（`2` と `3` は使えない）。選んだプロファイルの基準（選ばなかったとき・`criteria` を書かないプロファイルでは既定の 1・4）に足す。番号が、どれかのプロファイルの `criteria` か、既定の 1・4 が効きうるとき（`criteria` を書かないプロファイルがある・`paths` を持たないプロファイルが無い）のその番号と重なれば壊れている |
+| `not_written`（最上位） | 文字列の配列 | `version: 3` だけで読む。任意。選んだプロファイルの書かないもの（書かなければ既定）の前に足し、同じ文は 1 つにする |
 
 状態ファイルの `review_criteria` には、プロファイルがあるときだけ `profile_status`（`declared` / `unreadable`）を置き、
 `declared` では `profile`（検査を通ったプロファイルの写し。宣言の `profile` と同じ形）を、`unreadable` では
 `profile_error`（理由）を持つ。プロファイルが無ければこの 3 項目を置かない。`init` の出力の
 `REVIEW_PROFILE=<declared|none|unreadable>` に同じ値が出る。`fix-steps.py context` は `profile` を振り分けの JSON の
 `review_profile` へ写し、`finalize` はその写しで振り分けを検査して見送りの返信を組む。
+
+`version: 3` では、`init` が PR の変更ファイル（`changed_files` のパス。名前を変えたファイルは前の名前も含む）で
+プロファイルを 1 つ選ぶ。`profiles` の先頭から見て、変更ファイルのどれかに `paths` が当たる最初のプロファイルを選び
+（`review_criteria.select_profile`）、選んだものだけが上の `profile` と同じに効く。2 つ以上のプロファイルに当たる PR でも
+止めず、先に書いた方を選び、ほかに当たった名前を `⚠️ 変更ファイルが複数のプロファイル（…）に当たるため、先に書いた <名前> を使う`
+で知らせる。どれにも当たらなければプロファイルなしと同じ既定で続く。`profiles` のどれか 1 つでも形が違えば、`profiles` を
+全部捨てて既定で続け（`profile_status: unreadable`）、理由の頭に `profiles[<番号>]（<名前>）:` を付けて標準エラーと `report` に出す。
+最上位の `criteria`・`not_written` が壊れている（番号の重なりを含む）ときも同じく、`profiles` と最上位の基準を全部捨てる。
+選んだ名前は状態ファイルの `review_criteria.profile_name` と `init` の出力の `REVIEW_PROFILE_NAME=<名前>` に出る。
+`profile_name` は `version: 3` のときだけ置き、選ばなかった・壊れていたときは空文字。`REVIEW_PROFILE_NAME=` は
+`version: 3` で選んだときだけ値を持ち、ほかは空。ほかのプロファイルにも当たったときだけ、その名前を
+`review_criteria.profile_others`（宣言の順の配列）に置く。名前と `paths` だけを書いたプロファイルを選ぶと、名前だけが残り、
+プロファイルの項目は既定のまま（`profile_status` を置かない）。
+
+最上位の `criteria`・`not_written` を書いた宣言では、選んだプロファイル（選ばなかったときは既定の組）にそれを足した組が
+効き、状態ファイルの `profile` と振り分けの JSON の `review_profile` にも足した組が写る（`profile_status: declared`）。
+どの PR にも効かせたい基準は最上位に 1 か所だけ書き、プロファイルごとに写さない。
+
+`report` の要約は、`profile_name` があるときだけ `## レビューのプロファイル: <名前>`（空文字なら `既定`）の行を出し、
+`profile_others` があれば同じ行に `（ほかに <名前>, … にも当たった。先に書いた <名前> を使った）` を足す。
+
+状態ファイルが無いまま `/ndf:fix` を単独で使うときは、`fix-steps.py context` が宣言を読み、`version: 3` のときだけ
+`gh api repos/<repo>/pulls/<PR>/files --paginate` で変更ファイルを取って同じ規則で選ぶ。取れなければ理由を標準エラーへ出し、
+変更ファイルなしで選ぶ（`paths` を持たないプロファイルか、既定）。`review_criteria.py reviewer|fixer` は
+`--changed-file <パス>`（繰り返し可）で選ぶ。
 
 書いた鍵だけが既定を差し替え、書かない鍵は既定のまま。プロファイルがあると、修正担当への節の見送りの句は
 「対象のファイルを変えずに」になる。収束の判定・投稿の形・ラウンドの段・`review_kind` はプロファイルで変わらない。
@@ -434,5 +465,29 @@ PR の head の worktree の `.ndf/review.json` を、`init`（新規は worktre
 }
 ```
 
-再開の前に宣言を書き換えると、`init` が保存した `changed_files` から観点と指摘の基準を組み直し、保存した値と違うときだけ
-状態ファイルを書き直す。次のラウンドから新しい宣言が効く。
+`version: 3` の例（原稿のパスを 1 つでも変えた PR は `manuscript`、ほかの PR はすべて `system`。基準 9 はどちらにも効く）:
+
+```json
+{
+  "version": 3,
+  "criteria": {"9": "取得したデータとその分析の中身を、公開の置き場や外部の API へ出す"},
+  "profiles": [
+    {
+      "name": "manuscript",
+      "paths": ["works/*/chapters/*/text.md"],
+      "criteria": {"5": "人物の口調・呼び方が設定とずれる"},
+      "waive_kinds": {"taste": "好みの文体"},
+      "reply": "直しません。章を読んで困る所ではないためです（{inner}）。"
+    },
+    {
+      "name": "system",
+      "criteria": {"1": "利用者が普通に使う経路で、誤動作する・止まる・データを壊す"},
+      "waive_kinds": {"wording": "字句や言い回しの修正"},
+      "reply": "直しません。この指摘は、使って困る不具合ではないためです（{inner}）。"
+    }
+  ]
+}
+```
+
+再開の前に宣言を書き換えると、`init` が保存した `changed_files` からプロファイルを選び直し、観点と指摘の基準を組み直して、
+保存した値と違うときだけ状態ファイルを書き直す。再開では変更ファイルを GitHub から取り直さない。次のラウンドから新しい宣言が効く。

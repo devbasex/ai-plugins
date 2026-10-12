@@ -64,7 +64,7 @@ def test_declared_focus_appears_by_name_in_criterion_3(tmp_path):
     [
         "{not json",
         json.dumps({"version": 1, "focus": "文字列"}),
-        json.dumps({"version": 3, "focus": ["x"]}),
+        json.dumps({"version": 4, "focus": ["x"]}),
         json.dumps({"version": True, "focus": ["x"]}),
         json.dumps({"version": 2, "focus": "x"}),
         json.dumps(["x"]),
@@ -129,9 +129,11 @@ NOVEL = {
 }
 
 
-def _profile(root: Path, profile: dict, **extra) -> rc.ReviewDecl:
+def _profile(root: Path, profile: dict, **extra) -> tuple[rc.Focus, rc.Profile]:
     _declare(root, json.dumps({"version": 2, "profile": profile, **extra}, ensure_ascii=False))
-    return rc.load_review_decl(root)
+    decl = rc.load_review_decl(root)
+    assert decl.profiles is None
+    return decl.focus, decl.profile
 
 
 def _cli(block: str, root: Path) -> subprocess.CompletedProcess:
@@ -143,8 +145,9 @@ def test_without_profile_output_is_unchanged(tmp_path, decl):
     """受け入れ条件 1・I1: プロファイルが無いときは、既定の節・返信と同じで、状態にプロファイルの項目を置かない。"""
     if decl is not None:
         _declare(tmp_path, json.dumps(decl, ensure_ascii=False))
-    focus, profile = rc.load_review_decl(tmp_path)
-    assert profile == rc.NO_PROFILE
+    decl = rc.load_review_decl(tmp_path)
+    focus, profile = decl.focus, decl.profile
+    assert profile == rc.NO_PROFILE and decl.profiles is None
     assert rc.reviewer_block(focus, None, profile) == rc.reviewer_block(focus)
     assert rc.fixer_block(focus, None, profile) == rc.fixer_block(focus)
     assert "コードを変えずに" in rc.fixer_block(focus)
@@ -262,3 +265,263 @@ def test_profile_categories_match_like_pace_globs(tmp_path):
     assert rc.profile_categories(profile, ["works/novel-a/chapters/011/text.md"]) == [("manuscript", "## 原稿の観点")]
     assert rc.profile_categories(profile, ["works/novel-a/x/chapters/011/text.md", "README.md"]) == []
     assert rc.profile_categories(rc.NO_PROFILE, ["works/novel-a/chapters/011/text.md"]) == []
+
+
+# --- 名前つきの複数のプロファイル（version 3・#1942） --------------------------------------
+
+MANUSCRIPT_PATH = "works/novel-a/chapters/011/text.md"
+MANUSCRIPT = {
+    "name": "manuscript",
+    "paths": ["works/*/chapters/*/text.md"],
+    "criteria": {"5": "人物の口調・呼び方が設定とずれる"},
+    "not_written": ["好みの文体"],
+    "waive_kinds": {"taste": "好みの文体"},
+    "reply": "直しません。章を読んで困る所ではないためです（{inner}）。",
+    "categories": {"manuscript": {"paths": ["works/*/chapters/*/text.md"], "instructions": "## 原稿の観点"}},
+    "replace_auto_categories": True,
+}
+SYSTEM = {
+    "name": "system",
+    "criteria": {"1": "利用者が普通に使う経路で、誤動作する"},
+    "waive_kinds": {"wording": "字句や言い回しの修正"},
+    "reply": "直しません。この指摘は、使って困る不具合ではないためです（{inner}）。",
+    "categories": {"scripts": {"paths": ["scripts/**"], "instructions": "## 仕組みの観点"}},
+}
+
+
+def _profiles(root: Path, profiles, **extra) -> rc.ReviewDecl:
+    _declare(root, json.dumps({"version": 3, "profiles": profiles, **extra}, ensure_ascii=False))
+    return rc.load_review_decl(root)
+
+
+def _pick(root: Path, profiles, paths, **extra) -> tuple[rc.ReviewDecl, tuple[str, ...]]:
+    return rc.select_profile(_profiles(root, profiles, **extra), paths)
+
+
+def test_manuscript_paths_pick_only_the_manuscript_profile(tmp_path):
+    """受け入れ条件 1・4・5: 原稿のプロファイルの基準・書かないもの・見送りの種類だけが出て、基準 2 は残る。"""
+    decl, others = _pick(tmp_path, [MANUSCRIPT, SYSTEM], [MANUSCRIPT_PATH])
+    assert decl.profile.name == "manuscript" and others == ()
+    reviewer, fixer = rc.reviewer_block(decl.focus, None, decl.profile), rc.fixer_block(decl.focus, None, decl.profile)
+    for block in (reviewer, fixer):
+        assert "人物の口調・呼び方が設定とずれる" in block and f"2. {rc.CRITERIA[2]}" in block
+        assert "誤動作する" not in block and "wording" not in block
+    assert "`taste`" in fixer
+    assert rc.criterion_numbers(decl.profile) == (2, 3, 5)
+    assert rc.waiver_reply("taste", profile=decl.profile) == "直しません。章を読んで困る所ではないためです（好みの文体）。"
+
+
+def test_system_paths_pick_the_profile_without_paths(tmp_path):
+    """受け入れ条件 2・8: 原稿に当たらない PR は paths を持たない仕組みのプロファイルになる。"""
+    decl, _ = _pick(tmp_path, [MANUSCRIPT, SYSTEM], ["scripts/a.py"])
+    assert decl.profile.name == "system"
+    block = rc.fixer_block(decl.focus, None, decl.profile)
+    assert "誤動作する" in block and "`wording`" in block and f"2. {rc.CRITERIA[2]}" in block
+    assert "口調" not in block and "taste" not in block
+    assert rc.profile_categories(decl.profile, [MANUSCRIPT_PATH, "scripts/a.py"]) == [("scripts", "## 仕組みの観点")]
+
+
+def test_a_pr_across_both_picks_the_first_written(tmp_path):
+    """受け入れ条件 7・I1・I2: 先に書いたものを選び、ほかに当たった名前を返す。順を入れ替えれば仕組みになる。"""
+    paths = [MANUSCRIPT_PATH, "scripts/a.py"]
+    decl, others = _pick(tmp_path, [MANUSCRIPT, {**SYSTEM, "paths": ["scripts/**"]}], paths)
+    assert decl.profile.name == "manuscript" and others == ("system",)
+    assert "誤動作する" not in rc.reviewer_block(decl.focus, None, decl.profile)
+    assert rc.multi_profile_notice(decl.profile, others) == (
+        "⚠️ 変更ファイルが複数のプロファイル（manuscript, system）に当たるため、先に書いた manuscript を使う"
+    )
+    decl, others = _pick(tmp_path, [{**SYSTEM, "paths": ["scripts/**"]}, MANUSCRIPT], paths)
+    assert decl.profile.name == "system" and others == ("manuscript",)
+
+
+def test_the_profile_without_paths_is_not_counted_as_another_hit(tmp_path):
+    _, others = _pick(tmp_path, [MANUSCRIPT, SYSTEM], [MANUSCRIPT_PATH])
+    assert others == ()
+
+
+@pytest.mark.parametrize("focus", [None, ["重点 A"]])
+def test_no_hit_and_no_fallback_equals_the_defaults(tmp_path, focus):
+    """受け入れ条件 9: どれにも当たらず受け皿も無ければ、宣言が無いときの既定（重点を含む）と同じで、名前は空文字。"""
+    extra = {"focus": focus} if focus else {}
+    decl, _ = _pick(tmp_path, [MANUSCRIPT], ["README.md"], **extra)
+    assert decl.profile == rc.Profile("none", name="")
+    expected = rc.load_focus(_declare(tmp_path / "v1", json.dumps({"version": 1, "focus": focus or []})))
+    assert decl.focus == expected
+    assert rc.reviewer_block(decl.focus, None, decl.profile) == rc.reviewer_block(expected)
+    assert rc.fixer_block(decl.focus, None, decl.profile) == rc.fixer_block(expected)
+    st = rc.as_state(decl.focus, None, decl.profile)
+    assert st["profile_name"] == "" and "profile_status" not in st
+    assert {k: v for k, v in st.items() if k != "profile_name"} == rc.as_state(expected)
+
+
+@pytest.mark.parametrize("profiles", [None, []])
+def test_no_profiles_selects_nothing(tmp_path, profiles):
+    decl, _ = _pick(tmp_path, profiles, [MANUSCRIPT_PATH])
+    assert decl.profile == rc.Profile("none", name="") and rc.as_state(decl.focus, None, decl.profile)["profile_name"] == ""
+
+
+def test_v3_state_carries_the_chosen_name_and_the_record_without_it(tmp_path):
+    """受け入れ条件 11・I9・決定 5: profile_name は状態にだけ置き、写し（profile）には入れない。"""
+    decl, _ = _pick(tmp_path, [MANUSCRIPT, SYSTEM], [MANUSCRIPT_PATH])
+    st = rc.as_state(decl.focus, None, decl.profile)
+    assert st["profile_name"] == "manuscript" and st["profile_status"] == "declared"
+    assert st["profile"] == {k: v for k, v in MANUSCRIPT.items() if k not in ("name", "paths")}
+    assert rc.state_profile(st).record() == decl.profile.record()
+
+
+def test_a_profile_with_only_name_and_paths_keeps_the_default_wording(tmp_path):
+    """中身の無いプロファイル: 状態は none のまま、見送りの句は「コード」、名前は残る。"""
+    decl, _ = _pick(tmp_path, [{"name": "bare", "paths": ["docs/**"]}], ["docs/a.md"])
+    assert decl.profile.status == "none" and decl.profile.name == "bare"
+    st = rc.as_state(decl.focus, None, decl.profile)
+    assert st["profile_name"] == "bare" and "profile_status" not in st
+    assert "コードを変えずに" in rc.fixer_block(decl.focus, None, decl.profile)
+
+
+@pytest.mark.parametrize(
+    "decl",
+    [
+        {"profiles": [MANUSCRIPT, {**SYSTEM, "name": "manuscript"}]},
+        {"profiles": [SYSTEM, MANUSCRIPT]},
+        {"profiles": [SYSTEM, {**SYSTEM, "name": "other"}]},
+        {"profiles": [{**MANUSCRIPT, "unknown": 1}]},
+        {"profiles": [{**MANUSCRIPT, "criteria": {"2": "上書き"}}]},
+        {"profiles": [{**MANUSCRIPT, "paths": []}]},
+        {"profiles": [{**MANUSCRIPT, "name": "Bad-Name"}]},
+        {"profiles": [{k: v for k, v in MANUSCRIPT.items() if k != "name"}]},
+        {"profiles": ["manuscript"]},
+        {"profiles": {"manuscript": MANUSCRIPT}},
+        {"profiles": [MANUSCRIPT], "profile": {"criteria": {"5": "x"}}},
+    ],
+)
+def test_a_broken_profile_drops_all_profiles_and_keeps_focus(tmp_path, decl):
+    """受け入れ条件 14・I3・I4・I6: どれか 1 つが壊れていれば全部を捨てて既定で続け、重点は効く。"""
+    _declare(tmp_path, json.dumps({"version": 3, "focus": ["重点 A"], **decl}, ensure_ascii=False))
+    loaded = rc.load_review_decl(tmp_path)
+    assert loaded.profile.status == "unreadable" and loaded.profile.name == "" and loaded.profiles == ()
+    assert loaded.profile.error and "review.json" in loaded.profile.error
+    chosen, others = rc.select_profile(loaded, [MANUSCRIPT_PATH])
+    assert chosen == loaded and others == ()
+    st = rc.as_state(chosen.focus, None, chosen.profile)
+    assert st["profile_status"] == "unreadable" and st["profile_name"] == "" and "重点 A" in st["reviewer_block"]
+    assert "字句や言い回し" in st["reviewer_block"]
+
+
+def test_a_broken_profile_names_its_position(tmp_path):
+    loaded = _profiles(tmp_path, [MANUSCRIPT, {**SYSTEM, "reply": "{inner}{inner}"}])
+    assert "profiles[1]（system）:" in loaded.profile.error
+
+
+@pytest.mark.parametrize(
+    "decl", [None, {"version": 1, "focus": ["重点 A"]}, {"version": 2, "focus": ["重点 A"]}, {"version": 2, "profile": NOVEL}]
+)
+def test_v1_v2_are_untouched_by_the_selection(tmp_path, decl):
+    """受け入れ条件 10・I5: 選択は何も変えず、状態に profile_name を置かない。"""
+    if decl is not None:
+        _declare(tmp_path, json.dumps(decl, ensure_ascii=False))
+    loaded = rc.load_review_decl(tmp_path)
+    chosen, others = rc.select_profile(loaded, [MANUSCRIPT_PATH])
+    assert chosen == loaded and others == () and loaded.profile.name is None
+    assert "profile_name" not in rc.as_state(chosen.focus, None, chosen.profile)
+
+
+def test_context_decl_selects_only_for_v3(tmp_path, capsys):
+    """受け入れ条件 13・決定 6: 状態ファイルが無いとき、version 3 だけが変更ファイルを取って選ぶ。"""
+    calls = []
+
+    def paths_of():
+        calls.append(1)
+        return [MANUSCRIPT_PATH, "scripts/a.py"]
+
+    _profiles(tmp_path, [MANUSCRIPT, {**SYSTEM, "paths": ["scripts/**"]}])
+    decl = rc.context_decl(None, lambda: tmp_path, paths_of)
+    assert decl.profile.name == "manuscript" and calls == [1]
+    assert "先に書いた manuscript を使う" in capsys.readouterr().err
+    _declare(tmp_path, json.dumps({"version": 2, "profile": NOVEL}, ensure_ascii=False))
+    assert rc.context_decl(None, lambda: tmp_path, paths_of).profile.status == "declared" and calls == [1]
+
+
+def test_cli_selects_with_changed_files(tmp_path):
+    _profiles(tmp_path, [MANUSCRIPT, SYSTEM])
+    base = [sys.executable, str(LIB / "review_criteria.py"), "fixer", "--root", str(tmp_path)]
+    p = subprocess.run([*base, "--changed-file", MANUSCRIPT_PATH], capture_output=True, text=True)
+    assert p.returncode == 0 and "`taste`" in p.stdout and "`wording`" not in p.stdout
+    p = subprocess.run(base, capture_output=True, text=True)
+    assert p.returncode == 0 and "`wording`" in p.stdout and "`taste`" not in p.stdout
+
+
+def test_cli_with_a_broken_v3_declaration_exits_zero(tmp_path):
+    _profiles(tmp_path, [SYSTEM, MANUSCRIPT])
+    p = _cli("reviewer", tmp_path)
+    assert p.returncode == 0 and "profiles[1]（manuscript）" in p.stderr
+    assert _criterion_numbers(p.stdout) == ["1", "2", "4"]
+
+
+SHARED = {"criteria": {"9": "取得したデータを公開の置き場へ出す"}, "not_written": ["好みの文体", "表記の揃え"]}
+
+
+@pytest.mark.parametrize(("paths", "name"), [([MANUSCRIPT_PATH], "manuscript"), (["scripts/a.py"], "system")])
+def test_top_level_criteria_apply_to_every_profile(tmp_path, paths, name):
+    """決定 7: 最上位の criteria と not_written は、選んだどのプロファイルにも足され、finalize でも番号が通る。"""
+    decl, _ = _pick(tmp_path, [MANUSCRIPT, SYSTEM], paths, **SHARED)
+    assert decl.profile.name == name
+    for block in (rc.reviewer_block(decl.focus, None, decl.profile), rc.fixer_block(decl.focus, None, decl.profile)):
+        assert "9. 取得したデータを公開の置き場へ出す" in block and f"2. {rc.CRITERIA[2]}" in block
+    assert 9 in rc.criterion_numbers(rc.profile_from(decl.profile.record()))
+    st = rc.as_state(decl.focus, None, decl.profile)
+    assert rc.state_profile(st).criteria == decl.profile.criteria and st["profile_name"] == name
+
+
+def test_top_level_not_written_comes_first_without_duplicates(tmp_path):
+    decl, _ = _pick(tmp_path, [MANUSCRIPT, SYSTEM], [MANUSCRIPT_PATH], **SHARED)
+    assert decl.profile.not_written == ("好みの文体", "表記の揃え")
+    decl, _ = _pick(tmp_path, [MANUSCRIPT, SYSTEM], ["scripts/a.py"], **SHARED)
+    assert decl.profile.not_written == ("好みの文体", "表記の揃え", *rc.NOT_WRITTEN.split("・"))
+
+
+def test_top_level_criteria_apply_when_no_profile_is_selected(tmp_path):
+    """決定 7: どのプロファイルも選ばなかった PR では、NDF の既定の組へ足す。"""
+    decl, _ = _pick(tmp_path, [MANUSCRIPT], ["README.md"], criteria=SHARED["criteria"])
+    assert decl.profile.name == "" and decl.profile.criteria == {1: rc.CRITERIA[1], 4: rc.CRITERIA[4], 9: SHARED["criteria"]["9"]}
+    assert rc.reviewer_block(decl.focus, None, decl.profile).count("字句や言い回し") == 1
+    decl, _ = _pick(tmp_path, None, ["README.md"], **SHARED)
+    assert 9 in decl.profile.criteria and decl.profile.name == ""
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"criteria": {"5": "原稿と重なる"}},
+        {"criteria": {"1": "仕組みと重なる"}},
+        {"criteria": {"2": "外せない基準と重なる"}},
+        {"criteria": {"9": ""}},
+        {"not_written": "文字列"},
+    ],
+)
+def test_a_broken_top_level_drops_all_profiles(tmp_path, extra):
+    """決定 7・I6: 最上位の基準の番号の重なりや形の違いは、壊れた宣言として profiles も最上位の基準も捨てる。"""
+    loaded = _profiles(tmp_path, [MANUSCRIPT, SYSTEM], focus=["重点 A"], **extra)
+    assert loaded.profile.status == "unreadable" and loaded.profiles == () and loaded.focus.names == ("重点 A",)
+    chosen, _ = rc.select_profile(loaded, [MANUSCRIPT_PATH])
+    assert chosen.profile.status == "unreadable" and "9." not in rc.reviewer_block(chosen.focus, None, chosen.profile)
+
+
+def test_top_level_overlapping_the_default_criteria_is_broken_when_the_defaults_can_apply(tmp_path):
+    """どれにも当たらない PR に既定の基準 1・4 が効くとき、最上位の 1 は既定と重なる。"""
+    assert _profiles(tmp_path, [MANUSCRIPT], criteria={"4": "x"}).profile.status == "unreadable"
+    assert _profiles(tmp_path, [MANUSCRIPT, SYSTEM], criteria={"4": "x"}).profile.status == "none"
+
+
+def test_v1_v2_ignore_top_level_criteria(tmp_path):
+    _declare(tmp_path, json.dumps({"version": 2, "focus": ["重点 A"], **SHARED}, ensure_ascii=False))
+    loaded = rc.load_review_decl(tmp_path)
+    chosen, _ = rc.select_profile(loaded, [MANUSCRIPT_PATH])
+    assert chosen.profile == rc.NO_PROFILE and "9." not in rc.reviewer_block(chosen.focus, None, chosen.profile)
+
+
+def test_other_hits_are_kept_in_the_state(tmp_path):
+    """決定 8: ほかのプロファイルにも当たった名前を review_criteria の profile_others に置く（当たらなければ置かない）。"""
+    decl, _ = _pick(tmp_path, [MANUSCRIPT, {**SYSTEM, "paths": ["scripts/**"]}], [MANUSCRIPT_PATH, "scripts/a.py"])
+    assert rc.as_state(decl.focus, None, decl.profile, decl.others)["profile_others"] == ["system"]
+    decl, _ = _pick(tmp_path, [MANUSCRIPT, SYSTEM], [MANUSCRIPT_PATH])
+    assert "profile_others" not in rc.as_state(decl.focus, None, decl.profile, decl.others)

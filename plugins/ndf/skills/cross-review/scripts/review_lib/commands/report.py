@@ -271,8 +271,15 @@ def _print_rejected(st: dict) -> None:
 
 
 def _print_review_focus(st: dict) -> None:
-    """レビューの重点の宣言・プロファイルが読めなかったときだけ出す（既定の基準で続けた。#1910）。"""
+    """レビューの重点の宣言・プロファイルが読めなかったときだけ出す（既定の基準で続けた。#1910）。
+    `version: 3` の宣言（`profile_name` がある）では、どのプロファイルで見たかの行も出す（#1942 の決定 8）。"""
     crit = st.get("review_criteria") or {}
+    name = crit.get("profile_name") if isinstance(crit, dict) else None
+    if isinstance(name, str):
+        others = [o for o in crit.get("profile_others") or [] if isinstance(o, str)]
+        tail = f"（ほかに {', '.join(others)} にも当たった。先に書いた {name} を使った）" if others else ""
+        print(f"## レビューのプロファイル: {name or '既定'}{tail}")
+        print()
     if isinstance(crit, dict) and crit.get("status") == "unreadable":
         print(f"## レビューの重点の宣言: 読めなかった（基準 1・2・4 だけで続けた）: {crit.get('error')}")
         print()

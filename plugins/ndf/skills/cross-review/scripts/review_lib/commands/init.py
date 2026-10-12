@@ -46,6 +46,7 @@ class _InitResult(NamedTuple):
     resumed: bool
     review_focus: str = "none"
     review_profile: str = "none"
+    review_profile_name: str = ""
 
 
 def _print_init_result(result: _InitResult) -> None:
@@ -67,22 +68,22 @@ def _print_init_result(result: _InitResult) -> None:
     print(f"RESUMED={'1' if result.resumed else '0'}")
     print(f"REVIEW_FOCUS={result.review_focus}")
     print(f"REVIEW_PROFILE={result.review_profile}")
+    print(f"REVIEW_PROFILE_NAME={result.review_profile_name}")
 
 
-def _rewrite_review_criteria(state_file: pathlib.Path, worktree: object, base_branch: object = "") -> tuple[str, str]:
+def _rewrite_review_criteria(state_file: pathlib.Path, worktree: object, base_branch: object = "") -> tuple[str, str, str]:
     """再開で、同期した後の作業ツリーから宣言を読み直し、指摘の基準と自動レビュー観点を組み直して、
-    保存した値と違うときだけ状態ファイルへ書く（I7）。(重点の状態, プロファイルの状態) を返す。
+    保存した値と違うときだけ状態ファイルへ書く（I7）。(重点の状態, プロファイルの状態, プロファイルの名前) を返す。
 
     待ち行列を流した結果は状態ファイルへ直接書かれているため、手元の `st` ではなく
-    ファイルを読み直してから書く。
-    """
-    decl = review_focus._read_review_decl(worktree)
-    crit = review_focus._review_criteria(worktree, base_branch, decl)
-    statuses = (crit["status"], review_focus._profile_status(crit))
+    ファイルを読み直してから書く。プロファイルは保存した `changed_files` で選ぶため、状態ファイルを先に読む（#1942）。"""
     try:
         st = json.loads(state_file.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return statuses
+        st = None
+    decl = review_focus._select_profile(review_focus._read_review_decl(worktree), st.get("changed_files") if isinstance(st, dict) else [])
+    crit = review_focus._review_criteria(worktree, base_branch, decl)
+    statuses = (crit["status"], review_focus._profile_status(crit), review_focus._profile_name(crit))
     if not isinstance(st, dict):
         return statuses
     updated = json.loads(json.dumps(st))
@@ -192,7 +193,9 @@ def _resume_from_state(
         review_lib.info("↻ 追加レビュー観点を state に反映して再開")
 
     tmp_dir = _sync_resume_worktree(st, pr, worktree)
-    focus_status, profile_status = _rewrite_review_criteria(resume_state_file, st.get("worktree_path") or "", st.get("base_branch") or "")
+    focus_status, profile_status, profile_name = _rewrite_review_criteria(
+        resume_state_file, st.get("worktree_path") or "", st.get("base_branch") or ""
+    )
     review_lib.info(f"↻ 前回中断 state から再開（round={len(st.get('rounds', []))}）")
     _print_init_result(
         _InitResult(
@@ -209,6 +212,7 @@ def _resume_from_state(
             resumed=True,
             review_focus=focus_status,
             review_profile=profile_status,
+            review_profile_name=profile_name,
         )
     )
     return True
@@ -348,6 +352,135 @@ def _build_initial_review_state(
     }
 
 
+def _resolve_pr_and_ownership(pr: object, repo: str, worktree: str, args_worktree: str | None) -> _InitPRContext | None:
+    # 新規 init: プリチェック。
+    # **作成者・head・base は REST の 1 回でまとめて取る。** 項目ごとに `gh pr view` を
+    # 投げていた分（GraphQL 3 点）と、リポジトリ名の解決（同 1 点）が 0 点になる。
+    meta = github._fetch_pr_metadata(pr, repo)
+    if meta is None:
+        review_lib.die(f"PR #{pr} のメタデータを取得できません（リポジトリ名: {repo}）")
+        return None
+    if meta.repo != repo:
+        repo = meta.repo
+        if not args_worktree:
+            worktree = str(workspace_mod._default_worktree_base() / github._repo_slug(repo) / f"pr{pr}")
+    if meta.rate_remaining is not None:
+        review_lib.info(f"ℹ GitHub REST の残量: {meta.rate_remaining}")
+
+    me = github._viewer_login()
+    if not me:
+        review_lib.die("認証している利用者を gh api user で求められません")
+    author = meta.author
+    is_own = me == author
+    if is_own:
+        review_lib.info(f"⚠ 自分の PR (author={me}) — REQUEST_CHANGES → COMMENT 強制ダウングレード")
+
+    return _InitPRContext(
+        repo=repo,
+        worktree=worktree,
+        meta=meta,
+        me=me,
+        author=author,
+        is_own=is_own,
+        event_downgrade=is_own,
+    )
+
+
+def _prepare_review_instructions(
+    pr: object, repo: str, manual_extra_review: str, decl: review_criteria.ReviewDecl
+) -> tuple[_InitReviewContext, review_criteria.ReviewDecl]:
+    changed_files = github._fetch_changed_files(pr, repo)
+    # 変更ファイルを取った直後にプロファイルを選び、観点と指摘の基準の両方へ同じものを渡す（#1942）
+    decl = review_focus._select_profile(decl, changed_files)
+    default_categories = categories_mod._classify_changed_files(changed_files)
+    auto_review_categories, auto_review = review_focus._auto_review(default_categories, changed_files, decl.profile)
+    review_instructions = review_focus._combined_review_instructions(auto_review, manual_extra_review)
+    return _InitReviewContext(
+        changed_files=changed_files,
+        default_categories=default_categories,
+        auto_review_categories=auto_review_categories,
+        auto_review=auto_review,
+        review_instructions=review_instructions,
+    ), decl
+
+
+def _prepare_worktree_and_comments(worktree: str, pr: object, head_branch: str, repo: str, is_fork: bool = False) -> _InitWorkspaceContext:
+    # worktree 分離 — _tmp_dir() より先に worktree を作成/確認する
+    reused = False
+    if not pathlib.Path(worktree).exists():
+        workspace_mod._create_worktree(worktree, pr, head_branch)
+    elif workspace_mod._is_registered_worktree(worktree):
+        review_lib.info(f"↻ 既存 worktree 流用: {worktree}")
+        workspace_mod._sync_worktree(worktree, pr, head_branch)
+        reused = True
+    else:
+        # パスは存在するが現リポジトリの worktree ではない (別リポジトリの残骸等)。
+        # 流用すると git 操作が壊れるため退避して作り直す。
+        stale = f"{worktree}.stale-{time.strftime('%Y%m%d%H%M%S')}"
+        pathlib.Path(worktree).rename(stale)
+        review_lib.info(f"⚠ 現リポジトリの worktree でないため退避: {stale}")
+        workspace_mod._create_worktree(worktree, pr, head_branch)
+    workspace_mod._prepare_review_deps(worktree, if_unprepared=reused, is_fork=is_fork)
+
+    # worktree 作成/確認後に _tmp_dir() を呼ぶ (ここで .cross_review/ が作られる)
+    tmp_dir = store._tmp_dir(worktree)
+    state_file = tmp_dir / f"cross-review-pr{pr}-state.json"
+
+    # 既存コメントスナップショット（重複指摘防止）。
+    # 3 ソース (インラインコメント / レビュー body / PR レベルコメント) を
+    # fix skill の共有スクリプトで一括取得する。
+    existing_path = tmp_dir / f"cross-review-pr{pr}-existing-comments.txt"
+    error = github._fetch_existing_comments(repo, int(pr), existing_path, strict=False)
+    if error is not None:
+        review_lib.die(f"既存コメント取得失敗 (重複検出無効のため中断): {error}")
+
+    return _InitWorkspaceContext(
+        tmp_dir=tmp_dir,
+        state_file=state_file,
+    )
+
+
+def _finalize_initial_state(
+    args: argparse.Namespace,
+    pr: object,
+    pr_ctx: _InitPRContext,
+    review_ctx: _InitReviewContext,
+    ws_ctx: _InitWorkspaceContext,
+    manual_extra_review: str,
+    decl: review_criteria.ReviewDecl,
+) -> None:
+    initial_assignment = _prepare_initial_assignment(args)
+    context = _InitialStateContext(pr, pr_ctx, review_ctx, ws_ctx, initial_assignment, manual_extra_review)
+    state = _build_initial_review_state(args, context)
+    state["design_doc_oversize"] = categories_mod._warn_oversized_design_docs(pr_ctx.worktree, review_ctx.changed_files)
+    state.update(
+        review_focus._design_stage_fields(
+            state["review_kind"], pr_ctx.worktree, review_ctx.changed_files, review_ctx.review_instructions, manual_extra_review
+        )
+    )
+    state["review_criteria"] = review_focus._review_criteria(pr_ctx.worktree, pr_ctx.meta.base_branch, decl)
+    store._write_state(ws_ctx.state_file, state)
+    review_lib.info(f"✅ state 初期化: {ws_ctx.state_file}")
+    _print_init_result(
+        _InitResult(
+            pr=pr,
+            worktree=pr_ctx.worktree,
+            tmp_dir=ws_ctx.tmp_dir,
+            repo=pr_ctx.repo,
+            head_branch=pr_ctx.meta.head_branch,
+            base_branch=pr_ctx.meta.base_branch,
+            is_own=pr_ctx.is_own,
+            event_downgrade=pr_ctx.event_downgrade,
+            has_extra=bool(review_ctx.review_instructions),
+            carried_count=0,
+            resumed=False,
+            review_focus=state["review_criteria"]["status"],
+            review_profile=review_focus._profile_status(state["review_criteria"]),
+            review_profile_name=review_focus._profile_name(state["review_criteria"]),
+        )
+    )
+
+
 def _init_new_state(
     args: argparse.Namespace,
     pr: object,
@@ -356,132 +489,6 @@ def _init_new_state(
     manual_extra_review: str,
 ) -> None:
     """新規 init 経路: プリチェック → worktree 作成 → state 構築 → 出力。"""
-
-    def _resolve_pr_and_ownership(pr: object, repo: str, worktree: str, args_worktree: str | None) -> _InitPRContext | None:
-        # 新規 init: プリチェック。
-        # **作成者・head・base は REST の 1 回でまとめて取る。** 項目ごとに `gh pr view` を
-        # 投げていた分（GraphQL 3 点）と、リポジトリ名の解決（同 1 点）が 0 点になる。
-        meta = github._fetch_pr_metadata(pr, repo)
-        if meta is None:
-            review_lib.die(f"PR #{pr} のメタデータを取得できません（リポジトリ名: {repo}）")
-            return None
-        if meta.repo != repo:
-            repo = meta.repo
-            if not args_worktree:
-                worktree = str(workspace_mod._default_worktree_base() / github._repo_slug(repo) / f"pr{pr}")
-        if meta.rate_remaining is not None:
-            review_lib.info(f"ℹ GitHub REST の残量: {meta.rate_remaining}")
-
-        me = github._viewer_login()
-        if not me:
-            review_lib.die("認証している利用者を gh api user で求められません")
-        author = meta.author
-        is_own = me == author
-        event_downgrade = is_own
-        if is_own:
-            review_lib.info(f"⚠ 自分の PR (author={me}) — REQUEST_CHANGES → COMMENT 強制ダウングレード")
-
-        return _InitPRContext(
-            repo=repo,
-            worktree=worktree,
-            meta=meta,
-            me=me,
-            author=author,
-            is_own=is_own,
-            event_downgrade=event_downgrade,
-        )
-
-    def _prepare_review_instructions(
-        pr: object, repo: str, manual_extra_review: str, profile: review_criteria.Profile
-    ) -> _InitReviewContext:
-        changed_files = github._fetch_changed_files(pr, repo)
-        default_categories = categories_mod._classify_changed_files(changed_files)
-        auto_review_categories, auto_review = review_focus._auto_review(default_categories, changed_files, profile)
-        review_instructions = review_focus._combined_review_instructions(auto_review, manual_extra_review)
-        return _InitReviewContext(
-            changed_files=changed_files,
-            default_categories=default_categories,
-            auto_review_categories=auto_review_categories,
-            auto_review=auto_review,
-            review_instructions=review_instructions,
-        )
-
-    def _prepare_worktree_and_comments(
-        worktree: str, pr: object, head_branch: str, repo: str, is_fork: bool = False
-    ) -> _InitWorkspaceContext:
-        # worktree 分離 — _tmp_dir() より先に worktree を作成/確認する
-        reused = False
-        if not pathlib.Path(worktree).exists():
-            workspace_mod._create_worktree(worktree, pr, head_branch)
-        elif workspace_mod._is_registered_worktree(worktree):
-            review_lib.info(f"↻ 既存 worktree 流用: {worktree}")
-            workspace_mod._sync_worktree(worktree, pr, head_branch)
-            reused = True
-        else:
-            # パスは存在するが現リポジトリの worktree ではない (別リポジトリの残骸等)。
-            # 流用すると git 操作が壊れるため退避して作り直す。
-            stale = f"{worktree}.stale-{time.strftime('%Y%m%d%H%M%S')}"
-            pathlib.Path(worktree).rename(stale)
-            review_lib.info(f"⚠ 現リポジトリの worktree でないため退避: {stale}")
-            workspace_mod._create_worktree(worktree, pr, head_branch)
-        workspace_mod._prepare_review_deps(worktree, if_unprepared=reused, is_fork=is_fork)
-
-        # worktree 作成/確認後に _tmp_dir() を呼ぶ (ここで .cross_review/ が作られる)
-        tmp_dir = store._tmp_dir(worktree)
-        state_file = tmp_dir / f"cross-review-pr{pr}-state.json"
-
-        # 既存コメントスナップショット（重複指摘防止）。
-        # 3 ソース (インラインコメント / レビュー body / PR レベルコメント) を
-        # fix skill の共有スクリプトで一括取得する。
-        existing_path = tmp_dir / f"cross-review-pr{pr}-existing-comments.txt"
-        error = github._fetch_existing_comments(repo, int(pr), existing_path, strict=False)
-        if error is not None:
-            review_lib.die(f"既存コメント取得失敗 (重複検出無効のため中断): {error}")
-
-        return _InitWorkspaceContext(
-            tmp_dir=tmp_dir,
-            state_file=state_file,
-        )
-
-    def _finalize_initial_state(
-        args: argparse.Namespace,
-        pr: object,
-        pr_ctx: _InitPRContext,
-        review_ctx: _InitReviewContext,
-        ws_ctx: _InitWorkspaceContext,
-        manual_extra_review: str,
-        decl: review_criteria.ReviewDecl,
-    ) -> None:
-        initial_assignment = _prepare_initial_assignment(args)
-        context = _InitialStateContext(pr, pr_ctx, review_ctx, ws_ctx, initial_assignment, manual_extra_review)
-        state = _build_initial_review_state(args, context)
-        state["design_doc_oversize"] = categories_mod._warn_oversized_design_docs(pr_ctx.worktree, review_ctx.changed_files)
-        state.update(
-            review_focus._design_stage_fields(
-                state["review_kind"], pr_ctx.worktree, review_ctx.changed_files, review_ctx.review_instructions, manual_extra_review
-            )
-        )
-        state["review_criteria"] = review_focus._review_criteria(pr_ctx.worktree, pr_ctx.meta.base_branch, decl)
-        store._write_state(ws_ctx.state_file, state)
-        review_lib.info(f"✅ state 初期化: {ws_ctx.state_file}")
-        _print_init_result(
-            _InitResult(
-                pr=pr,
-                worktree=pr_ctx.worktree,
-                tmp_dir=ws_ctx.tmp_dir,
-                repo=pr_ctx.repo,
-                head_branch=pr_ctx.meta.head_branch,
-                base_branch=pr_ctx.meta.base_branch,
-                is_own=pr_ctx.is_own,
-                event_downgrade=pr_ctx.event_downgrade,
-                has_extra=bool(review_ctx.review_instructions),
-                carried_count=0,
-                resumed=False,
-                review_focus=state["review_criteria"]["status"],
-                review_profile=review_focus._profile_status(state["review_criteria"]),
-            )
-        )
-
     pr_ctx = _resolve_pr_and_ownership(pr, repo, worktree, args.worktree)
     if pr_ctx is None:
         return
@@ -489,5 +496,5 @@ def _init_new_state(
     # 宣言は PR の head の worktree にあるため、worktree を用意してから読み、観点と指摘の基準の両方へ渡す（決定 6）
     ws_ctx = _prepare_worktree_and_comments(pr_ctx.worktree, pr, pr_ctx.meta.head_branch, pr_ctx.repo, is_fork=pr_ctx.meta.is_fork)
     decl = review_focus._read_review_decl(pr_ctx.worktree)
-    review_ctx = _prepare_review_instructions(pr, pr_ctx.repo, manual_extra_review, decl.profile)
+    review_ctx, decl = _prepare_review_instructions(pr, pr_ctx.repo, manual_extra_review, decl)
     _finalize_initial_state(args, pr, pr_ctx, review_ctx, ws_ctx, manual_extra_review, decl)

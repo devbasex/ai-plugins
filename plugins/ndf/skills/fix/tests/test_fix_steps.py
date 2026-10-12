@@ -46,6 +46,9 @@ elif a[:2] == ["api", "graphql"] and "thread_pages" in st:
     out = json.dumps({{"data": {{"repository": {{"pullRequest": {{"reviewThreads": {{"pageInfo": info, "nodes": pages[n]}}}}}}}}}})
 elif a[:2] == ["api", "graphql"]:
     out = json.dumps({{"data": {{"repository": {{"pullRequest": {{"reviewThreads": {{"nodes": st["threads"]}}}}}}}}}})
+elif a[:1] == ["api"] and a[1].endswith("/files"):
+    out = "\n".join(st.get("files", []))
+    code = st.get("files_code", 0)
 elif a[:1] == ["api"]:
     ep = a[1]
     key = "inline" if ep.endswith("/comments") and "/pulls/" in ep else "reviews" if ep.endswith("/reviews") else "issue"
@@ -756,3 +759,100 @@ def test_finalize_with_a_profile_rejects_default_only_values(env):
     focus = {"review_focus": ["重点 A"], "review_focus_status": "declared"}
     code, _, _ = _finalize(env, _waived_only(review_profile=PROFILE, decisions=[{**fixed, "criterion": 3}], **focus))
     assert code == 0
+
+
+# --- 名前つきの複数のプロファイル（version 3・#1942） --------------------------------------
+
+CHAPTER = "works/novel-a/chapters/011/text.md"
+MANUSCRIPT = {
+    "name": "manuscript",
+    "paths": ["works/*/chapters/*/text.md"],
+    "criteria": {"5": "人物の口調・呼び方が設定とずれる"},
+    "waive_kinds": {"taste": "好みの文体"},
+    "reply": "直しません。章を読んで困る所ではないためです（{inner}）。",
+}
+SYSTEM = {
+    "name": "system",
+    "criteria": {"1": "利用者が普通に使う経路で、誤動作する"},
+    "waive_kinds": {"wording": "字句や言い回しの修正"},
+    "reply": "直しません。この指摘は、使って困る不具合ではないためです（{inner}）。",
+}
+
+
+def _declare_v3(root: Path, profiles: list) -> Path:
+    (root / ".ndf").mkdir(parents=True, exist_ok=True)
+    (root / ".ndf" / "review.json").write_text(json.dumps({"version": 3, "profiles": profiles}, ensure_ascii=False), encoding="utf-8")
+    return root
+
+
+def _gh_files(env, files: list[str], code: int = 0) -> None:
+    st = json.loads(env["state"].read_text(encoding="utf-8"))
+    st.update(files=files, files_code=code)
+    env["state"].write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
+
+
+def _files_calls(env) -> list[list[str]]:
+    calls = json.loads(env["state"].read_text(encoding="utf-8")).get("calls", [])
+    return [c for c in calls if c[:1] == ["api"] and c[1].endswith("/files")]
+
+
+def test_context_alone_selects_the_profile_from_the_changed_files(env):
+    """受け入れ条件 1・3・5・13: 状態ファイルが無いとき変更ファイルを 1 回取って選び、写しで finalize が検査する。"""
+    root = _declare_v3(env["root"] / "wt", [MANUSCRIPT, SYSTEM])
+    _gh_files(env, [CHAPTER])
+    code, out, _ = run("context", PR, "--repo", "o/r", "--root", root)
+    assert code == 0 and len(_files_calls(env)) == 1
+    ctx = _context_text(out)
+    assert "人物の口調・呼び方が設定とずれる" in ctx and "`taste`" in ctx and "誤動作する" not in ctx and "`wording`" not in ctx
+    copied = _context_decisions(out)["review_profile"]
+    assert copied == {k: v for k, v in MANUSCRIPT.items() if k not in ("name", "paths")}
+    d = _waived_only(review_profile=copied)
+    d["decisions"] = [{**d["decisions"][0], "waive_kind": "wording"}]
+    code, out, _ = _finalize(env, d)
+    assert code == 1 and "taste" in out["items"][0]["reason"]
+    d["decisions"] = [{**d["decisions"][0], "waive_kind": "taste"}]
+    code, _, err = _finalize(env, d)
+    assert code == 0, err
+    reply = json.loads((env["tmp"] / f"fix-pr{PR}-result.json").read_text())["deferred"][0]["reply"]
+    assert reply.startswith("直しません。章を読んで困る所ではないためです（好みの文体）。")
+
+
+def test_context_alone_with_system_paths_uses_the_fallback(env):
+    """受け入れ条件 2・4。"""
+    root = _declare_v3(env["root"] / "wt", [MANUSCRIPT, SYSTEM])
+    _gh_files(env, ["scripts/a.py"])
+    code, out, _ = run("context", PR, "--repo", "o/r", "--root", root)
+    ctx = _context_text(out)
+    assert code == 0 and "`wording`" in ctx and "口調" not in ctx and f"2. {review_criteria.CRITERIA[2]}" in ctx
+
+
+def test_context_alone_continues_when_the_changed_files_cannot_be_read(env):
+    """前提 8: 取れなければ空の列で選び（paths を持たないもの）、終了コードを変えない。"""
+    root = _declare_v3(env["root"] / "wt", [MANUSCRIPT, SYSTEM])
+    _gh_files(env, [], code=1)
+    code, out, err = run("context", PR, "--repo", "o/r", "--root", root)
+    assert code == 0 and "変更ファイルを取れない" in err and "`wording`" in _context_text(out)
+
+
+def test_context_alone_with_v2_does_not_fetch_the_changed_files(env):
+    """決定 6: version 1・2 では変更ファイルを取らない。"""
+    root = _declare_profile(env["root"] / "wt", PROFILE)
+    code, _, _ = run("context", PR, "--repo", "o/r", "--root", root)
+    assert code == 0 and _files_calls(env) == []
+
+
+def test_context_alone_adds_the_top_level_criteria_and_finalize_accepts_them(env):
+    """#1942 の決定 7: 最上位の基準は選んだプロファイルの節に出て、写しで finalize がその番号を通す。"""
+    root = _declare_v3(env["root"] / "wt", [MANUSCRIPT, SYSTEM])
+    decl = json.loads((root / ".ndf" / "review.json").read_text(encoding="utf-8"))
+    decl["criteria"] = {"9": "取得したデータを公開の置き場へ出す"}
+    (root / ".ndf" / "review.json").write_text(json.dumps(decl, ensure_ascii=False), encoding="utf-8")
+    _gh_files(env, [CHAPTER])
+    code, out, _ = run("context", PR, "--repo", "o/r", "--root", root)
+    assert code == 0 and "9. 取得したデータを公開の置き場へ出す" in _context_text(out)
+    copied = _context_decisions(out)["review_profile"]
+    d = _waived_only(review_profile=copied)
+    d["decisions"] = [{**d["decisions"][0], "decision": "fixed", "severity": "major", "criterion": 9}]
+    d["decisions"][0].pop("waive_kind", None)
+    code, _, err = _finalize(env, d)
+    assert code == 0, err
