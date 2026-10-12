@@ -181,7 +181,13 @@ def _judge_table(judge) -> list[str]:
     return lines
 
 
-def approval_present(tool: str, name: str, *, title: str, targets, change: str, judge, consent, rollback: str, path=None) -> str:
+# approval_present が書く `## ` の見出し（書く順）。承認資料の作り直しで、これ以外の節を残す（#1834）
+PRESENT_HEADINGS = ("## 1. 対象を開くためのもの", "## 2. 承認の判断に使うもの", "## 同意を求めること", "## 戻し方")
+
+
+def approval_present(
+    tool: str, name: str, *, title: str, targets, change: str, judge, consent, rollback: str, path=None, sections=()
+) -> str:
     """approval-request.md の 2 層の形で提示物の Markdown を書き出し、パスを返す。
 
     targets: [{"url", "title"?, "base_head"?}]（URL は生のまま書く）
@@ -189,15 +195,20 @@ def approval_present(tool: str, name: str, *, title: str, targets, change: str, 
     judge: [(項目, 内容)]（判断に使うもの）
     consent: 同意を求める項目の列
     rollback: 戻し方（配布では取り消しの手段とその限界）
+    sections: [(見出し, 行の列)]。`## 同意を求めること` の前へ、この順で置く
     """
     _validate_present_args(targets, consent, rollback)
-    lines = [f"# {title}", "", "## 1. 対象を開くためのもの", ""]
+    open_h, judge_h, consent_h, rollback_h = PRESENT_HEADINGS
+    lines = [f"# {title}", "", open_h, ""]
     lines += _targets_lines(targets)
-    lines += [f"- 変更量: {change}", "", "## 2. 承認の判断に使うもの", ""]
+    lines += [f"- 変更量: {change}", "", judge_h, ""]
     lines += _judge_table(judge)
-    lines += ["", "## 同意を求めること", ""]
+    lines.append("")
+    for heading, body in sections:
+        lines += [heading, "", *body, ""]
+    lines += [consent_h, ""]
     lines += [f"- [ ] {c}" for c in consent]
-    lines += ["", "## 戻し方", "", rollback.strip(), ""]
+    lines += ["", rollback_h, "", rollback.strip(), ""]
     if path is None:
         safe = re.sub(r"[^0-9A-Za-z._-]+", "-", f"{tool}-{name}").strip("-")
         path = presentation_dir() / f"{safe}-gate.md"

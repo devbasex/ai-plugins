@@ -87,13 +87,14 @@ import schema  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from merged_lib import trash  # noqa: E402
-from release_lib import approval, bump, changed, deploy, included, others, record, step_run  # noqa: E402
+from release_lib import approval, bump, carry, changed, deploy, included, instructions, others, record, replaced, step_run  # noqa: E402
 from release_lib.approval import HeadMoved  # noqa: E402
 from release_lib.names import changelog_section, changelog_span, h2_lines, next_h2, plugin_of, release_decl  # noqa: E402
 from step_result import (
     EXIT_GATE,
     EXIT_INFRA_WAIT,
     EXIT_PRECONDITION,
+    PRESENT_HEADINGS,
     StepError,
     approval_present,
     base_of,  # noqa: E402
@@ -856,6 +857,24 @@ def record_promote(root, a):
     emit(result(TOOL, "ok", *record.write(root, n, ver, prev, body, a.prs, ver)))
 
 
+APPROVAL_OWN = (*PRESENT_HEADINGS, instructions.HEADING)  # approval-facts が作り直す `## ` の節（#1834）
+
+
+def kept_sections(root, approval):
+    """前の承認資料のうち作り直しで残す節。資料を渡さない・無いときは空。読めない・H1 が無い・同じ見出しが
+    2 つあるときは StepError（2。承認資料を書かない）。"""
+    if not approval:
+        return []
+    path = Path(approval)
+    path = path if path.is_absolute() else root / path
+    if not path.is_file():
+        return []
+    try:
+        return carry.kept(path.read_text(encoding="utf-8").split("\n"), APPROVAL_OWN)
+    except (OSError, UnicodeDecodeError, ValueError) as e:
+        raise StepError(f"前の承認資料 {approval} を読めない（書き換えずに止める）: {e}", 2)
+
+
 def cmd_approval_facts(a):
     root = git_root(a.root)
     repo = repo_lib.owner_repo(root)
@@ -868,6 +887,8 @@ def cmd_approval_facts(a):
     if not prev:
         raise StepError("前のタグを決められない（--prev-tag を渡す）", EXIT_PRECONDITION)
     dev = git(root, "rev-parse", f"origin/{base}").stdout.strip()
+    keep = kept_sections(root, getattr(a, "approval", None))  # 前の承認資料の残す節（読めなければ書かずに止める。#1834）
+    changes = instructions.changed_instructions(root, prev, dev)
     prs = included.included_prs(included.range_prs(root, prev, dev), a.prs)  # 範囲の PR と --prs の和（#1274）
 
     stat = git(root, "diff", "--shortstat", f"origin/{prod}...origin/{base}").stdout.strip()
@@ -915,14 +936,27 @@ def cmd_approval_facts(a):
             f"タグ {cur_tag} と GitHub Release を消し、{prod} を {prev} の内容へ戻す PR を出す。"
             "導入済みの利用者の環境は利用者の側の操作（前の版の導入し直し）でしか戻せない。"
         ),
+        sections=[(instructions.HEADING, instructions.instruction_lines(changes, prev, dev))],
     )
+    if keep:
+        out = Path(path)
+        out.write_text("\n".join(carry.insert_kept(out.read_text(encoding="utf-8").split("\n"), keep)), encoding="utf-8")
     emit(
         result(
             TOOL,
             "gate",
             f"{plugin} v{a.version} の本番承認の提示物を書いた（PR {len(items)} 件）",
             items,
-            {"files": files, "insertions": ins, "deletions": dels, "prev_tag": prev, "compare": compare, "approved_sha": dev},
+            {
+                "files": files,
+                "insertions": ins,
+                "deletions": dels,
+                "prev_tag": prev,
+                "compare": compare,
+                "approved_sha": dev,
+                "kept": [k.heading for k in keep],
+                "instructions": len(changes),
+            },
             path,
             f"利用者の承認を得たら release-steps.py release --version {a.version} --channel prod --approved-sha {dev}",
         ),
@@ -937,13 +971,15 @@ def cmd_approve(a):
 
 CHANGES_HEADING = others.CHANGES_HEADING
 RISKS_HEADING = "## 未検証・残る危険"
+NO_RISKS = "- PR の本文に記載が無い"
 NOTES_PENDING = "（release-steps.py notes --approval が PR 本文の「利用者向けの変化」から書く）"
 RUNTIME_NAMES = {"claude": "Claude Code", "codex": "Codex", "kiro": "Kiro", "agy": "Antigravity"}
 
 
-def pr_notes(root, prs, skipped=None):
+def pr_notes(root, prs, skipped=None, replacing=None, unreadable=None):
     """PR ごとに (番号, 利用者向けの変化の箇条, 未検証・残る危険の箇条, 題名で代えたか, 移行の手順の箇条) を返す。
-    マージされていない PR は配る中身に入らないため載せず、番号を skipped へ足す。"""
+    マージされていない PR は配る中身に入らないため載せず、番号を skipped へ足す。replacing を渡すと本文の
+    `## 置き換える箇条` を足し、形に合わない行を unreadable へ items の行として足す（#1834）。"""
     out = []
     for n in prs:
         d = pr_view(root, n, "title,body,state")
@@ -955,6 +991,12 @@ def pr_notes(root, prs, skipped=None):
         body = d.get("body") or ""
         items = gh_sections.section_items(body, CHANGES_HEADING, n)
         risks = gh_sections.section_items(body, RISKS_HEADING, n)
+        if replacing is not None:
+            found, bad = replaced.replacements_in(body, n)
+            replacing += found
+            unreadable is not None and unreadable.extend(
+                {"kind": "replacement", "name": f"#{n}", "result": "unreadable", "text": t} for t in bad
+            )
         out.append((n, items or [f"{d['title'].strip()}（#{n}）"], risks, not items, others.migration_items(body, n)))
     return require_merged(out, prs)
 
@@ -1007,7 +1049,10 @@ def write_approval(path, version, bullets, risks, verified, ref, migration=()):
     missing = [k for k in rows if k not in done]
     if missing:
         raise StepError(f"提示物に欄が無い: {', '.join(missing)}", EXIT_PRECONDITION)
-    others.put_section(lines, RISKS_HEADING, risks or ["- PR の本文に記載が無い"], replace=False)
+    if any(lines[i] == RISKS_HEADING for i in h2_lines(lines)):  # 既にある危険は消さず、無い箇条だけを足す（#1834）
+        others.merge_lines(lines, RISKS_HEADING, list(risks), drop=(NO_RISKS,))
+    else:
+        others.put_section(lines, RISKS_HEADING, list(risks) or [NO_RISKS])
     others.put_section(lines, others.MIGRATION_HEADING, list(migration) or ["- 無し"])
     path.write_text("\n".join(lines), encoding="utf-8")
     return [{"kind": "cell", "name": k, "result": "written"} for k in rows] + [
@@ -1041,15 +1086,20 @@ def cmd_notes(a):
     root = git_root(a.root)
     skipped = []
     prs, path = notes_prs(root, a)
-    notes = pr_notes(root, prs, skipped)
-    bullets = [f"- {i}" for _, items, *_ in notes for i in items]
+    reps, bad = [], []
+    notes = pr_notes(root, prs, skipped, reps, bad)
+    before = {n: items for n, items, *_ in notes}
+    after, rep_items = replaced.apply(before, reps)  # 後の PR が置き換えた箇条を除く（#1834）
+    rep_items += bad
+    gone = sum(len(before[n]) - len(after[n]) for n in before)
+    bullets = [f"- {i}" for n, *_ in notes for i in after[n]]
     risks = [f"- {i}" for _, _, rs, *_ in notes for i in rs]
     migration = [f"- {i}" for *_, ms in notes for i in ms]
     fallback = sum(1 for *_, by_title, _ in notes if by_title)
     if path:
         verified = [r for r in (a.verified or "").split(",") if r]
         ref = a.ref or release_decl(root, a)[0]
-        items = write_approval(path, a.version, bullets, risks, verified, ref, migration) + unmerged_items(skipped)
+        items = write_approval(path, a.version, bullets, risks, verified, ref, migration) + unmerged_items(skipped) + rep_items
         emit(
             result(
                 TOOL,
@@ -1063,11 +1113,12 @@ def cmd_notes(a):
                     "migration": len(migration),
                     "approval": str(path),
                     "unmerged": skipped,
+                    "replaced": gone,
                 },
             )
         )
         return
-    items = write_notes(root, a.version, plugin_of(root, a), bullets, migration) + unmerged_items(skipped)
+    items = write_notes(root, a.version, plugin_of(root, a), bullets, migration) + unmerged_items(skipped) + rep_items
     emit(
         result(
             TOOL,
@@ -1081,6 +1132,7 @@ def cmd_notes(a):
                 "migration": len(migration),
                 "fallback": fallback,
                 "unmerged": skipped,
+                "replaced": gone,
             },
         )
     )
@@ -1163,6 +1215,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--prev-tag")
     p.add_argument("--plugin", help="配るプラグイン（既定は宣言の release.plugin。タグ <名前>--v<版> に使う）")
+    p.add_argument("--approval", help="前の承認資料。作り直しで approval-facts の書かない節（手で足した節など）を残す")
     p.set_defaults(func=cmd_approval_facts)
 
     p = sub.add_parser(

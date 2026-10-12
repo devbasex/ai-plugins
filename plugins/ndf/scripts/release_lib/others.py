@@ -232,6 +232,25 @@ def put_section(lines: list[str], heading: str, block: list[str], replace: bool 
     lines[at:at] = [heading, "", *block, ""]
 
 
+def merge_lines(lines: list[str], heading: str, block: list[str], drop: tuple[str, ...] = ()) -> int:
+    """承認資料の heading の節へ、block の箇条のうち節に無いもの（1 行目で比べる）だけを足し、足した数を返す。
+    1 つ以上足したら drop の行を節から外す。節が無ければ block で節を作る（put_section）。既にある行は消さない。"""
+    at = next((i for i in h2_lines(lines) if lines[i] == heading), None)
+    if at is None:
+        put_section(lines, heading, block)
+        return len(block)
+    end = next_h2(lines, at)
+    have = set(lines[at + 1 : end])
+    add = [b for b in block if b.split("\n", 1)[0] not in have]
+    if not add:
+        return 0
+    body = [x for x in lines[at + 1 : end] if x not in drop]
+    while body and body[-1] == "":
+        body.pop()
+    lines[at + 1 : end] = [*(body or [""]), *add, ""]
+    return len(add)
+
+
 def add_consent(lines: list[str]) -> bool:
     """`## 同意を求めること` の箇条の末尾へ同意の行を足す。既にある・節が無いときは足さない。"""
     if CONSENT_LINE in lines:

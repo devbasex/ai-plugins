@@ -93,7 +93,7 @@ python3 "$SCRIPTS/release-steps.py" run --root . --stage production --version 2.
 
 ```bash
 # 手順 2: 公開前の承認資料のうち機械で作れる部分を書き出す
-python3 "$SCRIPTS/release-steps.py" approval-facts --version <版> --prs <PR番号>... [--prev-tag <タグ>] --root .
+python3 "$SCRIPTS/release-steps.py" approval-facts --version <版> --prs <PR番号>... [--prev-tag <タグ>] [--approval <承認資料>] --root .
 # 手順 3: 版数と変更履歴を上げる
 python3 "$SCRIPTS/release-steps.py" bump      --plugin <名前> --to <版> --root .
 python3 "$SCRIPTS/release-steps.py" changelog --version <版> --prs <PR番号>... --root .
@@ -121,7 +121,16 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
   承認したコミットまでにベースブランチへ merge commit か squash merge で入った PR（head が `release/` の版上げの PR と、
   件名の `(#N)` が課題を指す番号を除く）と `--prs` の和を、番号の昇順に並べる。`--prs` には範囲の外の PR
   （マージ前の PR など）だけを渡せば足りる。範囲のログか squash の head を読めなければ、資料を書かずに
-  `stopped`（2 = git のログ・1 = GitHub）で止まる
+  `stopped`（2 = git のログ・1 = GitHub）で止まる。
+  `## 指示書の変更` の節には、前のタグから承認したコミットまでの first-parent のログで指示書（`.ndf/instructions.json`
+  の `files`。宣言が無ければ `AGENTS.md` と `CLAUDE.md`）に触れたコミットを、指示書ごとに `短い SHA（#PR）` と
+  差分を見るコマンド（`git diff <前のタグ> <承認したコミット> -- <ファイル>`）で並べる（触れていなければ「- 無し」。
+  個数は `metrics.instructions`）。`--approval` に前の承認資料を渡すと、`approval-facts` が書く節（`## 1.`・
+  `## 2.`・`## 指示書の変更`・`## 同意を求めること`・`## 戻し方`）だけを作り直し、それ以外の `## ` の節（手で
+  足した節・`## 未検証・残る危険` など）を見出しも中身も変えずに、前の資料で直前にあった `approval-facts` の節の
+  後へ戻す（その節が無くなれば `## 同意を求めること` の前。残した見出しは `metrics.kept`）。前の資料が読めない・
+  H1 が無い・同じ `## ` の見出しが 2 つあるときは、資料を書かずに `stopped`（2）で止まる。資料が無いパスは
+  新しく作る。開発版の配布のプランは `presentation_to` と同じパスを渡す
 - `approve`: 承認資料の「`承認したコミット`」の行の直後へ「`承認の記録`」（SHA・承認した者・時刻）を書く。
   `--approved-sha` が資料の今の値と違えば（提示の後に書き直された）書かずに `stopped`（1）で止まるので、
   資料を提示し直して承認を取り直す。形の誤りは 2、資料・欄が無いと 3
@@ -133,13 +142,19 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
   組み直す。plugin の README は読まず書かない（README は CHANGELOG.md を参照する固定の「`## 更新情報`」の節だけを
   持つ）。字下げした子の箇条は独立した項目にせず、親の項目の下に 1 段の入れ子（`  - `）で残す。節が無い・「無し」の
   PR は題名で代える（`metrics.fallback` が件数）。`--approval` を渡すと CHANGELOG は変えず、承認資料の 2 つの欄と、
-  PR の本文の `## 未検証・残る危険` を集めた節と `## 移行の手順` の節（0 件なら「- 無し」）を書く。PR の本文の
+  PR の本文の `## 未検証・残る危険` を集めた節と `## 移行の手順` の節（0 件なら「- 無し」）を書く。
+  `## 未検証・残る危険` の節が既にあれば行を消さず、PR の箇条のうち無いものだけを足す（足したら「- PR の本文に
+  記載が無い」の行を外す）。PR の本文の
   `## 移行の手順` の箇条は、CHANGELOG.md の版の節では `### 移行の手順` の下へ `（#番号）` つきで並ぶ（0 件なら
   見出しを作らない）。`--approval` のとき、欄を書く PR は承認資料の「`含む PR`」の欄の PR で、`--prs` は
   欄に足さない。`--prs` に「`含む PR`」に無い番号があれば欄を書かずに `stopped`（3）で止まるので、
   `approval-facts` で承認資料を作り直す。未マージの PR は載せず、番号を `metrics.unmerged` へ出す。
   `stopped`（3）は changelog や approval-facts を先に打つ。渡した PR がすべて未マージのときも 3 で止まるので、
-  マージしてから打ち直すか `--prs` を直す
+  マージしてから打ち直すか `--prs` を直す。
+  後の PR の本文の `## 置き換える箇条` が指す前の PR の箇条は、CHANGELOG.md の版の節にも「`配る中身`」にも
+  載せない（前の PR の本文は書き換えない）。書き方は下の「置き換える箇条」。置き換えごとに `items[]` へ
+  `kind: replacement`・`name: #<後>→#<前>`・`result`（`removed` / `not_found`。形に合わない行は `unreadable`）を
+  出し、除いた箇条の数を `metrics.replaced` へ出す。見つからない置き換えは何も除かず、終了コードは 0 のまま
 - `changed-plugins`: 前のタグからの差分にある、宣言の `release.plugin` 以外のプラグインを `items[]`（`from`・`to`・
   `level`・`basis`）へ返す。前のタグから版が変わったものは `metrics.already` へ入れ、上げ直さない。`--prs` は PR の
   本文の GitHub の closing keywords（PR 本文に `Closes #123` のように書くと、マージ時にその課題を自動で閉じる機能）が指す課題の `## 影響` の「公開インタフェース」の行に互換なしの印（`互換なし` か `互換の経路は持たない`）
@@ -172,6 +187,21 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
   | `items[]` の `result: unapproved` | 承認の外のコミット（`name` が SHA、`subject`、分かれば `pr`） |
 
   承認の外の変更を含めて `approval-facts` で承認資料を作り直し、承認を取り直して `next` のとおり打ち直す
+
+### 置き換える箇条
+
+同じ版の後の PR が前の PR の振る舞いを変えたときは、後の PR の本文に次の節を書き、前の PR の「利用者向けの変化」の
+箇条を CHANGELOG.md の版の節と承認資料の「`配る中身`」から外す。マージ済みの前の PR の本文は直さない。
+
+```markdown
+## 置き換える箇条
+
+- #1825: cross-refactoring の init は、対象の Pull Request が Draft でない場合に処理を止める
+```
+
+- 1 行に 1 つ、`- #<前の PR の番号>: <前の PR の「利用者向けの変化」の箇条の 1 行目>`。CHANGELOG の案から写してよい
+- 比べるときは両側の末尾の `（#N…）` / `(#N…)` を外し、空白の続きを 1 つにする。文が一致した箇条だけを外す
+- 指す PR は同じ版の PR（`notes` へ渡す PR）に限る。前の PR の `## 未検証・残る危険` と `## 移行の手順` は外さない
 
 ## 配布の後にリリース記録を置く
 
