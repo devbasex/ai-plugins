@@ -2130,8 +2130,7 @@
       "term": "指摘の基準",
       "context": "ndf-cross-review",
       "meaning": "指摘として出してよいものを決める番号つきの条件。既定は 1 利用者が普通に使う経路の誤動作・2 レッドラインに触れるもの（外せない基準）・3 レビューの重点（宣言があるときだけ）・4 実装を違えさせる設計の食い違い。レビューのプロファイルは 2・3 以外の番号を差し替える。当たるものが major 以上になる",
-      "source": "",
-      "pending_source": "issues/issue-1910-design.md"
+      "source": "docs/specifications/cross-review-review-profile.md"
     },
     {
       "term": "レビューの重点",
@@ -2144,37 +2143,32 @@
       "term": "見送りの返信",
       "context": "ndf-cross-review",
       "meaning": "修正担当が minor / nit の指摘を直さずに閉じるときに書く返信。雛形（既定か、レビューのプロファイルの reply）の {inner} に見送りの種類の名前を入れて組む。既定の雛形は直す条件（使って困る場面が出たら直す）を定型文で書く",
-      "source": "",
-      "pending_source": "issues/issue-1910-design.md"
+      "source": "docs/specifications/cross-review-review-profile.md"
     },
     {
       "term": "見送りの種類",
       "context": "ndf-cross-review",
       "meaning": "見送りの返信の括弧に書く、指摘の基準に当たらない理由の分類（waive_kind）。既定は 5 分類で、レビューのプロファイルの waive_kinds が差し替える",
-      "source": "",
-      "pending_source": "issues/issue-1910-design.md"
+      "source": "docs/specifications/cross-review-review-profile.md"
     },
     {
       "term": "レビューのプロファイル",
       "code": "review_profile",
       "context": "ndf-cross-review",
       "meaning": "プロジェクトが .ndf/review.json の profile に書く、指摘の基準・書かないもの・見送りの種類・見送りの返信・自動レビュー観点の差し替えの組。書いた鍵だけが既定を差し替える。文中では「プロファイル」と略す",
-      "source": "",
-      "pending_source": "issues/issue-1910-requirements.md"
+      "source": "docs/specifications/cross-review-review-profile.md"
     },
     {
       "term": "自動レビュー観点",
       "context": "ndf-cross-review",
       "meaning": "cross-review が変更ファイルの分類（自動カテゴリ）から選び、レビューの両スロットへ渡す観点の文。--focus と --extra-instructions-file の観点はこの後ろに足す",
-      "source": "",
-      "pending_source": "issues/issue-1910-requirements.md"
+      "source": "docs/specifications/cross-review-review-profile.md"
     },
     {
       "term": "外せない基準",
       "context": "ndf-cross-review",
       "meaning": "指摘の基準 2（秘密・認証認可・利用者のデータ・戻せない操作）。レビューのプロファイルがあっても消せず、番号 2 のまま出る",
-      "source": "",
-      "pending_source": "issues/issue-1910-design.md"
+      "source": "docs/specifications/cross-review-review-profile.md"
     },
     {
       "term": "最終スイープ",
