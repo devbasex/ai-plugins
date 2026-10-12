@@ -240,3 +240,117 @@ def test_the_report_names_an_unreadable_profile(state_mod, capsys):
     review_lib.commands.report._print_review_focus(st)
     out = capsys.readouterr().out
     assert "## レビューのプロファイル: 読めなかった" in out and "reply に {inner} が無い" in out
+
+
+# ---------------- 名前つきの複数のプロファイル（version 3・#1942） ----------------
+
+MANUSCRIPT = {
+    "name": "manuscript",
+    "paths": ["works/*/chapters/*/text.md"],
+    "criteria": {"5": "人物の口調・呼び方が設定とずれる"},
+    "waive_kinds": {"taste": "好みの文体"},
+    "reply": "直しません。章を読んで困る所ではないためです（{inner}）。",
+    "categories": {"manuscript": {"paths": ["works/*/chapters/*/text.md"], "instructions": "## 自動追加レビュー観点: 原稿"}},
+    "replace_auto_categories": True,
+}
+SYSTEM = {
+    "name": "system",
+    "criteria": {"1": "利用者が普通に使う経路で、誤動作する"},
+    "waive_kinds": {"wording": "字句や言い回しの修正"},
+    "reply": "直しません。この指摘は、使って困る不具合ではないためです（{inner}）。",
+    "categories": {"system": {"paths": ["**"], "instructions": "## 自動追加レビュー観点: 仕組み"}},
+}
+
+
+def _declare_v3(root: pathlib.Path, profiles: list, **extra) -> None:
+    (root / ".ndf").mkdir(parents=True, exist_ok=True)
+    decl = {"version": 3, "profiles": profiles, **extra}
+    (root / ".ndf" / "review.json").write_text(json.dumps(decl, ensure_ascii=False), encoding="utf-8")
+
+
+def _out_value(out: str, key: str) -> str:
+    return next(ln.split("=", 1)[1] for ln in out.splitlines() if ln.startswith(f"{key}="))
+
+
+def test_new_init_with_manuscript_paths_uses_only_the_manuscript_profile(init_env, capsys):
+    """受け入れ条件 1・6・11: 原稿のプロファイルの節と分類だけが入り、名前が出力と状態に残る。"""
+    worktree, run = init_env
+    _declare_v3(worktree, [MANUSCRIPT, SYSTEM])
+    st = run(CHAPTER)
+    assert _out_value(capsys.readouterr().out, "REVIEW_PROFILE_NAME") == "manuscript"
+    crit = st["review_criteria"]
+    assert crit["profile_name"] == "manuscript" and crit["profile_status"] == "declared"
+    assert "人物の口調・呼び方が設定とずれる" in crit["reviewer_block"] and "誤動作する" not in crit["reviewer_block"]
+    assert st["auto_review_categories"] == ["manuscript"]
+    assert "仕組み" not in st["auto_review_instructions"]
+
+
+def test_new_init_with_system_paths_uses_the_profile_without_paths(init_env, capsys):
+    """受け入れ条件 2・8。"""
+    worktree, run = init_env
+    _declare_v3(worktree, [MANUSCRIPT, SYSTEM])
+    st = run("scripts/a.py")
+    assert _out_value(capsys.readouterr().out, "REVIEW_PROFILE_NAME") == "system"
+    assert "誤動作する" in st["review_criteria"]["reviewer_block"] and "口調" not in st["review_criteria"]["reviewer_block"]
+    assert "manuscript" not in st["auto_review_categories"]
+
+
+def test_new_init_across_both_picks_the_first_and_notifies(init_env, capsys):
+    """受け入れ条件 7: 止まらず先に書いたものを選び、ほかに当たった名前を知らせる。"""
+    worktree, run = init_env
+    _declare_v3(worktree, [MANUSCRIPT, {**SYSTEM, "paths": ["scripts/**"]}])
+    st = run([CHAPTER, "scripts/a.py"])
+    out = capsys.readouterr()
+    assert _out_value(out.out, "REVIEW_PROFILE_NAME") == "manuscript"
+    assert "複数のプロファイル（manuscript, system）" in out.err
+    assert "誤動作する" not in st["review_criteria"]["reviewer_block"]
+
+
+def test_new_init_with_a_broken_v3_declaration_continues(init_env, capsys):
+    """受け入れ条件 14: 全部を捨てて既定で続け、名前は空、重点は効く。"""
+    worktree, run = init_env
+    _declare_v3(worktree, [SYSTEM, MANUSCRIPT], focus=["重点 A"])
+    st = run(CHAPTER)
+    out = capsys.readouterr()
+    assert _out_value(out.out, "REVIEW_PROFILE") == "unreadable" and _out_value(out.out, "REVIEW_PROFILE_NAME") == ""
+    assert "profiles[1]（manuscript）" in out.err
+    crit = st["review_criteria"]
+    assert crit["profile_status"] == "unreadable" and crit["profile_name"] == "" and "重点 A" in crit["reviewer_block"]
+
+
+def test_new_init_with_v2_prints_an_empty_name_and_keeps_the_state(init_env, capsys):
+    """受け入れ条件 10・11。"""
+    worktree, run = init_env
+    _declare(worktree, PROFILE)
+    st = run(CHAPTER)
+    assert _out_value(capsys.readouterr().out, "REVIEW_PROFILE_NAME") == ""
+    assert "profile_name" not in st["review_criteria"]
+
+
+def _saved_v3(wt: pathlib.Path, state_file: pathlib.Path, profiles: list) -> None:
+    """version 3 の宣言で新規の init と同じ値を組んだ状態ファイルに書き直す。"""
+    _declare_v3(wt, profiles)
+    st = json.loads(state_file.read_text(encoding="utf-8"))
+    decl = rf._select_profile(rf._read_review_decl(wt), st["changed_files"])
+    st["review_criteria"] = rf._review_criteria(wt, "", decl)
+    rf._apply_auto_review(st, review_lib.commands.init.categories_mod._classify_changed_files(st["changed_files"]), decl.profile)
+    state_file.write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
+
+
+def test_resume_with_v3_keeps_the_same_profile_without_rewriting(saved_state, fake_gh):
+    """受け入れ条件 12・I7: 宣言と変更ファイルを変えなければ同じ名前を選び、書かず、変更ファイルを取らない。"""
+    wt, state_file, writes = saved_state
+    _saved_v3(wt, state_file, [MANUSCRIPT, SYSTEM])
+    assert review_lib.commands.init._rewrite_review_criteria(state_file, str(wt)) == ("none", "declared", "manuscript")
+    assert writes == [] and not any("/files" in c for c in fake_gh.joined())
+
+
+def test_resume_with_a_reordered_declaration_selects_again(saved_state):
+    """受け入れ条件 12: 宣言を書き換えると保存した changed_files で選び直す。"""
+    wt, state_file, writes = saved_state
+    _saved_v3(wt, state_file, [MANUSCRIPT, SYSTEM])
+    _declare_v3(wt, [{**SYSTEM, "paths": ["works/**"]}, MANUSCRIPT])
+    assert review_lib.commands.init._rewrite_review_criteria(state_file, str(wt)) == ("none", "declared", "system")
+    st = json.loads(state_file.read_text(encoding="utf-8"))
+    assert st["review_criteria"]["profile_name"] == "system" and "誤動作する" in st["review_criteria"]["reviewer_block"]
+    assert len(writes) == 1
