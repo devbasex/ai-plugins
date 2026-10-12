@@ -22,7 +22,7 @@
     {
       "id": "changelog",
       "type": "run",
-      "cmd": "python3 <NDF>/scripts/release-steps.py changelog --version 1.2.0-dev.1 --prs {queue_prs}",
+      "cmd": "python3 <NDF>/scripts/release-steps.py changelog --version 1.2.0-dev.1 --prs {queue_pr:check}",
       "on_fail": "judge",
       "next": "notes"
     },
@@ -30,7 +30,7 @@
       "id": "notes",
       "type": "run",
       "stage": "配布",
-      "cmd": "sh -c 'python3 <NDF>/scripts/release-steps.py notes --version 1.2.0-dev.1 --prs {queue_prs} && git add -A && (git diff --cached --quiet || git commit -q -m \"Release: foo v1.2.0-dev.1\")'",
+      "cmd": "sh -c 'python3 <NDF>/scripts/release-steps.py notes --version 1.2.0-dev.1 --prs {queue_pr:check} && git add -A && (git diff --cached --quiet || git commit -q -m \"Release: foo v1.2.0-dev.1\")'",
       "on_fail": "judge",
       "next": "release"
     },
@@ -63,7 +63,7 @@
       "id": "facts",
       "type": "run",
       "cwd": "<TMP>/repo",
-      "cmd": "python3 <NDF>/scripts/release-steps.py approval-facts --version 1.2.0 --prs {queue_prs}",
+      "cmd": "python3 <NDF>/scripts/release-steps.py approval-facts --version 1.2.0 --prs {queue_pr:check}",
       "presentation_to": "issues/approval-foo-v1.2.0.md",
       "on_fail": "judge",
       "gate_next": "explain",
@@ -73,7 +73,7 @@
       "id": "explain",
       "type": "run",
       "cwd": "<TMP>/repo",
-      "cmd": "python3 <NDF>/scripts/release-steps.py notes --version 1.2.0-dev.1 --prs {queue_prs} --approval issues/approval-foo-v1.2.0.md --verified claude --ref main",
+      "cmd": "python3 <NDF>/scripts/release-steps.py notes --version 1.2.0-dev.1 --prs {queue_pr:check} --approval issues/approval-foo-v1.2.0.md --verified claude --ref main",
       "on_fail": "judge",
       "next": "others"
     },
@@ -81,7 +81,7 @@
       "id": "others",
       "type": "run",
       "cwd": "<TMP>/repo",
-      "cmd": "python3 <NDF>/scripts/release-steps.py changed-plugins --plugin foo --prs {queue_prs} --approval issues/approval-foo-v1.2.0.md",
+      "cmd": "python3 <NDF>/scripts/release-steps.py changed-plugins --plugin foo --prs {queue_pr:check} --approval issues/approval-foo-v1.2.0.md",
       "on_fail": "judge",
       "next": "end"
     },

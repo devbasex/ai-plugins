@@ -80,7 +80,7 @@
       "stage": "ドキュメントレビュー",
       "timeout": 3600,
       "args": "{pr}",
-      "on_fail": "gate",
+      "on_fail": "ready",
       "next": "sync-review"
     },
     {
@@ -127,6 +127,14 @@
       "stage": "ドキュメントレビュー",
       "timeout": 300,
       "cmd": "git push -q && bash <NDF>/scripts/pr-body-decisions.sh sync {pr} && python3 <NDF>/scripts/supervise.py sync-title --pr {pr} --doc issues/issue-16-design.md",
+      "next": "ready"
+    },
+    {
+      "id": "ready",
+      "type": "run",
+      "stage": "ドキュメントレビュー",
+      "timeout": 300,
+      "cmd": "gh pr ready {pr}",
       "next": "gate"
     },
     {

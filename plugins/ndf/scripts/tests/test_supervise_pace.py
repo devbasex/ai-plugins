@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -129,7 +130,7 @@ def test_fast_sprint_puts_check_then_dev_then_prod_after_the_implementation(tmp_
     assert ds["review"]["next"] == "sync-review" and ds["push-glossary"]["next"] == "mvv"  # 用語チェックの後で判定する
     # 直し切れずに残った当たりは mvv を通さず、当たりを入力に持つ関門 1 の judge へ回る
     assert ds["glossary-recheck"]["on_fail"] == "push-glossary-gate" and ds["glossary-recheck"]["next"] == "push-glossary"
-    assert ds["push-glossary-gate"]["next"] == "gate" and "glossary-recheck" in ds["gate"]["inputs"]
+    assert ds["push-glossary-gate"]["next"] == "ready" and ds["ready"]["next"] == "gate" and "glossary-recheck" in ds["gate"]["inputs"]
     for i in ("push-glossary", "push-glossary-gate"):  # 本文の「決めたこと」を設計文書に合わせる
         assert ds[i]["cmd"].startswith("git push -q && ") and "pr-body-decisions.sh sync {pr}" in ds[i]["cmd"]
     approve_runs_with_or_without_note(tmp_path, ds["approve"]["cmd"])
@@ -248,6 +249,26 @@ def test_check_of_a_pr_records_every_ending_and_judge_stops_through_abort(tmp_pa
     s = steps_of(load(since))
     assert "stop" not in s["judge"]["choices"] and "abort" in s["judge"]["choices"]
     assert s["refactor"]["on_fail"] == "abort" and s["review"]["on_fail"] == "abort"
+
+
+@pytest.mark.parametrize("push", [0, 1])
+def test_ready_of_the_check_plan_stops_when_the_push_fails(tmp_path, push):
+    """PR を指す検査の ready は、push が落ちたら Draft を外さずに落ちる（#1908）。設計のプランの ready は push せず、
+    push-glossary が落ちればプランが止まって ready へ来ない（test_supervise の設計のプランの検査が見る）。"""
+    out = tmp_path / "check.json"
+    assert cli("new", "check", "--pr", "5", "--worktree", str(tmp_path), "--out", str(out)).returncode == 0
+    cmds = [steps_of(load(out))["ready"]["cmd"]]
+    bin_dir, log = tmp_path / "fake-bin", tmp_path / "gh.log"
+    bin_dir.mkdir()
+    for name, code in (("git", push), ("gh", 0)):
+        (bin_dir / name).write_text(f'#!/bin/sh\necho "{name} $*" >> {log}\nexit {code}\n')
+        (bin_dir / name).chmod(0o755)
+    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+    for cmd in cmds:
+        log.unlink(missing_ok=True)
+        assert subprocess.run(cmd.replace("{pr}", "7"), shell=True, env=env).returncode == push
+        calls = [l.split()[:3] for l in log.read_text().splitlines()]
+        assert calls == [["git", "push", "-q"]] + ([["gh", "pr", "ready"]] if push == 0 else [])
 
 
 def test_since_ref_reaches_the_condition_and_prepare_but_not_record(tmp_path):
@@ -490,6 +511,34 @@ def test_queue_pr_placeholder_reads_a_sibling_plan_when_queued_alone(tmp_path):
     close = plan_file(tmp_path, "4-close", [{"id": "t", "type": "run", "cmd": "echo {queue_pr:release-prod}"}])
     assert queue.fill_queue_pr(close, []) is None
     assert load(close)["steps"][0]["cmd"] == "echo 91"
+
+
+@pytest.mark.parametrize("alone", [True, False])
+def test_normal_sprint_release_fills_the_check_pr_alone_or_after_check(tmp_path, monkeypatch, alone):
+    out = tmp_path / "m"
+    p = cli("new", "sprint", "--name", "m", "--worktree", str(tmp_path), "--issue", "1", "--version", "10.18.0-dev.1", "--out", str(out))
+    assert p.returncode == 0, p.stderr
+    waves = {w["name"]: w for w in load(out / "sprint.json")["ステージ"]}
+    check, release = waves["検査"]["plans"][0], waves["配布"]["plans"][0]
+    assert "{queue_prs}" not in Path(release).read_text()
+    seen = {}
+
+    def batch(plans, adm, args):
+        for q in plans:
+            if q == check:
+                report_with_pr(q, "https://github.com/o/r/pull/1915")
+            else:
+                seen.update(steps_of(load(q)))
+        return [{"plan": q, "result": "完了", "report": str(paths.state_dir_of(q) / "report.md")} for q in plans]
+
+    monkeypatch.setattr(flow, "run_stage", batch)
+    if alone:  # 検査の関門の後・開発版の出し直し: 検査の報告だけが残っている
+        report_with_pr(check, "https://github.com/o/r/pull/1915")
+        queue.cmd_queue([release], 3, poll=0.05)
+    else:
+        queue.cmd_queue([check], 3, poll=0.05, then=[[release]])
+    for sid in ("changelog", "notes", "facts", "explain", "others"):
+        assert re.search(r"--prs 1915(\s|$)", seen[sid]["cmd"]), (sid, seen[sid]["cmd"])
 
 
 def test_gate_as_ok_copies_the_presentation_and_goes_on(tmp_path):

@@ -324,7 +324,7 @@ def test_normal_sprint_with_a_state_puts_the_advice_before_both_gates(tmp_path):
     design = load(waves["設計"]["plans"][0])
     ds = steps_of(design)
     assert [s["id"] for s in design["steps"]][-3:] == ["mvv", "mvv-note", "gate"]
-    assert ds["push-glossary"]["next"] == "mvv" and ds["glossary-recheck"]["on_fail"] == "push-glossary"
+    assert ds["push-glossary"]["next"] == "ready" and ds["ready"]["next"] == "mvv" and ds["glossary-recheck"]["on_fail"] == "push-glossary"
     assert ds["mvv"]["cmd"].endswith("--advise") and "--gate design --pr {pr}" in ds["mvv"]["cmd"]
     assert (ds["mvv"]["on_fail"], ds["mvv-note"]["on_fail"], ds["mvv-note"]["next"]) == ("mvv-note", "gate", "gate")
     assert "mvv" in ds["gate"]["inputs"] and "gate_next" not in ds["mvv"]

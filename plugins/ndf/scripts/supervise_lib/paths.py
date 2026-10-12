@@ -5,7 +5,9 @@
 
 from __future__ import annotations
 
+import functools
 import hashlib
+import importlib.util
 import os
 import re
 import shutil
@@ -26,7 +28,23 @@ DRIVES = {
     "cross-review": SKILLS / "cross-review" / "scripts" / "drive.py",
     "cross-refactoring": SKILLS / "cross-refactoring" / "scripts" / "drive.py",
 }
+REFACTOR_VOCABULARY = DRIVES["cross-refactoring"].parent / "refactor_lib" / "vocabulary.py"
 EXTERNAL_AI = SKILLS / "external-ai" / "scripts" / "external-ai.py"
+
+
+@functools.cache
+def _refactor_vocabulary():
+    spec = importlib.util.spec_from_file_location("ndf_refactor_vocabulary", REFACTOR_VOCABULARY)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def default_refactor_budget_minutes() -> int:
+    """cross-refactoring の既定の想定最大時間（分）。値を写さず、cross-refactoring の定数を読む（#1916 の決定 8）。"""
+    return _refactor_vocabulary().DEFAULT_BUDGET_MINUTES
+
+
 HERE = SELF.parent  # 配布したスクリプトの置き場。計画のコマンドはここからの絶対パスで書く
 # run のステップの定型（"preset"）。作業場所（リポジトリの根）で動く。{base} は起点のブランチ
 PRESETS = {
@@ -132,6 +150,11 @@ DESIGN_MATCH_PY = f"python3 {HERE / 'design-match.py'}"
 DECISIONS_SH = HERE / "pr-body-decisions.sh"  # 設計の PR の本文の「決めたこと」を設計文書の決定へ合わせる
 # 設計の PR の本文の「決めたこと」を設計文書の決定へ合わせてから push する（CI の pr-body-decisions が見る）
 PUSH_DESIGN = f"git push -q && bash {DECISIONS_SH} sync {{pr}}"
+# PR を送ってから Draft を外す。push が落ちたら gh pr ready へ進まず止まる（`;` でつなぐと落ちても ready になる。#1908）
+READY = "sh -c 'git push -q && gh pr ready {pr}'"
+# 設計のプランの Draft 外し。push は直前の push-glossary（on_fail 無し）が済ませ、落ちればここへ来ない。
+# レビューの駆動が落ちた経路では別の場所の直しに追いついていない HEAD を送らない
+DESIGN_READY = "gh pr ready {pr}"
 # PR を作った直後に本文の「決めたこと」を確かめる。pr のステップ（decisions）が作る時点で揃えるため、
 # 揃っていれば書き込まず（本文の編集で CI を再起動しない）、揃わなかったときだけ直す
 SYNC_DESIGN_BODY = f"bash {DECISIONS_SH} sync {{pr}}"

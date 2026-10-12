@@ -12,7 +12,7 @@ from pathlib import Path
 import legacy_names
 
 from supervise_lib.decl import decl_fields
-from supervise_lib.paths import GLOSSARY_PY, MVV_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, SYNC_DESIGN_BODY, WORKTREE_SETUP
+from supervise_lib.paths import DESIGN_READY, GLOSSARY_PY, MVV_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, SYNC_DESIGN_BODY, WORKTREE_SETUP
 from supervise_lib.procedures import DESIGN_RESULTS, pr_step, requirements_path, sprint_materials, sprint_out, with_record
 from supervise_lib.release_templates import MVV_NOTE, advise_steps, plan_release
 from supervise_lib.templates import plan_check, plan_check_since, plan_impl
@@ -143,7 +143,7 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
                 "stage": "ドキュメントレビュー",
                 "timeout": 3600,
                 "args": "{pr}",
-                "on_fail": "gate",
+                "on_fail": "ready",
                 "next": "sync-review",
             },
             # レビューの直しは別の場所から PR のブランチへ push される。追いついてから語を見て push する
@@ -187,7 +187,10 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
                 "on_fail": "push-glossary",
                 "next": "push-glossary",
             },
-            {"id": "push-glossary", "type": "run", "stage": "ドキュメントレビュー", "timeout": 300, "cmd": push, "next": "gate"},
+            {"id": "push-glossary", "type": "run", "stage": "ドキュメントレビュー", "timeout": 300, "cmd": push, "next": "ready"},
+            # pr のステップは設計 PR を Draft で作る（レビュー中に CI と並べる）。関門 1 の前に Draft を外す。
+            # push は直前の push-glossary が済ませ、落ちればプランが止まってここへ来ない
+            {"id": "ready", "type": "run", "stage": "ドキュメントレビュー", "timeout": 300, "cmd": DESIGN_READY, "next": "gate"},
             {
                 "id": "gate",
                 "type": "judge",
@@ -304,13 +307,13 @@ def plan_sprint_check(a, repo: str) -> dict:
 
 
 def plan_sprint_release(a, repo: str, advise: bool = False) -> dict:
-    """開発版の配布。検査の queue が --then で流し、検査の PR を --prs へ渡す。`advise` なら承認資料の後に
-    助言の MVV 判定を置く（pace: normal と --state。#1400）。"""
+    """開発版の配布。出す PR は検査のプランのスプリントの PR（`{queue_pr:check}`）で、検査の queue の --then でも
+    単独で流し直しても埋まる（#1915）。`advise` なら承認資料の後に助言の MVV 判定を置く（pace: normal と --state。#1400）。"""
     ns = argparse.Namespace(
         **decl_fields(a),
         version=a.version,
-        prs=[],
-        prs_from_queue=True,
+        prs=["{queue_pr:check}"],
+        prs_from_queue=False,
         channel="dev",
         repo=repo,
         prev_tag=None,
@@ -342,7 +345,7 @@ def plan_advise_design(a, n: int, repo: str) -> dict:
     steps = plan["steps"]
     gate = steps.pop()
     for s in steps:
-        if s["id"] == "push-glossary":
+        if s["id"] == "ready":
             s["next"] = "mvv"
     gate["inputs"] = [*gate["inputs"], "mvv"]
     gate["question"] += "。mvv に助言の MVV 判定（判定・理由・根拠）があれば、関門 1 の提示に載せる（承認は利用者が行う）"
@@ -365,7 +368,7 @@ def plan_mvv_design(a, n: int, repo: str) -> dict:
         elif s["id"] == "glossary-recheck":
             s["on_fail"] = "push-glossary-gate"
     plan["steps"] += [
-        {"id": "push-glossary-gate", "type": "run", "stage": "ドキュメントレビュー", "timeout": 300, "cmd": push, "next": "gate"},
+        {"id": "push-glossary-gate", "type": "run", "stage": "ドキュメントレビュー", "timeout": 300, "cmd": push, "next": "ready"},
         {
             "id": "mvv",
             "type": "run",

@@ -1,4 +1,7 @@
-"""レビュー観点のテンプレートと、ラウンドごとの観点の組み立て（#1142 の C2）。"""
+"""レビュー観点のテンプレートと、ラウンドごとの観点の組み立て（#1142 の C2）。
+
+レビューの宣言（重点とプロファイル。#1910）から、状態ファイルの指摘の基準と自動レビュー観点を組む部品も置く。
+"""
 
 from __future__ import annotations
 
@@ -7,6 +10,8 @@ import pathlib
 from typing import Any
 
 import review_lib  # noqa: E402
+import project_mvv  # noqa: E402
+import review_criteria  # noqa: E402
 from classifications import has_domain_model, review_stage  # noqa: E402
 
 
@@ -139,10 +144,8 @@ def _design_stage_fields(
     """
     if kind != "design":
         return {}
-    paths = [p for entry in changed_files or [] if isinstance(entry, dict) for p in entry.get("paths", []) if isinstance(p, str)]
-    paths += [entry for entry in changed_files or [] if isinstance(entry, str)]
     return {
-        "design_has_model": has_domain_model(str(worktree) if worktree else None, paths),
+        "design_has_model": has_domain_model(str(worktree) if worktree else None, _changed_file_paths(changed_files)),
         "review_instructions_by_stage": {
             "model": _combined_review_instructions(MODEL_REVIEW_TEMPLATE, manual),
             "detail": review_instructions,
@@ -155,9 +158,28 @@ def _round_stage(st: dict[str, Any], round_no: int) -> str | None:
     return review_stage(st.get("review_kind") or "code", round_no, bool(st.get("design_has_model")))
 
 
+def _changed_file_paths(changed_files: list[Any]) -> list[str]:
+    """変更ファイルの記録（`{"paths": [...]}` の辞書か、パスの文字列）からパスを並べる。"""
+    paths = [p for entry in changed_files or [] if isinstance(entry, dict) for p in entry.get("paths", []) if isinstance(p, str)]
+    return paths + [entry for entry in changed_files or [] if isinstance(entry, str)]
+
+
 def _auto_review_instructions(categories: list[str]) -> str:
     parts = (CATEGORY_TEMPLATES.get(c) for c in categories)
     return "\n\n".join(p for p in parts if p is not None)
+
+
+def _auto_review(
+    categories: list[str], changed_files: list[Any], profile: review_criteria.Profile = review_criteria.NO_PROFILE
+) -> tuple[list[str], str]:
+    """(観点を渡す分類の名前の列, 自動レビュー観点の文)。既定の分類（`categories`）に、変更ファイルに当たった
+    プロファイルの分類を足す。`replace_auto_categories` が真なら既定の分類を外す（#1910）。
+    同じ名前は列で 1 つにまとめ、文は既定の後ろにプロファイルの文を足す（決定 5）。"""
+    hits = review_criteria.profile_categories(profile, _changed_file_paths(changed_files))
+    base = [] if profile.replace_auto_categories else list(categories)
+    names = list(dict.fromkeys([*base, *(name for name, _ in hits)]))
+    text = "\n\n".join(part for part in (_auto_review_instructions(base), *(t for _, t in hits)) if part)
+    return names, text
 
 
 def _combined_review_instructions(auto: str, manual: str) -> str:
@@ -186,3 +208,56 @@ def _extra_review_instructions(args: argparse.Namespace) -> str:
             parts.append(text)
 
     return "\n\n".join(parts)
+
+
+def _base_refs(base_branch: object) -> list[str]:
+    """base の宣言を引く ref の候補。取り込んだ remote の側を先に見る。"""
+    base = str(base_branch or "")
+    return [f"origin/{base}", base] if base else []
+
+
+def _read_review_decl(worktree: object) -> review_criteria.ReviewDecl:
+    """PR の head の作業ツリーからレビューの宣言（重点とプロファイル）を読む（#1287・#1910）。
+    読めなくても止めない。既定の基準で続け、読めなかったことを標準エラーへ出す。"""
+    if not worktree:
+        return review_criteria.ReviewDecl(review_criteria.NO_FOCUS, review_criteria.NO_PROFILE)
+    decl = review_criteria.load_review_decl(worktree)
+    if decl.focus.status == "unreadable":
+        review_lib.info(f"⚠️ レビューの重点の宣言を読めないため、基準 1・2・4 だけで続ける: {decl.focus.error}")
+    if decl.profile.status == "unreadable":
+        review_lib.info("⚠️ " + review_criteria.PROFILE_WARNING.format(error=decl.profile.error))
+    return decl
+
+
+def _review_criteria(worktree: object, base_branch: object = "", decl: review_criteria.ReviewDecl | None = None) -> dict[str, Any]:
+    """レビューの宣言（PR の head の作業ツリー）とプロジェクト MVV（base の側）を読み、状態ファイルの `review_criteria` を組む（#1287・#1366・#1910）。
+
+    プロジェクト MVV は base で承認済みのものだけを使う。PR の head が MVV を足す・書き換えても、
+    その PR 自身のレビューと修正の基準はマージの後まで変わらない。`decl` を渡せば宣言を読み直さない。
+    """
+    focus, profile = decl if decl is not None else _read_review_decl(worktree)
+    # プロジェクト MVV（#1366）は 1 回だけ読み、参照と MVV の節を写す。担当・修正担当・見送りの返信が同じ節を読む
+    mvv = project_mvv.load_mvv_at_ref(worktree, _base_refs(base_branch)) if worktree else project_mvv.ProjectMvv("none")
+    if mvv.status in ("unapproved", "mismatch", "unreadable"):
+        review_lib.info(f"⚠️ プロジェクト MVV が{project_mvv.STATUS_LABEL[mvv.status]}ため、MVV なしで続ける: {mvv.error}")
+    return review_criteria.as_state(focus, mvv, profile)
+
+
+def _profile_status(crit: dict[str, Any]) -> str:
+    return crit.get("profile_status") or "none"
+
+
+def _apply_auto_review(st: dict[str, Any], categories: list[str], profile: review_criteria.Profile) -> None:
+    """保存した `changed_files` と既定の分類（`categories`）から、プロファイル込みの観点を `st` へ置く（決定 6）。
+    変更ファイルを GitHub から取り直さない。`changed_files` が無い古い状態ファイルは観点を変えない。"""
+    if not isinstance(st.get("changed_files"), list):
+        return
+    names, auto = _auto_review(categories, st["changed_files"], profile)
+    st["auto_review_categories"] = names
+    st["auto_review_instructions"] = auto
+    manual = st.get("manual_extra_review_instructions") or st.get("extra_review_instructions") or ""
+    combined = _combined_review_instructions(auto, manual)
+    st["review_instructions"] = combined
+    by_stage = st.get("review_instructions_by_stage")
+    if isinstance(by_stage, dict):
+        by_stage["detail"] = combined

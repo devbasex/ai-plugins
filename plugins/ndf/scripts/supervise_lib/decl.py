@@ -9,12 +9,14 @@ from pathlib import Path
 import delivery
 import project_decl
 import schema
-from pydantic import ConfigDict
+from typing import Annotated
+
+from pydantic import ConfigDict, Field, StrictInt
 
 
-# プロジェクトごとの宣言（リポジトリの根の .ndf/）。形は DECLARATIONS の節にある
+# プロジェクトごとの宣言（リポジトリの根の .ndf/）。形は plan.py の docstring の「宣言」の節にある
 WORKTREE_DECL = "worktree.json"  # base_branch（起点のブランチ）・production_branch（本番のブランチ）
-SUPERVISE_DECL = "supervise.json"  # test・sync_checks・release・queue
+SUPERVISE_DECL = "supervise.json"  # test・sync_checks・release・queue・impl_timeout・refactor_budget_minutes
 
 
 class DeclError(Exception):
@@ -46,6 +48,26 @@ def supervise_shape(decl: dict) -> SuperviseDecl:
         return schema.load_shape(SuperviseDecl, {"test": decl.get("test") or {}, "sync_checks": decl.get("sync_checks") or []})
     except schema.ShapeError as e:
         raise DeclError(f'supervise.json: {e}（test はオブジェクト、sync_checks は {{"name", "command"}} の並びで書く）') from e
+
+
+PositiveInt = Annotated[StrictInt, Field(gt=0)]
+# 宣言と引数で同じ名前（a.<名前>）を使う、ステップの時間の枠（#1916）
+STEP_BUDGETS = ("impl_timeout", "refactor_budget_minutes")
+
+
+class StepBudgets(schema.Shape):
+    """.ndf/supervise.json の実装の上限（impl_timeout・秒）と想定最大時間（refactor_budget_minutes・分）。null は無い。"""
+
+    impl_timeout: PositiveInt | None = None
+    refactor_budget_minutes: PositiveInt | None = None
+
+
+def step_budgets(decl: dict) -> StepBudgets:
+    """supervise.json の 2 項目の形を見る（JSON の 1 以上の整数か null）。違えば項目の名前を含む DeclError。"""
+    try:
+        return schema.load_shape(StepBudgets, {k: decl.get(k) for k in STEP_BUDGETS})
+    except schema.ShapeError as e:
+        raise DeclError(f"supervise.json: {e}（impl_timeout と refactor_budget_minutes は 1 以上の整数で書く）") from e
 
 
 def read_decl(roots, name: str) -> dict:
@@ -181,15 +203,26 @@ def apply_decls(a) -> None:
       --test-all は廃止（知らせて無視する）
     - 同期とチェック（a.sync_checks）: supervise.json の sync_checks（無ければ計画に sync のステップを置かない）
     - 配布（a.release）: supervise.json の release
+    - 実装の上限（a.impl_timeout）と想定最大時間（a.refactor_budget_minutes）: 引数 → supervise.json の同じ名前の項目。
+      宣言の形は引数があっても見る（#1916 の決定 5）
 
     リリースの経路（a.routes）は sprint と close だけが使い、`sprint_routes.apply_routes` が delivery_decl（宣言。a.delivery）と require_versions で組む。
     """
-    import test_strategy as ts
-
     roots = decl_roots(a.worktree, getattr(a, "repo", None))
     wt = read_decl(roots, WORKTREE_DECL)
     sv = read_decl(roots, SUPERVISE_DECL)
+    _apply_simple_decls(a, wt, sv)
+    decl, a.test_note = _project_decl(roots, sv)
+    _apply_test_strategy(a, decl)
+    _require_declared(a)
+
+
+def _apply_simple_decls(a, wt: dict, sv: dict) -> None:
+    """引数を優先し、無ければ宣言の値をそのまま写す項目。"""
     sv_test = supervise_shape(sv).test
+    budgets = step_budgets(sv)
+    for k in STEP_BUDGETS:
+        setattr(a, k, getattr(a, k, None) or getattr(budgets, k))
     a.base = getattr(a, "base", None) or wt.get("base_branch") or None
     a.production_branch = getattr(a, "production_branch", None) or wt.get("production_branch") or None
     a.test_cmd = getattr(a, "test_cmd", None) or None
@@ -199,7 +232,12 @@ def apply_decls(a) -> None:
     a.no_reports = sv_test.get("no_reports") or ""
     a.sync_checks = sync_checks_of(sv)
     a.release = sv.get("release") or None
-    decl, a.test_note = _project_decl(roots, sv)
+
+
+def _apply_test_strategy(a, decl: dict) -> None:
+    """テスト戦略（a.strategy）と時間の上限（a.test_limits）を宣言と --test-cmd から組む。"""
+    import test_strategy as ts
+
     a.strategy, a.test_limits = None, None
     # 静的解析の雛形の全体テストの範囲。スプリントが各計画（検査の計画を含む）へ引き継ぐ（#1483）
     a.test_paths = getattr(a, "test_paths", None) or scope_paths(a)
@@ -215,6 +253,10 @@ def apply_decls(a) -> None:
         c = ts.ci_wall_seconds(decl, (strategy.ci or {}).get("check") if strategy.ci else None)
         a.strategy = strategy.as_state()
         a.test_limits = ts.limits(strategy, None, whole_seconds_value=w, whole_source=w_source, ci_seconds=c)
+
+
+def _require_declared(a) -> None:
+    """計画の種別（a.kind）に要る宣言が揃わなければ DeclError。"""
     missing = {
         "base": (not a.base, f"起点のブランチ（--base か .ndf/{WORKTREE_DECL} の base_branch）"),
         "test": (
@@ -293,6 +335,7 @@ def decl_fields(a) -> dict:
         "test_limits",
         "test_note",
         "routes",
+        *STEP_BUDGETS,
     )
     return {k: getattr(a, k, None) for k in keys}
 
