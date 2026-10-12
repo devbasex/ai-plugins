@@ -134,7 +134,7 @@
       "type": "run",
       "stage": "ドキュメントレビュー",
       "timeout": 300,
-      "cmd": "sh -c 'git push -q && gh pr ready {pr}'",
+      "cmd": "gh pr ready {pr}",
       "next": "gate"
     },
     {
