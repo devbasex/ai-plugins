@@ -86,7 +86,7 @@
 | 要素 | 責務 |
 | --- | --- |
 | `Engine.execute`（`supervise_lib/engine.py`。変える） | ステップの前の計画の Pull Request を覚え、ステップが終了コード 0 で終わって値が変わっていれば、記録の前に `cur["pr"]` へ入れる（I2） |
-| `Engine.prepare`（`supervise_lib/engine.py`。変える） | 耐久ステップの中で 1 回だけ、実行の条件を見る前に `RunState.run_line(start)` を呼ぶ（I6・E0） |
+| `Engine.prepare`（`supervise_lib/engine.py`。変える） | 耐久ステップの中で 1 回だけ、実行条件を見る前に `RunState.run_line(start)` を呼ぶ（I6・E0） |
 | `Engine._restore_pr`（`supervise_lib/engine.py`。変える） | `--from` でプランに `"Pull Request"` が無いとき、`RunState.recorded_pr` が返す値を計画の Pull Request にする（I3）。ファイルを直に読まない |
 | `RunState.step_line`（`supervise_lib/state.py`。変える） | `cur["pr"]` があればステップの行へ `pr` として書く（E2）。無ければ今と同じ行 |
 | `RunState.run_line`（`supervise_lib/state.py`。作る） | `progress.jsonl` へ `{"kind": "run", "from": <start か null>}` を追記する（I6） |
