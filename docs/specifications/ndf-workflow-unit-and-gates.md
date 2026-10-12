@@ -173,15 +173,21 @@ v10.5.0 は 22 件を 5 本の Pull Request へ束ねて通した。束の中の
 
 ```text
 pr-body-decisions.sh check <PR番号> [--repo <所有者>/<リポジトリ>]
-pr-body-decisions.sh sync  <PR番号> [--repo <所有者>/<リポジトリ>]
+pr-body-decisions.sh sync  <PR番号> [--repo <所有者>/<リポジトリ>] [--after-push <SHA> [--wait-seconds <秒>]]
 ```
 
 | 終了コード | `check` | `sync` |
 | --- | --- | --- |
 | 0 | 一致した。または対象外（head が `design/` で始まらない） | 一致した（書き込まない）、または書き込んだ後の突き合わせで一致した。対象外も 0 |
-| 1 | 食い違った。差分を標準出力へ出す。または決定を読めない文書がある | 書き込んだ後も食い違った。または決定を読めない文書がある（書き込まない） |
-| 2 | 読めなかった（`gh` が無い・Pull Request が無い・API の失敗） | 読めなかった、または書き込みに失敗した |
-| 3 | 呼び出しの誤り。GitHub を読まない | 同左 |
+| 1 | 食い違った。差分を標準出力へ出す。または決定を読めない文書がある | 書き込んだ後も食い違った（`--after-push` では締め切りまで読み直しても食い違った）。または決定を読めない文書がある（書き込まない） |
+| 2 | 読めなかった（`gh` が無い・Pull Request が無い・API の失敗） | 読めなかった、または書き込みに失敗した。`--after-push` では締め切りまでに head が送ったコミットか子孫へ届かなかったときも 2（標準エラーの先頭に送ったコミット・上限の秒・最後に読んだ head） |
+| 3 | 呼び出しの誤り。GitHub を読まない | 同左。`--after-push` が 16 進 7〜40 桁でない・`--wait-seconds` が 0 以上の整数でないか `--after-push` なしで渡された・`check` に新しい引数を渡したときも 3 |
+
+`sync --after-push <SHA>` は修正を送った直後に打つ（#1644）。GitHub の `pulls/{pr}` が古い head か古い本文を返す間、
+head が送ったコミットか子孫に届くまで待ってから書き、書いた後も揃ったと読めるまで読み直す。締め切りは呼び出しの時刻 +
+`--wait-seconds`（既定 30 秒）の 1 つを書く前と書いた後で共有し、間隔は 1 秒から倍にして 8 秒で止める。届いたかは
+head の文字列の一致で先に見て、違うときだけ `compare` の `identical` / `ahead` で見る。書いた後に head が先へ進んでいたら、
+進んだ先の設計文書と突き合わせ、書き直さない。`--after-push` を渡さない呼び方は待たない。
 
 | 規則 | 内容 |
 | --- | --- |
@@ -196,6 +202,7 @@ pr-body-decisions.sh sync  <PR番号> [--repo <所有者>/<リポジトリ>]
 | --- | --- | --- |
 | `pr` | 作成した直後 / 本文を更新した直後 | `sync` |
 | `fix` | 返信と Resolve の後。コミットの有無によらない | `sync` |
+| 修正の取り込み（`result_posts.py fix`・cross-review の `merge-fix` / `record-fix`。`design_body.sync_after_push`） | 修正のコミットを送った後（送らなければ打たない） | `sync --after-push <送ったコミット>`。`merge-fix` と `result_posts.py fix` は `push_fix` が取り直した送り先の先頭、`record-fix` は確かめた修正のコミットを渡す |
 | 3 層の `pr` ステップ（`"decisions": true`、`supervise_lib/pr.py`） | 設計 Pull Request を作る前。本文へ節を入れてから作るため、後の `sync` は書き込まず、継続的統合を 2 度起動しない | `render` |
 | 承認の提示（[approval-request.md](../../plugins/ndf/skills/development-workflow/references/approval-request.md)） | 設計 Pull Request の提示を組み立てる前 | `check`、1 なら `sync`。2 なら「本文との一致: 未確認」と書く |
 | 継続的統合（`.github/workflows/pr-body-decisions.yml`） | `pull_request` の `opened` / `synchronize` / `edited` / `reopened` | `check`。権限は `contents: read` / `pull-requests: read` だけ |
