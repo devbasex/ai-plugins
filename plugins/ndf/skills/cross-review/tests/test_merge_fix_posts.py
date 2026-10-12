@@ -24,6 +24,7 @@ import review_lib.commands.read_result
 
 PR = 5850
 REPO = "o/r"
+SENT = "d" * 40
 
 
 @pytest.fixture()
@@ -78,7 +79,7 @@ def calls(monkeypatch, state_mod):
 
     def push(worktree, head, commit):
         seen["push"].append((str(worktree), head, commit))
-        return rp.PushResult(seen.get("push_ok", True), True, seen.get("push_ok", True), "")
+        return rp.PushResult(seen.get("push_ok", True), True, seen.get("push_ok", True), "", SENT)
 
     def post(queue, result_path, repo, pr, round_no=None, actor=None):
         items = rp.fix_posts(result_path, repo, pr, round_no)
@@ -114,3 +115,25 @@ def test_the_take_in_stops_when_the_commit_is_not_on_the_branch(tmp_dir, state_m
     assert e.value.code != 0
     assert calls["post"] == []
     assert "fix" not in _state(tmp_dir)["rounds"][-1]
+
+
+def test_the_take_in_passes_the_sent_commit_and_stops_unrecorded_until_synced(tmp_dir, state_mod, calls, monkeypatch):
+    """送ったコミットを本文の同期へ渡す。0 でなければ記録せずに止まり、打ち直すと同期をやり直す（#1644 の受け入れ条件 5・6）。"""
+    _seed(tmp_dir)
+    st = _state(tmp_dir)
+    st["head_branch"] = "design/x"
+    (tmp_dir / f"cross-review-pr{PR}-state.json").write_text(json.dumps(st))
+    _fix(tmp_dir)
+    synced: list[tuple] = []
+    answers = ["pr-body-decisions.sh sync が unreadable（2）: 届かなかった", None]
+    monkeypatch.setattr(review_lib.commands.merge_fix.design_body, "sync_after_push", lambda *a: synced.append(a) or answers.pop(0))
+    monkeypatch.setattr(review_lib.commands.merge_fix, "_classify_fix_ci", lambda *a: None)
+
+    with pytest.raises(SystemExit) as e:
+        review_lib.commands.merge_fix.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
+    assert e.value.code != 0
+    assert "fix" not in _state(tmp_dir)["rounds"][-1] and calls["post"] == []
+
+    review_lib.commands.merge_fix.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
+    assert synced == [(REPO, PR, "design/x", SENT)] * 2
+    assert _state(tmp_dir)["rounds"][-1]["fix"]["merge"]["stage"] in ("recorded", "posted")

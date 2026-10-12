@@ -455,12 +455,17 @@ def post_fix(
 
 
 class PushResult(NamedTuple):
-    """送信の結果と、報告されたコミットが送り先に載っているか。"""
+    """送信の結果と、報告されたコミットが送り先に載っているか。
+
+    `sent` は送った後に取り直した送り先の先頭の完全な SHA（送らない・失敗のときは空）。本文の同期は
+    報告された `fix_commit` ではなくこれを待つ（`fix_commit` は送った先頭の祖先でもよいため）。
+    """
 
     ok: bool
     pushed: bool
     contains: bool
     detail: str
+    sent: str = ""
 
 
 # 認証の退避の値は共通層 1 か所が持つ（`git-credential.sh`）。ここへ写さない。
@@ -505,7 +510,9 @@ def push_fix(worktree: pathlib.Path | str, head_branch: str, fix_commit: str | N
     contains = _git(worktree, "merge-base", "--is-ancestor", fix_commit, "FETCH_HEAD")
     if contains.returncode != 0:
         return PushResult(False, True, False, f"報告されたコミット {fix_commit} が origin/{head_branch} に載っていない")
-    return PushResult(True, True, True, "")
+    # 取り直した先頭を読めなければ、報告されたコミットを待つ（送ったのに本文の同期を飛ばさない）。
+    sent = _git(worktree, "rev-parse", "FETCH_HEAD")
+    return PushResult(True, True, True, "", sent.stdout.strip() if sent.returncode == 0 else str(fix_commit))
 
 
 # ---------------- 部分命令 ----------------
@@ -567,7 +574,7 @@ def cmd_fix(args: argparse.Namespace) -> int:
     if not pushed.ok:
         print(pushed.detail, file=sys.stderr)
         return 1
-    if unsynced := design_body.sync_after_push(repo, int(args.pr), head, pushed.pushed):
+    if unsynced := design_body.sync_after_push(repo, int(args.pr), head, pushed.sent):
         # 本文が古いまま返信しない。打ち直すと揃えからやり直す。
         print(f"本文の「決めたこと」を揃えられないため止めます。打ち直してください ({unsynced})", file=sys.stderr)
         return 1

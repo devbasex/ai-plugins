@@ -273,16 +273,17 @@ def _record_new_fix(pr: int, st: dict, fix: dict, commit: object, pushed_by_host
     # 送れない・報告されたコミットが送り先に載っていないときは、記録も投稿もせずに
     # 止まる。同じ取り込みをやり直せば、同じ手順を最初から通る。
     if pushed_by_host:
-        pushed_flag = True  # 送り先に載っていることは `record-fix` が GitHub で確かめた
+        sent = str(commit or "")  # 送り先に載っていることは `record-fix` が GitHub で確かめた
         print("PUSHED=0 COMMIT_ON_HEAD=1")
     else:
         pushed = result_posts.push_fix(str(st.get("worktree_path") or ""), str(st.get("head_branch") or ""), commit)
         if not pushed.ok:
             review_lib.die(f"修正を送れないか、報告されたコミットが送り先に載っていません: {pushed.detail}")
         print(f"PUSHED={1 if pushed.pushed else 0} COMMIT_ON_HEAD={1 if pushed.contains else 0}")
-        pushed_flag = pushed.pushed
+        sent = pushed.sent
+    # 送ったコミットを渡し、PR の head がそこへ届くまでの待ちは本文の同期に任せる（#1644）。
     unsynced = design_body.sync_after_push(
-        str(st.get("repo") or ""), int(st.get("current_pr") or pr), str(st.get("head_branch") or ""), pushed_flag
+        str(st.get("repo") or ""), int(st.get("current_pr") or pr), str(st.get("head_branch") or ""), sent
     )
     if unsynced:
         # 本文が古いまま round を取り込み済みにしない。送信は済んでいるため、打ち直すと揃えからやり直す。

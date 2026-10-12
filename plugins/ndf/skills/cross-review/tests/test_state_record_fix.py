@@ -59,7 +59,7 @@ def _state(tmp_dir: pathlib.Path) -> dict:
 def gh(monkeypatch, state_mod):
     """GitHub の口（head・compare・未解決の一覧）と、送信・投稿を差し替える。"""
     rp = review_lib.commands.read_result.result_posts
-    seen: dict = {"push": [], "post": [], "compare": "ahead", "open": [], "post_fail": False}
+    seen: dict = {"push": [], "post": [], "compare": "ahead", "open": [], "post_fail": False, "sync": []}
 
     meta = review_lib.github.PrMetadata(REPO, "me", "feat/x", HEAD, "develop", False, None, None)
     monkeypatch.setattr(review_lib.github, "_fetch_pr_metadata", lambda pr, repo=None: meta)
@@ -84,7 +84,7 @@ def gh(monkeypatch, state_mod):
 
     monkeypatch.setattr(rp, "push_fix", push)
     monkeypatch.setattr(rp, "post_fix", post)
-    monkeypatch.setattr(review_lib.commands.merge_fix.design_body, "sync_after_push", lambda *a: None)
+    monkeypatch.setattr(review_lib.commands.merge_fix.design_body, "sync_after_push", lambda *a: seen["sync"].append(a))
     monkeypatch.setattr(review_lib.commands.start_round, "_sync_before_round", lambda st, pr: None)
     monkeypatch.setattr(review_lib.github, "_fetch_existing_comments", lambda *a, **k: None)
     monkeypatch.setattr(review_lib.commands.start_round.posts, "_auto_flush", lambda pr: None)
@@ -133,6 +133,8 @@ def test_record_fix_uses_the_given_commit(tmp_dir, state_mod, gh):
     _seed(tmp_dir)
     _record(state_mod, "--commit", "abc1234")
     assert _state(tmp_dir)["rounds"][-1]["fix"]["commit"] == "abc1234"
+    # 確かめたコミットを送ったコミットとして本文の同期へ渡す（#1644 の受け入れ条件 5）
+    assert gh["sync"] == [(REPO, PR, "feat/x", "abc1234")]
 
 
 # ---------------- AC10・I7: 確かめられなければ記録を作らない ----------------
