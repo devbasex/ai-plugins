@@ -87,6 +87,16 @@ def test_claude_launch_arguments_and_allowed_tools_override(tmp_path):
     assert args[args.index("--model") + 1] == "test-model"
 
 
+@pytest.mark.parametrize("allowed_tools", [None, "Read,Grep"])
+def test_claude_launch_loads_only_allowed_tools(tmp_path, allowed_tools):
+    """Tool の定義・MCP・Skill の一覧を文脈に載せず、`--tools` は許可と同じ値に追随する。"""
+    args = _launch(tmp_path, "claude", allowed_tools=allowed_tools)
+
+    assert args[args.index("--tools") + 1] == args[args.index("--allowed-tools") + 1]
+    assert "--strict-mcp-config" in args
+    assert "--disable-slash-commands" in args
+
+
 def test_claude_launch_passes_metered_declaration_as_settings(tmp_path):
     """従量の接続の区間から起動する claude にも、宣言を `--settings` の env で渡す（#1543）。資格情報は載せない。"""
     decl = "AWS_REGION=ap-northeast-1 AWS_BEARER_TOKEN_BEDROCK=b-SECRET"
