@@ -685,7 +685,7 @@
     {
       "term": "想定最大時間",
       "context": "ndf-cross-refactoring",
-      "meaning": "利用者が与える所要の上限（分、--budget-minutes）。最終ゲートの確かめと最終ゲート修正・打ち切りの後の取り消しまで含めた 1 回の実行は、動いていた時間でこの中に収まる",
+      "meaning": "利用者が与える所要の上限（分、--budget-minutes）。1 回の実行の子プロセスは、最終ゲートの確かめ・最終ゲート修正・打ち切りの後の取り消しも含めて、すべて想定最大時間の終わりまでに止まる",
       "source": "docs/specifications/cross-refactoring-time-budget.md"
     },
     {
@@ -3626,10 +3626,10 @@
       "pending_source": "issues/issue-1932-design.md"
     },
     {
-      "term": "最終ゲート修正の終わり",
+      "term": "確かめの開始の締め切り",
       "context": "ndf-cross-refactoring",
-      "meaning": "最終ゲート修正の CLI を止める時刻（limits.final_fix_end_at）。想定最大時間の終わり − 確かめの見込み",
-      "code": "final_fix_end_at",
+      "meaning": "想定最大時間の終わり − 確かめの見込み（H − v）。最終ゲートの確かめを始められる最後の時刻で、最終ゲート修正と打ち切りの後の取り消しもこの時刻までに止まる",
+      "code": "gate_start_end",
       "pending_source": "issues/issue-1932-design.md"
     },
     {
