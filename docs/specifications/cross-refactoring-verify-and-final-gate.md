@@ -442,7 +442,7 @@ import は名前が当たらず見落とす。見落としは最終ゲートが�
 | 項目 | 内容 |
 | --- | --- |
 | パスの現れ方 | 手がかり `path` は、本文にリポジトリからの相対パスが現れることを前提にする。ファイル名だけが現れるテスト（パラメータの ID が `claude.py` だけ）は `isolate` へ落ちる。pytest 以外の実行器の本文は確かめていない |
-| 時間の上限 | 検算は既定の B = 30 分で行った。検査のプランの refactor のステップの `timeout` は B に 10%（最低 30 秒）の余裕を足した秒（`with_margin(B × 60)`。既定の B で 1980 秒。#1916）で、項目ごとの取り消しと確かめ直しまで含めた所要（1.2·B + 7 分。既定の B で 43 分）はこれを超えうる。B は `supervise.py new` の `--refactor-budget-minutes` か `.ndf/supervise.json` の `refactor_budget_minutes` で渡し（プランが `--budget-minutes` を足す）、渡さないプランは cross-refactoring の既定の B で動く |
+| 時間の上限 | 検算は既定の B = 30 分で行った。検査のプランの refactor のステップの `timeout` は B に 10%（最低 30 秒）の余裕を足した秒（`with_margin(B × 60)`。既定の B で 1980 秒。#1916）で、項目ごとの取り消しと確かめ直しまで含めた所要（1.2·B + 7 分。既定の B で 43 分）はこれを超えうる。B は `supervise.py new` の `--refactor-budget-minutes` か `.ndf/supervise.json` の `refactor_budget_minutes` で渡し（プランが `--budget-minutes` を足す）、渡さないプランは cross-refactoring の既定の B で動く（決め方の理由は [ndf-supervise-step-budgets.md](ndf-supervise-step-budgets.md)） |
 | 宣言の保守 | 手で足した suite のため、`.ndf/project.json` の `test` は以後の解析で自動では更新されない（違えば `mismatch` で知らされる）。pytest の suite を変えるときは手で直す |
 | 共通層の再利用 | `failure_paths.mentioned` は、CI の失敗ログと Pull Request の変更ファイルを突き合わせる処理（cross-review など）でもそのまま使える形にしてある。cross-review は今は使わない |
 

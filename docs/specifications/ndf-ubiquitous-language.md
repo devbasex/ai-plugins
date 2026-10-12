@@ -23,7 +23,7 @@ NDF の開発ワークフローは、要求と設計の前に、そのプロジ�
 
 | 構成要素 | 置き場所 | 責務 |
 | --- | --- | --- |
-| 用語集のスクリプト | `plugins/ndf/scripts/glossary.py` | 用語集の設定と用語集の読み込み。`gate` / `init` / `candidates` / `render` / `check` / `diff` の 6 つの副命令 |
+| 用語集のスクリプト | `plugins/ndf/scripts/glossary.py` | 用語集の設定と用語集の読み込み。`gate` / `init` / `candidates` / `render` / `check` / `diff` / `merge` の 7 つの副命令 |
 | 仕様のコピーのスクリプト | `plugins/ndf/scripts/spec-copy.py` | 課題の本文からコピーを作る（`write`）。本文とコピーの食い違いを返す（`check`） |
 | 用語集の形式の参照 | `plugins/ndf/skills/requirements-design/references/glossary-format.md` | 用語集の設定と用語集の JSON の形、未登録の語とみなす規則、文書の形 |
 | ドメインモデルの参照 | `plugins/ndf/skills/design/references/domain-model.md` | ドメインモデルの節の書き方 |
@@ -86,7 +86,7 @@ ai-plugins の設計 Pull Request #742 は、返信を除いたインライン�
 
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
-| 用語集 | プロジェクトの変更（Pull Request）。NDF のスクリプトでは `init`・`render`・`spec-finalize` だけが書く | 用語集のファイル（用語集の設定の `source`） | コンテキスト（`id` で識別）・用語（コンテキストと語の組で識別） | 意味・廃止した語・正本・確定前の出所 |
+| 用語集 | プロジェクトの変更（Pull Request）。NDF のスクリプトでは `init`・`render`・`merge`（取り込みの途中だけ）・`spec-finalize` だけが書く | 用語集のファイル（用語集の設定の `source`） | コンテキスト（`id` で識別）・用語（コンテキストと語の組で識別） | 意味・廃止した語・正本・確定前の出所 |
 | 用語集の設定 | プロジェクトの変更。`glossary.py init` が初めの 1 回を書く | `.ndf/glossary.json` | — | 形式・置き場・チェックの対象 |
 
 人が読む文書は集約に入らない。用語集から `render` で導く生成物で、独立して変わらない。
@@ -157,7 +157,7 @@ stateDiagram-v2
 
 ### 入出力の契約（`glossary.py`）
 
-6 つの副命令の結果は、`lib/step_result.py` の形の 1 行の JSON（`tool: "glossary"`）で標準出力の最後の行に
+7 つの副命令の結果は、`lib/step_result.py` の形の 1 行の JSON（`tool: "glossary"`）で標準出力の最後の行に
 出す。語と行の一覧は `items` に入る。`--root` の既定は `.` で、用語集の設定はそこの `.ndf/glossary.json` から読む。
 
 | 副命令 | 入力 | 出力（`items`） | 終了コード |
@@ -168,6 +168,7 @@ stateDiagram-v2
 | `render [--check]` | 用語集 | 書いた文書。`--check` は書かずに一致を見る | 0 = 書いた・一致した。1 = `--check` で一致しない。2 = 設定が無い・読めない |
 | `check [--diff BASE \| --file P...] [--rules all\|structure]` | 起点の ref か、ファイル | `{rule, path, line, term, detail}` | 0 = 当たりなし（設定が無いときも 0 で、`summary` に「宣言が無い」）。1 = 当たりあり。2 = 設定・用語集・ファイルが読めない |
 | `diff --base REF [--head REF]` | 2 つの版（`--head` の既定は worktree） | `{change, context, term, before, after}`。`change` は `added` / `meaning_changed` / `deprecated` / `removed` | 0（設定が無いときも 0）。片方の版に用語集が無ければ、無い側を空として比べる。`REF` そのものが無ければ 2 |
+| `merge` | `git merge` の途中の index の段 1〜3 | 解いた 2 ファイルか、語の衝突・残りの衝突のパス。理由と境界は [ndf-glossary-merge.md](ndf-glossary-merge.md) | 0 = 取り込みのコミットを作った。1 = 語の衝突・残りの衝突・取り込みの途中でないなど。2 = 読めない |
 
 **パスはリポジトリの境界の内側に限る。** 用語集の設定の `source` / `document` / `check.paths` と `--source` /
 `--document` は、絶対パス・`..` を含むもの・シンボリックリンクを解いて `--root` の外を指すものを受けない。
@@ -371,7 +372,7 @@ head のブランチが `design/` で始まるときは `--rules all`、ほか�
 - コードの追加した行に廃止した識別子の 4 つの書き方のどれかが出ると `deprecated_code` が当たり、生きた識別子の内側・コメントの中・コード以外のファイル・`--rules structure` では当たらず、文字列の中（行をまたぐ文字列を含む）では当たること
 - `--diff` で追加した行だけが当たり、`BASE` 側だけが先へ進んで足した行は当たらないこと。コードブロックとインラインコードは当たらないこと
 - ai-plugins の語を 1 つも含まない用語集で、上の規則がすべて通ること
-- 境界を越えるパスで 6 つの副命令が 2 で止まり、ファイルが増えも変わりもしないこと
+- 境界を越えるパスで 7 つの副命令が 2 で止まり、ファイルが増えも変わりもしないこと
 - `diff` が 4 つの `change` を返し、用語集の設定の無いリポジトリで `check` と `diff` が 0 であること
 - `review_stage` が design の 1 ラウンド目で `model`、2 以降と `has_model` が偽のときに `detail`、code で `None` を返し、モデルレビューの APPROVE で抜けないこと。担当のプロンプトにそのラウンドの種類の観点が入ること
 - `spec-copy.py write` の出力が本文の `## 進行` より前と一致し、コピーにしか無い節があっても `check` が 0、本文の節の中身を変えると 1 であること
@@ -388,3 +389,4 @@ head のブランチが `design/` で始まるときは `--rules all`、ほか�
 - [ai-plugins の用語集](../glossary.md)
 - [NDF の開発ワークフローの語彙](../../plugins/ndf/skills/development-workflow/references/glossary.md)
 - [ndf-design-phase.md](ndf-design-phase.md)
+- [ndf-glossary-merge.md](ndf-glossary-merge.md)（並行の Pull Request の用語集の衝突を解く `merge`）
