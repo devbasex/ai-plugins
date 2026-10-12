@@ -356,7 +356,7 @@ import は名前が当たらず見落とす。見落としは最終ゲートが�
    `state_ci_wait_timeout`）が H までの残りで切り、`start-phase` も監視と CLI の上限を締め切りで切る。残りが 1 秒
    未満なら子プロセスを始めない（`process.run_with_timeout`）
 2. **余白は内側 1 つ・外側 1 つだけである。** 内側はバッファ R（計画の時点で B から引く）、外側は呼ぶ側の
-   `with_margin(B × 60)`（10%・最低 30 秒）で、H の後の git・push・報告・プロセスの後始末だけを吸収する。
+   `with_margin(B × 60)`（10%・最低 30 秒）で、H の後の git・push（直前の生成物の同期を含む。同期は H で切らない）・報告・プロセスの後始末だけを吸収する。
    手順ごとの余裕 0.05·B は締め切りで切られ、B の外へ出ない
 3. **時間の守り方は「入るときだけ始める」の 1 つである**（`timeline.fits`）。最終ゲートの確かめ・最終ゲート修正・
    打ち切りの後の項目ごとの取り消しは、今 + 見込み ≤ 確かめの開始の締め切り H − v（`timeline.gate_start_end`）の
@@ -463,7 +463,7 @@ import は名前が当たらず見落とす。見落としは最終ゲートが�
 | 項目 | 内容 |
 | --- | --- |
 | パスの現れ方 | 手がかり `path` は、本文にリポジトリからの相対パスが現れることを前提にする。ファイル名だけが現れるテスト（パラメータの ID が `claude.py` だけ）は `isolate` へ落ちる。pytest 以外の実行器の本文は確かめていない |
-| 時間の上限 | 締め切りは H = 開始 + B と H − v の 2 つだけである（式と 4 原則は「時間の上限」の節）。既定の B = 30 分・このリポジトリの全体テスト w = 400 秒（v = 400 秒）・最終ゲート修正 1 回の見込み F = 82 秒での検算: H は開始 + 1800 秒（すべての子プロセスがここまでに止まる）、確かめの開始の締め切り H − v は開始 + 1400 秒（確かめと項目ごとの取り消しの開始の最後。最終ゲート修正と項目ごとの取り消しの子プロセスもここで止まる）、最終ゲート修正を起動できる最後 H − v − F は開始 + 1318 秒で、どれも B 以内に収まる。H の後に動くのは起点への戻しのコミット・push・`finalize`・報告と固定値（kill_grace 5 秒・SIGTERM の猶予 3 秒）だけで、検査のプランの refactor のステップの `timeout`（`with_margin(B × 60)`。既定の B で 1980 秒。#1916）の余裕 180 秒が吸収する。B は `supervise.py new` の `--refactor-budget-minutes` か `.ndf/supervise.json` の `refactor_budget_minutes` で渡し（プランが `--budget-minutes` を足す）、渡さないプランは cross-refactoring の既定の B で動く（決め方の理由は [ndf-supervise-step-budgets.md](ndf-supervise-step-budgets.md)） |
+| 時間の上限 | 締め切りは H = 開始 + B と H − v の 2 つだけである（式と 4 原則は「時間の上限」の節）。既定の B = 30 分・このリポジトリの全体テスト w = 400 秒（v = 400 秒）・最終ゲート修正 1 回の見込み F = 82 秒での検算: H は開始 + 1800 秒（すべての子プロセスがここまでに止まる）、確かめの開始の締め切り H − v は開始 + 1400 秒（確かめと項目ごとの取り消しの開始の最後。最終ゲート修正と項目ごとの取り消しの子プロセスもここで止まる）、最終ゲート修正を起動できる最後 H − v − F は開始 + 1318 秒で、どれも B 以内に収まる。H の後に動くのは起点への戻しのコミット・push（直前の生成物の同期を含む）・`finalize`・報告と固定値（kill_grace 5 秒・SIGTERM の猶予 3 秒）だけで、検査のプランの refactor のステップの `timeout`（`with_margin(B × 60)`。既定の B で 1980 秒。#1916）の余裕 180 秒が吸収する。B は `supervise.py new` の `--refactor-budget-minutes` か `.ndf/supervise.json` の `refactor_budget_minutes` で渡し（プランが `--budget-minutes` を足す）、渡さないプランは cross-refactoring の既定の B で動く（決め方の理由は [ndf-supervise-step-budgets.md](ndf-supervise-step-budgets.md)） |
 | 宣言の保守 | 手で足した suite のため、`.ndf/project.json` の `test` は以後の解析で自動では更新されない（違えば `mismatch` で知らされる）。pytest の suite を変えるときは手で直す |
 | 共通層の再利用 | `failure_paths.mentioned` は、CI の失敗ログと Pull Request の変更ファイルを突き合わせる処理（cross-review など）でもそのまま使える形にしてある。cross-review は今は使わない |
 
