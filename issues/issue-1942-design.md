@@ -4,7 +4,7 @@
 
 - **何が壊れているか**: `.ndf/review.json` のプロファイルはリポジトリに 1 つで、性質の違う PR（小説の原稿の PR と、スクリプト・テスト・文書の PR）に同じ基準・書かないもの・見送りの種類・返信が効く
 - **誰が困るか**: 1 つのリポジトリで原稿と仕組みの両方を cross-review に通す利用者。当たらない基準で指摘が出る・当たる指摘が抜ける・原稿の指摘を仕組みの見送りの種類（`wording`）で見送れてしまう
-- **直すと何が成り立つか**: 宣言に名前つきのプロファイルを並べ、PR の変更ファイルのパスで 1 つを選ぶ。選んだプロファイルの組だけがレビュー担当・修正担当・振り分けの検査・見送りの返信・自動レビュー観点に効き、選んだ名前が `init` の出力と状態ファイルに残る
+- **直すと何が成り立つか**: 宣言に名前つきのプロファイルを並べ、PR の変更ファイルのパスで 1 つを選ぶ。選んだプロファイルの組だけがレビュー担当・修正担当・振り分けの検査・見送りの返信・自動レビュー観点に効き、選んだ名前が `init` の出力・状態ファイル・`report` の要約に残る。どの PR にも効かせたい基準は、宣言の最上位に 1 か所だけ書けば、選んだどの組にも足される
 
 ## 適用範囲
 
@@ -17,6 +17,7 @@
 | 根拠 | 種類 | 何を示すか |
 | --- | --- | --- |
 | 課題 #1942 の依頼の原文「プロファイルはリポジトリ全体で1つしか持てません。これはai-pluginsに改修issueを上げてください。優先度高めで依頼。」 | 利用者の指示の原文 | プロファイルを複数持てる形にすることそのもの |
+| 利用者の確認のコメント（https://github.com/devbasex/ai-plugins/issues/1942#issuecomment-6125366462）の「足してほしい点 1・2」 | 利用者の指示の原文 | どのプロファイルにも効く基準を 1 か所に書けること（決定 7）と、選んだ名前を `report` の要約に出すこと（決定 8） |
 | `.ndf/pace.json` の `areas`（`[{"name", "paths"}]` の配列。`scripts/lib/pace.py` の `read_pace`） | 既存の形 | `.ndf/` の宣言で「名前とパスの glob の組を並べる」形の前例。同じ形に揃えると書き手が覚え分けない |
 | `gh api repos/devbasex/ai-plugins/pulls/1938/files --paginate --jq '.[] \| .filename, (.previous_filename // empty)'` が 1 行 1 パスで返り、終了コード 0（2026-10-12 実測） | 実測 | 単独の `/ndf:fix` が 1 回の呼び出しで、cross-review と同じパスの集合（新しい名前と、名前を変えたときの前の名前）を取れる |
 
@@ -37,7 +38,7 @@
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
 | レビューの宣言 | 利用者（`.ndf/review.json`）。NDF は読むだけ | 宣言 | プロファイル（名前で区別する） | 重点・パスの glob の組・指摘の基準・書かないもの・見送りの種類・見送りの返信の雛形・分類 |
-| レビューの状態ファイル | cross-review の `init`（`review_lib/commands/init.py`） | 状態 | — | 指摘の基準の写し（`review_criteria`。選んだプロファイルの名前と写しを含む）・変更ファイル（`changed_files`） |
+| レビューの状態ファイル | cross-review の `init`（`review_lib/commands/init.py`） | 状態 | — | 指摘の基準の写し（`review_criteria`。選んだプロファイルの名前・ほかに当たった名前・写しを含む）・変更ファイル（`changed_files`） |
 | 振り分けの JSON | `fix-steps.py context`（雛形を書く）と修正担当（判定を書く） | 振り分け | 指摘ごとの判定 | プロファイルの写し（`review_profile`） |
 
 選んだプロファイルの名前と写しを書いてよいのは、状態ファイルでは `init` だけ、振り分けの JSON では `context` だけである。`finalize` と `launch-reviewer.sh` は写しを読むだけで、宣言を読み直さない。
@@ -55,6 +56,8 @@
 | I7 | レビューの状態ファイル | 再開で `review_criteria` と自動レビュー観点を書き直すのは、保存した `changed_files` と宣言から組んだ値が保存した値と違うときだけである | テストが落とす |
 | I8 | 振り分けの JSON | `finalize` が許す `criterion` と `waive_kind` は、`context` が修正担当へ渡した節と同じプロファイル（写し）から組む | 許さない値は `finalize` が `invalid` で止める |
 | I9 | レビューの状態ファイル | `version: 3` の宣言では、状態ファイルの `review_criteria` に `profile_name` が必ずあり、選ばなかったときは空文字である | テストが落とす |
+| I10 | レビューの宣言 | `version: 3` の最上位の `criteria` は、どのプロファイルを選んでも（選ばなかったときは既定の組にも）両方の節に出て、振り分けでその番号が通る。番号は、選びうる組（各プロファイルの `criteria`、書かないプロファイルと、どれも選ばれない PR では既定の 1・4）と外せない基準 2・重点の 3 のどれとも重ならない | 重なれば宣言のプロファイルと最上位の基準を全部捨てる（I6） |
+| I11 | レビューの状態ファイル | `report` の要約は、`review_criteria.profile_name` があるときだけプロファイルの行を出し、空文字なら「既定」と出す。`profile_others` があるときはその名前も同じ行に出す | テストが落とす |
 
 ### ドメインイベント
 
@@ -73,7 +76,7 @@
 
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
-| レビューのプロファイル | プロジェクトが `.ndf/review.json` に書く、指摘の基準・書かないもの・見送りの種類・見送りの返信・自動レビュー観点の差し替えの組。`version: 2` では `profile` に 1 つ、`version: 3` では `profiles` に名前つきで複数を書き、PR ごとに 1 つが効く。書いた鍵だけが既定を差し替える。文中では「プロファイル」と略す | 意味の変更（`ndf-cross-review`） |
+| レビューのプロファイル | プロジェクトが `.ndf/review.json` に書く、指摘の基準・書かないもの・見送りの種類・見送りの返信・自動レビュー観点の差し替えの組。`version: 2` では `profile` に 1 つ、`version: 3` では `profiles` に名前つきで複数を書き、PR ごとに 1 つが効く。書いた鍵だけが既定を差し替える。`version: 3` の最上位の `criteria`・`not_written` は、選んだ組に足す。文中では「プロファイル」と略す | 意味の変更（`ndf-cross-review`） |
 | プロファイルの選択 | PR の変更ファイルのパスから、その PR に効かせるレビューのプロファイルを 1 つ決めること。宣言の `profiles` の先頭から見て、変更ファイルのどれかに `paths` が当たる最初のものを選ぶ。`paths` を持たないものはどの PR にも当たる。選んだ名前を `init` の出力とレビューの状態ファイルに残す | 意味の変更（`ndf-cross-review`。要求で足した語の意味に選び方を足す） |
 
 ## 機能一覧
@@ -85,23 +88,28 @@
 | F3 | 選んだプロファイルの名前を `init` の出力と状態ファイルに残し、再開で選び直す | cross-review の利用者・`report` |
 | F4 | 選んだプロファイルの組で修正担当への節を書き、振り分けを検査し、見送りの返信を組む | `/ndf:fix`（cross-review の中と単独） |
 | F5 | 壊れたプロファイルを含む宣言で、プロファイルを全部捨てて既定で続け、理由を知らせる | cross-review・`/ndf:fix`・`review_criteria.py` |
+| F6 | どの PR にも効かせる基準と書かないものを、宣言の最上位に 1 か所だけ書く | プロジェクトの書き手 |
+| F7 | どのプロファイルで見たかと、ほかに当たったプロファイルを `report` の要約の 1 行で読む | cross-review の利用者 |
 
 ## 構成要素
 
 | 要素 | 責務 |
 | --- | --- |
-| `plugins/ndf/scripts/lib/review_criteria.py` | `version: 3` の `profiles` を読んで検査する（I3・I6）。`select_profile` で変更ファイルのパスから 1 つを選び（I2）、選んだプロファイルの名前を `as_state` で状態の `profile_name` へ写す（I9）。`context_decl` は状態ファイルが無いとき、`version: 3` に限って変更ファイルを受け取って選ぶ。CLI に `--changed-file` を足す。冒頭の説明に `version: 3` の形を足す |
+| `plugins/ndf/scripts/lib/review_criteria.py` | `version: 3` の `profiles` と最上位の `criteria`・`not_written` を読んで検査する（I3・I6・I10）。`select_profile` で変更ファイルのパスから 1 つを選び（I2）、最上位の基準を足し、選んだプロファイルの名前を `as_state` で状態の `profile_name` へ、ほかに当たった名前を `profile_others` へ写す（I9）。`context_decl` は状態ファイルが無いとき、`version: 3` に限って変更ファイルを受け取って選ぶ。CLI に `--changed-file` を足す。冒頭の説明に `version: 3` の形を足す |
+| `plugins/ndf/scripts/lib/review_criteria_decl.py` | プロファイル（`version: 2` の `profile`・`version: 3` の `profiles` の各要素）の形の検査と `Profile` の型。`review_criteria.py` が 500 行の上限を超えないよう、形の検査だけをここへ分ける（`project_mvv.py` と `project_mvv_decl.py` の分け方と同じ） |
+| `cross-review` の `review_lib/commands/report.py` | 要約に、選んだプロファイルの名前とほかに当たった名前の行を出す（I11・決定 8） |
 | `cross-review` の `review_lib/review_focus.py` | 選んだ後の宣言（`ReviewDecl`）から観点と `review_criteria` を組む。複数のプロファイルに当たったときの知らせ（`info`）を出す。`_changed_file_paths` を選択の入力にも使う |
 | `cross-review` の `review_lib/commands/init.py` | 新規: 変更ファイルを取った直後に選び、選んだ宣言を観点と `review_criteria` の両方へ渡す。再開: 状態ファイルを読んでから保存した `changed_files` で選び直す（I7）。出力に `REVIEW_PROFILE_NAME=` を足す |
 | `fix` の `scripts/fix-steps.py` | `context` が状態ファイルを持たないとき、`version: 3` に限り PR の変更ファイルを 1 回取り（`gh api repos/<repo>/pulls/<PR>/files --paginate`）、`context_decl` に渡す。取れなければ空の列で選ぶ（前提 8）。`context_decl` の戻り値（`ReviewDecl`）を 2 つに分解している所（`focus, profile = ...`）を、属性で読む形に直す |
 | `cross-review` の `docs/02-fix-and-rotation.md` | 「レビューの宣言」の節に `version: 3`・`profiles`・選び方・壊れたときの範囲・`profile_name`・`REVIEW_PROFILE_NAME=` を書く（宣言の鍵と規則の正本） |
-| `cross-review` の `docs/04-contracts.md` | `init` の出力の一覧に `REVIEW_PROFILE_NAME=` を足し、正本（02）を指す |
+| `cross-review` の `docs/04-contracts.md` | `init` の出力の一覧に `REVIEW_PROFILE_NAME=` を足し、`report` の要約のプロファイルの行を書き、正本（02）を指す |
+| `cross-review` の `SKILL.md` | 作業完了報告に、`report` の要約のプロファイルの行を写すことを足す |
 | `cross-review` の `references/design-principles.md`・`fix` の `SKILL.md`・`scripts/lib/README.md` | 「`version: 2` のプロファイル」と書いた所を、`version: 2` と `version: 3` の両方を指す語に直す（値の集合へ `3` を足したことによる） |
 | `docs/glossary/glossary.json`・`docs/glossary.md` | 用語の表の 2 語の意味を直し、`glossary.py render` で作り直す |
 
 文書の要素（`docs/`・`references/`・`SKILL.md`・`README.md`・用語集）は処理の流れに現れないため、下の図には載せない。
 
-`launch-reviewer.sh`・`report.py`・`fix-steps.py finalize` は変えない。どれも状態ファイルか振り分けの JSON の写し（`reviewer_block`・`profile`・`review_profile`）を読むだけで、選択は写しを書く前に済んでいる。
+`launch-reviewer.sh`・`fix-steps.py finalize` は変えない。どれも状態ファイルか振り分けの JSON の写し（`reviewer_block`・`profile`・`review_profile`）を読むだけで、選択と最上位の基準の足し込みは写しを書く前に済んでいる。`report.py` は状態ファイルの `profile_name`・`profile_others` を読むだけで、宣言を読み直さない。
 
 ```mermaid
 graph TD
@@ -131,6 +139,8 @@ classDiagram
         focus: Focus
         profile: Profile
         profiles: tuple~Profile~ | None
+        shared: Profile | None
+        others: tuple~str~
     }
     class Profile {
         status: declared | none | unreadable
@@ -143,17 +153,20 @@ classDiagram
     }
     ReviewDecl --> "1" Profile : 選んだもの
     ReviewDecl --> "0..*" Profile : 候補（version 3 だけ）
+    ReviewDecl --> "0..1" Profile : 最上位の基準（version 3 だけ）
 ```
 
 | 型・関数 | 変更 |
 | --- | --- |
 | `Profile` | `name`（`version: 3` で選んだ名前。`version: 1`・`2` は `None`）と `paths`（候補の glob。`None` はどの PR にも当たる）を足す。`record()` は両方を写さない（状態の `profile` と振り分けの JSON の `review_profile` の形を変えない。I5） |
-| `ReviewDecl` | `profiles`（`version: 3` の候補。`version: 1`・`2` は `None`）を足す。`version: 3` を読んだ直後の `profile` は「選ぶ前」を表す `Profile("none", name="")` |
-| `select_profile(decl, paths) -> tuple[ReviewDecl, tuple[str, ...]]` | 新設。`decl.profiles` が `None` か、`profile` が `unreadable`（壊れた `version: 3`）なら `decl` をそのまま返す（I5・I6）。そうでなければ I2 で選び、`profile` を差し替えた宣言と、選ばなかったが `paths` が当たったプロファイルの名前（`paths` を持たないものは数えない）を返す |
-| `load_review_decl` | `version: 3` を読む。`profiles` が壊れていれば `profile = Profile("unreadable", name="", error=…)`・`profiles = ()` を返す（I6・I9） |
+| `ReviewDecl` | `profiles`（`version: 3` の候補。`version: 1`・`2` は `None`）・`shared`（最上位の `criteria`・`not_written`。書かなければ `None`）・`others`（選ばなかったが当たった名前）を足す。`version: 3` を読んだ直後の `profile` は「選ぶ前」を表す `Profile("none", name="")` |
+| `select_profile(decl, paths) -> tuple[ReviewDecl, tuple[str, ...]]` | 新設。`decl.profiles` が `None` か、`profile` が `unreadable`（壊れた `version: 3`）なら `decl` をそのまま返す（I5・I6）。そうでなければ I2 で選び、最上位の基準を足した（I10）`profile` と `others` を差し替えた宣言と、選ばなかったが `paths` が当たったプロファイルの名前（`paths` を持たないものは数えない）を返す |
+| `load_review_decl` | `version: 3` を読む。`profiles` か最上位の `criteria`・`not_written` が壊れていれば（番号の重なりを含む）`profile = Profile("unreadable", name="", error=…)`・`profiles = ()`・`shared = None` を返す（I6・I9・I10） |
 | `ReviewDecl` を 2 つに分解している所（`focus, profile = decl`。`review_focus._review_criteria`・`review_criteria.main`・`fix-steps.py cmd_context`） | 3 つ目の項目を足すため、属性で読む形に直す |
-| `as_state(focus, mvv, profile)` | `profile.name` が `None` でなければ `profile_name` を置く（I9）。ほかの項目は今のまま |
+| `as_state(focus, mvv, profile, others=())` | `profile.name` が `None` でなければ `profile_name` を置く（I9）。`others` が空でなければ `profile_others` を置く（決定 8）。ほかの項目は今のまま |
 | `context_decl(state_path, root_of, paths_of=None)` | 状態ファイルの写しがあれば今のまま。無ければ宣言を読み、`profiles` が `None` でないときだけ `paths_of()` を呼んで選ぶ |
+
+最上位の基準を足すときは、選んだプロファイルの `criteria`（書いていなければ既定の 1・4）に最上位の番号を足し、`not_written` は最上位 → プロファイル（書いていなければ既定の書かないもの）の順に並べて同じ文を 1 つにする。足した後の組は `declared` で、状態ファイルの `profile` と振り分けの JSON の `review_profile` へそのまま写るので、`finalize` は最上位の番号も通す（I8・I10）。最上位を書かない宣言では足さない。
 
 選んだプロファイルの中身に差し替えの鍵が 1 つも無い（`name` と `paths` だけ）ときは、`status` を `none` にする。`version: 2` の `profile: {}` と同じ扱いで、節・返信・状態ファイルのプロファイルの項目は既定のまま（名前だけが `profile_name` に残る）。こうしないと、写しを読む側（`profile_from({})` が `NO_PROFILE` を返す）と選んだ側とで、修正担当への節の見送りの句（「コード」と「対象のファイル」）が食い違う。
 
@@ -165,6 +178,8 @@ classDiagram
 {
   "version": 3,
   "focus": ["..."],
+  "criteria": {"9": "取得したデータとその分析の中身を、公開の置き場や外部の API へ出す"},
+  "not_written": ["好みの文体"],
   "profiles": [
     {
       "name": "manuscript",
@@ -190,13 +205,15 @@ classDiagram
 | --- | --- | --- |
 | `version` | 数 | `3`。`1`・`2` は今のまま読む |
 | `focus` | 文字列の配列 | `version: 2` と同じ（任意。どのプロファイルを選んでも効く。前提 5） |
+| `criteria`（最上位） | オブジェクト | 任意。宣言の側で外せない基準。形は `profile` の `criteria` と同じ（2 と 3 は使えない）。選んだプロファイルの組（選ばなかったときは既定の組）に足す。番号が選びうる組と重なれば壊れている（I10） |
+| `not_written`（最上位） | 文字列の配列 | 任意。選んだ組の書かないものの前に足す（同じ文は 1 つにする） |
 | `profiles` | 配列 | 無いか `[]` なら、どのプロファイルも選ばない（状態の `profile_name` は空文字）。要素の形が 1 つでも違えば全部を捨てる（I6） |
 | `profiles[].name` | 文字列 | 必須。英小文字・数字・`_`（`waive_kinds` の種類と同じ規則）。宣言の中で重複しない |
 | `profiles[].paths` | 文字列の配列 | 任意。書くなら空でない glob の配列で、`.ndf/pace.json` の `areas` と同じ規則（前提 4）。書かないプロファイルは高々 1 つで、末尾に置く（I3） |
 | `profiles[]` のほかの鍵 | — | `version: 2` の `profile` の鍵（`criteria`・`not_written`・`waive_kinds`・`reply`・`categories`・`replace_auto_categories`）と同じ形と規則。知らない鍵があれば壊れている |
 | `profile` | — | `version: 3` では書かない。書けば壊れている（`profiles` に移すよう理由に書く） |
 
-宣言の 2 つ目の要素（`system`）は `paths` を持たないので、原稿のパスに当たらない PR はすべて `system` になる。原稿と仕組みの両方を変えた PR は、先に書いた `manuscript` になる。
+宣言の 2 つ目の要素（`system`）は `paths` を持たないので、原稿のパスに当たらない PR はすべて `system` になる。原稿と仕組みの両方を変えた PR は、先に書いた `manuscript` になる。最上位の基準 9 と書かないもの「好みの文体」は、どちらを選んでも足される（`manuscript` の `not_written` にも同じ文があれば 1 つにまとまる）。
 
 ### `init` の出力
 
@@ -213,6 +230,7 @@ classDiagram
 | 項目 | 置くとき | 値 |
 | --- | --- | --- |
 | `profile_name` | 宣言が `version: 3` のとき（壊れたときも） | 選んだ名前。選ばなかった・壊れていたときは空文字 |
+| `profile_others` | 選ばなかったプロファイルの `paths` も変更ファイルに当たったときだけ | 当たった名前の配列（宣言の順） |
 | `profile_status`・`profile`・`profile_error` | 今のまま（選んだプロファイルについて） | 今のまま |
 
 `version: 1`・`2` の状態ファイルには `profile_name` を置かない（I5）。
@@ -225,12 +243,22 @@ classDiagram
 
 `reviewer` / `fixer` に `--changed-file <パス>`（繰り返し可）を足す。`version: 3` の宣言ではこれで選び、省けば空の列で選ぶ（`paths` を持たないプロファイルか、既定）。`version: 1`・`2` では無視する。
 
+### `report` の要約
+
+`version: 3` の宣言（状態ファイルに `profile_name` がある）のときだけ、次の 1 行を出す。作業完了報告はこの行を写す。
+
+| 状態 | 行 |
+| --- | --- |
+| 選んだ | `## レビューのプロファイル: <名前>` |
+| 選ばなかった・壊れていた（`profile_name` が空文字） | `## レビューのプロファイル: 既定` |
+| ほかにも当たった（`profile_others` がある） | `## レビューのプロファイル: <名前>（ほかに <名前>, … にも当たった。先に書いた <名前> を使った）` |
+
 ### 知らせの文
 
 | いつ | どこへ | 文 |
 | --- | --- | --- |
 | 選ばなかったプロファイルの `paths` も変更ファイルに当たった | cross-review は `info`、単独の `fix` と CLI は標準エラー | `⚠️ 変更ファイルが複数のプロファイル（<選んだ名前>, <ほかの名前>…）に当たるため、先に書いた <選んだ名前> を使う` |
-| 宣言のプロファイルが壊れている | 今の `PROFILE_WARNING` と同じ経路（標準エラー・`info`・`report`） | 今の `PROFILE_WARNING` の文。理由の頭に `profiles[<番号>]（<名前>）:` を付ける |
+| 宣言のプロファイルが壊れている | 今の `PROFILE_WARNING` と同じ経路（標準エラー・`info`・`report`） | 今の `PROFILE_WARNING` の文。理由の頭に `profiles[<番号>]（<名前>）:` を付ける。最上位の基準が壊れているときは `最上位の` を付け、番号の重なりは重なった番号を並べる |
 
 ## 処理の流れ
 
@@ -278,7 +306,7 @@ graph TD
 | 大項目 | 実現方式 |
 | --- | --- |
 | 性能・拡張性 | 新規の `init` は既に取っている `changed_files`、再開は保存した `changed_files` で選び、GitHub の呼び出しを増やさない。単独の `/ndf:fix` は、状態ファイルが無く宣言が `version: 3` のときだけ 1 回（`--paginate` のページ数ぶん）増える。`version: 1`・`2` では増えない |
-| 運用・保守性 | 選んだ名前を `REVIEW_PROFILE_NAME=` と状態ファイルの `profile_name` に残す。複数に当たったときは選ばなかった名前も知らせる |
+| 運用・保守性 | 選んだ名前を `REVIEW_PROFILE_NAME=`・状態ファイルの `profile_name`・`report` の要約に残す。複数に当たったときは選ばなかった名前も知らせ、`profile_others` と `report` の行に残す。どの PR にも効く基準は最上位の 1 か所に書き、プロファイルごとの写しを持たない |
 | 移行性 | `version: 1`・`2` は読み方を変えない（I5）。`version: 3` を古い NDF が読むと `version` の値で宣言全体を読めないとして基準 1・2・4 で続く（今の `load_review_decl` が `1`・`2` 以外を拒む） |
 | セキュリティ | 宣言は PR の head から読むため、PR の作り手が選ばれるプロファイルを変えられる。どれを選んでも基準 2 は残り（I4）、#1910 と同じ範囲に収まる |
 
@@ -332,6 +360,24 @@ graph TD
 
 根拠: Value 3 / Value 6（MVV 版 2）
 
+### 決定 7: どの PR にも効く基準の写しがずれないよう、`version: 3` の最上位の `criteria`・`not_written` を選んだ組へ足し、番号の重なりは壊れた宣言にする
+
+利用者のリポジトリには、PR の種類によらず効かせたい基準（取得したデータとその分析の中身を、公開の置き場や外部の API へ出していないか）がある。プロファイルごとに写して書くと、写しのどれかを直し忘れたとき黙って基準がずれる。最上位に 1 か所だけ書き、外せない基準 2（I4）の延長として「宣言の側で外せない基準」として扱えば、選んだどの組にも同じ文が効く。選ばなかった PR（既定の組）にも足す。足した組はそのまま写しになるので、`finalize` も同じ番号を通す（I8）。
+
+番号の重なりは、プロファイルの側を勝たせる案を採らない。どちらの文が効くかが PR の種類で変わり、書き手が重なりに気づけない。重なれば決定 4 と同じく、プロファイルも最上位の基準も全部捨てて既定で続ける。重なりを見る相手は、選びうるすべての組（各プロファイルの `criteria`、`criteria` を書かないプロファイルと、`paths` を持たない受け皿の無い宣言では既定の 1・4）で、選ばれた PR でだけ壊れる宣言を作らない。`not_written` は文の並びなので重なりを壊れたとせず、最上位 → プロファイルの順の和にして同じ文を 1 つにする。`version: 1`・`2` には足さない（I5）。
+
+利用者の決定（2026-10-12、AskUserQuestion で確認）: このスプリントで入れる。番号の重なりは壊れた宣言として既定で続ける。プロファイルを選ばなかった PR にも最上位の基準を足す。
+
+根拠: Value 6 / Value 2（MVV 版 2）
+
+### 決定 8: 利用者が読む報告で選択を確かめられるよう、選んだプロファイルの名前とほかに当たった名前を `report` の要約の 1 行に出す
+
+利用者は多くの場合、プランのステップの最後の報告（`report` の要約と、それを写した PR のコメント）しか読まず、`init` の出力の `REVIEW_PROFILE_NAME=` は目に入らない。`report` は状態ファイルの `review_criteria.profile_name` を読んで 1 行を出し、決定 2 の知らせ（ほかのプロファイルにも当たった）も同じ行に出す。そのため、ほかに当たった名前を `review_criteria.profile_others` に置く。名前は保存した `changed_files` と宣言だけで決まるので、再開の比べ方（I7）は変わらず、当たらないときは項目を置かないので、ほかに当たらない状態ファイルは今と同じ形のままである。`version: 1`・`2` では `profile_name` が無いので行を出さない。
+
+状態ファイルの最上位に置く案は、決定 5 と同じ理由で採らない。
+
+根拠: Value 2 / Value 7（MVV 版 2）
+
 ## テスト設計
 
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
@@ -351,18 +397,20 @@ graph TD
 | 受け入れ条件 13 | 状態ファイルの無い `context` が、`version: 3` の宣言で変更ファイルを 1 回取り、同じ規則で選んだ節と写しを書く。取得が失敗しても終了コードを変えず空の列で選ぶ。`version: 2` の宣言では変更ファイルを取らない | 単独では選ばず先頭を使う／`version: 2` でも取る／取得の失敗で止まる |
 | 受け入れ条件 14・I3・I6 | 名前の重複・`paths` の無い要素が末尾以外・知らない鍵・`profile` を書いた `version: 3` のそれぞれで、`review_criteria.py` が終了コード 0・既定の節・標準エラーに理由を出し、`init` の状態ファイルが `profile_status: unreadable`・`profile_name: ""` を持ち、同じ宣言の `focus` は効く | 壊れたものだけを捨てて次を選ぶ／例外で止まる |
 | 受け入れ条件 15 | 既存のテストが通る（`uv run --frozen --project . --all-extras pytest . -q -n 4`） | — |
+| 受け入れ条件 16・I10・決定 7 | 最上位の基準が原稿の PR・仕組みの PR・どれも選ばない PR の両方の節に出て、写しから組んだ `criterion_numbers` と `finalize` がその番号を通す。`not_written` が最上位 → プロファイルの順の和で、同じ文が 1 つ。`version: 2` に書いても効かない | 選んだプロファイルにだけ足さない／写しに入れず `finalize` が拒む／`version: 2` でも足す |
+| 受け入れ条件 17・I10・I6 | 最上位の番号が原稿・仕組みの `criteria`・基準 2 と重なる宣言、既定の 1・4 が選ばれうる宣言で 4 と重なる宣言、最上位の形が違う宣言で、プロファイルも最上位の基準も捨てて既定で続き、`init` が `REVIEW_PROFILE=unreadable` を出し、重点は効く | プロファイルの側を勝たせる／最上位の基準だけ残す |
+| 受け入れ条件 18・I11・決定 8 | `report` の要約に `## レビューのプロファイル: <名前>`・`既定`・ほかに当たった名前つきの行が出て、`profile_name` の無い状態では出ない。またがる PR の `init` の状態に `profile_others` があり、宣言と変更ファイルを変えない再開で書き直さない | `version: 2` でも行を出す／`profile_others` の比べ方で再開のたびに書き直す |
 | 中身の無いプロファイル | `name` と `paths` だけの要素を選ぶと `profile_status` が無く、`fixer` の見送りの句が「コード」のまま、`profile_name` に名前が残る | `declared` のまま空の写しを書き、cross-review の中と外で句が食い違う |
 
 ## 設計の結果
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #1942 | 実装する | — | `plugins/ndf/scripts/lib/review_criteria.py`、`plugins/ndf/scripts/lib/README.md`、`plugins/ndf/scripts/tests/test_review_criteria.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/review_focus.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/commands/init.py`、`plugins/ndf/skills/cross-review/tests/`、`plugins/ndf/skills/cross-review/docs/02-fix-and-rotation.md`、`plugins/ndf/skills/cross-review/docs/04-contracts.md`、`plugins/ndf/skills/cross-review/references/design-principles.md`、`plugins/ndf/skills/fix/scripts/fix-steps.py`、`plugins/ndf/skills/fix/SKILL.md`、`plugins/ndf/skills/fix/tests/`、`docs/glossary/glossary.json`、`docs/glossary.md` |
+| #1942 | 実装する | — | `plugins/ndf/scripts/lib/review_criteria.py`、`plugins/ndf/scripts/lib/review_criteria_decl.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/commands/report.py`、`plugins/ndf/skills/cross-review/SKILL.md`、`plugins/ndf/scripts/lib/README.md`、`plugins/ndf/scripts/tests/test_review_criteria.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/review_focus.py`、`plugins/ndf/skills/cross-review/scripts/review_lib/commands/init.py`、`plugins/ndf/skills/cross-review/tests/`、`plugins/ndf/skills/cross-review/docs/02-fix-and-rotation.md`、`plugins/ndf/skills/cross-review/docs/04-contracts.md`、`plugins/ndf/skills/cross-review/references/design-principles.md`、`plugins/ndf/skills/fix/scripts/fix-steps.py`、`plugins/ndf/skills/fix/SKILL.md`、`plugins/ndf/skills/fix/tests/`、`docs/glossary/glossary.json`、`docs/glossary.md` |
 
 ## 未確認のまま残ること
 
 | 項目 | 内容 |
 | --- | --- |
 | 実際の原稿のリポジトリでの効き目 | 原稿の PR と仕組みの PR でレビュー担当の指摘・修正担当の見送りが PR の種類に合うかは、リリース後テスト（利用者のリポジトリ）でしか分からない |
-| 決定 2 の選び方が利用者の運用に合うか | 原稿と仕組みを同じ PR で変える頻度と、そのとき原稿のプロファイルで見てよいかは、承認ゲート 1 で利用者が確かめる（起票者の推定 S3） |
 | 名前を変えたファイルの前の名前で当たる場合 | 選択の入力に前の名前も含める（cross-review の `changed_files` と同じ集合）。前の名前だけが原稿のパスに当たる PR（原稿を外へ移す PR）が原稿のプロファイルになるが、利用の実例は無い |

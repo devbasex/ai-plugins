@@ -414,6 +414,8 @@ PR の head の worktree の `.ndf/review.json` を、`init`（新規は worktre
 | `profiles[].name` | 文字列 | 必須。英小文字・数字・`_`。宣言の中で重複しない |
 | `profiles[].paths` | 文字列の配列 | 任意。空でない glob の配列で、`profile.categories` の `paths` と同じ規則。書かないプロファイルはどの PR にも当たり、高々 1 つを末尾に置く |
 | `profiles[]` のほかの鍵 | — | `profile` の鍵（`criteria`・`not_written`・`waive_kinds`・`reply`・`categories`・`replace_auto_categories`）と同じ形と規則。知らない鍵があれば壊れている |
+| `criteria`（最上位） | オブジェクト（番号の文字列 → 文） | `version: 3` だけで読む、宣言の側で外せない基準。任意。形は `profile.criteria` と同じ（`2` と `3` は使えない）。選んだプロファイルの基準（選ばなかったとき・`criteria` を書かないプロファイルでは既定の 1・4）に足す。番号が、どれかのプロファイルの `criteria` か、既定の 1・4 が効きうるとき（`criteria` を書かないプロファイルがある・`paths` を持たないプロファイルが無い）のその番号と重なれば壊れている |
+| `not_written`（最上位） | 文字列の配列 | `version: 3` だけで読む。任意。選んだプロファイルの書かないもの（書かなければ既定）の前に足し、同じ文は 1 つにする |
 
 状態ファイルの `review_criteria` には、プロファイルがあるときだけ `profile_status`（`declared` / `unreadable`）を置き、
 `declared` では `profile`（検査を通ったプロファイルの写し。宣言の `profile` と同じ形）を、`unreadable` では
@@ -427,10 +429,19 @@ PR の head の worktree の `.ndf/review.json` を、`init`（新規は worktre
 止めず、先に書いた方を選び、ほかに当たった名前を `⚠️ 変更ファイルが複数のプロファイル（…）に当たるため、先に書いた <名前> を使う`
 で知らせる。どれにも当たらなければプロファイルなしと同じ既定で続く。`profiles` のどれか 1 つでも形が違えば、`profiles` を
 全部捨てて既定で続け（`profile_status: unreadable`）、理由の頭に `profiles[<番号>]（<名前>）:` を付けて標準エラーと `report` に出す。
+最上位の `criteria`・`not_written` が壊れている（番号の重なりを含む）ときも同じく、`profiles` と最上位の基準を全部捨てる。
 選んだ名前は状態ファイルの `review_criteria.profile_name` と `init` の出力の `REVIEW_PROFILE_NAME=<名前>` に出る。
 `profile_name` は `version: 3` のときだけ置き、選ばなかった・壊れていたときは空文字。`REVIEW_PROFILE_NAME=` は
-`version: 3` で選んだときだけ値を持ち、ほかは空。名前と `paths` だけを書いたプロファイルを選ぶと、名前だけが残り、
+`version: 3` で選んだときだけ値を持ち、ほかは空。ほかのプロファイルにも当たったときだけ、その名前を
+`review_criteria.profile_others`（宣言の順の配列）に置く。名前と `paths` だけを書いたプロファイルを選ぶと、名前だけが残り、
 プロファイルの項目は既定のまま（`profile_status` を置かない）。
+
+最上位の `criteria`・`not_written` を書いた宣言では、選んだプロファイル（選ばなかったときは既定の組）にそれを足した組が
+効き、状態ファイルの `profile` と振り分けの JSON の `review_profile` にも足した組が写る（`profile_status: declared`）。
+どの PR にも効かせたい基準は最上位に 1 か所だけ書き、プロファイルごとに写さない。
+
+`report` の要約は、`profile_name` があるときだけ `## レビューのプロファイル: <名前>`（空文字なら `既定`）の行を出し、
+`profile_others` があれば同じ行に `（ほかに <名前>, … にも当たった。先に書いた <名前> を使った）` を足す。
 
 状態ファイルが無いまま `/ndf:fix` を単独で使うときは、`fix-steps.py context` が宣言を読み、`version: 3` のときだけ
 `gh api repos/<repo>/pulls/<PR>/files --paginate` で変更ファイルを取って同じ規則で選ぶ。取れなければ理由を標準エラーへ出し、
@@ -454,11 +465,12 @@ PR の head の worktree の `.ndf/review.json` を、`init`（新規は worktre
 }
 ```
 
-`version: 3` の例（原稿のパスを 1 つでも変えた PR は `manuscript`、ほかの PR はすべて `system`）:
+`version: 3` の例（原稿のパスを 1 つでも変えた PR は `manuscript`、ほかの PR はすべて `system`。基準 9 はどちらにも効く）:
 
 ```json
 {
   "version": 3,
+  "criteria": {"9": "取得したデータとその分析の中身を、公開の置き場や外部の API へ出す"},
   "profiles": [
     {
       "name": "manuscript",
