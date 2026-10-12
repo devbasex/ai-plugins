@@ -10,7 +10,7 @@ from pathlib import Path
 
 import gh_rest
 from loop_drive import review_answer
-from supervise_lib import paths
+from supervise_lib import paths, running
 from supervise_lib.claude import TAIL, WORK_TOOLS, run_ticking
 from supervise_lib.prompts import FULL_SYSTEM, PROGRESS_PROMPT, REPORT_DONE, REPORT_NOT_DONE, RESUME_PROMPT, WORK_SYSTEM, WORKDIR_PROMPT
 from supervise_lib.steps import RunStep, last_json
@@ -24,11 +24,6 @@ TICK_GRACE = 120  # worker 自身の上限に、外側で打ち切るまで足�
 
 def _timeout(step: dict) -> int:
     return step.get("timeout", DEFAULT_TIMEOUT)
-
-
-CONCURRENT_FILES = (
-    "並行の触るファイル"  # 実行中のプランへ queue が入れる、同時に流れる他のプランの 触るファイル（プランの JSON には書かない）
-)
 
 
 class WorkStep:
@@ -98,11 +93,16 @@ class WorkStep:
         }
 
     def concurrent_rule(self, ctx, step: dict) -> str:
-        """実装の指示文へ足す除外の行。同時に流れる他のプランの `触るファイル` を、流す時点で入れる（#1248）。"""
-        files = ctx.plan.get(CONCURRENT_FILES) or []
-        if step.get("kind") != "実装" or not files:
+        """実装の指示文へ足す除外の行（#1248・#1674）。担当を起動する時点で走っている他のプランの `触るファイル`
+        のうち、ディレクトリでないものを入れる。入れたものと外したディレクトリを進捗ログ（`kind: concurrent`）へ書く。"""
+        if step.get("kind") != "実装":
             return ""
-        return "\n並行して別のプランが次を触る。それらは変えない: " + "、".join(files)
+        root = step.get("cwd", ctx.cwd) or "."
+        found = running.others(ctx.plan_path) if ctx.plan_path else []
+        dirs = [f for f in found if paths.is_dir_entry(f, root)]
+        files = [f for f in found if f not in dirs]
+        ctx.state.progress_write({"kind": "concurrent", "step": step.get("id"), "files": files, "dirs": dirs})
+        return "\n並行して別のプランが次を触る。それらは変えない: " + "、".join(files) if files else ""
 
     def execute(self, ctx, step: dict) -> tuple[bool, str]:
         issues = self.issue_text(ctx, step)

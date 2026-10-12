@@ -50,6 +50,7 @@ MODULES = [
     "pr",
     "engine",
     "admission",
+    "running",  # queue のプロセスの中の、走っているプランの登録簿（#1674）
     "flow",
     "templates",
     "verify_steps",
@@ -85,6 +86,7 @@ NO_ENGINE = [
     "new_args",
     "paths",
     "admission",
+    "running",
 ]
 
 # 関数の中の import で、モジュールの循環にしない辺（Engine.run と cmd_queue が耐久ワークフローを始める。

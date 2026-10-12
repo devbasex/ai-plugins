@@ -52,13 +52,21 @@ def test_groups_join_chained_overlaps_and_keep_the_order():
     plans = {"a": ["x/"], "b": ["y.py"], "c": ["x/1.py", "z/"], "d": ["z/2.py"], "e": ["w.py"]}
     grouped = admission.groups(plans)
     assert grouped == [["a", "c", "d"], ["b"], ["e"]]  # a と d は直に重ならないが、c を介して同じ組
-    assert admission.others(plans, grouped) == {
-        "a": ["y.py", "w.py"],
-        "c": ["y.py", "w.py"],
-        "d": ["y.py", "w.py"],
-        "b": ["x/", "x/1.py", "z/", "z/2.py", "w.py"],
-        "e": ["x/", "x/1.py", "z/", "z/2.py", "y.py"],
-    }
+
+
+def test_groups_wait_for_the_plans_they_need_and_merge_waiting_cycles():
+    """前提のプランは組を変えず待ちになる。前提が後ろにあれば待たない。待ちが循環する組は 1 つにまとめる（#1674 の I5）。"""
+    plans = {"a": ["a.py"], "x": ["a.py"], "b": ["b.py"], "c": ["c.py"], "z": ["z.py"]}
+    after = {"b": ["a"], "c": ["a"], "z": ["c"]}
+    grouped = admission.groups(plans, (), after)
+    assert grouped == [["a", "x"], ["b"], ["c"], ["z"]]
+    assert admission.needs(plans, grouped, after) == [[], ["a"], ["a"], ["c"]]
+    assert admission.needs(plans, grouped, {"a": ["b"]}) == [[], [], [], []]  # 前提が後ろにあると待ちの辺を張らない
+    cyc = {"a": ["p/"], "b": ["q/"], "c": ["q/y.py"], "d": ["p/x.py"]}
+    after = {"b": ["a"], "d": ["c"]}  # 組 {a, d} は c を、組 {b, c} は a を待つ
+    assert admission.groups(cyc) == [["a", "d"], ["b", "c"]]
+    assert admission.groups(cyc, (), after) == [["a", "b", "c", "d"]]
+    assert admission.needs(cyc, [["a", "b", "c", "d"]], after) == [[]]
 
 
 def test_tags_come_from_the_step_type_and_the_command():
@@ -121,9 +129,10 @@ class Queue:
         (tmp / ".ndf").mkdir()
         (tmp / ".ndf" / "supervise.json").write_text(json.dumps({"version": 1, **({"queue": queue_decl} if queue_decl else {})}))
 
-    def plan(self, name: str, steps: list[dict], files: list[str] | None = None) -> str:
+    def plan(self, name: str, steps: list[dict], files: list[str] | None = None, after: list[str] | None = None) -> str:
         steps[-1].setdefault("next", "end")
         plan = {"フェーズ": "試験", "課題": [], "作業場所": str(self.tmp), "steps": steps, **({"触るファイル": files} if files else {})}
+        plan.update({"前提のプラン": after} if after else {})
         (self.tmp / f"{name}.json").write_text(json.dumps(plan, ensure_ascii=False))
         return str(self.tmp / f"{name}.json")
 
@@ -255,6 +264,98 @@ def test_a_plan_ending_with_an_exception_does_not_stop_the_other_plans(tmp_path,
     assert p.returncode == 1 and res["status"] == "stopped", p.stderr
     assert items["good"]["result"] == "完了" and q.visits() == ["g"]
     assert items["bad"]["result"] == "報告なし" and items["bad"]["exit"] == 1 and "KeyError" in items["bad"]["reason"]
+
+
+# ---- #1674: 前提のプラン ----
+
+
+def test_plans_needing_one_plan_wait_for_it_and_then_run_side_by_side(tmp_path, env):
+    """B と C が A だけを前提にし、触るファイルが重ならなければ、A の後に同時に流れる（I5）。"""
+    q = Queue(tmp_path, env)
+    a = q.plan("a", [run_step(q.span("a", 0.6))], ["a.py"])
+    b = q.plan("b", [run_step(q.span("b", 0.6))], ["b.py"], after=["a"])
+    c = q.plan("c", [run_step(q.span("c", 0.6))], ["c.py"], after=["a"])
+    p, res = q.run(a, b, c, "--max", "2")
+    assert p.returncode == 0 and [i["result"] for i in res["items"]] == ["完了"] * 3, p.stderr
+    sa, sb, sc = q.spans("a", "b", "c")
+    assert sa[1] <= sb[0] and sa[1] <= sc[0] and overlap(sb, sc)
+
+
+def test_waiting_plans_do_not_hold_the_only_slot(tmp_path, env):
+    """`--max 1` でも、前提を待つプランは枠を塞がない（I5）。"""
+    q = Queue(tmp_path, env)
+    a = q.plan("a", [run_step(note(tmp_path, "a"))], ["a.py"])
+    b = q.plan("b", [run_step(note(tmp_path, "b"))], ["b.py"], after=["a"])
+    c = q.plan("c", [run_step(note(tmp_path, "c"))], ["c.py"], after=["a"])
+    p, res = q.run(a, b, c, "--max", "1")
+    assert p.returncode == 0 and [i["result"] for i in res["items"]] == ["完了"] * 3, p.stderr
+    assert q.visits() == ["a", "b", "c"]
+
+
+def test_a_plan_needing_one_member_of_a_group_does_not_wait_for_the_rest(tmp_path, env):
+    """A が X と重なりの組にあっても、A だけを前提にする B は X の終わりを待たない（I5）。"""
+    q = Queue(tmp_path, env)
+    a = q.plan("a", [run_step(q.span("a", 0.3))], ["pkg/a.py"])
+    x = q.plan("x", [run_step(q.span("x", 1.5))], ["pkg/"])
+    b = q.plan("b", [run_step(q.span("b", 0.3))], ["b.py"], after=["a"])
+    p, res = q.run(a, x, b, "--max", "3")
+    assert p.returncode == 0 and [i["result"] for i in res["items"]] == ["完了"] * 3, p.stderr
+    sa, sx, sb = q.spans("a", "x", "b")
+    assert sa[1] <= sb[0] and overlap(sx, sb)
+
+
+def test_groups_waiting_for_each_other_run_as_one_group_in_order(tmp_path, env):
+    q = Queue(tmp_path, env)
+    a = q.plan("a", [run_step(note(tmp_path, "a"))], ["p/"])
+    b = q.plan("b", [run_step(note(tmp_path, "b"))], ["q/"], after=["a"])
+    c = q.plan("c", [run_step(note(tmp_path, "c"))], ["q/y.py"])
+    d = q.plan("d", [run_step(note(tmp_path, "d"))], ["p/x.py"], after=["c"])
+    p, res = q.run(a, b, c, d, "--max", "4")
+    assert p.returncode == 0 and [i["result"] for i in res["items"]] == ["完了"] * 4, p.stderr
+    assert q.visits() == ["a", "b", "c", "d"]
+
+
+def test_a_plan_whose_needed_plan_stopped_is_not_run_and_others_still_run(tmp_path, env):
+    """前提のプランが止まれば後ろのプランを流さず、理由と blocked_by を残す。前提の無いプランは流れる（受け入れ条件 5〜7）。"""
+    q = Queue(tmp_path, env)
+    a = q.plan("a", [run_step(note(tmp_path, "a", "exit 1"))], ["a.py"])
+    b = q.plan("b", [run_step(note(tmp_path, "b"))], ["b.py"], after=["a"])
+    c = q.plan("c", [run_step(note(tmp_path, "c"))], ["c.py"])
+    p, res = q.run(a, b, c, "--max", "2")
+    items = {Path(i["plan"]).stem: i for i in res["items"]}
+    assert p.returncode == 1 and items["a"]["result"] == "止まった" and items["c"]["result"] == "完了", p.stderr
+    assert items["b"]["result"] == "流さなかった" and items["b"]["blocked_by"] == [a]
+    assert items["b"]["reason"] == f"前提のプランが完了でない: {a}（止まった）"
+    assert sorted(q.visits()) == ["a", "c"] and not q.state(b).exists()
+    assert res["metrics"]["not_run"] == 1 and res["summary"].endswith("。1 本は流さなかった")
+
+
+def test_a_needed_plan_later_in_the_queue_or_missing_blocks_the_plan(tmp_path, env):
+    q = Queue(tmp_path, env)
+    b = q.plan("b", [run_step(note(tmp_path, "b"))], ["b.py"], after=["a"])
+    a = q.plan("a", [run_step(note(tmp_path, "a"))], ["a.py"])
+    m = q.plan("m", [run_step(note(tmp_path, "m"))], ["m.py"], after=["nosuch"])
+    p, res = q.run(b, a, m, "--max", "1")
+    items = {Path(i["plan"]).stem: i for i in res["items"]}
+    assert items["a"]["result"] == "完了" and q.visits() == ["a"], p.stderr
+    assert items["b"]["blocked_by"] == [a] and items["b"]["reason"] == f"前提のプラン {a} の結果が無い（後ろにある）"
+    assert items["m"]["blocked_by"] == ["nosuch"] and items["m"]["reason"] == "前提のプラン nosuch が見つからない"
+
+
+def test_a_needed_plan_of_an_earlier_stage_or_with_a_gate_record(tmp_path, env):
+    """前のステージの完了は前提を満たす。関門の記録は完了でない（受け入れ条件 5）。"""
+    t, q = tmp_path, Queue(tmp_path, env)
+    a = q.plan("a", [run_step(note(t, "a"))], ["a.py"])
+    b = q.plan("b", [run_step(note(t, "b"))], ["b.py"], after=["a"])
+    p, res = q.run(a, "--then", b)
+    assert p.returncode == 0 and [i["result"] for i in res["items"]] == ["完了", "完了"], p.stderr
+    gate = q.plan("gate", [{**run_step(note(t, "g", "exit 10"), "g"), "gate_next": "end"}])
+    q.run(gate)
+    c = q.plan("c", [run_step(note(t, "c"))], ["c.py"], after=["gate"])
+    p, res = q.run(gate, c)
+    items = {Path(i["plan"]).stem: i for i in res["items"]}
+    assert items["gate"]["result"] == "関門" and items["c"]["result"] == "流さなかった" and items["c"]["blocked_by"] == [gate]
+    assert "c" not in q.visits()
 
 
 # ---- C-5・I21: 資源の枠 ----
