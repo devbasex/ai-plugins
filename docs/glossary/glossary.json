@@ -2159,6 +2159,13 @@
       "source": "docs/specifications/cross-review-review-profile.md"
     },
     {
+      "term": "プロファイルの選択",
+      "context": "ndf-cross-review",
+      "meaning": "PR の変更ファイルのパスから、その PR に効かせるレビューのプロファイルを 1 つ決めること。選んだ名前を init の出力とレビューの状態ファイルに残す",
+      "source": "",
+      "pending_source": "issues/issue-1942-requirements.md"
+    },
+    {
       "term": "自動レビュー観点",
       "context": "ndf-cross-review",
       "meaning": "cross-review が変更ファイルの分類（自動カテゴリ）から選び、レビューの両スロットへ渡す観点の文。--focus と --extra-instructions-file の観点はこの後ろに足す",
