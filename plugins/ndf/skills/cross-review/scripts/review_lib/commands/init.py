@@ -372,7 +372,6 @@ def _resolve_pr_and_ownership(pr: object, repo: str, worktree: str, args_worktre
         review_lib.die("認証している利用者を gh api user で求められません")
     author = meta.author
     is_own = me == author
-    event_downgrade = is_own
     if is_own:
         review_lib.info(f"⚠ 自分の PR (author={me}) — REQUEST_CHANGES → COMMENT 強制ダウングレード")
 
@@ -383,7 +382,7 @@ def _resolve_pr_and_ownership(pr: object, repo: str, worktree: str, args_worktre
         me=me,
         author=author,
         is_own=is_own,
-        event_downgrade=event_downgrade,
+        event_downgrade=is_own,
     )
 
 
