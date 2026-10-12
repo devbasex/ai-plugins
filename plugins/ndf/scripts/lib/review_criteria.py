@@ -45,6 +45,8 @@ CRITERIA = {
     2: "秘密・認証認可・利用者のデータ・戻せない操作に触れる（起きる確率によらず書く）",
     4: "設計の文書で、実装する人が違うものを作ってしまう食い違い",
 }
+# プロファイルが基準を書かないときの組（外せない基準 2 を除く）
+DEFAULT_CRITERIA = {n: t for n, t in CRITERIA.items() if n != FIXED_CRITERION}
 FOCUS_LABEL = "このプロジェクトのレビューの重点に当たる"
 CRITERION_NUMBERS = tuple(sorted({*CRITERIA, FOCUS_CRITERION}))
 
@@ -128,7 +130,7 @@ def _parse_shared(data: dict, profiles) -> tuple[Profile | None, str | None]:
         return None, f"最上位の {shared.error}"
     default = (None,) if not profiles or profiles[-1].paths is not None else ()
     taken = {n for p in profiles for n in (p.criteria or {})} | {
-        n for p in (*profiles, *default) if not p or p.criteria is None for n in (1, 4)
+        n for p in (*profiles, *default) if not p or p.criteria is None for n in DEFAULT_CRITERIA
     }
     overlap = sorted(set(shared.criteria or ()) & taken)
     if overlap:
@@ -140,7 +142,7 @@ def _with_shared(profile: Profile, shared: Profile | None) -> Profile:
     """選んだプロファイル（選ばなかったときは既定の組）へ最上位の基準を足す。`not_written` は最上位 → プロファイルの順の和。"""
     if shared is None:
         return profile
-    criteria = profile.criteria if profile.criteria is not None else {n: CRITERIA[n] for n in (1, 4)}
+    criteria = profile.criteria if profile.criteria is not None else DEFAULT_CRITERIA
     own = profile.not_written if profile.not_written is not None else tuple(NOT_WRITTEN.split("・"))
     nw = profile.not_written if shared.not_written is None else tuple(dict.fromkeys((*shared.not_written, *own)))
     merged = dict(sorted({**criteria, **shared.criteria}.items())) if shared.criteria else profile.criteria
@@ -210,7 +212,7 @@ def profile_categories(profile: Profile, paths) -> list[tuple[str, str]]:
 
 
 def _criteria_lines(focus: Focus, profile: Profile = NO_PROFILE) -> list[str]:
-    items = dict(profile.criteria) if profile.criteria is not None else {n: CRITERIA[n] for n in (1, 4)}
+    items = dict(profile.criteria if profile.criteria is not None else DEFAULT_CRITERIA)
     items[FIXED_CRITERION] = CRITERIA[FIXED_CRITERION]
     if focus.status == "declared" and focus.names:
         items[FOCUS_CRITERION] = f"{FOCUS_LABEL}: {' / '.join(focus.names)}"
