@@ -3753,6 +3753,18 @@
       "context": "ndf-workflow",
       "meaning": "承認ゲートの差し戻しを 1 回 1 行で追記する JSONL（NDF_MVV_STATE_DIR の gate-rejections.jsonl）。pace と状態ファイルの有無によらず唯一の置き場で、覆しの記録とは別のファイル",
       "source": "docs/specifications/ndf-gate-rejections-and-filer-assumptions.md"
+    },
+    {
+      "term": "手で足した節",
+      "context": "ndf-release",
+      "meaning": "承認資料の `## ` の節のうち、配布のステップ（approval-facts・notes --approval・changed-plugins --approval）が書く見出しに当たらないもの。作り直しの後も見出しと中身が残る",
+      "source": "plugins/ndf/skills/release/references/release-steps.md"
+    },
+    {
+      "term": "置き換える箇条",
+      "context": "ndf-release",
+      "meaning": "後の PR の本文の `## 置き換える箇条` の節に書く行。同じ版に含む前の PR の「利用者向けの変化」の箇条を指し、その箇条を CHANGELOG と承認資料の「配る中身」から除く",
+      "source": "plugins/ndf/skills/release/references/release-steps.md"
     }
   ]
 }
