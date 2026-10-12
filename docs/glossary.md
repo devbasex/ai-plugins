@@ -226,6 +226,8 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 資源の枠 | `resource_limit` | 資源のタグごとの、同時に流せるステップの本数の上限（.ndf/supervise.json の queue.resources） | — | — | — |
 | 重なりの組 | `overlap_pair` | 同じステージの 2 本のプランで、触るファイルが包含で重なるか同じ共有の一覧に当たるもの。同時には流さない | — | — | — |
 | 共有の一覧 | `shared_list` | 複数のプランが同じ行の並びへ書き足すファイル（索引など）。.ndf/supervise.json の queue.shared に書く | — | — | — |
+| 除外の行 | `concurrent_rule` | queue が実装の担当の指示文の末尾に足す 1 行。担当を起動する時点で走っている他のプランの触るファイルのうち、ディレクトリでないものを変えないよう求める | — | — | — |
+| 前提のプラン | `after` | プランの JSON の `前提のプラン` に名前で挙げたプラン。その結果が完了でなければ、queue は挙げた側のプランを流さない | — | — | — |
 | スプリントの雛形 | — | `supervise.py new sprint` がステージごとのプランを作る関数（`sprint_waves.py` の `plan_sprint_*` / `plan_fast_*`） | — | — | — |
 | 単発の雛形 | — | `supervise.py new impl / fix / check` が 1 本のプランを作る関数（`templates.py`） | — | — | — |
 | 取り込んだ課題 | — | 設計で、受け入れ内容を別の課題の実装へ含めると決めた課題。自分の実装のプランは残すが、`実行の条件` で飛ばして実行しない | — | — | — |
@@ -507,6 +509,8 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | 範囲の PR | — | 直前の正式版のタグから承認したコミットまでに、ベースブランチへ merge commit か squash merge で入った PR。版上げの PR と、PR でない番号（squash の件名の `(#N)` が課題を指すもの）は含まない | — | — | `docs/specifications/ndf-release-approval-included-prs.md` |
 | 版上げの PR | — | head のブランチが `release/` で始まる PR。版数と CHANGELOG だけを変え、中身の変更を持たない | — | — | `docs/specifications/ndf-release-approval-included-prs.md` |
 | 合格の行 | — | リリース後テストの表で、`結果` の列が `合格` で始まる行 | — | — | `docs/specifications/ndf-sprint-close-acceptance-criteria.md` |
+| 手で足した節 | — | 承認資料の `## ` の節のうち、配布のステップ（approval-facts・notes --approval・changed-plugins --approval）が書く見出しに当たらないもの。作り直しの後も見出しと中身が残る | — | — | `plugins/ndf/skills/release/references/release-steps.md` |
+| 置き換える箇条 | — | 後の PR の本文の `## 置き換える箇条` の節に書く行。同じ版に含む前の PR の「利用者向けの変化」の箇条を指し、その箇条を CHANGELOG と承認資料の「配る中身」から除く | — | — | `plugins/ndf/skills/release/references/release-steps.md` |
 
 ## NDF の指示書チェック（`ndf-instructions`）
 
