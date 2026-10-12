@@ -1772,7 +1772,7 @@ def test_alive_line_carries_run_step_last_stderr_line(tmp_path):
 
 def test_no_alive_line_within_interval(tmp_path):
     s, _ = run_plan(tmp_path, [{"id": "a", "type": "run", "cmd": "sleep 0.3", "next": "end"}])
-    assert [r["kind"] for r in progress(s)] == ["step"]
+    assert [r["kind"] for r in progress(s)] == ["run", "step"]
 
 
 def test_work_prompt_has_progress_instructions(tmp_path, fakes):
@@ -2306,6 +2306,85 @@ def test_run_from_restores_pr_from_previous_report(tmp_path):
     s = engine.Engine(plan, state)
     assert "結果: 完了" in s.run(start="b")
     assert "n=1066" in s.state.results["b"]["text"]
+
+
+FAKE_GH_DOWN = f"#!{PY}\nimport os, sys\nopen(os.environ['FAKE_GH_CALLED'], 'w').write(' '.join(sys.argv[1:]))\nsys.exit(1)\n"
+
+
+def test_run_from_restores_the_pr_its_pr_step_made_however_many_times_it_resumes(tmp_path, monkeypatch):
+    """#1296 の受け入れ条件 1〜3: pr のステップが作った PR を、report.md が上書きされても消えても、何度目の再開でも
+    {pr} / {pr_url} と報告に使う。読み直しは gh を呼ばない。実行の始まりの行は実行ごとに 1 行（I6）。"""
+    root, _ = pr_repo(tmp_path, monkeypatch)
+    plan = {
+        "フェーズ": "検査",
+        "課題": [1296],
+        "作業場所": str(root),
+        "steps": [
+            {"id": "pr", "type": "pr", "stage": "Pull Request", "base": "develop", "body": "template", "next": "chk"},
+            {"id": "chk", "type": "run", "cmd": "echo n={pr} u={pr_url}; false", "next": "end"},
+        ],
+    }
+    state = tmp_path / "state"
+    url = "https://github.com/o/r/pull/5"
+    assert f"- Pull Request: {url}" in engine.Engine(json.loads(json.dumps(plan)), state).run()
+    (tmp_path / "bin" / "gh").write_text(FAKE_GH_DOWN)  # 再開では gh が呼ばれたら落ちる
+    called = tmp_path / "gh-called"
+    monkeypatch.setenv("FAKE_GH_CALLED", str(called))
+    for spoil in (None, "## フェーズの報告\n\n- Pull Request: 無し\n", ""):
+        if spoil is not None:
+            (state / "report.md").write_text(spoil) if spoil else (state / "report.md").unlink()
+        s = engine.Engine(json.loads(json.dumps(plan)), state)
+        text = s.run(start="chk")
+        assert f"n=5 u={url}" in s.state.results["chk"]["text"]
+        assert f"- Pull Request: {url}" in text and f"- Pull Request: {url}" in (state / "report.md").read_text()
+    assert not called.exists()
+    rows = [json.loads(l) for l in (state / "progress.jsonl").read_text().splitlines()]
+    assert [r["from"] for r in rows if r["kind"] == "run"] == [None, "chk", "chk", "chk"]
+    assert [r.get("pr") for r in rows if r["kind"] == "step" and r["step"] == "pr"] == [url]
+
+
+def recorder(url: str, code: int = 0) -> dict:
+    """pr_from で計画の Pull Request を決める run のステップ（終了コード code）。"""
+    out = json.dumps({"metrics": {"release_pr_url": url}})
+    return {"id": "rec", "type": "run", "cmd": f"echo '{out}'; exit {code}", "pr_from": "release_pr_url", "next": "use"}
+
+
+def pr_plan(tmp_path, *steps: dict, **extra) -> dict:
+    use = {"id": "use", "type": "run", "cmd": "echo n={pr}", "next": "end"}
+    return {"フェーズ": "試験", "課題": [1296], "作業場所": str(tmp_path), "steps": [*steps, use], **extra}
+
+
+def test_run_from_uses_the_last_pr_decided_since_the_last_full_run(tmp_path):
+    """#1296 の受け入れ条件 6 と I2: 2 回成功したら後の PR、落ちた回の値は残さない。"""
+    state = tmp_path / "state"
+    engine.Engine(pr_plan(tmp_path, recorder("https://github.com/o/r/pull/1")), state).run()
+    engine.Engine(pr_plan(tmp_path, recorder("https://github.com/o/r/pull/2")), state).run(start="rec")
+    engine.Engine(pr_plan(tmp_path, recorder("https://github.com/o/r/pull/3", code=1)), state).run(start="rec")
+    s = engine.Engine(pr_plan(tmp_path, recorder("x")), state)
+    s.run(start="use")
+    assert "n=2" in s.state.results["use"]["text"]
+
+
+def test_run_from_keeps_the_pull_request_written_in_the_plan(tmp_path):
+    """#1296 の受け入れ条件 5: プランの "Pull Request" は記録の PR より先に使う。"""
+    state = tmp_path / "state"
+    engine.Engine(pr_plan(tmp_path, recorder("https://github.com/o/r/pull/1")), state).run()
+    s = engine.Engine(pr_plan(tmp_path, recorder("x"), **{"Pull Request": "https://github.com/o/r/pull/9"}), state)
+    s.run(start="use")
+    assert "n=9" in s.state.results["use"]["text"]
+
+
+def test_run_from_stops_without_a_pr_since_the_last_full_run_and_names_the_state_dir(tmp_path, monkeypatch):
+    """#1296 の受け入れ条件 4: --from を付けない実行が PR を決めずに止まった後の再開は、それより前の PR を使わずに止まり、
+    理由の文に状態の置き場の絶対パスを出す（相対パスで渡しても）。"""
+    monkeypatch.chdir(tmp_path)
+    state = Path("state")
+    engine.Engine(pr_plan(tmp_path, recorder("https://github.com/o/r/pull/1")), state).run()
+    engine.Engine(pr_plan(tmp_path, recorder("https://github.com/o/r/pull/2", code=1)), state).run()
+    s = engine.Engine(pr_plan(tmp_path, recorder("x")), state)
+    assert "結果: 完了" not in s.run(start="use")
+    out = s.state.results["use"]["text"]
+    assert "Pull Request がまだ無い" in out and str((tmp_path / "state").resolve()) in out
 
 
 def test_new_check_builds_the_refactor_scope_from_the_pr_files(tmp_path):
