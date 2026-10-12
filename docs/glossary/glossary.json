@@ -3622,21 +3622,21 @@
       "context": "ndf-cross-refactoring",
       "meaning": "started_at + 想定最大時間（limits.final_end_at）。中断して再開した実行では、止まっていた分だけずれる。子プロセスへ渡す上限はすべてこの時刻で切る",
       "code": "final_end_at",
-      "pending_source": "issues/issue-1932-design.md"
+      "source": "docs/specifications/cross-refactoring-verify-and-final-gate.md"
     },
     {
       "term": "確かめの見込み",
       "context": "ndf-cross-refactoring",
       "meaning": "最終ゲートの確かめ 1 回にかかる見込みの秒（limits.gate_seconds）。手元で全体テストを走らせるなら w、CI で見るなら c、どちらも測れていなければ 0",
       "code": "gate_seconds",
-      "pending_source": "issues/issue-1932-design.md"
+      "source": "docs/specifications/cross-refactoring-verify-and-final-gate.md"
     },
     {
       "term": "確かめの開始の締め切り",
       "context": "ndf-cross-refactoring",
       "meaning": "想定最大時間の終わり − 確かめの見込み（H − v）。最終ゲートの確かめを始められる最後の時刻で、最終ゲート修正と打ち切りの後の取り消しもこの時刻までに止まる",
       "code": "gate_start_end",
-      "pending_source": "issues/issue-1932-design.md"
+      "source": "docs/specifications/cross-refactoring-verify-and-final-gate.md"
     },
     {
       "term": "未解決のスレッド",
