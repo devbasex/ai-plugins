@@ -36,7 +36,7 @@
 
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
-| 実行の記録 | `RunState`（状態の置き場へ書くのはこのクラスだけ） | 状態の置き場 | ステップの行（`progress.jsonl` の `"kind": "step"`） | ステップの行の `pr`（そのステップが決めた Pull Request） |
+| 実行の記録 | `RunState`（状態の置き場へ書くのはこのクラスだけ） | 状態の置き場 | 実行の始まりの行（`progress.jsonl` の `"kind": "run"`）・ステップの行（`"kind": "step"`） | 実行の始まりの行の `from`（その実行の `--from`）・ステップの行の `pr`（そのステップが決めた Pull Request） |
 | プランの実行 | `Engine` | プラン（`self.plan`） | ステップ | 計画の Pull Request（`plan["Pull Request"]`） |
 
 `Engine` は計画の Pull Request を決め、`RunState` は記録へ書く値と、記録から読み直した値だけを渡す。`Engine` は状態の置き場のファイルを直に読まない。
@@ -47,14 +47,16 @@
 | --- | --- | --- | --- |
 | I1 | 実行の記録 | `progress.jsonl` の行は追記だけで、前の実行の行を書き換えも消しもしない | 再開で前の実行の Pull Request を読めない。テストで縛る |
 | I2 | 実行の記録 | ステップの行に `pr` が付くのは、そのステップが終了コード 0 で終わり、計画の Pull Request をステップの前と違う空でない値にしたときだけである | 失敗した pr のステップの値や、プランに書かれた値を、作った Pull Request として読み直す。テストで縛る |
-| I3 | プランの実行 | 再開で使う Pull Request は、プランの `"Pull Request"` > `progress.jsonl` の最後の `pr` > `report.md` の `- Pull Request:` の順に、最初に見つかったものである | プランの値が記録で上書きされる（受け入れ条件 5 の退行）か、古い PR が新しい PR に勝つ（受け入れ条件 6） |
+| I3 | プランの実行 | 再開で使う Pull Request は、プランの `"Pull Request"` > `progress.jsonl` の、最後の `"from": null` の実行の始まりの行より後の最後の `pr` > `report.md` の `- Pull Request:` の順に、最初に見つかったものである。`report.md` を読むのは、`progress.jsonl` に実行の始まりの行も `pr` も 1 行も無いとき（修正より前の版の記録）だけである | プランの値が記録で上書きされる（受け入れ条件 5 の退行）か、古い PR が新しい PR に勝つ（受け入れ条件 6）か、`--from` を付けずに流し直した後の再開が、それより前の実行の PR を使う（受け入れ条件 4） |
 | I4 | プランの実行 | 読み直しは状態の置き場のファイルだけで決まり、LLM も GitHub も呼ばない | 非機能の条件（運用・保守性）に反する。テストは `gh` を偽物にして縛る |
 | I5 | プランの実行 | `fill_pr` が `{pr}` を埋められずに返す誤りの文は、状態の置き場の絶対パスを含む | 次に起きたときに、どこを読んだかが分からない（要求の未決） |
+| I6 | 実行の記録 | 実行は 1 回につき 1 行だけ、ステップを流す前に実行の始まりの行（`from` は `--from` の値か null）を追記する。耐久ワークフローの続きでは書き直さない | 「前の実行」の範囲が決まらず、I3 の読み直しが `--from` を付けない実行をまたぐ。テストで縛る |
 
 ### ドメインイベント
 
 | # | イベント | 発生元 | 受け手 |
 | --- | --- | --- | --- |
+| E0 | 実行が始まり、実行の始まりの行を追記した | `Engine.prepare`（`RunState.run_line`） | E5・E8 の読み直し（範囲の境目） |
 | E1 | 1 回目の実行が pr のステップで Pull Request を作った（または既存の PR を見つけた） | `PrStep._publish` | `Engine.execute`（計画の Pull Request が変わったことを見る） |
 | E2 | Pull Request の URL を上書きされない記録へ残した | `RunState.step_line`（ステップの行の `pr`） | E5・E8 の読み直し |
 | E3 | 1 回目の実行が後のステップで止まり、報告（`report.md`）を書いた | `RunState.write_report` | 利用者・conductor |
@@ -84,9 +86,11 @@
 | 要素 | 責務 |
 | --- | --- |
 | `Engine.execute`（`supervise_lib/engine.py`。変える） | ステップの前の計画の Pull Request を覚え、ステップが終了コード 0 で終わって値が変わっていれば、記録の前に `cur["pr"]` へ入れる（I2） |
+| `Engine.prepare`（`supervise_lib/engine.py`。変える） | 耐久ステップの中で 1 回だけ、実行の条件を見る前に `RunState.run_line(start)` を呼ぶ（I6・E0） |
 | `Engine._restore_pr`（`supervise_lib/engine.py`。変える） | `--from` でプランに `"Pull Request"` が無いとき、`RunState.recorded_pr` が返す値を計画の Pull Request にする（I3）。ファイルを直に読まない |
 | `RunState.step_line`（`supervise_lib/state.py`。変える） | `cur["pr"]` があればステップの行へ `pr` として書く（E2）。無ければ今と同じ行 |
-| `RunState.recorded_pr`（`supervise_lib/state.py`。作る） | `progress.jsonl` の最後の `pr` を返す。無ければ `report.md` の `- Pull Request:` の URL、どちらも無ければ空を返す（I3・F3）。壊れた行は飛ばす |
+| `RunState.run_line`（`supervise_lib/state.py`。作る） | `progress.jsonl` へ `{"kind": "run", "from": <start か null>}` を追記する（I6） |
+| `RunState.recorded_pr`（`supervise_lib/state.py`。作る） | `progress.jsonl` の、最後の `"from": null` の実行の始まりの行より後（その行が無ければ全体）の最後の `pr` を返す。実行の始まりの行も `pr` も 1 行も無いときだけ `report.md` の `- Pull Request:` の URL を返し、どれも無ければ空を返す（I3・F3）。壊れた行は飛ばす |
 | `StepContext.fill_pr`（`supervise_lib/steps.py`。変える） | `{pr}` を埋められない誤りの文に、状態の置き場の絶対パスを添える（I5） |
 
 ```mermaid
@@ -94,10 +98,12 @@ graph LR
     subgraph engine["supervise_lib/engine.py"]
         EX["Engine.execute"]
         RP["Engine._restore_pr"]
+        PR["Engine.prepare"]
     end
     subgraph state["supervise_lib/state.py"]
         SL["RunState.step_line"]
         RC["RunState.recorded_pr"]
+        RL["RunState.run_line"]
     end
     subgraph steps["supervise_lib/steps.py"]
         FP["StepContext.fill_pr"]
@@ -108,6 +114,8 @@ graph LR
     end
     EX -->|"cur の pr"| SL
     SL -->|"追記"| PJ
+    PR --> RL
+    RL -->|"追記（実行の始まり）"| PJ
     RP --> RC
     RC -->|"読む（先）"| PJ
     RC -->|"読む（後）"| RM
@@ -119,8 +127,8 @@ graph LR
 ```text
 plugins/ndf/scripts/
 ├── supervise_lib/
-│   ├── engine.py   # execute（pr の印）・_restore_pr（読み直しの順）
-│   ├── state.py    # step_line（pr の欄）・recorded_pr（新規）
+│   ├── engine.py   # execute（pr の印）・prepare（実行の始まりの行）・_restore_pr（読み直しの順）
+│   ├── state.py    # step_line（pr の欄）・run_line（新規）・recorded_pr（新規）
 │   └── steps.py    # fill_pr（誤りの文）
 └── tests/
     └── test_supervise.py   # 再開の振る舞い（既存の test_run_from_restores_pr_from_previous_report の隣）
@@ -135,6 +143,7 @@ classDiagram
     class Engine {
         +plan: dict
         +state: RunState
+        +prepare(start) tuple
         +execute(n, sid) dict
         -_restore_pr() None
     }
@@ -142,6 +151,7 @@ classDiagram
         +dir: Path
         +progress: Path
         +cur: dict
+        +run_line(start) None
         +step_line(nxt) None
         +recorded_pr() str
         +write_report(plan, result, reason) str
@@ -156,11 +166,11 @@ classDiagram
     StepContext --> RunState : 状態の置き場のパス
 ```
 
-`RunState.recorded_pr` を足し、`Engine` と `StepContext` は型を変えない（既存のメソッドの中身だけを変える）。
+`RunState.run_line` と `RunState.recorded_pr` を足し、`Engine` と `StepContext` は型を変えない（既存のメソッドの中身だけを変える）。
 
 ## データ構造
 
-**変えるのは `progress.jsonl` の `"kind": "step"` の行に、任意の欄 `pr` を 1 つ足すことだけである。** ほかの記録（`state.json`・`report.md`・`.out`）の形は変えない。`state.json` の `log` には `cur` の写しとして `pr` が載るが、読み直しには使わない（決定 1）。
+**変えるのは `progress.jsonl` の `"kind": "step"` の行に任意の欄 `pr` を 1 つ足すことと、実行の始まりの行（`"kind": "run"`）を足すことだけである。** ほかの記録（`state.json`・`report.md`・`.out`）の形は変えない。`state.json` の `log` には `cur` の写しとして `pr` が載るが、読み直しには使わない（決定 1）。
 
 ステップの行（足すのは最後の 1 欄）:
 
@@ -169,15 +179,22 @@ classDiagram
 | `kind` / `at` / `step` / `type` / `exit` / `seconds` / `cost` / `next` / `summary` | 既存 | 既存 | 変えない |
 | `pr` | 文字列 | 欄ごと無い | そのステップが終了コード 0 で終わり、計画の Pull Request をこの値に変えた（I2）。pr のステップでは PR の URL、`pr_from` の run のステップでは `metrics` の値。欄が無いのは「このステップは Pull Request を決めていない」で、「Pull Request が無い」ではない |
 
+実行の始まりの行（新しい行の種類。実行ごとに 1 行、ステップの行より前）:
+
+| 欄 | 型 | 空を許すか | 意味 |
+| --- | --- | --- | --- |
+| `kind` / `at` | 既存の規則 | 不可 | `"run"` と書いた時刻（`progress_write` が付ける） |
+| `from` | 文字列か null | null を許す | その実行の `--from` のステップ。null は `--from` を付けない実行で、読み直しの範囲の境目になる（I3・決定 5） |
+
 | 機能 | `progress.jsonl` | `report.md` | 計画（メモリ） |
 | --- | --- | --- | --- |
-| F1 残す | C（行を足す） | — | R |
+| F1 残す | C（ステップの行と実行の始まりの行を足す） | — | R |
 | F2 読み直す | R | — | U |
 | F3 古い版から読み直す | R | R | U |
 | F4 止まる理由 | C（既存のステップの行の要約） | — | R |
 
-- **時系列の扱い**: 事象の記録を採る。`progress.jsonl` は既に追記だけの記録で、「最後に成功した回」（受け入れ条件 6）は最後の `pr` の行として導ける。状態を上書きする記録（`report.md`・`state.json`）は採らない（決定 1）
-- **移行**: 既存の状態の置き場は移さない。`pr` の欄が 1 行も無ければ `report.md` を読む（F3）。古い版の読み手は知らない欄を読み捨てる（`progress.jsonl` の読み手は `queue` の attention・`slow_step.import_progress`・`RunState.read_worker_lines` で、いずれも欄を名前で取る）
+- **時系列の扱い**: 事象の記録を採る。`progress.jsonl` は既に追記だけの記録で、「前の実行」（受け入れ条件 1・4）は最後の `"from": null` の実行の始まりの行より後の行として、「最後に成功した回」（受け入れ条件 6）はその範囲の最後の `pr` の行として導ける。状態を上書きする記録（`report.md`・`state.json`）は採らない（決定 1）
+- **移行**: 既存の状態の置き場は移さない。実行の始まりの行も `pr` の欄も 1 行も無ければ `report.md` を読む（F3）。古い版の読み手は知らない欄と行の種類を読み捨てる（`progress.jsonl` の読み手は `queue` の attention・`slow_step.import_progress`・`RunState.read_worker_lines` で、いずれも `kind` と欄を名前で取る）
 - **検査の手段**: `uv run --frozen --project . --all-extras pytest plugins/ndf/scripts/tests -q -n 4`
 
 ## 処理の流れ
@@ -188,7 +205,9 @@ sequenceDiagram
     participant E as Engine
     participant S as RunState
     participant D as 状態の置き場
-    Note over E,D: 1 回目の実行
+    Note over E,D: 1 回目の実行（--from なし）
+    E->>S: prepare → run_line(null)
+    S->>D: progress.jsonl へ {"kind": "run", "from": null} を追記
     E->>E: execute(pr) の前に計画の PR を覚える
     E->>E: PrStep が計画の PR を URL にする
     E->>S: exit 0 で値が変わった → cur["pr"] = URL
@@ -201,12 +220,14 @@ sequenceDiagram
         E->>E: プランの値を使う（読み直さない）
     else 無い
         E->>S: recorded_pr()
-        S->>D: progress.jsonl の最後の pr
-        opt pr の行が無い（古い版の記録）
+        S->>D: progress.jsonl の、最後の from=null の run の行より後の最後の pr
+        opt run の行も pr の行も無い（古い版の記録）
             S->>D: report.md の - Pull Request:
         end
         S-->>E: URL か空
     end
+    E->>S: prepare → run_line("refactor")
+    S->>D: progress.jsonl へ {"kind": "run", "from": "refactor"} を追記
     E->>E: fill_pr: {pr} を番号、{pr_url} を URL に
     alt 空のまま
         E->>S: exit 2（理由に状態の置き場の絶対パス）
@@ -221,13 +242,13 @@ sequenceDiagram
 | 大項目 | 条件 | 実現方式 |
 | --- | --- | --- |
 | 運用・保守性 | 読み直しに LLM も GitHub への問い合わせも使わない | `recorded_pr` は状態の置き場の 2 ファイルを読むだけにする（I4）。`{pr_url}` を番号から引く `fill_pr` の既存の経路は、記録の値が URL なら通らない |
-| 移行性 | 修正より前の版の状態の置き場からも `report.md` で読み直せる | `progress.jsonl` に `pr` の行が無いときだけ、今と同じ正規表現で `report.md` を読む（F3） |
+| 移行性 | 修正より前の版の状態の置き場からも `report.md` で読み直せる | `progress.jsonl` に実行の始まりの行も `pr` の行も無いときだけ、今と同じ正規表現で `report.md` を読む（F3） |
 
 ## 決定の記録
 
 ### 決定 1: 上書きされない記録から読み直すため、`progress.jsonl` のステップの行に `pr` の欄を足し、それを正にする
 
-`progress.jsonl` は状態の置き場で唯一の追記だけの記録で、devbase の事例でも 1 回目の pr のステップの行が再開の後まで残っていた。ステップの行に欄を足せば、「最後に成功した回」は最後の行として決まり、新しいファイルも新しい行の種類も要らない。
+`progress.jsonl` は状態の置き場で唯一の追記だけの記録で、devbase の事例でも 1 回目の pr のステップの行が再開の後まで残っていた。ステップの行に欄を足せば、「最後に成功した回」は最後の行として決まり、新しいファイルは要らない（読み直しの範囲の境目に要る行の種類は決定 5 で足す）。
 
 既存の `summary` を読む案は、`summary` が出力の最後の空でない行を 160 文字で切った値で、`gh pr create` の stderr に行があると URL にならないため採らない。`state.json` の `log` は新しい実行が `log` を空から書き直すため、再開を 1 度挟むと前の実行の行を失う。専用のファイル（`pr.txt` など）は上書きの記録になり、成功の順序を持てないうえ、状態の置き場の形を 1 つ増やす。
 
@@ -243,7 +264,7 @@ pr のステップの型だけに印を付ける案は、`pr_from` の経路で�
 
 ### 決定 3: 移行の手当てを 1 か所にするため、`pr` の行が無いときだけ `report.md` を読む
 
-修正より前の版が書いた状態の置き場は `report.md` にしか PR を持たない。読む順を「`progress.jsonl` → `report.md`」に固定し、`progress.jsonl` に 1 行でも `pr` があれば `report.md` を読まない。`report.md` が `Pull Request: 無し` で上書きされていても、新しい版の記録があればそちらが勝つ（受け入れ条件 2）。
+修正より前の版が書いた状態の置き場は `report.md` にしか PR を持たない。読む順を「`progress.jsonl` → `report.md`」に固定し、`progress.jsonl` に 1 行でも実行の始まりの行か `pr` があれば `report.md` を読まない（新しい版で `--from` を付けずに流し直した後に、上書きされずに残った古い `report.md` の PR を使わない）。`report.md` が `Pull Request: 無し` で上書きされていても、新しい版の記録があればそちらが勝つ（受け入れ条件 2）。
 
 2 つを読んで新しい方を選ぶ案は、`report.md` に時刻が無く比べられないため採らない。
 
@@ -257,6 +278,16 @@ pr のステップの型だけに印を付ける案は、`pr_from` の経路で�
 
 根拠: Value 6 / Value 3（MVV 版 2）
 
+### 決定 5: 要求の「前の実行」に読み直しを合わせるため、実行の始まりの行を足し、最後の `--from` を付けない実行より後の `pr` だけを読む
+
+`progress.jsonl` は実行をまたいで追記され続け、実行の境目の行を持たない。全体の最後の `pr` を読むと、`--from` を付けずに流し直した実行が pr のステップの前で止まった後の再開が、それより前の実行（別の Pull Request かもしれない）を `{pr}` に使って先へ進み、受け入れ条件 4（前の実行が pr のステップを成功させていなければ止まる）と食い違う。`--from` の再開はステップを途中から流すため、前の実行の続きとして同じ範囲に含める（受け入れ条件 2 の 2 度目の再開が 1 回目の PR を読める）。`--from` を付けない実行は最初から流し直すため、範囲をそこで切る。
+
+行は耐久ステップの `Engine.prepare` の中で書く。耐久ワークフローの続きでは耐久ステップが流れ直さないため 1 実行に 1 行になり（I6）、`setup` は「ファイルを書かない準備」のまま保てる。読み直し（`setup` の `_restore_pr`）はこの行を書く前に流れるため、今の実行の行を境目に取り違えない。
+
+要求の「前の実行」を「状態の置き場のこれまでの実行」と書き直す案は、流し直した後の再開が古い（マージ済みかもしれない）Pull Request へ書き込む経路を残すため採らない。
+
+根拠: Value 6 / Value 7（MVV 版 2）
+
 ## テスト設計
 
 `gh` を偽物にした状態の置き場で `Engine` を 2 度以上流し、再開の振る舞いを縛る。
@@ -266,10 +297,11 @@ pr のステップの型だけに印を付ける案は、`pr_from` の経路で�
 | 受け入れ条件 1 / I3 | pr のステップが成功した後で落ちたプランを `--from <後のステップ>` で再開すると、`{pr}` が番号、`{pr_url}` が URL に置き換わり、「まだ無い」で止まらない | `_restore_pr` を呼ばない・`recorded_pr` が空を返すように壊すと落ちる |
 | 受け入れ条件 2 / I1 | 受け入れ条件 1 の再開を落とした後、`report.md` を `Pull Request: 無し` に書き換えても、消しても、もう 1 度の再開で同じ PR になる | 読み直しを `report.md` だけに戻すと落ちる。`progress.jsonl` を `"w"` で開くように壊すと落ちる |
 | 受け入れ条件 3 | 受け入れ条件 1・2 の再開の `report.md` と、返した `## フェーズの報告` の `- Pull Request:` が前の実行の URL になる | 読み直した値を計画へ入れないように壊すと落ちる |
-| 受け入れ条件 4 / I5 | pr のステップを成功させていない状態の置き場で再開し `{pr}` に当たると止まり、ステップの出力に状態の置き場の絶対パスが含まれる（状態の置き場を相対パスで渡しても絶対パスが出る） | 誤りの文からパスを外す・`resolve()` せずに渡したパスのまま出すと落ちる |
+| 受け入れ条件 4 / I5 / I3 | pr のステップを成功させていない状態の置き場で再開し `{pr}` に当たると止まり、ステップの出力に状態の置き場の絶対パスが含まれる（状態の置き場を相対パスで渡しても絶対パスが出る）。さらに前の実行だけが PR を作った状態の置き場（PR を作った実行の後に、`--from` を付けない実行が pr のステップの前で止まった）でも同じく止まる | 誤りの文からパスを外す・`resolve()` せずに渡したパスのまま出す・`recorded_pr` が `progress.jsonl` 全体の最後の `pr` を返すように壊すと落ちる |
 | 受け入れ条件 5 / I3 | プランに `"Pull Request"` がある再開では、記録に別の PR があってもプランの値で `{pr}` が埋まる | 読み直しをプランの値より先にすると落ちる |
 | 受け入れ条件 6 / I2 | pr のステップが 2 回、別の PR で成功した記録からは、後の PR を読み直す | 最初の `pr` の行を返すように壊すと落ちる |
 | I2 | pr のステップが計画の Pull Request を入れたが終了コード 0 以外で終わったとき、その値は記録に残らず、再開は前の成功の PR を使う | 終了コードを見ずに印を付けると落ちる |
+| I6 | `--from` の再開を 2 度挟んだ状態の置き場で、実行の始まりの行が実行ごとに 1 行あり、`from` がそれぞれの `--from` の値（最初の実行は null）になる。耐久ワークフローの続きで行が増えない | `run_line` を `setup` で呼ぶ・`from` を書かないように壊すと落ちる |
 | I4 | 読み直しの間に `gh` を呼ばない（偽物の `gh` が呼ばれたら失敗を返す） | 読み直しで `gh pr list` などへ問い合わせるように壊すと落ちる |
 | 非機能（移行性） | `progress.jsonl` に `pr` の欄が無く `report.md` にだけ URL がある状態の置き場から再開すると、今と同じく読み直す（既存の `test_run_from_restores_pr_from_previous_report` が縛る） | `report.md` への後戻りを消すと落ちる |
 | 受け入れ条件 7 | 既存の supervise のテストがすべて通る | — |
