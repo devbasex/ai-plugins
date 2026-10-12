@@ -2162,8 +2162,7 @@
       "term": "プロファイルの選択",
       "context": "ndf-cross-review",
       "meaning": "PR の変更ファイルのパスから、その PR に効かせるレビューのプロファイルを 1 つ決めること。宣言の profiles の先頭から見て、変更ファイルのどれかに paths が当たる最初のものを選び、paths を持たないものはどの PR にも当たる。選んだ名前を init の出力・レビューの状態ファイル・report の要約に残す",
-      "source": "",
-      "pending_source": "issues/issue-1942-design.md"
+      "source": "docs/specifications/cross-review-review-profile.md"
     },
     {
       "term": "自動レビュー観点",
