@@ -86,7 +86,8 @@ def _dev_approval_steps(a, repo: str | None, approval: str, prs: str, rts: str) 
         "id": "facts",
         "type": "run",
         "cwd": repo,
-        "cmd": f"{STEPS_PY} approval-facts --version {base} --prs {prs}{prev}",
+        # 前の承認資料を渡し、出し直しでも手で足した節を残す（#1834）
+        "cmd": f"{STEPS_PY} approval-facts --version {base} --prs {prs}{prev} --approval {approval}",
         "presentation_to": approval,
         "on_fail": "judge",
         "gate_next": "explain",

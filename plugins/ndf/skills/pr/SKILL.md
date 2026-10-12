@@ -105,6 +105,10 @@ credential helper が応答しない環境の退避（`gh auth git-credential` �
 「- 無し」と書く。プラグインの名前に触れる箇条は、配布でそのプラグインの上げ幅の候補を MAJOR にする。要求の
 「公開インタフェース」の行に互換なしの印がある課題では、要求の移行性の行を手順にする。
 
+**`## 置き換える箇条`（任意）は、同じ版の前の PR の「利用者向けの変化」の箇条を CHANGELOG と承認資料から外す。**
+この PR が前の PR の振る舞いを変えたときに書き、前の PR の本文は直さない。書き方は `release` の
+`references/release-steps.md` の「置き換える箇条」にある。
+
 ```bash
 python3 "$SCRIPTS/pr-steps.py" create --title "<タイトル>" --body-file /tmp/pr-body.md [--draft] [--base <base>] \
   --mode <モード> --stages "<通した工程をカンマ区切り>"
