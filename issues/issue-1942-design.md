@@ -93,7 +93,7 @@
 | `plugins/ndf/scripts/lib/review_criteria.py` | `version: 3` の `profiles` を読んで検査する（I3・I6）。`select_profile` で変更ファイルのパスから 1 つを選び（I2）、選んだプロファイルの名前を `as_state` で状態の `profile_name` へ写す（I9）。`context_decl` は状態ファイルが無いとき、`version: 3` に限って変更ファイルを受け取って選ぶ。CLI に `--changed-file` を足す。冒頭の説明に `version: 3` の形を足す |
 | `cross-review` の `review_lib/review_focus.py` | 選んだ後の宣言（`ReviewDecl`）から観点と `review_criteria` を組む。複数のプロファイルに当たったときの知らせ（`info`）を出す。`_changed_file_paths` を選択の入力にも使う |
 | `cross-review` の `review_lib/commands/init.py` | 新規: 変更ファイルを取った直後に選び、選んだ宣言を観点と `review_criteria` の両方へ渡す。再開: 状態ファイルを読んでから保存した `changed_files` で選び直す（I7）。出力に `REVIEW_PROFILE_NAME=` を足す |
-| `fix` の `scripts/fix-steps.py` | `context` が状態ファイルを持たないとき、`version: 3` に限り PR の変更ファイルを 1 回取り（`gh api repos/<repo>/pulls/<PR>/files --paginate`）、`context_decl` に渡す。取れなければ空の列で選ぶ（前提 8） |
+| `fix` の `scripts/fix-steps.py` | `context` が状態ファイルを持たないとき、`version: 3` に限り PR の変更ファイルを 1 回取り（`gh api repos/<repo>/pulls/<PR>/files --paginate`）、`context_decl` に渡す。取れなければ空の列で選ぶ（前提 8）。`context_decl` の戻り値（`ReviewDecl`）を 2 つに分解している所（`focus, profile = ...`）を、属性で読む形に直す |
 | `cross-review` の `docs/02-fix-and-rotation.md` | 「レビューの宣言」の節に `version: 3`・`profiles`・選び方・壊れたときの範囲・`profile_name`・`REVIEW_PROFILE_NAME=` を書く（宣言の鍵と規則の正本） |
 | `cross-review` の `docs/04-contracts.md` | `init` の出力の一覧に `REVIEW_PROFILE_NAME=` を足し、正本（02）を指す |
 | `cross-review` の `references/design-principles.md`・`fix` の `SKILL.md`・`scripts/lib/README.md` | 「`version: 2` のプロファイル」と書いた所を、`version: 2` と `version: 3` の両方を指す語に直す（値の集合へ `3` を足したことによる） |
@@ -151,7 +151,7 @@ classDiagram
 | `ReviewDecl` | `profiles`（`version: 3` の候補。`version: 1`・`2` は `None`）を足す。`version: 3` を読んだ直後の `profile` は「選ぶ前」を表す `Profile("none", name="")` |
 | `select_profile(decl, paths) -> tuple[ReviewDecl, tuple[str, ...]]` | 新設。`decl.profiles` が `None` か、`profile` が `unreadable`（壊れた `version: 3`）なら `decl` をそのまま返す（I5・I6）。そうでなければ I2 で選び、`profile` を差し替えた宣言と、選ばなかったが `paths` が当たったプロファイルの名前（`paths` を持たないものは数えない）を返す |
 | `load_review_decl` | `version: 3` を読む。`profiles` が壊れていれば `profile = Profile("unreadable", name="", error=…)`・`profiles = ()` を返す（I6・I9） |
-| `ReviewDecl` を 2 つに分解している所（`focus, profile = decl`。`review_focus._review_criteria`・`main`） | 3 つ目の項目を足すため、属性で読む形に直す |
+| `ReviewDecl` を 2 つに分解している所（`focus, profile = decl`。`review_focus._review_criteria`・`review_criteria.main`・`fix-steps.py cmd_context`） | 3 つ目の項目を足すため、属性で読む形に直す |
 | `as_state(focus, mvv, profile)` | `profile.name` が `None` でなければ `profile_name` を置く（I9）。ほかの項目は今のまま |
 | `context_decl(state_path, root_of, paths_of=None)` | 状態ファイルの写しがあれば今のまま。無ければ宣言を読み、`profiles` が `None` でないときだけ `paths_of()` を呼んで選ぶ |
 
