@@ -41,7 +41,7 @@
 | [models.py](models.py) | `--model` の解析、フラグ生成、実測値の突き合わせ | `cross-refactoring` / `external-ai.py` / `metrics.py` |
 | [metrics.py](metrics.py) | 担当ごとの指標算出と報告の整形 | テストだけ（収束ループの 2 つはまだ読まない） |
 | [post_queue.py](post_queue.py) | 上限のときに投稿を積む待ち行列と、上限の見分け | `cross-review`（`review_lib/` / `rotate-pr.sh`） |
-| [review_criteria.py](review_criteria.py) | 指摘の基準の正本（基準 1〜4・書かないもの・見送りの種類・見送りの返信の雛形）と、レビューの重点の宣言（`.ndf/review.json`）の読み取り。レビュー担当への節・修正担当への節・見送りの返信を組む。宣言が読めなくても例外を上げず基準 1・2・4 で返す | `cross-review`（`review_lib/commands/init.py`・`launch-reviewer.sh`） / `fix-steps.py` |
+| [review_criteria.py](review_criteria.py) | 指摘の基準の正本（基準 1〜4・書かないもの・見送りの種類・見送りの返信の雛形）と、レビューの宣言（`.ndf/review.json`。重点と、`version: 2` のレビューのプロファイル）の読み取り。レビュー担当への節・修正担当への節・見送りの返信・振り分けで許す値・プロファイルの分類の照合（glob は `pace.py` の `matches`）を組む。宣言が読めなくても例外を上げず既定の基準で返す。基準 2 はプロファイルがあっても外せない | `cross-review`（`review_lib/commands/init.py`・`launch-reviewer.sh`） / `fix-steps.py` |
 | [result_posts.py](result_posts.py) | 結果ファイル（指摘ファイル・修正の戻り値）を投稿へ組み立て、待ち行列から送る | `cross-review`（`review_lib/` / `drive.py`） / `fix-steps.py` |
 | [git-credential.sh](git-credential.sh) | credential helper が応答しない環境で git を通す退避の値 | `cross-refactoring`（`refactor_lib/publish.py`） |
 | [closing-issues.sh](closing-issues.sh) | Pull Request の本文から、閉じる語が指す issue を取り出す | `progress-tracking`（スプリントを閉じる） / `merged`（OPEN の一覧） / `development-workflow` の hook |
@@ -76,6 +76,7 @@
 | [deps.py](deps.py) | 外部パッケージを使うエントリポイントが最初に呼ぶ `require("<グループ>")`。import できなければ uv の環境（宣言と版の固定はプラグインルートの `pyproject.toml` と `uv.lock`。`project=` を渡せばその根の 1 組と `<根>/.venv`）で起動し直し、uv が無ければ版を固定して入れる。用意できなければ（起動し直しても import できない・宣言が無い・uv を入れられない）依存の欠けとして終了コード 69（定数 `EXIT_DEPS_MISSING`。値の持ち主はここだけ）。hook とラッパーは `require()` を呼ばない（ラッパーの環境は `relay_lib/runtime.py` が `find_uv`・`install_uv`・`venv_dir` で用意する） | 外部パッケージを使うエントリポイント・根の `scripts/`（`scripts/lib/ndf_wrappers.py` を通す）・`relay_lib/runtime.py` |
 | [md.py](md.py) | Markdown の構造の読み取り（囲み・見出し・節・表・地の文・リンクとアンカー）。markdown-it-py を呼ぶのはここだけ。書き込みは読み取った行の区間で呼び出し側が行う | `cross-refactoring`（`refactor_lib/vocabulary.py`）・`relay_lib/mark.py`。ほかは D1〜D8 が呼び出し側を置き換える |
 | [mdtable.py](mdtable.py) | Markdown の表の組み立て（列の幅を揃えない行・セルの縦棒のエスケープ・数の列の右寄せ）。tabulate を呼ぶのはここだけ | `cross-refactoring`（`refactor_lib/plan.py`・`commands/report.py`）。ほかは D1〜D8 が呼び出し側を置き換える |
+| [glossary_merge.py](glossary_merge.py) | 用語集の 3 方向の取り込み（祖先・自分・相手を語は `(context, term)`、コンテキストは `id` で突き合わせ、片側だけの変更を採り、両側の食い違いを語の衝突として返す）と、`git ls-files -u -z` の段の読み取り。ファイルも git も触らない。標準ライブラリだけ | `glossary.py merge` |
 | [merged_range.py](merged_range.py) | 範囲の first-parent のログから、merge commit と squash merge（件名の末尾 `(#N)`）でベースブランチへ入った PR を拾う。squash の head のブランチは GitHub から 100 件ずつ読む。どの PR を外すかは持たない（呼び手が決める） | `check-trigger.py`・`release_lib/included.py` |
 | [handoff_doc.py](handoff_doc.py) | 引継ぎ文書の節の読み書き（見出しに語を含む節の位置・見出しの文・節の本文の置き換え・深さごとの見出しの並び）。囲みの中の `#` を見出しと数えない | `handoff.py` / `sprint-state.py` |
 | [schema.py](schema.py) | JSON と設定の形の検証（`Shape` と `load_shape`）。pydantic の誤りを日本語の 1 行（`ShapeError`）へ直し、語彙に無い値を下げる読みは `lenient_choice` | L1 の時点では無し（D1〜D8 が呼び出し側を置き換える） |

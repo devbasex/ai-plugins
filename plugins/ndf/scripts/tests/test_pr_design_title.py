@@ -223,7 +223,7 @@ def test_sprint_design_pr_reads_the_design_doc_and_falls_back(tmp_path):
 
 def test_both_design_pushes_of_the_mvv_plan_sync_the_title(tmp_path):
     ds = steps_of(sprint_waves.plan_mvv_design(plan_args(tmp_path), 42, str(tmp_path)))
-    assert ds["glossary-recheck"]["on_fail"] == "push-glossary-gate" and ds["push-glossary-gate"]["next"] == "gate"
+    assert ds["glossary-recheck"]["on_fail"] == "push-glossary-gate" and ds["push-glossary-gate"]["next"] == "ready"
     for i in ("push-glossary", "push-glossary-gate"):
         cmd = ds[i]["cmd"]
         assert cmd.startswith("git push -q && ") and cmd.endswith(" sync-title --pr {pr} --doc issues/issue-42-design.md")

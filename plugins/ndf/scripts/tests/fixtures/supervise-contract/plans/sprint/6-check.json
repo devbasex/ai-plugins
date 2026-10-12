@@ -52,7 +52,7 @@
       "drive": "cross-refactoring",
       "kind": "構造改善",
       "stage": "構造改善",
-      "timeout": 3600,
+      "timeout": 1980,
       "cmd": "ndf_scope=$(python3 <NDF>/scripts/refactor-scope.py --pr {pr}) || exit 2; python3 <NDF>/skills/cross-refactoring/scripts/drive.py {pr} --workflow-step --scope $ndf_scope",
       "on_fail": "abort",
       "next": "review"
@@ -103,7 +103,7 @@
     {
       "id": "ready",
       "type": "run",
-      "cmd": "git push -q; gh pr ready {pr}",
+      "cmd": "sh -c 'git push -q && gh pr ready {pr}'",
       "on_fail": "abort",
       "next": "merge-gate"
     },

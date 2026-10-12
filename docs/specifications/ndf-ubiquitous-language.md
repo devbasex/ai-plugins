@@ -231,13 +231,14 @@ stateDiagram-v2
 | `glossary` | run | `glossary.py gate --mode <モード> --root .` | 0 → `design`。0 以外は `on_fail` を置かずに止まる（作る手順はステップの結果の `summary` に載る） |
 | `design` | work | `/ndf:design #<課題>` | `pr` |
 | `pr` | pr | 設計 Pull Request を出す | `review` |
-| `review` | drive | `cross-review`（設計の既定 3 ラウンド） | `sync-review`（失敗は `gate`） |
+| `review` | drive | `cross-review`（設計の既定 3 ラウンド） | `sync-review`（失敗は `ready`） |
 | `sync-review` | run | `git fetch -q && git merge -q --ff-only '@{u}'`（レビューの直しに追いつく） | `glossary-check` |
 | `glossary-check` | run | `glossary.py check --diff origin/<base> --root .` | 0 → `push-glossary`。1 → `fix-glossary` |
 | `fix-glossary` | work | 未登録の語は用語集へ足す（`source` を空にし `pending_source` に設計文書を書く）か言い換え、廃止した語は言い換える。用語集を変えたら `render` してコミットする（push しない）。利用者が採るかを決めるべき語は直さずに「判断が要る」と報告する | `glossary-recheck` |
 | `glossary-recheck` | run | `glossary-check` と同じ | 0 / 1 とも `push-glossary`（fast は 1 → `push-glossary-gate`） |
-| `push-glossary` | run | 設計のブランチを push し、`pr-body-decisions.sh sync` で設計 Pull Request の本文を揃える（直しが無ければ何も送らない） | `gate`（fast は `mvv`） |
-| `push-glossary-gate` | run | fast だけのステップ。`push-glossary` と同じ | `gate` |
+| `push-glossary` | run | 設計のブランチを push し、`pr-body-decisions.sh sync` で設計 Pull Request の本文を揃える（直しが無ければ何も送らない） | `ready`（fast は `mvv`） |
+| `push-glossary-gate` | run | fast だけのステップ。`push-glossary` と同じ | `ready` |
+| `ready` | run | `sh -c 'git push -q && gh pr ready <PR>'`（`pr` は設計 Pull Request を Draft で作る。push が落ちたら Draft を外さずに止まる） | `gate`（normal で `--state` があるときは `mvv`） |
 | `gate` | judge | ゲート 1。`review` と `glossary-recheck` を入力に持ち、当たりが残っていればゲート 1 の承認資料に載せる | — |
 
 **語の直しは 1 回だけ試す。** 残った当たりは語を採るかという利用者の判断であることが多く、往復させても
