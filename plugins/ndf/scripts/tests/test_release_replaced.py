@@ -88,9 +88,7 @@ def test_replaced_item_leaves_changelog_and_approval_without_editing_the_old_pr(
     body = section(repo)
     assert "Draft でない" not in body and "- init は Draft かどうかを問わない（#27）" in body and "- 別の変化（#1822）" in body
     assert res["metrics"]["replaced"] == 1
-    assert {"kind": "replacement", "name": "#27→#25", "result": "removed", "text": "init は Draft でない場合に処理を止める"} in res[
-        "items"
-    ]
+    assert {"kind": "replacement", "name": "#27→#25", "result": "removed", "text": "init は Draft でない場合に処理を止める"} in res["items"]
     (repo / "issues").mkdir()
     (repo / "issues" / "approval.md").write_text(APPROVAL, encoding="utf-8")
     notes(repo, env, "--approval", "issues/approval.md")
@@ -131,7 +129,9 @@ def test_risks_keep_hand_lines_and_add_only_new_items(repo, tmp_path):
     (repo / "issues").mkdir()
     path = repo / "issues" / "approval.md"
     head, tail = APPROVAL.split("## 同意を求めること")
-    path.write_text(f"{head}## 未検証・残る危険\n\n- PR の本文に記載が無い\n- 手で書いた危険\n\n## 同意を求めること{tail}", encoding="utf-8")
+    path.write_text(
+        f"{head}## 未検証・残る危険\n\n- PR の本文に記載が無い\n- 手で書いた危険\n\n## 同意を求めること{tail}", encoding="utf-8"
+    )
     for _ in range(2):
         notes(repo, env, "--approval", "issues/approval.md")
     text = path.read_text(encoding="utf-8")
