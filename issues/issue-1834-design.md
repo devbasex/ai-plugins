@@ -61,7 +61,11 @@
 | 配る中身の記述 | `notes --approval` | `## 2.` の「配る中身」と `検証への配布で確かめたこと` の欄 | `## 未検証・残る危険`・`## 移行の手順` | PR の箇条 |
 | 他のプラグインの上げ幅 | `changed-plugins --approval` | `## 版を上げる他のプラグイン` | — | 上げ幅の行・同意の 1 行 |
 | 手で足した節 | 人と conductor | 上の 3 つの持ち主が書く見出しに当たらない `## ` の節 | — | 見出しと中身 |
-| CHANGELOG の版の節 | `changelog`・`notes` | `## [<plugin> <版>]` | — | PR の箇条 |
+| CHANGELOG の版の節 | `notes`（`write_notes`） | `## [<plugin> <版>]` | — | PR の箇条 |
+
+`changelog`（`_update_changelog`）は版の節の見出しを置き、仮の中身として PR のタイトルを並べるだけである。
+節の中身は後の `notes` が `write_notes`（`replace_lines_under`）で丸ごと書き直すため、版の節の最終の箇条を
+決める持ち主は `notes` の 1 つにする。置き換え（I7・F3）も `notes` だけに入れ、`changelog` のタイトルには効かせない。
 
 **`approval-facts` は「承認の材料」だけを作り直し、ほかの集約の節は書き換えずに残す。** 残した節のうち、
 `notes` と `changed-plugins` の節は同じプランの後のステップが自分の書き方で書き直す（今の振る舞い）。
