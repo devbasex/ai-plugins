@@ -29,7 +29,7 @@ class Merge:
     branch: str | None
 
 
-def _match(parents: str, subject: str) -> tuple[int, str | None] | None:
+def _merge_of_line(parents: str, subject: str) -> tuple[int, str | None] | None:
     """first-parent のログの 1 行（親の列・件名）が PR のマージなら (番号, merge commit の head のブランチ または None)。"""
     if " " in parents:
         m = MERGE_SUBJECT.match(subject)
@@ -38,10 +38,10 @@ def _match(parents: str, subject: str) -> tuple[int, str | None] | None:
     return (int(m.group(1)), None) if m else None
 
 
-def pr_number(parents: str, subject: str) -> int | None:
+def subject_pr_number(parents: str, subject: str) -> int | None:
     """first-parent のログの 1 行（親の列・件名）から読める PR の番号。merge commit の `Merge pull request #N`
     と squash の末尾 `(#N)` を読む。読めなければ None（#1834 の指示書の変更も使う）。"""
-    m = _match(parents, subject)
+    m = _merge_of_line(parents, subject)
     return m[0] if m else None
 
 
@@ -57,7 +57,7 @@ def merges_in(root: Path, frm: str, to: str) -> list[Merge]:
     out = []
     for line in p.stdout.splitlines():
         sha, parents, subject = line.split("\t", 2)
-        if m := _match(parents, subject):
+        if m := _merge_of_line(parents, subject):
             out.append(Merge(sha, *m))
     return out
 

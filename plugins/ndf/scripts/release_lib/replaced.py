@@ -26,7 +26,7 @@ class Replacement:
     text: str
 
 
-def normalize(text: str) -> str:
+def comparable(text: str) -> str:
     """比べる形。1 行目だけを取り、末尾の `（#N…）` を外し、空白の続きを 1 つにする。"""
     first = text.partition("\n")[0]
     while (m := TAIL.search(first)) and m.start() > 0:
@@ -34,7 +34,7 @@ def normalize(text: str) -> str:
     return " ".join(first.split())
 
 
-def parse(body: str, n: int) -> tuple[list[Replacement], list[str]]:
+def replacements_in(body: str, n: int) -> tuple[list[Replacement], list[str]]:
     """PR #n の本文の置き換える箇条と、形に合わない行。節が無ければ ([], [])。"""
     found, unreadable = [], []
     for line in (gh_sections.get_section(body or "", HEADING) or "").splitlines():
@@ -54,9 +54,9 @@ def apply(items: dict[int, list[str]], replacements: list[Replacement]) -> tuple
     out = {n: list(v) for n, v in items.items()}
     rows = []
     for r in replacements:
-        want = normalize(r.text)
+        want = comparable(r.text)
         before = out.get(r.target)
-        kept = [i for i in before if normalize(i) != want] if before is not None else None
+        kept = [i for i in before if comparable(i) != want] if before is not None else None
         removed = len(before) - len(kept) if before is not None else 0
         if removed:
             out[r.target] = kept

@@ -91,7 +91,7 @@ def test_sections_whose_anchor_is_gone_go_before_consent():
     keep = carry.kept(old, (*OWN, "## 消えた節"))
     new = ["# t", "", "## 1. 対象を開くためのもの", "", "- u", "", "## 同意を求めること", "", "- [ ] c", ""]
     keep = [carry.Kept(k.heading, k.lines, "## 消えた節") for k in keep]
-    assert carry.merge(new, keep) == [*new[:6], "## 補足", "", "- x", "", *new[6:]]
+    assert carry.insert_kept(new, keep) == [*new[:6], "## 補足", "", "- x", "", *new[6:]]
 
 
 def test_without_an_approval_the_sections_are_the_same_plus_instructions(monkeypatch, world):

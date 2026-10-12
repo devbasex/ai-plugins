@@ -138,7 +138,7 @@ def test_risks_keep_hand_lines_and_add_only_new_items(repo, tmp_path):
     assert "## 未検証・残る危険\n\n- 手で書いた危険\n- 実機で未確認（#27）\n\n## 移行の手順" in text
 
 
-def test_normalize_drops_trailing_pr_references():
+def test_comparable_drops_trailing_pr_references():
     """比べる形: 1 行目だけ・末尾の（#N）/(#N) を外す・空白をまとめる。"""
-    assert replaced.normalize("a  b（#1821）（#1825）\n  - 子") == "a b"
-    assert replaced.normalize("a (#3, #4)") == "a"
+    assert replaced.comparable("a  b（#1821）（#1825）\n  - 子") == "a b"
+    assert replaced.comparable("a (#3, #4)") == "a"

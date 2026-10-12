@@ -60,7 +60,7 @@ def _block(k: Kept) -> list[str]:
     return [k.heading, *body]
 
 
-def merge(new_lines: list[str], keep: list[Kept]) -> list[str]:
+def insert_kept(new_lines: list[str], keep: list[Kept]) -> list[str]:
     """作り直した承認資料の行へ残す節を差し込む。"""
     if not keep:
         return list(new_lines)

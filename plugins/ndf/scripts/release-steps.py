@@ -888,7 +888,7 @@ def cmd_approval_facts(a):
         raise StepError("前のタグを決められない（--prev-tag を渡す）", EXIT_PRECONDITION)
     dev = git(root, "rev-parse", f"origin/{base}").stdout.strip()
     keep = kept_sections(root, getattr(a, "approval", None))  # 前の承認資料の残す節（読めなければ書かずに止める。#1834）
-    changes = instructions.changes(root, prev, dev)
+    changes = instructions.changed_instructions(root, prev, dev)
     prs = included.included_prs(included.range_prs(root, prev, dev), a.prs)  # 範囲の PR と --prs の和（#1274）
 
     stat = git(root, "diff", "--shortstat", f"origin/{prod}...origin/{base}").stdout.strip()
@@ -936,11 +936,11 @@ def cmd_approval_facts(a):
             f"タグ {cur_tag} と GitHub Release を消し、{prod} を {prev} の内容へ戻す PR を出す。"
             "導入済みの利用者の環境は利用者の側の操作（前の版の導入し直し）でしか戻せない。"
         ),
-        sections=[(instructions.HEADING, instructions.section_lines(changes, prev, dev))],
+        sections=[(instructions.HEADING, instructions.instruction_lines(changes, prev, dev))],
     )
     if keep:
         out = Path(path)
-        out.write_text("\n".join(carry.merge(out.read_text(encoding="utf-8").split("\n"), keep)), encoding="utf-8")
+        out.write_text("\n".join(carry.insert_kept(out.read_text(encoding="utf-8").split("\n"), keep)), encoding="utf-8")
     emit(
         result(
             TOOL,
@@ -992,7 +992,7 @@ def pr_notes(root, prs, skipped=None, replacing=None, unreadable=None):
         items = gh_sections.section_items(body, CHANGES_HEADING, n)
         risks = gh_sections.section_items(body, RISKS_HEADING, n)
         if replacing is not None:
-            found, bad = replaced.parse(body, n)
+            found, bad = replaced.replacements_in(body, n)
             replacing += found
             unreadable is not None and unreadable.extend(
                 {"kind": "replacement", "name": f"#{n}", "result": "unreadable", "text": t} for t in bad

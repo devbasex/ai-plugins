@@ -2,7 +2,7 @@
 
 指示書は `.ndf/instructions.json` の `files`（`Declaration.load`）。宣言が無いリポジトリでは `AGENTS.md` と
 `CLAUDE.md` に絞る（#1834 の受け入れ条件 8）。前のタグから承認したコミットまでの first-parent のログで、
-指示書ごとに触れたコミットを並べ、件名から PR の番号を読む（`merged_range.pr_number`）。
+指示書ごとに触れたコミットを並べ、件名から PR の番号を読む（`merged_range.subject_pr_number`）。
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ def files(root: Path) -> list[str]:
     return list(decl.files) if decl.present else list(UNDECLARED_FILES)
 
 
-def changes(root: Path, prev: str, sha: str) -> list[InstructionChange]:
+def changed_instructions(root: Path, prev: str, sha: str) -> list[InstructionChange]:
     """`prev..sha` の first-parent のログで触れた指示書（宣言の順）。git が失敗すれば StepError（2）。"""
     out = []
     for name in files(root):
@@ -50,13 +50,13 @@ def changes(root: Path, prev: str, sha: str) -> list[InstructionChange]:
         commits = []
         for line in p.stdout.splitlines():
             short, parents, subject = line.split("\t", 2)
-            commits.append((short, merged_range.pr_number(parents, subject)))
+            commits.append((short, merged_range.subject_pr_number(parents, subject)))
         if commits:
             out.append(InstructionChange(name, tuple(commits)))
     return out
 
 
-def section_lines(found: list[InstructionChange], prev: str, sha: str) -> list[str]:
+def instruction_lines(found: list[InstructionChange], prev: str, sha: str) -> list[str]:
     """節の中身。変わった指示書が無ければ `- 無し`。"""
     if not found:
         return ["- 無し"]
