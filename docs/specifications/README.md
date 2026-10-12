@@ -78,5 +78,6 @@
 | [ndf-supervise-step-budgets.md](ndf-supervise-step-budgets.md) | supervise.py new のプランの impl の timeout（実装の上限）と refactor の想定最大時間を、引数 → .ndf/supervise.json → 値なし の順で 1 つに決めて子のプランへ引き継ぎ、refactor の timeout を常に with_margin(M × 60) にする理由と境界（固定値を持たない・既定の予算は cross-refactoring の定数を読む）。宣言の形は plan.py の docstring が正 |
 | [ndf-supervise-queue-concurrent-files-and-prerequisites.md](ndf-supervise-queue-concurrent-files-and-prerequisites.md) | supervise の queue の除外の行と前提のプラン |
 | [ndf-supervise-resume-pr.md](ndf-supervise-resume-pr.md) | supervise.py run --from の再開で前の実行の Pull Request を読み直す |
+| [ndf-release-approval-rebuild-and-replacements.md](ndf-release-approval-rebuild-and-replacements.md) | 承認資料の作り直しで手で足した節を残す・指示書の変更の節・置き換える箇条 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
