@@ -258,13 +258,14 @@
 
 `start-phase <ID> <手順>` が、`state["limits"]` のその手順の終わり（`timeline.PHASE_END_KEYS`）
 までの残り + 余裕を `PHASE_TIMEOUT` として返し、`phases.<手順>.timeout` と
-`phases.<手順>.cli_timeout`（+ 余裕）に残す。終わりを過ぎていれば余裕だけを返す。
+`phases.<手順>.cli_timeout`（+ 余裕）に残す。終わりを過ぎていれば余裕だけを返す。どちらも想定最大時間の終わり H
+（最終ゲート修正は確かめの開始の締め切り H − v）で切り、H の外へ出さない（#1932 原則 1）。
 
 | 渡す先 | 値 |
 | --- | --- |
 | 監視の `--timeout` と `--stall-timeout`（無音の打ち切り） | `PHASE_TIMEOUT`（同じ値） |
 | CLI の上限（skill 側の `launch-cli.sh` が読む） | `cli_timeout` |
-| 最終ゲート修正の 1 回目 | max(残り, `final_fix_seconds`) + 余裕（`timeline.final_fix_timeout`） |
+| 最終ゲート修正（1 回目を含む） | 確かめの開始の締め切り H − v までの残り + 余裕を、H − v で切った値（`timeline.phase_timeout`。#933 決定 26 は #1932 で廃止） |
 
 **無音の打ち切りを手順の上限と同じ値にするのは**、ランタイムごとの無音の性質（claude は完了まで
 何も出さない）を下限に残すと固定値が残り、実装担当が claude のときは手順の途中で止まるため
@@ -420,7 +421,7 @@
 | リファクタリング計画のマージ処理が順位・見積り・テスト・対象を持ち、リファクタリング計画を読めなくても止まらず、叩き直しで作り直さず、実行時の値をすべて書き出すこと | 同 `tests/test_merge_plan.py` |
 | Jev のグレード・同じ変更か・D5 が確信度の下限で採られ、使えなければ実装担当の答えになること。非公開と鍵なしで Jev を使わないこと | 同 `test_merge_plan.py` / `test_init.py` |
 | 時間の上限がすべて予算に従い、テストの上限が w で伸び、手順の上限が残り + 余裕であること | 同 `tests/test_timeline.py` |
-| `start-phase` が開始を 1 度だけ書き、最終ゲート修正の 1 回目にバッファの長さを渡すこと | 同 `test_init.py` |
+| `start-phase` が開始を 1 度だけ書き、最終ゲート修正の上限を確かめの開始の締め切り（H − v）で切ること | 同 `test_init.py` |
 | 監視が止めた手順が締め切りで取り込まれ、報告に出ること | 同 `tests/test_phases_git.py` |
 | リファクタリング計画の後で Jev と判定の CLI が呼ばれないこと | 同 `tests/test_after_plan_no_llm_git.py` |
 | 履歴の置き場所・集計の窓と代わり・初期値と出所・取り消しと見送りを数えないこと | 同 `tests/test_allocation.py`（根を引数で渡し、利用者の手元を読み書きしない） |
