@@ -62,7 +62,7 @@
       "id": "facts",
       "type": "run",
       "cwd": "<TMP>/repo",
-      "cmd": "python3 <NDF>/scripts/release-steps.py approval-facts --version 1.2.0 --prs {queue_prs}",
+      "cmd": "python3 <NDF>/scripts/release-steps.py approval-facts --version 1.2.0 --prs {queue_prs} --approval issues/approval-foo-v1.2.0.md",
       "presentation_to": "issues/approval-foo-v1.2.0.md",
       "on_fail": "judge",
       "gate_next": "explain",
