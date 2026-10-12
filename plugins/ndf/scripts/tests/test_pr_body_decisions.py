@@ -12,6 +12,7 @@ import os
 import pathlib
 import shutil
 import subprocess
+import time
 import urllib.parse
 
 import pytest
@@ -32,7 +33,7 @@ def parse_request(args):
         a = args[i]
         if a in ("-X", "--method"):
             method = args[i + 1]; i += 2; continue
-        if a in ("-H", "--header"):
+        if a in ("-H", "--header", "--jq"):
             i += 2; continue
         if a == "--input":
             input_file = args[i + 1]; i += 2; continue
@@ -50,6 +51,9 @@ def respond_patch(state, state_path, input_file):
         f.write(sent["body"])
     if state.get("patch_effective", True):
         state["pr"]["body"] = sent["body"]
+    if "reads_after_patch" in state:
+        # 書いた後の読みが返す古い値（#1644）。1 回の読みごとに先頭から 1 つずつ使う
+        state["pr_reads"] = state.pop("reads_after_patch")
     if "head_after_patch" in state:
         # 書き込みと読み直しの間に head が進んだことを再現する
         state["pr"]["head"]["sha"] = state["head_after_patch"]
@@ -65,7 +69,25 @@ def respond_pull_request(state, state_path):
     if state.get("fail_pr") or (state.get("fail_reread") and state["reads"] >= 2):
         sys.stderr.write("HTTP 404\n")
         sys.exit(1)
-    sys.stdout.write(json.dumps(state["pr"]))
+    pr = json.loads(json.dumps(state["pr"]))
+    if state.get("pr_reads"):
+        # 読みの遅れ（#1644）。先頭の 1 つで head の SHA か本文を差し替えて返す
+        stale = state["pr_reads"].pop(0)
+        json.dump(state, open(state_path, "w", encoding="utf-8"), ensure_ascii=False)
+        if "sha" in stale:
+            pr["head"]["sha"] = stale["sha"]
+        if "body" in stale:
+            pr["body"] = stale["body"]
+    sys.stdout.write(json.dumps(pr))
+    sys.exit(0)
+
+
+def respond_compare(state, spec):
+    status = state.get("compare", {}).get(spec)
+    if status is None:
+        sys.stderr.write("HTTP 404: No commit found\n")
+        sys.exit(1)
+    sys.stdout.write(status + "\n")
     sys.exit(0)
 
 
@@ -110,6 +132,8 @@ if method == "PATCH":
     respond_patch(state, state_path, input_file)
 if len(parts) == 5 and parts[3] == "pulls":
     respond_pull_request(state, state_path)
+if len(parts) == 5 and parts[3] == "compare":
+    respond_compare(state, parts[4])
 if len(parts) == 6 and parts[5] == "files":
     respond_files(state)
 if len(parts) >= 5 and parts[3] == "contents":
@@ -767,5 +791,178 @@ def test_32_render_without_base_ref_returns_2_and_prints_nothing(fake, tmp_path)
 @pytest.mark.parametrize("args", [["render"], ["render", "--base", "develop"], ["render", "--body", "x"], ["render", "7"]])
 def test_32_render_usage_errors_return_3(fake, args):
     out = fake.run(*args)
+    assert out.returncode == 3, (args, out.stdout, out.stderr)
+    assert not fake.calls()
+
+
+# --- 送った直後の本文の同期（#1644） ---------------------------------------------
+#
+# HEAD_SHA を送ったコミット、OLD_SHA を送る前の head、NEW_SHA を送った後に別の push で進んだ head とする。
+# 送る前の head の設計文書は OLD_DESIGN、送ったコミットの設計文書は DESIGN。
+
+OLD_SHA = "1111111111111111111111111111111111111111"
+NEW_SHA = "fedcba9876543210fedcba9876543210fedcba98"
+BEHIND = {f"{HEAD_SHA}...{OLD_SHA}": "behind"}
+
+
+def after_push(fake, *extra):
+    return fake.run("sync", "7", "--repo", REPO, "--after-push", HEAD_SHA, *extra)
+
+
+def compare_calls(fake):
+    return [c for c in fake.calls() if any("/compare/" in a for a in c)]
+
+
+def test_1644_waits_for_the_pushed_head_before_writing(fake):
+    """受け入れ条件 1: 最初の読みが送る前の head でも、送ったコミットの設計文書で書いて 0。"""
+    design_pr(
+        fake,
+        OLD_SECTION,
+        pr_reads=[{"sha": OLD_SHA}],
+        compare=BEHIND,
+        contents_at={OLD_SHA: {"issues/issue-1-design.md": OLD_DESIGN}},
+    )
+    out = after_push(fake)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert len(fake.writes()) == 1
+    assert EXPECTED in fake.patched_body()
+    assert "待った: 1 秒 / 読み直し 1 回" in out.stdout.splitlines()[-1]
+
+
+@pytest.mark.parametrize(
+    "stale",
+    [{"body": OLD_SECTION}, {"sha": OLD_SHA, "body": OLD_SECTION}],
+    ids=["old-body", "old-head"],
+)
+def test_1644_rereads_after_writing_until_the_body_is_seen(fake, stale):
+    """受け入れ条件 2: 書いた後の読みが古い本文か送る前の head を返しても、読み直して 0。書くのは 1 回。"""
+    design_pr(fake, OLD_SECTION, reads_after_patch=[stale], compare=BEHIND)
+    out = after_push(fake)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert len(fake.writes()) == 1
+    assert "書き直した" in out.stdout
+
+
+def test_1644_head_advanced_after_writing_is_compared_at_the_new_head(fake):
+    """受け入れ条件 3: 進んだ先の見出しが違えば、締め切りまで読み直してから 1。進んだ先を差分に出す。"""
+    design_pr(
+        fake,
+        OLD_SECTION,
+        head_after_patch=NEW_SHA,
+        compare={f"{HEAD_SHA}...{NEW_SHA}": "ahead"},
+        contents_at={NEW_SHA: {"issues/issue-1-design.md": OLD_DESIGN}},
+    )
+    out = after_push(fake, "--wait-seconds", "1")
+    assert out.returncode == 1, out.stdout + out.stderr
+    assert len(fake.writes()) == 1
+    assert "+- 決定 1: 実行してよいコマンドをリポジトリが宣言する" in out.stdout
+
+
+def test_1644_head_advanced_with_an_old_body_read_returns_0(fake):
+    """受け入れ条件 3: 進んだ先の見出しが同じなら、古い本文の読みを読み直して 0。書くのは 1 回。"""
+    design_pr(
+        fake,
+        OLD_SECTION,
+        head_after_patch=NEW_SHA,
+        reads_after_patch=[{"body": OLD_SECTION}],
+        compare={f"{HEAD_SHA}...{NEW_SHA}": "ahead"},
+    )
+    out = after_push(fake)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert len(fake.writes()) == 1
+
+
+def test_1644_a_head_that_goes_back_is_not_compared_against(fake):
+    """受け入れ条件 3: 進んだ後に書いたときの head が返っても、その設計文書で一致と報告しない。"""
+    design_pr(
+        fake,
+        OLD_SECTION,
+        head_after_patch=NEW_SHA,
+        reads_after_patch=[{}] + [{"sha": HEAD_SHA}] * 10,
+        compare={f"{HEAD_SHA}...{NEW_SHA}": "ahead", f"{NEW_SHA}...{HEAD_SHA}": "behind"},
+        contents_at={NEW_SHA: {"issues/issue-1-design.md": OLD_DESIGN}},
+    )
+    out = after_push(fake, "--wait-seconds", "2")
+    assert out.returncode == 1, out.stdout + out.stderr
+
+
+def test_1644_head_that_never_arrives_returns_2_with_the_sha_and_limit(fake):
+    """受け入れ条件 4・I2: 届かなければ書かずに 2。理由の先頭 300 文字に SHA と上限。上限の内で終わる。"""
+    design_pr(fake, OLD_SECTION, compare={f"{NEW_SHA}...{HEAD_SHA}": "behind"})
+    started = time.monotonic()
+    out = fake.run("sync", "7", "--repo", REPO, "--after-push", NEW_SHA, "--wait-seconds", "2")
+    elapsed = time.monotonic() - started
+    assert out.returncode == 2, out.stdout + out.stderr
+    assert not fake.writes()
+    reason = out.stderr.strip()[:300]
+    assert NEW_SHA in reason and "上限 2 秒" in reason and HEAD_SHA in reason
+    assert elapsed < 2 + 3
+
+
+def test_1644_wait_zero_does_not_wait(fake):
+    design_pr(fake, OLD_SECTION, compare={f"{NEW_SHA}...{HEAD_SHA}": "behind"})
+    out = fake.run("sync", "7", "--repo", REPO, "--after-push", NEW_SHA, "--wait-seconds", "0")
+    assert out.returncode == 2, out.stdout + out.stderr
+    assert "待った" not in out.stdout
+
+
+def test_1644_the_deadline_is_shared_before_and_after_writing(fake):
+    """I2: 書く前と書いた後の両方で遅れても、待ちの合計が上限を超えない。"""
+    design_pr(
+        fake,
+        OLD_SECTION,
+        pr_reads=[{"sha": OLD_SHA}],
+        reads_after_patch=[{"body": OLD_SECTION}] * 20,
+        compare=BEHIND,
+        contents_at={OLD_SHA: {"issues/issue-1-design.md": OLD_DESIGN}},
+    )
+    started = time.monotonic()
+    out = after_push(fake, "--wait-seconds", "2")
+    elapsed = time.monotonic() - started
+    assert out.returncode == 1, out.stdout + out.stderr
+    assert "待った: 2 秒" in out.stdout
+    assert elapsed < 2 + 3
+
+
+@pytest.mark.parametrize("sent", [HEAD_SHA, HEAD_SHA[:7]], ids=["full", "short"])
+def test_1644_no_delay_reads_as_often_as_without_after_push(fake, sent):
+    """受け入れ条件 9・I3: 遅れが無ければ compare を読まず、待たず、読みの回数は今と同じ。"""
+    design_pr(fake, OLD_SECTION)
+    assert fake.run("sync", "7", "--repo", REPO).returncode == 0
+    plain = len(fake.calls())
+    fake.log.unlink()
+    design_pr(fake, OLD_SECTION)
+    out = fake.run("sync", "7", "--repo", REPO, "--after-push", sent)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert len(fake.calls()) == plain
+    assert not compare_calls(fake)
+    assert "待った" not in out.stdout
+
+
+def test_1644_non_design_pull_request_is_out_of_scope_without_waiting(fake):
+    design_pr(fake, "## Summary\n", head="feature/issue-1-x")
+    out = fake.run("sync", "7", "--repo", REPO, "--after-push", NEW_SHA)
+    assert out.returncode == 0
+    assert len(fake.calls()) == 1
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["sync", "7", "--wait-seconds", "5"],
+        ["check", "7", "--after-push", HEAD_SHA],
+        ["check", "7", "--wait-seconds", "5"],
+        ["sync", "7", "--after-push", "xyz1234"],
+        ["sync", "7", "--after-push", "abc12"],
+        ["sync", "7", "--after-push", HEAD_SHA + "0"],
+        ["sync", "7", "--after-push", HEAD_SHA, "--wait-seconds", "-1"],
+        ["sync", "7", "--after-push", HEAD_SHA, "--wait-seconds", "1.5"],
+        ["sync", "7", "--after-push"],
+    ],
+)
+def test_1644_usage_errors_return_3_without_reading(fake, args):
+    """受け入れ条件 8: 新しい引数の誤りは 3。GitHub を読まない。"""
+    design_pr(fake, EXPECTED)
+    out = fake.run(*args, "--repo", REPO) if args[-1] != "--after-push" else fake.run(*args)
     assert out.returncode == 3, (args, out.stdout, out.stderr)
     assert not fake.calls()

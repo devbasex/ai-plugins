@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import importlib
 
 import pytest
@@ -176,6 +177,29 @@ def test_a_launch_failure_in_the_test_round_stops_without_dropping_the_item(flow
     assert read_state(flow["path"])["launch_failure"]["phase"] == "tests"
 
 
+def test_added_tests_take_the_time_left_to_h_right_before_each_launch(flow, refactor, monkeypatch):
+    """別コマンドの追加テストが続くとき、後のコマンドへは起動の直前の H までの残りを渡す（H を越えて走らせない）。"""
+    implement = importlib.import_module("refactor_lib.commands.implement")
+    state = read_state(flow["path"])
+    start = dt.datetime.now().astimezone()
+    state["limits"] = {**(state.get("limits") or {}), "test_timeout": 600, "final_end_at": (start + dt.timedelta(seconds=100)).isoformat()}
+    state["items"] = [_item("I-001", 1), _item("I-002", 2)]
+    now = [start]
+    given: list[int] = []
+
+    def run(commands, work, timeout, log):
+        given.append(timeout)
+        now[0] += dt.timedelta(seconds=70)
+        return implement.ts.outcome(0, False), commands[-1]
+
+    monkeypatch.setattr(implement.clock, "now", lambda: now[0])
+    monkeypatch.setattr(implement.targets, "run_commands", run)
+    monkeypatch.setattr(implement, "_added_test_commands", lambda state, item, files: [f"true {item['id']}"])
+    intake = implement.Intake(accepted={"I-001": [{"sha": "a", "files": []}], "I-002": [{"sha": "b", "files": []}]})
+    implement._run_added_tests(flow["path"], state, intake)
+    assert given == [100, 30]
+
+
 # ---------- 最終ゲートの静的解析（I12） ----------
 
 
@@ -223,10 +247,24 @@ def test_the_final_gate_lint_shares_the_whole_timeout_with_the_test_run(flow, re
     gate_lint = importlib.import_module("refactor_lib.gate_lint")
     state = _gate_state(flow, before="green", lint=_lint(), change="Z = 3\n")
     gate = {"fix_rounds": 0, "checks": [], "mode": "test"}
-    limit = importlib.import_module("refactor_lib.timeline").state_whole_timeout(state)
+    limit = importlib.import_module("refactor_lib.timeline").state_whole_timeout(state, dt.datetime.now().astimezone())
     ok, _ = gate_lint.lint_gate(flow["path"], state, gate, started=time.monotonic() - limit)
     assert ok is False
     assert gate["lint"][0]["verdict"] == "caused"
+
+
+def test_the_final_gate_lint_subtracts_the_whole_test_elapsed_once_near_h(flow, refactor):
+    """H まで 20 秒・全体テストの経過 30 秒でも、静的解析は H までの残りで走る（経過を二重に引かない）。"""
+    import time
+
+    gate_lint = importlib.import_module("refactor_lib.gate_lint")
+    state = _gate_state(flow, before="red", lint=_lint(), change="Z = 3\n")
+    end = dt.datetime.now().astimezone() + dt.timedelta(seconds=20)
+    state["limits"] = {**(state.get("limits") or {}), "test_timeout": 600, "whole_timeout": 600, "final_end_at": end.isoformat()}
+    gate = {"fix_rounds": 0, "checks": [], "mode": "test"}
+    ok, _ = gate_lint.lint_gate(flow["path"], state, gate, started=time.monotonic() - 30)
+    assert ok is True
+    assert [v["verdict"] for v in gate["lint"]] == ["preexisting"]
 
 
 def test_a_launch_failure_in_the_final_gate_stops(flow, refactor, capsys):

@@ -110,7 +110,7 @@ def _isolate(
             if not git_ok(work, ["revert", "--no-commit", *shas]):
                 continue  # 外せない（衝突）。この項目は飛ばす
             worktree.mark_rewritten()
-            limit = timeline.state_test_timeout(state)
+            limit = timeline.state_test_timeout(state, clock.now())
             if deadline is not None:
                 limit = max(1, min(limit, int((deadline - clock.now()).total_seconds())))
             still, _, _ = test_triage.failing_in(work, strategy, tests, limit, log_dir, f"isolate-{item['id']}", triage.run_test)
@@ -206,7 +206,7 @@ def rerun_passes(state: dict[str, Any], rerun: Any, deadline: Optional[_dt.datet
     `rerun` はシェルで走らせる 1 本か、その並び（変更起因の suite ごと）で、すべて通ったときだけ真。各回の上限は
     `deadline` までの残りで切り詰め、過ぎていれば走らせずに偽を返す。
     """
-    work, limit = work_dir(state), timeline.state_test_timeout(state)
+    work, limit = work_dir(state), timeline.state_test_timeout(state, clock.now())
     commands = [rerun] if isinstance(rerun, str) else list(rerun)
 
     def passes() -> bool:

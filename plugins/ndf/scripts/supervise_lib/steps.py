@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 import time
+from pathlib import Path
 from typing import Any, Protocol
 
 import gh_call
@@ -66,7 +67,8 @@ class StepContext:
         value = str(self.plan.get("Pull Request") or "")
         number = plan_mod.pr_number(value)
         if not number:
-            return cmd, "cmd の {pr} を置き換える Pull Request がまだ無い"
+            where = Path(self.state.dir).resolve()  # 再開で読んだ状態の置き場（原因を後から追う）
+            return cmd, f"cmd の {{pr}} を置き換える Pull Request がまだ無い（状態の置き場: {where}）"
         if "{pr_url}" in cmd:
             url = (
                 value

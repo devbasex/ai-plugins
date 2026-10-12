@@ -251,7 +251,6 @@ def _run_added_tests(path: pathlib.Path, state: dict[str, Any], intake: Intake) 
     起動の失敗なら項目を落とさずに止まる（#1483 I8）。
     """
     work = work_dir(state)
-    timeout = timeline.state_test_timeout(state)
     results: dict[tuple[str, ...], bool] = {}
     for item_id, commits in intake.accepted.items():
         fact = commits[0]
@@ -261,7 +260,8 @@ def _run_added_tests(path: pathlib.Path, state: dict[str, Any], intake: Intake) 
         key = tuple(commands)
         if key not in results:
             log = pathlib.Path(state["tmp_dir"]) / f"add-tests-{item_id}.log"
-            result, last = targets.run_commands(commands, work, timeout, log)
+            # H までの残りは起動の直前に取る。ループの前に 1 度だけ取ると、後のコマンドが H を越えて走る（#1932 原則 1）
+            result, last = targets.run_commands(commands, work, timeline.state_test_timeout(state, clock.now()), log)
             if result.launch_failed:
                 launch.stop(path, state, "tests", last, result, log)
             results[key] = result.status == ts.PASSED

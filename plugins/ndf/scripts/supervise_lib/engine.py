@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import subprocess
 import time
@@ -211,6 +210,7 @@ class Engine:
 
     def prepare(self, start: str | None) -> tuple[str, str] | None:
         """実行の条件と worktree の用意（耐久ステップの中で 1 回だけ流す）。流さないなら (結果, 理由)。"""
+        self.state.run_line(start)
         if self.plan.get("実行の条件") and not start:
             skipped = self.check_condition(self.plan["実行の条件"])
             if skipped:
@@ -231,8 +231,12 @@ class Engine:
         記録に `resumed` を付ける（孤児の片付け。決定 35）。"""
         st = self.state
         prev = st.begin_step(sid)
+        before = self.plan.get("Pull Request")
         try:
             nxt, result, reason = self._run_step(sid, self.steps[sid])
+            after = self.plan.get("Pull Request")
+            if st.cur.get("exit") == 0 and after and after != before:
+                st.cur["pr"] = after  # このステップが決めた Pull Request を上書きされない記録へ残す（--from の再開が読む）
             if prev == sid:
                 st.cur["resumed"] = True
             self.slow.end_watch()
@@ -286,11 +290,10 @@ class Engine:
         return result, reason
 
     def _restore_pr(self) -> None:
-        """途中から再開するときは、前の実行の報告に残った Pull Request を {pr} に使う。"""
-        prev = self.state.dir / "report.md"
-        m = re.search(r"^- Pull Request: (\S*/pull/\d+)", prev.read_text(), re.M) if prev.is_file() else None
-        if m:
-            self.plan["Pull Request"] = m.group(1)
+        """途中から再開するときは、前の実行が決めた Pull Request（`RunState.recorded_pr`）を {pr} に使う。"""
+        pr = self.state.recorded_pr()
+        if pr:
+            self.plan["Pull Request"] = pr
 
     def _next_after_judge(self, sid: str, step: dict) -> tuple[str | None, str | None, str | None]:
         """judge の決定から (次のステップ, 結果, 理由) を返す。結果を変えないときは結果・理由が None。"""

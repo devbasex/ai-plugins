@@ -94,6 +94,18 @@ def test_sync_commits_generated_changes(vocabulary, gitfacts, tmp_path):
     assert subject == vocabulary.SYNC_COMMIT_MESSAGE.splitlines()[0]
 
 
+def test_sync_runs_after_the_end_of_the_budget(gitfacts, tmp_path):
+    """H を過ぎても同期は走る。H で切ると起点への戻しの公開と pending_push の再試行が永久に止まる。"""
+    work = _make_work(tmp_path)
+    state = read_state(_state_with_sync(tmp_path, work, command="printf 'x = 2\\n' > generated/out.py"))
+    state["limits"] = {**(state.get("limits") or {}), "test_timeout": 60, "final_end_at": "2000-01-01T00:00:00+00:00"}
+
+    gitfacts._sync_generated(state)
+
+    assert (work / "generated" / "out.py").read_text(encoding="utf-8") == "x = 2\n"
+    assert _git("status", "--porcelain", cwd=work).stdout == ""
+
+
 def test_sync_without_changes_makes_no_commit(gitfacts, tmp_path):
     """差分が出ない同期はコミットを作らない。"""
     work = _make_work(tmp_path)

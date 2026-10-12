@@ -186,8 +186,10 @@ LLM が配布するほかの形では、`release` の手順が配布の後に実
 
 run のステップが終了コード 0 で終わり、出力の最後の JSON の `metrics.<鍵>` が空でなければ、プランの
 `Pull Request` をその値にする。終了コードが 0 でない・鍵が無いなら書き換えない。値は URL を渡す
-（本番のリリースプランでは `release_pr_url`）。途中から再開したときに前の報告から Pull Request を戻す処理
-（`Engine._restore_pr`）が、URL の形（`/pull/<番号>`）だけを読むためである。
+（本番のリリースプランでは `release_pr_url`）。プランの `Pull Request` を変えて終了コード 0 で終わったステップは、
+その値を `progress.jsonl` のステップの行の `pr` に残し、途中から再開したときに前の実行の Pull Request を戻す処理
+（`Engine._restore_pr`・`RunState.recorded_pr`）がそれを読む。`pr` の記録が無い古い状態の置き場だけは前の報告
+（`report.md`）から読み、そこでは URL の形（`/pull/<番号>`）だけを読むためである。
 
 ### `record` が落ちたとき
 

@@ -175,6 +175,13 @@ def _final_gate_lines(gate: dict[str, Any]) -> list[str]:
         lines.append(f"- 最終ゲートの原因の項目: {culprit.verdict_line(gate['culprit'])}")
     if gate.get("stop_revert"):
         lines.append(f"- 打ち切りの後の取り消し: {stop_revert.record_line(gate['stop_revert'])}")
+    skipped = gate.get("check_skipped")
+    if skipped:
+        same = "同じ" if skipped.get("base_identity") else "違う"
+        lines.append(
+            f"- 最終ゲートの確かめを省いた: {skipped.get('reason')}（想定最大時間の終わりまで {skipped.get('left_seconds')} 秒"
+            f" / 確かめの見込み {skipped.get('gate_seconds')} 秒 / HEAD の木は起点の木と{same}）"
+        )
     lines.append(
         f"- 最終ゲート: {gate.get('mode') or '—'}（{gate.get('status') or '未実行'}"
         f"{' / 検証の結果を使い回した' if gate.get('whole_test_reused') else ''}"
