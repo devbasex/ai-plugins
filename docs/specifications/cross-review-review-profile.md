@@ -7,13 +7,15 @@
 （例: Markdown の小説の原稿）の PR も、cross-review の収束ループ（2 者がレビューし、1 者が直し、新しい指摘が出なくなるまで
 回す）で通すためである。書いた鍵だけが既定を差し替え、`profile` を書かないリポジトリでは出力も状態ファイルも 1 字も
 変わらない。**基準 2（秘密・認証認可・利用者のデータ・戻せない操作）は外せない基準で、プロファイルがあっても番号 2 のまま残る。**
+`version: 3` では `profiles` に名前つきのプロファイルを複数書き、PR の変更ファイルのパスで 1 つを選ぶ（#1942）。選んだ 1 つは
+`version: 2` の `profile` と同じに効き、この文書の決定・条件・境界はそのまま当てはまる。
 
 この文書は、その形に**なぜしたか**（背景・決定と理由・常に成り立つ条件・境界・既知の限界・テスト観点）を残す。
 **宣言の鍵と規則・状態ファイルの項目・修正担当の手順の正は Skill とスクリプトにある。**
 
 | 何を | 正本 |
 | --- | --- |
-| 宣言（`.ndf/review.json`）の鍵と規則・宣言の例・状態ファイルの `profile_status` / `profile` / `profile_error`・`init` の出力の `REVIEW_PROFILE=`・再開で組み直す条件 | `cross-review` の [docs/02-fix-and-rotation.md](../../plugins/ndf/skills/cross-review/docs/02-fix-and-rotation.md) の「レビューの宣言（`.ndf/review.json`）」の節 |
+| 宣言（`.ndf/review.json`）の鍵と規則・宣言の例・状態ファイルの `profile_status` / `profile` / `profile_error` / `profile_name`・`init` の出力の `REVIEW_PROFILE=` / `REVIEW_PROFILE_NAME=`・`version: 3` のプロファイルの選び方・再開で組み直す条件 | `cross-review` の [docs/02-fix-and-rotation.md](../../plugins/ndf/skills/cross-review/docs/02-fix-and-rotation.md) の「レビューの宣言（`.ndf/review.json`）」の節 |
 | 自動レビュー観点の分類の一覧と、プロファイルの分類・`replace_auto_categories` の効き方・`auto_review_categories` | `cross-review` の [docs/04-contracts.md](../../plugins/ndf/skills/cross-review/docs/04-contracts.md) |
 | 指摘の基準の方針（基準 1〜4 とプロファイルで差し替えられる範囲） | `cross-review` の [references/design-principles.md](../../plugins/ndf/skills/cross-review/references/design-principles.md) の「指摘の基準」の行 |
 | 修正担当の振り分け（`criterion` / `waive_kind` の許す値・見送りの返信・「対象のファイル」の語） | [`fix` の SKILL.md](../../plugins/ndf/skills/fix/SKILL.md) と [`fix-steps.py`](../../plugins/ndf/skills/fix/scripts/fix-steps.py) の冒頭の説明 |
@@ -56,11 +58,11 @@
 
 | 要素 | 責務 |
 | --- | --- |
-| `plugins/ndf/scripts/lib/review_criteria.py` | 既定の基準・書かないもの・見送りの種類・返信の雛形の唯一の置き場。宣言を 1 回読み（`load_review_decl` → `ReviewDecl(focus, profile)`。例外を上げない）、写しからプロファイルを組み直し（`profile_from` / `state_profile` / `context_decl`）、節（`reviewer_block` / `fixer_block`）・返信（`waiver_reply`）・許す値（`criterion_numbers` / `waive_kinds`）・分類の照合（`profile_categories`）・状態の `review_criteria`（`as_state`）を組む |
+| `plugins/ndf/scripts/lib/review_criteria.py` | 既定の基準・書かないもの・見送りの種類・返信の雛形の唯一の置き場。宣言を 1 回読み（`load_review_decl` → `ReviewDecl(focus, profile, profiles)`。例外を上げない。`version: 3` は `select_profile` で 1 つを選ぶ）、写しからプロファイルを組み直し（`profile_from` / `state_profile` / `context_decl`）、節（`reviewer_block` / `fixer_block`）・返信（`waiver_reply`）・許す値（`criterion_numbers` / `waive_kinds`）・分類の照合（`profile_categories`）・状態の `review_criteria`（`as_state`）を組む |
 | `cross-review` の `review_lib/review_focus.py` | 宣言の読み取り（`_read_review_decl`）、`review_criteria` の組み立て（`_review_criteria`）、既定の分類とプロファイルの分類を合わせた観点の組み立て（`_auto_review`・再開の組み直し `_apply_auto_review`）。新規と再開の両方の経路が同じ部品を呼ぶ |
 | `cross-review` の `review_lib/commands/init.py` | 新規は worktree を用意した後に、再開は同期した後に宣言を読み、`review_kind` を既定の分類から、観点と `review_criteria` をプロファイル込みで組んで状態ファイルへ書く |
 | `cross-review` の `review_lib/commands/report.py` | プロファイルが `unreadable` のとき理由を出す |
-| `fix` の `scripts/fix-steps.py` | `context` で状態ファイルの写し（無ければ `--root` の宣言）から節を書き、`review_profile` を振り分けの JSON へ写す。`finalize` は写しで `_decision_problems` / `_criterion_problems` を検査し、返信を組む |
+| `fix` の `scripts/fix-steps.py` | `context` で状態ファイルの写し（無ければ `--root` の宣言。`version: 3` では PR の変更ファイルで選んだプロファイル）から節を書き、`review_profile` を振り分けの JSON へ写す。`finalize` は写しで `_decision_problems` / `_criterion_problems` を検査し、返信を組む |
 
 `launch-reviewer.sh` は変えない。状態ファイルの `review_criteria.reviewer_block` と `review_instructions` を読むだけで、
 差し替えはどちらも `init` が済ませている。
