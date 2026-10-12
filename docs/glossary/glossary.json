@@ -3753,6 +3753,12 @@
       "context": "ndf-workflow",
       "meaning": "承認ゲートの差し戻しを 1 回 1 行で追記する JSONL（NDF_MVV_STATE_DIR の gate-rejections.jsonl）。pace と状態ファイルの有無によらず唯一の置き場で、覆しの記録とは別のファイル",
       "source": "docs/specifications/ndf-gate-rejections-and-filer-assumptions.md"
+    },
+    {
+      "term": "状態の置き場",
+      "context": "ndf-workflow",
+      "meaning": "`supervise.py run` の `--state-dir`（省けば `<プラン>-state/`）。`progress.jsonl`・`report.md`・`state.json` を置き、`--from` の再開が前の実行の記録を読む",
+      "pending_source": "issues/issue-1296-requirements.md"
     }
   ]
 }
