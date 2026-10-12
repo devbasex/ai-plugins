@@ -177,25 +177,40 @@ class DriveStep:
             ctx.state.cur.setdefault("pauses", []).append(kind)
             res_file = Path(item["result_file"])
             if item.get("command") and depth == 0:
-                ok, sub, sub_text = self.drive_loop(ctx, step, item["command"], depth + 1, inner)
-                if inner is not None and sub and isinstance(sub.get("metrics"), dict):
-                    inner.append(sub["metrics"])
-                texts.append(sub_text)
+                ok, sub = self._drive_nested(ctx, step, item, res_file, depth, inner, texts)
                 if not ok:
                     return False, sub, "\n".join(texts) + f"\n{kind} の駆動が止まった"
-                res_file.write_text(json.dumps(review_answer(sub.get("metrics"))))
                 continue
-            pf = item.get("prompt_file")
-            if not pf or not Path(pf).is_file():
-                return False, out, "\n".join(texts) + f"\n{kind} の prompt_file が無い"
-            wd = str(item.get("cwd") or cwd)  # 駆動が作業ディレクトリを示せば、それが worker の作業場所
-            prompt = f"作業: {kind}\n作業場所: {wd}\n\n{Path(pf).read_text()}\n\n終えたら結果ファイル {res_file} を書く。"
-            res = self.work.call_worker(ctx, step, prompt, wd, f"{step['id']}-{kind}-{len(ctx.state.cur['pauses'])}")
-            ctx.claude.record_usage("work", res)
-            texts.append(f"## {kind} の worker\n{res['text'][-TAIL:]}")
-            if not res_file.is_file():
-                return False, out, "\n".join(texts) + f"\n{kind} の worker が結果ファイルを書かなかった"
+            err = self._delegate_pause(ctx, step, item, kind, res_file, cwd, texts)
+            if err:
+                return False, out, "\n".join(texts) + f"\n{err}"
         return False, None, "\n".join(texts) + f"\npause が上限 {max_pauses} を超えた"
+
+    def _drive_nested(
+        self, ctx, step: dict, item: dict, res_file: Path, depth: int, inner: list[dict] | None, texts: list[str]
+    ) -> tuple[bool, dict | None]:
+        """item.command の駆動を回し、通れば件数から答えを結果ファイルへ書く。(成功, 内側の最後の結果) を返す。"""
+        ok, sub, sub_text = self.drive_loop(ctx, step, item["command"], depth + 1, inner)
+        if inner is not None and sub and isinstance(sub.get("metrics"), dict):
+            inner.append(sub["metrics"])
+        texts.append(sub_text)
+        if ok:
+            res_file.write_text(json.dumps(review_answer(sub.get("metrics"))))
+        return ok, sub
+
+    def _delegate_pause(self, ctx, step: dict, item: dict, kind: str, res_file: Path, cwd: str, texts: list[str]) -> str | None:
+        """pause を worker へ渡す。失敗したら理由を返す。"""
+        pf = item.get("prompt_file")
+        if not pf or not Path(pf).is_file():
+            return f"{kind} の prompt_file が無い"
+        wd = str(item.get("cwd") or cwd)  # 駆動が作業ディレクトリを示せば、それが worker の作業場所
+        prompt = f"作業: {kind}\n作業場所: {wd}\n\n{Path(pf).read_text()}\n\n終えたら結果ファイル {res_file} を書く。"
+        res = self.work.call_worker(ctx, step, prompt, wd, f"{step['id']}-{kind}-{len(ctx.state.cur['pauses'])}")
+        ctx.claude.record_usage("work", res)
+        texts.append(f"## {kind} の worker\n{res['text'][-TAIL:]}")
+        if not res_file.is_file():
+            return f"{kind} の worker が結果ファイルを書かなかった"
+        return None
 
     def execute(self, ctx, step: dict) -> tuple[bool, str]:
         started = time.time()
