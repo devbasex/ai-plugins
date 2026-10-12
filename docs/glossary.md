@@ -273,6 +273,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 起票者の推定 | — | 課題の題・本文に、利用者の指示の原文に無く起票者（課題を書いた AI）が文書・コード・経緯から推して足した条件。承認ゲート 1 で利用者が確かめるまで、利用者の決定として扱わない | — | — | `docs/specifications/ndf-gate-rejections-and-filer-assumptions.md` |
 | 承認ゲートの差し戻し | — | 承認ゲートで利用者が承認せず、対象を直すよう戻したこと。MVV 判定の有無を問わず 1 回を 1 件と数える。MVV 判定との食い違いである覆しとは別の数 | — | — | `docs/specifications/ndf-gate-rejections-and-filer-assumptions.md` |
 | 差し戻しの記録 | — | 承認ゲートの差し戻しを 1 回 1 行で追記する JSONL（NDF_MVV_STATE_DIR の gate-rejections.jsonl）。pace と状態ファイルの有無によらず唯一の置き場で、覆しの記録とは別のファイル | — | — | `docs/specifications/ndf-gate-rejections-and-filer-assumptions.md` |
+| 状態の置き場 | — | `supervise.py run` の `--state-dir`（省けば `<プラン>-state/`）。`progress.jsonl`・`report.md`・`state.json` を置き、`--from` の再開が前の実行の記録を読む | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 
