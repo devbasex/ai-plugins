@@ -33,7 +33,7 @@ M は想定最大時間、無ければ cross-refactoring の既定の予算（`D
 `supervise.py new` が書くプランの `impl` と `refactor` の `timeout` は 3600 秒の固定値で、cross-refactoring の想定最大時間も渡せなかった。
 conductor はスプリントのたびに jq で値を書き足していた（実装の `timeout` 3600 → 5400 を m1693・m1385・m744・m815・m653・m1290・
 m1743・m1847・m1683 の 9 回。#1334。検査のプランへ `--budget-minutes 60`・`timeout` 3600 → 4200 を #1370・m1693・m1385）。
-#1336 では構造改善が 3600 秒ちょうどで exit=124 になり、結果を失った。merge・release のステップは既に `with_margin(上限)` で余裕を
+構造改善が 3600 秒ちょうどで exit=124 になり、結果を失った回もあった。merge・release のステップは既に `with_margin(上限)` で余裕を
 足していた。
 
 ## 決定と理由
@@ -81,7 +81,7 @@ graph TD
 | --- | --- | --- |
 | I1 | 値は「`new` の引数 → `.ndf/supervise.json` → 値なし」の順で 1 つに決まる | 起こさない（`apply_decls` の 1 か所で決める。決定 4） |
 | I2 | 値は 1 以上の整数（JSON の数の整数。文字列・小数・真偽値・0・負は違う） | プランを書かずに終了コード 2 で止まり、違う項目の名前を出す |
-| I3 | `impl` の `timeout` は、実装の上限があればその値、無ければ雛形の値（#1916 の前と同じ） | — |
+| I3 | `impl` の `timeout` は、実装の上限があればその値、無ければ雛形の値（3600 秒） | — |
 | I4 | `refactor` の cmd が `--budget-minutes N` を含むのは想定最大時間があるときだけで、N は想定最大時間に等しい | — |
 | I5 | `refactor` の `timeout` は `with_margin(M × 60)`。`with_margin` が最低 30 秒を足すため、常に M × 60 より大きい | — |
 | I6 | `new sprint` / `new close` が書く課題ごとの実装のプランと検査のプラン（最終の検査を含む）は、同じ入力から作られ、I3〜I5 の値がそろう | — |
@@ -90,11 +90,11 @@ graph TD
 
 - **検査の順は、引数の形（argparse）→ 宣言の形 → 値の決定 → プランの書き出しである。** プランのファイルは最後に書くため、どちらの検査で
   止まってもファイルは残らない
-- **宣言の形は、`supervise.py new` のすべての種別で、引数の有無にかかわらず検査する**（`test` の形の検査と同じ時点）
+- **宣言の形は、`supervise.py new` のすべての種別で、引数を渡したときも検査する**（`test` の形の検査と同じ時点）
 - **受けない種別へ渡した引数は、argparse が知らない引数として止める。** `fill_new_defaults` がその属性を `None` で埋めるため、雛形は種別をまたいで
   `getattr` で読める
-- **宣言も引数も無いプランは、`impl` の `timeout` と `refactor` の cmd が #1916 の前と同じで、`refactor` の `timeout` だけが
-  `with_margin(既定の予算 × 60)` に変わる。** 既定の予算 30 分で 1980 秒になり、以前の 3600 秒より短い
+- **宣言も引数も無いプランは、`impl` の `timeout` が雛形の値で、`refactor` の cmd に `--budget-minutes` を持たず、`refactor` の `timeout` が
+  `with_margin(既定の予算 × 60)` になる。** 既定の予算 30 分で 1980 秒である
 - `with_margin` の式と最低 30 秒（`MARGIN_FLOOR`）・cross-refactoring の既定の予算・ほかのステップの `timeout` は変えない
 - `vocabulary.py` は読み込むときに `refactoring` の `references/vocabulary.md` を読む。読めなければ例外のまま止まり、プランを書かない
   （cross-refactoring の駆動も同じ読み込みをするため、止まる形は増えない）

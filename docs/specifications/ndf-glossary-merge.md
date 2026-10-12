@@ -103,7 +103,7 @@ graph TB
 
 - **扱うのは `git merge` の途中だけである。** `git rebase` / `git cherry-pick` の途中の衝突は扱わない（`MERGE_HEAD` が無ければ 1）
 - **段は `--root` を今のディレクトリにして `:N:./<source>` で読む。** `--root` が worktree の最上位でなくても、宣言のパスのまま読める
-- **残りの衝突は、2 ファイルを index に載せた後に `git diff --name-only --diff-filter=U` で数える。** 今のディレクトリに関わらず最上位からのパスで全件を出す（`git ls-files -u` は今のディレクトリの下だけを出す）。載せた 2 ファイルは自然に一覧から外れる
+- **残りの衝突は、2 ファイルを index に載せた後に `git diff --name-only --diff-filter=U` で数える。** どのディレクトリから打っても最上位からのパスで全件を出す（`git ls-files -u` は今のディレクトリの下だけを出す）。載せた 2 ファイルは自然に一覧から外れる
 - **コミットは `GIT_EDITOR=false` と `--no-edit` で、git が用意した取り込みの文を使う。** エディタを待って止まらない
 - **用語集と文書の置き場は用語集の設定の `source` と `document` から読み、`docs/glossary` を埋め込まない。**
 - 止まったときの標準エラーの 1 行は、空でない `side`・`key`・`path` も並べる（例 `ERROR: duplicate: ours: <context>: <term>`、`ERROR: file_deleted: theirs: <path>`）。重複・片側の消去・上位のキーの衝突は `context` と `term` だけでは版やキーが分からないため
