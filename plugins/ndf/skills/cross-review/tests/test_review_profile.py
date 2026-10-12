@@ -105,11 +105,13 @@ def init_env(monkeypatch, state_mod, tmp_path, fake_gh):
 
     monkeypatch.setattr(subprocess, "run", _run)
 
-    def run(path: str, focus: str | None = None):
+    def run(path: str | list[str], focus: str | None = None):
+        paths = [path] if isinstance(path, str) else path
+        files = [{"path": p, "changeType": "MODIFIED"} for p in paths]
         fake_gh.set_rules(
             [
                 {"match": f"repos/{REPO}/pulls/{PR}/files", "stdout": "", "exit": 1},
-                {"match": f"pr view {PR} --json files", "stdout": json.dumps({"files": [{"path": path, "changeType": "MODIFIED"}]})},
+                {"match": f"pr view {PR} --json files", "stdout": json.dumps({"files": files})},
             ]
         )
         monkeypatch.setattr(
@@ -212,7 +214,7 @@ def saved_state(monkeypatch, state_mod, tmp_path):
 def test_resume_without_changes_does_not_rewrite_the_state(saved_state):
     """I7: 宣言を変えなければ書かない（古い状態ファイルからの再開を含む）。"""
     wt, state_file, writes = saved_state
-    assert review_lib.commands.init._rewrite_review_criteria(state_file, str(wt)) == ("none", "none")
+    assert review_lib.commands.init._rewrite_review_criteria(state_file, str(wt)) == ("none", "none", "")
     assert writes == []
 
 
@@ -220,7 +222,7 @@ def test_resume_picks_up_a_rewritten_profile(saved_state):
     """受け入れ条件 9・10: 書き換えたプロファイルで次のラウンドの節と観点を組み直し、2 回目は書かない。"""
     wt, state_file, writes = saved_state
     _declare(wt, PROFILE)
-    assert review_lib.commands.init._rewrite_review_criteria(state_file, str(wt)) == ("none", "declared")
+    assert review_lib.commands.init._rewrite_review_criteria(state_file, str(wt)) == ("none", "declared", "")
     st = json.loads(state_file.read_text(encoding="utf-8"))
     assert "5. 人物の口調が設定とずれる" in st["review_criteria"]["reviewer_block"]
     assert st["auto_review_categories"] == ["manuscript"]

@@ -187,6 +187,16 @@ def failed_log(branch: str, pr: int) -> str | None:
     return str(path)
 
 
+def changed_file_paths(repo: str, pr: int) -> list[str]:
+    """PR の変更ファイルのパス（新しい名前と、名前を変えたときの前の名前。cross-review の `changed_files` と同じ集合）。
+    `version: 3` の宣言でプロファイルを選ぶときだけ呼ぶ（#1942 の決定 6）。取れなければ理由を標準エラーへ出し、空の列を返す。"""
+    p = gh_parts.gh(["api", f"repos/{repo}/pulls/{pr}/files", "--paginate", "--jq", ".[] | .filename, (.previous_filename // empty)"])
+    if p.returncode != 0:
+        print(f"変更ファイルを取れないため、変更ファイルなしでプロファイルを選ぶ: {(p.stderr or '').strip()[:300]}", file=sys.stderr)
+        return []
+    return [ln.strip() for ln in p.stdout.splitlines() if ln.strip()]
+
+
 def exclusion_sections(body: str) -> list[tuple[str, str]]:
     """本文のうち、この PR で対応しない内容を書いた節（見出しと、次の見出しまでの本文）。見出しは lib/md.py で読む。"""
     text = body or ""
@@ -214,7 +224,10 @@ def _root_or_cwd(root_arg) -> Path:
 def cmd_context(a):
     pr = a.pr
     repo = repo_of(a)
-    focus, profile = review_criteria.context_decl(os.environ.get("CROSS_REVIEW_STATE"), lambda: _root_or_cwd(a.root))
+    decl = review_criteria.context_decl(
+        os.environ.get("CROSS_REVIEW_STATE"), lambda: _root_or_cwd(a.root), lambda: changed_file_paths(repo, pr)
+    )
+    focus, profile = decl.focus, decl.profile
     mvv_ref, mvv_block = review_criteria.mvv_context(os.environ.get("CROSS_REVIEW_STATE"), lambda: _root_or_cwd(a.root))
     view = pr_for_fix(pr)
     threads = threads_with_first_comment(repo, pr)

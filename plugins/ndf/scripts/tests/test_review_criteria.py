@@ -64,7 +64,7 @@ def test_declared_focus_appears_by_name_in_criterion_3(tmp_path):
     [
         "{not json",
         json.dumps({"version": 1, "focus": "文字列"}),
-        json.dumps({"version": 3, "focus": ["x"]}),
+        json.dumps({"version": 4, "focus": ["x"]}),
         json.dumps({"version": True, "focus": ["x"]}),
         json.dumps({"version": 2, "focus": "x"}),
         json.dumps(["x"]),
@@ -129,9 +129,11 @@ NOVEL = {
 }
 
 
-def _profile(root: Path, profile: dict, **extra) -> rc.ReviewDecl:
+def _profile(root: Path, profile: dict, **extra) -> tuple[rc.Focus, rc.Profile]:
     _declare(root, json.dumps({"version": 2, "profile": profile, **extra}, ensure_ascii=False))
-    return rc.load_review_decl(root)
+    decl = rc.load_review_decl(root)
+    assert decl.profiles is None
+    return decl.focus, decl.profile
 
 
 def _cli(block: str, root: Path) -> subprocess.CompletedProcess:
@@ -143,8 +145,9 @@ def test_without_profile_output_is_unchanged(tmp_path, decl):
     """受け入れ条件 1・I1: プロファイルが無いときは、既定の節・返信と同じで、状態にプロファイルの項目を置かない。"""
     if decl is not None:
         _declare(tmp_path, json.dumps(decl, ensure_ascii=False))
-    focus, profile = rc.load_review_decl(tmp_path)
-    assert profile == rc.NO_PROFILE
+    decl = rc.load_review_decl(tmp_path)
+    focus, profile = decl.focus, decl.profile
+    assert profile == rc.NO_PROFILE and decl.profiles is None
     assert rc.reviewer_block(focus, None, profile) == rc.reviewer_block(focus)
     assert rc.fixer_block(focus, None, profile) == rc.fixer_block(focus)
     assert "コードを変えずに" in rc.fixer_block(focus)
