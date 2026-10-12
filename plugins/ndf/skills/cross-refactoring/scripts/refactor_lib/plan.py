@@ -20,7 +20,7 @@ import mdtable
 
 import statefile
 
-from . import clock, die, info, ledger, rounds, timeline
+from . import die, info, ledger, rounds, timeline
 from .codemetrics_view import record_lines
 from .paths import sh
 from .items import item_label, item_shas
@@ -296,10 +296,6 @@ _LIMIT_ROWS = (
 )
 
 
-def _iso_or_none(value: Any) -> Any:
-    return clock.iso(value) if value is not None else None
-
-
 def limits_section(limits: dict[str, Any]) -> list[str]:
     """実行時の値の表（テストの時間）。読み手が実行の前にすべての時刻を見られるようにする（決定 24）。
 
@@ -307,7 +303,7 @@ def limits_section(limits: dict[str, Any]) -> list[str]:
     """
     if not limits:
         return []
-    derived = {GATE_START_END: _iso_or_none(timeline.gate_start_end_of(limits)) if limits.get("gate_seconds") is not None else None}
+    derived = {GATE_START_END: timeline.iso_or_none(timeline.gate_start_end_of(limits)) if limits.get("gate_seconds") is not None else None}
     values = {**limits, **derived}
     rows = [(label, "—" if values.get(key) is None else str(values[key])) for key, label in _LIMIT_ROWS]
     lines = ["## 時間の上限", "", mdtable.table_markdown(["値", "中身"], rows)]

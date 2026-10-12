@@ -133,7 +133,7 @@ def pending_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [i for i in items if i.get("status", "planned") in UNVERIFIED]
 
 
-def _iso(value: Optional[_dt.datetime]) -> Optional[str]:
+def iso_or_none(value: Optional[_dt.datetime]) -> Optional[str]:
     return clock.iso(value) if value is not None else None
 
 
@@ -181,12 +181,12 @@ def compute(
         "whole_timeout": int(tests["whole_timeout"]),
         "ci_wait_timeout": int(tests["ci_wait_timeout"]),
         "basis": basis,
-        "propose_end_at": _iso(propose_end),
-        "plan_end_at": _iso(plan_end),
-        "add_tests_end_at": _iso(add_tests_end),
-        "implement_end_at": _iso(implement_end),
-        "fix_end_at": _iso(budget.fix_end(started_at, b, reserve)) if planned else None,
-        "final_end_at": _iso(final_end),
+        "propose_end_at": iso_or_none(propose_end),
+        "plan_end_at": iso_or_none(plan_end),
+        "add_tests_end_at": iso_or_none(add_tests_end),
+        "implement_end_at": iso_or_none(implement_end),
+        "fix_end_at": iso_or_none(budget.fix_end(started_at, b, reserve)) if planned else None,
+        "final_end_at": iso_or_none(final_end),
         # 最終ゲートの確かめ 1 回の見込み v（秒）。バッファの最終ゲートの全体テスト（#1932 決定 5）。
         "gate_seconds": (math.ceil(round(float(reserve.get("final_whole_test") or 0.0) * 60, 6)) if planned else None),
         # 最終ゲート修正 1 回の見込み F（秒）。起動の前に H − v までに入るかを見る（#1932 決定 3）。
