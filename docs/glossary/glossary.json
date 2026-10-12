@@ -2911,6 +2911,13 @@
       "pending_source": "issues/issue-1142-design-dbos.md"
     },
     {
+      "term": "除外の行",
+      "context": "ndf-workflow",
+      "meaning": "queue が実装の担当の指示文の末尾に足す、同時に流れる他のプランの触るファイルを変えないよう求める 1 行",
+      "code": "concurrent_rule",
+      "pending_source": "issues/issue-1674-requirements.md"
+    },
+    {
       "term": "実測値",
       "context": "ndf-agent-cli",
       "meaning": "CLI の出力かランタイムのセッションの記録から取った、実際に動いたモデル名。状態ファイルの observed",
