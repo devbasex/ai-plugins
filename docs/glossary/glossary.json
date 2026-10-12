@@ -3811,7 +3811,7 @@
       "term": "状態の置き場",
       "context": "ndf-workflow",
       "meaning": "`supervise.py run` の `--state-dir`（省けば `<プラン>-state/`）。`progress.jsonl`・`report.md`・`state.json` を置き、`--from` の再開が前の実行の記録を読む",
-      "pending_source": "issues/issue-1296-requirements.md"
+      "source": "docs/specifications/ndf-supervise-resume-pr.md"
     }
   ]
 }
