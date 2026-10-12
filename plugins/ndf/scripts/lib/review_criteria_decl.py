@@ -128,23 +128,34 @@ def _parse_profile(raw) -> Profile:
     return Profile("declared", **values)
 
 
+def _profile_body(item) -> dict | None:
+    """`profiles` の 1 要素から `name`・`paths` を除いた本体（`profile` と同じ鍵）。オブジェクトでなければ None。"""
+    return {k: v for k, v in item.items() if k not in ("name", "paths")} if isinstance(item, dict) else None
+
+
+def _profile_entry_problem(item, profile: Profile, out: list[Profile]) -> str | None:
+    """`profiles` の 1 要素の形の誤り（先に当たったもの）。`out` はそれより前の読めた要素。誤りが無ければ None。"""
+    obj = isinstance(item, dict)
+    name = item.get("name") if obj else None
+    problems = (
+        (not obj or not (isinstance(name, str) and _NAME_RE.match(name)), "オブジェクトで書き、name は英小文字・数字・_ の名前にする"),
+        (any(p.name == name for p in out), "name が重複している"),
+        (obj and "paths" in item and not _nonempty_globs(item["paths"]), "paths は空でない glob の配列で書く"),
+        (bool(out) and out[-1].paths is None, "paths を持たないプロファイルは高々 1 つで、末尾に置く"),
+        (profile.status == "unreadable", profile.error),
+    )
+    return next((msg for bad, msg in problems if bad), None)
+
+
 def _parse_profiles(raw) -> tuple[tuple[Profile, ...] | None, str | None]:
     """`version: 3` の `profiles` を検査する。1 つでも形が違えば (None, 理由)（決定 4）。"""
     if raw is not None and not isinstance(raw, list):
         return None, "profiles は配列で書く"
     out: list[Profile] = []
     for i, item in enumerate(raw or []):
-        obj = isinstance(item, dict)
-        name = item.get("name") if obj else None
-        profile = _parse_profile({k: v for k, v in item.items() if k not in ("name", "paths")} if obj else None)
-        problems = (
-            (not obj or not (isinstance(name, str) and _NAME_RE.match(name)), "オブジェクトで書き、name は英小文字・数字・_ の名前にする"),
-            (any(p.name == name for p in out), "name が重複している"),
-            (obj and "paths" in item and not _nonempty_globs(item["paths"]), "paths は空でない glob の配列で書く"),
-            (bool(out) and out[-1].paths is None, "paths を持たないプロファイルは高々 1 つで、末尾に置く"),
-            (profile.status == "unreadable", profile.error),
-        )
-        err = next((msg for bad, msg in problems if bad), None)
+        name = item.get("name") if isinstance(item, dict) else None
+        profile = _parse_profile(_profile_body(item))
+        err = _profile_entry_problem(item, profile, out)
         if err:
             return None, f"profiles[{i}]（{name if isinstance(name, str) else '?'}）: {err}"
         out.append(profile._replace(name=name, paths=tuple(x.strip() for x in item["paths"]) if "paths" in item else None))
