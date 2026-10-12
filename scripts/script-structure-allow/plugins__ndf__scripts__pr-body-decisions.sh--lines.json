@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/pr-body-decisions.sh", "name": "", "kind": "lines", "reason": "送った直後の本文の同期（#1644）で、head の到達の待ち・書いた後の読み直し・--after-push / --wait-seconds の引数と終了コードの説明を足し、434 行から増えた。待ちは共通の層 1 か所に置く設計（Value 6）のため、呼び出し元へは分けない。触って 500 行以下にしたら消す", "lines": 569}

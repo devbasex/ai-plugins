@@ -455,11 +455,7 @@ def post_fix(
 
 
 class PushResult(NamedTuple):
-    """送信の結果と、報告されたコミットが送り先に載っているか。
-
-    `sent` は送った後に取り直した送り先の先頭の完全な SHA（送らない・失敗のときは空）。本文の同期は
-    報告された `fix_commit` ではなくこれを待つ（`fix_commit` は送った先頭の祖先でもよいため）。
-    """
+    """送信の結果と、報告されたコミットが送り先に載っているか。`sent` は取り直した送り先の先頭（#1644）。"""
 
     ok: bool
     pushed: bool
@@ -510,8 +506,7 @@ def push_fix(worktree: pathlib.Path | str, head_branch: str, fix_commit: str | N
     contains = _git(worktree, "merge-base", "--is-ancestor", fix_commit, "FETCH_HEAD")
     if contains.returncode != 0:
         return PushResult(False, True, False, f"報告されたコミット {fix_commit} が origin/{head_branch} に載っていない")
-    # 取り直した先頭を読めなければ、報告されたコミットを待つ（送ったのに本文の同期を飛ばさない）。
-    sent = _git(worktree, "rev-parse", "FETCH_HEAD")
+    sent = _git(worktree, "rev-parse", "FETCH_HEAD")  # 読めなければ報告されたコミットを待つ
     return PushResult(True, True, True, "", sent.stdout.strip() if sent.returncode == 0 else str(fix_commit))
 
 
