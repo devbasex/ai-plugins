@@ -76,15 +76,12 @@ def _rewrite_review_criteria(state_file: pathlib.Path, worktree: object, base_br
     保存した値と違うときだけ状態ファイルへ書く（I7）。(重点の状態, プロファイルの状態, プロファイルの名前) を返す。
 
     待ち行列を流した結果は状態ファイルへ直接書かれているため、手元の `st` ではなく
-    ファイルを読み直してから書く。プロファイルは保存した `changed_files` で選ぶため、状態ファイルを先に読む（#1942）。
-    """
+    ファイルを読み直してから書く。プロファイルは保存した `changed_files` で選ぶため、状態ファイルを先に読む（#1942）。"""
     try:
         st = json.loads(state_file.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         st = None
-    decl = review_focus._read_review_decl(worktree)
-    saved = st.get("changed_files") if isinstance(st, dict) else None
-    decl = review_focus._select_profile(decl, saved if isinstance(saved, list) else [])
+    decl = review_focus._select_profile(review_focus._read_review_decl(worktree), st.get("changed_files") if isinstance(st, dict) else [])
     crit = review_focus._review_criteria(worktree, base_branch, decl)
     statuses = (crit["status"], review_focus._profile_status(crit), review_focus._profile_name(crit))
     if not isinstance(st, dict):

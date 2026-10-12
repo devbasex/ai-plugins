@@ -188,13 +188,11 @@ def failed_log(branch: str, pr: int) -> str | None:
 
 
 def changed_file_paths(repo: str, pr: int) -> list[str]:
-    """PR の変更ファイルのパス（新しい名前と、名前を変えたときの前の名前。cross-review の `changed_files` と同じ集合）。
-    `version: 3` の宣言でプロファイルを選ぶときだけ呼ぶ（#1942 の決定 6）。取れなければ理由を標準エラーへ出し、空の列を返す。"""
+    """PR の変更ファイルのパス（前の名前も含む。cross-review の `changed_files` と同じ集合）。取れなければ空（#1942 の決定 6）。"""
     p = gh_parts.gh(["api", f"repos/{repo}/pulls/{pr}/files", "--paginate", "--jq", ".[] | .filename, (.previous_filename // empty)"])
     if p.returncode != 0:
         print(f"変更ファイルを取れないため、変更ファイルなしでプロファイルを選ぶ: {(p.stderr or '').strip()[:300]}", file=sys.stderr)
-        return []
-    return [ln.strip() for ln in p.stdout.splitlines() if ln.strip()]
+    return [ln.strip() for ln in p.stdout.splitlines() if ln.strip()] if p.returncode == 0 else []
 
 
 def exclusion_sections(body: str) -> list[tuple[str, str]]:
@@ -224,29 +222,20 @@ def _root_or_cwd(root_arg) -> Path:
 def cmd_context(a):
     pr = a.pr
     repo = repo_of(a)
-    decl = review_criteria.context_decl(
-        os.environ.get("CROSS_REVIEW_STATE"), lambda: _root_or_cwd(a.root), lambda: changed_file_paths(repo, pr)
-    )
+    state = os.environ.get("CROSS_REVIEW_STATE")
+    decl = review_criteria.context_decl(state, lambda: _root_or_cwd(a.root), lambda: changed_file_paths(repo, pr))
     focus, profile = decl.focus, decl.profile
-    mvv_ref, mvv_block = review_criteria.mvv_context(os.environ.get("CROSS_REVIEW_STATE"), lambda: _root_or_cwd(a.root))
+    mvv_ref, mvv_block = review_criteria.mvv_context(state, lambda: _root_or_cwd(a.root))
     view = pr_for_fix(pr)
     threads = threads_with_first_comment(repo, pr)
     comments_text, comments_n = fetch_comments(repo, pr)
     ci_status, failed = ci_snapshot(pr)
     log_path = failed_log(view.get("headRefName") or "", pr) if failed else None
     excluded = exclusion_sections(view.get("body") or "")
-
     d = result_dir()
     ctx = d / f"fix-pr{pr}-context.md"
-    lines = [
-        f"# PR #{pr} の文脈",
-        "",
-        f"- URL: {view.get('url')}",
-        f"- head: {view.get('headRefName')}",
-        f"- reviewDecision: {view.get('reviewDecision')}",
-        f"- CI: {ci_status}",
-        "",
-    ]
+    lines = [f"# PR #{pr} の文脈", "", f"- URL: {view.get('url')}", f"- head: {view.get('headRefName')}"]
+    lines += [f"- reviewDecision: {view.get('reviewDecision')}", f"- CI: {ci_status}", ""]
     lines += ["## この PR で対応しない内容（本文の節）", ""]
     lines += [f"### {t}\n\n{b}\n" for t, b in excluded] or ["（無し）", ""]
     lines += [f"## 未解決のスレッド（{len(threads)} 件）", ""]
