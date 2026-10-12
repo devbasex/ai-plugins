@@ -133,13 +133,13 @@
       "term": "用語集の取り込み",
       "context": "project-glossary",
       "meaning": "ベースブランチの取り込みで衝突した用語集を、共通の祖先・自分の側・相手の側の 3 つの版から語の単位で合わせ、文書を作り直して取り込みを終えること。`glossary.py merge` が行う",
-      "pending_source": "issues/issue-1913-design.md"
+      "source": "docs/specifications/ndf-glossary-merge.md"
     },
     {
       "term": "語の衝突",
       "context": "project-glossary",
       "meaning": "用語集の取り込みで、両側が同じ語（コンテキストと語の組）を違う中身にしたこと、または片側が消して片側が書き換えたこと。コンテキストの `id` でも同じ。スクリプトは解かずに止まる",
-      "pending_source": "issues/issue-1913-design.md"
+      "source": "docs/specifications/ndf-glossary-merge.md"
     },
     {
       "term": "用語集の設定",

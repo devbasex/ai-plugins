@@ -74,5 +74,6 @@
 | [ndf-release-approval-included-prs.md](ndf-release-approval-included-prs.md) | 本番への配布の承認資料の「含む PR」が、直前の正式版のタグから承認したコミットまでにベースブランチへ入った PR（版上げの PR を除く）と --prs の和を並べ、notes --approval が同じ欄から配る中身と残る危険を書く理由と部品の契約。打ち方と終了コードは release の references/release-steps.md が正 |
 | [ndf-gate-rejections-and-filer-assumptions.md](ndf-gate-rejections-and-filer-assumptions.md) | 起票者の推定を本文の節として承認ゲート 1 まで運ぶ理由と、承認ゲートの差し戻しを差し戻しの記録（gate-rejections.jsonl）へ 1 回 1 行で追記して承認ゲートごとに数える形（1 行の形・リポジトリの決め方・不明の扱い）。手順は out-of-scope・requirements-design・approval-request.md が正 |
 | [cross-review-review-profile.md](cross-review-review-profile.md) | cross-review と /ndf:fix で、プロジェクトが .ndf/review.json の version: 2 のプロファイルで指摘の基準・書かないもの・見送りの種類と返信・自動レビュー観点を差し替え、基準 2（外せない基準）だけは残す理由と境界（丸ごと捨てる壊れたプロファイル・review_kind を既定の分類から決める・再開の組み直し）。宣言の鍵と状態ファイルの項目は cross-review の docs/02-fix-and-rotation.md が正 |
+| [ndf-glossary-merge.md](ndf-glossary-merge.md) | 並行の Pull Request が用語集へ語を足し合った git merge の衝突を、glossary.py merge が語の単位の 3 方向の取り込みで解き、文書を作り直して取り込みのコミットまで終える理由と規則（並びの規則・語の衝突で止まる・書き込みは判定の後・何もしなければ 1）。副命令の終了コードは glossary-format.md が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
