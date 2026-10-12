@@ -183,7 +183,7 @@ pr-body-decisions.sh sync  <PR番号> [--repo <所有者>/<リポジトリ>] [--
 | 2 | 読めなかった（`gh` が無い・Pull Request が無い・API の失敗） | 読めなかった、または書き込みに失敗した。`--after-push` では締め切りまでに head が送ったコミットか子孫へ届かなかったときも 2（標準エラーの先頭に送ったコミット・上限の秒・最後に読んだ head） |
 | 3 | 呼び出しの誤り。GitHub を読まない | 同左。`--after-push` が 16 進 7〜40 桁でない・`--wait-seconds` が 0 以上の整数でないか `--after-push` なしで渡された・`check` に新しい引数を渡したときも 3 |
 
-`sync --after-push <SHA>` は修正を送った直後に打つ（#1644）。GitHub の `pulls/{pr}` が古い head か古い本文を返す間、
+`sync --after-push <SHA>` は修正を送った直後に打つ。GitHub の `pulls/{pr}` が古い head か古い本文を返す間、
 head が送ったコミットか子孫に届くまで待ってから書き、書いた後も揃ったと読めるまで読み直す。締め切りは呼び出しの時刻 +
 `--wait-seconds`（既定 30 秒）の 1 つを書く前と書いた後で共有し、間隔は 1 秒から倍にして 8 秒で止める。届いたかは
 head の文字列の一致で先に見て、違うときだけ `compare` の `identical` / `ahead` で見る。書いた後に head が先へ進んでいたら、
