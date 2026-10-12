@@ -147,7 +147,7 @@ def _planned_state(**over):
             "implement_end_at": (START + 18 * M).isoformat(),
             "fix_end_at": (START + 22 * M).isoformat(),
             "final_end_at": (START + 30 * M).isoformat(),
-            "stop_revert_end_at": (START + 36 * M).isoformat(),
+            "gate_seconds": 396,
         },
         "pause": {"seconds": 0, "shifted_seconds": 0, "legacy": False, "events": []},
     }
@@ -168,7 +168,9 @@ def test_a_pause_shifts_only_the_deadlines_still_ahead(mods):
     assert _at(state, "implement_end_at") == START + 30 * M
     assert _at(state, "fix_end_at") == START + 34 * M
     assert _at(state, "final_end_at") == START + 42 * M
-    assert _at(state, "stop_revert_end_at") == START + 48 * M
+    # 確かめの見込みは長さなのでずれず、確かめの開始の締め切り H − v は H と同じだけずれる（#1932）
+    assert state["limits"]["gate_seconds"] == 396
+    assert mods["timeline"].gate_start_end(state) == START + 42 * M - dt.timedelta(seconds=396)
     assert state["pause"]["shifted_seconds"] == 720
     # ずれた後の実装の終わりから出した監視の上限は正（採った項目が実装へ進む）
     assert mods["timeline"].phase_timeout(_at(state, "implement_end_at"), START + 22 * M, 90) > 90
@@ -235,7 +237,7 @@ def test_catch_up_twice_shifts_once(mods, tmp_path, monkeypatch):
     """I10: 続けて 2 度打っても、1 度目の保存で最後の動きの時刻が今になり、ずれるのは 1 度だけ。報告に 1 行残る。"""
     now = dt.datetime.now().astimezone()
     state = _planned_state(started_at=now.isoformat())
-    for key in ("add_tests_end_at", "implement_end_at", "fix_end_at", "final_end_at", "stop_revert_end_at"):
+    for key in ("add_tests_end_at", "implement_end_at", "fix_end_at", "final_end_at"):
         state["limits"][key] = (now + 5 * M).isoformat(timespec="seconds")
     path = tmp_path / "cross-refactoring-rf7-state.json"
     path.write_text(json.dumps(state))

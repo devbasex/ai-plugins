@@ -48,8 +48,8 @@ def test_every_limit_follows_the_budget(timeline, budget_minutes):
     # 直しの試行の打ち切り = 開始 + B − 全体のテストの予備時間 2 つ − 最終ゲートの修正の予備時間（決定 26）
     assert got["fix_end_at"] == (START + (b - 2 - 5.5) * M).isoformat(timespec="seconds")
     assert got["final_end_at"] == (START + b * M).isoformat(timespec="seconds")
-    # 最終ゲートの修正の 1 回目に必ず渡す長さ（秒）= 予備時間の final_fix
-    assert got["final_fix_seconds"] == 330
+    # 最終ゲート修正 1 回の見込み F（秒）= 予備時間の final_fix、確かめの見込み v = final_whole_test
+    assert got["final_fix_seconds"] == 330 and got["gate_seconds"] == 60
 
 
 def test_the_test_limit_grows_with_the_measured_test(timeline):
@@ -68,7 +68,7 @@ def test_the_test_limit_grows_with_the_measured_test(timeline):
 def test_values_after_the_plan_are_empty_before_the_plan(timeline):
     got = timeline.compute(START, 30, None)
     assert got["add_tests_end_at"] is None and got["implement_end_at"] is None
-    assert got["fix_end_at"] is None and got["final_fix_seconds"] is None
+    assert got["fix_end_at"] is None and got["final_fix_seconds"] is None and got["gate_seconds"] is None
     assert got["propose_end_at"] and got["plan_end_at"] and got["final_end_at"]
 
 
@@ -123,7 +123,7 @@ def test_the_deadlines_after_the_plan_do_not_move(timeline):
     items = _items([(15, 12)])
     short = timeline.compute(START, 30, _local_full(0.0), items, RESERVE, offset_seconds=0.0)
     long = timeline.compute(START, 30, _local_full(357.0), items, RESERVE, offset_seconds=357.0)
-    for key in ("fix_end_at", "stop_revert_end_at", "final_end_at", "add_tests_end_at", "implement_end_at"):
+    for key in ("fix_end_at", "gate_seconds", "final_end_at", "add_tests_end_at", "implement_end_at"):
         assert long[key] == short[key], key
 
 
@@ -205,3 +205,40 @@ def test_the_plan_comment_shows_the_scope_test(timeline):
     )
     line = next(text for text in plan.limits_section(limits) if text.startswith("入力:"))
     assert "s 320.0（history）" in line
+
+
+def test_every_deadline_is_within_the_budget(timeline):
+    """#1932 AC1・I1: B = 30 分・w = 400 秒で、すべての時刻が H（S + 1800 秒）以前にあり、確かめの開始の締め切りは
+    S + 1400 秒である。取り消しの締め切り（H + 0.20·B）は書かない。"""
+    reserve = {"danger_whole_test": 0.0, "final_whole_test": 400 / 60, "fix": 1.0, "final_fix": 82 / 60}
+    got = timeline.compute(START, 30, _local_full(400.0), _items([(15, 12)]), reserve, offset_seconds=0.0)
+    end = _at(got["final_end_at"])
+    assert end == START + 1800 * S
+    assert "stop_revert_end_at" not in got
+    assert got["gate_seconds"] == 400 and got["final_fix_seconds"] == 82
+    for key in ("propose_end_at", "plan_end_at", "add_tests_end_at", "implement_end_at", "fix_end_at"):
+        assert _at(got[key]) <= end, key
+    state = {"limits": got}
+    assert timeline.gate_start_end(state) == START + 1400 * S
+    # 最終ゲート修正を起動できる最後は H − v − F = S + 1318 秒
+    assert timeline.fits(START + 1318 * S, got["final_fix_seconds"], timeline.gate_start_end(state))
+    assert not timeline.fits(START + 1319 * S, got["final_fix_seconds"], timeline.gate_start_end(state))
+
+
+def test_an_old_state_file_reads_the_check_start_deadline_as_the_end(timeline):
+    """#1932 I1: `gate_seconds` が無く `stop_revert_end_at`（H + 0.20·B）を持つ旧い表は、締め切りを H と読む。"""
+    limits = {"final_end_at": (START + 30 * M).isoformat(), "stop_revert_end_at": (START + 36 * M).isoformat()}
+    assert timeline.gate_start_end({"limits": limits}) == START + 30 * M
+
+
+def test_child_limits_are_cut_at_the_end(timeline):
+    """#1932 I1: テスト・全体テスト・CI の待ちの上限は H までの残りで切り、残りが無ければ 0 以下になる。"""
+    limits = {"final_end_at": (START + 30 * M).isoformat(), "test_timeout": 300, "whole_timeout": 1200, "ci_wait_timeout": 2400}
+    state = {"limits": limits}
+    assert timeline.state_test_timeout(state, START) == 300
+    assert timeline.state_whole_timeout(state, START + 25 * M) == 300
+    assert timeline.state_ci_wait_timeout(state, START + 29 * M) == 60
+    assert timeline.state_whole_timeout(state, START + 31 * M) <= 0
+    # 手順の監視の上限も締め切りで切る（過ぎていれば 1 秒）
+    assert timeline.phase_timeout(START + 40 * M, START + 29 * M, 90, START + 30 * M) == 60
+    assert timeline.phase_timeout(START + 40 * M, START + 31 * M, 90, START + 30 * M) == 1

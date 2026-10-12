@@ -19,7 +19,7 @@ from typing import Any, Optional
 from . import clock, info, timeline
 
 # ずらす上限の表のキー（I4）。`propose_end_at`・`plan_end_at` は計画の後には過ぎているため含めない。
-SHIFT_KEYS = ("add_tests_end_at", "implement_end_at", "fix_end_at", "final_end_at", "stop_revert_end_at")
+SHIFT_KEYS = ("add_tests_end_at", "implement_end_at", "fix_end_at", "final_end_at")
 
 SHIFTED = "shifted"
 WITHIN_MARGIN = "within_margin"

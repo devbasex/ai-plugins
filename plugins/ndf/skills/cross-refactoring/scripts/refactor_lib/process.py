@@ -49,7 +49,13 @@ def run_with_timeout(
     宣言にコンテナで走る suite があれば、そのコンテナが `cwd` を見ているかを先に確かめ、テスト環境の値を足して
     走らせる。見ていなければ走らせずに `container_reach.Unreachable` を送る（#1337）。
     テストでないコマンド（生成物の同期など）は `reach=False` で渡し、確かめずに走らせる。
+    上限が 1 秒未満なら走らせずに打ち切ったとみなす（`(None, True)`）。上限は想定最大時間の終わりで切ってあり、
+    残りが無ければ子プロセスを始めない（#1932 原則 1）。
     """
+    if timeout < 1:
+        if output is not None:
+            output.write_text("想定最大時間の終わりまでに残りが無いため走らせませんでした\n", encoding="utf-8")
+        return None, True
     extra = container_reach.env_for(cwd) if reach else {}
     sink = open(output, "wb") if output is not None else None
     try:

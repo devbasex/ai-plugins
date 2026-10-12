@@ -16,7 +16,7 @@ import secret_redact
 import statefile
 import tool_paths
 
-from . import Abort, die, info, ledger, timeline, worktree
+from . import Abort, clock, die, info, ledger, timeline, worktree
 from .paths import git_out, sh
 from .plan import format_plan, normalize_plan_file
 from .process import run_with_timeout
@@ -34,7 +34,7 @@ def _run_sync_command(state: dict[str, Any], work: str, command: str) -> None:
     チェックを壊したまま進むことになる。
     """
     # 同期はテストではない。コンテナの到達を確かめると、コンテナが止まっているだけで公開の直前に止まる（#1337）
-    code, timed_out = run_with_timeout(command, work, timeline.state_test_timeout(state), reach=False)
+    code, timed_out = run_with_timeout(command, work, timeline.state_test_timeout(state, clock.now()), reach=False)
     if not (timed_out or code != 0):
         return
     # **途中まで書き換えた差分を残さない。** 残すと次の実行は

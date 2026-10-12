@@ -19,6 +19,7 @@ import sys
 import pytest
 
 from crossref_helpers import (
+    past_fix_end,
     CALC,
     SCOPE_COMMAND,
     TEST_TOTAL,
@@ -97,7 +98,7 @@ def _existing_tests(flow, files):
     write_state(flow["path"], state)
 
 
-def _implement(flow, cmd_setup, cmd_implement, changes, **state_overrides):
+def _implement(flow, cmd_setup, cmd_implement, changes, late=False, **state_overrides):
     """項目ごとに `changes[id](work)` を当てて 1 コミットずつ積み、取り込む。"""
     work = flow["work"]
     state = read_state(flow["path"])
@@ -110,6 +111,8 @@ def _implement(flow, cmd_setup, cmd_implement, changes, **state_overrides):
     }
     state["phase"] = "implement"
     state.update(state_overrides)
+    if late:
+        past_fix_end(state)
     write_state(flow["path"], state)
     _call(cmd_setup, "cmd_start_phase", phase="implement")
     for item_id, change in changes.items():
@@ -227,7 +230,7 @@ def test_without_time_to_fix_the_newest_flagged_items_are_reverted_until_it_pass
         cmd_setup,
         cmd_implement,
         {"I-001": _break_total, "I-002": _touch_other("other"), "I-003": _touch_other("another")},
-        started_at="2000-01-01T00:00:00+00:00",
+        late=True,
     )
     capsys.readouterr()
 
@@ -247,9 +250,7 @@ def test_without_time_to_fix_the_newest_flagged_items_are_reverted_until_it_pass
 def test_narrowing_stops_as_soon_as_the_failed_tests_pass(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
     work = flow["work"]
     _existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
-    _implement(
-        flow, cmd_setup, cmd_implement, {"I-001": _touch_other("other"), "I-002": _break_total}, started_at="2000-01-01T00:00:00+00:00"
-    )
+    _implement(flow, cmd_setup, cmd_implement, {"I-001": _touch_other("other"), "I-002": _break_total}, late=True)
     capsys.readouterr()
 
     _call(cmd_converge, "cmd_verify")

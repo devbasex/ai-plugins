@@ -20,7 +20,7 @@ from typing import Any, Optional
 import test_strategy as ts
 import test_triage
 
-from . import timeline
+from . import clock, timeline
 from .gitfacts import run_with_timeout
 from .paths import work_dir
 
@@ -71,7 +71,7 @@ def classify(state: dict[str, Any], timed_out: bool, ci_xmls: Optional[list[byte
         failed=ids,
         fallback_reason=reason,
         base_sha=baseline_head(state),
-        timeout=timeline.state_test_timeout(state),
+        timeout=timeline.state_test_timeout(state, clock.now()),
         log_dir=pathlib.Path(state["tmp_dir"]),
         existing_failures=existing_failures(state),
         run=run_test,

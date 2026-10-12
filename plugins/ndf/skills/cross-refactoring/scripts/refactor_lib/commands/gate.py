@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import pathlib
 import sys
 import time
@@ -33,7 +34,7 @@ import test_triage
 from .. import clock, gate_lint, info, launch, prepush_lint, publish, stop_revert, timeline, triage
 from ..gitfacts import push_with_retry_marker, run_with_timeout, safe_int
 from ..gate_ci import ci_checks, ci_gate, ci_mode, revert_deferred
-from ..paths import head_sha, load_state, work_dir
+from ..paths import git_out, head_sha, load_state, work_dir
 
 
 def cmd_final_gate(args: argparse.Namespace) -> None:
@@ -43,6 +44,10 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
     1 = 単独で起動して修正を打ち切った（**取り消さず**報告へ抜ける）/ 4 = 判断できない（CI が終わらない・案 B の後でも落ちた）。
     打ち切ったとき、単独の起動は取り消さず判断を Pull Request の読み手へ渡し、工程の 1 つとして起動したときは
     打ち切りの後の取り消し（`stop_revert`。#1669）で全体テストが通る状態へ戻してから確かめ直す。
+
+    **確かめ・最終ゲート修正は、確かめの開始の締め切り H − v までに入るときだけ始める**（#1932 原則 3）。入らなければ、
+    HEAD の木が起点の木と同じなら確かめを省いて通し、違えば工程の 1 つは案 B を積んで打ち直し、単独の起動は
+    取り消さずに終了コード 1 で終える（原則 4。`final_gate.check_skipped`）。
 
     | 全体テストの置き場 | 見るもの |
     | --- | --- |
@@ -68,6 +73,11 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
     if reused is not None:
         passed, detail = False, reused
     else:
+        if not _reusable_whole_test(state) and not timeline.fits(clock.now(), 0, timeline.gate_start_end(state)):
+            # 確かめを確かめの開始の締め切り H − v までに始められない（#1932 原則 3・4）
+            _cannot_check(path, state, gate, standalone, NO_CHECK_ROOM)
+            return
+        gate.pop("check_skipped", None)
         passed, detail = _run_gate_checks(path, state, gate)
         _remember_failure(state, gate, passed, detail)
 
@@ -84,13 +94,64 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
         return
 
     stop = _final_fix_stop(state, gate)
-    if stop and (revert_deferred(path, state, gate) if standalone else stop_revert.revert_after_cutoff(path, state, gate)):
+    if stop is None:
+        _gate_failing(path, state, gate, detail)
+        return
+    if standalone and stop == NO_FIX_ROOM:
+        # 単独の起動は時間で打ち切っても取り消さない（#1932 原則 4）
+        _cannot_check(path, state, gate, standalone, stop, detail)
+        return
+    if revert_deferred(path, state, gate) if standalone else stop_revert.revert_after_cutoff(path, state, gate):
         # 原因の項目を取り消した（単独は寄せた危険フラグの全体テスト、工程の 1 つは打ち切りの後の取り消し）。公開して確かめ直す。
         _gate_recheck(path, state, gate, detail)
-    if stop:
-        _gate_limit_reached(path, state, gate, detail, stop)
+    _gate_limit_reached(path, state, gate, detail, stop)
+
+
+NO_CHECK_ROOM = "確かめの開始の締め切りを過ぎていて、最終ゲートの確かめを始められない"
+NO_FIX_ROOM = "最終ゲート修正が確かめの開始の締め切りまでに入らない"
+
+
+def _cannot_check(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], standalone: bool, why: str, detail: str = "") -> None:
+    """確かめか最終ゲート修正が H − v までに入らないときの 2 通りの扱い（#1932 原則 4・I3）。
+
+    HEAD の木が起点の木と同じなら確かめを省いて通す。違えば、工程の 1 つは起点の木へ戻して（案 B）打ち直し、
+    単独の起動は何も取り消さずに終了コード 1 で終える。省いた理由は `final_gate.check_skipped` に残す。
+    """
+    now = clock.now()
+    end = timeline.final_end(state)
+    same = _same_as_base(state, gate)
+    gate["check_skipped"] = {
+        "reason": why,
+        "left_seconds": max(0, math.floor((end - now).total_seconds())) if end is not None else None,
+        "gate_seconds": timeline.gate_seconds(timeline.limits_of(state)),
+        "base_identity": same,
+        "at": statefile.now(),
+    }
+    statefile.save(path, state)
+    if same:
+        _gate_passed(path, state, gate, f"確かめを省いた（{why}。HEAD の木が起点の木と同じ）")
         return
-    _gate_failing(path, state, gate, detail)
+    if standalone:
+        _gate_limit_reached(path, state, gate, detail or "確かめを始めていない", why)
+        return
+    stop_revert.fall_back(path, state, gate, stop_revert.NO_ROOM)
+    _gate_recheck(path, state, gate, detail or why)
+
+
+def _same_as_base(state: dict[str, Any], gate: dict[str, Any]) -> bool:
+    """HEAD の木（か、案 B のコミットの木）が起点の木（`plan.base_sha`）と同じか。案 B の後に同期が積んだコミットは見ない。"""
+    work = work_dir(state)
+    base = str((state.get("plan") or {}).get("base_sha") or "")
+    if not base:
+        return False
+    base_tree = git_out(work, ["rev-parse", f"{base}^{{tree}}"])
+    if not base_tree:
+        return False
+    revs = ["HEAD"]
+    record = gate.get("stop_revert") or {}
+    if record.get("plan") == "B" and record.get("commit"):
+        revs.append(str(record["commit"]))
+    return any(git_out(work, ["rev-parse", f"{rev}^{{tree}}"]) == base_tree for rev in revs)
 
 
 def _run_gate_checks(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]) -> tuple[bool, str]:
@@ -144,20 +205,15 @@ def _reusable_failure(state: dict[str, Any], gate: dict[str, Any]) -> Optional[s
 def _final_fix_stop(state: dict[str, Any], gate: dict[str, Any]) -> Optional[str]:
     """最終ゲートの修正を打ち切る理由。続けられれば `None`（決定 23）。
 
-    **回数ではなく時計で決める。** 終わり（`limits.final_end_at` = 開始 + 想定最大時間）を
-    過ぎていれば打ち切る。起動し直しても解けない結末（利用上限）も打ち切る。
-
-    **ただし 1 度も試みていなければ時計で打ち切らない**（決定 26）。修正 1 回分の予備時間
-    （`plan.reserve.final_fix`）を改修計画の時点で予算から差し引いてあり、予算を使い切った後に
-    落ちても必ず 1 度は直しを試みる。
+    **回数ではなく時計で決める。** 今 + 最終ゲート修正 1 回の見込み F（`limits.final_fix_seconds`）が確かめの開始の
+    締め切り H − v を越えるなら、1 回目でも起動しない（`NO_FIX_ROOM`。#1932 原則 3。#933 決定 26 は廃止）。
+    起動し直しても解けない結末（利用上限）も打ち切る。
     """
     if gate.get("no_relaunch"):
         return "修正担当を起動し直しても解けない結末だった"
-    if safe_int(gate.get("fix_rounds")) == 0:
-        return None
-    end = clock.parse(timeline.limits_of(state).get("final_end_at"))
-    if end is not None and clock.now() >= end:
-        return "想定最大時間の終わりを過ぎた"
+    seconds = int(timeline.limits_of(state).get("final_fix_seconds") or 0)
+    if not timeline.fits(clock.now(), seconds, timeline.gate_start_end(state)):
+        return NO_FIX_ROOM
     return None
 
 
@@ -319,7 +375,7 @@ def _local_gate(path: pathlib.Path, state: dict[str, Any]) -> tuple[bool, str, O
     if not commands:
         return True, "テストの種別の全体テストが無い", None
     work = work_dir(state)
-    timeout = timeline.state_whole_timeout(state)
+    timeout = timeline.state_whole_timeout(state, clock.now())  # 確かめの子プロセスは H で切る
     triage.clear_junit(state)
     started = time.monotonic()
     for command in commands:
