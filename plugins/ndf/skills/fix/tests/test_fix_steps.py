@@ -839,3 +839,20 @@ def test_context_alone_with_v2_does_not_fetch_the_changed_files(env):
     root = _declare_profile(env["root"] / "wt", PROFILE)
     code, _, _ = run("context", PR, "--repo", "o/r", "--root", root)
     assert code == 0 and _files_calls(env) == []
+
+
+def test_context_alone_adds_the_top_level_criteria_and_finalize_accepts_them(env):
+    """#1942 の決定 7: 最上位の基準は選んだプロファイルの節に出て、写しで finalize がその番号を通す。"""
+    root = _declare_v3(env["root"] / "wt", [MANUSCRIPT, SYSTEM])
+    decl = json.loads((root / ".ndf" / "review.json").read_text(encoding="utf-8"))
+    decl["criteria"] = {"9": "取得したデータを公開の置き場へ出す"}
+    (root / ".ndf" / "review.json").write_text(json.dumps(decl, ensure_ascii=False), encoding="utf-8")
+    _gh_files(env, [CHAPTER])
+    code, out, _ = run("context", PR, "--repo", "o/r", "--root", root)
+    assert code == 0 and "9. 取得したデータを公開の置き場へ出す" in _context_text(out)
+    copied = _context_decisions(out)["review_profile"]
+    d = _waived_only(review_profile=copied)
+    d["decisions"] = [{**d["decisions"][0], "decision": "fixed", "severity": "major", "criterion": 9}]
+    d["decisions"][0].pop("waive_kind", None)
+    code, _, err = _finalize(env, d)
+    assert code == 0, err
