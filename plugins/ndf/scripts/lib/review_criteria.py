@@ -168,6 +168,14 @@ def multi_profile_notice(profile: Profile, others) -> str:
     return f"⚠️ 変更ファイルが複数のプロファイル（{', '.join((profile.name or '', *others))}）に当たるため、先に書いた {profile.name} を使う"
 
 
+def select_and_notify(decl: ReviewDecl, paths, notify) -> ReviewDecl:
+    """`select_profile` で選んだ宣言を返す。選ばなかったプロファイルにも当たったときは `notify` へ知らせの文を渡す。"""
+    decl, others = select_profile(decl, paths)
+    if others:
+        notify(multi_profile_notice(decl.profile, others))
+    return decl
+
+
 def load_focus(root) -> Focus:
     """`<root>/.ndf/review.json` の重点だけを読む。例外を上げない。"""
     return load_review_decl(root).focus
@@ -331,9 +339,7 @@ def context_decl(state_path, root_of, paths_of=None) -> ReviewDecl:
     if decl.profile.status == "unreadable":
         print(PROFILE_WARNING.format(error=decl.profile.error), file=sys.stderr)
     elif decl.profiles is not None:
-        decl, others = select_profile(decl, paths_of() if paths_of else ())
-        if others:
-            print(multi_profile_notice(decl.profile, others), file=sys.stderr)
+        decl = select_and_notify(decl, paths_of() if paths_of else (), lambda m: print(m, file=sys.stderr))
     return decl
 
 
@@ -381,9 +387,7 @@ def main(argv=None) -> int:
     ap.add_argument("--changed-file", action="append", default=[], help="version 3 の宣言でプロファイルを選ぶ変更ファイル（繰り返し可）")
     a = ap.parse_args(argv)
     decl = load_review_decl(a.root) if a.root else ReviewDecl(NO_FOCUS, NO_PROFILE)
-    decl, others = select_profile(decl, a.changed_file)
-    if others:
-        print(multi_profile_notice(decl.profile, others), file=sys.stderr)
+    decl = select_and_notify(decl, a.changed_file, lambda m: print(m, file=sys.stderr))
     focus, profile = decl.focus, decl.profile
     if focus.status == "unreadable":
         print(f"レビューの重点の宣言を読めないため、基準 1・2・4 だけで続ける: {focus.error}", file=sys.stderr)

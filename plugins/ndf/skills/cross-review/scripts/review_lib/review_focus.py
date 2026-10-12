@@ -232,10 +232,8 @@ def _read_review_decl(worktree: object) -> review_criteria.ReviewDecl:
 def _select_profile(decl: review_criteria.ReviewDecl, changed_files: list[Any]) -> review_criteria.ReviewDecl:
     """変更ファイルのパスで `version: 3` のプロファイルを 1 つ選んだ宣言を返す（#1942）。選ばなかったプロファイルにも
     当たったときは知らせる。`version: 1`・`2` と壊れた宣言はそのまま返す。"""
-    chosen, others = review_criteria.select_profile(decl, _changed_file_paths(changed_files if isinstance(changed_files, list) else []))
-    if others:
-        review_lib.info(review_criteria.multi_profile_notice(chosen.profile, others))
-    return chosen
+    paths = _changed_file_paths(changed_files if isinstance(changed_files, list) else [])
+    return review_criteria.select_and_notify(decl, paths, review_lib.info)
 
 
 def _profile_name(crit: dict[str, Any]) -> str:
