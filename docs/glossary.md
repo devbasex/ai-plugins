@@ -15,8 +15,8 @@
 | 廃止した語 | `deprecated` | 用語集で別の語へ置き換えた語。文書に出たら落とす | — | — | `docs/specifications/ndf-ubiquitous-language.md` |
 | 不変条件 | — | 集約がいつも満たす条件。設計のドメインモデルの節に書き、実装の前にテストにする | — | — | `docs/specifications/ndf-ubiquitous-language.md` |
 | 未登録の語 | `unregistered` | 用語として書かれているのに用語集に無い語。見出しが「用語」の節の表の 1 列目に書いた語を指す | — | — | `docs/specifications/ndf-ubiquitous-language.md` |
-| 用語集の取り込み | — | ベースブランチの取り込みで衝突した用語集を、共通の祖先・自分の側・相手の側の 3 つの版から語の単位で合わせ、文書を作り直して取り込みを終えること。`glossary.py merge` が行う | — | — | — |
-| 語の衝突 | — | 用語集の取り込みで、両側が同じ語（コンテキストと語の組）を違う中身にしたこと、または片側が消して片側が書き換えたこと。コンテキストの `id` でも同じ。スクリプトは解かずに止まる | — | — | — |
+| 用語集の取り込み | — | ベースブランチの取り込みで衝突した用語集を、共通の祖先・自分の側・相手の側の 3 つの版から語の単位で合わせ、文書を作り直して取り込みを終えること。`glossary.py merge` が行う | — | — | `docs/specifications/ndf-glossary-merge.md` |
+| 語の衝突 | — | 用語集の取り込みで、両側が同じ語（コンテキストと語の組）を違う中身にしたこと、または片側が消して片側が書き換えたこと。コンテキストの `id` でも同じ。スクリプトは解かずに止まる | — | — | `docs/specifications/ndf-glossary-merge.md` |
 
 ## NDF の開発ワークフロー（`ndf-workflow`）
 
@@ -226,6 +226,8 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 資源の枠 | `resource_limit` | 資源のタグごとの、同時に流せるステップの本数の上限（.ndf/supervise.json の queue.resources） | — | — | — |
 | 重なりの組 | `overlap_pair` | 同じステージの 2 本のプランで、触るファイルが包含で重なるか同じ共有の一覧に当たるもの。同時には流さない | — | — | — |
 | 共有の一覧 | `shared_list` | 複数のプランが同じ行の並びへ書き足すファイル（索引など）。.ndf/supervise.json の queue.shared に書く | — | — | — |
+| 除外の行 | `concurrent_rule` | queue が実装の担当の指示文の末尾に足す 1 行。担当を起動する時点で走っている他のプランの触るファイルのうち、ディレクトリでないものを変えないよう求める | — | — | — |
+| 前提のプラン | `after` | プランの JSON の `前提のプラン` に名前で挙げたプラン。その結果が完了でなければ、queue は挙げた側のプランを流さない | — | — | — |
 | スプリントの雛形 | — | `supervise.py new sprint` がステージごとのプランを作る関数（`sprint_waves.py` の `plan_sprint_*` / `plan_fast_*`） | — | — | — |
 | 単発の雛形 | — | `supervise.py new impl / fix / check` が 1 本のプランを作る関数（`templates.py`） | — | — | — |
 | 取り込んだ課題 | — | 設計で、受け入れ内容を別の課題の実装へ含めると決めた課題。自分の実装のプランは残すが、`実行の条件` で飛ばして実行しない | — | — | — |
@@ -235,7 +237,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 決定を分けたファイル | — | 設計文書から決定の記録の節だけを別に置いたファイル。名前は `issue-<番号>-design-decisions.md` | — | — | `docs/specifications/ndf-workflow-unit-and-gates.md` |
 | 決定を読めない文書 | — | 設計 PR で変更した .md のうち、`## 決定の記録` で始まる H2 を持つか決定を分けたファイルであるのに、決定の見出しが 0 件のもの。文書自身の名前が `-design-decisions.md` で終わらないときに限り、決定を分けたファイルの名前だけを示す節は除く。pr-body-decisions.sh の check / sync が 1 で止まる | — | — | `docs/specifications/ndf-workflow-unit-and-gates.md` |
 | hook の上限 | — | ランタイムの hook の定義（hooks/*.json・dev.agy/hooks.json）の timeout。過ぎるとランタイムが hook を打ち切る | — | — | `docs/specifications/cross-review-reopen-and-hook-deadline.md` |
-| 実装の上限 | `impl_timeout` | プランの impl のステップ（worker の実装）の timeout（秒）。.ndf/supervise.json の impl_timeout か supervise.py new の --impl-timeout で決め、無ければ雛形の既定の値 | — | — | — |
+| 実装の上限 | `impl_timeout` | プランの impl のステップ（worker の実装）の timeout（秒）。.ndf/supervise.json の impl_timeout か supervise.py new の --impl-timeout で決め、無ければ雛形の既定の値 | — | — | `docs/specifications/ndf-supervise-step-budgets.md` |
 | hook の締め切り | — | NDF の hook が自分で決める 1 回の実行の時間の上限（3.5 秒）。hook の上限より短く、過ぎたら残りの判定を飛ばして通し、標準エラーへ 1 行残す | — | — | `docs/specifications/cross-review-reopen-and-hook-deadline.md` |
 | 適用範囲 | — | 設計した変更が働く範囲。このリポジトリだけで働くのか配布先のリポジトリでも働くのか、プロジェクトごとに違うものを設定か引数のどちらで受けるのか。設計文書の節と承認資料の行に書く | — | — | `docs/specifications/ndf-design-phase.md` |
 | あるべき姿の根拠 | — | 変更後の形が適切だと言える根拠。外部の一次情報・実測・利用者の指示の原文のどれか。設計文書の節と承認資料の行に書き、無ければ「無し（理由）」。MVV の根拠の項目とは別のもの | — | — | `docs/specifications/ndf-design-phase.md` |
@@ -271,6 +273,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 起票者の推定 | — | 課題の題・本文に、利用者の指示の原文に無く起票者（課題を書いた AI）が文書・コード・経緯から推して足した条件。承認ゲート 1 で利用者が確かめるまで、利用者の決定として扱わない | — | — | `docs/specifications/ndf-gate-rejections-and-filer-assumptions.md` |
 | 承認ゲートの差し戻し | — | 承認ゲートで利用者が承認せず、対象を直すよう戻したこと。MVV 判定の有無を問わず 1 回を 1 件と数える。MVV 判定との食い違いである覆しとは別の数 | — | — | `docs/specifications/ndf-gate-rejections-and-filer-assumptions.md` |
 | 差し戻しの記録 | — | 承認ゲートの差し戻しを 1 回 1 行で追記する JSONL（NDF_MVV_STATE_DIR の gate-rejections.jsonl）。pace と状態ファイルの有無によらず唯一の置き場で、覆しの記録とは別のファイル | — | — | `docs/specifications/ndf-gate-rejections-and-filer-assumptions.md` |
+| 状態の置き場 | — | `supervise.py run` の `--state-dir`（省けば `<プラン>-state/`）。`progress.jsonl`・`report.md`・`state.json` を置き、`--from` の再開が前の実行の記録を読む | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 
@@ -344,13 +347,14 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 重複投稿 | — | 送ろうとした投稿と同じものとして、すでに Pull Request にある投稿 | 先客 | — | `docs/specifications/cross-review-writes-to-conductor.md` |
 | 総評 | — | レビュー本体に書く文章（body）。インラインのコメントとは別に置く | — | — | `docs/specifications/cross-review-writes-to-conductor.md` |
 | drive の状態 | `drive_state` | 収束ループの drive.py が Pull Request ごとに持つ状態ファイル（drive-pr<N>.json / drive-rf<ID>.json）。stage と init_vars を持つ。スプリント 2c の Q3・Q4 で耐久の記録へ移して廃止する | — | — | — |
-| 指摘の基準 | — | 指摘として出してよいものを決める番号つきの条件。既定は 1 利用者が普通に使う経路の誤動作・2 レッドラインに触れるもの（外せない基準）・3 レビューの重点（宣言があるときだけ）・4 実装を違えさせる設計の食い違い。レビューのプロファイルは 2・3 以外の番号を差し替える。当たるものが major 以上になる | — | — | — |
+| 指摘の基準 | — | 指摘として出してよいものを決める番号つきの条件。既定は 1 利用者が普通に使う経路の誤動作・2 レッドラインに触れるもの（外せない基準）・3 レビューの重点（宣言があるときだけ）・4 実装を違えさせる設計の食い違い。レビューのプロファイルは 2・3 以外の番号を差し替える。当たるものが major 以上になる | — | — | `docs/specifications/cross-review-review-profile.md` |
 | レビューの重点 | — | プロジェクトが .ndf/review.json で宣言した、指摘の基準 3 に使う観点。宣言が無ければ基準 3 は無い | — | — | — |
-| 見送りの返信 | — | 修正担当が minor / nit の指摘を直さずに閉じるときに書く返信。雛形（既定か、レビューのプロファイルの reply）の {inner} に見送りの種類の名前を入れて組む。既定の雛形は直す条件（使って困る場面が出たら直す）を定型文で書く | — | — | — |
-| 見送りの種類 | — | 見送りの返信の括弧に書く、指摘の基準に当たらない理由の分類（waive_kind）。既定は 5 分類で、レビューのプロファイルの waive_kinds が差し替える | — | — | — |
-| レビューのプロファイル | `review_profile` | プロジェクトが .ndf/review.json の profile に書く、指摘の基準・書かないもの・見送りの種類・見送りの返信・自動レビュー観点の差し替えの組。書いた鍵だけが既定を差し替える。文中では「プロファイル」と略す | — | — | — |
-| 自動レビュー観点 | — | cross-review が変更ファイルの分類（自動カテゴリ）から選び、レビューの両スロットへ渡す観点の文。--focus と --extra-instructions-file の観点はこの後ろに足す | — | — | — |
-| 外せない基準 | — | 指摘の基準 2（秘密・認証認可・利用者のデータ・戻せない操作）。レビューのプロファイルがあっても消せず、番号 2 のまま出る | — | — | — |
+| 見送りの返信 | — | 修正担当が minor / nit の指摘を直さずに閉じるときに書く返信。雛形（既定か、レビューのプロファイルの reply）の {inner} に見送りの種類の名前を入れて組む。既定の雛形は直す条件（使って困る場面が出たら直す）を定型文で書く | — | — | `docs/specifications/cross-review-review-profile.md` |
+| 見送りの種類 | — | 見送りの返信の括弧に書く、指摘の基準に当たらない理由の分類（waive_kind）。既定は 5 分類で、レビューのプロファイルの waive_kinds が差し替える | — | — | `docs/specifications/cross-review-review-profile.md` |
+| レビューのプロファイル | `review_profile` | プロジェクトが .ndf/review.json に書く、指摘の基準・書かないもの・見送りの種類・見送りの返信・自動レビュー観点の差し替えの組。version 2 では profile に 1 つ、version 3 では profiles に名前つきで複数を書き、PR ごとに 1 つが効く。書いた鍵だけが既定を差し替える。version 3 の最上位の criteria・not_written は、どのプロファイルを選んでも（選ばなかったときは既定の組にも）足す。文中では「プロファイル」と略す | — | — | `docs/specifications/cross-review-review-profile.md` |
+| プロファイルの選択 | — | PR の変更ファイルのパスから、その PR に効かせるレビューのプロファイルを 1 つ決めること。宣言の profiles の先頭から見て、変更ファイルのどれかに paths が当たる最初のものを選び、paths を持たないものはどの PR にも当たる。選んだ名前を init の出力・レビューの状態ファイル・report の要約に残す | — | — | — |
+| 自動レビュー観点 | — | cross-review が変更ファイルの分類（自動カテゴリ）から選び、レビューの両スロットへ渡す観点の文。--focus と --extra-instructions-file の観点はこの後ろに足す | — | — | `docs/specifications/cross-review-review-profile.md` |
+| 外せない基準 | — | 指摘の基準 2（秘密・認証認可・利用者のデータ・戻せない操作）。レビューのプロファイルがあっても消せず、番号 2 のまま出る | — | — | `docs/specifications/cross-review-review-profile.md` |
 | 最終スイープ | — | 収束ループを抜けた後に /ndf:fix を通し、open thread を 0 にする工程 | — | — | — |
 | レビューの状態ファイル | — | cross-review が <worktree>/.cross_review/cross-review-pr<PR>-state.json に置く、ラウンドの履歴（rounds）と終わり方（final）の記録 | — | — | `docs/specifications/cross-review-reopen-and-hook-deadline.md` |
 | 修正の記録 | — | 修正の工程が作る戻り値ファイル（fix-pr<PR>-result.json）を merge-fix がレビューの状態ファイルへ取り込んだもの。ホストが自分で直したときは state.py record-fix が同じ形で作る。修正必須のラウンドの次のラウンドを始める条件 | — | — | `docs/specifications/cross-review-reopen-and-hook-deadline.md` |
@@ -373,7 +377,7 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 必須トレーラー | — | 担当がコミットメッセージのトレーラーとして書く Item-Id / Impl-Runtime / Impl-Model。最終ゲート修正は Item-Id を除く 2 つ | 必須の記名 | — | `docs/specifications/cross-refactoring-apply-intake.md` |
 | 帰属トレーラー | — | 実行環境がコミットメッセージの末尾へ足すトレーラー（Co-Authored-By: / Claude-Session:） | 帰属の段落 | — | `docs/specifications/cross-refactoring-apply-intake.md` |
 | プロダクションコード | — | コードの拡張子を持ち、テストの置き場所でないファイル（production_code_changes） | 本番コード | — | `docs/specifications/cross-refactoring-round-tests-and-assess.md` |
-| 想定最大時間 | — | 利用者が与える所要の上限（分、--budget-minutes）。リファクタリング計画はこの中に収まるように立てる | — | — | `docs/specifications/cross-refactoring-time-budget.md` |
+| 想定最大時間 | — | 利用者が与える所要の上限（分、--budget-minutes）。1 回の実行の子プロセスは、最終ゲートの確かめ・最終ゲート修正・打ち切りの後の取り消しも含めて、すべて想定最大時間の終わりまでに止まる | — | — | `docs/specifications/cross-refactoring-time-budget.md` |
 | 実装担当 | — | リファクタリング計画・テスト追加・実装・修正・最終ゲート修正を通して担う 1 ランタイム（--implementer） | — | — | `docs/specifications/cross-refactoring-time-budget.md` |
 | 改善候補 | — | 提案を path + symbol + smell のキーで集約したもの。リファクタリング計画へ渡す（candidates[]） | — | — | `docs/specifications/cross-refactoring-time-budget.md` |
 | 改善項目 | — | リファクタリング計画が採った改善候補。I-001 の形の ID を持ち、Item-Id の同じコミットを何件でも持てる（テストを足すコミットは 1 件） | — | — | `docs/specifications/cross-refactoring-time-budget.md` |
@@ -396,7 +400,7 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 巻き込まれた項目 | — | 範囲テストが落ち、原因の項目が自分以外だけに決まった改善項目。取り消さず、原因が片づいてから走らせ直す | — | — | — |
 | 公開前の静的解析 | — | 最終ゲート修正の取り込みで、push の前に、修正のコミットが変えたファイルへ当てる静的解析の範囲テスト | — | — | — |
 | 原因の手がかり | `basis` | 原因の項目を決めた根拠。path（落ちたテストの出力に項目の変えたファイルのパスが現れた）・isolate（項目を外した走らせ直しで通った）・undetermined（どちらでも決まらない）の 3 つ | — | — | `docs/specifications/cross-refactoring-verify-and-final-gate.md` |
-| 打ち切りの後の取り消し | `stop_revert` | 工程の 1 つとして起動した cross-refactoring が、最終ゲート修正を打ち切った後に、原因の項目を取り消すか（案 A）、着手前の木へ戻すコミットを積む（案 B）処理 | — | — | `docs/specifications/cross-refactoring-verify-and-final-gate.md` |
+| 打ち切りの後の取り消し | `stop_revert` | 工程の 1 つとして起動した cross-refactoring が、最終ゲート修正を打ち切った後か、最終ゲートの確かめを始められないときに、原因の項目を取り消すか（案 A）、着手前の木へ戻すコミットを積む（案 B）処理 | — | — | `docs/specifications/cross-refactoring-verify-and-final-gate.md` |
 | リファクタリング計画のコメント | — | cross-refactoring が対象の Pull Request に 1 件だけ置き、結果の出口のたびに同じものを編集するリファクタリング計画の記録。目印 `<!-- cross-refactoring plan rf<ID> -->` で引き当てる | — | — | `docs/specifications/cross-refactoring-plan-comment-at-exits.md` |
 | 結果の出口 | — | リファクタリング計画ができた後に、cross-refactoring のスクリプトがその時点の結果を確定させて終了コードを返す地点（push の成功と失敗・最終ゲートの判定・打ち切り・取り消し・中断・finalize） | — | — | `docs/specifications/cross-refactoring-plan-comment-at-exits.md` |
 | 未確認 | `unconfirmed` | 取り消されずに残ったが、最終ゲートが passed になっていない改善項目の状態。採用とは数えない | — | — | `docs/specifications/cross-refactoring-plan-comment-at-exits.md` |
@@ -428,6 +432,9 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 採り直し | — | `cross-refactoring` で検証の後に時間が残ったとき、budget で見送った候補と実装の終わりまでにコミットが無かった改善項目から、残った時間に入るものを順位の順に採り、テストの追加・実装・検証をもう 1 巡回すこと。計画し直さない | — | — | `docs/specifications/cross-refactoring-implementation-window-and-readopt.md` |
 | 見送った改善項目 | — | リファクタリング計画が採った改善項目のうち、表示の状態が見送りのもの（実装の終わりまでにコミットが無く採り直しにも入らなかった not_done・足したテストが落ちた test_failed）。結果 JSON の metrics.deferred の数 | — | — | `docs/specifications/cross-refactoring-pr-gate-and-skip-counts.md` |
 | 見送った提案 | `deferred_items` | 計画に入らなかった提案と見送った改善項目を合わせたもの。理由を 1 つ持つ。状態ファイルの deferred_items | — | — | `docs/specifications/cross-refactoring-pr-gate-and-skip-counts.md` |
+| 想定最大時間の終わり | `final_end_at` | started_at + 想定最大時間（limits.final_end_at）。中断して再開した実行では、止まっていた分だけずれる。子プロセスへ渡す上限はすべてこの時刻で切る | — | — | — |
+| 確かめの見込み | `gate_seconds` | 最終ゲートの確かめ 1 回にかかる見込みの秒（limits.gate_seconds）。手元で全体テストを走らせるなら w、CI で見るなら c、どちらも測れていなければ 0 | — | — | — |
+| 確かめの開始の締め切り | `gate_start_end` | 想定最大時間の終わり − 確かめの見込み（H − v）。最終ゲートの確かめを始められる最後の時刻で、最終ゲート修正と打ち切りの後の取り消しもこの時刻までに止まる | — | — | — |
 
 ## NDF のラッパー（`ndf-relay`）
 
@@ -506,6 +513,8 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | 範囲の PR | — | 直前の正式版のタグから承認したコミットまでに、ベースブランチへ merge commit か squash merge で入った PR。版上げの PR と、PR でない番号（squash の件名の `(#N)` が課題を指すもの）は含まない | — | — | `docs/specifications/ndf-release-approval-included-prs.md` |
 | 版上げの PR | — | head のブランチが `release/` で始まる PR。版数と CHANGELOG だけを変え、中身の変更を持たない | — | — | `docs/specifications/ndf-release-approval-included-prs.md` |
 | 合格の行 | — | リリース後テストの表で、`結果` の列が `合格` で始まる行 | — | — | `docs/specifications/ndf-sprint-close-acceptance-criteria.md` |
+| 手で足した節 | — | 承認資料の `## ` の節のうち、配布のステップ（approval-facts・notes --approval・changed-plugins --approval）が書く見出しに当たらないもの。作り直しの後も見出しと中身が残る | — | — | `plugins/ndf/skills/release/references/release-steps.md` |
+| 置き換える箇条 | — | 後の PR の本文の `## 置き換える箇条` の節に書く行。同じ版に含む前の PR の「利用者向けの変化」の箇条を指し、その箇条を CHANGELOG と承認資料の「配る中身」から除く | — | — | `plugins/ndf/skills/release/references/release-steps.md` |
 
 ## NDF の指示書チェック（`ndf-instructions`）
 

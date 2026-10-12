@@ -64,8 +64,9 @@ FIX=$(bash "$R/scripts/resolve.sh" scripts fix) || exit 3
 
    `items[].name` が `context` のファイルを読む。末尾の「指摘の基準」の節が振り分けの基準である
    （正本は `$R/scripts/lib/review_criteria.py`。プロジェクトのレビューの重点は `.ndf/review.json`
-   の宣言から入り、`/ndf:cross-review` の中では状態ファイルにコピーした重点を使う。宣言の `version: 2` の
-   プロファイルがあれば、基準・書かないもの・見送りの種類・返信もそこから入る）。`review-focus` の
+   の宣言から入り、`/ndf:cross-review` の中では状態ファイルにコピーした重点を使う。宣言のプロファイル
+   （`version: 2` の 1 つか、`version: 3` で PR の変更ファイルのパスから選んだ 1 つ）があれば、基準・書かないもの・
+   見送りの種類・返信もそこから入る）。`review-focus` の
    項目が `unreadable` なら、宣言を読めずに基準 1・2・4 だけで続けたことを作業完了報告へ書く。`ci_failed` の項目があれば `ci_log` のログも
    読む。`metrics.unresolved` が対応の対象の全量である（レビュー結果の投稿数は使わない）
 2. **指摘を振り分ける**（「重要度の判定」）。`items[].name` が `decisions` の JSON の各要素へ
