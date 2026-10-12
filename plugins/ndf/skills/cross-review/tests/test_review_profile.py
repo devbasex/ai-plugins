@@ -354,3 +354,68 @@ def test_resume_with_a_reordered_declaration_selects_again(saved_state):
     st = json.loads(state_file.read_text(encoding="utf-8"))
     assert st["review_criteria"]["profile_name"] == "system" and "誤動作する" in st["review_criteria"]["reviewer_block"]
     assert len(writes) == 1
+
+
+SHARED_CRITERIA = {"9": "取得したデータを公開の置き場へ出す"}
+
+
+@pytest.mark.parametrize(("path", "name"), [(CHAPTER, "manuscript"), ("scripts/a.py", "system")])
+def test_new_init_adds_the_top_level_criteria_to_either_profile(init_env, capsys, path, name):
+    """決定 7: 最上位の基準は、原稿の PR にも仕組みの PR にもレビュー担当の節へ出る。"""
+    worktree, run = init_env
+    _declare_v3(worktree, [MANUSCRIPT, SYSTEM], criteria=SHARED_CRITERIA)
+    st = run(path)
+    assert _out_value(capsys.readouterr().out, "REVIEW_PROFILE_NAME") == name
+    assert "9. 取得したデータを公開の置き場へ出す" in st["review_criteria"]["reviewer_block"]
+
+
+def test_new_init_with_an_overlapping_top_level_number_continues_with_defaults(init_env, capsys):
+    """決定 7・I6: 最上位の番号がプロファイルと重なれば壊れた宣言として既定で続ける。"""
+    worktree, run = init_env
+    _declare_v3(worktree, [MANUSCRIPT, SYSTEM], criteria={"5": "原稿と重なる"})
+    st = run(CHAPTER)
+    out = capsys.readouterr()
+    assert _out_value(out.out, "REVIEW_PROFILE") == "unreadable" and "重なる" in out.err
+    assert "原稿と重なる" not in st["review_criteria"]["reviewer_block"]
+
+
+def test_new_init_across_both_keeps_the_other_names_in_the_state(init_env):
+    """決定 8: ほかにも当たった名前を review_criteria.profile_others に置き、report の行に出す。"""
+    worktree, run = init_env
+    _declare_v3(worktree, [MANUSCRIPT, {**SYSTEM, "paths": ["scripts/**"]}])
+    st = run([CHAPTER, "scripts/a.py"])
+    assert st["review_criteria"]["profile_others"] == ["system"]
+
+
+def test_resume_across_both_does_not_rewrite(saved_state):
+    """I7: profile_others を含めても、宣言と変更ファイルを変えなければ書き直さない。"""
+    wt, state_file, writes = saved_state
+    st = json.loads(state_file.read_text(encoding="utf-8"))
+    st["changed_files"] = _files(CHAPTER, "scripts/a.py")
+    state_file.write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
+    _saved_v3(wt, state_file, [MANUSCRIPT, {**SYSTEM, "paths": ["scripts/**"]}])
+    assert json.loads(state_file.read_text(encoding="utf-8"))["review_criteria"]["profile_others"] == ["system"]
+    assert review_lib.commands.init._rewrite_review_criteria(state_file, str(wt))[2] == "manuscript"
+    assert writes == []
+
+
+@pytest.mark.parametrize(
+    ("crit", "line"),
+    [
+        ({"profile_name": "manuscript"}, "## レビューのプロファイル: manuscript"),
+        ({"profile_name": ""}, "## レビューのプロファイル: 既定"),
+        (
+            {"profile_name": "manuscript", "profile_others": ["system"]},
+            "## レビューのプロファイル: manuscript（ほかに system にも当たった。先に書いた manuscript を使った）",
+        ),
+    ],
+)
+def test_the_report_names_the_profile_used(state_mod, capsys, crit, line):
+    """決定 8: report の要約に、どのプロファイルで見たかを 1 行出す。"""
+    review_lib.commands.report._print_review_focus({"review_criteria": {"status": "none", **crit}})
+    assert line in capsys.readouterr().out.splitlines()
+
+
+def test_the_report_has_no_profile_line_for_v1_v2(state_mod, capsys):
+    review_lib.commands.report._print_review_focus({"review_criteria": {"status": "none", "profile_status": "declared"}})
+    assert "## レビューのプロファイル" not in capsys.readouterr().out

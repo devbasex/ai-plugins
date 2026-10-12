@@ -455,3 +455,73 @@ def test_cli_with_a_broken_v3_declaration_exits_zero(tmp_path):
     p = _cli("reviewer", tmp_path)
     assert p.returncode == 0 and "profiles[1]（manuscript）" in p.stderr
     assert _criterion_numbers(p.stdout) == ["1", "2", "4"]
+
+
+SHARED = {"criteria": {"9": "取得したデータを公開の置き場へ出す"}, "not_written": ["好みの文体", "表記の揃え"]}
+
+
+@pytest.mark.parametrize(("paths", "name"), [([MANUSCRIPT_PATH], "manuscript"), (["scripts/a.py"], "system")])
+def test_top_level_criteria_apply_to_every_profile(tmp_path, paths, name):
+    """決定 7: 最上位の criteria と not_written は、選んだどのプロファイルにも足され、finalize でも番号が通る。"""
+    decl, _ = _pick(tmp_path, [MANUSCRIPT, SYSTEM], paths, **SHARED)
+    assert decl.profile.name == name
+    for block in (rc.reviewer_block(decl.focus, None, decl.profile), rc.fixer_block(decl.focus, None, decl.profile)):
+        assert "9. 取得したデータを公開の置き場へ出す" in block and f"2. {rc.CRITERIA[2]}" in block
+    assert 9 in rc.criterion_numbers(rc.profile_from(decl.profile.record()))
+    st = rc.as_state(decl.focus, None, decl.profile)
+    assert rc.state_profile(st).criteria == decl.profile.criteria and st["profile_name"] == name
+
+
+def test_top_level_not_written_comes_first_without_duplicates(tmp_path):
+    decl, _ = _pick(tmp_path, [MANUSCRIPT, SYSTEM], [MANUSCRIPT_PATH], **SHARED)
+    assert decl.profile.not_written == ("好みの文体", "表記の揃え")
+    decl, _ = _pick(tmp_path, [MANUSCRIPT, SYSTEM], ["scripts/a.py"], **SHARED)
+    assert decl.profile.not_written == ("好みの文体", "表記の揃え", *rc.NOT_WRITTEN.split("・"))
+
+
+def test_top_level_criteria_apply_when_no_profile_is_selected(tmp_path):
+    """決定 7: どのプロファイルも選ばなかった PR では、NDF の既定の組へ足す。"""
+    decl, _ = _pick(tmp_path, [MANUSCRIPT], ["README.md"], criteria=SHARED["criteria"])
+    assert decl.profile.name == "" and decl.profile.criteria == {1: rc.CRITERIA[1], 4: rc.CRITERIA[4], 9: SHARED["criteria"]["9"]}
+    assert rc.reviewer_block(decl.focus, None, decl.profile).count("字句や言い回し") == 1
+    decl, _ = _pick(tmp_path, None, ["README.md"], **SHARED)
+    assert 9 in decl.profile.criteria and decl.profile.name == ""
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"criteria": {"5": "原稿と重なる"}},
+        {"criteria": {"1": "仕組みと重なる"}},
+        {"criteria": {"2": "外せない基準と重なる"}},
+        {"criteria": {"9": ""}},
+        {"not_written": "文字列"},
+    ],
+)
+def test_a_broken_top_level_drops_all_profiles(tmp_path, extra):
+    """決定 7・I6: 最上位の基準の番号の重なりや形の違いは、壊れた宣言として profiles も最上位の基準も捨てる。"""
+    loaded = _profiles(tmp_path, [MANUSCRIPT, SYSTEM], focus=["重点 A"], **extra)
+    assert loaded.profile.status == "unreadable" and loaded.profiles == () and loaded.focus.names == ("重点 A",)
+    chosen, _ = rc.select_profile(loaded, [MANUSCRIPT_PATH])
+    assert chosen.profile.status == "unreadable" and "9." not in rc.reviewer_block(chosen.focus, None, chosen.profile)
+
+
+def test_top_level_overlapping_the_default_criteria_is_broken_when_the_defaults_can_apply(tmp_path):
+    """どれにも当たらない PR に既定の基準 1・4 が効くとき、最上位の 1 は既定と重なる。"""
+    assert _profiles(tmp_path, [MANUSCRIPT], criteria={"4": "x"}).profile.status == "unreadable"
+    assert _profiles(tmp_path, [MANUSCRIPT, SYSTEM], criteria={"4": "x"}).profile.status == "none"
+
+
+def test_v1_v2_ignore_top_level_criteria(tmp_path):
+    _declare(tmp_path, json.dumps({"version": 2, "focus": ["重点 A"], **SHARED}, ensure_ascii=False))
+    loaded = rc.load_review_decl(tmp_path)
+    chosen, _ = rc.select_profile(loaded, [MANUSCRIPT_PATH])
+    assert chosen.profile == rc.NO_PROFILE and "9." not in rc.reviewer_block(chosen.focus, None, chosen.profile)
+
+
+def test_other_hits_are_kept_in_the_state(tmp_path):
+    """決定 8: ほかのプロファイルにも当たった名前を review_criteria の profile_others に置く（当たらなければ置かない）。"""
+    decl, _ = _pick(tmp_path, [MANUSCRIPT, {**SYSTEM, "paths": ["scripts/**"]}], [MANUSCRIPT_PATH, "scripts/a.py"])
+    assert rc.as_state(decl.focus, None, decl.profile, decl.others)["profile_others"] == ["system"]
+    decl, _ = _pick(tmp_path, [MANUSCRIPT, SYSTEM], [MANUSCRIPT_PATH])
+    assert "profile_others" not in rc.as_state(decl.focus, None, decl.profile, decl.others)

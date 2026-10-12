@@ -256,7 +256,7 @@ def _review_criteria(worktree: object, base_branch: object = "", decl: review_cr
     mvv = project_mvv.load_mvv_at_ref(worktree, _base_refs(base_branch)) if worktree else project_mvv.ProjectMvv("none")
     if mvv.status in ("unapproved", "mismatch", "unreadable"):
         review_lib.info(f"⚠️ プロジェクト MVV が{project_mvv.STATUS_LABEL[mvv.status]}ため、MVV なしで続ける: {mvv.error}")
-    return review_criteria.as_state(focus, mvv, profile)
+    return review_criteria.as_state(focus, mvv, profile, decl.others)
 
 
 def _profile_status(crit: dict[str, Any]) -> str:
