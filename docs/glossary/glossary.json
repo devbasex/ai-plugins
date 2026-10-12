@@ -2155,8 +2155,15 @@
       "term": "レビューのプロファイル",
       "code": "review_profile",
       "context": "ndf-cross-review",
-      "meaning": "プロジェクトが .ndf/review.json の profile に書く、指摘の基準・書かないもの・見送りの種類・見送りの返信・自動レビュー観点の差し替えの組。書いた鍵だけが既定を差し替える。文中では「プロファイル」と略す",
+      "meaning": "プロジェクトが .ndf/review.json に書く、指摘の基準・書かないもの・見送りの種類・見送りの返信・自動レビュー観点の差し替えの組。version 2 では profile に 1 つ、version 3 では profiles に名前つきで複数を書き、PR ごとに 1 つが効く。書いた鍵だけが既定を差し替える。文中では「プロファイル」と略す",
       "source": "docs/specifications/cross-review-review-profile.md"
+    },
+    {
+      "term": "プロファイルの選択",
+      "context": "ndf-cross-review",
+      "meaning": "PR の変更ファイルのパスから、その PR に効かせるレビューのプロファイルを 1 つ決めること。宣言の profiles の先頭から見て、変更ファイルのどれかに paths が当たる最初のものを選び、paths を持たないものはどの PR にも当たる。選んだ名前を init の出力とレビューの状態ファイルに残す",
+      "source": "",
+      "pending_source": "issues/issue-1942-design.md"
     },
     {
       "term": "自動レビュー観点",
