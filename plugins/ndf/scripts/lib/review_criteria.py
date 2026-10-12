@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""review_criteria.py: 指摘の基準の正本と、レビューの宣言（`.ndf/review.json`）の読み取り（#1287・#1910）。
+"""review_criteria.py: 指摘の基準の正本と、レビューの宣言（`.ndf/review.json`）の読み取り（#1287・#1910・#1942）。
 
 レビュー担当への指示（cross-review の `launch-reviewer.sh`）・修正担当の文脈のファイル（`fix-steps.py context`）・
 見送りの返信（`fix-steps.py finalize`）は、どれもここの定数と、宣言のプロファイルから組む。標準ライブラリだけで書く。
 
-    review_criteria.py reviewer [--root <worktree>]   レビュー担当への節を標準出力へ
-    review_criteria.py fixer    [--root <worktree>]   修正担当への節を標準出力へ
+    review_criteria.py reviewer [--root <worktree>] [--changed-file <パス> ...]   レビュー担当への節を標準出力へ
+    review_criteria.py fixer    [--root <worktree>] [--changed-file <パス> ...]   修正担当への節を標準出力へ
 
 `--root` を省くと宣言を読まない既定の節（基準 3 の無い形）を出す。重点やプロファイルが読めないときは理由を標準エラーへ出し、
 終了コードは 0 のまま既定の節で続ける。`--root` を渡すと、節の後ろへ MVV の節（NDF の共通原則 → プロジェクト MVV →
-判断の決まり。`project_mvv.block`・#1366）を足す。
+判断の決まり。`project_mvv.block`・#1366）を足す。`--changed-file` は `version: 3` でプロファイルを選ぶパス（省けば空の列）。
 
 宣言の形（`version: 1` はほかの鍵を無視する。`version: 2` では `focus` も `profile` も任意）:
 
@@ -17,6 +17,7 @@
     {"version": 2, "focus": [...], "profile": {"criteria": {"1": "..."}, "not_written": ["..."],
      "waive_kinds": {"<種類>": "<名前>"}, "reply": "...{inner}...",
      "categories": {"<名前>": {"paths": ["<glob>"], "instructions": "..."}}, "replace_auto_categories": false}}
+    {"version": 3, "focus": [...], "profiles": [{"name": "<名前>", "paths": ["<glob>"], <profile と同じ鍵>}, ...]}（`select_profile`）
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from typing import NamedTuple
 
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
+import pace  # noqa: E402
 import project_mvv  # noqa: E402
 
 DECL_PATH = (".ndf", "review.json")
@@ -54,9 +56,7 @@ WAIVE_KINDS = {
     "alignment": "番号や表記の揃え",
     "preference": "好みの設計",
 }
-NOT_WRITTEN = "・".join(
-    ("字句や言い回し", "まず起きない条件での異常処理", "実装に影響しない文書どうしの食い違い", "番号や表記の揃え", "好みの設計")
-)
+NOT_WRITTEN = "字句や言い回し・まず起きない条件での異常処理・実装に影響しない文書どうしの食い違い・番号や表記の揃え・好みの設計"
 REPLY = "直しません。この指摘は、利用者が実際に使って困る不具合ではないためです（{inner}）。使って困る場面が出たら、そのときに直します。"
 REPLY_FOCUS = "。レビューの重点（{names}）にも当たりません"
 INNER = "{inner}"
@@ -87,37 +87,41 @@ class Profile(NamedTuple):
     categories: dict | None = None  # 名前 → (glob の組, 観点の文)
     replace_auto_categories: bool = False
     error: str | None = None
+    name: str | None = None  # version 3 で選んだ名前（選ばなかったときは空文字）。version 1・2 は None
+    paths: tuple[str, ...] | None = None  # version 3 の候補の glob。None はどの PR にも当たる
 
     def record(self) -> dict:
-        """状態ファイル・振り分けの JSON へ写す形（宣言の `profile` と同じ形。書いた鍵だけ）。"""
-        out: dict = {}
-        if self.criteria is not None:
-            out["criteria"] = {str(n): t for n, t in self.criteria.items()}
-        if self.not_written is not None:
-            out["not_written"] = list(self.not_written)
-        if self.waive_kinds is not None:
-            out["waive_kinds"] = dict(self.waive_kinds)
-        if self.reply is not None:
-            out["reply"] = self.reply
-        if self.categories is not None:
-            out["categories"] = {n: {"paths": list(g), "instructions": i} for n, (g, i) in self.categories.items()}
-        if self.replace_auto_categories:
-            out["replace_auto_categories"] = True
-        return out
+        """状態ファイル・振り分けの JSON へ写す形（宣言の `profile` と同じ形。書いた鍵だけ。`name` と `paths` は写さない）。"""
+        c = self.categories
+        out = {
+            "criteria": None if self.criteria is None else {str(n): t for n, t in self.criteria.items()},
+            "not_written": None if self.not_written is None else list(self.not_written),
+            "waive_kinds": None if self.waive_kinds is None else dict(self.waive_kinds),
+            "reply": self.reply,
+            "categories": None if c is None else {n: {"paths": list(g), "instructions": i} for n, (g, i) in c.items()},
+            "replace_auto_categories": True if self.replace_auto_categories else None,
+        }
+        return {k: v for k, v in out.items() if v is not None}
 
 
 NO_PROFILE = Profile("none")
 
 
 class ReviewDecl(NamedTuple):
-    """宣言の読み取り結果。重点とプロファイルは独立に検査する（#1910 の決定 4）。"""
+    """宣言の読み取り結果。重点とプロファイルは独立に検査する（#1910 の決定 4）。`profiles` は `version: 3` の候補（#1942）。"""
 
     focus: Focus
     profile: Profile
+    profiles: tuple[Profile, ...] | None = None
 
 
 def _text(x) -> bool:
     return isinstance(x, str) and bool(x.strip())
+
+
+def _nonempty_globs(x) -> bool:
+    """空でない glob の配列か（`categories` と `profiles` の `paths`。`.ndf/pace.json` の `areas` と同じ規則）。"""
+    return isinstance(x, list) and bool(x) and all(_text(p) for p in x)
 
 
 def _parse_focus(focus) -> Focus | None:
@@ -163,13 +167,7 @@ def _parse_categories(v):
     out = {}
     for name, c in v.items():
         paths = c.get("paths") if isinstance(c, dict) else None
-        if (
-            not (isinstance(name, str) and _NAME_RE.match(name))
-            or not isinstance(paths, list)
-            or not paths
-            or not all(_text(p) for p in paths)
-            or not _text(c.get("instructions"))
-        ):
+        if not (isinstance(name, str) and _NAME_RE.match(name)) or not _nonempty_globs(paths) or not _text(c.get("instructions")):
             return None, f"categories の {name!r} は英小文字の名前で、paths（空でない glob の配列）と instructions（空でない文）を持つ"
         out[name] = (tuple(p.strip() for p in paths), c["instructions"].strip())
     return out, None
@@ -181,14 +179,9 @@ def _parse_replace(v):
     return v, None
 
 
-_PARSERS = {
-    "criteria": _parse_criteria,
-    "not_written": _parse_not_written,
-    "waive_kinds": _parse_waive_kinds,
-    "reply": _parse_reply,
-    "categories": _parse_categories,
-    "replace_auto_categories": _parse_replace,
-}
+_PARSERS = dict(
+    zip(PROFILE_KEYS, (_parse_criteria, _parse_not_written, _parse_waive_kinds, _parse_reply, _parse_categories, _parse_replace))
+)
 
 
 def _parse_profile(raw) -> Profile:
@@ -209,6 +202,29 @@ def _parse_profile(raw) -> Profile:
     return Profile("declared", **values)
 
 
+def _parse_profiles(raw) -> tuple[tuple[Profile, ...] | None, str | None]:
+    """`version: 3` の `profiles` を検査する。1 つでも形が違えば (None, 理由)（決定 4）。"""
+    if raw is not None and not isinstance(raw, list):
+        return None, "profiles は配列で書く"
+    out: list[Profile] = []
+    for i, item in enumerate(raw or []):
+        obj = isinstance(item, dict)
+        name = item.get("name") if obj else None
+        profile = _parse_profile({k: v for k, v in item.items() if k not in ("name", "paths")} if obj else None)
+        problems = (
+            (not obj or not (isinstance(name, str) and _NAME_RE.match(name)), "オブジェクトで書き、name は英小文字・数字・_ の名前にする"),
+            (any(p.name == name for p in out), "name が重複している"),
+            (obj and "paths" in item and not _nonempty_globs(item["paths"]), "paths は空でない glob の配列で書く"),
+            (bool(out) and out[-1].paths is None, "paths を持たないプロファイルは高々 1 つで、末尾に置く"),
+            (profile.status == "unreadable", profile.error),
+        )
+        err = next((msg for bad, msg in problems if bad), None)
+        if err:
+            return None, f"profiles[{i}]（{name if isinstance(name, str) else '?'}）: {err}"
+        out.append(profile._replace(name=name, paths=tuple(x.strip() for x in item["paths"]) if "paths" in item else None))
+    return tuple(out), None
+
+
 def load_review_decl(root) -> ReviewDecl:
     """`<root>/.ndf/review.json` を 1 回読み、重点とプロファイルを返す。例外を上げない。"""
     path = Path(root).joinpath(*DECL_PATH)
@@ -220,7 +236,7 @@ def load_review_decl(root) -> ReviewDecl:
         return ReviewDecl(Focus("unreadable", (), f"{path} を読めない: {e}"), NO_PROFILE)
     version = data.get("version") if isinstance(data, dict) else None
     shape = f'{path} の形が違う（{{"version": 1, "focus": ["..."]}} を書く）'
-    if isinstance(version, bool) or version not in (1, 2):
+    if isinstance(version, bool) or version not in (1, 2, 3):
         return ReviewDecl(Focus("unreadable", (), shape), NO_PROFILE)
     if version == 1:
         focus = _parse_focus(data.get("focus"))
@@ -228,10 +244,33 @@ def load_review_decl(root) -> ReviewDecl:
     focus = _parse_focus(data["focus"]) if "focus" in data else NO_FOCUS
     if focus is None:
         focus = Focus("unreadable", (), f"{path} の focus の形が違う（空でない文字列の配列で書く）")
+    if version == 3:
+        profiles, err = (None, "profile は書かず、profiles に移す") if "profile" in data else _parse_profiles(data.get("profiles"))
+        broken = Profile("unreadable", name="", error=f"{path} の {err}")
+        return ReviewDecl(focus, broken, ()) if profiles is None else ReviewDecl(focus, Profile("none", name=""), profiles)
     profile = _parse_profile(data.get("profile"))
     if profile.status == "unreadable":
         profile = profile._replace(error=f"{path} の profile: {profile.error}")
     return ReviewDecl(focus, profile)
+
+
+def select_profile(decl: ReviewDecl, paths) -> tuple[ReviewDecl, tuple[str, ...]]:
+    """(選んだプロファイルを `profile` に置いた宣言, 選ばなかったが `paths` が当たったプロファイルの名前)（#1942 の I2）。
+    `profiles` の先頭から見て `paths` が当たる最初のもの（`paths` が無ければ当たる）。`version: 1`・`2` と壊れた宣言はそのまま返す。"""
+    if decl.profiles is None or decl.profile.status == "unreadable":
+        return decl, ()
+    paths = [p for p in paths or () if isinstance(p, str)]
+    hit = lambda p: p.paths is None or any(pace.matches(x, p.paths) for x in paths)  # noqa: E731
+    chosen = next((p for p in decl.profiles if hit(p)), None)
+    if chosen is None:
+        return decl._replace(profile=Profile("none", name="")), ()
+    rest = decl.profiles[decl.profiles.index(chosen) + 1 :]
+    return decl._replace(profile=chosen), tuple(p.name for p in rest if p.paths is not None and hit(p))
+
+
+def multi_profile_notice(profile: Profile, others) -> str:
+    """選ばなかったプロファイル（`others`）にも当たったときの知らせの文。"""
+    return f"⚠️ 変更ファイルが複数のプロファイル（{', '.join((profile.name or '', *others))}）に当たるため、先に書いた {profile.name} を使う"
 
 
 def load_focus(root) -> Focus:
@@ -273,8 +312,6 @@ def profile_categories(profile: Profile, paths) -> list[tuple[str, str]]:
     """変更ファイルのパスに当たったプロファイルの分類の (名前, 観点の文)。宣言の順。glob は `.ndf/pace.json` と同じ規則（決定 2）。"""
     if not profile.categories:
         return []
-    import pace
-
     paths = [p for p in paths or () if isinstance(p, str)]
     return [(name, text) for name, (globs, text) in profile.categories.items() if any(pace.matches(p, globs) for p in paths)]
 
@@ -385,9 +422,10 @@ def mvv_context(state_path, root_of) -> tuple[dict, str]:
     return project_mvv.record(mvv), project_mvv.block(mvv)
 
 
-def context_decl(state_path, root_of) -> ReviewDecl:
-    """(重点, プロファイル)。cross-review の状態ファイル（`state_path`）の `review_criteria` があればその写し（I8・#1910）、
-    無ければ `root_of()` の作業ツリーの宣言を読み、プロファイルが読めなければ理由を標準エラーへ出す。`fix-steps.py context` が使う。"""
+def context_decl(state_path, root_of, paths_of=None) -> ReviewDecl:
+    """重点とプロファイル。cross-review の状態ファイル（`state_path`）の `review_criteria` があればその写し（I8・#1910）、
+    無ければ `root_of()` の作業ツリーの宣言を読み、`version: 3` のときだけ `paths_of()`（変更ファイルのパス）で選ぶ（#1942 の決定 6）。
+    プロファイルが読めなければ理由を、複数に当たれば知らせを標準エラーへ出す。`fix-steps.py context` が使う。"""
     try:
         crit = json.loads(Path(state_path).read_text(encoding="utf-8")).get("review_criteria") if state_path else None
     except (OSError, ValueError, AttributeError):
@@ -397,6 +435,10 @@ def context_decl(state_path, root_of) -> ReviewDecl:
     decl = load_review_decl(root_of())
     if decl.profile.status == "unreadable":
         print(PROFILE_WARNING.format(error=decl.profile.error), file=sys.stderr)
+    elif decl.profiles is not None:
+        decl, others = select_profile(decl, paths_of() if paths_of else ())
+        if others:
+            print(multi_profile_notice(decl.profile, others), file=sys.stderr)
     return decl
 
 
@@ -411,19 +453,16 @@ def apply_basis(decisions: dict):
 
 def as_state(focus: Focus, mvv=None, profile: Profile = NO_PROFILE) -> dict:
     """状態ファイルの `review_criteria` の形。`mvv`（`project_mvv.ProjectMvv`）を渡すと、参照と MVV の節も写す。
-    プロファイルが無い（`none`）ときは、プロファイルの項目を置かない（決定 9）。"""
-    out = {
-        "status": focus.status,
-        "focus": list(focus.names),
-        "error": focus.error,
-        "reviewer_block": reviewer_block(focus, mvv, profile),
-    }
+    プロファイルが無い（`none`）ときは、プロファイルの項目を置かない（決定 9）。`profile_name` は `version: 3` だけに置く（#1942）。"""
+    out = {"status": focus.status, "focus": list(focus.names), "error": focus.error, "reviewer_block": reviewer_block(focus, mvv, profile)}
     if mvv is not None:
         out.update(project_mvv=project_mvv.record(mvv), mvv_block=project_mvv.block(mvv))
     if profile.status == "declared":
         out.update(profile_status="declared", profile=profile.record())
     elif profile.status == "unreadable":
         out.update(profile_status="unreadable", profile_error=profile.error)
+    if profile.name is not None:
+        out["profile_name"] = profile.name
     return out
 
 
@@ -441,8 +480,13 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("block", choices=("reviewer", "fixer"))
     ap.add_argument("--root", help="宣言を読む worktree の根（省くと宣言を読まない）")
+    ap.add_argument("--changed-file", action="append", default=[], help="version 3 の宣言でプロファイルを選ぶ変更ファイル（繰り返し可）")
     a = ap.parse_args(argv)
-    focus, profile = load_review_decl(a.root) if a.root else ReviewDecl(NO_FOCUS, NO_PROFILE)
+    decl = load_review_decl(a.root) if a.root else ReviewDecl(NO_FOCUS, NO_PROFILE)
+    decl, others = select_profile(decl, a.changed_file)
+    if others:
+        print(multi_profile_notice(decl.profile, others), file=sys.stderr)
+    focus, profile = decl.focus, decl.profile
     if focus.status == "unreadable":
         print(f"レビューの重点の宣言を読めないため、基準 1・2・4 だけで続ける: {focus.error}", file=sys.stderr)
     if profile.status == "unreadable":

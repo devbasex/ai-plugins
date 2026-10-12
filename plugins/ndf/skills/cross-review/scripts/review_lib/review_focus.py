@@ -229,13 +229,29 @@ def _read_review_decl(worktree: object) -> review_criteria.ReviewDecl:
     return decl
 
 
+def _select_profile(decl: review_criteria.ReviewDecl, changed_files: list[Any]) -> review_criteria.ReviewDecl:
+    """変更ファイルのパスで `version: 3` のプロファイルを 1 つ選んだ宣言を返す（#1942）。選ばなかったプロファイルにも
+    当たったときは知らせる。`version: 1`・`2` と壊れた宣言はそのまま返す。"""
+    chosen, others = review_criteria.select_profile(decl, _changed_file_paths(changed_files if isinstance(changed_files, list) else []))
+    if others:
+        review_lib.info(review_criteria.multi_profile_notice(chosen.profile, others))
+    return chosen
+
+
+def _profile_name(crit: dict[str, Any]) -> str:
+    """`init` の出力の `REVIEW_PROFILE_NAME=` の値（`version: 3` で選んだ名前。ほかは空）。"""
+    name = crit.get("profile_name")
+    return name if isinstance(name, str) else ""
+
+
 def _review_criteria(worktree: object, base_branch: object = "", decl: review_criteria.ReviewDecl | None = None) -> dict[str, Any]:
     """レビューの宣言（PR の head の作業ツリー）とプロジェクト MVV（base の側）を読み、状態ファイルの `review_criteria` を組む（#1287・#1366・#1910）。
 
     プロジェクト MVV は base で承認済みのものだけを使う。PR の head が MVV を足す・書き換えても、
     その PR 自身のレビューと修正の基準はマージの後まで変わらない。`decl` を渡せば宣言を読み直さない。
     """
-    focus, profile = decl if decl is not None else _read_review_decl(worktree)
+    decl = decl if decl is not None else _read_review_decl(worktree)
+    focus, profile = decl.focus, decl.profile
     # プロジェクト MVV（#1366）は 1 回だけ読み、参照と MVV の節を写す。担当・修正担当・見送りの返信が同じ節を読む
     mvv = project_mvv.load_mvv_at_ref(worktree, _base_refs(base_branch)) if worktree else project_mvv.ProjectMvv("none")
     if mvv.status in ("unapproved", "mismatch", "unreadable"):

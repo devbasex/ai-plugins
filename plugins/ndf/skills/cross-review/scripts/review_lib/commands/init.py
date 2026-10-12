@@ -46,6 +46,7 @@ class _InitResult(NamedTuple):
     resumed: bool
     review_focus: str = "none"
     review_profile: str = "none"
+    review_profile_name: str = ""
 
 
 def _print_init_result(result: _InitResult) -> None:
@@ -67,22 +68,22 @@ def _print_init_result(result: _InitResult) -> None:
     print(f"RESUMED={'1' if result.resumed else '0'}")
     print(f"REVIEW_FOCUS={result.review_focus}")
     print(f"REVIEW_PROFILE={result.review_profile}")
+    print(f"REVIEW_PROFILE_NAME={result.review_profile_name}")
 
 
-def _rewrite_review_criteria(state_file: pathlib.Path, worktree: object, base_branch: object = "") -> tuple[str, str]:
+def _rewrite_review_criteria(state_file: pathlib.Path, worktree: object, base_branch: object = "") -> tuple[str, str, str]:
     """再開で、同期した後の作業ツリーから宣言を読み直し、指摘の基準と自動レビュー観点を組み直して、
-    保存した値と違うときだけ状態ファイルへ書く（I7）。(重点の状態, プロファイルの状態) を返す。
+    保存した値と違うときだけ状態ファイルへ書く（I7）。(重点の状態, プロファイルの状態, プロファイルの名前) を返す。
 
     待ち行列を流した結果は状態ファイルへ直接書かれているため、手元の `st` ではなく
-    ファイルを読み直してから書く。
-    """
-    decl = review_focus._read_review_decl(worktree)
-    crit = review_focus._review_criteria(worktree, base_branch, decl)
-    statuses = (crit["status"], review_focus._profile_status(crit))
+    ファイルを読み直してから書く。プロファイルは保存した `changed_files` で選ぶため、状態ファイルを先に読む（#1942）。"""
     try:
         st = json.loads(state_file.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return statuses
+        st = None
+    decl = review_focus._select_profile(review_focus._read_review_decl(worktree), st.get("changed_files") if isinstance(st, dict) else [])
+    crit = review_focus._review_criteria(worktree, base_branch, decl)
+    statuses = (crit["status"], review_focus._profile_status(crit), review_focus._profile_name(crit))
     if not isinstance(st, dict):
         return statuses
     updated = json.loads(json.dumps(st))
@@ -192,7 +193,9 @@ def _resume_from_state(
         review_lib.info("↻ 追加レビュー観点を state に反映して再開")
 
     tmp_dir = _sync_resume_worktree(st, pr, worktree)
-    focus_status, profile_status = _rewrite_review_criteria(resume_state_file, st.get("worktree_path") or "", st.get("base_branch") or "")
+    focus_status, profile_status, profile_name = _rewrite_review_criteria(
+        resume_state_file, st.get("worktree_path") or "", st.get("base_branch") or ""
+    )
     review_lib.info(f"↻ 前回中断 state から再開（round={len(st.get('rounds', []))}）")
     _print_init_result(
         _InitResult(
@@ -209,6 +212,7 @@ def _resume_from_state(
             resumed=True,
             review_focus=focus_status,
             review_profile=profile_status,
+            review_profile_name=profile_name,
         )
     )
     return True
@@ -392,11 +396,13 @@ def _init_new_state(
         )
 
     def _prepare_review_instructions(
-        pr: object, repo: str, manual_extra_review: str, profile: review_criteria.Profile
-    ) -> _InitReviewContext:
+        pr: object, repo: str, manual_extra_review: str, decl: review_criteria.ReviewDecl
+    ) -> tuple[_InitReviewContext, review_criteria.ReviewDecl]:
         changed_files = github._fetch_changed_files(pr, repo)
+        # 変更ファイルを取った直後にプロファイルを選び、観点と指摘の基準の両方へ同じものを渡す（#1942）
+        decl = review_focus._select_profile(decl, changed_files)
         default_categories = categories_mod._classify_changed_files(changed_files)
-        auto_review_categories, auto_review = review_focus._auto_review(default_categories, changed_files, profile)
+        auto_review_categories, auto_review = review_focus._auto_review(default_categories, changed_files, decl.profile)
         review_instructions = review_focus._combined_review_instructions(auto_review, manual_extra_review)
         return _InitReviewContext(
             changed_files=changed_files,
@@ -404,7 +410,7 @@ def _init_new_state(
             auto_review_categories=auto_review_categories,
             auto_review=auto_review,
             review_instructions=review_instructions,
-        )
+        ), decl
 
     def _prepare_worktree_and_comments(
         worktree: str, pr: object, head_branch: str, repo: str, is_fork: bool = False
@@ -479,6 +485,7 @@ def _init_new_state(
                 resumed=False,
                 review_focus=state["review_criteria"]["status"],
                 review_profile=review_focus._profile_status(state["review_criteria"]),
+                review_profile_name=review_focus._profile_name(state["review_criteria"]),
             )
         )
 
@@ -489,5 +496,5 @@ def _init_new_state(
     # 宣言は PR の head の worktree にあるため、worktree を用意してから読み、観点と指摘の基準の両方へ渡す（決定 6）
     ws_ctx = _prepare_worktree_and_comments(pr_ctx.worktree, pr, pr_ctx.meta.head_branch, pr_ctx.repo, is_fork=pr_ctx.meta.is_fork)
     decl = review_focus._read_review_decl(pr_ctx.worktree)
-    review_ctx = _prepare_review_instructions(pr, pr_ctx.repo, manual_extra_review, decl.profile)
+    review_ctx, decl = _prepare_review_instructions(pr, pr_ctx.repo, manual_extra_review, decl)
     _finalize_initial_state(args, pr, pr_ctx, review_ctx, ws_ctx, manual_extra_review, decl)
