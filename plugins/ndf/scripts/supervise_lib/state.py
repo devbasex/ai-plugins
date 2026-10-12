@@ -232,8 +232,24 @@ class RunState:
                 "cost": (c.get("llm") or {}).get("cost", 0.0),
                 "next": nxt or "end",
                 "summary": summary.strip()[:160],
+                **({"pr": c["pr"]} if c.get("pr") else {}),
             }
         )
+
+    def run_line(self, start: str | None) -> None:
+        """実行の始まりの 1 行（`from` は `--from` のステップか null。`recorded_pr` が前の実行の範囲を決める）。"""
+        self.progress_write({"kind": "run", "from": start})
+
+    def recorded_pr(self) -> str:
+        """前の実行が決めた Pull Request（`--from` の再開で使う）。最後の `--from` を付けない実行の始まりの行より後の
+        最後の `pr`。実行の始まりの行も `pr` も無い記録（修正より前の版）だけ `report.md` から読む。無ければ空。"""
+        rows = jsonio.read_jsonl(self.progress, missing=[], broken=[], skip_broken=True)
+        rows = [r for r in rows if r.get("kind") == "run" or r.get("pr")]
+        prev = self.dir / "report.md"
+        if not rows and prev.is_file():
+            return m.group(1) if (m := re.search(r"^- Pull Request: (\S*/pull/\d+)", prev.read_text(), re.M)) else ""
+        cut = max((i for i, r in enumerate(rows) if r.get("kind") == "run" and r.get("from") is None), default=-1)
+        return next((str(r["pr"]) for r in reversed(rows[cut + 1 :]) if r.get("pr")), "")
 
     # --- 流れているステップの子（孤児の片付け。決定 35） ---
     def begin_step(self, sid: str) -> str | None:
