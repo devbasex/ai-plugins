@@ -169,6 +169,11 @@ def report_result(text: str) -> str:
     return m.group(1) if m else "不明"
 
 
+def is_dir_entry(path: str, root: str) -> bool:
+    """`触るファイル` の 1 行がディレクトリか（末尾が `/` か、`root` の下の既存のディレクトリ。#1674）。"""
+    return str(path).endswith("/") or (Path(root) / str(path)).is_dir()
+
+
 def state_dir_of(plan: str) -> Path:
     """プランの状態ディレクトリ `<プラン>-state`（パスは変えない）。
 

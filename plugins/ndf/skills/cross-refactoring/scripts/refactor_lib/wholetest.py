@@ -14,7 +14,7 @@ import statefile
 import test_strategy as ts
 import test_triage
 
-from . import culprit, info, launch, timeline, triage
+from . import clock, culprit, info, launch, timeline, triage
 from .gitfacts import run_with_timeout
 from .outbound import dropped_line
 from .paths import work_dir
@@ -44,7 +44,7 @@ def run_locally(state: dict[str, Any], log: pathlib.Path, path: Any = None) -> t
     passed, timed_out = True, False
     with open(log, "wb"):
         pass
-    limit, started = timeline.state_whole_timeout(state), time.monotonic()
+    limit, started = timeline.state_whole_timeout(state, clock.now()), time.monotonic()
     for i, command in enumerate(commands):
         part = log.with_name(f"{log.stem}-{i}.log") if len(commands) > 1 else log
         # 上限は suite 群全体で 1 つ（test-run.py の whole と同じ）

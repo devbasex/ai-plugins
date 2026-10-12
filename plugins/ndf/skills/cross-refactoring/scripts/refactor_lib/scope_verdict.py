@@ -21,7 +21,7 @@ import junit
 import test_strategy as ts
 import test_triage
 
-from . import culprit, info, launch, targets, timeline
+from . import clock, culprit, info, launch, targets, timeline
 from .gitfacts import changed_files
 from .items import FAILING, IMPLEMENTED, VERIFIED, find_item, item_shas, live_items
 from .paths import work_dir
@@ -76,7 +76,7 @@ def _run_scope(path: pathlib.Path, state: dict[str, Any], runs: list[ts.ScopeRun
     """範囲テストを 1 本ずつ走らせる（`targets.run_or_stop` と同じ上限と止め方）。落ちた 1 本を残す。"""
     strategy = timeline.strategy_of(state)
     test_triage.clear_junit(work_dir(state), strategy)
-    outcome, last = targets.run_commands([r.command for r in runs], work_dir(state), timeline.state_test_timeout(state), log)
+    outcome, last = targets.run_commands([r.command for r in runs], work_dir(state), timeline.state_test_timeout(state, clock.now()), log)
     if outcome.launch_failed:
         launch.stop(path, state, "verify", last, outcome, log)
     if outcome.status == ts.PASSED:

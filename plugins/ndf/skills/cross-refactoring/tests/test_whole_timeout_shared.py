@@ -33,7 +33,7 @@ def _whole_state(monkeypatch, module):
     strategy = types.SimpleNamespace(whole_commands=lambda kind=None: [] if kind == "lint" else ["a", "b", "c"])
     timeline = sys.modules["refactor_lib.timeline"]
     monkeypatch.setattr(timeline, "strategy_of", lambda state: strategy)
-    monkeypatch.setattr(timeline, "state_whole_timeout", lambda state: 100)
+    monkeypatch.setattr(timeline, "state_whole_timeout", lambda state, now: 100)
     monkeypatch.setattr(sys.modules["refactor_lib.triage"], "clear_junit", lambda state: None)
     monkeypatch.setattr(module, "work_dir", lambda state: "/nonexistent")
 

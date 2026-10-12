@@ -17,7 +17,7 @@ M は想定最大時間、無ければ cross-refactoring の既定の予算（`D
 | `--impl-timeout`（`impl` `sprint`）・`--refactor-budget-minutes`（`check` `sprint` `close`）と、`new <種別> --help` の「任意の設定」 | [`supervise_lib/new_args.py`](../../plugins/ndf/scripts/supervise_lib/new_args.py) の `NEW_ARGS`・`DECL_WORDS` |
 | 引数と宣言から値を決める順（`apply_decls`）と子のプランへの引き継ぎ（`decl_fields`） | [`supervise_lib/decl.py`](../../plugins/ndf/scripts/supervise_lib/decl.py) |
 | 想定最大時間の意味と cross-refactoring の中の配分 | [cross-refactoring-time-budget.md](cross-refactoring-time-budget.md) と `cross-refactoring` の Skill |
-| 最終ゲートの後の取り消しの所要と `refactor` の `timeout` の関係 | [cross-refactoring-verify-and-final-gate.md](cross-refactoring-verify-and-final-gate.md) の運用の「時間の上限」 |
+| 最終ゲートの後の取り消しを含む所要と `refactor` の `timeout` の関係 | [cross-refactoring-verify-and-final-gate.md](cross-refactoring-verify-and-final-gate.md) の運用の「時間の上限」 |
 
 決定の番号は #1916 の設計の番号である。
 
@@ -25,7 +25,7 @@ M は想定最大時間、無ければ cross-refactoring の既定の予算（`D
 
 「実装の上限」「想定最大時間」の定義は用語集（[docs/glossary.md](../glossary.md)）が正である。課題の本文の「リファクタリングの予算」は
 想定最大時間と同じものを指す。工程（`ndf-workflow`）は cross-refactoring（`ndf-cross-refactoring`）の **順応者** の関係にあり、
-プランは想定最大時間を cross-refactoring の意味（分・1 以上の整数・目安の上限）のまま受けて `--budget-minutes` へそのまま渡す。
+プランは想定最大時間を cross-refactoring の意味（分・1 以上の整数・所要の上限）のまま受けて `--budget-minutes` へそのまま渡す。
 工程の側で配分や解釈を足さない。
 
 ## 背景
@@ -105,7 +105,7 @@ graph TD
 
 | 項目 | 内容 |
 | --- | --- |
-| 予算を余裕より長く超える run | 想定最大時間は目安の上限で、cross-refactoring は予算を超えても実行中の CLI を止めない。超えた秒が `with_margin` の余裕より長い run は打ち切られる（exit=124）。最終ゲートの後の取り消しと確かめ直しまで含めた所要は 1.2·B + 7 分（既定の B = 30 分で 43 分）で、既定の `timeout`（1980 秒 = 33 分）より長い（[cross-refactoring-verify-and-final-gate.md](cross-refactoring-verify-and-final-gate.md) の決定 8）。想定最大時間を渡さないプランでは、項目ごとの取り消しが打ち切られうる。リリース後テストで exit=124 が出れば、渡す想定最大時間を見直す（余裕の割合は 10% のまま） |
+| 予算の後に残る処理 | cross-refactoring は子プロセス（CLI・テスト・CI の待ち）をすべて想定最大時間の終わりまでに止める。その後に動くのは git の操作・push・報告・プロセスの後始末だけで、`with_margin` の余裕（10%・最低 30 秒。既定の B = 30 分で 180 秒）が吸収する（[cross-refactoring-verify-and-final-gate.md](cross-refactoring-verify-and-final-gate.md) の運用の「時間の上限」）。リリース後テストで exit=124 が出れば、想定最大時間の後に動いた処理を調べる（余裕の割合は 10% のまま） |
 | ai-plugins の値 | ai-plugins の宣言には書かない（決定 7）。値が要るかは所要の実測が揃ってから決める |
 | 説明の置き場 | 宣言の形の正本は `plan.py` の docstring で、`.md` の文書を新設していない |
 

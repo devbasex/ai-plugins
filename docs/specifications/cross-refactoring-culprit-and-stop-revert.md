@@ -15,8 +15,8 @@
 | --- | --- | --- |
 | 検証の中の全体テスト（`converge._triage_whole`） | 修正の締め切り（`culprit.fix_deadline` = `budget.fix_end`） | 行う |
 | JUnit を読めない経路（`wholetest.fallback`） | なし | 行わない |
-| 最終ゲートへ寄せた危険フラグの全体テスト（`gate_ci.revert_deferred`。単独の起動） | `limits.stop_revert_end_at` | 行う |
-| 打ち切りの後の取り消し（`stop_revert`。工程の 1 つとしての起動） | `limits.stop_revert_end_at` | 行う |
+| 最終ゲートへ寄せた危険フラグの全体テスト（`gate_ci.revert_deferred`。単独の起動の時間以外の打ち切り） | 確かめの開始の締め切り（`timeline.gate_start_end` = H − v） | 行う |
+| 打ち切りの後の取り消し（`stop_revert`。工程の 1 つとしての起動） | 確かめの開始の締め切り（同上） | 行う |
 
 | `Verdict` の値 | 何を持つか |
 | --- | --- |
@@ -73,34 +73,38 @@ cross-refactoring の側は構造チェックのために何も持たない。�
 ### 打ち切りの後の取り消し
 
 工程の 1 つとして起動した実行（`--workflow-step`）が最終ゲート修正を打ち切ると、`gate.cmd_final_gate` が
-`stop_revert.revert_after_cutoff` を呼ぶ。単独の起動は呼ばず、寄せた危険フラグの全体テストがあるときだけ
-`gate_ci.revert_deferred` で原因の項目を取り消す。2 つの手当ての中身は
+`stop_revert.revert_after_cutoff` を呼ぶ。最終ゲートの確かめを確かめの開始の締め切り（H − v）までに始められず、
+HEAD の木が起点の木と違うときは、項目ごとの取り消しを飛ばして `stop_revert.fall_back` で起点への戻しを積む
+（[時間の上限](cross-refactoring-verify-and-final-gate.md#時間の上限)の原則 4）。単独の起動は呼ばず、時間以外の打ち切り
+（`no_relaunch`）で寄せた危険フラグの全体テストがあるときだけ `gate_ci.revert_deferred` で原因の項目を取り消す。
+時間の打ち切りでは何も取り消さずに終了コード 1 で終える。2 つの手当ての中身は
 [`docs/04-verify-and-report.md`](../../plugins/ndf/skills/cross-refactoring/docs/04-verify-and-report.md) の
 「打ち切りの後の取り消し」が正である。ここでは進み方の契約だけを書く。
 
 ```mermaid
 stateDiagram-v2
     [*] --> 打ち切り: 最終ゲートが落ち、修正を打ち切った
-    打ち切り --> 項目ごと: stop_revert.plan が無い
+    打ち切り --> 項目ごと: stop_revert.plan が無く、今が H − v 以前
+    打ち切り --> 起点へ: stop_revert.plan が無く、今が H − v を過ぎた
     打ち切り --> 起点へ: plan が A（項目ごとの取り消しの後でも落ちた）
     打ち切り --> 判断が要る: plan が B
-    項目ごと --> 確かめ直し: 落ちたテストが通った
+    項目ごと --> 打ち直し: 落ちたテストが通った
     項目ごと --> 起点へ: 衝突・候補が尽きた・締め切り・走らせ直す語が無い
-    起点へ --> 確かめ直し: 起点の木へ戻すコミットを積んだ
+    起点へ --> 打ち直し: 起点の木へ戻すコミットを積んだ
     起点へ --> 判断が要る: コミットを作れない
-    確かめ直し --> [*]: push して FINAL_GATE=recheck（終了コード 2）
+    打ち直し --> [*]: push して FINAL_GATE=recheck（終了コード 2）
     判断が要る --> [*]: 終了コード 4
 ```
 
 - **項目ごとの取り消し**は、最終ゲートの見分け（`final_gate.triage`）の変更起因で原因の項目を決め（`final_gate.culprit`）、
-  `culprit.revert_in_order` で取り消す。衝突は `DropConflict` で受け、締め切り（`limits.stop_revert_end_at`）を過ぎたら次の取り消しを始めない。
+  `culprit.revert_in_order` で取り消す。衝突は `DropConflict` で受け、締め切り（確かめの開始の締め切り H − v）を過ぎたら次の取り消しを始めない。走らせ直しの上限も H − v までの残りで切る。
   取り消した項目の `failure_reason` は「最終ゲート修正を打ち切った後に、原因の項目として取り消した」
 - **起点への戻し**は、`plan.base_sha` の木へ worktree と index を合わせ（`git read-tree -u --reset`）、
   `Revert: cross-refactoring の改善を着手前の木へ戻す（<理由>）` を 1 本コミットする。台帳にはオーケストレーターのコミットとして記録し
   （`ledger.note_orchestrator_commit`）、残った項目をすべて取り消した記録にする（`failure_reason` は `stop_revert.REASON_B` の文）。
   コミットを作れなければ HEAD を戻して終了コード 4 で止まる
 - どちらも、積んだ後の公開と、起点（`final_gate.fix_base_sha`）の置き直しは `gate.cmd_final_gate` が行う
-- 確かめ直しの最終ゲートが通れば `final_gate.status` は `passed` になり、駆動は残った項目（`verified`）の数を `adopted` にして完了で終える（`unconfirmed` は出ない）。
+- 取り消しの後の最終ゲートが通れば（起点への戻しの後に確かめを始められず、木が起点と同じなので省いて通したときを含む）`final_gate.status` は `passed` になり、駆動は残った項目（`verified`）の数を `adopted` にして完了で終える（`unconfirmed` は出ない）。
   検査のプランは refactor を完了として review へ進む（プランの定義は変えない）
 - 変更起因を挙げられない（静的解析だけが落ちた・見分けを全体の走らせ直しへ落とした）ときは、走らせ直す語が無いので項目ごとの取り消しを飛ばして起点への戻しへ進む。
   `final-gate` は打ち直すたびに前回の見分けを消すため、古い変更起因で取り消さない

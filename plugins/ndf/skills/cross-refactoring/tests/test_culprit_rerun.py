@@ -101,13 +101,13 @@ def test_whole_recheck_runs_every_caused_suite(refactor, tmp_path, monkeypatch):
     assert record["resolution"] == "fixed"
 
 
-def test_deferred_revert_stops_at_the_stop_revert_deadline(refactor, tmp_path, monkeypatch):
+def test_deferred_revert_stops_at_the_check_start_deadline(refactor, tmp_path, monkeypatch):
     gate_ci = sys.modules["refactor_lib.gate_ci"]
     culprit = _culprit(refactor)
     end = NOW + dt.timedelta(seconds=5)
     seen: dict = {}
     monkeypatch.setattr(gate_ci, "live_items", lambda state: [{"id": "I1"}])
-    monkeypatch.setattr(gate_ci.timeline, "stop_revert_end", lambda state: end)
+    monkeypatch.setattr(gate_ci.timeline, "gate_start_end", lambda state: end)
     monkeypatch.setattr(culprit, "judge", lambda state, gate, verdict, deadline: type("F", (), {"order": ["I1"]})())
     monkeypatch.setattr(culprit, "rerun_passes", lambda state, rerun, deadline=None: seen.setdefault("passes", deadline))
     monkeypatch.setattr(

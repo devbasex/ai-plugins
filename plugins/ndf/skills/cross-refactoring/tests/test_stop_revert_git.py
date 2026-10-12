@@ -106,9 +106,11 @@ def _verified_run(flow, cmd_setup, cmd_implement, cmd_converge):
 
 
 def _cut_off(flow, minutes_ago):
-    """最終ゲート修正を 1 度試みた後で、想定最大時間（60 分）の終わりを過ぎた状態にする。"""
+    """最終ゲート修正を 1 度試みた後で、開始から `minutes_ago` 分たった状態にする。想定最大時間は 60 分、確かめの見込み v は
+    6 秒、最終ゲート修正 1 回の見込み F は 300 秒（58 分前に始めたなら、確かめは入り、最終ゲート修正は入らない）。"""
     state = read_state(flow["path"])
     state["started_at"] = (_dt.datetime.now() - _dt.timedelta(minutes=minutes_ago)).isoformat(timespec="seconds")
+    state["plan"]["reserve"]["final_fix"] = 5.0
     state.pop("limits", None)
     state["final_gate"].update({"fix_rounds": 1, "status": "failing"})
     write_state(flow["path"], state)
@@ -135,7 +137,7 @@ def test_plan_a_reverts_only_the_culprit_and_the_rechecked_gate_passes(flow, cmd
     """AC1〜3・AC7・AC8 — 原因の項目だけを取り消して push し、次の最終ゲートが通る。採用は残った項目の数で、未確認は出ない。"""
     work = flow["work"]
     _verified_run(flow, cmd_setup, cmd_implement, cmd_converge)
-    _cut_off(flow, minutes_ago=61)
+    _cut_off(flow, minutes_ago=58)
 
     code, verdict = _gate(cmd_gate, capsys)
 
@@ -158,8 +160,37 @@ def test_plan_a_reverts_only_the_culprit_and_the_rechecked_gate_passes(flow, cmd
     _descends(work, flow["pushed"])
 
 
+def test_every_child_limit_from_the_cut_off_to_the_recheck_ends_by_the_end(
+    flow, cmd_setup, cmd_implement, cmd_converge, cmd_gate, capsys, patch_lib
+):
+    """#1932 AC2・I1 — 最終ゲートが落ち、最終ゲート修正が入らずに打ち切り、案 A で取り消して打ち直すまでに子プロセス（テスト・
+    走らせ直し）へ渡す上限は、どれも渡した時刻 + 上限 ≤ H である。案 A の走らせ直しは H − v 以前に止まる。"""
+    clock, process, timeline = (sys.modules[f"refactor_lib.{m}"] for m in ("clock", "process", "timeline"))
+    real = process.run_with_timeout
+    given: list = []
+
+    def spy(command, cwd, timeout, *a, **k):
+        state = read_state(flow["path"])
+        given.append((clock.now() + _dt.timedelta(seconds=timeout), bool(state["final_gate"].get("stop_revert")), state))
+        return real(command, cwd, timeout, *a, **k)
+
+    _verified_run(flow, cmd_setup, cmd_implement, cmd_converge)
+    _cut_off(flow, minutes_ago=58)
+    patch_lib("run_with_timeout", spy)
+
+    assert _gate(cmd_gate, capsys) == (2, "recheck")
+    assert _gate(cmd_gate, capsys) == (0, "passed")
+
+    assert any(reverting and state["final_gate"]["status"] != "recheck" for _, reverting, state in given)
+    for until, reverting, state in given:
+        assert until <= timeline.final_end(state)
+        if reverting and state["final_gate"]["status"] != "recheck":
+            assert until <= timeline.gate_start_end(state)
+
+
 def test_plan_b_restores_the_planned_tree_when_plan_a_runs_out_of_time(flow, cmd_setup, cmd_implement, cmd_converge, cmd_gate, capsys):
-    """AC4・AC7 — 案 A の締め切り（終わり + 0.20·B）を過ぎていたら、計画の起点の木へ戻すコミットを 1 本積んで確かめ直す。"""
+    """AC4・AC7・#1932 I3 — 確かめの開始の締め切り（H − v）を過ぎていたら、確かめを始めずに計画の起点の木へ戻すコミットを
+    1 本積む。次の最終ゲートは、HEAD の木が起点の木と同じなので確かめを省いて通す。"""
     work = flow["work"]
     state = _verified_run(flow, cmd_setup, cmd_implement, cmd_converge)
     base = state["plan"]["base_sha"]
@@ -171,13 +202,17 @@ def test_plan_b_restores_the_planned_tree_when_plan_a_runs_out_of_time(flow, cmd
     state = read_state(flow["path"])
     record = state["final_gate"]["stop_revert"]
     assert record["plan"] == "B" and record["base_sha"] == base and record["commit"] == _head(work)
-    assert "締め切り" in record["fallback_reason"]
+    assert record["fallback_reason"] == sys.modules["refactor_lib.stop_revert"].NO_ROOM
+    assert state["final_gate"]["check_skipped"]["base_identity"] is False
     assert all(i["status"] == "reverted" for i in state["items"])
     assert git("diff", "--quiet", base, "HEAD", cwd=work).returncode == 0
     _descends(work, flow["pushed"])
 
     code, verdict = _gate(cmd_gate, capsys)
     assert (code, verdict) == (0, "passed")
+    state = read_state(flow["path"])
+    assert state["final_gate"]["status"] == "passed" and state["final_gate"]["check_skipped"]["base_identity"] is True
+    assert not [c for c in state["final_gate"]["checks"] if c.get("at", "") > record["at"]], "確かめは走らせない"
 
 
 def test_after_plan_b_a_failing_gate_stops_without_reverting_again(refactor, tmp_path):
@@ -189,14 +224,31 @@ def test_after_plan_b_a_failing_gate_stops_without_reverting_again(refactor, tmp
     assert e.value.code == 4
 
 
-def test_the_stop_revert_deadline_is_written_with_the_plan(refactor):
-    """AC6 — 打ち切りの後の取り消しの締め切りは、計画の後の表に `終わり + 0.20·B` として載る。"""
+def test_the_check_start_deadline_is_written_with_the_plan(refactor):
+    """#1932 AC8 — 計画の後の上限の表に、確かめの開始の締め切り（H − v）と確かめの見込み v が載り、H + 0.20·B は載らない。"""
     timeline, plan = sys.modules["refactor_lib.timeline"], sys.modules["refactor_lib.plan"]
     start = _dt.datetime(2026, 10, 3, 0, 0, 0, tzinfo=_dt.timezone.utc)
-    limits = timeline.compute(start, 30, 60, items=[], reserve={"fix": 1.0})
-    assert limits["stop_revert_end_at"] == timeline.compute(start, 36, 60, items=[], reserve={"fix": 1.0})["final_end_at"]
-    assert timeline.compute(start, 30, 60)["stop_revert_end_at"] is None
-    assert any(limits["stop_revert_end_at"] in line for line in plan.limits_section(limits))
+    limits = timeline.compute(start, 30, 60, items=[], reserve={"fix": 1.0, "final_whole_test": 400 / 60})
+    deadline = timeline.gate_start_end({"limits": limits})
+    assert deadline == start + _dt.timedelta(seconds=1400) and limits["gate_seconds"] == 400
+    lines = plan.limits_section(limits)
+    assert any(deadline.isoformat() in line for line in lines)
+    assert not any(timeline.compute(start, 36, 60)["final_end_at"] in line for line in lines)
+    assert timeline.compute(start, 30, 60)["gate_seconds"] is None
+
+
+def test_plan_a_is_skipped_after_the_check_start_deadline(refactor, tmp_path, monkeypatch):
+    """#1932 I2 — 確かめの開始の締め切りを過ぎて打ち切ると、案 A の取り消しを 1 件も行わずに案 B を積む。"""
+    stop_revert = sys.modules["refactor_lib.stop_revert"]
+    past = _dt.datetime.now().astimezone() - _dt.timedelta(seconds=1)
+    monkeypatch.setattr(stop_revert.timeline, "gate_start_end", lambda state: past)
+    monkeypatch.setattr(stop_revert.culprit, "judge", lambda *a, **k: pytest.fail("案 A を始めた"))
+    monkeypatch.setattr(stop_revert.statefile, "save", lambda path, state: None)
+    seen: list = []
+    monkeypatch.setattr(stop_revert, "_plan_b", lambda path, state, gate, why: seen.append(why))
+    gate = {"triage": {"caused": ["t"], "rerun_commands": ["a"]}}
+    assert stop_revert.revert_after_cutoff(tmp_path / "state.json", {}, gate) is True
+    assert seen == [stop_revert.NO_ROOM] and gate["stop_revert"]["reverted"] == []
 
 
 def test_plan_b_stops_without_discarding_uncommitted_changes(flow, cmd_setup, cmd_implement, cmd_converge, cmd_gate, capsys):

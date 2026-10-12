@@ -1,10 +1,11 @@
 """打ち切りの後の取り消し（#1669 決定 1・8〜11）。`commands/gate.py` が、工程の 1 つとして起動したとき（`--workflow-step`）だけ呼ぶ。
 
-最終ゲート修正を打ち切った後、全体テストを落とすコミットをスプリントのブランチに残さずに終えるため、次の順に 1 度ずつ取り消す（I7）。
+最終ゲート修正を打ち切った後か、最終ゲートの確かめを確かめの開始の締め切り H − v までに始められないとき（`fall_back`。
+#1932 原則 4）、全体テストを落とすコミットをスプリントのブランチに残さずに終えるため、次の順に 1 度ずつ取り消す（I7）。
 
 | 案 | 何をするか | 次へ進むとき |
 | --- | --- | --- |
-| A | 原因の判定（`culprit.judge`）の順に `undo.drop` で 1 件ずつ取り消し、落ちたテストを手元で走らせ直して通った時点で止める | 積み直しの衝突・候補が尽きた・締め切り（`limits.stop_revert_end_at`）・走らせ直す語が無い |
+| A | 原因の判定（`culprit.judge`）の順に `undo.drop` で 1 件ずつ取り消し、落ちたテストを手元で走らせ直して通った時点で止める | 今が確かめの開始の締め切り（H − v。`timeline.gate_start_end`）を過ぎている・積み直しの衝突・候補が尽きた・締め切り・走らせ直す語が無い |
 | B | リファクタリング計画の起点（`plan.base_sha`）の木へ worktree と index を合わせ、コミットを 1 本積む | コミットを作れない → 終了コード 4 |
 
 どちらも push 済みの履歴を書き換えない（`git revert`・積み直し・新しいコミットだけ。C4）。積んだ後の公開と確かめ直しは呼ぶ側
@@ -19,7 +20,7 @@ from typing import Any, Optional
 
 import statefile
 
-from . import culprit, die, info, ledger, timeline, worktree
+from . import clock, culprit, die, info, ledger, timeline, worktree
 from .items import live_items
 from .paths import git_out, work_dir
 from .undo import ON_CONFLICT_RAISE
@@ -27,6 +28,7 @@ from .worktree import reset_hard
 
 REASON_A = "最終ゲート修正を打ち切った後に、原因の項目として取り消した"
 REASON_B = "最終ゲート修正を打ち切った後に、着手前の木へ戻した（案 B）"
+NO_ROOM = "確かめの開始の締め切りまでに入らない"
 
 
 def revert_after_cutoff(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]) -> bool:
@@ -46,10 +48,22 @@ def revert_after_cutoff(path: pathlib.Path, state: dict[str, Any], gate: dict[st
     return True
 
 
+def fall_back(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], why: str) -> None:
+    """最終ゲートの確かめを始められないとき、案 A を飛ばして案 B を積む（#1932 原則 4）。案 B の後なら終了コード 4 で止まる。"""
+    if (gate.get("stop_revert") or {}).get("plan") == "B":
+        die(f"着手前の木へ戻した（案 B）後も木が起点と違い、確かめを始められません（{why}）。判断が要ります")
+    _plan_b(path, state, gate, why)
+
+
 def _plan_a(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]) -> Optional[str]:
-    """案 A。落ちたテストが通ったら `None`、案 B へ進むならその理由を返す。"""
-    end = timeline.stop_revert_end(state)
+    """案 A。落ちたテストが通ったら `None`、案 B へ進むならその理由を返す。
+
+    今が確かめの開始の締め切り H − v を過ぎていれば 1 件も取り消さずに案 B へ進む。取り消しの子プロセスも H − v で切る
+    （#1932 原則 3。案 A の見込みは 0）。"""
+    end = timeline.gate_start_end(state)
     record = gate["stop_revert"] = {"plan": "A", "reverted": [], "end_at": end.isoformat() if end else None, "at": statefile.now()}
+    if not timeline.fits(clock.now(), 0, end):
+        return NO_ROOM
     verdict = gate.get("triage") or {}
     rerun = culprit.rerun_of(verdict)
     if not verdict.get("caused") or not rerun:

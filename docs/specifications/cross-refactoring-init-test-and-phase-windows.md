@@ -117,7 +117,7 @@ init が終了コード 4 で止まった。同じ範囲の実測は 320 秒（6
 | I1 | `final_end_at = started_at + B`。着手前のテストの所要に左右されない | 単体テストで落とす |
 | I2 | `propose_end_at = started_at + o + 0.20·B`、`plan_end_at = propose_end_at + 0.10·B`。o は `resumed_at` が無ければ x（`baseline_test.seconds`。無ければ 0）、あれば `max(x, resumed_at − started_at)` | 単体テストで落とす |
 | I3 | `resumed_at` を書くのは、止めた印（`window_stopped_at`）を持つ状態をリファクタリング計画の前に打ち直したときだけである。印の無い再開と計画を取り込んだ後の再開は `resumed_at` を変えない | `init` のテストで落とす |
-| I4 | `fix_end_at`・`stop_revert_end_at`・実装の終わりは `started_at` から数え、x に依らない（項目ごとの期限は持たない） | 単体テストで落とす |
+| I4 | `fix_end_at`・`final_end_at`・実装の終わりは `started_at` から数え、x に依らない（項目ごとの期限は持たない） | 単体テストで落とす |
 | I5 | `plan_end_at` に計画の後の見込み（`after_plan_minutes`。バッファの見込みと最短の項目 1 件）を足した時刻が `final_end_at` を越える状態で提案者を起動しない。`init`（新規と、計画の前の再開）は止めた印を残して状態を保存し、要る想定最大時間の下限を出して終了コード 4 で止まる。収まれば印を消す | `init` のテストで落とす |
 | I6 | 計画を取り込んだ後の再開は `limits` を組み直さず、`window_problem` も見ない | `init` のテストで落とす |
 | I7 | CI に任せる戦略の `init_test_timeout` は、範囲テストの所要 s が分かれば `max(0.10·B, 3·s)`、分からなければ `0.10·B`。ほかの戦略と予算なしの値は s を渡しても変わらない | 単体テストで落とす |
@@ -213,7 +213,7 @@ init が終了コード 4 で止まった。同じ範囲の実測は 320 秒（6
   開始 + 357 秒の手順の監視の上限が 450 秒、指標の測定に使える時間が 90 秒（`test_the_windows_start_after_the_init_test`）
 - x が `None` か 0 なら枠の終わりは開始 + 360 / + 540 秒（`test_a_short_init_test_keeps_the_windows`）。`seconds` の無い旧い状態も同じ
   （`test_of_state_offsets_the_windows_by_the_measured_test`）
-- 計画の後の `fix_end_at`・`stop_revert_end_at`・`final_end_at`・テストの追加と実装の終わりが x に依らない
+- 計画の後の `fix_end_at`・`final_end_at`・テストの追加と実装の終わりが x に依らない
   （`test_the_deadlines_after_the_plan_do_not_move`）
 - `resumed_at` があれば o = `max(x, resumed_at − started_at)`（`test_a_restart_after_the_stop_starts_the_windows_at_the_restart`）
 - `window_problem` が x 1300・B 30 で下限 39、B 39 で開始 + 1700 秒の打ち直しなら 48 を出し、+ 1360 / + 1600 秒と x 1260（`0.70·B` ちょうど）は

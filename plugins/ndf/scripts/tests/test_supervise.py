@@ -1772,7 +1772,7 @@ def test_alive_line_carries_run_step_last_stderr_line(tmp_path):
 
 def test_no_alive_line_within_interval(tmp_path):
     s, _ = run_plan(tmp_path, [{"id": "a", "type": "run", "cmd": "sleep 0.3", "next": "end"}])
-    assert [r["kind"] for r in progress(s)] == ["step"]
+    assert [r["kind"] for r in progress(s)] == ["run", "step"]
 
 
 def test_work_prompt_has_progress_instructions(tmp_path, fakes):
@@ -2048,29 +2048,94 @@ def test_new_impl_builds_prompt_from_issue_without_counting_other_plans(tmp_path
     assert prompt.startswith("指示\n") and "並行して" not in prompt and "push しない" in prompt
 
 
-def test_queue_tells_the_impl_worker_the_files_of_the_plans_running_at_the_same_time(tmp_path, fakes):
-    """同じステージで同時に流れる他のプランの 触るファイル を、流す時点で実装の指示文へ足す（#1248）。
+RULE = "並行して別のプランが次を触る。それらは変えない: "
 
-    同じ重なりの組のプラン（同時に流れない）・別のステージのプラン・キューの外のプランは数えない。"""
-    (tmp_path / ".ndf").mkdir()
+
+def impl_plan(tmp_path, name, files, before=0.0, after=0.0):
+    """実装のステップ 1 つ（前後に眠る run のステップを置ける）のプラン。"""
+    (tmp_path / ".ndf").mkdir(exist_ok=True)
     (tmp_path / ".ndf" / "supervise.json").write_text('{"version": 1}')
+    impl = {"id": "impl", "type": "work", "kind": "実装", "prompt": f"実装 {name}\n共通の規則\n"}
+    steps = ([{"id": "pre", "type": "run", "cmd": f"sleep {before}"}] if before else []) + [impl]
+    steps += [{"id": "post", "type": "run", "cmd": f"sleep {after}"}] if after else []
+    for s, nxt in zip(steps, [*(t["id"] for t in steps[1:]), "end"]):
+        s["next"] = nxt
+    f = tmp_path / f"{name}.json"
+    f.write_text(json.dumps({"フェーズ": "実装", "課題": [], "作業場所": str(tmp_path), "触るファイル": files, "steps": steps}))
+    return str(f)
 
-    def impl(name, files):
-        f = tmp_path / f"{name}.json"
-        step = {"id": "impl", "type": "work", "kind": "実装", "prompt": f"実装 {name}\n共通の規則\n", "next": "end"}
-        f.write_text(json.dumps({"フェーズ": "実装", "課題": [], "作業場所": str(tmp_path), "触るファイル": files, "steps": [step]}))
-        return str(f)
 
-    a, b, c, d = impl("a", ["lib/a.py"]), impl("b", ["docs/"]), impl("c", ["lib/"]), impl("d", ["x.py"])
-    impl("outside", ["outside.py"])  # 同じディレクトリにあるが、キューへ入れない
-    res = queue.cmd_queue([a, b, c], 3, poll=0.05, then=[[d]])
-    assert [i["result"] for i in res["items"]] == ["完了"] * 4, res
-    prompts = {n: next(t for t in fakes.read_text().split("\n=====\n") if f"実装 {n}\n" in t) for n in "abcd"}
-    rule = "並行して別のプランが次を触る。それらは変えない: "
-    assert f"共通の規則\n{rule}docs/\n\n## 入力" in prompts["a"]
-    assert f"{rule}lib/a.py、lib/\n" in prompts["b"]
-    assert f"{rule}docs/\n" in prompts["c"]
-    assert "並行して" not in prompts["d"]
+def impl_prompts(log, names):
+    return {n: next(t for t in log.read_text().split("\n=====\n") if f"実装 {n}\n" in t) for n in names}
+
+
+def concurrent_lines(plan):
+    rows = [json.loads(ln) for ln in (Path(plan).with_name(Path(plan).stem + "-state") / "progress.jsonl").read_text().splitlines()]
+    return [{k: r[k] for k in ("step", "files", "dirs")} for r in rows if r.get("kind") == "concurrent"]
+
+
+def test_queue_with_max_1_tells_no_impl_worker_other_files(tmp_path, fakes):
+    """`--max 1` では、どの実装の指示文にも除外の行が無い（#1674 の受け入れ条件 1）。"""
+    a, b, c = (impl_plan(tmp_path, n, [f"{n}.py"], after=0.2) for n in "abc")
+    res = queue.cmd_queue([a, b, c], 1, poll=0.05)
+    assert [i["result"] for i in res["items"]] == ["完了"] * 3, res
+    assert all("並行して" not in t for t in impl_prompts(fakes, "abc").values())
+    assert concurrent_lines(a) == [{"step": "impl", "files": [], "dirs": []}]
+
+
+def test_queue_tells_only_the_files_of_plans_running_when_the_worker_starts(tmp_path, fakes):
+    """除外の行は、担当を起動する時点で走っている他のプランの触るファイルだけ（#1674 の受け入れ条件 2・3、I1・I2）。
+
+    x は始めに実装し、その後眠る。z は眠って終わる。y は z の枠が空いてから始まる。同じ重なりの組の g1・g2 は
+    1 本ずつ流れ、互いのファイルが入らない。例外で終わる bad の後に始まるプランへ bad のファイルは入らない。"""
+    x = impl_plan(tmp_path, "x", ["x.py"], after=1.5)
+    z = impl_plan(tmp_path, "z", ["z.py"], before=0.5)
+    z_steps = json.loads(Path(z).read_text())
+    z_steps["steps"] = z_steps["steps"][:1]
+    z_steps["steps"][0]["next"] = "end"
+    Path(z).write_text(json.dumps(z_steps))
+    y = impl_plan(tmp_path, "y", ["y.py", "docs/"])
+    res = queue.cmd_queue([x, z, y], 2, poll=0.05)
+    assert [i["result"] for i in res["items"]] == ["完了"] * 3, res
+    prompts = impl_prompts(fakes, "xy")
+    assert f"共通の規則\n{RULE}z.py\n\n## 入力" in prompts["x"]  # 後から始まった y は入らない
+    assert f"{RULE}x.py\n" in prompts["y"]  # 終わった z は入らない
+    fakes.write_text("")
+    g1, g2 = impl_plan(tmp_path, "g1", ["lib/a.py"], after=0.3), impl_plan(tmp_path, "g2", ["lib/a.py", "g2.py"], after=0.3)
+    bad = tmp_path / "bad.json"
+    bad.write_text(
+        json.dumps(
+            {"フェーズ": "試験", "課題": [], "作業場所": str(tmp_path), "触るファイル": ["bad.py"], "steps": [{"id": "x", "cmd": "true"}]}
+        )
+    )
+    w = impl_plan(tmp_path, "w", ["w.py"])
+    res = queue.cmd_queue([g1, g2, str(bad), w], 2, poll=0.05)
+    assert [i["result"] for i in res["items"]] == ["完了", "完了", "報告なし", "完了"], res
+    prompts = impl_prompts(fakes, ["g1", "g2", "w"])
+    assert "g2.py" not in prompts["g1"] and "lib/a.py" not in prompts["g2"]
+    assert "bad.py" not in prompts["w"]
+
+
+def test_directories_of_other_plans_are_not_in_the_exclusion_line(tmp_path, fakes):
+    """相手の触るファイルのディレクトリ（末尾の / か、既存のディレクトリ）は除外の行に入らず、進捗ログに残る（#1674 の受け入れ条件 4）。"""
+    (tmp_path / "pkgdir").mkdir()
+    a = impl_plan(tmp_path, "a", ["tests/", "pkgdir", "a.py"], after=1.0)
+    b = impl_plan(tmp_path, "b", ["b.py"], before=0.3)
+    res = queue.cmd_queue([a, b], 2, poll=0.05)
+    assert [i["result"] for i in res["items"]] == ["完了"] * 2, res
+    prompt = impl_prompts(fakes, "b")["b"]
+    assert f"{RULE}a.py\n" in prompt and "tests/" not in prompt and "pkgdir" not in prompt
+    assert concurrent_lines(b) == [{"step": "impl", "files": ["a.py"], "dirs": ["tests/", "pkgdir"]}]
+
+
+def test_new_impl_after_writes_the_needed_plans(tmp_path):
+    out = tmp_path / "plan.json"
+    base = ["new", "impl", "--issue", "1", "--worktree", "/w", "--tests", "t", "--title", "T", "--out", str(out)]
+    p = cli(*base, "--after", "a", "b")
+    assert p.returncode == 0, p.stderr
+    assert json.loads(out.read_text())["前提のプラン"] == ["a", "b"]
+    p = cli(*base)
+    assert p.returncode == 0 and "前提のプラン" not in json.loads(out.read_text()), p.stderr
 
 
 def test_new_impl_opens_pr_before_test_all(tmp_path):
@@ -2241,6 +2306,85 @@ def test_run_from_restores_pr_from_previous_report(tmp_path):
     s = engine.Engine(plan, state)
     assert "結果: 完了" in s.run(start="b")
     assert "n=1066" in s.state.results["b"]["text"]
+
+
+FAKE_GH_DOWN = f"#!{PY}\nimport os, sys\nopen(os.environ['FAKE_GH_CALLED'], 'w').write(' '.join(sys.argv[1:]))\nsys.exit(1)\n"
+
+
+def test_run_from_restores_the_pr_its_pr_step_made_however_many_times_it_resumes(tmp_path, monkeypatch):
+    """#1296 の受け入れ条件 1〜3: pr のステップが作った PR を、report.md が上書きされても消えても、何度目の再開でも
+    {pr} / {pr_url} と報告に使う。読み直しは gh を呼ばない。実行の始まりの行は実行ごとに 1 行（I6）。"""
+    root, _ = pr_repo(tmp_path, monkeypatch)
+    plan = {
+        "フェーズ": "検査",
+        "課題": [1296],
+        "作業場所": str(root),
+        "steps": [
+            {"id": "pr", "type": "pr", "stage": "Pull Request", "base": "develop", "body": "template", "next": "chk"},
+            {"id": "chk", "type": "run", "cmd": "echo n={pr} u={pr_url}; false", "next": "end"},
+        ],
+    }
+    state = tmp_path / "state"
+    url = "https://github.com/o/r/pull/5"
+    assert f"- Pull Request: {url}" in engine.Engine(json.loads(json.dumps(plan)), state).run()
+    (tmp_path / "bin" / "gh").write_text(FAKE_GH_DOWN)  # 再開では gh が呼ばれたら落ちる
+    called = tmp_path / "gh-called"
+    monkeypatch.setenv("FAKE_GH_CALLED", str(called))
+    for spoil in (None, "## フェーズの報告\n\n- Pull Request: 無し\n", ""):
+        if spoil is not None:
+            (state / "report.md").write_text(spoil) if spoil else (state / "report.md").unlink()
+        s = engine.Engine(json.loads(json.dumps(plan)), state)
+        text = s.run(start="chk")
+        assert f"n=5 u={url}" in s.state.results["chk"]["text"]
+        assert f"- Pull Request: {url}" in text and f"- Pull Request: {url}" in (state / "report.md").read_text()
+    assert not called.exists()
+    rows = [json.loads(l) for l in (state / "progress.jsonl").read_text().splitlines()]
+    assert [r["from"] for r in rows if r["kind"] == "run"] == [None, "chk", "chk", "chk"]
+    assert [r.get("pr") for r in rows if r["kind"] == "step" and r["step"] == "pr"] == [url]
+
+
+def recorder(url: str, code: int = 0) -> dict:
+    """pr_from で計画の Pull Request を決める run のステップ（終了コード code）。"""
+    out = json.dumps({"metrics": {"release_pr_url": url}})
+    return {"id": "rec", "type": "run", "cmd": f"echo '{out}'; exit {code}", "pr_from": "release_pr_url", "next": "use"}
+
+
+def pr_plan(tmp_path, *steps: dict, **extra) -> dict:
+    use = {"id": "use", "type": "run", "cmd": "echo n={pr}", "next": "end"}
+    return {"フェーズ": "試験", "課題": [1296], "作業場所": str(tmp_path), "steps": [*steps, use], **extra}
+
+
+def test_run_from_uses_the_last_pr_decided_since_the_last_full_run(tmp_path):
+    """#1296 の受け入れ条件 6 と I2: 2 回成功したら後の PR、落ちた回の値は残さない。"""
+    state = tmp_path / "state"
+    engine.Engine(pr_plan(tmp_path, recorder("https://github.com/o/r/pull/1")), state).run()
+    engine.Engine(pr_plan(tmp_path, recorder("https://github.com/o/r/pull/2")), state).run(start="rec")
+    engine.Engine(pr_plan(tmp_path, recorder("https://github.com/o/r/pull/3", code=1)), state).run(start="rec")
+    s = engine.Engine(pr_plan(tmp_path, recorder("x")), state)
+    s.run(start="use")
+    assert "n=2" in s.state.results["use"]["text"]
+
+
+def test_run_from_keeps_the_pull_request_written_in_the_plan(tmp_path):
+    """#1296 の受け入れ条件 5: プランの "Pull Request" は記録の PR より先に使う。"""
+    state = tmp_path / "state"
+    engine.Engine(pr_plan(tmp_path, recorder("https://github.com/o/r/pull/1")), state).run()
+    s = engine.Engine(pr_plan(tmp_path, recorder("x"), **{"Pull Request": "https://github.com/o/r/pull/9"}), state)
+    s.run(start="use")
+    assert "n=9" in s.state.results["use"]["text"]
+
+
+def test_run_from_stops_without_a_pr_since_the_last_full_run_and_names_the_state_dir(tmp_path, monkeypatch):
+    """#1296 の受け入れ条件 4: --from を付けない実行が PR を決めずに止まった後の再開は、それより前の PR を使わずに止まり、
+    理由の文に状態の置き場の絶対パスを出す（相対パスで渡しても）。"""
+    monkeypatch.chdir(tmp_path)
+    state = Path("state")
+    engine.Engine(pr_plan(tmp_path, recorder("https://github.com/o/r/pull/1")), state).run()
+    engine.Engine(pr_plan(tmp_path, recorder("https://github.com/o/r/pull/2", code=1)), state).run()
+    s = engine.Engine(pr_plan(tmp_path, recorder("x")), state)
+    assert "結果: 完了" not in s.run(start="use")
+    out = s.state.results["use"]["text"]
+    assert "Pull Request がまだ無い" in out and str((tmp_path / "state").resolve()) in out
 
 
 def test_new_check_builds_the_refactor_scope_from_the_pr_files(tmp_path):

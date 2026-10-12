@@ -13,7 +13,7 @@ from typing import Any, Optional
 import gh_checks
 import test_triage
 
-from . import culprit, die, info, rounds, timeline
+from . import clock, culprit, die, info, rounds, timeline
 from .github import gh_api_get
 from .items import live_items
 from .outbound import plan_line
@@ -56,7 +56,7 @@ def ci_gate(state: dict[str, Any]) -> tuple[bool, str, Optional[dict[str, Any]]]
     checks = ci_checks(state)
     if not checks:
         die("最終ゲートで待つチェックの名前がありません（--ci-check か宣言の test.ci.check・ci.required_checks）")
-    max_wait = float(timeline.state_ci_wait_timeout(state))
+    max_wait = float(timeline.state_ci_wait_timeout(state, clock.now()))
     last: dict[str, Any] = {}
 
     def fetch() -> Optional[str]:
@@ -81,7 +81,7 @@ def revert_deferred(path: pathlib.Path, state: dict[str, Any], gate: dict[str, A
     """検証で最終ゲートへ寄せた危険フラグの全体テストで変更起因の失敗が出て締め切りを過ぎたとき、原因の項目から取り消す（#1649）。
 
     取り消す対象は寄せた危険フラグの項目ではなく、原因の判定（`culprit.judge`。締め切りは打ち切りの後の取り消しと同じ
-    `limits.stop_revert_end_at`）の順である。取り消すたびに変更起因のファイルを手元で走らせ直し、通った時点か締め切りで止める。
+    確かめの開始の締め切り H − v。#1932 原則 3）の順である。取り消すたびに変更起因のファイルを手元で走らせ直し、通った時点か締め切りで止める。
     取り消したら真。寄せた項目が無い・変更起因でない・走らせ直す語が無い・残る項目が無いときは何もせず偽。
     """
     deferred = rounds.deferred_union(state)
@@ -89,7 +89,7 @@ def revert_deferred(path: pathlib.Path, state: dict[str, Any], gate: dict[str, A
     rerun = culprit.rerun_of(verdict)
     if not deferred.get("items") or not verdict.get("caused") or not rerun or not live_items(state):
         return False
-    end = timeline.stop_revert_end(state)
+    end = timeline.gate_start_end(state)
     found = culprit.judge(state, gate, verdict, end)
     reason = "最終ゲートへ寄せた危険フラグの全体テストで変更起因の失敗が出て、締め切りを過ぎた"
     passes = culprit.rerun_passes(state, rerun, end)

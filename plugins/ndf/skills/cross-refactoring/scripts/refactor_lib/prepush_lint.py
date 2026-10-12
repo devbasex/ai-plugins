@@ -19,7 +19,7 @@ from typing import Any, Optional
 import failure_paths
 import test_strategy as ts
 
-from . import targets, timeline
+from . import clock, targets, timeline
 from .paths import work_dir
 
 
@@ -61,7 +61,7 @@ def check_files(state: dict[str, Any], files: list[str], label: str) -> PrepushR
     if not runs:
         return PrepushResult(True, [], 0.0)
     work = work_dir(state)
-    limit = timeline.state_test_timeout(state)
+    limit = timeline.state_test_timeout(state, clock.now())
     rejections: list[LintRejection] = []
     for run in runs:
         log = pathlib.Path(state["tmp_dir"]) / f"{label}-{run.suite}.log"

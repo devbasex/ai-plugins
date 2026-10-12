@@ -121,6 +121,22 @@ def named(plan: str, name: str) -> bool:
     return stem == name or stem.endswith(f"-{name}")
 
 
+def results_named(name: str, items: list[dict], plan: str) -> list[dict]:
+    """名前の一致する計画の結果。`items` に無ければ、`plan` と同じディレクトリの計画の報告を読む（関門の後に単独で流すとき）。"""
+    hits = [i for i in items if named(i.get("plan", ""), name)]
+    if hits:
+        return hits
+    return [
+        {
+            "plan": str(f),
+            "result": report_result((state_dir_of(str(f)) / "report.md").read_text()),
+            "report": str(state_dir_of(str(f)) / "report.md"),
+        }
+        for f in sorted(Path(plan).parent.glob("*.json"))
+        if str(f) != plan and named(str(f), name) and (state_dir_of(str(f)) / "report.md").is_file()
+    ]
+
+
 def fill_queue_pr(plan: str, items: list[dict]) -> str | None:
     """計画の {queue_pr:<名>} を、前のステージの名前の一致する計画の Pull Request 1 本で置き換える。
     前のステージに無ければ同じディレクトリの計画の報告を読む（関門の後に単独で流すとき）。無い・飛ばされたなら 0。"""
@@ -132,17 +148,7 @@ def fill_queue_pr(plan: str, items: list[dict]) -> str | None:
     if not names:
         return None
     for name in names:
-        hits = [i for i in items if named(i.get("plan", ""), name)]
-        if not hits:
-            hits = [
-                {
-                    "plan": str(f),
-                    "result": report_result((state_dir_of(str(f)) / "report.md").read_text()),
-                    "report": str(state_dir_of(str(f)) / "report.md"),
-                }
-                for f in sorted(Path(plan).parent.glob("*.json"))
-                if str(f) != plan and named(str(f), name) and (state_dir_of(str(f)) / "report.md").is_file()
-            ]
+        hits = results_named(name, items, plan)
         prs = [n for n in (plan_pr(i) for i in hits) if n]
         text = text.replace(f"{{queue_pr:{name}}}", prs[-1] if prs else "0")
     write_text_atomic(Path(plan), text)
@@ -273,8 +279,46 @@ def touched_files(body: str) -> list[str]:
     return [str(f) for f in files if str(f).strip()] if isinstance(files, list) else []
 
 
+def deps_of(body: str) -> list[str]:
+    """プランの JSON の `前提のプラン`（前提にするプランの名前。読めない・無いなら空）。"""
+    try:
+        names = json.loads(body).get("前提のプラン")
+    except (ValueError, AttributeError):
+        return []
+    return [str(n) for n in names if str(n).strip()] if isinstance(names, list) else []
+
+
+def blocked(plan: str, deps: list[str], items: list[dict], queued: list[str]) -> dict | None:
+    """前提のプランのうち完了でないものがあれば、`plan` を流さなかった item（`blocked_by` 付き）を返す。無ければ None。
+
+    名前の照合は `{queue_pr:<名>}` と同じ。`items`（それまでの結果）に無く、queue の `queued` にあれば結果が無い
+    （後ろにある）。どちらにも無ければ同じディレクトリの計画の報告を読み、それも無ければ見つからない。"""
+    by, why = [], []
+    for name in deps:
+        hits = [i for i in items if named(i.get("plan", ""), name)]
+        later = [q for q in queued if q != plan and named(q, name)]
+        if not hits and later:
+            by.append(later[0])
+            why.append(f"前提のプラン {later[0]} の結果が無い（後ろにある）")
+            continue
+        hits = hits or results_named(name, [], plan)
+        if not hits:
+            by.append(name)
+            why.append(f"前提のプラン {name} が見つからない")
+        elif hits[-1].get("result") != "完了":
+            by.append(hits[-1]["plan"])
+            why.append(f"前提のプランが完了でない: {hits[-1]['plan']}（{hits[-1].get('result')}）")
+    if not by:
+        return None
+    return {"plan": plan, "result": NOT_RUN, "reason": "。".join(why), "blocked_by": by}
+
+
 def plan_item(plan: str, out: dict) -> dict:
-    """プランの耐久ワークフローの出力から、結果の JSON の items の 1 件を作り、報告を <プラン>.log へ書く。"""
+    """プランの耐久ワークフローの出力から、結果の JSON の items の 1 件を作り、報告を <プラン>.log へ書く。
+
+    前提のプランで流さなかったプランの出力（`result` が流さなかった）は、そのまま item にする。"""
+    if out.get("result") == NOT_RUN:
+        return {**out, "plan": plan}
     rep = state_dir_of(plan) / "report.md"
     if "error" in out:
         print(f"supervise-queue: {plan} が例外で終わった: {out['error']}", file=sys.stderr, flush=True)
@@ -309,7 +353,7 @@ def _queue_result(items: list[dict], max_: int, done_path: Path) -> dict:
     status = "stopped" if stopped else "gate" if gates else "ok"
     summary = f"{len(ran)} 本: 完了 {len(ran) - len(stopped) - len(gates)} / 関門 {len(gates)} / 止まった {len(stopped)}"
     if skipped:
-        summary += f"。後続 {skipped} 本は流さなかった"
+        summary += f"。{skipped} 本は流さなかった"
     nxt = "関門の計画の report.md を読んで提示する" if status == "gate" else None
     return result(
         "supervise-queue",
