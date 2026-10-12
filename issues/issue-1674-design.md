@@ -51,16 +51,16 @@
 | I2 | 実装の指示文 | 除外の行に入るのは、担当を起動する時点で登録簿にある自分以外のプランの `触るファイル` のうち、ディレクトリでないものだけである。1 つも無ければ行を付けない | テストで落とす |
 | I3 | queue の実行 | `前提のプラン` に挙げたプランの結果が `完了` でないプラン（結果が無い・後ろにある・見つからないを含む）は、担当の CLI を起動しない | items に `流さなかった` と、どの前提のプランが完了でなかったかを残す |
 | I4 | queue の実行 | `前提のプラン` を持たないプランの流し方（ステージ・枠・重なりの組・`--then`）は変わらない | 既存のテストで落とす |
-| I5 | queue の実行 | 同じステージで前提のプランと後ろのプランは同じ組に入り、queue へ入れた順に 1 本ずつ流れる | テストで落とす |
+| I5 | queue の実行 | 同じステージの前提のプランを持つ組は、前提のプランを含む組が終わるまで耐久キュー `plans` の外で待ち、`--max` の枠を塞がない。前提が終わった後、触るファイルの重ならない組どうしは空いた枠で同時に流れる。1 本ずつ流れる同じ組に入るのは、触るファイルが重なるプランと、前提で互いを待ち合う組だけである | テストで落とす |
 
 ### ドメインイベント
 
 | # | イベント | 発生元 | 受け手 |
 | --- | --- | --- | --- |
-| E1 | queue がステージのプランを受け付け、組（重なりと前提のプラン）を決めた | `flow.admit_step` | `flow.run_stage` |
+| E1 | queue がステージのプランを受け付け、組（重なり）と組の待ち（前提のプランを含む組）を決めた | `flow.admit_step` | `flow.run_stage` |
 | E2 | プランが空いた枠で始まった（登録簿へ登録した） | `flow.plan_workflow` | 登録簿（`running.begin`） |
 | E3 | 実装の担当へ渡す指示文を組み立て、除外の行を決めた | `WorkStep.execute` | 担当の CLI・進捗ログ（`kind: concurrent`） |
-| E4 | プランが終わった（登録簿から抹消した） | `flow.plan_workflow` | 登録簿（`running.end`）・`flow.group_workflow`（後ろの組の員の前提の確かめ） |
+| E4 | プランが終わった（登録簿から抹消した） | `flow.plan_workflow` | 登録簿（`running.end`）・`flow.wait_workflow`（前提のプランを含む組の終わりを待つ後ろの組） |
 | E5 | 前提のプランが完了でないため、後ろのプランを流さないと決めた | `flow.deps_step`（新設の耐久ステップ。`group_workflow` が員を流す前に呼ぶ） | 結果の items |
 | E6 | queue が結果の JSON を書いた | `flow.done_step` | conductor（`supervise.py wait`） |
 
@@ -87,9 +87,9 @@
 | --- | --- | --- |
 | `supervise_lib/running.py` | 走っているプランの登録簿。`begin(plan, files)`・`end(plan)`・`others(plan)`（自分以外の登録の `触るファイル` を登録の順に重ねずに返す）。排他は自前の `threading.Lock` | 新設 |
 | `supervise_lib/paths.py` | `is_dir_entry(path, root)` を足す（`触るファイル` の 1 行が、末尾が `/` か、`root` の下の既存のディレクトリ）。ファイルを読む判定のため、ファイルを読まない `admission` には置かない | 変更 |
-| `supervise_lib/admission.py` | `groups` に引数 `after`（プラン → 同じステージの前提のプラン）を足し、前提の辺も和集合でまとめる。`others` を消す | 変更 |
+| `supervise_lib/admission.py` | `groups` に引数 `after`（プラン → 同じステージの前提のプラン）を足し、組（重なりの和集合）に加えて組の待ち（組 → 待つ組。前提のプランが queue で前にあるときだけ辺を張る）を返す。待ちが循環する組はまとめて 1 つの組にし、入れた順に流す。`others` を消す | 変更 |
 | `supervise_lib/worker_steps.py` | `concurrent_rule` が `running.others(ctx.plan_path)` から `paths.is_dir_entry`（`root` は担当の作業場所）に当たるものを除いて行を作る。行の中身（入れたもの・外したディレクトリ）を進捗ログへ `kind: concurrent` で書く。定数 `CONCURRENT_FILES` を消す | 変更 |
-| `supervise_lib/flow.py` | `plan_workflow` の始めに `running.begin`、`finally` で `running.end`。`_engine` と `_plan_args` から `others` を消す。`admit_step` が `前提のプラン` を読んで `groups` へ渡す。`run_stage` は前提のプランを持つプランを必ず `group_workflow` で入れる。`group_workflow` が員を流す前に `deps_step` を呼び、完了でない前提があれば員を流さない | 変更 |
+| `supervise_lib/flow.py` | `plan_workflow` の始めに `running.begin`、`finally` で `running.end`。`_engine` と `_plan_args` から `others` を消す。`admit_step` が `前提のプラン` を読んで `groups` へ渡す。`run_stage` は前提のプランを持つプランを必ず `group_workflow` で入れ、待つ組がある組は `wait_workflow`（新設。耐久キュー `plans` に入れずに `durable.start` で始める）で包む。`wait_workflow` は待つ組の出力を読み終えてから組を `plans` へ入れる（優先度は組の順のまま）。`group_workflow` が員を流す前に `deps_step` を呼び、完了でない前提があれば員を流さない | 変更 |
 | `supervise_lib/queue.py` | `deps_of(body)`（プランの JSON の `前提のプラン`）・`blocked(deps, results)`（完了でない前提のプランの一覧）を足す。`fill_queue_pr` の「名前の一致する計画の結果を引く」部分を `results_named(name, items, plan)` へ切り出し、前提の確かめと共有する。`plan_item` が `流さなかった` の出力を item にする（`blocked_by` を持つ）。`_queue_result` の要約を「N 本は流さなかった」にする | 変更 |
 | `supervise_lib/new_args.py` | `--files` の説明を新しい意味に合わせる。`impl` に `--after NAME...` を足す | 変更 |
 | `supervise_lib/procedures.py` | `with_touched` の隣に `with_after(plan, names)`（`前提のプラン` を書く） | 変更 |
@@ -102,6 +102,8 @@ graph LR
         QW["flow.queue_workflow"] --> AD["flow.admit_step"]
         AD --> AM["admission.groups"]
         QW --> RS["flow.run_stage"]
+        RS --> WW["flow.wait_workflow"]
+        WW --> GW
         RS --> GW["flow.group_workflow"]
         GW --> DS["flow.deps_step"]
         DS --> QF["queue.blocked / results_named"]
@@ -140,7 +142,7 @@ classDiagram
         +is_dir_entry(path, root) bool
     }
     class admission {
-        +groups(plans, shared, after) list~list~str~~
+        +groups(plans, shared, after) tuple~groups, needs~
     }
     class WorkStep {
         +concurrent_rule(ctx, step) str
@@ -203,14 +205,21 @@ supervise.py new impl ... [--files PATH...] [--after NAME...]
 sequenceDiagram
     participant QW as queue_workflow
     participant AD as admit_step
+    participant WW as wait_workflow
     participant GW as group_workflow
     participant DS as deps_step
     participant PW as plan_workflow
     participant RG as running
     participant WS as WorkStep
     QW->>AD: ステージのプラン
-    AD-->>QW: 組（重なり + 前提の辺）・refs
-    QW->>GW: 組（前提のプランを持つ員がいる組）
+    AD-->>QW: 組（重なり）・組の待ち・refs
+    alt 待つ組がある
+        QW->>WW: 組・待つ組（plans の外で始める。枠を使わない）
+        WW->>WW: 待つ組の出力を読む（終わるまで待つ）
+        WW->>GW: 組を plans へ入れる（空いた枠で始まる）
+    else 待つ組が無い
+        QW->>GW: 組（前提のプランを持つ員がいる組）
+    end
     loop 員を入れた順に
         GW->>DS: 員の前提のプラン・それまでの結果
         alt 完了でない前提がある
@@ -230,7 +239,9 @@ sequenceDiagram
 
 前提のプランを持たないプランは、今までどおり 1 本なら `plan_workflow`、重なりの組なら `group_workflow` で入れ、`deps_step` を通らない。
 
-`deps_step` が読む「それまでの結果」は、前のステージの items・このステージで記録のある（流し直さない）プランの出力・同じ組で先に流れた員の出力の 3 つである。どれにも無い名前は `results_named` で同じディレクトリのプランの報告を読む（承認ゲートの後に単独で流すときと同じ）。報告も無ければ「見つからない」として流さない。
+例: 同じステージに A・B・C があり、B と C がともに A だけを前提にし、3 本の触るファイルが重ならないとき、組は {A}・{B}・{C} の 3 つで、{B} と {C} がそれぞれ {A} を待つ。A が終わると B と C は `--max 2` 以上なら同時に流れる。待つ間の B・C は `plans` の外にいるため、`--max 1` でも A の枠は塞がれない。
+
+`deps_step` が読む「それまでの結果」は、前のステージの items・このステージで記録のある（流し直さない）プランの出力・待った組の出力・同じ組で先に流れた員の出力の 4 つである。どれにも無い名前は `results_named` で同じディレクトリのプランの報告を読む（承認ゲートの後に単独で流すときと同じ）。報告も無ければ「見つからない」として流さない。
 
 ## 非機能の実現方式
 
@@ -243,7 +254,7 @@ sequenceDiagram
 
 ### 決定 1: 走っていないプランを除外の行に入れないため、除外の行を受け付けの時点でなく担当の起動の時点の登録簿から作る
 
-除外の行は、受け付け（`admit_step`）の時点で「他の組のすべてのプラン」を静的に入れていた。`--max` の枠と始まる時刻はそこでは分からない。queue のプランは同じプロセスの中で流れるため、`plan_workflow` が始まりと終わりを登録簿へ書き、実装のステップが起動の時点で読めば、要求の前提 1 の「走っているプラン」がそのまま得られる。同じ組の員は 1 本ずつ流れるため、受け入れ条件 2 も登録簿だけで満たされる。
+除外の行は、受け付け（`admit_step`）の時点で「他の組のすべてのプラン」を静的に入れていた。`--max` の枠と始まる時刻はそこでは分からない。queue のプランは同じプロセスの中で流れるため、`plan_workflow` が始まりと終わりを登録簿へ書き、実装のステップが起動の時点で読めば、要求の前提 1 の「走っているプラン」がそのまま得られる。同じ組の員は 1 本ずつ流れ、前提のプランを待つ組は前提のプランが終わってから始まるため、受け入れ条件 2 も登録簿だけで満たされる。
 
 受け付けの時点で `--max` から同時に走りうるプランを推す案は採らない。プランごとの所要が違うため、`--max 2` 以上では推した集合と実際に走っている集合が食い違う。
 
@@ -265,13 +276,13 @@ sequenceDiagram
 
 根拠: Value 5・Value 6（MVV 版 2）
 
-### 決定 4: 前提のプランの終わりを枠を塞がずに待つため、同じステージの前提のプランを同じ組へ入れる
+### 決定 4: 前提のプランの終わりを枠を塞がずに待ち、重ならない後ろのプランを並列に流すため、待ちを耐久キューの外に置く
 
-同じステージの前提のプランと後ろのプランを和集合で同じ組にすれば、組の中は入れた順に 1 本ずつ流れ、後ろのプランは前提のプランの結果を見てから始まる。確かめは `group_workflow` の員の前の 1 か所（`deps_step`）に集める。前のステージ・記録のあるプラン・queue の外のプランの結果もここで読む。
+前提のプランを含む組（待つ組）がある組は、耐久キュー `plans` に入れずに始める `wait_workflow` で包み、待つ組の出力を読み終えてから組を `plans` へ入れる。待つ間は枠を使わず、前提が終わった後は重ならない組どうしが空いた枠で同時に流れる。組（1 本ずつ流れるまとまり）は触るファイルの重なりだけで決まり、依存による待ちと重なりによる直列を分ける。確かめは `group_workflow` の員の前の 1 か所（`deps_step`）に集める。前のステージ・記録のあるプラン・queue の外のプランの結果もここで読む。待ちが循環する組（組 G1 の員が G2 の員を、G2 の員が G1 の員を前提にする）は待ち合って進まないため、まとめて 1 つの組にし、入れた順に流す。前提のプランが queue で後ろにあるときは待ちの辺を張らず、`deps_step` が「結果が無い（後ろにある）」として流さない。
 
-後ろのプランを別に入れて、前提のプランの耐久ワークフローの出力を待たせる案は採らない。待つ間も `--max` の枠を 1 つ塞ぎ、前提のプランが後ろの並びにあると `--max 1` で止まったまま進まない。
+同じステージの前提のプランと後ろのプランを和集合で同じ組にする案は採らない。B と C がともに A だけを前提にし触るファイルが重ならないときも A・B・C が 1 つの組になり、A の後に並列に流せる B と C まで 1 本ずつ流れ、所要時間が延びる。後ろのプランを `plans` へ入れてから中で前提のプランの出力を待たせる案も採らない。待つ間も `--max` の枠を 1 つ塞ぎ、`--max 1` で前提のプランが後ろの並びにあると止まったまま進まない。
 
-根拠: Value 6（MVV 版 2）
+根拠: Value 6・Value 3（MVV 版 2）
 
 ### 決定 5: 前提が満たされない理由を後から読めるため、流さなかった item に `blocked_by` を足す
 
@@ -284,7 +295,8 @@ sequenceDiagram
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
 | 1（`--max 1`） | 重ならない 2 本以上を `--max 1` で流すと、どの実装の指示文にも除外の行が無い | 受け付けの時点で他の組のファイルを入れると落ちる |
-| 2・I5（同じ組） | 重なりの組の 2 本と、前提でつながる 2 本の指示文に互いのファイルが入らない | 登録簿の抹消を忘れる・組の員を同時に流すと落ちる |
+| 2（同じ組） | 重なりの組の 2 本と、前提でつながる 2 本の指示文に互いのファイルが入らない | 登録簿の抹消を忘れる・組の員を同時に流すと落ちる |
+| I5（前提の待ち） | 重ならない A・B・C で B と C が A だけを前提にするとき、`--max 2` で B と C の担当が A の終わった後に同時に走り、どちらの指示文にも A のファイルが入らない。`--max 1` で後ろのプランが前の並びにあっても止まらずに流れ切る。待ちが循環する 2 組は 1 つの組として入れた順に流れる | B・C を A と同じ組に入れる・待つ組を `plans` の中で待たせる・循環をまとめないと落ちる |
 | 3・I2（走っているプラン） | `--max 2` で、後から始まったプランの指示文には先に走っているプランのファイルが入り、先に始まったプランの指示文には後から始まったプランのファイルが入らない。終わったプランのファイルは入らない | 起動の時点でなく登録の後の変化を読む・終わったプランを残すと落ちる |
 | 4・I2（ディレクトリ） | 相手の `触るファイル` が `tests/`（末尾 `/`）と既存のディレクトリ名（末尾 `/` 無し）のとき、除外の行に入らず、進捗ログの `dirs` に残る | `is_dir_entry` を末尾の `/` だけで見る・ディレクトリを残すと落ちる |
 | I1（例外で終わったプラン） | 例外で終わったプランの後に始まったプランの指示文に、そのファイルが入らない | `end` を `finally` で呼ばないと落ちる |
