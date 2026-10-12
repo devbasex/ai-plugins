@@ -99,7 +99,7 @@ graph TD
 | 項目 | 内容 |
 | --- | --- |
 | 範囲の PR が多い版の待ち時間 | `approval-facts` は PR ごとに `pr view` と checks を 1 回ずつ読む。6 件では数秒で、数十件の版でどれだけ延びるかは測っていない |
-| 承認資料を手で直したとき | 「含む PR」の行を手で消すと、`notes --approval` はその PR の欄を書かない（欄が「含む PR」に従う）。手で直す運用は #1834 の範囲である |
+| 承認資料を手で直したとき | 「含む PR」の行を手で消すと、`notes --approval` はその PR の欄を書かない（欄が「含む PR」に従う）。作り直しで手で足した節を残す形は [ndf-release-approval-rebuild-and-replacements.md](ndf-release-approval-rebuild-and-replacements.md) にある。「含む PR」の欄は `approval-facts` の節の中にあるため、作り直しで範囲から書き直される |
 | 外す head の接頭辞 | `release/` の 1 つで、配布の工程が作るブランチ名（`release/v<版>`）と同じ NDF の側の規約である。別の名前で版上げを出すと範囲に並ぶ |
 
 ## テスト観点
@@ -123,4 +123,4 @@ graph TD
 - [`release` の references/release-steps.md](../../plugins/ndf/skills/release/references/release-steps.md)（`approval-facts` と `notes` の打ち方・終了コードの正）
 - [`lib/merged_range.py`](../../plugins/ndf/scripts/lib/merged_range.py)・[`release_lib/included.py`](../../plugins/ndf/scripts/release_lib/included.py)・[`release-steps.py`](../../plugins/ndf/scripts/release-steps.py)・[`check-trigger.py`](../../plugins/ndf/scripts/check-trigger.py)
 - [ndf-release-approved-commit.md](ndf-release-approved-commit.md)（承認したコミットと承認の記録）
-- #1274（この形を決めた課題）、#1885（CHANGELOG の版の節の欠け）、#1834（承認資料の手の節）
+- #1274（この形を決めた課題）、#1885（CHANGELOG の版の節の欠け）、#1834（承認資料の手の節。[ndf-release-approval-rebuild-and-replacements.md](ndf-release-approval-rebuild-and-replacements.md)）
