@@ -20,6 +20,7 @@ import sys
 import pytest
 
 from crossref_helpers import (
+    past_fix_end,
     CALC,
     TEST_TOTAL,
     build_git_flow,
@@ -31,7 +32,6 @@ from crossref_helpers import (
 )
 
 FAR = "2099-01-01T00:00:00+00:00"
-PAST = "2000-01-01T00:00:00+00:00"
 
 # `total` が calc.py の中で例外を投げる。JUnit の本文の traceback に `src/calc.py` が現れる。
 CALC_RAISES = CALC.replace("    return result\n", "    raise RuntimeError('calc broke')\n")
@@ -101,7 +101,7 @@ def _existing(flow, files):
     write_state(flow["path"], state)
 
 
-def _implement(flow, cmd_setup, cmd_implement, changes, **over):
+def _implement(flow, cmd_setup, cmd_implement, changes, late=False, **over):
     work = flow["work"]
     state = read_state(flow["path"])
     state["items"] = [_item(item_id, rank) for rank, item_id in enumerate(changes, start=1)]
@@ -113,6 +113,8 @@ def _implement(flow, cmd_setup, cmd_implement, changes, **over):
     }
     state["phase"] = "implement"
     state.update(over)
+    if late:
+        past_fix_end(state)
     write_state(flow["path"], state)
     _call(cmd_setup, "cmd_start_phase", phase="implement")
     for item_id, change in changes.items():
@@ -167,7 +169,7 @@ def test_after_the_deadline_only_the_culprit_is_reverted(flow, cmd_setup, cmd_im
         cmd_setup,
         cmd_implement,
         {"I-001": _calc(CALC_RAISES), "I-002": _flagged("other"), "I-003": _flagged("another")},
-        started_at=PAST,
+        late=True,
     )
 
     verify, record = _verify(flow, cmd_converge, capsys)
@@ -290,7 +292,7 @@ def test_the_1634_and_1663_shape_reverts_no_flagged_item(flow, cmd_setup, cmd_im
             "I-003": _flagged("another"),
             "I-004": lambda w: _write(w, "src/participants.py", "def add(a, b):\n    return a + b\n"),
         },
-        started_at=PAST,
+        late=True,
     )
     state = read_state(flow["path"])
     state["items"][3]["path"] = "src/participants.py"  # 項目の対象の中だけを変えた（危険フラグは立たない）
@@ -321,7 +323,7 @@ def test_without_time_and_without_a_path_every_item_is_reverted_newest_first_unt
         cmd_setup,
         cmd_implement,
         {"I-001": _flagged("other"), "I-002": _calc(CALC_OFF_BY_ONE), "I-003": _flagged("another")},
-        started_at=PAST,
+        late=True,
     )
 
     verify, record = _verify(flow, cmd_converge, capsys)

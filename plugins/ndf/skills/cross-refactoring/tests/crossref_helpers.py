@@ -11,6 +11,7 @@ import datetime as _dt
 import json
 import pathlib
 import subprocess
+import sys
 from typing import Any
 
 
@@ -222,7 +223,6 @@ def build_git_flow(tmp_path: pathlib.Path, monkeypatch: Any, patch_lib: Any, env
     語の並びで走るため）。公開（push）は差し替え、公開した HEAD を `pushed` に積む。
     """
     import os
-    import sys
 
     work = tmp_path / "work"
     (work / "src").mkdir(parents=True)
@@ -257,3 +257,15 @@ def build_git_flow(tmp_path: pathlib.Path, monkeypatch: Any, patch_lib: Any, env
     path = make_state_v2(tmp_path, work, **state_overrides)
     env_tmp_dir(path)
     return {"work": work, "path": path, "pushed": pushed, "metrics": metrics}
+
+
+LATE = "2000-01-01T00:00:00+00:00"
+
+
+def past_fix_end(state: dict[str, Any]) -> dict[str, Any]:
+    """直しの試行の打ち切り（`limits.fix_end_at`）だけを過ぎた上限の表を書く。想定最大時間の終わり H は先のまま
+    （H を過ぎると子プロセスを始めない。#1932 原則 1）。"""
+    limits = sys.modules["refactor_lib.timeline"].of_state(state)
+    limits["fix_end_at"] = LATE
+    state["limits"] = limits
+    return state

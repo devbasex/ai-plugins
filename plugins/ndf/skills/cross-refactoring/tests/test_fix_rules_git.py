@@ -15,10 +15,9 @@ import argparse
 
 import pytest
 
-from crossref_helpers import build_git_flow, commit_with_trailers, git, item_trailers, read_state, write_result, write_state
+from crossref_helpers import build_git_flow, commit_with_trailers, git, item_trailers, read_state, write_result, write_state, past_fix_end
 
 FAR = "2099-01-01T00:00:00+00:00"
-PAST = "2000-01-01T00:00:00+00:00"
 FIX_STEM = "claude-fix-rf130"
 
 
@@ -247,7 +246,7 @@ def test_items_left_after_a_drop_are_judged_again_on_the_new_head(flow, cmd_setu
         {"I-001": ("a", helper.replace("return 1", "return 9")), "I-002": ("b", uses), "I-003": ("c", _module("c") + "\n\nY = 1\n")},
     )
     state = read_state(flow["path"])
-    state["started_at"] = PAST
+    past_fix_end(state)
     write_state(flow["path"], state)
 
     capsys.readouterr()

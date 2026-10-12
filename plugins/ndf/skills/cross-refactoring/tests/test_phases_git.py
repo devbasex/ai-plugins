@@ -19,6 +19,7 @@ import json
 import pytest
 
 from crossref_helpers import (
+    past_fix_end,
     CALC,
     TEST_TOTAL,
     build_git_flow,
@@ -341,7 +342,7 @@ def test_an_item_without_time_to_fix_is_reverted_alone(flow, cmd_setup, cmd_impl
     commit_with_trailers(work, "Refactor total", item_trailers("I-002"))
     _call(cmd_implement, "cmd_merge_implement")
     state = read_state(flow["path"])
-    state["started_at"] = PAST
+    past_fix_end(state)
     write_state(flow["path"], state)
 
     capsys.readouterr()
@@ -373,7 +374,7 @@ def test_items_sharing_a_command_are_reverted_newest_first_until_it_passes(flow,
     commit_with_trailers(work, "Refactor total", item_trailers("I-002"))
     _call(cmd_implement, "cmd_merge_implement")
     state = read_state(flow["path"])
-    state["started_at"] = PAST
+    past_fix_end(state)
     write_state(flow["path"], state)
 
     capsys.readouterr()
@@ -424,7 +425,7 @@ def test_a_whole_test_failure_left_unfixed_reverts_the_flagged_item_and_the_gate
     commit_with_trailers(work, "既存のテスト", {})
     _verify_phase(flow, cmd_setup, cmd_implement, item, change=rename_and_break_outside)
     state = read_state(flow["path"])
-    state["started_at"] = PAST
+    past_fix_end(state)
     write_state(flow["path"], state)
     _call(cmd_converge, "cmd_verify")
     state = read_state(flow["path"])

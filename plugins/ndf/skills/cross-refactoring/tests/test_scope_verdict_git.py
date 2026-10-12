@@ -19,10 +19,9 @@ import sys
 
 import pytest
 
-from crossref_helpers import SCOPE_COMMAND, build_git_flow, commit_with_trailers, git, item_trailers, read_state, write_state
+from crossref_helpers import SCOPE_COMMAND, build_git_flow, commit_with_trailers, git, item_trailers, read_state, write_state, past_fix_end
 
 FAR = "2099-01-01T00:00:00+00:00"
-PAST = "2000-01-01T00:00:00+00:00"
 LIMIT = 12
 
 SIZE_CHECK = f"""import sys
@@ -99,7 +98,17 @@ def _item(item_id, rank, path, test_target):
 
 
 def _setup(
-    flow, cmd_setup, cmd_implement, *, whole="tests/test_layout.py", name="test_layout", x_text=OVER, y_text="Y = 1\n", lint=True, **over
+    flow,
+    cmd_setup,
+    cmd_implement,
+    *,
+    whole="tests/test_layout.py",
+    name="test_layout",
+    x_text=OVER,
+    y_text="Y = 1\n",
+    lint=True,
+    late=False,
+    **over,
 ):
     work = flow["work"]
     _write(work, "size_check.py", SIZE_CHECK)
@@ -129,6 +138,8 @@ def _setup(
     }
     state["phase"] = "implement"
     state.update(over)
+    if late:
+        past_fix_end(state)
     write_state(flow["path"], state)
     _call(cmd_setup, "cmd_start_phase", phase="implement")
     _write(work, "src/big.py", x_text)
@@ -173,7 +184,7 @@ def test_an_item_broken_by_another_items_violation_waits(flow, cmd_setup, cmd_im
 @pytest.mark.parametrize("whole,name", WHOLE_TESTS)
 def test_after_the_deadline_only_the_culprit_is_reverted_with_its_check(flow, cmd_setup, cmd_implement, cmd_converge, capsys, whole, name):
     """AC7・AC8・I5・I6 — 締め切りで X を取り消す理由に suite とファイルが入り、Y は走らせ直されて残る。"""
-    _setup(flow, cmd_setup, cmd_implement, whole=whole, name=name, started_at=PAST)
+    _setup(flow, cmd_setup, cmd_implement, whole=whole, name=name, late=True)
 
     verify, items, _ = _verify(flow, cmd_converge, capsys)
 

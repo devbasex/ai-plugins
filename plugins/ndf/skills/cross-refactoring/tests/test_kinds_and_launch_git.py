@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import importlib
 
 import pytest
@@ -223,7 +224,7 @@ def test_the_final_gate_lint_shares_the_whole_timeout_with_the_test_run(flow, re
     gate_lint = importlib.import_module("refactor_lib.gate_lint")
     state = _gate_state(flow, before="green", lint=_lint(), change="Z = 3\n")
     gate = {"fix_rounds": 0, "checks": [], "mode": "test"}
-    limit = importlib.import_module("refactor_lib.timeline").state_whole_timeout(state)
+    limit = importlib.import_module("refactor_lib.timeline").state_whole_timeout(state, dt.datetime.now().astimezone())
     ok, _ = gate_lint.lint_gate(flow["path"], state, gate, started=time.monotonic() - limit)
     assert ok is False
     assert gate["lint"][0]["verdict"] == "caused"

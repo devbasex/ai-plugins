@@ -14,6 +14,7 @@ AC16b）。検証の中で全体のテストが通り、取り消しが無く、
 
 from __future__ import annotations
 
+import datetime as _dt
 import json
 
 import pytest
@@ -269,21 +270,25 @@ def test_the_fix_cap_reports_the_failure_without_reverting(patch_lib, refactor, 
     assert read_state(state_path)["final_gate"]["status"] == "failed"
 
 
-def test_the_first_fix_is_tried_even_after_the_budget_ran_out(cmd_gate, tmp_path, env_tmp_dir, spy):
-    """決定 26: 想定最大時間を使い切った後に落ちても、最終ゲートの修正は必ず 1 度試みる。"""
-    state_path = _state(tmp_path, workflow_step=True, started_at="2000-01-01T00:00:00")
+def test_the_first_fix_is_not_launched_when_it_does_not_fit_before_the_check_start_deadline(cmd_gate, tmp_path, env_tmp_dir, spy):
+    """#1932 I2 — 今 + 最終ゲート修正 1 回の見込み F が確かめの開始の締め切りを越えると、1 回目でも修正を起動しない。
+    単独の起動は取り消さずに終了コード 1 で終え、理由を `check_skipped` に残す。"""
+    started = (_dt.datetime.now() - _dt.timedelta(minutes=59)).isoformat(timespec="seconds")  # H まで約 60 秒
+    state_path = _state(tmp_path, started_at=started, plan={"reserve": {"final_fix": 5.0}})  # F = 300 秒
     env_tmp_dir(state_path)
     spy["test_code"] = 1
 
     with pytest.raises(SystemExit) as e:
         cmd_gate.cmd_final_gate(_args())
-    assert e.value.code == 2, "時計で打ち切らず修正ラウンドへ進む"
+    assert e.value.code == 1
     gate = read_state(state_path)["final_gate"]
-    assert gate["fix_rounds"] == 1 and gate["status"] == "failing"
+    assert gate["fix_rounds"] == 0 and gate["status"] == "failed"
+    assert gate["check_skipped"]["reason"] == cmd_gate.NO_FIX_ROOM and gate["check_skipped"]["base_identity"] is False
+    assert spy["tests"], "確かめは H − v より前なので走らせた"
 
 
 def test_the_second_fix_after_the_budget_ran_out_is_not_tried(cmd_gate, tmp_path, env_tmp_dir, spy):
-    """決定 26: 2 度目からは時計で打ち切る（単独の起動は取り消さずに 1 で終わる）。"""
+    """#1932 I2・I3 — 確かめを始められない実行は、単独の起動なら取り消さずに 1 で終わる。"""
     state_path = _state(tmp_path, started_at="2000-01-01T00:00:00", final_gate={"fix_rounds": 1, "checks": []})
     env_tmp_dir(state_path)
     spy["test_code"] = 1
@@ -624,7 +629,8 @@ def _item(item_id, rank):
 def test_a_caused_failure_after_the_deadline_reverts_the_deferred_items_newest_first(
     patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, spy, capsys
 ):
-    """AC8・I8 — 単独の起動で寄せた危険フラグの全体テストが落ちたら、原因の判定の順に取り消し、通った時点で止める。
+    """AC8・I8 — 単独の起動で寄せた危険フラグの全体テストが落ち、時間以外の理由で修正を打ち切ったら、原因の判定の順に
+    取り消し、通った時点で止める。
 
     本文に項目のパスが現れず、項目のコミットも無い（外して走らせ直せない）ため原因は決まらず、新しい順になる（#1649 AC6）。
     """
@@ -641,9 +647,9 @@ def test_a_caused_failure_after_the_deadline_reverts_the_deferred_items_newest_f
     state_path = _ci_whole_state(
         tmp_path,
         workflow_step=False,
-        started_at="2000-01-01T00:00:00",
-        limits={"test_timeout": 60, "whole_timeout": 60, "ci_wait_timeout": 60, "final_end_at": "2000-01-01T00:30:00"},
-        final_gate={"fix_rounds": 1, "checks": []},
+        limits={"test_timeout": 60, "whole_timeout": 60, "ci_wait_timeout": 60, "final_end_at": "2999-01-01T00:30:00"},
+        # 時間以外の打ち切り（起動し直しても解けない結末）。時間で打ち切った単独の起動は取り消さない（#1932 原則 4）
+        final_gate={"fix_rounds": 1, "checks": [], "no_relaunch": True},
         items=[_item("I1", 1), _item("I2", 2), _item("I3", 3)],
         whole_test={
             "ran": False,
@@ -691,9 +697,9 @@ def test_the_deferred_revert_reverts_the_culprit_named_by_the_failure_not_the_fl
     state_path = _ci_whole_state(
         tmp_path,
         workflow_step=False,
-        started_at="2000-01-01T00:00:00",
-        limits={"test_timeout": 60, "whole_timeout": 60, "ci_wait_timeout": 60, "final_end_at": "2000-01-01T00:30:00"},
-        final_gate={"fix_rounds": 1, "checks": []},
+        limits={"test_timeout": 60, "whole_timeout": 60, "ci_wait_timeout": 60, "final_end_at": "2999-01-01T00:30:00"},
+        # 時間以外の打ち切り（起動し直しても解けない結末）。時間で打ち切った単独の起動は取り消さない（#1932 原則 4）
+        final_gate={"fix_rounds": 1, "checks": [], "no_relaunch": True},
         items=items,
         whole_test={"ran": False, "flags": [], "status": None, "deferred": {"flags": ["D2"], "items": ["I1", "I3"]}},
     )
@@ -762,3 +768,22 @@ def test_the_lint_limit_excludes_the_triage_time(cmd_gate, tmp_path, env_tmp_dir
     monkeypatch.setattr(cmd_gate.gate_lint, "lint_gate", fake_lint)
     cmd_gate.cmd_final_gate(_args())
     assert seen["started"] == 1100.0
+
+
+def test_a_standalone_run_past_the_deadline_with_the_planned_tree_skips_the_check(
+    patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, spy, capsys
+):
+    """#1932 I3 — 確かめを始められず、HEAD の木が起点の木と同じなら、単独の起動でも確かめを省いて通し、報告に理由が出る。"""
+    patch_lib("push_with_retry_marker", lambda *a, **k: None)
+    state_path = _state(tmp_path, started_at="2000-01-01T00:00:00", plan={"base_sha": "BASE", "reserve": {"final_whole_test": 1.0}})
+    env_tmp_dir(state_path)
+
+    cmd_gate.cmd_final_gate(_args())
+
+    assert "FINAL_GATE=passed" in capsys.readouterr().out
+    gate = read_state(state_path)["final_gate"]
+    assert gate["status"] == "passed" and gate["check_skipped"]["base_identity"] is True
+    assert gate["check_skipped"]["gate_seconds"] == 60 and gate["check_skipped"]["left_seconds"] == 0
+    assert spy["tests"] == [], "確かめは走らせない"
+    refactor.cmd_report(type("A", (), {"id": 130, "metrics": False})())
+    assert "確かめを省いた" in capsys.readouterr().out

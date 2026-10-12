@@ -15,7 +15,7 @@ import statefile
 import test_strategy as ts
 import test_triage
 
-from . import info, launch, timeline, triage
+from . import clock, info, launch, timeline, triage
 from .gitfacts import run_with_timeout
 from .paths import work_dir
 
@@ -47,7 +47,7 @@ def _judge_suite(path: pathlib.Path, state: dict[str, Any], suite: Any, i: int, 
         suite=suite,
         baseline=before,
         changed=env["changed"],
-        timeout=timeline.state_test_timeout(state),
+        timeout=timeline.state_test_timeout(state, clock.now()),
         log=tmp / f"final-lint-{i}-scope.log",
         run=triage.run_test,
     )
@@ -93,7 +93,7 @@ def lint_gate(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], s
     baseline = state.get("baseline_test") or {}
     env: dict[str, Any] = {
         "work": work_dir(state),
-        "timeout": timeline.state_whole_timeout(state),
+        "timeout": timeline.state_whole_timeout(state, clock.now()),
         "tmp": pathlib.Path(state["tmp_dir"]),
         "baseline": baseline,
         "per_suite": baseline.get("suites") if isinstance(baseline.get("suites"), dict) else None,

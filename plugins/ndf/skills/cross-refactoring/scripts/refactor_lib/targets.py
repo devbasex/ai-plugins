@@ -21,7 +21,7 @@ from typing import Any, Iterable, Optional
 import test_strategy as ts
 import test_triage
 
-from . import launch
+from . import clock, launch
 from .gitfacts import changed_files
 from .items import item_shas
 from .paths import work_dir
@@ -267,7 +267,7 @@ def run_or_stop(
         commands = [commands]
     elif isinstance(commands, list) and commands and not all(isinstance(c, str) for c in commands):
         commands = [r.command for r in item_runs({"command": commands})]
-    limit = state_whole_timeout(state) if whole else state_test_timeout(state)
+    limit = state_whole_timeout(state, clock.now()) if whole else state_test_timeout(state, clock.now())
     result, last = run_commands([str(c) for c in commands or []], work_dir(state), limit, log)
     if result.launch_failed:
         launch.stop(path, state, phase, last, result, log)

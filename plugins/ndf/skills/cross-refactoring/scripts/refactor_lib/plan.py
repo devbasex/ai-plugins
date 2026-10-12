@@ -20,7 +20,7 @@ import mdtable
 
 import statefile
 
-from . import die, info, ledger, rounds, timeline
+from . import clock, die, info, ledger, rounds, timeline
 from .codemetrics_view import record_lines
 from .paths import sh
 from .items import item_label, item_shas
@@ -270,6 +270,9 @@ def format_plan(state: dict[str, Any], head: Optional[list[str]] = None) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+# 上限の表から読み出す行（時刻の鍵は持たない。#1932 決定 3）。
+GATE_START_END = "gate_start_end"
+
 # 上限の表の行（決定 24）。式は `docs/02-plan-and-implement.md` の「締め切り」の節にある。
 _LIMIT_ROWS = (
     ("propose_end_at", "提案の枠の終わり（監視の上限 = 残り + 余裕）"),
@@ -277,12 +280,13 @@ _LIMIT_ROWS = (
     ("add_tests_end_at", "テストの追加の終わり = 実装の終わり − Σ（採っていて未検証の項目の実装の見積り）"),
     ("implement_end_at", "実装の終わり = 最終ゲートの修正の打ち切り − バッファ − Σ（採っていて未検証の項目の検証の見積り）"),
     ("fix_end_at", "直しの試行の打ち切り"),
-    ("final_end_at", "最終ゲートの修正の打ち切り（想定最大時間の終わり）"),
+    ("final_end_at", "想定最大時間の終わり H（子プロセスはすべてここまでに止まる）"),
+    (GATE_START_END, "確かめの開始の締め切り = H − 確かめの見込み（最終ゲート修正と打ち切りの後の取り消しもここまで）"),
+    ("gate_seconds", "確かめの見込み（秒。最終ゲートの確かめ 1 回。バッファの最終ゲートの全体テスト）"),
     (
-        "stop_revert_end_at",
-        f"打ち切りの後の取り消し（案 A）の締め切り = 最終ゲートの修正の打ち切り + {timeline.STOP_REVERT_SHARE:.2f}·B（工程の 1 つとして起動したとき）",
+        "final_fix_seconds",
+        "最終ゲート修正 1 回の見込み（秒。バッファの final_fix。起動は今 + この値が確かめの開始の締め切り以前のときだけ）",
     ),
-    ("final_fix_seconds", "最終ゲートの修正の 1 回目に必ず渡す長さ（秒。予備時間の final_fix）"),
     ("measure_timeout", "指標の測定の上限（秒。提案の枠の中から割く）"),
     ("init_test_timeout", "着手前のテスト 1 回の上限（秒）"),
     ("test_timeout", "範囲テスト 1 回の上限（秒）"),
@@ -292,6 +296,10 @@ _LIMIT_ROWS = (
 )
 
 
+def _iso_or_none(value: Any) -> Any:
+    return clock.iso(value) if value is not None else None
+
+
 def limits_section(limits: dict[str, Any]) -> list[str]:
     """実行時の値の表（テストの時間）。読み手が実行の前にすべての時刻を見られるようにする（決定 24）。
 
@@ -299,7 +307,9 @@ def limits_section(limits: dict[str, Any]) -> list[str]:
     """
     if not limits:
         return []
-    rows = [(label, "—" if limits.get(key) is None else str(limits[key])) for key, label in _LIMIT_ROWS]
+    derived = {GATE_START_END: _iso_or_none(timeline.gate_start_end_of(limits)) if limits.get("gate_seconds") is not None else None}
+    values = {**limits, **derived}
+    rows = [(label, "—" if values.get(key) is None else str(values[key])) for key, label in _LIMIT_ROWS]
     lines = ["## 時間の上限", "", mdtable.table_markdown(["値", "中身"], rows)]
     basis = limits.get("basis") or {}
     if basis:

@@ -1513,36 +1513,37 @@ PLANNED = {
         ("plan", False, 6 + 18 * 60 + 180),  # 改修計画の枠の終わり 10:18 + 6 秒
         ("add-tests", True, round(50.3 * 60) + 180),  # 実装の終わり − Σ implement（#1743 I13）
         ("implement", True, round(52.3 * 60) + 180),  # 11:00 − R 7.5 分 − Σ verify 0.2 分
-        ("fix", True, 58 * 60 + 180),  # 開始 + 60 − 全体のテストの予備時間 2 分
-        ("final-fix", False, 60 * 60 + 180),  # 想定最大時間の終わり 11:00
+        ("fix", True, 60 * 60),  # 開始 + 60 − 全体のテストの予備時間 2 分 + 余裕を、想定最大時間の終わり 11:00 で切る
+        ("final-fix", False, 60 * 60),  # 確かめの見込みが無い（v = 0）ので H − v = 11:00 で切る
     ],
 )
 def test_start_phase_returns_the_time_left_to_the_end_of_the_phase(phase_state, start_phase, phase, planned, expected):
-    """決定 23・24: 監視の上限は、その手順の終わりまでの残り + 余裕。CLI の上限は + 余裕。"""
+    """決定 23・24: 監視の上限は、その手順の終わりまでの残り + 余裕。CLI の上限は + 余裕。
+    どちらも想定最大時間の終わり（最終ゲート修正は確かめの開始の締め切り）で切る（#1932 原則 1）。"""
     if planned:
         phase_state.edit(**PLANNED)
     state, timeout = start_phase(phase)
     assert timeout == str(expected)
     record = state["phases"][phase]
-    assert record["timeout"] == expected and record["cli_timeout"] == expected + 180
+    assert record["timeout"] == expected and record["cli_timeout"] == min(expected + 180, 60 * 60)
 
 
 @pytest.mark.parametrize(
-    "minutes, rounds, expected",
+    "minutes, expected",
     [
-        (70, 1, 330 + 180),  # 終わり（11:00）の後の 1 回目: 予備時間の final_fix（5.5 分）+ 余裕
-        (58, 1, 330 + 180),  # 残り 2 分 < 予備時間: 予備時間の長さを渡す
-        (50, 1, 600 + 180),  # 残り 10 分 > 予備時間: 残り + 余裕
-        (70, 2, 180),  # 2 回目からは今までどおり（過ぎていれば余裕だけ）
+        (50, 540),  # 確かめの開始の締め切り 10:59（H − v。v = final_whole_test 1 分）までの残り。余裕は足さない
+        (58, 60),
+        (70, 1),  # 過ぎていれば 1 秒（`final-gate` が起動の前に入るかを見ている）
     ],
 )
-def test_start_phase_gives_the_first_final_fix_at_least_its_reserve(phase_state, start_phase, minutes, rounds, expected):
-    """決定 26: 最終ゲートの修正の 1 回目は、想定最大時間を過ぎていても予備時間 1 回分を渡す。"""
+def test_start_phase_cuts_the_final_fix_at_the_check_start_deadline(phase_state, start_phase, minutes, expected):
+    """#1932 原則 3・I2: 最終ゲート修正の監視と CLI の上限は、1 回目も確かめの開始の締め切り H − v で切る。"""
     reserve = dict(PLANNED["plan"]["reserve"], final_fix=5.5)
-    phase_state.edit(plan={"reserve": reserve}, items=PLANNED["items"], final_gate={"fix_rounds": rounds, "checks": []})
+    phase_state.edit(plan={"reserve": reserve}, items=PLANNED["items"], final_gate={"fix_rounds": 1, "checks": []})
     phase_state.set_now(minutes=minutes)
-    _, timeout = start_phase("final-fix")
+    state, timeout = start_phase("final-fix")
     assert timeout == str(expected)
+    assert state["phases"]["final-fix"]["cli_timeout"] == expected
 
 
 def test_start_phase_for_the_final_fix_keeps_the_phase(phase_state, start_phase):

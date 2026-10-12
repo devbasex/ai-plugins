@@ -29,7 +29,6 @@ MEASURE_SHARE = 0.05  # 指標の測定の上限 = 0.05·B（提案の枠の中�
 MEASURE_PROPOSE_CAP = 0.5  # 測定に使える時間は、提案の枠の終わりまでの残りの半分まで
 # 枠が想定最大時間に収まらずに止めた後、人が `init` を打ち直すまでの見込み（秒）。要る想定最大時間の下限に足す（#1385 決定 2）。
 RESUME_GRACE_SECONDS = 300
-STOP_REVERT_SHARE = 0.20  # 打ち切りの後の取り消し（案 A）の締め切り = 最終ゲートの修正の打ち切り + 0.20·B（#1669 決定 8）
 # テストと CI の待ちの係数は `test_strategy` が持つ（cross-refactoring と supervise で同じ値）。
 INIT_TEST_SHARE = ts.INIT_TEST_SHARE
 TEST_FACTOR = ts.TEST_FACTOR
@@ -155,7 +154,10 @@ def compute(
     implement を引いた時刻である（I13）。項目ごとの期限は持たない。
 
     提案と改修計画の枠は `started_at + offset_seconds`（o。着手前のテストの終わり）から数える（#1385 I2）。
-    `final_end_at` と `fix_end_at`・`stop_revert_end_at` は `started_at` から数える（I1・I3）。"""
+    `final_end_at` と `fix_end_at` は `started_at` から数える（I1・I3）。
+
+    **すべての時刻は想定最大時間の終わり H（`final_end_at`）以前である**（#1932 原則 1）。確かめの開始の締め切り
+    H − v は、H と確かめの見込み v（`gate_seconds`）から読み出す（`gate_start_end`）ので、時刻の鍵は持たない。"""
     b = int(budget_minutes)
     if not isinstance(tests, dict):
         tests = ts.limits(ts.Strategy(ts.LOCAL_FULL, "args"), b, measured_seconds=tests)
@@ -185,9 +187,10 @@ def compute(
         "implement_end_at": _iso(implement_end),
         "fix_end_at": _iso(budget.fix_end(started_at, b, reserve)) if planned else None,
         "final_end_at": _iso(final_end),
-        "stop_revert_end_at": _iso(started_at + _dt.timedelta(minutes=b * (1 + STOP_REVERT_SHARE))) if planned else None,
-        # 最終ゲートの修正の 1 回目に必ず渡す長さ（決定 26）。予備時間の `final_fix`。
-        "final_fix_seconds": (math.ceil(float(reserve.get("final_fix") or 0.0) * 60) if planned else None),
+        # 最終ゲートの確かめ 1 回の見込み v（秒）。バッファの最終ゲートの全体テスト（#1932 決定 5）。
+        "gate_seconds": (math.ceil(round(float(reserve.get("final_whole_test") or 0.0) * 60, 6)) if planned else None),
+        # 最終ゲート修正 1 回の見込み F（秒）。起動の前に H − v までに入るかを見る（#1932 決定 3）。
+        "final_fix_seconds": (math.ceil(round(float(reserve.get("final_fix") or 0.0) * 60, 6)) if planned else None),
         # 計画の後に要る時間の見込み（バッファの見込み R + 1 件の長さ L）。提案の前に止まる判定に使う（I8）。
         "after_plan_minutes": after_plan_minutes(after_plan),
     }
@@ -270,9 +273,40 @@ def _limit_at(state: dict[str, Any], key: str) -> Optional[_dt.datetime]:
     return clock.parse(value)
 
 
-def stop_revert_end(state: dict[str, Any]) -> Optional[_dt.datetime]:
-    """打ち切りの後の取り消し（案 A）の締め切り。"""
-    return _limit_at(state, "stop_revert_end_at")
+def final_end(state: dict[str, Any]) -> Optional[_dt.datetime]:
+    """想定最大時間の終わり H（`limits.final_end_at`）。子プロセスへ渡す上限はすべてここで切る（#1932 原則 1）。"""
+    return _limit_at(state, "final_end_at")
+
+
+def gate_seconds(limits: dict[str, Any]) -> int:
+    """確かめの見込み v（秒）。無い（計画の前・この変更より前の表）なら 0。"""
+    return int(limits.get("gate_seconds") or 0)
+
+
+def gate_start_end_of(limits: dict[str, Any]) -> Optional[_dt.datetime]:
+    """確かめの開始の締め切り H − v（上限の表から）。H が無ければ `None`。"""
+    end = clock.parse(limits.get("final_end_at"))
+    return end - _dt.timedelta(seconds=gate_seconds(limits)) if end is not None else None
+
+
+def gate_start_end(state: dict[str, Any]) -> Optional[_dt.datetime]:
+    """確かめの開始の締め切り H − v（#1932 原則 3）。最終ゲートの確かめはここまでに始め、最終ゲート修正と
+    打ち切りの後の取り消しはここまでに止まる。旧い表の `stop_revert_end_at` は読まない。"""
+    end = final_end(state)
+    return end - _dt.timedelta(seconds=gate_seconds(limits_of(state))) if end is not None else None
+
+
+def fits(now: _dt.datetime, seconds: float, end: Optional[_dt.datetime]) -> bool:
+    """今 + 見込み ≤ 締め切りなら真（#1932 原則 3。唯一の守り方）。締め切りが無ければ真。"""
+    return end is None or now + _dt.timedelta(seconds=max(0.0, float(seconds or 0.0))) <= end
+
+
+def clip_to_end(seconds: float, end: Optional[_dt.datetime], now: _dt.datetime) -> int:
+    """子プロセスの上限（秒）を締め切りまでの残りで切る（#1932 原則 1）。締め切りが無ければそのまま。
+    0 以下なら、呼ぶ側はその子プロセスを始めない（`process.run_with_timeout` は 1 秒未満なら走らせない）。"""
+    if end is None:
+        return int(seconds)
+    return min(int(seconds), math.floor((end - now).total_seconds()))
 
 
 def fix_end_at(state: dict[str, Any]) -> Optional[_dt.datetime]:
@@ -280,44 +314,27 @@ def fix_end_at(state: dict[str, Any]) -> Optional[_dt.datetime]:
     return _limit_at(state, "fix_end_at")
 
 
-def state_test_timeout(state: dict[str, Any]) -> int:
-    """テスト 1 回の上限（秒）。"""
-    return int(limits_of(state)["test_timeout"])
+def state_test_timeout(state: dict[str, Any], now: _dt.datetime) -> int:
+    """テスト 1 回の上限（秒）。H で切る。"""
+    return clip_to_end(int(limits_of(state)["test_timeout"]), final_end(state), now)
 
 
-def state_whole_timeout(state: dict[str, Any]) -> int:
-    """手元の全体テスト 1 回の上限（秒）。旧い表なら `test_timeout`。"""
+def state_whole_timeout(state: dict[str, Any], now: _dt.datetime) -> int:
+    """手元の全体テスト 1 回の上限（秒）。旧い表なら `test_timeout`。H で切る。"""
     limits = limits_of(state)
-    return int(limits.get("whole_timeout") or limits["test_timeout"])
+    return clip_to_end(int(limits.get("whole_timeout") or limits["test_timeout"]), final_end(state), now)
 
 
-def state_ci_wait_timeout(state: dict[str, Any]) -> int:
-    """CI の待ちの上限（秒）。"""
+def state_ci_wait_timeout(state: dict[str, Any], now: _dt.datetime) -> int:
+    """CI の待ちの上限（秒）。H で切る。"""
     limits = limits_of(state)
-    if limits.get("ci_wait_timeout") is not None:
-        return int(limits["ci_wait_timeout"])
-    return int(test_limits(state)["ci_wait_timeout"])
+    wait = limits.get("ci_wait_timeout")
+    seconds = int(wait) if wait is not None else int(test_limits(state)["ci_wait_timeout"])
+    return clip_to_end(seconds, final_end(state), now)
 
 
-def phase_timeout(end: _dt.datetime, now: _dt.datetime, margin_seconds: int) -> int:
-    """手順の監視の上限（秒）= 終わりの時刻までの残り + 余裕。終わりを過ぎていれば余裕だけ。"""
-    return max(math.ceil((end - now).total_seconds()), 0) + int(margin_seconds)
-
-
-def final_fix_timeout(
-    end: _dt.datetime,
-    now: _dt.datetime,
-    margin_seconds: int,
-    floor_seconds: Optional[int],
-    first: bool,
-) -> int:
-    """最終ゲートの修正の監視の上限（秒）。
-
-    **1 回目は、終わりまでの残りが予備時間（`final_fix_seconds`）より短くても予備時間の長さを渡す**
-    （決定 26）。想定最大時間を使い切った後に落ちても、必ず 1 度は直しを試みる。
-    2 回目からは他の手順と同じく残り + 余裕である。
-    """
-    left = max(math.ceil((end - now).total_seconds()), 0)
-    if first:
-        left = max(left, int(floor_seconds or 0))
-    return left + int(margin_seconds)
+def phase_timeout(end: _dt.datetime, now: _dt.datetime, margin_seconds: int, deadline: Optional[_dt.datetime] = None) -> int:
+    """手順の監視の上限（秒）= 終わりの時刻までの残り + 余裕を、締め切り（`deadline`。H か H − v）で切った値。
+    終わりを過ぎていれば余裕だけ。締め切りを過ぎていても 1 秒は渡す（0 は監視が上限の表の値と読む）。"""
+    seconds = max(math.ceil((end - now).total_seconds()), 0) + int(margin_seconds)
+    return max(1, clip_to_end(seconds, deadline, now))

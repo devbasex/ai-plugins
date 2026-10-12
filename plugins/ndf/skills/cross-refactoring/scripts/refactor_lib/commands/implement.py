@@ -251,7 +251,7 @@ def _run_added_tests(path: pathlib.Path, state: dict[str, Any], intake: Intake) 
     起動の失敗なら項目を落とさずに止まる（#1483 I8）。
     """
     work = work_dir(state)
-    timeout = timeline.state_test_timeout(state)
+    timeout = timeline.state_test_timeout(state, clock.now())
     results: dict[tuple[str, ...], bool] = {}
     for item_id, commits in intake.accepted.items():
         fact = commits[0]
