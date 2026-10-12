@@ -671,6 +671,19 @@ def test_the_push_names_the_current_head(tmp_path) -> None:
         ["git", "-C", str(remote), "rev-parse", "refs/heads/main"], check=True, capture_output=True, text=True
     ).stdout.strip()
     assert remote_head == commit
+    assert outcome.sent == commit
+
+
+def test_the_sent_commit_is_the_pushed_head_not_the_reported_commit(tmp_path) -> None:
+    """報告されたコミットが送った先頭の祖先でも、本文の同期が待つのは送り先の先頭（#1644 の決定 3）。"""
+    work, _ = _repo_with_remote(tmp_path)
+    reported = _head(work)
+    (work / "a.txt").write_text("2\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(work), "commit", "-am", "2"], check=True, capture_output=True)
+
+    outcome = result_posts.push_fix(work, "main", reported)
+
+    assert outcome.ok is True and outcome.sent == _head(work) != reported
 
 
 def test_the_push_fails_when_the_reported_commit_is_not_on_the_branch(tmp_path) -> None:
@@ -687,7 +700,7 @@ def test_nothing_is_pushed_when_no_commit_was_made(tmp_path) -> None:
 
     outcome = result_posts.push_fix(work, "main", None)
 
-    assert outcome.ok is True and outcome.pushed is False
+    assert outcome.ok is True and outcome.pushed is False and outcome.sent == ""
 
 
 def test_the_push_fails_without_a_destination() -> None:
@@ -704,7 +717,7 @@ def test_a_rejected_push_stops_before_checking_the_branch(tmp_path) -> None:
     outcome = result_posts.push_fix(work, "main", _head(work))
 
     assert outcome[:3] == (False, False, False)
-    assert outcome.detail != ""
+    assert outcome.detail != "" and outcome.sent == ""
 
 
 # ---------------- 単独で使う口 ----------------
@@ -876,11 +889,41 @@ def test_sync_after_push_runs_only_after_pushing_a_design_pr(monkeypatch):
         return subprocess.CompletedProcess(cmd, 1, "", "mismatch")
 
     monkeypatch.setattr(design_body.subprocess, "run", fake_run)
-    assert design_body.sync_after_push("o/r", 5, "feat/x", True) is None
-    assert design_body.sync_after_push("o/r", 5, "design/x", False) is None
+    sent = "a" * 40
+    assert design_body.sync_after_push("o/r", 5, "feat/x", sent) is None
+    assert design_body.sync_after_push("o/r", 5, "design/x", "") is None
     assert ran == []
-    reason = design_body.sync_after_push("o/r", 5, "design/x", True)
-    assert ran[0][-4:] == ["sync", "5", "--repo", "o/r"] and "mismatch" in reason
+    reason = design_body.sync_after_push("o/r", 5, "design/x", sent)
+    assert ran[0][-6:] == ["sync", "5", "--repo", "o/r", "--after-push", sent] and "mismatch" in reason
+
+
+def test_sync_decisions_without_after_push_keeps_the_old_call(monkeypatch):
+    """`fix-steps.py finalize` の呼び方は `--after-push` を付けない（#1644 の受け入れ条件 8）。"""
+    import design_body
+
+    ran: list[list[str]] = []
+    monkeypatch.setattr(design_body.subprocess, "run", lambda cmd, **_: ran.append(cmd) or subprocess.CompletedProcess(cmd, 0, "", ""))
+    assert design_body.sync_decisions(5, "o/r")["result"] == "synced"
+    assert ran[0][-4:] == ["sync", "5", "--repo", "o/r"]
+
+
+def test_the_standalone_command_passes_the_sent_commit_to_the_sync(tmp_path, monkeypatch) -> None:
+    """`result_posts.py fix` は送ったコミットを本文の同期へ渡す（#1644 の受け入れ条件 5）。"""
+    import design_body
+
+    work = tmp_path / "work"
+    work.mkdir()
+    sent = "b" * 40
+    monkeypatch.setattr(result_posts, "push_fix", lambda *_: result_posts.PushResult(True, True, True, "", sent))
+    seen: list[tuple] = []
+    monkeypatch.setattr(design_body, "sync_after_push", lambda *a: seen.append(a) or "stop")
+    monkeypatch.delenv("CROSS_REVIEW_TMP_DIR", raising=False)
+    args = result_posts.argparse.Namespace(
+        repo=REPO, pr=str(PR), result=str(_fix_file(tmp_path)), head="design/x", worktree=str(work), round=ROUND, actor=ACTOR
+    )
+
+    assert result_posts.cmd_fix(args) == 1
+    assert seen == [(REPO, PR, "design/x", sent)]
 
 
 def test_the_standalone_command_stops_when_the_body_is_not_synced(tmp_path, monkeypatch, capsys) -> None:
