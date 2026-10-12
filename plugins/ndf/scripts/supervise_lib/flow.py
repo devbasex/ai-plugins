@@ -411,6 +411,15 @@ def run_stage(plans: list[str], adm: dict, args: dict) -> list[dict]:
     worktrees_step([g[0] for g in adm["groups"]][: args["max"]])
     boxed = [len(g) > 1 or any(deps.get(p) for p in g) for g in adm["groups"]]
     where = {p: (_group_id(refs[g[0]]["id"]) if boxed[i] else None, k) for i, g in enumerate(adm["groups"]) for k, p in enumerate(g)}
+    waits = _submit_groups(adm, args, deps, known, boxed, where, queued)
+    return _collect_items(plans, waits, refs)
+
+
+def _submit_groups(
+    adm: dict, args: dict, deps: dict, known: list, boxed: list[bool], where: dict, queued: list[str]
+) -> dict[str, tuple[str, int | None]]:
+    """組ごとに投入の仕方を選んで入れ、プランごとの (workflow の id, 員の位置) を返す。"""
+    refs = adm["refs"]
     waits: dict[str, tuple[str, int | None]] = {}
     for i, group in enumerate(adm["groups"]):
         members = [
@@ -428,6 +437,11 @@ def run_stage(plans: list[str], adm: dict, args: dict) -> list[dict]:
         else:
             wid = durable.submit(PLANS, plan_workflow, members[0]["args"], id=members[0]["id"], priority=i + 1)
             waits[group[0]] = (wid, None)
+    return waits
+
+
+def _collect_items(plans: list[str], waits: dict[str, tuple[str, int | None]], refs: dict) -> list[dict]:
+    """プランの順に結果を集める。workflow の出力は 1 つにつき 1 度だけ読む。"""
     outs: dict[str, Any] = {}
     out_items = []
     for p in plans:
