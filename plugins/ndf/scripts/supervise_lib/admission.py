@@ -5,6 +5,8 @@
     plans = {"a.json": ["lib/"], "b.json": ["lib/x.py"], "c.json": ["docs/"]}
     overlaps(plans, shared)   # [{"a": "a.json", "b": "b.json", "paths": ["lib/", "lib/x.py"]}]
     groups(plans, shared)     # [["a.json", "b.json"], ["c.json"]]（組の中は同時に流さない）
+    after = {"c.json": ["a.json"]}                   # プラン → 同じステージの前提のプラン
+    needs(plans, groups(plans, shared, after), after)  # [[], ["a.json"]]（組ごとの、待つ前提のプラン）
     tags(step, resources)     # ["graphql"]（ステップが使う資源のタグ）
 
 - 重なりの組: 同じステージの 2 本のプランで、`触るファイル` が包含で重なるか、同じ共有の一覧に当たるもの
@@ -64,8 +66,9 @@ def overlaps(plans: Mapping[str, list[str]], shared: Iterable[Mapping] = ()) -> 
     return found
 
 
-def groups(plans: Mapping[str, list[str]], shared: Iterable[Mapping] = ()) -> list[list[str]]:
-    """同時に流さないプランの組（入れた順）。どれとも重ならないプランは 1 本だけの組になる。"""
+def _union(plans: Iterable[str], pairs: Iterable[tuple[str, str]]) -> list[list[str]]:
+    """和集合の森で `pairs` をつないだ組（`plans` の順。組の中も `plans` の順）。"""
+    plans = list(plans)
     root = {p: p for p in plans}
 
     def find(p: str) -> str:
@@ -74,22 +77,74 @@ def groups(plans: Mapping[str, list[str]], shared: Iterable[Mapping] = ()) -> li
             p = root[p]
         return p
 
-    for o in overlaps(plans, shared):
-        root[find(o["b"])] = find(o["a"])
+    for a, b in pairs:
+        root[find(b)] = find(a)
     grouped: dict[str, list[str]] = {}
     for p in plans:
         grouped.setdefault(find(p), []).append(p)
     return list(grouped.values())
 
 
-def others(plans: Mapping[str, list[str]], grouped: list[list[str]]) -> dict[str, list[str]]:
-    """プランごとの、同時に流れる他の組の `触るファイル`（重ねずに入れた順）。同じ組のプランは同時に流れないので入れない。"""
-    out: dict[str, list[str]] = {}
+def _edges(plans: list[str], after: Mapping[str, Iterable[str]]) -> list[tuple[str, str]]:
+    """待ちの辺 (後ろのプラン, 前提のプラン)。前提のプランが `plans` で前にあるときだけ張る。"""
+    pos = {p: i for i, p in enumerate(plans)}
+    return [(p, a) for p in plans for a in after.get(p) or () if a in pos and pos[a] < pos[p]]
+
+
+def needs(plans: Iterable[str], grouped: list[list[str]], after: Mapping[str, Iterable[str]] | None = None) -> list[list[str]]:
+    """組ごとの、待つ前提のプラン（他の組にいるもの。重ねずに）。`plans` は入れた順、`after` は プラン → 同じステージの前提のプラン。"""
+    edges = _edges(list(plans), after or {})
+    out = []
     for g in grouped:
-        rest = [f for h in grouped if h is not g for p in h for f in plans[p]]
-        for p in g:
-            out[p] = list(dict.fromkeys(rest))
+        mine = set(g)
+        out.append(list(dict.fromkeys(a for p, a in edges if p in mine and a not in mine)))
     return out
+
+
+def groups(
+    plans: Mapping[str, list[str]], shared: Iterable[Mapping] = (), after: Mapping[str, Iterable[str]] | None = None
+) -> list[list[str]]:
+    """同時に流さないプランの組（入れた順）。どれとも重ならないプランは 1 本だけの組になる。
+
+    `after`（プラン → 同じステージの前提のプラン）を渡すと、待ちが循環する組（組 G1 の員が G2 の員を、G2 の員が
+    G1 の員を前提にする）をまとめて 1 つの組にする（待ち合って進まないため。入れた順に流す）。"""
+    names = list(plans)
+    pairs = [(o["a"], o["b"]) for o in overlaps(plans, shared)]
+    edges = _edges(names, after or {})
+    while True:
+        grouped = _union(names, pairs)
+        at = {p: i for i, g in enumerate(grouped) for p in g}
+        cycle = _cycle({i: {at[a] for p, a in edges if at[p] == i and at[a] != i} for i in range(len(grouped))})
+        if not cycle:
+            return grouped
+        pairs += [(grouped[cycle[0]][0], grouped[i][0]) for i in cycle[1:]]
+
+
+def _cycle(wait: Mapping[int, set[int]]) -> list[int]:
+    """待ちの有向グラフ（組の番号 → 待つ組の番号）の循環 1 つの組の番号。無ければ空。"""
+    state: dict[int, int] = {}
+    stack: list[int] = []
+
+    def visit(n: int) -> list[int]:
+        state[n] = 1
+        stack.append(n)
+        for m in sorted(wait.get(n, ())):
+            if state.get(m) == 1:
+                return stack[stack.index(m) :]
+            if m not in state:
+                found = visit(m)
+                if found:
+                    return found
+        stack.pop()
+        state[n] = 2
+        return []
+
+    for n in sorted(wait):
+        if n not in state:
+            found = visit(n)
+            if found:
+                return found
+    return []
 
 
 def tags(step: Mapping, resources: Mapping[str, Mapping]) -> list[str]:

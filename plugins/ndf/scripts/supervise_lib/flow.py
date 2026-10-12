@@ -15,13 +15,17 @@
 
 - 登録簿: `Engine` はプロセスの中の登録簿（`plan_workflow` の接頭辞 → `Engine`）で引く。落ちた後の起動では
   `DBOS.launch()` の直後に回復した `plan_workflow` が流れ始めるため、`run` は launch の前に登録する。登録簿に
-  無ければ、耐久ワークフローの入力（プランのパス・状態ディレクトリ・`--slow`・開始のステップ・同時に流れる
-  他のプランのファイル）から作り直す
+  無ければ、耐久ワークフローの入力（プランのパス・状態ディレクトリ・`--slow`・開始のステップ）
+  から作り直す
+- 走っているプラン: `plan_workflow` は始めに登録簿（`running`）へ自分の `触るファイル` を登録し、終わりに
+  （例外でも）抹消する。実装のステップは担当の起動の時点で登録簿を読み、除外の行を作る（#1674）
 - 資源の枠: 資源のタグのあるステップ（`admission.tags`）は、耐久キュー `res-<タグ>`（同時の本数 = 枠の本数）へ
   入れた耐久ワークフロー `slot_workflow` の中で流す（I21）
 - queue: `queue_workflow` がステージを順に流す。同じステージのプランは耐久キュー `plans`（同時の本数 = `--max`）へ
   入れた順に流れる。重なりの組（`admission.groups`）は、耐久ワークフロー `group_workflow` 1 つとして入れ、その中で
-  1 本ずつ流す（I20）。DBOS 3.1.0 の耐久キューの分割は、枠が足りないとき流す分割を乱数の順に選び、入れた順に
+  1 本ずつ流す（I20）。`前提のプラン` を持つプランは必ず `group_workflow` で入れ、員を流す前に `deps_step` が
+  前提の結果を確かめる。同じステージの前提のプランを待つ組は、耐久キューの外の `wait_workflow` で前提のプランの
+  終わりを待ってから `plans` へ入れる（枠を塞がない。#1674）。DBOS 3.1.0 の耐久キューの分割は、枠が足りないとき流す分割を乱数の順に選び、入れた順に
   流す今の約束を保てないため使わない
 """
 
@@ -35,13 +39,12 @@ from pathlib import Path
 from typing import Any
 
 import durable
-from supervise_lib import admission, paths
+from supervise_lib import admission, paths, running
 from supervise_lib import queue as queue_files
 from supervise_lib.decl import QUEUE_RESOURCES, SUPERVISE_DECL, DeclError, decl_roots, queue_decl, read_decl
 from supervise_lib.engine import Engine
-from supervise_lib.queue import FINISHED
+from supervise_lib.queue import FINISHED, NO_REPORT
 from supervise_lib.state import RunState
-from supervise_lib.worker_steps import CONCURRENT_FILES
 
 PLANS = "plans"  # queue が流すプランの耐久キュー
 PARENT_WAIT = 120.0  # 回復した slot_workflow が、自分を入れた plan_workflow の回復を待つ上限（秒）
@@ -165,8 +168,6 @@ def _engine(prefix: str, args: dict | None = None) -> Engine:
                 raise durable.DurableError(f"耐久ワークフロー {prefix} の Engine が無く、プランのパスも無い")
             plan = json.loads(Path(args["plan_path"]).read_text(encoding="utf-8"))
             eng = _ENGINES[prefix] = Engine(plan, Path(args["state_dir"]), args.get("slow") or [], args["plan_path"])
-            if args.get("others"):
-                eng.plan[CONCURRENT_FILES] = list(args["others"])
         return eng
 
 
@@ -217,11 +218,23 @@ def _in_slot(prefix: str, n: int, sid: str, tags: list[str]) -> dict:
 
 @durable.workflow(name="ndf.supervise.plan_workflow")
 def plan_workflow(args: dict) -> dict:
-    """プラン 1 本の実行。ステップを `nxt` の順に流し、ステップの数が上限を超えるか知らないステップに当たれば止まる。"""
+    """プラン 1 本の実行。ステップを `nxt` の順に流し、ステップの数が上限を超えるか知らないステップに当たれば止まる。
+
+    流れている間は、走っているプランの登録簿（`running`）に自分の `触るファイル` を載せる（#1674 の I1）。"""
     began = time.time()
     prefix, start = args["prefix"], args.get("start")
     resources = args.get("resources") or {}
     eng = _engine(prefix, args)
+    me = eng.ctx.plan_path or prefix
+    files = eng.plan.get("触るファイル")
+    running.begin(me, [str(f) for f in files if str(f).strip()] if isinstance(files, list) else [])
+    try:
+        return _plan_steps(eng, prefix, start, resources, began)
+    finally:
+        running.end(me)
+
+
+def _plan_steps(eng: Engine, prefix: str, start: str | None, resources: dict, began: float) -> dict:
     stopped = eng.setup(start) or prepare_step(prefix, start)
     if stopped:
         result, reason = stopped
@@ -279,6 +292,7 @@ def admit_step(plans: list[str], shared: list[dict]) -> dict:
     関門の記録があるプランは、記録した関門の attention を進捗ログへ書き直す。"""
     refs: dict[str, dict] = {}
     files: dict[str, list[str]] = {}
+    deps: dict[str, list[str]] = {}
     for p in plans:
         body = Path(p).read_text(encoding="utf-8")
         prefix = prefix_of(str(Path(p).resolve()), body, None)
@@ -286,15 +300,17 @@ def admit_step(plans: list[str], shared: list[dict]) -> dict:
         refs[p] = {"prefix": prefix, "id": ref.id, "action": ref.action, "output": ref.output}
         if ref.action != "done":
             files[p] = queue_files.touched_files(body)
+            deps[p] = queue_files.deps_of(body)
         elif ref.output.get("result") == "関門":  # 承認の無い打ち直しでも、conductor へもう一度知らせる
             RunState(paths.state_dir_of(p), json.loads(body)).retell_gates(ref.output.get("gates") or [])
-    grouped = admission.groups(files, shared)
+    after = {p: [q for q in files if q != p and any(queue_files.named(q, n) for n in names)] for p, names in deps.items()}
+    grouped = admission.groups(files, shared, after)
     pairs = admission.overlaps(files, shared)
     for o in pairs:
         a, b = o["paths"]
         how = a if a == b else f"{a} ⊃ {b}" if admission.contains(a, b) else f"{b} ⊃ {a}"
         print(f"supervise-queue: 重なる組 {o['a']} と {o['b']}（{how}）を同時には流さない", file=sys.stderr, flush=True)
-    return {"groups": grouped, "overlaps": pairs, "others": admission.others(files, grouped), "refs": refs}
+    return {"groups": grouped, "needs": admission.needs(files, grouped, after), "deps": deps, "overlaps": pairs, "refs": refs}
 
 
 @durable.step(name="ndf.supervise.queue.worktrees")
@@ -325,47 +341,109 @@ def _plan_output(wid: str) -> dict:
         return {"error": f"{type(e).__name__}: {e}"}
 
 
+def _known(plan: str, out: Any) -> dict:
+    """前提の確かめに使う、プランの結果 `{plan, result}`（例外で終わったプランは報告なし）。"""
+    return {"plan": plan, "result": out.get("result", NO_REPORT) if isinstance(out, dict) else NO_REPORT}
+
+
+@durable.step(name="ndf.supervise.queue.deps")
+def deps_step(plan: str, deps: list[str], known: list[dict], queued: list[str]) -> dict | None:
+    """前提のプランの結果を確かめる。完了でない前提があれば、流さなかった item（`blocked_by` 付き）を返す（#1674 の I3）。"""
+    return queue_files.blocked(plan, deps, known, queued)
+
+
+@durable.step(name="ndf.supervise.queue.await")
+def await_step(wid: str, group: str | None, k: int | None) -> Any:
+    """前提のプランの耐久ワークフロー `wid` の終わりを待って出力を返す。前提のプランが組 `group` の `k` 番目で、
+    組が前提のプランを始めずに終わったときは、組の出力にある前提のプランの item を返す。"""
+    while True:
+        if durable.status(wid) in durable.FINISHED:
+            return _plan_output(wid)
+        if group and durable.status(group) in durable.FINISHED:
+            if durable.status(wid) in durable.FINISHED:
+                return _plan_output(wid)
+            outs = _plan_output(group)
+            return outs[k] if isinstance(outs, list) and k is not None and k < len(outs) else outs
+        time.sleep(durable.POLL_SECONDS)
+
+
 @durable.workflow(name="ndf.supervise.group_workflow")
-def group_workflow(members: list[dict]) -> list[dict]:
-    """重なりの組を、入れた順に 1 本ずつ流す（I20）。組は耐久キュー `plans` の 1 本として数える。"""
+def group_workflow(members: list[dict], known: list[dict] | None = None, queued: list[str] | None = None) -> list[dict]:
+    """重なりの組を、入れた順に 1 本ずつ流す（I20）。組は耐久キュー `plans` の 1 本として数える。
+
+    `前提のプラン` を持つ員は、流す前に `deps_step` で前提の結果（`known` と、同じ組で先に流れた員）を確かめ、
+    完了でない前提があれば流さない。"""
+    known = list(known or [])
     outs = []
     for m in members:
-        outs.append(_plan_output(durable.start(durable.WorkflowRef(m["id"], 0, "start"), plan_workflow, m["args"])))
-        _forget(m["args"]["prefix"])
+        stop = deps_step(m["plan"], m["deps"], known, queued or []) if m.get("deps") else None
+        if stop:
+            outs.append(stop)
+        else:
+            outs.append(_plan_output(durable.start(durable.WorkflowRef(m["id"], 0, "start"), plan_workflow, m["args"])))
+            _forget(m["args"]["prefix"])
+        known.append(_known(m.get("plan", ""), outs[-1]))
     return outs
+
+
+@durable.workflow(name="ndf.supervise.wait_workflow")
+def wait_workflow(waits: list[dict], members: list[dict], known: list[dict], queued: list[str], priority: int) -> Any:
+    """同じステージの前提のプランの終わりを耐久キューの外で待ち（`--max` の枠を塞がない）、組を `plans` へ入れて
+    その出力を返す（#1674 の I5）。"""
+    got = [_known(w["plan"], await_step(w["id"], w.get("group"), w.get("k"))) for w in waits]
+    wid = durable.submit(PLANS, group_workflow, members, known + got, queued, id=_group_id(members[0]["id"]), priority=priority)
+    return _plan_output(wid)
+
+
+def _group_id(first: str) -> str:
+    return f"group-{first}"
 
 
 def run_stage(plans: list[str], adm: dict, args: dict) -> list[dict]:
     """同じステージのプランを耐久キュー `plans` へ入れ、終わりを待って items を返す（`queue_workflow` の中で呼ぶ）。
 
-    同時に流れるのは `--max` 本までで、入れた順に流れる。重なりの組は `group_workflow` 1 つとして入れる。"""
-    refs = adm["refs"]
+    同時に流れるのは `--max` 本までで、入れた順に流れる。重なりの組と、`前提のプラン` を持つ員のいる組は
+    `group_workflow` 1 つとして入れる。同じステージの前提のプランを待つ組は `wait_workflow` で包む。
+    `adm` の `prior` は前のステージまでの結果、`queued` は queue のすべてのプラン（前提の確かめに使う）。"""
+    refs, deps, queued = adm["refs"], adm.get("deps") or {}, adm.get("queued") or list(plans)
+    known = [_known(i["plan"], i) for i in adm.get("prior") or []]
+    known += [_known(p, refs[p]["output"]) for p in plans if refs[p]["action"] == "done"]
     worktrees_step([g[0] for g in adm["groups"]][: args["max"]])
+    boxed = [len(g) > 1 or any(deps.get(p) for p in g) for g in adm["groups"]]
+    where = {p: (_group_id(refs[g[0]]["id"]) if boxed[i] else None, k) for i, g in enumerate(adm["groups"]) for k, p in enumerate(g)}
     waits: dict[str, tuple[str, int | None]] = {}
     for i, group in enumerate(adm["groups"]):
-        members = [{"id": refs[p]["id"], "args": _plan_args(p, refs[p]["prefix"], adm["others"].get(p), args)} for p in group]
-        if len(members) == 1:
+        members = [
+            {"id": refs[p]["id"], "plan": p, "deps": deps.get(p) or [], "args": _plan_args(p, refs[p]["prefix"], args)} for p in group
+        ]
+        need = adm["needs"][i] if adm.get("needs") else []
+        if need:
+            on = [{"plan": a, "id": refs[a]["id"], "group": where[a][0], "k": where[a][1]} for a in need]
+            ref = durable.WorkflowRef(f"wait-{members[0]['id']}", 0, "start")
+            wid = durable.start(ref, wait_workflow, on, members, known, queued, i + 1)
+            waits.update({p: (wid, k) for k, p in enumerate(group)})
+        elif boxed[i]:
+            wid = durable.submit(PLANS, group_workflow, members, known, queued, id=_group_id(members[0]["id"]), priority=i + 1)
+            waits.update({p: (wid, k) for k, p in enumerate(group)})
+        else:
             wid = durable.submit(PLANS, plan_workflow, members[0]["args"], id=members[0]["id"], priority=i + 1)
             waits[group[0]] = (wid, None)
-        else:
-            wid = durable.submit(PLANS, group_workflow, members, id=f"group-{members[0]['id']}", priority=i + 1)
-            waits.update({p: (wid, k) for k, p in enumerate(group)})
     outs: dict[str, Any] = {}
-    items = []
+    out_items = []
     for p in plans:
         if p not in waits:
-            items.append(queue_files.plan_item(p, refs[p]["output"]))  # 完了か関門の記録があるプランは、記録した結果を返す
+            out_items.append(queue_files.plan_item(p, refs[p]["output"]))  # 完了か関門の記録があるプランは、記録した結果を返す
             continue
         wid, k = waits[p]
         if wid not in outs:
             outs[wid] = _plan_output(wid)
         out = outs[wid][k] if k is not None and isinstance(outs[wid], list) else outs[wid]
         _forget(refs[p]["prefix"])
-        items.append(queue_files.plan_item(p, out))
-    return items
+        out_items.append(queue_files.plan_item(p, out))
+    return out_items
 
 
-def _plan_args(plan: str, prefix: str, others: list[str] | None, args: dict) -> dict:
+def _plan_args(plan: str, prefix: str, args: dict) -> dict:
     return {
         "prefix": prefix,
         "plan_path": plan,
@@ -373,22 +451,23 @@ def _plan_args(plan: str, prefix: str, others: list[str] | None, args: dict) -> 
         "slow": [],
         "start": None,
         "resources": args["resources"],
-        "others": others or [],
     }
 
 
 @durable.workflow(name="ndf.supervise.queue_workflow")
 def queue_workflow(args: dict) -> dict:
-    """`queue` 1 回。ステージを順に流し、前のステージが 1 本でも完了でなければ後続を流さない。"""
+    """`queue` 1 回。ステージを順に流し、前のステージが 1 本でも完了でなければ後続を流さない。
+    `前提のプラン` を持つプランは、前提のプランが完了でなければ流さない（#1674）。"""
     stages, done = args["stages"], args["done"]
     listing_step(done, [p for stage in stages for p in stage])
     items: list[dict] = []
     pairs: list[dict] = []
+    queued = [p for stage in stages for p in stage]
     for idx, stage in enumerate(stages):
         filled = fill_step(idx == 0, stage, items)
         items += filled["skipped"]
         if filled["runnable"]:
-            adm = admit_step(filled["runnable"], args["shared"])
+            adm = {**admit_step(filled["runnable"], args["shared"]), "prior": list(items), "queued": queued}
             pairs += adm["overlaps"]
             items += run_stage(filled["runnable"], adm, args)
     return done_step(done, items, args["max"], pairs, args["resources"])

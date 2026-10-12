@@ -18,6 +18,7 @@ from supervise_lib.procedures import (
     push_fix_steps,
     record_steps,
     design_diff_on_pr,
+    with_after,
     with_record,
     with_touched,
 )
@@ -182,6 +183,7 @@ def plan_to_merge(a, head: list[dict]) -> dict:
     test_meta(plan, a)
     with_record(plan)
     with_touched(plan, getattr(a, "files", None))
+    with_after(plan, getattr(a, "after", None))
     if a.branch:
         plan["branch"] = a.branch
         plan["起点"] = f"origin/{a.base}"

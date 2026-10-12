@@ -35,6 +35,13 @@ def with_touched(plan: dict, files) -> dict:
     return plan
 
 
+def with_after(plan: dict, names) -> dict:
+    """前提のプランがあればプランの `前提のプラン` へ書く（queue は前提のプランが完了でなければ流さない。#1674）。"""
+    if names:
+        plan["前提のプラン"] = list(names)
+    return plan
+
+
 def pr_step(base: str, title: str, summary: str, changes: str, next: str, materials: dict | None = None, **extra) -> dict:
     """`pr` のステップ。`materials` があれば `pr` のハンドラーが本文の材料（手動確認・集めた実装の PR・
     設計の結果・Closes）を集める。"""
