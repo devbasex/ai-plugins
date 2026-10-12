@@ -131,9 +131,13 @@ launch_runtime() {
       PID=$!
       ;;
     claude)
+      # `--allowed-tools` は許可を絞るだけで、Tool の定義・MCP・Skill の一覧は文脈に残る。#827 の最小構成と
+      # 同じく `--tools` を許可と同じ値にし、MCP とスラッシュコマンドを読まない（Skill はプロンプトがパスで渡す）。
       nohup claude -p ${CLAUDE_SETTINGS_ARGS[@]+"${CLAUDE_SETTINGS_ARGS[@]}"} \
         --permission-mode acceptEdits \
+        --tools "$CLAUDE_ALLOWED_TOOLS" \
         --allowed-tools "$CLAUDE_ALLOWED_TOOLS" \
+        --strict-mcp-config --disable-slash-commands \
         --output-format json ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} \
         < "$PROMPT" > "$STDOUT_LOG" 2> "$ERR_LOG" &
       PID=$!
