@@ -50,7 +50,7 @@
 
 | 業務用語 | 識別子 | 何を指すか |
 | --- | --- | --- |
-| 想定最大時間 | `--budget-minutes` / `budget_minutes`（B） | 利用者が与える所要の上限（分）。目安の上限で、リファクタリング計画はこの中に収まるように立てる |
+| 想定最大時間 | `--budget-minutes` / `budget_minutes`（B） | 利用者が与える所要の上限（分）。1 回の実行の子プロセスは、最終ゲートの確かめ・最終ゲート修正・打ち切りの後の取り消しも含めて、すべて想定最大時間の終わり（開始 + B）までに止まる。リファクタリング計画はこの中に収まるように立てる |
 | 手順 | `phase` / `phases.<名前>` | `propose` / `plan` / `add-tests` / `implement` / `verify`（と `fix` / `final-fix`）。状態・履歴・起動の部品・上限の表・雛形で同じ語を使う |
 | 実装担当 | `implementer` | リファクタリング計画・テスト追加・実装・修正・最終ゲート修正を通して担う 1 ランタイム |
 | 改善候補 | `candidates[]` | 提案を鍵（`path` + `symbol` + `smell`）でまとめたもの。リファクタリング計画へ渡す |
@@ -116,7 +116,7 @@
 | 23 | 締め切りはスクリプトが守らせる。手順の監視の上限は手順の終わり + 余裕で、直しは回数でなく締め切りまで試みる | LLM の申告に時間を預けると予算の外まで走る。回数で切ると時間が残っていても止まる |
 | 24 | 時間に関わる数値はすべて B から算術で逆算し、リファクタリング計画の終わりまでに書き出す。`--max-fix-rounds` と `--test-timeout` も廃止する | 固定値は予算と連動しない。上書きの口を残すと連動しない経路が戻る |
 | 25 | リファクタリング計画の後で LLM が動くのは作業の CLI だけにする。D5 の Jev はリファクタリング計画へ前倒しし、機械で決まらないテストの差分はレビューへ引き継ぐ | リファクタリング計画の後に問い続けると、見積もった時間の外で所要が伸び、応答で結果が変わる |
-| 26 | 最終ゲート修正 1 回分（`final_fix`）をバッファに足し、1 回目の最終ゲート修正は時計で打ち切らない | 検証の直しがバッファを使い切ると、最終ゲートが落ちたときに 1 度も直せずに終わる。全体テストが落ちたまま残るのが最も悪い終わり方である |
+| 26 | 最終ゲート修正 1 回分（`final_fix`）をバッファに足し、検証の直しの終わりから引く。最終ゲート修正は 1 回目も、今 + この見込みが確かめの開始の締め切り（H − v）を越えないときだけ起動する | 検証の直しがバッファを使い切ると、最終ゲートが落ちたときに 1 度も直せずに終わる。H − v を過ぎて直しても、直した後の確かめが想定最大時間に入らず、直しは使われない |
 
 **クラス図は持たない**（決定 19）。`refactor_lib` は関数の集まりで型を定義しない。状態は
 辞書として状態ファイルに持つ。
@@ -226,9 +226,9 @@
 | バッファ（`plan.reserve`） | 値（分） |
 | --- | --- |
 | `danger_whole_test` | 手元の戦略に `--ci-check` を付けたときだけ全体テストの所要 w。ほかは 0（手元で最終ゲートを見る戦略は最終ゲートの全体テストと兼ね、CI に任せる戦略は最終ゲートへ寄せる） |
-| `final_whole_test` | 手元で最終ゲートを見るなら w、CI で見る（戦略か `--ci-check`）なら CI の壁時計 c。測れていなければ 0 |
+| `final_whole_test` | 手元で最終ゲートを見るなら w、CI で見る（戦略か `--ci-check`）なら CI の壁時計 c。測れていなければ 0。秒へ直した値が確かめの見込み v（`gate_seconds`） |
 | `fix` | 配分テーブルの `fix`（検証の直しの起動 1 回分） |
-| `final_fix` | 同じ値。最終ゲート修正 1 回分（決定 26） |
+| `final_fix` | 同じ値。最終ゲート修正 1 回分（決定 26）。秒へ直した値が F（`final_fix_seconds`） |
 
 項目ごとの期限は持たない。実装を止める時刻は実装の終わりの 1 つだけで、テストの追加の終わりはそこから
 採っていて未検証の項目の implement の見積りを引いた時刻である（`budget.implement_end` / `add_tests_end`。
@@ -245,9 +245,9 @@
 | 提案の枠の終わり / リファクタリング計画の枠の終わり | 開始 + 0.20·B / さらに + 0.10·B（開始 + 0.30·B） | `PROPOSE_SHARE` / `PLAN_SHARE` |
 | テストの追加・実装の終わり | 実装の終わり = 最終ゲート修正の打ち切り − R − Σ（採っていて未検証の項目の verify）。テストの追加の終わりはそこから同じ項目の implement を引く | `budget.implement_end` / `budget.add_tests_end` |
 | 直しの試行の打ち切り | 開始 + B − `danger_whole_test` − `final_whole_test` − `final_fix`（バッファの `fix` は引かない） | `budget.fix_end` |
-| 最終ゲート修正の打ち切り | 開始 + B（中断の後の再開でずらした秒を足す）。1 回目は打ち切らない | `final_end_at` / `gate._final_fix_stop` |
-| 打ち切りの後の取り消しの締め切り | 開始 + B + 0.20·B（既定の 30 分で打ち切りから 6 分）。理由は [検証と最終ゲートの確定仕様](cross-refactoring-verify-and-final-gate.md#決定と理由) の #1649 の決定 8 | `STOP_REVERT_SHARE` / `stop_revert_end_at` |
-| 最終ゲート修正の 1 回目の長さの下限 | バッファの `final_fix` を秒へ直した値 | `final_fix_seconds` |
+| 想定最大時間の終わり H | 開始 + B（中断の後の再開でずらした秒を足す）。子プロセスへ渡す上限はすべてここで切る | `final_end_at` / `timeline.final_end` / `timeline.clip_to_end` |
+| 確かめの開始の締め切り | H − v（v = `final_whole_test` を秒へ直した値）。最終ゲートの確かめはここまでに始め、最終ゲート修正と打ち切りの後の取り消しはここまでに止まる。時刻の鍵は持たず H と v から読み出す。理由は [検証と最終ゲートの確定仕様](cross-refactoring-verify-and-final-gate.md#時間の上限) | `gate_seconds` / `timeline.gate_start_end` / `timeline.fits` |
+| 最終ゲート修正 1 回の見込み F | バッファの `final_fix` を秒へ直した値。今 + F ≤ H − v のときだけ起動する | `final_fix_seconds` / `gate._final_fix_stop` |
 
 **提案とリファクタリング計画の枠を予算の比率にしたのは**、#917 を 60 分に当てた例（提案 4.5 分・リファクタリング計画 3 分）の
 倍の余裕があり、配分テーブルは提案とリファクタリング計画の所要を持たないためである。**テスト 1 回の上限を
@@ -391,7 +391,7 @@
 | `budget_minutes` / `margin_seconds` / `init_test_timeout` / `test_timeout` | `init`（リファクタリング計画の前に予算を置き換えた再開も組み直す） |
 | `propose_end_at` / `plan_end_at` / `final_end_at` | `init` |
 | `after_plan_minutes` | `init`（提案の前の判定に使う見込み） |
-| `add_tests_end_at` / `implement_end_at` / `fix_end_at` / `stop_revert_end_at` / `final_fix_seconds` | `merge-plan`（リファクタリング計画の前は `null`）。`add_tests_end_at` / `implement_end_at` は採り直しでも書き直す |
+| `add_tests_end_at` / `implement_end_at` / `fix_end_at` / `gate_seconds` / `final_fix_seconds` | `merge-plan`（リファクタリング計画の前は `null`）。`add_tests_end_at` / `implement_end_at` は採り直しでも書き直す |
 
 ### 旧い状態ファイルと再開
 
