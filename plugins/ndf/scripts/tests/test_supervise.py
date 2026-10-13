@@ -2581,6 +2581,37 @@ def test_run_ticking_timeout_stops_the_group_after_the_leader_exits(tmp_path):
     assert procs.wait_gone(int(pidfile.read_text()), timeout=3)
 
 
+def _pidfd_einval(procs_, timeout=None):
+    raise OSError(22, "Invalid argument")
+
+
+def test_run_ticking_timeout_stays_a_timeout_when_waiting_raises_einval(tmp_path, monkeypatch):
+    """ステップの timeout の打ち切りで待ちが EINVAL を投げても、TimeoutExpired（ステップの失敗）になる（#1817）。"""
+    import procs
+
+    monkeypatch.setattr(procs.psutil, "wait_procs", _pidfd_einval)
+    pidfile = tmp_path / "pid"
+    with pytest.raises(subprocess.TimeoutExpired):
+        claude.run_ticking(f"sleep 30 & echo $! > {pidfile}; wait", shell=True, timeout=1)
+    monkeypatch.undo()
+    assert procs.wait_gone(int(pidfile.read_text()), timeout=3)
+
+
+def test_run_ticking_stall_cut_keeps_its_own_error_when_waiting_raises_einval(monkeypatch):
+    """停滞の打ち切り（tick() の例外）で待ちが EINVAL を投げても、tick() の例外がそのまま届く（retry へ進む。#1817）。"""
+    import procs
+
+    class Stalled(Exception):
+        pass
+
+    def tick():
+        raise Stalled
+
+    monkeypatch.setattr(procs.psutil, "wait_procs", _pidfd_einval)
+    with pytest.raises(Stalled):
+        claude.run_ticking("sleep 30", shell=True, tick=tick, every=0.2)
+
+
 @pytest.mark.parametrize("sv", [{"sync_checks": [{"name": 1, "command": "x"}]}, {"sync_checks": "x"}, {"test": [1]}])
 def test_supervise_decl_shape_is_checked_by_the_schema_wrapper(sv):
     """supervise.json の test と sync_checks の形は lib/schema.py で見る。違えば DeclError（#1142 の D1）。"""
