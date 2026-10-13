@@ -98,6 +98,11 @@ graph TD
 - `with_margin` の式と最低 30 秒（`MARGIN_FLOOR`）・cross-refactoring の既定の予算・ほかのステップの `timeout` は変えない
 - `vocabulary.py` は読み込むときに `refactoring` の `references/vocabulary.md` を読む。読めなければ例外のまま止まり、プランを書かない
   （cross-refactoring の駆動も同じ読み込みをするため、止まる形は増えない）
+- **ステップの `timeout` と停滞の打ち切りで子のプロセスの木を止めるとき、待ちの途中の `EINVAL` / `ESRCH` は、投げたプロセスだけを
+  止まったものとして扱う**（`lib/procs.py` の `stop_tree`、#1817）。待つ間に子が終わって pid が別のプロセスのスレッドへ再利用されると、
+  `psutil.wait_procs` の `os.pidfd_open` が `EINVAL` を投げる。まとめて待つ呼び出しが投げたら同じ期限の中で 1 つずつ待ち直し、まだ
+  生きているプロセスには SIGKILL を送る。打ち切りは例外にならず、停滞は retry へ、`timeout` はそのステップの失敗へ進み、キューは
+  後続のプランを通常の失敗と同じに扱う。ほかの errno と `OSError` 以外の例外は握りつぶさない
 
 ## 運用
 
@@ -121,9 +126,11 @@ graph TD
 - 引数と宣言の両方があると引数の値が入ること（I1）
 - 0・負・小数・文字列・真偽値を引数か宣言で渡すと、プランを書かずに 0 以外で終わり、項目名が出ること。宣言の誤りは引数があっても止まること（I2）
 - `new sprint --help` と `new check --help` の「任意の設定」に 2 項目が出ること
+- `psutil.wait_procs` が `EINVAL` / `ESRCH` を投げても `stop_tree` が例外を出さず、投げたプロセスだけを止まったものとして扱って残りへ SIGKILL を送り、ほかの errno と `OSError` 以外は投げること。停滞と `timeout` の打ち切りで同じことが起きてもプランが例外で終わらないこと（`test_lib_procs.py`・`test_supervise.py`）
 
 ## 関連リンク
 
 - [`supervise_lib/decl.py`](../../plugins/ndf/scripts/supervise_lib/decl.py)・[`new_args.py`](../../plugins/ndf/scripts/supervise_lib/new_args.py)・[`paths.py`](../../plugins/ndf/scripts/supervise_lib/paths.py)・[`plan.py`](../../plugins/ndf/scripts/supervise_lib/plan.py)・[`templates.py`](../../plugins/ndf/scripts/supervise_lib/templates.py)・[`verify_steps.py`](../../plugins/ndf/scripts/supervise_lib/verify_steps.py)（`with_margin`）
 - [cross-refactoring-time-budget.md](cross-refactoring-time-budget.md)・[cross-refactoring-verify-and-final-gate.md](cross-refactoring-verify-and-final-gate.md)
+- [issue #1817](https://github.com/devbasex/ai-plugins/issues/1817) — 打ち切りでプロセスの木を止める待ちの `EINVAL`
 - #1916（この形を決めた課題）、#1336（3600 秒ちょうどの exit=124）、#1334・#1370（conductor の手当ての記録）

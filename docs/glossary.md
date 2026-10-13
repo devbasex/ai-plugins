@@ -191,7 +191,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | ライブラリ | `library` | 2 つ以上のスクリプトが使う関数とクラスの置き場。今の plugins/ndf/scripts/lib/ に当たる。pace.json の「共通層」（点数を重くする領域）とは別 | — | — | — |
 | エントリポイント | `entry_point` | Skill・プラン・hook・宣言・利用者が呼ぶスクリプトのパスと副命令と引数と出力の形 | — | — | — |
 | 移行ステップ | `migration_step` | 設計の決める移行の順序の 1 つ分。1 本の PR で閉じる。プランの「ステップ」とは別 | — | — | — |
-| 使用量の帳簿 | `usage_ledger` | NDF が起動したエージェントの呼び出し 1 回ごとに、版・呼び出し元・モデル・使用量を 1 行で追記する jsonl。ランタイムごと（Claude・codex・kiro・agy・jev。jev は帳簿だけのランタイムで、席順の ALL_RUNTIMES には入れない）のディレクトリに、リポジトリごとのファイルを置く（<帳簿のディレクトリ>/<ランタイム>/<owner>__<repo>.jsonl） | — | — | — |
+| 使用量の帳簿 | `usage_ledger` | NDF が起動したエージェントの呼び出し 1 回ごとに、版・呼び出し元・モデル・使用量を 1 行で追記する jsonl。ランタイムごと（Claude・codex・kiro・agy・jev。jev は帳簿だけのランタイムで、席順の ALL_RUNTIMES には入れない）のディレクトリに、リポジトリごとのファイルを置く（<帳簿のディレクトリ>/<ランタイム>/<owner>__<repo>.jsonl） | — | — | `docs/specifications/ndf-usage-ledger-by-runtime.md` |
 | 構造チェック | `structure_check` | テストを除くスクリプトの行数と、本体の同じ関数・同じ名前で本体の違う関数を構文木で数える継続的統合のチェック。ファイルを指定すると、検査は木全体で行い、合否を指定したファイルに関わる違反だけで決める | — | — | `docs/specifications/cross-refactoring-verify-and-final-gate.md` |
 | プロジェクトの宣言 | — | リポジトリの根の `.ndf/` に置く、そのプロジェクトの形（言語・テスト・CI・ブランチ・配布・課題の正本など）を表すファイルの集まり。機能ごとの JSON と、解析が書く `project.json` からなる | — | — | — |
 | 解析 | — | プロジェクトの宣言を作るために、リポジトリと CI を決定論で測り、測った値から宣言の中身を決めること | — | — | — |
@@ -274,10 +274,10 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 承認ゲートの差し戻し | — | 承認ゲートで利用者が承認せず、対象を直すよう戻したこと。MVV 判定の有無を問わず 1 回を 1 件と数える。MVV 判定との食い違いである覆しとは別の数 | — | — | `docs/specifications/ndf-gate-rejections-and-filer-assumptions.md` |
 | 差し戻しの記録 | — | 承認ゲートの差し戻しを 1 回 1 行で追記する JSONL（NDF_MVV_STATE_DIR の gate-rejections.jsonl）。pace と状態ファイルの有無によらず唯一の置き場で、覆しの記録とは別のファイル | — | — | `docs/specifications/ndf-gate-rejections-and-filer-assumptions.md` |
 | 状態の置き場 | — | `supervise.py run` の `--state-dir`（省けば `<プラン>-state/`）。`progress.jsonl`・`report.md`・`state.json` を置き、`--from` の再開が前の実行の記録を読む | — | — | `docs/specifications/ndf-supervise-resume-pr.md` |
-| 呼び出し元 | — | エージェントの呼び出しを起動した Skill またはスクリプト（帳簿の行の source）と、そのステップの役割（kind）の組。表示は source:kind（例: supervise:work・cross-review:review） | — | — | — |
-| 起動の共有処理 | — | LLM の CLI と Jev を起動する処理を集めた 4 か所（launch-cli.sh・supervise_lib/claude.py の call_claude・lib/auth.py のモデルの確認・lib/jev.py の _post）。起動の後に使用量の帳簿へ 1 行を書く | — | — | — |
-| Claude の帳簿の全体 | — | Claude の使用量の帳簿の claude -p の行（usage）とサブエージェントの行に、行ごとの modelUsage の和から usage と親を同じくするサブエージェントの行を引いた残り（hook の効かない claude -p の中のサブエージェント）と、会話の記録だけの claude -p の会話（セッション ID が帳簿に無いもの）を足した値。同じ呼び出しは 1 回だけ数える。トークン削減の効果を測る主な値 | — | — | — |
-| 会話の記録だけの呼び出し | — | 使用量の帳簿に行が無く、Claude Code の会話の記録（~/.claude/projects/）にだけ残る claude -p の会話とサブエージェント。帳簿ができる前の分と、NDF のコードの外で打った claude -p が当たる | — | — | — |
+| 呼び出し元 | — | エージェントの呼び出しを起動した Skill またはスクリプト（帳簿の行の source）と、そのステップの役割（kind）の組。表示は source:kind（例: supervise:work・cross-review:review） | — | — | `docs/specifications/ndf-usage-ledger-by-runtime.md` |
+| 起動の共有処理 | — | LLM の CLI と Jev を起動する処理を集めた 4 か所（launch-cli.sh・supervise_lib/claude.py の call_claude・lib/auth.py のモデルの確認・lib/jev.py の _post）。起動の後に使用量の帳簿へ 1 行を書く | — | — | `docs/specifications/ndf-usage-ledger-by-runtime.md` |
+| Claude の帳簿の全体 | — | Claude の使用量の帳簿の claude -p の行（usage）とサブエージェントの行に、行ごとの modelUsage の和から usage と親を同じくするサブエージェントの行を引いた残り（hook の効かない claude -p の中のサブエージェント）と、会話の記録だけの claude -p の会話（セッション ID が帳簿に無いもの）を足した値。同じ呼び出しは 1 回だけ数える。トークン削減の効果を測る主な値 | — | — | `docs/specifications/ndf-usage-ledger-by-runtime.md` |
+| 会話の記録だけの呼び出し | — | 使用量の帳簿に行が無く、Claude Code の会話の記録（~/.claude/projects/）にだけ残る claude -p の会話とサブエージェント。帳簿ができる前の分と、NDF のコードの外で打った claude -p が当たる | — | — | `docs/specifications/ndf-usage-ledger-by-runtime.md` |
 
 ## NDF の Slack 通知（`ndf-notification`）
 
