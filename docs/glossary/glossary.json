@@ -3828,8 +3828,8 @@
     {
       "term": "Claude の帳簿の全体",
       "context": "ndf-workflow",
-      "meaning": "Claude の使用量の帳簿のサブエージェントの行と claude -p の行の合計。トークン削減の効果を測る主な値",
-      "pending_source": "issues/issue-1953-requirements.md"
+      "meaning": "Claude の使用量の帳簿の claude -p の行（usage）とサブエージェントの行に、行ごとの modelUsage の和から usage と親を同じくするサブエージェントの行を引いた残り（hook の効かない claude -p の中のサブエージェント）と、会話の記録だけの claude -p の会話（セッション ID が帳簿に無いもの）を足した値。同じ呼び出しは 1 回だけ数える。トークン削減の効果を測る主な値",
+      "pending_source": "issues/issue-1953-design.md"
     },
     {
       "term": "会話の記録だけの呼び出し",
