@@ -3762,7 +3762,7 @@
     {
       "term": "既定のログイン",
       "context": "ndf-relay",
-      "meaning": "CLAUDE_CONFIG_DIR を指定しない共有の設定ディレクトリ（~/.claude）のログイン。登録済みアカウントでも従量の接続でもなく、relay の区間のアカウントが無い状態で使われる",
+      "meaning": "共有の設定ディレクトリ（${CLAUDE_CONFIG_DIR:-~/.claude}。親から引き継いだ CLAUDE_CONFIG_DIR の指定を含む）のログイン。登録済みアカウントでも従量の接続でもなく、relay の区間のアカウントが None のときに子が親から引き継いで使う",
       "pending_source": "issues/issue-1727-requirements.md"
     },
     {
