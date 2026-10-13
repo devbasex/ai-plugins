@@ -219,6 +219,11 @@ def call_claude(
     started = time.time()
     who = {"kind": claude_kind(system, full), **(caller or {})}
     cmd = claude_cmd(system, tools, cwd, full, serena, resume, base)  # 従量の接続は宣言を --settings でも渡す（#1543）
+    run_env = child_env if child_env is not None else ({**os.environ, **env} if env else None)
+    # 子の中の Skill が起動する CLI・SubagentStop の行も、今回の呼び出し元のプラン・ステップで数える（継承した別プランを上書きする）
+    usage_env = {f"NDF_USAGE_{k.upper()}": str(v) for k, v in (caller or {}).items() if k in ("plan", "step") and v is not None}
+    if usage_env:
+        run_env = {**(run_env if run_env is not None else os.environ), **usage_env}
     try:
         p = run_ticking(
             metered_settings(cmd, child_env if child_env is not None else os.environ, cwd, cmd.index("-p")),
@@ -227,7 +232,7 @@ def call_claude(
             input=prompt,
             cwd=cwd,
             timeout=timeout,
-            env=child_env if child_env is not None else ({**os.environ, **env} if env else None),
+            env=run_env,
         )
     except OSError:
         usage_capture.record_claude({}, cwd=cwd, **who, seconds=round(time.time() - started, 1), status="error")

@@ -160,6 +160,20 @@ def test_each_call_appends_one_row_with_5m_and_1h(tmp_path, ledger):
     assert (s.state.dir / "state.json").is_file()
 
 
+@pytest.mark.parametrize("child_env", [None, {"PATH": "/usr/bin", "NDF_USAGE_PLAN": "other.json"}])
+def test_child_gets_the_callers_plan_and_step(tmp_path, ledger, monkeypatch, child_env):
+    """子の中の Skill の CLI・SubagentStop も今回のプラン・ステップで数える。アカウントの切り替え後の環境でも同じ。"""
+    monkeypatch.setenv("NDF_USAGE_PLAN", "inherited.json")
+    seen = []
+    monkeypatch.setattr(
+        claude, "run_ticking", lambda cmd, *a, **k: seen.append(k["env"]) or subprocess.CompletedProcess(cmd, 0, '{"result": "x"}', "")
+    )
+    claude.call_claude("s", "p", None, str(tmp_path), 10, full=True, child_env=child_env, caller={"plan": "p.json", "step": "impl"})
+    assert (seen[0]["NDF_USAGE_PLAN"], seen[0]["NDF_USAGE_STEP"]) == ("p.json", "impl")
+    if child_env is not None:
+        assert seen[0]["PATH"] == "/usr/bin" and child_env["NDF_USAGE_PLAN"] == "other.json"
+
+
 def test_ledger_failure_keeps_the_call_result(tmp_path, ledger, monkeypatch, capsys):
     blocker = tmp_path / "blocker"
     blocker.write_text("")
