@@ -314,3 +314,68 @@ def test_codex_review_shows_in_the_codex_report(fake_clis):
     [g] = out["groups"]
     assert g["key"] == "cross-review:review" and g["usage"]["input_tokens"] > 0
     assert "claude" not in out and out["closed_issues"] == "unknown"
+
+
+# --- codex_usage の現状固定 ---
+
+CODEX_SID = "0199aaaa-bbbb-cccc-dddd-eeeeffff0000"
+
+
+def _rollout(home: Path, sid: str, lines: list, sub: str = "2026/10/13") -> Path:
+    d = home / "sessions" / sub
+    d.mkdir(parents=True, exist_ok=True)
+    path = d / f"rollout-2026-10-13T00-00-00-{sid}.jsonl"
+    path.write_text("\n".join(x if isinstance(x, str) else json.dumps(x) for x in lines) + "\n", encoding="utf-8")
+    return path
+
+
+def _token_count(**total) -> dict:
+    return {"type": "event_msg", "payload": {"type": "token_count", "info": {"total_token_usage": total}}}
+
+
+def test_codex_usage_without_session_id_falls_back_to_tokens_used(tmp_path):
+    assert usage_capture.codex_usage("tokens used\n 12,345\n", tmp_path) == ({"total_tokens": 12345}, "", None)
+    assert usage_capture.codex_usage("", tmp_path) == (usage_capture.UNKNOWN, "", None)
+    assert usage_capture.codex_usage(None, tmp_path) == (usage_capture.UNKNOWN, "", None)
+
+
+def test_codex_usage_takes_the_last_token_count_and_model(tmp_path):
+    _rollout(tmp_path, CODEX_SID, [
+        "not json",
+        [1, 2],
+        {"type": "turn_context", "payload": "x"},
+        {"type": "turn_context", "payload": {"model": "gpt-a"}},
+        _token_count(input_tokens=10),
+        {"type": "event_msg", "payload": {"type": "token_count", "info": None}},
+        {"type": "event_msg", "payload": {"type": "token_count", "info": {"total_token_usage": {}}}},
+        {"type": "event_msg", "payload": {"type": "other", "info": {"total_token_usage": {"input_tokens": 99}}}},
+        {"type": "turn_context", "payload": {"model": 5}},
+        {"type": "turn_context", "payload": {"model": "gpt-b"}},
+        _token_count(input_tokens=20, output_tokens=3),
+    ])
+    err = f"session id: {CODEX_SID}\ntokens used\n 999\n"
+    assert usage_capture.codex_usage(err, tmp_path) == ({"input_tokens": 20, "output_tokens": 3}, "gpt-b", CODEX_SID)
+
+
+def test_codex_usage_reads_rollouts_in_sorted_order(tmp_path):
+    _rollout(tmp_path, CODEX_SID, [_token_count(input_tokens=2)], sub="2026/10/14")
+    _rollout(tmp_path, CODEX_SID, [{"type": "turn_context", "payload": {"model": "m"}}, _token_count(input_tokens=1)])
+    assert usage_capture.codex_usage(f"session id: {CODEX_SID}", tmp_path) == ({"input_tokens": 2}, "m", CODEX_SID)
+
+
+def test_codex_usage_without_token_count_falls_back(tmp_path):
+    _rollout(tmp_path, CODEX_SID, [{"type": "turn_context", "payload": {"model": "gpt-a"}}])
+    err = f"session id: {CODEX_SID}\ntokens used\n 7\n"
+    assert usage_capture.codex_usage(err, tmp_path) == ({"total_tokens": 7}, "gpt-a", CODEX_SID)
+    assert usage_capture.codex_usage(f"session id: {CODEX_SID}", tmp_path) == (usage_capture.UNKNOWN, "gpt-a", CODEX_SID)
+
+
+def test_codex_usage_without_sessions_dir(tmp_path):
+    err = f"session id: {CODEX_SID}"
+    assert usage_capture.codex_usage(err, tmp_path / "missing") == (usage_capture.UNKNOWN, "", CODEX_SID)
+
+
+def test_codex_usage_home_falls_back_to_codex_home_env(tmp_path, monkeypatch):
+    _rollout(tmp_path / "env", CODEX_SID, [_token_count(input_tokens=4)])
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "env"))
+    assert usage_capture.codex_usage(f"session id: {CODEX_SID}") == ({"input_tokens": 4}, "", CODEX_SID)
