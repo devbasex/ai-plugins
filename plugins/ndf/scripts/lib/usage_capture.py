@@ -88,6 +88,26 @@ def _read_text(path: Path) -> str:
 # --- ランタイムごとの取り出し ---
 
 
+def _rollout_usage(path: Path) -> tuple[Optional[dict], Optional[str]]:
+    """rollout 1 本の (最後の `total_token_usage`, 最後の `turn_context` のモデル)。見つからなければ None。"""
+    usage: Optional[dict] = None
+    model: Optional[str] = None
+    for line in _read_text(path).splitlines():
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        p = d.get("payload") if isinstance(d, dict) else None
+        if not isinstance(p, dict):
+            continue
+        if d.get("type") == "turn_context" and isinstance(p.get("model"), str):
+            model = p["model"]
+        total = (p.get("info") or {}).get("total_token_usage") if p.get("type") == "token_count" else None
+        if isinstance(total, dict) and total:
+            usage = dict(total)
+    return usage, model
+
+
 def codex_usage(err_text: str, home: Optional[Path] = None) -> tuple[object, str, Optional[str]]:
     """(使用量, モデル, セッション ID)。rollout の最後の `token_count` の `info.total_token_usage` を鍵のまま返す。"""
     m = SESSION_ID.search(err_text or "")
@@ -97,19 +117,11 @@ def codex_usage(err_text: str, home: Optional[Path] = None) -> tuple[object, str
     if sid:
         root = Path(home or os.environ.get("CODEX_HOME") or Path.home() / ".codex") / "sessions"
         for path in sorted(root.glob(f"**/rollout-*-{sid}.jsonl")) if root.is_dir() else []:
-            for line in _read_text(path).splitlines():
-                try:
-                    d = json.loads(line)
-                except ValueError:
-                    continue
-                p = d.get("payload") if isinstance(d, dict) else None
-                if not isinstance(p, dict):
-                    continue
-                if d.get("type") == "turn_context" and isinstance(p.get("model"), str):
-                    model = p["model"]
-                total = (p.get("info") or {}).get("total_token_usage") if p.get("type") == "token_count" else None
-                if isinstance(total, dict) and total:
-                    usage = dict(total)
+            found_usage, found_model = _rollout_usage(path)
+            if found_usage is not None:
+                usage = found_usage
+            if found_model is not None:
+                model = found_model
     if usage == UNKNOWN:
         t = TOKENS_USED.search(err_text or "")
         if t:
