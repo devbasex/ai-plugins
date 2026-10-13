@@ -173,6 +173,31 @@ def test_term_to_the_group_leaves_a_killed_row(fake_clis):
     assert row["status"] == "killed" and row["usage"] == "unknown"
 
 
+def test_term_after_the_cli_ended_still_leaves_the_row(fake_clis):
+    # 監視は codex の終わりの印と result.json がそろうと、CLI が終わった後でも包みのグループへ TERM を送る。
+    # 記録の python3 を遅らせ、その間に TERM を送っても行が残ることを確かめる。
+    bin_dir = fake_clis / "bin"
+    real = subprocess.run(["bash", "-c", "command -v python3"], capture_output=True, text=True, check=True).stdout.strip()
+    shim = bin_dir / "python3"
+    shim.write_text(
+        "#!/bin/bash\n"
+        'case " $* " in *" record-cli "*) touch "$NDF_TEST_RECORDING"; sleep 1 ;; esac\n'
+        f'exec {real} "$@"\n'
+    )
+    shim.chmod(0o755)
+    marker = fake_clis / "recording"
+    stem = launch(fake_clis, "codex", NDF_TEST_RECORDING=str(marker))
+    pid = int(Path(f"{stem}.pid").read_text())
+    end = time.time() + 20
+    while not marker.exists():
+        assert time.time() < end, "記録が始まらない"
+        time.sleep(0.02)
+    os.killpg(pid, signal.SIGTERM)
+    wait_gone(stem)
+    [row] = ledger("codex")
+    assert row["status"] == "ok" and row["usage"] != "unknown"
+
+
 def test_unwritable_ledger_keeps_launch_results(fake_clis, monkeypatch):
     blocker = fake_clis / "blocker"
     blocker.write_text("")

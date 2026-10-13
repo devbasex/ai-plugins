@@ -163,6 +163,9 @@ run_wrapped() {
   local rc=0 status=
   trap 'status=killed' TERM INT
   run_runtime || rc=$?
+  # 記録の間は TERM / INT を無視する（無視は python3 へ継がれる）。監視は CLI が終わった後も包みのグループへ
+  # TERM を送るため、既定の扱いのままでは記録が殺されて行が残らない。上限は猶予の後の KILL が保つ。
+  trap '' TERM INT
   python3 "$LIB_DIR/usage_capture.py" record-cli --stem "$STEM_ABS" --runtime "$RUNTIME" --rc "$rc" \
     ${status:+--status "$status"} --model "$MODEL" < /dev/null > /dev/null 2>> "$ERR_LOG" || true
   return "$rc"
