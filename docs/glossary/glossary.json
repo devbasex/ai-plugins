@@ -2075,8 +2075,8 @@
       "term": "使用量の帳簿",
       "code": "usage_ledger",
       "context": "ndf-workflow",
-      "meaning": "claude -p の 1 回の呼び出しごとに、版・プラン・ステップ・usage を 1 行で追記する jsonl（usage/<owner>__<repo>.jsonl）",
-      "pending_source": "issues/issue-1142-design.md"
+      "meaning": "NDF が起動したエージェントの呼び出し 1 回ごとに、版・呼び出し元・モデル・使用量を 1 行で追記する jsonl。ランタイムごと（Claude・codex・kiro・agy・jev。jev は帳簿だけのランタイムで、席順の ALL_RUNTIMES には入れない）のディレクトリに、リポジトリごとのファイルを置く（<帳簿のディレクトリ>/<ランタイム>/<owner>__<repo>.jsonl）",
+      "pending_source": "issues/issue-1953-design.md"
     },
     {
       "term": "ラッパーのバージョンディレクトリ",
@@ -3812,6 +3812,30 @@
       "context": "ndf-workflow",
       "meaning": "`supervise.py run` の `--state-dir`（省けば `<プラン>-state/`）。`progress.jsonl`・`report.md`・`state.json` を置き、`--from` の再開が前の実行の記録を読む",
       "source": "docs/specifications/ndf-supervise-resume-pr.md"
+    },
+    {
+      "term": "呼び出し元",
+      "context": "ndf-workflow",
+      "meaning": "エージェントの呼び出しを起動した Skill またはスクリプト（帳簿の行の source）と、そのステップの役割（kind）の組。表示は source:kind（例: supervise:work・cross-review:review）",
+      "pending_source": "issues/issue-1953-design.md"
+    },
+    {
+      "term": "起動の共有処理",
+      "context": "ndf-workflow",
+      "meaning": "LLM の CLI と Jev を起動する処理を集めた 4 か所（launch-cli.sh・supervise_lib/claude.py の call_claude・lib/auth.py のモデルの確認・lib/jev.py の _post）。起動の後に使用量の帳簿へ 1 行を書く",
+      "pending_source": "issues/issue-1953-design.md"
+    },
+    {
+      "term": "Claude の帳簿の全体",
+      "context": "ndf-workflow",
+      "meaning": "Claude の使用量の帳簿の claude -p の行（usage）とサブエージェントの行に、行ごとの modelUsage の和から usage と親を同じくするサブエージェントの行を引いた残り（hook の効かない claude -p の中のサブエージェント）と、会話の記録だけの claude -p の会話（セッション ID が帳簿に無いもの）を足した値。同じ呼び出しは 1 回だけ数える。トークン削減の効果を測る主な値",
+      "pending_source": "issues/issue-1953-design.md"
+    },
+    {
+      "term": "会話の記録だけの呼び出し",
+      "context": "ndf-workflow",
+      "meaning": "使用量の帳簿に行が無く、Claude Code の会話の記録（~/.claude/projects/）にだけ残る claude -p の会話とサブエージェント。帳簿ができる前の分と、NDF のコードの外で打った claude -p が当たる",
+      "pending_source": "issues/issue-1953-design.md"
     }
   ]
 }
