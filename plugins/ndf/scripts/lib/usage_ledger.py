@@ -266,3 +266,39 @@ def read_usage_ledger(runtime: str = "claude", directory: Optional[Path] = None,
     if runtime not in RUNTIMES:
         raise ValueError(f"帳簿の無いランタイム: {runtime}")
     return [as_v2(r, runtime) for p in ledger_files(runtime, directory, repo) for r in read_rows(p)]
+
+
+def ledger_snapshot(directory: Path) -> dict[str, int]:
+    """帳簿のディレクトリの下の jsonl の一覧と大きさ（テストの前後の比較に使う。I9）。"""
+    d = Path(directory)
+    out = {}
+    for p in sorted(d.rglob("*.jsonl")) if d.is_dir() else []:
+        try:
+            out[str(p.relative_to(d))] = p.stat().st_size
+        except OSError:
+            continue
+    return out
+
+
+def marked_rows(directory: Path, before: dict[str, int], name: Optional[str] = None) -> list[dict]:
+    """`before` の後に増えた行のうち、テストの印（`pytest`）を持つもの。`name` を渡せばそのテストの印だけ。"""
+    d = Path(directory)
+    out = []
+    for rel, size in ledger_snapshot(d).items():
+        start = before.get(rel, 0)
+        if size <= start:
+            continue
+        try:
+            with open(d / rel, "rb") as f:
+                f.seek(start)
+                text = f.read().decode("utf-8", errors="replace")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(row, dict) and row.get("pytest") and (name is None or row["pytest"] == name):
+                out.append({"file": rel, "pytest": row["pytest"], "source": row.get("source"), "kind": row.get("kind")})
+    return out

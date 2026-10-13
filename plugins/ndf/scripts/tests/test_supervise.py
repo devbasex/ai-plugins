@@ -854,6 +854,7 @@ REPORT_EMPTY = """## フェーズの報告
 - 通ったステップ: {empty}
 - 件数: 無し
 - LLM の使用量: 入力 0 / cache read 0 / cache write 0 / 出力 0 / $0.000
+- CLI（drive・work の中）: 無し
 - 記録: {dir}
 
 | ステップ | 往復 | 秒 | cache read | cache write | 出力 | 費用 |
@@ -880,6 +881,7 @@ REPORT_RICH = """## フェーズの報告
 - 通ったステップ: impl(exit=0) → judge[続ける] → show(exit=12) → quiet(exit=12) → wait(exit=0) → wait2(exit=None)
 - 件数: impl: passed 3 / skipped 0; judge: 無し
 - LLM の使用量: 入力 56 / cache read 200 / cache write 40 / 出力 14 / $1.012
+- CLI（drive・work の中）: 無し
 - 記録: {dir}
 
 | ステップ | 往復 | 秒 | cache read | cache write | 出力 | 費用 |

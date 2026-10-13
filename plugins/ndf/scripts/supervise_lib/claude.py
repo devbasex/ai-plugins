@@ -324,7 +324,7 @@ class ClaudeRunner:
         tried_fallback, waited = False, 0.0
         tried: set[str] = set()  # この呼び出しで上限に当たったアカウント
         auth_failed: set[str] = set()  # この呼び出しで認証が通らなかったアカウント（同じアカウントを 2 度試さない）
-        who = {"source": "supervise", "plan": ctx.plan_path or "", "step": str(st.cur.get("id") or "")}
+        who = {"source": "supervise", "plan": getattr(ctx, "plan_path", None) or "", "step": str(st.cur.get("id") or "")}
         kw = {"tick": ctx.tick, "every": st.every, "caller": who, **kw}
         while True:
             try:

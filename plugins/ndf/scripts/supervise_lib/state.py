@@ -1,8 +1,6 @@
 """実行の状態（`<プラン>-state/`）の持ち主（#1142 の C1）。
 
-`RunState` は、ステップの結果・記録（`state.json` の `log` と `llm`）・途中の報告（`progress.jsonl`）・
-承認ゲート・報告（`report.md`）を持つ。書くのはこのクラスだけである。
-"""
+`RunState` は、ステップの結果・記録（`state.json` の `log` と `llm`）・途中の報告（`progress.jsonl`）・承認ゲート・報告（`report.md`）を持つ。書くのはこのクラスだけである。"""
 
 from __future__ import annotations
 
@@ -19,6 +17,7 @@ import clock
 import jsonio
 import legacy_names
 import procs
+import usage_aggregate
 import usage_ledger
 from sprint_mvv import MVV_PACES
 from supervise_lib.claude import TICK, watch_children
@@ -490,6 +489,7 @@ class RunState:
 - 通ったステップ: {steps}
 - 件数: {counts_line}
 - LLM の使用量: 入力 {l["input"]} / cache read {l["cache_read"]} / cache write {l["cache_write"]} / 出力 {l["output"]} / ${l["cost"]:.3f}
+- CLI（drive・work の中）: {usage_aggregate.runtimes_text(self.log)}
 - 記録: {self.dir}
 
 | ステップ | 往復 | 秒 | cache read | cache write | 出力 | 費用 |

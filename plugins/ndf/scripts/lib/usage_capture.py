@@ -61,7 +61,7 @@ def status_of(rc: Optional[int]) -> str:
     return "ok" if rc == 0 else "error"
 
 
-def _parse_time(value) -> Optional[float]:
+def utc_seconds(value) -> Optional[float]:
     if not isinstance(value, str) or not value:
         return None
     m = re.match(r"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(\.\d+)?", value)
@@ -71,14 +71,14 @@ def _parse_time(value) -> Optional[float]:
     return base + (float("0" + m.group(2)) if m.group(2) else 0.0)
 
 
-def _read_json(path: Path) -> object:
+def _load_json(path: Path) -> object:
     try:
         return json.loads(Path(path).read_text(encoding="utf-8", errors="replace"))
     except (OSError, ValueError):
         return None
 
 
-def _read(path: Path) -> str:
+def _read_text(path: Path) -> str:
     try:
         return Path(path).read_text(encoding="utf-8", errors="replace")
     except OSError:
@@ -97,7 +97,7 @@ def codex_usage(err_text: str, home: Optional[Path] = None) -> tuple[object, str
     if sid:
         root = Path(home or os.environ.get("CODEX_HOME") or Path.home() / ".codex") / "sessions"
         for path in sorted(root.glob(f"**/rollout-*-{sid}.jsonl")) if root.is_dir() else []:
-            for line in _read(path).splitlines():
+            for line in _read_text(path).splitlines():
                 try:
                     d = json.loads(line)
                 except ValueError:
@@ -129,10 +129,10 @@ def kiro_usage(workdir: str, started: float, ended: float, home: Optional[Path] 
                 continue
         except OSError:
             continue
-        d = _read_json(path)
+        d = _load_json(path)
         if not isinstance(d, dict) or os.path.realpath(str(d.get("cwd") or "")) != want:
             continue
-        created = _parse_time(d.get("created_at"))
+        created = utc_seconds(d.get("created_at"))
         if created is not None and started - 1 <= created <= ended + 1:
             found.append(d)
     if len(found) != 1:
@@ -171,7 +171,7 @@ def transcript_usage(path: Path) -> tuple[object, str]:
     w5 = w1h = 0
     seen: set = set()
     models: Counter = Counter()
-    for line in _read(path).splitlines():
+    for line in _read_text(path).splitlines():
         try:
             row = json.loads(line)
         except ValueError:
@@ -219,7 +219,7 @@ def record_claude(
     return usage_ledger.append_safely(cwd, rec)
 
 
-def _record(runtime: str, cwd: str, who: dict, **fields) -> bool:
+def _append_row(runtime: str, cwd: str, who: dict, **fields) -> bool:
     try:
         rec = usage_ledger.UsageRecord(runtime=runtime, **who, **fields)
     except Exception as e:  # noqa: BLE001
@@ -262,7 +262,7 @@ def record_output(
         usage, sid = agy_usage(stdout)
     else:
         usage = UNKNOWN
-    return _record(runtime, cwd, who, usage=usage, status=status, model=model, seconds=seconds, session_id=sid)
+    return _append_row(runtime, cwd, who, usage=usage, status=status, model=model, seconds=seconds, session_id=sid)
 
 
 def record_probe(runtime: str, *, cwd: str, stdout: str, stderr: str, rc: Optional[int], started: float, model: str = "") -> bool:
@@ -280,7 +280,7 @@ def record_jev(body: dict, payload: Optional[dict], *, started: float, cwd: Opti
     extra = payload.get("usage") if isinstance(payload, dict) else None
     if isinstance(extra, dict):
         usage.update({k: v for k, v in extra.items() if k not in usage})
-    return _record(
+    return _append_row(
         "jev",
         cwd or os.getcwd(),
         caller(kind="evaluate"),
@@ -297,7 +297,7 @@ def record_subagent(hook: dict) -> bool:
     path = hook.get("agent_transcript_path")
     usage, model = transcript_usage(Path(path)) if isinstance(path, str) and path else (UNKNOWN, "")
     who = caller(source="subagent", kind="subagent")
-    return _record(
+    return _append_row(
         "claude",
         str(hook.get("cwd") or os.getcwd()),
         who,
@@ -312,16 +312,16 @@ def record_subagent(hook: dict) -> bool:
 
 def record_cli(stem: str, runtime: str, rc: Optional[int] = None, status: Optional[str] = None, model: str = "") -> bool:
     """`launch-cli.sh` の 1 回の起動を、`<stem>-stdout.log`・`-err.log`・`-launch.json` から帳簿へ書く。"""
-    launch = _read_json(Path(f"{stem}-launch.json"))
+    launch = _load_json(Path(f"{stem}-launch.json"))
     launch = launch if isinstance(launch, dict) else {}
-    started = _parse_time(launch.get("started_at")) or time.time()
+    started = utc_seconds(launch.get("started_at")) or time.time()
     cwd = str(launch.get("workdir") or os.getcwd())
     status = status or status_of(rc)
     return record_output(
         runtime,
         cwd=cwd,
-        stdout=_read(Path(f"{stem}-stdout.log")),
-        stderr=_read(Path(f"{stem}-err.log")),
+        stdout=_read_text(Path(f"{stem}-stdout.log")),
+        stderr=_read_text(Path(f"{stem}-err.log")),
         status=status,
         started=started,
         who=caller(),
