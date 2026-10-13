@@ -2075,8 +2075,8 @@
       "term": "使用量の帳簿",
       "code": "usage_ledger",
       "context": "ndf-workflow",
-      "meaning": "NDF が起動したエージェントの呼び出し 1 回ごとに、版・呼び出し元・モデル・使用量を 1 行で追記する jsonl。ランタイムごとに分ける（Claude・codex・kiro・agy・jev）",
-      "pending_source": "issues/issue-1953-requirements.md"
+      "meaning": "NDF が起動したエージェントの呼び出し 1 回ごとに、版・呼び出し元・モデル・使用量を 1 行で追記する jsonl。ランタイムごと（Claude・codex・kiro・agy・jev）のディレクトリに、リポジトリごとのファイルを置く（<帳簿のディレクトリ>/<ランタイム>/<owner>__<repo>.jsonl）",
+      "pending_source": "issues/issue-1953-design.md"
     },
     {
       "term": "ラッパーのバージョンディレクトリ",
@@ -3816,20 +3816,26 @@
     {
       "term": "呼び出し元",
       "context": "ndf-workflow",
-      "meaning": "エージェントの呼び出しを起動した Skill またはスクリプトと、そのステップ（例: supervise:work・cross-review:review）",
-      "pending_source": "issues/issue-1953-requirements.md"
+      "meaning": "エージェントの呼び出しを起動した Skill またはスクリプト（帳簿の行の source）と、そのステップの役割（kind）の組。表示は source:kind（例: supervise:work・cross-review:review）",
+      "pending_source": "issues/issue-1953-design.md"
     },
     {
       "term": "起動の共有処理",
       "context": "ndf-workflow",
-      "meaning": "CLI の起動を集めた処理（launch-cli.sh・supervise_lib/claude.py など）。使用量の帳簿への記録はここで行う",
-      "pending_source": "issues/issue-1953-requirements.md"
+      "meaning": "LLM の CLI と Jev を起動する処理を集めた 4 か所（launch-cli.sh・supervise_lib/claude.py の call_claude・lib/auth.py のモデルの確認・lib/jev.py の _post）。起動の後に使用量の帳簿へ 1 行を書く",
+      "pending_source": "issues/issue-1953-design.md"
     },
     {
       "term": "Claude の帳簿の全体",
       "context": "ndf-workflow",
       "meaning": "Claude の使用量の帳簿のサブエージェントの行と claude -p の行の合計。トークン削減の効果を測る主な値",
       "pending_source": "issues/issue-1953-requirements.md"
+    },
+    {
+      "term": "会話の記録だけの呼び出し",
+      "context": "ndf-workflow",
+      "meaning": "使用量の帳簿に行が無く、Claude Code の会話の記録（~/.claude/projects/）にだけ残る claude -p の会話とサブエージェント。帳簿ができる前の分と、NDF のコードの外で打った claude -p が当たる",
+      "pending_source": "issues/issue-1953-design.md"
     }
   ]
 }
