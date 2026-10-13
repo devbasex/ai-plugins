@@ -12,7 +12,7 @@
 | 2（`--reopen`） | claude / kiro | 2 者とも末尾の 2 コミット（cross-refactoring が足したもの）だけ。claude は「変更は manager.py だけ」と書いた |
 | 3（`--reopen --focus` で `git diff <base>...<head>` を読むよう指示） | claude / codex | 2 者ともスプリントの全差分 |
 
-スプリントの Pull Request は、検査のプランで cross-refactoring の後に cross-review が走るため、末尾にリファクタリングのコミットと改修計画のコメントが付く。担当はそれを手がかりに、範囲を末尾のコミットへ狭めた。round 1 の「全員 APPROVE・指摘 0」は、全差分を見た結果ではなかった。
+スプリントの Pull Request は、検査のプランで cross-refactoring の後に cross-review が走るため、末尾にリファクタリングのコミットとリファクタリング計画のコメントが付く。担当はそれを手がかりに、範囲を末尾のコミットへ狭めた。round 1 の「全員 APPROVE・指摘 0」は、全差分を見た結果ではなかった。
 
 ## 原因の見立て
 
