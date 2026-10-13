@@ -128,6 +128,31 @@ def test_stop_tree_treats_einval_and_esrch_while_waiting_as_stopped(monkeypatch,
         p.wait(timeout=5)
 
 
+def test_stop_tree_still_kills_the_rest_when_one_pid_raises_while_waiting(monkeypatch):
+    """1 つの pid の EINVAL で残りを空にせず、TERM を無視して生きている子へ SIGKILL を送る（#1817）。"""
+    p = subprocess.Popen(["sh", "-c", "trap '' TERM; sleep 30 & sleep 30; wait"], start_new_session=True)
+    deadline = time.monotonic() + 5
+    while len(procs.child_pids(p.pid)) < 2 and time.monotonic() < deadline:
+        time.sleep(0.05)
+    kids = procs.child_pids(p.pid)
+    real = procs.psutil.wait_procs
+
+    def wait_procs(procs_, timeout=None):
+        if len(procs_) > 1 or procs_[0].pid == p.pid:
+            raise OSError(errno.EINVAL, os.strerror(errno.EINVAL))
+        return real(procs_, timeout=timeout)
+
+    try:
+        monkeypatch.setattr(procs.psutil, "wait_procs", wait_procs)
+        assert procs.stop_tree(p.pid, grace=0.2)
+        assert len(kids) == 2
+        assert all(not procs.pid_alive(k) or procs.pid_is_zombie(k) for k in kids)
+    finally:
+        monkeypatch.undo()
+        procs.stop_tree(p.pid, grace=0)
+        p.wait(timeout=5)
+
+
 @pytest.mark.parametrize("exc", [OSError(errno.EPERM, "x"), RuntimeError("x")])
 def test_stop_tree_raises_other_errors_while_waiting(monkeypatch, exc):
     """EINVAL / ESRCH 以外の errno と、OSError 以外の例外は握りつぶさない（#1817）。"""
