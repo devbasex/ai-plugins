@@ -150,6 +150,8 @@ def test_the_time_budget_is_shared_by_the_steps_of_one_runtime(auth, monkeypatch
     budgets: list[float] = []
 
     def run(cmd, **kw):
+        if cmd[0] == "git":  # 使用量の帳簿のリポジトリの鍵を引く git（#1953）は確認の持ち時間に入らない
+            return _completed(cmd, 1)
         budgets.append(kw["timeout"])
         time.sleep(0.05)
         return _completed(cmd, 0, stdout="OK")

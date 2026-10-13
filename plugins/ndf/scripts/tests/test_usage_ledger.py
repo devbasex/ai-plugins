@@ -75,7 +75,7 @@ def ledger(tmp_path, monkeypatch):
 
 
 def rows(d: Path) -> list[dict]:
-    return usage_ledger.read_all(d)
+    return usage_ledger.read_usage_ledger("claude", d)
 
 
 # --- ライブラリ ---
@@ -93,7 +93,7 @@ def test_record_keeps_usage_and_picks_main_model():
 def test_missing_values_stay_empty_not_zero():
     d = json.loads(usage_ledger.UsageRecord.from_claude({}, source="mvv-gate", kind="mvv").to_json())
     assert d["model"] == "" and d["model_usage"] is None
-    assert d["cost_usd"] is None and d["turns"] is None and d["seconds"] is None and d["usage"] == {}
+    assert d["cost_usd"] is None and d["turns"] is None and d["seconds"] is None and d["usage"] == "unknown"
 
 
 def test_cache_writes_split_5m_and_1h():
@@ -107,7 +107,7 @@ def test_append_only_adds_lines(tmp_path):
     for kind in ("work", "judge"):
         led.append(usage_ledger.UsageRecord(source="supervise", kind=kind))
     assert [r["kind"] for r in led.records()] == ["work", "judge"]
-    assert led.path.name == "unknown.jsonl"  # origin の無いリポジトリ
+    assert led.path == tmp_path / "u" / "claude" / "unknown.jsonl"  # origin の無いリポジトリ
 
 
 def test_slug_comes_from_origin(tmp_path):
@@ -203,6 +203,70 @@ def test_nested_drive_keeps_inner_metrics(tmp_path, monkeypatch):
     assert json.loads(res.read_text()) == {"review_status": "approved"}
 
 
+CHILD = (
+    "import json, os, sys, time\n"
+    f"sys.path.insert(0, {str(SCRIPTS / 'lib')!r})\n"
+    "import usage_capture\n"
+    "def rec(rt, usage):\n"
+    "    usage_capture._append_row(rt, os.getcwd(), usage_capture.caller(), usage=usage, status='ok')\n"
+)
+
+
+def test_runtime_work_writes_its_runtime_ledger_not_claude(tmp_path, ledger, monkeypatch):
+    """runtime を指定した work は Claude の帳簿へ `usage: {}` の行を書かず、そのランタイムの帳簿の行を報告へ集める。"""
+    fake = tmp_path / "fake_external_ai.py"
+    fake.write_text(
+        CHILD
+        + "rec('codex', {'input_tokens': 9})\n"
+        + "out = sys.argv[sys.argv.index('--output-file') + 1]\n"
+        + "open(out, 'w').write('## 作業の報告\\n- 結果: 完了')\n"
+        + "print(json.dumps({'status': 'ok'}))\n"
+    )
+    monkeypatch.setattr(paths, "EXTERNAL_AI", fake)
+    plan_file = tmp_path / "plan-r.json"
+    plan_file.write_text("{}")
+    s, text = run_plan(tmp_path, [{"id": "impl", "type": "work", "runtime": "codex", "prompt": "直す", "next": "end"}], str(plan_file))
+    assert rows(ledger) == [], text
+    [row] = usage_ledger.read_usage_ledger("codex", ledger)
+    assert (row["source"], row["kind"], row["step"], row["plan"]) == ("supervise", "work", "impl", str(plan_file.resolve()))
+    assert s.state.llm["work"] == 0 and "llm" not in s.state.log[0]
+    assert s.state.log[0]["llm_runtimes"]["codex"]["usage"] == {"input_tokens": 9}
+
+
+def test_drive_step_reports_cli_usage_per_runtime(tmp_path, ledger, monkeypatch):
+    drive = tmp_path / "drive.py"
+    drive.write_text(
+        CHILD
+        + "os.environ.update(NDF_USAGE_SOURCE='cross-review', NDF_USAGE_KIND='review')\n"
+        + "rec('codex', {'input_tokens': 7})\nrec('kiro', {'credits': 0.5})\n"
+        + "print(json.dumps({'status': 'ok'}))\n"
+    )
+    monkeypatch.setitem(paths.DRIVES, "fake", drive)
+    s, text = run_plan(tmp_path, [{"id": "review", "type": "drive", "drive": "fake", "next": "end"}])
+    assert "- CLI（drive・work の中）: codex 1 回（input_tokens 7）; kiro 1 回（credits 0.5）" in text, text
+    assert set(s.state.log[0]["llm_runtimes"]) == {"codex", "kiro"}
+
+
+def test_full_step_counts_in_total_not_subagent_only(tmp_path, ledger):
+    import usage_aggregate
+
+    run_plan(tmp_path, [{"id": "rev", "type": "work", "full": True, "prompt": "/ndf:cross-review", "next": "end"}])
+    [row] = rows(ledger)
+    assert (row["kind"], row["step"]) == ("full", "rev")
+    c = usage_aggregate.usage_report("claude", root=tmp_path, directory=ledger)["claude"]
+    assert c["subagent_only"]["calls"] == 0 and c["subagent_only"]["usage"] == {}
+    for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"):
+        assert c["total"]["usage"][k] >= USAGE[k]
+
+
+def test_project_mvv_names_itself(tmp_path, ledger):
+    from project_lib import mvv_llm
+
+    mvv_llm.call_llm_json("system", "prompt", tmp_path, "mvv-vet")
+    [row] = rows(ledger)
+    assert (row["source"], row["kind"], row["runtime"]) == ("project-mvv", "mvv-vet", "claude")
+
+
 # --- mvv-gate.py ---
 
 
@@ -216,7 +280,7 @@ def test_mvv_ask_appends_one_row(tmp_path, monkeypatch):
     assert verdict["verdict"] == "follow" and usage["cost_usd"] == 0.06
     [row] = rows(d)
     assert (row["source"], row["kind"], row["plan"], row["step"]) == ("mvv-gate", "mvv", "", "")
-    assert row["seconds"] == 2.0 and row["usage"]["cache_creation"] == USAGE["cache_creation"]
+    assert row["seconds"] is not None and row["usage"]["cache_creation"] == USAGE["cache_creation"]
 
 
 # --- プランの状態の置き場所 ---

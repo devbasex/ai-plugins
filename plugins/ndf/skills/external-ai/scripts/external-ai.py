@@ -134,14 +134,14 @@ def cmd_check(a) -> None:
 
 
 def read_stdout(runtime: str, path: pathlib.Path) -> str:
-    """stdout から本文を取り出す。claude は JSON の `result`、kiro は ANSI を除く。"""
+    """stdout から本文を取り出す。claude は JSON の `result`、agy は JSON の `response`（#1953 の決定 3）、kiro は ANSI を除く。"""
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ""
     if runtime == "kiro":
         text = ANSI.sub("", text)
-    if runtime == "claude":
+    if runtime in ("claude", "agy"):
         import json
 
         try:
@@ -150,7 +150,7 @@ def read_stdout(runtime: str, path: pathlib.Path) -> str:
             return ""
         if not isinstance(payload, dict) or payload.get("is_error"):
             return ""
-        text = payload.get("result") or ""
+        text = str(payload.get("result" if runtime == "claude" else "response") or "")
     return text if text.strip() else ""
 
 
@@ -252,7 +252,10 @@ def cmd_run(a) -> None:
 
     cli_limit = str(a.timeout + limits.CLI_MARGIN) if a.timeout else a.phase
     launch = [str(LIB / "launch-cli.sh"), runtime, str(workdir), str(prompt_copy), str(stem), a.model or "", str(output.parent), cli_limit]
-    p = proc.run(launch, check=False)
+    # 帳簿の呼び出し元（#1953 の決定 7）。呼び出し元が名乗っていればそれを継ぎ、無ければ external-ai の run
+    usage_env = {**os.environ, "NDF_USAGE_SOURCE": os.environ.get("NDF_USAGE_SOURCE") or "external-ai"}
+    usage_env["NDF_USAGE_KIND"] = os.environ.get("NDF_USAGE_KIND") or "run"
+    p = proc.run(launch, check=False, env=usage_env)
     if p.returncode != 0:
         finish(runtime, "launch_failed", f"起動できない: {p.stderr.strip()[:300]}", {"stem": str(stem)})
     # 監視は `<stem>-result.json` の有無で結果を見る。結果ファイルへのリンクにして、
