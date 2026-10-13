@@ -48,8 +48,8 @@
 
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
-| I1 | CLI の版の一覧 | 配布の経路のスモークの像に入った CLI の `--version` の出力は、一覧の版数を含む | 像の作成が落ち、スモークが落ちる |
-| I2 | CLI の版の一覧 | Containerfile が宣言する `ARG` の名前の集合と、一覧のキーの集合が一致し、どの値も空でなく、`ARG` は既定値を持たない | 検査のテストが落ちる。手元と継続的統合では、値の無い `ARG` で像の作成が落ちる |
+| I1 | CLI の版の一覧 | 配布の経路のスモークの像に入った CLI の `--version` の出力から取り出した版数（`[0-9]+(\.[0-9]+)+` に当たる最初の文字列）は、一覧の版数と完全に一致する（`1.3.4` に対する `1.3.40` は一致としない） | 像の作成が落ち、スモークが落ちる |
+| I2 | CLI の版の一覧 | 4 つの Containerfile（claude・codex・kiro・agy）が宣言する `ARG` の名前の和集合が一覧の 10 キーの集合と一致し、各 `ARG` はその接頭辞のランタイムの Containerfile にだけ現れ（`CLAUDE_CODE_` は claude、`CODEX_` は codex、`KIRO_CLI_` は kiro、`AGY_` は agy）、どの値も空でなく、`ARG` は既定値を持たない | 検査のテストが落ちる。手元と継続的統合では、値の無い `ARG` で像の作成が落ちる |
 | I3 | CLI の版の一覧 | 配布の経路の取得先は、版数を含む取得先だけ（`latest`・版を受けないインストーラを使わない） | 検査のテストが落ちる |
 | I4 | 最新の版のスモークの失敗の課題 | 同じランタイムの開いている失敗の課題は高々 1 件 | 2 度目以降はコメントを足し、新しい課題を作らない |
 | I5 | 最新の版のスモークの失敗の課題 | 最新の版のスモークは PR と push で起動せず、書き込みの権限は `issues: write` だけ | 検査のテストが落ちる |
@@ -89,7 +89,7 @@
 | 要素 | 責務 |
 | --- | --- |
 | CLI の版の一覧（`tests/runtime-smoke/cli-versions.env`、新設） | 4 ランタイムの版数・取得先・checksum を `KEY=VALUE` の行で持つ。ランタイムごとにキーの接頭辞（`CLAUDE_CODE_`・`CODEX_`・`KIRO_CLI_`・`AGY_`）で 1 か所にまとまる |
-| ランタイムの像（`tests/runtime-smoke/Containerfile.{claude,codex,kiro,agy}`、変更） | 既定値の無い `ARG` で版を受け、版数を含む取得先から入れ、`--version` の出力が版数を含むことを作成の中で確かめる |
+| ランタイムの像（`tests/runtime-smoke/Containerfile.{claude,codex,kiro,agy}`、変更） | 既定値の無い `ARG` で版を受け、版数を含む取得先から入れ、`--version` の出力から取り出した版数が一覧の版数と完全に一致することを作成の中で確かめる（I1） |
 | スモークの起動（`scripts/runtime-smoke-test.sh`、変更） | 一覧を読み、各行を `--build-arg` として像の作成へ渡す。`--cli-versions <パス>` で別の一覧を受ける（既定は `tests/runtime-smoke/cli-versions.env`） |
 | アダプタ（`tests/runtime-smoke/adapters/kiro.sh`・`agy.sh`、変更） | CLI が無いときに読み飛ばす分岐を外す。kiro の版は `kiro-cli --version` で残す |
 | 最新の版の解決と課題の報告（`scripts/runtime-smoke-latest.py`、新設） | `resolve` が取得元の最新の版を一覧と同じ形で出す。`report` が失敗の課題を作るか、開いている課題へコメントを足す |
@@ -247,7 +247,7 @@ sequenceDiagram
     T->>V: 読む（既定の一覧）
     T->>B: --build-arg で版・URL・checksum を渡す
     B->>B: 版つきの取得先から入れ、checksum を確かめる
-    B->>B: --version が版数を含むかを確かめる
+    B->>B: --version の出力から取り出した版数が一覧の版数と完全に一致するかを確かめる
     alt 取得・checksum・版の照合のどれかが落ちた
         B-->>T: 作成の失敗（終了コード 1）
         T-->>W: runtime-smoke (<名前>) が落ちる
@@ -368,8 +368,8 @@ main を試す形は採らなかった。main は配布が済んだ中身で、�
 
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
-| 1・I2 | 一覧のキーの集合と、4 つの Containerfile の `ARG` の名前の集合が一致し、値が空でなく、`ARG` が既定値を持たない | 一覧から 1 行を消す・`ARG` に既定値を足す・値を空にすると、検査のテストが落ちる |
-| 2・I1 | 像の作成が `--version` の出力に一覧の版数を含むことを確かめる。固定を入れた PR の `version.log` が 4 ランタイムとも一覧の版を示す | 一覧の版数だけを別の実在する版に変えて checksum を合わせない、または版数を存在しない値にすると、像の作成が落ちる |
+| 1・I2 | 一覧のキーの集合と、4 つの Containerfile の `ARG` の名前の和集合が一致し、各 `ARG` が接頭辞のランタイムの Containerfile にだけ現れ、値が空でなく、`ARG` が既定値を持たない | 一覧から 1 行を消す・`ARG` に既定値を足す・値を空にすると、検査のテストが落ちる |
+| 2・I1 | 像の作成が `--version` の出力から取り出した版数と一覧の版数の完全一致を確かめる。固定を入れた PR の `version.log` が 4 ランタイムとも一覧の版を示す | 一覧の版数だけを別の実在する版に変えて checksum を合わせない、または版数を存在しない値にすると、像の作成が落ちる |
 | 3・I3 | Containerfile の取得の行が一覧の値（`${...}`）を含む取得先だけを使い、`latest` と公式のインストーラの URL を含まない | Containerfile を `curl ... install.sh \| bash` や `@anthropic-ai/claude-code`（版なし）へ戻すと、検査のテストが落ちる |
 | 4 | 固定を入れた PR で `runtime-smoke (<ランタイム>)` が 4 件とも通る | — （PR の継続的統合で見る） |
 | 5・6・I5 | 最新の版のスモークの `on` が `schedule` と `workflow_dispatch` だけで、`permissions` が `contents: read`・`issues: write` だけ。`required-checks-check` が知らせを出さない | `on` に `pull_request` を足す・`permissions` に `contents: write` を足すと、検査のテストが落ちる |
