@@ -42,7 +42,7 @@ left as an argument and ignored.
 `external-ai.py run agy` が次の形で起動する（共通ライブラリの `launch-cli.sh`）。`--print-timeout` は
 工程の監視の上限 + 120 秒、`--add-dir` は作業ディレクトリと結果ファイルの置き場所である。
 使用量は JSON の出力にしか無いため `--output-format json` で起動し、本文は `external-ai.py` が `response` の鍵から
-読む（#1953）。
+読む。
 
 ```bash
 agy --dangerously-skip-permissions --output-format json --print-timeout <秒>s [--model M] \
