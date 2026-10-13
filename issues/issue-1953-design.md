@@ -74,7 +74,7 @@
 
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
-| 使用量の帳簿 | NDF が起動したエージェントの呼び出し 1 回ごとに 1 行を追記する jsonl。ランタイムごとのディレクトリにリポジトリごとのファイルを置く（`<帳簿のディレクトリ>/<ランタイム>/<owner>__<repo>.jsonl`） | 意味の変更（置き場の形を足す） |
+| 使用量の帳簿 | NDF が起動したエージェントの呼び出し 1 回ごとに 1 行を追記する jsonl。ランタイムごとのディレクトリにリポジトリごとのファイルを置く（`<帳簿のディレクトリ>/<ランタイム>/<owner>__<repo>.jsonl`）。帳簿のランタイムは claude・codex・kiro・agy・jev の 5 つで、jev は cross-review の席順の `ALL_RUNTIMES`（4 つ）に足さない | 意味の変更（置き場の形と jev を足す） |
 | 呼び出し元 | 行の `source`（Skill またはスクリプト）と `kind`（そのステップの役割）の組。表示は `source:kind`（例: `supervise:work`・`cross-review:review`） | 意味の変更（行の鍵との対応を足す） |
 | 起動の共有処理 | LLM の CLI と Jev を起動する処理を集めた 4 か所（`launch-cli.sh`・`supervise_lib/claude.py` の `call_claude`・`lib/auth.py` のモデルの確認・`lib/jev.py` の `_post`）。起動の後に使用量の帳簿へ 1 行を書く | 意味の変更（4 か所に限る） |
 | 会話の記録だけの呼び出し | 帳簿に行が無く、Claude Code の会話の記録（`~/.claude/projects/`）にだけ残る `claude -p` の会話とサブエージェント。帳簿ができる前の分と、NDF のコードの外で打った `claude -p` が当たる | 追加 |
@@ -116,7 +116,7 @@
 | `scripts/token-usage.py`・`scripts/measure/claude-p-usage.py` | 変える | 帳簿を `usage_ledger.read_ledger(runtime="claude")` で読む（新しい置き場と旧い置き場の両方） |
 | `docs/specifications/ndf-context-window-metrics.md` | 変える | 数える範囲・帳簿の分け方・トークン削減の課題の受け入れ条件を Claude の帳簿の全体で書くこと |
 
-**値の集合へ値を足す規則の判定。** ランタイムの集合に `jev` を、`kind` の集合に `subagent`・`probe`・`evaluate` と Skill の役割（`review` など）を足す。当てはまらない規則は次の 4 つで、上の表の行で変える。
+**値の集合へ値を足す規則の判定。** 帳簿のランタイムの集合（行の `runtime` と置き場のディレクトリ）に `jev` を、`kind` の集合に `subagent`・`probe`・`evaluate` と Skill の役割（`review` など）を足す。当てはまらない規則は次の 4 つで、上の表の行で変える。
 
 | 既存の規則 | 当てはまらない理由 | 変える行 |
 | --- | --- | --- |
