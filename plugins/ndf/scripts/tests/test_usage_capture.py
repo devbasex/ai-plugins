@@ -340,19 +340,23 @@ def test_codex_usage_without_session_id_falls_back_to_tokens_used(tmp_path):
 
 
 def test_codex_usage_takes_the_last_token_count_and_model(tmp_path):
-    _rollout(tmp_path, CODEX_SID, [
-        "not json",
-        [1, 2],
-        {"type": "turn_context", "payload": "x"},
-        {"type": "turn_context", "payload": {"model": "gpt-a"}},
-        _token_count(input_tokens=10),
-        {"type": "event_msg", "payload": {"type": "token_count", "info": None}},
-        {"type": "event_msg", "payload": {"type": "token_count", "info": {"total_token_usage": {}}}},
-        {"type": "event_msg", "payload": {"type": "other", "info": {"total_token_usage": {"input_tokens": 99}}}},
-        {"type": "turn_context", "payload": {"model": 5}},
-        {"type": "turn_context", "payload": {"model": "gpt-b"}},
-        _token_count(input_tokens=20, output_tokens=3),
-    ])
+    _rollout(
+        tmp_path,
+        CODEX_SID,
+        [
+            "not json",
+            [1, 2],
+            {"type": "turn_context", "payload": "x"},
+            {"type": "turn_context", "payload": {"model": "gpt-a"}},
+            _token_count(input_tokens=10),
+            {"type": "event_msg", "payload": {"type": "token_count", "info": None}},
+            {"type": "event_msg", "payload": {"type": "token_count", "info": {"total_token_usage": {}}}},
+            {"type": "event_msg", "payload": {"type": "other", "info": {"total_token_usage": {"input_tokens": 99}}}},
+            {"type": "turn_context", "payload": {"model": 5}},
+            {"type": "turn_context", "payload": {"model": "gpt-b"}},
+            _token_count(input_tokens=20, output_tokens=3),
+        ],
+    )
     err = f"session id: {CODEX_SID}\ntokens used\n 999\n"
     assert usage_capture.codex_usage(err, tmp_path) == ({"input_tokens": 20, "output_tokens": 3}, "gpt-b", CODEX_SID)
 
