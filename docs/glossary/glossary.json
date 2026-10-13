@@ -2412,7 +2412,7 @@
     {
       "term": "従量の接続",
       "context": "ndf-relay",
-      "meaning": "利用上限の無い、使った分だけ費用が掛かる claude の接続（Bedrock か Anthropic API の API キー）。中身は利用者が宣言し、登録済みアカウントがすべて上限のときだけ使う",
+      "meaning": "利用上限の無い、使った分だけ費用が掛かる claude の接続（Bedrock か Anthropic API の API キー）。中身は利用者が宣言し、登録済みアカウントがすべて上限か認証できないときに使う",
       "source": "",
       "pending_source": "issues/issue-1389-requirements.md"
     },
