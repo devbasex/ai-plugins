@@ -238,12 +238,13 @@ def parse_report(text: str) -> list[dict]:
 # ---------- B: 帳簿（記録の残らない claude -p） ----------
 
 
-def read_ledger(path: Path) -> list[tuple[float, dict]]:
-    """帳簿の行（時刻・行）を時刻の順に。時刻を読めない行は捨てる。"""
+def read_ledger(root: Path, key: str) -> list[tuple[float, dict]]:
+    """Claude の帳簿の `claude -p` の行（時刻・行）を時刻の順に。版 2 の `claude/` と版 1 の直下の両方を読む。
+    サブエージェントの行（`kind=subagent`。#1953）と時刻を読めない行は捨てる。"""
     out = []
-    for r in usage_ledger.read_rows(path):
+    for r in usage_ledger.read_usage_ledger("claude", root, repo=key):
         t = tu.parse_ts(r.get("at"))
-        if t is not None:
+        if t is not None and r.get("kind") != "subagent":
             out.append((t, r))
     return sorted(out, key=lambda x: x[0])
 
@@ -678,8 +679,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     a = ap.parse_args(argv)
     configure(a.repo, a.sv_root, a.projects, a.seat_prefix)
-    ledger_path = a.usage_root / f"{usage_ledger.repo_key(str(a.repo))}.jsonl"
-    ledger = read_ledger(ledger_path)
+    key = usage_ledger.repo_key(str(a.repo))
+    ledger_path = a.usage_root / "claude" / f"{key}.jsonl"
+    ledger = read_ledger(a.usage_root, key)
     t0 = ledger[0][0] if ledger else None  # 帳簿のある期間の始まり（決定 4）
     if a.since is None and t0 is None:
         ap.error(f"帳簿が無い（{ledger_path}）。--since を渡す")

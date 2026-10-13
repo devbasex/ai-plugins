@@ -46,7 +46,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import shlex
 import subprocess
 import sys
 import urllib.parse
@@ -187,33 +186,20 @@ def well_formed(verdict) -> bool:
 def ask(prompt: str) -> tuple[dict | None, str, dict]:
     """(判定, 生の文, 使用量) を返す。読めなければ判定は None。
 
-    呼び出しごとに使用量の帳簿へ 1 行を足す（#1142 の不足 f。source は mvv-gate、プランの外の呼び出し）。
+    claude -p は起動の共有処理 `call_claude` で起動し、呼び出しごとに Claude の使用量の帳簿へ 1 行が残る
+    （#1953 の決定 2。source は mvv-gate、プランの外の呼び出し）。NDF_MVV_CLAUDE は起動するコマンドの差し替え。
     """
-    import usage_ledger  # lib/ は起動の時に sys.path へ足してある
-    from supervise_lib.claude import minimal_args
+    from supervise_lib.claude import call_claude
 
-    base = shlex.split(os.environ.get("NDF_MVV_CLAUDE", "claude"))
-    cmd = base + minimal_args(SYSTEM) + ["--tools", ""]
     try:
-        p = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=600)
-    except (OSError, subprocess.TimeoutExpired) as e:
+        res = call_claude(
+            SYSTEM, prompt, None, os.getcwd(), 600, caller={"source": TOOL, "kind": "mvv"}, base=os.environ.get("NDF_MVV_CLAUDE")
+        )
+    except OSError as e:
         return None, str(e)[-500:], {}
-    try:
-        outer = json.loads(p.stdout)
-    except json.JSONDecodeError:
-        outer = None
-    if not isinstance(outer, dict):
-        usage_ledger.append_safely(os.getcwd(), usage_ledger.UsageRecord(source="mvv-gate", kind="mvv"))
-        return None, (p.stdout + p.stderr)[-500:], {}
-    text = outer.get("result") or ""
-    usage = {"cost_usd": outer.get("total_cost_usd"), "seconds": (outer.get("duration_ms") or 0) / 1000}
-    usage_ledger.append_safely(
-        os.getcwd(),
-        usage_ledger.UsageRecord.from_claude(
-            outer, source="mvv-gate", kind="mvv", seconds=usage["seconds"] if outer.get("duration_ms") is not None else None
-        ),
-    )
-    verdict = pm.json_object(text)
+    text = str(res.get("text") or "")
+    usage = {"cost_usd": res.get("cost"), "seconds": res.get("seconds")}
+    verdict = pm.json_object(text) if res.get("ok") else None
     if not well_formed(verdict):
         return None, text[-500:], usage
     return verdict, text, usage

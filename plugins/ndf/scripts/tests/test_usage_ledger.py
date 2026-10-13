@@ -75,7 +75,7 @@ def ledger(tmp_path, monkeypatch):
 
 
 def rows(d: Path) -> list[dict]:
-    return usage_ledger.read_all(d)
+    return usage_ledger.read_usage_ledger("claude", d)
 
 
 # --- ライブラリ ---
@@ -93,7 +93,7 @@ def test_record_keeps_usage_and_picks_main_model():
 def test_missing_values_stay_empty_not_zero():
     d = json.loads(usage_ledger.UsageRecord.from_claude({}, source="mvv-gate", kind="mvv").to_json())
     assert d["model"] == "" and d["model_usage"] is None
-    assert d["cost_usd"] is None and d["turns"] is None and d["seconds"] is None and d["usage"] == {}
+    assert d["cost_usd"] is None and d["turns"] is None and d["seconds"] is None and d["usage"] == "unknown"
 
 
 def test_cache_writes_split_5m_and_1h():
@@ -107,7 +107,7 @@ def test_append_only_adds_lines(tmp_path):
     for kind in ("work", "judge"):
         led.append(usage_ledger.UsageRecord(source="supervise", kind=kind))
     assert [r["kind"] for r in led.records()] == ["work", "judge"]
-    assert led.path.name == "unknown.jsonl"  # origin の無いリポジトリ
+    assert led.path == tmp_path / "u" / "claude" / "unknown.jsonl"  # origin の無いリポジトリ
 
 
 def test_slug_comes_from_origin(tmp_path):
@@ -216,7 +216,7 @@ def test_mvv_ask_appends_one_row(tmp_path, monkeypatch):
     assert verdict["verdict"] == "follow" and usage["cost_usd"] == 0.06
     [row] = rows(d)
     assert (row["source"], row["kind"], row["plan"], row["step"]) == ("mvv-gate", "mvv", "", "")
-    assert row["seconds"] == 2.0 and row["usage"]["cache_creation"] == USAGE["cache_creation"]
+    assert row["seconds"] is not None and row["usage"]["cache_creation"] == USAGE["cache_creation"]
 
 
 # --- プランの状態の置き場所 ---

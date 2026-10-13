@@ -1,6 +1,7 @@
-"""使用量の帳簿: `claude -p` の 1 回の呼び出しごとに 1 行を追記する jsonl（#1142 の不足 f）。
+"""使用量の帳簿: NDF が起動したエージェントの呼び出し 1 回ごとに 1 行を追記する jsonl（#1142・#1953）。
 
-置き場所は `<帳簿のディレクトリ>/<owner>__<repo>.jsonl`。帳簿のディレクトリは検査の記録
+帳簿はランタイムごとに分ける（claude・codex・kiro・agy・jev）。料金体系が違うため、帳簿の間で単位を足さない。
+置き場所は `<帳簿のディレクトリ>/<runtime>/<owner>__<repo>.jsonl`。帳簿のディレクトリは検査の記録
 （`check-trigger.py`）と同じ順で決める:
 
 1. `NDF_USAGE_DIR`（テストと、置き場所を明示したいとき）
@@ -8,9 +9,12 @@
 3. `${XDG_STATE_HOME}/ndf/usage`
 4. `~/.local/state/ndf/usage`
 
-**1 行 1 呼び出しの事象の記録にする。** 既存の行は書き換えない（I8）。合計は読む側が導く。
-`usage` と `model_usage` は `claude -p` の結果の `usage` と `modelUsage` をそのまま持つ。5 分と 1 時間の
+帳簿のディレクトリの直下の `<owner>__<repo>.jsonl` は版 1（#1142）の行で、読むときに claude の行とみなす。
+
+**1 行 1 呼び出しの事象の記録にする。** 既存の行は書き換えない（I4）。合計は読む側が導く。
+claude の `usage` と `model_usage` は `claude -p` の結果の `usage` と `modelUsage` をそのまま持つ。5 分と 1 時間の
 書き込みの区別は `usage.cache_creation` にしか無く、合計にした時点で戻らないためである。
+使用量を取れなかった行は `usage` が `"unknown"` で、0 の数値を書かない（I3）。
 
 ライブラリなので、標準ライブラリとライブラリだけを import する（I1）。
 """
@@ -29,8 +33,9 @@ from pathlib import Path
 from typing import Iterator, Optional
 
 LIB = Path(__file__).resolve().parent
-KINDS = ("work", "full", "judge", "slow", "pr", "mvv")
-SOURCES = ("supervise", "mvv-gate")
+RUNTIMES = ("claude", "codex", "kiro", "agy", "jev")  # 帳簿のランタイム（cross-review の席順の ALL_RUNTIMES とは別）
+STATUSES = ("ok", "error", "timeout", "killed")
+SCHEMA = 2
 UNKNOWN = "unknown"
 
 
@@ -100,13 +105,30 @@ def main_model(model_usage: Optional[dict]) -> str:
     return max(model_usage.items(), key=weight)[0]
 
 
+def _test_name(env: Optional[dict] = None) -> Optional[str]:
+    """テストの中で書いた行の印（`PYTEST_CURRENT_TEST` のテストの名前。I9）。テストの外は None。"""
+    cur = (os.environ if env is None else env).get("PYTEST_CURRENT_TEST") or ""
+    return cur.rsplit(" (", 1)[0] or None
+
+
+def known_usage(usage) -> object:
+    """使用量を行の形にする。dict で空でなければそのまま、ほかは `"unknown"`（0 を書かない。I3）。"""
+    return usage if isinstance(usage, dict) and usage else UNKNOWN
+
+
 @dataclass
 class UsageRecord:
-    """帳簿の 1 行。空を許さない列は `at`・`ndf_version`・`source`・`kind`・`usage`。"""
+    """帳簿の 1 行（版 2）。空を許さない列は `schema`・`runtime`・`at`・`ndf_version`・`source`・`kind`・`usage`・`status`。
+
+    `usage` はランタイムごとの形の dict か `"unknown"`（取れなかった。I3）。プロンプト・環境変数の値・認証情報は
+    持たない（I6。鍵はこの一覧だけ）。
+    """
 
     source: str
     kind: str
-    usage: dict = field(default_factory=dict)
+    usage: object = UNKNOWN
+    runtime: str = "claude"
+    status: str = "ok"
     plan: str = ""
     step: str = ""
     model: str = ""
@@ -115,18 +137,34 @@ class UsageRecord:
     turns: Optional[int] = None
     seconds: Optional[float] = None
     session_id: Optional[str] = None
+    parent_session_id: Optional[str] = None
+    agent_type: Optional[str] = None
+    agent_id: Optional[str] = None
     at: str = field(default_factory=now_utc)
     ndf_version: str = field(default_factory=ndf_version)
+    schema: int = SCHEMA
+    pytest: Optional[str] = field(default_factory=_test_name)
 
     def __post_init__(self) -> None:
-        if not isinstance(self.usage, dict):
-            self.usage = {}
+        self.usage = known_usage(self.usage)
+        self.source = self.source or UNKNOWN
+        self.kind = self.kind or UNKNOWN
+        if self.runtime not in RUNTIMES:
+            raise ValueError(f"帳簿の無いランタイム: {self.runtime}")
         if not self.model:
             self.model = main_model(self.model_usage)
 
     @classmethod
     def from_claude(
-        cls, data: dict, *, source: str, kind: str, plan: str = "", step: str = "", seconds: Optional[float] = None
+        cls,
+        data: dict,
+        *,
+        source: str,
+        kind: str,
+        plan: str = "",
+        step: str = "",
+        seconds: Optional[float] = None,
+        status: str = "ok",
     ) -> "UsageRecord":
         """`claude -p --output-format json` の結果の dict から作る。"""
         data = data if isinstance(data, dict) else {}
@@ -134,7 +172,8 @@ class UsageRecord:
         return cls(
             source=source,
             kind=kind,
-            usage=data.get("usage") or {},
+            usage=data.get("usage"),
+            status=status,
             plan=plan,
             step=step,
             model_usage=mu if isinstance(mu, dict) else None,
@@ -145,18 +184,29 @@ class UsageRecord:
         )
 
     def to_json(self) -> str:
-        return json.dumps(asdict(self), ensure_ascii=False, sort_keys=True)
+        d = asdict(self)
+        if d["pytest"] is None:
+            del d["pytest"]
+        return json.dumps(d, ensure_ascii=False, sort_keys=True)
 
 
 class UsageLedger:
-    """1 つのリポジトリの帳簿。追記と読み取りだけを持つ（書き換えない）。"""
+    """1 つのランタイム × 1 つのリポジトリの帳簿。追記と読み取りだけを持つ（書き換えない。I4）。
 
-    def __init__(self, root: str | os.PathLike, directory: Optional[Path] = None):
+    置き場は `<帳簿のディレクトリ>/<runtime>/<owner>__<repo>.jsonl`。パスは `runtime` からだけ決める（I2）。
+    """
+
+    def __init__(self, root: str | os.PathLike, directory: Optional[Path] = None, runtime: str = "claude"):
+        if runtime not in RUNTIMES:
+            raise ValueError(f"帳簿の無いランタイム: {runtime}")
         self.dir = Path(directory) if directory is not None else ledger_dir()
-        self.path = self.dir / f"{repo_key(str(root))}.jsonl"
+        self.runtime = runtime
+        self.path = self.dir / runtime / f"{repo_key(str(root))}.jsonl"
 
     def append(self, record: UsageRecord) -> Path:
-        """1 行を追記する。失敗は OSError のまま投げる。"""
+        """1 行を追記する。行の `runtime` が帳簿と違えば ValueError、書けなければ OSError のまま投げる。"""
+        if record.runtime != self.runtime:
+            raise ValueError(f"{record.runtime} の行を {self.runtime} の帳簿へ書かない")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.path, "a", encoding="utf-8") as f:
             f.write(record.to_json() + "\n")
@@ -167,9 +217,9 @@ class UsageLedger:
 
 
 def append_safely(root: str | os.PathLike, record: UsageRecord, directory: Optional[Path] = None) -> bool:
-    """追記する。失敗しても投げず、stderr に 1 行を出して False を返す（I8。呼び出しの結果は返し続ける）。"""
+    """行の `runtime` の帳簿へ追記する。失敗しても投げず、stderr に 1 行を出して False を返す（I5）。"""
     try:
-        UsageLedger(root, directory).append(record)
+        UsageLedger(root, directory, record.runtime).append(record)
         return True
     except Exception as e:  # noqa: BLE001  帳簿の失敗で呼び出しの結果を失わない
         print(f"usage_ledger: 使用量の帳簿へ追記できない: {e}", file=sys.stderr)
@@ -191,9 +241,28 @@ def read_rows(path: Path) -> Iterator[dict]:
             yield d
 
 
-def read_all(directory: Optional[Path] = None) -> list[dict]:
-    """帳簿のディレクトリのすべての行（ファイル名の順・ファイルの中は追記の順）。"""
+def as_v2(row: dict, runtime: str) -> dict:
+    """読んだ行を版 2 の形にそろえる。版 1 の行（`schema` が無い）は claude の `ok` の行とみなし、`{}` は `"unknown"`。"""
+    out = dict(row)
+    out.setdefault("schema", 1)
+    out.setdefault("runtime", runtime)
+    out.setdefault("status", "ok")
+    out["usage"] = known_usage(out.get("usage"))
+    return out
+
+
+def ledger_files(runtime: str, directory: Optional[Path] = None, repo: Optional[str] = None) -> list[Path]:
+    """1 つの帳簿のファイル。`repo`（`<owner>__<repo>`）を渡せばそのリポジトリだけ。claude は版 1 の置き場（直下）も含む。"""
     d = Path(directory) if directory is not None else ledger_dir()
-    if not d.is_dir():
-        return []
-    return [r for p in sorted(d.glob("*.jsonl")) for r in read_rows(p)]
+    pattern = f"{repo}.jsonl" if repo else "*.jsonl"
+    files = sorted((d / runtime).glob(pattern)) if (d / runtime).is_dir() else []
+    if runtime == "claude" and d.is_dir():
+        files = sorted(d.glob(pattern)) + files
+    return files
+
+
+def read_usage_ledger(runtime: str = "claude", directory: Optional[Path] = None, repo: Optional[str] = None) -> list[dict]:
+    """1 つの帳簿のすべての行（版 2 の形にそろえる）。別のランタイムの行は読まない（I7）。"""
+    if runtime not in RUNTIMES:
+        raise ValueError(f"帳簿の無いランタイム: {runtime}")
+    return [as_v2(r, runtime) for p in ledger_files(runtime, directory, repo) for r in read_rows(p)]

@@ -1,4 +1,4 @@
-"""claude -p の起動と、利用上限・使用量の帳簿（#1142 の C1）。`lib/` と `prompts` だけを import する。
+"""claude -p の起動と、利用上限・使用量の帳簿への記録（#1142 の C1・#1953）。`lib/` と `prompts` だけを import する。
 
 `ClaudeRunner.call` が claude -p を呼ぶ唯一の口である（work / drive の worker / judge / slow / pr）。
 ハンドラーと遅れの見張りは、`Engine` が渡す `ctx` の `claude` を通して呼ぶ。
@@ -22,7 +22,7 @@ from pathlib import Path
 import claude_accounts as ca
 from claude_settings import metered_settings
 import procs
-import usage_ledger
+import usage_capture
 from claude_usage import LIMIT_EPOCH, kind_of_text, limit_reset_at  # noqa: F401  上限の文言の読みは部品が持つ
 from monitor import USAGE_LIMIT_FATAL  # 利用上限の文言の表
 from supervise_lib.prompts import JUDGE_SYSTEM, PR_SYSTEM, SLOW_SYSTEM
@@ -161,8 +161,11 @@ def minimal_args(system: str) -> list[str]:
     return head + ["--disable-slash-commands", "--system-prompt", system]
 
 
-def claude_cmd(system: str, tools: str | None, cwd: str, full: bool = False, serena: bool = False, resume: str | None = None) -> list[str]:
-    base = shlex.split(os.environ.get("NDF_SUPERVISE_CLAUDE", "claude"))
+def claude_cmd(
+    system: str, tools: str | None, cwd: str, full: bool = False, serena: bool = False, resume: str | None = None, base: str | None = None
+) -> list[str]:
+    """起動の引数。`base` は claude の起動のコマンド（既定は NDF_SUPERVISE_CLAUDE か `claude`）。"""
+    base = shlex.split(base or os.environ.get("NDF_SUPERVISE_CLAUDE", "claude"))
     if full:
         # Skill を回すステップ（cross-review など）。設定・プラグイン・Skill・hook をそのまま読む
         # 新しい文脈の claude -p。本体の会話なのでキャッシュはサブスクリプションなら 1 時間。
@@ -204,13 +207,18 @@ def call_claude(
     tick=None,
     every: float = TICK,
     child_env: dict | None = None,
+    caller: dict | None = None,
+    base: str | None = None,
 ) -> dict:
-    """claude -p を 1 回呼び、結果の本文と使用量を返す（既定は最小構成）。
+    """claude -p を 1 回呼び、結果の本文と使用量を返す（既定は最小構成）。Claude の使用量の帳簿へ 1 行を書く（#1953）。
 
     `env` は環境に足す変数（認証の切り替え）。`child_env` を渡すと環境をそれで置き換える（アカウントの切り替え）。利用上限で落ちたら `"limit": true` と、読めれば
-    解除の時刻（UNIX 時刻）を `"resets_at"` に残す。`tick` は待ちの間に every 秒ごとに呼ぶ。"""
+    解除の時刻（UNIX 時刻）を `"resets_at"` に残す。`tick` は待ちの間に every 秒ごとに呼ぶ。
+    `caller` は帳簿の呼び出し元（`source`・`kind`・`plan`・`step`）。`kind` の既定は `claude_kind`、ほかは環境変数（C2）。
+    帳簿への記録に失敗しても結果は変わらない（I5）。"""
     started = time.time()
-    cmd = claude_cmd(system, tools, cwd, full, serena, resume)  # 従量の接続は宣言を --settings でも渡す（#1543）
+    who = {"kind": claude_kind(system, full), **(caller or {})}
+    cmd = claude_cmd(system, tools, cwd, full, serena, resume, base)  # 従量の接続は宣言を --settings でも渡す（#1543）
     try:
         p = run_ticking(
             metered_settings(cmd, child_env if child_env is not None else os.environ, cwd, cmd.index("-p")),
@@ -221,7 +229,11 @@ def call_claude(
             timeout=timeout,
             env=child_env if child_env is not None else ({**os.environ, **env} if env else None),
         )
+    except OSError:
+        usage_capture.record_claude({}, cwd=cwd, **who, seconds=round(time.time() - started, 1), status="error")
+        raise
     except subprocess.TimeoutExpired:
+        usage_capture.record_claude({}, cwd=cwd, **who, seconds=timeout, status="timeout")
         return ClaudeCall(
             ok=False, text=f"打ち切り（{timeout} 秒）", usage={}, seconds=timeout, kind=claude_kind(system, full), model_usage=None
         )
@@ -237,6 +249,7 @@ def call_claude(
     limit = not ok and is_usage_limit("\n".join([result, p.stderr, p.stdout]))
     # 認証の失敗（`result` が `Failed to authenticate` で始まるか、`api_error_status` が 401。#1576 の実測 H）
     auth = not ok and not limit and (result.startswith("Failed to authenticate") or data.get("api_error_status") == 401)
+    usage_capture.record_claude(data, cwd=cwd, **who, seconds=round(time.time() - started, 1), status="ok" if ok else "error")
     return ClaudeCall(
         {
             "ok": ok,
@@ -277,7 +290,7 @@ class AccountsLimited(Exception):
 
 
 class ClaudeRunner:
-    """claude -p を呼ぶ唯一の口。利用上限の待ちと認証の切り替え、使用量の数えと帳簿への追記を持つ。
+    """claude -p を呼ぶ唯一の口。利用上限の待ちと認証の切り替え、報告の使用量の数えを持つ（帳簿へは `call_claude` が書く）。
 
     `ctx` から読むもの: `plan`（上限の設定）・`state`（今のステップ `cur`・切り替えた認証 `switched`・`every`）・
     `tick`（待ちの間に呼ぶ）・`slow`（上限の待ちを遅れの経過から外す）・`plan_path`・`cwd`。
@@ -311,7 +324,8 @@ class ClaudeRunner:
         tried_fallback, waited = False, 0.0
         tried: set[str] = set()  # この呼び出しで上限に当たったアカウント
         auth_failed: set[str] = set()  # この呼び出しで認証が通らなかったアカウント（同じアカウントを 2 度試さない）
-        kw = {"tick": ctx.tick, "every": st.every, **kw}
+        who = {"source": "supervise", "plan": ctx.plan_path or "", "step": str(st.cur.get("id") or "")}
+        kw = {"tick": ctx.tick, "every": st.every, "caller": who, **kw}
         while True:
             try:
                 child = self.child_env(fallback) if multi else None
@@ -477,22 +491,5 @@ class ClaudeRunner:
             cur["limit_resets"] = datetime.fromtimestamp(res["resets_at"]).astimezone().isoformat(timespec="minutes")
 
     def record_usage(self, kind: str, res: dict) -> None:
-        """1 回の呼び出しの使用量を実行の状態へ数え、使用量の帳簿へ 1 行足す（I8）。
-
-        追記に失敗しても呼び出しの結果は失わない（`usage_ledger.append_safely`）。
-        """
-        ctx = self.ctx
-        ctx.state.add_usage(kind, res)
-        rec = usage_ledger.UsageRecord(
-            source="supervise",
-            kind=res.get("kind") or kind,
-            usage=res.get("usage", {}),
-            plan=ctx.plan_path,
-            step=str(ctx.state.cur.get("id") or ""),
-            model_usage=res.get("model_usage"),
-            cost_usd=res.get("cost"),
-            turns=res.get("turns"),
-            seconds=res.get("seconds"),
-            session_id=res.get("session"),
-        )
-        usage_ledger.append_safely(ctx.cwd, rec)
+        """1 回の呼び出しの使用量を実行の状態（報告の数え上げ）へ足す。帳簿へは `call_claude` が書く（#1953 の決定 2）。"""
+        self.ctx.state.add_usage(kind, res)

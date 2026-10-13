@@ -355,6 +355,8 @@ def cmd_delegate(a) -> None:
         metrics["root"],
     ]
     argv += [*(["--timeout", str(a.timeout)] if a.timeout else []), *(["--poll", str(a.poll)] if a.poll else [])]
+    # 使用量の帳簿の呼び出し元を名乗る（#1953 の決定 7）。子の external-ai.py へ環境で渡る
+    os.environ.update(NDF_USAGE_SOURCE="pr-review", NDF_USAGE_KIND="review")
     ran, _ = _child(argv)
     rm = ran.get("metrics") or {}
     if rm.get("outcome") != "ok":

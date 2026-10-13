@@ -247,7 +247,9 @@ esac
 # 打ち切りの判断を監視の側へ一本化する（#598 / #537）。
 # 起動のモデル: 引数の明示 → 既定のモデルへの切り替え（参加の確認。#1290）→ 空（CLI の設定のまま）
 MODEL=$(jq -r --arg rt "$RUNTIME" '(.models // {})[$rt] // (.participants.default_models // {})[$rt] // ""' "$STATE")
-"$SCRIPT_DIR/../../../scripts/lib/launch-cli.sh" "$RUNTIME" "$WORKTREE_ABS" "$PROMPT" "$STEM" "$MODEL" \
+# 使用量の帳簿の呼び出し元を名乗る（#1953 の決定 7）
+NDF_USAGE_SOURCE=cross-review NDF_USAGE_KIND=review \
+  "$SCRIPT_DIR/../../../scripts/lib/launch-cli.sh" "$RUNTIME" "$WORKTREE_ABS" "$PROMPT" "$STEM" "$MODEL" \
   "$EXTRA_DIR" review
 }
 

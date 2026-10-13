@@ -25,6 +25,7 @@ import assignment
 import claude_settings
 import monitor_patterns
 import secret_redact
+import usage_capture
 
 ProbeResult = dict[str, dict[str, Any]]
 
@@ -246,6 +247,12 @@ def _probe_once(step: str, runtime: str, model: Optional[str], cmd: tuple[str, .
     """確認のコマンドを 1 回走らせて分類する（`run_check` の 1 回分）。"""
     shown = " ".join(a if a != workdir else "<cwd>" for a in cmd)
     started = time.monotonic()
+    wall = time.time()
+
+    def note(stdout: str, stderr: str, rc: Optional[int]) -> None:
+        """モデルの確認（LLM の呼び出し）1 回を、そのランタイムの使用量の帳簿へ 1 行残す（`kind=probe`。#1953）。"""
+        if step != "auth":
+            usage_capture.record_probe(runtime, cwd=workdir, stdout=stdout, stderr=stderr, rc=rc, started=wall, model=model or "")
 
     def done(reason: str, detail: str, found_model: Optional[str] = None) -> Check:
         seconds = round(time.monotonic() - started, 1)
@@ -264,9 +271,11 @@ def _probe_once(step: str, runtime: str, model: Optional[str], cmd: tuple[str, .
     except FileNotFoundError:
         return done("missing_cli", "コマンドが見つかりません")
     except subprocess.TimeoutExpired:
+        note("", "", None)
         return done("timeout", f"{AUTH_PROBE_TIMEOUT} 秒の持ち時間で応答しませんでした")
     except OSError as exc:
         return done("missing_cli", f"コマンドを実行できません（{exc.strerror or exc}）")
+    note(r.stdout or "", r.stderr or "", r.returncode)
     stdout = monitor_patterns._strip_ansi(r.stdout or "")
     stderr = monitor_patterns._strip_ansi(r.stderr or "")
     reason, hit = _classify_output(step, runtime, model, r.returncode, stdout, stderr)

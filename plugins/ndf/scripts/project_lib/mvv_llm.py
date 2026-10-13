@@ -1,7 +1,7 @@
 """mvv_llm.py: プロジェクト MVV の LLM の呼び出し（候補の生成・照合）と照合の記録（`project-mvv.py`・#1366）。
 
 LLM は `supervise_lib/claude.py` の `call_claude` を Tool なしで 1 回呼ぶ（NDF_SUPERVISE_CLAUDE で差し替えられる）。
-呼び出しごとに使用量の帳簿へ 1 行を足す。照合は本文を書き換えず、判定と箇所を `project-mvv.jsonl` へ残すだけである（I14）。
+呼び出しごとに `call_claude` が使用量の帳簿へ 1 行を足す。照合は本文を書き換えず、判定と箇所を `project-mvv.jsonl` へ残すだけである（I14）。
 """
 
 from __future__ import annotations
@@ -34,24 +34,11 @@ VET_SYSTEM = """あなたは MVV の照合者である。Tool は無い。
 def call_llm_json(system: str, prompt: str, root: Path, kind: str) -> tuple[dict | None, str, dict]:
     """最小構成の claude -p を 1 回呼ぶ（Tool なし）。(JSON, 生の文, 使用量)。"""
     import supervise_lib  # noqa: F401  lib/ を sys.path へ足す
-    import usage_ledger
     from supervise_lib.claude import call_claude
 
-    res = call_claude(system, prompt, None, str(root), 900)
+    # 帳簿へは call_claude（起動の共有処理）が呼び出し元を付けて 1 行を書く（#1953 の決定 2）
+    res = call_claude(system, prompt, None, str(root), 900, caller={"source": TOOL, "kind": kind})
     usage = {"cost_usd": res.get("cost"), "seconds": res.get("seconds")}
-    usage_ledger.append_safely(
-        str(root),
-        usage_ledger.UsageRecord(
-            source=TOOL,
-            kind=kind,
-            usage=res.get("usage") or {},
-            model_usage=res.get("model_usage"),
-            cost_usd=res.get("cost"),
-            turns=res.get("turns"),
-            seconds=res.get("seconds"),
-            session_id=res.get("session"),
-        ),
-    )
     text = str(res.get("text") or "")
     if not res.get("ok"):
         return None, text[-500:], usage

@@ -162,5 +162,7 @@ PRINT_TIMEOUT=${LIMITS_OUT##*$'\n'}
 # 成果物が落ちて差分に現れる。記録は `$TMP_DIR` の下へ集める。
 # 起動のモデル: 引数の明示 → 既定のモデルへの切り替え（参加の確認。#1290）→ 空（CLI の設定のまま）
 MODEL=$(jq -r --arg rt "$RUNTIME" '(.models // {})[$rt] // (.participants.default_models // {})[$rt] // ""' "$STATE")
-"$SCRIPT_DIR/../../../scripts/lib/launch-cli.sh" "$RUNTIME" "$WORKTREE" "$PROMPT" \
+# 使用量の帳簿の呼び出し元を名乗る（#1953 の決定 7）
+NDF_USAGE_SOURCE=cross-review NDF_USAGE_KIND=critique \
+  "$SCRIPT_DIR/../../../scripts/lib/launch-cli.sh" "$RUNTIME" "$WORKTREE" "$PROMPT" \
   "$STEM" "$MODEL" "$TMP_DIR" "$PRINT_TIMEOUT"
