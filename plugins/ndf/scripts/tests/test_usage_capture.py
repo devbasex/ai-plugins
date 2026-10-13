@@ -179,11 +179,7 @@ def test_term_after_the_cli_ended_still_leaves_the_row(fake_clis):
     bin_dir = fake_clis / "bin"
     real = subprocess.run(["bash", "-c", "command -v python3"], capture_output=True, text=True, check=True).stdout.strip()
     shim = bin_dir / "python3"
-    shim.write_text(
-        "#!/bin/bash\n"
-        'case " $* " in *" record-cli "*) touch "$NDF_TEST_RECORDING"; sleep 1 ;; esac\n'
-        f'exec {real} "$@"\n'
-    )
+    shim.write_text(f'#!/bin/bash\ncase " $* " in *" record-cli "*) touch "$NDF_TEST_RECORDING"; sleep 1 ;; esac\nexec {real} "$@"\n')
     shim.chmod(0o755)
     marker = fake_clis / "recording"
     stem = launch(fake_clis, "codex", NDF_TEST_RECORDING=str(marker))
