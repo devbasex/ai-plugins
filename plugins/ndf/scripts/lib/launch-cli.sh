@@ -44,6 +44,9 @@
 
 set -euo pipefail
 
+# 包みが作業ディレクトリへ `cd` した後に記録の部品を呼ぶため、絶対パスで控える（`pwd` は symlink を畳まない）。
+LIB_DIR=$(cd "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+
 RUNTIME=${1:?runtime required}
 WORKDIR=${2:?workdir required}
 PROMPT=${3:?prompt file required}
@@ -85,9 +88,14 @@ resolve_print_timeout() {
 prepare_artifacts() {
   STDOUT_LOG=$STEM-stdout.log
   ERR_LOG=$STEM-err.log
+  # 包みは作業ディレクトリへ `cd` した後に記録を書くため、stem を絶対パスで控える。
+  STEM_ABS=$(cd "$(dirname "$STEM")" && pwd)/$(basename "$STEM")
   PID_FILE=$STEM.pid
   rm -f "$STDOUT_LOG" "$ERR_LOG" "$PID_FILE" "$STEM-result.json" "$STEM-progress.log" \
     "$STEM-monitor.json" "$STEM-launch.json"
+  # 出力のファイルは起動から戻る時点で在るようにする（包みのサブシェルが開くより先に読まれても欠けない）。
+  : > "$STDOUT_LOG"
+  : > "$ERR_LOG"
 }
 
 # 起動の記録（`<stem>-launch.json`）を書く（#759）。実際に動いたモデルを取る側
@@ -106,52 +114,75 @@ write_launch_record() {
     "$RUNTIME" "$real_workdir" "$started_at" > "$STEM-launch.json"
 }
 
-# ランタイム名で分岐して nohup で背景起動し、PID を `PID` へ入れる。
+# ランタイム名で分岐して CLI を前景で走らせる（包みのサブシェルの中で呼ぶ）。
 # **ホストか否かで分岐してはいけない。** ランタイム名だけで分岐する。ホストと同じ
 # ランタイムが実装担当になるラウンドでも、ホストのサブエージェント機能は使わず
 # 別プロセスの CLI として起動する。これにより「実装した者と評価する者が別」という
 # 構造と、ホストセッションの作業文脈を汚さない性質の両方が保たれる。
-launch_runtime() {
+run_runtime() {
   case "$RUNTIME" in
     codex)
-      nohup codex exec --dangerously-bypass-approvals-and-sandbox \
+      codex exec --dangerously-bypass-approvals-and-sandbox \
         --config model_reasoning_effort=medium -C "$WORKDIR" ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} \
-        < "$PROMPT" > "$STDOUT_LOG" 2> "$ERR_LOG" &
-      PID=$!
+        < "$PROMPT" > "$STDOUT_LOG" 2> "$ERR_LOG"
       ;;
     agy)
       # 作業領域は作業ディレクトリと、結果ファイルの置き場所だけを宣言する。
       local add_dir_args=(--add-dir "$WORKDIR")
       [ -n "$EXTRA_DIR" ] && add_dir_args+=(--add-dir "$EXTRA_DIR")
       # `--print-timeout` は単位付きの時間を取る（数字だけでは `missing unit` で落ちる）。
-      nohup agy --dangerously-skip-permissions --output-format text \
+      # 使用量は JSON の出力にしか無い（#1953 の決定 3）。本文は `response` の鍵にある。
+      agy --dangerously-skip-permissions --output-format json \
         --print-timeout "${PRINT_TIMEOUT}s" ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} "${add_dir_args[@]}" \
         -p="$(cat "$PROMPT")" \
-        < /dev/null > "$STDOUT_LOG" 2> "$ERR_LOG" &
-      PID=$!
+        < /dev/null > "$STDOUT_LOG" 2> "$ERR_LOG"
       ;;
     claude)
       # `--allowed-tools` は許可を絞るだけで、Tool の定義・MCP・Skill の一覧は文脈に残る。#827 の最小構成と
       # 同じく `--tools` を許可と同じ値にし、MCP とスラッシュコマンドを読まない（Skill はプロンプトがパスで渡す）。
-      nohup claude -p ${CLAUDE_SETTINGS_ARGS[@]+"${CLAUDE_SETTINGS_ARGS[@]}"} \
+      claude -p ${CLAUDE_SETTINGS_ARGS[@]+"${CLAUDE_SETTINGS_ARGS[@]}"} \
         --permission-mode acceptEdits \
         --tools "$CLAUDE_ALLOWED_TOOLS" \
         --allowed-tools "$CLAUDE_ALLOWED_TOOLS" \
         --strict-mcp-config --disable-slash-commands \
         --output-format json ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} \
-        < "$PROMPT" > "$STDOUT_LOG" 2> "$ERR_LOG" &
-      PID=$!
+        < "$PROMPT" > "$STDOUT_LOG" 2> "$ERR_LOG"
       ;;
     kiro)
-      nohup kiro-cli chat --no-interactive --trust-all-tools ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} \
-        < "$PROMPT" > "$STDOUT_LOG" 2> "$ERR_LOG" &
-      PID=$!
+      kiro-cli chat --no-interactive --trust-all-tools ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} \
+        < "$PROMPT" > "$STDOUT_LOG" 2> "$ERR_LOG"
       ;;
+  esac
+}
+
+# 包みのサブシェル（#1953 の決定 6）。CLI を前景で走らせ、終わった後に使用量の帳簿へ 1 行を書く。
+# `nohup` と同じく HUP を無視する（無視は CLI へ継がれる）。止める側の TERM はプロセスグループの全員へ届き、
+# CLI が終わった後で trap が `killed` を控える。帳簿への記録の失敗は終了コードに出さない（I5）。
+run_wrapped() {
+  trap '' HUP
+  local rc=0 status=
+  trap 'status=killed' TERM INT
+  run_runtime || rc=$?
+  # 記録の間は TERM / INT を無視する（無視は python3 へ継がれる）。監視は CLI が終わった後も包みのグループへ
+  # TERM を送るため、既定の扱いのままでは記録が殺されて行が残らない。上限は猶予の後の KILL が保つ。
+  trap '' TERM INT
+  python3 "$LIB_DIR/usage_capture.py" record-cli --stem "$STEM_ABS" --runtime "$RUNTIME" --rc "$rc" \
+    ${status:+--status "$status"} --model "$MODEL" < /dev/null > /dev/null 2>> "$ERR_LOG" || true
+  return "$rc"
+}
+
+# 包みを背景で起動し、PID を `PID` へ入れる。`<stem>.pid` は CLI ではなく包みを指す。包みの起動の引数は
+# この script と同じで、ランタイム名を含む（監視の起動の引数の照合はそのまま通る）。
+launch_runtime() {
+  case "$RUNTIME" in
+    codex | agy | claude | kiro) ;;
     *)
       echo "未知のランタイムです: $RUNTIME" >&2
       exit 1
       ;;
   esac
+  run_wrapped < /dev/null > /dev/null 2>&1 &
+  PID=$!
 }
 
 resolve_print_timeout
@@ -180,9 +211,9 @@ write_launch_record
 cd "$WORKDIR"
 
 # **CLI を独立したプロセスグループで起動する（#584 / #729 の決定 10）。** ジョブ制御を
-# 有効にして背景起動すると、CLI の pid がそのままプロセスグループの番号になる。監視は
-# 止めるときにグループへシグナルを送るので、CLI の子プロセスが止めた後に結果ファイルを
-# 書かない。`setsid` は macOS に標準で無いため使わない。起動の直後に戻し、この script の
+# 有効にして背景起動すると、包みの pid がそのままプロセスグループの番号になり、前景で走る CLI も
+# 同じグループに入る（サブシェルの中ではジョブ制御が切れる）。監視は止めるときにグループへ
+# シグナルを送るので、CLI の子プロセスが止めた後に結果ファイルを書かない。`setsid` は macOS に標準で無いため使わない。起動の直後に戻し、この script の
 # 残りはジョブ制御の影響を受けない。`set -m` は bash 3.2（macOS）にもある（bash.1 の
 # 「Monitor mode. Job control is enabled.」）。
 set -m

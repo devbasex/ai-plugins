@@ -94,13 +94,18 @@ print(f"agy skills installed: {len(present)}")
 AGYPY
     # ファイルの存在だけでは、agy がどの要素を取り込んだかを確かめられない。取り込みの
     # 記録を読み、並びに依存せず 3 つが揃っていることを見る。
-    agy plugin list | python3 -c '
+    # agy 1.3.4 から既定の出力はテキストになり、JSON は --json のときだけ出る。形も
+    # {"imports": [{"components": [...]}]} から、要素ごとに skills / agents / hooks の
+    # 一覧を持つ配列へ変わった。どちらの形も読む。
+    agy plugin list --json | python3 -c '
 import json, sys
-imports = json.load(sys.stdin).get("imports", [])
+data = json.load(sys.stdin)
+imports = data.get("imports", []) if isinstance(data, dict) else data
 entry = next((i for i in imports if i.get("name") == "ndf"), None)
 if entry is None:
     sys.exit("agy plugin list does not contain ndf")
-components = sorted(entry.get("components", []))
+components = entry.get("components") or [k for k in ("agents", "hooks", "skills") if entry.get(k)]
+components = sorted(components)
 if components != ["agents", "hooks", "skills"]:
     sys.exit(f"agy imported unexpected components: {components}")
 print("agy components: " + ", ".join(components))

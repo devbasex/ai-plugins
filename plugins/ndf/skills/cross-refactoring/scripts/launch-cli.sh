@@ -247,7 +247,9 @@ launch_cli() {
 EXTRA_DIR=
 [ "$RUNTIME" = "agy" ] && EXTRA_DIR=$TMP_DIR
 
-"$LIB/launch-cli.sh" "$RUNTIME" "$WORKDIR" "$PROMPT" "$STEM" "$MODEL" "$EXTRA_DIR" \
+# 使用量の帳簿の呼び出し元を名乗る（工程名を kind に。#1953 の決定 7）
+NDF_USAGE_SOURCE=cross-refactoring NDF_USAGE_KIND=$PHASE \
+  "$LIB/launch-cli.sh" "$RUNTIME" "$WORKDIR" "$PROMPT" "$STEM" "$MODEL" "$EXTRA_DIR" \
   "$PRINT_TIMEOUT"
 }
 

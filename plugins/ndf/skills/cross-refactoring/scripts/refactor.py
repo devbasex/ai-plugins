@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import pathlib
 import sys
 
@@ -313,6 +314,8 @@ def main() -> None:
 
     args = p.parse_args()
     _set_alive_file(args)
+    # 使用量の帳簿の呼び出し元（Jev の要求の行。#1953 の決定 7）。起動の包みが名乗っていればそれを継ぐ
+    os.environ.setdefault("NDF_USAGE_SOURCE", "cross-refactoring")
     try:
         args.func(args)
     except container_reach.Unreachable as e:

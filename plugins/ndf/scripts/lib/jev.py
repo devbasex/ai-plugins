@@ -24,9 +24,12 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 from typing import Any, Callable, Mapping, Optional
+
+import usage_capture
 
 ENDPOINT = "https://ai-gateway.vercel.sh/v1/evaluate"
 MODEL = "typesafe-ai/jev"
@@ -48,7 +51,9 @@ Post = Callable[[dict[str, Any], int], Optional[dict[str, Any]]]
 
 
 def _post(body: dict[str, Any], timeout: int) -> Optional[dict[str, Any]]:
-    """要求を 1 回送り、応答の JSON を返す。失敗は `None`（例外を外へ出さない）。"""
+    """要求を 1 回送り、応答の JSON を返す。失敗は `None`（例外を外へ出さない）。
+
+    送った要求 1 回ごとに `jev` の使用量の帳簿へ 1 行を残す（起動の共有処理。#1953 の決定 8）。"""
     key = os.environ.get(KEY_ENV, "")
     if not key:
         return None
@@ -58,12 +63,15 @@ def _post(body: dict[str, Any], timeout: int) -> Optional[dict[str, Any]]:
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
         method="POST",
     )
+    started = time.time()
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except (urllib.error.URLError, OSError, ValueError, TimeoutError):
-        return None
-    return payload if isinstance(payload, dict) else None
+        payload = None
+    payload = payload if isinstance(payload, dict) else None
+    usage_capture.record_jev(body, payload, started=started)
+    return payload
 
 
 def _answer(payload: Optional[dict[str, Any]], name: str) -> Optional[dict[str, Any]]:

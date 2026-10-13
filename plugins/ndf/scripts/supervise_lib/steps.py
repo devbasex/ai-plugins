@@ -142,6 +142,8 @@ class RunStep:
         if no_reports and not step.get("reports"):
             addopts.append(no_reports)
         env["PYTEST_ADDOPTS"] = " ".join(a for a in addopts if a)
+        # 子が起動する CLI の使用量の帳簿の行にプランとステップを付ける（#1953 の決定 7・決定 11）
+        env.update(NDF_USAGE_PLAN=getattr(ctx, "plan_path", None) or "", NDF_USAGE_STEP=str(step.get("id") or ""))
         ctx.state.run_log = ctx.state.dir / "run-stderr.log"
         try:
             p = run_ticking(

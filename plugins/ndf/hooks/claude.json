@@ -163,6 +163,19 @@
           }
         ]
       }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; python3 \"$ROOT/scripts/usage-subagent.py\"; exit 0'",
+            "description": "NDF: record the finished subagent's token usage in the Claude usage ledger",
+            "timeout": 10,
+            "continueOnError": true
+          }
+        ]
+      }
     ]
   }
 }
