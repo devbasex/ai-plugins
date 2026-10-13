@@ -3760,6 +3760,19 @@
       "source": "docs/specifications/ndf-relay-goal-skill-and-prose-wait.md"
     },
     {
+      "term": "既定のログイン",
+      "context": "ndf-relay",
+      "meaning": "CLAUDE_CONFIG_DIR を指定しない共有の設定ディレクトリ（~/.claude）のログイン。登録済みアカウントでも従量の接続でもなく、relay の区間のアカウントが無い状態で使われる",
+      "pending_source": "issues/issue-1727-requirements.md"
+    },
+    {
+      "term": "再登録が要る",
+      "code": "needs_relogin",
+      "context": "ndf-relay",
+      "meaning": "登録の記録の needs_relogin が真の登録済みアカウントの状態。アカウントの切り替えの候補から外れ、relay.py account add で登録し直すまで戻らない",
+      "pending_source": "issues/issue-1727-requirements.md"
+    },
+    {
       "term": "受け入れ条件の番号",
       "context": "ndf-workflow",
       "meaning": "課題の本文の `## 受け入れ条件` の節で、コードブロックの外にある行頭のチェックボックスの行を上から数えた順（1 から）。リリース後テストの表の `受け入れ条件` の列は、セルの頭に `<番号>.` で書く",
