@@ -2266,6 +2266,13 @@
       "source": "docs/specifications/cross-refactoring-test-stale-bytecode.md"
     },
     {
+      "term": "CLI の版の一覧",
+      "context": "repo-dev-checks",
+      "meaning": "スモークの像へ入れる 4 ランタイムの CLI の版数と取得先と checksum を書いたファイル（tests/runtime-smoke/cli-versions.env）。版を上げるときに書き換える唯一の場所",
+      "source": "",
+      "pending_source": "issues/issue-1982-design.md"
+    },
+    {
       "term": "プロジェクトの宣言",
       "context": "ndf-workflow",
       "meaning": "リポジトリの根の `.ndf/` に置く、そのプロジェクトの形（言語・テスト・CI・ブランチ・配布・課題の正本など）を表すファイルの集まり。機能ごとの JSON と、解析が書く `project.json` からなる",
