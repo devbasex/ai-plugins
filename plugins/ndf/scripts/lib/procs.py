@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import signal
 import time
@@ -141,11 +142,37 @@ def stop_tree(pid: int, grace: float = 3.0, poll: float = 0.1) -> bool:
     procs = [root, *(_process(c) for c in child_pids(pid))]
     procs = [p for p in procs if p is not None]
     _signal_all(procs, pid, group, signal.SIGTERM)
-    _gone, alive = psutil.wait_procs(procs, timeout=grace)
+    alive = _wait_procs(procs, grace)
     if alive:
         _signal_all(alive, pid, group, signal.SIGKILL)
-        _gone, alive = psutil.wait_procs(alive, timeout=max(poll, 0.5))
+        alive = _wait_procs(alive, max(poll, 0.5))
     return not alive
+
+
+def _wait_procs(procs: list[psutil.Process], timeout: float) -> list[psutil.Process]:
+    """psutil.wait_procs の残りを返す。待ちの途中の EINVAL / ESRCH は、投げたプロセスだけを止まったものとみなす（#1817）。
+
+    待つ間に子が終わり pid が別のプロセスのスレッドへ再利用されると、`os.pidfd_open` が EINVAL を投げる。
+    まとめて待つ呼び出しが投げたら、同じ期限の中で 1 つずつ待ち直し、ほかのまだ生きているプロセスを残りに返す
+    （残りを空にすると SIGKILL が省かれる）。ほかの errno と OSError 以外の例外はそのまま投げる。"""
+    deadline = time.monotonic() + timeout
+    try:
+        _gone, alive = psutil.wait_procs(procs, timeout=timeout)
+    except OSError as e:
+        if e.errno not in (errno.EINVAL, errno.ESRCH):
+            raise
+    else:
+        return alive
+    alive = []
+    for p in procs:
+        try:
+            _gone, rest = psutil.wait_procs([p], timeout=max(0.0, deadline - time.monotonic()))
+        except OSError as e:
+            if e.errno not in (errno.EINVAL, errno.ESRCH):
+                raise
+            continue
+        alive.extend(rest)
+    return alive
 
 
 def _signal_all(procs: list[psutil.Process], pid: int, group: bool, sig: int) -> None:

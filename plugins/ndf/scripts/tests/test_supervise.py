@@ -854,6 +854,7 @@ REPORT_EMPTY = """## フェーズの報告
 - 通ったステップ: {empty}
 - 件数: 無し
 - LLM の使用量: 入力 0 / cache read 0 / cache write 0 / 出力 0 / $0.000
+- CLI（drive・work の中）: 無し
 - 記録: {dir}
 
 | ステップ | 往復 | 秒 | cache read | cache write | 出力 | 費用 |
@@ -880,6 +881,7 @@ REPORT_RICH = """## フェーズの報告
 - 通ったステップ: impl(exit=0) → judge[続ける] → show(exit=12) → quiet(exit=12) → wait(exit=0) → wait2(exit=None)
 - 件数: impl: passed 3 / skipped 0; judge: 無し
 - LLM の使用量: 入力 56 / cache read 200 / cache write 40 / 出力 14 / $1.012
+- CLI（drive・work の中）: 無し
 - 記録: {dir}
 
 | ステップ | 往復 | 秒 | cache read | cache write | 出力 | 費用 |
@@ -2579,6 +2581,37 @@ def test_run_ticking_timeout_stops_the_group_after_the_leader_exits(tmp_path):
     with pytest.raises(subprocess.TimeoutExpired):
         claude.run_ticking(f"sleep 30 & echo $! > {pidfile}; exit 0", shell=True, timeout=1)
     assert procs.wait_gone(int(pidfile.read_text()), timeout=3)
+
+
+def _pidfd_einval(procs_, timeout=None):
+    raise OSError(22, "Invalid argument")
+
+
+def test_run_ticking_timeout_stays_a_timeout_when_waiting_raises_einval(tmp_path, monkeypatch):
+    """ステップの timeout の打ち切りで待ちが EINVAL を投げても、TimeoutExpired（ステップの失敗）になる（#1817）。"""
+    import procs
+
+    monkeypatch.setattr(procs.psutil, "wait_procs", _pidfd_einval)
+    pidfile = tmp_path / "pid"
+    with pytest.raises(subprocess.TimeoutExpired):
+        claude.run_ticking(f"sleep 30 & echo $! > {pidfile}; wait", shell=True, timeout=1)
+    monkeypatch.undo()
+    assert procs.wait_gone(int(pidfile.read_text()), timeout=3)
+
+
+def test_run_ticking_stall_cut_keeps_its_own_error_when_waiting_raises_einval(monkeypatch):
+    """停滞の打ち切り（tick() の例外）で待ちが EINVAL を投げても、tick() の例外がそのまま届く（retry へ進む。#1817）。"""
+    import procs
+
+    class Stalled(Exception):
+        pass
+
+    def tick():
+        raise Stalled
+
+    monkeypatch.setattr(procs.psutil, "wait_procs", _pidfd_einval)
+    with pytest.raises(Stalled):
+        claude.run_ticking("sleep 30", shell=True, tick=tick, every=0.2)
 
 
 @pytest.mark.parametrize("sv", [{"sync_checks": [{"name": 1, "command": "x"}]}, {"sync_checks": "x"}, {"test": [1]}])

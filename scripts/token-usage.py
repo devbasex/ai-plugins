@@ -604,7 +604,7 @@ SEQ_KEYS = (
 def read_ledger(root: Path, until: float | None = None) -> list[tuple[float, dict]]:
     """帳簿の行のうち、層へ加えるもの（時刻・行）。時刻を読めない行と `until` より後の行は捨てる。"""
     out = []
-    for r in usage_ledger.read_all(root):
+    for r in usage_ledger.read_usage_ledger("claude", root):  # 版 2 の claude/ と版 1 の直下の両方
         t = parse_ts(r.get("at"))
         if t is None or r.get("kind") not in LEDGER_LAYER or (until is not None and t > until):
             continue

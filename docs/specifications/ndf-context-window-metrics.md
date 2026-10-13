@@ -3,11 +3,14 @@
 conductor / supervisor / worker の会話の記録を層の単位で読み、記録 1 件ごとの固定費・ピーク使用量・
 実作業と、層ごとの合計、フェーズごとの worker の使い方を出せるようにした。同じ読み取りで、利用上限
 （429）で中断した記録の一覧と解除の待ちも行う。この文書は、記録を読む部品（`transcript_agents.py`）
-の値の取り方と、`skill-stats --agents` の出力の契約を残す。**値の取り方はこの文書が正である。**
+の値の取り方と、`skill-stats --agents` の出力の契約を残す。あわせて、トークン消費を数える範囲と、
+NDF が起動した呼び出しをランタイムごとに残す使用量の帳簿（`usage_ledger.py`）と集計（`usage-report.py`）の
+契約を残す。**値の取り方と数える範囲はこの文書が正である。**
 
 | 何を読むか | 正本 |
 | --- | --- |
 | 記録の値の取り方、コマンドの引数と終了コード、出力の列 | この文書 |
+| トークン消費を数える範囲、使用量の帳簿の分け方と行の形、集計の値 | この文書の「使用量の帳簿」 |
 | `skill-stats` の使い方 | `plugins/ndf/skills/skill-stats/SKILL.md` |
 | 振り返りの記録へ貼る表 | `plugins/ndf/skills/retrospective/SKILL.md` の記録の雛形「context window の大きさ」 |
 | 中断の点検の手順（誰がいつ `interrupted` / `wait-reset` を呼ぶか） | [ndf-agent-layers-unattended-run.md](ndf-agent-layers-unattended-run.md) と `development-workflow/references/agent-layers.md` の「中断と再開」 |
@@ -78,6 +81,12 @@ worker（読解）は深さ 1 に現れるため、`description` の先頭語が
 **`wait-reset` は、まだ来ていないリセット時刻のうち最も早いもの + 余白まで眠る。** 過ぎたものは眠る理由に
 ならず、固定の間隔で待たない。
 
+**トークン消費は、NDF が起動した呼び出しを経路を問わずランタイムごとの帳簿で数える。** 会話の記録の
+サブエージェントだけを数えると、処理を `claude -p` や他の CLI へ移した分が計測の外へ出て、#845 のように
+「サブエージェントの中は −86%、総量は同じ」を値から読めない。codex・kiro・agy・Jev は別のアカウントと料金体系で、
+1 つの帳簿に混ぜた合計は意味を持たないため、帳簿を分け、帳簿の間で単位を足さない。記録は起動の共有処理
+（下の表）でだけ行い、起動の経路を足しても書き忘れないようにする。
+
 **識別子は層の側を揃え、量を指す名前は `window` のまま残す。** `--agents` は conductor も supervisor も
 出るため `--workers` としない。`--window-limit` は劣化の目安で context window の長さを指す。
 
@@ -102,6 +111,77 @@ worker（読解）は深さ 1 に現れるため、`description` の先頭語が
 `~/.claude` は環境変数 `CLAUDE_CONFIG_DIR` があればそちらを使う。読めない行・壊れたファイルは飛ばし、
 飛ばした件数を標準エラーへ 1 行（`[transcript-agents] 読めない行を飛ばした: N 件`）出す。JSON の出力にも
 `skipped` として出す。終了コードは変えない。
+
+### 使用量の帳簿
+
+**数える範囲。** NDF のコードが起動したエージェントの呼び出し（Agent で起動したサブエージェント、NDF の
+スクリプトが起動した `claude -p`・codex・kiro-cli・agy、Jev の要求）を、1 回につき 1 行、そのランタイムの帳簿に
+残す。利用者が自分で開いた会話（conductor の会話そのもの）は帳簿へ入れない。その中で起動したサブエージェントは入れる。
+
+**帳簿の分け方。** 帳簿はランタイムごとに 5 つ（`claude`・`codex`・`kiro`・`agy`・`jev`）。Claude の帳簿には
+サブエージェントと `claude -p` の両方が入る（同じアカウント・同じ料金体系）。置き場は
+`<帳簿のディレクトリ>/<ランタイム>/<owner>__<repo>.jsonl` で、帳簿のディレクトリは `NDF_USAGE_DIR` →
+`${CLAUDE_PLUGIN_DATA}/usage` → `${XDG_STATE_HOME}/ndf/usage` → `~/.local/state/ndf/usage` の順に決める。
+直下の `<owner>__<repo>.jsonl`（ランタイムの階層を持たない帳簿）は Claude の行として読む。帳簿は追記だけで、既存の行を書き換えない。
+
+| 書く場所（起動の共有処理） | 書く行 |
+| --- | --- |
+| `scripts/lib/launch-cli.sh`（cross-review・cross-refactoring・external-ai・pr-review・supervise の `runtime` の work） | CLI を包みのサブシェルで走らせ、終わり（TERM で止めたときを含む）にそのランタイムの行 |
+| `scripts/supervise_lib/claude.py` の `call_claude`（supervise.py の work・full・judge・slow・pr、mvv-gate、project-mvv） | Claude の行 |
+| `scripts/lib/auth.py` のモデルの確認（参加者の確認） | そのランタイムの行（`kind=probe`） |
+| `scripts/lib/jev.py` の `_post` | `jev` の行（`kind=evaluate`） |
+| SubagentStop の hook（`scripts/usage-subagent.py`） | Claude の行（`source=subagent`・`kind=subagent`） |
+
+`plugins/ndf/` の `scripts/`・`skills/`・`hooks/` に、この表の外で LLM の CLI を起動する箇所を足すと
+`scripts/tests/test_launch_sites.py` が落ちる。LLM を呼ばない起動（`claude plugin`・`claude auth`・`codex login`・
+`agy models`・版の確認）は当たらない。当たるが起動しない箇所と計測の外に置く箇所は、そのテストの除外の一覧に理由と並べる。
+
+**行の形。** 時刻（`at`）・NDF の版・`schema`（2）・`runtime`・呼び出し元（`source` と `kind`、supervise の中なら
+`plan` と `step`）・モデル・使用量（`usage`）・終わり方（`status`: `ok` / `error` / `timeout` / `killed`）・
+セッション ID を持つ。サブエージェントの行は `agent_type`・`agent_id`・`parent_session_id` も持つ。呼び出し元は
+起動の共有処理への引数か、環境変数 `NDF_USAGE_SOURCE`・`NDF_USAGE_KIND`・`NDF_USAGE_PLAN`・`NDF_USAGE_STEP` で渡し、
+名乗りが無ければ `unknown` にする。行にプロンプトの本文・環境変数の値・認証情報を書かない。
+
+| 帳簿 | `usage` の鍵（ランタイムの記録の名前のまま） | 出所 |
+| --- | --- | --- |
+| claude | `input_tokens`・`cache_read_input_tokens`・`cache_creation_input_tokens`・`cache_creation` の 5 分と 1 時間・`output_tokens` | `claude -p` の結果の `usage`（`modelUsage` は `model_usage` に）。サブエージェントは会話の記録の応答を `message.id` ごとに 1 回足す |
+| codex | `input_tokens`・`cached_input_tokens`・`cache_write_input_tokens`・`output_tokens`・`reasoning_output_tokens`・`total_tokens` | `$CODEX_HOME/sessions` の rollout の最後の `token_count` の `info.total_token_usage`。無ければ標準エラーの `tokens used` の合計を `total_tokens` に |
+| kiro | `credits`・`turns` | `~/.kiro/sessions/cli/*.json` のうち作業ディレクトリと起動の時刻で 1 つに絞れたものの `metering_usage`（credit） |
+| agy | `input_tokens`・`output_tokens`・`thinking_tokens`・`cache_read_tokens`・`total_tokens` | `--output-format json` の標準出力の `usage`（本文は `response`） |
+| jev | `requests`・`questions`（応答に `usage` があればその鍵も） | 要求の本文の問いの数と応答 |
+
+使用量を取れなかった行は `usage` を `"unknown"` にし、0 の数値を書かない。帳簿への追記に失敗しても、呼び出しの
+結果と呼び出し元の処理の結果は変わらない（標準エラーに 1 行を出すだけ）。
+
+**集計。** `python3 plugins/ndf/scripts/usage-report.py --ledger <帳簿> [--since 日付] [--until 日付] [--milestone 番号か名前]
+[--by caller|day|plan] [--repo owner/repo | --all-repos] [--format json|table]` が、帳簿を 1 つ選んで呼び出し元・日・
+プランごとの合計と、同じ期間の閉じた課題の数（`.ndf/project.json` の `issues.primary` が `github` のときだけ。ほかは
+`unknown`）を出す。期間は JST の日付で両端を含み、`--milestone` はマイルストーンの作成から閉じた時刻（開いていれば今）。
+出力は帳簿をまたぐ合計を持たない。引数の誤りは終了コード 2、帳簿が無い・空は 0 件で終了コード 0。
+
+Claude の帳簿では、同じ期間について次の 3 つを並べる。同じ呼び出しは、`claude -p` はセッション ID、サブエージェントは
+`agent_id` で突き合わせて 1 回だけ数える。
+
+| 値 | 求め方 |
+| --- | --- |
+| サブエージェントだけ | サブエージェントの行と、会話の記録の `subagents/agent-*.jsonl` のうち帳簿に無いもの |
+| 全体（Claude の帳簿の全体） | `claude -p` の行の `usage` + サブエージェント（上と同じ）+ `claude -p` の行ごとの `modelUsage` の和から `usage` と親を同じくするサブエージェントを引いた残り（hook の効かない中のサブエージェント。書き込みは 5 分として数える）+ 会話の記録だけの `claude -p`（`entrypoint` が `sdk-cli` で帳簿に無いセッション） |
+| 会話の記録だけ | 全体のうち会話の記録から足した分 |
+
+会話の記録も帳簿の行も残さない呼び出し（帳簿ができる前の、会話を残さない最小構成の `claude -p`）は推定で埋めず、
+帳簿の最初の行の時刻を添えて「数えられない」と出す。
+
+**トークン削減の課題の受け入れ条件は、Claude の帳簿の全体の値で書く。** サブエージェントだけの値は内訳として並べてよいが、
+削減の判定には使わない。codex・kiro・agy・jev の帳簿はそれぞれの単位で別に書く。
+
+**supervise の報告。** drive のステップと `runtime` を指定した work のステップは、子の環境に `NDF_USAGE_PLAN`・
+`NDF_USAGE_STEP` を置き、終わりに帳簿からそのステップの行（supervise 自身の `claude -p` を除く）をランタイムごとに
+集める。報告の「CLI（drive・work の中）」の行がランタイムごとの回数と使用量を出す。`runtime` を指定した work は
+`claude -p` の回数に数えない。
+
+**テストは本物の帳簿へ書かない。** `plugins/ndf/conftest.py` がテストごとに帳簿のディレクトリを一時ディレクトリへ向け、
+テストの中で書いた行に `pytest`（テストの名前）の印を付ける。テストの終わりに、本物の帳簿（`NDF_USAGE_DIR` を外した
+ときの置き場所）へそのテストの印の付いた行が増えていれば、そのテストを落とし、増えたファイルと大きさを出す。
 
 ### `AgentRecord` の値
 
@@ -225,5 +305,6 @@ Claude Code が記録と同時に書くため起きないが、欠けた記録�
 - [issue #657](https://github.com/devbasex/ai-plugins/issues/657) — 上限で落ちた担当の検知
 - [PR #749](https://github.com/devbasex/ai-plugins/pull/749) — 測定
 - [PR #757](https://github.com/devbasex/ai-plugins/pull/757) — 中断と再開
+- [issue #1953](https://github.com/devbasex/ai-plugins/issues/1953) — 経路を問わずすべての呼び出しをランタイムごとの帳簿で数える
 - [ndf-agent-layers-unattended-run.md](ndf-agent-layers-unattended-run.md) — 3 層の運転
 - 要求・設計・契約・計画の元の文書は `issues/old/milestone-18-unattended/` にある
