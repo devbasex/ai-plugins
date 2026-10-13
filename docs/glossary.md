@@ -352,6 +352,7 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 総評 | — | レビュー本体に書く文章（body）。インラインのコメントとは別に置く | — | — | `docs/specifications/cross-review-writes-to-conductor.md` |
 | 総評だけの指摘 | — | インラインのスレッドを持たず、総評にだけ書かれた指摘（review_findings[] の posted_to が body のもの）。差分の外を指す指摘と、HTTP 422 で総評へ移した指摘がこれになる | — | — | — |
 | 決着 | — | 指摘が直した・見送った・却下したのどれかに振り分けられ、取り込み（merge-fix）が記録したこと。スレッドの指摘ではスレッドの解決も含む | — | — | — |
+| 決着の記録 | — | 状態ファイルの body_settlements[] の 1 要素。総評だけの指摘 1 件の振り分け（fixed / deferred / waived / separate_pr / rejected）と、記録したラウンドと経路（修正のラウンドの merge-fix か最終スイープの verify-sweep か）を持ち、追記だけで書き換えない | — | — | — |
 | drive の状態 | `drive_state` | 収束ループの drive.py が Pull Request ごとに持つ状態ファイル（drive-pr<N>.json / drive-rf<ID>.json）。stage と init_vars を持つ。スプリント 2c の Q3・Q4 で耐久の記録へ移して廃止する | — | — | — |
 | 指摘の基準 | — | 指摘として出してよいものを決める番号つきの条件。既定は 1 利用者が普通に使う経路の誤動作・2 レッドラインに触れるもの（外せない基準）・3 レビューの重点（宣言があるときだけ）・4 実装を違えさせる設計の食い違い。レビューのプロファイルは 2・3 以外の番号を差し替える。当たるものが major 以上になる | — | — | `docs/specifications/cross-review-review-profile.md` |
 | レビューの重点 | — | プロジェクトが .ndf/review.json で宣言した、指摘の基準 3 に使う観点。宣言が無ければ基準 3 は無い | — | — | — |

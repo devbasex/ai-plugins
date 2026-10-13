@@ -959,6 +959,12 @@
       "pending_source": "issues/issue-1980-requirements.md"
     },
     {
+      "term": "決着の記録",
+      "context": "ndf-cross-review",
+      "meaning": "状態ファイルの body_settlements[] の 1 要素。総評だけの指摘 1 件の振り分け（fixed / deferred / waived / separate_pr / rejected）と、記録したラウンドと経路（修正のラウンドの merge-fix か最終スイープの verify-sweep か）を持ち、追記だけで書き換えない",
+      "pending_source": "issues/issue-1980-design.md"
+    },
+    {
       "term": "正本",
       "context": "ndf-workflow",
       "meaning": "その事柄の定義を持つ唯一の文書。食い違ったときはこれを正とする",
