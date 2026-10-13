@@ -3836,6 +3836,12 @@
       "context": "ndf-workflow",
       "meaning": "使用量の帳簿に行が無く、Claude Code の会話の記録（~/.claude/projects/）にだけ残る claude -p の会話とサブエージェント。帳簿ができる前の分と、NDF のコードの外で打った claude -p が当たる",
       "source": "docs/specifications/ndf-usage-ledger-by-runtime.md"
+    },
+    {
+      "term": "レビュー範囲",
+      "context": "ndf-cross-review",
+      "meaning": "そのラウンドで担当が見る差分。base と head の SHA の組と、その間の変更ファイル",
+      "pending_source": "issues/issue-1702-requirements.md"
     }
   ]
 }
