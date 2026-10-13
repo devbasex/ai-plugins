@@ -27,7 +27,7 @@ def put(d: Path, runtime: str, rows: list[dict], repo: str = "acme__w") -> None:
 
 
 def report(d: Path, ledger: str, **kw) -> dict:
-    return ua.report(ledger, root=d, repo=kw.pop("repo", "acme__w"), directory=d, **kw)
+    return ua.usage_report(ledger, root=d, repo=kw.pop("repo", "acme__w"), directory=d, **kw)
 
 
 def test_one_ledger_per_report_and_caller_groups(tmp_path):
@@ -66,7 +66,9 @@ def test_empty_ledger_is_zero(tmp_path):
 
 
 def test_v1_rows_count_as_claude(tmp_path):
-    (tmp_path / "acme__w.jsonl").write_text(json.dumps({"source": "supervise", "kind": "work", "usage": U, "at": "2026-10-01T00:00:00Z"}) + "\n")
+    (tmp_path / "acme__w.jsonl").write_text(
+        json.dumps({"source": "supervise", "kind": "work", "usage": U, "at": "2026-10-01T00:00:00Z"}) + "\n"
+    )
     out = report(tmp_path, "claude")
     assert out["totals"]["usage"]["input_tokens"] == 10 and out["claude"]["total"]["usage"]["input_tokens"] == 10
 
@@ -138,11 +140,11 @@ def github_project(root: Path, primary: str = "github") -> None:
 
 def test_closed_issues_from_gh(tmp_path, monkeypatch):
     github_project(tmp_path)
-    fake_gh(tmp_path, monkeypatch, 'echo \'{"total_count": 7}\'')
+    fake_gh(tmp_path, monkeypatch, "echo '{\"total_count\": 7}'")
     assert report(tmp_path, "codex", since="2026-10-01", until="2026-10-02")["closed_issues"] == 7
 
 
-@pytest.mark.parametrize("primary,gh", [("redmine", 'echo \'{"total_count": 7}\''), ("github", "exit 1")])
+@pytest.mark.parametrize("primary,gh", [("redmine", "echo '{\"total_count\": 7}'"), ("github", "exit 1")])
 def test_closed_issues_unknown(tmp_path, monkeypatch, primary, gh):
     github_project(tmp_path, primary)
     fake_gh(tmp_path, monkeypatch, gh)
@@ -151,7 +153,9 @@ def test_closed_issues_unknown(tmp_path, monkeypatch, primary, gh):
 
 def test_milestone_sets_the_period_and_count(tmp_path, monkeypatch):
     github_project(tmp_path)
-    ms = [{"number": 17, "title": "トークン", "created_at": "2026-10-01T00:00:00Z", "closed_at": "2026-10-02T00:00:00Z", "closed_issues": 4}]
+    ms = [
+        {"number": 17, "title": "トークン", "created_at": "2026-10-01T00:00:00Z", "closed_at": "2026-10-02T00:00:00Z", "closed_issues": 4}
+    ]
     fake_gh(tmp_path, monkeypatch, f"echo '{json.dumps(ms)}'")
     put(tmp_path, "agy", [{"source": "s", "kind": "k", "usage": {"input_tokens": 1}, "at": "2026-10-01T03:00:00Z"}])
     put(tmp_path, "agy", [{"source": "s", "kind": "k", "usage": {"input_tokens": 2}, "at": "2026-10-05T03:00:00Z"}])
@@ -182,7 +186,9 @@ def test_cli_table_lists_the_three_claude_values(tmp_path, monkeypatch):
 
 
 def test_step_totals_split_by_runtime_and_skip_supervise_claude(tmp_path):
-    rows = [{"source": "cross-review", "kind": "review", "plan": "P", "step": "d", "usage": {"input_tokens": 5}, "at": usage_ledger.now_utc()}]
+    rows = [
+        {"source": "cross-review", "kind": "review", "plan": "P", "step": "d", "usage": {"input_tokens": 5}, "at": usage_ledger.now_utc()}
+    ]
     put(tmp_path, "codex", rows)
     put(tmp_path, "claude", [{**rows[0], "source": "supervise"}])
     put(tmp_path, "kiro", [{**rows[0], "step": "other", "usage": {"credits": 1}}])

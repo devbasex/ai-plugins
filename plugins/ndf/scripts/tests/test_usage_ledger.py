@@ -253,7 +253,7 @@ def test_full_step_counts_in_total_not_subagent_only(tmp_path, ledger):
     run_plan(tmp_path, [{"id": "rev", "type": "work", "full": True, "prompt": "/ndf:cross-review", "next": "end"}])
     [row] = rows(ledger)
     assert (row["kind"], row["step"]) == ("full", "rev")
-    c = usage_aggregate.report("claude", root=tmp_path, directory=ledger)["claude"]
+    c = usage_aggregate.usage_report("claude", root=tmp_path, directory=ledger)["claude"]
     assert c["subagent_only"]["calls"] == 0 and c["subagent_only"]["usage"] == {}
     for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"):
         assert c["total"]["usage"][k] >= USAGE[k]

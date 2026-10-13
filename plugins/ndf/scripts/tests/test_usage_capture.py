@@ -83,7 +83,12 @@ def fake_clis(tmp_path, monkeypatch):
         "(pathlib.Path(os.environ['HOME']) / '.kiro' / 'sessions' / 'cli' / 'k1.json').write_text(json.dumps(s))\n"
         "print('kiro done')\n",
     )
-    agy_out = {"conversation_id": "c1", "status": "SUCCESS", "response": "2\n", "usage": {"input_tokens": 13842, "output_tokens": 41, "total_tokens": 13883}}
+    agy_out = {
+        "conversation_id": "c1",
+        "status": "SUCCESS",
+        "response": "2\n",
+        "usage": {"input_tokens": 13842, "output_tokens": 41, "total_tokens": 13883},
+    }
     write_cli(bin_dir, "agy", f"print(json.dumps({agy_out!r}))\n")
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setenv("HOME", str(home))
@@ -263,7 +268,9 @@ def test_hook_is_registered_for_subagent_stop():
 
 
 def test_v1_rows_are_read_as_claude(tmp_path):
-    (tmp_path / "acme__w.jsonl").write_text(json.dumps({"source": "supervise", "kind": "work", "usage": {}, "at": "2026-10-01T00:00:00Z"}) + "\n")
+    (tmp_path / "acme__w.jsonl").write_text(
+        json.dumps({"source": "supervise", "kind": "work", "usage": {}, "at": "2026-10-01T00:00:00Z"}) + "\n"
+    )
     [row] = usage_ledger.read_usage_ledger("claude", tmp_path)
     assert (row["schema"], row["runtime"], row["status"], row["usage"]) == (1, "claude", "ok", "unknown")
     assert usage_ledger.read_usage_ledger("codex", tmp_path) == []

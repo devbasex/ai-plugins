@@ -36,7 +36,7 @@ def top_level(path: str) -> Path:
     return Path(p.stdout.strip() if p.returncode == 0 and p.stdout.strip() else path).resolve()
 
 
-def table(out: dict) -> str:
+def report_table(out: dict) -> str:
     """表の形。使用量の列は帳簿の鍵のまま並べる。"""
     keys = sorted({k for g in out["groups"] for k in g["usage"]} | set(out["totals"]["usage"]))
     head = f"| {out['ledger']} | 回数 | 不明 | " + " | ".join(keys) + " |"
@@ -82,7 +82,7 @@ def main(argv: list[str] | None = None) -> int:
     root = top_level(a.root)
     repo = None if a.all_repos else (a.repo.replace("/", "__", 1) if a.repo else usage_ledger.repo_key(str(root)))
     try:
-        out = usage_aggregate.report(
+        out = usage_aggregate.usage_report(
             a.ledger,
             root=root,
             since=a.since,
@@ -94,7 +94,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     except ValueError as e:
         ap.error(str(e))
-    print(table(out) if a.format == "table" else json.dumps(out, ensure_ascii=False, indent=1))
+    print(report_table(out) if a.format == "table" else json.dumps(out, ensure_ascii=False, indent=1))
     return 0
 
 

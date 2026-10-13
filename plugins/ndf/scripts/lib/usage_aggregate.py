@@ -72,7 +72,7 @@ def bucket() -> dict:
     return {"calls": 0, "unknown_calls": 0, "usage": {}}
 
 
-def count(b: dict, row: dict) -> None:
+def count_row(b: dict, row: dict) -> None:
     b["calls"] += 1
     if row.get("usage") == UNKNOWN:
         b["unknown_calls"] += 1
@@ -82,13 +82,13 @@ def count(b: dict, row: dict) -> None:
 # --- 期間 ---
 
 
-def parse_at(value) -> Optional[datetime]:
+def row_time(value) -> Optional[datetime]:
     t = usage_capture.utc_seconds(value)
     return datetime.fromtimestamp(t, timezone.utc) if t is not None else None
 
 
 def jst_day(value) -> str:
-    t = parse_at(value)
+    t = row_time(value)
     return t.astimezone(JST).date().isoformat() if t else ""
 
 
@@ -100,7 +100,7 @@ def in_period(at, since: Optional[str], until: Optional[str]) -> bool:
     return (not since or day >= since) and (not until or day <= until)
 
 
-def group_key(row: dict, by: str) -> str:
+def usage_group_key(row: dict, by: str) -> str:
     if by == "day":
         return jst_day(row.get("at"))
     if by == "plan":
@@ -113,8 +113,8 @@ def summarize(rows: Iterable[dict], by: str = "caller") -> dict:
     groups: dict = defaultdict(bucket)
     totals = bucket()
     for r in rows:
-        count(groups[group_key(r, by)], r)
-        count(totals, r)
+        count_row(groups[usage_group_key(r, by)], r)
+        count_row(totals, r)
     return {"groups": [{"key": k, **v} for k, v in sorted(groups.items())], "totals": totals}
 
 
@@ -199,7 +199,9 @@ def transcripts(projects: Path, since: Optional[str], until: Optional[str], repo
     return out
 
 
-def claude_views(rows: list, all_rows: list, since: Optional[str], until: Optional[str], repo: Optional[str], projects: Optional[Path]) -> dict:
+def claude_views(
+    rows: list, all_rows: list, since: Optional[str], until: Optional[str], repo: Optional[str], projects: Optional[Path]
+) -> dict:
     """Claude の帳簿の「サブエージェントだけ」「全体」「会話の記録だけ」と、数えられない範囲の注記。"""
     subs = [r for r in rows if r.get("kind") == "subagent"]
     calls = [r for r in rows if r.get("kind") != "subagent"]
@@ -209,23 +211,23 @@ def claude_views(rows: list, all_rows: list, since: Optional[str], until: Option
     extra_agents = {a: v for a, v in found["agents"].items() if a not in known_agents}
     sub_only, total, only = bucket(), bucket(), bucket()
     for r in subs:
-        count(sub_only, r)
-        count(total, r)
+        count_row(sub_only, r)
+        count_row(total, r)
     for parent, usage in extra_agents.values():
         for b in (sub_only, total, only):
-            count(b, {"usage": usage})
+            count_row(b, {"usage": usage})
     children = defaultdict(list)
     for r in subs:
         children[r.get("parent_session_id")].append(r.get("usage"))
     for parent, usage in extra_agents.values():
         children[parent].append(usage)
     for r in calls:
-        count(total, r)
+        count_row(total, r)
         add_into(total["usage"], residual(r, children.get(r.get("session_id"), []) if r.get("session_id") else []))
     for session, usage in found["sdk"].items():
         if session not in known_sessions:
-            count(total, {"usage": usage})
-            count(only, {"usage": usage})
+            count_row(total, {"usage": usage})
+            count_row(only, {"usage": usage})
     first = min((r.get("at") for r in all_rows if r.get("at")), default=None)
     note = (
         f"{first} より前の、会話の記録を残さない claude -p は含まない（帳簿の最初の行の時刻）"
@@ -293,7 +295,7 @@ def closed_issues(root: Path, slug: str, since: Optional[str], until: Optional[s
 # --- 入口 ---
 
 
-def report(
+def usage_report(
     ledger: str,
     *,
     root: Path,
@@ -335,12 +337,12 @@ def step_totals(plan: str, step: str, since: float, directory: Optional[Path] = 
     for rt in usage_ledger.RUNTIMES:
         b = bucket()
         for r in usage_ledger.read_usage_ledger(rt, directory):
-            t = parse_at(r.get("at"))
+            t = row_time(r.get("at"))
             if r.get("plan", "") != plan or r.get("step", "") != str(step) or t is None or t.timestamp() < since - 1:
                 continue
             if rt == "claude" and r.get("source") == "supervise":
                 continue
-            count(b, r)
+            count_row(b, r)
         if b["calls"]:
             out[rt] = b
     return out
