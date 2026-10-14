@@ -93,7 +93,7 @@ class Relay(AccountSwitch, ho.Swapper):
         remove(self.path(QUESTION_FILE), self.path(LIMIT_FILE))  # 上限シグナルファイルは前の子のもの（新しい子の hook はまだ書けない）
         prev = self.account
         self.settle_account(prev)  # 前のセッションの .claude.json の共有する部分を書き戻してから次を用意する（E12）
-        to, reason, choice = (s.plan or self.pick(None)) if self.multi else (None, None, None)
+        to, reason, choice = self.section_plan(s.plan, prev)
         env = cl.section_env(self.env, to, self.note_account_dir) if to else None
         if to and env is None:  # 親の認証へ戻さない。選び直し、無ければ止める
             to, reason, choice, env = self.replace_unusable(to)
@@ -119,19 +119,19 @@ class Relay(AccountSwitch, ho.Swapper):
             row["cwd_fallback"] = s.cwd_fallback
         if s.carried is not None:
             row["carried"] = s.carried
-        if self.multi:
+        if self.multi or to is not None:
             row["account"] = to
         self.log(**row)
         bad = ca.metered_problem(self.env) if self.section == 1 else None
         if bad:  # 保存した宣言が壊れていれば、宣言なしとして扱い 1 行出す（#1468 の I5）
             self.term.screen("ndf-relay: " + bad)
             self.log(event="metered_invalid", section=self.section, detail=bad)
-        if self.multi:
+        if self.multi or to is not None:
             self.tell_account(prev, to, reason, choice)
-            if self.watch is not None:
-                self.watch.reset()
-                if not self.watch.thread.is_alive():
-                    self.watch.start()
+        if self.watch is not None:  # 登録が 2 つ以上のときだけある
+            self.watch.reset()
+            if not self.watch.thread.is_alive():
+                self.watch.start()
         self.limit.release()
 
     def replace_unusable(self, failed: str) -> tuple[str, str, ca.Choice, dict]:
@@ -367,6 +367,7 @@ class Relay(AccountSwitch, ho.Swapper):
 
     def loop(self, first_args: list[str]) -> int:
         self.first_args = first_args
+        self.tell_relogin()  # 起動時の知らせ（E1）。入れ替えた後の版（from_handover）は起動ではないので呼ばない
         code = self._start_first_section(first_args)
         if code is not None:
             return code
