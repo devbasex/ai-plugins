@@ -12,7 +12,7 @@ import review_lib  # noqa: E402
 import models  # noqa: E402
 import monitor_outcome  # noqa: E402
 import result_posts  # noqa: E402
-from review_lib import posts, store  # noqa: E402
+from review_lib import posts, review_scope, store  # noqa: E402
 
 
 def _load_round_state(pr: int) -> dict[str, Any] | None:
@@ -343,4 +343,9 @@ def _record_review_post(
         "posted_inline": posted.posted_inline,
         "posted_body": posted.posted_body,
     }
+    # 読んだファイル数（#1702）。`null` は測れないことで、0 件読んだことではない。判定の範囲の照合が読む。
+    read, why = review_scope.parse_read_files(r)
+    last[agent]["read_files"] = read
+    if why is not None:
+        last[agent]["read_files_reason"] = why
     return _collect_review_findings(st, agent, pr, round_no)

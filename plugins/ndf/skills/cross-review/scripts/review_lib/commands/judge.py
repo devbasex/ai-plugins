@@ -16,6 +16,7 @@ from review_lib import (  # noqa: E402
     matching,
     participants as participants_mod,
     posts,
+    review_scope,
     store,
 )
 
@@ -296,6 +297,38 @@ def _finalize_round_if_converged(
     _finalize_converged_round(pr, st, last, findings_measurable)
 
 
+def _check_scope(last: dict[str, Any], reviewers: list[str], only: str | None) -> dict[str, Any]:
+    """範囲の照合を行い、`scope_check` に書いて `SCOPE_CHECK` / `SCOPE_UNMATCHED` を出す。
+
+    照合は判定の中だけで行い、指摘の取り込みには触らない（設計の I3）。同じラウンドで打ち直すたびに書き直す。
+    """
+    result = review_scope.check_scope(last, reviewers, only)
+    last["scope_check"] = result
+    if not result["checked"]:
+        print(f"SCOPE_CHECK=unchecked:{result['reason']}")
+        return result
+    print("SCOPE_CHECK=checked")
+    print(f"SCOPE_UNMATCHED='{review_scope.unmatched_text(result)}'")
+    for u in result["unmatched"]:
+        if u["reason"] == "too_few":
+            review_lib.info(
+                f"⚠ {u['seat']} は {result['files']} ファイルのうち {u['read_files']} ファイルを読んだと申告した"
+                f"（{result['min_read']} 以上で数える）。この承認を収束に数えない"
+            )
+        else:
+            review_lib.info(f"⚠ {u['seat']} の読んだファイル数を測れない（{u['reason']}）。この承認を収束に数えない")
+    return result
+
+
+def _retry_unmatched_scope(pr: int, st: dict[str, Any], last: dict[str, Any]) -> None:
+    """照合で外れた担当を数えなければ収束したラウンドを、修正を挟まずに次のラウンドへ進める（設計の I5）。"""
+    last["verdict"] = "scope_unmatched"
+    store._save(pr, st)
+    print("SCOPE_RETRY=1")
+    review_lib.info("→ 範囲の照合で外れた承認を除くと収束しない。修正を挟まずに次のラウンドへ進む。")
+    sys.exit(2)
+
+
 def cmd_judge(args: argparse.Namespace) -> None:
     """Step 3 — intent ベース pass 判定。
 
@@ -306,6 +339,10 @@ def cmd_judge(args: argparse.Namespace) -> None:
     code-related の失敗があれば**中断せず**終了コード 2 で修正のラウンドへ回す。
     収束の直前は修正の機会が残っている段であり、そこで中断すると直せる失敗まで
     人手へ戻すことになる。中断は上限のラウンド数・振動の検知・`merge-fix` が受け持つ。
+
+    結果なしの扱いを抜けた後、範囲の照合（#1702）を行う。収束の式が成り立っても、照合で外れた
+    通した担当（読んだファイル数が足りない・測れない）がいれば収束させず、修正を挟まずに次のラウンドへ
+    進める（`scope_unmatched`・`SCOPE_RETRY=1`・終了コード 2）。
 
     Exit code: 0=approved, 2=continue, 7=結果なしのため起動し直す・振り替える,
                8=待ち行列に投稿が残っている, 1=error
@@ -341,6 +378,8 @@ def cmd_judge(args: argparse.Namespace) -> None:
     if no_result:
         _handle_no_result_round(pr, st, last, no_result)
 
+    scope = _check_scope(last, reviewers, only)
+
     converged = _evaluate_convergence(
         carried,
         round_passes,
@@ -348,6 +387,8 @@ def cmd_judge(args: argparse.Namespace) -> None:
         new_findings,
         blocking_body,
     )
+    if converged and scope.get("unmatched"):
+        _retry_unmatched_scope(pr, st, last)
 
     _finalize_round_if_converged(
         pr,

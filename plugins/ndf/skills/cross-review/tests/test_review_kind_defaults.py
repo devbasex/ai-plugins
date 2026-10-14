@@ -153,20 +153,32 @@ def _prompt(tmp_path, kind, rnd, rounds):
     return (tmp_path / f"codex-review-pr{PR}-prompt.md").read_text()
 
 
-TWO_ROUNDS = [{"round": 1, "head_sha": "a" * 40}, {"round": 2, "head_sha": "b" * 40}]
+# 範囲は `start-round` が求めて `review_scope` に書き、起動スクリプトは写すだけである（#1702 の決定 2）
+A, B, C = "a" * 40, "b" * 40, "c" * 40
+DESIGN_TWO = [
+    {"round": 1, "head_sha": A, "review_scope": {"range": "full", "base_sha": C, "head_sha": A, "files": 4}},
+    {"round": 2, "head_sha": B, "review_scope": {"range": "since_previous", "base_sha": A, "head_sha": B, "files": 1}},
+]
+CODE_TWO = [
+    {"round": 1, "head_sha": A, "review_scope": {"range": "full", "base_sha": C, "head_sha": A, "files": 4}},
+    {"round": 2, "head_sha": B, "review_scope": {"range": "full", "base_sha": C, "head_sha": B, "files": 5}},
+]
 
 
 def test_design_round_two_gets_only_the_previous_changes(tmp_path):
-    prompt = _prompt(tmp_path, "design", 2, TWO_ROUNDS)
-    assert f"diff {'a' * 40} {'b' * 40}" in prompt
+    prompt = _prompt(tmp_path, "design", 2, DESIGN_TWO)
+    assert f"diff {A}...{B}" in prompt
+    assert "前のラウンドのレビュー対象" in prompt
 
 
 @pytest.mark.parametrize(
     "kind, rnd, rounds",
     [
-        ("code", 2, TWO_ROUNDS),
-        ("design", 1, TWO_ROUNDS[:1]),
+        ("code", 2, CODE_TWO),
+        ("design", 1, DESIGN_TWO[:1]),
     ],
 )
 def test_code_and_first_round_get_the_full_diff(tmp_path, kind, rnd, rounds):
-    assert f"diff {'a' * 40}" not in _prompt(tmp_path, kind, rnd, rounds)
+    prompt = _prompt(tmp_path, kind, rnd, rounds)
+    assert f"diff {A}..." not in prompt
+    assert f"diff {C}...{rounds[-1]['head_sha']}" in prompt
