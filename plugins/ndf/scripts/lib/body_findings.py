@@ -178,6 +178,16 @@ def _decision(place: str, e: dict[str, Any]) -> str:
     return "deferred"
 
 
+def _settlement_details(place: str, e: dict[str, Any]) -> dict[str, str]:
+    decision = _decision(place, e)
+    reason = e.get("reason_for_rejection") if place == "rejected" else e.get("reason_for_deferral")
+    return {
+        "decision": decision,
+        "reason": "" if decision == "fixed" else str(reason or ""),
+        "issue": str(e.get("issue") or "") if decision == "separate_pr" else "",
+    }
+
+
 def record_settlements(
     st: dict[str, Any],
     items: Iterable[tuple[str, dict[str, Any]]],
@@ -205,14 +215,10 @@ def record_settlements(
             continue
         if fid in done:
             continue
-        decision = _decision(place, e)
-        reason = e.get("reason_for_rejection") if place == "rejected" else e.get("reason_for_deferral")
         records.append(
             {
                 "finding_id": fid,
-                "decision": decision,
-                "reason": "" if decision == "fixed" else str(reason or ""),
-                "issue": str(e.get("issue") or "") if decision == "separate_pr" else "",
+                **_settlement_details(place, e),
                 "round": round_no,
                 "pr": pr,
                 "source": source,
