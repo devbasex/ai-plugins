@@ -137,8 +137,7 @@
 ### 重要なフィールド
 
 - `rounds[].review_scope` / `rounds[].scope_check` / `rounds[].<席>.read_files` — レビュー範囲と範囲の照合の記録。欄と値は [05-pool-and-convergence.md](05-pool-and-convergence.md) の「範囲の照合」にある
-- `host` — 確定したホスト名（`claude` / `codex` / `agy` / `kiro`）。参加者プールに残る
-  （`participants` を持たない古い状態の再開では、変更の前と同じく参加者プールから外して輪番を回す）
+- `host` — 確定したホスト名（`claude` / `codex` / `agy` / `kiro`）。参加者プールに残る（`participants` を持たない古い状態の再開では、変更の前と同じく参加者プールから外して輪番を回す）
 - `rounds[].reviewer_models.<席>` — そのラウンドのレビューの起動で実際に動いたモデル。
   取り込み（`read-result`）が結果の検証より前に、共通ライブラリの `models.observed_model` で取って書く。
   結果が無くて止まる経路でも残る。`requested` は指定値で、cross-review は `--model` を渡さないため常に `null`。
