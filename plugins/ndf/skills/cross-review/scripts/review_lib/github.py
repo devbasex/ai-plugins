@@ -115,6 +115,8 @@ class PrMetadata(NamedTuple):
     is_fork: bool
     rate_remaining: int | None
     rate_reset: str | None
+    # base のコミット（応答の `base.sha`）。レビュー範囲の基準に使う（#1702 の決定 1）。
+    base_sha: str = ""
 
 
 def _pr_metadata_of(repo: str, resp: RestResponse) -> PrMetadata | None:
@@ -135,6 +137,7 @@ def _pr_metadata_of(repo: str, resp: RestResponse) -> PrMetadata | None:
         is_fork=head_repo.lower() != repo.lower(),
         rate_remaining=resp.rate_remaining,
         rate_reset=resp.rate_reset,
+        base_sha=str(base.get("sha") or ""),
     )
 
 
