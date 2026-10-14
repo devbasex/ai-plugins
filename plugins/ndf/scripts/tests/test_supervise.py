@@ -1517,6 +1517,7 @@ def test_new_sprint_writes_waves_in_order(tmp_path):
         "sync-body",
         "review",
         "sync-review",
+        "requirements-recheck",
         "glossary-check",
         "fix-glossary",
         "glossary-recheck",
@@ -1528,7 +1529,10 @@ def test_new_sprint_writes_waves_in_order(tmp_path):
     # PR 本文の「決めたこと」を review の前に合わせる。無いと CI の pr-body-decisions が落ち、cross-review が中断する
     assert ds["pr"]["decisions"] is True and ds["pr"]["next"] == "sync-body" and ds["sync-body"]["next"] == "review"
     assert "pr-body-decisions.sh" in ds["sync-body"]["cmd"] and ds["sync-body"]["cmd"].endswith(" sync {pr}")
-    assert ds["review"]["next"] == "sync-review" and ds["sync-review"]["next"] == "glossary-check"
+    assert ds["review"]["next"] == "sync-review" and ds["sync-review"]["next"] == "requirements-recheck"
+    # レビューの直しの後にも写しと本文の一致を見て、食い違えば on_fail を置かずに止まる（#1769）
+    assert "spec-copy.py check" in ds["requirements-recheck"]["cmd"] and "on_fail" not in ds["requirements-recheck"]
+    assert ds["requirements-recheck"]["next"] == "glossary-check"
     assert "--ff-only" in ds["sync-review"]["cmd"]  # レビューが push した直しに追いついてから語を見る
     assert "check --diff origin/develop" in ds["glossary-check"]["cmd"]
     assert ds["glossary-check"]["on_fail"] == "fix-glossary" and ds["fix-glossary"]["next"] == "glossary-recheck"
