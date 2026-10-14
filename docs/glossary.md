@@ -632,6 +632,7 @@ ai-plugins の開発で formatter と静的解析を手元と CI で走らせる
 | 抑止 | — | 静的解析の指摘を、行のコメント（# noqa・# shellcheck disable=）か設定の除外で出さなくすること。理由を添える | — | — | — |
 | 古いバイトコード | — | Python が、書き換えたソースを、前の内容から作った .pyc で読むこと。.pyc はソースの更新時刻（秒）と大きさだけで新しさを照らすため、同じ秒に同じ大きさで書き換えると見分けられない | — | — | `docs/specifications/cross-refactoring-test-stale-bytecode.md` |
 | git を使うテストの土台 | — | cross-refactoring のテストで、git のリポジトリの作業ディレクトリ・pytest の起動口・状態ファイルを用意する補助（crossref_helpers.build_git_flow） | — | — | `docs/specifications/cross-refactoring-test-stale-bytecode.md` |
+| CLI の版の一覧 | — | スモークの像へ入れる 4 ランタイムの CLI の版数と取得先と checksum を書いたファイル（tests/runtime-smoke/cli-versions.env）。版を上げるときに書き換える唯一の場所 | — | — | — |
 
 ## NDF の学習の設定（`ndf-training-optout`）
 
