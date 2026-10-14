@@ -112,6 +112,8 @@ class HeadRef(NamedTuple):
     branch: str
     oid: str
     is_fork: bool
+    # 同じ応答の base のコミット。レビュー範囲の基準（#1702 の決定 1）。取れなければ空。
+    base_oid: str = ""
 
 
 def _resolve_head_ref(pr: int, code: int = 8, repo: str | None = None) -> HeadRef:
@@ -130,7 +132,7 @@ def _resolve_head_ref(pr: int, code: int = 8, repo: str | None = None) -> HeadRe
         raise SystemExit(code)  # die は戻らないが、型のために置く
     if not meta.head_branch or not meta.head_sha:
         review_lib.die(f"PR #{pr} の head が空である", code=code)
-    return HeadRef(branch=meta.head_branch, oid=meta.head_sha, is_fork=meta.is_fork)
+    return HeadRef(branch=meta.head_branch, oid=meta.head_sha, is_fork=meta.is_fork, base_oid=meta.base_sha)
 
 
 def _fetch_head(worktree: str, pr: int, head: HeadRef) -> bool:

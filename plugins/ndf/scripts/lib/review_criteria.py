@@ -263,6 +263,15 @@ MVV_FIXER = (
     "返信の末尾の根拠の句は `finalize` が足す。"
 )
 
+# 要求（受け入れ条件）の変更が要る指摘の扱い。`fix-steps.py context` が「指摘の基準」の後へ置く。写しだけを直すと
+# 課題の本文（正）と食い違ったまま進む（#1769）
+REQUIREMENTS_FIXER = (
+    "## 要求の変更が要る指摘\n\n"
+    "要求（受け入れ条件）の変更が要る指摘は、要求の写し（`issues/issue-<番号>-requirements.md`。正は課題の本文）を直さない。"
+    '課題の本文の変更として止めて返す: `decision: "deferred"` にし、`reason` に「要ユーザ判断: 課題の本文の変更が要る」と'
+    "変える中身を書く（受け入れ条件の変更は利用者が承認する判断である）。"
+)
+
 
 def fixer_block(focus: Focus = NO_FOCUS, mvv=None, profile: Profile = NO_PROFILE) -> str:
     """修正担当への「指摘の基準」の節。基準・書かないもの・見送りの種類・返信の雛形。`mvv` を渡すと MVV の節を後ろへ足す。

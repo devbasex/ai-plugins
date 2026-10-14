@@ -162,3 +162,74 @@ agy 1 者で回る）。記録の `included` には書かない。再開で `--o
 round 5 の指摘は修正済みの箇所を指していた。再提出された指摘は Pull Request に残り、
 最終スイープ（Step 7.5）が解消する。
 
+## 範囲の照合
+
+**担当が範囲を推測して一部だけを見た承認では、収束しない。** スプリント PR（複数課題の差分の末尾に
+cross-refactoring のコミットが付く形）では、担当が末尾のコミットだけを見て承認しうる。そのため
+範囲をプロンプトで渡し、担当が読んだファイル数を範囲のファイル数と突き合わせる。
+
+### レビュー範囲
+
+`start-round` がラウンドを開くときに求め、`rounds[].review_scope` に書く。base の SHA は head を取る
+REST の応答（`GET /repos/{repo}/pulls/{pr}`）の `base.sha` から読み、API の呼び出しを増やさない。
+
+| 欄 | 意味 |
+| --- | --- |
+| `range` | `full`（PR の全差分）か `since_previous`（設計 PR の 2 ラウンド目以降。`classifications.diff_scope`） |
+| `base_sha` | `full` は PR の `base.sha`。`since_previous` は同じ PR の 1 つ前のラウンドの `head_sha`（無いか今の head と同じなら `full` へ落とす） |
+| `head_sha` | そのラウンドの `head_sha` |
+| `files` | `git -C <worktree> diff --name-only <base_sha>...<head_sha>` の行数 |
+| `unavailable` | 求められなかった理由。このとき上の 4 つは無い |
+
+| `unavailable` | いつ |
+| --- | --- |
+| `no_head` | 作業ツリーの同期を飛ばし、head を記録していない |
+| `no_base` | PR の応答に `base.sha` が無い |
+| `base_missing` | base のコミットが作業ツリーに無く、`git fetch origin <base_sha>` でも取れない |
+| `diff_failed` | `git diff --name-only` が非 0 で終わった |
+
+範囲を求められなくてもラウンドは止めない。`launch-reviewer.sh` は `review_scope` に `unavailable` が
+無く、`review_scope.head_sha` がそのラウンドの `head_sha` と一致するときだけ、プロンプトの「必須
+コンテキスト」に節「このラウンドのレビュー範囲」（base・head・3 点の `git diff` のコマンド・ファイル数）を
+載せ、結果ファイルに `read_files` を書くよう指示する。それ以外は節も指示も載せない。
+
+### 読んだファイル数
+
+担当は結果ファイルの `read_files` に、レビュー範囲のファイルのうち差分を読んだファイルの数を整数で書く
+（自己申告）。`read-result` は席の記録へ写す。
+
+| 席の記録 | 値 |
+| --- | --- |
+| `read_files` | 0 以上の整数。測れなければ `null`（0 件とは別の値として扱う） |
+| `read_files_reason` | `null` の理由。`missing`（鍵が無い）か `not_integer`（真偽値・文字列・小数・負の数） |
+
+取り込みは `read_files` で止まらず、指摘も捨てない。
+
+### 判定での照合
+
+`judge` は結果なしの扱いを抜けた後、通した担当（`APPROVE` か重大な指摘の無い `COMMENT`）ごとに
+`read_files` を照らす。通すのに要る数は `ceil(files × 0.5)`（`review_scope.READ_FILES_MIN_RATIO`）で、
+16 ファイルなら 8 である。足りない（`too_few`）・測れない（`missing` / `not_integer`）担当を外れた担当とする。
+通していない担当（`REQUEST_CHANGES`・重大な指摘のある `COMMENT`）は照らさない。
+
+収束の式（終了基準の層）を今のまま評価し、成り立ったうえで外れた担当がいれば収束させない。
+`verdict = scope_unmatched`・終了コード 2・`SCOPE_RETRY=1` を返し、`drive.py` は修正を挟まずに
+次のラウンドを開く。次のラウンドは席の輪番で組み直され、別の担当が全範囲を見る。ラウンドの上限は
+今のまま効く。収束の式が成り立たないラウンドは、照合をせずに修正へ回る。
+
+照合しないラウンドは今と同じ判定になる。
+
+| 照合しない理由（`SCOPE_CHECK=unchecked:<理由>`） | いつ |
+| --- | --- |
+| `review_scope.unavailable` の値 | 範囲を求められなかった |
+| `legacy` | `review_scope` を持たない前の版のラウンド |
+| `model_stage` | 設計 PR のモデルの段。指示どおりドメインモデルの節だけを読むため、照合すると誤って外す |
+
+判定の出力と状態ファイル:
+
+| 出力 | 形 |
+| --- | --- |
+| `SCOPE_CHECK` | `checked` か `unchecked:<理由>` |
+| `SCOPE_UNMATCHED` | `checked` のとき。`'<席>=<読んだ数>/<差分の数> ...'`。測れないときは読んだ数の位置に理由（`'kiro=1/16 codex=missing/16'`） |
+| `SCOPE_RETRY` | 出口が `scope_unmatched` のとき `1` |
+| `rounds[].scope_check` | `{checked, reason?, files?, min_read?, unmatched: [{seat, read_files, reason}]}`。判定のたびに書き直す |

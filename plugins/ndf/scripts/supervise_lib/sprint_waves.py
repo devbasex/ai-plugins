@@ -153,6 +153,16 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
                 "stage": "ドキュメントレビュー",
                 "timeout": 120,
                 "cmd": "git fetch -q && git merge -q --ff-only '@{u}'",
+                "next": "requirements-recheck",
+            },
+            # レビューの直しの後にも写しと課題の本文（正）の一致を見る。写しだけを直した直しを送らずに止める
+            # （on_fail を置かない。受け入れ条件の変更は課題の本文を直す利用者の判断で、修正担当の手直しで済ませない。#1769）
+            {
+                "id": "requirements-recheck",
+                "type": "run",
+                "stage": "ドキュメントレビュー",
+                "timeout": 120,
+                "cmd": f"{SPEC_COPY_PY} check {n} {copy}",
                 "next": "glossary-check",
             },
             # 用語チェック。当たりは 1 回だけ直し、残った当たりは関門 1 の提示へ載せる

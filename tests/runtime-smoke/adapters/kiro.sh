@@ -4,11 +4,7 @@ set -euo pipefail
 source /workspace/ai-plugins/tests/runtime-smoke/lib/common.sh
 
 cd "$PROJECT_DIR"
-if command -v kiro-cli >/dev/null 2>&1; then
-  record_version kiro-cli --help
-else
-  echo "kiro-cli is not available; using installer fallback" | tee "$ARTIFACT_DIR/version.log"
-fi
+record_version kiro-cli --version
 
 run_step "kiro install ndf" bash "$REPO_ROOT/plugins/ndf/dev.kiro/install.sh" --project "$PROJECT_DIR" --with-slack
 run_step "kiro install ndf idempotent" bash "$REPO_ROOT/plugins/ndf/dev.kiro/install.sh" --project "$PROJECT_DIR" --with-slack

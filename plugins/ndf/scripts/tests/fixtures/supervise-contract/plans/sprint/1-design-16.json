@@ -89,6 +89,14 @@
       "stage": "ドキュメントレビュー",
       "timeout": 120,
       "cmd": "git fetch -q && git merge -q --ff-only '@{u}'",
+      "next": "requirements-recheck"
+    },
+    {
+      "id": "requirements-recheck",
+      "type": "run",
+      "stage": "ドキュメントレビュー",
+      "timeout": 120,
+      "cmd": "python3 <NDF>/scripts/spec-copy.py check 16 issues/issue-16-requirements.md",
       "next": "glossary-check"
     },
     {

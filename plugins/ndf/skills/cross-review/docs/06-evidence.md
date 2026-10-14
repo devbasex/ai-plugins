@@ -61,6 +61,28 @@
 `posted_to` が投稿先（`inline` / `body`）を持ち、`path` と `line` は総評へ書いたときも
 埋める。
 
+**総評だけの指摘も、修正担当が必ず振り分け、決着するまで収束を止める。** スレッドを持たないため、未解決の
+スレッドだけを対象にすると直されも見送られもせず、まとめの件数にも入らない。行き先は次のとおりで、判定の正本は
+`scripts/lib/body_findings.py` にある（2 つの経路を区別しない）。
+
+| 段階 | 行き先 |
+| --- | --- |
+| 修正の雛形 | `fix-steps.py context`（環境変数 `CROSS_REVIEW_STATE` が状態ファイルを指すとき）が、決着していない総評だけの指摘を全ラウンドから `thread_id: null` と `finding_id` を持つ要素として入れ、`metrics.body_findings` に件数を出す。決着の記録を持つもの・統合済み（`merged_into`）・前のラウンドで `fixed` 以外に決着した指摘の再提出（照合は新しい指摘の数え方と同じ `scripts/lib/finding_match.py`）は入れない。`fixed` に決着した指摘と同じ箇所の再提出は入れる（直したはずの指摘が残っている）。状態ファイルを読めなければ `items` に `body-findings: unreadable` を出してスレッドだけで進む |
+| 振り分け | `finalize` は、雛形の総評だけの指摘が `decisions[]` から消えていれば `missing` として止まり、戻り値ファイルを書かない。戻り値ファイルの要素へ `finding_id` を写す（スレッドの要素は持たない）。返事はまとめの「レビュー本文の指摘への返事」に 1 行ずつ載る |
+| 決着の記録 | `merge-fix`（`source: fix`）と `verify-sweep`（`source: sweep`）が、`finding_id` を持つ要素を状態ファイルの `body_settlements[]` へ追記する |
+| 収束の判定 | 決着していない `critical` / `major` で反証に棄却されていないものが残る間、`judge` は全員が承認したラウンドも収束させず終了コード 2 で修正へ回し、`BODY_BLOCKING=<件数>` を出す。`minor` / `nit` は収束を止めない |
+| 最終スイープ | 結果ファイルの決着を記録した後も決着していないものを、未解決のスレッドの件数（取得できなければ申告）へ足して `REMAINING_OPEN` にする。1 件以上なら `REMAINING_BODY=<件数>` を出し、`remaining_reason` が空なら「決着していない総評だけの指摘 N 件」を入れる。`sweep.remaining_body` は常に置く。まとめの `unresolved` はこの `remaining_open` である |
+
+`body_settlements[]` の要素（追記だけで書き換えない。1 つの `finding_id` の記録は高々 1 件で、打ち直しても増えない。
+鍵の無い状態ファイルは空の配列として読む）:
+
+| 鍵 | 意味 |
+| --- | --- |
+| `finding_id` | 決着した総評だけの指摘（`review_findings[].finding_id`）。結べば、どのラウンドのどの指摘がどう振り分けられたかを状態ファイルだけで辿れる |
+| `decision` | 戻り値ファイルの要素の場所から決める。`resolved_threads` は `fixed`、`rejected` は `rejected`、`deferred` は `waived` があれば `waived`・`issue` があれば `separate_pr`・どちらも無ければ `deferred` |
+| `reason` / `issue` | 見送り・却下の理由の写し（`fixed` は空）/ `separate_pr` の起票番号 |
+| `round` / `pr` / `source` / `recorded_at` | 記録したラウンド / そのときの PR / `fix` か `sweep` / 時刻 |
+
 ## 独立発見
 
 **発見を終えるまで、参照してよい既存コメントは起動時のスナップショットに限る。**

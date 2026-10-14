@@ -234,6 +234,34 @@ def test_design_plan_sets_up_glossary_and_requirements_before_design(tmp_path):
     assert any("glossary-candidates" in f for f in st["pr"]["append"])
 
 
+def test_design_plan_stops_when_the_review_fix_edits_only_the_requirements_copy(tmp_path, monkeypatch):
+    """#1769: レビューの直しの後の requirements-recheck は、写しだけを書き換えた状態で止まる（本文に合えば先へ進む）。"""
+    st = {s["id"]: s for s in design_plan(tmp_path)["steps"]}
+    steps = [dict(st["requirements-recheck"], next="after"), {"id": "after", "type": "run", "cmd": "true", "next": "end"}]
+    bindir = tmp_path / "spec-gh"
+    bindir.mkdir()
+    view = bindir / "view.json"
+    view.write_text(json.dumps({"title": "題", "body": "## 受け入れ条件\n\n- [ ] 1. 動く\n"}, ensure_ascii=False))
+    (bindir / "gh").write_text(f'#!/bin/bash\n[ "$2" = view ] && cat {view}\n')
+    (bindir / "gh").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    subprocess.run([PY, str(SCRIPTS / "spec-copy.py"), "write", "216", "issues/issue-216-requirements.md"], cwd=wt, check=True)
+
+    def run(name):
+        e = engine.Engine({"フェーズ": "試験", "課題": [216], "作業場所": str(wt), "steps": steps}, tmp_path / name)
+        return e, e.run()
+
+    e, _ = run("same")
+    assert [x["id"] for x in e.state.log] == ["requirements-recheck", "after"]
+    copy = wt / "issues" / "issue-216-requirements.md"
+    copy.write_text(copy.read_text().replace("1. 動く", "1. 速く動く"))  # 写しだけを直した
+    e, text = run("differs")
+    assert [x["id"] for x in e.state.log] == ["requirements-recheck"]
+    assert "requirements-recheck が失敗した" in text
+
+
 def glossary_repo(tmp_path):
     root = tmp_path / "wt"
     root.mkdir()

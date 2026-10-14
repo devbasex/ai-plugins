@@ -7,6 +7,7 @@ import sys
 from typing import Any
 
 import review_lib  # noqa: E402
+import body_findings  # noqa: E402
 import design_body  # noqa: E402
 import result_posts  # noqa: E402
 from review_lib import ci as ci_mod, findings as findings_mod, fix_result, posts, store  # noqa: E402
@@ -98,7 +99,7 @@ def _merge_fix_records(st: dict, fix: dict, pr: int) -> dict:
     normalized = _normalize_fix_result(fix)
     st["rounds"][-1]["fix"] = _build_round_fix(normalized)
     st["rounds"][-1]["ended_at"] = review_lib._now()
-    _record_fix_history(st, normalized, pr)
+    _record_fix_history(st, normalized, pr, fix)
     return st["rounds"][-1]["fix"]
 
 
@@ -182,8 +183,8 @@ def _build_round_fix(normalized: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _record_fix_history(st: dict, normalized: dict[str, Any], pr: int) -> None:
-    """引継ぎの消化と、見送り・却下の項目別履歴を state へ積む。"""
+def _record_fix_history(st: dict, normalized: dict[str, Any], pr: int, fix: dict | None = None) -> None:
+    """引継ぎの消化と、見送り・却下の項目別履歴と、総評だけの指摘の決着を state へ積む。"""
     round_no = st["rounds"][-1]["round"]
     # 引き継いだ指摘は、修正の工程を 1 度通した時点で収束の抑止から外す。
     # 残りは最終スイープ (Step 7.5) が受け持つ。
@@ -200,6 +201,12 @@ def _record_fix_history(st: dict, normalized: dict[str, Any], pr: int) -> None:
     rejected_findings = st.setdefault("rejected_findings", [])
     for r in normalized["rejected_items"]:
         rejected_findings.append({**r, "pr": pr, "round": round_no})
+
+    # **総評だけの指摘はスレッドを持たないため、決着を状態ファイルが持つ**（#1980）。
+    # `finding_id` を持つ要素だけが記録され、同じ `finding_id` は重ねない（打ち直しても増えない）。
+    if fix is not None:
+        places = {k: _normalize_dict_items(fix.get(k)) for k in ("resolved_threads", "deferred", "rejected")}
+        body_findings.record_settlements(st, body_findings.entries(places), round_no, int(st.get("current_pr") or pr), "fix")
 
 
 # 取り込みの段階（#1340 の I8）。`rounds[-1].fix.merge.stage` に書き進め、打ち直しは済んでいない段階から続ける。

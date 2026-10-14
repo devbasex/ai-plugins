@@ -51,7 +51,7 @@ def _msg_limit(sw, prev, to, reason) -> tuple[str, dict]:
 
 
 def _msg_auth(sw, prev, to, reason) -> tuple[str, dict]:
-    return f"認証が通らなかったため、アカウントを {prev} から {ca.account_label(to)}へ替えて続ける", {}
+    return f"認証が通らなかったため、アカウントを {prev or '既定のログイン'} から {ca.account_label(to)}へ替えて続ける", {}
 
 
 def _msg_default(sw, prev, to, reason) -> tuple[str, dict]:
@@ -75,6 +75,27 @@ _RESUME_TEXTS = {
     REASON_RECOVERED: "上限が外れたためアカウントへ戻した。中断したところから続ける",
 }
 _RESUME_DEFAULT = "アカウントを替えた。中断したところから続ける"
+
+# 再登録・宣言の確かめのコマンド（relay.md が利用者に示している形）
+_RELAY_CMD = "python3 ~/.claude/ndf/relay.py"
+
+
+def login_on(name: str | None) -> str:
+    """区間のログインの形と助詞（`既定のログインで`・`従量の接続で`・`アカウント <名前> で`）。"""
+    if name is None:
+        return "既定のログインで"
+    return "従量の接続で" if name == ca.METERED else f"アカウント {name} で"
+
+
+def auth_guide(name: str | None) -> str:
+    """401 で替え先が無いときの 1 行（ログインの形ごとの直し方。#1727 の決定 4）。名前と変数の名前だけを書く（I5）。"""
+    if name is None:
+        fix = "claude の中で /login を打ってログインし直す"
+    elif name == ca.METERED:
+        fix = f"{_RELAY_CMD} account check metered で宣言（環境変数 {ca.FALLBACK_ENV} か保存した宣言）を確かめる"
+    else:
+        fix = f"{_RELAY_CMD} account add {name} で登録し直す"
+    return f"{login_on(name)}認証に失敗した（401）。{fix}。子はこのまま残す"
 
 
 def resume_text(reason: str | None) -> str:
@@ -169,6 +190,13 @@ class AccountSwitch:
             return ca.METERED, REASON_LIMITED, c
         return cur, None, c
 
+    def section_plan(self, plan, prev: str | None) -> tuple[str | None, str | None, ca.Choice | None]:
+        """区間の起動で使う (アカウント, 理由, 選んだ結果)。予定（上限・認証の失敗の後）は登録の数に依らず使い、予定が無く
+        登録が 1 つ以下なら今のアカウントを引き継ぐ（#1727 の I7）。"""
+        if plan:
+            return plan
+        return self.pick(None) if self.multi else (prev, None, None)
+
     def stop_accounts(self) -> None:
         """ラッパーの終了時: 定期の確認を止め、今のアカウントの .claude.json の共有する部分を書き戻す（E12）。"""
         if self.watch is not None:
@@ -176,8 +204,8 @@ class AccountSwitch:
         self.settle_account(self.account)
 
     def settle_account(self, name: str | None) -> None:
-        """アカウント `name` のセッションの後の書き戻し（登録が 1 つ以下・従量の接続・既定のログインでは何もしない）。"""
-        if self.multi and name and name != ca.METERED:
+        """アカウント `name` のセッションの後の書き戻し（従量の接続・既定のログインでは何もしない）。"""
+        if name and name != ca.METERED:
             ca.settle(name, self.env, lambda row: self.note_account_dir(row, self.section))
 
     def note_account_dir(self, row: dict, section: int | None = None) -> None:
@@ -192,8 +220,11 @@ class AccountSwitch:
         """トークンを更新しないアカウント（今のセッションのアカウント。claude が更新する。#1576 の I8）。"""
         return {self.account} if self.account and self.account != ca.METERED else set()
 
-    def _pick_after_limit(self, kind: str, cur: str | None, declared: bool) -> tuple[str | None, str | None, ca.Choice]:
-        """上限と認証の失敗の後の選び直し（今のアカウントを除く）。None が返れば切り替えずに子を残す。"""
+    def _pick_after_limit(self, kind: str, cur: str | None, declared: bool) -> tuple[str | None, str | None, ca.Choice | None]:
+        """上限と認証の失敗の後の選び直し（今のアカウントを除く）。None が返れば切り替えずに子を残す。
+        従量の接続の認証の失敗では替えない（宣言を直さないまま行き来しない。#1727 の I2）。"""
+        if kind == REASON_AUTH and cur == ca.METERED:
+            return None, kind, None
         c = ca.choose(exclude=set() if cur in (None, ca.METERED) else {cur}, keep=self.keep())
         if c.name:
             return c.name, REASON_RECOVERED if cur == ca.METERED else kind, c
@@ -237,7 +268,11 @@ class AccountSwitch:
             return
         if to == ca.METERED:
             keys = list(ca.fallback_env(self.env))
-            self.term.screen("ndf-relay: " + self.all_limited(choice) + f"。従量の接続（{self.keys_text(keys)}）へ替えて続ける")
+            if reason == REASON_AUTH:
+                why = f"{login_on(prev)}認証に失敗し、替えられる登録済みのアカウントが無い"
+            else:
+                why = self.all_limited(choice)
+            self.term.screen("ndf-relay: " + why + f"。従量の接続（{self.keys_text(keys)}）へ替えて続ける")
             self.log(
                 event="account", section=self.section, reason=reason, **{"from": prev}, to=to, keys=keys, earliest=self.earliest(choice)
             )
@@ -271,6 +306,15 @@ class AccountSwitch:
         name, t = choice.earliest
         return f"登録済みのアカウントはすべて上限にある（最も早く戻るのは {name}、{ca.local_time(t, '%H:%M')}）"
 
+    def tell_relogin(self) -> None:
+        """起動時に、再登録が要るアカウントを 1 つにつき 1 行出す（E1）。判定に失敗しても起動を止めない。"""
+        try:  # `usable` で判定してから印を読む（候補の判定と食い違わない。#1727 の決定 5）
+            found = [n for n in ca.names() if not ca.usable(n) and (a := ca.load_account(n)) is not None and a.needs_relogin]
+        except Exception:
+            return
+        for n in found:
+            self.term.screen(f"ndf-relay: アカウント {n} は再登録が要る。{_RELAY_CMD} account add {n} で登録し直す")
+
     @staticmethod
     def keys_text(keys: list[str]) -> str:
         return keys[0] + (f" ほか {len(keys) - 1} つ" if len(keys) > 1 else "") if keys else "宣言"
@@ -301,7 +345,7 @@ class AccountSwitch:
         lim = self.read_limit()
         if lim is None:
             return None
-        auth = lim.get("error") == "authentication_failed" and self.account not in (None, ca.METERED) and self.auth_section != self.section
+        auth = lim.get("error") == "authentication_failed" and self.auth_section != self.section
         if not self._limit_relevant(lim, auth):
             return None
         written = parse_iso(lim.get("written_at")) or time.time()
@@ -318,7 +362,8 @@ class AccountSwitch:
         to, reason, choice = self.pick(kind)
         if to is None:
             self.log(event="account", section=self.section, reason=kind, **{"from": self.account}, to=None, earliest=self.earliest(choice))
-            self.term.screen("ndf-relay: " + self.all_limited(choice) + "。子はこのまま残す")
+            line = auth_guide(self.account) if auth else self.all_limited(choice) + "。子はこのまま残す"
+            self.term.screen("ndf-relay: " + line)
             self.drop_limit(lim)
             return None
         if not self._may_start(written):
@@ -326,8 +371,9 @@ class AccountSwitch:
         return {**lim, "_kind": "limit", "_snap": snap, "_plan": (to, reason, choice)}
 
     def _limit_relevant(self, lim, auth) -> bool:
-        """替える対象の上限か。上限でない失敗（overloaded など）と、登録が 1 つ以下のときは読み捨てて偽を返す。"""
-        if not self.multi or (lim.get("error") not in LIMIT_ERRORS and not auth):
+        """替える対象の上限か。認証の失敗は登録の数に依らず扱う。上限でない失敗（overloaded など）と、登録が 1 つ以下の
+        ときの上限は読み捨てて偽を返す。"""
+        if not auth and not (self.multi and lim.get("error") in LIMIT_ERRORS):
             self.drop_limit(lim)
             return False
         return True
@@ -357,7 +403,8 @@ class AccountSwitch:
         if self.noted != lim["written_at"]:
             self.noted = lim["written_at"]
             if kind == REASON_AUTH:
-                ca.note_auth_failed(self.account or "")
+                if self.account not in (None, ca.METERED):  # 登録済みのアカウントにだけ残す（#1727 の I6）
+                    ca.note_auth_failed(self.account)
             else:
                 ca.note_limit(self.account or "", kind, resets)
 
@@ -367,7 +414,8 @@ class AccountSwitch:
             return False
         if self.told != lim["written_at"]:
             self.told = lim["written_at"]
-            self.term.screen(f"ndf-relay: 上限（{kind}）に達したが、背景の作業が残っているため終わるまで替えない")
+            why = "認証に失敗した" if kind == REASON_AUTH else f"上限（{kind}）に達した"
+            self.term.screen(f"ndf-relay: {why}が、背景の作業が残っているため終わるまで替えない")
         return True
 
     def limit_start(self, m) -> tuple[list[str], str, str, dict]:
