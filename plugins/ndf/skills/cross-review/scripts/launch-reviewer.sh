@@ -60,9 +60,19 @@ PR=$(jq -r '.current_pr' "$STATE")
 # 前の版の state.json から再開したときだけ、従来の `gh pr view` へ落ちる。
 SHA=$(jq -r '(.rounds[-1].head_sha // "")' "$STATE")
 [ -n "$SHA" ] || SHA=$(gh pr view "$PR" --json headRefOid -q .headRefOid)
-# 分類（design / code）と前のラウンドの head（#1005）。規則は classifications.py の diff_scope
-REVIEW_KIND=$(jq -r '.review_kind // "code"' "$STATE")
-PREV_SHA=$(jq -r '(.rounds // []) | if length >= 2 then (.[-2].head_sha // "") else "" end' "$STATE")
+# レビュー範囲（#1702）。`start-round` が求めて `rounds[-1].review_scope` に書いた値を写すだけで、
+# 範囲の規則（classifications.py の diff_scope）はここに持たない。求められなかった・head が
+# このラウンドの head と違う・前の版の状態ファイルのときは空のままにし、範囲の節を載せない。
+SCOPE_RANGE=''
+SCOPE_BASE=''
+SCOPE_FILES=''
+if jq -e --arg sha "$SHA" '(.rounds[-1].review_scope // {}) as $s
+    | ($s.unavailable == null) and ($s.head_sha == $sha) and ($s.base_sha | type == "string")
+      and ($s.files | type == "number")' "$STATE" >/dev/null 2>&1; then
+  SCOPE_RANGE=$(jq -r '.rounds[-1].review_scope.range // "full"' "$STATE")
+  SCOPE_BASE=$(jq -r '.rounds[-1].review_scope.base_sha' "$STATE")
+  SCOPE_FILES=$(jq -r '.rounds[-1].review_scope.files' "$STATE")
+fi
 # 指摘の基準（#1287）。init が重点の宣言を読んで写した節を使い、無ければ宣言を読まない既定の節
 # （基準 3 の無い形）を正本から組む。どのラウンドの担当も同じ基準を受け取る
 REVIEW_CRITERIA_BLOCK=$(jq -r '.review_criteria.reviewer_block // ""' "$STATE")
@@ -110,22 +120,38 @@ $EXTRA_REVIEW_INSTRUCTIONS
 EXTRA_EOF
 )
 fi
-# 設計 PR の 2 ラウンド目以降は、前のラウンドからの変更だけを渡す。設計の指摘の連鎖は
-# 修正で変わった行から生まれるため、変わっていない行を読み直させない。code は全差分のまま
-DIFF_SCOPE_BLOCK=
-if [ "$REVIEW_KIND" = design ] && [ "$ROUND" -ge 2 ] 2>/dev/null && [ -n "$PREV_SHA" ] && [ "$PREV_SHA" != "$SHA" ]; then
-  DIFF_SCOPE_BLOCK=$(cat <<SCOPE_EOF
+# このラウンドのレビュー範囲（#1702）。担当が Pull Request のコメントや直近のコミットから範囲を
+# 推測して狭めないよう、base・head・コマンド・ファイル数を渡し、結果ファイルに読んだファイル数を書かせる。
+# 設計 PR の 2 ラウンド目以降（since_previous）は、前のラウンドの head からの変更だけを見る（#1005）。
+REVIEW_SCOPE_BLOCK=
+RESULT_SEVERITY_LINE='"by_severity": {"critical": 0, "major": 1, "minor": 0, "nit": 0}'
+READ_FILES_NOTE=
+if [ -n "$SCOPE_BASE" ]; then
+  if [ "$SCOPE_RANGE" = since_previous ]; then
+    SCOPE_RULE="前のラウンドのレビュー対象（${SCOPE_BASE}）からの変更だけを見る。変わっていない行へ新しい指摘を出さない。"
+  else
+    SCOPE_RULE="この範囲の ${SCOPE_FILES} ファイルをすべて見る。Pull Request のコメントや直近のコミットから範囲を狭めない。"
+  fi
+  REVIEW_SCOPE_BLOCK=$(cat <<SCOPE_EOF
 
-## このラウンドで見る差分（設計 Pull Request の round 2 以降）
-前のラウンドのレビュー対象（${PREV_SHA}）からの変更だけを見る:
+## このラウンドのレビュー範囲
+- base: $SCOPE_BASE
+- head: $SHA
+- 差分のファイル数: $SCOPE_FILES
 
 \`\`\`bash
-git -C "$WORKTREE" diff $PREV_SHA $SHA
+git -C "$WORKTREE" diff $SCOPE_BASE...$SHA
+git -C "$WORKTREE" diff --name-only $SCOPE_BASE...$SHA
 \`\`\`
 
-変わっていない行へ新しい指摘を出さない。差分が取れないときだけ PR の全差分を見る。
+$SCOPE_RULE
 SCOPE_EOF
 )
+  RESULT_SEVERITY_LINE="$RESULT_SEVERITY_LINE,
+     \"read_files\": $SCOPE_FILES"
+  READ_FILES_NOTE="
+   - \`read_files\` は、上のレビュー範囲のファイルのうち、差分を読んだファイルの数を整数で書く。
+     範囲の外に読んだファイルは数えない"
 fi
 }
 
@@ -141,6 +167,7 @@ PR #$PR を **$SEAT の観点でレビューし、指摘を 2 つのファイル
 - PR: #$PR
 - commit_id (headRefOid): $SHA
 - worktree: $WORKTREE （**ファイル読み取りは必ず此処の絶対パスを使う**）
+$REVIEW_SCOPE_BLOCK
 
 ## 既存コメントスナップショット（重複指摘禁止）
 workspace 外を読まなくて済むよう、以下にインライン展開する:
@@ -149,7 +176,6 @@ workspace 外を読まなくて済むよう、以下にインライン展開す�
 $EXISTING_INLINE
 \`\`\`
 $EXTRA_REVIEW_BLOCK
-$DIFF_SCOPE_BLOCK
 
 $REVIEW_CRITERIA_BLOCK
 
@@ -207,11 +233,11 @@ $REVIEW_CRITERIA_BLOCK
    \`\`\`json
    {
      "event": "REQUEST_CHANGES",
-     "by_severity": {"critical": 0, "major": 1, "minor": 0, "nit": 0}
+     $RESULT_SEVERITY_LINE
    }
    \`\`\`
    - \`event\` は本来の判定で、\`APPROVE\` / \`REQUEST_CHANGES\` / \`COMMENT\` のいずれか。
-     \`intent\` などの別名は使わない
+     \`intent\` などの別名は使わない$READ_FILES_NOTE
 3. 改名する（**この順で**）:
    \`\`\`bash
    mv "$STEM-round$ROUND-payload.json.tmp" "$STEM-round$ROUND-payload.json"

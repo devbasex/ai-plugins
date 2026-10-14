@@ -136,6 +136,7 @@
 
 ### 重要なフィールド
 
+- `rounds[].review_scope` / `rounds[].scope_check` / `rounds[].<席>.read_files` — レビュー範囲と範囲の照合の記録。欄と値は [05-pool-and-convergence.md](05-pool-and-convergence.md) の「範囲の照合」にある
 - `host` — 確定したホスト名（`claude` / `codex` / `agy` / `kiro`）。参加者プールに残る
   （`participants` を持たない古い状態の再開では、変更の前と同じく参加者プールから外して輪番を回す）
 - `rounds[].reviewer_models.<席>` — そのラウンドのレビューの起動で実際に動いたモデル。
@@ -361,7 +362,7 @@ launcher が生成するプロンプトに以下を強制している:
 
 | ファイル | 内容 |
 |---|---|
-| `$TMP_DIR/<席>-review-pr<PR>-result.json` | `{event, by_severity}`。担当が書くのはこの 2 つだけ |
+| `$TMP_DIR/<席>-review-pr<PR>-result.json` | `{event, by_severity, read_files}`。担当が書くのはこの 3 つだけ。`read_files`（読んだファイル数）はプロンプトにレビュー範囲が載ったときだけ求める |
 | `$TMP_DIR/<席>-review-pr<PR>-round<R>-payload.json` | `{summary, comments: [{path, line, body, severity, evidence, falsification, suggested_check}, ...]}` |
 
 **`comments[]` が持つのは、その担当が出した指摘の全件である**（#156）。位置を持つ指摘は
