@@ -27,9 +27,10 @@ bash scripts/runtime-smoke-test.sh
 bash scripts/runtime-smoke-test.sh --runtime claude
 bash scripts/runtime-smoke-test.sh --runtime codex
 bash scripts/runtime-smoke-test.sh --runtime kiro
+bash scripts/runtime-smoke-test.sh --runtime agy
 ```
 
-`--runtime` は `claude`、`codex`、`kiro`、`all` を受け付ける。省略時は `all` で全 runtime を順に実行する。
+`--runtime` は `claude`、`codex`、`kiro`、`agy`、`all` を受け付ける。省略時は `all` で全 runtime を順に実行する。
 
 `scripts/runtime-smoke-test.sh` は Docker を必須とし、以下の image を build する。
 
@@ -39,6 +40,22 @@ bash scripts/runtime-smoke-test.sh --runtime kiro
 | `ai-plugins-runtime-smoke-claude` | `tests/runtime-smoke/Containerfile.claude` |
 | `ai-plugins-runtime-smoke-codex` | `tests/runtime-smoke/Containerfile.codex` |
 | `ai-plugins-runtime-smoke-kiro` | `tests/runtime-smoke/Containerfile.kiro` |
+| `ai-plugins-runtime-smoke-agy` | `tests/runtime-smoke/Containerfile.agy` |
+
+### CLI の版
+
+runtime の image は CLI を、CLI の版の一覧 `tests/runtime-smoke/cli-versions.env` に書いた版で入れる（#1982）。一覧は 1 行 1 つの `KEY=VALUE` で、キーは Containerfile の `ARG` の名前と同じである。`ARG` は既定値を持たず、版の出所は一覧の 1 つだけになる。
+
+| runtime | 一覧のキー | 取得の仕方 |
+|---|---|---|
+| claude | `CLAUDE_CODE_VERSION` | `npm install -g @anthropic-ai/claude-code@<版>`。`DISABLE_AUTOUPDATER=1` で実行中の更新を止める |
+| codex | `CODEX_VERSION` | `npm install -g @openai/codex@<版>` |
+| kiro | `KIRO_CLI_VERSION`、`KIRO_CLI_SHA256_X86_64`、`KIRO_CLI_SHA256_AARCH64` | 版つきの musl 版の tarball を取り、sha256 を確かめて `/usr/local/bin` へ置く（bookworm の glibc では glibc 版が動かない） |
+| agy | `AGY_VERSION`、`AGY_URL_X86_64`、`AGY_URL_AARCH64`、`AGY_SHA512_X86_64`、`AGY_SHA512_AARCH64` | 一覧の url（版とビルド番号を含む）を取り、sha512 を確かめて `/usr/local/bin/agy` へ置く |
+
+公式のインストーラは版を受けないか版の無い URL にあるため使わない。`scripts/runtime-smoke-test.sh` は一覧の各行を `--build-arg` で渡し、`--cli-versions PATH` で別の一覧を受ける（ファイルが無い・読めないときは終了コード 2）。image の作成は、取得・checksum・`--version` の出力から取り出した最初の版数（`[0-9]+(\.[0-9]+)+`）と一覧の版数の完全一致のどれかが落ちたら失敗する。取得の失敗を読み飛ばさない。
+
+版を上げる手順は [Runtime smoke README](../../tests/runtime-smoke/README.md#版を上げる) にある。
 
 コンテナ内では以下のパスを使用する。
 
@@ -81,7 +98,7 @@ adapter は runtime 固有の CLI 差分を閉じ込める。
 
 ### Kiro CLI
 
-`tests/runtime-smoke/adapters/kiro.sh` は Kiro CLI が利用可能な場合は `kiro-cli --help` を version log として記録する。Kiro CLI がコンテナ内で利用できない場合も、installer fallback を使って smoke を継続する。
+`tests/runtime-smoke/adapters/kiro.sh` は `kiro-cli --version` を version log として記録する。
 
 Kiro adapter は以下を実行する。
 
@@ -150,7 +167,7 @@ app-server が応答前に終わった・30 秒を超えたときに終了コー
 
 | 決定 | 理由 |
 |---|---|
-| ランタイムに読ませて判定し、受け取るキーの一覧を持たない | 受け取るキーはランタイムと版で違う。Claude Code はマッチャーグループと上位の未知キーを報告するが、コマンド階層の未知キーと上位の `description` は報告しない。Codex はどの階層の未知キーも受け取る。1 つの一覧では片方で受け取るキーを落とすか、受け取らないキーを見逃す。継続的統合は最新版を導入するため、判定がその版に揃う |
+| ランタイムに読ませて判定し、受け取るキーの一覧を持たない | 受け取るキーはランタイムと版で違う。Claude Code はマッチャーグループと上位の未知キーを報告するが、コマンド階層の未知キーと上位の `description` は報告しない。Codex はどの階層の未知キーも受け取る。1 つの一覧では片方で受け取るキーを落とすか、受け取らないキーを見逃す。継続的統合は CLI の版の一覧の版を入れるため、判定はその版に揃い、新しい版の報告の変化は最新の版のスモークが先に見つける |
 | Claude Code は `-p` ではなく `plugin list` で読ませる | モデルへの要求をせず、認証の無い環境でも終了コード 0 で 1 秒未満に終わる。`-p` は認証の誤りで 1 になり起動の失敗と見分けられず、API の再試行で数十秒かかる |
 | Codex は app-server の `hooks/list` で報告を受け取る | 読み込みの失敗を非対話で返す経路は、確かめた範囲ではこれだけである（`codex exec` / `plugin list` は hooks について何も出さない）。app-server は experimental だが、応答の形が変われば陽性対照と取得のチェックが落ちる |
 | 陽性対照を毎回先に読ませる | 本物の判定は「報告 0 件」で通る。報告を出さない版（Claude Code 2.1.261）や報告の形が変わった版では、何もチェックしないまま通る。最小の版を決めて `--version` と比べる形は、警告の入った版を特定できず、文言の変化にも効かない |
@@ -199,7 +216,8 @@ artifact は既定で `tmp/runtime-smoke/<runtime>/` に出力する。`--artifa
 | artifact | 内容 |
 |---|---|
 | `smoke.log` | adapter 実行ログ |
-| `version.log` | runtime CLI version / help 出力 |
+| `version.log` | runtime CLI の `--version` 出力 |
+| `cli-versions.env` | image の作成に使った CLI の版の一覧 |
 | `generated-tree.txt` | `/tmp/runtime-project` の生成物一覧 |
 | `junit.xml` | GitHub Actions artifact 用の最小 JUnit XML |
 | `authenticated-smoke.log` | 認証付き smoke の実行または skip 結果 |
@@ -213,9 +231,10 @@ artifact は既定で `tmp/runtime-smoke/<runtime>/` に出力する。`--artifa
 
 | 項目 | 仕様 |
 |---|---|
-| trigger | `pull_request`、`main` / `release/**` への `push` |
-| 対象変更 | `plugins/**`、`scripts/runtime-smoke-test.sh`、`tests/runtime-smoke/**`、runtime smoke workflow |
-| matrix | `claude`, `codex`, `kiro` |
+| trigger | `pull_request`、`main` / `develop` への `push` |
+| 対象変更 | `push` だけ絞る: `plugins/**`、`scripts/runtime-smoke-test.sh`、`tests/runtime-smoke/**`、runtime smoke workflow |
+| matrix | `claude`, `codex`, `kiro`, `agy` |
+| CLI の版 | CLI の版の一覧の版だけ |
 | command | `bash scripts/runtime-smoke-test.sh --runtime "${{ matrix.runtime }}" --with-secrets=off` |
 | artifact | `tmp/runtime-smoke/<runtime>` |
 
@@ -228,6 +247,18 @@ artifact は既定で `tmp/runtime-smoke/<runtime>/` に出力する。`--artifa
 | runtime input | `all`, `claude`, `codex`, `kiro` |
 | secret mode | `--with-secrets=auto` |
 | artifact | `tmp/runtime-smoke` |
+
+最新の版のスモークは `.github/workflows/runtime-plugin-smoke-latest.yml` で実行する。その時点の最新の CLI との食い違いを、配布の経路（develop・main 宛の PR と push）の外で先に見つける。
+
+| 項目 | 仕様 |
+|---|---|
+| trigger | `schedule`（毎日 21:00 UTC = 06:00 JST）と `workflow_dispatch`（入力 `ref`、既定 `develop`）。`pull_request` と `push` では走らず、必須のチェックに入らない |
+| permissions | `contents: read`、`issues: write`。secret は渡さない |
+| job | `runtime-smoke-latest (<runtime>)`、matrix は `claude`, `codex`, `kiro`, `agy`、`fail-fast: false` |
+| 版の解決 | `python3 scripts/runtime-smoke-latest.py resolve --runtime <runtime>` が取得元の最新を一覧の形で出し、`--cli-versions` で渡す。解決した一覧は step summary と artifact に残る |
+| 失敗の報告 | `python3 scripts/runtime-smoke-latest.py report` が題 `最新の版のスモークが落ちた: <runtime>` の開いている課題へコメントを足し、無ければ作る。本文に runtime・入れた版・実行の URL を書く。通っても課題は閉じない（直す PR が閉じる） |
+| artifact | `runtime-smoke-latest-<runtime>`（`tmp/runtime-smoke/<runtime>`） |
+| 同時の実行 | `concurrency` で 1 つずつ並べ、取り消さない |
 
 authenticated workflow は `ANTHROPIC_API_KEY`、`OPENAI_API_KEY` を protected environment から受け取る。BigQuery の secret は渡さない。`BIGQUERY_ACCESS_TOKEN` は 1 時間で切れ、保存した secret では保てないため、手元で `BIGQUERY_ACCESS_TOKEN=$(gcloud auth print-access-token)` と `BIGQUERY_PROJECT` を付けて実行する。
 
@@ -249,6 +280,9 @@ authenticated workflow は `ANTHROPIC_API_KEY`、`OPENAI_API_KEY` を protected 
 | Claude smoke | `bash scripts/runtime-smoke-test.sh --runtime claude` |
 | Codex smoke | `bash scripts/runtime-smoke-test.sh --runtime codex` |
 | Kiro smoke | `bash scripts/runtime-smoke-test.sh --runtime kiro` |
+| agy smoke | `bash scripts/runtime-smoke-test.sh --runtime agy` |
+| CLI の版の一覧と Containerfile の形 | `scripts/tests/test_runtime_smoke_versions.py` |
+| 最新の版の解決と失敗の課題 | `scripts/tests/test_runtime_smoke_latest.py`（取得元と `gh` を偽物にする） |
 | hooks 定義の報告で落ちる | 手元で `plugins/ndf/hooks/claude.json` か `plugins/mcp/mcp-serena/hooks/hooks.json` のマッチャーグループへ `description` を置くと `--runtime claude` が 1、`plugins/ndf/hooks/codex.json` の `type` を `cmd` にすると `--runtime codex` が 1 になり、`smoke.log` に報告の行が出ること |
 | 読まれないプラグインで落ちる | `hooks` を存在しないパスへ向ける（claude）/ 定義を `{"hooks":{}}` にする（codex）と `did not load hooks for: <名前>` で 1 になること |
 | 陽性対照が報告を受け取れる | 陽性対照の壊し方を外すと `did not report the broken hooks fixture` で 1 になること |
@@ -264,4 +298,7 @@ authenticated workflow は `ANTHROPIC_API_KEY`、`OPENAI_API_KEY` を protected 
 - [runtime plugin validation](../../scripts/validate-runtime-plugins.sh)
 - [Runtime plugin smoke workflow](../../.github/workflows/runtime-plugin-smoke.yml)
 - [Runtime plugin authenticated smoke workflow](../../.github/workflows/runtime-plugin-authenticated-smoke.yml)
+- [Runtime plugin smoke (latest CLI) workflow](../../.github/workflows/runtime-plugin-smoke-latest.yml)
+- [CLI の版の一覧](../../tests/runtime-smoke/cli-versions.env)
+- [issue #1982](https://github.com/devbasex/ai-plugins/issues/1982) — CLI の版の固定と最新の版のスモーク
 - [Runtime Plugin Distribution 仕様](runtime-plugin-distribution.md)

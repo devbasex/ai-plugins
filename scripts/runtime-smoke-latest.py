@@ -162,9 +162,7 @@ def report_body(runtime: str, run_url: str, versions: str | None) -> str:
 def report(runtime: str, run_url: str, versions: str | None, repo: str | None) -> str:
     """開いている同じ題の課題へコメントを足すか、無ければ作る。何をしたかを返す"""
     title = TITLE.format(runtime=runtime)
-    listed = json.loads(
-        run_gh(["issue", "list", *_repo_args(repo), "--state", "open", "--limit", "1000", "--json", "number,title"])
-    )
+    listed = json.loads(run_gh(["issue", "list", *_repo_args(repo), "--state", "open", "--limit", "1000", "--json", "number,title"]))
     # 題の完全一致で探す（部分一致にすると別のランタイムの課題へ足してしまう）
     same = sorted(i["number"] for i in listed if i.get("title") == title)
     body = report_body(runtime, run_url, versions)
