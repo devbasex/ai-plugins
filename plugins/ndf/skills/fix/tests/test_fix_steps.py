@@ -180,6 +180,7 @@ def test_context_collects_threads_comments_ci_and_exclusions(env):
     assert "`PRRT_1` comment_id=11 a.py:3" in text and "PRRT_2" not in text
     assert "[REVIEW-BODY]" in text and "[PR-COMMENT]" in text
     assert "- lint: FAILURE https://x/1" in text
+    assert "## 要求の変更が要る指摘" in text and "requirements.md" in text  # 写しを直さずに止めて返す（#1769）
     log = Path(next(i["path"] for i in out["items"] if i["name"] == "ci_log"))
     assert log.read_text(encoding="utf-8") == "E lint failed" and str(log) in text
     dec = json.loads(Path(next(i["path"] for i in out["items"] if i["name"] == "decisions")).read_text())

@@ -247,7 +247,7 @@ def cmd_context(a):
     if log_path:
         lines += ["", f"失敗ログ: {log_path}"]
     lines += ["", f"## コメント（3 種、{comments_n} 行）", "", "```", comments_text.rstrip(), "```", ""]
-    lines += [review_criteria.fixer_block(focus, mvv_block, profile), ""]
+    lines += [review_criteria.fixer_block(focus, mvv_block, profile), "", review_criteria.REQUIREMENTS_FIXER, ""]
     ctx.write_text("\n".join(lines), encoding="utf-8")
 
     dec = d / f"fix-pr{pr}-decisions.json"
