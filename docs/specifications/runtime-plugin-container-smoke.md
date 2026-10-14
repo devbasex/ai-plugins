@@ -44,7 +44,7 @@ bash scripts/runtime-smoke-test.sh --runtime agy
 
 ### CLI の版
 
-runtime の image は CLI を、CLI の版の一覧 `tests/runtime-smoke/cli-versions.env` に書いた版で入れる（#1982）。一覧は 1 行 1 つの `KEY=VALUE` で、キーは Containerfile の `ARG` の名前と同じである。`ARG` は既定値を持たず、版の出所は一覧の 1 つだけになる。
+runtime の image は CLI を、CLI の版の一覧 `tests/runtime-smoke/cli-versions.env` に書いた版で入れる。一覧は 1 行 1 つの `KEY=VALUE` で、キーは Containerfile の `ARG` の名前と同じである。`ARG` は既定値を持たず、版の出所は一覧の 1 つだけになる。
 
 | runtime | 一覧のキー | 取得の仕方 |
 |---|---|---|
