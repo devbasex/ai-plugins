@@ -1,3 +1,15 @@
 FROM ai-plugins-runtime-smoke-base
 
-RUN npm install -g @anthropic-ai/claude-code
+# 版は tests/runtime-smoke/cli-versions.env に書き、scripts/runtime-smoke-test.sh が build-arg で渡す。
+# ARG に既定値を持たせない（版の出所を一覧の 1 つにする）。
+ARG CLAUDE_CODE_VERSION
+
+# 実行中に自分を更新して版が一覧とずれないようにする
+ENV DISABLE_AUTOUPDATER=1
+
+# 入った CLI の --version から取り出した版数が一覧の版数と完全に一致しなければ、像の作成を落とす
+RUN set -eu; \
+  test -n "$CLAUDE_CODE_VERSION"; \
+  npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"; \
+  actual="$(claude --version | grep -oE '[0-9]+(\.[0-9]+)+' | head -n 1)"; \
+  [ "$actual" = "$CLAUDE_CODE_VERSION" ] || { echo "claude の版が一覧と違う: $actual != $CLAUDE_CODE_VERSION" >&2; exit 1; }

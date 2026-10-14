@@ -1,0 +1,70 @@
+name: Runtime plugin smoke (latest CLI)
+
+# 最新の版のスモーク（#1982）。配布の経路のスモーク（runtime-plugin-smoke.yml）は
+# tests/runtime-smoke/cli-versions.env に書いた版の CLI だけを入れる。この workflow は 4 ランタイムの
+# その時点の最新の版を解決して同じ手順で試し、落ちたらランタイムごとに 1 件の課題に残す。
+# Pull Request と push では起動しない（必須のチェックに入れない。外部の版上げで配布を止めない）
+on:
+  schedule:
+    # 毎日 06:00 JST。定期の起動は既定ブランチ（main）の workflow で動く
+    - cron: "0 21 * * *"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 試すブランチ（既定は次に配布する develop）
+        default: develop
+        required: false
+
+# 課題を作るのに要る権限だけ。秘密は渡さない（認証なしのスモークと同じ）
+permissions:
+  contents: read
+  issues: write
+
+# 定期と手の起動が重なっても 1 つずつ走らせ、同じ失敗の課題を 2 件にしない
+concurrency:
+  group: runtime-plugin-smoke-latest
+  cancel-in-progress: false
+
+jobs:
+  runtime-smoke-latest:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [claude, codex, kiro, agy]
+    env:
+      RUNTIME: ${{ matrix.runtime }}
+      LATEST_VERSIONS: tmp/runtime-smoke-latest/cli-versions.env
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || 'develop' }}
+      - name: Resolve the latest CLI version
+        run: |
+          mkdir -p "$(dirname "$LATEST_VERSIONS")"
+          python3 scripts/runtime-smoke-latest.py resolve --runtime "$RUNTIME" > "$LATEST_VERSIONS"
+          {
+            echo "### 最新の版（$RUNTIME）"
+            echo '```text'
+            cat "$LATEST_VERSIONS"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Run unauthenticated runtime smoke with the latest CLI
+        run: >-
+          bash scripts/runtime-smoke-test.sh --runtime "$RUNTIME" --with-secrets=off
+          --cli-versions "$LATEST_VERSIONS"
+      - name: Upload smoke artifacts
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: runtime-smoke-latest-${{ matrix.runtime }}
+          path: tmp/runtime-smoke/${{ matrix.runtime }}
+          if-no-files-found: ignore
+      - name: Report the failure as an issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 scripts/runtime-smoke-latest.py report --runtime "$RUNTIME"
+          --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          --versions "$LATEST_VERSIONS"

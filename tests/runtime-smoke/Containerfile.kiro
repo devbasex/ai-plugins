@@ -1,3 +1,28 @@
 FROM ai-plugins-runtime-smoke-base
 
-RUN curl -fsSL https://cli.kiro.dev/install | bash || true
+# 版と checksum は tests/runtime-smoke/cli-versions.env に書き、scripts/runtime-smoke-test.sh が
+# build-arg で渡す。ARG に既定値を持たせない（版の出所を一覧の 1 つにする）。
+# 公式のインストーラは版を受けず、bookworm の glibc では glibc 版が動かないため、版つきの musl 版の
+# tarball を取り、一覧の sha256 で確かめて入れる。取得・checksum・版の照合のどれかが落ちたら像の作成を落とす。
+ARG KIRO_CLI_VERSION
+ARG KIRO_CLI_SHA256_X86_64
+ARG KIRO_CLI_SHA256_AARCH64
+
+RUN set -eu; \
+  test -n "$KIRO_CLI_VERSION"; \
+  arch="$(uname -m)"; \
+  case "$arch" in \
+    x86_64) sha256="$KIRO_CLI_SHA256_X86_64" ;; \
+    aarch64) sha256="$KIRO_CLI_SHA256_AARCH64" ;; \
+    *) echo "対応していない arch: $arch" >&2; exit 1 ;; \
+  esac; \
+  test -n "$sha256"; \
+  work="$(mktemp -d)"; \
+  curl -fsSL -o "$work/kirocli.tar.gz" \
+    "https://prod.download.cli.kiro.dev/stable/${KIRO_CLI_VERSION}/kirocli-${arch}-linux-musl.tar.gz"; \
+  echo "$sha256  $work/kirocli.tar.gz" | sha256sum -c -; \
+  tar -xzf "$work/kirocli.tar.gz" -C "$work"; \
+  install -m 755 "$work/kirocli/bin/kiro-cli" "$work/kirocli/bin/kiro-cli-chat" "$work/kirocli/bin/kiro-cli-term" /usr/local/bin/; \
+  rm -rf "$work"; \
+  actual="$(kiro-cli --version | grep -oE '[0-9]+(\.[0-9]+)+' | head -n 1)"; \
+  [ "$actual" = "$KIRO_CLI_VERSION" ] || { echo "kiro-cli の版が一覧と違う: $actual != $KIRO_CLI_VERSION" >&2; exit 1; }
