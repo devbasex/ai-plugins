@@ -155,6 +155,47 @@ def test_settle_maps_the_place_to_the_decision_and_does_not_repeat():
     assert body_findings.unsettled(st) == []
 
 
+def test_settle_records_the_whole_shape_and_keeps_earlier_records(capsys):
+    """記録の全フィールドと、既存の記録を書き換えないこと・知らない finding_id を標準エラーへ数えることを固定する。"""
+    st = _pr1973()
+    f = st["review_findings"]
+    earlier = {"finding_id": "codex-r1-0", "decision": "deferred", "reason": "前の判断", "round": 0}
+    st["body_settlements"] = [earlier, "not-a-dict"]
+    items = [
+        ("resolved_threads", _entry(f[0])),  # 決着済み: 書き換えない
+        ("resolved_threads", _entry(f[1], reason_for_deferral="無視される")),
+        ("resolved_threads", _entry(f[1])),  # 同じ並びの 2 件目は重ねない
+        ("deferred", _entry(f[2], waived="wording", issue="#9", reason_for_deferral="基準外")),  # waived が issue より先
+        ("rejected", _entry(f[3], reason_for_deferral="使わない")),  # 却下は reason_for_rejection だけを読む
+        ("deferred", _entry(f[4], issue=7)),  # 理由が無ければ空、issue は文字列にする
+        ("deferred", {"finding_id": "nobody-r1-0"}),
+        ("rejected", {"finding_id": "nobody-r1-1"}),
+        ("deferred", {"finding_id": ""}),
+    ]
+    assert body_findings.record_settlements(st, items, 3, PR, "sweep") == 4
+    assert "状態ファイルに無い finding_id が 2 件" in capsys.readouterr().err
+    records = st["body_settlements"]
+    assert records[:2] == [earlier, "not-a-dict"]
+    for r in records[2:]:
+        assert set(r) == {"finding_id", "decision", "reason", "issue", "round", "pr", "source", "recorded_at"}
+        assert (r["round"], r["pr"], r["source"]) == (3, PR, "sweep")
+        assert r["recorded_at"].endswith("+00:00") and "T" in r["recorded_at"] and "." not in r["recorded_at"]
+    got = [(r["finding_id"], r["decision"], r["reason"], r["issue"]) for r in records[2:]]
+    assert got == [
+        ("codex-r1-1", "fixed", "", ""),
+        ("codex-r1-2", "waived", "基準外", ""),
+        ("codex-r1-3", "rejected", "", ""),
+        ("codex-r1-4", "separate_pr", "", "7"),
+    ]
+
+
+def test_settle_without_known_or_new_ids_adds_the_list_and_prints_nothing(capsys):
+    st = {"review_findings": [{"finding_id": "a"}, "x"]}
+    assert body_findings.record_settlements(st, [("resolved_threads", {"thread_id": "PRRT_1"})], 1, PR, "fix") == 0
+    assert st["body_settlements"] == []
+    assert capsys.readouterr().err == ""
+
+
 # ---------------- 取り込み（AC4・AC5） ----------------
 
 
