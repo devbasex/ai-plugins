@@ -342,3 +342,38 @@ def test_a_sweep_that_settles_every_body_finding_leaves_nothing(tmp_dir, state_m
     )
     assert code == 0 and "REMAINING_OPEN=0" in out and "REMAINING_BODY" not in out
     assert _read(tmp_dir)["sweep"]["remaining_body"] == 0
+
+
+@pytest.mark.parametrize("inline, expected", [(0, "body"), (1, "inline")])
+def test_a_review_flushed_from_the_queue_records_where_it_went(tmp_dir, monkeypatch, inline, expected):
+    """積んだレビューを後から流したときも、指摘と指摘のファイルへ送れた先を書き戻す。
+
+    積んだ時点では送れていないため、取り込みは既定の `inline` のまま記録する。書き戻さないと、
+    すべて総評へ移して送ったレビューの重大な指摘が振り分けと収束の判定から漏れる。
+    """
+    import review_lib.posts as posts
+    import review_lib.store as store
+
+    st = _pr1973()
+    st["body_settlements"] = []
+    for f in st["review_findings"]:
+        f["posted_to"] = "inline"
+    st["rounds"][0]["codex"] = {"queued": True, "review_url": None}
+    _write(tmp_dir, st)
+    payload = store._payload_path("codex", PR, 1)
+    comments = [{k: f[k] for k in ("path", "line", "body")} for f in st["review_findings"]]
+    payload.write_text(json.dumps({"comments": comments}, ensure_ascii=False))
+    monkeypatch.setattr(review_lib.github, "_review_exists", lambda repo, pr, url: True)
+    item = {
+        "kind": "review-post",
+        "extra": {"agent": "codex", "round": 1, "inline": inline},
+        "response": {"html_url": f"https://github.com/o/r/pull/{PR}#pullrequestreview-1"},
+    }
+
+    posts._confirm_flushed(PR, item)
+
+    after = _read(tmp_dir)
+    assert {f["posted_to"] for f in after["review_findings"]} == {expected}
+    assert {c["posted_to"] for c in json.loads(payload.read_text())["comments"]} == {expected}
+    assert after["rounds"][0]["codex"]["queued"] is False
+    assert len(body_findings.unsettled(after)) == (5 if expected == "body" else 0)
