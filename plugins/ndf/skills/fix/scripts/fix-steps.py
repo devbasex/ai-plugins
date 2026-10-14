@@ -75,13 +75,6 @@ TOOL = "fix"
 SEVERITIES = ("critical", "major", "minor", "nit")
 FIX_SEVERITIES = ("critical", "major")
 WAIVE_SEVERITIES = ("minor", "nit")
-# 要求（受け入れ条件）の変更が要る指摘の扱い。写しだけを直すと課題の本文（正）と食い違ったまま進む（#1769）
-REQUIREMENTS_BLOCK = (
-    "## 要求の変更が要る指摘\n\n"
-    "要求（受け入れ条件）の変更が要る指摘は、要求の写し（`issues/issue-<番号>-requirements.md`。正は課題の本文）を直さない。"
-    '課題の本文の変更として止めて返す: `decision: "deferred"` にし、`reason` に「要ユーザ判断: 課題の本文の変更が要る」と'
-    "変える中身を書く（受け入れ条件の変更は利用者が承認する判断である）。"
-)
 DECISIONS = ("fixed", "waived", "deferred", "rejected", "separate_pr")
 EXCLUDE_HEADINGS = ("やらないこと", "別 PR", "別PR", "対応しない", "スコープ外", "範囲外", "out of scope", "non-goals", "not in scope")
 CI_FAILED = ("FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE")
@@ -254,8 +247,7 @@ def cmd_context(a):
     if log_path:
         lines += ["", f"失敗ログ: {log_path}"]
     lines += ["", f"## コメント（3 種、{comments_n} 行）", "", "```", comments_text.rstrip(), "```", ""]
-    lines += [review_criteria.fixer_block(focus, mvv_block, profile), ""]
-    lines += [REQUIREMENTS_BLOCK, ""]
+    lines += [review_criteria.fixer_block(focus, mvv_block, profile), "", review_criteria.REQUIREMENTS_FIXER, ""]
     ctx.write_text("\n".join(lines), encoding="utf-8")
 
     dec = d / f"fix-pr{pr}-decisions.json"
