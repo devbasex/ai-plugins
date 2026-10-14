@@ -217,7 +217,9 @@ def _approved(st: dict) -> dict:
 
 @pytest.fixture()
 def green(monkeypatch, state_mod):
-    monkeypatch.setattr(review_lib.ci, "_fetch_check_runs", lambda repo, sha: [{"name": "pytest", "status": "completed", "conclusion": "success"}])
+    monkeypatch.setattr(
+        review_lib.ci, "_fetch_check_runs", lambda repo, sha: [{"name": "pytest", "status": "completed", "conclusion": "success"}]
+    )
 
 
 def _judge(tmp_dir, st, capsys) -> tuple[int, str]:

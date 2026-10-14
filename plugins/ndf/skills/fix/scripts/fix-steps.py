@@ -10,8 +10,9 @@ context   未解決のスレッド・3 種のコメント・CI の状態（失�
           振り分けの雛形（decisions）を書き出す。レビューの重点は、環境変数 `CROSS_REVIEW_STATE` が
           cross-review の状態ファイルを指し `review_criteria` を持てばそれを写し、無ければ `--root`
           （既定はカレントの作業ツリーの根）の `.ndf/review.json` を読む。レビューのプロファイル（#1910）も同じ経路で得て、
-          節に効かせ、振り分けの雛形の `review_profile` へ写す
-finalize  振り分けの JSON から件数と by_severity を数え、`cross-review` の `state.py merge-fix`
+          節に効かせ、振り分けの雛形の `review_profile` へ写す。状態ファイルを指すときは、決着していない総評だけの
+          指摘（`scripts/lib/body_findings.py`）も `thread_id: null` と `finding_id` を持つ要素として雛形へ入れる
+finalize  総評だけの指摘が振り分けに無ければ止まる。振り分けの JSON から件数と by_severity を数え、`cross-review` の `state.py merge-fix`
           が読む戻り値ファイル `$TMP_DIR/fix-pr<PR>-result.json` を組む。`waived` は見送りの返信を
           組んで `deferred` へ `resolve: true` で載せ、`fixed` も CI の修正（`ci_fixed`）も無ければ `fix_commit` を捨てる。設計 PR の本文の
           「決めたこと」の節も揃える（`pr-body-decisions.sh sync`）
@@ -31,7 +32,8 @@ remaining 返信と決着の後に未解決のスレッドを数え直し、見�
                     "decision": "fixed|waived|deferred|rejected|separate_pr", "reason": "...",
                     "criterion": 1（当たった基準の番号。任意。waived では持たない）,
                     "waive_kind": "wording"（waived のとき）,
-                    "issue": "#123"（separate_pr のとき）}]}
+                    "issue": "#123"（separate_pr のとき）,
+                    "finding_id": "codex-r1-0"（総評だけの指摘のとき。戻り値ファイルの要素へ写す）}]}
 
 振り分けの規則（破れば finalize が止まる）: fixed は critical / major だけ。waived は minor / nit だけで、
 criterion を持たず、waive_kind が見送りの種類のどれか。criterion は指摘の基準の番号のどれかで、3 は review_focus が

@@ -68,12 +68,18 @@ FIX=$(bash "$R/scripts/resolve.sh" scripts fix) || exit 3
    （`version: 2` の 1 つか、`version: 3` で PR の変更ファイルのパスから選んだ 1 つ）があれば、基準・書かないもの・
    見送りの種類・返信もそこから入る）。`review-focus` の
    項目が `unreadable` なら、宣言を読めずに基準 1・2・4 だけで続けたことを作業完了報告へ書く。`ci_failed` の項目があれば `ci_log` のログも
-   読む。`metrics.unresolved` が対応の対象の全量である（レビュー結果の投稿数は使わない）
+   読む。対応の対象の全量は、未解決のスレッド（`metrics.unresolved`）と、`/ndf:cross-review` の中では
+   総評だけの指摘（`metrics.body_findings`。レビュー本文にだけ書かれ、スレッドを持たない指摘）の和である
+   （レビュー結果の投稿数は使わない）。総評だけの指摘は、状態ファイルに決着の記録が無いものを全ラウンドから
+   スクリプトが雛形へ入れる。`items[].name` が `body-findings` の項目が `unreadable` なら、状態ファイルを読めずに
+   スレッドだけで続けたことを作業完了報告へ書く
 2. **指摘を振り分ける**（「重要度の判定」）。`items[].name` が `decisions` の JSON の各要素へ
    `severity` / `category` / `decision`（`fixed` / `waived` / `deferred` / `rejected` /
    `separate_pr`）/ `reason` を書き、`fixed` には当たった基準の番号を `criterion` へ、`waived` には
    見送りの種類を `waive_kind` へ書く。`separate_pr` は `/ndf:out-of-scope` で起票し、番号を `issue` へ書く。
-   本文の除外の節に載る内容への指摘は `separate_pr`。`--classify-only` はここで
+   本文の除外の節に載る内容への指摘は `separate_pr`。`finding_id` を持つ要素（総評だけの指摘）は消さず、
+   `finding_id` を変えずに、スレッドの要素と同じ「重要度の判定」で振り分ける（`severity` は担当の値が
+   入っており、判定し直して書き換えてよい）。`--classify-only` はここで
    「`--classify-only` の出力」を報告して終える
 3. **修正する。** `fixed` の指摘と CI の失敗を直す（「CI の失敗の切り分け」）。`waived` の指摘の
    ために対象のファイルを変えない。コミット前に手順 1 を打ち直し、新しい指摘・失敗があれば手順 2 へ戻る
@@ -90,7 +96,8 @@ FIX=$(bash "$R/scripts/resolve.sh" scripts fix) || exit 3
    `fix_commit` を省くと HEAD を採る。CI の失敗を直したコミットがあればテンプレートの `ci_fixed` を `true` に
    する。`ci_fixed` が `true` なら CI を照会せず、`ci_status` を `PENDING`・`ci_failed_checks` を空にする
    （照会できるのは送信前の head で、直した失敗が残って見えるため）。`fixed` が 0 件で `ci_fixed` も `true` でなければ `fix_commit` を捨てて `null` にし（`items`
-   の `fix-commit` が `dropped`）、送信も CI も起きない。振り分けが「重要度の判定」の規則を破れば
+   の `fix-commit` が `dropped`）、送信も CI も起きない。振り分けが「重要度の判定」の規則を破るか、
+   決着していない総評だけの指摘が振り分けに無ければ（`items[].result` が `missing`）
    `stopped` で止まり、戻り値ファイルを書かない。`items[].name` が `pr-body-decisions` の `result`
    （`synced` / `mismatch` / `unreadable` / `invalid_call` / `after_push`）と `code` を作業完了報告へ写す。
    `unreadable` を一致と書かない。`invalid_call` は呼び出しの誤りで `stopped` になる
@@ -190,8 +197,10 @@ FIX=$(bash "$R/scripts/resolve.sh" scripts fix) || exit 3
 | `rejected` | `rejected` | 理由（`reason_for_rejection`）の返信。決着しない。`path` / `line` / `severity` を持ち、次のラウンドの再提出と照合される |
 | （すべて） | | 対応件数・決着・見送り・却下・CI を並べた PR のまとめ。`waived` があれば「基準外の見送り: N 件」の行を決着の行の直後に足す |
 
-- `thread_id` を持たない要素（レビュー本文の指摘）には返信を送らず、理由を PR のまとめへ
-  載せる。GitHub はレビュー本文への返信を受け付けないためである
+- `thread_id` を持たない要素（レビュー本文の指摘）には返信を送らず、理由を PR のまとめの
+  「レビュー本文の指摘への返事」へ載せる。GitHub はレビュー本文への返信を受け付けないためである
+- 総評だけの指摘の要素は `finding_id` を持つ（スレッドの要素は持たない）。`cross-review` の取り込みは
+  この値で決着を状態ファイルの `body_settlements[]` へ記録する
 - `ci_failed_checks` は `cross-review` 側で code-related と meta-only に分類され、メタチェックのみ
   失敗ならループを継続する。meta-only の失敗の補足はテンプレートの `ci_note` に書く
 - まとめの参照（`summary_comment_url`）は投稿する側が記録へ書く

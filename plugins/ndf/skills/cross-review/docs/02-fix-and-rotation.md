@@ -33,7 +33,7 @@
 | --- | --- |
 | リポジトリ・PR・ラウンド | state.json の `repo` / `current_pr` / `rounds[-1].round` |
 | 作業ディレクトリ・ブランチ・ベース | state.json の `worktree_path` / `head_branch` / `base_branch` |
-| 前ラウンドのレビュー | `rounds[-1]` の担当ごとの `intent` / `posted_as` / `comments` / `review_url`。件数はそのラウンドで投稿した数で、対応の対象は `/ndf:fix` が PR の未解決のスレッドから数え直す |
+| 前ラウンドのレビュー | `rounds[-1]` の担当ごとの `intent` / `posted_as` / `comments` / `review_url`。件数はそのラウンドで投稿した数で、対応の対象は `/ndf:fix` が PR の未解決のスレッドと、状態ファイルの決着していない総評だけの指摘から数え直す |
 | コメントのスナップショット | `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt` |
 | 戻り値ファイル | `$TMP_DIR/fix-pr<PR>-result.json`。環境変数 `CROSS_REVIEW_TMP_DIR` を渡すと `/ndf:fix` がここへ書く |
 | 指摘の基準 | 環境変数 `CROSS_REVIEW_STATE=$TMP_DIR/cross-review-pr<STATE_PR>-state.json`。`fix-steps.py context` が状態ファイルの `review_criteria`（`init` がコピーした重点とレビューのプロファイル）を読み、担当と同じ基準で振り分ける |
@@ -46,7 +46,14 @@ GitHub と git へ書かない。取り込みは現在の頭を指定して送�
 送信が何も送らずに終了コード 0 で終わり、送ったという報告と実物が食い違う。
 
 **レビュー本文の指摘は `thread_id` を `null` にし、`comment_id` にはレビューの ID を書く。**
-スレッドを持たない要素には返信を積まず、`summary` と理由をまとめのコメントへ載せる。
+スレッドを持たない要素には返信を積まず、`summary` と理由をまとめのコメントの「レビュー本文の指摘への返事」へ載せる。
+
+**総評だけの指摘（`review_findings[]` の `posted_to` が `body`）は、スクリプトが修正担当の雛形へ入れる。**
+差分の外を指す指摘と、`HTTP 422` で総評へ移した指摘を区別しない。`fix-steps.py context` は状態ファイルの
+全ラウンドから、決着の記録（`body_settlements[]`）が無く、統合済み（`merged_into`）でなく、前のラウンドで
+`fixed` 以外に決着した総評だけの指摘の再提出（照合は新しい指摘の数え方と同じ位置・近傍・本文）でないものを選び、
+`thread_id: null` と `finding_id` を持つ要素として雛形へ足す。`finalize` はそれらが振り分けに無ければ止まり、
+戻り値ファイルの要素へ `finding_id` を写す。判定の正本は `scripts/lib/body_findings.py` にある。
 投稿キューは、送り直しても届かない項目（`HTTP 400` / `404` / `410` / `422`、レビューの
 投稿を除く）を飛ばして投稿キューの `dropped/` へ移し、後ろの決着とまとめを送る。飛ばした数は
 `DROPPED=` / `PENDING_DROPPED=` に出る。
@@ -64,7 +71,7 @@ fi
 `state.py merge-fix` が内部で行う処理:
 
 1. `$TMP_DIR/fix-pr<PR>-result.json` を読んで `state.rounds[-1].fix` にマージ（段階 `recorded`）
-2. `deferred` を `state.deferred_nits` に追記
+2. `deferred` を `state.deferred_nits` に追記し、`finding_id` を持つ要素の決着を `state.body_settlements[]` へ記録する（`source: fix`。同じ `finding_id` は重ねない）
 3. 返信・決着・まとめを投稿する（段階 `posted`）
 4. **CI 失敗の分類**（段階 `done`）:
    - code-fail（チェックジョブの名前がメタのチェック（`review_lib/ci.py` の `CI_META_PATTERNS`）に当たらない。テスト・lint・型検査・ビルドはここに入る）: `final=error` で中断 (exit 3)
@@ -90,7 +97,10 @@ lint や型検査の失敗は即中断してユーザ判断。
 
 **収束の判定（Step 3）も同じ振り分けを使う**（#327）。両方の AI が承認したラウンドは、
 収束を返す前に `commits/{HEAD_OID}/check-runs` を **1 度だけ** 照会する。code-related の
-失敗があれば**中断せず**終了コード 2 で修正のラウンドへ回す。収束の直前は修正の機会が
+失敗があれば**中断せず**終了コード 2 で修正のラウンドへ回す。決着していない `critical` / `major` の総評だけの指摘
+（反証で棄却されたものを除く）が残るときも、全員が承認したラウンドを収束させず終了コード 2 で修正のラウンドへ回し、
+`BODY_BLOCKING=<件数>` を出す（モデルレビューのラウンドでも `MODEL_CONFIRMED` を出さない）。`minor` / `nit` は収束を止めず、
+雛形と最終スイープの残数にだけ入る。収束の直前は修正の機会が
 残っている段階であり、そこで中断すると直せる失敗まで人手へ戻すことになる。照会できない
 とき（`gh` の失敗 / `HTTP 422` / チェックジョブ 0 件）は収束させ、`rounds[-1].ci.verdict` へ
 `unverified` と理由を残す。**進行を止めない側へ倒す。** 同名のチェックジョブは名前ごとの
@@ -281,6 +291,9 @@ while ループ脱出後にメインが以下のプロンプトでサブエー�
 > 3. 判断保留（`deferred`）と bot 誤指摘（`rejected`）→ 理由を添えて入れ、**`"resolve": true`** を付ける
 >    （スレッドを open のまま残さない）
 >
+> `fix-steps.py context` の雛形に入る総評だけの指摘（`finding_id` を持つ要素。スレッドを持たない）も同じ規則で
+> 振り分け、`finalize` が写した `finding_id` ごと結果ファイルの `resolved_threads` / `deferred` / `rejected` へ入れる。
+>
 > **GitHub と git へ書かない。** 返信・決着・送信は、メインがこの結果ファイルを読んで
 > 共通ライブラリの 1 行（`result_posts.py fix`）で行う。
 >
@@ -324,7 +337,7 @@ while ループ脱出後にメインが以下のプロンプトでサブエー�
 
 **`verification` は突き合わせる相手を持たない。** `verify-sweep` が結果ファイルから
 取り出すのは `remaining_open` / `remaining_reason` / `resolved` / `fixed_in_sweep` /
-`commit` の 5 つだけで、この項目は読まない。記録は結果ファイルとサブエージェントの
+`commit` の 5 つと、決着を記録する `resolved_threads` / `deferred` / `rejected` だけで、この項目は読まない。記録は結果ファイルとサブエージェントの
 最終メッセージに残り、メインが Step 8 の完了報告へ書き写す。
 
 ### Step 7.5 後段: 最終スイープの結果を検証する（必須）
@@ -354,6 +367,12 @@ fi
 | 0 件 | 2 件 | 2 | 6 |
 | 1 件 | 1 件 | 1 | 6（件数と理由を完了報告へ） |
 | 0 件 | 取得できない | 0（申告のまま） | 0（確認できなかったことを stderr へ） |
+
+**総評だけの指摘は残件数に足す。** `verify-sweep` は結果ファイルの `finding_id` を持つ要素の決着を
+`body_settlements[]` へ記録し（`source: sweep`）、それでも決着していない総評だけの指摘の件数を、
+未解決のスレッドの件数（取得できなければ申告）へ足して `REMAINING_OPEN` にする。1 件以上なら
+`REMAINING_BODY=<件数>` を出し、`sweep.remaining_body` に件数を、`remaining_reason` が空なら
+「決着していない総評だけの指摘 N 件」を残す。駆動のまとめの `unresolved` はこの `remaining_open` である。
 
 結果は state.json の `sweep` に残り、`state.py report` が完了報告へ折り込む。
 
