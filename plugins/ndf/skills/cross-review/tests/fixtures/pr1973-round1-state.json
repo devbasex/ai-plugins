@@ -1,0 +1,117 @@
+{
+ "current_pr": 1973,
+ "repo": "devbasex/ai-plugins",
+ "max_rounds": 12,
+ "rotate_after": 8,
+ "only": null,
+ "pr_history": [
+  {
+   "pr": 1973,
+   "opened_at": "2026-10-12T00:00:00+00:00",
+   "closed_at": null,
+   "rounds": 1
+  }
+ ],
+ "rounds": [
+  {
+   "round": 1,
+   "pr": 1973,
+   "started_at": "2026-10-12T00:00:00+00:00",
+   "head_sha": "b87b3ae",
+   "codex": {
+    "intent": "REQUEST_CHANGES",
+    "comments": 0,
+    "posted_as": "REQUEST_CHANGES",
+    "by_severity": {
+     "major": 5
+    }
+   },
+   "reviewers": [
+    "codex"
+   ]
+  }
+ ],
+ "deferred_nits": [],
+ "rejected_findings": [],
+ "review_findings": [
+  {
+   "finding_id": "codex-r1-0",
+   "pr": 1973,
+   "round": 1,
+   "agent": "codex",
+   "path": "plugins/ndf/scripts/lib/a.py",
+   "line": 40,
+   "severity": "major",
+   "body": "[major / logic] 差分の外: 退避の分岐が空の配列を返す\n詳細",
+   "posted_to": "body",
+   "evidence": "読んだ",
+   "falsification": "呼び出し元を見る",
+   "suggested_check": "",
+   "has_evidence": true
+  },
+  {
+   "finding_id": "codex-r1-1",
+   "pr": 1973,
+   "round": 1,
+   "agent": "codex",
+   "path": "plugins/ndf/scripts/lib/b.py",
+   "line": 120,
+   "severity": "major",
+   "body": "[major / logic] 差分の外: 再開のときに記録を二重に積む\n詳細",
+   "posted_to": "body",
+   "evidence": "読んだ",
+   "falsification": "呼び出し元を見る",
+   "suggested_check": "",
+   "has_evidence": true
+  },
+  {
+   "finding_id": "codex-r1-2",
+   "pr": 1973,
+   "round": 1,
+   "agent": "codex",
+   "path": "plugins/ndf/skills/x/SKILL.md",
+   "line": 15,
+   "severity": "major",
+   "body": "[major / docs] 差分の外: 手順の順序が実装と逆\n詳細",
+   "posted_to": "body",
+   "evidence": "読んだ",
+   "falsification": "呼び出し元を見る",
+   "suggested_check": "",
+   "has_evidence": true
+  },
+  {
+   "finding_id": "codex-r1-3",
+   "pr": 1973,
+   "round": 1,
+   "agent": "codex",
+   "path": "plugins/ndf/scripts/lib/c.py",
+   "line": 300,
+   "severity": "major",
+   "body": "[major / logic] 差分の外: 終了コードが 0 のまま\n詳細",
+   "posted_to": "body",
+   "evidence": "読んだ",
+   "falsification": "呼び出し元を見る",
+   "suggested_check": "",
+   "has_evidence": true
+  },
+  {
+   "finding_id": "codex-r1-4",
+   "pr": 1973,
+   "round": 1,
+   "agent": "codex",
+   "path": "plugins/ndf/scripts/lib/d.py",
+   "line": 8,
+   "severity": "major",
+   "body": "[major / logic] 差分の外: 環境変数を読まない\n詳細",
+   "posted_to": "body",
+   "evidence": "読んだ",
+   "falsification": "呼び出し元を見る",
+   "suggested_check": "",
+   "has_evidence": true
+  }
+ ],
+ "body_settlements": [],
+ "evidence_rounds": [],
+ "carried_over": null,
+ "final": null
+}

@@ -121,7 +121,7 @@
 | `lib/claude_accounts.py` の `_usable_held` | 変更 | refreshToken が空なら、アクセストークンの期限に依らず再登録が要るにする（I3）。ほかの判定は今のまま |
 | `lib/claude_accounts.py` の `needs_relogin_names`（新規） | 新規 | 登録済みアカウントを順に `usable` で確かめ、再登録が要るものの名前を返す。読めないアカウントは飛ばす（ネットワークを使わない） |
 | `skills/development-workflow/references/relay.md` | 変更 | 401 の案内の 3 つの文と、「1 アカウント = 1 ログイン」の運用の 1 文を足す（決定 7） |
-| `scripts/tests/test_relay_account.py`・`test_claude_accounts.py` | 変更 | テスト設計の行を足す |
+| `plugins/ndf/scripts/tests/test_relay_account.py`・`test_claude_accounts.py` | 変更 | テスト設計の行を足す |
 
 **`relay.py` のサブコマンドと引数、`limit.json` の形、StopFailure hook は変えない。**
 

@@ -448,25 +448,21 @@ def _refresh_expired(o: dict, now: float) -> bool:
 
 
 def _usable_held(name: str, now: float) -> bool:
-    """排他の中で呼ぶ。`usable` の中身。認証ファイルが無い・読めない・権限を直せない・期限の切れたアクセストークンを
-    更新できる見込みが無い（リフレッシュトークンが無いか期限切れ）なら `needs_relogin` を真にする。"""
+    """排他の中で呼ぶ。`usable` の中身。認証ファイルが無い・読めない・権限を直せない・リフレッシュトークンが空（アクセス
+    トークンが期限内でも。#1727 の I3）・期限の切れたアクセストークンを更新できる見込みが無いなら `needs_relogin` を真にする。"""
     a = _read(_path(name, ACCOUNT_FILE))
     if a is None or a.get("needs_relogin"):
         return False
     o = _creds(name)
-    if not _secure(name) or o is None:
+    if not _secure(name) or o is None or not o.get("refreshToken") or (_refresh_expired(o, now) and not _fresh(o, now)):
         _update_account(name, needs_relogin=True)
         return False
-    refreshable = bool(o.get("refreshToken")) and not _refresh_expired(o, now)
-    if refreshable or _fresh(o, now):
-        return True
-    _update_account(name, needs_relogin=True)  # 期限の切れたアクセストークンを更新できる見込みが無い（今のまま）
-    return False
+    return True
 
 
 def usable(name: str, now: float | None = None) -> bool:
     """候補として起動できるか（ネットワークを使わない）。登録の記録があって再登録が要らず、権限を直せ、認証ファイルに
-    リフレッシュトークンか期限内のアクセストークンがある。"""
+    リフレッシュトークンがあり、その期限が切れていれば期限内のアクセストークンがある。"""
     now = _now(now)
     return bool(_with_lock(name, lambda: _usable_held(name, now), lambda: False))
 

@@ -203,7 +203,7 @@ class Drive:
 - 作業ディレクトリ: {s.get("worktree_path")}（外を触らない）
 - ブランチ: {s.get("head_branch")} / ベース: {s.get("base_branch")}
 - 作業ディレクトリは detached HEAD（PR の head）のままでよい。ブランチへ切り替えず、そこでコミットする。送る（push）のは取り込み
-- 前ラウンドのレビュー（件数はそのラウンドで投稿した数。対象は reviewThreads を数え直して決める）:
+- 前ラウンドのレビュー（件数はそのラウンドで投稿した数。対象は reviewThreads を数え直したものと、`fix-steps.py context` が雛形へ入れる総評だけの指摘（`finding_id` を持つ要素）):
 {reviews}
 - 既存コメントのスナップショット: {self.tmp}/cross-review-pr{self.pr}-existing-comments.txt
 
@@ -323,8 +323,8 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
         if jrc == 0:
             return "done"
         self.must((jrc, ""), "state.py judge", ok=(2,))
-        if parse_vars(jout).get("MODEL_CONFIRMED") == "1":
-            return "round"  # 設計 PR のモデルの段が承認された。修正を挟まずに詳細の段へ進む（#1111）
+        if "1" in (parse_vars(jout).get(k) for k in ("MODEL_CONFIRMED", "SCOPE_RETRY")):
+            return "round"  # モデルの段の承認（#1111）か範囲の照合で外れた承認（#1702）だけが妨げた。修正を挟まず次へ
         orc, _ = self.st("check-oscillation", str(self.pr))
         if orc == 4:
             return "done"  # final = oscillation。最終スイープへ

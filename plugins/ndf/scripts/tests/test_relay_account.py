@@ -508,3 +508,194 @@ def test_pending_modes_and_start_time(accounts):  # noqa: F811
         assert not p.alive()  # 止めた（psutil が刈り取るため終了コードは見ない）
     finally:
         child.kill()
+
+
+# ---------------------------------------------------------------- どのログインの形でも 401 を扱う（#1727）
+
+from relay_lib import switch as relay_switch  # noqa: E402
+from test_relay import METERED_DECL, _fake_ca, _teller, account_term, events, hit_limit, no_secret, term  # noqa: E402,F401
+
+AUTH = {"written_at": "2026-10-14T00:00:00.000Z", "error": "authentication_failed"}
+
+
+def _ticker(monkeypatch, tmp_path, cur, env=None, multi=False):
+    """上限シグナルファイルの判定だけを動かす `Relay`（待ちの条件は通す）。"""
+    r = _teller(monkeypatch, 1, env)
+    r.account, r.multi, r.dir = cur, multi, str(tmp_path)
+    r.auth_section, r.noted, r.told = 0, None, None
+    r._limit_on_hold = lambda *a: False
+    r._wait_background = lambda *a: False
+    r._may_start = lambda written: True
+    r.noted_auth = []
+    monkeypatch.setattr(relay_switch.ca, "note_auth_failed", lambda name, now=None: r.noted_auth.append(name))
+    return r
+
+
+def _signal(r, lim=AUTH):
+    with open(r.path("limit.json"), "w") as f:
+        json.dump(lim, f)
+
+
+@pytest.mark.parametrize(
+    "cur, line",
+    [
+        (None, "ndf-relay: 既定のログインで認証に失敗した（401）。claude の中で /login を打ってログインし直す。子はこのまま残す"),
+        (
+            "metered",
+            "ndf-relay: 従量の接続で認証に失敗した（401）。python3 ~/.claude/ndf/relay.py account check metered で宣言"
+            "（環境変数 NDF_SUPERVISE_CLAUDE_FALLBACK か保存した宣言）を確かめる。子はこのまま残す",
+        ),
+        (
+            "a",
+            "ndf-relay: アカウント a で認証に失敗した（401）。python3 ~/.claude/ndf/relay.py account add a で登録し直す。子はこのまま残す",
+        ),
+    ],
+)
+def test_auth_failure_without_target_tells_fix_once(monkeypatch, tmp_path, cur, line):
+    """受け入れ条件 1・3・4・8・I1・I6: 替え先が無ければログインの形に合う直し方を 1 度だけ出し、子を残す。"""
+    calls = _fake_ca(monkeypatch, choice=relay_switch.ca.Choice(None))
+    r = _ticker(monkeypatch, tmp_path, cur)
+    _signal(r)
+    assert r._tick_limit() is None
+    _signal(r, {**AUTH, "written_at": "2026-10-14T00:00:05.000Z"})  # 同じ区間の 2 度目
+    assert r._tick_limit() is None
+    assert r.screens == [line] and "上限にある" not in line
+    assert r.rows == [{"event": "account", "section": 1, "reason": "auth", "from": cur, "to": None, "earliest": None}]
+    assert not os.path.exists(r.path("limit.json"))
+    assert r.noted_auth == ([cur] if cur == "a" else [])  # 既定のログインと従量の接続は登録の記録へ残さない
+    if cur == "metered":
+        assert calls == []  # 従量の接続からは替えない（I2）
+
+
+def test_metered_auth_failure_does_not_go_back_to_account(monkeypatch, tmp_path):
+    """受け入れ条件 3・I2: 上限の外れた登録済みアカウントがあっても、従量の接続の 401 では替えない。"""
+    calls = _fake_ca(monkeypatch, choice=relay_switch.ca.Choice("b"))
+    r = _ticker(monkeypatch, tmp_path, "metered", {"NDF_SUPERVISE_CLAUDE_FALLBACK": "ANTHROPIC_API_KEY=sk-SECRET"}, multi=True)
+    _signal(r)
+    assert r._tick_limit() is None and calls == []
+    assert [(x["from"], x["to"]) for x in r.rows] == [("metered", None)]
+    assert "SECRET" not in json.dumps(r.rows) + " ".join(r.screens)  # 受け入れ条件 9
+
+
+@pytest.mark.parametrize(
+    "cur, choice, env, plan",
+    [
+        (None, "b", {}, ("b", "auth")),
+        (None, None, METERED_DECL, ("metered", "auth")),
+        ("a", None, METERED_DECL, ("metered", "auth")),  # 受け入れ条件 7
+    ],
+)
+def test_auth_failure_plans_next_account_regardless_of_count(monkeypatch, tmp_path, cur, choice, env, plan):
+    """受け入れ条件 2・7: 登録が 1 つ以下でも、401 の後は登録済みアカウント → 従量の接続の順で替え先を予定する。"""
+    _fake_ca(monkeypatch, choice=relay_switch.ca.Choice(choice))
+    r = _ticker(monkeypatch, tmp_path, cur, env)
+    _signal(r)
+    m = r._tick_limit()
+    assert m["_kind"] == "limit" and m["_plan"][:2] == plan
+    assert r.auth_section == 1 and r.screens == []
+
+
+def test_limit_with_one_account_is_still_dropped(monkeypatch, tmp_path):
+    """受け入れ条件 10・I4: 登録が 1 つ以下の上限は今と同じく読み捨てる。"""
+    calls = _fake_ca(monkeypatch, choice=relay_switch.ca.Choice("b"))
+    r = _ticker(monkeypatch, tmp_path, None, METERED_DECL)
+    _signal(r, {**AUTH, "error": "rate_limit"})
+    assert r._tick_limit() is None and calls == [] and r.rows == [] and r.screens == []
+    assert not os.path.exists(r.path("limit.json"))
+
+
+@pytest.mark.parametrize(
+    "prev, line",
+    [
+        (None, "既定のログインで認証に失敗し、替えられる登録済みのアカウントが無い。従量の接続（ANTHROPIC_API_KEY）へ替えて続ける"),
+        ("a", "アカウント a で認証に失敗し、替えられる登録済みのアカウントが無い。従量の接続（ANTHROPIC_API_KEY）へ替えて続ける"),
+    ],
+)
+def test_auth_switch_to_metered_does_not_say_limited(monkeypatch, prev, line):
+    """受け入れ条件 2・7・9: 401 で従量の接続へ替えた 1 行は「上限にある」と言わず、宣言の値を書かない。"""
+    r = _teller(monkeypatch, 2, {"NDF_SUPERVISE_CLAUDE_FALLBACK": "ANTHROPIC_API_KEY=sk-SECRET"})
+    r.tell_account(prev, "metered", "auth", relay_switch.ca.Choice(None))
+    assert r.screens == ["ndf-relay: " + line]
+    assert [(x["reason"], x["from"], x["to"], x["keys"]) for x in r.rows] == [("auth", prev, "metered", ["ANTHROPIC_API_KEY"])]
+    assert "SECRET" not in json.dumps(r.rows) + " ".join(r.screens)
+
+
+def test_auth_switch_from_default_login_names_it(monkeypatch):
+    """受け入れ条件 2: 既定のログインから替えた 1 行で None と出さない。"""
+    r = _teller(monkeypatch, 2)
+    r.tell_account(None, "b", "auth", None)
+    assert r.screens == ["ndf-relay: 認証が通らなかったため、アカウントを 既定のログイン から b（m）へ替えて続ける"]
+
+
+def _relogin_line(n):
+    return f"ndf-relay: アカウント {n} は再登録が要る。python3 ~/.claude/ndf/relay.py account add {n} で登録し直す"
+
+
+def test_tell_relogin_one_line_per_account(monkeypatch, accounts):  # noqa: F811
+    """受け入れ条件 5・6: 印のあるものと refreshToken が空のものだけ、1 つにつき 1 行（名前の順）。"""
+    for n in "abc":
+        accounts.add(n)
+    oauth = accounts.creds("c")
+    oauth["refreshToken"] = ""
+    accounts.write(accounts.root / "c" / ".credentials.json", {"claudeAiOauth": oauth})
+    ca._update_account("a", needs_relogin=True)
+    r = _teller(monkeypatch, 0)
+    r.tell_relogin()
+    assert r.screens == [_relogin_line("a"), _relogin_line("c")]
+    assert accounts.account("c")["needs_relogin"] is True and accounts.account("b")["needs_relogin"] is False
+
+
+def test_tell_relogin_silent_when_all_usable_or_broken(monkeypatch, accounts):  # noqa: F811
+    """受け入れ条件 6・可用性: 無ければ何も出さず、判定の失敗で起動を止めない。"""
+    accounts.add("a")
+    r = _teller(monkeypatch, 0)
+    r.tell_relogin()
+    monkeypatch.setattr(relay_switch.ca, "names", lambda: (_ for _ in ()).throw(RuntimeError("broken")))
+    r.tell_relogin()
+    assert r.screens == []
+
+
+def test_default_login_auth_failure_without_accounts(term, accounts):  # noqa: F811
+    """受け入れ条件 1・8: 登録が 0 件の既定のログインの 401 で、/login の 1 行と記録を残して子を残す。"""
+    t = account_term(term, accounts)
+    t.wait_start(1)
+    hit_limit(t, 0, error="authentication_failed")
+    t.wait(lambda: "/login" in t.text, timeout=20, what="/login の 1 行")
+    assert "既定のログインで認証に失敗した（401）" in t.text
+    assert len(t.starts()) == 1 and b"/exit" not in t.child_input(0)
+    assert [(r["reason"], r["from"], r["to"]) for r in events(t.rows(), "account")] == [("auth", None, None)]
+    no_secret(t)
+
+
+def test_default_login_auth_failure_moves_to_single_account_and_stays(term, accounts):  # noqa: F811
+    """受け入れ条件 2・F4・I7: 登録が 1 件でも 401 の後はそのアカウントで起動し、次の区間も引き継ぐ。"""
+    accounts.add("a", util5=10)
+    t = account_term(term, accounts)
+    t.wait_start(1)
+    assert t.starts()[0]["account"] is None
+    hit_limit(t, 0, error="authentication_failed")
+    t.wait_start(2)
+    assert t.starts()[1]["account"] == "a" and t.starts()[1]["config_dir"] == str(accounts.root / "a")
+    assert "認証が通らなかったため、アカウントを 既定のログイン から a（a@example.com）へ替えて続ける" in t.text
+    t.type("mark 次\r")
+    t.wait_start(3)
+    assert t.starts()[2]["account"] == "a"
+    rows = t.rows()
+    assert [r.get("account") for r in events(rows, "start")] == [None, "a", "a"]
+    assert [(r["reason"], r["from"], r["to"]) for r in events(rows, "account")] == [("auth", None, "a")]
+    no_secret(t)
+
+
+def test_relay_start_tells_accounts_needing_relogin(term, accounts):  # noqa: F811
+    """受け入れ条件 5・6: 起動時に refreshToken が空のアカウントを 1 行で知らせ、候補から外す。"""
+    accounts.add("a", util5=10)
+    accounts.add("b", util5=30)
+    oauth = accounts.creds("a")
+    oauth["refreshToken"] = ""
+    accounts.write(accounts.root / "a" / ".credentials.json", {"claudeAiOauth": oauth})
+    t = account_term(term, accounts)
+    t.wait_start(1)
+    assert "アカウント a は再登録が要る。python3 ~/.claude/ndf/relay.py account add a で登録し直す" in t.text
+    assert "アカウント b は再登録が要る" not in t.text
+    assert t.starts()[0]["account"] == "b"
+    assert accounts.account("a")["needs_relogin"] is True

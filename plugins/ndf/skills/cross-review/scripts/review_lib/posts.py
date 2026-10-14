@@ -16,6 +16,7 @@ from typing import Any
 
 import review_lib  # noqa: E402
 import post_queue  # noqa: E402
+import result_posts  # noqa: E402
 from review_lib import github, store  # noqa: E402
 
 
@@ -97,7 +98,25 @@ def _confirm_flushed(pr: int, item: dict[str, Any]) -> None:
     else:
         target[agent]["review_url"] = url
         target[agent]["queued"] = False
+        _record_destinations(pr, st, agent, round_no, item)
     store._save(pr, st)
+
+
+def _record_destinations(pr: int, st: dict[str, Any], agent: Any, round_no: Any, item: dict[str, Any]) -> None:
+    """流して届いたレビューの指摘へ、送れた先（`posted_to`）を書き戻す。
+
+    **積んだときは送れていないため、取り込みは送れた先を書いていない。** 書かないままだと
+    指摘は既定の `inline` と読まれ、総評だけの指摘が振り分け・収束の判定から漏れる。
+    決め方は直接送れたときと同じ（`result_posts._write_destinations`。インラインが 0 件なら
+    すべて総評、そうでなければ指す位置を持つものがインライン）。
+    """
+    inline_count = int((item.get("extra") or {}).get("inline") or 0)
+    note = result_posts._write_destinations(store._payload_path(agent, pr, round_no), inline_count)
+    if note:
+        review_lib.info(f"⚠ {agent}: {note}")
+    for f in st.get("review_findings") or []:
+        if isinstance(f, dict) and f.get("pr") == pr and f.get("round") == round_no and f.get("agent") == agent:
+            f["posted_to"] = "inline" if inline_count and result_posts._can_be_inline(f) else "body"
 
 
 def _auto_flush(pr: int) -> None:

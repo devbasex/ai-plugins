@@ -36,6 +36,7 @@ LAYERS = {
     "review_lib.fix_result": 2,
     "review_lib.participants": 3,
     "review_lib.matching": 4,
+    "review_lib.review_scope": 4,
 }
 COMMANDS_LAYER = 5
 

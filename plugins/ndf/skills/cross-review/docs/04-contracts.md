@@ -51,7 +51,7 @@
     "declared_remaining_open": 0,
     "remaining_open": 0,
     "remaining_reason": null,
-    "verified": true
+    "verified": true, "remaining_body": 0
   },
   "rounds": [
     {
@@ -136,8 +136,8 @@
 
 ### 重要なフィールド
 
-- `host` — 確定したホスト名（`claude` / `codex` / `agy` / `kiro`）。参加者プールに残る
-  （`participants` を持たない古い状態の再開では、変更の前と同じく参加者プールから外して輪番を回す）
+- `rounds[].review_scope` / `rounds[].scope_check` / `rounds[].<席>.read_files` — レビュー範囲と範囲の照合の記録。欄と値は [05-pool-and-convergence.md](05-pool-and-convergence.md) の「範囲の照合」にある
+- `host` — 確定したホスト名（`claude` / `codex` / `agy` / `kiro`）。参加者プールに残る（`participants` を持たない古い状態の再開では、変更の前と同じく参加者プールから外して輪番を回す）
 - `rounds[].reviewer_models.<席>` — そのラウンドのレビューの起動で実際に動いたモデル。
   取り込み（`read-result`）が結果の検証より前に、共通ライブラリの `models.observed_model` で取って書く。
   結果が無くて止まる経路でも残る。`requested` は指定値で、cross-review は `--model` を渡さないため常に `null`。
@@ -268,8 +268,9 @@
 - `auto_review_categories` — 観点を渡した分類の名前の列。プロファイルの分類の名前を含み、`replace_auto_categories` が真なら既定の分類の名前を含まない。`review_kind` は既定の分類から決める
 - `deferred_nits[].waived` — `/ndf:fix` が基準外として見送った指摘の種類。見送りの返信（`reply`）を
   付けて決着したもので、`report` は残 deferred の一覧から外して件数だけを出す
-- `sweep` — 最終スイープ後の検証結果。`remaining_open` は GitHub 側で数え直した実数で、
-  `declared_remaining_open` は結果ファイルの申告値。両者が食い違う場合は実数を採る
+- `sweep` — 最終スイープ後の検証結果。`remaining_open` は GitHub 側で数え直した実数に総評だけの残り（`remaining_body`）を
+  足した値で、`declared_remaining_open` は結果ファイルの申告値。両者が食い違う場合は実数を採る
+- `body_settlements` — 総評だけの指摘の決着の記録（追記だけ。形は [06-evidence.md](06-evidence.md) の「総評だけへ書いた指摘」）
 - `reopens` — ラウンドを足した記録（古い順）。要素は `at`（足した時刻）・`from_final`（足す前の `final`）・
   `base_round`（足した時点の `len(rounds)`）・`ended_at`・`sweep`（足す前の値。無ければ `null`）。鍵が無い状態ファイルは
   足したことが無い（`base_round = 0`）として読む。上限・巻き直し・振動検知は最後の要素の `base_round` より後のラウンドで数える
@@ -361,7 +362,7 @@ launcher が生成するプロンプトに以下を強制している:
 
 | ファイル | 内容 |
 |---|---|
-| `$TMP_DIR/<席>-review-pr<PR>-result.json` | `{event, by_severity}`。担当が書くのはこの 2 つだけ |
+| `$TMP_DIR/<席>-review-pr<PR>-result.json` | `{event, by_severity, read_files}`。担当が書くのはこの 3 つだけ。`read_files`（読んだファイル数）はプロンプトにレビュー範囲が載ったときだけ求める |
 | `$TMP_DIR/<席>-review-pr<PR>-round<R>-payload.json` | `{summary, comments: [{path, line, body, severity, evidence, falsification, suggested_check}, ...]}` |
 
 **`comments[]` が持つのは、その担当が出した指摘の全件である**（#156）。位置を持つ指摘は

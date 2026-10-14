@@ -16,6 +16,7 @@ from review_lib import (  # noqa: E402
     matching,
     participants as participants_mod,
     posts,
+    review_scope,
     store,
 )
 
@@ -238,12 +239,18 @@ def _evaluate_convergence(
     round_passes: bool,
     findings_measurable: bool,
     new_findings: int,
+    blocking_body: int = 0,
 ) -> bool:
     """このラウンドが収束したかを判定する。
 
     **新規の指摘が 0 件なら収束する。** 全員 `APPROVE` は最も止まらない参加者に
     律速される。同じ論点の再提出では止まり、新しい観点が出るあいだは回る。
+
+    **決着していない重大な総評だけの指摘が残る間は収束しない**（#1980）。スレッドを持たないため、
+    全員 `APPROVE` でも修正担当の手に渡らないまま終わる。
     """
+    if blocking_body:
+        return False
     return carried is None and (round_passes or (findings_measurable and new_findings == 0))
 
 
@@ -290,6 +297,38 @@ def _finalize_round_if_converged(
     _finalize_converged_round(pr, st, last, findings_measurable)
 
 
+def _check_scope(last: dict[str, Any], reviewers: list[str], only: str | None) -> dict[str, Any]:
+    """範囲の照合を行い、`scope_check` に書いて `SCOPE_CHECK` / `SCOPE_UNMATCHED` を出す。
+
+    照合は判定の中だけで行い、指摘の取り込みには触らない（設計の I3）。同じラウンドで打ち直すたびに書き直す。
+    """
+    result = review_scope.check_scope(last, reviewers, only)
+    last["scope_check"] = result
+    if not result["checked"]:
+        print(f"SCOPE_CHECK=unchecked:{result['reason']}")
+        return result
+    print("SCOPE_CHECK=checked")
+    print(f"SCOPE_UNMATCHED='{review_scope.unmatched_text(result)}'")
+    for u in result["unmatched"]:
+        if u["reason"] == "too_few":
+            review_lib.info(
+                f"⚠ {u['seat']} は {result['files']} ファイルのうち {u['read_files']} ファイルを読んだと申告した"
+                f"（{result['min_read']} 以上で数える）。この承認を収束に数えない"
+            )
+        else:
+            review_lib.info(f"⚠ {u['seat']} の読んだファイル数を測れない（{u['reason']}）。この承認を収束に数えない")
+    return result
+
+
+def _retry_unmatched_scope(pr: int, st: dict[str, Any], last: dict[str, Any]) -> None:
+    """照合で外れた担当を数えなければ収束したラウンドを、修正を挟まずに次のラウンドへ進める（設計の I5）。"""
+    last["verdict"] = "scope_unmatched"
+    store._save(pr, st)
+    print("SCOPE_RETRY=1")
+    review_lib.info("→ 範囲の照合で外れた承認を除くと収束しない。修正を挟まずに次のラウンドへ進む。")
+    sys.exit(2)
+
+
 def cmd_judge(args: argparse.Namespace) -> None:
     """Step 3 — intent ベース pass 判定。
 
@@ -300,6 +339,10 @@ def cmd_judge(args: argparse.Namespace) -> None:
     code-related の失敗があれば**中断せず**終了コード 2 で修正のラウンドへ回す。
     収束の直前は修正の機会が残っている段であり、そこで中断すると直せる失敗まで
     人手へ戻すことになる。中断は上限のラウンド数・振動の検知・`merge-fix` が受け持つ。
+
+    結果なしの扱いを抜けた後、範囲の照合（#1702）を行う。収束の式が成り立っても、照合で外れた
+    通した担当（読んだファイル数が足りない・測れない）がいれば収束させず、修正を挟まずに次のラウンドへ
+    進める（`scope_unmatched`・`SCOPE_RETRY=1`・終了コード 2）。
 
     Exit code: 0=approved, 2=continue, 7=結果なしのため起動し直す・振り替える,
                8=待ち行列に投稿が残っている, 1=error
@@ -317,6 +360,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
     carried = findings_mod._carried_over_pending(st)
     carried_count = (st.get("carried_over") or {}).get("count", 0)
     new_findings, findings_measurable = matching._new_finding_count(st, pr)
+    blocking_body = len(findings_mod.blocking_body(st))
     pending_posts = posts._pending_posts(pr)
 
     _print_judge_status(
@@ -327,17 +371,24 @@ def cmd_judge(args: argparse.Namespace) -> None:
         carried_count,
         pending_posts,
     )
+    if blocking_body:
+        print(f"BODY_BLOCKING={blocking_body}")
 
     no_result = participants_mod._no_result_agents(last, only, reviewers)
     if no_result:
         _handle_no_result_round(pr, st, last, no_result)
+
+    scope = _check_scope(last, reviewers, only)
 
     converged = _evaluate_convergence(
         carried,
         round_passes,
         findings_measurable,
         new_findings,
+        blocking_body,
     )
+    if converged and scope.get("unmatched"):
+        _retry_unmatched_scope(pr, st, last)
 
     _finalize_round_if_converged(
         pr,
@@ -350,7 +401,9 @@ def cmd_judge(args: argparse.Namespace) -> None:
 
     last["verdict"] = "changes_requested"
     store._save(pr, st)
-    if carried is not None:
+    if blocking_body:
+        review_lib.info(f"→ 決着していない総評だけの指摘が {blocking_body} 件ある。修正へ。")
+    elif carried is not None:
         review_lib.info(f"→ 引き継いだ指摘が {carried_count} 件残っている。修正の工程を 1 度通すまで収束させない。")
     else:
         review_lib.info(
