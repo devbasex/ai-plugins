@@ -1,7 +1,7 @@
 """指摘どうしの照合（位置・近傍・本文）。cross-review と fix が同じ照合を使う。
 
 新しい指摘の数え方・振動の検知（cross-review の `review_lib.matching`）と、総評だけの指摘の
-再提出の照合（`body_findings.pending`）が、この 1 か所の判定を使う。照合を 2 つ持つと、
+再提出の照合（`body_findings.unsettled`）が、この 1 か所の判定を使う。照合を 2 つ持つと、
 片方だけが更新されたときに数え方と収束の判定が食い違う。
 """
 

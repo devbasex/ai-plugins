@@ -138,7 +138,7 @@ def _unrefuted_reason(finding: dict[str, Any]) -> str:
 
 
 def blocking_body(st: dict[str, Any]) -> list[dict[str, Any]]:
-    """収束を妨げる総評だけの指摘（#1980）。決着していない（`body_findings.pending`）もののうち、
+    """収束を妨げる総評だけの指摘（#1980）。決着していない（`body_findings.unsettled`）もののうち、
     `critical` / `major` で、反証で棄却されていないもの。
 
     区分は `_classify_finding` で決め、要素へ書かない（証拠集約を通っていないラウンドの記録を書き換えない）。
@@ -146,7 +146,7 @@ def blocking_body(st: dict[str, Any]) -> list[dict[str, Any]]:
     """
     return [
         f
-        for f in body_findings.pending(st)
+        for f in body_findings.unsettled(st)
         if _SEVERITY_RANK.get(str(f.get("severity")), -1) >= _SEVERITY_RANK["major"] and _classify_finding(f) != "rejected"
     ]
 

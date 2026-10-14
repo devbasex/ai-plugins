@@ -206,7 +206,7 @@ def _record_fix_history(st: dict, normalized: dict[str, Any], pr: int, fix: dict
     # `finding_id` を持つ要素だけが記録され、同じ `finding_id` は重ねない（打ち直しても増えない）。
     if fix is not None:
         places = {k: _normalize_dict_items(fix.get(k)) for k in ("resolved_threads", "deferred", "rejected")}
-        body_findings.settle(st, body_findings.entries(places), round_no, int(st.get("current_pr") or pr), "fix")
+        body_findings.record_settlements(st, body_findings.entries(places), round_no, int(st.get("current_pr") or pr), "fix")
 
 
 # 取り込みの段階（#1340 の I8）。`rounds[-1].fix.merge.stage` に書き進め、打ち直しは済んでいない段階から続ける。

@@ -51,8 +51,7 @@
     "declared_remaining_open": 0,
     "remaining_open": 0,
     "remaining_reason": null,
-    "verified": true,
-    "remaining_body": 0
+    "verified": true, "remaining_body": 0
   },
   "rounds": [
     {
@@ -99,10 +98,6 @@
                       "finding_id": "agy-r1-0", "ran_at": "..."},
      "critiques": [{"agent": "codex", "verdict": "support", "reason": "..."}],
      "classification": "verified_blocking"}
-  ],
-  "body_settlements": [
-    {"finding_id": "agy-r1-0", "decision": "deferred", "reason": "...", "issue": "",
-     "round": 1, "pr": 123, "source": "fix", "recorded_at": "..."}
   ],
   "unmatched_critiques": [],
   "evidence_rounds": [1],
@@ -273,18 +268,9 @@
 - `auto_review_categories` — 観点を渡した分類の名前の列。プロファイルの分類の名前を含み、`replace_auto_categories` が真なら既定の分類の名前を含まない。`review_kind` は既定の分類から決める
 - `deferred_nits[].waived` — `/ndf:fix` が基準外として見送った指摘の種類。見送りの返信（`reply`）を
   付けて決着したもので、`report` は残 deferred の一覧から外して件数だけを出す
-- `sweep` — 最終スイープ後の検証結果。`remaining_open` は GitHub 側で数え直した実数に、決着していない
-  総評だけの指摘の件数（`remaining_body`。常に置く）を足した値で、`declared_remaining_open` は結果ファイルの申告値。
-  両者が食い違う場合は実数を採る
-- `body_settlements` — 総評だけの指摘（`review_findings[]` の `posted_to` が `body`）の決着の記録（#1980）。
-  スレッドを持たないため、決着は GitHub ではなくここが持つ。書くのは `scripts/lib/body_findings.py` の `settle` だけで、
-  `merge-fix`（`source: fix`）と `verify-sweep`（`source: sweep`）が呼ぶ。**追記だけで書き換えず、1 つの `finding_id` の記録は
-  高々 1 件である**（打ち直しても増えない）。`decision` は `fixed` / `deferred` / `waived` / `separate_pr` / `rejected` で、
-  戻り値ファイルの要素の場所（`resolved_threads` は `fixed`、`rejected` は `rejected`、`deferred` は `waived` があれば `waived`・
-  `issue` があれば `separate_pr`・どちらも無ければ `deferred`）から決める。`reason` は見送り・却下の理由の写し（`fixed` は空）、
-  `issue` は `separate_pr` の起票番号、`round` は記録したラウンド、`pr` は記録したときの PR。`review_findings[]` と
-  `finding_id` で結べば、どのラウンドのどの総評だけの指摘がどう振り分けられたかを状態ファイルだけで辿れる。
-  鍵の無い状態ファイルは空の配列として読む
+- `sweep` — 最終スイープ後の検証結果。`remaining_open` は GitHub 側で数え直した実数に総評だけの残り（`remaining_body`）を
+  足した値で、`declared_remaining_open` は結果ファイルの申告値。両者が食い違う場合は実数を採る
+- `body_settlements` — 総評だけの指摘の決着の記録（追記だけ。形は [06-evidence.md](06-evidence.md) の「総評だけへ書いた指摘」）
 - `reopens` — ラウンドを足した記録（古い順）。要素は `at`（足した時刻）・`from_final`（足す前の `final`）・
   `base_round`（足した時点の `len(rounds)`）・`ended_at`・`sweep`（足す前の値。無ければ `null`）。鍵が無い状態ファイルは
   足したことが無い（`base_round = 0`）として読む。上限・巻き直し・振動検知は最後の要素の `base_round` より後のラウンドで数える

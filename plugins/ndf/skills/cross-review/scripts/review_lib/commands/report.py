@@ -110,8 +110,8 @@ def cmd_verify_sweep(args: argparse.Namespace) -> None:
     current_pr = int(st.get("current_pr") or pr)
     # 総評だけの指摘はスレッドを持たないため、スイープの結果の振り分けを決着として記録してから数える（#1980）
     round_no = int(((st.get("rounds") or [{}])[-1]).get("round") or 0)
-    body_findings.settle(st, body_findings.entries(sweep), round_no, current_pr, "sweep")
-    body_left = len(body_findings.pending(st))
+    body_findings.record_settlements(st, body_findings.entries(sweep), round_no, current_pr, "sweep")
+    body_left = len(body_findings.unsettled(st))
     threads = github._fetch_unresolved_threads(str(st.get("repo") or ""), current_pr)
     remaining, verified, reason = _reconcile_sweep_result(sweep, declared, threads)
     remaining += body_left

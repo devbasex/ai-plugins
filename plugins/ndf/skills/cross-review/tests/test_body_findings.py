@@ -6,8 +6,8 @@
 
 | 経路 | 確かめること |
 | --- | --- |
-| `body_findings.pending` | `posted_to` の無い記録・統合済み・決着済み・見送りや却下の再提出を外す |
-| `body_findings.settle` | 置き場所から振り分けを決め、同じ `finding_id` を重ねない |
+| `body_findings.unsettled` | `posted_to` の無い記録・統合済み・決着済み・見送りや却下の再提出を外す |
+| `body_findings.record_settlements` | 置き場所から振り分けを決め、同じ `finding_id` を重ねない |
 | 取り込み（`merge-fix`） | 決着を記録し、まとめの「レビュー本文の指摘への返事」に 1 行ずつ載る。駆動の件数に入る |
 | `judge` | 決着していない重大な総評だけの指摘があれば収束させない |
 | `verify-sweep` | 決着していない総評だけの指摘を残数に足す |
@@ -95,21 +95,21 @@ def _fix_result(st: dict) -> dict:
 
 
 def test_the_pr1973_shape_has_five_pending_body_findings():
-    assert _ids(body_findings.pending(_pr1973())) == [f"codex-r1-{i}" for i in range(5)]
+    assert _ids(body_findings.unsettled(_pr1973())) == [f"codex-r1-{i}" for i in range(5)]
 
 
 def test_a_finding_without_posted_to_is_inline():
     st = _pr1973()
     for f in st["review_findings"]:
         f.pop("posted_to")
-    assert body_findings.pending(st) == []
+    assert body_findings.unsettled(st) == []
 
 
 def test_merged_and_settled_findings_are_not_pending():
     st = _pr1973()
     st["review_findings"][0]["merged_into"] = "kiro-r1-0"
     st["body_settlements"] = [{"finding_id": "codex-r1-1", "decision": "fixed"}]
-    assert _ids(body_findings.pending(st)) == ["codex-r1-2", "codex-r1-3", "codex-r1-4"]
+    assert _ids(body_findings.unsettled(st)) == ["codex-r1-2", "codex-r1-3", "codex-r1-4"]
 
 
 def _resubmitted(st: dict, source: dict) -> dict:
@@ -124,7 +124,7 @@ def test_a_resubmission_of_a_let_go_finding_is_not_pending(decision, pending):
     st = _pr1973()
     _resubmitted(st, st["review_findings"][0])
     st["body_settlements"] = [{"finding_id": f"codex-r1-{i}", "decision": decision if i == 0 else "fixed"} for i in range(5)]
-    assert ("codex-r2-0" in _ids(body_findings.pending(st))) is pending
+    assert ("codex-r2-0" in _ids(body_findings.unsettled(st))) is pending
 
 
 # ---------------- settle ----------------
@@ -142,8 +142,8 @@ def test_settle_maps_the_place_to_the_decision_and_does_not_repeat():
         ],
         "rejected": [_entry(f[4], reason_for_rejection="誤り"), {"finding_id": "nobody-r1-0"}],
     }
-    assert body_findings.settle(st, body_findings.entries(result), 1, PR, "fix") == 5
-    assert body_findings.settle(st, body_findings.entries(result), 2, PR, "sweep") == 0  # I2
+    assert body_findings.record_settlements(st, body_findings.entries(result), 1, PR, "fix") == 5
+    assert body_findings.record_settlements(st, body_findings.entries(result), 2, PR, "sweep") == 0  # I2
     got = {s["finding_id"]: (s["decision"], s["reason"], s["issue"], s["round"], s["source"]) for s in st["body_settlements"]}
     assert got == {
         "codex-r1-0": ("fixed", "", "", 1, "fix"),
@@ -152,7 +152,7 @@ def test_settle_maps_the_place_to_the_decision_and_does_not_repeat():
         "codex-r1-3": ("separate_pr", "別 PR で対応（#2001）", "#2001", 1, "fix"),
         "codex-r1-4": ("rejected", "誤り", "", 1, "fix"),
     }
-    assert body_findings.pending(st) == []
+    assert body_findings.unsettled(st) == []
 
 
 # ---------------- 取り込み（AC4・AC5） ----------------
@@ -201,7 +201,7 @@ def test_the_pr1973_shape_is_counted_after_the_fix(tmp_dir, state_mod):
     st = _pr1973()
     review_lib.commands.merge_fix._merge_fix_records(st, _fix_result(st), PR)
     review_lib.commands.merge_fix._merge_fix_records(st, _fix_result(st), PR)  # 打ち直しても決着は重ねない
-    assert len(st["body_settlements"]) == 5 and body_findings.pending(st) == []
+    assert len(st["body_settlements"]) == 5 and body_findings.unsettled(st) == []
     _write(tmp_dir, st)
     counts = _drive(tmp_dir).counts()
     assert (counts["findings"], counts["fixed"], counts["deferred"], counts["rejected"]) == (5, 3, 1, 1)

@@ -354,8 +354,7 @@ def _build_initial_review_state(
 
 
 def _resolve_pr_and_ownership(pr: object, repo: str, worktree: str, args_worktree: str | None) -> _InitPRContext | None:
-    # 新規 init: プリチェック。
-    # **作成者・head・base は REST の 1 回でまとめて取る。** 項目ごとに `gh pr view` を
+    # 新規 init: プリチェック。**作成者・head・base は REST の 1 回でまとめて取る。** 項目ごとに `gh pr view` を
     # 投げていた分（GraphQL 3 点）と、リポジトリ名の解決（同 1 点）が 0 点になる。
     meta = github._fetch_pr_metadata(pr, repo)
     if meta is None:

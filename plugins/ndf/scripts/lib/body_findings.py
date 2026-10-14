@@ -32,7 +32,7 @@ def read_state(path) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
-def _findings(st: dict[str, Any]) -> list[dict[str, Any]]:
+def _review_findings_of(st: dict[str, Any]) -> list[dict[str, Any]]:
     return [f for f in st.get("review_findings") or [] if isinstance(f, dict)]
 
 
@@ -45,21 +45,21 @@ def is_body(finding: dict[str, Any]) -> bool:
     return (finding.get("posted_to") or "inline") == "body"
 
 
-def _line(finding: dict[str, Any]) -> int | None:
+def _line_number(finding: dict[str, Any]) -> int | None:
     try:
         return int(finding.get("line"))
     except (TypeError, ValueError):
         return None
 
 
-def _same(a: dict[str, Any], b: dict[str, Any]) -> bool:
+def _same_place(a: dict[str, Any], b: dict[str, Any]) -> bool:
     """2 件の指摘が同じ箇所か。照合は新しい指摘の数え方と同じ `finding_match.match_kind`。
 
     行を持たない指摘は位置で比べられないため、同じファイルで本文が一致するときだけ同じとみる。
     """
     path_a, path_b = str(a.get("path") or ""), str(b.get("path") or "")
     body_a, body_b = normalized_body(a.get("body")), normalized_body(b.get("body"))
-    line_a, line_b = _line(a), _line(b)
+    line_a, line_b = _line_number(a), _line_number(b)
     if line_a is None or line_b is None:
         return path_a == path_b and bool(body_a) and body_a == body_b
     return match_kind((path_a, line_a, body_a), [(path_b, line_b, body_b)]) is not None
@@ -72,14 +72,14 @@ def _round(finding: dict[str, Any]) -> int:
         return 0
 
 
-def pending(st: dict[str, Any]) -> list[dict[str, Any]]:
+def unsettled(st: dict[str, Any]) -> list[dict[str, Any]]:
     """決着していない総評だけの指摘を、`review_findings[]` の並びの順で返す。
 
     すべてのラウンドを見る。外すのは、決着の記録を持つもの・証拠集約が統合した（`merged_into`）
     もの・前のラウンドで `fixed` 以外に決着した総評だけの指摘の再提出である。`fixed` に決着した
     指摘と同じ箇所の再提出は外さない（直したはずの指摘が残っている）。
     """
-    findings = _findings(st)
+    findings = _review_findings_of(st)
     by_id = {f.get("finding_id"): f for f in findings}
     settled = {s.get("finding_id"): s for s in _settlements(st)}
     let_go = [by_id[i] for i, s in settled.items() if s.get("decision") != "fixed" and i in by_id]
@@ -87,7 +87,7 @@ def pending(st: dict[str, Any]) -> list[dict[str, Any]]:
     for f in findings:
         if not is_body(f) or f.get("merged_into") or f.get("finding_id") in settled:
             continue
-        if any(_round(prev) < _round(f) and _same(f, prev) for prev in let_go):
+        if any(_round(prev) < _round(f) and _same_place(f, prev) for prev in let_go):
             continue
         out.append(f)
     return out
@@ -98,28 +98,64 @@ def _head_line(s: object, n: int = 100) -> str:
     return text.splitlines()[0][:n] if text else ""
 
 
-def template_entry(finding: dict[str, Any]) -> dict[str, Any]:
-    """修正の振り分けの雛形へ入れる要素。`severity` は担当の値を入れておく（付け直してよい）。"""
-    severity = finding.get("severity")
+def blank_entry(thread_id, comment_id, path, line, body, severity: str = "", finding_id: str | None = None) -> dict[str, Any]:
+    """修正の振り分けの雛形の要素 1 件。`finding_id` は総評だけの指摘にだけ置く（スレッドの要素へ null を出さない）。"""
     return {
-        "thread_id": None,
-        "finding_id": finding.get("finding_id"),
-        "comment_id": None,
-        "path": finding.get("path"),
-        "line": finding.get("line"),
-        "severity": severity if severity in SEVERITIES else "",
+        "thread_id": thread_id,
+        **({"finding_id": finding_id} if finding_id else {}),
+        "comment_id": comment_id,
+        "path": path,
+        "line": line,
+        "severity": severity,
         "category": "",
-        "summary": _head_line(finding.get("body")),
+        "summary": _head_line(body),
         "decision": "",
         "reason": "",
         "mvv_basis": [],
     }
 
 
-def missing(decisions: Iterable[Any], pending_findings: Iterable[dict[str, Any]]) -> list[str]:
-    """`pending` の指摘のうち、振り分け（`decisions[]`）に同じ `finding_id` の要素が無いものの `finding_id`。"""
+def template_entry(finding: dict[str, Any]) -> dict[str, Any]:
+    """総評だけの指摘の雛形の要素。`severity` は担当の値を入れておく（付け直してよい）。"""
+    severity = finding.get("severity")
+    sev = severity if severity in SEVERITIES else ""
+    return blank_entry(None, None, finding.get("path"), finding.get("line"), finding.get("body"), sev, finding.get("finding_id"))
+
+
+def unsorted(decisions: Iterable[Any], unsettled_findings: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """`unsettled` の指摘のうち、振り分け（`decisions[]`）に同じ `finding_id` の要素が無いものを、`finalize` の誤りの形で返す。"""
     present = {e.get("finding_id") for e in decisions if isinstance(e, dict) and e.get("finding_id")}
-    return [str(f.get("finding_id")) for f in pending_findings if f.get("finding_id") not in present]
+    return [
+        {"finding_id": f.get("finding_id"), "result": "missing", "reason": "総評だけの指摘が decisions に無い"}
+        for f in unsettled_findings
+        if f.get("finding_id") not in present
+    ]
+
+
+def unsettled_at(state_path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """環境変数 `CROSS_REVIEW_STATE` の状態ファイルから、決着していない総評だけの指摘と `items` に足す項目を返す。
+
+    状態ファイルを指していなければ `([], [])`（単独で呼んだ `/ndf:fix`）。指しているのに読めなければ
+    `([], [unreadable の項目])` で、呼ぶ側は止めずにスレッドだけで進む（`judge` と `verify-sweep` が数え直す）。
+    """
+    if not state_path:
+        return [], []
+    st = read_state(state_path)
+    if st is None:
+        return [], [{"name": "body-findings", "result": "unreadable", "reason": f"状態ファイルを読めない: {state_path}"}]
+    return unsettled(st), []
+
+
+def context_lines(findings: list[dict[str, Any]]) -> list[str]:
+    """修正担当の文脈のファイルへ載せる節。0 件なら何も足さない。"""
+    if not findings:
+        return []
+    lines = ["", f"## 総評だけの指摘（{len(findings)} 件）", ""]
+    for i, f in enumerate(findings, 1):
+        where = f"{f.get('path')}:{f.get('line')}"
+        lines.append(f"{i}. `{f.get('finding_id')}` round={f.get('round')} [{f.get('agent')}] {f.get('severity')} {where}")
+        lines.append("   " + str(f.get("body") or "").replace("\n", "\n   "))
+    return lines
 
 
 def entries(result: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
@@ -142,7 +178,7 @@ def _decision(place: str, e: dict[str, Any]) -> str:
     return "deferred"
 
 
-def settle(
+def record_settlements(
     st: dict[str, Any],
     items: Iterable[tuple[str, dict[str, Any]]],
     round_no: int,
@@ -155,7 +191,7 @@ def settle(
     `review_findings[]` にあり、決着の記録がまだ無い要素だけを記録する。記録は書き換えない。
     知らない `finding_id` は記録せず、件数を標準エラーへ出す。
     """
-    known = {f.get("finding_id") for f in _findings(st)}
+    known = {f.get("finding_id") for f in _review_findings_of(st)}
     records = st.setdefault("body_settlements", [])
     done = {s.get("finding_id") for s in records if isinstance(s, dict)}
     now = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")

@@ -10,9 +10,8 @@ context   未解決のスレッド・3 種のコメント・CI の状態（失�
           振り分けの雛形（decisions）を書き出す。レビューの重点は、環境変数 `CROSS_REVIEW_STATE` が
           cross-review の状態ファイルを指し `review_criteria` を持てばそれを写し、無ければ `--root`
           （既定はカレントの作業ツリーの根）の `.ndf/review.json` を読む。レビューのプロファイル（#1910）も同じ経路で得て、
-          節に効かせ、振り分けの雛形の `review_profile` へ写す。状態ファイルを指すときは、決着していない総評だけの
-          指摘（`scripts/lib/body_findings.py`）も `thread_id: null` と `finding_id` を持つ要素として雛形へ入れる
-finalize  総評だけの指摘が振り分けに無ければ止まる。振り分けの JSON から件数と by_severity を数え、`cross-review` の `state.py merge-fix`
+          節に効かせ、振り分けの雛形の `review_profile` へ写す。決着していない総評だけの指摘（`lib/body_findings.py`）も雛形へ入れる
+finalize  振り分けの JSON から件数と by_severity を数え、`cross-review` の `state.py merge-fix`
           が読む戻り値ファイル `$TMP_DIR/fix-pr<PR>-result.json` を組む。`waived` は見送りの返信を
           組んで `deferred` へ `resolve: true` で載せ、`fixed` も CI の修正（`ci_fixed`）も無ければ `fix_commit` を捨てる。設計 PR の本文の
           「決めたこと」の節も揃える（`pr-body-decisions.sh sync`）
@@ -32,8 +31,7 @@ remaining 返信と決着の後に未解決のスレッドを数え直し、見�
                     "decision": "fixed|waived|deferred|rejected|separate_pr", "reason": "...",
                     "criterion": 1（当たった基準の番号。任意。waived では持たない）,
                     "waive_kind": "wording"（waived のとき）,
-                    "issue": "#123"（separate_pr のとき）,
-                    "finding_id": "codex-r1-0"（総評だけの指摘のとき。戻り値ファイルの要素へ写す）}]}
+                    "issue": "#123"（separate_pr のとき）, "finding_id": "codex-r1-0"（総評だけの指摘のとき）}]}
 
 振り分けの規則（破れば finalize が止まる）: fixed は critical / major だけ。waived は minor / nit だけで、
 criterion を持たず、waive_kind が見送りの種類のどれか。criterion は指摘の基準の番号のどれかで、3 は review_focus が
@@ -222,26 +220,11 @@ def _root_or_cwd(root_arg) -> Path:
         return Path.cwd()
 
 
-def body_pending(state) -> tuple[list[dict] | None, dict | None]:
-    """cross-review の状態ファイルから、決着していない総評だけの指摘を読む（#1980）。
-
-    状態ファイルを指していなければ `([], None)`（単独で呼んだ `/ndf:fix`）。指しているのに
-    読めなければ `(None, <items の 1 件>)` で、呼ぶ側は止めずに今の振る舞いで進む。
-    """
-    if not state:
-        return [], None
-    st = body_findings.read_state(state)
-    if st is None:
-        return None, {"name": "body-findings", "result": "unreadable", "reason": f"状態ファイルを読めない: {state}"}
-    return body_findings.pending(st), None
-
-
 def cmd_context(a):
     pr = a.pr
     repo = repo_of(a)
     state = os.environ.get("CROSS_REVIEW_STATE")
-    body, body_problem = body_pending(state)
-    body = body or []
+    body, body_problem = body_findings.unsettled_at(state)
     decl = review_criteria.context_decl(state, lambda: _root_or_cwd(a.root), lambda: changed_file_paths(repo, pr))
     focus, profile = decl.focus, decl.profile
     mvv_ref, mvv_block = review_criteria.mvv_context(state, lambda: _root_or_cwd(a.root))
@@ -261,13 +244,7 @@ def cmd_context(a):
     for i, t in enumerate(threads, 1):
         lines.append(f"{i}. `{t['thread_id']}` comment_id={t['comment_id']} {t['path']}:{t['line']} [{t.get('author')}]")
         lines.append("   " + (t["body"].replace("\n", "\n   ")))
-    if body:
-        lines += ["", f"## 総評だけの指摘（{len(body)} 件）", ""]
-        for i, f in enumerate(body, 1):
-            lines.append(
-                f"{i}. `{f.get('finding_id')}` round={f.get('round')} [{f.get('agent')}] {f.get('severity')} {f.get('path')}:{f.get('line')}"
-            )
-            lines.append("   " + str(f.get("body") or "").replace("\n", "\n   "))
+    lines += body_findings.context_lines(body)
     lines += ["", f"## CI の失敗（{len(failed)} 件）", ""]
     lines += [f"- {c.get('name')}: {c.get('state')} {c.get('link') or ''}" for c in failed] or ["（無し）"]
     if log_path:
@@ -288,21 +265,7 @@ def cmd_context(a):
                 "review_focus_status": focus.status,
                 "project_mvv": mvv_ref,
                 **({"review_profile": profile.record()} if profile.status == "declared" else {}),
-                "decisions": [
-                    {
-                        "thread_id": t["thread_id"],
-                        "comment_id": t["comment_id"],
-                        "path": t["path"],
-                        "line": t["line"],
-                        "severity": "",
-                        "category": "",
-                        "summary": head_line(t["body"]),
-                        "decision": "",
-                        "reason": "",
-                        "mvv_basis": [],
-                    }
-                    for t in threads
-                ]
+                "decisions": [body_findings.blank_entry(t["thread_id"], t["comment_id"], t["path"], t["line"], t["body"]) for t in threads]
                 + [body_findings.template_entry(f) for f in body],
             },
             ensure_ascii=False,
@@ -311,24 +274,19 @@ def cmd_context(a):
         encoding="utf-8",
     )
 
-    items = [
+    items = body_problem + [
         {"name": "context", "path": str(ctx)},
         {"name": "decisions", "path": str(dec)},
         {"name": "review-focus", "result": focus.status, "reason": focus.error},
         {"name": "project-mvv", "result": mvv_ref.get("status"), "version": mvv_ref.get("version"), "sha256": mvv_ref.get("sha256")},
     ]
     items += [{"name": c.get("name"), "result": "ci_failed", "state": c.get("state"), "link": c.get("link")} for c in failed]
-    if log_path:
-        items.append({"name": "ci_log", "path": log_path})
-    if body_problem:
-        items.append(body_problem)
+    items += [{"name": "ci_log", "path": log_path}] if log_path else []
     emit(
         result(
             TOOL,
             "ok",
-            f"未解決 {len(threads)} 件"
-            + (f" / 総評だけ {len(body)} 件" if body else "")
-            + f" / コメント {comments_n} 行 / CI {ci_status}（失敗 {len(failed)} 件）",
+            f"未解決 {len(threads)} 件{f' / 総評だけ {len(body)} 件' if body else ''} / コメント {comments_n} 行 / CI {ci_status}（失敗 {len(failed)} 件）",
             items,
             {
                 "pr": pr,
@@ -434,12 +392,10 @@ def profile_of(d: dict) -> review_criteria.Profile:
 
 
 def pick(e: dict, *keys) -> dict:
-    """鍵を写す。`finding_id`（総評だけの指摘）は持つ要素だけに出す（スレッドの要素へ null を出さない）。"""
-    return {k: e.get(k) for k in keys if k != "finding_id" or e.get(k)}
+    return {k: e.get(k) for k in keys if k != "finding_id" or e.get(k)}  # finding_id は総評だけの指摘にだけ出す
 
 
-# 見送り・却下の行へ写す鍵
-ENTRY = ("comment_id", "thread_id", "finding_id", "path", "line", "severity", "category", "summary", "mvv_basis")
+ENTRY = ("comment_id", "thread_id", "finding_id", "path", "line", "severity", "category", "summary", "mvv_basis")  # 見送り・却下へ写す
 
 
 def build_result(pr: int, d: dict, commit: str | None, ci_status: str, failed_names: list[str]) -> dict:
@@ -484,13 +440,8 @@ def cmd_finalize(a):
     if not isinstance(pr, int):
         raise StepError("PR 番号が無い（--pr か JSON の pr）", EXIT_UNREADABLE)
     bad = check_decisions(d["decisions"], focus_names(d), profile_of(d))
-    body, body_problem = body_pending(os.environ.get("CROSS_REVIEW_STATE"))
-    if body:
-        # 総評だけの指摘はスレッドを持たないため、振り分けから消えても GitHub の上では見えない（#1980）
-        bad += [
-            {"finding_id": fid, "result": "missing", "reason": "総評だけの指摘が decisions に無い"}
-            for fid in body_findings.missing(d["decisions"], body)
-        ]
+    body, body_problem = body_findings.unsettled_at(os.environ.get("CROSS_REVIEW_STATE"))
+    bad += body_findings.unsorted(d["decisions"], body)  # スレッドを持たないため、消えても GitHub の上では見えない
     if bad:
         emit(
             result(
@@ -530,7 +481,7 @@ def cmd_finalize(a):
         sync = {"name": "pr-body-decisions", "result": "after_push", "code": None, "reason": f"{commit} を送った後に送る側が揃える"}
     else:
         sync = design_body.sync_decisions(pr, getattr(a, "repo", None), a.sync_script)
-    items = [{"name": "result", "path": str(out)}, sync] + ([dropped] if dropped else []) + ([body_problem] if body_problem else [])
+    items = [{"name": "result", "path": str(out)}, sync] + ([dropped] if dropped else []) + body_problem
     items += [{"name": c.get("name"), "result": "ci_failed", "state": c.get("state")} for c in failed]
     waived = sum(1 for e in res["deferred"] if e.get("waived"))
     metrics = {
