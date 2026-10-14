@@ -14,6 +14,7 @@ from typing import Any
 
 import review_lib  # noqa: E402
 import assignment  # noqa: E402
+import body_findings  # noqa: E402
 import mdtable  # noqa: E402  使う側（state.py）が deps.require("mdtable") を先に呼ぶ
 import run_metrics  # noqa: E402
 from review_lib import github, participants as participants_mod, posts, store  # noqa: E402
@@ -107,13 +108,22 @@ def cmd_verify_sweep(args: argparse.Namespace) -> None:
 
     declared = _as_count(sweep.get("remaining_open"))
     current_pr = int(st.get("current_pr") or pr)
+    # 総評だけの指摘はスレッドを持たないため、スイープの結果の振り分けを決着として記録してから数える（#1980）
+    round_no = int(((st.get("rounds") or [{}])[-1]).get("round") or 0)
+    body_findings.settle(st, body_findings.entries(sweep), round_no, current_pr, "sweep")
+    body_left = len(body_findings.pending(st))
     threads = github._fetch_unresolved_threads(str(st.get("repo") or ""), current_pr)
     remaining, verified, reason = _reconcile_sweep_result(sweep, declared, threads)
-    st["sweep"] = _sweep_record(sweep, declared, remaining, verified, reason)
+    remaining += body_left
+    if body_left and not (sweep.get("remaining_reason") or sweep.get("reason")):
+        reason = f"決着していない総評だけの指摘 {body_left} 件"
+    st["sweep"] = {**_sweep_record(sweep, declared, remaining, verified, reason), "remaining_body": body_left}
     store._save(pr, st)
 
     print(f"REMAINING_OPEN={remaining}")
     print(f"SWEEP_VERIFIED={'1' if verified else '0'}")
+    if body_left:
+        print(f"REMAINING_BODY={body_left}")
     if remaining == 0:
         review_lib.info("✅ 未解決の指摘は残っていません")
         sys.exit(0)

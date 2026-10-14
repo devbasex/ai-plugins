@@ -344,6 +344,7 @@ def _build_initial_review_state(
         "deferred_nits": [],
         "rejected_findings": [],
         "review_findings": [],
+        "body_settlements": [],
         "evidence_rounds": [],
         "verify_commands": list(getattr(args, "verify_command", None) or []),
         "verify_exit_codes": list(getattr(args, "verify_exit_code", None) or []),

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import review_lib  # noqa: E402
+import body_findings  # noqa: E402
 from classifications import COUNTED_CLASSIFICATIONS  # noqa: E402
 from review_lib import github  # noqa: E402
 
@@ -134,6 +135,20 @@ def _unrefuted_reason(finding: dict[str, Any]) -> str:
     あるが支持も否定も無い（`not_supported`）。
     """
     return "not_supported" if finding.get("critiques") else "no_critique"
+
+
+def blocking_body(st: dict[str, Any]) -> list[dict[str, Any]]:
+    """収束を妨げる総評だけの指摘（#1980）。決着していない（`body_findings.pending`）もののうち、
+    `critical` / `major` で、反証で棄却されていないもの。
+
+    区分は `_classify_finding` で決め、要素へ書かない（証拠集約を通っていないラウンドの記録を書き換えない）。
+    `minor` / `nit` は収束を止めず、雛形と最終スイープの残数にだけ入る。
+    """
+    return [
+        f
+        for f in body_findings.pending(st)
+        if _SEVERITY_RANK.get(str(f.get("severity")), -1) >= _SEVERITY_RANK["major"] and _classify_finding(f) != "rejected"
+    ]
 
 
 def _apply_classification(finding: dict[str, Any]) -> str:

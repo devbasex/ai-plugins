@@ -66,6 +66,7 @@ from step_result import (  # noqa: E402
     result,
     run,
 )
+import body_findings  # noqa: E402
 import design_body  # noqa: E402
 import gh_parts  # noqa: E402
 import project_mvv  # noqa: E402
@@ -219,10 +220,26 @@ def _root_or_cwd(root_arg) -> Path:
         return Path.cwd()
 
 
+def body_pending(state) -> tuple[list[dict] | None, dict | None]:
+    """cross-review の状態ファイルから、決着していない総評だけの指摘を読む（#1980）。
+
+    状態ファイルを指していなければ `([], None)`（単独で呼んだ `/ndf:fix`）。指しているのに
+    読めなければ `(None, <items の 1 件>)` で、呼ぶ側は止めずに今の振る舞いで進む。
+    """
+    if not state:
+        return [], None
+    st = body_findings.read_state(state)
+    if st is None:
+        return None, {"name": "body-findings", "result": "unreadable", "reason": f"状態ファイルを読めない: {state}"}
+    return body_findings.pending(st), None
+
+
 def cmd_context(a):
     pr = a.pr
     repo = repo_of(a)
     state = os.environ.get("CROSS_REVIEW_STATE")
+    body, body_problem = body_pending(state)
+    body = body or []
     decl = review_criteria.context_decl(state, lambda: _root_or_cwd(a.root), lambda: changed_file_paths(repo, pr))
     focus, profile = decl.focus, decl.profile
     mvv_ref, mvv_block = review_criteria.mvv_context(state, lambda: _root_or_cwd(a.root))
@@ -242,6 +259,13 @@ def cmd_context(a):
     for i, t in enumerate(threads, 1):
         lines.append(f"{i}. `{t['thread_id']}` comment_id={t['comment_id']} {t['path']}:{t['line']} [{t.get('author')}]")
         lines.append("   " + (t["body"].replace("\n", "\n   ")))
+    if body:
+        lines += ["", f"## 総評だけの指摘（{len(body)} 件）", ""]
+        for i, f in enumerate(body, 1):
+            lines.append(
+                f"{i}. `{f.get('finding_id')}` round={f.get('round')} [{f.get('agent')}] {f.get('severity')} {f.get('path')}:{f.get('line')}"
+            )
+            lines.append("   " + str(f.get("body") or "").replace("\n", "\n   "))
     lines += ["", f"## CI の失敗（{len(failed)} 件）", ""]
     lines += [f"- {c.get('name')}: {c.get('state')} {c.get('link') or ''}" for c in failed] or ["（無し）"]
     if log_path:
@@ -276,7 +300,8 @@ def cmd_context(a):
                         "mvv_basis": [],
                     }
                     for t in threads
-                ],
+                ]
+                + [body_findings.template_entry(f) for f in body],
             },
             ensure_ascii=False,
             indent=1,
@@ -293,11 +318,15 @@ def cmd_context(a):
     items += [{"name": c.get("name"), "result": "ci_failed", "state": c.get("state"), "link": c.get("link")} for c in failed]
     if log_path:
         items.append({"name": "ci_log", "path": log_path})
+    if body_problem:
+        items.append(body_problem)
     emit(
         result(
             TOOL,
             "ok",
-            f"未解決 {len(threads)} 件 / コメント {comments_n} 行 / CI {ci_status}（失敗 {len(failed)} 件）",
+            f"未解決 {len(threads)} 件"
+            + (f" / 総評だけ {len(body)} 件" if body else "")
+            + f" / コメント {comments_n} 行 / CI {ci_status}（失敗 {len(failed)} 件）",
             items,
             {
                 "pr": pr,
@@ -308,6 +337,7 @@ def cmd_context(a):
                 "ci_failed": len(failed),
                 "excluded_sections": len(excluded),
                 "review_focus": focus.status,
+                **({"body_findings": len(body)} if body else {}),
             },
             next=f"{ctx} を読み、{dec} の decision を埋める",
         )
@@ -381,6 +411,7 @@ def check_decisions(decs: list, focus_names=(), profile: review_criteria.Profile
                 {
                     "index": i,
                     "thread_id": e.get("thread_id"),
+                    **({"finding_id": e["finding_id"]} if e.get("finding_id") else {}),
                     "path": e.get("path"),
                     "line": e.get("line"),
                     "result": "invalid",
@@ -401,10 +432,12 @@ def profile_of(d: dict) -> review_criteria.Profile:
 
 
 def pick(e: dict, *keys) -> dict:
-    return {k: e.get(k) for k in keys}
+    """鍵を写す。`finding_id`（総評だけの指摘）は持つ要素だけに出す（スレッドの要素へ null を出さない）。"""
+    return {k: e.get(k) for k in keys if k != "finding_id" or e.get(k)}
 
 
-ENTRY = ("comment_id", "thread_id", "path", "line", "severity", "category", "summary", "mvv_basis")  # 見送り・却下の行へ写す鍵
+# 見送り・却下の行へ写す鍵
+ENTRY = ("comment_id", "thread_id", "finding_id", "path", "line", "severity", "category", "summary", "mvv_basis")
 
 
 def build_result(pr: int, d: dict, commit: str | None, ci_status: str, failed_names: list[str]) -> dict:
@@ -414,7 +447,7 @@ def build_result(pr: int, d: dict, commit: str | None, ci_status: str, failed_na
     by = {s: 0 for s in SEVERITIES}
     for e in fixed:
         by[e["severity"]] += 1
-    resolved = [pick(e, "thread_id", "comment_id", "path", "line", "mvv_basis") for e in fixed]
+    resolved = [pick(e, "thread_id", "finding_id", "comment_id", "path", "line", "mvv_basis") for e in fixed]
     deferred = []
     names = focus_names(d)
     profile = profile_of(d)
@@ -449,6 +482,13 @@ def cmd_finalize(a):
     if not isinstance(pr, int):
         raise StepError("PR 番号が無い（--pr か JSON の pr）", EXIT_UNREADABLE)
     bad = check_decisions(d["decisions"], focus_names(d), profile_of(d))
+    body, body_problem = body_pending(os.environ.get("CROSS_REVIEW_STATE"))
+    if body:
+        # 総評だけの指摘はスレッドを持たないため、振り分けから消えても GitHub の上では見えない（#1980）
+        bad += [
+            {"finding_id": fid, "result": "missing", "reason": "総評だけの指摘が decisions に無い"}
+            for fid in body_findings.missing(d["decisions"], body)
+        ]
     if bad:
         emit(
             result(
@@ -488,7 +528,7 @@ def cmd_finalize(a):
         sync = {"name": "pr-body-decisions", "result": "after_push", "code": None, "reason": f"{commit} を送った後に送る側が揃える"}
     else:
         sync = design_body.sync_decisions(pr, getattr(a, "repo", None), a.sync_script)
-    items = [{"name": "result", "path": str(out)}, sync] + ([dropped] if dropped else [])
+    items = [{"name": "result", "path": str(out)}, sync] + ([dropped] if dropped else []) + ([body_problem] if body_problem else [])
     items += [{"name": c.get("name"), "result": "ci_failed", "state": c.get("state")} for c in failed]
     waived = sum(1 for e in res["deferred"] if e.get("waived"))
     metrics = {
