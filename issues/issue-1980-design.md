@@ -104,7 +104,7 @@ I1・I3・I4 の対象はどれも `pending(st)`（下の「`pending(st)` の規
 | `plugins/ndf/skills/fix/SKILL.md` | 変更 | 雛形の `finding_id` を持つ要素の扱い（消さない・`finding_id` を変えない・重要度の判定は同じ規則） |
 | `plugins/ndf/skills/cross-review/docs/02-fix-and-rotation.md`・`04-contracts.md`・`06-evidence.md` | 変更 | Step 5・Step 7.5・状態ファイルの `body_settlements`・戻り値ファイルの `finding_id`・総評だけへ書いた指摘の行き先 |
 | `docs/glossary/glossary.json`・`docs/glossary.md` | 変更 | 「決着の記録」を足して `glossary.py render` |
-| テスト（`skills/fix/tests/test_fix_steps.py`・`skills/cross-review/tests/test_body_findings.py` ほか） | 新規・変更 | 「テスト設計」の各行 |
+| テスト（`plugins/ndf/skills/fix/tests/test_fix_steps.py`・`plugins/ndf/skills/cross-review/tests/test_body_findings.py` ほか） | 新規・変更 | 「テスト設計」の各行 |
 
 ```mermaid
 flowchart LR
