@@ -296,7 +296,7 @@ def _check_scope(last: dict[str, Any], reviewers: list[str], only: str | None) -
 
     照合は判定の中だけで行い、指摘の取り込みには触らない（設計の I3）。同じラウンドで打ち直すたびに書き直す。
     """
-    result = review_scope.check(last, reviewers, only)
+    result = review_scope.check_scope(last, reviewers, only)
     last["scope_check"] = result
     if not result["checked"]:
         print(f"SCOPE_CHECK=unchecked:{result['reason']}")

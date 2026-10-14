@@ -251,13 +251,13 @@ def test_base_fetched_when_missing_from_worktree(sprint, tmp_path):
     _git(sprint.wt, "push", "-q", "origin", "develop")
     assert subprocess.run(["git", "-C", str(clone), "cat-file", "-e", f"{moved_base}^{{commit}}"], capture_output=True).returncode != 0
 
-    scope = review_lib.review_scope.compute(str(clone), sprint.head, moved_base, "code", 1, [], PR)
+    scope = review_lib.review_scope.compute_scope(str(clone), sprint.head, moved_base, "code", 1, [], PR)
     assert scope["files"] == 16
 
 
 def test_no_head_is_unavailable():
-    assert review_lib.review_scope.compute("/nowhere", None, "a" * 40, "code", 1, [], PR) == {"unavailable": "no_head"}
-    assert review_lib.review_scope.compute("/nowhere", "b" * 40, "", "code", 1, [], PR) == {"unavailable": "no_base"}
+    assert review_lib.review_scope.compute_scope("/nowhere", None, "a" * 40, "code", 1, [], PR) == {"unavailable": "no_head"}
+    assert review_lib.review_scope.compute_scope("/nowhere", "b" * 40, "", "code", 1, [], PR) == {"unavailable": "no_base"}
 
 
 def test_pr_metadata_reads_base_sha():

@@ -323,11 +323,8 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
         if jrc == 0:
             return "done"
         self.must((jrc, ""), "state.py judge", ok=(2,))
-        jv = parse_vars(jout)
-        if jv.get("MODEL_CONFIRMED") == "1":
-            return "round"  # 設計 PR のモデルの段が承認された。修正を挟まずに詳細の段へ進む（#1111）
-        if jv.get("SCOPE_RETRY") == "1":
-            return "round"  # 範囲の照合で外れた承認だけが収束を妨げた。修正するものは無く、次のラウンドで別の席が見る（#1702）
+        if any(parse_vars(jout).get(k) == "1" for k in ("MODEL_CONFIRMED", "SCOPE_RETRY")):  # 設計 PR のモデルの段の承認（#1111）か、範囲の照合で外れた承認だけが収束を妨げた（#1702）
+            return "round"  # どちらも修正を挟まず次のラウンドへ（詳細の段へ / 別の席が見る）
         orc, _ = self.st("check-oscillation", str(self.pr))
         if orc == 4:
             return "done"  # final = oscillation。最終スイープへ

@@ -129,7 +129,7 @@ def _review_scope(
     if head is None:
         scope: dict[str, Any] = {"unavailable": "no_head"}
     else:
-        scope = review_scope.compute(
+        scope = review_scope.compute_scope(
             str(st.get("worktree_path") or ""),
             head.oid,
             head.base_oid,

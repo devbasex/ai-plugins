@@ -1,7 +1,7 @@
 """レビュー範囲と範囲の照合（#1702）。
 
 レビュー範囲は、そのラウンドで担当が見る差分（base と head の SHA の組と、その間の変更ファイル）である。
-`compute` は `start-round` が呼び、`rounds[-1].review_scope` に書く値を返す。`check` は `judge` が呼び、
+`compute_scope` は `start-round` が呼び、`rounds[-1].review_scope` に書く値を返す。`check_scope` は `judge` が呼び、
 通した担当の読んだファイル数（`read_files`）を範囲のファイル数と突き合わせた `scope_check` の値を返す。
 
 どちらも例外や終了コードで止めない。範囲を求められないときは `unavailable` に理由を書いて返し、
@@ -33,7 +33,7 @@ def _has_commit(worktree: str, sha: str) -> bool:
     return proc.git(worktree, "cat-file", "-e", f"{sha}^{{commit}}", check=False).returncode == 0
 
 
-def compute(
+def compute_scope(
     worktree: str,
     head_oid: str | None,
     base_oid: str | None,
@@ -71,7 +71,7 @@ def min_read(files: int) -> int:
     return math.ceil(files * READ_FILES_MIN_RATIO)
 
 
-def check(round_entry: dict[str, Any], reviewers: list[str], only: str | None) -> dict[str, Any]:
+def check_scope(round_entry: dict[str, Any], reviewers: list[str], only: str | None) -> dict[str, Any]:
     """通した担当の読んだファイル数を範囲のファイル数と突き合わせる（副作用なし）。"""
     scope = round_entry.get("review_scope")
     if not isinstance(scope, dict):
