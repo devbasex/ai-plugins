@@ -673,7 +673,9 @@ def _held(accounts, oauth, name="a"):
         ({"accessToken": "t", "refreshToken": "r", "refreshTokenExpiresAt": REFRESH_NOW, "expiresAt": EXPIRED}, False),
         ({"accessToken": "t", "refreshToken": "r", "refreshTokenExpiresAt": REFRESH_PAST, "expiresAt": FRESH}, True),
         ({"accessToken": "t", "refreshToken": "r", "refreshTokenExpiresAt": REFRESH_PAST, "expiresAt": AT_MARGIN}, False),
-        ({"accessToken": "t", "expiresAt": FRESH}, True),
+        # リフレッシュトークンが空なら、アクセストークンが期限内でも外す（#1727 の I3）
+        ({"accessToken": "t", "expiresAt": FRESH}, False),
+        ({"accessToken": "t", "refreshToken": "", "expiresAt": FRESH}, False),
         ({"accessToken": "t", "refreshToken": "", "expiresAt": EXPIRED}, False),
         ({"accessToken": "t"}, False),
         ({"accessToken": "", "refreshToken": "r", "expiresAt": FRESH}, False),
@@ -685,6 +687,23 @@ def test_usable_by_tokens_marks_relogin_only_when_not_usable(accounts, oauth, ex
     _held(accounts, oauth)
     assert ca.usable("a", now=NOW) is expected
     assert accounts.account("a")["needs_relogin"] is (not expected)
+
+
+def _drop_refresh(accounts, name):
+    """`name` の認証ファイルのリフレッシュトークンを空にする（アクセストークンは期限内のまま）。"""
+    oauth = accounts.creds(name)
+    oauth["refreshToken"] = ""
+    accounts.write(accounts.root / name / ".credentials.json", {"claudeAiOauth": oauth})
+
+
+def test_choose_skips_account_without_refresh_token_even_if_access_is_fresh(accounts):
+    """#1727 の受け入れ条件 5: リフレッシュトークンが空なら、期限内でも候補にならず再登録が要るになる。"""
+    accounts.add("a", util5=5.0)
+    accounts.add("b", util5=50.0)
+    _drop_refresh(accounts, "a")
+    assert ca.choose().name == "b"
+    assert accounts.account("a")["needs_relogin"] is True
+    assert accounts.account("b")["needs_relogin"] is False
 
 
 @pytest.mark.parametrize("content", [None, "{broken", "[1]", json.dumps({"claudeAiOauth": "x"})])
