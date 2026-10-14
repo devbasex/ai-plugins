@@ -203,7 +203,7 @@ class Drive:
 - 作業ディレクトリ: {s.get("worktree_path")}（外を触らない）
 - ブランチ: {s.get("head_branch")} / ベース: {s.get("base_branch")}
 - 作業ディレクトリは detached HEAD（PR の head）のままでよい。ブランチへ切り替えず、そこでコミットする。送る（push）のは取り込み
-- 前ラウンドのレビュー（件数はそのラウンドで投稿した数。対象は reviewThreads を数え直して決める）:
+- 前ラウンドのレビュー（件数はそのラウンドで投稿した数。対象は reviewThreads を数え直したものと、`fix-steps.py context` が雛形へ入れる総評だけの指摘（`finding_id` を持つ要素）):
 {reviews}
 - 既存コメントのスナップショット: {self.tmp}/cross-review-pr{self.pr}-existing-comments.txt
 

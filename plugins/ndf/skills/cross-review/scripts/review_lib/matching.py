@@ -4,30 +4,19 @@ from __future__ import annotations
 
 import json
 import pathlib
-import re
 from typing import Any, NamedTuple
 
 import review_lib  # noqa: E402
 from classifications import COUNTED_CLASSIFICATIONS  # noqa: E402
+
+# 照合の正本は `scripts/lib/finding_match.py`（fix と共有する）。ここでは旧い名前で読み込む。
+from finding_match import (  # noqa: E402, F401
+    OSCILLATION_BODY_CHARS,
+    OSCILLATION_NEAR_LINES,
+    match_kind as _finding_match_kind,
+    normalized_body as _normalized_body,
+)
 from review_lib import findings as findings_mod, participants as participants_mod, store  # noqa: E402
-
-
-# 指摘の位置がずれても同じ箇所として数える幅。修正で前後にずれる幅として、同じ処理の
-# 範囲の中の移動を拾い、隣の指摘まで巻き込まない値を採る。**この値の根拠となる実測は
-# まだ無い。** 出力へ内訳を出すのは、実測を集めるためである。
-OSCILLATION_NEAR_LINES = 3
-# 本文を比べる長さ。先頭だけを見るのは、末尾の言い回しの揺れで別物にならないようにするため。
-OSCILLATION_BODY_CHARS = 80
-# 正規化で落とすもの。**文字と数字は言語を問わず残す。** 指摘の本文は日本語で書かれるため、
-# ASCII の英数字だけを残すと本文が空になり、別の指摘どうしが一致してしまう。
-_OSCILLATION_DROP = re.compile(r"[^\w]", re.UNICODE)
-
-
-def _normalized_body(body: object) -> str:
-    """指摘の本文を、行番号・引用符・記号の違いで別物にならない形へ揃える。"""
-    if not isinstance(body, str):
-        return ""
-    return _OSCILLATION_DROP.sub("", body.lower())[:OSCILLATION_BODY_CHARS]
 
 
 def _evidence_completed(st: dict[str, Any], round_no: int) -> bool:
@@ -136,26 +125,6 @@ def _counted_finding_keys(st: dict[str, Any], round_no: int) -> list[tuple[str, 
             continue
         keys.append((path, line, _normalized_body(finding.get("body"))))
     return keys
-
-
-def _finding_match_kind(
-    current_key: tuple[str, int, str],
-    previous_keys: list[tuple[str, int, str]],
-) -> str | None:
-    """前ラウンドの指摘リストに対する現指摘の一致種別を返す。
-
-    同一ファイルに限定した候補全体に対して、完全一致 → 近傍 → 本文の優先順で判定し、
-    "exact" / "near" / "body" / None を返す。
-    """
-    path, line, body = current_key
-    same_file = [q for q in previous_keys if q[0] == path]
-    if any(line == q[1] for q in same_file):
-        return "exact"
-    if any(abs(line - q[1]) <= OSCILLATION_NEAR_LINES for q in same_file):
-        return "near"
-    if body and any(body == q[2] for q in same_file):
-        return "body"
-    return None
 
 
 def _new_finding_count(st: dict[str, Any], pr: int) -> tuple[int, bool]:

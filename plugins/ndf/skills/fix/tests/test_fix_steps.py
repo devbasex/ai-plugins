@@ -857,3 +857,92 @@ def test_context_alone_adds_the_top_level_criteria_and_finalize_accepts_them(env
     d["decisions"][0].pop("waive_kind", None)
     code, _, err = _finalize(env, d)
     assert code == 0, err
+
+
+# --- 総評だけの指摘（#1980） -----------------------------------------------------
+# 入力は PR 1973 のラウンド 1 と同じ形（未解決のスレッド 0 件・CI 成功・本文に major 5 件）。
+# cross-review の側の取り込み・判定・スイープは skills/cross-review/tests/test_body_findings.py が同じ入力で見る。
+
+PR1973 = PLUGIN_ROOT / "skills" / "cross-review" / "tests" / "fixtures" / "pr1973-round1-state.json"
+
+
+@pytest.fixture()
+def pr1973(env, monkeypatch):
+    st = json.loads(env["state"].read_text())
+    st["threads"] = [dict(t, isResolved=True) for t in _threads()]
+    st["checks"] = [{"name": "test", "state": "SUCCESS", "link": ""}]
+    env["state"].write_text(json.dumps(st))
+    cr_state = env["root"] / "cr-state.json"
+    cr_state.write_text(PR1973.read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.setenv("CROSS_REVIEW_STATE", str(cr_state))
+    return cr_state
+
+
+def test_context_puts_every_body_finding_into_the_template(pr1973):
+    code, out, err = run("context", PR, "--repo", "o/r")
+    assert code == 0 and out["status"] == "ok", err
+    assert out["metrics"]["unresolved"] == 0 and out["metrics"]["body_findings"] == 5
+    entries = _context_decisions(out)["decisions"]
+    assert [e["finding_id"] for e in entries] == [f"codex-r1-{i}" for i in range(5)]
+    assert all(e["thread_id"] is None and e["severity"] == "major" and e["decision"] == "" for e in entries)
+    assert (entries[0]["path"], entries[0]["line"]) == ("plugins/ndf/scripts/lib/a.py", 40)
+    assert entries[0]["summary"] == "[major / logic] 差分の外: 退避の分岐が空の配列を返す"
+    text = _context_text(out)
+    assert "## 総評だけの指摘（5 件）" in text and all(f"`codex-r1-{i}`" in text for i in range(5))
+
+
+def test_context_reports_an_unreadable_state_and_continues(env, monkeypatch):
+    monkeypatch.setenv("CROSS_REVIEW_STATE", str(env["root"] / "missing.json"))
+    code, out, _ = run("context", PR, "--repo", "o/r")
+    assert code == 0 and out["status"] == "ok"
+    assert next(i for i in out["items"] if i["name"] == "body-findings")["result"] == "unreadable"
+    assert "body_findings" not in out["metrics"]
+
+
+def test_context_without_body_findings_is_unchanged(env, monkeypatch):
+    cr_state = env["root"] / "cr-state.json"
+    cr_state.write_text(json.dumps({"review_findings": []}), encoding="utf-8")
+    monkeypatch.setenv("CROSS_REVIEW_STATE", str(cr_state))
+    code, out, _ = run("context", PR, "--repo", "o/r")
+    assert code == 0 and "body_findings" not in out["metrics"] and "総評だけ" not in out["summary"]
+    assert not any(i["name"] == "body-findings" for i in out["items"])
+    assert all("finding_id" not in e for e in _context_decisions(out)["decisions"])
+
+
+def _sorted_pr1973(out) -> dict:
+    """雛形の 5 件を fixed 3・deferred 1・rejected 1 に振り分ける。"""
+    d = _context_decisions(out)
+    for e in d["decisions"][:3]:
+        e["decision"] = "fixed"
+    d["decisions"][3].update(decision="deferred", reason="次の版で入れ替える")
+    d["decisions"][4].update(decision="rejected", reason="環境変数は呼び出し元が渡す")
+    d["fix_commit"] = "abc1234"
+    return d
+
+
+@pytest.mark.parametrize("broken", ["empty", "removed"])
+def test_finalize_stops_when_a_body_finding_is_not_sorted(env, pr1973, broken):
+    _, out, _ = run("context", PR, "--repo", "o/r")
+    d = _sorted_pr1973(out)
+    if broken == "empty":
+        d["decisions"][1]["decision"] = ""
+    else:
+        del d["decisions"][1]
+    code, res, _ = _finalize(env, d)
+    assert res["status"] == "stopped" and code != 0
+    bad = next(i for i in res["items"] if i.get("finding_id") == "codex-r1-1")
+    assert bad["result"] == ("invalid" if broken == "empty" else "missing")
+    assert not (env["tmp"] / f"fix-pr{PR}-result.json").exists()
+
+
+def test_finalize_copies_the_finding_id_of_body_findings_only(env, pr1973):
+    _, out, _ = run("context", PR, "--repo", "o/r")
+    d = _sorted_pr1973(out)
+    d["decisions"].insert(0, {**_decisions()["decisions"][0]})  # スレッドの要素
+    code, res, err = _finalize(env, d)
+    assert code == 0 and res["status"] == "ok", err
+    result = json.loads((env["tmp"] / f"fix-pr{PR}-result.json").read_text())
+    assert "finding_id" not in result["resolved_threads"][0]
+    assert [e["finding_id"] for e in result["resolved_threads"][1:]] == ["codex-r1-0", "codex-r1-1", "codex-r1-2"]
+    assert result["deferred"][0]["finding_id"] == "codex-r1-3" and result["rejected"][0]["finding_id"] == "codex-r1-4"
+    assert result["fixed_count"] == 4

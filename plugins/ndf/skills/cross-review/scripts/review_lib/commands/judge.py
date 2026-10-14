@@ -239,12 +239,18 @@ def _evaluate_convergence(
     round_passes: bool,
     findings_measurable: bool,
     new_findings: int,
+    blocking_body: int = 0,
 ) -> bool:
     """このラウンドが収束したかを判定する。
 
     **新規の指摘が 0 件なら収束する。** 全員 `APPROVE` は最も止まらない参加者に
     律速される。同じ論点の再提出では止まり、新しい観点が出るあいだは回る。
+
+    **決着していない重大な総評だけの指摘が残る間は収束しない**（#1980）。スレッドを持たないため、
+    全員 `APPROVE` でも修正担当の手に渡らないまま終わる。
     """
+    if blocking_body:
+        return False
     return carried is None and (round_passes or (findings_measurable and new_findings == 0))
 
 
@@ -354,6 +360,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
     carried = findings_mod._carried_over_pending(st)
     carried_count = (st.get("carried_over") or {}).get("count", 0)
     new_findings, findings_measurable = matching._new_finding_count(st, pr)
+    blocking_body = len(findings_mod.blocking_body(st))
     pending_posts = posts._pending_posts(pr)
 
     _print_judge_status(
@@ -364,6 +371,8 @@ def cmd_judge(args: argparse.Namespace) -> None:
         carried_count,
         pending_posts,
     )
+    if blocking_body:
+        print(f"BODY_BLOCKING={blocking_body}")
 
     no_result = participants_mod._no_result_agents(last, only, reviewers)
     if no_result:
@@ -376,6 +385,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
         round_passes,
         findings_measurable,
         new_findings,
+        blocking_body,
     )
     if converged and scope.get("unmatched"):
         _retry_unmatched_scope(pr, st, last)
@@ -391,7 +401,9 @@ def cmd_judge(args: argparse.Namespace) -> None:
 
     last["verdict"] = "changes_requested"
     store._save(pr, st)
-    if carried is not None:
+    if blocking_body:
+        review_lib.info(f"→ 決着していない総評だけの指摘が {blocking_body} 件ある。修正へ。")
+    elif carried is not None:
         review_lib.info(f"→ 引き継いだ指摘が {carried_count} 件残っている。修正の工程を 1 度通すまで収束させない。")
     else:
         review_lib.info(
