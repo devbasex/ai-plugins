@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -94,3 +95,14 @@ def test_latest_workflow_triggers_and_permissions():
     for job in data["jobs"].values():
         assert job.get("permissions") in (None, {"contents": "read", "issues": "write"})
     assert "secrets." not in LATEST_WORKFLOW.read_text(encoding="utf-8")
+
+
+def test_missing_cli_versions_file_exits_2(tmp_path):
+    # docker を呼ぶ前に、一覧のファイルが無ければ終了コード 2 で止まる
+    result = subprocess.run(
+        ["bash", str(REPO / "scripts" / "runtime-smoke-test.sh"), "--runtime", "claude",
+         "--artifact-dir", str(tmp_path / "artifacts"), "--cli-versions", str(tmp_path / "missing.env")],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 2
+    assert "--cli-versions" in result.stderr
