@@ -4,14 +4,6 @@ set -euo pipefail
 source /workspace/ai-plugins/tests/runtime-smoke/lib/common.sh
 
 cd "$PROJECT_DIR"
-if ! command -v agy >/dev/null 2>&1; then
-  # CLI を取得できない環境では、導入の手順そのものが実行できない。読み飛ばした事実を
-  # 証跡へ残す（Kiro CLI の installer フォールバックと同じ考え方）。
-  echo "agy is not available; skipped the install steps" | tee "$ARTIFACT_DIR/version.log"
-  write_junit agy
-  exit 0
-fi
-
 record_version agy --version
 
 run_step "agy validate ndf" agy plugin validate "$REPO_ROOT/plugins/ndf/dev.agy"

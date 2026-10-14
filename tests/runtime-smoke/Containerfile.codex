@@ -1,3 +1,12 @@
 FROM ai-plugins-runtime-smoke-base
 
-RUN curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh
+# 版は tests/runtime-smoke/cli-versions.env に書き、scripts/runtime-smoke-test.sh が build-arg で渡す。
+# ARG に既定値を持たせない（版の出所を一覧の 1 つにする）。
+ARG CODEX_VERSION
+
+# 入った CLI の --version から取り出した版数が一覧の版数と完全に一致しなければ、像の作成を落とす
+RUN set -eu; \
+  test -n "$CODEX_VERSION"; \
+  npm install -g "@openai/codex@${CODEX_VERSION}"; \
+  actual="$(codex --version | grep -oE '[0-9]+(\.[0-9]+)+' | head -n 1)"; \
+  [ "$actual" = "$CODEX_VERSION" ] || { echo "codex の版が一覧と違う: $actual != $CODEX_VERSION" >&2; exit 1; }
