@@ -2419,7 +2419,7 @@
     {
       "term": "従量の接続",
       "context": "ndf-relay",
-      "meaning": "利用上限の無い、使った分だけ費用が掛かる claude の接続（Bedrock か Anthropic API の API キー）。中身は利用者が宣言し、登録済みアカウントがすべて上限のときだけ使う",
+      "meaning": "利用上限の無い、使った分だけ費用が掛かる claude の接続（Bedrock か Anthropic API の API キー）。中身は利用者が宣言し、登録済みアカウントがすべて上限か認証できないときに使う",
       "source": "",
       "pending_source": "issues/issue-1389-requirements.md"
     },
@@ -3765,6 +3765,19 @@
       "context": "ndf-relay",
       "meaning": "ラッパーの直接の子の応答が承認待ちの文で終わったとき、Stop hook が Stop を 1 度止め、`AskUserQuestion` で出し直すよう伝えること",
       "source": "docs/specifications/ndf-relay-goal-skill-and-prose-wait.md"
+    },
+    {
+      "term": "既定のログイン",
+      "context": "ndf-relay",
+      "meaning": "共有の設定ディレクトリ（${CLAUDE_CONFIG_DIR:-~/.claude}。親から引き継いだ CLAUDE_CONFIG_DIR の指定を含む）のログイン。登録済みアカウントでも従量の接続でもなく、relay の区間のアカウントが None のときに子が親から引き継いで使う",
+      "pending_source": "issues/issue-1727-requirements.md"
+    },
+    {
+      "term": "再登録が要る",
+      "code": "needs_relogin",
+      "context": "ndf-relay",
+      "meaning": "登録の記録の needs_relogin が真の登録済みアカウントの状態。アカウントの切り替えの候補から外れ、relay.py account add で登録し直すまで戻らない",
+      "pending_source": "issues/issue-1727-requirements.md"
     },
     {
       "term": "受け入れ条件の番号",
