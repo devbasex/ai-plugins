@@ -36,7 +36,7 @@ Skill の配布は `plugins/ndf/manifests/` が唯一の基準（数と内訳は
 ## 版ごとの判断の記録
 
 **リリース済み版の判断と理由は確定仕様（[docs/specifications/](docs/specifications/)）が持つ。**
-v10.17.51 までは [docs/ndf-version-decisions.md](docs/ndf-version-decisions.md) にあり、以後は書き足さない。
+v10.17.51 までは [docs/archive/version-decisions/](docs/archive/version-decisions/) にあり、以後は書き足さない。
 変更点は `CHANGELOG.md` が持つ。これらの参照に `@` を付けない（全セッションが毎回読むことになる）。
 
 - `CLAUDE.md` に残すのは現行版で決めたことだけ。リリースした版の段落はその主題の確定仕様へ移す（手順は `release`）

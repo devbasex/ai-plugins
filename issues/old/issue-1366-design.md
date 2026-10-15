@@ -8,7 +8,7 @@
 1. conductor が `development-workflow` の手順 0 で `project-mvv.py check` を打つ。`.ndf/mvv.json` が無いので終了コード 2 と
    「プロジェクト MVV が無い」が出る。LLM も `gh` も呼ばず、何も書かない
 2. `project-mvv.py collect` が材料を集める。コミット 3781 件・課題 573 件で閾値（100 件・20 件）を超えるので履歴モードになり、
-   `git log` の件名・課題の題名と本文・`docs/ndf-version-decisions.md`・`AGENTS.md`・`README.md` から出典つきの材料を
+   `git log` の件名・課題の題名と本文・`docs/archive/version-decisions/`・`AGENTS.md`・`README.md` から出典つきの材料を
    状態ディレクトリの `materials.json` へ書く（git 0.03 秒・`gh issue list` 全件 5.9 秒の実測で、60 秒に収まる）
 3. `project-mvv.py propose` が最小構成の `claude -p` を 1 回呼び、候補 A・B と「利用者に決めてもらう点」を
    `candidates.json` と `candidates.md` へ書く（`issues/mvv-candidates-ai-plugins.md` と同じ形）。`candidates.md` は

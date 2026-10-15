@@ -271,7 +271,7 @@ semver の形（数字 3 つと任意の接尾辞）でなければ終了コー�
 実装で分かれるためである。
 
 このリポジトリの設定は `files` の 3 つ・`CLAUDE.md` から `AGENTS.md` への許可・`CHANGELOG.md` の
-`## [ndf <版>]` の行を読む `released`・`decisions` に `docs/ndf-version-decisions.md`・`pending_marker` に
+`## [ndf <版>]` の行を読む `released`・`decisions` に `docs/archive/version-decisions/`・`pending_marker` に
 `の次の版で`・`budget.bytes` に **24,000** を持つ。現在の最大は `CLAUDE.md` の 19,444 バイトで、
 30,000 では増加の兆しにならない。`$schema` はリリースのタグを打った後に足す（定義ファイルを新設した時点では
 版を固定した URL が解決できない）。
@@ -297,7 +297,7 @@ semver の形（数字 3 つと任意の接尾辞）でなければ終了コー�
 | --- | --- |
 | 指示書チェックの設定 | `.ndf/instructions.json` |
 | 継続的統合のジョブ `instruction-files-check` | `.github/workflows/runtime-plugin-validate.yml`。Pull Request では絞り込まずに起動し、push の絞り込みに `.ndf/**` と `CHANGELOG.md` を含む |
-| 必須のチェック | ruleset `protect main and develop` へ `instruction-files-check` を足した（11 → 12 個）。必須のチェックの数を持つ 3 か所（`docs/versioning-and-distribution.md` の散文とコンソールの例、`docs/ndf-version-decisions.md`）は ruleset へ足すのと同じ時点で直した |
+| 必須のチェック | ruleset `protect main and develop` へ `instruction-files-check` を足した（11 → 12 個）。必須のチェックの数を持つ 3 か所（`docs/versioning-and-distribution.md` の散文とコンソールの例、`docs/archive/version-decisions/`）は ruleset へ足すのと同じ時点で直した |
 | 版が決まる前のマーカーとチェックのコマンド | `CLAUDE.md` の「版ごとの判断の記録」 |
 | リリースの手順 | `docs/versioning-and-distribution.md` の「バージョン更新時の手順」と `release/SKILL.md` の退避の段落 |
 

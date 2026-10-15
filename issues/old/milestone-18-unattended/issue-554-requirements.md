@@ -51,7 +51,7 @@
 | --- | --- |
 | `CLAUDE.md` の行数 | 333（行数の検査は 501 行以上で落とすため**通っていた**） |
 | 行頭が出た版の版数で始まる段落 | **7 個**（`v10.0.0` 〜 `v10.5.1`。当時の最新は `10.9.1`） |
-| 即時読み込みの参照 | `@AGENTS.md` と **`@docs/ndf-version-decisions.md`**（出た版の記録そのものを毎回読ませていた） |
+| 即時読み込みの参照 | `@AGENTS.md` と **`@docs/archive/version-decisions/`**（出た版の記録そのものを毎回読ませていた） |
 
 この 8 件を退避した結果、毎回の読み込みが **19,186 トークン（30.3%）減った**（PR #552 の実測）。
 **同じ状態へ戻ったときに機械が止めるのが、この課題の狙いである。**
@@ -218,9 +218,9 @@
 - [ ] AC79: `.github/workflows/runtime-plugin-validate.yml` に検査のジョブがあり、Pull Request では絞り込まずに起動する
 - [ ] AC80: そのジョブが実装の Pull Request で pass する
 - [ ] AC81: `CLAUDE.md` の「版ごとの判断の記録」に、版が決まる前の書き出しの印と、検査のコマンドが書かれている
-- [ ] AC82: `docs/versioning-and-distribution.md` の「バージョン更新時の手順」に検査のコマンドがある。手順 4 は判断の理由の置き場所を `docs/ndf-version-decisions.md` と書く
-- [ ] AC83: **必須の検査の数を持つ箇所すべて**が、ruleset へ `instruction-files-check` を足すのと**同じ時点で**新しい数になる。対象は `docs/versioning-and-distribution.md` の散文「必須の検査 11 個」とコンソールの例、`docs/ndf-version-decisions.md` の「必須にする検査は job の単位で 11 個ある」の 3 か所である（実装 Pull Request の差分には入れない）
-- [ ] AC84: `CHANGELOG.md` の冒頭が、判断の理由の置き場所を `docs/ndf-version-decisions.md` と書く
+- [ ] AC82: `docs/versioning-and-distribution.md` の「バージョン更新時の手順」に検査のコマンドがある。手順 4 は判断の理由の置き場所を `docs/archive/version-decisions/` と書く
+- [ ] AC83: **必須の検査の数を持つ箇所すべて**が、ruleset へ `instruction-files-check` を足すのと**同じ時点で**新しい数になる。対象は `docs/versioning-and-distribution.md` の散文「必須の検査 11 個」とコンソールの例、`docs/archive/version-decisions/` の「必須にする検査は job の単位で 11 個ある」の 3 か所である（実装 Pull Request の差分には入れない）
+- [ ] AC84: `CHANGELOG.md` の冒頭が、判断の理由の置き場所を `docs/archive/version-decisions/` と書く
 
 ### 退行しないこと
 
