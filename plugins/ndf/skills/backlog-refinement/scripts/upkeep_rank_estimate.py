@@ -10,8 +10,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-OVER_SCALE = "尺度を超える"
-VALUE_KEYS = ("A", "H", "L", "C")
+from estimate_predict import OVER_SCALE, VALUE_KEYS
 
 
 def plain_row() -> dict:
