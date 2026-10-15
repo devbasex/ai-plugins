@@ -82,5 +82,6 @@
 | [ndf-usage-ledger-by-runtime.md](ndf-usage-ledger-by-runtime.md) | NDF が起動した呼び出し（サブエージェント・claude -p・codex・kiro・agy・Jev）をランタイムごとの使用量の帳簿に 1 行ずつ残し、帳簿ごとに集計する（usage_ledger・usage-report.py）。帳簿の置き場と行の形・記録を書く場所・Claude の帳簿の全体の求め方 |
 | [runtime-smoke-cli-versions.md](runtime-smoke-cli-versions.md) | スモークが入れる 4 ランタイムの CLI の版を一覧のファイルに固定し、最新の版は毎日別の workflow で試して落ちたら課題に残す（#1982） |
 | [ndf-relay-auth-failure.md](ndf-relay-auth-failure.md) | ラッパーの認証の失敗（401）をどのログインの形でも同じ経路で扱い、refreshToken が空のアカウントを再登録が要るとして候補から外す仕組みの決定と理由（#1727） |
+| [cross-review-review-scope.md](cross-review-review-scope.md) | cross-review: 担当へレビュー範囲（base・head・ファイル数）を渡し、読んだファイル数が範囲の半分に満たない承認では収束しない（#1702） |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。

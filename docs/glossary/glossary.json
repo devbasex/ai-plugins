@@ -3878,19 +3878,19 @@
       "term": "レビュー範囲",
       "context": "ndf-cross-review",
       "meaning": "そのラウンドで担当が見る差分。base と head の SHA の組と、その間の変更ファイル",
-      "pending_source": "issues/issue-1702-requirements.md"
+      "source": "docs/specifications/cross-review-review-scope.md"
     },
     {
       "term": "読んだファイル数",
       "context": "ndf-cross-review",
       "meaning": "担当が結果ファイルの read_files に書く、レビュー範囲のうち差分を読んだファイルの数。担当の自己申告",
-      "pending_source": "issues/issue-1702-design.md"
+      "source": "docs/specifications/cross-review-review-scope.md"
     },
     {
       "term": "範囲の照合",
       "context": "ndf-cross-review",
       "meaning": "判定で、通した担当の読んだファイル数をレビュー範囲のファイル数と突き合わせ、半分に満たない・測れない担当の「通した」を収束に数えないこと",
-      "pending_source": "issues/issue-1702-design.md"
+      "source": "docs/specifications/cross-review-review-scope.md"
     }
   ]
 }
