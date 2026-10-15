@@ -2,7 +2,7 @@
 
 NDF プラグインの版数の付け方と、正式版・開発版のリリースの手順・実測・一覧を持つ。**この主題の正本である。**
 判断の基準（何を選ぶか）は [AGENTS.md](../AGENTS.md) の「版と配布の方針」にあり、この文書は
-どう動くかとどう確かめるかを扱う。リリース済み版ごとの判断は確定仕様（[specifications/](specifications/)）にある（v10.17.51 までは [ndf-version-decisions.md](ndf-version-decisions.md)）。
+どう動くかとどう確かめるかを扱う。リリース済み版ごとの判断は確定仕様（[specifications/](specifications/)）にある（v10.17.51 までは [archive/version-decisions/](archive/version-decisions/)）。
 
 ## チャネルと ref
 
@@ -335,7 +335,7 @@ CHANGELOG.md を参照する固定の「`## 更新情報`」の節だけを持�
 8. テストを実行
 9. **正式版として `main` を進めた後、リリースタグを打つ**
 
-**すべての版数を機械的に置換しない。** 履歴（`docs/ndf-version-decisions.md`、確定仕様、`CLAUDE.md` の
+**すべての版数を機械的に置換しない。** 履歴（`docs/archive/version-decisions/`、確定仕様、`CLAUDE.md` の
 現行版の段落、`docs/development-history/`）、記録（`issues/`）、意図的に前の版を指す文（取り消しの説明）は
 そのまま残す。現行版を指しているかは文脈で決まる。**チェックが突き合わせるのは、周囲の固定の語で
 位置を決めた記載だけである。** 履歴と記録は最初から走査に入らない。

@@ -4,7 +4,9 @@
 
 | 仕様書 | 内容 |
 |---|---|
-| [issues-derived-specifications.md](issues-derived-specifications.md) | `issues/` 配下の完了済み issue / plan / report 由来仕様の索引 |
+| [mcp-redash-multi-environment.md](mcp-redash-multi-environment.md) | Redash MCP の suffix 付きマルチ環境 plugin |
+| [runtime-plugin-distribution.md](runtime-plugin-distribution.md) | Claude Code / Codex / Kiro 向け plugin 配布 |
+| [runtime-plugin-container-smoke.md](runtime-plugin-container-smoke.md) | runtime 分離 plugin の container smoke test（hooks 定義のチェックを含む） |
 | [ndf-knowledge-and-kiro.md](ndf-knowledge-and-kiro.md) | NDF 知識構造（`AGENTS.md` と版と配布の正本、README の役割）、Serena 分離、Kiro CLI 対応（installer の導入先のチェックを含む） |
 | [ndf-skill-inventory/](ndf-skill-inventory/01-ledger-and-criteria.md) | Skill ごとの利用実績と、維持・統合・削除・発動改善の判定（3 本） |
 | [ndf-design-phase.md](ndf-design-phase.md) | 設計工程を置いた経緯と決定（表から導ける値の数え直し、承認する人が読む欄を雛形に置く理由を含む）と、設計 Pull Request の題を設計文書の H1 から作る契約（`title_doc`・`supervise.py sync-title`）。手順は `design` の SKILL.md と `references/design-template.md` が正 |

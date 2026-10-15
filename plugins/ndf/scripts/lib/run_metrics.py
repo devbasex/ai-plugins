@@ -21,7 +21,7 @@ cross-review / cross-refactoring の 1 回の実行が、何分かかりどう�
 **プロンプト・本文・`detail` を入れない**（決定 7）。`detail` は err.log の抜粋で、
 認証の失敗の行に鍵の一部が出うる。
 
-キーの形は `issues/issue-662-598-537-619-584-583-design-contracts.md` の「実行の要約」にある。
+キーの形は `issues/old/issue-662-598-537-619-584-583-design-contracts.md` の「実行の要約」にある。
 
     run_metrics.py aggregate [--since <日付>] [--until <日付>] [--repo <owner>/<repo>]
                              [--kind <種類>] [--version <版>]

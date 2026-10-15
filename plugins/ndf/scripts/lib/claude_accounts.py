@@ -77,7 +77,7 @@ OLD_LOCK_AGE = 60.0  # 置き場の直下の古い形の排他ファイルを消
 AUTH_FAILED_HOLD = 3600.0  # 認証の失敗の観測を候補から外す秒数（#1576 の決定 13。仮の値）
 LOCK_WAIT = 30.0
 NO_RESET_HOLD = 5 * 3600.0  # リセット時刻の読めない上限の観測を候補から外す秒数
-# 枠の大きさの対応表（`rateLimitTier` → 枠ごとの USD 換算）。根拠は issues/relay-capacity-estimate-2026-09-28.md。
+# 枠の大きさの対応表（`rateLimitTier` → 枠ごとの USD 換算）。根拠は issues/old/relay-capacity-estimate-2026-09-28.md。
 # Max 5x の週の枠は非公式の比（1,100 × 3.5 / 6）による仮の値（#1453 の決定 1）。表に無い tier は宣言だけで決まる
 CAPACITY: dict[str, dict[str, float]] = {
     "default_claude_max_20x": {"five_hour": 210.0, "seven_day": 1100.0},
