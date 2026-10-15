@@ -83,5 +83,6 @@
 | [runtime-smoke-cli-versions.md](runtime-smoke-cli-versions.md) | スモークが入れる 4 ランタイムの CLI の版を一覧のファイルに固定し、最新の版は毎日別の workflow で試して落ちたら課題に残す（#1982） |
 | [ndf-relay-auth-failure.md](ndf-relay-auth-failure.md) | ラッパーの認証の失敗（401）をどのログインの形でも同じ経路で扱い、refreshToken が空のアカウントを再登録が要るとして候補から外す仕組みの決定と理由（#1727） |
 | [cross-review-review-scope.md](cross-review-review-scope.md) | cross-review: 担当へレビュー範囲（base・head・ファイル数）を渡し、読んだファイル数が範囲の半分に満たない承認では収束しない（#1702） |
+| [cross-review-body-findings.md](cross-review-body-findings.md) | cross-review: 総評だけの指摘を修正の雛形へ入れ、決着を状態ファイルに残し、決着するまで収束せず残数と件数に数える（#1980） |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
