@@ -215,3 +215,113 @@ def test_import_progress_is_idempotent(tmp_path):
     table = er.run_table(rows, alive=DEAD)
     assert all(r.outcome is None for r in table.values())
     assert er.issue_actuals(rows, "実装", alive=DEAD)[9].a == 1100
+
+
+def _write_progress(state, lines):
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "progress.jsonl").write_text(
+        "".join((l if isinstance(l, str) else json.dumps(l, ensure_ascii=False)) + "\n" for l in lines),
+        encoding="utf-8",
+    )
+
+
+def test_import_progress_step_row_fields(tmp_path):
+    sv = tmp_path / "sv"
+    sv.mkdir()
+    (sv / "p.json").write_text(json.dumps({"フェーズ": "", "課題": [3, "4", "x", None]}, ensure_ascii=False))
+    _write_progress(
+        sv / "p-state",
+        [
+            {"kind": "step", "at": "2026-10-01T00:00:01+09:00", "step": "before", "type": "work"},
+            "not json",
+            "[1, 2]",
+            {"kind": "run", "from": "a"},
+            {"kind": "run", "at": "2026-10-01T00:00:00+09:00", "from": "s1"},
+            {"kind": "step", "at": "t1", "step": "s1", "type": "run", "exit": 0, "seconds": 5, "cost": 9.0},
+            {"kind": "step", "at": "t2", "step": "s2", "type": "pr", "exit": "0", "seconds": "5"},
+            {"kind": "step", "at": "t3", "step": 7, "exit": 2, "seconds": 1.5, "cost": "1"},
+            {"kind": "step", "at": "t4", "step": "s4", "type": "work", "cost": 2},
+            {"kind": "step", "at": "t5", "step": "", "type": "work"},
+        ],
+    )
+    out = tmp_path / "rec"
+    assert ei.import_supervise_progress(sv, out) == {"added": 1, "skipped": 0}
+    rows = er.read_actuals(out)
+    start = rows[0]
+    rid = er.actual_run_id(str(sv / "p.json"), "2026-10-01T00:00:00+09:00")
+    assert {k: start[k] for k in ("kind", "at", "run", "plan", "issues", "phase", "from", "attempt", "imported")} == {
+        "kind": "run_start",
+        "at": "2026-10-01T00:00:00+09:00",
+        "run": rid,
+        "plan": str(sv / "p.json"),
+        "issues": [3, 4],
+        "phase": None,
+        "from": "s1",
+        "attempt": 1,
+        "imported": True,
+    }
+    steps = [{k: r[k] for k in ("at", "run", "step", "type", "exit", "seconds", "cost_usd", "retry")} for r in rows[1:]]
+    assert steps == [
+        {"at": "t1", "run": rid, "step": "s1", "type": "run", "exit": 0, "seconds": 5, "cost_usd": 0.0, "retry": 0},
+        {"at": "t2", "run": rid, "step": "s2", "type": "pr", "exit": None, "seconds": None, "cost_usd": 0.0, "retry": 0},
+        {"at": "t3", "run": rid, "step": "7", "type": "", "exit": 2, "seconds": 1.5, "cost_usd": None, "retry": 0},
+        {"at": "t4", "run": rid, "step": "s4", "type": "work", "exit": None, "seconds": None, "cost_usd": 2, "retry": 0},
+    ]
+
+
+def test_import_progress_finds_plan_and_skips_other_dirs(tmp_path):
+    sv = tmp_path / "sv"
+    run = {"kind": "run", "at": "2026-10-01T00:00:00+09:00"}
+    # 隣のプランが無ければ中の写し（plan.json）を読む
+    inner = sv / "a" / "q-state"
+    _write_progress(inner, [run])
+    (inner / "plan.json").write_text(json.dumps({"課題": [1]}), encoding="utf-8")
+    # 名前が -state で終わらないディレクトリは見ない
+    _write_progress(sv / "b" / "other", [run])
+    (sv / "b" / "other.json").write_text(json.dumps({"課題": [2]}), encoding="utf-8")
+    # プランが無い・壊れている・dict でない状態ディレクトリは見ない
+    _write_progress(sv / "c" / "none-state", [run])
+    _write_progress(sv / "d" / "bad-state", [run])
+    (sv / "d" / "bad.json").write_text("{", encoding="utf-8")
+    _write_progress(sv / "e" / "list-state", [run])
+    (sv / "e" / "list.json").write_text("[1]", encoding="utf-8")
+    # run の行が無ければ何も足さない
+    _write_progress(sv / "f" / "empty-state", [{"kind": "step", "step": "x"}])
+    (sv / "f" / "empty.json").write_text(json.dumps({"課題": [6]}), encoding="utf-8")
+    out = tmp_path / "rec"
+    assert ei.import_supervise_progress(str(sv), str(out)) == {"added": 1, "skipped": 0}
+    rows = er.read_actuals(out)
+    assert [r["kind"] for r in rows] == ["run_start"]
+    assert rows[0]["plan"] == str(inner / "plan.json") and rows[0]["issues"] == [1]
+    assert rows[0]["from"] is None and rows[0]["phase"] is None
+
+
+def test_import_progress_skips_runs_already_recorded(tmp_path):
+    sv = tmp_path / "sv"
+    sv.mkdir()
+    (sv / "p.json").write_text(json.dumps({"課題": [1]}), encoding="utf-8")
+    first = {"kind": "run", "at": "2026-10-01T00:00:00+09:00"}
+    _write_progress(sv / "p-state", [first])
+    out = tmp_path / "rec"
+    assert ei.import_supervise_progress(sv, out) == {"added": 1, "skipped": 0}
+    _write_progress(
+        sv / "p-state",
+        [first, {"kind": "step", "step": "late"}, {"kind": "run", "at": "2026-10-01T01:00:00+09:00"}, {"kind": "step", "step": "s"}],
+    )
+    assert ei.import_supervise_progress(sv, out) == {"added": 1, "skipped": 1}
+    rows = er.read_actuals(out)
+    assert [(r["kind"], r.get("attempt"), r.get("step")) for r in rows] == [
+        ("run_start", 1, None),
+        ("run_start", 2, None),
+        ("step", None, "s"),
+    ]
+
+
+def test_import_progress_raises_when_append_fails(tmp_path, monkeypatch):
+    sv = tmp_path / "sv"
+    sv.mkdir()
+    (sv / "p.json").write_text(json.dumps({"課題": [1]}), encoding="utf-8")
+    _write_progress(sv / "p-state", [{"kind": "run", "at": "2026-10-01T00:00:00+09:00"}])
+    monkeypatch.setattr(ei, "append_actual", lambda directory, row: "書けない")
+    with pytest.raises(OSError, match="書けない"):
+        ei.import_supervise_progress(sv, tmp_path / "rec")
