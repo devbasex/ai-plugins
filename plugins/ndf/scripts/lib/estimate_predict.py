@@ -110,9 +110,9 @@ def _value(samples: list[tuple[int, float, bool]], provisional, missing_mark: st
         return {"mark": missing_mark, "kind": None, "typical": None, "high": None, "basis": [], "note": note}
     vals = [v for _, v, _ in samples]
     if len(vals) >= P_BREAK:
-        kind, typical, high = "P50/P80", stats.median(vals), stats.quantile(vals, 0.8)
+        kind, typical, high = "P50/P80", stats.median_value(vals), stats.quantile(vals, 0.8)
     else:
-        kind, typical, high = "通常/追加の調査", stats.median(vals), stats.maximum(vals)
+        kind, typical, high = "通常/追加の調査", stats.median_value(vals), stats.maximum(vals)
     basis = [{"issue": i, "value": v, **({"shared": True} if sh else {})} for i, v, sh in samples]
     return {"mark": "実績", "kind": kind, "typical": typical, "high": high, "basis": basis, "note": note}
 
@@ -124,7 +124,7 @@ def size_unit(a_values: list[float], decl: dict) -> float | None:
     xs = sorted(v for v in a_values if v and v > 0)
     if len(xs) < 4:
         return None
-    return stats.median(xs[: math.ceil(len(xs) / 4)])
+    return stats.median_value(xs[: math.ceil(len(xs) / 4)])
 
 
 def to_size(a_seconds: float | None, unit: float | None, scale=SCALE):
@@ -274,7 +274,7 @@ def errors(estimates: list[dict], rows: list[dict], since: str | None = None, al
         items.append({"kind": "pair", "issue": issue, "estimate": e.get("id"), "predicted": predicted, "actual": actual, "ratio": ratio})
     metrics: dict = {"pairs": len(items)}
     for k in ("A", "L", "C"):
-        metrics[f"ratio_median_{k}"] = stats.median([i["ratio"][k] for i in items if i["ratio"][k] is not None])
+        metrics[f"ratio_median_{k}"] = stats.median_value([i["ratio"][k] for i in items if i["ratio"][k] is not None])
     both = [(i["predicted"]["A"], i["actual"]["A"]) for i in items if isinstance(i["predicted"]["A"], (int, float))]
     metrics["rank_correlation_A"] = spearman([p for p, _ in both], [a for _, a in both])
     return items, metrics

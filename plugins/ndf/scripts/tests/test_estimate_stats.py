@@ -25,9 +25,9 @@ def test_recent_keeps_last_window_in_order():
 
 
 def test_median_quantile_maximum():
-    assert st.median([3, 1, 2]) == 2
-    assert st.median([1, 2, 3, 4]) == 2.5
-    assert st.median([]) is None
+    assert st.median_value([3, 1, 2]) == 2
+    assert st.median_value([1, 2, 3, 4]) == 2.5
+    assert st.median_value([]) is None
     # nearest-rank: ceil(q * n) 番目
     assert st.quantile([1, 2, 3, 4, 5], 0.8) == 4
     assert st.quantile([10], 0.8) == 10

@@ -18,7 +18,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -32,7 +31,7 @@ class ArgError(ValueError):
     pass
 
 
-def _items(text: str | None) -> dict:
+def _parse_items(text: str | None) -> dict:
     import estimate_records as er
 
     out = {}
@@ -47,10 +46,10 @@ def _items(text: str | None) -> dict:
     return out
 
 
-def _check_items(items) -> dict:
+def _items_of_object(items) -> dict:
     if not isinstance(items, dict):
         raise ArgError("items はオブジェクトにする")
-    return _items(",".join(f"{k}={v}" for k, v in items.items()))
+    return _parse_items(",".join(f"{k}={v}" for k, v in items.items()))
 
 
 def _provisional(values) -> dict:
@@ -89,7 +88,7 @@ def _request(d: dict):
         raise ArgError("--issue か --task のどちらかが要る")
     if d.get("done") not in er.PHASES:
         raise ArgError(f"--done は {'・'.join(er.PHASES)} のどれか")
-    items = d["items"] if isinstance(d.get("items"), dict) and d.get("_parsed") else _check_items(d.get("items") or {})
+    items = d["items"] if isinstance(d.get("items"), dict) and d.get("_parsed") else _items_of_object(d.get("items") or {})
     prov = d.get("provisional") or {}
     if not isinstance(prov, dict) or any(not isinstance(v, tuple) for v in prov.values()):
         prov = _provisional([f"{k}={v}" for k, v in (prov.items() if isinstance(prov, dict) else [])])
@@ -115,9 +114,9 @@ def _materials(root: Path) -> dict:
 
 
 def _estimate_row(item: dict) -> dict:
-    import estimate_records as er
+    import clock
 
-    at = er.now_iso()
+    at = clock.now_iso()
     key = str(item["issue"]) if item["issue"] is not None else str(item["task"])
     return {
         "at": at,
@@ -152,17 +151,17 @@ def cmd_predict(a, root: Path) -> tuple[dict, int]:
                     "issue": a.issue,
                     "task": a.task,
                     "done": a.done,
-                    "items": _items(a.items),
+                    "items": _parse_items(a.items),
                     "_parsed": True,
                     "like": a.like,
                     "provisional": _provisional(a.provisional),
                 }
             )
         ]
-    decl = er.load_decl(root)
-    rec = er.records_dir(root)
+    decl = er.load_estimate_decl(root)
+    rec = er.estimate_dir(root)
     rows, estimates = er.read_actuals(rec), er.read_estimates(rec)
-    materials = _materials(er.repo_root(root))
+    materials = _materials(er.repo_top(root))
     items = [ep.predict(r, rows, estimates, decl, materials) for r in reqs]
     warnings = []
     if a.save:
@@ -182,27 +181,22 @@ def cmd_human(a, root: Path) -> tuple[dict, int]:
 
     if a.minutes is None or a.minutes <= 0 or not a.issue:
         raise ArgError("human は --issue と正の --minutes が要る")
-    rec = er.records_dir(root)
+    rec = er.estimate_dir(root)
     err = er.append_actual(rec, er.human_row(a.issue, round(a.minutes * 60, 1), a.what))
     if err:
         return result(TOOL + "-human", "stopped", err, [], {}), 1
     return result(TOOL + "-human", "ok", f"人の作業時間 {a.minutes} 分を記録した", [], {"records": str(rec)}), 0
 
 
-def sv_state_home() -> Path:
-    """supervise の状態の置き場所（`supervise_lib.paths.sv_state_home` と同じ順）。"""
-    if os.environ.get("NDF_SV_STATE_DIR"):
-        return Path(os.environ["NDF_SV_STATE_DIR"])
-    base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
-    return Path(base) / "ndf" / "sv"
-
-
 def cmd_import(a, root: Path) -> tuple[dict, int]:
+    import estimate_import
     import estimate_records as er
     from step_result import result
 
-    rec = er.records_dir(root)
-    got = er.import_progress(Path(a.sv_dir) if a.sv_dir else sv_state_home(), rec)
+    rec = er.estimate_dir(root)
+    from supervise_lib.paths import sv_state_home
+
+    got = estimate_import.import_supervise_progress(Path(a.sv_dir) if a.sv_dir else sv_state_home(), rec)
     return result(TOOL + "-import", "ok", f"実行 {got['added']} 件を取り込み、{got['skipped']} 件を重複で飛ばした", [], {**got, "records": str(rec)}), 0
 
 
@@ -211,7 +205,7 @@ def cmd_errors(a, root: Path) -> tuple[dict, int]:
     import estimate_records as er
     from step_result import result
 
-    rec = er.records_dir(root)
+    rec = er.estimate_dir(root)
     items, metrics = ep.errors(er.read_estimates(rec), er.read_actuals(rec), since=a.since)
     return result(TOOL + "-errors", "ok", f"予測と実績の組 {metrics['pairs']} 件", items, metrics), 0
 
@@ -222,7 +216,7 @@ def cmd_actuals(a, root: Path) -> tuple[dict, int]:
 
     if a.done not in er.PHASES:
         raise ArgError(f"--done は {'・'.join(er.PHASES)} のどれか")
-    rec = er.records_dir(root)
+    rec = er.estimate_dir(root)
     got = er.issue_actuals(er.read_actuals(rec), a.done)
     items = [
         {
@@ -243,7 +237,7 @@ def cmd_actuals(a, root: Path) -> tuple[dict, int]:
     return result(TOOL + "-actuals", "ok", f"課題 {len(items)} 件の実績", items, {"records": str(rec)}), 0
 
 
-def parser() -> argparse.ArgumentParser:
+def estimate_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="estimate.py", description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("predict", help="A・H・L・C の見込みと根拠を返す")
@@ -278,7 +272,7 @@ def main(argv: list[str] | None = None) -> None:
     from step_result import emit, result
 
     try:
-        a = parser().parse_args(argv)
+        a = estimate_parser().parse_args(argv)
     except SystemExit as e:
         raise SystemExit(2 if e.code else 0) from None
     root = Path(a.root or Path.cwd()).resolve()

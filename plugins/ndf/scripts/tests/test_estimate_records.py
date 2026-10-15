@@ -11,6 +11,7 @@ import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS / "lib"))
+import estimate_import as ei  # noqa: E402
 import estimate_records as er  # noqa: E402
 import schema  # noqa: E402
 
@@ -26,7 +27,7 @@ def _git(cwd, *args):
 
 def test_records_dir_env_wins(tmp_path, monkeypatch):
     monkeypatch.setenv("NDF_ESTIMATE_DIR", str(tmp_path / "x"))
-    assert er.records_dir(tmp_path) == tmp_path / "x"
+    assert er.estimate_dir(tmp_path) == tmp_path / "x"
 
 
 def test_records_dir_git_common_dir_from_worktree(tmp_path, monkeypatch):
@@ -37,8 +38,8 @@ def test_records_dir_git_common_dir_from_worktree(tmp_path, monkeypatch):
     _git(repo, "-c", "user.email=a@b", "-c", "user.name=a", "commit", "-q", "--allow-empty", "-m", "x")
     _git(repo, "worktree", "add", "-q", str(tmp_path / "wt"))
     want = (repo / ".git" / "ndf" / "estimate").resolve()
-    assert er.records_dir(repo).resolve() == want
-    assert er.records_dir(tmp_path / "wt" ).resolve() == want
+    assert er.estimate_dir(repo).resolve() == want
+    assert er.estimate_dir(tmp_path / "wt" ).resolve() == want
 
 
 def test_records_dir_decl_then_non_git(tmp_path, monkeypatch):
@@ -46,19 +47,19 @@ def test_records_dir_decl_then_non_git(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     plain = tmp_path / "plain"
     plain.mkdir()
-    got = er.records_dir(plain)
+    got = er.estimate_dir(plain)
     assert got.parent == tmp_path / "state" / "ndf" / "estimate"
     assert len(got.name) == 12
     (plain / ".ndf").mkdir()
-    (plain / ".ndf" / "estimate.json").write_text(json.dumps({"records_dir": "rec"}))
-    assert er.records_dir(plain) == plain / "rec"
+    (plain / ".ndf" / "estimate.json").write_text(json.dumps({"estimate_dir": "rec"}))
+    assert er.estimate_dir(plain) == plain / "rec"
 
 
 def test_decl_rejects_unknown_key(tmp_path):
     (tmp_path / ".ndf").mkdir()
     (tmp_path / ".ndf" / "estimate.json").write_text(json.dumps({"nope": 1}))
     with pytest.raises(er.DeclError):
-        er.load_decl(tmp_path)
+        er.load_estimate_decl(tmp_path)
 
 
 # --- 行の形 ---
@@ -177,8 +178,8 @@ def test_import_progress_is_idempotent(tmp_path):
     ]
     (st / "progress.jsonl").write_text("".join(json.dumps(l) + "\n" for l in lines))
     out = tmp_path / "rec"
-    assert er.import_progress(tmp_path / "sv", out) == {"added": 2, "skipped": 0}
-    assert er.import_progress(tmp_path / "sv", out) == {"added": 0, "skipped": 2}
+    assert ei.import_supervise_progress(tmp_path / "sv", out) == {"added": 2, "skipped": 0}
+    assert ei.import_supervise_progress(tmp_path / "sv", out) == {"added": 0, "skipped": 2}
     rows = er.read_actuals(out)
     starts = [r for r in rows if r["kind"] == "run_start"]
     assert all(r["imported"] for r in starts) and [r["attempt"] for r in starts] == [1, 2]

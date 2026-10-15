@@ -138,7 +138,7 @@ def ndf_record(repo: str | None) -> dict | None:
     if not values:
         return None
     return {
-        "seconds": round(stats.median(values), 1),
+        "seconds": round(stats.median_value(values), 1),
         "source": "ndf-record",
         "detail": f"NDF の実行の記録の直近 {len(values)} 件の中央値",
     }

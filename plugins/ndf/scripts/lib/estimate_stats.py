@@ -22,7 +22,7 @@ def recent(values: Sequence, window: int | None = WINDOW) -> list:
     return values[-window:] if window > 0 else []
 
 
-def median(values: Iterable[float]) -> float | None:
+def median_value(values: Iterable[float]) -> float | None:
     """中央値。空なら None。"""
     values = list(values)
     return statistics.median(values) if values else None

@@ -1,6 +1,6 @@
 """見積もりの記録と実績の記録（#1856）。置き場の解決・行の形の検査・追記と読み出し・課題ごとの実績の合計・取り込み。
 
-置き場は `NDF_ESTIMATE_DIR` → `.ndf/estimate.json` の `records_dir` → `<git の共通ディレクトリ>/ndf/estimate` →
+置き場は `NDF_ESTIMATE_DIR` → `.ndf/estimate.json` の `estimate_dir` → `<git の共通ディレクトリ>/ndf/estimate` →
 `$XDG_STATE_HOME/ndf/estimate/<リポジトリの絶対パスの sha256 の先頭 12 文字>`。git の共通ディレクトリは
 `.git` を読んで決め、`git` を起動しない（部品は subprocess を使わない。設計の非機能の条件）。
 
@@ -19,6 +19,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Literal
 
+import clock
 import schema
 
 SCHEMA = 1
@@ -131,7 +132,7 @@ _ACTUAL_SHAPES = {"run_start": RunStart, "step": StepRow, "run_end": RunEnd, "hu
 _RENAMED = {"from": "from_"}
 
 
-def _check(model, row: dict, where: str) -> None:
+def _check_row(model, row: dict, where: str) -> None:
     data = {_RENAMED.get(k, k): v for k, v in row.items() if k not in ("schema", "kind", "at")}
     schema.load_shape(model, data, where=where)
 
@@ -141,12 +142,12 @@ def check_actual(row: dict) -> None:
     kind = row.get("kind")
     if kind not in _ACTUAL_SHAPES:
         raise schema.ShapeError(f"actuals.kind: 次のどれかにする: {', '.join(_ACTUAL_SHAPES)}", [("kind", "知らない種類")])
-    _check(_ACTUAL_SHAPES[kind], row, f"actuals[{kind}]")
+    _check_row(_ACTUAL_SHAPES[kind], row, f"actuals[{kind}]")
 
 
 def check_estimate(row: dict) -> None:
     """見積もりの記録の 1 行の形を検査する（A・H・L・C を足した欄は知らない項目として落ちる。I1）。"""
-    _check(Estimate, row, "estimates")
+    _check_row(Estimate, row, "estimates")
 
 
 # --- 置き場 ---
@@ -184,16 +185,16 @@ def _common_of(gitdir: Path) -> Path:
     return gitdir
 
 
-def repo_root(start: Path | str | None = None) -> Path:
+def repo_top(start: Path | str | None = None) -> Path:
     """リポジトリの根（git でなければ start そのもの）。"""
     start = Path(start or Path.cwd()).resolve()
     got = find_git_dir(start)
     return got[0] if got else start
 
 
-def load_decl(root: Path | str | None = None) -> dict:
+def load_estimate_decl(root: Path | str | None = None) -> dict:
     """`.ndf/estimate.json`（任意）。無ければ {}。知らない鍵・形の違う値は DeclError。"""
-    path = repo_root(root) / DECL
+    path = repo_top(root) / DECL
     if not path.is_file():
         return {}
     try:
@@ -211,17 +212,17 @@ class Decl(schema.Shape):
     min_samples: int | None = None
     size_unit_seconds: float | None = None
     scale: list[int] | None = None
-    records_dir: str | None = None
+    estimate_dir: str | None = None
 
 
-def records_dir(root: Path | str | None = None) -> Path:
+def estimate_dir(root: Path | str | None = None) -> Path:
     """記録の置き場（上の解決の順）。"""
     if os.environ.get("NDF_ESTIMATE_DIR"):
         return Path(os.environ["NDF_ESTIMATE_DIR"])
     start = Path(root or Path.cwd()).resolve()
     got = find_git_dir(start)
     top = got[0] if got else start
-    configured = load_decl(top).get("records_dir")
+    configured = load_estimate_decl(top).get("estimate_dir")
     if configured:
         p = Path(configured)
         return p if p.is_absolute() else top / p
@@ -232,10 +233,6 @@ def records_dir(root: Path | str | None = None) -> Path:
 
 
 # --- 追記と読み出し ---
-
-
-def now_iso() -> str:
-    return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
 def _append(path: Path, row: dict) -> str | None:
@@ -254,19 +251,19 @@ def _append(path: Path, row: dict) -> str | None:
 
 def append_actual(directory: Path | str, row: dict) -> str | None:
     """実績の記録へ 1 行足す。形が違えば ShapeError、書けなければ誤りの文（書けたら None）。"""
-    row = {"schema": SCHEMA, "at": row.get("at") or now_iso(), **{k: v for k, v in row.items() if k not in ("schema", "at")}}
+    row = {"schema": SCHEMA, "at": row.get("at") or clock.now_iso(), **{k: v for k, v in row.items() if k not in ("schema", "at")}}
     check_actual(row)
     return _append(Path(directory) / ACTUALS, row)
 
 
 def append_estimate(directory: Path | str, row: dict) -> str | None:
     """見積もりの記録へ 1 行足す。形が違えば ShapeError、書けなければ誤りの文。"""
-    row = {"schema": SCHEMA, "at": row.get("at") or now_iso(), **{k: v for k, v in row.items() if k not in ("schema", "at")}}
+    row = {"schema": SCHEMA, "at": row.get("at") or clock.now_iso(), **{k: v for k, v in row.items() if k not in ("schema", "at")}}
     check_estimate(row)
     return _append(Path(directory) / ESTIMATES, row)
 
 
-def _read(path: Path) -> list[dict]:
+def _read_rows(path: Path) -> list[dict]:
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
@@ -284,19 +281,19 @@ def _read(path: Path) -> list[dict]:
 
 def read_actuals(directory: Path | str) -> list[dict]:
     """実績の記録の行（`schema` の無い行・壊れた行は読み飛ばす）。無ければ []。"""
-    return _read(Path(directory) / ACTUALS)
+    return _read_rows(Path(directory) / ACTUALS)
 
 
 def read_estimates(directory: Path | str) -> list[dict]:
     """見積もりの記録の行。無ければ []。"""
-    return _read(Path(directory) / ESTIMATES)
+    return _read_rows(Path(directory) / ESTIMATES)
 
 
 def human_row(issues: list[int], seconds: float, what: str | None) -> dict:
     return {"kind": "human", "issues": [int(i) for i in issues], "seconds": float(seconds), "what": what}
 
 
-def run_id(plan: str, started: str) -> str:
+def actual_run_id(plan: str, started: str) -> str:
     return f"{hashlib.sha256(str(plan).encode()).hexdigest()[:12]}-{started}"
 
 
@@ -449,78 +446,3 @@ def issue_actuals(
             acc = out.setdefault(issue, IssueActual(issue))
             acc.h = (acc.h or 0.0) + float(r["seconds"])
     return out
-
-
-# --- 取り込み ---
-
-
-def _plan_of_state(state: Path) -> tuple[str, dict]:
-    """状態ディレクトリ（<名前>-state/）の隣のプラン（<名前>.json）か、中の写し（plan.json）を読む。"""
-    for plan in (state.with_name(state.name[: -len("-state")] + ".json"), state / "plan.json"):
-        try:
-            data = json.loads(plan.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        if isinstance(data, dict):
-            return str(plan), data
-    return "", {}
-
-
-def import_progress(sv_dir: Path | str, directory: Path | str) -> dict:
-    """supervise の状態ディレクトリの下の `progress.jsonl` から `run_start`・`step` の行を作る。
-
-    `run_end` は作らず、`run_start` の `imported` を真にする。`run` の識別子で重複を除く（何度流しても同じ）。"""
-    existing = {r.get("run") for r in read_actuals(directory) if r.get("kind") == "run_start"}
-    added = skipped = 0
-    for progress in sorted(Path(sv_dir).rglob("progress.jsonl")):
-        state = progress.parent
-        if not state.name.endswith("-state"):
-            continue
-        plan, data = _plan_of_state(state)
-        if not plan:
-            continue
-        try:
-            lines = progress.read_text(encoding="utf-8", errors="replace").splitlines()
-        except OSError:
-            continue
-        issues = [int(i) for i in data.get("課題") or [] if isinstance(i, int) or str(i).isdigit()]
-        phase = data.get("フェーズ") or None
-        attempt, cur, buf = 0, None, []
-        batches: list[tuple[dict, list[dict]]] = []
-        for raw in lines:
-            try:
-                d = json.loads(raw)
-            except ValueError:
-                continue
-            if not isinstance(d, dict):
-                continue
-            if d.get("kind") == "run" and d.get("at"):
-                if cur:
-                    batches.append((cur, buf))
-                attempt += 1
-                rid = run_id(plan, d["at"])
-                cur = {"kind": "run_start", "at": d["at"], "run": rid, "plan": plan, "issues": issues, "phase": phase,
-                       "from": d.get("from"), "attempt": attempt, "imported": True}
-                buf = []
-            elif d.get("kind") == "step" and cur and d.get("step"):
-                buf.append(
-                    {"kind": "step", "at": d.get("at"), "run": cur["run"], "step": str(d["step"]), "type": str(d.get("type") or ""),
-                     "exit": d.get("exit") if isinstance(d.get("exit"), int) else None,
-                     "seconds": d.get("seconds") if isinstance(d.get("seconds"), (int, float)) else None,
-                     "cost_usd": d.get("cost") if isinstance(d.get("cost"), (int, float)) and d.get("type") in ("work", "judge") else None,
-                     "retry": 0}
-                )
-        if cur:
-            batches.append((cur, buf))
-        for start, steps in batches:
-            if start["run"] in existing:
-                skipped += 1
-                continue
-            for row in (start, *steps):
-                err = append_actual(directory, row)
-                if err:
-                    raise OSError(err)
-            existing.add(start["run"])
-            added += 1
-    return {"added": added, "skipped": skipped}
-

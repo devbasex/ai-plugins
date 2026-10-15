@@ -122,7 +122,7 @@ def expected_for(seconds: list[float], cfg: SlowConfig, step_expected=None) -> t
     basis = {"samples": len(recent), "factor": cfg.factor, "floor": cfg.floor}
     if len(recent) < cfg.min_samples:
         return float(cfg.default), {"source": "default", **basis, "default": cfg.default}
-    median = round(stats.median(recent), 2)
+    median = round(stats.median_value(recent), 2)
     value = round(median * cfg.factor, 1)
     if value < cfg.floor:
         return float(cfg.floor), {"source": "floor", **basis, "median": median}
