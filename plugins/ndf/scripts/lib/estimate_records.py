@@ -303,7 +303,7 @@ def run_id(plan: str, started: str) -> str:
 # --- 実行の表と課題ごとの合計 ---
 
 
-def _ts(at: str | None) -> float | None:
+def ts(at: str | None) -> float | None:
     try:
         return datetime.fromisoformat(str(at)).timestamp()
     except (TypeError, ValueError):
@@ -407,11 +407,11 @@ def issue_actuals(
     指す実行は課題の数で等分する。L は最初の実行の始まりから完了条件のフェーズの最初の `成功` の終わりまで。
     C は同じ範囲の USD の和。H は `human` の行の秒の和（無ければ None）。"""
     limit = _phase_index(done)
-    since_ts = _ts(since) if since else None
+    since_ts = ts(since) if since else None
     table = run_table(rows, alive)
     out: dict[int, IssueActual] = {}
     for run in table.values():
-        if since_ts is not None and (_ts(run.started) or 0) <= since_ts:
+        if since_ts is not None and (ts(run.started) or 0) <= since_ts:
             continue
         idx = _phase_index(run.phase)
         if limit is not None and idx is not None and idx > limit:
@@ -419,13 +419,13 @@ def issue_actuals(
         for issue in run.issues:
             out.setdefault(issue, IssueActual(issue)).runs.append(run)
     for issue, acc in out.items():
-        acc.runs.sort(key=lambda r: _ts(r.started) or 0)
+        acc.runs.sort(key=lambda r: ts(r.started) or 0)
         ends = [r for r in acc.runs if r.phase == done and r.outcome == "成功"]
         end = ends[0] if ends else None
-        cut = _ts(end.end.get("at")) if end else None
+        cut = ts(end.end.get("at")) if end else None
         if end:
             acc.completed, acc.config, acc.finished = True, end.config, end.end.get("at")
-            acc.runs = [r for r in acc.runs if (_ts(r.started) or 0) <= (cut or 0)]
+            acc.runs = [r for r in acc.runs if (ts(r.started) or 0) <= (cut or 0)]
         for run in acc.runs:
             share = len(run.issues) or 1
             acc.shared |= share > 1
@@ -437,13 +437,13 @@ def issue_actuals(
                 else:
                     acc.cost_unknown = True
         if end and cut is not None and acc.runs:
-            first = _ts(acc.runs[0].started)
+            first = ts(acc.runs[0].started)
             acc.l = round(cut - first, 1) if first is not None else None
         acc.a, acc.c = round(acc.a, 1), round(acc.c, 4)
     for r in rows:
         if r.get("kind") != "human" or not isinstance(r.get("seconds"), (int, float)):
             continue
-        if since_ts is not None and (_ts(r.get("at")) or 0) <= since_ts:
+        if since_ts is not None and (ts(r.get("at")) or 0) <= since_ts:
             continue
         for issue in r.get("issues") or []:
             acc = out.setdefault(issue, IssueActual(issue))
