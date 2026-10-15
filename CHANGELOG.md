@@ -5,7 +5,7 @@
 版の見出しにプラグイン名を含める。** 版が動くのは主に `ndf` と `playwright-kit` で、MCP プラグインは変更があった版だけ載せる。
 
 **ここに書くのは「何が変わったか」である。** 「なぜそう変えたか」と、その版で決めた規約は
-`docs/ndf-version-decisions.md` に、詳細な経緯は `issues/` の記録と Pull Request にある。
+`docs/archive/version-decisions/` に、詳細な経緯は `issues/` の記録と Pull Request にある。
 **開発版（接尾辞の付いた版）は載せない。** `9.8.0` は `9.8.0-dev.1` までしか出ておらず、
 その内容は `10.0.0` で届いている。
 
@@ -1494,7 +1494,7 @@ rm -f .kiro/skills/redash-add .kiro/skills/redash-remove .kiro/skills/redash-lis
   残すと、その内容を全セッションと全サブエージェントが毎回読む
 - `cross-review` の `SKILL.md` から `<worktree-base>` の解決順を `docs/04-contracts.md` へ
   移した（#156）
-- `CLAUDE.md` の v10.0.0〜v10.5.1 の判断を `docs/ndf-version-decisions.md` へ移した（#551）。
+- `CLAUDE.md` の v10.0.0〜v10.5.1 の判断を `docs/archive/version-decisions/` へ移した（#551）。
   `CLAUDE.md` は 333 行 → 79 行。参照から `@` を外し、毎回の読み込みから外した
 - 計画と設計 9 本 2207 行を `docs/specifications/cross-review-evidence-based.md` 464 行の
   確定仕様 1 本へまとめた（#156）

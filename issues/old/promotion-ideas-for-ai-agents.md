@@ -207,7 +207,7 @@ Pull Request、リポジトリ設定の変更がこれに当たる。一度公�
 | --- | --- |
 | 1 つのディレクトリから 4 つのランタイムへ同じ Skill を配る | `plugins/ndf/manifests/`、`docs/versioning-and-distribution.md` |
 | 複数の AI に構造改善を提案・適用・レビューさせて収束させる | `/ndf:cross-refactoring`、実行の要約（#662） |
-| worktree をフックで強制したら何が起きたか | `.ndf/worktree.json`、`docs/ndf-version-decisions.md` |
+| worktree をフックで強制したら何が起きたか | `.ndf/worktree.json`、`docs/archive/version-decisions/` |
 | Skill の利用実績を測って、削る Skill を決めた | `/ndf:skill-stats`、`docs/specifications/ndf-skill-inventory/` |
 | 並列エージェントは何本まで動くか（OOM の実例） | 開発時の記録 |
 

@@ -15,13 +15,13 @@
 | 3 | `CLAUDE.md` の「版ごとの判断の記録」へ、版が決まる前の印と検査のコマンドを書く | AC81 |
 | 4 | `docs/versioning-and-distribution.md` の「バージョン更新時の手順」へ検査を足し、手順 4 の置き場所を直す | AC82 |
 | 5 | `CHANGELOG.md` の冒頭の置き場所を直す | AC84 |
-| 6 | ruleset（`protect main and develop`）の必須の検査へ `instruction-files-check` を入れ、**同じ時点で** **必須の検査の数を持つ 3 か所**（`docs/versioning-and-distribution.md` の散文と断りの文言のコンソールの例、`docs/ndf-version-decisions.md` の記載）を直す | **実装の差分に入らない。** 入れると決まっており（利用者の判断）、実行は実装 Pull Request のマージ後に進行側が行う（AC83） |
+| 6 | ruleset（`protect main and develop`）の必須の検査へ `instruction-files-check` を入れ、**同じ時点で** **必須の検査の数を持つ 3 か所**（`docs/versioning-and-distribution.md` の散文と断りの文言のコンソールの例、`docs/archive/version-decisions/` の記載）を直す | **実装の差分に入らない。** 入れると決まっており（利用者の判断）、実行は実装 Pull Request のマージ後に進行側が行う（AC83） |
 
 **数と ruleset は同じ時点で変える。** 文書が「12 個」と書いて ruleset が 11 個しか求めない状態では、
 `main` へ進めるときの断りの文言と文書が食い違う。**断りの文言は同じ文書へコンソールの例として載り、退避先の文書も同じ数を持つ**ため、3 か所を同時に直す。
 
 **4 と 5 は、規則と逆のことを書いている記載を直す。** どちらも「判断の理由は `CLAUDE.md` に置く」と書いており、
-#551 で決めた置き場所（`docs/ndf-version-decisions.md`）と食い違う。
+#551 で決めた置き場所（`docs/archive/version-decisions/`）と食い違う。
 
 ## 未確認のまま残ること
 

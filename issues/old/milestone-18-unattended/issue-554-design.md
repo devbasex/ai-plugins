@@ -25,8 +25,8 @@ ERROR: [直す] docs/CLAUDE.md:12: @docs/none.md の参照先が無い。参照�
 
 ```console
 $ python3 plugins/ndf/scripts/instructions-check.py --root .   # 宣言があるリポジトリ
-ERROR: [直す] CLAUDE.md:38: v10.0.0 の段落が残っている（最新は 10.9.1）。次の見出しまでを docs/ndf-version-decisions.md へ移す
-ERROR: [直す] CLAUDE.md:36: @docs/ndf-version-decisions.md は許可していない即時読み込み。@ を外すか imports へ理由とともに足す
+ERROR: [直す] CLAUDE.md:38: v10.0.0 の段落が残っている（最新は 10.9.1）。次の見出しまでを docs/archive/version-decisions/ へ移す
+ERROR: [直す] CLAUDE.md:36: @docs/archive/version-decisions/ は許可していない即時読み込み。@ を外すか imports へ理由とともに足す
 ```
 
 **2 つ目は `ai-plugins` の `f56c90d9` で実際に出る形である**（AC78）。
@@ -234,7 +234,7 @@ Pull Request の時点では、版を固定した URL が解決できない（�
   },
   "released": {"source": "changelog", "path": "CHANGELOG.md",
                "pattern": "^## \\[ndf (?P<version>\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?)\\]"},
-  "decisions": "docs/ndf-version-decisions.md",
+  "decisions": "docs/archive/version-decisions/",
   "pending_marker": "の次の版で",
   "budget": {"bytes": 30000}
 }
