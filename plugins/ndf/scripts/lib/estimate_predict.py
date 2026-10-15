@@ -66,8 +66,13 @@ def config_diff(cur: dict, other: dict) -> tuple[list[str], bool]:
 
 def _items_of(estimates: list[dict]) -> dict[int, dict]:
     """課題ごとの最新の見積もりの 6 項目。"""
-    latest = er.latest_estimates([e for e in estimates if isinstance(e.get("items"), dict)])
-    return {k: e["items"] for k, e in latest.items()}
+    out: dict[int, tuple[float, dict]] = {}
+    for e in estimates:
+        if isinstance(e.get("issue"), int) and isinstance(e.get("items"), dict):
+            t = er.ts(e.get("at")) or 0
+            if e["issue"] not in out or out[e["issue"]][0] <= t:
+                out[e["issue"]] = (t, e["items"])
+    return {k: v for k, (_, v) in out.items()}
 
 
 def items_difference(a: dict, b: dict) -> int:
@@ -245,7 +250,16 @@ def errors(estimates: list[dict], rows: list[dict], since: str | None = None, al
     """予測と実績の組ごとの比（実績 ÷ 予測）と、比の中央値・A の順位相関。
 
     組は、課題を指す見積もりのうち、見積もりの後の実行で完了条件のフェーズが成功した課題の最新の見積もり。"""
-    latest = er.latest_estimates(estimates, since=since)
+    since_ts = er.ts(since) if since else None
+    latest: dict[int, dict] = {}
+    for e in estimates:
+        if not isinstance(e.get("issue"), int):
+            continue
+        t = er.ts(e.get("at")) or 0
+        if since_ts is not None and t < since_ts:
+            continue
+        if e["issue"] not in latest or (er.ts(latest[e["issue"]].get("at")) or 0) <= t:
+            latest[e["issue"]] = e
     items = []
     for issue, e in sorted(latest.items()):
         got = er.issue_actuals(rows, e.get("done") or "実装", since=e.get("at"), alive=alive).get(issue)

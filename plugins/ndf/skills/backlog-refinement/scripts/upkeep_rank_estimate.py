@@ -10,12 +10,22 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from estimate_predict import OVER_SCALE, VALUE_KEYS
+OVER_SCALE = "尺度を超える"
+VALUE_KEYS = ("A", "H", "L", "C")
 
 
 def plain_row() -> dict:
     """見積もりの記録が無い課題の行の追加の列。"""
     return {"size_source": "付けた段階", **{k.lower(): None for k in VALUE_KEYS}, "size_basis": []}
+
+
+def _latest(estimates: list[dict], numbers, ts) -> dict[int, dict]:
+    out: dict[int, dict] = {}
+    for e in estimates:
+        n = e.get("issue")
+        if isinstance(n, int) and n in numbers and (n not in out or (ts(out[n].get("at")) or 0) <= (ts(e.get("at")) or 0)):
+            out[n] = e
+    return out
 
 
 def estimate_overlay(root, numbers, scale) -> dict[int, dict]:
@@ -24,7 +34,7 @@ def estimate_overlay(root, numbers, scale) -> dict[int, dict]:
     import estimate_records as er
 
     rec = er.estimate_dir(root)
-    latest = er.latest_estimates(er.read_estimates(rec), numbers=set(numbers))
+    latest = _latest(er.read_estimates(rec), set(numbers), er.ts)
     if not latest:
         return {}
     rows, decl = er.read_actuals(rec), er.load_estimate_decl(root)

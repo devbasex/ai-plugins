@@ -307,22 +307,6 @@ def ts(at: str | None) -> float | None:
         return None
 
 
-def latest_estimates(estimates: list[dict], numbers=None, since: str | None = None) -> dict[int, dict]:
-    """課題ごとの最新の見積もりの行（`at` が同じなら後の行）。`numbers` の課題だけ、`since` より前の行は除く。"""
-    since_ts = ts(since) if since else None
-    out: dict[int, dict] = {}
-    for e in estimates:
-        n = e.get("issue")
-        if not isinstance(n, int) or (numbers is not None and n not in numbers):
-            continue
-        t = ts(e.get("at")) or 0
-        if since_ts is not None and t < since_ts:
-            continue
-        if n not in out or (ts(out[n].get("at")) or 0) <= t:
-            out[n] = e
-    return out
-
-
 def plan_alive(run: "Run") -> bool:
     """プランの状態ディレクトリの `step.pid` の子のどれかが生きていれば真（実行中）。"""
     plan = Path(run.plan or "")
