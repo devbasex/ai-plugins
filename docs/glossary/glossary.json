@@ -3948,7 +3948,7 @@
     {
       "term": "実績の記録",
       "context": "ndf-estimate",
-      "meaning": "supervise の実行ごとに、始まり・ステップの終わり・実行の終わりを追記する行の列。終わり方（成功・承認ゲート・失敗・取り消し）と秒・USD・実行の構成を持ち、終わりの行の無い実行は中断として数える",
+      "meaning": "supervise の実行ごとに、始まり・ステップの終わり・実行の終わりを追記する行の列。終わり方（成功・承認ゲート・失敗・取り消し）と秒・USD・実行の構成を持ち、終わりの行の無い実行は、実行中（`step.pid` が生きている）と取り込んだ実行（`outcome` が `取り込み`）を除いて中断として数える",
       "pending_source": "issues/issue-1856-design.md"
     },
     {
@@ -3966,7 +3966,7 @@
     {
       "term": "尺度を超える",
       "context": "ndf-estimate",
-      "meaning": "A の見込みが Size 1 の基準の、尺度の最大の倍を超えたときの Size の値。最大へ潰さず、分割を検討する印にする",
+      "meaning": "A の見込みと Size 1 の基準との比が、尺度の最大を超えたときの Size の値。最大へ潰さず、分割を検討する印にする",
       "pending_source": "issues/issue-1856-design.md"
     },
     {
