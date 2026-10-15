@@ -3787,14 +3787,14 @@
       "term": "既定のログイン",
       "context": "ndf-relay",
       "meaning": "共有の設定ディレクトリ（${CLAUDE_CONFIG_DIR:-~/.claude}。親から引き継いだ CLAUDE_CONFIG_DIR の指定を含む）のログイン。登録済みアカウントでも従量の接続でもなく、relay の区間のアカウントが None のときに子が親から引き継いで使う",
-      "pending_source": "issues/issue-1727-requirements.md"
+      "source": "docs/specifications/ndf-relay-auth-failure.md"
     },
     {
       "term": "再登録が要る",
       "code": "needs_relogin",
       "context": "ndf-relay",
       "meaning": "登録の記録の needs_relogin が真の登録済みアカウントの状態。アカウントの切り替えの候補から外れ、relay.py account add で登録し直すまで戻らない",
-      "pending_source": "issues/issue-1727-requirements.md"
+      "source": "docs/specifications/ndf-relay-auth-failure.md"
     },
     {
       "term": "受け入れ条件の番号",
