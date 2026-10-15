@@ -10,11 +10,11 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import re
-import statistics
 import subprocess
 import time
 
 import ci_workflows
+import estimate_stats as stats
 import junit
 import repo as repo_id
 import run_metrics
@@ -24,7 +24,6 @@ from .measure_repo import Tree, measured, question, unknown, url_hosts
 CALL_LIMIT = 30.0
 TEST_STEP = re.compile(r"(?<![a-z])test|pytest|phpunit|jest|vitest|rspec", re.I)
 RECORD_NAME = "cross-refactoring-allocation.jsonl"
-RECORD_ROWS = 10
 CANDIDATE_RUNS = 5  # ワークフローごとに代表を探す成功の run の上限（I5。前の頁は取りに行かない）
 
 
@@ -135,11 +134,11 @@ def ndf_record(repo: str | None) -> dict | None:
             continue
         if isinstance(v, (int, float)) and v > 0:
             values.append(float(v))
-    values = values[-RECORD_ROWS:]
+    values = stats.recent(values)
     if not values:
         return None
     return {
-        "seconds": round(statistics.median(values), 1),
+        "seconds": round(stats.median(values), 1),
         "source": "ndf-record",
         "detail": f"NDF の実行の記録の直近 {len(values)} 件の中央値",
     }

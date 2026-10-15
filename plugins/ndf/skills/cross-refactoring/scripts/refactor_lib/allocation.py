@@ -20,6 +20,8 @@ import json
 import pathlib
 from typing import Any, Optional
 
+import estimate_stats as stats
+
 from .items import DEFERRED, REVERTED, implement_shas
 from .phases import phase_seconds
 from .rounds import whole_records
@@ -30,9 +32,9 @@ HISTORY_NAME = "cross-refactoring-allocation.jsonl"
 # 解かずに `parents[]` を数えると Skill のディレクトリへ届かない。
 DEFAULTS_PATH = pathlib.Path(__file__).resolve().parents[2] / "data" / "allocation-defaults.json"
 
-# 種類ごとに遡る行の数。**その種類を含む行**で数えるため、珍しい手法も 10 回分まで
-# 遡れる（設計の「データ構造: 履歴と配分テーブル」）。
-WINDOW = 10
+# 種類ごとに遡る行の数（既定は集計の `estimate_stats.WINDOW`）。**その種類を含む行**で数えるため、珍しい手法も
+# 窓の数だけ遡れる（設計の「データ構造: 履歴と配分テーブル」）。
+WINDOW = stats.WINDOW
 
 # 履歴の行の形の版。形を変えたら上げる。2 で `kind` と着手前のテストの行を足した（#1385）。
 ROW_SCHEMA = 2
@@ -100,11 +102,8 @@ def _per_unit(samples: list[tuple[float, float]]) -> Optional[float]:
 
     件数 0 の行は数えない。0 件の行を窓に入れると、珍しい種類の古い標本が押し出される。
     """
-    usable = [(count, seconds) for count, seconds in samples if count > 0][-WINDOW:]
-    total_count = sum(count for count, _ in usable)
-    if total_count <= 0:
-        return None
-    return sum(seconds for _, seconds in usable) / total_count / 60
+    per_second = stats.ratio_of_sums(stats.recent([(count, seconds) for count, seconds in samples if count > 0], WINDOW))
+    return None if per_second is None else per_second / 60
 
 
 def _kind_samples(rows: list[dict[str, Any]], kind: str) -> list[tuple[float, float]]:
@@ -361,8 +360,7 @@ def scope_seconds(rows: list[dict[str, Any]], strategy: str, locations: list[str
         value = _num(row.get("seconds"))
         if value > 0:
             values.append(value)
-    values = values[-WINDOW:]
-    return max(values) if values else None
+    return stats.maximum(stats.recent(values, WINDOW))
 
 
 def append_row(path: pathlib.Path, row: dict[str, Any]) -> None:
