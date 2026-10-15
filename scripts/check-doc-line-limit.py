@@ -28,9 +28,7 @@ LIMIT = 500
 RECORD_PREFIXES = (
     "issues/",
     "docs/development-history/",
-    "docs/superpowers/",
     "docs/presentations/",
-    "docs/external-reviews/",
 )
 
 # 書式が 1 ファイルであることを前提にする文書。理由を値に書く。
