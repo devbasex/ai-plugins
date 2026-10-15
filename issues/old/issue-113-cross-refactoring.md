@@ -7,7 +7,7 @@ issue #113 に紐づく作業中の文書はこの 1 ファイルだけで、設
 ## 関連リンク
 
 - [7 回目の実機試行の記録](issue-113-cross-refactoring-7th-trial-report.md) — 本計画の実測の出どころ
-- [issue-158-llm-ensemble-for-agentic-development.md](../issue-158-llm-ensemble-for-agentic-development.md) — アンサンブル利用の優位性に関する文献調査と実測
+- [issue-158-llm-ensemble-for-agentic-development.md](issue-158-llm-ensemble-for-agentic-development.md) — アンサンブル利用の優位性に関する文献調査と実測
 - [不具合修正の引継ぎ](issue-113-cross-refactoring-fix-handoff.md) — v8.5.4 時点の状態と編集対象
 - 対象 Skill: `plugins/ndf/skills/cross-refactoring/`
 
@@ -180,7 +180,7 @@ flowchart TD
 提案が出揃ったところで投票フェーズを 1 回置く。ただし**投票の得点を単独の採否基準にはしない。**
 機械的に検証できる証拠を投票より上に置き、投票は証拠で決まらないものの順序付けに使う。
 
-理由は [issue-158-llm-ensemble-for-agentic-development.md](../issue-158-llm-ensemble-for-agentic-development.md)
+理由は [issue-158-llm-ensemble-for-agentic-development.md](issue-158-llm-ensemble-for-agentic-development.md)
 に調べた文献と実測にある。参加者の誤りは相関するため、多数決は少数派の正解を系統的に潰す。
 実測でも、1 者だけが挙げた指摘が振る舞いの変化を捕捉し、項目 1 件を Pull Request から
 外した事例がある。

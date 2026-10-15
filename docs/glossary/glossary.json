@@ -197,19 +197,19 @@
       "deprecated": [
         "待ちの通知"
       ],
-      "pending_source": "issues/issue-821-wait-notify-design.md"
+      "pending_source": "issues/old/issue-821-wait-notify-design.md"
     },
     {
       "term": "回答待ち",
       "context": "ndf-notification",
       "meaning": "利用者に問いへの答え（選択・情報・指示）を求めている待ち",
-      "pending_source": "issues/issue-821-wait-notify-design.md"
+      "pending_source": "issues/old/issue-821-wait-notify-design.md"
     },
     {
       "term": "承認待ち",
       "context": "ndf-notification",
       "meaning": "利用者に操作の許可（ツールの実行・プラン・マージ・リリースなど）を求めている待ち",
-      "pending_source": "issues/issue-821-wait-notify-design.md"
+      "pending_source": "issues/old/issue-821-wait-notify-design.md"
     },
     {
       "term": "待ちのキー",
@@ -218,7 +218,7 @@
       "deprecated": [
         "待ちの鍵"
       ],
-      "pending_source": "issues/issue-821-wait-notify-design.md"
+      "pending_source": "issues/old/issue-821-wait-notify-design.md"
     },
     {
       "term": "復帰先",
@@ -227,7 +227,7 @@
       "deprecated": [
         "戻り先"
       ],
-      "pending_source": "issues/issue-821-wait-notify-design.md"
+      "pending_source": "issues/old/issue-821-wait-notify-design.md"
     },
     {
       "term": "パイプライン",
@@ -290,7 +290,7 @@
         "越えない線"
       ],
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
-      "pending_source": "issues/issue-1366-design.md"
+      "pending_source": "issues/old/issue-1366-design.md"
     },
     {
       "term": "実行条件",
@@ -315,7 +315,7 @@
       "code": "check_log",
       "context": "ndf-workflow",
       "meaning": "check-trigger.py が検査の事象（eval・check・escape）を 1 行ずつ追記する jsonl（checks/<owner>__<repo>.jsonl）。トリガーの判定と stats が読む",
-      "pending_source": "issues/issue-1316-requirements.md"
+      "pending_source": "issues/old/issue-1316-requirements.md"
     },
     {
       "term": "重点領域",
@@ -404,7 +404,7 @@
       "term": "導入の確認",
       "context": "ndf-workflow",
       "meaning": "`.ndf/pace.json` の `<節>.verify` に書かれたコマンドを、ベースブランチの先頭で走らせること。pace: fast / auto で、経路 promote では承認ゲート 2 の前に、経路 merge だけのときは検査の後に走り、終了コードを承認資料へ載せ、出力は所有者だけが読めるログへ分ける",
-      "pending_source": "issues/issue-1457-design.md"
+      "pending_source": "issues/old/issue-1457-design.md"
     },
     {
       "term": "リリース完了の確認",
@@ -728,20 +728,20 @@
       "term": "suite の種別",
       "context": "ndf-workflow",
       "meaning": "テストの宣言（.ndf/project.json の test.suites[]）の 1 件がテスト（test）か静的解析（lint。整形の検査を含む）か。キーは kind。書かなければ test",
-      "pending_source": "issues/issue-1483-requirements.md",
+      "pending_source": "issues/old/issue-1483-requirements.md",
       "code": "kind"
     },
     {
       "term": "起動の失敗",
       "context": "ndf-workflow",
       "meaning": "テストのコマンドのプロセスを起動できない、またはシェルが終了コード 126 / 127 を返したこと。テストが落ちたこととは別に扱う",
-      "pending_source": "issues/issue-1483-requirements.md"
+      "pending_source": "issues/old/issue-1483-requirements.md"
     },
     {
       "term": "変更したファイル",
       "context": "ndf-cross-refactoring",
       "meaning": "判定の起点から変わったファイルのうち、worktree に残るもの。起点は判定ごとに決まる。項目の範囲テストではその項目のコミット（実装と修正）、最終ゲートでは着手前の HEAD、`test-run.py whole` では merge-base である。そのうち静的解析の suite の `paths` に当たるものが、その suite の範囲になる",
-      "pending_source": "issues/issue-1483-design.md"
+      "pending_source": "issues/old/issue-1483-design.md"
     },
     {
       "term": "危険フラグ",
@@ -758,7 +758,7 @@
       "deprecated": [
         "元からの失敗"
       ],
-      "pending_source": "issues/issue-1334-design.md"
+      "pending_source": "issues/old/issue-1334-design.md"
     },
     {
       "term": "指摘",
@@ -1820,100 +1820,100 @@
       "context": "ndf-workflow",
       "meaning": "Mission / Vision / Value。プロジェクト MVV とスプリント MVV の 2 層があり、下位は上位の範囲で具体化する",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
-      "pending_source": "issues/issue-1366-design.md"
+      "pending_source": "issues/old/issue-1366-design.md"
     },
     {
       "term": "MVV 判定",
       "context": "ndf-workflow",
       "meaning": "承認ゲートのエビデンスが NDF の共通原則・プロジェクト MVV・スプリント MVV に従うかの判定。auto と fast では「従う」でレッドラインが無いときだけ承認ゲートを省き、記録を残す。normal では助言の MVV 判定として承認資料に載せ、承認は人が行う",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
-      "pending_source": "issues/issue-1400-design.md"
+      "pending_source": "issues/old/issue-1400-design.md"
     },
     {
       "term": "助言の MVV 判定",
       "context": "ndf-workflow",
       "meaning": "承認ゲートの記録（by: mvv）は書かないが、mvv-gate.jsonl へ判定の行（pace 付き）を書き、判定・理由・根拠の項目を承認資料へ載せる MVV 判定（mvv-gate.py check --advise）。normal の承認ゲートの前に走り、承認するのは人である",
       "source": "plugins/ndf/skills/development-workflow/references/pace.md",
-      "pending_source": "issues/issue-1400-design.md"
+      "pending_source": "issues/old/issue-1400-design.md"
     },
     {
       "term": "上位の原則",
       "context": "ndf-workflow",
       "meaning": "「人を守り、人の発展を支える」。NDF の共通原則の最上位の 1 文",
-      "pending_source": "issues/issue-1366-requirements.md"
+      "pending_source": "issues/old/issue-1366-requirements.md"
     },
     {
       "term": "プロジェクト MVV",
       "context": "ndf-workflow",
       "meaning": "プロジェクト全体の Mission / Vision / Value と固有の必ず承認が要る操作（`P<番号>`）。`.ndf/` に宣言し、利用者が承認する。判断の基準の上位",
-      "pending_source": "issues/issue-1366-design.md"
+      "pending_source": "issues/old/issue-1366-design.md"
     },
     {
       "term": "MVV の版",
       "context": "ndf-workflow",
       "meaning": "プロジェクト MVV の承認のたびに 1 ずつ上がる番号。改訂の理由と前の版との差分を伴う",
-      "pending_source": "issues/issue-1366-requirements.md"
+      "pending_source": "issues/old/issue-1366-requirements.md"
     },
     {
       "term": "MVV の改訂",
       "context": "ndf-workflow",
       "meaning": "プロジェクト MVV の本文を変え、利用者の承認で新しい版にすること",
-      "pending_source": "issues/issue-1366-requirements.md"
+      "pending_source": "issues/old/issue-1366-requirements.md"
     },
     {
       "term": "判断の地点",
       "context": "ndf-workflow",
       "meaning": "NDF が LLM の判断を挟む場所（承認ゲートの判定・レビューの指摘と修正の可否・リファクタリングの提案の採否・judge のステップ・範囲外の起票の 3 択）",
-      "pending_source": "issues/issue-1366-requirements.md"
+      "pending_source": "issues/old/issue-1366-requirements.md"
     },
     {
       "term": "MVV 候補",
       "context": "ndf-workflow",
       "meaning": "材料から書いたプロジェクト MVV の案。2 案以上と分かれる点を利用者へ示す",
-      "pending_source": "issues/issue-1366-requirements.md"
+      "pending_source": "issues/old/issue-1366-requirements.md"
     },
     {
       "term": "傾向モード",
       "context": "ndf-workflow",
       "meaning": "履歴が育っていないプロジェクトで、README・指示書・依頼文の傾向から MVV 候補を出す抽出の形",
-      "pending_source": "issues/issue-1366-requirements.md"
+      "pending_source": "issues/old/issue-1366-requirements.md"
     },
     {
       "term": "MVV の照合",
       "context": "ndf-workflow",
       "meaning": "本文（候補・改訂案・スプリント MVV）が NDF の共通原則とプロジェクト MVV に従うかを「従う / 反する疑い / 判定できない」の 3 択で判定すること。従う以外は人へ戻す",
-      "pending_source": "issues/issue-1366-design.md"
+      "pending_source": "issues/old/issue-1366-design.md"
     },
     {
       "term": "MVV の節",
       "context": "ndf-workflow",
       "meaning": "判断の地点へ渡す塊。NDF の共通原則の本文全体を先頭に置き、承認済みのプロジェクト MVV の本文か「MVV なし」とその理由、行動の 2 択と根拠の指示を続ける",
-      "pending_source": "issues/issue-1366-design.md"
+      "pending_source": "issues/old/issue-1366-design.md"
     },
     {
       "term": "根拠の項目",
       "context": "ndf-workflow",
       "meaning": "判断の記録と設計の決定の記録に残す MVV の項目の番号（Mission / Vision / Value 3 / C4 / P1 / R2）。スプリント MVV の項目は頭に「スプリント」を付ける（スプリント Value 4。R の番号はそのまま）。MVV が無ければ「MVV なし」、返されなければ「根拠なし」",
       "source": "plugins/ndf/skills/development-workflow/references/project-mvv.md",
-      "pending_source": "issues/issue-1400-design.md"
+      "pending_source": "issues/old/issue-1400-design.md"
     },
     {
       "term": "覆し",
       "context": "ndf-workflow",
       "meaning": "承認ゲートで人の答えが直前の MVV 判定と食い違ったこと。「反する疑い」「判定できない」を人が通すと override_pass、「従う」を人が差し戻すと override_reject。MVV の改訂の兆候に数える",
-      "pending_source": "issues/issue-1400-requirements.md"
+      "pending_source": "issues/old/issue-1400-requirements.md"
     },
     {
       "term": "NDF の共通原則",
       "context": "ndf-workflow",
       "meaning": "NDF を使うすべてのプロジェクトに効く原則。NDF が持ち、利用側は上書きできない。上位の原則・優先順位・AI の行動の 2 択・判断の記録・人と AI の対話・必ず承認が要る操作 C1〜C8 を含む",
-      "pending_source": "issues/issue-1366-requirements.md"
+      "pending_source": "issues/old/issue-1366-requirements.md"
     },
     {
       "term": "改訂の兆候",
       "context": "ndf-workflow",
       "meaning": "人が AI の判断を覆した回数（「従う」を退けた・「反する疑い」を通した）・「判定できない」の回数・流出不具合の件数。現行の版のもとで数え、宣言の閾値を超えたら改訂を提案する",
-      "pending_source": "issues/issue-1366-design.md"
+      "pending_source": "issues/old/issue-1366-design.md"
     },
     {
       "term": "トリガー",
@@ -2017,13 +2017,13 @@
       "term": "引継ぎの対象",
       "context": "ndf-workflow",
       "meaning": "引継ぎ文書 1 本が受け持つ仕事のまとまり（スプリント・マイルストーン・課題のどれか）。名の頭（sprint- / milestone- / issue-）になる",
-      "pending_source": "issues/issue-1560-design.md"
+      "pending_source": "issues/old/issue-1560-design.md"
     },
     {
       "term": "引継ぎの履歴",
       "context": "ndf-workflow",
       "meaning": "引継ぎ文書の本体から終わった項目を移す文書。本体と同じ場所の <名>-history.md",
-      "pending_source": "issues/issue-1560-design.md"
+      "pending_source": "issues/old/issue-1560-design.md"
     },
     {
       "term": "ndf-next",
@@ -2121,14 +2121,14 @@
       "code": "relay_reexec",
       "context": "ndf-relay",
       "meaning": "セッションの切り替えで子の claude が居ない間に、動いているラッパーのプロセスが、PID と端末を保ったまま別のラッパーのバージョンディレクトリのコードで起動し直すこと",
-      "pending_source": "issues/issue-1587-requirements.md"
+      "pending_source": "issues/old/issue-1587-requirements.md"
     },
     {
       "term": "入れ替えの申し送り",
       "code": "relay_handover",
       "context": "ndf-relay",
       "meaning": "ラッパーの入れ替えの直前に作業ディレクトリへ書く、次のセッションの起動の入力とラッパーの状態のファイル（handover.json）。入れ替えた後のラッパーが読んで消す",
-      "pending_source": "issues/issue-1587-design.md"
+      "pending_source": "issues/old/issue-1587-design.md"
     },
     {
       "term": "drive の状態",
@@ -2155,7 +2155,7 @@
       "context": "ndf-cross-review",
       "meaning": "プロジェクトが .ndf/review.json で宣言した、指摘の基準 3 に使う観点。宣言が無ければ基準 3 は無い",
       "source": "",
-      "pending_source": "issues/issue-1287-design.md"
+      "pending_source": "issues/old/issue-1287-design.md"
     },
     {
       "term": "見送りの返信",
@@ -2199,77 +2199,77 @@
       "context": "ndf-cross-review",
       "meaning": "収束ループを抜けた後に /ndf:fix を通し、open thread を 0 にする工程",
       "source": "",
-      "pending_source": "issues/issue-1287-design.md"
+      "pending_source": "issues/old/issue-1287-design.md"
     },
     {
       "term": "指標",
       "context": "ndf-cross-refactoring",
       "meaning": "`cross-refactoring` が提案の前に対象範囲のコードを測定ツールで測った値。関数ごとの循環的複雑度（Python では認知的複雑度も）、ファイルごとの大きさ、行数、重複の箇所",
       "source": "",
-      "pending_source": "issues/issue-1319-design.md"
+      "pending_source": "issues/old/issue-1319-design.md"
     },
     {
       "term": "指標のファイル",
       "context": "ndf-cross-refactoring",
       "meaning": "提案の前に 1 回だけ作り、参加者の全員が読む指標の測定の結果",
       "source": "",
-      "pending_source": "issues/issue-1319-design.md"
+      "pending_source": "issues/old/issue-1319-design.md"
     },
     {
       "term": "測定ツール",
       "context": "ndf-cross-refactoring",
       "meaning": "言語ごとに指標を測る外部のコマンド（Ruff・complexipy・lizard・symilar・jscpd など）",
       "source": "",
-      "pending_source": "issues/issue-1319-design.md"
+      "pending_source": "issues/old/issue-1319-design.md"
     },
     {
       "term": "測定の宣言",
       "context": "ndf-cross-refactoring",
       "meaning": "言語ごとの測定ツールをプロジェクトが置き換える `.ndf/code-metrics.json`",
       "source": "",
-      "pending_source": "issues/issue-1319-design.md"
+      "pending_source": "issues/old/issue-1319-design.md"
     },
     {
       "term": "根拠の値",
       "context": "ndf-cross-refactoring",
       "meaning": "提案が根拠にした指標の値。提案の JSON の `evidence` に書き、採否には使わない",
       "source": "",
-      "pending_source": "issues/issue-1319-design.md"
+      "pending_source": "issues/old/issue-1319-design.md"
     },
     {
       "term": "重複の箇所",
       "context": "ndf-cross-refactoring",
       "meaning": "対象範囲の中で、同じコードが最小の行数（8 行）以上続く 2 か所以上の組。Python は symilar、ほかの言語は jscpd が見つける",
       "source": "",
-      "pending_source": "issues/issue-1319-design.md"
+      "pending_source": "issues/old/issue-1319-design.md"
     },
     {
       "term": "一括の整形",
       "context": "repo-dev-checks",
       "meaning": "リポジトリの全対象へ formatter を掛け、結果を 1 つのコミットにしたもの。.git-blame-ignore-revs に載せる単位",
       "source": "",
-      "pending_source": "issues/issue-1323-requirements.md"
+      "pending_source": "issues/old/issue-1323-requirements.md"
     },
     {
       "term": "検査のコマンド",
       "context": "repo-dev-checks",
       "meaning": "手元で formatter の確認と静的解析を、CI と同じ版・同じ設定で走らせる 1 つのコマンド",
       "source": "",
-      "pending_source": "issues/issue-1323-requirements.md"
+      "pending_source": "issues/old/issue-1323-requirements.md"
     },
     {
       "term": "一括の自動修正",
       "context": "repo-dev-checks",
       "meaning": "リポジトリの全対象へ ruff check --fix を掛け、結果を 1 つのコミットにしたもの。一括の整形と同じく .git-blame-ignore-revs に載せる",
       "source": "",
-      "pending_source": "issues/issue-1323-design.md"
+      "pending_source": "issues/old/issue-1323-design.md"
     },
     {
       "term": "抑止",
       "context": "repo-dev-checks",
       "meaning": "静的解析の指摘を、行のコメント（# noqa・# shellcheck disable=）か設定の除外で出さなくすること。理由を添える",
       "source": "",
-      "pending_source": "issues/issue-1323-design.md"
+      "pending_source": "issues/old/issue-1323-design.md"
     },
     {
       "term": "古いバイトコード",
@@ -2294,42 +2294,42 @@
       "context": "ndf-workflow",
       "meaning": "リポジトリの根の `.ndf/` に置く、そのプロジェクトの形（言語・テスト・CI・ブランチ・配布・課題の正本など）を表すファイルの集まり。機能ごとの JSON と、解析が書く `project.json` からなる",
       "source": "",
-      "pending_source": "issues/issue-1333-requirements.md"
+      "pending_source": "issues/old/issue-1333-requirements.md"
     },
     {
       "term": "解析",
       "context": "ndf-workflow",
       "meaning": "プロジェクトの宣言を作るために、リポジトリと CI を決定論で測り、測った値から宣言の中身を決めること",
       "source": "",
-      "pending_source": "issues/issue-1333-requirements.md"
+      "pending_source": "issues/old/issue-1333-requirements.md"
     },
     {
       "term": "不明",
       "context": "ndf-workflow",
       "meaning": "解析が測れなかった・決められなかった項目の値。ai-plugins の値で埋めない",
       "source": "",
-      "pending_source": "issues/issue-1333-requirements.md"
+      "pending_source": "issues/old/issue-1333-requirements.md"
     },
     {
       "term": "測った値",
       "context": "ndf-workflow",
       "meaning": "解析の測定が、ファイル・git・`gh` の出力から決定論で決めた項目の値",
       "source": "",
-      "pending_source": "issues/issue-1333-design.md"
+      "pending_source": "issues/old/issue-1333-design.md"
     },
     {
       "term": "問い",
       "context": "ndf-workflow",
       "meaning": "解析の測定が値を 1 つに決められず、候補と根拠を付けて conductor へ渡す項目",
       "source": "",
-      "pending_source": "issues/issue-1333-design.md"
+      "pending_source": "issues/old/issue-1333-design.md"
     },
     {
       "term": "答え",
       "context": "ndf-workflow",
       "meaning": "解析の問いごとに conductor が選んだ値か不明。書き出しが形を確かめて宣言へ書く",
       "source": "",
-      "pending_source": "issues/issue-1333-design.md"
+      "pending_source": "issues/old/issue-1333-design.md"
     },
     {
       "term": "ジョブを飛ばした run",
@@ -2348,14 +2348,14 @@
       "context": "ndf-workflow",
       "meaning": "解析が読んだファイルの、HEAD の木での blob の SHA と、ブランチの構成の組。プロジェクトの宣言の新しさの判定に使う",
       "source": "",
-      "pending_source": "issues/issue-1333-design.md"
+      "pending_source": "issues/old/issue-1333-design.md"
     },
     {
       "term": "テストの戦略",
       "context": "ndf-workflow",
       "meaning": "範囲テストの走らせ方・全体テストの置き場（手元か CI か）・落ちたテストの見分け方の組。local-full / local-scoped-ci-whole / round-only の 3 つ。宣言の test.strategy か、同じ関数が所要から導く（#1334）",
       "source": "",
-      "pending_source": "issues/issue-1334-requirements.md",
+      "pending_source": "issues/old/issue-1334-requirements.md",
       "code": "strategy"
     },
     {
@@ -2364,7 +2364,7 @@
       "meaning": "{paths} を引用の外の 1 字句として含むテストのコマンド（宣言の scope_command か、{paths} を含む引数）。{paths} をシェルの引用で守った対象の並びへ置き換え、シェルで走らせる",
       "code": "scope_command",
       "source": "",
-      "pending_source": "issues/issue-1483-design.md",
+      "pending_source": "issues/old/issue-1483-design.md",
       "deprecated": [
         "範囲テストの雛形"
       ]
@@ -2375,126 +2375,126 @@
       "meaning": "テストのコマンドが JUnit XML を書くファイルの、作業ディレクトリからの相対パス（宣言の suites[].junit）。NDF はコマンドへ引数を足さず、このファイルを読む",
       "code": "junit",
       "source": "",
-      "pending_source": "issues/issue-1334-design.md"
+      "pending_source": "issues/old/issue-1334-design.md"
     },
     {
       "term": "依存物",
       "context": "ndf-worktree",
       "meaning": "パッケージマネージャが入れる、追跡されないディレクトリ（`vendor/`・`node_modules/`・`.venv` など）。worktree には最初から無い",
       "source": "",
-      "pending_source": "issues/issue-1337-requirements.md"
+      "pending_source": "issues/old/issue-1337-requirements.md"
     },
     {
       "term": "依存の用意",
       "context": "ndf-worktree",
       "meaning": "worktree を作った直後、または未用意の既存 worktree を使う前（使い回し・手で打つやり直し）に、宣言に従って依存物を worktree で使える状態にすること。手段（コマンド・参照・複製）は問わない",
       "source": "",
-      "pending_source": "issues/issue-1337-requirements.md"
+      "pending_source": "issues/old/issue-1337-requirements.md"
     },
     {
       "term": "用意の印",
       "context": "ndf-worktree",
       "meaning": "依存の用意が済んだことを示す、worktree ごとの git ディレクトリの `ndf-deps` ファイル。使い回すときはこれを見てやり直しを省く",
       "source": "",
-      "pending_source": "issues/issue-1337-design.md"
+      "pending_source": "issues/old/issue-1337-design.md"
     },
     {
       "term": "到達の確認",
       "context": "ndf-worktree",
       "meaning": "コンテナの中から worktree の探りの印を読み、テストのコンテナが worktree を見ているかを確かめること",
       "source": "",
-      "pending_source": "issues/issue-1337-design.md"
+      "pending_source": "issues/old/issue-1337-design.md"
     },
     {
       "term": "登録済みアカウント",
       "context": "ndf-relay",
       "meaning": "利用者が登録のコマンドで認証情報を預けた claude のアカウント。アカウントの切り替えの候補になる",
       "source": "",
-      "pending_source": "issues/issue-1389-requirements.md"
+      "pending_source": "issues/old/issue-1389-requirements.md"
     },
     {
       "term": "アカウントの切り替え",
       "context": "ndf-relay",
       "meaning": "次に起動する claude（ラッパーの次の区間・worker のやり直し）を、別の登録済みアカウントの認証で起動すること。動いているプロセスの認証は替えない",
       "source": "",
-      "pending_source": "issues/issue-1389-requirements.md"
+      "pending_source": "issues/old/issue-1389-requirements.md"
     },
     {
       "term": "使用率",
       "context": "ndf-relay",
       "meaning": "api/oauth/usage が返す five_hour / seven_day の utilization と、limits[] の weekly_scoped の percent（%）。推論を呼ばずに読む。切り替えの閾値と比べるのはその最大",
       "source": "",
-      "pending_source": "issues/issue-1453-design.md"
+      "pending_source": "issues/old/issue-1453-design.md"
     },
     {
       "term": "支出上限",
       "context": "ndf-relay",
       "meaning": "追加利用の支出の上限（individual spend limit）。extra_usage.spend_limit_reached が真か、spend.percent が 100 以上か、spend.severity が critical なら達したとする",
       "source": "",
-      "pending_source": "issues/issue-1453-design.md"
+      "pending_source": "issues/old/issue-1453-design.md"
     },
     {
       "term": "従量の接続",
       "context": "ndf-relay",
       "meaning": "利用上限の無い、使った分だけ費用が掛かる claude の接続（Bedrock か Anthropic API の API キー）。中身は利用者が宣言し、登録済みアカウントがすべて上限か認証できないときに使う",
       "source": "",
-      "pending_source": "issues/issue-1389-requirements.md"
+      "pending_source": "issues/old/issue-1389-requirements.md"
     },
     {
       "term": "アカウントの置き場",
       "context": "ndf-relay",
       "meaning": "登録済みアカウントごとの設定ディレクトリを並べた <共有の設定ディレクトリ>/ndf/accounts/。NDF の側で書くのは lib/claude_accounts.py とその部品だけで、認証ファイルと .claude.json は claude 自身も書く",
       "source": "",
-      "pending_source": "issues/issue-1389-design.md"
+      "pending_source": "issues/old/issue-1389-design.md"
     },
     {
       "term": "上限シグナルファイル",
       "context": "ndf-relay",
       "meaning": "子の claude の応答が API の失敗で終わったときに、StopFailure hook がラッパーの作業ディレクトリへ書く limit.json",
       "source": "",
-      "pending_source": "issues/issue-1389-design.md"
+      "pending_source": "issues/old/issue-1389-design.md"
     },
     {
       "term": "切り替えの閾値",
       "context": "ndf-relay",
       "meaning": "今のアカウントの使用率がこれを超えたら、次のカットポイントで別の登録済みアカウントへ替える値（NDF_ACCOUNT_SWITCH_AT、既定 90%）",
       "source": "",
-      "pending_source": "issues/issue-1389-design.md"
+      "pending_source": "issues/old/issue-1389-design.md"
     },
     {
       "term": "従量の接続の宣言",
       "context": "ndf-relay",
       "meaning": "従量の接続で起動する子へ足す変数の並び（KEY=VALUE を空白区切り）。環境変数 NDF_SUPERVISE_CLAUDE_FALLBACK か、relay の置き場に保存した宣言が持ち、環境変数があればそちらだけが効く。ラッパーと supervise.py が同じものを読む",
       "source": "",
-      "pending_source": "issues/issue-1468-requirements.md"
+      "pending_source": "issues/old/issue-1468-requirements.md"
     },
     {
       "term": "relay の置き場",
       "context": "ndf-relay",
       "meaning": "relay.py が登録と設定を置くディレクトリ ${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/。アカウントの置き場と、保存した従量の接続の宣言を持つ",
       "source": "",
-      "pending_source": "issues/issue-1468-requirements.md"
+      "pending_source": "issues/old/issue-1468-requirements.md"
     },
     {
       "term": "登録の途中の状態",
       "context": "ndf-relay",
       "meaning": "OAuth の account add を 2 回の呼び出しに分けたとき、1 回目（認可の URL を出す）と 2 回目（認可コードで登録を終える）の間に relay の置き場へ残す状態。期限を過ぎたら捨てる",
       "source": "",
-      "pending_source": "issues/issue-1468-requirements.md"
+      "pending_source": "issues/old/issue-1468-requirements.md"
     },
     {
       "term": "待機中のログイン",
       "context": "ndf-relay",
       "meaning": "OAuth の account add の 1 回目で起動し、認可コードを受け取るまで生かしておく claude auth login のプロセス。登録の途中の状態が持ち、標準入力の FIFO でコードを受ける",
       "source": "",
-      "pending_source": "issues/issue-1468-design.md"
+      "pending_source": "issues/old/issue-1468-design.md"
     },
     {
       "term": "呼べるかの確認",
       "context": "ndf-relay",
       "meaning": "従量の接続の宣言を保存する前に、その変数で Bedrock の Claude を 1 回呼び、通らなければ理由を 4 つの区分（認証切れ・権限が無い・地域で使えない・モデルが有効でない）で示すこと。通ったものだけを保存する",
       "source": "",
-      "pending_source": "issues/issue-1468-design.md"
+      "pending_source": "issues/old/issue-1468-design.md"
     },
     {
       "term": "スプリント",
@@ -2568,154 +2568,154 @@
       "context": "ndf-workflow",
       "meaning": "本番チャネルのうち、マージ（push）で本番系への反映が自動で始まるもの。宣言の delivery に kind: auto で本番チャネルを branch に持つ行があるときに当たる。そこへのマージは承認ゲート 2 に当たる",
       "code": "auto_production_branch",
-      "pending_source": "issues/issue-1336-design.md"
+      "pending_source": "issues/old/issue-1336-design.md"
     },
     {
       "term": "手動反映の本番系",
       "context": "ndf-workflow",
       "meaning": "配布の宣言の行のうち、production: true と宣言され、kind: manual（担い手が手で起こす）のもの。そこへ届ける操作の前に承認ゲート 2 を掛ける。自動反映の本番チャネルと対になる",
       "code": "manual_production",
-      "pending_source": "issues/issue-1454-requirements.md"
+      "pending_source": "issues/old/issue-1454-requirements.md"
     },
     {
       "term": "リリースの経路",
       "context": "ndf-release",
       "meaning": "変更が本番系へ届く道筋の種類。template（release.form の雛形で組む）/ merge（マージで反映）/ manual（手で反映）/ none（届けない）。release.form があればそれ、無ければ宣言の delivery から決まる。リリースの形とは別の軸",
       "code": "release_route",
-      "pending_source": "issues/issue-1336-design.md"
+      "pending_source": "issues/old/issue-1336-design.md"
     },
     {
       "term": "昇格の Pull Request",
       "context": "ndf-release",
       "meaning": "ベースブランチから本番チャネルへ変更を入れる Pull Request",
       "code": "promotion_pr",
-      "pending_source": "issues/issue-1336-design.md"
+      "pending_source": "issues/old/issue-1336-design.md"
     },
     {
       "term": "昇格のプラン",
       "context": "ndf-release",
       "meaning": "リリースの経路 promote のための「本番」のステージのプラン（plan_promote）。昇格の Pull Request を作り、承認ゲート 2 の後にマージする",
-      "pending_source": "issues/issue-1457-design.md"
+      "pending_source": "issues/old/issue-1457-design.md"
     },
     {
       "term": "プロダクトバックログ",
       "context": "ndf-issue-upkeep",
       "meaning": "open の課題を着手の順に並べた全体。マイルストーンの順（上の層）→ マイルストーンの中の順位（下の層）の辞書順で読む",
-      "pending_source": "issues/issue-1429-requirements.md"
+      "pending_source": "issues/old/issue-1429-requirements.md"
     },
     {
       "term": "スプリントバックログの候補",
       "context": "ndf-issue-upkeep",
       "meaning": "1 つのマイルストーンの中の課題を順位で並べたもの。次のスプリントはその先頭から容量の分を切り出す",
-      "pending_source": "issues/issue-1429-requirements.md"
+      "pending_source": "issues/old/issue-1429-requirements.md"
     },
     {
       "term": "遅延コスト",
       "context": "ndf-issue-upkeep",
       "meaning": "課題の着手を遅らせると失う量の相対値。実害の大きさ・時間的重要度・リスク低減の 3 つの見積の段階の和。略して CoD",
-      "pending_source": "issues/issue-1429-requirements.md"
+      "pending_source": "issues/old/issue-1429-requirements.md"
     },
     {
       "term": "実害の目安",
       "context": "ndf-issue-upkeep",
       "meaning": "実害の大きさの見積の段階の帯を影響範囲の区分で決める表。既定は全体の停止・データの損失・安全機構の欠落が 13〜20、一部の機能の誤動作・手戻りが 5〜8、表示や終了コードの誤り（結果は正しい）が 2〜3、どれにも当たらなければ 1。帯の中の値はアンカー（段階を比べる基準の課題）と比べて決める。宣言で変えられる",
-      "pending_source": "issues/issue-1429-design.md"
+      "pending_source": "issues/old/issue-1429-design.md"
     },
     {
       "term": "退避策の状態",
       "context": "ndf-issue-upkeep",
       "meaning": "退避策・回避策が実際に止まるのを防いでいるか（防いでいる / 部分的 / 無い）。防いでいるときだけ実害の大きさとリスク低減を下げる根拠になる。実害の大きさを下げてよいのは実害の目安の区分を 1 つ下げるまでである",
-      "pending_source": "issues/issue-1429-design.md"
+      "pending_source": "issues/old/issue-1429-design.md"
     },
     {
       "term": "WSJF",
       "context": "ndf-issue-upkeep",
       "meaning": "遅延コストを大きさの見積の段階で割った値。人が実施する前提の一般的な形で、順位の値の大きさの指数が 1 のときに当たる",
-      "pending_source": "issues/issue-1429-design.md"
+      "pending_source": "issues/old/issue-1429-design.md"
     },
     {
       "term": "見積の段階",
       "context": "ndf-issue-upkeep",
       "meaning": "遅延コストの 3 つの要素と大きさに付ける相対値。宣言の尺度（既定は 1, 2, 3, 5, 8, 13, 20）の中から選ぶ。大きさは AI エージェントが実施したときの費用（所要時間・LLM の費用・変更量）で付け、人の工数では付けない",
-      "pending_source": "issues/issue-1429-design.md"
+      "pending_source": "issues/old/issue-1429-design.md"
     },
     {
       "term": "切り出しの境界",
       "context": "ndf-issue-upkeep",
       "meaning": "マイルストーンの中の順位を、大きい課題の枠に当てた 1 切れを除いて先頭から、大きさの見積の段階の和が容量の残りに収まるまで取ったときの、最後の課題",
-      "pending_source": "issues/issue-1429-design.md"
+      "pending_source": "issues/old/issue-1429-design.md"
     },
     {
       "term": "前倒しの候補",
       "context": "ndf-issue-upkeep",
       "meaning": "後ろのマイルストーンか未設定にあり、遅延コストが直近のマイルストーンの切り出しの境界の課題より余白以上に高い課題",
-      "pending_source": "issues/issue-1429-requirements.md"
+      "pending_source": "issues/old/issue-1429-requirements.md"
     },
     {
       "term": "後ろ倒しの候補",
       "context": "ndf-issue-upkeep",
       "meaning": "直近のマイルストーンのうち、同じマイルストーンの課題が依存していない課題の中で遅延コストが最も低い 1 件。前倒しの候補の最小の遅延コスト以上のものと、順序で次のマイルストーンが無いときは出さない。前倒しの候補と対にして示す",
-      "pending_source": "issues/issue-1429-design.md"
+      "pending_source": "issues/old/issue-1429-design.md"
     },
     {
       "term": "容量",
       "context": "ndf-issue-upkeep",
       "meaning": "1 つのスプリントへ切り出す大きさの見積の段階の和の上限。宣言か引数で受け、既定値を持たない",
-      "pending_source": "issues/issue-1429-design.md"
+      "pending_source": "issues/old/issue-1429-design.md"
     },
     {
       "term": "余白",
       "context": "ndf-issue-upkeep",
       "meaning": "前倒しの候補にするために、遅延コストが切り出しの境界の課題を上回るべき尺度の段階の数。既定は 1",
-      "pending_source": "issues/issue-1429-design.md"
+      "pending_source": "issues/old/issue-1429-design.md"
     },
     {
       "term": "自動の閾値",
       "context": "ndf-issue-upkeep",
       "meaning": "前倒しを承認なしに反映するために、実害の大きさかリスク低減のどちらかが届くべき段階。既定は 8",
-      "pending_source": "issues/issue-1429-design.md"
+      "pending_source": "issues/old/issue-1429-design.md"
     },
     {
       "term": "バックログの宣言",
       "context": "ndf-issue-upkeep",
       "meaning": "尺度・余白・自動の閾値・容量・被依存の対応表・ラベルの下限・大きさの指数・大きい課題の閾値と枠の割合・実害の目安・アンカーを持つ `.ndf/backlog.json`",
-      "pending_source": "issues/issue-1429-design.md"
+      "pending_source": "issues/old/issue-1429-design.md"
     },
     {
       "term": "順位の値",
       "context": "ndf-issue-upkeep",
       "meaning": "遅延コストを大きさの見積の段階の α 乗で割った値（α は大きさの指数）。マイルストーンの中の順位を決める",
-      "pending_source": "issues/issue-1429-design.md"
+      "pending_source": "issues/old/issue-1429-design.md"
     },
     {
       "term": "大きさの指数",
       "context": "ndf-issue-upkeep",
       "meaning": "順位の値で大きさの見積の段階に掛ける指数 α。0 以上 1 以下で、既定は 0.3（AI エージェントが実施する前提）。1 で WSJF、0 で遅延コストだけになる",
-      "pending_source": "issues/issue-1429-design.md"
+      "pending_source": "issues/old/issue-1429-design.md"
     },
     {
       "term": "大きい課題",
       "context": "ndf-issue-upkeep",
       "meaning": "大きさの見積の段階が宣言の閾値（既定は尺度の上から 2 番目。既定の尺度では 13）以上の課題",
-      "pending_source": "issues/issue-1429-design.md"
+      "pending_source": "issues/old/issue-1429-design.md"
     },
     {
       "term": "大きい課題の枠",
       "context": "ndf-issue-upkeep",
       "meaning": "容量のうち枠の割合（既定 0.5）の分を、マイルストーンの中で遅延コストが最大の大きい課題の 1 切れへ先に当てる取り決め。容量が無い回は出さない",
-      "pending_source": "issues/issue-1429-design.md"
+      "pending_source": "issues/old/issue-1429-design.md"
     },
     {
       "term": "分割が要る",
       "context": "ndf-issue-upkeep",
       "meaning": "大きい課題の枠に当たったが、枠に収まるサブイシューが無く課題そのものも枠を超える状態。報告に出し、自動で分割しない",
-      "pending_source": "issues/issue-1429-design.md"
+      "pending_source": "issues/old/issue-1429-design.md"
     },
     {
       "term": "人の判断待ち",
       "context": "ndf-issue-upkeep",
       "meaning": "着手の前に人の判断（needs-decision・承認ゲート）を要する状態。費用に数えず、順位の値を変えずに印として出す",
-      "pending_source": "issues/issue-1429-design.md"
+      "pending_source": "issues/old/issue-1429-design.md"
     },
     {
       "term": "候補の上限",
@@ -2733,86 +2733,86 @@
       "term": "残りの量",
       "context": "ndf-relay",
       "meaning": "登録済みアカウントが上限に達するまでに使える量の見積り。枠ごとの「枠の大きさ ×（1 − 使用率 / 100）」の最小（USD 換算）。保存せず、選ぶ・一覧を出すたびに求める",
-      "pending_source": "issues/issue-1453-design.md"
+      "pending_source": "issues/old/issue-1453-design.md"
     },
     {
       "term": "枠の大きさ",
       "context": "ndf-relay",
       "meaning": "1 つの枠（5 時間の枠・週の枠・モデル別の週の枠）が 0% から 100% になるまでに使える量（USD 換算）。支出上限とは別の量",
-      "pending_source": "issues/issue-1453-design.md"
+      "pending_source": "issues/old/issue-1453-design.md"
     },
     {
       "term": "枠の大きさの対応表",
       "context": "ndf-relay",
       "meaning": "rateLimitTier から 5 時間の枠と週の枠の大きさを引く表（claude_accounts.CAPACITY）",
-      "pending_source": "issues/issue-1453-design.md"
+      "pending_source": "issues/old/issue-1453-design.md"
     },
     {
       "term": "枠の大きさの宣言",
       "context": "ndf-relay",
       "meaning": "利用者が登録済みアカウントごとに書く枠の大きさ（account.json の capacity）。対応表の値より先に効く",
-      "pending_source": "issues/issue-1453-design.md"
+      "pending_source": "issues/old/issue-1453-design.md"
     },
     {
       "term": "モデル別の週の枠",
       "context": "ndf-relay",
       "meaning": "使用量の応答の limits[] のうち kind が weekly_scoped のもの。特定のモデル（例: Fable）だけの週の上限",
-      "pending_source": "issues/issue-1453-design.md"
+      "pending_source": "issues/old/issue-1453-design.md"
     },
     {
       "term": "claude.ai のコネクタ",
       "context": "ndf-relay",
       "meaning": "利用者が claude.ai で接続した MCP サーバー（Slack・Notion・Google Drive など）。Claude Code は起動時に claude.ai から一覧を取り、claude mcp list に claude.ai <名前> として並べる",
-      "pending_source": "issues/issue-1523-requirements.md"
+      "pending_source": "issues/old/issue-1523-requirements.md"
     },
     {
       "term": "アカウントのスコープ",
       "context": "ndf-relay",
       "meaning": "登録済みアカウントのトークンに付いた権限の並び。認証ファイルの claudeAiOauth.scopes で、claude が認証ファイルから自分で読む（環境変数では渡さない）",
-      "pending_source": "issues/issue-1523-design.md"
+      "pending_source": "issues/old/issue-1523-design.md"
     },
     {
       "term": "アカウントの設定ディレクトリ",
       "context": "ndf-relay",
       "meaning": "登録済みアカウントごとのディレクトリ（アカウントの置き場の <名前>/）。認証ファイルと登録の記録を実体で持ち、そのアカウントで起動する claude の CLAUDE_CONFIG_DIR になる",
       "code": "account_dir",
-      "pending_source": "issues/issue-1576-requirements.md"
+      "pending_source": "issues/old/issue-1576-requirements.md"
     },
     {
       "term": "共有の設定ディレクトリ",
       "context": "ndf-relay",
       "meaning": "ラッパーを通さずに起動した claude が使う設定ディレクトリ（${CLAUDE_CONFIG_DIR:-~/.claude}）。会話の記録・プラグイン・設定の正を持ち、登録済みアカウントの claude の中ではアカウントの設定ディレクトリの symlink の参照先になる",
-      "pending_source": "issues/issue-1576-requirements.md"
+      "pending_source": "issues/old/issue-1576-requirements.md"
     },
     {
       "term": "アカウント固有の項目",
       "context": "ndf-relay",
       "meaning": "アカウントの設定ディレクトリに実体で持ち、共有の設定ディレクトリへの symlink にしない項目（認証ファイル・.claude.json・更新の排他・NDF の記録など）",
-      "pending_source": "issues/issue-1576-design.md"
+      "pending_source": "issues/old/issue-1576-design.md"
     },
     {
       "term": "共有する設定の部分",
       "context": "ndf-relay",
       "meaning": ".claude.json のうち、共有の設定ディレクトリの側を正とする projects と mcpServers",
-      "pending_source": "issues/issue-1576-design.md"
+      "pending_source": "issues/old/issue-1576-design.md"
     },
     {
       "term": "同期の控え",
       "context": "ndf-relay",
       "meaning": "前の同期で両側へ書いた共有する設定の部分の写しと、その時点のアカウント側の userID（アカウントの設定ディレクトリの .ndf-shared-base.json）",
-      "pending_source": "issues/issue-1576-design.md"
+      "pending_source": "issues/old/issue-1576-design.md"
     },
     {
       "term": "更新の排他",
       "context": "ndf-relay",
       "meaning": "Claude Code がトークンを更新するときに設定ディレクトリの中に作る排他（.oauth_refresh.lock のディレクトリ）",
-      "pending_source": "issues/issue-1576-design.md"
+      "pending_source": "issues/old/issue-1576-design.md"
     },
     {
       "term": "認証の失敗の観測",
       "context": "ndf-relay",
       "meaning": "子の claude の応答が認証の失敗で終わったことの記録（account.json の auth_failed）。後の使用量の取得が成功するか 1 時間で解ける",
-      "pending_source": "issues/issue-1576-design.md"
+      "pending_source": "issues/old/issue-1576-design.md"
     },
     {
       "term": "ツールのパス",
@@ -2820,55 +2820,55 @@
       "meaning": "CLI が起動したツール（MCP サーバーなど）が、利用者の操作なしに worktree の中で書き換える既知のパス。既定（`.serena/project.yml` と `.serena/serena_config.yml`）と `.ndf/worktree.json` の `tool_paths`（`add` / `remove`）で決まる。検査とコミットの対象から外す",
       "code": "tool_paths",
       "source": "",
-      "pending_source": "issues/issue-1436-requirements.md"
+      "pending_source": "issues/old/issue-1436-requirements.md"
     },
     {
       "term": "載った版",
       "context": "ndf-workflow",
       "meaning": "PR が載った正式版。CHANGELOG の版の節 → マージの時刻の後の最初の正式版のタグ → 行の時刻の後の最初の正式版のタグ、の順で決める。計測で版を寄せる規則",
-      "pending_source": "issues/issue-1316-design.md"
+      "pending_source": "issues/old/issue-1316-design.md"
     },
     {
       "term": "動いた版",
       "context": "ndf-workflow",
       "meaning": "呼び出しや会話を動かした NDF の版（使用量の帳簿の ndf_version・会話の Skill の置き場の版）",
-      "pending_source": "issues/issue-1316-design.md"
+      "pending_source": "issues/old/issue-1316-design.md"
     },
     {
       "term": "取り消しの判定",
       "context": "ndf-cross-refactoring",
       "meaning": "改善項目ごとに取り消したかと、起点から HEAD までの各コミットを残すか・消すか・戻すか・公開してよいかを 1 か所で決める処理。取り消しの経路と push の直前の照合が同じものを呼ぶ",
-      "pending_source": "issues/issue-1482-requirements.md"
+      "pending_source": "issues/old/issue-1482-requirements.md"
     },
     {
       "term": "残留コミット",
       "context": "ndf-cross-refactoring",
       "meaning": "見放した（STALLED・結果なし）実装担当のプロセスが、オーケストレーターの判定の後に積んだコミット",
-      "pending_source": "issues/issue-1482-requirements.md"
+      "pending_source": "issues/old/issue-1482-requirements.md"
     },
     {
       "term": "途中の push",
       "context": "ndf-cross-refactoring",
       "meaning": "cross-refactoring で、最終ゲートへ入るより前の push",
-      "pending_source": "issues/issue-1482-requirements.md"
+      "pending_source": "issues/old/issue-1482-requirements.md"
     },
     {
       "term": "残すコミット",
       "context": "ndf-cross-refactoring",
       "meaning": "取り消しの判定が残すと決めたコミット。取り消されていない改善項目に記録されたコミット・受け入れた最終ゲート修正のコミット・オーケストレーターが状態ファイルに記録したコミットのどれかで、公開してよいのはこれだけである",
-      "pending_source": "issues/issue-1482-design.md"
+      "pending_source": "issues/old/issue-1482-design.md"
     },
     {
       "term": "公開した地点",
       "context": "ndf-cross-refactoring",
       "meaning": "cross-refactoring のオーケストレーターが最後に push した HEAD。まだ push していなければ plan.base_sha。これより前のコミットは取り消しで書き換えない",
-      "pending_source": "issues/issue-1482-design.md"
+      "pending_source": "issues/old/issue-1482-design.md"
     },
     {
       "term": "積み直しの起点",
       "context": "ndf-cross-refactoring",
       "meaning": "取り消しで git reset --hard する先。未公開の範囲で最も古い「消すコミット」の親で、公開した地点より前には置かない",
-      "pending_source": "issues/issue-1482-design.md"
+      "pending_source": "issues/old/issue-1482-design.md"
     },
     {
       "term": "耐久ワークフロー",
@@ -2958,128 +2958,128 @@
       "term": "実測値",
       "context": "ndf-agent-cli",
       "meaning": "CLI の出力かランタイムのセッションの記録から取った、実際に動いたモデル名。状態ファイルの observed",
-      "pending_source": "issues/issue-759-requirements.md",
+      "pending_source": "issues/old/issue-759-requirements.md",
       "code": "observed_model"
     },
     {
       "term": "指定値",
       "context": "ndf-agent-cli",
       "meaning": "--model で CLI へ渡したモデル名。状態ファイルの requested。未指定なら null",
-      "pending_source": "issues/issue-759-requirements.md"
+      "pending_source": "issues/old/issue-759-requirements.md"
     },
     {
       "term": "主たるモデル",
       "context": "ndf-agent-cli",
       "meaning": "1 回の起動で複数のモデルが動いたとき、実測値として記録する 1 つ",
-      "pending_source": "issues/issue-759-requirements.md"
+      "pending_source": "issues/old/issue-759-requirements.md"
     },
     {
       "term": "分離",
       "context": "ndf-agent-cli",
       "meaning": "何が動いたか分からない実行を、モデル別の集計に入れず理由だけを報告すること",
-      "pending_source": "issues/issue-759-requirements.md"
+      "pending_source": "issues/old/issue-759-requirements.md"
     },
     {
       "term": "起動の記録",
       "context": "ndf-agent-cli",
       "meaning": "起動 1 回の開始の時刻・作業ディレクトリ・ランタイムを、起動が自分で書いたファイル（<stem>-launch.json）",
-      "pending_source": "issues/issue-759-design.md"
+      "pending_source": "issues/old/issue-759-design.md"
     },
     {
       "term": "取れなかった理由",
       "context": "ndf-agent-cli",
       "meaning": "実測値が null のときに残す符号（no_record / ambiguous / no_model_field / unsupported / unreadable）。状態ファイルの unobserved",
-      "pending_source": "issues/issue-759-design.md"
+      "pending_source": "issues/old/issue-759-design.md"
     },
     {
       "term": "ランタイムの宣言",
       "context": "ndf-agent-cli",
       "meaning": ".ndf/runtimes.json。NDF が CLI として起動してよいランタイムの一覧（allowed）と、cross-review の固定の組（review_seats）を持つ。無ければ制限しない",
-      "pending_source": "issues/issue-1598-design.md"
+      "pending_source": "issues/old/issue-1598-design.md"
     },
     {
       "term": "レビューの組",
       "context": "ndf-agent-cli",
       "meaning": "cross-review の 1 ラウンドの 2 つのスロットのランタイムを辞書順に + でつないだもの（claude+claude・claude+codex など）。組ごとの集計の単位",
-      "pending_source": "issues/issue-1598-design.md"
+      "pending_source": "issues/old/issue-1598-design.md"
     },
     {
       "term": "固定の組",
       "context": "ndf-agent-cli",
       "meaning": "ランタイムの宣言の review_seats。cross-review の毎ラウンドのスロットを交代させずにこの 2 つにする",
       "code": "review_seats",
-      "pending_source": "issues/issue-1598-design.md"
+      "pending_source": "issues/old/issue-1598-design.md"
     },
     {
       "term": "学習の設定",
       "context": "ndf-training-optout",
       "meaning": "アカウントの入力を学習に使うかの設定。claude は「Help improve our AI models」（grove_enabled）、codex は ChatGPT の「Improve the model for everyone」（training_allowed）と Codex の環境の学習（codex_training_allowed・codex_training_allowed_v2）。true なら入力を学習に使う",
-      "pending_source": "issues/issue-1597-requirements.md"
+      "pending_source": "issues/old/issue-1597-requirements.md"
     },
     {
       "term": "学習の設定の確認",
       "context": "ndf-training-optout",
       "meaning": "学習の設定を読み、1 行の JSON で返すこと（check）。書き換えない",
-      "pending_source": "issues/issue-1597-requirements.md"
+      "pending_source": "issues/old/issue-1597-requirements.md"
     },
     {
       "term": "学習の設定の書き換え",
       "context": "ndf-training-optout",
       "meaning": "NDF のセッションの開始で、true の学習の設定を false にすること",
-      "pending_source": "issues/issue-1597-requirements.md"
+      "pending_source": "issues/old/issue-1597-requirements.md"
     },
     {
       "term": "書き換えの無効化",
       "context": "ndf-training-optout",
       "meaning": "利用者が環境変数 NDF_TRAINING_OPTOUT=0 で学習の設定の書き換えを止めること。確認（check）は止めない",
-      "pending_source": "issues/issue-1597-design.md"
+      "pending_source": "issues/old/issue-1597-design.md"
     },
     {
       "term": "OAuth でない接続",
       "context": "ndf-training-optout",
       "meaning": "claude_accounts.FOREIGN_AUTH_ENV の変数（ANTHROPIC_API_KEY・ANTHROPIC_AUTH_TOKEN・CLAUDE_CODE_USE_BEDROCK・CLAUDE_CODE_USE_VERTEX）のどれかが空でない起動。学習の設定が無く、読みも書きも送らない。ndf-relay の「従量の接続」より範囲が広い",
-      "pending_source": "issues/issue-1597-design.md"
+      "pending_source": "issues/old/issue-1597-design.md"
     },
     {
       "term": "ChatGPT でないログイン",
       "context": "ndf-training-optout",
       "meaning": "codex の auth.json の auth_mode が chatgpt でない起動（API キーのログイン）。ChatGPT のアカウントの学習の設定が無く、読みを送らない",
-      "pending_source": "issues/issue-1597-design.md"
+      "pending_source": "issues/old/issue-1597-design.md"
     },
     {
       "term": "スプリントの雛形",
       "context": "ndf-workflow",
       "meaning": "`supervise.py new sprint` がステージごとのプランを作る関数（`sprint_waves.py` の `plan_sprint_*` / `plan_fast_*`）",
       "source": "",
-      "pending_source": "issues/issue-1485-requirements.md"
+      "pending_source": "issues/old/issue-1485-requirements.md"
     },
     {
       "term": "単発の雛形",
       "context": "ndf-workflow",
       "meaning": "`supervise.py new impl / fix / check` が 1 本のプランを作る関数（`templates.py`）",
       "source": "",
-      "pending_source": "issues/issue-1485-requirements.md"
+      "pending_source": "issues/old/issue-1485-requirements.md"
     },
     {
       "term": "取り込んだ課題",
       "context": "ndf-workflow",
       "meaning": "設計で、受け入れ内容を別の課題の実装へ含めると決めた課題。自分の実装のプランは残すが、`実行の条件` で飛ばして実行しない",
       "source": "",
-      "pending_source": "issues/issue-1485-requirements.md"
+      "pending_source": "issues/old/issue-1485-requirements.md"
     },
     {
       "term": "手動確認の行",
       "context": "ndf-workflow",
       "meaning": "要求の検証手段の表で、項目が「手動確認」で始まる行。項目が「手動確認（マージ前）」ならマージ前、それ以外はリリース後テストに確かめる",
       "source": "",
-      "pending_source": "issues/issue-1485-design.md"
+      "pending_source": "issues/old/issue-1485-design.md"
     },
     {
       "term": "設計の結果",
       "context": "ndf-workflow",
       "meaning": "設計文書の「設計の結果」の節の表。課題ごとに扱い（実装する / 取り込む / 閉じる）・取り込み先・触るファイルを書き、実装のステージの前に機械が読む",
       "source": "",
-      "pending_source": "issues/issue-1485-design.md"
+      "pending_source": "issues/old/issue-1485-design.md"
     },
     {
       "term": "決定の見出し",

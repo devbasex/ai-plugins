@@ -1,4 +1,4 @@
-"""プロジェクトの宣言の解析（project-decl.py）の中身（#1333）。設計は issues/issue-1333-design.md にある。
+"""プロジェクトの宣言の解析（project-decl.py）の中身（#1333）。設計は issues/old/issue-1333-design.md にある。
 
 `model` だけが pydantic を使う（`check`・`write`・`schema` が `deps.require("schema")` の後に読む）。
 ほかのモジュールは標準ライブラリと `git`・`gh` だけで動き、`measure` は uv の環境の外の `python3` でも通る。
