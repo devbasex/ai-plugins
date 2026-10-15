@@ -35,6 +35,7 @@ quality-gates
 worktree
 out-of-scope
 backlog-refinement
+estimate
 progress-tracking
 release-verification
 retrospective

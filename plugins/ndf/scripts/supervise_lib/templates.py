@@ -23,6 +23,7 @@ from supervise_lib.procedures import (
     with_touched,
 )
 from supervise_lib.verify_steps import (
+    impl_timeout_estimate,
     merge_steps,
     refactor_template_arg,
     scope_cmd,
@@ -73,6 +74,7 @@ def impl_prompt(a) -> str:
 
 
 def plan_impl(a) -> dict:
+    timeout, estimate = impl_timeout_estimate(a)  # 引数 → 宣言 → 実績の見込み → 3600（#1916・#1856）
     impl = {
         "id": "impl",
         "type": "work",
@@ -80,7 +82,8 @@ def plan_impl(a) -> dict:
         "serena": True,
         "stage": "実装",
         "issues": True,
-        "timeout": getattr(a, "impl_timeout", None) or 3600,  # 実装の上限（--impl-timeout か宣言の impl_timeout。#1916）
+        "timeout": timeout,
+        "estimate": estimate,
         "prompt": impl_prompt(a),
     }
     return plan_to_merge(a, [impl])
@@ -468,11 +471,12 @@ def cmd_new(a) -> dict:
     }[a.kind]()
     out = Path(a.out or f"plan-{key}.json")
     out.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n")
+    src = next((s["estimate"]["source"] for s in plan["steps"] if s["id"] == "impl" and s.get("estimate")), None)
     return result(
         "supervise-new",
         "ok",
-        f"計画を書いた: {out}",
-        [{"path": str(out), "kind": a.kind, "steps": [s["id"] for s in plan["steps"]]}],
+        f"計画を書いた: {out}" + ("。実装の上限は未校正（3600 秒）" if src == "uncalibrated" else ""),
+        [{"path": str(out), "kind": a.kind, "steps": [s["id"] for s in plan["steps"]], **({"impl_timeout_source": src} if src else {})}],
         {"steps": len(plan["steps"])},
         next=(f"実装の queue へ --then {out} で渡す（実装がすべて完了した後に続けて流れる）" if a.kind == "release" else None),
     )
