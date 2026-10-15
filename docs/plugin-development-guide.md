@@ -279,7 +279,7 @@ claude plugin validate .
 終了コード 1 になる（Claude Code 2.1.261 で実測、2.1.300 でも同じ文言）。マーケットプレイスの根で `.` を渡すと
 `marketplace.json` と各プラグインの定義をチェックし、終了コード 0 で終わる。`policy` と
 `interface` は Claude Code が読み込み時に無視するため未知フィールドの警告が出るが、
-**警告は終了コードを変えない**。合否は出力ではなく終了コードで見る。
+**警告は終了コードを変えない**。合否は終了コードで見る。
 
 実ランタイムのインストール経路を Docker コンテナ内で確かめる smoke test の手順は
 [tests/runtime-smoke/README.md](../tests/runtime-smoke/README.md) にあります。
