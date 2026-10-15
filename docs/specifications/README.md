@@ -80,5 +80,6 @@
 | [ndf-supervise-resume-pr.md](ndf-supervise-resume-pr.md) | supervise.py run --from の再開で前の実行の Pull Request を読み直す |
 | [ndf-release-approval-rebuild-and-replacements.md](ndf-release-approval-rebuild-and-replacements.md) | 承認資料の作り直しで手で足した節を残す・指示書の変更の節・置き換える箇条 |
 | [ndf-usage-ledger-by-runtime.md](ndf-usage-ledger-by-runtime.md) | NDF が起動した呼び出し（サブエージェント・claude -p・codex・kiro・agy・Jev）をランタイムごとの使用量の帳簿に 1 行ずつ残し、帳簿ごとに集計する（usage_ledger・usage-report.py）。帳簿の置き場と行の形・記録を書く場所・Claude の帳簿の全体の求め方 |
+| [runtime-smoke-cli-versions.md](runtime-smoke-cli-versions.md) | スモークが入れる 4 ランタイムの CLI の版を一覧のファイルに固定し、最新の版は毎日別の workflow で試して落ちたら課題に残す（#1982） |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。

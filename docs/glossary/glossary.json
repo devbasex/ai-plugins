@@ -2287,8 +2287,7 @@
       "term": "CLI の版の一覧",
       "context": "repo-dev-checks",
       "meaning": "スモークの像へ入れる 4 ランタイムの CLI の版数と取得先と checksum を書いたファイル（tests/runtime-smoke/cli-versions.env）。版を上げるときに書き換える唯一の場所",
-      "source": "",
-      "pending_source": "issues/issue-1982-design.md"
+      "source": "docs/specifications/runtime-smoke-cli-versions.md"
     },
     {
       "term": "プロジェクトの宣言",
