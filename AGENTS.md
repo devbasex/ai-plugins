@@ -147,7 +147,7 @@ ai-plugins/
 
 **NDFプラグイン**は、このマーケットプレイスの主要プラグインです。plugin 名は全ランタイムで `ndf` を維持し、配布物は `plugins/ndf/` の1ディレクトリにまとまっています。
 - Skill の実体は `plugins/ndf/skills/` の1箇所。配布先は `plugins/ndf/manifests/*-skills.txt` が決める
-- Claude Code版は 8個の専門サブエージェントと 3 層の worker の定義 1 個、公開Skills、PreToolUse/SessionStart/Stopフックを提供
+- Claude Code版は専門サブエージェントと実行主体（supervisor・worker）の定義（`plugins/ndf/agents/`）、公開Skills、PreToolUse/SessionStart/Stopフックを提供
 - Codex版は Codex向け公開Skillsと任意Slack通知hookを提供
 - Kiro版は `plugins/ndf/dev.kiro/install.sh` で `.kiro/skills/`、`.kiro/steering/ndf-policies.md`、`.kiro/agents/ndf.json` を生成
 - agy版は `plugins/ndf/dev.agy/` を `agy plugin install` で導入し、公開Skills・エージェント定義・PreToolUse/PreInvocationフックを提供
@@ -180,7 +180,7 @@ ai-plugins/
 ### DON'T（非推奨）
 - ファイル全体を無闇に読み込む
 - `main` / `develop` に直接コミット
-- バージョン番号の更新を忘れる
+- Pull Request ごとに版数を上げる（版を上げるのはスプリント単位のマージの後。「版と配布の方針」）
 - ドキュメントをスキップ
 - 機密情報をコミット
 - テストをスキップ
@@ -189,12 +189,7 @@ ai-plugins/
 
 ## Git運用フロー
 
-### ブランチ戦略
-```bash
-git checkout -b feature/{feature-name}  # 新機能開発
-git checkout -b fix/{bug-name}          # バグ修正
-git checkout -b docs/{doc-name}         # ドキュメント更新
-```
+ブランチ名と Pull Request の流れは「Git運用ルール」と [CONTRIBUTING.md](CONTRIBUTING.md) にある。
 
 ### コミットメッセージ
 日本語で明確に記述：
@@ -207,20 +202,9 @@ Refactor: リファクタリング
 Test: テスト追加・修正
 ```
 
-### PR作成フロー
-1. featureブランチで作業完了
-2. 変更をコミット
-3. リモートにプッシュ
-4. GitHubでPR作成
-5. レビュー依頼
-6. ユーザーの承認後にマージ
-
 ## 参考リンク
 
-- [Claude Code公式ドキュメント](https://docs.claude.com/en/docs/claude-code)
-- [プラグインマーケットプレイス](https://code.claude.com/docs/ja/plugin-marketplaces)
-- [プラグインスキル](https://docs.claude.com/en/docs/claude-code/skills)
-- [MCP仕様](https://modelcontextprotocol.io)
+外部の公式ドキュメントへのリンクは [docs/plugin-development-guide.md](docs/plugin-development-guide.md) の「参考リンク」にある。
 
 ## 検証
 
@@ -228,8 +212,4 @@ Test: テスト追加・修正
 claude plugin validate .
 ```
 
-**`path` は必須の位置引数である。** 省くと `error: missing required argument 'path'` で
-終了コード 1 になる（Claude Code 2.1.261 で実測）。マーケットプレイスの根で `.` を渡すと
-`marketplace.json` と各プラグインの定義をチェックし、終了コード 0 で終わる。`policy` と
-`interface` は Claude Code が読み込み時に無視するため未知フィールドの警告が出るが、
-**警告は終了コードを変えない**。合否は出力ではなく終了コードで見る。
+`path` は必須の位置引数で、合否は終了コードで見る（詳細は [docs/plugin-development-guide.md](docs/plugin-development-guide.md) の「Runtime plugin 検証」）。
