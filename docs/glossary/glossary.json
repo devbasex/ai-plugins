@@ -950,19 +950,19 @@
       "term": "総評だけの指摘",
       "context": "ndf-cross-review",
       "meaning": "インラインのスレッドを持たず、総評にだけ書かれた指摘（review_findings[] の posted_to が body のもの）。差分の外を指す指摘と、HTTP 422 で総評へ移した指摘がこれになる",
-      "pending_source": "issues/issue-1980-requirements.md"
+      "source": "docs/specifications/cross-review-body-findings.md"
     },
     {
       "term": "決着",
       "context": "ndf-cross-review",
       "meaning": "指摘が直した・見送った・却下したのどれかに振り分けられ、取り込み（修正のラウンドの merge-fix か最終スイープの verify-sweep）が記録したこと。スレッドの指摘ではスレッドの解決も含む",
-      "pending_source": "issues/issue-1980-requirements.md"
+      "source": "docs/specifications/cross-review-body-findings.md"
     },
     {
       "term": "決着の記録",
       "context": "ndf-cross-review",
       "meaning": "状態ファイルの body_settlements[] の 1 要素。総評だけの指摘 1 件の振り分け（fixed / deferred / waived / separate_pr / rejected）と、記録したラウンドと経路（修正のラウンドの merge-fix か最終スイープの verify-sweep か）を持ち、追記だけで書き換えない",
-      "pending_source": "issues/issue-1980-design.md"
+      "source": "docs/specifications/cross-review-body-findings.md"
     },
     {
       "term": "正本",
@@ -2287,8 +2287,7 @@
       "term": "CLI の版の一覧",
       "context": "repo-dev-checks",
       "meaning": "スモークの像へ入れる 4 ランタイムの CLI の版数と取得先と checksum を書いたファイル（tests/runtime-smoke/cli-versions.env）。版を上げるときに書き換える唯一の場所",
-      "source": "",
-      "pending_source": "issues/issue-1982-design.md"
+      "source": "docs/specifications/runtime-smoke-cli-versions.md"
     },
     {
       "term": "プロジェクトの宣言",
@@ -3788,14 +3787,14 @@
       "term": "既定のログイン",
       "context": "ndf-relay",
       "meaning": "共有の設定ディレクトリ（${CLAUDE_CONFIG_DIR:-~/.claude}。親から引き継いだ CLAUDE_CONFIG_DIR の指定を含む）のログイン。登録済みアカウントでも従量の接続でもなく、relay の区間のアカウントが None のときに子が親から引き継いで使う",
-      "pending_source": "issues/issue-1727-requirements.md"
+      "source": "docs/specifications/ndf-relay-auth-failure.md"
     },
     {
       "term": "再登録が要る",
       "code": "needs_relogin",
       "context": "ndf-relay",
       "meaning": "登録の記録の needs_relogin が真の登録済みアカウントの状態。アカウントの切り替えの候補から外れ、relay.py account add で登録し直すまで戻らない",
-      "pending_source": "issues/issue-1727-requirements.md"
+      "source": "docs/specifications/ndf-relay-auth-failure.md"
     },
     {
       "term": "受け入れ条件の番号",
@@ -3879,19 +3878,19 @@
       "term": "レビュー範囲",
       "context": "ndf-cross-review",
       "meaning": "そのラウンドで担当が見る差分。base と head の SHA の組と、その間の変更ファイル",
-      "pending_source": "issues/issue-1702-requirements.md"
+      "source": "docs/specifications/cross-review-review-scope.md"
     },
     {
       "term": "読んだファイル数",
       "context": "ndf-cross-review",
       "meaning": "担当が結果ファイルの read_files に書く、レビュー範囲のうち差分を読んだファイルの数。担当の自己申告",
-      "pending_source": "issues/issue-1702-design.md"
+      "source": "docs/specifications/cross-review-review-scope.md"
     },
     {
       "term": "範囲の照合",
       "context": "ndf-cross-review",
       "meaning": "判定で、通した担当の読んだファイル数をレビュー範囲のファイル数と突き合わせ、半分に満たない・測れない担当の「通した」を収束に数えないこと",
-      "pending_source": "issues/issue-1702-design.md"
+      "source": "docs/specifications/cross-review-review-scope.md"
     }
   ]
 }
