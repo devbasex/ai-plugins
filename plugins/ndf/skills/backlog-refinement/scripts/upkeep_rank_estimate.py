@@ -18,22 +18,13 @@ def plain_row() -> dict:
     return {"size_source": "付けた段階", **{k.lower(): None for k in VALUE_KEYS}, "size_basis": []}
 
 
-def _latest(estimates: list[dict], numbers, ts) -> dict[int, dict]:
-    out: dict[int, dict] = {}
-    for e in estimates:
-        n = e.get("issue")
-        if isinstance(n, int) and n in numbers and (n not in out or (ts(out[n].get("at")) or 0) <= (ts(e.get("at")) or 0)):
-            out[n] = e
-    return out
-
-
 def estimate_overlay(root, numbers, scale) -> dict[int, dict]:
     """{課題: {"size": 段階 | "尺度を超える" | None, "ratio": 比 | None, "row": 追加の列}}。記録が無ければ {}。"""
     import estimate_predict as ep
     import estimate_records as er
 
     rec = er.estimate_dir(root)
-    latest = _latest(er.read_estimates(rec), set(numbers), er.ts)
+    latest = er.latest_estimates(er.read_estimates(rec), numbers=set(numbers))
     if not latest:
         return {}
     rows, decl = er.read_actuals(rec), er.load_estimate_decl(root)
