@@ -269,6 +269,18 @@ bash scripts/build-runtime-plugins.sh
 bash scripts/validate-runtime-plugins.sh
 ```
 
+マーケットプレイスの定義は Claude Code でもチェックします。
+
+```bash
+claude plugin validate .
+```
+
+**`path` は必須の位置引数である。** 省くと `error: missing required argument 'path'` で
+終了コード 1 になる（Claude Code 2.1.261 で実測、2.1.300 でも同じ文言）。マーケットプレイスの根で `.` を渡すと
+`marketplace.json` と各プラグインの定義をチェックし、終了コード 0 で終わる。`policy` と
+`interface` は Claude Code が読み込み時に無視するため未知フィールドの警告が出るが、
+**警告は終了コードを変えない**。合否は出力ではなく終了コードで見る。
+
 実ランタイムのインストール経路を Docker コンテナ内で確かめる smoke test の手順は
 [tests/runtime-smoke/README.md](../tests/runtime-smoke/README.md) にあります。
 
@@ -316,3 +328,10 @@ bash scripts/install-dev-hooks.sh
   置かない（README は CHANGELOG.md を参照する「`## 更新情報`」の節だけを持つ）
 - 取得元が自動更新されるとは限らない。利用者側で `claude plugin marketplace update` を実行する
 - Claude Codeを再起動
+
+## 参考リンク
+
+- [Claude Code公式ドキュメント](https://docs.claude.com/en/docs/claude-code)
+- [プラグインマーケットプレイス](https://code.claude.com/docs/ja/plugin-marketplaces)
+- [プラグインスキル](https://docs.claude.com/en/docs/claude-code/skills)
+- [MCP仕様](https://modelcontextprotocol.io)
