@@ -44,6 +44,7 @@ from upkeep_rank_config import (  # noqa: F401  呼び出し側は upkeep_rank �
     restore_from_row,
     validate_estimate,
 )
+from upkeep_rank_estimate import OVER_SCALE, is_over, plain_row
 from upkeep_rank_table import (  # noqa: F401
     outside_unchanged,
     parallel_group_edges,
@@ -251,6 +252,7 @@ class Board:
     rejected: list = field(default_factory=list)
     approved: tuple = ()
     excluded: list = field(default_factory=list)
+    sizes: dict = field(default_factory=dict)  # 見積もりの記録から決めた Size と追加の列（upkeep_rank_estimate。#1856）
 
 
 def _milestone_rows(board, rows, place, title):
@@ -262,7 +264,7 @@ def _slot_and_boundary(board, ranked):
     """直近のマイルストーンの大きい課題の枠と、切り出しの境界。候補と表で同じ決め方を使う。"""
     cfg = board.cfg
     slot = large_slot(ranked, cfg.capacity, cfg, board.sub_issues, board.edges)
-    return slot, boundary(ranked, cfg.capacity, slot)
+    return slot, boundary([r for r in ranked if not is_over(board, r.number)], cfg.capacity, slot)  # 尺度を超える課題は境界に入れない
 
 
 def _group(board, n, place, nearest):
@@ -368,6 +370,8 @@ def _milestone_out(board, rows, place, title, idx):
             "rank": k,
             "number": r.number,
             **r.steps(),
+            **({"size": OVER_SCALE} if is_over(board, r.number) else {}),
+            **((board.sizes.get(r.number) or {}).get("row") or plain_row()),
             "cod": r.cod,
             "value": r.value,
             "waiting_decision": r.waiting_decision,
@@ -381,7 +385,8 @@ def _milestone_out(board, rows, place, title, idx):
         "cod_max": max((r.cod for r in ranked), default=0),
         "high_count": sum(1 for r in ranked if r.ubv >= cfg.auto_threshold),
     }
-    return {"title": title, "order": idx, "rows": out_rows, "large_slot": slot, "boundary": bnd, "totals": totals}
+    over = [r.number for r in ranked if is_over(board, r.number)]
+    return {"title": title, "order": idx, "rows": out_rows, "large_slot": slot, "boundary": bnd, "totals": totals, "over_scale": over}
 
 
 def compute_ranking(board: Board) -> dict:
