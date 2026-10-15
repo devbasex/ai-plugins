@@ -11,7 +11,7 @@
 `refactor_lib` / 要約）が同じ定数と関数を使う。`monitor.py` に置くと、読む側が監視の
 実体を読み込むことになる（設計の決定 4）。
 
-キーと値の形は `issues/issue-662-598-537-619-584-583-design-contracts.md` の
+キーと値の形は `issues/old/issue-662-598-537-619-584-583-design-contracts.md` の
 「監視の結果ファイル」にある。
 
 **起動 1 回の結末を 1 つの値として読むのもここである（#729）。** `read_launch_outcome` が

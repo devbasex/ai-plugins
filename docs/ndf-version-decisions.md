@@ -54,8 +54,8 @@ MVV の Mission（使命）が同じ語で、「ミッション MVV」のよう�
 まま失敗する。表と旧名の入口のスクリプトを消すのは、断る振る舞いを 1 つの正式版として出した後で、時期は #1427 が決める。
 
 v10.17.42 で配布の工程を、プラグインの版数を持たないプロジェクトでも回せるようにし、マージが本番へのデプロイに
-なるリポジトリでは承認ゲート 2 をそのマージに掛けるようにした（#1336）。設計は `issues/issue-1336-design.md`、
-選んだ結論と理由の全体は `issues/issue-1336-design-decisions.md` にある。
+なるリポジトリでは承認ゲート 2 をそのマージに掛けるようにした（#1336）。設計は `issues/old/issue-1336-design.md`、
+選んだ結論と理由の全体は `issues/old/issue-1336-design-decisions.md` にある。
 
 **止める場所はプランや hook ではなく `merge-when-green` に置く** ── プランのマージはすべてこのスクリプトを通るため、
 4 ランタイムのどれから流しても同じに止まる。hook だけでは、スクリプトが子のプロセスで呼ぶ `gh` が見えない。
@@ -89,7 +89,7 @@ v10.17.42 で配布の工程を、プラグインの版数を持たないプロ�
 通すとベースブランチを消す。
 
 v10.17.43 で課題の棚卸しに優先順位の組み替えを足し、Skill を `issue-upkeep` から `backlog-refinement` へ改名した
-（#1429）。設計は `issues/issue-1429-design.md`、選んだ結論と理由の全体は `issues/issue-1429-design-decisions.md` にある。
+（#1429）。設計は `issues/old/issue-1429-design.md`、選んだ結論と理由の全体は `issues/old/issue-1429-design-decisions.md` にある。
 
 **マイルストーンの間をプロダクトバックログ、マイルストーンの中の順位をスプリントバックログの候補と読む**（決定 0）
 ── #1407 の「スプリントはマイルストーンから切り出す」を変えずに済み、1 本から何十ものスプリントを出す
@@ -126,8 +126,8 @@ v10.17.43 で課題の棚卸しに優先順位の組み替えを足し、Skill �
 必要があり、仕様の判断になる。承認の後に境界・移動先・依存が変わると、承認した時と違う移動が実行されうる。
 
 v10.17.44 で relay のアカウント選びを残りの量で行うようにし（#1453）、手動反映の本番系で `pace: auto` / `fast` を
-使えるようにした（#1454）。設計はそれぞれ `issues/issue-1453-design.md` と `issues/issue-1454-design.md`（決定の記録は
-`issues/issue-1454-design-decisions.md`）にある。
+使えるようにした（#1454）。設計はそれぞれ `issues/old/issue-1453-design.md` と `issues/old/issue-1454-design.md`（決定の記録は
+`issues/old/issue-1454-design-decisions.md`）にある。
 
 **アカウントは残りの量 = 枠の大きさ ×（1 − 使用率）の、枠ごとの最小で選ぶ**（#1453）── 使用率だけで選ぶと、
 Max 20x に余りがあっても使用率の少し低い Max 5x へ切り替わる。5 時間の枠と週の枠は大きさの比が違うため、使用率の
@@ -166,7 +166,7 @@ Max 5x の週の枠（640）は非公式の比による仮の値で、見かけ�
 `verify` が走らない件は #1457 へ回した。
 
 v10.17.45 で relay の Bedrock の登録をスクリプトにし、`account` の副命令をすべて引数でも打てるようにした（#1468）。
-設計は `issues/issue-1468-design.md`、選んだ結論と理由の全体は `issues/issue-1468-design-decisions.md` にある。
+設計は `issues/old/issue-1468-design.md`、選んだ結論と理由の全体は `issues/old/issue-1468-design-decisions.md` にある。
 
 **副命令は `add-bedrock`・`check metered`・`remove metered` にする**（決定 1）── `add <名前>` の名前には `bedrock` も
 使えるため、`add bedrock` は同じ形に別の意味を持ち込む。`metered` は従量の接続の予約の名前として既にあり、一覧の行の
@@ -204,7 +204,7 @@ converse`（最大 1 トークン）で行う**（決定 4）── `aws` はエ
 2 回の登録が通るか・コードと待機中のログインの寿命（未確認のまま残ること 1・2）はリリース後テストで見る。
 
 v10.17.46 でテストの戦略の宣言に suite の種別と起動の失敗を持たせ、ツールのパスを検査とコミットから外した
-（スプリント m1483、#1483 #1436 #476）。設計は `issues/issue-1483-design.md` と `issues/issue-1436-design.md` にある。
+（スプリント m1483、#1483 #1436 #476）。設計は `issues/old/issue-1483-design.md` と `issues/old/issue-1436-design.md` にある。
 
 **suite の種別のキーは `kind`、値は `test` と `lint`、引数は `--test-kind` にする**（#1483 決定 1）── `lint` は整形の
 検査を含む静的解析の総称として流通している。`check` は宣言の `checks` と CI の `test.ci.check` に既にあり、1 語 1 意味が
@@ -242,7 +242,7 @@ MVV の助言は「機械のチェックで外れた」で、理由は同じ版�
 
 v10.17.47 で cross-refactoring の取り消しと公開を 1 つの判定から決め（スプリント m1482、#1482 #817 #1399 #1237）、
 費用と検査の物差しを 2c の前後で同じに使えるようにした（スプリント m1316、#1316 #1317）。設計は
-`issues/issue-1482-design.md`・`issues/issue-1482-design-decisions.md` と `issues/issue-1316-design.md` にある。
+`issues/old/issue-1482-design.md`・`issues/old/issue-1482-design-decisions.md` と `issues/old/issue-1316-design.md` にある。
 
 **取り消しと公開は `refactor_lib/ledger.py` の 1 つの判定にまとめ、判定は git を書き換えない**（#1482 決定 1）──
 取り消しの範囲・積み直しの対象・push してよいコミットは、どれも「このコミットは残すコミットか」への答えから導ける。
@@ -277,8 +277,8 @@ cross-refactoring の作業ディレクトリが消えた。打ち切った分�
 まだ通っていない（次のスプリントの構造改善が最初の実地になる）。#1316 #1317 も実データで確かめた記録が無い。
 
 v10.17.48 で `pace: auto` / `fast` の昇格の前に導入の確認を走らせ、待ちの雛形から外部の `timeout` を外し、雛形から
-組んだ全体テストを注記で知らせるようにした（スプリント m1457、#1457 #1297 #1437）。設計は `issues/issue-1457-design.md`・
-`issues/issue-1457-design-decisions.md`・`issues/issue-1297-design.md`・`issues/issue-1437-design.md` にある。
+組んだ全体テストを注記で知らせるようにした（スプリント m1457、#1457 #1297 #1437）。設計は `issues/old/issue-1457-design.md`・
+`issues/old/issue-1457-design-decisions.md`・`issues/old/issue-1297-design.md`・`issues/old/issue-1437-design.md` にある。
 
 **導入の確認は昇格のプランの先頭のステップ `verify` に置く**（#1457 決定 1）── 確認と承認ゲート 2 を同じプランに置けば、
 「確認が通った後にだけ MVV 判定へ進む」をステップの並びだけで守れる。`prepare` の後に置くと、落ちたスプリントごとに昇格の
@@ -368,7 +368,7 @@ PR 1557 の検査で実際に動いた。GraphQL の枠の既定 2 は測って�
 手元で確かめただけである。#1482 の取り消しと公開は、構造改善で取り消しが起きず今回も実物では確かめられていない。
 
 v10.17.50 で relay の下の claude と `supervise.py` の claude -p が claude.ai のコネクタを読むようにした（スプリント m1523、
-#1523）。要求は `issues/issue-1523-requirements.md`、設計は `issues/issue-1523-design.md`（決定 1〜5）にある。
+#1523）。要求は `issues/old/issue-1523-requirements.md`、設計は `issues/old/issue-1523-design.md`（決定 1〜5）にある。
 設計 PR 1562・実装 PR 1563 をスプリント PR 1564 で取り込んだ。
 
 **子の認証は今のまま変数のトークンで渡し、アカウントの置き場の `scopes` を `CLAUDE_CODE_OAUTH_SCOPES` で添える**
@@ -410,8 +410,8 @@ Claude Code 自身が置き場の `.credentials.json` を更新して NDF の更
 v10.17.51 で引継ぎ文書を `.ndf/handoff/` に置く仕組みを足し（スプリント m1560、#1560）、従量の接続の子の claude へ
 宣言の変数を `--settings` でも渡し（#1543）、登録済みアカウントの子の claude にアカウントの設定ディレクトリを渡して
 トークンの更新を claude に任せた（スプリント m1576、#1576）。PR は 1573・1577・1581 である。設計は
-`issues/issue-1560-design.md`（決定 1〜10 は `issues/issue-1560-design-decisions.md`）と
-`issues/issue-1576-design.md`（決定 1〜21 は `issues/issue-1576-design-decisions.md`）にある。
+`issues/old/issue-1560-design.md`（決定 1〜10 は `issues/old/issue-1560-design-decisions.md`）と
+`issues/old/issue-1576-design.md`（決定 1〜21 は `issues/old/issue-1576-design-decisions.md`）にある。
 
 **3 つを 10.17.51 にまとめて 1 回出した**（承認ゲート 2、提示物 `issues/approval-ndf-v10.17.51.md`）── 利用者が決めた。
 検証へは 10.17.51-dev.1（1573・1577）と 10.17.51-dev.2（1581）の 2 回に分けて配り、どちらも 3 つのランタイムで

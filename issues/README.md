@@ -9,7 +9,7 @@
 | `issues/old/` | 完了した issue の計画・実機試行の記録・報告書・調査資料 |
 
 `old/` の中身は履歴として読むためのもので、運用判断の根拠には使わない。確定した仕様は
-[docs/specifications/](../docs/specifications/) を、リリース済みの変更点は `CLAUDE.md` を参照する。
+[docs/specifications/](../docs/specifications/) を、リリース済みの変更点は [CHANGELOG.md](../CHANGELOG.md) を参照する。
 
 ## old/ へ移すときの参照
 
