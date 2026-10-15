@@ -172,7 +172,9 @@ def cmd_predict(a, root: Path) -> tuple[dict, int]:
                 break
     uncal = sum(1 for i in items if any(v["mark"] != "実績" for v in i["values"].values()))
     summary = f"見積もり {len(items)} 件（実績の無い値を含むもの {uncal} 件）"
-    return result(TOOL + "-predict", "ok", summary, items + warnings, {"estimates": len(items), "uncalibrated": uncal, "records": str(rec)}), 0
+    return result(
+        TOOL + "-predict", "ok", summary, items + warnings, {"estimates": len(items), "uncalibrated": uncal, "records": str(rec)}
+    ), 0
 
 
 def cmd_human(a, root: Path) -> tuple[dict, int]:
@@ -197,7 +199,9 @@ def cmd_import(a, root: Path) -> tuple[dict, int]:
     from supervise_lib.paths import sv_state_home
 
     got = estimate_import.import_supervise_progress(Path(a.sv_dir) if a.sv_dir else sv_state_home(), rec)
-    return result(TOOL + "-import", "ok", f"実行 {got['added']} 件を取り込み、{got['skipped']} 件を重複で飛ばした", [], {**got, "records": str(rec)}), 0
+    return result(
+        TOOL + "-import", "ok", f"実行 {got['added']} 件を取り込み、{got['skipped']} 件を重複で飛ばした", [], {**got, "records": str(rec)}
+    ), 0
 
 
 def cmd_errors(a, root: Path) -> tuple[dict, int]:

@@ -72,7 +72,20 @@ def _impl_history(seconds_list, config=None):
     for i, sec in enumerate(seconds_list):
         run = f"r{i}"
         at = f"2026-10-0{i + 1}T00:00:00+00:00"
-        er.append_actual(d, {"kind": "run_start", "at": at, "run": run, "plan": "/p.json", "issues": [i], "phase": "実装", "from": None, "attempt": 1, "imported": False})
+        er.append_actual(
+            d,
+            {
+                "kind": "run_start",
+                "at": at,
+                "run": run,
+                "plan": "/p.json",
+                "issues": [i],
+                "phase": "実装",
+                "from": None,
+                "attempt": 1,
+                "imported": False,
+            },
+        )
         er.append_actual(d, {"kind": "step", "at": at, "run": run, "step": "impl", "type": "work", "exit": 0, "seconds": sec, "retry": 0})
         er.append_actual(d, {"kind": "run_end", "at": at, "run": run, "outcome": "成功", "wall_seconds": sec, "config": config or {}})
 
@@ -103,7 +116,10 @@ def test_impl_timeout_argument_and_declaration_win():
     from supervise_lib.verify_steps import impl_timeout_estimate
 
     _impl_history([1000, 5000, 3000])
-    assert impl_timeout_estimate(_ns(impl_timeout=1234, impl_timeout_source="arg")) == (1234, {"source": "arg", "samples": 0, "high": None, "basis": []})
+    assert impl_timeout_estimate(_ns(impl_timeout=1234, impl_timeout_source="arg")) == (
+        1234,
+        {"source": "arg", "samples": 0, "high": None, "basis": []},
+    )
     assert impl_timeout_estimate(_ns(impl_timeout=99, impl_timeout_source="decl"))[1]["source"] == "decl"
 
 

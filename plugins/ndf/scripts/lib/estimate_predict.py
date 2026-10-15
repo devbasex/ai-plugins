@@ -268,7 +268,11 @@ def errors(estimates: list[dict], rows: list[dict], since: str | None = None, al
         actual = {"A": got.a, "L": got.l, "C": got.c}
         predicted = {k: ((e.get("values") or {}).get(k) or {}).get("typical") for k in ("A", "L", "C")}
         ratio = {
-            k: (round(actual[k] / predicted[k], 4) if isinstance(predicted[k], (int, float)) and predicted[k] and actual[k] is not None else None)
+            k: (
+                round(actual[k] / predicted[k], 4)
+                if isinstance(predicted[k], (int, float)) and predicted[k] and actual[k] is not None
+                else None
+            )
             for k in ("A", "L", "C")
         }
         items.append({"kind": "pair", "issue": issue, "estimate": e.get("id"), "predicted": predicted, "actual": actual, "ratio": ratio})

@@ -40,7 +40,10 @@ def _estimate(n, a, at="2026-10-01T00:00:00+00:00", basis=(7,)):
         "L": {**ACT, "typical": 600, "high": 600, "basis": [{"issue": 7, "value": 600}]},
         "C": {"mark": "未校正"},
     }
-    er.append_estimate(Path(os.environ["NDF_ESTIMATE_DIR"]), {"at": at, "id": f"e{n}{at}", "issue": n, "done": "実装", "items": {}, "config": {}, "values": vals})
+    er.append_estimate(
+        Path(os.environ["NDF_ESTIMATE_DIR"]),
+        {"at": at, "id": f"e{n}{at}", "issue": n, "done": "実装", "items": {}, "config": {}, "values": vals},
+    )
 
 
 def test_overlay_rounds_a_and_keeps_other_values(repo):
@@ -79,7 +82,7 @@ def test_value_of_over_scale_uses_unrounded_ratio(repo):
     b.sizes = RE.estimate_overlay(repo, [2], b.cfg.scale)
     b.estimates = RE.apply_overlay(b.estimates, b.sizes)
     row = R.compute_ranking(b)["milestones"][0]["rows"][0]
-    assert row["value"] == round(row["cod"] / (50.0 ** b.cfg.size_exponent), 9)
+    assert row["value"] == round(row["cod"] / (50.0**b.cfg.size_exponent), 9)
 
 
 def test_no_records_keep_given_sizes(repo):

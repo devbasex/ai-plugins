@@ -39,7 +39,7 @@ def test_records_dir_git_common_dir_from_worktree(tmp_path, monkeypatch):
     _git(repo, "worktree", "add", "-q", str(tmp_path / "wt"))
     want = (repo / ".git" / "ndf" / "estimate").resolve()
     assert er.estimate_dir(repo).resolve() == want
-    assert er.estimate_dir(tmp_path / "wt" ).resolve() == want
+    assert er.estimate_dir(tmp_path / "wt").resolve() == want
 
 
 def test_records_dir_decl_then_non_git(tmp_path, monkeypatch):
@@ -104,11 +104,39 @@ def test_append_is_append_only(tmp_path):
 
 
 def _run(rows, run, issues, phase, at, steps, outcome=None, end_at=None, frm=None, imported=False, config=None):
-    rows.append({"schema": 1, "kind": "run_start", "at": at, "run": run, "plan": f"/p/{run}.json", "issues": issues, "phase": phase, "from": frm, "attempt": 1, "imported": imported})
+    rows.append(
+        {
+            "schema": 1,
+            "kind": "run_start",
+            "at": at,
+            "run": run,
+            "plan": f"/p/{run}.json",
+            "issues": issues,
+            "phase": phase,
+            "from": frm,
+            "attempt": 1,
+            "imported": imported,
+        }
+    )
     for sid, sec, cost in steps:
-        rows.append({"schema": 1, "kind": "step", "at": at, "run": run, "step": sid, "type": "work", "exit": 0, "seconds": sec, "cost_usd": cost, "retry": 0})
+        rows.append(
+            {
+                "schema": 1,
+                "kind": "step",
+                "at": at,
+                "run": run,
+                "step": sid,
+                "type": "work",
+                "exit": 0,
+                "seconds": sec,
+                "cost_usd": cost,
+                "retry": 0,
+            }
+        )
     if outcome:
-        rows.append({"schema": 1, "kind": "run_end", "at": end_at, "run": run, "outcome": outcome, "wall_seconds": 1, "config": config or {}})
+        rows.append(
+            {"schema": 1, "kind": "run_end", "at": end_at, "run": run, "outcome": outcome, "wall_seconds": 1, "config": config or {}}
+        )
 
 
 def test_totals_include_failed_cancelled_interrupted_and_retry():

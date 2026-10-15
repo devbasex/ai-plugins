@@ -129,7 +129,13 @@ class ActualsLog:
         models = sorted({m for e in self.state.log for m in ((e.get("llm") or {}).get("models") or {})})
         ran = {e.get("id") for e in self.state.log}
         harness = sorted({_runtime(steps[i]) for i in ran if i in steps and steps[i].get("type") in ("work", "drive")})
-        return {"models": models or None, "harness": "+".join(h for h in harness if h) or None, "review": None, "test": None, "parallel": None}
+        return {
+            "models": models or None,
+            "harness": "+".join(h for h in harness if h) or None,
+            "review": None,
+            "test": None,
+            "parallel": None,
+        }
 
 
 def _step_cost_usd(kind, llm: dict) -> float | None:

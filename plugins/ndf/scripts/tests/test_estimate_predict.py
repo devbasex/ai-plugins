@@ -10,7 +10,6 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS / "lib"))
 import estimate_predict as ep  # noqa: E402
-import estimate_records as er  # noqa: E402
 
 DEAD = lambda run: False  # noqa: E731
 CFG = {"models": ["opus"], "harness": "claude-p", "review": None, "test": None, "parallel": None}
@@ -19,9 +18,45 @@ CFG = {"models": ["opus"], "harness": "claude-p", "review": None, "test": None, 
 def _done(rows, issue, a, cost=1.0, config=None, day=1, phase="実装", issues=None):
     run = f"r{issue}-{day}-{len(rows)}"
     at = f"2026-10-{day:02d}T00:00:00+00:00"
-    rows.append({"schema": 1, "kind": "run_start", "at": at, "run": run, "plan": "/p.json", "issues": issues or [issue], "phase": phase, "from": None, "attempt": 1, "imported": False})
-    rows.append({"schema": 1, "kind": "step", "at": at, "run": run, "step": "impl", "type": "work", "exit": 0, "seconds": a, "cost_usd": cost, "retry": 0})
-    rows.append({"schema": 1, "kind": "run_end", "at": f"2026-10-{day:02d}T01:00:00+00:00", "run": run, "outcome": "成功", "wall_seconds": 3600, "config": config or CFG})
+    rows.append(
+        {
+            "schema": 1,
+            "kind": "run_start",
+            "at": at,
+            "run": run,
+            "plan": "/p.json",
+            "issues": issues or [issue],
+            "phase": phase,
+            "from": None,
+            "attempt": 1,
+            "imported": False,
+        }
+    )
+    rows.append(
+        {
+            "schema": 1,
+            "kind": "step",
+            "at": at,
+            "run": run,
+            "step": "impl",
+            "type": "work",
+            "exit": 0,
+            "seconds": a,
+            "cost_usd": cost,
+            "retry": 0,
+        }
+    )
+    rows.append(
+        {
+            "schema": 1,
+            "kind": "run_end",
+            "at": f"2026-10-{day:02d}T01:00:00+00:00",
+            "run": run,
+            "outcome": "成功",
+            "wall_seconds": 3600,
+            "config": config or CFG,
+        }
+    )
 
 
 def _req(**kw):
@@ -86,7 +121,9 @@ def test_unknown_config_keys_are_not_compared():
 def test_items_select_by_at_most_one_difference():
     rows: list[dict] = []
     ests = []
-    for i, items in enumerate([{"spread": "軽", "rework": "軽"}, {"spread": "重", "rework": "軽"}, {"spread": "重", "rework": "重", "information": "重"}]):
+    for i, items in enumerate(
+        [{"spread": "軽", "rework": "軽"}, {"spread": "重", "rework": "軽"}, {"spread": "重", "rework": "重", "information": "重"}]
+    ):
         _done(rows, 30 + i, 100 * (i + 1), day=i + 1)
         ests.append({"schema": 1, "id": f"e{i}", "at": f"2026-09-0{i + 1}T00:00:00+00:00", "issue": 30 + i, "done": "実装", "items": items})
     got = ep.predict(_req(items={"spread": "軽", "rework": "軽"}), rows, ests, {}, {}, alive=DEAD)
@@ -166,8 +203,33 @@ def test_impl_limit_includes_failures_and_skips_other_config():
     for d, a in enumerate([1000, 2000]):
         _done(rows, 1, a, day=d + 1)
     _done(rows, 2, 99999, day=3, config={**CFG, "harness": "codex"})
-    rows.append({"schema": 1, "kind": "run_start", "at": "2026-10-04T00:00:00+00:00", "run": "f", "plan": "/p.json", "issues": [3], "phase": "実装", "from": None, "attempt": 1, "imported": False})
-    rows.append({"schema": 1, "kind": "step", "at": "2026-10-04T00:00:00+00:00", "run": "f", "step": "impl", "type": "work", "exit": 1, "seconds": 3000, "retry": 0})
+    rows.append(
+        {
+            "schema": 1,
+            "kind": "run_start",
+            "at": "2026-10-04T00:00:00+00:00",
+            "run": "f",
+            "plan": "/p.json",
+            "issues": [3],
+            "phase": "実装",
+            "from": None,
+            "attempt": 1,
+            "imported": False,
+        }
+    )
+    rows.append(
+        {
+            "schema": 1,
+            "kind": "step",
+            "at": "2026-10-04T00:00:00+00:00",
+            "run": "f",
+            "step": "impl",
+            "type": "work",
+            "exit": 1,
+            "seconds": 3000,
+            "retry": 0,
+        }
+    )
     _done(rows, 4, 500, day=5)
     got = ep.impl_limit(rows)
     assert (got["samples"], got["high"]) == (4, 3000)
@@ -182,8 +244,22 @@ def test_errors_pairs_after_estimate_only():
     _done(rows, 1, 200, day=5)
     _done(rows, 2, 400, day=6)
     ests = [
-        {"schema": 1, "id": "a", "at": "2026-10-03T00:00:00+00:00", "issue": 1, "done": "実装", "values": {"A": {"typical": 100}, "L": {"typical": 3600}, "C": {"typical": 1}}},
-        {"schema": 1, "id": "b", "at": "2026-10-03T00:00:00+00:00", "issue": 2, "done": "実装", "values": {"A": {"typical": 300}, "L": {}, "C": {}}},
+        {
+            "schema": 1,
+            "id": "a",
+            "at": "2026-10-03T00:00:00+00:00",
+            "issue": 1,
+            "done": "実装",
+            "values": {"A": {"typical": 100}, "L": {"typical": 3600}, "C": {"typical": 1}},
+        },
+        {
+            "schema": 1,
+            "id": "b",
+            "at": "2026-10-03T00:00:00+00:00",
+            "issue": 2,
+            "done": "実装",
+            "values": {"A": {"typical": 300}, "L": {}, "C": {}},
+        },
         {"schema": 1, "id": "c", "at": "2026-10-03T00:00:00+00:00", "task": "x", "done": "実装", "values": {"A": {"typical": 1}}},
     ]
     items, metrics = ep.errors(ests, rows, alive=DEAD)

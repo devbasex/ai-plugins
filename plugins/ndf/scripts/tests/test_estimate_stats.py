@@ -47,7 +47,10 @@ def test_ratio_of_sums():
 
 def test_slow_step_expected_for_keeps_values():
     cfg = ss.resolve_config(None, None, {"window": 3, "min_samples": 2, "factor": 2, "floor": 10})
-    assert ss.expected_for([100, 1, 2, 9, 7], cfg) == (14.0, {"source": "history", "samples": 3, "factor": 2.0, "floor": 10.0, "median": 7.0})
+    assert ss.expected_for([100, 1, 2, 9, 7], cfg) == (
+        14.0,
+        {"source": "history", "samples": 3, "factor": 2.0, "floor": 10.0, "median": 7.0},
+    )
     assert ss.expected_for([1, 2, 3], cfg)[1]["source"] == "floor"
     assert ss.expected_for([5], cfg)[1]["source"] == "default"
 

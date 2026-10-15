@@ -11,6 +11,7 @@ from pathlib import Path
 
 from estimate_records import actual_run_id, append_actual, read_actuals
 
+
 def plan_beside_state(state: Path) -> tuple[str, dict]:
     """状態ディレクトリ（<名前>-state/）の隣のプラン（<名前>.json）か、中の写し（plan.json）を読む。"""
     for plan in (state.with_name(state.name[: -len("-state")] + ".json"), state / "plan.json"):
@@ -56,16 +57,33 @@ def import_supervise_progress(sv_dir: Path | str, directory: Path | str) -> dict
                     batches.append((cur, buf))
                 attempt += 1
                 rid = actual_run_id(plan, d["at"])
-                cur = {"kind": "run_start", "at": d["at"], "run": rid, "plan": plan, "issues": issues, "phase": phase,
-                       "from": d.get("from"), "attempt": attempt, "imported": True}
+                cur = {
+                    "kind": "run_start",
+                    "at": d["at"],
+                    "run": rid,
+                    "plan": plan,
+                    "issues": issues,
+                    "phase": phase,
+                    "from": d.get("from"),
+                    "attempt": attempt,
+                    "imported": True,
+                }
                 buf = []
             elif d.get("kind") == "step" and cur and d.get("step"):
                 buf.append(
-                    {"kind": "step", "at": d.get("at"), "run": cur["run"], "step": str(d["step"]), "type": str(d.get("type") or ""),
-                     "exit": d.get("exit") if isinstance(d.get("exit"), int) else None,
-                     "seconds": d.get("seconds") if isinstance(d.get("seconds"), (int, float)) else None,
-                     "cost_usd": 0.0 if d.get("type") in ("run", "pr") else (d.get("cost") if isinstance(d.get("cost"), (int, float)) else None),
-                     "retry": 0}
+                    {
+                        "kind": "step",
+                        "at": d.get("at"),
+                        "run": cur["run"],
+                        "step": str(d["step"]),
+                        "type": str(d.get("type") or ""),
+                        "exit": d.get("exit") if isinstance(d.get("exit"), int) else None,
+                        "seconds": d.get("seconds") if isinstance(d.get("seconds"), (int, float)) else None,
+                        "cost_usd": 0.0
+                        if d.get("type") in ("run", "pr")
+                        else (d.get("cost") if isinstance(d.get("cost"), (int, float)) else None),
+                        "retry": 0,
+                    }
                 )
         if cur:
             batches.append((cur, buf))
@@ -80,4 +98,3 @@ def import_supervise_progress(sv_dir: Path | str, directory: Path | str) -> dict
             existing.add(start["run"])
             added += 1
     return {"added": added, "skipped": skipped}
-

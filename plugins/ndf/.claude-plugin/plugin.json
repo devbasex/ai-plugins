@@ -69,6 +69,7 @@
     "./skills/worktree",
     "./skills/out-of-scope",
     "./skills/backlog-refinement",
+    "./skills/estimate",
     "./skills/progress-tracking",
     "./skills/release-verification",
     "./skills/retrospective",
