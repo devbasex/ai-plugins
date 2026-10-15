@@ -31,6 +31,7 @@ def test_success_writes_start_step_end(tmp_path):
     start, step, end = _rows()
     assert (start["issues"], start["phase"], start["attempt"], start["imported"]) == ([42], "実装", 1, False)
     assert step["run"] == start["run"] == end["run"] and step["exit"] == 0
+    assert step["cost_usd"] == 0.0  # LLM を呼ばない run のステップは 0（費用の不明とは分ける）
     assert end["outcome"] == "成功" and set(end["config"]) == set(er.CONFIG_KEYS)
     assert not (tmp_path / "state" / actuals.RUN_FILE).exists()
 

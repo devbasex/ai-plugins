@@ -97,7 +97,7 @@ class ActualsLog:
                 "type": str(cur.get("type") or ""),
                 "exit": cur.get("exit") if isinstance(cur.get("exit"), int) else None,
                 "seconds": cur.get("seconds") if isinstance(cur.get("seconds"), (int, float)) else None,
-                "cost_usd": llm.get("cost") if isinstance(llm.get("cost"), (int, float)) else None,
+                "cost_usd": _step_cost_usd(cur.get("type"), llm),
                 "runtime": _runtime(step),
                 "models": sorted(llm.get("models") or {}) or None,
                 "retry": retry,
@@ -130,6 +130,13 @@ class ActualsLog:
         ran = {e.get("id") for e in self.state.log}
         harness = sorted({_runtime(steps[i]) for i in ran if i in steps and steps[i].get("type") in ("work", "drive")})
         return {"models": models or None, "harness": "+".join(h for h in harness if h) or None, "review": None, "test": None, "parallel": None}
+
+
+def _step_cost_usd(kind, llm: dict) -> float | None:
+    """ステップの USD。LLM を呼ばないステップ（run・pr）は 0、LLM の費用を取れなかったステップは空（不明）。"""
+    if isinstance(llm.get("cost"), (int, float)):
+        return llm["cost"]
+    return 0.0 if kind in ("run", "pr") else None
 
 
 def _runtime(step: dict) -> str | None:

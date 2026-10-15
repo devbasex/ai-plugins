@@ -64,7 +64,7 @@ def import_supervise_progress(sv_dir: Path | str, directory: Path | str) -> dict
                     {"kind": "step", "at": d.get("at"), "run": cur["run"], "step": str(d["step"]), "type": str(d.get("type") or ""),
                      "exit": d.get("exit") if isinstance(d.get("exit"), int) else None,
                      "seconds": d.get("seconds") if isinstance(d.get("seconds"), (int, float)) else None,
-                     "cost_usd": d.get("cost") if isinstance(d.get("cost"), (int, float)) and d.get("type") in ("work", "judge") else None,
+                     "cost_usd": 0.0 if d.get("type") in ("run", "pr") else (d.get("cost") if isinstance(d.get("cost"), (int, float)) else None),
                      "retry": 0}
                 )
         if cur:
