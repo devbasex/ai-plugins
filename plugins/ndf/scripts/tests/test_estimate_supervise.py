@@ -104,3 +104,13 @@ def test_impl_timeout_argument_and_declaration_win():
     _impl_history([1000, 5000, 3000])
     assert impl_timeout_estimate(_ns(impl_timeout=1234, impl_timeout_source="arg")) == (1234, {"source": "arg", "samples": 0, "high": None, "basis": []})
     assert impl_timeout_estimate(_ns(impl_timeout=99, impl_timeout_source="decl"))[1]["source"] == "decl"
+
+
+def test_impl_timeout_window_and_min_samples_from_declaration(tmp_path):
+    from supervise_lib.verify_steps import impl_timeout_estimate
+
+    (tmp_path / ".ndf").mkdir()
+    (tmp_path / ".ndf" / "estimate.json").write_text('{"window": 2, "min_samples": 2}')
+    _impl_history([9000, 1000, 2000])
+    timeout, est = impl_timeout_estimate(_ns(worktree=str(tmp_path)))
+    assert (est["source"], est["samples"], est["high"]) == ("history", 2, 2000)

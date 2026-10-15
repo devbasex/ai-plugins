@@ -63,7 +63,9 @@ def impl_timeout_estimate(a) -> tuple[int, dict]:
 
     root = getattr(a, "repo", None) or getattr(a, "worktree", None) or "."
     try:
-        got = ep.impl_limit(er.read_actuals(er.estimate_dir(root)))
+        decl = er.load_estimate_decl(root)
+        window, least = decl.get("window") or ep.stats.WINDOW, decl.get("min_samples") or ep.IMPL_MIN_SAMPLES
+        got = ep.impl_limit(er.read_actuals(er.estimate_dir(root)), window, least)
     except (er.DeclError, OSError) as e:
         got = {"source": "uncalibrated", "samples": 0, "high": None, "basis": [], "note": str(e)[:200]}
     if got["source"] == "history" and got["high"]:
