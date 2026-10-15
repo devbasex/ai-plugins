@@ -3944,6 +3944,36 @@
       "context": "ndf-estimate",
       "meaning": "見積もりの時点の 6 項目・実行の構成・予測した A・H・L・C を残したもの。後で実績と突き合わせる",
       "pending_source": "issues/issue-1856-requirements.md"
+    },
+    {
+      "term": "実績の記録",
+      "context": "ndf-estimate",
+      "meaning": "supervise の実行ごとに、始まり・ステップの終わり・実行の終わりを追記する行の列。終わり方（成功・承認ゲート・失敗・取り消し）と秒・USD・実行の構成を持ち、終わりの行の無い実行は中断として数える",
+      "pending_source": "issues/issue-1856-design.md"
+    },
+    {
+      "term": "着手前の 6 項目",
+      "context": "ndf-estimate",
+      "meaning": "要件の確定度・必要な情報の取得・変更の波及・検証のしやすさ・環境の準備・手戻りの見込み。それぞれ軽・重・判定できないの 3 値で、加点して時間へ換算せず、類似の実績を選ぶ材料と説明に使う",
+      "pending_source": "issues/issue-1856-design.md"
+    },
+    {
+      "term": "見積もりの完了条件",
+      "context": "ndf-estimate",
+      "meaning": "見積もる作業がどこまで終われば完了かを、supervise のフェーズの名前（設計・実装・検査・配布（開発版）・配布（本番））で表したもの",
+      "pending_source": "issues/issue-1856-design.md"
+    },
+    {
+      "term": "尺度を超える",
+      "context": "ndf-estimate",
+      "meaning": "A の見込みが Size 1 の基準の、尺度の最大の倍を超えたときの Size の値。最大へ潰さず、分割を検討する印にする",
+      "pending_source": "issues/issue-1856-design.md"
+    },
+    {
+      "term": "Size 1 の基準",
+      "context": "ndf-estimate",
+      "meaning": "Size を A の見込みから丸めるときの単位の秒。宣言が無ければ、実績のある課題のうち A の小さい 4 分の 1 の中央値",
+      "pending_source": "issues/issue-1856-design.md"
     }
   ]
 }
