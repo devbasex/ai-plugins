@@ -58,7 +58,7 @@ m1743・m1847・m1683 の 9 回。#1334。検査のプランへ `--budget-minute
 | `supervise_lib/new_args.py` | `--impl-timeout`・`--refactor-budget-minutes` を受け、1 以上の整数でなければ argparse の誤り（`positive_int`）で止める。値の出どころの 1 行を受ける種別の `--help` に出す |
 | `supervise_lib/decl.py` | `StepBudgets`（`impl_timeout` / `refactor_budget_minutes`。`PositiveInt` か `None`）で `supervise.json` の 2 項目だけを取り出して検査し（`step_budgets`。ほかの項目は拒まない）、違えば項目の名前を含む `DeclError`。`apply_decls` が引数 → 宣言で `a` に載せ、`decl_fields` が子のプランへ引き継ぐ |
 | `supervise_lib/paths.py` | `DRIVES` が指す cross-refactoring の置き場から `refactor_lib/vocabulary.py` を読み込み、`default_refactor_budget_minutes()` で既定の予算を返す |
-| `supervise_lib/templates.py` | `plan_impl` は `impl` の `timeout` を `a.impl_timeout`、無ければ雛形の値にする。`_inspect_steps` は想定最大時間があれば cmd に `--budget-minutes N` を足し、`timeout` を `with_margin(M × 60)` にする |
+| `supervise_lib/templates.py` | `plan_impl` は `impl` の `timeout` を `a.impl_timeout`、無ければ実績の記録からの見込み、それも無ければ雛形の値にする（`verify_steps.impl_timeout_estimate`。#1856）。`_inspect_steps` は想定最大時間があれば cmd に `--budget-minutes N` を足し、`timeout` を `with_margin(M × 60)` にする |
 
 スプリントの雛形（`sprint_waves.py`）は既に `**decl_fields(a)` で子のプランの引数を組むため、変えずに値が届く。
 設計の結果のステージ（`design_stage.rewrite`）は `impl` の `prompt` だけを書き換え、`timeout` を残す。
@@ -81,7 +81,7 @@ graph TD
 | --- | --- | --- |
 | I1 | 値は「`new` の引数 → `.ndf/supervise.json` → 値なし」の順で 1 つに決まる | 起こさない（`apply_decls` の 1 か所で決める。決定 4） |
 | I2 | 値は 1 以上の整数（JSON の数の整数。文字列・小数・真偽値・0・負は違う） | プランを書かずに終了コード 2 で止まり、違う項目の名前を出す |
-| I3 | `impl` の `timeout` は、実装の上限があればその値、無ければ雛形の値（3600 秒） | — |
+| I3 | `impl` の `timeout` は、実装の上限があればその値、無ければ同じ実行の構成の直近の実装の秒の最大に `with_margin` を掛けた値（3 件以上のとき）、それも無ければ雛形の値（3600 秒・`uncalibrated`）。出所はステップの `estimate` の欄に出る（#1856 の決定 10） | — |
 | I4 | `refactor` の cmd が `--budget-minutes N` を含むのは想定最大時間があるときだけで、N は想定最大時間に等しい | — |
 | I5 | `refactor` の `timeout` は `with_margin(M × 60)`。`with_margin` が最低 30 秒を足すため、常に M × 60 より大きい | — |
 | I6 | `new sprint` / `new close` が書く課題ごとの実装のプランと検査のプラン（最終の検査を含む）は、同じ入力から作られ、I3〜I5 の値がそろう | — |
@@ -93,7 +93,7 @@ graph TD
 - **宣言の形は、`supervise.py new` のすべての種別で、引数を渡したときも検査する**（`test` の形の検査と同じ時点）
 - **受けない種別へ渡した引数は、argparse が知らない引数として止める。** `fill_new_defaults` がその属性を `None` で埋めるため、雛形は種別をまたいで
   `getattr` で読める
-- **宣言も引数も無いプランは、`impl` の `timeout` が雛形の値で、`refactor` の cmd に `--budget-minutes` を持たず、`refactor` の `timeout` が
+- **宣言も引数も無いプランは、`impl` の `timeout` が実績からの見込みか雛形の値で（I3）、`refactor` の cmd に `--budget-minutes` を持たず、`refactor` の `timeout` が
   `with_margin(既定の予算 × 60)` になる。** 既定の予算 30 分で 1980 秒である
 - `with_margin` の式と最低 30 秒（`MARGIN_FLOOR`）・cross-refactoring の既定の予算・ほかのステップの `timeout` は変えない
 - `vocabulary.py` は読み込むときに `refactoring` の `references/vocabulary.md` を読む。読めなければ例外のまま止まり、プランを書かない
@@ -118,7 +118,7 @@ graph TD
 
 テストは `plugins/ndf/scripts/tests/test_supervise_step_budgets.py` と、契約の fixture（`tests/fixtures/supervise-contract/`）にある。
 
-- `new impl` / `new sprint` に実装の上限を宣言か引数で渡すと、`impl` の `timeout` がその値になり、どちらも無ければ変更前と同じ値であること（I3）
+- `new impl` / `new sprint` に実装の上限を宣言か引数で渡すと、`impl` の `timeout` がその値になり、どちらも無く実績も無ければ変更前と同じ値であること（I3。実績からの見込みは `test_estimate_supervise.py`）
 - 想定最大時間を宣言か引数（`new check` / `new sprint` / `new close`）で渡すと、`refactor` の cmd に `--budget-minutes N`、`timeout` が `with_margin(N × 60)` になること（I4・I5）
 - 想定最大時間が無いと、cmd に `--budget-minutes` が無く、`timeout` が `with_margin(DEFAULT_BUDGET_MINUTES × 60)` で、定数を差し替えると `timeout` も追うこと（決定 8）
 - 値を既存の `.ndf/supervise.json` に書くとプランに入ること
