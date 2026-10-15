@@ -48,6 +48,29 @@ def with_margin(seconds: int) -> int:
     return int(seconds) + max(MARGIN_FLOOR, math.ceil(int(seconds) * MARGIN_SHARE))
 
 
+IMPL_TIMEOUT_DEFAULT = 3600  # 実装の上限の既定（引数・宣言・実績のどれも無いとき）
+
+
+def impl_timeout_estimate(a) -> tuple[int, dict]:
+    """実装のステップの (timeout, 根拠)。引数 → 宣言 → 実績の見込み（同じ構成の直近の最大 + 余裕）→ 3600（#1856 の決定 10）。
+
+    根拠はステップの `estimate` の欄の形 `{source: arg|decl|history|uncalibrated, samples, high, basis}`。"""
+    if getattr(a, "impl_timeout", None):
+        source = getattr(a, "impl_timeout_source", None) or "arg"
+        return int(a.impl_timeout), {"source": source, "samples": 0, "high": None, "basis": []}
+    import estimate_predict as ep
+    import estimate_records as er
+
+    root = getattr(a, "repo", None) or getattr(a, "worktree", None) or "."
+    try:
+        got = ep.impl_limit(er.read_actuals(er.estimate_dir(root)))
+    except (er.DeclError, OSError) as e:
+        got = {"source": "uncalibrated", "samples": 0, "high": None, "basis": [], "note": str(e)[:200]}
+    if got["source"] == "history" and got["high"]:
+        return with_margin(math.ceil(got["high"])), got
+    return IMPL_TIMEOUT_DEFAULT, got
+
+
 def _template_arg(a) -> str:
     """`--template` と、静的解析の雛形なら `--test-kind lint`（種別は `test-run.py` へそのまま渡す）。"""
     template = getattr(a, "test_cmd", None)
