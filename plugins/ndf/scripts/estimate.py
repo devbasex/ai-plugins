@@ -198,10 +198,12 @@ def cmd_import(a, root: Path) -> tuple[dict, int]:
     rec = er.estimate_dir(root)
     from supervise_lib.paths import sv_state_home
 
-    got = estimate_import.import_supervise_progress(Path(a.sv_dir) if a.sv_dir else sv_state_home(), rec)
-    return result(
-        TOOL + "-import", "ok", f"実行 {got['added']} 件を取り込み、{got['skipped']} 件を重複で飛ばした", [], {**got, "records": str(rec)}
-    ), 0
+    # 既定の置き場所は全プロジェクト共通のため、このリポジトリのプランだけを取り込む
+    got = estimate_import.import_supervise_progress(Path(a.sv_dir) if a.sv_dir else sv_state_home(), rec, only_own=not a.sv_dir)
+    summary = f"実行 {got['added']} 件を取り込み、{got['skipped']} 件を重複で飛ばした"
+    if got["foreign"]:
+        summary += f"（別のリポジトリのプラン {got['foreign']} 件は除いた）"
+    return result(TOOL + "-import", "ok", summary, [], {**got, "records": str(rec)}), 0
 
 
 def cmd_errors(a, root: Path) -> tuple[dict, int]:

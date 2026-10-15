@@ -50,7 +50,7 @@ python3 "$SCRIPTS/estimate.py" predict --issue 1856 --done 実装 \
 | コマンド | 使う場面 |
 | --- | --- |
 | `estimate.py human --issue N --minutes M [--what 説明]` | 人が判断・レビュー・確認に手を動かした時間を残す（H の材料） |
-| `estimate.py import [--sv-dir DIR]` | 導入の初回に、既存の supervise の記録から実績の記録を作る（何度流しても同じ） |
+| `estimate.py import [--sv-dir DIR]` | 導入の初回に、既存の supervise の記録から実績の記録を作る（何度流しても同じ）。既定の置き場所（全プロジェクト共通）からは、このリポジトリのプランだけを取り込む |
 | `estimate.py errors [--since 日付]` | 見積もりの記録と、その後の実績を突き合わせ、A・L・C の誤差の比と A の順位相関を出す |
 | `estimate.py actuals [--issue N] [--done 実装]` | 課題ごとの実績の合計と、その材料の実行（終わり方を含む）を見る |
 

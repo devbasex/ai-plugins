@@ -1,6 +1,6 @@
 """見積もりの記録と実績の記録（#1856）。置き場の解決・行の形の検査・追記と読み出し・課題ごとの実績の合計・取り込み。
 
-置き場は `NDF_ESTIMATE_DIR` → `.ndf/estimate.json` の `estimate_dir` → `<git の共通ディレクトリ>/ndf/estimate` →
+置き場は `NDF_ESTIMATE_DIR` → `.ndf/estimate.json` の `records_dir` → `<git の共通ディレクトリ>/ndf/estimate` →
 `$XDG_STATE_HOME/ndf/estimate/<リポジトリの絶対パスの sha256 の先頭 12 文字>`。git の共通ディレクトリは
 `.git` を読んで決め、`git` を起動しない（部品は subprocess を使わない。設計の非機能の条件）。
 
@@ -212,7 +212,7 @@ class Decl(schema.Shape):
     min_samples: int | None = None
     size_unit_seconds: float | None = None
     scale: list[int] | None = None
-    estimate_dir: str | None = None
+    records_dir: str | None = None
 
 
 def estimate_dir(root: Path | str | None = None) -> Path:
@@ -222,7 +222,7 @@ def estimate_dir(root: Path | str | None = None) -> Path:
     start = Path(root or Path.cwd()).resolve()
     got = find_git_dir(start)
     top = got[0] if got else start
-    configured = load_estimate_decl(top).get("estimate_dir")
+    configured = load_estimate_decl(top).get("records_dir")
     if configured:
         p = Path(configured)
         return p if p.is_absolute() else top / p

@@ -84,6 +84,26 @@ def test_import_from_sv_dir(bare_repo, tmp_path):
     assert code == 0 and out["metrics"]["added"] == 1
 
 
+def test_import_default_takes_hashed_state_dirs_of_this_repo_only(bare_repo, tmp_path):
+    """既定の置き場所は全プロジェクト共通: `<stem>-<hash>/` の実体を読み、別のリポジトリと持ち主の分からないプランは除く。"""
+    other = tmp_path / "other"
+    other.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=other, check=True)
+    sv = tmp_path / "sv"
+    run = json.dumps({"kind": "run", "at": "2026-10-01T00:00:00+00:00", "from": None}) + "\n"
+    for name, plan in (
+        ("mine-0123abcd", {"フェーズ": "実装", "課題": [3], "作業場所": str(bare_repo)}),
+        ("theirs-4567ef01", {"フェーズ": "実装", "課題": [3], "作業場所": str(other)}),
+        ("unknown-89ab2345", {"フェーズ": "実装", "課題": [3]}),
+    ):
+        (sv / name).mkdir(parents=True)
+        (sv / name / "plan.json").write_text(json.dumps(plan, ensure_ascii=False))
+        (sv / name / "progress.jsonl").write_text(run)
+    code, out, err = _cli(bare_repo, "import", env={"NDF_SV_STATE_DIR": str(sv)})
+    assert code == 0, err
+    assert (out["metrics"]["added"], out["metrics"]["foreign"]) == (1, 2)
+
+
 def test_predict_uses_no_subprocess_or_network(bare_repo, monkeypatch, capsys):
     import estimate
 

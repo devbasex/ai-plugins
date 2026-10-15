@@ -51,7 +51,7 @@ def test_records_dir_decl_then_non_git(tmp_path, monkeypatch):
     assert got.parent == tmp_path / "state" / "ndf" / "estimate"
     assert len(got.name) == 12
     (plain / ".ndf").mkdir()
-    (plain / ".ndf" / "estimate.json").write_text(json.dumps({"estimate_dir": "rec"}))
+    (plain / ".ndf" / "estimate.json").write_text(json.dumps({"records_dir": "rec"}))
     assert er.estimate_dir(plain) == plain / "rec"
 
 
@@ -206,8 +206,8 @@ def test_import_progress_is_idempotent(tmp_path):
     ]
     (st / "progress.jsonl").write_text("".join(json.dumps(l) + "\n" for l in lines))
     out = tmp_path / "rec"
-    assert ei.import_supervise_progress(tmp_path / "sv", out) == {"added": 2, "skipped": 0}
-    assert ei.import_supervise_progress(tmp_path / "sv", out) == {"added": 0, "skipped": 2}
+    assert ei.import_supervise_progress(tmp_path / "sv", out) == {"added": 2, "skipped": 0, "foreign": 0}
+    assert ei.import_supervise_progress(tmp_path / "sv", out) == {"added": 0, "skipped": 2, "foreign": 0}
     rows = er.read_actuals(out)
     starts = [r for r in rows if r["kind"] == "run_start"]
     assert all(r["imported"] for r in starts) and [r["attempt"] for r in starts] == [1, 2]
