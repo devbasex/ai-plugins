@@ -43,7 +43,8 @@
 | [post_queue.py](post_queue.py) | 上限のときに投稿を積む待ち行列と、上限の見分け | `cross-review`（`review_lib/` / `rotate-pr.sh`） |
 | [review_criteria.py](review_criteria.py) | 指摘の基準の正本（基準 1〜4・書かないもの・見送りの種類・見送りの返信の雛形）と、レビューの宣言（`.ndf/review.json`。重点と、`version: 2` の 1 つか `version: 3` の名前つきの複数のレビューのプロファイル）の読み取りと、変更ファイルのパスによるプロファイルの選択。レビュー担当への節・修正担当への節（要求の変更が要る指摘は写しを直さずに止めて返す節を含む）・見送りの返信・振り分けで許す値・プロファイルの分類の照合（glob は `pace.py` の `matches`）を組む。宣言が読めなくても例外を上げず既定の基準で返す。基準 2 と、`version: 3` の最上位の `criteria`（宣言の側で外せない基準）は、どのプロファイルを選んでも外せない | `cross-review`（`review_lib/commands/init.py`・`launch-reviewer.sh`） / `fix-steps.py` |
 | [review_criteria_decl.py](review_criteria_decl.py) | レビューの宣言のプロファイル（`version: 2` の `profile`・`version: 3` の `profiles` の各要素）の形の検査と `Profile` の型。既定の基準・節の組み立て・選択は持たない | `review_criteria.py` |
-| [result_posts.py](result_posts.py) | 結果ファイル（指摘ファイル・修正の戻り値）を投稿へ組み立て、待ち行列から送る | `cross-review`（`review_lib/` / `drive.py`） / `fix-steps.py` |
+| [result_posts.py](result_posts.py) | 結果ファイル（指摘ファイル・修正の戻り値）を投稿へ組み立て、待ち行列から送る。修正を送る前に宣言の整形（`formatting.format_before_push`）を上のコミットとして足す | `cross-review`（`review_lib/` / `drive.py`） / `fix-steps.py` |
+| [formatting.py](formatting.py) | 整形の宣言（`.ndf/supervise.json` の `format`）の形の検査と読み取り（`format_commands`・`read_format_commands`）、整形を当てて整形で変わった追跡ファイルだけを上のコミットにする `apply_format`、送る前の整形 `format_before_push`。外部パッケージを要しない | `result_posts.py` / `supervise.py`（`supervise_lib/decl.py`・`commands.py` の `format`） |
 | [git-credential.sh](git-credential.sh) | credential helper が応答しない環境で git を通す退避の値 | `cross-refactoring`（`refactor_lib/publish.py`） |
 | [closing-issues.sh](closing-issues.sh) | Pull Request の本文から、閉じる語が指す issue を取り出す | `progress-tracking`（スプリントを閉じる） / `merged`（OPEN の一覧） / `development-workflow` の hook |
 | [refresh.py](refresh.py) | 観点の出典の取得・指紋の比較・一覧の提示・待ちの扱い（#554）。**提示するだけで書き換えない** | `instructions-check.py` |

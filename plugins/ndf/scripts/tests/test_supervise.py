@@ -2154,7 +2154,7 @@ def test_new_impl_opens_pr_before_test_all(tmp_path):
     assert st["test-limited"]["next"] == "design-tests" and st["design-match"]["next"] == "pr" and st["pr"]["next"] == "test-all"
     assert st["doc-lint"]["next"] == "ready" and st["ready"]["next"] == "merge-gate" and st["merge-gate"]["next"] == "merge"
     assert "git push" in st["ready"]["cmd"] and "gh pr ready {pr}" in st["ready"]["cmd"]
-    assert st["fix"]["next"] == "test-limited"
+    assert st["fix"]["next"] == "format"  # 範囲テストの前のステップの先頭（ai-plugins は整形を宣言する。#1651）
     assert set(st["judge"]["choices"]) <= set(st) | {"stop"}
 
 

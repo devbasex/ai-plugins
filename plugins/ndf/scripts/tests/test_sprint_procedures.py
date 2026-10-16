@@ -101,6 +101,7 @@ def test_single_plans_keep_their_step_order_and_gain_the_record(tmp_path):
         "impl",
         "base-sync",
         "fix-base",
+        *["format", "fix-format"],  # 宣言の整形（.ndf/supervise.json の format。#1651）
         "sync",
         "fix-sync",
         "test-limited",

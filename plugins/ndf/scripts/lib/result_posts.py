@@ -32,6 +32,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import deps  # noqa: E402  外部パッケージの環境（投稿キューは耐久の記録を使う）
 import design_body  # noqa: E402
+import formatting  # noqa: E402
 import post_queue  # noqa: E402
 import statefile  # noqa: E402
 import tool_paths  # noqa: E402
@@ -486,16 +487,15 @@ def _git(worktree: pathlib.Path | str, *args: str) -> subprocess.CompletedProces
 
 
 def push_fix(worktree: pathlib.Path | str, head_branch: str, fix_commit: str | None) -> PushResult:
-    """現在の頭を送り先のブランチへ送り、報告されたコミットが載ったことを確かめる。
+    """宣言の整形を上のコミットとして足し（#1507）、現在の頭を送り先のブランチへ送り、報告されたコミットが載ったことを確かめる。
 
     **ブランチ名だけを指定しない。** 作業ツリーが切り離された頭で作られている場合、
-    ブランチ名だけの指定では現在の頭が送られないまま終了コード 0 で終わる。
-    """
+    ブランチ名だけの指定では現在の頭が送られないまま終了コード 0 で終わる。"""
     if not fix_commit:
         return PushResult(True, False, True, "コミットが無いため送らない")
     if not (str(worktree or "") and head_branch):
         return PushResult(False, False, False, "送る先（作業ツリーとブランチ）が分からない")
-    if blocked := tool_paths.before_push(worktree, head_branch, lambda *a: _git(worktree, *a)):  # #1436
+    if blocked := formatting.format_before_push(worktree) or tool_paths.before_push(worktree, head_branch, lambda *a: _git(worktree, *a)):
         return PushResult(False, False, False, blocked)
     pushed = _git(worktree, "push", "origin", f"HEAD:{head_branch}")
     if pushed.returncode != 0:

@@ -1,4 +1,4 @@
-"""run・sync-check・design-glossary・note・history・expected の副命令（#1142 の C1）。
+"""run・sync-check・format・design-glossary・note・history・expected の副命令（#1142 の C1）。
 
 `engine` を import するのはこのモジュールだけである。
 """
@@ -10,6 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import formatting
 import mdtable
 import report_fields
 import slow_step as ss
@@ -59,6 +60,35 @@ def sync_check(root: str, commit: bool, checks: list[tuple[str, str]] | None = N
             failed.append("commit")
     summary = f"失敗: {', '.join(failed)}" if failed else f"同期とチェック {len(checks)} 本が通った"
     return result("supervise-sync-check", "stopped" if failed else "ok", summary, items, {"failed": len(failed), "changed": len(changed)})
+
+
+def cmd_format(root: str, commit: bool) -> tuple[dict, int]:
+    """宣言（.ndf/supervise.json の format）の整形を根で順に打つ（実装のプランの format のステップ。#1651）。
+
+    0 = すべて 0（commit なら整形で変わったファイルを 1 つのコミットにした）/ 1 = 整形で直らない違反が残る /
+    2 = 宣言が無い・形が違う・コマンドが 0 と 1 以外・コミットが落ちた。"""
+    tool = "supervise-format"
+    try:
+        commands = formatting.read_format_commands(root)
+    except formatting.FormatError as e:
+        return result(tool, "stopped", str(e), [], {"changed": 0}), 2
+    if not commands:
+        return result(tool, "stopped", f"整形の宣言が無い（{root}/.ndf/{SUPERVISE_DECL} の format）", [], {"changed": 0}), 2
+    out = formatting.apply_format(root, commands, commit=commit)
+    items = list(out.runs)
+    if out.commit:
+        items.append({"name": "commit", "sha": out.commit, "files": out.files})
+    if out.skipped:
+        items.append({"name": "skipped", "files": out.skipped, "reason": "整形の前から変更があったためコミットに入れない"})
+    metrics = {"changed": len(out.files)}
+    if out.status == formatting.OK:
+        done = f"整形 {len(commands)} 本が通った" + (f"。{len(out.files)} 件をコミットした" if out.commit else "（変わったファイルは無い）")
+        return result(tool, "ok", done, items, metrics), 0
+    if out.failed == "commit":
+        items.append({"name": "commit", "result": "failed", "tail": out.tail})
+    code = 1 if out.status == formatting.VIOLATIONS else 2
+    why = "整形で直らない違反が残る" if code == 1 else "整形を当てられない"
+    return result(tool, "stopped", f"{why}: {out.failed}（{out.tail[-300:]}）", items, metrics), code
 
 
 def _ignored(root: str, paths: list[str]) -> list[str]:
