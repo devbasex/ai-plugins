@@ -19,6 +19,7 @@ OVER_SCALE = "尺度を超える"
 MAX_CANDIDATES = stats.WINDOW
 P_BREAK = 5  # この件数以上なら中央値と 80 分位、未満なら中央値と最大（決定 5）
 IMPL_MIN_SAMPLES = 3  # 実装の上限を実績から出す最少の件数（決定 10。遅れの見張りの min_samples の既定と揃える）
+TIMED_OUT_EXIT = 124  # ステップの `timeout` で打ち切られた終了コード（supervise_lib/steps.py・engine.py）
 VALUE_KEYS = ("A", "H", "L", "C")
 
 
@@ -201,20 +202,26 @@ def predict(
 def impl_limit(rows: list[dict], window: int = stats.WINDOW, min_samples: int = IMPL_MIN_SAMPLES, alive: Callable | None = None) -> dict:
     """同じ構成でフェーズ `実装`・ステップ `impl` の `step` の行の直近 window 件（失敗を含む）の最大（決定 10）。
 
-    返り値: {"source": "history"|"uncalibrated", "samples", "high", "basis": [実行の識別子...]}。余裕は呼び出し側が掛ける。"""
+    返り値: {"source": "history"|"uncalibrated", "samples", "high", "basis": [実行の識別子...]}。`history` のときだけ
+    `timed_out`（最大が打ち切り（終了コード 124。秒は前の上限と同じ値）の標本か）を足す。余裕は呼び出し側が掛け、
+    `timed_out` が真なら足さない（打ち切りのたびに上限が伸び続けないように）。"""
     cur = current_config(rows)
     table = er.run_table(rows, alive or (lambda run: False))
-    picked: list[tuple[float, str, float]] = []
+    picked: list[tuple[float, str, float, bool]] = []
     for run in table.values():
         if run.phase != "実装" or config_diff(cur, run.config)[0]:
             continue
         for s in run.steps:
             if s.get("step") == "impl" and isinstance(s.get("seconds"), (int, float)):
-                picked.append((er.ts(s.get("at")) or er.ts(run.started) or 0, run.run, float(s["seconds"])))
+                at = er.ts(s.get("at")) or er.ts(run.started) or 0
+                picked.append((at, run.run, float(s["seconds"]), s.get("exit") == TIMED_OUT_EXIT))
     picked = stats.recent(sorted(picked), window)
+    basis = [r for _, r, _, _ in picked]
     if len(picked) < min_samples:
-        return {"source": "uncalibrated", "samples": len(picked), "high": None, "basis": [r for _, r, _ in picked]}
-    return {"source": "history", "samples": len(picked), "high": stats.maximum(v for _, _, v in picked), "basis": [r for _, r, _ in picked]}
+        return {"source": "uncalibrated", "samples": len(picked), "high": None, "basis": basis}
+    high = stats.maximum(v for _, _, v, _ in picked)
+    timed_out = all(t for _, _, v, t in picked if v == high)
+    return {"source": "history", "samples": len(picked), "high": high, "basis": basis, "timed_out": timed_out}
 
 
 # --- 誤差 ---

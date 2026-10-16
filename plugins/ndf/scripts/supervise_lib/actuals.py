@@ -51,11 +51,14 @@ class ActualsLog:
             return {}
         return data if isinstance(data, dict) else {}
 
-    def start(self, start: str | None) -> None:
-        """実行の始まり。同じプランの何回目かは `progress.jsonl` の `run` の行の数で数える。"""
-        at = clock.now_iso()
+    def start(self, start: str | None, at: str | None = None) -> None:
+        """実行の始まり。同じプランの何回目かは `progress.jsonl` の `run` の行の数で数える。
+
+        `at` は `run_line` が書いた `run` の行の `at`。識別子は取り込み（`estimate_import`）と同じく、状態ディレクトリの
+        実体とその `at` から作る（同じ実行を取り込みが別の実行として足さない）。"""
+        at = at or clock.now_iso()
         plan = self.plan_path or str(self.state.dir)
-        rid = er.actual_run_id(plan, at)
+        rid = er.actual_run_id(self.state.dir, at)
         try:
             (self.state.dir / RUN_FILE).write_text(json.dumps({"run": rid, "began": time.time()}), encoding="utf-8")
         except OSError:

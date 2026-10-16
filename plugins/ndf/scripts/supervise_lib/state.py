@@ -142,14 +142,14 @@ class RunState:
         return mvv, (self.sprint_mvv_of(plan) if mvv.approved else None)
 
     # --- 途中の報告 ---
-    def progress_write(self, rec: dict) -> None:
+    def progress_write(self, rec: dict) -> dict:
         rec = {"kind": rec.pop("kind"), "at": clock.now_iso(), **rec}
         with open(self.progress, "a") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
         self.progress_seen = self.progress.stat().st_size
         self.last_line_at = time.time()
-        if rec["kind"] in self.pcount:
-            self.pcount[rec["kind"]] += 1
+        self.pcount.update({k: self.pcount[k] + 1 for k in (rec["kind"],) if k in self.pcount})
+        return rec
 
     def attention(self, reason: str, text: str) -> None:
         """conductor の判断が要る出来事を 1 行残す（同じ理由と文は 1 度だけ）。"""
@@ -235,9 +235,9 @@ class RunState:
             }
         )
 
-    def run_line(self, start: str | None) -> None:
-        """実行の始まりの 1 行（`from` は `--from` のステップか null。`recorded_pr` が前の実行の範囲を決める）。"""
-        self.progress_write({"kind": "run", "from": start})
+    def run_line(self, start: str | None) -> str:
+        """実行の始まりの 1 行（`from` は `--from` のステップか null。`recorded_pr` が前の実行の範囲を決める）。行の `at` を返す。"""
+        return self.progress_write({"kind": "run", "from": start})["at"]
 
     def recorded_pr(self) -> str:
         """前の実行が決めた Pull Request（`--from` の再開で使う）。最後の `--from` を付けない実行の始まりの行より後の

@@ -293,8 +293,16 @@ def human_row(issues: list[int], seconds: float, what: str | None) -> dict:
     return {"kind": "human", "issues": [int(i) for i in issues], "seconds": float(seconds), "what": what}
 
 
-def actual_run_id(plan: str, started: str) -> str:
-    return f"{hashlib.sha256(str(plan).encode()).hexdigest()[:12]}-{started}"
+def actual_run_id(state_dir: Path | str, started: str) -> str:
+    """実行の識別子。材料は状態ディレクトリの実体の解決済みパスと、`progress.jsonl` の `run` の行の `at` である。
+
+    supervise のライブ記録と `estimate.py import` が同じ材料から作り、同じ実行に同じ識別子を付ける（プランのパスは
+    一時プランの状態を置き場所へ移すと両者で違うため使わない）。"""
+    try:
+        key = str(Path(state_dir).resolve())
+    except OSError:
+        key = str(state_dir)
+    return f"{hashlib.sha256(key.encode()).hexdigest()[:12]}-{started}"
 
 
 # --- 実行の表と課題ごとの合計 ---

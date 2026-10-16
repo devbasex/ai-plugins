@@ -52,7 +52,7 @@ IMPL_TIMEOUT_DEFAULT = 3600  # 実装の上限の既定（引数・宣言・実�
 
 
 def impl_timeout_estimate(a) -> tuple[int, dict]:
-    """実装のステップの (timeout, 根拠)。引数 → 宣言 → 実績の見込み（同じ構成の直近の最大 + 余裕）→ 3600（#1856 の決定 10）。
+    """実装のステップの (timeout, 根拠)。引数 → 宣言 → 実績の見込み（同じ構成の直近の最大 + 余裕。最大が打ち切りなら余裕を足さない）→ 3600（#1856 の決定 10）。
 
     根拠はステップの `estimate` の欄の形 `{source: arg|decl|history|uncalibrated, samples, high, basis}`。"""
     if getattr(a, "impl_timeout", None):
@@ -68,8 +68,11 @@ def impl_timeout_estimate(a) -> tuple[int, dict]:
         got = ep.impl_limit(er.read_actuals(er.estimate_dir(root)), window, least)
     except (er.DeclError, OSError) as e:
         got = {"source": "uncalibrated", "samples": 0, "high": None, "basis": [], "note": str(e)[:200]}
+    timed_out = got.pop("timed_out", False)  # ステップの `estimate` の欄の形には載せない
     if got["source"] == "history" and got["high"]:
-        return with_margin(math.ceil(got["high"])), got
+        high = math.ceil(got["high"])
+        # 最大が打ち切りの標本（秒は前の上限）なら余裕を足さない。足すと打ち切りのたびに上限が伸び続ける
+        return (high if timed_out else with_margin(high)), got
     return IMPL_TIMEOUT_DEFAULT, got
 
 

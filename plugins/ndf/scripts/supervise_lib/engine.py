@@ -214,8 +214,7 @@ class Engine:
 
     def prepare(self, start: str | None) -> tuple[str, str] | None:
         """実行の条件と worktree の用意（耐久ステップの中で 1 回だけ流す）。流さないなら (結果, 理由)。"""
-        self.state.run_line(start)
-        self.actuals.start(start)
+        self.actuals.start(start, self.state.run_line(start))
         if self.plan.get("実行の条件") and not start:
             skipped = self.check_condition(self.plan["実行の条件"])
             if skipped:

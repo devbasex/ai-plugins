@@ -75,7 +75,7 @@ def import_supervise_progress(sv_dir: Path | str, directory: Path | str, only_ow
                 if cur:
                     batches.append((cur, buf))
                 attempt += 1
-                rid = actual_run_id(plan, d["at"])
+                rid = actual_run_id(state, d["at"])
                 cur = {
                     "kind": "run_start",
                     "at": d["at"],
