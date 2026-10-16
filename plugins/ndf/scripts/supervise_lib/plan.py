@@ -148,7 +148,9 @@ queue の置き換え: `{queue_prs}` は前のすべてのステージの Pull R
   `gate` なら関門として止まる。`choices` を渡すとその中から選ばせる
 
 途中の報告（`<state-dir>/progress.jsonl`。1 行 1 つの JSON。LLM は使わない）:
-- `"kind": "step"`: ステップの切り替わりごとに 1 行（at・step・type・exit・seconds・cost・next・summary）
+- `"kind": "step"`: ステップの切り替わりごとに 1 行（at・step・type・exit・seconds・cost・next・summary・out）。
+  `run --from` の再開では、judge と work の `inputs` のうち今の実行でまだ流れていないステップへ、前の実行（`--from` の
+  無い最後の実行より後）の最後の行の exit と `out` の出力ファイルの末尾を渡す
 - `"kind": "alive"`: 最後の行から計画の `"report_interval"`（既定 600 秒）動きが無いとき（step・elapsed・
   worker の最後の報告。run のステップなら stderr の最後の行を last_output に）。長いステップ（work・run・drive）の
   待ちは区切って見るので、ステップの途中でも書く
@@ -172,7 +174,8 @@ queue の置き換え: `{queue_prs}` は前のすべてのステージの Pull R
   中央値 × `factor`（下限 `floor`）、履歴が `min_samples` 件に満たなければ `default`。所要の履歴は成功と関門の
   ステップだけを `<git の共通ディレクトリ>/ndf/step-history.jsonl`（git でなければ `<state-dir>/`）へ積む
 - 経過（利用上限の待ちを除く）が想定を超えると、ステップの `"probe"` で一次の調査を流す。`"output"`（run・drive の
-  既定。stderr が伸びたか）/ `"worker"`（work の既定。worker の行かコミットが足されたか）/
+  既定。stderr が伸びたか。drive は前の確認より後の Pull Request の投稿・レビュー・コミットも見る）/ `"worker"`（work の
+  既定。worker の行かコミットが足されたか、会話を残す claude -p のセッションの記録が伸びたか）/
   `{"cmd": "<コマンド>"}`（シェルを通さずに打ち、最後の行の JSON の `metrics.action` を読む。`{pr}` `{base}`
   `{branch}` `{state_dir}` を置き換える）/ `false`（調べずに判定へ）
 - `action` が `wait` か `remedied` なら、`max_waits` 回まで想定の秒だけ待ち直す。`retry` / `fix` / `stop` はそのまま
