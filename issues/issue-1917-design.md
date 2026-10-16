@@ -49,7 +49,7 @@
 
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
-| I1 | プラン | 実装のプランでは、作業の後・`sync`（宣言が無ければ範囲テスト）の前にベースブランチの取り込みのステップが 1 つある。検査のプランと差分の検査では、全体テストの前に 1 つある | 雛形のテストが落ちる |
+| I1 | プラン | 実装のプランでは、作業の後・取り込みの後の検査の並び（下の「取り込みの後の行き先」）の前にベースブランチの取り込みのステップが 1 つある。検査のプランと差分の検査では、全体テストの前に 1 つある | 雛形のテストが落ちる |
 | I2 | プラン | ベースブランチの取り込みのステップは 1 つの関数（`base_sync_steps`）だけが組む。雛形がコマンドの文字列を自分で組まない | 雛形のテストが落ちる（`git merge` の文字列が雛形に残る） |
 | I3 | 作業ブランチ | ベースブランチの取り込みはマージのコミットだけで行う。rebase・強制 push をしない | — （コマンドに無い。テストで `--force` と `rebase` が打たれないことを縛る） |
 | I4 | 作業ブランチ | ベースブランチが進んでいなければ、取り込みのステップはコミットを作らない。push しないのは、ベースブランチを取り込み済みで、upstream へ送る未 push のコミットも無いときだけである。`--push` のときは、ベースブランチが進んでいなくても `HEAD` が upstream より進んでいれば（`fix-base` が衝突を解いてコミットした後の打ち直しなど）push する | 既存のプランの結果が変わる／検査のプランで worker の解いた取り込みが送られず、リモートの PR が衝突したまま残る |
@@ -62,7 +62,7 @@
 
 | # | イベント | 発生元 | 受け手 |
 | --- | --- | --- | --- |
-| E1 | ベースブランチを取り込んだ | `base-sync` | 次のステップ（実装: `sync` か範囲テスト／検査: 全体テスト） |
+| E1 | ベースブランチを取り込んだ | `base-sync` | 次のステップ（実装: 取り込みの後の検査の並びの先頭／検査: 全体テスト） |
 | E2 | 取り込みが衝突した | `base-sync`（`git merge` の衝突） | `base-sync` の中の用語集の取り込み（E3）か、`fix-base`（E4） |
 | E3 | 用語集の衝突をスクリプトで解いた | `glossary.py merge`（`base-sync` が呼ぶ） | `base-sync`（取り込みのコミットまで終わる → E1 と同じ行き先。語の衝突が残れば `glossary.py merge` が終了コード 1 を返し、E4 へ） |
 | E4 | 修正の worker が衝突を解いてマージのコミットを作った | `fix-base` | `base-sync`（打ち直して `MERGE_HEAD` を閉じる。`--push` なら upstream より進んだ分を push してから次へ） |
@@ -141,6 +141,20 @@ graph TB
 
 `T` から `P`・`V` へは関数の呼び出し、`P`・`V` から `B`・`M` へはステップの `cmd` に書くコマンドである（点線）。
 `base-return` は `state.json` を読むだけで書かない。
+
+### システム構成図（文脈・配置）
+
+```mermaid
+graph LR
+    SV[supervise.py run<br/>手元のプロセス] -->|ステップの cmd| MS[merged-steps.py]
+    MS -->|fetch・merge・push| O[(origin<br/>ベースブランチ・作業ブランチ)]
+    MS -->|pr view・pr merge| GH[(GitHub の PR)]
+    SV -->|fix-base| W[修正の worker<br/>claude -p]
+    W --> WT[(worktree)]
+    MS --> WT
+```
+
+配置は今と同じで、プロセスも置き場も増やさない。外の系は origin と GitHub で、書くのは作業ブランチへの push だけである。
 
 ### パッケージ・モジュール構成
 
@@ -242,7 +256,7 @@ base_sync_steps(source: str, nxt: str, *, push: bool, on_error: str | None, retu
 | --- | --- | --- | --- |
 | `base-sync` | run（`stage` は呼び手の工程。`timeout` 600） | `python3 merged-steps.py base-sync <source>[ --push] --root .` | `next: nxt`、`on_exit: {"1": "fix-base"}`、`on_fail: on_error`（`None` なら持たない） |
 | `fix-base` | work（`kind: 修正`、`inputs: ["base-sync"]`） | `BASE_FIX_PROMPT` | `next: base-sync` |
-| `base-return` | run（`returns` のときだけ） | `python3 merged-steps.py base-return --state {state_dir}` | `next: base-sync`、`on_fail: on_error`（`None` なら持たない） |
+| `base-return` | run（`returns` のときだけ。`kind: "戻り"`） | `python3 merged-steps.py base-return --state {state_dir}` | `next: base-sync`、`on_fail: on_error`（`None` なら持たない） |
 
 `BASE_FIX_PROMPT`: 「入力はベースブランチの取り込みのステップの出力である。衝突が残っていれば、`git status` で
 衝突したファイルを確かめ、両方の変更を残して衝突を解き、`git add` してマージのコミットを作る。push 前の検査で
@@ -254,9 +268,20 @@ base_sync_steps(source: str, nxt: str, *, push: bool, on_error: str | None, retu
 
 | 雛形 | `source` | `nxt` | `push` | `on_error` | `returns` | マージの衝突の行き先 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `plan_to_merge`（`new impl`・`new fix`・スプリントの実装） | `--base <a.base>` | `sync`（宣言が無ければ `test-limited`） | しない（`pr` のステップが push する） | `None` | する | `merge_steps(a, next=…, on_conflict="base-return")` |
+| `plan_to_merge`（`new impl`・`new fix`・スプリントの実装） | `--base <a.base>` | 取り込みの後の検査の並びの先頭（下の段落） | しない（`pr` のステップが push する） | `None` | する | `merge_steps(a, next=…, on_conflict="base-return")` |
 | `plan_check`（`new check --pr`。スプリントの検査も `plan_sprint_check` がこれを呼ぶ） | `--pr {pr}` | `test-all` | する | `"abort"` | する | `merge_steps(a, on_fail="abort", next="record", on_conflict="base-return")` |
 | `plan_check_since`（差分の検査） | `--base <a.base>` | `test-all` | する | `"abort"` | しない | 今のまま（`on_fail: abort`） |
+
+**取り込みの後の行き先（実装のプラン）: 並びは `impl → base-sync → format → sync → lint-limited → test-limited` に揃える。**
+`base-sync` の `nxt` は、指示と整形（#1651）の `pre_test_steps(a)` が返す並びの先頭（`format`・`sync`・`lint-limited` の
+うち置いたもの）で、並びが空なら `test-limited` である。#1651 が入る前は `sync`（宣言が無ければ `test-limited`）で、
+宣言の無いプロジェクトでは同じ値になる。`head[-1]["next"]` を `base-sync` へ向けるのはこの主題で、`fix-format`・`fix-lint`・
+`fix` の `next`（同じ先頭）は #1651 の受け持ちである。整形を取り込みの後に置くのは、取り込んだ合成の形を整えてから
+sync と範囲テストへ渡すためである。#2003-4 の「修正の後は `sync` からやり直す」は、`sync` より前に置いた整形を含む
+「並びの先頭からやり直す」として満たす（整形の宣言が無ければ先頭は `sync`）。
+
+`base-return` のステップは `kind: "戻り"` を持つ。上限の計算（#1909 の「上限の計算」の戻りの輪）はこの印で
+`merge →(4) base-return → base-sync → … → merge` の輪を見つけ、戻りの上限 3 回ぶんを上限に足す（前提 1）。
 
 ## 処理の流れ
 
@@ -265,11 +290,11 @@ base_sync_steps(source: str, nxt: str, *, push: bool, on_error: str | None, retu
 ```mermaid
 graph TD
     impl[impl<br/>new fix では無い] --> bs[base-sync]
-    bs -->|0| sync[sync か test-limited]
+    bs -->|0| sync[並びの先頭<br/>format / sync / lint-limited / test-limited]
     bs -->|1 衝突が残る| fb[fix-base]
     fb --> bs
     bs -->|2・3| stop1[止まる]
-    sync --> rest[範囲テスト → 突き合わせ → pr → test-all → doc-lint → ready]
+    sync --> rest[… → 範囲テスト → 突き合わせ → pr → test-all → doc-lint → ready]
     rest --> gate[merge-gate]
     gate --> merge[merge / merge-approved]
     merge -->|0| fin[end か escape]
@@ -279,7 +304,7 @@ graph TD
     br -->|1 上限超え| stop3[止まる<br/>理由に戻った回数]
 ```
 
-戻った後は `sync` からやり直し、`pr` のステップが取り込みのコミットを push する（#2003-4）。
+戻った後は並びの先頭（整形の宣言が無ければ `sync`）からやり直し、`pr` のステップが取り込みのコミットを push する（#2003-4）。
 `merge-approved` から戻ったときも `merge-gate` を通り直す（決定 6）。
 
 ### 検査のプラン（`plan_check`。スプリントの検査は先頭に `collect` → `pr` が付く）
@@ -334,6 +359,16 @@ sequenceDiagram
     end
     S->>Git: --push で upstream より進んでいれば push
 ```
+
+## 非機能の実現方式
+
+| 大項目 | 実現方式 |
+| --- | --- |
+| 可用性 | `fetch`・`gh pr view` の失敗は終了コード 2 で、実装は止まり検査は `abort` へ行く。打ち直しは今の run の失敗の扱いに任せ、取り込みの途中の状態（`MERGE_HEAD`）は次の打ち直しが手順 1 で閉じる |
+| 性能・拡張性 | 進んでいなければ `fetch` と `merge-base` の 2 回で終わり、コミットも push もしない（I4）。戻りは 1 回の実行で 3 回まで（I6） |
+| セキュリティ | rebase・強制 push を打たない（I3・前提 5）。push は作業ブランチの upstream だけで、`--no-verify` を付けない |
+| 運用・保守性 | 止まった理由に戻った回数と直前の失敗の要約が載る（決定 7）。ベースブランチの名前と用語集の置き場は引数と設定から読み、ai-plugins の値を埋め込まない |
+| 移行性 | 新しいサブコマンドと終了コード 4 は足すだけで、`on_exit` に 4 を持たない呼び手は今のまま（I8）。書き済みのプランは取り込みのステップを持たないまま流れる |
 
 ## 決定の記録
 
@@ -463,11 +498,12 @@ upstream も無い。検査のプランでは、取り込みの後に `pr` の�
 | #1917-7・I6 | `state.json` に `base-return` の成功が 3 行あると `base-return` が 1 で終わり、`summary` に回数が載る。エンジンのテストで、実装のプランの形は理由に `base-return` の要約が、検査のプランの形（`on_fail: abort`）は `abort` の理由に `base-return` の要約が載る | 数え方を実行をまたいで残す／理由に要約を添えない |
 | #1917-8・I8 | `merge_steps` を `on_conflict` 無しで呼ぶと `on_exit` は `{"75": "stop"}` のまま。`wait_and_merge` は 4 を 1 として扱う | `merge_steps` が常に 4 の行き先を足す |
 | #1917-9 | 全体テスト（`uv run --frozen --project . --all-extras pytest . -q -n 4`） | — |
-| #2003-1・I1 | `new impl` で `impl` の次が `base-sync`、`base-sync` の次が `sync`（宣言が無ければ `test-limited`）。`new fix` では先頭が `base-sync` | `head[-1]["next"]` を `sync` のままにする |
+| #2003-1・I1 | `new impl` で `impl` の次が `base-sync`、`base-sync` の次が `pre_test_steps(a)` の先頭（`format` の宣言があれば `format`、無ければ `sync`、それも無ければ `test-limited`）。`new fix` では先頭が `base-sync` | `head[-1]["next"]` を `sync` のままにする |
 | #2003-2 | 一時リポジトリでベースブランチ側と作業ブランチ側が同じ文書の別の行へ 1 行ずつ足し、合成で行数の上限を超える形で、取り込んだ後の `doc-lint`（か `sync`）が落ちる | `base-sync` を `sync` の後へ置く |
 | #2003-3・I2 | 3 つの雛形の取り込みのステップが `base_sync_steps` の返す形と一致し、`plan_check_since` の `test-all` の `cmd` に `git merge` が無い | 雛形にコマンドの文字列を残す |
-| #2003-4 | 実装のプランの `fix-base` の次が `base-sync`、`base-sync` の次が `sync` | `fix-base` の次を `test-limited` にする |
+| #2003-4 | 実装のプランの `fix-base` の次が `base-sync`、`base-sync` の次が並びの先頭（`format` の宣言の無いプランでは `sync`） | `fix-base` の次を `test-limited` にする |
 | #2003-5・I4 | ベースブランチが進んでいない一時リポジトリで `base-sync --push` を打つと、コミット数も upstream も変わらず `up_to_date` | 進んでいなくても `git merge` と push を打つ |
+| 前提 1（上限） | `base_sync_steps` の `base-return` が `kind: "戻り"` を持ち、#1909 の上限の計算が実装のプランと検査のプランで戻りの輪を 1 つずつ数える | 印を外すと戻りの輪が上限に入らず、#1909 の戻りの輪のテストが落ちる |
 | I3 | `base-sync` が打つ git のコマンドに `rebase`・`--force` が無い（コマンドの記録で確かめる） | 拒否のときに rebase で取り込む |
 
 ## 設計の結果
@@ -487,7 +523,7 @@ upstream も無い。検査のプランでは、取り込みの後に `pr` の�
 
 | ファイル | この主題が触る関数・定数 | 触らない（ほかの主題が触る） |
 | --- | --- | --- |
-| `supervise_lib/templates.py` | `plan_to_merge`（`head[-1]["next"]`・`base_sync_steps` の挿入・`merge_steps` の `on_conflict`）、`plan_check`（`steps` の並び・`merge_steps` の `on_conflict`）、`plan_check_since`（`test-all` の `cmd`・`judge` の `question`・`fix` の `prompt` と `next`・`base_sync_steps` の挿入）、`_inspect_steps`（`review` の `next` だけ） | 各プランの `"上限"` の値（#1909）、`impl_prompt`・`IMPL_RULES`・`FIX_PROMPT`（#1651）、`RULE_IMPL`・`RULE_CHECK`・`RULE_CHECK_SINCE`・`judge_step`（この主題は変えない） |
+| `supervise_lib/templates.py` | `plan_to_merge`（`head[-1]["next"]` を `base-sync` へ・`base_sync_steps` の挿入と `nxt` に並びの先頭を渡すこと・`merge_steps` の `on_conflict`）、`plan_check`（`steps` の並び・`merge_steps` の `on_conflict`）、`plan_check_since`（`test-all` の `cmd`・`judge` の `question`・`fix` の `prompt` と `next`・`base_sync_steps` の挿入）、`_inspect_steps`（`review` の `next` だけ） | 各プランの `"上限"` の値（#1909）、`impl_prompt`・`IMPL_RULES`・`FIX_PROMPT`・`pre_test_steps` と `fix` の `next`（#1651）、`RULE_IMPL`・`RULE_CHECK`・`RULE_CHECK_SINCE`・`judge_step`（この主題は変えない） |
 | `supervise_lib/flow.py` | 触らない | `plan_workflow`（#1909・#1676） |
 | `supervise_lib/design_stage.py` | 触らない | 全体（#1651・#1941） |
 | `supervise_lib/sprint_waves.py` | 触らない（`plan_sprint_check` は `plan_check` の変更を受け継ぐ。`collect` は変えない） | `plan_sprint_design`（#1676） |
@@ -502,7 +538,7 @@ upstream も無い。検査のプランでは、取り込みの後に `pr` の�
 
 | 項目 | 内容 |
 | --- | --- |
-| `上限` との関係 | 実装のプランは修正の無い経路が 1 本、検査のプランも 1 本伸び、戻りのたびに実装は `base-sync` から `merge` までの 13 本前後、検査は 6 本が足される。前提 1 のとおり #1909 の「上限を経路から決める」形が先に入ることを前提にする。#1909 より先に実装へ入るときは、実装の計画で上限の扱いを決め直す |
+| `上限` との関係 | 実装のプランは修正の無い経路が 1 本、検査のプランも 1 本伸び、戻りのたびに実装は `base-sync` から `merge` までの 13 本前後、検査は 6 本が足される。前提 1 のとおり #1909 の「上限を経路から決める」形が先に入ることを前提にし、戻りの輪は `kind: 戻り` の印で #1909 の計算に入る（#1909 の「上限の計算」）。#1909 より先に実装へ入るときは、実装の計画で上限の扱いを決め直す |
 | `gh pr merge` の拒否の文言 | 衝突の拒否の標準エラー（`cannot be cleanly created`）は要求の記録の文言で、この設計の時点では再現していない。読み直した `mergeStateStatus` でも判定するため、文言が変わっても `DIRTY` が読めれば 4 になる。実装の時点で `gh` の版の出力を確かめる |
 | `DIRTY` を返す時点 | 取り込みを push した直後、GitHub は `mergeStateStatus` を `UNKNOWN` にしてから計算し直す。`UNKNOWN` の間は待つ（前提 4）ため衝突と読まないが、計算し直す前に古い `DIRTY` を読む時間があるかは実測していない |
 | 検査のプランの `git pull --rebase` | 全体テストの `git pull -q --rebase` は、取り込みを push した後なら何もしない。全体テストの修正の worker が push しないまま終えた場合に、取り込みのコミットが rebase で平らになるかは実装で確かめる |
