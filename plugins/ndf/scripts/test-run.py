@@ -215,23 +215,18 @@ def _emit_outcome(ctx: OutcomeContext) -> int:
     return code
 
 
-def _select_scope_runs(root: pathlib.Path, strategy: ts.Strategy, a) -> tuple[list, bool]:
-    """（走らせる範囲の run, 対象が無いので通す）を決める。`--only-kind` で種類を絞る。"""
-    only = getattr(a, "only_kind", None)
-    if strategy.name == ts.ROUND_ONLY:
-        runs = [r for r in strategy.round_runs() if only is None or r.kind == only]
-        return runs, only is not None and not runs
-    changed = _changed(root, a) if strategy.scoped_suites(ts.LINT) and only != ts.TEST else []
-    runs = [r for r in ts.scope_runs(strategy, list(a.paths), changed) if only is None or r.kind == only]
-    # 静的解析は範囲に入るファイルが無ければ通る。テストは範囲の雛形を持つ suite が無ければ通る（静的解析は前に通した）
-    return runs, not runs and (only == ts.LINT or (only == ts.TEST and not strategy.scoped_suites(ts.TEST)))
-
-
 def cmd_scope(a) -> int:
     root = pathlib.Path(a.root).resolve()
     strategy, limits, notes = _resolve(root, a)
     only = getattr(a, "only_kind", None)
-    runs, nothing_to_run = _select_scope_runs(root, strategy, a)
+    if strategy.name == ts.ROUND_ONLY:
+        runs = [r for r in strategy.round_runs() if only is None or r.kind == only]
+        nothing_to_run = only is not None and not runs
+    else:
+        changed = _changed(root, a) if strategy.scoped_suites(ts.LINT) and only != ts.TEST else []
+        runs = [r for r in ts.scope_runs(strategy, list(a.paths), changed) if only is None or r.kind == only]
+        # 静的解析は範囲に入るファイルが無ければ通る。テストは範囲の雛形を持つ suite が無ければ通る（静的解析は前に通した）
+        nothing_to_run = not runs and (only == ts.LINT or (only == ts.TEST and not strategy.scoped_suites(ts.TEST)))
     if nothing_to_run:
         emit(result(TOOL, "ok", f"範囲に当てる {only} の suite が無い（戦略 {strategy.name}）", [], {"caused": 0}))
         return 0
