@@ -187,7 +187,13 @@ def test_run_stops_before_any_step_when_the_limit_is_shorter_than_the_longest_pa
 def test_run_does_not_rewrite_the_plan_file(tmp_path, plans):
     """I3: run は書き済みのプランの `上限` を書き換えない。"""
     path = tmp_path / "plan.json"
-    plan = {"フェーズ": "試験", "課題": [1], "作業場所": str(tmp_path), "上限": 9, "steps": [{"id": "a", "type": "run", "cmd": "true", "next": "end"}]}
+    plan = {
+        "フェーズ": "試験",
+        "課題": [1],
+        "作業場所": str(tmp_path),
+        "上限": 9,
+        "steps": [{"id": "a", "type": "run", "cmd": "true", "next": "end"}],
+    }
     path.write_text(json.dumps(plan, ensure_ascii=False))
     before = path.read_text()
     p = cli("run", str(path), cwd=tmp_path)

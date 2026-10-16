@@ -23,6 +23,7 @@ from sprint_mvv import MVV_PACES
 from supervise_lib.claude import TICK, watch_children
 
 STEP_PID = "step.pid"  # 流れているステップの子のプロセスグループ（ステップが流れている間だけある）
+USAGE_TOKENS = (("input", "input"), ("cache_read", "cache_read_input"), ("cache_write", "cache_creation_input"), ("output", "output"))
 REPORT_INTERVAL = 600  # 最後の行から動きが無いときに「まだ動いている」を足すまでの秒数。計画の "report_interval"
 # worker の途中の報告を分ける語（スクリプトで見る。LLM は使わない）
 PROGRESS_STOP = re.compile(r"止まった|止まる|進めない|進められない|判断が要る|できなかった|stuck", re.I)
@@ -250,8 +251,7 @@ class RunState:
     def recorded_pr(self) -> str:
         """前の実行（`prior_rows`）が決めた最後の Pull Request。実行の始まりも `pr` も無い古い記録だけ `report.md` から読む。"""
         rows = jsonio.read_jsonl(self.progress, missing=[], broken=[], skip_broken=True)
-        prev = self.dir / "report.md"
-        if not any(r.get("kind") == "run" or r.get("pr") for r in rows) and prev.is_file():
+        if not any(r.get("kind") == "run" or r.get("pr") for r in rows) and (prev := self.dir / "report.md").is_file():
             return m.group(1) if (m := re.search(r"^- Pull Request: (\S*/pull/\d+)", prev.read_text(), re.M)) else ""
         return next((str(r["pr"]) for r in reversed(self.prior_rows(rows)) if r.get("pr")), "")
 
@@ -308,7 +308,7 @@ class RunState:
         c = self.cur.setdefault("llm", {"calls": 0, "turns": 0, "input": 0, "cache_read": 0, "cache_write": 0, "output": 0, "cost": 0.0})
         c["calls"] += 1
         c["turns"] += res.get("turns") or 0
-        for key, src in (("input", "input"), ("cache_read", "cache_read_input"), ("cache_write", "cache_creation_input"), ("output", "output")):
+        for key, src in USAGE_TOKENS:
             self.llm[key] += u.get(f"{src}_tokens", 0)
             c[key] += u.get(f"{src}_tokens", 0)
         c["cost"] = round(c["cost"] + (res.get("cost") or 0.0), 4)
