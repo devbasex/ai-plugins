@@ -7,7 +7,7 @@
   "モード": "standard",
   "作業場所": "<TMP>/repo",
   "規則": "",
-  "上限": 3,
+  "上限": 1,
   "steps": [
     {
       "id": "design-results",

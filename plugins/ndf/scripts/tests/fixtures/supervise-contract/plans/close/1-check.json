@@ -9,7 +9,7 @@
   "起点": "origin/main",
   "リポジトリ": "<TMP>/repo",
   "規則": "全体テストが落ちたら（落ちたテストだけの再実行でも落ちた後）、検査の修正に起因するなら fix、修正に無関係なら finish。2 回直しても同じなら abort。",
-  "上限": 20,
+  "上限": 22,
   "実行の条件": {
     "cmd": "git -C <TMP>/repo fetch -q origin && python3 <NDF>/scripts/check-trigger.py eval --id m9-final --root <TMP>/repo --final",
     "skip_code": 3

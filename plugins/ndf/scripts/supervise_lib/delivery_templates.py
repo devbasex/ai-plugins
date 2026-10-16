@@ -30,7 +30,7 @@ def verify_facts_cmd(a, repo: str, verify: str) -> str:
 
 
 def release_plan(a, repo: str, phase: str, rule: str, steps: list, condition: dict | None) -> dict:
-    """配布のプラン（導入の確認・昇格・承認ゲート 2）に共通の枠。上限 12 で、condition があれば「実行の条件」を足す。"""
+    """配布のプラン（導入の確認・昇格・承認ゲート 2）に共通の枠。上限は書き出しが遷移から求める。condition があれば「実行の条件」を足す。"""
     plan = {
         "フェーズ": phase,
         "課題": a.issue,
@@ -38,7 +38,6 @@ def release_plan(a, repo: str, phase: str, rule: str, steps: list, condition: di
         "作業場所": repo,
         "リポジトリ": repo,
         "規則": rule,
-        "上限": 12,
         "steps": steps,
     }
     if condition:

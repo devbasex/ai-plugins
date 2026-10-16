@@ -12,7 +12,10 @@
                                             # git worktree add が .git/config の lock で落ちたら 5 回までやり直す
       "記録": "/abs/projects-sync.sh",      # 省略可。stage を記録する
       "規則": "判断の規則の抜粋（文字列）",   # judge へ毎回渡す
-      "上限": 30,                           # 実行するステップの数の上限（ループの歯止め）
+      "上限": 30,                           # 実行するステップの数の上限（ループの歯止め。無ければ 30）。雛形は遷移から求めて書く
+                                            # （supervise_lib/limits.py）。run は流す前に、上限がループを通らない最長の経路より
+                                            # 短いか、遷移の行き先が知らないステップなら、ステップを流さずに止まる。
+                                            # 遅れの見張りの再試行（retry）は数えない
       "steps": [
         {"id": "test", "type": "run", "cmd": "pytest -q", "stage": "完了判定",
          "timeout": 1800, "on_fail": "judge-test", "next": "end"},
@@ -254,19 +257,17 @@ def fail_kind_matches(step: dict, cur: dict) -> bool:
 
 
 def on_exit_error(steps: list[dict]) -> str | None:
-    """run のステップの `on_exit` の誤り（鍵が整数でない・行き先が知らないステップの id）。無ければ None。"""
-    ids = {s.get("id") for s in steps}
+    """run のステップの `on_exit` の形の誤り（対応表でない・鍵が整数でない）。無ければ None。
+    行き先の照合はすべての遷移の鍵と合わせて `limits.unknown_targets` が持つ。"""
     for s in steps:
         table = s.get("on_exit")
         if table is None:
             continue
         if not isinstance(table, dict):
             return f"ステップ {s.get('id')} の on_exit が対応表でない"
-        for code, dest in table.items():
+        for code in table:
             if not re.fullmatch(r"-?\d+", str(code)):
                 return f"ステップ {s.get('id')} の on_exit の鍵が終了コードでない: {code}"
-            if dest not in ("end", "stop") and dest not in ids:
-                return f"ステップ {s.get('id')} の on_exit の行き先が知らないステップ: {dest}"
     return None
 
 
