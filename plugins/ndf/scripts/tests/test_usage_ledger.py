@@ -287,8 +287,6 @@ def test_project_mvv_names_itself(tmp_path, ledger):
 def test_mvv_ask_appends_one_row(tmp_path, monkeypatch):
     d = tmp_path / "usage"
     monkeypatch.setenv("NDF_USAGE_DIR", str(d))
-    monkeypatch.delenv("NDF_USAGE_PLAN", raising=False)  # supervise.py の下で走らせても空のまま比べる
-    monkeypatch.delenv("NDF_USAGE_STEP", raising=False)
     out = {**CLAUDE_OUT, "result": '{"verdict": "follow", "reasons": [], "boundary": []}', "duration_ms": 2000}
     monkeypatch.setenv("NDF_MVV_CLAUDE", f"{PY} {fake_claude(tmp_path, out)}")
     monkeypatch.chdir(tmp_path)
