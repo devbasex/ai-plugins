@@ -3986,6 +3986,12 @@
       "context": "ndf-workflow",
       "meaning": "規則を変えずにコードの形だけを揃えるコマンド。何を打つかはプロジェクトの宣言が持つ",
       "pending_source": "issues/issue-1651-requirements.md"
+    },
+    {
+      "term": "一時的な失敗",
+      "context": "ndf-workflow",
+      "meaning": "GitHub や git の呼び出しが 0 以外で終わり、打ち直せば通りうる失敗（5xx・接続の切断）。打ち直しても残れば、読めなかったとして止まる（#1941）",
+      "pending_source": "issues/issue-1651-design.md"
     }
   ]
 }
