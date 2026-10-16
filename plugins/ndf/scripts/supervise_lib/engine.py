@@ -331,7 +331,18 @@ class Engine:
         if step.get("on_fail") and fail_kind_matches(step, st.cur):
             st.failed_step = sid
             return step["on_fail"], None, None
-        return None, "止まった", f"ステップ {sid} が失敗した（exit={st.cur['exit']}）"
+        return None, "止まった", f"ステップ {sid} が失敗した（exit={st.cur['exit']}）" + self._stop_detail(sid)
+
+    def _stop_detail(self, sid: str) -> str:
+        """止まった理由へ添える要約: このステップの結果の summary と、直前のステップが on_fail でここへ回した失敗の
+        summary（検査のプランが abort へ回した理由を読めるように。#1917 の決定 7）。"""
+        st = self.state
+        parts = [(last_json(st.cur.get("text", "")) or {}).get("summary") or ""]
+        prev = st.log[-1].get("id") if st.log else None
+        if prev and prev == st.failed_step and prev != sid and self.steps.get(prev, {}).get("on_fail") == sid:
+            why = (last_json((st.results.get(prev) or {}).get("text", "")) or {}).get("summary") or ""
+            parts.append(f"{prev}: {why}" if why else "")
+        return "".join(f": {p}" for p in parts if p)
 
     def _next_on_exit(self, sid: str, step: dict) -> tuple[str | None, str | None, str | None]:
         """run のステップの `on_exit`（終了コード → ステップの id / end / stop）の行き先。`on_fail` と judge を通らない

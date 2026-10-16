@@ -13,6 +13,7 @@ from supervise_lib.decl import with_decls
 from supervise_lib.paths import CHECK_PY, DRIVES, READY, REFACTOR_SCOPE_PY, default_refactor_budget_minutes
 from supervise_lib.procedures import (
     DESIGN_MATCH_MODES,
+    base_sync_steps,
     design_match_steps,
     pr_step,
     push_fix_steps,
@@ -103,13 +104,16 @@ def fix_worktree(branch: str) -> str:
 
 
 def plan_to_merge(a, head: list[dict]) -> dict:
-    """head（impl なら worker の実装）の後に、同期とチェック → 範囲テスト → Pull Request → 全体テスト →
-    doc-lint → ready → マージ（--escape-of なら逃げた不具合の記録）を続けた実装のプラン。"""
+    """head（impl なら worker の実装）の後に、ベースブランチの取り込み → 同期とチェック → 範囲テスト → Pull Request →
+    全体テスト → doc-lint → ready → マージ（--escape-of なら逃げた不具合の記録）を続けた実装のプラン。
+    検査は取り込んだ合成の上で走り（#2003）、マージの直前の衝突（4）は取り込みへ戻る（#1917）。"""
     tests = " ".join(a.tests)
     sync = bool(getattr(a, "sync_checks", None))
     if head:
-        head[-1]["next"] = "sync" if sync else "test-limited"
-    steps = list(head)
+        head[-1]["next"] = "base-sync"
+    first = "sync" if sync else "test-limited"
+    *base, back = base_sync_steps(f"--base {shlex.quote(a.base or '')}", first, push=False, on_error=None, returns=True, stage="実装")
+    steps = [*head, *base]
     pr = pr_step(
         a.base,
         a.title,
@@ -165,7 +169,7 @@ def plan_to_merge(a, head: list[dict]) -> dict:
             "next": "doc-lint",
         },
         {"id": "ready", "type": "run", "cmd": READY, "next": "merge-gate"},
-        *merge_steps(a, next="end"),
+        *merge_steps(a, next="end", on_conflict="base-return"),
     ]
     if getattr(a, "escape_of", None) is not None:
         # その場で直した不具合を「逃げた不具合」として記録する（検査のトリガーの材料。#1078）
@@ -173,6 +177,7 @@ def plan_to_merge(a, head: list[dict]) -> dict:
             if step["id"] in ("merge", "merge-approved"):
                 step["next"] = "escape"
         steps.append({"id": "escape", "type": "run", "cmd": f"{CHECK_PY} escape --pr {{pr}} --of {a.escape_of}", "next": "end"})
+    steps.append(back)  # merge の衝突（4）からの戻りは並びの末尾に置く（merge から後ろへ行く遷移にする）
     plan = {
         "フェーズ": "実装",
         "課題": a.issue,
@@ -251,7 +256,7 @@ def _inspect_steps(a, pr_ref: str, scope: str) -> list[dict]:
             "timeout": 3600,
             "args": f"{pr_ref} --max-rounds 4",
             "on_fail": "abort",
-            "next": "test-all",
+            "next": "base-sync",  # 全体テストの前にベースブランチを取り込む（#1917）
         },
     ]
 
@@ -277,6 +282,7 @@ def plan_check(a) -> dict:
     pr = a.pr
     name = getattr(a, "id", None) or f"pr-{pr}"
     scope = refactor_scope(a, pr)
+    *base, back = base_sync_steps(f"--pr {pr}", "test-all", push=True, on_error="abort", returns=True, stage="完了判定")
     plan = _with_test_meta(
         {
             "フェーズ": "検査",
@@ -287,6 +293,7 @@ def plan_check(a) -> dict:
             "Pull Request": str(pr),
             "steps": [
                 *_inspect_steps(a, str(pr), scope),
+                *base,
                 {
                     "id": "test-all",
                     "type": "run",
@@ -312,8 +319,9 @@ def plan_check(a) -> dict:
                     "next": "test-all",
                 },
                 {"id": "ready", "type": "run", "cmd": READY.replace("{pr}", str(pr)), "on_fail": "abort", "next": "merge-gate"},
-                *merge_steps(a, on_fail="abort", next="record"),
+                *merge_steps(a, on_fail="abort", next="record", on_conflict="base-return"),
                 *record_steps(name, target_pr=pr, advance=getattr(a, "advance_done", False)),
+                back,
             ],
         },
         a,
@@ -385,15 +393,13 @@ def plan_check_since(a) -> dict:
         ),
         *_inspect_steps(a, "{pr}", scope),
         # 検査の間に起点のブランチが進んでも finish の付け替えの後にマージできるよう、毎回取り込んでから測る
+        *base_sync_steps(f"--base {shlex.quote(a.base)}", "test-all", push=True, on_error="abort", returns=False, stage="完了判定"),
         {
             "id": "test-all",
             "type": "run",
             "stage": "完了判定",
             "timeout": whole_timeout(a),
-            "cmd": (
-                f"git pull -q --rebase && git fetch -q origin {shlex.quote(a.base)} && "
-                f"git merge -q --no-edit origin/{shlex.quote(a.base)} && git push -q && " + whole_cmd(a)
-            ),
+            "cmd": "git pull -q --rebase && " + whole_cmd(a),
             "on_fail": "judge",
             "next": "finish",
         },
@@ -401,8 +407,7 @@ def plan_check_since(a) -> dict:
             "id": "judge",
             "type": "judge",
             "inputs": ["test-all"],
-            "question": "全体テストの失敗（起点のブランチの取り込みの衝突を含む）を直す（fix）か、修正に無関係として進める"
-            "（finish）か、止める（abort）か",
+            "question": "全体テストの失敗を直す（fix）か、修正に無関係として進める（finish）か、止める（abort）か",
             "choices": ["fix", "finish", "abort"],
         },
         {
@@ -410,11 +415,8 @@ def plan_check_since(a) -> dict:
             "type": "work",
             "kind": "修正",
             "inputs": ["test-all"],
-            "prompt": (
-                f"失敗したテストを直してコミットし、git push する。origin/{a.base} の取り込みで衝突していれば、"
-                "両方の変更を残して衝突を解き、マージのコミットを作って git push する。"
-            ),
-            "next": "test-all",
+            "prompt": "失敗したテストを直してコミットし、git push する。",
+            "next": "base-sync",
         },
         {
             "id": "finish",

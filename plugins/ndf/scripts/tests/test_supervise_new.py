@@ -448,7 +448,7 @@ def test_new_fix_runs_tests_pr_and_merge_without_the_worker_step(tmp_path):
     assert res["tool"] == "supervise-new" and res["status"] == "ok" and res["items"][0]["kind"] == "fix"
     plan = json.loads(out.read_text())
     order, steps = fix_order(plan)
-    assert order == ["test-limited", "pr", "test-all", "doc-lint", "ready", "merge-gate", "merge"]
+    assert order == ["base-sync", "test-limited", "pr", "test-all", "doc-lint", "ready", "merge-gate", "merge"]
     assert not any(s["type"] == "work" and s.get("kind") == "実装" for s in plan["steps"])
     assert "merge-when-green" in steps["merge"]["cmd"] and steps["pr"]["title"] == "Fix: x"
     assert "tests/test_x.py" in steps["test-limited"]["cmd"] and plan["作業場所"] == str(root)
@@ -673,7 +673,8 @@ def test_merge_steps_gate_then_merge_and_approved_only_by_from(tmp_path):
     assert "merge-gate --pr {pr}" in gate["cmd"] and gate["gate_next"] == "end" and gate["next"] == "merge"
     assert "--gate-approved" not in merge["cmd"] and approved["cmd"] == merge["cmd"] + " --gate-approved user"
     assert approved["next"] == merge["next"] == "end"
-    assert merge["on_exit"] == approved["on_exit"] == {"75": "stop"}  # CI の基盤待ちは judge を通らずに止まる（#1645）
+    # CI の基盤待ちは judge を通らずに止まり（#1645）、ベースブランチとの衝突は取り込みへ戻る（#1917）
+    assert merge["on_exit"] == approved["on_exit"] == {"75": "stop", "4": "base-return"}
 
 
 def test_plan_promote_with_mvv_judges_before_merging(tmp_path):

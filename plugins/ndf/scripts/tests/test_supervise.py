@@ -453,7 +453,7 @@ def test_new_impl_in_other_repo_uses_declarations_only(tmp_path):
     assert p.returncode == 0, p.stderr
     plan = json.loads(out.read_text())
     steps = {s["id"]: s for s in plan["steps"]}
-    assert "sync" not in steps and steps["impl"]["next"] == "test-limited"
+    assert "sync" not in steps and steps["impl"]["next"] == "base-sync" and steps["base-sync"]["next"] == "test-limited"
     # テストのステップは test-run.py が宣言（supervise.json の test.command を 1 つの suite として読む）から走らせる（#1334）
     assert steps["test-limited"]["cmd"] == f"python3 {SCRIPTS / 'test-run.py'} scope --paths src/a.test.js"
     assert steps["test-all"]["cmd"] == f"python3 {SCRIPTS / 'test-run.py'} whole --pr {{pr}}"
