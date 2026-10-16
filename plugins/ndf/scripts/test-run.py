@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """テストの実行の入口（#1334 F2・F4・F5）。supervise の run のステップが呼ぶ。
 
-    python3 test-run.py scope --paths <パス>... [--changed <パス>...] [--root DIR] [--template CMD] [--test-kind test|lint]
+    python3 test-run.py scope --paths <パス>... [--changed <パス>...] [--only-kind test|lint] [--root DIR] [--template CMD] [--test-kind test|lint]
     python3 test-run.py whole [--paths <パス>...] [--pr N] [--base <ブランチ>] [--root DIR] [--template CMD] [--test-kind test|lint]
 
 宣言（`.ndf/project.json` の `test`。無ければ `.ndf/supervise.json` の `test.command` を 1 つの suite として読む）から
@@ -11,6 +11,7 @@
 静的解析は戦略に関わらず手元で走らせる。落ちたテストは `lib/test_triage.classify` で フレーキー・既存失敗・変更起因 に、
 落ちた静的解析は `lib/test_triage.lint_verdict` で分ける。`--template` は引数の雛形で、宣言より先に効き、種別は `--test-kind`。
 `whole --paths` は静的解析の雛形の全体テストの `{paths}` に入れる範囲である。
+`scope --only-kind` は渡した種別の suite だけを打ち（当てる範囲は同じ）、打つものが無ければ通る（0）。
 
 終了コード: 0 = 通った（フレーキーと既存失敗だけのときも 0。`items` に分類を持つ）/ 1 = 変更起因の失敗がある /
 2 = 判断できない（起動の失敗・CI が上限までに終わらない・`gh` が使えない・宣言の不足・コンテナで走る suite が worktree を
@@ -217,11 +218,18 @@ def _emit_outcome(ctx: OutcomeContext) -> int:
 def cmd_scope(a) -> int:
     root = pathlib.Path(a.root).resolve()
     strategy, limits, notes = _resolve(root, a)
+    only = getattr(a, "only_kind", None)
     if strategy.name == ts.ROUND_ONLY:
-        runs = strategy.round_runs()
+        runs = [r for r in strategy.round_runs() if only is None or r.kind == only]
+        nothing_to_run = only is not None and not runs
     else:
-        changed = _changed(root, a) if strategy.scoped_suites(ts.LINT) else []
-        runs = ts.scope_runs(strategy, list(a.paths), changed)
+        changed = _changed(root, a) if strategy.scoped_suites(ts.LINT) and only != ts.TEST else []
+        runs = [r for r in ts.scope_runs(strategy, list(a.paths), changed) if only is None or r.kind == only]
+        # 静的解析は範囲に入るファイルが無ければ通る。テストは範囲の雛形を持つ suite が無ければ通る（静的解析は前に通した）
+        nothing_to_run = not runs and (only == ts.LINT or (only == ts.TEST and not strategy.scoped_suites(ts.TEST)))
+    if nothing_to_run:
+        emit(result(TOOL, "ok", f"範囲に当てる {only} の suite が無い（戦略 {strategy.name}）", [], {"caused": 0}))
+        return 0
     if not runs:
         emit(result(TOOL, "stopped", "範囲テストの雛形（scope_command）を持つ suite が無いか、範囲に入るファイルが無い", [], {}))
         return 2
@@ -373,6 +381,12 @@ def main(argv=None) -> int:
         nargs="+",
         default=None,
         help="静的解析の suite の範囲（既定は起点との merge-base からの差分と追跡していない新しいファイル）",
+    )
+    scope.add_argument(
+        "--only-kind",
+        choices=ts.KINDS,
+        default=None,
+        help="渡した種別（test / lint）の suite だけを打つ。範囲に当てるものが無ければ 0（範囲の静的解析を先に当てるプラン。#1651）",
     )
     whole = sub.add_parser("whole", help="全体テスト（手元か、CI に任せる戦略なら Pull Request のチェックを待つ）")
     whole.add_argument("--pr", type=int, default=None)

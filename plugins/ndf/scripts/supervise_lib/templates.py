@@ -10,7 +10,7 @@ from pathlib import Path
 from step_result import result
 from supervise_lib import limits, release_templates
 from supervise_lib.decl import with_decls
-from supervise_lib.paths import CHECK_PY, DRIVES, READY, REFACTOR_SCOPE_PY, default_refactor_budget_minutes
+from supervise_lib.paths import CHECK_PY, DRIVES, GLOSSARY_PY, READY, REFACTOR_SCOPE_PY, default_refactor_budget_minutes
 from supervise_lib.procedures import (
     DESIGN_MATCH_MODES,
     base_sync_steps,
@@ -26,6 +26,7 @@ from supervise_lib.procedures import (
 from supervise_lib.verify_steps import (
     impl_timeout_estimate,
     merge_steps,
+    pre_test_steps,
     refactor_template_arg,
     scope_cmd,
     scope_timeout,
@@ -54,14 +55,21 @@ IMPL_RULES = (
 )
 
 
-def impl_prompt(a) -> str:
-    """実装の指示文。--prompt が無ければ課題への参照を組み、共通の規則を足す。
+GLOSSARY_RULE = f"- 文書に語を足したら `{GLOSSARY_PY} check --file <文書>` を打ち、新しい語は用語集へ足す"
+DESIGN_DOCS_LINE = "設計文書: {docs}（決定の記録と「設計の結果」を読んでから実装する）"
 
+
+def impl_prompt(a) -> str:
+    """実装の指示文。--prompt が無ければ課題への参照（と設計文書・触る範囲）を組み、共通の規則を足す。
+
+    用語集のあるプロジェクト（`a.glossary_ready`）では用語集と突き合わせる行を規則へ足す。`a.kept` の行
+    （conductor の補正。`design_stage.rewrite` が渡す）は規則の後へ順のまま置く。整形と静的解析は worker に
+    打たせず、ステップが受け持つ（`pre_test_steps`）。
     同時に流れる他のプランの `触るファイル` の除外は、流す時点で `WorkStep` が足す（#1248）。"""
     n = a.issue[0]
-    if a.prompt_file:
+    if getattr(a, "prompt_file", None):
         head = Path(a.prompt_file).read_text().rstrip()
-    elif a.prompt:
+    elif getattr(a, "prompt", None):
         head = a.prompt.rstrip()
     else:
         if len(a.issue) == 1:
@@ -69,9 +77,13 @@ def impl_prompt(a) -> str:
         else:
             refs = "・".join(f"#{i}" for i in a.issue)
             head = f"課題 {refs} を実装する。本文はそれぞれ `gh issue view <番号>` で読む（何をするか と 受け入れ条件）。"
+        if getattr(a, "design_docs", None):
+            head += "\n" + DESIGN_DOCS_LINE.format(docs="、".join(a.design_docs))
         if getattr(a, "files", None):
             head += "\n触る範囲: " + "、".join(a.files)
-    return f"{head}\n{IMPL_RULES}\n"
+    rules = IMPL_RULES + ("\n" + GLOSSARY_RULE if getattr(a, "glossary_ready", False) else "")
+    kept = "".join(f"{line}\n" for line in getattr(a, "kept", None) or [])
+    return f"{head}\n{rules}\n{kept}"
 
 
 def plan_impl(a) -> dict:
@@ -104,14 +116,15 @@ def fix_worktree(branch: str) -> str:
 
 
 def plan_to_merge(a, head: list[dict]) -> dict:
-    """head（impl なら worker の実装）の後に、ベースブランチの取り込み → 同期とチェック → 範囲テスト → Pull Request →
+    """head（impl なら worker の実装）の後に、ベースブランチの取り込み → 整形・同期とチェック・範囲の静的解析
+    （`pre_test_steps`）→ 範囲テスト → Pull Request →
     全体テスト → doc-lint → ready → マージ（--escape-of なら逃げた不具合の記録）を続けた実装のプラン。
     検査は取り込んだ合成の上で走り（#2003）、マージの直前の衝突（4）は取り込みへ戻る（#1917）。"""
     tests = " ".join(a.tests)
-    sync = bool(getattr(a, "sync_checks", None))
+    pre = pre_test_steps(a, FIX_PROMPT)
     if head:
         head[-1]["next"] = "base-sync"
-    first = "sync" if sync else "test-limited"
+    first = pre[0]["id"] if pre else "test-limited"
     *base, back = base_sync_steps(f"--base {shlex.quote(a.base or '')}", first, push=False, on_error=None, returns=True, stage="実装")
     steps = [*head, *base]
     pr = pr_step(
@@ -128,23 +141,20 @@ def plan_to_merge(a, head: list[dict]) -> dict:
     after_tests = match[0]["id"] if match else "pr"
     if match:
         design_diff_on_pr(pr, "judge")
-    if sync:  # 同期とチェックの宣言が無いプロジェクトではステップを置かない
-        steps += [
-            {"id": "sync", "type": "run", "preset": "sync-check", "stage": "実装", "on_fail": "fix-sync", "next": "test-limited"},
-            {"id": "fix-sync", "type": "work", "kind": "修正", "inputs": ["sync"], "prompt": FIX_PROMPT, "next": "sync"},
-        ]
+    steps += pre  # 整形 → 同期とチェック → 範囲の静的解析（宣言の無いものは置かない。#1651）
+    lint_first = any(s["id"] == "lint-limited" for s in pre)
     steps += [
         {
             "id": "test-limited",
             "type": "run",
             "stage": "完了判定",
             "timeout": scope_timeout(a),
-            "cmd": scope_cmd(a, tests),
+            "cmd": scope_cmd(a, tests) + (" --only-kind test" if lint_first else ""),
             "on_fail": "judge",
             "next": after_tests,
         },
         judge_step(after_tests, bool(match)),
-        {"id": "fix", "type": "work", "kind": "修正", "inputs": ["test-limited", "test-all"], "prompt": FIX_PROMPT, "next": "test-limited"},
+        {"id": "fix", "type": "work", "kind": "修正", "inputs": ["test-limited", "test-all"], "prompt": FIX_PROMPT, "next": first},
         # Draft の PR を全体テストの前に出し、CI と手元の全体テストを並べる。直した後は pr のステップが push して本文を更新する
         # 手動確認の節は課題の PR に載せる（スプリントブランチへ集める実装の PR は載せず、スプリント PR に載せる）
         *match,
