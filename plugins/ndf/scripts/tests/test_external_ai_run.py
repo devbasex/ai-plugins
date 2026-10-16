@@ -26,6 +26,7 @@ esac
 [ -t 0 ] || cat > /dev/null
 case "$FAKE_MODE" in
   ok)      echo "レビューの結果" > "$FAKE_OUT"; echo "thinking" >&2
+           [ -n "$FAKE_SID" ] && printf 'session id: %s\n' "$FAKE_SID" >&2
            [ "$FAKE_NAME" = codex ] && printf 'tokens used\n123\n' >&2;;
   stdout)  if [ "$FAKE_NAME" = claude ]; then
              printf '{"type":"result","is_error":false,"result":"標準出力の結果","modelUsage":{"claude-x-1":{}}}'
@@ -92,11 +93,56 @@ def _run(tmp_path, runtime, mode, *args, **extra):
 @pytest.mark.parametrize("runtime", ["codex", "agy", "kiro", "claude"])
 def test_success_returns_file(tmp_path, runtime):
     code, out = _run(tmp_path, runtime, "ok")
-    assert code == 0 and out["status"] == "ok"
+    # CI でだけ codex がまれに落ちる（develop の run 37176848993 でも）。原因を追えるよう結果を出す
+    assert code == 0 and out["status"] == "ok", out
     m = out["metrics"]
     assert (m["outcome"], m["source"], m["runtime"]) == ("ok", "file", runtime)
     assert pathlib.Path(m["result"]).read_text(encoding="utf-8").strip() == "レビューの結果"
     assert m["monitor_status"] == "OK"
+
+
+def test_codex_reports_the_model_that_actually_ran(tmp_path):
+    """#759 AC7 — `--model` なしの codex でも、結果の `model` にセッションの記録のモデル名が入る。"""
+    import datetime as dt
+
+    day = dt.datetime.now(dt.timezone.utc)
+    sessions = tmp_path / "codex-home" / "sessions" / day.strftime("%Y/%m/%d")
+    sessions.mkdir(parents=True)
+    row = {"type": "turn_context", "payload": {"model": "gpt-6.1-sol"}}
+    (sessions / "rollout-x-01a0-test.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
+    code, out = _run(tmp_path, "codex", "ok", CODEX_HOME=str(tmp_path / "codex-home"), FAKE_SID="01a0-test")
+    assert code == 0
+    assert out["metrics"]["model"] == "gpt-6.1-sol"
+
+
+def test_codex_without_a_session_record_says_why(tmp_path):
+    """記録が無ければ `default` のまま、取れなかった理由を標準エラーに 1 行出す。"""
+    prompt = tmp_path / "p.md"
+    prompt.write_text("これを読んで答える\n", encoding="utf-8")
+    (tmp_path / "work").mkdir()
+    env = _env(tmp_path, "codex", "ok", CODEX_HOME=str(tmp_path / "empty"))
+    p = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "run",
+            "codex",
+            "--prompt-file",
+            str(prompt),
+            "--output-file",
+            str(tmp_path / "out.md"),
+            "--workdir",
+            str(tmp_path / "work"),
+            "--poll",
+            "1",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert json.loads(p.stdout.strip().splitlines()[-1])["metrics"]["model"] == "default"
+    assert "実測値を取れなかった（no_record）" in p.stderr
 
 
 @pytest.mark.parametrize("runtime", ["kiro", "claude"])
@@ -160,3 +206,144 @@ def test_missing_cli(tmp_path):
     env = {**os.environ, "PATH": "/nonexistent"}
     p = subprocess.run([sys.executable, str(SCRIPT), "check", "kiro"], env=env, capture_output=True, text=True)
     assert p.returncode == 3 and json.loads(p.stdout)["metrics"]["outcome"] == "missing_cli"
+
+
+# ---------- check は init と同じ参加の確認を通る（#1290 の AC4・AC5） ----------
+
+# 認証確認は通り、最小の呼び出しが FAKE_CHECK の形で答える偽の codex（#461・#1589 の実物の行）
+FAKE_CODEX_CHECK = r"""#!/bin/sh
+if [ "$1 $2" = "login status" ]; then echo "Logged in using ChatGPT"; exit 0; fi
+cat > /dev/null
+case " $* " in
+  *" --ignore-user-config "*|*" --model gpt-6-astra "*) echo "model: gpt-6-astra" >&2; echo OK; exit 0;;
+esac
+echo "model: gpt-5.5" >&2
+case "$FAKE_CHECK" in
+  404) echo 'ERROR: unexpected status 404 Not Found: The model `gpt-5.5` does not exist or you do not have access to it.' >&2
+       [ -n "$FAKE_NO_DEFAULT" ] || exit 1;;
+  revoked) echo "ERROR: Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again." >&2;;
+  *) echo OK; exit 0;;
+esac
+exit 1
+"""
+
+
+def _check_codex(tmp_path, mode):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    stub = bin_dir / "codex"
+    stub.write_text(FAKE_CODEX_CHECK, encoding="utf-8")
+    stub.chmod(0o755)
+    env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "FAKE_CHECK": mode}
+    env.pop("NDF_SKIP_AUTH_CHECK", None)
+    p = subprocess.run([sys.executable, str(SCRIPT), "check", "codex"], env=env, capture_output=True, text=True, cwd=tmp_path)
+    return p.returncode, json.loads(p.stdout), p.stderr
+
+
+def test_check_rejects_a_cli_with_a_revoked_refresh_token(tmp_path):
+    """AC4: 認証の状態確認は通っても、最小の呼び出しが失効を返せば失敗と理由を返す。"""
+    code, out, err = _check_codex(tmp_path, "revoked")
+    assert code == step_result.EXIT_PRECONDITION
+    assert (out["metrics"]["outcome"], out["metrics"]["reason"]) == ("auth", "auth_expired")
+    assert "auth_expired" in out["summary"]
+    assert "❌ codex: auth_expired" in err
+
+
+def test_check_falls_back_to_the_default_model_and_guides_run(tmp_path):
+    """AC5・決定 9: 設定のモデルを引けず既定のモデルで通れば ok と既定のモデルの名前・run の案内を返す。"""
+    code, out, _ = _check_codex(tmp_path, "404")
+    assert code == 0
+    m = out["metrics"]
+    assert (m["outcome"], m["default_model"], m["from_model"]) == ("ok", "gpt-6-astra", "gpt-5.5")
+    assert "--model gpt-6-astra" in out["next"]
+
+
+def test_check_without_a_switch_returns_no_default_model(tmp_path):
+    code, out, err = _check_codex(tmp_path, "ok")
+    assert code == 0 and out["metrics"]["default_model"] is None
+    assert "✅ codex: 認証とモデル" in err
+
+
+# ---------- cmd_run の前提の確かめとモデルの記録（現状固定） ----------
+
+
+def _run_raw(tmp_path, runtime, prompt_text, *args):
+    prompt = tmp_path / "p.md"
+    prompt.write_text(prompt_text, encoding="utf-8")
+    p = subprocess.run(
+        [sys.executable, str(SCRIPT), "run", runtime, "--prompt-file", str(prompt), "--output-file", str(tmp_path / "out.md"), *args],
+        env=_env(tmp_path, runtime, "ok"),
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    out = json.loads(p.stdout.strip().splitlines()[-1])
+    assert step_result.validate_result(out, p.returncode) == [], (out, p.stderr[-2000:])
+    return p.returncode, out
+
+
+@pytest.mark.parametrize(
+    ("prompt_text", "extra", "code", "summary"),
+    [
+        ("", [], 3, "プロンプトが無いか空"),
+        ("x\n", ["--phase", "no-such-phase"], 2, "上限の表に無い工程: no-such-phase"),
+        ("x\n", ["--workdir", "/nonexistent/ndf-work"], 3, "作業ディレクトリが無い"),
+    ],
+)
+def test_run_preconditions_stop_before_launch(tmp_path, prompt_text, extra, code, summary):
+    """現状固定 — 空のプロンプト・表に無い工程・無い作業ディレクトリは起動せずに launch_failed で止める。"""
+    got, out = _run_raw(tmp_path, "kiro", prompt_text, *extra)
+    assert got == code and out["status"] == "stopped"
+    assert out["metrics"] == {"outcome": "launch_failed", "runtime": "kiro"}
+    assert summary in out["summary"]
+    assert not (tmp_path / "t").exists() and not (tmp_path / "out.md").exists()
+
+
+@pytest.mark.parametrize(("args", "model"), [((), "default"), (("--model", "spec-model"), "spec-model")])
+def test_run_records_the_specified_model_when_not_observed(tmp_path, args, model):
+    """現状固定 — 実測できないランタイムは指定したモデル、無ければ `default` を記録する。"""
+    code, out = _run(tmp_path, "kiro", "ok", *args)
+    m = out["metrics"]
+    assert code == 0 and m["model"] == model
+    assert pathlib.Path(m["stem"]).name.startswith("kiro-")
+
+
+def _load_external_ai():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("external_ai_under_test", SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.mark.parametrize(
+    "rec, source, path, expected",
+    [
+        ({"status": "OK"}, "file", "/o", ("ok", "codex の結果を回収した（file）: /o", None)),
+        (
+            {"status": "NO_RESULT", "reason": "x"},
+            "stderr",
+            "/e",
+            ("no_result", "codex は終わったが結果が無い（理由: x）", "stderr の末尾を読む: /e"),
+        ),
+        (
+            {"status": "EARLY_ERROR", "reason": "r", "detail": "HTTP/2 401"},
+            None,
+            None,
+            ("auth", "codex を止めた（EARLY_ERROR / 理由: r）", None),
+        ),
+        (
+            {"status": "EARLY_ERROR", "reason": "usage_limit", "detail": "HTTP/2 401"},
+            None,
+            None,
+            ("usage_limit", "codex を止めた（EARLY_ERROR / 理由: usage_limit）", None),
+        ),
+        ({"status": "WHATEVER", "reason": "r"}, None, None, ("launch_failed", "codex を止めた（WHATEVER / 理由: r）", None)),
+        ({}, None, None, ("launch_failed", "codex を止めた（PIDFILE_BAD / 理由: pidfile_bad）", None)),
+    ],
+    ids=["ok", "no_result", "auth", "usage_limit_over_auth", "unknown_status", "no_record"],
+)
+def test_run_outcome_characterization(rec, source, path, expected):
+    """現状固定 — 監視後の auth 判定・利用上限の優先・未知の状態の結末。"""
+    assert _load_external_ai().run_outcome("codex", rec, source, path) == expected

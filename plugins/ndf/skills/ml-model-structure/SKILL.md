@@ -111,7 +111,7 @@ flowchart LR
   `train/` 等を除外して context を軽くする。
 - `model.tar.gz` には**モデル成果物のみ**を入れ、`inference.py` は ECR イメージ側 (`/opt/ml/code`) に同梱する。
 
-詳細 (ハンドラ雛形・Dockerfile・テスト・TRAIN_SPEC の章立て) は
+詳細 (ハンドラのテンプレート・Dockerfile・テスト・TRAIN_SPEC の章立て) は
 [`references/inference-and-contract.md`](references/inference-and-contract.md) を参照。
 
 ## lab/ と v1/ の扱い

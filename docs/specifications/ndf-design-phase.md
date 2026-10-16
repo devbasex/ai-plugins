@@ -3,7 +3,10 @@
 開発ループに設計工程を置き、その成果物を規約化した経緯と決定を残す。
 
 **手順と表は [`design` の SKILL.md](../../plugins/ndf/skills/design/SKILL.md) が正である。**
-ここに書き写さない。この文書が扱うのは、そこに書かない決定の理由と、工程表での位置である。
+ここに書き写さない。この文書が扱うのは、そこに書かない決定の理由と、工程表での位置と、設計 Pull Request の
+題を作るスクリプトの契約である。承認する人が読む欄（題・目的・適用範囲・あるべき姿の根拠・用語・決定の見出し）の
+書き方は [design-template.md の「承認する人が読む欄」](../../plugins/ndf/skills/design/references/design-template.md#承認する人が読む欄)、
+承認資料への載せ方は [approval-request.md](../../plugins/ndf/skills/development-workflow/references/approval-request.md) が正である。
 
 ## 概要
 
@@ -21,6 +24,9 @@
 | 設計文書 | `design` が作る成果物。`issues/` 配下に置く Markdown |
 | 設計 Pull Request | 要求仕様と設計文書だけを載せ、実装を含まない Pull Request |
 | 記述標準 | 機械が読める形式で契約を書く外部の取り決め（OpenAPI・Open Data Contract Standard・Design Tokens Format Module） |
+
+適用範囲・あるべき姿の根拠・承認資料の定義は、設定の用語集（`.ndf/glossary.json` の `document` が指す
+[docs/glossary.md](../glossary.md)）にある。
 
 ## 背景
 
@@ -60,6 +66,17 @@ AI ごとに変わり、文書の分割単位・記載項目・粒度をその�
 | 既存の規則は名前の検索と、新しい値が通る手順を読むことの 2 つで集める | PR #519 の 3 件は、どれも集合の名前も値の名前も含まない、すべての値へ同じように当たる規則だった。名前では集まらない |
 | 既存の規則の判定は突き合わせの対に入れず、設計文書を書く手順に置く | 対は同じ文書の中だけで確かめられるものに限り、外部を要するものはレビューが拾う、という境界がある。検索を要する判定を対へ混ぜると境界が崩れる |
 | 突き合わせを機械で確かめるチェックは作らない | `design` は配布する Skill で、設計文書は利用者のリポジトリで書かれる。導ける値の記述は形が決まらず、どの表のどの列から導いたかは本文の意味を読まないと決まらない |
+| 承認する人が問う項目（題・目的・用語・適用範囲・あるべき姿の根拠・決定の見出し）を、設計文書の雛形の欄にする | 承認ゲート 1 の差し戻しの理由は、設計の中身より欄の欠けだった。v10.15.0 では用語・適用範囲・あるべき姿の根拠の 3 点で問いが 9 回になり、マイルストーン 13 では題が仕組みの語だけで設計 PR 3 本が題から書き直しになった |
+| 欄の規約の本文は `design-template.md` の「承認する人が読む欄」の 1 か所に置き、雛形のコードブロックの外に書く | 雛形のコードブロックは設計文書ごとに写されるため、中に規約の文を置くと文書の数だけ写しが増える。承認資料と他の Skill はこの節を指すだけにする |
+| 欄の順を H1 → 目的 → 適用範囲 → あるべき姿の根拠 → 管理上の注記 → ドメインモデルにする | 承認する人が最初に問うのは「何が壊れていて何が成り立つか」である。ドメインモデルを先頭に置く規約は機能一覧より先にモデルを決めるためのもので、欄の次でも目的は保たれる |
+| 欠けた欄は承認資料に「無し（理由）」と出し、承認ゲートを止めない | 欄の充足を機械が止めると、人の手が承認ゲートの外で止まる。用語を確定するために設計より前に人へ問うと、問いの回数が増える |
+| 設計 PR を出すときは `legacy-refactor` でも欄を書く | 承認ゲート 1 はどのモードでも同じ承認資料を組むため、欄が無いとこのモードの設計 PR だけ 4 行が「無し」になる |
+| スプリントの設計 PR の題は、pr のステップが PR を出す時点で設計文書の H1 から読む | プランを作る時点では設計文書がまだ無い。LLM に題を別に書かせると書き手が 2 つになり、題と H1 が食い違う |
+| 題を読む文書は頭のファイル `issues/issue-<番号>-design.md` に固定する | 直近の設計文書はすべてこの名前で書かれており、規約は今の形の追認である。差分から決定の節を持つ文書を探すと、決定を別ファイルへ分けた文書で取り違える |
+| 既存の PR では、H1 を読めたときだけ題も書き直す | 読めないときに書き直すと、人が付けた題を代わりの題で上書きする |
+| 設計を送る 2 つのステップ（push-glossary と push-glossary-gate）の後にも題を H1 へ合わせ直す | review より後に pr のステップは無く、レビューの直しで H1 が変わると古い題のまま承認ゲート 1 に届く。承認ゲート 1 の前にはどの経路でもこの 2 つのどちらかを通る。送りの定数（`PUSH_DESIGN`）に含めると、設計 PR 以外の送りでも題を書き換える |
+| 256 コードポイントを超える H1 は題に使わず、代わりの題で出す。長さは `len()` で数える | 題を切り詰めると、問題と成り立つことのどちらかが欠けた題が規約の形に見えて出る。バイトで数えると、日本語の 86 文字前後の H1 でも代わりの題へ落ちる |
+| 題と章の形を機械で検査しない | 欄の欠けと題の形の外れは、承認資料の「無し（理由）」と「題: 規約の形でない」で承認する人に見える。機械の検査は doc-check を扱う #873 の側に置く |
 
 ## 工程表での位置
 
@@ -90,6 +107,51 @@ AI ごとに変わり、文書の分割単位・記載項目・粒度をその�
 | `requirements-design` | 受け入れ条件と対象範囲を受け取る（`legacy-refactor` を除く） |
 | `implementation-plan` | 設計文書の節からタスクを導く |
 | `plan-to-spec` | 設計文書を確定仕様へ取り込む。**クラス図を実装と突き合わせるのはこの 1 回だけである** |
+
+## 設計 Pull Request の題
+
+**スプリントの設計 Pull Request の題は、設計文書の頭のファイルの H1 と同じ文である。** 題を作るのは
+`supervise.py` の pr のステップ（`plugins/ndf/scripts/supervise_lib/pr.py`）で、題を読むのは同じファイルの
+`design_title` の 1 か所である。単発の `/ndf:pr` では、呼ぶ者が `pr` の SKILL.md の 1 行に従って H1 を題に渡す。
+
+### H1 の読み方（`design_title`）
+
+| 条件 | 結果 |
+| --- | --- |
+| 囲み（行頭の空白を除いて ```` ``` ```` か `~~~` で始まる行の間）の外にある、最初の `# ` で始まる行 | その行から `# ` を除き、前後の空白を落とした文 |
+| その文が空、または 256 コードポイント（`TITLE_MAX`、Python の `len()`）を超える | 読めない |
+| ファイルが無い・読めない（UTF-8 でない）・H1 が無い | 読めない |
+
+### pr のステップの `title_doc`（プランの JSON）
+
+| キー | 型 | 意味 |
+| --- | --- | --- |
+| `title_doc` | 文字列（作業ディレクトリからの相対パス） | 題を読む設計文書。省けば題は `title` の振る舞いのまま |
+| `title` | 文字列 | `title_doc` から題を読めないときの題 |
+
+| 状況 | 新しく作る PR の題 | 既にある PR |
+| --- | --- | --- |
+| H1 を読めた | H1 の文 | 本文と一緒に題も書き直す |
+| 読めない | `title`（無ければコミットの件名） | 本文だけを書き直し、題は変えない |
+
+スプリントの設計のプラン（`supervise_lib/sprint_waves.py` の `plan_sprint_design`）は、pr のステップに
+`"title_doc": "issues/issue-<番号>-design.md"` と `"title": "設計: #<番号>"` を渡す。
+
+### `supervise.py sync-title --pr N --doc <設計文書>`
+
+レビューの直しを送った後に、題を H1 へ合わせ直す。設計のプランの push-glossary のステップの `cmd` は
+`PUSH_DESIGN` の後にこのコマンドを続け、`pace: fast` / `auto` のプラン（`plan_mvv_design`）が足す
+push-glossary-gate は push-glossary の `cmd` をそのまま使う。
+
+| 条件 | 振る舞い |
+| --- | --- |
+| H1 を読めて、今の題と違う | `gh pr edit --title <H1>` で書き直す（`metrics.changed: 1`） |
+| H1 を読めて、今の題と同じ | 書き込まない（`metrics.changed: 0`） |
+| H1 を読めない | 書き込まない（人が付けた題を代わりの題で上書きしない） |
+| `gh` の照会か書き込みが失敗した | 書き込まず、失敗を標準エラーへ出す |
+
+**結果は `lib/step_result.py` の形の 1 行の JSON で、`status` は常に `ok`、終了コードは常に 0 である。**
+題を合わせられなくても承認ゲート 1 へ進み、承認資料の「題: 規約の形でない」で見える。
 
 ## 要求側の非機能との対応
 
@@ -135,6 +197,11 @@ AI ごとに変わり、文書の分割単位・記載項目・粒度をその�
 | 4 ランタイムで Skill が読み込める | `bash scripts/runtime-smoke-test.sh` |
 | 工程表の「設計」の行と `WF_STAGE_MATRIX` が一致する | 文書を読んで確かめる（照合していたテストは #885 で削除） |
 | 条件付きの工程は、記録が無くても欠落として並ばない | `test_workflow_guard.py::test_a_conditional_stage_without_a_record_is_not_a_gap` |
+| 設計文書の囲みの外の最初の H1 を題にし、空・256 コードポイント超・ファイルが無いときは読めない（256 は題になり 257 はならない） | `plugins/ndf/scripts/tests/test_pr_design_title.py`（`test_first_h1_outside_fences_is_the_title` / `test_missing_or_empty_h1_gives_no_title` / `test_title_length_is_counted_in_code_points`） |
+| pr のステップが H1 で PR を作り、読めなければ `title` で出す。既存の PR は H1 を読めたときだけ題も書き直す | 同上（`test_new_pr_takes_the_h1_as_its_title` / `test_unreadable_h1_falls_back_to_the_step_title` / `test_existing_pr_*`） |
+| `sync-title` が違うときだけ書き直し、読めないときと `gh` の失敗では書かずに 0 で終わる | 同上（`test_sync_title_*`） |
+| 設計のプランが `title_doc` を渡し、push-glossary と push-glossary-gate の両方が送りの後に `sync-title` を打つ | 同上（`test_sprint_design_pr_reads_the_design_doc_and_falls_back` / `test_both_design_pushes_of_the_mvv_plan_sync_the_title`） |
+| 欄の規約の本文が `design-template.md` の 1 か所にだけあり、承認資料・`decisions.md`・`pr`・`requirements-design`・`document-restructuring`・`agent-layers.md` は節を指す | 文書を読んで確かめる（文言を照合するテストは書かない） |
 
 ## 運用
 
@@ -148,6 +215,7 @@ AI ごとに変わり、文書の分割単位・記載項目・粒度をその�
 - [PR #212](https://github.com/devbasex/ai-plugins/pull/212) — 要求仕様と設計
 - [PR #218](https://github.com/devbasex/ai-plugins/pull/218) — 実装
 - [issue #526](https://github.com/devbasex/ai-plugins/issues/526) / [PR #574](https://github.com/devbasex/ai-plugins/pull/574)（設計） / [PR #587](https://github.com/devbasex/ai-plugins/pull/587)（実装） — 表から導ける値の数え直しと、値を足す設計での既存の規則の判定
+- [issue #1289](https://github.com/devbasex/ai-plugins/issues/1289)（子は [#772](https://github.com/devbasex/ai-plugins/issues/772) / [#785](https://github.com/devbasex/ai-plugins/issues/785)） — 承認する人が読む欄と設計 Pull Request の題
 - [`design` Skill](../../plugins/ndf/skills/design/SKILL.md)
 - [設計文書の雛形の「進む前に突き合わせる対」](../../plugins/ndf/skills/design/references/design-template.md)
 - [開発ワークフローの振り分け](../../plugins/ndf/skills/development-workflow/SKILL.md)

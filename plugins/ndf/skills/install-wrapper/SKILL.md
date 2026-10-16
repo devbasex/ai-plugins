@@ -10,7 +10,7 @@ allowed-tools:
 # ラッパーの導入・取り外し・状態
 
 **ラッパー（`relay.py`）を使うかは利用者が決める。** この Skill が、利用者のシェル設定を書き換える
-唯一の入口である。SessionStart hook はシェル設定を書かない。ラッパーの振る舞いは
+唯一のエントリポイントである。SessionStart hook はシェル設定を書かない。ラッパーの振る舞いは
 `development-workflow` の [references/relay.md](../development-workflow/references/relay.md) にある。
 
 例: ラッパーを初めて入れる。

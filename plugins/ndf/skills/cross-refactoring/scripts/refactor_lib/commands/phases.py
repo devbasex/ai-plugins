@@ -29,14 +29,15 @@ def cmd_start_phase(args: argparse.Namespace) -> None:
     timeout = ""
     if end is not None:
         margin = int(limits_table["margin_seconds"])
-        if phase == "final-fix":
-            # 1 回目は予備時間の長さを必ず渡す（決定 26）。`final-gate` が起動の前に回数を上げる。
-            first = int((state.get("final_gate") or {}).get("fix_rounds") or 0) <= 1
-            seconds = timeline.final_fix_timeout(end, clock.now(), margin, limits_table.get("final_fix_seconds"), first)
-        else:
-            seconds = timeline.phase_timeout(end, clock.now(), margin)
+        # 締め切りは最終ゲート修正が確かめの開始の締め切り H − v、ほかの手順が想定最大時間の終わり H（#1932 原則 1・3）。
+        # 最終ゲート修正は `final-gate` が起動の前に H − v までに入るかを見ている。
+        deadline = timeline.gate_start_end(state) if phase == "final-fix" else timeline.final_end(state)
+        if phase == "final-fix" and deadline is not None:
+            end = deadline
+        now = clock.now()
+        seconds = timeline.phase_timeout(end, now, margin, deadline)
         record["timeout"] = seconds
-        record["cli_timeout"] = seconds + margin
+        record["cli_timeout"] = max(1, timeline.clip_to_end(seconds + margin, deadline, now))
         timeout = str(seconds)
     if phase != "final-fix":
         state["phase"] = phase

@@ -38,6 +38,15 @@ def init_new_state() -> ast.FunctionDef:
     raise AssertionError("_init_new_state が見つからない")
 
 
+@pytest.fixture(scope="module")
+def init_new_state_path(init_new_state: ast.FunctionDef) -> list[ast.FunctionDef]:
+    """`_init_new_state` と、その本体が直接呼ぶ同じモジュールの関数（工程ごとに抽出した関数）。"""
+    tree = ast.parse(INIT_PY.read_text(encoding="utf-8"))
+    defs = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+    called = {node.func.id for node in ast.walk(init_new_state) if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
+    return [init_new_state] + [defs[n] for n in sorted(called) if n in defs and n != init_new_state.name]
+
+
 def test_no_statement_appears_twice(init_new_state: ast.FunctionDef) -> None:
     """本体の直下に、まったく同じ文が 2 回並ばない。
 
@@ -57,6 +66,6 @@ def _called_name(func: ast.expr) -> str | None:
 
 
 @pytest.mark.parametrize("name", SINGLE_CALL)
-def test_the_call_appears_once(init_new_state: ast.FunctionDef, name: str) -> None:
-    calls = [node for node in ast.walk(init_new_state) if isinstance(node, ast.Call) and _called_name(node.func) == name]
+def test_the_call_appears_once(init_new_state_path: list[ast.FunctionDef], name: str) -> None:
+    calls = [node for fn in init_new_state_path for node in ast.walk(fn) if isinstance(node, ast.Call) and _called_name(node.func) == name]
     assert len(calls) == 1, f"{name} が {len(calls)} 回呼ばれている"

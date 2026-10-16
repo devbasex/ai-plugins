@@ -8,31 +8,18 @@ from __future__ import annotations
 import os
 import pathlib
 import subprocess
-import tempfile
 from typing import NamedTuple
 
 import review_lib  # noqa: E402
 import gh_call  # noqa: E402
+import tool_paths  # noqa: E402
+import worktree_base  # noqa: E402
+import worktree_deps  # noqa: E402
 from review_lib import github  # noqa: E402
 
 
-def _default_worktree_base() -> pathlib.Path:
-    """worktree の親ディレクトリを解決する。
-
-    優先順位:
-      1. 環境変数 NDF_WORKTREE_BASE (明示オーバーライド)
-      2. <システム tmpdir>/ndf-worktrees (非永続領域。コンテナ再作成で自動消滅)
-
-    かつての /work/worktrees ($HOME/work/worktrees) は共有の永続 volume 上にあり、
-    別リポジトリの pr<N> と衝突する・明示削除が必要・volume を消費する問題が
-    あったため廃止した。
-    """
-    env = os.environ.get("NDF_WORKTREE_BASE")
-    if env:
-        # 相対パスのまま state.json に保存されると後続のパス比較が壊れるため、
-        # 常に絶対パスへ解決して返す。
-        return pathlib.Path(env).resolve()
-    return pathlib.Path(tempfile.gettempdir()) / "ndf-worktrees"
+# worktree の親ディレクトリ。解決の規則は共通層の `worktree_base.worktree_parent` だけが持つ。
+_default_worktree_base = worktree_base.worktree_parent
 
 
 def _is_registered_worktree(path: str) -> bool:
@@ -44,6 +31,22 @@ def _is_registered_worktree(path: str) -> bool:
     out = review_lib._sh(["git", "worktree", "list", "--porcelain"], check=False)
     target = str(pathlib.Path(path).resolve())
     return any(line == f"worktree {target}" for line in out.splitlines())
+
+
+def _prepare_review_deps(worktree: str, *, if_unprepared: bool = False, is_fork: bool = False) -> None:
+    """宣言（`.ndf/worktree.json` の `deps`）に従って依存を用意する（#1337）。失敗したら止まる。
+
+    worktree は消さない。次の init が使い回すときに `if_unprepared` でやり直す。
+
+    **フォーク PR では用意しない。** 依存の用意（`npm ci`・`composer install` など）は PR の head の
+    package.json・composer.json のスクリプトを走らせるため、外部の投稿者のコードがレビュー担当の環境変数
+    （`GH_TOKEN` など）の届く所で動く。
+    """
+    if is_fork:
+        review_lib.info(f"ℹ フォーク PR のため依存の用意（.ndf/worktree.json の deps）を行いません: {worktree}")
+        return
+    if worktree_deps.prepare_reporting(worktree, if_unprepared=if_unprepared):
+        review_lib.die(f"依存の用意に失敗しました（worktree は残します。次の init がやり直します）: {worktree}")
 
 
 def _create_worktree(worktree: str, pr: int, head_branch: str) -> None:
@@ -85,6 +88,16 @@ def _create_worktree(worktree: str, pr: int, head_branch: str) -> None:
             )
             review_lib.die(f"gh pr checkout --detach #{pr} 失敗: {checkout_result.stderr.strip()}")
         review_lib.info(f"✅ worktree 作成 (gh pr checkout --detach #{pr}): {worktree}")
+    _hide_tool_paths(worktree, tool_paths.load_or_die(worktree, 1))
+
+
+def _hide_tool_paths(worktree: str, entries: list[str]) -> None:
+    """ツールのパスへ skip-worktree の印を掛ける（#1436）。
+
+    担当の CLI が起動した Serena などが書き換えても、fix 担当の `git add -A` で index へ入らず、
+    ラウンドの開始の検査にも現れない。失敗しても止めない（`tool_paths.hide` が警告を出す）。
+    """
+    tool_paths.hide(worktree, entries)
 
 
 class HeadRef(NamedTuple):
@@ -99,6 +112,8 @@ class HeadRef(NamedTuple):
     branch: str
     oid: str
     is_fork: bool
+    # 同じ応答の base のコミット。レビュー範囲の基準（#1702 の決定 1）。取れなければ空。
+    base_oid: str = ""
 
 
 def _resolve_head_ref(pr: int, code: int = 8, repo: str | None = None) -> HeadRef:
@@ -117,7 +132,7 @@ def _resolve_head_ref(pr: int, code: int = 8, repo: str | None = None) -> HeadRe
         raise SystemExit(code)  # die は戻らないが、型のために置く
     if not meta.head_branch or not meta.head_sha:
         review_lib.die(f"PR #{pr} の head が空である", code=code)
-    return HeadRef(branch=meta.head_branch, oid=meta.head_sha, is_fork=meta.is_fork)
+    return HeadRef(branch=meta.head_branch, oid=meta.head_sha, is_fork=meta.is_fork, base_oid=meta.base_sha)
 
 
 def _fetch_head(worktree: str, pr: int, head: HeadRef) -> bool:
@@ -202,19 +217,29 @@ def _is_synced(
     head: HeadRef,
     exclusions: list[str],
     code: int,
+    entries: list[str] | None = None,
 ) -> bool:
     """基準と突き合わせ、書き換えが要らないかを返す。失われるものがあるときは止める。
 
     **`strict=True` の経路からだけ呼ぶ。** 見つかる変更は、同じループの修正の工程が
     今まさに残したものである。捨てると修正そのものが失われ、しかも失われたことが
     誰にも見えない。
+
+    ツールのパス（#1436）の変更は利用者の変更に数えない。外したパス（印の掛かったパスと、
+    印の無いまま変わっていたパス）は 1 行で出す。
     """
+    entries = tool_paths.load_or_die(worktree, code) if entries is None else entries
     tracked, untracked = _worktree_changes(worktree, exclusions, code)
-    if tracked:
+    user, tool = tool_paths.split_changes(tracked, entries)
+    shown = tool_paths.describe(dict.fromkeys([*tool_paths.hidden(worktree, entries), *tool]))
+    if user:
         review_lib.die(
-            f"作業ツリーに未 push の変更が残っています: {' '.join(tracked[:10])}。 修正を push してから次のラウンドを開始してください",
+            f"worktree に未 push の変更が残っています: {' '.join(user[:10])}。 修正を push してから次のラウンドを開始してください"
+            + (f"\n{shown}" if shown else ""),
             code=code,
         )
+    if shown:
+        review_lib.info(shown)
     ahead = subprocess.run(
         ["git", "rev-list", "--count", f"{head.oid}..HEAD"],
         capture_output=True,
@@ -363,14 +388,17 @@ def _sync_worktree(
     あり、意味が違う。
     """
     code = 8 if strict else 1
+    entries = tool_paths.load_or_die(worktree, code)
     exclusions = _sync_exclusions(worktree)
     have_base, target, label = _resolve_sync_target(worktree, pr, head)
 
     if have_base:
-        if strict and isinstance(head, HeadRef) and _is_synced(worktree, pr, head, exclusions, code):
+        if strict and isinstance(head, HeadRef) and _is_synced(worktree, pr, head, exclusions, code, entries):
+            _hide_tool_paths(worktree, entries)
             return
         if not strict and _has_unpushed_commits(worktree, target):
             review_lib.info(f"↷ 作業ツリーに PR #{pr} の head より先の未 push のコミットがあるため巻き戻さない")
+            _hide_tool_paths(worktree, entries)
             return
     elif strict:
         # HEAD を動かす前に、何が失われるかを数える材料が無い（基準が手元に無いのだから、
@@ -382,8 +410,12 @@ def _sync_worktree(
     else:
         # フォーク PR は origin に head branch が無い。作成時と同じ経路で合わせる。
         review_lib.info(f"⚠ git fetch origin {label} 失敗 (フォーク PR の可能性) — gh pr checkout でフォールバック")
+    # 印の掛かったツールのパスに手元の変更があると、そのパスを変える先への `reset --hard` が
+    # 失敗する。レビュー worktree の中身なので、印を外して HEAD へ戻してから動かす（#1436 決定 2）。
+    tool_paths.release(worktree, entries)
     _reset_worktree_head(worktree, pr, target if have_base else None, code)
     _clean_untracked_files(worktree, exclusions, code)
+    _hide_tool_paths(worktree, entries)
     rev = subprocess.run(
         ["git", "rev-parse", "--short", "HEAD"],
         capture_output=True,

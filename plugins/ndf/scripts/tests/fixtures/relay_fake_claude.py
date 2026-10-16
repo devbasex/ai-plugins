@@ -3,7 +3,7 @@
 
 - `plugin ...` の副命令: 呼び出しを `FAKE_DIR/calls.jsonl` へ記録する。`list --json` は
   `ndf@mk` の要素を返す。版は `plugin update` が呼ばれた後なら `FAKE_VERSION_AFTER`、
-  前なら `FAKE_VERSION`（既定 1.0.0）。`FAKE_FAIL` に `list` / `update` / `marketplace` を
+  前なら `FAKE_VERSION`（既定 1.0.0）。導入先 `installPath` は同じく `FAKE_INSTALL_PATH_AFTER` / `FAKE_INSTALL_PATH`（無ければ出さない）。`FAKE_FAIL` に `list` / `update` / `marketplace` を
   含めると、その副命令が終了コード 1 で終わる。`FAKE_HANG` に含めると終わらない。
   `FAKE_BREAK_ON_LIST=N` なら N 回目の `list` の後に自分の実行権限を外す（次の exec が失敗する）
 - それ以外: 対話の区間として動く。起動の記録（argv・cwd・pid・環境の一部）を
@@ -21,6 +21,7 @@
 | `answer [mark <中身>]` | 質問に答えた後の Stop を模す。`relay.py mark` を呼び（中身が無ければブロック無し）、終了コード 0 で終わる |
 | `unq` | 質問の合図だけを消す |
 | `stop` | ブロックの無い応答の Stop を模す。`relay.py mark` を呼ぶ |
+| `fail <error>` | 応答が API の失敗で終わった StopFailure を模す。`relay.py limit` を呼ぶ（#1389） |
 
 行の中の Esc（`\\x1b`）は読み捨てる（入力待ちの Esc 1 回は何もしない形を模す）。
 
@@ -28,7 +29,8 @@
 答えの後に働く形を模す）。このとき SIGTERM を受けたら `FAKE_DIR/sigterm-<pid>` を書いて 143 で終わる。
 受けたバイトは読んだ単位ごとに `FAKE_DIR/chunks-<pid>.jsonl` へも書く。
 
-最後の引数（区間のプロンプト）が `mark ` で始まれば、起動の直後にその行を 1 度実行する。
+起動の直後に、最後の引数（区間のプロンプト）を `UserPromptSubmit` の hook と同じ形で `hook.py goal-skill` へ渡し、
+入力と出力を `FAKE_DIR/prompt-<pid>.jsonl` へ書く（#1492）。最後の引数が `mark ` で始まれば、続けてその行を 1 度実行する。
 """
 
 import fcntl
@@ -62,7 +64,11 @@ def plugin(args):
         calls = [json.loads(x) for x in open(os.path.join(D, "calls.jsonl"))]
         updated = any(c["args"][:1] == ["update"] for c in calls)
         ver = os.environ.get("FAKE_VERSION_AFTER" if updated else "FAKE_VERSION") or os.environ.get("FAKE_VERSION") or "1.0.0"
-        print(json.dumps([{"id": "other@x", "version": "9"}, {"id": "ndf@mk", "version": ver}]))
+        item = {"id": "ndf@mk", "version": ver}
+        path = os.environ.get("FAKE_INSTALL_PATH_AFTER" if updated else "FAKE_INSTALL_PATH") or os.environ.get("FAKE_INSTALL_PATH")
+        if path:
+            item["installPath"] = path
+        print(json.dumps([{"id": "other@x", "version": "9"}, item]))
         lists = sum(c["args"][:1] == ["list"] for c in calls)
         if str(lists) == os.environ.get("FAKE_BREAK_ON_LIST"):
             os.chmod(sys.argv[0], 0o644)  # 次の exec を失敗させる
@@ -71,6 +77,25 @@ def plugin(args):
 
 def transcript():
     return os.path.join(D, f"transcript-{os.getpid()}.jsonl")
+
+
+def do_fail(error):
+    data = {"session_id": f"s{os.getpid()}", "transcript_path": transcript(), "cwd": os.getcwd(), "error": error}
+    subprocess.run([sys.executable, RELAY, "limit"], input=json.dumps(data), text=True)
+
+
+def prompt_hook(prompt):
+    """区間のプロンプトを受けた `UserPromptSubmit` hook（`hook.py goal-skill`）を模す。"""
+    hook = os.path.join(os.path.dirname(RELAY), "hook.py")
+    data = {
+        "session_id": f"s{os.getpid()}",
+        "transcript_path": transcript(),
+        "cwd": os.getcwd(),
+        "hook_event_name": "UserPromptSubmit",
+        "prompt": prompt,
+    }
+    p = subprocess.run([sys.executable, hook, "goal-skill"], input=json.dumps(data), text=True, capture_output=True)
+    log(f"prompt-{os.getpid()}.jsonl", {"prompt": prompt, "stdout": p.stdout, "code": p.returncode})
 
 
 def do_mark(body):
@@ -119,6 +144,8 @@ def handle(line):
         sys.exit(0)
     elif line == "stop":
         do_mark(None)
+    elif line.startswith("fail "):
+        do_fail(line[5:])
     elif line == "unq":
         try:
             os.unlink(os.path.join(os.environ["NDF_RELAY_DIR"], "question"))
@@ -148,9 +175,16 @@ def main():
             "relay_dir": os.environ.get("NDF_RELAY_DIR"),
             "claudecode": os.environ.get("CLAUDECODE"),
             "depth": os.environ.get("NDF_RELAY_DEPTH"),
+            "token": os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
+            "config_dir": os.environ.get("CLAUDE_CONFIG_DIR"),
+            "account": os.environ.get("NDF_CLAUDE_ACCOUNT"),
+            "bedrock": os.environ.get("CLAUDE_CODE_USE_BEDROCK"),
+            "api_key": os.environ.get("ANTHROPIC_API_KEY"),
         },
     )
     open(transcript(), "a").close()
+    if args:
+        prompt_hook(args[-1])
     if args and args[-1].startswith("mark "):
         do_mark(args[-1][5:])
     tty.setraw(0)

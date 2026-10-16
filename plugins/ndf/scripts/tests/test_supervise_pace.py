@@ -1,4 +1,4 @@
-"""supervise.py の `pace: fast`（#1078）: 計画の組み立て（new mission --pace fast・new check --since-last・
+"""supervise.py の `pace: fast`（#1078）: 計画の組み立て（new sprint --pace fast・new check --since-last・
 new close・new release --mvv・new impl --escape-of）と実行（実行の条件・--then のステージ・{queue_pr:<名>}・gate_as_ok）。
 
 実機の claude と gh は呼ばない（計画の形と、run のステップだけの計画を流して見る）。
@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -16,27 +17,33 @@ import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 SUPERVISE = SCRIPTS / "supervise.py"
-MISSION_STATE = SCRIPTS / "mission-state.py"
+SPRINT_STATE = SCRIPTS / "sprint-state.py"
 REPO = SCRIPTS.parents[2]
 PY = sys.executable
 
 sys.path.insert(0, str(SCRIPTS))
-from supervise_lib import engine, paths, queue  # noqa: E402
+from supervise_lib import engine, flow, paths, queue  # noqa: E402
+
+
+# new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える
+pytestmark = pytest.mark.usefixtures("issue_bodies")
 
 
 def cli(*args, cwd=None):
     return subprocess.run([PY, str(SUPERVISE), *args], capture_output=True, text=True, cwd=cwd or REPO)
 
 
-def mission_state(tmp_path: Path, approve: bool = True) -> Path:
+def sprint_state(tmp_path: Path, approve: bool = True) -> Path:
     mvv = tmp_path / "mvv-src.md"
     mvv.write_text("## Mission\n速く\n## Vision\n回る\n## Value\n実測\n")
-    state = tmp_path / "state" / "mission-state.json"
+    state = tmp_path / "state" / "sprint-state.json"
     subprocess.run(
-        [PY, str(MISSION_STATE), "init", str(state), "--name", "m", "--pace", "fast", "--mvv", str(mvv)], check=True, capture_output=True
+        [PY, str(SPRINT_STATE), "init", str(state), "--name", "m", "--pace", "fast", "--mvv", str(mvv), "--root", str(tmp_path)],
+        check=True,
+        capture_output=True,
     )
     if approve:
-        subprocess.run([PY, str(MISSION_STATE), "gate", str(state), "MVV", "--what", "MVV を承認"], check=True, capture_output=True)
+        subprocess.run([PY, str(SPRINT_STATE), "gate", str(state), "MVV", "--what", "MVV を承認"], check=True, capture_output=True)
     return state
 
 
@@ -56,14 +63,14 @@ def assert_transitions_exist(plan: dict) -> None:
                 assert s[k] in ids or s[k] == "end", (plan.get("フェーズ"), s)
 
 
-# ---------- new mission --pace fast ----------
+# ---------- new sprint --pace fast ----------
 
 
-def new_fast_mission(tmp_path, state, *extra):
+def new_fast_sprint(tmp_path, state, *extra):
     out = tmp_path / "m"
     p = cli(
         "new",
-        "mission",
+        "sprint",
         "--name",
         "m26",
         "--worktree",
@@ -86,19 +93,19 @@ def new_fast_mission(tmp_path, state, *extra):
     return p, out
 
 
-def test_fast_mission_puts_check_then_dev_then_prod_after_the_implementation(tmp_path):
-    p, out = new_fast_mission(tmp_path, mission_state(tmp_path))
+def test_fast_sprint_puts_check_then_dev_then_prod_after_the_implementation(tmp_path):
+    p, out = new_fast_sprint(tmp_path, sprint_state(tmp_path))
     assert p.returncode == 0, p.stdout + p.stderr
-    manifest = load(out / "mission.json")
-    assert manifest["進め方"] == "fast" and manifest["状態"].endswith("mission-state.json")
+    manifest = load(out / "sprint.json")
+    assert manifest["進め方"] == "fast" and manifest["状態"].endswith("sprint-state.json")
     waves = {w["name"]: w for w in manifest["ステージ"]}
-    assert [w["name"] for w in manifest["ステージ"]] == ["設計", "関門 1", "実装", "検査", "実装レビュー", "開発版", "本番"]
-    cmd = waves["実装"]["command"]
+    assert [w["name"] for w in manifest["ステージ"]] == ["設計", "関門 1", "設計の結果", "実装", "検査", "実装レビュー", "開発版", "本番"]
+    cmd = waves["設計の結果"]["command"]  # 設計の結果の queue が実装以降を --then で流す（#1485 の決定 2）
     check, dev, prod = waves["検査"]["plans"][0], waves["開発版"]["plans"][0], waves["本番"]["plans"][0]
     review = waves["実装レビュー"]["plans"][0]
     assert cmd.index("--then " + check) < cmd.index("--then " + review) < cmd.index("--then " + dev) < cmd.index("--then " + prod)
-    # ミッションのブランチを作らない。スクリプトの絶対パスは .worktrees/mission/... を含みうるので、ブランチ名で見る。
-    assert "mission/m26" not in json.dumps(manifest, ensure_ascii=False)
+    # スプリントブランチを作らない。スクリプトの絶対パスは .worktrees/sprint/... を含みうるので、ブランチ名で見る。
+    assert "sprint/m26" not in json.dumps(manifest, ensure_ascii=False)
 
     impl = load(waves["実装"]["plans"][0])
     assert impl["起点"] == "origin/develop" and next(s for s in impl["steps"] if s["type"] == "pr")["base"] == "develop"
@@ -119,11 +126,11 @@ def test_fast_mission_puts_check_then_dev_then_prod_after_the_implementation(tmp
     design = load(waves["設計"]["plans"][0])
     ds = steps_of(design)
     assert "--gate design" in ds["mvv"]["cmd"] and ds["mvv"]["next"] == "approve" and ds["mvv"]["gate_next"] == "end"
-    assert "design-approved" in ds["approve"]["cmd"] and ds["approve"]["next"] == "merge"
+    assert "design-approved" in ds["approve"]["cmd"] and ds["approve"]["next"] == "merge-gate"
     assert ds["review"]["next"] == "sync-review" and ds["push-glossary"]["next"] == "mvv"  # 用語チェックの後で判定する
     # 直し切れずに残った当たりは mvv を通さず、当たりを入力に持つ関門 1 の judge へ回る
     assert ds["glossary-recheck"]["on_fail"] == "push-glossary-gate" and ds["glossary-recheck"]["next"] == "push-glossary"
-    assert ds["push-glossary-gate"]["next"] == "gate" and "glossary-recheck" in ds["gate"]["inputs"]
+    assert ds["push-glossary-gate"]["next"] == "ready" and ds["ready"]["next"] == "gate" and "glossary-recheck" in ds["gate"]["inputs"]
     for i in ("push-glossary", "push-glossary-gate"):  # 本文の「決めたこと」を設計文書に合わせる
         assert ds[i]["cmd"].startswith("git push -q && ") and "pr-body-decisions.sh sync {pr}" in ds[i]["cmd"]
     approve_runs_with_or_without_note(tmp_path, ds["approve"]["cmd"])
@@ -150,23 +157,23 @@ def approve_runs_with_or_without_note(tmp_path, cmd):
 
 
 @pytest.mark.parametrize("change", ["unapproved", "changed"])
-def test_fast_mission_is_refused_without_a_matching_approval(tmp_path, change):
-    state = mission_state(tmp_path, approve=change != "unapproved")
+def test_fast_sprint_is_refused_without_a_matching_approval(tmp_path, change):
+    state = sprint_state(tmp_path, approve=change != "unapproved")
     if change == "changed":
         mvv = Path(load(state)["mvv"]["path"])
         mvv.write_text(mvv.read_text() + "足した行\n")
-    p, out = new_fast_mission(tmp_path, state)
+    p, out = new_fast_sprint(tmp_path, state)
     assert p.returncode == 1, p.stdout + p.stderr
     assert json.loads(p.stdout)["status"] == "stopped"
     assert not list(out.glob("*.json")) if out.exists() else True
 
 
-def test_fast_mission_is_refused_for_operation_mode(tmp_path):
-    p, out = new_fast_mission(tmp_path, mission_state(tmp_path), "--mode", "operation")
+def test_fast_sprint_is_refused_for_operation_mode(tmp_path):
+    p, out = new_fast_sprint(tmp_path, sprint_state(tmp_path), "--mode", "operation")
     assert p.returncode == 1 and "モード" in json.loads(p.stdout)["summary"]
 
 
-def test_fast_mission_is_refused_without_the_declaration(tmp_path):
+def test_fast_sprint_is_refused_without_the_declaration(tmp_path):
     repo = tmp_path / "repo"
     (repo / ".ndf").mkdir(parents=True)
     (repo / ".ndf" / "worktree.json").write_text('{"version": 1, "base_branch": "develop", "production_branch": "main"}')
@@ -174,7 +181,7 @@ def test_fast_mission_is_refused_without_the_declaration(tmp_path):
     out = tmp_path / "m"
     p = cli(
         "new",
-        "mission",
+        "sprint",
         "--name",
         "m",
         "--worktree",
@@ -186,7 +193,7 @@ def test_fast_mission_is_refused_without_the_declaration(tmp_path):
         "--pace",
         "fast",
         "--state",
-        str(mission_state(tmp_path)),
+        str(sprint_state(tmp_path)),
         "--out",
         str(out),
         cwd=repo,
@@ -207,11 +214,11 @@ def test_check_since_last_has_a_condition_and_every_failure_reaches_abort(tmp_pa
     assert ids[:3] == ["prepare", "pr", "assess"]
     s = steps_of(plan)
     assert s["pr"]["base"] == "check-base/m-3" and s["pr"]["body"] == "template"
-    assert "check-trigger.py scope --id m-3" in s["refactor"]["args"]
+    assert "check-trigger.py scope --id m-3" in s["refactor"]["cmd"]
     # 起点のブランチを取り込んで送ってから測る（検査の間に進んだ起点と finish の付け替えの後に衝突しない）
     cmd = s["test-all"]["cmd"]
     base = plan["起点"].removeprefix("origin/")
-    assert cmd.index(f"git merge -q --no-edit origin/{base}") < cmd.index("git push -q") < cmd.index("pytest")
+    assert cmd.index(f"git merge -q --no-edit origin/{base}") < cmd.index("git push -q") < cmd.index("test-run.py")
     assert s["finish"]["skip_to"] == "record" and s["record"]["next"] == "end"
     for step in plan["steps"]:
         if step["type"] == "run" and not step["id"].startswith("abort"):
@@ -220,6 +227,48 @@ def test_check_since_last_has_a_condition_and_every_failure_reaches_abort(tmp_pa
     assert "--pr" not in s["abort-before-pr"]["cmd"]
     assert s["prepare"]["on_fail"] == "abort-before-pr" and s["ready"]["on_fail"] == "abort"
     assert_transitions_exist(plan)
+
+
+def test_check_of_a_pr_records_every_ending_and_judge_stops_through_abort(tmp_path):
+    """PR を指す検査も、マージの後と落ちたときに検査の記録へ 1 行を書く（#1317）。"""
+    out = tmp_path / "check.json"
+    p = cli("new", "check", "--pr", "5", "--worktree", str(tmp_path), "--out", str(out))
+    assert p.returncode == 0, p.stdout + p.stderr
+    plan = load(out)
+    s = steps_of(plan)
+    assert s["merge"]["next"] == "record" and s["merge-approved"]["next"] == "record"
+    assert "record --id pr-5" in s["record"]["cmd"] and s["record"]["cmd"].endswith("--target-pr 5")
+    assert s["abort"]["cmd"] == s["record"]["cmd"] + " --failed"
+    for step in plan["steps"]:
+        if step["type"] in ("run", "drive") and step["id"] not in ("abort", "assess", "test-all"):
+            assert step.get("on_fail") == "abort", step
+    assert "stop" not in s["judge"]["choices"] and "abort" in s["judge"]["choices"]
+    assert_transitions_exist(plan)
+    since = tmp_path / "since.json"
+    assert cli("new", "check", "--since-last", "--id", "m-4", "--worktree", str(tmp_path), "--out", str(since)).returncode == 0
+    s = steps_of(load(since))
+    assert "stop" not in s["judge"]["choices"] and "abort" in s["judge"]["choices"]
+    assert s["refactor"]["on_fail"] == "abort" and s["review"]["on_fail"] == "abort"
+
+
+@pytest.mark.parametrize("push", [0, 1])
+def test_ready_of_the_check_plan_stops_when_the_push_fails(tmp_path, push):
+    """PR を指す検査の ready は、push が落ちたら Draft を外さずに落ちる（#1908）。設計のプランの ready は push せず、
+    push-glossary が落ちればプランが止まって ready へ来ない（test_supervise の設計のプランの検査が見る）。"""
+    out = tmp_path / "check.json"
+    assert cli("new", "check", "--pr", "5", "--worktree", str(tmp_path), "--out", str(out)).returncode == 0
+    cmds = [steps_of(load(out))["ready"]["cmd"]]
+    bin_dir, log = tmp_path / "fake-bin", tmp_path / "gh.log"
+    bin_dir.mkdir()
+    for name, code in (("git", push), ("gh", 0)):
+        (bin_dir / name).write_text(f'#!/bin/sh\necho "{name} $*" >> {log}\nexit {code}\n')
+        (bin_dir / name).chmod(0o755)
+    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+    for cmd in cmds:
+        log.unlink(missing_ok=True)
+        assert subprocess.run(cmd.replace("{pr}", "7"), shell=True, env=env).returncode == push
+        calls = [l.split()[:3] for l in log.read_text().splitlines()]
+        assert calls == [["git", "push", "-q"]] + ([["gh", "pr", "ready"]] if push == 0 else [])
 
 
 def test_since_ref_reaches_the_condition_and_prepare_but_not_record(tmp_path):
@@ -271,12 +320,12 @@ def test_close_runs_spec_close_and_retro_once_each_in_order(tmp_path):
         "--prod",
         "10.18.0",
         "--state",
-        str(mission_state(tmp_path)),
+        str(sprint_state(tmp_path)),
         "--out",
         str(out),
     )
     assert p.returncode == 0, p.stdout + p.stderr
-    manifest = load(out / "mission.json")
+    manifest = load(out / "sprint.json")
     waves = {w["name"]: w for w in manifest["ステージ"]}
     assert [w["name"] for w in manifest["ステージ"]] == ["最終の検査", "開発版", "本番", "まとめ"]
     final = load(waves["最終の検査"]["plans"][0])
@@ -295,13 +344,22 @@ def test_close_runs_spec_close_and_retro_once_each_in_order(tmp_path):
     cmd = waves["最終の検査"]["command"]
     assert cmd.count("--then") == 3
     assert_transitions_exist(close)
+    # 棚卸しは振り返りの後の別のステップ（#842）。振り返りのプロンプトは棚卸しを含まない
+    steps = steps_of(close)
+    assert steps["retro"]["next"] == "refine" and "backlog-refinement" not in steps["retro"]["prompt"]
+    refine = steps["refine"]
+    assert refine["stage"] == "棚卸し" and refine["type"] == "work" and refine["timeout"] > 0
+    assert refine["next"] == "end" and stages.index("振り返り") < stages.index("棚卸し")
+    # 無人で通す: 上限を上げて打ち直さない・終了コード 10 で承認を求めない・記録のリポジトリの外へ書かない
+    for words in ("--limit` を上げて打ち直さず", "承認を求めず", "`--repo` を渡さない", "親 issue の起票"):
+        assert words in refine["prompt"]
 
 
 # ---------- new release --mvv・new impl --escape-of ----------
 
 
 def test_release_with_mvv(tmp_path):
-    state = mission_state(tmp_path)
+    state = sprint_state(tmp_path)
     for channel, version in (("prod", "10.18.0"), ("dev", "10.18.0-dev.1")):
         out = tmp_path / f"{channel}.json"
         p = cli(
@@ -387,6 +445,21 @@ def test_condition_zero_runs_and_other_codes_stop(tmp_path):
     assert got == {"ok": "完了", "bad": "止まった"} and (tmp_path / "ran").exists()
 
 
+def test_condition_that_stops_on_missing_deps_is_not_done(tmp_path):
+    """実行の条件のコマンドが依存の欠け（69）で終わると、完了でなく止まった（#1654）。"""
+    import deps
+
+    plan = plan_file(
+        tmp_path,
+        "deps",
+        [{"id": "t", "type": "run", "cmd": f"touch {tmp_path}/ran", "next": "end"}],
+        **{"実行の条件": {"cmd": f"exit {deps.EXIT_DEPS_MISSING}", "skip_code": 3}},
+    )
+    res = queue.cmd_queue([plan], 3, poll=0.05)
+    assert [i["result"] for i in res["items"]] == ["止まった"] and not (tmp_path / "ran").exists()
+    assert "- 結果: 止まった" in (paths.state_dir_of(plan) / "report.md").read_text()
+
+
 def test_then_stages_run_in_order_and_stop_after_a_failed_stage(tmp_path):
     a = plan_file(tmp_path, "a", [{"id": "t", "type": "run", "cmd": f"date +%s.%N > {tmp_path}/a", "next": "end"}])
     b = plan_file(tmp_path, "b", [{"id": "t", "type": "run", "cmd": f"sleep 0.2; date +%s.%N > {tmp_path}/b", "next": "end"}])
@@ -412,7 +485,7 @@ def test_queue_pr_placeholder_takes_the_named_plan_or_zero(tmp_path, monkeypatch
     close = plan_file(tmp_path, "4-close", [{"id": "t", "type": "run", "cmd": "echo {queue_pr:release-prod}", "next": "end"}])
     seen = {}
 
-    def batch(plans, m, poll):
+    def batch(plans, adm, args):
         items = []
         for p in plans:
             if p == close:
@@ -423,7 +496,7 @@ def test_queue_pr_placeholder_takes_the_named_plan_or_zero(tmp_path, monkeypatch
                 items.append({"plan": p, "result": "完了", "report": str(paths.state_dir_of(p) / "report.md")})
         return items
 
-    monkeypatch.setattr(queue, "run_batch", batch)
+    monkeypatch.setattr(flow, "run_stage", batch)
     queue.cmd_queue([impl], 3, poll=0.05, then=[[prod], [close]])
     assert seen["cmd"] == "echo 77"
     close2 = plan_file(tmp_path, "4-close-b", [{"id": "t", "type": "run", "cmd": "echo {queue_pr:release-prod}", "next": "end"}])
@@ -438,6 +511,34 @@ def test_queue_pr_placeholder_reads_a_sibling_plan_when_queued_alone(tmp_path):
     close = plan_file(tmp_path, "4-close", [{"id": "t", "type": "run", "cmd": "echo {queue_pr:release-prod}"}])
     assert queue.fill_queue_pr(close, []) is None
     assert load(close)["steps"][0]["cmd"] == "echo 91"
+
+
+@pytest.mark.parametrize("alone", [True, False])
+def test_normal_sprint_release_fills_the_check_pr_alone_or_after_check(tmp_path, monkeypatch, alone):
+    out = tmp_path / "m"
+    p = cli("new", "sprint", "--name", "m", "--worktree", str(tmp_path), "--issue", "1", "--version", "10.18.0-dev.1", "--out", str(out))
+    assert p.returncode == 0, p.stderr
+    waves = {w["name"]: w for w in load(out / "sprint.json")["ステージ"]}
+    check, release = waves["検査"]["plans"][0], waves["配布"]["plans"][0]
+    assert "{queue_prs}" not in Path(release).read_text()
+    seen = {}
+
+    def batch(plans, adm, args):
+        for q in plans:
+            if q == check:
+                report_with_pr(q, "https://github.com/o/r/pull/1915")
+            else:
+                seen.update(steps_of(load(q)))
+        return [{"plan": q, "result": "完了", "report": str(paths.state_dir_of(q) / "report.md")} for q in plans]
+
+    monkeypatch.setattr(flow, "run_stage", batch)
+    if alone:  # 検査の関門の後・開発版の出し直し: 検査の報告だけが残っている
+        report_with_pr(check, "https://github.com/o/r/pull/1915")
+        queue.cmd_queue([release], 3, poll=0.05)
+    else:
+        queue.cmd_queue([check], 3, poll=0.05, then=[[release]])
+    for sid in ("changelog", "notes", "facts", "explain", "others"):
+        assert re.search(r"--prs 1915(\s|$)", seen[sid]["cmd"]), (sid, seen[sid]["cmd"])
 
 
 def test_gate_as_ok_copies_the_presentation_and_goes_on(tmp_path):

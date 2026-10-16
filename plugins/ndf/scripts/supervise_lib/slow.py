@@ -169,34 +169,43 @@ class SlowWatch:
             if action == "remedied":
                 self.ctx.state.attention("遅れ", f"ステップ {sid} が想定 {exp} 秒を超えた（{round(el)} 秒）: {brief['summary']}。待ち直す")
             return
-        llm = None
-        if action in ("retry", "fix", "stop"):
-            act, by, reason = action, "rule", str(brief.get("summary") or "")
-        else:
-            w.llm_calls += 1
-            d = self.judge_slow(w, el)
-            by, reason = "llm", d["reason"]
-            llm = {"reason": reason, "cost": d.get("cost") or 0.0, "seconds": d.get("seconds")}
-            act = d["decision"] if d["ok"] else "wait"
-            if not d["ok"]:
-                self.ctx.state.attention("遅れ", f"ステップ {sid} の遅れの判定を読めない（{reason[:200]}）")
+        act, by, reason, llm, d = self._decide_action(w, el, brief, action)
         if act == "retry" and w.retries >= cfg.max_retry:
             act, reason = "stop", f"{reason}（retry の上限 {cfg.max_retry} 回を超えた）"
         if llm:
             line["llm"] = llm
         if act == "wait":
-            w.waits = 0
-            wait_s = w.expected
-            if llm and d["ok"] and isinstance(d.get("wait_seconds"), (int, float)) and not isinstance(d["wait_seconds"], bool):
-                wait_s = min(max(float(d["wait_seconds"]), 60.0), w.expected)
-            w.next_check = round(el + wait_s, 1)
-            self.slow_write({**line, "act": "wait", "by": by, "next_check": w.next_check})
-            if llm and d["ok"]:
-                self.ctx.state.attention("遅れ", f"ステップ {sid} が想定 {exp} 秒を超えた（{round(el)} 秒）: 判定 wait（{reason}）")
+            self._apply_wait(w, el, line, by, reason, llm, d)
             return
         self.slow_write({**line, "act": act, "by": by})
         self.ctx.state.attention("遅れ", f"ステップ {sid} を打ち切った（{act}）: {reason}")
         raise SlowAction(act, reason, str(brief.get("summary") or ""))
+
+    def _decide_action(self, w: StepWatch, el: float, brief: dict, action) -> tuple[str, str, str, dict | None, dict | None]:
+        """probe の action で決まれば rule、決まらなければ judge_slow（llm）で手を決める。"""
+        if action in ("retry", "fix", "stop"):
+            return action, "rule", str(brief.get("summary") or ""), None, None
+        w.llm_calls += 1
+        d = self.judge_slow(w, el)
+        reason = d["reason"]
+        llm = {"reason": reason, "cost": d.get("cost") or 0.0, "seconds": d.get("seconds")}
+        act = d["decision"] if d["ok"] else "wait"
+        if not d["ok"]:
+            self.ctx.state.attention("遅れ", f"ステップ {w.step_id} の遅れの判定を読めない（{reason[:200]}）")
+        return act, "llm", reason, llm, d
+
+    def _apply_wait(self, w: StepWatch, el: float, line: dict, by: str, reason: str, llm: dict | None, d: dict | None) -> None:
+        """wait と決めたときの次の確認時刻を出して記録する。llm が秒数を返していれば 60 秒〜想定の範囲で使う。"""
+        w.waits = 0
+        wait_s = w.expected
+        if llm and d["ok"] and isinstance(d.get("wait_seconds"), (int, float)) and not isinstance(d["wait_seconds"], bool):
+            wait_s = min(max(float(d["wait_seconds"]), 60.0), w.expected)
+        w.next_check = round(el + wait_s, 1)
+        self.slow_write({**line, "act": "wait", "by": by, "next_check": w.next_check})
+        if llm and d["ok"]:
+            self.ctx.state.attention(
+                "遅れ", f"ステップ {w.step_id} が想定 {round(w.expected, 1)} 秒を超えた（{round(el)} 秒）: 判定 wait（{reason}）"
+            )
 
     def probe_values(self, step: dict) -> dict:
         """probe の cmd の置き換え: {pr} {base} {branch} {state_dir}。"""

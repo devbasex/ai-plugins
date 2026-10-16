@@ -1,7 +1,7 @@
 {
   "name": "ndf",
-  "version": "10.18.0-dev.1",
-  "description": "Claude Code plugin (v10.18.0-dev.1): 8 specialized agents (plus 2 supervisor agents and 1 worker agent for the 3-layer workflow) and 48 focused NDF skills for PR/review workflows, cross-review, implementation planning, plan-to-spec, Docker container access, statusline, external AI delegation (Codex/agy), transcript retention guard, and optional Slack notifications.",
+  "version": "10.17.75",
+  "description": "Claude Code plugin (v10.17.75): 8 specialized agents (plus 2 supervisor agents and 1 worker agent for the 3-layer workflow) and 48 focused NDF skills for PR/review workflows, cross-review, implementation planning, plan-to-spec, Docker container access, statusline, external AI delegation (Codex/agy), transcript retention guard, and optional Slack notifications.",
   "author": {
     "name": "takemi-ohama",
     "url": "https://github.com/takemi-ohama"
@@ -68,13 +68,13 @@
     "./skills/quality-gates",
     "./skills/worktree",
     "./skills/out-of-scope",
-    "./skills/issue-upkeep",
+    "./skills/backlog-refinement",
+    "./skills/estimate",
     "./skills/progress-tracking",
     "./skills/release-verification",
     "./skills/retrospective",
     "./skills/release",
-    "./skills/google-auth",
-    "./skills/google-drive",
+    "./skills/google-workspace",
     "./skills/ml-model-structure",
     "./skills/skill-stats",
     "./skills/install-wrapper",

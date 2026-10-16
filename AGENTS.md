@@ -28,7 +28,7 @@
 - 必ずfeatureブランチを作成して作業
 - Pull Requestを通じてレビュー・マージ
 - ユーザーの許可なくPRを承認しない
-  - `pace: fast` は MVV の承認・ハッシュの一致・判定の記録がそろったゲート 1・2 だけ、MVV の承認を許可として扱う（レッドラインは除く。条件は `plugins/ndf/skills/development-workflow/references/pace.md`）。approve はしない
+  - `pace: fast` と `pace: auto` は MVV の承認・ハッシュの一致・判定の記録がそろったゲート 1・2 だけ、MVV の承認を許可として扱う（レッドラインは除く。条件は `plugins/ndf/skills/development-workflow/references/pace.md`）。approve はしない
 
 ### 版と配布の方針
 
@@ -48,10 +48,10 @@
 **開発版の版数には接尾辞を付ける。** 接尾辞は人が読むための目印で、入れたくない利用者が版数を見て
 判断できるようにするためである。次に出す正式版の版数へ付け、正式版を出すときに外す（形の一覧は正本の「版の付け方と開発版の配布」）。
 
-**版を上げるのは、ミッション単位でマージが終わった後である。** Pull Request ごとには上げない。
+**版を上げるのは、スプリント単位でマージが終わった後である。** Pull Request ごとには上げない。
 担い手と時期の決まりは `release` にある（`/ndf:release`）。
 
-**マイルストーンの名前は版数を持たない。** 版数を決めるのはミッションの中身であり、名前を
+**マイルストーンの名前は版数を持たない。** 版数を決めるのはスプリントの中身であり、名前を
 付ける時点では決まっていない。
 
 | 状態 | 名前の形 | 何を表すか |
@@ -62,7 +62,7 @@
 **閉じるときに改名する。** リリースで版が決まった時点が、名前を版数へ変えられる最初の時点である。
 
 **連番は再利用しない。** `01` を閉じて版数へ改名しても、次に作るのは番号の続きである。詰め直すと、
-記録に残った番号が別のミッションを指す。
+記録に残った番号が別のスプリントを指す。
 
 **名前を版数にすると 2 つが壊れる。** 名前は着手の前に付き、版の大小は中身が固まるまで決まらない
 ため、見積が外れると名前とリリース済み版が食い違う。**食い違いを直そうとしても、その版数を着手待ちの
@@ -133,7 +133,7 @@ ai-plugins/
 |-------------|------|
 | [docs/project-overview.md](docs/project-overview.md) | プロジェクト概要・インストール方法 |
 | [docs/plugin-development-guide.md](docs/plugin-development-guide.md) | プラグイン開発ガイド（構造、plugin.json、検証） |
-| [docs/versioning-and-distribution.md](docs/versioning-and-distribution.md) | 版と配布（チャネル、版の付け方、ランタイムごとの取得と導入、版数を持つ 15 箇所、過去の版へ戻る）。版数の扱いの正本 |
+| [docs/versioning-and-distribution.md](docs/versioning-and-distribution.md) | 版と配布（チャネル、版の付け方、ランタイムごとの取得と導入、版数を持つ箇所、過去の版へ戻る）。版数の扱いの正本 |
 | [docs/ndf-plugin-reference.md](docs/ndf-plugin-reference.md) | NDFプラグイン詳細リファレンス |
 | [docs/ndf-experiments.md](docs/ndf-experiments.md) | NDF の実験版の台帳（試している仕組み・使った結果・行き先） |
 | [docs/specifications/](docs/specifications/) | 完了済みplan/issue由来の確定仕様 |
@@ -145,9 +145,9 @@ ai-plugins/
 
 ## NDFプラグインについて
 
-**NDFプラグイン**は、このマーケットプレイスの主要プラグインです（v10.18.0-dev.1）。plugin 名は全ランタイムで `ndf` を維持し、配布物は `plugins/ndf/` の1ディレクトリにまとまっています。
+**NDFプラグイン**は、このマーケットプレイスの主要プラグインです。plugin 名は全ランタイムで `ndf` を維持し、配布物は `plugins/ndf/` の1ディレクトリにまとまっています。
 - Skill の実体は `plugins/ndf/skills/` の1箇所。配布先は `plugins/ndf/manifests/*-skills.txt` が決める
-- Claude Code版は 8個の専門サブエージェントと 3 層の worker の定義 1 個、公開Skills、PreToolUse/SessionStart/Stopフックを提供
+- Claude Code版は専門サブエージェントと実行主体（supervisor・worker）の定義（`plugins/ndf/agents/`）、公開Skills、PreToolUse/SessionStart/Stopフックを提供
 - Codex版は Codex向け公開Skillsと任意Slack通知hookを提供
 - Kiro版は `plugins/ndf/dev.kiro/install.sh` で `.kiro/skills/`、`.kiro/steering/ndf-policies.md`、`.kiro/agents/ndf.json` を生成
 - agy版は `plugins/ndf/dev.agy/` を `agy plugin install` で導入し、公開Skills・エージェント定義・PreToolUse/PreInvocationフックを提供
@@ -180,7 +180,7 @@ ai-plugins/
 ### DON'T（非推奨）
 - ファイル全体を無闇に読み込む
 - `main` / `develop` に直接コミット
-- バージョン番号の更新を忘れる
+- Pull Request ごとに版数を上げる（版を上げるのはスプリント単位のマージの後。「版と配布の方針」）
 - ドキュメントをスキップ
 - 機密情報をコミット
 - テストをスキップ
@@ -189,12 +189,7 @@ ai-plugins/
 
 ## Git運用フロー
 
-### ブランチ戦略
-```bash
-git checkout -b feature/{feature-name}  # 新機能開発
-git checkout -b fix/{bug-name}          # バグ修正
-git checkout -b docs/{doc-name}         # ドキュメント更新
-```
+ブランチ名と Pull Request の流れは「Git運用ルール」と [CONTRIBUTING.md](CONTRIBUTING.md) にある。
 
 ### コミットメッセージ
 日本語で明確に記述：
@@ -207,20 +202,9 @@ Refactor: リファクタリング
 Test: テスト追加・修正
 ```
 
-### PR作成フロー
-1. featureブランチで作業完了
-2. 変更をコミット
-3. リモートにプッシュ
-4. GitHubでPR作成
-5. レビュー依頼
-6. ユーザーの承認後にマージ
-
 ## 参考リンク
 
-- [Claude Code公式ドキュメント](https://docs.claude.com/en/docs/claude-code)
-- [プラグインマーケットプレイス](https://code.claude.com/docs/ja/plugin-marketplaces)
-- [プラグインスキル](https://docs.claude.com/en/docs/claude-code/skills)
-- [MCP仕様](https://modelcontextprotocol.io)
+外部の公式ドキュメントへのリンクは [docs/plugin-development-guide.md](docs/plugin-development-guide.md) の「参考リンク」にある。
 
 ## 検証
 
@@ -228,8 +212,4 @@ Test: テスト追加・修正
 claude plugin validate .
 ```
 
-**`path` は必須の位置引数である。** 省くと `error: missing required argument 'path'` で
-終了コード 1 になる（Claude Code 2.1.261 で実測）。マーケットプレイスの根で `.` を渡すと
-`marketplace.json` と各プラグインの定義をチェックし、終了コード 0 で終わる。`policy` と
-`interface` は Claude Code が読み込み時に無視するため未知フィールドの警告が出るが、
-**警告は終了コードを変えない**。合否は出力ではなく終了コードで見る。
+`path` は必須の位置引数で、合否は終了コードで見る（詳細は [docs/plugin-development-guide.md](docs/plugin-development-guide.md) の「Runtime plugin 検証」）。

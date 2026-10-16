@@ -12,13 +12,14 @@ import os
 import re
 import subprocess
 import time
+from pathlib import Path
 from typing import Any, Protocol
 
 import gh_call
 from supervise_lib import decl, paths, plan as plan_mod
 from supervise_lib.claude import TAIL, run_ticking
 from supervise_lib.prompts import JUDGE_SYSTEM
-from supervise_lib.slow import SLOW_EXIT
+import project_mvv
 
 
 def is_gate(code: int | None) -> bool:
@@ -66,7 +67,8 @@ class StepContext:
         value = str(self.plan.get("Pull Request") or "")
         number = plan_mod.pr_number(value)
         if not number:
-            return cmd, "cmd の {pr} を置き換える Pull Request がまだ無い"
+            where = Path(self.state.dir).resolve()  # 再開で読んだ状態の置き場（原因を後から追う）
+            return cmd, f"cmd の {{pr}} を置き換える Pull Request がまだ無い（状態の置き場: {where}）"
         if "{pr_url}" in cmd:
             url = (
                 value
@@ -119,7 +121,7 @@ class RunStep:
             return ""
         return str(test.get("no_reports") or "") if isinstance(test, dict) else ""
 
-    def run_cmd(self, ctx, step: dict, extra_addopts: str = "") -> tuple[int, str]:
+    def run_cmd(self, ctx, step: dict) -> tuple[int, str]:
         cmd = step.get("cmd") or paths.PRESETS.get(step.get("preset", ""), "")
         if not cmd:
             return 2, f"ステップ {step['id']} に cmd も知っている preset も無い"
@@ -139,8 +141,9 @@ class RunStep:
         addopts = [(inherited.replace(no_reports, "") if no_reports else inherited).strip()]
         if no_reports and not step.get("reports"):
             addopts.append(no_reports)
-        addopts.append(extra_addopts)
         env["PYTEST_ADDOPTS"] = " ".join(a for a in addopts if a)
+        # 子が起動する CLI の使用量の帳簿の行にプランとステップを付ける（#1953 の決定 7・決定 11）
+        env.update(NDF_USAGE_PLAN=getattr(ctx, "plan_path", None) or "", NDF_USAGE_STEP=str(step.get("id") or ""))
         ctx.state.run_log = ctx.state.dir / "run-stderr.log"
         try:
             p = run_ticking(
@@ -160,15 +163,9 @@ class RunStep:
             ctx.state.run_log = None
 
     def execute(self, ctx, step: dict) -> tuple[bool, str]:
+        # 落ちたテストの走らせ直しは持たない。テストのステップは test-run.py が JUnit で見分ける（#1334）
         started = time.time()
         code, text = self.run_cmd(ctx, step)
-        if code not in (0, 124, SLOW_EXIT) and not is_gate(code) and step.get("rerun_failed") and not self.is_skip(step, code):
-            # 落ちたテストだけを走らせ直す。通れば揺れとして成功にする
-            code2, text2 = self.run_cmd(ctx, step, "--lf")
-            ctx.state.cur["rerun"] = {"exit": code2}
-            text = f"{text}\n\n## 落ちたテストだけの再実行（exit={code2}）\n{text2}"
-            if code2 == 0:
-                code, text = 0, text + "\n再実行で通った（揺れとして進む）"
         ctx.state.cur.update(exit=code, text=text, seconds=round(time.time() - started, 1))
         return code == 0, text
 
@@ -180,8 +177,10 @@ class JudgeStep:
 
     def execute(self, ctx, step: dict) -> dict:
         choices = step.get("choices")
+        # 判断の基準（#1366）。実行の中で 1 回だけ読む。スプリントが特定できればスプリント MVV も渡す（#1400）
+        mvv, sprint = ctx.state.mvv_block_of(ctx.cwd, ctx.plan)
         prompt = (
-            f"フェーズ: {ctx.plan.get('フェーズ')} / 課題: {ctx.plan.get('課題')}\n"
+            project_mvv.block(mvv, sprint) + "\n" + f"フェーズ: {ctx.plan.get('フェーズ')} / 課題: {ctx.plan.get('課題')}\n"
             f"問い: {step['question']}\n"
             + (f"選べる値: {', '.join(choices)}（関門なら gate、止めるなら stop）\n" if choices else "")
             + f"作業ディレクトリ: {ctx.state.work}（worker の作業ファイルの置き場所）\n"
@@ -190,5 +189,6 @@ class JudgeStep:
         res = ctx.claude.call(JUDGE_SYSTEM, prompt, None, ctx.cwd, step.get("timeout", 600))
         ctx.claude.record_usage("judge", res)
         d = parse_decision(res["text"]) if res["ok"] else {"decision": "stop", "reason": res["text"][:200]}
-        ctx.state.cur.update(exit=0, text=json.dumps(d, ensure_ascii=False), seconds=res["seconds"])
+        d["basis"] = project_mvv.basis(d.get("basis"), mvv, sprint=sprint)  # 返されなければ「根拠なし」か「MVV なし」（止めない）
+        ctx.state.cur.update(exit=0, text=json.dumps(d, ensure_ascii=False), seconds=res["seconds"], basis=d["basis"])
         return d

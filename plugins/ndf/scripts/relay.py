@@ -75,17 +75,6 @@ else:
 
     main = relay_lib.main
 
-MODULES = ("common", "proc", "record", "mark", "claude", "terminal", "run", "shellrc", "version_dir", "install")
-
-
-def __getattr__(name: str):
-    """移行の間、ランチャーを読み込んで `relay.<名前>` で読む呼び出し元のため、relay_lib の定義を返す（読むだけ）。"""
-    for mod in MODULES:
-        m = sys.modules.get(f"relay_lib.{mod}")
-        if m is not None and hasattr(m, name):
-            return getattr(m, name)
-    raise AttributeError(name)
-
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))

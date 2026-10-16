@@ -18,10 +18,26 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 SUPERVISE = SCRIPTS / "supervise.py"
 PKG = SCRIPTS / "supervise_lib"
 
-SUBCOMMANDS = ["run", "history", "expected", "example", "new", "queue", "wait", "design-glossary", "note", "sync-check"]
-NEW_KINDS = ["impl", "fix", "check", "release", "mission", "close"]
+SUBCOMMANDS = [
+    "run",
+    "history",
+    "expected",
+    "example",
+    "new",
+    "queue",
+    "wait",
+    "design-glossary",
+    "design-results",
+    "note",
+    "sync-check",
+    "sync-title",
+]
+NEW_KINDS = ["impl", "fix", "check", "release", "sprint", "close"]
 MODULES = [
     "__init__",
+    "procedures",  # 単発とスプリントの雛形が共有する手順の定義（#1485）
+    "pr_materials",
+    "design_stage",
     "paths",
     "decl",
     "plan",
@@ -33,10 +49,18 @@ MODULES = [
     "worker_steps",
     "pr",
     "engine",
+    "actuals",  # supervise の実行を見積もりの実績の記録へ残す（#1856）
+    "admission",
+    "running",  # queue のプロセスの中の、走っているプランの登録簿（#1674）
+    "flow",
     "templates",
+    "verify_steps",
     "release_templates",
-    "mission_waves",
-    "mission",
+    "delivery_templates",
+    "sprint_waves",
+    "sprint_routes",
+    "sprint_inputs",  # new sprint が計画を書く前に課題の受け入れ条件を確かめる（#1767）
+    "sprint",
     "queue",
     "commands",
     "new_args",
@@ -54,12 +78,26 @@ NO_ENGINE = [
     "pr",
     "templates",
     "release_templates",
-    "mission_waves",
-    "mission",
+    "delivery_templates",
+    "sprint_waves",
+    "sprint_routes",
+    "sprint_inputs",
+    "sprint",
     "queue",
     "new_args",
     "paths",
+    "admission",
+    "running",
+    "actuals",
 ]
+
+# 関数の中の import で、モジュールの循環にしない辺（Engine.run と cmd_queue が耐久ワークフローを始める。
+# flow は Engine と、queue のファイルだけに触る関数を import する）
+LAZY = {("engine", "flow"), ("queue", "flow")}
+
+
+# new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える
+pytestmark = pytest.mark.usefixtures("issue_bodies")
 
 
 def run(*args: str) -> subprocess.CompletedProcess:
@@ -126,7 +164,7 @@ def test_only_commands_imports_engine(name):
 
 
 def test_imports_have_no_cycle():
-    graph = {m: lib_imports(m) & set(MODULES) for m in MODULES}
+    graph = {m: {n for n in lib_imports(m) & set(MODULES) if (m, n) not in LAZY} for m in MODULES}
 
     def visit(m: str, path: tuple[str, ...]) -> None:
         assert m not in path, " → ".join((*path, m))

@@ -104,3 +104,21 @@ jobs:
         with:
           python-version: "3.x"
       - run: python3 plugins/ndf/scripts/instructions-check.py --root .
+
+  # ワークフローのジョブから決まるチェックの名前と、宛先のブランチの必須のチェックを突き合わせる（#653）。
+  # 宛先のブランチは Pull Request でしか決まらないため、push では起動しない。必須の一覧は読むだけで書き込まない
+  required-checks-check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.x"
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 scripts/check-required-checks.py
+          --repo "${{ github.repository }}" --branch "${{ github.base_ref }}"

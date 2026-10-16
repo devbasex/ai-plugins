@@ -39,11 +39,12 @@ def fake_gh(tmp_path):
         encoding="utf-8",
     )
     (bin_dir / "gh").chmod(0o755)
-    return type("G", (), {"bin": bin_dir, "body": body, "written": written})
+    return type("G", (), {"bin": bin_dir, "body": body, "written": written, "data": tmp_path / "data"})
 
 
 def run(fake_gh, *args):
-    env = {**os.environ, "PATH": f"{fake_gh.bin}:{os.environ['PATH']}"}
+    # 通過記録も積まれる（#725）。置き場所を試験用へ向ける
+    env = {**os.environ, "PATH": f"{fake_gh.bin}:{os.environ['PATH']}", "CLAUDE_PLUGIN_DATA": str(fake_gh.data)}
     return subprocess.run(["bash", str(SCRIPT), *args], capture_output=True, text=True, env=env, timeout=60)
 
 
@@ -128,7 +129,7 @@ def test_missing_gh_is_not_an_error(tmp_path):
         capture_output=True,
         text=True,
         timeout=60,
-        env={**os.environ, "PATH": str(bin_dir)},
+        env={**os.environ, "PATH": str(bin_dir), "CLAUDE_PLUGIN_DATA": str(tmp_path / "data")},
     )
     assert out.returncode == 0
     assert out.stdout == ""
@@ -206,8 +207,103 @@ def test_pace_fast_is_written_after_the_mode_and_kept(fake_gh):
     assert "モード: standard / 進め方: fast / 作業ツリー: `.worktrees/x`" in fake_gh.written.read_text(encoding="utf-8")
 
 
+def test_pace_auto_is_written_in_the_heading_line(fake_gh):
+    """#1370: auto も normal でないので見出し行へ書く。"""
+    fake_gh.body.write_text("## 進行\n\nモード: standard\n\n- [ ] 設計\n", encoding="utf-8")
+    out = run(fake_gh, "123", "設計", "--pace", "auto")
+    assert out.returncode == 0, out.stderr
+    assert "モード: standard / 進め方: auto" in fake_gh.written.read_text(encoding="utf-8")
+
+
 def test_pace_normal_is_not_written_and_an_unknown_pace_is_rejected(fake_gh):
     fake_gh.body.write_text("## 進行\n\nモード: standard\n\n- [ ] 設計\n", encoding="utf-8")
     run(fake_gh, "123", "設計", "--pace", "normal")
     assert "進め方" not in fake_gh.written.read_text(encoding="utf-8")
     assert run(fake_gh, "123", "-", "--pace", "slow").returncode == 2
+
+
+# --- 課題ごとの錠（#1241 の I10）---
+
+
+def _issue_lock(number):
+    import sys
+
+    sys.path.insert(0, str(SCRIPT.parent / "lib"))
+    import locks
+
+    return locks.exclusive(pathlib.Path(os.environ["NDF_LOCK_DIR"]) / "issue-body" / f"o--r--{number}")
+
+
+def test_progress_is_skipped_with_exit_0_when_the_lock_cannot_be_taken(fake_gh, monkeypatch):
+    fake_gh.body.write_text("# 課題\n\n本文\n", encoding="utf-8")
+    monkeypatch.setenv("NDF_PROGRESS_LOCK_TIMEOUT", "1")
+    with _issue_lock(123):
+        out = run(fake_gh, "123", "設計", "--repo", "o/r")
+    assert out.returncode == 0, out.stderr
+    assert not fake_gh.written.exists() and "NOTE:" in out.stderr
+
+
+def test_progress_waits_for_the_lock_and_then_writes(fake_gh):
+    import threading
+    import time
+
+    fake_gh.body.write_text("# 課題\n\n本文\n", encoding="utf-8")
+    taken = threading.Event()
+
+    def hold():  # 錠は取ったスレッドで放す
+        with _issue_lock(123):
+            taken.set()
+            time.sleep(1)
+
+    threading.Thread(target=hold).start()
+    taken.wait(5)
+    out = run(fake_gh, "123", "設計", "--repo", "o/r")
+    assert out.returncode == 0, out.stderr
+    assert "- [x] 設計 —" in fake_gh.written.read_text(encoding="utf-8")
+
+
+LIGHT_SKIPPED = (
+    "素材の収集と出典の確定",
+    "ドキュメント再構成",
+    "ドキュメントレビュー",
+    "計画",
+    "構造改善",
+    "確定仕様化",
+    "体裁レビュー",
+    "リリース後テスト",
+    "振り返り",
+)
+
+
+def _rows(written):
+    return [ln for ln in written.splitlines() if ln.startswith("- [")]
+
+
+def test_light_mode_drops_the_rows_of_stages_it_does_not_pass(fake_gh):
+    """モード `light` の列が `-` の工程の行は書かず、`C` の工程の行は残す（#1683 の受け入れ条件 14）。"""
+    fake_gh.body.write_text("# 課題\n\n本文\n", encoding="utf-8")
+    out = run(fake_gh, "123", "実装", "--mode", "light")
+    assert out.returncode == 0, out.stderr
+    rows = _rows(fake_gh.written.read_text(encoding="utf-8"))
+    names = [r.split("] ", 1)[1].split(" — ")[0] for r in rows]
+    assert not set(LIGHT_SKIPPED) & set(names)
+    assert "作業場所の用意" in names and "設計" in names and "- [x] 実装" in "\n".join(rows)
+
+
+def test_a_recorded_row_stays_even_when_the_mode_skips_it(fake_gh):
+    """列が `-` の工程でも、記録が済んだ行は残る（受け入れ条件 15）。"""
+    fake_gh.body.write_text("# 課題\n\n## 進行\n\nモード: light\n\n- [x] 計画 — 2026-10-01 10:00\n- [ ] 実装\n", encoding="utf-8")
+    out = run(fake_gh, "123", "実装")
+    assert out.returncode == 0, out.stderr
+    written = fake_gh.written.read_text(encoding="utf-8")
+    assert "- [x] 計画 — 2026-10-01 10:00" in written
+    assert "構造改善" not in written
+
+
+def test_unrecorded_mode_keeps_every_stage_row(fake_gh):
+    """モードが `—` なら全工程の行を持つ（受け入れ条件 16）。"""
+    fake_gh.body.write_text("# 課題\n\n本文\n", encoding="utf-8")
+    out = run(fake_gh, "123", "設計")
+    assert out.returncode == 0, out.stderr
+    written = fake_gh.written.read_text(encoding="utf-8")
+    assert "モード: —" in written and len(_rows(written)) == 19

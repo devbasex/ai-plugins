@@ -6,9 +6,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import pathlib
 import sys
+import threading
 from dataclasses import dataclass
 from typing import Optional
 
@@ -42,6 +44,9 @@ DEFAULT_TIMEOUT = limits.PHASE_TIMEOUT[limits.DEFAULT_PHASE]
 DEFAULT_STALL = limits.DEFAULT_STALL
 DEFAULT_STALL_AGENT_BUILTIN = limits.AGENT_STALL
 DEFAULT_POLL = 15  # 15 sec — env `MONITOR_POLL` で上書き可
+# 心拍の間隔（秒）。待つ側が心拍のファイルの更新時刻を今にする間隔で、見回りの間隔（`DEFAULT_POLL` / `MONITOR_POLL`）とは
+# 別の定数である（cross-refactoring の #1743 決定 3）。`monitor.py` と cross-refactoring の `process.py` がここから読む。
+HEARTBEAT_SECONDS = 15
 # result.json が書き込まれた後もプロセスがハングするケース (実測) の
 # fallback: mtime から RESULT_AGE_GRACE 秒以上経過していれば完了とみなす。
 RESULT_AGE_GRACE = 30
@@ -209,3 +214,37 @@ class AgentStatus:
     started_at: Optional[str] = None
     ended_at: Optional[str] = None
     outcome: Optional[MonitorOutcome] = None
+
+
+def _touch(path: pathlib.Path) -> None:
+    try:
+        path.touch()
+    except OSError:
+        pass  # 心拍が書けなくても待ちは止めない（止まっていた時間が長めに数えられるだけ）
+
+
+@contextlib.contextmanager
+def heartbeat(path: "Optional[os.PathLike[str] | str]"):
+    """`with` の間、`path` の更新時刻を心拍の間隔（`HEARTBEAT_SECONDS`）ごとに今にする。`path` が無ければ何もしない。
+
+    出力の無い CLI やテストを待つ間も「動いている」ことを残すためで、中断でプロセスが止まると心拍も止まる
+    （cross-refactoring の止まっていた時間の測り方。#1743 決定 3）。間隔は呼ぶたびにこのモジュールから読む。
+    """
+    if path is None:
+        yield
+        return
+    target = pathlib.Path(path)
+    _touch(target)
+    stop = threading.Event()
+
+    def beat() -> None:
+        while not stop.wait(float(HEARTBEAT_SECONDS)):
+            _touch(target)
+
+    thread = threading.Thread(target=beat, daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join(timeout=1.0)

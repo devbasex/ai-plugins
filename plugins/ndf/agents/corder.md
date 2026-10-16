@@ -58,7 +58,7 @@ python3 "$SKILL_DIR/scripts/external-ai.py" run codex \
 
 - Claude Code では Bash の `run_in_background: true` でこの 1 行を起動し、完了通知を 1 回受ける（決まりは `development-workflow/references/waiting.md`）
 - `status` が `ok` なら `metrics.result` のファイルを読む。`stopped` なら `metrics.outcome`（`no_result` / `timeout` / `usage_limit` / `auth` など）に応じた次の手を `/ndf:external-ai` skill の表で選ぶ
-- CLI の有無と認証だけを先に確かめるときは `external-ai.py check codex`
+- CLI の有無・認証・モデルを先に確かめるときは `external-ai.py check codex`。`metrics.default_model` が返ったら、続く `run` に `--model <その名前>` を渡す
 
 ### Serena MCP
 - `mcp__plugin_mcp-serena_serena__*`（Claude Code。Codex では `mcp__serena__*`）- シンボル検索、リファレンス検索、コード編集

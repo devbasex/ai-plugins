@@ -5,7 +5,6 @@ CLI options:
 - ``--pwk-out-dir <path>``: 成果物 (HAR / trace / 動画 / report) の出力先
 - ``--pwk-no-evidence``: evidence 収集を OFF
 - ``--pwk-overlay``: overlay (赤丸カーソル + 字幕、旧名 HUD) を ON
-- ``--pwk-drive-folder <id>``: Drive 連携
 
 markers:
 - ``page_role(*roles)``: accessibility / web vitals autouse の判定材料
@@ -85,17 +84,6 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         action="store_true",
         default=False,
         help="overlay (赤丸カーソル + 字幕、旧名 HUD) を全 page に inject する",
-    )
-    group.addoption(
-        "--pwk-drive-folder",
-        action="store",
-        default=None,
-        help=(
-            "Drive アップロード先フォルダ ID (terminal_summary 後に upload 実行)。"
-            "trace.zip / *.har / 動画には機微情報 (URL / Cookie / localStorage / 操作履歴) "
-            "が含まれる可能性があります。private folder + 信頼できる共有相手のみに限定してください。"
-            " (Codex Minor 8)"
-        ),
     )
 
 
@@ -376,60 +364,10 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
     terminalreporter.write_sep("-", "pwk report")
     terminalreporter.write_line(f"report.md generated: {path}")
 
-    # session 後の Drive アップロードに使うため pickle 不要な情報を保存
-    config._pwk_report_path = path  # type: ignore[attr-defined]
-    config._pwk_out_dir = out_dir  # type: ignore[attr-defined]
-
-
-def pytest_sessionfinish(session, exitstatus):
-    """``--pwk-drive-folder`` 指定時、生成済 report.md と evidence を Drive アップ。
-
-    ``upload_evidence.upload`` を直接呼ぶ。失敗時は警告のみで test 結果には影響しない。
-    """
-    folder_id: str | None = session.config.getoption("pwk_drive_folder", default=None)
-    if not folder_id:
-        return
-
-    report_path: Path | None = getattr(session.config, "_pwk_report_path", None)
-    out_dir: Path | None = getattr(session.config, "_pwk_out_dir", None)
-    if report_path is None or out_dir is None:
-        return
-
-    try:
-        # Amazon Q Critical-5: sys.path への動的 inject を廃止し、
-        # playwright_kit.uploaders パッケージ経由で安全に import する。
-        # scripts/upload_evidence.py は CLI スタンドアロン用途として残す。
-        from playwright_kit.uploaders import upload, detect_kind
-
-        # report.md は kind=any でアップ
-        if report_path.exists():
-            upload(report_path, kind="any", parent_folder_id=folder_id, public=False)
-
-        # trace.zip / *.har / *.mp4 / body_check.jsonl を 1 階層下から拾い上げる
-        for sub in out_dir.iterdir():
-            if not sub.is_dir():
-                continue
-            for f in sub.iterdir():
-                suffix = f.suffix
-                if suffix not in (".zip", ".har", ".mp4", ".webm", ".jsonl"):
-                    continue
-                # detect_kind は body_check.jsonl 等の任意ファイルを未知の kind
-                # と扱うため、jsonl は ``any`` に固定する。
-                kind = "any" if suffix == ".jsonl" else detect_kind(f)
-                upload(f, kind=kind, parent_folder_id=folder_id, public=False)
-    except Exception as exc:  # pragma: no cover - depends on Drive auth
-        import warnings
-
-        warnings.warn(
-            f"[pwk] Drive upload 失敗 (session continues): {exc}",
-            stacklevel=1,
-        )
-
 
 def _try_load_config_silently(config: pytest.Config) -> Any | None:
     """``--pwk-config`` 等から Config を試行ロードする。失敗時は None。"""
     import os
-    from pathlib import Path
 
     raw_path: str | None = config.getoption("pwk_config", default=None)
     if not raw_path:

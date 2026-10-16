@@ -10,17 +10,39 @@ from pathlib import Path
 from step_result import result
 from supervise_lib import release_templates
 from supervise_lib.decl import with_decls
-from supervise_lib.paths import CHECK_PY, MERGE_CMD, MERGE_PROBE, report_result, state_dir_of, with_paths
+from supervise_lib.paths import CHECK_PY, DRIVES, READY, REFACTOR_SCOPE_PY, default_refactor_budget_minutes
+from supervise_lib.procedures import (
+    DESIGN_MATCH_MODES,
+    design_match_steps,
+    pr_step,
+    push_fix_steps,
+    record_steps,
+    design_diff_on_pr,
+    with_after,
+    with_record,
+    with_touched,
+)
+from supervise_lib.verify_steps import (
+    impl_timeout_estimate,
+    merge_steps,
+    refactor_template_arg,
+    scope_cmd,
+    scope_timeout,
+    test_meta,
+    whole_cmd,
+    whole_timeout,
+    with_margin,
+)
 
 
 RULE_IMPL = (
     "範囲テストや全体テストが落ちたら（落ちたテストだけの再実行でも落ちた後）、変更に起因するなら fix、"
-    "環境や変更に無関係なら次のステップ（範囲テストなら pr、全体テストなら doc-lint）。"
+    "環境や変更に無関係なら次のステップ（範囲テストなら {after_tests}、全体テストなら doc-lint）。"
     "2 回直しても同じ失敗なら stop。"
 )
 RULE_CHECK = (
     "全体テストが落ちたら（落ちたテストだけの再実行でも落ちた後）、変更に起因するなら fix、"
-    "変更に無関係なら ready。2 回直しても同じなら stop。"
+    "変更に無関係なら ready。2 回直しても同じなら abort。"
 )
 FIX_PROMPT = "失敗した箇所を直してコミットする（push しない）。変更に起因しない失敗は直さない。"
 IMPL_RULES = (
@@ -31,31 +53,10 @@ IMPL_RULES = (
 )
 
 
-def plan_done(path: Path) -> bool:
-    """計画が終わったか。状態ディレクトリの report.md の結果が完了なら終わり。"""
-    rep = state_dir_of(str(path)) / "report.md"
-    return rep.is_file() and report_result(rep.read_text()) == "完了"
+def impl_prompt(a) -> str:
+    """実装の指示文。--prompt が無ければ課題への参照を組み、共通の規則を足す。
 
-
-def other_files(out: Path) -> list[tuple[str, list[str]]]:
-    """同じディレクトリにある、まだ終わっていない他の計画の「触るファイル」を [(課題, パス)] で返す。"""
-    found = []
-    for f in sorted(out.parent.glob("*.json")):
-        if f.resolve() == out.resolve() or plan_done(f):
-            continue
-        try:
-            plan = json.loads(f.read_text())
-        except (OSError, ValueError):
-            continue
-        files = plan.get("触るファイル") if isinstance(plan, dict) else None
-        if isinstance(files, list) and files:
-            issues = " ".join(f"#{i}" for i in plan.get("課題", []))
-            found.append((issues or f.name, [str(x) for x in files]))
-    return found
-
-
-def impl_prompt(a, out: Path | None) -> str:
-    """実装の指示文。--prompt が無ければ課題への参照を組み、共通の規則と他の計画の除外を足す。"""
+    同時に流れる他のプランの `触るファイル` の除外は、流す時点で `WorkStep` が足す（#1248）。"""
     n = a.issue[0]
     if a.prompt_file:
         head = Path(a.prompt_file).read_text().rstrip()
@@ -69,19 +70,11 @@ def impl_prompt(a, out: Path | None) -> str:
             head = f"課題 {refs} を実装する。本文はそれぞれ `gh issue view <番号>` で読む（何をするか と 受け入れ条件）。"
         if getattr(a, "files", None):
             head += "\n触る範囲: " + "、".join(a.files)
-    parts = [head]
-    others = other_files(out) if out else []
-    if others:
-        parts.append(
-            "並行して別の計画が次を触る。それらは変えない: " + "、".join(f"{', '.join(files)}（{issues}）" for issues, files in others)
-        )
-    parts.append(IMPL_RULES)
-    return "\n".join(parts) + "\n"
+    return f"{head}\n{IMPL_RULES}\n"
 
 
-def plan_impl(a, out: Path | None = None) -> dict:
-    if out is None and hasattr(a, "out"):
-        out = Path(a.out or f"plan-{a.issue[0]}.json")
+def plan_impl(a) -> dict:
+    timeout, estimate = impl_timeout_estimate(a)  # 引数 → 宣言 → 実績の見込み → 3600（#1916・#1856）
     impl = {
         "id": "impl",
         "type": "work",
@@ -89,8 +82,9 @@ def plan_impl(a, out: Path | None = None) -> dict:
         "serena": True,
         "stage": "実装",
         "issues": True,
-        "timeout": 3600,
-        "prompt": impl_prompt(a, out),
+        "timeout": timeout,
+        "estimate": estimate,
+        "prompt": impl_prompt(a),
     }
     return plan_to_merge(a, [impl])
 
@@ -116,6 +110,20 @@ def plan_to_merge(a, head: list[dict]) -> dict:
     if head:
         head[-1]["next"] = "sync" if sync else "test-limited"
     steps = list(head)
+    pr = pr_step(
+        a.base,
+        a.title,
+        a.summary or "",
+        getattr(a, "changes", None) or "",
+        "test-all",
+        # 要求の移行性の行は常に材料にする（互換なしの印があれば「移行の手順」の箇条になる。#1752）
+        {"manual": bool(getattr(a, "manual", True)), "migration": True},
+    )
+    # standard では範囲テストと PR の間で設計と突き合わせる（#1241 の決定 9）。修正のループのたびにやり直す
+    match = design_match_steps(a.issue, a.base, "pr") if a.mode in DESIGN_MATCH_MODES and a.issue else []
+    after_tests = match[0]["id"] if match else "pr"
+    if match:
+        design_diff_on_pr(pr, "judge")
     if sync:  # 同期とチェックの宣言が無いプロジェクトではステップを置かない
         steps += [
             {"id": "sync", "type": "run", "preset": "sync-check", "stage": "実装", "on_fail": "fix-sync", "next": "test-limited"},
@@ -126,39 +134,24 @@ def plan_to_merge(a, head: list[dict]) -> dict:
             "id": "test-limited",
             "type": "run",
             "stage": "完了判定",
-            "timeout": 900,
-            "rerun_failed": True,
-            "cmd": with_paths(a.test_cmd, tests),
+            "timeout": scope_timeout(a),
+            "cmd": scope_cmd(a, tests),
             "on_fail": "judge",
-            "next": "pr",
+            "next": after_tests,
         },
-        {
-            "id": "judge",
-            "type": "judge",
-            "inputs": ["test-limited", "test-all"],
-            "question": "テストの失敗を直すか（fix）、範囲テストの失敗が変更に無関係なら PR へ（pr）、"
-            "全体テストの失敗が変更に無関係なら文書のチェックへ（doc-lint）、止めるか（stop）",
-            "choices": ["fix", "pr", "doc-lint", "stop"],
-        },
+        judge_step(after_tests, bool(match)),
         {"id": "fix", "type": "work", "kind": "修正", "inputs": ["test-limited", "test-all"], "prompt": FIX_PROMPT, "next": "test-limited"},
         # Draft の PR を全体テストの前に出し、CI と手元の全体テストを並べる。直した後は pr のステップが push して本文を更新する
-        {
-            "id": "pr",
-            "type": "pr",
-            "stage": "Pull Request",
-            "base": a.base,
-            "title": a.title,
-            "summary": a.summary or "",
-            "changes": getattr(a, "changes", None) or "",
-            "next": "test-all",
-        },
+        # 手動確認の節は課題の PR に載せる（スプリントブランチへ集める実装の PR は載せず、スプリント PR に載せる）
+        *match,
+        pr,
+        *push_fix_steps(pr),  # push 前の検査で拒まれたら直して打ち直す（#1751）
         {
             "id": "test-all",
             "type": "run",
             "stage": "完了判定",
-            "timeout": 1800,
-            "rerun_failed": True,
-            "cmd": with_paths(a.test_cmd, a.test_all),
+            "timeout": whole_timeout(a),
+            "cmd": whole_cmd(a),
             "on_fail": "judge",
             "next": "doc-lint",
         },
@@ -171,53 +164,121 @@ def plan_to_merge(a, head: list[dict]) -> dict:
             "prompt": "ヒットした行を今の決まりだけを書く形へ直してコミットする（push しない）。",
             "next": "doc-lint",
         },
-        {"id": "ready", "type": "run", "cmd": "sh -c 'git push -q && gh pr ready {pr}'", "next": "merge"},
-        {"id": "merge", "type": "run", "timeout": 7200, "cmd": MERGE_CMD, "probe": MERGE_PROBE, "next": "end"},
+        {"id": "ready", "type": "run", "cmd": READY, "next": "merge-gate"},
+        *merge_steps(a, next="end"),
     ]
     if getattr(a, "escape_of", None) is not None:
         # その場で直した不具合を「逃げた不具合」として記録する（検査のトリガーの材料。#1078）
-        steps[-1]["next"] = "escape"
+        for step in steps:
+            if step["id"] in ("merge", "merge-approved"):
+                step["next"] = "escape"
         steps.append({"id": "escape", "type": "run", "cmd": f"{CHECK_PY} escape --pr {{pr}} --of {a.escape_of}", "next": "end"})
     plan = {
         "フェーズ": "実装",
         "課題": a.issue,
         "モード": a.mode,
         "作業場所": a.worktree,
-        "規則": RULE_IMPL,
+        "規則": RULE_IMPL.format(after_tests=after_tests),
         "上限": 20,
         "steps": steps,
     }
     with_decls(plan, a)
-    if getattr(a, "files", None):
-        plan["触るファイル"] = a.files
+    test_meta(plan, a)
+    with_record(plan)
+    with_touched(plan, getattr(a, "files", None))
+    with_after(plan, getattr(a, "after", None))
     if a.branch:
         plan["branch"] = a.branch
         plan["起点"] = f"origin/{a.base}"
     return plan
 
 
-def plan_check(a) -> dict:
-    pr = a.pr
-    # 範囲の指定が無ければ、PR が変えたファイルのディレクトリ（根を除く）を範囲にする。ステップはシェルで動く。
-    # 一覧は REST から取る（gh pr diff は差分が 20000 行を超えると 406 で拒み、範囲が空になる）
-    scope = (
-        " ".join(map(shlex.quote, a.scope))
-        if a.scope
-        else f"$(gh api 'repos/{{owner}}/{{repo}}/pulls/{pr}/files' --paginate --jq '.[].filename'"
-        f" | xargs -n1 dirname | sort -u | grep -vx '\\.')"
-    )
-    # 駆動で回す（最終ゲートは全体のテスト）
-    refactor = {
-        "id": "refactor",
-        "type": "drive",
-        "drive": "cross-refactoring",
-        "kind": "構造改善",
-        "stage": "構造改善",
-        "timeout": 3600,
-        "args": f"{pr} --workflow-step --scope {scope} --baseline-test {shlex.quote(with_paths(a.test_cmd, a.test_all))}",
-        "next": "review",
+def judge_step(after_tests: str, match: bool) -> dict:
+    """実装のプランの judge。範囲テストの失敗が変更に無関係なら `after_tests`（突き合わせがあれば design-tests、
+    無ければ pr）へ進む。突き合わせがあれば、PR の本文の節が欠けて pr が止まったときもここへ戻る。"""
+    to_next = "設計との突き合わせへ（design-tests）" if match else "PR へ（pr）"
+    pr_missing = "、PR が「設計と違う点」の節を欠いて止まったなら突き合わせをやり直すか（design-tests）" if match else ""
+    return {
+        "id": "judge",
+        "type": "judge",
+        "inputs": ["test-limited", "test-all", *(["pr"] if match else [])],
+        "question": f"テストの失敗を直すか（fix）、範囲テストの失敗が変更に無関係なら{to_next}{pr_missing}、"
+        "全体テストの失敗が変更に無関係なら文書のチェックへ（doc-lint）、止めるか（stop）",
+        "choices": ["fix", after_tests, "doc-lint", "stop"],
     }
-    return with_decls(
+
+
+# development-workflow の工程表で「構造改善」が「—」のモード
+NO_REFACTOR_MODES = ("light", "operation", "documentation")
+
+
+def _inspect_steps(a, pr_ref: str, scope: str) -> list[dict]:
+    """検査の assess・refactor・review のステップ。pr_ref は PR の番号か、駆動が埋める `{pr}`。
+
+    refactor の `timeout` は想定最大時間（無ければ cross-refactoring の既定の予算）に `with_margin` の余裕を足す（#1916）。"""
+    budget = getattr(a, "refactor_budget_minutes", None)
+    budget_arg = f" --budget-minutes {budget}" if budget else ""
+    return [
+        {
+            "id": "assess",
+            "type": "run",
+            "preset": "assess",
+            "stage": "構造改善",
+            "skip_to": "review",
+            "on_fail": "refactor",
+            "next": "refactor",
+        },
+        # 駆動で回す（最終ゲートは全体テスト。テストの走らせ方は cross-refactoring が同じ宣言から読む。#1334）
+        # 範囲を変数へ受けて終了コードを見る。`--scope $(...)` のままだと範囲を組めないときの停止（終了コード 2）が
+        # 捨てられ、空の --scope で argparse が落ちる
+        {
+            "id": "refactor",
+            "type": "drive",
+            "drive": "cross-refactoring",
+            "kind": "構造改善",
+            "stage": "構造改善",
+            "timeout": with_margin((budget or default_refactor_budget_minutes()) * 60),
+            "cmd": f"ndf_scope={scope} || exit 2; python3 {DRIVES['cross-refactoring']} {pr_ref} --workflow-step --scope $ndf_scope"
+            f"{budget_arg}{refactor_template_arg(a)}",
+            "on_fail": "abort",
+            "next": "review",
+        },
+        {
+            "id": "review",
+            "type": "drive",
+            "drive": "cross-review",
+            "kind": "実装レビュー",
+            "stage": "実装レビュー",
+            "timeout": 3600,
+            "args": f"{pr_ref} --max-rounds 4",
+            "on_fail": "abort",
+            "next": "test-all",
+        },
+    ]
+
+
+def refactor_scope(a, pr) -> str:
+    """cross-refactoring へ渡す範囲を組むシェルの式（単発とスプリントの検査が使う 1 か所。#1484）。
+
+    PR の差分のファイルそのもの・宣言のテストの置き場所（無ければ変更したファイルの近くのテストの置き場所）・
+    明示した `--scope`（足す）を `refactor-scope.py` がステップの実行の時点で組む。"""
+    cmd = f"{REFACTOR_SCOPE_PY} --pr {pr}"
+    tests = [t for t in (getattr(a, "test_paths", None) or []) if str(t) not in (".", "")]
+    if tests:
+        cmd += " --tests " + " ".join(map(shlex.quote, map(str, tests)))
+    if getattr(a, "scope", None):
+        cmd += " --scope " + " ".join(map(shlex.quote, a.scope))
+    return f"$({cmd})"
+
+
+def plan_check(a) -> dict:
+    """PR を指す検査（`new check --pr`）。終わり方（マージ・変更なし・落ちた）にかかわらず検査の記録へ 1 行を書く
+    （`check-trigger.py record --target-pr`。#1317）。落ちたステップと judge の止める判断は abort へ行き、
+    落ちた行を書いてから止まる。承認ゲートで止まった間は書かず、承認の後に merge-approved から record へ進む。"""
+    pr = a.pr
+    name = getattr(a, "id", None) or f"pr-{pr}"
+    scope = refactor_scope(a, pr)
+    plan = _with_test_meta(
         {
             "フェーズ": "検査",
             "課題": a.issue or [],
@@ -227,33 +288,13 @@ def plan_check(a) -> dict:
             "上限": 12,
             "Pull Request": str(pr),
             "steps": [
-                {
-                    "id": "assess",
-                    "type": "run",
-                    "preset": "assess",
-                    "stage": "構造改善",
-                    "skip_to": "review",
-                    "on_fail": "refactor",
-                    "next": "refactor",
-                },
-                refactor,
-                {
-                    "id": "review",
-                    "type": "drive",
-                    "drive": "cross-review",
-                    "kind": "実装レビュー",
-                    "stage": "実装レビュー",
-                    "timeout": 3600,
-                    "args": f"{pr} --max-rounds 4",
-                    "next": "test-all",
-                },
+                *_inspect_steps(a, str(pr), scope),
                 {
                     "id": "test-all",
                     "type": "run",
                     "stage": "完了判定",
-                    "timeout": 1800,
-                    "rerun_failed": True,
-                    "cmd": "git pull -q --rebase && " + with_paths(a.test_cmd, a.test_all),
+                    "timeout": whole_timeout(a),
+                    "cmd": "git pull -q --rebase && " + whole_cmd(a),
                     "on_fail": "judge",
                     "next": "ready",
                 },
@@ -261,8 +302,8 @@ def plan_check(a) -> dict:
                     "id": "judge",
                     "type": "judge",
                     "inputs": ["test-all"],
-                    "question": "全体テストの失敗を直す（fix）か、変更に無関係として進める（ready）か、止める（stop）か",
-                    "choices": ["fix", "ready", "stop"],
+                    "question": "全体テストの失敗を直す（fix）か、変更に無関係として進める（ready）か、止める（abort）か",
+                    "choices": ["fix", "ready", "abort"],
                 },
                 {
                     "id": "fix",
@@ -272,17 +313,26 @@ def plan_check(a) -> dict:
                     "prompt": "失敗したテストを直してコミットし、git push する。",
                     "next": "test-all",
                 },
-                {"id": "ready", "type": "run", "cmd": f"git push -q; gh pr ready {pr}", "next": "merge"},
-                {"id": "merge", "type": "run", "timeout": 7200, "cmd": MERGE_CMD, "probe": MERGE_PROBE, "next": "end"},
+                {"id": "ready", "type": "run", "cmd": READY.replace("{pr}", str(pr)), "on_fail": "abort", "next": "merge-gate"},
+                *merge_steps(a, on_fail="abort", next="record"),
+                *record_steps(name, target_pr=pr, advance=getattr(a, "advance_done", False)),
             ],
         },
         a,
     )
+    # 工程表で「構造改善」を通らないモードは、実装レビューから始める
+    if a.mode in NO_REFACTOR_MODES:
+        plan["steps"] = [s for s in plan["steps"] if s["id"] not in ("assess", "refactor")]
+    return with_record(plan)
+
+
+def _with_test_meta(plan: dict, a) -> dict:
+    return test_meta(with_decls(plan, a), a)
 
 
 RULE_CHECK_SINCE = (
     "全体テストが落ちたら（落ちたテストだけの再実行でも落ちた後）、検査の修正に起因するなら fix、"
-    "修正に無関係なら finish。2 回直しても同じなら stop。"
+    "修正に無関係なら finish。2 回直しても同じなら abort。"
 )
 
 
@@ -303,14 +353,12 @@ def plan_check_since(a) -> dict:
     if getattr(a, "since_ref", None):
         flag += f" --since {shlex.quote(a.since_ref)}"
     name = a.id
-    tests_all = shlex.quote(with_paths(a.test_cmd, a.test_all))
     state = "{state_dir}"
     scope = f"$({CHECK_PY} scope --id {name} --state {state} --root .)"
     cond = f"git -C {shlex.quote(repo)} fetch -q origin && {CHECK_PY} eval --id {name} --root {shlex.quote(repo)}"
     cond += flag
     if getattr(a, "final", False):
         cond += " --final"
-    record = f"{CHECK_PY} record --id {name} --state {state} --root .{' --review' if review_only else ''}"
     first = "実装レビュー" if review_only else "構造改善"
     steps = [
         {
@@ -322,62 +370,31 @@ def plan_check_since(a) -> dict:
             "on_fail": "abort-before-pr",
             "next": "pr",
         },
-        {
-            "id": "pr",
-            "type": "pr",
-            "stage": first,
-            "base": f"check-base/{name}",
-            "title": f"検査: {name}",
-            "body": "template",
-            "on_fail": "abort-before-pr",
-            "summary": (
+        pr_step(
+            f"check-base/{name}",
+            f"検査: {name}",
+            (
                 f"前回の検査からの差分に{'実装レビュー' if review_only else '構造改善と実装レビュー'}を"
                 f" 1 回ずつ通す（{name}）。範囲・立ったトリガー・"
                 f"先に見る範囲は `{CHECK_PY} scope --id {name}` と状態ディレクトリの check.json にある。"
                 "検査の後に宛先を起点のブランチへ付け替える"
             ),
-            "changes": "無し（検査の修正だけ）",
-            "next": "review" if review_only else "assess",
-        },
-        {
-            "id": "assess",
-            "type": "run",
-            "preset": "assess",
-            "stage": "構造改善",
-            "skip_to": "review",
-            "on_fail": "refactor",
-            "next": "refactor",
-        },
-        {
-            "id": "refactor",
-            "type": "drive",
-            "drive": "cross-refactoring",
-            "kind": "構造改善",
-            "stage": "構造改善",
-            "timeout": 3600,
-            "args": f"{{pr}} --workflow-step --scope {scope} --baseline-test {tests_all}",
-            "next": "review",
-        },
-        {
-            "id": "review",
-            "type": "drive",
-            "drive": "cross-review",
-            "kind": "実装レビュー",
-            "stage": "実装レビュー",
-            "timeout": 3600,
-            "args": "{pr} --max-rounds 4",
-            "next": "test-all",
-        },
+            "無し（検査の修正だけ）",
+            "review" if review_only else "assess",
+            stage=first,
+            body="template",
+            on_fail="abort-before-pr",
+        ),
+        *_inspect_steps(a, "{pr}", scope),
         # 検査の間に起点のブランチが進んでも finish の付け替えの後にマージできるよう、毎回取り込んでから測る
         {
             "id": "test-all",
             "type": "run",
             "stage": "完了判定",
-            "timeout": 1800,
-            "rerun_failed": True,
+            "timeout": whole_timeout(a),
             "cmd": (
                 f"git pull -q --rebase && git fetch -q origin {shlex.quote(a.base)} && "
-                f"git merge -q --no-edit origin/{shlex.quote(a.base)} && git push -q && " + with_paths(a.test_cmd, a.test_all)
+                f"git merge -q --no-edit origin/{shlex.quote(a.base)} && git push -q && " + whole_cmd(a)
             ),
             "on_fail": "judge",
             "next": "finish",
@@ -387,8 +404,8 @@ def plan_check_since(a) -> dict:
             "type": "judge",
             "inputs": ["test-all"],
             "question": "全体テストの失敗（起点のブランチの取り込みの衝突を含む）を直す（fix）か、修正に無関係として進める"
-            "（finish）か、止める（stop）か",
-            "choices": ["fix", "finish", "stop"],
+            "（finish）か、止める（abort）か",
+            "choices": ["fix", "finish", "abort"],
         },
         {
             "id": "fix",
@@ -410,18 +427,16 @@ def plan_check_since(a) -> dict:
             "on_fail": "abort",
             "next": "ready",
         },
-        {"id": "ready", "type": "run", "cmd": "sh -c 'git push -q && gh pr ready {pr}'", "on_fail": "abort", "next": "merge"},
-        {"id": "merge", "type": "run", "timeout": 7200, "cmd": MERGE_CMD, "probe": MERGE_PROBE, "on_fail": "abort", "next": "record"},
-        {"id": "record", "type": "run", "cmd": f"{record} --pr {{pr}}", "on_fail": "abort", "next": "end"},
-        {"id": "abort", "type": "run", "cmd": f"{record} --failed --pr {{pr}}", "next": "end"},
-        {"id": "abort-before-pr", "type": "run", "cmd": f"{record} --failed", "next": "end"},
+        {"id": "ready", "type": "run", "cmd": READY, "on_fail": "abort", "next": "merge-gate"},
+        *merge_steps(a, on_fail="abort", next="record"),
+        *record_steps(name, review=review_only, pr=True),
     ]
     if review_only:
         steps = [s for s in steps if s["id"] not in ("assess", "refactor")]
     issues = list(a.issue or [])
-    if not issues and getattr(a, "mission", None):
+    if not issues and getattr(a, "sprint", None):
         try:
-            issues = [int(i) for i in json.loads(Path(a.mission).read_text()).get("issues", [])]
+            issues = [int(i) for i in json.loads(Path(a.sprint).read_text()).get("issues", [])]
         except (OSError, ValueError, TypeError):
             issues = []
     plan = {
@@ -437,7 +452,7 @@ def plan_check_since(a) -> dict:
         "実行の条件": {"cmd": cond, "skip_code": 3},
         "steps": steps,
     }
-    return with_decls(plan, a)
+    return with_record(_with_test_meta(plan, a))
 
 
 def cmd_new(a) -> dict:
@@ -456,11 +471,12 @@ def cmd_new(a) -> dict:
     }[a.kind]()
     out = Path(a.out or f"plan-{key}.json")
     out.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n")
+    src = next((s["estimate"]["source"] for s in plan["steps"] if s["id"] == "impl" and s.get("estimate")), None)
     return result(
         "supervise-new",
         "ok",
-        f"計画を書いた: {out}",
-        [{"path": str(out), "kind": a.kind, "steps": [s["id"] for s in plan["steps"]]}],
+        f"計画を書いた: {out}" + ("。実装の上限は未校正（3600 秒）" if src == "uncalibrated" else ""),
+        [{"path": str(out), "kind": a.kind, "steps": [s["id"] for s in plan["steps"]], **({"impl_timeout_source": src} if src else {})}],
         {"steps": len(plan["steps"])},
         next=(f"実装の queue へ --then {out} で渡す（実装がすべて完了した後に続けて流れる）" if a.kind == "release" else None),
     )

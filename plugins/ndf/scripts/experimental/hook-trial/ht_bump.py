@@ -1,8 +1,8 @@
-"""4b: bump-my-version が release-steps.py の cmd_bump の書き換え（版数を持つ 15 箇所。
+"""4b: bump-my-version が release-steps.py の cmd_bump の書き換え（版数を持つ 14 箇所。
 docs/versioning-and-distribution.md）を満たすか（hook-trial.py bump）。
 
 HEAD の複製を 2 つ作り、片方で今の `release-steps.py bump --plugin ndf`、もう片方で bump-my-version の
-`replace`（下の BUMPCFG の 15 箇所）を流して、2 つの木の差を比べる。基底が同じ上げ方（-dev.N の連番）と
+`replace`（下の BUMPCFG の 14 箇所）を流して、2 つの木の差を比べる。基底が同じ上げ方（-dev.N の連番）と
 基底が変わる上げ方（PATCH）の 2 つを見る。cmd_bump の手で直す箇所の報告と check-doc-staleness.py の実行は
 NDF の側に残る部分なので比べない。
 """
@@ -22,7 +22,7 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[4]
 RELEASE = HERE.parents[1] / "release-steps.py"
 TOOL = "hook-trial"
-# 15 箇所（定義ファイルと更新案内の見出し 8・説明文書の本文 7）
+# 14 箇所（定義ファイル 7・説明文書の本文 7）
 BUMPCFG = r"""[tool.bumpversion]
 current_version = "{old}"
 parse = "(?P<major>\\d+)\\.(?P<minor>\\d+)\\.(?P<patch>\\d+)(?:-(?P<pre_l>dev|rc)\\.(?P<pre_n>\\d+))?"
@@ -58,10 +58,6 @@ replace = "(v{{new_version}})"
 filename = ".claude-plugin/marketplace.json"
 search = "Claude Code plugin (v{{current_version}}): 8 specialized agents"
 replace = "Claude Code plugin (v{{new_version}}): 8 specialized agents"
-[[tool.bumpversion.files]]
-filename = "plugins/ndf/README.md"
-search = "## v{{current_version}} へ更新するとき"
-replace = "## v{{new_version}} へ更新するとき"
 [[tool.bumpversion.files]]
 filename = "README.md"
 search = "**NDFプラグイン v{{current_version}}**"

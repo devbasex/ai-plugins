@@ -421,6 +421,15 @@ def test_code_blocks_and_inline_code_are_not_matched(repo):
     assert run(repo, "check", "--diff", "develop")[0] == 0
 
 
+def test_blockquote_lines_are_not_matched(repo):
+    """引用（`>` で始まる行）は他者の言葉の写しなので、廃止した語があっても当てない。引用の外は当てる。"""
+    write(repo, "issues/a.md", "## 依頼（原文）\n\n> オーダーを速くする\n>\n> * オーダーの一覧\n\n本文。\n")
+    assert run(repo, "check", "--diff", "develop")[0] == 0
+    write(repo, "issues/a.md", "## 依頼（原文）\n\n> オーダーを速くする\n\nオーダーは廃止した。\n")
+    code, out, _ = run(repo, "check", "--diff", "develop")
+    assert code == 1 and [i["line"] for i in out["items"]] == [5]
+
+
 def test_deprecated_inside_live_term_is_not_matched(repo):
     g = shop_glossary()
     g["terms"][1]["deprecated"] = ["カート"]
@@ -787,6 +796,7 @@ def test_declaration_paths_outside_root_stop_every_command(bare, tmp_path, field
         ["render"],
         ["check", "--diff", "develop"],
         ["diff", "--base", "develop"],
+        ["merge"],
     ):
         code, _, err = run(bare, *args)
         assert code == 2, (args, err)
@@ -809,3 +819,235 @@ def test_command_lines_are_step_results(repo):
         code, out, _ = run(repo, *args)
         assert code == 0 and out["tool"] == "glossary" and out["status"] == "ok"
     assert os.access(SCRIPT, os.X_OK)
+
+
+# --- merge: 取り込みの途中の用語集の衝突（#1913） ---------------------------------------
+
+ADDED_OURS = {"term": "返品", "context": "ordering", "meaning": "届いた品を戻すこと"}
+ADDED_THEIRS = {"term": "置き配", "context": "ordering", "meaning": "玄関先へ置く届け方"}
+
+
+def merge_repo(bare, source=DEFAULT_SOURCE, document=DEFAULT_DOCUMENT, base_terms=None):
+    """祖先の用語集を develop に置き、feature/x へ移ったリポジトリ。"""
+    config = {"version": 1, "format": "json", "source": source, "document": document, "check": {"paths": ["issues/*.md"]}}
+    write_json(bare, ".ndf/glossary.json", config)
+    write_json(bare, source, shop_glossary(base_terms))
+    assert run(bare, "render")[0] == 0
+    commit(bare, "glossary")
+    git(bare, "checkout", "-q", "-b", "feature/x")
+    return bare
+
+
+def side(root, branch, edit, source=DEFAULT_SOURCE, extra=None):
+    """branch へ移り、用語集の terms を edit で変えて文書を作り直し、コミットする。"""
+    git(root, "checkout", "-q", branch)
+    g = json.loads((root / source).read_text(encoding="utf-8"))
+    g["terms"] = edit(g["terms"])
+    write_json(root, source, g)
+    assert run(root, "render")[0] == 0
+    if extra:
+        write(root, "notes.md", extra)
+    commit(root, branch)
+
+
+def conflict(root, ours, theirs, source=DEFAULT_SOURCE, extra=False):
+    """feature/x（自分）を ours、develop（相手）を theirs で変え、feature/x へ develop を取り込んで止める。"""
+    side(root, "feature/x", ours, source, "ours\n" if extra else None)
+    side(root, "develop", theirs, source, "theirs\n" if extra else None)
+    git(root, "checkout", "-q", "feature/x")
+    p = subprocess.run(["git", "-C", str(root), "merge", "-q", "--no-ff", "develop"], capture_output=True, text=True)
+    assert p.returncode != 0, p.stdout
+    return unmerged(root)
+
+
+def unmerged(root):
+    return git(root, "diff", "--name-only", "--diff-filter=U").split()
+
+
+def merging(root):
+    return subprocess.run(["git", "-C", str(root), "rev-parse", "-q", "--verify", "MERGE_HEAD"], capture_output=True).returncode == 0
+
+
+def term_keys(root, source=DEFAULT_SOURCE):
+    return [(t["context"], t["term"]) for t in json.loads((root / source).read_text(encoding="utf-8"))["terms"]]
+
+
+def rendered(root, source=DEFAULT_SOURCE):
+    glossary = import_glossary()
+    return glossary.render_text(json.loads((root / source).read_text(encoding="utf-8")), source)
+
+
+@pytest.mark.parametrize("source,document", [(DEFAULT_SOURCE, DEFAULT_DOCUMENT), ("words/terms.json", "words/terms.md")])
+def test_merge_keeps_terms_added_on_both_sides_and_commits(bare, source, document):
+    root = merge_repo(bare, source, document)
+    assert sorted(conflict(root, lambda ts: ts + [ADDED_OURS], lambda ts: ts + [ADDED_THEIRS], source)) == sorted([source, document])
+    code, out, err = run(root, "merge")
+    assert code == 0, err
+    keys = term_keys(root, source)
+    assert keys.count(("ordering", "返品")) == 1 and keys.count(("ordering", "置き配")) == 1
+    assert (root / document).read_text(encoding="utf-8") == rendered(root, source)
+    assert unmerged(root) == [] and not merging(root)
+    assert git(root, "status", "--porcelain") == ""
+    assert out["items"] == [{"name": source, "result": "merged"}, {"name": document, "result": "rendered"}]
+    assert out["metrics"]["added"] == 1
+
+
+def test_merge_source_has_no_hardcoded_glossary_place():
+    for p in (SCRIPTS / "lib" / "glossary_merge.py", SCRIPTS / "glossary.py"):
+        text = p.read_text(encoding="utf-8")
+        body = text[text.find("def cmd_merge") :] if p.name == "glossary.py" else text
+        assert "docs/glossary" not in body.split("def build_parser")[0]
+
+
+def _changed(ts):
+    return [dict(t, meaning="自分が変えた意味") if t["term"] == "注文" else t for t in ts]
+
+
+@pytest.mark.parametrize(
+    "ours,theirs,kind",
+    [
+        (_changed, lambda ts: [dict(t, meaning="相手が変えた意味") if t["term"] == "注文" else t for t in ts], "both_changed"),
+        (_changed, lambda ts: [t for t in ts if t["term"] != "注文"] + [ADDED_THEIRS], "deleted_and_changed"),
+        (lambda ts: ts + [ADDED_OURS], lambda ts: ts + [dict(ADDED_OURS, meaning="別の意味")], "both_added"),
+    ],
+)
+def test_merge_stops_on_term_conflicts_without_writing(repo, ours, theirs, kind):
+    conflict(repo, ours, theirs)
+    before, index_before = snapshot(repo), git(repo, "ls-files", "-u")
+    code, out, err = run(repo, "merge")
+    assert code == 1 and out["status"] == "stopped"
+    assert snapshot(repo) == before and git(repo, "ls-files", "-u") == index_before and merging(repo)
+    assert {"kind": kind, "context": "ordering", "term": "返品" if kind == "both_added" else "注文"} in out["items"]
+    assert f"ERROR: {kind}: ordering:" in err
+
+
+def test_merge_takes_one_side_rewrite_and_other_side_addition(bare):
+    pending = {"term": "返品", "context": "ordering", "meaning": "届いた品を戻すこと", "pending_source": "issues/x-design.md"}
+    write(bare, "issues/x-design.md", "# 設計\n")
+    root = merge_repo(bare, base_terms=shop_glossary()["terms"] + [pending])
+
+    def confirm(ts):
+        return [
+            {k: v for k, v in t.items() if k != "pending_source"} | {"source": "docs/ordering.md"} if t["term"] == "返品" else t for t in ts
+        ]
+
+    conflict(root, lambda ts: ts + [ADDED_THEIRS], confirm)
+    code, _, err = run(root, "merge")
+    assert code == 0, err
+    terms = {(t["context"], t["term"]): t for t in json.loads((root / DEFAULT_SOURCE).read_text(encoding="utf-8"))["terms"]}
+    assert ("ordering", "置き配") in terms
+    assert terms[("ordering", "返品")].get("source") == "docs/ordering.md" and "pending_source" not in terms[("ordering", "返品")]
+
+
+def test_merge_keeps_a_term_added_identically_on_both_sides_once(repo):
+    conflict(repo, lambda ts: ts + [ADDED_OURS, ADDED_THEIRS], lambda ts: ts + [ADDED_THEIRS])
+    code, _, err = run(repo, "merge")
+    assert code == 0, err
+    assert term_keys(repo).count(("ordering", "置き配")) == 1
+    code, out, _ = run(repo, "check", "--rules", "structure")
+    assert "duplicate" not in [it["rule"] for it in out["items"]]
+
+
+def test_merge_with_other_conflicts_resolves_glossary_but_does_not_commit(repo):
+    conflict(repo, lambda ts: ts + [ADDED_OURS], lambda ts: ts + [ADDED_THEIRS], extra=True)
+    code, out, err = run(repo, "merge")
+    assert code == 1 and out["status"] == "stopped"
+    assert out["items"] == [{"path": "notes.md", "result": "unresolved"}]
+    assert unmerged(repo) == ["notes.md"] and merging(repo)
+    assert "ERROR: unresolved: notes.md" in err
+
+
+def test_merge_outside_a_merge_or_without_glossary_conflict_writes_nothing(repo):
+    before = snapshot(repo)
+    code, out, _ = run(repo, "merge")
+    assert code == 1 and "MERGE_HEAD" in out["summary"] and snapshot(repo) == before
+    side(repo, "feature/x", lambda ts: ts, extra="ours\n")
+    side(repo, "develop", lambda ts: ts, extra="theirs\n")
+    git(repo, "checkout", "-q", "feature/x")
+    subprocess.run(["git", "-C", str(repo), "merge", "-q", "develop"], capture_output=True)
+    before = snapshot(repo)
+    code, out, _ = run(repo, "merge")
+    assert code == 1 and "衝突していない" in out["summary"] and snapshot(repo) == before
+    assert out["items"] == [{"path": "notes.md", "result": "unresolved"}]
+
+
+def test_merge_resolves_a_document_only_conflict_by_rendering(repo):
+    write(repo, DEFAULT_DOCUMENT, "自分が手で書いた\n")
+    commit(repo, "ours doc")
+    git(repo, "checkout", "-q", "develop")
+    write(repo, DEFAULT_DOCUMENT, "相手が手で書いた\n")
+    commit(repo, "theirs doc")
+    git(repo, "checkout", "-q", "feature/x")
+    subprocess.run(["git", "-C", str(repo), "merge", "-q", "develop"], capture_output=True)
+    assert unmerged(repo) == [DEFAULT_DOCUMENT]
+    code, out, err = run(repo, "merge")
+    assert code == 0, err
+    assert out["items"] == [{"name": DEFAULT_DOCUMENT, "result": "rendered"}]
+    assert (repo / DEFAULT_DOCUMENT).read_text(encoding="utf-8") == rendered(repo) and not merging(repo)
+
+
+def test_merge_stops_when_one_side_deleted_the_glossary(repo):
+    side(repo, "feature/x", lambda ts: ts + [ADDED_OURS])
+    git(repo, "checkout", "-q", "develop")
+    git(repo, "rm", "-q", DEFAULT_SOURCE)
+    commit(repo, "rm")
+    git(repo, "checkout", "-q", "feature/x")
+    subprocess.run(["git", "-C", str(repo), "merge", "-q", "develop"], capture_output=True)
+    before = snapshot(repo)
+    code, out, _ = run(repo, "merge")
+    assert code == 1 and out["items"] == [{"kind": "file_deleted", "side": "theirs", "path": DEFAULT_SOURCE}]
+    assert snapshot(repo) == before
+
+
+# --- glossary_merge（純粋な処理） --------------------------------------------------------
+
+
+def import_merge():
+    sys.path.insert(0, str(SCRIPTS / "lib"))
+    import glossary_merge
+
+    return glossary_merge
+
+
+def _g(*terms, contexts=None):
+    return {"version": 1, "contexts": contexts if contexts is not None else [{"id": "ordering"}], "terms": list(terms)}
+
+
+def _t(term, meaning="m"):
+    return {"term": term, "context": "ordering", "meaning": meaning}
+
+
+def test_merge_is_deterministic_and_inserts_theirs_after_its_predecessor():
+    gm = import_merge()
+    base = _g(_t("a"), _t("z"))
+    ours = _g(_t("a"), _t("o1"), _t("z"))
+    theirs = _g(_t("t0"), _t("a"), _t("t1"), _t("t2"), _t("z"), _t("t3"))
+    first = gm.merge_glossaries(base, ours, theirs)
+    again = gm.merge_glossaries(base, ours, theirs)
+    assert json.dumps(first.glossary, ensure_ascii=False) == json.dumps(again.glossary, ensure_ascii=False)
+    assert [t["term"] for t in first.glossary["terms"]] == ["t0", "a", "t1", "t2", "o1", "z", "t3"]
+    assert first.counts == {"added": 4, "changed": 0, "removed": 0}
+
+
+def test_merge_takes_one_side_changes_and_removals():
+    gm = import_merge()
+    base = _g(_t("a"), _t("b"), _t("c"))
+    m = gm.merge_glossaries(base, _g(_t("a", "new"), _t("b"), _t("c")), _g(_t("a"), _t("c")))
+    assert m.conflicts == [] and [(t["term"], t["meaning"]) for t in m.glossary["terms"]] == [("a", "new"), ("c", "m")]
+    assert m.counts["removed"] == 1
+
+
+def test_merge_reports_duplicates_and_context_and_top_level_conflicts():
+    gm = import_merge()
+    dup = gm.merge_glossaries(_g(), _g(_t("a"), _t("a")), _g())
+    assert dup.glossary is None and dup.duplicates == [{"kind": "duplicate", "side": "ours", "context": "ordering", "term": "a"}]
+    ctx = gm.merge_glossaries(_g(), _g(contexts=[{"id": "ordering", "name": "x"}]), _g(contexts=[{"id": "ordering", "name": "y"}]))
+    assert ctx.conflicts == [{"kind": "both_changed", "context": "ordering", "term": None}]
+    top = gm.merge_glossaries(_g(), dict(_g(), version=2), dict(_g(), version=3))
+    assert top.conflicts == [{"kind": "key_changed", "context": None, "term": None, "key": "version"}]
+
+
+def test_merge_treats_a_missing_base_as_empty():
+    gm = import_merge()
+    m = gm.merge_glossaries({"version": 1}, _g(_t("a")), _g(_t("b")))
+    assert [t["term"] for t in m.glossary["terms"]] == ["b", "a"] and m.glossary["contexts"] == [{"id": "ordering"}]

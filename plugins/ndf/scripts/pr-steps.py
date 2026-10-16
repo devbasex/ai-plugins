@@ -7,7 +7,7 @@
     python3 pr-steps.py create --title T --body-file F [--draft] [--base B] [--root DIR]
     python3 pr-steps.py update --body-file F [--title T] [--pr N] [--root DIR]
     python3 pr-steps.py report [PR番号] [--root DIR]
-    python3 pr-steps.py template --out F [--force]
+    python3 pr-steps.py template --out F [--mode standard] [--force]
 
 結果は lib/step_result.py の形の 1 行の JSON。終了コードは 0 = ok / 1 = 違反（閉じる語がコミット
 メッセージにある・push や作成が失敗）/ 2 = 読めない / 3 = 前提が無い（既定ブランチにいる・起点が
@@ -26,7 +26,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
 
-deps.require("md")
+deps.require("md", "durable")
 import md  # noqa: E402
 from step_result import (
     EXIT_PRECONDITION,
@@ -41,20 +41,19 @@ from step_result import (
     run,
 )
 import gh_parts  # noqa: E402
+from closing import closing_issues, closing_words  # noqa: E402
 import repo  # noqa: E402
+import tool_paths  # noqa: E402
+from design_diff import DESIGN_DIFF_HEADING  # noqa: E402
 from pr_mode import needs_review, pr_target, split_stages, with_mode_line  # noqa: E402
 
 TOOL = "pr"
 SCRIPTS = Path(__file__).resolve().parent
 REVIEW_MARK = "<!-- I want to review in Japanese. -->"
-CLOSING = re.compile(
-    r"\b(close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s*"
-    r"(https?://github\.com/[\w.-]+/[\w.-]+/issues/\d+|[\w.-]+/[\w.-]+#\d+|#\d+)",
-    re.I,
-)
 # credential helper が応答しない環境の退避（lib/git-credential.sh と同じ値）
 CREDENTIAL_FALLBACK = ["-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential"]
-CHANGES_HEADING = "## 利用者向けの変化"  # 配布の CHANGELOG と更新案内の材料（release-steps.py notes が読む）
+CHANGES_HEADING = "## 利用者向けの変化"  # 配布の CHANGELOG の版の節の材料（release-steps.py notes が読む）。正本は release_lib/others.py（lib だけを読むため写す）
+MIGRATION_HEADING = "## 移行の手順"  # CHANGELOG の版の節の「### 移行の手順」と承認資料の材料（release-steps.py notes が読む）
 BODY_TEMPLATE = f"""<何を変えたかを 1〜3 文>
 
 ## Summary
@@ -65,10 +64,17 @@ BODY_TEMPLATE = f"""<何を変えたかを 1〜3 文>
 
 - <利用者に何ができるようになるか・使い方が変わる点。今の決まりだけを書く。見える変化が無ければ「無し」>
 
+{MIGRATION_HEADING}
+
+- <利用者が新しい版へ移るときに自分で行う操作（引数の置き換え・認証のし直し・導入し直し）。プラグインの名前を書く。無ければ「無し」>
+
 ## Test plan
 
 - [x] `<実行したコマンド>` exit=0
 """
+DIFF_TEMPLATE = (
+    f"\n{DESIGN_DIFF_HEADING}\n\n- <設計・既存の確定仕様・受け入れ条件と違う点を「| 設計の箇所 | 違い | 理由 |」の表で。無ければ「無し」>\n"
+)
 STAT_RE = re.compile(r"(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?")
 
 
@@ -88,14 +94,6 @@ def compare_ref(root, base):
         if git(root, "rev-parse", "--verify", "--quiet", ref, check=False).returncode == 0:
             return ref
     raise StepError(f"起点 {base} が無い（git fetch origin {base} を先に打つ）", EXIT_PRECONDITION)
-
-
-def closing_words(text):
-    return [m.group(0) for m in CLOSING.finditer(text or "")]
-
-
-def closing_issues(text):
-    return [m.group(2) for m in CLOSING.finditer(text or "")]
 
 
 def repo_owner_name(root):
@@ -144,7 +142,8 @@ def existing_pr(root, branch):
 
 
 def diff_numbers(root, ref):
-    last = (git(root, "diff", "--shortstat", f"{ref}..HEAD").stdout.strip().splitlines() or [""])[-1]
+    # 3 点（分岐点からの差分）。2 点だと起点が進んでいたとき他 PR の変更まで数える
+    last = (git(root, "diff", "--shortstat", f"{ref}...HEAD").stdout.strip().splitlines() or [""])[-1]
     m = STAT_RE.search(last)
     files, ins, dels = (int(m.group(1)), int(m.group(2) or 0), int(m.group(3) or 0)) if m else (0, 0, 0)
     commits = int(git(root, "rev-list", "--count", f"{ref}..HEAD").stdout.strip() or 0)
@@ -175,8 +174,8 @@ def cmd_plan(a):
             ),
             EXIT_PRECONDITION,
         )
-    # ミッションのブランチ宛て（課題の PR）は宣言の外でも起点として受ける
-    if base not in allowed and pr_target(base) != "mission" and not a.force:
+    # スプリントブランチ宛て（課題の PR）は宣言の外でも起点として受ける
+    if base not in allowed and pr_target(base) != "sprint" and not a.force:
         items[1]["result"] = "redirect"
         emit(
             result(
@@ -189,20 +188,20 @@ def cmd_plan(a):
             ),
             EXIT_PRECONDITION,
         )
-    status = [l for l in git(root, "status", "--short").stdout.splitlines() if l.strip()]
+    status, tool_status = tool_paths.split_status(root, tool_paths.load_or_stop(root, EXIT_UNREADABLE))  # #1436
     ref = compare_ref(root, base)
     nums = diff_numbers(root, ref)
-    in_commits = []
-    for line in git(root, "log", "--format=%H %B%x00", f"{ref}..HEAD").stdout.split("\x00"):
-        line = line.strip()
-        if line and closing_words(line):
-            in_commits.append(line.split()[0][:12])
+    log = git(root, "log", "--format=%H %B%x00", f"{ref}..HEAD").stdout.split("\x00")  # 本文は NUL で区切る
+    in_commits = [c.split()[0][:12] for c in map(str.strip, log) if c and closing_words(c)]
     pr = existing_pr(root, branch)
     in_msg = closing_words(a.message or "")
     items.append({"kind": "existing_pr", "name": pr["url"] if pr else "無し", "result": "update" if pr else "create"})
     items.append(
         {"kind": "changes", "name": f"{len(status)} 件の未コミット", "result": "uncommitted" if status else "clean", "files": status[:50]}
     )
+    if tool_status:
+        n = f"{len(tool_status)} 件のツールのパスの変更（コミットしない）"
+        items.append({"kind": "tool_paths", "name": n, "result": "excluded", "files": tool_status[:50]})
     for sha in in_commits:
         items.append({"kind": "commit", "name": sha, "result": "closing_word"})
     metrics = {
@@ -232,7 +231,7 @@ def cmd_plan(a):
         )
     action = "既存の PR を更新する" if pr else "新しい PR を作る"
     if not needs_review(base):
-        action += "（ミッションのブランチ宛て。実装レビューはミッションの PR で通す）"
+        action += "（スプリントブランチ宛て。実装レビューはスプリントの PR で通す）"
     emit(
         result(
             TOOL,
@@ -270,17 +269,22 @@ def cmd_commit(a):
                 {"branch": branch, "closing_words": words},
             )
         )
+    entries = tool_paths.load_or_stop(root, EXIT_UNREADABLE)
     git(root, "add", "-A")
-    if not git(root, "status", "--porcelain").stdout.strip():
-        emit(result(TOOL, "ok", "コミットする変更が無い", [], {"branch": branch, "committed": False}))
+    # ツールのパス（#1436）は index から外すだけで中身は残す。worktree に変更が残るため、有無は index で決める
+    unstaged = tool_paths.unstage(root, entries)
+    tool_items = [{"kind": "tool_paths", "name": " ".join(unstaged), "result": "unstaged"}] if unstaged else []
+    hint = f"。{tool_paths.describe(unstaged)}（意図した変更なら git commit で直接コミットする）" if unstaged else ""
+    if git(root, "diff", "--cached", "--quiet", check=False).returncode == 0:
+        emit(result(TOOL, "ok", f"コミットする変更が無い{hint}", tool_items, {"branch": branch, "committed": False}))
     run(["git", "-C", str(root), "commit", "-q", "-m", msg])
     sha = git(root, "rev-parse", "HEAD").stdout.strip()
     emit(
         result(
             TOOL,
             "ok",
-            f"コミットした: {sha[:12]} {msg.splitlines()[0][:80]}",
-            [{"kind": "commit", "name": sha[:12], "result": "committed"}],
+            f"コミットした: {sha[:12]} {msg.splitlines()[0][:80]}{hint}",
+            [{"kind": "commit", "name": sha[:12], "result": "committed"}, *tool_items],
             {"branch": branch, "committed": True, "sha": sha},
         )
     )
@@ -335,21 +339,18 @@ def rest_create(root, branch, base, title, body, draft):
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False)
         tmp = f.name
-    p = gh_parts.gh(["api", f"repos/{owner}/{name}/pulls", "--input", tmp], cwd=root)
+    try:
+        p = gh_parts.gh(["api", f"repos/{owner}/{name}/pulls", "--input", tmp], cwd=root)
+    finally:
+        Path(tmp).unlink(missing_ok=True)  # 本文を /tmp に残さない
     if p.returncode != 0:
         raise StepError(f"REST でも作成が失敗: {p.stderr.strip()[:300]}")
     d = json.loads(p.stdout)
     return d["number"], d["html_url"]
 
 
-def upsert(a, must_exist):
-    root = git_root(a.root)
-    branch = current_branch(root)
-    body = with_mode_line(body_with_mark(a.body_file), getattr(a, "mode", None), split_stages(getattr(a, "stages", None)))
-    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as f:
-        f.write(body)
-        body_path = f.name
-    pr = None
+def send_body(root, branch, body, body_path, a, must_exist):
+    """gh へ本文ファイルを渡して PR を作る・更新する。(番号, URL, action) を返す。"""
     if getattr(a, "pr", None):
         pr = {"number": a.pr, "url": f"#{a.pr}"}
     else:
@@ -361,28 +362,37 @@ def upsert(a, must_exist):
         p = gh_parts.gh(args, cwd=root)
         if p.returncode != 0:
             raise StepError(f"gh pr edit {pr['number']} が失敗: {p.stderr.strip()[:300]}")
-        number, url, action = pr["number"], pr["url"], "updated"
-    else:
-        if must_exist:
-            raise StepError(f"{branch} の OPEN の PR が無い（create を使う）", EXIT_PRECONDITION)
-        if not a.title:
-            raise StepError("--title が要る", EXIT_UNREADABLE)
-        base = a.base or repo.base_branch(root) or "main"
-        args = ["pr", "create", "--base", base, "--title", a.title, "--body-file", body_path]
-        if a.draft:
-            args.append("--draft")
-        p = gh_parts.gh(args, cwd=root)
-        rest = False
-        if p.returncode == 0:
-            url = (p.stdout.strip().splitlines() or [""])[-1]
-            m = re.search(r"/pull/(\d+)", url)
-            number = int(m.group(1)) if m else None
-        elif gh_parts.is_rate_limited(p.stderr):
-            rest = True
-            number, url = rest_create(root, branch, base, a.title, body, a.draft)
-        else:
-            raise StepError(f"gh pr create が失敗: {p.stderr.strip()[:300]}")
-        action = "created_rest" if rest else "created"
+        return pr["number"], pr["url"], "updated"
+    if must_exist:
+        raise StepError(f"{branch} の OPEN の PR が無い（create を使う）", EXIT_PRECONDITION)
+    if not a.title:
+        raise StepError("--title が要る", EXIT_UNREADABLE)
+    base = a.base or repo.base_branch(root) or "main"
+    args = ["pr", "create", "--base", base, "--title", a.title, "--body-file", body_path]
+    if a.draft:
+        args.append("--draft")
+    p = gh_parts.gh(args, cwd=root)
+    if p.returncode == 0:
+        url = (p.stdout.strip().splitlines() or [""])[-1]
+        m = re.search(r"/pull/(\d+)", url)
+        return (int(m.group(1)) if m else None), url, "created"
+    if gh_parts.is_rate_limited(p.stderr):
+        number, url = rest_create(root, branch, base, a.title, body, a.draft)
+        return number, url, "created_rest"
+    raise StepError(f"gh pr create が失敗: {p.stderr.strip()[:300]}")
+
+
+def upsert(a, must_exist):
+    root = git_root(a.root)
+    branch = current_branch(root)
+    body = with_mode_line(body_with_mark(a.body_file), getattr(a, "mode", None), split_stages(getattr(a, "stages", None)))
+    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as f:
+        f.write(body)
+        body_path = f.name
+    try:
+        number, url, action = send_body(root, branch, body, body_path, a, must_exist)
+    finally:
+        Path(body_path).unlink(missing_ok=True)  # 本文を /tmp に残さない
     sync_exit = decisions_sync(root, number) if number else None
     metrics = {
         "number": number,
@@ -403,6 +413,10 @@ def upsert(a, must_exist):
         items.append({"kind": "section", "name": CHANGES_HEADING, "result": "ok" if has else "missing"})
         if not has:
             nxt = f"本文に {CHANGES_HEADING} の節を足して update する（無いと配布の説明文が題名になる）"
+        if getattr(a, "mode", None) == "standard":  # 設計との突き合わせの結果の節（#1241 の I8）
+            diff = any(title == DESIGN_DIFF_HEADING[3:] for title, _ in h2_sections(body))
+            items.append({"kind": "section", "name": DESIGN_DIFF_HEADING, "result": "ok" if diff else "missing"})
+            nxt = nxt or (None if diff else f"本文に {DESIGN_DIFF_HEADING} の節を足して update する（無ければ「無し」と書く）")
     emit(result(TOOL, "ok", f"PR #{number} を{'更新した' if action == 'updated' else '作った'}: {url}", items, metrics, next=nxt))
 
 
@@ -421,14 +435,15 @@ def cmd_template(a):
     out = Path(a.out)
     if out.exists() and not a.force:
         raise StepError(f"{out} が既にある（書き直すなら --force）", EXIT_PRECONDITION)
-    out.write_text(BODY_TEMPLATE, encoding="utf-8")
+    text = BODY_TEMPLATE + (DIFF_TEMPLATE if a.mode == "standard" else "")
+    out.write_text(text, encoding="utf-8")
     emit(
         result(
             TOOL,
             "ok",
             f"PR 本文の雛形を書いた: {out}",
             [{"kind": "file", "name": str(out), "result": "written"}],
-            {"sections": [l for l in BODY_TEMPLATE.splitlines() if l.startswith("## ")]},
+            {"sections": [l for l in text.splitlines() if l.startswith("## ")]},
         )
     )
 
@@ -570,6 +585,7 @@ def build_parser():
     p.set_defaults(func=cmd_report)
     p = sub.add_parser("template", help=f"PR 本文の雛形（Summary・{CHANGES_HEADING}・Test plan）を書き出す")
     p.add_argument("--out", required=True)
+    p.add_argument("--mode", help=f"standard なら {DESIGN_DIFF_HEADING} の節も書く")
     p.add_argument("--force", action="store_true")
     p.set_defaults(func=cmd_template)
     return ap

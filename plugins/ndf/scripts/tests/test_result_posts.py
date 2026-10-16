@@ -309,7 +309,7 @@ def test_a_position_rejection_of_an_earlier_item_is_not_taken_as_ours(tmp_path, 
         actor=ACTOR,
         extra={"ident": f"agy-r{ROUND}"},
     )
-    earlier_seq = post_queue.read_item(earlier)["seq"]
+    earlier_seq = earlier["seq"]
     fake_gh.set_rules(
         [
             {"match": "pulls/730/reviews?", "stdout": "[]"},
@@ -671,6 +671,19 @@ def test_the_push_names_the_current_head(tmp_path) -> None:
         ["git", "-C", str(remote), "rev-parse", "refs/heads/main"], check=True, capture_output=True, text=True
     ).stdout.strip()
     assert remote_head == commit
+    assert outcome.sent == commit
+
+
+def test_the_sent_commit_is_the_pushed_head_not_the_reported_commit(tmp_path) -> None:
+    """報告されたコミットが送った先頭の祖先でも、本文の同期が待つのは送り先の先頭（#1644 の決定 3）。"""
+    work, _ = _repo_with_remote(tmp_path)
+    reported = _head(work)
+    (work / "a.txt").write_text("2\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(work), "commit", "-am", "2"], check=True, capture_output=True)
+
+    outcome = result_posts.push_fix(work, "main", reported)
+
+    assert outcome.ok is True and outcome.sent == _head(work) != reported
 
 
 def test_the_push_fails_when_the_reported_commit_is_not_on_the_branch(tmp_path) -> None:
@@ -687,7 +700,7 @@ def test_nothing_is_pushed_when_no_commit_was_made(tmp_path) -> None:
 
     outcome = result_posts.push_fix(work, "main", None)
 
-    assert outcome.ok is True and outcome.pushed is False
+    assert outcome.ok is True and outcome.pushed is False and outcome.sent == ""
 
 
 def test_the_push_fails_without_a_destination() -> None:
@@ -704,7 +717,7 @@ def test_a_rejected_push_stops_before_checking_the_branch(tmp_path) -> None:
     outcome = result_posts.push_fix(work, "main", _head(work))
 
     assert outcome[:3] == (False, False, False)
-    assert outcome.detail != ""
+    assert outcome.detail != "" and outcome.sent == ""
 
 
 # ---------------- 単独で使う口 ----------------
@@ -863,3 +876,124 @@ def test_a_reply_that_github_refuses_does_not_hold_back_the_summary(tmp_path, fa
     assert outcome.resolved == 2
     assert outcome.queued == 0
     assert "Parent comment not found" in outcome.detail
+
+
+def test_sync_after_push_runs_only_after_pushing_a_design_pr(monkeypatch):
+    """本文の「決めたこと」は送った後に揃える。送っていない・設計 PR でないときは GitHub を読まない。"""
+    import design_body
+
+    ran: list[list[str]] = []
+
+    def fake_run(cmd, **_):
+        ran.append(cmd)
+        return subprocess.CompletedProcess(cmd, 1, "", "mismatch")
+
+    monkeypatch.setattr(design_body.subprocess, "run", fake_run)
+    sent = "a" * 40
+    assert design_body.sync_after_push("o/r", 5, "feat/x", sent) is None
+    assert design_body.sync_after_push("o/r", 5, "design/x", "") is None
+    assert ran == []
+    reason = design_body.sync_after_push("o/r", 5, "design/x", sent)
+    assert ran[0][-6:] == ["sync", "5", "--repo", "o/r", "--after-push", sent] and "mismatch" in reason
+
+
+def test_sync_decisions_without_after_push_keeps_the_old_call(monkeypatch):
+    """`fix-steps.py finalize` の呼び方は `--after-push` を付けない（#1644 の受け入れ条件 8）。"""
+    import design_body
+
+    ran: list[list[str]] = []
+    monkeypatch.setattr(design_body.subprocess, "run", lambda cmd, **_: ran.append(cmd) or subprocess.CompletedProcess(cmd, 0, "", ""))
+    assert design_body.sync_decisions(5, "o/r")["result"] == "synced"
+    assert ran[0][-4:] == ["sync", "5", "--repo", "o/r"]
+
+
+def test_the_standalone_command_passes_the_sent_commit_to_the_sync(tmp_path, monkeypatch) -> None:
+    """`result_posts.py fix` は送ったコミットを本文の同期へ渡す（#1644 の受け入れ条件 5）。"""
+    import design_body
+
+    work = tmp_path / "work"
+    work.mkdir()
+    sent = "b" * 40
+    monkeypatch.setattr(result_posts, "push_fix", lambda *_: result_posts.PushResult(True, True, True, "", sent))
+    seen: list[tuple] = []
+    monkeypatch.setattr(design_body, "sync_after_push", lambda *a: seen.append(a) or "stop")
+    monkeypatch.delenv("CROSS_REVIEW_TMP_DIR", raising=False)
+    args = result_posts.argparse.Namespace(
+        repo=REPO, pr=str(PR), result=str(_fix_file(tmp_path)), head="design/x", worktree=str(work), round=ROUND, actor=ACTOR
+    )
+
+    assert result_posts.cmd_fix(args) == 1
+    assert seen == [(REPO, PR, "design/x", sent)]
+
+
+def test_the_standalone_command_stops_when_the_body_is_not_synced(tmp_path, monkeypatch, capsys) -> None:
+    """設計 PR で送った後に本文を揃えられなければ、返信・まとめへ進まず止める。"""
+    import design_body
+
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.setattr(result_posts, "push_fix", lambda *_: result_posts.PushResult(True, True, True, ""))
+    monkeypatch.setattr(design_body, "sync_after_push", lambda *_: "pr-body-decisions.sh sync が unreadable（2）: api")
+    posted: list[object] = []
+    monkeypatch.setattr(result_posts, "post_fix", lambda *a, **k: posted.append(a))
+    monkeypatch.delenv("CROSS_REVIEW_TMP_DIR", raising=False)
+    fix = _fix_file(tmp_path)
+    args = result_posts.argparse.Namespace(
+        repo=REPO, pr=str(PR), result=str(fix), head="design/x", worktree=str(work), round=ROUND, actor=ACTOR
+    )
+
+    assert result_posts.cmd_fix(args) == 1
+    assert "揃えられない" in capsys.readouterr().err
+    assert posted == []
+
+
+# ---------------- 一時的な失敗（#1843） ----------------
+
+# PR 1842 の round 1 の実例: HTTP 500・本文なしで `gh api` が応答を読めずに終わる。
+_SERVER_ERROR_NO_BODY = {"match": "pulls/730/reviews", "exit": 1, "stdout": "", "stderr": "unexpected end of JSON input\n"}
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        _SERVER_ERROR_NO_BODY,
+        {"match": "pulls/730/reviews", "exit": 1, "stdout": "", "stderr": "gh: Server Error (HTTP 500)\n"},
+        {"match": "pulls/730/reviews", "exit": 1, "stdout": "", "stderr": "error connecting to api.github.com\n"},
+    ],
+)
+def test_a_review_left_by_a_transient_failure_remains_queued_and_is_not_a_failure(tmp_path, fake_gh, failure) -> None:
+    """一時的な失敗は失敗にせず、投稿を積んだまま取り込みへ渡す（AC2）。"""
+    fake_gh.set_rules([{"match": "pulls/730/reviews?", "stdout": "[]"}, failure])
+
+    outcome, payload = _post_review(tmp_path)
+
+    assert outcome.failed is False and outcome.queued == 1 and outcome.findings == 2
+    assert outcome.review_url is None and outcome.posted_inline == 0
+    assert all("posted_to" not in c for c in json.loads(payload.read_text(encoding="utf-8"))["comments"])
+    [(_, item)] = _queue(tmp_path).items()
+    assert item["kind"] == "review-post" and item["last_transient"] is True
+
+
+def test_a_review_rejected_for_a_bad_request_still_fails(tmp_path, fake_gh) -> None:
+    """恒久の失敗は今までどおり失敗として返す（AC8）。"""
+    fake_gh.set_rules(
+        [
+            {"match": "pulls/730/reviews?", "stdout": "[]"},
+            {"match": "pulls/730/reviews", "exit": 1, "stdout": "", "stderr": "gh: Bad Request (HTTP 400)\n"},
+        ]
+    )
+
+    outcome, _ = _post_review(tmp_path)
+
+    assert outcome.failed is True
+
+
+def test_a_reply_left_by_a_transient_failure_remains_queued_and_is_not_a_failure(tmp_path, fake_gh) -> None:
+    """返信の送りも一時的な失敗なら失敗にせず残す（AC10）。"""
+    fake_gh.set_rules([{"match": "comments/111/replies", "exit": 1, "stdout": "", "stderr": "gh: Bad Gateway (HTTP 502)\n"}])
+
+    outcome = result_posts.post_fix(_queue(tmp_path), _fix_file(tmp_path), REPO, PR, round_no=ROUND, actor=ACTOR)
+
+    assert outcome.failed is False
+    assert outcome.queued >= 1
+    assert outcome.dropped == 0

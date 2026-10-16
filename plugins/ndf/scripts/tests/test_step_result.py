@@ -134,3 +134,20 @@ def test_approval_present_requires_targets_consent_and_rollback(tmp_path, kw):
     args.update(kw)
     with pytest.raises(ValueError):
         sr.approval_present("m", "1", **args)
+
+
+def test_deps_missing_is_stopped_and_owned_by_deps():
+    """依存の欠け（#1654）は stopped で、値は deps.py の定数そのもの（写さない）。"""
+    import sys
+
+    deps = sys.modules["deps"]
+    assert sr.EXIT_DEPS_MISSING == deps.EXIT_DEPS_MISSING
+    assert sr.code_matches("stopped", sr.EXIT_DEPS_MISSING)
+    assert not sr.code_matches("ok", sr.EXIT_DEPS_MISSING) and not sr.code_matches("gate", sr.EXIT_DEPS_MISSING)
+
+
+def test_infra_wait_is_stopped():
+    """CI の基盤待ち（75。#1645）は stopped で、ok と gate には当たらない。"""
+    assert sr.EXIT_INFRA_WAIT == 75
+    assert sr.code_matches("stopped", 75)
+    assert not sr.code_matches("ok", 75) and not sr.code_matches("gate", 75)

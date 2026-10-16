@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
+import delivery
+import project_decl
 import schema
-from pydantic import ConfigDict
+from typing import Annotated
+
+from pydantic import ConfigDict, Field, StrictInt
 
 
-# プロジェクトごとの宣言（リポジトリの根の .ndf/）。形は DECLARATIONS の節にある
+# プロジェクトごとの宣言（リポジトリの根の .ndf/）。形は plan.py の docstring の「宣言」の節にある
 WORKTREE_DECL = "worktree.json"  # base_branch（起点のブランチ）・production_branch（本番のブランチ）
-SUPERVISE_DECL = "supervise.json"  # test・sync_checks・release
+SUPERVISE_DECL = "supervise.json"  # test・sync_checks・release・queue・impl_timeout・refactor_budget_minutes
 
 
 class DeclError(Exception):
@@ -43,6 +48,26 @@ def supervise_shape(decl: dict) -> SuperviseDecl:
         return schema.load_shape(SuperviseDecl, {"test": decl.get("test") or {}, "sync_checks": decl.get("sync_checks") or []})
     except schema.ShapeError as e:
         raise DeclError(f'supervise.json: {e}（test はオブジェクト、sync_checks は {{"name", "command"}} の並びで書く）') from e
+
+
+PositiveInt = Annotated[StrictInt, Field(gt=0)]
+# 宣言と引数で同じ名前（a.<名前>）を使う、ステップの時間の枠（#1916）
+STEP_BUDGETS = ("impl_timeout", "refactor_budget_minutes")
+
+
+class StepBudgets(schema.Shape):
+    """.ndf/supervise.json の実装の上限（impl_timeout・秒）と想定最大時間（refactor_budget_minutes・分）。null は無い。"""
+
+    impl_timeout: PositiveInt | None = None
+    refactor_budget_minutes: PositiveInt | None = None
+
+
+def step_budgets(decl: dict) -> StepBudgets:
+    """supervise.json の 2 項目の形を見る（JSON の 1 以上の整数か null）。違えば項目の名前を含む DeclError。"""
+    try:
+        return schema.load_shape(StepBudgets, {k: decl.get(k) for k in STEP_BUDGETS})
+    except schema.ShapeError as e:
+        raise DeclError(f"supervise.json: {e}（impl_timeout と refactor_budget_minutes は 1 以上の整数で書く）") from e
 
 
 def read_decl(roots, name: str) -> dict:
@@ -88,16 +113,84 @@ def sync_checks_of(decl: dict) -> list[tuple[str, str]]:
     return [(c.name, c.command) for c in supervise_shape(decl).sync_checks]
 
 
+# 資源の枠の既定（#1142 の決定 30）。宣言の resources.<タグ> が項目ごとに上書きする
+QUEUE_RESOURCES = {"graphql": {"limit": 2, "types": ["pr", "drive"], "commands": ["merged-steps.py"]}}
+
+
+class QueueResource(schema.Shape):
+    """資源の枠: 同時に流せる本数（limit）と、タグを持つステップの型（types）・run の cmd に含まれる語（commands）。"""
+
+    limit: int
+    types: list[str] = []
+    commands: list[str] = []
+
+
+class SharedList(schema.Shape):
+    """共有の一覧: 複数のプランが書き足すファイル（path）と、当たり方（touched_by。無ければ path そのもの）。"""
+
+    path: str
+    touched_by: list[str] = []
+
+
+class QueueDecl(schema.Shape):
+    """.ndf/supervise.json の queue。"""
+
+    resources: dict[str, QueueResource] = {}
+    shared: list[SharedList] = []
+
+
+def queue_decl(decl: dict) -> dict:
+    """supervise.json の queue を既定と合わせて `{"resources": {タグ: {limit, types, commands}}, "shared": [{path, touched_by}]}` で返す。
+
+    無ければ既定（graphql の枠 2 本・共有の一覧は無し）。形が違えば DeclError。"""
+    raw = decl.get("queue") or {}
+    hint = '（queue は {"resources": {タグ: {"limit", "types", "commands"}}, "shared": [{"path", "touched_by"}]} で書く）'
+    declared = (raw.get("resources") or {}) if isinstance(raw, dict) else None
+    if isinstance(declared, dict):  # 既定へ、宣言したタグを項目ごとに重ねる
+        merged = {**QUEUE_RESOURCES, **declared}
+        raw = {**raw, "resources": {t: {**QUEUE_RESOURCES.get(t, {}), **r} if isinstance(r, dict) else r for t, r in merged.items()}}
+    try:
+        shape = schema.load_shape(QueueDecl, raw, "supervise.json: queue")
+    except schema.ShapeError as e:
+        raise DeclError(f"{e}{hint}") from e
+    low = [t for t, r in shape.resources.items() if r.limit < 1]
+    if low:
+        raise DeclError(f"supervise.json: queue.resources.{low[0]}.limit: 1 以上の整数にする{hint}")
+    out = schema.dump_shape(shape)
+    for s in out["shared"]:
+        s["touched_by"] = s["touched_by"] or [s["path"]]
+    return out
+
+
+def queue_decl_of(plans: list[dict]) -> dict:
+    """queue が流すプランの宣言（`queue_decl`）。プランの作業場所と元のリポジトリを入れた順に探し、最後に今のディレクトリを探す。"""
+    roots: list[Path] = []
+    for plan in plans:
+        if isinstance(plan, dict) and plan.get("作業場所"):
+            roots += decl_roots(str(plan["作業場所"]), plan.get("リポジトリ"))[:-1]
+    return queue_decl(read_decl(list(dict.fromkeys([*roots, Path.cwd()])), SUPERVISE_DECL))
+
+
 # 雛形が宣言から受けるもの。引数が宣言より先に効く
-# mission はリリースの形を要らない（雛形の無い形ならリリースの段を書かず、/ndf:release で行うと返す）
+# sprint と close はリリースの形を要らない（リリースの経路を delivery から導く。雛形で組む経路だけが版数を要する。#1336）
 NEEDS = {
     "impl": ("base", "test"),
     "fix": ("base", "test"),
     "check": ("base", "test"),
     "release": ("base", "release"),
-    "mission": ("base", "test"),
-    "close": ("base", "test", "release"),
+    "sprint": ("base", "test"),
+    "close": ("base", "test"),
 }
+
+
+def test_kind(a) -> str:
+    """`--test-cmd` の雛形の種別（`--test-kind`。既定はテスト。#1483 決定 3）。"""
+    return getattr(a, "test_kind", None) or "test"
+
+
+def scope_paths(a) -> list[str]:
+    """静的解析の雛形の全体テストで `{paths}` に入れる範囲 = 明示した `--tests`。`.`（sprint の既定）は数えない（I4）。"""
+    return [str(t) for t in getattr(a, "tests", None) or [] if str(t) not in (".", "")]
 
 
 def apply_decls(a) -> None:
@@ -105,24 +198,73 @@ def apply_decls(a) -> None:
 
     - 起点のブランチ（a.base）: --base → worktree.json の base_branch
     - 本番のブランチ（a.production_branch）: --production-branch → worktree.json の production_branch
-    - テスト（a.test_cmd・a.test_all・a.no_reports）: --test-cmd・--test-all → supervise.json の test
+    - テスト（a.strategy・a.test_limits・a.test_cmd・a.no_reports）: --test-cmd（雛形）→ project.json の test →
+      supervise.json の test.command（project.json に test が無いときだけ。読んだことを a.test_note に残す。#1334 決定 3）。
+      --test-all は廃止（知らせて無視する）
     - 同期とチェック（a.sync_checks）: supervise.json の sync_checks（無ければ計画に sync のステップを置かない）
     - 配布（a.release）: supervise.json の release
+    - 実装の上限（a.impl_timeout）と想定最大時間（a.refactor_budget_minutes）: 引数 → supervise.json の同じ名前の項目。
+      宣言の形は引数があっても見る（#1916 の決定 5）
+
+    リリースの経路（a.routes）は sprint と close だけが使い、`sprint_routes.apply_routes` が delivery_decl（宣言。a.delivery）と require_versions で組む。
     """
     roots = decl_roots(a.worktree, getattr(a, "repo", None))
     wt = read_decl(roots, WORKTREE_DECL)
     sv = read_decl(roots, SUPERVISE_DECL)
-    test = supervise_shape(sv).test
+    _apply_simple_decls(a, wt, sv)
+    decl, a.test_note = _project_decl(roots, sv)
+    _apply_test_strategy(a, decl)
+    _require_declared(a)
+
+
+def _apply_simple_decls(a, wt: dict, sv: dict) -> None:
+    """引数を優先し、無ければ宣言の値をそのまま写す項目。"""
+    sv_test = supervise_shape(sv).test
+    budgets = step_budgets(sv)
+    if not getattr(a, "impl_timeout_source", None):  # 実装の上限の出所（#1856。スプリントは各計画へ引き継ぐ）
+        a.impl_timeout_source = "arg" if getattr(a, "impl_timeout", None) else ("decl" if budgets.impl_timeout else None)
+    for k in STEP_BUDGETS:
+        setattr(a, k, getattr(a, k, None) or getattr(budgets, k))
     a.base = getattr(a, "base", None) or wt.get("base_branch") or None
     a.production_branch = getattr(a, "production_branch", None) or wt.get("production_branch") or None
-    a.test_cmd = getattr(a, "test_cmd", None) or test.get("command") or None
-    a.test_all = getattr(a, "test_all", None) or test.get("all") or "."
-    a.no_reports = test.get("no_reports") or ""
+    a.test_cmd = getattr(a, "test_cmd", None) or None
+    if getattr(a, "test_all", None):
+        print("⚠ --test-all は廃止しました（#1334）。全体テストは宣言の suites[].command で決まります", file=sys.stderr, flush=True)
+    a.test_all = None
+    a.no_reports = sv_test.get("no_reports") or ""
     a.sync_checks = sync_checks_of(sv)
     a.release = sv.get("release") or None
+
+
+def _apply_test_strategy(a, decl: dict) -> None:
+    """テスト戦略（a.strategy）と時間の上限（a.test_limits）を宣言と --test-cmd から組む。"""
+    import test_strategy as ts
+
+    a.strategy, a.test_limits = None, None
+    # 静的解析の雛形の全体テストの範囲。スプリントが各計画（検査の計画を含む）へ引き継ぐ（#1483）
+    a.test_paths = getattr(a, "test_paths", None) or scope_paths(a)
+    if decl.get("test") is not None or a.test_cmd:
+        try:
+            strategy = ts.resolve(decl, baseline_test=a.test_cmd, template_kind=test_kind(a), scope_paths=scope_paths(a))
+        except ts.StrategyError as e:
+            raise DeclError(str(e)) from e
+        # 戦略の注記（雛形から組んだ全体テスト・組まなかった静的解析の全体テスト）を計画の作成の時点で知らせる（#1437）
+        for note in strategy.notes:
+            print(f"⚠ {note}", file=sys.stderr, flush=True)
+        w, w_source = ts.whole_seconds(decl)
+        c = ts.ci_wall_seconds(decl, (strategy.ci or {}).get("check") if strategy.ci else None)
+        a.strategy = strategy.as_state()
+        a.test_limits = ts.limits(strategy, None, whole_seconds_value=w, whole_source=w_source, ci_seconds=c)
+
+
+def _require_declared(a) -> None:
+    """計画の種別（a.kind）に要る宣言が揃わなければ DeclError。"""
     missing = {
         "base": (not a.base, f"起点のブランチ（--base か .ndf/{WORKTREE_DECL} の base_branch）"),
-        "test": (not a.test_cmd, f"テストのコマンド（--test-cmd か .ndf/{SUPERVISE_DECL} の test.command）"),
+        "test": (
+            a.strategy is None,
+            f"テストの宣言（.ndf/{project_decl.DECL.name} の test か --test-cmd、または .ndf/{SUPERVISE_DECL} の test.command）",
+        ),
         "release": (not isinstance(a.release, dict) or not a.release.get("form"), f"配布の形（.ndf/{SUPERVISE_DECL} の release.form）"),
     }
     lack = [missing[k][1] for k in NEEDS[a.kind] if missing[k][0]]
@@ -130,9 +272,75 @@ def apply_decls(a) -> None:
         raise DeclError(f"new {a.kind} に要る宣言が無い: " + "・".join(lack))
 
 
+def delivery_decl(a) -> "delivery.DeliveryDecl":
+    """配布の判定に使う宣言（lib/delivery.py の DeliveryDecl）。起点と本番のブランチは引数（a.base・a.production_branch）が
+    宣言より先に効く。読めない宣言は `problems` に書き、例外を上げない。"""
+    import repo
+
+    roots = decl_roots(a.worktree, getattr(a, "repo", None))
+    problems = []
+    try:
+        wt = read_decl(roots, WORKTREE_DECL)
+    except DeclError as e:
+        wt, problems = {}, [str(e)]
+    try:
+        project = read_decl(roots, project_decl.DECL.name)
+    except DeclError as e:
+        project, problems = {}, [*problems, str(e)]
+    return delivery.build(
+        wt,
+        project,
+        a.release,
+        default_branch=repo.default_branch(roots[0]),
+        problems=problems,
+        base=a.base,
+        production=a.production_branch,
+    )
+
+
+def require_versions(a) -> None:
+    """版数（--version・close は --prod も）は、リリースの経路が雛形（template）で組むときだけ要る（#1336 の I6）。"""
+    if not delivery.needs_version(a.routes):
+        return
+    need = [("version", "--version", "版数"), *([("prod", "--prod", "本番の版")] if a.kind == "close" else [])]
+    gaps = [f"{what}（{flag}。release.form の雛形は版数で組む）" for attr, flag, what in need if not getattr(a, attr, None)]
+    if gaps:
+        raise DeclError(f"new {a.kind} に要る宣言が無い: " + "・".join(gaps))
+
+
+def _project_decl(roots, sv: dict) -> tuple[dict, str | None]:
+    """roots の順に `.ndf/project.json` を探し、`test` を持つ最初の宣言。無ければ supervise.json の test を 1 つの suite として読む。"""
+    import test_strategy as ts
+
+    last: tuple[dict, str | None] = ({}, None)
+    for r in roots:
+        decl, note = ts.decl_of(r, sv)
+        if note is None and decl.get("test") is not None:
+            return decl, None
+        last = (decl, note)
+    return last
+
+
 def decl_fields(a) -> dict:
-    """ミッションの雛形が各計画へ引き継ぐ、宣言から埋めた値。"""
-    return {k: getattr(a, k) for k in ("base", "production_branch", "test_cmd", "test_all", "no_reports", "sync_checks", "release")}
+    """スプリントの雛形が各計画へ引き継ぐ、宣言から埋めた値。"""
+    keys = (
+        "base",
+        "production_branch",
+        "test_cmd",
+        "test_kind",
+        "test_paths",
+        "test_all",
+        "no_reports",
+        "sync_checks",
+        "release",
+        "strategy",
+        "test_limits",
+        "test_note",
+        "routes",
+        "impl_timeout_source",
+        *STEP_BUDGETS,
+    )
+    return {k: getattr(a, k, None) for k in keys}
 
 
 def with_decls(plan: dict, a) -> dict:

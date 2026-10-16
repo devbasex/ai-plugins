@@ -126,9 +126,10 @@ def test_limited_test_files(danger, repo):
         "tests/test_plan.py",
         "tests/x.py",
     ]
-    assert danger.limited_test_files_from_round_test("pytest tests -q", str(repo)) == ["tests/test_plan.py"]
-    # 対象の語が無いコマンドは挙げられない（決定 21）
-    assert danger.limited_test_files_from_round_test("make test", str(repo)) is None
+    # ラウンドテストをそのまま走らせる項目は、`--scope` のテストの置き場所の配下の追跡ファイル（#1334 決定 13）。
+    # コマンドの語（`docker compose exec -T app ...` の `app`）からは読まない。
+    assert danger.limited_test_files_from_scope(["src", "tests"], str(repo)) == ["tests/test_plan.py"]
+    assert danger.limited_test_files_from_scope(["src"], str(repo)) is None
 
 
 def test_item_flags_combines(danger, repo):
@@ -144,3 +145,32 @@ def test_item_flags_combines(danger, repo):
 
     only = danger.item_flags(str(repo), item, [sha], ["src/refactor_lib/plan.py"], SCOPE, ["tests/test_plan.py"], False)
     assert only == {"flags": [], "hits": []}
+
+
+@pytest.fixture
+def php_repo(tmp_path):
+    """調査の `/tmp/ndfprobe` と同じ形の PHP の仮のリポジトリ（#1334 AC11）。本体は `app/`、テストは `tests/`。"""
+    repo = tmp_path / "ndfprobe"
+    repo.mkdir()
+    _git("init", "-q", "-b", "main", cwd=repo)
+    _git("config", "user.email", "t@e.st", cwd=repo)
+    _git("config", "user.name", "test", cwd=repo)
+    _write(repo, "app/Services/UserService.php", "<?php\nnamespace App\\Services;\n\nclass UserService {}\n")
+    _write(repo, "app/Http/Controllers/UserController.php", "<?php\nnamespace App\\Http\\Controllers;\n\nuse App\\Services\\UserService;\n")
+    _write(repo, "tests/Unit/ExampleTest.php", "<?php\nclass ExampleTest {}\n")
+    _commit(repo, "init")
+    return repo
+
+
+def test_d3_and_d4_are_raised_for_a_php_service_used_outside_the_scope(danger, php_repo):
+    """AC11 — D3 は PHP の `use App\\Services\\UserService;` に当たり、D4 はテストのコマンドの語でなく
+    `--scope` の置き場所（`tests/Unit`）から範囲テストのファイルを取る。本体の `app/` をテストの側に入れない。"""
+    scope = ["app/Services", "tests/Unit"]
+    test_files = danger.limited_test_files_from_scope(scope, str(php_repo))
+    assert test_files == ["tests/Unit/ExampleTest.php"]
+    item = {"path": "app/Services/UserService.php", "symbol": "UserService", "tests": []}
+
+    out = danger.item_flags(str(php_repo), item, [], ["app/Services/UserService.php"], scope, test_files, False)
+
+    assert "D3" in out["flags"] and "D4" in out["flags"]
+    assert any("UserService" in hit for hit in out["hits"])

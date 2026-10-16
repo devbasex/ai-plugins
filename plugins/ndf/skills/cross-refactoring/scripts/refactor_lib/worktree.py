@@ -2,44 +2,43 @@
 
 from __future__ import annotations
 
+import math
 import pathlib
 import subprocess
+import time
 from typing import Any, Optional
 
-from . import die, info
-from .paths import git_out
+import tool_paths
+
+from . import ABORT, die, info
+from .paths import git_out, resolve_commit
+
+# このプロセスが最後に worktree を書き換え終えた時刻（書き換えの印。#1806 決定 6）。プロセスの中だけに持つ
+_last_rewrite: Optional[float] = None
+# 時刻と待ち。テストが差し替える
+_clock = time.time
+_sleep = time.sleep
 
 
-def revert_item_commits(state: dict[str, Any], item: dict[str, Any], dry_run: bool = False) -> int:
-    """改善項目のコミットを取り消し、取り消した件数を返す。
+def wait_past_rewrite() -> None:
+    """書き換えの印の秒が終わっていなければ、次の秒の頭まで待つ。worktree を書き換える前に呼ぶ。
 
-    **新しいコミットから順に戻す。** 逆順にすると後続の取り消しが競合する。
-    取り消しに失敗したら中断する。半端な状態を Pull Request に残さない。
-
-    適用の検証に失敗したときと、レビューが収束しなかったときの両方から呼ぶ。
-    前者で呼ばないと、実装担当が既に push した差分が Pull Request に残り、
-    以後のレビュー対象にも混入する。
+    Python の `.pyc` などのキャッシュは、ソースの更新時刻（秒）と大きさで新しさを照らす。直前の書き換えと同じ秒に
+    同じ大きさで書き換えると、続く走らせ直しやテストが前の内容から作ったキャッシュを新しいとみなして読む。待てば
+    書き換えの更新時刻（秒）が直前より必ず後になる。締め切りを過ぎていても待つ（戻さないと worktree が残る）。
     """
-    # **取り消し済みなら何もしない。** push の失敗などで叩き直したときに、
-    # 既に戻したコミットへもう一度 `git revert` を掛けると必ず失敗し、
-    # そこから先へ進めなくなる。
-    if item.get("reverted"):
-        info(f"↩ {item['item_id']} は取り消し済みです")
-        return 0
+    if _last_rewrite is None:
+        return
+    next_second = math.floor(_last_rewrite) + 1
+    left = next_second - _clock()
+    if left > 0:
+        _sleep(left)
 
-    work = state["worktrees"]["work"]
-    shas = _order_newest_first(work, [s for s in (item.get("commits") or []) if isinstance(s, str) and s])
-    if dry_run:
-        for sha in shas:
-            info(f"（dry-run）git revert --no-edit {sha}")
-        return len(shas)
 
-    # 途中で失敗したら**着手前の HEAD まで戻す**。1 項目が複数のコミットを持つとき、
-    # 先行して成功した取り消しだけが履歴に残ると、再実行で不整合になって進めなくなる。
-    before = git_out(work, ["rev-parse", "HEAD"])
-    revert_range(work, shas, before, prefix=f"{item['item_id']} の")
-    item["reverted"] = True
-    return len(shas)
+def mark_rewritten() -> None:
+    """書き換えの印を今の時刻にする。worktree を書き換え終えたら呼ぶ。"""
+    global _last_rewrite
+    _last_rewrite = _clock()
 
 
 def reset_hard(work: str, sha: Optional[str]) -> None:
@@ -48,30 +47,26 @@ def reset_hard(work: str, sha: Optional[str]) -> None:
         subprocess.run(["git", "reset", "--hard", sha], cwd=work, capture_output=True, text=True)
 
 
-def revert_range(work: str, ordered: list[str], before: Optional[str], prefix: str = "") -> None:
-    """範囲を**新しい順に**全て取り消す。失敗したら着手前へ戻して中断する。
+def revert_range(work: str, ordered: list[str]) -> Optional[str]:
+    """並びの順に `git revert` する。戻せなかったコミットを返す（全部戻せたら `None`）。
 
-    範囲全体を新しい順にたどる取り消しは、履歴をそのまま逆再生するだけなので
-    **競合しない**。競合するのは「一部のコミットだけを飛ばして戻す」ときである。
+    **ここで中断しない。** 戻せないときは `git revert --abort` だけを打ち、着手前へ戻すかは呼び出し側
+    （`undo`）が決める。同じファイルを触った項目まで広げてやり直せるようにするためである。
     """
     for sha in ordered:
-        r = subprocess.run(
-            ["git", "revert", "--no-edit", sha],
-            cwd=work,
-            capture_output=True,
-            text=True,
-        )
+        r = subprocess.run(["git", "revert", "--no-edit", sha], cwd=work, capture_output=True, text=True)
         if r.returncode != 0:
             subprocess.run(["git", "revert", "--abort"], cwd=work, capture_output=True, text=True)
-            reset_hard(work, before)
-            die(f"{prefix}コミット {sha} を取り消せませんでした: {r.stderr.strip()[:400]}（HEAD を {before} へ戻しました）")
+            info(f"⚠ {sha[:12]} を戻せませんでした: {r.stderr.strip()[:200]}")
+            return sha
+    return None
 
 
-def replay_commits(work: str, shas: list[str]) -> Optional[dict[str, str]]:
-    """残す項目のコミットを**古い順に**積み直し、`{元の SHA: 新しい SHA}` を返す。
+def replay_commits(work: str, shas: list[str]) -> tuple[dict[str, str], Optional[str]]:
+    """コミットを**古い順に**積み直し、`({元の SHA: 新しい SHA}, 積み直せなかったコミット)` を返す。
 
-    競合したら `None` を返す。**ここで中断しない。** どの項目を残せるか決められない
-    だけなので、呼び出し側がラウンド全件の取り消しへ退避できる。
+    競合したら `git cherry-pick --abort` だけを打って返す。**ここで中断しない。** 衝突したコミットの
+    項目を外すか止まるかは呼び出し側（`undo`）が決める。
     """
     mapping: dict[str, str] = {}
     for sha in shas:
@@ -83,10 +78,10 @@ def replay_commits(work: str, shas: list[str]) -> Optional[dict[str, str]]:
         )
         if r.returncode != 0:
             subprocess.run(["git", "cherry-pick", "--abort"], cwd=work, capture_output=True, text=True)
-            info(f"⚠ {sha[:7]} を積み直せませんでした: {r.stderr.strip()[:200]}")
-            return None
+            info(f"⚠ {sha[:12]} を積み直せませんでした: {r.stderr.strip()[:200]}")
+            return mapping, sha
         mapping[sha] = git_out(work, ["rev-parse", "HEAD"]) or sha
-    return mapping
+    return mapping, None
 
 
 def _order_newest_first(work: str, shas: list[str]) -> list[str]:
@@ -101,7 +96,7 @@ def _order_newest_first(work: str, shas: list[str]) -> list[str]:
     if history is None:
         return list(shas)
     rank = {sha: i for i, sha in enumerate(history.split())}  # 0 が最も新しい
-    resolved = {s: (git_out(work, ["rev-parse", "--verify", f"{s}^{{commit}}"]) or s) for s in shas}
+    resolved = {s: (resolve_commit(work, s) or s) for s in shas}
     return sorted(shas, key=lambda s: rank.get(resolved[s], len(rank)))
 
 
@@ -146,10 +141,30 @@ def _control_prefix(state: dict[str, Any], work: str) -> Optional[str]:
     return f"{relative}/"
 
 
-def _dirty_paths(state: dict[str, Any], work: str) -> list[str]:
-    """作業ツリーの未コミット変更のパス。制御用ディレクトリは除く。"""
+def _split_dirty(state: dict[str, Any], work: str) -> tool_paths.Split:
+    """作業ツリーの未コミット変更を、利用者の変更とツールのパスに分ける。制御用ディレクトリは除く。"""
     control = _control_prefix(state, work)
-    return sorted(path for path in _worktree_changes(work) if not (control and path.startswith(control)))
+    paths = sorted(path for path in _worktree_changes(work) if not (control and path.startswith(control)))
+    return tool_paths.split_changes(paths, tool_paths.load_or_die(work, ABORT))
+
+
+def _dirty_paths(state: dict[str, Any], work: str) -> list[str]:
+    """作業ツリーの未コミット変更のパス。制御用ディレクトリとツールのパスは除く。
+
+    ツールのパスを除くので、同期コミット（このパスだけを `git add` する）にも入らない。
+    """
+    return _split_dirty(state, work).user
+
+
+def stop_if_dirty(state: dict[str, Any], work: str, what: str) -> None:
+    """未コミットの変更があれば、捨てずに終了コード 4 で止める（C4）。`what` は止める前に行おうとした操作。
+
+    取り消し（`undo.drop` の `reset --hard`）と着手前の木へ戻す `read-tree -u --reset` は、未コミットの変更を戻せずに消す。
+    """
+    dirty = _dirty_paths(state, work)
+    if dirty:
+        more = f" ほか {len(dirty) - 5} 件" if len(dirty) > 5 else ""
+        die(f"{what}前に、作業ツリーへ未コミットの変更があります（{', '.join(dirty[:5])}{more}）。捨てずに止まります。判断が要ります")
 
 
 def _discard_worktree_changes(work: str) -> None:
@@ -204,7 +219,9 @@ def _require_clean_worktree(state: dict[str, Any], work: str) -> None:
     無視されたファイルはここに現れない。生成物やキャッシュを `.gitignore` へ
     入れてあれば止まらない。
     """
-    dirty = _dirty_paths(state, work)
+    dirty, tool = _split_dirty(state, work)
+    if tool:
+        info(tool_paths.describe(tool))
     if not dirty:
         return
     shown = ", ".join(dirty[:5])

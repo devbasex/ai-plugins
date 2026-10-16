@@ -6,8 +6,8 @@
 #   check            宣言の状態を終了コードで返す（読み取り専用）
 #   create <ブランチ> [--from <起点>]
 #                    `.worktrees/<ブランチ>` に作業ツリーを作る。起点の既定は宣言の
-#                    base_branch。課題の作業ツリーはミッションのブランチ（mission/<名前>）を
-#                    --from に渡して切る。ミッションのブランチそのものは --from を省いて切る
+#                    base_branch。課題の作業ツリーはスプリントブランチ（sprint/<名前>）を
+#                    --from に渡して切る。スプリントブランチそのものは --from を省いて切る
 #
 # 作業ツリー運用の仕組みは、リポジトリ側に宣言ファイルがあるときだけ動く。
 # 無ければ hook もコマンドも何も出力せず終了コード 0 で終わる。**このスクリプトは
@@ -298,8 +298,8 @@ do_check() {
 # 作業ツリーを `.worktrees/<ブランチ>` に作り、そのパスを出力する。
 #
 # 起点は --from があればそれ、無ければ宣言の base_branch（無ければ既定ブランチ）で
-# ある。**宣言の base_branch は書き換えない。** ミッションのブランチは develop から
-# 切り、課題の作業ツリーは --from にミッションのブランチを渡して切る。
+# ある。**宣言の base_branch は書き換えない。** スプリントブランチは develop から
+# 切り、課題の作業ツリーは --from にスプリントブランチを渡して切る。
 # 起点の名前が origin にもローカルにも無いときは作らずに 1 で終わる。
 do_create() {
   local branch="$CREATE_BRANCH" base target start
@@ -343,6 +343,11 @@ do_create() {
   fi
   printf '作業ツリー: %s\n' "$target"
   printf '起点: %s\n' "$base"
+
+  # 共有の宣言に `deps` があるときだけ依存の用意を起こす（#1337）。失敗しても worktree は消さず、
+  # `worktree-deps.sh` の終了コード（1 失敗 / 3 宣言が壊れている）で終わる。
+  wt_deps_declared "$MAIN_DIR" || return 0
+  "$SCRIPT_DIR/worktree-deps.sh" prepare "$target"
 }
 
 case "$SUBCOMMAND" in

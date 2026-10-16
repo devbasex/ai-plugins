@@ -9,7 +9,10 @@
    - 環境を用意する副命令（`PREPARE`。導入と SessionStart の `startup`）→ 同じ lock から環境を作って 2 へ進む。
      作れないときは理由を出して終了コード 3
    - hook の副命令（`PASS`）→ 判定をせずに決まった終了コードで終わる（パススルー）
-   - `run` → 理由を出して本物の claude をそのまま起動する（素通し）
+   - `run` → 複製の環境の python が無い（別のコンテナで作った環境のリンク切れ）なら作り直して 2 へ進む。
+     それ以外か、作れないときは理由を出して本物の claude をそのまま起動する（素通し）
+
+環境はシステムの python で作る（`--no-managed-python`）。要件を満たすものが無いときだけ uv に選ばせる。
 
 | ラッパーの中身の置き場 | 環境の python |
 | --- | --- |
@@ -21,7 +24,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 import os
 import subprocess
 import sys
@@ -36,10 +38,14 @@ import deps  # noqa: E402
 GROUPS = ("procs", "locks", "md", "versions", "terminal")
 REEXEC_ENV = "NDF_RELAY_REEXEC"
 UV_ENV = "NDF_RELAY_UV"
-PREPARE = {"install", "uninstall", "status", "startup", "stop"}
+PREPARE = {"install", "uninstall", "status", "startup", "stop", "account"}
 # hook の副命令が環境の無いときに返す終了コード（is-child の 1 は「ラッパーの直接の子でない」）
-PASS = {"mark": 0, "question": 0, "is-child": 1, "notice": 0}
+PASS = {"mark": 0, "limit": 0, "question": 0, "is-child": 1, "notice": 0}
 MANIFEST = "MANIFEST"
+# ラッパーの環境を作れない・環境が無いときの終わり方。共通の契約の 3（前提が無い。`lib/step_result.py` の
+# `EXIT_PRECONDITION`）と同じ値で、依存の欠け（`deps.EXIT_DEPS_MISSING`）ではない。バージョンディレクトリは
+# `step_result.py` を持たない（`version_dir.LIB_FILES`）ため import せずに値を置く（#1654）
+EXIT_PRECONDITION = 3
 
 
 class EnvUnavailable(OSError):
@@ -49,7 +55,7 @@ class EnvUnavailable(OSError):
 def ready() -> bool:
     """今の python で、ラッパーの使うパッケージがすべて import できるか。"""
     try:
-        return all(importlib.util.find_spec(m) is not None for g in GROUPS for m in deps.GROUPS[g])
+        return all(deps.importable(g) for g in GROUPS)
     except (ImportError, ValueError):
         return False
 
@@ -77,10 +83,7 @@ def uv_path() -> str:
     forced = os.environ.get(UV_ENV)
     if forced:
         return forced
-    uv = deps.find_uv()
-    if not uv:
-        print(f"[ndf relay] uv が無いため {deps.UV_VERSION} を ~/.local/bin へ入れる", file=sys.stderr)
-        uv = deps.install_uv()
+    uv = deps.ensure_uv("[ndf relay]")
     if not uv:
         raise EnvUnavailable(f"uv を入れられない（ネットワークか権限が無い）。手で入れてから打ち直す: {deps.INSTALL_HINT}")
     return uv
@@ -91,13 +94,20 @@ def sync(project: str, venv: str, inexact: bool = False) -> str:
 
     `inexact` は、ほかのグループも入る共有の環境（プラグインのキャッシュの環境）で、入っているものを消さない。"""
     extras = [x for g in GROUPS for x in ("--extra", g)]
-    cmd = [uv_path(), "sync", "--frozen", "--quiet", "--project", project, *extras, *(["--inexact"] if inexact else [])]
     env = dict(os.environ, UV_PROJECT_ENVIRONMENT=venv)
     env.pop("VIRTUAL_ENV", None)
-    try:
-        p = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=600)
-    except (OSError, subprocess.SubprocessError) as e:
-        raise EnvUnavailable(f"uv sync を起動できない（{e}）") from None
+    uv = uv_path()
+    # まずシステムの python で作る。uv 管理の python（~/.local/share/uv）はコンテナごとに違い、共有の ~/.claude に
+    # 置いた環境がそれを指すと、別のコンテナや作り直したコンテナでリンクが切れる。要件を満たすシステムの python が
+    # 無ければ（macOS の 3.9 など）uv に選ばせる
+    for pin in (["--no-managed-python"], []):
+        cmd = [uv, "sync", "--frozen", "--quiet", *pin, "--project", project, *extras, *(["--inexact"] if inexact else [])]
+        try:
+            p = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=600)
+        except (OSError, subprocess.SubprocessError) as e:
+            raise EnvUnavailable(f"uv sync を起動できない（{e}）") from None
+        if p.returncode == 0:
+            break
     python = python_of(venv)
     if p.returncode != 0 or not os.path.isfile(python):
         tail = (p.stderr or p.stdout).strip().splitlines()[-1:] or ["理由は出ていない"]
@@ -122,15 +132,19 @@ def enter(argv: list[str], launcher: str, root: str = PKG_ROOT) -> int | None:
         _reexec(python, launcher, argv)
     if sub in PASS:
         return PASS[sub]
-    if sub in PREPARE:
+    # 複製の環境の python が無い（別のコンテナで作った環境のリンク切れ）ときは、`run` も作り直してから起動する
+    remake = sub == "run" and is_version_dir(root) and not os.path.isfile(python)
+    if sub in PREPARE or remake:
         own = is_version_dir(root)
         try:
             python = sync(root if own else str(deps.PLUGIN_ROOT), venv, inexact=not own)
         except EnvUnavailable as e:
             print(f"ndf-relay: {e}", file=sys.stderr)
-            return deps.EXIT_PRECONDITION
-        os.environ.pop(REEXEC_ENV, None)
-        _reexec(python, launcher, argv)
+            if not remake:
+                return EXIT_PRECONDITION
+        else:
+            os.environ.pop(REEXEC_ENV, None)
+            _reexec(python, launcher, argv)
     reason = f"ラッパーの環境（{venv}）が無い。/ndf:install-wrapper を打ち直す"
     if sub == "run":
         from . import claude as cl  # 外部パッケージを import しない
@@ -141,4 +155,4 @@ def enter(argv: list[str], launcher: str, root: str = PKG_ROOT) -> int | None:
             cl.passthrough(claude, argv[1:])
         return 127
     print(f"ndf-relay: {reason}", file=sys.stderr)
-    return deps.EXIT_PRECONDITION
+    return EXIT_PRECONDITION

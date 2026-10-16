@@ -5,7 +5,7 @@
 #   ./run.sh                                    # 全テスト実行
 #   ./run.sh -k test_login                      # nodeid フィルタ
 #   ./run.sh -m "page_role and role"            # marker フィルタ
-#   ./run.sh --pwk-overlay --pwk-drive-folder=<id>
+#   ./run.sh --pwk-overlay                      # 動画に赤丸カーソル + 字幕
 #   ./run.sh --help                             # この help を表示
 #
 # 動作:
@@ -37,7 +37,6 @@ scenario-test ランタイムランチャ
   --pwk-har-mode {minimal,full,none}
                                HAR 録画モード (default: minimal)
   --pwk-overlay                動画に赤丸カーソル + 字幕 (旧名 HUD) を焼き込む
-  --pwk-drive-folder <id>      終了後に成果物を Google Drive にアップロード
   -k <expr>                    nodeid 部分一致フィルタ
   -m <expr>                    marker フィルタ (page_role / role / phase 等)
   --headed                     ブラウザを画面表示 (debug 用)
@@ -47,7 +46,7 @@ scenario-test ランタイムランチャ
 
 例:
   $(basename "$0") -k test_login --pwk-overlay
-  $(basename "$0") -m "page_role" --pwk-drive-folder=ABCDEF
+  $(basename "$0") -m "page_role"
   PWK_CONFIG=./alt.yaml $(basename "$0")
 HELP
     exit 0

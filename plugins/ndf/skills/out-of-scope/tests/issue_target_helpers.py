@@ -1,89 +1,46 @@
-"""起票先の判断を読み取る補助。
+"""起票先の解決（`issue-file.py resolve-target`）を配置ごとに呼ぶ補助。
 
 `conftest.py` ではなく固有名のモジュールへ置く。pytest は収集したテストのあるディレクトリを
 `sys.path` の先頭へ足すため、束を同時に実行すると同名のファイルが互いを覆う。**束ごとに
 違う名前を付ければ、どの束から実行しても同じものが読まれる。**
+
+手順書の Markdown は読まない。解決の本体は部品にあり、テストは部品を直接呼ぶ（#851）。
 """
 
 from __future__ import annotations
 
+import contextlib
+import importlib.util
+import io
+import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 SKILL_DIR = Path(__file__).resolve().parents[1]
-REFERENCE = SKILL_DIR / "references" / "issue-target.md"
+SCRIPTS = SKILL_DIR.parents[1] / "scripts"
+SCRIPT = SCRIPTS / "issue-file.py"
+
+sys.path.insert(0, str(SCRIPTS / "lib"))
+import gh_call  # noqa: E402
 
 REMOTE = "https://github.com/devbasex/ai-plugins.git"
 SLUG = "devbasex/ai-plugins"
 
-RESOLUTION_TABLE_HEADING = "## 起票先のリポジトリを決める"
+
+def _load():
+    spec = importlib.util.spec_from_file_location("ndf_issue_file_for_target", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
-def read(path: Path) -> str:
-    assert path.is_file(), f"ファイルが無い: {path}"
-    return path.read_text(encoding="utf-8")
+ISSUE_FILE = _load()
 
 
-def fenced_blocks(body: str) -> list[str]:
-    """囲みの中身を、本文に現れる順で返す。"""
-    blocks: list[str] = []
-    current: list[str] | None = None
-    for line in body.splitlines():
-        if line.lstrip().startswith("```"):
-            if current is None:
-                current = []
-            else:
-                blocks.append("\n".join(current))
-                current = None
-            continue
-        if current is not None:
-            current.append(line)
-    return blocks
-
-
-def resolution_snippet(body: str) -> str:
-    """手順の解決を書いた囲みを返す。
-
-    読み取れないこと自体を失敗として扱う。囲みを消すだけで、解決の形を見るチェックを無効に
-    できる形にしない。
-    """
-    found = [block for block in fenced_blocks("\n".join(section(body, RESOLUTION_TABLE_HEADING))) if "SKILL_REPO=" in block]
-    assert found, "手順の解決を書いた囲みが見つからない"
-    return found[0]
-
-
-def section(body: str, heading: str) -> list[str]:
-    """見出しから、次の同じ深さ以上の見出しまでの行を返す。
-
-    読み取れないこと自体を失敗として扱う。見出しを消すか節を空にするだけで、この節を
-    見るチェックを無効にできる形にしない。囲みの中の `#` は見出しとして数えない。
-    """
-    depth = len(heading) - len(heading.lstrip("#"))
-    lines = body.splitlines()
-    try:
-        start = next(i for i, line in enumerate(lines) if line.strip() == heading)
-    except StopIteration:
-        raise AssertionError(f"見出しが見つからない: {heading}")
-    found: list[str] = []
-    fenced = False
-    for line in lines[start + 1 :]:
-        stripped = line.strip()
-        if stripped.startswith("```"):
-            fenced = not fenced
-            found.append(line)
-            continue
-        if not fenced and stripped.startswith("#"):
-            level = len(stripped) - len(stripped.lstrip("#"))
-            if level <= depth:
-                break
-        found.append(line)
-    assert any(line.strip() for line in found), f"節の本文が空である: {heading}"
-    return found
-
-
-# 手順 2 が見る位置を、ランタイムごとに作る。**手順書の表が挙げる位置と同じものを作る。**
-# 手順は「1 つに絞れたときだけ採る」ため、どのランタイムでも配置は 1 つにする。
+# 手順 2 が見る位置を、ランタイムごとに作る。**部品が見る位置と同じものを作る。**
+# 部品は「1 つに絞れたときだけ採る」ため、どのランタイムでも配置は 1 つにする。
 RUNTIME_LAYOUTS = {
     "claude": ".claude/plugins/marketplaces/ai-plugins",
     # 取得元を持たない。clone した作業ディレクトリそのものを見る。agy も同じ位置になるため、
@@ -125,25 +82,49 @@ def runtime_layout(root: Path, runtime: str, url: str | None = REMOTE) -> tuple[
     return home, work
 
 
-def run_resolution(body: str, *, home: Path, cwd: Path) -> str:
-    """手順の解決の囲みをそのまま実行し、決まった名前を返す。
+def _answer_target(target: str | None):
+    """`gh repo view` だけに答える。ほかの呼び出しは GitHub へ届く経路なので失敗にする。"""
 
-    **手順書に書いてある本文を動かす。** 写し取った別の実装を試すと、手順書が誤ったまま
-    でもチェックは通る。
+    def runner(args, stdin=None, cwd=None):
+        if args[:2] == ["repo", "view"]:
+            return gh_call.GhResult(0, target + "\n", "") if target else gh_call.GhResult(1, "", "no repo")
+        raise AssertionError(f"想定外の gh の呼び出し: {args}")
 
-    厳しい設定（`set -euo pipefail`）の下で動かす。未定義の変数とパイプの途中の失敗を
-    拾うためで、手順書の囲みは呼び出す側の設定を選べない。
-    """
-    script = f'set -euo pipefail\n{resolution_snippet(body)}\nprintf "%s" "$SKILL_REPO"\n'
-    env = os.environ.copy()
-    env.pop("NDF_SKILL_REPO", None)
-    env.update({"HOME": str(home), "LC_ALL": "C.UTF-8"})
-    done = subprocess.run(
-        ["bash", "-c", script],
-        cwd=str(cwd),
-        env=env,
-        capture_output=True,
-        text=True,
-    )
-    assert done.returncode == 0, f"解決が落ちた: {done.stderr}"
-    return done.stdout.strip()
+    return runner
+
+
+def run_resolution(*, home: Path, cwd: Path, target: str | None = None, env_repo: str | None = None) -> tuple[int, dict]:
+    """`resolve-target` を一時の `HOME` と現在地で呼び、`(終了コード, 結果)` を返す。"""
+    saved_env = {k: os.environ.get(k) for k in ("HOME", "NDF_SKILL_REPO")}
+    saved_cwd, saved_runner = Path.cwd(), gh_call.RUNNER
+    out = io.StringIO()
+    try:
+        os.environ["HOME"] = str(home)
+        os.environ.pop("NDF_SKILL_REPO", None)
+        if env_repo is not None:
+            os.environ["NDF_SKILL_REPO"] = env_repo
+        os.chdir(cwd)
+        gh_call.RUNNER = _answer_target(target)
+        with contextlib.redirect_stdout(out):
+            try:
+                ISSUE_FILE.main(["resolve-target"])
+                code = 0
+            except SystemExit as done:
+                code = done.code
+    finally:
+        gh_call.RUNNER = saved_runner
+        os.chdir(saved_cwd)
+        for k, v in saved_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    return code, json.loads(out.getvalue().strip().splitlines()[-1])
+
+
+def resolved_upstream(*, home: Path, cwd: Path) -> str:
+    """上流リポジトリの名前。決まらなければ空文字（終了コード 20 であることも確かめる）。"""
+    code, obj = run_resolution(home=home, cwd=cwd)
+    upstream = obj["metrics"]["upstream"]
+    assert code == (0 if upstream else 20), obj
+    return upstream or ""

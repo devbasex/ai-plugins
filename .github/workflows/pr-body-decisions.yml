@@ -6,7 +6,8 @@ name: PR body decisions
 # **本文の編集（edited）でも起動する。** 進行側が本文や設計文書を手順を通らずに直したとき、
 # 機械で食い違いを見つけられるのはここだけである。sync で直した結果もここで緑に戻る。
 #
-# ruleset の必須のチェックにはしていない（#545 の決定 8）。必須にするかは利用者が決める。
+# ruleset の必須のチェックにする（#653、2026-10-06 に利用者が決めた）。ジョブ名 pr-body-decisions-check で
+# 必須の一覧と照合する。ruleset へ足すまでは scripts/required-checks-allow.json の追加待ちに置く。
 on:
   pull_request:
     types: [opened, synchronize, edited, reopened]
@@ -17,7 +18,7 @@ permissions:
   pull-requests: read
 
 jobs:
-  check:
+  pr-body-decisions-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

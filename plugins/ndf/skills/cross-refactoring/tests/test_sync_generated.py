@@ -16,7 +16,7 @@ import subprocess
 
 import pytest
 
-from crossref_helpers import make_state_v2, read_state
+from crossref_helpers import make_state_v2, read_state, write_state
 
 
 def _git(*args, cwd):
@@ -92,6 +92,18 @@ def test_sync_commits_generated_changes(vocabulary, gitfacts, tmp_path):
     assert _git("status", "--porcelain", cwd=work).stdout == ""
     subject = _git("log", "-1", "--format=%s", cwd=work).stdout.strip()
     assert subject == vocabulary.SYNC_COMMIT_MESSAGE.splitlines()[0]
+
+
+def test_sync_runs_after_the_end_of_the_budget(gitfacts, tmp_path):
+    """H を過ぎても同期は走る。H で切ると起点への戻しの公開と pending_push の再試行が永久に止まる。"""
+    work = _make_work(tmp_path)
+    state = read_state(_state_with_sync(tmp_path, work, command="printf 'x = 2\\n' > generated/out.py"))
+    state["limits"] = {**(state.get("limits") or {}), "test_timeout": 60, "final_end_at": "2000-01-01T00:00:00+00:00"}
+
+    gitfacts._sync_generated(state)
+
+    assert (work / "generated" / "out.py").read_text(encoding="utf-8") == "x = 2\n"
+    assert _git("status", "--porcelain", cwd=work).stdout == ""
 
 
 def test_sync_without_changes_makes_no_commit(gitfacts, tmp_path):
@@ -243,6 +255,9 @@ def test_merge_fix_reverts_a_commit_for_another_item(patch_lib, refactor, tmp_pa
     work = _make_work(tmp_path)
     head = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
     state_path = _fix_state(tmp_path, work, head)
+    state = read_state(state_path)
+    state["plan"] = {"base_sha": head}
+    write_state(state_path, state)
     env_tmp_dir(state_path)
     pushed = []
     patch_lib("push_head", lambda state: pushed.append(True))
@@ -255,4 +270,5 @@ def test_merge_fix_reverts_a_commit_for_another_item(patch_lib, refactor, tmp_pa
     state = read_state(state_path)
     assert state["items"][0]["commits"]["fix"] == []
     assert state["items"][0]["fix_count"] == 1
-    assert pushed, "取り消しを公開していない"
+    assert _git("rev-parse", "HEAD", cwd=work).stdout.strip() == head, "取り消しは revert を積まずに範囲を外す"
+    assert not pushed, "最終ゲートの前には push しない（#1399）"

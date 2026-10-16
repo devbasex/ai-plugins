@@ -26,6 +26,7 @@ from .common import (
     read_text,
     state_root,
 )
+from .record import running_version_dir
 from .shellrc import (
     UNSAFE,
     _add_record,
@@ -268,20 +269,23 @@ def cmd_status() -> int:
     ver = (read_text(copy_version_path()) or "").strip() or "不明"
     out(f"複製 {copy_path()}: {_same(copy_path(), body)}（複製の版 {ver}）")
     out(f"旧い複製 {old_copy_path()}: {_same(old_copy_path(), body)}")
-    out(session_line())
+    pos = proc.relay_position()
+    out(session_line(pos))
+    if pos == "relay":
+        out(running_line(os.environ["NDF_RELAY_DIR"]))
     warn = None if loader else login_warning()
     if warn:
         out(warn)
     return 0
 
 
-def session_line() -> str:
+def session_line(pos: str | None = None) -> str:
     """今のセッションとラッパーとの位置を 1 行で示す（#1187）。
 
     `status` → シェル → claude と親をたどって最初に当たる claude は、hook のときと同じなので
     `relay_position()` をそのまま使う。親がたどれない環境では「判定できない」とする。
     """
-    pos = proc.relay_position()
+    pos = proc.relay_position() if pos is None else pos
     head = "このセッション: "
     if pos == "relay":
         pid = (read_text(os.path.join(os.environ["NDF_RELAY_DIR"], PID_FILE)) or "").strip() or "不明"
@@ -299,6 +303,23 @@ def session_line() -> str:
     if proc.proc_info(os.getppid()) is None:
         return f"{head}判定できない（親のプロセスをたどれない）"
     return f"{head}ラッパーの直接の子ではない（fork・bg-pty-host・別の入口。#1016）"
+
+
+def running_line(d: str) -> str:
+    """動いているラッパーのバージョンディレクトリと、複製（`relay.current`）が指すものとの違いを 1 行で示す（#1587）。"""
+    head = "動いているラッパー: "
+    has, name = running_version_dir(d)
+    if not has:
+        return f"{head}不明（入れ替えの仕組みを持たない版）。/exit してから claude を打ち直すと、以後は版が見え、更新で入れ替わる"
+    if name is None:
+        return f"{head}プラグインのキャッシュから起動（入れ替えない）"
+    base = config_dir()
+    if not os.path.isdir(os.path.join(base, name)) and os.path.isdir(os.path.join(data_dir(), name)):
+        base = data_dir()  # 10.17.4〜10.17.6 の旧い複製から起動した
+    cur = VersionDir(base).current()
+    if cur == name:
+        return f"{head}{name}（複製が指すものと同じ）"
+    return f"{head}{name}。複製は {cur or '不明'} を指す。次のカットポイントで入れ替わる。すぐ替えるなら /exit してから claude を打ち直す"
 
 
 def startup_once() -> str | None:

@@ -1,7 +1,7 @@
 ---
 name: cross-refactoring
 description: "Let every CLI propose refactorings on a PR once, then one CLI plans, tests, applies, and verifies what fits a time budget. Use when structural improvement should be done across runtimes within a set time（クロスリファクタリング・多AIリファクタリング・時間内のリファクタリング）."
-argument-hint: "[PR番号] --scope PATH... [--budget-minutes N] [--implementer NAME] [--host claude|codex|agy|kiro] [--exclude NAMES] [--include NAMES] [--require-all] [--model RT=MODEL] [--baseline-test CMD] [--round-test CMD] [--ci-check NAME] [--workflow-step] [--no-code-metrics]"
+argument-hint: "[PR番号] --scope PATH... [--budget-minutes N] [--implementer NAME] [--host claude|codex|agy|kiro] [--exclude NAMES] [--include NAMES] [--require-all] [--model RT=MODEL] [--baseline-test CMD] [--round-test CMD] [--test-kind test|lint] [--ci-check NAME] [--workflow-step] [--no-code-metrics]"
 allowed-tools:
   - Bash
   - Read
@@ -28,7 +28,7 @@ allowed-tools:
 - [docs/02-plan-and-implement.md](docs/02-plan-and-implement.md) — リファクタリング計画・テスト追加・実装
 - [docs/03-review-viewpoints.md](docs/03-review-viewpoints.md) — 最終ゲートの `cross-review` へ渡す観点
 - [docs/04-verify-and-report.md](docs/04-verify-and-report.md) — 検証/修正・危険フラグ・最終ゲート・配分テーブル・報告
-- [scripts/refactor.py](scripts/refactor.py) — 状態管理（uv 自己完結、標準ライブラリのみ）
+- [scripts/refactor.py](scripts/refactor.py) — 状態管理。外部パッケージ（`md` / `mdtable` のグループ）を import の前に `deps.require` で用意する（import できなければ uv の環境で起動し直す）
 - [scripts/prepare-worktrees.sh](scripts/prepare-worktrees.sh) — 作業ディレクトリ準備と Skill 配置
 - [scripts/launch-cli.sh](scripts/launch-cli.sh) — 手順ごとのプロンプト組み立てと CLI 起動
 - 監視と CLI 起動の実体は `../../scripts/lib/`（プラグインルート直下の収束ループの共通ライブラリ）
@@ -41,11 +41,19 @@ allowed-tools:
 | 手順 | 提案・リファクタリング計画・テスト追加・実装・検証/修正の 5 つ。**それぞれ 1 回だけ**行う（検証と修正の繰り返しを除く） |
 | 実装担当 | リファクタリング計画以降の 4 つの手順を通して担う 1 ランタイム |
 | 改善候補 | 提案を鍵（`path` + `symbol` + `smell`）で集約したもの。リファクタリング計画へ渡す |
-| 改善項目 | リファクタリング計画が採った改善候補。`I-001` の形の ID を持ち、**1 改善項目 = 1 コミット**（テストを足す項目は 2 コミット） |
+| 改善項目 | リファクタリング計画が採った改善候補。`I-001` の形の ID を持ち、`Item-Id` の同じコミットを何件でも持てる（改名と中身の変更を分けるなど。テストを足すコミットは 1 件） |
+| 新しいファイル | リファクタリング計画の起点（`plan.base_sha`）のツリーに無かったパス。分割・抽出の行き先で、どこに置いても範囲の中として扱う |
+| 呼び手の書き換え | 範囲の外の既存のファイルで、項目が変えた名前の読み込み・呼び出しだけを書き換える変更。機械がハンクごとに判定し、通したファイルを最終ゲートのレビューへ引き継ぐ |
 | グレード | 改善候補ごとに付ける適用の価値（`tier`: high / medium / low）。Jev か実装担当が付け、改善項目の順位の最初の鍵にする |
 | 配分テーブル | 種類（`test` / `structure/<手法>` / `verify` / `fix`）ごとの 1 件あたりの所要。履歴の直近 10 回からリファクタリング計画のたびに集計する |
-| 範囲テスト | 項目が触った箇所に限って走らせるテスト。リファクタリング計画の `test_targets` からオーケストレーターが組み立てる |
-| 危険フラグ | 範囲テストでは覆えない変更（D1〜D5）。立ったら全体テストを 1 度だけ走らせる |
+| テストの戦略 | 範囲テストの走らせ方・全体テストの置き場（手元か CI か）・落ちたテストの見分け方の組。`local-full` / `local-scoped-ci-whole` / `round-only`。宣言（`.ndf/project.json` の `test.strategy`）か、同じ関数が所要から導く |
+| 範囲テスト | 項目が触った箇所に限って走らせるテスト。宣言の `scope_command`（`{paths}` のテンプレート）に、テストの suite はリファクタリング計画の `test_targets` を、静的解析の suite は項目のコミットが変えたファイルを入れてオーケストレーターが組み立て、シェルで走らせる |
+| suite の種別 | 宣言の suite がテスト（`test`）か静的解析（`lint`。整形の検査を含む）か。書かなければテスト。テスト整備ラウンドと `--scope` のテストの置き場所の検査はテストの suite があるときだけ行い、静的解析の全体テストはどの戦略でも着手前と最終ゲートで手元で走らせる |
+| 起動の失敗 | テストのコマンドを起動できない（終了コード 126 / 127）こと。落ちたとは扱わず、その時点で項目を取り消さずに中断（終了コード 4）し、報告にコマンドと理由を書く |
+| 危険フラグ | 範囲テストでは覆えない変更（D1〜D5）。立ったら全体テストを 1 度だけ走らせる（全体テストを CI に任せる戦略では最終ゲートへ寄せる）。全体テストを走らせる理由であって、失敗の原因を指さない |
+| 原因の項目 | 全体テストで変更起因として落ちたテストを、その変更で落とした改善項目。落ちたテストの出力に現れるパス（`path`）か、項目を外した走らせ直し（`isolate`）で決め、決まらなければ `undetermined`。修正と取り消しはこの項目へ向く |
+| 打ち切りの後の取り消し | 工程の 1 つとして起動したとき、最終ゲート修正を打ち切った後に原因の項目を 1 件ずつ取り消す（項目ごとの取り消し）か、リファクタリング計画の起点の木へ戻すコミットを積む（起点への戻し）処理 |
+| フレーキー / 既存失敗 / 変更起因 | 全体テスト（着手前・危険フラグ・最終ゲート）で落ちたテストの 3 つの分類。ID は JUnit XML から読み、落ちたファイルだけを HEAD と着手前の HEAD で走らせ直して分ける |
 | リファクタリング計画 | 採る改善項目と、見送った提案とその理由を決める手順と、その出力（PR のコメントか `--plan-file`） |
 | バッファ | リファクタリング計画の見積りで、想定最大時間から経過を引いた後に差し引いておく時間（危険フラグと最終ゲートの全体テスト・修正 1 回・最終ゲート修正 1 回） |
 
@@ -69,9 +77,10 @@ allowed-tools:
 | `--include NAMES` | 参加者に足す者（例: `--include agy`） | なし |
 | `--require-all` | 確認を通らない者が 1 者でもいれば中断する（終了コード 4） | 外して続ける |
 | `--model RT=MODEL` | ランタイムごとのモデル。繰り返し指定できる | CLI の既定 |
-| `--baseline-test CMD` | 着手前・危険フラグ・最終ゲートで実行する全体テスト | 必須 |
-| `--round-test CMD` | ラウンドテスト。項目ごとの範囲テストを組み立てる元で、組み立てられない項目はそのまま走らせる。**`--baseline-test` の実行器が `pytest` / `python -m pytest` / `jest` / `vitest` でなければ必須** | `--baseline-test` から組み立てる |
-| `--ci-check NAME` | 最終ゲートで手元のテストの代わりに見るチェックの名前（排他） | なし |
+| `--baseline-test CMD` | 全体テスト。`{paths}` を含めば範囲テストのテンプレート（全体は宣言の同じ種別の `command`、無ければテストは `{paths}` を `.` にしたもの、静的解析は `{paths}` を `--scope` で埋めたもの）、含まなければ全体テストとしてそのまま走らせる（戦略は `round-only`）。文字列の中身は解析しない | 宣言の `test` を読む |
+| `--round-test CMD` | ラウンドテスト。`{paths}` を含めば範囲テストのテンプレート、含まなければ項目ごとにそのまま走らせる（戦略は `round-only`）。宣言に `test` が無いときの逃げ道 | なし |
+| `--test-kind test\|lint` | `--baseline-test` と `--round-test` のテンプレートの種別（`lint` = 静的解析）。テンプレートの語から種別を推測しない | `test` |
+| `--ci-check NAME` | 最終ゲートで待つチェックの名前。宣言の `test.ci.check` より先に効き、`limits.ci_wait_timeout` まで待つ | 宣言の `test.ci.check` |
 | `--workflow-step` | `development-workflow` の 1 工程として起動したことを伝える。`cross-review` を省く | 単独起動 |
 | `--severity-threshold LEVEL` | この重要度未満は `threshold` で見送る | `minor` |
 | `--sync-command CMD` | 生成物を同期するコマンド。push の直前にオーケストレーターが実行する | なし |
@@ -80,17 +89,30 @@ allowed-tools:
 
 **値を使わない引数**: `--max-test-rounds` / `--max-outer-rounds` / `--max-items-per-round` /
 `--max-fix-rounds` / `--test-timeout` は、渡すと使わないことを知らせる 1 行を出して**値を使わずに続ける**。
-回数と所要は `--budget-minutes` が決める（修正は締め切りまで試み、テスト 1 回の上限は想定最大時間から導く）。
+回数と所要は `--budget-minutes` が決める（修正は締め切りまで試み（コミットしなかった項目はその回で取り消す）、テスト 1 回の上限は想定最大時間から導く）。
 
 ```text
-/ndf:cross-refactoring 130 --scope src/services tests/services --round-test "pytest tests/services -q" --baseline-test "pytest -q"
-/ndf:cross-refactoring 130 --scope src tests --baseline-test "pytest -q" --budget-minutes 30
-/ndf:cross-refactoring 130 --scope src tests --baseline-test "pytest -q" --implementer codex --sync-command "make generate"
-/ndf:cross-refactoring 130 --scope src tests --baseline-test "pytest -q" --include agy --exclude kiro
+/ndf:cross-refactoring 130 --scope src/services tests/services
+/ndf:cross-refactoring 130 --scope src tests --budget-minutes 30
+/ndf:cross-refactoring 130 --scope src tests --implementer codex --sync-command "make generate"
+/ndf:cross-refactoring 130 --scope src tests --include agy --exclude kiro
+/ndf:cross-refactoring 130 --scope src tests --round-test "make test-unit"   # 宣言に test が無いリポジトリ
 ```
 
-**モデルを比べたいなら `--model <ランタイム>=<name>` を参加者の全員に指定する。**
-実際に動いたモデルを取得できるのは claude だけで、残る者は指定値で代用する。
+**テストの走らせ方は宣言（`.ndf/project.json` の `test`）の戦略で決まる**（[docs/01](docs/01-state-and-propose.md) の「テストの戦略」）。
+`init` は `STRATEGY` / `STRATEGY_SOURCE` を返し、コマンドの文字列を解析しない。
+
+**継続的統合のジョブのうち宣言に無いものは、`init` が知らせる（止めない）**。宣言の `ci.provider` が `github-actions` のとき、
+作業ディレクトリの `.github/workflows/` のジョブを、suite の `ci_jobs` と `test.ci_exempt` に照らす。どちらにも無いジョブは
+手元の検証で走らないため、識別子（`<ワークフローのパス>#<job id>`）を挙げて状態ファイルの `ci_coverage` にも残す。
+手元で同じ検査を走らせる suite の `ci_jobs` に書くか、走らせない理由を添えて `test.ci_exempt`（`{"job", "reason"}`）に書く。
+識別子から `#<job id>` を省くと、そのファイルのジョブすべてを指す。照合は文字列の一致だけで、glob は使わない。
+
+**実際に動いたモデルは、`--model` を指定しなくても claude と codex なら記録される**。
+claude は出力の `modelUsage`、codex はセッションの記録（`$CODEX_HOME/sessions`）から取り、状態ファイルの
+`implementer_model.observed` に入れる。取れなければ取れなかった理由を `implementer_model.unobserved` に残す。
+agy と kiro は取れないため、モデルを比べたいなら `--model agy=<name>` / `--model kiro=<name>` を指定する
+（指定値で代用して集計に入れる）。指定も実測値も無い実行は、集計から分離される。
 
 ## 担当の決め方
 
@@ -100,27 +122,53 @@ allowed-tools:
 
 - **ホストも別の CLI プロセスとして起動する。** ホストの会話の文脈を持ち込まずに、独立した提案を 1 つ得られる
 - **agy はホストのときだけ入る。** 起動の失敗と所要が最も多いためである。足すときは `--include agy`、外すときは `--exclude kiro` のように名指しする
+- **リポジトリの `.ndf/runtimes.json` の宣言の外のランタイムは参加させない**。参加者プールを宣言の `allowed` で絞り、宣言の外を `--include` / `--implementer` で渡すと作業ディレクトリを用意する前に止まる
 - **起動の前に各 CLI のログイン状態を確かめ**（コマンドは「前提」の節）、ログインしていない者を外して続ける。全員が揃わなければ止めたいときは `--require-all`
 
 **リファクタリング計画・テスト追加・実装・修正・最終ゲート修正は、実装担当 1 者が通す。** 実装担当は
 `--implementer` → ホスト（参加者にいれば）→ 参加者の先頭の順で決まり、多くはホストになる。
 
-- **再開で参加者を作り直し、実装担当が外れたら**、リファクタリング計画の前なら決め方を当て直し、リファクタリング計画の後なら止める
+- **再開で参加者を作り直し、実装担当が外れたら**、リファクタリング計画の前なら決め方を当て直し、リファクタリング計画の後なら止める。
+  結果なしの記録で外した担当は、作り直した参加者にいても実装担当に戻さない
+- **実装担当が結果を残さなかったら**（利用上限・起動し直した後の結果なし）、同じ実行の中で振り替える。実装担当が替わるのは
+  このときだけで、リファクタリング計画の後でも止めない。規則と工程ごとの扱いは
+  [docs/02-plan-and-implement.md](docs/02-plan-and-implement.md) の「結果を残さなかった担当の振り替え」にある
 
 ## 前提
 
 - `gh` CLI が認証済みで、`jq` と `uv`（または Python 3.10 以上）が使える
-- 参加者の CLI がログイン済みである。`init` が認証状態を確認し、通らない者を外して続ける
-  （確認コマンドは claude: `claude auth status` / codex: `codex login status` / agy: `agy models` /
-  kiro: `kiro-cli whoami`。誤検知するときは `NDF_SKIP_AUTH_CHECK=1`）
-- 対象の Pull Request が Draft で開いている（未作成なら `/ndf:pr` で先に作る）
-- プロダクションコードの差分がある。起動の前に Skill のディレクトリで `assess` を打ち、飛ばしてよいかを見る。**終了コード 3 なら
-  起動しない**（2 は判定できなかったことを示し、飛ばしてよいとは読まない）
+- 参加者の CLI がログイン済みで、モデルを引ける。`init` が認証確認（claude: `claude auth status` /
+  codex: `codex login status` / agy: `agy models` / kiro: `kiro-cli whoami`）と、担当の起動と同じ
+  モデルの指定での 1 回の呼び出しで確かめ、通らない者を理由を出して外して続ける。`--model` で明示して
+  いないモデルを引けないときは既定のモデルで担当に入れる（誤検知するときは `NDF_SKIP_AUTH_CHECK=1`）
+- 対象の Pull Request が開いている（未作成なら `/ndf:pr` で先に作る。Draft かどうかは問わない）。`init` が作業ディレクトリを
+  用意する前に Pull Request の状態を確かめ、閉じている・マージ済み・状態を判定できないときは、番号と満たさなかった条件と
+  直し方を出して終了コード 4 で止まる。新しい実行も再開も同じ判定を受ける
+- 対象のリポジトリ（またはその worktree）の中で会話を始めている。単独起動のコマンドは**すべてそこで打ち**、Skill の
+  ディレクトリへ移らない。対象のリポジトリは打った場所が属する git の作業ツリーの根で決まり、git の作業ツリーでない
+  場所では assess も drive も「対象のリポジトリを決められない」と出して止まる
+- プロダクションコードの差分がある。起動の前に `assess` を打ち、飛ばしてよいかを見る（読み方は下の終了コードの表）
+
+シェルの変数は呼び出しをまたいで残らないため、この節と「実行」の各ブロックを 1 回の呼び出しとし、先頭で毎回 `$R` を
+決め直す。`<入口を探すコマンド>` の行は [scripts-lookup.md](../development-workflow/references/scripts-lookup.md) の
+「入口を探すコマンド」の for 文である（Codex / Kiro / agy では `${CLAUDE_PLUGIN_ROOT}` が置き換わらないため、この for 文で探す）。
+スクリプトの位置は解決のエントリポイント（`resolve.sh`）が導入先から求める。
 
 ```bash
+<入口を探すコマンド>   # scripts-lookup.md の「入口を探すコマンド」の for 文。$R を決める
+[ -n "$R" ] || exit 2   # 入口を探せない = 判定できない（3 の「飛ばしてよい」と取り違えない）
+RF=$(bash "$R/scripts/resolve.sh" scripts cross-refactoring) || exit 2
 BASE="<開発の起点>"   # worktree-setup.sh check の「開発の起点:」の行の名前
-python3 scripts/refactor.py assess --base "origin/$BASE"; echo "exit=$?"
+python3 "$RF/refactor.py" assess --base "origin/$BASE"; echo "exit=$?"
 ```
+
+| 終了コード | 意味 | cross-refactoring を |
+| --- | --- | --- |
+| 0 | プロダクションコードの差分がある | 起動する |
+| 3 | 差分が無い（飛ばしてよい） | 起動しない |
+| 2 | 対象のリポジトリか `<base>` を解けない（判定できない） | 飛ばしてよいとは読まない。対象のリポジトリの中で、起点を直して打ち直す |
+| 69 | 依存が欠けた（`deps.require` が外部パッケージを用意できずに止めた。判定していない）。標準エラーに `❌ [ndf deps]` の行 | 起動するかを決めない（起動しないとも飛ばしてよいとも読まない）。理由を見て依存を入れ、打ち直す |
+| 1 | `uv run` 自身が失敗した（ネットワークが無い・lock を解決できない。判定していない）。標準エラーは uv の `error:` の行 | 69 と同じに扱う |
 
 - Jev を使うには、環境変数 `AI_GATEWAY_API_KEY` があり、対象が公開リポジトリであること。
   `NDF_JEV=0` で使わない。使えなければ実装担当が同じ判断をする（止まらない）
@@ -137,11 +185,11 @@ flowchart TD
     Plan --> Sel["merge-plan: 順位 → 見積り → 時間に収まる件数 → 締め切り"]
     Sel --> T{"テストを足す項目 ?"}
     T -->|ある| AT["テスト追加（実装担当）"]:::phase --> Impl
-    T -->|無い| Impl["実装（実装担当）<br/>順位の順に 1 項目 = 1 コミット"]:::phase
+    T -->|無い| Impl["実装（実装担当）<br/>順位の順に項目ごとにコミット"]:::phase
     Impl --> V{"範囲テストが通る ?"}
-    V -->|いいえ| Fix["修正（実装担当）"] --> Cap{"上限・残り時間 ?"}
-    Cap -->|未達| V
-    Cap -->|到達| Drop["その項目だけ取り消す<br/>全体テストなら危険フラグの項目を新しい順に絞る"]:::stop --> V
+    V -->|いいえ| Fix["修正（実装担当）"] --> Cap{"コミットした・残り時間 ?"}
+    Cap -->|コミットし 時間が残る| V
+    Cap -->|コミットしない・時間切れ| Drop["その項目を取り消す（衝突した項目だけを外す）<br/>残った項目は範囲テストで確かめ直す"]:::stop --> V
     V -->|はい| D{"危険フラグ ?"}
     D -->|立った| W{"全体テストを 1 度"}
     W -->|通る・フレーキー・既存失敗| Gate
@@ -149,7 +197,7 @@ flowchart TD
     W -->|取り出せない| DropAll["危険フラグの項目をまとめて取り消す"]:::stop --> Gate
     D -->|無い| Gate{"最終ゲート"}
     Gate -->|単独| CR["全体テスト → /ndf:cross-review"]
-    Gate -->|工程の 1 つ| Whole["全体テスト（使い回しあり）<br/>--ci-check なら継続的統合"]
+    Gate -->|工程の 1 つ| Whole["全体テスト（使い回しあり）<br/>CI に任せる戦略・--ci-check なら継続的統合を待つ"]
     CR --> Fin["finalize: 通った実行だけ配分の履歴へ 1 行"]:::ok
     Whole --> Fin
 
@@ -164,21 +212,38 @@ flowchart TD
 
 ## 実行
 
-メインが決めるのは `--scope` / `--baseline-test` / `--round-test` / `--sync-command` である。決めたら Skill の
-ディレクトリで次の 1 行を打ち、最後の行の結果 JSON の `status` と終了コードを見る。
+メインが決めるのは `--scope` / `--sync-command`（宣言に `test` が無ければ `--round-test`）である。決めたら「前提」と
+同じ対象のリポジトリの中で次のブロックを打ち、最後の行の結果 JSON の `status` と終了コードを見る。
+
+待ちはコマンドの中で行う。Claude Code では `run_in_background` で起動し、完了通知を 1 回受ける。
 
 ```bash
-python3 scripts/drive.py <PR> --scope <範囲...> --baseline-test "<全体テスト>" [「引数」の表のうち値のあるもの]
+<入口を探すコマンド>   # scripts-lookup.md の「入口を探すコマンド」の for 文。$R を決める
+[ -n "$R" ] || exit 3
+RF=$(bash "$R/scripts/resolve.sh" scripts cross-refactoring) || exit 3
+python3 "$RF/drive.py" <PR> --scope <範囲...> [「引数」の表のうち値のあるもの]
 ```
 
-待ちはコマンドの中で行う。Claude Code では `run_in_background` で起動し、完了通知を 1 回受ける。Codex / Kiro /
-agy では共通ライブラリの `scripts/lib/bg-wait.sh` で背景に起動し、区切った待ちを 124 が返るあいだ**別の呼び出しとして**
-打ち直す。終わると駆動の出力の全体を出し、駆動の終了コードで終わる。
+Codex / Kiro / agy では共通ライブラリの `bg-wait.sh` でバックグラウンドに起動し、区切った待ちを 124 が返るあいだ**別の呼び出しとして**
+打ち直す。終わると駆動の出力の全体を出し、駆動の終了コードで終わる。`RC` は run と wait で同じ文字列にする。
 
 ```bash
+# 起動（1 回の呼び出し）
+<入口を探すコマンド>   # scripts-lookup.md の「入口を探すコマンド」の for 文。$R を決める
+[ -n "$R" ] || exit 3
+RF=$(bash "$R/scripts/resolve.sh" scripts cross-refactoring) || exit 3
+LIB=$(bash "$R/scripts/resolve.sh" scripts)/lib || exit 3
 RC="${TMPDIR:-/tmp}/cross-refactoring-drive-pr<PR>.rc"
-bash ../../scripts/lib/bg-wait.sh run "$RC" -- python3 scripts/drive.py <PR> --scope <範囲...> --baseline-test "<全体テスト>" [上と同じ引数]
-bash ../../scripts/lib/bg-wait.sh wait "$RC"   # 1 回 540 秒以内。124 = まだ終わっていない
+bash "$LIB/bg-wait.sh" run "$RC" -- python3 "$RF/drive.py" <PR> --scope <範囲...> [上と同じ引数]
+```
+
+```bash
+# 待ち（124 が返るあいだ、別の呼び出しとして打ち直す）
+<入口を探すコマンド>   # scripts-lookup.md の「入口を探すコマンド」の for 文。$R を決める
+[ -n "$R" ] || exit 3
+LIB=$(bash "$R/scripts/resolve.sh" scripts)/lib || exit 3
+RC="${TMPDIR:-/tmp}/cross-refactoring-drive-pr<PR>.rc"
+bash "$LIB/bg-wait.sh" wait "$RC"   # 1 回 540 秒以内。124 = まだ終わっていない
 ```
 
 待ち方の規約は [waiting.md](../development-workflow/references/waiting.md)、待ちから戻った後に同じ応答で次の手順へ
@@ -189,16 +254,44 @@ bash ../../scripts/lib/bg-wait.sh wait "$RC"   # 1 回 540 秒以内。124 = ま
 | 終了コード（`items[0].pause`） | 止まった地点 | すること |
 | --- | --- | --- |
 | 0 | finalize まで終わった | `items[0].report`（`refactor.py report` の出力）と `metrics` を「完了報告」へ写す |
-| 23（`cross-review`） | 単独起動の最終ゲート | `prompt_file` を読み、`items[0].command`（cross-review の駆動）を回して `result_file` へ最終ステータスを書く。同じコマンドを打ち直し、続けて Draft を解除する |
-| 1 | 中断（`metrics.exit` に元の終了コード。4 = 予算の指定の誤り・`--round-test` が要る・旧い状態ファイル・取り消しの失敗・範囲を確定できない など） | `summary` を報告して止まる。**握り潰さない**（検証を通っていない変更が残る） |
+| 23（`cross-review`） | 単独起動の最終ゲート | `prompt_file` を読み、`items[0].cwd`（対象のリポジトリの根）で `items[0].command`（cross-review の駆動）を回す。最終ステータスは cross-review の駆動が `result_file` へ書き、自分では書かない。同じコマンドを打ち直し、結果 JSON の `metrics.review_status` が `approved` のときだけ Draft を解除する。それ以外は Draft のまま最終ステータスを報告して止まる |
+| 1 | 中断（`metrics.exit` に元の終了コード。4 = 対象の Pull Request が閉じている・マージ済み・状態を判定できない（作業ディレクトリを作らず、担当の CLI を起動しない）・予算の指定の誤り・着手前のテストが長く手順の枠が想定最大時間に収まらない（要る `--budget-minutes` の下限を出す。下限以上で `init` を打ち直すと着手前のテストを走らせずに続く）・着手前のテストの打ち切り・`--round-test` が要る・旧い状態ファイル・取り消しの失敗（項目に属さないコミットの積み直しか公開済みの revert が衝突した）・打ち切りの後の取り消しで起点へ戻した後でも最終ゲートが落ちた・push の直前に残すコミットでないもの（見放した担当の残留コミットなど）がある・範囲を確定できない など。最終ゲートを経ずに終わった実行もここで、`metrics.adopted` は 0・`metrics.unconfirmed` に残った項目の数） | `summary` を報告して止まる。**握り潰さない**（検証を通っていない変更が残る） |
 
-再開は同じコマンドを打ち直すだけである（`init` が終わった手順を返し、最終ゲートの後の進みは
-`$TMP_DIR/drive-rf<ID>.json`）。`metrics` は状態ファイルから数えた件数（`items` / `adopted` / `reverted` /
-`deferred` / `fix_rounds` / `final_gate` / `review_status`）である。
+再開は同じコマンドを打ち直すだけである。進みは耐久の記録（既定の置き場は `~/.local/state/ndf/dbos/refactor-<鍵>.sqlite` ）が持ち、
+記録のある手順は流し直さない。`metrics` は状態ファイルから数えた件数（`items` / `adopted` / `reverted` /
+`deferred`（見送った改善項目の数） / `fix_rounds` / `final_gate` / `reassigned`（結果を残さなかった担当を振り替えた回数。0 でも出す） / `review_status`）と、最終ゲートを経ていない実行の `unconfirmed`、手元の HEAD が
+公開した地点より進んでいるかの `unpublished`（真偽。判定できなければ `null`）である。
+
+### リファクタリング計画のコメントを書き直す時点
+
+駆動は done・中断・最終ゲートの止まり（23）の各出口で、結果 JSON を組む前に `refactor.py plan-comment <PR>` を 1 度だけ
+打ち、Pull Request のリファクタリング計画のコメントを書き直す。push が落ちた実行でもコメントができ、公開の行に落ちた理由と
+未公開の改善項目があることが載る。コメントの件数（採用・未確認・取り消し・見送り）は結果 JSON の `metrics` と同じ集計から出る。
+投稿に失敗しても駆動の結果と終了コードは変わらない。リファクタリング計画ができる前に止まった実行と、置き場所が
+`--plan-file` か「記録しない」の実行ではコメントを作らない。
+
+駆動が終わった後に項目のコミットを `git revert` で取り消して push したとき（プランの外の取り消し）は、次の 1 行を打つ。
+origin の head ブランチの `This reverts commit <SHA>` を読み、実装コミットが取り消されたままの項目を「取り消し」に、
+取り消しが取り消された項目を元の状態へ戻してから書き直す。状態ファイルは環境変数・現在地に無ければ既定の worktree の置き場から探す。
+「前提」と同じく対象のリポジトリの中で打つ（既定の置き場は対象のリポジトリの origin から決まる）。
+
+```bash
+<入口を探すコマンド>   # scripts-lookup.md の「入口を探すコマンド」の for 文。$R を決める
+[ -n "$R" ] || exit 3
+RF=$(bash "$R/scripts/resolve.sh" scripts cross-refactoring) || exit 3
+python3 "$RF/refactor.py" plan-comment <PR> --scan-reverts
+```
+
+| 終了コード | 意味 |
+| --- | --- |
+| 0 | 書き直した・書く対象が無い（`PLAN_COMMENT=skipped`） |
+| 1 | 投稿・編集に失敗した（`PLAN_COMMENT=failed`） |
+| 4 | 状態ファイルが無い・origin を取り込めない（コメントも状態も変えない） |
 
 最終ゲートの判定の相手は起動のされ方で変わる（[docs/04-verify-and-report.md](docs/04-verify-and-report.md)）。
-`--workflow-step` なら全体テスト（`--ci-check` なら継続的統合）で判定して finalize まで進み、単独起動なら
-cross-review の最終ステータスを受けてから finalize を呼ぶ。
+`--workflow-step` なら全体テスト（CI に任せる戦略か `--ci-check` なら継続的統合）で判定して finalize まで進み、単独起動なら
+cross-review の最終ステータスを受けてから finalize を呼ぶ。最終ゲート修正を打ち切ったとき、`--workflow-step` なら打ち切りの後の
+取り消しで全体テストが通る状態へ戻して確かめ直し、単独起動なら取り消さずに失敗として報告する。
 
 ## アンチパターン
 
@@ -207,7 +300,7 @@ cross-review の最終ステータスを受けてから finalize を呼ぶ。
 | ホストのサブエージェントで実装する | ホストの作業文脈に差分が載り、提案した者と実装する者の独立性が崩れる |
 | `launch-cli.sh` に「ホストなら起動しない」分岐を入れる | ホストは実装担当として起動しうる。分岐はランタイム名だけで行う |
 | `--scope` を省く / テストの置き場所を入れない | 提案が発散する。足したテストが範囲外になる。**`init` が止める** |
-| 実装担当に生成物を同期させる・push させる | 範囲外の変更が生まれる。検証を通る前に公開される |
+| 実装担当に生成物を同期させる・push させる | 生成物の差分が項目に混ざる。検証を通る前に公開される |
 | 監視の上限を表の固定値のまま使う・LLM の申告で締め切りを守らせる | 予算の外まで走る。**上限はその手順の終わり + 余裕で、スクリプトが時計で止める。** 止めたときの半端な変更はマージ処理が捨て、コミット済みの項目は締め切りで判定する |
 | リファクタリング計画の後に判断のために LLM を呼ぶ（Jev・判定の CLI） | リファクタリング計画で見積もった時間の外で所要が伸び、結果が再現しない。判断はリファクタリング計画で済ませ、後はスクリプトの規則で決める |
 | 検証の中で全体テストを 2 回以上走らせる | 走らせるたびに全体テストの所要が加わり、リファクタリング計画の見積りから外れる。走らせ直すのは落ちたテストだけで、取り消した後の HEAD は最終ゲートが確かめる |
@@ -223,7 +316,9 @@ cross-review の最終ステータスを受けてから finalize を呼ぶ。
 
 - 手順ごとの所要と、想定最大時間との差（`cross-review` を除く）
 - 改善項目の表（**`<ファイル>#<シンボル>`**・兆候・手法・グレード・見積り・状態・危険フラグ・修正の回数）
-- 採用・取り消し・見送りの件数と、**見送りの理由別の件数**。内訳は**リファクタリング計画の生の URL**
+- 採用・未確認・取り消し・見送りの件数（リファクタリング計画のコメントと結果 JSON の `metrics` と同じ集計。「見送り」は見送った改善項目の数）と、
+  別の行に**見送った提案の総数と理由別の件数**（計画に入らなかった提案を含む。理由別の `not_done` と `test_failed` の和が見送った改善項目の数）。
+  内訳は**リファクタリング計画の生の URL**
 - 着手前の全体テストの結果（通過か失敗・秒・HEAD）と、検証の中で全体テストを走らせたか、走らせた理由（危険フラグ）、落ちたときの見分け（フレーキー・既存失敗・変更起因）とその結果
 - 判断に Jev を使ったか（使わなかった理由・呼び出しの失敗の数）
 - 最終ゲートの結果（`cross-review` の収束、または全体テスト／継続的統合の合否）

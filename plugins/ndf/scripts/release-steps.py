@@ -19,20 +19,44 @@
 `git status --porcelain -uall` に出たパスの内容の要約（`git hash-object`）を比べて決める。
 
 配布の決まった手順（#862。試作は #827 の phase-steps.py）も同じスクリプトに置く。結果は
-`lib/step_result.py` の形の 1 行の JSON で、終了コードは 0 = ok / 1 = 失敗（stopped）/
-2 = 読めない / 3 = 前提が無い / 10 = 本番への配布の承認が要る（approval-facts）。
+`lib/step_result.py` の形の 1 行の JSON で、終了コードは 0 = ok / 1 = 失敗（stopped）/ 2 = 読めない / 3 = 前提が無い /
+10 = 本番への配布の承認が要る（approval-facts）/ 75 = 待つ PR の CI の基盤待ち（中身の失敗ではない）。
 
-    python3 release-steps.py bump           --plugin <名前> --to <版> [--base develop] [--root <dir>]
-    python3 release-steps.py changed-plugins [--since <タグ>] [--plugin ndf] [--root <dir>]  # 差分のある他のプラグイン
-    python3 release-steps.py changelog      --version <版> --prs <PR番号>... [--plugin ndf] [--root <dir>]
-    python3 release-steps.py release        --version <版> --channel dev|prod [--plugins ndf,...] [--root <dir>]
-    python3 release-steps.py approval-facts --version <版> --prs <PR番号>... [--prev-tag <タグ>] [--root <dir>]
+    python3 release-steps.py bump           --plugin <名前> --to <版> [--base <ベースブランチ>] [--root <dir>]
+    python3 release-steps.py changed-plugins [--since <タグ>] [--plugin <名前>] [--root <dir>]  # 差分のある他のプラグイン
+                                            [--prs <PR番号>...] [--approval <承認資料> [--set <名前>=<上げ幅>]...]
+                                            [--decided <承認資料>]
+    python3 release-steps.py changelog      --version <版> --prs <PR番号>... [--plugin <名前>] [--root <dir>]
+    python3 release-steps.py release        --version <版> --channel dev|prod [--plugins <名前>,...] [--root <dir>]
+                                            [--approved-sha <SHA> | --approval <承認資料>]   # prod はどちらかが要る
+    python3 release-steps.py record         --version <版> --prs <PR番号>... [--plugin <名前>] [--root <dir>]   # prod の後
+    python3 release-steps.py record         --promote --head <ベースブランチ> --base <本番チャネル> --prs <PR番号>... [--root <dir>]
+    python3 release-steps.py approve        --approval <承認資料> --approved-sha <SHA> --by user|mvv [--root <dir>]
+    python3 release-steps.py approval-facts --version <版> --prs <PR番号>... [--prev-tag <タグ>] [--plugin <名前>] [--root <dir>]
     python3 release-steps.py notes          --version <版> --prs <PR番号>... [--approval <提示物>]
-                                            [--verified claude,codex,kiro] [--ref develop] [--plugin ndf] [--root <dir>]
+                                            [--verified claude,codex,kiro] [--ref <ブランチ>] [--plugin <名前>] [--root <dir>]
 
-notes は PR 本文の `## 利用者向けの変化` の節（無い・「無し」の PR は題名）から、CHANGELOG.md の版の節と
-plugin の README の `## v<版> へ更新するとき` の節を組み直す。`--approval` を渡すと、代わりに本番承認の提示物の
+release --channel prod は承認したコミットを受け取り、配布の PR をマージした後の `origin/<ベースブランチ>` の先端と比べ、
+承認の外の変更があれば本番チャネルの PR もタグも作らずに承認ゲート（10）で止まる（release_lib/approval.py。#815）。
+
+record は release --channel prod の後に、本番のリリースの PR（release/v<版> → ベースブランチ）へリリース記録
+（`## 配布の記録`。形は lib/dist_record.py）をコメントで 1 件書く。タグと GitHub Release が無ければ書かずに 3 で止まり、
+同じ記録が既にあれば書かずに ok を返す。投稿の失敗は 1、PR を読めなければ 2。metrics.release_pr_url を
+プランの `pr_from` が報告の Pull Request へ移す（#1273）。
+`record --promote` は昇格の経路で、最後にマージした昇格の Pull Request（--head → --base）へ同じ形の記録を書く。
+`版:` はマージのコミット（`<本番チャネル> <短い SHA>`）である（#837）。
+
+ブランチ（ベースブランチ・本番チャネル）は `.ndf/worktree.json` の base_branch・production_branch（無ければ既定ブランチ）、
+プラグイン（タグ `<名前>--v<版>`・題 `Release: <名前> v<版>`）は引数 → `.ndf/supervise.json` の release.plugin から読む（#1336）。
+CHANGELOG.md の置き場と見出し・`plugins/<名前>/` の配置・版の形は、形 package-plugin の約束である（form-package-plugin.md）。
+
+notes は PR 本文の `## 利用者向けの変化` の節（無い・「無し」の PR は題名）から、CHANGELOG.md の版の節を
+組み直す。bump・changelog・notes は plugin の README に触れない（#1867。更新情報は CHANGELOG.md の版の節が正本）。
+`--approval` を渡すと、代わりに本番承認の提示物の
 「配る中身」「検証への配布で確かめたこと」の欄と、PR 本文の `## 未検証・残る危険` を集めた節を書く。
+このとき PR は提示物の「含む PR」の欄から読み、`--prs` は欄にあることを確かめるだけにする（無ければ 3）。
+approval-facts の「含む PR」は、前のタグから承認したコミットまでにベースブランチへ入った PR（版上げの `release/` を除く）と
+`--prs` の和を番号の昇順に並べる（release_lib/included.py。#1274）。
 changelog と notes は未マージの PR を載せず、番号を metrics.unmerged へ出す。渡した PR がすべて未マージなら
 書き込む前に 3（前提エラー）で止まる。PR の読み取り（`gh pr view --json`）は、GraphQL が上限なら REST で読み直す
 （`lib/gh_parts.py` の `view_json`）。
@@ -47,7 +71,6 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -57,17 +80,21 @@ from typing import Literal
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
 
-deps.require("schema", "versions", "bump", "md", "mdtable")
-import md  # noqa: E402
+deps.require("schema", "versions", "bump", "md", "mdtable", "durable")
+import approved_commit as ac  # noqa: E402
 import mdtable  # noqa: E402
 import schema  # noqa: E402
-import versions  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from release_lib import bump  # noqa: E402
+from merged_lib import trash  # noqa: E402
+from release_lib import approval, bump, carry, changed, deploy, included, instructions, others, record, replaced, step_run  # noqa: E402
+from release_lib.approval import HeadMoved  # noqa: E402
+from release_lib.names import changelog_section, changelog_span, h2_lines, next_h2, plugin_of, release_decl  # noqa: E402
 from step_result import (
     EXIT_GATE,
+    EXIT_INFRA_WAIT,
     EXIT_PRECONDITION,
+    PRESENT_HEADINGS,
     StepError,
     approval_present,
     base_of,  # noqa: E402
@@ -84,9 +111,11 @@ from step_result import (
     version_arg,
 )
 import gh_parts  # noqa: E402
+import gh_sections  # noqa: E402
 import jsonio  # noqa: E402
 import proc  # noqa: E402
 import repo as repo_lib  # noqa: E402
+import delivery  # noqa: E402
 
 DECLARATION = ".ndf/release.json"
 SUPPORTED_VERSIONS = (1,)
@@ -218,6 +247,16 @@ def expand(step: Step, version: str) -> list[str]:
     return [c.replace("{version}", version) for c in step.command]
 
 
+def changed_paths(root: Path, before_paths: set[str], before: dict[str, str | None]) -> list[str]:
+    """コマンドの後の状態と比べ、内容の変わったパスを返す。"""
+    after_paths = status_paths(root)
+    union = before_paths | after_paths
+    after = digests(root, union)
+    for p in after_paths - before_paths:  # コマンドの前は変更が無かった = HEAD の内容
+        before[p] = _head_digest(root, p)
+    return sorted(p for p in union if before[p] != after[p])
+
+
 def run_steps(root: Path, stage: str, version: str, dry_run: bool) -> int:
     steps = load_steps(root)
     if steps is None:
@@ -225,11 +264,7 @@ def run_steps(root: Path, stage: str, version: str, dry_run: bool) -> int:
     for step in selected(steps, stage):
         command = expand(step, version)
         if dry_run:
-            print(f"コマンド: {step.name}（{step.stage}）")
-            print(f"  command: {' '.join(command)}")
-            print(f"  writes: {', '.join(step.writes) or '（何も書かない）'}")
-            if step.guide:
-                print(f"  guide: {step.guide}")
+            step_run.print_step(step, command)
             continue
         try:
             before_paths = status_paths(root)
@@ -237,21 +272,10 @@ def run_steps(root: Path, stage: str, version: str, dry_run: bool) -> int:
         except (OSError, StepError) as e:
             print(f"コマンド: {step.name} → 実行しない（git status を取れない: {e}）", file=sys.stderr)
             return 1
-        sys.stdout.flush()
-        try:
-            rc = subprocess.run(command, cwd=str(root), timeout=step.timeout).returncode
-        except subprocess.TimeoutExpired:
-            print(f"コマンド: {step.name} → 時間切れ（{step.timeout} 秒）")
+        rc = step_run.run_command(root, step, command)
+        if rc is None:
             return 1
-        except OSError as e:
-            print(f"コマンド: {step.name} → 起動できない: {e}")
-            return 1
-        after_paths = status_paths(root)
-        union = before_paths | after_paths
-        after = digests(root, union)
-        for p in after_paths - before_paths:  # コマンドの前は変更が無かった = HEAD の内容
-            before[p] = _head_digest(root, p)
-        changed = sorted(p for p in union if before[p] != after[p])
+        changed = changed_paths(root, before_paths, before)
         outside = [p for p in changed if not allowed(p, step.writes)]
         print(f"コマンド: {step.name} → {rc}")
         for p in changed:
@@ -370,19 +394,18 @@ def plan_bump(root, pdir, plugin, old, new):
         ed.manual.append(f"README.md のプラグイン一覧表に {plugin} の行が無い")
     if plugin == "ndf":
         ed.sub(readme, r"\*\*NDFプラグイン v", "README.md の概要の版")
-        ed.sub(root / "AGENTS.md", r"主要プラグインです（v", "AGENTS.md の版")
         nr = pdir / "README.md"
         ed.sub(nr, r"（Kiro CLI用 / v", "plugins/ndf/README.md の Kiro の確認例")
         ed.sub(nr, r"/plugins/cache/ai-plugins/ndf/", "plugins/ndf/README.md の Codex のパス例", count=2)
         ed.sub(nr, r"ndf@ai-plugins\s+installed", "plugins/ndf/README.md の codex plugin list の出力例")
         bump_versioning_doc(ed)
 
-    bump.bump_update_heading(ed, pdir / "README.md")
     return ed
 
 
 def cmd_bump(a):
     root = git_root(a.root)
+    a.base = a.base or delivery.load_delivery(root).base  # 既定は宣言のベースブランチ（#1336）
     pdir = plugin_dir(root, a.plugin)
     try:
         old = json.loads((pdir / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["version"]
@@ -406,11 +429,7 @@ def cmd_bump(a):
     ed = plan_bump(root, pdir, a.plugin, old, new)
     ed.apply()
 
-    expected = []
-    if base_of(old) != base_of(new):
-        expected.append(f"更新案内の見出しが 2 個ある（v{new} / v{old}）")
-        ed.manual.append(f"{pdir.relative_to(root).as_posix()}/README.md: 更新案内の v{old} の節を片付ける（見出しを 1 つにする）")
-    ok, summary = run_staleness(root, expected)
+    ok, summary = run_staleness(root)
     if ok is None:
         ed.manual.append(summary)
     items = [{"kind": "file", "name": f, "result": "updated"} for f in ed.files] + [
@@ -438,36 +457,58 @@ def release_tag_before(root, plugin, current=None):
     return next((t for t in tags if t != current and "-" not in t[len(head) :]), None)
 
 
-def next_release(name, old):
-    """PATCH を 1 つ上げた正式版（`2.3.4` と `2.3.4-dev.1` は `2.3.5`）。"""
+def next_release(name, old, level="patch"):
+    """上げ幅（既定は PATCH）で上げた正式版（`2.3.4` と `2.3.4-dev.1` の PATCH は `2.3.5`）。"""
     try:
-        return versions.next_patch(versions.release_base(old))
+        return others.bumped(old, level)
     except ValueError as e:
         raise StepError(f"{name} の版を読めない: {e}", 2)
 
 
-def cmd_changed_plugins(a):
-    """前のタグからの差分にある --plugin 以外のプラグインと、PATCH を 1 つ上げた版を items に返す。"""
-    root = git_root(a.root)
+def other_plugins(root, a):
+    """(前のタグ, 差分にあってまだ上げていない {名前: 前のタグの版}, 上げ済みの行)。"""
     since = a.since or release_tag_before(root, a.plugin) or f"{a.plugin}--v*"
     p = git(root, "diff", "--name-only", f"refs/tags/{since}", "HEAD", check=False)
     if p.returncode:
         raise StepError(f"前のタグが無い: {since}", 2)
-    items, already = [], []
+    pending, already = {}, []
     for name in sorted({m[1] for f in p.stdout.split() if (m := re.match(r"plugins/(?:mcp/)?([^/]+)/", f))} - {a.plugin}):
         pdir = root / "plugins" / (name if name in ("ndf", "playwright-kit") else f"mcp/{name}")
         old, head = base_version(root, pdir, since), base_version(root, pdir, "HEAD")
         if old and head == old:  # 差分の中でまだ上げていない
-            items.append({"kind": "plugin", "name": name, "result": "bump", "from": old, "to": next_release(name, old)})
+            pending[name] = old
         elif head:
-            already.append(name)
+            already.append(others.OtherPlugin(name, old or "—", others.ALREADY, head, ["前のタグから版が変わっている"]))
+    return since, pending, already
+
+
+def cmd_changed_plugins(a):
+    """前のタグからの差分にある --plugin 以外のプラグインと、上げた版を items に返す（上げ幅は release_lib/others.py）。"""
+    root = git_root(a.root)
+    a.plugin = plugin_of(root, a)
+    if (a.decided and (a.prs or a.approval)) or (a.set and not a.approval):
+        raise StepError("引数の組み合わせが違う（--decided は --prs・--approval と並べない。--set は --approval と使う）", 2)
+    if a.set:
+        return emit(changed.set_levels(TOOL, changed.approval_path(root, a.approval), a.set))
+    since, pending, already = other_plugins(root, a)
+    skipped, decided = [], None
+    if a.decided and pending:
+        decided = changed.approval_path(root, a.decided)
+        rows = changed.decided_rows(decided, pending, already)
+    elif a.prs:
+        rows = changed.candidate_rows(root, a.prs, pending, lambda n: pr_view(root, n, "body,state,mergeCommit"), skipped)
+    else:
+        rows = [others.OtherPlugin(n, old, "PATCH", next_release(n, old), ["材料を渡していない"]) for n, old in pending.items()]
+    if a.approval:
+        path = changed.approval_path(root, a.approval)
+        changed.write_others(path, changed.read_approval(path), rows + already)
     emit(
         result(
             TOOL,
             "ok",
-            f"{since} からの差分で版を上げるプラグイン {len(items)} 件（{a.plugin} を除く）",
-            items,
-            {"since": since, "plugins": len(items), "already": already},
+            f"{since} からの差分で版を上げるプラグイン {len(rows)} 件（{a.plugin} を除く）",
+            changed.plugin_items(rows) + unmerged_items(skipped),
+            {"since": since, "plugins": len(rows), "already": [r.name for r in already], "decided": decided and str(decided)},
         )
     )
 
@@ -514,63 +555,54 @@ def pr_titles(root, prs, skipped=None):
     return require_merged(items, prs)
 
 
+def _update_changelog(root, a, items) -> dict:
+    """CHANGELOG.md へこの版の節を足すか、既存の節へ PR を挿す（見出しは基底の版。開発版の接尾辞は載せない）。"""
+    cl = root / "CHANGELOG.md"
+    lines = cl.read_text(encoding="utf-8").split("\n")
+    a.plugin = plugin_of(root, a)
+    head, (at, end) = f"## [{a.plugin} {base_of(a.version)}]", changelog_span(lines, a.plugin, a.version)
+    if at is None:
+        section = _add_changelog_section(lines, head, items)
+    else:
+        section = _insert_into_changelog_section(lines, at, end, items)
+    cl.write_text("\n".join(lines), encoding="utf-8")
+    return section
+
+
+def _add_changelog_section(lines, head, items) -> dict:
+    """最初の版の節の前へ、この版の節を足す（lines をその場で書き換える）。"""
+    first = next((i for i in h2_lines(lines) if lines[i].startswith("## [")), len(lines))
+    block = [f"{head} - {today()}", ""] + [b for _, b in items] + [""]
+    if first == len(lines) and lines and lines[-1] != "":
+        block = [""] + block
+    lines[first:first] = block
+    return {
+        "kind": "section",
+        "name": "CHANGELOG.md",
+        "result": "added",
+        "heading": block[0] or block[1],
+        "added": [n for n, _ in items],
+    }
+
+
+def _insert_into_changelog_section(lines, at, end, items) -> dict:
+    """既存の節（lines[at:end]）の末尾へ、まだ載っていない PR だけを挿す（lines をその場で書き換える）。"""
+    body = "\n".join(lines[at:end])
+    add = [(n, b) for n, b in items if f"#{n}）" not in body and f"#{n})" not in body]
+    ins = end
+    while ins - 1 > at and lines[ins - 1].strip() == "":
+        ins -= 1
+    lines[ins:ins] = [b for _, b in add]
+    return {"kind": "section", "name": "CHANGELOG.md", "result": "added", "heading": lines[at], "added": [n for n, _ in add]}
+
+
 def cmd_changelog(a):
     root = git_root(a.root)
-    cl = root / "CHANGELOG.md"
-    if not cl.is_file():
+    if not (root / "CHANGELOG.md").is_file():
         raise StepError("CHANGELOG.md が無い", EXIT_PRECONDITION)
     skipped = []
     items = pr_titles(root, a.prs, skipped)
-    sections = []
-
-    # CHANGELOG.md（見出しは基底の版。開発版の接尾辞は載せない）
-    lines = cl.read_text(encoding="utf-8").split("\n")
-    head, (at, end) = f"## [{a.plugin} {base_of(a.version)}]", changelog_span(lines, a.plugin, a.version)
-    if at is None:
-        first = next((i for i in h2_lines(lines) if lines[i].startswith("## [")), len(lines))
-        block = [f"{head} - {today()}", ""] + [b for _, b in items] + [""]
-        if first == len(lines) and lines and lines[-1] != "":
-            block = [""] + block
-        lines[first:first] = block
-        sections.append(
-            {"kind": "section", "name": "CHANGELOG.md", "result": "added", "heading": block[0] or block[1], "added": [n for n, _ in items]}
-        )
-    else:
-        body = "\n".join(lines[at:end])
-        add = [(n, b) for n, b in items if f"#{n}）" not in body and f"#{n})" not in body]
-        ins = end
-        while ins - 1 > at and lines[ins - 1].strip() == "":
-            ins -= 1
-        lines[ins:ins] = [b for _, b in add]
-        sections.append({"kind": "section", "name": "CHANGELOG.md", "result": "added", "heading": lines[at], "added": [n for n, _ in add]})
-    cl.write_text("\n".join(lines), encoding="utf-8")
-
-    # plugin の README の更新案内: 見出しから次の同じ深さの見出しまでを、この版の PR の一覧へ差し替える
-    try:
-        pdir = plugin_dir(root, a.plugin)
-    except StepError:
-        pdir = None
-    readme = pdir / "README.md" if pdir else None
-    h = f"## v{a.version} へ更新するとき"
-    if readme and readme.is_file():
-        rl = readme.read_text(encoding="utf-8").split("\n")
-        i = next((j for j in h2_lines(rl) if rl[j] == h), None)
-        if i is not None:
-            end = next_h2(rl, i)
-            if not any(f"（#{n}）" in l for l in rl[i:end] for n, _ in items):
-                rl[i + 1 : end] = [""] + [b for _, b in items] + [""]
-                readme.write_text("\n".join(rl), encoding="utf-8")
-                sections.append(
-                    {
-                        "kind": "section",
-                        "name": readme.relative_to(root).as_posix(),
-                        "result": "replaced",
-                        "heading": h,
-                        "added": [n for n, _ in items],
-                    }
-                )
-
-    readme_done = any(s["result"] == "replaced" for s in sections)
+    sections = [_update_changelog(root, a, items)]
     emit(
         result(
             TOOL,
@@ -578,34 +610,8 @@ def cmd_changelog(a):
             f"{len(items)} 件の PR を {len(sections)} 箇所へ並べた{unmerged_note(skipped)}",
             sections + unmerged_items(skipped),
             {"version": a.version, "prs": len(items), "unmerged": skipped},
-            next="更新案内の本文を利用者向けの説明へ書き直す" if readme_done else None,
         )
     )
-
-
-def h2_lines(lines):
-    """深さ 2 の見出しの行（0 始まり）。コードの囲みの中の `##` は見出しにしない（lib/md.py）。"""
-    return [h.line for h in md.headings("\n".join(lines)) if h.level == 2]
-
-
-def next_h2(lines, at):
-    """lines[at] の次の `## ` の見出しの行。無ければ行の数。"""
-    return next((i for i in h2_lines(lines) if i > at), len(lines))
-
-
-def changelog_span(lines, plugin, version):
-    """CHANGELOG.md の `## [<plugin> <基底の版>]` の節の (見出しの行, 次の節の行)。無ければ (None, None)。"""
-    head = f"## [{plugin} {base_of(version)}]"
-    at = next((i for i in h2_lines(lines) if lines[i] == head or lines[i].startswith(head + " ")), None)
-    return (None, None) if at is None else (at, next_h2(lines, at))
-
-
-def changelog_section(root, version, plugin="ndf"):
-    """CHANGELOG.md の `## [<plugin> <基底の版>]` の節の本文（見出しを除く）を返す。"""
-    cl = root / "CHANGELOG.md"
-    lines = cl.read_text(encoding="utf-8").split("\n") if cl.is_file() else []
-    at, end = changelog_span(lines, plugin, version)
-    return "" if at is None else "\n".join(lines[at + 1 : end]).strip()
 
 
 def run_checks(root):
@@ -625,12 +631,8 @@ def run_checks(root):
 
 def find_pr(root, head, base, states=("OPEN",)):
     """head → base の PR を探す。states の順に最初に見つかった {number, state} を返す。"""
-    items = (
-        gh_json(
-            root, ["pr", "list", "--head", head, "--base", base, "--state", "all", "--json", "number,state", "--limit", "20"], "gh pr list"
-        )
-        or []
-    )
+    args = ["pr", "list", "--head", head, "--base", base, "--state", "all", "--json", "number,state", "--limit", "20"]
+    items = gh_json(root, args, "gh pr list") or []
     for st in states:
         for it in items:
             if it.get("state") == st:
@@ -656,21 +658,23 @@ def pr_check_buckets(root, n):
         return []
 
 
-def wait_and_merge(root, n):
-    """PR のチェックを merge-when-green で待ってマージする。止まったらその summary で止める。
-
-    merge-when-green は待ちの上限を持ち、実行が終わったのに pending のまま取り残されたチェックを
-    1 度だけ再実行する（`gh pr checks --watch` は上限が無く、取り残されたチェックを待ち続けた）。
-    後片付けは配布の手順が持つので行わせない。
+def wait_and_merge(root, n, expect=None, ci_wait=3600.0):
+    """PR のチェックを merge-when-green で待って（上限 ci_wait 秒）マージする。止まったらその summary で止める。
+    CI の基盤待ち（75）は同じ 75 で、中身の失敗は 1 で止める（#1645）。後片付けは行わせない。expect を渡すと、
+    PR の先端がその SHA のときだけマージし、違えば HeadMoved を投げる。
     """
     script = Path(__file__).resolve().parent / "merged-steps.py"
-    p = run([sys.executable, str(script), "merge-when-green", str(n), "--no-cleanup", "--interval", "5"], cwd=root, check=False)
+    cmd = [sys.executable, str(script), "merge-when-green", str(n), "--no-cleanup", "--interval", "5", "--timeout", f"{ci_wait:g}"]
+    p = run(cmd + (["--expect-head", expect] if expect else []), cwd=root, check=False)
     try:
         out = json.loads((p.stdout or "").strip().splitlines()[-1])
     except (ValueError, IndexError):
         out = {}
     if p.returncode != 0:
-        raise StepError(f"PR #{n} をマージできない: {out.get('summary') or p.stderr.strip()[:300]}")
+        if any(isinstance(i, dict) and i.get("result") == "head_moved" for i in out.get("items") or []):
+            raise HeadMoved(out.get("summary") or "")
+        code = EXIT_INFRA_WAIT if p.returncode == EXIT_INFRA_WAIT else 1
+        raise StepError(f"PR #{n} をマージできない: {out.get('summary') or p.stderr.strip()[:300]}", code)
     return merge_commit_of(root, n)
 
 
@@ -682,23 +686,32 @@ def merge_commit_of(root, n):
 def cmd_release(a):
     root = git_root(a.root)
     ver = a.version
-    plugins = [s.strip() for s in a.plugins.split(",") if s.strip()]
-    branch = git(root, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
-    if branch != f"release/v{ver}":
+    base, prod, plugin = release_decl(root, a)
+    try:
+        approved = approval.approved_of(root, a, plugin)
+    except approval.Gate as g:
+        emit(g.out, EXIT_GATE)
+    plugins = [s.strip() for s in (a.plugins or plugin).split(",") if s.strip()]
+    if (branch := git(root, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()) != f"release/v{ver}":
         raise StepError(f"作業ツリーのブランチが release/v{ver} でない: {branch}", EXIT_PRECONDITION)
     if git(root, "status", "--porcelain", "--untracked-files=no").stdout.strip():
         raise StepError("作業ツリーにコミットしていない変更がある（bump と changelog をコミットしてから呼ぶ）", EXIT_PRECONDITION)
+    bump.require_bumped(root, plugin, ver)
 
     git(root, "push", "-q", "-u", "origin", "HEAD")
 
-    # 開発版の PR（release/v<版> → develop）
-    pr = find_pr(root, branch, "develop", states=("OPEN", "MERGED"))
+    # 開発版の PR（release/v<版> → ベースブランチ）
+    pr = find_pr(root, branch, base, states=("OPEN", "MERGED"))
+    if pr and pr["state"] == "MERGED":
+        # マージ済みの PR へ後から積んだコミットは GitHub が開き直さずベースブランチに入らない。入っていなければ PR を作り直す
+        git(root, "fetch", "-q", "origin", base)
+        pr = pr if git(root, "merge-base", "--is-ancestor", "HEAD", f"origin/{base}", check=False).returncode == 0 else None
     if pr is None:
-        section = changelog_section(root, ver)
+        section = changelog_section(root, ver, plugin)
         mark = {True: "pass", False: "fail", None: "skip"}
         body = "\n".join(
             [
-                f"ndf v{ver} のリリース（{a.channel}）。対象の plugin: {', '.join(plugins)}",
+                f"{plugin} v{ver} のリリース（{a.channel}）。対象の plugin: {', '.join(plugins)}",
                 "",
                 "## 含む PR",
                 "",
@@ -711,9 +724,9 @@ def cmd_release(a):
                 "🤖 Generated with [Claude Code](https://claude.com/claude-code)",
             ]
         )
-        pr = {"number": create_pr(root, "develop", branch, f"Release: ndf v{ver}", body), "state": "OPEN"}
+        pr = {"number": create_pr(root, base, branch, f"Release: {plugin} v{ver}", body), "state": "OPEN"}
     release_pr = pr["number"]
-    release_commit = wait_and_merge(root, release_pr) if pr["state"] == "OPEN" else merge_commit_of(root, release_pr)
+    release_commit = wait_and_merge(root, release_pr, ci_wait=a.ci_wait) if pr["state"] == "OPEN" else merge_commit_of(root, release_pr)
 
     metrics = {
         "channel": a.channel,
@@ -724,52 +737,142 @@ def cmd_release(a):
         "merge_commit": release_commit,
         "plugins": ",".join(plugins),
     }
-    items = [{"kind": "pr", "name": f"#{release_pr}", "result": "merged", "base": "develop"}]
+    items = [{"kind": "pr", "name": f"#{release_pr}", "result": "merged", "base": base}]
     if a.channel == "dev":
-        emit(result(TOOL, "ok", f"ndf v{ver} を develop へ出した（#{release_pr}）", items, metrics))
+        emit(result(TOOL, "ok", f"{plugin} v{ver} を {base} へ出した（#{release_pr}）", items, metrics))
 
-    # 本番: develop → main、タグ、GitHub Release（利用者の承認を得てから呼ぶ）
-    tag = f"ndf--v{ver}"
+    # 本番: ベースブランチ → 本番チャネル、タグ、GitHub Release（利用者の承認を得てから呼ぶ）
+    tag = f"{plugin}--v{ver}"
     git(root, "fetch", "-q", "origin", "--tags")
     if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode == 0:
         raise StepError(f"タグ {tag} は既にある")
-    mp = find_pr(root, "develop", "main", states=("OPEN",))
+    # 承認したコミットの後に、配布の PR の外の変更がベースブランチへ入っていないか（#815）
+    allowed = approval.release_pr_allowed(root, release_pr, pr_view)
+    verdict = approval.check_approved(root, approved, base, allowed)
+    if not verdict.ok:
+        emit(approval.gate(root, a, plugin, base, verdict, items, metrics), EXIT_GATE)
+    metrics.update({"approved_sha": approved, "compared_head": verdict.tip})
+    mp = find_pr(root, base, prod, states=("OPEN",))
     main_pr = (
         mp["number"]
         if mp
         else create_pr(
             root,
-            "main",
-            "develop",
-            f"Release: ndf v{ver} を main へ",
-            f"ndf v{ver} を main へ出す（開発版の PR #{release_pr}）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+            prod,
+            base,
+            f"Release: {plugin} v{ver} を {prod} へ",
+            f"{plugin} v{ver} を {prod} へ出す（開発版の PR #{release_pr}）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)",
         )
     )
-    merge = wait_and_merge(root, main_pr)
+    try:
+        merge = wait_and_merge(root, main_pr, expect=verdict.tip, ci_wait=a.ci_wait)  # 比べた先端だけを本番チャネルへ入れる
+    except HeadMoved:
+        moved = approval.check_approved(root, approved, base, allowed)
+        emit(approval.gate(root, a, plugin, base, moved, items, metrics, moved=True), EXIT_GATE)
     git(root, "fetch", "-q", "origin")
     if not merge:
-        merge = git(root, "rev-parse", "origin/main").stdout.strip()
-    git(root, "tag", "-a", tag, merge, "-m", f"ndf v{ver}")
+        merge = git(root, "rev-parse", f"origin/{prod}").stdout.strip()
+    _publish_tag_and_release(root, plugin, ver, tag, merge)
+
+    metrics.update({"main_pr": main_pr, "tag": tag, "merge_commit": merge})
+    items += [
+        {"kind": "pr", "name": f"#{main_pr}", "result": "merged", "base": prod},
+        {"kind": "tag", "name": tag, "result": "pushed"},
+        {"kind": "release", "name": tag, "result": "created"},
+    ]
+    swept, sweep_metrics, nxt = _sweep_candidates(root, merge)
+    items += swept
+    metrics.update(sweep_metrics)
+    emit(result(TOOL, "ok", f"{plugin} v{ver} を {prod} へ出し、{tag} と GitHub Release を作った", items, metrics, None, nxt))
+
+
+def _publish_tag_and_release(root, plugin, ver, tag, merge):
+    """本番チャネルへ入ったコミットにタグを打って push し、CHANGELOG.md の節を本文に GitHub Release を作る。"""
+    git(root, "tag", "-a", tag, merge, "-m", f"{plugin} v{ver}")
     git(root, "push", "-q", "origin", tag)
 
-    notes = changelog_section(root, ver) or f"ndf v{ver}"
+    notes = changelog_section(root, ver, plugin) or f"{plugin} v{ver}"
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as f:
         f.write(notes + "\n")
         notes_file = f.name
     try:
-        p = gh_parts.gh(["release", "create", tag, "--title", f"ndf v{ver}", "--notes-file", notes_file, "--latest"], cwd=root)
+        p = gh_parts.gh(["release", "create", tag, "--title", f"{plugin} v{ver}", "--notes-file", notes_file, "--latest"], cwd=root)
     finally:
         os.unlink(notes_file)
     if p.returncode != 0:
         raise StepError(f"gh release create {tag} が失敗: {p.stderr.strip()[:300]}")
 
-    metrics.update({"main_pr": main_pr, "tag": tag, "merge_commit": merge})
-    items += [
-        {"kind": "pr", "name": f"#{main_pr}", "result": "merged", "base": "main"},
-        {"kind": "tag", "name": tag, "result": "pushed"},
-        {"kind": "release", "name": tag, "result": "created"},
-    ]
-    emit(result(TOOL, "ok", f"ndf v{ver} を main へ出し、{tag} と GitHub Release を作った", items, metrics))
+
+def _sweep_candidates(root, merge):
+    """後片付け: この版に入ったブランチの退避先（merged の worktree-trash）を回収の候補として挙げる（#824）。
+    退避先は Git にも本番のコミットにも無い利用者のファイルを含むため、本番の承認だけでは消さない（C3・C4）。
+    消すのは、候補を人へ示して承認を得た後に、承認した名前だけを --only で渡す sweep-trash である。
+    (items, metrics, next) を返す。
+    """
+    swept, sweep_metrics = trash.sweep(root, merge)
+    cmd = trash.sweep_command(merge, swept)
+    nxt = cmd and f"回収の候補の退避先（items の kind: trash・result: candidate）を人へ示し、承認した名前だけを渡して消す: {cmd}"
+    return swept, sweep_metrics, nxt
+
+
+def cmd_record(a):
+    """本番の配布の後に、本番のリリースの PR（release/v<版> → ベースブランチ）へリリース記録を 1 件コメントで書く（#1273）。
+
+    タグ <plugin>--v<版> が origin に無い・同じタグの GitHub Release が無い・マージ済みの PR が無いなら、書かずに 3 で止まる
+    （記録の `段階: 本番` は配布が終わった事実を表す）。PR の最後のリリース記録が同じ版・同じスプリントの PR の本番の記録なら
+    書かずに ok（exists）を返す。組み立てと投稿は release_lib/record.py、形は lib/dist_record.py が持つ。
+    """
+    root = git_root(a.root)
+    if a.promote:
+        return record_promote(root, a)
+    ver = a.version
+    base, _prod, plugin = release_decl(root, a)
+    tag = f"{plugin}--v{ver}"
+    if git(root, "ls-remote", "--exit-code", "--tags", "origin", f"refs/tags/{tag}", check=False).returncode != 0:
+        raise StepError(f"origin にタグ {tag} が無い（本番の配布が済んでいない）", EXIT_PRECONDITION)
+    git(root, "fetch", "-q", "origin", "--tags", check=False)  # 直前の正式版とタグの時刻を読む
+    if gh_parts.gh(["release", "view", tag, "--json", "tagName"], cwd=root).returncode != 0:
+        raise StepError(f"GitHub Release {tag} が無い（本番の配布が済んでいない）", EXIT_PRECONDITION)
+    pr = find_pr(root, f"release/v{ver}", base, states=("MERGED",))
+    if pr is None:
+        raise StepError(f"release/v{ver} → {base} のマージ済みの PR が無い", EXIT_PRECONDITION)
+    n = pr["number"]
+    prev_tag = release_tag_before(root, plugin, current=tag)
+    prev = prev_tag[len(f"{plugin}--v") :] if prev_tag else None
+    body = record.body_of(root, plugin, ver, tag, prev_tag, a.prs)
+    emit(result(TOOL, "ok", *record.write(root, n, ver, prev, body, a.prs, f"v{ver}")))
+
+
+def record_promote(root, a):
+    """昇格の経路（--promote）: 最後にマージした昇格の Pull Request（--head → --base）へリリース記録を書く（#837）。
+    版はマージのコミット（`<本番チャネル> <短い SHA>`）、直前の版はその 1 つ目の親。マージ済みの PR が無ければ 3。"""
+    if not (a.head and a.base):
+        raise StepError("--promote には --head（ベースブランチ）と --base（本番チャネル）が要る", EXIT_PRECONDITION)
+    pr = find_pr(root, a.head, a.base, states=("MERGED",))
+    sha = merge_commit_of(root, pr["number"]) if pr else None
+    if not sha:
+        raise StepError(f"{a.head} → {a.base} のマージ済みの昇格の PR が無い（本番の配布が済んでいない）", EXIT_PRECONDITION)
+    n, prev, ver = pr["number"], record.parent_of(root, a.base, sha), f"{a.base} {sha[:7]}"
+    body = record.promote_body_of(n, a.head, a.base, prev, sha[:7], a.prs)
+    emit(result(TOOL, "ok", *record.write(root, n, ver, prev, body, a.prs, ver)))
+
+
+APPROVAL_OWN = (*PRESENT_HEADINGS, instructions.HEADING)  # approval-facts が作り直す `## ` の節（#1834）
+
+
+def kept_sections(root, approval):
+    """前の承認資料のうち作り直しで残す節。資料を渡さない・無いときは空。読めない・H1 が無い・同じ見出しが
+    2 つあるときは StepError（2。承認資料を書かない）。"""
+    if not approval:
+        return []
+    path = Path(approval)
+    path = path if path.is_absolute() else root / path
+    if not path.is_file():
+        return []
+    try:
+        return carry.kept(path.read_text(encoding="utf-8").split("\n"), APPROVAL_OWN)
+    except (OSError, UnicodeDecodeError, ValueError) as e:
+        raise StepError(f"前の承認資料 {approval} を読めない（書き換えずに止める）: {e}", 2)
 
 
 def cmd_approval_facts(a):
@@ -777,20 +880,24 @@ def cmd_approval_facts(a):
     repo = repo_lib.owner_repo(root)
     if not repo:
         raise StepError("リポジトリの owner/name を決められない", EXIT_PRECONDITION)
+    base, prod, plugin = release_decl(root, a)
     git(root, "fetch", "-q", "origin", "--tags")
-    cur_tag = f"ndf--v{a.version}"
-    prev = a.prev_tag or release_tag_before(root, "ndf", cur_tag)
+    cur_tag = f"{plugin}--v{a.version}"
+    prev = a.prev_tag or release_tag_before(root, plugin, cur_tag)
     if not prev:
         raise StepError("前のタグを決められない（--prev-tag を渡す）", EXIT_PRECONDITION)
-    dev = git(root, "rev-parse", "origin/develop").stdout.strip()
+    dev = git(root, "rev-parse", f"origin/{base}").stdout.strip()
+    keep = kept_sections(root, getattr(a, "approval", None))  # 前の承認資料の残す節（読めなければ書かずに止める。#1834）
+    changes = instructions.changed_instructions(root, prev, dev)
+    prs = included.included_prs(included.range_prs(root, prev, dev), a.prs)  # 範囲の PR と --prs の和（#1274）
 
-    stat = git(root, "diff", "--shortstat", "origin/main...origin/develop").stdout.strip()
+    stat = git(root, "diff", "--shortstat", f"origin/{prod}...origin/{base}").stdout.strip()
     files = int(m.group(1)) if (m := re.search(r"(\d+) files? changed", stat)) else 0
     ins = int(m.group(1)) if (m := re.search(r"(\d+) insertions?", stat)) else 0
     dels = int(m.group(1)) if (m := re.search(r"(\d+) deletions?", stat)) else 0
 
     items, rows = [], []
-    for n in a.prs:
+    for n in prs:
         d = pr_view(root, n, "number,title,state,mergeCommit,url") or {}
         oid = (d.get("mergeCommit") or {}).get("oid") or ""
         checks = pr_check_buckets(root, n)
@@ -814,64 +921,65 @@ def cmd_approval_facts(a):
     path = approval_present(
         TOOL,
         f"v{a.version}",
-        title=f"ndf v{a.version} の本番への配布",
-        targets=[{"url": compare, "title": f"{prev} → develop（{dev[:8]}）", "base_head": "main ← develop"}],
-        change=f"`main...develop` の差分 {files} ファイル / +{ins} / −{dels}",
+        title=f"{plugin} v{a.version} の本番への配布",
+        targets=[{"url": compare, "title": f"{prev} → {base}（{dev[:8]}）", "base_head": f"{prod} ← {base}"}],
+        change=f"`{prod}...{base}` の差分 {files} ファイル / +{ins} / −{dels}",
         judge=[
+            ac.material_row(dev),
             ("版数", a.version),
             ("含む PR", "\n".join(rows) or "—"),
             ("配る中身", NOTES_PENDING),
             ("検証への配布で確かめたこと", NOTES_PENDING),
         ],
-        consent=[f"ndf v{a.version} を main へ出し、タグ {cur_tag} と GitHub Release を作る"],
+        consent=[f"{plugin} v{a.version} を {prod} へ出し、タグ {cur_tag} と GitHub Release を作る"],
         rollback=(
-            f"タグ {cur_tag} と GitHub Release を消し、main を {prev} の内容へ戻す PR を出す。"
+            f"タグ {cur_tag} と GitHub Release を消し、{prod} を {prev} の内容へ戻す PR を出す。"
             "導入済みの利用者の環境は利用者の側の操作（前の版の導入し直し）でしか戻せない。"
         ),
+        sections=[(instructions.HEADING, instructions.instruction_lines(changes, prev, dev))],
     )
+    if keep:
+        out = Path(path)
+        out.write_text("\n".join(carry.insert_kept(out.read_text(encoding="utf-8").split("\n"), keep)), encoding="utf-8")
     emit(
         result(
             TOOL,
             "gate",
-            f"ndf v{a.version} の本番承認の提示物を書いた（PR {len(a.prs)} 件）",
+            f"{plugin} v{a.version} の本番承認の提示物を書いた（PR {len(items)} 件）",
             items,
-            {"files": files, "insertions": ins, "deletions": dels, "prev_tag": prev, "compare": compare},
+            {
+                "files": files,
+                "insertions": ins,
+                "deletions": dels,
+                "prev_tag": prev,
+                "compare": compare,
+                "approved_sha": dev,
+                "kept": [k.heading for k in keep],
+                "instructions": len(changes),
+            },
             path,
-            f"利用者の承認を得たら release-steps.py release --version {a.version} --channel prod",
+            f"利用者の承認を得たら release-steps.py release --version {a.version} --channel prod --approved-sha {dev}",
         ),
         EXIT_GATE,
     )
 
 
-CHANGES_HEADING = "## 利用者向けの変化"
+def cmd_approve(a):
+    """ゲート 2 の承認を承認資料へ記録する（#815 の I10。本体は release_lib/approval.py の approve）。"""
+    emit(approval.approve(git_root(a.root), a))
+
+
+CHANGES_HEADING = others.CHANGES_HEADING
 RISKS_HEADING = "## 未検証・残る危険"
+NO_RISKS = "- PR の本文に記載が無い"
 NOTES_PENDING = "（release-steps.py notes --approval が PR 本文の「利用者向けの変化」から書く）"
 RUNTIME_NAMES = {"claude": "Claude Code", "codex": "Codex", "kiro": "Kiro", "agy": "Antigravity"}
 
 
-def section_lines(body, heading):
-    """Markdown の本文から heading の節の中身の行（空行を除く）を返す（節の読み取りは `gh_sections`）。"""
-    text = gh_parts.get_section(body or "", heading) or ""
-    return [line.rstrip() for line in text.splitlines() if line.strip()]
-
-
-def change_items(lines, n):
-    """節の行を「- 本文（#n）」の箇条へ直す。続きの行（字下げ）は前の項目へつなぐ。「無し」だけなら空。"""
-    items = []
-    for line in lines:
-        text = line.strip()
-        bullet = re.match(r"^[-*]\s+(.*)$", text)
-        if bullet or not items or not line[:1].isspace():
-            items.append((bullet.group(1) if bullet else text).strip())
-        else:
-            items[-1] += " " + text
-    items = [i for i in items if i and i not in ("無し", "なし")]
-    return [i if f"#{n}" in i else f"{i}（#{n}）" for i in items]
-
-
-def pr_notes(root, prs, skipped=None):
-    """PR ごとに (番号, 利用者向けの変化の箇条, 未検証・残る危険の箇条, 題名で代えたか) を返す。
-    マージされていない PR は配る中身に入らないため載せず、番号を skipped へ足す。"""
+def pr_notes(root, prs, skipped=None, replacing=None, unreadable=None):
+    """PR ごとに (番号, 利用者向けの変化の箇条, 未検証・残る危険の箇条, 題名で代えたか, 移行の手順の箇条) を返す。
+    マージされていない PR は配る中身に入らないため載せず、番号を skipped へ足す。replacing を渡すと本文の
+    `## 置き換える箇条` を足し、形に合わない行を unreadable へ items の行として足す（#1834）。"""
     out = []
     for n in prs:
         d = pr_view(root, n, "title,body,state")
@@ -881,9 +989,15 @@ def pr_notes(root, prs, skipped=None):
         if not isinstance(d, dict) or not isinstance(d.get("title"), str):
             raise StepError(f"gh pr view {n} の出力を読めない", 2)
         body = d.get("body") or ""
-        items = change_items(section_lines(body, CHANGES_HEADING), n)
-        risks = change_items(section_lines(body, RISKS_HEADING), n)
-        out.append((n, items or [f"{d['title'].strip()}（#{n}）"], risks, not items))
+        items = gh_sections.section_items(body, CHANGES_HEADING, n)
+        risks = gh_sections.section_items(body, RISKS_HEADING, n)
+        if replacing is not None:
+            found, bad = replaced.replacements_in(body, n)
+            replacing += found
+            unreadable is not None and unreadable.extend(
+                {"kind": "replacement", "name": f"#{n}", "result": "unreadable", "text": t} for t in bad
+            )
+        out.append((n, items or [f"{d['title'].strip()}（#{n}）"], risks, not items, others.migration_items(body, n)))
     return require_merged(out, prs)
 
 
@@ -892,8 +1006,10 @@ def replace_lines_under(lines, at, block):
     lines[at + 1 : next_h2(lines, at)] = [""] + block + [""]
 
 
-def write_notes(root, version, plugin, bullets):
-    items = []
+def write_notes(root, version, plugin, bullets, migration=()):
+    """CHANGELOG.md の版の節を箇条にする。移行の手順があれば `### 移行の手順` の下へ並べる（I6・I7）。
+    plugin の README は読まず書かない（#1867: 更新情報は CHANGELOG.md の版の節が正本）。"""
+    bullets = [*bullets, *(["", "### 移行の手順", "", *migration] if migration else [])]
     cl = root / "CHANGELOG.md"
     if not cl.is_file():
         raise StepError("CHANGELOG.md が無い", EXIT_PRECONDITION)
@@ -904,23 +1020,7 @@ def write_notes(root, version, plugin, bullets):
         raise StepError(f"CHANGELOG.md に {head} の節が無い（先に changelog を走らせる）", EXIT_PRECONDITION)
     replace_lines_under(lines, at, bullets)
     cl.write_text("\n".join(lines), encoding="utf-8")
-    items.append({"kind": "section", "name": "CHANGELOG.md", "result": "replaced", "heading": lines[at], "lines": len(bullets)})
-    try:
-        pdir = plugin_dir(root, plugin)
-    except StepError:
-        pdir = None
-    readme = pdir / "README.md" if pdir else None
-    h = f"## v{version} へ更新するとき"
-    if readme and readme.is_file():
-        rl = readme.read_text(encoding="utf-8").split("\n")
-        ra = next((j for j in h2_lines(rl) if rl[j] == h), None)
-        if ra is not None:
-            replace_lines_under(rl, ra, bullets)
-            readme.write_text("\n".join(rl), encoding="utf-8")
-            items.append(
-                {"kind": "section", "name": readme.relative_to(root).as_posix(), "result": "replaced", "heading": h, "lines": len(bullets)}
-            )
-    return items
+    return [{"kind": "section", "name": "CHANGELOG.md", "result": "replaced", "heading": lines[at], "lines": len(bullets)}]
 
 
 def approval_cell(text):
@@ -928,7 +1028,7 @@ def approval_cell(text):
     return mdtable.cell_text(text.replace("\n", "<br>"))
 
 
-def write_approval(path, version, bullets, risks, verified, ref):
+def write_approval(path, version, bullets, risks, verified, ref, migration=()):
     if not path.is_file():
         raise StepError(f"提示物 {path} が無い（先に approval-facts を走らせる）", EXIT_PRECONDITION)
     names = "・".join(RUNTIME_NAMES.get(r, r) for r in verified)
@@ -949,12 +1049,15 @@ def write_approval(path, version, bullets, risks, verified, ref):
     missing = [k for k in rows if k not in done]
     if missing:
         raise StepError(f"提示物に欄が無い: {', '.join(missing)}", EXIT_PRECONDITION)
-    if RISKS_HEADING not in lines:
-        at = next((i for i, l in enumerate(lines) if l == "## 同意を求めること"), len(lines))
-        lines[at:at] = [RISKS_HEADING, "", *(risks or ["- PR の本文に記載が無い"]), ""]
+    if any(lines[i] == RISKS_HEADING for i in h2_lines(lines)):  # 既にある危険は消さず、無い箇条だけを足す（#1834）
+        others.merge_lines(lines, RISKS_HEADING, list(risks), drop=(NO_RISKS,))
+    else:
+        others.put_section(lines, RISKS_HEADING, list(risks) or [NO_RISKS])
+    others.put_section(lines, others.MIGRATION_HEADING, list(migration) or ["- 無し"])
     path.write_text("\n".join(lines), encoding="utf-8")
     return [{"kind": "cell", "name": k, "result": "written"} for k in rows] + [
-        {"kind": "section", "name": RISKS_HEADING, "result": "written", "lines": len(risks)}
+        {"kind": "section", "name": RISKS_HEADING, "result": "written", "lines": len(risks)},
+        {"kind": "section", "name": others.MIGRATION_HEADING, "result": "written", "lines": len(migration)},
     ]
 
 
@@ -966,36 +1069,71 @@ def unmerged_note(skipped):
     return f"（マージされていない {' '.join(f'#{n}' for n in skipped)} は載せない）" if skipped else ""
 
 
+def notes_prs(root, a):
+    """notes が欄を書く PR。--approval なら承認資料の「含む PR」（--prs はそこに無い番号があれば止まる。#1274）。"""
+    if not a.approval:
+        return a.prs, None
+    path = Path(a.approval)
+    path = path if path.is_absolute() else root / path
+    listed = included.read_included(path)
+    if missing := [n for n in a.prs if n not in listed]:
+        names = " ".join(f"#{n}" for n in missing)
+        raise StepError(f"--prs の {names} が承認資料の「含む PR」に無い（approval-facts で承認資料を作り直す）", EXIT_PRECONDITION)
+    return listed, path
+
+
 def cmd_notes(a):
     root = git_root(a.root)
     skipped = []
-    notes = pr_notes(root, a.prs, skipped)
-    bullets = [f"- {i}" for _, items, _, _ in notes for i in items]
-    risks = [f"- {i}" for _, _, rs, _ in notes for i in rs]
-    fallback = sum(1 for *_, by_title in notes if by_title)
-    if a.approval:
-        path = Path(a.approval)
-        path = path if path.is_absolute() else root / path
+    prs, path = notes_prs(root, a)
+    reps, bad = [], []
+    notes = pr_notes(root, prs, skipped, reps, bad)
+    before = {n: items for n, items, *_ in notes}
+    after, rep_items = replaced.apply(before, reps)  # 後の PR が置き換えた箇条を除く（#1834）
+    rep_items += bad
+    gone = sum(len(before[n]) - len(after[n]) for n in before)
+    bullets = [f"- {i}" for n, *_ in notes for i in after[n]]
+    risks = [f"- {i}" for _, _, rs, *_ in notes for i in rs]
+    migration = [f"- {i}" for *_, ms in notes for i in ms]
+    fallback = sum(1 for *_, by_title, _ in notes if by_title)
+    if path:
         verified = [r for r in (a.verified or "").split(",") if r]
-        items = write_approval(path, a.version, bullets, risks, verified, a.ref) + unmerged_items(skipped)
+        ref = a.ref or release_decl(root, a)[0]
+        items = write_approval(path, a.version, bullets, risks, verified, ref, migration) + unmerged_items(skipped) + rep_items
         emit(
             result(
                 TOOL,
                 "ok",
                 f"提示物の欄を {len(notes)} 件の PR から書いた{unmerged_note(skipped)}",
                 items,
-                {"version": a.version, "prs": len(notes), "lines": len(bullets), "approval": str(path), "unmerged": skipped},
+                {
+                    "version": a.version,
+                    "prs": len(notes),
+                    "lines": len(bullets),
+                    "migration": len(migration),
+                    "approval": str(path),
+                    "unmerged": skipped,
+                    "replaced": gone,
+                },
             )
         )
         return
-    items = write_notes(root, a.version, a.plugin, bullets) + unmerged_items(skipped)
+    items = write_notes(root, a.version, plugin_of(root, a), bullets, migration) + unmerged_items(skipped) + rep_items
     emit(
         result(
             TOOL,
             "ok",
             f"{len(notes)} 件の PR の利用者向けの変化を書いた{unmerged_note(skipped)}",
             items,
-            {"version": a.version, "prs": len(notes), "lines": len(bullets), "fallback": fallback, "unmerged": skipped},
+            {
+                "version": a.version,
+                "prs": len(notes),
+                "lines": len(bullets),
+                "migration": len(migration),
+                "fallback": fallback,
+                "unmerged": skipped,
+                "replaced": gone,
+            },
         )
     )
 
@@ -1017,46 +1155,82 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--to", required=True, type=version_arg)
     p.add_argument(
         "--base",
-        default="develop",
-        help="起点のブランチ。作業場所の版がすでに --to で、origin/<base> の版と違うなら打ち直しとして ok を返す",
+        help="起点のブランチ（既定は宣言のベースブランチ）。作業場所の版がすでに --to で、origin/<base> の版と違うなら打ち直しとして ok を返す",
     )
     p.set_defaults(func=cmd_bump)
     p = sub.add_parser("changed-plugins", parents=[common], help="前のタグからの差分にある他のプラグインと上げる版")
     p.add_argument("--since", help="前のタグ（省略時は <--plugin>--v の接尾辞の無い最も新しいタグ）")
-    p.add_argument("--plugin", default="ndf", help="除くプラグイン（宣言の release.plugin）")
+    p.add_argument("--plugin", help="除くプラグイン（既定は宣言の release.plugin）")
+    p.add_argument("--prs", nargs="+", type=int, metavar="PR番号", help="版に含む PR（本文と閉じる課題から上げ幅の候補を出す）")
+    p.add_argument("--approval", help="承認資料。「版を上げる他のプラグイン」の節を書く")
+    p.add_argument("--set", action="append", metavar="名前=上げ幅", help="--approval: 承認ゲート 2 で決めた上げ幅へ行を書き直す")
+    p.add_argument("--decided", help="承認資料の表の上げ幅で上げた版を返す（本番の bump-others）")
     p.set_defaults(func=cmd_changed_plugins)
 
-    p = sub.add_parser("changelog", parents=[common], help="CHANGELOG.md と plugin の README の更新案内へ PR のタイトルを並べる")
+    p = sub.add_parser("changelog", parents=[common], help="CHANGELOG.md の版の節へ PR のタイトルを並べる")
     p.add_argument("--version", required=True, type=version_arg)
     p.add_argument("--prs", nargs="+", required=True, type=int, metavar="PR番号")
-    p.add_argument("--plugin", default="ndf")
+    p.add_argument("--plugin", help="配るプラグイン（既定は宣言の release.plugin）")
     p.set_defaults(func=cmd_changelog)
 
     p = sub.add_parser(
-        "release", parents=[common], help="release/v<版> を develop へマージし、prod なら main へ出してタグと Release を作る"
+        "release",
+        parents=[common],
+        help="release/v<版> をベースブランチへマージし、prod なら本番チャネルへ出してタグと Release を作る（ブランチは .ndf/worktree.json）",
     )
     p.add_argument("--version", required=True, type=version_arg)
     p.add_argument("--channel", required=True, choices=("dev", "prod"))
-    p.add_argument("--plugins", default="ndf", help="カンマ区切り（例 ndf,mcp-serena）")
+    p.add_argument("--plugins", help="カンマ区切り（例 ndf,mcp-serena。既定は宣言の release.plugin。先頭がタグと題に使うプラグイン）")
+    p.add_argument("--ci-wait", type=float, default=3600.0, help="待つ PR ごとの CI の待ちの上限（秒）")
+    g = p.add_mutually_exclusive_group()
+    g.add_argument("--approved-sha", metavar="SHA", help="prod: 承認したコミット（approval-facts の metrics.approved_sha。40 桁）")
+    g.add_argument("--approval", help="prod: 承認資料（「承認したコミット」と「承認の記録」の欄を読む）")
     p.set_defaults(func=cmd_release)
+
+    p = sub.add_parser("record", parents=[common], help="本番の配布の後に、本番のリリースの PR へリリース記録（## 配布の記録）を書く")
+    g = p.add_mutually_exclusive_group(required=True)
+    g.add_argument("--version", type=version_arg)
+    g.add_argument("--promote", action="store_true", help="昇格の Pull Request（--head → --base）のマージで出たときの記録")
+    p.add_argument("--head", help="--promote: 昇格の Pull Request の head（ベースブランチ）")
+    p.add_argument("--base", help="--promote: 昇格の Pull Request の base（本番チャネル）")
+    p.add_argument("--prs", nargs="+", required=True, type=int, metavar="PR番号", help="スプリントの PR（`スプリント:` の行に並べる）")
+    p.add_argument("--plugin", help="配るプラグイン（既定は宣言の release.plugin。タグ <名前>--v<版> に使う）")
+    p.set_defaults(func=cmd_record)
+
+    p = sub.add_parser("approve", parents=[common], help="本番への配布の承認（ゲート 2）を承認資料へ記録する")
+    p.add_argument("--approval", required=True, help="承認資料")
+    p.add_argument("--approved-sha", required=True, metavar="SHA", help="提示した承認資料を書いた approval-facts の metrics.approved_sha")
+    p.add_argument("--by", required=True, choices=("user", "mvv"), help="承認した者")
+    p.set_defaults(func=cmd_approve)
 
     p = sub.add_parser("approval-facts", parents=[common], help="本番承認の提示物のうち機械で作れる部分を書き出す")
     p.add_argument("--version", required=True, type=version_arg)
-    p.add_argument("--prs", nargs="+", required=True, type=int, metavar="PR番号")
+    p.add_argument(
+        "--prs",
+        nargs="+",
+        required=True,
+        type=int,
+        metavar="PR番号",
+        help="前のタグからベースブランチへ入った PR に足す PR（マージ前の PR など）",
+    )
     p.add_argument("--prev-tag")
+    p.add_argument("--plugin", help="配るプラグイン（既定は宣言の release.plugin。タグ <名前>--v<版> に使う）")
+    p.add_argument("--approval", help="前の承認資料。作り直しで approval-facts の書かない節（手で足した節など）を残す")
     p.set_defaults(func=cmd_approval_facts)
 
     p = sub.add_parser(
-        "notes", parents=[common], help="PR 本文の「利用者向けの変化」から CHANGELOG と更新案内（--approval なら提示物の欄）を組む"
+        "notes", parents=[common], help="PR 本文の「利用者向けの変化」から CHANGELOG の版の節（--approval なら提示物の欄）を組む"
     )
     p.add_argument("--version", required=True, type=version_arg)
-    p.add_argument("--prs", nargs="+", required=True, type=int, metavar="PR番号")
-    p.add_argument("--plugin", default="ndf")
+    p.add_argument(
+        "--prs", nargs="+", required=True, type=int, metavar="PR番号", help="--approval なら提示物の「含む PR」にあることを確かめるだけ"
+    )
+    p.add_argument("--plugin", help="配るプラグイン（既定は宣言の release.plugin）")
     p.add_argument("--approval", help="本番承認の提示物。渡すと「配る中身」「検証への配布で確かめたこと」の欄を書く")
     p.add_argument("--verified", default="", help="--approval: 導入を確かめた経路（カンマ区切り。例 claude,codex,kiro）")
-    p.add_argument("--ref", default="develop", help="--approval: 検証への配布で導入した ref")
+    p.add_argument("--ref", help="--approval: 検証への配布で導入した ref（既定は宣言のベースブランチ）")
     p.set_defaults(func=cmd_notes)
-    return ap
+    return deploy.add_deploy_parser(sub, common, ap)  # deploy-facts（手動反映の本番系の承認資料。#1454）
 
 
 def main(argv: list[str] | None = None) -> int:

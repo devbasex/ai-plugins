@@ -10,6 +10,8 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
+import pytest
+
 
 def test_plugin_module_importable():
     """plugin module が import 可能で pytest_plugins/markers が宣言されている。"""
@@ -29,7 +31,15 @@ def test_addoption_registered(pytester):
     assert "--pwk-out-dir" in out
     assert "--pwk-no-evidence" in out
     assert "--pwk-overlay" in out
-    assert "--pwk-drive-folder" in out
+    assert "--pwk-drive-folder" not in out
+
+
+def test_drive_folder_option_is_rejected(pytester):
+    """Drive への保管は外した。渡した実行は未知の引数として止まる（#744 の決定 7）。"""
+    pytester.makepyfile("def test_dummy(): pass\n")
+    res = pytester.runpytest("--pwk-drive-folder", "FOLDER")
+    assert res.ret == pytest.ExitCode.USAGE_ERROR
+    assert "unrecognized arguments: --pwk-drive-folder" in res.stderr.str()
 
 
 def test_markers_registered(pytester):

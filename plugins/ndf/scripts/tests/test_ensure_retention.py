@@ -41,3 +41,39 @@ def test_writes_under_claude_config_dir(tmp_path: Path) -> None:
     data = json.loads((cfg / "settings.json").read_text())
     assert data["cleanupPeriodDays"] == 90
     assert not (home / ".claude" / "settings.json").exists()
+
+
+SWITCH = Path(__file__).resolve().parents[1] / "statusline-switch.sh"
+
+
+def _linked(tmp_path: Path) -> tuple[Path, Path, Path]:
+    """共有の settings.json への symlink を持つアカウントの設定ディレクトリ（#1576）。"""
+    home, shared, account = tmp_path / "home", tmp_path / "shared", tmp_path / "account"
+    for d in (home, shared, account):
+        d.mkdir()
+    (shared / "settings.json").write_text('{"model": "sonnet"}')
+    os.symlink(shared / "settings.json", account / "settings.json")
+    return home, shared, account
+
+
+def test_retention_writes_through_symlink(tmp_path: Path) -> None:
+    """受け入れ条件 15・I16: symlink は symlink のまま、値と印・排他は参照先の側に入る。"""
+    home, shared, account = _linked(tmp_path)
+    result = _run(home, account)
+    assert result.returncode == 0, result.stderr
+    assert (account / "settings.json").is_symlink()
+    data = json.loads((shared / "settings.json").read_text())
+    assert data == {"model": "sonnet", "cleanupPeriodDays": 90}
+    assert (shared / ".ndf-retention-checked").exists() and not (account / ".ndf-retention-checked").exists()
+
+
+def test_statusline_ensure_writes_through_symlink(tmp_path: Path) -> None:
+    """受け入れ条件 15・I16: statusline-switch.sh ensure も symlink を残して参照先へ書く。"""
+    home, shared, account = _linked(tmp_path)
+    env = {**os.environ, "HOME": str(home), "CLAUDE_CONFIG_DIR": str(account)}
+    result = subprocess.run(["bash", str(SWITCH), "ensure"], capture_output=True, text=True, env=env)
+    assert result.returncode == 0, result.stderr
+    assert (account / "settings.json").is_symlink()
+    data = json.loads((shared / "settings.json").read_text())
+    assert data["model"] == "sonnet" and "statusLine" in data
+    assert not any(p.name.startswith(".ndf-statusline") for p in account.iterdir())

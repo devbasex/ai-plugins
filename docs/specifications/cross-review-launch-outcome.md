@@ -28,13 +28,13 @@ Skill（cross-review / cross-refactoring）はその値を読むだけで、同�
 | 起動 1 回 | 起動の手順が担当を 1 度起動し、監視がそれを見終わるまで |
 | 起動結果 | 起動 1 回の終わり方。監視の状態と理由、結果ファイルの有無と読めるかを合わせたもの（`LaunchOutcome`） |
 | 理由 | 起動結果の語彙の 1 語（`REASONS`） |
-| リトライ可否 | 同じ担当を同じ条件で起動し直せば解ける起動結果か（`relaunch_same_agent`） |
+| リトライ可否 | 同じ担当を同じ条件で起動し直せば解ける起動結果か（`plugins/ndf/scripts/lib/assignment.py` の `relaunch_same_agent`） |
 | 使える結果 | 結果ファイルがあり、JSON オブジェクトとして読める（`payload`） |
 | 起動結果のライブラリ | `plugins/ndf/scripts/lib/monitor_outcome.py` |
 | 監視 | `plugins/ndf/scripts/lib/monitor.py` |
 | 起動の手順 | `plugins/ndf/scripts/lib/launch-cli.sh` |
 | 起動結果を読む関数 | `read_launch_outcome(tmp_dir, stem, result_path)` |
-| 起動し直せない理由の集合 | `NO_RELAUNCH_REASONS` |
+| 起動し直せない理由の集合 | `assignment.NO_RELAUNCH_REASONS` |
 | 状態からの既定の理由 | `reason_for(status)` |
 | 結果ファイル | `<stem>-result.json` |
 | 監視結果ファイル | `<stem>-monitor.json` |

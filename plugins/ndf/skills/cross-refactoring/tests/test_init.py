@@ -17,6 +17,8 @@ import pytest
 
 
 HEAD_BRANCH = "refactor/target"
+# 応答から項目を外す印（`run_init` の `pr_status`）
+MISSING = object()
 
 
 def _git(*args, cwd):
@@ -86,16 +88,22 @@ def run_init(refactor_lib, paths, patch_lib, refactor, origin_repo, monkeypatch)
     """
     refactor_lib = sys.modules["refactor_lib"]
     probed: list[list[str]] = []
+    probed_models: list[dict] = []
 
-    def _run(args, viewer="someone-else", probe=None, real_probe=False):
+    def _run(args, viewer="someone-else", probe=None, real_probe=False, pr_status=None):
         """`probe` を渡すと確認を差し替える。`{ランタイム: 理由}` の者だけが通らない。
+
+        `pr_status` は Pull Request の応答の `state` / `draft` / `merged_at` を上書きする（#1658。`draft` は判定に使わない）。
+        値に `MISSING` を渡すとその項目を応答から外す。
 
         `real_probe` を立てると差し替えず、止めない確認をそのまま走らせる（#813）。
         """
         real_sh = paths.sh
+        _run.gh_calls = []
 
         def fake_sh(cmd, cwd=None, check=True):
             if cmd[0] == "gh":
+                _run.gh_calls.append(list(cmd))
                 if "nameWithOwner" in cmd:
                     return "acme/demo"
                 if cmd[:3] == ["gh", "api", "user"]:
@@ -109,14 +117,22 @@ def run_init(refactor_lib, paths, patch_lib, refactor, origin_repo, monkeypatch)
                 if len(cmd) == 3 and cmd[:2] == ["gh", "api"] and cmd[2].startswith("repos/"):
                     if cmd[2] != f"repos/acme/demo/pulls/{args.pr}":
                         return ""
-                    return json.dumps(
-                        {
-                            "number": args.pr,
-                            "user": {"login": "me"},
-                            "head": {"ref": HEAD_BRANCH, "repo": {"full_name": "acme/demo"}},
-                            "base": {"ref": "main"},
-                        }
-                    )
+                    body = {
+                        "number": args.pr,
+                        "user": {"login": "me"},
+                        "head": {"ref": HEAD_BRANCH, "repo": {"full_name": "acme/demo"}},
+                        "base": {"ref": "main"},
+                        # 実際の応答は必ずこの 3 項目を持つ（#1658 の決定 5）
+                        "state": "open",
+                        "draft": True,
+                        "merged_at": None,
+                    }
+                    for key, value in (pr_status or {}).items():
+                        if value is MISSING:
+                            body.pop(key, None)
+                        else:
+                            body[key] = value
+                    return json.dumps(body)
                 raise AssertionError(f"想定外の gh 呼び出し: {cmd}")
             return real_sh(cmd, cwd=cwd, check=check)
 
@@ -134,15 +150,17 @@ def run_init(refactor_lib, paths, patch_lib, refactor, origin_repo, monkeypatch)
             cmd_setup = sys.modules["refactor_lib.commands.setup"]
             probed.clear()
 
-            def fake_probe(runtimes, *, info, env=None):
+            def fake_probe(runtimes, *, info, env=None, models=None, level="model"):
                 names = list(runtimes)
                 probed.append(names)
+                probed_models.append(dict(models or {}))
                 return {n: {"command": n, "ok": n not in probe, "detail": probe.get(n, "")} for n in names}, False
 
             monkeypatch.setattr(cmd_setup.auth, "probe_auth", fake_probe)
         refactor.cmd_init(args)
 
     _run.probed = probed
+    _run.probed_models = probed_models
     return _run
 
 
@@ -253,6 +271,8 @@ def test_init_starts_when_an_unreadable_path_hides_a_missing_cli(run_init, tmp_p
             "kiro": ("ndf-stub-missing",),
         },
     )
+    # 最小の呼び出しは本物の CLI を呼ばないよう外す（この試験の主題は認証確認の起動の失敗）
+    monkeypatch.setattr(cmd_setup.auth, "MODEL_PROBES", {})
     monkeypatch.setenv("PATH", f"{os.environ['PATH']}:{bin_dir}:{unreadable}")
     try:
         run_init(_args(tmp_path), real_probe=True)
@@ -263,6 +283,94 @@ def test_init_starts_when_an_unreadable_path_hides_a_missing_cli(run_init, tmp_p
     assert state["runtimes"] == ["claude", "codex"]
     assert list(state["participants"]["unavailable"]) == ["kiro"]
     assert "kiro を担当から外しました" in capsys.readouterr().err
+
+
+# 参加の確認の最小の呼び出しまで答える偽の CLI（#1290）。codex は FAKE_CODEX の形で答える:
+# 404 = 設定のモデルを引けないが既定のモデルでは引ける / 404all = 既定のモデルでも引けない / revoked = 認証の失効
+FAKE_PARTICIPANT_CLI = r"""#!/bin/sh
+name=$(basename "$0")
+case "$name $1 $2" in
+  "claude auth status"|"codex login status"|"kiro-cli whoami ") echo ok; exit 0;;
+esac
+cat > /dev/null
+echo "$name $*" >> "$FAKE_CALLS"
+[ "$name" = codex ] || { echo OK; exit 0; }
+case " $* " in
+  *" --ignore-user-config "*|*" --model gpt-6-astra "*) [ "$FAKE_CODEX" = 404all ] || { echo "model: gpt-6-astra" >&2; echo OK; exit 0; };;
+esac
+case " $* " in
+  *" --model explicit-model "*) echo 'ERROR: unexpected status 404 Not Found: The model `explicit-model` does not exist or you do not have access to it.' >&2; exit 1;;
+esac
+echo "model: gpt-5.5" >&2
+case "$FAKE_CODEX" in
+  404|404all) echo 'ERROR: unexpected status 404 Not Found: The model `gpt-5.5` does not exist or you do not have access to it.' >&2; exit 1;;
+  revoked) echo "ERROR: Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again." >&2; exit 1;;
+esac
+echo OK
+"""
+
+
+def _fake_participants(tmp_path, monkeypatch, codex_mode):
+    bin_dir = tmp_path / "fake-bin"
+    bin_dir.mkdir()
+    for name in ("claude", "codex", "kiro-cli"):
+        (bin_dir / name).write_text(FAKE_PARTICIPANT_CLI, encoding="utf-8")
+        (bin_dir / name).chmod(0o755)
+    calls = tmp_path / "fake-calls.log"
+    calls.write_text("", encoding="utf-8")
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    monkeypatch.setenv("FAKE_CODEX", codex_mode)
+    monkeypatch.setenv("FAKE_CALLS", str(calls))
+    return calls
+
+
+@pytest.mark.parametrize(("mode", "reason"), [("404all", "model_unavailable"), ("revoked", "auth_expired")])
+def test_init_drops_a_cli_that_cannot_reach_its_model(run_init, tmp_path, monkeypatch, capsys, mode, reason):
+    """#1290 の AC1・AC2・AC3: 認証は通るがモデルを引けない・認証が失効した codex は外れ、理由が出る。"""
+    _fake_participants(tmp_path, monkeypatch, mode)
+
+    run_init(_args(tmp_path), real_probe=True)
+
+    _, state = _state_of(tmp_path)
+    p = state["participants"]
+    assert p["available"] == ["claude", "kiro"]
+    assert p["unavailable"]["codex"].startswith(f"{reason}: ERROR:")
+    assert p["checks"]["codex"]["result"] == reason
+    assert p["checks"]["claude"]["result"] == "ok" and p["checks"]["claude"]["level"] == "model"
+    err = capsys.readouterr().err
+    assert f"❌ codex: {reason}" in err
+    assert "✅ claude: 認証とモデル" in err
+
+
+def test_init_switches_a_configured_model_to_the_default(run_init, tmp_path, monkeypatch, capsys):
+    """#1290 の AC5・AC6: 設定のモデルを引けない codex は既定のモデルで入り、起動の式がそのモデルを指す。"""
+    _fake_participants(tmp_path, monkeypatch, "404")
+
+    run_init(_args(tmp_path), real_probe=True)
+
+    path, state = _state_of(tmp_path)
+    p = state["participants"]
+    assert "codex" in p["available"]
+    assert p["default_models"] == {"codex": "gpt-6-astra"}
+    assert (p["checks"]["codex"]["from_model"], p["checks"]["codex"]["model"]) == ("gpt-5.5", "gpt-6-astra")
+    assert "↪ codex: 設定のモデル gpt-5.5 を引けないため、既定のモデル gpt-6-astra で担当に入れる" in capsys.readouterr().err
+    expr = '(.models // {})[$rt] // (.participants.default_models // {})[$rt] // ""'
+    got = subprocess.run(["jq", "-r", "--arg", "rt", "codex", expr, str(path)], capture_output=True, text=True, check=True)
+    assert got.stdout.strip() == "gpt-6-astra"
+
+
+def test_init_does_not_switch_an_explicit_model(run_init, tmp_path, monkeypatch):
+    """#1290 の AC7: `--model codex=<名前>` で明示したモデルを引けなければ、切り替えずに外す。"""
+    calls = _fake_participants(tmp_path, monkeypatch, "ok")
+
+    run_init(_args(tmp_path, model=["codex=explicit-model"]), real_probe=True)
+
+    _, state = _state_of(tmp_path)
+    p = state["participants"]
+    assert p["unavailable"]["codex"].startswith("model_unavailable:")
+    assert p["default_models"] == {}
+    log = calls.read_text(encoding="utf-8")
+    assert "--model explicit-model" in log and "--ignore-user-config" not in log
 
 
 def test_init_starts_when_a_probe_cannot_be_launched(run_init, tmp_path, monkeypatch):
@@ -281,7 +389,7 @@ def test_init_starts_when_a_probe_cannot_be_launched(run_init, tmp_path, monkeyp
 
     _, state = _state_of(tmp_path)
     assert state["runtimes"] == ["claude", "codex"]
-    assert state["participants"]["unavailable"] == {"kiro": "コマンドを実行できません（Permission denied）"}
+    assert state["participants"]["unavailable"] == {"kiro": "missing_cli: コマンドを実行できません（Permission denied）"}
 
 
 def test_require_all_stops_without_writing_the_state(run_init, tmp_path):
@@ -370,14 +478,14 @@ def test_init_warns_when_kiro_is_given_auto_explicitly(run_init, tmp_path, capsy
     assert "kiro のモデルが auto です" in capsys.readouterr().err
 
 
-def test_init_warns_when_codex_or_agy_has_no_model(run_init, tmp_path, capsys):
-    """実測できないランタイムで指定が無いラウンドも、kiro の auto と同じく分離される。
+def test_init_does_not_warn_when_codex_has_no_model(run_init, tmp_path, capsys):
+    """codex は実際に動いたモデルをセッションの記録から取れる見込みがあるため、着手前に警告しない（#759）。
 
     警告の対象は参加者だけである。既定で外れる agy は、足したときだけ警告する。
     """
     run_init(_args(tmp_path, model=["kiro=claude-opus-5"]))
     warning = capsys.readouterr().err
-    assert "codex のモデルが default です" in warning
+    assert "codex のモデルが" not in warning
     assert "agy のモデルが" not in warning
 
 
@@ -422,10 +530,14 @@ def test_init_runs_the_baseline_test(run_init, tmp_path):
     assert state["baseline_test"]["command"] == "true"
 
 
-def test_init_refuses_to_start_when_the_baseline_test_fails(run_init, tmp_path):
-    """壊れた状態から始めると、壊したのか元から壊れていたのか区別できない。"""
-    with pytest.raises(SystemExit):
-        run_init(_args(tmp_path, baseline_test="false"))
+def test_a_red_baseline_does_not_stop_the_init_and_is_recorded(run_init, tmp_path, capsys):
+    """AC10 — 着手前のテストが落ちていても止めず、既存失敗として記録する。JUnit が無ければ `null` と理由。"""
+    run_init(_args(tmp_path, baseline_test="false", round_test="false"))
+    _, state = _state_of(tmp_path)
+    assert state["baseline_test"]["status"] == "red"
+    assert state["baseline_test"]["existing_failures"] is None
+    assert state["baseline_test"]["existing_failures_reason"]
+    assert "既存失敗" in capsys.readouterr().err
 
 
 def test_init_stops_when_the_scope_has_no_test_location(run_init, tmp_path):
@@ -435,14 +547,6 @@ def test_init_stops_when_the_scope_has_no_test_location(run_init, tmp_path):
     """
     with pytest.raises(SystemExit) as e:
         run_init(_args(tmp_path, scope=["src"]))
-    assert e.value.code == refactor_abort()
-
-
-def test_init_stops_when_the_test_location_is_outside_the_baseline_search(run_init, tmp_path, origin_repo):
-    """C3 — 足したテストが `--baseline-test` で実行されないなら止める。"""
-    (origin_repo / "src" / "unit").mkdir(parents=True, exist_ok=True)
-    with pytest.raises(SystemExit) as e:
-        run_init(_args(tmp_path, scope=["src", "tests"], round_test=None, baseline_test="pytest src/unit"))
     assert e.value.code == refactor_abort()
 
 
@@ -588,30 +692,66 @@ def test_no_deprecation_notice_without_the_arguments(run_init, tmp_path, capsys)
     assert "廃止" not in capsys.readouterr().err
 
 
-# ---------- 項目ごとのテストを組み立てられるか（#933 の AC3b） ----------
+# ---------- テストの戦略は引数と宣言から決まり、コマンドの文字列は読まない（#1334 AC1・AC4・AC5） ----------
 
 
-def test_an_unknown_baseline_without_a_round_test_stops(run_init, tmp_path, test_calls):
-    """AC3b — `--round-test` が無く `--baseline-test` が既知の実行器でなければ止める。"""
-    with pytest.raises(SystemExit) as e:
-        run_init(_args(tmp_path, round_test=None, baseline_test="make test"))
-    assert e.value.code == refactor_abort()
-    assert test_calls.seen == [], "テストに時間を使う前に止める"
-    assert not _state_path(tmp_path).exists()
-
-
-def test_a_known_baseline_without_a_round_test_starts(run_init, tmp_path, test_calls):
-    """AC3b — `pytest -q` なら項目ごとのテストを組み立てられるので通る。"""
-    run_init(_args(tmp_path, round_test=None, baseline_test="pytest -q"))
+def test_a_baseline_without_paths_becomes_round_only(run_init, tmp_path, test_calls, capsys):
+    """`{paths}` を含まない `--baseline-test` は、実行器が何であれ round-only としてそのまま走らせる（文字列を解析しない）。"""
+    run_init(_args(tmp_path, round_test=None, baseline_test="make test"))
     _, state = _state_of(tmp_path)
-    assert state["baseline_test"]["command"] == "pytest -q"
-    assert state["round_test"]["command"] is None
+    assert state["strategy"]["name"] == "round-only" and state["strategy"]["source"] == "args"
+    assert state["round_test"]["command"] == "make test"
+    assert test_calls.seen == ["make test"]
+    assert "STRATEGY=round-only" in capsys.readouterr().out
 
 
-def test_an_unknown_baseline_with_a_round_test_starts(run_init, tmp_path, test_calls):
-    """AC3b — `--round-test` があれば、全体のテストが既知でなくても通る。"""
-    run_init(_args(tmp_path, round_test="true", baseline_test="make test"))
-    assert _state_path(tmp_path).exists()
+@pytest.mark.parametrize(
+    "prefix",
+    ["", "env X=1 ", "uv run --frozen ", "docker compose exec -T app "],
+)
+def test_a_baseline_with_paths_is_a_scope_template_whatever_the_prefix(run_init, tmp_path, test_calls, prefix):
+    """AC5 — 前置きが違っても、`{paths}` を含む引数は同じ戦略・同じ範囲の対象になる。"""
+    run_init(_args(tmp_path, round_test=None, baseline_test=f"{prefix}pytest -q {{paths}}"))
+    _, state = _state_of(tmp_path)
+    assert state["strategy"]["name"] == "local-full"
+    assert state["strategy"]["suites"][0]["scope_command"] == f"{prefix}pytest -q {{paths}}"
+    assert test_calls.seen == [f"{prefix}pytest -q ."], "全体テストは {paths} を . にしたもの"
+
+
+def test_a_template_whose_paths_is_not_a_word_stops(run_init, tmp_path, test_calls):
+    """決定 14 — `--filter={paths}` のように `{paths}` が 1 語として立っていない雛形は止める。"""
+    with pytest.raises(SystemExit) as e:
+        run_init(_args(tmp_path, round_test=None, baseline_test="pytest --filter={paths}"))
+    assert e.value.code == refactor_abort()
+    assert test_calls.seen == []
+
+
+def test_without_a_declaration_and_without_arguments_the_init_stops(run_init, tmp_path, test_calls, capsys):
+    """AC4 — 宣言に `test` が無く引数も無ければ、既定のコマンドで埋めずに欠けたキーと直し方を出して止める。"""
+    with pytest.raises(SystemExit) as e:
+        run_init(_args(tmp_path, round_test=None, baseline_test=None))
+    assert e.value.code == refactor_abort()
+    err = capsys.readouterr().err
+    assert ".ndf/project.json の test" in err and "--round-test" in err
+    assert test_calls.seen == [] and not _state_path(tmp_path).exists()
+
+
+def test_the_declaration_is_read_when_no_argument_is_given(run_init, tmp_path, test_calls, origin_repo):
+    """宣言（`.ndf/project.json`）だけを入力に戦略が決まる（AC2 の経路）。ai-plugins の値で埋めない。"""
+    decl = {
+        "version": 1,
+        "test": {
+            "suites": [{"name": "pytest", "runner": "pytest", "command": "pytest -q", "scope_command": "pytest -q {paths}", "paths": ["."]}]
+        },
+        "test_duration": {"measured": [{"seconds": 424.0, "source": "ci-steps", "detail": "x"}]},
+    }
+    (origin_repo / ".ndf").mkdir(exist_ok=True)
+    (origin_repo / ".ndf" / "project.json").write_text(json.dumps(decl), encoding="utf-8")
+    run_init(_args(tmp_path, round_test=None, baseline_test=None))
+    _, state = _state_of(tmp_path)
+    assert state["strategy"]["name"] == "local-full" and state["strategy"]["source"] == "derived:test_duration"
+    assert test_calls.seen == ["pytest -q"]
+    assert state["baseline_test"]["whole_seconds"] == 424.0
 
 
 def test_include_and_exclude_parse_names_and_none(patch_lib, refactor, monkeypatch):
@@ -677,16 +817,13 @@ def test_init_records_the_ci_check(run_init, tmp_path):
     assert state["ci_check"] == "tests"
 
 
-def test_baseline_test_is_required(refactor, monkeypatch):
-    """振る舞い不変を示す手段が無い書き換えは構造改善ではないため、必須にする。"""
-    monkeypatch.setattr(
-        refactor.sys,
-        "argv",
-        ["refactor.py", "init", "130", "--scope", "src", "--host", "claude"],
-    )
-    with pytest.raises(SystemExit) as e:
-        refactor.main()
-    assert e.value.code == 2  # argparse の引数エラー
+def test_baseline_test_is_optional_in_the_arguments(patch_lib, refactor, monkeypatch):
+    """`--baseline-test` は任意になり、無ければ宣言の `test` を読む（#1334 前提 3）。"""
+    captured = {}
+    monkeypatch.setattr(refactor, "cmd_init", lambda args: captured.update(vars(args)))
+    monkeypatch.setattr(refactor.sys, "argv", ["refactor.py", "init", "130", "--scope", "src", "--host", "claude"])
+    refactor.main()
+    assert captured["baseline_test"] is None and captured["round_test"] is None
 
 
 def test_init_is_idempotent(run_init, tmp_path, capsys):
@@ -793,10 +930,10 @@ def test_init_records_the_vocabulary_for_the_prompt(run_init, tmp_path, vocabula
 def test_resume_before_the_plan_rebuilds_the_limits_from_the_new_budget(run_init, tmp_path):
     """決定 24 — 改修計画の前に予算を置き換えた再開は、上限の表を新しい予算で組み直す。"""
     run_init(_args(tmp_path, budget_minutes="30"))
-    run_init(_args(tmp_path, budget_minutes="10"))
+    run_init(_args(tmp_path, budget_minutes="20"))
     _, after = _state_of(tmp_path)
-    assert after["budget_minutes"] == 10
-    assert after["limits"]["init_test_timeout"] == 60 and after["limits"]["margin_seconds"] == 30
+    assert after["budget_minutes"] == 20
+    assert after["limits"]["init_test_timeout"] == 120 and after["limits"]["margin_seconds"] == 60
 
 
 @pytest.mark.parametrize(
@@ -827,15 +964,11 @@ def test_resume_notifies_arguments_it_does_not_reflect(run_init, tmp_path, capsy
 
 
 def test_resume_without_arguments_changes_nothing(run_init, tmp_path, capsys, test_calls):
-    """AC39 — 何も渡さない再開では、上限・モデル・参加者が変わらず、確認もしない。
-
-    `--round-test` は省く。全体のテストと同じ文字列を渡すと状態には省いた形で残り、
-    再開で同じ引数を渡しても「反映しない」と知らせる（本体の既知の振る舞い）。
-    """
-    run_init(_args(tmp_path, round_test=None, baseline_test="pytest -q"), probe={})
+    """AC39 — 何も渡さない再開では、上限・モデル・参加者が変わらず、確認もしない。"""
+    run_init(_args(tmp_path, round_test="true", baseline_test="true"), probe={})
     _, before = _state_of(tmp_path)
 
-    run_init(_args(tmp_path, round_test=None, baseline_test="pytest -q"), probe={"kiro": "Not logged in"})
+    run_init(_args(tmp_path, round_test="true", baseline_test="true"), probe={"kiro": "Not logged in"})
     _, after = _state_of(tmp_path)
     assert run_init.probed == [], "担当に関わる引数を渡していないのに確かめ直している"
     for key in ("budget_minutes", "limits", "models", "runtimes", "participants", "implementer"):
@@ -947,9 +1080,9 @@ def test_calls(patch_lib):
     seen: list[str] = []
     codes: dict[str, int] = {}
 
-    def fake_run(command, cwd, timeout, grace=5.0):
+    def fake_run(command, cwd, timeout, grace=5.0, output=None):
         seen.append(command)
-        return codes.get(command, 0), False
+        return codes.get(command if isinstance(command, str) else " ".join(command), 0), False
 
     patch_lib("run_with_timeout", fake_run)
     seen_codes = codes
@@ -963,62 +1096,41 @@ def test_the_round_test_is_parsed_and_unset_by_default(patch_lib, refactor, monk
 
 
 def test_init_records_the_round_test(run_init, tmp_path, test_calls):
-    """AC1 — `--round-test` は状態の `round_test.command` に残る。"""
+    """AC1 — `--round-test` は状態の `round_test.command` に残り、戦略は round-only になる。"""
     run_init(_args(tmp_path, round_test="pytest -q -k scope", baseline_test="true"))
     _, state = _state_of(tmp_path)
+    assert state["strategy"]["name"] == "round-only"
     assert state["round_test"]["command"] == "pytest -q -k scope"
     assert state["round_test"]["status"] == "green"
-    assert state["baseline_test"]["command"] == "true"
+    assert state["baseline_test"]["mode"] == "round"
     assert test_calls.seen == ["true", "pytest -q -k scope"], "全体テストの後にラウンドのテストを 1 回"
 
 
-def test_an_omitted_round_test_is_recorded_as_omitted_and_runs_once(run_init, tmp_path, test_calls):
-    """AC1 / AC10b — 省けば `round_test.command` は空で、テストの実行は 1 回。
-
-    省いたことを残す。項目の検証は全体のテストから組み立てた語の並びだけを使う。
-    """
+def test_a_baseline_without_paths_and_no_round_test_runs_once(run_init, tmp_path, test_calls):
+    """`{paths}` の無い `--baseline-test` だけなら、それがラウンドテストと全体テストを兼ね、着手前の実行は 1 回。"""
     run_init(_args(tmp_path, round_test=None, baseline_test="pytest -q"))
     _, state = _state_of(tmp_path)
-    assert state["round_test"]["command"] is None
+    assert state["round_test"]["command"] == "pytest -q"
     assert state["round_test"]["status"] == "green"
     assert test_calls.seen == ["pytest -q"]
 
 
 def test_a_round_test_equal_to_the_baseline_test_runs_once(run_init, tmp_path, test_calls):
-    """全体のテストと同じ文字列は 2 度走らせず、省いたときと同じに残す。"""
+    """全体テストと同じ文字列は 2 度走らせない。"""
     run_init(_args(tmp_path, round_test="true", baseline_test="true"))
     _, state = _state_of(tmp_path)
-    assert state["round_test"]["command"] is None
+    assert state["round_test"]["command"] == "true"
     assert test_calls.seen == ["true"]
 
 
 @pytest.mark.parametrize("command", ["false", "exit 5"])
-def test_init_stops_when_the_round_test_fails(run_init, tmp_path, command):
-    """AC4 — ラウンドのテストが成功しなければ止める。集まらない終了コード 5 も失敗。"""
-    with pytest.raises(SystemExit) as e:
-        run_init(_args(tmp_path, round_test=command, baseline_test="true"))
-    assert e.value.code == refactor_abort()
-    assert not _state_path(tmp_path).exists()
-
-
-def test_init_stops_when_the_round_test_runs_outside_the_scope_tests(run_init, tmp_path, test_calls):
-    """AC4 — `--scope` のテストの置き場所が `--round-test` の実行集合の外なら止める。"""
-    with pytest.raises(SystemExit) as e:
-        run_init(_args(tmp_path, scope=["src", "tests"], round_test="pytest src", baseline_test="true"))
-    assert e.value.code == refactor_abort()
-    assert test_calls.seen == [], "関門はテストの実行より先"
-
-
-def test_init_hints_the_round_test_when_the_baseline_test_is_broad(run_init, tmp_path, capsys, test_calls):
-    """AC5 — `--round-test` が無く全体を走らせる `--baseline-test` なら、案内して続ける。"""
-    run_init(_args(tmp_path, round_test=None, baseline_test="pytest -q"))
-    assert "--round-test" in capsys.readouterr().err
-    assert _state_path(tmp_path).exists()
-
-
-def test_init_does_not_hint_when_the_round_test_is_given(run_init, tmp_path, capsys):
-    run_init(_args(tmp_path, round_test="true", baseline_test="true"))
-    assert "--round-test" not in capsys.readouterr().err
+def test_a_failing_round_test_is_recorded_and_does_not_stop(run_init, tmp_path, command, test_calls):
+    """AC10 — ラウンドテストが落ちても止めず、着手前の状態を red として残す。"""
+    test_calls.codes[command] = 5 if command == "exit 5" else 1
+    run_init(_args(tmp_path, round_test=command, baseline_test="true"))
+    _, state = _state_of(tmp_path)
+    assert state["baseline_test"]["status"] == "red"
+    assert state["round_test"]["status"] == "red"
 
 
 def test_resume_notifies_a_changed_round_test(run_init, tmp_path, capsys):
@@ -1050,7 +1162,7 @@ def timeout_calls(patch_lib):
     seen: list[str] = []
     timed_out: set[str] = set()
 
-    def fake_run(command, cwd, timeout, grace=5.0):
+    def fake_run(command, cwd, timeout, grace=5.0, output=None):
         seen.append(command)
         if command in timed_out:
             return None, True
@@ -1205,7 +1317,7 @@ def test_a_named_implementer_wins(run_init, tmp_path, capsys):
     _, state = _state_of(tmp_path)
     assert (state["implementer"], state["implementer_reason"]) == ("kiro", "named")
     assert state["implementer_named"] == "kiro"
-    assert state["implementer_model"] == {"requested": "claude-opus-5", "observed": None}
+    assert state["implementer_model"] == {"requested": "claude-opus-5", "observed": None, "unobserved": None}
     out = capsys.readouterr().out.splitlines()
     assert "IMPL=kiro" in out and "IMPL_MODEL=claude-opus-5" in out
 
@@ -1390,53 +1502,48 @@ def test_start_phase_rewrites_the_launch_start_for_fix(phase_state, start_phase)
 # 予算 60 分・開始 10:00。余裕は 0.05·B = 180 秒（決定 24）。
 PLANNED = {
     "plan": {"reserve": {"danger_whole_test": 1.0, "final_whole_test": 1.0, "fix": 5.5}},
-    "items": [
-        {
-            "start_deadline": "2026-09-24T10:30:00+09:00",
-            "test_start_deadline": "2026-09-24T10:20:00+09:00",
-            "estimate": {"test": 3.0, "implement": 2.0, "verify": 0.2},
-        }
-    ],
+    "items": [{"status": "planned", "estimate": {"test": 3.0, "implement": 2.0, "verify": 0.2}}],
 }
 
 
 @pytest.mark.parametrize(
     "phase, planned, expected",
     [
-        ("propose", False, 12 * 60 + 180),  # 提案の枠の終わり 10:12
-        ("plan", False, 18 * 60 + 180),  # 改修計画の枠の終わり 10:18
-        ("add-tests", True, 23 * 60 + 180),  # 最後の項目の完了の締め切り 10:20 + 3 分
-        ("implement", True, 32 * 60 + 180),  # 10:30 + 2 分
-        ("fix", True, 58 * 60 + 180),  # 開始 + 60 − 全体のテストの予備時間 2 分
-        ("final-fix", False, 60 * 60 + 180),  # 想定最大時間の終わり 11:00
+        ("propose", False, 6 + 12 * 60 + 180),  # 提案の枠の終わり 10:12 + 着手前のテスト 6 秒（#1385）
+        ("plan", False, 6 + 18 * 60 + 180),  # 改修計画の枠の終わり 10:18 + 6 秒
+        ("add-tests", True, round(50.3 * 60) + 180),  # 実装の終わり − Σ implement（#1743 I13）
+        ("implement", True, round(52.3 * 60) + 180),  # 11:00 − R 7.5 分 − Σ verify 0.2 分
+        ("fix", True, 60 * 60),  # 開始 + 60 − 全体のテストの予備時間 2 分 + 余裕を、想定最大時間の終わり 11:00 で切る
+        ("final-fix", False, 60 * 60),  # 確かめの見込みが無い（v = 0）ので H − v = 11:00 で切る
     ],
 )
 def test_start_phase_returns_the_time_left_to_the_end_of_the_phase(phase_state, start_phase, phase, planned, expected):
-    """決定 23・24: 監視の上限は、その手順の終わりまでの残り + 余裕。CLI の上限は + 余裕。"""
+    """決定 23・24: 監視の上限は、その手順の終わりまでの残り + 余裕。CLI の上限は + 余裕。
+    どちらも想定最大時間の終わり（最終ゲート修正は確かめの開始の締め切り）で切る（#1932 原則 1）。"""
     if planned:
         phase_state.edit(**PLANNED)
     state, timeout = start_phase(phase)
     assert timeout == str(expected)
     record = state["phases"][phase]
-    assert record["timeout"] == expected and record["cli_timeout"] == expected + 180
+    assert record["timeout"] == expected and record["cli_timeout"] == min(expected + 180, 60 * 60)
 
 
 @pytest.mark.parametrize(
-    "minutes, rounds, expected",
+    "minutes, expected",
     [
-        (70, 1, 330 + 180),  # 終わり（11:00）の後の 1 回目: 予備時間の final_fix（5.5 分）+ 余裕
-        (58, 1, 330 + 180),  # 残り 2 分 < 予備時間: 予備時間の長さを渡す
-        (50, 1, 600 + 180),  # 残り 10 分 > 予備時間: 残り + 余裕
-        (70, 2, 180),  # 2 回目からは今までどおり（過ぎていれば余裕だけ）
+        (50, 540),  # 確かめの開始の締め切り 10:59（H − v。v = final_whole_test 1 分）までの残り。余裕は足さない
+        (58, 60),
+        (70, 1),  # 過ぎていれば 1 秒（`final-gate` が起動の前に入るかを見ている）
     ],
 )
-def test_start_phase_gives_the_first_final_fix_at_least_its_reserve(phase_state, start_phase, minutes, rounds, expected):
-    """決定 26: 最終ゲートの修正の 1 回目は、想定最大時間を過ぎていても予備時間 1 回分を渡す。"""
+def test_start_phase_cuts_the_final_fix_at_the_check_start_deadline(phase_state, start_phase, minutes, expected):
+    """#1932 原則 3・I2: 最終ゲート修正の監視と CLI の上限は、1 回目も確かめの開始の締め切り H − v で切る。"""
     reserve = dict(PLANNED["plan"]["reserve"], final_fix=5.5)
-    phase_state.edit(plan={"reserve": reserve}, items=PLANNED["items"], final_gate={"fix_rounds": rounds, "checks": []})
+    phase_state.edit(plan={"reserve": reserve}, items=PLANNED["items"], final_gate={"fix_rounds": 1, "checks": []})
     phase_state.set_now(minutes=minutes)
-    _, timeout = start_phase("final-fix")
+    state, timeout = start_phase("final-fix")
     assert timeout == str(expected)
+    assert state["phases"]["final-fix"]["cli_timeout"] == expected
 
 
 def test_start_phase_for_the_final_fix_keeps_the_phase(phase_state, start_phase):
@@ -1456,3 +1563,579 @@ def test_start_phase_rejects_an_unknown_phase(phase_state, cmd_phases):
     with pytest.raises(SystemExit) as e:
         cmd_phases.cmd_start_phase(types.SimpleNamespace(id=130, phase="review"))
     assert e.value.code == refactor_abort()
+
+
+CARMO_DECL = {
+    "version": 1,
+    "test": {
+        "strategy": "local-scoped-ci-whole",
+        "ci": {"check": "test-results", "junit_artifacts": "junit-*"},
+        "suites": [
+            {
+                "name": "phpunit",
+                "runner": "phpunit",
+                "command": "docker compose exec -T app ./vendor/bin/phpunit --log-junit build/ndf/junit.xml",
+                "scope_command": "docker compose exec -T app ./vendor/bin/phpunit --log-junit build/ndf/junit.xml {paths}",
+                "junit": "build/ndf/junit.xml",
+                "container": {"service": "app"},
+                "paths": ["tests"],
+            }
+        ],
+    },
+    "test_duration": {"measured": [{"seconds": 3827.0, "source": "ci-junit", "detail": "run"}]},
+    "ci": {
+        "provider": "github-actions",
+        "workflows": [{"path": ".github/workflows/test-results.yml", "jobs": 24, "wall_seconds": 360.0}],
+        "required_checks": ["test-results", "codex-review"],
+    },
+}
+
+
+def _push_tests_to_head(repo):
+    """head ブランチへテストの置き場所（`tests/`）を足して origin へ上げ、ローカルのブランチを消す。"""
+    _git("checkout", "-qb", HEAD_BRANCH, f"origin/{HEAD_BRANCH}", cwd=repo)
+    (repo / "tests").mkdir()
+    (repo / "tests" / "UserServiceTest.php").write_text("<?php\n")
+    _git("add", "-A", cwd=repo)
+    _git("commit", "-qm", "tests", cwd=repo)
+    _git("push", "-q", "origin", HEAD_BRANCH, cwd=repo)
+    _git("checkout", "-q", "main", cwd=repo)
+    _git("branch", "-qD", HEAD_BRANCH, cwd=repo)
+
+
+def test_a_carmo_declaration_runs_only_the_scope_test_before_the_start(run_init, tmp_path, test_calls, origin_repo):
+    """AC3・AC9・I4 — CI に任せる戦略の宣言では、`--round-test` 無しで `init` が通り、着手前は置き場所の範囲テストだけを
+    コンテナ越しに走らせる。全体テストは手元で走らせず、30 分の予算の 0.10 倍で止まらない。"""
+    _push_tests_to_head(origin_repo)
+    (origin_repo / ".ndf").mkdir(exist_ok=True)
+    (origin_repo / ".ndf" / "project.json").write_text(json.dumps(CARMO_DECL), encoding="utf-8")
+
+    run_init(_args(tmp_path, round_test=None, baseline_test=None, budget_minutes=30))
+
+    _, state = _state_of(tmp_path)
+    assert state["strategy"]["name"] == "local-scoped-ci-whole" and state["strategy"]["source"] == "test.strategy"
+    whole = CARMO_DECL["test"]["suites"][0]["command"]
+    assert whole not in test_calls.seen
+    assert test_calls.seen == ["docker compose exec -T app ./vendor/bin/phpunit --log-junit build/ndf/junit.xml tests"]
+    assert state["baseline_test"]["mode"] == "scope"
+
+
+def test_cross_refactoring_and_supervise_build_the_same_scope_words(refactor):
+    """#1334 AC7・I10 — 同じ宣言と対象から、cross-refactoring の項目の検証と supervise の `test-run.py scope` が同じコマンドを組む。"""
+    import importlib
+
+    import test_strategy as ts
+    import test_triage
+
+    targets = importlib.import_module("refactor_lib.targets")
+    strategy = ts.resolve(CARMO_DECL)
+    paths = ["tests/Unit/AServiceTest.php", "tests/Unit/BServiceTest.php"]
+    assert [r.command for r in targets.scope_runs_for(strategy, paths)] == test_triage.rerun_commands(strategy, paths)
+    assert targets.scope_runs_for(strategy, paths)[0].command.endswith(" " + " ".join(paths))
+
+
+# ---------- #1483: 静的解析の雛形・起動の失敗 ----------
+
+LINT_TEMPLATE = "uvx --from shellcheck-py shellcheck -s bash {paths}"
+
+
+def test_a_lint_template_never_runs_on_the_whole_directory(run_init, tmp_path, test_calls):
+    """AC16・AC17 — 静的解析の雛形を `--test-kind lint` で渡し `--scope` がシェルスクリプトだけなら、着手前に `.` を
+    渡さず、テストの置き場所の検査で止まらず、行わなかったことを戦略の表示に残す。"""
+    scope = ["scripts/a.sh", "scripts/b.sh"]
+    run_init(_args(tmp_path, scope=scope, baseline_test=LINT_TEMPLATE, round_test=None, test_kind="lint"))
+    _, state = _state_of(tmp_path)
+    assert [s["kind"] for s in state["strategy"]["suites"]] == ["lint"]
+    assert test_calls.seen == ["uvx --from shellcheck-py shellcheck -s bash scripts/a.sh scripts/b.sh"]
+    assert not any(c.endswith(" .") or " . " in c for c in test_calls.seen)
+    assert state["baseline_test"]["suites"] == {"args": "green"}
+
+
+def test_a_launch_failure_before_the_start_stops_the_init(run_init, tmp_path, test_calls, capsys):
+    """AC13（着手前）— 起動できないコマンドは「落ちた」として続けず、中断で止まり、コマンドと理由を出す。"""
+    test_calls.codes["nosuchcmd_1483"] = 127
+    with pytest.raises(SystemExit) as e:
+        run_init(_args(tmp_path, baseline_test="nosuchcmd_1483", round_test=None))
+    assert e.value.code == refactor_abort()
+    err = capsys.readouterr().err
+    assert "起動の失敗" in err and "nosuchcmd_1483" in err and "127" in err
+
+
+def _fake_baseline(monkeypatch, runs, codes, junit=(["t::a"], None)):
+    """`run_baseline` の外側（git・JUnit・時刻・実行）を差し替える。`codes` はコマンド → 終了コード。"""
+    baseline = sys.modules["refactor_lib.baseline"]
+    monkeypatch.setattr(baseline, "commands_of", lambda strategy, scope, work: ("whole", runs))
+    monkeypatch.setattr(baseline.test_triage, "clear_junit", lambda work, strategy: None)
+    monkeypatch.setattr(baseline.test_triage, "read_junit", lambda work, strategy: junit)
+    monkeypatch.setattr(baseline, "git_out", lambda work, args: "headsha")
+    monkeypatch.setattr(baseline.statefile, "now", lambda: "2026-09-30T00:00:00+00:00")
+    monkeypatch.setattr(baseline, "run_with_timeout", lambda command, cwd, timeout, output=None: (codes[command], False))
+    return baseline
+
+
+def test_run_baseline_records_a_green_run_of_test_and_lint_suites(refactor, monkeypatch, tmp_path, capsys):
+    """現状固定: すべて通れば green。suite ごとの成否・コマンドの連結・HEAD を記録する。"""
+    ts = sys.modules["refactor_lib.baseline"].ts
+    runs = [ts.ScopeRun("unit", ts.TEST, "run unit"), ts.ScopeRun("lint", ts.LINT, "run lint")]
+    baseline = _fake_baseline(monkeypatch, runs, {"run unit": 0, "run lint": 0})
+
+    record = baseline.run_baseline(types.SimpleNamespace(), tmp_path, 100, [], tmp_path)
+
+    seconds = record.pop("seconds")
+    assert isinstance(seconds, float)
+    assert record == {
+        "mode": "whole",
+        "locations": None,
+        "timed_out": False,
+        "command": "run unit && run lint",
+        "status": "green",
+        "suites": {"unit": "green", "lint": "green"},
+        "checked_at": "2026-09-30T00:00:00+00:00",
+        "head": "headsha",
+        "existing_failures": [],
+        "existing_failures_reason": None,
+    }
+    captured = capsys.readouterr()
+    assert "着手前のテスト成功: run unit && run lint" in captured.out + captured.err
+
+
+def test_run_baseline_records_existing_failures_and_a_red_lint_suite(refactor, monkeypatch, tmp_path, capsys):
+    """現状固定: テストの suite が落ちたら red にして JUnit の失敗を既存失敗に書く。同じ suite の 1 本でも
+    落ちれば suite は red のまま。静的解析だけの失敗は status を red にしない。"""
+    ts = sys.modules["refactor_lib.baseline"].ts
+    runs = [
+        ts.ScopeRun("unit", ts.TEST, "run unit 1"),
+        ts.ScopeRun("unit", ts.TEST, "run unit 2"),
+        ts.ScopeRun("lint", ts.LINT, "run lint"),
+    ]
+    baseline = _fake_baseline(monkeypatch, runs, {"run unit 1": 1, "run unit 2": 0, "run lint": 2})
+
+    record = baseline.run_baseline(types.SimpleNamespace(), tmp_path, 100, [], tmp_path)
+
+    assert record["status"] == "red"
+    assert record["suites"] == {"unit": "red", "lint": "red"}
+    assert record["existing_failures"] == ["t::a"]
+    assert record["existing_failures_reason"] is None
+    out = "".join(capsys.readouterr())
+    assert "1 件を既存失敗として記録" in out
+    assert "静的解析の suite（lint）が落ちています" in out
+    assert "着手前のテスト成功" not in out
+
+
+def test_run_baseline_keeps_green_when_only_a_lint_suite_fails(refactor, monkeypatch, tmp_path, capsys):
+    """現状固定: 静的解析だけが落ちたら status は green のまま、成功の表示を出さない。"""
+    ts = sys.modules["refactor_lib.baseline"].ts
+    runs = [ts.ScopeRun("unit", ts.TEST, "run unit"), ts.ScopeRun("lint", ts.LINT, "run lint")]
+    baseline = _fake_baseline(monkeypatch, runs, {"run unit": 0, "run lint": 1})
+
+    record = baseline.run_baseline(types.SimpleNamespace(), tmp_path, 100, [], tmp_path)
+
+    assert record["status"] == "green"
+    assert record["suites"] == {"unit": "green", "lint": "red"}
+    assert record["existing_failures"] == []
+    out = "".join(capsys.readouterr())
+    assert "着手前のテスト成功" not in out
+    assert "静的解析の suite（lint）が落ちています" in out
+
+
+def test_run_baseline_records_unreadable_junit_as_none(refactor, monkeypatch, tmp_path, capsys):
+    """現状固定: JUnit を読めなければ既存失敗は None で、理由を残す。"""
+    ts = sys.modules["refactor_lib.baseline"].ts
+    runs = [ts.ScopeRun("unit", ts.TEST, "run unit")]
+    baseline = _fake_baseline(monkeypatch, runs, {"run unit": 1}, junit=(None, "JUnit が無い"))
+
+    record = baseline.run_baseline(types.SimpleNamespace(), tmp_path, 100, [], tmp_path)
+
+    assert (record["status"], record["existing_failures"], record["existing_failures_reason"]) == ("red", None, "JUnit が無い")
+    assert "落ちたテストを読めない（JUnit が無い）" in "".join(capsys.readouterr())
+
+
+def test_run_baseline_without_runs_records_no_command(refactor, monkeypatch, tmp_path, capsys):
+    """現状固定: 走らせるものが無ければ command は None、status は green で、無い旨を知らせる。"""
+    baseline = _fake_baseline(monkeypatch, [], {})
+
+    record = baseline.run_baseline(types.SimpleNamespace(), tmp_path, 100, [], tmp_path)
+
+    assert (record["command"], record["status"], record["suites"]) == (None, "green", {})
+    assert "着手前に走らせるテストがありません" in "".join(capsys.readouterr())
+
+
+def test_run_baseline_stops_on_a_launch_failure(refactor, monkeypatch, tmp_path):
+    """現状固定: 起動の失敗（終了コード 127）は `launch.stop` へ渡して止める。"""
+    ts = sys.modules["refactor_lib.baseline"].ts
+    runs = [ts.ScopeRun("unit", ts.TEST, "missing-cmd")]
+    baseline = _fake_baseline(monkeypatch, runs, {"missing-cmd": 127})
+    stopped = []
+
+    def stop(*args):
+        stopped.append(args)
+        raise SystemExit(9)
+
+    monkeypatch.setattr(baseline.launch, "stop", stop)
+
+    with pytest.raises(SystemExit):
+        baseline.run_baseline(types.SimpleNamespace(), tmp_path, 100, [], tmp_path)
+
+    assert stopped[0][2:4] == ("baseline", "missing-cmd")
+    assert stopped[0][5] == tmp_path / "init-whole-0.log"
+
+
+def _declare_ci(origin_repo, workflow: str, **test_over):
+    """`ci.provider: github-actions` の宣言と、ワークフロー `ci.yml` を置く（#464）。"""
+    suite = {"name": "pytest", "runner": "pytest", "command": "true", "scope_command": "true {paths}", "paths": ["."]}
+    decl = {
+        "version": 1,
+        "test": {"suites": [{**suite, **test_over.pop("suite", {})}], **test_over},
+        "ci": {"provider": "github-actions", "workflows": [{"path": ".github/workflows/ci.yml", "jobs": 2}]},
+    }
+    # ワークフローは作業ディレクトリ（origin の head）から読むので、head へ積んで push する
+    _git("checkout", "-qb", "ci-wf", f"origin/{HEAD_BRANCH}", cwd=origin_repo)
+    (origin_repo / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
+    (origin_repo / ".github" / "workflows" / "ci.yml").write_text(workflow, encoding="utf-8")
+    _git("add", "-A", cwd=origin_repo)
+    _git("commit", "-qm", "ci", cwd=origin_repo)
+    _git("push", "-q", "origin", f"ci-wf:{HEAD_BRANCH}", cwd=origin_repo)
+    _git("checkout", "-q", "main", cwd=origin_repo)
+    _git("branch", "-qD", "ci-wf", cwd=origin_repo)
+    (origin_repo / ".ndf").mkdir(exist_ok=True)
+    (origin_repo / ".ndf" / "project.json").write_text(json.dumps(decl), encoding="utf-8")
+
+
+CI_WORKFLOW = "on: push\njobs:\n  test:\n    runs-on: x\n  docs:\n    runs-on: x\n"
+
+
+def test_init_names_the_ci_jobs_missing_from_the_declaration(run_init, tmp_path, origin_repo, capsys):
+    """#464 AC5 — 宣言に無いジョブを識別子で知らせ、状態ファイルに残し、止まらない。"""
+    _declare_ci(origin_repo, CI_WORKFLOW, suite={"ci_jobs": [".github/workflows/ci.yml#test"]})
+    run_init(_args(tmp_path, round_test=None, baseline_test=None))
+    err = capsys.readouterr().err
+    assert "宣言に無いもの 1 件" in err and ".github/workflows/ci.yml#docs" in err
+    assert ".github/workflows/ci.yml#test" not in err
+    _, state = _state_of(tmp_path)
+    assert state["ci_coverage"] == {"status": "compared", "reason": "", "jobs": 2, "undeclared": [".github/workflows/ci.yml#docs"]}
+
+
+def test_init_is_silent_when_the_declaration_covers_every_ci_job(run_init, tmp_path, origin_repo, capsys):
+    """#464 AC6 — ジョブを `ci_jobs` と `ci_exempt` で覆えば知らせない。"""
+    exempt = [{"job": ".github/workflows/ci.yml#docs", "reason": "Pull Request の本文を見る"}]
+    _declare_ci(origin_repo, CI_WORKFLOW, suite={"ci_jobs": [".github/workflows/ci.yml#test"]}, ci_exempt=exempt)
+    run_init(_args(tmp_path, round_test=None, baseline_test=None))
+    assert "継続的統合のジョブ" not in capsys.readouterr().err
+    _, state = _state_of(tmp_path)
+    assert state["ci_coverage"]["status"] == "compared" and state["ci_coverage"]["undeclared"] == []
+
+
+def test_init_keeps_going_when_the_ci_cannot_be_compared(run_init, tmp_path, origin_repo, capsys):
+    """#464 AC7 — 宣言に `ci` が無ければ突き合わせられなかったと知らせ、続ける。"""
+    run_init(_args(tmp_path))
+    assert "突き合わせられませんでした（ci が無い）" in capsys.readouterr().err
+    _, state = _state_of(tmp_path)
+    assert state["ci_coverage"]["status"] == "skipped"
+
+
+def test_init_takes_the_pull_request_of_the_repository_it_is_run_in(refactor, patch_lib, tmp_path, monkeypatch):
+    """AC3（#1655）: ai-plugins の外のリポジトリの中（下位のディレクトリを含む）で打つと、そのリポジトリの PR を取る。"""
+    repo = tmp_path / "sample"
+    (repo / "src").mkdir(parents=True)
+    _git("init", "-q", cwd=repo)
+    _git("remote", "add", "origin", "https://github.com/example/sample.git", cwd=repo)
+    asked: list[list[str]] = []
+
+    def fake_sh(cmd, cwd=None, check=True):
+        asked.append(cmd)
+        if cmd[:3] == ["gh", "api", "user"]:
+            return "me"
+        if cmd == ["gh", "api", "repos/example/sample/pulls/12"]:
+            return json.dumps(
+                {
+                    "number": 12,
+                    "user": {"login": "me"},
+                    "head": {"ref": "feat/x"},
+                    "base": {"ref": "main"},
+                    "state": "open",
+                    "draft": True,
+                    "merged_at": None,
+                }
+            )
+        raise AssertionError(f"想定外の呼び出し: {cmd}")
+
+    patch_lib("sh", fake_sh)
+    monkeypatch.chdir(repo / "src")
+    setup = sys.modules["refactor_lib.commands.setup"]
+    gate = sys.modules["refactor_lib.pr_gate"]
+    assert setup._fetch_pr_context(12) == ("example/sample", "main", "feat/x", True, "me", gate.PrStatus("open", None))
+    assert not any("nameWithOwner" in c for c in asked)
+
+
+# ---------- #1385: 手順の枠が想定最大時間に収まらなければ提案者を起動せずに止める（AC6・I4） ----------
+
+
+@pytest.fixture
+def init_clock(monkeypatch, refactor):
+    """`statefile.now` を開始からの秒で動かす。"""
+    import datetime as dt
+
+    statefile = sys.modules["statefile"]
+    base = dt.datetime(2026, 10, 4, 8, 0, 0)
+    current = {"t": base}
+    monkeypatch.setattr(statefile, "now", lambda: current["t"].isoformat(timespec="seconds"))
+
+    def at(seconds):
+        current["t"] = base + dt.timedelta(seconds=seconds)
+
+    return at
+
+
+@pytest.fixture
+def slow_baseline(monkeypatch, refactor):
+    """着手前のテストの実測を `seconds` に置き換え、走らせた回数を数える。"""
+    setup = sys.modules["refactor_lib.commands.setup"]
+    real = setup.baseline_lib.run_baseline
+    box = {"seconds": 1300.0, "calls": 0}
+
+    def fake(*a, **k):
+        box["calls"] += 1
+        return {**real(*a, **k), "seconds": box["seconds"]}
+
+    monkeypatch.setattr(setup.baseline_lib, "run_baseline", fake)
+    return box
+
+
+def _window_seconds(state, key):
+    clock = sys.modules["refactor_lib.clock"]
+    return (clock.parse(state["limits"][key]) - clock.parse(state["started_at"])).total_seconds()
+
+
+def _stopped_init(run_init, tmp_path, init_clock, capsys):
+    init_clock(0)
+    with pytest.raises(SystemExit) as e:
+        run_init(_args(tmp_path, budget_minutes="30"))
+    assert e.value.code == refactor_abort()
+    captured = capsys.readouterr()
+    return captured
+
+
+def test_init_stops_before_the_proposers_when_the_windows_do_not_fit(run_init, tmp_path, init_clock, slow_baseline, capsys):
+    captured = _stopped_init(run_init, tmp_path, init_clock, capsys)
+    # 下限 = ceil(((o + 300) / 60 + R + L) / 0.70)。R = 21.67 + 5.5 + 5.5、L = 1.5（配分の初期値。#1743 I8）
+    assert "--budget-minutes を 87 以上" in captured.err
+    assert "PHASE=" not in captured.out, "提案へ進む出力を出さない"
+    _, state = _state_of(tmp_path)
+    assert state["window_stopped_at"] and "resumed_at" not in state
+
+    # 1 分後に下限の予算で打ち直すと、着手前のテストを走らせずに枠を打ち直した時刻から数えて進む
+    init_clock(1360)
+    run_init(_args(tmp_path, budget_minutes="87"))
+    _, state = _state_of(tmp_path)
+    assert slow_baseline["calls"] == 1
+    assert "window_stopped_at" not in state and state["resumed_at"]
+    assert _window_seconds(state, "propose_end_at") == 1360 + 1044
+    assert "PHASE=" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "restart, budget, propose_end",
+    [(1600, "87", 1600 + 1044), (1500, "88", 1500 + 1056)],
+)
+def test_a_restart_within_the_grace_continues(run_init, tmp_path, init_clock, slow_baseline, capsys, restart, budget, propose_end):
+    _stopped_init(run_init, tmp_path, init_clock, capsys)
+    init_clock(restart)
+    run_init(_args(tmp_path, budget_minutes=budget))
+    _, state = _state_of(tmp_path)
+    assert _window_seconds(state, "propose_end_at") == propose_end
+
+
+def test_a_late_restart_stops_again_with_a_new_lower_bound(run_init, tmp_path, init_clock, slow_baseline, capsys):
+    _stopped_init(run_init, tmp_path, init_clock, capsys)
+    init_clock(1700)
+    with pytest.raises(SystemExit) as e:
+        run_init(_args(tmp_path, budget_minutes="87"))
+    assert e.value.code == refactor_abort()
+    assert "--budget-minutes を 97 以上" in capsys.readouterr().err
+    _, state = _state_of(tmp_path)
+    assert state["window_stopped_at"] and slow_baseline["calls"] == 1
+
+
+def test_a_restart_without_the_stop_keeps_the_windows(run_init, tmp_path, init_clock, slow_baseline):
+    """印の無い再開（計画の手順の途中で落ちた）は起点をずらさず、止めない。"""
+    slow_baseline["seconds"] = 200.0
+    init_clock(0)
+    run_init(_args(tmp_path, budget_minutes="30"))
+    _, state = _state_of(tmp_path)
+    state["phase"] = "plan"
+    _overwrite_state(tmp_path, state)
+    init_clock(1300)
+    run_init(_args(tmp_path))
+    _, state = _state_of(tmp_path)
+    assert "resumed_at" not in state
+    assert _window_seconds(state, "propose_end_at") == 560
+
+
+def test_a_restart_after_the_plan_keeps_the_saved_deadlines(run_init, tmp_path, init_clock, slow_baseline, capsys):
+    """計画を取り込んだ後の再開は limits を組み直さず、window_problem も見ずに続く。"""
+    _stopped_init(run_init, tmp_path, init_clock, capsys)
+    _, state = _state_of(tmp_path)
+    state["phase"], state["plan"] = "implement", {"end_at": "2026-10-04T08:30:00"}
+    before = dict(state["limits"])
+    _overwrite_state(tmp_path, state)
+    init_clock(1500)
+    run_init(_args(tmp_path, budget_minutes="39"))
+    _, state = _state_of(tmp_path)
+    assert state["limits"] == before and state["budget_minutes"] == 30 and "resumed_at" not in state
+
+
+# ---------- #1555: CI に任せる戦略の着手前の上限と、着手前のテストの行（AC7・AC10・AC11・I6） ----------
+
+
+@pytest.fixture
+def verify_init(refactor, monkeypatch, tmp_path):
+    """`_verify_init` を CI に任せる戦略で呼ぶ。着手前のテストは渡された上限と `run` の値を返す。"""
+    setup = sys.modules["refactor_lib.commands.setup"]
+    ts = sys.modules["test_strategy"]
+    monkeypatch.setenv("NDF_METRICS_DIR", str(tmp_path / "metrics"))
+    work = tmp_path / "work"
+    (work / "tests").mkdir(parents=True)
+    (work / "tests" / "test_a.py").write_text("def test_a():\n    pass\n")
+    strategy = ts.Strategy(
+        ts.LOCAL_SCOPED_CI_WHOLE, "args", [ts.Suite("unit", "pytest .", scope_command="pytest {paths}", paths=["tests"])]
+    )
+    prep = types.SimpleNamespace(strategy=strategy, work=work, tmp_dir=tmp_path, decl={}, repo="acme/demo")
+    given: list[int] = []
+    run = {"seconds": 320.0, "timed_out": False}
+
+    def fake_run(strategy, work, timeout, scope, tmp_dir):
+        given.append(timeout)
+        seconds = float(timeout) if run["timed_out"] else run["seconds"]
+        return {
+            "mode": "scope",
+            "locations": ["tests"],
+            "timed_out": run["timed_out"],
+            "command": "pytest tests",
+            "status": "green",
+            "suites": {"unit": "green"},
+            "checked_at": "2026-10-04T08:05:00",
+            "seconds": seconds,
+        }
+
+    monkeypatch.setattr(setup, "resolve_participants", lambda *a, **k: {"available": ["claude"]})
+    monkeypatch.setattr(setup.baseline_lib, "run_baseline", fake_run)
+    args = types.SimpleNamespace(budget_minutes=30, scope=["tests"], pr=1554, require_all=None)
+    inputs = types.SimpleNamespace(host="claude", include=[], exclude=[], model_spec={})
+
+    def call():
+        return setup._verify_init(args, inputs, prep)
+
+    history = sys.modules["refactor_lib.allocation"].history_path(tmp_path / "metrics", "acme/demo")
+    return types.SimpleNamespace(call=call, given=given, run=run, history=history, setup=setup, strategy=strategy)
+
+
+def _history(path):
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def test_the_scope_test_seconds_feed_the_next_init_limit(verify_init):
+    """AC11・AC7: 着手前の範囲テストの実測が履歴に残り、次の実行の上限は 3·s になる。"""
+    _, baseline, _ = verify_init.call()
+    assert verify_init.given == [180], "初回は所要が分からず 0.10·B"
+    assert (baseline["scope_seconds"], baseline["scope_source"]) == (None, None)
+    rows = _history(verify_init.history)
+    assert [(r["kind"], r["strategy"], r["locations"], r["seconds"]) for r in rows] == [
+        ("init_test", "local-scoped-ci-whole", ["tests"], 320.0)
+    ]
+    _, baseline, _ = verify_init.call()
+    assert verify_init.given[-1] == 960
+    assert (baseline["scope_seconds"], baseline["scope_source"]) == (320.0, "history")
+    # I6: 状態に残る入力から組み直した上限が、着手前のテストに使った上限と一致する
+    timeline = sys.modules["refactor_lib.timeline"]
+    state = {"budget_minutes": 30, "strategy": verify_init.strategy.as_state(), "baseline_test": baseline}
+    assert timeline.test_limits(state)["init_test_timeout"] == 960
+
+
+def test_a_timed_out_init_test_is_recorded_before_stopping(verify_init, capsys):
+    """AC11・E9: 打ち切りでも上限の秒で 1 行足してから止め、次の上限は 3 倍になる。"""
+    verify_init.run["timed_out"] = True
+    with pytest.raises(SystemExit) as e:
+        verify_init.call()
+    assert e.value.code == refactor_abort()
+    assert "次の実行の上限は 540 秒" in capsys.readouterr().err
+    assert [(r["seconds"], r["timed_out"]) for r in _history(verify_init.history)] == [(180.0, True)]
+    verify_init.run["timed_out"] = False
+    verify_init.call()
+    assert verify_init.given[-1] == 540
+
+
+def test_the_whole_test_covers_the_scope(verify_init):
+    """AC8: 履歴に一致が無く、置き場所が suite のパスを覆えば w を使う。"""
+    prep = types.SimpleNamespace(strategy=None, work=None, repo="acme/demo")
+    strategy = sys.modules["test_strategy"].Strategy(
+        "local-scoped-ci-whole",
+        "args",
+        [sys.modules["test_strategy"].Suite("unit", "pytest .", scope_command="pytest {paths}", paths=["tests"])],
+    )
+    prep.strategy, prep.work = strategy, verify_init.history.parents[2] / "work"
+    assert sys.modules["refactor_lib.init_test"].resolve_scope_seconds(prep, ["tests"], 424.0) == (424.0, "whole")
+    assert sys.modules["refactor_lib.init_test"].resolve_scope_seconds(prep, ["tests"], None) == (None, None)
+
+
+# ---------- #1658: 閉じた・マージ済み・状態を判定できない Pull Request で止める ----------
+
+
+def _stopped(run_init, tmp_path, capsys, pr_status):
+    capsys.readouterr()
+    with pytest.raises(SystemExit) as e:
+        run_init(_args(tmp_path), pr_status=pr_status)
+    assert e.value.code == refactor_abort()
+    return capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "pr_status, words",
+    [
+        ({"state": "closed", "merged_at": None}, ["#130", "閉じている"]),
+        ({"state": "closed", "merged_at": "2026-10-06T15:44:18Z"}, ["#130", "マージ済み"]),
+        ({"state": "merged"}, ["判定できない", "state"]),
+        ({"state": MISSING}, ["判定できない", "state"]),
+    ],
+)
+def test_init_stops_before_preparing_the_work_dir_for_a_pull_request_it_must_not_touch(run_init, tmp_path, capsys, pr_status, words):
+    """AC1・2・6（#1658）: 終了コード 4 で止まり、理由が出て、作業ディレクトリも状態ファイルも作らない。"""
+    err = _stopped(run_init, tmp_path, capsys, pr_status)
+    assert all(w in err for w in words), err
+    assert not (tmp_path / "rf130" / "work").exists()
+    assert not _state_path(tmp_path).exists()
+
+
+@pytest.mark.parametrize("draft", [False, MISSING, "false"])
+def test_a_new_run_continues_on_an_open_pull_request_whatever_its_draft_is(run_init, tmp_path, draft):
+    """AC3（#1658・2026-10-07 の差し戻し）: 開いていれば `draft` の値にかかわらず新しい実行が続く。"""
+    run_init(_args(tmp_path), pr_status={"draft": draft})
+    _, state = _state_of(tmp_path)
+    assert state["phase"] == "propose"
+
+
+def test_a_resumed_run_continues_on_an_open_pull_request_that_is_not_draft(run_init, tmp_path):
+    """AC5（#1658）: 終わっていない状態ファイルがあれば、Draft でない開いた Pull Request でも続ける。"""
+    run_init(_args(tmp_path))
+    run_init(_args(tmp_path), pr_status={"draft": False})
+    _, state = _state_of(tmp_path)
+    assert state["phase"] == "propose"
+
+
+@pytest.mark.parametrize("merged_at, word", [(None, "閉じている"), ("2026-10-06T15:44:18Z", "マージ済み")])
+def test_a_resumed_run_stops_on_a_closed_pull_request_without_touching_the_state(run_init, tmp_path, capsys, merged_at, word):
+    """AC5（#1658）: 再開でも閉じた・マージ済みなら止まり、状態ファイルを書き換えない。"""
+    run_init(_args(tmp_path))
+    path = _state_path(tmp_path)
+    before = path.read_text(encoding="utf-8")
+    err = _stopped(run_init, tmp_path, capsys, {"state": "closed", "merged_at": merged_at})
+    assert word in err
+    assert path.read_text(encoding="utf-8") == before
+
+
+def test_the_pull_request_check_adds_no_gh_call(run_init, tmp_path, capsys):
+    """AC8（#1658 I5）: 止まる実行も続く実行も、`gh` の呼び出しの並びは同じ（応答 1 回から判定する）。"""
+    _stopped(run_init, tmp_path, capsys, {"state": "closed"})
+    stopped = list(run_init.gh_calls)
+    run_init(_args(tmp_path))
+    assert stopped == run_init.gh_calls
+    assert sum(1 for c in stopped if c[2:3] and c[2].startswith("repos/")) == 1

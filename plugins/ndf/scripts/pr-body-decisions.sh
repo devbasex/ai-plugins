@@ -2,9 +2,16 @@
 # NDF plugin: 設計 Pull Request の本文の「決めたこと」の節を、設計文書の決定の見出しと突き合わせる。
 #
 #   pr-body-decisions.sh check <PR番号> [--repo <所有者>/<リポジトリ>]
-#   pr-body-decisions.sh sync  <PR番号> [--repo <所有者>/<リポジトリ>]
+#   pr-body-decisions.sh sync  <PR番号> [--repo <所有者>/<リポジトリ>] [--after-push <SHA> [--wait-seconds <秒>]]
+#   pr-body-decisions.sh render --base <起点のブランチ> --body <本文のファイル>
 #
-# **本文は決定の中身を持たず、設計文書の `## 決定の記録` の下の `### ` の見出しだけを写す。**
+# `render` は Pull Request を作る前に使う。本文のファイルの中身へ、手元の HEAD の設計文書
+# （`origin/<起点>...HEAD` で変わった .md）から作った節を `sync` と同じ位置へ入れて標準出力へ出す。
+# 作る時点で本文が揃っていれば、後の `sync` は書き込まず、本文の編集で CI を 2 度起動しない。
+# GitHub を読まない。head のブランチが design/ で始まらなければ本文をそのまま出す。
+# **本文は決定の中身を持たず、設計文書の決定の見出しだけを写す。** 決定の見出しは、`## 決定の記録` で
+# 始まる H2 の節の `### ` の行か、その節が無く H1 に「決定の記録」を含む文書の `## 決定 <数字>…` /
+# `### 決定 <数字>…` の行である（見出しの記号を除いて写す）。
 # 見出しだけであれば文字列の一致で食い違いを判定でき、`sync` は節の外を 1 バイトも変えずに
 # 書き直せる。
 #
@@ -15,37 +22,83 @@
 # 設計文書は Pull Request の head のコミットから、本文は Pull Request の `body` から読む。
 # 手元の作業ツリーにも、継続的統合の checkout（マージの試行のコミット）にも左右されない。
 #
+# `sync --after-push <SHA>` は修正を送った直後に打つ（#1644）。push と本文の書き込みの直後は、GitHub の
+# `pulls/{pr}` が古い head か古い本文を返すことがある。そこで PR の head が送ったコミット（かその子孫）に
+# 届くまで待ってから書き、書いた後も揃ったと読めるまで読み直す。待ちの締め切りは呼び出しの時刻 +
+# `--wait-seconds`（既定 30 秒）の 1 つを書く前と書いた後で共有し、間隔は 1 秒から倍にして 8 秒で止める。
+# 書いた後に head が送ったコミットの先へ進んでいたら、進んだ先の設計文書と突き合わせ、書き直さない。
+# 待った回数が 1 回以上なら、標準出力の最後へ「待った: <秒> 秒 / 読み直し <回> 回」を出す。
+# `--after-push` を渡さない呼び方は待たず、読み直しも 1 回である。
+#
 # 終了コード:
 #   0  一致した（`sync` は書き込んだ後の突き合わせで一致した）。対象外も 0
-#   1  食い違った（`check` は差分を標準出力へ出す。`sync` は書き込んだ後も食い違った）
-#   2  読めなかった（`gh` が無い・Pull Request が無い・API の失敗）、または書き込みに失敗した
-#   3  呼び出しの誤り（副コマンドが無い・未知の副コマンド・番号が数値でない）。GitHub を読まない
+#   1  食い違った（`check` は差分を標準出力へ出す。`sync` は書き込んだ後も食い違った。`--after-push` では
+#      締め切りまで読み直しても食い違った）。または
+#      決定を読めない文書がある（`## 決定の記録` で始まる H2 を持つか名前が `-design-decisions.md` で
+#      終わるのに決定の見出しが 0 件。パスと理由を標準出力へ出し、`sync` は書き込まない）
+#   2  読めなかった（`gh` が無い・Pull Request が無い・API の失敗）、または書き込みに失敗した。
+#      `--after-push` では、締め切りまでに PR の head が送ったコミットか子孫に届かなかったときも 2
+#      （標準エラーの先頭に、送ったコミット・上限の秒・最後に読んだ head を出す）
+#   3  呼び出しの誤り（副コマンドが無い・未知の副コマンド・番号が数値でない・`--after-push` が 16 進
+#      7〜40 桁でない・`--wait-seconds` が 0 以上の整数でないか `--after-push` なしで渡された・`check` に
+#      `--after-push` / `--wait-seconds` を渡した）。GitHub を読まない
+#   `render` は 0（出した）か 2（git を読めなかった。標準出力へ何も出さない）か 3 を返す
 #
 # **2 を 0 へ畳まない。** この結果は承認の提示に使う。確かめられなかったことを一致と報告しない。
 set -uo pipefail
 
 usage() {
-  printf 'usage: pr-body-decisions.sh check|sync <PR番号> [--repo <所有者>/<リポジトリ>]\n' >&2
+  printf 'usage: pr-body-decisions.sh check <PR番号> [--repo <所有者>/<リポジトリ>]\n' >&2
+  printf '       pr-body-decisions.sh sync <PR番号> [--repo <所有者>/<リポジトリ>] [--after-push <SHA> [--wait-seconds <秒>]]\n' >&2
+  printf '       pr-body-decisions.sh render --base <起点のブランチ> --body <本文のファイル>\n' >&2
   exit 3
 }
 
 SUB="${1:-}"
 case "$SUB" in
   check|sync) ;;
+  render)
+    shift
+    BASE=
+    BODY=
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --base) [ -n "${2:-}" ] || usage; BASE="$2"; shift 2 ;;
+        --body) [ -n "${2:-}" ] || usage; BODY="$2"; shift 2 ;;
+        *) printf 'ERROR: 知らない引数です: %s\n' "$1" >&2; usage ;;
+      esac
+    done
+    [ -n "$BASE" ] && [ -n "$BODY" ] || usage
+    ;;
   *) usage ;;
 esac
+if [ "$SUB" != render ]; then
 PR="${2:-}"
 case "$PR" in
   ''|*[!0-9]*) printf 'ERROR: PR 番号が数値ではありません: %s\n' "$PR" >&2; usage ;;
 esac
 shift 2
 REPO=
+AFTER_PUSH=
+WAIT_SECONDS=
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --repo) [ -n "${2:-}" ] || usage; REPO="$2"; shift 2 ;;
+    --after-push|--wait-seconds)
+      [ "$SUB" = sync ] || { printf 'ERROR: %s は sync だけが受けます\n' "$1" >&2; usage; }
+      [ -n "${2:-}" ] || usage
+      if [ "$1" = --after-push ]; then AFTER_PUSH="$2"; else WAIT_SECONDS="$2"; fi
+      shift 2 ;;
     *) printf 'ERROR: 知らない引数です: %s\n' "$1" >&2; usage ;;
   esac
 done
+if [ -n "$AFTER_PUSH" ] && ! [[ "$AFTER_PUSH" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
+  printf 'ERROR: --after-push は 16 進 7〜40 桁のコミットです: %s\n' "$AFTER_PUSH" >&2; usage
+fi
+if [ -n "$WAIT_SECONDS" ]; then
+  [ -n "$AFTER_PUSH" ] || { printf 'ERROR: --wait-seconds は --after-push と組むときだけ受けます\n' >&2; usage; }
+  [[ "$WAIT_SECONDS" =~ ^[0-9]+$ ]] || { printf 'ERROR: --wait-seconds は 0 以上の整数です: %s\n' "$WAIT_SECONDS" >&2; usage; }
+fi
 
 if ! command -v gh >/dev/null 2>&1; then
   printf 'ERROR: gh が見つかりません。本文と設計文書を読めません\n' >&2
@@ -60,8 +113,9 @@ if [ -z "$REPO" ]; then
     exit 2
   fi
 fi
+fi
 
-python3 - "$SUB" "$PR" "$REPO" <<'PY'
+python3 - "$SUB" "${PR:-}" "${REPO:-}" "${BASE:-}" "${BODY:-}" "${AFTER_PUSH:-}" "${WAIT_SECONDS:-30}" <<'PY'
 import difflib
 import json
 import os
@@ -69,9 +123,12 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.parse
 
-sub, pr, repo = sys.argv[1:4]
+sub, pr, repo, base, body_file, after_push, wait_seconds = sys.argv[1:8]
+after_push = after_push.lower()
+wait_seconds = int(wait_seconds)
 HEADING = "## 決めたこと"
 MARKER = "<!-- 設計文書の「決定の記録」の見出しから pr-body-decisions.sh sync が作る。手で書き換えない -->"
 DESIGN_BRANCH_PREFIX = "design/"
@@ -132,18 +189,51 @@ def is_top_heading(line):
     return line.startswith("# ") or line.startswith("## ")
 
 
-def decision_headings(text):
-    found, inside = [], False
+DECISIONS_SECTION = "## 決定の記録"
+SPLIT_SUFFIX = "-design-decisions.md"
+SPLIT_NAME = re.compile(re.escape(SPLIT_SUFFIX) + r"(?![\w-])")
+DIRECT_DECISION = re.compile(r"#{2,3} (決定 \d.*)")
+
+
+def read_decisions(name, text):
+    """決定の見出しの並びと、決定を読めない理由（無ければ None）を 1 回の走査で返す。
+
+    (a) 「## 決定の記録」で始まる H2 の節の「### 」の行。(b) (a) の節が無く、最初の H1 に「決定の記録」を
+    含む文書の「## 決定 <数字>…」「### 決定 <数字>…」の行。囲みの中の行は読まない。
+    """
+    section_found, direct_found = [], []
+    first_section, h1, inside, names_split = None, None, False, False
     for _, line, outside in lines_outside_fences(text):
         if not outside:
             continue
-        if re.fullmatch(r"## 決定の記録[ \t]*", line):
+        if h1 is None and line.startswith("# "):
+            h1 = line
+        if line.startswith(DECISIONS_SECTION):
             inside = True
-        elif is_top_heading(line):
+            first_section = first_section or line.rstrip()
+            continue
+        m = DIRECT_DECISION.fullmatch(line.rstrip())
+        if m:
+            direct_found.append(m.group(1))
+        if is_top_heading(line):
             inside = False
         elif inside and line.startswith("### "):
-            found.append(line[4:].rstrip())
-    return found
+            section_found.append(line[4:].rstrip())
+        elif inside and SPLIT_NAME.search(line):
+            names_split = True
+    if first_section is not None:
+        found = section_found
+    else:
+        found = direct_found if h1 is not None and "決定の記録" in h1 else []
+    if found:
+        return found, None
+    is_split = name.endswith(SPLIT_SUFFIX)
+    if first_section is not None and not (names_split and not is_split):
+        return [], f"「{first_section}」の節に「### 」の見出しが無い"
+    if is_split:
+        return [], (f"決定を分けたファイルなのに決定の見出しが無い。"
+                    f"「{DECISIONS_SECTION}」の節の下に「### 決定 N: …」を置く")
+    return [], None
 
 
 def markdown_names(raw):
@@ -165,15 +255,24 @@ def markdown_names(raw):
 
 def changed_markdown(head_sha):
     names = markdown_names(gh("--paginate", f"repos/{repo}/pulls/{pr}/files?per_page=100"))
-    docs = []
+    docs, unreadable = [], []
     for name in names:
         quoted = urllib.parse.quote(name, safe="/")
         text = gh("-H", "Accept: application/vnd.github.raw",
                   f"repos/{repo}/contents/{quoted}?ref={head_sha}")
-        headings = decision_headings(text)
+        headings, reason = read_decisions(name, text)
         if headings:
             docs.append((name, headings))
-    return docs
+        if reason:
+            unreadable.append((name, reason))
+    return docs, unreadable
+
+
+def report_unreadable(unreadable):
+    print(f"止めた: 決定の見出しを読めない文書が {len(unreadable)} 本ある。"
+          f"本文の「{HEADING}」は突き合わせず、書き換えない")
+    for name, reason in unreadable:
+        print(f"- {name}: {reason}")
 
 
 def expected_section(docs):
@@ -223,7 +322,7 @@ def compare(body, docs):
 
 def report(actual, expected, docs):
     if expected is None:
-        print(f"食い違い: 変更したファイルに「## 決定の記録」を持つ設計文書が無いのに、本文に「{HEADING}」の節がある")
+        print(f"食い違い: 変更したファイルに決定の見出しを持つ設計文書が無いのに、本文に「{HEADING}」の節がある")
         return
     if actual is None:
         print(f"食い違い: 本文に「{HEADING}」の節が無い（{summary(docs)}）")
@@ -263,12 +362,103 @@ def write_body(new_body):
         os.unlink(payload)
 
 
-def sync_section(body, span, expected, docs, head_sha):
+class Wait:
+    """`--after-push` の待ち。締め切りは書く前と書いた後で 1 つを共有する（合計が上限を超えない）。"""
+
+    def __init__(self, seconds):
+        self.seconds = seconds
+        self.deadline = time.monotonic() + seconds
+        self.step = 1.0
+        self.waited = 0.0
+        self.count = 0
+
+    def again(self):
+        """締め切りの前なら間隔だけ待って True。過ぎていれば待たずに False。"""
+        left = self.deadline - time.monotonic()
+        if left <= 0:
+            return False
+        pause = min(self.step, left)
+        time.sleep(pause)
+        self.waited += pause
+        self.count += 1
+        self.step = min(self.step * 2, 8.0)
+        return True
+
+    def note(self):
+        if self.count:
+            print(f"待った: {self.waited:.0f} 秒 / 読み直し {self.count} 回")
+
+
+def compare_status(base_sha, head_sha):
+    """`compare/<base>...<head>` の status。読めなければ None（GitHub がまだ知らないコミットの 404 を含む）。"""
+    try:
+        return gh("--jq", ".status", f"repos/{repo}/compare/{base_sha}...{head_sha}").strip()
+    except Unreadable:
+        return None
+
+
+def head_reached(head_sha):
+    """読んだ head が送ったコミットか子孫か。一致すれば compare を読まない。"""
+    if head_sha.lower().startswith(after_push):
+        return True
+    return compare_status(after_push, head_sha) in ("identical", "ahead")
+
+
+def report_not_reached(head_sha):
+    # design_body が理由を 300 文字で切るため、SHA と上限を先頭に置く。
+    print(f"ERROR: 待っても PR の head が送ったコミットに届かなかった（送ったコミット {after_push}、"
+          f"上限 {wait_seconds} 秒、最後に読んだ head {head_sha}）", file=sys.stderr)
+
+
+def confirm_written(written_sha, docs, wait):
+    """書いた後、揃ったと読めるまで締め切りの内で読み直す。
+
+    head が書いたときの先へ進んでいれば（compare が ahead）、進んだ先の設計文書と突き合わせ、書き直さない。
+    戻った head（behind / diverged / 読めない）は古い読みとして捨て、最も進んだ head の設計文書と比べ続ける。
+    """
+    best_sha, best_docs = written_sha, docs
+    while True:
+        _, sha, body = read_pr()
+        stale_head = False
+        if sha != best_sha:
+            if compare_status(best_sha, sha) == "ahead":
+                best_docs, unreadable = changed_markdown(sha)
+                if unreadable:
+                    report_unreadable(unreadable)
+                    wait.note()
+                    return 1
+                best_sha = sha
+            else:
+                stale_head = True
+        if not stale_head:
+            same, _, actual, expected = compare(body, best_docs)
+            if same:
+                print(f"書き直した: {summary(best_docs)}")
+                wait.note()
+                return 0
+        if wait.again():
+            continue
+        if stale_head and not head_reached(sha):
+            report_not_reached(sha)
+            wait.note()
+            return 2
+        _, _, actual, expected = compare(body, best_docs)
+        report(actual, expected, best_docs)
+        wait.note()
+        return 1
+
+
+def sync_section(body, span, expected, docs, head_sha, wait=None):
     write_body(rewrite(body, span, expected))
+    if wait is not None:
+        return confirm_written(head_sha, docs, wait)
     _, new_sha, body = read_pr()
     # 書き込みの間に head が進んだら、進んだ先の設計文書と突き合わせる。古い決定を一致と報告しない。
     if new_sha != head_sha:
-        docs = changed_markdown(new_sha)
+        docs, unreadable = changed_markdown(new_sha)
+        if unreadable:
+            report_unreadable(unreadable)
+            return 1
     same, _, actual, expected = compare(body, docs)
     if same:
         print(f"書き直した: {summary(docs)}")
@@ -278,28 +468,96 @@ def sync_section(body, span, expected, docs, head_sha):
 
 
 def build_comparison(head_sha, body):
-    docs = changed_markdown(head_sha)
+    docs, unreadable = changed_markdown(head_sha)
     same, span, actual, expected = compare(body, docs)
-    return head_sha, body, docs, same, span, actual, expected
+    return head_sha, body, docs, unreadable, same, span, actual, expected
 
 
-def handle_comparison(sub, comparison):
-    head_sha, body, docs, same, span, actual, expected = comparison
+def handle_comparison(sub, comparison, wait=None):
+    head_sha, body, docs, unreadable, same, span, actual, expected = comparison
+    # 読めない文書があれば突き合わせず、sync も書き込まない。読めた文書だけで節を上書きしない。
+    if unreadable:
+        report_unreadable(unreadable)
+        return 1
     if same:
         print(f"一致: {summary(docs)}")
+        if wait is not None:
+            wait.note()
         return 0
     if sub == "check":
         report(actual, expected, docs)
         return 1
-    return sync_section(body, span, expected, docs, head_sha)
+    return sync_section(body, span, expected, docs, head_sha, wait)
+
+
+def sync_after_push(head_sha, body):
+    """PR の head が送ったコミットか子孫へ届くまで締め切りの内で待ってから揃える。"""
+    wait = Wait(wait_seconds)
+    while not head_reached(head_sha):
+        if not wait.again():
+            report_not_reached(head_sha)
+            wait.note()
+            return 2
+        _, head_sha, body = read_pr()
+    return handle_comparison("sync", build_comparison(head_sha, body), wait)
+
+
+def git(*args):
+    try:
+        done = subprocess.run(["git", *args], capture_output=True, timeout=120)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise Unreadable(f"git {args[0]}: {exc}")
+    if done.returncode != 0:
+        detail = done.stderr.decode("utf-8", "replace").strip().splitlines()
+        raise Unreadable(f"git {' '.join(args)}: {detail[-1] if detail else done.returncode}")
+    try:
+        return done.stdout.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise Unreadable(f"git {' '.join(args)}: UTF-8 ではありません: {exc}")
+
+
+def local_markdown():
+    """手元の HEAD で、起点から変わった（削除でない）.md の決定の見出し。changed_markdown の手元版。"""
+    out = git("diff", "--name-only", "--no-renames", "--diff-filter=d", "-z", f"origin/{base}...HEAD")
+    docs = []
+    for name in sorted(n for n in out.split("\0") if n.endswith(".md")):
+        headings, _ = read_decisions(name, git("show", f"HEAD:{name}"))
+        if headings:
+            docs.append((name, headings))
+    return docs
+
+
+def render():
+    try:
+        with open(body_file, "rb") as f:
+            body = f.read().decode("utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        print(f"ERROR: 本文のファイルを読めなかった: {exc}", file=sys.stderr)
+        return 2
+    try:
+        branch = git("rev-parse", "--abbrev-ref", "HEAD").strip()
+        if branch.startswith(DESIGN_BRANCH_PREFIX):
+            docs = local_markdown()
+            same, span, _, expected = compare(body, docs)
+            if not same:
+                body = rewrite(body, span, expected)
+    except Unreadable as exc:
+        print(f"ERROR: 読めなかった（本文を出さない）: {exc}", file=sys.stderr)
+        return 2
+    sys.stdout.buffer.write(body.encode("utf-8"))
+    return 0
 
 
 def main():
+    if sub == "render":
+        return render()
     try:
         head_ref, head_sha, body = read_pr()
         if not head_ref.startswith(DESIGN_BRANCH_PREFIX):
             print(f"対象外: head が design/ で始まらない（{head_ref}）")
             return 0
+        if after_push:
+            return sync_after_push(head_sha, body)
         comparison = build_comparison(head_sha, body)
         return handle_comparison(sub, comparison)
     except Unreadable as exc:

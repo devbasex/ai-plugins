@@ -46,13 +46,16 @@ def git_out(root, *args) -> str | None:
     return p.stdout.strip() if p.returncode == 0 else None
 
 
-def git_root(arg=None) -> Path:
-    """`arg` があればそのパス、無ければカレントの作業ツリーの根。作業ツリーでなければ `StepError`（2）。"""
+def git_root(arg=None, hint: str = "--root を渡す") -> Path:
+    """`arg` があればそのパス、無ければカレントの作業ツリーの根。作業ツリーでなければ `StepError`（2）。
+
+    `hint` は止まるときの案内（括弧の中の文）。呼び手が自分の直し方を渡す。
+    """
     if arg:
         return Path(arg).resolve()
     p = run(["git", "rev-parse", "--show-toplevel"], check=False)
     if p.returncode != 0:
-        raise StepError("カレントが git の作業ツリーではない（--root を渡す）", 2)
+        raise StepError(f"カレントが git の作業ツリーではない（{hint}）", 2)
     return Path(p.stdout.strip())
 
 

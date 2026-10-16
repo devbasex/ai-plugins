@@ -257,9 +257,11 @@ def test_wrapped_parts_outside_their_wrapper_fail(tmp_path: Path):
     put(tmp_path, "scripts/c.py", "import re\nF = re.compile(r'^\\s*(```|~~~)')\n")
     put(tmp_path, "scripts/d.py", "def f(s):\n    return s.startswith(('```', '~~~'))\n")
     put(tmp_path, "scripts/e.py", "import termios\nimport pty\nfrom urllib.request import urlopen\n")
+    put(tmp_path, "scripts/supervise_lib/flow.py", "from dbos import DBOS\n")
+    put(tmp_path, "scripts/lib/post_queue.py", "import dbos._sys_db\n")
     code, r = run(tmp_path, [])
     assert code == 1
-    assert kinds(r) == {
+    assert {k for k in kinds(r) if k[0] == "wrapped"} == {
         ("wrapped", "plugins/ndf/scripts/a.py:fcntl"),
         ("wrapped", "plugins/ndf/scripts/a.py:urllib.request"),
         ("wrapped", "plugins/ndf/scripts/b.py:proc-fs"),
@@ -268,6 +270,8 @@ def test_wrapped_parts_outside_their_wrapper_fail(tmp_path: Path):
         ("wrapped", "plugins/ndf/scripts/e.py:termios"),
         ("wrapped", "plugins/ndf/scripts/e.py:pty"),
         ("wrapped", "plugins/ndf/scripts/e.py:urllib.request"),
+        ("wrapped", "plugins/ndf/scripts/supervise_lib/flow.py:dbos"),
+        ("wrapped", "plugins/ndf/scripts/lib/post_queue.py:dbos"),
     }
 
 
@@ -277,6 +281,7 @@ def test_wrappers_may_use_their_parts_and_mentions_do_not_count(tmp_path: Path):
     put(tmp_path, "scripts/lib/md.py", "import re\nF = re.compile('```')\n")
     put(tmp_path, "scripts/lib/notify.py", "import urllib.request\n")
     put(tmp_path, "scripts/relay_lib/terminal.py", "import pty\nimport termios\n")
+    put(tmp_path, "scripts/lib/durable.py", "from dbos import DBOS, DBOSClient\n")
     # docstring の言及・囲みを書く側の文字列・urllib.parse は数えない
     put(
         tmp_path,
@@ -317,3 +322,226 @@ def test_hook_path_must_not_use_deps(tmp_path: Path):
         ("hook-deps", "plugins/ndf/scripts/hook_lib/inner.py:deps.require"),
         ("hook-deps", "plugins/ndf/hooks/claude.json:uv run"),
     }
+
+
+DEPS_PY = 'GROUPS = {"md": ["markdown_it"], "mdtable": ["tabulate"], "durable": ["dbos", "filelock"], "locks": ["filelock"]}\n'
+
+
+def test_require_must_list_groups_reached_through_imports(tmp_path: Path):
+    """決定 23: supervise.py の形（エントリポイント → パッケージ → lib を経て md に届く）で、require に md が無ければ落ちる。"""
+    put(tmp_path, "scripts/lib/deps.py", DEPS_PY)
+    put(tmp_path, "scripts/lib/md.py", "from markdown_it import MarkdownIt\n")
+    put(tmp_path, "scripts/lib/mvv.py", "import md\n")
+    put(tmp_path, "scripts/sup_lib/__init__.py", "")
+    put(tmp_path, "scripts/sup_lib/state.py", "import mvv\n")
+    put(tmp_path, "scripts/sup_lib/table.py", "import tabulate\n")
+    put(tmp_path, "scripts/sup_lib/cmds.py", "from . import state\nfrom .table import x\n")
+    entry = "import deps\n\ndeps.require({})\nfrom sup_lib import cmds\n"
+    put(tmp_path, "scripts/sup.py", entry.format('"mdtable"'))
+    # 関数の中の import と except ImportError で受ける import は読み込み時に届かない
+    put(
+        tmp_path,
+        "scripts/lazy.py",
+        "import deps\n\ndeps.require('mdtable')\ntry:\n    import markdown_it\nexcept ImportError:\n    pass\n\ndef f():\n    import md\n",
+    )
+    put(tmp_path, "scripts/lock.py", "import deps\n\ndeps.require('durable')\nimport filelock\n")  # 同じ名前は持つグループのどれかでよい
+    put(tmp_path, "scripts/plain.py", "import md\n")  # require を呼ばないモジュールは見ない
+    code, r = run(tmp_path, [])
+    assert code == 1
+    assert kinds(r) == {("require-groups", "plugins/ndf/scripts/sup.py:md")}
+    put(tmp_path, "scripts/sup.py", entry.format('"md", "mdtable"'))
+    code, r = run(tmp_path, [])
+    assert code == 0, r
+
+
+GOOD_BOUNDARY = {
+    "scripts/supervise_lib/flow.py": "import durable\n\n@durable.workflow(name='w')\ndef plan_workflow():\n    for s in range(3):\n        pass\n",
+    "scripts/supervise_lib/engine.py": (
+        "class Engine:\n    def run(self, start=None):\n        from supervise_lib import flow\n\n        return flow.run_engine(self, start)\n"
+    ),
+    "scripts/supervise_lib/state.py": (
+        "import json\n\nclass RunState:\n    def record(self):\n        data = {'log': self.log, 'llm': self.llm}\n"
+        "        if self.project_mvv is not None:\n            data['project_mvv'] = 1\n"
+        "        (self.dir / 'state.json').write_text(json.dumps(data))\n"
+    ),
+    "scripts/supervise_lib/queue.py": "import time\n\ndef cmd_queue(a):\n    from supervise_lib import flow\n\n    return flow.plan_workflow()\n",
+    "scripts/lib/post_queue.py": (
+        "import durable\n\nclass Queue:\n    def put(self):\n        return durable.workflow(name='n')(lambda r: r)\n\n"
+        "    def _import_legacy(self):\n        return sorted(self.dir.glob('*.json'))\n"
+    ),
+    "skills/cross-review/scripts/drive.py": (
+        "import durable\n\nclass Drive:\n    def run(self):\n        return durable.start(1)\n\n"
+        "@durable.workflow(name='review')\ndef review_drive():\n    while True:\n        break\n"
+    ),
+    "skills/cross-refactoring/scripts/drive.py": (
+        "import durable\n\nclass Drive:\n    def run(self):\n        return 1\n\n    def phases(self):\n        return 1\n\n"
+        "    def final_gate(self):\n        return [x for x in range(2)]\n\n"
+        "@durable.workflow(name='refactor_drive')\ndef refactor_drive():\n    for x in range(2):\n        pass\n"
+    ),
+}
+
+
+def boundary_tree(root: Path, **broken: str) -> set[tuple[str, str]]:
+    """I15 の置き場の最小の木を書き、broken（相対パスの `/` を `__` にした名前 → 中身）で差し替えて検査する。"""
+    for rel, text in GOOD_BOUNDARY.items():
+        put(root, rel, broken.get(rel.replace("/", "__").replace("-", "_").removesuffix(".py"), text))
+    return {(v["path"].removeprefix("plugins/ndf/"), v["function"]) for v in structure.durable_boundary(root)}
+
+
+def test_durable_boundary_passes_the_minimal_tree_and_skips_trees_without_it(tmp_path: Path):
+    """I15: ループは耐久ワークフローの中だけ。置き場を 1 つも持たない木は見ない。"""
+    assert structure.durable_boundary(tmp_path) == []
+    assert boundary_tree(tmp_path) == set()
+
+
+@pytest.mark.parametrize(
+    "name, text, hit",
+    [
+        (
+            "scripts__supervise_lib__engine",
+            "class Engine:\n    def run(self, start=None):\n        from supervise_lib import flow\n        while True:\n            flow.step()\n",
+            ("scripts/supervise_lib/engine.py", "Engine.run"),
+        ),
+        (
+            "scripts__supervise_lib__state",
+            "import json\n\nclass RunState:\n    def record(self):\n        data = {'log': 1}\n        data['next'] = 3\n"
+            "        (self.dir / 'state.json').write_text(json.dumps(data))\n",
+            ("scripts/supervise_lib/state.py", "RunState.record"),
+        ),
+        (
+            "scripts__supervise_lib__queue",
+            "import subprocess\nfrom supervise_lib import flow\n\ndef run_batch(ps):\n    return [p for p in ps]\n",
+            ("scripts/supervise_lib/queue.py", ""),
+        ),
+        (
+            "scripts__supervise_lib__queue",
+            "import subprocess\nfrom supervise_lib import flow\n\ndef go(p):\n    return p.poll()\n",
+            ("scripts/supervise_lib/queue.py", ""),
+        ),
+        (
+            "scripts__lib__post_queue",
+            "import durable, os\n\nclass Queue:\n    def put(self):\n        durable.workflow(name='n')(lambda r: r)\n"
+            "        return os.open('x', os.O_CREAT)\n",
+            ("scripts/lib/post_queue.py", "Queue"),
+        ),
+        (
+            "skills__cross_review__scripts__drive",
+            "import durable\n\nclass Drive:\n    def run(self):\n        for r in range(3):\n            pass\n\n"
+            "@durable.workflow(name='review')\ndef review_drive():\n    pass\n",
+            ("skills/cross-review/scripts/drive.py", "Drive.run"),
+        ),
+        (
+            "skills__cross_refactoring__scripts__drive",
+            "import durable\n\nclass Drive:\n    def run(self):\n        return 1\n\n    def phases(self):\n        return 1\n\n"
+            "    def final_gate(self):\n        return 1\n\n    def save_ds(self):\n        pass\n\n"
+            "@durable.workflow(name='refactor_drive')\ndef refactor_drive():\n    pass\n",
+            ("skills/cross-refactoring/scripts/drive.py", "Drive"),
+        ),
+        (
+            "skills__cross_refactoring__scripts__drive",
+            "import durable\n\nclass Drive:\n    def run(self):\n        return 1\n\n    def final_gate(self):\n        return 1\n",
+            ("skills/cross-refactoring/scripts/drive.py", "Drive.phases"),
+        ),
+    ],
+)
+def test_durable_boundary_catches_loops_and_file_state_brought_back(tmp_path: Path, name: str, text: str, hit: tuple[str, str]):
+    """I15（C-1）: 置き場へ遷移のループ・state.json の再開位置・子プロセス・ファイルの待ち行列・drive の状態ファイルを戻すと落ちる。"""
+    assert hit in boundary_tree(tmp_path, **{name: text})
+
+
+def test_durable_boundary_needs_a_workflow_not_only_the_missing_loop(tmp_path: Path):
+    """I15: ループを消して耐久ワークフローも置かない壊し方を落とす（import した先に有れば通る）。"""
+    no_flow = "class Engine:\n    def run(self, start=None):\n        return None\n"
+    got = boundary_tree(
+        tmp_path,
+        scripts__supervise_lib__engine=no_flow,
+        skills__cross_review__scripts__drive="import durable\n\nclass Drive:\n    def run(self):\n        return 1\n",
+    )
+    assert got == {
+        ("scripts/supervise_lib/engine.py", "durable.workflow"),
+        ("skills/cross-review/scripts/drive.py", "durable.workflow"),
+    }
+    (tmp_path / "plugins/ndf/scripts/supervise_lib/engine.py").unlink()
+    assert ("scripts/supervise_lib/engine.py", "") in {
+        (v["path"].removeprefix("plugins/ndf/"), v["function"]) for v in structure.durable_boundary(tmp_path)
+    }
+
+
+# ---------- ファイルの指定（#1668。項目の範囲テストの静的解析の suite） ----------
+
+
+def scoped_tree(root: Path) -> None:
+    """行数の違反 1 件と同じ名前の違反 1 組と、違反の無いファイルを持つ木。"""
+    put(root, "scripts/big.py", "x = 1\n" * 501)
+    put(root, "scripts/lib/participants.py", "def setup():\n    return 1\n")
+    put(root, "skills/x/scripts/setup.py", "def setup():\n    return 2\n")
+    put(root, "scripts/clean.py", "def clean():\n    return 3\n")
+
+
+def test_files_narrow_items_and_exit_code_to_the_given_files(tmp_path: Path):
+    scoped_tree(tmp_path)
+    code, r = run(tmp_path, [], "plugins/ndf/scripts/clean.py")
+    assert code == 0 and r["status"] == "ok" and r["items"] == []
+    assert r["metrics"]["targets"] == 1 and r["metrics"]["outside"] == 3
+    code, r = run(tmp_path, [], "plugins/ndf/scripts/big.py")
+    assert code == 1 and kinds(r) == {("lines", "plugins/ndf/scripts/big.py")}
+
+
+def test_same_name_counts_when_either_file_is_given(tmp_path: Path):
+    """#1634 の `participants.py` を指定すれば、ほかのファイルとの衝突が両側とも出る。"""
+    scoped_tree(tmp_path)
+    both = {
+        ("same-name", "plugins/ndf/scripts/lib/participants.py:setup"),
+        ("same-name", "plugins/ndf/skills/x/scripts/setup.py:setup"),
+    }
+    for given in ("plugins/ndf/scripts/lib/participants.py", "plugins/ndf/skills/x/scripts/setup.py"):
+        code, r = run(tmp_path, [], given)
+        assert code == 1 and kinds(r) == both
+
+
+def test_same_body_counts_when_the_other_file_is_given(tmp_path: Path):
+    put(tmp_path, "scripts/a.py", "def f():\n    return 1\n")
+    put(tmp_path, "scripts/b.py", "def g():\n    return 1\n")
+    code, r = run(tmp_path, [], str(tmp_path / "plugins/ndf/scripts/b.py"))
+    assert code == 1 and {k for k, _ in kinds(r)} == {"same-body"} and len(r["items"]) == 2
+
+
+def test_lines_over_the_allow_row_count_only_for_the_given_file(tmp_path: Path):
+    row = {"path": "plugins/ndf/scripts/big.py", "name": "", "kind": "lines", "reason": "分ける前", "lines": 600}
+    put(tmp_path, "scripts/big.py", "x = 1\n" * 601)
+    put(tmp_path, "scripts/clean.py", "x = 1\n")
+    assert run(tmp_path, [row], "plugins/ndf/scripts/clean.py")[0] == 0
+    code, r = run(tmp_path, [row], "plugins/ndf/scripts/big.py")
+    assert code == 1 and kinds(r) == {("lines", "plugins/ndf/scripts/big.py")}
+
+
+def test_allow_rows_count_by_their_path_or_their_file(tmp_path: Path):
+    """使われない例外の行は、行の path か、行のファイル自身を指定したときに数える。"""
+    row = {"path": "plugins/ndf/scripts/gone.py", "name": "f", "kind": "same-body", "reason": "移す前"}
+    put(tmp_path, "scripts/clean.py", "x = 1\n")
+    assert run(tmp_path, [row], "plugins/ndf/scripts/clean.py")[0] == 0
+    assert run(tmp_path, [row], "plugins/ndf/scripts/gone.py")[0] == 1
+    code, r = run(tmp_path, [row], "allow/" + structure.allow_file_name(row))
+    assert code == 1 and kinds(r) == {("unused-allow", "plugins/ndf/scripts/gone.py:f")}
+
+
+def test_giving_the_check_itself_counts_every_violation(tmp_path: Path):
+    scoped_tree(tmp_path)
+    full = run(tmp_path, [])[1]
+    code, r = run(tmp_path, [], "scripts/check-script-structure.py")
+    assert code == 1 and r["items"] == full["items"]
+
+
+def test_without_files_the_metrics_keep_their_keys(tmp_path: Path):
+    scoped_tree(tmp_path)
+    code, r = run(tmp_path, [])
+    assert code == 1 and len(r["items"]) == 3
+    assert "targets" not in r["metrics"] and "outside" not in r["metrics"]
+
+
+def test_broken_allow_list_stops_even_with_files(tmp_path: Path):
+    put(tmp_path, "scripts/clean.py", "x = 1\n")
+    (tmp_path / "allow").mkdir()
+    (tmp_path / "allow" / "x.json").write_text("{")
+    code, _ = run(tmp_path, None, "--allow", str(tmp_path / "allow"), "plugins/ndf/scripts/clean.py")
+    assert code == 2

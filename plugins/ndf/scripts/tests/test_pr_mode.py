@@ -9,8 +9,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 from pr_mode import needs_review, pr_target, split_stages, with_mode_line  # noqa: E402
 
 
-def test_target_separates_mission_and_develop():
-    assert pr_target("mission/v10-18") == "mission" and not needs_review("mission/v10-18")
+def test_target_separates_sprint_and_develop():
+    assert pr_target("sprint/v10-18") == "sprint" and not needs_review("sprint/v10-18")
     assert pr_target("develop") == "develop" and needs_review("develop")
 
 

@@ -40,7 +40,6 @@ def _home(tmp_path, plugins=None, raw=None):
 def _check(root, home, bindir, *extra, env=None):
     e = {"HOME": str(home), "PATH": str(bindir)}
     e.update(env or {})
-    e.pop("CLAUDE_CONFIG_DIR", None)
     return run_json("check", "--root", str(root), "--json", *extra, env=e)
 
 
@@ -49,6 +48,15 @@ def _items(out):
 
 
 def test_all_present_exits_0(tmp_path):
+    root = _project(tmp_path / "r", ["python"])
+    home = _home(tmp_path, ["pyright-lsp@claude-plugins-official"])
+    code, out, _ = _check(root, home, _bin(tmp_path, "pyright-langserver"))
+    assert (code, out["missing"]) == (0, [])
+
+
+def test_parent_claude_config_dir_does_not_reach_the_child(tmp_path, monkeypatch):
+    # 利用者のシェルの CLAUDE_CONFIG_DIR は子プロセスへ渡さない（#1689。テストは HOME で隔てる）
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "no-such-config"))
     root = _project(tmp_path / "r", ["python"])
     home = _home(tmp_path, ["pyright-lsp@claude-plugins-official"])
     code, out, _ = _check(root, home, _bin(tmp_path, "pyright-langserver"))

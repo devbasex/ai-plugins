@@ -125,8 +125,9 @@ def test_the_approval_flag_comes_before_the_prompt(args) -> None:
     assert args.index("--dangerously-skip-permissions") < len(args) - 1
 
 
-def test_the_output_format_is_text(args) -> None:
-    assert args[args.index("--output-format") + 1] == "text"
+def test_the_output_format_is_json(args) -> None:
+    # 使用量は JSON の出力にしか無い（#1953 の決定 3）。本文は `response` の鍵から読む
+    assert args[args.index("--output-format") + 1] == "json"
 
 
 # ---------- 受け入れ条件 9（モデル） ----------

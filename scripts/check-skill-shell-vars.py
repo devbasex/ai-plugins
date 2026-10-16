@@ -52,6 +52,7 @@ DEFAULT_SKILLS = ("plugins/ndf/skills/cross-refactoring",)
 
 # 骨組みの外から渡る値。利用者が引数として与えるものと、この Skill の入口が決めるもの。
 DEFAULT_EXTERNAL = (
+    "R",  # 入口を探すコマンド（scripts-lookup.md の for 文）が決める NDF の置き場
     "PR",
     "SCOPE",
     "BASELINE",

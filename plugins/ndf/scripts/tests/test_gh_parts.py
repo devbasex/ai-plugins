@@ -17,6 +17,7 @@ sys.path.insert(0, str(LIB))
 _spec = importlib.util.spec_from_file_location("ndf_lib_gh_parts", LIB / "gh_parts.py")
 gp = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(gp)
+import clock  # noqa: E402
 import gh_call  # noqa: E402
 
 REPO = "o/r"
@@ -196,6 +197,12 @@ def test_fold_uses_run_order_when_times_are_missing():
     assert gp.check_result(None, "t") is None
 
 
+def test_fold_takes_a_run_without_times_as_the_newest():
+    """時刻がどちらも無い項目（まだ始まっていない再実行）は最も新しい。マージの待ちと同じ規則（#1645）。"""
+    runs = [_run("t", "failure", "2026-09-25T02:00:00Z", 9), {"id": 1, "name": "t", "status": "queued", "conclusion": None}]
+    assert [gp.run_result(r) for r in gp.fold_check_runs(runs)] == ["pending"]
+
+
 def test_failed_check_logs_are_saved_to_files_not_embedded(fake, tmp_path):
     fake.on("pr", "view", out=json.dumps(GRAPHQL_PR))
     fake.on(
@@ -255,17 +262,55 @@ def test_check_runs_are_read_to_total_count_across_pages(fake):
     assert len(runs) == 101 and runs[-1]["name"] == "last"
 
 
+def test_no_check_runs_yet_is_an_empty_list_only_when_asked(fake):
+    """push 直後（`total_count` 0）は、待つ側が頼んだときだけ空の一覧（照会の失敗の `None` と分ける。#1354）。"""
+    fake.on("api", "-i", f"repos/{REPO}/commits/{SHA}/check-runs?per_page=100&page=1", out=_rest_out({"total_count": 0, "check_runs": []}))
+
+    assert gp.fetch_check_runs(REPO, SHA) is None
+    assert gp.fetch_check_runs(REPO, SHA, empty_ok=True) == []
+
+
+def test_checks_outcome_waits_for_checks_that_are_not_listed_yet():
+    """待つチェックが一覧にまだ無いのは `pending`。照会できないときだけ `None`（#1354）。"""
+    import gh_checks
+
+    assert gh_checks.checks_outcome(None, ["t"]) is None
+    assert gh_checks.checks_outcome([], ["t"]) == "pending"
+    assert gh_checks.checks_outcome([_run("other", "success", "", 1)], ["t"]) == "pending"
+    assert gh_checks.checks_outcome([_run("t", "success", "", 1), _run("u", "", "", 2, status="in_progress")], ["t", "u"]) == "pending"
+    assert gh_checks.checks_outcome([_run("t", "success", "", 1), _run("u", "failure", "", 2)], ["t", "u"]) == "failure"
+    assert gh_checks.checks_outcome([_run("t", "success", "", 1)], ["t"]) == "success"
+
+
+def test_checks_outcome_edge_cases_are_fixed():
+    """現状固定（I-007）: 待つ名前が空・再実行・結論の順・空の名前・大文字・重複の扱い。"""
+    import gh_checks
+
+    t_ok, u_fail, v_cancel = _run("t", "SUCCESS", "", 1), _run("u", "failure", "", 2), _run("v", "cancelled", "", 3)
+    assert gh_checks.checks_outcome([], []) == "success"
+    assert gh_checks.checks_outcome([u_fail], []) == "success"
+    assert gh_checks.checks_outcome([t_ok], ["t", "t"]) == "success"
+    assert gh_checks.checks_outcome([t_ok, u_fail, v_cancel], ["t", "v", "u"]) == "cancelled"
+    assert gh_checks.checks_outcome([t_ok, u_fail, v_cancel], ["t", "u", "v"]) == "failure"
+    assert gh_checks.checks_outcome([t_ok, v_cancel, _run("w", "", "", 4, status="queued")], ["v", "w"]) == "pending"
+    assert gh_checks.checks_outcome([t_ok, _run("x", "", "", 5)], ["x"]) == "unknown"
+    assert gh_checks.checks_outcome([t_ok], ["t", ""]) == "pending"
+    rerun = [_run("u", "failure", "2026-01-01T00:00:00Z", 2), _run("u", "success", "2026-01-01T00:05:00Z", 6)]
+    assert gh_checks.checks_outcome(rerun, ["u"]) == "success"
+    assert gh_checks.checks_outcome(list(reversed(rerun)), ["u"]) == "success"
+
+
 # ---------------- unresolved-threads ----------------
 
 
 def test_unresolved_threads_carry_thread_id(fake):
-    fake.on("api", "graphql", out="PRRT_a\tsrc/foo.py\t42\nPRRT_b\tdocs/bar.md\t\n")
+    fake.on("api", "graphql", out="PRRT_a\tsrc/foo.py\t42\t[major] 空を弾く\nPRRT_b\tdocs/bar.md\t\t\n")
 
     threads = gp.unresolved_threads(REPO, PR)
 
     assert threads == [
-        {"thread_id": "PRRT_a", "path": "src/foo.py", "line": "42"},
-        {"thread_id": "PRRT_b", "path": "docs/bar.md", "line": ""},
+        {"thread_id": "PRRT_a", "path": "src/foo.py", "line": "42", "body": "[major] 空を弾く"},
+        {"thread_id": "PRRT_b", "path": "docs/bar.md", "line": "", "body": ""},
     ]
     joined = fake.argvs()[0]
     assert "owner=o" in joined and "name=r" in joined and f"pr={PR}" in joined
@@ -286,6 +331,82 @@ def test_pr_info_with_threads_counts_and_lists_them(fake, tmp_path):
     thread = next(i for i in obj["items"] if i["kind"] == "thread")
     assert (thread["thread_id"], thread["line"]) == ("PRRT_a", 42)
     assert obj["metrics"]["unresolved_threads"] == 1
+
+
+def test_pr_info_with_all_parts_is_fixed(fake, tmp_path):
+    """現状固定（I-002）: diff → checks → threads の順に items と notes が並ぶ。"""
+    fake.on("pr", "view", out=json.dumps(GRAPHQL_PR))
+    fake.on("api", "-H", out="diff --git a/x b/x\n")
+    fake.on("api", "graphql", out="PRRT_a\tsrc/foo.py\tx\n")
+    fake.on("api", "-i", out=_checks(_run("pytest", "failure", "2026-09-25T01:00:00Z", 101)))
+
+    obj, code = gp.pr_info(PR, REPO, {"diff", "checks", "threads"}, tmp_path)
+
+    assert code == 0 and obj["status"] == "ok"
+    assert [i["kind"] for i in obj["items"]] == ["pr", "diff", "check", "thread"]
+    assert obj["items"][0]["name"] == f"#{PR}" and obj["items"][0]["repo"] == REPO and obj["items"][0]["result"] == "open"
+    assert obj["items"][1] == {"kind": "diff", "name": "diff", "result": "saved", "path": str(tmp_path / "pr.diff")}
+    assert "log_path" not in obj["items"][2]
+    assert obj["items"][3]["line"] is None
+    assert obj["metrics"] == {
+        "source": "graphql",
+        "additions": 10,
+        "deletions": 2,
+        "changed_files": 3,
+        "failed_checks": 1,
+        "pending_checks": 0,
+        "superseded_checks": 0,
+        "unresolved_threads": 1,
+    }
+    assert obj["summary"] == f"PR #{PR} open（graphql） / checks 失敗 1 / 保留 0 / 未解決 1"
+
+
+def test_pr_info_with_every_part_unavailable_is_fixed(fake, tmp_path):
+    """現状固定（I-002）: 取得できない部分は diff → checks → threads の順に unavailable へ入る。"""
+    fake.on("pr", "view", out=json.dumps(GRAPHQL_PR))
+    fake.on("api", "-H", rc=1, err="HTTP 500\n")
+    fake.on("api", "graphql", rc=1, err="boom")
+    fake.on("api", "-i", rc=1, err="HTTP 422")
+
+    obj, code = gp.pr_info(PR, REPO, {"diff", "logs", "threads"}, tmp_path)
+
+    assert code == 0 and obj["status"] == "ok"
+    assert obj["items"][1] == {
+        "kind": "diff",
+        "name": "diff",
+        "result": "unavailable",
+        "path": None,
+        "reason": "差分を取得できない: HTTP 500",
+    }
+    assert [i["kind"] for i in obj["items"]] == ["pr", "diff"]
+    assert obj["metrics"]["unavailable"] == ["diff", "checks", "threads"]
+    assert obj["metrics"]["failed_checks"] is None and obj["metrics"]["pending_checks"] is None
+    assert obj["metrics"]["unresolved_threads"] is None
+    assert obj["summary"] == f"PR #{PR} open（graphql） / 取得できない: diff, checks, threads"
+
+
+def test_pr_info_stops_when_the_repo_cannot_be_resolved(fake, tmp_path, monkeypatch):
+    """現状固定（I-002）: リポジトリを決められなければ前提の不足で止まる。"""
+    monkeypatch.setattr(gh_call, "resolve_repo", lambda repo=None: None)
+
+    obj, code = gp.pr_info(PR, None, set(), tmp_path)
+
+    assert (obj["status"], code, obj["summary"]) == ("stopped", gp.step_result.EXIT_PRECONDITION, "リポジトリを決められない")
+    assert obj["items"] == [] and obj["metrics"] == {}
+    assert fake.calls == []
+
+
+def test_pr_info_stop_summary_carries_the_reason_and_source(fake, tmp_path):
+    """現状固定（I-002）: メタを読めないときは理由と取得元を結果に残す。"""
+    fake.on("pr", "view", rc=1, err=RATE)
+    fake.on("api", "-i", f"repos/{REPO}/pulls/{PR}", out=_rest_out({}))
+
+    obj, code = gp.pr_info(PR, REPO, {"diff"}, tmp_path)
+
+    assert (obj["status"], code) == ("stopped", gp.step_result.EXIT_UNREADABLE)
+    assert obj["summary"] == f"PR #{PR} を取得できない: GraphQL が上限で、REST でも取得できない"
+    assert obj["metrics"] == {"source": "rest"} and obj["items"] == []
+    assert not any("-H" in a for a, _ in fake.calls)
 
 
 # ---------------- body-section ----------------
@@ -350,6 +471,18 @@ def test_heading_must_match_a_whole_line_outside_code_blocks():
     assert new.startswith(body.rstrip("\n")) and new.count("## 進行\n") == 2
 
 
+def test_heading_skips_tilde_mixed_unclosed_and_crlf_fences():
+    """現状固定（I-003）: `~~~` も囲み、違う種類の囲みは閉じず、閉じない囲みは末尾まで続き、CRLF でも同じ。"""
+    tilde = "## 進行\n\n~~~\n## 関連\n~~~\n\na\n\n## 関連\n\nb\n"
+    mixed = "## 進行\n\n```\n~~~\n## 関連\n```\n\na\n\n## 関連\n\nb\n"
+    unclosed = "## 進行\n\n```\n## 関連\n\nb\n"
+    crlf = "## 進行\r\n\r\n~~~\r\n## 関連\r\n~~~\r\na\r\n## 関連\r\nb\r\n"
+    assert gp.get_section(tilde, "## 進行") == "~~~\n## 関連\n~~~\n\na"
+    assert gp.get_section(mixed, "## 進行") == "```\n~~~\n## 関連\n```\n\na"
+    assert gp.get_section(unclosed, "## 進行") == "```\n## 関連\n\nb"
+    assert gp.get_section(crlf, "## 進行") == "~~~\n## 関連\n~~~\na"
+
+
 def test_subheadings_stay_inside_the_section():
     body = "## 進行\n\n### 細目\n\na\n\n## 関連\n\nb\n"
     assert gp.get_section(body, "## 進行") == "### 細目\n\na"
@@ -395,7 +528,7 @@ def test_review_post_downgrades_on_own_pr(fake, monkeypatch, tmp_path, viewer, o
     seen = {}
 
     def _post(queue, payload, result, repo, pr, round_no, seat, head_sha, is_own_pr, **kw):
-        seen.update(repo=repo, pr=pr, head_sha=head_sha, is_own_pr=is_own_pr)
+        seen.update(repo=repo, pr=pr, head_sha=head_sha, is_own_pr=is_own_pr, since=kw.get("since"))
         return result_posts.ReviewOutcome(
             review_url="https://github.com/o/r/pull/812#pullrequestreview-1",
             posted_inline=2,
@@ -412,7 +545,10 @@ def test_review_post_downgrades_on_own_pr(fake, monkeypatch, tmp_path, viewer, o
 
     obj, code = gp.review_post("p.json", "r.json", PR, 1, "codex", REPO, queue_dir=str(tmp_path / "q"))
 
+    since = seen.pop("since")
     assert code == 0 and seen == {"repo": REPO, "pr": PR, "head_sha": SHA, "is_own_pr": own}
+    # 入口の時刻（タイムゾーン付き）を since に渡し、前の実行の同じラウンド・席のレビューを「既投稿」にしない
+    assert clock.parse(since, naive="reject") is not None and (clock.now(utc=True) - clock.parse(since)).total_seconds() < 60
     assert obj["items"][0]["posted_as"] == ("COMMENT" if own else "REQUEST_CHANGES")
     assert obj["metrics"]["is_own_pr"] is own
 
@@ -533,3 +669,39 @@ def test_view_json_rest_failure_keeps_both_errors(fake):
     fake.on("api", rc=1, err="HTTP 403: API rate limit exceeded")
     r = gp.view_json("pr", 5, "title")
     assert r.returncode == 1 and RATE in r.stderr and "HTTP 403" in r.stderr
+
+
+# --- 課題ごとの錠（#1241 の I10）---
+
+
+def test_body_section_replace_waits_for_the_issue_lock_before_reading(monkeypatch):
+    import threading
+    import time
+
+    import locks
+
+    store = {"body": "# t\n\n## 受け入れ条件\n\n- a\n\n## 進行\n\n- [x] 設計\n"}
+    reads: list[int] = []
+    monkeypatch.setattr(gp.gh_rest, "fetch_body", lambda repo, n: reads.append(n) or store["body"])
+    monkeypatch.setattr(gp.gh_rest, "update_body", lambda repo, n, body: store.update(body=body) or True)
+    out: dict = {}
+    worker = threading.Thread(target=lambda: out.update(r=gp.body_section("replace", 7, REPO, "## 受け入れ条件", "- b")))
+    with locks.exclusive(gp.issue_lock_target(REPO, 7)):
+        worker.start()
+        time.sleep(0.3)
+        assert reads == []  # 錠を持つ者がいるあいだ本文を読まない
+        store["body"] = store["body"].replace("- [x] 設計", "- [x] 設計\n- [x] 実装")  # 錠の持ち主が書いた節
+    worker.join(10)
+    assert out["r"][1] == 0
+    assert "- b" in store["body"] and "- [x] 実装" in store["body"]  # 先に書いた節を消さない
+
+
+def test_body_lock_runs_the_command_under_the_lock_and_stops_on_timeout(tmp_path):
+    import locks
+
+    mark = tmp_path / "ran"
+    assert gp.body_lock(9, REPO, ["sh", "-c", f"touch {mark}; exit 4"], timeout=1) == 4 and mark.is_file()
+    mark.unlink()
+    with locks.exclusive(gp.issue_lock_target(REPO, 9)):
+        assert gp.body_lock(9, REPO, ["touch", str(mark)], timeout=0.2) == 2
+    assert not mark.exists()

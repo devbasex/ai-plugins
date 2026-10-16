@@ -124,6 +124,21 @@ NOT_USAGE_LIMIT_LINES = [
     ("Python の文字列", f'    CLAUDE_WEEKLY = "{CLAUDE_WEEKLY}"'),
     ("差分の追加行", f"+{CODEX_USAGE_LIMIT_PREFIXED}"),
     ("差分の文脈行", f" {CLAUDE_SESSION}"),
+    # PR 1404 のテストの定義を codex が読み上げた行（2026-09-28 の実物）。JSON の結果行ではない
+    ("Python の辞書", 'LIMIT = {"out": {"result": "' + CLAUDE_SESSION + '", "is_error": True, "api_error_status": 429}, "code": 1}'),
+    ("差分の追加行の JSON", "+" + CLAUDE_429),
+    # 担当が差分・コードのコメント・文書を読み上げた行（振り返りで確かめた形）。利用上限の報告ではない
+    ("差分の追加行のコメント", "+    # rate limit exceeded のときは待つ"),
+    ("差分の追加行の文書", "+- 利用上限（rate limit exceeded）で止まる"),
+    ("差分の削除行", "-    # quota exceeded なら止める"),
+    ("コードのコメント", "    # rate limit exceeded のときは待つ"),
+    ("JavaScript のコメント", "  // quota exceeded のときは待つ"),
+    ("Markdown の見出し", "## rate limit exceeded のとき"),
+    ("Markdown のリスト", "- 利用上限（rate limit exceeded）で止まる"),
+    ("Markdown の番号付きリスト", "1. quota exceeded なら待つ"),
+    ("Markdown の表", "| usage_limit | rate limit exceeded | 利用上限 |"),
+    ("Markdown の引用", "> Rate limit exceeded for model"),
+    ("バッククォートの中", "文言は `rate limit exceeded` である"),
 ]
 
 
@@ -166,7 +181,16 @@ def test_claude_stdout_json_is_matched_without_the_quote_exclusion(tmp_path, mon
     assert monitor_mod._scan_claude_stdout_usage_limit(_write(tmp_path / "ok.log", '{"is_error":false}')) is None
 
 
-@pytest.mark.parametrize("line", ["quota exceeded: please upgrade", "Rate limit exceeded for model", HTTP_429])
+@pytest.mark.parametrize(
+    "line",
+    [
+        "quota exceeded: please upgrade",
+        "Rate limit exceeded for model",
+        "ERROR: rate limit exceeded",
+        "GraphQL: API rate limit exceeded for user ID 1.",
+        HTTP_429,
+    ],
+)
 def test_existing_limit_matches_moved_to_usage_limit(tmp_path, monitor_mod, line):
     log = _write(tmp_path / "err.log", line)
     assert monitor_mod._scan_patterns(log, monitor_mod.USAGE_LIMIT_FATAL) is not None
@@ -333,8 +357,12 @@ def test_the_retry_limit_with_another_status_is_not_a_usage_limit(tmp_path):
 
 
 def test_quoted_measured_lines_do_not_stop_the_agent(tmp_path):
-    """AC5: 引用・差分・文の途中に出た実物の文言では止まらない。"""
-    stem = _finished(tmp_path, "codex", err="\n".join(line for _label, line in NOT_USAGE_LIMIT_LINES), result=True)
+    """AC5: 引用・差分・文の途中に出た実物の文言では止まらない。
+
+    codex の 400 の行は利用上限ではないが、モデルを引けない致命（`model_unavailable`。#1290）として止まるため除く。
+    """
+    lines = [line for label, line in NOT_USAGE_LIMIT_LINES if label != "codex 400 の行"]
+    stem = _finished(tmp_path, "codex", err="\n".join(lines), result=True)
 
     proc = _run_monitor(tmp_path, "codex")
 

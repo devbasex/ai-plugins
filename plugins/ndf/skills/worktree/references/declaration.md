@@ -6,6 +6,8 @@ worktree 運用の仕組みは、リポジトリごとの差を `.ndf/worktree.j
 定義は [`../schemas/worktree.schema.json`](../schemas/worktree.schema.json) にある。
 `$schema` を書いておくと編集時に補完が効く。読み取り側はこの項目を参照しない。
 
+**目次:** [この文書が受け取る値](#この文書が受け取る値) / [作る](#作る) / [最小の設定](#最小の設定) / [ツールが書き換えるファイルを追跡しているリポジトリ](#ツールが書き換えるファイルを追跡しているリポジトリ) / [開発の起点が既定ブランチと違うリポジトリ](#開発の起点が既定ブランチと違うリポジトリ) / [メインディレクトリのブランチを稼働中の worktree へ追従させる](#メインディレクトリのブランチを稼働中の-worktree-へ追従させる) / [ローカル環境を持つリポジトリ](#ローカル環境を持つリポジトリ) / [依存物を worktree へ用意するリポジトリ](#依存物を-worktree-へ用意するリポジトリ) / [テスト実行を分けるリポジトリ](#テスト実行を分けるリポジトリ) / [機械ごとに違う値は個人設定へ書く](#機械ごとに違う値は個人設定へ書く) / [確かめる](#確かめる) / [互換性の規則](#互換性の規則)
+
 ## この文書が受け取る値
 
 | 変数 | 値 | 決め方 |
@@ -52,6 +54,31 @@ bash "$SCRIPTS/worktree-setup.sh" init
 {
   "version": 1,
   "guard": { "allow_paths": ["issues/", "notes/", ".gitignore"] }
+}
+```
+
+## ツールが書き換えるファイルを追跡しているリポジトリ
+
+CLI が起動したツール（Serena MCP など）は、利用者の操作なしに worktree の中のファイルを書き換える。
+このパスを「ツールのパス」と呼び、cross-review・cross-refactoring・`pr` の手順は検査とコミットの
+対象から外す。既定は `.serena/project.yml` と `.serena/serena_config.yml` の 2 つである。
+
+| 工程 | 扱い |
+| --- | --- |
+| cross-review のレビュー worktree・cross-refactoring の書き込み用の作業ディレクトリ | 作った後に `git update-index --skip-worktree` を掛ける。HEAD を動かす前に外して HEAD の内容へ戻し、動かした後に掛け直す |
+| ラウンドの開始・同期の前の検査 | ツールのパスの変更だけでは止まらない。外したパスを `↷ ツールのパスを検査から外した:` の 1 行で出す |
+| push の直前 | 送るコミットにツールのパスがあれば push しない（追跡対象外のツールのパスは `.gitignore` へ入れる） |
+| `pr-steps.py plan` / `commit` | `plan` は `tool_paths` の項目に分けて数え、`commit` は index から外す（ファイルの中身は残す）。意図した変更は `git commit` で直接コミットする |
+
+足すときは `tool_paths.add`、既定から外すときは `tool_paths.remove` を書く。末尾が `/` の項目は
+前方一致、それ以外は完全一致である。読むのは検査する worktree の直下のこのファイルだけで、
+レビュー worktree では Pull Request の head の設定になる。`tool_paths` があるのに読めない
+（JSON が壊れている・`version` が 1 でない・型が違う）ときは、既定へ戻さずに止まる。
+
+```json
+{
+  "version": 1,
+  "tool_paths": { "add": [".idea/workspace.xml"], "remove": [".serena/project.yml"] }
 }
 ```
 
@@ -135,6 +162,41 @@ worktree が 1 つならそのブランチのコミットへ、0 個または複
 ローカル環境に載っているコードを判定する。値を返せないとき（ローカル環境が動いていない、仕掛けが
 入っていない）は「未起動または適用外」として扱われ、「不一致」とは区別される。
 
+## 依存物を worktree へ用意するリポジトリ
+
+pre-commit やテストが `vendor/`・`node_modules/`・`.env` などの追跡されないファイルを使うなら、`deps` を足す。
+NDF が worktree を作った直後に、`copy_from_main`・`copy_as_real`・`run` の順に用意する（`worktree-deps.sh prepare`）。
+
+```json
+{
+  "version": 1,
+  "deps": {
+    "copy_from_main": ["vendor", "node_modules"],
+    "copy_as_real": [".env", "vendor/composer/autoload_real.php"],
+    "run": ["uv sync --frozen"]
+  }
+}
+```
+
+| 項目 | 決め方 |
+| --- | --- |
+| `copy_from_main` | メインディレクトリからハードリンクで複製するパス（使えない配置では実体で複製する）。**worktree の中でその場で書き換えないパスだけを置く。** 書き換えるとメインディレクトリの同じファイルも変わる |
+| `copy_as_real` | 実体で複製するパス。worktree の中で書き換えるもの（`.env`・自動読み込みの生成物）を置く。`copy_from_main` の内側を指してよい |
+| `run` | 複製の後に、worktree を作業ディレクトリにして `sh -c` で順に走らせるコマンド。1 つでも 0 以外なら止まる |
+
+- パスは worktree の根からの相対パスで書く。`..` と絶対パスは断る
+- **複製元がメインディレクトリに無ければ失敗にする。** 依存物が無いまま「済み」と出すと、依存物に頼る検査が黙って飛ぶ
+- 依存物は git が無視するパスに置く。用意の前後で `git status --porcelain` が変わると失敗にする。`run` が lock
+  ファイルを書き換えた場合も同じである
+- `run` がハードリンクで複製したファイルをその場で書き換えると失敗にする（そのパスは `copy_as_real` へ移す）
+- **`deps` は個人設定から反映しない。** 走らせるコマンドは、レビューを通る共有設定に書いたものだけである
+- `deps` が無いか空なら、worktree を作る処理は今までと同じ動きをする
+- 設定が JSON として読めない・`deps` が object でない・3 つの項目が文字列の配列でないときは、何もせずに
+  設定のファイルと誤りの箇所を出して終了コード 3 で終わる
+
+NDF は依存の用意の設定を推測で書かない。同じリポジトリでも、使う人の環境で正しい手段（`composer install` が
+使えるか、メインディレクトリから複製するか）が変わるためである。
+
 ## テスト実行を分けるリポジトリ
 
 worktree ごとにテスト環境を立てるなら、`testenv` を足す。
@@ -173,9 +235,10 @@ worktree ごとにテスト環境を立てるなら、`testenv` を足す。
 | `golden_tag_paths` | データ構造を定める資産。**内容が同じなら基準を焼き直さない** |
 | `test_kinds` | 種類ごとの選別と実行。**書かなければテスト実行の仕組みは何もせずに終わる** |
 | `skip_reset` | 初期化を抑止する環境変数。渡さないと最初のテストが全体を作り直す構成がある |
-| `port_role` | 入口の URL を組み立てるときに使う `port_roles` の役割名。既定は `http` |
+| `port_role` | エントリポイントの URL を組み立てるときに使う `port_roles` の役割名。既定は `http` |
+| `service` | その種類のテストを走らせるコンテナのサービス名。書くと、走らせる前にそのコンテナが worktree を見ているかを確かめ、見ていなければ走らせずに 1 で終わる（[test-execution.md](test-execution.md) の到達の確認） |
 | `expose.enabled` | **既定は無効。** マスク済みデータが整い、明示的に有効化したときだけ公開する |
-| `expose.open_command` | 公開の口を開けるコマンド。**設定が無ければ公開しない。** `NDF_EXPOSE_URL` / `NDF_EXPOSE_HOST` / `NDF_EXPOSE_ENVIRONMENT` / `NDF_EXPOSE_SLOT` が渡る |
+| `expose.open_command` | 公開のエンドポイントを開けるコマンド。**設定が無ければ公開しない。** `NDF_EXPOSE_URL` / `NDF_EXPOSE_HOST` / `NDF_EXPOSE_ENVIRONMENT` / `NDF_EXPOSE_SLOT` が渡る |
 
 worktree レジストリの定義は [`../schemas/registry.schema.json`](../schemas/registry.schema.json) にある。
 

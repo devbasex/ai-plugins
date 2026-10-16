@@ -26,6 +26,17 @@
 パートに分ける: work のステップに `"parts": [{"name": ..., "files": [...]}, ...]` を書くと、パートごとに
 新しい文脈の claude -p のステップ（`<id>-1`, `<id>-2`, ...）へ展開する。大きな実装は分けて書く。
 
+PR 本文の材料: pr のステップの `"materials"`（`supervise_lib/pr_materials.py`）が、手動確認（`manual`。既定 true）・
+`collect` のブランチへマージした実装の PR の利用者向けの変化・`design_results`（`design-results.json`）の設計 PR・
+`closes` と設計の結果の課題の `Closes` を本文へ集める。無ければ今の本文のまま。
+
+設計と違う点: pr のステップの `"diff_section"`（`{state_dir}` を含むパス）があれば、そのファイルの中身を
+`## 設計と違う点` の節として本文へ 1 つだけ置く（LLM の本文に同じ見出しがあれば置き換える）。ファイルが無いとき、
+`design-tests` のステップが 3（設計文書が無い）で終わっていれば「該当なし（設計文書が無い）」を置き、それ以外は
+push も PR の作成もせずに失敗し、`"on_section_missing"` のステップ（実装のプランでは judge）へ進む。
+`new impl` / `new fix` は `standard` のときだけ、範囲テストと pr の間に `design-tests` → `design-specs` →
+`design-match` の 3 ステップ（`design-match.py` の確認 (a)(b) と、確認 (c) の worker）を置く。
+
 Serena: work のステップに `"serena": true` を書くと Serena の MCP だけを載せる（大きなコードを何度も読む実装向け）。
 
 課題の本文: work のステップに `"issues": [858]`（`true` なら計画の `課題`）を書くと、`gh issue view` の題と本文を
@@ -51,10 +62,14 @@ drive のステップ: `cmd`（または `"drive": "cross-review" | "cross-refac
        "test": {"command": "<テストのコマンド。{paths} を範囲に置き換える>", "all": "<全体の範囲（既定 .）>",
                 "no_reports": "<run のステップの PYTEST_ADDOPTS に足す。省略可>"},
        "sync_checks": [{"name": "<名前>", "command": "<同期かチェックのコマンド>"}, ...],   # 省略可。無ければ sync のステップを置かない
-       "release": {"form": "package-plugin", "plugin": "<名前>", "runtimes": ["claude", ...]}}
+       "release": {"form": "package-plugin", "plugin": "<名前>", "runtimes": ["claude", ...]},
+       "impl_timeout": <1 以上の整数>,              # 省略可。impl のステップの timeout（秒）。無ければ雛形の値
+       "refactor_budget_minutes": <1 以上の整数>}   # 省略可。構造改善の想定最大時間（分）。refactor に --budget-minutes で渡す
+  refactor の timeout は想定最大時間（無ければ cross-refactoring の既定の予算）に 10%（最低 30 秒）の余裕を足した秒。
+  impl_timeout と refactor_budget_minutes は --impl-timeout・--refactor-budget-minutes が先に効く
   テストの範囲の選び方（--tests）と配布してよいかの判断は、宣言にせず conductor と judge のステップに残す
 
-配布の雛形（new release）: 形（`release.form`）ごとにある。無い形は /ndf:release で配る（new mission は配布の計画を
+配布の雛形（new release）: 形（`release.form`）ごとにある。無い形は /ndf:release で配る（new sprint は配布の計画を
 書かずに検査までを書き、結果の next と items に /ndf:release で行うことを載せる。new close と new release は形を要る）。
 - `package-plugin`（Claude Code のプラグイン）: dev は bump → changelog → 説明文 → sync-check → release →
   verify-install（起点のブランチ）→ approval-facts → 提示物の説明文。approval-facts の提示物は
@@ -66,7 +81,21 @@ drive のステップ: `cmd`（または `"drive": "cross-review" | "cross-refac
 利用上限: claude -p（work・drive の worker・judge・pr）が利用上限（session limit・HTTP 429・
 `api_error_status: 429`・「You've hit your limit … resets …」。lib/monitor.py の USAGE LIMIT の表と同じ文言）で
 落ちたら、ステップの失敗とは区別する（on_fail・judge へ回さない）。ステップの結果に `"limit": true` と読めた解除時刻を残す。
-- 環境変数 `NDF_SUPERVISE_CLAUDE_FALLBACK`（`KEY=VALUE` を空白区切り。例 `CLAUDE_CODE_USE_BEDROCK=1`）が
+- 登録済みの claude アカウント（`relay.py account add`）が 2 つ以上あれば、上限に当たったアカウントを除いて最も
+  上限から遠いものへ替え、待たずに同じ呼び出しを起動し直す（`lib/claude_accounts.py`。子へはトークンもスコープも渡さず、
+  `CLAUDE_CONFIG_DIR`（アカウントの設定ディレクトリ。claude が自分でトークンを更新する）・`NDF_CLAUDE_ACCOUNT`・
+  `NDF_SHARED_CONFIG_DIR`・`CLAUDE_CODE_PLUGIN_CACHE_DIR` を渡す）。以後の呼び出しもそのアカウントで起動する。ステップの `auth` に
+  `アカウント <名前>（<種類>）`、報告に `認証: 切り替え（アカウント <名前>）`、途中の報告に `"kind": "account"` の行を残す。
+  結果が認証の失敗（`Failed to authenticate`）なら、そのアカウントを 1 時間候補から外して同じ呼び出しをやり直す（種類は `auth`）。
+  使えないアカウントの理由は途中の報告の `"kind": "account_dir"` の行に残る。起動したときの `NDF_CLAUDE_ACCOUNT`（動いている
+  区間のアカウント）と実行中の呼び出しのアカウントのトークンは、プランが更新しない
+- 従量の接続の宣言は、環境変数 `NDF_SUPERVISE_CLAUDE_FALLBACK` が定義されていれば（空でも）それ、無ければ
+  `relay.py account add-bedrock` が保存した宣言（アカウントの置き場の `metered.json`）である。保存先が壊れていれば
+  最初の呼び出しの前に標準エラーと途中の報告（`"kind": "metered_invalid"`）へ 1 行出し、宣言なしとして扱う
+- 候補が無く従量の接続の宣言があれば、その変数を足し、`CLAUDE_CONFIG_DIR` を元の値へ戻した環境へ移り、
+  以後の呼び出しもそれで起動する。起動のたびに登録済みのアカウントの残量を読み（推論なし）、上限を外れ閾値
+  （`NDF_ACCOUNT_SWITCH_AT`）未満のものがあれば戻す（`auth` は `従量の接続（<変数名>）`・`アカウント <名前>（recovered）`）
+- 登録が 1 つ以下なら、従量の接続の宣言（環境変数は `KEY=VALUE` を空白区切り。例 `CLAUDE_CODE_USE_BEDROCK=1`）が
   あれば、それを環境に足した同じ claude -p で 1 度だけ起動し直す。報告に `認証: 切り替え（<変数名>）` を書く
 - それでも上限なら、解除時刻 + 1 分まで（読めなければ計画の `"limit_retry_seconds"`、既定 900 秒）待って
   同じ呼び出しを起動し直す。待ちは LLM を使わない（time.sleep）。queue の枠は待ちの間も保つ
@@ -77,7 +106,8 @@ run のステップ:
   `doc-lint`（追加した行の書き方のチェック）。`cmd` を書けばそちらを使う
 - `cmd` の `{pr}` は Pull Request の番号に、`{pr_url}` は URL に置き換わる（drive のステップの `args` も同じ）。
   Pull Request は pr のステップで作ったもの、または計画の `"Pull Request"`（URL なら末尾の数字を番号として読む）
-- `"rerun_failed": true`: 失敗したら落ちたテストだけ（`pytest --lf`）を走らせ直し、通れば成功として進む
+- テストのステップ（`test-limited` / `test-all`）は `test-run.py` が宣言の戦略で走らせ、落ちたテストを JUnit で
+  フレーキー・既存失敗・変更起因に分ける（変更起因が無ければ通る）。計画の `テストの戦略` と `テストの時間` に戦略と上限が載る
 - `"skip_to": "<ステップの id>"`: 終了コードが `skip_code`（既定 3。`refactor.py assess` の「飛ばしてよい」）なら
   そのステップへ進む
 - 終了コード 10〜19（共通の契約の関門）は失敗にしない。ステップの結果に `gate` を残して `"gate_next"`（無ければ
@@ -86,7 +116,16 @@ run のステップ:
 - テストの成果物を作らない（計画の `no_reports` を `PYTEST_ADDOPTS` に足す）。作らせるときは `"reports": true`
 - `cmd` の `{base}` は起点のブランチ（計画か .ndf/worktree.json の `base_branch`）に置き換わる。
   `{state_dir}` は計画の状態ディレクトリに置き換わる
+- `"on_exit": {"<終了コード>": "<ステップの id> | end | stop"}`: 終了コードを読んだら `skip_to` の次・関門（10〜19）の
+  前に見る。当たれば `on_fail` へ行かない。`stop` は `結果: 止まった`・`理由: ステップ <id> が終了コード <n> で止めた:
+  <出力の最後の JSON の summary>`（release とマージのステップが CI の基盤待ち 75 で judge を通らずに止まる）。
+  鍵が整数でない・行き先が知らないステップの id なら、ステップを流す前に `結果: 止まった`
+- `"on_fail_only": "push-check"`: 失敗のうち `on_fail` へ回すものを絞る。`push-check` は pr のステップの push が
+  push 前の検査（`pre-push` フック）で拒まれたとき（終了コード 1 で `! [` の拒否の行が無い）だけを回し、同じコミットで
+  2 回続けて落ちたとき・先行の拒否・接続の失敗・Pull Request の作成の失敗は止まる。無ければすべての失敗を回す
 - `"gate_as_ok": true`: 終了コード 10〜19 を関門として数えず、提示物だけを写して `next` へ進む
+- `"pr_from": "<鍵>"`: 終了コード 0 で終わったとき、出力の最後の JSON の `metrics.<鍵>` が空でなければ、計画の
+  `"Pull Request"` をその値（URL）にする。報告の `Pull Request` に載り、queue の `{queue_pr:<計画名>}` が読む
 
 実行の条件（計画の `"実行の条件": {"cmd": "...", "skip_code": 3}`）: run と queue が作業ツリーを作る前に
 元のリポジトリで打つ。0 なら流す。`skip_code` なら作業ツリーを作らず、報告を `結果: 完了`・
@@ -98,9 +137,10 @@ queue の置き換え: `{queue_prs}` は前のすべてのステージの Pull R
 
 ステップの遷移:
 - `next` に `end` を書くと、そこでフェーズを完了として終える
-- run: 終了コード 0 なら `next`（無ければ次のステップ）。10〜19 は関門として `gate_next` か `next`。
-  それ以外の 0 以外なら `on_fail`（無ければ止まる）
-- work: 終了後に `next`（無ければ次のステップ）
+- run: 終了コード 0 なら `next`（無ければ次のステップ）。`on_exit` に当たればその行き先。10〜19 は関門として
+  `gate_next` か `next`。それ以外の 0 以外なら `on_fail`（無ければ止まる）
+- work: 終了後に `next`（無ければ次のステップ）。`"back_to_failed": true` なら、最後に落ちて `on_fail` へ回った
+  ステップが `next` より並びで前のとき、そのステップからやり直す（judge の後の fix で使う）
 - judge: 答えの `decision` がステップの id ならそのステップへ、`next` なら次のステップへ、`stop` なら止まる、
   `gate` なら関門として止まる。`choices` を渡すとその中から選ばせる
 
@@ -114,6 +154,8 @@ queue の置き換え: `{queue_prs}` は前のすべてのステージの Pull R
 - `"kind": "gh-limit"`: judge が打ち直すステップの前の出力が GitHub の上限（`gh_parts.is_rate_limited`）のとき、
   打ち直す前に待った 1 回ごとに 1 行（step・waited・reset）。待つのは `gh api rate_limit` の graphql の残りが 0 のときの reset まで。
   読めなければ（残りがあるときも）同じステップの待ちごとに 60 秒から倍々で、1 時間で頭打ち
+- `"kind": "account"`: 利用上限などで claude -p のアカウントを替えた 1 回ごとに 1 行（step・reason・from・to。
+  従量の接続へ移ったときは to が `metered` で、keys に宣言の変数の名前。値は書かない）
 - `"kind": "attention"`: conductor の判断が要る出来事（reason が 止まった・関門・同じ失敗の繰り返し・
   judge のステップで stop が出そう・遅れ）。worker の行の語と繰り返し、ステップの結果からスクリプトで分ける。
   `queue` はこの行を標準出力の `{"tool": "supervise-queue", "event": "attention", ...}` で知らせる
@@ -149,6 +191,40 @@ import re
 QUEUE_PRS = "{queue_prs}"
 
 
+def _part_prompt(base_prompt: str, i: int, parts: list[dict]) -> str:
+    """i 番目（1 始まり）のパートの prompt。元の prompt へ、触るファイルと終え方を足す。"""
+    part = parts[i - 1]
+    return (
+        base_prompt + f"\n\n## このパート（{i}/{len(parts)}: {part['name']}）\n"
+        f"触るのは次のファイルだけ: {', '.join(part['files'])}。"
+        "他のパートは別の作業が受け持つ。前のパートの成果は git log と該当ファイルの要る範囲で確かめる。"
+        "このパートの変更をコミットして終える。"
+    )
+
+
+def _expand_one(step: dict, parts: list[dict]) -> list[dict]:
+    """1 つの work のステップをパートの数だけのステップへ展開する（id は `<元の id>-<番号>`、next で順につなぐ）。"""
+    out = []
+    for i in range(1, len(parts) + 1):
+        p = {k: v for k, v in step.items() if k not in ("parts", "id", "next")}
+        p["id"] = f"{step['id']}-{i}"
+        if i < len(parts):
+            p["next"] = f"{step['id']}-{i + 1}"
+        elif step.get("next"):
+            p["next"] = step["next"]
+        p["prompt"] = _part_prompt(step["prompt"], i, parts)
+        out.append(p)
+    return out
+
+
+def _rewire_transitions(steps: list[dict], old_id: str, first_id: str) -> None:
+    """元の id を指す遷移（next / on_fail）を最初のパートへ書き換える。"""
+    for t in steps:
+        for key in ("next", "on_fail"):
+            if t.get(key) == old_id:
+                t[key] = first_id
+
+
 def expand_parts(steps: list[dict]) -> list[dict]:
     """work のステップの `parts` を、パートごとに別の claude -p のステップへ展開する。
 
@@ -162,26 +238,36 @@ def expand_parts(steps: list[dict]) -> list[dict]:
         if s.get("type") != "work" or not parts:
             out.append(s)
             continue
-        for i, part in enumerate(parts, 1):
-            p = {k: v for k, v in s.items() if k not in ("parts", "id", "next")}
-            p["id"] = f"{s['id']}-{i}"
-            if i < len(parts):
-                p["next"] = f"{s['id']}-{i + 1}"
-            elif s.get("next"):
-                p["next"] = s["next"]
-            p["prompt"] = (
-                s["prompt"] + f"\n\n## このパート（{i}/{len(parts)}: {part['name']}）\n"
-                f"触るのは次のファイルだけ: {', '.join(part['files'])}。"
-                "他のパートは別の作業が受け持つ。前のパートの成果は git log と該当ファイルの要る範囲で確かめる。"
-                "このパートの変更をコミットして終える。"
-            )
-            out.append(p)
-        # 元の id を指す遷移は最初のパートへ
-        for t in steps:
-            for key in ("next", "on_fail"):
-                if t.get(key) == s["id"]:
-                    t[key] = f"{s['id']}-1"
+        out += _expand_one(s, parts)
+        _rewire_transitions(steps, s["id"], f"{s['id']}-1")
     return out
+
+
+# `on_fail_only` の値 → その種類の失敗のときにハンドラーが結果へ true で残すキー
+ON_FAIL_ONLY = {"push-check": "push_check"}
+
+
+def fail_kind_matches(step: dict, cur: dict) -> bool:
+    """失敗を `on_fail` へ回すか。`on_fail_only` が無ければすべての失敗、あれば宣言した種類の失敗だけ（#1751 の決定 4）。"""
+    only = step.get("on_fail_only")
+    return not only or bool(cur.get(ON_FAIL_ONLY.get(only, ""), False))
+
+
+def on_exit_error(steps: list[dict]) -> str | None:
+    """run のステップの `on_exit` の誤り（鍵が整数でない・行き先が知らないステップの id）。無ければ None。"""
+    ids = {s.get("id") for s in steps}
+    for s in steps:
+        table = s.get("on_exit")
+        if table is None:
+            continue
+        if not isinstance(table, dict):
+            return f"ステップ {s.get('id')} の on_exit が対応表でない"
+        for code, dest in table.items():
+            if not re.fullmatch(r"-?\d+", str(code)):
+                return f"ステップ {s.get('id')} の on_exit の鍵が終了コードでない: {code}"
+            if dest not in ("end", "stop") and dest not in ids:
+                return f"ステップ {s.get('id')} の on_exit の行き先が知らないステップ: {dest}"
+    return None
 
 
 # 計画の旧いキー（持ち場）を今のキー（フェーズ）へ読み替える。旧い計画の JSON も読めるようにする

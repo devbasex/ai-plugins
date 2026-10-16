@@ -79,6 +79,28 @@ CASES = [
         0,
     ),
     ("function_call_after_move", "f() { cd .worktrees/x; }\nf\necho hi > after.md", "/base", [], 1),
+    # --- 文の種類ごとの振り分け（_Scan.stmt の各枝） ---
+    ("bare_redirect", "> a.md", "/base", ["/base/a.md"], 0),
+    ("bare_redirect_after_cd", "cd x\n> a.md", "/base", ["/base/x/a.md"], 0),
+    ("negated", "! echo hi > a.md", "/base", ["/base/a.md"], 0),
+    ("negated_cd", "! cd x\necho hi > a.md", "/base", ["/base/x/a.md"], 0),
+    ("group_cd", "{ cd x; echo hi > a.md; }\necho hi > b.md", "/base", ["/base/x/a.md", "/base/x/b.md"], 0),
+    ("group_redirect", "{ cd x; echo hi; } > a.md", "/base", ["/base/a.md"], 0),
+    ("subshell_redirect", "( cd x; echo hi ) > a.md", "/base", ["/base/a.md"], 0),
+    ("list_trailing_redirect", "cd x && echo hi > a.md", "/base", ["/base/x/a.md"], 0),
+    ("pipe_trailing_redirect", "echo hi | cat > a.md", "/base", ["/base/a.md"], 0),
+    ("for_loop", "for f in a b; do echo hi > $f.md; echo x > c.md; done", "/base", ["/base/c.md"], 0),
+    ("for_loop_cd", "for f in a b; do cd x; done\necho hi > a.md", "/base", [], 1),
+    ("c_for_loop", "for ((i=0;i<3;i++)); do echo hi > a.md; done", "/base", ["/base/a.md"], 0),
+    ("while_loop", "while read l; do echo $l >> a.md; done < in.txt", "/base", ["/base/a.md"], 0),
+    ("while_redirect", "while true; do cd x; done > a.md", "/base", ["/base/a.md"], 0),
+    ("until_loop", "until false; do echo hi > a.md; done", "/base", ["/base/a.md"], 0),
+    ("if_else", "if true; then echo > a.md; else echo > b.md; fi", "/base", ["/base/a.md", "/base/b.md"], 0),
+    ("assign_subst", "X=$(echo hi > a.md)", "/base", ["/base/a.md"], 0),
+    ("declare_subst", "local y=$(cd x; echo hi > a.md)\necho hi > b.md", "/base", ["/base/x/a.md", "/base/b.md"], 0),
+    ("test_cmd", "[[ -f a.md ]] && echo hi > b.md", "/base", ["/base/b.md"], 0),
+    ("function_no_move", "f() { echo hi > in.md; }\nf\necho hi > after.md", "/base", ["/base/in.md", "/base/after.md"], 0),
+    ("function_redirect", "f() { echo hi; } > a.md", "/base", [], 1),
 ]
 
 

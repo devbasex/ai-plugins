@@ -6,7 +6,7 @@ Step 1（ラウンドの開始）と Step 3（判定）が読む基準を持つ�
 
 ## 参加者プールと担当
 
-**既定の参加者プールは claude / codex / kiro とホストである。** agy はテストを背景で起動した
+**既定の参加者プールは claude / codex / kiro とホストである。** agy はテストをバックグラウンドで起動した
 まま結果を残さずに終わることがあり、起動し直しても残らなければ収束が止まるため、既定から外した。
 戻すときは `--include agy` を渡す。ホストは常に参加者プールに入る（#892。ホストが agy なら 4 者）。
 レビュー担当は CLI プロセスとして起動するため、ホストと同じランタイムでもホストの会話の作業文脈は
@@ -27,6 +27,31 @@ Step 1（ラウンドの開始）と Step 3（判定）が読む基準を持つ�
 収束ループ全体を開始できないと、他の 2 者で回せる場面まで止まる。確認は「止めるゲート」では
 なく「誰が使えるかを把握する手順」であり、通らなかった者は理由とともに状態ファイルの
 `participants.unavailable` へ残して先へ進む。
+
+**確認は認証だけでなく、モデルを 1 回引くところまで行う**（参加の確認。`lib/auth.py` の `probe_auth` が
+参加者ごとに並行に走らせ、合否は `lib/assignment.py` の `admit` が決める）。認証の状態確認が通っても、
+設定のモデルを引けない CLI や更新トークンが失効した CLI は結果を残さずに終わるためである。
+
+| 種類 | 何をするか |
+| --- | --- |
+| 認証確認 | `claude auth status` / `codex login status` / `agy models` / `kiro-cli whoami`。通らなければ最小の呼び出しを走らせずに外す |
+| 最小の呼び出し | 担当の起動と同じ CLI・同じプロジェクトのディレクトリ・同じ設定の上書き（claude の従量の接続の `--settings`）で、短い固定の問いを 1 回答えさせる（agy は持たない） |
+| 既定のモデルでの引き直し | 最小の呼び出しがモデルを引けず、モデルを引数で明示していないときだけ、claude は `--model default`、codex は `--ignore-user-config` で引き直す。codex はこれで読めた既定のモデルを、担当の起動と同じ形（利用者の設定のまま `--model <名前>`）でもう 1 回引き、通ったときだけ通す（`--ignore-user-config` は提供元の設定も外すため）。通れば既定のモデルで担当に入り、`participants.default_models` に残る。利用者の設定ファイルは書き換えない |
+
+1 者の持ち時間は 3 種類で共有して 120 秒。外した理由は `participants.unavailable` の値の先頭
+（`model_unavailable: ERROR: ...` など）と `participants.checks[<名前>].result` に語で残る
+（`unauthenticated` / `auth_expired` / `model_unavailable` / `timeout` / `missing_cli` / `probe_failed`）。
+`init` は参加者ごとに次の形の 1 行を出す。
+
+```text
+✅ claude: 認証とモデル（4.9 秒）
+↪ codex: 設定のモデル gpt-5.5 を引けないため、既定のモデル gpt-6.1-sol で担当に入れる（9.1 秒）
+❌ kiro: auth_expired — ERROR: Your access token could not be refreshed ...（5.0 秒）
+```
+
+確認の後に同じ形（モデルを引けない・認証の失効）が起きたときは、監視が `err.log` の文言で理由を付けて止め、
+同じ担当で起動し直さずに振り替える（`assignment.NO_RELAUNCH_REASONS`）。確認の結果は再開で使い回し、
+参加者に関わる引数を渡した再開だけ確かめ直す。
 
 | 引数 | 何をするか |
 | --- | --- |
@@ -121,7 +146,7 @@ agy 1 者で回る）。記録の `included` には書かない。再開で `--o
 
 **測れないことを 0 件として扱わない。** 指摘の記録（payload）が残っていないラウンドでは
 中身を読めない。これを 0 件と数えると、修正必須の指摘が出ているラウンドまで収束させて
-しまう。測れないときは従来の判定（全員が pass か）に従い、出力の `NEW_FINDINGS` は `-` に
+しまう。測れないときは全員が pass かで判定し、出力の `NEW_FINDINGS` は `-` に
 なる。
 
 **担当が 1 者のラウンドと、起動し直した担当の指摘は、未反証（`unrefuted`）として新規性の層が
@@ -137,3 +162,74 @@ agy 1 者で回る）。記録の `included` には書かない。再開で `--o
 round 5 の指摘は修正済みの箇所を指していた。再提出された指摘は Pull Request に残り、
 最終スイープ（Step 7.5）が解消する。
 
+## 範囲の照合
+
+**担当が範囲を推測して一部だけを見た承認では、収束しない。** スプリント PR（複数課題の差分の末尾に
+cross-refactoring のコミットが付く形）では、担当が末尾のコミットだけを見て承認しうる。そのため
+範囲をプロンプトで渡し、担当が読んだファイル数を範囲のファイル数と突き合わせる。
+
+### レビュー範囲
+
+`start-round` がラウンドを開くときに求め、`rounds[].review_scope` に書く。base の SHA は head を取る
+REST の応答（`GET /repos/{repo}/pulls/{pr}`）の `base.sha` から読み、API の呼び出しを増やさない。
+
+| 欄 | 意味 |
+| --- | --- |
+| `range` | `full`（PR の全差分）か `since_previous`（設計 PR の 2 ラウンド目以降。`classifications.diff_scope`） |
+| `base_sha` | `full` は PR の `base.sha`。`since_previous` は同じ PR の 1 つ前のラウンドの `head_sha`（無いか今の head と同じなら `full` へ落とす） |
+| `head_sha` | そのラウンドの `head_sha` |
+| `files` | `git -C <worktree> diff --name-only <base_sha>...<head_sha>` の行数 |
+| `unavailable` | 求められなかった理由。このとき上の 4 つは無い |
+
+| `unavailable` | いつ |
+| --- | --- |
+| `no_head` | 作業ツリーの同期を飛ばし、head を記録していない |
+| `no_base` | PR の応答に `base.sha` が無い |
+| `base_missing` | base のコミットが作業ツリーに無く、`git fetch origin <base_sha>` でも取れない |
+| `diff_failed` | `git diff --name-only` が非 0 で終わった |
+
+範囲を求められなくてもラウンドは止めない。`launch-reviewer.sh` は `review_scope` に `unavailable` が
+無く、`review_scope.head_sha` がそのラウンドの `head_sha` と一致するときだけ、プロンプトの「必須
+コンテキスト」に節「このラウンドのレビュー範囲」（base・head・3 点の `git diff` のコマンド・ファイル数）を
+載せ、結果ファイルに `read_files` を書くよう指示する。それ以外は節も指示も載せない。
+
+### 読んだファイル数
+
+担当は結果ファイルの `read_files` に、レビュー範囲のファイルのうち差分を読んだファイルの数を整数で書く
+（自己申告）。`read-result` は席の記録へ写す。
+
+| 席の記録 | 値 |
+| --- | --- |
+| `read_files` | 0 以上の整数。測れなければ `null`（0 件とは別の値として扱う） |
+| `read_files_reason` | `null` の理由。`missing`（鍵が無い）か `not_integer`（真偽値・文字列・小数・負の数） |
+
+取り込みは `read_files` で止まらず、指摘も捨てない。
+
+### 判定での照合
+
+`judge` は結果なしの扱いを抜けた後、通した担当（`APPROVE` か重大な指摘の無い `COMMENT`）ごとに
+`read_files` を照らす。通すのに要る数は `ceil(files × 0.5)`（`review_scope.READ_FILES_MIN_RATIO`）で、
+16 ファイルなら 8 である。足りない（`too_few`）・測れない（`missing` / `not_integer`）担当を外れた担当とする。
+通していない担当（`REQUEST_CHANGES`・重大な指摘のある `COMMENT`）は照らさない。
+
+収束の式（終了基準の層）を今のまま評価し、成り立ったうえで外れた担当がいれば収束させない。
+`verdict = scope_unmatched`・終了コード 2・`SCOPE_RETRY=1` を返し、`drive.py` は修正を挟まずに
+次のラウンドを開く。次のラウンドは席の輪番で組み直され、別の担当が全範囲を見る。ラウンドの上限は
+今のまま効く。収束の式が成り立たないラウンドは、照合をせずに修正へ回る。
+
+照合しないラウンドは今と同じ判定になる。
+
+| 照合しない理由（`SCOPE_CHECK=unchecked:<理由>`） | いつ |
+| --- | --- |
+| `review_scope.unavailable` の値 | 範囲を求められなかった |
+| `legacy` | `review_scope` を持たない前の版のラウンド |
+| `model_stage` | 設計 PR のモデルの段。指示どおりドメインモデルの節だけを読むため、照合すると誤って外す |
+
+判定の出力と状態ファイル:
+
+| 出力 | 形 |
+| --- | --- |
+| `SCOPE_CHECK` | `checked` か `unchecked:<理由>` |
+| `SCOPE_UNMATCHED` | `checked` のとき。`'<席>=<読んだ数>/<差分の数> ...'`。測れないときは読んだ数の位置に理由（`'kiro=1/16 codex=missing/16'`） |
+| `SCOPE_RETRY` | 出口が `scope_unmatched` のとき `1` |
+| `rounds[].scope_check` | `{checked, reason?, files?, min_read?, unmatched: [{seat, read_files, reason}]}`。判定のたびに書き直す |

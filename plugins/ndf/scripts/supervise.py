@@ -11,7 +11,7 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
 | work  | 1 つの作業（修正・調査）を worker として行わせる | Tool あり（Read/Edit/Write/Bash/Grep/Glob）。`"full": true` なら設定・プラグイン・Skill をそのまま読む claude -p で Skill を回す（cross-review など） |
 | drive | 駆動（cross-review / cross-refactoring の drive.py）を run として回し、`pause` のときだけ worker に判断・修正をさせて駆動へ返す | pause のときだけ（work と同じ最小構成） |
 | judge | 結果ファイルと規則の抜粋だけを渡し、次のステップを決めさせる | Tool なし |
-| pr    | push して Draft の Pull Request を作る（スクリプト）。本文は材料（計画の値・コミット・変更の統計・run の結果・設計文書）から LLM が書く。`"body": "template"` なら材料をそのまま本文にする。本文には必ず「## 利用者向けの変化」の節を置く（ステップの `changes`、無ければ `summary`、それも無ければ題名から。配布の説明文の材料）。`"append": [<パス>...]`（`{state_dir}` を置き換える）のうち、あるファイルの中身を署名の前へそのまま足す。末尾の署名は本文に無いときだけ足す | 本文だけTool なし |
+| pr    | push して Draft の Pull Request を作る（スクリプト）。本文は材料（計画の値・コミット・変更の統計・run の結果・設計文書）から LLM が書く。`"body": "template"` なら材料をそのまま本文にする。本文には必ず「## 利用者向けの変化」の節を置く（ステップの `changes`、無ければ `summary`、それも無ければ題名から。配布の説明文の材料）。`"append": [<パス>...]`（`{state_dir}` を置き換える）のうち、あるファイルの中身を署名の前へそのまま足す。末尾の署名は本文に無いときだけ足す。`"decisions": true` なら、設計の PR の本文へ「決めたこと」の節を作る時点で入れる（`pr-body-decisions.sh render`。後の sync が書き込まず、CI を 2 度起動しない）。`"title_doc": <設計文書>` なら、囲みの外の最初の H1（256 コードポイント以内）を題にし、既存の PR の題も書き直す。読めなければ `title` で出し、既存の題は書き直さない | 本文だけTool なし |
 
 使い方:
     supervise.py run <plan.json> [--state-dir DIR] [--from <ステップの id>] [--slow K=V]...
@@ -22,27 +22,30 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
     supervise.py new fix (--worktree DIR | --branch B) --tests PATH... --title T [--issue N] [--escape-of N] [--summary S] [--out F]
         # 即時修正: 作業場所の今のコミットを 範囲テスト → Pull Request → 全体テスト → doc-lint → ready → マージ で流す
     supervise.py new check --pr N --worktree DIR [--issue N...] [--scope PATH...] [--out F]
-    supervise.py new check --since-last --id <名> --worktree <リポジトリの根> [--mission <状態>] [--final] [--since-ref R] [--out F]
+    supervise.py new check --since-last --id <名> --worktree <リポジトリの根> [--sprint <状態>] [--final] [--since-ref R] [--out F]
         # 前回の検査からの差分を範囲にする検査（pace: fast）。実行の条件 check-trigger.py eval が立ったときだけ流れる
-    supervise.py new check --since-last --review-only --id <名> --worktree <リポジトリの根> [--mission <状態>] [--since-ref R] [--out F]
+    supervise.py new check --since-last --review-only --id <名> --worktree <リポジトリの根> [--sprint <状態>] [--since-ref R] [--out F]
         # 実装レビューだけ（開発版ごと）。前回のレビューから PR が 1 本以上で流れ、構造改善のトリガーの起点は動かさない
-        # new の共通: [--base B] [--test-cmd CMD] [--test-all PATH] [--production-branch B]（宣言より先に効く。下の「宣言」）
+        # new の共通: [--base B] [--test-cmd CMD] [--production-branch B]（宣言より先に効く。下の「宣言」）。
+        # テストは .ndf/project.json の test（戦略・suites[].scope_command の {paths}・junit）を test-run.py が読む
     supervise.py new release --version V (--prs N... | --prs-from-queue) --channel dev|prod --worktree DIR
                              [--issue N...] [--prev-tag T] [--repo DIR] [--out F]
         # --prs-from-queue: queue が --then でこの計画を流す前に、先行の計画の報告の Pull Request を集めて
         # --prs に足す（--prs の固定の番号と併用できる）。prod のステップの最後は後片付け（merged-steps.py cleanup）
-    supervise.py new release ... --mvv <ミッションの状態>
+    supervise.py new release ... --mvv <スプリントの状態>
         # prod: 先頭に MVV 判定（mvv-gate.py）のステップを置く。dev: approval-facts のステップを gate_as_ok にする
-    supervise.py new mission --name M --worktree <リポジトリの根> --issue N... --version <開発版> [--design N...] [--tests PATH...] [--out DIR]
-        # 並列の設計 → 関門 1 → ミッションのブランチ → 並列の実装（ミッションのブランチへ集める）→ 検査 1 回 → 配布
-        # をステージごとの計画の JSON と mission.json へ書き出す。ステージの中は queue --max 3 で流す。配布は検査の queue が --then で流す
+    supervise.py new sprint --name M --worktree <リポジトリの根> --issue N... --version <開発版> [--design N...] [--tests PATH...] [--out DIR]
+        # 並列の設計 → 関門 1 → 設計の結果 → スプリントブランチ → 並列の実装（スプリントブランチへ集める）→ 検査 1 回 → 配布
+        # をステージごとの計画の JSON と sprint.json へ書き出す。ステージの中は queue --max 3 で流す。配布は検査の queue が --then で流す
         # 設計の計画: 用語集（無ければ worktree の中で起こしてコミットする）→ 要求と受け入れ条件（本文と写しが一致すれば
         # 飛ばす）→ 設計 → 設計 PR → cross-review → 用語チェック → 関門 1
         # release.form が無いか雛形の無い形なら配布の計画を書かず、最後のステージを「/ndf:release で行う」にする
-        # --pace fast --state <ミッションの状態>: 使ってよい条件を確かめ、設計（関門 1 は MVV 判定）→ 実装（develop へ直接）
+        # --pace fast --state <スプリントの状態>: 使ってよい条件を確かめ、設計（関門 1 は MVV 判定）→ 実装（develop へ直接）
         # → 検査（実行の条件）→ 開発版 → 本番（関門 2 は MVV 判定）を書く。条件に外れれば計画を書かずに止まる
     supervise.py new close --name M --worktree <根> --issue N... --version <開発版> --prod <正式版> --state <状態> [--out DIR]
-        # ミッションの終わり: 最終の検査 → 開発版 → 本番（最終の検査で変更があったときだけ）→ 確定仕様化・閉じる・振り返り
+        # スプリントの終わり: 最終の検査 → 開発版 → 本番（最終の検査で変更があったときだけ）→ 確定仕様化・閉じる・振り返り・棚卸し
+    supervise.py design-results --manifest <sprint.json> --base B --root <根> --design N...
+        # 設計の結果のステージ: マージした設計 PR の「設計の結果」の表を読み、実装のステージのプランを書き換える
     supervise.py design-glossary --mode M --root . --out <候補の語.md>
         # 設計の計画の入口: 用語集が揃えば何もしない。無ければ init と candidates を打ってコミットし、候補の語を書く
     supervise.py queue <plan.json>... [--max 3] [--then <plan.json>...]... [--done <パス>]
@@ -55,10 +58,11 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
         # 終了コード: done = 0 / attention = 20 / 上限 = 3。attention の後にもう一度打つと、その続きから待つ
     supervise.py note <引継ぎ文書.md> --report <report.md> [--next 次の欄] [--section 見出しの語]
     supervise.py sync-check [--root DIR] [--commit]   # 宣言した同期とチェック（.ndf/supervise.json の sync_checks）
+    supervise.py sync-title --pr N --doc <設計文書>   # 設計 PR の題を設計文書の H1 に合わせ直す（違うときだけ。常に 0）
     supervise.py example            # 計画の例を出す
 
 new <種別> --help は、その種別の書き出すステップの並び・要る宣言・引数だけを出す。
-new / queue / wait / note / sync-check の結果は lib/step_result.py の形の 1 行の JSON（status を見る）。
+new / queue / wait / note / sync-check / sync-title の結果は lib/step_result.py の形の 1 行の JSON（status を見る）。
 
 
 プランの形と実行の決まり（ステップの型ごとの鍵・承認ゲート・遅れの見張り）は supervise_lib/plan.py の docstring にある。
@@ -77,20 +81,25 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import supervise_lib  # noqa: E402,F401  lib/ を sys.path へ足す
 import deps  # noqa: E402
 
-deps.require("mdtable", "schema", "procs")  # 表（pr・commands）・宣言の形（decl）・claude -p の打ち切り（claude）
-from supervise_lib import commands, mission, new_args, queue, templates  # noqa: E402
+deps.require(
+    "md", "mdtable", "schema", "procs", "locks", "durable"
+)  # 課題の本文（state → sprint_mvv → md）・表（pr・commands）・宣言の形（decl）・claude -p の打ち切り（claude）・アカウントの排他（claude_accounts）・耐久の記録（flow）
+from supervise_lib import commands, design_stage, sprint, sprint_routes, new_args, queue, templates  # noqa: E402
+from supervise_lib import pr as pr_step  # noqa: E402
 from supervise_lib.decl import DeclError, apply_decls  # noqa: E402
 from supervise_lib.plan import EXAMPLE  # noqa: E402
+import handoff_doc  # noqa: E402
+import legacy_names  # noqa: E402
 from step_result import emit  # noqa: E402  supervise_lib が lib/ を sys.path へ足す
 
 MAIN_EPILOG = """フェーズごとの種別（new <種別> --help で、書き出すステップの並び・要る設定・引数を出す）:
   フェーズ                                 種別
-  設計 → 承認ゲート 1 → 実装 → 検査（ミッション）  new mission（リリースの形に雛形があればリリースまで）
+  設計 → 承認ゲート 1 → 実装 → 検査（スプリント）  new sprint（リリースの形に雛形があればリリースまで）
   実装（1 課題の Pull Request）              new impl
   即時修正（worker の実装なしで Pull Request）  new fix
   検査（1 本の Pull Request か前回からの差分）   new check
   リリース（開発版か本番）                   new release
-  ミッションの終わり                         new close
+  スプリントの終わり                         new close
 書き出したプランは run で 1 本、queue で並べて流し、wait で終わりか attention まで待つ。"""
 
 
@@ -169,30 +178,51 @@ def main() -> int:
     g.add_argument("--mode", default="standard", help="モード（設計の工程の入口で用語集を見るモードか）")
     g.add_argument("--root", default=".", help="worktree の根")
     g.add_argument("--out", required=True, help="候補の語を書く Markdown のパス")
+    d = sub.add_parser(
+        "design-results",
+        help="設計の結果のステージ: マージした設計 PR の設計の結果を読み、実装のステージのプランを書き換える",
+        description="design/issue-<番号> のマージした PR が変えた issues/*.md の「設計の結果」の表を読み、実装のプランへ "
+        "触るファイル・取り込んだ課題・実行の条件を書く。design-results.json を manifest の隣へ書く",
+        epilog="終了コード: 書いた = 0（読めなかった設計の課題があっても 0）/ manifest を読めない・取り込み先が無い・扱いが食い違う = 2",
+    )
+    d.add_argument("--manifest", required=True, help="スプリントの計画の sprint.json")
+    d.add_argument("--base", required=True, help="設計 PR をマージしたベースブランチ")
+    d.add_argument("--root", default=".", help="リポジトリの根")
+    d.add_argument("--design", type=int, nargs="+", required=True, help="設計の課題")
     t = sub.add_parser("note", help="報告から引継ぎ文書の表へ 1 行を足す")
     t.add_argument("doc")
     t.add_argument("--report", required=True)
     t.add_argument("--next", default="")
-    t.add_argument("--section", default="今の会話の進み")
+    t.add_argument("--section", default=handoff_doc.PROGRESS_SECTION)
     c = sub.add_parser("sync-check", help="宣言した同期とチェック（.ndf/supervise.json の sync_checks）")
     c.add_argument("--root", default=".")
     c.add_argument("--commit", action="store_true", help="同期で変わったファイルをコミットする")
-    a = ap.parse_args()
+    st = sub.add_parser(
+        "sync-title",
+        help="設計 PR の題を設計文書の H1 に合わせ直す",
+        description="設計文書の囲みの外の最初の H1 を読み、PR の題と違うときだけ書き直す。H1 を読めないときは書き直さない",
+        epilog="終了コード: 常に 0（gh の失敗は標準エラーへ出し、承認ゲートを止めない）",
+    )
+    st.add_argument("--pr", type=int, required=True, help="題を合わせる Pull Request")
+    st.add_argument("--doc", required=True, help="題を読む設計文書（作業ディレクトリからの相対パス）")
+    a = ap.parse_args(legacy_names.rewrite_argv("supervise.py", sys.argv[1:]))
     if a.cmd == "new":
         new_args.fill_new_defaults(a)
     if a.cmd == "design-glossary":
         emit(*commands.cmd_design_glossary(a.root, a.mode, a.out))
+    if a.cmd == "design-results":
+        emit(*design_stage.cmd_design_results(a))
     if a.cmd == "example":
         print(json.dumps(EXAMPLE, ensure_ascii=False, indent=2))
         return 0
-    if a.cmd == "new" and a.kind in ("mission", "close"):
-        new_args.check_mission(ap, a)
+    if a.cmd == "new" and a.kind in ("sprint", "close"):
+        new_args.check_sprint(ap, a)
         try:
-            if a.kind == "close":
-                apply_decls(a)
-                emit(mission.cmd_new_mission(a, mission.close_waves(a)))
             apply_decls(a)
-            res = mission.cmd_new_mission(a)
+            sprint_routes.apply_routes(a)
+            if a.kind == "close":
+                emit(sprint.cmd_new_sprint(a, sprint.close_waves(a)))
+            res = sprint.cmd_new_sprint(a)
             emit(res, 1 if res["status"] == "stopped" else None)
         except DeclError as e:
             ap.error(str(e))
@@ -213,6 +243,8 @@ def main() -> int:
         emit(commands.cmd_note(a.doc, a.report, a.next, a.section))
     if a.cmd == "sync-check":
         emit(commands.sync_check(a.root, a.commit))
+    if a.cmd == "sync-title":
+        emit(pr_step.sync_title(".", a.pr, a.doc))
     if a.cmd == "history":
         emit(commands.cmd_history_import(a.progress, a.history))
     if a.cmd == "expected":

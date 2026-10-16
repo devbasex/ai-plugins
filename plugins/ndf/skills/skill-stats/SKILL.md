@@ -45,7 +45,7 @@ Claude Code の transcript JSONL ファイル (`~/.claude/projects/*.jsonl`) を
 
 # --- 3 層の context window の測定 (#550) ---
 /ndf:skill-stats --agents --session <conductor のセッション>   # 4 つの表を出す
-/ndf:skill-stats --agents --session A --session B              # ミッションを 1 つの表にする
+/ndf:skill-stats --agents --session A --session B              # スプリントを 1 つの表にする
 /ndf:skill-stats --agents --layer supervisor                   # 1 つの層に絞る
 /ndf:skill-stats --agents --session A --window-limit 150000    # 割る候補の目安を変える
 ```
@@ -120,7 +120,7 @@ transcript JSONL 先頭の `cwd` フィールドを優先してプロジェク�
 | `worker を使いすぎ` | supervisor と配下の worker の固定費の合計が、その supervisor の実作業を上回った |
 
 **判定は記録ごとの比で行う。** 中央値どうしを比べないため、固定費の水準が違うセッションを
-束ねても判定の意味は変わらない。中央値と合計の列は分布の目安である。
+まとめても判定の意味は変わらない。中央値と合計の列は分布の目安である。
 
 **応答が 3 に満たない記録は束ねの表からだけ外す。** 層ごとの合計とフェーズごとの表には含める
 （短命な記録も固定費を使うため）。外した件数は表の下に 1 行出る。

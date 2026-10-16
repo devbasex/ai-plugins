@@ -6,7 +6,7 @@
 振る舞いと決定の理由を残す。
 
 **チェック J が見る記載の書き方は
-[版と配布の正本](../versioning-and-distribution.md)の「版数を持つ 15 箇所」が正である。**
+[版と配布の正本](../versioning-and-distribution.md)の「版数を持つ箇所」が正である。**
 ここに書き写さない。この文書が扱うのは、そこに書かない決定の理由と、照合の規則の細部である。
 
 ## 概要
@@ -134,7 +134,7 @@ graph TD
 
 | 項目 | 内容 |
 | --- | --- |
-| 読む先・報告先 | `docs/versioning-and-distribution.md`（`VERSIONING_MD`）。`AGENTS.md` の「主要プラグインです（v<版>）」を読むチェック I とは別に読む |
+| 読む先・報告先 | `docs/versioning-and-distribution.md`（`VERSIONING_MD`）。指示書（`AGENTS.md`）は版数を持たないため読まない |
 | 位置決め | `VERSION_SECTION_HEADING = "## 版の付け方と開発版の配布"` |
 | 節の終端 | 位置決めの見出しと同じか上位の見出し。深さは位置決めの見出しから導く（`## ` なら `^#{1,2}\s`） |
 | 囲み | フェンスの中の `# ` 始まりは見出しと数えない |

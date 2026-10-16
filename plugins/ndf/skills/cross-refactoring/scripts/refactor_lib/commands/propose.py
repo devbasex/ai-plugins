@@ -12,6 +12,7 @@ import pathlib
 import sys
 from typing import Any, Optional
 
+import project_mvv
 import statefile
 
 from .. import info
@@ -72,6 +73,9 @@ def cmd_merge_proposals(args: argparse.Namespace) -> None:
 
     proposals = load_proposals(state)
     candidates, deferred = build_candidates(proposals, threshold=str(state.get("severity_threshold") or "minor"))
+    mvv = project_mvv.from_record((state.get("project_mvv") or {}).get("ref"))
+    for item in [*candidates, *(i for i, _ in deferred)]:  # 根拠の項目を正規化する（I7。返されなければ「根拠なし」）
+        item["mvv_basis"] = project_mvv.basis(item.get("mvv_basis"), mvv)
     state["candidates"] = candidates
     for item, reason in deferred:
         defer(state, item, reason)

@@ -140,9 +140,25 @@ def test_phases_without_records_or_launches_are_absent(rf_measure):
 
 
 def test_the_summary_extra_carries_the_budget_and_the_implementer(rf_measure, tmp_path):
-    state = {"budget_minutes": 45, "implementer": "codex", "phases": {"propose": {"seconds": 12.0}}}
+    state = {
+        "budget_minutes": 45,
+        "implementer": "codex",
+        "implementer_model": {"requested": None, "observed": "gpt-6.1-sol", "unobserved": None},
+        "phases": {"propose": {"seconds": 12.0}},
+    }
     extra = rf_measure.summary_extra(tmp_path / "s.json", state, [])
-    assert extra == {"phases": {"propose": {"seconds": 12.0}}, "budget_minutes": 45, "implementer": "codex"}
+    assert extra == {
+        "phases": {"propose": {"seconds": 12.0}},
+        "budget_minutes": 45,
+        "implementer": "codex",
+        "implementer_model": {"requested": None, "observed": "gpt-6.1-sol", "unobserved": None},
+    }
+
+
+def test_the_summary_extra_reads_an_old_state_without_the_model(rf_measure, tmp_path):
+    """欄の無い過去の状態ファイルは、3 つとも空として読む。"""
+    extra = rf_measure.summary_extra(tmp_path / "s.json", {"implementer": "codex"}, [])
+    assert extra["implementer_model"] == {"requested": None, "observed": None, "unobserved": None}
 
 
 # ---------- AC16 ----------

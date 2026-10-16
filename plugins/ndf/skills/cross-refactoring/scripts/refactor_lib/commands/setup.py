@@ -19,15 +19,22 @@ import assignment
 import auth
 import jev
 import models as models_lib
-import proc
+import project_mvv
+import project_decl
 import repo as repo_lib
 import statefile
+import test_strategy as ts
+import tool_paths
+import worktree_deps
 
-from .. import ABORT, die, info
-from ..gitfacts import run_with_timeout
+from .. import ABORT, die, forecast, info, init_test, pause
+from .. import baseline as baseline_lib
+from .. import ci_coverage
+from .. import pr_gate
+from .. import runtime_decl
 from .. import timeline
 from ..paths import (
-    git_out,
+    github_repo_from_origin,
     default_worktree_base,
     sh,
     state_path,
@@ -35,8 +42,7 @@ from ..paths import (
 )
 from ..codemetrics_record import code_metrics_record, ensure_record, recorded_enabled
 from ..plan import PLAN_COMMENT, PLAN_FILE, PLAN_NONE, normalize_plan_file
-from ..scope import require_scope_covers_tests, round_test_hint
-from ..testcmd import is_known
+from ..scope import require_scope_covers_tests
 from ..vocabulary import (
     DEFAULT_BUDGET_MINUTES,
     DEFAULT_SEVERITY_THRESHOLD,
@@ -128,6 +134,7 @@ def resolve_participants(
     include: list[str],
     exclude: list[str],
     require_all: bool,
+    models: Optional[dict[str, Optional[str]]] = None,
 ) -> dict[str, Any]:
     """参加者を決め、状態ファイルの `participants` を返す（#727 の決定 2〜5）。
 
@@ -136,7 +143,12 @@ def resolve_participants(
     欠け・使える者が 0 者は、この工程の中断（終了コード 4）へ写す。母集合に無い者の
     除外は中断せず、`ℹ` の 1 行を出して続ける（#786 の決定 2）。状態ファイルは
     この関数の後に書かれるため、失敗したときは作られも書き換えられもしない。
+
+    ランタイムの宣言（#1598）があれば、母集合をその `allowed` で絞り、宣言の外の `include` を止める。
+    `models` は `--model` で明示したモデルで、参加の確認はそのモデルで引く（明示のモデルは既定のモデルへ切り替えない）。
     """
+    policy = runtime_decl.load_policy()
+    explicit = {k: v for k, v in (models or {}).items() if v}
     try:
         pool = assignment.default_pool(host)
         resolved = assignment.resolve_participants(
@@ -144,9 +156,11 @@ def resolve_participants(
             host=host,
             include=include,
             exclude=exclude,
-            probe=lambda names: auth.probe_auth(names, info=info),
+            probe=lambda names: auth.probe_auth(names, info=info, models=explicit),
             require_all=require_all,
+            policy=policy,
         )
+        pool = resolved.pool
     except assignment.AssignmentError as e:
         die(str(e))
         raise
@@ -176,33 +190,22 @@ def _apply_post_event(state: dict[str, Any], is_own_pr: bool) -> None:
 
 
 def _warn_unmeasurable_models(model_spec: dict[str, Optional[str]], participants: Iterable[str]) -> None:
-    """実際に動いたモデルを取得できない指定を、**着手前に**知らせる。
+    """実際に動いたモデルを取得できない見込みの指定を、**着手前に**知らせる。
 
-    分離の対象は 2 つある。kiro の既定 `auto` はラウンドごとに違うモデルが動きうる。
-    実測モデル名を取れないランタイム（claude 以外）で `--model` を渡さないラウンドも、
+    分離の対象は 2 つある。kiro の既定 `auto` は選んだモデルが返らない。
+    実測モデル名を取れないランタイム（claude と codex 以外）で `--model` を渡さない実行も、
     何が動いたかを後から確かめる手段が無い。報告まで分からないと、比較のために
     回した実行が丸ごと無駄になる。止めはしない（比較が目的でない実行もある）。
     """
     for runtime in sorted(participants):
-        if models_lib.is_measurable(runtime, model_spec.get(runtime)):
+        if models_lib.foreseen_separation(runtime, model_spec.get(runtime)) is None:
             continue
         info(
             f"⚠ {runtime} のモデルが "
             f"{models_lib.label(model_spec.get(runtime))} です — "
-            "実際に動いたモデルを取得できないため、そのラウンドは集計から分離されます。"
+            "実際に動いたモデルを取得できないため、その実行は集計から分離されます。"
             f"比較するなら --model {runtime}=<モデル名> を指定してください"
         )
-
-
-def github_repo_from_origin() -> Optional[str]:
-    """カレントの origin の URL から `owner/repo` を求める（GitHub の URL だけ）。求まらなければ `None`。
-
-    **求めた名前はそのまま使わない。** `repos/{owner}/{repo}/pulls/{PR}` の応答が
-    そのまま検証になるため、誤った名前は失敗として現れる（`_fetch_pr_context`）。
-    URL の読み方はライブラリの `repo.owner_repo_from_url` が持つ。
-    """
-    url = proc.git_out(pathlib.Path.cwd(), "remote", "get-url", "origin") or ""
-    return repo_lib.owner_repo_from_url(url) if "github.com" in url else None
 
 
 def _pr_payload(repo: str, pr: int) -> Optional[dict[str, Any]]:
@@ -217,10 +220,11 @@ def _pr_payload(repo: str, pr: int) -> Optional[dict[str, Any]]:
     return body if isinstance(body, dict) and body.get("number") else None
 
 
-def _fetch_pr_context(pr: int, repo: Optional[str] = None) -> tuple[str, str, str, bool, str]:
+def _fetch_pr_context(pr: int, repo: Optional[str] = None) -> tuple[str, str, str, bool, str, pr_gate.PrStatus]:
     """GitHub から Pull Request のメタデータを取り、自分の Pull Request かを判定する。
 
-    返すのは `(repo, base_branch, head_branch, is_own_pr, author)`。
+    返すのは `(repo, base_branch, head_branch, is_own_pr, author, status)`。`status` は同じ応答から読んだ
+    Pull Request の状態で、入口の検査に使う（#1658。呼び出しを増やさない）。
 
     **作成者・head・base は REST の 1 回でまとめて取る**（#271）。項目ごとに
     `gh pr view` を投げると、同じ Pull Request へ GraphQL を 3 点使う。尽きるのは
@@ -254,7 +258,7 @@ def _fetch_pr_context(pr: int, repo: Optional[str] = None) -> tuple[str, str, st
     is_own_pr = bool(viewer) and viewer == author
     head_branch = str((body.get("head") or {}).get("ref") or "")
     base_branch = str((body.get("base") or {}).get("ref") or "")
-    return resolved, base_branch, head_branch, is_own_pr, author
+    return resolved, base_branch, head_branch, is_own_pr, author, pr_gate.PrStatus.of(body)
 
 
 def _plan_mode_of(plan_file: Optional[str]) -> str:
@@ -289,6 +293,15 @@ class InitialContext:
     implementer_reason: str
     judge: dict[str, Any]
     started_at: str
+    strategy: ts.Strategy
+
+
+def _project_mvv(work: pathlib.Path) -> dict[str, Any]:
+    """プロジェクト MVV の参照と MVV の節。宣言が無くても共通原則と「MVV なし」の節を持つ（止めない）。"""
+    mvv = project_mvv.load_mvv(work)
+    if mvv.status in ("unapproved", "mismatch", "unreadable"):
+        info(f"⚠ プロジェクト MVV が{project_mvv.STATUS_LABEL[mvv.status]}ため、MVV なしで続けます: {mvv.error}")
+    return {"ref": project_mvv.record(mvv), "block": project_mvv.block(mvv)}
 
 
 def _build_initial_state(args: argparse.Namespace, ctx: InitialContext) -> dict[str, Any]:
@@ -325,16 +338,15 @@ def _build_initial_state(args: argparse.Namespace, ctx: InitialContext) -> dict[
         "implementer_reason": ctx.implementer_reason,
         # 名指しの記録。再開で `--implementer` を比べる相手（置き換えない。知らせるだけ）。
         "implementer_named": getattr(args, "implementer", None),
-        "implementer_model": {
-            "requested": (ctx.model_spec or {}).get(ctx.implementer),
-            "observed": None,
-        },
+        "implementer_model": models_lib.model_record((ctx.model_spec or {}).get(ctx.implementer)),
         "judge": ctx.judge,
         "resume_changes": [],
         "models": ctx.model_spec,
         # 提案プロンプトへ許容値をそのまま列挙するために持たせる。
         # 定義は検証側（この CLI）にあり、状態ファイル経由で起動側へ渡す。
         "vocabulary": vocabulary(),
+        # 判断の基準（#1366）。PR の head の作業ツリーから 1 回だけ読み、提案と改修計画のプロンプトへ `RF_MVV` で渡す
+        "project_mvv": _project_mvv(ctx.work),
         "skills": {"required": list(REQUIRED_SKILLS)},
         # 最終ゲートで手元のテストの代わりに見るチェックの名前。**排他である**
         # （指定があれば手元のテストを実行しない）。
@@ -342,8 +354,10 @@ def _build_initial_state(args: argparse.Namespace, ctx: InitialContext) -> dict[
         # 最終ゲートの分かれ道。**単独起動が既定である。**
         "workflow_step": bool(args.workflow_step),
         "severity_threshold": args.severity_threshold,
+        # 解いたテストの戦略（#1334 E1）。**以後変えない。** 宣言を途中で直しても、この実行はこの戦略のまま進む。
+        "strategy": ctx.strategy.as_state(),
         "baseline_test": ctx.baseline,
-        # 項目の検証の元になるコマンド（#880 / #933 の AC10b）。省けば全体テストを元に組み立てる。
+        # `round-only` のラウンドテスト（#880）。ほかの戦略は `command` が空で、範囲テストは戦略の雛形から組み立てる。
         "round_test": ctx.round_test,
         # 生成物の同期は**進行側の責務**。push の直前に実行する。
         "sync_command": args.sync_command,
@@ -366,6 +380,8 @@ def _build_initial_state(args: argparse.Namespace, ctx: InitialContext) -> dict[
         "final_gate": {"fix_rounds": 0, "checks": []},
         "pending_push": False,
         "pending_drop": None,
+        # 公開の台帳（#1482）。公開した地点（`published_sha`）はまだ無い。無ければ `plan.base_sha` を使う
+        "ledger": {"orchestrator_commits": []},
         "history_written": False,
         "code_metrics": code_metrics_record(ctx.work, getattr(args, "code_metrics", None) is not False),
     }
@@ -384,6 +400,8 @@ def cmd_init(args: argparse.Namespace) -> None:
     inputs = _resolve_init_inputs(args)
     if inputs is None:
         return
+    # **宣言の外の名前は作業ディレクトリを用意する前に止める**（#1598 の AC3）。
+    runtime_decl.require_in_policy([*(inputs.include or []), getattr(args, "implementer", None)], "--include / --implementer")
     prep = _prepare_init(args)
     if _resume_if_pending(args, inputs, prep):
         return
@@ -394,13 +412,14 @@ def cmd_init(args: argparse.Namespace) -> None:
 
     participants, baseline, round_record = _verify_init(args, inputs, prep)
     state = _save_initial_state(args, inputs, prep, participants, baseline, round_record, started_at)
-    # **出力は入口から直接呼ぶ。** 手順書の変数の出所のチェック
-    # （`scripts/check-skill-shell-vars.py`）は `cmd_*` からヘルパーを 1 階層だけたどる。
+    # **手順の枠と計画の後の見込みが想定最大時間に収まらなければ、提案者を起動せずに止める**（#1385 I4・#1743 I8）。
+    init_test.stop_if_window_short(prep.state_file, state)
+    # **出力は入口から直接呼ぶ。** 手順書の変数の出所のチェック（`scripts/check-skill-shell-vars.py`）は 1 階層だけたどる。
     _emit_init(state)
 
 
 def _normalize_args(args: argparse.Namespace) -> None:
-    """予算のチェックと、廃止した引数の知らせ。**提案の前に止める**（AC1 AC2 AC3b）。"""
+    """予算のチェックと、廃止した引数の知らせ。**提案の前に止める**（AC1 AC2）。"""
     raw = getattr(args, "budget_minutes", None)
     if raw is not None:
         try:
@@ -414,14 +433,6 @@ def _normalize_args(args: argparse.Namespace) -> None:
         if getattr(args, name, None) is not None:
             option = "--" + name.replace("_", "-")
             print(f"⚠ {option} は廃止しました（#933）。--budget-minutes で所要を決めます", file=sys.stderr, flush=True)
-    # AC3b: ラウンドのテストが無く、全体のテストから範囲テストを組み立てられないなら、
-    # 提案と改修計画に時間を使った後で全項目が `no_target` になる。着手前に止める。
-    if not getattr(args, "round_test", None) and not is_known(args.baseline_test):
-        die(
-            f"--baseline-test（{args.baseline_test}）からは項目ごとのテストを組み立てられません"
-            "（既知の実行器: pytest / python -m pytest / jest / vitest）。"
-            "--round-test でラウンドのテストを渡してください"
-        )
 
 
 @dataclass
@@ -437,7 +448,7 @@ class _InitInputs:
 
 @dataclass
 class _InitPreparation:
-    """Pull Request の文脈と、用意した作業ディレクトリ。"""
+    """Pull Request の文脈と、用意した作業ディレクトリ、解いたテストの戦略。"""
 
     repo: str
     base_branch: str
@@ -447,7 +458,9 @@ class _InitPreparation:
     work: pathlib.Path
     tmp_dir: pathlib.Path
     state_file: pathlib.Path
-    round_test: Optional[str]
+    strategy: ts.Strategy
+    decl: dict[str, Any]
+    ci_coverage: dict[str, Any]
 
 
 def _resolve_init_inputs(args: argparse.Namespace) -> Optional[_InitInputs]:
@@ -472,9 +485,10 @@ def _resolve_init_inputs(args: argparse.Namespace) -> Optional[_InitInputs]:
 
 
 def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
-    """Pull Request の文脈を取り、作業ディレクトリを用意して `--scope` の関門を通す。"""
+    """Pull Request の文脈を取り、作業ディレクトリを用意して `--scope` の関門を通し、テストの戦略を解く。
+    継続的統合のジョブのうち宣言に無いものは知らせるだけで止めない（#464 E2）。状態には新しい実行だけが書く。"""
     # リポジトリ名は git の設定から求め、Pull Request の応答で確かめる（#271）。
-    repo, base_branch, head_branch, is_own_pr, author = _fetch_pr_context(args.pr)
+    repo, base_branch, head_branch, is_own_pr, author, status = _fetch_pr_context(args.pr)
     if is_own_pr:
         info(f"⚠ 自分の Pull Request です（作成者 {author}）— 投稿は COMMENT へ倒します")
 
@@ -482,20 +496,40 @@ def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
         pathlib.Path(args.worktree_root).resolve() if args.worktree_root else default_worktree_base() / repo_lib.slug(repo) / f"rf{args.pr}"
     )
     work = root / "work"
+    # **Pull Request の状態は作業ディレクトリを用意する前に確かめる**（#1658 I4）。止まった実行は何も作らない。
+    reason = pr_gate.init_refusal(args.pr, repo, status)
+    if reason:
+        die(reason)
     _ensure_work_worktree(work, head_branch)
 
-    # **`--scope` の関門はここで通す**（#436 決定 5）。テストの置き場所が範囲に
-    # 無い、または `--baseline-test` の実行集合に入らないまま進むと、テスト整備
-    # ラウンドが足したテストが検証に効かない。案内だけでは同じ失敗を繰り返す
-    # ため、**止める**。作業ディレクトリが要るのは、探索範囲の語がディレクトリか
-    # どうかを実物で確かめるためである。
-    # **足したテストが入るべき実行集合は `--round-test` である**（#880）。群の検証が
-    # 走らせるのはこちらで、全体テストは着手前と最終ゲートにしか走らない。
-    round_test = getattr(args, "round_test", None)
-    if round_test:
-        require_scope_covers_tests(args.scope, round_test, str(work), round_test=True)
+    # **テストの戦略は宣言（`.ndf/project.json` の `test`）と引数から解く**（#1334 E1）。コマンドの文字列は
+    # 解析しない。解けなければ欠けたキーと直し方を出して止める（I3）。引数の雛形の種別は `--test-kind`（#1483 I1）。
+    decl = project_decl.read_project_decl(str(work))
+    try:
+        strategy = ts.resolve(
+            decl,
+            baseline_test=getattr(args, "baseline_test", None),
+            round_test=getattr(args, "round_test", None),
+            ci_check=getattr(args, "ci_check", None),
+            template_kind=getattr(args, "test_kind", None) or ts.TEST,
+            scope_paths=list(args.scope or []),
+        )
+    except ts.StrategyError as e:
+        die(str(e))
+        raise SystemExit(ABORT)
+    info(f"🧭 テストの戦略: {strategy.name}（根拠 {strategy.source}）")
+    for note in strategy.notes:
+        info(f"   ℹ {note}")
+    for line in (coverage := ci_coverage.compare_jobs(decl, work)).lines():
+        info(line)
+
+    # **`--scope` の関門は戦略を解いてから通す**（#436 決定 5・#1483 I9）。テストの置き場所が範囲に無いまま進むと、
+    # テスト整備ラウンドが足したテストが検証に効かない。案内だけでは同じ失敗を繰り返すため、**止める**。
+    # テストの種別の suite が無い戦略はテスト整備ラウンドを行わないため、検査を通らない（計画に残す）。
+    if strategy.has_kind(ts.TEST):
+        require_scope_covers_tests(args.scope, str(work))
     else:
-        require_scope_covers_tests(args.scope, args.baseline_test, str(work))
+        info("   ℹ テストの種別の suite が無いため、--scope のテストの置き場所の検査とテスト整備ラウンドを行いません")
 
     tmp_dir = tmp_dir_for(work)
     tmp_dir.mkdir(parents=True, exist_ok=True)
@@ -508,7 +542,9 @@ def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
         work=work,
         tmp_dir=tmp_dir,
         state_file=state_path(tmp_dir, args.pr),
-        round_test=round_test,
+        strategy=strategy,
+        decl=decl,
+        ci_coverage=coverage.as_state(),
     )
 
 
@@ -536,28 +572,35 @@ def _resume_if_pending(args: argparse.Namespace, inputs: _InitInputs, prep: _Ini
         return False
     if state.get("phase") == "done":
         return False
-    _resume(prep.state_file, state, args, inputs.model_spec, inputs.include, inputs.exclude, prep.is_own_pr)
+    _resume(prep.state_file, state, args, inputs, prep.is_own_pr)
     return True
 
 
 def _verify_init(
     args: argparse.Namespace, inputs: _InitInputs, prep: _InitPreparation
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-    """参加者を確定し、着手前のテストとラウンドのテストを実行する。"""
+    """参加者を確定し、戦略に沿った着手前のテストを実行する。"""
     # **確認は着手前のテストより先に行う。** 使える者がいなければ、テストに時間を
     # 使わずに止める。
-    participants = resolve_participants(inputs.host, inputs.include or [], inputs.exclude or [], bool(getattr(args, "require_all", None)))
+    participants = resolve_participants(
+        inputs.host, inputs.include or [], inputs.exclude or [], bool(getattr(args, "require_all", None)), inputs.model_spec
+    )
     _warn_unmeasurable_models(inputs.model_spec, participants["available"])
 
-    hint = round_test_hint(prep.round_test, args.baseline_test, args.scope, str(prep.work))
-    if hint:
-        info(hint)
-
-    # 着手前のテストの上限は予算から導く（決定 24。全体のテストの実測はまだ無い）。
-    timeout = timeline.init_test_timeout(args.budget_minutes)
-    baseline = _run_baseline_test(args.baseline_test, prep.work, timeout)
-    round_record = _run_round_test(prep.round_test, baseline, prep.work, timeout)
-    return participants, baseline, round_record
+    # 着手前のテストの上限は予算と宣言の所要から導く（決定 8）。CI に任せる戦略は範囲テストの所要 s も入れる（#1555）。
+    w, w_source = ts.whole_seconds(prep.decl)
+    c = ts.ci_wall_seconds(prep.decl, (prep.strategy.ci or {}).get("check") if prep.strategy.ci else None)
+    s, s_source = init_test.resolve_scope_seconds(prep, list(args.scope), w)
+    kw: dict[str, Any] = {"whole_seconds_value": w, "whole_source": w_source, "ci_seconds": c, "scope_seconds": s, "scope_source": s_source}
+    timeout = ts.limits(prep.strategy, int(args.budget_minutes), **kw)["init_test_timeout"]
+    if s is not None:
+        info(f"   着手前のテストの上限: {timeout} 秒（範囲テストの所要 {s} 秒 / {s_source}）")
+    baseline = baseline_lib.run_baseline(prep.strategy, prep.work, timeout, list(args.scope), prep.tmp_dir)
+    baseline.update({"whole_seconds": w, "whole_source": w_source, "ci_seconds": c, "scope_seconds": s, "scope_source": s_source})
+    init_test.append_init_test(prep, int(args.budget_minutes), args.pr, baseline)
+    if baseline.get("timed_out"):
+        init_test.abort_timed_out(prep.strategy, int(args.budget_minutes), baseline, timeout)
+    return participants, baseline, baseline_lib.round_record(prep.strategy, baseline)
 
 
 def _choose_implementer(
@@ -619,14 +662,15 @@ def _save_initial_state(
         baseline=baseline,
         round_test=round_record,
         started_at=started_at,
+        strategy=prep.strategy,
     )
     state = _build_initial_state(args, context)
     # **実行時の値を書き出す**（決定 24）。改修計画の後の値は `merge-plan` が足す。
-    state["limits"] = timeline.of_state(state)
+    state["limits"] = timeline.of_state(state, forecast.after_plan(state))
+    state["ci_coverage"] = prep.ci_coverage
     info(f"   実装担当: {context.implementer}（{context.implementer_reason}）")
-    # GitHub は自分の Pull Request への `APPROVE` と `REQUEST_CHANGES` を
-    # `HTTP 422` で拒む。判定はそのまま結果ファイルへ残し、**投稿の event だけ**
-    # を倒す。収束判定は結果ファイルの判定を見るので、倒しても進行は変わらない。
+    # GitHub は自分の Pull Request への `APPROVE` と `REQUEST_CHANGES` を `HTTP 422` で拒む。判定はそのまま結果ファイルへ
+    # 残し、**投稿の event だけ**を倒す。収束判定は結果ファイルの判定を見るので、倒しても進行は変わらない。
     _apply_post_event(state, prep.is_own_pr)
     statefile.save(prep.state_file, state)
     info(f"✅ 状態を初期化しました: {prep.state_file}")
@@ -643,7 +687,10 @@ def _rebuild_participants(
 ) -> None:
     """再開時の指定を補完し、参加者と作業ツリーの記録を作り直す。"""
     recorded = state.get("participants") or {}
-    include_eff = include if include is not None else list(recorded.get("included") or [])
+    include_eff = include if include is not None else runtime_decl.keep_recorded(state, "included", list(recorded.get("included") or []))
+    named = state.get("implementer_named")
+    if named and not runtime_decl.keep_recorded(state, "implementer_named", [named]):
+        state["implementer_named"] = None
     # `--exclude` を渡さない再開では、外した者と無視した除外の両方を足し戻す（#786 の AC4d。
     # 規則は cross-review と共通の `assignment.recorded_exclusions`）
     exclude_eff = exclude if exclude is not None else assignment.recorded_exclusions(recorded, include_eff)
@@ -652,6 +699,7 @@ def _rebuild_participants(
         include_eff,
         exclude_eff,
         bool(require_all) if require_all is not None else bool(recorded.get("require_all")),
+        state.get("models"),
     )
     state.setdefault("resume_changes", []).append(
         {
@@ -672,9 +720,7 @@ def _resume(
     state_file: pathlib.Path,
     state: dict[str, Any],
     args: argparse.Namespace,
-    model_spec: dict[str, Optional[str]],
-    include: Optional[list[str]],
-    exclude: Optional[list[str]],
+    inputs: _InitInputs,
     is_own_pr: bool,
 ) -> None:
     """前回中断した状態から再開する（#727 / #648 の決定 13〜16、#933 の「再開」）。
@@ -689,19 +735,25 @@ def _resume(
     budget_spec = RESUME_BUDGET_REPLACE if _before_plan(state) else RESUME_BUDGET_NOTIFY
     for line in statefile.apply_resume_args(state, args, budget_spec):
         info(line)
-    view, given = _notify_view(state, args, model_spec)
+    view, given = _notify_view(state, args, inputs.model_spec)
     for line in statefile.apply_resume_args(view, given, RESUME_NOTIFY_FIELDS):
         info(line)
 
     require_all = getattr(args, "require_all", None)
-    if include is not None or exclude is not None or require_all is not None:
-        _rebuild_participants(state, include, exclude, require_all)
+    if inputs.include is not None or inputs.exclude is not None or require_all is not None or runtime_decl.policy_changed(state):
+        _rebuild_participants(state, inputs.include, inputs.exclude, require_all)
         _recheck_implementer(state)
 
     _apply_post_event(state, is_own_pr)
-    # **予算を置き換えたら上限の表を組み直す**（改修計画の前だけ。改修計画の後は表を変えない）。
+    # **予算を置き換えたら上限の表を組み直す**（改修計画の前だけ。改修計画の後は止まっていた時間の分だけ締め切りをずらす。#1491）。
     if not state.get("plan"):
-        state["limits"] = timeline.of_state(state)
+        # 枠が収まらずに止めた後の打ち直しだけ、枠の起点を打ち直した時刻へずらす（#1385 I2・決定 2）。
+        if state.get("window_stopped_at"):
+            state["resumed_at"] = statefile.now()
+        state["limits"] = timeline.of_state(state, forecast.after_plan(state))
+        init_test.stop_if_window_short(state_file, state)
+    else:
+        pause.resume_after_pause(state_file, state)
     statefile.save(state_file, state)
     _emit_init(state)
 
@@ -718,11 +770,12 @@ def _recheck_implementer(state: dict[str, Any]) -> None:
     担った者が途中で替わると、見積りの前提と、項目とコミットの対応を読む者が食い違う。
     """
     current = state.get("implementer")
-    if current in state["runtimes"]:
+    pool = {**state["participants"], "available": assignment.seats_pool(state["participants"]["available"], state.get("no_results") or [])}
+    if current in state["runtimes"] and current in pool["available"]:  # 結果なしの記録で外した担当（#919）は戻さない
         return
     if not _before_plan(state):
         die(f"実装担当 {current} が参加者から外れました。改修計画の後は実装担当を替えられません")
-    implementer, reason = _choose_implementer(state["participants"], str(state["host"]), state.get("implementer_named"))
+    implementer, reason = _choose_implementer(pool, str(state["host"]), state.get("implementer_named"))
     state.setdefault("resume_changes", []).append(
         {
             "at": statefile.now(),
@@ -731,11 +784,8 @@ def _recheck_implementer(state: dict[str, Any]) -> None:
             "to": f"{implementer}（{reason}）",
         }
     )
-    state["implementer"], state["implementer_reason"] = implementer, reason
-    state["implementer_model"] = {
-        "requested": (state.get("models") or {}).get(implementer),
-        "observed": None,
-    }
+    state["implementer"], state["implementer_reason"], state["implementer_account"] = implementer, reason, ""
+    state["implementer_model"] = models_lib.model_record((state.get("models") or {}).get(implementer))
     info(f"↻ 実装担当を {implementer} へ替えました（{reason}）")
 
 
@@ -790,6 +840,9 @@ def _emit_init(state: dict[str, Any]) -> None:
         HEAD_BRANCH=state["head_branch"],
         BASE_BRANCH=state["base_branch"],
         SCOPE=" ".join(state["target_scope"]),
+        # 解いたテストの戦略と根拠（#1334）。駆動と手順書が読む。
+        STRATEGY=(state.get("strategy") or {}).get("name") or "",
+        STRATEGY_SOURCE=(state.get("strategy") or {}).get("source") or "",
     )
 
 
@@ -803,6 +856,7 @@ def _ensure_work_worktree(work: pathlib.Path, head_branch: str) -> None:
     if work.exists():
         if _is_registered_worktree(work):
             _sync_work_worktree(work, head_branch)
+            _prepare_work_deps(work, if_unprepared=True)
             return
         stale = work.with_name(f"work.stale-{time.strftime('%Y%m%d%H%M%S')}")
         work.rename(stale)
@@ -812,6 +866,19 @@ def _ensure_work_worktree(work: pathlib.Path, head_branch: str) -> None:
     sh(["git", "fetch", "origin", head_branch])
     sh(["git", "worktree", "add", "--detach", str(work), f"origin/{head_branch}"])
     info(f"✅ 書き込み用の作業ディレクトリを作成しました: {work}")
+    # ツールのパス（#1436）へ skip-worktree の印を掛ける。担当の CLI が起動した Serena などが
+    # 書き換えても、同期の前の検査に現れず、コミットにも入らない。
+    tool_paths.hide(str(work), tool_paths.load_or_die(work, ABORT))
+    _prepare_work_deps(work)
+
+
+def _prepare_work_deps(work: pathlib.Path, *, if_unprepared: bool = False) -> None:
+    """宣言（`.ndf/worktree.json` の `deps`）に従って依存を用意する（#1337）。失敗したら止まる。
+
+    作業ディレクトリは消さない。次の init が使い回すときに `if_unprepared` でやり直す。
+    """
+    if worktree_deps.prepare_reporting(work, if_unprepared=if_unprepared):
+        die(f"依存の用意に失敗しました（作業ディレクトリは残します。次の init がやり直します）: {work}")
 
 
 def _sync_work_worktree(work: pathlib.Path, head_branch: str) -> None:
@@ -831,12 +898,17 @@ def _sync_work_worktree(work: pathlib.Path, head_branch: str) -> None:
         # 取得できないまま古い `origin/<head>` へ早送りすると、同期したつもりで
         # **古い HEAD のまま**進んでしまう。通信・認証の失敗はここで止める。
         die(f"origin/{head_branch} を取得できませんでした: {fetched.stderr.strip()[:300]}。古い HEAD のまま進めないため中断します")
+    # 印の掛かったツールのパスに手元の変更があると、そのパスを変える先への早送りが失敗する。
+    # 書き込み用の作業ディレクトリの中身なので、印を外して HEAD へ戻してから動かす（#1436 決定 2）。
+    entries = tool_paths.load_or_die(work, ABORT)
+    tool_paths.release(str(work), entries)
     r = subprocess.run(
         ["git", "merge", "--ff-only", f"origin/{head_branch}"],
         cwd=str(work),
         capture_output=True,
         text=True,
     )
+    tool_paths.hide(str(work), entries)
     if r.returncode != 0:
         die(
             f"作業ディレクトリを origin/{head_branch} へ早送りできませんでした: "
@@ -850,64 +922,3 @@ def _is_registered_worktree(path: pathlib.Path) -> bool:
     out = sh(["git", "worktree", "list", "--porcelain"], check=False)
     target = str(path.resolve())
     return any(line == f"worktree {target}" for line in out.splitlines())
-
-
-def _run_baseline_test(command: str, work: pathlib.Path, timeout: int) -> dict[str, Any]:
-    """着手前のテストを実行して記録する。
-
-    失敗している状態で構造改善に入ると、**壊したのか元から壊れていたのか**
-    区別できない。そもそも振る舞いが変わっていないことを示す手段が無い書き換えは
-    構造改善ではないため、テストコマンドは必須にしている。
-    """
-    started = time.monotonic()
-    code, timed_out = run_with_timeout(command, str(work), timeout)
-    seconds = round(time.monotonic() - started, 1)
-    if timed_out:
-        die(f"着手前のテストが {timeout} 秒で終わりませんでした（{command}）。打ち切りました")
-        raise SystemExit(1)
-    status = "green" if code == 0 else "red"
-    if status == "red":
-        die(f"着手前のテストが失敗しています（{command}）。先に直してから開始してください")
-    info(f"✅ 着手前のテスト成功: {command}（{seconds} 秒）")
-    # **所要を残す。** 危険フラグと最終ゲートの全体のテストの予備時間を、この秒から見積もる。
-    # **HEAD も残す。** 危険フラグの全体のテストが落ちたとき、元からの失敗かをこの SHA で
-    # 見分け（決定 22）、報告と改修計画に基準として出す。
-    return {
-        "command": command,
-        "status": status,
-        "checked_at": statefile.now(),
-        "seconds": seconds,
-        "head": git_out(str(work), ["rev-parse", "HEAD"]),
-    }
-
-
-def _run_round_test(
-    command: Optional[str],
-    baseline: dict[str, Any],
-    work: pathlib.Path,
-    timeout: int,
-) -> dict[str, Any]:
-    """ラウンドのテストを着手前に 1 回実行して記録する（#880）。
-
-    **省いたとき、または全体テストと同じ文字列のときは実行しない。** 同じコマンドを
-    2 度走らせても判定は変わらず、時間だけが掛かる。全体テストの結果を写す。
-
-    **失敗は全体テストと別に止める。** 全体テストが通ってもラウンドのテストが通らない
-    （テストが 1 件も集まらない終了コード 5 を含む）なら、群の検証が初回から落ちる。
-    """
-    if not command or command == baseline["command"]:
-        # **省いたことを残す。** 項目の検証は `--round-test` をそのまま使えず、
-        # 全体のテストから組み立てた語の並びだけを使う（AC10b）。
-        return {"command": None, "status": baseline["status"], "checked_at": baseline["checked_at"]}
-    code, timed_out = run_with_timeout(command, str(work), timeout)
-    if timed_out:
-        die(f"ラウンドのテストが {timeout} 秒で終わりませんでした（{command}）。打ち切りました")
-        raise SystemExit(ABORT)
-    if code != 0:
-        die(
-            f"ラウンドのテストが成功しません（{command} / 終了コード {code}）。"
-            "--round-test が --scope のテストの置き場所を走らせるかを確かめてください"
-        )
-        raise SystemExit(ABORT)
-    info(f"✅ 着手前のラウンドのテスト成功: {command}")
-    return {"command": command, "status": "green", "checked_at": statefile.now()}

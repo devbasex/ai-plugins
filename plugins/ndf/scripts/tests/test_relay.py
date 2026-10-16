@@ -24,8 +24,10 @@ import json
 import os
 import pathlib
 import shutil
+import stat
 import subprocess
 import sys
+import types
 
 import pytest
 
@@ -54,7 +56,10 @@ def fake_uv(tmp_path):
             "#!/bin/sh\n"
             '[ -z "$FAKE_UV_LOG" ] || echo "$*" >> "$FAKE_UV_LOG"\n'
             '[ "${FAKE_UV_EXIT:-0}" = 0 ] || { echo "fake uv: no network" >&2; exit "$FAKE_UV_EXIT"; }\n'
+            'case " $* " in *" --no-managed-python "*) [ -z "$FAKE_UV_NO_SYSTEM" ] || '
+            '{ echo "fake uv: no system python" >&2; exit 2; };; esac\n'
             'mkdir -p "$UV_PROJECT_ENVIRONMENT/bin"\n'
+            'rm -f "$UV_PROJECT_ENVIRONMENT/bin/python"\n'  # 本物の uv もリンク切れの python を作り直す
             'printf \'#!/bin/sh\\n[ -z "$FAKE_PY_LOG" ] || echo "$0" >> "$FAKE_PY_LOG"\\nexec %s "$@"\\n\' '
             f"'{sys.executable}' > \"$UV_PROJECT_ENVIRONMENT/bin/python\"\n"
             'chmod 755 "$UV_PROJECT_ENVIRONMENT/bin/python"\n'
@@ -67,6 +72,14 @@ def fake_uv(tmp_path):
 def relay_uv(tmp_path, monkeypatch):
     """バージョンディレクトリの環境は、本物の uv ではなく fake_uv で作る（ネットワークと本物のキャッシュを使わない）。"""
     monkeypatch.setenv("NDF_RELAY_UV", str(fake_uv(tmp_path)))
+
+
+@pytest.fixture(autouse=True)
+def relay_accounts_dir(tmp_path, monkeypatch):
+    """アカウントの置き場を空の一時ディレクトリへ向ける。向けないと、実行した人の `~/.claude/ndf/accounts` の
+    `metered.json`（保存した従量の接続の宣言）を `fallback_env` が読み、宣言の無い前提のテストが落ちる。
+    `accounts` のフィクスチャはこの後に自分の置き場へ向け直す。"""
+    monkeypatch.setenv("NDF_ACCOUNTS_DIR", str(tmp_path / "no-accounts"))
 
 
 def isolated_env(tmp_path, **extra):
@@ -93,7 +106,7 @@ def fence(body, info="ndf-next", ticks=3):
 # ---------------------------------------------------------------- mark（AC3 / AC4 / AC4b / AC24）
 
 
-class Relay:
+class FakeRelayDir:
     """動いているラッパーに見立てた作業ディレクトリ。`relay.lock` を持ち、`child.pid` を書く。"""
 
     def __init__(self, tmp_path, child_pid=None):
@@ -115,7 +128,7 @@ class Relay:
 
 @pytest.fixture()
 def relay(tmp_path):
-    r = Relay(tmp_path)
+    r = FakeRelayDir(tmp_path)
     yield r
     if not r.lock.closed:
         r.release()
@@ -558,7 +571,9 @@ def test_run_switches_to_next_section(term, tmp_path):
     rows = t.rows()
     assert [r["event"] for r in rows] == ["start", "end", "start"]
     s1, e1, s2 = rows
-    assert set(s1) == {"event", "at", "section", "pid", "command", "from_session", "plugin_version", "cwd"}
+    assert set(s1) == {"event", "at", "section", "pid", "command", "from_session", "plugin_version", "cwd", "relay_version_dir"}
+    assert s1["relay_version_dir"] is None and s2["relay_version_dir"] is None  # プラグインのキャッシュから起動（#1587 の AC13）
+    assert not events(rows, "reexec") and not events(rows, "reexec_skipped")  # キャッシュからの起動は入れ替えない（AC12）
     assert s1["command"] == "--model haiku"
     assert s1["plugin_version"] == "1.0.0"
     assert s2["plugin_version"] == "2.0.0"
@@ -1244,8 +1259,8 @@ def test_make_relay_dir_is_new_each_time(mod, tmp_path, monkeypatch):
     assert pathlib.Path(b).stat().st_mode & 0o777 == 0o700
 
 
-def goal_row(sentinel=False, met=False, at=None):
-    a = {"type": "goal_status", "met": met, "condition": "c"}
+def goal_row(sentinel=False, met=False, at=None, condition="c"):
+    a = {"type": "goal_status", "met": met, "condition": condition}
     if sentinel:
         a["sentinel"] = True
     ts = at or time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
@@ -1809,7 +1824,7 @@ def home_of_now():
 
 def test_status_session_relay(mod, tmp_path, monkeypatch, capsys):
     # 関数で呼ぶ status の親は pytest の親。そこを child.pid にすると最初に当たる claude がラッパーの子になる
-    r = Relay(tmp_path, child_pid=os.getppid())
+    r = FakeRelayDir(tmp_path, child_pid=os.getppid())
     (r.dir / "relay.pid").write_text("4321")
     monkeypatch.setenv("NDF_RELAY_DIR", str(r.dir))
     try:
@@ -1847,7 +1862,7 @@ def test_status_session_no_dir_hints_when_devbase_loader_exists(mod, tmp_path, m
 
 
 def test_status_session_not_running(mod, tmp_path, monkeypatch, capsys):
-    r = Relay(tmp_path)
+    r = FakeRelayDir(tmp_path)
     r.release()
     monkeypatch.setenv("NDF_RELAY_DIR", str(r.dir))
     assert session_lines(mod, capsys) == [
@@ -1856,7 +1871,7 @@ def test_status_session_not_running(mod, tmp_path, monkeypatch, capsys):
 
 
 def test_status_session_not_child(mod, tmp_path, monkeypatch, capsys):
-    r = Relay(tmp_path, child_pid=999999)
+    r = FakeRelayDir(tmp_path, child_pid=999999)
     monkeypatch.setenv("NDF_RELAY_DIR", str(r.dir))
     try:
         assert session_lines(mod, capsys) == ["ndf-relay: このセッション: ラッパーの直接の子ではない（fork・bg-pty-host・別の入口。#1016）"]
@@ -1866,7 +1881,7 @@ def test_status_session_not_child(mod, tmp_path, monkeypatch, capsys):
 
 def test_status_session_cannot_trace_parents(mod, tmp_path, monkeypatch, capsys):
     # /proc も ps も使えない環境。ほかの行はそのまま出す
-    r = Relay(tmp_path, child_pid=999999)
+    r = FakeRelayDir(tmp_path, child_pid=999999)
     monkeypatch.setenv("NDF_RELAY_DIR", str(r.dir))
     monkeypatch.setattr(relay_proc, "proc_info", lambda pid: None)
     try:
@@ -2444,7 +2459,7 @@ def test_notice_relay_not_running(relay):
 
 
 def test_notice_not_direct_child(tmp_path):
-    r = Relay(tmp_path, child_pid=1)
+    r = FakeRelayDir(tmp_path, child_pid=1)
     try:
         assert notice_lines(notice(r.dir, "5")) == ["outside", notice_not_child(1)]
     finally:
@@ -2753,6 +2768,62 @@ def test_install_prepares_env_then_copy_runs_in_it(tmp_path, home):
     assert pylog.read_text().splitlines() == [str(vdir / ".venv" / "bin" / "python")]
 
 
+def test_env_is_made_from_system_python(tmp_path, home):
+    """環境はシステムの python で作る。uv 管理の python（~/.local/share/uv）はコンテナごとに在ったり無かったりし、
+    共有の ~/.claude に置いた環境がそれを指すと、別のコンテナや作り直したコンテナでリンクが切れる。"""
+    (home / ".bashrc").write_text("")
+    log = tmp_path / "uv.log"
+    p = bare(tmp_path, "install", FAKE_UV_LOG=log)
+    assert p.returncode == 0, p.stdout + p.stderr
+    syncs = log.read_text().splitlines()
+    assert len(syncs) == 2 and all("--no-managed-python" in s for s in syncs)
+
+
+def test_env_falls_back_to_managed_python(tmp_path, home):
+    """要件を満たすシステムの python が無ければ（macOS の 3.9 など）、uv に選ばせて作り直す。"""
+    (home / ".bashrc").write_text("")
+    log = tmp_path / "uv.log"
+    p = bare(tmp_path, "install", FAKE_UV_LOG=log, FAKE_UV_NO_SYSTEM=1)
+    assert p.returncode == 0, p.stdout + p.stderr
+    syncs = log.read_text().splitlines()
+    assert ["--no-managed-python" in s for s in syncs] == [True, False, True, False]
+
+
+def test_run_remakes_env_whose_python_is_gone(tmp_path, home):
+    """複製の環境の python が無い（別のコンテナで作った環境のリンク切れ）ときは、素通しせずに作り直して起動する。"""
+    (home / ".bashrc").write_text("")
+    assert bare(tmp_path, "install").returncode == 0
+    vdir = cfg(tmp_path) / current_of(cfg(tmp_path))
+    py = vdir / ".venv" / "bin" / "python"
+    py.unlink()
+    py.symlink_to(tmp_path / "gone" / "python3.11")
+    claude = tmp_path / "bin" / "claude"
+    claude.parent.mkdir()
+    claude.write_text('#!/bin/sh\necho "args:$*"\nexit 7\n')
+    claude.chmod(0o755)
+    log, pylog = tmp_path / "uv.log", tmp_path / "py.log"
+    p = bare(tmp_path, "run -c", relay=cfg(tmp_path) / "relay.py", NDF_RELAY_CLAUDE=claude, FAKE_UV_LOG=log, FAKE_PY_LOG=pylog)
+    assert (p.returncode, p.stdout) == (7, "args:-c\n"), p.stderr
+    assert "ラッパーを始めない" not in p.stderr, p.stderr
+    assert len(log.read_text().splitlines()) == 1
+    assert pylog.read_text().splitlines() == [str(py)]
+
+
+def test_run_passes_through_when_env_cannot_be_remade(tmp_path, home):
+    """作り直せなければ、これまでどおり理由を出して本物の claude を素通しで起動する。"""
+    (home / ".bashrc").write_text("")
+    assert bare(tmp_path, "install").returncode == 0
+    py = cfg(tmp_path) / current_of(cfg(tmp_path)) / ".venv" / "bin" / "python"
+    py.unlink()
+    claude = tmp_path / "bin" / "claude"
+    claude.parent.mkdir()
+    claude.write_text('#!/bin/sh\necho "args:$*"\nexit 7\n')
+    claude.chmod(0o755)
+    p = bare(tmp_path, "run -c", relay=cfg(tmp_path) / "relay.py", NDF_RELAY_CLAUDE=claude, FAKE_UV_EXIT=2)
+    assert (p.returncode, p.stdout) == (7, "args:-c\n")
+    assert "ラッパーを始めない（ラッパーの環境" in p.stderr, p.stderr
+
+
 def test_install_stops_when_env_cannot_be_made(tmp_path, home):
     """環境を作れない（ネットワークが無いなど）ときは、理由を出して終了コード 3 で止まり、複製を置かない。"""
     (home / ".bashrc").write_text("")
@@ -2795,3 +2866,1691 @@ def test_prune_treats_zombie_as_dead(tmp_path):
         assert not relay_version_dir.VersionDir._in_use(str(old))
     finally:
         child.wait()
+
+
+# ---------------------------------------------------------------- 登録済みのアカウントの切り替え（#1389）
+
+sys.path.insert(0, str(ROOT / "scripts" / "tests"))
+from account_fake import FakeAnthropic, accounts, scoped_limit, window  # noqa: E402,F401
+
+
+def synthetic_row(text, quota=None):
+    """利用上限で終わった応答の合成の行（`tests/fixtures/transcript_agents/` の実物と同じ形）。"""
+    row = {
+        "type": "assistant",
+        "timestamp": iso_now(),
+        "isApiErrorMessage": True,
+        "error": "rate_limit",
+        "apiErrorStatus": 429,
+        "message": {"model": "<synthetic>", "role": "assistant", "content": [{"type": "text", "text": text}]},
+    }
+    if quota:
+        row["quotaLimits"] = quota
+    return json.dumps(row, ensure_ascii=False)
+
+
+FIVE_HOUR = {"status": "rejected", "resetsAt": 4102444800, "rateLimitType": "five_hour"}
+
+
+def account_term(term, accounts, **env):
+    return term(env={**accounts.env(), "NDF_ACCOUNT_CHECK_INTERVAL": "1", **env})
+
+
+def hit_limit(t, n, text="You've hit your session limit", quota=FIVE_HOUR, error="rate_limit"):
+    t.type(f"tr {synthetic_row(text, quota)}\r")
+    t.type(f"fail {error}\r")
+
+
+def no_secret(t):
+    assert all("SECRET" not in " ".join(s["argv"]) for s in t.starts())
+    assert "SECRET" not in json.dumps(t.rows()) and "SECRET" not in t.text
+    assert "user:inference" not in json.dumps(t.rows())  # アカウントのスコープも記録に出さない（#1523 の I6）
+
+
+def test_limit_switches_account_and_resumes_goal(term, accounts):
+    """受け入れ条件 3: 上限で子を終え、最も上限から遠いアカウントと `--resume` で次の区間を起動する。"""
+    accounts.add("a", util5=10)
+    accounts.add("b", util5=30)
+    accounts.add("c", util5=60)
+    t = account_term(term, accounts)
+    t.wait_start(1)
+    s0 = t.starts()[0]
+    assert (s0["token"], s0["config_dir"], s0["account"]) == (None, str(accounts.root / "a"), "a")
+    t.type(f"tr {goal_row(met=False, at=iso_now())}\r")
+    hit_limit(t, 0)
+    t.wait_start(2)
+    s1 = t.starts()[1]
+    assert (s1["token"], s1["config_dir"], s1["account"]) == (None, str(accounts.root / "b"), "b")
+    assert s1["argv"][-3:] == ["--resume", f"s{s0['pid']}", "/goal c"]
+    assert b"/exit\r" in t.child_input(0)
+    assert "アカウント a（a@example.com）で起動する" in t.text
+    assert "利用上限（five_hour）に達したため、アカウントを a から b（b@example.com）へ替えて続ける" in t.text
+    rows = t.rows()
+    assert [r["account"] for r in events(rows, "start")] == ["a", "b"]
+    acc = events(rows, "account")
+    assert [(r["reason"], r["from"], r["to"], r["section"]) for r in acc] == [("five_hour", "a", "b", 2)]
+    assert accounts.account("a")["limit"]["type"] == "five_hour"
+    no_secret(t)
+
+
+def test_auth_failure_switches_without_refresh(term, accounts):
+    """受け入れ条件 11・20・#1576 の I8・I12: 認証の失敗では NDF が更新せず、観測を残して別のアカウントへ替え、認証の文で続ける。"""
+    accounts.add("a", util5=10)
+    accounts.add("b", util5=30)
+    accounts.fake.refresh["a-refresh-SECRET"] = (200, {"access_token": "a-new-SECRET", "expires_in": 28800})
+    t = account_term(term, accounts)
+    t.wait_start(1)
+    hit_limit(t, 0, error="authentication_failed")
+    t.wait_start(2)
+    s0, s1 = t.starts()
+    assert s1["account"] == "b" and s1["config_dir"] == str(accounts.root / "b")
+    assert s1["argv"][-3:] == ["--resume", f"s{s0['pid']}", "認証が通らなかったためアカウントを替えた。中断したところから続ける"]
+    assert accounts.fake.refresh_calls == [] and accounts.account("a")["auth_failed"] and not accounts.account("a")["needs_relogin"]
+    assert [(r["reason"], r["from"], r["to"]) for r in events(t.rows(), "account")] == [("auth", "a", "b")]
+    assert "認証が通らなかったため、アカウントを a から b（b@example.com）へ替えて続ける" in t.text
+    no_secret(t)
+
+
+def test_auth_failure_without_candidate_keeps_child(term, accounts):
+    """受け入れ条件 20: 認証の失敗の後に候補も宣言も無ければ、理由 auth を残して子を残す。"""
+    accounts.add("a", util5=10)
+    accounts.add("b", util5=100)
+    t = account_term(term, accounts)
+    t.wait_start(1)
+    hit_limit(t, 0, error="authentication_failed")
+    t.wait(lambda: "子はこのまま残す" in t.text, timeout=20, what="子を残す 1 行")
+    assert len(t.starts()) == 1 and b"/exit" not in t.child_input(0)
+    assert [(r["reason"], r["to"]) for r in events(t.rows(), "account")] == [("auth", None)]
+
+
+def test_unshared_projects_account_is_skipped(term, accounts):
+    """受け入れ条件 18・#1576 の I6: projects が共有を指さないアカウントは使わず、理由を画面と記録に残す。"""
+    accounts.add("a", util5=10)
+    accounts.add("b", util5=30)
+    (accounts.root / "a" / "projects").mkdir()
+    t = account_term(term, accounts)
+    t.wait_start(1)
+    assert t.starts()[0]["account"] == "b"
+    assert "アカウント a を使わない（会話の記録の置き場 projects が共有の設定ディレクトリを指していない）" in t.text
+    rows = [r for r in events(t.rows(), "account_dir") if not r["ok"]]
+    assert [(r["account"], r["reason"], r["section"]) for r in rows] == [("a", "projects_not_shared", 1)]
+
+
+def test_section_switch_writes_back_claude_json(term, accounts):
+    """受け入れ条件 19・#1576 の E12: 次のセッションの前に、前のアカウントの .claude.json で足した projects を共有側へ書き戻す。"""
+    accounts.add("a", util5=10)
+    accounts.add("b", util5=30)
+    accounts.write(accounts.shared / ".claude.json", {"projects": {"/p": {"t": 1}}, "keep": 1})
+    accounts.write(accounts.root / "a" / ".claude.json", {"userID": "u-a"})
+    t = account_term(term, accounts)
+    t.wait_start(1)
+    a = json.loads((accounts.root / "a" / ".claude.json").read_text())
+    assert a["projects"] == {"/p": {"t": 1}}
+    a["projects"]["/new"] = {"hasTrustDialogAccepted": True}
+    accounts.write(accounts.root / "a" / ".claude.json", a)
+    hit_limit(t, 0)
+    t.wait_start(2)
+    shared = json.loads((accounts.shared / ".claude.json").read_text())
+    assert shared["projects"]["/new"] == {"hasTrustDialogAccepted": True} and shared["keep"] == 1
+    assert json.loads((accounts.root / "b" / ".claude.json").read_text())["projects"]["/new"] == {"hasTrustDialogAccepted": True}
+
+
+def test_spend_limit_without_quota_switches_with_fixed_input(term, accounts):
+    """受け入れ条件 3（支出上限）: `quotaLimits` が無くても本文で `spend` と読み、未達の目標が無ければ定型の文で続ける。"""
+    accounts.add("a", util5=10)
+    accounts.add("b", util5=30)
+    t = account_term(term, accounts)
+    t.wait_start(1)
+    hit_limit(t, 0, text="You've hit your individual spend limit", quota=None, error="billing_error")
+    t.wait_start(2)
+    s1 = t.starts()[1]
+    assert s1["config_dir"] == str(accounts.root / "b") and s1["argv"][-1] == "利用上限でアカウントを替えた。中断したところから続ける"
+    assert events(t.rows(), "account")[0]["reason"] == "spend"
+
+
+def test_limit_with_next_block_uses_it(term, accounts):
+    """ndf-next のシグナルファイルが同時にあれば、それを最初の入力にする（新しい会話）。"""
+    accounts.add("a", util5=10)
+    accounts.add("b", util5=30)
+    t = account_term(term, accounts, NDF_RELAY_QUIET="1")
+    t.wait_start(1)
+    t.type("mark 次の作業\r")
+    hit_limit(t, 0)
+    t.wait_start(2)
+    assert t.starts()[1]["argv"][-1] == "次の作業" and "--resume" not in t.starts()[1]["argv"]
+
+
+def test_all_limited_without_declaration_keeps_child(term, accounts):
+    """受け入れ条件 4・14: 候補が無く宣言も無ければ、`/exit` を書かずに最も早く戻るアカウントを示す。"""
+    accounts.add("a", util5=10)
+    tb = accounts.add("b", util5=None)
+    accounts.fake.set_usage(tb, window(100, 1800), window(5))
+    t = account_term(term, accounts)
+    t.wait_start(1)
+    hit_limit(t, 0)
+    t.wait(lambda: "子はこのまま残す" in t.text, what="すべて上限の 1 行")
+    assert "最も早く戻るのは b" in t.text
+    time.sleep(1)
+    assert len(t.starts()) == 1 and b"/exit" not in t.child_input(0)
+    row = events(t.rows(), "account")[0]
+    assert row["to"] is None and row["earliest"]["name"] == "b"
+    t.type("quit 0\r")
+    assert t.finish() == 0
+
+
+@pytest.mark.parametrize("n", [0, 1])
+def test_one_or_no_account_does_nothing_on_limit(term, accounts, n):
+    """受け入れ条件 9: 登録が 1 つ以下なら、子の環境に変数を足さず、上限で何もしない。"""
+    if n:
+        accounts.add("a")
+    t = account_term(term, accounts)
+    t.wait_start(1)
+    assert t.starts()[0]["token"] is None and t.starts()[0]["account"] is None
+    assert t.starts()[0]["config_dir"] == str(accounts.shared)  # 受け入れ条件 21: 設定ディレクトリを変えない
+    assert not (accounts.root / "a" / "projects").exists()  # 用意を呼ばない
+    hit_limit(t, 0)
+    time.sleep(1.5)
+    assert len(t.starts()) == 1 and b"/exit" not in t.child_input(0)
+    assert "account" not in events(t.rows(), "start")[0]
+    t.type("quit 0\r")
+    assert t.finish() == 0
+
+
+def test_background_work_defers_switch(term, accounts):
+    """I11: 背景の作業が残っている間は終えず、終わりの通知の後のシグナルファイルで替える。"""
+    accounts.add("a", util5=10)
+    accounts.add("b", util5=30)
+    t = account_term(term, accounts)
+    t.wait_start(1)
+    use = {
+        "type": "assistant",
+        "timestamp": iso_now(),
+        "message": {
+            "content": [{"type": "tool_use", "id": "toolu_bg1", "name": "Bash", "input": {"command": "sleep 9", "run_in_background": True}}]
+        },
+    }
+    t.type(f"tr {json.dumps(use)}\r")
+    time.sleep(0.05)
+    hit_limit(t, 0)
+    t.wait(lambda: "背景の作業が残っているため終わるまで替えない" in t.text, what="背景の 1 行")
+    time.sleep(1)
+    assert len(t.starts()) == 1
+    note = {
+        "type": "queue-operation",
+        "timestamp": iso_now(),
+        "content": "<task-notification>\n<task-id>x</task-id>\n<tool-use-id>toolu_bg1</tool-use-id>\n<status>completed</status>",
+    }
+    t.type(f"tr {json.dumps(note)}\r")
+    time.sleep(0.05)
+    hit_limit(t, 0)
+    t.wait_start(2)
+    assert t.starts()[1]["account"] == "b"
+
+
+def test_threshold_switches_at_next_cut_point(term, accounts):
+    """受け入れ条件 5・I10: 使用率が閾値を超えると 1 行を出し、次のカットポイントで替える。その前は `/exit` を書かない。"""
+    accounts.add("a", util5=60)
+    accounts.add("b", util5=30)
+    t = account_term(term, accounts, NDF_ACCOUNT_SWITCH_AT="70")
+    t.wait_start(1)
+    assert t.starts()[0]["account"] == "b"  # 閾値未満でも、区間 1 は最も遠いもの
+    tb = accounts.creds("b")["accessToken"]
+    accounts.fake.set_usage(tb, window(80), window(10))
+    t.wait(lambda: "b の使用率が 80% を超えた。次のカットポイントで替える" in t.text, timeout=20, what="閾値の 1 行")
+    assert b"/exit" not in t.child_input(0)
+    t.type("mark 次\r")
+    t.wait_start(2)
+    assert t.starts()[1]["account"] == "a"
+    row = events(t.rows(), "account")[0]
+    assert (row["reason"], row["from"], row["to"], row["usage"]) == ("threshold", "b", "a", 80)
+    assert "b の使用率が 80% に達したため、アカウントを a（a@example.com）へ替える" in t.text
+
+
+def test_below_threshold_keeps_account_across_cut_points(term, accounts):
+    accounts.add("a", util5=20)
+    accounts.add("b", util5=10)
+    t = account_term(term, accounts)
+    t.wait_start(1)
+    assert t.starts()[0]["account"] == "b"
+    accounts.fake.set_usage(accounts.creds("b")["accessToken"], window(40), window(10))
+    t.type("mark 次\r")
+    t.wait_start(2)
+    assert t.starts()[1]["account"] == "b" and events(t.rows(), "account") == []
+
+
+def test_metered_safety_net_and_recovery(term, accounts):
+    """受け入れ条件 12・13: すべて上限なら宣言の接続へ移り、上限が外れたアカウントへ次のカットポイントで戻す。"""
+    ta = accounts.add("a", util5=10)
+    tb = accounts.add("b", util5=None)
+    accounts.fake.set_usage(tb, window(100, 1800), window(5))
+    decl = "CLAUDE_CODE_USE_BEDROCK=1 ANTHROPIC_API_KEY=sk-SECRET AWS_REGION=us-east-1"
+    t = account_term(term, accounts, NDF_SUPERVISE_CLAUDE_FALLBACK=decl)
+    t.wait_start(1)
+    assert t.starts()[0]["bedrock"] is None and t.starts()[0]["api_key"] is None
+    accounts.fake.set_usage(ta, window(100, 3600), window(5))
+    hit_limit(t, 0)
+    t.wait_start(2)
+    s1 = t.starts()[1]
+    assert (s1["token"], s1["config_dir"], s1["account"], s1["bedrock"]) == (None, str(accounts.shared), "metered", "1")
+    assert s1["argv"][-3] == "--resume"
+    assert "従量の接続（CLAUDE_CODE_USE_BEDROCK ほか 2 つ）へ替えて続ける" in t.text
+    row = events(t.rows(), "account")[0]
+    assert (row["reason"], row["from"], row["to"]) == ("five_hour", "a", "metered")
+    assert row["keys"] == ["CLAUDE_CODE_USE_BEDROCK", "ANTHROPIC_API_KEY", "AWS_REGION"]
+    accounts.fake.set_usage(tb, window(10), window(5))
+    t.wait(lambda: "b の上限が外れた。次のカットポイントで従量の接続から戻す" in t.text, timeout=20, what="戻す予定の 1 行")
+    assert len(t.starts()) == 2 and b"/exit" not in t.child_input(1)
+    t.type("mark 次\r")
+    t.wait_start(3)
+    s2 = t.starts()[2]
+    assert (s2["token"], s2["config_dir"], s2["account"], s2["bedrock"], s2["api_key"]) == (None, str(accounts.root / "b"), "b", None, None)
+    back = events(t.rows(), "account")[1]
+    assert (back["reason"], back["from"], back["to"]) == ("recovered", "metered", "b")
+    assert "b（b@example.com）の上限が外れたため、従量の接続からアカウント b へ戻して続ける" in t.text
+    no_secret(t)
+
+
+def test_saved_metered_declaration_is_used(term, accounts):
+    """#1468 の AC4: 保存した宣言があれば、すべて上限のときに次の区間をその変数で起動する（環境変数が無いとき）。"""
+    ta = accounts.add("a", util5=10)
+    tb = accounts.add("b", util5=None)
+    accounts.fake.set_usage(tb, window(100, 1800), window(5))
+    decl = {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": "p", "AWS_REGION": "us-west-2"}
+    accounts.write(
+        accounts.root / "metered.json", {"version": 1, "provider": "bedrock", "env": decl, "details": {"profile": "p"}, "verified_at": "x"}
+    )
+    t = account_term(term, accounts)
+    t.wait_start(1)
+    accounts.fake.set_usage(ta, window(100, 3600), window(5))
+    hit_limit(t, 0)
+    t.wait_start(2)
+    s1 = t.starts()[1]
+    assert (s1["token"], s1["config_dir"], s1["account"], s1["bedrock"]) == (None, str(accounts.shared), "metered", "1")
+    assert events(t.rows(), "account")[0]["keys"] == list(decl) and events(t.rows(), "metered_invalid") == []
+    no_secret(t)
+
+
+@pytest.mark.parametrize(
+    "user, as_file",
+    [
+        (None, False),
+        ({"model": "x", "env": {"AWS_REGION": "us-east-1", "KEEP": "1"}}, False),
+        ({"model": "x", "env": {"AWS_REGION": "us-east-1", "GITHUB_TOKEN": "g-SECRET"}}, True),
+    ],
+)
+def test_metered_section_gets_declaration_as_settings(term, accounts, tmp_path, user, as_file):
+    """#1543: 従量の接続の区間は宣言を `--settings` の env でも渡す（settings.json の env に負けない）。
+    利用者の `--settings` は 1 つにまとめて残し、アカウントの区間は引数を変えない。利用者の値がファイルなら、
+    まとめた設定も状態ディレクトリの 0600 のファイルで渡す（ファイルの `env` の資格情報を引数へ展開しない）。"""
+    ta = accounts.add("a", util5=10)
+    tb = accounts.add("b", util5=None)
+    accounts.fake.set_usage(tb, window(100, 1800), window(5))
+    decl = {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": "default", "AWS_REGION": "ap-northeast-1"}
+    accounts.write(
+        accounts.root / "metered.json", {"version": 1, "provider": "bedrock", "env": decl, "details": {"profile": "p"}, "verified_at": "x"}
+    )
+    first = ["--settings", json.dumps(user)] if user else []
+    if as_file:
+        (tmp_path / "s.json").write_text(json.dumps(user))
+        first = ["--settings", str(tmp_path / "s.json")]
+    t = term(*first, env={**accounts.env(), "NDF_ACCOUNT_CHECK_INTERVAL": "1"})
+    t.wait_start(1)
+    assert t.starts()[0]["argv"] == first
+    accounts.fake.set_usage(ta, window(100, 3600), window(5))
+    hit_limit(t, 0)
+    t.wait_start(2)
+    argv = t.starts()[1]["argv"]
+    want = {**(user or {}), "env": {**(user or {}).get("env", {}), **decl}}
+    assert t.starts()[1]["account"] == "metered" and argv[0] == "--settings"
+    assert argv[-3] == "--resume" and argv.count("--settings") == 1
+    if not as_file:
+        assert json.loads(argv[1]) == want
+        return
+    merged = pathlib.Path(argv[1])
+    assert merged == t.relay_dirs()[0] / "metered-settings.json" and "SECRET" not in " ".join(argv)
+    assert json.loads(merged.read_text()) == want and stat.S_IMODE(merged.stat().st_mode) == 0o600
+    t.type("quit 0\r")
+    assert t.finish() == 0 and not merged.exists()  # 終われば残さない
+
+
+def test_broken_saved_declaration_is_told_at_first_section(term, accounts):
+    """#1468 の I5: 保存先が壊れていれば、区間 1 の起動で画面と log.jsonl に 1 行出し、宣言なしとして扱う。"""
+    accounts.add("a", util5=10)
+    accounts.add("b", util5=20)
+    (accounts.root / "metered.json").write_text("{broken")
+    t = account_term(term, accounts)
+    t.wait_start(1)
+    t.wait(lambda: "壊れている" in t.text, timeout=10, what="壊れた宣言の 1 行")
+    assert len(events(t.rows(), "metered_invalid")) == 1
+    t.type("mark 次\r")
+    t.wait_start(2)
+    assert len(events(t.rows(), "metered_invalid")) == 1
+
+
+def test_limit_file_is_kept_when_rewritten(tmp_path, accounts, monkeypatch):
+    """I15: 読んだ後に書き直された上限シグナルファイルは消さない。"""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from relay_lib import run
+
+    d = tmp_path / "rd"
+    d.mkdir()
+    r = run.Relay.__new__(run.Relay)
+    r.dir = str(d)
+    lim = {"written_at": "2026-09-28T00:00:00.000Z", "error": "rate_limit"}
+    (d / "limit.json").write_text(json.dumps({**lim, "written_at": "2026-09-28T00:00:01.000Z"}))
+    r.drop_limit({**lim, "_kind": "limit"})
+    assert (d / "limit.json").exists()
+    (d / "limit.json").write_text(json.dumps(lim))
+    r.drop_limit({**lim, "_kind": "limit"})
+    assert not (d / "limit.json").exists()
+
+
+def test_transcript_readers(tmp_path):
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from relay_lib import claude as rc
+
+    tp = tmp_path / "t.jsonl"
+    tp.write_text(synthetic_row("You've hit your weekly limit · resets 3pm (UTC)") + "\n")
+    kind, resets = rc.limit_of(str(tp))
+    assert kind == "seven_day" and resets is not None
+    tp.write_text(synthetic_row("x", FIVE_HOUR) + "\n" + goal_row(met=False) + "\n")
+    assert rc.limit_of(str(tp)) == ("five_hour", 4102444800.0)
+    assert rc.unmet_goal(str(tp)) == "c" and rc.resume_input(str(tp), "x") == "/goal c"
+    # 支出上限の実物（2026-09-28 の会話の記録の写し）。`quotaLimits` があれば種類とリセット時刻はそちらを読む
+    spend = "You've hit your individual spend limit · run /usage-credits to raise it, or visit claude.ai/admin-settings/usage · your session limit resets 6:30am (UTC)"
+    quota = {
+        "status": "rejected",
+        "resetsAt": 1790058600,
+        "rateLimitType": "five_hour",
+        "overageStatus": "rejected",
+        "overageDisabledReason": "org_spend_cap_reached",
+    }
+    tp.write_text(synthetic_row(spend, quota) + "\n")
+    assert rc.limit_of(str(tp)) == ("five_hour", 1790058600.0)
+    tp.write_text(goal_row(met=True) + "\n")
+    assert rc.unmet_goal(str(tp)) is None
+    assert rc.background_open(str(tmp_path / "missing.jsonl"), time.time()) is True
+    assert rc.background_open(str(tp), time.time()) is False
+
+
+def test_limit_hook_writes_signal_without_body(relay):
+    """`relay.py limit` はラッパーの直接の子のときだけ、応答の本文を含めずに `limit.json` を書く。"""
+    data = {"error": "rate_limit", "transcript_path": "/t.jsonl", "session_id": "s1", "cwd": "/w", "last_assistant_message": "SECRET body"}
+    e = {k: v for k, v in os.environ.items() if not k.startswith("NDF_")}
+    p = subprocess.run(
+        [sys.executable, str(RELAY), "limit"],
+        input=json.dumps(data),
+        text=True,
+        env={**e, "NDF_RELAY_DIR": str(relay.dir)},
+        capture_output=True,
+    )
+    assert p.returncode == 0
+    got = json.loads((relay.dir / "limit.json").read_text())
+    assert {k: got[k] for k in ("error", "transcript_path", "session_id", "cwd")} == {
+        "error": "rate_limit",
+        "transcript_path": "/t.jsonl",
+        "session_id": "s1",
+        "cwd": "/w",
+    }
+    assert "SECRET" not in json.dumps(got)
+    assert oct((relay.dir / "limit.json").stat().st_mode & 0o777) == "0o600"
+
+
+AUTH_FAKE = """#!/usr/bin/env python3
+import json, os, sys, time
+d = os.environ["CLAUDE_CONFIG_DIR"]
+open(os.environ["FAKE_AUTH_LOG"], "a").write(json.dumps({"argv": sys.argv[1:], "dir": d, "token": os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")}) + "\\n")
+if sys.argv[1:3] == ["auth", "login"]:
+    if os.environ.get("FAKE_LOGIN_FAIL"):
+        sys.exit(1)
+    if not os.isatty(0):  # 端末でない: 認可の URL を出し、標準入力の認可コードを待つ（2.1.284 の実測の形。#1468）
+        print("Browser didn't open? Use the url below to sign in:\\n\\nhttps://claude.com/cai/oauth/authorize?code=true&state=st", flush=True)
+        print("Paste code here if prompted > ", end="", flush=True)
+        if sys.stdin.readline().strip() != os.environ.get("FAKE_CODE", "code-SECRET"):
+            print("OAuth error: Invalid code", flush=True)
+            sys.exit(1)
+    name = os.path.basename(d)
+    oauth = {"accessToken": "login-access-SECRET", "refreshToken": "r", "expiresAt": int((time.time() + 28800) * 1000), "scopes": ["user:profile"]}
+    open(os.path.join(d, ".credentials.json"), "w").write(json.dumps({"claudeAiOauth": oauth}))
+    sys.exit(0)
+if sys.argv[1:3] == ["auth", "status"]:
+    ok = os.path.exists(os.path.join(d, ".credentials.json"))
+    st = {"loggedIn": ok, "email": os.environ["FAKE_EMAIL"]}
+    if os.environ.get("FAKE_ORG_ID"):
+        st.update(orgId=os.environ["FAKE_ORG_ID"], orgName=os.environ.get("FAKE_ORG_NAME", ""), subscriptionType="max")
+    own = os.path.join(d, "fake-status.json")  # 登録済みの設定ディレクトリごとの識別（組織の読み直しを試す）
+    if os.path.exists(own):
+        st = {"loggedIn": ok, **json.load(open(own))}
+    print(json.dumps(st if ok else {"loggedIn": False}))
+    sys.exit(0)
+if sys.argv[1:3] == ["auth", "logout"]:
+    sys.exit(0)
+sys.exit(3)  # 推論（auth 以外）は呼ばれてはいけない
+"""
+
+
+def account_cmd(tmp_path, accounts, *args, tty=True, **env):
+    fake = tmp_path / "auth_fake.py"
+    fake.write_text(AUTH_FAKE)
+    fake.chmod(0o755)
+    e = isolated_env(
+        tmp_path,
+        **{"NDF_RELAY_CLAUDE": fake, "FAKE_AUTH_LOG": tmp_path / "auth.jsonl", "FAKE_EMAIL": "x@example.com", **accounts.env(), **env},
+    )
+    if not tty:
+        return subprocess.run(
+            [sys.executable, str(RELAY), "account", *args], env=e, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60
+        )
+    master, slave = pty.openpty()
+    try:
+        p = subprocess.run([sys.executable, str(RELAY), "account", *args], env=e, stdin=slave, capture_output=True, text=True, timeout=60)
+    finally:
+        os.close(master)
+        os.close(slave)
+    return p
+
+
+def auth_calls(tmp_path):
+    p = tmp_path / "auth.jsonl"
+    return [json.loads(x) for x in p.read_text().splitlines()] if p.exists() else []
+
+
+def test_account_add_list_remove(tmp_path, accounts):
+    """受け入れ条件 1・2・I2: 登録は専用の設定ディレクトリの auth login で行い、一覧は推論を呼ばずに出る。"""
+    p = account_cmd(tmp_path, accounts, "add", "work1", FAKE_EMAIL="a@example.com")
+    assert p.returncode == 0 and "登録した: work1（a@example.com）" in p.stdout
+    p = account_cmd(tmp_path, accounts, "add", "work2", FAKE_EMAIL="b@example.com")
+    assert p.returncode == 0
+    accounts.fake.set_usage("login-access-SECRET", window(15), window(3))
+    p = account_cmd(tmp_path, accounts, "list", tty=False)
+    assert p.returncode == 0, p.stderr
+    lines = p.stdout.splitlines()
+    assert lines[0].split() == ["名前", "識別", "5", "時間", "7", "日", "モデル別の週", "支出上限", "枠の大きさ", "残り", "状態"]
+    assert any(
+        line.startswith("work1") and "a@example.com" in line and "15%" in line and "3%" in line and " no " in line and "使える" in line
+        for line in lines
+    )
+    assert "達して" not in p.stdout  # 支出上限の列は yes / no の短い語
+    assert "%（" not in p.stdout  # 表の使用率の列にリセットの日付と時刻を添えない
+    rows = json.loads(account_cmd(tmp_path, accounts, "list", "--json", tty=False).stdout)
+    assert [r["name"] for r in rows] == ["work1", "work2"] and rows[0]["five_hour"]["utilization"] == 15
+    assert rows[0]["five_hour"]["resets_at"] and rows[0]["seven_day"]["resets_at"]  # JSON にはリセットの時刻を残す
+    assert rows[0]["spend_limit_reached"] is False  # JSON は真偽値のまま
+    assert all(c["argv"][:1] == ["auth"] for c in auth_calls(tmp_path))  # 推論を呼ばない
+    assert all(c["token"] is None for c in auth_calls(tmp_path))
+    for d in ("work1", "work2"):
+        assert oct((accounts.root / d).stat().st_mode & 0o777) == "0o700"
+        for f in (accounts.root / d).iterdir():
+            assert oct(f.stat().st_mode & 0o777) == "0o600", f
+    assert "SECRET" not in p.stdout + p.stderr
+    p = account_cmd(tmp_path, accounts, "remove", "work2", tty=False)
+    assert p.returncode == 0 and "外した: work2" in p.stdout and not (accounts.root / "work2").exists()
+    assert auth_calls(tmp_path)[-1]["argv"] == ["auth", "logout"] and auth_calls(tmp_path)[-1]["dir"].endswith("work2")
+
+
+def test_account_add_rejects(tmp_path, accounts):
+    """I3・入力の形: 同じメールの 2 つ目・名前の形・端末でない・ログインの失敗は登録しない。作りかけも残さない。"""
+    assert account_cmd(tmp_path, accounts, "add", "work1", FAKE_EMAIL="a@example.com").returncode == 0
+    p = account_cmd(tmp_path, accounts, "add", "work2", FAKE_EMAIL="A@example.com")
+    assert p.returncode == 1 and "登録済み: work1" in p.stderr
+    assert account_cmd(tmp_path, accounts, "add", "Bad!").returncode == 2
+    assert account_cmd(tmp_path, accounts, "add", "metered").returncode == 2
+    assert account_cmd(tmp_path, accounts, "add", "work4", FAKE_LOGIN_FAIL="1", FAKE_EMAIL="c@example.com").returncode == 1
+    assert account_cmd(tmp_path, accounts, "add", "work1", FAKE_EMAIL="a@example.com").returncode == 1  # 登録済みの名前
+    assert sorted(p.name for p in accounts.root.iterdir() if not p.name.endswith(".lock") and p.name != ".locks") == ["work1"]
+    assert account_cmd(tmp_path, accounts, "remove", "none", tty=False).returncode == 1
+    assert account_cmd(tmp_path, accounts, "list", "--bad", tty=False).returncode == 2
+
+
+def test_account_add_same_email_other_org(tmp_path, accounts):
+    """I3: 1 つのメールアドレスでも組織が違えば別のアカウントとして登録でき、同じ組織なら拒む。"""
+    personal = {"FAKE_EMAIL": "a@example.com", "FAKE_ORG_ID": "org-p", "FAKE_ORG_NAME": "a@example.com's Organization"}
+    team = {"FAKE_EMAIL": "a@example.com", "FAKE_ORG_ID": "org-t", "FAKE_ORG_NAME": "Team A"}
+    assert account_cmd(tmp_path, accounts, "add", "work1", **personal).returncode == 0
+    p = account_cmd(tmp_path, accounts, "add", "work2", **team)
+    assert p.returncode == 0, p.stderr
+    assert accounts.account("work2")["org_id"] == "org-t" and accounts.account("work2")["org_name"] == "Team A"
+    p = account_cmd(tmp_path, accounts, "add", "work3", **{**team, "FAKE_EMAIL": "A@example.com"})
+    assert p.returncode == 1 and "登録済み: work2" in p.stderr and "Team A" in p.stderr
+    rows = json.loads(account_cmd(tmp_path, accounts, "list", "--json", tty=False).stdout)
+    assert [(r["name"], r["org_id"], r["org_name"]) for r in rows] == [
+        ("work1", "org-p", "a@example.com's Organization"),
+        ("work2", "org-t", "Team A"),
+    ]
+    lines = account_cmd(tmp_path, accounts, "list", tty=False).stdout.splitlines()
+    assert any(line.startswith("work2") and "a@example.com（Team A）" in line for line in lines)
+    assert any(line.startswith("work1") and "a@example.com（個人）" in line for line in lines)  # 個人の組織の既定の名前は短く
+    assert "'s Organization" not in "\n".join(lines)
+    assert sorted(p.name for p in accounts.root.iterdir() if not p.name.endswith(".lock") and p.name != ".locks") == ["work1", "work2"]
+
+
+@pytest.mark.parametrize(
+    ("profile", "label"),
+    [("default", "Bedrock（ap-northeast-1・claude-opus-5-5）"), ("dev", "Bedrock（dev・ap-northeast-1・claude-opus-5-5）")],
+)
+def test_account_list_metered_label_is_short(tmp_path, accounts, profile, label):
+    """表の metered の識別は地域の接頭辞と `anthropic.` を外したモデル名にし、プロファイルは default 以外のときだけ出す。"""
+    details = {"profile": profile, "region": "ap-northeast-1", "model": "jp.anthropic.claude-opus-5-5"}
+    decl = {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": profile, "AWS_REGION": "ap-northeast-1"}
+    accounts.write(
+        accounts.root / "metered.json", {"version": 1, "provider": "bedrock", "env": decl, "details": details, "verified_at": "x"}
+    )
+    lines = account_cmd(tmp_path, accounts, "list", tty=False).stdout.splitlines()
+    assert any(line.startswith("metered") and label in line for line in lines), lines
+    rows = json.loads(account_cmd(tmp_path, accounts, "list", "--json", tty=False).stdout)
+    assert rows[-1]["details"] == details  # JSON の出力は変えない
+
+
+def test_account_add_same_email_without_known_org_rejects(tmp_path, accounts):
+    """I3: 組織の分からない登録（古い account.json）で組織を読み直せなければ、組織が違うと言い切れないので拒む。"""
+    accounts.add("old", email="a@example.com")
+    (accounts.root / "old" / ".credentials.json").unlink()  # ログアウト済み: auth status から組織を読めない
+    p = account_cmd(tmp_path, accounts, "add", "work1", FAKE_EMAIL="a@example.com", FAKE_ORG_ID="org-t", FAKE_ORG_NAME="Team A")
+    assert p.returncode == 1 and "登録済み: old" in p.stderr
+    lines = account_cmd(tmp_path, accounts, "list", tty=False).stdout.splitlines()
+    assert any(line.startswith("old") and "a@example.com" in line and "（" not in line.split()[1] for line in lines)
+
+
+def test_account_add_backfills_org_of_old_registration(tmp_path, accounts):
+    """I3: 組織の分からない登録は、その設定ディレクトリの auth status から組織を読み直して書き戻し、別の組織なら登録する。"""
+    accounts.add("old", email="a@example.com")
+    accounts.write(accounts.root / "old" / "fake-status.json", {"email": "a@example.com", "orgId": "org-p", "orgName": "Personal"})
+    p = account_cmd(tmp_path, accounts, "add", "work1", FAKE_EMAIL="a@example.com", FAKE_ORG_ID="org-t", FAKE_ORG_NAME="Team A")
+    assert p.returncode == 0, p.stderr
+    assert (accounts.account("old")["org_id"], accounts.account("old")["org_name"]) == ("org-p", "Personal")
+    assert accounts.account("old")["email"] == "a@example.com" and accounts.account("old")["needs_relogin"] is False
+    assert any(c["argv"][:2] == ["auth", "status"] and c["dir"].endswith("/old") for c in auth_calls(tmp_path))
+    lines = account_cmd(tmp_path, accounts, "list", tty=False).stdout.splitlines()
+    assert any(line.startswith("old") and "a@example.com（Personal）" in line for line in lines)
+    p = account_cmd(tmp_path, accounts, "add", "work2", FAKE_EMAIL="a@example.com", FAKE_ORG_ID="org-p", FAKE_ORG_NAME="Personal")
+    assert p.returncode == 1 and "登録済み: old" in p.stderr
+
+
+def test_owner_of_compares_email_and_org(accounts):
+    """I3: 同じメールアドレスと組織の登録を拒む。どちらかの組織が分からなければ同じとみなす（安全側）。"""
+    from relay_lib.accounts import ca as relay_ca, owner_of
+
+    accounts.add("p", email="x@example.com", org_id="org-p", org_name="Personal")
+    accounts.add("old", email="y@example.com")
+    assert owner_of("X@example.com", "org-p") == "p" and owner_of("x@example.com", "org-p", other_than="p") is None
+    assert owner_of("x@example.com", "org-t") is None
+    assert owner_of("x@example.com", "") == "p"  # 新しい側の組織が分からない
+    assert owner_of("y@example.com", "org-t") == "old"  # 既存の側の組織が分からない
+    acc = relay_ca.load_account("p")
+    assert (acc.org_id, acc.org_name) == ("org-p", "Personal")
+    assert (relay_ca.load_account("old").org_id, relay_ca.load_account("old").org_name) == ("", "")
+    st = relay_ca.staging_dir("t")
+    relay_ca.register("t", st, "x@example.com", org_id="org-t", org_name="Team")
+    assert (accounts.account("t")["org_id"], accounts.account("t")["org_name"]) == ("org-t", "Team")
+    assert owner_of("x@example.com", "org-t") == "t"
+
+
+def test_account_list_empty(tmp_path, accounts):
+    p = account_cmd(tmp_path, accounts, "list", tty=False)
+    assert p.returncode == 0 and p.stdout.strip() == "登録済みのアカウントは無い"
+
+
+def test_slow_usage_endpoint_does_not_stall_relay(term, accounts):
+    """性能の条件: 取得先が応答しなくても、定期の確認は別スレッドなので子への中継が止まらない。"""
+    accounts.add("a", util5=10)
+    accounts.add("b", util5=30)
+    t = account_term(term, accounts)
+    t.wait_start(1)
+    accounts.fake.delay = 8  # 定期の確認（1 秒ごと）の取得が待たされる
+    time.sleep(1.5)
+    pid = t.starts()[0]["pid"]
+    sent = time.time()
+    t.type("size\r")
+    t.wait(lambda: (t.fake_dir / f"size-{pid}").exists(), timeout=5, what="中継")
+    assert time.time() - sent < 1.0
+    accounts.fake.delay = 0
+    t.type("quit 0\r")
+    assert t.finish() == 0
+
+
+def test_account_add_stops_on_macos(monkeypatch, capsys):
+    """macOS の claude は .credentials.json を書かないため、登録の前に止まる。"""
+    from relay_lib import accounts as relay_accounts
+
+    monkeypatch.setattr(relay_accounts.sys, "platform", "darwin")
+    assert relay_accounts.cmd_add("work1") == 2
+    assert "macOS" in capsys.readouterr().err
+
+
+def _bare_relay(env):
+    r = object.__new__(relay_run.Relay)
+    r.env = env
+    r.account = None
+    r.section = 0
+    r.notes = []
+    r.note_account_dir = lambda row, section=None: r.notes.append(row)
+    return r
+
+
+def test_start_env_failure_repicks_another_account(accounts, monkeypatch):
+    """選んだアカウントのトークンを起動の直前に得られなければ、親の認証へ戻さず別のアカウントを選ぶ。"""
+    accounts.add("a", util5=10)
+    tb = accounts.add("b", util5=30)
+    real = relay_claude.section_env
+    monkeypatch.setattr(relay_claude, "section_env", lambda base, name, note=None: None if name == "a" else real(base, name, note))
+    to, reason, _, env = _bare_relay({}).replace_unusable("a")
+    assert (to, reason, env["CLAUDE_CONFIG_DIR"]) == ("b", "auth", str(accounts.root / "b"))
+    assert tb not in env.values() and "CLAUDE_CODE_OAUTH_TOKEN" not in env
+
+
+def test_start_env_failure_uses_metered_or_stops(accounts, monkeypatch):
+    """替えるアカウントが無ければ従量の接続の宣言へ、それも無ければ子を起動せずに止まる。"""
+    accounts.add("a", util5=10)
+    accounts.add("b", util5=30)
+    monkeypatch.setattr(
+        relay_claude, "section_env", lambda base, name, note=None: relay_claude.ca.account_env(name, base) if name == "metered" else None
+    )
+    to, _, _, env = _bare_relay({"NDF_SUPERVISE_CLAUDE_FALLBACK": "ANTHROPIC_API_KEY=k"}).replace_unusable("a")
+    assert to == "metered" and env["ANTHROPIC_API_KEY"] == "k"
+    with pytest.raises(relay_run.NoAccountEnv):
+        _bare_relay({}).replace_unusable("a")
+
+
+# ---------------------------------------------------------------- 残りの量（#1453）
+
+
+def _picker(cur):
+    r = _bare_relay({})
+    r.account, r.watch = cur, None
+    return r
+
+
+@pytest.mark.parametrize(
+    "other, to",
+    [
+        (dict(tier="default_claude_max_5x", util5=50, util7=0), "b"),  # 26.25 > 16.8
+        (dict(tier="default_claude_max_5x", util5=80, util7=0), "a"),  # 10.5 <= 16.8
+        (dict(util5=50, util7=0), "b"),  # 残りの量が不明: 使用率 50 < 92
+        (dict(util5=91, util7=0), "b"),
+    ],
+)
+def test_pick_compares_remaining_over_threshold(accounts, other, to):
+    """AC8・I9: 今が使えて閾値を超えたとき、両方分かれば残りの量で、どちらかが不明なら使用率で比べる。"""
+    accounts.add("a", tier="default_claude_max_20x", util5=92, util7=0)  # 16.8
+    accounts.add("b", **other)
+    name, reason, _ = _picker("a").pick(None)
+    assert (name, reason) == (to, "threshold" if to == "b" else None)
+
+
+def test_pick_keeps_current_when_candidate_usage_is_higher(accounts):
+    accounts.add("a", util5=92, util7=0)
+    accounts.add("b", util5=95, util7=0)
+    assert _picker("a").pick(None)[0] == "a"
+
+
+def test_account_capacity_and_list(tmp_path, accounts):
+    """AC3・AC7・I8: 宣言は一覧の枠の大きさと残りの量に効き、`-` で外すと表へ戻る。トークンを出さない。"""
+    accounts.add("a", tier="default_claude_max_5x", util5=40, util7=50)
+    accounts.add("b", util5=10, util7=10, extra={"limits": [scoped_limit(58)]})
+    creds = (accounts.root / "a" / ".credentials.json").read_bytes()
+    p = account_cmd(tmp_path, accounts, "capacity", "a", "1000", "900", tty=False)
+    assert p.returncode == 0 and "枠の大きさ: a 5 時間 1,000 / 週 900" in p.stdout, p.stderr
+    rows = {r["name"]: r for r in json.loads(account_cmd(tmp_path, accounts, "list", "--json", tty=False).stdout)}
+    assert rows["a"]["capacity"] == {"five_hour": 1000.0, "seven_day": 900.0}
+    assert rows["a"]["capacity_declared"] == {"five_hour": 1000.0, "seven_day": 900.0}
+    assert rows["a"]["remaining"] == pytest.approx(450.0) and rows["a"]["tier"] == "default_claude_max_5x"
+    assert rows["b"]["capacity"] == {"five_hour": None, "seven_day": None} and rows["b"]["remaining"] is None
+    assert rows["b"]["scoped"][0]["model"] == "Fable" and rows["b"]["tier"] is None
+    table = account_cmd(tmp_path, accounts, "list", tty=False).stdout
+    line_a = next(x for x in table.splitlines() if x.startswith("a "))
+    line_b = next(x for x in table.splitlines() if x.startswith("b "))
+    assert "1,000* / 900*" in line_a and " 450 " in line_a
+    assert "Fable 58%" in line_b and "- / -" in line_b
+    assert account_cmd(tmp_path, accounts, "capacity", "a", "-", "-", tty=False).returncode == 0
+    rows = {r["name"]: r for r in json.loads(account_cmd(tmp_path, accounts, "list", "--json", tty=False).stdout)}
+    assert rows["a"]["capacity"] == {"five_hour": 52.5, "seven_day": 640.0} and rows["a"]["remaining"] == pytest.approx(31.5)
+    assert (accounts.root / "a" / ".credentials.json").read_bytes() == creds
+    assert "SECRET" not in table and "SECRET" not in json.dumps(rows)
+    assert account_cmd(tmp_path, accounts, "capacity", "a", "0", "-", tty=False).returncode == 2
+    assert account_cmd(tmp_path, accounts, "capacity", "a", "x", "-", tty=False).returncode == 2
+    assert account_cmd(tmp_path, accounts, "capacity", "zz", "1", "1", tty=False).returncode == 1
+
+
+# ---------------------------------------------------------------- 現状固定: 区間のアカウントの選び方（AccountSwitch.pick）
+
+from relay_lib import switch as relay_switch  # noqa: E402
+
+
+class _Acc:
+    def __init__(self, relogin=False, limited=None, left=None):
+        self.needs_relogin, self.limited, self.left = relogin, limited, left
+
+    def limited_until(self, now):
+        return self.limited
+
+    def auth_held(self, now):
+        return False
+
+    def remaining(self):
+        return self.left
+
+
+class _Use:
+    def __init__(self, score):
+        self.s = score
+
+    def score(self):
+        return self.s
+
+
+def _fake_ca(monkeypatch, *, choice, usage=None, acc=None, thr=90.0):
+    """`pick` と `check` が読む `ca` を差し替え、`choose` に渡った引数を記録する。"""
+    calls = []
+
+    def choose(exclude=(), **kw):
+        calls.append({"exclude": set(exclude), **kw})
+        return choice
+
+    monkeypatch.setattr(relay_switch.ca, "switch_at", lambda: thr)
+    monkeypatch.setattr(relay_switch.ca, "choose", choose)
+    monkeypatch.setattr(relay_switch.ca, "usage", lambda name, refresh=True: usage)
+    monkeypatch.setattr(relay_switch.ca, "load_account", lambda name: acc)
+    return calls
+
+
+def _pk(cur, env=None, due=None):
+    r = _bare_relay(env or {})
+    r.account = cur
+    r.watch = None if due is None else type("W", (), {"due": due})()
+    return r
+
+
+METERED_DECL = {"NDF_SUPERVISE_CLAUDE_FALLBACK": "ANTHROPIC_API_KEY=k"}
+
+
+@pytest.mark.parametrize(
+    "kind, cur, env, name, want, exclude",
+    [
+        ("five_hour", "a", {}, "b", ("b", "five_hour"), {"a"}),
+        ("auth", "a", {}, "b", ("b", "auth"), {"a"}),  # 認証の失敗でも今のアカウントを除く（#1576 の I12）
+        ("five_hour", "metered", {}, "b", ("b", "recovered"), set()),
+        ("five_hour", None, {}, "b", ("b", "five_hour"), set()),
+        ("five_hour", "a", METERED_DECL, None, ("metered", "five_hour"), {"a"}),
+        ("five_hour", "a", {}, None, (None, "five_hour"), {"a"}),
+        ("five_hour", "metered", METERED_DECL, None, (None, "five_hour"), set()),
+    ],
+)
+def test_pick_after_limit_characterization(monkeypatch, kind, cur, env, name, want, exclude):
+    """現状固定: 上限の後（`kind` あり）の選び方と、`choose` へ渡す除外。"""
+    c = relay_switch.ca.Choice(name)
+    calls = _fake_ca(monkeypatch, choice=c)
+    assert _pk(cur, env).pick(kind) == (*want, c)
+    assert calls[0]["exclude"] == exclude
+
+
+@pytest.mark.parametrize(
+    "name, score, want",
+    [("b", 10.0, ("b", "recovered")), ("b", None, ("b", "recovered")), ("b", 95.0, ("metered", None)), (None, None, ("metered", None))],
+)
+def test_pick_on_metered_characterization(monkeypatch, name, score, want):
+    """現状固定: 従量の接続で区間を起動するとき、閾値未満（または不明）の候補があれば戻す。"""
+    c = relay_switch.ca.Choice(name, score=score)
+    _fake_ca(monkeypatch, choice=c)
+    assert _pk("metered").pick(None) == (*want, c)
+
+
+@pytest.mark.parametrize(
+    "cur, acc, score, due, name, env, want, keep_choice",
+    [
+        # 今が使えて閾値未満なら `choose` を呼ばずに替えない
+        ("a", _Acc(), 50.0, None, "b", {}, ("a", None), False),
+        ("a", _Acc(), None, None, "b", {}, ("a", None), False),
+        # 閾値を超えた・定期の確認が立てた
+        ("a", _Acc(), 95.0, None, "b", {}, ("b", "threshold"), True),
+        ("a", _Acc(), 50.0, 91.0, "b", {}, ("b", "threshold"), True),
+        # 使えない（登録が無い・再ログインが要る・上限にある）
+        ("a", None, 10.0, None, "b", {}, ("b", "unusable"), True),
+        ("a", _Acc(relogin=True), 10.0, None, "b", {}, ("b", "unusable"), True),
+        ("a", _Acc(limited=1.0), 10.0, None, "b", {}, ("b", "unusable"), True),
+        (None, None, None, None, "b", {}, ("b", "start"), True),
+        # 候補が無い
+        ("a", _Acc(), 95.0, None, None, METERED_DECL, ("a", None), True),
+        ("a", None, None, None, None, METERED_DECL, ("metered", "limited"), True),
+        (None, None, None, None, None, METERED_DECL, ("metered", "limited"), True),
+        ("a", None, None, None, None, {}, ("a", None), True),
+        (None, None, None, None, None, {}, (None, None), True),
+    ],
+)
+def test_pick_section_start_characterization(monkeypatch, cur, acc, score, due, name, env, want, keep_choice):
+    """現状固定: 区間の起動（`kind` が None）で今のアカウントを残すか替えるか。"""
+    c = relay_switch.ca.Choice(name, score=10.0)
+    calls = _fake_ca(monkeypatch, choice=c, usage=None if score is None else _Use(score), acc=acc)
+    assert _pk(cur, env, due).pick(None) == (*want, c if keep_choice else None)
+    if keep_choice:
+        assert calls[0]["exclude"] == ({cur} if cur else set())
+    else:
+        assert calls == []
+
+
+@pytest.mark.parametrize(
+    "left, c_left, c_score, want",
+    [(100.0, 100.0, 10.0, "a"), (100.0, 101.0, 99.0, "b"), (None, 500.0, 96.0, "a"), (None, 500.0, 94.0, "b"), (None, None, None, "b")],
+)
+def test_pick_no_better_characterization(monkeypatch, left, c_left, c_score, want):
+    """現状固定: 閾値を超えたとき、候補が今より良くなければ今を残す（残りの量 → 使用率の順で比べる）。"""
+    c = relay_switch.ca.Choice("b", score=c_score, remaining=c_left)
+    _fake_ca(monkeypatch, choice=c, usage=_Use(95.0), acc=_Acc(left=left))
+    assert _pk("a").pick(None) == ((want, "threshold", c) if want == "b" else ("a", None, c))
+
+
+# ---------------------------------------------------------------- 現状固定: 定期の確認（UsageWatch.check）
+
+
+def _watch(cur):
+    return relay_switch.UsageWatch(type("R", (), {"account": cur})())
+
+
+def _drain(w):
+    out = []
+    while not w.lines.empty():
+        out.append(w.lines.get_nowait())
+    return out
+
+
+@pytest.mark.parametrize(
+    "name, score, recover",
+    [("b", 10.0, "b"), ("b", None, "b"), ("b", 90.0, None), (None, None, None)],
+)
+def test_usage_watch_on_metered_characterization(monkeypatch, name, score, recover):
+    """現状固定: 従量の接続の間は、閾値未満（または不明）の候補を `recover` に立て、1 行を 1 度だけ積む。"""
+    calls = _fake_ca(monkeypatch, choice=relay_switch.ca.Choice(name, score=score))
+    w = _watch("metered")
+    w.check()
+    w.check()
+    assert w.recover == recover and w.due is None
+    assert _drain(w) == ([f"{name} の上限が外れた。次のカットポイントで従量の接続から戻す"] if recover else [])
+    assert calls[0] == {"exclude": set()}
+
+
+def test_usage_watch_recover_cleared_characterization(monkeypatch):
+    """現状固定: 戻せる候補が無くなれば `recover` を外す。"""
+    _fake_ca(monkeypatch, choice=relay_switch.ca.Choice(None))
+    w = _watch("metered")
+    w.recover = "b"
+    w.check()
+    assert w.recover is None and _drain(w) == []
+
+
+@pytest.mark.parametrize(
+    "cur, score, thr, due, want_due, lines",
+    [
+        ("a", 95.4, 90.0, None, 95.4, ["a の使用率が 95% を超えた。次のカットポイントで替える"]),
+        ("a", 90.0, 90.0, None, 90.0, ["a の使用率が 90% を超えた。次のカットポイントで替える"]),
+        ("a", 89.9, 90.0, None, None, []),
+        ("a", None, 90.0, None, None, []),
+        ("a", 95.0, 100.0, None, None, []),
+        ("a", 95.0, 90.0, 91.0, 91.0, []),
+        (None, 95.0, 90.0, None, None, []),
+    ],
+)
+def test_usage_watch_on_account_characterization(monkeypatch, cur, score, thr, due, want_due, lines):
+    """現状固定: アカウントの間は、今の使用率が閾値以上なら `due` を立てる（閾値 100 以上・立て済み・未登録は読まない）。"""
+    _fake_ca(monkeypatch, choice=None, usage=None if score is None else _Use(score), thr=thr)
+    w = _watch(cur)
+    w.due = due
+    w.check()
+    assert w.due == want_due and w.recover is None and _drain(w) == lines
+
+
+# ---------------------------------------------------------------- 現状固定: 区間のアカウントの知らせ（AccountSwitch.tell_account）
+
+
+def _teller(monkeypatch, section, env=None, due=None):
+    """画面の 1 行と記録の行を集める `Relay`。`account_label` は `名前（m）` に固定する。"""
+    monkeypatch.setattr(relay_switch.ca, "account_label", lambda n: f"{n}（m）")
+    r = _pk("a", env, due)
+    r.section, r.screens, r.rows = section, [], []
+    r.term = type("T", (), {"screen": lambda _s, line: r.screens.append(line)})()
+    r.log = lambda **row: r.rows.append(row)
+    return r
+
+
+@pytest.mark.parametrize("prev, to, section", [("a", "a", 2), ("a", None, 2), (None, None, 1)])
+def test_tell_account_silent_characterization(monkeypatch, prev, to, section):
+    """現状固定: 2 区間目以降で同じアカウント、または替え先が無いなら何も出さない。"""
+    r = _teller(monkeypatch, section)
+    r.tell_account(prev, to, "threshold", None)
+    assert r.screens == [] and r.rows == []
+
+
+@pytest.mark.parametrize("prev, to", [(None, "b"), ("b", "b")])
+def test_tell_account_first_section_characterization(monkeypatch, prev, to):
+    """現状固定: 1 区間目は起動したアカウントの 1 行だけを出し、記録しない。"""
+    r = _teller(monkeypatch, 1)
+    r.tell_account(prev, to, None, None)
+    assert r.screens == ["ndf-relay: アカウント b（m）で起動する"] and r.rows == []
+
+
+@pytest.mark.parametrize(
+    "section, decl, choice, screen, keys, earliest",
+    [
+        (
+            2,
+            "ANTHROPIC_API_KEY=k",
+            None,
+            "ndf-relay: 登録済みのアカウントはすべて上限にある。従量の接続（ANTHROPIC_API_KEY）へ替えて続ける",
+            ["ANTHROPIC_API_KEY"],
+            None,
+        ),
+        (
+            1,
+            "ANTHROPIC_API_KEY=k ANTHROPIC_BASE_URL=u",
+            ("x", float("inf")),
+            "ndf-relay: 登録済みのアカウントはすべて上限にある（最も早く戻るのは x、不明）。従量の接続（ANTHROPIC_API_KEY ほか 1 つ）へ替えて続ける",
+            ["ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"],
+            {"name": "x", "at": None},
+        ),
+        (2, "", None, "ndf-relay: 登録済みのアカウントはすべて上限にある。従量の接続（宣言）へ替えて続ける", [], None),
+    ],
+)
+def test_tell_account_metered_characterization(monkeypatch, section, decl, choice, screen, keys, earliest):
+    """現状固定: 従量の接続へ替えたら、区間によらず 1 行と `account` の記録（宣言のキーと最も早く戻る時刻）を残す。"""
+    r = _teller(monkeypatch, section, {"NDF_SUPERVISE_CLAUDE_FALLBACK": decl})
+    c = relay_switch.ca.Choice(None, earliest=choice)
+    r.tell_account("a", "metered", "five_hour", c)
+    assert r.screens == [screen]
+    assert r.rows == [
+        {"event": "account", "section": section, "reason": "five_hour", "from": "a", "to": "metered", "keys": keys, "earliest": earliest}
+    ]
+
+
+@pytest.mark.parametrize(
+    "prev, reason, due, line, extra",
+    [
+        ("metered", "five_hour", None, "b（m）の上限が外れたため、従量の接続からアカウント b へ戻して続ける", {"reason": "recovered"}),
+        ("metered", "threshold", 95.0, "b（m）の上限が外れたため、従量の接続からアカウント b へ戻して続ける", {"reason": "recovered"}),
+        ("a", "threshold", 95.4, "a の使用率が 95% に達したため、アカウントを b（m）へ替える", {"usage": 95}),
+        ("a", "threshold", None, "a の使用率が 0% に達したため、アカウントを b（m）へ替える", {"usage": 0}),
+        *[
+            ("a", k, None, f"利用上限（{k}）に達したため、アカウントを a から b（m）へ替えて続ける", {})
+            for k in ("five_hour", "seven_day", "spend", "unknown")
+        ],
+        ("a", "auth", None, "認証が通らなかったため、アカウントを a から b（m）へ替えて続ける", {}),
+        ("a", "unusable", None, "アカウントを a から b（m）へ替える", {}),
+        (None, "start", None, "アカウントを 既定のログイン から b（m）へ替える", {}),
+        ("a", None, None, "アカウントを a から b（m）へ替える", {}),
+    ],
+)
+def test_tell_account_reason_lines_characterization(monkeypatch, prev, reason, due, line, extra):
+    """現状固定: 2 区間目以降でアカウントへ替えたとき、理由ごとの 1 行と `account` の記録。"""
+    r = _teller(monkeypatch, 3, due=due)
+    r.tell_account(prev, "b", reason, None)
+    assert r.screens == ["ndf-relay: " + line]
+    assert r.rows == [{"event": "account", "section": 3, "reason": reason, "from": prev, "to": "b", **extra}]
+
+
+# ---------------------------------------------------------------- ラッパーの入れ替え（#1587）
+
+from relay_lib import handover as relay_handover  # noqa: E402
+
+OLD_VER, NEW_VER = "10.17.52", "10.17.53"
+
+
+def handover_data(**over):
+    """申し送りの中身（設計の申し送りの形の表）。"""
+    d = {
+        "shown": "/goal 続き",
+        "from_dir": f"relay-{OLD_VER}-aaaa1111",
+        "to_dir": f"relay-{NEW_VER}-bbbb2222",
+        "written_at": 1790000000.0,
+        "prepare_seconds": 0.5,
+        "claude": "/bin/claude",
+        "marketplace": "mk",
+        "version": NEW_VER,
+        "first_args": ["--model", "haiku"],
+        "state": {"section": 7, "account": None, "multi": False, "auth_section": 0},
+        "next": {
+            "args": ["/goal 続き"],
+            "cwd": "/work",
+            "command": "/goal 続き",
+            "from_session": "s1",
+            "cwd_fallback": None,
+            "carried": ["--model", "haiku"],
+            "plan": None,
+        },
+    }
+    d.update(over)
+    return d
+
+
+def test_handover_written_private_and_removed_after_read(tmp_path):
+    """申し送りは 0600 で書き、形の表のキーだけを持ち、読んだら消す（I7）。"""
+    d = tmp_path / "relay"
+    d.mkdir(mode=0o700)
+    path = relay_handover.write_handover(str(d), handover_data())
+    assert pathlib.Path(path).stat().st_mode & 0o777 == 0o600
+    keys = set(json.loads(pathlib.Path(path).read_text()))
+    assert keys == {"schema", "prepare_seconds", *relay_handover.REQUIRED}
+    got, shown = relay_handover.read_handover(path)
+    assert got is not None and got["state"]["section"] == 7 and shown == "/goal 続き"
+    assert not os.path.exists(path) and os.listdir(d) == []
+
+
+def broken_handovers(drop, unreadable_shown):
+    """読めない申し送りの 4 通りの (本文, 期待する `shown`)。`drop` は 4 つ目で落とす必須のキー。
+
+    `unreadable_shown` は、本文から `shown` を読めない 2 通り（無い・壊れている）で期待する値。"""
+    return [
+        pytest.param(None, unreadable_shown, id="missing"),  # 無い
+        pytest.param("{not json", unreadable_shown, id="broken"),  # 壊れている
+        pytest.param(json.dumps({"schema": 99, **handover_data()}), "/goal 続き", id="schema"),  # 知らない schema
+        pytest.param(
+            json.dumps({"schema": 1, **{k: v for k, v in handover_data().items() if k != drop}}), "/goal 続き", id="key"
+        ),  # 必須のキーが無い
+    ]
+
+
+@pytest.mark.parametrize("body, shown", broken_handovers("next", None))
+def test_handover_read_rejects(tmp_path, body, shown):
+    path = tmp_path / "handover.json"
+    if body is not None:
+        path.write_text(body)
+    assert relay_handover.read_handover(str(path)) == (None, shown)
+    assert not path.exists()
+
+
+def test_section_input_round_trips_through_handover():
+    """申し送りの `next` は SectionInput そのもので、上限の後の選び方（Choice）も戻る（I4）。"""
+    import claude_accounts as ca
+
+    s = relay_handover.SectionInput(
+        args=["--resume", "s1", "続き"],
+        cwd="/w",
+        command="続き",
+        from_session="s1",
+        cwd_fallback="/gone",
+        carried=["--model", "haiku"],
+        plan=("b", "limit", ca.Choice(name="b", score=0.2, earliest=("a", 123.0), remaining=None)),
+    )
+    back = relay_handover.SectionInput.from_json(json.loads(json.dumps(s.to_json())))
+    assert back == s
+
+
+@pytest.mark.parametrize("keep_input, when", [(False, "TCSAFLUSH"), (True, "TCSADRAIN")])
+def test_set_raw_keeps_typed_input_after_swap(monkeypatch, keep_input, when):
+    """入れ替えた後の raw 化は、旧版が残した入力を捨てない（#1587 の決定 6）。"""
+    import termios
+    import tty
+
+    from relay_lib.terminal import Terminal
+
+    calls = []
+    monkeypatch.setattr(termios, "tcgetattr", lambda fd: ["saved"])
+    monkeypatch.setattr(tty, "setraw", lambda fd, w=termios.TCSAFLUSH: calls.append((fd, w)))
+    t = Terminal()
+    t.set_raw(keep_input=keep_input)
+    assert calls == [(0, getattr(termios, when))] and t.saved == ["saved"]
+
+
+def test_version_of_reads_version_from_name():
+    assert relay_version_dir.version_of("relay-10.17.53-bbbb2222") == "10.17.53"
+    assert relay_version_dir.version_of("relay-10.17.53-dev.1-bbbb2222") == "10.17.53-dev.1"
+    assert relay_version_dir.version_of("scripts") is None and relay_version_dir.version_of(None) is None
+
+
+def test_expected_dir_is_the_name_startup_places(tmp_path, home):
+    """導入先のファイルから計算した名前は、その版の startup が置く名前と同じ（決定 2）。"""
+    new = plugin_root(tmp_path, NEW_VER, "new")
+    (home / ".bashrc").write_text("")
+    assert relay_cmd(tmp_path, "install", relay=plugin_root(tmp_path, OLD_VER, "old")).returncode == 0
+    assert relay_cmd(tmp_path, "startup", relay=new).returncode == 0
+    assert relay_handover.expected_dir(str(new.parent.parent), "ignored") == current_of(cfg(tmp_path))
+    assert relay_handover.expected_dir(str(tmp_path / "missing"), NEW_VER) is None
+    assert relay_handover.expected_dir(None, NEW_VER) is None
+
+
+def fake_startup(root, base, name, env=True, reader=True):
+    """更新後の版の startup の代わり。`base` に `name` のバージョンディレクトリを置いて relay.current で指す。
+    `env` が偽なら環境の python を置かず、`"noexec"` なら実行できない python を置く。`reader` が偽なら handover.py を置かない。"""
+    script = f"""#!/usr/bin/env python3
+import os, sys
+if sys.argv[1:] != ["startup"]:
+    sys.exit(0)
+base, name = {str(base)!r}, {name!r}
+vd = os.path.join(base, name)
+os.makedirs(os.path.join(vd, "relay_lib"), exist_ok=True)
+open(os.path.join(vd, "MANIFEST"), "w").close()
+if {reader!r}:
+    open(os.path.join(vd, "relay_lib", "handover.py"), "w").close()
+env = {env!r}
+if env:
+    os.makedirs(os.path.join(vd, ".venv", "bin"), exist_ok=True)
+    py = os.path.join(vd, ".venv", "bin", "python")
+    open(py, "w").write("#!/bin/sh\\nexit 9\\n")
+    os.chmod(py, 0o644 if env == "noexec" else 0o755)
+open(os.path.join(base, "relay.current"), "w").write(name + "\\n")
+"""
+    (root / "scripts" / "relay.py").write_text(script)
+
+
+class Swap:
+    """複製のランチャーから起動したラッパーで、版をまたぐ切り替えを 1 回行う場（偽の claude と一時の複製の置き場）。"""
+
+    def __init__(self, tmp_path, term, after=NEW_VER, after_root=None, args=("--model", "haiku"), env=None):
+        home = home_of(tmp_path)
+        home.mkdir(exist_ok=True)
+        (home / ".bashrc").write_text("")
+        self.old = plugin_root(tmp_path, OLD_VER, "old").parent.parent
+        assert relay_cmd(tmp_path, "install", relay=self.old / "scripts" / "relay.py").returncode == 0
+        self.base = cfg(tmp_path)
+        self.old_name = current_of(self.base)
+        if after_root is None:
+            after_root = self.old if after == OLD_VER else plugin_root(tmp_path, after, "new").parent.parent
+        self.new = after_root
+        e = {
+            "FAKE_VERSION": OLD_VER,
+            "FAKE_INSTALL_PATH": self.old,
+            "FAKE_VERSION_AFTER": after,
+            "FAKE_INSTALL_PATH_AFTER": after_root,
+            **(env or {}),
+        }
+        self.t = term(*args, env=e, cmd=[sys.executable, str(self.base / "relay.py"), "run"])
+
+    def cut(self, body="/goal 次"):
+        self.t.wait_start(1)
+        self.t.type(f"mark {body}\r")
+        self.t.wait_start(2)
+        return self.t.rows()
+
+
+def test_swap_runs_next_session_in_new_version_dir(tmp_path, term):
+    """版をまたぐ切り替えで、同じ PID・同じ作業ディレクトリのまま更新後のバージョンディレクトリへ入れ替わり、
+    セッションの番号は続く（AC1〜AC3・AC5〜AC7・AC9・AC13）。"""
+    sw = Swap(tmp_path, term)
+    t = sw.t
+    rows = sw.cut()
+    new_name = current_of(sw.base)
+    assert new_name.startswith(f"relay-{NEW_VER}-") and new_name != sw.old_name
+    assert [r["event"] for r in rows] == ["start", "end", "reexec", "start"]
+    s1, e1, rx, s2 = rows
+    assert s1["relay_version_dir"] == sw.old_name and s2["relay_version_dir"] == new_name
+    assert (rx["section"], rx["from"], rx["to"]) == (1, sw.old_name, new_name)
+    assert isinstance(rx["prepare_seconds"], float) and isinstance(rx["seconds"], float)
+    assert (s1["section"], e1["section"], s2["section"]) == (1, 1, 2)
+    assert s2["plugin_version"] == NEW_VER
+    # PID と作業ディレクトリは変わらない
+    assert t.proc.poll() is None
+    (d,) = t.relay_dirs()
+    assert (d / "relay.pid").read_text() == str(t.proc.pid)
+    assert relay_common.relay_running(str(d))
+    assert t.starts()[1]["relay_dir"] == str(d)
+    assert not (d / "handover.json").exists()
+    # 使用中の印は入れ替え後のバージョンディレクトリにだけある
+    assert not (sw.base / sw.old_name / f"inuse-{t.proc.pid}").exists()
+    assert (sw.base / new_name / f"inuse-{t.proc.pid}").exists()
+    assert "── ndf-relay: 区間 2 ──" in t.text and "入れ替えずに" not in t.text
+    assert termios.tcgetattr(t.slave) != t.before  # raw のまま中継する
+    # 入れ替えた後も停止シグナルファイルの扱いが続く（起動は 2 回のまま）
+    (d / "stop").touch()
+    t.type("mark /goal その次\r")
+    t.wait(lambda: events(t.rows(), "stop"), what="停止の行")
+    assert events(t.rows(), "stop")[-1]["reason"] == "stop-file"
+    t.type("quit 0\r")
+    assert t.finish() == 0
+    assert len(events(t.rows(), "start")) == 2 and len(events(t.rows(), "reexec")) == 1
+    assert termios.tcgetattr(t.slave) == t.before
+
+
+@pytest.mark.parametrize("swap", [True, False])
+def test_swap_keeps_next_session_input(tmp_path, term, swap):
+    """次のセッションの引数・cwd・引き継ぐ引数は、入れ替えの有無で同じ（AC4）。同じ名前なら入れ替えず、
+    外部コマンドの呼び出しも増えない（AC8）。"""
+    sw = Swap(tmp_path, term, after=NEW_VER if swap else OLD_VER)
+    rows = sw.cut()
+    second = sw.t.starts()[1]
+    assert second["argv"] == ["--model", "haiku", "/goal 次"]
+    assert second["cwd"] == str(tmp_path)
+    assert [r for r in rows if r["event"] == "start"][1]["carried"] == ["--model", "haiku"]
+    assert sw.t.calls() == [["list", "--json"], ["marketplace", "update", "mk"], ["update", "ndf@mk", "-y"], ["list", "--json"]]
+    assert bool(events(rows, "reexec")) is swap and not events(rows, "reexec_skipped")
+    sw.t.type("quit 0\r")
+    assert sw.t.finish() == 0
+
+
+def _break(case, sw_args, tmp_path):
+    """入れ替えを失敗させる用意。(Swap に渡す引数, 起動の後に呼ぶもの)。"""
+    if case == "unreadable":
+        return {"after_root": tmp_path / "missing"}, None
+    if case == "not-placed":  # 後退の防止で startup が置かない
+        return {"after": "10.17.51"}, None
+    root = plugin_root(tmp_path, NEW_VER, "new").parent.parent
+    base = cfg(tmp_path)
+    name = f"relay-{NEW_VER}-cccc3333"
+    if case == "startup-failed":
+        (root / "scripts" / "relay.py").write_text("import sys\nsys.exit(3)\n")
+    elif case == "no-env":
+        fake_startup(root, base, name, env=False)
+    elif case == "no-handover":
+        fake_startup(root, base, name, reader=False)
+    elif case == "exec-failed":
+        fake_startup(root, base, name, env="noexec")
+    elif case == "handover-write":
+
+        def block(t):
+            (d,) = t.relay_dirs()
+            (d / f"handover.json.{t.proc.pid}.tmp").mkdir()
+
+        return {"after_root": root}, block
+    return {"after_root": root}, None
+
+
+@pytest.mark.parametrize("case", ["startup-failed", "not-placed", "unreadable", "no-env", "no-handover", "handover-write", "exec-failed"])
+def test_swap_failure_keeps_current_version(tmp_path, term, case):
+    """入れ替えられないときは、今の版のまま次のセッションを起動し、画面に 1 行と reexec_skipped の 1 行を残す（AC10・I5・I9）。"""
+    kw, hook = _break(case, None, tmp_path)
+    sw = Swap(tmp_path, term, **kw)
+    t = sw.t
+    t.wait_start(1)
+    if hook:
+        hook(t)
+    t.type("mark /goal 次\r")
+    t.wait_start(2)
+    rows = t.rows()
+    assert [r["event"] for r in rows] == ["start", "end", "reexec_skipped", "start"]
+    sk = rows[2]
+    assert sk["reason"] == case and sk["reason"] in relay_handover.REASONS
+    assert sk["section"] == 1 and sk["from"] == sw.old_name and isinstance(sk["seconds"], float)
+    assert rows[3]["relay_version_dir"] == sw.old_name and rows[3]["section"] == 2
+    assert t.text.count("入れ替えずに今の版で続ける") == 1
+    assert (sw.base / sw.old_name / f"inuse-{t.proc.pid}").exists()
+    (d,) = t.relay_dirs()
+    assert not (d / "handover.json").exists()
+    t.type("quit 0\r")
+    assert t.finish() == 0
+    assert termios.tcgetattr(t.slave) == t.before
+
+
+@pytest.mark.parametrize("body, shown", broken_handovers("state", "claude を打ち直し、前の会話は /resume で選ぶ"))
+def test_run_from_unreadable_handover_stops_with_command(tmp_path, home, body, shown):
+    """入れ替えた後に申し送りを読めなければ、子を起動せず、次のコマンドを示して止まる（AC11・I6）。"""
+    d = tmp_path / "relay-dir"
+    d.mkdir(mode=0o700)
+    (d / "log.jsonl").write_text(json.dumps({"event": "start", "section": 7}) + "\n")
+    path = d / "handover.json"
+    if body is not None:
+        path.write_text(body)
+    (d / "relay.pid").write_text("1")
+    (d / "metered-settings.json").write_text("{}")
+    fake = tmp_path / "fake"
+    fake.mkdir()
+    p = relay_cmd(tmp_path, "run", NDF_RELAY_HANDOVER=path, NDF_RELAY_CLAUDE=FAKE, FAKE_DIR=fake, FAKE_RELAY=RELAY)
+    assert p.returncode == 2, p.stderr
+    assert "次の区間を起動できない" in p.stdout and shown in p.stdout
+    assert not (fake / "starts.jsonl").exists() and not (fake / "calls.jsonl").exists()
+    last = json.loads((d / "log.jsonl").read_text().splitlines()[-1])
+    assert (last["event"], last["reason"], last["section"]) == ("stop", "handover", 7)
+    assert not path.exists()
+    # 旧版が exec で飛ばした片づけ: 資格情報を持ちうるまとめた設定と pid のファイルを残さない
+    assert not (d / "relay.pid").exists() and not (d / "metered-settings.json").exists()
+
+
+@pytest.mark.parametrize("launcher, reason", [(True, "not-placed"), (False, "unreadable")])
+def test_swap_without_expected_name_runs_startup_when_launcher_exists(tmp_path, monkeypatch, launcher, reason):
+    """更新後の名前を計算できなくても（後の版が LIB_FILES を変えた）、導入先にランチャーがあれば startup へ進み、
+    入れ替え先は relay.current で決める。ランチャーも無ければ unreadable で見送る。"""
+    install = tmp_path / "plugin"
+    (install / "scripts").mkdir(parents=True)
+    if launcher:
+        (install / "scripts" / "relay.py").write_text("")
+    called, logged = [], []
+    monkeypatch.setattr(relay_handover, "running_dir", lambda: "relay-old-aaaa1111")
+    monkeypatch.setattr(relay_handover, "expected_dir", lambda *a: None)
+    monkeypatch.setattr(relay_handover, "copy_base", lambda: str(tmp_path))
+
+    def prepare(install_path, running, base):
+        called.append((install_path, running, base))
+        raise relay_handover.Skip(relay_handover.NOT_PLACED, "x")
+
+    monkeypatch.setattr(relay_handover, "prepare_target", prepare)
+    sw = relay_handover.Swapper()
+    sw.install_path, sw.version, sw.section = str(install), NEW_VER, 1
+    sw.log = lambda **row: logged.append(row)
+    sw.term = types.SimpleNamespace(screen=lambda text: None)
+    sw.swap(None, "claude")
+    assert bool(called) is launcher
+    assert [r["reason"] for r in logged] == [reason]
+
+
+def _start_row(d, **extra):
+    with open(d / "log.jsonl", "a") as f:
+        f.write(json.dumps({"event": "start", "section": 1, **extra}) + "\n")
+
+
+@pytest.mark.parametrize(
+    "row, current, expected",
+    [
+        ({"relay_version_dir": "relay-10.17.53-bbbb2222"}, "relay-10.17.53-bbbb2222", "relay-10.17.53-bbbb2222（複製が指すものと同じ）"),
+        (
+            {"relay_version_dir": "relay-10.17.52-aaaa1111"},
+            "relay-10.17.53-bbbb2222",
+            "relay-10.17.52-aaaa1111。複製は relay-10.17.53-bbbb2222 を指す。次のカットポイントで入れ替わる。"
+            "すぐ替えるなら /exit してから claude を打ち直す",
+        ),
+        (
+            {},
+            "relay-10.17.53-bbbb2222",
+            "不明（入れ替えの仕組みを持たない版）。/exit してから claude を打ち直すと、以後は版が見え、更新で入れ替わる",
+        ),
+        ({"relay_version_dir": None}, "relay-10.17.53-bbbb2222", "プラグインのキャッシュから起動（入れ替えない）"),
+    ],
+    ids=["same", "differs", "unknown", "cache"],
+)
+def test_status_shows_running_wrapper(mod, tmp_path, monkeypatch, capsys, row, current, expected):
+    """ラッパー経由の status は、動いているラッパーのバージョンディレクトリと複製との違いを示す（AC14・AC16）。"""
+    base = pathlib.Path(relay_common.config_dir())
+    for n in ("relay-10.17.52-aaaa1111", "relay-10.17.53-bbbb2222"):
+        (base / n).mkdir(parents=True)
+        (base / n / "MANIFEST").touch()
+    (base / "relay.current").write_text(current + "\n")
+    r = FakeRelayDir(tmp_path, child_pid=os.getppid())
+    (r.dir / "relay.pid").write_text("4321")
+    _start_row(r.dir, relay_version_dir="ignored-older-row")
+    _start_row(r.dir, **row)
+    monkeypatch.setenv("NDF_RELAY_DIR", str(r.dir))
+    try:
+        assert relay_install.cmd_status() == 0
+        lines = capsys.readouterr().out.splitlines()
+    finally:
+        r.release()
+    i = next(i for i, x in enumerate(lines) if x.startswith("ndf-relay: このセッション: ラッパー経由"))
+    assert lines[i + 1] == "ndf-relay: 動いているラッパー: " + expected
+
+
+def test_status_outside_relay_has_no_running_wrapper_line(mod, capsys):
+    assert relay_install.cmd_status() == 0
+    assert "動いているラッパー" not in capsys.readouterr().out
+
+
+# --- log.jsonl の最後の start の行を読む 2 つ（現状固定） ---
+
+
+def _write_log(d, *lines):
+    rows = [x if isinstance(x, str) else json.dumps(x, ensure_ascii=False) for x in lines]
+    (d / relay_common.LOG_FILE).write_text("".join(r + "\n" for r in rows))
+
+
+@pytest.mark.parametrize(
+    "lines,expected",
+    [
+        ([], None),
+        ([{"event": "end", "section": 4}, {"event": "mark_skipped", "section": 5}], None),
+        (
+            [
+                {"event": "start", "section": 1},
+                {"event": "end", "section": 1},
+                {"event": "start", "section": 2},
+                {"event": "stop", "section": 9},
+            ],
+            2,
+        ),
+        # 番号が整数でない start は飛ばし、その前の start まで遡る
+        (
+            [{"event": "start", "section": 1}, {"event": "start", "section": "2"}, {"event": "start"}, {"event": "start", "section": None}],
+            1,
+        ),
+        ([{"event": "start", "section": 0}, {"event": "start", "section": 1.5}], 0),
+        # 現状の記録: 真偽値は整数として通る
+        ([{"event": "start", "section": 1}, {"event": "start", "section": True}], True),
+        # 読めない行・空行・辞書でない行は飛ばす
+        ([{"event": "start", "section": 3}, "{broken", "", "[1, 2]", '"start"', "null"], 3),
+    ],
+)
+def test_current_section_reads_last_start_with_int_section(tmp_path, lines, expected):
+    _write_log(tmp_path, *lines)
+    got = relay_record.current_section(str(tmp_path))
+    assert got == expected and type(got) is type(expected)
+
+
+@pytest.mark.parametrize(
+    "lines,expected",
+    [
+        ([], (False, None)),
+        ([{"event": "end", "relay_version_dir": "relay-x"}], (False, None)),
+        ([{"event": "start", "section": 1, "relay_version_dir": "relay-a"}, {"event": "end"}], (True, "relay-a")),
+        ([{"event": "start", "relay_version_dir": "relay-a"}, {"event": "start", "relay_version_dir": "relay-b"}], (True, "relay-b")),
+        # キーの無い start が最後なら、前の start へは遡らない（current_section とは違う）
+        ([{"event": "start", "relay_version_dir": "relay-a"}, {"event": "start", "section": 2}], (False, None)),
+        ([{"event": "start", "relay_version_dir": "relay-a"}, {"event": "start", "relay_version_dir": None}], (True, None)),
+        ([{"event": "start", "relay_version_dir": 5}], (True, None)),
+        ([{"event": "start", "relay_version_dir": "relay-a"}, "{broken", "", "[1, 2]", "null"], (True, "relay-a")),
+    ],
+)
+def test_running_version_dir_reads_last_start_row(tmp_path, lines, expected):
+    _write_log(tmp_path, *lines)
+    assert relay_record.running_version_dir(str(tmp_path)) == expected
+
+
+def test_last_start_readers_without_log_file(tmp_path):
+    assert relay_record.current_section(str(tmp_path)) is None
+    assert relay_record.current_section(str(tmp_path / "missing")) is None
+    assert relay_record.running_version_dir(str(tmp_path)) == (False, None)
+    assert relay_record.running_version_dir(str(tmp_path / "missing")) == (False, None)
+
+
+# ---------- runtime.uv_path の現状固定 ----------
+
+
+def test_uv_path_prefers_forced_env(monkeypatch):
+    from relay_lib import runtime as relay_runtime
+
+    monkeypatch.setenv(relay_runtime.UV_ENV, "/forced/uv")
+    monkeypatch.setattr(relay_runtime.deps, "find_uv", lambda: pytest.fail("探さない"))
+    assert relay_runtime.uv_path() == "/forced/uv"
+
+
+def test_uv_path_uses_found_uv_without_installing(monkeypatch):
+    from relay_lib import runtime as relay_runtime
+
+    monkeypatch.delenv(relay_runtime.UV_ENV, raising=False)
+    monkeypatch.setattr(relay_runtime.deps, "find_uv", lambda: "/found/uv")
+    monkeypatch.setattr(relay_runtime.deps, "install_uv", lambda: pytest.fail("入れない"))
+    assert relay_runtime.uv_path() == "/found/uv"
+
+
+def test_uv_path_installs_when_missing(monkeypatch, capsys):
+    from relay_lib import runtime as relay_runtime
+
+    monkeypatch.delenv(relay_runtime.UV_ENV, raising=False)
+    monkeypatch.setattr(relay_runtime.deps, "find_uv", lambda: None)
+    monkeypatch.setattr(relay_runtime.deps, "install_uv", lambda: "/installed/uv")
+    assert relay_runtime.uv_path() == "/installed/uv"
+    assert "uv が無いため" in capsys.readouterr().err
+
+
+def test_uv_path_raises_when_install_fails(monkeypatch):
+    from relay_lib import runtime as relay_runtime
+
+    monkeypatch.delenv(relay_runtime.UV_ENV, raising=False)
+    monkeypatch.setattr(relay_runtime.deps, "find_uv", lambda: None)
+    monkeypatch.setattr(relay_runtime.deps, "install_uv", lambda: None)
+    with pytest.raises(relay_runtime.EnvUnavailable):
+        relay_runtime.uv_path()
+
+
+# ---------------------------------------------------------------- 条件の Skill の案内と承認待ちの差し戻し（#1492）
+
+
+def prompt_rows(t, n):
+    p = t.fake_dir / f"prompt-{t.starts()[n]['pid']}.jsonl"
+    return [json.loads(x) for x in p.read_text().splitlines()] if p.exists() else []
+
+
+def goal_context(t, n):
+    """区間 n の UserPromptSubmit hook（`hook.py goal-skill`）の案内の文。出なければ None。"""
+    rows = prompt_rows(t, n)
+    assert rows and all(r["code"] == 0 for r in rows)
+    out = rows[-1]["stdout"]
+    return json.loads(out)["hookSpecificOutput"]["additionalContext"] if out else None
+
+
+def test_cutpoint_next_section_is_told_to_load_the_condition_skill(term):
+    """受け入れ条件 1・4: ndf-next の中身の /goal の条件の Skill を、次の区間が読み込むよう案内される。最初の入力は同じ文面。"""
+    t = term()
+    t.wait_start(1)
+    t.type("mark /goal /ndf:development-workflow #895\r")
+    t.wait_start(2)
+    assert t.starts()[1]["argv"][-1] == "/goal /ndf:development-workflow #895"
+    assert events(t.rows(), "start")[1]["command"] == "/goal /ndf:development-workflow #895"
+    ctx = goal_context(t, 1)
+    assert ctx is not None and "`ndf:development-workflow`" in ctx and "`#895`" in ctx
+    t.type("quit 0\r")
+    t.finish()
+
+
+def test_limit_next_section_is_told_to_load_the_condition_skill(term, accounts):
+    """受け入れ条件 2・4: 未達の目標の会話が上限で切り替わると、--resume の最初の入力の /goal にも同じ案内が出る。"""
+    accounts.add("a", util5=10)
+    accounts.add("b", util5=30)
+    t = account_term(term, accounts)
+    t.wait_start(1)
+    t.type(f"tr {goal_row(met=False, at=iso_now(), condition='/ndf:development-workflow #895')}\r")
+    hit_limit(t, 0)
+    t.wait_start(2)
+    s0, s1 = t.starts()[:2]
+    assert s1["argv"][-3:] == ["--resume", f"s{s0['pid']}", "/goal /ndf:development-workflow #895"]
+    ctx = goal_context(t, 1)
+    assert ctx is not None and "`ndf:development-workflow`" in ctx and "`#895`" in ctx
+    no_secret(t)
+
+
+@pytest.mark.parametrize("body", ["/goal 引継ぎ文書の続きから", "/ndf:development-workflow #895"])
+def test_cutpoint_without_condition_skill_is_unchanged(term, body):
+    """受け入れ条件 5: 条件の先頭が Skill 名でない /goal と、/goal の無い ndf-next では、最初の入力も案内も今のまま。"""
+    t = term()
+    t.wait_start(1)
+    t.type(f"mark {body}\r")
+    t.wait_start(2)
+    assert t.starts()[1]["argv"] == [body]
+    assert goal_context(t, 1) is None
+    t.type("quit 0\r")
+    t.finish()
+
+
+def test_cutpoint_with_unknown_skill_still_starts(term):
+    """受け入れ条件 6: 導入されていない Skill でも次の区間は起動し、案内は見つからなければ続けると伝える。"""
+    t = term()
+    t.wait_start(1)
+    t.type("mark /goal /nosuch:skill #1\r")
+    t.wait_start(2)
+    assert t.starts()[1]["argv"] == ["/goal /nosuch:skill #1"]
+    ctx = goal_context(t, 1)
+    assert ctx is not None and "`nosuch:skill`" in ctx and "見つからなければ" in ctx
+    t.type("quit 0\r")
+    t.finish()
+
+
+WAIT_MSG = "設計 PR を作った。\n\n設計 PR の承認を待ちます。"
+
+
+def section_start(relay, section=1):
+    with open(relay.dir / "log.jsonl", "a") as f:
+        f.write(json.dumps({"event": "start", "at": iso_now(), "section": section}) + "\n")
+
+
+def held_reason(p):
+    assert p.returncode == 0, p.stderr
+    out = json.loads(p.stdout)
+    assert out["decision"] == "block"
+    return out["reason"]
+
+
+@pytest.mark.parametrize("active", [False, True])
+def test_prose_wait_holds_the_stop_once(relay, active):
+    """受け入れ条件 8・9・11: 本文の承認待ちで終えた応答を 1 度止め、直後の Stop は止めず、その次は再び止める。"""
+    section_start(relay, 3)
+    reason = held_reason(mark(relay.dir, stop_input(WAIT_MSG, stop_hook_active=active)))
+    assert reason == relay_mark.WAIT_REASON and "AskUserQuestion" in reason
+    quiet_ok(mark(relay.dir, stop_input(WAIT_MSG, stop_hook_active=True)))
+    held_reason(mark(relay.dir, stop_input("設計をマージしてよいでしょうか。", stop_hook_active=True)))
+    rows = log_rows(relay, "prose_wait")
+    assert [(r["section"], r["kind"]) for r in rows] == [(3, "承認待ち"), (3, "承認待ち")]
+    assert all(set(r) == {"event", "at", "section", "kind"} for r in rows)
+    assert not relay.next.exists()
+
+
+def test_prose_wait_does_nothing_outside_the_relay(relay):
+    """受け入れ条件 10: ラッパーの外と、直接の子でない会話では止めず、状態も作らない。"""
+    quiet_ok(mark(None, stop_input(WAIT_MSG)))
+    (relay.dir / "child.pid").write_text("1")
+    quiet_ok(mark(relay.dir, stop_input(WAIT_MSG)))
+    assert not (relay.dir / relay_common.WAIT_HELD_FILE).exists()
+    assert not log_rows(relay, "prose_wait")
+
+
+def test_prose_wait_ignores_a_reply_without_a_wait(relay):
+    section_start(relay)
+    quiet_ok(mark(relay.dir, stop_input("設計文書をコミットした。")))
+    assert not log_rows(relay, "prose_wait")
+
+
+def test_prose_wait_ignores_an_operation_instruction(relay):
+    """操作の案内の依頼形（「…再起動してください」）は回答・承認の待ちではないので止めない。承認の依頼は止める。"""
+    section_start(relay)
+    quiet_ok(mark(relay.dir, stop_input("更新を終えました。アプリを再起動してください。")))
+    assert not log_rows(relay, "prose_wait")
+    held_reason(mark(relay.dir, stop_input("設計 PR を作った。承認をお願いします。")))
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "設計 PR の内容の確認をお願いします。",
+        "A と B のどちらで進めるか選んでください。",
+        "方針を教えてください。",
+        "次にどのファイルを直すか教えてください。",
+    ],
+)
+def test_reply_wait_keeps_requests_that_ask_for_an_answer(text):
+    """依頼の語だけの文でも、操作の案内でなく回答・確認を求める文は待ちに残す。"""
+    assert relay_mark.wait_notice.classify_reply_wait(text) == relay_mark.wait_notice.ANSWER
+
+
+def test_reply_wait_drops_only_operation_instructions():
+    """操作の動詞（再起動・インストールなど）だけを案内する文は待ちに数えない。"""
+    for text in ("更新を終えました。アプリを再起動してください。", "依存を入れました。uv sync でインストールしてください。"):
+        assert relay_mark.wait_notice.classify_reply_wait(text) == relay_mark.wait_notice.NONE
+
+
+def test_prose_wait_ignores_a_reply_that_asked(relay):
+    """受け入れ条件 10: 質問の合図が在る Stop と、前の Stop より後に質問を出した Stop では止めない。"""
+    section_start(relay)
+    (relay.dir / "question").write_text("")
+    quiet_ok(mark(relay.dir, stop_input(WAIT_MSG)))
+    time.sleep(0.01)
+    (relay.dir / "asked").write_text(json.dumps({"at": iso_now()}))
+    quiet_ok(mark(relay.dir, stop_input(WAIT_MSG)))
+    # 質問がその前の Stop より前なら、本文の待ちで止める
+    time.sleep(0.01)
+    held_reason(mark(relay.dir, stop_input(WAIT_MSG)))
+
+
+def test_prose_wait_leaves_the_mark_alone(relay):
+    """I7: ndf-next と承認待ちの文を両方含む応答は合図を書いて止めない。合図が保留中に続いた応答も止めず、合図を残す。"""
+    section_start(relay)
+    quiet_ok(mark(relay.dir, stop_input(WAIT_MSG + "\n\n" + fence("/goal x"))))
+    assert json.loads(relay.next.read_text())["command"] == "/goal x"
+    quiet_ok(mark(relay.dir, stop_input(WAIT_MSG)))
+    assert json.loads(relay.next.read_text())["command"] == "/goal x"
+    assert not log_rows(relay, "prose_wait")
+
+
+def test_prose_wait_holds_even_when_the_log_cannot_be_written(relay):
+    """I8: log.jsonl に書けなくても差し戻しの文は出る。"""
+    (relay.dir / "log.jsonl").mkdir()
+    assert held_reason(mark(relay.dir, stop_input(WAIT_MSG))) == relay_mark.WAIT_REASON
+
+
+def test_prose_wait_passes_when_the_judgement_fails(relay, monkeypatch):
+    """I9: 判定が例外になったら止めない。"""
+
+    def boom(text):
+        raise RuntimeError("x")
+
+    monkeypatch.setattr(relay_mark.wait_notice, "classify_reply_wait", boom)
+    record = relay_record.RelayRecord(str(relay.dir))
+    assert relay_mark.prose_wait_reason(str(relay.dir), record, {"last_assistant_message": WAIT_MSG}, False) is None

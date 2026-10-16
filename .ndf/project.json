@@ -24,12 +24,68 @@
       {
         "name": "pytest",
         "runner": "pytest",
-        "command": "uv run --frozen --project . --all-extras pytest . -q -n 4",
-        "scope_command": "uv run --frozen --project . --all-extras pytest {paths} -q -n 4",
+        "command": "uv run --frozen --project . --all-extras pytest . -q -n 4 -o junit_family=xunit1 --junitxml=.ndf/tmp/junit.xml",
+        "scope_command": "uv run --frozen --project . --all-extras pytest {paths} -q -n 4 -o junit_family=xunit1 --junitxml=.ndf/tmp/junit.xml",
+        "junit": ".ndf/tmp/junit.xml",
         "needs": [],
         "paths": [
           "."
+        ],
+        "ci_jobs": [
+          ".github/workflows/pytest.yml"
         ]
+      },
+      {
+        "name": "script-structure",
+        "runner": "check-script-structure",
+        "kind": "lint",
+        "command": "python3 scripts/check-script-structure.py",
+        "scope_command": "python3 scripts/check-script-structure.py {paths}",
+        "needs": [],
+        "paths": [
+          "plugins/ndf",
+          "scripts/script-structure-allow",
+          "scripts/check-script-structure.py"
+        ],
+        "ci_jobs": [
+          ".github/workflows/script-structure.yml"
+        ]
+      },
+      {
+        "name": "lint",
+        "runner": "check-lint",
+        "kind": "lint",
+        "command": "bash scripts/check-lint.sh",
+        "scope_command": "bash scripts/check-lint.sh -- {paths}",
+        "needs": [],
+        "paths": [
+          "."
+        ],
+        "ci_jobs": [
+          ".github/workflows/lint.yml"
+        ]
+      }
+    ],
+    "ci_exempt": [
+      {
+        "job": ".github/workflows/glossary.yml",
+        "reason": "Pull Request の差分と head のブランチ名で語の規則を選ぶ。項目のコミットだけでは判定が決まらない"
+      },
+      {
+        "job": ".github/workflows/pr-base-guard.yml",
+        "reason": "Pull Request の宛先を見る。項目の変更で結果が変わらない"
+      },
+      {
+        "job": ".github/workflows/pr-body-decisions.yml",
+        "reason": "Pull Request の本文を見る。項目の変更で結果が変わらない"
+      },
+      {
+        "job": ".github/workflows/runtime-plugin-authenticated-smoke.yml",
+        "reason": "手動で起動し、秘密を使う"
+      },
+      {
+        "job": ".github/workflows/runtime-plugin-smoke.yml",
+        "reason": "4 つのランタイムの CLI を入れて動かす。手元の検証の時間に収まらない"
       }
     ]
   },

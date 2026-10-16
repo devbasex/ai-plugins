@@ -5,7 +5,9 @@
 
 from __future__ import annotations
 
+import functools
 import hashlib
+import importlib.util
 import os
 import re
 import shutil
@@ -15,6 +17,7 @@ import tempfile
 import time
 from pathlib import Path
 
+import worktree_deps
 from supervise_lib import decl, plan as plan_mod
 
 SELF = Path(__file__).resolve().parent.parent / "supervise.py"
@@ -25,7 +28,23 @@ DRIVES = {
     "cross-review": SKILLS / "cross-review" / "scripts" / "drive.py",
     "cross-refactoring": SKILLS / "cross-refactoring" / "scripts" / "drive.py",
 }
+REFACTOR_VOCABULARY = DRIVES["cross-refactoring"].parent / "refactor_lib" / "vocabulary.py"
 EXTERNAL_AI = SKILLS / "external-ai" / "scripts" / "external-ai.py"
+
+
+@functools.cache
+def _refactor_vocabulary():
+    spec = importlib.util.spec_from_file_location("ndf_refactor_vocabulary", REFACTOR_VOCABULARY)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def default_refactor_budget_minutes() -> int:
+    """cross-refactoring の既定の想定最大時間（分）。値を写さず、cross-refactoring の定数を読む（#1916 の決定 8）。"""
+    return _refactor_vocabulary().DEFAULT_BUDGET_MINUTES
+
+
 HERE = SELF.parent  # 配布したスクリプトの置き場。計画のコマンドはここからの絶対パスで書く
 # run のステップの定型（"preset"）。作業場所（リポジトリの根）で動く。{base} は起点のブランチ
 PRESETS = {
@@ -35,9 +54,8 @@ PRESETS = {
 }
 
 
-def with_paths(cmd: str, paths: str) -> str:
-    """テストのコマンドの {paths} を範囲に置き換える。{paths} が無ければ末尾に足す。"""
-    return cmd.replace("{paths}", paths) if "{paths}" in cmd else f"{cmd} {paths}"
+# テストの実行の入口（#1334）。範囲テスト（scope）と全体テスト（whole）を、宣言の戦略に沿って走らせる
+TEST_RUN_PY = f"python3 {HERE / 'test-run.py'}"
 
 
 WORKTREE_LOCK_RETRIES = 5  # .git/config の lock で落ちたときのやり直しの回数
@@ -48,28 +66,27 @@ def is_config_lock(stderr: str) -> bool:
     return "could not lock config file" in stderr or "File exists" in stderr
 
 
-def ensure_worktree(plan: dict, sleep=time.sleep) -> str | None:
-    """計画に branch があり作業場所が無ければ、作業ツリーを作る。誤りの文を返す（無ければ None）。
+def _prepare_deps(wt, **kw) -> str | None:
+    """依存を用意し、失敗したら誤りの文を返す（`worktree_deps.prepare_reporting` の先頭行を包む）。"""
+    err = worktree_deps.prepare_reporting(wt, **kw)
+    return f"作業ツリーは作ったが依存の用意に失敗した: {err}" if err else None
 
-    run と queue の両方が使う。同時に作ると .git/config の lock で落ちるので、そのときは
-    WORKTREE_LOCK_WAIT 秒おきに WORKTREE_LOCK_RETRIES 回までやり直す。
-    """
-    plan = plan_mod.normalize_plan(dict(plan))
-    branch = plan.get("branch")
-    wt = Path(plan["作業場所"])
-    if not branch or wt.exists():
-        return None
-    repo = plan.get("リポジトリ") or (str(wt).split("/.worktrees/")[0] if "/.worktrees/" in str(wt) else None)
-    if not repo:
-        return "作業ツリーの元のリポジトリが分からない（計画に リポジトリ を書く）"
+
+def _resolve_base(plan: dict, repo: str) -> tuple[str | None, str | None]:
+    """作業ツリーの起点（起点 → base_branch → 宣言の順）を決め、origin なら fetch する。(起点, 誤りの文) を返す。"""
     base = plan.get("起点")
     if not base:
         b = plan.get("base_branch") or decl.declared_base_of([repo])
         if not b:
-            return "作業ツリーの起点が分からない（計画の 起点 か base_branch、または .ndf/worktree.json の base_branch）"
+            return None, "作業ツリーの起点が分からない（計画の 起点 か base_branch、または .ndf/worktree.json の base_branch）"
         base = f"origin/{b}"
     if base.startswith("origin/"):
         subprocess.run(["git", "-C", repo, "fetch", "-q", "origin"], capture_output=True, text=True)
+    return base, None
+
+
+def _add_worktree_with_retry(repo: str, wt: Path, branch: str, base: str, sleep) -> subprocess.CompletedProcess:
+    """作業ツリーを作る。.git/config の lock で落ちたら途中の生成物を片付けてやり直す。最後の結果を返す。"""
     p = None
     for i in range(WORKTREE_LOCK_RETRIES + 1):
         if i:
@@ -82,26 +99,65 @@ def ensure_worktree(plan: dict, sleep=time.sleep) -> str | None:
         )
         cmd = ["git", "-C", repo, "worktree", "add", "-q"] + ([str(wt), branch] if has else ["-b", branch, str(wt), base])
         p = subprocess.run(cmd, capture_output=True, text=True)
-        if p.returncode == 0:
-            return None
-        if not is_config_lock(p.stderr):
-            break
+        if p.returncode == 0 or not is_config_lock(p.stderr):
+            return p
         # lock で途中まで作られた作業ツリーは、次のやり直しの前に片付ける
         subprocess.run(["git", "-C", repo, "worktree", "prune"], capture_output=True, text=True)
         if wt.exists() and not any(wt.iterdir()):
             wt.rmdir()
+    return p
+
+
+def ensure_worktree(plan: dict, sleep=time.sleep) -> str | None:
+    """計画に branch があり作業場所が無ければ、作業ツリーを作る。誤りの文を返す（無ければ None）。
+
+    run と queue の両方が使う。同時に作ると .git/config の lock で落ちるので、そのときは
+    WORKTREE_LOCK_WAIT 秒おきに WORKTREE_LOCK_RETRIES 回までやり直す。
+    """
+    plan = plan_mod.normalize_plan(dict(plan))
+    branch = plan.get("branch")
+    wt = Path(plan["作業場所"])
+    if not branch:
+        return None
+    if wt.exists():
+        # 使い回す作業ツリーは、依存の用意が済んでいなければ用意する（#1337）
+        return _prepare_deps(wt, if_unprepared=True)
+    repo = plan.get("リポジトリ") or (str(wt).split("/.worktrees/")[0] if "/.worktrees/" in str(wt) else None)
+    if not repo:
+        return "作業ツリーの元のリポジトリが分からない（計画に リポジトリ を書く）"
+    base, err = _resolve_base(plan, repo)
+    if err:
+        return err
+    p = _add_worktree_with_retry(repo, wt, branch, base, sleep)
+    if p.returncode == 0:
+        return _prepare_deps(wt, main_dir=repo)
     return f"作業ツリーを作れない: {p.stderr.strip()[:300]}"
 
 
 MERGE_CMD = f"python3 {HERE / 'merged-steps.py'} merge-when-green {{pr}}"
+MERGE_GATE_CMD = f"python3 {HERE / 'merged-steps.py'} merge-gate --pr {{pr}}"  # 宛先は PR から読む（プランの途中で宛先が変わる）
 # マージの待ちのステップの一次の調査（遅れたとき PR のチェックを分け、取り残しを再実行する）
 MERGE_PROBE = {"cmd": f"python3 {HERE / 'merged-steps.py'} probe --pr {{pr}} --act"}
 CHECK_PY = f"python3 {HERE / 'check-trigger.py'}"
+# 検査のプランが cross-refactoring へ渡す範囲を PR の差分と宣言から組む（#1484）
+REFACTOR_SCOPE_PY = f"python3 {HERE / 'refactor-scope.py'}"
 MVV_PY = f"python3 {HERE / 'mvv-gate.py'}"
+SPRINT_STATE_PY = f"python3 {HERE / 'sprint-state.py'}"
 GLOSSARY_PY = f"python3 {HERE / 'glossary.py'}"
 SPEC_COPY_PY = f"python3 {HERE / 'spec-copy.py'}"
+# 完了判定の設計との突き合わせ（確認 (a) tests・確認 (b) specs。#1241）
+DESIGN_MATCH_PY = f"python3 {HERE / 'design-match.py'}"
+DECISIONS_SH = HERE / "pr-body-decisions.sh"  # 設計の PR の本文の「決めたこと」を設計文書の決定へ合わせる
 # 設計の PR の本文の「決めたこと」を設計文書の決定へ合わせてから push する（CI の pr-body-decisions が見る）
-PUSH_DESIGN = f"git push -q && bash {HERE / 'pr-body-decisions.sh'} sync {{pr}}"
+PUSH_DESIGN = f"git push -q && bash {DECISIONS_SH} sync {{pr}}"
+# PR を送ってから Draft を外す。push が落ちたら gh pr ready へ進まず止まる（`;` でつなぐと落ちても ready になる。#1908）
+READY = "sh -c 'git push -q && gh pr ready {pr}'"
+# 設計のプランの Draft 外し。push は直前の push-glossary（on_fail 無し）が済ませ、落ちればここへ来ない。
+# レビューの駆動が落ちた経路では別の場所の直しに追いついていない HEAD を送らない
+DESIGN_READY = "gh pr ready {pr}"
+# PR を作った直後に本文の「決めたこと」を確かめる。pr のステップ（decisions）が作る時点で揃えるため、
+# 揃っていれば書き込まず（本文の編集で CI を再起動しない）、揃わなかったときだけ直す
+SYNC_DESIGN_BODY = f"bash {DECISIONS_SH} sync {{pr}}"
 STEPS_PY = f"python3 {HERE / 'release-steps.py'}"
 VERIFY_PY = f"python3 {HERE / 'release-verification-steps.py'}"
 MERGED_PY = f"python3 {HERE / 'merged-steps.py'}"
@@ -111,6 +167,11 @@ WORKTREE_SETUP = SELF.parent / "worktree-setup.sh"
 def report_result(text: str) -> str:
     m = re.search(r"^- 結果: (\S+)", text, re.M)
     return m.group(1) if m else "不明"
+
+
+def is_dir_entry(path: str, root: str) -> bool:
+    """`触るファイル` の 1 行がディレクトリか（末尾が `/` か、`root` の下の既存のディレクトリ。#1674）。"""
+    return str(path).endswith("/") or (Path(root) / str(path)).is_dir()
 
 
 def state_dir_of(plan: str) -> Path:

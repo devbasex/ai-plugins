@@ -129,7 +129,6 @@ def test_a_commit_with_an_attribution_paragraph_passes_the_implement_check(gitfa
     problem = cmd_implement._implement_problem(
         {"id": "I-001", "estimated_diff_lines": 100, "technique": "extract_method"},
         facts,
-        ["src"],
         [],
         {"worktrees": {"work": str(repo)}},
     )
@@ -145,7 +144,6 @@ def test_a_commit_without_the_item_trailer_is_rejected(gitfacts, cmd_implement, 
     problem = cmd_implement._implement_problem(
         {"id": "I-001", "estimated_diff_lines": 100, "technique": "extract_method"},
         facts,
-        ["src"],
         [],
         {"worktrees": {"work": str(repo)}},
     )

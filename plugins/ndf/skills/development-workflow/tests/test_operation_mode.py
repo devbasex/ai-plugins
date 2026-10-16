@@ -13,9 +13,8 @@ from __future__ import annotations
 
 import re
 
-from workflow_helpers import LIB, SKILL_DIR, run_lib
+from workflow_helpers import LIB, run_lib
 
-PROJECTS_COMMON = SKILL_DIR.parents[1] / "scripts" / "lib" / "projects-common.sh"
 
 EXPECTED_MODES = ["light", "operation", "legacy-refactor", "standard", "documentation"]
 
@@ -149,13 +148,3 @@ def test_stage_class_rejects_an_unknown_stage_without_output() -> None:
     result = run_lib('wf_stage_class operation "存在しない工程"')
     assert result.returncode == 1
     assert result.stdout == ""
-
-
-# --- ボードの値 ----------------------------------------------------------------
-
-
-def test_the_board_accepts_the_new_mode() -> None:
-    body = PROJECTS_COMMON.read_text(encoding="utf-8")
-    found = re.search(r"PJ_MODES=\$'([^']*)'", body)
-    assert found, f"モードの一覧を読み取れない: {PROJECTS_COMMON}"
-    assert found.group(1).split("\\n") == EXPECTED_MODES

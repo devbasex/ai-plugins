@@ -14,8 +14,8 @@ NDF プラグイン v6.1.0 までは NDF に同梱していました。**Skill �
 | --- | --- |
 | `playwright-planning` | ページ役割を判定し、チェックリストとテスト技法を選ぶ |
 | `playwright-authoring` | E2E スクリプトを書き、動画 / trace 付きで実行する |
-| `playwright-evidence` | テスト報告書を生成し、証跡を Google Drive へ保管する |
-| `playwright-kit-ops` | `playwright_kit` のスクリプト（init、ページ役割分類、a11y / CWV スキャン、Drive アップロード）を実行する |
+| `playwright-evidence` | テスト報告書を生成し、証跡を `reports/<run-id>/` にまとめる |
+| `playwright-kit-ops` | `playwright_kit` のスクリプト（init、ページ役割分類、a11y / CWV スキャン）を実行する |
 
 `playwright-kit-ops` は Python パッケージ本体（`pyproject.toml` / `uv.lock` / `tests/`）を
 同梱しており、この 4 個のうち最も大きい配布物です。
@@ -54,18 +54,7 @@ bash plugins/playwright-kit/dev.kiro/install.sh --dry-run
 NDF の installer と違い、エージェント定義・常時指示・プロンプト・フックは扱いません
 （このプラグインは Skill だけを配ります）。
 
-## v2.0.6 へ更新するとき
-
-**証跡リンクの置換が働かない状態を直しました（#81）。** テストの報告書を共有ストレージ上の
-文書へ変換するとき、報告書に書かれた証跡のファイル位置が URL へ書き換わらず、変換した文書から
-証跡へたどり着けませんでした。
-
-拾う対象を、行頭の `- trace: ` / `- HAR: ` に続くコード表記と、リンク記法のリンク先の 2 つに
-しました。ケースのディレクトリ名が `TC-` で始まる必要はありません。共有ストレージ側の一覧に
-載っている位置だけを書き換えるため、テストの失敗メッセージに現れるファイル位置や外部の URL は
-そのまま残ります。
-
-報告書を作る側の出力は変えていません。Skill の名前と数も変えていません（4 個）。
+### 更新
 
 ```bash
 # Claude Code
@@ -79,6 +68,10 @@ codex plugin add playwright-kit@ai-plugins
 # Kiro CLI
 bash plugins/playwright-kit/dev.kiro/install.sh
 ```
+
+## 更新情報
+
+版ごとの変更と移行の手順は [CHANGELOG.md](https://github.com/devbasex/ai-plugins/blob/main/CHANGELOG.md) の `[playwright-kit <版>]` の節にあります。
 
 ## NDF との関係
 

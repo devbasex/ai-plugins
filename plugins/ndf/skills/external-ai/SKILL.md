@@ -28,7 +28,7 @@ description: "Delegate coding, review, or research to the codex, agy, kiro-cli, 
 ## NDF との関係
 
 - Claude Code 版の `corder` エージェントは Codex CLI を呼び出す
-- `/ndf:pr-review <PR番号> codex` / `/ndf:pr-review <PR番号> agy` の委譲先として利用される
+- `/ndf:pr-review <PR番号> codex` / `agy` は `pr-review-steps.py delegate` が `external-ai.py run --phase review` で起動する。外部 AI は指摘ファイルを書くだけで、投稿は `pr-review-steps.py` が行う
 - `/ndf:cross-review` は codex / agy を**並列に起動**して両者の APPROVE 収束を待つ
 - v4.0.0 で Codex MCP サーバは廃止。`mcp__codex__*` ツールは存在しない
 - agy 専用エージェントは未整備。委譲時はメインエージェントから本スキルを参照して直接 CLI を起動する
@@ -58,7 +58,7 @@ description: "Delegate coding, review, or research to the codex, agy, kiro-cli, 
 | 承認の与え方 | `--dangerously-bypass-approvals-and-sandbox` | `--dangerously-skip-permissions`（**作業領域の外への書き込みは止まらない**） | `--trust-all-tools`（**絞り込みは防御にならない**） | `--permission-mode acceptEdits` + `--allowed-tools` |
 | 非対話実行 | `codex exec` で完結。プロンプトは**標準入力必須** | `-p=<本文>` で渡す。**標準入力は受け取らない** | `chat --no-interactive` | `-p` |
 | 完了判定 | stderr の `^tokens used$` sentinel | プロセス終了（`kill -0` / `wait`） | **終了コードは使えない。** 結果ファイルと stderr の照合 | JSON の `is_error` / `subtype` |
-| 実測モデルの取得 | できない | できない | **できない**（既定 `auto` は特に不可） | `modelUsage` から取れる |
+| 実測モデルの取得 | セッションの記録（`$CODEX_HOME/sessions`）から取れる | できない | **できない**（`auto` が選んだモデルは返らない） | `modelUsage` から取れる |
 | 典型実行時間 | 5〜10 分 | 数十秒〜5 分 | 数分 | 数分（29 ターンで 218 秒の実測） |
 | 強み | コード逐語照合、長時間の深い調査 | 横断調査、長文生成、軽量タスク。作業領域を明示的に区切れる | claude 系 / gpt 系のモデルを同じハーネスで選べる | 手順書（Skill）への追従が最も安定 |
 | 弱み | セットアップ・運用が煩雑 | 高難度コード解析でやや浅くなることがある | **Skill を配置しても本文を読まない**（明示パスが必須） | 実行コストが高い（1 件 1.42 ドルの実測） |
@@ -107,9 +107,14 @@ LLM が決めるのは **どの CLI に渡すか**（上の表）と **プロン
 | `stopped` | `timeout` / `stalled` | 読むファイルを絞るか観点を分けて渡し直す |
 | `stopped` | `usage_limit` | 同じ CLI では解けない。別の CLI へ渡す |
 | `stopped` | `auth` / `missing_cli` | 補助ファイルのログイン・インストールの手順を行う（終了コード 3） |
+| `stopped` | `policy` | リポジトリのランタイムの宣言（`.ndf/runtimes.json`）の外。CLI を起動していない。`metrics.reason` を読み、宣言の中の CLI へ渡す（終了コード 3） |
 | `stopped` | `early_error` / `launch_failed` | `metrics.detail` を読む |
 
-- 使えるかだけを先に知りたいときは `external-ai.py check <runtime>`（CLI の有無と認証）
+- 使えるかだけを先に知りたいときは `external-ai.py check <runtime>`（CLI の有無・認証・モデルを 1 回引けるか。
+  cross-review / cross-refactoring の `init` と同じ確認）。通らなければ `auth` で終わり、`metrics.reason` に理由の語
+  （`auth_expired` / `model_unavailable` など）が入る。設定のモデルを引けず既定のモデルで通ったときは
+  `metrics.default_model` にその名前が入るので、続く `run` に `--model <その名前>` を渡す（`next` に案内が出る）。
+  `run` は起動の前に認証確認だけを行う
 - 上限は `limits.py` の工程の値（`--phase`）で、`--timeout` / `--stall-timeout` で狭められる。
   上限を超えると CLI を止めて必ず終わる
 - 回収は結果ファイル → stdout（claude は JSON の `result`、kiro は ANSI を除く） → stderr の末尾の順で、
@@ -205,6 +210,7 @@ CLI 固有の症状（サンドボックス失敗、承認モードによるハ�
 | `timeout` / `stalled` で終わる | 調査範囲が広すぎる、探索ループに入った | 読むべきファイルを明示リスト化し、スコープ外を明記して渡し直す |
 | 「ファイルを読めません」と返る | 相対パス指定で cwd が想定と違う | プロンプトには**絶対パス**を書き、`--workdir` を渡す |
 | `auth` で終わる | ログインセッション失効 | 各 CLI のログイン手順をやり直す（補助ファイル参照） |
+| `check` が `auth` で `metrics.reason` が `model_unavailable` | 設定のモデルをその利用者か CLI の版が使えず、既定のモデルでも引けない | CLI を更新するか、設定のモデルを直す |
 
 ## 既知の制約とコスト
 
@@ -225,6 +231,6 @@ CLI 固有の症状（サンドボックス失敗、承認モードによるハ�
 - [references/cli-claude.md](references/cli-claude.md) — `claude -p` 固有の手順
 - `/ndf:cross-review` — codex / agy 両方を並列起動して APPROVE 収束まで回す
 - `/ndf:cross-refactoring` — 4 CLI を役割ごとに分担させ、リファクタリングを収束させる
-- `/ndf:pr-review` — 第二引数に `codex` / `agy` を指定すると本スキルの手順へ委譲する
+- `/ndf:pr-review` — 第二引数に `codex` / `agy` を指定すると、`pr-review-steps.py delegate` が本スキルの `run --phase review` を呼ぶ
 - Claude Code 版 `corder` エージェント — 本スキルの手順で Codex CLI を呼び出す独立レビュー担当
 - 他の AI CLI（`claude`, `ollama` 等）も同じパターンで利用できる

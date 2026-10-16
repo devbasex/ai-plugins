@@ -57,6 +57,23 @@ def _sleep_cmd(n, limit, loop, depth) -> bool:
         subs = [c] if c.type in SUBST else list(_substs(c))
         if any(_sleep(s, limit, loop, False, depth) for s in subs):
             return True
+    i = _command_start(words)
+    if i >= len(words):
+        return False
+    name, rest = words[i], words[i + 1 :]
+    if name == "sleep" and rest:
+        sec = seconds(rest[0])
+        return loop or (sec is not None and sec > limit)
+    if name in SHELLS:
+        target = _shell_c_target(rest)
+        return target is not None and sleep_deny(target, limit, loop, depth + 1)
+    if name == "eval":
+        return sleep_deny(" ".join(rest), limit, loop, depth + 1)
+    return False
+
+
+def _command_start(words: list) -> int:
+    """ラッパー語とそのオプション・秒数・代入を読み飛ばし、実コマンド名の添字を返す。"""
     i = 0
     while i < len(words):
         w = words[i]
@@ -66,25 +83,20 @@ def _sleep_cmd(n, limit, loop, depth) -> bool:
                 i += 1
             continue
         break
-    if i >= len(words):
-        return False
-    name, rest = words[i], words[i + 1 :]
-    if name == "sleep" and rest:
-        sec = seconds(rest[0])
-        return loop or (sec is not None and sec > limit)
-    if name in SHELLS:
-        j = 0
-        while j < len(rest) and rest[j][:1] in "-+":
-            if SHELL_OPT_WITH_ARG.fullmatch(rest[j]):
-                j += 2
-                continue
-            if rest[j].startswith("-") and "c" in rest[j].lstrip("-") and not rest[j].startswith("--"):
-                return j + 1 < len(rest) and sleep_deny(rest[j + 1], limit, loop, depth + 1)
-            j += 1
-        return False
-    if name == "eval":
-        return sleep_deny(" ".join(rest), limit, loop, depth + 1)
-    return False
+    return i
+
+
+def _shell_c_target(rest: list):
+    """シェルの引数から `-c` に渡すコマンド文字列を取り出す。`-c` が無い・続く語が無いときは None。"""
+    j = 0
+    while j < len(rest) and rest[j][:1] in "-+":
+        if SHELL_OPT_WITH_ARG.fullmatch(rest[j]):
+            j += 2
+            continue
+        if rest[j].startswith("-") and "c" in rest[j].lstrip("-") and not rest[j].startswith("--"):
+            return rest[j + 1] if j + 1 < len(rest) else None
+        j += 1
+    return None
 
 
 def _substs(n):

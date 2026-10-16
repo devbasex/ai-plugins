@@ -8,26 +8,23 @@
 from __future__ import annotations
 
 import datetime as _dt
-import io
 import json
 import re
-import statistics
 import subprocess
 import time
-import xml.etree.ElementTree as ET
-import zipfile
 
+import ci_workflows
+import estimate_stats as stats
+import junit
 import repo as repo_id
 import run_metrics
 
 from .measure_repo import Tree, measured, question, unknown, url_hosts
 
 CALL_LIMIT = 30.0
-ARTIFACT_BYTES = 50 * 1024 * 1024
-JUNIT_NAME = re.compile(r"junit|test-?result|test-?report|phpunit|pytest|jest|vitest", re.I)
 TEST_STEP = re.compile(r"(?<![a-z])test|pytest|phpunit|jest|vitest|rspec", re.I)
 RECORD_NAME = "cross-refactoring-allocation.jsonl"
-RECORD_ROWS = 10
+CANDIDATE_RUNS = 5  # ワークフローごとに代表を探す成功の run の上限（I5。前の頁は取りに行かない）
 
 
 class GhUnavailable(Exception):
@@ -85,69 +82,21 @@ def _span(start, end) -> float | None:
 
 
 def workflow_jobs(tree: Tree) -> dict[str, int]:
-    """ワークフローのファイル → `jobs:` の直下の job の数（YAML を読まずに字下げで拾う）。"""
-    out = {}
-    for f in sorted(p for p in tree.files if re.match(r"\.github/workflows/[^/]+\.ya?ml$", p)):
-        n, inside, indent = 0, False, None
-        for line in (tree.read(f) or "").splitlines():
-            if not line.strip() or line.lstrip().startswith("#"):
-                continue
-            lead = len(line) - len(line.lstrip())
-            if lead == 0:
-                inside = line.rstrip() == "jobs:"
-                continue
-            if inside:
-                indent = lead if indent is None else indent
-                if lead == indent and line.strip().endswith(":"):
-                    n += 1
-        out[f] = n
-    return out
-
-
-def junit_seconds(xml_bytes: bytes) -> float | None:
-    """JUnit の XML 1 本の直列の所要（根の `time`、無ければ直下の `testsuite` の `time` の合計）。"""
-    try:
-        root = ET.fromstring(xml_bytes)
-    except ET.ParseError:
-        return None
-    if root.get("time"):
-        try:
-            return float(root.get("time"))
-        except ValueError:
-            return None
-    total = 0.0
-    for child in root.findall("testsuite"):
-        try:
-            total += float(child.get("time") or 0)
-        except ValueError:
-            continue
-    return total if root.findall("testsuite") else None
+    """ワークフローのファイル → `jobs:` の直下の job の数（YAML を読まずに字下げで拾う。`ci_workflows.job_ids`）。"""
+    files = sorted(p for p in tree.files if ci_workflows.WORKFLOW_PATH.match(p))
+    return {f: len(ci_workflows.job_ids(tree.read(f) or "")) for f in files}
 
 
 def _junit_of_run(gh: Gh, run: dict) -> dict | None:
-    arts = (gh.get(f"repos/{gh.repo}/actions/runs/{run['id']}/artifacts?per_page=100") or {}).get("artifacts") or []
-    picked = [a for a in arts if JUNIT_NAME.search(a.get("name", "")) and not a.get("expired")]
-    if not picked:
+    """run の成果物の JUnit（`lib/junit.py` の読み取り。名前の規則は `junit.JUNIT_NAME`）の直列の合計。"""
+    seconds = [s for s in (junit.total_seconds(xml) for xml in junit.artifact_xmls(gh.get, gh.raw, gh.repo, run["id"])) if s is not None]
+    if not seconds:
         return None
-    total, files, size = 0.0, 0, 0
-    for a in picked:
-        size += int(a.get("size_in_bytes") or 0)
-        if size > ARTIFACT_BYTES:
-            break
-        data = gh.raw(f"repos/{gh.repo}/actions/artifacts/{a['id']}/zip")
-        try:
-            with zipfile.ZipFile(io.BytesIO(data)) as z:
-                for name in z.namelist():
-                    if name.lower().endswith(".xml"):
-                        sec = junit_seconds(z.read(name))
-                        if sec is not None:
-                            total += sec
-                            files += 1
-        except zipfile.BadZipFile:
-            continue
-    if not files:
-        return None
-    return {"seconds": round(total, 1), "source": "ci-junit", "detail": f"run {run['id']}（{run.get('path')}）の JUnit {files} 本の合計"}
+    return {
+        "seconds": round(sum(seconds), 1),
+        "source": "ci-junit",
+        "detail": f"run {run['id']}（{run.get('path')}）の JUnit {len(seconds)} 本の合計",
+    }
 
 
 def _steps_of(jobs: list[dict], run: dict) -> dict | None:
@@ -165,7 +114,7 @@ def _steps_of(jobs: list[dict], run: dict) -> dict | None:
 
 
 def ndf_record(repo: str | None) -> dict | None:
-    """同じ機械の NDF の実行の記録の `whole_test.init` の直近 10 件の中央値（決定 9）。"""
+    """同じ機械の NDF の実行の記録の、実行の行の `whole_test.init` の直近 10 件の中央値（決定 9）。"""
     if not repo:
         return None
     f = run_metrics.metrics_dir() / repo_id.slug(repo) / RECORD_NAME
@@ -176,16 +125,20 @@ def ndf_record(repo: str | None) -> dict | None:
         return None
     for line in lines:
         try:
-            v = (json.loads(line).get("whole_test") or {}).get("init")
+            row = json.loads(line)
+            # 着手前のテストの行（`kind: init_test`。cross-refactoring の #1385）は全体テストの所要に数えない
+            if row.get("kind", "run") != "run":
+                continue
+            v = (row.get("whole_test") or {}).get("init")
         except (ValueError, AttributeError):
             continue
         if isinstance(v, (int, float)) and v > 0:
             values.append(float(v))
-    values = values[-RECORD_ROWS:]
+    values = stats.recent(values)
     if not values:
         return None
     return {
-        "seconds": round(statistics.median(values), 1),
+        "seconds": round(stats.median_value(values), 1),
         "source": "ndf-record",
         "detail": f"NDF の実行の記録の直近 {len(values)} 件の中央値",
     }
@@ -194,17 +147,41 @@ def ndf_record(repo: str | None) -> dict | None:
 def _required_checks(gh: Gh, branch: str | None) -> list[str]:
     if not branch:
         return []
-    out = []
     try:
         rules = gh.get(f"repos/{gh.repo}/rules/branches/{branch}") or []
     except GhUnavailable as e:
         if str(e) == "時間切れ":
             raise
         rules = []
-    for r in rules if isinstance(rules, list) else []:
-        if r.get("type") == "required_status_checks":
-            out += [c.get("context") for c in (r.get("parameters") or {}).get("required_status_checks") or [] if c.get("context")]
-    return sorted(set(out))
+    try:
+        return ci_workflows.required_contexts(rules) or []
+    except ValueError:
+        return []
+
+
+def _test_duration(durations: list[dict], ci_reason: str | None) -> dict:
+    """測れた所要の候補があれば measured、無ければ unknown。"""
+    if durations:
+        return measured({"measured": durations})
+    return unknown(ci_reason or "CI に JUnit もテストの step も無く、NDF の実行の記録も無い")
+
+
+def _measure_merges(gh: Gh, repo: str) -> tuple[dict[str, int], list[str]]:
+    """閉じた PR の宛先別のマージ数と、本文に出たホスト名。"""
+    pulls = gh.get(f"repos/{repo}/pulls?state=closed&per_page=100") or []
+    merges: dict[str, int] = {}
+    hosts: set[str] = set()
+    for pr in pulls:
+        if pr.get("merged_at"):
+            ref = (pr.get("base") or {}).get("ref")
+            merges[ref] = merges.get(ref, 0) + 1
+        hosts |= url_hosts(pr.get("body") or "")
+    return merges, sorted(hosts)
+
+
+def _measure_github_issues(gh: Gh, repo: str) -> int:
+    issues = gh.get(f"repos/{repo}/issues?state=all&per_page=100") or []
+    return sum(1 for i in issues if "pull_request" not in i)
 
 
 def measure_ci(tree: Tree, repo: str | None, head: str | None, deadline: float) -> dict:
@@ -216,59 +193,85 @@ def measure_ci(tree: Tree, repo: str | None, head: str | None, deadline: float) 
     if not repo:
         reason = "origin が GitHub のリポジトリを指していない"
         out["ci"] = unknown(reason)
-        out["test_duration"] = measured({"measured": durations}) if durations else unknown(reason)
+        out["test_duration"] = _test_duration(durations, reason)
         return out
     gh = Gh(tree.root, repo, deadline)
     try:
-        ci, found = _measure_runs(gh, jobs_static, head)
+        ci, found, notes = _measure_runs(gh, jobs_static, head)
         out["ci"] = measured(ci)
         durations += found
+        out["notes"] += notes
     except GhUnavailable as e:
         out["ci"] = unknown(str(e))
         out["notes"].append(f"CI を測れない: {e}")
-    out["test_duration"] = (
-        measured({"measured": durations})
-        if durations
-        else unknown(out["ci"].get("reason") or "CI に JUnit もテストの step も無く、NDF の実行の記録も無い")
-    )
+    out["test_duration"] = _test_duration(durations, out["ci"].get("reason"))
     try:
-        pulls = gh.get(f"repos/{repo}/pulls?state=closed&per_page=100") or []
-        merges: dict[str, int] = {}
-        for pr in pulls:
-            if pr.get("merged_at"):
-                ref = (pr.get("base") or {}).get("ref")
-                merges[ref] = merges.get(ref, 0) + 1
-            out["hosts"] = sorted(set(out["hosts"]) | url_hosts(pr.get("body") or ""))
-        out["merges"] = merges
-        issues = gh.get(f"repos/{repo}/issues?state=all&per_page=100") or []
-        out["github_issues"] = sum(1 for i in issues if "pull_request" not in i)
+        out["merges"], out["hosts"] = _measure_merges(gh, repo)
+        out["github_issues"] = _measure_github_issues(gh, repo)
     except GhUnavailable as e:
         out["notes"].append(f"PR の宛先と GitHub Issues を測れない: {e}")
     return out
 
 
-def _measure_runs(gh: Gh, jobs_static: dict[str, int], head: str | None) -> tuple[dict, list[dict]]:
+def _has_skipped_job(jobs: list[dict]) -> bool:
+    """ジョブを飛ばした run か（conclusion が `skipped` のジョブがある）。名前・イベントでは判定しない（I2）。"""
+    return any(job.get("conclusion") == "skipped" for job in jobs)
+
+
+def _representative(gh: Gh, candidates: list[dict]) -> tuple[dict | None, list[dict], int]:
+    """新しい順の候補を最大 `CANDIDATE_RUNS` 件見て、ジョブを飛ばしていない最初の run とそのジョブ、見た件数（I1・I5）。"""
+    seen = 0
+    for run in candidates[:CANDIDATE_RUNS]:
+        seen += 1
+        jobs = (gh.get(f"repos/{gh.repo}/actions/runs/{run['id']}/jobs?per_page=100") or {}).get("jobs") or []
+        if not _has_skipped_job(jobs):
+            return run, jobs, seen
+    return None, [], seen
+
+
+def _measure_workflow(path: str, static_jobs: int, run: dict | None, jobs: list[dict]) -> tuple[dict, dict | None]:
+    """ワークフロー 1 本の行（パス・job 数・壁時計）と、代表の run のテストの step の所要。run が無ければ静的な job 数だけ。"""
+    entry = {"path": path, "jobs": static_jobs}
+    if not run:
+        return entry, None
+    wall = _span(run.get("run_started_at"), run.get("updated_at"))
+    if wall is not None:
+        entry["wall_seconds"] = wall
+    entry["jobs"] = max(entry["jobs"], len(jobs))
+    return entry, _steps_of(jobs, run)
+
+
+def _measure_runs(gh: Gh, jobs_static: dict[str, int], head: str | None) -> tuple[dict, list[dict], list[str]]:
+    """ワークフローごとの行・所要の候補・注記。代表の run はジョブを飛ばしていない最新の候補（I1・I4・I5）。"""
     runs = (gh.get(f"repos/{gh.repo}/actions/runs?status=success&per_page=50") or {}).get("workflow_runs") or []
-    latest: dict[str, dict] = {}
+    required = _required_checks(gh, head)
+    candidates: dict[str, list[dict]] = {}
     for run in runs:
-        latest.setdefault(run.get("path") or "", run)
-    workflows, junit, steps = [], None, None
-    for path in sorted(set(jobs_static) | {p for p in latest if p}):
-        entry = {"path": path, "jobs": jobs_static.get(path, 0)}
-        run = latest.get(path)
+        candidates.setdefault(run.get("path") or "", []).append(run)
+    workflows, notes, junit, steps, timed_out = [], [], None, None, False
+    for path in sorted(set(jobs_static) | {p for p in candidates if p}):
+        mine = candidates.get(path) or []
+        run, jobs = None, []
+        if mine and not timed_out:
+            try:
+                run, jobs, seen = _representative(gh, mine)
+            except GhUnavailable as e:
+                if str(e) != "時間切れ":
+                    raise
+                timed_out = True
+            else:
+                if not run:
+                    notes.append(f"飛ばしていない run が無い: {path}（候補 {seen} 件）")
+        if mine and timed_out:
+            notes.append(f"候補のジョブを取れない（時間切れ）: {path}")
+        entry, found = _measure_workflow(path, jobs_static.get(path, 0), run, jobs)
+        if found and found["seconds"] > (steps or {}).get("seconds", 0):
+            steps = found
         if run:
-            wall = _span(run.get("run_started_at"), run.get("updated_at"))
-            if wall is not None:
-                entry["wall_seconds"] = wall
-            jobs = (gh.get(f"repos/{gh.repo}/actions/runs/{run['id']}/jobs?per_page=100") or {}).get("jobs") or []
-            entry["jobs"] = max(entry["jobs"], len(jobs))
-            found = _steps_of(jobs, run)
-            if found and found["seconds"] > (steps or {}).get("seconds", 0):
-                steps = found
             junit = junit or _junit_of_run(gh, run)
         workflows.append(entry)
-    ci = {"provider": "github-actions" if workflows else "none", "workflows": workflows, "required_checks": _required_checks(gh, head)}
-    return ci, [d for d in (junit, steps) if d]
+    ci = {"provider": "github-actions" if workflows else "none", "workflows": workflows, "required_checks": required}
+    return ci, [d for d in (junit, steps) if d], notes
 
 
 def measure_issues(repo_part: dict, ci_part: dict) -> dict:

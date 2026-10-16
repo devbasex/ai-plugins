@@ -18,7 +18,7 @@ query($owner: String!, $name: String!, $pr: Int!, $endCursor: String) {
     pullRequest(number: $pr) {
       reviewThreads(first: 100, after: $endCursor) {
         pageInfo { hasNextPage endCursor }
-        nodes { id isResolved path line }
+        nodes { id isResolved path line comments(first: 1) { nodes { body } } }
       }
     }
   }
@@ -28,37 +28,44 @@ query($owner: String!, $name: String!, $pr: Int!, $endCursor: String) {
 UNRESOLVED_THREADS_JQ = (
     ".data.repository.pullRequest.reviewThreads.nodes[]"
     " | select(.isResolved == false)"
-    ' | [.id, (.path // ""), (.line // "" | tostring)] | @tsv'
+    ' | [.id, (.path // ""), (.line // "" | tostring),'
+    ' ((.comments.nodes[0].body // "") | gsub("[\\r\\n\\t]+"; " ") | .[0:200])] | @tsv'
 )
 
 
+def unresolved_threads_argv(repo: str, pr: int, jq: str) -> list[str] | None:
+    """未解決のレビュースレッドを読む `gh api graphql` の argv。repo が `owner/name` の形でなければ `None`。"""
+    owner, sep, name = str(repo or "").partition("/")
+    if not (owner and sep and name):
+        return None
+    return [
+        "gh",
+        "api",
+        "graphql",
+        "--paginate",
+        "-F",
+        f"owner={owner}",
+        "-F",
+        f"name={name}",
+        "-F",
+        f"pr={int(pr)}",
+        "-f",
+        f"query={UNRESOLVED_THREADS_QUERY}",
+        "--jq",
+        jq,
+    ]
+
+
 def unresolved_threads(repo: str, pr: int, output: Callable[[list[str]], str | None] | None = None) -> list[dict[str, str]] | None:
-    """未解決のレビュースレッドを `thread_id` つきで返す。0 件は空の一覧、取得できなければ `None`。
+    """未解決のレビュースレッドを `thread_id` と最初のコメントの本文（改行を空白へ畳んだ先頭 200 字）つきで返す。0 件は空の一覧、取得できなければ `None`。
 
     `output` は `gh` の argv を受けて標準出力（失敗は `None`）を返す関数。省くと `RUNNER` を使う。
     Resolve の状態は REST から読めないため、上限のときは退避せず `None` を返す。
     """
-    owner, sep, name = str(repo or "").partition("/")
-    if not (owner and sep and name):
+    argv = unresolved_threads_argv(repo, pr, UNRESOLVED_THREADS_JQ)
+    if argv is None:
         return None
-    out = (output or gh_call._output_via_runner)(
-        [
-            "gh",
-            "api",
-            "graphql",
-            "--paginate",
-            "-F",
-            f"owner={owner}",
-            "-F",
-            f"name={name}",
-            "-F",
-            f"pr={int(pr)}",
-            "-f",
-            f"query={UNRESOLVED_THREADS_QUERY}",
-            "--jq",
-            UNRESOLVED_THREADS_JQ,
-        ]
-    )
+    out = (output or gh_call._output_via_runner)(argv)
     if out is None:
         return None
     threads: list[dict[str, str]] = []
@@ -71,9 +78,20 @@ def unresolved_threads(repo: str, pr: int, output: Callable[[list[str]], str | N
                 "thread_id": cols[0],
                 "path": cols[1] if len(cols) > 1 else "",
                 "line": cols[2] if len(cols) > 2 else "",
+                "body": cols[3] if len(cols) > 3 else "",
             }
         )
     return threads
+
+
+def _graphql_failure(r: gh_call.GhResult, errors: Any) -> str:
+    """`gh api graphql` の失敗の理由。stderr を先に、無ければ GraphQL のエラー、どちらも無ければ読めないことを返す。"""
+    stderr = r.stderr.strip()
+    if stderr:
+        return stderr
+    if errors:
+        return json.dumps(errors, ensure_ascii=False)
+    return "GraphQL の応答を読めない"
 
 
 def graphql(query: str, variables: dict[str, Any] | None = None) -> gh_quota.Attempt:
@@ -95,6 +113,5 @@ def graphql(query: str, variables: dict[str, Any] | None = None) -> gh_quota.Att
         d = None
     errors = (d or {}).get("errors") if isinstance(d, dict) else None
     if r.returncode != 0 or errors or not isinstance(d, dict):
-        why = (r.stderr.strip() or json.dumps(errors, ensure_ascii=False) if errors else r.stderr.strip()) or "GraphQL の応答を読めない"
-        return gh_quota.Attempt(None, why, "graphql")
+        return gh_quota.Attempt(None, _graphql_failure(r, errors), "graphql")
     return gh_quota.Attempt(d.get("data"), "", "graphql")

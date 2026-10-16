@@ -69,7 +69,7 @@ description: |
 ## 使用可能なMCPツール
 
 ### BigQuery MCP
-- `mcp__mcp-server-bigquery__*` - BigQueryクエリ実行、テーブル管理
+- `mcp__plugin_mcp-bigquery_bigquery__*` - BigQueryクエリ実行（`execute_sql_readonly`）、データセット・テーブルの参照
 
 ### DBHub MCP
 - `mcp__dbhub__*` - PostgreSQL、MySQL、SQLite等のデータベース操作

@@ -70,11 +70,12 @@ STEP_PHASES = {
     "完了判定": "検査",
     "Pull Request": "検査",
     "確定仕様化": "取り込み",
-    "ミッションの Pull Request のマージ": "取り込み",
+    "スプリントの Pull Request のマージ": "取り込み",
     "後片付け": "取り込み",
     "配布": "取り込み",
     "リリース後テスト": "仕上げ",
     "振り返り": "仕上げ",
+    "棚卸し": "仕上げ",
 }
 
 ENDINGS = ("completed", "in_progress", "rate_limit", "api_error")
@@ -840,13 +841,11 @@ def _run_wait_reset(args) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    deps.require("mdtable")
     args = _build_parser().parse_args(argv)
-    if args.command == "interrupted":
-        return _run_interrupted(args)
-    if args.command == "wait-reset":
-        return _run_wait_reset(args)
-    return _run_list(args)
+    if getattr(args, "format", None) == "md":  # tabulate は表を出すときだけ（再開経路をオフラインでも止めない）
+        deps.require("mdtable")
+    run = {"interrupted": _run_interrupted, "wait-reset": _run_wait_reset}.get(args.command, _run_list)
+    return run(args)
 
 
 if __name__ == "__main__":

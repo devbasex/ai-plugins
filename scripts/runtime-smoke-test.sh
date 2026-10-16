@@ -6,6 +6,7 @@ RUNTIME="all"
 WITH_SECRETS="off"
 KEEP_CONTAINER=false
 ARTIFACT_DIR="$ROOT_DIR/tmp/runtime-smoke"
+CLI_VERSIONS="$ROOT_DIR/tests/runtime-smoke/cli-versions.env"
 
 usage() {
   cat <<'USAGE'
@@ -17,6 +18,8 @@ Options:
   --secret-file KEY=PATH           inject an allowlisted file secret
   --keep-container                 keep the container for local debugging
   --artifact-dir PATH              write logs/JUnit/artifacts under PATH
+  --cli-versions PATH              CLI version list to build images with
+                                   (default: tests/runtime-smoke/cli-versions.env)
   -h, --help                       show this help
 USAGE
 }
@@ -33,6 +36,8 @@ while [ "$#" -gt 0 ]; do
     --keep-container) KEEP_CONTAINER=true ;;
     --artifact-dir) ARTIFACT_DIR="${2:?}"; shift ;;
     --artifact-dir=*) ARTIFACT_DIR="${1#*=}" ;;
+    --cli-versions) CLI_VERSIONS="${2:?}"; shift ;;
+    --cli-versions=*) CLI_VERSIONS="${1#*=}" ;;
     -h|--help) usage; exit 0 ;;
     *) echo "ERROR: unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -45,6 +50,7 @@ if [ "$KEEP_CONTAINER" = true ] && [ "$WITH_SECRETS" != off ]; then
   echo "ERROR: --keep-container cannot be used with --with-secrets=$WITH_SECRETS" >&2
   exit 2
 fi
+[ -f "$CLI_VERSIONS" ] && [ -r "$CLI_VERSIONS" ] || { echo "ERROR: --cli-versions file not found or unreadable: $CLI_VERSIONS" >&2; exit 2; }
 command -v docker >/dev/null 2>&1 || { echo "ERROR: docker is required" >&2; exit 1; }
 
 mkdir -p "$ARTIFACT_DIR"
@@ -59,13 +65,12 @@ RAW_SECRET_NAMES=(
   AWS_ACCESS_KEY_ID
   AWS_SECRET_ACCESS_KEY
   AWS_SESSION_TOKEN
+  BIGQUERY_ACCESS_TOKEN
   BIGQUERY_PROJECT
-  BIGQUERY_LOCATION
-  BIGQUERY_DATASET
   REDASH_URL
   REDASH_API_KEY
 )
-FILE_SECRET_ENV_NAMES=(GOOGLE_APPLICATION_CREDENTIALS BIGQUERY_KEY_FILE)
+FILE_SECRET_ENV_NAMES=(GOOGLE_APPLICATION_CREDENTIALS)
 ALLOWLIST="$ROOT_DIR/tests/runtime-smoke/secrets-files.allowlist"
 
 validate_secret_key() {
@@ -98,10 +103,23 @@ if [ "$WITH_SECRETS" = required ] && [ "$secret_count" -eq 0 ]; then
   exit 1
 fi
 
+# CLI の版の一覧（KEY=VALUE の行。# の行と空行は読み飛ばす）を build-arg の並びにする。
+# 各ランタイムの Containerfile は自分の ARG だけを使い、残りは docker が警告して読み捨てる
+read_cli_version_args() {
+  local line
+  CLI_VERSION_ARGS=()
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in ''|'#'*) continue ;; esac
+    CLI_VERSION_ARGS+=(--build-arg "$line")
+  done < "$CLI_VERSIONS"
+}
+
 build_images() {
+  read_cli_version_args
   docker build -q -f "$ROOT_DIR/tests/runtime-smoke/Containerfile.base" -t ai-plugins-runtime-smoke-base "$ROOT_DIR" >/dev/null
   for runtime in "${RUNTIMES[@]}"; do
-    docker build -q -f "$ROOT_DIR/tests/runtime-smoke/Containerfile.$runtime" -t "ai-plugins-runtime-smoke-$runtime" "$ROOT_DIR" >/dev/null
+    docker build -q ${CLI_VERSION_ARGS[@]+"${CLI_VERSION_ARGS[@]}"} \
+      -f "$ROOT_DIR/tests/runtime-smoke/Containerfile.$runtime" -t "ai-plugins-runtime-smoke-$runtime" "$ROOT_DIR" >/dev/null
   done
 }
 
@@ -143,6 +161,8 @@ run_runtime() {
   local cid=""
   rm -rf "$runtime_artifacts"
   mkdir -p "$runtime_artifacts"
+  # 読んだ一覧を成果物に写す（どの版で試したかを残す）
+  cp "$CLI_VERSIONS" "$runtime_artifacts/cli-versions.env"
 
   cid="$(docker run -d \
     --tmpfs /tmp/runtime-secrets:rw,noexec,nosuid,nodev,size=1m \

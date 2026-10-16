@@ -1,15 +1,23 @@
-"""本物の claude: 実体の解決・素通し・引数の引き継ぎ・プラグインの版・会話の記録の読み取り（#895・#936・#1142 の C6）。"""
+"""本物の claude: 実体の解決・素通し・引数の引き継ぎ・プラグインの版・会話の記録の読み取り・区間のアカウントの環境
+（#895・#936・#1142 の C6・#1389）。"""
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
 
-from .common import config_dir, data_dir, env_num, launcher_path, parse_iso
+from .common import PluginInfo, config_dir, data_dir, env_num, launcher_path, parse_iso
 
+import claude_accounts as ca  # noqa: E402,I001  common が lib/ を sys.path に置く
+from claude_settings import metered_settings  # noqa: E402,F401  区間の引数へ宣言を足す（#1543。run.py が呼ぶ）
+import claude_usage as cu  # noqa: E402
+
+# 従量の接続の区間へ渡す、利用者の `--settings` のファイルと宣言をまとめた設定（状態ディレクトリの 0600。引数へ展開しない。#1543）
+SETTINGS_FILE = "metered-settings.json"
 # 素通しにする引数と副命令（Claude Code 2.1.280 の `claude --help` から写す）
 PASS_FLAGS = {"-p", "--print", "-h", "--help", "-v", "--version"}
 SUBCOMMANDS = {
@@ -175,23 +183,31 @@ def carried_args(args: list[str]) -> list[str]:
             break
         if not a.startswith("-") or a == "-":
             continue  # 位置引数（最初のプロンプト）
-        long = a.startswith("--")
-        name = a.split("=", 1)[0] if long else a[:2]  # `-nfoo` は `-n` に値が付いた 1 語
-        group = [a]
-        one_word = "=" in a if long else len(a) > 2
-        if not one_word and name in REQUIRED_FLAGS:
-            group += args[i : i + 1]
-            i += 1
-        elif not one_word and name not in BOOL_FLAGS:
-            take_all = name in VARIADIC_FLAGS
-            while i < len(args) and not args[i].startswith("-"):
-                group.append(args[i])
-                i += 1
-                if not take_all:
-                    break
+        name, group, i = _split_flag(args, i - 1)
         if name not in SECTION_FLAGS:
             out += group
     return out
+
+
+def _split_flag(args: list[str], i: int) -> tuple[str, list[str], int]:
+    """`args[i]` の選択肢 1 つぶんを値ごと切り出す。(選択肢名, 選択肢と値の語, 次に読む位置)。"""
+    a = args[i]
+    i += 1
+    long = a.startswith("--")
+    name = a.split("=", 1)[0] if long else a[:2]  # `-nfoo` は `-n` に値が付いた 1 語
+    group = [a]
+    one_word = "=" in a if long else len(a) > 2
+    if not one_word and name in REQUIRED_FLAGS:
+        group += args[i : i + 1]
+        i += 1
+    elif not one_word and name not in BOOL_FLAGS:
+        take_all = name in VARIADIC_FLAGS
+        while i < len(args) and not args[i].startswith("-"):
+            group.append(args[i])
+            i += 1
+            if not take_all:
+                break
+    return name, group, i
 
 
 def say(msg: str) -> None:
@@ -229,8 +245,8 @@ def plugin_cli(claude: str, args: list[str], timeout: float) -> subprocess.Compl
         return None
 
 
-def read_plugin(claude: str, marketplace: str | None = None) -> tuple[str, str] | None:
-    """`claude plugin list --json` から (マーケットプレイス, 版) を読む。"""
+def read_plugin(claude: str, marketplace: str | None = None) -> PluginInfo | None:
+    """`claude plugin list --json` から (マーケットプレイス, 版, 導入先 `installPath`) を読む。導入先は無ければ None。"""
     p = plugin_cli(claude, ["list", "--json"], env_num("NDF_RELAY_LIST_TIMEOUT", 15))
     if p is None or p.returncode != 0:
         return None
@@ -247,19 +263,20 @@ def read_plugin(claude: str, marketplace: str | None = None) -> tuple[str, str] 
             continue
         ver = it.get("version")
         if mk and isinstance(ver, str) and ver:
-            return mk, ver
+            path = it.get("installPath")
+            return PluginInfo(mk, ver, path if isinstance(path, str) and path else None)
     return None
 
 
-def update_plugin(claude: str, marketplace: str) -> str | None:
-    """マーケットプレイスと ndf を更新し、更新後の版を返す。どれかに失敗したら None。"""
+def update_plugin(claude: str, marketplace: str) -> tuple[str, str | None] | None:
+    """マーケットプレイスと ndf を更新し、更新後の (版, 導入先) を返す。どれかに失敗したら None。"""
     t = env_num("NDF_RELAY_UPDATE_TIMEOUT", 120)
     for args in (["marketplace", "update", marketplace], ["update", f"ndf@{marketplace}", "-y"]):
         p = plugin_cli(claude, args, t)
         if p is None or p.returncode != 0:
             return None
     got = read_plugin(claude, marketplace)
-    return got[1] if got else None
+    return (got.version, got.install_path) if got else None
 
 
 # ---------------------------------------------------------------- 会話の記録
@@ -296,9 +313,14 @@ def pending_wakeups(transcript_path: str, now: float) -> list[dict]:
 
     予約は Stop hook の `background_tasks` に入らないが、残っていると `/exit` で Claude Code が選択肢を出して
     止まる（区間 7・16）。`stop: true` の呼び出しより前の予約は取り消されたものとして数えない。"""
+    return _wakeup_tasks(_wakeup_fires(_iter_transcript_rows(transcript_path)), now)
+
+
+def _wakeup_fires(rows) -> list[float]:
+    """会話の記録の行から、取り消されていない `ScheduleWakeup` の発火の時刻（delay は 60〜3600 秒に丸める）。"""
     fires: list[float] = []
-    for row in _iter_transcript_rows(transcript_path):
-        content = (row.get("message") or {}).get("content") if isinstance(row.get("message"), dict) else None
+    for row in rows:
+        content = _content(row)
         at = parse_iso(row.get("timestamp"))
         if row.get("type") != "assistant" or not isinstance(content, list) or at is None:
             continue
@@ -310,6 +332,11 @@ def pending_wakeups(transcript_path: str, now: float) -> list[dict]:
                 fires = []
             elif isinstance(inp.get("delaySeconds"), (int, float)):
                 fires.append(at + min(max(inp["delaySeconds"], 60), 3600))
+    return fires
+
+
+def _wakeup_tasks(fires: list[float], now: float) -> list[dict]:
+    """`now` より後の発火を `running_tasks` と同じ形へ写す。"""
     return [
         {"id": "ScheduleWakeup", "type": "wakeup", "command": "発火の予定 " + time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(f))}
         for f in fires
@@ -332,7 +359,7 @@ def _is_user_prompt(row: dict) -> bool:
     """利用者が入力した行か。hook の差し戻し（`isMeta`）と Tool の結果は除く。"""
     if row.get("type") != "user" or row.get("isMeta"):
         return False
-    content = (row.get("message") or {}).get("content") if isinstance(row.get("message"), dict) else None
+    content = _content(row)
     if isinstance(content, str):
         return True
     if isinstance(content, list):
@@ -344,17 +371,26 @@ def _is_user_prompt(row: dict) -> bool:
     return False
 
 
+def _content(row: dict) -> list | str | None:
+    """行の `message.content`（`message` が辞書でなければ None）。"""
+    return row["message"].get("content") if isinstance(row.get("message"), dict) else None
+
+
+def _background_uses(row: dict) -> list[dict]:
+    """`assistant` の行のうち、背景の処理を起動する Tool の呼び出し（`run_in_background` が真）。"""
+    content = _content(row)
+    if row.get("type") != "assistant" or not isinstance(content, list):
+        return []
+    return [
+        c
+        for c in content
+        if isinstance(c, dict) and c.get("type") == "tool_use" and isinstance(c.get("input"), dict) and c["input"].get("run_in_background")
+    ]
+
+
 def _starts_background(row: dict) -> bool:
     """背景の処理を起動する Tool の呼び出し（`run_in_background` が真）を含む `assistant` の行か。"""
-    if row.get("type") != "assistant" or not isinstance(row.get("message"), dict):
-        return False
-    content = row["message"].get("content")
-    if not isinstance(content, list):
-        return False
-    return any(
-        isinstance(c, dict) and c.get("type") == "tool_use" and isinstance(c.get("input"), dict) and c["input"].get("run_in_background")
-        for c in content
-    )
+    return any(_background_uses(row))
 
 
 def after_mark(transcript_path: str, written: float) -> tuple[bool, bool]:
@@ -377,3 +413,86 @@ def after_mark(transcript_path: str, written: float) -> tuple[bool, bool]:
         if _is_user_prompt(row) or _starts_background(row):
             cancel = True
     return unmet, cancel
+
+
+# ---------------------------------------------------------------- 利用上限とアカウント（#1389）
+
+# 背景の作業の終わりの通知（Claude Code 2.1.283 の会話の記録で実測。`queue-operation` の `content` か `attachment` に入る）
+NOTIFIED = re.compile(r"<tool-use-id>([^<\s]+)</tool-use-id>")
+
+
+def _synthetic_reply(row: dict) -> bool:
+    msg = row.get("message") if isinstance(row.get("message"), dict) else {}
+    return row.get("type") == "assistant" and (row.get("isApiErrorMessage") is True or msg.get("model") == "<synthetic>")
+
+
+def _reply_text(row: dict) -> str:
+    content = (row.get("message") or {}).get("content") if isinstance(row.get("message"), dict) else None
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(str(c.get("text") or "") for c in content if isinstance(c, dict))
+    return ""
+
+
+def limit_of(transcript_path: str) -> tuple[str, float | None]:
+    """会話の記録の最後の合成応答から (上限の種類, リセット時刻) を読む。
+
+    種類は `quotaLimits.rateLimitType`（`five_hour`・`seven_day`）、無ければ本文（`spend limit` なら `spend`）、
+    どちらでもなければ `unknown`。リセット時刻は `quotaLimits.resetsAt`、無ければ本文から読む。"""
+    last = None
+    for row in _iter_transcript_rows(transcript_path):
+        if _synthetic_reply(row):
+            last = row
+    if last is None:
+        return "unknown", None
+    text = _reply_text(last)
+    quota = last.get("quotaLimits") if isinstance(last.get("quotaLimits"), dict) else {}
+    kind = quota.get("rateLimitType") if quota.get("rateLimitType") in ("five_hour", "seven_day") else cu.kind_of_text(text)
+    resets = quota.get("resetsAt")
+    if not isinstance(resets, (int, float)) or isinstance(resets, bool):
+        resets = cu.limit_reset_at(text)
+    return kind, float(resets) if resets is not None else None
+
+
+def unmet_goal(transcript_path: str) -> str | None:
+    """会話の記録の最後の `goal_status` が未達なら、その条件。無い・達した・条件が無ければ None。"""
+    last = None
+    for row in _iter_transcript_rows(transcript_path):
+        a = row.get("attachment")
+        if row.get("type") == "attachment" and isinstance(a, dict) and a.get("type") == "goal_status" and not a.get("sentinel"):
+            last = a
+    if last is None or last.get("met") is not False:
+        return None
+    cond = last.get("condition")
+    return cond.strip() if isinstance(cond, str) and cond.strip() else None
+
+
+def background_open(transcript_path: str, now: float) -> bool:
+    """背景の作業（`run_in_background` の Tool の呼び出しで終わりの通知の無いもの・発火の前の予約）が残っていれば真。
+    会話の記録を読めなければ「残っている」とする（I11）。"""
+    if not transcript_path or not os.path.isfile(transcript_path):
+        return True
+    started: set[str] = set()
+    ended: set[str] = set()
+    for row in _iter_transcript_rows(transcript_path):
+        started.update(str(c.get("id") or "") for c in _background_uses(row))
+        if row.get("type") in ("queue-operation", "attachment", "user"):
+            blob = json.dumps(row, ensure_ascii=False)
+            if "<task-notification>" in blob:
+                ended.update(NOTIFIED.findall(blob))
+    return bool(started - ended) or bool(pending_wakeups(transcript_path, now))
+
+
+def resume_input(transcript_path: str, text: str) -> str:
+    """替えた次の区間の最初の入力。未達の `/goal` があれば入れ直し、無ければ `text`（切り替えの理由に合う文）。"""
+    goal = unmet_goal(transcript_path)
+    return f"/goal {goal}" if goal else text
+
+
+def section_env(base: dict, account: str | None, note=None) -> dict | None:
+    """区間の環境にアカウント（か `metered`）の環境を重ねる。`account` が None なら今と同じ環境。
+    使えない・設定ディレクトリを用意できなければ None（理由は `note` へ渡す）。"""
+    if account is None:
+        return dict(base)
+    return ca.account_env(account, base, note)

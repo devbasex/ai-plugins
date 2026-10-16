@@ -60,7 +60,7 @@ python3 "$SCRIPTS/pr-steps.py" plan [--draft] [--base <base>] [--message "<コ�
   そこへ移ってから打ち直す（入れ子の worktree は作らない）
 - `metrics.redirect` が `cherry-pick-pr`: 起点が `main`/`master` でも設定のブランチでもない。警告を出して
   `/ndf:cherry-pick-pr <base>` へ誘導し、利用者が明示的に継続を指示したときだけ `--force` で進める
-- `metrics.closing_words_in_message` に語がある: メッセージから外す（「閉じる語は本文だけに書く」）
+- `metrics.closing_words_in_message` に語がある: メッセージから外す（「closing keywords は本文だけに書く」）
 - `metrics.existing_pr` が null なら新規作成、あれば更新になる
 
 ### 2. コミット
@@ -71,7 +71,7 @@ python3 "$SCRIPTS/pr-steps.py" plan [--draft] [--base <base>] [--message "<コ�
 python3 "$SCRIPTS/pr-steps.py" commit --message "<メッセージ>"
 ```
 
-閉じる語があるとコミットせずに `stopped` で止まる。上位階層を含むすべての変更をコミットする。
+メッセージに GitHub の closing keywords（PR 本文に `Closes #123` のように書くと、マージ時にその課題を自動で閉じる機能）があるとコミットせずに `stopped` で止まる。上位階層を含むすべての変更をコミットする。
 
 ### 3. 同意の確認と push
 
@@ -86,13 +86,28 @@ credential helper が応答しない環境の退避（`gh auth git-credential` �
 ### 4. PR の作成・更新
 
 本文を日本語で書いてファイルに置く。`.github/pull_request_template.md` があればその構造に従い、
-`## Summary`・`## 利用者向けの変化`・`## Test plan` を持ち、機密情報を含めない。更新のときはブランチの全コミット
-（`git log origin/<base>..HEAD`）を反映し、既存の関連リンクを保つ。雛形は
-`python3 "$SCRIPTS/pr-steps.py" template --out /tmp/pr-body.md` が書く。
+`## Summary`・`## 利用者向けの変化`・`## 移行の手順`・`## Test plan` を持ち、機密情報を含めない。更新のときはブランチの全コミット
+（`git log origin/<base>..HEAD`）を反映し、既存の関連リンクを保つ。テンプレートは
+`python3 "$SCRIPTS/pr-steps.py" template --out /tmp/pr-body.md [--mode <モード>]` が書く。
 
-**`## 利用者向けの変化` はリリースの CHANGELOG と更新案内へそのまま載る**（`release-steps.py notes` が組む）。
+**`standard` の実装 PR は `## 設計と違う点` の節を持つ。** 完了判定の設計との突き合わせ（`quality-gates` の
+`references/design-match.md`）で見つけた、設計の決定・設計に名前の出るテスト・既存の確定仕様・受け入れ条件と実装の
+違いを「| 設計の箇所 | 違い | 理由 |」の表で並べる。違いが無ければ「- 無し」、設計文書が無ければ
+「- 該当なし（設計文書が無い）」と書く。`template --mode standard` が雛形を書き、`create` / `update` に
+`--mode standard` を渡すと、節の無い本文では `next` が節を足すよう求める（設計 PR は対象にしない）。
+
+**`## 利用者向けの変化` はリリースの CHANGELOG の版の節へそのまま載る**（`release-steps.py notes` が組む）。
 利用者に何ができるようになるか・使い方が変わる点を箇条書きにし、今の決まりだけを書く。見える変化が無ければ
 「- 無し」と書く（リリースの説明文は題名で代わる）。節の無い本文では、`create` / `update` の `next` が節を足すよう求める。
+
+**`## 移行の手順` は CHANGELOG の版の節の `### 移行の手順` へ載る。** 利用者が新しい版へ移るときに自分で行う操作
+（引数の置き換え・認証のし直し・導入し直し）を、プラグインの名前を添えて箇条書きにする。操作が要らなければ
+「- 無し」と書く。プラグインの名前に触れる箇条は、配布でそのプラグインの上げ幅の候補を MAJOR にする。要求の
+「公開インタフェース」の行に互換なしの印がある課題では、要求の移行性の行を手順にする。
+
+**`## 置き換える箇条`（任意）は、同じ版の前の PR の「利用者向けの変化」の箇条を CHANGELOG と承認資料から外す。**
+この PR が前の PR の振る舞いを変えたときに書き、前の PR の本文は直さない。書き方は `release` の
+`references/release-steps.md` の「置き換える箇条」にある。
 
 ```bash
 python3 "$SCRIPTS/pr-steps.py" create --title "<タイトル>" --body-file /tmp/pr-body.md [--draft] [--base <base>] \
@@ -125,27 +140,30 @@ python3 "$SCRIPTS/pr-steps.py" report <番号>
 URL は最終行に生のまま置く（Markdown リンクにすると利用者の画面では番号しか表示されない）。
 コミット履歴は報告に含めない。
 
-## ミッションブランチ宛てと develop 宛て
+## スプリントブランチ宛てと develop 宛て
 
 **宛て先で、Pull Request の役割が変わる。** `plan` の `metrics.target` と `metrics.review` が区分を返す。
 
 | 宛て先 | 何の Pull Request か | コードレビュー | `metrics` |
 | --- | --- | --- | --- |
-| `mission/<名前>` | 課題の Pull Request。課題の worktree からミッションブランチへ集める | 通さない。緑になったらミッションブランチへ取り込む | `target: mission` / `review: false` |
-| develop（worktree の設定の `base_branch`） | ミッションの Pull Request（ミッションで 1 本）か、ミッションブランチを経ない単独の Pull Request | 通す（リファクタリング・`cross-review`・完了判定を 1 回） | `target: develop` / `review: true` |
+| `sprint/<名前>` | 課題の Pull Request。課題の worktree からスプリントブランチへ集める | 通さない。緑になったらスプリントブランチへ取り込む | `target: sprint` / `review: false` |
+| develop（worktree の設定の `base_branch`） | スプリントの Pull Request（スプリントで 1 本）か、スプリントブランチを経ない単独の Pull Request | 通す（リファクタリング・`cross-review`・完了判定を 1 回） | `target: develop` / `review: true` |
 
-課題の Pull Request は `--base mission/<名前>` で出す。ミッションの Pull Request は、
-ミッションブランチの worktree から `--base` を省いて出し、本文にミッションが閉じる課題を番号ごとに書く。
+課題の Pull Request は `--base sprint/<名前>` で出す。スプリントの Pull Request は、
+スプリントブランチの worktree から `--base` を省いて出し、本文にスプリントが閉じる課題を番号ごとに書く。
 
-## 閉じる語は本文だけに書く
+## closing keywords は本文だけに書く
 
-**閉じる語（`Closes` / `Fixes` / `Resolves`）は Pull Request の本文だけに、番号ごとに書く。** コミット
-メッセージに書くと、マージでそのコミットが指す課題だけが先に閉じ、ミッションが割れる。**本文の閉じる語は
-外さない**（`stage-completeness.md` と `progress-tracking` の「ミッションを閉じる」が本文を入力にする）。
+**closing keywords（`Closes` / `Fixes` / `Resolves` の後に番号を書く記法）は Pull Request の本文だけに、番号ごとに書く。** コミット
+メッセージに書くと、マージでそのコミットが指す課題だけが先に閉じ、スプリントが割れる。**本文の closing keywords は
+外さない**（`stage-completeness.md` と `progress-tracking` の「スプリントを閉じる」が本文を入力にする）。
 
 ## 設計 Pull Request の本文
 
 **head のブランチ名が `design/` で始まる Pull Request の本文は、決定の中身を持たない**（決定は設計文書だけが持つ）。
+
+**設計 Pull Request の題は、設計文書の H1 と同じ文にして `--title` に渡す。** 題の形は `design` の
+[design-template.md の「承認する人が読む欄」](../design/references/design-template.md#承認する人が読む欄) にある。
 
 | 節 | 何を書くか |
 | --- | --- |

@@ -4,6 +4,8 @@
 レビューを行う CLI へ渡す入出力の取り決めである。**手順の途中では読まず、形式を確かめる
 ときだけ開く。** 手順は [01-state-and-review.md](01-state-and-review.md) にある。
 
+**目次:** [状態ファイル](#状態ファイル) / [再開で渡した引数の扱い](#再開で渡した引数の扱い) / [record-fix](#record-fix) / [AI への入出力契約（両 launcher 共通）](#ai-への入出力契約両-launcher-共通) / [AI が書き出すファイル契約](#ai-が書き出すファイル契約) / [投稿と監視の記録](#投稿と監視の記録) / [ラウンドの開始時に担当へ渡すもの](#ラウンドの開始時に担当へ渡すもの) / [`<worktree-base>` の解決順](#worktree-base-の解決順) / [事前確認](#事前確認) / [自動レビュー観点テンプレート](#自動レビュー観点テンプレート)
+
 ## 状態ファイル
 
 `$TMP_DIR/cross-review-pr<番号>-state.json`:
@@ -28,6 +30,7 @@
     "available": ["claude", "codex"],
     "unavailable": {"kiro": "kiro-cli が見つかりません"},
     "probe_skipped": false, "require_all": false,
+    "policy": null,
     "fallback": []
   },
   "resume_changes": [
@@ -48,7 +51,7 @@
     "declared_remaining_open": 0,
     "remaining_open": 0,
     "remaining_reason": null,
-    "verified": true
+    "verified": true, "remaining_body": 0
   },
   "rounds": [
     {
@@ -57,6 +60,12 @@
       "started_at": "...",
       "verdict": "changes_requested",
       "reviewers": ["codex", "claude-2"],
+      "reviewer_models": {
+        "codex":    {"requested": null, "observed": "gpt-6.1-sol", "unobserved": null},
+        "claude-2": {"requested": null, "observed": null, "unobserved": "no_record"}},
+      "seats": [
+        {"seat": "codex", "runtime": "codex", "model": "gpt-6.1-sol", "partner": "claude-2"},
+        {"seat": "claude-2", "runtime": "claude", "model": null, "partner": "codex"}],
       "codex":  {"intent": "REQUEST_CHANGES", "posted_as": "COMMENT",
                  "comments": 5, "review_url": "...",
                  "by_severity": {"critical": 0, "major": 3, "minor": 2, "nit": 0}},
@@ -67,7 +76,8 @@
                  "resolved_threads": 4, "resolved_thread_ids": ["PRRT_kwDO..."],
                  "resolved_thread_positions": [
                    {"thread_id": "PRRT_kwDO...", "path": "src/foo.py", "line": 42}],
-                 "ci": "SUCCESS", "ci_note": null},
+                 "ci": "SUCCESS", "ci_note": null,
+                 "merge": {"stage": "done", "exit_code": 0}},
       "ended_at": "..."
     }
   ],
@@ -95,11 +105,16 @@
     {"pr": 123, "round": 1, "path": "src/foo.py", "line": 42, "severity": "minor",
      "comment_id": 3222849090, "summary": "...", "reason_for_rejection": "..."}
   ],
+  "reopens": [
+    {"at": "...", "from_final": "approved", "base_round": 3, "ended_at": "...",
+     "sweep": {"remaining_open": 0, "verified": true}}
+  ],
   "final": null
 }
 ```
 
-`final` 値: `approved` / `max_rounds` / `oscillation` / `error`
+`final` 値: `approved` / `max_rounds` / `oscillation` / `error`。確定した値から別の確定した値へ直接は移らない。
+確定した値から `null` へ戻すのは `init` がラウンドを足すときだけである（[01-state-and-review.md](01-state-and-review.md) の「ラウンドを足す」）。
 
 ### スロット名
 
@@ -121,8 +136,14 @@
 
 ### 重要なフィールド
 
-- `host` — 確定したホスト名（`claude` / `codex` / `agy` / `kiro`）。参加者プールに残る
-  （`participants` を持たない古い状態の再開では、変更の前と同じく参加者プールから外して輪番を回す）
+- `rounds[].review_scope` / `rounds[].scope_check` / `rounds[].<席>.read_files` — レビュー範囲と範囲の照合の記録。欄と値は [05-pool-and-convergence.md](05-pool-and-convergence.md) の「範囲の照合」にある
+- `host` — 確定したホスト名（`claude` / `codex` / `agy` / `kiro`）。参加者プールに残る（`participants` を持たない古い状態の再開では、変更の前と同じく参加者プールから外して輪番を回す）
+- `rounds[].reviewer_models.<席>` — そのラウンドのレビューの起動で実際に動いたモデル。
+  取り込み（`read-result`）が結果の検証より前に、共通ライブラリの `models.observed_model` で取って書く。
+  結果が無くて止まる経路でも残る。`requested` は指定値で、cross-review は `--model` を渡さないため常に `null`。
+  `observed` は実測値、`unobserved` は取れなかった理由の符号（`no_record` / `ambiguous` / `no_model_field` /
+  `unsupported` / `unreadable`）で、どちらか一方が入る。取れるのは claude と codex で、agy と kiro は `unsupported`。
+  前のラウンドの値は書き換えない。反証の起動（`critique.sh`）の分は残さない
 - `review_findings` — 取り込んだ指摘を **per-item** で蓄積する（#156）。各要素は
   `finding_id`（`<担当>-r<ラウンド>-<索引>`）を持つ。**取り込みの時点で採番し、統合・
   反証・実行検証の記録がどの指摘を指すかをこの値で結ぶ。** 担当とラウンドを含めるため、
@@ -162,8 +183,15 @@
   ラウンドが絞り込みに掛かる）。目印を書くのは経路の最後（`collect-critiques`）で、**対象
   ごとに有効な反証が揃ったときだけである**。揃わないときは付けないだけでなく、**先に付いて
   いたそのラウンドの目印を外す**（取り直しの後も目印が残ると、出力と実際の数え方が食い違う）
-- `rounds[].critique_relaunched` — 反証を取り直した担当（#549 レビュー対応）。
+- `rounds[].critique_relaunched` — 反証を取り直した担当。
   **同じラウンドで 1 度だけ取り直す**ための記録である
+- `no_results` — 結果なしの記録。結果なしの 1 回ごとに `step`（`review`）/ `attempt`（ラウンドの番号）/
+  `seat` / `account`（claude のアカウントの名前。空は選んでいない）/ `reason` / `decision`（`relaunch` / `reassign` /
+  `abort`）/ `to` / `to_account` / `at` の 1 件を**追記だけ**で積む。外した担当・今のアカウント・起動し直し済みかは
+  この記録から導き、別の欄に持たない。この項目を持たない状態ファイルは 0 件として読む
+- `rounds[].reassigned` — そのラウンドで振り替えた `{from, to, to_account, reason}` の並び（報告と judge の出力のコピー。
+  正は `no_results`）。振り替えた後の `rounds[].reviewers` / `seats` は振り替え先を指し、元の席の欄は残る
+- `rounds[].seats[].account` — 席の claude のアカウントの名前（振り替えで選んだときだけ持つ）
 - `rejected_findings` — 却下した指摘を **per-item** で蓄積する。`rounds[].fix.rejected` は
   ラウンドごとの件数で、こちらは理由と位置を持つ。**両方を持つのは、件数だけが返る劣化表現
   （`fix` が int を返す経路）があるためである。** そのときは記録が空になり、件数だけが残る。
@@ -173,13 +201,18 @@
   `excluded` / `ignored_exclude`（`--exclude` で指定したが参加者プールに無かったため無視した者。#786。
   この項目を持たない状態ファイルは空として読む）/ `available`（利用可能な参加者）/ `unavailable`（名前 → 確認が通らなかった理由）/
   `probe_skipped`（確認を飛ばしたか）/ `require_all` / `fallback`（スロットのフォールバックに使える
-  相手。**#892 の後に作る状態では空**で、変更の前に作った状態だけがホストを持ちうる）の 9 項目。**この項目を持たない状態ファイルは、この変更の前に始めた実行である**
+  相手。**#892 の後に作る状態では空**で、変更の前に作った状態だけがホストを持ちうる）/ `policy`（決めた時点の
+  ランタイムの宣言のコピー `path` / `allowed` / `review_seats`。`null` は宣言が無かった。キーが無いのは #1598 の前の状態）の 10 項目。**この項目を持たない状態ファイルは、この変更の前に始めた実行である**
   （読み方は `05-pool-and-convergence.md`）。`unavailable` が空である理由は 2 つあり、
   `probe_skipped` がそれを分ける（全員が通った / 確認を飛ばした）
 - `resume_changes` — 再開で変えた値の記録（#727）。要素は `at` / `field` / `to` / `from` で、
   `field` は状態ファイルの鍵である。**追記だけを行う。** 参加者の記録を作り直したときは
   `participants` の 1 件として積む（中の項目ごとには積まない）
 - `rounds[].reviewers` — そのラウンドのレビュー担当 2 スロット。**ラウンドを開くときに決めて残す**
+- `rounds[].seats` — スロットごとの記録。`reviewers` と同じ並びで、`seat`（スロット名）/
+  `runtime` / `model`（実際に動いたモデル。`read-result` が `reviewer_models.<席>.observed` と同じ取得の値で埋め、
+  取れなければ `null`）/ `partner`（組の相手のスロット名。`--only` の 1 スロットでは `null`）を持つ。
+  キーが無いのは #1598 の前に開いたラウンドである。実行の要約の `rounds[].seats` へそのまま写る
 - `worktree_path` — 並行セッションとの分離。サブエージェントへの cwd 指示にも使う
 - `is_own_pr` / `event_downgrade` — 自分の PR の場合 `REQUEST_CHANGES → COMMENT` 強制ダウングレード
 - `rounds[].<担当>.intent` — AI の本来判定。**ループ判定はこれを見る**。担当ごとのキーの
@@ -210,7 +243,7 @@
 - `viewer_login` — 自分のログイン名。一度取って持つキャッシュで、投稿キューの冪等の照合が
   「投稿者が自分か」を見るために使う
 - `rounds[].codex.queued` — 取り込みが送ったレビューが上限で送れず、投稿キューに残っているか。
-  流した直後に参照を書き戻して偽にする（[01-state-and-review.md](01-state-and-review.md) の投稿キューの節参照）
+  流した直後に参照を書き戻して偽にする（[07-posts-and-records.md](07-posts-and-records.md) の投稿キューの節参照）
 - `rounds[].codex.review_url` — 送信の応答が返した参照。流し直しで重複投稿が見つかったときは重複投稿の参照
 - `rounds[].codex.posted_inline` / `posted_body` — インラインとして送れた件数と、差分の外を
   理由に総評へ移した件数（#730）。`comments` は `posted_inline` と同じ値
@@ -227,15 +260,24 @@
   モデルレビューの観点と手動の観点、`detail` は `review_instructions` と同じ値。`launch-reviewer.sh` がそのラウンドの
   `stage` の値を「追加レビュー観点」へ差し込み、この項目かレビューの種類の無い状態ファイルは `review_instructions` を使う
 - `review_criteria` — 指摘の基準。`init` が新規・再開のどちらでも PR の worktree の
-  `.ndf/review.json`（レビューの重点の宣言）を読んで書き直す。`status` は `declared` / `none` /
+  `.ndf/review.json`（レビューの宣言。下の「レビューの宣言」）を読んで書き直す。`status` は `declared` / `none` /
   `unreadable`（`error` に理由）、`focus` は重点の名前の列、`reviewer_block` はレビュー担当への節
   （正本 `scripts/lib/review_criteria.py` が組む）。`launch-reviewer.sh` が `reviewer_block` を指示へ
   差し込み、空なら宣言を読まない既定の節（基準 3 の無い形）を使う。修正担当は `drive.py` が渡す
-  `CROSS_REVIEW_STATE` から `status` と `focus` を読む。`init` の出力の `REVIEW_FOCUS=<status>` に同じ値が出る
+  `CROSS_REVIEW_STATE` から `status` と `focus` とプロファイルを読む。`init` の出力の `REVIEW_FOCUS=<status>` に同じ値が出る。プロファイルの項目（`profile_status` / `profile` / `profile_error` / `profile_name` / `profile_others`）と、`init` の出力の `REVIEW_PROFILE=` / `REVIEW_PROFILE_NAME=`（`version: 3` で選んだプロファイルの名前。ほかは空）と、`report` の要約のプロファイルの行（`profile_name` があるときだけ）は [02-fix-and-rotation.md](02-fix-and-rotation.md) の「レビューの宣言」にある
+- `auto_review_categories` — 観点を渡した分類の名前の列。プロファイルの分類の名前を含み、`replace_auto_categories` が真なら既定の分類の名前を含まない。`review_kind` は既定の分類から決める
 - `deferred_nits[].waived` — `/ndf:fix` が基準外として見送った指摘の種類。見送りの返信（`reply`）を
   付けて決着したもので、`report` は残 deferred の一覧から外して件数だけを出す
-- `sweep` — 最終スイープ後の検証結果。`remaining_open` は GitHub 側で数え直した実数で、
-  `declared_remaining_open` は結果ファイルの申告値。両者が食い違う場合は実数を採る
+- `sweep` — 最終スイープ後の検証結果。`remaining_open` は GitHub 側で数え直した実数に総評だけの残り（`remaining_body`）を
+  足した値で、`declared_remaining_open` は結果ファイルの申告値。両者が食い違う場合は実数を採る
+- `body_settlements` — 総評だけの指摘の決着の記録（追記だけ。形は [06-evidence.md](06-evidence.md) の「総評だけへ書いた指摘」）
+- `reopens` — ラウンドを足した記録（古い順）。要素は `at`（足した時刻）・`from_final`（足す前の `final`）・
+  `base_round`（足した時点の `len(rounds)`）・`ended_at`・`sweep`（足す前の値。無ければ `null`）。鍵が無い状態ファイルは
+  足したことが無い（`base_round = 0`）として読む。上限・巻き直し・振動検知は最後の要素の `base_round` より後のラウンドで数える
+- `rounds[].fix.merge` — 修正の取り込みの段階。`stage` は `recorded`（記録を保存した）→ `posted`（返信・決着・まとめを
+  投稿した）→ `done`（CI の分類を終えた）、`exit_code` は `done` のときの取り込みの終了コード（0 / 3）。同じコミットの
+  戻り値ファイルで `merge-fix` を打ち直すと、`done` なら投稿も記録もせずに `exit_code` で抜け、そうでなければ済んでいない
+  段階から続ける。鍵が無い記録は `recorded` と読む（投稿キューが投稿済みの項目を送らずに済ませる）
 
 ## 再開で渡した引数の扱い
 
@@ -247,23 +289,55 @@
 | 反映する | `--max-rounds` / `--rotate-after` / `--verify-command` / `--verify-exit-code` | 状態を書き換え、`resume_changes` へ 1 件積み、`↻ <項目>: <旧> → <新>` を出す |
 | 反映し、参加者を作り直す | `--only` | 状態を書き換えて記録へ積んだうえで、認証確認をやり直して `participants` を置き換える。`none` を渡すと 1 者指定を外す |
 | 参加者を作り直す | `--exclude` / `--include` / `--require-all` | 利用可能な参加者を解決し直して `participants` を置き換える。失敗したら状態を書き換えずに終了コード 1 |
+| （引数なしでも）参加者を作り直す | ランタイムの宣言の変更 | `participants.policy` と今の宣言が違えば作り直す。記録から引き継ぐ `included` / `only` のうち宣言の外のものは止めずに落とし、`policy:<項目>` を積む。判定の済んでいない最後のラウンドの担当に宣言の外の者がいれば選び直す |
 | 反映しない | `--host` | 状態と違うときだけ `ℹ --host は再開では反映しません` を出す |
 
 **1 者指定は 2 行にまたがる。** 1 者指定（`--only`）は状態ファイルに載る項目であると同時に、
 参加する実行主体を決め直す引数でもある（`PARTICIPANT_ARGS`）。渡した再開は、指定した 1 者の
 認証確認をやり直し、通らなければ状態を書き換えずに終了コード 1 で止まる。
 
+## `record-fix`
+
+ホストが自分で直して送り、返信と Resolve を済ませたときに、修正の記録を作る。
+
+```bash
+python3 scripts/state.py record-fix <PR> [--commit <SHA>] [--resolved-thread <ID>]...
+```
+
+| 引数 | 既定 | 意味 |
+| --- | --- | --- |
+| `--commit` | PR の今の head の OID | 修正のコミット（送り済みであること） |
+| `--resolved-thread` | なし | 返信して Resolve したスレッドの node ID。繰り返して渡す |
+
+| 条件 | 振る舞い | 終了コード |
+| --- | --- | --- |
+| 最後のラウンドが無い・修正の記録が既にある | 書かずに理由を出す | 1 |
+| コミットが PR の head から辿れない（`compare/<commit>...<head>` が `identical` / `ahead` 以外か、取れない） | 書かずに `コミット <SHA> が PR の head にありません` | 5 |
+| PR の head・未解決の一覧を取れない、申告したスレッドが未解決 | 書かずに理由か未解決の ID を出す | 5 |
+| 上のどれでもない | 戻り値ファイル `fix-pr<PR>-result.json` を書き、`merge-fix` と同じ取り込み（送信は飛ばし、本文の揃え・記録・投稿・CI の分類）を通す | 取り込みの終了コード（0 / 3） |
+
+書く戻り値ファイルは [02-fix-and-rotation.md](02-fix-and-rotation.md) の戻り値スキーマの形で、`fixed_count` は申告した
+スレッドの数、`recorded_by` は取り込みが読まない出所の印である。
+
+```json
+{"pr": 1234, "fix_commit": "<SHA>", "fixed_count": 2, "resolved_threads": [{"thread_id": "PRRT_..."}],
+ "deferred": [], "rejected": [], "ci_status": null, "recorded_by": "record-fix"}
+```
+
+`drive.py` の修正の止まり（終了コード 20）で `record-fix` を打った後に `drive.py` を打ち直すと、取り込みは済んでいる
+ため `merge-fix` は記録した終了コードで戻る。
+
 ## AI への入出力契約（両 launcher 共通）
 
 launcher が生成するプロンプトに以下を強制している:
 
-- **headRefOid (commit_id) を明示**: AI が自前で取得すると baseRefOid を誤って入れる事故が多発
+- **headRefOid (commit_id) を明示**: AI が自前で取得すると baseRefOid を誤って入れることがある
 - **作業 worktree の絶対パス**: 「ファイル読み取りは必ず worktree 配下の絶対パスを使う」（実 path は state.json の `worktree_path` を参照。`<worktree-base>` は `NDF_WORKTREE_BASE` env > `<システム tmpdir>/ndf-worktrees` の優先順で解決）
 - **投稿の手順を持たない**（#730）: 担当は投稿しない。判定の格下げ（`event_downgrade`）も
   担当へ渡さず、投稿する側が送信の時点で行う
 - **既存コメント差分**: `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt` を読んで重複指摘禁止。2 ラウンド目以降は `start-round` が取り直す（#542）
-- **出し切りと、起動しない処理**: 見つけた指摘はそのラウンドですべて出す。テストも背景の処理も起動しない（確かめる手順は `suggested_check` に書き、`verify-findings` が実行する。#542 #786）
-- **自動レビュー観点**: GitHub API の `pulls/<PR>/files --paginate` で変更ファイルを全件取得して分類し、`common` / `docs_only` / `design` / `code` / `db_migration` / `test` / `dependency` / `config_ci` / `api_contract` / `auth_security` / `frontend` / `performance` / `deletion_rename` / `generated` / `i18n` / `infra` の該当テンプレートを state.json の `auto_review_instructions` に保存する
+- **出し切りと、起動しない処理**: 見つけた指摘はそのラウンドですべて出す。テストもバックグラウンドの処理も起動しない（確かめる手順は `suggested_check` に書き、`verify-findings` が実行する。#542 #786）
+- **自動レビュー観点**: GitHub API の `pulls/<PR>/files --paginate` で変更ファイルを全件取得して分類し、`common` / `docs_only` / `design` / `code` / `db_migration` / `test` / `dependency` / `config_ci` / `api_contract` / `auth_security` / `frontend` / `performance` / `deletion_rename` / `generated` / `i18n` / `infra` の該当テンプレートと、レビューのプロファイルの分類の観点を state.json の `auto_review_instructions` に保存する
 - **手動追加レビュー観点**: `--focus` / `--extra-instructions-file` が指定されていれば state.json の `manual_extra_review_instructions` に保存し、自動テンプレートの後ろに連結した `review_instructions` を codex / agy 両 launcher が同じ「追加レビュー観点」セクションとしてプロンプトに差し込む
 - **進捗マーカー**: agy には `$TMP_DIR/agy-review-pr<PR>-progress.log` へ短いフェーズ名を追記させ、monitor の heartbeat で表示する。内部推論や長文説明は書かせない
 - **review body 先頭 prefix**（投稿する側が組み立てる）:
@@ -288,7 +362,7 @@ launcher が生成するプロンプトに以下を強制している:
 
 | ファイル | 内容 |
 |---|---|
-| `$TMP_DIR/<席>-review-pr<PR>-result.json` | `{event, by_severity}`。担当が書くのはこの 2 つだけ |
+| `$TMP_DIR/<席>-review-pr<PR>-result.json` | `{event, by_severity, read_files}`。担当が書くのはこの 3 つだけ。`read_files`（読んだファイル数）はプロンプトにレビュー範囲が載ったときだけ求める |
 | `$TMP_DIR/<席>-review-pr<PR>-round<R>-payload.json` | `{summary, comments: [{path, line, body, severity, evidence, falsification, suggested_check}, ...]}` |
 
 **`comments[]` が持つのは、その担当が出した指摘の全件である**（#156）。位置を持つ指摘は
@@ -325,27 +399,12 @@ launcher が生成するプロンプトに以下を強制している:
 **落とすのは、書き込む中身が確定した後である。** 読めなかった再実行が、一度取り込めて
 いた記録を消さないようにする。
 
-## 投稿の種別ごとの契約
+## 投稿と監視の記録
 
-**GitHub へ書くのはオーケストレーターだけで、すべて投稿キュー（`scripts/lib/post_queue.py`）を
-通る**。組み立てと送信は共通ライブラリの `scripts/lib/result_posts.py` が持つ。送る前に同じ
-ものが先にあるかを照合し、あれば送らずに重複投稿を応答として返す。
+投稿の種別ごとの契約と、監視と計測が残すファイルは
+[07-posts-and-records.md](07-posts-and-records.md) にある。
 
-| 種別 | 積む側 | 組み立ての元 | 二度書かない照合の鍵 |
-| --- | --- | --- | --- |
-| `review-post` | 指摘の取り込み（`read-result`） | 指摘ファイルと結果ファイル | 投稿者と、本文の先頭行の `## 🤖 cross-review \| round <R> \| <席> \|` までの前方一致（判定の語を含めない） |
-| `review-reply` | 修正の取り込み（`merge-fix`）/ 単独の `fix` | 修正の結果ファイルの `resolved_threads` / `deferred` / `rejected` | 返信先の指摘の識別子と、本文の先頭 80 文字 |
-| `thread-resolve` | 同上 | `resolved_threads`（と、`resolve` が真の見送り・却下） | スレッドの識別子と、すでに決着しているかどうか |
-| `pr-comment` | 同上（修正のまとめ）/ 巻き直し（`rotate-pr.sh`） | 修正の結果ファイルの件数とコミット | 投稿者と、本文の先頭 80 文字（まとめはラウンドとコミットを含む） |
-
-**差分の外を指すインラインで拒まれたら、その要求のインラインをすべて総評へ移して送り直す。**
-契機は応答の `errors` が `could not be resolved` を含むときだけで、ほかの 422 は失敗として
-止める。すでに決着したスレッドの決着をもう一度送っても失敗にならない（実測）。
-
-修正の送信は `git push origin HEAD:<ブランチ名>` で行い、戻り値ファイルの `fix_commit` が
-送り先に載ったことを確かめる。載っていなければ取り込みは失敗として止まる。
-
-## ラウンドの開始時に担当へ渡すもの（#542）
+## ラウンドの開始時に担当へ渡すもの
 
 round エントリを状態ファイルへ保存する前に次を行う。**失敗してもラウンドを止めない**
 （`⚠` の 1 行を出して続ける。取得のスクリプトを起動できないときも同じ）。保存の前に行うのは、
@@ -359,35 +418,6 @@ round エントリを状態ファイルへ保存する前に次を行う。**失
 スナップショットを取り直すのは、次のラウンドの担当が同じ実行の前のラウンドの指摘と「対応しました」の返信を
 知らないと、直った指摘の近くを別の言い方で再び指摘し、振動の検知に当たるためである。
 
-## 監視と計測が残すファイル
-
-監視（`monitor.py`）と状態の保存が、AI の書き出しとは別に残す（#662）。
-
-| ファイル | 置き場所 | 中身 | いつ書くか |
-|---|---|---|---|
-| `<stem>-monitor.json` | `$TMP_DIR` | その担当の**最後の**監視の結果（`status` / `reason` / 時刻と、`--phase` の値の `phase`（省いたときは `null`）など 15 個のキー） | 担当 1 者の監視を終えたとき。起動（`launch-cli.sh`）の前に消す |
-| `monitor-outcomes.jsonl` | `$TMP_DIR` | 監視の結果を 1 行 1 つで**追記だけ**で積む | 同上。消さない |
-| `cross-review-pr<PR>-<開始時刻の UTC>.json` | 要約の置き場所の `<owner>--<repo>/` | 実行の要約（所要・`final`・ラウンド・起動と `measure`）。**本文・`detail` を含まない** | 状態を保存するたび（同じ実行は上書き） |
-
-`reason` は既定では `status` から決まる（`OK`→`ok` / `TIMEOUT`→`timeout` / `STALLED`→`stalled` /
-`EARLY_ERROR`→`early_error` / `NO_RESULT`→`missing` / `PIDFILE_BAD`→`pidfile_bad`）。監視が
-文言で区別した 2 つだけが状態から決まらない: 利用上限は `EARLY_ERROR` のまま `usage_limit`、
-CLI 自身の上限で結果を書かずに終わったときは `NO_RESULT` のまま `cli_timeout`（#729）。
-監視の標準出力と終了コードは変わらない。
-
-結果の取り込みは結果ファイルを自前で開かず、共通ライブラリの `monitor_outcome.read_launch_outcome(tmp_dir,
-"<agent>-review-pr<PR>", result_path)` が返す値（使える結果 `payload` / 理由 `reason` / 監視の詳細
-`detail` / リトライ可否 `relaunch_same_agent`）を読む。結果なしのときは
-`rounds[-1].<agent>` に `intent: "NO_RESULT"`、`no_result_reason: <reason>`、監視結果ファイルが
-あれば `monitor_detail: <detail>` を書く（**鍵が無い** = 監視結果ファイルが無かった。空文字は
-書かない）。理由の一覧は [01-state-and-review.md](01-state-and-review.md) の「結果を残さなかった
-レビュアーの扱い」にある。
-
-**要約の置き場所は worktree の外である。** `NDF_METRICS_DIR` → `$XDG_STATE_HOME/ndf/metrics` →
-`$HOME/.local/state/ndf/metrics` の順に決まり、`NDF_METRICS=0` のときは書かない。`state.py report`
-の最後の行が、書いた要約のパスか書かなかった理由を出す。集約するのは共通ライブラリの `run_metrics.py aggregate`
-（`--since` / `--until` / `--repo` / `--kind` / `--version` / `--by total|round-count|reason`）である。
-
 ## `<worktree-base>` の解決順
 
 `state.py init` は worktree の親ディレクトリを以下の優先順で解決する:
@@ -397,8 +427,8 @@ CLI 自身の上限で結果を書かずに終わったときは `NO_RESULT` の
    コンテナ再作成で自動消滅し、共有 volume を消費しない）
 
 worktree の実パスは `<base>/<owner>--<repo>/pr<PR>` 形式で、リポジトリ slug を含める
-ことで**他リポジトリの同一 PR 番号と衝突しない**。永続 volume（旧 `/work/worktrees`）を
-使っていた頃は別プロジェクトの残骸 worktree を誤って流用する事故があったため、
+ことで**他リポジトリの同一 PR 番号と衝突しない**。同じパスに別プロジェクトの残骸 worktree が
+残っていると誤って流用するため、
 パスが存在しても `git worktree list` に登録されていなければ `.stale-<timestamp>` に
 退避して作り直すガードも入っている。
 
@@ -439,7 +469,7 @@ GitHub は **自分の PR には `REQUEST_CHANGES` でレビューを投稿で�
 
 `state.py init` は GitHub API の `pulls/<PR>/files --paginate` で変更ファイルを全件取得して分類し、
 そのラウンドのレビュー担当に同じ追加観点を渡す。`--focus` /
-`--extra-instructions-file` は、この自動テンプレートの後ろに上乗せされる。
+`--extra-instructions-file` は、この自動テンプレートの後ろに上乗せされる（レビューのプロファイルの観点があっても同じ）。レビューのプロファイルの分類（[02-fix-and-rotation.md](02-fix-and-rotation.md) の「レビューの宣言」）に当たる変更ファイルがあれば、その観点を既定の観点の後ろに足し、`replace_auto_categories` が真なら既定の自動カテゴリ（`common` / `docs_only` を含むすべて）の観点を渡さない。
 
 自動カテゴリ:
 

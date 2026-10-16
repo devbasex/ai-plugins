@@ -78,10 +78,13 @@ issue のことではない。
 
 ### 2. 設計文書を書く
 
-雛形は [references/design-template.md](references/design-template.md) にある。節の並びと、
+テンプレートは [references/design-template.md](references/design-template.md) にある。節の並びと、
 各節が `implementation-plan` のどのタスクへつながるかもそこにある。
 
-**ドメインモデルの節を最初に書く。** 変更が属するコンテキスト・変える集約とその持ち主・不変条件・
+**H1 と承認する人が読む欄（目的・適用範囲・あるべき姿の根拠）を先に書き、続けてドメインモデルの節を書く。**
+欄の書き方は [design-template.md の「承認する人が読む欄」](references/design-template.md#承認する人が読む欄) にある。
+
+**ドメインモデルの節は機能一覧より先に書く。** 変更が属するコンテキスト・変える集約とその持ち主・不変条件・
 ドメインイベント・用語を、機能一覧より先に決める。書き方は
 [references/domain-model.md](references/domain-model.md) にある。
 
@@ -110,6 +113,13 @@ issue のことではない。
 
 選んだ結論と、その理由と、採らなかった案を残す。書き方は
 [references/decisions.md](references/decisions.md) にある。
+
+**決定ごとに、根拠にした MVV の項目を最後の行に書く**（「根拠: Value 6（MVV 版 1）」）。MVV に反する疑いのある決定は
+設計に書かずに人へ戻す（理由と根拠の項目つき）。MVV の節の読み方と根拠の行の形は [project-mvv.md の「工程での読み方」](../development-workflow/references/project-mvv.md) にある。
+
+**承認の工程を足す決定を書かない。** 承認ゲートの数と置き場所は `development-workflow` の「人手の承認を求める承認ゲート」だけが持つ。
+共通原則の「必ず人の承認が要る操作」（C1〜C8）やプロジェクト固有の操作に当たる変更も、承認ゲート 1・2 で人が見る。
+「別の Pull Request で承認を取ってから書く」「実装でコミットを止めて承認を待つ」のような決定は書かず、変更は実装の中に置く。
 
 ### 4. 進む前に文書の内部整合を突き合わせる
 
@@ -146,9 +156,9 @@ pr → cross-review → merged → worktree（実装用に作り直す）
 | 項目 | 設計 Pull Request |
 | --- | --- |
 | 載せるもの | 要求仕様と設計文書だけ。実装を含めない |
-| 本文 | 形は `/ndf:pr` の「設計 Pull Request の本文」に従う（決定の中身を写さない）。課題を自動で閉じる語（`Closes` / `Fixes` / `Resolves`）を書かない |
+| 本文 | 形は `/ndf:pr` の「設計 Pull Request の本文」に従う（決定の中身を写さない）。GitHub の closing keywords（`Closes` / `Fixes` / `Resolves` の後に課題の番号を書くと、マージ時にその課題を自動で閉じる機能）を書かない |
 
-**自動で閉じる語を書かないのは、実装が終わっていない段階でマージするためである。** 書くと、
+**closing keywords を書かないのは、実装が終わっていない段階でマージするためである。** 書くと、
 マージした時点で課題が閉じ、実装の工程が残っていることが課題の一覧から見えなくなる。課題を
 指すときは番号だけを書く。
 

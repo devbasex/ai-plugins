@@ -114,6 +114,17 @@ def test_a_fork_pull_request_is_detected_from_the_same_response(state_mod, real_
     assert review_lib.github._fetch_pr_metadata(PR).is_fork is True
 
 
+@pytest.mark.parametrize("head_repo", [None, {}, {"full_name": ""}])
+def test_a_missing_head_repository_is_treated_as_a_fork(state_mod, real_github, monkeypatch, head_repo):
+    """削除・参照できないフォークは head.repo が null になる。同じリポジトリと確かめられないので依存を用意しない。"""
+    body = json.loads(json.dumps(PULL_BODY))
+    body["head"]["repo"] = head_repo
+    monkeypatch.setattr(review_lib.github, "_repo_from_git", lambda: REPO)
+    monkeypatch.setattr(review_lib.github, "_gh_rest", lambda p: _response(state_mod, body))
+
+    assert review_lib.github._fetch_pr_metadata(PR).is_fork is True
+
+
 def test_a_wrong_repository_name_falls_back_to_gh_repo_view(state_mod, real_github, monkeypatch):
     """求めた名前が誤っていれば応答が失敗する。そのときだけ解決し直す。"""
     paths: list[str] = []

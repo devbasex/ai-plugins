@@ -17,12 +17,19 @@ PR を**既定の参加者プール（claude / codex / kiro とホスト）か�
 `/ndf:pr-review` と `/ndf:fix` を自動で回す。
 
 既定の参加者プールは claude / codex / kiro とホストで、agy は `--include agy` で戻す（#786。agy は
-テストを背景で起動したまま結果を残さずに終わることがある）。そのうち利用可能な参加者から毎ラウンド 2 スロットを埋める
+テストをバックグラウンドで起動したまま結果を残さずに終わることがある）。そのうち利用可能な参加者から毎ラウンド 2 スロットを埋める
 （実装は共通ライブラリの `lib/assignment.py`）。**1 者が使えなくても始まり**、利用可能な参加者が 1 者なら
 その者と同じランタイムの 2 つ目で埋める（`docs/05`）。**ホストも輪番に入れる**のは、
 レビュー担当を CLI プロセスとして起動するためである。ホストと同じランタイムでも、ホストの
 会話の作業文脈は持ち込まれない。外したい相手は `--exclude` で名指しする（既定の参加者プールに無い者の
 指定は止めずに無視し、`ℹ` の 1 行で知らせる）。
+
+**リポジトリが `.ndf/runtimes.json` で使ってよいランタイムを宣言していれば、参加者プールをその `allowed` で絞る**。
+宣言の外の名前を `--include` / `--only` で渡すと、`init` が宣言のパスと `allowed` を出して終了コード 1 で止まる。
+宣言で使えるランタイムが 1 つなら、引数なしで 2 スロットを `<その者>` と `<その者>-2` で埋める。`review_seats`
+（例: `["claude", "claude-2"]`）を書くと、毎ラウンドその 2 スロットで回る。形と読み方は `docs/04` と
+`scripts/lib/runtime_policy.py` にある。ラウンドごとのスロット・ランタイム・モデル・組の相手は `rounds[].seats` に残り、
+`run_metrics.py aggregate --by pair` で組ごとに数えられる。
 
 /goalの引数として、または development-workflow の工程として呼ばれた場合は、新しい指摘が出なくなるまで/cross-reviewを繰り返す。
   * 担当のいずれかが不具合などで実行できなくなった場合は異常終了とする
@@ -37,6 +44,7 @@ PR を**既定の参加者プール（claude / codex / kiro とホスト）か�
 - [docs/04-contracts.md](docs/04-contracts.md) — 状態ファイルの形式と AI への入出力の契約（手順の途中では読まない）
 - [docs/05-pool-and-convergence.md](docs/05-pool-and-convergence.md) — 誰がレビューし、いつ止めるか（参加者プール・担当の輪番・認証・終了基準の 3 層）
 - [docs/06-evidence.md](docs/06-evidence.md) — 指摘に求める根拠と反証条件、独立発見の規約、効果の測定（4 つの集約方式と限界）
+- [docs/07-posts-and-records.md](docs/07-posts-and-records.md) — 状態ファイルの外へ書くもの（投稿の種別ごとの契約・投稿キュー・監視と計測が残すファイル。手順の途中では読まない）
 - [scripts/drive.py](scripts/drive.py) — 収束ループの駆動（LLM が要る地点で pause を返して止まる）
 - [scripts/state.py](scripts/state.py) — state.json 操作。起動・監視・巻き直しは `launch-reviewer.sh` / `monitor.py` / `rotate-pr.sh`、効果の測定は `measure.py`（状態を保存するたびに呼ばれる）
 
@@ -104,7 +112,7 @@ PR を**既定の参加者プール（claude / codex / kiro とホスト）か�
 ## 前提
 
 - `/ndf:fix` が **サブエージェント起動 + 重要度ベース自動修正 + Resolve Conversation** に対応
-- `gh` CLI が認証済み。担当になる CLI は `init` が起動前に確かめ、通らない者は外して続ける（誤検知するときは `NDF_SKIP_AUTH_CHECK=1`）
+- `gh` CLI が認証済み。担当になる CLI は `init` が起動前に認証とモデルの 1 回の呼び出しまで確かめ、通らない者は理由を出して外して続ける。設定のモデルを引けないだけなら既定のモデルで担当に入れる（誤検知するときは `NDF_SKIP_AUTH_CHECK=1`）
 - worker（`general-purpose` のサブエージェント）を起こせる
 
 ## 事前確認
@@ -116,7 +124,8 @@ PR を**既定の参加者プール（claude / codex / kiro とホスト）か�
 
 1 ラウンドは「2 スロットの並列レビュー → 根拠の検証 → 判定（`intent` ベース）」で、一方でも REQUEST_CHANGES なら
 修正 → 収束チェック（`max-rounds`・振動・CI の失敗・`rotate-after` の巻き直し）→ 次のラウンドへ進む。結果を残さなかった
-スロットは同じラウンドで 1 度だけ起動し直す。ループを抜けたら（`final` がどの値でも）最終スイープで open thread を 0 にし、
+スロットは、振り替えの規則（`assignment.after_no_result`）の答えどおりに同じラウンドで 1 度だけ起動し直すか、利用上限と
+2 度目の結果なしでは別のアカウントか残りの参加者へ振り替える（振り替え先が無ければ中断）。ループを抜けたら（`final` がどの値でも）最終スイープで open thread を 0 にし、
 `verify-sweep` が GitHub 側の実数で確かめる。担当が書くのは指摘の基準（`references/design-principles.md` の「指摘の基準」）に
 当たる `critical` / `major` だけで、修正と最終スイープがコードを直すのも `major` 以上だけである。`minor` / `nit` は見送りの返信を付けて閉じる。
 
@@ -126,12 +135,12 @@ Skill のディレクトリで次の 1 行を打ち、最後の行の結果 JSON
 渡す**（再開で渡した引数の扱いは [docs/04-contracts.md](docs/04-contracts.md) の「再開で渡した引数の扱い」）。
 
 ```bash
-python3 scripts/drive.py <PR> [--rotate-mode light|squash] [--max-rounds N] [--rotate-after K] [--host H] [--only R] \
+python3 scripts/drive.py <PR> [--rotate-mode light|squash] [--reopen] [--max-rounds N] [--rotate-after K] [--host H] [--only R] \
   [--exclude N] [--include N] [--require-all] [--focus TEXT] [--extra-instructions-file PATH] [--verify-command CMD] [--verify-exit-code N]
 ```
 
 待ちはコマンドの中で行う（1 ラウンドで 20 分を超えうる）。Claude Code では `run_in_background` で起動し、
-完了通知を 1 回受ける。Codex / Kiro / agy では共通ライブラリの `scripts/lib/bg-wait.sh` で背景に起動し、区切った待ちを
+完了通知を 1 回受ける。Codex / Kiro / agy では共通ライブラリの `scripts/lib/bg-wait.sh` でバックグラウンドで起動し、区切った待ちを
 124 が返るあいだ**別の呼び出しとして**打ち直す。終わると駆動の出力の全体を出し、駆動の終了コードで終わる。
 
 ```bash
@@ -156,9 +165,15 @@ JSON の形と終了コードの表は共通ライブラリの `scripts/lib/driv
 レビュー・戻り値ファイル）だけを持つ。担当はコミットまでで、送信・返信・決着は駆動の取り込みが行う。
 振動を検知したときは、メインが正しい状態を決めてから打ち直す。
 
-再開は同じコマンドを打ち直すだけである。進みは `$TMP_DIR/drive-pr<PR>.json` と state.json にあり、pause の
+再開は同じコマンドを打ち直すだけである。進みは耐久の記録（`~/.local/state/ndf/dbos/review-<鍵>.sqlite`）と state.json にあり、pause の
 結果ファイルがあればその続きから進む。`metrics` は state.json から数えた件数（`rounds` / `prs` / `findings` /
 `fixed` / `deferred` / `rejected` / `unresolved` / `final` / `review_status`）である。
+
+**終わったレビューにもう一度回すときも、同じコマンドを打ち直すだけである。** state.json を開かない・`mv` しない・
+書き換えない。終わりの時点の PR の head と今の head が違えば（差分を足した）、`state.py init` が `final` を外して
+`reopens` に 1 件積み、前のラウンドを残したまま次の番号のラウンドから続ける。上限・巻き直し・振動検知は足した時点から
+数え直す。head が同じなら前回の結果を返す。差分を足さずに回すとき（担当の認証で `error` になった、など）は `--reopen` を
+付ける。手順と鍵は [docs/01-state-and-review.md](docs/01-state-and-review.md) の「ラウンドを足す」にある。
 
 ## レビュー出力の制約と運用の切り分け
 
@@ -181,6 +196,7 @@ JSON の形と終了コードの表は共通ライブラリの `scripts/lib/driv
 - **最終スイープ結果**: `resolved` / `fixed_in_sweep` / `remaining_open`（`unresolved`）。**0 が正常**で、0 でなければ理由を書く
 - **基準外の見送りの件数**・**残 deferred nit**・**rejected 件数**・**最終 PR URL**
 - レビューの重点の宣言（`.ndf/review.json`）が読めなかったときは、その理由（基準 1・2・4 だけで続けた）
+- `report` の要約に `## レビューのプロファイル:` の行があるときは、その行（どのプロファイルで見たか。ほかにも当たったプロファイルの名前を含む）
 - **検証**（スイープの結果ファイルの `verification`）: 実行したコマンドと終了コード。実行しなかったときはその理由
 
 詳細は PR 上のインラインコメントと state.json に残っているため、本報告では繰り返さない。

@@ -20,10 +20,15 @@ PY = sys.executable
 
 sys.path.insert(0, str(SCRIPTS / "lib"))
 from step_result import validate_result  # noqa: E402
+import claude_accounts as ca  # noqa: E402
 
 sys.path.insert(0, str(SCRIPTS))
-from supervise_lib import claude, commands, engine, paths, plan, pr as pr_step, queue  # noqa: E402
+from supervise_lib import claude, commands, engine, flow, paths, plan, pr as pr_step, procedures, queue  # noqa: E402
+from supervise_lib.prompts import PR_SYSTEM  # noqa: E402
 import gh_call  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from account_fake import FakeAnthropic, accounts, window  # noqa: E402,F401
 
 FAKE_GH = """#!{py}
 import json, sys
@@ -40,6 +45,10 @@ open(os.environ["FAKE_CLAUDE_LOG"], "a").write(sys.stdin.read() + "\\n=====\\n")
 print(json.dumps({{"result": "## 作業の報告\\n- 結果: 完了", "usage": {{}}, "total_cost_usd": 0.01,
                   "num_turns": 1}}))
 """
+
+
+# new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える
+pytestmark = pytest.mark.usefixtures("issue_bodies")
 
 
 @pytest.fixture
@@ -81,23 +90,106 @@ def test_work_without_issues_does_not_call_gh(tmp_path, fakes):
     assert "## 課題" not in fakes.read_text()
 
 
-def test_rerun_failed_passes_when_last_failed_run_passes(tmp_path):
-    # 1 回目は落ち、PYTEST_ADDOPTS に --lf が付いた 2 回目は通る
-    cmd = 'case "$PYTEST_ADDOPTS" in *--lf*) exit 0;; *) echo boom; exit 1;; esac'
-    s, text = run_plan(tmp_path, [{"id": "t", "type": "run", "cmd": cmd, "rerun_failed": True, "next": "end"}])
-    assert "結果: 完了" in text
-    assert s.state.results["t"]["rerun"] == {"exit": 0}
-    assert "揺れとして進む" in s.state.results["t"]["text"]
-
-
-def test_rerun_failed_still_failing_goes_to_on_fail(tmp_path):
+def test_a_failed_run_step_is_not_rerun_by_the_engine(tmp_path):
+    """落ちたテストの走らせ直しは run のステップが持たない（test-run.py が JUnit で見分ける。#1334 AC1）。"""
     steps = [
-        {"id": "t", "type": "run", "cmd": "exit 1", "rerun_failed": True, "on_fail": "after"},
+        {"id": "t", "type": "run", "cmd": "exit 1", "on_fail": "after"},
         {"id": "after", "type": "run", "cmd": "true", "next": "end"},
     ]
     s, text = run_plan(tmp_path, steps)
-    assert s.state.results["t"]["rerun"] == {"exit": 1}
+    assert "rerun" not in s.state.results["t"]
     assert [e["id"] for e in s.state.log] == ["t", "after"]
+
+
+INFRA_OUT = json.dumps(
+    {"tool": "release", "status": "stopped", "summary": "PR #5 をマージできない: #5 の CI の基盤待ち", "items": [], "metrics": {}}
+)
+
+
+def test_on_exit_stop_skips_on_fail_and_judge(tmp_path):
+    """#1645 の AC12・決定 6: on_exit の 75 → stop は on_fail（judge）へ行かず、summary を理由に止まる。ほかの失敗は on_fail へ。"""
+    steps = [
+        {"id": "release", "type": "run", "cmd": f"echo '{INFRA_OUT}'; exit 75", "on_exit": {"75": "stop"}, "on_fail": "judge"},
+        {"id": "judge", "type": "run", "cmd": "true", "next": "end"},
+    ]
+    s, text = run_plan(tmp_path, steps)
+    assert [e["id"] for e in s.state.log] == ["release"]
+    assert "結果: 止まった" in text
+    assert "ステップ release が終了コード 75 で止めた: PR #5 をマージできない: #5 の CI の基盤待ち" in text
+    steps[0]["cmd"] = "exit 1"
+    s, _ = run_plan(tmp_path / "other", steps)
+    assert [e["id"] for e in s.state.log] == ["release", "judge"]
+
+
+def test_on_exit_goes_to_a_step(tmp_path):
+    steps = [
+        {"id": "a", "type": "run", "cmd": "exit 75", "on_exit": {"75": "c"}, "on_fail": "b"},
+        {"id": "b", "type": "run", "cmd": "true", "next": "end"},
+        {"id": "c", "type": "run", "cmd": "true", "next": "end"},
+    ]
+    s, text = run_plan(tmp_path, steps)
+    assert [e["id"] for e in s.state.log] == ["a", "c"] and "結果: 完了" in text
+
+
+@pytest.mark.parametrize(
+    ("table", "why"),
+    [({"x": "stop"}, "鍵が終了コードでない: x"), ({"75": "nowhere"}, "行き先が知らないステップ: nowhere")],
+)
+def test_on_exit_with_a_bad_table_stops_before_any_step(tmp_path, table, why):
+    s, text = run_plan(tmp_path, [{"id": "a", "type": "run", "cmd": "true", "on_exit": table, "next": "end"}])
+    assert s.state.log == [] and "結果: 止まった" in text and why in text
+
+
+RECORD_OUT = json.dumps(
+    {"tool": "release", "status": "ok", "summary": "s", "items": [], "metrics": {"release_pr_url": "https://github.com/o/r/pull/40"}}
+)
+
+
+@pytest.mark.parametrize(("code", "want"), [(0, "https://github.com/o/r/pull/40"), (1, "無し")])
+def test_pr_from_takes_the_pull_request_from_a_successful_run_step(tmp_path, code, want):
+    """#1273 の I5: pr_from の run のステップが 0 で終わると、報告の Pull Request が metrics の URL になる。落ちたら書き換えない。"""
+    steps = [
+        {"id": "record", "type": "run", "cmd": f"echo '{RECORD_OUT}'; exit {code}", "pr_from": "release_pr_url", "next": "end"},
+    ]
+    s, text = run_plan(tmp_path, steps)
+    assert f"- Pull Request: {want}" in text
+
+
+def test_pr_from_without_the_key_keeps_the_pull_request(tmp_path):
+    """#1273 の I5: metrics に鍵が無ければ Pull Request を書き換えない。"""
+    out = json.dumps({"tool": "t", "status": "ok", "summary": "s", "items": [], "metrics": {}})
+    steps = [{"id": "record", "type": "run", "cmd": f"echo '{out}'", "pr_from": "release_pr_url", "next": "end"}]
+    s, text = run_plan(tmp_path, steps)
+    assert "- Pull Request: 無し" in text
+
+
+@pytest.mark.parametrize(
+    ("failing", "visits"),
+    [
+        # 落ちたステップが fix の next より前: そこからやり直す（#1315 の bump）
+        ("bump", ["bump", "fix", "bump", "sync", "release", "verify"]),
+        # 落ちたステップが fix の next より後: next から配り直す（verify の前に release を流し直す）
+        ("verify", ["bump", "sync", "release", "verify", "fix", "sync", "release", "verify"]),
+    ],
+)
+def test_fix_goes_back_to_the_failed_step_before_its_next(tmp_path, fakes, failing, visits):
+    """#1315: back_to_failed の fix は、落ちたステップが next より並びで前なら、そのステップへ戻る。"""
+    once = tmp_path / "failed-once"
+    fail_once = f"sh -c '[ -f {once} ] || {{ touch {once}; exit 3; }}'"
+
+    def run_step(sid, nxt):
+        return {"id": sid, "type": "run", "cmd": fail_once if sid == failing else "true", "on_fail": "fix", "next": nxt}
+
+    steps = [
+        run_step("bump", "sync"),
+        run_step("sync", "release"),
+        run_step("release", "verify"),
+        run_step("verify", "end"),
+        {"id": "fix", "type": "work", "prompt": "直す", "inputs": ["bump", "verify"], "back_to_failed": True, "next": "sync"},
+    ]
+    s, text = run_plan(tmp_path, steps)
+    assert "結果: 完了" in text
+    assert [e["id"] for e in s.state.log] == visits
 
 
 @pytest.mark.parametrize("where", ["plan", "declaration"])
@@ -138,6 +230,20 @@ def test_skip_to_jumps_over_steps(tmp_path):
     s, text = run_plan(tmp_path, steps)
     assert "結果: 完了" in text
     assert [e["id"] for e in s.state.log] == ["assess", "review"]
+
+
+def test_skip_to_does_not_jump_when_deps_are_missing(tmp_path):
+    """依存の欠け（deps の 69）は飛ばしてよい（skip_code の既定 3）と読まず、on_fail へ進む（#1654）。"""
+    import deps
+
+    steps = [
+        {"id": "assess", "type": "run", "cmd": f"exit {deps.EXIT_DEPS_MISSING}", "skip_to": "review", "on_fail": "refactor"},
+        {"id": "refactor", "type": "run", "cmd": "true"},
+        {"id": "review", "type": "run", "cmd": "true", "next": "end"},
+    ]
+    s, _ = run_plan(tmp_path, steps)
+    assert [e["id"] for e in s.state.log] == ["assess", "refactor", "review"]
+    assert not s.state.log[0].get("skipped")
 
 
 def test_skip_to_passes_through_on_zero(tmp_path):
@@ -302,7 +408,7 @@ def test_queue_creates_worktrees_in_order_before_run(tmp_path, monkeypatch):
         f.write_text(json.dumps(wt_plan(repo, b)))
         plans.append(str(f))
     real = paths.ensure_worktree
-    monkeypatch.setattr(paths, "ensure_worktree", lambda plan, **kw: calls.append(plan["branch"]) or real(plan, **kw))
+    monkeypatch.setattr(flow, "make_worktree", lambda plan, **kw: calls.append(plan["branch"]) or real(plan, **kw))
     res = queue.cmd_queue(plans, 3, poll=0.1)
     assert calls == ["feat/a", "feat/b", "feat/c"]
     assert res["status"] == "ok", res
@@ -348,8 +454,14 @@ def test_new_impl_in_other_repo_uses_declarations_only(tmp_path):
     plan = json.loads(out.read_text())
     steps = {s["id"]: s for s in plan["steps"]}
     assert "sync" not in steps and steps["impl"]["next"] == "test-limited"
-    assert steps["test-limited"]["cmd"] == "npm test -- src/a.test.js"
-    assert steps["test-all"]["cmd"] == "npm test -- src"
+    # テストのステップは test-run.py が宣言（supervise.json の test.command を 1 つの suite として読む）から走らせる（#1334）
+    assert steps["test-limited"]["cmd"] == f"python3 {SCRIPTS / 'test-run.py'} scope --paths src/a.test.js"
+    assert steps["test-all"]["cmd"] == f"python3 {SCRIPTS / 'test-run.py'} whole --pr {{pr}}"
+    assert "rerun_failed" not in steps["test-limited"] and "rerun_failed" not in steps["test-all"]
+    assert plan["テストの戦略"]["name"] == "local-full" and "supervise.json" in plan["テストの戦略"]["note"]
+    assert plan["テストの時間"]["basis"]["unknown_duration"] is True
+    assert steps["test-limited"]["timeout"] == 990 and steps["test-all"]["timeout"] == 1980
+    assert steps["merge"]["cmd"].endswith("merge-when-green {pr} --timeout 3600") and steps["merge"]["timeout"] == 3960
     assert steps["pr"]["base"] == "main" and plan["base_branch"] == "main" and "no_reports" not in plan
     for cmd in run_cmds(plan):
         assert not any(w in cmd for w in AI_PLUGINS_WORDS), cmd
@@ -387,8 +499,11 @@ def test_new_impl_without_declaration_stops(tmp_path):
         cwd=root,
     )
     assert p.returncode == 0, p.stderr
-    steps = {s["id"]: s for s in json.loads((tmp_path / "p.json").read_text())["steps"]}
-    assert steps["test-limited"]["cmd"] == "make test t" and steps["pr"]["base"] == "trunk"
+    plan = json.loads((tmp_path / "p.json").read_text())
+    steps = {s["id"]: s for s in plan["steps"]}
+    # `--test-cmd` は雛形として test-run.py へ渡す。`{paths}` が無いのでそのまま走らせる round-only になる
+    assert steps["test-limited"]["cmd"].endswith("scope --paths t --template 'make test'") and steps["pr"]["base"] == "trunk"
+    assert plan["テストの戦略"]["name"] == "round-only"
 
 
 def test_new_release_needs_release_form(tmp_path):
@@ -478,7 +593,7 @@ def test_new_impl_writes_plan(tmp_path):
     assert steps["impl"]["issues"] is True and steps["impl"]["prompt"].startswith("指示\n")
     assert steps["sync"]["preset"] == "sync-check"
     assert steps["merge"]["probe"]["cmd"].endswith("merged-steps.py probe --pr {pr} --act")
-    assert "plugins/ndf/scripts/tests" in steps["test-limited"]["cmd"] and steps["test-limited"]["rerun_failed"]
+    assert "plugins/ndf/scripts/tests" in steps["test-limited"]["cmd"] and "test-run.py" in steps["test-limited"]["cmd"]
     assert plan["branch"] == "feat/issue-858-x"
     # ステップの遷移がすべて知っているステップを指す
     for s in plan["steps"]:
@@ -495,7 +610,41 @@ def test_new_check_uses_assess_skip(tmp_path):
     assert p.returncode == 0, p.stderr
     steps = {s["id"]: s for s in json.loads(out.read_text())["steps"]}
     assert steps["assess"]["skip_to"] == "review"
-    assert "--scope a.py" in steps["refactor"]["args"]
+    assert "--scope a.py" in steps["refactor"]["cmd"]
+
+
+@pytest.mark.parametrize("mode", ["light", "operation", "documentation"])
+def test_new_check_skips_refactor_for_modes_without_it(tmp_path, mode):
+    # 工程表で「構造改善」を通らないモードは、検査を実装レビューから始める
+    out = tmp_path / "c.json"
+    p = cli("new", "check", "--pr", "999", "--worktree", "/w", "--mode", mode, "--out", str(out))
+    assert p.returncode == 0, p.stderr
+    ids = [s["id"] for s in json.loads(out.read_text())["steps"]]
+    assert ids[0] == "review" and "assess" not in ids and "refactor" not in ids
+
+
+def test_new_sprint_check_for_light_goes_from_pr_to_review(tmp_path):
+    out = tmp_path / "m"
+    p = cli(
+        "new",
+        "sprint",
+        "--name",
+        "m",
+        "--worktree",
+        str(tmp_path),
+        "--issue",
+        "1",
+        "--mode",
+        "light",
+        "--version",
+        "10.18.0-dev.1",
+        "--out",
+        str(out),
+    )
+    assert p.returncode == 0, p.stderr
+    waves = {w["name"]: w for w in json.loads((out / "sprint.json").read_text())["ステージ"]}
+    steps = {s["id"]: s for s in json.loads(Path(waves["検査"]["plans"][0]).read_text())["steps"]}
+    assert steps["pr"]["next"] == "review" and "refactor" not in steps
 
 
 def test_new_impl_requires_title():
@@ -590,7 +739,7 @@ def test_queue_removes_old_done_at_start(tmp_path, monkeypatch):
     done.parent.mkdir()
     done.write_text("古い")
     seen = []
-    monkeypatch.setattr(queue, "run_batch", lambda plans, m, poll: seen.append(done.exists()) or [{"plan": plans[0], "result": "完了"}])
+    monkeypatch.setattr(flow, "run_stage", lambda plans, adm, args: seen.append(done.exists()) or [{"plan": plans[0], "result": "完了"}])
     res = queue.cmd_queue([a], 3)
     assert seen == [False] and json.loads(done.read_text()) == res
 
@@ -658,6 +807,159 @@ def test_old_plan_and_report_keys_are_read(tmp_path):
     assert commands.note_row(old, "") == "| #2 | 実装: 完了 | — |"
 
 
+def _report_state_empty(st):
+    return {"フェーズ": "試験", "課題": [858, 859], "次のフェーズ": "検査", "Pull Request": "https://example/pull/9"}, "完了", "無し"
+
+
+def _report_state_rich(st):
+    llm = {"turns": 3, "cache_read": 100, "cache_write": 20, "output": 7, "cost": 0.0125}
+    st.log = [
+        {"id": "impl", "exit": 0, "seconds": 12.5, "llm": llm, "counts": {"passed": 3, "failed": None, "skipped": 0}},
+        {"id": "judge", "decision": "続ける", "llm": {**llm, "turns": 1, "cost": 1}, "counts": {"failed": None}},
+        {"id": "show", "exit": 12, "gate_as_ok": True, "presentation": "/w/shown.md"},
+        {"id": "quiet", "exit": 12, "presentation": "/w/not-shown.md"},
+        {"id": "wait", "exit": 0, "limit": True, "limit_hits": 2, "limit_waited": 90, "limit_resets": "03:00"},
+        {"id": "wait2", "limit": True},
+    ]
+    st.llm.update(work=2, judge=1, input=56, cache_read=200, cache_write=40, output=14, cost=1.0125)
+    st.last_stage = "Pull Request"
+    st.gates = [{"id": "release", "exit": 10, "presentation": "/w/gate.md"}, {"id": "merge", "exit": 11}]
+    st.switched = ["CLAUDE_KEY_2", "従量"]
+    st.slow_events = [
+        {"step": "impl", "round": 1, "act": "wait", "by": "rule"},
+        {"step": "impl", "round": 2, "act": "wait", "by": "llm"},
+        {"step": "impl", "act": "kill", "by": "rule", "probe": {"class": "hang", "action": "none"}},
+        {"step": "pr", "round": 3, "act": "wait", "by": "rule", "probe": {"class": "net", "action": "remedied"}},
+    ]
+    st.pcount.update(step=6, alive=1, attention=2, slow=4, llm=1, llm_cost=0.02)
+    st.progress.write_text(
+        '{"kind": "worker", "text": "テストを書いた"}\n{"kind": "step", "id": "impl"}\nこわれた行\n{"kind": "worker", "text": " "}\n[1]\n\n{"kind": "worker", "text": "書きかけ'
+    )
+    return {"フェーズ": "実装", "課題": [1054], "次のフェーズ": "検査"}, "関門", "承認を待つ"
+
+
+REPORT_EMPTY = """## フェーズの報告
+
+- フェーズ: 試験
+- 課題: #858 #859
+- 結果: 完了
+- 関門: 無し
+- 次のフェーズ: 検査
+- Pull Request: https://example/pull/9
+- 最後に記録した工程: 無し
+- 使った worker: 修正 0（claude -p）/ 判断 0（claude -p）
+- 途中の報告: ステップ 0 / まだ動いている 0 / worker 0（形が違う 0）/ conductor 向け 0 / 遅れの調査 0 / LLM へ回した 0 回・$0.000（{dir}/progress.jsonl）
+- 提示物: 無し
+- 理由: 無し
+- 通ったステップ: {empty}
+- 件数: 無し
+- LLM の使用量: 入力 0 / cache read 0 / cache write 0 / 出力 0 / $0.000
+- CLI（drive・work の中）: 無し
+- 記録: {dir}
+
+| ステップ | 往復 | 秒 | cache read | cache write | 出力 | 費用 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 無し | | | | | | |
+"""
+
+REPORT_RICH = """## フェーズの報告
+
+- フェーズ: 実装
+- 課題: #1054
+- 結果: 関門
+- 関門: ステップ release（exit=10）; ステップ merge（exit=11）
+- 次のフェーズ: 無し
+- Pull Request: 無し
+- 最後に記録した工程: Pull Request
+- 使った worker: 修正 2（claude -p）/ 判断 1（claude -p）
+- 認証: 切り替え（CLAUDE_KEY_2, 従量）
+- 利用上限: wait 2 回（待ち 90 秒・解除 03:00）; wait2 1 回（待ち 0 秒）
+- 遅れ: impl 2 回目 wait（llm）; impl 0 回目 kill（rule・hang）; pr 3 回目 wait（rule・net）
+- 途中の報告: ステップ 6 / まだ動いている 1 / worker 1（形が違う 3）/ conductor 向け 2 / 遅れの調査 4 / LLM へ回した 1 回・$0.020（{dir}/progress.jsonl）
+- 提示物: /w/gate.md, /w/shown.md
+- 理由: 承認を待つ
+- 通ったステップ: impl(exit=0) → judge[続ける] → show(exit=12) → quiet(exit=12) → wait(exit=0) → wait2(exit=None)
+- 件数: impl: passed 3 / skipped 0; judge: 無し
+- LLM の使用量: 入力 56 / cache read 200 / cache write 40 / 出力 14 / $1.012
+- CLI（drive・work の中）: 無し
+- 記録: {dir}
+
+| ステップ | 往復 | 秒 | cache read | cache write | 出力 | 費用 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| impl | 3 | 12.5 | 100 | 20 | 7 | $0.013 |
+| judge | 1 |  | 100 | 20 | 7 | $1.000 |
+"""
+
+
+@pytest.mark.parametrize("fill, expected", [(_report_state_empty, REPORT_EMPTY), (_report_state_rich, REPORT_RICH)], ids=["empty", "rich"])
+def test_write_report_text_of_a_state(tmp_path, fill, expected):
+    """現状固定: 報告の全文。`{dir}` は状態ディレクトリ、`{empty}` は空（行末の空白を書かないための目印）。空の状態と、関門・認証の切り替え・利用上限・遅れ・途中の報告がある状態。"""
+    from supervise_lib.state import RunState
+
+    st = RunState(tmp_path / "state", {})
+    plan, result, reason = fill(st)
+    text = st.write_report(plan, result, reason)
+    assert text.replace(str(st.dir), "{dir}") == expected.replace("{empty}", "")
+    assert (st.dir / "report.md").read_text() == text
+
+
+@pytest.mark.parametrize("result, gate", [("関門", "本番の系へ届く操作"), ("止まった", "無し")])
+def test_write_report_without_gates_or_plan_keys(tmp_path, result, gate):
+    """現状固定: 関門の記録が無いときの関門の行と、計画に鍵が無いときの行。完了でなければ次のフェーズを書かない。"""
+    from supervise_lib.state import RunState
+
+    lines = RunState(tmp_path / "state", {}).write_report({"次のフェーズ": "検査"}, result, "x").splitlines()
+    assert lines[2:8] == [
+        "- フェーズ: None",
+        "- 課題: ",
+        f"- 結果: {result}",
+        f"- 関門: {gate}",
+        "- 次のフェーズ: 無し",
+        "- Pull Request: 無し",
+    ]
+
+
+NOTE_REPORT = """## フェーズの報告
+
+- フェーズ: 実装
+- 課題: #1054
+- 結果: {res}
+- Pull Request: {pr}
+- 理由: {reason}
+- LLM の使用量: 入力 56 / cache read 1423577 / cache write 78735 / 出力 24980 / {cost}
+- 記録: x
+"""
+
+
+@pytest.mark.parametrize(
+    "fields, row",
+    [
+        # 完了でなければ理由を足す。費用は報告の文字のまま（0.50 を 0.5 に丸めない）
+        (
+            {"res": "止まった", "pr": "https://example/pull/9", "reason": "テストが落ちた", "cost": "$0.50"},
+            "| #1054 | 実装: 止まった（https://example/pull/9、$0.50）。理由: テストが落ちた | 直す |",
+        ),
+        (
+            {"res": "止まった", "pr": "無し", "reason": "テストが落ちた", "cost": "$1.178"},
+            "| #1054 | 実装: 止まった（$1.178）。理由: テストが落ちた | 直す |",
+        ),
+        # 理由が「無し」なら足さない。完了なら理由があっても足さない
+        ({"res": "止まった", "pr": "無し", "reason": "無し", "cost": "$1.178"}, "| #1054 | 実装: 止まった（$1.178） | 直す |"),
+        ({"res": "完了", "pr": "#9", "reason": "書いてある", "cost": "$2"}, "| #1054 | 実装: 完了（#9、$2） | 直す |"),
+        # 費用が行の末尾に `/ $数` の形で無ければ出さない。Pull Request も無ければ括弧ごと出さない
+        ({"res": "止まった", "pr": "無し", "reason": "上限", "cost": "不明"}, "| #1054 | 実装: 止まった。理由: 上限 | 直す |"),
+    ],
+)
+def test_note_row_shows_reason_and_cost_when_not_done(fields, row):
+    """現状固定: 表の行は、報告の Pull Request・費用・理由をこの形で並べる。"""
+    assert commands.note_row(NOTE_REPORT.format(**fields), "直す") == row
+
+
+def test_note_row_of_an_empty_report():
+    """現状固定: 読める行が無い報告は、課題も次も「—」で埋める。"""
+    assert commands.note_row("", "") == "| — | :  | — |"
+
+
 def test_note_without_section_stops(tmp_path):
     doc = tmp_path / "handoff.md"
     doc.write_text("# 無し\n")
@@ -704,7 +1006,7 @@ n = len(open(os.path.join(state, "calls")).read().splitlines()) if os.path.exist
 responses = json.load(open(os.path.join(state, "responses.json")))
 r = responses[min(n, len(responses) - 1)]
 sys.stdin.read()
-open(os.path.join(state, "calls"), "a").write(json.dumps({"n": n, "bedrock": os.environ.get("CLAUDE_CODE_USE_BEDROCK")}) + "\\n")
+open(os.path.join(state, "calls"), "a").write(json.dumps({"n": n, "bedrock": os.environ.get("CLAUDE_CODE_USE_BEDROCK"), "token": os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"), "config_dir": os.environ.get("CLAUDE_CONFIG_DIR"), "account": os.environ.get("NDF_CLAUDE_ACCOUNT"), "auth_token": os.environ.get("ANTHROPIC_AUTH_TOKEN")}) + "\\n")
 if r.get("stderr"):
     sys.stderr.write(r["stderr"])
 print(json.dumps(r["out"]))
@@ -726,6 +1028,8 @@ def seq(tmp_path, monkeypatch):
     monkeypatch.setenv("NDF_SUPERVISE_LIMIT_SLEEP", "0")
     monkeypatch.delenv("NDF_SUPERVISE_CLAUDE_FALLBACK", raising=False)
     monkeypatch.delenv("CLAUDE_CODE_USE_BEDROCK", raising=False)
+    monkeypatch.delenv("NDF_CLAUDE_ACCOUNT", raising=False)
+    monkeypatch.setenv("NDF_ACCOUNTS_DIR", str(tmp_path / "no-accounts"))  # 利用者の置き場を読まない
 
     def set_responses(*rs):
         (d / "responses.json").write_text(json.dumps(list(rs)))
@@ -796,6 +1100,214 @@ def test_limit_applies_to_judge(tmp_path, seq):
     assert len(calls()) == 2 and s.state.results["j"]["decision"] == "next" and "結果: 完了" in text
 
 
+# ---- 登録済みのアカウントの切り替え（#1389）
+
+WORK_TWICE = [
+    {"id": "w1", "type": "work", "prompt": "直す"},
+    {"id": "w2", "type": "work", "prompt": "もう 1 つ直す", "next": "end"},
+]
+
+
+def progress_rows(tmp_path, kind):
+    p = tmp_path / "state" / "progress.jsonl"
+    return [r for r in map(json.loads, p.read_text().splitlines()) if r["kind"] == kind]
+
+
+def test_limit_switches_to_registered_account_without_wait(tmp_path, seq, accounts, monkeypatch):
+    """受け入れ条件 6: worker が上限に当たると、待たずに別の登録済みアカウントで同じ呼び出しをやり直す。"""
+    set_responses, calls = seq
+    accounts.add("a", util5=50)
+    accounts.add("b", util5=20)
+    accounts.add("c", util5=60)
+    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "a")
+    set_responses(LIMIT, OK)
+    s, text = run_plan(tmp_path, WORK_THEN_FAIL)
+    got = [(c["token"], c["config_dir"], c["account"]) for c in calls()]
+    assert got == [(None, str(accounts.root / "a"), "a"), (None, str(accounts.root / "b"), "b")]
+    w = s.state.results["w"]
+    assert w["auth"] == "アカウント b（five_hour）" and "limit_waited" not in w
+    assert "- 認証: 切り替え（アカウント b）" in text
+    assert accounts.account("a")["limit"]["type"] == "five_hour"
+    assert [(r["reason"], r["from"], r["to"]) for r in progress_rows(tmp_path, "account")] == [("five_hour", "a", "b")]
+    assert "SECRET" not in (tmp_path / "state" / "progress.jsonl").read_text() and "SECRET" not in text
+
+
+def test_all_accounts_limited_without_declaration_waits(tmp_path, seq, accounts, monkeypatch):
+    """受け入れ条件 4・14: 候補が無く宣言も無ければ、今と同じ上限待ちに入る。"""
+    set_responses, calls = seq
+    accounts.add("a")
+    accounts.add("b", util5=100)
+    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "a")
+    set_responses(LIMIT_NO_TIME, OK)
+    s, text = run_plan(tmp_path, WORK_THEN_FAIL, limit_retry_seconds=3)
+    assert [c["config_dir"] for c in calls()] == [str(accounts.root / "a")] * 2
+    assert s.state.results["w"]["limit_waited"] == 3 and "auth" not in s.state.results["w"]
+
+
+def test_all_limited_moves_to_metered_then_recovers(tmp_path, seq, accounts, monkeypatch):
+    """受け入れ条件 12・13: すべて上限なら宣言の接続へ移り、上限が外れたアカウントへ次の起動で戻る。"""
+    set_responses, calls = seq
+    monkeypatch.setenv("NDF_ACCOUNT_CHECK_INTERVAL", "0")
+    accounts.add("a", util5=100)
+    tb = accounts.add("b", util5=None)
+    full, low = FakeAnthropic.usage_reply(window(100), window(10)), FakeAnthropic.usage_reply(window(10), window(10))
+    accounts.fake.usage[tb] = [full, full, low]
+    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "a")
+    monkeypatch.setenv("NDF_SUPERVISE_CLAUDE_FALLBACK", "CLAUDE_CODE_USE_BEDROCK=1 ANTHROPIC_API_KEY=sk-SECRET")
+    set_responses(LIMIT, OK, OK)
+    s, text = run_plan(tmp_path, WORK_TWICE)
+    got = [(c["token"], c["config_dir"], c["bedrock"], c["account"]) for c in calls()]
+    a, b, shared = str(accounts.root / "a"), str(accounts.root / "b"), str(accounts.shared)
+    assert got == [(None, a, None, "a"), (None, shared, "1", "metered"), (None, b, None, "b")]
+    assert s.state.results["w1"]["auth"] == "従量の接続（CLAUDE_CODE_USE_BEDROCK, ANTHROPIC_API_KEY）"
+    assert s.state.results["w2"]["auth"] == "アカウント b（recovered）"
+    rows = progress_rows(tmp_path, "account")
+    assert [(r["reason"], r["from"], r["to"]) for r in rows] == [("five_hour", "a", "metered"), ("recovered", "metered", "b")]
+    assert rows[0]["keys"] == ["CLAUDE_CODE_USE_BEDROCK", "ANTHROPIC_API_KEY"]
+    assert "SECRET" not in (tmp_path / "state" / "progress.jsonl").read_text() and "SECRET" not in text
+
+
+@pytest.mark.parametrize("env_decl", [None, "ANTHROPIC_API_KEY=sk-SECRET"])
+def test_all_limited_uses_saved_declaration_unless_env(tmp_path, seq, accounts, monkeypatch, env_decl):
+    """#1468 の AC4: すべて上限なら保存した宣言の変数で呼ぶ。環境変数の宣言があれば、保存した宣言は 1 つも入らない。"""
+    set_responses, calls = seq
+    monkeypatch.setenv("NDF_ACCOUNT_CHECK_INTERVAL", "0")
+    accounts.add("a", util5=100)
+    accounts.add("b", util5=100)
+    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "a")
+    if env_decl is not None:
+        monkeypatch.setenv("NDF_SUPERVISE_CLAUDE_FALLBACK", env_decl)
+    ca.save_metered("bedrock", {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": "p"}, {"profile": "p"})
+    set_responses(LIMIT, OK)
+    s, text = run_plan(tmp_path, WORK_THEN_FAIL)
+    got = [(c["config_dir"], c["bedrock"], c["account"]) for c in calls()]
+    assert got == [(str(accounts.root / "a"), None, "a"), (str(accounts.shared), None if env_decl else "1", "metered")]
+    keys = "ANTHROPIC_API_KEY" if env_decl else "CLAUDE_CODE_USE_BEDROCK, AWS_PROFILE"
+    assert s.state.results["w"]["auth"] == f"従量の接続（{keys}）"
+    assert "SECRET" not in (tmp_path / "state" / "progress.jsonl").read_text() and "SECRET" not in text
+
+
+def test_broken_saved_declaration_is_told_once(tmp_path, seq, accounts, capsys):
+    """#1468 の I5: 保存先が壊れていれば、最初の呼び出しの前に標準エラーと進捗ログへ 1 行出し、宣言なしで進む。"""
+    set_responses, calls = seq
+    (accounts.root / "metered.json").write_text("{broken")
+    set_responses(OK)
+    s, text = run_plan(tmp_path, WORK_TWICE)
+    assert "結果: 完了" in text and len(calls()) == 2
+    assert len(progress_rows(tmp_path, "metered_invalid")) == 1
+    assert capsys.readouterr().err.count("壊れている") == 1
+
+
+def test_single_account_keeps_fallback_once_per_call(tmp_path, seq, accounts, monkeypatch):
+    """受け入れ条件 9・14: 登録が 1 つなら、宣言があっても今と同じ（呼び出しごとに 1 度だけ FALLBACK を試す）。"""
+    set_responses, calls = seq
+    accounts.add("a")
+    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "a")
+    monkeypatch.setenv("NDF_SUPERVISE_CLAUDE_FALLBACK", "CLAUDE_CODE_USE_BEDROCK=1")
+    set_responses(LIMIT, OK)
+    s, text = run_plan(tmp_path, WORK_THEN_FAIL)
+    assert [(c["token"], c["bedrock"]) for c in calls()] == [(None, None), (None, "1")]
+    assert "- 認証: 切り替え（CLAUDE_CODE_USE_BEDROCK）" in text
+
+
+def test_single_account_fallback_drops_parent_auth(tmp_path, seq, accounts, monkeypatch):
+    """登録が 1 つ以下の FALLBACK でも、宣言より優先される親の認証（AUTH_TOKEN・OAuth トークン）を外して呼ぶ。"""
+    set_responses, calls = seq
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "parent-SECRET")
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "parent-oauth")
+    monkeypatch.setenv("NDF_SUPERVISE_CLAUDE_FALLBACK", "CLAUDE_CODE_USE_BEDROCK=1")
+    set_responses(LIMIT, OK)
+    run_plan(tmp_path, WORK_THEN_FAIL)
+    got = [(c["auth_token"], c["token"], c["bedrock"]) for c in calls()]
+    assert got == [("parent-SECRET", "parent-oauth", None), (None, None, "1")]
+
+
+def test_section_account_is_not_refreshed_by_plan(tmp_path, seq, accounts, monkeypatch):
+    """#1576 の I8: 動いている区間のアカウントは期限切れでも NDF が更新せず、そのアカウントのまま呼ぶ（claude が更新する）。"""
+    set_responses, calls = seq
+    accounts.add("a", expires_in=-60)
+    accounts.add("b", util5=30)
+    accounts.fake.refresh["a-refresh-SECRET"] = (200, {"access_token": "a-new", "expires_in": 28800})
+    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "a")
+    set_responses(OK)
+    run_plan(tmp_path, [{"id": "w", "type": "work", "prompt": "直す", "next": "end"}])
+    assert calls()[0]["config_dir"] == str(accounts.root / "a") and accounts.fake.refresh_calls == []
+
+
+AUTH_FAILED = {
+    "out": {
+        "result": "Failed to authenticate: OAuth session expired and could not be refreshed",
+        "is_error": True,
+        "api_error_status": None,
+    },
+    "code": 1,
+}
+
+
+def test_auth_failure_result_switches_account_and_retries(tmp_path, seq, accounts, monkeypatch):
+    """受け入れ条件 20・I12: 結果行が認証の失敗なら観測を残し、別のアカウントで同じ呼び出しをやり直す（再登録は求めない）。"""
+    set_responses, calls = seq
+    accounts.add("a", util5=10)
+    accounts.add("b", util5=30)
+    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "a")
+    set_responses(AUTH_FAILED, OK)
+    s, text = run_plan(tmp_path, [{"id": "w", "type": "work", "prompt": "直す", "next": "end"}])
+    assert [c["account"] for c in calls()] == ["a", "b"] and "結果: 完了" in text
+    assert s.state.results["w"]["auth"] == "アカウント b（auth）"
+    assert accounts.account("a")["auth_failed"]["observed_at"] and not accounts.account("a")["needs_relogin"]
+
+
+def test_auth_failure_without_candidate_stops(tmp_path, seq, accounts, monkeypatch):
+    """認証の失敗の後に替える候補も従量の接続も無ければ AuthUnavailable で止まる（同じアカウントを 2 度試さない）。"""
+    set_responses, calls = seq
+    accounts.add("a", util5=10)
+    accounts.add("b")
+    acc = accounts.account("b")
+    acc["needs_relogin"] = True
+    accounts.write(accounts.root / "b" / "account.json", acc)
+    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "a")
+    set_responses(AUTH_FAILED, OK)
+    s, text = run_plan(tmp_path, [{"id": "w", "type": "work", "prompt": "直す", "next": "end"}])
+    assert [c["account"] for c in calls()] == ["a"] and "止まった" in text and "認証" in text
+
+
+def test_unreadable_account_config_is_skipped_by_plan(tmp_path, seq, accounts, monkeypatch):
+    """I19: アカウント側の .claude.json が読めないアカウントでは呼ばず、別の候補で呼ぶ。進捗ログに理由が残る。"""
+    set_responses, calls = seq
+    accounts.add("a", util5=10)
+    accounts.add("b", util5=30)
+    (accounts.root / "a" / ".claude.json").write_text('{"projects": ')
+    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "a")
+    set_responses(OK)
+    run_plan(tmp_path, [{"id": "w", "type": "work", "prompt": "直す", "next": "end"}])
+    assert [c["account"] for c in calls()] == ["b"]
+    assert (accounts.root / "a" / ".claude.json").read_text() == '{"projects": '
+    rows = progress_rows(tmp_path, "account_dir")
+    assert [(r["account"], r["ok"], r["reason"]) for r in rows if not r["ok"]] == [("a", False, "account_unreadable")]
+
+
+def test_no_token_and_no_alternative_stops_without_old_env(tmp_path, seq, accounts, monkeypatch):
+    """トークンを得られず替え先も宣言も無ければ、起動した時の環境で呼ばずに止まる（上限なだけの替え先は待つ）。"""
+    set_responses, calls = seq
+    accounts.add("a", expires_in=-60, refresh_in=-10)
+    accounts.add("b", expires_in=-60, refresh_in=-10)
+    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "a")
+    set_responses(OK)
+    s, text = run_plan(tmp_path, [{"id": "w", "type": "work", "prompt": "直す", "next": "end"}])
+    assert calls() == [] and "止まった" in text and "認証" in text
+
+
+def test_no_token_moves_to_metered_when_declared(tmp_path, seq, accounts, monkeypatch):
+    set_responses, calls = seq
+    accounts.add("a", expires_in=-60, refresh_in=-10)
+    accounts.add("b", util5=100)
+    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "a")
+    monkeypatch.setenv("NDF_SUPERVISE_CLAUDE_FALLBACK", "CLAUDE_CODE_USE_BEDROCK=1")
+    set_responses(OK)
+    run_plan(tmp_path, [{"id": "w", "type": "work", "prompt": "直す", "next": "end"}])
+    assert [(c["token"], c["bedrock"], c["account"]) for c in calls()] == [(None, "1", "metered")]
+
+
 def test_error_that_is_not_limit_is_plain_failure(tmp_path, seq):
     set_responses, calls = seq
     set_responses(
@@ -850,7 +1362,6 @@ def test_run_gate_exit_goes_next_and_copies_presentation(tmp_path):
                 "cmd": f"echo '{out}'; exit 10",
                 "presentation_to": "issues/a.md",
                 "on_fail": "bad",
-                "rerun_failed": True,
                 "gate_next": "after",
             },
             {"id": "bad", "type": "run", "cmd": "false", "next": "end"},
@@ -901,7 +1412,7 @@ def test_new_release_dev_and_prod(tmp_path):
     assert p.returncode == 0, p.stderr
     plan = json.loads((tmp_path / "d.json").read_text())
     ids = [s["id"] for s in plan["steps"]]
-    assert ids == ["bump", "changelog", "notes", "sync", "release", "verify", "facts", "explain", "judge", "fix"]
+    assert ids == ["bump", "changelog", "notes", "sync", "release", "verify", "facts", "explain", "others", "judge", "fix"]
     st = {s["id"]: s for s in plan["steps"]}
     assert plan["branch"] == "release/v10.17.11-dev.1" and plan["リポジトリ"] == "/r"
     assert "approval-facts --version 10.17.11 --prs 995 997" in st["facts"]["cmd"]
@@ -933,10 +1444,12 @@ def test_new_release_dev_and_prod(tmp_path):
         "snapshot",
         "sync",
         "release",
+        "record",
         "verify",
         "cleanup",
         "judge",
         "fix",
+        "judge-record",
     ]
     assert "--ref main" in st["verify"]["cmd"] and st["verify"]["stage"] == "リリース後テスト"
     assert st["verify"]["next"] == "cleanup" and "facts" not in st
@@ -947,14 +1460,14 @@ def test_new_release_requires_version():
     assert p.returncode != 0 and "--version" in p.stderr
 
 
-# --- ミッション（#1005） ------------------------------------------------------------
+# --- スプリント（#1005） ------------------------------------------------------------
 
 
-def test_new_mission_writes_waves_in_order(tmp_path):
+def test_new_sprint_writes_waves_in_order(tmp_path):
     out = tmp_path / "m"
     p = cli(
         "new",
-        "mission",
+        "sprint",
         "--name",
         "v10-18",
         "--worktree",
@@ -972,9 +1485,9 @@ def test_new_mission_writes_waves_in_order(tmp_path):
     assert p.returncode == 0, p.stderr
     res = json.loads(p.stdout)
     assert res["status"] == "ok"
-    manifest = json.loads((out / "mission.json").read_text())
-    assert manifest["ブランチ"] == "mission/v10-18"
-    assert [w["name"] for w in manifest["ステージ"]] == ["設計", "関門 1", "ミッションのブランチ", "実装", "検査", "配布"]
+    manifest = json.loads((out / "sprint.json").read_text())
+    assert manifest["ブランチ"] == "sprint/v10-18"
+    assert [w["name"] for w in manifest["ステージ"]] == ["設計", "関門 1", "設計の結果", "スプリントブランチ", "実装", "検査", "配布"]
     waves = {w["name"]: w for w in manifest["ステージ"]}
     assert "plans" not in waves["関門 1"] and waves["関門 1"]["gate"]
     assert len(waves["実装"]["plans"]) == 2 and waves["実装"]["command"].endswith("--max 3")
@@ -1001,48 +1514,61 @@ def test_new_mission_writes_waves_in_order(tmp_path):
         "requirements",
         "design",
         "pr",
+        "sync-body",
         "review",
         "sync-review",
+        "requirements-recheck",
         "glossary-check",
         "fix-glossary",
         "glossary-recheck",
         "push-glossary",
+        "ready",
         "gate",
     ]
     assert "design-glossary --mode" in ds["glossary"]["cmd"] and "on_fail" not in ds["glossary"]
-    assert ds["review"]["next"] == "sync-review" and ds["sync-review"]["next"] == "glossary-check"
+    # PR 本文の「決めたこと」を review の前に合わせる。無いと CI の pr-body-decisions が落ち、cross-review が中断する
+    assert ds["pr"]["decisions"] is True and ds["pr"]["next"] == "sync-body" and ds["sync-body"]["next"] == "review"
+    assert "pr-body-decisions.sh" in ds["sync-body"]["cmd"] and ds["sync-body"]["cmd"].endswith(" sync {pr}")
+    assert ds["review"]["next"] == "sync-review" and ds["sync-review"]["next"] == "requirements-recheck"
+    # レビューの直しの後にも写しと本文の一致を見て、食い違えば on_fail を置かずに止まる（#1769）
+    assert "spec-copy.py check" in ds["requirements-recheck"]["cmd"] and "on_fail" not in ds["requirements-recheck"]
+    assert ds["requirements-recheck"]["next"] == "glossary-check"
     assert "--ff-only" in ds["sync-review"]["cmd"]  # レビューが push した直しに追いついてから語を見る
     assert "check --diff origin/develop" in ds["glossary-check"]["cmd"]
     assert ds["glossary-check"]["on_fail"] == "fix-glossary" and ds["fix-glossary"]["next"] == "glossary-recheck"
     assert ds["glossary-recheck"]["on_fail"] == ds["glossary-recheck"]["next"] == "push-glossary"
-    assert ds["push-glossary"]["next"] == "gate"
+    # 設計 PR は Draft で作り、関門 1 の前に Draft を外す（#1908）。レビューの駆動が落ちても関門の前に通る
+    assert ds["push-glossary"]["next"] == ds["review"]["on_fail"] == "ready" and ds["ready"]["next"] == "gate"
+    # push は push-glossary（on_fail 無し）だけが行う。ready は送り直さない（重複の push と、レビューが落ちた経路で
+    # 直しに追いついていない HEAD を送る non-fast-forward を避ける）
+    assert ds["ready"]["cmd"] == "gh pr ready {pr}" and "on_fail" not in ds["ready"] and "on_fail" not in ds["push-glossary"]
     assert [s["id"] for s in design["steps"] if s["type"] == "judge"] == ["gate"]  # 関門の数は変わらない
     assert "glossary-recheck" in ds["gate"]["inputs"]
 
     impl = json.loads(Path(waves["実装"]["plans"][0]).read_text())
-    assert impl["起点"] == "origin/mission/v10-18"
-    assert next(s for s in impl["steps"] if s["type"] == "pr")["base"] == "mission/v10-18"
+    assert impl["起点"] == "origin/sprint/v10-18"
+    assert next(s for s in impl["steps"] if s["type"] == "pr")["base"] == "sprint/v10-18"
 
     check = json.loads(Path(waves["検査"]["plans"][0]).read_text())
-    assert check["branch"] == "mission/v10-18" and "Pull Request" not in check
+    assert check["branch"] == "sprint/v10-18" and "Pull Request" not in check
     pr = next(s for s in check["steps"] if s["type"] == "pr")
-    assert pr["base"] == "develop" and "関連: #11 #12" in pr["summary"]
-    assert "Closes" not in pr["summary"]
-    assert "関連" not in pr["changes"]  # 関連の行は「利用者向けの変化」へ入れない
+    # 閉じる課題は本文の材料（materials の closes）から「閉じる課題」の節へ 1 行ずつ入る（#1485 の AC10）
+    assert pr["base"] == "develop" and pr["materials"]["closes"] == [11, 12]
+    assert "Closes" not in pr["summary"] and "関連" not in pr["changes"]
     assert [s["id"] for s in check["steps"]][:3] == ["collect", "pr", "assess"]
 
 
-def test_new_mission_without_design_skips_gate(tmp_path):
+def test_new_sprint_without_design_skips_gate(tmp_path):
     out = tmp_path / "m"
-    p = cli("new", "mission", "--name", "m", "--worktree", str(tmp_path), "--issue", "1", "--version", "10.18.0-dev.1", "--out", str(out))
+    p = cli("new", "sprint", "--name", "m", "--worktree", str(tmp_path), "--issue", "1", "--version", "10.18.0-dev.1", "--out", str(out))
     assert p.returncode == 0, p.stderr
-    names = [w["name"] for w in json.loads((out / "mission.json").read_text())["ステージ"]]
-    assert names == ["ミッションのブランチ", "実装", "検査", "配布"]
+    names = [w["name"] for w in json.loads((out / "sprint.json").read_text())["ステージ"]]
+    assert names == ["スプリントブランチ", "実装", "検査", "配布"]
 
 
 @pytest.mark.parametrize("args", [["--issue", "1"], ["--name", "a b", "--issue", "1"], ["--name", "m"], ["--name", "m", "--issue", "1"]])
-def test_new_mission_rejects_bad_args(tmp_path, args):
-    assert cli("new", "mission", "--worktree", str(tmp_path), *args).returncode == 2
+def test_new_sprint_rejects_bad_args(tmp_path, args):
+    assert cli("new", "sprint", "--worktree", str(tmp_path), *args).returncode == 2
 
 
 FAKE_GH_PR = """#!{py}
@@ -1252,7 +1778,7 @@ def test_alive_line_carries_run_step_last_stderr_line(tmp_path):
 
 def test_no_alive_line_within_interval(tmp_path):
     s, _ = run_plan(tmp_path, [{"id": "a", "type": "run", "cmd": "sleep 0.3", "next": "end"}])
-    assert [r["kind"] for r in progress(s)] == ["step"]
+    assert [r["kind"] for r in progress(s)] == ["run", "step"]
 
 
 def test_work_prompt_has_progress_instructions(tmp_path, fakes):
@@ -1416,15 +1942,15 @@ def test_queue_then_fills_prs_from_reports(tmp_path, fakes, monkeypatch):
         impl.append(str(f))
     rel = release_plan(tmp_path, "dev", "10.17.99-dev.1", "--prs", "1052", "--prs-from-queue")
     assert plan.QUEUE_PRS in rel.read_text()
-    real, seen = queue.run_batch, {}
+    real, seen = flow.run_stage, {}
 
-    def batch(plans, m, poll):
+    def batch(plans, adm, args):
         if str(rel) in plans:  # 後続の配布は流さず、流す時の計画を読む
             seen.update({s["id"]: s for s in json.loads(rel.read_text())["steps"]})
             return [{"plan": p, "result": "完了"} for p in plans]
-        return real(plans, m, poll)
+        return real(plans, adm, args)
 
-    monkeypatch.setattr(queue, "run_batch", batch)
+    monkeypatch.setattr(flow, "run_stage", batch)
     done = tmp_path / "done.json"
     res = queue.cmd_queue(impl, 3, poll=0.1, then=[str(rel)], done=str(done))
     assert res["status"] == "ok", res
@@ -1507,29 +2033,115 @@ def test_wait_returns_3_on_timeout_before_queue_starts(tmp_path):
 # --- 機械で組む指示文と説明文（#1054）---
 
 
-def test_new_impl_builds_prompt_from_issue_and_excludes_other_plans(tmp_path):
+def test_new_impl_builds_prompt_from_issue_without_counting_other_plans(tmp_path):
+    """実装の指示文は、書き出す時点の他のプランを数えない（除外の行は、流す時点で WorkStep が足す。#1248）。"""
     other = tmp_path / "plan-1053.json"
     other.write_text(json.dumps({"フェーズ": "実装", "課題": [1053], "触るファイル": ["a.py", "b.py"], "steps": []}))
-    done = tmp_path / "plan-1050.json"
-    done.write_text(json.dumps({"フェーズ": "実装", "課題": [1050], "触るファイル": ["done.py"], "steps": []}))
-    (tmp_path / "plan-1050-state").mkdir()
-    (tmp_path / "plan-1050-state" / "report.md").write_text("## フェーズの報告\n\n- 結果: 完了\n")
     out = tmp_path / "plan-1054.json"
     p = cli("new", "impl", "--issue", "1054", "--worktree", "/w", "--tests", "t", "--title", "Add: x", "--files", "c.py", "--out", str(out))
     assert p.returncode == 0, p.stderr
     plan = json.loads(out.read_text())
     prompt = plan["steps"][0]["prompt"]
     assert "gh issue view 1054" in prompt and "c.py" in prompt
-    assert "並行して別の計画が次を触る。それらは変えない: a.py, b.py（#1053）" in prompt
-    assert "done.py" not in prompt
+    assert "並行して" not in prompt and "a.py" not in prompt
     assert "Closes" in prompt and "push しない" in prompt and "今の決まりだけ" in prompt
     assert plan["触るファイル"] == ["c.py"]
-    # --prompt を渡しても共通の規則と除外は足す
+    # --prompt を渡しても共通の規則は足す
     p = cli(
         "new", "impl", "--issue", "1054", "--worktree", "/w", "--tests", "t", "--title", "Add: x", "--prompt", "指示", "--out", str(out)
     )
     prompt = json.loads(out.read_text())["steps"][0]["prompt"]
-    assert prompt.startswith("指示\n") and "a.py, b.py（#1053）" in prompt and "push しない" in prompt
+    assert prompt.startswith("指示\n") and "並行して" not in prompt and "push しない" in prompt
+
+
+RULE = "並行して別のプランが次を触る。それらは変えない: "
+
+
+def impl_plan(tmp_path, name, files, before=0.0, after=0.0):
+    """実装のステップ 1 つ（前後に眠る run のステップを置ける）のプラン。"""
+    (tmp_path / ".ndf").mkdir(exist_ok=True)
+    (tmp_path / ".ndf" / "supervise.json").write_text('{"version": 1}')
+    impl = {"id": "impl", "type": "work", "kind": "実装", "prompt": f"実装 {name}\n共通の規則\n"}
+    steps = ([{"id": "pre", "type": "run", "cmd": f"sleep {before}"}] if before else []) + [impl]
+    steps += [{"id": "post", "type": "run", "cmd": f"sleep {after}"}] if after else []
+    for s, nxt in zip(steps, [*(t["id"] for t in steps[1:]), "end"]):
+        s["next"] = nxt
+    f = tmp_path / f"{name}.json"
+    f.write_text(json.dumps({"フェーズ": "実装", "課題": [], "作業場所": str(tmp_path), "触るファイル": files, "steps": steps}))
+    return str(f)
+
+
+def impl_prompts(log, names):
+    return {n: next(t for t in log.read_text().split("\n=====\n") if f"実装 {n}\n" in t) for n in names}
+
+
+def concurrent_lines(plan):
+    rows = [json.loads(ln) for ln in (Path(plan).with_name(Path(plan).stem + "-state") / "progress.jsonl").read_text().splitlines()]
+    return [{k: r[k] for k in ("step", "files", "dirs")} for r in rows if r.get("kind") == "concurrent"]
+
+
+def test_queue_with_max_1_tells_no_impl_worker_other_files(tmp_path, fakes):
+    """`--max 1` では、どの実装の指示文にも除外の行が無い（#1674 の受け入れ条件 1）。"""
+    a, b, c = (impl_plan(tmp_path, n, [f"{n}.py"], after=0.2) for n in "abc")
+    res = queue.cmd_queue([a, b, c], 1, poll=0.05)
+    assert [i["result"] for i in res["items"]] == ["完了"] * 3, res
+    assert all("並行して" not in t for t in impl_prompts(fakes, "abc").values())
+    assert concurrent_lines(a) == [{"step": "impl", "files": [], "dirs": []}]
+
+
+def test_queue_tells_only_the_files_of_plans_running_when_the_worker_starts(tmp_path, fakes):
+    """除外の行は、担当を起動する時点で走っている他のプランの触るファイルだけ（#1674 の受け入れ条件 2・3、I1・I2）。
+
+    x は始めに実装し、その後眠る。z は眠って終わる。y は z の枠が空いてから始まる。同じ重なりの組の g1・g2 は
+    1 本ずつ流れ、互いのファイルが入らない。例外で終わる bad の後に始まるプランへ bad のファイルは入らない。"""
+    x = impl_plan(tmp_path, "x", ["x.py"], after=1.5)
+    z = impl_plan(tmp_path, "z", ["z.py"], before=0.5)
+    z_steps = json.loads(Path(z).read_text())
+    z_steps["steps"] = z_steps["steps"][:1]
+    z_steps["steps"][0]["next"] = "end"
+    Path(z).write_text(json.dumps(z_steps))
+    y = impl_plan(tmp_path, "y", ["y.py", "docs/"])
+    res = queue.cmd_queue([x, z, y], 2, poll=0.05)
+    assert [i["result"] for i in res["items"]] == ["完了"] * 3, res
+    prompts = impl_prompts(fakes, "xy")
+    assert f"共通の規則\n{RULE}z.py\n\n## 入力" in prompts["x"]  # 後から始まった y は入らない
+    assert f"{RULE}x.py\n" in prompts["y"]  # 終わった z は入らない
+    fakes.write_text("")
+    g1, g2 = impl_plan(tmp_path, "g1", ["lib/a.py"], after=0.3), impl_plan(tmp_path, "g2", ["lib/a.py", "g2.py"], after=0.3)
+    bad = tmp_path / "bad.json"
+    bad.write_text(
+        json.dumps(
+            {"フェーズ": "試験", "課題": [], "作業場所": str(tmp_path), "触るファイル": ["bad.py"], "steps": [{"id": "x", "cmd": "true"}]}
+        )
+    )
+    w = impl_plan(tmp_path, "w", ["w.py"])
+    res = queue.cmd_queue([g1, g2, str(bad), w], 2, poll=0.05)
+    assert [i["result"] for i in res["items"]] == ["完了", "完了", "報告なし", "完了"], res
+    prompts = impl_prompts(fakes, ["g1", "g2", "w"])
+    assert "g2.py" not in prompts["g1"] and "lib/a.py" not in prompts["g2"]
+    assert "bad.py" not in prompts["w"]
+
+
+def test_directories_of_other_plans_are_not_in_the_exclusion_line(tmp_path, fakes):
+    """相手の触るファイルのディレクトリ（末尾の / か、既存のディレクトリ）は除外の行に入らず、進捗ログに残る（#1674 の受け入れ条件 4）。"""
+    (tmp_path / "pkgdir").mkdir()
+    a = impl_plan(tmp_path, "a", ["tests/", "pkgdir", "a.py"], after=1.0)
+    b = impl_plan(tmp_path, "b", ["b.py"], before=0.3)
+    res = queue.cmd_queue([a, b], 2, poll=0.05)
+    assert [i["result"] for i in res["items"]] == ["完了"] * 2, res
+    prompt = impl_prompts(fakes, "b")["b"]
+    assert f"{RULE}a.py\n" in prompt and "tests/" not in prompt and "pkgdir" not in prompt
+    assert concurrent_lines(b) == [{"step": "impl", "files": ["a.py"], "dirs": ["tests/", "pkgdir"]}]
+
+
+def test_new_impl_after_writes_the_needed_plans(tmp_path):
+    out = tmp_path / "plan.json"
+    base = ["new", "impl", "--issue", "1", "--worktree", "/w", "--tests", "t", "--title", "T", "--out", str(out)]
+    p = cli(*base, "--after", "a", "b")
+    assert p.returncode == 0, p.stderr
+    assert json.loads(out.read_text())["前提のプラン"] == ["a", "b"]
+    p = cli(*base)
+    assert p.returncode == 0 and "前提のプラン" not in json.loads(out.read_text()), p.stderr
 
 
 def test_new_impl_opens_pr_before_test_all(tmp_path):
@@ -1538,8 +2150,9 @@ def test_new_impl_opens_pr_before_test_all(tmp_path):
     assert p.returncode == 0, p.stderr
     steps = json.loads(out.read_text())["steps"]
     st = {s["id"]: s for s in steps}
-    assert st["test-limited"]["next"] == "pr" and st["pr"]["next"] == "test-all"
-    assert st["doc-lint"]["next"] == "ready" and st["ready"]["next"] == "merge"
+    # standard（既定）では範囲テストと PR の間に設計との突き合わせが入る（#1241）
+    assert st["test-limited"]["next"] == "design-tests" and st["design-match"]["next"] == "pr" and st["pr"]["next"] == "test-all"
+    assert st["doc-lint"]["next"] == "ready" and st["ready"]["next"] == "merge-gate" and st["merge-gate"]["next"] == "merge"
     assert "git push" in st["ready"]["cmd"] and "gh pr ready {pr}" in st["ready"]["cmd"]
     assert st["fix"]["next"] == "test-limited"
     assert set(st["judge"]["choices"]) <= set(st) | {"stop"}
@@ -1624,6 +2237,65 @@ def test_pr_body_from_llm_keeps_user_changes_section(tmp_path, monkeypatch):
     assert "結果: 完了" in engine.Engine(plan, tmp_path / "state").run()
     got = body.read_text()
     assert "## 利用者向けの変化\n\n- 題名だけ" in got and "本文。" in got
+    assert "## 利用者向けの変化\n\n- 題名だけ\n\n## 移行の手順\n\n- 無し\n\n## 概要" in got  # 節が無ければ置く（#1752）
+
+
+def _migration_pr(tmp_path, monkeypatch, public: str, migration: str, llm_section: str = "- 無し"):
+    """要求の写し（移行性の行と公開インタフェースの行）を持つ課題 1 の実装の pr を、移行の手順を「llm_section」と書く
+    偽の LLM で流し、(PR 本文, LLM へ渡したプロンプト) を返す。"""
+    root, body = pr_repo(tmp_path, monkeypatch)
+    (root / "issues").mkdir()
+    (root / "issues" / "issue-1-requirements.md").write_text(
+        f"## 非機能の条件\n\n| 大項目 | 条件 |\n| --- | --- |\n| 移行性 | {migration} |\n\n"
+        f"## 影響\n\n| 対象 | 影響 |\n| --- | --- |\n| 公開インタフェース | {public} |\n",
+        encoding="utf-8",
+    )
+    prompt = tmp_path / "prompt.txt"
+    reply = f"## 利用者向けの変化\n\n- 変えた\n\n## 移行の手順\n\n{llm_section}\n\n## 変更の要点\n\n本文。"
+    fake = tmp_path / "claude.py"
+    fake.write_text(
+        f"import json, sys\nopen({str(prompt)!r}, 'w').write(sys.stdin.read() + ' '.join(sys.argv))\n"
+        f"print(json.dumps({{'result': {reply!r}, 'usage': {{}}, 'total_cost_usd': 0}}))\n"
+    )
+    monkeypatch.setenv("NDF_SUPERVISE_CLAUDE", f"{PY} {fake}")
+    step = procedures.pr_step("develop", "T", "", "", "end", {"manual": False, "migration": True})
+    plan = {"フェーズ": "実装", "課題": [1], "作業場所": str(root), "steps": [step]}
+    assert "結果: 完了" in engine.Engine(plan, tmp_path / "state").run()
+    return body.read_text(), prompt.read_text()
+
+
+def test_pr_body_takes_the_migration_row_of_a_breaking_requirement(tmp_path, monkeypatch):
+    """受け入れ条件 9・I8（#1752）: 要求に移行性の行と互換なしの印があれば、LLM が「- 無し」と書いても節は要求の行になる。"""
+    got, prompt = _migration_pr(tmp_path, monkeypatch, "変わる。互換の経路は持たない", "`--pwk-drive-folder` を外す案内を書く")
+    assert "## 移行の手順\n\n- `--pwk-drive-folder` を外す案内を書く（#1の要求の移行性）" in got
+    assert "## 移行の手順\n\n- 無し" not in got and "#1 の要求の移行性:" in prompt
+
+
+def test_pr_body_keeps_none_for_a_requirement_without_the_breaking_mark(tmp_path, monkeypatch):
+    """受け入れ条件 9・I8（#1752）: 印の無い課題の移行性の行は材料に渡るだけで、節は「- 無し」を許す。"""
+    got, prompt = _migration_pr(tmp_path, monkeypatch, "変わる。互換の無い削除はしない", "利用者の操作は要らない")
+    assert "## 移行の手順\n\n- 無し" in got and "（#1の要求の移行性）" not in got
+    assert "#1 の要求の移行性: 利用者の操作は要らない" in prompt
+
+
+def test_pr_body_keeps_the_steps_the_llm_wrote(tmp_path, monkeypatch):
+    """決定 8（#1752）: LLM が書いた具体的な手順は「無し」でない限り残す。"""
+    got, _ = _migration_pr(tmp_path, monkeypatch, "互換なし", "手順を書く", "- playwright-kit を入れ直す")
+    assert "## 移行の手順\n\n- playwright-kit を入れ直す" in got and "（#1の要求の移行性）" not in got
+
+
+def test_pr_machine_body_has_the_migration_section(tmp_path, monkeypatch):
+    """受け入れ条件 8（#1752）: 機械の本文も「移行の手順」の節を持ち、無ければ「- 無し」と書く。"""
+    root, body = pr_repo(tmp_path, monkeypatch)
+    plan = {
+        "フェーズ": "実装",
+        "課題": [1],
+        "作業場所": str(root),
+        "steps": [{**procedures.pr_step("develop", "T", "", "x", "end"), "body": "template"}],
+    }
+    assert "結果: 完了" in engine.Engine(plan, tmp_path / "state").run()
+    assert "## 利用者向けの変化\n\n- x\n\n## 移行の手順\n\n- 無し\n" in body.read_text()
+    assert "## 移行の手順" in PR_SYSTEM and "- 無し" in PR_SYSTEM
 
 
 def test_run_from_restores_pr_from_previous_report(tmp_path):
@@ -1642,27 +2314,136 @@ def test_run_from_restores_pr_from_previous_report(tmp_path):
     assert "n=1066" in s.state.results["b"]["text"]
 
 
-def test_new_check_without_scope_drives_over_the_pr_directories(tmp_path):
+FAKE_GH_DOWN = f"#!{PY}\nimport os, sys\nopen(os.environ['FAKE_GH_CALLED'], 'w').write(' '.join(sys.argv[1:]))\nsys.exit(1)\n"
+
+
+def test_run_from_restores_the_pr_its_pr_step_made_however_many_times_it_resumes(tmp_path, monkeypatch):
+    """#1296 の受け入れ条件 1〜3: pr のステップが作った PR を、report.md が上書きされても消えても、何度目の再開でも
+    {pr} / {pr_url} と報告に使う。読み直しは gh を呼ばない。実行の始まりの行は実行ごとに 1 行（I6）。"""
+    root, _ = pr_repo(tmp_path, monkeypatch)
+    plan = {
+        "フェーズ": "検査",
+        "課題": [1296],
+        "作業場所": str(root),
+        "steps": [
+            {"id": "pr", "type": "pr", "stage": "Pull Request", "base": "develop", "body": "template", "next": "chk"},
+            {"id": "chk", "type": "run", "cmd": "echo n={pr} u={pr_url}; false", "next": "end"},
+        ],
+    }
+    state = tmp_path / "state"
+    url = "https://github.com/o/r/pull/5"
+    assert f"- Pull Request: {url}" in engine.Engine(json.loads(json.dumps(plan)), state).run()
+    (tmp_path / "bin" / "gh").write_text(FAKE_GH_DOWN)  # 再開では gh が呼ばれたら落ちる
+    called = tmp_path / "gh-called"
+    monkeypatch.setenv("FAKE_GH_CALLED", str(called))
+    for spoil in (None, "## フェーズの報告\n\n- Pull Request: 無し\n", ""):
+        if spoil is not None:
+            (state / "report.md").write_text(spoil) if spoil else (state / "report.md").unlink()
+        s = engine.Engine(json.loads(json.dumps(plan)), state)
+        text = s.run(start="chk")
+        assert f"n=5 u={url}" in s.state.results["chk"]["text"]
+        assert f"- Pull Request: {url}" in text and f"- Pull Request: {url}" in (state / "report.md").read_text()
+    assert not called.exists()
+    rows = [json.loads(l) for l in (state / "progress.jsonl").read_text().splitlines()]
+    assert [r["from"] for r in rows if r["kind"] == "run"] == [None, "chk", "chk", "chk"]
+    assert [r.get("pr") for r in rows if r["kind"] == "step" and r["step"] == "pr"] == [url]
+
+
+def recorder(url: str, code: int = 0) -> dict:
+    """pr_from で計画の Pull Request を決める run のステップ（終了コード code）。"""
+    out = json.dumps({"metrics": {"release_pr_url": url}})
+    return {"id": "rec", "type": "run", "cmd": f"echo '{out}'; exit {code}", "pr_from": "release_pr_url", "next": "use"}
+
+
+def pr_plan(tmp_path, *steps: dict, **extra) -> dict:
+    use = {"id": "use", "type": "run", "cmd": "echo n={pr}", "next": "end"}
+    return {"フェーズ": "試験", "課題": [1296], "作業場所": str(tmp_path), "steps": [*steps, use], **extra}
+
+
+def test_run_from_uses_the_last_pr_decided_since_the_last_full_run(tmp_path):
+    """#1296 の受け入れ条件 6 と I2: 2 回成功したら後の PR、落ちた回の値は残さない。"""
+    state = tmp_path / "state"
+    engine.Engine(pr_plan(tmp_path, recorder("https://github.com/o/r/pull/1")), state).run()
+    engine.Engine(pr_plan(tmp_path, recorder("https://github.com/o/r/pull/2")), state).run(start="rec")
+    engine.Engine(pr_plan(tmp_path, recorder("https://github.com/o/r/pull/3", code=1)), state).run(start="rec")
+    s = engine.Engine(pr_plan(tmp_path, recorder("x")), state)
+    s.run(start="use")
+    assert "n=2" in s.state.results["use"]["text"]
+
+
+def test_run_from_keeps_the_pull_request_written_in_the_plan(tmp_path):
+    """#1296 の受け入れ条件 5: プランの "Pull Request" は記録の PR より先に使う。"""
+    state = tmp_path / "state"
+    engine.Engine(pr_plan(tmp_path, recorder("https://github.com/o/r/pull/1")), state).run()
+    s = engine.Engine(pr_plan(tmp_path, recorder("x"), **{"Pull Request": "https://github.com/o/r/pull/9"}), state)
+    s.run(start="use")
+    assert "n=9" in s.state.results["use"]["text"]
+
+
+def test_run_from_stops_without_a_pr_since_the_last_full_run_and_names_the_state_dir(tmp_path, monkeypatch):
+    """#1296 の受け入れ条件 4: --from を付けない実行が PR を決めずに止まった後の再開は、それより前の PR を使わずに止まり、
+    理由の文に状態の置き場の絶対パスを出す（相対パスで渡しても）。"""
+    monkeypatch.chdir(tmp_path)
+    state = Path("state")
+    engine.Engine(pr_plan(tmp_path, recorder("https://github.com/o/r/pull/1")), state).run()
+    engine.Engine(pr_plan(tmp_path, recorder("https://github.com/o/r/pull/2", code=1)), state).run()
+    s = engine.Engine(pr_plan(tmp_path, recorder("x")), state)
+    assert "結果: 完了" not in s.run(start="use")
+    out = s.state.results["use"]["text"]
+    assert "Pull Request がまだ無い" in out and str((tmp_path / "state").resolve()) in out
+
+
+def test_new_check_builds_the_refactor_scope_from_the_pr_files(tmp_path):
     out = tmp_path / "c.json"
-    p = cli("new", "check", "--pr", "999", "--worktree", "/w", "--out", str(out))
+    p = cli("new", "check", "--pr", "999", "--worktree", "/w", "--scope", "extra dir", "--out", str(out))
     assert p.returncode == 0, p.stderr
     refactor = next(s for s in json.loads(out.read_text())["steps"] if s["id"] == "refactor")
     assert refactor["type"] == "drive" and not refactor.get("full")
-    # 差分が 20000 行を超える PR は gh pr diff が 406 で拒むため、ファイルの一覧は REST から取る
-    assert "gh api 'repos/{owner}/{repo}/pulls/999/files' --paginate" in refactor["args"]
-    assert "gh pr diff" not in refactor["args"]
+    # 範囲は refactor-scope.py が PR の差分から組み、明示した --scope は足す（#1484）
+    assert f"ndf_scope=$(python3 {SCRIPTS / 'refactor-scope.py'} --pr 999 --scope 'extra dir')" in refactor["cmd"]
 
 
-def test_new_mission_check_and_release_run_without_a_whole_skill(tmp_path):
+def test_new_sprint_check_hands_the_declared_tests_and_scope_to_the_same_builder(tmp_path):
     out = tmp_path / "m"
-    p = cli("new", "mission", "--name", "m", "--worktree", str(tmp_path), "--issue", "1", "--version", "10.18.0-dev.1", "--out", str(out))
+    p = cli(
+        "new", "sprint", "--name", "m", "--worktree", str(tmp_path), "--issue", "1", "--version", "10.18.0-dev.1",
+        "--tests", "tests/cli", "--scope", "lib/a", "--out", str(out),
+    )  # fmt: skip
     assert p.returncode == 0, p.stderr
-    waves = {w["name"]: w for w in json.loads((out / "mission.json").read_text())["ステージ"]}
+    check = next(out.glob("*-check.json"))
+    refactor = next(s for s in json.loads(check.read_text())["steps"] if s["id"] == "refactor")
+    assert f"$(python3 {SCRIPTS / 'refactor-scope.py'} --pr {{pr}} --tests tests/cli --scope lib/a)" in refactor["cmd"]
+
+
+def test_refactor_step_stops_with_the_scope_exit_code_before_starting_the_drive(tmp_path):
+    """範囲を組めない（refactor-scope.py が終了コード 2）ときは、駆動を空の --scope で起動せずに 2 で止まる。"""
+    from types import SimpleNamespace
+
+    from supervise_lib.templates import _inspect_steps
+
+    marker = tmp_path / "started"
+    stub = tmp_path / "bin" / "python3"  # 駆動の起動を記録だけする python3
+    stub.parent.mkdir()
+    stub.write_text(f"#!/bin/sh\ntouch {marker}\n")
+    stub.chmod(0o755)
+    env = {**os.environ, "PATH": f"{stub.parent}:{os.environ['PATH']}"}
+    for scope, code, started in (("$(exit 2)", 2, False), ("$(echo a.py)", 0, True)):
+        refactor = next(s for s in _inspect_steps(SimpleNamespace(), "1", scope) if s["id"] == "refactor")
+        p = subprocess.run(refactor["cmd"], shell=True, env=env, capture_output=True, text=True)
+        assert (p.returncode, marker.exists()) == (code, started), p.stderr
+
+
+def test_new_sprint_check_and_release_run_without_a_whole_skill(tmp_path):
+    out = tmp_path / "m"
+    p = cli("new", "sprint", "--name", "m", "--worktree", str(tmp_path), "--issue", "1", "--version", "10.18.0-dev.1", "--out", str(out))
+    assert p.returncode == 0, p.stderr
+    waves = {w["name"]: w for w in json.loads((out / "sprint.json").read_text())["ステージ"]}
     for name in ("検査", "配布"):
         for path in waves[name]["plans"]:
             assert not [s for s in json.loads(Path(path).read_text())["steps"] if s.get("full")], path
     release = json.loads(Path(waves["配布"]["plans"][0]).read_text())
-    assert release["フェーズ"] == "配布（開発版）" and "{queue_prs}" in json.dumps(release, ensure_ascii=False)
+    assert release["フェーズ"] == "配布（開発版）"
+    assert "{queue_prs}" not in json.dumps(release) and "--prs {queue_pr:check}" in json.dumps(release, ensure_ascii=False)
     # 配布は検査の queue が --then で流す（検査の PR を --prs へ渡すため）
     assert waves["検査"]["command"].endswith("--then " + waves["配布"]["plans"][0])
     assert "command" not in waves["配布"] and waves["配布"]["then_of"] == "検査"
@@ -1806,6 +2587,37 @@ def test_run_ticking_timeout_stops_the_group_after_the_leader_exits(tmp_path):
     assert procs.wait_gone(int(pidfile.read_text()), timeout=3)
 
 
+def _pidfd_einval(procs_, timeout=None):
+    raise OSError(22, "Invalid argument")
+
+
+def test_run_ticking_timeout_stays_a_timeout_when_waiting_raises_einval(tmp_path, monkeypatch):
+    """ステップの timeout の打ち切りで待ちが EINVAL を投げても、TimeoutExpired（ステップの失敗）になる（#1817）。"""
+    import procs
+
+    monkeypatch.setattr(procs.psutil, "wait_procs", _pidfd_einval)
+    pidfile = tmp_path / "pid"
+    with pytest.raises(subprocess.TimeoutExpired):
+        claude.run_ticking(f"sleep 30 & echo $! > {pidfile}; wait", shell=True, timeout=1)
+    monkeypatch.undo()
+    assert procs.wait_gone(int(pidfile.read_text()), timeout=3)
+
+
+def test_run_ticking_stall_cut_keeps_its_own_error_when_waiting_raises_einval(monkeypatch):
+    """停滞の打ち切り（tick() の例外）で待ちが EINVAL を投げても、tick() の例外がそのまま届く（retry へ進む。#1817）。"""
+    import procs
+
+    class Stalled(Exception):
+        pass
+
+    def tick():
+        raise Stalled
+
+    monkeypatch.setattr(procs.psutil, "wait_procs", _pidfd_einval)
+    with pytest.raises(Stalled):
+        claude.run_ticking("sleep 30", shell=True, tick=tick, every=0.2)
+
+
 @pytest.mark.parametrize("sv", [{"sync_checks": [{"name": 1, "command": "x"}]}, {"sync_checks": "x"}, {"test": [1]}])
 def test_supervise_decl_shape_is_checked_by_the_schema_wrapper(sv):
     """supervise.json の test と sync_checks の形は lib/schema.py で見る。違えば DeclError（#1142 の D1）。"""
@@ -1837,3 +2649,92 @@ def test_pr_body_tests_table_escapes_a_pipe_in_the_last_line(tmp_path, monkeypat
     }
     assert "結果: 完了" in engine.Engine(plan, tmp_path / "state").run()
     assert "| test | 0 | a \\| b |" in body.read_text().splitlines()
+
+
+CARMO_PROJECT = {
+    "version": 1,
+    "test": {
+        "strategy": "local-scoped-ci-whole",
+        "ci": {"check": "test-results", "junit_artifacts": "junit-*"},
+        "suites": [
+            {
+                "name": "phpunit",
+                "runner": "phpunit",
+                "command": "docker compose exec -T app ./vendor/bin/phpunit --log-junit build/ndf/junit.xml",
+                "scope_command": "docker compose exec -T app ./vendor/bin/phpunit --log-junit build/ndf/junit.xml {paths}",
+                "junit": "build/ndf/junit.xml",
+                "container": {"service": "app"},
+                "paths": ["tests"],
+            }
+        ],
+    },
+    "test_duration": {"measured": [{"seconds": 3827.0, "source": "ci-junit", "detail": "run"}]},
+    "ci": {"provider": "github-actions", "workflows": [{"path": ".github/workflows/test-results.yml", "jobs": 24, "wall_seconds": 360.0}]},
+}
+
+
+def _carmo_repo(tmp_path):
+    root = foreign_repo(tmp_path)
+    (root / ".ndf" / "project.json").write_text(json.dumps(CARMO_PROJECT))
+    return root
+
+
+def test_new_check_with_a_ci_whole_declaration_passes_no_test_command_to_the_refactoring(tmp_path):
+    """#1334 AC7 — carmo の形の宣言で `new check` を作ると、リファクタリングのステップは `--baseline-test` / `--round-test` を持たず
+    （cross-refactoring が同じ宣言から戦略を読む）、全体テストと CI の待ちの打ち切りは宣言の所要から出た値で、計画に書かれる。"""
+    root = _carmo_repo(tmp_path)
+    out = tmp_path / "check.json"
+    p = cli("new", "check", "--pr", "5", "--worktree", str(root), "--scope", "app", "tests", "--out", str(out), cwd=root)
+    assert p.returncode == 0, p.stderr
+    plan = json.loads(out.read_text())
+    steps = {s["id"]: s for s in plan["steps"]}
+    assert "--baseline-test" not in steps["refactor"]["cmd"] and "--round-test" not in steps["refactor"]["cmd"]
+    assert plan["テストの戦略"]["name"] == "local-scoped-ci-whole" and plan["テストの戦略"]["source"] == "test.strategy"
+    limits = plan["テストの時間"]
+    # 予算を持たない supervise は、テストが 3·w（w = 3,827 秒）、CI の待ちが 3·c（c = 360 秒）
+    assert limits["test_timeout"] == 3 * 3827 and limits["ci_wait_timeout"] == 3 * 360
+    assert limits["basis"]["unknown_duration"] is False
+    ci_wait = limits["ci_wait_timeout"]
+    assert steps["merge"]["cmd"].endswith(f"--timeout {ci_wait}")
+    assert steps["test-all"]["timeout"] == steps["merge"]["timeout"] > ci_wait
+    for fixed in (900, 1800, 3600):
+        assert f"--timeout {fixed}" not in steps["merge"]["cmd"]
+
+
+def test_new_impl_with_a_ci_whole_declaration_takes_the_scope_timeout_from_the_limits(tmp_path):
+    """#1334 AC7 — 範囲テストのステップの打ち切りは `limits.test_timeout` に余裕を足した値で、900 秒の固定でない。"""
+    root = _carmo_repo(tmp_path)
+    out = tmp_path / "impl.json"
+    p = cli(
+        "new", "impl", "--issue", "1", "--worktree", str(root), "--tests", "tests/Unit/A.php", "--title", "T", "--out", str(out), cwd=root
+    )
+    assert p.returncode == 0, p.stderr
+    plan = json.loads(out.read_text())
+    steps = {s["id"]: s for s in plan["steps"]}
+    assert steps["test-limited"]["cmd"] == f"python3 {SCRIPTS / 'test-run.py'} scope --paths tests/Unit/A.php"
+    assert steps["test-limited"]["timeout"] > plan["テストの時間"]["test_timeout"] > 990
+
+
+def test_new_stops_on_a_template_whose_paths_is_not_a_word(tmp_path):
+    """#1334 決定 14 — `--filter={paths}` のように `{paths}` が 1 語で立たない雛形では計画を作らない。"""
+    root = foreign_repo(tmp_path)
+    out = tmp_path / "p.json"
+    p = cli(
+        "new",
+        "impl",
+        "--issue",
+        "1",
+        "--worktree",
+        str(root),
+        "--tests",
+        "t",
+        "--title",
+        "T",
+        "--test-cmd",
+        "phpunit --filter={paths}",
+        "--out",
+        str(out),
+        cwd=root,
+    )
+    assert p.returncode == 2 and "1 語" in p.stderr
+    assert not out.exists()

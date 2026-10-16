@@ -234,6 +234,31 @@ def test_the_runtime_of_a_seat_is_used_for_the_cli_specific_checks(monitor_mod):
     assert monitor_mod._agent_runtime("impl") == "impl"
 
 
+def test_the_pid_of_a_second_seat_is_checked_against_the_cli_of_its_runtime(monkeypatch, monitor_mod):
+    """2 つ目の席（`claude-2`）が起動するのは `claude` の CLI なので、pid の照合はランタイム名で行う（#1412）。"""
+    cmdline = "node /usr/bin/claude -p --output-format stream-json"
+    monkeypatch.setattr(monitor_mod.monitor_proc, "_pid_cmdline_matches", lambda pid, expected: expected.lower() in cmdline)
+    killed: list[int] = []
+    monkeypatch.setattr(monitor_mod.monitor_proc, "_kill_pid", killed.append)
+
+    validated, outcome = monitor_mod._validate_pid_cmdline(37881, "claude-2", True, False)
+
+    assert outcome is None
+    assert validated is True
+    assert killed == []
+
+
+def test_the_pid_of_another_cli_is_still_rejected_for_a_second_seat(monkeypatch, monitor_mod):
+    """ランタイムの CLI を含まない pid（再利用された pid）は、2 つ目の席でも PIDFILE_BAD にする。"""
+    monkeypatch.setattr(monitor_mod.monitor_proc, "_pid_cmdline_matches", lambda pid, expected: False)
+    monkeypatch.setattr(monitor_mod.monitor_proc, "_kill_pid", lambda pid: None)
+
+    _, outcome = monitor_mod._validate_pid_cmdline(37881, "claude-2", True, False)
+
+    assert outcome is not None
+    assert outcome.status == "PIDFILE_BAD"
+
+
 # ---------------- 監視の上限と無進捗の許容 ----------------
 
 

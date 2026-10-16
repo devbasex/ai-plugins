@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from typing import NamedTuple
 
 SECTION_END = "<!-- ndf:section-end -->"
@@ -27,9 +28,8 @@ def _lines(body: str) -> list[str]:
     return body.replace("\r\n", "\n").split("\n")
 
 
-def _heading_lines(lines: list[str]) -> list[tuple[int, int]]:
-    """コードブロックの外にある見出しの `(行, 段)`。"""
-    out: list[tuple[int, int]] = []
+def unfenced_lines(lines: list[str]) -> Iterator[tuple[int, str]]:
+    """コードブロックの外にある `(行番号, 行)`。囲みの行そのものも返さない。"""
     fence = None
     for i, line in enumerate(lines):
         m = _FENCE.match(line)
@@ -37,9 +37,16 @@ def _heading_lines(lines: list[str]) -> list[tuple[int, int]]:
             fence = None if fence == m.group(1) else (fence or m.group(1))
             continue
         if fence is None:
-            h = _HEADING.match(line)
-            if h:
-                out.append((i, len(h.group(1))))
+            yield i, line
+
+
+def _heading_lines(lines: list[str]) -> list[tuple[int, int]]:
+    """コードブロックの外にある見出しの `(行, 段)`。"""
+    out: list[tuple[int, int]] = []
+    for i, line in unfenced_lines(lines):
+        h = _HEADING.match(line)
+        if h:
+            out.append((i, len(h.group(1))))
     return out
 
 
@@ -66,6 +73,21 @@ def get_section(body: str, heading: str) -> str | None:
     if span is None:
         return None
     return "\n".join(lines[span.content : span.end]).strip("\n")
+
+
+def section_bounds(body: str, heading: str) -> tuple[int, int] | None:
+    """節の中身（見出しの次の行から節の終わりまで）を、元の本文の文字の位置 `(始め, 終わり)` で返す。
+
+    改行（`\\r\\n`）を正規化しない。節の外を 1 文字も変えずに中身だけを書き換える側が使う（#1683）。"""
+    raw = body.split("\n")
+    span = _find(_lines(body), heading)
+    if span is None:
+        return None
+    starts = [0]
+    for line in raw:
+        starts.append(starts[-1] + len(line) + 1)
+    at = lambda i: min(starts[i], len(body))  # noqa: E731
+    return at(span.content), at(span.end)
 
 
 def _section_block(heading: str, content: str) -> list[str]:
@@ -116,3 +138,35 @@ def append_line(body: str, line: str) -> str:
             lines.append(SECTION_END)
     head = "\n".join(lines).rstrip("\n")
     return (head + "\n\n" if head else "") + line + "\n"
+
+
+NO_ITEMS = ("無し", "なし")  # 節の箇条で「何も無い」を示す語
+
+
+def section_items(body: str, heading: str, n: int) -> list[str]:
+    """節の箇条を `<本文>（#n）` で返す（本文に `#n` があれば付けない）。続きの行（字下げ）は前の項目へつなぐ。
+    字下げした箇条（子の箇条）は独立した項目にせず、前の項目の中へ改行と `  - <本文>` で残す（#1867）。
+    `（#n）` は項目の 1 行目にだけ付ける。節が無い・「無し」だけなら空。
+    PR 本文の「利用者向けの変化」「未検証・残る危険」「移行の手順」を読む。"""
+    items: list[str] = []
+    for line in (get_section(body or "", heading) or "").splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        bullet = re.match(r"^[-*]\s+(.*)$", text)
+        indented = line[:1].isspace()
+        if not items or not indented:
+            items.append((bullet.group(1) if bullet else text).strip())
+        elif bullet:
+            items[-1] += "\n  - " + bullet.group(1).strip()
+        else:
+            items[-1] += " " + text
+    out: list[str] = []
+    for i in items:
+        if not i or i in NO_ITEMS:
+            continue
+        if f"#{n}" not in i:
+            first, sep, rest = i.partition("\n")
+            i = f"{first}（#{n}）{sep}{rest}"
+        out.append(i)
+    return out

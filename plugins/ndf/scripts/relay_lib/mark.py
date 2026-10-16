@@ -1,4 +1,4 @@
-"""hook の本体: Stop（`mark`）・停止（`stop`）・質問の合図（`question`）・カットポイントの告知（`notice`）。
+"""hook の本体: Stop（`mark`。承認待ちの差し戻しを含む）・StopFailure（`limit`）・停止（`stop`）・質問の合図（`question`）・カットポイントの告知（`notice`）。
 
 #895・#980・#1016・#1142 の C6。合図 `next.json` と `log.jsonl` は `record.RelayRecord` を通して書く。
 """
@@ -16,11 +16,13 @@ from . import proc
 from .common import (
     ASKED_FILE,
     HELD_FILE,
+    LIMIT_FILE,
     MARK_FILE,
     PID_FILE,
     QUESTION_FILE,
     QUESTION_LOCK,
     STOP_FILE,
+    WAIT_HELD_FILE,
     LockBusy,
     _lock,
     _unlock,
@@ -34,9 +36,10 @@ from .common import (
     state_root,
     write_json_atomic,
 )
-from .record import RelayRecord, current_section
+from .record import RelayRecord, _start_rows, current_section
 
 import md  # noqa: E402,I001  common が lib/ を sys.path に置く
+import wait_notice  # noqa: E402,I001
 
 
 def next_blocks(text: str) -> list[str]:
@@ -112,7 +115,123 @@ def asked_after(d: str, mark_path: str) -> bool:
     return w is not None and a is not None and a >= w
 
 
+def _hook_input() -> tuple[str, dict] | None:
+    """ラッパーの直接の子が送った hook の入力と状態ディレクトリ。対象でなければ None。"""
+    d = os.environ.get("NDF_RELAY_DIR")
+    if not d or not relay_running(d):
+        return None
+    try:
+        data = json.loads(sys.stdin.read())
+    except ValueError:
+        return None
+    if not isinstance(data, dict) or not proc.is_direct_child(d):
+        return None
+    return d, data
+
+
+def _mark_action(blocks: list[str], tasks: list[dict]) -> str:
+    """合図の扱い: `skip`（背景の作業か複数の候補で書かない）・`idle`（候補なし）・`write`（書く）。"""
+    if tasks or len(blocks) > 1:
+        return "skip"
+    return "write" if blocks else "idle"
+
+
+def _skip_mark(d: str, record: RelayRecord, blocks: list[str], tasks: list[dict], active: bool) -> None:
+    record.drop_mark()
+    if not blocks:
+        return
+    section = current_section(d)
+    reason = "blocks" if len(blocks) > 1 else "background"
+    held = reason == "background" and hold_once(d, section, blocks[0], active)
+    record.mark_skipped(section, reason, tasks, held)
+    if held:
+        print(json.dumps({"decision": "block", "reason": hold_reason(tasks)}, ensure_ascii=False))
+
+
+WAIT_REASON = (
+    "ndf-relay: この応答は AskUserQuestion を呼ばずに、本文で承認・判断を待って終わった。/goal の判定は本文の待ちでは止まらず、"
+    "承認のないまま先へ進む。利用者の承認・判断が要るなら、同じ問いを AskUserQuestion で出し直す（判断の材料は本文に書いてよい）。"
+    "問いでなければ、そのまま作業を続ける。"
+)
+
+
+def _section_started(d: str, section: int | None) -> float | None:
+    for row in _start_rows(d):
+        if section is None or row.get("section") == section:
+            return parse_iso(row.get("at"))
+    return None
+
+
+def prose_wait_reason(d: str, record: RelayRecord, data: dict, asked_open: bool) -> str | None:
+    """承認待ちの差し戻し（#1492）。ブロックの無い応答が本文の待ちで終わったら差し戻しの文を返す。
+
+    合図 `next.json` が保留中（在り、質問がその後に出ていない）なら判定しない。差し戻した直後の同じ区間の Stop では
+    差し戻さない（`wait-held.json`。`stop_hook_active` は `/goal` の続きで常に真になるため読まない）。応答の中で
+    質問を出した（質問の合図が在った・質問の時刻が前の Stop より後）なら差し戻さない。どの失敗も差し戻さない側へ倒す。"""
+    try:
+        mark_path = record.path(MARK_FILE)
+        if os.path.exists(mark_path) and not asked_after(d, mark_path):
+            return None
+        section = current_section(d)
+        state_path = os.path.join(d, WAIT_HELD_FILE)
+        prev = load_json(state_path)
+        same = isinstance(prev, dict) and prev.get("section") == section
+        prev_at = parse_iso(prev.get("at")) if same else _section_started(d, section)
+        state = {"section": section, "at": stamp(), "held": False}
+        write_json_atomic(state_path, state)
+        if same and prev.get("held"):
+            return None
+        asked = load_json(os.path.join(d, ASKED_FILE))
+        asked_at = parse_iso(asked.get("at")) if isinstance(asked, dict) else None
+        if asked_open or (asked_at is not None and (prev_at is None or asked_at >= prev_at)):
+            return None
+        kind = wait_notice.classify_reply_wait(str(data.get("last_assistant_message") or ""))
+        if kind not in (wait_notice.ANSWER, wait_notice.APPROVAL):
+            return None
+        write_json_atomic(state_path, {**state, "held": True})
+        try:
+            record.prose_wait(section, kind)
+        except OSError:
+            pass
+        return WAIT_REASON
+    except Exception:  # noqa: BLE001 — 判定・状態の読み書きの失敗: Stop を止めない
+        return None
+
+
 def cmd_mark() -> int:
+    got = _hook_input()
+    if got is None:
+        return 0
+    d, data = got
+    # Stop が起きたなら質問は表示されていない（Esc で取り消した合図もここで消える）
+    question = os.path.join(d, QUESTION_FILE)
+    asked_open = os.path.exists(question)
+    remove(question)
+    record = RelayRecord(d)
+    blocks = next_blocks(str(data.get("last_assistant_message") or ""))
+    tasks = running_tasks(data.get("background_tasks")) + cl.pending_wakeups(str(data.get("transcript_path") or ""), time.time())
+    action = _mark_action(blocks, tasks)
+    if action == "skip":
+        _skip_mark(d, record, blocks, tasks, bool(data.get("stop_hook_active")))
+    elif action == "idle":
+        # 合図の後に応答が続いた（目標が未達など）。質問が出ていなければ前の合図を残す
+        if asked_after(d, record.path(MARK_FILE)):
+            record.drop_mark()
+    else:
+        record.write_mark(blocks[0], data)
+    if not blocks:
+        reason = prose_wait_reason(d, record, data, asked_open)
+        if reason:
+            print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))
+    return 0
+
+
+def cmd_limit() -> int:
+    """StopFailure hook の本体（#1389）。ラッパーの直接の子の応答が API の失敗で終わったら `limit.json` を書く。
+
+    書くのは `written_at`・`error`・`transcript_path`・`session_id`・`cwd` だけで、応答の本文とトークンは書かない。
+    上限の種類とリセット時刻は、ラッパーが会話の記録の最後の合成応答から読む。StopFailure の出力と終了コードは
+    Claude Code が無視するので、常に 0 を返す。"""
     d = os.environ.get("NDF_RELAY_DIR")
     if not d or not relay_running(d):
         return 0
@@ -122,27 +241,16 @@ def cmd_mark() -> int:
         return 0
     if not isinstance(data, dict) or not proc.is_direct_child(d):
         return 0
-    # Stop が起きたなら質問は表示されていない（Esc で取り消した合図もここで消える）
-    remove(os.path.join(d, QUESTION_FILE))
-    record = RelayRecord(d)
-    blocks = next_blocks(str(data.get("last_assistant_message") or ""))
-    tasks = running_tasks(data.get("background_tasks")) + cl.pending_wakeups(str(data.get("transcript_path") or ""), time.time())
-    if tasks or len(blocks) > 1:
-        record.drop_mark()
-        if blocks:
-            section = current_section(d)
-            reason = "blocks" if len(blocks) > 1 else "background"
-            held = reason == "background" and hold_once(d, section, blocks[0], bool(data.get("stop_hook_active")))
-            record.mark_skipped(section, reason, tasks, held)
-            if held:
-                print(json.dumps({"decision": "block", "reason": hold_reason(tasks)}, ensure_ascii=False))
-        return 0
-    if not blocks:
-        # 合図の後に応答が続いた（目標が未達など）。質問が出ていなければ前の合図を残す
-        if asked_after(d, record.path(MARK_FILE)):
-            record.drop_mark()
-        return 0
-    record.write_mark(blocks[0], data)
+    write_json_atomic(
+        os.path.join(d, LIMIT_FILE),
+        {
+            "written_at": stamp(),
+            "error": str(data.get("error") or ""),
+            "transcript_path": str(data.get("transcript_path") or ""),
+            "session_id": str(data.get("session_id") or ""),
+            "cwd": str(data.get("cwd") or ""),
+        },
+    )
     return 0
 
 

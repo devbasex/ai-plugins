@@ -10,10 +10,11 @@ from __future__ import annotations
 import json
 import os
 import shlex
-import statistics
 import subprocess
 from dataclasses import dataclass, fields
 from pathlib import Path
+
+import estimate_stats as stats
 
 HISTORY_NAME = "step-history.jsonl"
 WATCHED_TYPES = ("run", "work", "drive")
@@ -28,7 +29,7 @@ class SlowConfigError(ValueError):
 @dataclass(frozen=True)
 class SlowConfig:
     enabled: bool = True
-    window: int = 10
+    window: int = stats.WINDOW
     min_samples: int = 3
     factor: float = 3.0
     floor: float = 300.0
@@ -41,17 +42,22 @@ class SlowConfig:
     history: str | None = None
 
 
-def _coerce(key: str, kind, value):
-    if kind is bool:
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, str) and value.lower() in ("true", "false"):
-            return value.lower() == "true"
-        raise SlowConfigError(key)
-    if key == "history":
-        if value is None or (isinstance(value, str) and value):
-            return value
-        raise SlowConfigError(key)
+def _coerce_bool(key: str, value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.lower() in ("true", "false"):
+        return value.lower() == "true"
+    raise SlowConfigError(key)
+
+
+def _coerce_optional_str(key: str, value) -> str | None:
+    if value is None or (isinstance(value, str) and value):
+        return value
+    raise SlowConfigError(key)
+
+
+def _coerce_number(key: str, value) -> int | float:
+    """bool を拒み、文字列は float に読み、負の数を拒む。"""
     if isinstance(value, bool):
         raise SlowConfigError(key)
     if isinstance(value, str):
@@ -61,6 +67,15 @@ def _coerce(key: str, kind, value):
             raise SlowConfigError(key) from None
     if not isinstance(value, (int, float)) or value < 0:
         raise SlowConfigError(key)
+    return value
+
+
+def _coerce(key: str, kind, value):
+    if kind is bool:
+        return _coerce_bool(key, value)
+    if key == "history":
+        return _coerce_optional_str(key, value)
+    value = _coerce_number(key, value)
     if kind is int:
         if float(value) != int(value):
             raise SlowConfigError(key)
@@ -103,11 +118,11 @@ def expected_for(seconds: list[float], cfg: SlowConfig, step_expected=None) -> t
     """同じステップの所要（古い順）から想定の秒と根拠を返す。step_expected があればそれに固定する。"""
     if step_expected is not None:
         return float(step_expected), {"source": "step"}
-    recent = [float(s) for s in seconds][-cfg.window :]
+    recent = stats.recent([float(s) for s in seconds], cfg.window)
     basis = {"samples": len(recent), "factor": cfg.factor, "floor": cfg.floor}
     if len(recent) < cfg.min_samples:
         return float(cfg.default), {"source": "default", **basis, "default": cfg.default}
-    median = round(statistics.median(recent), 2)
+    median = round(stats.median_value(recent), 2)
     value = round(median * cfg.factor, 1)
     if value < cfg.floor:
         return float(cfg.floor), {"source": "floor", **basis, "median": median}
@@ -158,7 +173,7 @@ def _rows(path: Path):
 def read_history(path: Path, phase: str, step: str, window: int | None = None) -> list[float]:
     """同じステップ（フェーズ, ステップの id）の所要を古い順に返す（window があれば直近の件数だけ）。読めなければ []。"""
     out = [float(d["seconds"]) for d in _rows(path) if d.get("phase") == phase and d.get("step") == step]
-    return out[-window:] if window else out
+    return stats.recent(out, window) if window else out
 
 
 def history_record(phase, step: str, type_: str, seconds: float, exit_code: int, plan: str | None, at: str) -> dict:

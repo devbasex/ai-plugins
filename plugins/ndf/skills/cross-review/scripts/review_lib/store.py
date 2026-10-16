@@ -126,11 +126,12 @@ def _find_resumable_state(
     pr: object,
     worktree: str,
 ) -> tuple[dict[str, Any], pathlib.Path] | None:
-    """既存 state を探し、再開できるものだけを (state, path) で返す。
+    """既存 state を探し、(state, path) で返す。状態ファイルが無ければ `None`。
 
-    再開に該当しなければ `None`。**探索の入口は `_tmp_dir()` を使わない**（mkdir の
-    副作用でパスが作られてしまう）。`CROSS_REVIEW_TMP_DIR` があればそれを、無ければ
-    `<worktree>/.cross_review/` を直接組む。`final` が確定した state は再開しない。
+    **探索の入口は `_tmp_dir()` を使わない**（mkdir の副作用でパスが作られてしまう）。
+    `CROSS_REVIEW_TMP_DIR` があればそれを、無ければ `<worktree>/.cross_review/` を直接組む。
+    `final` が確定した state も返す（呼び出し側がラウンドを足す。#1340 の決定 1）。
+    JSON として読めなければ、上書きせずにパスと理由を出して終了コード 1 で止まる（I9）。
     """
     env_tmp = os.environ.get("CROSS_REVIEW_TMP_DIR")
     if env_tmp:
@@ -140,9 +141,12 @@ def _find_resumable_state(
     resume_state_file = resume_dir / f"cross-review-pr{pr}-state.json"
     if not resume_state_file.exists():
         return None
-    st = json.loads(resume_state_file.read_text(encoding="utf-8"))
-    if st.get("final") is not None:
-        return None
+    try:
+        st = json.loads(resume_state_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        review_lib.die(f"レビューの状態ファイルを読めません: {resume_state_file}（{e}）")
+    if not isinstance(st, dict) or not isinstance(st.get("rounds"), list):
+        review_lib.die(f"レビューの状態ファイルを読めません: {resume_state_file}（rounds の list を持つ object ではない）")
     return st, resume_state_file
 
 

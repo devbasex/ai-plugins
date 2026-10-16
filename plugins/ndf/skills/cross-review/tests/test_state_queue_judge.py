@@ -422,3 +422,61 @@ def test_the_flush_stops_at_a_broken_item(queue_mod, tmp_path) -> None:
     assert result.sent == [] and result.skipped == []
     assert result.remaining == 2
     assert "読めない" in (result.failed or {})["last_error"]
+
+
+# ---- 一時的な失敗（#1843） ----
+
+
+@pytest.mark.parametrize("event, code", [("APPROVE", 8), ("REQUEST_CHANGES", 2)])
+def test_reviews_left_by_a_transient_failure_are_taken_in_and_are_not_a_missing_result(
+    state_mod, queue_mod, fake_gh, tmp_dir, capsys, event, code
+) -> None:
+    """PR 1842 の round 1: 送りが HTTP 500・本文なしで終わっても結果を取り込み、判定は結果なし（7・1）へ進まない（AC2・AC3）。
+
+    収束していれば投稿の残りで 8、指摘があれば修正（2）へ進む（判定の規則は変えない）。"""
+    _seed(tmp_dir, rounds=[{"round": 1, "pr": PR, "started_at": "2026-09-03T00:00:00+00:00", "reviewers": ["codex", "agy"]}])
+    fake_gh.set_rules(
+        [
+            {"match": f"pulls/{PR}/reviews?", "stdout": "[]"},
+            {"match": f"pulls/{PR}/reviews", "exit": 1, "stdout": "", "stderr": "unexpected end of JSON input\n"},
+        ]
+    )
+
+    for agent in ("codex", "agy"):
+        rfile = tmp_dir / f"{agent}-result.json"
+        rfile.write_text(json.dumps({"event": event, "by_severity": {"major": 2 if code == 2 else 0}}), encoding="utf-8")
+        review_lib.commands.read_result.cmd_read_result(argparse.Namespace(pr=PR, agent=agent, file=str(rfile)))
+        out = capsys.readouterr().out
+        assert "QUEUED=1" in out and "FINDINGS=" in out
+
+    round1 = _state(tmp_dir)["rounds"][0]
+    for agent in ("codex", "agy"):
+        assert round1[agent]["intent"] == event
+        assert round1[agent]["queued"] is True
+    assert queue_mod.Queue(tmp_dir / "pending").count() == 2
+
+    with pytest.raises(SystemExit) as e:
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
+
+    assert e.value.code == code
+    state = _state(tmp_dir)
+    assert state["final"] is None
+    assert "NO_RESULT" not in json.dumps(state["rounds"][0])
+
+
+def test_the_flush_tells_a_transient_failure_from_the_limit(state_mod, queue_mod, fake_gh, tmp_dir, capsys) -> None:
+    _seed(tmp_dir)
+    queue_mod.enqueue(queue_mod.Queue(tmp_dir / "pending"), "pr-comment", REPO, PR, {"body": "積んだ本文"})
+    fake_gh.set_rules(
+        [
+            {"match": f"issues/{PR}/comments?", "stdout": "[]"},
+            {"match": "", "exit": 1, "stdout": "", "stderr": "gh: Server Error (HTTP 503)\n"},
+        ]
+    )
+
+    review_lib.commands.judge.cmd_flush(argparse.Namespace(pr=PR))
+
+    out = capsys.readouterr().out.splitlines()
+    assert "PENDING_REMAINING=1" in out
+    assert "PENDING_TRANSIENT=1" in out and "PENDING_RATE_LIMITED=0" in out
+    assert any(line.startswith("PENDING_LAST_ERROR=") and "503" in line for line in out)

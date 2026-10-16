@@ -74,7 +74,7 @@ NDF の Skill 実装は `plugins/ndf/skills/` にあります。公開セット�
 - runtime 設定: `statusline`（Claude Code と Kiro CLI のみ）、`install-wrapper` / `restart`（カットポイントで claude を起動し直すラッパー。Claude Code のみ）
 - policy: `ndf-policies`, `problem-solving`, `logging-guidelines`
 
-- 外部サービスと測定: `google-auth`, `google-drive`, `skill-stats`, `ml-model-structure`,
+- 外部サービスと測定: `google-workspace`, `skill-stats`, `ml-model-structure`,
   `notion-writing`（v10.5.0 で 4 ランタイムすべてへ配布へ回しました。#116 / #144）
 
 ## MCP Plugins

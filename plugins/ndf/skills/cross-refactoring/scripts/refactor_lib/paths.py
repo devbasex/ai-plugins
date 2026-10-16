@@ -12,7 +12,9 @@ import subprocess
 from typing import Any, Optional
 
 import proc
+import repo as repo_lib
 import statefile
+import worktree_base
 
 from . import die
 
@@ -22,18 +24,8 @@ def work_dir(state: dict[str, Any]) -> str:
     return str(state["worktrees"]["work"])
 
 
-def default_worktree_base() -> pathlib.Path:
-    """作業ディレクトリの親。解決順は cross-review と揃える。
-
-    1. 環境変数 `NDF_WORKTREE_BASE`（明示指定）
-    2. `<システム tmpdir>/ndf-worktrees`（非永続領域。コンテナ再作成で自動消滅）
-    """
-    import tempfile
-
-    env = os.environ.get("NDF_WORKTREE_BASE")
-    if env:
-        return pathlib.Path(env).resolve()
-    return pathlib.Path(tempfile.gettempdir()) / "ndf-worktrees"
+# worktree の親ディレクトリ。解決の規則は共通層の `worktree_base.worktree_parent` だけが持つ。
+default_worktree_base = worktree_base.worktree_parent
 
 
 def tmp_dir_for(work: pathlib.Path) -> pathlib.Path:
@@ -50,22 +42,74 @@ def state_path(tmp_dir: pathlib.Path, state_id: int) -> pathlib.Path:
     return tmp_dir / f"cross-refactoring-rf{state_id}-state.json"
 
 
-def _find_state(state_id: int) -> pathlib.Path:
-    """状態ファイルを探す。見つからなければ終了する。
+def alive_path(tmp_dir: pathlib.Path, state_id: int) -> pathlib.Path:
+    """心拍のファイル。待つ側が心拍の間隔ごとに更新時刻を今にする（#1743 決定 3）。"""
+    return pathlib.Path(tmp_dir) / f"cross-refactoring-rf{state_id}-alive"
 
-    環境変数が設定されていればそこを、無ければ現在の作業ディレクトリからの
-    相対で探す。呼び出し側の bash は `init` の出力を `export` してから使う。
+
+# 対象のリポジトリを決められないときの案内。単独起動で利用者が打つ assess と drive が同じ文を出す
+TARGET_REPO_HINT = "対象のリポジトリを決められない。対象のリポジトリの中で打つ"
+
+
+def target_repo_root() -> pathlib.Path:
+    """対象のリポジトリ（現在のディレクトリが属する git の作業ツリーの根）。
+
+    決められなければ `proc.StepError`（2）。別のリポジトリを黙って対象にしない（#1655 の I5）。
+    """
+    return proc.git_root(hint=TARGET_REPO_HINT)
+
+
+def github_repo_from_origin() -> Optional[str]:
+    """カレントの origin の URL から `owner/repo` を求める（GitHub の URL だけ）。求まらなければ `None`。
+
+    **求めた名前はそのまま使わない。** `repos/{owner}/{repo}/pulls/{PR}` の応答が
+    そのまま検証になるため、誤った名前は失敗として現れる（`_fetch_pr_context`）。
+    URL の読み方はライブラリの `repo.owner_repo_from_url` が持つ。
+    """
+    url = proc.git_out(pathlib.Path.cwd(), "remote", "get-url", "origin") or ""
+    return repo_lib.owner_repo_from_url(url) if "github.com" in url else None
+
+
+def default_tmp_dir(state_id: int) -> Optional[pathlib.Path]:
+    """既定の worktree の置き場の状態の置き場（`<既定の根>/<owner--repo>/rf<ID>/work/.cross_refactoring`）。
+
+    origin の owner/repo が求まらなければ `None`。環境変数 `CROSS_REFACTORING_TMP_DIR` は見ない
+    （駆動の `known_tmp` と `_find_state` が先に見る）。
+    """
+    repo = github_repo_from_origin()
+    if not repo:
+        return None
+    return default_worktree_base() / repo_lib.slug(repo) / f"rf{state_id}" / "work" / ".cross_refactoring"
+
+
+def _find_state(state_id: int) -> pathlib.Path:
+    """状態ファイルを探す。見つからなければ終了する。"""
+    found = existing_state(state_id)
+    if found is not None:
+        return found
+    die(f"状態ファイルが見つかりません（rf{state_id}）。CROSS_REFACTORING_TMP_DIR を export してから実行してください")
+    raise SystemExit(1)  # die が抜けることはないが型のために置く
+
+
+def existing_state(state_id: int) -> Optional[pathlib.Path]:
+    """状態ファイルを探す。見つからなければ `None`。
+
+    環境変数 → 現在の作業ディレクトリの `.cross_refactoring/` → 既定の worktree の置き場の順に探す。
+    駆動が終わった後の conductor は環境変数を持たないため、既定の置き場からも探す（#1692 の決定 5）。
     """
     env = os.environ.get("CROSS_REFACTORING_TMP_DIR")
     candidates = []
     if env:
-        candidates.append(pathlib.Path(env) / f"cross-refactoring-rf{state_id}-state.json")
-    candidates.append(pathlib.Path.cwd() / ".cross_refactoring" / f"cross-refactoring-rf{state_id}-state.json")
+        candidates.append(state_path(pathlib.Path(env), state_id))
+    candidates.append(state_path(pathlib.Path.cwd() / ".cross_refactoring", state_id))
     for c in candidates:
         if c.exists():
             return c
-    die(f"状態ファイルが見つかりません（rf{state_id}）。CROSS_REFACTORING_TMP_DIR を export してから実行してください")
-    raise SystemExit(1)  # die が抜けることはないが型のために置く
+    # 既定の置き場は git を 1 回起動して求めるため、先の候補で見つからないときだけ解決する
+    fallback = default_tmp_dir(state_id)
+    if fallback is not None and state_path(fallback, state_id).exists():
+        return state_path(fallback, state_id)
+    return None
 
 
 def load_state(state_id: int) -> tuple[pathlib.Path, dict[str, Any]]:
@@ -119,3 +163,18 @@ def git_out(work: str, args: list[str], strip: bool = True) -> Optional[str]:
     if r.returncode != 0:
         return None
     return r.stdout.strip() if strip else r.stdout.rstrip("\n")
+
+
+def head_sha(work: str) -> Optional[str]:
+    """`work` の HEAD のコミット。読めなければ `None`。"""
+    return git_out(work, ["rev-parse", "HEAD"])
+
+
+def resolve_commit(work: str, sha: str) -> Optional[str]:
+    """SHA（短縮形を含む）をコミットの完全な SHA へ解決する。解決できなければ `None`。"""
+    return git_out(work, ["rev-parse", "--verify", f"{sha}^{{commit}}"])
+
+
+def full_commit(work: str, sha: Any) -> Any:
+    """SHA を完全な形へ解決する。解決できない SHA と、文字列でない・空の値はそのまま返す。"""
+    return (resolve_commit(work, sha) or sha) if isinstance(sha, str) and sha else sha

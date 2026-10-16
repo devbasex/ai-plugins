@@ -5,7 +5,7 @@
     check-trigger.py prepare --id <名> --state <計画の状態ディレクトリ> [--review] [--root DIR]
     check-trigger.py scope --id <名> --state <DIR>
     check-trigger.py finish --id <名> --pr N [--root DIR]
-    check-trigger.py record --id <名> --state <DIR> (--pr N | --failed [--pr N]) [--review] [--root DIR]
+    check-trigger.py record --id <名> --state <DIR> (--pr N | --failed [--pr N] | --target-pr N [--advance-done] [--failed]) [--review] [--root DIR]
     check-trigger.py escape --pr N [--of M] [--root DIR]
     check-trigger.py changed --id <名> [--root DIR]
     check-trigger.py stats [--root DIR]
@@ -19,7 +19,7 @@
 | lines | 前回の検査からの変更（追加 + 削除）> triggers.lines |
 | escapes | 前回の検査の後に、同じ領域で逃げた不具合の記録 ≥ triggers.escapes |
 | hours | 前回の検査から triggers.hours 時間以上たち、その間に PR が 1 本以上ある |
-| final | --final を渡し、範囲に PR が 1 本以上ある（ミッションの終わり） |
+| final | --final を渡し、範囲に PR が 1 本以上ある（スプリントの終わり） |
 | review | --review を渡し、前回のレビューからの範囲に PR が 1 本以上ある（開発版ごとの実装レビュー。ほかのトリガーは見ない） |
 
 **範囲の起点（前回の検査）は、origin の `check-done/review`（`--review`）か `check-done/check`（それ以外）→
@@ -42,40 +42,56 @@
 前回の検査は result が merged か no_change の check の最新の行で、無ければ --since、リポジトリの配布の宣言
 （`.ndf/supervise.json` の release）が決める正式版のタグの最新、起点のブランチとの分岐点の順に使う。
 トリガーの評価は通信しない（git の履歴だけを読む）。
+
+**検査の記録の書き手は `record` の 1 つである（#1317）。** 前回の検査からの差分の検査（`scope: since`）も、
+PR を指す検査（`--target-pr N`。`scope: pr`）も、終わり方（マージ・変更なし・落ちた）にかかわらず 1 行を書く。
+PR を指す検査の行は `pr` と `to` を持たないため、範囲の起点にも、範囲から外す PR にもならない。件数は計画の
+`state.json` の `counts`（フェーズレポートと同じ出所）から写す。`stats` は、流出不具合を持ち込んだ PR（`of`）を
+範囲（`prs`）に含めた最新の検査へ結び付ける。
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+from collections import Counter
+from contextlib import suppress
 import os
 import re
 import sys
 from datetime import datetime, timezone
+from operator import ge, gt
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
-from step_result import (
-    EXIT_OK,
-    EXIT_PRECONDITION,
-    EXIT_UNREADABLE,
-    EXIT_VIOLATION,  # noqa: E402
-    emit,
-    result,
-)
+from step_result import EXIT_OK, EXIT_PRECONDITION, EXIT_UNREADABLE, EXIT_VIOLATION, StepError, emit, result  # noqa: E402
 from pace import PaceError, matches, read_pace  # noqa: E402
 import clock  # noqa: E402
 import gh_call  # noqa: E402
+import gh_rest  # noqa: E402
+import merged_range  # noqa: E402
 import jsonio  # noqa: E402
 import proc  # noqa: E402
 import repo  # noqa: E402
 
 TOOL = "check-trigger"
-MERGE_SUBJECT = re.compile(r"^Merge pull request #(\d+) from [^/\s]+/(\S+)")
 SKIP_BRANCHES = ("release/", "check/")
 BASE_PREFIX = "check-base/"
 DONE_PREFIX = "check-done/"  # 見終えた位置を origin に残すブランチ（review = 実装レビュー、check = 構造改善を含む検査）
 ENDED = ("merged", "no_change")  # 前回の検査になる check の終わり方
+# 実装レビューの件数（cross-review の drive の counts）。findings / fixed / deferred / rejected は修正担当が扱った
+# 指摘の単位、comments はレビュー担当のコメントの単位、unresolved はスレッドの単位（#1317）
+REVIEW_COUNTS = ("rounds", "comments", "findings", "fixed", "deferred", "rejected", "unresolved")
+
+
+def read_findings(f: dict | None) -> dict:
+    """検査の行の件数を今の単位で読む。`comments` を持たない古い行の `findings` はコメントの数なので、
+    `comments` へ読み替え、指摘と修正は空にする（単位の違う値を指摘として並べない）。行は書き換えない。"""
+    f = dict(f or {})
+    if "comments" not in f and "findings" in f:
+        f["comments"] = f.pop("findings")
+        f.update(findings=None, fixed=None)
+    return f
 
 
 class Stop(Exception):
@@ -160,22 +176,18 @@ def slug_of(root: Path) -> str:
     return found.replace("/", "__", 1)
 
 
+# 置き場の候補: (環境変数, その値からの置き場)。設定されている最初の環境変数で決める
+STATE_BASES = (("CLAUDE_PLUGIN_DATA", Path), ("XDG_STATE_HOME", lambda v: Path(v, "ndf")), ("HOME", lambda v: Path(v, ".local/state/ndf")))
+
+
 def state_base() -> Path:
     """通過記録と同じ順で置き場を決める。"""
-    fallback = Path(os.environ.get("TMPDIR", "/tmp")) / "ndf-checks"
-    if os.environ.get("CLAUDE_PLUGIN_DATA"):
-        base = Path(os.environ["CLAUDE_PLUGIN_DATA"])
-    elif os.environ.get("XDG_STATE_HOME"):
-        base = Path(os.environ["XDG_STATE_HOME"]) / "ndf"
-    elif os.environ.get("HOME"):
-        base = Path(os.environ["HOME"]) / ".local" / "state" / "ndf"
-    else:
-        return fallback
-    try:
-        (base / "checks").mkdir(parents=True, exist_ok=True)
-        return base
-    except OSError:
-        return fallback
+    base = next((make(os.environ[name]) for name, make in STATE_BASES if os.environ.get(name)), None)
+    if base is not None:
+        with suppress(OSError):
+            (base / "checks").mkdir(parents=True, exist_ok=True)
+            return base
+    return Path(os.environ.get("TMPDIR", "/tmp")) / "ndf-checks"
 
 
 def log_path(root: Path) -> Path:
@@ -219,8 +231,8 @@ def range_base(root: Path) -> str:
     raise Stop("起点のブランチが分からない（.ndf/worktree.json の base_branch）")
 
 
-def release_tag_glob(root: Path) -> str | None:
-    """配布の宣言から正式版のタグの形を決める。package-plugin は `<plugin>--v*`。"""
+def release_tag_prefix(root: Path) -> str | None:
+    """配布の宣言から正式版のタグの接頭辞を決める。package-plugin は `<plugin>--v`（照合の `*` は呼び手が足す）。"""
     rel = optional_decl(root, "supervise.json").get("release") or {}
     if isinstance(rel, dict) and rel.get("form") == "package-plugin" and rel.get("plugin"):
         return f"{rel['plugin']}--v"
@@ -251,6 +263,10 @@ def done_branch(review: bool) -> str:
     return DONE_PREFIX + ("review" if review else "check")
 
 
+def is_ancestor(root: Path, old: str, new: str) -> bool:
+    return proc.git(root, "merge-base", "--is-ancestor", old, new, check=False).returncode == 0
+
+
 def range_start(root: Path, events: list[dict], since: str | None, review: bool = False) -> tuple[str, datetime, str]:
     """(from のコミット, 期限の起点, 決め方)。
 
@@ -259,6 +275,8 @@ def range_start(root: Path, events: list[dict], since: str | None, review: bool 
     prev = last_check(events, review)
     ref = f"refs/remotes/origin/{done_branch(review)}"
     done = git_or_stop(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}", check=False)
+    if done and prev and prev["to"] != done and is_ancestor(root, done, prev["to"]):
+        done = ""  # 送れなかった記録のほうが先にある（origin の位置は古い）
     if done:
         at = parse_at(prev["at"]) if prev and prev["to"] == done else commit_at(root, done)
         return done, at, f"origin/{done_branch(review)}"
@@ -267,7 +285,7 @@ def range_start(root: Path, events: list[dict], since: str | None, review: bool 
     if since:
         sha = git_or_stop(root, "rev-parse", f"{since}^{{commit}}")
         return sha, commit_at(root, sha), f"--since {since}"
-    prefix = release_tag_glob(root)
+    prefix = release_tag_prefix(root)
     if prefix:
         for tag in git_or_stop(root, "tag", "--list", f"{prefix}*", "--sort=-v:refname").split():
             if "-" not in tag[len(prefix) :]:
@@ -278,25 +296,34 @@ def range_start(root: Path, events: list[dict], since: str | None, review: bool 
     return sha, commit_at(root, sha), f"origin/{base} との分岐点"
 
 
-def merged_prs(root: Path, frm: str, to: str, decl: dict) -> list[dict]:
+def merged_prs(root: Path, frm: str, to: str, decl: dict, skip: set[int] = frozenset()) -> tuple[list[dict], list[str]]:
+    """(範囲へ入った PR, 外した PR のコミット)。拾い出しは `lib/merged_range.py`（merge commit と squash merge）。
+    検査の PR は記録の番号（skip）で外し、残りの squash の PR だけブランチを GitHub から読んで `SKIP_BRANCHES` を
+    当てる。外したコミットは行数からも差し引くために返す。"""
+    try:
+        merges = merged_range.merges_in(root, frm, to)
+        kept = merged_range.with_heads(root, [m for m in merges if m.number not in skip])
+    except StepError as e:
+        raise Stop(str(e), e.code)
+    excluded = [m.sha for m in merges if m.number in skip]
     out = []
-    log = git_or_stop(root, "log", "--first-parent", "--merges", "--format=%H%x09%s", f"{frm}..{to}")
-    for line in log.splitlines():
-        sha, _, subject = line.partition("\t")
-        m = MERGE_SUBJECT.match(subject)
-        if not m or m.group(2).startswith(SKIP_BRANCHES):
+    for m in kept:
+        if m.branch.startswith(SKIP_BRANCHES):
+            excluded.append(m.sha)
             continue
-        files = git_or_stop(root, "diff", "--name-only", f"{sha}^1", sha).splitlines()
-        common = any(area_of(f, decl)[1] for f in files)
-        out.append(
-            {"pr": int(m.group(1)), "branch": m.group(2), "common": common, "points": decl["triggers"]["common_weight"] if common else 1}
-        )
-    return out
+        common = any(area_of(f, decl)[1] for f in git_or_stop(root, "diff", "--name-only", f"{m.sha}^1", m.sha).splitlines())
+        out.append({"pr": m.number, "branch": m.branch, "common": common, "points": decl["triggers"]["common_weight"] if common else 1})
+    return out, excluded
 
 
-def changed_lines(root: Path, frm: str, to: str) -> int:
-    stat = git_or_stop(root, "diff", "--shortstat", frm, to)
-    return sum(int(n) for n in re.findall(r"(\d+) (?:insertion|deletion)", stat))
+def changed_lines(root: Path, frm: str, to: str, excluded: list[str] = ()) -> int:
+    """範囲の変更行数。外した PR（検査・リリース）のコミットの分は差し引く。検査の修正が次の検査を立てないためである。"""
+
+    def count(a: str, b: str) -> int:
+        stat = git_or_stop(root, "diff", "--shortstat", a, b)
+        return sum(int(n) for n in re.findall(r"(\d+) (?:insertion|deletion)", stat))
+
+    return max(0, count(frm, to) - sum(count(f"{sha}^1", sha) for sha in excluded))
 
 
 def escapes_since(events: list[dict], since: datetime) -> dict[str, int]:
@@ -308,40 +335,34 @@ def escapes_since(events: list[dict], since: datetime) -> dict[str, int]:
     return counts
 
 
+# しきい値で立つトリガー: (metrics と triggers のキー, 立つ比較, PR が 1 本以上要るか)。上から順に判定する
+THRESHOLD_TRIGGERS = (("score", ge, False), ("lines", gt, False), ("escapes", ge, False), ("hours", ge, True))
+
+
 def evaluate(root: Path, final: bool, since: str | None, to_ref: str | None = None, review: bool = False) -> dict:
     decl = load_decl(root)
     events = read_events(root)
     frm, since_at, how = range_start(root, events, since, review)
     to = git_or_stop(root, "rev-parse", to_ref or f"origin/{range_base(root)}")
-    prs = merged_prs(root, frm, to, decl)
+    prs, excluded = merged_prs(root, frm, to, decl, {e["pr"] for e in events if e["kind"] == "check" and isinstance(e.get("pr"), int)})
     t = decl["triggers"]
     esc = escapes_since(events, since_at)
-    hours = round((clock.now(utc=True) - since_at).total_seconds() / 3600, 2)
     metrics = {
         "prs": len(prs),
         "score": sum(p["points"] for p in prs),
-        "lines": changed_lines(root, frm, to),
-        "hours": hours,
+        "lines": changed_lines(root, frm, to, excluded),
+        "hours": round((clock.now(utc=True) - since_at).total_seconds() / 3600, 2),
         "escapes": max(esc.values(), default=0),
         "from": frm,
         "to": to,
     }
-    fired = []
-    if review:
-        if prs:
-            fired.append({"trigger": "review", "value": len(prs), "threshold": 1})
-        return {"decl": decl, "fired": fired, "metrics": metrics, "escape_areas": esc, "how": how}
-    if metrics["score"] >= t["score"]:
-        fired.append({"trigger": "score", "value": metrics["score"], "threshold": t["score"]})
-    if metrics["lines"] > t["lines"]:
-        fired.append({"trigger": "lines", "value": metrics["lines"], "threshold": t["lines"]})
-    if metrics["escapes"] >= t["escapes"]:
-        fired.append({"trigger": "escapes", "value": metrics["escapes"], "threshold": t["escapes"]})
-    if hours >= t["hours"] and prs:
-        fired.append({"trigger": "hours", "value": hours, "threshold": t["hours"]})
-    if final and prs:
+    fired = [{"trigger": "review", "value": len(prs), "threshold": 1}] if review and prs else []
+    for name, reached, needs_prs in THRESHOLD_TRIGGERS:
+        if not review and reached(metrics[name], t[name]) and (prs or not needs_prs):
+            fired.append({"trigger": name, "value": metrics[name], "threshold": t[name]})
+    if final and prs and not review:
         fired.append({"trigger": "final", "value": len(prs), "threshold": 1})
-    return {"decl": decl, "fired": fired, "metrics": metrics, "escape_areas": esc, "how": how}
+    return {"decl": decl, "fired": fired, "metrics": metrics, "escape_areas": esc, "how": how, "prs": [p["pr"] for p in prs]}
 
 
 # ---------------------------------------------------------------- 副命令
@@ -404,6 +425,7 @@ def cmd_prepare(a, root: Path) -> tuple[dict, int]:
         "fired": fired,
         "metrics": m,
         "files": files,
+        "prs": ev["prs"],
         "escape_areas": ev["escape_areas"],
         "base": branch,
     }
@@ -470,8 +492,9 @@ def findings_of(state: Path) -> tuple[dict, str]:
     findings = {
         "applied": ref.get("adopted", ref.get("applied")),
         "reverted": ref.get("reverted"),
-        "findings": rev.get("findings"),
-        "unresolved": rev.get("unresolved"),
+        **({"unconfirmed": ref["unconfirmed"]} if "unconfirmed" in ref else {}),  # 最終ゲートを経ていない実行だけ（#1652）
+        # drive が返したキーだけを写す（古い drive の `findings` はコメントの数で、stats が読むときに読み替える）
+        **{k: rev[k] for k in REVIEW_COUNTS if k in rev},
     }
     failed = [
         e.get("id") for e in log if e.get("exit") not in (0, None) and not e.get("gate") and not str(e.get("id", "")).startswith("abort")
@@ -479,7 +502,93 @@ def findings_of(state: Path) -> tuple[dict, str]:
     return findings, (failed[-1] if failed else "")
 
 
+PR_END_RESULT = {"MERGED": "merged", "CLOSED": "no_change"}
+
+
+def _append_failed(root: Path, row: dict) -> str:
+    """落ちた検査の行を書き、書けたかの文言を返す（書けなくても止めない）。"""
+    try:
+        append_event(root, row)
+        return "記録した"
+    except OSError as e:
+        return f"記録できない（{e}）"
+
+
+def _ended_result(root: Path, n: int) -> str:
+    """PR の状態を検査の終わり方（merged / no_change）へ写す。マージも閉じもされていなければ止める。"""
+    state = json.loads(gh_or_stop(root, "pr", "view", str(n), "--json", "state")).get("state")
+    res = PR_END_RESULT.get(state)
+    if not res:
+        raise Stop(f"#{n} がマージも閉じられもしていない（{state}）", EXIT_VIOLATION)
+    return res
+
+
+def _append_or_stop(root: Path, row: dict) -> None:
+    try:
+        append_event(root, row)
+    except OSError as e:
+        raise Stop(f"検査の記録へ書けない: {e}", EXIT_VIOLATION)
+
+
+def merged_at(root: Path, n: int) -> str:
+    """マージした PR のマージのコミット。手元へ取り込んでから返す（送る前に手元にコミットが要る）。読めなければ空。"""
+    try:
+        d = json.loads(gh_or_stop(root, "pr", "view", str(n), "--json", "state,mergeCommit,baseRefName"))
+    except (Stop, ValueError):
+        d = None
+    sha = ((d.get("mergeCommit") or {}).get("oid") or "") if isinstance(d, dict) and d.get("state") == "MERGED" else ""
+    if sha and d.get("baseRefName"):
+        git_or_stop(root, "fetch", "-q", "origin", d["baseRefName"], check=False)
+    return sha
+
+
+def _pushed_result(root: Path, a_id: str, res: str, n: int, row: dict, to: str, review: bool) -> dict:
+    """`check-done/*` を `to` へ進め、進めた ref と送れなかった ref を添えた記録の結果。"""
+    pushed, unpushed = push_done(root, to, review)
+    note = f"・origin の {' / '.join(pushed)} を進めた" if pushed else ""
+    note += f"・{' / '.join(unpushed)} を送れない（次の範囲は手元の記録から決まる）" if unpushed else ""
+    return result(TOOL, "ok", f"検査 {a_id} を記録した（{res}・#{n}）{note}", [row], {"pushed": pushed, "unpushed": unpushed})
+
+
+def record_target(a, root: Path) -> tuple[dict, int]:
+    """PR を指す検査（`new check --pr`）の記録。範囲の起点（`to`）と検査の PR（`pr`）を持たないため、差分の検査の
+    範囲に影響しない。`check-base` を消さず、`check-done/*` を進めず、PR を閉じない（検査した PR は実装の PR である）。
+
+    `--advance-done`（スプリントの検査。#1485 の決定 8）なら、検査が成功してマージした PR のマージのコミットを
+    `to` にして `check-done/*` を進める。落ちた検査とマージしなかった検査は進めない。"""
+    findings, failed_at = findings_of(Path(a.state))
+    n = a.target_pr
+    row = {
+        "kind": "check",
+        "id": a.id,
+        "scope": "pr",
+        "target_pr": n,
+        "prs": [n],
+        "from": "",
+        "to": "",
+        "metrics": {},
+        "findings": findings,
+    }
+    if a.failed:
+        row.update(result="failed", failed_at=failed_at or "不明")
+        written = _append_failed(root, row)
+        return result(TOOL, "stopped", f"検査 {a.id}（#{n}）が {row['failed_at']} で落ちた。{written}", [row], {}), EXIT_VIOLATION
+    res = _ended_result(root, n)
+    row["result"] = res
+    row["to"] = merged_at(root, n) if a.advance_done and res == "merged" else ""
+    _append_or_stop(root, row)
+    if not a.advance_done:
+        return result(TOOL, "ok", f"検査 {a.id} を記録した（{res}・#{n}）", [row], {}), EXIT_OK
+    return _pushed_result(root, a.id, res, n, row, row["to"], False), EXIT_OK
+
+
 def cmd_record(a, root: Path) -> tuple[dict, int]:
+    if a.advance_done and a.target_pr is None:
+        raise Stop("--advance-done は --target-pr と一緒に渡す")
+    if a.target_pr is not None:
+        if a.pr is not None or a.review:
+            raise Stop("--target-pr は --pr / --review と同時に渡せない")
+        return record_target(a, root)
     p = check_json(a.state)
     data = json.loads(p.read_text()) if p.is_file() else {}
     findings, failed_at = findings_of(Path(a.state))
@@ -490,18 +599,17 @@ def cmd_record(a, root: Path) -> tuple[dict, int]:
         "to": data.get("to", ""),
         "metrics": data.get("metrics", {}),
         "findings": findings,
+        "scope": "since",
     }
+    if isinstance(data.get("prs"), list):
+        row["prs"] = data["prs"]
     if a.review:
         row["only"] = "review"
     if a.pr:
         row["pr"] = a.pr
     if a.failed:
         row.update(result="failed", failed_at=failed_at or "不明")
-        try:
-            append_event(root, row)
-            written = "記録した"
-        except OSError as e:
-            written = f"記録できない（{e}）"
+        written = _append_failed(root, row)
         delete_base(root, a.id)
         if a.pr:
             gh_call.gh(["pr", "close", str(a.pr), "--comment", "検査が途中で落ちたため閉じる"], cwd=str(root))
@@ -510,39 +618,37 @@ def cmd_record(a, root: Path) -> tuple[dict, int]:
         ), EXIT_VIOLATION
     if not a.pr:
         raise Stop("record には --pr か --failed が要る")
-    state = json.loads(gh_or_stop(root, "pr", "view", str(a.pr), "--json", "state")).get("state")
-    res = {"MERGED": "merged", "CLOSED": "no_change"}.get(state)
-    if not res:
-        raise Stop(f"#{a.pr} がマージも閉じられもしていない（{state}）", EXIT_VIOLATION)
+    res = _ended_result(root, a.pr)
     row["result"] = res
-    try:
-        append_event(root, row)
-    except OSError as e:
-        raise Stop(f"検査の記録へ書けない: {e}", EXIT_VIOLATION)
+    _append_or_stop(root, row)
     delete_base(root, a.id)
-    pushed, unpushed = push_done(root, row["to"], a.review)
-    note = f"・origin の {' / '.join(pushed)} を進めた" if pushed else ""
-    if unpushed:
-        note += f"・{' / '.join(unpushed)} を送れない（次の範囲は手元の記録から決まる）"
-    return result(TOOL, "ok", f"検査 {a.id} を記録した（{res}・#{a.pr}）{note}", [row], {"pushed": pushed, "unpushed": unpushed}), EXIT_OK
+    return _pushed_result(root, a.id, res, a.pr, row, row["to"], a.review), EXIT_OK
 
 
 def push_done(root: Path, to: str, review: bool) -> tuple[list[str], list[str]]:
-    """見終えた位置を origin の check-done/* へ送る。構造改善を含む検査は実装レビューも通すため両方を進める。"""
+    """見終えた位置を origin の check-done/* へ送る。構造改善を含む検査は実装レビューも通すため両方を進める。
+    fast-forward だけで送り、origin が既に `to` と同じか先なら保つ（古い検査が後に終わっても見終えた位置を戻さない）。"""
     if not to:
         return [], []
     pushed, unpushed = [], []
     for name in [done_branch(True)] + ([] if review else [done_branch(False)]):
-        ok = proc.git(root, "push", "-q", "-f", "origin", f"{to}:refs/heads/{name}", check=False).returncode == 0
+        ok = proc.git(root, "push", "-q", "origin", f"{to}:refs/heads/{name}", check=False).returncode == 0
+        if not ok:
+            git_or_stop(root, "fetch", "-q", "origin", f"+refs/heads/{name}:refs/remotes/origin/{name}", check=False)
+            ok = is_ancestor(root, to, f"refs/remotes/origin/{name}")
         (pushed if ok else unpushed).append(name)
     return pushed, unpushed
 
 
 def cmd_escape(a, root: Path) -> tuple[dict, int]:
     decl = load_decl(root)
-    info = json.loads(gh_or_stop(root, "pr", "view", str(a.pr), "--json", "files"))
+    r = gh_rest.pr_files(a.pr, cwd=str(root))
+    if r.returncode != 0:
+        raise Stop(
+            "gh が無い" if r.returncode == 127 else f"PR #{a.pr} の変更したファイルを読めない: {r.stderr.strip()[:300]}", EXIT_VIOLATION
+        )
     areas: list[str] = []
-    for f in info.get("files") or []:
+    for f in json.loads(r.stdout):
         name = area_of(f.get("path", ""), decl)[0]
         if name not in areas:
             areas.append(name)
@@ -572,48 +678,96 @@ def cmd_changed(a, root: Path) -> tuple[dict, int]:
     raise Stop(f"検査 {a.id} の記録が無い")
 
 
-def cmd_stats(a, root: Path) -> tuple[dict, int]:
-    events = read_events(root)
-    evals = [e for e in events if e["kind"] == "eval"]
-    checks = [e for e in events if e["kind"] == "check"]
-    ended = [e for e in checks if e.get("result") in ENDED]
-    rows = []
-    for i, c in enumerate(ended):
-        # 実装レビューだけの回は次の記録（どちらの検査もレビューを通る）までで切り、
-        # 構造改善を含む検査は同じ種類の次の記録までで切る
-        review = c.get("only") == "review"
-        nxt = next((d for d in ended[i + 1 :] if review or d.get("only") != "review"), None)
-        until = parse_at(nxt["at"]) if nxt else clock.now(utc=True)
-        escaped = sum(1 for e in events if e["kind"] == "escape" and parse_at(c["at"]) < parse_at(e["at"]) <= until)
-        rows.append(
-            {
-                "id": c.get("id"),
-                "at": c["at"],
-                "result": c["result"],
-                "pr": c.get("pr"),
-                "only": c.get("only"),
-                "findings": c.get("findings") or {},
-                "escapes_after": escaped,
-            }
-        )
-    fired: dict[str, int] = {}
-    for e in evals:
-        for t in e.get("fired") or []:
-            fired[t] = fired.get(t, 0) + 1
-    metrics = {
+def link_escape(e: dict, checks: list[dict]) -> tuple[dict | None, str]:
+    """流出不具合を、持ち込んだ PR（`of`）を範囲（`prs`）に含めた最新の検査へ結び付ける。(検査, 結び付かない理由)。
+    理由は `of_unknown`（`of: 0`）/ `no_check`（範囲に含めた検査が無い）/ `no_range`（その時点より前に範囲を持たない
+    検査の行しか無い）。`scope` は問わない。"""
+    of = e.get("of") or 0
+    if not of:
+        return None, "of_unknown"
+    at = parse_at(e["at"])
+    before = [c for c in checks if parse_at(c["at"]) < at]
+    hit = [c for c in before if of in (c.get("prs") or [])]
+    if hit:
+        return hit[-1], ""
+    return None, "no_range" if any(not isinstance(c.get("prs"), list) for c in before) else "no_check"
+
+
+def link_escapes(escapes: list[dict], checks: list[dict]) -> tuple[dict[int, list[int]], list[dict]]:
+    """流出不具合を検査へ結び付ける。(id(検査) -> 直した PR の列, 結び付かない流出不具合の列)。"""
+    linked: dict[int, list[int]] = {}
+    unlinked = []
+    for e in escapes:
+        c, reason = link_escape(e, checks)
+        if c is None:
+            unlinked.append({"pr": e.get("pr"), "of": e.get("of") or 0, "reason": reason})
+        else:
+            linked.setdefault(id(c), []).append(e.get("pr"))
+    return linked, unlinked
+
+
+def escapes_in_window(c: dict, i: int, windows: list[dict], escapes: list[dict]) -> int:
+    """窓の i 番目の検査 c の後、次の記録までに記録された流出不具合の数。"""
+    # 実装レビューだけの回は次の記録（どちらの検査もレビューを通る）までで切り、
+    # 構造改善を含む検査は同じ種類の次の記録までで切る
+    review = c.get("only") == "review"
+    nxt = next((d for d in windows[i + 1 :] if review or d.get("only") != "review"), None)
+    until = parse_at(nxt["at"]) if nxt else clock.now(utc=True)
+    return sum(1 for e in escapes if parse_at(c["at"]) < parse_at(e["at"]) <= until)
+
+
+def check_row(c: dict, linked: dict[int, list[int]]) -> dict:
+    return {
+        "id": c.get("id"),
+        "at": c["at"],
+        "result": c.get("result"),
+        "scope": c.get("scope", "since"),
+        "pr": c.get("pr"),
+        "target_pr": c.get("target_pr"),
+        "prs": c.get("prs"),
+        "only": c.get("only"),
+        "findings": read_findings(c.get("findings")),
+        "escapes_linked": linked.get(id(c), []),
+    }
+
+
+def _check_rows(checks: list[dict], windows: list[dict], escapes: list[dict], linked) -> list[dict]:
+    """検査ごとの行に、窓を切る検査なら窓の中の逃げた不具合を足す。"""
+    at = {id(w): i for i, w in enumerate(windows)}
+    return [
+        check_row(c, linked) | ({"escapes_after": escapes_in_window(c, at[id(c)], windows, escapes)} if id(c) in at else {}) for c in checks
+    ]
+
+
+def _stats_metrics(root: Path, evals: list[dict], checks: list[dict], escapes: list[dict], unlinked) -> dict:
+    return {
         "evals": len(evals),
         "fired": sum(1 for e in evals if e.get("fired")),
-        "by_trigger": fired,
+        "by_trigger": dict(Counter(t for e in evals for t in e.get("fired") or [])),
         "checks": len(checks),
+        "checks_pr": sum(1 for c in checks if c.get("scope") == "pr"),
         "failed": sum(1 for c in checks if c.get("result") == "failed"),
-        "escapes": sum(1 for e in events if e["kind"] == "escape"),
+        "escapes": len(escapes),
+        "escapes_linked": len(escapes) - len(unlinked),
+        "escapes_unlinked": len(unlinked),
+        "unlinked": unlinked,
         "log": str(log_path(root)),
     }
+
+
+def cmd_stats(a, root: Path) -> tuple[dict, int]:
+    events = read_events(root)
+    evals, checks, escapes = ([e for e in events if e["kind"] == kind] for kind in ("eval", "check", "escape"))
+    linked, unlinked = link_escapes(escapes, checks)
+    # 時刻の窓を切るのは範囲が時刻で連続する検査（scope: since）だけ。PR を指す検査は窓を切らない
+    windows = [e for e in checks if e.get("result") in ENDED and e.get("scope", "since") == "since"]
+    metrics = _stats_metrics(root, evals, checks, escapes, unlinked)
     return result(
         TOOL,
         "ok",
-        f"評価 {metrics['evals']} 回（立った {metrics['fired']}）・検査 {len(checks)} 回・逃げた不具合 {metrics['escapes']} 件",
-        rows,
+        f"評価 {metrics['evals']} 回（立った {metrics['fired']}）・検査 {len(checks)} 回（PR を指す {metrics['checks_pr']}）"
+        f"・逃げた不具合 {metrics['escapes']} 件（結び付いた {metrics['escapes_linked']}）",
+        _check_rows(checks, windows, escapes, linked),
         metrics,
     ), EXIT_OK
 
@@ -645,6 +799,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--pr", type=int, required=True)
     s = add("record", True, True)
     s.add_argument("--pr", type=int)
+    s.add_argument("--target-pr", type=int, help="PR を指す検査として記録する（検査した PR。範囲の起点にしない）")
+    s.add_argument(
+        "--advance-done",
+        action="store_true",
+        help="--target-pr の PR をマージしたら、そのマージのコミットへ check-done/* を進める（スプリントの検査）",
+    )
     s.add_argument("--failed", action="store_true")
     s.add_argument("--review", action="store_true", help="レビューだけの回として記録する（only: review）")
     s = add("escape")

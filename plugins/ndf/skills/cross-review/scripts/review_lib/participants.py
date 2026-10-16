@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import argparse
 import functools
+import os
 from typing import Any
 
 import review_lib  # noqa: E402
 import assignment  # noqa: E402
 import auth  # noqa: E402
+import runtime_policy  # noqa: E402
 import statefile  # noqa: E402
 from review_lib import posts  # noqa: E402
 
@@ -38,9 +40,22 @@ def _apply_resume_args_block(st: dict[str, Any], args: argparse.Namespace) -> bo
     （決定 14）。作り直しの失敗は状態を書き換える前に起きる（`_resolve_reviewers` を
     先に呼び、通ってから `st` を書く）。
     """
-    only, include, exclude = _normalize_participant_args(args)
+    only, _, _ = _normalize_participant_args(args)
     before = len(st.get("resume_changes") or [])
 
+    _apply_plain_resume_args(st, args, only)
+
+    policy = _load_policy()
+    # **再開した時点の宣言に従う（#1598 の前提 8）。** 記録の写しと今の宣言が違えば、引数が無くても作り直す。
+    policy_changed = runtime_policy.differs_from_record(policy, st.get("participants") or {})
+    if any(getattr(args, name, None) is not None for name in PARTICIPANT_ARGS) or policy_changed:
+        _reresolve_resume_participants(st, args, policy)
+
+    return len(st.get("resume_changes") or []) > before
+
+
+def _apply_plain_resume_args(st: dict[str, Any], args: argparse.Namespace, only: str | None) -> None:
+    """`--only none` の解除と、担当に関わらない再開引数を状態へ反映する。"""
     # **`--only none` はここで処理する。** 正規化した `None` を表へ渡すと「未指定」と
     # 区別できず、指定を外す操作が黙って捨てられる（決定 15）。
     args_copy = argparse.Namespace(**vars(args))
@@ -56,28 +71,35 @@ def _apply_resume_args_block(st: dict[str, Any], args: argparse.Namespace) -> bo
     for line in statefile.apply_resume_args(st, args_copy, REVIEW_RESUME_FIELDS):
         review_lib.info(line)
 
-    if any(getattr(args, name, None) is not None for name in PARTICIPANT_ARGS):
-        old_participants = st.get("participants")
-        recorded = old_participants or {}
-        try:
-            host = st.get("host") or assignment.detect_host(getattr(args, "host", None))[0]
-        except assignment.AssignmentError as e:
-            review_lib.die(str(e), code=1)
-            raise
-        include_eff = include if include is not None else list(recorded.get("included") or [])
-        rebuild = argparse.Namespace(
-            only=st.get("only"),
-            include=include_eff,
-            exclude=(exclude if exclude is not None else assignment.recorded_exclusions(recorded, include_eff, st.get("only"))),
-            require_all=(args.require_all if getattr(args, "require_all", None) is not None else bool(recorded.get("require_all"))),
-        )
-        participants = _resolve_reviewers(host, rebuild)
-        st["participants"] = participants
-        st.setdefault("resume_changes", []).append(
-            {"at": statefile.now(), "field": "participants", "from": old_participants, "to": participants}
-        )
 
-    return len(st.get("resume_changes") or []) > before
+def _reresolve_resume_participants(st: dict[str, Any], args: argparse.Namespace, policy: Any) -> None:
+    """渡さなかった担当の引数を状態ファイルの値で補い、使える者を解決し直して記録する（決定 14）。"""
+    _, include, exclude = _normalize_participant_args(args)
+    old_participants = st.get("participants")
+    recorded = old_participants or {}
+    try:
+        host = st.get("host") or assignment.detect_host(getattr(args, "host", None))[0]
+    except assignment.AssignmentError as e:
+        review_lib.die(str(e), code=1)
+        raise
+    include_eff = include if include is not None else list(recorded.get("included") or [])
+    if include is None and policy is not None:
+        include_eff = policy.keep_allowed(st, "included", include_eff, review_lib.info)
+    if policy is not None and st.get("only") and getattr(args, "only", None) in (None, NONE_WORD):
+        if not policy.keep_allowed(st, "only", [st["only"]], review_lib.info):
+            st["only"] = None
+    rebuild = argparse.Namespace(
+        only=st.get("only"),
+        include=include_eff,
+        exclude=(exclude if exclude is not None else assignment.recorded_exclusions(recorded, include_eff, st.get("only"))),
+        require_all=(args.require_all if getattr(args, "require_all", None) is not None else bool(recorded.get("require_all"))),
+    )
+    participants = _resolve_reviewers(host, rebuild, policy=policy)
+    st["participants"] = participants
+    st.setdefault("resume_changes", []).append(
+        {"at": statefile.now(), "field": "participants", "from": old_participants, "to": participants}
+    )
+    _reselect_open_round(st)
 
 
 # **母集合を広げる前からある 2 者。** `host` を持たない状態ファイル（このリポジトリの
@@ -99,13 +121,20 @@ def _round_reviewers(st: dict[str, Any], round_no: int) -> list[str]:
     | ---: | --- | --- |
     | 1 | ラウンドに `reviewers` がある | その値 |
     | 2 | `only` がある | `[only]` |
-    | 3 | `participants` がある | `assignment.review_seats(round_no, available, fallback)` |
+    | 3 | `participants` がある | `assignment.review_seats(round_no, available − 外した担当, fallback)` |
     | 4 | `host` がある | `assignment.review_seats(round_no, 全ランタイム − ホスト, [])`（#892 の前の母集合。変更前の輪番と同じ値） |
     | 5 | どれも無い（古い状態ファイル） | `LEGACY_AGENTS` |
+
+    順 3 は結果なしの記録（`no_results`。#919）の外した担当を引き、固定の組は `pinned_in_force` が
+    どちらかのランタイムを振り替えの元と読めば渡さない。席を選べなければ `AssignmentError`。
     """
     for entry in st.get("rounds") or []:
         if entry.get("round") == round_no and entry.get("reviewers"):
-            return list(entry["reviewers"])
+            # 判定の済んでいないラウンドの記録に宣言の外の者がいれば選び直す（#1598 の I4）。
+            # 判定の済んだラウンドは今の宣言で検査しない（過去の記録を書き換えない）。
+            if "verdict" in entry or not _outside_policy(st, entry["reviewers"]):
+                return list(entry["reviewers"])
+            break
     # **`--only` は担当そのものを絞る。** 輪番が返す 2 者を担当のまま残すと、指定した
     # 1 者が含まれないラウンドで誰も起動されない。そのとき全員が「指定によるスキップ」
     # として扱われ、レビューが行われていないのに収束する。
@@ -114,10 +143,13 @@ def _round_reviewers(st: dict[str, Any], round_no: int) -> list[str]:
         return [only]
     participants = st.get("participants")
     if participants:
+        log = st.get("no_results") or []
+        pinned = assignment.pinned_in_force((participants.get("policy") or {}).get("review_seats"), log)
         return assignment.review_seats(
             max(round_no, 1),
-            list(participants.get("available") or []),
+            assignment.seats_pool(participants.get("available") or [], log),
             list(participants.get("fallback") or []),
+            pinned=pinned,
         )
     host = st.get("host")
     if host:
@@ -125,6 +157,82 @@ def _round_reviewers(st: dict[str, Any], round_no: int) -> list[str]:
         # ホストを除く全ランタイムから選んでいた。その担当を保つため、この母集合を式で持つ。
         return assignment.review_seats(max(round_no, 1), [r for r in assignment.ALL_RUNTIMES if r != host], [])
     return list(LEGACY_AGENTS)
+
+
+# ---------- ランタイムの宣言（#1598） ----------
+
+# `_resolve_reviewers` の `policy` を渡さなかった印。`None`（宣言が無い）と区別する。
+_UNSET = object()
+
+
+def _load_policy() -> runtime_policy.RuntimePolicy | None:
+    """カレントディレクトリのリポジトリのランタイムの宣言。壊れていれば終了コード 1（前提 7）。"""
+    try:
+        return runtime_policy.read_policy(os.getcwd())
+    except runtime_policy.RuntimePolicyError as e:
+        review_lib.die(str(e), code=1)
+        raise
+
+
+def _outside_policy(st: dict[str, Any], seats: list[str]) -> list[str]:
+    """状態ファイルの宣言の写しで見た、宣言の外の席。写しが無ければ空。"""
+    allowed = ((st.get("participants") or {}).get("policy") or {}).get("allowed")
+    if not allowed:
+        return []
+    return runtime_policy.outside_of(allowed, [s for s in seats if assignment.SEAT_PATTERN.match(s)])
+
+
+def _reselect_open_round(st: dict[str, Any]) -> None:
+    """判定の済んでいない最後のラウンドの担当に宣言の外の者がいれば、選び直して記録を直す（AC12）。"""
+    rounds = st.get("rounds") or []
+    if not rounds:
+        return
+    last = rounds[-1]
+    if "verdict" in last or not last.get("reviewers") or not _outside_policy(st, last["reviewers"]):
+        return
+    old = list(last["reviewers"])
+    last["reviewers"] = _round_reviewers(st, int(last.get("round") or 1))
+    last["seats"] = seat_records(last["reviewers"], round_accounts(st, last["reviewers"]))
+    st.setdefault("resume_changes", []).append(
+        {"at": statefile.now(), "field": f"round{last.get('round')}:reviewers", "from": old, "to": last["reviewers"]}
+    )
+    review_lib.info(
+        f"↻ round {last.get('round')} の担当を宣言に合わせて選び直しました: {' + '.join(old)} → {' + '.join(last['reviewers'])}"
+    )
+
+
+def seat_records(reviewers: list[str], accounts: dict[str, str | None] | None = None) -> list[dict[str, Any]]:
+    """ラウンドの席ごとの記録（席・ランタイム・モデル・組の相手）。モデルは `read-result` が埋める（#1598 の AC13）。
+
+    `accounts` は席ごとの claude のアカウントの名前（#919）。名前のある席だけが `account` を持ち、無い席は
+    アカウントを選んでいない（起動した環境のまま）。"""
+    pair = len(reviewers) == 2
+    records = []
+    for i, seat in enumerate(reviewers):
+        rec: dict[str, Any] = {
+            "seat": seat,
+            "runtime": assignment.seat_runtime(seat),
+            "model": None,
+            "partner": reviewers[1 - i] if pair else None,
+        }
+        account = (accounts or {}).get(seat)
+        if account:
+            rec["account"] = account
+        records.append(rec)
+    return records
+
+
+def round_accounts(st: dict[str, Any], reviewers: list[str]) -> dict[str, str | None]:
+    """新しいラウンドの席ごとの claude のアカウント。結果なしの記録の最後の振り替え先のアカウント（#919）。"""
+    account = assignment.current_account(st.get("no_results") or [], "claude", None)
+    if not account:
+        return {}
+    return {s: account for s in reviewers if assignment.SEAT_PATTERN.match(s) and assignment.seat_runtime(s) == "claude"}
+
+
+def seat_accounts(round_entry: dict[str, Any]) -> dict[str, str | None]:
+    """ラウンドの席の記録から、席ごとの claude のアカウントを引く。"""
+    return {rec["seat"]: rec.get("account") or None for rec in round_entry.get("seats") or [] if rec.get("seat")}
 
 
 # ---------- 参加者の引数と使える者の解決（#727） ----------
@@ -165,7 +273,9 @@ def _normalize_participant_args(
     return only, _flatten("include"), _flatten("exclude")
 
 
-def _resolve_reviewers(host: str, args: argparse.Namespace) -> dict[str, Any]:
+def _resolve_reviewers(
+    host: str, args: argparse.Namespace, policy: runtime_policy.RuntimePolicy | None | object = _UNSET
+) -> dict[str, Any]:
     """使える者を決め、状態ファイルの `participants`（`fallback` を含む 9 項目）を返す。
 
     母集合は `default_pool(host)`（claude / codex / kiro とホスト）。母集合に無い者の
@@ -175,8 +285,13 @@ def _resolve_reviewers(host: str, args: argparse.Namespace) -> dict[str, Any]:
     1 者なら `review_seats` が `<その者>-2` で席を埋める。名前の矛盾・`--require-all` で
     欠け・使える者が 0 者・1 者指定が確認を通らない、は終了コード 1（状態ファイルはこの
     関数の後に書かれるため作られない）。
+
+    ランタイムの宣言（#1598）があれば、母集合をその `allowed` で絞り、宣言の外の `--include` /
+    `--only` を終了コード 1 で止める。`policy` を渡さなければ（既定の `_UNSET`）ここで読む。
     """
     only, include, exclude = _normalize_participant_args(args)
+    if policy is _UNSET:
+        policy = _load_policy()
     probe = functools.partial(auth.probe_auth, info=review_lib.info)
     try:
         pool = assignment.default_pool(host)
@@ -188,7 +303,9 @@ def _resolve_reviewers(host: str, args: argparse.Namespace) -> dict[str, Any]:
             only=only,
             probe=probe,
             require_all=bool(getattr(args, "require_all", None)),
+            policy=policy,
         )
+        pool = resolved.pool
     except assignment.AssignmentError as e:
         review_lib.die(str(e), code=1)
         raise
@@ -210,11 +327,14 @@ def _resolve_reviewers(host: str, args: argparse.Namespace) -> dict[str, Any]:
         review_lib.die(
             f"1 者指定の {only} が確認を通りません"
             f"（{resolved.unavailable.get(only, '')}）。"
-            f"{only} で認証し直すか、1 者指定を外して再実行してください",
+            f"{only} の CLI を確認が通る状態に直すか、1 者指定を外して再実行してください",
             code=1,
         )
     if only is None and not available:
         review_lib.die(f"使える者がいません: 母集合 {' / '.join(pool)} の全員が確認を通りません", code=1)
+    pinned = policy.review_seats if policy is not None else None
+    if only is None and pinned and not all(assignment.seat_runtime(x) in available for x in pinned):
+        review_lib.info(f"⚠ 固定の組 {' + '.join(pinned)} のランタイムが使えないため、今の規則で席を決めます（{policy.path}）")
     if only is None and len(available) == 1:
         review_lib.info("⚠ 使える者が 1 者のため、席を同じランタイムの 2 つ目で埋めます（観点が減ります）")
 

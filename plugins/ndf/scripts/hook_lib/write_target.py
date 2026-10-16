@@ -20,6 +20,18 @@ NONCONT = frozenset({"exit", "return", "break", "continue"})
 WRITE_OPS = frozenset({">", ">>", "&>", "&>>", ">|", ">&", "<>"})
 LOOPS = ("if_statement", "while_statement", "for_statement", "c_style_for_statement", "case_statement")
 STATEMENTS = frozenset({"command", "list", "pipeline", "redirected_statement", "compound_statement", "subshell", "negated_command"})
+# 文の種類 -> _Scan の読み方（メソッド名）。並び（STATEMENT_LISTS）と制御構文（LOOPS）は種類の集合ごとに 1 つの読み方
+STMT_HANDLERS = {
+    "redirected_statement": "_stmt_redirected",
+    "command": "command",
+    "list": "andor",
+    "pipeline": "_stmt_pipeline",
+    "subshell": "_stmt_subshell",
+    "negated_command": "_stmt_negated",
+    **dict.fromkeys(sp.STATEMENT_LISTS, "_stmt_list"),
+    **dict.fromkeys(LOOPS, "_stmt_loop"),
+    "function_definition": "_stmt_function",
+}
 SED_INPLACE = re.compile(r"-[a-zA-Z]*i([a-zA-Z]*|\..*)")
 PATCH_MARKS = ("*** Update File: ", "*** Add File: ", "*** Delete File: ", "*** Move to: ")
 
@@ -100,47 +112,52 @@ class _Scan:
         return info
 
     def stmt(self, n: sp.Node, st: _Place, redirs=()) -> tuple[int, bool, bool]:
-        t = n.type
-        if t == "redirected_statement":
-            red = sp.split_redirects(n)
-            if red.body is None:
-                self.redirects(red.redirects, st)
-                return (0, False, False)
-            if red.reattach:  # 並び・パイプの末尾のリダイレクトは最後のコマンドへ付け直す
-                return self.stmt(red.body, st, list(redirs) + red.redirects)
-            self.redirects(list(redirs) + red.redirects, st)  # 複合コマンドのリダイレクトは入る前の位置で開く
-            return self.stmt(red.body, st)
-        if t == "command":
-            return self.command(n, st, redirs)
-        if t == "list":
-            return self.andor(n, st, redirs)
-        if t == "pipeline":
-            segs = [c for c in n.children if c.is_named]
-            for i, c in enumerate(segs):
-                self.stmt(c, st.copy(), redirs if i == len(segs) - 1 else ())
+        return getattr(self, STMT_HANDLERS.get(n.type, "_stmt_other"))(n, st, redirs)
+
+    def _stmt_redirected(self, n: sp.Node, st: _Place, redirs) -> tuple[int, bool, bool]:
+        red = sp.split_redirects(n)
+        if red.body is None:
+            self.redirects(red.redirects, st)
             return (0, False, False)
-        if t == "subshell":
-            self.redirects(redirs, st)
-            self.seq(n, st.copy())
-            return (0, False, False)
-        if t == "negated_command":
-            inner = [c for c in n.children if c.is_named]
-            return self.stmt(inner[0], st, redirs) if inner else (0, False, False)
-        if t in sp.STATEMENT_LISTS:
-            self.redirects(redirs, st)
-            return (self.seq(n, st)[0], False, False)
-        if t in LOOPS:
-            self.redirects(redirs, st)
-            return self.block(n, st)
-        if t == "function_definition":
-            name, body = n.child_by_field_name("name"), n.child_by_field_name("body")
-            inner = st.copy()
-            before = inner.cds
-            if body is not None:
-                self.stmt(body, inner)
-            if inner.cds > before and name is not None:
-                st.moving.add(sp.node_text(name))
-            return (0, False, False)
+        if red.reattach:  # 並び・パイプの末尾のリダイレクトは最後のコマンドへ付け直す
+            return self.stmt(red.body, st, list(redirs) + red.redirects)
+        self.redirects(list(redirs) + red.redirects, st)  # 複合コマンドのリダイレクトは入る前の位置で開く
+        return self.stmt(red.body, st)
+
+    def _stmt_pipeline(self, n: sp.Node, st: _Place, redirs) -> tuple[int, bool, bool]:
+        segs = [c for c in n.children if c.is_named]
+        for i, c in enumerate(segs):
+            self.stmt(c, st.copy(), redirs if i == len(segs) - 1 else ())
+        return (0, False, False)
+
+    def _stmt_subshell(self, n: sp.Node, st: _Place, redirs) -> tuple[int, bool, bool]:
+        self.redirects(redirs, st)
+        self.seq(n, st.copy())
+        return (0, False, False)
+
+    def _stmt_negated(self, n: sp.Node, st: _Place, redirs) -> tuple[int, bool, bool]:
+        inner = [c for c in n.children if c.is_named]
+        return self.stmt(inner[0], st, redirs) if inner else (0, False, False)
+
+    def _stmt_list(self, n: sp.Node, st: _Place, redirs) -> tuple[int, bool, bool]:
+        self.redirects(redirs, st)
+        return (self.seq(n, st)[0], False, False)
+
+    def _stmt_loop(self, n: sp.Node, st: _Place, redirs) -> tuple[int, bool, bool]:
+        self.redirects(redirs, st)
+        return self.block(n, st)
+
+    def _stmt_function(self, n: sp.Node, st: _Place, redirs) -> tuple[int, bool, bool]:
+        name, body = n.child_by_field_name("name"), n.child_by_field_name("body")
+        inner = st.copy()
+        before = inner.cds
+        if body is not None:
+            self.stmt(body, inner)
+        if inner.cds > before and name is not None:
+            st.moving.add(sp.node_text(name))
+        return (0, False, False)
+
+    def _stmt_other(self, n: sp.Node, st: _Place, redirs) -> tuple[int, bool, bool]:
         self.substs(n, st)  # 代入・宣言・テストなど: 中の置換だけを見る
         self.redirects(redirs, st)
         return (0, False, False)
@@ -148,41 +165,50 @@ class _Scan:
     def block(self, n: sp.Node, st: _Place) -> tuple[int, bool, bool]:
         entry_cds, t = st.cds, n.type
         if t == "if_statement":
-            for c in n.children:
-                if c.type in ("elif_clause", "else_clause"):
-                    if st.cds > entry_cds:
-                        st.cwd = None
-                    for g, bg in sp.statement_list(c):
-                        self.stmt(g, st.copy() if bg else st)
-                elif c.is_named and c.type != "comment":
-                    nxt = c.next_sibling
-                    self.stmt(c, st.copy() if nxt is not None and nxt.type == "&" else st)
+            self._block_if(n, st, entry_cds)
         elif t == "case_statement":
-            entry, fell = st.cwd, False
-            for c in n.children:
-                if c.type != "case_item":
-                    if c.is_named and sp.field_of(n, c) == "value":
-                        self.substs(c, st)
-                    continue
-                if not fell:
-                    st.cwd = entry
-                for g, bg in sp.statement_list(c):
-                    if sp.field_of(c, g) != "value":
-                        self.stmt(g, st.copy() if bg else st)
-                fell = any(k.type in (";&", ";;&") for k in c.children)
+            self._block_case(n, st)
         else:
-            for c in n.children:
-                if not c.is_named or c.type == "comment":
-                    continue
-                if c.type == "do_group":
-                    self.seq(c, st)
-                elif sp.field_of(n, c) in ("value", "initializer", "condition", "update") and c.type not in STATEMENTS:
-                    self.substs(c, st)
-                else:
-                    self.stmt(c, st)
+            self._block_loop(n, st)
         if st.cds > entry_cds:
             st.cwd = None
         return (st.cds - entry_cds, False, False)
+
+    def _block_if(self, n: sp.Node, st: _Place, entry_cds: int) -> None:
+        for c in n.children:
+            if c.type in ("elif_clause", "else_clause"):
+                if st.cds > entry_cds:
+                    st.cwd = None
+                for g, bg in sp.statement_list(c):
+                    self.stmt(g, st.copy() if bg else st)
+            elif c.is_named and c.type != "comment":
+                nxt = c.next_sibling
+                self.stmt(c, st.copy() if nxt is not None and nxt.type == "&" else st)
+
+    def _block_case(self, n: sp.Node, st: _Place) -> None:
+        entry, fell = st.cwd, False
+        for c in n.children:
+            if c.type != "case_item":
+                if c.is_named and sp.field_of(n, c) == "value":
+                    self.substs(c, st)
+                continue
+            if not fell:
+                st.cwd = entry
+            for g, bg in sp.statement_list(c):
+                if sp.field_of(c, g) != "value":
+                    self.stmt(g, st.copy() if bg else st)
+            fell = any(k.type in (";&", ";;&") for k in c.children)
+
+    def _block_loop(self, n: sp.Node, st: _Place) -> None:
+        for c in n.children:
+            if not c.is_named or c.type == "comment":
+                continue
+            if c.type == "do_group":
+                self.seq(c, st)
+            elif sp.field_of(n, c) in ("value", "initializer", "condition", "update") and c.type not in STATEMENTS:
+                self.substs(c, st)
+            else:
+                self.stmt(c, st)
 
     def andor(self, n: sp.Node, st: _Place, redirs) -> tuple[int, bool, bool]:
         c, last, or1, cond = self._andor(n, st, redirs)
@@ -260,14 +286,7 @@ class _Scan:
             st.cwd = None
         if name != "cd" or st.base is None:
             return (0, False, False)
-        st.cds += 1
-        dest = _cd_destination(words[i + 1 :])
-        if dest == "" or "$" in dest or dest.startswith("~"):
-            st.cwd = None
-        elif dest.startswith("/"):
-            st.cwd = normalize_path(dest, "/")
-        elif st.cwd is not None:
-            st.cwd = normalize_path(st.cwd + "/" + dest, "/")
+        _apply_cd(st, words[i + 1 :])
         return (1, True, False)
 
 
@@ -291,6 +310,18 @@ def _noncontinuing(n: sp.Node) -> bool:
                 if name is not None and sp.unquote(name) in NONCONT:
                     return True
     return False
+
+
+def _apply_cd(st: _Place, args: list[str]) -> None:
+    """`cd` の引数から現在地を進める。宛先を字面から決められなければ `cwd` を None にする。"""
+    st.cds += 1
+    dest = _cd_destination(args)
+    if dest == "" or "$" in dest or dest.startswith("~"):
+        st.cwd = None
+    elif dest.startswith("/"):
+        st.cwd = normalize_path(dest, "/")
+    elif st.cwd is not None:
+        st.cwd = normalize_path(st.cwd + "/" + dest, "/")
 
 
 def _cd_destination(args: list[str]) -> str:

@@ -2,35 +2,50 @@
 """merged-steps.py: merged の後片付けの決まった手順。
 
     python3 merged-steps.py cleanup <PR番号>... [--root <dir>]
-    python3 merged-steps.py merge-when-green <PR番号> [--method merge|squash|rebase]
-                            [--interval 秒] [--timeout 秒] [--stale-after 秒] [--no-cleanup] [--root <dir>]
+    python3 merged-steps.py sweep-trash --ref <本番に出たコミット> [--yes --only <退避先>...] [--root <dir>]
+    python3 merged-steps.py merge-gate (--base <宛先> | --pr <PR番号>) [--pr <PR番号>] [--root <dir>]
+    python3 merged-steps.py merge-when-green <PR番号> [--gate-approved user|mvv] [--method merge|squash|rebase]
+                            [--interval 秒] [--timeout 秒] [--stale-after 秒] [--no-cleanup] [--expect-head <SHA>] [--root <dir>]
+    python3 merged-steps.py promote --head <ベースブランチ> --base <本番チャネル> [--prepare] [--gate-approved user|mvv]
 
 cleanup: マージ済みの PR の作業ツリーとローカルブランチを外し、主ディレクトリを取り込む。
-merge-when-green: PR が draft なら `gh pr ready` で外し、CI のチェックが全部通るまで待ち
-（push で先頭のコミットが変われば待ち直す）、
-失敗があれば止まり、通れば `gh pr merge --admin` でマージして cleanup まで行う。
+`git worktree remove` が拒否した作業ツリーは、未追跡・無視されたファイルを退避してから外す。作り直せる生成物
+（`.venv`・`node_modules`・`__pycache__`・`target` など）は退避せずに捨てる（merged_lib/trash.py）。
+sweep-trash: 本番に出たコミット（--ref）に含まれるブランチの退避先を回収の候補として挙げる。消すのは、人が候補を見て
+承認した後に --yes と --only <承認した退避先>... を付けたときの、その名前の退避先だけ（消すと戻せない利用者のファイル）。
+merge-when-green: PR が draft なら `gh pr ready` で外し、CI のチェックが全部通るまで待ち（push で先頭のコミットが
+変われば待ち直す）、失敗があれば止まり、通れば `gh pr merge --admin` でマージして cleanup まで行う。--expect-head を
+渡すと、PR を読むたびに先端をその SHA と比べ、違えば待ち直さず（マージ済みでも）止まる（items[].result: head_moved。#815）。
+最初の読みで宛先（baseRefName）を判定し、自動反映の本番チャネルか判定できない宛先なら、--gate-approved が無い限り
+CI を待たずに承認ゲート 2 で止まる（status: gate・metrics.gate: production-merge。判定は lib/delivery.py。#1336）。
+merge-gate: 宛先の判定だけを行う（0 = 進めてよい / 10 = 承認ゲート 2）。
+promote: 昇格の Pull Request（ベースブランチ → 本番チャネル）を探すか作り、merge-when-green と同じ判定と待ちで
+マージする（後片付けはしない）。--prepare は用意して承認資料を書くところで 0 で終える。
 実行が終わったのにチェックが pending のまま --stale-after 秒続けば、そのジョブを 1 度だけ
-`gh run rerun --job` で再実行し、再実行でも取り残されれば止まる。実行が終わりジョブに結論が
-あれば、チェックの表示が pending のままでも待たずにその結論で扱う。ジョブがランナーを待つ間は、
-待ち行列の件数を待ちの 1 周ごとに stderr へ 1 行出す。
+`gh run rerun --job` で再実行し、再実行でも取り残されれば止まる。実行が終わりジョブに結論があれば、チェックの表示が
+pending のままでも待たずにその結論で扱う。ジョブがランナーを待つ間は、待ち行列の件数を待ちの 1 周ごとに stderr へ 1 行出す。
+同じチェック（workflow の名前と名前の組）は最新の項目だけで数え、古い項目の失敗は items に result: superseded で残す。
+Runner が付かずに取り消されたジョブ（ステップ 0 件・Runner の名前が空）は CI の基盤待ちとし、実行が終わって
+--infra-gap 秒の後に `gh run rerun <run> --failed` で打ち直して待ち直す（--infra-reruns 回まで）。使い切るか待ちの上限に
+達すると終了コード 75 で止まる（items[].result: infra_wait）。中身の失敗が同時にあれば中身の失敗で止まる。
 
     python3 merged-steps.py probe (--pr N | --head <ブランチ>...) [--act] [--root <dir>]
 
 probe: 開いた PR のチェックを読み、強い順に failed（fix）/ stale（取り残し。--act なら再実行して remedied）/
-stale_again（再実行しても取り残し）/ settled・queued・running（wait）/ passed・none（judge）の 1 つに分ける。
+stale_again（再実行しても取り残し）/ infra（Runner が付かずに取り消された。CI の基盤待ち）・settled・queued・running（wait）/
+passed・none（judge）の 1 つに分ける。置き換わった失敗は分類に数えず、items に result: superseded で載せる。
 `metrics` に class・action・prs・queued_runs を持つ。書き込みは --act の再実行だけ。終了コードは 0 = 調べた。
 
-結果は lib/step_result.py の形の 1 行の JSON。終了コードは 0 = ok / 10 = `git branch -D` が要る
-ブランチがある（同意が要る。提示物を書く）/ 1 = 取り込み・CI・マージが失敗 / 2 = 読めない。
+結果は lib/step_result.py の形の 1 行の JSON。終了コードは 0 = ok / 10 = 承認ゲート 2（metrics.gate が
+production-merge）か、`git branch -D` が要るブランチがある（同意が要る。どちらも提示物を書く）/
+1 = 取り込み・CI・マージが失敗 / 2 = 読めない / 75 = CI の基盤待ち（merge-when-green・promote）。
 """
 
 from __future__ import annotations
 
 import argparse
-import datetime
 import json
 import os
-import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -38,7 +53,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
 
-deps.require("waits")
+deps.require("waits", "durable")
 from step_result import (
     StepError,
     approval_present,
@@ -55,13 +70,10 @@ import gh_parts  # noqa: E402
 import repo  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from merged_lib.checks import (
-    FAIL_CONCLUSIONS,
-    GreenWatch,
-    check_states,
-    probe_checks,  # noqa: E402
-    queued_run_count,
-)
+from merged_lib import merge, trash  # noqa: E402
+from merged_lib.pull import blocking_local_changes, same_untracked  # noqa: E402,F401
+from merged_lib.checks import queued_run_count  # noqa: E402
+from merged_lib.reading import read_checks  # noqa: E402
 
 TOOL = "merged"
 
@@ -84,58 +96,27 @@ def list_worktrees(root):
     return items
 
 
-def common_git_dir(path):
-    d = Path(git(path, "rev-parse", "--git-common-dir").stdout.strip())
-    return d if d.is_absolute() else (Path(path) / d).resolve()
+def remove_worktree(root, path, label, merge_commit=None):
+    """作業ツリーを外す。拒否されたら未追跡・無視のファイルを退避してから --force で外す。(成否, 理由) を返す。
 
-
-def evacuate(path, label):
-    """未追跡・無視されたファイルを <git-common-dir>/ndf/worktree-trash/ へ移す。移した先を返す。"""
-    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d%H%M%S")
-    trash = common_git_dir(path) / "ndf" / "worktree-trash" / f"{label.replace('/', '__')}-{stamp}"
-    trash.mkdir(parents=True, exist_ok=True)
-    out = git(path, "status", "--ignored", "--untracked-files=all", "--porcelain=v1", "-z").stdout
-    for ent in out.split("\0"):
-        if ent[:3] not in ("?? ", "!! "):
-            continue
-        rel = ent[3:].rstrip("/")
-        if not rel:
-            continue
-        src, dst = Path(path) / rel, trash / rel
-        if not os.path.lexists(src):
-            continue
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        # 作業ツリーが /tmp（tmpfs）にあると、.git の下へはファイルシステムをまたぐ。
-        # os.replace は EXDEV で落ちるため、コピーと削除へ切り替わる shutil.move を使う
-        shutil.move(str(src), str(dst))
-    return str(trash)
-
-
-def remove_worktree(root, path, label):
-    """作業ツリーを外す。拒否されたら退避してから --force で外す。(成否, 理由) を返す。"""
+    追跡ファイルの未コミットの変更は退避できず --force が消すため、残っていれば外さず kept にする。
+    理由は `退避先 <パス>` で始まり、作り直せる生成物を捨てたら `（捨てた: <相対パス>, …）` を続ける。
+    """
     if git(root, "worktree", "remove", path, check=False).returncode == 0:
         return True, None
+    dirty = git(path, "status", "--porcelain=v1", "--untracked-files=no").stdout.splitlines()
+    if dirty:
+        names = ", ".join(line[3:] for line in dirty[:5]) + ("…" if len(dirty) > 5 else "")
+        return False, f"追跡ファイルに未コミットの変更が {len(dirty)} 件ある（{names}）ため --force で外さない"
     try:
-        trash = evacuate(path, label)
+        dest, discarded = trash.evacuate(path, label, merge_commit)
     except (StepError, OSError) as e:
         return False, f"退避に失敗: {e}"
     p = git(root, "worktree", "remove", "--force", path, check=False)
-    if p.returncode == 0:
-        return True, f"退避先 {trash}"
-    return False, f"worktree remove --force が失敗: {p.stderr.strip()[:300]}"
-
-
-def same_untracked(main_dir, pull):
-    """pull を止めた未追跡のファイルが、すべて上流の内容と同じならその一覧を返す。1 つでも違えば空。"""
-    if "untracked working tree files would be overwritten" not in pull.stderr:
-        return []
-    rels = [l.strip() for l in pull.stderr.splitlines() if l.startswith("\t")]
-    for rel in rels:
-        up = run(["git", "-C", main_dir, "show", f"@{{u}}:{rel}"], check=False)
-        path = Path(main_dir) / rel
-        if up.returncode != 0 or not path.is_file() or path.read_text(errors="replace") != up.stdout:
-            return []
-    return rels
+    if p.returncode != 0:
+        return False, f"worktree remove --force が失敗: {p.stderr.strip()[:300]}"
+    why = f"退避先 {dest}" if dest else "退避するものは無かった"
+    return True, why + (f"（捨てた: {', '.join(discarded)}）" if discarded else "")
 
 
 def _recorder():
@@ -165,7 +146,7 @@ def _delete_branch(root, branch, add):
         add("branch", branch, "absent")
 
 
-def _remove_pr_tmp_worktree(root, tmp_wt, n, add):
+def _remove_pr_tmp_worktree(root, tmp_wt, n, add, merge_commit=None):
     """PR の一時作業ツリー（wt_base/slug/pr<n>）を、登録済みで detached のときだけ外す。"""
     if not tmp_wt.exists():
         return
@@ -176,7 +157,7 @@ def _remove_pr_tmp_worktree(root, tmp_wt, n, add):
     elif not w["detached"]:
         add("worktree", str(tmp_wt), "kept", "detached でない")
     else:
-        ok, why = remove_worktree(root, w["path"], f"pr{n}")
+        ok, why = remove_worktree(root, w["path"], f"pr{n}", merge_commit)
         add("worktree", w["path"], "removed" if ok else "kept", why)
 
 
@@ -196,6 +177,7 @@ def _cleanup_pr(root, main_dir, slug, wt_base, n, add):
         add("pr", branch or f"#{n}", "kept", f"#{n} が MERGED でない（{info.get('state')}）")
         return
 
+    merge_commit = (info.get("mergeCommit") or {}).get("oid")
     branch_free = True
     for wt in list_worktrees(root):
         if wt["branch"] != branch:
@@ -204,7 +186,7 @@ def _cleanup_pr(root, main_dir, slug, wt_base, n, add):
             add("worktree", wt["path"], "kept", "主ディレクトリはこのブランチを checkout しているため外さない")
             branch_free = False
             continue
-        ok, why = remove_worktree(root, wt["path"], branch)
+        ok, why = remove_worktree(root, wt["path"], branch, merge_commit)
         add("worktree", wt["path"], "removed" if ok else "kept", why)
         branch_free = branch_free and ok
 
@@ -212,7 +194,7 @@ def _cleanup_pr(root, main_dir, slug, wt_base, n, add):
         _delete_branch(root, branch, add)
 
     if slug:
-        _remove_pr_tmp_worktree(root, wt_base / slug / f"pr{n}", n, add)
+        _remove_pr_tmp_worktree(root, wt_base / slug / f"pr{n}", n, add, merge_commit)
 
 
 def _update_main_dir(main_dir, add):
@@ -236,6 +218,11 @@ def _update_main_dir(main_dir, add):
             (Path(main_dir) / rel).unlink()
             add("untracked", rel, "removed", "取り込む内容と同じ")
         pull = run(["git", "-C", main_dir, "pull", "--ff-only"], check=False)
+    if pull.returncode != 0 and (dirty := blocking_local_changes(main_dir, pull)):
+        # マージは済んでいる。利用者の手元の変更には触れず（stash も checkout もしない）、取り込みだけを見送る
+        names = ", ".join(dirty[:5]) + ("…" if len(dirty) > 5 else "")
+        add("main_dir", main_dir, "kept", f"未コミットの変更（{names}）が git pull --ff-only を塞いだため取り込まない")
+        return None
     if pull.returncode != 0:
         pull_err = f"主ディレクトリの git pull --ff-only が失敗: {pull.stderr.strip()[:300]}"
         add("main_dir", main_dir, "stopped", pull_err)
@@ -300,45 +287,44 @@ def cmd_cleanup(a):
     emit(result(TOOL, status, summary, items, metrics, path, nxt))
 
 
-# --- merge-when-green ---------------------------------------------------------
+def cmd_sweep_trash(a):
+    root = git_root(a.root)
+    if git(root, "rev-parse", "-q", "--verify", f"{a.ref}^{{commit}}", check=False).returncode != 0:
+        raise StepError(f"--ref {a.ref} がコミットとして読めない", 2)
+    if a.yes != bool(a.only):
+        raise StepError("--yes には承認した退避先の名前（候補の items[].name）を --only で必ず渡す", 2)
+    items, metrics = trash.sweep(root, a.ref, approved=a.only)
+    # 既定は消さずに挙げるだけ。消すのは承認した名前の退避先だけ（Git に無い利用者のファイルで戻せない。C3・C4）
+    done = f"{metrics['swept_trash']} 件を消した（" if a.yes else "を消していない（"
+    summary = f"本番に出た退避先{done}回収の候補 {metrics['sweep_candidates']} 件・残す {metrics['kept_trash'] + metrics['unledgered_trash']} 件）"
+    nxt = (cmd := trash.sweep_command(a.ref, items)) and f"候補を人へ示し、承認した名前だけを渡して消す: {cmd}"
+    emit(result(TOOL, "ok", summary, items, metrics, None, nxt))
+
+
+# --- merge-gate・merge-when-green・promote（本体は merged_lib/merge.py） ----------------
+
+
+def cmd_merge_gate(a):
+    merge.merge_gate(a)
 
 
 def cmd_merge_when_green(a):
-    root = git_root(a.root)
-    n = a.pr
-    watch = GreenWatch(root, a)
-    watch.wait()
-    items, waits, queued_runs = watch.items, watch.waits, watch.queued_runs
+    merge.merge_when_green(a, cleanup)
 
-    if not any(i["kind"] == "pr" and i["result"] == "already_merged" for i in items):
-        p = gh_parts.gh(["pr", "merge", str(n), "--admin", f"--{a.method}"], cwd=root)
-        if p.returncode != 0:
-            emit(
-                result(
-                    TOOL,
-                    "stopped",
-                    f"gh pr merge --admin が失敗: {p.stderr.strip()[:300]}",
-                    items + [{"kind": "pr", "name": f"#{n}", "result": "stopped", "reason": p.stderr.strip()[:300]}],
-                    {"waits": waits},
-                )
-            )
-        items.append({"kind": "pr", "name": f"#{n}", "result": "merged", "method": a.method})
 
-    if a.no_cleanup:
-        emit(result(TOOL, "ok", f"#{n} をマージした（後片付けは行わない）", items, {"waits": waits, "queued_runs": queued_runs}))
-    status, summary, citems, metrics, path, nxt = cleanup(root, [n])
-    metrics = {**metrics, "waits": waits, "queued_runs": queued_runs}
-    emit(result(TOOL, status, f"#{n} をマージした。{summary}", items + citems, metrics, path, nxt))
+def cmd_promote(a):
+    merge.promote(a, cleanup)
 
 
 # --- probe --------------------------------------------------------------------
 
 # 分類は強い順。PR が 2 つ以上に当たれば上を採り、複数の PR は最も上の分類で全体を表す
-PROBE_CLASSES = ("failed", "stale", "stale_again", "settled", "queued", "running", "passed", "none")
+PROBE_CLASSES = ("failed", "stale", "stale_again", "infra", "settled", "queued", "running", "passed", "none")
 PROBE_ACTIONS = {
     "failed": "fix",
     "stale": "judge",
     "stale_again": "judge",
+    "infra": "wait",  # Runner が付かずに取り消された（CI の基盤待ち）。再実行は merge-when-green が持つ
     "settled": "wait",
     "queued": "wait",
     "running": "wait",
@@ -361,6 +347,52 @@ def probe_prs(root, a):
     return list(dict.fromkeys(out))
 
 
+def _check_item(n, name, result, **extra) -> dict:
+    """probe の根拠の 1 件（PR n のチェック name）。"""
+    return {"kind": "check", "pr": int(n), "name": name, "result": result, **extra}
+
+
+def _classify_checks(root, n, rollup):
+    """rollup のチェックを分類する（数え方は merged_lib/checks.py の read_checks。同じチェックは最新の項目だけで数える）。
+    (分類, 根拠, 置き換わった失敗の根拠) を返す。stale の根拠は取り残された初回のチェックそのもの。"""
+    r = read_checks(root, rollup)
+    first = [s for s in r.stale if s[3] <= 1]  # s[3] は試行回数
+    again = [s for s in r.stale if s[3] > 1]
+    superseded = [i.item("superseded", pr=int(n)) for i in r.superseded]
+    # 優先順に並べ、根拠が空でない最初の分類を返す
+    ranked = (
+        ("failed", [i.item("failed", pr=int(n)) for i in r.failed]),
+        ("stale", first),
+        ("stale_again", [_probe_item(n, s, "stale_again", "attempt") for s in again]),
+        ("infra", [i.item("infra_wait", pr=int(n)) for i in r.infra]),
+        ("settled", [_probe_item(n, s, "settled", "conclusion") for s in r.settled]),
+        ("queued", [_check_item(n, q, "queued") for q in r.queued]),
+        ("running", [_check_item(n, i.label, "running") for i in r.pending]),
+    )
+    cls, found = next(((kind, items) for kind, items in ranked if items), ("passed", []))
+    return cls, found, superseded
+
+
+def _probe_item(n, probe, result, last):
+    """probe_checks の 1 件 (name, run, job, 試行回数か結論) を根拠の 1 件にする。last は 4 つ目の要素の名前。"""
+    name, run, job, value = probe
+    return _check_item(n, name, result, run=run, job=job, **{last: value})
+
+
+def _rerun_stale(root, n, first, act):
+    """取り残されたチェックを --act なら再実行する。(根拠, 手) を返す。"""
+    items = []
+    for name, run_id, job_id, attempt in first:
+        item = _check_item(n, name, "stale", run=run_id, job=job_id, attempt=attempt)
+        if act:
+            r = gh_parts.gh(["run", "rerun", run_id, "--job", job_id], cwd=root)
+            item["result"] = "rerun" if r.returncode == 0 else "rerun_failed"
+            if r.returncode != 0:
+                item["reason"] = r.stderr.strip()[:300]
+        items.append(item)
+    return items, "remedied" if act and all(i["result"] == "rerun" for i in items) else "judge"
+
+
 def probe_one(root, n, act, items):
     """1 本の PR のチェックを分類する。(分類, 手) を返し、根拠を items に足す。読めなければ None。"""
     p = gh_parts.gh(["pr", "view", n, "--json", "number,state,statusCheckRollup"], cwd=root)
@@ -370,49 +402,11 @@ def probe_one(root, n, act, items):
         info = None
     if not isinstance(info, dict) or info.get("state") != "OPEN":
         return None
-    rollup = info.get("statusCheckRollup")
-    pending, failed, passed = check_states(rollup)
-    stale, queued, settled = probe_checks(root, rollup) if pending else ([], [], [])
-    failed += [s[0] for s in settled if s[3].upper() in FAIL_CONCLUSIONS]
-    first = [s for s in stale if s[3] <= 1]
-    again = [s for s in stale if s[3] > 1]
-    if failed:
-        cls = "failed"
-        items += [{"kind": "check", "pr": int(n), "name": f, "result": "failed"} for f in failed]
-    elif first:
-        cls = "stale"
-    elif again:
-        cls = "stale_again"
-        items += [
-            {"kind": "check", "pr": int(n), "name": s[0], "result": "stale_again", "run": s[1], "job": s[2], "attempt": s[3]} for s in again
-        ]
-    elif settled:
-        cls = "settled"
-        items += [
-            {"kind": "check", "pr": int(n), "name": s[0], "result": "settled", "run": s[1], "job": s[2], "conclusion": s[3]}
-            for s in settled
-        ]
-    elif queued:
-        cls = "queued"
-        items += [{"kind": "check", "pr": int(n), "name": q, "result": "queued"} for q in queued]
-    elif pending:
-        cls = "running"
-        items += [{"kind": "check", "pr": int(n), "name": c, "result": "running"} for c in pending]
-    else:
-        cls = "passed"
+    cls, found, superseded = _classify_checks(root, n, info.get("statusCheckRollup"))
     action = PROBE_ACTIONS[cls]
     if cls == "stale":
-        done = True
-        for name, run_id, job_id, attempt in first:
-            item = {"kind": "check", "pr": int(n), "name": name, "result": "stale", "run": run_id, "job": job_id, "attempt": attempt}
-            if act:
-                r = gh_parts.gh(["run", "rerun", run_id, "--job", job_id], cwd=root)
-                item["result"] = "rerun" if r.returncode == 0 else "rerun_failed"
-                if r.returncode != 0:
-                    done = False
-                    item["reason"] = r.stderr.strip()[:300]
-            items.append(item)
-        action = "remedied" if act and done else "judge"
+        found, action = _rerun_stale(root, n, found, act)
+    items += found + superseded
     return cls, action
 
 
@@ -432,11 +426,12 @@ def cmd_probe(a):
         _, cls, action = min(found, key=lambda f: PROBE_CLASSES.index(f[1]))
     queued_runs = (queued_run_count(root) or 0) if cls == "queued" else 0
     prs = [f[0] for f in found]
-    names = ", ".join(i["name"] for i in items if i.get("kind") == "check") or "無し"
+    names = ", ".join(i["name"] for i in items if i.get("kind") == "check" and i.get("result") != "superseded") or "無し"
     summary = {
         "failed": f"失敗したチェックがある: {names}",
         "stale": ("取り残されたチェックを再実行した: " if action == "remedied" else "取り残されたチェックがある: ") + names,
         "stale_again": f"再実行したチェックが再び取り残された: {names}",
+        "infra": f"Runner が付かずに取り消されたジョブがある（CI の基盤待ち）: {names}",
         "settled": f"実行は終わりジョブに結論がある（表示だけが pending）: {names}",
         "queued": f"ジョブがランナーを待っている（待ち行列 {queued_runs} 件）: {names}",
         "running": f"実行中のチェックがある: {names}",
@@ -457,23 +452,34 @@ def build_parser():
     p = sub.add_parser("cleanup", parents=[common_parser()], help="マージ済みの PR の作業ツリーとローカルブランチを片付ける")
     p.add_argument("prs", nargs="+", type=int, metavar="PR番号")
     p.set_defaults(func=cmd_cleanup)
+    t = sub.add_parser("sweep-trash", parents=[common_parser()], help="本番に出たブランチの退避先（worktree-trash）を消す")
+    t.add_argument("--ref", required=True, help="本番に出たコミット（タグ・本番チャネルのブランチ・マージコミット）")
+    t.add_argument("--yes", action="store_true", help="--only の退避先を消す。人が候補を見て承認したときだけ付ける")
+    t.add_argument("--only", nargs="+", default=[], metavar="退避先", help="承認した退避先の名前（候補の items[].name）")
+    t.set_defaults(func=cmd_sweep_trash)
+    g = sub.add_parser(
+        "merge-gate", parents=[common_parser()], help="宛先へのマージが承認ゲート 2（自動反映の本番チャネル）に当たるかを判定する"
+    )
+    g.add_argument("--base", help="Pull Request の宛先のブランチ（省けば --pr の宛先を読む）")
+    g.add_argument("--pr", type=int, help="承認資料に URL と差分の量を載せる Pull Request")
+    g.set_defaults(func=cmd_merge_gate)
     m = sub.add_parser("merge-when-green", parents=[common_parser()], help="CI が通るまで待ち、--admin でマージして後片付けまで行う")
     m.add_argument("pr", type=int, metavar="PR番号")
-    m.add_argument("--method", choices=("merge", "squash", "rebase"), default="merge")
-    m.add_argument("--interval", type=float, default=10.0, help="CI を読み直す間隔（秒）")
-    m.add_argument("--recheck", type=float, default=5.0, help="pending を見ずに通っていたとき、確かめ直すまでの間隔（秒）")
-    m.add_argument(
-        "--no-checks-after", type=float, default=60.0, help="rollup が空のままこの秒数を過ぎたら、CI の無いリポジトリとしてマージする"
-    )
-    m.add_argument("--timeout", type=float, default=3600.0, help="CI を待つ上限（秒）")
-    m.add_argument(
-        "--stale-after",
-        type=float,
-        default=300.0,
-        help="実行が終わったのにチェックが pending のまま続けば、ジョブを 1 度だけ再実行するまでの秒数",
-    )
+    merge.add_wait_args(m)
     m.add_argument("--no-cleanup", action="store_true", help="マージだけ行い、後片付けをしない")
+    m.add_argument("--expect-head", metavar="SHA", help="この SHA が PR の先端のときだけマージする（違えば result: head_moved で止まる）")
     m.set_defaults(func=cmd_merge_when_green)
+    pm = sub.add_parser(
+        "promote",
+        parents=[common_parser()],
+        help="昇格の Pull Request（ベースブランチ → 本番チャネル）を作り、承認ゲート 2 の後にマージする",
+    )
+    pm.add_argument("--head", required=True, help="昇格させるブランチ（ベースブランチ）")
+    pm.add_argument("--base", required=True, help="本番チャネル")
+    pm.add_argument("--prepare", action="store_true", help="Pull Request を用意して承認資料を書くところで終える（マージしない）")
+    pm.add_argument("--out", help="--prepare の承認資料の置き場（既定は提示物の置き場）")
+    merge.add_wait_args(pm)
+    pm.set_defaults(func=cmd_promote)
     pr = sub.add_parser(
         "probe", parents=[common_parser()], help="開いた PR のチェックを分類する（遅れの一次の調査）。--act なら取り残しを再実行する"
     )

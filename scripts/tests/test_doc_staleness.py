@@ -215,72 +215,34 @@ def test_layout_counts_removed_fails(tree: Path) -> None:
     assert "plugins/ndf/README.md" in output_of(result)
 
 
-# --- F: 更新案内の見出しの版数 ---
+# --- F: plugin の README に版ごとの更新の節を置かない ---
 
 
-def test_upgrade_heading_version_stale_fails(tree: Path) -> None:
-    edit(plugin_readme(tree), "## v9.3.0 へ更新するとき", "## v9.2.1 へ更新するとき")
+@pytest.mark.parametrize(
+    "readme",
+    ["plugins/ndf/README.md", "plugins/playwright-kit/README.md", "plugins/mcp/mcp-serena/README.md"],
+)
+def test_upgrade_section_in_plugin_readme_fails(tree: Path, readme: str) -> None:
+    """どの plugin の README でも、版ごとの更新の節が戻れば落とす（更新情報は CHANGELOG.md が正本）。"""
+    path = tree / readme
+    path.parent.mkdir(parents=True, exist_ok=True)
+    body = path.read_text(encoding="utf-8") if path.is_file() else "# plugin\n"
+    path.write_text(
+        body + "\n## v9.3.0-dev.1 へ更新するとき\n\n- 変わったこと\n\n## 以前の版: v9.2.0 へ更新するとき\n\nx\n", encoding="utf-8"
+    )
     result = run_check(tree)
     assert result.returncode != 0
     out = output_of(result)
-    assert "plugins/ndf/README.md" in out
-    assert "9.2.1" in out and "9.3.0" in out
-
-
-def test_upgrade_heading_removed_fails(tree: Path) -> None:
-    edit(plugin_readme(tree), "## v9.3.0 へ更新するとき\n", "")
-    result = run_check(tree)
-    assert result.returncode != 0
-    assert "plugins/ndf/README.md" in output_of(result)
+    assert readme in out
+    assert "v9.3.0-dev.1 へ更新するとき" in out and "以前の版: v9.2.0 へ更新するとき" in out
 
 
 @pytest.mark.parametrize("version", ["9.7.0-dev.1", "9.7.0-rc.1", "9.6.0"])
-def test_upgrade_heading_matches_whole_version(tree: Path, version: str) -> None:
-    """見出しの版数を接尾辞まで 1 つの値として読む。
-
-    数字 3 つだけで拾うと、`## v9.7.0-dev.1 へ更新するとき` を見出しとして読めない。
-    接尾辞の無い版も同じ経路で通ることを、同じテストで確かめる。
-    """
+def test_plugin_readme_without_upgrade_section_passes(tree: Path, version: str) -> None:
+    """版ごとの更新の節が無ければ、版を上げても見出しを理由に落ちない。"""
     retarget_version(tree, version)
     result = run_check(tree)
     assert result.returncode == 0, output_of(result)
-
-
-def test_upgrade_heading_without_suffix_fails(tree: Path) -> None:
-    """接尾辞を落とした見出しは古い版として弾く。
-
-    見出しを読めない状態を直すだけでは足りない。接尾辞を外して書けば通るようにすると、
-    `plugin.json` と見出しが別の版を指したまま配布できてしまう。
-    """
-    retarget_version(tree, "9.7.0-dev.1")
-    edit(plugin_readme(tree), "## v9.7.0-dev.1 へ更新するとき", "## v9.7.0 へ更新するとき")
-    result = run_check(tree)
-    assert result.returncode != 0
-    out = output_of(result)
-    assert "plugins/ndf/README.md" in out
-    # 「見出しが無い」ではなく「版数が古い」として出す。読めていないのか食い違って
-    # いるのかで、直し方が変わる。
-    assert "見出し: v9.7.0 " in out
-    assert "9.7.0-dev.1" in out
-
-
-def test_upgrade_heading_stale_prerelease_fails(tree: Path) -> None:
-    """接尾辞の連番だけが古い見出しも拾う。"""
-    retarget_version(tree, "9.7.0-dev.2")
-    edit(plugin_readme(tree), "## v9.7.0-dev.2 へ更新するとき", "## v9.7.0-dev.1 へ更新するとき")
-    result = run_check(tree)
-    assert result.returncode != 0
-    out = output_of(result)
-    assert "9.7.0-dev.1" in out and "9.7.0-dev.2" in out
-
-
-def test_upgrade_heading_duplicated_fails(tree: Path) -> None:
-    """前の版の節を残したままにすると、どちらが現行かを読み手が決められない。"""
-    body = plugin_readme(tree).read_text(encoding="utf-8")
-    plugin_readme(tree).write_text(body + "\n## v9.2.1 へ更新するとき\n\n前の版の本文。\n", encoding="utf-8")
-    result = run_check(tree)
-    assert result.returncode != 0
-    assert "plugins/ndf/README.md" in output_of(result)
 
 
 # --- 失敗の出力に含めるもの ---
@@ -353,7 +315,6 @@ def agents_md(tree: Path) -> Path:
     ("mark", "document", "before", "after"),
     [
         ("G", "README.md", "**NDFプラグイン v9.3.0**", "**NDFプラグイン v9.2.1**"),
-        ("I", "AGENTS.md", "主要プラグインです（v9.3.0）", "主要プラグインです（v9.2.1）"),
         ("K", "plugins/ndf/README.md", "Kiro CLI用 / v9.3.0）", "Kiro CLI用 / v9.2.1）"),
         (
             "M",
@@ -391,7 +352,6 @@ def test_codex_cache_path_partial_stale_fails(tree: Path) -> None:
     ("mark", "document", "fragment", "occurrences"),
     [
         ("G", "README.md", "**NDFプラグイン v9.3.0** のチェック用の最小構成です。\n", 1),
-        ("I", "AGENTS.md", "主要プラグインです（v9.3.0）", 1),
         ("K", "plugins/ndf/README.md", "# => NDF統合開発エージェント（Kiro CLI用 / v9.3.0）\n", 1),
         ("L", "plugins/ndf/README.md", "~/.codex/plugins/cache/ai-plugins/ndf/9.3.0/skills/deploy/SKILL.md", 2),
         ("M", "plugins/ndf/README.md", "# => ndf@ai-plugins  installed, enabled  9.3.0  <path>\n", 1),
@@ -532,7 +492,7 @@ def test_missing_versioning_document_fails(tree: Path) -> None:
 def test_versions_after_the_section_do_not_fail(tree: Path) -> None:
     """章 2 より後ろの章に囲んだ古い版数があっても落ちない（節は次の同位の見出しで閉じる）。"""
     body = versioning_md(tree).read_text(encoding="utf-8")
-    assert "`8.4.0`" in body.split("## 版数を持つ 15 箇所", 1)[1]
+    assert "`8.4.0`" in body.split("## 版数を持つ箇所", 1)[1]
     result = run_check(tree)
     assert result.returncode == 0, output_of(result)
 
@@ -543,7 +503,7 @@ def test_version_section_stops_at_a_higher_level_heading(tree: Path) -> None:
     自身と同じ深さの見出しだけで区切ると、次が上位の見出しのときに節が閉じない。閉じなければ
     走査は文書の末尾まで続き、後ろの章に並ぶ前の版の版数を現行版と比べてしまう。
     """
-    edit(versioning_md(tree), "## 版数を持つ 15 箇所\n", "# 版数を持つ 15 箇所\n")
+    edit(versioning_md(tree), "## 版数を持つ箇所\n", "# 版数を持つ箇所\n")
     result = run_check(tree)
     assert result.returncode == 0, output_of(result)
 
@@ -844,7 +804,7 @@ def test_versions_outside_the_section_do_not_fail(tree: Path) -> None:
 
 
 def test_bumping_only_the_plugin_version_reports_every_body_claim(tree: Path) -> None:
-    """この課題が起きた経路そのもの。説明文書を直さずに版だけ上げると 7 種類が挙がる。"""
+    """この課題が起きた経路そのもの。説明文書を直さずに版だけ上げると 6 種類が挙がる。"""
     bump_plugin_version(tree, "9.4.0")
     result = run_check(tree)
     assert result.returncode != 0
@@ -852,7 +812,6 @@ def test_bumping_only_the_plugin_version_reports_every_body_claim(tree: Path) ->
     for subject in (
         "概要の版数",
         "プラグイン一覧表の ndf の版数",
-        "「主要プラグインです（v<版>）」の版数",
         "版の付け方の節の版数",
         "Kiro の確認例の版数",
         "Codex のキャッシュパスの例の版数",
@@ -880,12 +839,20 @@ def test_count_failure_output_is_unchanged(tree: Path) -> None:
     assert ("ERROR: README.md: 公開Skills の Claude Code の数が食い違う（記載: 9 / plugins/ndf/manifests/claude-skills.txt: 5）") in out
 
 
-def test_missing_agents_md_fails(tree: Path) -> None:
-    """チェックの対象の説明文書が無いこと自体を失敗として扱う。"""
+def test_agents_md_is_not_a_version_claim(tree: Path) -> None:
+    """指示書（`AGENTS.md`）は版数を持たない。食い違う版数を書いても、無くても突き合わせない。
+
+    開発版の配布の `bump` が指示書の版数を書き換えると、Pull Request で通った読み込み量が配布の
+    時点で伸びる（#1739）。チェックが `AGENTS.md` の版数を求めると、版数を書き戻す理由になる。
+    """
+    edit(agents_md(tree), "主要プラグインです。", "主要プラグインです（v9.2.1）。")
+    result = run_check(tree)
+    assert result.returncode == 0, output_of(result)
+    assert "AGENTS.md" not in output_of(result)
+
     agents_md(tree).unlink()
     result = run_check(tree)
-    assert result.returncode != 0
-    assert "AGENTS.md" in output_of(result)
+    assert result.returncode == 0, output_of(result)
 
 
 # --- base_of: バージョン文字列を基底タプルへ分解する（単体）---

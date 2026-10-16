@@ -113,7 +113,7 @@ plugins/{plugin-name}/
 ## 版と配布
 
 版数の付け方（セマンティックバージョニングと接尾辞）、正式版と開発版のリリース、版を上げるときの手順、
-版数を書いた 15 箇所は [versioning-and-distribution.md](versioning-and-distribution.md) にあります
+版数を書いた箇所は [versioning-and-distribution.md](versioning-and-distribution.md) にあります
 （版数の扱いの正本）。
 
 ## ドキュメント要件
@@ -269,6 +269,18 @@ bash scripts/build-runtime-plugins.sh
 bash scripts/validate-runtime-plugins.sh
 ```
 
+マーケットプレイスの定義は Claude Code でもチェックします。
+
+```bash
+claude plugin validate .
+```
+
+**`path` は必須の位置引数である。** 省くと `error: missing required argument 'path'` で
+終了コード 1 になる（Claude Code 2.1.261 で実測、2.1.300 でも同じ文言）。マーケットプレイスの根で `.` を渡すと
+`marketplace.json` と各プラグインの定義をチェックし、終了コード 0 で終わる。`policy` と
+`interface` は Claude Code が読み込み時に無視するため未知フィールドの警告が出るが、
+**警告は終了コードを変えない**。合否は終了コードで見る。
+
 実ランタイムのインストール経路を Docker コンテナ内で確かめる smoke test の手順は
 [tests/runtime-smoke/README.md](../tests/runtime-smoke/README.md) にあります。
 
@@ -311,7 +323,15 @@ bash scripts/install-dev-hooks.sh
 **Q: バージョン更新が反映されない**
 - `plugins/<名前>/.claude-plugin/plugin.json` の `version` を更新（**版を持つのはここだけ**。
   `marketplace.json` に `version` フィールドは置かない）
-- 版数を書いた説明文書の記載（`description` の `(vX.Y.Z)`、更新案内の見出し）を揃える。
-  これは読み手向けの記載で、取得する版は変えない
+- 版数を書いた説明文書の記載（`description` の `(vX.Y.Z)`）を揃える。これは読み手向けの記載で、取得する版は
+  変えない。その版の変化と移行の手順は `CHANGELOG.md` の版の節へ書き、プラグインの README には版ごとの更新の節を
+  置かない（README は CHANGELOG.md を参照する「`## 更新情報`」の節だけを持つ）
 - 取得元が自動更新されるとは限らない。利用者側で `claude plugin marketplace update` を実行する
 - Claude Codeを再起動
+
+## 参考リンク
+
+- [Claude Code公式ドキュメント](https://docs.claude.com/en/docs/claude-code)
+- [プラグインマーケットプレイス](https://code.claude.com/docs/ja/plugin-marketplaces)
+- [プラグインスキル](https://docs.claude.com/en/docs/claude-code/skills)
+- [MCP仕様](https://modelcontextprotocol.io)

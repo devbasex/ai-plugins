@@ -7,8 +7,9 @@
 | 起動し直せない理由（利用上限）を 1 つでも含む | **起動し直さず**中断（`final = error`） | 1 |
 
 どの出口でも、判定は先に標準出力へ `NO_RESULT_REASONS='<担当>=<理由> ...'` の 1 行を出す。
-起動し直しの可否は結末の共通層（`monitor_outcome.relaunch_same_agent`）だけが決め、
-判定は `usage_limit` という値を知らない（AC12）。報告の表は結果なしの担当を
+起動し直しの可否は振り替えの規則（`assignment.after_no_result`。#919）だけが決め、
+判定は `usage_limit` という値を知らない（AC12）。参加者の記録が無い状態では振り替え先が無いため、
+起動し直せない理由と 2 度目の結果なしは中断になる。報告の表は結果なしの担当を
 `<担当>=NO_RESULT(<理由>)` の形で出す（AC17）。
 """
 
@@ -196,14 +197,14 @@ def test_the_verdict_reads_relaunchability_from_the_common_layer(tmp_dir, state_
     共通層の「起動し直せない理由」に `timeout` を足すと、判定は `timeout` でも止まる。
     判定が `usage_limit` を直に比べていれば、この変更は届かず 7 になる。
     """
-    monkeypatch.setattr(review_lib.commands.judge.monitor_outcome, "NO_RELAUNCH_REASONS", frozenset({"timeout"}))
+    monkeypatch.setattr(review_lib.commands.judge.assignment, "NO_RELAUNCH_REASONS", frozenset({"timeout"}))
     _write(tmp_dir, _state([_round(codex=_approve(), agy=_no_result("timeout"))]))
 
     assert _judge(state_mod) == 1
     assert _read(tmp_dir)["final"] == "error"
 
     # 逆に `usage_limit` を外せば、判定は起動し直す
-    monkeypatch.setattr(review_lib.commands.judge.monitor_outcome, "NO_RELAUNCH_REASONS", frozenset())
+    monkeypatch.setattr(review_lib.commands.judge.assignment, "NO_RELAUNCH_REASONS", frozenset())
     _write(tmp_dir, _state([_round(codex=_approve(), agy=_no_result("usage_limit"))]))
 
     assert _judge(state_mod) == 7
@@ -241,7 +242,20 @@ def test_a_second_no_result_with_relaunchable_reasons_stops(tmp_dir, state_mod, 
         _state(
             [
                 _round(codex=_approve(), agy=_no_result("timeout"), relaunched=["agy"]),
-            ]
+            ],
+            no_results=[
+                {
+                    "step": "review",
+                    "attempt": 1,
+                    "seat": "agy",
+                    "account": "",
+                    "reason": "timeout",
+                    "decision": "relaunch",
+                    "to": "",
+                    "to_account": "",
+                    "at": "t",
+                }
+            ],
         ),
     )
 

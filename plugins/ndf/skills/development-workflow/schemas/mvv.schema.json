@@ -1,0 +1,254 @@
+{
+  "$defs": {
+    "MvvChange": {
+      "additionalProperties": false,
+      "properties": {
+        "item": {
+          "title": "Item",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "added",
+            "changed",
+            "removed"
+          ],
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "item",
+        "kind"
+      ],
+      "title": "MvvChange",
+      "type": "object"
+    },
+    "MvvSettings": {
+      "additionalProperties": false,
+      "properties": {
+        "trend_commits": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trend Commits"
+        },
+        "trend_issues": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trend Issues"
+        },
+        "unknown_streak": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unknown Streak"
+        },
+        "revise_after": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RevisePolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "MvvSettings",
+      "type": "object"
+    },
+    "MvvVersion": {
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "sha256": {
+          "minLength": 1,
+          "title": "Sha256",
+          "type": "string"
+        },
+        "approved_at": {
+          "minLength": 1,
+          "title": "Approved At",
+          "type": "string"
+        },
+        "approved_by": {
+          "minLength": 1,
+          "title": "Approved By",
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
+        "vet": {
+          "$ref": "#/$defs/MvvVet"
+        },
+        "changes": {
+          "items": {
+            "$ref": "#/$defs/MvvChange"
+          },
+          "title": "Changes",
+          "type": "array"
+        },
+        "body": {
+          "minLength": 1,
+          "title": "Body",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "sha256",
+        "approved_at",
+        "approved_by",
+        "vet",
+        "changes",
+        "body"
+      ],
+      "title": "MvvVersion",
+      "type": "object"
+    },
+    "MvvVet": {
+      "additionalProperties": false,
+      "properties": {
+        "verdict": {
+          "enum": [
+            "follow",
+            "unknown"
+          ],
+          "title": "Verdict",
+          "type": "string"
+        },
+        "at": {
+          "title": "At",
+          "type": "string"
+        },
+        "accepted_unknown": {
+          "default": false,
+          "title": "Accepted Unknown",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "verdict",
+        "at"
+      ],
+      "title": "MvvVet",
+      "type": "object"
+    },
+    "RevisePolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "overrides": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Overrides"
+        },
+        "unknowns": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unknowns"
+        },
+        "escapes": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Escapes"
+        }
+      },
+      "title": "RevisePolicy",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "const": 1,
+      "title": "Version",
+      "type": "integer"
+    },
+    "body": {
+      "default": "mvv.md",
+      "minLength": 1,
+      "title": "Body",
+      "type": "string"
+    },
+    "settings": {
+      "$ref": "#/$defs/MvvSettings"
+    },
+    "versions": {
+      "items": {
+        "$ref": "#/$defs/MvvVersion"
+      },
+      "minItems": 1,
+      "title": "Versions",
+      "type": "array"
+    }
+  },
+  "required": [
+    "version",
+    "versions"
+  ],
+  "title": "NDF のプロジェクト MVV の宣言（.ndf/mvv.json）",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

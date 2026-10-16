@@ -13,6 +13,8 @@ import sys
 from typing import Any
 
 import review_lib  # noqa: E402
+import assignment  # noqa: E402
+import body_findings  # noqa: E402
 import mdtable  # noqa: E402  使う側（state.py）が deps.require("mdtable") を先に呼ぶ
 import run_metrics  # noqa: E402
 from review_lib import github, participants as participants_mod, posts, store  # noqa: E402
@@ -106,13 +108,22 @@ def cmd_verify_sweep(args: argparse.Namespace) -> None:
 
     declared = _as_count(sweep.get("remaining_open"))
     current_pr = int(st.get("current_pr") or pr)
+    # 総評だけの指摘はスレッドを持たないため、スイープの結果の振り分けを決着として記録してから数える（#1980）
+    round_no = int(((st.get("rounds") or [{}])[-1]).get("round") or 0)
+    body_findings.record_settlements(st, body_findings.entries(sweep), round_no, current_pr, "sweep")
+    body_left = len(body_findings.unsettled(st))
     threads = github._fetch_unresolved_threads(str(st.get("repo") or ""), current_pr)
     remaining, verified, reason = _reconcile_sweep_result(sweep, declared, threads)
-    st["sweep"] = _sweep_record(sweep, declared, remaining, verified, reason)
+    remaining += body_left
+    if body_left and not (sweep.get("remaining_reason") or sweep.get("reason")):
+        reason = f"決着していない総評だけの指摘 {body_left} 件"
+    st["sweep"] = {**_sweep_record(sweep, declared, remaining, verified, reason), "remaining_body": body_left}
     store._save(pr, st)
 
     print(f"REMAINING_OPEN={remaining}")
     print(f"SWEEP_VERIFIED={'1' if verified else '0'}")
+    if body_left:
+        print(f"REMAINING_BODY={body_left}")
     if remaining == 0:
         review_lib.info("✅ 未解決の指摘は残っていません")
         sys.exit(0)
@@ -180,6 +191,7 @@ def _print_participants(st: dict) -> None:
     print(f"- --include で足した者: {_names(p.get('included'))}")
     print(f"- 確認を通らなかった者: {failed}")
     print(f"- 席の埋め合わせ: {_names(p.get('fallback'))}")
+    _print_reassigned(st)
 
     changes = st.get("resume_changes") or []
     if not changes:
@@ -189,6 +201,20 @@ def _print_participants(st: dict) -> None:
         for c in changes:
             print(f"  - {c.get('at')} {c.get('field')}: {_resume_value(c.get('from'))} → {_resume_value(c.get('to'))}")
     print()
+
+
+def _print_reassigned(st: dict) -> None:
+    """結果なしの記録（`no_results`。#919）の振り替えと中断を 1 行ずつ、外した担当を 1 行。記録が無ければ出さない。"""
+    rows = [e for e in st.get("no_results") or [] if e.get("decision") in (assignment.REASSIGN, assignment.ABORT)]
+    if not rows:
+        return
+    print("- 振り替え:")
+    for e in rows:
+        src = assignment.Assignee(e.get("seat") or "", e.get("account") or None).label()
+        dst = assignment.Assignee(e["to"], e.get("to_account") or None).label() if e.get("to") else "なし（中断）"
+        print(f"  - round {e.get('attempt')}: {src} → {dst}（{e.get('reason')}）")
+    gone = sorted(assignment.excluded_runtimes(st.get("no_results") or []))
+    print(f"- 外した担当: {', '.join(gone) or 'なし'}")
 
 
 def _resume_value(value: object) -> str:
@@ -255,10 +281,20 @@ def _print_rejected(st: dict) -> None:
 
 
 def _print_review_focus(st: dict) -> None:
-    """レビューの重点の宣言が読めなかったときだけ出す（基準 1・2・4 で続けた）。"""
+    """レビューの重点の宣言・プロファイルが読めなかったときだけ出す（既定の基準で続けた。#1910）。
+    `version: 3` の宣言（`profile_name` がある）では、どのプロファイルで見たかの行も出す（#1942 の決定 8）。"""
     crit = st.get("review_criteria") or {}
+    name = crit.get("profile_name") if isinstance(crit, dict) else None
+    if isinstance(name, str):
+        others = [o for o in crit.get("profile_others") or [] if isinstance(o, str)]
+        tail = f"（ほかに {', '.join(others)} にも当たった。先に書いた {name} を使った）" if others else ""
+        print(f"## レビューのプロファイル: {name or '既定'}{tail}")
+        print()
     if isinstance(crit, dict) and crit.get("status") == "unreadable":
         print(f"## レビューの重点の宣言: 読めなかった（基準 1・2・4 だけで続けた）: {crit.get('error')}")
+        print()
+    if isinstance(crit, dict) and crit.get("profile_status") == "unreadable":
+        print(f"## レビューのプロファイル: 読めなかった（既定の基準で続けた）: {crit.get('profile_error')}")
         print()
 
 

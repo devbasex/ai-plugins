@@ -1,1 +1,1 @@
-{"path": "plugins/ndf/skills/skill-stats/scripts/skill-stats.py", "name": "", "kind": "lines", "reason": "L0 の時点で 942 行。C3 は重複だけをライブラリへ置き換える。触って 500 行以下にしたら消す。一括の整形（#1323）で物理行が増えた", "lines": 961}
+{"path": "plugins/ndf/skills/skill-stats/scripts/skill-stats.py", "name": "", "kind": "lines", "reason": "L0 の時点で 942 行。C3 は重複だけをライブラリへ置き換える。触って 500 行以下にしたら消す。一括の整形（#1323）で物理行が増えた。aggregate_by_project の関数の抽出（#1452）で物理行が増えた", "lines": 967}

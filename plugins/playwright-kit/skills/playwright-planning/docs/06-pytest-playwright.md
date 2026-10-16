@@ -70,7 +70,6 @@ addopts = "--headed --browser firefox --tracing retain-on-failure"
 | CLI | `--pwk-out-dir <path>` | NDF | — | 成果物出力先 (default: `reports/<run-id>/`) |
 | CLI | `--pwk-no-evidence` | NDF | — | HAR / trace / video の収集を OFF |
 | CLI | `--pwk-overlay` | NDF | — | overlay (旧名 HUD) を inject (録画用) |
-| CLI | `--pwk-drive-folder <id>` | NDF | — | session 終了時に Drive へアップ |
 
 ## 5. fixture override パターン
 
@@ -171,7 +170,6 @@ cd /path/to/your-app
 ./scenario-test/run.sh -k test_admin                  # nodeid フィルタ
 ./scenario-test/run.sh -m "page_role"                 # marker フィルタ
 ./scenario-test/run.sh --pwk-overlay                  # 動画に赤丸カーソル + 字幕
-./scenario-test/run.sh --pwk-drive-folder=<ID>        # Drive 自動アップロード
 ./scenario-test/run.sh -n 4                           # 並列実行
 ```
 

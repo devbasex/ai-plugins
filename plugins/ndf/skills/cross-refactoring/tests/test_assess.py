@@ -171,3 +171,35 @@ def test_extensionless_file_without_shebang_is_not_production_code(repo):
     rc, out = _assess(repo, "--base", "base")
     assert rc == 3
     assert out[2] == "本番コード: 0 ファイル・0 行"
+
+
+def test_a_repository_outside_ai_plugins_is_assessed_from_its_own_directory(tmp_path):
+    """AC2（#1655）: ai-plugins を含まないリポジトリ（origin が GitHub）の中で、スクリプトを絶対パスで打つと 0 か 3。"""
+    work = tmp_path / "sample"
+    (work / "src").mkdir(parents=True)
+    _git("init", "-q", "-b", "main", cwd=work)
+    _git("config", "user.email", "t@e.st", cwd=work)
+    _git("config", "user.name", "test", cwd=work)
+    _git("remote", "add", "origin", "https://github.com/example/sample.git", cwd=work)
+    (work / "README.md").write_text("# sample\n")
+    _git("add", "-A", cwd=work)
+    _git("commit", "-qm", "init", cwd=work)
+    _git("branch", "base", cwd=work)
+    _commit(work, {"src/a.py": _lines(20)})
+    rc, out = _assess(work / "src", "--base", "base")
+    assert rc == 0 and out[0] == "判定: 通す"
+
+
+def test_outside_a_repository_the_assess_says_the_target_cannot_be_decided(tmp_path):
+    """AC4（#1655）: git の作業ツリーでない場所で打つと、対象のリポジトリを決められないと示して 2 で終わる。"""
+    nogit = tmp_path / "nogit"
+    nogit.mkdir()
+    r = subprocess.run(
+        [sys.executable, str(_SCRIPT), "assess", "--base", "origin/main"],
+        cwd=nogit,
+        capture_output=True,
+        text=True,
+        env={**__import__("os").environ, "GIT_CEILING_DIRECTORIES": str(tmp_path)},
+    )
+    assert r.returncode == 2
+    assert "対象のリポジトリを決められない" in r.stderr and r.stdout == ""

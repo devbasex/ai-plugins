@@ -11,14 +11,17 @@
 set -euo pipefail
 
 CMD="${1:-status}"
-# settings.json は Claude Code と同じく CLAUDE_CONFIG_DIR（無ければ ~/.claude）の下を読み書きする。
+# settings.json は Claude Code と同じく CLAUDE_CONFIG_DIR（無ければ ~/.claude）の下を読み書きする。symlink なら参照先へ書き、
+# 控えと排他も参照先の隣に置く（symlink を実体に置き換えない。#1576）。
 # statusline の本体は settings.json の command が ~ 起点で指すため ~/.claude に置く。
-CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-SETTINGS="$CONFIG_DIR/settings.json"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/claude-settings.sh
+. "$SCRIPT_DIR/lib/claude-settings.sh"
+SETTINGS="$(claude_settings_path)"
+CONFIG_DIR="$(dirname "$SETTINGS")"
 TARGET="$HOME/.claude/ndf-statusline.sh"
 BACKUP="$CONFIG_DIR/.ndf-statusline-backup.json"
 LOCK="$CONFIG_DIR/.ndf-statusline.lock"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC="$SCRIPT_DIR/statusline.sh"
 NDF_COMMAND="bash ~/.claude/ndf-statusline.sh"
 

@@ -41,6 +41,8 @@ if path.startswith(R + "actions/runs?"):
 if path.startswith(R + "actions/runs/7/jobs"):
     steps = [{{"name": "Run phpunit", "started_at": "2026-09-01T00:01:00Z", "completed_at": "2026-09-01T00:05:00Z"}},
              {{"name": "Check out latest", "started_at": "2026-09-01T00:00:00Z", "completed_at": "2026-09-01T00:01:00Z"}}]
+    if os.environ.get("FAKE_GH_SKIP"):
+        out({{"jobs": [{{"steps": steps, "conclusion": "success"}}, {{"steps": [], "conclusion": "skipped"}}]}})
     out({{"jobs": [{{"steps": steps}}] * 3}})
 if path.startswith(R + "actions/runs/7/artifacts"):
     out({{"artifacts": [{{"id": 9, "name": "junit-1", "size_in_bytes": 100}}, {{"id": 10, "name": "coverage", "size_in_bytes": 100}}]}})
@@ -257,6 +259,21 @@ def test_ndf_record_is_listed_as_a_source(plain, env, tmp_path):
     ]
 
 
+def test_ndf_record_skips_the_init_test_rows_and_scope_runs(plain, env, tmp_path):
+    """#1385 I8: 着手前のテストの行（kind: init_test）と、範囲テストだけを走らせた実行の行（init が null）を数えない。"""
+    rec = Path(env["NDF_METRICS_DIR"]) / "acme--app" / "cross-refactoring-allocation.jsonl"
+    rec.parent.mkdir(parents=True)
+    rows = [{"whole_test": {"init": s}} for s in (130, 140.2, 150)]
+    rows += [{"schema": 2, "kind": "init_test", "mode": "scope", "seconds": 900.0}] * 3
+    rows += [{"schema": 2, "kind": "run", "whole_test": {"init": None}}]
+    rec.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    env["FAKE_GH_MODE"] = "fail"
+    _, m = measure(env, plain, tmp_path)
+    assert m["items"]["test_duration"]["value"]["measured"] == [
+        {"seconds": 140.2, "source": "ndf-record", "detail": "NDF の実行の記録の直近 3 件の中央値"}
+    ]
+
+
 # --- AC4・I8: 新しい宣言では解析しない ------------------------------------------------
 
 
@@ -382,6 +399,35 @@ def test_unknown_does_not_replace_previous_analysis_value(laravel, env, tmp_path
     assert decl(laravel)["ci"] == ci
     row = next(i for i in out["items"] if i["key"] == "ci")
     assert row["kind"] == "unknown" and row["kept_previous"] is True
+
+
+def test_workflow_wall_is_kept_when_the_new_analysis_has_only_skipped_runs(laravel, env, tmp_path):
+    """#1664 の AC3・AC7・I6: 飛ばした run しか無いワークフローは、前の解析の壁時計を残し、注記と出力の行に出る。"""
+    analyze(env, laravel, tmp_path, LARAVEL_ANSWERS)
+    path = ".github/workflows/test.yml"
+    assert next(w for w in decl(laravel)["ci"]["workflows"] if w["path"] == path)["wall_seconds"] == 390.0
+    env["FAKE_GH_SKIP"] = "1"
+    code, out, text, m = analyze(env, laravel, tmp_path, LARAVEL_ANSWERS)
+    assert code == 0, text
+    assert f"飛ばしていない run が無い: {path}（候補 1 件）" in m["notes"]
+    measured = m["items"]["ci"]["value"]["workflows"]
+    assert "wall_seconds" not in next(w for w in measured if w["path"] == path)
+    assert next(w for w in decl(laravel)["ci"]["workflows"] if w["path"] == path)["wall_seconds"] == 390.0
+    row = next(i for i in out["items"] if i["key"] == f"ci#{path}")
+    assert row["kind"] == "unknown" and row["kept_previous"] is True
+    assert "前の値を残した" in text
+
+
+def test_carry_walls_only_fills_the_same_path_of_an_analysis_value():
+    """#1664 の I6: 同じパスの前の壁時計だけを引き継ぎ、手で書いた値（指紋が違う）には触らない。"""
+    merge = _project_lib("merge")
+    cur = {"provider": "github-actions", "workflows": [{"path": "a.yml", "jobs": 1, "wall_seconds": 500.0}], "required_checks": []}
+    new = {"provider": "github-actions", "workflows": [{"path": "a.yml", "jobs": 1}, {"path": "b.yml", "jobs": 1}], "required_checks": []}
+    value, rows, ours = merge.merge_item("ci", cur, True, new, "測った", {"ci": merge.value_digest(cur)})
+    assert ours and value["workflows"] == [{"path": "a.yml", "jobs": 1, "wall_seconds": 500.0}, {"path": "b.yml", "jobs": 1}]
+    assert [r["key"] for r in rows if r.get("kept_previous")] == ["ci#a.yml"]
+    value, rows, ours = merge.merge_item("ci", cur, True, new, "測った", {})
+    assert not ours and value == cur and rows[0]["kind"] == "mismatch"
 
 
 # --- I4: 値と不明の両方を持つ項目を拒む -----------------------------------------------------
@@ -661,3 +707,77 @@ def test_force_reanalysis(laravel, env, tmp_path):
     d = decl(laravel)
     assert d["issues"] == {"primary": "github", "others": []}
     assert d["checks"]["tools"] == [{"name": "hand", "config": "x"}]
+
+
+# --- #1483 AC1・AC2: suite の種別 ---------------------------------------------------------
+
+
+def _suite_decl(kind: str) -> dict:
+    return {"version": 1, "test": {"suites": [{"name": "sc", "runner": "shellcheck", "command": "bash lint.sh", "kind": kind}]}}
+
+
+def test_a_lint_kind_passes_the_check(plain, env):
+    """AC1 — 種別 `lint` を書いた宣言は形の検証を通る（手書きなので古いとだけ言われる）。"""
+    write(plain, ".ndf/project.json", json.dumps(_suite_decl("lint")))
+    code, _, text = run(env, "check", "--root", str(plain))
+    assert code == 2 and "suites[0].kind" not in text and "analysis" in text
+
+
+def test_an_unknown_kind_fails_the_check_and_names_the_suite(plain, env):
+    """AC2 — 2 値以外の種別は検証で落ち、どの suite のどのキーかを出す。"""
+    write(plain, ".ndf/project.json", json.dumps(_suite_decl("unit")))
+    code, _, text = run(env, "check", "--root", str(plain))
+    assert code == 3 and "suites[0].kind" in text
+
+
+# --- 現状固定: measure_repo.dependencies（I-004） --------------------------------------
+
+
+def _deps_of(files: dict[str, str]):
+    mr = _project_lib("measure_repo")
+    tree = mr.Tree.__new__(mr.Tree)
+    tree.root, tree.deadline, tree.files = None, float("inf"), set(files)
+    tree.read = files.get
+    return mr.dependencies(tree)
+
+
+def test_dependencies_collects_every_manifest_kind_as_is():
+    files = {
+        "composer.json": json.dumps({"require": {"php": "^8.2", "laravel/framework": "^11.0"}, "require-dev": {"phpunit/phpunit": 10}}),
+        "web/package.json": json.dumps(
+            {"dependencies": {"react": "^18.2.0"}, "devDependencies": {"vitest": "1"}, "engines": {"node": ">=20"}}
+        ),
+        "deep/a/package.json": json.dumps({"dependencies": {"ignored": "1"}}),
+        "pyproject.toml": (
+            '[project]\nrequires-python = ">=3.11"\ndependencies = ["Django>=5.0", "requests[socks]~=2.31"]\n'
+            "[project.optional-dependencies]\ndev = [\"pytest; python_version>'3'\"]\n"
+            '[dependency-groups]\nlint = ["Ruff==0.6"]\nbad = "x"\n'
+            '[tool.poetry.dependencies]\nFlask = "^3.0"\n'
+            '[tool.poetry.dev-dependencies]\nBlack = "*"\n'
+            '[tool.poetry.group.docs.dependencies]\nMkDocs = "1.6"\n'
+        ),
+        "requirements.txt": "# comment\nDjango==4.0\nnumpy>=1.26  # pinned\n\n",
+        "requirements-dev.txt": "Mypy==1.10\n",
+    }
+    assert _deps_of(files) == {
+        "php": {"php": "^8.2", "laravel/framework": "^11.0", "phpunit/phpunit": "10"},
+        "javascript": {"react": "^18.2.0", "vitest": "1", "node": ">=20"},
+        "python": {
+            "django": "Django>=5.0",
+            "requests": "requests[socks]~=2.31",
+            "pytest": "pytest; python_version>'3'",
+            "ruff": "Ruff==0.6",
+            "flask": "^3.0",
+            "black": "*",
+            "mkdocs": "1.6",
+            "python": ">=3.11",
+            "numpy": "numpy>=1.26  # pinned",
+            "mypy": "Mypy==1.10",
+        },
+    }
+
+
+def test_dependencies_of_an_empty_or_broken_tree_are_empty_per_language():
+    assert _deps_of({}) == {"php": {}, "javascript": {}, "python": {}}
+    broken = {"composer.json": "{", "package.json": "[1]", "pyproject.toml": "[[", "requirements.txt": ""}
+    assert _deps_of(broken) == {"php": {}, "javascript": {}, "python": {}}

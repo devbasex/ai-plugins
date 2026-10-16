@@ -189,6 +189,52 @@ def classify_text(text: str) -> tuple[str, str]:
     return kind, " ".join(waits)[:EXCERPT_LIMIT]
 
 
+# 操作の案内（「アプリを再起動してください」）にだけ現れる依頼の語。回答・承認を待つ問いとは分ける
+INSTRUCTION_ONLY = ("ください", "お願いします")
+# 操作の案内と見なす動詞（許可リスト）。依頼の語だけの文は、これを含むときに限り待ちから外す
+OPERATION_VERBS = (
+    "再起動",
+    "起動し直",
+    "開き直",
+    "読み込み直",
+    "再読み込み",
+    "リロード",
+    "インストール",
+    "導入",
+    "実行して",
+    "ログインし直",
+    "再ログイン",
+)
+# 回答・判断を求める語。操作の動詞と並んでも待ちに残す
+REPLY_WORDS = ("確認", "選", "教え", "回答", "答え", "判断", "レビュー", "返事", "指示", "意見", "知らせ", "決め")
+
+
+def _asks_reply(sentence: str) -> bool:
+    """回答・承認を待つ問いか。依頼の語だけで待ちになった文は、操作の案内（OPERATION_VERBS を含み、
+    回答・判断・承認の語を含まない）のときだけ外す。"""
+    if not _is_wait(sentence):
+        return False
+    core = _core(sentence)
+    if any(w in core for w in USER_WAIT_CONTAINS) or sentence.rstrip(_DECORATION).endswith(("?", "？")) or core.endswith(WAIT_ENDINGS):
+        return True
+    hits = [w for w in WAIT_CONTAINS if w in core]
+    if not set(hits) <= set(INSTRUCTION_ONLY):
+        return True
+    if not any(w in core for w in OPERATION_VERBS):
+        return True
+    return any(w in core for w in REPLY_WORDS + APPROVAL_WORDS)
+
+
+def classify_reply_wait(text: str) -> str:
+    """本文が回答・承認を待って終わったかの種類（ANSWER / APPROVAL / NONE）。通知の classify_text より狭く、
+    操作の案内の依頼形（「更新を終えました。アプリを再起動してください。」）は待ちに数えない。"""
+    sentences = _sentences(_last_lines(_prose_lines(text)))
+    waits = [s for s in sentences if _asks_reply(s)]
+    if not waits:
+        return NONE
+    return APPROVAL if any(any(w in s for w in APPROVAL_WORDS) for s in waits) else ANSWER
+
+
 def done_excerpt(text: str) -> str:
     """完了の通知の抜粋: 最後の段落の先頭 200 字（決定 7）。"""
     paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text or "") if p.strip()]
@@ -224,46 +270,58 @@ def _from_text(text: str, key: str) -> Wait:
     return Wait(kind, excerpt, key)
 
 
+def _classify_claude(event: str, tool: str, tool_input: dict, hook_input: dict, transcript_text: str, key: str) -> Wait | None:
+    if event == "Notification":
+        ntype = hook_input.get("notification_type")
+        message = str(hook_input.get("message") or "")[:EXCERPT_LIMIT]
+        if ntype == "permission_prompt":
+            return Wait(APPROVAL, message, key)
+        if ntype in ("elicitation_dialog", "elicitation_url_dialog"):
+            return Wait(ANSWER, message, key)
+        return None
+    if event == "PermissionRequest":
+        if tool == "ExitPlanMode":
+            return Wait(APPROVAL, _plan_excerpt(str(tool_input.get("plan") or "")), key)
+        return None
+    if event == "PreToolUse":
+        if tool == "AskUserQuestion":
+            return Wait(ANSWER, _question_excerpt(tool_input), key)
+        return None
+    if event == "Stop":
+        return _from_text(hook_input.get("last_assistant_message") or transcript_text, key)
+    return None
+
+
+def _classify_codex(event: str, tool: str, tool_input: dict, hook_input: dict, transcript_text: str, key: str) -> Wait | None:
+    if event == "PermissionRequest":
+        return Wait(APPROVAL, f"{tool or 'ツール'} の実行の承認", key)
+    if event == "Stop":
+        return _from_text(hook_input.get("last_assistant_message") or transcript_text, key)
+    return None
+
+
+def _classify_kiro(event: str, tool: str, tool_input: dict, hook_input: dict, transcript_text: str, key: str) -> Wait | None:
+    # 入口は stop フックにだけ置く。名前の付いたほかの事象は応答の途中でありうるため待ちにしない。
+    if event and event.lower() != "stop":
+        return None
+    return _from_text(hook_input.get("assistant_response") or transcript_text, key)
+
+
+_CLASSIFIERS = {"claude": _classify_claude, "codex": _classify_codex, "kiro": _classify_kiro}
+
+
 def classify_event(runtime: str, hook_input: dict, transcript_text: str = "", key: str = "") -> Wait | None:
     """ランタイムの事象を待ちへ訳す。待ちを作らない事象は None。
 
     `transcript_text` は transcript の最後の assistant の本文（`Stop` に本文が無いときに使う）。
     """
+    classify = _CLASSIFIERS.get(runtime)
+    if classify is None:
+        return None
     event = hook_input.get("hook_event_name") or ""
     tool = hook_input.get("tool_name") or ""
     tool_input = hook_input.get("tool_input") if isinstance(hook_input.get("tool_input"), dict) else {}
-    if runtime == "claude":
-        if event == "Notification":
-            ntype = hook_input.get("notification_type")
-            message = str(hook_input.get("message") or "")[:EXCERPT_LIMIT]
-            if ntype == "permission_prompt":
-                return Wait(APPROVAL, message, key)
-            if ntype in ("elicitation_dialog", "elicitation_url_dialog"):
-                return Wait(ANSWER, message, key)
-            return None
-        if event == "PermissionRequest":
-            if tool == "ExitPlanMode":
-                return Wait(APPROVAL, _plan_excerpt(str(tool_input.get("plan") or "")), key)
-            return None
-        if event == "PreToolUse":
-            if tool == "AskUserQuestion":
-                return Wait(ANSWER, _question_excerpt(tool_input), key)
-            return None
-        if event == "Stop":
-            return _from_text(hook_input.get("last_assistant_message") or transcript_text, key)
-        return None
-    if runtime == "codex":
-        if event == "PermissionRequest":
-            return Wait(APPROVAL, f"{tool or 'ツール'} の実行の承認", key)
-        if event == "Stop":
-            return _from_text(hook_input.get("last_assistant_message") or transcript_text, key)
-        return None
-    if runtime == "kiro":
-        # 入口は stop フックにだけ置く。名前の付いたほかの事象は応答の途中でありうるため待ちにしない。
-        if event and event.lower() != "stop":
-            return None
-        return _from_text(hook_input.get("assistant_response") or transcript_text, key)
-    return None
+    return classify(event, tool, tool_input, hook_input, transcript_text, key)
 
 
 # ---------------------------------------------------------------------------
@@ -308,12 +366,11 @@ def github_slug(remote_url: str) -> str | None:
     return f"{m.group(1)}/{m.group(2)}" if m else None
 
 
-def extract_urls(
-    kind: str, text: str, slug: str | None = None, redmine_url: str | None = None, pr_fallback: str | None = None
-) -> list[tuple[str, str]]:
-    """本文から関連 URL を抜く。承認待ちは PR を先頭に置き、本文に無ければ `pr_fallback` を使う。"""
-    text = text or ""
-    redmine_base = (redmine_url or "").rstrip("/")
+def _collect_urls(text: str, slug: str | None, redmine_base: str) -> tuple[list[str], list[tuple[int, str, str]]]:
+    """本文から URL と参照（Redmine の `#123`・課題の `#123`）を切り出して正規化する。
+
+    戻りは（PR の URL の並び, 本文の位置の順に並べた（位置, 種類, URL）の並び）。
+    """
     redmine_host = urlparse(redmine_base).netloc if redmine_base else ""
     found: list[tuple[int, str, str]] = []
     prs: list[str] = []
@@ -334,6 +391,14 @@ def extract_urls(
         for m in _HASH_REF.finditer(stripped):
             found.append((m.start(), "issue", f"https://github.com/{slug}/issues/{m.group(1)}"))
     found.sort()
+    return prs, found
+
+
+def extract_urls(
+    kind: str, text: str, slug: str | None = None, redmine_url: str | None = None, pr_fallback: str | None = None
+) -> list[tuple[str, str]]:
+    """本文から関連 URL を抜く。承認待ちは PR を先頭に置き、本文に無ければ `pr_fallback` を使う。"""
+    prs, found = _collect_urls(text or "", slug, (redmine_url or "").rstrip("/"))
     out: list[tuple[str, str]] = []
     if kind == APPROVAL:
         for url in prs or ([pr_fallback] if pr_fallback else []):

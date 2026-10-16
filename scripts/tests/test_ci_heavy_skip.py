@@ -286,6 +286,6 @@ def test_merge_when_green_accepts_skipped_heavy_jobs(monkeypatch):
         {"__typename": "CheckRun", "name": n, "status": "COMPLETED", "conclusion": c}
         for n, c in [("pytest", "SUCCESS"), ("pytest (0/2)", "SKIPPED"), ("runtime-smoke (claude)", "SUCCESS"), ("ci-scope", "SUCCESS")]
     ]
-    pending, failed, passed = ms.check_states(rollup)
-    assert pending == [] and failed == []
-    assert sorted(passed) == ["ci-scope", "pytest", "pytest (0/2)", "runtime-smoke (claude)"]
+    r = ms.read_checks(".", rollup)
+    assert r.pending == [] and r.failed == [] and r.infra == []
+    assert sorted(i.label for i in r.passed) == ["ci-scope", "pytest", "pytest (0/2)", "runtime-smoke (claude)"]

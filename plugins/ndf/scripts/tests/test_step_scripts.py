@@ -172,6 +172,21 @@ def test_spec_finalize_removes_design_and_indexes_spec(repo, env):
     assert out["metrics"]["commit"] == git(repo, "rev-parse", "HEAD").strip()
 
 
+def test_spec_finalize_leaves_unrelated_staged_changes_out_of_the_commit(repo, env):
+    spec_repo(repo)
+    write(repo, "other.txt", "利用者の作業\n")
+    git(repo, "add", "--", "other.txt", "docs/specifications/x.md")
+    code, _, err = call(
+        "plan-to-spec-steps.py",
+        ["spec-finalize", "--spec", "docs/specifications/x.md", "--design", "docs/design/x-design.md", "--title", "X", "--root", str(repo)],
+        env,
+    )
+    assert code == 0, err
+    committed = set(git(repo, "show", "--name-only", "--format=", "HEAD").split())
+    assert committed == {"docs/design/x-design.md", "docs/specifications/README.md", "docs/specifications/x.md"}
+    assert git(repo, "diff", "--cached", "--name-only").split() == ["other.txt"]
+
+
 def test_spec_finalize_skips_index_lines_inside_a_fence(repo, env):
     """索引の行は囲みの外だけを数える（lib/md.py。行の字面で見ていた頃は、囲みの中の例の後ろへ足した）。"""
     spec_repo(repo)
@@ -311,32 +326,38 @@ def test_spec_finalize_missing_spec_is_precondition(repo, env):
 # --- bump / changelog（release-steps.py） ------------------------------------
 
 
-def plugin_repo(repo, name="mcp-x", version="1.0.0", heading="1.0.0"):
+README_BODY = "# {name}\n\n## 使い方\n\nx\n\n## 更新情報\n\n版ごとの変更は CHANGELOG.md の版の節にあります。\n"
+
+
+def plugin_repo(repo, name="mcp-x", version="1.0.0"):
     d = f"plugins/mcp/{name}"
     write(
         repo,
         f"{d}/.claude-plugin/plugin.json",
         json.dumps({"name": name, "version": version, "description": f"X (v{version})"}, indent=2) + "\n",
     )
-    write(repo, f"{d}/README.md", f"# {name}\n\n## v{heading} へ更新するとき\n\n前の版の説明\n\n## 使い方\n\nx\n")
+    write(repo, f"{d}/README.md", README_BODY.format(name=name))
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "plugin")
     return repo / d
 
 
-def test_bump_updates_manifest_and_update_heading(repo, env):
+def test_bump_updates_manifest_and_leaves_the_readme(repo, env):
+    """受け入れ条件 6: bump は plugin の README に触れず、版ごとの更新の節が無いことを manual に出さない。"""
     pdir = plugin_repo(repo)
+    before = (pdir / "README.md").read_bytes()
     code, out, err = call("release-steps.py", ["bump", "--plugin", "mcp-x", "--to", "1.1.0", "--root", str(repo)], env)
     assert code == 0, err
     check_shape(out)
     assert out["tool"] == "release" and out["status"] == "ok"
     pj = json.loads((pdir / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
     assert pj["version"] == "1.1.0" and pj["description"] == "X (v1.1.0)"
-    assert "## v1.1.0 へ更新するとき" in (pdir / "README.md").read_text(encoding="utf-8")
+    assert (pdir / "README.md").read_bytes() == before
     assert out["metrics"]["from"] == "1.0.0" and out["metrics"]["to"] == "1.1.0"
     files = [i["name"] for i in out["items"] if i["result"] == "updated"]
     assert "plugins/mcp/mcp-x/.claude-plugin/plugin.json" in files
-    assert any(i["result"] == "manual" for i in out["items"]) and out["next"]
+    assert "plugins/mcp/mcp-x/README.md" not in files
+    assert not [i for i in out["items"] if i["result"] == "manual" and "README.md:" in i["name"]]
 
 
 def test_bump_unknown_plugin_is_precondition(repo, env):
@@ -344,8 +365,11 @@ def test_bump_unknown_plugin_is_precondition(repo, env):
     assert code == 3 and out["status"] == "stopped"
 
 
-def test_changelog_adds_section_and_replaces_update_guide(repo, env):
-    pdir = plugin_repo(repo, heading="1.1.0")
+def test_changelog_adds_section_and_leaves_the_readme(repo, env):
+    """changelog は CHANGELOG.md の版の節だけを書き、版ごとの更新の節が残る README にも触れない。"""
+    pdir = plugin_repo(repo)
+    (pdir / "README.md").write_text("# mcp-x\n\n## v1.1.0 へ更新するとき\n\n前の版の説明\n\n## 使い方\n\nx\n", encoding="utf-8")
+    before = (pdir / "README.md").read_bytes()
     write(repo, "CHANGELOG.md", "# Changelog\n\n## [mcp-x 1.0.0] - 2026-01-01\n\n- old（#1）\n")
     env["FAKE_GH_PRS"] = json.dumps({"5": {"title": "Add: x"}, "6": {"title": "Fix: y"}})
     code, out, err = call(
@@ -356,10 +380,9 @@ def test_changelog_adds_section_and_replaces_update_guide(repo, env):
     cl = (repo / "CHANGELOG.md").read_text(encoding="utf-8")
     assert cl.index("## [mcp-x 1.1.0] - ") < cl.index("## [mcp-x 1.0.0]")
     assert "- Add: x（#5）\n- Fix: y（#6）" in cl
-    rd = (pdir / "README.md").read_text(encoding="utf-8")
-    assert "前の版の説明" not in rd and "- Add: x（#5）" in rd and "## 使い方" in rd
-    assert {i["result"] for i in out["items"]} == {"added", "replaced"}
-    assert out["next"]
+    assert (pdir / "README.md").read_bytes() == before
+    assert [i["name"] for i in out["items"]] == ["CHANGELOG.md"]
+    assert not out.get("next")
 
     # もう一度呼んでも同じ PR を重ねない
     code, out, _ = call(
@@ -442,6 +465,49 @@ def test_compare_files_skips_symlinks_for_a_runtime_that_drops_them(tmp_path):
     assert out == ["codex: p/skills/a/SKILL.md"]
 
 
+def kiro_project(tmp_path):
+    """この checkout の dev.kiro/install.sh で <tmp>/proj へ導入し、(src, proj) を返す。"""
+    src = SCRIPTS.parents[2]
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    p = subprocess.run(
+        ["bash", str(src / "plugins/ndf/dev.kiro/install.sh"), "--project", str(proj), "--yes"],
+        capture_output=True,
+        text=True,
+        cwd=str(src),
+    )
+    assert p.returncode == 0, p.stdout + p.stderr
+    return src, proj
+
+
+def test_compare_kiro_accepts_what_the_installer_made(tmp_path):
+    src, proj = kiro_project(tmp_path)
+    assert load_verification().compare_kiro(src, proj) == []
+
+
+@pytest.mark.parametrize("broken", ["skill_link", "prompt", "steering", "agent", "policy_link"])
+def test_compare_kiro_reports_missing_or_changed_outputs(tmp_path, broken):
+    """Kiro の生成物（skills / prompts / steering / agents）の欠落・内容違いを不一致にする。"""
+    src, proj = kiro_project(tmp_path)
+    kiro = proj / ".kiro"
+    if broken == "skill_link":
+        (kiro / "skills" / "pr").unlink()
+        want = "kiro: .kiro/skills/pr"
+    elif broken == "prompt":
+        (kiro / "prompts" / "pr.md").write_text("changed\n", encoding="utf-8")
+        want = "kiro: .kiro/prompts/pr.md"
+    elif broken == "steering":
+        (kiro / "steering" / "ndf-policies.md").write_text("stale\n", encoding="utf-8")
+        want = "kiro: .kiro/steering/ndf-policies.md"
+    elif broken == "agent":
+        (kiro / "agents" / "ndf.json").write_text("{", encoding="utf-8")
+        want = "kiro: .kiro/agents/ndf.json"
+    else:
+        (kiro / "skills" / "ndf-policies").symlink_to(src / "plugins/ndf/skills/ndf-policies")
+        want = "kiro: .kiro/skills/ndf-policies が残っている（steering へ移した Skill）"
+    assert load_verification().compare_kiro(src, proj) == [want]
+
+
 # --- phase-steps.py（互換の入口） --------------------------------------------
 
 
@@ -496,6 +562,31 @@ def test_cleanup_pull_removes_untracked_file_equal_to_upstream(repo, env, tmp_pa
         assert (main / "a.md").read_text(encoding="utf-8") == "別の中身\n"
 
 
+@pytest.mark.parametrize("cause", ["local_change", "diverged"])
+def test_cleanup_pull_blocked_by_local_change_keeps_main_dir(repo, env, tmp_path, cause):
+    # 未コミットの変更が pull を塞いだら、手元に触れず main_dir だけを kept にして ok で終える（#1685）
+    main = clone_with_upstream(tmp_path, repo)
+    write(repo, "keep.txt", "上流\n")
+    git(repo, "commit", "-q", "-am", "up")
+    if cause == "local_change":
+        write(main, "keep.txt", "手元\n")
+    else:
+        write(main, "b.md", "手元のコミット\n")
+        git(main, "add", "-A")
+        git(main, "commit", "-q", "-m", "local")
+    env["FAKE_GH_PRS"] = json.dumps({"1": {"headRefName": "feature/gone", "state": "MERGED"}})
+    code, out, err = call("merged-steps.py", ["cleanup", "1", "--root", str(main)], env)
+    item = {(i["kind"], i["name"]): i for i in out["items"]}[("main_dir", str(main))]
+    if cause == "local_change":
+        assert code == 0 and out["status"] == "ok", err
+        assert item["result"] == "kept" and "未コミットの変更（keep.txt）" in item["reason"]
+        assert (main / "keep.txt").read_text(encoding="utf-8") == "手元\n"
+        assert git(main, "stash", "list") == ""
+    else:
+        assert code != 0 and out["status"] == "stopped"
+        assert item["result"] == "stopped"
+
+
 def clone_with_main_and_develop(tmp_path, cur):
     """origin の HEAD が main で develop もある上流を clone し、主ディレクトリを `cur` に置く（宣言は無い）。"""
     up = tmp_path / "up"
@@ -532,3 +623,148 @@ def test_cleanup_base_follows_declaration(tmp_path, env):
     code, out, err = call("merged-steps.py", ["cleanup", "1", "--root", str(main)], env)
     assert code == 0, err
     assert {(i["kind"], i["name"]): i for i in out["items"]}[("main_dir", str(main))]["result"] == "pulled"
+
+
+@pytest.mark.parametrize(("local", "same"), [(b"a\nb\n", True), (b"a\r\nb\r\n", False)])
+def test_same_untracked_compares_bytes_not_text(repo, tmp_path, local, same):
+    """上流が LF で手元の未追跡が CRLF なら別物とみなし、消す一覧に入れない。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("merged_steps", SCRIPTS / "merged-steps.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    up = tmp_path / "up.git"
+    git(tmp_path, "clone", "-q", "--bare", str(repo), str(up))
+    git(repo, "remote", "add", "origin", str(up))
+    git(repo, "fetch", "-q", "origin")
+    git(repo, "checkout", "-q", "-b", "side")
+    (repo / "new.txt").write_bytes(b"a\nb\n")
+    git(repo, "add", "new.txt")
+    git(repo, "commit", "-q", "-m", "new")
+    git(repo, "push", "-q", "origin", "side:develop")
+    git(repo, "checkout", "-q", "develop")
+    git(repo, "branch", "-q", "-D", "side")
+    git(repo, "branch", "-q", "--set-upstream-to", "origin/develop")
+    git(repo, "fetch", "-q", "origin")
+    (repo / "new.txt").write_bytes(local)
+    pull = subprocess.run(["git", "-C", str(repo), "pull", "--ff-only", "-q"], capture_output=True, text=True)
+    assert "untracked working tree files would be overwritten" in pull.stderr
+    assert mod.same_untracked(repo, pull) == (["new.txt"] if same else [])
+
+
+def test_verify_install_source_comes_from_origin_and_declaration(repo):
+    """#1336 の決定 8・I9: 導入元の owner/repo は origin、ref の候補とプラグインは宣言から読む。ai-plugins の宣言では今と同じ値。"""
+    import argparse
+
+    mod = load_verification()
+    git(repo, "remote", "add", "origin", "https://github.com/devbasex/ai-plugins.git")
+    write(repo, ".ndf/worktree.json", json.dumps({"version": 1, "base_branch": "develop", "production_branch": "main"}))
+    write(repo, ".ndf/supervise.json", json.dumps({"release": {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude"]}}))
+    write(repo, ".claude-plugin/marketplace.json", json.dumps({"name": "ai-plugins"}))
+    where, plugins = mod.install_source(repo, argparse.Namespace(ref="develop", plugins=None))
+    assert where == ("devbasex/ai-plugins", "ai-plugins", "main") and plugins == ["ndf"]
+    with pytest.raises(mod.StepError, match="--ref trunk"):
+        mod.install_source(repo, argparse.Namespace(ref="trunk", plugins=None))
+    write(repo, ".ndf/worktree.json", json.dumps({"version": 1, "base_branch": "trunk", "production_branch": "live"}))
+    where, _ = mod.install_source(repo, argparse.Namespace(ref="trunk", plugins="foo"))
+    assert where[2] == "live"
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["ok", "version_mismatch", "failed", "file_mismatch", "user_env_changed"],
+)
+def test_verify_install_assembles_items_and_metrics(tmp_path, monkeypatch, case):
+    """現状固定: cmd_verify_install が導入の結果・中身の比較・利用者の環境から items と metrics を組み立てる。"""
+    import argparse
+    import types
+
+    mod = load_verification()
+    calls = []
+
+    def fake_git(root, *args):
+        calls.append(args)
+        out = {
+            "rev-parse": "abcdef1234567890\n",
+            "tag": "ndf--v1.2.0 ndf--v1.1.0-dev.3 ndf--v1.1.0 ndf--v1.0.0\n",
+            "diff": "plugins/ndf/a.txt plugins/ndf/b.txt\n",
+        }.get(args[0], "")
+        return types.SimpleNamespace(stdout=out)
+
+    def fake_run(cmd, **kw):
+        return types.SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+
+    snaps = iter([{"claude": "x"}, {"claude": "y" if case == "user_env_changed" else "x"}])
+    seen = {}
+
+    def verify_claude(env, ref, plugins, expect, where):
+        code = 1 if case == "failed" else 0
+        ver = "9.9.9" if case == "version_mismatch" else "1.2.0"
+        return {"exit": code, "version": {"ndf": ver, "mcp-serena": "0.1.0"}}, {"ndf": tmp_path / "inst", "mcp-serena": None}
+
+    def compare_files(src, d, rel, changed, name, keeps_symlinks):
+        seen["compare"] = (rel, changed, name, keeps_symlinks)
+        return ["claude: a.txt が違う"] if case == "file_mismatch" else []
+
+    emitted = []
+    monkeypatch.setattr(mod, "git_root", lambda r: tmp_path)
+    monkeypatch.setattr(mod, "install_source", lambda root, a: (("o/r", "m", "main"), ["ndf", "mcp-serena"]))
+    monkeypatch.setattr(mod, "plugin_dir", lambda root, p: root / "plugins" / p)
+    monkeypatch.setattr(mod, "git", fake_git)
+    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(mod, "user_env_snapshot", lambda: next(snaps))
+    monkeypatch.setattr(mod, "isolated_env", lambda tmp: {})
+    monkeypatch.setattr(mod, "verify_claude", verify_claude)
+    monkeypatch.setattr(mod, "compare_files", compare_files)
+    monkeypatch.setattr(mod, "emit", emitted.append)
+
+    a = argparse.Namespace(root=str(tmp_path), ref="develop", expect="1.2.0", runtimes="claude", plugins=None)
+    mod.cmd_verify_install(a)
+    out = emitted[0]
+
+    assert ("tag", "--list", "ndf--v*", "--sort=-v:refname") in calls
+    # 前の正式版は今の版と開発版を除いた最新のタグ
+    assert out["metrics"]["prev_tag"] == "ndf--v1.1.0"
+    assert ("diff", "--name-only", "ndf--v1.1.0", "abcdef1234567890", "--", "plugins/ndf") in calls
+    assert seen["compare"] == ("plugins/ndf", ["plugins/ndf/a.txt", "plugins/ndf/b.txt"], "claude", True)
+    assert out["metrics"]["rev"] == "abcdef12" and out["metrics"]["ref"] == "develop"
+    kinds = [(i["kind"], i["name"], i["result"]) for i in out["items"]]
+    assert ("file", "claude: mcp-serena の導入先が無い", "mismatch") in kinds
+    rt = {"ok": "ok", "version_mismatch": "version_mismatch", "failed": "failed"}.get(case, "ok")
+    assert ("runtime", "claude", rt) in kinds
+    assert out["status"] == "stopped"  # mcp-serena の導入先が無いので常に止まる
+    assert out["metrics"]["user_env_unchanged"] is (case != "user_env_changed")
+    if case == "user_env_changed":
+        assert ("user_env", "claude", "changed") in kinds
+    assert out["metrics"]["mismatch"] == (2 if case == "file_mismatch" else 1)
+
+
+def test_verify_install_all_ok_emits_ok(tmp_path, monkeypatch):
+    """現状固定: 版・中身・利用者の環境がそろえば ok で、summary に ref と版が出る。"""
+    import argparse
+    import types
+
+    mod = load_verification()
+
+    def fake_git(root, *args):
+        out = {"rev-parse": "abcdef1234567890\n", "tag": "ndf--v1.2.0\n"}.get(args[0], "")
+        return types.SimpleNamespace(stdout=out)
+
+    emitted = []
+    monkeypatch.setattr(mod, "git_root", lambda r: tmp_path)
+    monkeypatch.setattr(mod, "install_source", lambda root, a: (("o/r", "m", "main"), ["ndf"]))
+    monkeypatch.setattr(mod, "plugin_dir", lambda root, p: root / "plugins" / p)
+    monkeypatch.setattr(mod, "git", fake_git)
+    monkeypatch.setattr(mod.subprocess, "run", lambda cmd, **kw: types.SimpleNamespace(returncode=0, stdout=b"", stderr=b""))
+    monkeypatch.setattr(mod, "user_env_snapshot", lambda: {"k": "v"})
+    monkeypatch.setattr(mod, "isolated_env", lambda tmp: {})
+    monkeypatch.setattr(mod, "verify_codex", lambda *a: ({"exit": 0, "version": "1.2.0"}, {"ndf": tmp_path}))
+    monkeypatch.setattr(mod, "compare_files", lambda *a, **k: [])
+    monkeypatch.setattr(mod, "emit", emitted.append)
+
+    mod.cmd_verify_install(argparse.Namespace(root=None, ref="develop", expect="1.2.0", runtimes="codex", plugins=None))
+    out = emitted[0]
+    assert out["status"] == "ok"
+    assert out["metrics"]["prev_tag"] is None and out["metrics"]["mismatch"] == 0
+    assert [(i["kind"], i["name"], i["result"]) for i in out["items"]] == [("runtime", "codex", "ok")]
+    assert "develop（abcdef12）" in out["summary"] and "v1.2.0" in out["summary"]

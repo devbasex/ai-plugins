@@ -14,17 +14,24 @@ AC16b）。検証の中で全体のテストが通り、取り消しが無く、
 
 from __future__ import annotations
 
+import datetime as _dt
 import json
 
 import pytest
 
-from crossref_helpers import make_state_v2, read_state
+from crossref_helpers import WHOLE_COMMAND, make_state_v2, read_state, strategy_state
+
+# 状態の戦略の全体テスト（手元で 1 度走らせるコマンド）。
+WHOLE = WHOLE_COMMAND
 
 
 def _state(tmp_path, **over):
     over.setdefault("workflow_step", False)
-    over.setdefault("baseline_test", {"command": "pytest -q", "status": "green", "checked_at": "2026-09-24T10:00:00", "seconds": 6.0})
     return make_state_v2(tmp_path, tmp_path / "work", phase="final", **over)
+
+
+def _abort(refactor_lib):
+    return refactor_lib.ABORT
 
 
 def _args(state_id=130):
@@ -36,7 +43,7 @@ def spy(patch_lib, refactor, monkeypatch):
     """テストの実行と `gh` の呼び出しを差し替え、何を呼んだかを記録する。"""
     seen: dict[str, list] = {"tests": [], "gh": []}
 
-    def fake_run(command, cwd, timeout, grace=5.0):
+    def fake_run(command, cwd, timeout, grace=5.0, output=None):
         seen["tests"].append(command)
         return seen.get("test_code", 0), False
 
@@ -69,7 +76,7 @@ def test_a_standalone_run_goes_to_cross_review_after_the_whole_test(refactor, cm
     cmd_gate.cmd_final_gate(_args())
 
     assert "FINAL_GATE=cross-review" in capsys.readouterr().out
-    assert spy["tests"] == ["pytest -q"]
+    assert spy["tests"] == [WHOLE]
     gate = read_state(state_path)["final_gate"]
     assert gate["mode"] == "cross-review"
     assert gate["checked_mode"] == "test"
@@ -86,7 +93,7 @@ def test_a_workflow_step_run_skips_cross_review_and_runs_the_tests(refactor, cmd
     out = capsys.readouterr().out
     assert "FINAL_GATE=passed" in out
     assert "cross-review" not in out
-    assert spy["tests"] == ["pytest -q"]
+    assert spy["tests"] == [WHOLE]
     assert read_state(state_path)["final_gate"]["status"] == "passed"
 
 
@@ -151,36 +158,68 @@ def test_a_failed_ci_check_does_not_pass(cmd_gate, tmp_path, env_tmp_dir, spy):
         "not json",  # 応答を解釈できない
     ],
 )
-def test_no_result_does_not_pass(cmd_gate, tmp_path, env_tmp_dir, spy, payload):
-    """fail-closed — **結果を得られないときは通過させない。**"""
+def test_no_result_does_not_pass(refactor_lib, cmd_gate, tmp_path, env_tmp_dir, spy, payload, capsys):
+    """fail-closed — **結果を得られないときは通過させず、「判断が要る」で終える**（#1334 非機能の可用性）。"""
     state_path = _state(tmp_path, workflow_step=True, ci_check="tests")
     env_tmp_dir(state_path)
     spy["gh_out"] = payload
 
     with pytest.raises(SystemExit) as e:
         cmd_gate.cmd_final_gate(_args())
-    assert e.value.code == 2
+    assert e.value.code == _abort(refactor_lib)
+    assert "得られませんでした" in capsys.readouterr().err
 
 
-def test_an_unfinished_ci_check_does_not_pass(cmd_gate, tmp_path, env_tmp_dir, spy):
-    state_path = _state(tmp_path, workflow_step=True, ci_check="tests")
+def test_an_unfinished_ci_check_is_waited_for_until_the_limit_then_needs_a_decision(
+    refactor_lib, cmd_gate, tmp_path, env_tmp_dir, spy, capsys
+):
+    """`pending` の間は `limits.ci_wait_timeout` まで待ち、上限に届いたら待った秒を出して「判断が要る」で終える（決定 9）。"""
+    state_path = _state(
+        tmp_path, workflow_step=True, ci_check="tests", limits={"test_timeout": 60, "whole_timeout": 60, "ci_wait_timeout": 25}
+    )
     env_tmp_dir(state_path)
     spy["gh_out"] = _check_runs(_run("tests", conclusion=None, status="in_progress"))
 
     with pytest.raises(SystemExit) as e:
         cmd_gate.cmd_final_gate(_args())
-    assert e.value.code == 2
+    assert e.value.code == _abort(refactor_lib)
+    assert len(spy["gh"]) > 1, "pending の間は問い合わせ直す"
+    err = capsys.readouterr().err
+    assert "上限 25 秒" in err and "待ち" in err
 
 
-def test_a_named_check_that_is_missing_does_not_pass(refactor, cmd_gate, tmp_path, env_tmp_dir, spy):
-    """名前が一致しないチェックの成功で通さない。"""
+def test_a_pending_check_that_turns_green_passes(refactor, cmd_gate, tmp_path, env_tmp_dir, spy, capsys):
+    """待っている間に success へ変わればそのまま通す。"""
+    state_path = _state(
+        tmp_path, workflow_step=True, ci_check="tests", limits={"test_timeout": 60, "whole_timeout": 60, "ci_wait_timeout": 600}
+    )
+    env_tmp_dir(state_path)
+    answers = [_check_runs(_run("tests", conclusion=None, status="in_progress")), _check_runs(_run("tests"))]
+    spy["gh_out"] = answers[0]
+    original = spy["gh"]
+
+    class _Rotating(list):
+        def append(self, item):
+            super().append(item)
+            spy["gh_out"] = answers[min(len(self), len(answers) - 1)]
+
+    spy["gh"] = _Rotating(original)
+
+    cmd_gate.cmd_final_gate(_args())
+
+    assert "FINAL_GATE=passed" in capsys.readouterr().out
+    assert spy["tests"] == []
+
+
+def test_a_named_check_that_is_missing_does_not_pass(refactor_lib, cmd_gate, tmp_path, env_tmp_dir, spy):
+    """名前が一致しないチェックの成功で通さない。結論を得られないので「判断が要る」で終える。"""
     state_path = _state(tmp_path, workflow_step=True, ci_check="tests")
     env_tmp_dir(state_path)
     spy["gh_out"] = _check_runs(_run("lint"))
 
     with pytest.raises(SystemExit) as e:
         cmd_gate.cmd_final_gate(_args())
-    assert e.value.code == 2
+    assert e.value.code == _abort(refactor_lib)
 
 
 def test_a_failing_local_test_is_not_overturned_by_the_ci(refactor, cmd_gate, tmp_path, env_tmp_dir, spy):
@@ -213,14 +252,14 @@ def test_a_failure_opens_a_fix_round(cmd_gate, tmp_path, env_tmp_dir, spy):
 
 
 def test_the_fix_cap_reports_the_failure_without_reverting(patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, spy, monkeypatch):
-    """**Step 7 は push 済みの地点である。** 上限に達しても取り消さない。
+    """**単独で起動したとき、Step 7 は push 済みの地点である。** 上限に達しても取り消さない（#1669 AC9）。
 
     取り消しの判断は Pull Request の読み手が持つ。失敗として報告に書く。
     """
     dropped: list = []
     patch_lib("drop", lambda *a, **k: dropped.append(a) or {})
     patch_lib("revert_range", lambda *a, **k: dropped.append(a))
-    state_path = _state(tmp_path, workflow_step=True, started_at="2000-01-01T00:00:00", final_gate={"fix_rounds": 2, "checks": []})
+    state_path = _state(tmp_path, started_at="2000-01-01T00:00:00", final_gate={"fix_rounds": 2, "checks": []})
     env_tmp_dir(state_path)
     spy["test_code"] = 1
 
@@ -231,22 +270,26 @@ def test_the_fix_cap_reports_the_failure_without_reverting(patch_lib, refactor, 
     assert read_state(state_path)["final_gate"]["status"] == "failed"
 
 
-def test_the_first_fix_is_tried_even_after_the_budget_ran_out(cmd_gate, tmp_path, env_tmp_dir, spy):
-    """決定 26: 想定最大時間を使い切った後に落ちても、最終ゲートの修正は必ず 1 度試みる。"""
-    state_path = _state(tmp_path, workflow_step=True, started_at="2000-01-01T00:00:00")
+def test_the_first_fix_is_not_launched_when_it_does_not_fit_before_the_check_start_deadline(cmd_gate, tmp_path, env_tmp_dir, spy):
+    """#1932 I2 — 今 + 最終ゲート修正 1 回の見込み F が確かめの開始の締め切りを越えると、1 回目でも修正を起動しない。
+    単独の起動は取り消さずに終了コード 1 で終え、理由を `check_skipped` に残す。"""
+    started = (_dt.datetime.now() - _dt.timedelta(minutes=59)).isoformat(timespec="seconds")  # H まで約 60 秒
+    state_path = _state(tmp_path, started_at=started, plan={"reserve": {"final_fix": 5.0}})  # F = 300 秒
     env_tmp_dir(state_path)
     spy["test_code"] = 1
 
     with pytest.raises(SystemExit) as e:
         cmd_gate.cmd_final_gate(_args())
-    assert e.value.code == 2, "時計で打ち切らず修正ラウンドへ進む"
+    assert e.value.code == 1
     gate = read_state(state_path)["final_gate"]
-    assert gate["fix_rounds"] == 1 and gate["status"] == "failing"
+    assert gate["fix_rounds"] == 0 and gate["status"] == "failed"
+    assert gate["check_skipped"]["reason"] == cmd_gate.NO_FIX_ROOM and gate["check_skipped"]["base_identity"] is False
+    assert spy["tests"], "確かめは H − v より前なので走らせた"
 
 
 def test_the_second_fix_after_the_budget_ran_out_is_not_tried(cmd_gate, tmp_path, env_tmp_dir, spy):
-    """決定 26: 2 度目からは時計で打ち切る。"""
-    state_path = _state(tmp_path, workflow_step=True, started_at="2000-01-01T00:00:00", final_gate={"fix_rounds": 1, "checks": []})
+    """#1932 I2・I3 — 確かめを始められない実行は、単独の起動なら取り消さずに 1 で終わる。"""
+    state_path = _state(tmp_path, started_at="2000-01-01T00:00:00", final_gate={"fix_rounds": 1, "checks": []})
     env_tmp_dir(state_path)
     spy["test_code"] = 1
 
@@ -345,7 +388,7 @@ def test_a_standalone_run_with_a_round_test_runs_the_baseline_test_once(refactor
 
     cmd_gate.cmd_final_gate(_args())
 
-    assert spy["tests"] == ["pytest -q"]
+    assert spy["tests"] == [WHOLE]
     assert "FINAL_GATE=cross-review" in capsys.readouterr().out
     gate = read_state(state_path)["final_gate"]
     assert gate["mode"] == "cross-review"
@@ -359,7 +402,7 @@ def test_a_workflow_step_run_with_a_round_test_runs_the_baseline_test_once(refac
 
     cmd_gate.cmd_final_gate(_args())
 
-    assert spy["tests"] == ["pytest -q"]
+    assert spy["tests"] == [WHOLE]
     assert "FINAL_GATE=passed" in capsys.readouterr().out
 
 
@@ -400,6 +443,17 @@ def test_a_whole_test_passed_in_verify_at_the_same_head_is_reused(refactor, cmd_
     assert expected in capsys.readouterr().out
 
 
+def test_a_new_gate_run_drops_the_previous_triage(refactor, cmd_gate, tmp_path, env_tmp_dir, spy):
+    """前回の見分けは今回の取り消しの根拠にしない（今回のテストが通れば変更起因は無い）。"""
+    stale = {"caused": ["tests/test_a.py::t"], "rerun_command": "pytest -q tests/test_a.py"}
+    state_path = _state(tmp_path, whole_test=PASSED_IN_VERIFY, final_gate={"fix_rounds": 1, "checks": [], "triage": stale})
+    env_tmp_dir(state_path)
+
+    cmd_gate.cmd_final_gate(_args())
+
+    assert "triage" not in read_state(state_path)["final_gate"]
+
+
 @pytest.mark.parametrize(
     "whole_test",
     [
@@ -416,10 +470,10 @@ def test_the_whole_test_runs_unless_it_is_reusable(refactor, cmd_gate, tmp_path,
 
     cmd_gate.cmd_final_gate(_args())
 
-    assert spy["tests"] == ["pytest -q"]
+    assert spy["tests"] == [WHOLE]
     gate = read_state(state_path)["final_gate"]
     assert not gate.get("whole_test_reused")
-    assert gate["checks"][-1]["command"] == "pytest -q"
+    assert gate["checks"][-1]["command"] == WHOLE
 
 
 def test_a_ci_check_is_not_replaced_by_the_whole_test_in_verify(refactor, cmd_gate, tmp_path, env_tmp_dir, spy):
@@ -466,7 +520,7 @@ def test_the_gate_check_records_the_command_and_seconds(refactor, cmd_gate, tmp_
 
     check = read_state(state_path)["final_gate"]["checks"][-1]
     assert check["mode"] == "test"
-    assert check["command"] == "pytest -q"
+    assert check["command"] == WHOLE
     assert isinstance(check["seconds"], (int, float)) and check["seconds"] >= 0
 
 
@@ -502,3 +556,234 @@ def test_final_gate_records_a_timed_out_whole_test_and_enters_a_fix_round(
     check = gate["checks"][-1]
     assert check["status"] == "fail"
     assert "60" in check["detail"]
+
+
+# ---------- #1334: 全体テストを CI に任せる戦略の最終ゲート ----------
+
+OLD_FAILURE = "tests/test_old.py::tests.test_old::test_old"
+NEW_FAILURE = "tests/test_new.py::tests.test_new::test_new"
+
+
+def _ci_whole_state(tmp_path, **over):
+    over.setdefault("strategy", strategy_state("local-scoped-ci-whole"))
+    over.setdefault("limits", {"test_timeout": 60, "whole_timeout": 60, "ci_wait_timeout": 60})
+    over.setdefault("workflow_step", True)
+    return _state(tmp_path, **over)
+
+
+def _failed_ci(patch_lib, spy, ids):
+    """CI が落ち、成果物の JUnit から `ids` が落ちたと読める。範囲の走らせ直しも落ちる。"""
+    spy["gh_out"] = _check_runs(_run("tests", conclusion="failure"))
+    spy["test_code"] = 1
+    patch_lib("ci_junit", lambda state, sha, checks, runs=None: [b"<testsuites/>"])
+    patch_lib("failed_ids_of", lambda state, ci_xmls=None: (list(ids), None))
+
+
+def test_a_ci_whole_gate_never_runs_the_whole_test_locally(refactor, cmd_gate, tmp_path, env_tmp_dir, spy, capsys):
+    """AC3・I4 — `local-scoped-ci-whole` は `--ci-check` が無くても CI の結果で判定し、手元で全体テストを走らせない。"""
+    state_path = _ci_whole_state(tmp_path)
+    env_tmp_dir(state_path)
+    spy["gh_out"] = _check_runs(_run("tests"))
+
+    cmd_gate.cmd_final_gate(_args())
+
+    assert "FINAL_GATE=passed" in capsys.readouterr().out
+    assert spy["tests"] == []
+    assert read_state(state_path)["final_gate"]["mode"] == "ci"
+
+
+def test_a_ci_failure_that_is_only_an_existing_failure_passes(patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, spy, capsys):
+    """AC10・I5 — 着手前に記録した既存失敗だけが落ちたなら通す。走らせ直すのは落ちたファイルだけ（全体テストは走らせない）。"""
+    baseline = {"mode": "scope", "command": "x", "status": "red", "checked_at": "t", "seconds": 1.0, "existing_failures": [OLD_FAILURE]}
+    state_path = _ci_whole_state(tmp_path, baseline_test=baseline)
+    env_tmp_dir(state_path)
+    _failed_ci(patch_lib, spy, [OLD_FAILURE])
+
+    cmd_gate.cmd_final_gate(_args())
+
+    assert "FINAL_GATE=passed" in capsys.readouterr().out
+    assert WHOLE not in spy["tests"]
+    assert all("tests/test_old.py" in words for words in spy["tests"])
+    triage = read_state(state_path)["final_gate"]["triage"]
+    assert triage["preexisting"] == [OLD_FAILURE] and triage["caused"] == []
+
+
+def test_a_ci_failure_outside_the_existing_failures_does_not_pass(patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, spy):
+    """AC10 — 既存失敗の外で落ちたテストがあれば通さない（着手前の HEAD が分からないので変更起因）。"""
+    baseline = {"mode": "scope", "command": "x", "status": "red", "checked_at": "t", "seconds": 1.0, "existing_failures": [OLD_FAILURE]}
+    state_path = _ci_whole_state(tmp_path, baseline_test=baseline)
+    env_tmp_dir(state_path)
+    _failed_ci(patch_lib, spy, [OLD_FAILURE, NEW_FAILURE])
+
+    with pytest.raises(SystemExit) as e:
+        cmd_gate.cmd_final_gate(_args())
+    assert e.value.code == 2
+    triage = read_state(state_path)["final_gate"]["triage"]
+    assert triage["caused"] == [NEW_FAILURE]
+
+
+def _item(item_id, rank):
+    return {"id": item_id, "rank": rank, "status": "verified", "danger": ["D2"]}
+
+
+def test_a_caused_failure_after_the_deadline_reverts_the_deferred_items_newest_first(
+    patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, spy, capsys
+):
+    """AC8・I8 — 単独の起動で寄せた危険フラグの全体テストが落ち、時間以外の理由で修正を打ち切ったら、原因の判定の順に
+    取り消し、通った時点で止める。
+
+    本文に項目のパスが現れず、項目のコミットも無い（外して走らせ直せない）ため原因は決まらず、新しい順になる（#1649 AC6）。
+    """
+    dropped: list = []
+    pushed: list = []
+
+    def fake_drop(path, state, ids, reason, on_conflict="stop"):
+        dropped.extend(ids)
+        spy["test_code"] = 0  # 取り消した後の走らせ直しは通る
+
+    patch_lib("drop", fake_drop)
+    patch_lib("push_with_retry_marker", lambda *a, **k: pushed.append(True))
+    patch_lib("_dirty_paths", lambda state, work: [])  # 作業ツリーは git でない（drop を差し替える）
+    state_path = _ci_whole_state(
+        tmp_path,
+        workflow_step=False,
+        limits={"test_timeout": 60, "whole_timeout": 60, "ci_wait_timeout": 60, "final_end_at": "2999-01-01T00:30:00"},
+        # 時間以外の打ち切り（起動し直しても解けない結末）。時間で打ち切った単独の起動は取り消さない（#1932 原則 4）
+        final_gate={"fix_rounds": 1, "checks": [], "no_relaunch": True},
+        items=[_item("I1", 1), _item("I2", 2), _item("I3", 3)],
+        whole_test={
+            "ran": False,
+            "flags": [],
+            "status": None,
+            "seconds": None,
+            "head": None,
+            "reverted": False,
+            "deferred": {"flags": ["D2"], "items": ["I1", "I3"]},
+        },
+    )
+    env_tmp_dir(state_path)
+    _failed_ci(patch_lib, spy, [NEW_FAILURE])
+
+    with pytest.raises(SystemExit) as e:
+        cmd_gate.cmd_final_gate(_args())
+    assert e.value.code == 2, "取り消しを公開して、次の最終ゲートが CI を待ち直す"
+    assert dropped == ["I3"], "原因が決まらなければ新しい（rank の大きい）項目から取り消し、通った時点で止める"
+    assert pushed == [True]
+    gate = read_state(state_path)["final_gate"]
+    assert gate["reverted_deferred"] == ["I3"]
+    # 修正の依頼ではない。起点を取り消し後の HEAD へ置き直し、取り消しを後の修正の範囲へ入れない。
+    assert "FINAL_GATE=recheck" in capsys.readouterr().out
+    assert gate["status"] == "recheck" and gate["fix_base_sha"]
+
+
+def test_the_deferred_revert_reverts_the_culprit_named_by_the_failure_not_the_flagged_items(
+    patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, spy, monkeypatch
+):
+    """#1649 AC6 — 寄せた危険フラグの取り消しも原因の判定に従う。本文に現れたファイルを変えた I2 だけを取り消す。"""
+    import sys
+
+    dropped: list = []
+
+    def fake_drop(path, state, ids, reason, on_conflict="stop"):
+        dropped.extend(ids)
+        spy["test_code"] = 0
+
+    patch_lib("drop", fake_drop)
+    patch_lib("push_with_retry_marker", lambda *a, **k: None)
+    patch_lib("_dirty_paths", lambda state, work: [])
+    culprit = sys.modules["refactor_lib.culprit"]
+    monkeypatch.setattr(culprit, "_changed_by", lambda work, item: {"I2": ["src/i2.py"]}.get(item["id"], [f"src/{item['id']}.py"]))
+    items = [_item("I1", 1), {**_item("I2", 2), "danger": []}, _item("I3", 3)]
+    state_path = _ci_whole_state(
+        tmp_path,
+        workflow_step=False,
+        limits={"test_timeout": 60, "whole_timeout": 60, "ci_wait_timeout": 60, "final_end_at": "2999-01-01T00:30:00"},
+        # 時間以外の打ち切り（起動し直しても解けない結末）。時間で打ち切った単独の起動は取り消さない（#1932 原則 4）
+        final_gate={"fix_rounds": 1, "checks": [], "no_relaunch": True},
+        items=items,
+        whole_test={"ran": False, "flags": [], "status": None, "deferred": {"flags": ["D2"], "items": ["I1", "I3"]}},
+    )
+    env_tmp_dir(state_path)
+    _failed_ci(patch_lib, spy, [NEW_FAILURE])
+    classified = {"failed_tests": [NEW_FAILURE], "flaky": [], "preexisting": [], "caused": [NEW_FAILURE], "fallback_reason": None}
+    classified.update({"caused_output": {NEW_FAILURE: "E  src/i2.py:3: boom"}, "rerun_command": "pytest -q tests/test_new.py"})
+    monkeypatch.setattr(cmd_gate.triage, "classify", lambda state, timed_out, ci_xmls=None: dict(classified))
+
+    with pytest.raises(SystemExit) as e:
+        cmd_gate.cmd_final_gate(_args())
+
+    assert e.value.code == 2
+    assert dropped == ["I2"], "危険フラグの I1・I3 ではなく、本文に現れたファイルを変えた I2"
+    gate = read_state(state_path)["final_gate"]
+    assert gate["culprit"]["culprits"] == ["I2"] and gate["culprit"]["basis"] == "path"
+
+
+def test_the_ci_gate_waits_without_pushing(patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, spy):
+    """I9 — 最終ゲートは公開の手順が push 済みの HEAD のチェックを待つだけで、待ちの前に push しない。"""
+    pushed: list = []
+    patch_lib("push_with_retry_marker", lambda *a, **k: pushed.append(True))
+    state_path = _ci_whole_state(tmp_path)
+    env_tmp_dir(state_path)
+    spy["gh_out"] = _check_runs(_run("tests"))
+
+    cmd_gate.cmd_final_gate(_args())
+
+    assert pushed == []
+    assert not any(cmd[:2] == ["git", "push"] for cmd in spy["gh"])
+
+
+def test_the_ci_gate_reads_every_check_with_one_query_per_poll(refactor, cmd_gate, tmp_path, env_tmp_dir, spy, capsys):
+    """待つチェックが複数でも、1 回の照会でチェックジョブの一覧を 1 度だけ読む（照会の回数がチェックの本数倍にならない）。"""
+    ci = {"check": "tests", "checks": ["tests", "lint", "e2e"], "junit_artifacts": None}
+    state_path = _ci_whole_state(tmp_path, strategy=strategy_state("local-scoped-ci-whole", ci=ci))
+    env_tmp_dir(state_path)
+    spy["gh_out"] = _check_runs(_run("tests"), _run("lint"), _run("e2e"))
+
+    cmd_gate.cmd_final_gate(_args())
+
+    assert "FINAL_GATE=passed" in capsys.readouterr().out
+    assert len([cmd for cmd in spy["gh"] if any("check-runs" in str(w) for w in cmd)]) == 1
+
+
+def test_the_lint_limit_excludes_the_triage_time(cmd_gate, tmp_path, env_tmp_dir, spy, monkeypatch):
+    """静的解析の上限は、テストの実行秒数だけを差し引いて数える。落ちたテストの見分けの時間は引かない。"""
+    state_path = _state(tmp_path, workflow_step=True)
+    env_tmp_dir(state_path)
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(cmd_gate.time, "monotonic", lambda: clock["now"])
+
+    def fake_check(path, state, gate):
+        # テストが 5 秒、見分けが 100 秒かかった
+        gate["mode"] = "test"
+        clock["now"] += 105.0
+        return True, "d", 5.0
+
+    seen = {}
+
+    def fake_lint(path, state, gate, started=None):
+        seen["started"] = started
+        return True, ""
+
+    monkeypatch.setattr(cmd_gate, "_run_and_record_gate_check", fake_check)
+    monkeypatch.setattr(cmd_gate.gate_lint, "lint_gate", fake_lint)
+    cmd_gate.cmd_final_gate(_args())
+    assert seen["started"] == 1100.0
+
+
+def test_a_standalone_run_past_the_deadline_with_the_planned_tree_skips_the_check(
+    patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, spy, capsys
+):
+    """#1932 I3 — 確かめを始められず、HEAD の木が起点の木と同じなら、単独の起動でも確かめを省いて通し、報告に理由が出る。"""
+    patch_lib("push_with_retry_marker", lambda *a, **k: None)
+    state_path = _state(tmp_path, started_at="2000-01-01T00:00:00", plan={"base_sha": "BASE", "reserve": {"final_whole_test": 1.0}})
+    env_tmp_dir(state_path)
+
+    cmd_gate.cmd_final_gate(_args())
+
+    assert "FINAL_GATE=passed" in capsys.readouterr().out
+    gate = read_state(state_path)["final_gate"]
+    assert gate["status"] == "passed" and gate["check_skipped"]["base_identity"] is True
+    assert gate["check_skipped"]["gate_seconds"] == 60 and gate["check_skipped"]["left_seconds"] == 0
+    assert spy["tests"] == [], "確かめは走らせない"
+    refactor.cmd_report(type("A", (), {"id": 130, "metrics": False})())
+    assert "確かめを省いた" in capsys.readouterr().out

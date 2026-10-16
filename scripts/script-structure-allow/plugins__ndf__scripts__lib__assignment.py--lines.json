@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/assignment.py", "name": "", "kind": "lines", "reason": "担当に入れる判断（admit）と振り替えの規則（after_no_result）を 1 ファイルに置く要求（#1290 の AC13・決定 12）で 601 行。分けるなら、結果なしの規則（NO_RELAUNCH_REASONS から no_result_entry まで）を別のモジュールへ移し、cross-refactoring のテストが assignment.py を別の名前で読み込む形を直してから行う", "lines": 601}

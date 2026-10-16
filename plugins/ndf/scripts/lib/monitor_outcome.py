@@ -11,13 +11,14 @@
 `refactor_lib` / 要約）が同じ定数と関数を使う。`monitor.py` に置くと、読む側が監視の
 実体を読み込むことになる（設計の決定 4）。
 
-キーと値の形は `issues/issue-662-598-537-619-584-583-design-contracts.md` の
+キーと値の形は `issues/old/issue-662-598-537-619-584-583-design-contracts.md` の
 「監視の結果ファイル」にある。
 
 **起動 1 回の結末を 1 つの値として読むのもここである（#729）。** `read_launch_outcome` が
 結果ファイルの有無・読めるかと監視の結果を突き合わせ、使える結果（`payload`）か理由
-（`reason`）と起動し直しの可否（`relaunch_same_agent`）を返す。結果なしの判断と可否の表を
-cross-review / cross-refactoring がそれぞれ持つと、語彙を足すたびに片方が古くなる。
+（`reason`）を返す。結果なしの判断を cross-review / cross-refactoring がそれぞれ持つと、
+語彙を足すたびに片方が古くなる。理由ごとに起動し直すか・振り替えるかの規則（リトライ可否）は
+ここに置かず、`assignment.after_no_result` が持つ（#919）。
 """
 
 # `from __future__ import annotations` を置かない。注釈が文字列になると `dataclass` が
@@ -37,8 +38,8 @@ if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 import clock  # noqa: E402  時刻の書き出し（#1142 の L0）
 
-# 理由の語彙。先頭の 6 語は監視の状態（`status`）から決まる。`usage_limit` / `cli_timeout` は
-# 監視が文言の照合で結末に添えたときだけ現れ、`unparsable` は読む側（`read_launch_outcome`）
+# 理由の語彙。先頭の 6 語は監視の状態（`status`）から決まる。`usage_limit` / `cli_timeout` /
+# `model_unavailable` / `auth_expired` は監視が文言の照合で結末に添えたときだけ現れ、`unparsable` は読む側（`read_launch_outcome`）
 # だけが書く（#729 の決定 7）。
 REASONS = (
     "ok",
@@ -49,17 +50,16 @@ REASONS = (
     "pidfile_bad",
     "usage_limit",
     "cli_timeout",
+    "model_unavailable",
+    "auth_expired",
     "unparsable",
 )
 
-# 同じ担当を同じ条件で起動し直しても解けない理由。利用上限は起動のたびに待ちと相手の
-# 枠を使うだけで直らない（#619）。それ以外は対象や負荷で変わりうるので 1 度は起動し直せる。
-# **理由を足すときはこの集合だけを見直す。** 偽のときに何をするかは Skill が決める。
-NO_RELAUNCH_REASONS = frozenset({"usage_limit"})
-
 # 監視がこの理由を書いていれば、監視が止めたか、結果を書けない終わり方をしたと分かっている。
 # 結果ファイルの状態を見ずにその値を採る（`ok` / `missing` は結果ファイルの側で決め直す）。
-_MONITOR_DECIDED_REASONS = frozenset({"timeout", "stalled", "early_error", "usage_limit", "cli_timeout", "pidfile_bad"})
+_MONITOR_DECIDED_REASONS = frozenset(
+    {"timeout", "stalled", "early_error", "usage_limit", "cli_timeout", "model_unavailable", "auth_expired", "pidfile_bad"}
+)
 
 _STATUS_REASON = {
     "OK": "ok",
@@ -107,11 +107,6 @@ def reason_for(status: str) -> str:
         raise ValueError(f"監視の状態として知らない値です: {status!r}") from None
 
 
-def relaunch_same_agent(reason: Optional[str]) -> bool:
-    """同じ担当を同じ条件で起動し直せば解けるか。`NO_RELAUNCH_REASONS` に無ければ可。"""
-    return reason not in NO_RELAUNCH_REASONS
-
-
 def outcome_path(tmp_dir: os.PathLike[str] | str, stem: str) -> pathlib.Path:
     return pathlib.Path(tmp_dir) / f"{stem}-monitor.json"
 
@@ -154,7 +149,6 @@ class LaunchOutcome:
     reason: Optional[str]
     detail: str
     monitor: Optional[dict[str, Any]]
-    relaunch_same_agent: bool
 
 
 def _read_result_file(path: pathlib.Path) -> tuple[Optional[dict[str, Any]], str]:
@@ -188,11 +182,11 @@ def read_launch_outcome(tmp_dir: os.PathLike[str] | str, stem: str, result_path:
     monitor = read_outcome(tmp_dir, stem)
     monitor_detail = str(monitor.get("detail") or "") if monitor else ""
     if payload is not None:
-        return LaunchOutcome(payload=payload, reason=None, detail=monitor_detail, monitor=monitor, relaunch_same_agent=True)
+        return LaunchOutcome(payload=payload, reason=None, detail=monitor_detail, monitor=monitor)
     monitor_reason = monitor.get("reason") if monitor else None
     reason = monitor_reason if monitor_reason in _MONITOR_DECIDED_REASONS else result_reason
     detail = monitor_detail or _unusable_detail(path, result_reason)
-    return LaunchOutcome(payload=None, reason=reason, detail=detail, monitor=monitor, relaunch_same_agent=relaunch_same_agent(reason))
+    return LaunchOutcome(payload=None, reason=reason, detail=detail, monitor=monitor)
 
 
 def _unusable_detail(path: pathlib.Path, result_reason: str) -> str:

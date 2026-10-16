@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """release-verification-steps.py: リリース後テストの導入確認（#862。試作は #827 の phase-steps.py）。
 
-    python3 release-verification-steps.py verify-install --ref develop|main --expect <版>
-        [--plugins ndf,...] [--runtimes claude,codex,kiro] [--root <dir>]
+    python3 release-verification-steps.py verify-install --ref <ベースブランチ|本番チャネル> --expect <版>
+        [--plugins <名前>,...] [--runtimes claude,codex,kiro] [--root <dir>]
 
 隔離した HOME で ref から導入し、導入された版と、前の正式版のタグから変わったファイルの中身が
 ref と一致するかを確かめる。利用者の HOME の設定が変わっていないことも確かめる。
 結果は lib/step_result.py の形の 1 行の JSON。終了コードは 0 = ok / 1 = 不一致か導入の失敗 /
-2 = 呼び出しの誤り（未知の runtime）/ 3 = plugin が無い。
+2 = 呼び出しの誤り（未知の runtime・宣言に無い ref）/ 3 = plugin が無い。
+導入元の owner/repo は origin の URL、マーケットプレイスの名前は `.claude-plugin/marketplace.json` の name、ref の
+候補（ベースブランチ・本番チャネル）は `.ndf/worktree.json`、プラグインとタグの接頭辞は --plugins → 宣言の
+release.plugin から読む（#1336）。
 """
 
 from __future__ import annotations
@@ -37,10 +40,19 @@ from step_result import (
     result,
     version_arg,
 )
+import delivery  # noqa: E402
+import repo as repo_lib  # noqa: E402
 
 TOOL = "release-verification"
-REPO_SLUG = "devbasex/ai-plugins"
-MARKET = "ai-plugins"
+
+
+def market_of(root, slug):
+    """マーケットプレイスの名前: `.claude-plugin/marketplace.json` の name → リポジトリ名（#1336）。"""
+    try:
+        name = json.loads((Path(root) / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8")).get("name")
+    except (OSError, ValueError, AttributeError):
+        name = None
+    return name if isinstance(name, str) and name else slug.split("/", 1)[-1]
 
 
 def rc_digest(path):
@@ -100,9 +112,9 @@ def run_env_i(cmd, env, cwd=None, timeout=600):
         return 124, f"{' '.join(cmd)} が {timeout} 秒で終わらない"
 
 
-def installed_dir(cache_root, p, expect):
-    """<設定>/plugins/cache/ai-plugins/<p>/<版> を探す。期待の版が無ければ最新のものを返す。"""
-    base = Path(cache_root) / "plugins" / "cache" / MARKET / p
+def installed_dir(cache_root, p, expect, market):
+    """<設定>/plugins/cache/<マーケットプレイス>/<p>/<版> を探す。期待の版が無ければ最新のものを返す。"""
+    base = Path(cache_root) / "plugins" / "cache" / market / p
     if not base.is_dir():
         return None
     if (base / expect).is_dir():
@@ -171,36 +183,38 @@ def _run_steps(env, steps):
     return res, out, True
 
 
-def verify_claude(env, ref, plugins, expect):
-    src = f"https://github.com/{REPO_SLUG}.git#{ref}" if ref != "main" else REPO_SLUG
+def verify_claude(env, ref, plugins, expect, where):
+    slug, market, production = where
+    src = f"https://github.com/{slug}.git#{ref}" if ref != production else slug
     steps = [["claude", "plugin", "marketplace", "add", src]]
-    steps += [["claude", "plugin", "install", f"{p}@{MARKET}"] for p in plugins]
+    steps += [["claude", "plugin", "install", f"{p}@{market}"] for p in plugins]
     steps.append(["claude", "plugin", "list"])
     res, out, ok = _run_steps(env, steps)
     if not ok:
         return res, {}
     dirs = {}
     for p in plugins:
-        d = installed_dir(env["CLAUDE_CONFIG_DIR"], p, expect)
+        d = installed_dir(env["CLAUDE_CONFIG_DIR"], p, expect, market)
         dirs[p] = d
         v = manifest_version(d) if d else None
-        m = re.search(rf"{re.escape(p)}@{MARKET}\S*\s+(?:.*?)?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)", out)
+        m = re.search(rf"{re.escape(p)}@{market}\S*\s+(?:.*?)?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)", out)
         res["version"][p] = v or (m.group(1) if m else None)
     return res, dirs
 
 
-def verify_codex(env, ref, plugins, expect):
-    add = ["codex", "plugin", "marketplace", "add", REPO_SLUG]
-    if ref != "main":
+def verify_codex(env, ref, plugins, expect, where):
+    slug, market, production = where
+    add = ["codex", "plugin", "marketplace", "add", slug]
+    if ref != production:
         add += ["--ref", ref]
-    steps = [add] + [["codex", "plugin", "add", f"{p}@{MARKET}"] for p in plugins]
+    steps = [add] + [["codex", "plugin", "add", f"{p}@{market}"] for p in plugins]
     steps.append(["codex", "plugin", "list"])
     res, _, ok = _run_steps(env, steps)
     if not ok:
         return res, {}
     dirs = {}
     for p in plugins:
-        d = installed_dir(env["CODEX_HOME"], p, expect)
+        d = installed_dir(env["CODEX_HOME"], p, expect, market)
         dirs[p] = d
         res["version"][p] = manifest_version(d) if d else None
     return res, dirs
@@ -226,55 +240,120 @@ def verify_kiro(env, src, tmp, expect):
     return res, proj
 
 
-def cmd_verify_install(a):
-    root = git_root(a.root)
-    plugins = [p.strip() for p in a.plugins.split(",") if p.strip()]
-    runtimes = [r.strip() for r in a.runtimes.split(",") if r.strip()]
-    bad = [r for r in runtimes if r not in ("claude", "codex", "kiro")]
-    if bad:
-        raise StepError(f"未知の runtime: {','.join(bad)}", EXIT_UNREADABLE)
-    rel = {p: plugin_dir(root, p).relative_to(root).as_posix() for p in plugins}
+KIRO_PLUGIN = "plugins/ndf"
+KIRO_POLICY = "ndf-policies"
 
-    git(root, "fetch", "-q", "origin", "--tags")
-    ref_rev = git(root, "rev-parse", f"origin/{a.ref}").stdout.strip()
-    tags = git(root, "tag", "--list", "ndf--v*", "--sort=-v:refname").stdout.split()
-    cur = f"ndf--v{a.expect}"
-    prev = next((t for t in tags if t != cur and "-" not in t[len("ndf--v") :]), None)
 
-    before = user_env_snapshot()
-    tmp = tempfile.mkdtemp(prefix="ndf-verify-install-")
-    runtimes_res, mismatch = {}, []
+def kiro_manifest_skills(src):
+    """manifests/kiro-skills.txt に載る Skill 名（コメント・空行を除く）。"""
+    text = (Path(src) / KIRO_PLUGIN / "manifests" / "kiro-skills.txt").read_text(encoding="utf-8")
+    return sorted({line.split("#", 1)[0].strip() for line in text.splitlines()} - {""})
+
+
+def kiro_steering_body(policy_file):
+    """install.sh が steering へ写す ndf-policies の本文（frontmatter を除いた部分）。"""
+    text = Path(policy_file).read_text(encoding="utf-8")
+    if text.startswith("---\n"):
+        end = text.find("\n---\n", 3)
+        if end != -1:
+            text = text[end + len("\n---\n") :]
+    return text.strip("\n")
+
+
+def compare_kiro(src, proj):
+    """Kiro の導入先（<proj>/.kiro）を ref の展開物と比べ、一致しないものを返す。
+
+    manifest の Skill は .kiro/skills/<名前> のリンク、dev.kiro/prompts/*.md は .kiro/prompts/ の複製、
+    ndf-policies は .kiro/steering/ndf-policies.md の本文、agents/ndf.json は JSON として読めることを見る。
+    """
+    src, kiro = Path(src), Path(proj) / ".kiro"
+    plugin = src / KIRO_PLUGIN
+    out = []
+    for name in kiro_manifest_skills(src):
+        s, t = plugin / "skills" / name, kiro / "skills" / name
+        if not (s / "SKILL.md").is_file():
+            continue  # installer も SKIP する
+        if name == KIRO_POLICY:
+            if t.exists() or t.is_symlink():
+                out.append(f"kiro: {t.relative_to(proj)} が残っている（steering へ移した Skill）")
+            continue
+        if not same_entry(s, t):
+            out.append(f"kiro: {t.relative_to(proj)}")
+    for f in sorted((plugin / "dev.kiro" / "prompts").glob("*.md")):
+        if f.name == "codex.md":
+            continue  # --with-codex のときだけ配る
+        t = kiro / "prompts" / f.name
+        if not (t.is_file() and filecmp.cmp(f, t, shallow=False)):
+            out.append(f"kiro: {t.relative_to(proj)}")
+    steering = kiro / "steering" / f"{KIRO_POLICY}.md"
+    body = kiro_steering_body(plugin / "skills" / KIRO_POLICY / "SKILL.md")
+    if not (steering.is_file() and steering.read_text(encoding="utf-8").endswith(f"\n{body}\n")):
+        out.append(f"kiro: {steering.relative_to(proj)}")
+    agent = kiro / "agents" / "ndf.json"
     try:
-        src = Path(tmp) / "src"
-        src.mkdir()
-        arch = subprocess.run(["git", "-C", str(root), "archive", ref_rev], capture_output=True)
-        if arch.returncode != 0:
-            raise StepError(f"git archive {ref_rev[:8]} が失敗: {arch.stderr.decode(errors='replace')[:300]}")
-        tar = subprocess.run(["tar", "-x", "-C", str(src)], input=arch.stdout, capture_output=True)
-        if tar.returncode != 0:
-            raise StepError(f"展開が失敗: {tar.stderr.decode(errors='replace')[:300]}")
+        json.loads(agent.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        out.append(f"kiro: {agent.relative_to(proj)}")
+    return out
 
-        changed = {
-            p: ([f for f in git(root, "diff", "--name-only", prev, ref_rev, "--", r).stdout.split() if f] if prev else [])
-            for p, r in rel.items()
-        }
-        env = isolated_env(tmp)
-        for name, fn in (("claude", verify_claude), ("codex", verify_codex)):
-            if name not in runtimes:
-                continue
-            res, dirs = fn(env, a.ref, plugins, a.expect)
-            runtimes_res[name] = res
-            for p, d in dirs.items():
-                if d is None:
-                    mismatch.append(f"{name}: {p} の導入先が無い")
-                else:
-                    mismatch += compare_files(src, d, rel[p], changed[p], name, keeps_symlinks=(name != "codex"))
-        if "kiro" in runtimes:
-            runtimes_res["kiro"], _ = verify_kiro(env, src, tmp, a.expect)
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
 
-    after = user_env_snapshot()
+def install_source(root, a):
+    """導入元（owner/repo・マーケットプレイスの名前・本番チャネル）と、確かめるプラグイン。値は origin の URL と宣言から読む
+    （#1336 の決定 8）。--ref は宣言のベースブランチか本番チャネルに限る。"""
+    d = delivery.load_delivery(root)
+    slug = repo_lib.owner_repo(root)
+    if not slug:
+        raise StepError("導入元の owner/repo を origin の URL から決められない", EXIT_UNREADABLE)
+    refs = [b for b in dict.fromkeys((d.base, d.production)) if b]
+    if a.ref not in refs:
+        raise StepError(f"--ref {a.ref} は宣言のベースブランチか本番チャネル（{' / '.join(refs) or '無し'}）でない", EXIT_UNREADABLE)
+    names = a.plugins or (d.release or {}).get("plugin") or ""
+    plugins = [p.strip() for p in names.split(",") if p.strip()]
+    if not plugins:
+        raise StepError("確かめるプラグインを決められない（--plugins か .ndf/supervise.json の release.plugin）", EXIT_UNREADABLE)
+    return (slug, market_of(root, slug), d.production), plugins
+
+
+def _extract_source(root, ref_rev, tmp) -> Path:
+    """ref_rev の中身を git archive で tmp/src へ取り出す。"""
+    src = Path(tmp) / "src"
+    src.mkdir()
+    arch = subprocess.run(["git", "-C", str(root), "archive", ref_rev], capture_output=True)
+    if arch.returncode != 0:
+        raise StepError(f"git archive {ref_rev[:8]} が失敗: {arch.stderr.decode(errors='replace')[:300]}")
+    tar = subprocess.run(["tar", "-x", "-C", str(src)], input=arch.stdout, capture_output=True)
+    if tar.returncode != 0:
+        raise StepError(f"展開が失敗: {tar.stderr.decode(errors='replace')[:300]}")
+    return src
+
+
+def _verify_runtimes(a, root, src, tmp, runtimes, plugins, rel, prev, ref_rev, where):
+    """ランタイムごとに導入して確かめる。(ランタイムごとの結果, 中身の不一致) を返す。"""
+    runtimes_res, mismatch = {}, []
+    changed = {
+        p: ([f for f in git(root, "diff", "--name-only", prev, ref_rev, "--", r).stdout.split() if f] if prev else [])
+        for p, r in rel.items()
+    }
+    env = isolated_env(tmp)
+    for name, fn in (("claude", verify_claude), ("codex", verify_codex)):
+        if name not in runtimes:
+            continue
+        res, dirs = fn(env, a.ref, plugins, a.expect, where)
+        runtimes_res[name] = res
+        for p, d in dirs.items():
+            if d is None:
+                mismatch.append(f"{name}: {p} の導入先が無い")
+            else:
+                mismatch += compare_files(src, d, rel[p], changed[p], name, keeps_symlinks=(name != "codex"))
+    if "kiro" in runtimes:
+        runtimes_res["kiro"], proj = verify_kiro(env, src, tmp, a.expect)
+        if proj is not None:
+            mismatch += compare_kiro(src, proj)
+    return runtimes_res, mismatch
+
+
+def _build_result(a, ref_rev, prev, runtimes_res, mismatch, before, after) -> dict:
+    """ランタイムごとの結果・中身の不一致・利用者の環境の差分から結果をまとめる。"""
     items = []
     env_same = before == after
     if not env_same:
@@ -310,7 +389,35 @@ def cmd_verify_install(a):
         else f"導入の確認が通らない（runtime: {', '.join(bad_rt) or 'なし'} / 中身の不一致 {len(mismatch)} 件"
         f" / 利用者の環境が{'変わらない' if env_same else '変わった'}）"
     )
-    emit(result(TOOL, "ok" if ok else "stopped", summary, items, metrics))
+    return result(TOOL, "ok" if ok else "stopped", summary, items, metrics)
+
+
+def cmd_verify_install(a):
+    root = git_root(a.root)
+    where, plugins = install_source(root, a)
+    runtimes = [r.strip() for r in a.runtimes.split(",") if r.strip()]
+    bad = [r for r in runtimes if r not in ("claude", "codex", "kiro")]
+    if bad:
+        raise StepError(f"未知の runtime: {','.join(bad)}", EXIT_UNREADABLE)
+    rel = {p: plugin_dir(root, p).relative_to(root).as_posix() for p in plugins}
+
+    git(root, "fetch", "-q", "origin", "--tags")
+    ref_rev = git(root, "rev-parse", f"origin/{a.ref}").stdout.strip()
+    prefix = f"{plugins[0]}--v"  # タグの接頭辞は先頭のプラグイン（宣言の release.plugin）から決める
+    tags = git(root, "tag", "--list", f"{prefix}*", "--sort=-v:refname").stdout.split()
+    cur = f"{prefix}{a.expect}"
+    prev = next((t for t in tags if t != cur and "-" not in t[len(prefix) :]), None)
+
+    before = user_env_snapshot()
+    tmp = tempfile.mkdtemp(prefix="ndf-verify-install-")
+    try:
+        src = _extract_source(root, ref_rev, tmp)
+        runtimes_res, mismatch = _verify_runtimes(a, root, src, tmp, runtimes, plugins, rel, prev, ref_rev, where)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    after = user_env_snapshot()
+    emit(_build_result(a, ref_rev, prev, runtimes_res, mismatch, before, after))
 
 
 def build_parser():
@@ -320,9 +427,9 @@ def build_parser():
     ap.add_argument("--root", help="対象のリポジトリの根（既定はカレントの git の根）")
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("verify-install", parents=[common_parser()], help="隔離した HOME で ref から導入し、版と中身を確かめる")
-    p.add_argument("--ref", required=True, choices=("develop", "main"))
+    p.add_argument("--ref", required=True, help="導入する ref（宣言のベースブランチか本番チャネル）")
     p.add_argument("--expect", required=True, type=version_arg)
-    p.add_argument("--plugins", default="ndf", help="カンマ区切り（例 ndf,mcp-serena）")
+    p.add_argument("--plugins", help="カンマ区切り（例 ndf,mcp-serena。既定は宣言の release.plugin）")
     p.add_argument("--runtimes", default="claude,codex,kiro", help="カンマ区切り（claude,codex,kiro）")
     p.set_defaults(func=cmd_verify_install)
     return ap

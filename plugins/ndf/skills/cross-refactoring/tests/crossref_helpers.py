@@ -11,6 +11,7 @@ import datetime as _dt
 import json
 import pathlib
 import subprocess
+import sys
 from typing import Any
 
 
@@ -68,6 +69,30 @@ def write_result(state_path: pathlib.Path, stem: str, payload: Any) -> pathlib.P
     return out
 
 
+# 状態ファイルの既定の戦略（#1334）。全体テストは JUnit を `reports/junit.xml`（`build_git_flow` が無視する置き場）へ
+# 書き、範囲テストは `{paths}` の雛形から組む。
+JUNIT_PATH = "reports/junit.xml"
+JUNIT_OPTS = f"-o junit_family=xunit1 --junitxml={JUNIT_PATH}"
+WHOLE_COMMAND = f"pytest -q {JUNIT_OPTS}"
+SCOPE_COMMAND = f"pytest -q {JUNIT_OPTS} {{paths}}"
+
+
+def strategy_state(name: str = "local-full", source: str = "test.strategy", *, junit: bool = True, **over: Any) -> dict[str, Any]:
+    """状態の `strategy`。`junit=False` なら JUnit を書かない suite（見分けが走らせ直しへ落ちる経路）。"""
+    whole = WHOLE_COMMAND if junit else "pytest -q"
+    scope = SCOPE_COMMAND if junit else "pytest -q {paths}"
+    state = {
+        "name": name,
+        "source": source,
+        "suites": [{"name": "pytest", "command": whole, "scope_command": scope, "junit": JUNIT_PATH if junit else None, "paths": ["."]}],
+        "round_command": None,
+        "ci": {"check": "tests", "checks": ["tests"], "junit_artifacts": None} if name == "local-scoped-ci-whole" else None,
+        "notes": [],
+    }
+    state.update(over)
+    return state
+
+
 def make_state_v2(tmp_path: pathlib.Path, work: pathlib.Path, **overrides: Any) -> pathlib.Path:
     """版 2（#933）の最小の状態ファイルを組み立ててパスを返す。
 
@@ -108,7 +133,16 @@ def make_state_v2(tmp_path: pathlib.Path, work: pathlib.Path, **overrides: Any) 
         "ci_check": None,
         "workflow_step": True,
         "severity_threshold": "minor",
-        "baseline_test": {"command": "pytest -q tests", "status": "green", "checked_at": "2026-09-24T10:00:00", "seconds": 6.0},
+        "strategy": strategy_state(),
+        "baseline_test": {
+            "mode": "whole",
+            "command": WHOLE_COMMAND,
+            "status": "green",
+            "checked_at": "2026-09-24T10:00:00",
+            "seconds": 6.0,
+            "existing_failures": [],
+            "existing_failures_reason": None,
+        },
         "round_test": {"command": None, "status": "green", "checked_at": "2026-09-24T10:00:00"},
         "sync_command": None,
         "plan_mode": "none",
@@ -189,7 +223,6 @@ def build_git_flow(tmp_path: pathlib.Path, monkeypatch: Any, patch_lib: Any, env
     語の並びで走るため）。公開（push）は差し替え、公開した HEAD を `pushed` に積む。
     """
     import os
-    import sys
 
     work = tmp_path / "work"
     (work / "src").mkdir(parents=True)
@@ -210,6 +243,12 @@ def build_git_flow(tmp_path: pathlib.Path, monkeypatch: Any, patch_lib: Any, env
     runner.write_text(f'#!/bin/sh\nexec {sys.executable} -m pytest -p no:cacheprovider "$@"\n', encoding="utf-8")
     runner.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    # 古いバイトコード（#1806）: 項目の書き込みから取り消しまでを 1 秒弱で通すため、同じ秒に同じ大きさで
+    # 書き換えたモジュールを、子の Python が前の内容から作った .pyc で読みうる。バイトコードを書かせない
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    # 書き換えの印（#1806 決定 6）は worktree ごとのもの。前のテストの worktree の印で待たない
+    if "refactor_lib.worktree" in sys.modules:
+        monkeypatch.setattr(sys.modules["refactor_lib.worktree"], "_last_rewrite", None)
     metrics = tmp_path / "metrics"
     monkeypatch.setenv("NDF_METRICS_DIR", str(metrics))
 
@@ -218,3 +257,15 @@ def build_git_flow(tmp_path: pathlib.Path, monkeypatch: Any, patch_lib: Any, env
     path = make_state_v2(tmp_path, work, **state_overrides)
     env_tmp_dir(path)
     return {"work": work, "path": path, "pushed": pushed, "metrics": metrics}
+
+
+LATE = "2000-01-01T00:00:00+00:00"
+
+
+def past_fix_end(state: dict[str, Any]) -> dict[str, Any]:
+    """直しの試行の打ち切り（`limits.fix_end_at`）だけを過ぎた上限の表を書く。想定最大時間の終わり H は先のまま
+    （H を過ぎると子プロセスを始めない。#1932 原則 1）。"""
+    limits = sys.modules["refactor_lib.timeline"].of_state(state)
+    limits["fix_end_at"] = LATE
+    state["limits"] = limits
+    return state

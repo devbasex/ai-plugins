@@ -6,24 +6,29 @@
 | 元からの失敗 | 着手前の HEAD（一時の作業ツリー）でも落ちれば、取り消さない。一時の作業ツリーは残さない |
 | 直しを試みる | 変更が原因なら修正へ回し、落ちたテストだけを走らせ直して通れば残す |
 | 締め切りで絞る | 修正に使える時間が無ければ、新しい順に 1 件ずつ取り消し、通った時点で止める |
-| 取り出せない | 実行器が pytest でなければ、今と同じく危険フラグの項目をまとめて取り消し、理由を残す |
+| 見分けられない | JUnit が無ければ全体を 1 度走らせ直し、落としたことと理由を残す。着手前が green なら変更起因、red ならまとめて取り消す |
+| CI に任せる | `local-scoped-ci-whole` は検証の中で全体テストを走らせず、最終ゲートへ寄せる |
 | 基準を示す | 報告と改修計画に着手前の全体のテストの結果と HEAD が出る |
 """
 
 from __future__ import annotations
 
 import argparse
+import sys
 
 import pytest
 
 from crossref_helpers import (
+    past_fix_end,
     CALC,
+    SCOPE_COMMAND,
     TEST_TOTAL,
     build_git_flow,
     commit_with_trailers,
     git,
     item_trailers,
     read_state,
+    strategy_state,
     write_state,
 )
 
@@ -93,7 +98,7 @@ def _existing_tests(flow, files):
     write_state(flow["path"], state)
 
 
-def _implement(flow, cmd_setup, cmd_implement, changes, **state_overrides):
+def _implement(flow, cmd_setup, cmd_implement, changes, late=False, **state_overrides):
     """項目ごとに `changes[id](work)` を当てて 1 コミットずつ積み、取り込む。"""
     work = flow["work"]
     state = read_state(flow["path"])
@@ -106,6 +111,8 @@ def _implement(flow, cmd_setup, cmd_implement, changes, **state_overrides):
     }
     state["phase"] = "implement"
     state.update(state_overrides)
+    if late:
+        past_fix_end(state)
     write_state(flow["path"], state)
     _call(cmd_setup, "cmd_start_phase", phase="implement")
     for item_id, change in changes.items():
@@ -152,8 +159,9 @@ def test_a_flaky_failure_is_not_reverted(flow, cmd_setup, cmd_implement, cmd_con
     assert _emitted(capsys, "VERIFY") == "done"
     record = read_state(flow["path"])["whole_test"]
     assert record["status"] == "fail"
-    assert record["flaky"] == ["tests/test_flaky.py::test_once"]
-    assert record["caused"] == [] and record["reverted"] is False
+    # ID は JUnit（xunit1）の `file::classname::name`（#1334 決定 5）。
+    assert record["flaky"] == ["tests/test_flaky.py::tests.test_flaky::test_once"]
+    assert record["caused"] == [] and record["reverted"] is False and "culprit" not in record
     assert _items(flow)["I-001"]["status"] == "verified"
 
 
@@ -170,15 +178,17 @@ def test_a_failure_already_present_at_the_start_is_not_reverted(flow, cmd_setup,
 
     assert _emitted(capsys, "VERIFY") == "done"
     record = read_state(flow["path"])["whole_test"]
-    assert record["preexisting"] == ["tests/test_env.py::test_env"]
-    assert record["caused"] == [] and record["reverted"] is False
+    assert record["preexisting"] == ["tests/test_env.py::tests.test_env::test_env"]
+    assert record["caused"] == [] and record["reverted"] is False and "culprit" not in record
     assert _items(flow)["I-001"]["status"] == "verified"
     # 着手前の HEAD は一時の作業ツリーで走らせ、作業ディレクトリは動かさず、後で消す
     assert len(_worktrees(flow["work"])) == 1
     assert git("status", "--porcelain", cwd=flow["work"]).stdout.strip() == ""
 
 
-def test_a_failure_caused_by_the_change_goes_to_fix_and_is_kept_when_fixed(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+def test_a_failure_caused_by_the_change_goes_to_fix_and_is_kept_when_fixed(
+    flow, cmd_setup, cmd_implement, cmd_converge, cmd_merge_fix, capsys
+):
     work = flow["work"]
     _existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
     _implement(flow, cmd_setup, cmd_implement, {"I-001": _break_total})
@@ -188,19 +198,19 @@ def test_a_failure_caused_by_the_change_goes_to_fix_and_is_kept_when_fixed(flow,
 
     assert _emitted(capsys, "VERIFY") == "fix"
     state = read_state(flow["path"])
-    assert state["whole_test"]["caused"] == ["tests/test_total.py::test_total"]
+    assert state["whole_test"]["caused"] == ["tests/test_total.py::tests.test_total::test_total"]
     assert state["fix"]["items"] == ["I-001"]
     item = _items(flow)["I-001"]
     assert item["status"] == "failing"
-    # 修正担当へは、落ちたテストだけを走らせ直すコマンドとその出力を渡す
-    assert item["whole_test_command"] == ["pytest", "-q", "tests/test_total.py::test_total"]
+    # 修正担当へは、落ちたテストのファイルだけを走らせ直すコマンド（雛形の {paths} の置き換え）とその出力を渡す
+    assert item["whole_test_command"] == [" ".join(SCOPE_COMMAND.split()[:-1] + ["tests/test_total.py"])]
     with open(item["last_log"], encoding="utf-8") as fh:
         assert "test_total" in fh.read()
 
     _call(cmd_setup, "cmd_start_phase", phase="fix")
     _write(work, "src/calc.py", CALC)
     commit_with_trailers(work, "Fix", item_trailers("I-001"))
-    _call(cmd_converge, "cmd_merge_fix")
+    _call(cmd_merge_fix, "cmd_merge_fix")
     capsys.readouterr()
     _call(cmd_converge, "cmd_verify")
 
@@ -220,7 +230,7 @@ def test_without_time_to_fix_the_newest_flagged_items_are_reverted_until_it_pass
         cmd_setup,
         cmd_implement,
         {"I-001": _break_total, "I-002": _touch_other("other"), "I-003": _touch_other("another")},
-        started_at="2000-01-01T00:00:00+00:00",
+        late=True,
     )
     capsys.readouterr()
 
@@ -228,9 +238,11 @@ def test_without_time_to_fix_the_newest_flagged_items_are_reverted_until_it_pass
 
     assert _emitted(capsys, "VERIFY") == "done"
     items = _items(flow)
+    # 修正の締め切りの後は外す走らせ直しをせず、本文にパスも無いので原因は決まらない（#1649）。
     # 新しい順に取り消し、I-001（原因）を取り消した時点で通るまで 1 件ずつ
     assert [items[i]["status"] for i in ("I-003", "I-002", "I-001")] == ["reverted", "reverted", "reverted"]
     record = read_state(flow["path"])["whole_test"]
+    assert record["culprit"]["basis"] == "undetermined"
     assert record["resolution"] == "narrowed" and record["reverted"] is True
     assert "return result + 1" not in (work / "src" / "calc.py").read_text()
 
@@ -238,9 +250,7 @@ def test_without_time_to_fix_the_newest_flagged_items_are_reverted_until_it_pass
 def test_narrowing_stops_as_soon_as_the_failed_tests_pass(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
     work = flow["work"]
     _existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
-    _implement(
-        flow, cmd_setup, cmd_implement, {"I-001": _touch_other("other"), "I-002": _break_total}, started_at="2000-01-01T00:00:00+00:00"
-    )
+    _implement(flow, cmd_setup, cmd_implement, {"I-001": _touch_other("other"), "I-002": _break_total}, late=True)
     capsys.readouterr()
 
     _call(cmd_converge, "cmd_verify")
@@ -253,12 +263,36 @@ def test_narrowing_stops_as_soon_as_the_failed_tests_pass(flow, cmd_setup, cmd_i
     assert read_state(flow["path"])["whole_test"]["resolution"] == "narrowed"
 
 
-def test_without_failed_test_ids_the_flagged_items_are_reverted_together(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+def test_without_junit_the_whole_test_is_rerun_and_a_green_baseline_sends_it_to_fix(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+    """AC6 — JUnit が無いときは見分けを全体の走らせ直しに落とし、落としたことが結果に出る。着手前が green なら変更起因。
+
+    原因の項目は走らせ直しのログに現れるパスで決め、その項目だけを修正へ回す（#1649）。
+    """
+    _existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
+    raises = lambda w: _write(w, "src/calc.py", CALC.replace("    return result\n", "    raise RuntimeError('broke')\n"))  # noqa: E731
+    _implement(flow, cmd_setup, cmd_implement, {"I-001": _touch_other("other"), "I-002": raises}, strategy=strategy_state(junit=False))
+    capsys.readouterr()
+
+    _call(cmd_converge, "cmd_verify")
+
+    assert _emitted(capsys, "VERIFY") == "fix"
+    record = read_state(flow["path"])["whole_test"]
+    assert record["fallback_reason"] and record["fallback_rerun"] == "fail"
+    assert record["resolution"] == "fixing" and record["failed_tests"] is None
+    assert record["culprit"]["culprits"] == ["I-002"] and record["culprit"]["basis"] == "path"
+    items = _items(flow)
+    assert items["I-001"]["status"] == "verified" and items["I-002"]["status"] == "failing"
+
+
+def test_without_junit_and_a_red_baseline_the_flagged_items_are_reverted_together(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+    """JUnit が無く着手前も red なら見分けられないので、危険フラグの項目をまとめて取り消して理由を残す。"""
     _existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
     state = read_state(flow["path"])
-    state["baseline_test"]["command"] = "sh -c 'pytest -q tests'"  # 実行器が pytest と読めない
+    state["baseline_test"]["status"] = "red"
     write_state(flow["path"], state)
-    _implement(flow, cmd_setup, cmd_implement, {"I-001": _touch_other("other"), "I-002": _break_total})
+    _implement(
+        flow, cmd_setup, cmd_implement, {"I-001": _touch_other("other"), "I-002": _break_total}, strategy=strategy_state(junit=False)
+    )
     capsys.readouterr()
 
     _call(cmd_converge, "cmd_verify")
@@ -268,7 +302,32 @@ def test_without_failed_test_ids_the_flagged_items_are_reverted_together(flow, c
     assert items["I-001"]["status"] == "reverted" and items["I-002"]["status"] == "reverted"
     record = read_state(flow["path"])["whole_test"]
     assert record["resolution"] == "reverted_all" and record["reverted"] is True
-    assert record["unparsed_reason"]
+    assert record["fallback_reason"]
+
+
+def test_a_ci_whole_strategy_defers_the_whole_test_to_the_final_gate(flow, cmd_setup, cmd_implement, cmd_converge, capsys, patch_lib):
+    """AC3・AC8 — 全体テストを CI に任せる戦略では、危険フラグが立っても検証の中で全体テストを走らせず、最終ゲートへ寄せる。"""
+    whole_runs: list = []
+    original = sys.modules["refactor_lib.targets"].run_with_timeout
+
+    def spy_run(command, cwd, timeout, grace=5.0, output=None):
+        if command == strategy_state("local-scoped-ci-whole")["suites"][0]["command"]:
+            whole_runs.append(command)
+        return original(command, cwd, timeout, grace, output)
+
+    patch_lib("run_with_timeout", spy_run)
+    _existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
+    _implement(flow, cmd_setup, cmd_implement, {"I-001": _touch_other("other")}, strategy=strategy_state("local-scoped-ci-whole"))
+    capsys.readouterr()
+
+    _call(cmd_converge, "cmd_verify")
+
+    assert _emitted(capsys, "VERIFY") == "done"
+    record = read_state(flow["path"])["whole_test"]
+    assert record.get("ran") is False and record["resolution"] == "deferred"
+    assert record["deferred"] == {"flags": ["D1"], "items": ["I-001"]}
+    assert whole_runs == [], "全体テストのコマンドを手元で起動しない（I4）"
+    assert _items(flow)["I-001"]["status"] == "verified"
 
 
 def test_the_report_and_the_plan_show_the_baseline(flow, cmd_report, plan, capsys):
@@ -282,3 +341,10 @@ def test_the_report_and_the_plan_show_the_baseline(flow, cmd_report, plan, capsy
 
     for text in (out, body):
         assert "0123456" in text and "12.5" in text
+
+
+def test_the_fix_command_keeps_the_suite_boundaries(refactor):
+    """変更起因の suite が複数なら、launch-cli.sh が空白で連結しても壊れない 1 本にして渡す。"""
+    culprit = sys.modules["refactor_lib.culprit"]
+    assert culprit.one_command(["pytest a -q"]) == "pytest a -q"
+    assert culprit.one_command(["pytest a -q", "pytest b -q"]) == "( pytest a -q ) && ( pytest b -q )"

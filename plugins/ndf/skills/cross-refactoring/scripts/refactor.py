@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import pathlib
 import sys
 
@@ -29,6 +30,7 @@ sys.path.insert(
 )
 
 import assignment  # noqa: E402
+import container_reach  # noqa: E402
 import deps  # noqa: E402
 
 # `refactor_lib` の呼び名の表の読み取り（md）と報告の表（mdtable）が外部パッケージを使う。
@@ -40,34 +42,28 @@ deps.require("md", "mdtable")
 # スクリプトの位置と揃わない。
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-# **呼び名の表は `refactoring` が持つ**（#444）。読めないと兆候と手法の名前が決まらず、
-# 重複排除が効かない。取り込みの時点で読むため、ここで捕まえて理由だけを出す
-# （トレースバックを見せても、直す手がかりにならない）。
-try:
-    pass  # noqa: E402
-except Exception as _exc:  # 取り込みそのものが失敗した
-    print(f"ERROR: {_exc}", file=sys.stderr)
-    sys.exit(4)
-
 from refactor_lib.commands.assess import DEFAULT_MAX_LINES, cmd_assess  # noqa: E402
-from refactor_lib.commands.converge import (  # noqa: E402
-    cmd_merge_fix,
-    cmd_verify,
-)
-from refactor_lib.commands.gate import cmd_final_gate, cmd_merge_final_fix  # noqa: E402
+from refactor_lib.commands.converge import cmd_verify  # noqa: E402
+from refactor_lib.commands.final_fix import cmd_merge_final_fix  # noqa: E402
+from refactor_lib.commands.gate import cmd_final_gate  # noqa: E402
+from refactor_lib.commands.merge_fix import cmd_merge_fix  # noqa: E402
 from refactor_lib.commands.implement import (  # noqa: E402
     cmd_merge_implement,
     cmd_merge_tests,
 )
 from refactor_lib.commands.measure import cmd_measure  # noqa: E402
 from refactor_lib.commands.plan import cmd_merge_plan  # noqa: E402
+from refactor_lib.commands.plan_comment import cmd_plan_comment  # noqa: E402
+from refactor_lib.commands.readopt import cmd_readopt  # noqa: E402
 from refactor_lib.commands.propose import cmd_merge_proposals  # noqa: E402
+from refactor_lib.commands.reassign import STEPS as REASSIGN_STEPS, cmd_reassign  # noqa: E402
 from refactor_lib.commands.report import (  # noqa: E402
     cmd_finalize,
     cmd_report,
     cmd_status,
 )
 from refactor_lib.commands.phases import PHASE_NAMES, cmd_start_phase  # noqa: E402
+from refactor_lib.commands.catch_up import cmd_catch_up  # noqa: E402
 from refactor_lib.commands.setup import cmd_init, runtime_list  # noqa: E402
 from refactor_lib.measure import summary_extra  # noqa: E402
 
@@ -180,21 +176,28 @@ def add_init_parser(sub: argparse._SubParsersAction) -> None:
         "公開のたびに同じコメントを編集する。"
         "空文字を渡すと記録しない",
     )
+    # **テストの走らせ方は宣言（`.ndf/project.json` の `test`）の戦略で決める**（#1334）。引数は宣言より先に効き、
+    # `{paths}` を含めば範囲テストの雛形、含まなければそのまま走らせるコマンドとして受ける。文字列の中身は解析しない。
     init.add_argument(
         "--baseline-test",
-        required=True,
-        help="着手前・危険フラグが立ったとき・最終ゲートで実行する全体のテスト。"
-        "振る舞い不変を示す手段が無い書き換えは構造改善ではないため必須",
+        default=None,
+        metavar="CMD",
+        help="全体のテスト。{paths} を含めば範囲テストの雛形（全体は宣言の command、無ければテストは {paths} を . にしたもの、"
+        "静的解析は {paths} を --scope で埋めたもの）、含まなければ全体テストのコマンドとしてそのまま走らせる（戦略は round-only）。"
+        "省けば宣言の test を読む",
     )
-    # **項目の検証は範囲テストで行う**（#880 / #933 の AC10b）。対象の語を改修計画の
-    # `test_targets` に差し替えて組み立てる元になり、組み立てられない項目はそのまま使う。
+    init.add_argument(
+        "--test-kind",
+        choices=("test", "lint"),
+        default="test",
+        help="--baseline-test と --round-test の雛形の種別（test = テスト / lint = 静的解析。整形の検査を含む）。既定は test",
+    )
     init.add_argument(
         "--round-test",
         default=None,
         metavar="CMD",
-        help="ラウンドのテスト。項目ごとの範囲テストを組み立てる元で、"
-        "組み立てられない項目はそのまま走らせる。--baseline-test が "
-        "pytest / jest / vitest でなければ必須",
+        help="ラウンドのテスト。{paths} を含めば範囲テストの雛形、"
+        "含まなければ項目ごとにそのまま走らせる（戦略は round-only）。宣言に test が無いときの逃げ道",
     )
     # **起動のされ方は引数で受け取る**（#436 決定 7）。環境変数や記録の読み取りは、
     # 起動元が違っても同じ値になりうる。呼ぶ側が明示すれば判定が 1 か所で済む。
@@ -221,11 +224,13 @@ def add_id_commands(sub: argparse._SubParsersAction) -> None:
     for name, func, help_ in (
         ("measure", cmd_measure, "提案の前に指標を 1 回だけ測り、指標のファイルを書く（失敗しても 0）"),
         ("merge-proposals", cmd_merge_proposals, "提案の統合・語彙としきい値・候補の切り出し（30 組 × 組の中 3 件）"),
-        ("merge-plan", cmd_merge_plan, "改修計画の取り込み・等級と同じ変更か（Jev）・見積り・件数・締め切り"),
-        ("merge-tests", cmd_merge_tests, "テストの追加の取り込み（test_failed / not_done）"),
-        ("merge-implement", cmd_merge_implement, "実装の取り込み（1 項目 = 1 コミット / not_done）"),
+        ("merge-plan", cmd_merge_plan, "改修計画の取り込み・等級と同じ変更か（Jev）・見積り・件数・実装の終わり"),
+        ("merge-tests", cmd_merge_tests, "テストの追加の取り込み（test_failed / コミットの無い項目は持ち越し）"),
+        ("merge-implement", cmd_merge_implement, "実装の取り込み（1 項目 = 1 コミット / コミットの無い項目は持ち越し）"),
         ("verify", cmd_verify, "項目ごとの範囲テストと危険フラグ。VERIFY=done|fix"),
         ("merge-fix", cmd_merge_fix, "修正の取り込み"),
+        ("readopt", cmd_readopt, "検証の後、残った時間に入る見送りの候補を採り直す。0 = 採った / 2 = 入らない（最終ゲートへ）"),
+        ("catch-up", cmd_catch_up, "再開で止まっていた時間を測り、まだ来ていない締め切りをずらす（常に 0）"),
         ("final-gate", cmd_final_gate, "最終ゲート。--ci-check があれば継続的統合、無ければ全体のテスト"),
         ("merge-final-fix", cmd_merge_final_fix, "最終ゲートの修正結果の取り込み"),
         ("status", cmd_status, "現在の状態を人が読む形で出す"),
@@ -234,10 +239,28 @@ def add_id_commands(sub: argparse._SubParsersAction) -> None:
         sp.add_argument("id", type=int)
         sp.set_defaults(func=func)
 
+    sp = sub.add_parser("reassign", help="結果を残さなかった担当を規則どおりに起動し直すか振り替える（#919）。7 / 2 / 3 / 0")
+    sp.add_argument("id", type=int)
+    sp.add_argument("phase", choices=list(REASSIGN_STEPS))
+    sp.add_argument("--seats", nargs="*", default=None, help="提案で起動した担当（propose だけ。省くと参加者の全員）")
+    sp.set_defaults(func=cmd_reassign)
+
     sp = sub.add_parser("start-phase", help="手順の開始を記録し、上限（PHASE_TIMEOUT）を返す")
     sp.add_argument("id", type=int)
     sp.add_argument("phase", choices=list(PHASE_NAMES))
     sp.set_defaults(func=cmd_start_phase)
+
+    sp = sub.add_parser(
+        "plan-comment",
+        help="リファクタリング計画のコメントを状態ファイルから書き直す。0 = 書いた・対象なし / 1 = 投稿に失敗 / 4 = 状態ファイルが無い・origin を取り込めない",
+    )
+    sp.add_argument("id", type=int, help="実行の ID（対象の Pull Request の番号）")
+    sp.add_argument(
+        "--scan-reverts",
+        action="store_true",
+        help="origin の head ブランチの `This reverts commit` を読み、プランの外で取り消した項目を取り消しにしてから書き直す",
+    )
+    sp.set_defaults(func=cmd_plan_comment)
 
     sp = sub.add_parser("finalize", help="最終ゲートが通った実行だけ配分の履歴へ 1 行追記する（失敗しても 0）")
     sp.add_argument("id", type=int)
@@ -248,7 +271,8 @@ def add_id_commands(sub: argparse._SubParsersAction) -> None:
 def add_assess_parser(sub: argparse._SubParsersAction) -> None:
     """`assess` を登録する。"""
     ap = sub.add_parser(
-        "assess", help="構造改善を飛ばしてよいかを差分から判定する。終了コード 0 = 通す / 3 = 飛ばしてよい / 2 = 判定できない"
+        "assess",
+        help="構造改善を飛ばしてよいかを差分から判定する。終了コード 0 = 通す / 3 = 飛ばしてよい / 2 = 判定できない / 69 = 依存が欠けた（判定していない）",
     )
     ap.add_argument("--base", required=True, help="起点の ref。`<base>...HEAD` の差分を見る")
     ap.add_argument(
@@ -268,6 +292,18 @@ def add_report_parser(sub: argparse._SubParsersAction) -> None:
     rp.set_defaults(func=cmd_report)
 
 
+def _set_alive_file(args: argparse.Namespace) -> None:
+    """`id` を持つサブコマンドなら、テストの待ちが更新する心拍のファイルを 1 度だけ設定する（#1743 決定 3）。"""
+    from refactor_lib import paths, process
+
+    state_id = getattr(args, "id", None)
+    if not isinstance(state_id, int):
+        return
+    found = paths.existing_state(state_id)
+    if found is not None:
+        process.ALIVE_FILE = paths.alive_path(found.parent, state_id)
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -277,7 +313,17 @@ def main() -> None:
     add_report_parser(sub)
 
     args = p.parse_args()
-    args.func(args)
+    _set_alive_file(args)
+    # 使用量の帳簿の呼び出し元（Jev の要求の行。#1953 の決定 7）。起動の包みが名乗っていればそれを継ぐ
+    os.environ.setdefault("NDF_USAGE_SOURCE", "cross-refactoring")
+    try:
+        args.func(args)
+    except container_reach.Unreachable as e:
+        # コンテナで走る suite が worktree を見ていない。走らせると結果はメインディレクトリのコードのもので、
+        # 既存失敗にも通ったことにもしない（#1337）
+        from refactor_lib import die
+
+        die(f"コンテナで走るテストへ作業ディレクトリが届かないため、走らせずに止めます: {e.reason}")
 
 
 if __name__ == "__main__":

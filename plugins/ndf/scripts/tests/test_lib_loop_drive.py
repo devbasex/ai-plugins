@@ -47,11 +47,49 @@ def test_same_behavior_as_both_drives(path):
     drive = load(path)
     text = "A=1 B='x y'\nnot-an-id=3\n"
     assert drive.parse_vars(text) == loop_drive.parse_vars(text)
+    if not hasattr(drive, "review_status"):
+        return  # cross-refactoring の駆動は最終ステータスを決めない（cross-review の駆動が回答ファイルへ書く。#1656）
     for state in ({"final": "approved"}, {"final": "approved", "sweep": {"verified": True}}, {}):
         assert drive.review_status(state) == loop_drive.review_status(state)
+
+
+@pytest.mark.parametrize(
+    ("metrics", "want"),
+    [
+        ({"review_status": "unverified", "rounds": 2}, {"review_status": "unverified"}),
+        ({}, {"review_status": "unknown"}),
+        (None, {"review_status": "unknown"}),
+    ],
+)
+def test_review_answer_has_only_the_review_status(metrics, want):
+    """回答ファイルの形は `{"review_status": ...}` だけで、値が無ければ unknown（#1655 の I2）。"""
+    assert loop_drive.review_answer(metrics) == want
 
 
 def test_call_returns_code_and_stdout_and_passes_stderr(capsys):
     code, out = loop_drive.call([sys.executable, "-c", "import sys; print('o'); sys.stderr.write('e'); sys.exit(5)"])
     assert (code, out) == (5, "o\n")
     assert capsys.readouterr().err == "e"
+
+
+@pytest.mark.parametrize("path", DRIVES, ids=lambda p: p.parents[1].name)
+def test_identity_is_the_resolved_tmp_or_cwd_and_pr(path, tmp_path, monkeypatch):
+    """Drive.identity（現状固定）: 状態の置き場が求まればその絶対パス、求まらなければ `<作業ディレクトリ>#<PR>`。"""
+    drive = load(path)
+    d = object.__new__(drive.Drive)
+    d.pr = 42
+    (tmp_path / "t").mkdir()
+    monkeypatch.chdir(tmp_path)
+    d.known_tmp = lambda: Path("t")
+    assert d.identity() == str((tmp_path / "t").resolve())
+    d.known_tmp = lambda: None
+    assert d.identity() == f"{tmp_path.resolve()}#42"
+
+
+def test_durable_identity_is_the_resolved_tmp(tmp_path: Path):
+    assert loop_drive.durable_identity(tmp_path / "a" / ".." / "b", 7) == str((tmp_path / "b").resolve())
+
+
+def test_durable_identity_without_tmp_is_cwd_and_pr(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert loop_drive.durable_identity(None, 7) == f"{tmp_path.resolve()}#7"

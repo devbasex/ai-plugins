@@ -28,6 +28,19 @@ info = statefile.info
 ABORT = 4
 
 
+class Abort(SystemExit):
+    """`die` の中断。終了コードに加えて理由を運ぶ（#1692 の決定 3）。
+
+    `SystemExit` を継ぐため、捕まえない呼び出し元では今と同じく終了コードで終わる。
+    公開（`publish.push_head`）だけが捕まえて、push が落ちた理由を状態ファイルへ残す。
+    """
+
+    def __init__(self, code: int, reason: str):
+        super().__init__(code)
+        self.reason = reason
+
+
 def die(msg: str, code: int = ABORT) -> None:
-    """中断して終了する。既定は「中断」を表す終了コード。"""
-    statefile.die(msg, code)
+    """中断して終了する。既定は「中断」を表す終了コード。理由を `❌` の 1 行で出してから `Abort` を投げる。"""
+    statefile.info(f"❌ {msg}")
+    raise Abort(code, msg)

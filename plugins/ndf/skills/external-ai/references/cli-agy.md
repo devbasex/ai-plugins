@@ -1,6 +1,6 @@
 # agy CLI 固有の手順
 
-共通手順（プロンプトの書き出し、バックグラウンド起動、三段フォールバック回収、待機間隔、
+共通手順（プロンプトの書き出し、バックグラウンド起動、3 段階のフォールバック回収、待機間隔、
 プロンプトテンプレート）は [../SKILL.md](../SKILL.md) を参照。本ファイルは agy CLI に固有の
 差分だけを扱う。
 
@@ -41,9 +41,11 @@ left as an argument and ignored.
 
 `external-ai.py run agy` が次の形で起動する（共通ライブラリの `launch-cli.sh`）。`--print-timeout` は
 工程の監視の上限 + 120 秒、`--add-dir` は作業ディレクトリと結果ファイルの置き場所である。
+使用量は JSON の出力にしか無いため `--output-format json` で起動し、本文は `external-ai.py` が `response` の鍵から
+読む。
 
 ```bash
-agy --dangerously-skip-permissions --output-format text --print-timeout <秒>s [--model M] \
+agy --dangerously-skip-permissions --output-format json --print-timeout <秒>s [--model M] \
   --add-dir <workdir> --add-dir <結果ファイルの置き場所> -p="<プロンプトの本文>" \
   < /dev/null > <stem>-stdout.log 2> <stem>-err.log
 ```
@@ -113,6 +115,11 @@ $ agy --output-format json -p="1+1は？数字だけ答えて"
 
 **実際に動いたモデル名は出力に載らない。** `--model` で指定した値だけが手がかりになる。
 モデルを比べる目的で動かすときは必ず明示する。
+
+ログの要求 URL（`models/<名前>:streamGenerateContent`）にモデル名が載ることが agy 1.2.6 で観測されたが、
+1.2.11 では未認証の環境で確かめられていない。確かめていない形からは取らず、`external-ai.py run` の
+`model` は指定値か `default` になる（認証済みの環境で確かめる作業は #1603）。`~/.gemini/settings.json` の
+モデルは実際に動いたものと食い違った実測があり、代用しない。
 
 回収は結果ファイル → 標準出力 → 標準エラー出力の順で、`external-ai.py run` が行う。
 

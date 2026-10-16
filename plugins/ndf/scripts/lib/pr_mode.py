@@ -1,17 +1,19 @@
 """Pull Request の宛て先の区別と、本文の末尾に書くモードの 1 行。
 
-ミッションの課題の Pull Request はミッションのブランチ（`mission/<名前>`）宛てに出して集め、
-実装レビューを通さない。develop への Pull Request はミッションで 1 本で、チェックを通す。
+スプリントの課題の Pull Request はスプリントブランチ（`sprint/<名前>`）宛てに出して集め、
+実装レビューを通さない。develop への Pull Request はスプリントで 1 本で、チェックを通す。
 
 本文の末尾には `モード: <mode> / 通した工程: <工程> → <工程>` の 1 行を書く。配布後の
-不具合の起票数と突き合わせ、ミッション単位にした後の精度を測る材料にする。
+不具合の起票数と突き合わせ、スプリント単位にした後の精度を測る材料にする。
 """
 
 from __future__ import annotations
 
 import re
 
-MISSION_PREFIX = "mission/"
+import legacy_names
+
+SPRINT_PREFIX = "sprint/"
 MODE_LINE_PREFIX = "モード: "
 REVIEW_MARK = "<!-- I want to review in Japanese. -->"
 STAGE_SEP = " → "
@@ -20,13 +22,14 @@ TRAILERS = (REVIEW_MARK, "🤖 Generated with")
 
 
 def pr_target(base: str) -> str:
-    """宛て先の区分を返す。`mission`（課題の PR）か `develop`（ミッションの PR・単独の PR）。"""
-    return "mission" if (base or "").startswith(MISSION_PREFIX) else "develop"
+    """宛て先の区分を返す。`sprint`（課題の PR）か `develop`（スプリントの PR・単独の PR）。"""
+    # 改名の前に切った旧名の頭のブランチ宛ても課題の PR として読む（#1407 の I4）
+    return "sprint" if (base or "").startswith(legacy_names.branch_prefixes(SPRINT_PREFIX)) else "develop"
 
 
 def needs_review(base: str) -> bool:
-    """実装レビューを通す宛て先か。ミッションのブランチ宛ては通さない。"""
-    return pr_target(base) != "mission"
+    """実装レビューを通す宛て先か。スプリントブランチ宛ては通さない。"""
+    return pr_target(base) != "sprint"
 
 
 def split_stages(text: str | None) -> list[str]:

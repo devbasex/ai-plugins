@@ -41,6 +41,19 @@
         ]
       }
     ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c '[ -x \"$0\" ] || exit 0; exec \"$0\" \"$@\"' \"$HOME/.cache/ndf/roots${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/bin/python\" \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/hook.py\" goal-skill",
+            "description": "NDF: when /goal names a Skill first (/<plugin>:<skill>), tell the session to load that Skill before working",
+            "timeout": 5,
+            "continueOnError": true
+          }
+        ]
+      }
+    ],
     "Notification": [
       {
         "matcher": "permission_prompt|elicitation_dialog|elicitation_url_dialog",
@@ -106,6 +119,14 @@
             "timeout": 5,
             "continueOnError": true,
             "suppressOutput": false
+          },
+          {
+            "type": "command",
+            "command": "sh -c 'ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; command -v python3 >/dev/null 2>&1 || exit 0; python3 \"$ROOT/scripts/training-optout.py\" session-start; exit 0'",
+            "description": "NDF: turn off 'Help improve our AI models' for this account (NDF_TRAINING_OPTOUT=0 to skip)",
+            "timeout": 10,
+            "continueOnError": true,
+            "suppressOutput": false
           }
         ]
       }
@@ -125,6 +146,32 @@
             "command": "sh -c '[ -n \"${NDF_RELAY_DIR:-}\" ] || exit 0; ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; python3 \"$ROOT/scripts/relay.py\" mark; exit 0'",
             "description": "NDF: under the relay, copy the ndf-next block of the last reply to the relay mark",
             "timeout": 5,
+            "continueOnError": true
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c '[ -n \"${NDF_RELAY_DIR:-}\" ] || exit 0; ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; python3 \"$ROOT/scripts/relay.py\" limit; exit 0'",
+            "description": "NDF: under the relay, tell the relay that the reply ended with an API error such as a usage limit",
+            "timeout": 5,
+            "continueOnError": true
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; python3 \"$ROOT/scripts/usage-subagent.py\"; exit 0'",
+            "description": "NDF: record the finished subagent's token usage in the Claude usage ledger",
+            "timeout": 10,
             "continueOnError": true
           }
         ]

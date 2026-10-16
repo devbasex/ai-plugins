@@ -50,7 +50,7 @@ def test_only_the_known_references_remain(checker) -> None:
     """例外に無い参照が増えていないこと。
 
     同じ (ファイル, 相手) が複数行に現れることがあるため、行ではなく組で見る
-    （`gdrive_fetch.py` は候補の一覧と読み込みの 2 行で `google-auth` を指す）。
+    （1 つのファイルが、候補の一覧と読み込みのように 2 行で同じ相手を指すことがある）。
     """
     found = checker.find_references(ROOT)
     assert {(rel, name) for rel, _, name, _ in found} == set(checker.EXCEPTIONS)

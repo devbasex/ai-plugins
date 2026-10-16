@@ -93,6 +93,13 @@ def _default_host(monkeypatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _no_accounts(tmp_path, monkeypatch) -> None:
+    """振り替えのアカウントの選び方（#919）が利用者の登録済みアカウントを読まないよう、空の置き場へ向ける。"""
+    monkeypatch.setenv("NDF_ACCOUNTS_DIR", str(tmp_path / "ndf-accounts"))
+    monkeypatch.delenv("NDF_CLAUDE_ACCOUNT", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _no_github(monkeypatch) -> None:
     """テストから GitHub を呼ばない。
 

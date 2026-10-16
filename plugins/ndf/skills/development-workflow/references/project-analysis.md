@@ -50,6 +50,12 @@ python3 "$SCRIPTS/project-decl.py" write --measure "$TMP/measure.json" --answers
 `measure` の締め切りは 120 秒（`--budget`）で、`gh` の 1 回の呼び出しは残りと 30 秒の小さい方で打ち切る。
 `measure` が書くのは `--out` だけで、リポジトリの中へは置けない。`gh` へは読む要求（`gh api --method GET`）だけを渡す。
 
+CI の壁時計（`ci.workflows[].wall_seconds`）とテストの所要の `ci-steps`・`ci-junit` は、ワークフローごとの代表の run から測る。
+代表の run は、直近 50 件の成功の run のうち、そのワークフローの新しい順に最大 5 件を見て、ジョブを飛ばしていない最新の 1 件である。
+ジョブを飛ばした run は、conclusion が `skipped` のジョブを 1 つ以上含む run で、ワークフローやジョブの名前では判定しない。
+5 件ともジョブを飛ばしていたワークフローは、壁時計を持たない行になり、注記に `飛ばしていない run が無い: <パス>（候補 <n> 件）` が出る。
+候補のジョブの取得が時間切れになったら、そのワークフローから後は壁時計を持たない行になり、注記に `候補のジョブを取れない（時間切れ）: <パス>` が出る。
+
 ## 答え方
 
 **答えるのは、測定の結果で `status: question` の項目だけである。** 測った値（`status: measured`）は答えで変えられない。
@@ -62,21 +68,24 @@ python3 "$SCRIPTS/project-decl.py" write --measure "$TMP/measure.json" --answers
 
 | 項目 | 答えの `value` の形 | 決め方 |
 | --- | --- | --- |
-| `test`（P2） | `{"suites": [{"name", "runner", "command", "scope_command"?, "container"?: {"service", "compose_files"}, "needs", "paths"}]}` | 指示書・README の走らせ方の行を正とする。コンテナ越しなら `container` を書き、`scope_command` の `{paths}` に範囲のパスが入る |
-| `branches`（P6） | `{"base": "<起点>", "production": "<本番>"}` | origin の HEAD・直近 100 件のマージ先・最後のコミットの日時を見る。放置したブランチ（長くコミットが無い `develop` など）は採らない |
-| `delivery`（P7） | `[{"target", "kind": "auto" / "manual", "trigger", "branch"?, "versioned"}]` | 配布の設定ファイル・ワークフローの `deploy` の行・版数の置き場とタグから決める |
+| `test`（P2） | `{"strategy"?, "ci"?: {"check"?, "junit_artifacts"?}, "suites": [{"name", "runner", "command", "scope_command"?, "junit"?, "container"?: {"service", "compose_files"}, "needs", "paths", "kind"?}]}` | 指示書・README の走らせ方の行を正とする。コンテナ越しなら `container` を書き、`scope_command` の `{paths}`（引用の外の、空白で区切った 1 語）にシェルの引用で守った範囲のパスが入る。`command` と `scope_command` はシェルで走らせる。`kind` は suite の種別で、`test`（既定）か `lint`（静的解析。整形の検査を含む）。静的解析の suite は変更したファイルのうち `paths` に当たるものにかかり、`paths` の要素には接頭辞のほかに glob（`*.sh` など）を書ける。`junit` はコマンドが JUnit XML を書く相対パス（pytest は `-o junit_family=xunit1 --junitxml=<パス>` をコマンドに書く。無ければ落ちたテストの見分けが全体の走らせ直しへ落ちる）。`strategy` は `local-full`（全体テストを手元で走らせる）/ `local-scoped-ci-whole`（範囲は手元、全体は CI に任せる。`ci.check` に待つチェック、`ci.junit_artifacts` に JUnit の成果物の名前の glob）/ `round-only`（パスでテストを選べない。suite の `command` をそのまま走らせる）。空なら所要と suite から導く（600 秒を超え CI が読めれば `local-scoped-ci-whole`。`scope_command` が無ければ `round-only`。ほかは `local-full`）ので、その既定を答えとして示し、手元で全体テストを回さない方針があるときだけ書き換える |
+| `branches`（P6） | `{"base": "<起点>", "production": "<本番>"}` | origin の HEAD・直近 100 件のマージ先・最後のコミットの日時を見る。長くコミットの無いブランチ（`develop` など）は採らない |
+| `delivery`（P7） | `[{"target", "kind": "auto" / "manual", "trigger", "branch"?, "versioned", "production"?}]` | 配布の設定ファイル・ワークフローの `deploy` の行・版数の置き場とタグから決める。`production`（本番系へ届くか。[pace.md](pace.md) の「手動反映の本番系の形」）は解析では書かず、利用者が書く |
 | `issues`（P8） | `{"primary", "others"}`。名前は `github`・`markdown`・`redmine`・`external` など | 名前だけを書き、URL や識別子を書かない |
 | `ndf_policies`（P9） | `{"doc_lint": bool, "reject_md_wording_tests": bool}` | 指示書に NDF の文体の規則・`.md` の文言テストを退ける方針があるときだけ `true`。無ければ両方 `false` |
 
 答えのファイルの例:
 
 ```json
-{"test": {"value": {"suites": [{"name": "phpunit", "runner": "phpunit",
-                                "command": "docker compose exec -T app ./vendor/bin/phpunit",
-                                "scope_command": "docker compose exec -T app ./vendor/bin/phpunit {paths}",
+{"test": {"value": {"strategy": "local-scoped-ci-whole",
+                    "ci": {"check": "test-results", "junit_artifacts": "junit-*"},
+                    "suites": [{"name": "phpunit", "runner": "phpunit",
+                                "command": "docker compose exec -T app ./vendor/bin/phpunit --log-junit build/ndf/junit.xml",
+                                "scope_command": "docker compose exec -T app ./vendor/bin/phpunit --log-junit build/ndf/junit.xml {paths}",
+                                "junit": "build/ndf/junit.xml",
                                 "container": {"service": "app", "compose_files": ["docker-compose.yml"]},
                                 "needs": ["mysql"], "paths": ["tests"]}]},
-          "reason": "AGENTS.md:34 の手順"},
+          "reason": "AGENTS.md:34 の手順。全体は約 64 分で CI が 24 本に分けて回すため CI に任せる"},
  "branches": {"value": {"base": "main", "production": "main"}, "reason": "マージ先の多くが main。develop が無い"},
  "delivery": {"unknown": "デプロイの設定がリポジトリに無い"}}
 ```
@@ -88,6 +97,7 @@ python3 "$SCRIPTS/project-decl.py" write --measure "$TMP/measure.json" --answers
 - 手で書いた値は変えない。変えるのは、キーが無い項目と、前の `write` が書いた値のまま（`analysis.written` の指紋が一致する）の項目だけ。
   解析の値と食い違えば、出力に `宣言 <値> / 解析 <値>` の行が出る
 - 新しい解析で不明になった項目は、前の値を残す
+- `ci` のワークフローの行に新しい解析の壁時計が無ければ、前の解析の同じパスの行の壁時計を残し、出力に `ci#<パス>: 不明（新しい解析に壁時計が無い）（前の値を残した）` の行が出る
 - 秘密の形の値は、手で書いた値でも捨てて `{"unknown": "秘密の形"}` にする。値は宣言・差分・出力のどれにも出ない
 - `.ndf/worktree.json` には、`base_branch`・`production_branch` のうち無いキーだけを足す。ほかのキーと順序は変えない
 - 解析の結果が前と同じなら、ファイルを書かない
@@ -112,9 +122,9 @@ python3 "$SCRIPTS/project-decl.py" write --measure "$TMP/measure.json" --answers
 
 `check` は、解析が読んだ入力の指紋（下の表のファイルの HEAD の blob・ブランチの構成・解析器の版）が記録と違えば 2 を返し、
 `変わった入力: <パス>` を出す。手順 0 はそのまま 3 手を通し、`解析: 更新した（変わった入力 <パス>）` を出す。
-自動の再解析は手順 0 でだけ走る。ほかの工程の入り口は宣言をそのまま読む。
+自動の再解析は手順 0 でだけ走る。ほかの工程は、始めに宣言をそのまま読む。
 
-| 分類 | 入力のパス（根と 1 段下） |
+| 分類 | 入力のパス（根と 1 階層下） |
 | --- | --- |
 | CI | `.github/workflows/*` |
 | 依存の定義 | `composer.json`・`package.json`・`pyproject.toml`・`requirements*.txt`・`Gemfile`・`go.mod`・`Cargo.toml` |

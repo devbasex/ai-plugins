@@ -208,7 +208,22 @@ def test_a_missing_result_after_the_relaunch_stops_the_review(tmp_dir, state_mod
     """起動し直した後も結果が残らなければ、`final = error` で中断する。"""
     _write(
         tmp_dir,
-        _state([_round(codex=_approve(), relaunched=["agy"])]),
+        _state(
+            [_round(codex=_approve(), relaunched=["agy"])],
+            no_results=[
+                {
+                    "step": "review",
+                    "attempt": 1,
+                    "seat": "agy",
+                    "account": "",
+                    "reason": "missing",
+                    "decision": "relaunch",
+                    "to": "",
+                    "to_account": "",
+                    "at": "t",
+                }
+            ],
+        ),
     )
 
     with pytest.raises(SystemExit) as e:
@@ -278,3 +293,39 @@ def test_the_round_summary_shows_the_missing_result(tmp_dir, state_mod, capsys):
     review_lib.commands.report.cmd_report(argparse.Namespace(pr=PR))
 
     assert "NO_RESULT" in capsys.readouterr().out
+
+
+# ---------------- `_record_no_result` の記録の形（現状固定） ----------------
+
+
+@pytest.mark.parametrize(("detail", "has_key"), [(None, False), ("", False), ("stalled 120s", True)])
+def test_record_no_result_writes_the_entry_on_the_last_round(tmp_dir, state_mod, detail, has_key):
+    """現状固定 — 最後のラウンドの担当の欄だけを結果なしの形で上書きし、空の detail は鍵を書かない。"""
+    _write(tmp_dir, _state([_round(1, codex=_approve()), _round(2, codex=_approve(), agy=_approve())]))
+    review_lib.commands.read_result._record_no_result(PR, "codex", "no_result_file", detail)
+    rounds = _read(tmp_dir)["rounds"]
+    expected = {
+        "intent": "NO_RESULT",
+        "no_result_reason": "no_result_file",
+        "posted_as": None,
+        "comments": None,
+        "review_url": None,
+        "by_severity": {},
+    }
+    if has_key:
+        expected["monitor_detail"] = detail
+    assert rounds[-1]["codex"] == expected
+    assert rounds[-1]["agy"] == _approve() and rounds[0]["codex"] == _approve()
+
+
+@pytest.mark.parametrize("body", [None, "{broken", json.dumps([1]), json.dumps(_state([]))])
+def test_record_no_result_leaves_unusable_state_alone(tmp_dir, state_mod, body):
+    """現状固定 — 状態ファイルが無い・読めない・辞書でない・ラウンドが無いときは何も書かない。"""
+    path = tmp_dir / f"cross-review-pr{PR}-state.json"
+    if body is not None:
+        path.write_text(body)
+    review_lib.commands.read_result._record_no_result(PR, "codex", "no_result_file")
+    if body is None:
+        assert not path.exists()
+    else:
+        assert path.read_text() == body

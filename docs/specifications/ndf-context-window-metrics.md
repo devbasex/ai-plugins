@@ -3,11 +3,14 @@
 conductor / supervisor / worker の会話の記録を層の単位で読み、記録 1 件ごとの固定費・ピーク使用量・
 実作業と、層ごとの合計、フェーズごとの worker の使い方を出せるようにした。同じ読み取りで、利用上限
 （429）で中断した記録の一覧と解除の待ちも行う。この文書は、記録を読む部品（`transcript_agents.py`）
-の値の取り方と、`skill-stats --agents` の出力の契約を残す。**値の取り方はこの文書が正である。**
+の値の取り方と、`skill-stats --agents` の出力の契約を残す。あわせて、トークン消費を数える範囲と、
+トークン削減の課題の受け入れ条件に使う値を決める。**値の取り方と数える範囲はこの文書が正である。**
 
 | 何を読むか | 正本 |
 | --- | --- |
 | 記録の値の取り方、コマンドの引数と終了コード、出力の列 | この文書 |
+| トークン消費を数える範囲、トークン削減の課題の受け入れ条件に使う値 | この文書の「トークン消費を数える範囲」 |
+| 使用量の帳簿の置き場と行の形、記録を書く場所、集計（`usage-report.py`）の契約 | [ndf-usage-ledger-by-runtime.md](ndf-usage-ledger-by-runtime.md) |
 | `skill-stats` の使い方 | `plugins/ndf/skills/skill-stats/SKILL.md` |
 | 振り返りの記録へ貼る表 | `plugins/ndf/skills/retrospective/SKILL.md` の記録の雛形「context window の大きさ」 |
 | 中断の点検の手順（誰がいつ `interrupted` / `wait-reset` を呼ぶか） | [ndf-agent-layers-unattended-run.md](ndf-agent-layers-unattended-run.md) と `development-workflow/references/agent-layers.md` の「中断と再開」 |
@@ -78,6 +81,12 @@ worker（読解）は深さ 1 に現れるため、`description` の先頭語が
 **`wait-reset` は、まだ来ていないリセット時刻のうち最も早いもの + 余白まで眠る。** 過ぎたものは眠る理由に
 ならず、固定の間隔で待たない。
 
+**トークン消費は、NDF が起動した呼び出しを経路を問わずランタイムごとの帳簿で数える。** 会話の記録の
+サブエージェントだけを数えると、処理を `claude -p` や他の CLI へ移した分が計測の外へ出て、#845 のように
+「サブエージェントの中は −86%、総量は同じ」を値から読めない。codex・kiro・agy・Jev は別のアカウントと料金体系で、
+1 つの帳簿に混ぜた合計は意味を持たないため、帳簿を分け、帳簿の間で単位を足さない。帳簿の決定と理由は
+[ndf-usage-ledger-by-runtime.md](ndf-usage-ledger-by-runtime.md) にある。
+
 **識別子は層の側を揃え、量を指す名前は `window` のまま残す。** `--agents` は conductor も supervisor も
 出るため `--workers` としない。`--window-limit` は劣化の目安で context window の長さを指す。
 
@@ -102,6 +111,20 @@ worker（読解）は深さ 1 に現れるため、`description` の先頭語が
 `~/.claude` は環境変数 `CLAUDE_CONFIG_DIR` があればそちらを使う。読めない行・壊れたファイルは飛ばし、
 飛ばした件数を標準エラーへ 1 行（`[transcript-agents] 読めない行を飛ばした: N 件`）出す。JSON の出力にも
 `skipped` として出す。終了コードは変えない。
+
+### トークン消費を数える範囲
+
+**数える範囲。** NDF のコードが起動したエージェントの呼び出し（Agent で起動したサブエージェント、NDF の
+スクリプトが起動した `claude -p`・codex・kiro-cli・agy、Jev の要求）を、1 回につき 1 行、そのランタイムの帳簿に
+残す。利用者が自分で開いた会話（conductor の会話そのもの）は帳簿へ入れない。その中で起動したサブエージェントは入れる。
+
+**帳簿の分け方。** 帳簿はランタイムごとに 5 つ（`claude`・`codex`・`kiro`・`agy`・`jev`）。Claude の帳簿には
+サブエージェントと `claude -p` の両方が入る（同じアカウント・同じ料金体系）。帳簿の間で単位を足さない。置き場・
+行の形・記録を書く場所・集計のコマンドは [ndf-usage-ledger-by-runtime.md](ndf-usage-ledger-by-runtime.md) にある。
+
+**トークン削減の課題の受け入れ条件は、Claude の帳簿の全体の値で書く。** 全体はサブエージェントと `claude -p` の
+合計で、同じ呼び出しは 1 回だけ数える（求め方は同じ文書の「集計」）。サブエージェントだけの値は内訳として並べてよいが、
+削減の判定には使わない。codex・kiro・agy・jev の帳簿はそれぞれの単位で別に書く。
 
 ### `AgentRecord` の値
 
@@ -193,7 +216,7 @@ worker（読解）は深さ 1 に現れるため、`description` の先頭語が
 `retrospective` の記録の雛形「何が起きたか」の後ろに `## context window の大きさ` を置き、
 `skill-stats --agents --session <conductor のセッション>` の 2 つ目・3 つ目・4 つ目の表をそのまま貼る。
 マーカーの付いた行ごとに、束ねる・割る・worker を減らす・そのままのどれにするかと理由を 1 行書く。
-ミッションを複数のセッションで通したときは `--session` を繰り返して 1 つの表にする。マーカーの判定は記録ごとの
+スプリントを複数のセッションで通したときは `--session` を繰り返して 1 つの表にする。マーカーの判定は記録ごとの
 比で行うため、固定費の違うセッションを合算しても判定の意味は変わらない。
 
 ## テスト観点
@@ -225,5 +248,6 @@ Claude Code が記録と同時に書くため起きないが、欠けた記録�
 - [issue #657](https://github.com/devbasex/ai-plugins/issues/657) — 上限で落ちた担当の検知
 - [PR #749](https://github.com/devbasex/ai-plugins/pull/749) — 測定
 - [PR #757](https://github.com/devbasex/ai-plugins/pull/757) — 中断と再開
+- [issue #1953](https://github.com/devbasex/ai-plugins/issues/1953) — 経路を問わずすべての呼び出しをランタイムごとの帳簿で数える
 - [ndf-agent-layers-unattended-run.md](ndf-agent-layers-unattended-run.md) — 3 層の運転
 - 要求・設計・契約・計画の元の文書は `issues/old/milestone-18-unattended/` にある

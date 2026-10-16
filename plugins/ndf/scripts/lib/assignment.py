@@ -96,11 +96,13 @@ def default_pool(host: str) -> list[str]:
 
 @dataclass
 class Participants:
-    """使える者の解決の結果。状態ファイルの `participants` のうち `fallback` を除く 8 項目。
+    """使える者の解決の結果。状態ファイルの `participants` のうち `fallback` を除く 11 項目。
 
     `fallback`（席の埋め合わせに使える者）は cross-review だけが持つため、呼び出し側が
     `to_state()` の辞書へ足す。`ignored_exclude` は「外す指定をしたが母集合に無かったため
     無視した者」で、外した者（`excluded`）とは別に持つ（#786 の決定 2）。
+    `unavailable` の値は `<理由>: <詳細>`、`checks` は名前 → 参加の確認の結果、`default_models` は
+    既定のモデルへ切り替えた者 → 起動の引数のモデル（#1290）。
     """
 
     pool: list[str]
@@ -111,6 +113,10 @@ class Participants:
     unavailable: dict[str, str] = field(default_factory=dict)
     probe_skipped: bool = False
     require_all: bool = False
+    # 決めた時点のランタイムの宣言の写し（`RuntimePolicy.to_state()`）。宣言が無ければ `None`（#1598）。
+    policy: Optional[dict[str, Any]] = None
+    checks: dict[str, dict[str, Any]] = field(default_factory=dict)
+    default_models: dict[str, str] = field(default_factory=dict)
 
     def to_state(self) -> dict[str, Any]:
         return {
@@ -122,12 +128,132 @@ class Participants:
             "unavailable": dict(self.unavailable),
             "probe_skipped": self.probe_skipped,
             "require_all": self.require_all,
+            "policy": dict(self.policy) if self.policy is not None else None,
+            "checks": {n: dict(c) for n, c in self.checks.items()},
+            "default_models": dict(self.default_models),
         }
 
 
 # 止めない確認の形。`auth.probe_auth` を `functools.partial(auth.probe_auth, info=info)`
-# のように包んで渡す。返り値は `(名前 → {"command", "ok", "detail"}, 飛ばしたか)`。
+# のように包んで渡す。返り値は `(名前 → Admission.to_probe() の辞書, 飛ばしたか)`。
 Probe = Callable[[list[str]], tuple[dict[str, dict[str, Any]], bool]]
+
+# 参加の確認の理由の語（`checks[].result`）。`ok` 以外は外した理由（#1290 のデータ構造）。
+CHECK_REASONS = ("ok", "unauthenticated", "auth_expired", "model_unavailable", "timeout", "missing_cli", "probe_failed")
+
+
+@dataclass(frozen=True)
+class Admission:
+    """1 者の参加の確認の合否。`level` は通った確認の種類（`model` / `auth`）。"""
+
+    runtime: str
+    ok: bool
+    reason: str
+    detail: str
+    level: Optional[str]
+    seconds: float
+    command: str = ""
+    model: Optional[str] = None
+    default_model: Optional[str] = None
+    from_model: Optional[str] = None
+
+    def to_probe(self) -> dict[str, Any]:
+        """`auth.probe_auth` の 1 者の辞書。今の 3 キー（`command` / `ok` / `detail`）を保つ。"""
+        return {
+            "command": self.command,
+            "ok": self.ok,
+            "detail": self.detail,
+            "reason": self.reason,
+            "level": self.level,
+            "seconds": self.seconds,
+            "model": self.model,
+            "default_model": self.default_model,
+            "from_model": self.from_model,
+        }
+
+
+def admit(runtime: str, *, explicit_model: Optional[str], check: Callable[[str, str, Optional[str]], Any]) -> Admission:
+    """1 者の確認の進め方と合否、既定のモデルへ切り替えるかを決める（#1290 の決定 4）。
+
+    `check(step, runtime, model)` は 1 回の確認（`auth.Check` の形）を返し、その CLI が種類を
+    持たなければ `None` を返す。この関数は自分では CLI を呼ばない。
+
+    1. 種類 `auth` が通らなければその理由で外す（種類 `model` を走らせない。I5）
+    2. 種類 `model` を持たなければ `level=auth` で入れる。通れば `level=model` で入れる
+    3. `model_unavailable` 以外で通らなければその理由で外す
+    4. `model_unavailable` のとき、モデルを引数で明示していれば切り替えずに外す（前提 4・I3）。
+       種類 `default` を持たなければ外す
+    5. 種類 `default` が通り起動の引数のモデルが読めれば、`default_models` に記録して入れる。
+       通らなければ種類 `model` の理由と詳細で外す（直す対象は設定のモデル）
+    """
+    done: list[Any] = []
+
+    def run(step: str, model: Optional[str]) -> Any:
+        c = check(step, runtime, model)
+        if c is not None:
+            done.append(c)
+        return c
+
+    def result(ok: bool, last: Any, level: Optional[str] = None, **extra: Any) -> Admission:
+        seconds = round(sum(c.seconds for c in done), 1)
+        commands = " && ".join(c.command for c in done)
+        return Admission(runtime, ok, "ok" if ok else last.reason, last.detail, level, seconds, commands, **extra)
+
+    auth = run("auth", explicit_model)
+    if auth is None or not auth.ok:
+        if auth is None:
+            return Admission(runtime, False, "missing_cli", "確認のコマンドがありません", None, 0.0)
+        return result(False, auth)
+    model = run("model", explicit_model)
+    if model is None:
+        return result(True, auth, "auth")
+    if model.ok:
+        return result(True, model, "model", model=model.model)
+    if model.reason != "model_unavailable" or explicit_model:
+        return result(False, model, from_model=model.model)
+    fallback = run("default", None)
+    if fallback is None or not fallback.ok or not fallback.model:
+        return result(False, model, from_model=model.model)
+    return result(True, fallback, "model", model=fallback.model, default_model=fallback.model, from_model=model.model)
+
+
+def _validate_names(include: list[str], exclude: list[str], only: Optional[str]) -> None:
+    """名前の綴りと、include / exclude / only の矛盾を確かめる。"""
+    for name in (*include, *exclude, *([only] if only is not None else [])):
+        if name not in ALL_RUNTIMES:
+            raise AssignmentError(f"参加できないランタイムです: {name}（{'/'.join(ALL_RUNTIMES)} のいずれか）")
+    overlap = set(include) & set(exclude)
+    if overlap:
+        raise AssignmentError(f"足す者と外す者に同じ名前があります: {', '.join(_in_fixed_order(overlap))}")
+    # 矛盾は無視より先に見る。母集合に無い名前の除外を先に捨てると、`--only agy
+    # --exclude agy` が矛盾ではなく「参加者に無い」で止まり、理由を読み違える。
+    if only is not None and only in exclude:
+        raise AssignmentError(f"--only と --exclude が矛盾しています: {only}")
+
+
+def _split_by_probe(
+    participants: list[str], probe: Probe
+) -> tuple[list[str], dict[str, str], bool, dict[str, dict[str, Any]], dict[str, str]]:
+    """probe の結果で参加者を（通った者, 通らなかった者と理由, 飛ばされたか, 確認の結果, 既定のモデル）に分ける。"""
+    results, skipped = probe(list(participants))
+    if skipped:
+        return list(participants), {}, skipped, {}, {}
+    unavailable: dict[str, str] = {}
+    checks: dict[str, dict[str, Any]] = {}
+    default_models: dict[str, str] = {}
+    for n in participants:
+        r = results.get(n, {})
+        ok = bool(r.get("ok", False))
+        reason = r.get("reason") or ("ok" if ok else "")
+        detail = str(r.get("detail", ""))
+        if not ok:
+            unavailable[n] = f"{reason}: {detail}" if reason else detail
+        if "reason" in r:
+            checks[n] = {k: r.get(k) for k in ("level", "seconds", "model", "from_model")}
+            checks[n]["result"] = reason
+        if ok and r.get("default_model"):
+            default_models[n] = str(r["default_model"])
+    return [n for n in participants if n not in unavailable], unavailable, skipped, checks, default_models
 
 
 def resolve_participants(
@@ -139,6 +265,7 @@ def resolve_participants(
     only: Optional[str] = None,
     probe: Probe,
     require_all: bool = False,
+    policy: Any = None,
 ) -> Participants:
     """母集合の既定・足す者・外す者・1 者指定から使える者を決める（設計の決定 2〜4）。
 
@@ -153,25 +280,24 @@ def resolve_participants(
     3. `only` があれば、参加者に含まれ `exclude` に無いことを確かめ、参加者をその 1 者にする
     4. `probe(参加者)` で確かめる。飛ばされたら全員を通ったものとし `probe_skipped` を真にする
     5. `require_all` が真で通らない者がいれば `AssignmentError`（欠けた者と理由を並べる）
-    6. 通った者を `available`、通らなかった者と理由を `unavailable` として返す
+    6. 通った者を `available`、通らなかった者と `<理由>: <詳細>` を `unavailable`、1 者ごとの確認の
+       結果を `checks`、既定のモデルへ切り替えた者を `default_models` として返す（1 者の合否は `admit`）
 
     名前の綴りのチェック（argparse の型）はこの前段で済んでいる前提だが、ここでも
     `ALL_RUNTIMES` に無い名前は弾く。
+
+    `policy`（`runtime_policy.RuntimePolicy`。#1598）があれば、1 の後で `include` と `only` を
+    宣言と照らし（外があれば `RuntimePolicyError`）、`pool` を `allowed` で絞ってから 2 へ進む。
+    認証確認（4）は宣言の中の者にしか呼ばない。絞った結果、参加者が 0 なら止める。
     """
     pool = list(pool)
     include = list(include)
     exclude = list(exclude)
 
-    for name in (*include, *exclude, *([only] if only is not None else [])):
-        if name not in ALL_RUNTIMES:
-            raise AssignmentError(f"参加できないランタイムです: {name}（{'/'.join(ALL_RUNTIMES)} のいずれか）")
-    overlap = set(include) & set(exclude)
-    if overlap:
-        raise AssignmentError(f"足す者と外す者に同じ名前があります: {', '.join(_in_fixed_order(overlap))}")
-    # 矛盾は無視より先に見る。母集合に無い名前の除外を先に捨てると、`--only agy
-    # --exclude agy` が矛盾ではなく「参加者に無い」で止まり、理由を読み違える。
-    if only is not None and only in exclude:
-        raise AssignmentError(f"--only と --exclude が矛盾しています: {only}")
+    _validate_names(include, exclude, only)
+    if policy is not None:
+        policy.require([*include, only], "--include / --only")
+        pool = [n for n in pool if policy.allows(n)]
     base = set(pool) | set(include)
     if only is not None and only not in base:
         base.add(only)
@@ -179,25 +305,25 @@ def resolve_participants(
     exclude = [n for n in exclude if n in base]
 
     participants = _in_fixed_order(base - set(exclude))
+    if policy is not None and not participants:
+        raise AssignmentError(
+            f"宣言の中に参加者がいません（{policy.path} の allowed: {', '.join(policy.allowed)}）。"
+            "--include で宣言の中のランタイムを足すか、宣言を直す"
+        )
 
     if only is not None:
         if only not in participants:
             raise AssignmentError(f"--only は参加者のいずれかを指定してください: {only}（参加者: {', '.join(participants)}）")
         participants = [only]
 
-    results, skipped = probe(list(participants))
-    if skipped:
-        available, unavailable = list(participants), {}
-    else:
-        unavailable = {n: str(results.get(n, {}).get("detail", "")) for n in participants if not results.get(n, {}).get("ok", False)}
-        available = [n for n in participants if n not in unavailable]
+    available, unavailable, skipped, checks, default_models = _split_by_probe(participants, probe)
 
     if require_all and unavailable:
         failed = " / ".join(f"{n}（{d}）" for n, d in unavailable.items())
         raise AssignmentError(
-            "認証されていない CLI があります: " + failed + "。"
+            "確認を通らない CLI があります: " + failed + "。"
             "参加者が欠けたまま進むと、その者のレビューが無いまま収束します。"
-            "各 CLI でログインしてから再実行してください"
+            "各 CLI を確認が通る状態に直してから再実行してください"
         )
 
     return Participants(
@@ -209,6 +335,9 @@ def resolve_participants(
         unavailable=unavailable,
         probe_skipped=skipped,
         require_all=require_all,
+        policy=policy.to_state() if policy is not None else None,
+        checks=checks,
+        default_models=default_models,
     )
 
 
@@ -245,7 +374,12 @@ def seat_runtime(seat: str) -> str:
     return m.group(1)
 
 
-def review_seats(round_no: int, available: list[str], fallback: list[str]) -> list[str]:
+def review_seats(
+    round_no: int,
+    available: list[str],
+    fallback: list[str],
+    pinned: Optional[Iterable[str]] = None,
+) -> list[str]:
     """cross-review のラウンドの 2 席を決める（設計の決定 9・20。規則の正本はこの表）。
 
     | 使える者の数 n | 席 |
@@ -259,9 +393,16 @@ def review_seats(round_no: int, available: list[str], fallback: list[str]) -> li
     この関数より前の輪番（外す 1 者を `(round_no - 1) % 3` で回す式）と一致する。埋め合わせの候補は使える者に含まれない者だけを
     使い、含まれる者は飛ばす（同じ席の名前を 2 つ返さないため）。`only` の処理は呼び出し側が
     先に行う（1 者指定は埋め合わせをしない）。
+
+    `pinned` はランタイムの宣言の固定の組（`review_seats`。#1598）。どちらの席のランタイムも
+    `available` にあれば、表に依らずその 2 席を返す。無ければ表の規則へ戻る。
     """
     if round_no < 1:
         raise AssignmentError(f"ラウンド番号は 1 以上です: {round_no}")
+    if pinned:
+        seats = list(pinned)
+        if all(seat_runtime(s) in available for s in seats):
+            return seats
     n = len(available)
     if n >= 3:
         picked = {available[round_no % n], available[(round_no + 1) % n]}
@@ -300,3 +441,161 @@ def choose_implementer(
     if host in participants:
         return host, "host"
     return participants[0], "first"
+
+
+# ---------------------------------------------------------------- 結果なしの後の規則（#919）
+
+# 同じ担当を同じ条件で起動し直しても解けない理由（利用上限は待ちと相手の枠を使うだけで直らない。#619。
+# 認証の失効は再ログインでしか解けず、モデルを引けないのは同じ実行の中では解けない。#1290 の前提 6）。
+# **理由を足すときはこの集合だけを見直す。** 偽のときの扱い（振り替え・中断）は `after_no_result` が決める。
+NO_RELAUNCH_REASONS = frozenset({"usage_limit", "model_unavailable", "auth_expired"})
+RELAUNCH, REASSIGN, ABORT = "relaunch", "reassign", "abort"  # 規則の答え: 同じ担当で起動し直す / 振り替える / 中断する
+
+
+def relaunch_same_agent(reason: Optional[str]) -> bool:
+    """同じ担当を同じ条件で起動し直せば解けるか（リトライ可否）。`NO_RELAUNCH_REASONS` に無ければ可。"""
+    return reason not in NO_RELAUNCH_REASONS
+
+
+@dataclass(frozen=True)
+class Assignee:
+    """担当。席の名前（`SEAT_PATTERN`）と、claude ではアカウントの名前（無ければ共有の設定）。"""
+
+    seat: str
+    account: Optional[str] = None
+
+    def runtime(self) -> str:
+        return seat_runtime(self.seat)
+
+    def label(self) -> str:  # 報告の形。アカウントがあれば `claude@<アカウント>`
+        return f"{self.seat}@{self.account}" if self.account else self.seat
+
+
+@dataclass(frozen=True)
+class NoResultDecision:
+    """`after_no_result` の答え。`to` は relaunch なら元の担当、reassign なら振り替え先、abort なら None。`drop` は元の担当を外したか。"""
+
+    action: str
+    to: Optional[Assignee]
+    drop: bool
+    note: str
+
+
+def _entry_runtime(seat: Any) -> Optional[str]:
+    m = SEAT_PATTERN.match(str(seat or ""))
+    return m.group(1) if m else None
+
+
+def excluded_runtimes(log: Iterable[Mapping[str, Any]]) -> set[str]:
+    """結果なしの記録（`no_results`）から導く外した担当: 中断した件と、別のランタイムへ振り替えた件の元のランタイム。"""
+    out: set[str] = set()
+    for e in log or ():
+        runtime = _entry_runtime(e.get("seat"))
+        if runtime and (e.get("decision") == ABORT or (e.get("decision") == REASSIGN and _entry_runtime(e.get("to")) != runtime)):
+            out.add(runtime)
+    return out
+
+
+def current_account(log: Iterable[Mapping[str, Any]], runtime: str, initial: Optional[str]) -> Optional[str]:
+    """ランタイムの今のアカウント。記録の最後の、そのランタイムへの振り替えの `to_account`。無ければ `initial`。"""
+    account = initial
+    for e in log or ():
+        if e.get("decision") == REASSIGN and _entry_runtime(e.get("to")) == runtime:
+            account = e.get("to_account") or None
+    return account
+
+
+def seats_pool(available: Iterable[str], log: Iterable[Mapping[str, Any]]) -> list[str]:
+    """席と実装担当を選ぶ母集合。利用可能な参加者から外した担当を引く（`-2` の席も同じランタイムで外れる）。"""
+    gone = excluded_runtimes(log)
+    return [r for r in available if r not in gone]
+
+
+def pinned_in_force(pinned: Optional[Iterable[str]], log: Iterable[Mapping[str, Any]]) -> Optional[list[str]]:
+    """固定の組を今も使うか。どちらかのランタイムが振り替えか中断の元になっていれば None（前提 6・決定 10）。"""
+    seats = list(pinned or [])
+    runtimes = {seat_runtime(s) for s in seats}
+    if not seats or any(e.get("decision") in (REASSIGN, ABORT) and _entry_runtime(e.get("seat")) in runtimes for e in log or ()):
+        return None
+    return seats
+
+
+def _tried_accounts(failed: Assignee, log: list[Mapping[str, Any]], initial: Optional[str] = None) -> frozenset[str]:
+    # 席にアカウントが無ければ、起動した CLI は環境から継承した initial を使っている
+    used = failed.account or initial
+    tried = {used} if used else set()
+    for e in log:
+        tried |= {str(e[k]) for s, k in (("seat", "account"), ("to", "to_account")) if _entry_runtime(e.get(s)) == "claude" and e.get(k)}
+    return frozenset(tried)
+
+
+def after_no_result(
+    failed: Assignee,
+    reason: Optional[str],
+    *,
+    available: Iterable[str],
+    log: Iterable[Mapping[str, Any]],
+    step: str,
+    attempt: int,
+    host: str,
+    busy: Iterable[str] = (),
+    only: bool = False,
+    initial_account: Optional[str] = None,
+    pick_account: Optional[Callable[[frozenset[str]], Optional[str]]] = None,
+    relaunch_next_attempt: bool = False,
+) -> NoResultDecision:
+    """結果なしの担当を、同じ担当で起動し直す / 振り替える / 中断するのどれにするかを決める（規則の正本。#919）。
+
+    上から順に、最初に当たった行の答えを返す。副作用を持たず、記録は呼ぶ側が書く。
+    `relaunch_next_attempt` は、起動し直しが次の試行として起動される工程（試行番号が起動ごとに進む修正）で真にする。
+    偽のままだと試行番号の一致が毎回外れ、同じ担当を締め切りまで起動し直し続ける。
+
+    | 順 | 条件 | 答え |
+    | ---: | --- | --- |
+    | 1 | リトライ可否が真で、記録に同じ工程・試行・席・アカウントの `relaunch` が無い（`relaunch_next_attempt` なら 1 つ前の試行の `relaunch` も同じ件として照合する） | `relaunch` |
+    | 2 | `only`（1 者指定） | `abort` |
+    | 3 | claude の `usage_limit` で、`pick_account(試したアカウント)` が名前を返す | 同じ席のそのアカウントへ `reassign` |
+    | 4 | 候補 = `available` −（外した担当 ∪ 結果なしのランタイム）− `busy`（同じラウンドのほかの席）が 1 者以上 | `choose_implementer(候補, host)` へ |
+    | 5 | どれにも当たらない | `abort` |
+    """
+    runtime, log = failed.runtime(), list(log or ())
+    attempts = {attempt, attempt - 1} if relaunch_next_attempt else {attempt}
+    relaunched = any(
+        (e.get("decision"), e.get("step"), e.get("seat"), e.get("account") or None) == (RELAUNCH, step, failed.seat, failed.account)
+        and e.get("attempt") in attempts
+        for e in log
+    )
+    if relaunch_same_agent(reason) and not relaunched:
+        return NoResultDecision(RELAUNCH, failed, False, f"{failed.label()} を 1 度だけ起動し直す（{reason}）")
+    if only:
+        return NoResultDecision(ABORT, None, True, f"{failed.label()} は 1 者指定のため振り替えない（{reason}）")
+    if runtime == "claude" and reason == "usage_limit" and pick_account is not None:
+        name = pick_account(_tried_accounts(failed, log, initial_account))
+        if name:
+            to = Assignee(failed.seat, name)
+            return NoResultDecision(REASSIGN, to, False, f"{failed.label()} → {to.label()}（{reason}）")
+    gone = excluded_runtimes(log) | {runtime} | {seat_runtime(b) for b in busy}
+    candidates = [r for r in available if r not in gone]
+    if not candidates:
+        return NoResultDecision(ABORT, None, True, f"{failed.label()} の振り替え先がありません（{reason}）")
+    pick, _ = choose_implementer(candidates, host)
+    to = Assignee(pick, current_account(log, pick, initial_account) if pick == "claude" else None)
+    return NoResultDecision(REASSIGN, to, True, f"{failed.label()} → {to.label()}（{reason}）")
+
+
+def no_result_entry(
+    step: str, attempt: int, failed: Assignee, reason: Optional[str], decision: NoResultDecision, at: str
+) -> dict[str, Any]:
+    """結果なしの記録（`no_results`）の 1 件。2 つの Skill で同じ形にする。"""
+    to = decision.to if decision.action == REASSIGN else None
+    return {
+        "step": step,
+        "attempt": int(attempt),
+        "seat": failed.seat,
+        "account": failed.account or "",
+        "reason": str(reason or ""),
+        "decision": decision.action,
+        "to": to.seat if to else "",
+        "to_account": (to.account or "") if to else "",
+        "at": at,
+    }

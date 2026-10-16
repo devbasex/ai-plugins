@@ -7,12 +7,13 @@
 
 from __future__ import annotations
 
+import pathlib
 import re
 import subprocess
 from typing import Any, Optional
 
 from . import github, pathkinds, process, publish, results, worktree
-from .paths import git_out
+from .paths import git_out, resolve_commit
 
 # 分けた先の名前を再エクスポートする。`from .gitfacts import ...` で使う側の import を変えない。
 
@@ -62,8 +63,6 @@ _worktree_changes = worktree._worktree_changes
 discard_impl_leftovers = worktree.discard_impl_leftovers
 replay_commits = worktree.replay_commits
 reset_hard = worktree.reset_hard
-revert_item_commits = worktree.revert_item_commits
-revert_range = worktree.revert_range
 
 # 実装担当は自分の成果を報告する側なので、結果ファイルの値をそのままチェックに使うと
 # 「JSON を書き換えるだけで通る」チェックになる。ここは git だけを情報源にする。
@@ -176,8 +175,8 @@ def _parse_trailer_paragraph(paragraph: str) -> dict[str, str]:
 
 
 def commit_diff_lines(work: str, sha: str) -> int:
-    """コミットの追加 + 削除行数を git から数える。"""
-    out = git_out(work, ["show", "--numstat", "--format=", sha])
+    """コミットの追加 + 削除行数を git から数える。名前の変更は `-M` で 1 回に数える（記録だけ。#1814 決定 4）。"""
+    out = git_out(work, ["show", "-M", "--numstat", "--format=", sha])
     total = 0
     for line in (out or "").splitlines():
         parts = line.split("\t")
@@ -193,6 +192,42 @@ def commit_files(work: str, sha: str) -> list[str]:
     """コミットが触ったファイルのリポジトリ相対パス。範囲のチェックに使う。"""
     out = git_out(work, ["show", "--name-only", "--format=", sha])
     return [p.strip() for p in (out or "").splitlines() if p.strip()]
+
+
+def commit_file_status(work: str, sha: str) -> dict[str, str]:
+    """コミットが触ったファイルごとの状態（`A` / `M` / `D` ほか）。名前の変更は元の `D` と先の `A` に分ける（`--no-renames`）。"""
+    out = git_out(work, ["show", "--no-renames", "--name-status", "-z", "--format=", sha], strip=False)
+    fields = [f for f in (out or "").strip("\n").split("\0") if f]
+    return {path: status[:1] for status, path in zip(fields[0::2], fields[1::2])}
+
+
+def commit_hunks(work: str, sha: str, path: str) -> list[tuple[list[str], list[str]]]:
+    """コミットのファイル 1 つの `-U0` のハンクを `(削除の行, 追加の行)` の並びで返す（#1814 の呼び手の書き換えの判定）。"""
+    out = git_out(work, ["show", "-U0", "--no-renames", "--format=", sha, "--", path], strip=False)
+    hunks: list[tuple[list[str], list[str]]] = []
+    for line in (out or "").splitlines():
+        if line.startswith("@@"):
+            hunks.append(([], []))
+        elif hunks and line.startswith("-"):
+            hunks[-1][0].append(line[1:])
+        elif hunks and line.startswith("+"):
+            hunks[-1][1].append(line[1:])
+    return hunks
+
+
+def path_in_tree(work: str, sha: str, path: str) -> bool:
+    """コミット `sha` のツリーにパスがあるか。"""
+    return git_out(work, ["cat-file", "-e", f"{sha}:{path}"]) is not None
+
+
+def changed_files(work: str, shas: list[str]) -> list[str]:
+    """コミットの並びが変えたファイルのうち、worktree に残るもの（静的解析の範囲テストの範囲。#1483 I10）。"""
+    out: list[str] = []
+    for sha in shas:
+        for f in commit_files(work, sha):
+            if f not in out and (pathlib.Path(work) / f).is_file():
+                out.append(f)
+    return out
 
 
 def commit_test_changes(work: str, sha: str) -> dict[str, tuple[list[str], list[str]]]:
@@ -254,7 +289,7 @@ def collect_commit_facts(
     """
     facts: list[dict[str, Any]] = []
     for sha in shas:
-        full = git_out(work, ["rev-parse", "--verify", f"{sha}^{{commit}}"])
+        full = resolve_commit(work, sha)
         if full is None or full not in in_range:
             facts.append({"sha": sha, "exists": False})
             continue

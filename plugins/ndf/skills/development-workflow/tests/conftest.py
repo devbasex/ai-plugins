@@ -21,6 +21,11 @@ def _hook_python(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture()
-def repo(tmp_path: Path) -> Path:
-    """宣言を置く前のリポジトリ。"""
+def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """宣言を置く前のリポジトリ。
+
+    進捗記録のスクリプトは通過記録を自分で積む（#725）。置き場所を試験用へ向け、実行した人の
+    状態ディレクトリへ書かない。
+    """
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", str(tmp_path / "plugin-data"))
     return init_repo(tmp_path / "main")

@@ -198,4 +198,4 @@ def test_a_pipe_or_newline_in_a_cell_does_not_break_the_table(plan, tmp_path):
     )
     section = plan.format_plan(state).split("## 見送った提案", 1)[1]
     row = next(ln for ln in section.splitlines() if "src/bar.py#Bar.run" in ln)
-    assert row == "| `src/bar.py#Bar.run` | duplication | not_done | a \\| b c |"
+    assert row == "| `src/bar.py#Bar.run` | duplication | not_done | — | a \\| b c |"

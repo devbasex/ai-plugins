@@ -15,6 +15,7 @@ import os
 import sys
 import time
 from contextlib import ExitStack
+from typing import NamedTuple
 
 # relay_lib の親。プラグインでは `scripts/`、複製ではバージョンディレクトリ（`relay-<版>-<digest>/`）
 PKG_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -25,6 +26,8 @@ import clock  # noqa: E402
 import jsonio  # noqa: E402
 
 MARK_FILE = "next.json"
+# 子の応答が API の失敗（利用上限など）で終わったときに StopFailure hook が書くシグナルファイル（#1389）
+LIMIT_FILE = "limit.json"
 STOP_FILE = "stop"
 LOCK_FILE = "relay.lock"
 PID_FILE = "relay.pid"
@@ -38,6 +41,8 @@ QUESTION_LOCK = "question.lock"
 ASKED_FILE = "asked"
 # 背景の作業が残っていて Stop を止めた合図の候補（区間とハッシュ）。同じ候補では 2 度止めない
 HELD_FILE = "mark-held.json"
+# 承認待ちの差し戻しの状態（区間・前の Stop の時刻・差し戻したか）。差し戻した直後の Stop では差し戻さない（#1492）
+WAIT_HELD_FILE = "wait-held.json"
 
 BLOCK_OPEN = "# >>> ndf relay >>>"
 BLOCK_CLOSE = "# <<< ndf relay <<<"
@@ -116,11 +121,12 @@ def relay_running(d: str) -> bool:
     return held is None
 
 
-def remove(path: str) -> None:
-    try:
-        os.unlink(path)
-    except OSError:
-        pass
+def remove(*paths: str) -> None:
+    for path in paths:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
 
 
 def fallback_cwd(cwd: str) -> str:
@@ -136,6 +142,14 @@ def fallback_cwd(cwd: str) -> str:
             break
         p = parent
     return p if p and os.path.isdir(p) else os.path.expanduser("~")
+
+
+class PluginInfo(NamedTuple):
+    """`claude plugin list --json` から読んだ ndf の 1 件。導入先 `installPath` は無ければ None。"""
+
+    marketplace: str
+    version: str
+    install_path: str | None
 
 
 class LockBusy(Exception):

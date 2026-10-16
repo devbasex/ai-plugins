@@ -47,6 +47,22 @@ def test_default_behaviour_files_cover_skills_and_skip_readme():
     assert "README.md" not in files
 
 
+LEDGER = PLUGIN.parents[1] / "docs" / "ndf-experiments.md"
+
+
+def test_trials_moved_to_the_main_body_are_removed():
+    """台帳の行き先が「本体へ移した」の試行は、試行の置き場に残らない（台帳だけ直して試行を残さない）。"""
+    left = []
+    for line in LEDGER.read_text().splitlines():
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) < 5 or not cells[0].startswith("`") or not cells[-1].startswith("本体へ移した"):
+            continue
+        name = cells[0].strip("`")
+        if (EXP / name).exists() or (EXP / Path(name).stem).exists():
+            left.append(name)
+    assert left == []
+
+
 def fake_gh(tmp_path, view_body):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -145,6 +161,39 @@ def test_resume_lists_mark_skipped_of_previous_and_current_section(tmp_path):
     assert "b5rbmp9yj" in p.stdout and "背景の作業が残った" in p.stdout
 
 
+@pytest.mark.parametrize(
+    "row, shown, mismatch",
+    [
+        ({"relay_version_dir": "relay-10.17.53-bbbb2222"}, "動いているラッパー 10.17.53", False),
+        ({"relay_version_dir": "relay-10.17.52-aaaa1111"}, "動いているラッパー 10.17.52", True),
+        ({}, "動いているラッパー 不明（打ち直すと見える）", False),
+    ],
+    ids=["same", "differs", "unknown"],
+)
+def test_resume_lists_running_wrapper_version(tmp_path, row, shown, mismatch):
+    """版の行に動いているラッパーの版を並べ、違えば食い違いあり。不明は食い違いに数えない（#1587 の AC15・AC16）。"""
+    cur = tmp_path / "state" / "ndf" / "relay" / "20261001T000000Z-1-a"
+    cur.mkdir(parents=True)
+    (cur / "log.jsonl").write_text(
+        json.dumps({"event": "start", "section": 1, "from_session": "", "plugin_version": "10.17.53", **row}) + "\n"
+    )
+    (tmp_path / "cfg" / "ndf").mkdir(parents=True)
+    (tmp_path / "cfg" / "ndf" / "relay.version").write_text("10.17.53\n")
+    env = {
+        **os.environ,
+        "XDG_STATE_HOME": str(tmp_path / "state"),
+        "CLAUDE_CONFIG_DIR": str(tmp_path / "cfg"),
+        "XDG_DATA_HOME": str(tmp_path / "data"),
+    }
+    p = subprocess.run([sys.executable, str(EXP / "resume.py"), "--relay-dir", str(cur)], capture_output=True, text=True, env=env)
+    assert p.returncode == 0, p.stderr
+    line = next(x for x in p.stdout.splitlines() if x.startswith("版: "))
+    assert shown in line and ("（食い違いあり）" in line) is mismatch
+    res = json.loads(p.stdout.strip().splitlines()[-1])
+    assert res["items"][0]["versions"]["動いているラッパー"] == shown.split(" ", 1)[1]
+    assert res["metrics"]["version_mismatch"] is mismatch
+
+
 def _body_repo(tmp_path):
     """origin（bare）と clone を作り、clone に origin/develop へ載っていないファイルを 1 つ置く。"""
 
@@ -185,6 +234,56 @@ def test_issue_body_refuses_paths_only_on_this_machine(tmp_path):
     assert p.returncode == 1 and out["status"] == "stopped"
     assert [i["path"] for i in out["items"]] == ["issues/local-only.md"]
     assert not (tmp_path / "gh.log").exists()  # gh は呼ばない
+
+
+def _run_body(tmp_path, clone, env, text, *extra):
+    body = tmp_path / "body.md"
+    body.write_text(text)
+    # 読み直しは書いた本文をそのまま返す
+    (tmp_path / "bin" / "gh").write_text(f'#!/bin/sh\necho called >> "$FAKE_GH_LOG"\n[ "$2" = view ] && cat {body}\nexit 0\n')
+    p = subprocess.run(
+        [sys.executable, str(EXP / "issue-body.py"), "set", "1", str(body), *extra], cwd=clone, env=env, capture_output=True, text=True
+    )
+    return p, json.loads(p.stdout.strip().splitlines()[-1])
+
+
+def _commit_on_branch(clone, push):
+    def run(*a):
+        subprocess.run(a, cwd=clone, check=True, capture_output=True, text=True)
+
+    run("git", "switch", "-q", "-c", "design/x")
+    run("git", "add", "issues/local-only.md")
+    run("git", "commit", "-qm", "design")
+    if push:
+        run("git", "push", "-q", "-u", "origin", "design/x")
+
+
+def test_issue_body_accepts_paths_pushed_to_the_current_branch(tmp_path):
+    # 設計 PR のブランチへ push 済みなら、起点のブランチへマージする前でも通し、そのブランチの blob の URL を案内する。
+    # URL のリポジトリはブランチと同じ origin から決め、課題の置き場の --repo は使わない
+    clone, env = _body_repo(tmp_path)
+    _commit_on_branch(clone, push=True)
+    subprocess.run(["git", "remote", "set-url", "origin", "https://github.com/o/r.git"], cwd=clone, check=True)
+    p, out = _run_body(tmp_path, clone, env, "要求は `issues/local-only.md` にある\n", "--repo", "records/elsewhere")
+    assert p.returncode == 0, p.stdout + p.stderr
+    pushed = [i for i in out["items"] if i["result"] == "pushed_branch"]
+    assert pushed == [
+        {
+            "number": 1,
+            "result": "pushed_branch",
+            "path": "issues/local-only.md",
+            "ref": "origin/design/x",
+            "url": "https://github.com/o/r/blob/design/x/issues/local-only.md",
+        }
+    ]
+
+
+def test_issue_body_still_refuses_paths_committed_but_not_pushed(tmp_path):
+    clone, env = _body_repo(tmp_path)
+    _commit_on_branch(clone, push=False)
+    p, out = _run_body(tmp_path, clone, env, "要求は `issues/local-only.md` にある\n")
+    assert p.returncode == 1 and [i["path"] for i in out["items"]] == ["issues/local-only.md"]
+    assert not (tmp_path / "gh.log").exists()
 
 
 def test_review_terms_count_counts_findings_without_replies(tmp_path):

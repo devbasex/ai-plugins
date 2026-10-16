@@ -280,3 +280,34 @@ def test_no_settings_file_is_written_for_the_delegate(repo):
     for rt in ("codex", "agy", "kiro"):
         assert not (repo["root"] / rt / ".gemini").exists()
         assert not (repo["root"] / rt / ".agy").exists()
+
+
+def test_readonly_worktrees_get_dependencies(repo):
+    """依存の用意の宣言があれば、読み取り用の作業ディレクトリにも依存物を用意する（#1337）。"""
+    main = repo["repo"]
+    (main / ".git" / "info" / "exclude").write_text("vendor/\n.ndf/\n", encoding="utf-8")
+    pint = main / "vendor" / "bin" / "pint"
+    pint.parent.mkdir(parents=True)
+    pint.write_text("#!/bin/sh\necho pint-ok\n")
+    pint.chmod(0o755)
+    (main / ".ndf").mkdir()
+    (main / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "deps": {"copy_from_main": ["vendor"]}}))
+
+    _run(repo)
+
+    for rt in RUNTIMES:
+        out = subprocess.run([str(repo["root"] / rt / "vendor" / "bin" / "pint")], capture_output=True, text=True)
+        assert out.stdout.strip() == "pint-ok", rt
+
+
+def test_readonly_worktree_preparation_failure_stops_the_run(repo):
+    main = repo["repo"]
+    (main / ".ndf").mkdir()
+    (main / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "deps": {"run": ["exit 5"]}}))
+    (main / ".git" / "info" / "exclude").write_text(".ndf/\n", encoding="utf-8")
+
+    r = _run(repo, expect_ok=False)
+
+    assert r.returncode == 1
+    assert "依存の用意: 失敗（run[0] exit 5" in r.stderr
+    assert (repo["root"] / RUNTIMES[0]).is_dir()

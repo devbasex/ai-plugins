@@ -81,6 +81,12 @@ is_registered_worktree() {
   git worktree list --porcelain | grep -qx "worktree $target"
 }
 
+# 宣言（`.ndf/worktree.json` の `deps`）に従って依存を用意する（#1337）。宣言が無ければ
+# 包みは git も複製も起こさない。失敗すると `set -e` で止まる（作業ディレクトリは残す）。
+prepare_deps() {
+  python3 "$SCRIPT_DIR/../../../scripts/lib/worktree_deps.py" prepare "$@"
+}
+
 ensure_readonly_worktree() {
   local dir=$1 sha=$2
   if [ -d "$dir" ]; then
@@ -88,6 +94,7 @@ ensure_readonly_worktree() {
       git -C "$dir" checkout --detach "$sha" >/dev/null 2>&1 \
         || { git -C "$dir" fetch origin >/dev/null 2>&1
              git -C "$dir" checkout --detach "$sha" >/dev/null; }
+      prepare_deps "$dir" --if-unprepared
       return
     fi
     local stale
@@ -98,6 +105,7 @@ ensure_readonly_worktree() {
   git worktree prune
   git worktree add --detach "$dir" "$sha" >/dev/null
   echo "✅ 読み取り用の作業ディレクトリを作成しました: $dir" >&2
+  prepare_deps "$dir"
 }
 
 # 対象リポジトリが元から Skill を持っている場合は**それを使い、上書きしない**。

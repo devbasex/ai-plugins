@@ -15,7 +15,7 @@ NDF 標準 statusline (project_dir + メインとサブエージェントのコ�
 ## 表示内容
 
 ```
-<project_dir> [Opus5 61k │ 修正:PR 167k · 検証:#8 42k]
+<project_dir> [Opus5 61k │ 修正:PR 167k · 検証:#8 42k] takemi@example.com (team)
 ```
 
 - コンテナ名・ホスト名は出さない。区別は端末やエディタのウィンドウタイトルに任せる
@@ -25,6 +25,7 @@ NDF 標準 statusline (project_dir + メインとサブエージェントのコ�
   - 直近 60 分以内に記録が更新され、終わっていないものを実行中とみなす。更新の時刻では決めない (子を待つ supervisor や長いコマンドを待つ担当は、実行中でも何分も書き足さない)。止められた担当は、記録が `tool_use` で終わったまま 60 分残ることがある。記録の最後の user / assistant の行が `tool_use` を含まない assistant で、`end_turn` が付いているか 30 秒以上書き足されていなければ終わったとみなす
   - 使用量の多い順に 3 本まで並べ、残りは `+2` のように本数だけを出す。80 桁の端末に収めるため
   - ラベルは `agent-<id>.meta.json` の `description` から空白を除いた先頭 4 文字で、空白を挟んで使用量を続ける。project_dir と 3 本を並べても 80 桁に収めるため。種類名 (`agentType`) はほとんどが `general-purpose` で見分けに使えない。説明が無ければ ID の先頭を出す
+- 末尾に接続先を薄い色で出す。Anthropic のアカウントは `claude auth status` の `email` に契約の種別 `subscriptionType`（team / pro / max。同じメールアドレスに Team と個人の契約がありうるため）を括弧で添えたもの（0.4 秒かかるので `~/.claude/.ndf-statusline-auth.json` に 60 秒控える。呼び出しは 1 秒で打ち切る）。`CLAUDE_CODE_USE_BEDROCK` が空でなければ `bedrock`（`AWS_PROFILE` があれば `bedrock:<profile>`）。取れなければ何も出さない
 - メイン・サブエージェントとも、500k を超えたら使用量を赤で表示する。上限が 200K 以下のモデル (Haiku 4.5) は 150k で赤にする。メインは入力の `context_window.context_window_size`、サブエージェントは記録のモデル名で判定する
   - サブエージェントの記録の置き場所と形は公式ドキュメントに無い内部の仕様で、Claude Code の更新で変わりうる。読めなければ何も出さない
 

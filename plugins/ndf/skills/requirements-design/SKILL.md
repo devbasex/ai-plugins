@@ -20,7 +20,7 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 受け入れ条件のない計画は、完了判定ができない。逆に、受け入れ条件だけあって分解がない
 状態は問題ない（分解は `implementation-plan` が続けて行う）。
 
-`tdd-cycle` / `quality-gates` は開発ループの後段を担う Skill で、順次追加している。
+`tdd-cycle` / `quality-gates` は開発ループの後半の工程を担う Skill で、順次追加している。
 導入されていない環境では、実装とテストは対象プロジェクトの既存手順に従う。
 
 ## 使う場面
@@ -63,6 +63,33 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 
 最初に依頼文を**原文のまま**記録する。要約は解釈を含み、後から「そう言っていない」と
 食い違う原因になる。原文と、そこから導いた解釈を別の欄に分けて書く。
+
+引用した文ごとに**書き手と日付**を添える。書き手は次の 4 つのどれかで書く。
+
+| 書き手 | 当たる文 |
+| --- | --- |
+| 利用者 | 利用者が会話で書いた文、利用者が自分で書いた課題の本文 |
+| AI の起動指示 | conductor などが worker・supervisor を起動するときに書いた指示 |
+| 起票者 | 課題を書いた AI が、起票や振り返りの記録として書いた本文 |
+| 不明 | 書き手を確かめられない文 |
+
+**書き手が利用者でない文は、利用者の指示の原文として扱わない。** その文が利用者の指示を引用していれば、引用された
+部分だけを利用者の文として書き手を「利用者」で写す。課題の作成者の欄は書き手を示さない（課題はどれも同じアカウントで
+作られる）ため、本文の書き方と経緯から書き手を決め、決められなければ「不明」と書く。
+
+### 1a. 起票者の推定を写す
+
+課題の題と本文のうち、利用者の指示の原文に無く起票者が推して足した条件を、仕様の「起票者の推定」の節へ 1 行に
+1 条件で写す。各行に「条件」「推した出所」「この要求での扱い（受け入れ条件の番号・前提・含まない・採らない）」を書く。
+0 件なら「無し」と書く。承認ゲート 1 の承認資料はこの節の行をそのまま並べ、利用者が承認で確かめる
+（`development-workflow` の `references/approval-request.md`）。
+
+1. 課題の本文に `## 起票者の推定` の節があれば、その行を写して扱いを書き足す
+2. 節が無い課題（節を求める前に起票された課題）では、本文の書き直しを求めずに、題・本文の条件を手順 1 の原文と
+   突き合わせ、原文に無い条件を拾い出して書く。課題の本文の既存の部分は書き換えない
+3. 承認ゲート 1 で利用者が推定を差し戻したら、その行を消さずに取り消し線と理由・日付を足し
+   （「変更の途中で要求が変わったとき」の形）、`spec-copy.py write` で写しを作り直す。承認された推定は、
+   利用者が確かめた条件として扱う
 
 ### 2. 曖昧語を検出して具体化する
 
@@ -123,6 +150,12 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 扱うもの（含む）と扱わないもの（含まない）を対にして書く。「やらないこと」を省くと、
 レビューで範囲外の変更が混ざったのか意図的な判断なのかを区別できない。
 
+### 5a. 要求と範囲を MVV と突き合わせる
+
+承認済みのプロジェクト MVV があれば、手順 1〜5 の要求と範囲を MVV と突き合わせる。**反する疑いがあれば、要求を書き切らずに
+人へ戻す**（理由と根拠の項目つき）。受け入れ条件の文に MVV の項目を書き込まない。MVV の節の読み方・人へ戻す形・「MVV なし」の
+ときの扱いは [project-mvv.md の「工程での読み方」](../development-workflow/references/project-mvv.md) にある。
+
 ### 6. 実装前に明文化する項目
 
 次の 7 項目のうち、対象プロジェクトの記録（`AGENTS.md` / `README` / 既存の設定ファイル）から
@@ -130,7 +163,7 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 
 | 項目 | 決めること |
 | --- | --- |
-| 目的 | 何のための変更か。達成したい状態 |
+| 目的 | 何のための変更か。達成したい状態。設計文書の「目的」の章の出所になる（[design-template.md の「承認する人が読む欄」](../design/references/design-template.md#承認する人が読む欄)） |
 | 成功条件 | 受け入れ条件（4 で作ったもの） |
 | 検証手段 | 起動・テスト・静的解析・型検査をどのコマンドで行うか。自動化できない条件は手動確認の手順。「人が見る」条件は、擬似端末などで確かめる振る舞いと人が見る見た目に分ける（acceptance-criteria.md） |
 | プロジェクト構造 | 変更を置く場所と、置いてはいけない場所 |
@@ -146,9 +179,12 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 行わない      … 依頼範囲外のリファクタリング、生成物の手編集、無関係な整形
 ```
 
+「確認してから行う」は、承認ゲート 1・2 で人が見ることを指す。境界から承認の工程を足さない。共通原則の「必ず人の承認が要る操作」
+（C1〜C8）に当たる変更も同じで、承認ゲートの数と置き場所は `development-workflow` の「人手の承認を求める承認ゲート」だけが持つ。
+
 ### 7. 仕様として残す
 
-雛形は [references/spec-template.md](references/spec-template.md)。**仕様の正は課題の本文である。**
+テンプレートは [references/spec-template.md](references/spec-template.md)。**仕様の正は課題の本文である。**
 課題を読む人が GitHub の上で受け入れ条件を読めるように、要求の全文を本文へ書く
 （`gh issue edit <番号> --body-file <ファイル>`）。本文にファイルのパスだけを書かない。
 
@@ -193,7 +229,7 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 
 - [references/acceptance-criteria.md](references/acceptance-criteria.md) — 受け入れ条件の形式と性質
 - [references/nonfunctional-requirements.md](references/nonfunctional-requirements.md) — 非機能の 6 大項目の書き方・例・該当の判定
-- [references/spec-template.md](references/spec-template.md) — 仕様の雛形
+- [references/spec-template.md](references/spec-template.md) — 仕様のテンプレート
 - [references/glossary-format.md](references/glossary-format.md) — 用語集の設定・用語集・人が読む文書の形と、用語チェックの規則
 - [references/document-requirements.md](references/document-requirements.md) — 読み手へ渡す文書の受け入れ条件
 

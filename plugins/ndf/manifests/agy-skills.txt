@@ -17,7 +17,8 @@ notion-writing
 merged
 ndf-policies
 out-of-scope
-issue-upkeep
+backlog-refinement
+estimate
 progress-tracking
 plan-to-spec
 pr
@@ -38,7 +39,6 @@ retrospective
 tdd-cycle
 worktree
 release
-google-auth
-google-drive
+google-workspace
 ml-model-structure
 skill-stats

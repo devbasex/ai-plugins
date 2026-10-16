@@ -24,47 +24,73 @@ PR_VIEW_FIELDS = (
 WITH_PARTS = ("checks", "threads", "diff", "logs")
 
 
-def _meta_from_graphql(d: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "number": d.get("number"),
-        "title": d.get("title") or "",
-        "body": d.get("body") or "",
-        "state": str(d.get("state") or "").lower(),
-        "draft": bool(d.get("isDraft")),
-        "author": str((d.get("author") or {}).get("login") or ""),
-        "head_branch": d.get("headRefName") or "",
-        "head_sha": d.get("headRefOid") or "",
-        "base_branch": d.get("baseRefName") or "",
-        "url": d.get("url") or "",
-        "is_fork": bool(d.get("isCrossRepository")),
-        "labels": [str(x.get("name")) for x in d.get("labels") or [] if isinstance(x, dict)],
-        "additions": d.get("additions"),
-        "deletions": d.get("deletions"),
-        "changed_files": d.get("changedFiles"),
-    }
+def _label_names(seq: Any) -> list[str]:
+    return [str(x.get("name")) for x in seq or [] if isinstance(x, dict)]
 
 
-def _meta_from_rest(repo: str, d: dict[str, Any]) -> dict[str, Any]:
-    head = d.get("head") or {}
-    head_repo = (head.get("repo") or {}).get("full_name") or ""
-    state = "merged" if d.get("merged") or d.get("merged_at") else str(d.get("state") or "")
+def _build_meta(
+    d: dict[str, Any],
+    *,
+    state: str,
+    draft: bool,
+    author: str,
+    head_branch: str,
+    head_sha: str,
+    base_branch: str,
+    url: str,
+    is_fork: bool,
+    changed_files: Any,
+) -> dict[str, Any]:
+    """取得元によらない同じ形のメタ。number・title・body・labels・additions・deletions は両取得元で同じ鍵から取る。"""
     return {
         "number": d.get("number"),
         "title": d.get("title") or "",
         "body": d.get("body") or "",
         "state": state.lower(),
-        "draft": bool(d.get("draft")),
-        "author": str((d.get("user") or {}).get("login") or ""),
-        "head_branch": head.get("ref") or "",
-        "head_sha": head.get("sha") or "",
-        "base_branch": (d.get("base") or {}).get("ref") or "",
-        "url": d.get("html_url") or "",
-        "is_fork": bool(head_repo) and head_repo != repo,
-        "labels": [str(x.get("name")) for x in d.get("labels") or [] if isinstance(x, dict)],
+        "draft": draft,
+        "author": author,
+        "head_branch": head_branch,
+        "head_sha": head_sha,
+        "base_branch": base_branch,
+        "url": url,
+        "is_fork": is_fork,
+        "labels": _label_names(d.get("labels")),
         "additions": d.get("additions"),
         "deletions": d.get("deletions"),
-        "changed_files": d.get("changed_files"),
+        "changed_files": changed_files,
     }
+
+
+def _meta_from_graphql(d: dict[str, Any]) -> dict[str, Any]:
+    return _build_meta(
+        d,
+        state=str(d.get("state") or ""),
+        draft=bool(d.get("isDraft")),
+        author=str((d.get("author") or {}).get("login") or ""),
+        head_branch=d.get("headRefName") or "",
+        head_sha=d.get("headRefOid") or "",
+        base_branch=d.get("baseRefName") or "",
+        url=d.get("url") or "",
+        is_fork=bool(d.get("isCrossRepository")),
+        changed_files=d.get("changedFiles"),
+    )
+
+
+def _meta_from_rest(repo: str, d: dict[str, Any]) -> dict[str, Any]:
+    head = d.get("head") or {}
+    head_repo = (head.get("repo") or {}).get("full_name") or ""
+    return _build_meta(
+        d,
+        state="merged" if d.get("merged") or d.get("merged_at") else str(d.get("state") or ""),
+        draft=bool(d.get("draft")),
+        author=str((d.get("user") or {}).get("login") or ""),
+        head_branch=head.get("ref") or "",
+        head_sha=head.get("sha") or "",
+        base_branch=(d.get("base") or {}).get("ref") or "",
+        url=d.get("html_url") or "",
+        is_fork=bool(head_repo) and head_repo != repo,
+        changed_files=d.get("changed_files"),
+    )
 
 
 def fetch_pr_meta(repo: str, pr: int) -> tuple[dict[str, Any] | None, str, str]:
@@ -140,9 +166,40 @@ def _thread_items(slug: str, pr: int) -> tuple[list[dict[str, Any]], int | None]
         except (TypeError, ValueError):
             line = None
         items.append(
-            {"kind": "thread", "name": t["thread_id"], "result": "unresolved", "thread_id": t["thread_id"], "path": t["path"], "line": line}
+            {
+                "kind": "thread",
+                "name": t["thread_id"],
+                "result": "unresolved",
+                "thread_id": t["thread_id"],
+                "path": t["path"],
+                "line": line,
+                "body": t.get("body", ""),
+            }
         )
     return items, len(threads)
+
+
+def _diff_part(slug: str, pr: int, out: pathlib.Path) -> tuple[list[dict[str, Any]], dict[str, Any], str | None, str | None]:
+    """差分の部品。`(items, metrics, 取得できない部品の名前, note)`。"""
+    path, why = _save_diff(slug, pr, out)
+    item = {"kind": "diff", "name": "diff", "result": "saved" if path else "unavailable", "path": path, **({"reason": why} if why else {})}
+    return [item], {}, None if path else "diff", None
+
+
+def _checks_part(
+    slug: str, meta: dict[str, Any], parts: set[str], out: pathlib.Path
+) -> tuple[list[dict[str, Any]], dict[str, Any], str | None, str | None]:
+    """checks の部品。`(items, metrics, 取得できない部品の名前, note)`。"""
+    items, metrics, note = _check_items(slug, meta, parts, out)
+    return items, metrics, "checks" if note is None else None, note
+
+
+def _threads_part(slug: str, pr: int) -> tuple[list[dict[str, Any]], dict[str, Any], str | None, str | None]:
+    """未解決のスレッドの部品。`(items, metrics, 取得できない部品の名前, note)`。"""
+    items, count = _thread_items(slug, pr)
+    if count is None:
+        return items, {"unresolved_threads": None}, "threads", None
+    return items, {"unresolved_threads": count}, None, f"未解決 {count}"
 
 
 def pr_info(
@@ -173,31 +230,22 @@ def pr_info(
     unavailable: list[str] = []
     notes: list[str] = []
 
-    if "diff" in parts:
-        path, why = _save_diff(slug, pr, out)
-        items.append(
-            {"kind": "diff", "name": "diff", "result": "saved" if path else "unavailable", "path": path, **({"reason": why} if why else {})}
-        )
-        if not path:
-            unavailable.append("diff")
-
-    if "checks" in parts or "logs" in parts:
-        check_items, check_metrics, note = _check_items(slug, meta, parts, out)
-        items.extend(check_items)
-        metrics.update(check_metrics)
-        if note is None:
-            unavailable.append("checks")
-        else:
+    # 取得の順序は diff → checks → threads。左はその部品を取る --with の値
+    collectors = (
+        ({"diff"}, lambda: _diff_part(slug, pr, out)),
+        ({"checks", "logs"}, lambda: _checks_part(slug, meta, parts, out)),
+        ({"threads"}, lambda: _threads_part(slug, pr)),
+    )
+    for triggers, collect in collectors:
+        if not triggers & parts:
+            continue
+        part_items, part_metrics, missing, note = collect()
+        items.extend(part_items)
+        metrics.update(part_metrics)
+        if missing:
+            unavailable.append(missing)
+        if note:
             notes.append(note)
-
-    if "threads" in parts:
-        thread_items, count = _thread_items(slug, pr)
-        items.extend(thread_items)
-        metrics["unresolved_threads"] = count
-        if count is None:
-            unavailable.append("threads")
-        else:
-            notes.append(f"未解決 {count}")
 
     if unavailable:
         metrics["unavailable"] = unavailable

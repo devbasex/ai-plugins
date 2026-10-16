@@ -104,7 +104,7 @@
 | 通過工程の控えの hook が、1 回の実行の 2 件目以降の記録を読まないこと（#487） | 控えの契約の変更になる。まとまりの工程は控えの検査対象に入っていない |
 | 課題の指し方の一般化（#482） | 別の課題 |
 | 版数・`CHANGELOG.md` | 配布の工程が書く |
-| `docs/specifications/ndf-skill-inventory/02-frontmatter-and-triggers.md` と `docs/ndf-version-decisions.md` の `merged` の記述 | 当時の Pull Request で決めたことの記録である。現行の規約は `AUTHORING.md` が持つ |
+| `docs/specifications/ndf-skill-inventory/02-frontmatter-and-triggers.md` と `docs/archive/version-decisions/` の `merged` の記述 | 当時の Pull Request で決めたことの記録である。現行の規約は `AUTHORING.md` が持つ |
 | クラス図・ER 図・テーブル定義・CRUD 図・画面・API 仕様記述（設計の成果物） | 型・永続データ・画面・API を持たない変更である。変えるのは Skill の手順の文書と、その文面を読むテストだけ |
 
 ## 受け入れ条件

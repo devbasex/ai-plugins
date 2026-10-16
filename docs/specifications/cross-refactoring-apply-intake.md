@@ -36,7 +36,7 @@
 | 最終ゲート修正 | `final-fix` / `merge-final-fix` | 最終ゲートの失敗を直す起動と、そのマージ処理 |
 | 起動結果 | `LaunchOutcome` | 担当 1 回の起動の終わり方。使える結果か、結果なしの理由かを持つ |
 | 結果なし | `payload` が `None` | 結果ファイルが無い、または JSON オブジェクトとして読めない |
-| リトライ可否 | `relaunch_same_agent` | 同じ担当を同じ条件で起動し直せば解ける起動結果か |
+| リトライ可否 | `assignment.relaunch_same_agent` | 同じ担当を同じ条件で起動し直せば解ける起動結果か |
 | 起動結果の読み取り | `gitfacts.read_result` | 状態・担当・手順から結果ファイルの名前の幹を組み、起動結果を値で返す包み |
 | 起動結果のライブラリ | `lib/monitor_outcome.py` の `read_launch_outcome` | 理由の語彙と可否を持つ、2 つの Skill 共通の読み取り |
 | マージ処理の共通手順 | `refactor_lib/intake.py` | 範囲の確定・取り消し・起動結果の記録。今は最終ゲート修正のマージ処理だけが通る |

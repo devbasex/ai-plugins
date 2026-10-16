@@ -1,1 +1,1 @@
-{"path": "plugins/ndf/scripts/pr-steps.py", "name": "", "kind": "lines", "reason": "一括の整形（#1323）で物理行が増えた。500 行以下にしたら消す", "lines": 593}
+{"path": "plugins/ndf/scripts/pr-steps.py", "name": "", "kind": "lines", "reason": "一括の整形（#1323）で物理行が増え、ツールのパスの分類と除外（#1436）で 6 行増えた。500 行以下にしたら消す", "lines": 599}

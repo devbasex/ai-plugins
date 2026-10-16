@@ -2,7 +2,7 @@
 
 NDF プラグインの版数の付け方と、正式版・開発版のリリースの手順・実測・一覧を持つ。**この主題の正本である。**
 判断の基準（何を選ぶか）は [AGENTS.md](../AGENTS.md) の「版と配布の方針」にあり、この文書は
-どう動くかとどう確かめるかを扱う。リリース済み版ごとの判断は [ndf-version-decisions.md](ndf-version-decisions.md) にある。
+どう動くかとどう確かめるかを扱う。リリース済み版ごとの判断は確定仕様（[specifications/](specifications/)）にある（v10.17.51 までは [archive/version-decisions/](archive/version-decisions/)）。
 
 ## チャネルと ref
 
@@ -57,11 +57,11 @@ semver の順序で除外されるのは、プラグイン間の依存解決（`
 
 | 版 | 形 | 意味 |
 | --- | --- | --- |
-| 正式版 | `10.18.0` | 利用者が常用してよい |
+| 正式版 | `10.17.75` | 利用者が常用してよい |
 | 開発版 | `10.19.0-dev.1` | 検証中。入れたくない利用者は取得を控えられる |
 | 公開前の確認版 | `10.19.0-rc.1` | 正式版の候補。残るのは確認だけ |
 
-- 接尾辞は**次に出す正式版の版数へ付ける**。`10.18.0` の次を開発するなら `10.19.0-dev.1`
+- 接尾辞は**次に出す正式版の版数へ付ける**。`10.17.75` の次を開発するなら `10.19.0-dev.1`
 - 連番は開発版を出すたびに増やす。**同じ版数で中身を差し替えない**。差し替えると、利用者の
   手元にある版と `main` の版が同じ番号で別物になり、何を確かめたのかが分からなくなる
 - **正式版を出すときは接尾辞を外す。** `10.19.0-dev.3` の次は `10.19.0`
@@ -163,8 +163,10 @@ agy plugin uninstall ndf && agy plugin install <clone>/plugins/ndf/dev.agy
 
 **`git push origin develop:main` は使えない。** `main` / `develop` を守る ruleset の bypass は
 `pull_request` で作ってあり、**このモードは Pull Request のマージだけを通し、直接 push は
-管理者でも拒む**。必須のチェック 12 個は Pull Request で走るため、`develop` の先端のコミットには
-`push` 起動の 1 個しか結果が付いていない。
+管理者でも拒む**。必須のチェックは Pull Request で走るため、`develop` の先端のコミットには
+`push` 起動の 1 個しか結果が付いていない。必須のチェックの一覧は
+`gh api repos/<owner>/<repo>/rules/branches/develop` で読み、ワークフローのジョブとの食い違いは
+突き合わせのチェック（`required-checks-check`、`scripts/check-required-checks.py`）が Pull Request ごとに知らせる。
 
 ```console
 $ git push origin develop:main
@@ -174,8 +176,8 @@ remote:
  ! [remote rejected] develop -> main (push declined due to repository rule violations)
 ```
 
-この例は必須のチェックが 11 個だったときの観測である。`instruction-files-check` を足して 12 個に
-なった後は `11 of 12` になる。
+この例は必須のチェックが 11 個だったときの観測である。必須のチェックの数を N とすると、
+`N-1 of N` になる。
 
 **この手順では `main` に `develop` へ無いマージコミットが 1 つ積まれる。** そのため `main` は
 `develop` の fast-forward から外れる。**それでよい。** リリースした版を指すのは `main` の先端で
@@ -195,8 +197,8 @@ git fetch origin && git diff --stat origin/develop origin/main   # 空である�
 は指定しないと `main` を宛先にする。**`--base develop` を必ず付ける。**
 
 **リリースの Pull Request では、重いチェック（`pytest` と `runtime-smoke (*)`）を省く。** 同じ中身を
-2 度試さないためである。判定は各 workflow の `ci-scope` のジョブが `scripts/ci-heavy-skip.py` で
-行い、次のどちらかのときだけ省く。
+2 度試さないためである。判定は各 workflow の `ci-scope` のジョブ（チェックの名前は `pytest-scope`・
+`runtime-smoke-scope`）が `scripts/ci-heavy-skip.py` で行い、次のどちらかのときだけ省く。
 
 - 差分が版数と説明だけ（版上げの `release/v<版>` → `develop`）。説明は `CHANGELOG.md`・
   `README.md`・`AGENTS.md`・`plugins/**/README.md`・この文書・`docs/metrics/ndf-token-usage/`
@@ -227,15 +229,15 @@ claude plugin tag plugins/ndf --push      # ndf--v<版> を作って origin へ�
 `{プラグイン名}--v{版}` の形で作られ、打つ前に `plugin.json` の版とマーケットプレイスの項目が
 食い違っていないかをチェックする。
 
-## 版数を持つ 15 箇所
+## 版数を持つ箇所
 
-**版数を持つ箇所は 2 種類ある。** チェックが突き合わせる 15 箇所と、**チェックに載らず手で直す箇所**である。
+**版数を持つ箇所は 2 種類ある。** チェックが突き合わせる箇所と、**チェックに載らず手で直す箇所**である。
 
 揃っていないと `scripts/check-doc-staleness.py` と `scripts/validate-runtime-plugins.sh` が
 落ちる。**記載を消してもチェックは通らない。** 位置を決める語が見つからなければ、読み取れない
 こととして落ちる。
 
-**定義ファイルと更新案内の見出しが 8 箇所である。** 3 つの `plugin.json` はいずれも
+**定義ファイルが 7 箇所である。** 3 つの `plugin.json` はいずれも
 `version` と `description` の両方に版数を持つため、片方だけ直すとチェックで止まる。
 
 | 箇所 | 何を書くか |
@@ -247,16 +249,23 @@ claude plugin tag plugins/ndf --push      # ndf--v<版> を作って origin へ�
 | `plugins/ndf/dev.agy/plugin.json` の `version` | 版数そのもの |
 | `plugins/ndf/dev.agy/plugin.json` の `description` | `(vX.Y.Z)` の形で版数 |
 | `.claude-plugin/marketplace.json` の該当プラグインの `description` | 同上 |
-| `plugins/ndf/README.md` の更新案内の見出し | `## vX.Y.Z へ更新するとき` |
 
-**説明文書の本文が 7 箇所である。** いずれも利用者が読む入口にあり、古いまま残ると現行版を
+**plugin の README は版ごとの更新の節（`## vX.Y.Z へ更新するとき`）を持たない。** README は現行版の説明と、
+CHANGELOG.md を参照する固定の「`## 更新情報`」の節だけを持ち、版ごとの変更と移行の手順は CHANGELOG.md の版の節に
+置く。配布の手順（`release-steps.py` の `bump`・`changelog`・`notes`）は README に触れない。節が戻ると
+`scripts/check-doc-staleness.py` が落とす（`plugins/*/README.md`・`plugins/mcp/*/README.md`）。
+
+**説明文書の本文が 6 箇所である。** いずれも利用者が読む入口にあり、古いまま残ると現行版を
 誤って伝えるか、書かれたとおりに実行できない。
+
+**指示書（`AGENTS.md` / `CLAUDE.md`）には版数を書かない。** 開発版の配布の `bump` が版数を
+`-dev.<連番>` 付きへ書き換えると、Pull Request で上限に収まった指示書の読み込み量が配布の時点で
+伸び、指示書のチェックで止まるためである。
 
 | 箇所 | 何を書くか | 突き合わせ先 |
 | --- | --- | --- |
 | `README.md` の概要 | `**NDFプラグイン vX.Y.Z**` | `ndf` の `plugin.json` |
 | `README.md` のプラグイン一覧表 | 版数の列 | 行ごとに `plugins/<名前>/.claude-plugin/plugin.json` |
-| `AGENTS.md` の「NDFプラグインについて」 | 「主要プラグインです（vX.Y.Z）」 | `ndf` の `plugin.json` |
 | `docs/versioning-and-distribution.md` の「版の付け方と開発版の配布」章 | 版数の例 | `ndf` の `plugin.json`（基底の比較） |
 | `plugins/ndf/README.md` の Kiro の確認例 | 期待出力の版数 | `ndf` の `plugin.json` |
 | `plugins/ndf/README.md` の Codex のパス例 | `~/.codex/plugins/cache/.../ndf/X.Y.Z/`（2 箇所） | `ndf` の `plugin.json` |
@@ -287,7 +296,7 @@ claude plugin tag plugins/ndf --push      # ndf--v<版> を作って origin へ�
 表を章へ足すと、同じ行が複数あるとして落ちる。コードの囲みの中の表と文は、実行例か出力例として数えない。
 
 **版を決めるのは `plugins/ndf/.claude-plugin/plugin.json` の `version` だけである。** 他の
-14 箇所は読み手向けの記載とチェックのための突き合わせ先で、取得する版を変えない。
+箇所は読み手向けの記載とチェックのための突き合わせ先で、取得する版を変えない。
 `.claude-plugin/marketplace.json` に `version` フィールドは置かない。
 
 **版を持つのは `plugins/<名前>/.claude-plugin/plugin.json` だけである。**
@@ -296,39 +305,37 @@ claude plugin tag plugins/ndf --push      # ndf--v<版> を作って origin へ�
 両方に版を持たせると `plugin.json` が無警告で優先され、食い違いに気づけなくなる。
 
 `scripts/validate-runtime-plugins.sh` が突き合わせるのは、説明文書に書かれた Skill の数と、
-**版数を書いた 15 箇所**です。定義ファイルと更新案内の見出しが 8 箇所、説明文書の本文が
-7 箇所あります（`README.md` の概要とプラグイン一覧表、`AGENTS.md` と正本に 1 箇所ずつ、
+**版数を書いた箇所**です。定義ファイルが 7 箇所、説明文書の本文が
+6 箇所あります（`README.md` の概要とプラグイン一覧表、正本に 1 箇所、
 `plugins/ndf/README.md` の Kiro と Codex の確認例 3 種類）。**記載を消してもチェックは通りません。**
 一覧は上の 2 つの表にあります。
 
 ## チェックに載らず手で直す箇所
 
-**チェックが見るのは版数そのものの一致までで、記載の中身までは見ない。** 次の 3 つは版を
+**チェックが見るのは版数そのものの一致までで、記載の中身までは見ない。** 次の 2 つは版を
 上げるたびに人が読み直す。
 
 | 箇所 | 何を確かめるか |
 | --- | --- |
-| `plugins/ndf/README.md` の更新案内の本文 | その版の変更を説明しているか。見出しの版数はチェックが見るが、本文が何を説明しているかは機械では判定できない |
 | 接尾辞の付け忘れ・外し忘れ | 接尾辞の付いた版でもチェックは通る（形式としては妥当な版数のため）。出す前に版数を読み直す |
 | `CHANGELOG.md` の版の節 | その版で何が変わったかを書く。版数と日付は機械で確かめられるが、内容は書かないと残らない |
 
 **バージョン更新時の手順**:
 1. `plugin.json`のバージョンをインクリメント
 2. 変更内容をドキュメント化
-3. `plugins/ndf/README.md` の「v&lt;版&gt; へ更新するとき」の節を開き、**本文をその版の変更内容へ書き直す**。見出しの版数だけを置き換えて、本文を前の版の説明のまま残さない
-4. `CHANGELOG.md` の先頭へその版の節を足す。書式は Keep a Changelog に従い、変更点を
+3. `CHANGELOG.md` の先頭へその版の節を足す。書式は Keep a Changelog に従い、変更点を
    `追加` / `変更` / `修正` / `削除` へ分類して 1〜2 行で書く。判断の理由は
-   `docs/ndf-version-decisions.md` へ置く
-5. Skill の数が増減した場合は、`README.md` と `plugins/ndf/README.md` に書かれた数を書き直す
-6. `python3 scripts/check-doc-staleness.py --root .` を実行し、説明文書に残った古い版数を
+   確定仕様（`docs/specifications/`）が持つ
+4. Skill の数が増減した場合は、`README.md` と `plugins/ndf/README.md` に書かれた数を書き直す
+5. `python3 scripts/check-doc-staleness.py --root .` を実行し、説明文書に残った古い版数を
    出力の行番号のとおりに直す
-7. `python3 plugins/ndf/scripts/instructions-check.py --root .` を実行し、リリース済み版の段落が
-   指示書に残っていないかを見る。落ちた段落は `docs/ndf-version-decisions.md` へ移す
-8. 破壊的変更がある場合は明示
-9. テストを実行
-10. **正式版として `main` を進めた後、リリースタグを打つ**
+6. `python3 plugins/ndf/scripts/instructions-check.py --root .` を実行し、リリース済み版の段落が
+   指示書に残っていないかを見る。落ちた段落はその主題の確定仕様（`docs/specifications/`）へ移す
+7. 破壊的変更がある場合は明示
+8. テストを実行
+9. **正式版として `main` を進めた後、リリースタグを打つ**
 
-**すべての版数を機械的に置換しない。** 履歴（`docs/ndf-version-decisions.md`、`CLAUDE.md` の
+**すべての版数を機械的に置換しない。** 履歴（`docs/archive/version-decisions/`、確定仕様、`CLAUDE.md` の
 現行版の段落、`docs/development-history/`）、記録（`issues/`）、意図的に前の版を指す文（取り消しの説明）は
 そのまま残す。現行版を指しているかは文脈で決まる。**チェックが突き合わせるのは、周囲の固定の語で
 位置を決めた記載だけである。** 履歴と記録は最初から走査に入らない。

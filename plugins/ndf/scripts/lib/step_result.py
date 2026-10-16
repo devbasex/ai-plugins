@@ -26,6 +26,7 @@ from pathlib import Path
 
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
+import deps  # noqa: E402
 import proc  # noqa: E402
 
 # 子プロセスと git の起動は `proc` が持つ（#1142 の L0）。ここの名前は同じものを指す
@@ -45,6 +46,11 @@ EXIT_PRECONDITION = 3  # 前提が無い（宣言・認証・対象のファイ�
 # （立たない・変更なし・飛ばしてよい）。読めないときは 2 で返し、3 と混ぜない
 EXIT_GATE = 10  # 10〜19: 関門（人の同意が要る）
 EXIT_PAUSE = 20  # 20〜29: LLM の判断待ち
+# 依存の欠け（`deps.require` が外部パッケージを用意できずに止まった。何も判定していない）。値の持ち主は deps.py
+EXIT_DEPS_MISSING = deps.EXIT_DEPS_MISSING
+# CI の基盤待ち（Runner が付かずに取り消されたジョブが再実行でも解けない。sysexits.h の EX_TEMPFAIL。
+# 中身の失敗ではなく、後で打ち直せば通りうる。merge-when-green と release が返す。#1645）
+EXIT_INFRA_WAIT = 75
 
 GATE_CODES = range(10, 20)
 PAUSE_CODES = range(20, 30)
@@ -60,42 +66,52 @@ def code_matches(status: str, code: int) -> bool:
         return code == EXIT_OK
     if status == "gate":
         return code in GATE_CODES or code in PAUSE_CODES
-    return code in (EXIT_VIOLATION, EXIT_UNREADABLE, EXIT_PRECONDITION)
+    return code in (EXIT_VIOLATION, EXIT_UNREADABLE, EXIT_PRECONDITION, EXIT_DEPS_MISSING, EXIT_INFRA_WAIT)
 
 
-def validate_result(obj, code: int | None = None) -> list[str]:
-    """結果の形の誤りを並べて返す。空なら正しい。code を渡すと status との対応も確かめる。"""
-    if not isinstance(obj, dict):
-        return ["結果はオブジェクトで書く"]
-    errs = []
-    for k in REQUIRED:
-        if k not in obj:
-            errs.append(f"{k} が無い")
-    unknown = set(obj) - set(REQUIRED) - set(OPTIONAL)
-    if unknown:
-        errs.append(f"知らない項目: {', '.join(sorted(unknown))}")
+def _check_item_types(obj: dict, errs: list[str]) -> None:
+    if "items" not in obj:
+        return
+    if not isinstance(obj["items"], list):
+        errs.append("items は配列で書く")
+        return
+    for i, it in enumerate(obj["items"]):
+        if not isinstance(it, dict):
+            errs.append(f"items[{i}] はオブジェクトで書く")
+
+
+def _check_field_types(obj: dict, errs: list[str]) -> None:
     if "tool" in obj and (not isinstance(obj["tool"], str) or not obj["tool"]):
         errs.append("tool は空でない文字列で書く")
     if "status" in obj and obj["status"] not in STATUSES:
         errs.append(f"status は {' / '.join(STATUSES)} のどれか: {obj['status']!r}")
     if "summary" in obj and not isinstance(obj["summary"], str):
         errs.append("summary は文字列で書く")
-    if "items" in obj:
-        if not isinstance(obj["items"], list):
-            errs.append("items は配列で書く")
-        else:
-            for i, it in enumerate(obj["items"]):
-                if not isinstance(it, dict):
-                    errs.append(f"items[{i}] はオブジェクトで書く")
+    _check_item_types(obj, errs)
     if "metrics" in obj and not isinstance(obj["metrics"], dict):
         errs.append("metrics はオブジェクトで書く")
     for k in OPTIONAL:
         if k in obj and obj[k] is not None and not isinstance(obj[k], str):
             errs.append(f"{k} は文字列で書く")
+
+
+def _check_status_code(obj: dict, code: int | None, errs: list[str]) -> None:
     if obj.get("status") == "gate" and not obj.get("presentation_path") and not obj.get("next"):
         errs.append("gate には presentation_path か next を添える")
     if code is not None and obj.get("status") in STATUSES and not code_matches(obj["status"], code):
         errs.append(f"status {obj['status']} と終了コード {code} が合わない")
+
+
+def validate_result(obj, code: int | None = None) -> list[str]:
+    """結果の形の誤りを並べて返す。空なら正しい。code を渡すと status との対応も確かめる。"""
+    if not isinstance(obj, dict):
+        return ["結果はオブジェクトで書く"]
+    errs = [f"{k} が無い" for k in REQUIRED if k not in obj]
+    unknown = set(obj) - set(REQUIRED) - set(OPTIONAL)
+    if unknown:
+        errs.append(f"知らない項目: {', '.join(sorted(unknown))}")
+    _check_field_types(obj, errs)
+    _check_status_code(obj, code, errs)
     return errs
 
 
@@ -137,7 +153,41 @@ def presentation_dir() -> Path:
     return d
 
 
-def approval_present(tool: str, name: str, *, title: str, targets, change: str, judge, consent, rollback: str, path=None) -> str:
+def _validate_present_args(targets, consent, rollback: str) -> None:
+    if not targets:
+        raise ValueError("targets が空")
+    if not consent:
+        raise ValueError("consent が空")
+    if not rollback or not rollback.strip():
+        raise ValueError("rollback が空（戻し方を必ず示す）")
+
+
+def _targets_lines(targets) -> list[str]:
+    """「対象を開くためのもの」節の箇条（URL は生のまま書く）。"""
+    lines = []
+    for t in targets:
+        url = t["url"]
+        lines.append(f"- {url}" + (f"  {t['title']}" if t.get("title") else ""))
+        if t.get("base_head"):
+            lines.append(f"  - ベースと head: {t['base_head']}")
+    return lines
+
+
+def _judge_table(judge) -> list[str]:
+    """「判断に使うもの」の表。"""
+    lines = ["| 項目 | 内容 |", "| --- | --- |"]
+    for k, v in judge:
+        lines.append(f"| {k} | {str(v).replace('|', chr(92) + '|').replace(chr(10), '<br>')} |")
+    return lines
+
+
+# approval_present が書く `## ` の見出し（書く順）。承認資料の作り直しで、これ以外の節を残す（#1834）
+PRESENT_HEADINGS = ("## 1. 対象を開くためのもの", "## 2. 承認の判断に使うもの", "## 同意を求めること", "## 戻し方")
+
+
+def approval_present(
+    tool: str, name: str, *, title: str, targets, change: str, judge, consent, rollback: str, path=None, sections=()
+) -> str:
     """approval-request.md の 2 層の形で提示物の Markdown を書き出し、パスを返す。
 
     targets: [{"url", "title"?, "base_head"?}]（URL は生のまま書く）
@@ -145,25 +195,20 @@ def approval_present(tool: str, name: str, *, title: str, targets, change: str, 
     judge: [(項目, 内容)]（判断に使うもの）
     consent: 同意を求める項目の列
     rollback: 戻し方（配布では取り消しの手段とその限界）
+    sections: [(見出し, 行の列)]。`## 同意を求めること` の前へ、この順で置く
     """
-    if not targets:
-        raise ValueError("targets が空")
-    if not consent:
-        raise ValueError("consent が空")
-    if not rollback or not rollback.strip():
-        raise ValueError("rollback が空（戻し方を必ず示す）")
-    lines = [f"# {title}", "", "## 1. 対象を開くためのもの", ""]
-    for t in targets:
-        url = t["url"]
-        lines.append(f"- {url}" + (f"  {t['title']}" if t.get("title") else ""))
-        if t.get("base_head"):
-            lines.append(f"  - ベースと head: {t['base_head']}")
-    lines += [f"- 変更量: {change}", "", "## 2. 承認の判断に使うもの", "", "| 項目 | 内容 |", "| --- | --- |"]
-    for k, v in judge:
-        lines.append(f"| {k} | {str(v).replace('|', chr(92) + '|').replace(chr(10), '<br>')} |")
-    lines += ["", "## 同意を求めること", ""]
+    _validate_present_args(targets, consent, rollback)
+    open_h, judge_h, consent_h, rollback_h = PRESENT_HEADINGS
+    lines = [f"# {title}", "", open_h, ""]
+    lines += _targets_lines(targets)
+    lines += [f"- 変更量: {change}", "", judge_h, ""]
+    lines += _judge_table(judge)
+    lines.append("")
+    for heading, body in sections:
+        lines += [heading, "", *body, ""]
+    lines += [consent_h, ""]
     lines += [f"- [ ] {c}" for c in consent]
-    lines += ["", "## 戻し方", "", rollback.strip(), ""]
+    lines += ["", rollback_h, "", rollback.strip(), ""]
     if path is None:
         safe = re.sub(r"[^0-9A-Za-z._-]+", "-", f"{tool}-{name}").strip("-")
         path = presentation_dir() / f"{safe}-gate.md"
@@ -179,8 +224,9 @@ CO_AUTHOR = "Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com
 VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$")
 
 
-def commit(root, subject):
-    git(root, "commit", "-q", "-m", f"{subject}\n\n{CO_AUTHOR}\n")
+def commit(root, subject, paths=()):
+    """コミットして HEAD を返す。paths を渡すとその分だけを確定し（`git commit --only`）、他に stage 済みの変更は残す。"""
+    git(root, "commit", "-q", "-m", f"{subject}\n\n{CO_AUTHOR}\n", *(["--only", "--", *paths] if paths else []))
     return git(root, "rev-parse", "HEAD").stdout.strip()
 
 

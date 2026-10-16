@@ -22,7 +22,7 @@ allowed-tools:
 
 | 何を | どこが持つか |
 | --- | --- |
-| Google Drive からの取得 | `google-drive` |
+| Google Drive からの取得 | `google-workspace` |
 | システムごとの取得の手順 | `document-systems` の `system-<名前>.md` |
 | SQL による集計 | 対象リポジトリの手段（`ndf:data-analyst` エージェントなど） |
 | 書かれた値と出所の突き合わせ | **`quality-gates` の事実確認の手順**（この Skill の外） |

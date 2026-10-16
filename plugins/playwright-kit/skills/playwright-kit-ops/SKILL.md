@@ -1,6 +1,6 @@
 ---
 name: playwright-kit-ops
-description: "Run the playwright_kit scripts: init, page-role classification, a11y / CWV scans, Drive upload. Use when running one directly（playwright_kitのスクリプトを実行・a11yスキャン）."
+description: "Run the playwright_kit scripts: init, page-role classification, a11y / CWV scans. Use when running one directly（playwright_kitのスクリプトを実行・a11yスキャン）."
 allowed-tools:
   - Read
   - Bash(python *)
@@ -26,10 +26,6 @@ playwright_kit のスクリプト群を実行してテスト環境のセット�
 | `scripts/record_scenario.py` | Playwright codegen で操作を記録しテストコード化 | テスト計画 |
 | `scripts/run_a11y_scan.py` | axe-core による単発 accessibility スキャン | 品質 |
 | `scripts/check_cwv.py` | Core Web Vitals (LCP/CLS/TTFB) 単発計測 | 品質 |
-| `scripts/upload_evidence.py` | エビデンスファイルを Google Drive にアップロード | レポート |
-| `scripts/gdrive_upload_dir.py` | ディレクトリごと Drive にバッチアップロード | レポート |
-| `scripts/upload_md_as_gdoc.py` | Markdown を Google Doc に変換・アップロード | レポート |
-| `scripts/build_gdoc_with_drive_links.py` | Google Doc にエビデンスの Drive リンクを埋め込み | レポート |
 
 ## 出力と終了コード
 
@@ -45,11 +41,7 @@ playwright_kit のスクリプト群を実行してテスト環境のセット�
 | `record_scenario.py` | codegen の終了コードをそのまま返す | 同左 | playwright CLI が無い・起動できない |
 | `run_a11y_scan.py` | 走査した | `--fail-on-violations` で違反が 1 件以上 | 引数の誤り |
 | `check_cwv.py` | 計測した | `--fail-on-poor` で poor が 1 件以上 | 引数の誤り |
-| `upload_evidence.py` | 上げた | 認証・Drive API の失敗 | 引数の誤り・ファイルが無い |
-| `gdrive_upload_dir.py` / `upload_md_as_gdoc.py` | 上げた | 認証・Drive API の失敗 | 引数の誤り |
-| `build_gdoc_with_drive_links.py` | Doc を作った | run-id のフォルダが無い・認証・Drive API の失敗 | 引数の誤り |
 
-1 の「認証・Drive API の失敗」は例外で止まり、標準エラーに理由が出る (標準出力の JSON は出ない)。
 計画と作成の工程のスクリプトは各 Skill に置く: `playwright-planning/scripts/plan_skeleton.py` (計画書の雛形)、
 `playwright-authoring/scripts/lint_scenario.py` (構文木での検査) と `app_ready.sh` (起動の確認)。
 終了コードは各 Skill の SKILL.md に書く。
@@ -78,22 +70,6 @@ cd /path/to/your-app
 ./scenario-test/run.sh                            # 全テスト
 ./scenario-test/run.sh -k test_admin              # フィルタ
 ./scenario-test/run.sh --pwk-overlay              # 字幕 + カーソル付き動画
-./scenario-test/run.sh --pwk-drive-folder=<ID>    # Drive 自動アップロード
-```
-
-Drive 連携は optional dependency として扱う。`google-auth` / `google-drive` skill は
-NDF の 4 つのランタイム (Claude Code / Codex / Kiro / agy) すべてへ配布されるが、
-playwright-kit とは別のプラグインであるため、置かれる場所は導入したランタイムで変わる。
-スクリプトは各ランタイムの標準の導入先・Claude Code のプラグインのキャッシュ
-(`~/.claude/plugins/cache/<取得元>/ndf/<版>/` の最新の版)と、この Skill と並ぶ `google-auth/scripts` を探す
-(`scripts/_drive_auth.py`)。候補で見つからないときは `GOOGLE_AUTH_SCRIPTS` を
-`google-auth/scripts` へ設定する。
-
-```bash
-# 例: ai-plugins を clone した先の google-auth を使う
-export GOOGLE_AUTH_SCRIPTS=<ai-plugins のパス>/plugins/ndf/skills/google-auth/scripts
-cd scenario-test
-uv sync --extra drive
 ```
 
 ## テスト計画ツール
@@ -116,29 +92,6 @@ python scripts/run_a11y_scan.py --url https://example.com
 python scripts/check_cwv.py --url https://example.com
 ```
 
-## エビデンスアップロードツール
-
-```bash
-# 単一ファイルを Drive にアップロード
-python scripts/upload_evidence.py reports/run-001/test_login/trace.zip \
-  --kind trace --parent-folder-id FOLDER_ID
-
-# ディレクトリごとアップロード
-python scripts/gdrive_upload_dir.py --local reports/run-001/ --parent FOLDER_ID
-
-# Markdown を Google Doc へ変換
-python scripts/upload_md_as_gdoc.py --md reports/run-001/report.md --parent FOLDER_ID
-
-# エビデンスの Drive リンクを埋め込んだ Google Doc を作る
-python scripts/build_gdoc_with_drive_links.py \
-  --md reports/run-001/report.md --folder FOLDER_ID \
-  --run-id run-001 --name "run-001 レポート"
-```
-
-`--parent` / `--parent-folder-id` / `--folder` に渡すのは Drive のフォルダ ID。
-`upload_evidence.py` の `--parent-folder-id` だけは省略でき、その場合はマイドライブ
-直下へ置く。
-
 ## パッケージ参照
 
 playwright_kit Python パッケージ本体・templates・tests はこの skill ディレクトリ内に配置されている。
@@ -147,4 +100,4 @@ playwright_kit Python パッケージ本体・templates・tests はこの skill 
 
 - `/playwright-kit:playwright-planning` — テスト計画 (方法論 + チェックリスト + ワークフロー全体像)
 - `/playwright-kit:playwright-authoring` — スクリプト作成と実行 (テストコード / エビデンス / ブラウザ接続)
-- `/playwright-kit:playwright-evidence` — 証跡とレポート (report.md / Google Drive 保管)
+- `/playwright-kit:playwright-evidence` — 証跡とレポート (report.md と reports/<run-id>/ のエビデンス)

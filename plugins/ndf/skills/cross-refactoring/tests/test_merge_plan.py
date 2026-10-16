@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import shlex
 
 import pytest
 
-from crossref_helpers import make_state_v2, read_state, write_result, write_state
+from crossref_helpers import SCOPE_COMMAND, make_state_v2, read_state, strategy_state, write_result, write_state
+
+SCOPE_WORDS = SCOPE_COMMAND.split()[:-1]
 
 
 def _candidate(n, symbol, *, smell="long_method", technique="extract_method", agreed=("codex",), severity="major"):
@@ -70,10 +73,13 @@ def test_items_carry_rank_estimate_tests_and_targets(planned, cmd_plan, capsys):
     items = state["items"]
     assert [i["candidate_id"] for i in items] == ["C-001", "C-002"]  # 等級が先
     assert items[0]["tests"] == ["tests/test_new.py"]
-    assert items[0]["command"] == ["pytest", "-q", "tests/test_new.py"]
+    # 範囲テストは戦略の雛形の `{paths}` を対象へ置き換えたもの（#1334 AC2）。語は雛形の語の並びから `{paths}` を除いたものを含む。
+    assert items[0]["scope_commands"] == [{"suite": "pytest", "kind": "test", "command": shlex.join(SCOPE_WORDS + ["tests/test_new.py"])}]
     assert items[0]["estimate"] == {"test": 2.7, "implement": 1.3, "verify": 0.2}
-    assert items[0]["test_start_deadline"] is not None
-    assert items[1]["test_start_deadline"] is None
+    # 項目は期限を持たず、巡の番号を持つ（#1743 I13）
+    assert all("start_deadline" not in i and "test_start_deadline" not in i and i["round"] == 1 for i in items)
+    assert state["readopt"] == {"round": 1, "events": []}
+    assert state["pause"] == {"seconds": 0, "shifted_seconds": 0, "legacy": False, "events": []}
     assert state["plan"]["table_source"] == "defaults"
     assert "TESTS_NEEDED=1" in capsys.readouterr().out
 
@@ -81,7 +87,8 @@ def test_items_carry_rank_estimate_tests_and_targets(planned, cmd_plan, capsys):
 def test_items_that_do_not_fit_are_skipped_and_the_rest_packed(planned, cmd_plan):
     """AC8 / 決定 10: 入らない項目は飛ばし、後ろの小さな項目を詰める。"""
     big, small = _candidate(1, "big"), _candidate(2, "small")
-    # 使える時間 = 20 − 経過 5 − 予備時間（0.1 + 0.1 + 5.5 + 最終ゲートの修正 5.5）≒ 3.8 分。
+    # 使える時間 = 20 − 経過 5 − 予備時間（最終ゲートの全体テスト 0.1 + 5.5 + 最終ゲートの修正 5.5）≒ 3.9 分。
+    # 危険フラグの全体テストは最終ゲートと兼ねるため数えない（#1743 決定 1）。
     # big は 4.2 分、small は 1.5 分。
     path = planned(
         [big, small],
@@ -96,7 +103,7 @@ def test_items_that_do_not_fit_are_skipped_and_the_rest_packed(planned, cmd_plan
     assert [i["candidate_id"] for i in state["items"]] == ["C-002"]
     assert [(d["path"], d["symbol"], d["defer_reason"]) for d in state["deferred_items"]] == [("src/a.py", "big", "budget")]
     reserve = state["plan"]["reserve"]
-    assert reserve["danger_whole_test"] == pytest.approx(0.1)
+    assert reserve["danger_whole_test"] == 0.0
     assert reserve["final_whole_test"] == pytest.approx(0.1)
     assert reserve["fix"] == pytest.approx(5.5)
     assert reserve["final_fix"] == pytest.approx(5.5)
@@ -127,21 +134,35 @@ def test_an_item_without_a_limited_test_is_no_target(planned, cmd_plan):
     assert sorted(d["defer_reason"] for d in state["deferred_items"]) == ["no_target"] * 3
 
 
+def _round_only(command):
+    return strategy_state("round-only", "args", suites=[], round_command=command)
+
+
 def test_a_round_test_is_used_as_is_when_targets_cannot_be_built(planned, cmd_plan):
+    """`round-only` はラウンドテストをそのまま走らせる（AC4 の `--round-test` の経路）。"""
     a = _candidate(1, "f")
-    path = planned([a], [_answer(a, test_targets=[])], round_test={"command": "make test-unit", "status": "green"})
+    path = planned([a], [_answer(a, test_targets=[])], strategy=_round_only("make test-unit"))
     _run(cmd_plan)
     item = read_state(path)["items"][0]
-    assert item["command"] == ["make", "test-unit"]
+    assert item["scope_commands"] == [{"suite": "round", "kind": "test", "command": "make test-unit"}]
     assert item["command_source"] == "round_test"
 
 
 def test_a_missing_plan_result_uses_defaults_and_does_not_stop(planned, cmd_plan):
     a = _candidate(1, "f")
-    path = planned([a], None, round_test={"command": "pytest -q tests", "status": "green"})
+    path = planned([a], None, strategy=_round_only("pytest -q tests"))
     _run(cmd_plan)
     item = read_state(path)["items"][0]
     assert (item["tier"], item["tests"], item["command_source"]) == ("medium", [], "round_test")
+
+
+def test_the_verify_estimate_grows_with_the_measured_scope_test(planned, cmd_plan):
+    """項目の検証の見積りは、配分の verify と着手前の範囲テストの実測の大きい方（#1334 決定 8）。"""
+    a = _candidate(1, "f")
+    baseline = {"mode": "scope", "command": "x", "status": "green", "checked_at": "t", "seconds": 90.0, "existing_failures": []}
+    path = planned([a], [_answer(a)], strategy=strategy_state("local-scoped-ci-whole"), baseline_test=baseline)
+    _run(cmd_plan)
+    assert read_state(path)["items"][0]["estimate"]["verify"] == pytest.approx(1.5)
 
 
 def test_runtime_merge_into_defers_the_duplicate(planned, cmd_plan):
@@ -233,7 +254,7 @@ def test_the_plan_writes_every_runtime_value_to_the_state(planned, cmd_plan):
     ):
         assert limits[key] is not None, key
     for item in state["items"]:
-        assert item["start_deadline"] and "public_io" in item
+        assert "public_io" in item
 
 
 def test_d5_is_decided_by_jev_at_the_plan(planned, cmd_plan, monkeypatch):
@@ -270,3 +291,21 @@ def test_d5_keeps_the_runtime_risk_when_jev_is_not_confident(planned, cmd_plan, 
     items = {i["symbol"]: i for i in read_state(path)["items"]}
     assert (items["f"]["public_io"], items["f"]["public_io_source"]) == (True, "runtime")
     assert (items["g"]["public_io"], items["g"]["public_io_source"]) == (False, "runtime")
+
+
+def test_a_lint_only_strategy_skips_the_test_round_and_says_so(planned, cmd_plan, refactor):
+    """#1483 AC16・I9 — テストの種別の suite が無い戦略では、足すテストを空にし、項目を no_target で見送らず、
+    行わなかったことを計画に残す。"""
+    import importlib
+
+    lint = {"name": "sc", "command": "", "scope_command": "shellcheck {paths}", "junit": None, "paths": ["*.sh"], "kind": "lint"}
+    a = _candidate(1, "f")
+    strategy = strategy_state("local-full", "args", suites=[lint])
+    path = planned([a], [_answer(a, tests=["tests/test_new.py"], test_targets=[])], strategy=strategy)
+    _run(cmd_plan)
+    state = read_state(path)
+    item = state["items"][0]
+    assert item["tests"] == [] and item["scope_commands"] == [] and item["command_source"] == "lint"
+    assert state["plan_notes"] == [cmd_plan.NO_TEST_SUITE_NOTE]
+    plan_lib = importlib.import_module("refactor_lib.plan")
+    assert f"- 行わなかったこと: {cmd_plan.NO_TEST_SUITE_NOTE}" in plan_lib.strategy_lines(state)

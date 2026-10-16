@@ -31,6 +31,7 @@ jobs:
   # PR）では重いジョブを省く（#1055）。判定は scripts/ci-heavy-skip.py が差分と develop の
   # push の結果から行う。push では常に回す（develop で通ったという記録を省かない結果にするため）
   ci-scope:
+    name: pytest-scope
     runs-on: ubuntu-latest
     permissions:
       actions: read

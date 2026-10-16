@@ -366,6 +366,18 @@ def build_timeline(
     return timeline, project
 
 
+def _lookahead_hit(tl: list, i: int, qualified: str, cap: int) -> bool:
+    """i の次から cap 件の窓で、次の user / slash より前に qualified の skill が呼ばれたか。"""
+    end = min(i + 1 + cap, len(tl))
+    for j in range(i + 1, end):
+        k2, d2 = tl[j]
+        if k2 in ("user", "slash"):
+            return False
+        if k2 == "skill" and d2 == qualified:
+            return True
+    return False
+
+
 def aggregate_by_project(
     transcripts: list[pathlib.Path],
     skills: list[dict],
@@ -401,14 +413,8 @@ def aggregate_by_project(
                     continue
                 if any(t in text_l for t in trs):
                     trig_h[qualified] += 1
-                    end = min(i + 1 + lookahead_cap, len(tl))
-                    for j in range(i + 1, end):
-                        k2, d2 = tl[j]
-                        if k2 in ("user", "slash"):
-                            break
-                        if k2 == "skill" and d2 == qualified:
-                            hits[qualified] += 1
-                            break
+                    if _lookahead_hit(tl, i, qualified, lookahead_cap):
+                        hits[qualified] += 1
     return result
 
 

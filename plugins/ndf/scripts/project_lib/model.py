@@ -7,9 +7,9 @@
 from __future__ import annotations
 
 import json
-from typing import Literal, Optional, Union
+from typing import Annotated, Literal, Optional, Union
 
-from pydantic import Field
+from pydantic import Field, StrictBool
 
 import schema
 
@@ -32,24 +32,63 @@ class Language(schema.Shape):
 
 
 class Container(schema.Shape):
+    """suite を走らせるコンテナ。書いた suite は、テストを走らせる前にそのサービスのコンテナが worktree を見ているかを
+    確かめ（`lib/container_reach.py`）、テスト環境の値を足して走らせる。見ていなければ走らせない。
+    `compose_files` はテスト環境の割り当てが `COMPOSE_FILE` を持たないときだけ使う。"""
+
     service: str
     compose_files: list[str] = []
 
 
+# 継続的統合のジョブの識別子（I1。#464）。`<ワークフローのファイルのパス>#<job id>` か、そのファイルのジョブすべてを指す
+# `<ワークフローのファイルのパス>` の 2 形だけを取る
+JobId = Annotated[str, Field(pattern=r"^[^#\s]+\.ya?ml(#[^#\s]+)?$")]
+
+
 class Suite(schema.Shape):
-    """テストの 1 まとまり。`scope_command` の `{paths}` に範囲のパスが入る。"""
+    """テストの 1 まとまり。`scope_command` の `{paths}`（引用の外の、空白で区切った 1 語）に、シェルの引用で守った範囲の
+    パスが入る。`command` と `scope_command` はシェルで走らせる。
+    `junit` はコマンドが JUnit XML を書く作業ディレクトリからの相対パス（無ければ落ちたテストの見分けは走らせ直しへ落ちる）。
+    `kind` は種別で、`test`（テスト）か `lint`（静的解析。整形の検査を含む）。書かなければ `test`。静的解析の suite の範囲は
+    変更したファイルのうち `paths` に当たるもの。`paths` の要素は接頭辞（ディレクトリ）か glob（`*.sh` など）で、空ならすべて。
+    `ci_jobs` はこの suite が同じ検査を手元で走らせる継続的統合のジョブの識別子で、cross-refactoring の `init` が
+    宣言に無いジョブを知らせるときに見る。"""
 
     name: str
     runner: str
     command: str
     scope_command: Optional[str] = None
+    junit: Optional[str] = None
     container: Optional[Container] = None
     needs: list[str] = []
     paths: list[str] = []
+    kind: Literal["test", "lint"] = "test"
+    ci_jobs: list[JobId] = []
+
+
+class TestCi(schema.Shape):
+    """全体テストを CI に任せるときに見る先。`check` は待つチェックの名前（空なら `ci.required_checks` のすべて）、
+    `junit_artifacts` は JUnit を持つ成果物の名前の glob（空なら解析と同じ名前の規則）。"""
+
+    check: Optional[str] = None
+    junit_artifacts: Optional[str] = None
+
+
+class CiExempt(schema.Shape):
+    """手元の検証で走らせないと宣言した継続的統合のジョブ（除外したジョブ）。`reason` は空にしない（I2）。"""
+
+    job: JobId
+    reason: str = Field(min_length=1, pattern=r"\S")
 
 
 class Test(schema.Shape):
+    """テストの戦略（#1334）。`strategy` が空なら所要と suite から導く（`test_strategy.propose`）。
+    `ci_exempt` は手元の検証で走らせない継続的統合のジョブと、その理由。"""
+
+    strategy: Optional[Literal["local-full", "local-scoped-ci-whole", "round-only"]] = None
+    ci: Optional[TestCi] = None
     suites: list[Suite]
+    ci_exempt: list[CiExempt] = []
 
 
 class Duration(schema.Shape):
@@ -86,6 +125,7 @@ class Delivery(schema.Shape):
     trigger: str
     branch: Optional[str] = None
     versioned: bool
+    production: Optional[StrictBool] = None  # true: 本番系へ届く / false: 届かない（検証の環境）/ 無し: 決めない（#1454）
 
 
 class Issues(schema.Shape):

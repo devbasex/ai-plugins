@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import subprocess
 import sys
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -38,7 +39,34 @@ DEFAULT_SCAN_TARGETS = (
 )
 
 
+def _git_markdown_files(root: Path) -> list[Path] | None:
+    """Tracked and not-ignored new `.md` files when `root` is a git top level, else None."""
+    try:
+        top = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return None
+    if top.returncode != 0 or Path(top.stdout.strip()).resolve() != root.resolve():
+        return None
+    listed = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", *DEFAULT_SCAN_TARGETS],
+        capture_output=True,
+        text=True,
+    )
+    if listed.returncode != 0:
+        return None
+    paths = (root / rel for rel in listed.stdout.split("\0") if rel.endswith(".md"))
+    return [path for path in paths if path.is_file()]
+
+
 def iter_markdown_files(root: Path) -> list[Path]:
+    """Markdown files under the scan targets; in a git repository, ignored files are left out."""
+    tracked = _git_markdown_files(root)
+    if tracked is not None:
+        return sorted(set(tracked))
     roots = [root / target for target in DEFAULT_SCAN_TARGETS]
     files: list[Path] = []
     for item in roots:

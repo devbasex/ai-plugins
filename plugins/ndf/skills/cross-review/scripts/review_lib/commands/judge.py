@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import argparse
+import shlex
 import sys
 from typing import Any
 
 import review_lib  # noqa: E402
-import monitor_outcome  # noqa: E402
+import assignee_env  # noqa: E402
+import assignment  # noqa: E402
 from review_lib import (  # noqa: E402
     ci as ci_mod,
     findings as findings_mod,
     matching,
     participants as participants_mod,
     posts,
+    review_scope,
     store,
 )
 
@@ -31,14 +34,17 @@ def cmd_flush(args: argparse.Namespace) -> None:
     print(f"PENDING_SKIPPED={len(result.skipped)}")
     print(f"PENDING_DROPPED={len(result.dropped)}")
     print(f"PENDING_REMAINING={result.remaining}")
+    print(f"PENDING_RATE_LIMITED={'1' if result.rate_limited else '0'}")
+    print(f"PENDING_TRANSIENT={'1' if result.transient else '0'}")
+    # 止まった理由に最後の失敗を載せるため（drive.py の投稿待ち、#1843）。値は引用して 1 語にする。
+    print(f"PENDING_LAST_ERROR={shlex.quote(str((result.failed or {}).get('last_error') or ''))}")
     for item in result.dropped:
         review_lib.info(f"⚠️ 送れない項目を飛ばしました ({item.get('kind')} #{item.get('seq')}): {item.get('last_error') or ''}")
     if result.remaining:
         reason = (result.failed or {}).get("last_error", "")
+        why = "（まだ上限です）" if result.rate_limited else "（一時的な失敗です）" if result.transient else ""
         review_lib.info(
-            f"⏳ 待ち行列に {result.remaining} 件残っています"
-            f"{'（まだ上限です）' if result.rate_limited else ''}"
-            f"{f': {reason}' if reason and not result.rate_limited else ''}"
+            f"⏳ 待ち行列に {result.remaining} 件残っています{why}{f': {reason}' if reason and not result.rate_limited else ''}"
         )
     else:
         review_lib.info(f"✅ 待ち行列は空です（送った {len(result.sent)} 件）")
@@ -66,10 +72,8 @@ def _abort_no_result_round(pr: int, st: dict[str, Any], msg: str) -> None:
     review_lib.die(msg, code=1)
 
 
-def _record_relaunch(pr: int, st: dict[str, Any], last: dict[str, Any], pending: list[str]) -> None:
-    """同じラウンドで起動し直す担当を記録し、シェル向けの出力を出す。"""
-    last["relaunched"] = (last.get("relaunched") or []) + pending
-    store._save(pr, st)
+def _print_relaunch(pending: list[str]) -> None:
+    """同じ席で起動し直す担当のシェル向けの出力（形と意味は #919 の前と同じ）。"""
     print(f"RELAUNCH_AGENTS='{' '.join(pending)}'")
     print(f"RELAUNCH_AGENTS_CSV={','.join(pending)}")
     # 互換のために残す。**`both` は codex / agy の 2 者だけを指す語**であるため、
@@ -78,41 +82,112 @@ def _record_relaunch(pr: int, st: dict[str, Any], last: dict[str, Any], pending:
     review_lib.info(f"→ 結果を残さなかったレビュアーがいる: {' '.join(pending)}。同じラウンドで 1 度だけ起動し直す。")
 
 
+def _decide_seats(st: dict[str, Any], last: dict[str, Any], no_result: list[str], reasons: dict[str, str]):
+    """結果なしの席ごとに規則（`assignment.after_no_result`）へ答えを求め、記録（`no_results`）へ追記する。
+
+    judge は答えを実行するだけで、起動し直すか・誰へ振り替えるかを自分で決めない（#919 の AC5）。
+    記録は追記だけで、打ち直した judge は前の件を読んで次の答え（起動し直しの次は振り替え、候補が尽きれば
+    中断）へ進むため、繰り返しは必ず止まる。席は先に決めた席の振り替え先を `busy` に入れて決める（I6）。
+    """
+    log = st.setdefault("no_results", [])
+    round_no = int(last.get("round") or 1)
+    seats = list(last.get("reviewers") or no_result)
+    accounts = participants_mod.seat_accounts(last)
+    participants = st.get("participants") or {}
+    pick = assignee_env.account_picker()
+    decisions = []
+    for seat in no_result:
+        failed = assignment.Assignee(seat, accounts.get(seat))
+        d = assignment.after_no_result(
+            failed,
+            reasons[seat],
+            available=list(participants.get("available") or []),
+            log=log,
+            step="review",
+            attempt=round_no,
+            host=str(st.get("host") or ""),
+            busy=[s for s in seats if s != seat],
+            only=bool(st.get("only")),
+            initial_account=assignee_env.initial_account(),
+            pick_account=pick,
+        )
+        log.append(assignment.no_result_entry("review", round_no, failed, reasons[seat], d, review_lib._now()))
+        if d.action == assignment.REASSIGN and d.to is not None:
+            seats[seats.index(seat)] = d.to.seat
+            accounts[d.to.seat] = d.to.account
+        decisions.append((failed, reasons[seat], d))
+    return seats, accounts, decisions
+
+
+def _tried_line(st: dict[str, Any], round_no: int) -> str:
+    """このラウンドで試した担当と理由（中断のメッセージ。AC9）。"""
+    rows = [e for e in st.get("no_results") or [] if e.get("step") == "review" and e.get("attempt") == round_no]
+    return " ".join(
+        f"{assignment.Assignee(e['seat'], e.get('account') or None).label()}={e.get('reason')}→{e.get('decision')}" for e in rows
+    )
+
+
+def _apply_aborts(pr: int, st: dict[str, Any], last: dict[str, Any], aborted: list, round_no: int) -> None:
+    """`abort` の席があれば理由を出し、試した担当と理由を並べて中断する（無ければ何もしない）。"""
+    if not aborted:
+        return
+    for failed, reason in aborted:
+        detail = (last.get(failed.seat) or {}).get("monitor_detail")
+        review_lib.info(f"  {failed.label()}: reason={reason}" + (f" detail={detail}" if detail else ""))
+    _abort_no_result_round(
+        pr,
+        st,
+        f"結果が残らず、振り替え先もありません: {_tried_line(st, round_no)}。 中断します。最終スイープを通してから完了報告へ進んでください",
+    )
+
+
+def _apply_relaunch(last: dict[str, Any], pending: list[str]) -> None:
+    """同じ席で起動し直す担当を `relaunched` へ重ねずに足す。"""
+    if pending:
+        last["relaunched"] = (last.get("relaunched") or []) + [a for a in pending if a not in (last.get("relaunched") or [])]
+
+
+def _apply_reassign(last: dict[str, Any], moved: list, seats: list[str], accounts: dict) -> None:
+    """振り替えた席を担当と席の記録へ反映し、`reassigned` へ重ねずに足す。"""
+    if not moved:
+        return
+    last["reviewers"] = seats
+    last["seats"] = participants_mod.seat_records(seats, accounts)
+    done = {(m.get("from"), m.get("to"), m.get("to_account")) for m in last.get("reassigned") or []}
+    for f, to, r in moved:
+        if (f.seat, to.seat, to.account or "") not in done:
+            last.setdefault("reassigned", []).append({"from": f.seat, "to": to.seat, "to_account": to.account or "", "reason": r})
+
+
 def _handle_no_result_round(pr: int, st: dict[str, Any], last: dict[str, Any], no_result: list[str]) -> None:
     """結果なしの担当があるラウンドの出口を決める。
 
     先に理由の行（`NO_RESULT_REASONS`）を出す。どの出口でも進行側が理由を読めるようにする
-    ためである（#729 の AC14）。**起動し直しの可否は結末の共通層だけが決める**
-    （`monitor_outcome.relaunch_same_agent`）。可否が偽の理由が 1 つでもあれば、誰も起動し直さず
-    誤りの終わりへ進む。起動し直しても解けない理由で待つのは、相手の CLI の枠と時間を使うだけ
-    である（#619）。骨組みは既存の 1 の枝で受けるため、終了コードは増えない（決定 12）。
+    ためである（#729 の AC14）。席ごとの答えは規則（`assignment.after_no_result`）だけが決める（#919）。
+
+    | 答え | 出口 |
+    | --- | --- |
+    | どれかが `abort` | `final = error`・終了コード 1。メッセージに試した担当と理由を並べる |
+    | `relaunch` / `reassign` だけ | 席を振り替え先へ書き換え、`RELAUNCH_*`（同じ席で起動し直す席）と `REASSIGNED` を出して 7 |
+
+    振り替えた席の元の欄（`rounds[].<元の席>`）は残す。正は `no_results` で、`rounds[].reassigned` は報告の写し。
     """
     last["verdict"] = "no_result"
     reasons = _no_result_reasons(last, no_result)
-    blocked = [a for a, r in reasons.items() if not monitor_outcome.relaunch_same_agent(r)]
-    if blocked:
-        for a in blocked:
-            detail = (last.get(a) or {}).get("monitor_detail")
-            review_lib.info(f"  {a}: reason={reasons[a]}" + (f" detail={detail}" if detail else ""))
-        _abort_no_result_round(
-            pr,
-            st,
-            f"起動し直しても解けない理由で結果が残りませんでした: {' '.join(blocked)}。"
-            " 同じラウンドで起動し直さずに中断します。最終スイープを通してから"
-            "完了報告へ進んでください",
-        )
-    relaunched = last.get("relaunched") or []
-    pending = [a for a in no_result if a not in relaunched]
-    if not pending:
-        # 2 度続けて結果が残らないのは、対象や負荷ではなく実行環境の側の事象である。
-        _abort_no_result_round(
-            pr,
-            st,
-            f"起動し直した後も結果が残りませんでした: {' '.join(no_result)}。"
-            " 実行環境の側の問題として中断します。最終スイープを通してから"
-            "完了報告へ進んでください",
-        )
-    _record_relaunch(pr, st, last, pending)
+    round_no = int(last.get("round") or 1)
+    seats, accounts, decisions = _decide_seats(st, last, no_result, reasons)
+    aborted = [(f, r) for f, r, d in decisions if d.action == assignment.ABORT]
+    _apply_aborts(pr, st, last, aborted, round_no)
+    pending = [f.seat for f, _, d in decisions if d.action == assignment.RELAUNCH]
+    moved = [(f, d.to, r) for f, r, d in decisions if d.action == assignment.REASSIGN and d.to is not None]
+    _apply_relaunch(last, pending)
+    _apply_reassign(last, moved, seats, accounts)
+    store._save(pr, st)
+    if pending:
+        _print_relaunch(pending)
+    if moved:
+        print("REASSIGNED='" + " ".join(f"{f.seat}={('claude@' + to.account) if to.account else to.seat}:{r}" for f, to, r in moved) + "'")
+        review_lib.info("→ 結果を残さなかった席を振り替える: " + " ".join(f"{f.label()}→{to.label()}（{r}）" for f, to, r in moved))
     sys.exit(7)
 
 
@@ -164,12 +239,18 @@ def _evaluate_convergence(
     round_passes: bool,
     findings_measurable: bool,
     new_findings: int,
+    blocking_body: int = 0,
 ) -> bool:
     """このラウンドが収束したかを判定する。
 
     **新規の指摘が 0 件なら収束する。** 全員 `APPROVE` は最も止まらない参加者に
     律速される。同じ論点の再提出では止まり、新しい観点が出るあいだは回る。
+
+    **決着していない重大な総評だけの指摘が残る間は収束しない**（#1980）。スレッドを持たないため、
+    全員 `APPROVE` でも修正担当の手に渡らないまま終わる。
     """
+    if blocking_body:
+        return False
     return carried is None and (round_passes or (findings_measurable and new_findings == 0))
 
 
@@ -216,6 +297,38 @@ def _finalize_round_if_converged(
     _finalize_converged_round(pr, st, last, findings_measurable)
 
 
+def _check_scope(last: dict[str, Any], reviewers: list[str], only: str | None) -> dict[str, Any]:
+    """範囲の照合を行い、`scope_check` に書いて `SCOPE_CHECK` / `SCOPE_UNMATCHED` を出す。
+
+    照合は判定の中だけで行い、指摘の取り込みには触らない（設計の I3）。同じラウンドで打ち直すたびに書き直す。
+    """
+    result = review_scope.check_scope(last, reviewers, only)
+    last["scope_check"] = result
+    if not result["checked"]:
+        print(f"SCOPE_CHECK=unchecked:{result['reason']}")
+        return result
+    print("SCOPE_CHECK=checked")
+    print(f"SCOPE_UNMATCHED='{review_scope.unmatched_text(result)}'")
+    for u in result["unmatched"]:
+        if u["reason"] == "too_few":
+            review_lib.info(
+                f"⚠ {u['seat']} は {result['files']} ファイルのうち {u['read_files']} ファイルを読んだと申告した"
+                f"（{result['min_read']} 以上で数える）。この承認を収束に数えない"
+            )
+        else:
+            review_lib.info(f"⚠ {u['seat']} の読んだファイル数を測れない（{u['reason']}）。この承認を収束に数えない")
+    return result
+
+
+def _retry_unmatched_scope(pr: int, st: dict[str, Any], last: dict[str, Any]) -> None:
+    """照合で外れた担当を数えなければ収束したラウンドを、修正を挟まずに次のラウンドへ進める（設計の I5）。"""
+    last["verdict"] = "scope_unmatched"
+    store._save(pr, st)
+    print("SCOPE_RETRY=1")
+    review_lib.info("→ 範囲の照合で外れた承認を除くと収束しない。修正を挟まずに次のラウンドへ進む。")
+    sys.exit(2)
+
+
 def cmd_judge(args: argparse.Namespace) -> None:
     """Step 3 — intent ベース pass 判定。
 
@@ -227,7 +340,11 @@ def cmd_judge(args: argparse.Namespace) -> None:
     収束の直前は修正の機会が残っている段であり、そこで中断すると直せる失敗まで
     人手へ戻すことになる。中断は上限のラウンド数・振動の検知・`merge-fix` が受け持つ。
 
-    Exit code: 0=approved, 2=continue, 7=結果なしのため起動し直す,
+    結果なしの扱いを抜けた後、範囲の照合（#1702）を行う。収束の式が成り立っても、照合で外れた
+    通した担当（読んだファイル数が足りない・測れない）がいれば収束させず、修正を挟まずに次のラウンドへ
+    進める（`scope_unmatched`・`SCOPE_RETRY=1`・終了コード 2）。
+
+    Exit code: 0=approved, 2=continue, 7=結果なしのため起動し直す・振り替える,
                8=待ち行列に投稿が残っている, 1=error
     """
     pr = args.pr
@@ -243,6 +360,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
     carried = findings_mod._carried_over_pending(st)
     carried_count = (st.get("carried_over") or {}).get("count", 0)
     new_findings, findings_measurable = matching._new_finding_count(st, pr)
+    blocking_body = len(findings_mod.blocking_body(st))
     pending_posts = posts._pending_posts(pr)
 
     _print_judge_status(
@@ -253,17 +371,24 @@ def cmd_judge(args: argparse.Namespace) -> None:
         carried_count,
         pending_posts,
     )
+    if blocking_body:
+        print(f"BODY_BLOCKING={blocking_body}")
 
     no_result = participants_mod._no_result_agents(last, only, reviewers)
     if no_result:
         _handle_no_result_round(pr, st, last, no_result)
+
+    scope = _check_scope(last, reviewers, only)
 
     converged = _evaluate_convergence(
         carried,
         round_passes,
         findings_measurable,
         new_findings,
+        blocking_body,
     )
+    if converged and scope.get("unmatched"):
+        _retry_unmatched_scope(pr, st, last)
 
     _finalize_round_if_converged(
         pr,
@@ -276,7 +401,9 @@ def cmd_judge(args: argparse.Namespace) -> None:
 
     last["verdict"] = "changes_requested"
     store._save(pr, st)
-    if carried is not None:
+    if blocking_body:
+        review_lib.info(f"→ 決着していない総評だけの指摘が {blocking_body} 件ある。修正へ。")
+    elif carried is not None:
         review_lib.info(f"→ 引き継いだ指摘が {carried_count} 件残っている。修正の工程を 1 度通すまで収束させない。")
     else:
         review_lib.info(

@@ -251,7 +251,9 @@ git worktree add "$main_dir/.worktrees/feature/<PLAN-ID>-ui"     feature/<PLAN-I
 - **競合は後からマージする側が解き、解いた後の head でレビューを収束させてからマージする**
 - 終わった worktree は `git worktree remove <path>` で片付ける。マージ後の後片付けは
   `/ndf:merged` が扱う
-- Claude Code から並行開発を指示する場合、Agent tool の `isolation: "worktree"` も検討する
+- Claude Code から並行開発を指示する場合も、worktree は `worktree-setup.sh create` で作り、そのパスを渡す。
+  Agent tool の `isolation: "worktree"` は使わない（隔離の中では NDF のスクリプトが拒まれることがあり、
+  依存の用意も走らない）
 
 ## Step 6: 個別 PR のレビュー
 
@@ -262,7 +264,7 @@ git worktree add "$main_dir/.worktrees/feature/<PLAN-ID>-ui"     feature/<PLAN-I
 
 | 用途 | コマンド | 位置づけ |
 |---|---|---|
-| PR 作成前のセルフレビュー | `/ndf:pr-review --branch` | push / PR 化の前段。cross-review の代替にはしない |
+| PR 作成前のセルフレビュー | `/ndf:pr-review --branch` | push / PR 化の前に行う。cross-review の代替にはしない |
 | 個別 PR の収束レビュー (原則必須) | `/ndf:cross-review <PR番号>` | codex + agy 両方の APPROVE 収束を確認する本線 |
 | GitHub 上の例外的な単発確認 | `/ndf:pr-review <PR番号>` | ごく軽微な差分の単発確認に限定。cross-review の代替にはしない |
 | 指摘の修正 | `/ndf:fix <PR番号>` | cross-review ループ内・後で自動起動される |
@@ -381,7 +383,7 @@ git checkout release/<PLAN-ID>
 
 - `/ndf:implementation-plan` — plan ファイルのフォーマット (本 skill が依存)
 - `/ndf:development-workflow` — 並行の必須ルールと変更重複の目安（`references/parallel-work.md`）
-- `/ndf:issue-upkeep` — マイルストーンの説明へ書く課題グループ（実行計画のバンドルの初期値）
+- `/ndf:backlog-refinement` — マイルストーンの説明へ書く課題グループ（実行計画のバンドルの初期値）
 - `/ndf:pr` — 通常の PR 作成 / 更新
 - `/ndf:cherry-pick-pr` — 検証ブランチへの cherry-pick PR とブランチ汚染を避ける原則
 - `/ndf:pr-review` / `/ndf:cross-review` — レビュー（`--branch` で PR 前のセルフレビュー）

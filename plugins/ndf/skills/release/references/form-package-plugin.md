@@ -25,14 +25,42 @@
 配布物のパスへ絞る。まとめて置く上位のディレクトリを数えると、対象が動いていないのに版を
 上げることになる。タグも同じ理由で、対象の版のタグだけに当たる形で絞る。
 
-版はパッケージごとに独立するため、ミッションで複数の版を上げるときは、起点も大小の判断も
+版はパッケージごとに独立するため、スプリントで複数の版を上げるときは、起点も大小の判断も
 パッケージごとに分ける。
 
 **本番のリリースプラン（`supervise.py new release --channel prod`）は、宣言の `release.plugin` の後に、
-差分のある他のプラグインの PATCH を上げる（`bump-others` のステップ）。** 対象は
-`release-steps.py changed-plugins` が返す。前の本番のタグ（`<release.plugin>--v<版>`。`--prev-tag` で
-指定できる）からの差分にあるプラグインのうち、差分の中でまだ版を上げていないものである。開発版の
-プランは他のプラグインの版を上げない。他のプラグインのタグは打たない。
+差分のある他のプラグインの版を、承認資料の「版を上げる他のプラグイン」の表の上げ幅で上げる（`bump-others`
+のステップ。`release-steps.py changed-plugins --decided`）。** 対象は前の本番のタグ（`<release.plugin>--v<版>`。
+`--prev-tag` で指定できる）からの差分にあるプラグインのうち、差分の中でまだ版を上げていないものである。表を
+読めない・表と差分が合わないときは PATCH へ倒さずに止まる。他のプラグインのタグは打たない。
+
+**開発版のプランは他のプラグインの版を上げず、承認資料へ上げ幅の候補を書く（`others` のステップ。
+`changed-plugins --prs --approval`）。** 候補は版に含む PR の材料から機械で決まる。PR の GitHub の closing keywords（PR 本文に `Closes #123` のように書くと、マージ時にその課題を自動で閉じる機能）が指す課題の
+要求の「影響」の「公開インタフェース」の行に互換なしの印があるか、PR 本文の `## 移行の手順` がプラグインの名前に
+触れれば MAJOR、無ければ PATCH である。承認ゲート 2 で上げ幅を変えるときは、承認の前に
+`changed-plugins --approval <承認資料> --set <名前>=<上げ幅>` で表を書き直す（表を手で直さない）。
+
+**本番のリリースプランは、本番の配布（`release`）の後に `record` のステップで本番のリリースの PR
+（`release/v<版>` → ベースブランチ）へリリース記録をコメントで書く。** 並びは `release` → `record` → `verify` →
+`cleanup` で、`record` は `release-steps.py record` を打つ。タグと GitHub Release が無ければ書かずに止まり、同じ記録が
+既にあれば書かない。落ちたときは `judge-record` が `record` のやり直しか停止だけを選び、配布はやり直さない。書けたら
+本番のリリースの PR がプランの報告の `Pull Request` に載り、まとめの `close` ステップが `--record-pr` に受け取る。
+開発版のプランは記録を書かない。
+
+**配布の手順（`release-steps.py`・`release-verification-steps.py`）は、次の値を宣言と origin から読む。** リポジトリごとの値を
+スクリプトに埋め込まない。
+
+| 値 | 出所 |
+| --- | --- |
+| ベースブランチ（開発版の PR の宛先・差分の起点） | `.ndf/worktree.json` の `base_branch`（無ければ既定ブランチ） |
+| 本番チャネル（本番の PR の宛先・タグを打つコミット） | `.ndf/worktree.json` の `production_branch`（無ければ既定ブランチ） |
+| タグの接頭辞 `<名前>--v`・題 `Release: <名前> v<版>` | `--plugin` / `--plugins` の先頭 → `.ndf/supervise.json` の `release.plugin` |
+| 導入元の `owner/repo` | `origin` の URL |
+| マーケットプレイスの名前 | `.claude-plugin/marketplace.json` の `name`（無ければリポジトリ名） |
+
+**次の 3 つは、この形を選んだリポジトリが守る約束であり、宣言では変えない。** リポジトリのルートの `CHANGELOG.md` と
+見出し `## [<プラグイン> <基底の版>]`、プラグインの置き場 `plugins/<名前>/.claude-plugin/plugin.json`（MCP は
+`plugins/mcp/<名前>/`）、版の形 `X.Y.Z[-dev.N]`。
 
 ## このリポジトリでの例
 

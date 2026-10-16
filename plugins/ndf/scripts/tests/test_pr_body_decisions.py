@@ -12,6 +12,7 @@ import os
 import pathlib
 import shutil
 import subprocess
+import time
 import urllib.parse
 
 import pytest
@@ -32,7 +33,7 @@ def parse_request(args):
         a = args[i]
         if a in ("-X", "--method"):
             method = args[i + 1]; i += 2; continue
-        if a in ("-H", "--header"):
+        if a in ("-H", "--header", "--jq"):
             i += 2; continue
         if a == "--input":
             input_file = args[i + 1]; i += 2; continue
@@ -50,6 +51,9 @@ def respond_patch(state, state_path, input_file):
         f.write(sent["body"])
     if state.get("patch_effective", True):
         state["pr"]["body"] = sent["body"]
+    if "reads_after_patch" in state:
+        # 書いた後の読みが返す古い値（#1644）。1 回の読みごとに先頭から 1 つずつ使う
+        state["pr_reads"] = state.pop("reads_after_patch")
     if "head_after_patch" in state:
         # 書き込みと読み直しの間に head が進んだことを再現する
         state["pr"]["head"]["sha"] = state["head_after_patch"]
@@ -65,7 +69,25 @@ def respond_pull_request(state, state_path):
     if state.get("fail_pr") or (state.get("fail_reread") and state["reads"] >= 2):
         sys.stderr.write("HTTP 404\n")
         sys.exit(1)
-    sys.stdout.write(json.dumps(state["pr"]))
+    pr = json.loads(json.dumps(state["pr"]))
+    if state.get("pr_reads"):
+        # 読みの遅れ（#1644）。先頭の 1 つで head の SHA か本文を差し替えて返す
+        stale = state["pr_reads"].pop(0)
+        json.dump(state, open(state_path, "w", encoding="utf-8"), ensure_ascii=False)
+        if "sha" in stale:
+            pr["head"]["sha"] = stale["sha"]
+        if "body" in stale:
+            pr["body"] = stale["body"]
+    sys.stdout.write(json.dumps(pr))
+    sys.exit(0)
+
+
+def respond_compare(state, spec):
+    status = state.get("compare", {}).get(spec)
+    if status is None:
+        sys.stderr.write("HTTP 404: No commit found\n")
+        sys.exit(1)
+    sys.stdout.write(status + "\n")
     sys.exit(0)
 
 
@@ -110,6 +132,8 @@ if method == "PATCH":
     respond_patch(state, state_path, input_file)
 if len(parts) == 5 and parts[3] == "pulls":
     respond_pull_request(state, state_path)
+if len(parts) == 5 and parts[3] == "compare":
+    respond_compare(state, parts[4])
 if len(parts) == 6 and parts[5] == "files":
     respond_files(state)
 if len(parts) >= 5 and parts[3] == "contents":
@@ -266,20 +290,106 @@ def test_4_no_changed_files_compares_against_zero_decisions(fake, body, expected
     assert out.returncode == expected_returncode, out.stdout + out.stderr
 
 
-def test_4_empty_decisions_without_subheadings_is_treated_as_zero_decisions(fake):
-    """現状固定: 「## 決定の記録」があっても「### 」見出しが無ければ決定 0 件として扱う。"""
+@pytest.mark.parametrize("sub", ["check", "sync"])
+def test_4_empty_decisions_without_subheadings_is_treated_as_zero_decisions(fake, sub):
+    """#635 で期待を書き換えた: 以前は決定 0 件の一致（0）として通していた。今は決定を読めない文書として
+    パスと理由を出して 1 で止まり、sync は本文を書き換えない。"""
     empty_design = "# 設計\n\n## 決定の記録\n\n決定事項はまだありません。\n\n## その他\n"
-    # 本文に「## 決めたこと」節がない状態で check を実行し、決定 0 件として一致（終了コード 0）
-    design_pr(fake, body="## Summary\n\n- 要約\n\n## Test plan\n", design=empty_design)
+    for body in ("## Summary\n\n- 要約\n\n## Test plan\n", f"## Summary\n\n{EXPECTED}\n## Test plan\n"):
+        design_pr(fake, body=body, design=empty_design)
+        out = fake.run(sub, "7", "--repo", REPO)
+        assert out.returncode == 1, out.stdout + out.stderr
+        assert "issues/issue-1-design.md" in out.stdout
+        assert "## 決定の記録" in out.stdout
+        assert not fake.writes()
+
+
+# --- 決定の見出しの形（#635） -----------------------------------------------------
+
+
+def one_doc_pr(fake, name, text, body="## Summary\n\n## Test plan\n", extra=None):
+    files = {name: "added", **{n: "added" for n in (extra or {})}}
+    fake.setup(body=body, files=files, contents={name: text, **(extra or {})})
+
+
+def synced_section(fake):
+    out = fake.run("sync", "7", "--repo", REPO)
+    assert out.returncode == 0, out.stdout + out.stderr
+    return out, fake.patched_body()
+
+
+def test_635_suffixed_section_is_read_and_check_after_sync_returns_0(fake):
+    text = "# 設計\n\n## 決定の記録（#610）\n\n### 決定 1: 一\n\n### 決定 2: 二\n\n## 配置\n\n### 数えない\n"
+    one_doc_pr(fake, "issues/issue-9-design.md", text)
+    out, body = synced_section(fake)
+    assert "設計文書 1 本 / 決定 2 件" in out.stdout
+    assert section(("issues/issue-9-design.md", ["決定 1: 一", "決定 2: 二"])) in body
+    one_doc_pr(fake, "issues/issue-9-design.md", text, body=body)
+    assert fake.run("check", "7", "--repo", REPO).returncode == 0
+
+
+def test_635_two_suffixed_sections_are_listed_in_document_order(fake):
+    text = (
+        "# 設計\n\n## 決定の記録（#444）\n\n### 決定 1: 甲\n\n## 中間\n\n### 数えない\n\n"
+        "## 決定の記録: テストの扱い（#443）\n\n### 決定 1: 乙\n"
+    )
+    one_doc_pr(fake, "issues/issue-9-design.md", text)
+    _, body = synced_section(fake)
+    assert section(("issues/issue-9-design.md", ["決定 1: 甲", "決定 1: 乙"])) in body
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("# #1482: 決定の記録\n\n## 決定 1: 一\n\n本文\n\n## 決定 2: 二\n", ["決定 1: 一", "決定 2: 二"]),
+        ("# #1142: 決定の記録\n\n### 決定 1: 一\n", ["決定 1: 一"]),
+        ("# #1429: 決定の記録\n\n## 決定 0b: 前置き\n\n## 決定 1: 一\n", ["決定 0b: 前置き", "決定 1: 一"]),
+        (
+            "# #1407: 決定の記録\n\n## 決定の記録\n\n### 決定 1: 一\n\n## 決定 2: 節の外\n",
+            ["決定 1: 一"],
+        ),
+    ],
+)
+def test_635_split_file_shapes_are_read_without_double_counting(fake, text, expected):
+    name = "issues/issue-9-design-decisions.md"
+    one_doc_pr(fake, name, text)
+    out, body = synced_section(fake)
+    assert section((name, expected)) in body
+    assert f"決定 {len(expected)} 件" in out.stdout
+
+
+@pytest.mark.parametrize("sub", ["check", "sync"])
+@pytest.mark.parametrize(
+    ("name", "text"),
+    [
+        ("issues/issue-9-design.md", "# 設計\n\n## 決定の記録（#9）\n\n本文だけ\n"),
+        ("issues/issue-9-design-decisions.md", "# #9 の決定\n\n本文だけ\n"),
+        ("issues/issue-9-design-decisions.md", "# 設計\n\n## 決定の記録\n\n`issues/issue-9-design-decisions.md` を見る\n"),
+    ],
+)
+def test_635_unreadable_document_stops_with_path_and_keeps_body(fake, sub, name, text):
+    body = f"## Summary\n\n{EXPECTED}\n## Test plan\n"
+    one_doc_pr(fake, name, text, body=body, extra={"issues/issue-1-design.md": DESIGN})
+    out = fake.run(sub, "7", "--repo", REPO)
+    assert out.returncode == 1, out.stdout + out.stderr
+    assert f"- {name}: " in out.stdout
+    assert "issues/issue-1-design.md:" not in out.stdout
+    assert not fake.writes()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "# 設計\n\n## 決定の記録\n\n決定は [分けたファイル](issue-9-design-decisions.md) にある。\n",
+        "# 決定の記録\n\n```markdown\n## 決定の記録（#1）\n\n### 決定 1: 例\n\n## 決定 2: 例\n```\n",
+        "# 雛形\n\n~~~\n## 決定の記録（#1）\n~~~\n",
+    ],
+)
+def test_635_head_file_template_and_fenced_headings_do_not_stop(fake, text):
+    one_doc_pr(fake, "issues/issue-9-design.md", text)
     out = fake.run("check", "7", "--repo", REPO)
     assert out.returncode == 0, out.stdout + out.stderr
     assert "設計文書 0 本 / 決定 0 件" in out.stdout
-
-    # 本文に「## 決めたこと」節がある状態で check を実行し、決定がないのに節が存在する食い違い（終了コード 1）
-    design_pr(fake, body=f"## Summary\n\n{EXPECTED}\n## Test plan\n", design=empty_design)
-    out_with_section = fake.run("check", "7", "--repo", REPO)
-    assert out_with_section.returncode == 1, out_with_section.stdout + out_with_section.stderr
-    assert "食い違い" in out_with_section.stdout
 
 
 def test_5_headings_inside_code_fences_are_not_counted(fake):
@@ -594,4 +704,265 @@ def test_22_unresolvable_repo_returns_2_without_reading(fake, tmp_path, monkeypa
     out = fake.run("check", "7", cwd=str(outside))
     assert out.returncode == 2, (out.stdout, out.stderr)
     assert "リポジトリを決められません" in out.stderr
+    assert not fake.calls()
+
+
+# --- 作る時点の本文（render） ---------------------------------------------------
+
+
+def design_checkout(tmp_path, branch="design/issue-1-x"):
+    """起点（origin/develop）から設計文書と要求を足したブランチの作業場所を作る。"""
+    repo = tmp_path / "work"
+    repo.mkdir()
+
+    def git(*args):
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+
+    git("init", "-q", "-b", "develop")
+    git("config", "user.email", "t@example.com")
+    git("config", "user.name", "t")
+    (repo / "README.md").write_text("# r\n\n## 決定の記録\n\n### 起点の決定は数えない\n", encoding="utf-8")
+    git("add", ".")
+    git("commit", "-q", "-m", "base")
+    git("update-ref", "refs/remotes/origin/develop", "HEAD")
+    git("checkout", "-q", "-b", branch)
+    (repo / "issues").mkdir()
+    (repo / "issues" / "issue-1-design.md").write_text(DESIGN, encoding="utf-8")
+    (repo / "issues" / "issue-1-requirements.md").write_text("# 要求\n\n本文\n", encoding="utf-8")
+    git("add", ".")
+    git("commit", "-q", "-m", "design")
+    return repo
+
+
+def render(fake, repo, body, *extra):
+    src = fake.dir / "body.md"
+    src.write_text(body, encoding="utf-8")
+    return fake.run("render", "--base", "develop", "--body", str(src), *extra, cwd=str(repo))
+
+
+def test_30_render_places_section_like_sync_without_reading_github(fake, tmp_path):
+    repo = design_checkout(tmp_path)
+    body = "## Summary\n\n- 要約\n\n## Test plan\n\n- [ ] 何か\n"
+    out = render(fake, repo, body)
+    assert out.returncode == 0, out.stderr
+    assert not fake.calls()
+    assert out.stdout == "## Summary\n\n- 要約\n\n" + EXPECTED + "\n## Test plan\n\n- [ ] 何か\n"
+    # 作った本文のまま PR にすれば sync は書き込まない（本文の編集で CI を再起動しない）
+    design_pr(fake, out.stdout)
+    assert fake.run("sync", "7", "--repo", REPO).returncode == 0
+    assert not fake.writes()
+
+
+def test_635_render_reads_new_shapes_and_does_not_stop(fake, tmp_path):
+    repo = design_checkout(tmp_path)
+    issues = repo / "issues"
+    (issues / "issue-1-design.md").write_text(DESIGN.replace("## 決定の記録", "## 決定の記録（#1）"), encoding="utf-8")
+    (issues / "issue-2-design-decisions.md").write_text("# #2: 決定の記録\n\n## 決定 1: 二\n", encoding="utf-8")
+    (issues / "issue-3-design-decisions.md").write_text("# 読めない\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "more"], check=True)
+    out = render(fake, repo, "## Summary\n")
+    assert out.returncode == 0, out.stderr
+    expected = EXPECTED.rstrip("\n") + "\n\n`issues/issue-2-design-decisions.md`\n\n- 決定 1: 二\n"
+    assert out.stdout == "## Summary\n\n" + expected
+
+
+def test_30_render_leaves_matching_body_unchanged(fake, tmp_path):
+    repo = design_checkout(tmp_path)
+    body = "## Summary\n\n" + EXPECTED
+    out = render(fake, repo, body)
+    assert out.returncode == 0 and out.stdout == body
+
+
+def test_31_render_leaves_non_design_branch_unchanged(fake, tmp_path):
+    repo = design_checkout(tmp_path, branch="feature/issue-1-x")
+    out = render(fake, repo, "## Summary\n")
+    assert out.returncode == 0 and out.stdout == "## Summary\n"
+
+
+def test_32_render_without_base_ref_returns_2_and_prints_nothing(fake, tmp_path):
+    repo = design_checkout(tmp_path)
+    src = fake.dir / "body.md"
+    src.write_text("## Summary\n", encoding="utf-8")
+    out = fake.run("render", "--base", "main", "--body", str(src), cwd=str(repo))
+    assert out.returncode == 2 and out.stdout == ""
+
+
+@pytest.mark.parametrize("args", [["render"], ["render", "--base", "develop"], ["render", "--body", "x"], ["render", "7"]])
+def test_32_render_usage_errors_return_3(fake, args):
+    out = fake.run(*args)
+    assert out.returncode == 3, (args, out.stdout, out.stderr)
+    assert not fake.calls()
+
+
+# --- 送った直後の本文の同期（#1644） ---------------------------------------------
+#
+# HEAD_SHA を送ったコミット、OLD_SHA を送る前の head、NEW_SHA を送った後に別の push で進んだ head とする。
+# 送る前の head の設計文書は OLD_DESIGN、送ったコミットの設計文書は DESIGN。
+
+OLD_SHA = "1111111111111111111111111111111111111111"
+NEW_SHA = "fedcba9876543210fedcba9876543210fedcba98"
+BEHIND = {f"{HEAD_SHA}...{OLD_SHA}": "behind"}
+
+
+def after_push(fake, *extra):
+    return fake.run("sync", "7", "--repo", REPO, "--after-push", HEAD_SHA, *extra)
+
+
+def compare_calls(fake):
+    return [c for c in fake.calls() if any("/compare/" in a for a in c)]
+
+
+def test_1644_waits_for_the_pushed_head_before_writing(fake):
+    """受け入れ条件 1: 最初の読みが送る前の head でも、送ったコミットの設計文書で書いて 0。"""
+    design_pr(
+        fake,
+        OLD_SECTION,
+        pr_reads=[{"sha": OLD_SHA}],
+        compare=BEHIND,
+        contents_at={OLD_SHA: {"issues/issue-1-design.md": OLD_DESIGN}},
+    )
+    out = after_push(fake)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert len(fake.writes()) == 1
+    assert EXPECTED in fake.patched_body()
+    assert "待った: 1 秒 / 読み直し 1 回" in out.stdout.splitlines()[-1]
+
+
+@pytest.mark.parametrize(
+    "stale",
+    [{"body": OLD_SECTION}, {"sha": OLD_SHA, "body": OLD_SECTION}],
+    ids=["old-body", "old-head"],
+)
+def test_1644_rereads_after_writing_until_the_body_is_seen(fake, stale):
+    """受け入れ条件 2: 書いた後の読みが古い本文か送る前の head を返しても、読み直して 0。書くのは 1 回。"""
+    design_pr(fake, OLD_SECTION, reads_after_patch=[stale], compare=BEHIND)
+    out = after_push(fake)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert len(fake.writes()) == 1
+    assert "書き直した" in out.stdout
+
+
+def test_1644_head_advanced_after_writing_is_compared_at_the_new_head(fake):
+    """受け入れ条件 3: 進んだ先の見出しが違えば、締め切りまで読み直してから 1。進んだ先を差分に出す。"""
+    design_pr(
+        fake,
+        OLD_SECTION,
+        head_after_patch=NEW_SHA,
+        compare={f"{HEAD_SHA}...{NEW_SHA}": "ahead"},
+        contents_at={NEW_SHA: {"issues/issue-1-design.md": OLD_DESIGN}},
+    )
+    out = after_push(fake, "--wait-seconds", "1")
+    assert out.returncode == 1, out.stdout + out.stderr
+    assert len(fake.writes()) == 1
+    assert "+- 決定 1: 実行してよいコマンドをリポジトリが宣言する" in out.stdout
+
+
+def test_1644_head_advanced_with_an_old_body_read_returns_0(fake):
+    """受け入れ条件 3: 進んだ先の見出しが同じなら、古い本文の読みを読み直して 0。書くのは 1 回。"""
+    design_pr(
+        fake,
+        OLD_SECTION,
+        head_after_patch=NEW_SHA,
+        reads_after_patch=[{"body": OLD_SECTION}],
+        compare={f"{HEAD_SHA}...{NEW_SHA}": "ahead"},
+    )
+    out = after_push(fake)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert len(fake.writes()) == 1
+
+
+def test_1644_a_head_that_goes_back_is_not_compared_against(fake):
+    """受け入れ条件 3: 進んだ後に書いたときの head が返っても、その設計文書で一致と報告しない。"""
+    design_pr(
+        fake,
+        OLD_SECTION,
+        head_after_patch=NEW_SHA,
+        reads_after_patch=[{}] + [{"sha": HEAD_SHA}] * 10,
+        compare={f"{HEAD_SHA}...{NEW_SHA}": "ahead", f"{NEW_SHA}...{HEAD_SHA}": "behind"},
+        contents_at={NEW_SHA: {"issues/issue-1-design.md": OLD_DESIGN}},
+    )
+    out = after_push(fake, "--wait-seconds", "2")
+    assert out.returncode == 1, out.stdout + out.stderr
+
+
+def test_1644_head_that_never_arrives_returns_2_with_the_sha_and_limit(fake):
+    """受け入れ条件 4・I2: 届かなければ書かずに 2。理由の先頭 300 文字に SHA と上限。上限の内で終わる。"""
+    design_pr(fake, OLD_SECTION, compare={f"{NEW_SHA}...{HEAD_SHA}": "behind"})
+    started = time.monotonic()
+    out = fake.run("sync", "7", "--repo", REPO, "--after-push", NEW_SHA, "--wait-seconds", "2")
+    elapsed = time.monotonic() - started
+    assert out.returncode == 2, out.stdout + out.stderr
+    assert not fake.writes()
+    reason = out.stderr.strip()[:300]
+    assert NEW_SHA in reason and "上限 2 秒" in reason and HEAD_SHA in reason
+    assert elapsed < 2 + 3
+
+
+def test_1644_wait_zero_does_not_wait(fake):
+    design_pr(fake, OLD_SECTION, compare={f"{NEW_SHA}...{HEAD_SHA}": "behind"})
+    out = fake.run("sync", "7", "--repo", REPO, "--after-push", NEW_SHA, "--wait-seconds", "0")
+    assert out.returncode == 2, out.stdout + out.stderr
+    assert "待った" not in out.stdout
+
+
+def test_1644_the_deadline_is_shared_before_and_after_writing(fake):
+    """I2: 書く前と書いた後の両方で遅れても、待ちの合計が上限を超えない。"""
+    design_pr(
+        fake,
+        OLD_SECTION,
+        pr_reads=[{"sha": OLD_SHA}],
+        reads_after_patch=[{"body": OLD_SECTION}] * 20,
+        compare=BEHIND,
+        contents_at={OLD_SHA: {"issues/issue-1-design.md": OLD_DESIGN}},
+    )
+    started = time.monotonic()
+    out = after_push(fake, "--wait-seconds", "2")
+    elapsed = time.monotonic() - started
+    assert out.returncode == 1, out.stdout + out.stderr
+    assert "待った: 2 秒" in out.stdout
+    assert elapsed < 2 + 3
+
+
+@pytest.mark.parametrize("sent", [HEAD_SHA, HEAD_SHA[:7]], ids=["full", "short"])
+def test_1644_no_delay_reads_as_often_as_without_after_push(fake, sent):
+    """受け入れ条件 9・I3: 遅れが無ければ compare を読まず、待たず、読みの回数は今と同じ。"""
+    design_pr(fake, OLD_SECTION)
+    assert fake.run("sync", "7", "--repo", REPO).returncode == 0
+    plain = len(fake.calls())
+    fake.log.unlink()
+    design_pr(fake, OLD_SECTION)
+    out = fake.run("sync", "7", "--repo", REPO, "--after-push", sent)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert len(fake.calls()) == plain
+    assert not compare_calls(fake)
+    assert "待った" not in out.stdout
+
+
+def test_1644_non_design_pull_request_is_out_of_scope_without_waiting(fake):
+    design_pr(fake, "## Summary\n", head="feature/issue-1-x")
+    out = fake.run("sync", "7", "--repo", REPO, "--after-push", NEW_SHA)
+    assert out.returncode == 0
+    assert len(fake.calls()) == 1
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["sync", "7", "--wait-seconds", "5"],
+        ["check", "7", "--after-push", HEAD_SHA],
+        ["check", "7", "--wait-seconds", "5"],
+        ["sync", "7", "--after-push", "xyz1234"],
+        ["sync", "7", "--after-push", "abc12"],
+        ["sync", "7", "--after-push", HEAD_SHA + "0"],
+        ["sync", "7", "--after-push", HEAD_SHA, "--wait-seconds", "-1"],
+        ["sync", "7", "--after-push", HEAD_SHA, "--wait-seconds", "1.5"],
+        ["sync", "7", "--after-push"],
+    ],
+)
+def test_1644_usage_errors_return_3_without_reading(fake, args):
+    """受け入れ条件 8: 新しい引数の誤りは 3。GitHub を読まない。"""
+    design_pr(fake, EXPECTED)
+    out = fake.run(*args, "--repo", REPO) if args[-1] != "--after-push" else fake.run(*args)
+    assert out.returncode == 3, (args, out.stdout, out.stderr)
     assert not fake.calls()

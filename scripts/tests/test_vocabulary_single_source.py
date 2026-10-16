@@ -57,14 +57,10 @@ def test_the_techniques_come_from_the_table(vocabulary: types.ModuleType) -> Non
     assert vocabulary.TECHNIQUES == _table("手法")
 
 
-def test_the_budget_factors_come_from_the_table(vocabulary: types.ModuleType) -> None:
-    """倍率が高い手法が、表と一致すること。"""
-    high = {
-        name
-        for name, factor in _table("手法ごとの差分予算の倍率", "倍率").items()
-        if factor == str(vocabulary.EXTRACTION_DIFF_BUDGET_FACTOR)
-    }
-    assert high == set(vocabulary.EXTRACTION_TECHNIQUES)
+def test_the_viewpoints_come_from_the_table(vocabulary: types.ModuleType) -> None:
+    """読み込んだ観点と代表の兆候が、表と一致すること（#1814 決定 9）。"""
+    assert vocabulary.VIEWPOINTS == _table("観点", "説明")
+    assert vocabulary.VIEWPOINT_SMELLS == {k: v.strip("`") for k, v in _table("観点", "代表の兆候").items()}
 
 
 def test_the_reader_does_not_hold_the_names() -> None:

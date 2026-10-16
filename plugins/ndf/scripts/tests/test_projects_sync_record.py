@@ -1,7 +1,7 @@
 """記録のコマンド 1 行で、issue の本文とボードの両方へ残ること（#828）。
 
-`projects-sync.sh` が入口である。通過記録はこのコマンドを観測して積むため、入口を
-変えずに issue の本文の更新（`progress-record.sh`）を中から呼ぶ（設計の決定 1）。
+`projects-sync.sh` が入口であり、issue の本文の更新（`progress-record.sh`）を中から呼ぶ
+（設計の決定 1）。通過記録は中の `progress-record.sh` が 1 回だけ積む（#725）。
 """
 
 from __future__ import annotations
@@ -62,7 +62,7 @@ exit 0
         encoding="utf-8",
     )
     (bin_dir / "gh").chmod(0o755)
-    return type("R", (), {"root": root, "bin": bin_dir, "calls": calls, "body": body})
+    return type("R", (), {"root": root, "bin": bin_dir, "calls": calls, "body": body, "data": tmp_path / "data"})
 
 
 def declare(repo):
@@ -71,7 +71,7 @@ def declare(repo):
 
 
 def run(repo, script, *args):
-    env = {**os.environ, "PATH": f"{repo.bin}:{os.environ['PATH']}", "LC_ALL": "C.UTF-8"}
+    env = {**os.environ, "PATH": f"{repo.bin}:{os.environ['PATH']}", "LC_ALL": "C.UTF-8", "CLAUDE_PLUGIN_DATA": str(repo.data)}
     return subprocess.run(["bash", str(script), *args], cwd=repo.root, capture_output=True, text=True, env=env, timeout=60)
 
 
@@ -118,7 +118,7 @@ def test_a_wrong_value_writes_nothing(repo, key, value):
 
 
 def test_status_does_not_write_the_issue_body(repo):
-    """`status` はボードだけに書く（「ミッションを閉じる」だけが使う）。"""
+    """`status` はボードだけに書く（「スプリントを閉じる」だけが使う）。"""
     declare(repo)
     out = run(repo, SYNC, "42", "status", "Done")
     assert out.returncode == 0, out.stderr
@@ -137,6 +137,9 @@ def test_status_does_not_write_the_issue_body(repo):
 )
 def test_the_body_matches_the_two_commands_run_separately(repo, tmp_path, key, value, flag):
     """1 行で残る本文が、今の 2 コマンドの組（本文は `progress-record.sh`）と同じになる。"""
+    # 2 回の実行が分をまたぐと時刻の目印だけが食い違うため、時刻を固定する
+    (repo.bin / "date").write_text("#!/usr/bin/env bash\necho '2026-01-02 03:04'\n", encoding="utf-8")
+    (repo.bin / "date").chmod(0o755)
     out = run(repo, SYNC, "42", key, value)
     assert out.returncode == 0, out.stderr
     one_line = repo.body.read_text(encoding="utf-8")
@@ -164,7 +167,7 @@ def test_missing_gh_writes_nothing(repo, tmp_path):
         capture_output=True,
         text=True,
         timeout=60,
-        env={**os.environ, "PATH": str(bin_dir)},
+        env={**os.environ, "PATH": str(bin_dir), "CLAUDE_PLUGIN_DATA": str(repo.data)},
     )
     assert out.returncode == 0
     assert out.stdout == ""

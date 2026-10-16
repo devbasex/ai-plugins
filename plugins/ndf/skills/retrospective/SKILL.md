@@ -2,6 +2,7 @@
 name: retrospective
 description: "Record what to change in how the work was done, and pick up findings that were never filed. Use when a change has been released and verified（振り返り・進め方の見直し・起票の取りこぼしを拾う）."
 allowed-tools:
+  - Bash(python3 *)
   - Bash(gh *)
   - Bash(git *)
   - Read
@@ -61,17 +62,14 @@ Pull Request と違う場所へ記録が残り得る。`gh repo view` が別の�
 ここで行うのは、残っていないものを探すことである。
 
 ```bash
-# その変更から出た課題の一覧（本文とコメントの両方を対象にする）
-gh issue list --repo "$RECORD_REPO" --state all --search "<由来>"   # 例: "PR #177" / "issue #175"
+# その変更から出た課題の一覧（本文とコメントの両方・open と closed・記録先と上流リポジトリの両方を検索する）
+python3 "$SCRIPTS/issue-file.py" by-origin --origin "issue #<起点>" --origin "PR #<番号>" --repo "$RECORD_REPO" --with-upstream
 ```
 
-`<由来>` は `out-of-scope` が起票のときに書いたものと同じ形にする。Pull Request を作る前に
-見つけた課題は起点の issue の番号で残るため、`PR #<番号>` だけで探すと漏れる。**起点の
-issue と Pull Request の両方で検索する。**
-
-起票先が 2 つのリポジトリへ分かれた変更では、`--repo` を上流リポジトリへ替えてもう一度検索する。
-上流リポジトリへ回した課題は、開発対象リポジトリの検索には出ない。**替えるのは検索の
-`--repo` だけで、記録の投稿先は変わらない。**
+**起点の issue と Pull Request の両方を `--origin` に渡す。** Pull Request を作る前に見つけた課題は起点の issue の
+番号で残る。結果の `items` は課題ごとに 1 件（`repo`・`number`・`origins`）で、終了コード 2 は検索の失敗であり 0 件と
+読まない。**`metrics.upstream` が `null` なら上流リポジトリは検索されていない。** 上流リポジトリを `--repo` で名指しして
+打ち直す（名前が分からなければ利用者に聞く）。上流リポジトリを検索に足しても、記録の投稿先は変わらない。
 
 次の 3 か所と突き合わせる。番号が無いものが取りこぼしである。
 
@@ -97,12 +95,14 @@ issue と Pull Request の両方で検索する。**
 | 工程 | 実際に通った工程 | 飛ばした工程と、その結果 |
 | context window | `/ndf:skill-stats --agents --session <conductor のセッション>` | 層ごとの固定費と実作業、束ねる候補・割る候補・worker を使いすぎの目印 |
 | 用語集 | `python3 "$SCRIPTS/glossary.py" diff --base <起点> --head <終点>` | その変更で足された語・廃止された語・意味の変わった語（コンテキストごと） |
+| 承認ゲートの差し戻し | `python3 "$SCRIPTS/gate-rejections.py" count --sprint <状態ファイル>`（状態ファイルが無ければ `--issue <N>` か `--pr <N>` を繰り返す） | 承認ゲート 1・2 で利用者が差し戻した件数（`metrics` の `gate_1`・`gate_2`）と、何を差し戻したか（`items` の `what`）。終了コード 2 なら件数を 0 でなく「不明」と書く |
+| MVV を見直すか | `python3 "$SCRIPTS/project-mvv.py" signals` | 現行の版のもとで、人が AI の判断を覆した回数・「判定できない」の回数・流出不具合の件数と閾値。`items` に改訂の提案があるか |
 
 **用語集の変化は、その変更の起点と終点の 2 つの版で `glossary.py diff` を打って取る。** 起点と終点は
 「Pull Request の番号を特定する」で決めた Pull Request の base と merge のコミットである。用語集の設定の無い
 プロジェクトでは `items` が空になり、投稿に何も載せない。
 
-**context window の値は測って取る。** 記憶や体感で書かない。ミッションを複数のセッションで
+**context window の値は測って取る。** 記憶や体感で書かない。スプリントを複数のセッションで
 通したときは `--session` を繰り返して 1 つの表にする。**目印の判定は記録ごとの比で行われる**
 ため、固定費の水準が違うセッションを束ねても判定の意味は変わらない。中央値と合計の列は
 分布の目安として読む。
@@ -111,6 +111,13 @@ issue と Pull Request の両方で検索する。**
 python3 "$CLAUDE_PLUGIN_ROOT/skills/skill-stats/scripts/skill-stats.py" \
   --agents --session "$CLAUDE_CODE_SESSION_ID"
 ```
+
+**承認ゲートの差し戻しは覆しと別の数である。** 覆しは直前の MVV 判定と食い違った答えだけを数え、差し戻しは MVV 判定の
+有無を問わず利用者が差し戻した 1 回を 1 件と数える。`pace: normal` の差し戻しは覆しに出ないため、この行で数える。
+
+**「MVV を見直すか」は毎回問う。** `signals` の集計（件数・閾値・超えた兆候）を示し、プロジェクト MVV を改訂するかを
+利用者に問う。示す文面は `development-workflow` の `references/project-mvv.md` の「人へ示す文面の雛形」（経緯・前提・根拠・
+選択肢）に従う。改訂すると決めたら、同じ文書の「改訂」の手順へ入る。プロジェクト MVV が無ければ、定めるかを問う。
 
 ### 3. 次に変えることを決める
 
@@ -137,7 +144,7 @@ python3 "$CLAUDE_PLUGIN_ROOT/skills/skill-stats/scripts/skill-stats.py" \
 | 起点 | 記録の本体を置く場所 | 辿る経路 |
 | --- | --- | --- |
 | 1 件の issue | その issue へのコメント | その issue の本文末尾へ 1 行 |
-| 複数の issue（ミッション） | そのミッションをリリースした Pull Request へのコメント | 対象のすべての issue の本文末尾へ 1 行 |
+| 複数の issue（スプリント） | そのスプリントをリリースした Pull Request へのコメント | 対象のすべての issue の本文末尾へ 1 行 |
 | 起点の issue を持たない変更 | その変更の Pull Request へのコメント | 追加の 1 行は要らない |
 
 **閉じた issue にもコメントは投稿できる。** GitHub が拒むのは locked のときだけである。
@@ -154,7 +161,7 @@ python3 "$CLAUDE_PLUGIN_ROOT/skills/skill-stats/scripts/skill-stats.py" \
 | 手順 | 入力 | 出力 | 止まる条件 |
 | --- | --- | --- | --- |
 | 1. 開発の起点を解決する | `.ndf/worktree.json` の `base_branch`、origin | `$dev_base` | 設定したブランチが origin にもローカルにも無い |
-| 2. 記録対象の基準ブランチを決める | 下表の場合、`$dev_base`（起点の issue を持たない変更だけが使う） | `$record_base` | ミッションをリリースした先のブランチを判別できない |
+| 2. 記録対象の基準ブランチを決める | 下表の場合、`$dev_base`（起点の issue を持たない変更だけが使う） | `$record_base` | スプリントをリリースした先のブランチを判別できない |
 | 3. 基準コミットから Pull Request を引く | `$record_base`、`$RECORD_REPO` | マージ済みの Pull Request 1 件の番号 | マージ済みへ絞った結果が 1 件でない |
 
 **手順 1: 開発の起点を解決する**
@@ -206,9 +213,9 @@ fi
 | 場合 | 起点にするコミット |
 | --- | --- |
 | 起点の issue を持たない変更 | その変更をマージした先のブランチ（起点。`.ndf/worktree.json` の `base_branch`）の先頭 |
-| ミッション | そのミッションをリリースした先（正式版のチャネルのブランチ）の先頭 |
+| スプリント | そのスプリントをリリースした先（正式版のチャネルのブランチ）の先頭 |
 
-**ミッションを対象にする場合は、そのミッションをリリースした先を使う。**
+**スプリントを対象にする場合は、そのスプリントをリリースした先を使う。**
 `$dev_base` は開発の起点であり、リリースした先とは限らない。開発の起点とリリースの先が別の
 ブランチであるリポジトリで `$dev_base` のまま引くと、起点の先頭に
 関連付いた別の Pull Request を選び、誤った番号へ記録を投稿する。
@@ -219,13 +226,13 @@ record_base=$dev_base
 ```
 
 ```bash
-# ミッション — リリースした先を使う。**リリースした先は対象リポジトリが決める。** 開発の起点を
+# スプリント — リリースした先を使う。**リリースした先は対象リポジトリが決める。** 開発の起点を
 # そのままリリースに使っているリポジトリでは `$dev_base` と同じ値になり、正式版のチャネルを
 # 分けているリポジトリでは別の値になる。字面で書かず、既定ブランチ（origin の HEAD が
 # 指す先）で確かめる。取れないときは推測せず番号を利用者に聞く
 record_base=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
 [ -n "$record_base" ] || {
-  printf 'NOTE: ミッションを配布した先のブランチを判別できません。番号を利用者に聞いてください\n' >&2
+  printf 'NOTE: スプリントを配布した先のブランチを判別できません。番号を利用者に聞いてください\n' >&2
   exit 1
 }
 ```
@@ -244,7 +251,7 @@ gh api "/repos/$RECORD_REPO/commits/$(git rev-parse "origin/$record_base")/pulls
 
 #### 投稿する
 
-書式は `markdown-writing` に従う。本文の雛形は次のとおりである。
+書式は `markdown-writing` に従う。本文のテンプレートは次のとおりである。
 
 ```markdown
 ## 振り返り（<YYYY-MM-DD>）
@@ -278,6 +285,14 @@ worker を減らす・そのままのどれにするかと、その理由を 1 �
 | コンテキスト | 足した語 | 廃止した語 | 意味を変えた語 |
 | --- | --- | --- | --- |
 
+## 承認ゲートの差し戻し
+
+（`gate-rejections.py count` の結果: 関門 1・関門 2 の件数と、差し戻した中身を 1 行ずつ。記録が読めなければ「不明」）
+
+## MVV を見直すか
+
+（`project-mvv.py signals` の集計: 版・覆し・判定できない・流出不具合と閾値。利用者の答え: 改訂する / しない とその理由）
+
 ## 次に変えること
 
 | 変えること | 落とし先 | 状態 |
@@ -298,7 +313,7 @@ worker を減らす・そのままのどれにするかと、その理由を 1 �
 
 ```bash
 gh issue comment <issue番号> --repo "$RECORD_REPO" --body-file <記録のファイル>   # 起点が 1 件の issue
-gh pr comment <PR番号> --repo "$RECORD_REPO" --body-file <記録のファイル>         # ミッション / 起点の issue を持たない変更
+gh pr comment <PR番号> --repo "$RECORD_REPO" --body-file <記録のファイル>         # スプリント / 起点の issue を持たない変更
 ```
 
 #### 辿る経路を作る
@@ -317,7 +332,7 @@ printf '\n振り返り: %s\n' "<コメントの URL>" >> /tmp/issue-body.md
 gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 ```
 
-ミッションでは、対象のすべての issue へ同じ URL の 1 行を足す。起点の issue を持たない変更では
+スプリントでは、対象のすべての issue へ同じ URL の 1 行を足す。起点の issue を持たない変更では
 この手順が要らない。記録は Pull Request 自身に付いている。
 
 **設計判断の理由と実測の結果を残す。** Skill の挙動そのものは各 `SKILL.md` が正であり、
@@ -331,30 +346,27 @@ gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 | 成果物の良し悪し | コードレビューの工程が扱う |
 | 経緯の時系列そのもの | git の履歴と Pull Request に残っている |
 
-この工程に入ったら進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "振り返り"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「進捗記録」を使う）。 **入口のこの記録ではボードの `Status` を書かない。** 先に `Done` にすると、ボードの `Auto-close issue` が課題を閉じ、reopen の手段が報告から落ちる。
+この工程に入ったら進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "振り返り"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「進捗記録」を使う）。 **工程に入るときのこの記録ではボードの `Status` を書かない。** 先に `Done` にすると、ボードの `Auto-close issue` が課題を閉じ、reopen の手段が報告から落ちる。
 
-## ミッションを閉じる
+## スプリントを閉じる
 
 **振り返りを通る変更では、この工程がその実行の最終工程である。** 記録を投稿した後に、
-`progress-tracking` の「ミッションを閉じる」を行う。**手順はそこが正本で、ここには写さない。**
+`progress-tracking` の「スプリントを閉じる」を行う。**手順はそこが正本で、ここには写さない。**
 ボードの `Status` を `Done` にするのも、課題を閉じるのも、その手順の中で行う。
 
-## 蓄積した課題を棚卸しする
+## 振り返りの範囲
 
-**「ミッションを閉じる」の後に `/ndf:issue-upkeep` を呼ぶ。** 順序を逆にすると、`issue-upkeep` の
-手順 1 が読む「このミッションで閉じた課題」がまだ閉じていない。振り返りが拾うのは、この変更から出た
-取りこぼしである。**変更をまたいで溜まった課題そのもの**は対象にしていない。
-
-対象が 0 件ならその Skill 自身が飛ばす。
+振り返りが拾うのは、この変更から出た取りこぼしである。**変更をまたいで溜まった課題そのもの**は対象にしていない。
+それは工程表の次の工程 `棚卸し` が扱い、閉じた後の順序は `progress-tracking` の「スプリントを閉じる」にある。
 
 **振り返りはクラスタの発見を担わない。** クラスタは、同じ修正レイヤーを指す課題の集まりで
 ある。振り返りは 1 回の変更を見るため、変更をまたいで溜まった課題どうしの関係が見えない。
-見つけるのは `issue-upkeep` の「ルートコーズ」である。
+見つけるのは `backlog-refinement` の「ルートコーズ」である。
 
 ## 関連
 
 - `/ndf:release-verification` — この工程の前に行うリリース後テスト
 - `/ndf:out-of-scope` — 取りこぼしを見つけたときの起票
 - `/ndf:plan-to-spec` — 決まった仕様の永続化（振り返りとは別の出力物）
-- `/ndf:progress-tracking` — 「ミッションを閉じる」の正本
-- `/ndf:issue-upkeep` — 蓄積した課題の棚卸し（この工程の最後に呼ぶ）
+- `/ndf:progress-tracking` — 「スプリントを閉じる」の正本
+- `/ndf:backlog-refinement` — 蓄積した課題の棚卸し（工程表で次の工程）

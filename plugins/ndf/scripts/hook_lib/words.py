@@ -38,25 +38,36 @@ def _command_words(n: sp.Node, extra: list[sp.Node]) -> list[str]:
 def command_stream(cmd: str) -> list[str]:
     """語の並び（コマンドの境目は空の語）。"""
     out: list[str] = []
-
-    def visit(n: sp.Node, extra: list[sp.Node]) -> None:
-        if n.type in ("heredoc_body", "comment"):
-            return
-        if n.type == "redirected_statement":
-            red = sp.split_redirects(n)
-            if red.body is not None:
-                visit(red.body, [*extra, *red.redirects] if red.reattach else extra)
-            return
-        if n.type == "command":
-            if out:
-                out.append("")
-            out.extend(_command_words(n, extra))
-            for s in sp.substitutions(n):
-                visit(s, [])
-            return
-        kids = [c for c in n.children if c.is_named]
-        for i, c in enumerate(kids):  # 並びとパイプの末尾のリダイレクトは最後のコマンドのもの
-            visit(c, extra if i == len(kids) - 1 else [])
-
-    visit(sp.parse_bash(cmd), [])
+    _visit(sp.parse_bash(cmd), [], out)
     return out
+
+
+def _visit(n: sp.Node, extra: list[sp.Node], out: list[str]) -> None:
+    if n.type in ("heredoc_body", "comment"):
+        return
+    if n.type == "redirected_statement":
+        _visit_redirected(n, extra, out)
+    elif n.type == "command":
+        _visit_command(n, extra, out)
+    else:
+        _visit_children(n, extra, out)
+
+
+def _visit_redirected(n: sp.Node, extra: list[sp.Node], out: list[str]) -> None:
+    red = sp.split_redirects(n)
+    if red.body is not None:
+        _visit(red.body, [*extra, *red.redirects] if red.reattach else extra, out)
+
+
+def _visit_command(n: sp.Node, extra: list[sp.Node], out: list[str]) -> None:
+    if out:
+        out.append("")
+    out.extend(_command_words(n, extra))
+    for s in sp.substitutions(n):
+        _visit(s, [], out)
+
+
+def _visit_children(n: sp.Node, extra: list[sp.Node], out: list[str]) -> None:
+    kids = [c for c in n.children if c.is_named]
+    for i, c in enumerate(kids):  # 並びとパイプの末尾のリダイレクトは最後のコマンドのもの
+        _visit(c, extra if i == len(kids) - 1 else [], out)

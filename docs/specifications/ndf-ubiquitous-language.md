@@ -23,11 +23,11 @@ NDF の開発ワークフローは、要求と設計の前に、そのプロジ�
 
 | 構成要素 | 置き場所 | 責務 |
 | --- | --- | --- |
-| 用語集のスクリプト | `plugins/ndf/scripts/glossary.py` | 用語集の設定と用語集の読み込み。`gate` / `init` / `candidates` / `render` / `check` / `diff` の 6 つの副命令 |
+| 用語集のスクリプト | `plugins/ndf/scripts/glossary.py` | 用語集の設定と用語集の読み込み。`gate` / `init` / `candidates` / `render` / `check` / `diff` / `merge` の 7 つの副命令 |
 | 仕様のコピーのスクリプト | `plugins/ndf/scripts/spec-copy.py` | 課題の本文からコピーを作る（`write`）。本文とコピーの食い違いを返す（`check`） |
 | 用語集の形式の参照 | `plugins/ndf/skills/requirements-design/references/glossary-format.md` | 用語集の設定と用語集の JSON の形、未登録の語とみなす規則、文書の形 |
 | ドメインモデルの参照 | `plugins/ndf/skills/design/references/domain-model.md` | ドメインモデルの節の書き方 |
-| 設計のフェーズのステップ | `plugins/ndf/scripts/supervise.py` の `plan_mission_design` / `plan_fast_design` | 入口の検査（`glossary`）と、レビューの後の用語チェック（`glossary-check` ほか） |
+| 設計のフェーズのステップ | `plugins/ndf/scripts/supervise.py` の `plan_sprint_design` / `plan_fast_design` | 入口の検査（`glossary`）と、レビューの後の用語チェック（`glossary-check` ほか） |
 | レビューのラウンドの種類 | `plugins/ndf/skills/cross-review/scripts/classifications.py` の `review_stage` / `has_domain_model`・`state.py`・`launch-reviewer.sh` | 設計 Pull Request のラウンドをモデルレビューと詳細レビューに分け、それぞれの観点を渡す |
 | 確定仕様化の引き継ぎ | `plugins/ndf/scripts/plan-to-spec-steps.py` の `spec-finalize` | 消した設計を確定前の出所に持つ語の正本を、確定仕様へ移す |
 | ai-plugins の用語集の設定と用語集 | `.ndf/glossary.json`・`docs/glossary/glossary.json`・`docs/glossary.md` | このリポジトリのユビキタス言語 |
@@ -86,7 +86,7 @@ ai-plugins の設計 Pull Request #742 は、返信を除いたインライン�
 
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
-| 用語集 | プロジェクトの変更（Pull Request）。NDF のスクリプトでは `init`・`render`・`spec-finalize` だけが書く | 用語集のファイル（用語集の設定の `source`） | コンテキスト（`id` で識別）・用語（コンテキストと語の組で識別） | 意味・廃止した語・正本・確定前の出所 |
+| 用語集 | プロジェクトの変更（Pull Request）。NDF のスクリプトでは `init`・`render`・`merge`（取り込みの途中だけ）・`spec-finalize` だけが書く | 用語集のファイル（用語集の設定の `source`） | コンテキスト（`id` で識別）・用語（コンテキストと語の組で識別） | 意味・廃止した語・正本・確定前の出所 |
 | 用語集の設定 | プロジェクトの変更。`glossary.py init` が初めの 1 回を書く | `.ndf/glossary.json` | — | 形式・置き場・チェックの対象 |
 
 人が読む文書は集約に入らない。用語集から `render` で導く生成物で、独立して変わらない。
@@ -115,7 +115,7 @@ ai-plugins の設計 Pull Request #742 は、返信を除いたインライン�
 | E6 | 未登録の語・廃止した語を書いた | 要求・設計の文書 | `check` |
 | E7 | モデルレビューを確定した | `cross-review` の 1 ラウンド目 | 2 ラウンド目以降のレビュー |
 | E8 | 設計を確定仕様にした | `plan-to-spec-steps.py spec-finalize` | 用語集（正本を確定仕様へ移す） |
-| E9 | 変更がリリースされた | `merged` | 振り返り・`issue-upkeep`（`diff` を報告に載せる） |
+| E9 | 変更がリリースされた | `merged` | 振り返り・`backlog-refinement`（`diff` を報告に載せる） |
 
 ### 用語集の状態
 
@@ -149,15 +149,15 @@ stateDiagram-v2
 | 設計の手順 5 | `standard` | `spec-copy.py check` が 0 であることを確かめてから設計 Pull Request を出す。1 なら `write` でコピーを作り直す（本文が正） |
 | テスト駆動の手順 1 | すべて | 設計文書に不変条件の表があれば、不変条件 1 つにつきテストを 1 つ、受け入れ条件のテストより先に書く。テストの名前か docstring に不変条件の番号を書く |
 | 振り返り | すべて | その変更の起点と終点で `diff` を打ち、「用語集の変化」の節にコンテキストごとに 1 行ずつ載せる。0 件なら節を書かない |
-| `issue-upkeep` | — | 起点（直近の本番のタグ）と終点（`HEAD`）で `diff` を打ち、完了報告の表の「用語集の変化」の行に、足された語の数・廃止された語の数と語の並びを載せる |
+| `backlog-refinement` | — | 起点（直近の本番のタグ）と終点（`HEAD`）で `diff` を打ち、完了報告の表の「用語集の変化」の行に、足された語の数・廃止された語の数と語の並びを載せる |
 
-用語集の設定の無いプロジェクトでは、`check` と `diff` は 0 を返し、振り返りと `issue-upkeep` は何も載せない。
+用語集の設定の無いプロジェクトでは、`check` と `diff` は 0 を返し、振り返りと `backlog-refinement` は何も載せない。
 止めるのは `gate` だけで、`gate` を打つのは設計の工程の入口と要求の工程の手順 0（止めずに `init` へ進む）
 である。用語集の設定の無い既存のプロジェクトは、次に設計の工程へ入るときに用語集を作る手順へ案内される。
 
 ### 入出力の契約（`glossary.py`）
 
-6 つの副命令の結果は、`lib/step_result.py` の形の 1 行の JSON（`tool: "glossary"`）で標準出力の最後の行に
+7 つの副命令の結果は、`lib/step_result.py` の形の 1 行の JSON（`tool: "glossary"`）で標準出力の最後の行に
 出す。語と行の一覧は `items` に入る。`--root` の既定は `.` で、用語集の設定はそこの `.ndf/glossary.json` から読む。
 
 | 副命令 | 入力 | 出力（`items`） | 終了コード |
@@ -168,6 +168,7 @@ stateDiagram-v2
 | `render [--check]` | 用語集 | 書いた文書。`--check` は書かずに一致を見る | 0 = 書いた・一致した。1 = `--check` で一致しない。2 = 設定が無い・読めない |
 | `check [--diff BASE \| --file P...] [--rules all\|structure]` | 起点の ref か、ファイル | `{rule, path, line, term, detail}` | 0 = 当たりなし（設定が無いときも 0 で、`summary` に「宣言が無い」）。1 = 当たりあり。2 = 設定・用語集・ファイルが読めない |
 | `diff --base REF [--head REF]` | 2 つの版（`--head` の既定は worktree） | `{change, context, term, before, after}`。`change` は `added` / `meaning_changed` / `deprecated` / `removed` | 0（設定が無いときも 0）。片方の版に用語集が無ければ、無い側を空として比べる。`REF` そのものが無ければ 2 |
+| `merge` | `git merge` の途中の index の段 1〜3 | 解いた 2 ファイルか、語の衝突・残りの衝突のパス。理由と境界は [ndf-glossary-merge.md](ndf-glossary-merge.md) | 0 = 取り込みのコミットを作った。1 = 語の衝突・残りの衝突・取り込みの途中でないなど。2 = 読めない |
 
 **パスはリポジトリの境界の内側に限る。** 用語集の設定の `source` / `document` / `check.paths` と `--source` /
 `--document` は、絶対パス・`..` を含むもの・シンボリックリンクを解いて `--root` の外を指すものを受けない。
@@ -231,13 +232,14 @@ stateDiagram-v2
 | `glossary` | run | `glossary.py gate --mode <モード> --root .` | 0 → `design`。0 以外は `on_fail` を置かずに止まる（作る手順はステップの結果の `summary` に載る） |
 | `design` | work | `/ndf:design #<課題>` | `pr` |
 | `pr` | pr | 設計 Pull Request を出す | `review` |
-| `review` | drive | `cross-review`（設計の既定 3 ラウンド） | `sync-review`（失敗は `gate`） |
+| `review` | drive | `cross-review`（設計の既定 3 ラウンド） | `sync-review`（失敗は `ready`） |
 | `sync-review` | run | `git fetch -q && git merge -q --ff-only '@{u}'`（レビューの直しに追いつく） | `glossary-check` |
 | `glossary-check` | run | `glossary.py check --diff origin/<base> --root .` | 0 → `push-glossary`。1 → `fix-glossary` |
 | `fix-glossary` | work | 未登録の語は用語集へ足す（`source` を空にし `pending_source` に設計文書を書く）か言い換え、廃止した語は言い換える。用語集を変えたら `render` してコミットする（push しない）。利用者が採るかを決めるべき語は直さずに「判断が要る」と報告する | `glossary-recheck` |
 | `glossary-recheck` | run | `glossary-check` と同じ | 0 / 1 とも `push-glossary`（fast は 1 → `push-glossary-gate`） |
-| `push-glossary` | run | 設計のブランチを push し、`pr-body-decisions.sh sync` で設計 Pull Request の本文を揃える（直しが無ければ何も送らない） | `gate`（fast は `mvv`） |
-| `push-glossary-gate` | run | fast だけのステップ。`push-glossary` と同じ | `gate` |
+| `push-glossary` | run | 設計のブランチを push し、`pr-body-decisions.sh sync` で設計 Pull Request の本文を揃える（直しが無ければ何も送らない） | `ready`（fast は `mvv`） |
+| `push-glossary-gate` | run | fast だけのステップ。`push-glossary` と同じ | `ready` |
+| `ready` | run | `sh -c 'git push -q && gh pr ready <PR>'`（`pr` は設計 Pull Request を Draft で作る。push が落ちたら Draft を外さずに止まる） | `gate`（normal で `--state` があるときは `mvv`） |
 | `gate` | judge | ゲート 1。`review` と `glossary-recheck` を入力に持ち、当たりが残っていればゲート 1 の承認資料に載せる | — |
 
 **語の直しは 1 回だけ試す。** 残った当たりは語を採るかという利用者の判断であることが多く、往復させても
@@ -370,7 +372,7 @@ head のブランチが `design/` で始まるときは `--rules all`、ほか�
 - コードの追加した行に廃止した識別子の 4 つの書き方のどれかが出ると `deprecated_code` が当たり、生きた識別子の内側・コメントの中・コード以外のファイル・`--rules structure` では当たらず、文字列の中（行をまたぐ文字列を含む）では当たること
 - `--diff` で追加した行だけが当たり、`BASE` 側だけが先へ進んで足した行は当たらないこと。コードブロックとインラインコードは当たらないこと
 - ai-plugins の語を 1 つも含まない用語集で、上の規則がすべて通ること
-- 境界を越えるパスで 6 つの副命令が 2 で止まり、ファイルが増えも変わりもしないこと
+- 境界を越えるパスで 7 つの副命令が 2 で止まり、ファイルが増えも変わりもしないこと
 - `diff` が 4 つの `change` を返し、用語集の設定の無いリポジトリで `check` と `diff` が 0 であること
 - `review_stage` が design の 1 ラウンド目で `model`、2 以降と `has_model` が偽のときに `detail`、code で `None` を返し、モデルレビューの APPROVE で抜けないこと。担当のプロンプトにそのラウンドの種類の観点が入ること
 - `spec-copy.py write` の出力が本文の `## 進行` より前と一致し、コピーにしか無い節があっても `check` が 0、本文の節の中身を変えると 1 であること
@@ -387,3 +389,4 @@ head のブランチが `design/` で始まるときは `--rules all`、ほか�
 - [ai-plugins の用語集](../glossary.md)
 - [NDF の開発ワークフローの語彙](../../plugins/ndf/skills/development-workflow/references/glossary.md)
 - [ndf-design-phase.md](ndf-design-phase.md)
+- [ndf-glossary-merge.md](ndf-glossary-merge.md)（並行の Pull Request の用語集の衝突を解く `merge`）

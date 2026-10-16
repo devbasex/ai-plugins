@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
 import pathlib
+import signal
+import subprocess
 import sys
+import time
 from typing import Any
 
 import pytest
@@ -69,6 +73,30 @@ def test_flush_skips_posted_sends_success_and_stops_at_rate_limit(tmp_path: path
         paths[2].name,
         paths[3].name,
     ]
+
+
+def test_flush_ignores_json_files_without_a_sequence_name(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """待ち行列のディレクトリに置かれた連番でない JSON は項目として読まず、触らない。"""
+    other = tmp_path / "fix-pr1500-decisions.json"
+    other.write_text(json.dumps({"decisions": []}), encoding="utf-8")
+    _write_item(tmp_path, 1)
+    seen: list[int] = []
+
+    def posted_match(item):
+        seen.append(item["seq"])
+        return False, None
+
+    monkeypatch.setattr(post_queue, "posted_match", posted_match)
+    monkeypatch.setattr(post_queue, "send", lambda item: post_queue.Attempt(0, '{"id": 1}', ""))
+
+    queue = post_queue.Queue(tmp_path)
+    result = queue.flush()
+
+    assert seen == [1]
+    assert [item["seq"] for item in result.sent] == [1]
+    assert result.failed is None and result.remaining == 0
+    assert queue.paths() == [] and queue.count() == 0
+    assert json.loads(other.read_text(encoding="utf-8")) == {"decisions": []}
 
 
 def test_flush_stops_at_a_normal_send_failure(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -560,3 +588,366 @@ def test_flush_cli_prints_the_dropped_count(tmp_path: pathlib.Path, monkeypatch:
 
     out = capsys.readouterr().out
     assert "PENDING_DROPPED=1" in out and "PENDING_REMAINING=0" in out
+
+
+# ---------------- 未解決のスレッドの識別子（I-011 の現状固定） ----------------
+
+
+def test_unresolved_thread_ids_returns_stripped_nonblank_lines(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """現状固定。gh の出力の行を前後の空白を除いて返し、空行は捨てる。"""
+    calls: list[list[str]] = []
+    out = post_queue.Attempt(0, "T_1\n  T_2  \n\n   \nT_3\n", "")
+    monkeypatch.setattr(post_queue, "run", _run_returning([out], calls))
+
+    assert post_queue.unresolved_thread_ids("octo/repo", 12) == ["T_1", "T_2", "T_3"]
+    assert len(calls) == 1
+    cmd = calls[0]
+    assert cmd[:5] == ["gh", "api", "graphql", "--paginate", "-F"]
+    assert "owner=octo" in cmd
+    assert "name=repo" in cmd
+    assert "pr=12" in cmd
+    assert f"query={post_queue._UNRESOLVED_QUERY}" in cmd
+    assert cmd[-2:] == ["--jq", post_queue._UNRESOLVED_JQ]
+
+
+def test_unresolved_thread_ids_empty_output_is_empty_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """現状固定。成功して出力が空なら、`None` ではなく空の一覧を返す。"""
+    calls: list[list[str]] = []
+    monkeypatch.setattr(post_queue, "run", _run_returning([post_queue.Attempt(0, "", "")], calls))
+
+    assert post_queue.unresolved_thread_ids("octo/repo", "7") == []
+    assert "pr=7" in calls[0]
+
+
+def test_unresolved_thread_ids_failure_is_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """現状固定。gh が失敗したら `None`（0 件と区別する）。"""
+    calls: list[list[str]] = []
+    monkeypatch.setattr(post_queue, "run", _run_returning([_NORMAL_FAIL], calls))
+
+    assert post_queue.unresolved_thread_ids("octo/repo", 1) is None
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("repo", ["", None, "octo", "octo/", "/repo"])
+def test_unresolved_thread_ids_bad_repo_is_none_without_calling_gh(monkeypatch: pytest.MonkeyPatch, repo: Any) -> None:
+    """現状固定。`owner/name` の形でない repo は gh を呼ばずに `None`。"""
+    calls: list[list[str]] = []
+    monkeypatch.setattr(post_queue, "run", _run_returning([], calls))
+
+    assert post_queue.unresolved_thread_ids(repo, 1) is None
+    assert calls == []
+
+
+# ---------------- 耐久の記録（#1142 の Q2。送りの試行 1 回 = 耐久ワークフロー 1 つ） ----------------
+
+
+def _ids(queue: post_queue.Queue) -> list[str]:
+    with queue._session() as fl:
+        return sorted(fl["durable"].workflow_ids("post-"))
+
+
+def test_an_empty_queue_answers_without_opening_the_record(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """積んでいない待ち行列の count は耐久の記録を作らず、DBOS の読み込みと耐久ワークフローの登録（`_flows`）も起こさない。"""
+    queue = post_queue.Queue(tmp_path / "pending")
+
+    def no_flows() -> None:
+        raise AssertionError("空の待ち行列で _flows を呼んだ")
+
+    monkeypatch.setattr(post_queue, "_flows", no_flows)
+    assert queue.count() == 0 and queue.paths() == [] and queue.items() == [] and queue.flush().remaining == 0
+    assert not queue.drop(1)
+    assert not post_queue.durable_keys.record_path("posts", str(queue.dir.absolute())).exists()
+
+
+def test_an_empty_queue_does_not_import_dbos(tmp_path: pathlib.Path) -> None:
+    """空の待ち行列の count / paths は、新しいプロセスで dbos も durable も読み込まない（空キューの高速経路）。"""
+    code = (
+        "import sys, pathlib; sys.path.insert(0, sys.argv[1]); import post_queue;"
+        "q = post_queue.Queue(pathlib.Path(sys.argv[2])); assert q.count() == 0 and q.paths() == [];"
+        "print('dbos' in sys.modules, 'durable' in sys.modules)"
+    )
+    env = {**os.environ, "NDF_DBOS_DIR": str(tmp_path / "db")}
+    out = subprocess.run(
+        [sys.executable, "-c", code, str(LIB), str(tmp_path / "pending")], capture_output=True, text=True, env=env, check=True
+    )
+    assert out.stdout.split() == ["False", "False"]
+
+
+def test_legacy_items_are_imported_with_their_sequence(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """移行の前のファイルは最初の flush で同じ連番のまま送られ、`imported/` へ移る。"""
+    for seq in (3, 7):
+        _write_item(tmp_path, seq)
+    sent: list[int] = []
+    monkeypatch.setattr(post_queue, "posted_match", lambda item: (False, None))
+    monkeypatch.setattr(post_queue, "send", lambda item: sent.append(item["seq"]) or post_queue.Attempt(0, "{}", ""))
+
+    queue = post_queue.Queue(tmp_path)
+    result = queue.flush()
+
+    assert sent == [3, 7] and result.remaining == 0
+    assert sorted(p.name for p in (tmp_path / "imported").iterdir()) == ["0003-pr-comment-3.json", "0007-pr-comment-7.json"]
+    assert not list(tmp_path.glob("*.json"))
+    assert post_queue.enqueue(queue, "pr-comment", "o/r", 1, {"body": "次"})["seq"] == 8
+
+
+def test_an_unsent_item_is_retried_in_order_by_the_next_flush(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """上限の項目の後ろは送られず、次の flush が次の試行で順に送る。試行ごとに耐久ワークフローが 1 つ増える。"""
+    queue = post_queue.Queue(tmp_path)
+    for body in ("一", "二"):
+        post_queue.enqueue(queue, "pr-comment", "o/r", 5, {"body": body}, extra={"ident": body})
+    limited = {"on": True}
+    sent: list[str] = []
+
+    def send(item):
+        if limited["on"]:
+            return post_queue.Attempt(1, "", "API rate limit exceeded (HTTP 429)")
+        sent.append(item["match"]["body"])
+        return post_queue.Attempt(0, '{"id": 1}', "")
+
+    monkeypatch.setattr(post_queue, "posted_match", lambda item: (False, None))
+    monkeypatch.setattr(post_queue, "send", send)
+
+    first = queue.flush()
+    limited["on"] = False
+    second = queue.flush()
+
+    assert first.rate_limited is True and first.failed["seq"] == 1 and first.remaining == 2
+    assert [i["seq"] for i in second.sent] == [1, 2] and second.remaining == 0 and sent == ["一", "二"]
+    assert second.sent[0]["attempts"] == 1
+    assert _ids(queue) == ["post-0001-pr-comment-一-a0", "post-0001-pr-comment-一-a1", "post-0001-pr-comment-一-a2"] + [
+        "post-0002-pr-comment-二-a0",
+        "post-0002-pr-comment-二-a1",
+    ]
+
+
+def test_flush_drop_flush_run_in_one_process_that_exits_normally(tmp_path: pathlib.Path) -> None:
+    """result_posts の順（flush → drop → 積み直し → flush）を 1 つのプロセスで打ち、プロセスが普通に終わる。"""
+    script = tmp_path / "run.py"
+    script.write_text(
+        f"""
+import sys
+sys.path.insert(0, {str(LIB)!r})
+import post_queue
+calls = []
+def send(item):
+    calls.append(item["seq"])
+    if len(calls) == 1:
+        return post_queue.Attempt(1, '{{"message": "Line could not be resolved"}}', "gh: Unprocessable Entity (HTTP 422)")
+    return post_queue.Attempt(0, '{{"id": 9}}', "")
+post_queue.send = send
+post_queue.posted_match = lambda item: (False, None)
+q = post_queue.Queue({str(tmp_path / "pending")!r})
+seq = post_queue.enqueue(q, "review-post", "o/r", 1, {{"body": "b", "event": "COMMENT"}})["seq"]
+first = q.flush()
+assert post_queue.rejected_by_position(first.failed), first
+assert q.drop(first.failed["seq"]) is True
+seq = post_queue.enqueue(q, "review-post", "o/r", 1, {{"body": "b2", "event": "COMMENT"}})["seq"]
+second = q.flush()
+print(seq, [i["seq"] for i in second.sent], second.remaining, calls)
+""",
+        encoding="utf-8",
+    )
+    out = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, timeout=120)
+
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.split("\n")[0] == "2 [2] 0 [1, 2]"
+
+
+def test_an_attempt_cut_by_kill_is_sent_again_after_checking_it_was_not_posted(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """送りの途中で kill -9 された試行は次に開くときに止め、次の flush が既投稿の照合から次の試行で送る。"""
+    started = tmp_path / "started"
+    script = tmp_path / "hang.py"
+    script.write_text(
+        f"""
+import pathlib, sys, time
+sys.path.insert(0, {str(LIB)!r})
+import post_queue
+def send(item):
+    pathlib.Path({str(started)!r}).write_text("x")
+    time.sleep(60)
+post_queue.send = send
+post_queue.posted_match = lambda item: (False, None)
+q = post_queue.Queue({str(tmp_path / "pending")!r})
+post_queue.enqueue(q, "pr-comment", "o/r", 1, {{"body": "b"}})
+q.flush()
+""",
+        encoding="utf-8",
+    )
+    proc = subprocess.Popen([sys.executable, str(script)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        deadline = time.monotonic() + 60
+        while not started.exists() and time.monotonic() < deadline and proc.poll() is None:
+            time.sleep(0.05)
+        assert started.exists(), proc.communicate(timeout=5)
+    finally:
+        os.kill(proc.pid, signal.SIGKILL)
+        proc.wait(timeout=10)
+    checked: list[int] = []
+    monkeypatch.setattr(post_queue, "posted_match", lambda item: checked.append(item["seq"]) or (False, None))
+    monkeypatch.setattr(post_queue, "send", lambda item: post_queue.Attempt(0, '{"id": 3}', ""))
+
+    queue = post_queue.Queue(tmp_path / "pending")
+    result = queue.flush()
+
+    assert checked == [1] and [i["seq"] for i in result.sent] == [1] and result.remaining == 0
+    assert _ids(queue) == ["post-0001-pr-comment-1-a0", "post-0001-pr-comment-1-a1", "post-0001-pr-comment-1-a2"]
+
+
+# ---------------- 一時的な失敗（#1843） ----------------
+
+# 前提 1 の 3 つの形。500 の本文なしは PR 1842 の実例、ネットワークの語は gh 2.101.0 の実測。
+_TRANSIENT_FAILURES = [
+    post_queue.Attempt(1, '{"message": "Server Error"}', "gh: Server Error (HTTP 500)"),
+    post_queue.Attempt(1, "", "gh: Bad Gateway (HTTP 502)"),
+    post_queue.Attempt(1, "", "gh: Service Unavailable (HTTP 503)"),
+    post_queue.Attempt(1, "", "gh: Gateway Timeout (HTTP 504)"),
+    post_queue.Attempt(1, "", "unexpected end of JSON input"),
+    post_queue.Attempt(1, "", "error connecting to nonexistent.invalid"),
+    post_queue.Attempt(1, "", 'Post "https://api.github.com/graphql": dial tcp 127.0.0.1:9: connect: connection refused'),
+]
+_NOT_TRANSIENT = [
+    post_queue.Attempt(0, "", ""),
+    post_queue.Attempt(1, "", "gh: Bad Request (HTTP 400)"),
+    post_queue.Attempt(1, "", "gh: Not Found (HTTP 404)"),
+    post_queue.Attempt(1, "", "gh: Gone (HTTP 410)"),
+    post_queue.Attempt(1, "", "gh: Unprocessable Entity (HTTP 422)"),
+    post_queue.Attempt(1, "", "API rate limit exceeded (HTTP 429)"),
+    post_queue.Attempt(1, "", "API rate limit exceeded (HTTP 403)"),
+    post_queue.Attempt(1, "", "gh: Server Error rate limit (HTTP 500)"),
+    # 本文がある応答は「読めなかった」に当たらない
+    post_queue.Attempt(1, '{"message": "x"}', "unexpected end of JSON input"),
+    post_queue.Attempt(1, "", "permission denied"),
+]
+
+
+@pytest.mark.parametrize("attempt", _TRANSIENT_FAILURES)
+def test_a_transient_failure_is_told_apart(attempt: post_queue.Attempt) -> None:
+    assert post_queue.is_transient_failure(attempt) is True
+    assert post_queue.is_rate_limited(attempt) is False
+
+
+@pytest.mark.parametrize("attempt", _NOT_TRANSIENT)
+def test_other_failures_are_not_transient(attempt: post_queue.Attempt, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(post_queue, "quota_remaining", lambda: pytest.fail("一時的な失敗の判定は残り回数を引かない"))
+    assert post_queue.is_transient_failure(attempt) is False
+
+
+def test_the_wait_for_transient_failures_stays_within_the_rate_limit_retry() -> None:
+    assert 0 < post_queue.TRANSIENT_INTERVAL <= post_queue.TRANSIENT_MAX_WAIT <= 900.0
+
+
+@pytest.mark.parametrize("failure", _TRANSIENT_FAILURES[:1] + _TRANSIENT_FAILURES[4:6])
+@pytest.mark.parametrize("kind", ["pr-comment", "review-post", "review-reply"])
+def test_flush_keeps_an_item_on_a_transient_failure(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, failure: post_queue.Attempt, kind: str
+) -> None:
+    """一時的な失敗は控えず、待てば流れる印を立てて先頭に残す（AC1）。"""
+    path = _write_kind(tmp_path, 1, kind)
+    monkeypatch.setattr(post_queue, "posted_match", lambda item: (False, None))
+    monkeypatch.setattr(post_queue, "send", lambda item: failure)
+
+    result = post_queue.Queue(tmp_path).flush()
+
+    assert result.failed["seq"] == 1 and result.failed["last_transient"] is True
+    assert result.transient is True and result.rate_limited is False and result.waitable is True
+    assert result.dropped == [] and result.remaining == 1
+    assert [p.name for p in post_queue.Queue(tmp_path).paths()] == [path.name]
+    assert not (tmp_path / "dropped").exists()
+
+
+@pytest.mark.parametrize(
+    "failure, rate_limited",
+    [
+        (post_queue.Attempt(1, "", "API rate limit exceeded (HTTP 429)"), True),
+        (post_queue.Attempt(1, "", "gh: Bad Request (HTTP 400)"), False),
+    ],
+)
+def test_other_failures_do_not_raise_the_transient_mark(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, failure: post_queue.Attempt, rate_limited: bool
+) -> None:
+    _write_kind(tmp_path, 1, "review-post")
+    monkeypatch.setattr(post_queue, "posted_match", lambda item: (False, None))
+    monkeypatch.setattr(post_queue, "send", lambda item: failure)
+
+    result = post_queue.Queue(tmp_path).flush()
+
+    assert result.transient is False and result.rate_limited is rate_limited and result.waitable is rate_limited
+
+
+def test_an_item_left_by_a_transient_failure_is_not_sent_while_it_cannot_be_checked(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """届いたか分からない項目は、照会ができないうちは送らない（決定 3・AC7）。"""
+    _write_kind(tmp_path, 1, "review-post")
+    sends: list[int] = []
+    monkeypatch.setattr(post_queue, "posted_match", lambda item: (False, None))
+    monkeypatch.setattr(post_queue, "send", lambda item: sends.append(item["seq"]) or _TRANSIENT_FAILURES[0])
+    post_queue.Queue(tmp_path).flush()
+    assert sends == [1]
+
+    monkeypatch.setattr(post_queue, "posted_match", lambda item: (None, None))
+    result = post_queue.Queue(tmp_path).flush()
+
+    assert sends == [1]
+    assert result.transient is True and result.remaining == 1
+
+    monkeypatch.setattr(post_queue, "posted_match", lambda item: (True, {"id": 9, "body": "x"}))
+    result = post_queue.Queue(tmp_path).flush()
+
+    assert sends == [1]
+    assert [i["seq"] for i in result.skipped] == [1] and result.remaining == 0
+
+
+def test_an_item_left_by_a_rate_limit_is_still_sent_when_it_cannot_be_checked(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_kind(tmp_path, 1, "pr-comment")
+    sends: list[int] = []
+    monkeypatch.setattr(post_queue, "posted_match", lambda item: (None, None))
+    monkeypatch.setattr(
+        post_queue, "send", lambda item: sends.append(item["seq"]) or post_queue.Attempt(1, "", "API rate limit exceeded (HTTP 429)")
+    )
+    post_queue.Queue(tmp_path).flush()
+    post_queue.Queue(tmp_path).flush()
+
+    assert sends == [1, 1]
+
+
+def test_post_enqueues_and_returns_queued_on_a_transient_failure(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`pr-comment` の送りが一時的な失敗なら積んで先へ進む（AC10）。"""
+    q = post_queue.Queue(tmp_path)
+    monkeypatch.setattr(post_queue, "send", lambda item: post_queue.Attempt(1, "", "unexpected end of JSON input"))
+
+    outcome, attempt = post_queue.post(q, "pr-comment", "devbasex/ai-plugins", 757, {"body": "b"}, extra={"ident": "t"})
+
+    assert outcome == post_queue.QUEUED and attempt is not None
+    [(_, saved)] = q.items()
+    assert saved["last_transient"] is True and saved["attempts"] == 1
+
+
+def test_post_cli_exits_zero_on_a_transient_failure(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    body = tmp_path / "body.md"
+    body.write_text("b", encoding="utf-8")
+    monkeypatch.setattr(post_queue, "send", lambda item: post_queue.Attempt(1, "", "gh: Server Error (HTTP 500)"))
+    args = type("A", (), {"dir": str(tmp_path / "q"), "kind": "pr-comment", "repo": "o/r", "pr": 1, "body_file": str(body), "actor": ""})()
+
+    assert post_queue.cmd_post(args) == 0
+    assert "QUEUED=1" in capsys.readouterr().out
+
+
+def test_flush_cli_prints_the_transient_mark(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    _write_kind(tmp_path, 1, "pr-comment")
+    monkeypatch.setattr(post_queue, "posted_match", lambda item: (False, None))
+    monkeypatch.setattr(post_queue, "send", lambda item: _TRANSIENT_FAILURES[1])
+
+    post_queue.cmd_flush(type("A", (), {"dir": str(tmp_path)})())
+
+    assert "PENDING_TRANSIENT=1" in capsys.readouterr().out.splitlines()

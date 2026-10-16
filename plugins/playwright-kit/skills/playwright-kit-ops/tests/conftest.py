@@ -1,7 +1,7 @@
 """tests/ から scripts/ と playwright_kit/ の両方を import 可能にする path 設定。
 
 playwright_kit はパッケージなので import 可能。scripts/ 配下の単発スクリプト
-(upload_evidence.py 等) はパッケージ化されていないため sys.path 追加が必要。
+(record_scenario.py 等) はパッケージ化されていないため sys.path 追加が必要。
 pytest plugin の自己テスト用に ``pytester`` を有効化する。
 """
 

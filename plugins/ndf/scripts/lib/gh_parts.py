@@ -22,13 +22,20 @@ LLM が `gh` / `gh api` を手順の文どおりに組み立てていた取得�
     python3 gh_parts.py body-section get --issue 659 --heading "## 進行"
     python3 gh_parts.py body-section replace --issue 659 --heading "## 進行" --content-file s.md
     python3 gh_parts.py body-section append --issue 659 --line "振り返り: https://..."
+    python3 gh_parts.py body-lock --issue 659 --timeout 30 -- bash progress-record.sh 659 実装
     python3 gh_parts.py review-post --payload p.json --result r.json --pr 812 --round 1 --seat codex
 
 | 部品 | 返すもの |
 | --- | --- |
 | `pr-info` | メタ・本文・差分の統計・checks（名前ごとの最新の実行へ畳んだもの）・未解決のスレッド。差分とログはファイルへ書き、パスを返す |
 | `unresolved-threads` | 未解決のレビュースレッド（`thread_id` / `path` / `line`） |
-| `body-section` | 本文の指定の節の取得・置換と、末尾への 1 行の追記 |
+| `body-section` | 本文の指定の節の取得・置換と、末尾への 1 行の追記。置換と追記は課題ごとの錠の中で読みから書きまでを行う |
+| `body-lock` | 課題ごとの錠を取ったまま `--` の後のコマンドを走らせ、その終了コードで終わる。`--timeout` 秒で取れなければ走らせずに 2 |
+
+課題の本文を書き換える者（`body-section` と `progress-record.sh`）は、課題ごとの錠（`lib/locks.py` の `exclusive`。
+置き場は `~/.claude/ndf/locks/issue-body/<owner>--<repo>--<番号>`、環境変数 `NDF_LOCK_DIR` があればその下の
+`issue-body/`）を取ってから本文を読み、書き終えてから放す（#1241 の I10）。錠は機械ごとのファイルで、別の機械や
+GitHub の画面からの書き込みとは排他しない。
 | `review-post` | レビューの payload を 1 回で投稿する。自分の PR なら REQUEST_CHANGES を COMMENT へ下げる |
 
 結果は `step_result` の形（#846）で 1 行の JSON にして出す。**取得できなかった値は `null` にし、
@@ -41,11 +48,15 @@ LLM が `gh` / `gh api` を手順の文どおりに組み立てていた取得�
 from __future__ import annotations
 
 import argparse
+import os
 import pathlib
+import subprocess
 import sys
+from contextlib import nullcontext
 from typing import Any
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import deps  # noqa: E402
 import gh_call  # noqa: E402
 import gh_checks  # noqa: E402
 import gh_fields  # noqa: E402
@@ -54,6 +65,7 @@ import gh_pr_info  # noqa: E402
 import gh_quota  # noqa: E402
 import gh_rest  # noqa: E402
 import gh_sections  # noqa: E402
+import repo as repo_id  # noqa: E402
 import step_result  # noqa: E402
 
 # ---------------- 再エクスポート（`gh_parts.<名前>` で引く呼び出し側のため。RUNNER は除く） ----------------
@@ -118,6 +130,35 @@ replace_section = gh_sections.replace_section
 append_line = gh_sections.append_line
 
 
+# ---------------- 課題ごとの錠 ----------------
+
+
+def issue_lock_target(slug: str | None, number: int) -> pathlib.Path:
+    """課題 `number` の本文を守る錠の対象（`lib/locks.py` が `<対象>.lock` を錠にする）。リポジトリが分からなければ `local`。"""
+    base = pathlib.Path(os.environ.get("NDF_LOCK_DIR") or pathlib.Path.home() / ".claude" / "ndf" / "locks")
+    return base / "issue-body" / f"{(slug or 'local').replace('/', '--')}--{number}"
+
+
+def issue_lock(slug: str | None, number: int, timeout: float | None = None):
+    """課題ごとの錠を取る文脈（取れなければ `locks.LockTimeout`）。"""
+    import locks  # 使う側（main）が deps.require("locks") を済ませてから呼ぶ
+
+    return locks.exclusive(issue_lock_target(slug, number), timeout=timeout)
+
+
+def body_lock(number: int, repo: str | None, cmd: list[str], timeout: float | None) -> int:
+    """錠を取ったまま `cmd` を走らせ、その終了コードを返す。取れなければ走らせずに 2 を返す。"""
+    import locks
+
+    slug = repo or repo_id.owner_repo(".")
+    try:
+        with issue_lock(slug, number, timeout):
+            return subprocess.run(cmd).returncode
+    except locks.LockTimeout as e:
+        print(f"body-lock: {e}。走らせない", file=sys.stderr)
+        return step_result.EXIT_UNREADABLE
+
+
 # ---------------- body-section ----------------
 
 
@@ -129,6 +170,11 @@ def body_section(
     slug = gh_call.resolve_repo(repo)
     if not slug:
         return step_result.result(tool, "stopped", "リポジトリを決められない"), step_result.EXIT_PRECONDITION
+    with nullcontext() if op == "get" else issue_lock(slug, number):  # 書き換えは読みから書きまでを錠の中で行う
+        return _body_section_in(tool, op, slug, number, heading, content, line)
+
+
+def _body_section_in(tool: str, op: str, slug: str, number: int, heading: str, content: str, line: str) -> tuple[dict[str, Any], int]:
     body = gh_rest.fetch_body(slug, number)
     if body is None:
         return step_result.result(tool, "stopped", f"#{number} の本文を取得できない"), step_result.EXIT_UNREADABLE
@@ -163,11 +209,15 @@ def review_post(
     """レビューを 1 回で投稿する。PR の作成者が自分なら REQUEST_CHANGES を COMMENT へ下げる。
 
     投稿そのものは `result_posts.post_review`（待ち行列・位置の拒否の退避）に任せる。
+    入口の時刻を `since` として渡し、二度書かない照合をこの実行の中のレビューに限る
+    （前の実行で同じラウンド・席のレビューがあっても「既投稿」にしない）。
     """
+    import clock
     import post_queue
     import result_posts
 
     tool = "review-post"
+    since = clock.now_iso("utc")
     slug = gh_call.resolve_repo(repo)
     if not slug:
         return step_result.result(tool, "stopped", "リポジトリを決められない"), step_result.EXIT_PRECONDITION
@@ -181,7 +231,17 @@ def review_post(
     is_own = meta["author"] == me
     qdir = pathlib.Path(queue_dir) if queue_dir else gh_pr_info.default_out_dir(slug, pr) / post_queue.QUEUE_DIRNAME
     posted = result_posts.post_review(
-        post_queue.Queue(qdir), payload, result, slug, int(pr), int(round_no), seat, head_sha or meta["head_sha"], is_own, actor=me
+        post_queue.Queue(qdir),
+        payload,
+        result,
+        slug,
+        int(pr),
+        int(round_no),
+        seat,
+        head_sha or meta["head_sha"],
+        is_own,
+        actor=me,
+        since=since,
     )
     item = {
         "kind": "review",
@@ -231,6 +291,12 @@ def _parser() -> argparse.ArgumentParser:
     sp.add_argument("--content-file", help="置換する中身。`-` で標準入力")
     sp.add_argument("--line", default="")
 
+    sp = sub.add_parser("body-lock", help="課題ごとの錠を取ったまま `--` の後のコマンドを走らせる")
+    sp.add_argument("--issue", type=int, required=True)
+    sp.add_argument("--repo")
+    sp.add_argument("--timeout", type=float, help="錠を待つ上限の秒（既定は取れるまで待つ）")
+    sp.add_argument("command", nargs=argparse.REMAINDER, help="`--` の後に走らせるコマンド")
+
     sp = sub.add_parser("review-post", help="レビューの payload を 1 回で投稿する")
     sp.add_argument("--payload", required=True)
     sp.add_argument("--result", required=True)
@@ -243,39 +309,58 @@ def _parser() -> argparse.ArgumentParser:
     return p
 
 
+def _cmd_pr_info(args: argparse.Namespace) -> tuple[dict, int]:
+    parts = {x.strip() for x in args.with_parts.split(",") if x.strip()}
+    unknown = parts - set(gh_pr_info.WITH_PARTS)
+    if unknown:
+        step_result.emit(step_result.result("pr-info", "stopped", f"知らない --with: {', '.join(sorted(unknown))}"), 2)
+    return gh_pr_info.pr_info(args.pr, args.repo, parts, pathlib.Path(args.out_dir) if args.out_dir else None)
+
+
+def _cmd_unresolved_threads(args: argparse.Namespace) -> tuple[dict, int]:
+    slug = gh_call.resolve_repo(args.repo)
+    threads = gh_graphql.unresolved_threads(slug or "", args.pr)
+    if threads is None:
+        return step_result.result("unresolved-threads", "stopped", f"PR #{args.pr} の未解決のスレッドを取得できない"), 2
+    items = [{"kind": "thread", "name": t["thread_id"], "result": "unresolved", **t} for t in threads]
+    return step_result.result("unresolved-threads", "ok", f"未解決 {len(threads)}", items, {"unresolved_threads": len(threads)}), 0
+
+
+def _cmd_body_section(args: argparse.Namespace) -> tuple[dict, int]:
+    number = args.issue if args.issue is not None else args.pr
+    if args.op in ("get", "replace") and not args.heading.strip().startswith("#"):
+        step_result.emit(step_result.result("body-section", "stopped", "--heading に見出しの行（`## 進行` など）を渡す"), 2)
+    if args.op == "append" and not args.line.strip():
+        step_result.emit(step_result.result("body-section", "stopped", "--line が空"), 2)
+    content = ""
+    if args.op == "replace":
+        if not args.content_file:
+            step_result.emit(step_result.result("body-section", "stopped", "--content-file が要る"), 2)
+        content = sys.stdin.read() if args.content_file == "-" else pathlib.Path(args.content_file).read_text(encoding="utf-8")
+    return body_section(args.op, number, args.repo, args.heading, content, args.line)
+
+
+def _cmd_review_post(args: argparse.Namespace) -> tuple[dict, int]:
+    return review_post(args.payload, args.result, args.pr, args.round_no, args.seat, args.repo, args.head_sha, args.queue_dir)
+
+
+_COMMANDS = {
+    "pr-info": _cmd_pr_info,
+    "unresolved-threads": _cmd_unresolved_threads,
+    "body-section": _cmd_body_section,
+    "review-post": _cmd_review_post,
+}
+
+
 def main(argv: list[str] | None = None) -> None:
     args = _parser().parse_args(argv)
-    if args.cmd == "pr-info":
-        parts = {x.strip() for x in args.with_parts.split(",") if x.strip()}
-        unknown = parts - set(gh_pr_info.WITH_PARTS)
-        if unknown:
-            step_result.emit(step_result.result("pr-info", "stopped", f"知らない --with: {', '.join(sorted(unknown))}"), 2)
-        obj, code = gh_pr_info.pr_info(args.pr, args.repo, parts, pathlib.Path(args.out_dir) if args.out_dir else None)
-    elif args.cmd == "unresolved-threads":
-        slug = gh_call.resolve_repo(args.repo)
-        threads = gh_graphql.unresolved_threads(slug or "", args.pr)
-        if threads is None:
-            obj, code = step_result.result("unresolved-threads", "stopped", f"PR #{args.pr} の未解決のスレッドを取得できない"), 2
-        else:
-            items = [{"kind": "thread", "name": t["thread_id"], "result": "unresolved", **t} for t in threads]
-            obj, code = (
-                step_result.result("unresolved-threads", "ok", f"未解決 {len(threads)}", items, {"unresolved_threads": len(threads)}),
-                0,
-            )
-    elif args.cmd == "body-section":
-        number = args.issue if args.issue is not None else args.pr
-        if args.op in ("get", "replace") and not args.heading.strip().startswith("#"):
-            step_result.emit(step_result.result("body-section", "stopped", "--heading に見出しの行（`## 進行` など）を渡す"), 2)
-        if args.op == "append" and not args.line.strip():
-            step_result.emit(step_result.result("body-section", "stopped", "--line が空"), 2)
-        content = ""
-        if args.op == "replace":
-            if not args.content_file:
-                step_result.emit(step_result.result("body-section", "stopped", "--content-file が要る"), 2)
-            content = sys.stdin.read() if args.content_file == "-" else pathlib.Path(args.content_file).read_text(encoding="utf-8")
-        obj, code = body_section(args.op, number, args.repo, args.heading, content, args.line)
-    else:
-        obj, code = review_post(args.payload, args.result, args.pr, args.round_no, args.seat, args.repo, args.head_sha, args.queue_dir)
+    deps.require("durable", "locks")  # 投稿キュー（post-review）は耐久の記録を、本文の書き換えは課題ごとの錠を使う
+    if args.cmd == "body-lock":
+        cmd = args.command[1:] if args.command[:1] == ["--"] else args.command
+        if not cmd:
+            step_result.emit(step_result.result("body-lock", "stopped", "`--` の後に走らせるコマンドを渡す"), 2)
+        sys.exit(body_lock(args.issue, args.repo, cmd, args.timeout))
+    obj, code = _COMMANDS[args.cmd](args)
     step_result.emit(obj, code)
 
 

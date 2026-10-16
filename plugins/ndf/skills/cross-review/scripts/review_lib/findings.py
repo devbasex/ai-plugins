@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import review_lib  # noqa: E402
+import body_findings  # noqa: E402
 from classifications import COUNTED_CLASSIFICATIONS  # noqa: E402
 from review_lib import github  # noqa: E402
 
@@ -82,6 +83,16 @@ def _verify_result(finding: dict[str, Any]) -> str:
     return str((v or {}).get("result") or "not_run")
 
 
+def verify_rank_of(result: str) -> int:
+    """実行の結果（`verification.result`）の強さ。知らない結果は -1。"""
+    return _VERIFY_RANK.get(result, -1)
+
+
+def verify_rank(finding: dict[str, Any]) -> int:
+    """指摘の実行の結果の強さ。"""
+    return verify_rank_of(_verify_result(finding))
+
+
 def _verdicts(finding: dict[str, Any], verdict: str) -> list[str]:
     """その値を返した担当の一覧。"""
     return [str(c.get("agent")) for c in finding.get("critiques") or [] if c.get("verdict") == verdict]
@@ -124,6 +135,20 @@ def _unrefuted_reason(finding: dict[str, Any]) -> str:
     あるが支持も否定も無い（`not_supported`）。
     """
     return "not_supported" if finding.get("critiques") else "no_critique"
+
+
+def blocking_body(st: dict[str, Any]) -> list[dict[str, Any]]:
+    """収束を妨げる総評だけの指摘（#1980）。決着していない（`body_findings.unsettled`）もののうち、
+    `critical` / `major` で、反証で棄却されていないもの。
+
+    区分は `_classify_finding` で決め、要素へ書かない（証拠集約を通っていないラウンドの記録を書き換えない）。
+    `minor` / `nit` は収束を止めず、雛形と最終スイープの残数にだけ入る。
+    """
+    return [
+        f
+        for f in body_findings.unsettled(st)
+        if _SEVERITY_RANK.get(str(f.get("severity")), -1) >= _SEVERITY_RANK["major"] and _classify_finding(f) != "rejected"
+    ]
 
 
 def _apply_classification(finding: dict[str, Any]) -> str:
@@ -178,7 +203,7 @@ def _absorb(rep: dict[str, Any], other: dict[str, Any]) -> None:
     # **実行の結果は組から選び直す。** `reproduced` > `not_reproduced` > `not_run` の
     # 順で採り、出所を残す。**実行し直さない**（2 段目は反証の後にあり、その時点では
     # 組の全員が `verification` を持っている）。
-    if _VERIFY_RANK.get(_verify_result(other), -1) > _VERIFY_RANK.get(_verify_result(rep), -1):
+    if verify_rank(other) > verify_rank(rep):
         rep["verification"] = other.get("verification")
 
     # **根拠の対は同じ要素から採る。** `evidence` だけの要素と `falsification` だけの

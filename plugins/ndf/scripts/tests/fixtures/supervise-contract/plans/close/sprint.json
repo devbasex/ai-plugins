@@ -1,0 +1,51 @@
+{
+  "スプリント": "m9",
+  "進め方": "fast",
+  "状態": "<TMP>/out/sprint/sprint.json",
+  "リリースの経路": [
+    {
+      "route": "template",
+      "target": "package-plugin",
+      "branch": "main",
+      "stage": "template",
+      "note": null
+    }
+  ],
+  "ステージ": [
+    {
+      "wave": 1,
+      "name": "最終の検査",
+      "plans": [
+        "<TMP>/out/close/1-check.json"
+      ],
+      "command": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/close/1-check.json --max 3 --then <TMP>/out/close/2-release.json --then <TMP>/out/close/3-release-prod.json --then <TMP>/out/close/4-close.json"
+    },
+    {
+      "wave": 2,
+      "name": "開発版",
+      "plans": [
+        "<TMP>/out/close/2-release.json"
+      ],
+      "then_of": "最終の検査",
+      "resume": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/close/2-release.json --max 3 --then <TMP>/out/close/3-release-prod.json --then <TMP>/out/close/4-close.json"
+    },
+    {
+      "wave": 3,
+      "name": "本番",
+      "plans": [
+        "<TMP>/out/close/3-release-prod.json"
+      ],
+      "then_of": "最終の検査",
+      "resume": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/close/3-release-prod.json --max 3 --then <TMP>/out/close/4-close.json"
+    },
+    {
+      "wave": 4,
+      "name": "まとめ",
+      "plans": [
+        "<TMP>/out/close/4-close.json"
+      ],
+      "then_of": "最終の検査",
+      "resume": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/close/4-close.json --max 3"
+    }
+  ]
+}

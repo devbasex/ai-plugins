@@ -89,5 +89,6 @@ def test_step0_reports_the_exit_code_of_check(tmp_path: Path) -> None:
     assert got.returncode == 0, got.stderr
     lines = got.stdout.splitlines()
     assert "exit=2" in lines, got.stdout
-    assert lines[-1] == "decl=2", got.stdout  # 続けてプロジェクトの宣言を判定する（#1333）
+    assert "decl=2" in lines, got.stdout  # 続けてプロジェクトの宣言を判定する（#1333）
+    assert lines[-1] == "mvv=2", got.stdout  # 続けてプロジェクト MVV の有無を判定する（#1366）
     assert not (repo / ".ndf").exists(), "確認は宣言を作らない"

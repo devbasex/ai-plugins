@@ -149,7 +149,7 @@ def _state(tmp_path, reject: bool | None = True) -> dict:
 
 def test_the_implement_intake_rejects_the_item_with_the_reason(cmd_implement, tmp_path):
     facts = [_fact({"tests/test_full.py": _change([], ['    p = ROOT / "README.md"\n'])})]
-    problem = cmd_implement._implement_problem(ITEM, facts, [], TRACKED, _state(tmp_path))
+    problem = cmd_implement._implement_problem(ITEM, facts, TRACKED, _state(tmp_path))
     assert problem is not None
     assert problem.startswith(REASON)
     assert "tests/test_full.py: README.md" in problem
@@ -157,13 +157,13 @@ def test_the_implement_intake_rejects_the_item_with_the_reason(cmd_implement, tm
 
 def test_the_implement_intake_passes_a_temporary_markdown(cmd_implement, tmp_path):
     facts = [_fact({"tests/test_tmp.py": _change([], ['    p = tmp_path / "a.md"\n'])})]
-    assert cmd_implement._implement_problem(ITEM, facts, [], TRACKED, _state(tmp_path)) is None
+    assert cmd_implement._implement_problem(ITEM, facts, TRACKED, _state(tmp_path)) is None
 
 
 def test_the_add_tests_intake_rejects_the_item_with_the_reason(cmd_implement, tmp_path):
     facts = [_fact({"tests/test_full.py": _change([], ['    p = ROOT / "README.md"\n'])})]
     facts[0]["files"] = ["tests/test_full.py"]
-    problem = cmd_implement._test_commit_problem(facts, [], TRACKED, _state(tmp_path))
+    problem = cmd_implement._test_commit_problem(facts, TRACKED, _state(tmp_path))
     assert problem is not None and problem.startswith(REASON)
 
 
@@ -171,6 +171,6 @@ def test_the_add_tests_intake_rejects_the_item_with_the_reason(cmd_implement, tm
 def test_the_intakes_do_not_reject_unless_the_declaration_says_so(cmd_implement, tmp_path, reject):
     """宣言の `ndf_policies.reject_md_wording_tests` が `true` でなければ、拒否を当てない（#1333 の決定 8）。"""
     facts = [_fact({"tests/test_full.py": _change([], ['    p = ROOT / "README.md"\n'])})]
-    assert cmd_implement._implement_problem(ITEM, facts, [], TRACKED, _state(tmp_path, reject)) is None
+    assert cmd_implement._implement_problem(ITEM, facts, TRACKED, _state(tmp_path, reject)) is None
     facts[0]["files"] = ["tests/test_full.py"]
-    assert cmd_implement._test_commit_problem(facts, [], TRACKED, _state(tmp_path, reject)) is None
+    assert cmd_implement._test_commit_problem(facts, TRACKED, _state(tmp_path, reject)) is None

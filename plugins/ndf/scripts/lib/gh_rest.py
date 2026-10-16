@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import re
 import urllib.parse
-from typing import Any
+from typing import Any, Callable, NamedTuple
 
 import gh_call
 import gh_fields
@@ -40,7 +40,7 @@ def view_json(kind: str, number: int, fields: str, repo: str | None = None, cwd:
     names = gh_fields.field_names(fields)
     if not names or any(f not in _VIEW_JSON_FIELDS[kind] for f in names):
         return r
-    path = f"repos/{repo or '{owner}/{repo}'}/{gh_fields._VIEW_REST_PATH[kind]}/{int(number)}"
+    path = f"repos/{repo or '{owner}/{repo}'}/{gh_fields.VIEW_REST_PATH[kind]}/{int(number)}"
     rr = gh_call.gh(["api", path], cwd=cwd)
     try:
         d = json.loads(rr.stdout) if rr.returncode == 0 else None
@@ -50,6 +50,69 @@ def view_json(kind: str, number: int, fields: str, repo: str | None = None, cwd:
         why = rr.stderr.strip() or "REST の応答を読めない"
         return gh_call.GhResult(rr.returncode or 1, "", f"{r.stderr.strip()}\nREST でも読めない: {why}")
     return gh_call.GhResult(0, json.dumps(gh_fields.to_json_shape(kind, d, fields), ensure_ascii=False), "")
+
+
+def _decode_concatenated_arrays(text: str) -> list:
+    """`gh api --paginate` がページごとの配列を続けて書いた出力（`[...][...]`）を 1 つの並びにする。
+    配列でないページや壊れた JSON は ValueError。"""
+    rows: list = []
+    dec, i = json.JSONDecoder(), 0
+    while True:
+        while i < len(text) and text[i].isspace():
+            i += 1
+        if i >= len(text):
+            return rows
+        page, i = dec.raw_decode(text, i)
+        if not isinstance(page, list):
+            raise ValueError(page)
+        rows += page
+
+
+def pr_files(number: int, repo: str | None = None, cwd: str | None = None) -> gh_call.GhResult:
+    """PR の変更したファイルを全件読む（REST の `pulls/<n>/files` を全ページ）。
+
+    `gh pr view --json files` は先頭 100 件で切れ、rename の前のパスも返さない。stdout は
+    `[{"path", "previous_path", "status", "additions", "deletions"}]` の JSON（`previous_path` は rename のときだけ値を持つ）。
+    """
+    path = f"repos/{repo or '{owner}/{repo}'}/pulls/{int(number)}/files?per_page={PER_PAGE}"
+    r = gh_call.gh(["api", "--paginate", path], cwd=cwd)
+    if r.returncode != 0:
+        return r
+    try:
+        rows = _decode_concatenated_arrays(r.stdout)
+        files = [
+            {
+                "path": f["filename"],
+                "previous_path": f.get("previous_filename"),
+                "status": f.get("status", ""),
+                "additions": f.get("additions", 0),
+                "deletions": f.get("deletions", 0),
+            }
+            for f in rows
+        ]
+    except (ValueError, TypeError, KeyError):
+        return gh_call.GhResult(1, "", f"PR #{int(number)} の変更したファイルを読めない")
+    return gh_call.GhResult(0, json.dumps(files, ensure_ascii=False), "")
+
+
+def pr_head_branches(numbers: list[int], cwd: str | None = None) -> tuple[dict[int, str] | None, str]:
+    """PR の番号 → head のブランチ名（`cwd` のリポジトリ）。GraphQL の別名で 100 件ずつまとめて読む（PR 1 本ごとに呼ばない）。
+    番号が PR でないもの（squash の件名の `(#N)` が課題を指すなど）は空文字。読めなければ (None, 理由)。"""
+    out: dict[int, str] = {}
+    for i in range(0, len(numbers), PER_PAGE):
+        chunk = [int(n) for n in numbers[i : i + PER_PAGE]]
+        fields = " ".join(f"p{n}: pullRequest(number: {n}) {{ headRefName }}" for n in chunk)
+        query = f"query($owner: String!, $name: String!) {{ repository(owner: $owner, name: $name) {{ {fields} }} }}"
+        r = gh_call.gh(["api", "graphql", "-F", "owner={owner}", "-F", "name={repo}", "-f", f"query={query}"], cwd=cwd)
+        try:
+            data = json.loads(r.stdout)["data"]["repository"]
+        except (ValueError, KeyError, TypeError):
+            data = None
+        if not isinstance(data, dict):  # 一部の番号が PR でないだけなら data は残る
+            return None, ("gh が無い" if r.returncode == 127 else (r.stderr or r.stdout).strip()[:300] or "応答を読めない")
+        for n in chunk:
+            out[n] = (data.get(f"p{n}") or {}).get("headRefName") or ""
+    return out, ""
 
 
 def _rest(path: str, method: str = "GET", payload: Any = None) -> Attempt:
@@ -86,10 +149,42 @@ def view(kind: str, number: int, fields: str, repo: str | None = None) -> Attemp
         return graphql()
 
     def by_rest() -> Attempt:
-        a = _rest(f"repos/{slug}/{gh_fields._VIEW_REST_PATH[kind]}/{int(number)}")
+        a = _rest(f"repos/{slug}/{gh_fields.VIEW_REST_PATH[kind]}/{int(number)}")
         return a if not a.ok else a._replace(value=gh_fields.to_json_shape(kind, a.value or {}, fields))
 
     return gh_quota.with_fallback(by_rest, graphql)
+
+
+def _keep_list_item(kind: str, d: dict, state: str, labels: list[str]) -> bool:
+    """REST の一覧の 1 件を残すか。issue の一覧に混ざる PR・merged でない PR・ラベルの足りない PR を捨てる。"""
+    if kind == "issue" and "pull_request" in d:
+        return False
+    if state == "merged" and not d.get("merged_at"):
+        return False
+    return not (kind == "pr" and labels and not set(labels) <= {x.get("name") for x in d.get("labels") or []})
+
+
+def _rest_pages(base: str, keep: Callable[[Any], bool], shape: Callable[[Any], Any], limit: int) -> Attempt:
+    """REST の一覧をページを進めて読み、`keep` を通った項目を `shape` で整えて `limit` 件まで返す。
+    短いページが来たら終わりとみなす。"""
+    out: list[Any] = []
+    page = 1
+    while len(out) < limit:
+        a = _rest(f"{base}&page={page}")
+        if not a.ok or not isinstance(a.value, list):
+            return a if not a.ok else Attempt(None, "REST の一覧を読めない", "rest")
+        for d in a.value:
+            if keep(d):
+                out.append(shape(d))
+        if len(a.value) < PER_PAGE:
+            break
+        page += 1
+    return Attempt(out[:limit], "", "rest")
+
+
+def _flag_args(flag: str, names: list[str] | None) -> list[str]:
+    """名前の並びを `<flag> <名前>` の繰り返しの argv へ広げる。"""
+    return [arg for name in names or [] for arg in (flag, name)]
 
 
 def _list(kind: str, repo: str | None, fields: str, state: str, labels: list[str] | None, limit: int) -> Attempt:
@@ -98,31 +193,14 @@ def _list(kind: str, repo: str | None, fields: str, state: str, labels: list[str
 
     def by_rest() -> Attempt:
         rest_state = "closed" if state == "merged" else state
-        base = f"repos/{slug}/{gh_fields._VIEW_REST_PATH[kind]}?state={rest_state}&per_page={PER_PAGE}"
+        base = f"repos/{slug}/{gh_fields.VIEW_REST_PATH[kind]}?state={rest_state}&per_page={PER_PAGE}"
         if kind == "issue" and labels:
             base += "&labels=" + ",".join(labels)
-        out: list[dict[str, Any]] = []
-        page = 1
-        while len(out) < limit:
-            a = _rest(f"{base}&page={page}")
-            if not a.ok or not isinstance(a.value, list):
-                return a if not a.ok else Attempt(None, "REST の一覧を読めない", "rest")
-            for d in a.value:
-                if kind == "issue" and "pull_request" in d:
-                    continue
-                if state == "merged" and not d.get("merged_at"):
-                    continue
-                if kind == "pr" and labels and not set(labels) <= {x.get("name") for x in d.get("labels") or []}:
-                    continue
-                out.append(gh_fields.to_json_shape(kind, d, fields))
-            if len(a.value) < PER_PAGE:
-                break
-            page += 1
-        return Attempt(out[:limit], "", "rest")
+        return _rest_pages(
+            base, lambda d: _keep_list_item(kind, d, state, labels), lambda d: gh_fields.to_json_shape(kind, d, fields), limit
+        )
 
-    args = [kind, "list", "--repo", slug, "--state", state, "--limit", str(limit), "--json", fields]
-    for name in labels:
-        args += ["--label", name]
+    args = [kind, "list", "--repo", slug, "--state", state, "--limit", str(limit), "--json", fields, *_flag_args("--label", labels)]
     graphql = lambda: _graphql_cli(args)  # noqa: E731
     return gh_quota.with_fallback(by_rest, graphql) if gh_fields.covers(kind, fields) else graphql()
 
@@ -135,6 +213,24 @@ def pr_list(repo: str | None, fields: str, state: str = "open", labels: list[str
 def issue_list(repo: str | None, fields: str, state: str = "open", labels: list[str] | None = None, limit: int = 30) -> Attempt:
     """`gh issue list --json` と同じ形の一覧（PR を含めない）。`state` は open / closed / all。"""
     return _list("issue", repo, fields, state, labels, limit)
+
+
+ISSUE_SEARCH_FIELDS = "number,title,url,state"
+
+
+def issue_search(repo: str, query: str, state: str = "open", limit: int = 30) -> Attempt:
+    """`gh issue list --search <query>` を 1 回呼び、`[{"number", "title", "url", "state"}]` を返す。
+
+    `state` は open / closed / all。検索の語は GitHub の検索の構文のまま渡す（句を引用符で囲むと句で当たる）。
+    0 件は空の並び、読めない・失敗は `error` を持つ（0 件と取り違えない）。
+    """
+    if state not in ("open", "closed", "all"):
+        raise ValueError(f"state は open / closed / all のどれか: {state}")
+    args = ["issue", "list", "--repo", repo, "--state", state, "--search", query, "--limit", str(int(limit))]
+    a = _graphql_cli(args + ["--json", ISSUE_SEARCH_FIELDS])
+    if a.ok and not isinstance(a.value, list):
+        return Attempt(None, "gh issue list の出力が並びでない", a.via)
+    return a
 
 
 def _created(a: Attempt) -> Attempt:
@@ -162,50 +258,69 @@ def pr_create(repo: str | None, title: str, body: str, head: str, base: str, dra
 def issue_create(repo: str | None, title: str, body: str, labels: list[str] | None = None) -> Attempt:
     slug = _slug(repo)
     payload = {"title": title, "body": body, **({"labels": list(labels)} if labels else {})}
-    args = ["issue", "create", "--repo", slug, "--title", title, "--body-file", "-"]
-    for name in labels or []:
-        args += ["--label", name]
+    args = ["issue", "create", "--repo", slug, "--title", title, "--body-file", "-", *_flag_args("--label", labels)]
     return _created(gh_quota.with_fallback(lambda: _rest(f"repos/{slug}/issues", "POST", payload), lambda: _graphql_cli(args, body, False)))
 
 
-def _edit(
-    kind: str,
-    repo: str | None,
-    number: int,
-    title: str | None,
-    body: str | None,
-    add_labels: list[str] | None,
-    remove_labels: list[str] | None,
-) -> Attempt:
+def _rest_patch_fields(kind: str, slug: str, n: int, title: str | None, body: str | None) -> Attempt | None:
+    """title / body の PATCH。変える項目が無ければ呼ばない。失敗したときだけ結果を返す。"""
+    fields = {k: v for k, v in (("title", title), ("body", body)) if v is not None}
+    if fields:
+        a = _rest(f"repos/{slug}/{gh_fields.VIEW_REST_PATH[kind]}/{n}", "PATCH", fields)
+        if not a.ok:
+            return a
+    return None
+
+
+def _rest_add_labels(slug: str, n: int, add_labels: list[str] | None) -> Attempt | None:
+    if add_labels:
+        a = _rest(f"repos/{slug}/issues/{n}/labels", "POST", {"labels": list(add_labels)})
+        if not a.ok:
+            return a
+    return None
+
+
+def _rest_remove_labels(slug: str, n: int, remove_labels: list[str] | None) -> Attempt | None:
+    """付いていないラベル（404）は失敗にしない。"""
+    for name in remove_labels or []:
+        a = _rest(f"repos/{slug}/issues/{n}/labels/{urllib.parse.quote(name, safe='')}", "DELETE")
+        if not a.ok and "404" not in a.error:
+            return a
+    return None
+
+
+class _Edit(NamedTuple):
+    """PR / 課題の編集内容。None（と空の並び）の項目は変えない。"""
+
+    title: str | None
+    body: str | None
+    add_labels: list[str] | None
+    remove_labels: list[str] | None
+
+
+def _edit_cli_args(kind: str, slug: str, n: int, edit: _Edit) -> list[str]:
+    args = [kind, "edit", str(n), "--repo", slug]
+    args += ["--title", edit.title] if edit.title is not None else []
+    args += ["--body-file", "-"] if edit.body is not None else []
+    return args + _flag_args("--add-label", edit.add_labels) + _flag_args("--remove-label", edit.remove_labels)
+
+
+def _edit(kind: str, repo: str | None, number: int, edit: _Edit) -> Attempt:
     slug = _slug(repo)
     n = int(number)
 
     def by_rest() -> Attempt:
-        fields = {k: v for k, v in (("title", title), ("body", body)) if v is not None}
-        if fields:
-            a = _rest(f"repos/{slug}/{gh_fields._VIEW_REST_PATH[kind]}/{n}", "PATCH", fields)
-            if not a.ok:
-                return a
-        if add_labels:
-            a = _rest(f"repos/{slug}/issues/{n}/labels", "POST", {"labels": list(add_labels)})
-            if not a.ok:
-                return a
-        for name in remove_labels or []:
-            a = _rest(f"repos/{slug}/issues/{n}/labels/{urllib.parse.quote(name, safe='')}", "DELETE")
-            if not a.ok and "404" not in a.error:
-                return a
-        return Attempt(True, "", "rest")
+        return (
+            _rest_patch_fields(kind, slug, n, edit.title, edit.body)
+            or _rest_add_labels(slug, n, edit.add_labels)
+            or _rest_remove_labels(slug, n, edit.remove_labels)
+            or Attempt(True, "", "rest")
+        )
 
-    args = [kind, "edit", str(n), "--repo", slug]
-    args += ["--title", title] if title is not None else []
-    args += ["--body-file", "-"] if body is not None else []
-    for name in add_labels or []:
-        args += ["--add-label", name]
-    for name in remove_labels or []:
-        args += ["--remove-label", name]
+    args = _edit_cli_args(kind, slug, n, edit)
 
     def by_graphql() -> Attempt:
-        a = _graphql_cli(args, body, False)
+        a = _graphql_cli(args, edit.body, False)
         return a._replace(value=True) if a.ok else a
 
     return gh_quota.with_fallback(by_rest, by_graphql)
@@ -219,7 +334,7 @@ def pr_edit(
     add_labels: list[str] | None = None,
     remove_labels: list[str] | None = None,
 ) -> Attempt:
-    return _edit("pr", repo, number, title, body, add_labels, remove_labels)
+    return _edit("pr", repo, number, _Edit(title, body, add_labels, remove_labels))
 
 
 def issue_edit(
@@ -230,7 +345,7 @@ def issue_edit(
     add_labels: list[str] | None = None,
     remove_labels: list[str] | None = None,
 ) -> Attempt:
-    return _edit("issue", repo, number, title, body, add_labels, remove_labels)
+    return _edit("issue", repo, number, _Edit(title, body, add_labels, remove_labels))
 
 
 def comment(repo: str | None, number: int, body: str) -> Attempt:

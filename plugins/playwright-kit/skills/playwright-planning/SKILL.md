@@ -28,10 +28,10 @@ HTSM / ISTQB / FEW HICCUPPS に基づいて E2E テストシナリオを計画�
       │  ※ スクリプトが完成するまでテスト実行に進まない
       ▼
 [3] 証跡とレポート        /playwright-kit:playwright-evidence
-      │  reports/<run-id>/report.md 生成 → Google Drive 保管・共有
+      │  reports/<run-id>/report.md 生成 → エビデンスの共有
       ▼
 [任意] 実行環境の運用     /playwright-kit:playwright-kit-ops
-       init_project / 単発スキャン / アップロードスクリプト (任意タイミング)
+       init_project / 単発スキャン (任意タイミング)
 ```
 
 ## クイックスタート

@@ -3,28 +3,38 @@
 # ruff format --check・ruff check・shellcheck -S warning を、git が追跡するファイルへ掛ける。
 # ツールは根の uv.lock が固定した版を `uv run --only-group lint` から起動する（決定 6）。
 #
-# 使い方: bash scripts/check-lint.sh [--fix]
-#   --fix  段の前に ruff check --fix と ruff format を Python の対象へ掛ける（sh は直さない）
+# 使い方: bash scripts/check-lint.sh [--fix] [--] [<パス>...]
+#   --fix   段の前に ruff check --fix と ruff format を Python の対象へ掛ける（sh は直さない）
+#   <パス>  根からの相対パス。渡すと、そのうち git が追跡し作業ディレクトリに残るファイルだけを対象にする
+#           （範囲テスト。#464）。渡さなければ追跡されているファイルすべて。`--` 以降はすべてパスとして読む
 # 終了コード: 0 違反なし / 1 違反あり / 2 検査の仕組みが落ちた（git の外・uv が無い・引数の誤り・ツールの異常）
 set -uo pipefail
 
 usage() {
-  echo "使い方: bash scripts/check-lint.sh [--fix]" >&2
+  echo "使い方: bash scripts/check-lint.sh [--fix] [--] [<パス>...]" >&2
 }
 
 FIX=0
+PATHS=()
+ONLY_PATHS=0
 for arg in "$@"; do
+  if [ "$ONLY_PATHS" -eq 1 ]; then
+    PATHS+=("$arg")
+    continue
+  fi
   case "$arg" in
+    --) ONLY_PATHS=1 ;;
     --fix) FIX=1 ;;
     -h | --help)
       usage
       exit 0
       ;;
-    *)
+    -*)
       usage
       echo "check-lint: 知らない引数: $arg" >&2
       exit 2
       ;;
+    *) PATHS+=("$arg") ;;
   esac
 done
 
@@ -38,16 +48,22 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 cd "$ROOT_DIR" || exit 2
 
-# 対象は git が追跡するファイルだけにする（I2）。消したがまだ index にあるものは除く
-PY_FILES=()
-while IFS= read -r -d '' f; do
-  [ -f "$f" ] && PY_FILES+=("$f")
-done < <(git ls-files -z -- '*.py')
+# 対象は git が追跡するファイルだけにする（I2）。消したがまだ index にあるものは除く。
+# パスを渡したときは、その配下の追跡ファイルに絞る（振り分けの規則は引数なしと同じ）
+list_tracked() {
+  if [ "${#PATHS[@]}" -gt 0 ]; then
+    git --literal-pathspecs ls-files -z -- "${PATHS[@]}"
+  else
+    git ls-files -z
+  fi
+}
 
+PY_FILES=()
 SH_FILES=()
 while IFS= read -r -d '' f; do
   [ -f "$f" ] || continue
   case "${f##*/}" in
+    *.py) PY_FILES+=("$f") ;;
     *.sh) SH_FILES+=("$f") ;;
     *.*) ;;
     *)
@@ -58,7 +74,7 @@ while IFS= read -r -d '' f; do
       fi
       ;;
   esac
-done < <(git ls-files -z)
+done < <(list_tracked)
 
 tool() {
   uv run --frozen --project "$ROOT_DIR" --only-group lint "$@"

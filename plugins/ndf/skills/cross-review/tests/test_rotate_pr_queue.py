@@ -141,7 +141,7 @@ def test_a_comment_is_queued_instead_of_waiting(fake_gh, tmp_path) -> None:
 
     assert out.returncode == 0, out.stderr
     assert "QUEUED=1" in out.stdout
-    assert len(list(qdir.glob("*.json"))) == 1
+    assert "PENDING_COUNT=1" in _queue_cli("count", "--dir", str(qdir), env=_env(fake_gh)).stdout
 
 
 # ---- execute --mode light の失敗時の旧 PR 復旧（R2-001, 現状固定） ----

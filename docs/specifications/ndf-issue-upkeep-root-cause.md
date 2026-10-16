@@ -1,6 +1,6 @@
 # 課題を根本原因の場所で直す区分（ルートコーズ）
 
-溜まった課題の棚卸（`issue-upkeep`）に、課題を現れている場所ではなく根本原因の場所で直すと
+溜まった課題の棚卸（`backlog-refinement`）に、課題を根本原因の場所で直すと
 決める区分「ルートコーズ」を置いた。あわせて、どこを直すかという構造の判断の担い手を、4 つの
 Skill の境界に書いた。この文書は、決めたことの理由と、実測で確かめた事実を残す。
 
@@ -9,10 +9,10 @@ Skill の境界に書いた。この文書は、決めたことの理由と、�
 
 | 何を読むか | 正本 |
 | --- | --- |
-| 8 つの区分の並び、用語、手順 1 / 2A / 2B / 3、判断と見る対象の表 | `plugins/ndf/skills/issue-upkeep/SKILL.md` |
-| ルートコーズの条件、手順 3 での対応、修正レイヤーの決め方、修正方針、親 issue と子 issue | `plugins/ndf/skills/issue-upkeep/references/grouping.md` |
-| 「やらない」の条件 2 の行き先 | `plugins/ndf/skills/issue-upkeep/references/no-work.md` |
-| 直近のマイルストーン、親 issue の割り当て | `plugins/ndf/skills/issue-upkeep/references/milestones.md` |
+| 8 つの区分の並び、用語、手順 1 / 2A / 2B / 3、判断と見る対象の表 | `plugins/ndf/skills/backlog-refinement/SKILL.md` |
+| ルートコーズの条件、手順 3 での対応、修正レイヤーの決め方、修正方針、親 issue と子 issue | `plugins/ndf/skills/backlog-refinement/references/grouping.md` |
+| 「やらない」の条件 2 の行き先 | `plugins/ndf/skills/backlog-refinement/references/no-work.md` |
+| 直近のマイルストーン、親 issue の割り当て | `plugins/ndf/skills/backlog-refinement/references/milestones.md` |
 
 ## 概要
 
@@ -56,9 +56,9 @@ Skill の境界に書いた。この文書は、決めたことの理由と、�
 指す記録が無かった。
 
 **課題への判断は、価値（やるか）と構造（どこを直すか）の 2 種類ある。** 発見の瞬間の判断は
-`out-of-scope` と `problem-solving` が持ち、溜まった課題の価値の判断は `issue-upkeep` の
+`out-of-scope` と `problem-solving` が持ち、溜まった課題の価値の判断は `backlog-refinement` の
 「やらない」が持っていた。溜まった課題の構造の判断を、どの Skill も自分の役目と書いていな
-かった。この升を「ルートコーズ」で埋め、判断と見る対象の表の正本を `issue-upkeep` に置いた。
+かった。この升を「ルートコーズ」で埋め、判断と見る対象の表の正本を `backlog-refinement` に置いた。
 
 ## 仕様
 
@@ -110,7 +110,7 @@ Skill の境界に書いた。この文書は、決めたことの理由と、�
 | `no-work.md` の条件 2 の行き先 | 重複 / ルートコーズ / 寄せ先なし の 3 つ | 「重複」固定のままだと、同じ修正レイヤーを指す別の課題が重複として閉じられる |
 | `no-work.md` の「要判断」へ倒す文 | 見積りである条件 1 だけに掛かる | 条件 2 は突き合わせの結果で、3 つの行き先で終わる |
 | `milestones.md` の直近 | open のうち名前の先頭の連番が最も小さいもの。説明が別の着手の順序を書いていれば説明 | open のマイルストーンは版数を持たない（`AGENTS.md` の「版と配布の方針」） |
-| `milestones.md` の着手の時期の語 | 「マイルストーン」 | 「ミッション」は `SKILL.md` でリリースの単位（1 度にマージする Pull Request の集合）を指す |
+| `milestones.md` の着手の時期の語 | 「マイルストーン」 | 「スプリント」は `SKILL.md` でリリースの単位（1 度にマージする Pull Request の集合）を指す |
 
 ### 親 issue の割り当て
 
@@ -159,7 +159,7 @@ open の `13` は説明に「次に着手する（05 より先）」と書き、
 
 ## テスト観点
 
-`plugins/ndf/skills/issue-upkeep/tests/test_issue_upkeep_layout.py` が、`SKILL.md` と参照の文字列を
+`plugins/ndf/skills/backlog-refinement/tests/test_issue_upkeep_layout.py` が、`SKILL.md` と参照の文字列を
 直接照合する。
 
 | 観点 | 満たすこと |
@@ -171,7 +171,7 @@ open の `13` は説明に「次に着手する（05 より先）」と書き、
 | 修正レイヤーと修正方針 | 現象レイヤーと修正レイヤーの対応の例、さかのぼる層の数を決めないこと、5 つの修正方針の呼び名が `refactoring/references/vocabulary.md` に実在すること |
 | 承認 | 親 issue の起票と子 issue への書き込みが、一括で提示して承認を得る側にあること |
 | 境界 | 判断と見る対象の表が価値と構造の担い手を示し、`out-of-scope` / `problem-solving` / `retrospective` / `release` がこの Skill を指すこと |
-| 用語 | 4 語が用語の表にあり、置き換えた語が残っていないこと。`milestones.md` に「ミッション」「版数が最も小さい」「版数の順序」が無いこと |
+| 用語 | 4 語が用語の表にあり、置き換えた語が残っていないこと。`milestones.md` に「スプリント」「版数が最も小さい」「版数の順序」が無いこと |
 | 既存の規則 | `no-work.md` の条件 2 が 3 つの行き先を持ち、「要判断」の文が条件 1 だけに掛かること |
 
 GitHub 上の状態（親 issue の起票と結び付け）は自動テストにしない。リポジトリの外にあるためで、
@@ -179,7 +179,7 @@ GitHub 上の状態（親 issue の起票と結び付け）は自動テストに
 
 ## 関連リンク
 
-- [issue-upkeep](../../plugins/ndf/skills/issue-upkeep/SKILL.md)
-- [grouping.md](../../plugins/ndf/skills/issue-upkeep/references/grouping.md)
+- [backlog-refinement](../../plugins/ndf/skills/backlog-refinement/SKILL.md)
+- [grouping.md](../../plugins/ndf/skills/backlog-refinement/references/grouping.md)
 - [refactoring の手法の呼び名](../../plugins/ndf/skills/refactoring/references/vocabulary.md)
 - 起点の課題: #712 / #713。設計: PR #714。実装: PR #717

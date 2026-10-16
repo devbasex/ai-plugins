@@ -3,7 +3,7 @@
 - I7 を最初に当てる: 書く値・既存の値のどちらかが秘密の形なら、その項目を `{"unknown": "秘密の形"}` にし、値を出さない
 - I1: 置き換えてよいのは、キーが無い項目と、前の `write` の値のまま（`analysis.written` の指紋が一致する）項目だけ
 - I2: `worktree.json` は `base_branch`・`production_branch` の無いキー（と前の `write` の値のままのキー）だけを変える
-- I3: 新しい解析で不明でも、前の値があれば残す
+- I3: 新しい解析で不明でも、前の値があれば残す。`ci` のワークフローの行の壁時計も、新しい行に無ければ同じパスの前の値を残す（#1664 の I6）
 """
 
 from __future__ import annotations
@@ -53,6 +53,20 @@ def resolve_item(key: str, m: dict | None, answers: dict, check: Callable[[str, 
     return {"unknown": str(m.get("reason") or "測れない")}, "不明"
 
 
+def _carry_walls(cur: Any, new: Any) -> tuple[Any, list[dict]]:
+    """`ci` の新しい値で `wall_seconds` の無い行に、前の値の同じ `path` の行の壁時計を引き継ぐ（#1664 の I6）。"""
+    if not isinstance(cur, dict) or not isinstance(new, dict) or is_unknown(cur) or is_unknown(new):
+        return new, []
+    before = {w.get("path"): w["wall_seconds"] for w in cur.get("workflows") or [] if isinstance(w, dict) and "wall_seconds" in w}
+    rows, workflows = [], []
+    for w in new.get("workflows") or []:
+        if isinstance(w, dict) and "wall_seconds" not in w and w.get("path") in before:
+            w = {**w, "wall_seconds": before[w["path"]]}
+            rows.append({"kind": "unknown", "key": f"ci#{w['path']}", "reason": "新しい解析に壁時計が無い", "kept_previous": True})
+        workflows.append(w)
+    return ({**new, "workflows": workflows} if rows else new), rows
+
+
 def merge_item(key: str, cur: Any, has_cur: bool, new: Any, origin: str, written: dict) -> tuple[Any, list[dict], bool]:
     """1 項目を決める。返すのは (書く値, 出力の行, 解析の値か)。解析の値なら呼ぶ側が `written` に指紋を持つ。"""
     if has_cur and has_secret(cur):
@@ -75,6 +89,9 @@ def merge_item(key: str, cur: Any, has_cur: bool, new: Any, origin: str, written
         return cur, rows + [{"kind": "kept", "key": key}], False
     if is_unknown(new) and not is_unknown(cur):
         return cur, rows + [{"kind": "unknown", "key": key, "reason": new["unknown"], "kept_previous": True}], True
+    if key == "ci":
+        new, carried = _carry_walls(cur, new)
+        rows += carried
     return new, rows + [put(new)], True
 
 

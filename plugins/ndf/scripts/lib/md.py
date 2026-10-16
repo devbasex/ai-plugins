@@ -137,6 +137,14 @@ def headings(text: str) -> list[Heading]:
     return out
 
 
+def atx_only_headings(text: str) -> list[Heading]:
+    """`headings` のうち、行頭が `#` の見出し（ATX）だけ。Setext の見出しを節に数えない読み手が使う。
+
+    `sprint-close.py` の `parse_record` は同じ規則を `md_sections` の節へ当てている。"""
+    lines = text.splitlines()
+    return [h for h in headings(text) if lines[h.line].startswith("#")]
+
+
 def md_sections(text: str) -> list[Section]:
     """見出しごとの節。節は、次の同じか浅い見出しの行の手前まで（子の節を含む）。"""
     hs = headings(text)
@@ -200,11 +208,16 @@ def links(text: str) -> list[Link]:
                 line += 1
             if c.type != "link_open":
                 continue
-            label = []
-            for d in kids[k + 1 :]:
-                if d.type == "link_close":
-                    break
-                if d.type in ("text", "code_inline"):
-                    label.append(d.content)
-            out.append(Link(unquote(str(c.attrs.get("href", ""))), "".join(label), line))
+            out.append(Link(unquote(str(c.attrs.get("href", ""))), _link_label(kids, k), line))
     return out
+
+
+def _link_label(kids: list, start: int) -> str:
+    """`start` の link_open から link_close までの文字列（text と code_inline の字面）。"""
+    label = []
+    for d in kids[start + 1 :]:
+        if d.type == "link_close":
+            break
+        if d.type in ("text", "code_inline"):
+            label.append(d.content)
+    return "".join(label)

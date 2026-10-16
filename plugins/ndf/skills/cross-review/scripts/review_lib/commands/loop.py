@@ -10,7 +10,7 @@ import sys
 
 import review_lib  # noqa: E402
 import gh_call  # noqa: E402
-from review_lib import matching, store  # noqa: E402
+from review_lib import matching, reopen as reopen_mod, store  # noqa: E402
 
 
 def cmd_check_oscillation(args: argparse.Namespace) -> None:
@@ -32,7 +32,12 @@ def cmd_check_oscillation(args: argparse.Namespace) -> None:
     """
     pr = args.pr
     st = store._load(pr)
-    rounds = st["rounds"]
+    # 収束・中断で確定した終わりを上書きしない（#1340 の I5）。手で順に打つ経路にも効くよう、ここで見る。
+    if st.get("final") is not None:
+        review_lib.info(f"⏭ final={st['final']} は確定済み: 振動検知スキップ")
+        sys.exit(2)
+    # 比べるのは最後にラウンドを足した時点より後のラウンドだけ（I6）
+    rounds = reopen_mod.rounds_since(st)
     current_pr = st["current_pr"]
     same_pr = [r for r in rounds if r["pr"] == current_pr]
     if len(same_pr) < 2:
@@ -71,8 +76,10 @@ def cmd_should_rotate(args: argparse.Namespace) -> None:
     pr = args.pr
     st = store._load(pr)
     current_pr = st["current_pr"]
-    round_in_pr = sum(1 for r in st["rounds"] if r["pr"] == current_pr)
-    total = len(st["rounds"])
+    # 巻き直しと上限は最後にラウンドを足した時点より後のラウンドだけで数える（#1340 の I3）
+    since = reopen_mod.rounds_since(st)
+    round_in_pr = sum(1 for r in since if r["pr"] == current_pr)
+    total = len(since)
     rotate_after = st["rotate_after"]
     max_r = st["max_rounds"]
     if round_in_pr >= rotate_after and total < max_r:

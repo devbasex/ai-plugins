@@ -6,11 +6,14 @@ import argparse
 from typing import Any
 
 import review_lib  # noqa: E402
+import assignment  # noqa: E402
 from review_lib import (  # noqa: E402
     github,
     participants as participants_mod,
     posts,
+    reopen as reopen_mod,
     review_focus,
+    review_scope,
     store,
     workspace as workspace_mod,
 )
@@ -115,26 +118,55 @@ def _sync_before_round(st: dict[str, Any], pr: int) -> workspace_mod.HeadRef | N
     return head
 
 
+def _review_scope(
+    st: dict[str, Any],
+    head: workspace_mod.HeadRef | None,
+    pr: int,
+    round_in_pr: int,
+    since: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """そのラウンドのレビュー範囲。head は同期で取った値で、base も同じ REST の応答から得ている。"""
+    if head is None:
+        scope: dict[str, Any] = {"unavailable": "no_head"}
+    else:
+        scope = review_scope.compute_scope(
+            str(st.get("worktree_path") or ""),
+            head.oid,
+            head.base_oid,
+            str(st.get("review_kind") or "code"),
+            round_in_pr,
+            since,
+            pr,
+        )
+    if scope.get("unavailable"):
+        review_lib.info(f"⚠ レビュー範囲を求められない（{scope['unavailable']}）。範囲の節なしで担当を起動し、照合しない")
+    return scope
+
+
 def cmd_start_round(args: argparse.Namespace) -> None:
     """Step 1 — round 開始判定。"""
     posts._auto_flush(args.pr)
     st = store._load(args.pr)
     total = len(st["rounds"])
+    # 上限は最後にラウンドを足した時点より後のラウンドだけで数える（#1340 の I3）。
+    base = reopen_mod.base_round(st)
+    since = reopen_mod.rounds_since(st)
     max_r = st["max_rounds"]
-    if total >= max_r:
+    if len(since) >= max_r:
         st["final"] = "max_rounds"
         st["ended_at"] = review_lib._now()
         store._save(args.pr, st)
         review_lib.die(f"max_rounds={max_r} 到達。中断。", code=1)
     # 上限に達していれば、そこでループが終わる。後始末のチェックはその後で意味を持たない。
-    if total > 0:
+    # 足す前のラウンドは、最終スイープが未解決 0 件で閉じたと検証できたときだけ確認を当てない（I4）。
+    if total > 0 and not (total <= base and reopen_mod.sweep_closed(st)):
         _guard_previous_round(st, st["rounds"][-1])
 
     pr = st["current_pr"]
     head = _sync_before_round(st, pr)
 
     round_no = total + 1
-    round_in_pr = sum(1 for r in st["rounds"] if r["pr"] == pr) + 1
+    round_in_pr = sum(1 for r in since if r["pr"] == pr) + 1
 
     # 既存コメントのスナップショットを取り直す（#542 の決定 6）。通しの 1 ラウンド目は `init` が取った
     # 直後のため取り直さない。失敗しても前のスナップショットのまま進める（前のスナップショットでも今と同じ条件で
@@ -149,26 +181,42 @@ def cmd_start_round(args: argparse.Namespace) -> None:
     # 収束の判定が同じ値を読むためである。**2 本が同じ値を別々に取っていた分が 0 になる。**
     # **担当はラウンドを開くときに決めて残す。** 後から輪番を引き直すと、状態ファイルの
     # 記録と実際に起動した担当がずれる。
-    reviewers = participants_mod._round_reviewers(st, round_no)
+    # 振り替え（#919）は引き直しではない。judge が席を書き換え、結果なしの記録（`no_results`）に残す。
+    # 外した担当を引いて席を選べなければ、ラウンドを開かずに中断する。
+    try:
+        reviewers = participants_mod._round_reviewers(st, round_no)
+    except assignment.AssignmentError as e:
+        st["final"] = "error"
+        st["ended_at"] = review_lib._now()
+        store._save(args.pr, st)
+        gone = ", ".join(sorted(assignment.excluded_runtimes(st.get("no_results") or []))) or "なし"
+        review_lib.die(f"席を選べません（外した担当: {gone}）: {e}", code=1)
+        raise
     entry: dict[str, Any] = {
         "round": round_no,
         "pr": pr,
         "started_at": review_lib._now(),
         "reviewers": reviewers,
+        # 席ごとの記録（席・ランタイム・モデル・組の相手。#1598 の AC13）。`reviewers` と同じ並び。
+        "seats": participants_mod.seat_records(reviewers, participants_mod.round_accounts(st, reviewers)),
     }
     if head is not None:
         entry["head_sha"] = head.oid
+    # レビュー範囲（#1702）。起動の 2 本と判定が同じ値を読む。求められなくても止めない（設計の I4）。
+    entry["review_scope"] = _review_scope(st, head, pr, round_in_pr, since)
     stage = review_focus._round_stage(st, round_no)
     if stage is not None:
         entry["stage"] = stage
     st["rounds"].append(entry)
     store._save(args.pr, st)
 
-    review_lib.info(f"=== Round {round_no} / {max_r} (PR #{pr}, round_in_pr={round_in_pr}, レビュー: {' + '.join(reviewers)}) ===")
+    review_lib.info(f"=== Round {round_no} / {base + max_r} (PR #{pr}, round_in_pr={round_in_pr}, レビュー: {' + '.join(reviewers)}) ===")
     print(f"ROUND={round_no}")
     print(f"REVIEWERS='{' '.join(reviewers)}'")
     if stage is not None:
         print(f"STAGE={stage}")
+    scope = entry["review_scope"]
+    print(f"REVIEW_SCOPE={'unavailable:' + scope['unavailable'] if scope.get('unavailable') else scope['files']}")
     print(f"REVIEWERS_CSV={','.join(reviewers)}")
     print(f"ROUND_IN_PR={round_in_pr}")
     print(f"PR={pr}")

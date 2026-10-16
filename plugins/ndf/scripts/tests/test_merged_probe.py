@@ -40,6 +40,9 @@ elif a[:2] == ["run", "rerun"]:
         sys.stderr.write("rerun failed\n")
 elif a[:2] == ["run", "list"]:
     out = json.dumps([{{"databaseId": i}} for i in range(st.get("queued_runs", 0))])
+elif a[0] == "api":
+    job = st.get("jobs", {{}}).get(a[1].rsplit("/", 1)[-1])
+    out, code = (json.dumps(job), 0) if job else (None, 1)
 else:
     code = 1
 if out is not None:
@@ -157,6 +160,30 @@ def test_classes(tmp_path, gh, checks, runs, expected):
         assert out["metrics"]["queued_runs"] == 4
 
 
+def wf_check(wf, conclusion, run_id, job_id, started, status="COMPLETED"):
+    return {**check("check", status, conclusion, run_id, job_id), "workflowName": wf, "startedAt": started, "completedAt": started}
+
+
+def test_superseded_failure_is_not_failed(tmp_path, gh):
+    """AC13: PR 1753 の形（同じチェックの古い FAILURE と新しい SUCCESS）は failed に分けず、置き換わった失敗を items に載せる。"""
+    old = wf_check("PR body decisions", "FAILURE", "37264758029", "1", "2026-10-05T04:44:10Z")
+    new = wf_check("PR body decisions", "SUCCESS", "37264973318", "2", "2026-10-05T04:46:35Z")
+    gh(prs={"1753": pr(1753, old, new)})
+    _, out = probe(tmp_path, "--pr", "1753")
+    assert (out["metrics"]["class"], out["metrics"]["action"]) == ("passed", "judge")
+    assert [(i["result"], i.get("run")) for i in out["items"]] == [("superseded", "37264758029")]
+
+
+def test_runner_less_cancellation_is_infra_and_waits(tmp_path, gh):
+    """AC13: PR #1765 の形（Runner が付かずに取り消された Lint）は基盤待ちに分け、手を fix にしない。--act でも再実行しない。"""
+    lint = {**wf_check("Lint", "CANCELLED", "37364001907", "111944834887", "2026-10-05T19:55:00Z"), "name": "lint"}
+    state = gh(prs={"1765": pr(1765, lint)}, jobs={"111944834887": {"conclusion": "cancelled", "steps": [], "runner_name": ""}})
+    _, out = probe(tmp_path, "--pr", "1765", "--act")
+    assert (out["metrics"]["class"], out["metrics"]["action"]) == ("infra", "wait")
+    assert "CI の基盤待ち" in out["summary"] and "Lint / lint" in out["summary"]
+    assert not any(c[:2] == ["run", "rerun"] for c in calls(state))
+
+
 def test_strongest_class_wins_across_prs_found_by_head(tmp_path, gh):
     gh(
         heads={"release/v1": [7], "develop": [8]},
@@ -188,7 +215,7 @@ def test_green_watch_stretches_the_interval_while_nothing_changes(monkeypatch):
 
     monkeypatch.syspath_prepend(str(SCRIPTS / "lib"))
     monkeypatch.syspath_prepend(str(SCRIPTS))
-    from merged_lib import checks
+    from merged_lib import checks, reading
 
     pending = {"__typename": "CheckRun", "name": "t", "status": "IN_PROGRESS", "conclusion": None}
     done = {"__typename": "CheckRun", "name": "t", "status": "COMPLETED", "conclusion": "SUCCESS"}
@@ -201,7 +228,7 @@ def test_green_watch_stretches_the_interval_while_nothing_changes(monkeypatch):
 
     slept = []
     monkeypatch.setattr(checks, "pr_state", view)
-    monkeypatch.setattr(checks, "probe_checks", lambda _root, _rollup: ([], [], []))
+    monkeypatch.setattr(reading, "probe_checks", lambda _root, _pending: ([], [], []))
     monkeypatch.setattr(checks.time, "sleep", slept.append)
     a = argparse.Namespace(pr=5, timeout=3600.0, interval=10.0, recheck=1.0, no_checks_after=60.0, stale_after=300.0)
     watch = checks.GreenWatch(".", a)

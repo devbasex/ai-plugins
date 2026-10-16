@@ -49,15 +49,19 @@ def refactor() -> types.ModuleType:
 
 _MODULES = (
     "commands.converge",
+    "commands.final_fix",
     "commands.gate",
     "commands.implement",
+    "commands.merge_fix",
     "commands.plan",
     "commands.phases",
     "commands.propose",
+    "commands.reassign",
     "commands.report",
     "commands.setup",
     "commands.measure",
     "codemetrics",
+    "fix_intake",
     "codemetrics_read",
     "codemetrics_record",
     "codemetrics_view",
@@ -69,6 +73,7 @@ _MODULES = (
     "github",
     "intake",
     "items",
+    "ledger",
     "outbound",
     "pathkinds",
     "paths",
@@ -79,7 +84,8 @@ _MODULES = (
     "publish",
     "results",
     "scope",
-    "testcmd",
+    "scope_check",
+    "targets",
     "triage",
     "undo",
     "verify",
@@ -127,6 +133,16 @@ def metrics() -> types.ModuleType:
 def refactor_lib(refactor: types.ModuleType) -> types.ModuleType:
     """`refactor_lib` そのもの。`ABORT` / `die` / `info` を持つ。"""
     return sys.modules["refactor_lib"]
+
+
+@pytest.fixture(autouse=True)
+def no_ci_sleep(refactor, monkeypatch):
+    """CI の待ち（`test_triage.wait_check`）を実際には眠らせない。
+
+    `waits.wait_until` は眠る長さで上限を数えるため、眠りを空にしても上限の判定は同じで、
+    テストが `pending` のまま上限まで待つ経路を秒を使わずに通れる。
+    """
+    monkeypatch.setattr(sys.modules["test_triage"], "SLEEP", lambda seconds: None)
 
 
 @pytest.fixture
@@ -199,3 +215,6 @@ def _isolate_outside_world(tmp_path, monkeypatch):
     """
     monkeypatch.delenv("AI_GATEWAY_API_KEY", raising=False)
     monkeypatch.setenv("NDF_METRICS_DIR", str(tmp_path / "ndf-metrics"))
+    # 振り替えのアカウントの選び方（#919）が利用者の登録済みアカウントを読まない
+    monkeypatch.setenv("NDF_ACCOUNTS_DIR", str(tmp_path / "ndf-accounts"))
+    monkeypatch.delenv("NDF_CLAUDE_ACCOUNT", raising=False)

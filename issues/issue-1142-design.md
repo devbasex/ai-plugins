@@ -3,6 +3,9 @@
 要求と受け入れ条件は #1142 の本文にある（コピーは [issue-1142-requirements.md](issue-1142-requirements.md) ）。
 この文書は「どう作るか」だけを扱う。エントリポイントの一覧と移行の順序（移行ステップごとに触るファイル）は
 [issue-1142-design-migration.md](issue-1142-design-migration.md) 、モジュールの分け方は [issue-1142-design-modules.md](issue-1142-design-modules.md) 、決定の記録は [issue-1142-design-decisions.md](issue-1142-design-decisions.md) にある。
+汎用の処理を外部ライブラリへ置き換える設計（スプリント 2b。決定 19〜25）は [issue-1142-design-libraries.md](issue-1142-design-libraries.md) 、
+プランの実行とキューを DBOS Transact へ置き換える設計（スプリント 2c。決定 26〜35・移行ステップ Q0〜Q7）は
+[issue-1142-design-dbos.md](issue-1142-design-dbos.md) にある。
 
 数は 2026-09-26 03:30 UTC に測った値である（`python3 /tmp/ndf-measure-1142/structure.py plugins/ndf`）。
 ファイル 128 本・48,394 行（本文の表から 531 行増えた）、1000 行を超えるファイル 6 本、2 つ以上のファイルで

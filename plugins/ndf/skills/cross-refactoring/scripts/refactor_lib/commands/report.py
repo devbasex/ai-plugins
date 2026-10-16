@@ -6,19 +6,20 @@ import argparse
 from collections import Counter
 from typing import Any
 
+import assignment
 import mdtable
 import models as models_lib
 import run_metrics
 import statefile
 
-from .. import allocation, clock, info, timeline
+from .. import allocation, clock, culprit, info, launch, ledger, pause, rounds, stop_revert, time_report, timeline
 from ..codemetrics_view import record_lines
 from ..items import item_label
 from ..measure import summary_extra
 from ..outbound import plan_reference
-from ..plan import baseline_line
+from ..plan import baseline_line, counts_line, existing_failures_line, status_label, strategy_lines
 from ..paths import load_state
-from ..phases import phase_record
+from ..phases import phase_record, phase_seconds
 from ..vocabulary import DEFER_REASONS
 
 # `cross-review` の最終ステータスのうち、追記してよいもの。
@@ -26,7 +27,7 @@ APPROVED = "approved"
 
 
 def _gate_passed(state: dict[str, Any]) -> bool:
-    return (state.get("final_gate") or {}).get("status") == "passed"
+    return ledger.adoption_confirmed(state)
 
 
 def cmd_finalize(args: argparse.Namespace) -> None:
@@ -130,39 +131,109 @@ def _elapsed_seconds(state: dict[str, Any]) -> float:
     return max(clock.seconds_between(state.get("started_at"), end or clock.now()) or 0.0, 0.0)
 
 
-def _print_header(state: dict[str, Any]) -> None:
-    budget_seconds = int(state.get("budget_minutes") or 0) * 60
-    elapsed = _elapsed_seconds(state)
-    judge = state.get("judge") or {}
-    whole = state.get("whole_test") or {}
-    gate = state.get("final_gate") or {}
-    print(f"# cross-refactoring 実行報告 — {state['repo']} #{state['current_pr']}")
-    print()
-    print(f"- 対象範囲: {', '.join(state['target_scope']) or '（未指定）'}")
-    print(
-        f"- 想定最大時間: {state.get('budget_minutes')} 分 / 所要: {elapsed / 60:.1f} 分"
-        f"（差 {(budget_seconds - elapsed) / 60:+.1f} 分。cross-review を除く）"
-    )
-    print(
-        f"- 実装担当: {state.get('implementer')}（{state.get('implementer_reason')}）"
-        f" / モデル: {models_lib.label((state.get('implementer_model') or {}).get('requested'))}"
-    )
-    jev_line = "使った" if judge.get("kind") == "jev" else f"使わなかった（{judge.get('reason')}）"
-    print(f"- 判断に Jev を: {jev_line} / 呼び出しの失敗 {judge.get('failures', 0)} 回")
-    print(f"- 着手前の全体のテスト: {baseline_line(state.get('baseline_test') or {})}")
+def _implementer_model_text(state: dict[str, Any]) -> str:
+    """実装担当のモデルの表示。実測値があればそれを出し、無ければ指定値か分離の理由を出す（#759）。"""
+    model = state.get("implementer_model") or {}
+    requested, observed = model.get("requested"), model.get("observed")
+    if observed:
+        return f"{observed}（実測）"
+    reason = models_lib.separation_reason(str(state.get("implementer") or ""), requested, observed)
+    if reason:
+        return f"{models_lib.label(None)}（分離: {reason}）"
+    return f"{requested}（指定。実測できず）"
+
+
+def _whole_test_lines(state: dict[str, Any]) -> list[str]:
+    """検証の中の全体のテストと、その原因の項目の行。採り直しの巡があれば、最後に走らせた巡の記録を出す。"""
+    lines: list[str] = []
+    ran = [r for r in rounds.whole_records(state) if r.get("ran")]
+    whole = ran[-1] if ran else (state.get("whole_test") or {})
+    deferred = rounds.deferred_union(state)
     if whole.get("ran"):
-        print(
+        lines.append(
             f"- 検証の中の全体のテスト: 走らせた（危険フラグ {', '.join(whole.get('flags') or [])} / "
             f"{whole.get('status')}{_whole_detail(whole)}）"
         )
+    elif deferred:
+        lines.append(
+            f"- 検証の中の全体のテスト: 最終ゲートへ寄せた（危険フラグ {', '.join(deferred.get('flags') or [])} / 項目 {', '.join(deferred.get('items') or [])}）"
+        )
     else:
-        print("- 検証の中の全体のテスト: 走らせなかった（危険フラグが立たなかった）")
-    print(
+        lines.append("- 検証の中の全体のテスト: 走らせなかった（危険フラグが立たなかった）")
+    if whole.get("culprit"):
+        lines.append(f"- 検証の中の全体のテストの原因の項目: {culprit.verdict_line(whole['culprit'])}")
+    return lines
+
+
+def _final_gate_lines(gate: dict[str, Any]) -> list[str]:
+    """最終ゲートの見分け・原因・打ち切りの後の取り消し・結果・静的解析の行。"""
+    lines: list[str] = []
+    triage = gate.get("triage") or {}
+    if triage:
+        lines.append(f"- 最終ゲートの見分け: {_triage_line(triage)}")
+    if gate.get("culprit"):
+        lines.append(f"- 最終ゲートの原因の項目: {culprit.verdict_line(gate['culprit'])}")
+    if gate.get("stop_revert"):
+        lines.append(f"- 打ち切りの後の取り消し: {stop_revert.record_line(gate['stop_revert'])}")
+    skipped = gate.get("check_skipped")
+    if skipped:
+        same = "同じ" if skipped.get("base_identity") else "違う"
+        lines.append(
+            f"- 最終ゲートの確かめを省いた: {skipped.get('reason')}（想定最大時間の終わりまで {skipped.get('left_seconds')} 秒"
+            f" / 確かめの見込み {skipped.get('gate_seconds')} 秒 / HEAD の木は起点の木と{same}）"
+        )
+    lines.append(
         f"- 最終ゲート: {gate.get('mode') or '—'}（{gate.get('status') or '未実行'}"
         f"{' / 検証の結果を使い回した' if gate.get('whole_test_reused') else ''}"
         f" / 修正 {gate.get('fix_rounds', 0)} 回）"
     )
+    for lint in gate.get("lint") or []:
+        lines.append(f"- 最終ゲートの静的解析 {lint.get('suite')}: {lint.get('verdict')}（{lint.get('reason')}）")
+    return lines
+
+
+def _reassigned_lines(state: dict[str, Any]) -> list[str]:
+    """結果なしの記録（`no_results`。#919）の振り替えと中断を 1 行ずつ。記録が無ければ空。"""
+    lines = []
+    for e in state.get("no_results") or []:
+        if e.get("decision") not in (assignment.REASSIGN, assignment.ABORT):
+            continue
+        src = assignment.Assignee(str(e.get("seat") or ""), e.get("account") or None).label()
+        dst = assignment.Assignee(str(e["to"]), e.get("to_account") or None).label() if e.get("to") else "なし（中断）"
+        lines.append(f"- 振り替え: {e.get('step')}（試行 {e.get('attempt')}）: {src} → {dst}（{e.get('reason')}）")
+    return lines
+
+
+def _print_header(state: dict[str, Any]) -> None:
+    budget_seconds = int(state.get("budget_minutes") or 0) * 60
+    # 止まっていた時間の分だけ締め切りをずらしたなら、所要からその秒を除いて想定最大時間と比べる（#1491・決定 8）
+    shifted = pause.shifted_seconds(state)
+    elapsed = max(_elapsed_seconds(state) - shifted, 0.0)
+    paused = f"止まっていた {shifted / 60:.1f} 分を除く。" if shifted else ""
+    judge = state.get("judge") or {}
+    gate = state.get("final_gate") or {}
+    print(f"# cross-refactoring 実行報告 — {state['repo']} #{state['current_pr']}")
+    print()
+    print(f"- 件数: {counts_line(state)}")
+    print(f"- 対象範囲: {', '.join(state['target_scope']) or '（未指定）'}")
+    print(
+        f"- 想定最大時間: {state.get('budget_minutes')} 分 / 所要: {elapsed / 60:.1f} 分"
+        f"（差 {(budget_seconds - elapsed) / 60:+.1f} 分。{paused}cross-review を除く）"
+    )
+    print(f"- 実装担当: {state.get('implementer')}（{state.get('implementer_reason')}） / モデル: {_implementer_model_text(state)}")
+    jev_line = "使った" if judge.get("kind") == "jev" else f"使わなかった（{judge.get('reason')}）"
+    print(f"- 判断に Jev を: {jev_line} / 呼び出しの失敗 {judge.get('failures', 0)} 回")
+    for line in strategy_lines(state):
+        print(line)
+    baseline = state.get("baseline_test") or {}
+    print(f"- 着手前のテスト（{baseline.get('mode') or 'whole'}）: {baseline_line(baseline)} / 既存失敗 {existing_failures_line(baseline)}")
+    for line in _whole_test_lines(state) + _final_gate_lines(gate) + time_report.lines(state):
+        print(line)
+    if state.get("launch_failure"):
+        print(f"- {launch.line(state['launch_failure'])}")
     print(f"- 監視が止めた手順: {_stopped_line(state)}")
+    for line in _reassigned_lines(state):
+        print(line)
     print(f"- 配分テーブル: {(state.get('plan') or {}).get('table_source') or '—'}")
     print(f"- 改修計画: {plan_reference(state)}")
 
@@ -190,9 +261,17 @@ _RESOLUTIONS = {
     "kept": "変更が原因の失敗は無く、取り消さなかった",
     "fixing": "直しの途中",
     "fixed": "直して通った",
-    "narrowed": "直らず、危険フラグの項目を新しい順に取り消した",
-    "reverted_all": "落ちたテストを取り出せず、危険フラグの項目をまとめて取り消した",
+    "narrowed": "直らず、原因の項目から順に取り消した",
+    "reverted_all": "落ちたテストを見分けられず、危険フラグの項目をまとめて取り消した",
+    "deferred": "全体テストを CI に任せる戦略のため、最終ゲートへ寄せた",
 }
+
+
+def _triage_line(triage: dict[str, Any]) -> str:
+    """見分けの結果の 1 行。JUnit で見分けられなかったときは落とした理由。"""
+    if triage.get("fallback_reason"):
+        return f"全体の走らせ直しに落とした（{triage['fallback_reason']}）"
+    return f"フレーキー {len(triage.get('flaky') or [])}・既存失敗 {len(triage.get('preexisting') or [])}・変更起因 {len(triage.get('caused') or [])}"
 
 
 def _whole_detail(whole: dict[str, Any]) -> str:
@@ -201,23 +280,15 @@ def _whole_detail(whole: dict[str, Any]) -> str:
         return ""
     if not whole.get("resolution"):
         return " / 危険フラグの項目を取り消した" if whole.get("reverted") else ""
-    counts = ""
-    if whole.get("failed_tests") is not None:
-        counts = (
-            f" / 揺れ {len(whole.get('flaky') or [])}・元からの失敗 "
-            f"{len(whole.get('preexisting') or [])}・変更が原因 {len(whole.get('caused') or [])}"
-        )
-    why = f"（{whole['unparsed_reason']}）" if whole.get("unparsed_reason") else ""
-    return f"{counts} / {_RESOLUTIONS.get(whole['resolution'], whole['resolution'])}{why}"
+    counts = f" / {_triage_line(whole)}" if whole.get("failed_tests") is not None or whole.get("fallback_reason") else ""
+    return f"{counts} / {_RESOLUTIONS.get(whole['resolution'], whole['resolution'])}"
 
 
 def _phase_table(state: dict[str, Any]) -> str:
     def minutes(seconds: Any) -> str:
         return "—" if seconds is None else f"{seconds / 60:.1f}"
 
-    rows = [
-        (name, minutes(phase_record(state, name).get("seconds"))) for name in ("propose", "plan", "add-tests", "implement", "verify", "fix")
-    ]
+    rows = [(name, minutes(phase_seconds(state).get(name))) for name in ("propose", "plan", "add-tests", "implement", "verify", "fix")]
     rows.append(("最終ゲートの全体のテスト", minutes((state.get("final_gate") or {}).get("whole_test_seconds"))))
     return mdtable.table_markdown(["手順", "所要（分）"], rows, align=["left", "right"])
 
@@ -237,7 +308,7 @@ def _item_table(state: dict[str, Any]) -> str:
                 str(item.get("technique")),
                 str(item.get("tier")),
                 f"{estimate:.1f}",
-                str(item.get("status")),
+                status_label(state, item),
                 ", ".join(item.get("danger") or []) or "—",
                 str(item.get("fix_count", 0)),
             )
@@ -288,17 +359,21 @@ def _change_value(value: Any) -> str:
 
 
 def _print_deferred(state: dict[str, Any]) -> None:
-    """見送りの件数（理由別）。**内訳は改修計画にある**（#436 決定 6-b）。"""
+    """件数の行と、見送った提案の総数と理由別の件数。**内訳は改修計画にある**（#436 決定 6-b）。
+
+    件数の行の「見送り」は見送った改善項目の数で、結果 JSON の `metrics.deferred` と同じ `ledger.tally` から出す。
+    計画に入らなかった提案を含む数（`deferred_items`）は「見送った提案」として別の行に出す（#1660）。
+    """
     deferred = state.get("deferred_items") or []
     counts = Counter(d.get("defer_reason") for d in deferred)
-    reverted = [i for i in state.get("items") or [] if i.get("status") == "reverted"]
+    t = ledger.tally(state)
     print("## 見送った提案と取り消した項目")
     print()
-    print(
-        f"- 採用: {sum(1 for i in state.get('items') or [] if i.get('status') == 'verified')} 件"
-        f" / 取り消し: {len(reverted)} 件 / 見送り: {len(deferred)} 件"
-    )
-    print("- 見送りの理由別: " + " / ".join(f"{r} {counts.get(r, 0)}" for r in DEFER_REASONS))
+    # 最終ゲートを経ていない実行は、残った改善項目を採用と表さない（I8）。数え方は `ledger.tally` が持つ
+    adopted = f"{t.adopted} 件" if t.confirmed else f"未確定（最終ゲートを経ていない。残った改善項目 {t.unconfirmed} 件）"
+    print(f"- 採用: {adopted} / 取り消し: {t.reverted} 件 / 見送り: {t.deferred} 件")
+    by_reason = " / ".join(f"{r} {counts.get(r, 0)}" for r in DEFER_REASONS)
+    print(f"- 見送った提案: {len(deferred)} 件（理由別: {by_reason}）")
     print(f"- 内訳: 改修計画にある — {plan_reference(state)}")
 
 

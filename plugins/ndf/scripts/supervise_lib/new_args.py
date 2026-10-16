@@ -12,9 +12,31 @@ from supervise_lib.templates import fix_worktree
 DECL_HELP = "要る設定（引数が先に効く）: {needs}。new は作業場所 → 元のリポジトリ → 今のディレクトリの順に .ndf/ を探す"
 DECL_WORDS = {
     "base": "起点のブランチ（--base か .ndf/worktree.json の base_branch）",
-    "test": "テストのコマンド（--test-cmd か .ndf/supervise.json の test.command。{paths} を範囲に置き換える）",
+    "test": "テストの宣言（.ndf/project.json の test。無ければ --test-cmd か .ndf/supervise.json の test.command。{paths} を範囲に置き換える）",
     "release": "リリースの形（.ndf/supervise.json の release.form。雛形のある形: package-plugin）",
+    "impl_timeout": "実装の上限（--impl-timeout か .ndf/supervise.json の impl_timeout）",
+    "refactor_budget_minutes": "構造改善の想定最大時間（--refactor-budget-minutes か .ndf/supervise.json の refactor_budget_minutes）",
 }
+# 任意の設定（--help の「任意の設定」に出す。無くてもプランを書ける）
+OPTIONAL_DECLS = {
+    "impl": ("impl_timeout",),
+    "check": ("refactor_budget_minutes",),
+    "sprint": ("release", "impl_timeout", "refactor_budget_minutes"),
+    "close": ("release", "refactor_budget_minutes"),
+}
+
+
+def positive_int(text: str) -> int:
+    """1 以上の整数だけを受ける argparse の型。"""
+    try:
+        value = int(text)
+    except ValueError:
+        value = 0
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"1 以上の整数にする: {text!r}")
+    return value
+
+
 NEW_KINDS = {
     "impl": (
         "1 課題を実装するプラン",
@@ -40,19 +62,21 @@ NEW_KINDS = {
         "release → verify-install（本番のブランチ）→ 後片付け。実装の queue へ --then で渡すと、実装がすべて"
         "完了した後に続けて流れる",
     ),
-    "mission": (
-        "ミッションのステージごとのプランと mission.json を書き出す",
+    "sprint": (
+        "スプリントのステージごとのプランと sprint.json を書き出す",
         "ステージ: 設計（--design の課題ごと。用語集 → 要求と受け入れ条件 → 設計 → 設計 Pull Request → "
-        "cross-review → 用語チェック）→ 承認ゲート 1 → ミッションのブランチ → 実装（課題ごと。ミッションの"
+        "cross-review → 用語チェック）→ 承認ゲート 1 → スプリントブランチ → 実装（課題ごと。スプリントの"
         "ブランチへ集める）→ 検査 1 回 → リリース（開発版）。ステージの中は queue --max 3 で流す。\n"
         "リリースの形（release.form）が無いか雛形の無い形なら、リリースのプランを書かず、最後のステージに"
         "「/ndf:release で行う」を置く。\n"
+        "--state <状態>（normal）: 設計の用語チェックの後と開発版の承認資料の後に助言の MVV 判定（mvv-gate.py check --advise）を置く。"
+        "承認は利用者が行う。\n"
         "--pace fast --state <状態>: 使ってよい条件を確かめ、設計（承認ゲート 1 は MVV 判定）→ 実装（起点の"
         "ブランチへ直接）→ 検査（実行の条件）→ 開発版 → 本番（承認ゲート 2 は MVV 判定）を書く",
     ),
     "close": (
-        "ミッションの終わりのプラン",
-        "ステージ: 最終の検査 → 開発版 → 本番（最終の検査で変更があったときだけ）→ 確定仕様化・課題を閉じる・振り返り",
+        "スプリントの終わりのプラン",
+        "ステージ: 最終の検査 → 開発版 → 本番（最終の検査で変更があったときだけ）→ 確定仕様化・課題を閉じる・振り返り・棚卸し",
     ),
 }
 # 引数: (名前, add_argument の引数, 受ける種別)
@@ -63,13 +87,13 @@ NEW_ARGS = [
             "required": True,
             "help": {
                 "*": "作業場所（worktree）",
-                "mission": "リポジトリの根",
+                "sprint": "リポジトリの根",
                 "close": "リポジトリの根",
                 "check": "作業場所（worktree。--since-last はリポジトリの根）",
                 "fix": "作業場所（worktree。省けば --branch から <リポジトリ>/.worktrees/<ブランチ>）",
             },
         },
-        "impl fix check release mission close",
+        "impl fix check release sprint close",
     ),
     (
         "--issue",
@@ -79,32 +103,41 @@ NEW_ARGS = [
             "default": [],
             "help": {
                 "*": "課題の番号",
-                "mission": "実装する課題（課題ごとに実装のプランを書く）",
-                "close": "ミッションの課題（最後に閉じる）",
+                "sprint": "実装する課題（課題ごとに実装のプランを書く）",
+                "close": "スプリントの課題（最後に閉じる）",
                 "fix": "関連する課題の番号（任意）",
             },
         },
-        "impl fix check release mission close",
+        "impl fix check release sprint close",
     ),
-    ("--base", {"help": "起点のブランチ（PR の宛先。既定は .ndf/worktree.json の base_branch）"}, "impl fix check release mission close"),
-    ("--production-branch", {"help": "本番のブランチ（既定は .ndf/worktree.json の production_branch）"}, "release mission close"),
+    ("--base", {"help": "起点のブランチ（PR の宛先。既定は .ndf/worktree.json の base_branch）"}, "impl fix check release sprint close"),
+    ("--production-branch", {"help": "本番のブランチ（既定は .ndf/worktree.json の production_branch）"}, "release sprint close"),
     (
         "--test-cmd",
-        {"help": "テストのコマンド。{paths} を範囲に置き換える（既定は .ndf/supervise.json の test.command）"},
-        "impl fix check mission close",
+        {"help": "範囲テストの雛形（{paths} を 1 語で含むコマンド）。宣言（.ndf/project.json の test）より先に効く"},
+        "impl fix check sprint close",
     ),
-    ("--test-all", {"help": "全体テストの範囲（既定は .ndf/supervise.json の test.all か .）"}, "impl fix check mission close"),
-    ("--mode", {"default": "standard", "help": "モード（既定 standard）"}, "impl fix check release mission close"),
+    (
+        "--test-kind",
+        {
+            "choices": ("test", "lint"),
+            "default": "test",
+            "help": "範囲テストの雛形（--test-cmd）の種別。test = テスト / lint = 静的解析（整形の検査を含む）。既定 test",
+        },
+        "impl fix check sprint close",
+    ),
+    ("--test-all", {"help": "廃止（知らせて無視する。全体テストは宣言の suites[].command）"}, "impl fix check sprint close"),
+    ("--mode", {"default": "standard", "help": "モード（既定 standard）"}, "impl fix check release sprint close"),
     (
         "--out",
         {
             "help": {
                 "*": "書き出すプランのファイル",
-                "mission": "書き出すディレクトリ（既定 mission-<名前>）",
-                "close": "書き出すディレクトリ（既定 mission-<名前>）",
+                "sprint": "書き出すディレクトリ（既定 sprint-<名前>）",
+                "close": "書き出すディレクトリ（既定 sprint-<名前>）",
             }
         },
-        "impl fix check release mission close",
+        "impl fix check release sprint close",
     ),
     (
         "--tests",
@@ -114,12 +147,30 @@ NEW_ARGS = [
             "metavar": "PATH",
             "help": {
                 "*": "範囲テストの対象（テストのコマンドの {paths} に入る）",
-                "mission": "課題ごとの実装のプランの範囲テストの対象（{paths} に入る。既定 .）",
+                "sprint": "課題ごとの実装のプランの範囲テストの対象（{paths} に入る。既定 .）",
             },
         },
-        "impl fix mission",
+        "impl fix sprint",
     ),
-    ("--scope", {"nargs": "+", "default": [], "metavar": "PATH", "help": "構造改善の範囲"}, "check mission"),
+    (
+        "--scope",
+        {"nargs": "+", "default": [], "metavar": "PATH", "help": "構造改善の範囲に足すパス（PR の差分のファイルとテストの置き場所に足す）"},
+        "check sprint",
+    ),
+    (
+        "--impl-timeout",
+        {"type": positive_int, "metavar": "SECONDS", "help": "実装のステップの上限（秒）。既定は .ndf/supervise.json の impl_timeout"},
+        "impl sprint",
+    ),
+    (
+        "--refactor-budget-minutes",
+        {
+            "type": positive_int,
+            "metavar": "MINUTES",
+            "help": "構造改善の想定最大時間（分。cross-refactoring の --budget-minutes）。既定は .ndf/supervise.json の refactor_budget_minutes",
+        },
+        "check sprint close",
+    ),
     ("--title", {"help": "Pull Request の題名"}, "impl fix"),
     ("--summary", {"help": "Pull Request 本文の要約"}, "impl fix"),
     ("--prompt", {"help": "実装の指示文"}, "impl"),
@@ -130,7 +181,17 @@ NEW_ARGS = [
             "nargs": "+",
             "default": [],
             "metavar": "PATH",
-            "help": "触るファイル。同じ出力先の、まだ終わっていない他のプランの指示文へ除外として載る",
+            "help": "触るファイル。queue で同時に走る他のプランの実装の指示文へ除外として載る（ディレクトリは載らない）",
+        },
+        "impl",
+    ),
+    (
+        "--after",
+        {
+            "nargs": "+",
+            "default": [],
+            "metavar": "NAME",
+            "help": "前提のプランの名前。queue は、前提のプランが完了でなければこのプランを流さない",
         },
         "impl",
     ),
@@ -140,7 +201,7 @@ NEW_ARGS = [
     ("--pr", {"type": int, "help": "検査する Pull Request（--since-last と排他）"}, "check"),
     ("--since-last", {"action": "store_true", "help": "前回の検査からの差分を範囲にする（--pr と排他）"}, "check"),
     ("--id", {"help": "検査の名前（--since-last と組。ブランチ check/<名>）"}, "check"),
-    ("--final", {"action": "store_true", "help": "ミッションの終わりの検査（--since-last と組）"}, "check"),
+    ("--final", {"action": "store_true", "help": "スプリントの終わりの検査（--since-last と組）"}, "check"),
     (
         "--since-ref",
         {
@@ -154,17 +215,17 @@ NEW_ARGS = [
         {"action": "store_true", "help": "実装レビューだけ（--since-last と組。開発版ごと。構造改善はトリガーが立ったときの検査）"},
         "check",
     ),
-    ("--mission", {"help": "ミッションの状態（--since-last と組。課題を読む）"}, "check"),
+    ("--sprint", {"help": "スプリントの状態（--since-last と組。課題を読む）"}, "check"),
     (
         "--version",
         {
             "help": {
                 "*": "配る版（例 10.17.11-dev.1）",
-                "mission": "開発版の版（例 3.8.0-dev.1。リリースの雛形があるとき開発版のプランに使う）",
-                "close": "開発版の版（最終の検査で変更があったときに配る）",
+                "sprint": "開発版の版（例 3.8.0-dev.1。release.form の雛形で配るときだけ要る）",
+                "close": "開発版の版（最終の検査で変更があったときに配る。release.form の雛形で配るときだけ要る）",
             }
         },
-        "release mission close",
+        "release sprint close",
     ),
     ("--prs", {"type": int, "nargs": "+", "default": [], "help": "含む Pull Request"}, "release"),
     (
@@ -175,8 +236,8 @@ NEW_ARGS = [
     ("--channel", {"choices": ["dev", "prod"], "help": "開発版（dev）か本番（prod）か"}, "release"),
     ("--prev-tag", {"help": "dev: approval-facts の前のタグ。prod: 他のプラグインの差分の起点（省略時は自動）"}, "release"),
     ("--repo", {"help": "元のリポジトリ（省略時は作業場所の /.worktrees/ より前）"}, "release"),
-    ("--mvv", {"help": "承認ゲート 2 を MVV で判定する（ミッションの状態）"}, "release"),
-    ("--name", {"help": "ミッションの名前（英数字・. _ -。ブランチは mission/<名前>）"}, "mission close"),
+    ("--mvv", {"help": "承認ゲート 2 を MVV で判定する（スプリントの状態）"}, "release"),
+    ("--name", {"help": "スプリントの名前（英数字・. _ -。ブランチは sprint/<名前>）"}, "sprint close"),
     (
         "--design",
         {
@@ -185,24 +246,29 @@ NEW_ARGS = [
             "default": [],
             "help": "設計のプラン（設計 Pull Request と承認ゲート 1）を作る課題。省けば設計と承認ゲート 1 のステージを置かない",
         },
-        "mission",
+        "sprint",
     ),
     (
         "--pace",
-        {"choices": ["normal", "fast"], "default": "normal", "help": "進め方（fast は使ってよい条件と MVV の承認を確かめる）"},
-        "mission",
+        {
+            "choices": ["normal", "fast", "auto"],
+            "default": "normal",
+            "help": "進め方（fast と auto は使ってよい条件と MVV の承認を確かめる。auto は normal の工程で承認ゲート 1・2 を MVV 判定にする）",
+        },
+        "sprint",
     ),
     (
         "--state",
         {
             "help": {
-                "*": "ミッションの状態（mission-state.py のファイル）",
-                "mission": "ミッションの状態（--pace fast と組。mission-state.py のファイル）",
+                "*": "スプリントの状態（sprint-state.py のファイル）",
+                "sprint": "スプリントの状態（sprint-state.py のファイル）。--pace fast / auto では要る。normal で渡すと承認ゲート 1・2 の前に"
+                "助言の MVV 判定を置き、worker と judge が状態のスプリント MVV を読む",
             }
         },
-        "mission close",
+        "sprint close",
     ),
-    ("--prod", {"help": "本番の版（例 10.18.0）"}, "close"),
+    ("--prod", {"help": "本番の版（例 10.18.0。release.form の雛形で配るときだけ要る）"}, "close"),
     ("--milestone", {"help": "マイルストーン（振り返りの材料）"}, "close"),
 ]
 NEW_REQUIRED = {
@@ -210,8 +276,8 @@ NEW_REQUIRED = {
     "fix": "--worktree か --branch・--tests・--title",
     "check": "--pr か --since-last（--id と組）",
     "release": "--version・--prs（か --prs-from-queue）・--channel",
-    "mission": "--name・--issue・--version",
-    "close": "--name・--issue・--version・--prod・--state",
+    "sprint": "--name・--issue（release.form の雛形で配るときは --version も）",
+    "close": "--name・--issue・--state（release.form の雛形で配るときは --version・--prod も）",
 }
 
 
@@ -231,9 +297,7 @@ def add_new_parsers(sub, epilog: str) -> None:
             kind,
             help=short,
             description=f"{short}。\n\n{steps}",
-            epilog=f"必須の引数: {NEW_REQUIRED[kind]}。\n"
-            + DECL_HELP.format(needs=needs)
-            + ("。\n任意の設定: " + DECL_WORDS["release"] if kind == "mission" else ""),
+            epilog=f"必須の引数: {NEW_REQUIRED[kind]}。\n" + DECL_HELP.format(needs=needs) + optional_help(kind),
             formatter_class=argparse.RawDescriptionHelpFormatter,
         )
         for name, kw, allowed in NEW_ARGS:
@@ -241,6 +305,15 @@ def add_new_parsers(sub, epilog: str) -> None:
                 helps = kw.get("help")
                 extra = {"required": False} if (name, kind) == ("--worktree", "fix") else {}  # --branch でもよい
                 k.add_argument(name, **{**kw, **extra, "help": helps.get(kind, helps["*"]) if isinstance(helps, dict) else helps})
+
+
+def optional_help(kind: str) -> str:
+    """--help の「任意の設定」の 1 文（受ける種別だけ）。"""
+    words = [
+        DECL_WORDS[k] + ("（無ければ .ndf/project.json の delivery からリリースの経路を導く）" if k == "release" else "")
+        for k in OPTIONAL_DECLS.get(kind, ())
+    ]
+    return "。\n任意の設定: " + "・".join(words) if words else ""
 
 
 def fill_new_defaults(a) -> None:
@@ -251,37 +324,55 @@ def fill_new_defaults(a) -> None:
             setattr(a, dest, kw.get("default", False if kw.get("action") == "store_true" else None))
 
 
-def check_new(ap: argparse.ArgumentParser, a) -> None:
-    """impl / fix / check / release の引数の組を確かめる（足りなければ ap.error で終了コード 2）。"""
-    if a.kind == "impl" and not (a.issue and a.tests and a.title):
+def _check_impl(ap: argparse.ArgumentParser, a) -> None:
+    if not (a.issue and a.tests and a.title):
         ap.error("new impl には --issue・--tests・--title が要る")
-    if a.kind == "fix" and not ((a.worktree or a.branch) and a.tests and a.title):
+
+
+def _check_fix(ap: argparse.ArgumentParser, a) -> None:
+    if not ((a.worktree or a.branch) and a.tests and a.title):
         ap.error("new fix には --worktree か --branch・--tests・--title が要る")
-    if a.kind == "fix" and not a.worktree:
+    if not a.worktree:
         a.worktree = fix_worktree(a.branch)
-    if a.kind == "check" and a.since_last and a.pr:
+
+
+def _check_check(ap: argparse.ArgumentParser, a) -> None:
+    if a.since_last and a.pr:
         ap.error("new check の --since-last と --pr は同時に渡せない")
-    if a.kind == "check" and a.since_last and not a.id:
+    if a.since_last and not a.id:
         ap.error("new check --since-last には --id（検査の名前）が要る")
-    if a.kind == "check" and a.review_only and not a.since_last:
+    if a.review_only and not a.since_last:
         ap.error("new check の --review-only は --since-last と組にする")
-    if a.kind == "check" and a.review_only and a.final:
+    if a.review_only and a.final:
         ap.error("new check の --review-only と --final は同時に渡せない")
-    if a.kind == "check" and not (a.pr or a.since_last):
+    if not (a.pr or a.since_last):
         ap.error("new check には --pr か --since-last が要る")
-    if a.kind == "release" and not (a.version and (a.prs or a.prs_from_queue) and a.channel):
+
+
+def _check_release(ap: argparse.ArgumentParser, a) -> None:
+    if not (a.version and (a.prs or a.prs_from_queue) and a.channel):
         ap.error("new release には --version・--prs（か --prs-from-queue）・--channel が要る")
-    if a.kind == "release" and not (a.repo or "/.worktrees/" in a.worktree):
+    if not (a.repo or "/.worktrees/" in a.worktree):
         ap.error("new release には --repo が要る（作業場所が /.worktrees/ の下に無い）")
 
 
-def check_mission(ap: argparse.ArgumentParser, a) -> None:
-    """mission / close の引数の組を確かめる。"""
-    if not (a.name and a.issue and a.version):
-        ap.error(f"new {a.kind} には --name・--issue・--version（開発版の版）が要る")
+# 種類ごとの引数の組の検査（表に無い種類は確かめない）
+NEW_CHECKS = {"impl": _check_impl, "fix": _check_fix, "check": _check_check, "release": _check_release}
+
+
+def check_new(ap: argparse.ArgumentParser, a) -> None:
+    """impl / fix / check / release の引数の組を確かめる（足りなければ ap.error で終了コード 2）。"""
+    check = NEW_CHECKS.get(a.kind)
+    if check is not None:
+        check(ap, a)
+
+
+def check_sprint(ap: argparse.ArgumentParser, a) -> None:
+    """sprint / close の引数の組を確かめる。版数（--version・--prod）はリリースの経路が雛形のときだけ要り、
+    宣言を読んだ後に apply_decls が確かめる（#1336）。"""
+    if not (a.name and a.issue):
+        ap.error(f"new {a.kind} には --name・--issue が要る")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", a.name):
-        ap.error("--name は英数字・. _ - だけで書く（ブランチ名 mission/<名前> に使う）")
-    if a.kind == "close" and not (a.prod and a.state):
-        ap.error("new close には --prod（本番の版）と --state（ミッションの状態）が要る")
-    if a.kind == "mission" and a.pace == "normal":
-        a.state = None
+        ap.error("--name は英数字・. _ - だけで書く（ブランチ名 sprint/<名前> に使う）")
+    if a.kind == "close" and not a.state:
+        ap.error("new close には --state（スプリントの状態）が要る")

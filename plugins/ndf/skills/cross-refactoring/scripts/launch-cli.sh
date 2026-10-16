@@ -40,7 +40,8 @@ load_common_state() {
   HEAD_BRANCH=$(jq -r '.head_branch' "$STATE")
   BASE_BRANCH=$(jq -r '.base_branch' "$STATE")
   SCOPE=$(jq -r '.target_scope | join(" ")' "$STATE")
-  MODEL=$(jq -r --arg rt "$RUNTIME" '.models[$rt] // ""' "$STATE")
+  # 起動のモデル: 引数の明示 → 既定のモデルへの切り替え（参加の確認。#1290）→ 空（CLI の設定のまま）
+  MODEL=$(jq -r --arg rt "$RUNTIME" '(.models // {})[$rt] // (.participants.default_models // {})[$rt] // ""' "$STATE")
   BASELINE_TEST=$(jq -r '.baseline_test.command // ""' "$STATE")
   # ラウンドのテスト。省いた実行では空で、項目の検証は全体のテストから組み立てた語の並びを使う。
   ROUND_TEST=$(jq -r '.round_test.command // ""' "$STATE")
@@ -104,7 +105,7 @@ PROMPT=$STEM-prompt.md
 TEMPLATE=$PROMPTS/$PHASE.md
 [ -f "$TEMPLATE" ] || { echo "プロンプト雛形がありません: $TEMPLATE" >&2; exit 1; }
 
-# 手順ごとに渡す項目。**締め切りは項目ごとの時刻で渡す**（AC12）。
+# 手順ごとに渡す項目。項目ごとの期限は渡さない（止めるのは工程の監視の上限だけ。#1743 決定 9）。
 collect_items() {
 case "$PHASE" in
   plan)
@@ -116,20 +117,25 @@ case "$PHASE" in
   add-tests)
     ITEMS_JSON=$(jq '[.items[] | select(.status == "planned" and ((.tests // []) | length) > 0)
       | {item_id: .id, path, symbol, smell, technique, tests, test_targets,
-         start_deadline: .test_start_deadline, estimate_minutes: .estimate.test}]' "$STATE")
+         estimate_minutes: .estimate.test}]' "$STATE")
     ;;
   implement)
     ITEMS_JSON=$(jq '[.items[] | select(.status == "planned" or .status == "tested")
       | {item_id: .id, rank, path, symbol, smell, technique, rationale, plan, tests,
-         start_deadline, estimate_minutes: .estimate.implement,
-         test_command: (.command | join(" "))}]' "$STATE")
+         estimate_minutes: .estimate.implement,
+         test_command: (if .scope_commands then (.scope_commands | map(.command) | join(" ; "))
+                        else ((.command // []) | if ((.[0] // "") | type) == "array" then map(join(" ")) | join(" ; ") else join(" ") end) end)}]' "$STATE")
     ;;
   fix)
     # 落ちた項目だけ。**同じ語の並びを共有した項目はまとめて 1 つの修正の対象**になる。
     # 全体のテストで落ちた項目（決定 22）は、落ちたテストだけを走らせ直すコマンドを渡す。
     ITEMS_JSON=$(jq '[.items[] | select(.status == "failing")
       | {item_id: .id, path, symbol, technique, plan, fix_count,
-         test_command: ((.whole_test_command // .command) | join(" ")), test_log: .last_log}]' "$STATE")
+         test_command: (if .whole_test_command then (.whole_test_command | join(" "))
+                        elif .scope_commands then (.scope_commands | map(.command) | join(" ; "))
+                        else ((.command // []) | if ((.[0] // "") | type) == "array" then map(join(" ")) | join(" ; ") else join(" ") end) end),
+         test_log: .last_log}
+      + (if .failed_check then {failed_check} else {} end)]' "$STATE")
     ;;
   *)
     ITEMS_JSON='[]'
@@ -187,6 +193,13 @@ METRICS_EOF
 )
 }
 
+# 判断の基準の節（#1366）。**提案と改修計画だけ**に渡す。初期化が状態ファイルへ写した節を読む
+build_mvv_block() {
+MVV_BLOCK=
+case "$PHASE" in propose | plan) ;; *) return 0 ;; esac
+MVV_BLOCK=$(jq -r '.project_mvv.block // ""' "$STATE")
+}
+
 export_prompt_env() {
 BUDGET_MINUTES=$(jq -r '.budget_minutes' "$STATE")
 END_AT=$(jq -r '.plan.end_at // ""' "$STATE")
@@ -199,13 +212,18 @@ export RF_ITEMS=$ITEMS_JSON RF_TMP_DIR=$TMP_DIR
 export RF_BUDGET_MINUTES=$BUDGET_MINUTES RF_END_AT=$END_AT
 export RF_VOCAB_SMELLS=$VOCAB_SMELLS RF_VOCAB_TECHNIQUES=$VOCAB_TECHNIQUES
 export RF_VOCAB_SEVERITIES=$VOCAB_SEVERITIES RF_VOCAB_VIEWPOINTS=$VOCAB_VIEWPOINTS
-export RF_METRICS_BLOCK=$METRICS_BLOCK
+export RF_METRICS_BLOCK=$METRICS_BLOCK RF_MVV=$MVV_BLOCK
+# 最終ゲート修正の依頼に載せる内容（落ちた検査と直前の差し戻し。#1693 F2）。無ければ「無し」
+FINAL_FIX_REQUEST=
+[ "$PHASE" = "final-fix" ] && FINAL_FIX_REQUEST=$(jq -r '.final_gate.fix_request // ""' "$STATE")
+export RF_FINAL_FIX_REQUEST=${FINAL_FIX_REQUEST:-（無し）}
 }
 
 collect_items
 build_skill_block
 collect_refactoring_vocabulary
 build_metrics_block
+build_mvv_block
 export_prompt_env
 
 # 雛形は `${RF_*}` を展開するだけの素の Markdown。コマンド置換は展開しない
@@ -229,7 +247,9 @@ launch_cli() {
 EXTRA_DIR=
 [ "$RUNTIME" = "agy" ] && EXTRA_DIR=$TMP_DIR
 
-"$LIB/launch-cli.sh" "$RUNTIME" "$WORKDIR" "$PROMPT" "$STEM" "$MODEL" "$EXTRA_DIR" \
+# 使用量の帳簿の呼び出し元を名乗る（工程名を kind に。#1953 の決定 7）
+NDF_USAGE_SOURCE=cross-refactoring NDF_USAGE_KIND=$PHASE \
+  "$LIB/launch-cli.sh" "$RUNTIME" "$WORKDIR" "$PROMPT" "$STEM" "$MODEL" "$EXTRA_DIR" \
   "$PRINT_TIMEOUT"
 }
 

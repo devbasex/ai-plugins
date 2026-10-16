@@ -28,6 +28,7 @@ SUBCOMMANDS = (
     "verify-findings",
     "collect-critiques",
     "merge-fix",
+    "record-fix",
     "should-rotate",
     "set-current-pr",
     "verify-sweep",

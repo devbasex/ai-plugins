@@ -3,22 +3,48 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 import gh_rest
-from supervise_lib import paths
+import usage_aggregate
+from loop_drive import review_answer
+from supervise_lib import paths, running
 from supervise_lib.claude import TAIL, WORK_TOOLS, run_ticking
 from supervise_lib.prompts import FULL_SYSTEM, PROGRESS_PROMPT, REPORT_DONE, REPORT_NOT_DONE, RESUME_PROMPT, WORK_SYSTEM, WORKDIR_PROMPT
 from supervise_lib.steps import RunStep, last_json
+import project_mvv
+
+# worker 1 回の上限（秒）と、駆動が pause で止まってよい回数の既定
+DEFAULT_TIMEOUT = 1800
+DEFAULT_MAX_PAUSES = 12
+TICK_GRACE = 120  # worker 自身の上限に、外側で打ち切るまで足す余裕（秒）
+
+
+def _timeout(step: dict) -> int:
+    return step.get("timeout", DEFAULT_TIMEOUT)
+
+
+def note_runtimes(ctx, step: dict, started: float) -> None:
+    """ステップの中で起動した CLI の帳簿の行を、ランタイムごとに `cur["llm_runtimes"]` へ集める（#1953 の決定 11）。"""
+    found = usage_aggregate.step_totals(getattr(ctx, "plan_path", None) or "", str(step.get("id") or ""), started)
+    if found:
+        ctx.state.cur["llm_runtimes"] = found
 
 
 class WorkStep:
     """work のステップ: 1 つの作業を worker（最小構成の claude -p か external-ai.py run）に行わせる。"""
 
     kind = "work"
+
+    def mvv_system(self, ctx) -> str:
+        """worker のシステムプロンプトの末尾へ足す MVV の節（#1400 の決定 5）。プロジェクト MVV が承認済みのときだけ
+        `project_mvv.block` の出力をそのまま返し（スプリントが特定できればスプリント MVV も入る）、ほかは空文字。"""
+        mvv, sprint = ctx.state.mvv_block_of(ctx.cwd, ctx.plan)
+        return "\n\n" + project_mvv.block(mvv, sprint) if mvv.approved else ""
 
     def issue_text(self, ctx, step: dict) -> str:
         nums = step.get("issues")
@@ -37,10 +63,11 @@ class WorkStep:
     def call_worker(self, ctx, step: dict, prompt: str, cwd: str, name: str) -> dict:
         """worker を 1 回起動する。`runtime` があれば external-ai.py run、無ければ最小構成の claude -p。"""
         rt = step.get("runtime")
+        system = WORK_SYSTEM + self.mvv_system(ctx)
         if not rt or rt == "claude-p":
-            return ctx.claude.call(WORK_SYSTEM, prompt, WORK_TOOLS, cwd, step.get("timeout", 1800), serena=bool(step.get("serena")))
+            return ctx.claude.call(system, prompt, WORK_TOOLS, cwd, _timeout(step), serena=bool(step.get("serena")))
         pf, of = ctx.state.dir / f"{name}-prompt.md", ctx.state.dir / f"{name}-output.md"
-        pf.write_text(WORK_SYSTEM + "\n\n" + prompt)
+        pf.write_text(system + "\n\n" + prompt)
         started = time.time()
         cmd = [
             sys.executable,
@@ -56,10 +83,13 @@ class WorkStep:
             "--workdir",
             cwd,
             "--timeout",
-            str(step.get("timeout", 1800)),
+            str(_timeout(step)),
         ]
+        # 使用量の帳簿の呼び出し元（#1953 の決定 7）。行は external-ai.py の起動の共有処理がそのランタイムの帳簿へ書く
+        env = {**os.environ, "NDF_USAGE_SOURCE": "supervise", "NDF_USAGE_KIND": "work"}
+        env.update(NDF_USAGE_PLAN=getattr(ctx, "plan_path", None) or "", NDF_USAGE_STEP=str(step.get("id") or ""))
         try:
-            p = run_ticking(cmd, ctx.tick, ctx.state.every, cwd=cwd, timeout=step.get("timeout", 1800) + 120)
+            p = run_ticking(cmd, ctx.tick, ctx.state.every, cwd=cwd, timeout=_timeout(step) + TICK_GRACE, env=env)
             out = last_json(p.stdout) or {}
         except subprocess.TimeoutExpired:
             out = {"status": "stopped", "summary": "打ち切り"}
@@ -74,13 +104,28 @@ class WorkStep:
             "runtime": rt,
         }
 
+    def concurrent_rule(self, ctx, step: dict) -> str:
+        """実装の指示文へ足す除外の行（#1248・#1674）。担当を起動する時点で走っている他のプランの `触るファイル`
+        のうち、ディレクトリでないものを入れる。入れたものと外したディレクトリを進捗ログ（`kind: concurrent`）へ書く。"""
+        if step.get("kind") != "実装":
+            return ""
+        root = step.get("cwd", ctx.cwd) or "."
+        found = running.others(ctx.plan_path) if ctx.plan_path else []
+        dirs = [f for f in found if paths.is_dir_entry(f, root)]
+        files = [f for f in found if f not in dirs]
+        ctx.state.progress_write({"kind": "concurrent", "step": step.get("id"), "files": files, "dirs": dirs})
+        return "\n並行して別のプランが次を触る。それらは変えない: " + "、".join(files) if files else ""
+
     def execute(self, ctx, step: dict) -> tuple[bool, str]:
+        started = time.time()
         issues = self.issue_text(ctx, step)
         cwd = step.get("cwd", ctx.cwd)
+        rule = self.concurrent_rule(ctx, step)
         prompt = (
             f"作業: {step.get('kind', '修正')}\n作業場所: {cwd}\n\n"
             + (f"{issues}\n\n## 指示\n" if issues else "")
-            + f"{step['prompt']}\n\n## 入力\n{ctx.inputs_text(step)}\n\n"
+            + (step["prompt"].rstrip("\n") + rule if rule else step["prompt"])
+            + f"\n\n## 入力\n{ctx.inputs_text(step)}\n\n"
             + WORKDIR_PROMPT.format(path=ctx.state.work)
             + "\n\n"
             + PROGRESS_PROMPT.format(path=ctx.state.progress.resolve())
@@ -89,20 +134,24 @@ class WorkStep:
             # Skill の本文が手順を持つ。プロンプトは Skill の呼び出しをそのまま渡す
             prompt = step["prompt"]
         full = bool(step.get("full"))
+        system = FULL_SYSTEM + self.mvv_system(ctx)
         if full:
-            res = ctx.claude.call(FULL_SYSTEM, prompt, WORK_TOOLS, cwd, step.get("timeout", 1800), full=True)
+            res = ctx.claude.call(system, prompt, WORK_TOOLS, cwd, _timeout(step), full=True)
         else:
             res = self.call_worker(ctx, step, prompt, cwd, step["id"])
-        ctx.claude.record_usage("work", res)
+        if not res.get("runtime"):  # runtime を指定した work は claude -p に数えない（帳簿から集める）
+            ctx.claude.record_usage("work", res)
         # 報告が無いまま応答を終えた Skill のステップは、同じ会話を起こし直す（supervisor へ SendMessage で
         # 続けさせていたのと同じ。3 回まで）
         for _ in range(3):
             if not full or REPORT_DONE.search(res["text"] or "") or not res.get("session"):
                 break
-            res = ctx.claude.call(FULL_SYSTEM, RESUME_PROMPT, WORK_TOOLS, cwd, step.get("timeout", 1800), full=True, resume=res["session"])
+            res = ctx.claude.call(system, RESUME_PROMPT, WORK_TOOLS, cwd, _timeout(step), full=True, resume=res["session"])
             ctx.claude.record_usage("work", res)
         if (full and not REPORT_DONE.search(res["text"] or "")) or REPORT_NOT_DONE.search(res["text"] or ""):
             res["ok"] = False
+        if res.get("runtime"):
+            note_runtimes(ctx, step, started)
         ctx.state.cur.update(exit=0 if res["ok"] else 1, text=res["text"], seconds=res["seconds"])
         return res["ok"], res["text"]
 
@@ -128,7 +177,8 @@ class DriveStep:
         入れ子の駆動（最終ゲートの item.command）の metrics は `inner` へ足す（外側の結果は内側の件数を持たない）。"""
         cwd = step.get("cwd", ctx.cwd)
         texts = []
-        for _ in range(step.get("max_pauses", 12) + 1):
+        max_pauses = step.get("max_pauses", DEFAULT_MAX_PAUSES)
+        for _ in range(max_pauses + 1):
             code, text = self.run.run_cmd(ctx, {**step, "cmd": cmd})
             texts.append(text)
             out = last_json(text)
@@ -143,25 +193,41 @@ class DriveStep:
             ctx.state.cur.setdefault("pauses", []).append(kind)
             res_file = Path(item["result_file"])
             if item.get("command") and depth == 0:
-                ok, sub, sub_text = self.drive_loop(ctx, step, item["command"], depth + 1, inner)
-                if inner is not None and sub and isinstance(sub.get("metrics"), dict):
-                    inner.append(sub["metrics"])
-                texts.append(sub_text)
+                ok, sub = self._drive_nested(ctx, step, item, res_file, depth, inner, texts)
                 if not ok:
                     return False, sub, "\n".join(texts) + f"\n{kind} の駆動が止まった"
-                res_file.write_text(json.dumps({"review_status": (sub.get("metrics") or {}).get("review_status") or "unknown"}))
                 continue
-            pf = item.get("prompt_file")
-            if not pf or not Path(pf).is_file():
-                return False, out, "\n".join(texts) + f"\n{kind} の prompt_file が無い"
-            wd = str(item.get("cwd") or cwd)  # 駆動が作業ディレクトリを示せば、それが worker の作業場所
-            prompt = f"作業: {kind}\n作業場所: {wd}\n\n{Path(pf).read_text()}\n\n終えたら結果ファイル {res_file} を書く。"
-            res = self.work.call_worker(ctx, step, prompt, wd, f"{step['id']}-{kind}-{len(ctx.state.cur['pauses'])}")
+            err = self._delegate_pause(ctx, step, item, kind, res_file, cwd, texts)
+            if err:
+                return False, out, "\n".join(texts) + f"\n{err}"
+        return False, None, "\n".join(texts) + f"\npause が上限 {max_pauses} を超えた"
+
+    def _drive_nested(
+        self, ctx, step: dict, item: dict, res_file: Path, depth: int, inner: list[dict] | None, texts: list[str]
+    ) -> tuple[bool, dict | None]:
+        """item.command の駆動を回し、通れば件数から答えを結果ファイルへ書く。(成功, 内側の最後の結果) を返す。"""
+        ok, sub, sub_text = self.drive_loop(ctx, step, item["command"], depth + 1, inner)
+        if inner is not None and sub and isinstance(sub.get("metrics"), dict):
+            inner.append(sub["metrics"])
+        texts.append(sub_text)
+        if ok:
+            res_file.write_text(json.dumps(review_answer(sub.get("metrics"))))
+        return ok, sub
+
+    def _delegate_pause(self, ctx, step: dict, item: dict, kind: str, res_file: Path, cwd: str, texts: list[str]) -> str | None:
+        """pause を worker へ渡す。失敗したら理由を返す。"""
+        pf = item.get("prompt_file")
+        if not pf or not Path(pf).is_file():
+            return f"{kind} の prompt_file が無い"
+        wd = str(item.get("cwd") or cwd)  # 駆動が作業ディレクトリを示せば、それが worker の作業場所
+        prompt = f"作業: {kind}\n作業場所: {wd}\n\n{Path(pf).read_text()}\n\n終えたら結果ファイル {res_file} を書く。"
+        res = self.work.call_worker(ctx, step, prompt, wd, f"{step['id']}-{kind}-{len(ctx.state.cur['pauses'])}")
+        if not res.get("runtime"):  # runtime の worker の分はステップの終わりに帳簿から集める
             ctx.claude.record_usage("work", res)
-            texts.append(f"## {kind} の worker\n{res['text'][-TAIL:]}")
-            if not res_file.is_file():
-                return False, out, "\n".join(texts) + f"\n{kind} の worker が結果ファイルを書かなかった"
-        return False, None, "\n".join(texts) + f"\npause が上限 {step.get('max_pauses', 12)} を超えた"
+        texts.append(f"## {kind} の worker\n{res['text'][-TAIL:]}")
+        if not res_file.is_file():
+            return f"{kind} の worker が結果ファイルを書かなかった"
+        return None
 
     def execute(self, ctx, step: dict) -> tuple[bool, str]:
         started = time.time()
@@ -176,6 +242,7 @@ class DriveStep:
         # 入れ子の駆動（最終ゲートの item.command）の metrics を控える。外側の結果は内側の件数を持たない
         inner: list[dict] = []
         ok, out, text = self.drive_loop(ctx, step, cmd, inner=inner)
+        note_runtimes(ctx, step, started)
         if out or inner:
             ctx.state.cur["counts"] = dict((out or {}).get("metrics") or {})
             if inner:

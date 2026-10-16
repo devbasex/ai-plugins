@@ -55,6 +55,8 @@ def init_repo(path: Path) -> Path:
     git(path, "init", "-q")
     git(path, "config", "user.email", "t@example.com")
     git(path, "config", "user.name", "t")
+    # 通過記録の鍵（`<所有者>/<リポジトリ>`）を origin から引けるようにする（#725）
+    git(path, "remote", "add", "origin", "https://github.com/acme/demo.git")
     (path / "README.md").write_text("x\n", encoding="utf-8")
     git(path, "add", "-A")
     git(path, "commit", "-qm", "init")

@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
-"""bundle-close.py: mission-close.py の旧名。案内を stderr に出し、引数をそのまま新名へ渡す。
+"""bundle-close.py: 旧名の入口（#1407）。案内を stderr に 1 行出し、引数をそのまま新しい名前のスクリプトへ渡す。
 
-配布物の Skill が旧名で呼ぶ間だけ残す。結果と終了コードは mission-close.py のものである。
+渡し先は lib/legacy_names.py の表が決める。結果と終了コードは渡し先のものである。
 """
 
-import os
 import sys
 from pathlib import Path
 
-NEW = Path(__file__).resolve().parent / "mission-close.py"
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import legacy_names  # noqa: E402
 
 if __name__ == "__main__":
-    print("bundle-close.py は mission-close.py へ改名した。mission-close.py を呼ぶ", file=sys.stderr)
-    os.execv(sys.executable, [sys.executable, str(NEW), *sys.argv[1:]])
+    legacy_names.forward(__file__)

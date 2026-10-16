@@ -30,8 +30,11 @@ from typing import Any, NamedTuple
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
+import deps  # noqa: E402  外部パッケージの環境（投稿キューは耐久の記録を使う）
+import design_body  # noqa: E402
 import post_queue  # noqa: E402
 import statefile  # noqa: E402
+import tool_paths  # noqa: E402
 
 # レビューの本文の先頭行。**照合の鍵はラウンドと席までの前方一致である**ため、判定の
 # 語はこの行の末尾に置く（`post_queue.review_match_key`）。
@@ -269,16 +272,14 @@ def post_review(
     """
     findings = len(_findings(_read_json(payload_path)))
     item = review_posts(payload_path, result_path, repo, pr, round_no, seat, head_sha, is_own_pr, since=since)[0]
-    path = post_queue.enqueue(queue, item["kind"], repo, pr, item["fields"], actor=actor, extra=item["extra"])
-    seq = (post_queue.read_item(path) or {}).get("seq")
+    seq = post_queue.enqueue(queue, item["kind"], repo, pr, item["fields"], actor=actor, extra=item["extra"])["seq"]
     flushed = queue.flush()
 
     ours_failed = flushed.failed is not None and flushed.failed.get("seq") == seq
     if ours_failed and post_queue.rejected_by_position(flushed.failed):
         queue.drop(flushed.failed.get("seq"))
         item = review_posts(payload_path, result_path, repo, pr, round_no, seat, head_sha, is_own_pr, evacuate_all=True, since=since)[0]
-        path = post_queue.enqueue(queue, item["kind"], repo, pr, item["fields"], actor=actor, extra=item["extra"])
-        seq = (post_queue.read_item(path) or {}).get("seq")
+        seq = post_queue.enqueue(queue, item["kind"], repo, pr, item["fields"], actor=actor, extra=item["extra"])["seq"]
         flushed = queue.flush()
 
     done = _find(flushed.sent, seq) or _find(flushed.skipped, seq)
@@ -290,8 +291,8 @@ def post_review(
         posted_body=item["extra"]["body"] if done else 0,
         queued=0 if done else 1,
         findings=findings,
-        # 先客に止められた場合も、今回分は送れていない。上限だけは待てば流れる。
-        failed=bool(note_error) or bool(not done and flushed.failed is not None and not flushed.rate_limited),
+        # 先客に止められた場合も、今回分は送れていない。上限と一時的な失敗だけは待てば流れる。
+        failed=bool(note_error) or bool(not done and flushed.failed is not None and not flushed.waitable),
         posted_as=item["extra"]["posted_as"],
         intent=item["extra"]["intent"],
         detail=note_error or str((flushed.failed or {}).get("last_error") or ""),
@@ -423,10 +424,8 @@ def post_fix(
     """返信・決着・まとめを待ち行列へ積んで流す。"""
     seqs: dict[int, str] = {}
     for item in fix_posts(result_path, repo, pr, round_no):
-        path = post_queue.enqueue(queue, item["kind"], repo, pr, item["fields"], actor=actor, extra=item["extra"])
-        seq = (post_queue.read_item(path) or {}).get("seq")
-        if seq is not None:
-            seqs[int(seq)] = item["kind"]
+        seq = post_queue.enqueue(queue, item["kind"], repo, pr, item["fields"], actor=actor, extra=item["extra"])["seq"]
+        seqs[int(seq)] = item["kind"]
     flushed = queue.flush()
 
     done = {int(i["seq"]): i for i in (flushed.sent + flushed.skipped) if i.get("seq") is not None}
@@ -436,7 +435,7 @@ def post_fix(
             response = done[seq].get("response")
             if isinstance(response, dict):
                 summary_url = response.get("html_url") or response.get("url")
-    failed = flushed.failed is not None and not flushed.rate_limited
+    failed = flushed.failed is not None and not flushed.waitable
     ours_dropped = [i for i in flushed.dropped if i.get("seq") is not None and int(i["seq"]) in seqs]
     detail = str((flushed.failed or {}).get("last_error") or "")
     if not detail and ours_dropped:
@@ -456,12 +455,13 @@ def post_fix(
 
 
 class PushResult(NamedTuple):
-    """送信の結果と、報告されたコミットが送り先に載っているか。"""
+    """送信の結果と、報告されたコミットが送り先に載っているか。`sent` は取り直した送り先の先頭（#1644）。"""
 
     ok: bool
     pushed: bool
     contains: bool
     detail: str
+    sent: str = ""
 
 
 # 認証の退避の値は共通層 1 か所が持つ（`git-credential.sh`）。ここへ写さない。
@@ -495,6 +495,8 @@ def push_fix(worktree: pathlib.Path | str, head_branch: str, fix_commit: str | N
         return PushResult(True, False, True, "コミットが無いため送らない")
     if not (str(worktree or "") and head_branch):
         return PushResult(False, False, False, "送る先（作業ツリーとブランチ）が分からない")
+    if blocked := tool_paths.before_push(worktree, head_branch, lambda *a: _git(worktree, *a)):  # #1436
+        return PushResult(False, False, False, blocked)
     pushed = _git(worktree, "push", "origin", f"HEAD:{head_branch}")
     if pushed.returncode != 0:
         return PushResult(False, False, False, (pushed.stderr or pushed.stdout or "").strip()[:300])
@@ -504,7 +506,8 @@ def push_fix(worktree: pathlib.Path | str, head_branch: str, fix_commit: str | N
     contains = _git(worktree, "merge-base", "--is-ancestor", fix_commit, "FETCH_HEAD")
     if contains.returncode != 0:
         return PushResult(False, True, False, f"報告されたコミット {fix_commit} が origin/{head_branch} に載っていない")
-    return PushResult(True, True, True, "")
+    sent = _git(worktree, "rev-parse", "FETCH_HEAD")  # 読めなければ報告されたコミットを待つ
+    return PushResult(True, True, True, "", sent.stdout.strip() if sent.returncode == 0 else str(fix_commit))
 
 
 # ---------------- 部分命令 ----------------
@@ -566,6 +569,10 @@ def cmd_fix(args: argparse.Namespace) -> int:
     if not pushed.ok:
         print(pushed.detail, file=sys.stderr)
         return 1
+    if unsynced := design_body.sync_after_push(repo, int(args.pr), head, pushed.sent):
+        # 本文が古いまま返信しない。打ち直すと揃えからやり直す。
+        print(f"本文の「決めたこと」を揃えられないため止めます。打ち直してください ({unsynced})", file=sys.stderr)
+        return 1
 
     actor = args.actor or _sh("gh", "api", "user", "-q", ".login") or None
     outcome = post_fix(queue_for(worktree), result, repo, int(args.pr), round_no=args.round, actor=actor)
@@ -593,6 +600,7 @@ def main() -> None:
     f.add_argument("--actor")
     f.set_defaults(func=cmd_fix)
     args = p.parse_args()
+    deps.require("durable")
     sys.exit(args.func(args))
 
 
