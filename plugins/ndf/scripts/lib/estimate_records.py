@@ -6,7 +6,7 @@
 
 どちらの記録も追記だけで、既存の行を書き換えない（I3・I4）。実績の記録は 4 種類の行（`run_start`・`step`・
 `run_end`・`human`）を `kind` で分ける。終わりの行の無い実行は、実行中と取り込んだ実行を除いて「中断」と読む。
-行の形は設計の「データ構造」が正本である。使う側は `deps.require("schema")` を先に呼ぶ。
+行の形は確定仕様 `docs/specifications/ndf-estimate.md` の「データ・設定」が正本である。使う側は `deps.require("schema")` を先に呼ぶ。
 """
 
 from __future__ import annotations
@@ -406,7 +406,7 @@ class IssueActual:
 def issue_actuals(
     rows: list[dict], done: str, since: str | None = None, alive: Callable[[Run], bool] | None = None
 ) -> dict[int, IssueActual]:
-    """課題ごとの実績の合計（設計の「課題ごとの実績の合計」）。`since` があれば、その時刻より後に始まった実行だけを足す。
+    """課題ごとの実績の合計（確定仕様の「課題ごとの実績の合計」）。`since` があれば、その時刻より後に始まった実行だけを足す。
 
     A は完了条件のフェーズまでの実行（失敗・中断・取り消し・再試行を含む）の `step` の秒の和で、2 つ以上の課題を
     指す実行は課題の数で等分する。L は最初の実行の始まりから完了条件のフェーズの最初の `成功` の終わりまで。
