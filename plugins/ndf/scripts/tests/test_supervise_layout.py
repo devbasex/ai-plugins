@@ -30,6 +30,7 @@ SUBCOMMANDS = [
     "design-results",
     "note",
     "sync-check",
+    "format",
     "sync-title",
 ]
 NEW_KINDS = ["impl", "fix", "check", "release", "sprint", "close"]

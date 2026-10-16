@@ -257,7 +257,7 @@ MATCH = ("design-tests", "design-specs", "design-match", "pr")
 
 def test_1909_1_the_route_of_1833_reaches_merge(plans, tmp_path):
     route = _route(
-        "impl", "base-sync", "sync", "test-limited", *MATCH, ("test-all", 1), ("judge", "fix"), "fix",
+        "impl", "base-sync", "sync", "test-limited", *MATCH, ("test-all", 1), ("judge", "fix"), "fix", "sync",
         "test-limited", *MATCH, "test-all", ("doc-lint", 1), "fix-doc", "doc-lint", "ready", "merge-gate", "merge",
     )  # fmt: skip
     ran, text, _ = drive(tmp_path, plans["sprint/5-impl-16"], scripted(route))
@@ -265,13 +265,13 @@ def test_1909_1_the_route_of_1833_reaches_merge(plans, tmp_path):
 
 
 def test_1909_2_the_route_of_1702_reaches_merge(plans, tmp_path):
-    fix = (("test-limited", 1), ("judge", "fix"), "fix")
+    fix = (("test-limited", 1), ("judge", "fix"), "fix", "sync")  # 修正の後は範囲テストの前のステップの先頭へ戻る（#1651）
     route = _route(
         "impl", "base-sync", "sync", *fix, *fix, *fix, "test-limited", *MATCH, "test-all", ("doc-lint", 1), "fix-doc", "doc-lint",
         "ready", "merge-gate", "merge",
     )  # fmt: skip
     ran, text, _ = drive(tmp_path, plans["sprint/5-impl-16"], scripted(route))
-    assert len(ran) == 24 and ran == [r for r, _ in route] and "結果: 完了" in text
+    assert len(ran) == 27 and ran == [r for r, _ in route] and "結果: 完了" in text
 
 
 def test_1909_3_the_route_of_m1910_reaches_record(plans, tmp_path):
