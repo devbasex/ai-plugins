@@ -2,7 +2,8 @@
 
 実行の始まり（`run_start`）・ステップの終わり（`step`）・実行の終わり（`run_end`）を 1 行ずつ追記する。
 SIGINT・SIGTERM では `run_end` を「取り消し」で書いてから、元のシグナルの扱いへ渡す。終わりの行が無い実行は
-読む側が中断として数える。書けなくても実行の結果は変えず、`progress.jsonl` に `estimate_record` の行を残す。
+読む側が中断として数える。取り消しの後に耐久ワークフローを再開すると、同じ実行へ残りを書き足し、最後の `run_end` が
+終わり方になる。書けなくても実行の結果は変えず、`progress.jsonl` に `estimate_record` の行を残す。
 """
 
 from __future__ import annotations
@@ -86,6 +87,7 @@ class ActualsLog:
         rid = self._current().get("run")
         if not rid:
             return
+        _OPEN.add(self)  # 取り消しの後の再開では start が再生されて呼ばれないため、ここで取り消しの対象へ戻す
         sid = str(cur.get("id") or "")
         retry = self.retries.get(sid, 0)
         if (cur.get("slow") or {}).get("act") == "retry":
@@ -108,7 +110,9 @@ class ActualsLog:
         )
 
     def end(self, result: str) -> None:
-        """実行の終わり。結果（完了・関門・止まった ほか）か「取り消し」を終わり方へ写す。"""
+        """実行の終わり。結果（完了・関門・止まった ほか）か「取り消し」を終わり方へ写す。
+        「取り消し」では `RUN_FILE` を消さない。耐久ワークフローを再開すると `prepare_step` は記録から再生されて `start` が
+        呼ばれないため、残りのステップと終わりを同じ実行へ続けて書く（読む側は最後の `run_end` を採る）。"""
         cur = self._current()
         _OPEN.discard(self)
         if not cur.get("run"):
@@ -123,7 +127,8 @@ class ActualsLog:
                 "config": self.config(),
             }
         )
-        (self.state.dir / RUN_FILE).unlink(missing_ok=True)
+        if outcome != "取り消し":
+            (self.state.dir / RUN_FILE).unlink(missing_ok=True)
 
     def config(self) -> dict:
         """実行の構成。モデルは流したステップの記録から、ハーネスは work・drive のステップの起動先から取る。

@@ -192,7 +192,12 @@ def _build_board(a, gh, rows, order, scores, cfg, sd, ctx, notes):
     previous = {r["title"]: tab for r in rows if (tab := R.parse_rank_table(r.get("description") or "")) is not None}
     ests, excluded = estimates(issues, scores, ctx.read_state(sd / "estimates.json") or {}, previous, cfg)
     jsonio.write_atomic(sd / "estimates.json", {str(n): e.to_json() for n, e in ests.items()}, indent=1)
-    sizes = estimate_overlay(git_root(a.root), list(issues), cfg.scale)  # Size を見積もりの記録の A から決める（#1856）
+    import estimate_records as er  # lib は upkeep.py が sys.path へ載せる
+
+    try:
+        sizes = estimate_overlay(git_root(a.root), list(issues), cfg.scale)  # Size を見積もりの記録の A から決める（#1856）
+    except er.DeclError as e:
+        raise StepError(f"見積もりの宣言の誤り: {e}", EXIT_UNREADABLE)
     ests = apply_overlay(ests, sizes)
     notes.extend(
         f"--scores の #{n} は open でないため除いた" for n in (i.get("number") for i in scores.get("issues", [])) if n not in issues

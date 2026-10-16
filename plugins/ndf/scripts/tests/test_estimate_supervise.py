@@ -54,6 +54,23 @@ def test_cancel_writes_cancelled_and_passes_on(tmp_path, monkeypatch):
     assert _rows()[-1]["outcome"] == "取り消し"
 
 
+def test_resume_after_cancel_continues_the_same_run(tmp_path):
+    state = tmp_path / "state"
+    eng = engine.Engine(_plan(tmp_path, "true"), state, plan_path=str(tmp_path / "p.json"))
+    eng.actuals.start(None)
+    actuals._cancel_handler(signal.SIGTERM, lambda s, f: None)(signal.SIGTERM, None)
+    # 再開: 耐久ワークフローは prepare_step を再生し、start を呼ばずに残りのステップを流す
+    again = engine.Engine(_plan(tmp_path, "true"), state, plan_path=str(tmp_path / "p.json"))
+    again.actuals.step({"id": "a", "type": "run", "exit": 0, "seconds": 1.0})
+    again.actuals.end("完了")
+    rows = _rows()
+    assert [r["kind"] for r in rows] == ["run_start", "run_end", "step", "run_end"]
+    assert len({r["run"] for r in rows}) == 1
+    table = er.run_table(rows, alive=lambda r: False)
+    assert [(r.outcome, len(r.steps)) for r in table.values()] == [("成功", 1)]
+    assert not (state / actuals.RUN_FILE).exists()
+
+
 def test_unwritable_records_do_not_change_result(tmp_path, monkeypatch):
     blocker = tmp_path / "f"
     blocker.write_text("x")
