@@ -96,6 +96,6 @@ amend で修正のコミットへ混ぜる形は採らない。`fix_commit` の 
 
 ### 決定 12: ほかの 2 主題と同じ関数を書き換えないため、`plan_to_merge` で触るのは `pre_test_steps` の呼び出しと 2 つの `next` だけにする
 
-この主題のステップは新しい関数 `pre_test_steps(a)` が組み、`plan_to_merge` では `sync` を組む行をその呼び出しへ置き換え、`head[-1]["next"]` と `fix` の `next` をその先頭へ向ける。`上限` の値（#1909）、`test-limited` から後のステップと `judge_step`（#1917 #2003）、`flow.py`（#1909 #1676）には触らない。#2003 の起点の取り込みは、`head` の後に置いて `next` を `pre_test_steps` の先頭へ向ければ、この主題と同じ行を書き換えずに済む。
+この主題のステップは新しい関数 `pre_test_steps(a)` が組み、`plan_to_merge` では `sync` を組む行をその呼び出しへ置き換え、#1917 の `base_sync_steps` の `nxt` と `fix` の `next` をその先頭へ向ける（`head[-1]["next"]` を `base-sync` へ向けるのは #1917。並びは `impl → base-sync → format → sync → lint-limited → test-limited`）。`上限` の値（#1909）、`test-limited` から後のステップと `judge_step`（#1917 #2003）、`flow.py`（#1909 #1676）には触らない。#1917 より先にこの主題を実装に入れるときだけ `head[-1]["next"]` を先頭へ向け、#1917 がそれを `base-sync` へ付け替える。
 
 根拠: Value 6 / Value 7（MVV 版 2）

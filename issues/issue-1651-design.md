@@ -143,6 +143,38 @@ graph LR
   MF --> RP
 ```
 
+### システム構成図（文脈・配置）
+
+```mermaid
+graph LR
+  C[conductor] -->|new・design-results・run| SV[supervise.py<br/>手元のプロセス]
+  SV -->|pr list・pr view| GH[(GitHub)]
+  SV -->|fetch・ls-tree・show・commit| WT[(worktree と origin)]
+  SV -->|format の宣言を打つ| FX[プロジェクトの整形のコマンド]
+  CR[cross-review merge-fix] -->|push_fix| WT
+  CR --> FX
+```
+
+配置は今と同じで、プロセスも置き場も増やさない。外の系は GitHub と、プロジェクトが宣言した整形のコマンドである。
+
+### パッケージ・モジュール構成
+
+```text
+plugins/ndf/scripts/
+├── supervise.py                  # format の副命令の受け口
+├── test-run.py                   # scope --only-kind
+├── lib/
+│   ├── formatting.py             # 新規: 整形の宣言を読む・当ててコミットする
+│   ├── result_posts.py           # push_fix の前に整形
+│   └── design_results.py         # Row.doc
+└── supervise_lib/
+    ├── templates.py              # IMPL_RULES・impl_prompt・pre_test_steps
+    ├── design_stage.py           # _retrying・ReadFailed・kept_lines
+    ├── decl.py / commands.py / paths.py   # 宣言の写し・cmd_format・preset
+    └── plan.py                   # docstring だけ
+.ndf/supervise.json               # format の宣言（ai-plugins）
+```
+
 ## 構造
 
 ```mermaid
@@ -254,7 +286,8 @@ ai-plugins の宣言は `[{"name": "lint-fix", "command": "bash scripts/check-li
 
 ```mermaid
 graph LR
-  impl --> format
+  impl --> bs["base-sync（#1917）"]
+  bs --> format
   format -->|0| sync
   format -->|1| fixf["fix-format"]
   fixf --> format
@@ -272,7 +305,7 @@ graph LR
 
 宣言ごとに置くかを決める: `format` と `fix-format` は `format` の宣言、`sync` と `fix-sync` は `sync_checks`、`lint-limited` と `fix-lint` は範囲の雛形を持つ `kind: lint` の suite があり、かつ宣言から解いた戦略（`test_strategy.resolve`）が round-only でないときだけ置く（round-only は範囲に当てず全 suite を打つので、範囲の静的解析を先に当てる意味が無い。`test-limited` は今のまま）。どれも無ければ `impl → test-limited` で今と同じ（I7）。`format` と `lint-limited` の終了コード 2 は止まる。図の `fix-format` / `fix-lint` / `fix` から `format` への矢印は「並びの先頭」を指し、`format` を置かないプランでは置いたステップのうち最も前のもの（`sync`、無ければ `lint-limited`）へ向く。`lint-limited` を置くときは、`test-limited` は `--only-kind test` でテストの suite だけを打つ。
 
-`pre_test_steps(a)` はこの並びの `format` から `fix-lint` までを、置くステップだけで返し、`fix-format` / `fix-lint` の `next` を返す並びの先頭へ向けて組む。`plan_to_merge` は `head` の `next` と `fix` の `next` をその先頭（並びが空なら `test-limited`）へ向け、並びに `lint-limited` があれば `test-limited` の `cmd` に `--only-kind test` を足す。#2003 が起点の取り込みを `head` の後に置くときは、取り込みの `next` を同じ先頭へ向ける。
+`pre_test_steps(a)` はこの並びの `format` から `fix-lint` までを、置くステップだけで返し、`fix-format` / `fix-lint` の `next` を返す並びの先頭へ向けて組む。`plan_to_merge` は起点の取り込み（#1917 の `base-sync`）の `next` と `fix` の `next` をその先頭（並びが空なら `test-limited`）へ向け、並びに `lint-limited` があれば `test-limited` の `cmd` に `--only-kind test` を足す。**並びは `impl → base-sync → format → sync → lint-limited → test-limited` に揃える**（#1917 の「雛形ごとの置き場所」と同じ）。`head[-1]["next"]` を `base-sync` へ向けるのは #1917 で、この主題は `pre_test_steps(a)` の先頭を `base_sync_steps` の `nxt` に渡す。#1917 より先にこの主題を実装に入れるときだけ、`head[-1]["next"]` を先頭へ向け、#1917 がそれを `base-sync` へ付け替える。図の `fix` から `format` への矢印は取り込みを通らない（取り込みへ戻るのは `merge` の衝突と `fix-base` だけ）。
 
 ### 「設計の結果」の書き直し
 
@@ -379,11 +412,12 @@ sequenceDiagram
 
 | ファイル | この主題が触る | 触らない（受け持ち） |
 | --- | --- | --- |
-| `supervise_lib/templates.py` | `IMPL_RULES`・`impl_prompt`・`plan_impl`（`prompt` を組む引数だけ）・`pre_test_steps`（新規）。`plan_to_merge` は `sync` のステップを組む行を `pre_test_steps` の呼び出しへ置き換える行と、`head[-1]["next"]` と `fix` の `next` を `pre_test_steps` の先頭へ向ける行と、`lint-limited` があるとき `test-limited` の `cmd` へ `--only-kind test` を足す行だけ | `plan_to_merge` の `上限` と `test-limited` から後のステップ（#1909・#1917 #2003）、`judge_step`・`RULE_IMPL`・`RULE_CHECK`・`FIX_PROMPT`・`plan_check`・`plan_check_since`（#1917 #2003） |
+| `supervise_lib/templates.py` | `IMPL_RULES`・`impl_prompt`・`plan_impl`（`prompt` を組む引数だけ）・`pre_test_steps`（新規）。`plan_to_merge` は `sync` のステップを組む行を `pre_test_steps` の呼び出しへ置き換える行と、`base_sync_steps` の `nxt`（#1917 の取り込みの後の行き先）と `fix` の `next` を `pre_test_steps` の先頭へ向ける行と、`lint-limited` があるとき `test-limited` の `cmd` へ `--only-kind test` を足す行だけ | `plan_to_merge` の `上限` と `test-limited` から後のステップ（#1909・#1917 #2003）、`head[-1]["next"]` と `base_sync_steps` の挿入（#1917）、`judge_step`・`RULE_IMPL`・`RULE_CHECK`・`FIX_PROMPT`・`plan_check`・`plan_check_since`（#1917 #2003） |
 | `supervise_lib/flow.py` | 触らない | `plan_workflow`（#1909 #1676） |
+| `supervise_lib/plan.py` | 冒頭の docstring だけ（プランの鍵 `設計文書`・`supervise.json` の `format`・run の preset `format` の行を足す）。関数は触らない | `on_exit_error` と docstring の `"上限"` の行（#1909） |
 | `supervise_lib/design_stage.py` | `merged_design_pr`・`changed_design_docs`・`read_results`・`rewrite`・`cmd_design_results`・`_retrying`（新規）・`kept_lines`（新規）・`ReadFailed`（新規） | `impl_plans`（変えない） |
 
-#2003 の起点の取り込みは `head` の後に置き、その `next` を `pre_test_steps(a)` の先頭（空なら `test-limited`）へ向ける。経路が `format` と `lint-limited` の 2 本ぶん長くなる分は、#1909 の「上限を経路から決める」形が数える。この主題は `上限` の値を変えない。
+#1917 #2003 の起点の取り込みは `head` の後に置き、その `next` を `pre_test_steps(a)` の先頭（空なら `test-limited`）へ向ける（並びは「処理の流れ」）。経路が `format` と `lint-limited` の 2 本ぶん長くなる分と `fix-format`・`fix-lint` の修正のループは、#1909 の「上限を経路から決める」形が数える。この主題は `上限` の値を変えない。
 
 ## 未確認のまま残ること
 
