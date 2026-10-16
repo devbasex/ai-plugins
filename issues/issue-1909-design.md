@@ -22,7 +22,7 @@
 | #1676・スプリント m1847: 設計のプランが用語の修正を通って上限 12 を超え、`--from gate` の judge が「（入力なし）」で stop を返した | 実測 | 設計のプランの上限と、再開の入力の両方が足りない |
 | devbasex/devbase#381（#1623）・volareinc/carmo-cdk PR #454（#1496）: 設計の worker と、4 ラウンドで収束した cross-review が「出力なし」で打ち切られた | 実測 | 見張りが出力の行とコミットだけで進みを見ている |
 | 2026-10-16 の実測（claude 2.1.301）: `--output-format json` の claude -p は標準エラーへ 0 バイトしか書かず、`--session-id` で決めたセッションの記録（`<CLAUDE_CONFIG_DIR>/projects/<作業場所>/<id>.jsonl`）が 4 秒目から 24 秒目まで 247,156 → 367,366 バイトと伸び続けた。結果の `session_id` は渡した値と同じだった | 実測 | 要求・設計の worker の進みは、セッションの記録の大きさで見られる |
-| 2026-10-16 の実測（gh 2.101.0）: `gh pr view 2024 --json comments,reviews,commits --jq '[(.comments\|length),(.reviews\|length),(.commits\|length)]'` が 0.84 秒で `[6,21,23]` を返し、無い PR は終了コード 1 で落ちた | 実測 | cross-review の投稿とコミットの伸びは、確認 1 回につき gh 1 回で見られる |
+| 2026-10-16 の実測（gh 2.101.0）: `gh pr view 2024 --json comments,reviews,commits --jq '[(.comments\|length),(.reviews\|length),(.commits\|length)]'` が 0.84 秒で `[6,21,23]` を返し、無い PR は終了コード 1 で落ちた。`--jq '[.comments[].createdAt, .reviews[].submittedAt, .commits[].committedDate] \| max'` は 0.79 秒で最も新しい時刻（`2026-10-16T00:35:40Z`）を返した | 実測 | cross-review の投稿とコミットの伸びは、遅れたステップの確認 1 回につき gh 1 回で、時刻を比べて見られる。ステップの開始では読まなくてよい |
 
 要求と受け入れ条件は #1909 の本文にある（コピーは `issues/issue-1909-requirements.md`）。この文書は「どう作るか」だけを扱う。決定の記録は [issue-1909-design-decisions.md](issue-1909-design-decisions.md) に分けた。
 
@@ -82,8 +82,10 @@
 | 失敗の遷移 | ステップが落ちたときの行き先。`on_fail`・`on_section_missing`・`on_exit` の 0 以外の終了コードの行き先 | 追加（`ndf-workflow`） |
 | ループを通らない最長の経路 | プランの並びで後ろのステップへ行く遷移だけをたどった、最も長い経路。数はステップの数で、流し始めるステップを含む | 追加（`ndf-workflow`） |
 | worker のセッションの記録 | 会話を残す claude -p（Skill を回す work のステップ）が `<CLAUDE_CONFIG_DIR>/projects/` の下へ書き足していく 1 本の JSONL。遅れの見張りが大きさの伸びを進みに数える | 追加（`ndf-workflow`） |
-| ステップの上限 | 要求の意味のまま。雛形が書く値は遷移から求める | 変えない |
-| 修正のループ | 要求の意味のまま。数え方は「上限の計算」の節 | 変えない |
+| ステップの上限 | 要求の意味のまま。雛形が書く値は遷移から求める | 追加（`ndf-workflow`） |
+| 修正のループ | 要求の意味のまま。数え方は「上限の計算」の節 | 追加（`ndf-workflow`） |
+| 遅れの見張り | ステップが想定の時間を超えたときに一次の調査を流し、待つ・打ち切る・再試行するを決める仕組み（`slow`） | 追加（`ndf-workflow`） |
+| 前の実行 | `run --from` で再開したとき、今の実行より前に同じプランを流した実行。`--from` を付けない最後の実行の始まりより後の記録を指す | 追加（`ndf-workflow`） |
 
 ## 機能一覧
 
@@ -155,7 +157,7 @@ classDiagram
     }
     class StepWatch {
         +session_size: int
-        +pr_marks: list
+        +pr_checked: float
     }
     Engine ..> limits: setup と next_of
     Engine --> RunState
@@ -256,7 +258,7 @@ graph TD
 ### 入力を組む（judge と work）
 
 1. `inputs` の各ステップについて、今の実行の結果（`RunState.results`）があればそれを使う
-2. 無ければ `RunState.prior_results()` を引く。進捗ログを 1 回だけ読み、`--from` を付けない最後の `run` の行より後の `step` の行のうち、そのステップの最後の行の `exit` と、`out` のファイルの末尾（`TAIL` 文字）を返す
+2. 無ければ `RunState.prior_results()` を引く。進捗ログを 1 回だけ読み、`--from` を付けない最後の `run` の行より後の `step` の行のうち、そのステップの最後の行の `exit` と、`out` のファイルの末尾（`TAIL` 文字）を返す。読むのは実行の始まり（最初のステップを流す前）の 1 回で、結果は覚えておき、後から `.out` を読み直さない
 3. どちらにも無ければ、名前と理由の 1 行を書く
 
 `out` の鍵の無い行（この変更より前の記録）は、出力の本文を読まずに `exit` と `summary` だけを渡す。
@@ -277,7 +279,7 @@ graph TD
 ```
 
 - セッションの記録の大きさ: `RunState.session` から `<設定の置き場>/projects/*/<id>.jsonl` を探して大きさを読む。`RunState.session` は、`ClaudeRunner.call` が起動の前に入れる id と設定の置き場である。見つからなければ 0 として、ほかの印だけで判定する。設定の置き場は子へ渡す環境の `CLAUDE_CONFIG_DIR`、無ければ `~/.claude`
-- PR の投稿とコミットの数: `gh pr view <PR> --json comments,reviews,commits` の 3 つの長さ。`start_watch` で 1 回、確認のたびに 1 回読む。PR がまだ無い・gh が落ちたときは数を比べず、出力の大きさだけで判定する
+- PR の投稿とコミットの伸び: `start_watch` では gh を呼ばず、`StepWatch.pr_checked` にステップの開始時刻（`StepWatch.started`）を入れるだけにする。遅れたステップの一次の調査のときだけ `gh pr view <PR> --json comments,reviews,commits --jq '[.comments[].createdAt, .reviews[].submittedAt, .commits[].committedDate] | max'` を 1 回読み、最も新しい時刻が `pr_checked` より後なら伸びたとみなす。読んだ後に `pr_checked` を今の確認の時刻へ進める。遅れに達しないステップでは gh を 1 回も呼ばない。PR がまだ無い・gh が落ちたときは時刻を比べず、出力の大きさだけで判定する
 
 ## 非機能の実現方式
 
@@ -305,9 +307,9 @@ graph TD
 | 1909-2 | 同じプランで #1702 の経路（範囲テストの修正 3 回と doc-lint の修正 1 回）が merge まで通る | 同上 |
 | 1909-3 | スプリントの検査のプランで m1910 の経路が record まで通る | 上限を 12 に戻すと落ちる |
 | 1676-1 | スプリントの設計のプランで、用語の修正を通る経路に design の再試行 1 回を足した経路が gate の judge まで届く | 上限を 12 に戻すか、再試行を数えると落ちる |
-| 1676-2・I7 | 前の実行で review が approved のまま `--from gate` で再開すると、gate の judge の入力に review の結果（`前の実行` の印つき）が載る。同じステップが前の実行で 2 回流れていれば後の方が載る | `prior_results` を引かないと「まだ流れていない」になって落ちる |
+| 1676-2・I7 | 前の実行で review が approved のまま `--from gate` で再開すると、gate の judge の入力に review の結果（`前の実行` の印つき）が載る。同じステップが前の実行で 2 回流れていれば後の方が載る。今の実行が前の実行と同じ名前の `.out`（例: `01-gate.out`）を書き直した後に組む入力でも、前の実行の結果は実行の始まりに読んだ内容のまま載る | `prior_results` を引かないと「まだ流れていない」になって落ちる。入力を組むたびに `.out` を読み直すと、書き直した後の入力で落ちる |
 | 1676-3 | 前の実行にも無い入力は、名前と「前の実行の記録にも無い」が載り、「（入力なし）」の 1 語にならない | 無い入力を飛ばすと落ちる |
-| 1676-4・I8 | `--from` を付けない実行の前の結果は渡らない。今の実行で流れたステップは今の結果が載る | 切り方を「最初の行から」にする・今の結果より前の結果を先にすると落ちる |
+| 1676-4・I8 | `--from` を付けない実行の前の結果は渡らない。その実行は前の `.out` を消さずに始まるが、続く `--from` の再開でも、その実行の始まりより前の `.out` は渡らない。今の実行で流れたステップは今の結果が載る | 切り方を「最初の行から」にする・今の結果より前の結果を先にすると落ちる |
 | 1623-1・I9 | 要求・設計の work が、コミットも worker の行も足さずにセッションの記録を伸ばしている間、`slow` の行の `probe.class` が `progress` で、打ち切らない | セッションの記録を見ないと `silent` になって落ちる |
 | 1623-2・I10 | セッションの記録も伸びない work は判定へ回る | 記録が見つからないのを「伸びた」と扱うと落ちる |
 | 1623-3・I6 | 遅れの再試行が 2 回起きた設計のプラン（用語の修正を含む最長の経路）が gate まで届き、`max_retry` を超えた再試行は今と同じく止まる | 再試行を数えると上限で止まって落ちる |
