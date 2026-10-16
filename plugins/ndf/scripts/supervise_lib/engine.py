@@ -153,6 +153,7 @@ class Engine:
 
     def setup(self, start: str | None) -> tuple[str, str] | None:
         """ステップを流す前の、ファイルを書かない準備（打ち直しでも毎回流す）。流さないなら (結果, 理由)。"""
+        self.ctx.resumed = bool(start)  # 入力に前の実行の結果を渡す（#1676）
         if start and not self.plan.get("Pull Request"):
             self._restore_pr()
         try:
