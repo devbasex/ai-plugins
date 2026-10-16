@@ -40,7 +40,7 @@
 
 範囲テストは既に `kind: lint` の suite を変更したファイルへ当てている（m1693 で落ちたのはこれである）。同じ suite を、テストの suite を打たずに先に当てるステップ（`lint-limited`）を置く。新しい宣言は要らず、ai-plugins では lint と script-structure がそのまま当たる。範囲に入るファイルが無ければ通る。
 
-`lint-limited` を置くプランでは、`test-limited` を `--only-kind test` で打ち、同じ suite を同じ範囲へ 2 度当てない。種別の絞り込みは `--only-kind` の 1 つの口で受け、`lint` と `test` で口を分けない。
+`lint-limited` を置くプランでは、`test-limited` を `--only-kind test` で打ち、同じ suite を同じ範囲へ 2 度当てない。種別の絞り込みは `--only-kind` の 1 つの口で受け、`lint` と `test` で口を分けない。絞った後も当てる範囲は今の `scope` のまま（テストは `--paths`、静的解析は `--changed`）とし、実装のファイルだけを変えたときに渡したテストが落ちないようにする。静的解析の suite だけを宣言したプロジェクトでは `--only-kind test` が打つものを持たないので `ok` で通し、通った `lint-limited` の後で judge へ落とさない。戦略が round-only の宣言では範囲に当てる口が無いため `lint-limited` を置かない。
 
 `sync_checks` に script-structure を足す形は採らない。全体に当たり、変更起因かを分けられない。新しい宣言のキーを足す形も、同じコマンドを 2 か所に書くことになる。
 

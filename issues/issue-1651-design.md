@@ -210,7 +210,7 @@ ai-plugins の宣言は `[{"name": "lint-fix", "command": "bash scripts/check-li
 
 ### `test-run.py scope --only-kind lint` / `--only-kind test`
 
-`--only-kind` に渡した種別（suite の `kind`。`lint` か `test`）の suite だけを `--changed`（無ければ起点との merge-base からの差分）へ当てる。範囲に入るファイルが無ければ、`--only-kind lint` は `ok`・終了コード 0、`--only-kind test` と付けないときは今のまま 2。ほかの終了コードは `scope` と同じ。
+`--only-kind` に渡した種別（suite の `kind`。`lint` か `test`）の suite だけを打つ。当てる範囲は種別を絞った後も今の `scope` と同じで、テストの suite は `--paths`、静的解析の suite は `--changed`（無ければ起点との merge-base からの差分と追跡していない新しいファイル）。範囲に入るファイルが無ければ、`--only-kind lint` は `ok`・終了コード 0、`--only-kind test` と付けないときは今のまま 2。ただし `--only-kind test` は、戦略の範囲の雛形を持つ `kind: test` の suite が 1 つも無い（静的解析の suite だけを宣言した）とき、打たずに `ok`・終了コード 0 を返す（静的解析は前の `lint-limited` で通っている）。戦略が round-only のときは範囲に当てず、`round_runs()` を渡した種別で絞って打つ（その種別が無ければ同じく `ok`・0）。ほかの終了コードは `scope` と同じ。
 
 ### 実装のプランの形
 
@@ -222,7 +222,7 @@ ai-plugins の宣言は `[{"name": "lint-fix", "command": "bash scripts/check-li
 `format` のステップ: `{"type": "run", "preset": "format", "stage": "実装", "on_exit": {"2": "stop"}, "on_fail": "fix-format"}`。
 `lint-limited` のステップ: `{"type": "run", "stage": "完了判定", "cmd": "<scope_cmd> --only-kind lint", "on_exit": {"2": "stop"}, "on_fail": "fix-lint"}`。
 `fix-format` / `fix-lint` は `FIX_PROMPT` の修正の worker で、`next` は `pre_test_steps(a)` が返す並びの先頭（`format`。`format` の宣言が無ければ `sync`、それも無ければ `lint-limited`）。`fix-lint` は `lint-limited` を置くときだけ置くので、先頭は必ず実在する。
-`lint-limited` を置くプランでは、`test-limited` の `cmd` を `<scope_cmd> --only-kind test` にする（静的解析の suite を同じ範囲へ 2 度当てない）。`lint-limited` を置かないときは今のまま `<scope_cmd>`。
+`lint-limited` を置くプランでは、`test-limited` の `cmd` を `<scope_cmd> --only-kind test` にする（静的解析の suite を同じ範囲へ 2 度当てない）。`lint-limited` を置かないときは今のまま `<scope_cmd>`。静的解析の suite だけを宣言したプロジェクトでは `--only-kind test` が `ok`・0 を返すので、`lint-limited` が通れば `test-limited` を経て `pr` へ進む（judge へ落ちない）。
 
 ### 実装の指示（`impl` の `prompt`）
 
@@ -270,7 +270,7 @@ graph LR
   tl -->|0| pr
 ```
 
-宣言ごとに置くかを決める: `format` と `fix-format` は `format` の宣言、`sync` と `fix-sync` は `sync_checks`、`lint-limited` と `fix-lint` は範囲の雛形を持つ `kind: lint` の suite があるときだけ置く。どれも無ければ `impl → test-limited` で今と同じ（I7）。`format` と `lint-limited` の終了コード 2 は止まる。図の `fix-format` / `fix-lint` / `fix` から `format` への矢印は「並びの先頭」を指し、`format` を置かないプランでは置いたステップのうち最も前のもの（`sync`、無ければ `lint-limited`）へ向く。`lint-limited` を置くときは、`test-limited` は `--only-kind test` でテストの suite だけを打つ。
+宣言ごとに置くかを決める: `format` と `fix-format` は `format` の宣言、`sync` と `fix-sync` は `sync_checks`、`lint-limited` と `fix-lint` は範囲の雛形を持つ `kind: lint` の suite があり、かつ宣言から解いた戦略（`test_strategy.resolve`）が round-only でないときだけ置く（round-only は範囲に当てず全 suite を打つので、範囲の静的解析を先に当てる意味が無い。`test-limited` は今のまま）。どれも無ければ `impl → test-limited` で今と同じ（I7）。`format` と `lint-limited` の終了コード 2 は止まる。図の `fix-format` / `fix-lint` / `fix` から `format` への矢印は「並びの先頭」を指し、`format` を置かないプランでは置いたステップのうち最も前のもの（`sync`、無ければ `lint-limited`）へ向く。`lint-limited` を置くときは、`test-limited` は `--only-kind test` でテストの suite だけを打つ。
 
 `pre_test_steps(a)` はこの並びの `format` から `fix-lint` までを、置くステップだけで返し、`fix-format` / `fix-lint` の `next` を返す並びの先頭へ向けて組む。`plan_to_merge` は `head` の `next` と `fix` の `next` をその先頭（並びが空なら `test-limited`）へ向け、並びに `lint-limited` があれば `test-limited` の `cmd` に `--only-kind test` を足す。#2003 が起点の取り込みを `head` の後に置くときは、取り込みの `next` を同じ先頭へ向ける。
 
@@ -352,6 +352,9 @@ sequenceDiagram
 | 1651-5 | `kind: lint` の suite のあるプランは `test-limited` の前に `lint-limited` を持ち、違反で `fix-lint` → `format` へ戻る。`--only-kind lint` はテストの suite を打たない | テストの suite も打つ・`on_fail` が `test-limited` へ向くと落ちる |
 | 1651-6・I7 | 宣言が無いプロジェクトのプランの `steps` の id の並びが今と同じ | 宣言が無いのにステップを置くと落ちる |
 | 1651-5（重ねて打たない） | `kind: lint` の suite のあるプランの `test-limited` の `cmd` が `--only-kind test` を持ち、無いプランは今の `cmd` のまま | `lint-limited` を置いたのに `test-limited` が静的解析の suite も打つと落ちる |
+| 1651-5（種別ごとの範囲） | `--only-kind test` はテストの suite を `--paths` へ、`--only-kind lint` は静的解析の suite を `--changed` へ当てる。実装のファイルだけを変えた `--changed` と、テストのファイルを渡した `--paths` で、テストの suite が打たれる | `--only-kind test` を `--changed` へ当てると落ちる |
+| 1651-5（静的解析だけの宣言） | `kind: lint` の suite だけを宣言したプランで、`lint-limited` が通った後の `test-limited`（`--only-kind test`）が `ok`・0 を返し `pr` へ進む | 対象なしの 2 を返して judge へ落ちると落ちる |
+| 1651-5（round-only） | テストの suite が範囲の雛形を持たない宣言（戦略 round-only）のプランは `lint-limited`・`fix-lint` を置かず、`test-limited` の `cmd` は今のまま。round-only で `--only-kind lint` を打つと静的解析の suite の `command` だけを打つ | round-only で `lint-limited` を置く・`--only-kind lint` がテストの suite も打つと落ちる |
 | 1651-4・1651-5（行き先） | `kind: lint` の suite はあるが `format` の宣言が無いプランで、`fix-lint`・`fix` の `next` が実在するステップ（`sync`、無ければ `lint-limited`）を指す。宣言がすべてあるプランでは `fix` の後に `format` → `sync` を通る | `next` を `format` に固定する・`fix` の `next` を `test-limited` のままにすると落ちる |
 | 1651-7・I3 | 雛形が組む `prompt` に宣言の整形・静的解析のコマンドが現れない（宣言の `command` の文字列で照らす） | `IMPL_RULES` へ整形の指示を足すと落ちる |
 | 1941-1 | 1 回目に 504 で落ち 2 回目に通る応答で、失敗が無いときと同じプランを書いて `ok` | 打ち直さない・打ち直しの結果を捨てると落ちる |
