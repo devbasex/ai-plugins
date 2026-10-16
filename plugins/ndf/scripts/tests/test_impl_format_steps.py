@@ -80,8 +80,7 @@ def test_steps_follow_the_declarations(tmp_path):
     assert st["format"]["on_fail"] == "fix-format" and st["format"]["on_exit"] == {"2": "stop"}
     assert st["lint-limited"]["on_fail"] == "fix-lint" and st["lint-limited"]["cmd"].endswith("--only-kind lint")
     assert st["test-limited"]["cmd"].endswith("--only-kind test")
-    assert st["fix-format"]["next"] == st["fix-lint"]["next"] == st["fix"]["next"] == "format"
-    assert st["fix-sync"]["next"] == "sync"
+    assert st["fix-format"]["next"] == st["fix-sync"]["next"] == st["fix-lint"]["next"] == st["fix"]["next"] == "format"
 
 
 def test_no_declarations_keep_the_steps(tmp_path):

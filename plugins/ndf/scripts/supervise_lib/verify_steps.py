@@ -176,7 +176,8 @@ def test_meta(plan: dict, a) -> dict:
 def pre_test_steps(a, fix_prompt: str) -> list[dict]:
     """範囲テストの前のステップ: 整形（format）→ 同期とチェック（sync）→ 範囲の静的解析（lint-limited）。宣言の無いものは
     置かない（format は supervise.json の format、sync は sync_checks、lint-limited は範囲の雛形を持つ kind: lint の suite が
-    あり戦略が round-only でないとき。#1651 の決定 5・6）。fix-format と fix-lint（修正の worker。`fix_prompt`）は並びの先頭へ戻る。
+    あり戦略が round-only でないとき。#1651 の決定 5・6）。fix-format・fix-sync・fix-lint（修正の worker。`fix_prompt`）は並びの先頭へ戻る
+    （sync は静的解析も打つため、fix-sync の直しも整形を通し直す）。
     実装のプランの雛形（`templates.plan_to_merge`）が起点の取り込みの後に置く。"""
     st = plan_strategy(a) or {}
     lint = st.get("name") != ts.ROUND_ONLY and any(s.get("scope_command") and s.get("kind") == ts.LINT for s in st.get("suites") or [])
@@ -201,9 +202,8 @@ def pre_test_steps(a, fix_prompt: str) -> list[dict]:
     for i, step in enumerate(found):
         fix = "fix-" + step["id"].split("-")[0]
         nxt = found[i + 1]["id"] if i + 1 < len(found) else "test-limited"
-        back = step["id"] if fix == "fix-sync" else found[0]["id"]
         out += [
             {**step, "on_fail": fix, "next": nxt},
-            {"id": fix, "type": "work", "kind": "修正", "inputs": [step["id"]], "prompt": fix_prompt, "next": back},
+            {"id": fix, "type": "work", "kind": "修正", "inputs": [step["id"]], "prompt": fix_prompt, "next": found[0]["id"]},
         ]
     return out
