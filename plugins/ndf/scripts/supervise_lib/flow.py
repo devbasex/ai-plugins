@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import Any
 
 import durable
-from supervise_lib import admission, paths, running
+from supervise_lib import actuals, admission, paths, running
 from supervise_lib import queue as queue_files
 from supervise_lib.decl import QUEUE_RESOURCES, SUPERVISE_DECL, DeclError, decl_roots, queue_decl, read_decl
 from supervise_lib.engine import Engine
@@ -103,6 +103,7 @@ def resources_of(engine: Engine) -> dict:
 
 def launch_run(engine: Engine, start: str | None) -> str:
     """`Engine` を登録してから、`run` の耐久の記録を開く（続けない接頭辞の途中の記録は launch の前に止める）。接頭辞を返す。"""
+    actuals.install_cancel_handler()  # 主スレッドで登録する（耐久ワークフローの中では登録できない。#1856）
     prefix = plan_prefix(engine, start)
     resources = resources_of(engine)
     _ENGINES[prefix] = engine
@@ -120,6 +121,7 @@ def launch_queue(done: Path, max_: int, resources: dict, fresh: bool) -> str:
 
     `fresh` なら、途中の耐久ワークフローを launch の前に子ごと止める（流すプランの並びを変えて打ち直したとき）。"""
     queues = {PLANS: {"worker_concurrency": max_}, **_queues(resources)}
+    actuals.install_cancel_handler()  # 主スレッドで登録する（耐久ワークフローの中では登録できない。#1856）
     launched = durable.launch("queue", str(Path(done).resolve()), queues=queues, keep=() if fresh else None)
     _OPENED.update(launched=launched, resources=resources)
     return launched.key

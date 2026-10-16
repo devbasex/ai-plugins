@@ -295,7 +295,7 @@ class RunState:
             subprocess.run(["bash", rec, str(issue), "stage", stage], cwd=cwd, capture_output=True, text=True)
 
     def add_usage(self, kind: str, res: dict) -> None:
-        """1 回の呼び出しの使用量を、計画の合計（`llm`）と今のステップの内訳（`cur["llm"]`）へ足す。"""
+        """1 回の呼び出しの使用量を、計画の合計（`llm`）と今のステップの内訳（`cur["llm"]`。同じステップの呼び出しは足し合わせる）へ足す。"""
         u = res.get("usage", {})
         w5, w1h = usage_ledger.cache_writes(u)
         self.llm[kind] += 1
@@ -304,7 +304,6 @@ class RunState:
         self.llm["cache_write"] += u.get("cache_creation_input_tokens", 0)
         self.llm["output"] += u.get("output_tokens", 0)
         self.llm["cost"] += res.get("cost") or 0.0
-        # ステップごとの内訳（往復の回数・トークン・費用）。同じステップで複数回呼べば足し合わせる
         c = self.cur.setdefault("llm", {"calls": 0, "turns": 0, "input": 0, "cache_read": 0, "cache_write": 0, "output": 0, "cost": 0.0})
         c["calls"] += 1
         c["turns"] += res.get("turns") or 0
@@ -313,6 +312,7 @@ class RunState:
         c["cache_write"] += u.get("cache_creation_input_tokens", 0)
         c["output"] += u.get("output_tokens", 0)
         c["cost"] = round(c["cost"] + (res.get("cost") or 0.0), 4)
+        c["cost_unknown"] = c.get("cost_unknown", False) or not isinstance(res.get("cost"), (int, float))  # 実績では費用を不明にする
         # 書き込みの 5 分と 1 時間、モデルごとの呼び出し回数とトークン（#1142 の不足 f。キーの追加だけ）
         c["cache_write_5m"] = c.get("cache_write_5m", 0) + w5
         c["cache_write_1h"] = c.get("cache_write_1h", 0) + w1h

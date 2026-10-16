@@ -142,7 +142,9 @@ class ActualsLog:
 
 
 def _step_cost_usd(kind, llm: dict) -> float | None:
-    """ステップの USD。LLM を呼ばないステップ（run・pr）は 0、LLM の費用を取れなかったステップは空（不明）。"""
+    """ステップの USD。LLM を呼ばないステップ（run・pr）は 0、LLM の費用を取れなかった呼び出しを含むステップは空（不明）。"""
+    if llm.get("cost_unknown"):
+        return None
     if isinstance(llm.get("cost"), (int, float)):
         return llm["cost"]
     return 0.0 if kind in ("run", "pr") else None
@@ -171,7 +173,10 @@ def _progress_rows(path: Path) -> list[dict]:
 
 
 def install_cancel_handler() -> None:
-    """SIGINT・SIGTERM で開いている実行へ「取り消し」を書き、元の扱いへ渡す。主スレッドの外では何もしない。"""
+    """SIGINT・SIGTERM で開いている実行へ「取り消し」を書き、元の扱いへ渡す。主スレッドの外では何もしない。
+
+    耐久ワークフローの中（`prepare_step` から `ActualsLog.start`）は主スレッドの外のため、`supervise.py run` / `queue`
+    は耐久の記録を開く前（`flow.launch_run` / `launch_queue`）に主スレッドでここを呼ぶ。"""
     global _INSTALLED
     if _INSTALLED:
         return

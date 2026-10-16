@@ -153,3 +153,41 @@ def test_impl_timeout_window_and_min_samples_from_declaration(tmp_path):
     _impl_history([9000, 1000, 2000])
     timeout, est = impl_timeout_estimate(_ns(worktree=str(tmp_path)))
     assert (est["source"], est["samples"], est["high"]) == ("history", 2, 2000)
+
+
+def test_impl_timeout_does_not_drop_below_default():
+    from supervise_lib.verify_steps import IMPL_TIMEOUT_DEFAULT, impl_timeout_estimate
+
+    _impl_history([300, 200, 250])
+    timeout, est = impl_timeout_estimate(_ns())
+    assert (timeout, est["source"]) == (IMPL_TIMEOUT_DEFAULT, "history")
+
+
+def test_step_cost_is_unknown_when_a_call_had_no_cost():
+    assert actuals._step_cost_usd("work", {"cost": 0.0, "cost_unknown": True}) is None
+    assert actuals._step_cost_usd("work", {"cost": 0.12}) == 0.12
+
+
+def test_add_usage_marks_a_call_without_cost(tmp_path):
+    from supervise_lib.state import RunState
+
+    st = RunState.__new__(RunState)
+    st.llm = {"claude": 0, "input": 0, "cache_read": 0, "cache_write": 0, "output": 0, "cost": 0.0}
+    st.cur = {}
+    st.add_usage("claude", {"usage": {}, "cost": 0.5})
+    assert st.cur["llm"]["cost_unknown"] is False
+    st.add_usage("claude", {"usage": {}})
+    assert st.cur["llm"]["cost_unknown"] is True and st.cur["llm"]["cost"] == 0.5
+
+
+def test_launch_installs_cancel_handler_on_main_thread(monkeypatch):
+    from supervise_lib import flow
+
+    called = []
+    monkeypatch.setattr(actuals, "install_cancel_handler", lambda: called.append(1))
+    monkeypatch.setattr(flow.durable, "launch", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("stop")))
+    try:
+        flow.launch_queue(Path("/tmp/done"), 1, {}, False)
+    except RuntimeError:
+        pass
+    assert called == [1]

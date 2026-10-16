@@ -9,7 +9,7 @@ import re
 
 import gh_sections
 from upkeep_rank_config import COLUMN_NAMES, COLUMNS, HEADING, SLOT_NONE, SLOT_SPLIT
-from upkeep_rank_estimate import cells
+from upkeep_rank_estimate import OVER_SCALE, cells
 
 # ---------------- 前回との差分 ----------------
 
@@ -111,7 +111,9 @@ def slot_text(slot: dict) -> str:
 
 
 _ROW = re.compile(
-    r"^\|\s*(\d+)\s*\|\s*#(\d+)(（判断待ち）)?\s*\|\s*(\d+)(（ラベル）)?\s*\|\s*(\d+)\s*\|\s*(\d+)(（被依存）)?\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|"
+    r"^\|\s*(\d+)\s*\|\s*#(\d+)(（判断待ち）)?\s*\|\s*(\d+)(（ラベル）)?\s*\|\s*(\d+)\s*\|\s*(\d+)(（被依存）)?\s*\|\s*(\d+|"
+    + OVER_SCALE
+    + r")\s*\|\s*(\d+)\s*\|"
 )
 
 
@@ -134,7 +136,7 @@ def parse_rank_table(description: str):
                     "tc": int(m.group(6)),
                     "rr_oe": int(m.group(7)),
                     "rr_oe_dependents": bool(m.group(8)),
-                    "size": int(m.group(9)),
+                    "size": int(m.group(9)) if m.group(9).isdigit() else OVER_SCALE,
                     "cod": int(m.group(10)),
                 }
             )

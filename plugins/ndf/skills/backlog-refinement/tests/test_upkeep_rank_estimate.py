@@ -90,3 +90,25 @@ def test_no_records_keep_given_sizes(repo):
     assert RE.estimate_overlay(repo, [1], b.cfg.scale) == {}
     row = R.compute_ranking(b)["milestones"][0]["rows"][0]
     assert row["size"] == 5 and row["size_source"] == "付けた段階"
+
+
+def test_boundary_skips_issues_that_depend_on_an_over_scale_issue(repo):
+    _estimate(1, 5000)  # 尺度を超える前提の課題
+    b = board([raw(1, size=1), raw(2, size=3), raw(3, size=2)], {1: "01 近い", 2: "01 近い", 3: "01 近い"}, deps=[(2, 1)], capacity=30)
+    b.sizes = RE.estimate_overlay(repo, list(b.issues), b.cfg.scale)
+    b.estimates = RE.apply_overlay(b.estimates, b.sizes)
+    ms = R.compute_ranking(b)["milestones"][0]
+    assert (ms["boundary"]["number"], ms["boundary"]["size_sum"]) == (3, 2)
+
+
+def test_over_scale_row_survives_the_table_round_trip(repo):
+    _estimate(2, 5000)
+    b = board([raw(1, size=3), raw(2, size=1)], {1: "01 近い", 2: "01 近い"})
+    b.sizes = RE.estimate_overlay(repo, list(b.issues), b.cfg.scale)
+    b.estimates = RE.apply_overlay(b.estimates, b.sizes)
+    ms = R.compute_ranking(b)["milestones"][0]
+    parsed = R.parse_rank_table("### 順位\n\n" + R.render_rank_table(ms))
+    rows = {r["number"]: r for r in parsed["rows"]}
+    assert rows[2]["size"] == "尺度を超える" and rows[1]["size"] == 3
+    restored = R.restore_from_row(rows[2], b.cfg)
+    assert restored["size"]["step"] == b.cfg.scale[-1]

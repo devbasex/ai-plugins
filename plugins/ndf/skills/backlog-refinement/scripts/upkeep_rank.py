@@ -264,7 +264,21 @@ def _slot_and_boundary(board, ranked):
     """直近のマイルストーンの大きい課題の枠と、切り出しの境界。候補と表で同じ決め方を使う。"""
     cfg = board.cfg
     slot = large_slot(ranked, cfg.capacity, cfg, board.sub_issues, board.edges)
-    return slot, boundary([r for r in ranked if not is_over(board, r.number)], cfg.capacity, slot)  # 尺度を超える課題は境界に入れない
+    blocked = _over_and_dependents(board, ranked)
+    return slot, boundary([r for r in ranked if r.number not in blocked], cfg.capacity, slot)
+
+
+def _over_and_dependents(board, ranked) -> set:
+    """境界に入れない課題: 尺度を超える課題と、それを（辺を辿って）前提とする課題。前提を数えずに後続だけを切り出さない。"""
+    blocked = {r.number for r in ranked if is_over(board, r.number)}
+    grew = bool(blocked)
+    while grew:
+        grew = False
+        for a, b in board.edges:  # a は b に依存する
+            if b in blocked and a not in blocked:
+                blocked.add(a)
+                grew = True
+    return blocked
 
 
 def _group(board, n, place, nearest):
