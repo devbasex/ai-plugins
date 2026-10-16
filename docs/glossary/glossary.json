@@ -4023,6 +4023,12 @@
       "context": "ndf-workflow",
       "meaning": "修正の work を含まず、kind が「戻り」のステップを含む遷移の輪。戻りの上限の回数だけ回るものとして上限に数える",
       "pending_source": "issues/issue-1909-design.md"
+    },
+    {
+      "term": "ベースブランチの取り込み",
+      "context": "ndf-workflow",
+      "meaning": "ベースブランチの先端を作業ブランチへマージのコミットで取り込み、衝突を解いてから合成の上で検査を続けるプランのステップ。用語集だけの衝突は用語集の取り込みで解き、ほかは修正の worker へ回す",
+      "pending_source": "issues/issue-1917-requirements.md"
     }
   ]
 }
