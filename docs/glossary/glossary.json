@@ -3974,6 +3974,31 @@
       "context": "ndf-estimate",
       "meaning": "Size を A の見込みから丸めるときの単位の秒。宣言が無ければ、実績のある課題のうち A の小さい 4 分の 1 の中央値",
       "pending_source": "issues/issue-1856-design.md"
+    },
+    {
+      "term": "ステップの上限",
+      "context": "ndf-workflow",
+      "meaning": "プランの 上限。1 本の実行で流すステップの数の上限で、超えると「止まった」で終わる。ループの歯止め",
+      "pending_source": "issues/issue-1909-requirements.md"
+    },
+    {
+      "term": "修正のループ",
+      "context": "ndf-workflow",
+      "meaning": "検査のステップが落ちて修正の work へ行き、同じ検査へ戻ってくる遷移の輪",
+      "pending_source": "issues/issue-1909-requirements.md"
+    },
+    {
+      "term": "遅れの見張り",
+      "context": "ndf-workflow",
+      "meaning": "ステップが想定の時間を超えたときに一次の調査を流し、待つ・打ち切る・再試行するを決める仕組み",
+      "code": "slow",
+      "pending_source": "issues/issue-1909-requirements.md"
+    },
+    {
+      "term": "前の実行",
+      "context": "ndf-workflow",
+      "meaning": "run --from で再開したとき、今の実行より前に同じプランを流した実行。--from を付けない最後の実行の始まりより後の記録を指す",
+      "pending_source": "issues/issue-1909-requirements.md"
     }
   ]
 }

@@ -278,6 +278,10 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 起動の共有処理 | — | LLM の CLI と Jev を起動する処理を集めた 4 か所（launch-cli.sh・supervise_lib/claude.py の call_claude・lib/auth.py のモデルの確認・lib/jev.py の _post）。起動の後に使用量の帳簿へ 1 行を書く | — | — | `docs/specifications/ndf-usage-ledger-by-runtime.md` |
 | Claude の帳簿の全体 | — | Claude の使用量の帳簿の claude -p の行（usage）とサブエージェントの行に、行ごとの modelUsage の和から usage と親を同じくするサブエージェントの行を引いた残り（hook の効かない claude -p の中のサブエージェント）と、会話の記録だけの claude -p の会話（セッション ID が帳簿に無いもの）を足した値。同じ呼び出しは 1 回だけ数える。トークン削減の効果を測る主な値 | — | — | `docs/specifications/ndf-usage-ledger-by-runtime.md` |
 | 会話の記録だけの呼び出し | — | 使用量の帳簿に行が無く、Claude Code の会話の記録（~/.claude/projects/）にだけ残る claude -p の会話とサブエージェント。帳簿ができる前の分と、NDF のコードの外で打った claude -p が当たる | — | — | `docs/specifications/ndf-usage-ledger-by-runtime.md` |
+| ステップの上限 | — | プランの 上限。1 本の実行で流すステップの数の上限で、超えると「止まった」で終わる。ループの歯止め | — | — | — |
+| 修正のループ | — | 検査のステップが落ちて修正の work へ行き、同じ検査へ戻ってくる遷移の輪 | — | — | — |
+| 遅れの見張り | `slow` | ステップが想定の時間を超えたときに一次の調査を流し、待つ・打ち切る・再試行するを決める仕組み | — | — | — |
+| 前の実行 | — | run --from で再開したとき、今の実行より前に同じプランを流した実行。--from を付けない最後の実行の始まりより後の記録を指す | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 
