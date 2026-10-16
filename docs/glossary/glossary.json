@@ -3974,6 +3974,12 @@
       "context": "ndf-estimate",
       "meaning": "Size を A の見込みから丸めるときの単位の秒。宣言が無ければ、実績のある課題のうち A の小さい 4 分の 1 の中央値",
       "pending_source": "issues/issue-1856-design.md"
+    },
+    {
+      "term": "ベースブランチの取り込み",
+      "context": "ndf-workflow",
+      "meaning": "ベースブランチの先端を作業ブランチへマージのコミットで取り込み、衝突を解いてから合成の上で検査を続けるプランのステップ。用語集だけの衝突は用語集の取り込みで解き、ほかは修正の worker へ回す",
+      "pending_source": "issues/issue-1917-requirements.md"
     }
   ]
 }
