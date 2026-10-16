@@ -495,7 +495,7 @@ def push_fix(worktree: pathlib.Path | str, head_branch: str, fix_commit: str | N
         return PushResult(True, False, True, "コミットが無いため送らない")
     if not (str(worktree or "") and head_branch):
         return PushResult(False, False, False, "送る先（作業ツリーとブランチ）が分からない")
-    if blocked := formatting.before_push(worktree) or tool_paths.before_push(worktree, head_branch, lambda *a: _git(worktree, *a)):
+    if blocked := formatting.format_before_push(worktree) or tool_paths.before_push(worktree, head_branch, lambda *a: _git(worktree, *a)):
         return PushResult(False, False, False, blocked)
     pushed = _git(worktree, "push", "origin", f"HEAD:{head_branch}")
     if pushed.returncode != 0:

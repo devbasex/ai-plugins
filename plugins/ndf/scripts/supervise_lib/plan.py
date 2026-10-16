@@ -11,6 +11,7 @@
       "リポジトリ": "/abs/repo",             # 作業ツリーの元（省略時は作業場所の /.worktrees/ より前）
                                             # git worktree add が .git/config の lock で落ちたら 5 回までやり直す
       "記録": "/abs/projects-sync.sh",      # 省略可。stage を記録する
+      "設計文書": ["issues/issue-818-design.md"],  # 省略可。design-results が書く設計文書のパス（実装の指示の「設計文書:」の行）
       "規則": "判断の規則の抜粋（文字列）",   # judge へ毎回渡す
       "上限": 30,                           # 実行するステップの数の上限（ループの歯止め。無ければ 30）。雛形は遷移から求めて書く
                                             # （supervise_lib/limits.py）。run は流す前に、上限がループを通らない最長の経路より
@@ -65,6 +66,8 @@ drive のステップ: `cmd`（または `"drive": "cross-review" | "cross-refac
        "test": {"command": "<テストのコマンド。{paths} を範囲に置き換える>", "all": "<全体の範囲（既定 .）>",
                 "no_reports": "<run のステップの PYTEST_ADDOPTS に足す。省略可>"},
        "sync_checks": [{"name": "<名前>", "command": "<同期かチェックのコマンド>"}, ...],   # 省略可。無ければ sync のステップを置かない
+       "format": [{"name": "<名前>", "command": "<整形のコマンド>"}, ...],   # 省略可。無ければ format のステップを置かず、送信の前にも整形しない
+                                            # 終了コード 0 = 違反が残らない / 1 = 整形で直らない違反 / ほか = 仕組みの失敗
        "release": {"form": "package-plugin", "plugin": "<名前>", "runtimes": ["claude", ...]},
        "impl_timeout": <1 以上の整数>,              # 省略可。impl のステップの timeout（秒）。無ければ雛形の値
        "refactor_budget_minutes": <1 以上の整数>}   # 省略可。構造改善の想定最大時間（分）。refactor に --budget-minutes で渡す
@@ -105,7 +108,8 @@ drive のステップ: `cmd`（または `"drive": "cross-review" | "cross-refac
 - 待ちの合計が計画の `"limit_wait_max"`（既定 10800 秒）を超えるなら `結果: 止まった`・`理由: 利用上限`
 
 run のステップ:
-- `"preset"`: 定型のコマンド。`sync-check`（宣言した同期とチェック）・`assess`（構造改善の要否）・
+- `"preset"`: 定型のコマンド。`sync-check`（宣言した同期とチェック）・`format`（宣言した整形を当て、整形で変わったファイルを
+  コミットする）・`assess`（構造改善の要否）・
   `doc-lint`（追加した行の書き方のチェック）。`cmd` を書けばそちらを使う
 - `cmd` の `{pr}` は Pull Request の番号に、`{pr_url}` は URL に置き換わる（drive のステップの `args` も同じ）。
   Pull Request は pr のステップで作ったもの、または計画の `"Pull Request"`（URL なら末尾の数字を番号として読む）

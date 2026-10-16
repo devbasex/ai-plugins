@@ -77,14 +77,16 @@ def read_format_commands(root: Path | str) -> list[FormatCommand]:
     return format_commands(decl)
 
 
-def _git(root: Path | str, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+def _format_git(root: Path | str, *args: str) -> list[str] | None:
+    """git の標準出力の行。0 以外で終われば None。"""
+    p = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+    return p.stdout.splitlines() if p.returncode == 0 else None
 
 
 def _dirty(root: Path | str) -> set[str] | None:
     """HEAD から変わっている追跡ファイル（索引と作業ツリーの両方）。git が落ちたら None。"""
-    p = _git(root, "diff", "--name-only", "HEAD")
-    return set(p.stdout.splitlines()) if p.returncode == 0 else None
+    lines = _format_git(root, "diff", "--name-only", "HEAD")
+    return set(lines) if lines is not None else None
 
 
 def _contents(root: Path | str, paths: set[str]) -> dict[str, bytes | None]:
@@ -123,14 +125,15 @@ def apply_format(root: Path | str, commands: list[FormatCommand], commit: bool =
         return FormatOutcome(OK, files=changed, runs=runs, skipped=skipped)
     names = "・".join(c.name for c in commands)
     # パスを渡したコミットはそのパスだけを入れる（前から索引にあった変更を巻き込まない）
-    done = _git(root, "commit", "-q", "-m", f"Update: 宣言の整形を当てる（{names}）", "--", *changed)
+    msg = f"Update: 宣言の整形を当てる（{names}）"
+    done = subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", msg, "--", *changed], capture_output=True, text=True)
     if done.returncode != 0:
         return FormatOutcome(BROKEN, files=changed, failed="commit", tail=(done.stdout + done.stderr).strip()[-TAIL:], runs=runs)
-    sha = _git(root, "rev-parse", "HEAD").stdout.strip()
-    return FormatOutcome(OK, commit=sha or None, files=changed, runs=runs, skipped=skipped)
+    head = _format_git(root, "rev-parse", "HEAD") or [""]
+    return FormatOutcome(OK, commit=head[0] or None, files=changed, runs=runs, skipped=skipped)
 
 
-def before_push(root: Path | str) -> str:
+def format_before_push(root: Path | str) -> str:
     """送る前に宣言の整形を当ててコミットする。送れないときはその理由（送ってよければ空）。宣言が無ければ何もしない。"""
     try:
         commands = read_format_commands(root)

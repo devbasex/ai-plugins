@@ -213,7 +213,7 @@ def test_both_readers_share_one_shape_check(tmp_path):
     with pytest.raises(decl.DeclError) as e:
         decl.format_of(bad)
     root = make_repo(tmp_path / "wt", bad)
-    assert str(e.value) in formatting.before_push(root)
+    assert str(e.value) in formatting.format_before_push(root)
 
 
 # ---------- 送信の前の整形（1507-1〜1507-4） ----------
