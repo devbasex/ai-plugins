@@ -192,6 +192,35 @@ def test_1917_3_other_conflict_goes_to_the_worker_and_is_finished_after(tmp_path
     assert not r.merging() and r.remote_head() == r.head()
 
 
+def test_push_catches_up_with_the_upstream_before_the_take(tmp_path):
+    """別の worktree が PR の head へ送った分を先に早送りで受け、遅れた HEAD の上でマージしない（PR 2034 の round 2）。"""
+    r = Repos(tmp_path)
+    other = tmp_path / "other"
+    subprocess.run(["git", "clone", "-q", "-b", "feat/x", str(r.origin), str(other)], check=True, capture_output=True)
+    configure(other)
+    Repos.write(other, "drive.txt", "drive\n")
+    commit(other, "drive")
+    git(other, "push", "-q", "origin", "feat/x")
+    r.advance("theirs.txt", "theirs\n")
+    code, out, err = base_sync(r, "--push")
+    assert code == 0, (out, err)
+    assert results(out) == [("upstream", "fast_forwarded"), ("base", "merged"), ("push", "pushed")]
+    assert (r.wt / "drive.txt").exists() and (r.wt / "theirs.txt").exists() and r.remote_head() == r.head()
+
+
+def test_diverged_upstream_is_refused_with_3(tmp_path):
+    r = Repos(tmp_path)
+    other = tmp_path / "other"
+    subprocess.run(["git", "clone", "-q", "-b", "feat/x", str(r.origin), str(other)], check=True, capture_output=True)
+    configure(other)
+    Repos.write(other, "drive.txt", "drive\n")
+    commit(other, "drive")
+    git(other, "push", "-q", "origin", "feat/x")
+    r.work("mine.txt", "mine\n")
+    code, out, err = base_sync(r, "--push")
+    assert code == 3 and out["status"] == "stopped" and not r.merging(), (out, err)
+
+
 def test_overlapping_uncommitted_change_is_refused_with_3(tmp_path):
     r = Repos(tmp_path, {"a.txt": "base\n"})
     r.advance("a.txt", "theirs\n")

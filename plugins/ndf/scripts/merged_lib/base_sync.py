@@ -2,9 +2,9 @@
 
 base-sync: ベースブランチの先端を作業ブランチへマージのコミットで取り込む。途中の取り込み（`MERGE_HEAD`）があれば
 閉じ、無ければ fetch して進んでいるときだけ `git merge` を打つ。衝突が用語集（`.ndf/glossary.json` の `source` と
-`document`）に及べば `glossary.py merge` で解く。`--push` なら、upstream より進んでいるときだけ push する。
-rebase・強制 push は打たない。終了コードは 0 = 進めてよい / 1 = 衝突が残る・push が拒まれた（修正の worker へ）/
-2 = 読めない（fetch・gh・git）/ 3 = 拒まれた（未コミットの変更が取り込みと重なり、取り込みが始まらない）。
+`document`）に及べば `glossary.py merge` で解く。`--push` なら、取り込みの前に作業ブランチを upstream へ早送りし（`--ff-only`）、upstream より進んでいるときだけ
+push する。rebase・強制 push は打たない。終了コードは 0 = 進めてよい / 1 = 衝突が残る・push が拒まれた（修正の worker へ）/
+2 = 読めない（fetch・gh・git）/ 3 = 拒まれた（未コミットの変更が取り込みと重なり、取り込みが始まらない・upstream へ早送りできない）。
 
 base-return: プランの merge が衝突（終了コード 4）を見たとき、この実行で戻った回数を `state.json` の `log` から数え、
 上限（`RETURN_LIMIT`）を超えたら終了コード 1 で止まる。`state.json` は読むだけで書かない。
@@ -75,6 +75,22 @@ def _push_if_ahead(root, items, metrics) -> None:
     metrics["pushed"] = True
 
 
+def _catch_up(root, items, metrics) -> None:
+    """取り込みの前に作業ブランチを upstream へ早送りする（別の worktree が PR の head へ送った分を先に受ける）。
+    upstream が無ければ何もしない。fetch できなければ 2、早送りできない（分かれている・未コミットの変更と重なる）なら 3。"""
+    if git(root, "rev-parse", "-q", "--verify", "@{u}", check=False).returncode != 0:
+        return
+    if git(root, "fetch", "-q", check=False).returncode != 0:
+        raise StepError("upstream の git fetch が失敗した", 2)
+    behind = git(root, "rev-list", "--count", "HEAD..@{u}", check=False)
+    if behind.returncode != 0 or behind.stdout.strip() in ("", "0"):
+        return
+    p = git(root, "merge", "-q", "--ff-only", "@{u}", check=False)
+    if p.returncode != 0:
+        _stop_take(f"作業ブランチを upstream へ早送りできない: {(p.stderr or p.stdout).strip()[:300]}", [], metrics, EXIT_PRECONDITION)
+    items.append({"kind": "upstream", "result": "fast_forwarded"})
+
+
 def _take_merge(root, base, metrics) -> str:
     """origin/<base> を取り込み、結果（merged / glossary_merged）を返す。衝突が残れば 1、拒まれたら 3 で止まる。"""
     p = git(root, "merge", "-q", "--no-edit", f"origin/{base}", check=False)
@@ -107,6 +123,8 @@ def take(a):
     else:
         base = _take_base(root, a)
         metrics["base"] = base
+        if a.push:
+            _catch_up(root, items, metrics)
         if git(root, "fetch", "-q", "origin", base, check=False).returncode != 0:
             raise StepError(f"git fetch origin {base} が失敗した", 2)
         behind = git(root, "rev-list", "--count", f"HEAD..origin/{base}", check=False)
