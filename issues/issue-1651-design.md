@@ -293,7 +293,7 @@ graph LR
   fixf --> format
   sync -->|0| lint["lint-limited"]
   sync -->|失敗| fixs["fix-sync"]
-  fixs --> sync
+  fixs --> format
   lint -->|0| tl["test-limited"]
   lint -->|1| fixl["fix-lint"]
   fixl --> format
@@ -303,9 +303,9 @@ graph LR
   tl -->|0| pr
 ```
 
-宣言ごとに置くかを決める: `format` と `fix-format` は `format` の宣言、`sync` と `fix-sync` は `sync_checks`、`lint-limited` と `fix-lint` は範囲の雛形を持つ `kind: lint` の suite があり、かつ宣言から解いた戦略（`test_strategy.resolve`）が round-only でないときだけ置く（round-only は範囲に当てず全 suite を打つので、範囲の静的解析を先に当てる意味が無い。`test-limited` は今のまま）。どれも無ければ `impl → test-limited` で今と同じ（I7）。`format` と `lint-limited` の終了コード 2 は止まる。図の `fix-format` / `fix-lint` / `fix` から `format` への矢印は「並びの先頭」を指し、`format` を置かないプランでは置いたステップのうち最も前のもの（`sync`、無ければ `lint-limited`）へ向く。`lint-limited` を置くときは、`test-limited` は `--only-kind test` でテストの suite だけを打つ。
+宣言ごとに置くかを決める: `format` と `fix-format` は `format` の宣言、`sync` と `fix-sync` は `sync_checks`、`lint-limited` と `fix-lint` は範囲の雛形を持つ `kind: lint` の suite があり、かつ宣言から解いた戦略（`test_strategy.resolve`）が round-only でないときだけ置く（round-only は範囲に当てず全 suite を打つので、範囲の静的解析を先に当てる意味が無い。`test-limited` は今のまま）。どれも無ければ `impl → test-limited` で今と同じ（I7）。`format` と `lint-limited` の終了コード 2 は止まる。図の `fix-format` / `fix-sync` / `fix-lint` / `fix` から `format` への矢印（`sync` の宣言は静的解析も打つため、`fix-sync` の直しも整形を通し直す）は「並びの先頭」を指し、`format` を置かないプランでは置いたステップのうち最も前のもの（`sync`、無ければ `lint-limited`）へ向く。`lint-limited` を置くときは、`test-limited` は `--only-kind test` でテストの suite だけを打つ。
 
-`pre_test_steps(a)` はこの並びの `format` から `fix-lint` までを、置くステップだけで返し、`fix-format` / `fix-lint` の `next` を返す並びの先頭へ向けて組む。`plan_to_merge` は起点の取り込み（#1917 の `base-sync`）の `next` と `fix` の `next` をその先頭（並びが空なら `test-limited`）へ向け、並びに `lint-limited` があれば `test-limited` の `cmd` に `--only-kind test` を足す。**並びは `impl → base-sync → format → sync → lint-limited → test-limited` に揃える**（#1917 の「雛形ごとの置き場所」と同じ）。`head[-1]["next"]` を `base-sync` へ向けるのは #1917 で、この主題は `pre_test_steps(a)` の先頭を `base_sync_steps` の `nxt` に渡す。#1917 より先にこの主題を実装に入れるときだけ、`head[-1]["next"]` を先頭へ向け、#1917 がそれを `base-sync` へ付け替える。図の `fix` から `format` への矢印は取り込みを通らない（取り込みへ戻るのは `merge` の衝突と `fix-base` だけ）。
+`pre_test_steps(a)` はこの並びの `format` から `fix-lint` までを、置くステップだけで返し、`fix-format` / `fix-sync` / `fix-lint` の `next` を返す並びの先頭へ向けて組む。`plan_to_merge` は起点の取り込み（#1917 の `base-sync`）の `next` と `fix` の `next` をその先頭（並びが空なら `test-limited`）へ向け、並びに `lint-limited` があれば `test-limited` の `cmd` に `--only-kind test` を足す。**並びは `impl → base-sync → format → sync → lint-limited → test-limited` に揃える**（#1917 の「雛形ごとの置き場所」と同じ）。`head[-1]["next"]` を `base-sync` へ向けるのは #1917 で、この主題は `pre_test_steps(a)` の先頭を `base_sync_steps` の `nxt` に渡す。#1917 より先にこの主題を実装に入れるときだけ、`head[-1]["next"]` を先頭へ向け、#1917 がそれを `base-sync` へ付け替える。図の `fix` から `format` への矢印は取り込みを通らない（取り込みへ戻るのは `merge` の衝突と `fix-base` だけ）。
 
 ### 「設計の結果」の書き直し
 

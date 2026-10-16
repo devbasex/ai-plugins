@@ -253,7 +253,7 @@ stateDiagram-v2
 | 出力（成功） | `status: ok`・終了コード 0。items に足す: `{"kind": "check", "name": "<label>", "result": "superseded", "run": "<run>", "job": "<job>"}`（置き換わった失敗 1 件につき 1 件）、`{"kind": "check", "name": "<label>", "result": "infra_rerun", "run": "<run>", "rerun": <回目>}`（再実行 1 回につき 1 件） |
 | 中身の失敗 | 終了コード 1。summary `#<PR> の CI が失敗: <label>（run <run>）, …`。items の `result: failed` は `run`・`job` を持ち、照会できなかった取り消しは `reason` を持つ。置き換わった失敗の items も添える。metrics は `failed`・`pending`・`passed`・`infra`・`waits`。`next` は `gh pr checks <PR> で失敗を読み、直して push してから打ち直す` |
 | 基盤待ちの停止 | 終了コード 75。summary は `#<PR> の CI の基盤待ち: Runner が付かずに取り消された（<label>, …）。` に続けて `再実行 <N> 回で解けない` / `<timeout> 秒で解けない` / `gh run rerun <run> --failed が失敗: <stderr>` のどれか。items は `{"kind": "check", "name": "<label>", "result": "infra_wait", "run": "<run>", "job": "<job>", "reruns": <回>}`（Runner の付かない取り消しと、再実行して pending のままの項目）。metrics の `failed` は 0、`infra` は件数。`next` は `GitHub Actions の復旧の後に打ち直す: merged-steps.py merge-when-green <PR>` |
-| マージの拒否 | 終了コード 1・summary `gh pr merge --admin が失敗: …`。置き換わった失敗があれば `next` を `置き換わった失敗を通し直してから打ち直す: gh run rerun <run>; …; merged-steps.py merge-when-green <PR>` にする（run は重複を除いて items の順）。無ければ `next` を持たない |
+| マージの拒否 | 終了コード 1・summary `gh pr merge --admin が失敗: …`（ベースブランチとの衝突による拒否は 4。#1917）。置き換わった失敗があれば `next` を `置き換わった失敗を通し直してから打ち直す: gh run rerun <run>; …; merged-steps.py merge-when-green <PR>` にする（run は重複を除いて items の順）。無ければ `next` を持たない |
 | 互換性 | 終了コード 0・1・10 の意味は変えない。summary のチェックの名前に workflow の名前が付く。summary を文字列で照合するスクリプトは無い（`release-steps.py` は写すだけ） |
 
 #### `merged-steps.py probe`
@@ -283,7 +283,7 @@ stateDiagram-v2
 | 順序 | 終了コードを読んだら、`skip_to` の次・承認ゲートの終了コード（10〜19）の前に `on_exit` を見る。当たれば `on_fail` と judge へ行かない |
 | `stop` | `結果: 止まった`・`理由: ステップ <id> が終了コード <n> で止めた: <出力の最後の JSON の summary>` |
 | 検査 | 対応表でない・鍵が整数でない・行き先が `end` / `stop` / 知っているステップの id のどれでもないなら、ステップを流す前に `結果: 止まった` |
-| 雛形 | `release`（`supervise.py new release`）と、`merge`・`merge-approved`（`merge_steps`）が `{"75": "stop"}` を持つ |
+| 雛形 | `release`（`supervise.py new release`）と、`merge`・`merge-approved`（`merge_steps`）が `{"75": "stop"}` を持つ。実装と検査のプランの `merge`・`merge-approved` は、ベースブランチとの衝突（4）で `base-return` へ進む `{"4": "base-return"}` も持つ（`merge_steps` の `on_conflict`。#1917） |
 
 `release` のステップの `cmd` は `release --version <版> --ci-wait <ci_wait_timeout> --channel <チャネル>` で、`timeout` は
 `max(2400（開発版）/ 3000（本番）, with_margin(待つ PR の数 × ci_wait_timeout))`。`ci_wait_timeout` はマージのプランと

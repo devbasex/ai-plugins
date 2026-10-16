@@ -16,7 +16,7 @@ from dataclasses import dataclass
 import gh_parts
 import waits
 from merged_lib.reading import CheckReading, read_checks
-from step_result import EXIT_INFRA_WAIT, emit, gh_json, result
+from step_result import EXIT_BASE_CONFLICT, EXIT_INFRA_WAIT, emit, gh_json, result
 
 TOOL = "merged"
 
@@ -291,6 +291,21 @@ class GreenWatch:
             EXIT_INFRA_WAIT,
         )
 
+    def _stop_conflict(self, why: str = "mergeStateStatus=DIRTY"):
+        """PR がベースブランチと衝突している（終了コード 4。#1917）。プランの merge はベースブランチの取り込みへ戻る。"""
+        n = self.n
+        emit(
+            result(
+                TOOL,
+                "stopped",
+                f"#{n} はベースブランチと衝突している（{why}）",
+                self.items + [{"kind": "pr", "name": f"#{n}", "result": "conflict"}],
+                {"waits": self.waits},
+                next="ベースブランチを取り込んで push してから打ち直す",
+            ),
+            EXIT_BASE_CONFLICT,
+        )
+
     def _check_expected(self, sha, state):
         """--expect-head を渡したとき、読んだ先端がその SHA と違えば、待ち続けず・マージ済みでもそこで止める（#815 の I5）。
         待つ間に別の先端でマージされた PR を成功として返さない（release が承認していないマージへタグを打たない）。"""
@@ -332,6 +347,8 @@ class GreenWatch:
             hook(info)
         if info.get("isDraft"):
             self._ensure_ready()
+        if info.get("mergeStateStatus") == "DIRTY":  # UNKNOWN（計算中）は衝突と読まずに待つ
+            self._stop_conflict()
         self._reset_on_new_sha(sha)
         self.last_sha = sha
         reading = read_checks(root, info.get("statusCheckRollup"), self.seen_jobs)

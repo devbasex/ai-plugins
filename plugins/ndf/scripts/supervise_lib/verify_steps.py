@@ -11,6 +11,7 @@ import math
 import shlex
 
 import test_strategy as ts
+from step_result import EXIT_BASE_CONFLICT
 from supervise_lib.decl import scope_paths, test_kind
 from supervise_lib.paths import MERGE_CMD, MERGE_GATE_CMD, MERGE_PROBE, SPRINT_STATE_PY, TEST_RUN_PY
 
@@ -119,14 +120,15 @@ def refactor_template_arg(a) -> str:
     return f" --baseline-test {shlex.quote(template)}" + (f" --test-kind {kind}" if kind != ts.TEST else "")
 
 
-def merge_steps(a, **extra) -> list[dict]:
+def merge_steps(a, on_conflict: str | None = None, **extra) -> list[dict]:
     """マージの 3 ステップ（#1336 の決定 1）。
 
     - `merge-gate`: 宛先が承認ゲート 2（自動反映の本番チャネル）に当たるかだけを判定する。当たればプランを終える（`gate_next: end`）
     - `merge`: CI を待ってマージする。CI の待ちの上限を `--timeout` で渡し、ステップの `timeout` はそれに余裕を足す
     - `merge-approved`: `merge` に `--gate-approved user` を足したもの。通常の流れからは入らず、承認の後に `--from merge-approved` でだけ入る
 
-    `merge` と `merge-approved` は CI の基盤待ち（75）で judge を通らずに止まる（`on_exit`）。
+    `merge` と `merge-approved` は CI の基盤待ち（75）で judge を通らずに止まる（`on_exit`）。`on_conflict` を渡すと、
+    PR がベースブランチと衝突したとき（4。`EXIT_BASE_CONFLICT`）にそのステップへ進む（#1917）。渡さなければ今の失敗と同じ。
 
     `extra` の `next`（と `on_fail`）は `merge` と `merge-approved` に付ける。`next` が無いと `merge` が並びの次の
     `merge-approved` へ流れるため、必ず渡す。
@@ -140,7 +142,7 @@ def merge_steps(a, **extra) -> list[dict]:
         "timeout": with_margin(ci_wait),
         "cmd": f"{MERGE_CMD} --timeout {ci_wait}",
         "probe": MERGE_PROBE,
-        "on_exit": dict(INFRA_WAIT_STOP),
+        "on_exit": {**INFRA_WAIT_STOP, **({str(EXIT_BASE_CONFLICT): on_conflict} if on_conflict else {})},
         **extra,
     }
     gate = {"id": "merge-gate", "type": "run", "timeout": 120, "cmd": MERGE_GATE_CMD, "gate_next": "end", "next": "merge"}
@@ -169,3 +171,39 @@ def test_meta(plan: dict, a) -> dict:
         plan["テストの戦略"] = {"name": strategy["name"], "source": strategy["source"], "note": getattr(a, "test_note", None)}
     plan["テストの時間"] = dict(plan_limits(a))
     return plan
+
+
+def pre_test_steps(a, fix_prompt: str) -> list[dict]:
+    """範囲テストの前のステップ: 整形（format）→ 同期とチェック（sync）→ 範囲の静的解析（lint-limited）。宣言の無いものは
+    置かない（format は supervise.json の format、sync は sync_checks、lint-limited は範囲の雛形を持つ kind: lint の suite が
+    あり戦略が round-only でないとき。#1651 の決定 5・6）。fix-format・fix-sync・fix-lint（修正の worker。`fix_prompt`）は並びの先頭へ戻る
+    （sync は静的解析も打つため、fix-sync の直しも整形を通し直す）。
+    実装のプランの雛形（`templates.plan_to_merge`）が起点の取り込みの後に置く。"""
+    st = plan_strategy(a) or {}
+    lint = st.get("name") != ts.ROUND_ONLY and any(s.get("scope_command") and s.get("kind") == ts.LINT for s in st.get("suites") or [])
+    lint_cmd = scope_cmd(a, " ".join(a.tests)) + " --only-kind lint"
+    wanted = [
+        (getattr(a, "format", None), {"id": "format", "type": "run", "preset": "format", "stage": "実装", "on_exit": {"2": "stop"}}),
+        (getattr(a, "sync_checks", None), {"id": "sync", "type": "run", "preset": "sync-check", "stage": "実装"}),
+        (
+            lint,
+            {
+                "id": "lint-limited",
+                "type": "run",
+                "stage": "完了判定",
+                "timeout": scope_timeout(a),
+                "cmd": lint_cmd,
+                "on_exit": {"2": "stop"},
+            },
+        ),
+    ]
+    found = [step for want, step in wanted if want]
+    out: list[dict] = []
+    for i, step in enumerate(found):
+        fix = "fix-" + step["id"].split("-")[0]
+        nxt = found[i + 1]["id"] if i + 1 < len(found) else "test-limited"
+        out += [
+            {**step, "on_fail": fix, "next": nxt},
+            {"id": fix, "type": "work", "kind": "修正", "inputs": [step["id"]], "prompt": fix_prompt, "next": found[0]["id"]},
+        ]
+    return out

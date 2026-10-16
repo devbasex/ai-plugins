@@ -30,6 +30,7 @@ SUBCOMMANDS = [
     "design-results",
     "note",
     "sync-check",
+    "format",
     "sync-title",
 ]
 NEW_KINDS = ["impl", "fix", "check", "release", "sprint", "close"]
@@ -41,6 +42,7 @@ MODULES = [
     "paths",
     "decl",
     "plan",
+    "limits",  # ステップの上限をプランの遷移から求める（#1909）
     "prompts",
     "claude",
     "state",
@@ -69,6 +71,7 @@ MODULES = [
 NO_ENGINE = [
     "decl",
     "plan",
+    "limits",
     "prompts",
     "claude",
     "state",

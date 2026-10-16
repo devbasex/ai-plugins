@@ -62,7 +62,6 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
         "起点": f"origin/{a.base}",
         "リポジトリ": repo,
         "規則": RULE_DESIGN,
-        "上限": 12,
         "steps": [
             # 設計の工程の入口の検査（#1111 の I5）。用語集が無ければ worktree の中で起こし、設計 PR と一緒に
             # コミットする（承認ゲートを増やさない。語の採否は承認ゲート 1 で利用者が見る）。それ以外の失敗は止まる
@@ -227,7 +226,6 @@ def plan_sprint_branch(a, repo: str) -> dict:
             "モード": a.mode,
             "作業場所": repo,
             "規則": "",
-            "上限": 3,
             "steps": [{"id": "sprint-branch", "type": "run", "stage": "作業場所の用意", "timeout": 600, "cmd": cmd, "next": "end"}],
         }
     )
@@ -253,7 +251,6 @@ def plan_design_results(a, repo: str) -> dict:
             "モード": a.mode,
             "作業場所": repo,
             "規則": "",
-            "上限": 3,
             "steps": [{"id": "design-results", "type": "run", "stage": "計画", "timeout": 600, "cmd": cmd, "next": "end"}],
         }
     )

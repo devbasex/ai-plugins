@@ -278,9 +278,10 @@ def test_wait_and_merge_passes_the_ci_wait_as_the_timeout(monkeypatch):
     assert calls[0][calls[0].index("--timeout") + 1] == "1800"
 
 
-@pytest.mark.parametrize("code,expected", [(75, 75), (1, 1)])
+@pytest.mark.parametrize("code,expected", [(75, 75), (1, 1), (4, 1)])
 def test_wait_and_merge_returns_infra_wait_as_75(monkeypatch, code, expected):
-    """AC11: merge-when-green の基盤待ち（75）は 75 で、中身の失敗（1）は今のとおり 1 で止まる。"""
+    """AC11: merge-when-green の基盤待ち（75）は 75 で、中身の失敗（1）は今のとおり 1 で止まる。
+    ベースブランチとの衝突（4。#1917-8）も配布の手順では 1 として止まる。"""
     mod = _release_steps_module(monkeypatch)
     summary = "#5 の CI の基盤待ち: Runner が付かずに取り消された（Lint / lint）。再実行 3 回で解けない"
     out = json.dumps({"tool": "merged", "status": "stopped", "summary": summary, "items": []})

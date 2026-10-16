@@ -453,7 +453,7 @@ def test_new_impl_in_other_repo_uses_declarations_only(tmp_path):
     assert p.returncode == 0, p.stderr
     plan = json.loads(out.read_text())
     steps = {s["id"]: s for s in plan["steps"]}
-    assert "sync" not in steps and steps["impl"]["next"] == "test-limited"
+    assert "sync" not in steps and steps["impl"]["next"] == "base-sync" and steps["base-sync"]["next"] == "test-limited"
     # テストのステップは test-run.py が宣言（supervise.json の test.command を 1 つの suite として読む）から走らせる（#1334）
     assert steps["test-limited"]["cmd"] == f"python3 {SCRIPTS / 'test-run.py'} scope --paths src/a.test.js"
     assert steps["test-all"]["cmd"] == f"python3 {SCRIPTS / 'test-run.py'} whole --pr {{pr}}"
@@ -2154,7 +2154,7 @@ def test_new_impl_opens_pr_before_test_all(tmp_path):
     assert st["test-limited"]["next"] == "design-tests" and st["design-match"]["next"] == "pr" and st["pr"]["next"] == "test-all"
     assert st["doc-lint"]["next"] == "ready" and st["ready"]["next"] == "merge-gate" and st["merge-gate"]["next"] == "merge"
     assert "git push" in st["ready"]["cmd"] and "gh pr ready {pr}" in st["ready"]["cmd"]
-    assert st["fix"]["next"] == "test-limited"
+    assert st["fix"]["next"] == "format"  # 範囲テストの前のステップの先頭（ai-plugins は整形を宣言する。#1651）
     assert set(st["judge"]["choices"]) <= set(st) | {"stop"}
 
 

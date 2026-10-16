@@ -11,8 +11,12 @@
       "リポジトリ": "/abs/repo",             # 作業ツリーの元（省略時は作業場所の /.worktrees/ より前）
                                             # git worktree add が .git/config の lock で落ちたら 5 回までやり直す
       "記録": "/abs/projects-sync.sh",      # 省略可。stage を記録する
+      "設計文書": ["issues/issue-818-design.md"],  # 省略可。design-results が書く設計文書のパス（実装の指示の「設計文書:」の行）
       "規則": "判断の規則の抜粋（文字列）",   # judge へ毎回渡す
-      "上限": 30,                           # 実行するステップの数の上限（ループの歯止め）
+      "上限": 30,                           # 実行するステップの数の上限（ループの歯止め。無ければ 30）。雛形は遷移から求めて書く
+                                            # （supervise_lib/limits.py）。run は流す前に、上限がループを通らない最長の経路より
+                                            # 短いか、遷移の行き先が知らないステップなら、ステップを流さずに止まる。
+                                            # 遅れの見張りの再試行（retry）は数えない
       "steps": [
         {"id": "test", "type": "run", "cmd": "pytest -q", "stage": "完了判定",
          "timeout": 1800, "on_fail": "judge-test", "next": "end"},
@@ -62,6 +66,8 @@ drive のステップ: `cmd`（または `"drive": "cross-review" | "cross-refac
        "test": {"command": "<テストのコマンド。{paths} を範囲に置き換える>", "all": "<全体の範囲（既定 .）>",
                 "no_reports": "<run のステップの PYTEST_ADDOPTS に足す。省略可>"},
        "sync_checks": [{"name": "<名前>", "command": "<同期かチェックのコマンド>"}, ...],   # 省略可。無ければ sync のステップを置かない
+       "format": [{"name": "<名前>", "command": "<整形のコマンド>"}, ...],   # 省略可。無ければ format のステップを置かず、送信の前にも整形しない
+                                            # 終了コード 0 = 違反が残らない / 1 = 整形で直らない違反 / ほか = 仕組みの失敗
        "release": {"form": "package-plugin", "plugin": "<名前>", "runtimes": ["claude", ...]},
        "impl_timeout": <1 以上の整数>,              # 省略可。impl のステップの timeout（秒）。無ければ雛形の値
        "refactor_budget_minutes": <1 以上の整数>}   # 省略可。構造改善の想定最大時間（分）。refactor に --budget-minutes で渡す
@@ -102,7 +108,8 @@ drive のステップ: `cmd`（または `"drive": "cross-review" | "cross-refac
 - 待ちの合計が計画の `"limit_wait_max"`（既定 10800 秒）を超えるなら `結果: 止まった`・`理由: 利用上限`
 
 run のステップ:
-- `"preset"`: 定型のコマンド。`sync-check`（宣言した同期とチェック）・`assess`（構造改善の要否）・
+- `"preset"`: 定型のコマンド。`sync-check`（宣言した同期とチェック）・`format`（宣言した整形を当て、整形で変わったファイルを
+  コミットする）・`assess`（構造改善の要否）・
   `doc-lint`（追加した行の書き方のチェック）。`cmd` を書けばそちらを使う
 - `cmd` の `{pr}` は Pull Request の番号に、`{pr_url}` は URL に置き換わる（drive のステップの `args` も同じ）。
   Pull Request は pr のステップで作ったもの、または計画の `"Pull Request"`（URL なら末尾の数字を番号として読む）
@@ -145,7 +152,9 @@ queue の置き換え: `{queue_prs}` は前のすべてのステージの Pull R
   `gate` なら関門として止まる。`choices` を渡すとその中から選ばせる
 
 途中の報告（`<state-dir>/progress.jsonl`。1 行 1 つの JSON。LLM は使わない）:
-- `"kind": "step"`: ステップの切り替わりごとに 1 行（at・step・type・exit・seconds・cost・next・summary）
+- `"kind": "step"`: ステップの切り替わりごとに 1 行（at・step・type・exit・seconds・cost・next・summary・out）。
+  `run --from` の再開では、judge と work の `inputs` のうち今の実行でまだ流れていないステップへ、前の実行（`--from` の
+  無い最後の実行より後）の最後の行の exit と `out` の出力ファイルの末尾を渡す
 - `"kind": "alive"`: 最後の行から計画の `"report_interval"`（既定 600 秒）動きが無いとき（step・elapsed・
   worker の最後の報告。run のステップなら stderr の最後の行を last_output に）。長いステップ（work・run・drive）の
   待ちは区切って見るので、ステップの途中でも書く
@@ -169,7 +178,8 @@ queue の置き換え: `{queue_prs}` は前のすべてのステージの Pull R
   中央値 × `factor`（下限 `floor`）、履歴が `min_samples` 件に満たなければ `default`。所要の履歴は成功と関門の
   ステップだけを `<git の共通ディレクトリ>/ndf/step-history.jsonl`（git でなければ `<state-dir>/`）へ積む
 - 経過（利用上限の待ちを除く）が想定を超えると、ステップの `"probe"` で一次の調査を流す。`"output"`（run・drive の
-  既定。stderr が伸びたか）/ `"worker"`（work の既定。worker の行かコミットが足されたか）/
+  既定。stderr が伸びたか。drive は前の確認より後の Pull Request の投稿・レビュー・コミットも見る）/ `"worker"`（work の
+  既定。worker の行かコミットが足されたか、会話を残す claude -p のセッションの記録が伸びたか）/
   `{"cmd": "<コマンド>"}`（シェルを通さずに打ち、最後の行の JSON の `metrics.action` を読む。`{pr}` `{base}`
   `{branch}` `{state_dir}` を置き換える）/ `false`（調べずに判定へ）
 - `action` が `wait` か `remedied` なら、`max_waits` 回まで想定の秒だけ待ち直す。`retry` / `fix` / `stop` はそのまま
@@ -254,19 +264,17 @@ def fail_kind_matches(step: dict, cur: dict) -> bool:
 
 
 def on_exit_error(steps: list[dict]) -> str | None:
-    """run のステップの `on_exit` の誤り（鍵が整数でない・行き先が知らないステップの id）。無ければ None。"""
-    ids = {s.get("id") for s in steps}
+    """run のステップの `on_exit` の形の誤り（対応表でない・鍵が整数でない）。無ければ None。
+    行き先の照合はすべての遷移の鍵と合わせて `limits.unknown_targets` が持つ。"""
     for s in steps:
         table = s.get("on_exit")
         if table is None:
             continue
         if not isinstance(table, dict):
             return f"ステップ {s.get('id')} の on_exit が対応表でない"
-        for code, dest in table.items():
+        for code in table:
             if not re.fullmatch(r"-?\d+", str(code)):
                 return f"ステップ {s.get('id')} の on_exit の鍵が終了コードでない: {code}"
-            if dest not in ("end", "stop") and dest not in ids:
-                return f"ステップ {s.get('id')} の on_exit の行き先が知らないステップ: {dest}"
     return None
 
 

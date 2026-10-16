@@ -340,7 +340,6 @@ def plan_release_package_plugin(a) -> dict:
         "branch": a.branch or f"release/v{v}",
         "起点": f"origin/{a.base}",
         "規則": rule,
-        "上限": 20,
         "steps": steps,
     }
     with_decls(plan, a)

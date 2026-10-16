@@ -44,6 +44,9 @@ EXIT_VIOLATION = 1  # チェックで違反あり・手順が失敗した
 EXIT_UNREADABLE = 2  # 読めない・呼び出しの誤り（「一致」「0 件」と読ませない）
 EXIT_PRECONDITION = 3  # 前提が無い（宣言・認証・対象のファイル）、または各スクリプトが定めた正常な否定の結果
 # （立たない・変更なし・飛ばしてよい）。読めないときは 2 で返し、3 と混ぜない
+# PR がベースブランチと衝突している（mergeStateStatus が DIRTY か、gh pr merge がマージのコミットを作れずに拒んだ）。
+# merge-when-green が返し、プランの merge はベースブランチの取り込みへ戻る（#1917）
+EXIT_BASE_CONFLICT = 4
 EXIT_GATE = 10  # 10〜19: 関門（人の同意が要る）
 EXIT_PAUSE = 20  # 20〜29: LLM の判断待ち
 # 依存の欠け（`deps.require` が外部パッケージを用意できずに止まった。何も判定していない）。値の持ち主は deps.py
@@ -66,7 +69,7 @@ def code_matches(status: str, code: int) -> bool:
         return code == EXIT_OK
     if status == "gate":
         return code in GATE_CODES or code in PAUSE_CODES
-    return code in (EXIT_VIOLATION, EXIT_UNREADABLE, EXIT_PRECONDITION, EXIT_DEPS_MISSING, EXIT_INFRA_WAIT)
+    return code in (EXIT_VIOLATION, EXIT_UNREADABLE, EXIT_PRECONDITION, EXIT_BASE_CONFLICT, EXIT_DEPS_MISSING, EXIT_INFRA_WAIT)
 
 
 def _check_item_types(obj: dict, errs: list[str]) -> None:

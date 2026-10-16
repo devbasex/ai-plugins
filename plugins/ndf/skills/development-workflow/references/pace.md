@@ -300,7 +300,7 @@ Pull Request が範囲から外れる。ブランチはリポジトリにある�
 | ステップ | 内容 |
 | --- | --- |
 | `prepare` | `check-trigger.py prepare`: `check-base/<名>` を `from` に作って送る（残っていれば付け直す）。範囲を状態ディレクトリの `check.json` へ |
-| `pr` → `assess` → `refactor` → `review` → `test-all` | いつもの検査と同じ。`refactor` の範囲は `check-trigger.py scope`（重点領域 → 流出不具合の領域 → その他）。`--review-only` は `assess` と `refactor` を持たず、`pr` → `review` と進む |
+| `pr` → `assess` → `refactor` → `review` → `base-sync` → `test-all` | いつもの検査と同じ。`base-sync` は起点のブランチを取り込んで push し（`merged-steps.py base-sync`。衝突が残れば `fix-base` が解く）、全体テストの修正の後も `base-sync` から測り直す。`refactor` の範囲は `check-trigger.py scope`（重点領域 → 流出不具合の領域 → その他）。`--review-only` は `assess` と `refactor` を持たず、`pr` → `review` と進む |
 | `finish` | 宛先をベースブランチへ付け替える。検査で変更が無ければ Pull Request を閉じて `record` へ飛ぶ |
 | `ready` → `merge` → `record` | マージして検査の記録を足し、`check-base/<名>` を消す |
 | `abort` / `abort-before-pr` | 落ちたステップと judge の止める判断（`abort`）の行き先。`result: failed` と落ちたステップを記録し、`check-base/<名>` を消し、Pull Request を閉じて止まる |
