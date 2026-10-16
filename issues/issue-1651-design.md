@@ -105,7 +105,7 @@
 | `supervise_lib/design_stage.py` | 打ち直し（`_retrying`）、一時的な失敗の見分け（`ReadFailed`）、設計文書のパスの収集、補正の取り出し（`kept_lines`）と書き直し |
 | `supervise_lib/decl.py` | `format` の宣言と用語集の有無（`glossary_ready`）を引数へ写し、スプリントの各プランへ引き継ぐ |
 | `supervise_lib/commands.py`・`supervise.py`・`supervise_lib/paths.py` | `supervise.py format [--root] [--commit]` の副命令と、プリセット `format` |
-| `test-run.py` | `scope --only-kind lint`（静的解析の suite だけを変更範囲へ当てる） |
+| `test-run.py` | `scope --only-kind lint` / `scope --only-kind test`（渡した種別の suite だけを変更範囲へ当てる） |
 | `lib/result_posts.py` | `push_fix` が push の前に `formatting.apply_format` を呼ぶ |
 | `lib/design_results.py` | `Row.doc`（その行を読んだ設計文書のパス）を持ち、`design-results.json` へ写す |
 | `.ndf/supervise.json` | ai-plugins の整形の宣言 `format`（C7。実装の中でコミットし、承認ゲート 2 で人が見る） |
@@ -208,9 +208,9 @@ ai-plugins の宣言は `[{"name": "lint-fix", "command": "bash scripts/check-li
 `items` はコマンドごとの `{name, result, exit, tail}` と、コミットしたときの `{name: "commit", sha, files}`。
 コミットの件名は `Update: 宣言の整形を当てる（<名前>）`。
 
-### `test-run.py scope --only-kind lint`
+### `test-run.py scope --only-kind lint` / `--only-kind test`
 
-静的解析の suite だけを `--changed`（無ければ起点との merge-base からの差分）へ当てる。範囲に入るファイルが無ければ `ok`・終了コード 0（`--only-kind` を付けないときは今のまま 2）。ほかの終了コードは `scope` と同じ。
+`--only-kind` に渡した種別（suite の `kind`。`lint` か `test`）の suite だけを `--changed`（無ければ起点との merge-base からの差分）へ当てる。範囲に入るファイルが無ければ、`--only-kind lint` は `ok`・終了コード 0、`--only-kind test` と付けないときは今のまま 2。ほかの終了コードは `scope` と同じ。
 
 ### 実装のプランの形
 
@@ -221,7 +221,8 @@ ai-plugins の宣言は `[{"name": "lint-fix", "command": "bash scripts/check-li
 
 `format` のステップ: `{"type": "run", "preset": "format", "stage": "実装", "on_exit": {"2": "stop"}, "on_fail": "fix-format"}`。
 `lint-limited` のステップ: `{"type": "run", "stage": "完了判定", "cmd": "<scope_cmd> --only-kind lint", "on_exit": {"2": "stop"}, "on_fail": "fix-lint"}`。
-`fix-format` / `fix-lint` は `FIX_PROMPT` の修正の worker で、`next` は `pre_test_steps` の先頭（`format`）。
+`fix-format` / `fix-lint` は `FIX_PROMPT` の修正の worker で、`next` は `pre_test_steps(a)` が返す並びの先頭（`format`。`format` の宣言が無ければ `sync`、それも無ければ `lint-limited`）。`fix-lint` は `lint-limited` を置くときだけ置くので、先頭は必ず実在する。
+`lint-limited` を置くプランでは、`test-limited` の `cmd` を `<scope_cmd> --only-kind test` にする（静的解析の suite を同じ範囲へ 2 度当てない）。`lint-limited` を置かないときは今のまま `<scope_cmd>`。
 
 ### 実装の指示（`impl` の `prompt`）
 
@@ -269,9 +270,9 @@ graph LR
   tl -->|0| pr
 ```
 
-宣言ごとに置くかを決める: `format` と `fix-format` は `format` の宣言、`sync` と `fix-sync` は `sync_checks`、`lint-limited` と `fix-lint` は範囲の雛形を持つ `kind: lint` の suite があるときだけ置く。どれも無ければ `impl → test-limited` で今と同じ（I7）。`format` と `lint-limited` の終了コード 2 は止まる。
+宣言ごとに置くかを決める: `format` と `fix-format` は `format` の宣言、`sync` と `fix-sync` は `sync_checks`、`lint-limited` と `fix-lint` は範囲の雛形を持つ `kind: lint` の suite があるときだけ置く。どれも無ければ `impl → test-limited` で今と同じ（I7）。`format` と `lint-limited` の終了コード 2 は止まる。図の `fix-format` / `fix-lint` / `fix` から `format` への矢印は「並びの先頭」を指し、`format` を置かないプランでは置いたステップのうち最も前のもの（`sync`、無ければ `lint-limited`）へ向く。`lint-limited` を置くときは、`test-limited` は `--only-kind test` でテストの suite だけを打つ。
 
-`pre_test_steps(a)` はこの並びの `format` から `fix-lint` までを返し、`plan_to_merge` は `head` の `next` と `fix` の `next` をその先頭（無ければ `test-limited`）へ向ける。#2003 が起点の取り込みを `head` の後に置くときは、取り込みの `next` を同じ先頭へ向ける。
+`pre_test_steps(a)` はこの並びの `format` から `fix-lint` までを、置くステップだけで返し、`fix-format` / `fix-lint` の `next` を返す並びの先頭へ向けて組む。`plan_to_merge` は `head` の `next` と `fix` の `next` をその先頭（並びが空なら `test-limited`）へ向け、並びに `lint-limited` があれば `test-limited` の `cmd` に `--only-kind test` を足す。#2003 が起点の取り込みを `head` の後に置くときは、取り込みの `next` を同じ先頭へ向ける。
 
 ### 「設計の結果」の書き直し
 
@@ -331,7 +332,7 @@ sequenceDiagram
 | 大項目 | 実現方式 |
 | --- | --- |
 | 可用性 | 打ち直しの待ちは 1 回の実行で合計 120 秒まで。ステージの `timeout` 600 秒の内に収まる。打ち直しても読めなければ書かずに止まる（I4） |
-| 性能・拡張性 | `format` と `lint-limited` は変更範囲に当てる。完了判定で、ai-plugins の実装のプランでの 2 ステップの秒を測り、範囲テスト 1 回（約 310 秒）より短いことを実装の PR に書く |
+| 性能・拡張性 | `lint-limited` は変更範囲に当て、`format` は宣言のコマンドをそのまま根で打つ（範囲を渡す口を持たない。ai-plugins の `check-lint.sh --fix` は追跡ファイルすべてに当たり、コミットに入るのは I6 のとおり整形で変わったファイルだけ）。`lint-limited` を置くと `test-limited` は `--only-kind test` で静的解析の suite を打ち直さない。完了判定で、ai-plugins の実装のプランでの `format`・`lint-limited` と、修正のループ 1 回で通る `sync` の秒を測り、`format` と `lint-limited` の和が範囲テスト 1 回（約 310 秒）より短いことを実装の PR に書く |
 | 運用・保守性 | 整形と静的解析のコマンド名は `.ndf/` にだけ書く。`supervise_lib`・`lib`・`cross-review` に `check-lint`・`ruff` を書かない |
 | 移行性 | `format` の宣言は省略できる。既にある実装のプランの JSON（`設計文書` が無い）は `design-results` も実行も今のまま流れる |
 
@@ -350,6 +351,8 @@ sequenceDiagram
 | 1651-4 | `format` の宣言のあるプランは `impl` の後・`test-limited` の前に `format` を持つ。整形違反のコミットを持つ一時リポジトリで `supervise.py format --commit` を打つと、違反が消えたコミットが足される | ステップを `pr` の後に置く・コミットしないと落ちる |
 | 1651-5 | `kind: lint` の suite のあるプランは `test-limited` の前に `lint-limited` を持ち、違反で `fix-lint` → `format` へ戻る。`--only-kind lint` はテストの suite を打たない | テストの suite も打つ・`on_fail` が `test-limited` へ向くと落ちる |
 | 1651-6・I7 | 宣言が無いプロジェクトのプランの `steps` の id の並びが今と同じ | 宣言が無いのにステップを置くと落ちる |
+| 1651-5（重ねて打たない） | `kind: lint` の suite のあるプランの `test-limited` の `cmd` が `--only-kind test` を持ち、無いプランは今の `cmd` のまま | `lint-limited` を置いたのに `test-limited` が静的解析の suite も打つと落ちる |
+| 1651-4・1651-5（行き先） | `kind: lint` の suite はあるが `format` の宣言が無いプランで、`fix-lint`・`fix` の `next` が実在するステップ（`sync`、無ければ `lint-limited`）を指す。宣言がすべてあるプランでは `fix` の後に `format` → `sync` を通る | `next` を `format` に固定する・`fix` の `next` を `test-limited` のままにすると落ちる |
 | 1651-7・I3 | 雛形が組む `prompt` に宣言の整形・静的解析のコマンドが現れない（宣言の `command` の文字列で照らす） | `IMPL_RULES` へ整形の指示を足すと落ちる |
 | 1941-1 | 1 回目に 504 で落ち 2 回目に通る応答で、失敗が無いときと同じプランを書いて `ok` | 打ち直さない・打ち直しの結果を捨てると落ちる |
 | 1941-2・I4 | 打ち直しても落ちる応答で、プランと `design-results.json` が書き換わらず `stopped`・2、`summary` に課題とコマンドの末尾 | 失敗を `unread` に入れて `ok` にすると落ちる |
@@ -373,7 +376,7 @@ sequenceDiagram
 
 | ファイル | この主題が触る | 触らない（受け持ち） |
 | --- | --- | --- |
-| `supervise_lib/templates.py` | `IMPL_RULES`・`impl_prompt`・`plan_impl`（`prompt` を組む引数だけ）・`pre_test_steps`（新規）。`plan_to_merge` は `sync` のステップを組む行を `pre_test_steps` の呼び出しへ置き換える行と、`head[-1]["next"]` と `fix` の `next` を `pre_test_steps` の先頭へ向ける行だけ | `plan_to_merge` の `上限` と `test-limited` から後のステップ（#1909・#1917 #2003）、`judge_step`・`RULE_IMPL`・`RULE_CHECK`・`FIX_PROMPT`・`plan_check`・`plan_check_since`（#1917 #2003） |
+| `supervise_lib/templates.py` | `IMPL_RULES`・`impl_prompt`・`plan_impl`（`prompt` を組む引数だけ）・`pre_test_steps`（新規）。`plan_to_merge` は `sync` のステップを組む行を `pre_test_steps` の呼び出しへ置き換える行と、`head[-1]["next"]` と `fix` の `next` を `pre_test_steps` の先頭へ向ける行と、`lint-limited` があるとき `test-limited` の `cmd` へ `--only-kind test` を足す行だけ | `plan_to_merge` の `上限` と `test-limited` から後のステップ（#1909・#1917 #2003）、`judge_step`・`RULE_IMPL`・`RULE_CHECK`・`FIX_PROMPT`・`plan_check`・`plan_check_since`（#1917 #2003） |
 | `supervise_lib/flow.py` | 触らない | `plan_workflow`（#1909 #1676） |
 | `supervise_lib/design_stage.py` | `merged_design_pr`・`changed_design_docs`・`read_results`・`rewrite`・`cmd_design_results`・`_retrying`（新規）・`kept_lines`（新規）・`ReadFailed`（新規） | `impl_plans`（変えない） |
 
@@ -383,7 +386,7 @@ sequenceDiagram
 
 | 項目 | 内容 |
 | --- | --- |
-| 秒の実測 | `format` と `lint-limited` の秒は実装の完了判定で測る（非機能の性能の行） |
+| 秒の実測 | `format`・`lint-limited` と、修正のループで新たに通る `sync` の秒は実装の完了判定で測る（非機能の性能の行）。`sync` の秒が範囲テスト 1 回に比べて重ければ、修正の行き先から `sync` を外すかを振り返りで決める |
 | 直らない違反の往復 | `format` が 1 を返し続ける（変更に起因しない既存の違反）とき、`fix-format` との往復は経路の上限で止まる。往復を judge で切るかは、実際に起きた回数を振り返りで数えてから決める |
 | `/ndf:fix` の単独の送信 | `push_fix` を通るため整形が当たるようになる。単独の送信で整形のコミットが足されることを、次の実利用で確かめる |
 | 整形の前から変わっていたファイル | worker が未コミットのまま残したファイルを整形が変えたときは、コミットに入れず結果の `items` に出すだけである。実際に起きるかは実装で確かめる |

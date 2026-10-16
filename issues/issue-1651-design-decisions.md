@@ -40,17 +40,21 @@
 
 範囲テストは既に `kind: lint` の suite を変更したファイルへ当てている（m1693 で落ちたのはこれである）。同じ suite を、テストの suite を打たずに先に当てるステップ（`lint-limited`）を置く。新しい宣言は要らず、ai-plugins では lint と script-structure がそのまま当たる。範囲に入るファイルが無ければ通る。
 
+`lint-limited` を置くプランでは、`test-limited` を `--only-kind test` で打ち、同じ suite を同じ範囲へ 2 度当てない。種別の絞り込みは `--only-kind` の 1 つの口で受け、`lint` と `test` で口を分けない。
+
 `sync_checks` に script-structure を足す形は採らない。全体に当たり、変更起因かを分けられない。新しい宣言のキーを足す形も、同じコマンドを 2 か所に書くことになる。
 
 根拠: Value 6 / Value 3（MVV 版 2）
 
 ### 決定 6: 修正の後にも整形と静的解析を通すため、`impl → format → sync → lint-limited → test-limited` と並べ、修正の行き先を先頭にする
 
-`format` を `sync` の前に置き、`sync` の中の lint が整形だけの違反で落ちないようにする。`lint-limited` は `sync` が生成物を揃えた後に当てる。`fix`・`fix-format`・`fix-lint` の行き先は `pre_test_steps` の先頭（`format`）とし、修正の worker が作った整形の違反も push の前に直る。並びは `pre_test_steps(a)` が 1 か所で組み、宣言の無いステップは置かない（I7）。
+`format` を `sync` の前に置き、`sync` の中の lint が整形だけの違反で落ちないようにする。`lint-limited` は `sync` が生成物を揃えた後に当てる。`fix`・`fix-format`・`fix-lint` の行き先は `pre_test_steps(a)` が返す並びの先頭（宣言がすべてあれば `format`、`format` の宣言が無ければ `sync`、それも無ければ `lint-limited`）とし、修正の worker が作った整形の違反も push の前に直る。並びは `pre_test_steps(a)` が 1 か所で組み、宣言の無いステップは置かず、行き先も置いたステップの中から決める（I7）。
+
+`fix` の行き先が先頭になるため、修正のループのたびに今は通らない `sync` が通る。修正の worker が生成物の元（ai-plugins では Skill や hook。`build-runtime-plugins.sh` が runtime ごとの写しを作る）を変えたとき、`sync` を飛ばすと生成物のずれたコードが範囲テストと push へ進み、CI の validate で落ちてから修正のループをもう 1 回回すことになる。ループごとに `sync` を打つ秒は、範囲テストと CI の 1 回ぶんの往復より軽いと見込み、実装の完了判定で測る（非機能の性能の行）。重ければ行き先から `sync` を外すかを振り返りで決める。
 
 `pr` の直前に整形を置く形は採らない。範囲テストと設計との突き合わせが整形の前のコードを見ることになり、整形で変わったコードはテストを通らずに push される。
 
-根拠: Value 4 / Value 1（MVV 版 2）
+根拠: Value 4 / Value 1 / Value 3（MVV 版 2）
 
 ### 決定 7: 送信の経路を 1 つに保つため、送信の前の整形は `result_posts.push_fix` の中で当てる
 
