@@ -85,8 +85,9 @@ def _format_git(root: Path | str, *args: str) -> list[str] | None:
 
 def _dirty(root: Path | str) -> set[str] | None:
     """HEAD から変わっている追跡ファイル（索引と作業ツリーの両方）。git が落ちたら None。"""
-    lines = _format_git(root, "diff", "--name-only", "HEAD")
-    return set(lines) if lines is not None else None
+    # -z: core.quotePath の引用・エスケープを受けず、実際のファイル名を NUL 区切りで読む
+    p = subprocess.run(["git", "-C", str(root), "diff", "--name-only", "-z", "HEAD"], capture_output=True, text=True)
+    return {f for f in p.stdout.split("\0") if f} if p.returncode == 0 else None
 
 
 def _contents(root: Path | str, paths: set[str]) -> dict[str, bytes | None]:
@@ -124,9 +125,12 @@ def apply_format(root: Path | str, commands: list[FormatCommand], commit: bool =
     if not commit or not changed:
         return FormatOutcome(OK, files=changed, runs=runs, skipped=skipped)
     names = "・".join(c.name for c in commands)
-    # パスを渡したコミットはそのパスだけを入れる（前から索引にあった変更を巻き込まない）
+    # パスを渡したコミットはそのパスだけを入れる（前から索引にあった変更を巻き込まない）。
+    # --literal-pathspecs: `[id]` などを glob と読まず、列挙したファイル名だけに当てる
     msg = f"Update: 宣言の整形を当てる（{names}）"
-    done = subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", msg, "--", *changed], capture_output=True, text=True)
+    done = subprocess.run(
+        ["git", "-C", str(root), "--literal-pathspecs", "commit", "-q", "-m", msg, "--", *changed], capture_output=True, text=True
+    )
     if done.returncode != 0:
         return FormatOutcome(BROKEN, files=changed, failed="commit", tail=(done.stdout + done.stderr).strip()[-TAIL:], runs=runs)
     head = _format_git(root, "rev-parse", "HEAD") or [""]

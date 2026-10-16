@@ -196,6 +196,21 @@ def test_format_commits_only_what_the_format_changed(tmp_path):
     assert code == 0 and git(root, "rev-list", "--count", "HEAD") == "3"
 
 
+def test_format_commits_literal_names(tmp_path):
+    """日本語名（core.quotePath で引用される）と glob の文字を含む名前も、その名前のファイルだけをコミットする。"""
+    root = make_repo(tmp_path / "wt")
+    for rel in ("設計.txt", "[i].txt", "i.txt"):
+        (root / rel).write_text("x\n")
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "Add: names")
+    (root / "i.txt").write_text("user   \n")  # 整形の前からある利用者の変更。`[i].txt` の glob に一致する
+    cmd = "sed -i 's/x/y   /' 設計.txt '[i].txt' && sed -i 's/[[:space:]]*$//' 設計.txt '[i].txt'"
+    out = formatting.apply_format(root, [formatting.FormatCommand("f", cmd)])
+    assert out.status == formatting.OK, out
+    assert out.files == ["[i].txt", "設計.txt"]
+    assert git(root, "-c", "core.quotePath=false", "status", "--porcelain") == "M i.txt"
+
+
 @pytest.mark.parametrize("exit_code, want", [(1, 1), (3, 2)])
 def test_format_failures_stop(tmp_path, exit_code, want):
     root = make_repo(tmp_path / "wt", {**SV, "format": [{"name": "f", "command": f"echo boom; exit {exit_code}"}]})

@@ -130,7 +130,7 @@ class Fake:
         bad = self._fail(key)
         if bad:
             return bad
-        out = {"git fetch": "", "git ls-tree": f"{DOC}\n", "git show": TABLE}[key]
+        out = {"git fetch": "", "git ls-tree": f"{DOC}\0", "git show": TABLE}[key]
         return subprocess.CompletedProcess(cmd, 0, out, "")
 
 

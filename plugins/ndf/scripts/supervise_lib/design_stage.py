@@ -100,7 +100,9 @@ def changed_design_docs(root: str, base: str, pr: int, budget: Budget | None = N
     if not paths:
         return []
     _git_retrying(root, ["fetch", "-q", "origin", base], budget)
-    present = set(_git_retrying(root, ["ls-tree", "-r", "--name-only", f"origin/{base}", "--", "issues/"], budget).stdout.splitlines())
+    # -z: core.quotePath で引用された名前は gh の実パスと一致しないため、NUL 区切りで実際の名前を読む
+    listed = _git_retrying(root, ["ls-tree", "-r", "-z", "--name-only", f"origin/{base}", "--", "issues/"], budget).stdout
+    present = {f for f in listed.split("\0") if f}
     return [(f, _git_retrying(root, ["show", f"origin/{base}:{f}"], budget).stdout) for f in paths if f in present]
 
 
