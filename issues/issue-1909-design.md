@@ -84,6 +84,7 @@
 | worker のセッションの記録 | 会話を残す claude -p（Skill を回す work のステップ）が `<CLAUDE_CONFIG_DIR>/projects/` の下へ書き足していく 1 本の JSONL。遅れの見張りが大きさの伸びを進みに数える | 追加（`ndf-workflow`） |
 | ステップの上限 | 要求の意味のまま。雛形が書く値は遷移から求める | 追加（`ndf-workflow`） |
 | 修正のループ | 要求の意味のまま。数え方は「上限の計算」の節 | 追加（`ndf-workflow`） |
+| 戻りの輪 | 修正の work を含まず、`kind` が「戻り」のステップを含む遷移の輪。戻りの上限の回数だけ回るものとして上限に数える | 追加（`ndf-workflow`） |
 | 遅れの見張り | ステップが想定の時間を超えたときに一次の調査を流し、待つ・打ち切る・再試行するを決める仕組み（`slow`） | 追加（`ndf-workflow`） |
 | 前の実行 | `run --from` で再開したとき、今の実行より前に同じプランを流した実行。`--from` を付けない最後の実行の始まりより後の記録を指す | 追加（`ndf-workflow`） |
 
@@ -136,6 +137,36 @@ graph LR
     P --> K[(GitHub の PR)]
 ```
 
+### システム構成図（文脈・配置）
+
+```mermaid
+graph LR
+    U[conductor / supervisor] -->|new・run・queue| SV[supervise.py<br/>手元のプロセス]
+    SV -->|会話を残す claude -p| CL[claude CLI]
+    CL --> SJ[(CONFIG_DIR/projects の JSONL)]
+    SV -->|大きさを読む| SJ
+    SV -->|gh pr view| GH[(GitHub)]
+    SV --> ST[(状態ディレクトリ<br/>進捗ログ・.out)]
+```
+
+配置は今と同じで、プロセスも置き場も増やさない。外の系は claude CLI と GitHub の 2 つで、どちらも読むだけである。
+
+### パッケージ・モジュール構成
+
+```text
+plugins/ndf/scripts/
+├── lib/slow_step.py              # session_size・pr_latest・probe_worker・probe_drive
+└── supervise_lib/
+    ├── limits.py                 # 新規: 経路・修正のループ・戻りの輪・上限の計算
+    ├── templates.py / sprint.py / sprint_waves.py
+    │   release_templates.py / delivery_templates.py   # "上限" の 1 行を消す・書き出しで fill
+    ├── plan.py                   # on_exit_error の行き先の照合を limits へ寄せる
+    ├── engine.py / flow.py       # setup の照合・数え方
+    ├── state.py / steps.py       # prior_results・入力の組み方
+    ├── claude.py                 # --session-id
+    └── slow.py                   # 一次の調査に進みの印を足す
+```
+
 ## 構造
 
 ```mermaid
@@ -145,6 +176,7 @@ classDiagram
         +default_next(steps, sid)
         +longest_path(plan, start) int
         +fix_loops(plan) dict
+        +return_loops(plan) dict
         +step_limit(plan) int
         +unknown_targets(plan) list
         +fill(plan)
@@ -182,6 +214,7 @@ classDiagram
 
 - **D**: すべての遷移のうち、プランの並びで後ろのステップへ行くものだけをたどった最長の経路のステップの数（決定 2）。後ろのステップへ行く遷移だけのグラフは輪を持たないため、並びの逆順に 1 回たどれば求まる
 - **修正のループ**: 検査のステップ `c` の失敗の遷移 `c → f` 1 本ごとに 1 つ。長さは、`c → f` から成功の遷移だけを通って `c` へ戻る単純な輪のうち、修正の work を 1 つ以上含む最も長いもののステップの数（決定 3）。修正の work は、`type` が `work` で `kind` が無いか「修正」のステップである。そういう輪が無ければループに数えない（例: 設計のプランの `glossary-recheck → push-glossary`）
+- **戻りの輪**: 修正の work を含まないが、`kind` が「戻り」のステップを含む輪（起点の取り込み #1917 の `merge →(終了コード 4) base-return → base-sync → … → merge`）。修正のループと同じく失敗の遷移 1 本ごとに 1 つと数え、長さは `kind: 戻り` のステップを含む最長の単純な輪のステップの数、回数は戻りの上限（#1917 の前提 2 の 3 回）とする。式は `上限 = D + 3 × Σ 修正のループ + 3 × Σ 戻りの輪` になる。回数は `limits.FIX_ROUNDS` を使い、#1917 の `base_sync.RETURN_LIMIT` が `FIX_ROUNDS` 以下であることをテストで縛る（戻りの上限だけを上げると落ちる）。戻りの輪の中の `base-sync → fix-base → base-sync` は修正の work を含むので、修正のループとして別に数える。`kind: 戻り` を付けるのは #1917 の `base_sync_steps` である
 - 輪の探索が 100,000 回の展開を超えたら、そのループの長さは「`f` から行けて `c` へ戻れるステップの数」で代える（多めに見る側）
 
 今の雛形で計算した値を次に示す。2026-10-16 に `supervise.py new sprint`（pace: normal）と `new check` でプランを組み、この定義を写した手元のスクリプトで数えた。
@@ -197,6 +230,8 @@ classDiagram
 | スプリントの開発版の配布 | 20 | 11 | bump・changelog・notes・sync→judge: 各 3、release→judge: 4、verify: 5、facts: 6、explain: 7、others: 8 | 137 |
 
 要求の実測と照らすと、全体テストの修正 1 回は +8、doc-lint の修正 1 回は +2 で、#1909 の本文の数と一致する。要求の経路はどれも計算した上限に収まる。#1833（merge まで 22 本）と #1702（23 本）は 85 以内、m1910（13 本）は 21 以内、#1676（14 本）は 15 以内である。
+
+表は今の雛形の値である。起点の取り込み（#1917）と指示と整形（#1651）がステップを足すと、書き出しが同じ式で数え直す。実装のプランでは D が取り込みと `format`・`lint-limited` の分だけ伸び、`base-sync → fix-base` などの修正のループと、戻りの輪（`merge` から `base-sync` を経て `merge` へ戻る十数本）の 3 倍が足される。どちらの主題も `上限` の値を書かない。
 
 ## 入出力の契約
 
@@ -302,6 +337,7 @@ graph TD
 | L3・I5 | `上限` が D より短い手書きのプランを `run` すると、どのステップの `.out` も作られずに止まり、理由に上限と D が載る。`--from` では開始のステップからの D で照らす | 照合を消すと、最初のステップが流れて落ちる |
 | L4・I6 | 範囲テストが落ち続け judge が毎回 fix を返すプランは「ステップの数が上限 N を超えた」で止まる | 数え方が修正のステップを数えないと止まらずに落ちる |
 | L5・I4 | `next` の行き先が無いステップのプランは、`new` がファイルを書かずに終了コード 2、`run` が流す前に止まる。`limits` は例外で落ちない | 照合を `on_exit` だけに戻すと、`run` が途中まで流れて落ちる |
+| L1・戻りの輪 | `kind: 戻り` のステップを含む輪（`merge` の終了コード 4 → 戻り → 取り込み → … → `merge`）を持つプランで、上限に戻りの輪の長さの 3 倍が入り、戻りを 3 回通した経路が上限で止まらない。`RETURN_LIMIT` が `FIX_ROUNDS` を超えるとテストが落ちる | 戻りの輪を数えないと、戻りを 3 回通す経路が上限で止まって落ちる |
 | I3 | `run` の前後でプランのファイルの中身が変わらない | `run` が `上限` を埋めると落ちる |
 | 1909-1 | スプリントの実装のプランで #1833 の経路（20 本）が merge まで通る | 上限を 20 に戻すと落ちる |
 | 1909-2 | 同じプランで #1702 の経路（範囲テストの修正 3 回と doc-lint の修正 1 回）が merge まで通る | 同上 |
@@ -336,6 +372,7 @@ graph TD
 | `supervise_lib/templates.py` | `plan_to_merge`・`plan_check`・`plan_check_since` | プランの辞書の `"上限": N,` の 1 行を消すだけ。steps の並び・遷移・ほかの鍵は触らない |
 | `supervise_lib/templates.py` | `cmd_new` | ファイルを書く前に `limits.fill` を呼び、`LimitError` なら書かずに `stopped` を返す |
 | `supervise_lib/flow.py` | `_plan_steps` | 上限と比べる数を、遅れの再試行を除いた数にし、止まった理由に再試行の回数を足す |
+| `supervise_lib/plan.py` | `on_exit_error` と、冒頭の docstring の `"上限"` の行 | 行き先の照合（L5）を `limits.unknown_targets` へ寄せ、`on_exit_error` には鍵が終了コードかの照合だけを残す。docstring は「雛形は遷移から求める」と直す。指示と整形（#1651）は同じファイルの docstring の別の行（プランの鍵 `設計文書`・`supervise.json` の `format`・preset `format`）だけを足し、関数を触らないので重ならない |
 | `supervise_lib/design_stage.py` | 触らない | — |
 
 共有しないファイルで触る雛形の関数は次の 7 つである。`上限` の 1 行を消す関数は、上の 3 つと合わせて 9 つになる。

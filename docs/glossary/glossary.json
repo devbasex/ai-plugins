@@ -4017,6 +4017,12 @@
       "context": "ndf-workflow",
       "meaning": "会話を残す claude -p（Skill を回す work のステップ）が CLAUDE_CONFIG_DIR の projects の下へ書き足していく 1 本の JSONL。遅れの見張りが大きさの伸びを進みに数える",
       "pending_source": "issues/issue-1909-design.md"
+    },
+    {
+      "term": "戻りの輪",
+      "context": "ndf-workflow",
+      "meaning": "修正の work を含まず、kind が「戻り」のステップを含む遷移の輪。戻りの上限の回数だけ回るものとして上限に数える",
+      "pending_source": "issues/issue-1909-design.md"
     }
   ]
 }
