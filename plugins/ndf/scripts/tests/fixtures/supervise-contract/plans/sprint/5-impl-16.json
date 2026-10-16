@@ -16,6 +16,12 @@
       "stage": "実装",
       "issues": true,
       "timeout": 3600,
+      "estimate": {
+        "source": "uncalibrated",
+        "samples": 0,
+        "high": null,
+        "basis": []
+      },
       "prompt": "課題 #16 を実装する。本文は `gh issue view 16` で読む（何をするか と 受け入れ条件）。\n共通:\n- 文書には今の決まりだけを書く。.md の文言を照合するテストは書かない\n- コミットの件名と本文に課題を閉じる語（Closes / Fixes / Resolves）を書かない。区切りごとにコミットする（push しない）\n",
       "next": "test-limited"
     },

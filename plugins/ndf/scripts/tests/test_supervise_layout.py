@@ -49,6 +49,7 @@ MODULES = [
     "worker_steps",
     "pr",
     "engine",
+    "actuals",  # supervise の実行を見積もりの実績の記録へ残す（#1856）
     "admission",
     "running",  # queue のプロセスの中の、走っているプランの登録簿（#1674）
     "flow",
@@ -87,6 +88,7 @@ NO_ENGINE = [
     "paths",
     "admission",
     "running",
+    "actuals",
 ]
 
 # 関数の中の import で、モジュールの循環にしない辺（Engine.run と cmd_queue が耐久ワークフローを始める。

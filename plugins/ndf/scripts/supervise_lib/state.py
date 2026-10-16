@@ -142,14 +142,14 @@ class RunState:
         return mvv, (self.sprint_mvv_of(plan) if mvv.approved else None)
 
     # --- 途中の報告 ---
-    def progress_write(self, rec: dict) -> None:
+    def progress_write(self, rec: dict) -> dict:
         rec = {"kind": rec.pop("kind"), "at": clock.now_iso(), **rec}
         with open(self.progress, "a") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
         self.progress_seen = self.progress.stat().st_size
         self.last_line_at = time.time()
-        if rec["kind"] in self.pcount:
-            self.pcount[rec["kind"]] += 1
+        self.pcount.update({k: self.pcount[k] + 1 for k in (rec["kind"],) if k in self.pcount})
+        return rec
 
     def attention(self, reason: str, text: str) -> None:
         """conductor の判断が要る出来事を 1 行残す（同じ理由と文は 1 度だけ）。"""
@@ -235,9 +235,9 @@ class RunState:
             }
         )
 
-    def run_line(self, start: str | None) -> None:
-        """実行の始まりの 1 行（`from` は `--from` のステップか null。`recorded_pr` が前の実行の範囲を決める）。"""
-        self.progress_write({"kind": "run", "from": start})
+    def run_line(self, start: str | None) -> str:
+        """実行の始まりの 1 行（`from` は `--from` のステップか null。`recorded_pr` が前の実行の範囲を決める）。行の `at` を返す。"""
+        return self.progress_write({"kind": "run", "from": start})["at"]
 
     def recorded_pr(self) -> str:
         """前の実行が決めた Pull Request（`--from` の再開で使う）。最後の `--from` を付けない実行の始まりの行より後の
@@ -295,7 +295,7 @@ class RunState:
             subprocess.run(["bash", rec, str(issue), "stage", stage], cwd=cwd, capture_output=True, text=True)
 
     def add_usage(self, kind: str, res: dict) -> None:
-        """1 回の呼び出しの使用量を、計画の合計（`llm`）と今のステップの内訳（`cur["llm"]`）へ足す。"""
+        """1 回の呼び出しの使用量を、計画の合計（`llm`）と今のステップの内訳（`cur["llm"]`。同じステップの呼び出しは足し合わせる）へ足す。"""
         u = res.get("usage", {})
         w5, w1h = usage_ledger.cache_writes(u)
         self.llm[kind] += 1
@@ -304,7 +304,6 @@ class RunState:
         self.llm["cache_write"] += u.get("cache_creation_input_tokens", 0)
         self.llm["output"] += u.get("output_tokens", 0)
         self.llm["cost"] += res.get("cost") or 0.0
-        # ステップごとの内訳（往復の回数・トークン・費用）。同じステップで複数回呼べば足し合わせる
         c = self.cur.setdefault("llm", {"calls": 0, "turns": 0, "input": 0, "cache_read": 0, "cache_write": 0, "output": 0, "cost": 0.0})
         c["calls"] += 1
         c["turns"] += res.get("turns") or 0
@@ -313,6 +312,7 @@ class RunState:
         c["cache_write"] += u.get("cache_creation_input_tokens", 0)
         c["output"] += u.get("output_tokens", 0)
         c["cost"] = round(c["cost"] + (res.get("cost") or 0.0), 4)
+        c["cost_unknown"] = c.get("cost_unknown", False) or not isinstance(res.get("cost"), (int, float))  # 実績では費用を不明にする
         # 書き込みの 5 分と 1 時間、モデルごとの呼び出し回数とトークン（#1142 の不足 f。キーの追加だけ）
         c["cache_write_5m"] = c.get("cache_write_5m", 0) + w5
         c["cache_write_1h"] = c.get("cache_write_1h", 0) + w1h

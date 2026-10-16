@@ -48,6 +48,36 @@ def with_margin(seconds: int) -> int:
     return int(seconds) + max(MARGIN_FLOOR, math.ceil(int(seconds) * MARGIN_SHARE))
 
 
+IMPL_TIMEOUT_DEFAULT = 3600  # 実装の上限の既定（引数・宣言・実績のどれも無いとき）
+
+
+def impl_timeout_estimate(a) -> tuple[int, dict]:
+    """実装のステップの (timeout, 根拠)。引数 → 宣言 → 実績の見込み（同じ構成の直近の最大 + 余裕。最大が打ち切りなら余裕を足さない。
+    3600 を下限にする）→ 3600（#1856 の決定 10）。
+
+    根拠はステップの `estimate` の欄の形 `{source: arg|decl|history|uncalibrated, samples, high, basis}`。"""
+    if getattr(a, "impl_timeout", None):
+        source = getattr(a, "impl_timeout_source", None) or "arg"
+        return int(a.impl_timeout), {"source": source, "samples": 0, "high": None, "basis": []}
+    import estimate_predict as ep
+    import estimate_records as er
+
+    root = getattr(a, "repo", None) or getattr(a, "worktree", None) or "."
+    try:
+        decl = er.load_estimate_decl(root)
+        window, least = decl.get("window") or ep.stats.WINDOW, decl.get("min_samples") or ep.IMPL_MIN_SAMPLES
+        got = ep.impl_limit(er.read_actuals(er.estimate_dir(root)), window, least)
+    except (er.DeclError, OSError) as e:
+        got = {"source": "uncalibrated", "samples": 0, "high": None, "basis": [], "note": str(e)[:200]}
+    timed_out = got.pop("timed_out", False)  # ステップの `estimate` の欄の形には載せない
+    if got["source"] == "history" and got["high"]:
+        high = math.ceil(got["high"])
+        # 最大が打ち切りの標本（秒は前の上限）なら余裕を足さない。足すと打ち切りのたびに上限が伸び続ける。
+        # 既定より下げない: 短い実績で上限が下がると、それより長い実装が同じ秒で打ち切られ続け、上限が戻らない
+        return max(IMPL_TIMEOUT_DEFAULT, high if timed_out else with_margin(high)), got
+    return IMPL_TIMEOUT_DEFAULT, got
+
+
 def _template_arg(a) -> str:
     """`--template` と、静的解析の雛形なら `--test-kind lint`（種別は `test-run.py` へそのまま渡す）。"""
     template = getattr(a, "test_cmd", None)

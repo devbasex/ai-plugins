@@ -221,6 +221,8 @@ def _apply_simple_decls(a, wt: dict, sv: dict) -> None:
     """引数を優先し、無ければ宣言の値をそのまま写す項目。"""
     sv_test = supervise_shape(sv).test
     budgets = step_budgets(sv)
+    if not getattr(a, "impl_timeout_source", None):  # 実装の上限の出所（#1856。スプリントは各計画へ引き継ぐ）
+        a.impl_timeout_source = "arg" if getattr(a, "impl_timeout", None) else ("decl" if budgets.impl_timeout else None)
     for k in STEP_BUDGETS:
         setattr(a, k, getattr(a, k, None) or getattr(budgets, k))
     a.base = getattr(a, "base", None) or wt.get("base_branch") or None
@@ -335,6 +337,7 @@ def decl_fields(a) -> dict:
         "test_limits",
         "test_note",
         "routes",
+        "impl_timeout_source",
         *STEP_BUDGETS,
     )
     return {k: getattr(a, k, None) for k in keys}

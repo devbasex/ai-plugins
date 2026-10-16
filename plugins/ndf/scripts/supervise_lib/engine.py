@@ -20,6 +20,7 @@ import gh_quota
 import runtime_policy
 import slow_step as ss
 from supervise_lib import decl, paths
+from supervise_lib.actuals import ActualsLog
 from supervise_lib.claude import AuthUnavailable, ClaudeCall, ClaudeRunner, UsageLimit, claude_kind
 from supervise_lib.plan import expand_parts, fail_kind_matches, normalize_plan, on_exit_error
 from supervise_lib.pr import PrStep
@@ -56,6 +57,8 @@ class Engine:
         self.order = [s["id"] for s in plan["steps"]]
         self.state = RunState(state_dir, self.plan)
         self.ctx = StepContext(self.plan, self.steps, self.state, str(Path(plan_path).resolve()) if plan_path else "")
+        self.actuals = ActualsLog(self.state, self.plan)  # 見積もりの実績の記録（#1856）
+        self.actuals.plan_path = self.ctx.plan_path
         self.ctx.tick = self.tick
         self.slow = self.ctx.slow = SlowWatch(self.ctx, slow_args)
         self.ctx.claude = PolicyClaudeRunner(self.ctx)
@@ -154,6 +157,7 @@ class Engine:
             self.ctx.cwd = root
 
     def report(self, result: str, reason: str) -> str:
+        self.actuals.end(result)
         return self.state.write_report(self.plan, result, reason)
 
     def run(self, start: str | None = None) -> str:
@@ -210,7 +214,7 @@ class Engine:
 
     def prepare(self, start: str | None) -> tuple[str, str] | None:
         """実行の条件と worktree の用意（耐久ステップの中で 1 回だけ流す）。流さないなら (結果, 理由)。"""
-        self.state.run_line(start)
+        self.actuals.start(start, self.state.run_line(start))
         if self.plan.get("実行の条件") and not start:
             skipped = self.check_condition(self.plan["実行の条件"])
             if skipped:
@@ -241,6 +245,7 @@ class Engine:
                 st.cur["resumed"] = True
             self.slow.end_watch()
             st.record(n, sid, nxt, (self.steps.get(nxt) or {}).get("type") if nxt else None, is_gate)
+            self.actuals.step(st.cur)
         finally:
             st.end_step()
         return {
