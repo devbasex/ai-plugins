@@ -86,5 +86,6 @@
 | [ndf-relay-auth-failure.md](ndf-relay-auth-failure.md) | ラッパーの認証の失敗（401）をどのログインの形でも同じ経路で扱い、refreshToken が空のアカウントを再登録が要るとして候補から外す仕組みの決定と理由（#1727） |
 | [cross-review-review-scope.md](cross-review-review-scope.md) | cross-review: 担当へレビュー範囲（base・head・ファイル数）を渡し、読んだファイル数が範囲の半分に満たない承認では収束しない（#1702） |
 | [cross-review-body-findings.md](cross-review-body-findings.md) | cross-review: 総評だけの指摘を修正の雛形へ入れ、決着を状態ファイルに残し、決着するまで収束せず残数と件数に数える（#1980） |
+| [ndf-estimate.md](ndf-estimate.md) | AI エージェントが実施する前提の工数の見積もり（estimate）。記録の行の形・部品の入出力の契約・rank と supervise.py new の変わる約束・決定の理由・研究の一次資料の確認。定義と手順は `estimate` の `references/rules.md` と SKILL.md が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
