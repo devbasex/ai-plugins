@@ -3901,79 +3901,79 @@
       "term": "AI の実行量",
       "context": "ndf-estimate",
       "meaning": "作業の調査・設計・実装・検証・修正で、AI エージェントが動いた時間の合計。並列に動いた分は足す（A）",
-      "pending_source": "issues/issue-1856-requirements.md"
+      "source": "docs/specifications/ndf-estimate.md"
     },
     {
       "term": "人の作業時間",
       "context": "ndf-estimate",
       "meaning": "要件の判断・説明・レビュー・手動の確認・修正への介入に、人が手を動かした時間。判断を待つ時間は含まない（H）",
-      "pending_source": "issues/issue-1856-requirements.md"
+      "source": "docs/specifications/ndf-estimate.md"
     },
     {
       "term": "完了までの時間",
       "context": "ndf-estimate",
       "meaning": "着手から完了条件に届くまでの経過時間。並列・依存・CI・承認の待ちを含む（L）",
-      "pending_source": "issues/issue-1856-requirements.md"
+      "source": "docs/specifications/ndf-estimate.md"
     },
     {
       "term": "利用費用",
       "context": "ndf-estimate",
       "meaning": "作業に使った LLM と実行環境の費用（USD）。サブスクリプションの枠の消費は別に記録する（C）",
-      "pending_source": "issues/issue-1856-requirements.md"
+      "source": "docs/specifications/ndf-estimate.md"
     },
     {
       "term": "実行の構成",
       "context": "ndf-estimate",
       "meaning": "実績を比べる前提になる、モデル・ハーネス・レビューの方式・テストの方式・並列の数の組",
-      "pending_source": "issues/issue-1856-requirements.md"
+      "source": "docs/specifications/ndf-estimate.md"
     },
     {
       "term": "類似の実績",
       "context": "ndf-estimate",
       "meaning": "完了条件・6 項目・実行の構成が近い、過去の作業の A・H・L・C の実測",
-      "pending_source": "issues/issue-1856-requirements.md"
+      "source": "docs/specifications/ndf-estimate.md"
     },
     {
       "term": "未校正",
       "context": "ndf-estimate",
       "meaning": "類似の実績が無く、想定の手順と既知のテストの所要から出した暫定の見込みであることの印",
-      "pending_source": "issues/issue-1856-requirements.md"
+      "source": "docs/specifications/ndf-estimate.md"
     },
     {
       "term": "見積もりの記録",
       "context": "ndf-estimate",
       "meaning": "見積もりの時点の 6 項目・実行の構成・予測した A・H・L・C を残したもの。後で実績と突き合わせる",
-      "pending_source": "issues/issue-1856-requirements.md"
+      "source": "docs/specifications/ndf-estimate.md"
     },
     {
       "term": "実績の記録",
       "context": "ndf-estimate",
       "meaning": "supervise の実行ごとに、始まり・ステップの終わり・実行の終わりを追記する行の列。終わり方（成功・承認ゲート・失敗・取り消し）と秒・USD・実行の構成を持ち、終わりの行の無い実行は、実行中（`step.pid` が生きている）と取り込んだ実行（`run_start` の `imported` が真）を除いて中断として数える",
-      "pending_source": "issues/issue-1856-design.md"
+      "source": "docs/specifications/ndf-estimate.md"
     },
     {
       "term": "着手前の 6 項目",
       "context": "ndf-estimate",
       "meaning": "要件の確定度・必要な情報の取得・変更の波及・検証のしやすさ・環境の準備・手戻りの見込み。それぞれ軽・重・判定できないの 3 値で、加点して時間へ換算せず、類似の実績を選ぶ材料と説明に使う",
-      "pending_source": "issues/issue-1856-design.md"
+      "source": "docs/specifications/ndf-estimate.md"
     },
     {
       "term": "見積もりの完了条件",
       "context": "ndf-estimate",
       "meaning": "見積もる作業がどこまで終われば完了かを、supervise のフェーズの名前（設計・実装・検査・配布（開発版）・配布（本番））で表したもの",
-      "pending_source": "issues/issue-1856-design.md"
+      "source": "docs/specifications/ndf-estimate.md"
     },
     {
       "term": "尺度を超える",
       "context": "ndf-estimate",
       "meaning": "A の見込みと Size 1 の基準との比が、尺度の最大を超えたときの Size の値。最大へ潰さず、分割を検討する印にする",
-      "pending_source": "issues/issue-1856-design.md"
+      "source": "docs/specifications/ndf-estimate.md"
     },
     {
       "term": "Size 1 の基準",
       "context": "ndf-estimate",
       "meaning": "Size を A の見込みから丸めるときの単位の秒。宣言が無ければ、実績のある課題のうち A の小さい 4 分の 1 の中央値",
-      "pending_source": "issues/issue-1856-design.md"
+      "source": "docs/specifications/ndf-estimate.md"
     },
     {
       "term": "ベースブランチの取り込み",
