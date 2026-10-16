@@ -51,6 +51,9 @@ class StepWatch:
     retries: int = 0
     paused: float = 0.0
     probes: list = field(default_factory=list)
+    session_id: str = ""  # 前の確認で見た worker のセッション（#1623）
+    session_size: int = 0
+    pr_checked: float = 0.0  # drive の Pull Request の投稿とコミットを前に確かめた時刻（始まりはステップの開始。#1496）
 
 
 class SlowWatch:
@@ -99,10 +102,15 @@ class SlowWatch:
             expected, basis = ss.expected_for(hist, self.cfg, step.get("expected"))
             retries = 0
         commits = ss.commit_count(step.get("cwd", self.ctx.cwd)) if step["type"] == "work" else None
+        session = getattr(self.ctx.state, "session", None) or {}
+        now = time.time()
         return StepWatch(
             step_id=step["id"],
             type=step["type"],
-            started=time.time(),
+            started=now,
+            pr_checked=now,  # gh はここで呼ばず、遅れたときの確認でだけ読む
+            session_id=str(session.get("id") or ""),
+            session_size=ss.session_size(session) if step["type"] == "work" else 0,
             expected=expected,
             basis=basis,
             next_check=expected,
@@ -240,9 +248,23 @@ class SlowWatch:
             new_commits = c - w.commits if c is not None and w.commits is not None else 0
             w.commits = c
             since = time.time() - self.ctx.state.worker_last_at if self.ctx.state.worker_last_at else None
-            return ss.probe_worker(new_lines, new_commits, self.ctx.state.worker_last, since)
+            return ss.probe_worker(new_lines, new_commits, self.ctx.state.worker_last, since, self.session_grown(w))
+        if w.type == "drive":  # 段の出力へ書かない cross-review の進みは Pull Request の投稿とコミットで見る（#1496）
+            now, pr = time.time(), plan_mod.pr_number(self.ctx.plan.get("Pull Request"))
+            probe, w.out_size = ss.probe_drive(self.ctx.state.run_log, w.out_size, pr, step.get("cwd", self.ctx.cwd), w.pr_checked)
+            w.pr_checked = now
+            return probe
         probe, w.out_size = ss.probe_output(self.ctx.state.run_log, w.out_size)
         return probe
+
+    def session_grown(self, w: StepWatch) -> int:
+        """前の確認から worker のセッションの記録が伸びたバイト数。ステップの途中で新しいセッションが始まっていれば、
+        その記録の大きさ全部を伸びに数える（#1623）。"""
+        session = getattr(self.ctx.state, "session", None) or {}
+        sid, size = str(session.get("id") or ""), ss.session_size(session)
+        grown = size if sid != w.session_id else size - w.session_size
+        w.session_id, w.session_size = sid, size
+        return max(0, grown)
 
     def judge_slow(self, w: StepWatch, el: float) -> dict:
         """材料を最小構成の claude -p（Tool なし）に渡し、retry / fix / stop / wait から 1 つを選ばせる。

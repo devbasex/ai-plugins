@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import Any
 
 import durable
-from supervise_lib import actuals, admission, paths, running
+from supervise_lib import actuals, admission, limits, paths, running
 from supervise_lib import queue as queue_files
 from supervise_lib.decl import QUEUE_RESOURCES, SUPERVISE_DECL, DeclError, decl_roots, queue_decl, read_decl
 from supervise_lib.engine import Engine
@@ -243,12 +243,15 @@ def _plan_steps(eng: Engine, prefix: str, start: str | None, resources: dict, be
     else:
         eng.after_prepare()
         result, reason = "完了", "無し"
-        limit = eng.plan.get("上限", 30)
-        sid, n = start or eng.order[0], 0
+        limit = eng.plan.get("上限", limits.DEFAULT_LIMIT)
+        # n は耐久ステップの番号（すべての回で増やす）。上限と比べる counted は遅れの見張りの再試行を数えない（#1623 の I6）
+        sid, n, counted, retries, retried = start or eng.order[0], 0, 0, 0, False
         while sid:
             n += 1
-            if n > limit:
-                result, reason = "止まった", f"ステップの数が上限 {limit} を超えた"
+            retries, counted = (retries + 1, counted) if retried else (retries, counted + 1)
+            if counted > limit:
+                note = f"（遅れの再試行 {retries} 回は数えていない）" if retries else ""
+                result, reason = "止まった", f"ステップの数が上限 {limit} を超えた{note}"
                 break
             if sid not in eng.steps:
                 result, reason = "止まった", f"知らないステップ: {sid}"
@@ -258,6 +261,7 @@ def _plan_steps(eng: Engine, prefix: str, start: str | None, resources: dict, be
             eng.replay(out)
             if out["result"] is not None:
                 result, reason = out["result"], out["reason"]
+            retried = out["nxt"] == sid and ((out.get("cur") or {}).get("slow") or {}).get("act") == "retry"
             sid = out["nxt"]
         result, reason = eng._final_result(result, reason)
     gates = [a for a in eng.state.attention_log if a.get("reason") == "関門"]

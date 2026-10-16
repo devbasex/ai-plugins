@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 
 from step_result import result
-from supervise_lib import release_templates
+from supervise_lib import limits, release_templates
 from supervise_lib.decl import with_decls
 from supervise_lib.paths import CHECK_PY, DRIVES, READY, REFACTOR_SCOPE_PY, default_refactor_budget_minutes
 from supervise_lib.procedures import (
@@ -179,7 +179,6 @@ def plan_to_merge(a, head: list[dict]) -> dict:
         "モード": a.mode,
         "作業場所": a.worktree,
         "規則": RULE_IMPL.format(after_tests=after_tests),
-        "上限": 20,
         "steps": steps,
     }
     with_decls(plan, a)
@@ -285,7 +284,6 @@ def plan_check(a) -> dict:
             "モード": a.mode,
             "作業場所": a.worktree,
             "規則": RULE_CHECK,
-            "上限": 12,
             "Pull Request": str(pr),
             "steps": [
                 *_inspect_steps(a, str(pr), scope),
@@ -448,7 +446,6 @@ def plan_check_since(a) -> dict:
         "起点": f"origin/{a.base}",
         "リポジトリ": repo,
         "規則": RULE_CHECK_SINCE,
-        "上限": 20,
         "実行の条件": {"cmd": cond, "skip_code": 3},
         "steps": steps,
     }
@@ -470,6 +467,10 @@ def cmd_new(a) -> dict:
         "release": lambda: f"release-{a.version}",
     }[a.kind]()
     out = Path(a.out or f"plan-{key}.json")
+    try:
+        limits.fill(plan)  # 上限は遷移から求める（#1909 の I2）
+    except limits.LimitError as e:
+        return result("supervise-new", "stopped", str(e), [], {"steps": len(plan["steps"])})
     out.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n")
     src = next((s["estimate"]["source"] for s in plan["steps"] if s["id"] == "impl" and s.get("estimate")), None)
     return result(

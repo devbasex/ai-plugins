@@ -41,6 +41,7 @@ MODULES = [
     "paths",
     "decl",
     "plan",
+    "limits",  # ステップの上限をプランの遷移から求める（#1909）
     "prompts",
     "claude",
     "state",
@@ -69,6 +70,7 @@ MODULES = [
 NO_ENGINE = [
     "decl",
     "plan",
+    "limits",
     "prompts",
     "claude",
     "state",

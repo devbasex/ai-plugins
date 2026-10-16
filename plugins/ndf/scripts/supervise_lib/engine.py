@@ -19,7 +19,7 @@ import gh_call
 import gh_quota
 import runtime_policy
 import slow_step as ss
-from supervise_lib import decl, paths
+from supervise_lib import decl, limits, paths
 from supervise_lib.actuals import ActualsLog
 from supervise_lib.claude import AuthUnavailable, ClaudeCall, ClaudeRunner, UsageLimit, claude_kind
 from supervise_lib.plan import expand_parts, fail_kind_matches, normalize_plan, on_exit_error
@@ -125,23 +125,8 @@ class Engine:
         )
 
     def next_of(self, sid: str, step: dict) -> str | None:
-        """成功したときの次のステップ。`next` が無ければ並びの次へ進むが、失敗したときにだけ通るステップ
-        （どこかの `on_fail` が指すステップと、そこから `next` で戻るステップ）は飛ばす。"""
-        if step.get("next"):
-            return None if step["next"] == "end" else step["next"]
-        fail_only = {s["on_fail"] for s in self.steps.values() if s.get("on_fail")}
-        fail_only |= {
-            s["id"]
-            for s in self.steps.values()
-            if s["type"] == "work"
-            and s.get("next") in self.steps
-            and s.get("inputs")
-            and any(self.steps.get(i, {}).get("on_fail") for i in s["inputs"])
-        }
-        i = self.order.index(sid) + 1
-        while i < len(self.order) and self.order[i] in fail_only:
-            i += 1
-        return self.order[i] if i < len(self.order) else None
+        """成功したときの次のステップ（決め方は `limits.default_next`。上限の計算と同じ遷移を使う）。"""
+        return limits.default_next(self.plan["steps"], sid)
 
     def ensure_worktree(self) -> str | None:
         """計画に branch があり作業場所が無ければ、作業ツリーを作る。誤りの文を返す（無ければ None）。"""
@@ -168,13 +153,14 @@ class Engine:
 
     def setup(self, start: str | None) -> tuple[str, str] | None:
         """ステップを流す前の、ファイルを書かない準備（打ち直しでも毎回流す）。流さないなら (結果, 理由)。"""
+        self.ctx.resumed = bool(start)  # 入力に前の実行の結果を渡す（#1676）
         if start and not self.plan.get("Pull Request"):
             self._restore_pr()
         try:
             self.slow.cfg = self.slow.resolve_slow()
         except ss.SlowConfigError as e:
             return "止まった", f"slow の設定が読めない（{e.args[0]}）"
-        bad = on_exit_error(self.plan["steps"])
+        bad = on_exit_error(self.plan["steps"]) or limits.run_error(self.plan, start)  # 行き先と上限の照合（#1909 の L3・L5）
         if bad:
             return "止まった", bad
         return self.check_runtimes()

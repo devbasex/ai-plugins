@@ -16,6 +16,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -54,21 +55,10 @@ SERENA_MCP = {
         "serena": {
             "type": "stdio",
             "command": "uvx",
-            "args": [
-                "--from",
-                "serena-agent==1.7.0",
-                "serena",
-                "start-mcp-server",
-                "--context",
-                "claude-code",
-                "--project-from-cwd",
-                "--add-mode",
-                "no-memories",
-                "--add-mode",
-                "no-onboarding",
-                "--enable-web-dashboard",
-                "False",
-            ],
+            "args": (
+                "--from serena-agent==1.7.0 serena start-mcp-server --context claude-code --project-from-cwd "
+                "--add-mode no-memories --add-mode no-onboarding --enable-web-dashboard False"
+            ).split(),
             "env": {"SERENA_HOME": ".serena"},
         }
     }
@@ -209,12 +199,14 @@ def call_claude(
     child_env: dict | None = None,
     caller: dict | None = None,
     base: str | None = None,
+    session: dict | None = None,
 ) -> dict:
     """claude -p を 1 回呼び、結果の本文と使用量を返す（既定は最小構成）。Claude の使用量の帳簿へ 1 行を書く（#1953）。
 
     `env` は環境に足す変数（認証の切り替え）。`child_env` を渡すと環境をそれで置き換える（アカウントの切り替え）。利用上限で落ちたら `"limit": true` と、読めれば
     解除の時刻（UNIX 時刻）を `"resets_at"` に残す。`tick` は待ちの間に every 秒ごとに呼ぶ。
     `caller` は帳簿の呼び出し元（`source`・`kind`・`plan`・`step`）。`kind` の既定は `claude_kind`、ほかは環境変数（C2）。
+    `session` を渡すと、会話を残す起動（full で resume でない）の id を `--session-id` で決め、id と設定の置き場を入れる（#1623）。
     帳簿への記録に失敗しても結果は変わらない（I5）。"""
     started = time.time()
     who = {"kind": claude_kind(system, full), **(caller or {})}
@@ -224,6 +216,9 @@ def call_claude(
     usage_env = {f"NDF_USAGE_{k.upper()}": str(v) for k, v in (caller or {}).items() if k in ("plan", "step") and v is not None}
     if usage_env:
         run_env = {**(run_env if run_env is not None else os.environ), **usage_env}
+    if session is not None and full and not resume:  # 遅れの見張りがセッションの記録の伸びを進みに数える
+        session.update(id=str(uuid.uuid4()), config=(run_env or os.environ).get("CLAUDE_CONFIG_DIR") or str(Path.home() / ".claude"))
+        cmd += ["--session-id", session["id"]]
     try:
         p = run_ticking(
             metered_settings(cmd, child_env if child_env is not None else os.environ, cwd, cmd.index("-p")),
@@ -330,7 +325,7 @@ class ClaudeRunner:
         tried: set[str] = set()  # この呼び出しで上限に当たったアカウント
         auth_failed: set[str] = set()  # この呼び出しで認証が通らなかったアカウント（同じアカウントを 2 度試さない）
         who = {"source": "supervise", "plan": getattr(ctx, "plan_path", None) or "", "step": str(st.cur.get("id") or "")}
-        kw = {"tick": ctx.tick, "every": st.every, "caller": who, **kw}
+        kw = {"tick": ctx.tick, "every": st.every, "caller": who, "session": getattr(st, "session", None), **kw}
         while True:
             try:
                 child = self.child_env(fallback) if multi else None
