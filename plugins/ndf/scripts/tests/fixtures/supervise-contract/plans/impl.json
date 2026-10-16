@@ -6,7 +6,7 @@
   "モード": "standard",
   "作業場所": "<TMP>/repo",
   "規則": "範囲テストや全体テストが落ちたら（落ちたテストだけの再実行でも落ちた後）、変更に起因するなら fix、環境や変更に無関係なら次のステップ（範囲テストなら design-tests、全体テストなら doc-lint）。2 回直しても同じ失敗なら stop。",
-  "上限": 78,
+  "上限": 122,
   "steps": [
     {
       "id": "impl",
@@ -23,7 +23,28 @@
         "basis": []
       },
       "prompt": "課題 #11 を実装する。本文は `gh issue view 11` で読む（何をするか と 受け入れ条件）。\n触る範囲: src/a.py\n共通:\n- 文書には今の決まりだけを書く。.md の文言を照合するテストは書かない\n- コミットの件名と本文に課題を閉じる語（Closes / Fixes / Resolves）を書かない。区切りごとにコミットする（push しない）\n",
+      "next": "base-sync"
+    },
+    {
+      "id": "base-sync",
+      "type": "run",
+      "stage": "実装",
+      "timeout": 600,
+      "cmd": "python3 <NDF>/scripts/merged-steps.py base-sync --base main --root .",
+      "on_exit": {
+        "1": "fix-base"
+      },
       "next": "test-limited"
+    },
+    {
+      "id": "fix-base",
+      "type": "work",
+      "kind": "修正",
+      "inputs": [
+        "base-sync"
+      ],
+      "prompt": "入力はベースブランチの取り込みのステップの出力である。衝突が残っていれば、git status で衝突したファイルを確かめ、両方の変更を残して衝突を解き、git add してマージのコミットを作る。push 前の検査で拒まれていれば、指摘を直してコミットする。どちらも push しない（git merge --abort・rebase・強制 push をしない）。",
+      "next": "base-sync"
     },
     {
       "id": "test-limited",
@@ -169,7 +190,8 @@
         "cmd": "python3 <NDF>/scripts/merged-steps.py probe --pr {pr} --act"
       },
       "on_exit": {
-        "75": "stop"
+        "75": "stop",
+        "4": "base-return"
       },
       "next": "end"
     },
@@ -182,9 +204,18 @@
         "cmd": "python3 <NDF>/scripts/merged-steps.py probe --pr {pr} --act"
       },
       "on_exit": {
-        "75": "stop"
+        "75": "stop",
+        "4": "base-return"
       },
       "next": "end"
+    },
+    {
+      "id": "base-return",
+      "type": "run",
+      "kind": "戻り",
+      "timeout": 120,
+      "cmd": "python3 <NDF>/scripts/merged-steps.py base-return --state {state_dir}",
+      "next": "base-sync"
     }
   ],
   "base_branch": "main",

@@ -257,7 +257,7 @@ MATCH = ("design-tests", "design-specs", "design-match", "pr")
 
 def test_1909_1_the_route_of_1833_reaches_merge(plans, tmp_path):
     route = _route(
-        "impl", "sync", "test-limited", *MATCH, ("test-all", 1), ("judge", "fix"), "fix",
+        "impl", "base-sync", "sync", "test-limited", *MATCH, ("test-all", 1), ("judge", "fix"), "fix",
         "test-limited", *MATCH, "test-all", ("doc-lint", 1), "fix-doc", "doc-lint", "ready", "merge-gate", "merge",
     )  # fmt: skip
     ran, text, _ = drive(tmp_path, plans["sprint/5-impl-16"], scripted(route))
@@ -267,16 +267,16 @@ def test_1909_1_the_route_of_1833_reaches_merge(plans, tmp_path):
 def test_1909_2_the_route_of_1702_reaches_merge(plans, tmp_path):
     fix = (("test-limited", 1), ("judge", "fix"), "fix")
     route = _route(
-        "impl", "sync", *fix, *fix, *fix, "test-limited", *MATCH, "test-all", ("doc-lint", 1), "fix-doc", "doc-lint",
+        "impl", "base-sync", "sync", *fix, *fix, *fix, "test-limited", *MATCH, "test-all", ("doc-lint", 1), "fix-doc", "doc-lint",
         "ready", "merge-gate", "merge",
     )  # fmt: skip
     ran, text, _ = drive(tmp_path, plans["sprint/5-impl-16"], scripted(route))
-    assert len(ran) == 23 and ran == [r for r, _ in route] and "結果: 完了" in text
+    assert len(ran) == 24 and ran == [r for r, _ in route] and "結果: 完了" in text
 
 
 def test_1909_3_the_route_of_m1910_reaches_record(plans, tmp_path):
     route = _route(
-        "collect", "pr", "assess", "refactor", "review", ("test-all", 1), ("judge", "fix"), "fix", "test-all",
+        "collect", "pr", "assess", "refactor", "review", "base-sync", ("test-all", 1), ("judge", "fix"), "fix", "test-all",
         "ready", "merge-gate", "merge", "record",
     )  # fmt: skip
     ran, text, _ = drive(tmp_path, plans["sprint/6-check"], scripted(route))

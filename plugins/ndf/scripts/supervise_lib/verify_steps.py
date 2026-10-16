@@ -11,6 +11,7 @@ import math
 import shlex
 
 import test_strategy as ts
+from step_result import EXIT_BASE_CONFLICT
 from supervise_lib.decl import scope_paths, test_kind
 from supervise_lib.paths import MERGE_CMD, MERGE_GATE_CMD, MERGE_PROBE, SPRINT_STATE_PY, TEST_RUN_PY
 
@@ -119,14 +120,15 @@ def refactor_template_arg(a) -> str:
     return f" --baseline-test {shlex.quote(template)}" + (f" --test-kind {kind}" if kind != ts.TEST else "")
 
 
-def merge_steps(a, **extra) -> list[dict]:
+def merge_steps(a, on_conflict: str | None = None, **extra) -> list[dict]:
     """マージの 3 ステップ（#1336 の決定 1）。
 
     - `merge-gate`: 宛先が承認ゲート 2（自動反映の本番チャネル）に当たるかだけを判定する。当たればプランを終える（`gate_next: end`）
     - `merge`: CI を待ってマージする。CI の待ちの上限を `--timeout` で渡し、ステップの `timeout` はそれに余裕を足す
     - `merge-approved`: `merge` に `--gate-approved user` を足したもの。通常の流れからは入らず、承認の後に `--from merge-approved` でだけ入る
 
-    `merge` と `merge-approved` は CI の基盤待ち（75）で judge を通らずに止まる（`on_exit`）。
+    `merge` と `merge-approved` は CI の基盤待ち（75）で judge を通らずに止まる（`on_exit`）。`on_conflict` を渡すと、
+    PR がベースブランチと衝突したとき（4。`EXIT_BASE_CONFLICT`）にそのステップへ進む（#1917）。渡さなければ今の失敗と同じ。
 
     `extra` の `next`（と `on_fail`）は `merge` と `merge-approved` に付ける。`next` が無いと `merge` が並びの次の
     `merge-approved` へ流れるため、必ず渡す。
@@ -140,7 +142,7 @@ def merge_steps(a, **extra) -> list[dict]:
         "timeout": with_margin(ci_wait),
         "cmd": f"{MERGE_CMD} --timeout {ci_wait}",
         "probe": MERGE_PROBE,
-        "on_exit": dict(INFRA_WAIT_STOP),
+        "on_exit": {**INFRA_WAIT_STOP, **({str(EXIT_BASE_CONFLICT): on_conflict} if on_conflict else {})},
         **extra,
     }
     gate = {"id": "merge-gate", "type": "run", "timeout": 120, "cmd": MERGE_GATE_CMD, "gate_next": "end", "next": "merge"}

@@ -172,6 +172,16 @@ def _rerun_superseded_next(n, items):
     return f"置き換わった失敗を通し直してから打ち直す: {cmds}"
 
 
+def _conflicted(root, n, stderr: str) -> bool:
+    """gh pr merge の拒否がベースブランチとの衝突か（標準エラーの文言か、読み直した mergeStateStatus が DIRTY。#1917）。"""
+    if "cannot be cleanly created" in stderr:
+        return True
+    try:
+        return pr_state(root, n).get("mergeStateStatus") == "DIRTY"
+    except StepError:
+        return False
+
+
 def merge_when_green(a, cleanup, next_cmd=None, plan_step="merge-approved"):
     root = git_root(a.root)
     n = a.pr
@@ -197,6 +207,8 @@ def merge_when_green(a, cleanup, next_cmd=None, plan_step="merge-approved"):
         pin = ["--match-head-commit", sha] if sha else []  # 緑を確かめた先頭（--expect-head なら比べた先端）だけをマージする
         p = gh_parts.gh(["pr", "merge", str(n), "--admin", f"--{a.method}", *pin], cwd=root)
         if p.returncode != 0:
+            if _conflicted(root, n, p.stderr or ""):
+                watch._stop_conflict("gh pr merge がマージのコミットを作れずに拒んだ")
             emit(
                 result(
                     TOOL,
