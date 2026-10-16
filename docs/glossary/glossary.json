@@ -3999,6 +3999,24 @@
       "context": "ndf-workflow",
       "meaning": "run --from で再開したとき、今の実行より前に同じプランを流した実行。--from を付けない最後の実行の始まりより後の記録を指す",
       "pending_source": "issues/issue-1909-requirements.md"
+    },
+    {
+      "term": "失敗の遷移",
+      "context": "ndf-workflow",
+      "meaning": "ステップが落ちたときの行き先。on_fail・on_section_missing・on_exit の 0 以外の終了コードの行き先",
+      "pending_source": "issues/issue-1909-design.md"
+    },
+    {
+      "term": "ループを通らない最長の経路",
+      "context": "ndf-workflow",
+      "meaning": "プランの並びで後ろのステップへ行く遷移だけをたどった、最も長い経路。数はステップの数で、流し始めるステップを含む",
+      "pending_source": "issues/issue-1909-design.md"
+    },
+    {
+      "term": "worker のセッションの記録",
+      "context": "ndf-workflow",
+      "meaning": "会話を残す claude -p（Skill を回す work のステップ）が CLAUDE_CONFIG_DIR の projects の下へ書き足していく 1 本の JSONL。遅れの見張りが大きさの伸びを進みに数える",
+      "pending_source": "issues/issue-1909-design.md"
     }
   ]
 }
