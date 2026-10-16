@@ -44,7 +44,7 @@ def _glossary_files(root) -> set[str]:
     return {v for v in (raw.get("source"), raw.get("document")) if isinstance(v, str) and v} if isinstance(raw, dict) else set()
 
 
-def _base_of(root, a) -> str:
+def _take_base(root, a) -> str:
     if a.base:
         return a.base
     try:
@@ -56,7 +56,7 @@ def _base_of(root, a) -> str:
     return base
 
 
-def _stop(summary, paths, metrics, code=1):
+def _stop_take(summary, paths, metrics, code=1):
     items = [{"kind": "conflict", "path": p, "result": "unresolved"} for p in paths]
     nxt = "衝突を両方の変更を残して解き、git add してマージのコミットを作ってから打ち直す（push しない）" if paths else None
     emit(result(TOOL, "stopped", summary, items, metrics, None, nxt), code)
@@ -70,40 +70,42 @@ def _push_if_ahead(root, items, metrics) -> None:
     cmd = ("push", "-q") if up.returncode == 0 else ("push", "-q", "-u", "origin", "HEAD")
     p = git(root, *cmd, check=False)
     if p.returncode != 0:
-        _stop(f"取り込みを push できない（push 前の検査を直してから打ち直す）: {p.stderr.strip()[:300]}", [], metrics)
+        _stop_take(f"取り込みを push できない（push 前の検査を直してから打ち直す）: {p.stderr.strip()[:300]}", [], metrics)
     items.append({"kind": "push", "result": "pushed"})
     metrics["pushed"] = True
 
 
-def _merge(root, base, metrics) -> str:
+def _take_merge(root, base, metrics) -> str:
     """origin/<base> を取り込み、結果（merged / glossary_merged）を返す。衝突が残れば 1、拒まれたら 3 で止まる。"""
     p = git(root, "merge", "-q", "--no-edit", f"origin/{base}", check=False)
     if p.returncode == 0:
         return "merged"
     if not _merging(root):
-        _stop(f"origin/{base} の取り込みが始まらない（未コミットの変更と重なる）: {p.stderr.strip()[:300]}", [], metrics, EXIT_PRECONDITION)
+        _stop_take(
+            f"origin/{base} の取り込みが始まらない（未コミットの変更と重なる）: {p.stderr.strip()[:300]}", [], metrics, EXIT_PRECONDITION
+        )
     left = _unmerged(root)
     if set(left) & _glossary_files(root):
         g = run([sys.executable, str(GLOSSARY_PY), "merge", "--root", str(root)], check=False)
         if g.returncode == 0:
             return "glossary_merged"
         left = _unmerged(root)
-    _stop(f"origin/{base} の取り込みで衝突が {len(left)} 件残る", left, metrics)
+    _stop_take(f"origin/{base} の取り込みで衝突が {len(left)} 件残る", left, metrics)
     return ""  # emit で抜けるため届かない
 
 
-def sync(a):
+def take(a):
     root = git_root(a.root)
     items, metrics = [], {"base": a.base, "behind": 0, "pushed": False}
     if _merging(root):  # 修正の worker が解いた後の打ち直し
         if left := _unmerged(root):
-            _stop(f"取り込みの途中で衝突が {len(left)} 件残る", left, metrics)
+            _stop_take(f"取り込みの途中で衝突が {len(left)} 件残る", left, metrics)
         p = run(["git", "-C", str(root), "commit", "--no-edit"], check=False, env=NO_EDIT)
         if p.returncode != 0:
-            _stop(f"取り込みのコミットを作れない: {(p.stderr or p.stdout).strip()[:300]}", [], metrics)
+            _stop_take(f"取り込みのコミットを作れない: {(p.stderr or p.stdout).strip()[:300]}", [], metrics)
         base, state = a.base or "", "finished"
     else:
-        base = _base_of(root, a)
+        base = _take_base(root, a)
         metrics["base"] = base
         if git(root, "fetch", "-q", "origin", base, check=False).returncode != 0:
             raise StepError(f"git fetch origin {base} が失敗した", 2)
@@ -111,13 +113,21 @@ def sync(a):
         if behind.returncode != 0:
             raise StepError(f"origin/{base} を読めない: {behind.stderr.strip()[:300]}", 2)
         metrics["behind"] = int(behind.stdout.strip() or 0)
-        state = _merge(root, base, metrics) if metrics["behind"] else "up_to_date"
+        state = _take_merge(root, base, metrics) if metrics["behind"] else "up_to_date"
     items.append({"kind": "base", "name": base, "result": state})
     if a.push:
         _push_if_ahead(root, items, metrics)
     said = {"up_to_date": "進んでいない", "merged": "取り込んだ", "glossary_merged": "取り込み、用語集の衝突を解いた",
             "finished": "取り込みのコミットを作った"}[state]  # fmt: skip
-    emit(result(TOOL, "ok", f"ベースブランチ {base or '（途中の取り込み）'}: {said}" + ("。push した" if metrics["pushed"] else ""), items, metrics))
+    emit(
+        result(
+            TOOL,
+            "ok",
+            f"ベースブランチ {base or '（途中の取り込み）'}: {said}" + ("。push した" if metrics["pushed"] else ""),
+            items,
+            metrics,
+        )
+    )
 
 
 def count_returns(state_dir) -> int:
@@ -145,7 +155,7 @@ def add_parsers(sub, common):
     src.add_argument("--base", help="ベースブランチの名前")
     src.add_argument("--pr", type=int, help="宛先（baseRefName）をベースブランチにする Pull Request")
     s.add_argument("--push", action="store_true", help="取り込みの結果が upstream より進んでいれば push する")
-    s.set_defaults(func=sync)
+    s.set_defaults(func=take)
     r = sub.add_parser("base-return", parents=[common()], help="merge の衝突から取り込みへ戻る回数を数え、上限を超えたら止まる")
     r.add_argument("--state", required=True, help="プランの状態ディレクトリ（state.json の置き場）")
     r.add_argument("--limit", type=int, default=RETURN_LIMIT, help="戻りの上限（回）")
