@@ -3974,6 +3974,18 @@
       "context": "ndf-estimate",
       "meaning": "Size を A の見込みから丸めるときの単位の秒。宣言が無ければ、実績のある課題のうち A の小さい 4 分の 1 の中央値",
       "pending_source": "issues/issue-1856-design.md"
+    },
+    {
+      "term": "補正",
+      "context": "ndf-workflow",
+      "meaning": "conductor が雛形の書いたプランへ手で足した指示や値。プランを書き直す側は消さない",
+      "pending_source": "issues/issue-1651-requirements.md"
+    },
+    {
+      "term": "整形",
+      "context": "ndf-workflow",
+      "meaning": "規則を変えずにコードの形だけを揃えるコマンド。何を打つかはプロジェクトの宣言が持つ",
+      "pending_source": "issues/issue-1651-requirements.md"
     }
   ]
 }
