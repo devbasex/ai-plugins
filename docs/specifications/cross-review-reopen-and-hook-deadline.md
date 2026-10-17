@@ -226,7 +226,7 @@ Tool の事象（`tool_kind` がある）と userPromptSubmit だけで、待ち
 | --- | --- | --- |
 | `DEADLINE_SECONDS` | `plugins/ndf/scripts/hook_lib/deadline.py` | `3.5` |
 | `MARGIN_SECONDS` | 同上 | `1.5`（締め切りと hook の上限の間に残す余裕。テストは起動の時間の許しにも使う） |
-| 駆動の実行の回の終わりの出力 | 耐久の記録（`lib/durable.py`、種類 `review`） | `{"result", "code", "tmp", "head", "args"}`。`head` は `finish` の時点の PR の head の OID（取れなければ `null`）、`args` は結果を変える引数（#1263）。`head` か `args` を持たない記録はその項目を比べられないものとして扱う |
+| 駆動の実行の回の終わりの出力 | 耐久の記録（`lib/durable.py`、種類 `review`） | `{"result", "code", "tmp", "head", "args"}`。`head` は `finish` の時点の PR の head の OID（取れなければ `null`）、`args` は結果を変える引数。`head` か `args` を持たない記録はその項目を比べられないものとして扱う |
 | `reopens[]`・`rounds[].fix.merge` | レビューの状態ファイル | 形は [`docs/04-contracts.md`](../../plugins/ndf/skills/cross-review/docs/04-contracts.md)。`reopens` が無い状態ファイルは `base_round = 0` として読み、移行のコマンドを要さない |
 
 ## テスト観点

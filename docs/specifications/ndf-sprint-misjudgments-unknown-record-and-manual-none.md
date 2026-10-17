@@ -169,7 +169,7 @@ PR の一覧を空で返す。`_closing_blocker` は `unknown` のとき全課�
 
 | 項目 | 内容 |
 | --- | --- |
-| 記録の PR を `close` へ渡す手段が無い | merge・手で届ける・検証の環境だけの経路の課題は、`unknown` で開いたまま残り、人が手で閉じる。受け渡しの手段は #2044 で扱う |
+| 記録の PR を `close` へ渡す手段が無い | merge・手で届ける・検証の環境だけの経路の課題は、`unknown` で開いたまま残り、人が手で閉じる。受け渡しの手段は課題 #2044 が扱う |
 | 手動反映の本番系の昇格はテストで縛っていない | 見本のリポジトリ（`make_repo`）は起点 develop・本番 main で、起点と本番が同じ形を組めない。`record_pr_ref` の分岐（`manual_prod`）は昇格を飛ばして `unknown` へ落ちる形で入っている |
 | 語 `unknown` が 2 か所にある | `sprint-close.py` は `supervise_lib` を import しない独立のスクリプトで、`RECORD_UNKNOWN` を `sprint_routes.py` と別に持つ（コメントで指し合う） |
 | 既に閉じた課題も `kept_open` で載る | `unknown` は課題の状態を読まずに返すため、closing keywords で GitHub が先に閉じた課題も `kept_open` に並ぶ |

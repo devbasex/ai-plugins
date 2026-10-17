@@ -3,11 +3,11 @@
 ## 概要
 
 **cross-review と cross-refactoring の drive は、完了した実行の回を返す前に、完了の記録の PR の head と結果を変える引数を
-今回と比べ、どちらかが違えば新しい実行の回を始める。** 判定は 2 つの drive が共有する
-[`loop_drive.keep_finished_output`](../../plugins/ndf/scripts/lib/loop_drive.py) の 1 か所にある（#1263）。
+打ち直した回の値と比べ、どちらかが違えば新しい実行の回を始める。** 判定は 2 つの drive が共有する
+[`loop_drive.keep_finished_output`](../../plugins/ndf/scripts/lib/loop_drive.py) の 1 か所にある。
 **cross-refactoring は、計画の前に止まった時間も想定最大時間に数えない。** 使える時間が 0 分以下で候補が 1 件以上ある計画は
-`ok` で返さず中断し、時間で見送った件数を `metrics.deferred` とリファクタリング計画の件数の行へ出す（#1944）。
-**監視は、claude が `subtype: success`・`is_error: false` で終えた後の `permission_denials` を致命にせず、警告に残す**（#1513）。
+`ok` で返さず中断し、時間で見送った件数を `metrics.deferred` とリファクタリング計画の件数の行へ出す。
+**監視は、claude が `subtype: success`・`is_error: false` で終えた後の `permission_denials` を致命にせず、警告に残す**。
 
 例: devbasex/devbase PR #301 の検査のプランを 1 度完走させ、`--round-test` を変えて `supervise.py run --from refactor` で流し直す。
 
@@ -29,7 +29,7 @@
 | 結果 JSON の `status` と終了コード | `cross-refactoring` の [SKILL.md](../../plugins/ndf/skills/cross-refactoring/SKILL.md) の結果の表 |
 | 見送りの件数の出どころ（`ledger.tally`） | [cross-refactoring-pr-gate-and-skip-counts.md](cross-refactoring-pr-gate-and-skip-counts.md) |
 | 上限の表の起点のずれ o（`window_offset`） | [cross-refactoring-init-test-and-phase-windows.md](cross-refactoring-init-test-and-phase-windows.md) |
-| 計画の後の再開で締め切りをずらす規則（#1491） | [cross-refactoring-implementation-window-and-readopt.md](cross-refactoring-implementation-window-and-readopt.md) |
+| 計画の後の再開で締め切りをずらす規則 | [cross-refactoring-implementation-window-and-readopt.md](cross-refactoring-implementation-window-and-readopt.md) |
 | 監視の早期の致命・利用上限の照合 | [cross-review-launch-outcome.md](cross-review-launch-outcome.md) |
 
 ## 用語
@@ -41,8 +41,8 @@
 
 | 課題 | 起きたこと |
 | --- | --- |
-| #1263 | devbasex/devbase PR #301 で `--round-test` を変えて `--from refactor` で流し直すと、refactor は 1.3 秒・review は 0.1 秒で前回の結果を `ok` で返し、プランは承認ゲート 2 まで進んだ。worktree を外して流し直すと提案 14 件のうち 11 件が採用された。cross-review は head と `--reopen` しか比べず、cross-refactoring は状態ファイルがあれば前回を返していた |
-| #1944 | devbasex/devbase PR #462 で計画の前に止まった実行を打ち直すと、#1491 のずらしは計画の後だけで効かず、止まっていた時間まで経過に数えた。使える時間が無いまま全候補を時間で見送って `ok` で返り、その件数は `metrics.deferred` に入らなかった |
+| #1263 | devbasex/devbase PR #301 の検査: `--round-test` を変えて `--from refactor` で流し直すと、refactor は 1.3 秒・review は 0.1 秒で前回の結果を `ok` で返し、プランは承認ゲート 2 まで進んだ。worktree を外して流し直すと提案 14 件のうち 11 件が採用された。cross-review は head と `--reopen` しか比べず、cross-refactoring は状態ファイルがあれば前回を返していた |
+| #1944 | devbasex/devbase PR #462 の検査: 計画の前に止まった実行を打ち直すと、#1491 のずらしは計画の後だけで効かず、止まっていた時間まで経過に数えた。使える時間が無いまま全候補を時間で見送って `ok` で返り、その件数は `metrics.deferred` に入らなかった |
 | #1513 | PR #1573 の検査で、claude は結果ファイルを書いて `subtype: success` で終えたが、作業中の Bash の読み取り 1 回の拒否で監視が 240 秒で EARLY_ERROR にした。監視は周回ごとに早期の致命を終了の判定より先に照らし、`result_exists` を書くのは終了の判定だけのため、記録は `result_exists: false` になった |
 
 ## 対象範囲
@@ -124,7 +124,7 @@ cross-refactoring の終わりの head も `loop_drive.pr_head` で取り、結�
 余計な回り直し（費用）で、前回の結果の取り違えにはならないためである。値は要約にせずそのまま記録し、違った鍵の名前を出す。
 
 **決定**: PR の head の取得は、記録が head を持ち `--reopen` でないときだけにする。外部コマンドを増やすのはこの 1 回だけで、
-引数の比較は手元の正規化だけで済む。cross-refactoring の作業の worktree の `HEAD` ではなく PR の head で比べるのは、他者が
+引数の比較は手元の正規化だけで済む。cross-refactoring の作業の worktree の `HEAD` を使わず PR の head で比べるのは、他者が
 PR へ積んだ差分を映すためである。
 
 #### 計画の前の中断から再開して計画する
@@ -245,8 +245,8 @@ graph TD
 
 - [issue #1263](https://github.com/devbasex/ai-plugins/issues/1263)・[issue #1944](https://github.com/devbasex/ai-plugins/issues/1944)・[issue #1513](https://github.com/devbasex/ai-plugins/issues/1513) — 要求
 - [PR #2052](https://github.com/devbasex/ai-plugins/pull/2052)（実装）・[PR #2053](https://github.com/devbasex/ai-plugins/pull/2053)（スプリント a2）
-- [cross-review-reopen-and-hook-deadline.md](cross-review-reopen-and-hook-deadline.md) — `keep_finished` と `--reopen` の入口（#1340）
-- [cross-refactoring-implementation-window-and-readopt.md](cross-refactoring-implementation-window-and-readopt.md) — 計画の後の再開のずらし（#1491）
+- [cross-review-reopen-and-hook-deadline.md](cross-review-reopen-and-hook-deadline.md) — `keep_finished` と `--reopen` の入口
+- [cross-refactoring-implementation-window-and-readopt.md](cross-refactoring-implementation-window-and-readopt.md) — 計画の後の再開のずらし
 - [cross-refactoring-init-test-and-phase-windows.md](cross-refactoring-init-test-and-phase-windows.md) — 提案と計画の枠と起点のずれ
 - [cross-refactoring-pr-gate-and-skip-counts.md](cross-refactoring-pr-gate-and-skip-counts.md) — 見送りの件数の出どころ
 - [cross-refactoring-time-budget.md](cross-refactoring-time-budget.md) — 想定最大時間の全体

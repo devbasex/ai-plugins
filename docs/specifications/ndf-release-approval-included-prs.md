@@ -29,7 +29,7 @@ merge commit で入った PR の 2 つ目の親の側（スプリントブラン
 この文書は、その形に**なぜしたか**（背景・決定と理由・常に成り立つ条件・部品の契約・既知の限界・テスト観点）を残す。
 **打ち方・終了コード・`--prs` の意味の正は Skill にある。** [`release` の references/release-steps.md](../../plugins/ndf/skills/release/references/release-steps.md)
 の `approval-facts`・`changelog`・`notes`・`changed-plugins` の項を読む。承認したコミットそのものの扱いは [ndf-release-approved-commit.md](ndf-release-approved-commit.md) が、
-承認資料の `## 検査の結果` と `## 未検証・残る危険` の材料（#1488）は [ndf-release-approval-materials.md](ndf-release-approval-materials.md) が持つ。
+承認資料の `## 検査の結果` と `## 未検証・残る危険` の材料は [ndf-release-approval-materials.md](ndf-release-approval-materials.md) が持つ。
 
 決定の番号は、1〜6 が #1274 の設計、7〜10 が #1885（#1686 #1488 を取り込んだ）の設計の番号である。
 
@@ -42,15 +42,15 @@ merge commit で入った PR の 2 つ目の親の側（スプリントブラン
 
 「含む PR」は `approval-facts --prs` で渡した PR だけを並べていた。配布のプランはその開発版で渡した PR を `--prs` に入れるため、
 開発版を 2 回出すと 1 回目に入った PR が承認資料から落ちた。10.17.30 では #1238 #1239 #1250 #1251 などが落ち、手で直して利用者へ出した。
-承認する人が本番に入る変更の一部しか見ずに承認し、承認の意味が「直前の開発版の差分」に縮む（#1274）。
+承認する人が本番に入る変更の一部しか見ずに承認し、承認の意味が「直前の開発版の差分」に縮む。
 
 #1274 は承認資料の欄だけを直し、CHANGELOG の版の節と上げ幅の候補は `--prs` だけを材料にしたまま残った。
 10.17.69 では、develop へ直接入った #1869 が CHANGELOG・承認資料に載らなかった。#1869 は mcp-bigquery をリモート MCP へ置き換える PR で、
 移行の手順を持つ。それでも mcp-bigquery は PATCH（2.0.1）で出た（承認資料 `issues/approval-ndf-v10.17.69.md`、PR 1883）。
-10.17.71（#1911 ほか 4 本）と 10.17.75（#1986〜#1990 の 5 本）でも、conductor が `--prs` を手で足した（#1885）。
+10.17.71（#1911 ほか 4 本）と 10.17.75（#1986〜#1990 の 5 本）でも、conductor が `--prs` を手で足した。
 同じ版の開発版を出し直すと、`notes` が版の節を丸ごと置き換えるため、前の開発版の PR の箇条も消えた。
 
-スプリントブランチへ入った実装 PR（#1673 の #1671・#1672 など）は、first-parent のログに現れないため「含む PR」に載らなかった（#1686）。
+スプリントブランチへ入った実装 PR（#1673 の #1671・#1672 など）は、first-parent のログに現れないため「含む PR」に載らなかった。
 `ndf--v10.17.75..origin/develop` では first-parent のマージが 15 本で、その 2 つ目の親の側にさらに 9 本の `Merge pull request` があった（2026-10-17 の実測）。
 
 ## 決定と理由
