@@ -69,3 +69,142 @@ def test_user_tools_are_kept(tmp_path: Path) -> None:
     agent = install(INSTALLERS[0], project, tmp_path)
 
     assert agent["tools"] == ["fs_read"]
+
+
+# 以下は現状固定テスト。hooks.json の取り込み（埋め込み Python）の振る舞いを、今の出力どおりに固定する。
+PLACEHOLDER = "${PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}"
+
+
+def fake_plugin(tmp_path: Path, hooks: dict | None) -> Path:
+    """installer を偽のプラグインへ写す。installer は自分の置き場所からプラグインを決める。"""
+    plugin = tmp_path / "plugins" / "mcp-fake"
+    (plugin / "dev.kiro").mkdir(parents=True)
+    (plugin / ".mcp.json").write_text(json.dumps({"mcpServers": {"fake": {"command": "fake"}}}), encoding="utf-8")
+    if hooks is not None:
+        (plugin / "hooks").mkdir()
+        (plugin / "hooks/hooks.json").write_text(json.dumps(hooks), encoding="utf-8")
+    installer = plugin / "dev.kiro/install.sh"
+    installer.write_text(INSTALLERS[0].read_text(encoding="utf-8"), encoding="utf-8")
+    return installer
+
+
+def new_project(tmp_path: Path, agent: dict | None = None) -> Path:
+    project = tmp_path / "project"
+    (project / ".kiro/agents").mkdir(parents=True)
+    if agent is not None:
+        (project / ".kiro/agents/default.json").write_text(json.dumps(agent), encoding="utf-8")
+    return project.resolve()
+
+
+def test_hooks_are_mapped_rewritten_and_filtered(tmp_path: Path) -> None:
+    installer = fake_plugin(
+        tmp_path,
+        {
+            "hooks": {
+                "SessionStart": [
+                    {
+                        "matcher": "startup",
+                        "hooks": [
+                            {"type": "command", "command": f"python3 {PLACEHOLDER}/a.py {PLACEHOLDER}/b", "timeout": 10},
+                            {"type": "command", "command": "", "timeout_ms": 1},
+                            {"type": "command"},
+                        ],
+                    },
+                    {"matcher": "resume"},
+                ],
+                "Stop": [{"hooks": [{"command": "stop.sh", "timeout_ms": 500, "description": "x"}]}],
+                "PreToolUse": [{"matcher": "Read", "hooks": [{"command": "pre.sh"}, {"command": "pre.sh"}]}],
+            }
+        },
+    )
+    project = new_project(tmp_path)
+    link = f"{project}/.kiro/mcp_runtime/mcp-fake"
+
+    agent = install(installer, project, tmp_path)
+
+    assert agent["hooks"] == {
+        "agentSpawn": [{"command": f"python3 {link}/a.py {link}/b"}],
+        "stop": [{"command": "stop.sh", "timeout_ms": 500}],
+        "PreToolUse": [{"command": "pre.sh"}],
+    }
+
+
+def test_existing_hook_entries_are_kept_and_not_duplicated(tmp_path: Path) -> None:
+    installer = fake_plugin(
+        tmp_path,
+        {"hooks": {"Stop": [{"hooks": [{"command": "kept.sh", "timeout_ms": 9}, {"command": "new.sh"}]}]}},
+    )
+    project = new_project(
+        tmp_path,
+        {
+            "name": "default",
+            "hooks": {
+                "stop": ["not-a-dict", {"command": "kept.sh"}, {"command": "mine.sh"}],
+                "userPromptSubmit": [{"command": "other.sh"}],
+            },
+        },
+    )
+
+    agent = install(installer, project, tmp_path)
+
+    assert agent["hooks"] == {
+        "stop": ["not-a-dict", {"command": "kept.sh"}, {"command": "mine.sh"}, {"command": "new.sh"}],
+        "userPromptSubmit": [{"command": "other.sh"}],
+    }
+
+
+def test_reinstall_does_not_duplicate_hooks(tmp_path: Path) -> None:
+    installer = fake_plugin(tmp_path, {"hooks": {"SessionStart": [{"hooks": [{"command": f"{PLACEHOLDER}/s.sh"}]}]}})
+    project = new_project(tmp_path)
+    link = f"{project}/.kiro/mcp_runtime/mcp-fake"
+
+    install(installer, project, tmp_path)
+    agent = install(installer, project, tmp_path)
+
+    assert agent["hooks"] == {"agentSpawn": [{"command": f"{link}/s.sh"}]}
+
+
+def test_without_hooks_file_agent_has_no_hooks(tmp_path: Path) -> None:
+    installer = fake_plugin(tmp_path, None)
+    project = new_project(tmp_path)
+
+    agent = install(installer, project, tmp_path)
+
+    assert agent == {
+        "name": "default",
+        "resources": ["skill://.kiro/skills/**/SKILL.md"],
+        "tools": ["*"],
+        "mcpServers": {"fake": {"command": "fake"}},
+    }
+
+
+def test_hooks_file_without_hooks_key_adds_empty_hooks(tmp_path: Path) -> None:
+    installer = fake_plugin(tmp_path, {"description": "no hooks key"})
+    project = new_project(tmp_path)
+
+    agent = install(installer, project, tmp_path)
+
+    assert agent["hooks"] == {}
+
+
+def test_real_plugin_hooks(tmp_path: Path) -> None:
+    project = new_project(tmp_path)
+    serena = f"{project}/.kiro/mcp_runtime/mcp-serena"
+    playwright = f"{project}/.kiro/mcp_runtime/mcp-playwright"
+
+    install(ROOT / "plugins/mcp/mcp-serena/dev.kiro/install.sh", project, tmp_path)
+    agent = install(ROOT / "plugins/mcp/mcp-playwright/dev.kiro/install.sh", project, tmp_path)
+
+    assert agent["hooks"] == {
+        "agentSpawn": [
+            {"command": f'python3 "{serena}/scripts/serena-lsp.py" hook session-start --client claude-code'},
+            {"command": f"node {playwright}/scripts/ensure-playwright.js"},
+        ],
+        "PreToolUse": [
+            {
+                "command": 'sh -c \'[ -x "$0" ] || exit 0; exec "$0" "$@"\' '
+                f'"$HOME/.cache/mcp-serena/roots{serena}/bin/python" "{serena}/scripts/serena-lsp.py" '
+                "hook pre-tool-use --client claude-code"
+            }
+        ],
+    }
