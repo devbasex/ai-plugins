@@ -87,5 +87,6 @@
 | [cross-review-review-scope.md](cross-review-review-scope.md) | cross-review: 担当へレビュー範囲（base・head・ファイル数）を渡し、読んだファイル数が範囲の半分に満たない承認では収束しない（#1702） |
 | [cross-review-body-findings.md](cross-review-body-findings.md) | cross-review: 総評だけの指摘を修正の雛形へ入れ、決着を状態ファイルに残し、決着するまで収束せず残数と件数に数える（#1980） |
 | [ndf-estimate.md](ndf-estimate.md) | AI エージェントが実施する前提の工数の見積もり（estimate）。記録の行の形・部品の入出力の契約・rank と supervise.py new の変わる約束・決定の理由・研究の一次資料の確認。定義と手順は `estimate` の `references/rules.md` と SKILL.md が正 |
+| [ndf-supervise-impl-prompt-format-and-transient-failures.md](ndf-supervise-impl-prompt-format-and-transient-failures.md) | 実装の指示が conductor の補正を残すこと（`design-results` が雛形の部分だけを組み直す）、実装のプランが宣言に応じて範囲テストの前に整形と範囲の静的解析を置くこと、`push_fix` の送信前の整形、GitHub の一時的な失敗で書き換えずに止まること。宣言の形は `plan.py`、`--only-kind` は `test-run.py` が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
