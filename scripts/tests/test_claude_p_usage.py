@@ -20,7 +20,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "lib"))
 import release_map  # noqa: E402
-from test_token_usage import U_COST, _assistant, _jsonl, build  # noqa: E402
+from token_usage_helpers import U_COST, _assistant, _jsonl, build  # noqa: E402
 
 TU = HERE.parent / "token-usage.py"
 CPU = HERE.parent / "measure" / "claude-p-usage.py"
