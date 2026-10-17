@@ -3090,8 +3090,7 @@
       "term": "記録の置き場が分からない",
       "context": "ndf-workflow",
       "meaning": "まとめの close が読むリリース記録の Pull Request を、プランが組まれた時点で決められない状態。sprint-close.py --record-pr unknown で渡し、課題を開いたまま残す",
-      "source": "",
-      "pending_source": "issues/issue-1875-design.md"
+      "source": "docs/specifications/ndf-sprint-misjudgments-unknown-record-and-manual-none.md"
     },
     {
       "term": "設計の結果",
