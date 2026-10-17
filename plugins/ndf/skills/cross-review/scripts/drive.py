@@ -42,6 +42,7 @@ from loop_drive import call, durable_identity, keep_finished_output, parse_vars 
 from loop_drive import relaunch_seats, result_args, review_status, write_review_answer  # noqa: E402
 
 TOOL = "cross-review-drive"
+KIND = "review"  # 耐久の記録の種類
 PLACE_ARGS = frozenset({"--worktree"})  # 置き場だけを変える init の引数。完了の記録の比較から除く（#1263 の I4）
 DOCS02 = SKILL / "docs" / "02-fix-and-rotation.md"
 
@@ -385,8 +386,8 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
 
     def run(self) -> tuple[dict, int]:
         identity = self.identity()
-        durable.launch("review", identity)
-        ref = durable.resolve(f"review-{durable.key_hash(identity)}", finished=self.finished)
+        durable.launch(KIND, identity)
+        ref = durable.resolve(durable.launch_key(KIND, identity), finished=self.finished)
         if ref.action == "done":
             return ref.output["result"], ref.output["code"]
         seen = durable.resume_paused(ref)  # 止まりの続き。結果ファイルが無ければ同じ段階がもう一度止まる
