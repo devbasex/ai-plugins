@@ -1,6 +1,6 @@
 """`scripts/token-usage.py` が使用量の帳簿（plugins/ndf/scripts/lib/usage_ledger.py）の行を版と層へ加える（#1142 の不足 f）。
 
-会話の記録の作り方は test_token_usage.py の合成の記録を使う。
+会話の記録の作り方は token_usage_helpers.py の合成の記録を使う。
 """
 
 from __future__ import annotations
@@ -10,8 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from test_token_usage import U_COST, _jsonl, _ts, build  # noqa: E402
+from token_usage_helpers import U_COST, _jsonl, _ts, build
 
 SCRIPT = Path(__file__).resolve().parents[1] / "token-usage.py"
 
