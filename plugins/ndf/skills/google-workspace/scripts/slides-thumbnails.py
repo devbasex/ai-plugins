@@ -66,16 +66,27 @@ def _gws(gws: str, args: list[str], what: str) -> dict:
                 ),
                 EXIT_UNAUTHENTICATED,
             )
-        emit_stopped(TOOL, f"{what}: gws が終了コード {cp.returncode} で終わった", sr.EXIT_VIOLATION, items=[{"name": what, "result": "gws-failed", "detail": out}])
+        emit_stopped(
+            TOOL,
+            f"{what}: gws が終了コード {cp.returncode} で終わった",
+            sr.EXIT_VIOLATION,
+            items=[{"name": what, "result": "gws-failed", "detail": out}],
+        )
     try:
         return json.loads(cp.stdout)
     except json.JSONDecodeError:
-        emit_stopped(TOOL, f"{what}: gws の応答が JSON でない", sr.EXIT_UNREADABLE, items=[{"name": what, "result": "unreadable", "detail": out}])
+        emit_stopped(
+            TOOL, f"{what}: gws の応答が JSON でない", sr.EXIT_UNREADABLE, items=[{"name": what, "result": "unreadable", "detail": out}]
+        )
     return {}
 
 
 def _page_ids(gws: str, pid: str) -> list[str]:
-    data = _gws(gws, ["slides", "presentations", "get", "--params", json.dumps({"presentationId": pid, "fields": "slides(objectId)"})], "ページの ID の取得")
+    data = _gws(
+        gws,
+        ["slides", "presentations", "get", "--params", json.dumps({"presentationId": pid, "fields": "slides(objectId)"})],
+        "ページの ID の取得",
+    )
     slides = data.get("slides") if isinstance(data, dict) else None
     ids = [s.get("objectId") for s in slides or [] if isinstance(s, dict)]
     if not ids or not all(isinstance(i, str) and i for i in ids):
@@ -95,7 +106,12 @@ def _thumbnail(gws: str, pid: str, oid: str, size: str, dest: pathlib.Path, no: 
     except OSError as e:
         emit_stopped(TOOL, f"{what}: curl を起動できない: {e}", sr.EXIT_VIOLATION)
     if cp.returncode != 0:
-        emit_stopped(TOOL, f"{what}: 画像を取れない（curl の終了コード {cp.returncode}）", sr.EXIT_VIOLATION, items=[{"name": what, "result": "download-failed", "detail": output_tail(cp.stderr)}])
+        emit_stopped(
+            TOOL,
+            f"{what}: 画像を取れない（curl の終了コード {cp.returncode}）",
+            sr.EXIT_VIOLATION,
+            items=[{"name": what, "result": "download-failed", "detail": output_tail(cp.stderr)}],
+        )
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -120,7 +136,16 @@ def main(argv: list[str] | None = None) -> None:
         dest = out / f"p{no}.png"
         _thumbnail(gws, a.presentation_id, oid, a.size, dest, no)
         items.append({"name": f"p{no}", "result": "saved", "objectId": oid, "detail": str(dest)})
-    sr.emit(sr.result(TOOL, "ok", f"{len(ids)} ページのサムネイルを保存した", items=items, metrics={"pages": len(ids), "size": a.size, "out_dir": str(out)}), sr.EXIT_OK)
+    sr.emit(
+        sr.result(
+            TOOL,
+            "ok",
+            f"{len(ids)} ページのサムネイルを保存した",
+            items=items,
+            metrics={"pages": len(ids), "size": a.size, "out_dir": str(out)},
+        ),
+        sr.EXIT_OK,
+    )
 
 
 if __name__ == "__main__":

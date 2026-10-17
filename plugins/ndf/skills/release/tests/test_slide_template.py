@@ -47,8 +47,10 @@ OVERRIDE_COLORS = {
 def _png(path: Path) -> None:
     """1 × 1 の PNG を書く。"""
     raw = b"\x00\xff\x00\x00"
+
     def chunk(tag: bytes, data: bytes) -> bytes:
         return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+
     path.write_bytes(
         b"\x89PNG\r\n\x1a\n"
         + chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
@@ -108,7 +110,9 @@ def test_frame_positions_match_reference_and_ignore_theme(deck: Path, tmp_path: 
     plain.write_text(json.dumps({"copyright": "© Example"}), encoding="utf-8")
     big = tmp_path / "big.json"
     big.write_text(
-        json.dumps({"copyright": "© Example", "font": "Other Font", "sizes": {"title": 28, "footer": 12, "note": 11}, "colors": {"rule": "123456"}}),
+        json.dumps(
+            {"copyright": "© Example", "font": "Other Font", "sizes": {"title": 28, "footer": 12, "note": 11}, "colors": {"rule": "123456"}}
+        ),
         encoding="utf-8",
     )
     got = []

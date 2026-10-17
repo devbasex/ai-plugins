@@ -58,7 +58,9 @@ def env(tmp_path: Path) -> dict:
     imgs = tmp_path / "imgs"
     imgs.mkdir()
     e = dict(os.environ)
-    e.update(PATH=f"{bin_}{os.pathsep}{e['PATH']}", FAKE_CALLS=str(tmp_path / "calls.jsonl"), FAKE_IMG_DIR=str(imgs), FAKE_IDS="g1,p2_x,abc")
+    e.update(
+        PATH=f"{bin_}{os.pathsep}{e['PATH']}", FAKE_CALLS=str(tmp_path / "calls.jsonl"), FAKE_IMG_DIR=str(imgs), FAKE_IDS="g1,p2_x,abc"
+    )
     return e
 
 
@@ -66,7 +68,11 @@ def _run(env: dict, *args: str):
     cp = subprocess.run([sys.executable, str(SCRIPT), *args], env=env, capture_output=True, text=True, check=False)
     out = json.loads(cp.stdout.strip().splitlines()[-1])
     assert validate_result(out, cp.returncode) == []
-    calls = [json.loads(line) for line in Path(env["FAKE_CALLS"]).read_text(encoding="utf-8").splitlines()] if Path(env["FAKE_CALLS"]).exists() else []
+    calls = (
+        [json.loads(line) for line in Path(env["FAKE_CALLS"]).read_text(encoding="utf-8").splitlines()]
+        if Path(env["FAKE_CALLS"]).exists()
+        else []
+    )
     return cp.returncode, out, calls
 
 
