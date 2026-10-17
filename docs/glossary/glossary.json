@@ -2918,6 +2918,12 @@
       "pending_source": "issues/issue-1142-design-dbos.md"
     },
     {
+      "term": "結果を変える引数",
+      "context": "ndf-workflow",
+      "meaning": "cross-review・cross-refactoring の drive が `init` へ渡す引数のうち、置き場・出力だけを変えるものを除いた残り。完了の記録に残し、打ち直しで今回と比べる",
+      "pending_source": "issues/issue-1263-design.md"
+    },
+    {
       "term": "資源のタグ",
       "context": "ndf-workflow",
       "meaning": "ステップが使う、共有する外部の枠の名前（今は graphql だけ）",
@@ -3605,7 +3611,7 @@
     {
       "term": "止まっていた時間",
       "context": "ndf-cross-refactoring",
-      "meaning": "`cross-refactoring` をリファクタリング計画の後に中断してから、init か drive.py を打ち直して再開するまでの時間。再開の時刻 − 最後の動きの時刻で測り、想定最大時間に数えない",
+      "meaning": "`cross-refactoring` を中断してから、init か drive.py を打ち直して再開するまでの時間。リファクタリング計画の前の中断を含む。再開の時刻 − 最後の動きの時刻で測り、想定最大時間に数えない",
       "source": "docs/specifications/cross-refactoring-implementation-window-and-readopt.md"
     },
     {
