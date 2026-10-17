@@ -2921,6 +2921,7 @@
       "term": "結果を変える引数",
       "context": "ndf-workflow",
       "meaning": "cross-review・cross-refactoring の drive が `init` へ渡す引数のうち、置き場・出力だけを変えるものを除いた残り。完了の記録に残し、打ち直しで今回と比べる",
+      "code": "result_args",
       "pending_source": "issues/issue-1263-design.md"
     },
     {
@@ -3649,7 +3650,7 @@
     {
       "term": "見送った改善項目",
       "context": "ndf-cross-refactoring",
-      "meaning": "リファクタリング計画が採った改善項目のうち、表示の状態が見送りのもの（実装の終わりまでにコミットが無く採り直しにも入らなかった not_done・足したテストが落ちた test_failed）。結果 JSON の metrics.deferred の数",
+      "meaning": "リファクタリング計画が採った改善項目のうち、表示の状態が見送りのもの（実装の終わりまでにコミットが無く採り直しにも入らなかった not_done・足したテストが落ちた test_failed）。結果 JSON の metrics.deferred は、この数に時間（budget）で見送り項目に入っていない候補の数を足す（#1944）",
       "source": "docs/specifications/cross-refactoring-pr-gate-and-skip-counts.md"
     },
     {
@@ -4076,7 +4077,7 @@
     {
       "term": "配布物の変化なし",
       "context": "ndf-release",
-      "meaning": "PR の本文の `## 利用者向けの変化` が「無し」だけを持つこと。節の無い本文（題名で代える）とは別に扱う",
+      "meaning": "PR の本文の `## 利用者向けの変化` が「無し」（「なし」も同じ）だけを持つこと。承認資料の「含む PR」の行に印を付け、CHANGELOG の版の節と「配る中身」には載せない。節の無い本文（題名で代える）とは別に扱う",
       "source": ""
     }
   ]

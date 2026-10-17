@@ -3,7 +3,8 @@
 ## 概要
 
 **本番への配布の承認資料（`issues/approval-<プラグイン>-v<版>.md`）の「含む PR」は、直前の正式版のタグから承認したコミットまでに
-ベースブランチへ merge commit か squash merge で入った PR（範囲の PR）と、`approval-facts --prs` で渡した PR の和を、番号の昇順に並べる。**
+ベースブランチへ merge commit か squash merge で入った PR と、スプリントブランチへ merge commit で入った PR（スプリント経由の PR。#1885）を合わせた範囲の PR と、`approval-facts --prs` で渡した PR の和を、番号の昇順に並べる。**
+スプリント経由の行には `スプリント PR #<番号> 経由`、`## 利用者向けの変化` が「無し」（「なし」）だけの PR の行には `配布物の変化なし` の印を括弧の中に足す。
 版上げの PR（head が `release/` で始まる PR）と、PR でない番号（squash の件名の `(#N)` が課題を指すもの）は範囲から外す。
 「配る中身」「未検証・残る危険」を書く `notes --approval` は、承認資料の「含む PR」の欄から番号を読み、範囲を求め直さない。
 
@@ -51,7 +52,7 @@ CHANGELOG の版の節も、開発版を出し直すと前の開発版の PR を
 | 要素 | 責務 |
 | --- | --- |
 | `plugins/ndf/scripts/lib/merged_range.py` | `<起点>..<終点>` の first-parent のログから、merge commit（件名 `Merge pull request #N from <owner>/<branch>`、親が 2 つ）と squash merge（件名の末尾 `(#N)`、親が 1 つ）で入った PR を `Merge(sha, number, branch)` で返す（`merges_in`）。squash の head は GitHub からまとめて読む（`with_heads`）。**外す規則は持たない** |
-| `plugins/ndf/scripts/release_lib/included.py` | 範囲の PR（`range_prs`。`release/` と PR でない番号を外す）・`--prs` との和と並び（`included_prs`）・承認資料の「含む PR」の欄からの番号の読み取り（`read_included`） |
+| `plugins/ndf/scripts/release_lib/included.py` | 範囲の PR（`release_range`。`release/` と PR でない番号を外し、merge commit の 2 つ目の親の側を `merged_range.nested_merges` でたどってスプリント経由の PR を足す）・`--prs` との和と並び（`with_extra` / `included_prs`）・「含む PR」の行の印（`included_row`）・承認資料の「含む PR」の欄からの番号と印の読み取り（`read_included` / `read_included_rows`）・PR の中身の 100 件ずつのまとめ読み（`pr_fields`） |
 | `release-steps.py approval-facts` | 「含む PR」・結果 JSON の `kind: pr` の items・要約の件数を、組み立てた集合から書く |
 | `release-steps.py notes --approval` | 承認資料の「含む PR」の番号から「配る中身」「未検証・残る危険」を書く |
 | `check-trigger.py` | 拾い出しを `merged_range` へ任せ、外す規則（`SKIP_BRANCHES`・記録の番号）・点数・行数は自分で持つ。記録の番号で外した後の squash の番号だけを `with_heads` へ渡す |
@@ -98,7 +99,7 @@ graph TD
 
 | 項目 | 内容 |
 | --- | --- |
-| 範囲の PR が多い版の待ち時間 | `approval-facts` は PR ごとに `pr view` と checks を 1 回ずつ読む。6 件では数秒で、数十件の版でどれだけ延びるかは測っていない |
+| 範囲の PR が多い版の待ち時間 | `approval-facts` は PR の中身を `pr_fields` で 100 件ずつ 1 回で読み、checks は PR ごとに 1 回ずつ読む。checks の読み出しが数十件の版でどれだけ延びるかは測っていない |
 | 承認資料を手で直したとき | 「含む PR」の行を手で消すと、`notes --approval` はその PR の欄を書かない（欄が「含む PR」に従う）。作り直しで手で足した節を残す形は [ndf-release-approval-rebuild-and-replacements.md](ndf-release-approval-rebuild-and-replacements.md) にある。「含む PR」の欄は `approval-facts` の節の中にあるため、作り直しで範囲から書き直される |
 | 外す head の接頭辞 | `release/` の 1 つで、配布の工程が作るブランチ名（`release/v<版>`）と同じ NDF の側の規約である。別の名前で版上げを出すと範囲に並ぶ |
 

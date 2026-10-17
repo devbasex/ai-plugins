@@ -116,8 +116,8 @@ def test_the_report_does_not_list_the_deferred_breakdown(refactor, tmp_path, env
     env_tmp_dir(path)
     refactor.cmd_report(type("A", (), {"id": 130, "metrics": False})())
     out = capsys.readouterr().out
-    # 計画に入らなかった提案は見送った改善項目に数えず、見送った提案の行に出す（#1660）
-    assert "見送り: 0 件" in out
+    # 時間で見送った候補は見送りに数え（#1944）、内訳は見送った提案の行に件数だけ出す（#1660）
+    assert "見送り: 1 件" in out
     assert "- 見送った提案: 1 件（理由別: budget 1 " in out  # 理由別の件数（AC26）
     assert "src/bar.py#Bar.run" not in out, "内訳を書いている"
     assert "想定最大時間に収まらない" not in out, "内訳を書いている"
@@ -242,18 +242,20 @@ def _deferred_in(line, sep):
 
 
 def test_the_deferred_count_agrees_across_metrics_plan_and_report(refactor, tmp_path, env_tmp_dir, capsys):
-    """AC10・AC12（#1660）: metrics.deferred・計画の件数の行・完了報告の件数の行の「見送り」がどれも 1。"""
+    """AC10・AC12（#1660）・1944-4・1944-5: metrics.deferred・計画の件数の行・完了報告の件数の行の「見送り」がどれも 2
+    （見送った改善項目 1 件と時間で見送った候補 1 件）。重複の見送りは数えない。"""
     ledger, plan = sys.modules["refactor_lib.ledger"], sys.modules["refactor_lib.plan"]
     path, state = _mixed_deferred_state(tmp_path)
     metrics = ledger.tally(state).as_metrics()
     lines = _report_lines(refactor, path, env_tmp_dir, capsys)
     counts = next(line for line in lines if line.startswith("- 採用: "))
-    assert metrics["deferred"] == 1
-    assert _deferred_in(plan.counts_line(state), " ") == 1
-    assert _deferred_in(counts, ": ") == 1
+    assert metrics["deferred"] == 2
+    assert _deferred_in(plan.counts_line(state), " ") == 2
+    assert "見送り 2（うち時間 1）" in plan.counts_line(state)
+    assert _deferred_in(counts, ": ") == 2
     proposals = next(line for line in lines if line.startswith("- 見送った提案: "))
     by_reason = dict(part.rsplit(" ", 1) for part in proposals.split("理由別: ")[1].rstrip("）").split(" / "))
-    assert int(by_reason["not_done"]) + int(by_reason["test_failed"]) == metrics["deferred"]
+    assert int(by_reason["not_done"]) + int(by_reason["test_failed"]) + int(by_reason["budget"]) == metrics["deferred"]
 
 
 def test_the_report_states_the_deferred_proposals_on_their_own_line(refactor, tmp_path, env_tmp_dir, capsys):
@@ -272,10 +274,10 @@ def test_the_report_states_the_deferred_proposals_on_their_own_line(refactor, tm
 
 
 def test_the_report_counts_line_does_not_follow_the_deferred_proposals(refactor, tmp_path, env_tmp_dir, capsys):
-    """AC13（#1660）: 見送った提案だけを増やしても、件数の行の「見送り」は変わらない。"""
+    """AC13（#1660）: 時間以外の理由で見送った提案を増やしても、件数の行の「見送り」は変わらない。"""
     path, state = _mixed_deferred_state(tmp_path)
     before = _deferred_in(next(line for line in _report_lines(refactor, path, env_tmp_dir, capsys) if line.startswith("- 採用: ")), ": ")
     extra = {"item_id": "C-005", "path": "src/q.py", "symbol": "Q.x", "smell": "duplication", "defer_reason": "rank", "detail": "順位"}
     path, _ = _state(tmp_path, items=state["items"], deferred_items=[*state["deferred_items"], extra], final_gate=state["final_gate"])
     after = _deferred_in(next(line for line in _report_lines(refactor, path, env_tmp_dir, capsys) if line.startswith("- 採用: ")), ": ")
-    assert before == after == 1
+    assert before == after == 2

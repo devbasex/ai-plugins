@@ -33,6 +33,27 @@ def closing_numbers(text) -> list[int]:
     return out
 
 
+_REF = re.compile(r"^(?:https?://github\.com/([\w.-]+/[\w.-]+)/issues/|([\w.-]+/[\w.-]+)#|#)(\d+)$", re.I)
+
+
+def issue_ref(ref, repo):
+    """課題の字面（`#12`・`owner/repo#12`・課題の URL）を (owner/name, 番号) にする。`#12` は `repo` の課題。読めなければ None。"""
+    m = _REF.match(str(ref or "").strip())
+    if not m:
+        return None
+    return (m.group(1) or m.group(2) or repo, int(m.group(3)))
+
+
+def closing_refs(text, repo) -> list[tuple[str, int]]:
+    """closing keywords が指す課題を (owner/name, 番号) で、重ねずに現れた順で返す。`#12` は `repo` の課題。"""
+    out: list[tuple[str, int]] = []
+    for ref in closing_issues(text):
+        got = issue_ref(ref, repo)
+        if got is not None and got not in out:
+            out.append(got)
+    return out
+
+
 def _reference_pattern(repo):
     """記録のリポジトリの課題の参照（`#<番号>` と課題の URL）の正規表現。
 

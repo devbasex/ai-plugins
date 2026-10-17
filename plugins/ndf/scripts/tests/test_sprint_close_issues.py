@@ -1,4 +1,4 @@
-"""sprint-close.py の --issues と --record-pr 0（#1078）。
+"""sprint-close.py の --issues と --record-pr 0（#1078）・unknown（#1875）。
 
 `pace: fast` の実装 Pull Request は閉じる語を持たないため、閉じる課題を --issues で受ける。最終の検査で
 変更が無く本番を飛ばしたときは、配布の記録を読まずに閉じる（--record-pr 0）。gh の偽物は
@@ -76,6 +76,34 @@ def test_record_zero_alone_returns_two(repo, gh):
     code, out, err = call("sprint-close.py", ["--record-pr", "0", "--repo", "o/r"], gh.env, repo)
     assert code == 2 and out["status"] == "stopped"
     assert gh.get().get("calls", []) == []
+
+
+def test_record_unknown_keeps_the_given_issues_open_with_a_reason(repo, gh):
+    """#1875 1875-4・1875-5: unknown は記録を読まず、どの課題も閉じず、ボードも書かずに理由つきの kept_open を返す。"""
+    gh.set(issues={"o/r#1": ["OPEN"], "o/r#2": ["OPEN"]})
+    args = ["--record-pr", "unknown", "--issues", "1,2", "--repo", "o/r", "--with-verification"]
+    code, out, err = call("sprint-close.py", args, gh.env, repo)
+    assert code == 0 and out["status"] == "ok", (out, err)
+    res = issues_of(out)
+    assert sorted(res) == ["o/r#1", "o/r#2"]
+    assert all(i["result"] == "kept_open" and "置き場が分からない" in i["reason"] for i in res.values())
+    assert gh.get().get("calls", []) == []  # 記録も状態も読まず、閉じもボードも書かない
+    assert out["summary"].startswith("記録の置き場が分からない") and out["metrics"]["closed"] == 0
+    gh.set(issues={"o/r#1": ["OPEN"], "o/r#2": ["OPEN"]})
+    _, zero, _ = call("sprint-close.py", ["--record-pr", "0", "--issues", "1,2", "--repo", "o/r"], gh.env, repo)
+    assert zero["summary"] != out["summary"] and "置き場" not in zero["summary"]
+
+
+def test_record_unknown_alone_returns_two(repo, gh):
+    code, out, err = call("sprint-close.py", ["--record-pr", "unknown", "--repo", "o/r"], gh.env, repo)
+    assert code == 2 and out["status"] == "stopped" and "unknown" in out["summary"]
+    assert gh.get().get("calls", []) == []
+
+
+@pytest.mark.parametrize("value", ["-1", "none"])
+def test_record_pr_rejects_other_values(repo, gh, value):
+    code, _, _ = call("sprint-close.py", ["--record-pr", value, "--issues", "1", "--repo", "o/r"], gh.env, repo)
+    assert code == 3
 
 
 def test_issues_are_added_to_the_closing_words_of_the_prs(repo, gh):

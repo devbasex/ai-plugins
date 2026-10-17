@@ -82,6 +82,8 @@ def _dev_approval_steps(a, repo: str | None, approval: str, prs: str, rts: str) 
     base = re.sub(r"-.*$", "", v)
     advise = getattr(a, "advise", None)  # 助言の MVV 判定を置くスプリントの状態（pace: normal。#1400）
     prev = f" --prev-tag {a.prev_tag}" if a.prev_tag else ""
+    m = re.fullmatch(r"\{queue_pr:([A-Za-z0-9._-]+)\}", prs.strip())
+    check_state = f" --check-state '{{queue_state:{m.group(1)}}}'" if m else ""  # 出す PR を出した検査のプランの状態
     facts = {
         "id": "facts",
         "type": "run",
@@ -101,7 +103,8 @@ def _dev_approval_steps(a, repo: str | None, approval: str, prs: str, rts: str) 
             "id": "explain",
             "type": "run",
             "cwd": repo,
-            "cmd": f"{STEPS_PY} notes --version {v} --prs {prs} --approval {approval} --verified {rts} --ref {a.base}",
+            # 検査のプランの状態から承認の材料（レビュー・リファクタリング・全体テスト）を読む（#1488）
+            "cmd": f"{STEPS_PY} notes --version {v} --prs {prs} --approval {approval} --verified {rts} --ref {a.base}{check_state}",
             "on_fail": "judge",
             "next": "others",
         },

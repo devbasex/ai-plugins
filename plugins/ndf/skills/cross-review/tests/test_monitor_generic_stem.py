@@ -147,13 +147,13 @@ def test_claude_root_permission_error_is_fatal(monitor_mod, tmp_path):
 
 
 def test_claude_permission_denials_detected_in_stdout_json(monitor_mod, tmp_path):
-    """承認失敗は標準出力の JSON に出るため、そちらを見る必要がある。"""
+    """承認失敗は標準出力の JSON に出るため、そちらを見る必要がある（成功で終わらなかったとき）。"""
     out = tmp_path / "stdout.log"
     out.write_text(
         json.dumps(
             {
                 "type": "result",
-                "subtype": "success",
+                "subtype": "error_max_turns",
                 "is_error": False,
                 "permission_denials": [{"tool_name": "Write", "tool_use_id": "x"}],
             }

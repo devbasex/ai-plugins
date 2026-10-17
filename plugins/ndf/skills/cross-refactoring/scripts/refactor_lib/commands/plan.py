@@ -18,7 +18,7 @@ import project_mvv
 import statefile
 import test_strategy as ts
 
-from .. import budget, forecast, info, pause, targets, timeline
+from .. import ABORT, budget, forecast, info, pause, targets, timeline
 from ..gitfacts import read_result, record_observed_model
 from ..items import defer, group_key, item_label, key_text, new_items
 from ..paths import git_out, load_state, work_dir
@@ -267,7 +267,10 @@ def cmd_merge_plan(args: argparse.Namespace) -> None:
     """改修計画を取り込み、時間に収まる項目と締め切りを決める。
 
     終了コード: 0 = 項目あり / 2 = 残る項目 0 件（最終ゲートへ）/ 4 = 中断。
-    出力: `TESTS_NEEDED=0|1`（テストを足す項目があるか）。
+    出力: `TESTS_NEEDED=0|1`（テストを足す項目があるか）。中断の理由は `ABORT_DETAIL=<1 行>`。
+
+    使える時間が 0 分以下で候補が 1 件以上あれば、候補を時間で見送り、計画を置かずに保存して終了コード 4 で
+    中断する（#1944 の I7）。打ち直しは止まっていた時間を除いた経過時間で計画を作り直す。
 
     **叩き直しても改修計画を作り直さない。** 採用の件数・実装の終わり・予備時間はこの時点の予算で
     固定する（再開で予算を変えても食い違わない）。採る件数を増やすのは検証の後の `readopt` だけである。
@@ -277,6 +280,8 @@ def cmd_merge_plan(args: argparse.Namespace) -> None:
         _emit_and_exit(state, replay=True)
         return
 
+    # 前の試行（使える時間が無く中断した計画）の時間の見送りを消してから選ぶ（#1944）。
+    state["deferred_items"] = [d for d in state.get("deferred_items") or [] if d.get("defer_reason") != DEFER_BUDGET]
     answers = _read_plan_answers(state)
     _decide_tiers(state, answers)
     remaining = _merge_duplicates(state)
@@ -296,6 +301,8 @@ def cmd_merge_plan(args: argparse.Namespace) -> None:
     selected, skipped = budget.select(ranked, available)
     for item in skipped:
         defer(state, item, DEFER_BUDGET, f"見積り {budget.estimate_total(item['estimate']):.1f} 分が残りに入らない")
+    if available <= 0 and ranked:
+        _stop_without_time(path, state, available, len(ranked))
 
     state["items"] = new_items(selected)
     _decide_public_io(state, state["items"])
@@ -308,8 +315,9 @@ def cmd_merge_plan(args: argparse.Namespace) -> None:
         "table": table,
         "selected": [i["id"] for i in state["items"]],
     }
-    # 止まっていた時間の記録（#1491）と採り直しの記録（#1743 決定 10）を空で作る。
-    state["pause"] = pause.empty()
+    # 止まっていた時間の記録（#1491。計画の前の分は引き継ぐ。#1944）と採り直しの記録（#1743 決定 10）を置く。
+    if not isinstance(state.get("pause"), dict):
+        state["pause"] = pause.empty()
     state["readopt"] = {"round": 1, "events": []}
     # **実行時の値をすべて書き出す**（決定 24）。以後の手順は、この表と時計の比較だけで進む。
     state["limits"] = timeline.of_state(state)
@@ -320,6 +328,15 @@ def cmd_merge_plan(args: argparse.Namespace) -> None:
     statefile.save(path, state)
     _report(state, available, len(skipped))
     _emit_and_exit(state)
+
+
+def _stop_without_time(path: Any, state: dict[str, Any], available: float, candidates: int) -> None:
+    """使える時間が無いまま全候補を見送った。計画を置かずに保存し、理由を `ABORT_DETAIL` に出して終了コード 4 で止める。"""
+    statefile.save(path, state)
+    detail = f"使える時間 {available:.1f} 分に候補 {candidates} 件が入らない（すべて時間で見送った）"
+    info(detail)
+    statefile.emit(ABORT_DETAIL=detail)
+    sys.exit(ABORT)
 
 
 def _report(state: dict[str, Any], available: float, skipped: int) -> None:

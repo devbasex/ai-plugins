@@ -138,7 +138,7 @@ init が終了コード 4 で止まった。同じ範囲の実測は 320 秒（6
 | 名前 | 契約 |
 | --- | --- |
 | `compute(..., offset_seconds=None)` | 提案と計画の枠を `started_at + offset_seconds` から数える（負と `None` は 0）。ほかの行は `started_at` から数える（I1・I4） |
-| `window_offset(state)` | o（秒）。I2 の式で、状態の `baseline_test.seconds`・`started_at`・`resumed_at` だけを読む |
+| `window_offset(state)` | o（秒）。I2 の式で、状態の `baseline_test.seconds`・`started_at`・`resumed_at` を読み、締め切りをずらした止まっていた時間（`pause.shifted_seconds`。#1944）を足す |
 | `of_state(state)` | `window_offset(state)` を `compute` へ渡す。`test_limits(state)` は `baseline_test.scope_seconds` / `scope_source` を `limits` へ渡す（I9） |
 | `RESUME_GRACE_SECONDS` | 300。人が文を読んで打ち直すまでの見込み |
 | `required_budget_minutes(offset_seconds, after_plan=0)` | `ceil(((o + RESUME_GRACE_SECONDS) / 60 + after_plan) / (1 − PROPOSE_SHARE − PLAN_SHARE))`（分）。見込みが 0 なら o = 1300 で 39、1700 で 48 |
@@ -160,8 +160,8 @@ init が終了コード 4 で止まった。同じ範囲の実測は 320 秒（6
 1. `_verify_init`: w と c を読み、`resolve_scope_seconds` で s を求めて `limits` から上限を出す → `run_baseline` →
    `baseline_test` に `scope_seconds` / `scope_source` を残す → `append_init_test` → 打ち切りなら `abort_timed_out`
 2. `cmd_init`: `_save_initial_state` で状態を保存した後に `stop_if_window_short`。止まらなければ出力（`PHASE=` など）へ進む
-3. `_resume`: 計画の前（`state.plan` が無い）なら、印があるときだけ `resumed_at` を今にし、`limits` を `of_state` で組み直して
-   `stop_if_window_short`。計画の後は何もしない（I6）
+3. `_resume`: 計画の前後を問わず先に `pause.resume_after_pause` で止まっていた時間を測る。計画の前（`state.plan` が無い）なら、
+   印があるときだけ `resumed_at` を今にし、`limits` を `of_state` で組み直して `stop_if_window_short`。計画の後は組み直さない（I6）
 
 ### 履歴の行（`refactor_lib/allocation.py`）
 

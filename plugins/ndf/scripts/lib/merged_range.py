@@ -62,6 +62,26 @@ def merges_in(root: Path, frm: str, to: str) -> list[Merge]:
     return out
 
 
+def nested_merges(root: Path, merge: Merge) -> list[Merge]:
+    """merge commit `merge` の 2 つ目の親の側（`<sha>^1..<sha>^2` の first-parent のログ）へ merge commit で入った PR
+    （#1885 のスプリント経由の PR）。squash の件名の `(#N)` は課題を指すことが多いため拾わない。squash の `merge`
+    （親が 1 つ）は空。`merges_in` の返す値は変えない（`check-trigger.py` の起動の範囲を保つ）。git が読めなければ StepError（2）。"""
+    try:
+        p = proc.git(root, "log", "--first-parent", "--format=%H%x09%P%x09%s", f"{merge.sha}^1..{merge.sha}^2", check=False)
+    except OSError:
+        raise StepError("git が無い", 2)
+    if p.returncode != 0:
+        if "unknown revision" in p.stderr or "bad revision" in p.stderr:  # 親が 1 つ（squash）
+            return []
+        raise StepError(f"git log {merge.sha[:12]}^1..^2: {p.stderr.strip()[:300]}", 2)
+    out = []
+    for line in p.stdout.splitlines():
+        sha, parents, subject = line.split("\t", 2)
+        if " " in parents and (m := MERGE_SUBJECT.match(subject)):
+            out.append(Merge(sha, int(m.group(1)), m.group(2)))
+    return out
+
+
 def with_heads(root: Path, merges: list[Merge]) -> list[Merge]:
     """branch が None（squash）の番号だけを GitHub から読んで埋める。読めなければ StepError（1）。"""
     need = [m.number for m in merges if m.branch is None]

@@ -57,9 +57,9 @@
 
 | 要素 | 責務 |
 | --- | --- |
-| `plugins/ndf/scripts/lib/acceptance.py` | 受け入れ条件の節の見出し（`HEADING`）・番号の数え方（`criteria`）・印付け（`check_criteria`）・書く前の確かめ（`only_marks`）の唯一の置き場。純粋な文字列の処理で、GitHub を呼ばない |
+| `plugins/ndf/scripts/lib/acceptance.py` | 受け入れ条件の節の見出し（`HEADING`）・番号の数え方（`criteria`）・印付け（`check_criteria`）・書く前の確かめ（`only_marks`）・リリース後テストの表を課題と番号でまとめる（`verification_verdicts` / `IssueRows`。承認資料の材料と同じ規則で読む）の唯一の置き場。純粋な文字列の処理で、GitHub を呼ばない |
 | `plugins/ndf/scripts/lib/gh_sections.py` の `section_bounds` | 節の中身を元の本文の文字の位置 `(始め, 終わり)` で返す。改行（`\r\n`）を正規化しない |
-| `plugins/ndf/scripts/sprint-close.py` | 表を課題と番号でまとめる（`verification_verdicts`）・閉じる条件 2 の判定（`judge_acceptance`）・錠の中での本文の読み書き・`closed_unverified` と集計 |
+| `plugins/ndf/scripts/sprint-close.py` | 表のまとめ（`acceptance.verification_verdicts` を import する）・閉じる条件 2 の判定（`judge_acceptance`）・錠の中での本文の読み書き・`closed_unverified` と集計 |
 | `plugins/ndf/scripts/supervise_lib/sprint_inputs.py` | 見出しの定数 `HEADING` を `acceptance.HEADING` から引く（同じ役割の定数を 2 か所に置かない） |
 | `plugins/ndf/scripts/progress-record.sh` | モードの列が `-` で記録の無い工程の行を書かない |
 
@@ -78,7 +78,7 @@
 | I5 | 印付けで変わるのは、節の中のチェックボックスの `[ ]` の空白 1 文字だけである（節の外・取り消し線の行・説明の行・改行の形は変わらない） | 書き込まず、その課題を `failed`（受け入れ条件の印を書けない） |
 | I6 | 記録のリポジトリの課題で印を付ける番号があるとき、課題を閉じるのは印を書き終えた後だけである | 印を書けなければ閉じずに `failed`（`cmd` は同じ `sprint-close.py` の呼び出し） |
 | I7 | 他のリポジトリの課題の本文は書かない。判定は同じ規則で行う | — （書く経路を持たない） |
-| I8 | `--with-verification` が無い呼び出しと `--record-pr 0` の呼び出しは、本文を読まず書かない | — （読む経路に入らない） |
+| I8 | `--with-verification` が無い呼び出しと `--record-pr 0` / `unknown` の呼び出しは、本文を読まず書かない | — （読む経路に入らない） |
 | I9 | 閉じた課題を開き直さない | — （開き直す経路を持たない） |
 | I10 | 工程表は、モードが `WF_MODES` のどれかなら、`WF_STAGE_MATRIX` のその列が `-` で記録の無い工程の行を持たない。記録の済んだ行は列が `-` でも残る。モードが `—` か知らない値なら全工程の行を持つ | — （書き直すたびに組み直す） |
 
@@ -105,7 +105,7 @@ sequenceDiagram
   SC->>GH: 記録の PR を読む
   SC->>SC: verification_verdicts（課題を指さない行を飛ばす）
   loop スプリント課題ごと
-    alt 全体を止める経路（記録が読めない・本番の前・対応が読めない）
+    alt 全体を止める経路（記録の置き場が分からない・記録が読めない・本番の前・対応が読めない）
       SC->>SC: kept_open（本文を読まない）
     else --with-verification なし・--record-pr 0
       SC->>GH: 本文を読まずに判定する
@@ -176,7 +176,7 @@ sequenceDiagram
 - `--dry-run` で `would_check` が載り、本文を書かないこと
 - 本文の書き込みが失敗すると `failed`・`cmd` が同じ呼び出し・閉じる操作が 0 回・終了コード 1 になること
 - 節が無い本文とチェックボックスが 0 個の節で、表の合否だけで判定され本文を書かないこと
-- `--with-verification` なしと `--record-pr 0` で本文を読まないこと。他のリポジトリの課題は同じ規則で判定し、本文を書かないこと
+- `--with-verification` なしと `--record-pr 0` / `unknown` で本文を読まないこと。他のリポジトリの課題は同じ規則で判定し、本文を書かないこと
 - コードブロックの中・字下げしたチェックボックス・取り消し線の行を数えないこと
 - 本文の読み書きの間は同じ課題の錠が取られ、錠を取れないと `failed` になること
 - モード `light` の課題へ工程を記録すると列が `-` の 9 工程の行が無く `作業場所の用意`・`設計` の行があること。記録済みの `計画` の `[x]` 行は残ること。モード `—` では全 19 工程の行があること

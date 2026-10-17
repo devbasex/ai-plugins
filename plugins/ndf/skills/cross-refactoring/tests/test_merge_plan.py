@@ -231,6 +231,46 @@ def test_the_plan_is_not_rebuilt_on_resume(planned, cmd_plan):
     assert read_state(path)["plan"] == first
 
 
+def test_no_available_time_stops_without_a_plan_and_counts_the_deferred(planned, cmd_plan, capsys, refactor):
+    """1944-3・1944-4・I7: 使える時間が 0 分以下で候補があれば、計画を置かずに終了コード 4 で止め、候補を時間の見送りに数える。"""
+    import sys
+
+    a, b = _candidate(1, "f"), _candidate(2, "g")
+    path = planned([a, b], [_answer(a), _answer(b)], budget_minutes=10)
+    with pytest.raises(SystemExit) as stop:
+        _run(cmd_plan)
+    assert stop.value.code == 4
+    out = capsys.readouterr().out
+    assert "ABORT_DETAIL=" in out and "候補 2 件が入らない" in out and "使える時間 -" in out
+    state = read_state(path)
+    assert state.get("plan") is None
+    assert [d["defer_reason"] for d in state["deferred_items"]] == ["budget", "budget"]
+    assert sys.modules["refactor_lib.ledger"].tally(state).as_metrics()["deferred"] == 2
+
+
+def test_the_rerun_after_no_available_time_builds_the_plan_again(planned, cmd_plan):
+    """1944-1・I5: 打ち直しは止まっていた時間を除いた経過時間で計画を作り直し、前の試行の時間の見送りを積まない。"""
+    a, b = _candidate(1, "f"), _candidate(2, "g")
+    path = planned([a, b], [_answer(a), _answer(b)], budget_minutes=16)
+    with pytest.raises(SystemExit):
+        _run(cmd_plan)
+    state = read_state(path)
+    # 止まっていた 4 分をずらした（経過 5 分 → 1 分）。計画の前の記録は計画へ引き継ぐ
+    state["pause"] = {
+        "seconds": 240,
+        "shifted_seconds": 240,
+        "legacy": False,
+        "events": [{"reason": "shifted", "shifted": True, "seconds": 240}],
+    }
+    write_state(path, state)
+    _run(cmd_plan)
+    state = read_state(path)
+    assert state["plan"]["elapsed_minutes"] == pytest.approx(1, abs=0.1)
+    assert state["items"]
+    assert sum(1 for d in state["deferred_items"] if d["defer_reason"] == "budget") == 2 - len(state["items"])
+    assert state["pause"]["shifted_seconds"] == 240
+
+
 # ---------- 実行時の値を改修計画の終わりまでに書き出す（決定 24・25） ----------
 
 
