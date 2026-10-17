@@ -21,6 +21,8 @@ NDF の今の Skill はスライドの原則（`design/references/layout-slide.m
 - 新しい Skill を作る前に、既存のスライドの規約（`layout-slide.md`・`form-slide.md`・`layout-review`・`document-systems` の `system-gdrive.md`）への統合を優先する
 - トーン＆マナーは会社色を持たない汎用のテンプレートを既定にし、プロジェクトごとに差し替えられるようにする
 - 取り込んだ手順で、発表資料「独自スキルプラグイン開発の薦め」（台本は第 7 稿 https://docs.google.com/document/d/13nNf3sLjMtrp7WZKHPFD_KW-sv-v5xv5kno2pICfP3U/edit ）を `docs/presentations/` に作る
+- （2026-10-18 追加）Marp（Markdown を変換器でスライドにする経路）はこのプラグインから外す。変換後のスライドが編集できないのは致命的なため。外す範囲は規約とリポジトリの両方: `form-slide.md` 等のスライドの生成の経路から「変換器を使う」を外して生成スクリプトを既定にし、`docs/presentations/` の README・`build.sh`・`AGENTS.md` の Marp の記述を生成スクリプトの方式へ書き換える。2026-08-06 の資料は発表日時点の記録として残す
+- （2026-10-18 追加）python-pptx も pptxgenjs に比べて利点が無いため外す。スライドの生成の経路は「生成スクリプトを書く（pptxgenjs）」の 1 つだけにし、「AI エージェントが組む」をスライドから外す（文書・表計算・ページの形の経路は変えない）。`official-skills-autoloader` は「スライドを新しく作る」依頼を `release` の `form-slide.md` へ回し、公式の `pptx` Skill は既存の .pptx を読む・直すときだけに使う
 
 ## 由来
 
@@ -66,7 +68,7 @@ NDF の今の Skill はスライドの原則（`design/references/layout-slide.m
 
 ## 前提
 
-- 前提 1: 生成は pptxgenjs の生成スクリプト（Node.js）で行う。python-pptx で組む方式と、既存の Marp の経路（`docs/presentations/build.sh`）はこの課題で手を入れない
+- 前提 1: 生成は pptxgenjs の生成スクリプト（Node.js）で行う。python-pptx で組む方式と、AI エージェントがその場で組む方式は採らない（方針の 2026-10-18 追加）。Marp の経路はこの課題で外す（方針の 2026-10-18 追加）
 - 前提 2: 汎用テンプレートの版面（10 × 5.625 インチ）と枠組みの関数の座標は手本の値を踏襲する。書体・色・著作権表示の文言・ロゴは会社に由来しない値を既定にする（書体は配布先の環境と Google Slides で使える書体から設計で選ぶ）
 - 前提 3: 台本の正本は第 7 稿の Google ドキュメントである。作成時はドキュメントから取得し、手元の写し（会話の作業ディレクトリの `script-v7.md`）と食い違えばドキュメントを採る。台本はページごとの見出しと読み上げを持つが、ページに載せる要素（図・表・箇条書き）は持たないため、ページの中身は作成時に台本から起こし、構成メモの「役割」「根拠」に書く
 - 前提 4: Google Slides への変換は、利用者の Drive の非公開の場所（フォルダを指定しないアップロード、または利用者の既存の非公開フォルダ）に置く。共有・公開範囲の設定はこの課題で行わない
@@ -85,7 +87,7 @@ NDF の今の Skill はスライドの原則（`design/references/layout-slide.m
 
 含まない:
 - 新しい Skill の新設（統合で足りないと設計が示した場合だけ、設計 PR で理由を添えて扱う）
-- python-pptx・Marp・LibreOffice による生成の経路の追加と、既存の Marp 資料（`2026-08-06-ai-plugins-intro`）・`build.sh` の変更
+- python-pptx・LibreOffice による生成の経路の追加と、既存の Marp 資料（`2026-08-06-ai-plugins-intro` の md・html・pdf）の削除や書き換え
 - 発表資料の共有設定・登壇先への提出・`index.html`（公開ページの入口）以外の公開操作
 - 台本の内容の書き直し（第 7 稿を確定として使う。ページに収まらない場合の削り方は前提 3 の範囲で構成メモに書く）
 - 規約の既存の行の「枚」の言い換え（前提 7）
@@ -130,6 +132,8 @@ NDF の今の Skill はスライドの原則（`design/references/layout-slide.m
 - [ ] 13. 追加・変更したファイル（規約・汎用テンプレート・発表資料）に、事例のプロジェクトの名前と社名（`nyle` / `Nyle` / `ナイル` と案件名）と手本のコーポレートカラー `95FF00` が出ない（`git diff develop -- <対象>` の追加行を grep して 0 件）
 - [ ] 14. 追加・変更した行に、直訳の和語「枚」が出ない（ページの数え方は「ページ」）
 - [ ] 15. 退行しない: `python3 scripts/check-skill-frontmatter.py`・`python3 plugins/ndf/scripts/instructions-check.py --root .`・`python3 plugins/ndf/scripts/doc-lint.py`（PR の差分に対して）・`uv run --frozen --project . --all-extras pytest . -q -n 4`・`claude plugin validate .` がすべて終了コード 0。既存の Marp 資料と `build.sh` に差分が無い
+- [ ] 16. スライドの生成の経路から「変換器を使う」（Marp）が外れ、`plugins/` の規約と `docs/presentations/README.md`・`AGENTS.md` に Marp を使う手順が残らない（`git grep -i marp -- plugins/ AGENTS.md` はテストのデータを除いて 0 件。`docs/presentations/README.md` は 2026-08-06 の資料が Marp で作った記録だと示す行だけを残してよい）。`docs/presentations/build.sh` は消すか生成スクリプトの方式へ置き換える。2026-08-06 の資料の md・html・pdf は残す
+- [ ] 17. スライドの生成の経路が「生成スクリプトを書く」の 1 つになり、`form-slide.md`・`layout-slide.md`・`layout-common.md`・`distribution-forms.md` にスライドを「AI エージェントが組む」経路と python-pptx が残らない（ほかの形の経路は変わらない）。`official-skills-autoloader` の対応表で、スライドの新規作成は `form-slide.md` へ、公式 `pptx` は既存の .pptx を読む・直す依頼だけへ振り分けられる
 
 ## 非機能の条件
 
@@ -145,7 +149,7 @@ NDF の今の Skill はスライドの原則（`design/references/layout-slide.m
 | --- | --- |
 | 公開インタフェース | 変わらない（Skill の追加・削除・名前の変更が無い。規約の参照先が増える） |
 | データ | 無し |
-| 既存の振る舞い | スライドを作るときに AI が読む規約に、生成スクリプトと変換・確認の手順が加わる。Marp の経路は変わらない |
+| 既存の振る舞い | スライドを作るときに AI が読む規約に、生成スクリプトと変換・確認の手順が加わる。Marp（変換器）の経路はスライドの規約とリポジトリの手順から外れる |
 
 ## 検証手段
 

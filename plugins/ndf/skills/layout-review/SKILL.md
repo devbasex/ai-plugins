@@ -54,7 +54,8 @@ allowed-tools:
 | --- | --- |
 | HTML | `playwright-kit` の `playwright-evidence`（スクリーンショット） |
 | PDF | ページを画像へ変換する |
-| Google スライド / ドキュメント | PDF へ書き出してから画像へ（`document-systems` の `system-gdrive.md`） |
+| Google スライド | ページごとのサムネイル（`document-systems` の `system-gdrive.md`） |
+| Google ドキュメント | PDF へ書き出してから画像へ（`document-systems` の `system-gdrive.md`） |
 | システムのページ | **システムごとに違う。** `system-<名前>.md` が持つ。無いシステムもある |
 
 **手段は `document-systems` が持つ。** ここで重ねて定めない。
@@ -92,7 +93,7 @@ allowed-tools:
 | 原因 | 戻す先 |
 | --- | --- |
 | 版面の決め方（余白・文字の大きさ・1 枚あたりの情報量） | 体裁設計（`design` の `layout-<出力の形>.md`） |
-| 生成の経路（変換器の設定、指示の与え方） | リリースの生成の手順（`release` の `form-<出力の形>.md`） |
+| 生成の経路（変換器の設定、指示の与え方、生成スクリプト） | リリースの生成の手順（`release` の `form-<出力の形>.md`） |
 | 内容が多すぎて収まらない | **執筆へ戻す**（主張の数を減らす） |
 
 ## 見た結果を残す

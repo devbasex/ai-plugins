@@ -60,6 +60,9 @@ REQUIRED_COMMANDS: dict[str, tuple[str, ...]] = {
     "plugins/ndf/skills/cross-review/tests": ("bash", "jq", "git"),
     # `assert-characterization.sh` を bash で起動し、チェックの本体が `jq` と `python3` を呼ぶ。
     "tests/runtime-smoke": ("bash", "jq", "python3"),
+    # スライドの生成スクリプト（pptxgenjs）を node で実行し、依存が無ければ `npm ci` で入れる（#2065）
+    "plugins/ndf/skills/release/tests/test_slide_template.py": ("node", "npm"),
+    "tests/test_presentation_decks.py": ("node", "npm"),
 }
 
 # 読み飛ばしを選ぶ指定。**既定は失敗**である。読み飛ばしたい実行環境のために残すが、

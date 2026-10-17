@@ -34,19 +34,17 @@ if str(LIB) not in sys.path:
 
 import step_result as sr  # noqa: E402
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from gws_common import emit_stopped, output_tail  # noqa: E402
+
 TOOL = "google-workspace"
 PACKAGE = "@googleworkspace/cli"
 PACKAGE_URL = "https://www.npmjs.com/package/@googleworkspace/cli"
 INSTALL_CMD = ["npm", "install", "-g", PACKAGE]
 PROBE_KEYS = ("credential_source", "auth_method", "client_config_exists")
 EXIT_UNAUTHENTICATED = sr.EXIT_GATE + 1
-TAIL_LINES = 20
 TIMEOUT = 120
 INSTALL_TIMEOUT = 600
-
-
-def _tail(text: str) -> str:
-    return "\n".join((text or "").strip().splitlines()[-TAIL_LINES:])
 
 
 def _run(cmd: list[str], timeout: int = TIMEOUT) -> subprocess.CompletedProcess:
@@ -64,7 +62,7 @@ def _npm_prefix(npm: str) -> str | None:
 
 
 def _halt(summary: str, code: int, items=None, next_: str | None = None, metrics=None):
-    sr.emit(sr.result(TOOL, "stopped", summary, items=items, metrics=metrics, next=next_), code)
+    emit_stopped(TOOL, summary, code, items=items, next_=next_, metrics=metrics)
 
 
 def _probe(gws: str) -> dict:
@@ -73,7 +71,7 @@ def _probe(gws: str) -> dict:
         cp = _run([gws, "auth", "status"])
     except (OSError, subprocess.TimeoutExpired) as e:
         _halt(f"gws auth status を起動できない: {e}", sr.EXIT_UNREADABLE)
-    stderr_item = [{"name": "gws auth status の標準エラーの末尾", "result": "stderr", "detail": _tail(cp.stderr)}]
+    stderr_item = [{"name": "gws auth status の標準エラーの末尾", "result": "stderr", "detail": output_tail(cp.stderr)}]
     if cp.returncode != 0:
         _halt(f"gws auth status が終了コード {cp.returncode} で終わった", sr.EXIT_UNREADABLE, items=stderr_item)
     try:
@@ -132,7 +130,7 @@ def _install(npm: str) -> None:
         _halt(
             f"npm install -g が終了コード {cp.returncode} で終わった",
             sr.EXIT_VIOLATION,
-            items=[{"name": "npm の出力の末尾", "result": "failed", "detail": _tail(cp.stdout + "\n" + cp.stderr)}],
+            items=[{"name": "npm の出力の末尾", "result": "failed", "detail": output_tail(cp.stdout + "\n" + cp.stderr)}],
             next_="出力を利用者に示して止まる。sudo で打ち直さない",
         )
 
