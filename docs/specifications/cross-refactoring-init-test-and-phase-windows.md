@@ -160,7 +160,7 @@ init が終了コード 4 で止まった。同じ範囲の実測は 320 秒（6
 1. `_verify_init`: w と c を読み、`resolve_scope_seconds` で s を求めて `limits` から上限を出す → `run_baseline` →
    `baseline_test` に `scope_seconds` / `scope_source` を残す → `append_init_test` → 打ち切りなら `abort_timed_out`
 2. `cmd_init`: `_save_initial_state` で状態を保存した後に `stop_if_window_short`。止まらなければ出力（`PHASE=` など）へ進む
-3. `_resume`: 計画の前後を問わず先に `pause.resume_after_pause` で止まっていた時間を測る（#1944）。計画の前（`state.plan` が無い）なら、
+3. `_resume`: 計画の前後を問わず先に `pause.resume_after_pause` で止まっていた時間を測る。計画の前（`state.plan` が無い）なら、
    印があるときだけ `resumed_at` を今にし、`limits` を `of_state` で組み直して `stop_if_window_short`。計画の後は組み直さない（I6）
 
 ### 履歴の行（`refactor_lib/allocation.py`）
