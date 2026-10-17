@@ -70,6 +70,11 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.x"
+      # スライドの生成スクリプトのテストが node で pptxgenjs を動かす。依存の `npm ci` はテストが
+      # 自分で打つ（前提のコマンドの確認は根の conftest.py が行う。#2065）
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
       - name: Install uv
         run: python3 -m pip install --upgrade uv
       # 起点はリポジトリの根に置く。環境は根の pyproject.toml と uv.lock が固定する（#1142 の決定 22）。
