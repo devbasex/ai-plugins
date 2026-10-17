@@ -3081,9 +3081,16 @@
     {
       "term": "手動確認の行",
       "context": "ndf-workflow",
-      "meaning": "要求の検証手段の表で、項目が「手動確認」で始まる行。項目が「手動確認（マージ前）」ならマージ前、それ以外はリリース後テストに確かめる",
+      "meaning": "要求の検証手段の表で、項目が「手動確認」で始まり、2 列目が「無し」の形（「無し」「なし」「不要」「ない」「-」「—」「―」の単独か、直後に括弧・句読点・空白が続く形）でない行。項目が「手動確認（マージ前）」ならマージ前、それ以外はリリース後テストに確かめる",
       "source": "",
       "pending_source": "issues/old/issue-1485-design.md"
+    },
+    {
+      "term": "記録の置き場が分からない",
+      "context": "ndf-workflow",
+      "meaning": "まとめの close が読むリリース記録の Pull Request を、プランが組まれた時点で決められない状態。sprint-close.py --record-pr unknown で渡し、課題を開いたまま残す",
+      "source": "",
+      "pending_source": "issues/issue-1875-design.md"
     },
     {
       "term": "設計の結果",
