@@ -106,16 +106,18 @@ class Usage:
         return float(max(vals)) if vals else None
 
     def spend_reached(self) -> bool | None:
-        """支出上限に達したか（I4）: `spend_limit_reached`・`spend.percent` ≥ 100・`spend.severity` = critical のどれか。
+        """支出上限に達したか（I4）: 応答の生の `spend_limit_reached`。読めなければ None。
 
-        どれも読めなければ None。"""
-        sp = self.spend or {}
-        pct, sev = sp.get("percent"), sp.get("severity")
-        if self.spend_limit_reached or (isinstance(pct, (int, float)) and pct >= 100) or sev == "critical":
-            return True
-        if self.spend_limit_reached is None and self.spend is None:
+        `spend` の percent・severity は判定に使わない（#2036。生の旗が偽でも 100%・critical を返すことがあり、
+        解除の時刻を持たないため上限から外れなくなる）。表示の補足は `spend_full` が持つ。"""
+        return self.spend_limit_reached
+
+    def spend_full(self) -> bool | None:
+        """`spend` が使い切りを示すか（`percent` ≥ 100 か `severity` = critical。表示の補足だけに使う）。読めなければ None。"""
+        if self.spend is None:
             return None
-        return False
+        pct = self.spend.get("percent")
+        return (isinstance(pct, (int, float)) and pct >= 100) or self.spend.get("severity") == "critical"
 
     def resets(self, key: str) -> float | None:
         w = getattr(self, key)
