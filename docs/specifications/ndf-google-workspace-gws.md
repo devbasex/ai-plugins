@@ -25,7 +25,8 @@
 | --- | --- |
 | 3 段の流れ（確かめる → 同意のうえ入れる → 認証を案内する）と、終了コードごとの次の手 | [`google-workspace` の SKILL.md](../../plugins/ndf/skills/google-workspace/SKILL.md) の「流れ」 |
 | 同意の取り方（明示の依頼を同意とみなす・暗黙の依頼では待つ・人がいない起動で止まる） | 同上の「流れ」の 2. |
-| Drive の操作の対応表（エクスポート・ダウンロード・アップロード・フォルダの共有範囲の確認・公開リンクの付与）と、エクスポートの MIME | 同上の「操作の対応表」 |
+| Drive の操作の対応表（エクスポート・ダウンロード・アップロード・フォルダの共有範囲の確認・公開リンクの付与・pptx の Google Slides への変換と同じ URL のままの差し替え）と、エクスポートの MIME | 同上の「操作の対応表」 |
+| Google Slides のページの ID とサムネイルの取得（サムネイルはスクリプト `slides-thumbnails.py`。契約は #2065 の設計の「入出力の契約」） | 同上の「操作の対応表」と [`issues/issue-2065-design.md`](../../issues/issue-2065-design.md) |
 | Drive の素材の取り込みと PDF の取得の経路 | `document-systems` の [`references/system-gdrive.md`](../../plugins/ndf/skills/document-systems/references/system-gdrive.md) |
 | playwright-kit の利用者向けの移行の案内 | [`plugins/playwright-kit/README.md`](../../plugins/playwright-kit/README.md) と根の `CHANGELOG.md` の playwright-kit 3.0.0 |
 
@@ -41,7 +42,7 @@
 
 | 扱う | 扱わない |
 | --- | --- |
-| `google-workspace` の Skill と確認のスクリプト `gws-check.py` | gws の Drive 以外の操作の手順（Sheets の編集・Gmail・Calendar など。Skill は `gws <サービス> --help` を案内するだけ） |
+| `google-workspace` の Skill と確認のスクリプト `gws-check.py` | gws の Drive と Google Slides のページの ID・サムネイル以外の操作の手順（Sheets の編集・Gmail・Calendar など。Skill は `gws <サービス> --help` を案内するだけ） |
 | `google-auth` と `google-drive` を配布から外したこと（manifests 4 つ・`plugin.json` 2 つ・Skill 間の参照の例外） | playwright-kit の Drive 連携を gws へ移すこと（#745 は not planned） |
 | `document-systems` と `document-sources` の Drive の経路を gws へ向けたこと | gws の版の固定と、gws の不具合の回避策 |
 | playwright-kit から Drive への保管を外したこと | 旧 Skill のトークンを gws へ移すこと（利用者は `gws auth login` で認証し直す） |
