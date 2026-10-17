@@ -1054,18 +1054,18 @@ def cmd_notes(a):
     reps, bad = [], []
     data = pr_many(root, [p.number for p in prs], "title,body,state,closingIssuesReferences", comments=True) if path else None
     notes = pr_notes(root, prs, skipped, reps, bad, data)
-    before = {n: items for n, items, *_ in notes}
+    before = {note.number: note.changes for note in notes}
     after, rep_items = replaced.apply(before, reps)  # 後の PR が置き換えた箇条を除く（#1834）
     rep_items += bad
     gone = sum(len(before[n]) - len(after[n]) for n in before)
-    bullets = [f"- {i}" for n, *_ in notes for i in after[n]]
-    risks = [f"- {i}" for _, _, rs, *_ in notes for i in rs]
-    migration = [f"- {i}" for *_, ms in notes for i in ms]
+    bullets = [f"- {i}" for note in notes for i in after[note.number]]
+    risks = [f"- {i}" for note in notes for i in note.risks]
+    migration = [f"- {i}" for note in notes for i in note.migration]
     if path:
         metrics = _notes_metrics(a, notes, bullets, migration, skipped, gone, approval=str(path))
         _notes_to_approval(root, a, path, prs, data, bullets, risks, migration, skipped, rep_items, metrics)
         return
-    fallback = sum(1 for *_, by_title, _ in notes if by_title)
+    fallback = sum(1 for note in notes if note.by_title)
     metrics = _notes_metrics(a, notes, bullets, migration, skipped, gone, fallback=fallback)
     _notes_to_changelog(root, a, bullets, migration, skipped, rep_items, metrics)
 

@@ -16,6 +16,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 
 import approved_commit as ac
 import gh_call
@@ -41,6 +42,16 @@ class IncludedPr:
 
     number: int
     via: int | None = None
+
+
+class PrNote(NamedTuple):
+    """PR 1 本の要約: 利用者向けの変化・未検証・残る危険・題名で代えたか・移行の手順の箇条。"""
+
+    number: int
+    changes: list[str]
+    risks: list[str]
+    by_title: bool
+    migration: list[str]
 
 
 def _in_range(m: merged_range.Merge) -> bool:
@@ -231,8 +242,8 @@ def titles_of(prs: list[IncludedPr], data: dict, skipped=None) -> list[tuple[int
     return items
 
 
-def notes_of(prs: list[IncludedPr], data: dict, skipped=None, replacing=None, unreadable=None) -> list[tuple]:
-    """PR ごとに (番号, 利用者向けの変化の箇条, 未検証・残る危険の箇条, 題名で代えたか, 移行の手順の箇条) を返す。
+def notes_of(prs: list[IncludedPr], data: dict, skipped=None, replacing=None, unreadable=None) -> list[PrNote]:
+    """PR ごとに PrNote（番号・利用者向けの変化・未検証・残る危険・題名で代えたか・移行の手順）を返す。
     マージされていない PR は配る中身に入らないため載せず、番号を skipped へ足す。replacing を渡すと本文の
     `## 置き換える箇条` を足し、形に合わない行を unreadable へ items の行として足す（#1834）。
     スプリント経由の PR は変化と移行の手順をスプリント PR の本文に任せて危険だけを返し、配布物の変化なしの PR は
@@ -252,7 +263,7 @@ def notes_of(prs: list[IncludedPr], data: dict, skipped=None, replacing=None, un
                 {"kind": "replacement", "name": f"#{n}", "result": "unreadable", "text": t} for t in bad
             )
         if p.via is not None or no_change(d):
-            out.append((n, [], risks, False, []))
+            out.append(PrNote(n, [], risks, False, []))
             continue
-        out.append((n, items or [f"{d['title'].strip()}（#{n}）"], risks, not items, others.migration_items(body, n)))
+        out.append(PrNote(n, items or [f"{d['title'].strip()}（#{n}）"], risks, not items, others.migration_items(body, n)))
     return require_merged(out, [p.number for p in prs])
