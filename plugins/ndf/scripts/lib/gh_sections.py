@@ -14,6 +14,7 @@ from typing import NamedTuple
 SECTION_END = "<!-- ndf:section-end -->"
 _FENCE = re.compile(r"^\s*(```|~~~)")
 _HEADING = re.compile(r"^(#{1,6})[ \t]+\S")
+BULLET = re.compile(r"^[-*]\s+(.*)$")  # 箇条の行（`- ` / `* `）。群 1 が本文
 
 
 class _Span(NamedTuple):
@@ -163,7 +164,7 @@ def section_items(body: str, heading: str, n: int) -> list[str]:
         text = line.strip()
         if not text:
             continue
-        bullet = re.match(r"^[-*]\s+(.*)$", text)
+        bullet = BULLET.match(text)
         indented = line[:1].isspace()
         if not items or not indented:
             items.append((bullet.group(1) if bullet else text).strip())

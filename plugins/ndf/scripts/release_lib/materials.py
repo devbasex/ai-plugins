@@ -213,7 +213,7 @@ def _items_from_table(table) -> list[str]:
 
 def _items_from_bullets(section: str) -> list[str]:
     """節の箇条の行の文。"""
-    return [re.sub(r"^[-*]\s+", "", t.strip()) for t in section.splitlines() if re.match(r"^[-*]\s+", t.strip())]
+    return [m.group(1) for t in section.splitlines() if (m := gh_sections.BULLET.match(t.strip()))]
 
 
 def read_unconfirmed(root: Path, base: str, issues) -> tuple[Unconfirmed, ...] | None:
