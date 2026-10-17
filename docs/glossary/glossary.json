@@ -3650,7 +3650,7 @@
     {
       "term": "見送った改善項目",
       "context": "ndf-cross-refactoring",
-      "meaning": "リファクタリング計画が採った改善項目のうち、表示の状態が見送りのもの（実装の終わりまでにコミットが無く採り直しにも入らなかった not_done・足したテストが落ちた test_failed）。結果 JSON の metrics.deferred の数",
+      "meaning": "リファクタリング計画が採った改善項目のうち、表示の状態が見送りのもの（実装の終わりまでにコミットが無く採り直しにも入らなかった not_done・足したテストが落ちた test_failed）。結果 JSON の metrics.deferred は、この数に時間（budget）で見送り項目に入っていない候補の数を足す（#1944）",
       "source": "docs/specifications/cross-refactoring-pr-gate-and-skip-counts.md"
     },
     {

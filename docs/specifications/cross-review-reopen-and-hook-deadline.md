@@ -71,8 +71,8 @@ carmo-system-console の会話の記録（2026-09-27 に集計）で、次の手
 | `review_lib/commands/loop.py` | `check-oscillation` は `final` が確定していれば判定しない。振動検知と `should-rotate` は `rounds_since` で数える |
 | `review_lib/commands/merge_fix.py` の `ingest_fix` | 修正の記録の取り込みの本体。`rounds[-1].fix.merge.stage` を書き進め、打ち直しは済んでいない段階から続ける |
 | `review_lib/commands/record_fix.py` の `cmd_record_fix` | コミットとスレッドを GitHub で確かめ、戻り値ファイルを書いて `ingest_fix` を通す |
-| `plugins/ndf/scripts/lib/loop_drive.py` の `rerun_reason`・`keep_finished` | 完了した実行の回の結果を返してよいかの判定（cross-review と cross-refactoring の駆動の共有の部品） |
-| `cross-review/scripts/drive.py` の `Drive.finished`・`Drive.pr_head` | 耐久の記録の完了を返すかを `keep_finished` で決める。終わりの出力に PR の head を残す |
+| `plugins/ndf/scripts/lib/loop_drive.py` の `rerun_reason`・`keep_finished`・`keep_finished_output`・`result_args`・`args_diff`・`pr_head` | 完了した実行の回の結果を返してよいかの判定（cross-review と cross-refactoring の駆動の共有の部品。結果を変える引数の比較は #1263） |
+| `cross-review/scripts/drive.py` の `Drive.finished`・`Drive.pr_head` | 耐久の記録の完了を返すかを `keep_finished_output` で決める。終わりの出力に PR の head と結果を変える引数を残す |
 | `plugins/ndf/scripts/hook_lib/deadline.py` | `DEADLINE_SECONDS`・`MARGIN_SECONDS`・`Deadline`・`HookDeadlineExceeded` |
 | `plugins/ndf/scripts/hook.py` の `_guards` | worktree の guard と token の guard を締め切りの中で打つ |
 
@@ -84,8 +84,8 @@ classDiagram
         +pr_head(tmp) str|None
     }
     class loop_drive {
-        +rerun_reason(recorded_head, current_head, forced) str|None
-        +keep_finished(recorded_head, current_head, forced) bool
+        +rerun_reason(recorded_head, current_head, forced, recorded_args, current_args) str|None
+        +keep_finished(recorded_head, current_head, forced, recorded_args, current_args) bool
     }
     class reopen {
         +reopen(st, now) dict
@@ -164,25 +164,33 @@ stateDiagram-v2
 ### 前回の結果を返すかの判定（`loop_drive`）
 
 ```python
-def rerun_reason(recorded_head: str | None, current_head: str | None, forced: bool) -> str | None:
+def rerun_reason(recorded_head: str | None, current_head: str | None, forced: bool,
+                 recorded_args: dict | None = None, current_args: dict | None = None) -> str | None:
     """完了した実行の回を返さずに新しく始める理由。返してよければ None。"""
 
-def keep_finished(recorded_head: str | None, current_head: str | None, forced: bool) -> bool:
+def keep_finished(recorded_head: str | None, current_head: str | None, forced: bool,
+                  recorded_args: dict | None = None, current_args: dict | None = None) -> bool:
     """完了した実行の回の結果をそのまま返してよいか。理由を標準エラーへ書く。"""
 ```
 
 | 条件 | `rerun_reason` | `keep_finished` | 標準エラー |
 | --- | --- | --- | --- |
-| `forced`（`--reopen`） | `--reopen が渡されたため` | 偽 | `↻ --reopen が渡されたため、ラウンドを足す` |
-| 2 つの head があり違う | `完了の時点の head <旧 7 桁> から <新 7 桁> へ進んでいるため` | 偽 | `↻ 完了の時点の head … へ進んでいるため、ラウンドを足す` |
-| 2 つの head があり同じ | `None` | 真 | なし |
-| どちらかの head が無い | `None` | 真 | `ℹ head を比べられないため前回の結果を返す（足すなら --reopen）` |
+| `forced`（`--reopen`） | `--reopen が渡されたため` | 偽 | `↻ --reopen が渡されたため、新しい実行の回を始める` |
+| 2 つの head があり違う | `完了の時点の head <旧 7 桁> から <新 7 桁> へ進んでいるため` | 偽 | `↻ 完了の時点の head … へ進んでいるため、新しい実行の回を始める` |
+| 2 つの引数があり違う（#1263） | `完了の時点と結果を変える引数が違うため（<鍵>・<鍵>）` | 偽 | `↻ 完了の時点と結果を変える引数が違うため（…）、新しい実行の回を始める` |
+| head・引数とも同じ | `None` | 真 | なし |
+| どちらかの head が無い | `None`（引数が違えば上の行） | 真 | `ℹ head を比べられないため前回の結果を返す（足すなら --reopen）` |
+| 記録が引数を持たない（#1263 より前の記録） | 引数を比べない | — | `ℹ 完了の記録が引数を持たないため、引数を比べない（足すなら --reopen）`（その後の判定の行が返すか始めるかを言う） |
+
+結果を変える引数は `result_args` が `init` の引数を鍵ごとの値の並びにしたもので、置き場（cross-review は `--worktree`）を除く。
+`--name=value` は鍵と値に分け、鍵の順は比べない。
 
 `drive.py` の `Drive.finished` は、耐久の記録の終わりの出力が `ok` で状態ファイルが残っているときだけ `keep_finished` を呼ぶ
 （状態ファイルが消えていれば頭から流す）。今の head は `Drive.pr_head` が状態ファイルの今の PR（巻き直しの後は
 `current_pr`）について `gh api repos/<repo>/pulls/<PR> --jq .head.sha` で取る。`--reopen` のとき、または終わりの出力が
 `head` を持たないときは今の head を取りに行かない。`--reopen` は `state.py init` へ渡さない（`init` は `final` を見て足すかを決める）。
-cross-refactoring の駆動はこの判定を使っていない。
+cross-refactoring の駆動も同じ `keep_finished_output` を通る（#1263。除く引数は `--worktree-root`・`--plan-file`、head は
+`gh pr view <PR> --json headRefOid` で取り、`--reopen` は持たない）。
 
 ### hook の締め切り
 
