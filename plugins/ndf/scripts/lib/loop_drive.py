@@ -11,6 +11,7 @@ import shlex
 import subprocess
 import sys
 from pathlib import Path
+from typing import Callable
 
 
 def durable_identity(tmp: Path | None, pr: int) -> str:
@@ -89,6 +90,32 @@ def keep_finished(
     if not (recorded_head and current_head):
         print("ℹ head を比べられないため前回の結果を返す（足すなら --reopen）", file=sys.stderr)
     return True
+
+
+def keep_finished_output(
+    out: object,
+    alive: bool,
+    head_of: Callable[[], str | None],
+    forced: bool,
+    init_args: list[str],
+    ignore: frozenset[str],
+) -> bool:
+    """完了の記録（耐久ワークフローの出力）を返してよいか。2 つの drive の `finished` が通る（#1263 の I3）。
+
+    `ok` で終わり状態が残っている（`alive`）ときだけ、head と結果を変える引数を `keep_finished` で比べる。
+    今の head は、記録が head を持ち `--reopen` でないときだけ取る（外部コマンドを増やさない）。
+    """
+    if not isinstance(out, dict) or (out.get("result") or {}).get("status") != "ok" or not alive:
+        return False
+    recorded = out.get("head")
+    current = head_of() if recorded and not forced else None
+    return keep_finished(recorded, current, forced, out.get("args"), result_args(init_args, ignore))
+
+
+def pr_head(run: Callable[[list[str]], tuple[int, str]], pr: int) -> str | None:
+    """PR の head の OID（`gh pr view`）。取れなければ None（#1263 の決定 3）。"""
+    rc, out = run(["gh", "pr", "view", str(pr), "--json", "headRefOid", "--jq", ".headRefOid"])
+    return out.strip() if rc == 0 and out.strip() else None
 
 
 def call(cmd: list[str], env: dict | None = None, cwd: str | None = None) -> tuple[int, str]:

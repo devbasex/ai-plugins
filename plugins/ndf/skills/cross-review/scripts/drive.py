@@ -38,7 +38,7 @@ import post_queue  # noqa: E402  一時的な失敗の流し直し（#1843）
 import assignee_env  # noqa: E402
 import step_result as sr  # noqa: E402
 from drive_pause import Stop  # noqa: E402
-from loop_drive import call, durable_identity, keep_finished, parse_vars, relaunch_seats, result_args, review_status, write_review_answer  # noqa: E402,F401  テストは `call` をこのモジュールの上で差し替える
+from loop_drive import call, durable_identity, keep_finished_output, parse_vars, relaunch_seats, result_args, review_status, write_review_answer  # noqa: E402,F401  テストは `call` をこのモジュールの上で差し替える
 
 TOOL = "cross-review-drive"
 PLACE_ARGS = frozenset({"--worktree"})  # 置き場だけを変える init の引数。完了の記録の比較から除く（#1263 の I4）
@@ -377,13 +377,10 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
 
     # --- 起動: 耐久の記録を開き、耐久ワークフローを始めるか続けて、止まりか終わりを待つ ---
     def finished(self, out) -> bool:
-        """記録した終わりを返してよいか（I10・#1263）。状態のファイルが消えていれば頭から流し、head と引数の比べ方は `keep_finished` が決める。"""
-        tmp = out.get("tmp") if isinstance(out, dict) and (out.get("result") or {}).get("status") == "ok" else None
-        if not tmp or not (Path(tmp) / f"cross-review-pr{self.pr}-state.json").is_file():
-            return False
-        recorded = out.get("head")
-        current = self.pr_head(tmp) if recorded and not self.reopen else None
-        return keep_finished(recorded, current, self.reopen, out.get("args"), result_args(self.init_args, PLACE_ARGS))
+        """記録した終わりを返してよいか（I10・#1263）。状態のファイルが消えていれば頭から流し、head と引数の比べ方は `keep_finished_output` が決める。"""
+        tmp = out.get("tmp") if isinstance(out, dict) else None
+        alive = bool(tmp) and (Path(tmp) / f"cross-review-pr{self.pr}-state.json").is_file()
+        return keep_finished_output(out, alive, lambda: self.pr_head(tmp), self.reopen, self.init_args, PLACE_ARGS)
 
     def run(self) -> tuple[dict, int]:
         identity = self.identity()

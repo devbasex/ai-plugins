@@ -138,6 +138,6 @@ def test_keep_finished_compares_reopen_head_then_args(rec_head, cur_head, forced
 def test_both_drives_share_the_finished_comparison(path):
     """#1263 の 1263-6・I3: 2 つの drive は完了の判定と引数の正規化を同じ関数で通す。違うのは除く鍵だけ。"""
     drive = load(path)
-    assert drive.keep_finished is loop_drive.keep_finished
+    assert drive.keep_finished_output is loop_drive.keep_finished_output
     assert drive.result_args is loop_drive.result_args
     assert drive.PLACE_ARGS

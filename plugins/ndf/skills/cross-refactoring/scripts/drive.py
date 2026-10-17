@@ -50,7 +50,7 @@ import durable  # noqa: E402
 import assignee_env  # noqa: E402
 from drive_pause import Stop  # noqa: E402
 import proc  # noqa: E402
-from loop_drive import call, durable_identity, keep_finished, parse_vars, result_args  # noqa: E402  テストは `call` をこのモジュールの上で差し替える
+from loop_drive import call, durable_identity, keep_finished_output, parse_vars, pr_head, result_args  # noqa: E402  テストは `call` をこのモジュールの上で差し替える
 
 if str(HERE) not in sys.path:
     sys.path.append(str(HERE))
@@ -67,8 +67,7 @@ ALIVE_PHASES = ("plan", "add-tests", "implement", "fix")  # 監視が心拍の�
 RESUME_AS = {"fix": "verify", "final-fix": "final"}
 GO_FINAL = 2  # refactor.py の終了コード: 最終ゲートへ直に進む
 ABORT = 4  # refactor.py の終了コード: 中断
-# 置き場と出力の書き出し先だけを変える init の引数。完了の記録の比較から除く（#1263 の I4）
-PLACE_ARGS = frozenset({"--worktree-root", "--plan-file"})
+PLACE_ARGS = frozenset({"--worktree-root", "--plan-file"})  # 置き場と出力の書き出し先だけを変える init の引数。完了の記録の比較から除く（#1263 の I4）
 CR_DRIVE = HERE.parents[1] / "cross-review" / "scripts" / "drive.py"
 FOCUS = (
     "項目をまたいだ整合を見る。個々の改善項目の妥当性は範囲テストで判定済みのため対象外とする。"
@@ -152,9 +151,8 @@ class Drive(AssigneeLaunch):
     def rf(self, *args: str, ok=(0,)) -> tuple[int, dict]:
         rc, out = self.call(_refactor_cmd(*args))
         vs = parse_vars(out)
-        if rc == ABORT or rc not in ok:
-            detail = vs.get("ABORT_DETAIL")  # 中断の理由の 1 行（#1944 の決定 6）
-            raise Stop(f"refactor.py {args[0]} が終了コード {rc} で止まった" + (f": {detail}" if detail else ""), rc)
+        if rc == ABORT or rc not in ok:  # 子が出した中断の理由の 1 行（ABORT_DETAIL）を添える（#1944 の決定 6）
+            raise Stop(f"refactor.py {args[0]} が終了コード {rc} で止まった" + (f": {vs['ABORT_DETAIL']}" if vs.get("ABORT_DETAIL") else ""), rc)
         self.v.update(vs)
         return rc, vs
 
@@ -191,11 +189,6 @@ class Drive(AssigneeLaunch):
     def state(self) -> dict:
         kind, value = _read_json_step(str(self.state_file()))
         return value if kind == "ok" and isinstance(value, dict) else {}
-
-    def pr_head(self) -> str | None:
-        """PR の head の OID（cross-review と同じ比べ方。#1263 の決定 3）。取れなければ None。"""
-        rc, out = self.call(["gh", "pr", "view", str(self.pr), "--json", "headRefOid", "--jq", ".headRefOid"])
-        return out.strip() if rc == 0 and out.strip() else None
 
     def counts(self) -> dict:
         """結果 JSON の件数。4 つの件数は `ledger.tally`（コメントの件数の行と同じ集計。I1）から数える。"""
@@ -446,14 +439,9 @@ class Drive(AssigneeLaunch):
         raise Stop(f"耐久ワークフロー {wid} が {out.kind} で終わった: {out.value}", 1)
 
     def finished(self, out: object) -> bool:
-        """記録した終わりを返してよいか（#1263）。ok で終わり状態ファイルがまだあり、head と引数の比べ方は `keep_finished` が決める。"""
-        if not isinstance(out, dict) or (out.get("result") or {}).get("status") != "ok":
-            return False
-        if not Path(out.get("state_file") or "").is_file():
-            return False
-        recorded = out.get("head")
-        current = self.pr_head() if recorded else None
-        return keep_finished(recorded, current, False, out.get("args"), result_args(self.init_args, PLACE_ARGS))
+        """記録した終わりを返してよいか（#1263）。状態ファイルが消えていれば頭から流し、PR の head と引数の比べ方は `keep_finished_output` が決める。"""
+        alive = isinstance(out, dict) and Path(out.get("state_file") or "").is_file()
+        return keep_finished_output(out, alive, lambda: pr_head(self.call, self.pr), False, self.init_args, PLACE_ARGS)
 
 
 @durable.workflow(name="refactor_drive")
@@ -489,12 +477,8 @@ def refactor_drive(pr: int, init_args: list[str], root: str | None = None) -> di
             result = d.done()
     except Stop as e:
         result = d.stopped(e)
-    return {
-        "result": result,
-        "state_file": str(d.state_file()) if d.has_state() else "",
-        "head": d.pr_head() if result.get("status") == "ok" else None,
-        "args": result_args(init_args, PLACE_ARGS),
-    }
+    head = pr_head(d.call, pr) if result.get("status") == "ok" else None
+    return {"result": result, "state_file": str(d.state_file()) if d.has_state() else "", "head": head, "args": result_args(init_args, PLACE_ARGS)}
 
 
 def main(argv: list[str] | None = None) -> None:
