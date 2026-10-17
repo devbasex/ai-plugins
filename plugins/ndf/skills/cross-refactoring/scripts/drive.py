@@ -50,7 +50,7 @@ import durable  # noqa: E402
 import assignee_env  # noqa: E402
 from drive_pause import Stop  # noqa: E402
 import proc  # noqa: E402
-from loop_drive import call, durable_identity, parse_vars  # noqa: E402  テストは `call` をこのモジュールの上で差し替える
+from loop_drive import call, durable_identity, keep_finished, parse_vars, result_args  # noqa: E402  テストは `call` をこのモジュールの上で差し替える
 
 if str(HERE) not in sys.path:
     sys.path.append(str(HERE))
@@ -67,6 +67,8 @@ ALIVE_PHASES = ("plan", "add-tests", "implement", "fix")  # 監視が心拍の�
 RESUME_AS = {"fix": "verify", "final-fix": "final"}
 GO_FINAL = 2  # refactor.py の終了コード: 最終ゲートへ直に進む
 ABORT = 4  # refactor.py の終了コード: 中断
+# 置き場と出力の書き出し先だけを変える init の引数。完了の記録の比較から除く（#1263 の I4）
+PLACE_ARGS = frozenset({"--worktree-root", "--plan-file"})
 CR_DRIVE = HERE.parents[1] / "cross-review" / "scripts" / "drive.py"
 FOCUS = (
     "項目をまたいだ整合を見る。個々の改善項目の妥当性は範囲テストで判定済みのため対象外とする。"
@@ -149,9 +151,10 @@ class Drive(AssigneeLaunch):
 
     def rf(self, *args: str, ok=(0,)) -> tuple[int, dict]:
         rc, out = self.call(_refactor_cmd(*args))
-        if rc == ABORT or rc not in ok:
-            raise Stop(f"refactor.py {args[0]} が終了コード {rc} で止まった", rc)
         vs = parse_vars(out)
+        if rc == ABORT or rc not in ok:
+            detail = vs.get("ABORT_DETAIL")  # 中断の理由の 1 行（#1944 の決定 6）
+            raise Stop(f"refactor.py {args[0]} が終了コード {rc} で止まった" + (f": {detail}" if detail else ""), rc)
         self.v.update(vs)
         return rc, vs
 
@@ -188,6 +191,11 @@ class Drive(AssigneeLaunch):
     def state(self) -> dict:
         kind, value = _read_json_step(str(self.state_file()))
         return value if kind == "ok" and isinstance(value, dict) else {}
+
+    def pr_head(self) -> str | None:
+        """PR の head の OID（cross-review と同じ比べ方。#1263 の決定 3）。取れなければ None。"""
+        rc, out = self.call(["gh", "pr", "view", str(self.pr), "--json", "headRefOid", "--jq", ".headRefOid"])
+        return out.strip() if rc == 0 and out.strip() else None
 
     def counts(self) -> dict:
         """結果 JSON の件数。4 つの件数は `ledger.tally`（コメントの件数の行と同じ集計。I1）から数える。"""
@@ -422,7 +430,7 @@ class Drive(AssigneeLaunch):
                 durable.launch(KIND, identity)
         except durable.DurableError as exc:
             raise Stop(str(exc), 1) from None
-        ref = durable.resolve(durable.launch_key(KIND, identity), finished=finished)
+        ref = durable.resolve(durable.launch_key(KIND, identity), finished=self.finished)
         if ref.action == "done":
             return ref.output["result"]
         if ref.action == "continue":
@@ -437,17 +445,20 @@ class Drive(AssigneeLaunch):
             return out.value["result"]
         raise Stop(f"耐久ワークフロー {wid} が {out.kind} で終わった: {out.value}", 1)
 
-
-def finished(out: object) -> bool:
-    """done で終わり、状態ファイルがまだある実行の回は、打ち直しても流し直さない。"""
-    if not isinstance(out, dict):
-        return False
-    return (out.get("result") or {}).get("status") == "ok" and Path(out.get("state_file") or "").is_file()
+    def finished(self, out: object) -> bool:
+        """記録した終わりを返してよいか（#1263）。ok で終わり状態ファイルがまだあり、head と引数の比べ方は `keep_finished` が決める。"""
+        if not isinstance(out, dict) or (out.get("result") or {}).get("status") != "ok":
+            return False
+        if not Path(out.get("state_file") or "").is_file():
+            return False
+        recorded = out.get("head")
+        current = self.pr_head() if recorded else None
+        return keep_finished(recorded, current, False, out.get("args"), result_args(self.init_args, PLACE_ARGS))
 
 
 @durable.workflow(name="refactor_drive")
 def refactor_drive(pr: int, init_args: list[str], root: str | None = None) -> dict:
-    """1 回の改修計画の実行。出力は `{"result": <結果 JSON>, "state_file": <状態ファイル>}`。"""
+    """1 回の改修計画の実行。出力は `{"result": <結果 JSON>, "state_file": <状態ファイル>, "head": <終わりの PR の head>, "args": <結果を変える引数>}`。"""
     d = Drive(pr, init_args, root)
     try:
         d.start()
@@ -478,7 +489,12 @@ def refactor_drive(pr: int, init_args: list[str], root: str | None = None) -> di
             result = d.done()
     except Stop as e:
         result = d.stopped(e)
-    return {"result": result, "state_file": str(d.state_file()) if d.has_state() else ""}
+    return {
+        "result": result,
+        "state_file": str(d.state_file()) if d.has_state() else "",
+        "head": d.pr_head() if result.get("status") == "ok" else None,
+        "args": result_args(init_args, PLACE_ARGS),
+    }
 
 
 def main(argv: list[str] | None = None) -> None:

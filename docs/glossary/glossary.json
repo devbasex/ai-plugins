@@ -2921,6 +2921,7 @@
       "term": "結果を変える引数",
       "context": "ndf-workflow",
       "meaning": "cross-review・cross-refactoring の drive が `init` へ渡す引数のうち、置き場・出力だけを変えるものを除いた残り。完了の記録に残し、打ち直しで今回と比べる",
+      "code": "result_args",
       "pending_source": "issues/issue-1263-design.md"
     },
     {
