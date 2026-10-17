@@ -228,6 +228,9 @@ else:
         "resources": ["skill://.kiro/skills/**/SKILL.md"],
     }
 
+# Kiro は tools に挙がったツールだけをモデルへ見せる。欄が無いと MCP のツールを
+# 呼べない（#1873）。利用者が書いた tools は上書きしない。
+agent.setdefault("tools", ["*"])
 agent.setdefault("mcpServers", {})
 agent["mcpServers"].update(source_servers)
 
