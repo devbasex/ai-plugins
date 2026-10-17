@@ -37,11 +37,19 @@
 
 ## 投稿の手段
 
-**Markdown から Google スライド / ドキュメントを作る手段は、この Skill には無い。**
-`google-workspace` が持つのはアップロードと共有で、変換は持たない。生成の経路は
-`release` の `form-<出力の形>.md` が決める（変換器を使うか、AI エージェントが組むか）。
+**Markdown から Google スライド / ドキュメントを作る手段は、この Skill には無い。** 生成の経路は
+`release` の `form-<出力の形>.md` が決める。
 
-**アップロードと共有は `google-workspace` が持つ。** 内容をここへコピーしない。
+**アップロード・変換・共有のコマンドは `google-workspace` の対応表が持つ。** 内容をここへコピーしない。
+
+**Google スライドは、生成スクリプトが作った pptx を変換して作る**（`release` の `form-slide.md`）。
+
+| 場合 | 順 |
+| --- | --- |
+| 新しく作る | pptx をフォルダを指定せずに上げ（非公開）、応答の `id` を `mimeType` を Google Slides に指定して複製する。複製が成果物である |
+| 既にある Google スライドを直す | 同じファイルの ID へ pptx を上げ直す。**URL と共有の設定はそのまま残る。** pptx のあるディレクトリで打つ |
+
+フォルダへ入れるときは、先にフォルダの共有範囲を確かめる（`google-workspace` の手順）。
 
 ## 本文の表現
 
@@ -59,7 +67,11 @@ Google のネイティブ形式（スライド / ドキュメント / スプレ�
 
 ## 描画して見る手段
 
-`google-workspace` の対応表のエクスポート（`mimeType` は `application/pdf`）で PDF にしてから、ページを画像へ変換する。
+| 対象 | 手段 |
+| --- | --- |
+| Google スライド | **ページごとのサムネイル。** `google-workspace` の `slides-thumbnails.py` が全ページを `p<番号>.png` で保存する。Google Slides の描画をそのまま見られる |
+| Google ドキュメント | `google-workspace` の対応表のエクスポート（`mimeType` は `application/pdf`）で PDF にしてから、ページを画像へ変換する |
+
 **体裁レビューはこの経路を使う。**
 
 ## 既知の失敗
