@@ -372,6 +372,8 @@ def _build_initial_state(args: argparse.Namespace, ctx: InitialContext) -> dict[
         "phases": {},
         "candidates": [],
         "plan": None,
+        # 止まっていた時間の記録（#1491）。計画の前の中断も測る（#1944）
+        "pause": pause.empty(),
         "items": [],
         "deferred_items": [],
         "whole_test": {"ran": False, "flags": [], "status": None, "seconds": None, "head": None, "reverted": False},
@@ -745,15 +747,15 @@ def _resume(
         _recheck_implementer(state)
 
     _apply_post_event(state, is_own_pr)
-    # **予算を置き換えたら上限の表を組み直す**（改修計画の前だけ。改修計画の後は止まっていた時間の分だけ締め切りをずらす。#1491）。
+    # 止まっていた時間の分だけ締め切りをずらす（#1491。計画の前も測る。#1944）。**状態を書く前に測る。**
+    pause.resume_after_pause(state_file, state)
+    # **予算を置き換えたら上限の表を組み直す**（改修計画の前だけ。起点にずらした止まっていた時間を足す）。
     if not state.get("plan"):
         # 枠が収まらずに止めた後の打ち直しだけ、枠の起点を打ち直した時刻へずらす（#1385 I2・決定 2）。
         if state.get("window_stopped_at"):
             state["resumed_at"] = statefile.now()
         state["limits"] = timeline.of_state(state, forecast.after_plan(state))
         init_test.stop_if_window_short(state_file, state)
-    else:
-        pause.resume_after_pause(state_file, state)
     statefile.save(state_file, state)
     _emit_init(state)
 

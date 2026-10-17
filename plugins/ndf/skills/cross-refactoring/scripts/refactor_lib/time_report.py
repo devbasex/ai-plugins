@@ -7,9 +7,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from . import pause
+from . import ledger, pause
 from .allocation import RESERVE_KEYS, reserve_usage
-from .vocabulary import DEFER_BUDGET
 
 RESERVE_LABELS = {
     "danger_whole_test": "危険フラグの全体テスト",
@@ -55,7 +54,7 @@ def readopt_line(state: dict[str, Any]) -> Optional[str]:
         return None
     picked = [e for e in events if e.get("reason") == "selected"]
     ids = [i for e in picked for i in e.get("selected") or []]
-    left = sum(1 for d in state.get("deferred_items") or [] if d.get("defer_reason") == DEFER_BUDGET)
+    left = ledger.budget_deferred(state)
     last = events[-1]
     what = f"{len(picked)} 回で {len(ids)} 件（{'・'.join(ids)}）" if ids else "0 件"
     return f"- 採り直し: {what}。最後の判定の残った時間 {float(last.get('available_minutes') or 0.0):.1f} 分。採らずに残った `budget` の候補 {left} 件"

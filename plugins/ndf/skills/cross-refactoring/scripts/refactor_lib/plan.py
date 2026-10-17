@@ -63,7 +63,8 @@ def counts_line(state: dict[str, Any]) -> str:
     """件数の行。4 つの件数は結果 JSON の `metrics` と同じ集計（`ledger.tally`）から出る（I1）。"""
     t = ledger.tally(state)
     gate = (state.get("final_gate") or {}).get("status") or "未実行"
-    return f"採用 {t.adopted}・未確認 {t.unconfirmed}・取り消し {t.reverted}・見送り {t.deferred}（最終ゲート: {gate}）"
+    by_budget = f"（うち時間 {t.deferred_budget}）" if t.deferred_budget else ""
+    return f"採用 {t.adopted}・未確認 {t.unconfirmed}・取り消し {t.reverted}・見送り {t.deferred}{by_budget}（最終ゲート: {gate}）"
 
 
 def publication_line(state: dict[str, Any], unpublished: Optional[bool] = None) -> str:

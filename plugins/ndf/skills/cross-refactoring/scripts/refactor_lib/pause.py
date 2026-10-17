@@ -1,8 +1,10 @@
 """止まっていた時間を測り、まだ来ていない締め切りをその分だけ後ろへずらす（#1491・#1743 の F3）。
 
-想定最大時間は cross-refactoring が動いていた時間で数える。リファクタリング計画の後に中断して再開したとき、
-止まっていた時間（再開の時刻 − 最後の動きの時刻）が余裕（`0.05·B`）を超えれば、上限の表のうち最後の動きの
-時刻より後に来る締め切りだけをずらす（決定 4）。前に来る締め切りは開き直さない。
+想定最大時間は cross-refactoring が動いていた時間で数える。中断して再開したとき、止まっていた時間（再開の時刻 −
+最後の動きの時刻）が余裕（`0.05·B`）を超えれば、上限の表のうち最後の動きの時刻より後に来る締め切りだけをずらす
+（決定 4）。前に来る締め切りは開き直さない。リファクタリング計画の前の中断も同じく測り、提案と計画の枠の締め切りも
+ずらす（#1944）。ずらした秒の和は、計画の経過時間（`phases.elapsed_minutes`）と上限の表の起点（`timeline.window_offset`）
+から引く。
 
 最後の動きの時刻は、作業ディレクトリの直下のファイルのうち最も新しい更新時刻である（決定 3）。状態ファイル・
 CLI とテストのログ・結果ファイルのほかに、待つ側が 15 秒ごとに更新する心拍のファイル（`paths.alive_path`）を含む。
@@ -20,6 +22,8 @@ from . import clock, info, timeline
 
 # ずらす上限の表のキー（I4）。`propose_end_at`・`plan_end_at` は計画の後には過ぎているため含めない。
 SHIFT_KEYS = ("add_tests_end_at", "implement_end_at", "fix_end_at", "final_end_at")
+# 計画の前の中断でずらすキー（#1944 の I6）。提案と計画の枠の締め切りを足す。
+PRE_PLAN_SHIFT_KEYS = ("propose_end_at", "plan_end_at", *SHIFT_KEYS)
 
 SHIFTED = "shifted"
 WITHIN_MARGIN = "within_margin"
@@ -27,7 +31,7 @@ LEGACY = "legacy"
 
 
 def empty() -> dict[str, Any]:
-    """`merge-plan` が作る空の記録。"""
+    """`init` が新しい状態に置く空の記録（`merge-plan` は在れば引き継ぐ）。"""
     return {"seconds": 0, "shifted_seconds": 0, "legacy": False, "events": []}
 
 
@@ -61,22 +65,38 @@ def _event(now: _dt.datetime, last_at: Optional[_dt.datetime], seconds: float, s
     }
 
 
+def _after_final_gate(state: dict[str, Any]) -> bool:
+    """最終ゲートに入った後か。`final_gate` は `init` が空の記録（`fix_rounds`・`checks`）で置くため、在るだけでは決めない。"""
+    from .ledger import FINAL_PHASES  # ledger → gitfacts → … の読み込みを、時間の計算の側へ持ち込まない
+
+    return state.get("phase") in FINAL_PHASES or bool((state.get("final_gate") or {}).get("status"))
+
+
 def shift_for_pause(state: dict[str, Any], now: _dt.datetime, last_at: Optional[_dt.datetime]) -> Optional[dict[str, Any]]:
     """止まっていた時間を測り、状態の辞書を書き換えて、記録した 1 件を返す。記録しなければ `None`。
 
-    - 計画の前（`plan` が無い）と最終ゲートに入った後（`final_gate` がある）は記録しない（I7）
-    - `pause` を持たない状態（止まっていた時間を記録しない版で計画した）はずらさず、`legacy` を 1 度だけ残す（I6）
+    - 最終ゲートに入った後（手順が `final`・`done` か、`final_gate` に `status` がある）は記録しない（I7）
+    - 計画の前で、枠が収まらずに止めた後の打ち直し（`window_stopped_at` がある）は記録しない。起点を打ち直した
+      時刻へ移す扱い（`resumed_at`）が止まっていた時間を含む
+    - 計画の前で `pause` を持たない状態（この扱いより前の版で作った）は、空の記録を作って測る（#1944）
+    - 計画の後で `pause` を持たない状態（止まっていた時間を記録しない版で計画した）はずらさず、`legacy` を 1 度だけ残す（I6）
     - 止まっていた時間が余裕（`0.05·B`）以下ならずらさず、`within_margin` を残す（I5）
     - それより長ければ、最後の動きの時刻より後に来る上限の表の値をずらし、`shifted` を残す（I4）
     """
-    if not state.get("plan") or state.get("final_gate"):
+    if _after_final_gate(state):
+        return None
+    planned = bool(state.get("plan"))
+    if not planned and state.get("window_stopped_at"):
         return None
     record = state.get("pause")
     if not isinstance(record, dict):
-        record = state["pause"] = {**empty(), "legacy": True}
-        event = _event(now, last_at, 0.0, False, LEGACY)
-        record["events"].append(event)
-        return event
+        if not planned:
+            record = state["pause"] = empty()
+        else:
+            record = state["pause"] = {**empty(), "legacy": True}
+            event = _event(now, last_at, 0.0, False, LEGACY)
+            record["events"].append(event)
+            return event
     if record.get("legacy") or last_at is None:
         return None
     seconds = max(0.0, (now - last_at).total_seconds())
@@ -86,7 +106,7 @@ def shift_for_pause(state: dict[str, Any], now: _dt.datetime, last_at: Optional[
     else:
         limits = state.get("limits") or {}
         delta = _dt.timedelta(seconds=seconds)
-        for key in SHIFT_KEYS:
+        for key in SHIFT_KEYS if planned else PRE_PLAN_SHIFT_KEYS:
             value = clock.parse(limits.get(key))
             if value is not None and value > last_at:
                 limits[key] = clock.iso(value + delta)
@@ -123,7 +143,7 @@ def pause_report_line(state: dict[str, Any]) -> Optional[str]:
 
 
 def shifted_seconds(state: dict[str, Any]) -> float:
-    """ずらした秒の和。所要から引く（決定 8）。"""
+    """ずらした秒の和。所要（決定 8）・計画の経過時間・上限の表の起点から引く（#1944）。"""
     return float((state.get("pause") or {}).get("shifted_seconds") or 0.0)
 
 
