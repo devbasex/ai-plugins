@@ -144,7 +144,7 @@ def pr_fields(numbers, cwd: str | None = None, comments: bool = False) -> tuple[
             return None, ("gh が無い" if r.returncode == 127 else (r.stderr or r.stdout).strip()[:300] or "応答を読めない")
         for n in chunk:
             d = data.get(f"p{n}")
-            out[n] = _normalize(d, comments) if isinstance(d, dict) else None
+            out[n] = _normalize_pr(d, comments) if isinstance(d, dict) else None
     return out, ""
 
 
@@ -163,7 +163,7 @@ def _read_repository(r) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
-def _normalize(d: dict, comments: bool) -> dict:
+def _normalize_pr(d: dict, comments: bool) -> dict:
     """GraphQL の PR 1 件を gh pr view --json と同じ形へ（closingIssuesReferences と comments の nodes を取り出す）。"""
     return {
         **d,
