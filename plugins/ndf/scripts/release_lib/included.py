@@ -126,25 +126,39 @@ def pr_fields(numbers, cwd: str | None = None, comments: bool = False) -> tuple[
     nums = list(dict.fromkeys(int(n) for n in numbers))
     for i in range(0, len(nums), PER_PAGE):
         chunk = nums[i : i + PER_PAGE]
-        alias = " ".join(f"p{n}: pullRequest(number: {n}) {{ {fields} }}" for n in chunk)
-        query = f"query($owner: String!, $name: String!) {{ repository(owner: $owner, name: $name) {{ {alias} }} }}"
+        query = _graphql_query(chunk, fields)
         r = gh_call.gh(["api", "graphql", "-F", "owner={owner}", "-F", "name={repo}", "-f", f"query={query}"], cwd=cwd)
-        try:
-            data = json.loads(r.stdout)["data"]["repository"]
-        except (ValueError, KeyError, TypeError):
-            data = None
-        if not isinstance(data, dict):
+        data = _read_repository(r)
+        if data is None:
             return None, ("gh が無い" if r.returncode == 127 else (r.stderr or r.stdout).strip()[:300] or "応答を読めない")
         for n in chunk:
             d = data.get(f"p{n}")
-            if isinstance(d, dict):
-                d = {
-                    **d,
-                    "closingIssuesReferences": list((d.get("closingIssuesReferences") or {}).get("nodes") or []),
-                    **({"comments": list((d.get("comments") or {}).get("nodes") or [])} if comments else {}),
-                }
-            out[n] = d if isinstance(d, dict) else None
+            out[n] = _normalize(d, comments) if isinstance(d, dict) else None
     return out, ""
+
+
+def _graphql_query(chunk, fields: str) -> str:
+    """chunk の番号を別名 `p<番号>` で並べた 1 本の GraphQL クエリ。"""
+    alias = " ".join(f"p{n}: pullRequest(number: {n}) {{ {fields} }}" for n in chunk)
+    return f"query($owner: String!, $name: String!) {{ repository(owner: $owner, name: $name) {{ {alias} }} }}"
+
+
+def _read_repository(r) -> dict | None:
+    """gh api graphql の応答の `data.repository`。読めなければ None。"""
+    try:
+        data = json.loads(r.stdout)["data"]["repository"]
+    except (ValueError, KeyError, TypeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _normalize(d: dict, comments: bool) -> dict:
+    """GraphQL の PR 1 件を gh pr view --json と同じ形へ（closingIssuesReferences と comments の nodes を取り出す）。"""
+    return {
+        **d,
+        "closingIssuesReferences": list((d.get("closingIssuesReferences") or {}).get("nodes") or []),
+        **({"comments": list((d.get("comments") or {}).get("nodes") or [])} if comments else {}),
+    }
 
 
 def read_prs(root: Path, prs, view, fields: str = "title,body,state", comments: bool = False) -> dict[int, dict]:
