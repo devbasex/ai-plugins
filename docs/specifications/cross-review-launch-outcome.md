@@ -227,6 +227,9 @@ codex は誤りの行の先頭にマーカー（`ERROR: `）を付けるため�
 致命が両方あれば、理由は利用上限になる。上限で落ちた後に別の文言が続く形が普通で、上限の
 ほうが原因であるためである。
 
+**claude の標準出力の空でない `permission_denials` は、成功の終わりなら致命にしない。** `subtype: success`・`is_error: false`
+で終えた JSON なら警告に件数を残して終了の判定へ進む（#1513。[cross-drive-rerun-pause-and-denials.md](cross-drive-rerun-pause-and-denials.md)）。
+
 **CLI の上限の文言は、終了した後にだけ見る。** 生きている間に見ると、途中で出た警告を
 致命と読む。結果ファイルがあれば理由は `ok` になる。上限に当たっても、結果を書き終えて
 いれば使える。

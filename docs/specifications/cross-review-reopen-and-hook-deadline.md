@@ -226,7 +226,7 @@ Tool の事象（`tool_kind` がある）と userPromptSubmit だけで、待ち
 | --- | --- | --- |
 | `DEADLINE_SECONDS` | `plugins/ndf/scripts/hook_lib/deadline.py` | `3.5` |
 | `MARGIN_SECONDS` | 同上 | `1.5`（締め切りと hook の上限の間に残す余裕。テストは起動の時間の許しにも使う） |
-| 駆動の実行の回の終わりの出力 | 耐久の記録（`lib/durable.py`、種類 `review`） | `{"result", "code", "tmp", "head"}`。`head` は `finish` の時点の PR の head の OID（取れなければ `null`）。`head` を持たない記録は比べられないものとして扱う |
+| 駆動の実行の回の終わりの出力 | 耐久の記録（`lib/durable.py`、種類 `review`） | `{"result", "code", "tmp", "head", "args"}`。`head` は `finish` の時点の PR の head の OID（取れなければ `null`）、`args` は結果を変える引数（#1263）。`head` か `args` を持たない記録はその項目を比べられないものとして扱う |
 | `reopens[]`・`rounds[].fix.merge` | レビューの状態ファイル | 形は [`docs/04-contracts.md`](../../plugins/ndf/skills/cross-review/docs/04-contracts.md)。`reopens` が無い状態ファイルは `base_round = 0` として読み、移行のコマンドを要さない |
 
 ## テスト観点
@@ -258,7 +258,7 @@ Tool の事象（`tool_kind` がある）と userPromptSubmit だけで、待ち
 - [issue #1340](https://github.com/devbasex/ai-plugins/issues/1340) — 要求
 - [PR #1627](https://github.com/devbasex/ai-plugins/pull/1627)（設計） / [PR #1632](https://github.com/devbasex/ai-plugins/pull/1632)（実装）
 - [issue #734](https://github.com/devbasex/ai-plugins/issues/734) — worktree の guard の誤検知と、事後の観測
-- [issue #1263](https://github.com/devbasex/ai-plugins/issues/1263) — 完了した状態が残ると前回の結果を返す（流し直しと cross-refactoring）
+- [issue #1263](https://github.com/devbasex/ai-plugins/issues/1263) — 完了した状態が残ると前回の結果を返す（流し直しと cross-refactoring）。確定仕様は [cross-drive-rerun-pause-and-denials.md](cross-drive-rerun-pause-and-denials.md)
 - [`cross-review` の手順](../../plugins/ndf/skills/cross-review/SKILL.md)
 - [`cross-review` の状態と 1 ラウンドの流れ](../../plugins/ndf/skills/cross-review/docs/01-state-and-review.md)
 - [`cross-review` の状態ファイルと入出力の契約](../../plugins/ndf/skills/cross-review/docs/04-contracts.md)

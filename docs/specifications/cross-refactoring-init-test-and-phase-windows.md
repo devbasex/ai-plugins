@@ -268,3 +268,4 @@ init が終了コード 4 で止まった。同じ範囲の実測は 320 秒（6
 - [`plugins/ndf/scripts/lib/test_strategy.py`](../../plugins/ndf/scripts/lib/test_strategy.py)
 - [cross-refactoring-time-budget.md](cross-refactoring-time-budget.md)（想定最大時間と配分テーブル）
 - 課題: #1385（取り込んだ課題 #1555。関連 #968・#1522・#1689）・Pull Request #1729
+- [cross-drive-rerun-pause-and-denials.md](cross-drive-rerun-pause-and-denials.md)（計画の前の中断で起点にずらした止まっていた時間を足すこと。#1944）

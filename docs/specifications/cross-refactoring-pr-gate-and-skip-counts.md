@@ -177,3 +177,4 @@ graph LR
 - [`cross-refactoring` の `docs/04-verify-and-report.md`](../../plugins/ndf/skills/cross-refactoring/docs/04-verify-and-report.md)（完了報告の形）
 - [cross-refactoring-failed-item-rules.md](cross-refactoring-failed-item-rules.md)（取り消しと見送りを分けて数える規則）
 - #1658（入口の検査）、#1660（見送りの件数。#1658 に取り込み）、#1743（採り直し）
+- [cross-drive-rerun-pause-and-denials.md](cross-drive-rerun-pause-and-denials.md)（時間で見送った候補を `deferred` に含める規則と、使える時間が無い計画の中断。#1944）
