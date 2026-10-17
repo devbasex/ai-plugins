@@ -49,6 +49,22 @@ def last_json(text: str) -> dict | None:
     return None
 
 
+def prior_results(state) -> dict[str, dict]:
+    """前の実行の結果（`--from` の再開で inputs が読む。#1676 の I7・I8）。前の実行の範囲（`RunState.prior_rows`）の
+    `step` の行のうち、ステップごとに最後の行の `exit` と、出力ファイル（`out`）の本文を返す。`out` の無い古い行は `summary`。"""
+    found: dict[str, dict] = {}
+    for r in state.prior_rows():
+        if r.get("kind") != "step" or not r.get("step"):
+            continue
+        out = Path(state.dir) / str(r.get("out") or "")
+        try:
+            text = out.read_text(encoding="utf-8", errors="replace") if r.get("out") else str(r.get("summary") or "")
+        except OSError:
+            text = str(r.get("summary") or "")
+        found[str(r["step"])] = {"exit": r.get("exit"), "text": text}
+    return found
+
+
 class StepContext:
     """ハンドラーと遅れの見張りへ渡す、1 本のプランの実行の文脈。`cwd` は前のステップが作業場所を消すと
     元のリポジトリへ移る（`Engine.keep_cwd`）。`tick`・`slow`・`claude` は `Engine` が作った後に入れる。"""
@@ -59,6 +75,7 @@ class StepContext:
         self.tick = lambda: None
         self.slow: Any = None
         self.claude: Any = None
+        self.resumed = False  # `--from` で再開した実行か（Engine.setup が入れる）
 
     def fill_pr(self, cmd: str) -> tuple[str, str | None]:
         """cmd / args の {pr} を Pull Request の番号に、{pr_url} を URL に置き換える。(cmd, 誤りの文) を返す。"""
@@ -85,11 +102,21 @@ class StepContext:
         return self.plan.get("base_branch") or decl.declared_base_of([self.cwd])
 
     def inputs_text(self, step: dict) -> str:
-        parts = []
+        """judge と work の入力。今の実行の結果 → 前の実行の最後の結果（`--from` の再開のとき）→ 無い（名前と理由）の順（#1676）。"""
+        parts, prior = [], None
         for sid in step.get("inputs", []):
             r = self.state.results.get(sid)
             if r:
                 parts.append(f"### ステップ {sid}（exit={r.get('exit')}）\n{r['text'][-TAIL:]}")
+                continue
+            if prior is None:
+                prior = prior_results(self.state) if self.resumed else {}
+            if sid in prior:
+                parts.append(f"### ステップ {sid}（exit={prior[sid]['exit']}、前の実行）\n{prior[sid]['text'][-TAIL:]}")
+            elif self.resumed:
+                parts.append(f"### ステップ {sid}（今の実行でまだ流れておらず、前の実行の記録にも無い）")
+            else:
+                parts.append(f"### ステップ {sid}（この実行でまだ流れていない）")
         return "\n\n".join(parts) or "（入力なし）"
 
 

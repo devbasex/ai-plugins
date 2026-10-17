@@ -9,7 +9,7 @@ from __future__ import annotations
 import shlex
 from pathlib import Path
 
-from supervise_lib.paths import CHECK_PY, DESIGN_MATCH_PY, HERE, SPEC_COPY_PY
+from supervise_lib.paths import CHECK_PY, DESIGN_MATCH_PY, HERE, MERGED_PY, SPEC_COPY_PY
 from supervise_lib.prompts import DESIGN_MATCH_PROMPT
 
 RECORD_SH = HERE / "projects-sync.sh"  # 課題の本文の「進行」へ工程を記録するスクリプト
@@ -101,6 +101,39 @@ def push_fix_steps(pr: dict) -> list[dict]:
     `pr` のステップへ `on_fail` と `on_fail_only` を足し、修正の worker（`fix-push`）のステップを返す。"""
     pr.update(on_fail="fix-push", on_fail_only="push-check")
     return [{"id": "fix-push", "type": "work", "kind": "修正", "inputs": [pr["id"]], "prompt": PUSH_FIX_PROMPT, "next": pr["id"]}]
+
+
+BASE_FIX_PROMPT = (
+    "入力はベースブランチの取り込みのステップの出力である。衝突が残っていれば、git status で衝突したファイルを確かめ、"
+    "両方の変更を残して衝突を解き、git add してマージのコミットを作る。push 前の検査で拒まれていれば、指摘を直して"
+    "コミットする。どちらも push しない（git merge --abort・rebase・強制 push をしない）。"
+)
+
+
+def base_sync_steps(source: str, nxt: str, *, push: bool, on_error: str | None, returns: bool, stage: str | None = None) -> list[dict]:
+    """ベースブランチの取り込みのステップを組む唯一の部品（#1917 #2003 の I2）。
+
+    - `base-sync`: `merged-steps.py base-sync <source>`。0 なら `nxt`、1（衝突が残る・push が拒まれた）なら `fix-base`、
+      ほか（読めない・拒まれた）は `on_error`（None なら止まる）
+    - `fix-base`: 修正の worker が衝突を解いてマージのコミットを作り、`base-sync` を打ち直す
+    - `base-return`（`returns` のときだけ。最後の要素）: merge の衝突（終了コード 4）から戻る。戻りの回数が上限を超えたら
+      `on_error`。呼び手は merge より後ろ（並びの末尾）に置き、merge からの遷移を並びで後ろへ行くものにする"""
+    sync = {
+        "id": "base-sync",
+        "type": "run",
+        **({"stage": stage} if stage else {}),
+        "timeout": 600,
+        "cmd": f"{MERGED_PY} base-sync {source}{' --push' if push else ''} --root .",
+        "on_exit": {"1": "fix-base"},
+        **({"on_fail": on_error} if on_error else {}),
+        "next": nxt,
+    }
+    fix = {"id": "fix-base", "type": "work", "kind": "修正", "inputs": ["base-sync"], "prompt": BASE_FIX_PROMPT, "next": "base-sync"}
+    if not returns:
+        return [sync, fix]
+    back = {"id": "base-return", "type": "run", "kind": "戻り", "timeout": 120, "cmd": f"{MERGED_PY} base-return --state {{state_dir}}"}
+    back.update({"on_fail": on_error} if on_error else {})
+    return [sync, fix, {**back, "next": "base-sync"}]
 
 
 def sprint_materials(collect: str, design_results: str, closes: list[int]) -> dict:

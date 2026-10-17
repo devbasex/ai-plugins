@@ -9,6 +9,7 @@ import re
 
 import gh_sections
 from upkeep_rank_config import COLUMN_NAMES, COLUMNS, HEADING, SLOT_NONE, SLOT_SPLIT
+from upkeep_rank_estimate import OVER_SCALE, cells
 
 # ---------------- 前回との差分 ----------------
 
@@ -74,12 +75,16 @@ def outside_unchanged(before: str, after: str) -> bool:
 def render_rank_table(ms: dict, limit: int | None = None) -> str:
     """マイルストーンの `### 順位` の節を描く。limit を渡すと上から limit 行だけ載せ、残りの件数を書く（決定 15）。"""
     rows = ms["rows"] if limit is None else ms["rows"][:limit]
-    lines = ["| 順位 | 課題 | UBV | TC | RR/OE | Size | CoD | 順位の値 |", "| --- | --- | --- | --- | --- | --- | --- | --- |"]
+    lines = [
+        "| 順位 | 課題 | UBV | TC | RR/OE | Size | CoD | 順位の値 | A | H | L | C |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
     for r in rows:
         issue = f"#{r['number']}" + ("（判断待ち）" if r["waiting_decision"] else "")
         ubv = f"{r['ubv']}" + ("（ラベル）" if r["sources"]["ubv"] == "label" else "")
         rr = f"{r['rr_oe']}" + ("（被依存）" if r["sources"]["rr_oe"] == "dependents" else "")
-        lines.append(f"| {r['rank']} | {issue} | {ubv} | {r['tc']} | {rr} | {r['size']} | {r['cod']} | {r['value']:.1f} |")
+        values = " | ".join(cells(r))
+        lines.append(f"| {r['rank']} | {issue} | {ubv} | {r['tc']} | {rr} | {r['size']} | {r['cod']} | {r['value']:.1f} | {values} |")
     tail = []
     if limit is not None and len(ms["rows"]) > limit:
         tail.append(f"以下 {len(ms['rows']) - limit} 件は表に載せていない")
@@ -106,7 +111,9 @@ def slot_text(slot: dict) -> str:
 
 
 _ROW = re.compile(
-    r"^\|\s*(\d+)\s*\|\s*#(\d+)(（判断待ち）)?\s*\|\s*(\d+)(（ラベル）)?\s*\|\s*(\d+)\s*\|\s*(\d+)(（被依存）)?\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|"
+    r"^\|\s*(\d+)\s*\|\s*#(\d+)(（判断待ち）)?\s*\|\s*(\d+)(（ラベル）)?\s*\|\s*(\d+)\s*\|\s*(\d+)(（被依存）)?\s*\|\s*(\d+|"
+    + OVER_SCALE
+    + r")\s*\|\s*(\d+)\s*\|"
 )
 
 
@@ -129,7 +136,7 @@ def parse_rank_table(description: str):
                     "tc": int(m.group(6)),
                     "rr_oe": int(m.group(7)),
                     "rr_oe_dependents": bool(m.group(8)),
-                    "size": int(m.group(9)),
+                    "size": int(m.group(9)) if m.group(9).isdigit() else OVER_SCALE,
                     "cod": int(m.group(10)),
                 }
             )

@@ -1,6 +1,6 @@
 {
   "name": "mcp-devin",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "Devin MCP server for accessing repository documentation and code knowledge via DeepWiki",
   "author": {
     "name": "takemi-ohama",

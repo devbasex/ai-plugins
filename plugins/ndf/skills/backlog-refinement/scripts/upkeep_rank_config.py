@@ -306,7 +306,8 @@ def restore_from_row(row: dict, cfg: Config) -> dict:
         "ubv": {"step": low if row.get("ubv_label") else row["ubv"], "why": RESTORED_WHY},
         "tc": {"step": row["tc"], "why": RESTORED_WHY},
         "rr_oe": {"step": low if row.get("rr_oe_dependents") else row["rr_oe"], "why": RESTORED_WHY},
-        "size": {"step": row["size"], "why": RESTORED_WHY},
+        # 尺度を超える課題（表の Size が数でない）は尺度の最大へ戻す。見積もりの記録があれば丸める前の比で置き換わる
+        "size": {"step": row["size"] if isinstance(row["size"], int) else cfg.scale[-1], "why": RESTORED_WHY},
         "observed_harm": False,
         "waiting_decision": bool(row.get("waiting_decision")),
         "restored": True,

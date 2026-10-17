@@ -9,7 +9,7 @@
   "起点": "origin/main",
   "リポジトリ": "<TMP>/repo",
   "規則": "全体テストが落ちたら（落ちたテストだけの再実行でも落ちた後）、検査の修正に起因するなら fix、修正に無関係なら finish。2 回直しても同じなら abort。",
-  "上限": 20,
+  "上限": 32,
   "実行の条件": {
     "cmd": "git -C <TMP>/repo fetch -q origin && python3 <NDF>/scripts/check-trigger.py eval --id m9-final --root <TMP>/repo --final",
     "skip_code": 3
@@ -65,14 +65,36 @@
       "timeout": 3600,
       "args": "{pr} --max-rounds 4",
       "on_fail": "abort",
+      "next": "base-sync"
+    },
+    {
+      "id": "base-sync",
+      "type": "run",
+      "stage": "完了判定",
+      "timeout": 600,
+      "cmd": "python3 <NDF>/scripts/merged-steps.py base-sync --base main --push --root .",
+      "on_exit": {
+        "1": "fix-base"
+      },
+      "on_fail": "abort",
       "next": "test-all"
+    },
+    {
+      "id": "fix-base",
+      "type": "work",
+      "kind": "修正",
+      "inputs": [
+        "base-sync"
+      ],
+      "prompt": "入力はベースブランチの取り込みのステップの出力である。衝突が残っていれば、git status で衝突したファイルを確かめ、両方の変更を残して衝突を解き、git add してマージのコミットを作る。push 前の検査で拒まれていれば、指摘を直してコミットする。どちらも push しない（git merge --abort・rebase・強制 push をしない）。",
+      "next": "base-sync"
     },
     {
       "id": "test-all",
       "type": "run",
       "stage": "完了判定",
       "timeout": 1980,
-      "cmd": "git pull -q --rebase && git fetch -q origin main && git merge -q --no-edit origin/main && git push -q && python3 <NDF>/scripts/test-run.py whole --pr {pr}",
+      "cmd": "git pull -q --rebase && python3 <NDF>/scripts/test-run.py whole --pr {pr}",
       "on_fail": "judge",
       "next": "finish"
     },
@@ -82,7 +104,7 @@
       "inputs": [
         "test-all"
       ],
-      "question": "全体テストの失敗（起点のブランチの取り込みの衝突を含む）を直す（fix）か、修正に無関係として進める（finish）か、止める（abort）か",
+      "question": "全体テストの失敗を直す（fix）か、修正に無関係として進める（finish）か、止める（abort）か",
       "choices": [
         "fix",
         "finish",
@@ -96,8 +118,8 @@
       "inputs": [
         "test-all"
       ],
-      "prompt": "失敗したテストを直してコミットし、git push する。origin/main の取り込みで衝突していれば、両方の変更を残して衝突を解き、マージのコミットを作って git push する。",
-      "next": "test-all"
+      "prompt": "失敗したテストを直してコミットし、git push する。",
+      "next": "base-sync"
     },
     {
       "id": "finish",

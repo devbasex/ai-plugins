@@ -12,6 +12,9 @@
     {"name": "validate", "command": "bash scripts/validate-runtime-plugins.sh"},
     {"name": "lint", "command": "bash scripts/check-lint.sh"}
   ],
+  "format": [
+    {"name": "lint-fix", "command": "bash scripts/check-lint.sh --fix"}
+  ],
   "queue": {
     "shared": [
       {"path": "plugins/ndf/scripts/lib/README.md", "touched_by": ["plugins/ndf/scripts/lib/"]}

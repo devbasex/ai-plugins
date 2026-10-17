@@ -4,7 +4,9 @@
 
 | 仕様書 | 内容 |
 |---|---|
-| [issues-derived-specifications.md](issues-derived-specifications.md) | `issues/` 配下の完了済み issue / plan / report 由来仕様の索引 |
+| [mcp-redash-multi-environment.md](mcp-redash-multi-environment.md) | Redash MCP の suffix 付きマルチ環境 plugin |
+| [runtime-plugin-distribution.md](runtime-plugin-distribution.md) | Claude Code / Codex / Kiro 向け plugin 配布 |
+| [runtime-plugin-container-smoke.md](runtime-plugin-container-smoke.md) | runtime 分離 plugin の container smoke test（hooks 定義のチェックを含む） |
 | [ndf-knowledge-and-kiro.md](ndf-knowledge-and-kiro.md) | NDF 知識構造（`AGENTS.md` と版と配布の正本、README の役割）、Serena 分離、Kiro CLI 対応（installer の導入先のチェックを含む） |
 | [ndf-skill-inventory/](ndf-skill-inventory/01-ledger-and-criteria.md) | Skill ごとの利用実績と、維持・統合・削除・発動改善の判定（3 本） |
 | [ndf-design-phase.md](ndf-design-phase.md) | 設計工程を置いた経緯と決定（表から導ける値の数え直し、承認する人が読む欄を雛形に置く理由を含む）と、設計 Pull Request の題を設計文書の H1 から作る契約（`title_doc`・`supervise.py sync-title`）。手順は `design` の SKILL.md と `references/design-template.md` が正 |
@@ -80,5 +82,16 @@
 | [ndf-supervise-resume-pr.md](ndf-supervise-resume-pr.md) | supervise.py run --from の再開で前の実行の Pull Request を読み直す |
 | [ndf-release-approval-rebuild-and-replacements.md](ndf-release-approval-rebuild-and-replacements.md) | 承認資料の作り直しで手で足した節を残す・指示書の変更の節・置き換える箇条 |
 | [ndf-usage-ledger-by-runtime.md](ndf-usage-ledger-by-runtime.md) | NDF が起動した呼び出し（サブエージェント・claude -p・codex・kiro・agy・Jev）をランタイムごとの使用量の帳簿に 1 行ずつ残し、帳簿ごとに集計する（usage_ledger・usage-report.py）。帳簿の置き場と行の形・記録を書く場所・Claude の帳簿の全体の求め方 |
+| [runtime-smoke-cli-versions.md](runtime-smoke-cli-versions.md) | スモークが入れる 4 ランタイムの CLI の版を一覧のファイルに固定し、最新の版は毎日別の workflow で試して落ちたら課題に残す（#1982） |
+| [ndf-relay-auth-failure.md](ndf-relay-auth-failure.md) | ラッパーの認証の失敗（401）をどのログインの形でも同じ経路で扱い、refreshToken が空のアカウントを再登録が要るとして候補から外す仕組みの決定と理由（#1727） |
+| [cross-review-review-scope.md](cross-review-review-scope.md) | cross-review: 担当へレビュー範囲（base・head・ファイル数）を渡し、読んだファイル数が範囲の半分に満たない承認では収束しない（#1702） |
+| [cross-review-body-findings.md](cross-review-body-findings.md) | cross-review: 総評だけの指摘を修正の雛形へ入れ、決着を状態ファイルに残し、決着するまで収束せず残数と件数に数える（#1980） |
+| [ndf-estimate.md](ndf-estimate.md) | AI エージェントが実施する前提の工数の見積もり（estimate）。記録の行の形・部品の入出力の契約・rank と supervise.py new の変わる約束・決定の理由・研究の一次資料の確認。定義と手順は `estimate` の `references/rules.md` と SKILL.md が正 |
+| [ndf-supervise-impl-prompt-format-and-transient-failures.md](ndf-supervise-impl-prompt-format-and-transient-failures.md) | 実装の指示が conductor の補正を残すこと（`design-results` が雛形の部分だけを組み直す）、実装のプランが宣言に応じて範囲テストの前に整形と範囲の静的解析を置くこと、`push_fix` の送信前の整形、GitHub の一時的な失敗で書き換えずに止まること。宣言の形は `plan.py`、`--only-kind` は `test-run.py` が正 |
+| [ndf-supervise-base-sync.md](ndf-supervise-base-sync.md) | 実装・検査・差分の検査のプランがベースブランチを取り込んだ合成の上で検査すること（`merged-steps.py base-sync`）、マージの直前の衝突を終了コード 4 で返して取り込みへ 3 回まで戻ること（`base-return`）、`--push` が取り込みの前に upstream へ早送りすること。手順と終了コードは `merged_lib/base_sync.py` と `lib/README.md` が正 |
+| [ndf-supervise-plan-limits-and-slow-watch.md](ndf-supervise-plan-limits-and-slow-watch.md) | `supervise.py new` が書くプランの上限を遷移から求めて `run` が流す前に照らすこと、`--from` の再開で入力へ前の実行の結果を渡すこと、遅れの見張りが worker のセッションの記録と PR の投稿・コミットの伸びを進みに数えること。上限と照合の文は `limits.py`、鍵と設定は `plan.py` が正 |
+| [cross-drive-rerun-pause-and-denials.md](cross-drive-rerun-pause-and-denials.md) | cross-review・cross-refactoring の drive が完了した回を返す前に PR の head と結果を変える引数を比べること、計画の前の止まっていた時間の差し引きと使える時間が無い計画の中断、成功で終わった claude の permission_denials を警告にとどめること（#1263 #1944 #1513） |
+| [ndf-release-approval-materials.md](ndf-release-approval-materials.md) | 承認資料の検査の結果と未検証・残る危険に、レビュー・リファクタリング・全体テスト・設計文書の未確認・未実施のリリース後テストを集める契約と、材料を読む元（#1885 #1686 #1488。範囲の PR は ndf-release-approval-included-prs.md） |
+| [ndf-sprint-misjudgments-unknown-record-and-manual-none.md](ndf-sprint-misjudgments-unknown-record-and-manual-none.md) | スプリントの誤判定: 記録の置き場が分からない close は課題を開いたまま残し、「無し」の手動確認の行を数えない（#1875 #1675） |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。

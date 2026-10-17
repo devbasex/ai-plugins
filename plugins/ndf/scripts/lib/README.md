@@ -43,7 +43,8 @@
 | [post_queue.py](post_queue.py) | 上限のときに投稿を積む待ち行列と、上限の見分け | `cross-review`（`review_lib/` / `rotate-pr.sh`） |
 | [review_criteria.py](review_criteria.py) | 指摘の基準の正本（基準 1〜4・書かないもの・見送りの種類・見送りの返信の雛形）と、レビューの宣言（`.ndf/review.json`。重点と、`version: 2` の 1 つか `version: 3` の名前つきの複数のレビューのプロファイル）の読み取りと、変更ファイルのパスによるプロファイルの選択。レビュー担当への節・修正担当への節（要求の変更が要る指摘は写しを直さずに止めて返す節を含む）・見送りの返信・振り分けで許す値・プロファイルの分類の照合（glob は `pace.py` の `matches`）を組む。宣言が読めなくても例外を上げず既定の基準で返す。基準 2 と、`version: 3` の最上位の `criteria`（宣言の側で外せない基準）は、どのプロファイルを選んでも外せない | `cross-review`（`review_lib/commands/init.py`・`launch-reviewer.sh`） / `fix-steps.py` |
 | [review_criteria_decl.py](review_criteria_decl.py) | レビューの宣言のプロファイル（`version: 2` の `profile`・`version: 3` の `profiles` の各要素）の形の検査と `Profile` の型。既定の基準・節の組み立て・選択は持たない | `review_criteria.py` |
-| [result_posts.py](result_posts.py) | 結果ファイル（指摘ファイル・修正の戻り値）を投稿へ組み立て、待ち行列から送る | `cross-review`（`review_lib/` / `drive.py`） / `fix-steps.py` |
+| [result_posts.py](result_posts.py) | 結果ファイル（指摘ファイル・修正の戻り値）を投稿へ組み立て、待ち行列から送る。修正を送る前に宣言の整形（`formatting.format_before_push`）を上のコミットとして足す | `cross-review`（`review_lib/` / `drive.py`） / `fix-steps.py` |
+| [formatting.py](formatting.py) | 整形の宣言（`.ndf/supervise.json` の `format`）の形の検査と読み取り（`format_commands`・`read_format_commands`）、整形を当てて整形で変わった追跡ファイルだけを上のコミットにする `apply_format`、送る前の整形 `format_before_push`。外部パッケージを要しない | `result_posts.py` / `supervise.py`（`supervise_lib/decl.py`・`commands.py` の `format`） |
 | [git-credential.sh](git-credential.sh) | credential helper が応答しない環境で git を通す退避の値 | `cross-refactoring`（`refactor_lib/publish.py`） |
 | [closing-issues.sh](closing-issues.sh) | Pull Request の本文から、閉じる語が指す issue を取り出す | `progress-tracking`（スプリントを閉じる） / `merged`（OPEN の一覧） / `development-workflow` の hook |
 | [refresh.py](refresh.py) | 観点の出典の取得・指紋の比較・一覧の提示・待ちの扱い（#554）。**提示するだけで書き換えない** | `instructions-check.py` |
@@ -95,6 +96,10 @@
 | [durable.py](durable.py) | 耐久の記録（DBOS Transact を SQLite で使う）。起動 1 回に 1 つの SQLite（置き場は `NDF_DBOS_DIR` → `${XDG_STATE_HOME}/ndf/dbos` → `~/.local/state/ndf/dbos`）・実行の鍵とファイルロック・形式の版・実行の回の選び方（`resolve`）・止まりと続き（`pause` / `resume`）・`os._exit` での抜け方・30 日を過ぎた記録の削除。DBOS を import するのはここだけ（I16）。使う側は `deps.require(..., "durable")` | `supervise_lib`・収束ループの 2 つの `drive.py`・`post_queue.py` |
 | [durable_keys.py](durable_keys.py) | 耐久の記録の置き場（`records_dir`）・実行の鍵（`launch_key` / `key_hash`）・記録のファイル（`record_path`）。DBOS を import せず、記録が有るかだけを確かめる呼び出し（空の投稿キューの `count()` など）が DBOS を読まずに答えるために `durable.py` から分けた。`durable.py` が同じ名前で出す | `durable.py`・`post_queue.py` |
 | [drive_pause.py](drive_pause.py) | 収束ループの駆動が止まるときの結果の形（pause の 1 行 JSON）と終了コードの表（0 完了 / 20 fix / 21 sweep / 22 newtext / 23 cross-review / 1 中断） | 収束ループの 2 つの `drive.py` |
+| [estimate_stats.py](estimate_stats.py) | 実績の集計（直近 N 件・中央値・nearest-rank の分位・最大・Σ量÷Σ件数）と窓の既定 10。純粋な関数だけ | `estimate_predict` / `slow_step` / `project_lib/measure_ci` / `cross-refactoring`（`refactor_lib/allocation.py`） |
+| [estimate_records.py](estimate_records.py) | 見積もりの記録と実績の記録の置き場・行の形・追記と読み出し・課題ごとの実績の合計。`.git` を読んで置き場を決め、`git` を起動しない | `estimate.py` / `supervise_lib/actuals.py` / `backlog-refinement`（`upkeep_rank_estimate.py`） |
+| [estimate_predict.py](estimate_predict.py) | 類似の実績の選択・構成の違う実績の分離・値ごとの見込みと印・Size への丸め・実装の上限の見込み・誤差。係数の定数を持たない。規約は `skills/estimate/references/rules.md` | 同上と `supervise_lib/verify_steps.py` |
+| [estimate_import.py](estimate_import.py) | supervise の `progress.jsonl` から実績の記録を作る取り込み（何度流しても同じ） | `estimate.py import` |
 
 ## 手順のスクリプトの結果
 
@@ -129,6 +134,7 @@ Skill から呼ぶ手順のスクリプト（`scripts/*-steps.py`）は、最後
 | 1 | `stopped` | チェックで違反があった・手順が失敗した |
 | 2 | `stopped` | 読めない・呼び出しの誤り。「一致」「0 件」と読まない |
 | 3 | `stopped` | 前提が無い（宣言・認証・対象のファイル）、または各スクリプトが定めた正常な否定の結果（立たない・変更なし・飛ばしてよい。例 `check-trigger.py eval`・`refactor.py assess`）。読めないときは 2 で返し、3 と混ぜない |
+| 4 | `stopped` | PR がベースブランチと衝突している（`merge-when-green`・`promote`。値の持ち主は `step_result.py` の `EXIT_BASE_CONFLICT`。#1917） |
 | 10〜19 | `gate` | 承認ゲート。人の同意が要る |
 | 20〜29 | `gate` | LLM の判断待ち |
 | 69 | `stopped` | 依存の欠け。`deps.require` が外部パッケージを用意できずに止まった。手順は何も判定していない。「飛ばしてよい」とも 3 とも読まない（値の持ち主は `deps.py` の `EXIT_DEPS_MISSING`） |

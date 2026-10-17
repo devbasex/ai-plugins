@@ -82,12 +82,11 @@ import deps  # noqa: E402
 
 deps.require("schema", "versions", "bump", "md", "mdtable", "durable")
 import approved_commit as ac  # noqa: E402
-import mdtable  # noqa: E402
 import schema  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from merged_lib import trash  # noqa: E402
-from release_lib import approval, bump, carry, changed, deploy, included, instructions, others, record, replaced, step_run  # noqa: E402
+from release_lib import approval, bump, carry, changed, deploy, included, instructions, materials, others, record, replaced, step_run  # noqa: E402
 from release_lib.approval import HeadMoved  # noqa: E402
 from release_lib.names import changelog_section, changelog_span, h2_lines, next_h2, plugin_of, release_decl  # noqa: E402
 from step_result import (
@@ -111,7 +110,6 @@ from step_result import (
     version_arg,
 )
 import gh_parts  # noqa: E402
-import gh_sections  # noqa: E402
 import jsonio  # noqa: E402
 import proc  # noqa: E402
 import repo as repo_lib  # noqa: E402
@@ -495,8 +493,11 @@ def cmd_changed_plugins(a):
     if a.decided and pending:
         decided = changed.approval_path(root, a.decided)
         rows = changed.decided_rows(decided, pending, already)
-    elif a.prs:
-        rows = changed.candidate_rows(root, a.prs, pending, lambda n: pr_view(root, n, "body,state,mergeCommit"), skipped)
+    elif a.prs:  # 候補は範囲の PR と --prs の和の本文から出す（#1885。develop へ直接入った互換の無い変更を拾う）
+        prs = included.included_prs(included.release_range(root, f"refs/tags/{since}", "HEAD"), a.prs)
+        data = included.pr_fields(prs, cwd=str(root))[0] or {}
+        view = lambda n: data[n] if isinstance(data.get(n), dict) else pr_view(root, n, "body,state,mergeCommit")  # noqa: E731  読めない PR は根拠に書く（I4）
+        rows = changed.candidate_rows(root, prs, pending, view, skipped)
     else:
         rows = [others.OtherPlugin(n, old, "PATCH", next_release(n, old), ["材料を渡していない"]) for n, old in pending.items()]
     if a.approval:
@@ -527,32 +528,26 @@ def pr_view(root, n, fields):
         raise StepError(f"{what} の出力を読めない", 2)
 
 
-def unmerged(d):
-    """gh pr view の出力がマージされていない PR を指すか。state の無い出力はマージ済みとして扱う。"""
-    return isinstance(d, dict) and d.get("state", "MERGED") != "MERGED"
+def pr_many(root, prs, fields="title,body,state", comments=False):
+    """PR の番号 → gh pr view の出力（included.read_prs。読み直しは pr_view）。"""
+    return included.read_prs(root, prs, lambda n, f: pr_view(root, n, f), fields, comments)
 
 
-def require_merged(found, prs):
-    """マージ済みが 0 件なら、書き込む前に前提エラーで止める（既存の節や欄を空で上書きしない）。"""
-    if not found:
-        raise StepError(f"渡した PR {' '.join(f'#{n}' for n in prs)} にマージ済みが無い", EXIT_PRECONDITION)
-    return found
+def section_prs(root, a):
+    """CHANGELOG の版の節に並べる PR の候補と前のタグ（included.section_range。#1885）。配るプラグインが決まらなければ
+    --prs だけ（止めるのは版の節を書く側。PR の読み出しの失敗を先に返す）。"""
+    try:
+        plugin = plugin_of(root, a)
+    except StepError:
+        return included.with_extra([], a.prs), None
+    prev = release_tag_before(root, plugin, f"{plugin}--v{base_of(a.version)}")
+    return included.section_range(root, prev, prev and release_decl(root, a)[0], a.prs), prev
 
 
 def pr_titles(root, prs, skipped=None):
-    """PR ごとに (番号, 箇条) を返す。マージされていない PR は載せず、番号を skipped へ足す。"""
-    items = []
-    for n in prs:
-        d = pr_view(root, n, "title,state")
-        if unmerged(d):
-            skipped is not None and skipped.append(n)
-            continue
-        try:
-            title = d["title"].strip()
-        except (TypeError, KeyError, AttributeError):
-            raise StepError(f"gh pr view {n} の出力を読めない", 2)
-        items.append((n, f"- {title}（#{n}）"))
-    return require_merged(items, prs)
+    """PR ごとに (番号, 箇条)（included.titles_of。スプリント経由と配布物の変化なしの PR は箇条にしない）。"""
+    prs = included.as_included(prs)
+    return included.titles_of(prs, pr_many(root, [p.number for p in prs], "title,body,state"), skipped)
 
 
 def _update_changelog(root, a, items) -> dict:
@@ -601,7 +596,8 @@ def cmd_changelog(a):
     if not (root / "CHANGELOG.md").is_file():
         raise StepError("CHANGELOG.md が無い", EXIT_PRECONDITION)
     skipped = []
-    items = pr_titles(root, a.prs, skipped)
+    prs, since = section_prs(root, a)
+    items = pr_titles(root, prs, skipped)
     sections = [_update_changelog(root, a, items)]
     emit(
         result(
@@ -609,7 +605,7 @@ def cmd_changelog(a):
             "ok",
             f"{len(items)} 件の PR を {len(sections)} 箇所へ並べた{unmerged_note(skipped)}",
             sections + unmerged_items(skipped),
-            {"version": a.version, "prs": len(items), "unmerged": skipped},
+            {"version": a.version, "prs": len(items), "unmerged": skipped, "range": len(prs), "since": since},
         )
     )
 
@@ -889,7 +885,8 @@ def cmd_approval_facts(a):
     dev = git(root, "rev-parse", f"origin/{base}").stdout.strip()
     keep = kept_sections(root, getattr(a, "approval", None))  # 前の承認資料の残す節（読めなければ書かずに止める。#1834）
     changes = instructions.changed_instructions(root, prev, dev)
-    prs = included.included_prs(included.range_prs(root, prev, dev), a.prs)  # 範囲の PR と --prs の和（#1274）
+    prs = included.with_extra(included.release_range(root, prev, dev), a.prs)  # 範囲の PR と --prs の和（#1274・#1885）
+    data = pr_many(root, [p.number for p in prs], "number,title,body,state,mergeCommit,url")
 
     stat = git(root, "diff", "--shortstat", f"origin/{prod}...origin/{base}").stdout.strip()
     files = int(m.group(1)) if (m := re.search(r"(\d+) files? changed", stat)) else 0
@@ -897,8 +894,8 @@ def cmd_approval_facts(a):
     dels = int(m.group(1)) if (m := re.search(r"(\d+) deletions?", stat)) else 0
 
     items, rows = [], []
-    for n in prs:
-        d = pr_view(root, n, "number,title,state,mergeCommit,url") or {}
+    for p in prs:
+        n, d = p.number, data.get(p.number) or {}
         oid = (d.get("mergeCommit") or {}).get("oid") or ""
         checks = pr_check_buckets(root, n)
         passed = sum(1 for c in checks if c.get("bucket") == "pass")
@@ -913,9 +910,12 @@ def cmd_approval_facts(a):
                 "merge_commit": oid,
                 "checks_passed": passed,
                 "checks": len(checks),
+                "via": p.via,
+                "no_change": included.no_change(d),
             }
         )
-        rows.append(f"#{n} {d.get('title', '')}（{d.get('state', '')}・{oid[:8] if oid else '—'}・CI {passed}/{len(checks)}）")
+        facts = [str(d.get("state", "")), oid[:8] if oid else "—", f"CI {passed}/{len(checks)}"]
+        rows.append(included.included_row(n, d.get("title", ""), facts, p.via, included.no_change(d)))
 
     compare = f"https://github.com/{repo}/compare/{prev}...{dev}"
     path = approval_present(
@@ -970,35 +970,15 @@ def cmd_approve(a):
 
 
 CHANGES_HEADING = others.CHANGES_HEADING
-RISKS_HEADING = "## 未検証・残る危険"
-NO_RISKS = "- PR の本文に記載が無い"
+RISKS_HEADING = materials.RISKS_HEADING
 NOTES_PENDING = "（release-steps.py notes --approval が PR 本文の「利用者向けの変化」から書く）"
-RUNTIME_NAMES = {"claude": "Claude Code", "codex": "Codex", "kiro": "Kiro", "agy": "Antigravity"}
 
 
-def pr_notes(root, prs, skipped=None, replacing=None, unreadable=None):
-    """PR ごとに (番号, 利用者向けの変化の箇条, 未検証・残る危険の箇条, 題名で代えたか, 移行の手順の箇条) を返す。
-    マージされていない PR は配る中身に入らないため載せず、番号を skipped へ足す。replacing を渡すと本文の
-    `## 置き換える箇条` を足し、形に合わない行を unreadable へ items の行として足す（#1834）。"""
-    out = []
-    for n in prs:
-        d = pr_view(root, n, "title,body,state")
-        if unmerged(d):
-            skipped is not None and skipped.append(n)
-            continue
-        if not isinstance(d, dict) or not isinstance(d.get("title"), str):
-            raise StepError(f"gh pr view {n} の出力を読めない", 2)
-        body = d.get("body") or ""
-        items = gh_sections.section_items(body, CHANGES_HEADING, n)
-        risks = gh_sections.section_items(body, RISKS_HEADING, n)
-        if replacing is not None:
-            found, bad = replaced.replacements_in(body, n)
-            replacing += found
-            unreadable is not None and unreadable.extend(
-                {"kind": "replacement", "name": f"#{n}", "result": "unreadable", "text": t} for t in bad
-            )
-        out.append((n, items or [f"{d['title'].strip()}（#{n}）"], risks, not items, others.migration_items(body, n)))
-    return require_merged(out, prs)
+def pr_notes(root, prs, skipped=None, replacing=None, unreadable=None, data=None):
+    """PR ごとの配る中身・危険・移行の手順（included.notes_of）。data は pr_many の出力（渡さなければここで読む）。"""
+    prs = included.as_included(prs)
+    data = data if data is not None else pr_many(root, [p.number for p in prs])
+    return included.notes_of(prs, data, skipped, replacing, unreadable)
 
 
 def replace_lines_under(lines, at, block):
@@ -1023,44 +1003,6 @@ def write_notes(root, version, plugin, bullets, migration=()):
     return [{"kind": "section", "name": "CHANGELOG.md", "result": "replaced", "heading": lines[at], "lines": len(bullets)}]
 
 
-def approval_cell(text):
-    """提示物の表の 1 セル（改行は <br>）。"""
-    return mdtable.cell_text(text.replace("\n", "<br>"))
-
-
-def write_approval(path, version, bullets, risks, verified, ref, migration=()):
-    if not path.is_file():
-        raise StepError(f"提示物 {path} が無い（先に approval-facts を走らせる）", EXIT_PRECONDITION)
-    names = "・".join(RUNTIME_NAMES.get(r, r) for r in verified)
-    check = (
-        f"{names} の {len(verified)} 経路で {ref} から ndf {version} を導入し、版と中身が一致した"
-        f"（release-verification-steps.py verify-install）"
-        if verified
-        else "—"
-    )
-    rows = {"配る中身": "\n".join(bullets) or "—", "検証への配布で確かめたこと": check}
-    lines = path.read_text(encoding="utf-8").split("\n")
-    done = []
-    for i, line in enumerate(lines):
-        for key, value in rows.items():
-            if line.startswith(f"| {key} |"):
-                lines[i] = f"| {key} | {approval_cell(value)} |"
-                done.append(key)
-    missing = [k for k in rows if k not in done]
-    if missing:
-        raise StepError(f"提示物に欄が無い: {', '.join(missing)}", EXIT_PRECONDITION)
-    if any(lines[i] == RISKS_HEADING for i in h2_lines(lines)):  # 既にある危険は消さず、無い箇条だけを足す（#1834）
-        others.merge_lines(lines, RISKS_HEADING, list(risks), drop=(NO_RISKS,))
-    else:
-        others.put_section(lines, RISKS_HEADING, list(risks) or [NO_RISKS])
-    others.put_section(lines, others.MIGRATION_HEADING, list(migration) or ["- 無し"])
-    path.write_text("\n".join(lines), encoding="utf-8")
-    return [{"kind": "cell", "name": k, "result": "written"} for k in rows] + [
-        {"kind": "section", "name": RISKS_HEADING, "result": "written", "lines": len(risks)},
-        {"kind": "section", "name": others.MIGRATION_HEADING, "result": "written", "lines": len(migration)},
-    ]
-
-
 def unmerged_items(skipped):
     return [{"kind": "pr", "name": f"#{n}", "result": "skipped", "reason": "マージされていない"} for n in skipped]
 
@@ -1070,24 +1012,41 @@ def unmerged_note(skipped):
 
 
 def notes_prs(root, a):
-    """notes が欄を書く PR。--approval なら承認資料の「含む PR」（--prs はそこに無い番号があれば止まる。#1274）。"""
+    """notes が欄を書く PR。--approval なら承認資料の「含む PR」（--prs はそこに無い番号があれば止まる。#1274）、
+    無ければ changelog と同じ範囲の PR と --prs の和（#1885。出し直しでも前の開発版の PR を節に残す）。"""
     if not a.approval:
-        return a.prs, None
+        return section_prs(root, a)[0], None
     path = Path(a.approval)
     path = path if path.is_absolute() else root / path
-    listed = included.read_included(path)
-    if missing := [n for n in a.prs if n not in listed]:
+    listed = included.read_included_rows(path)
+    if missing := [n for n in a.prs if n not in {p.number for p in listed}]:
         names = " ".join(f"#{n}" for n in missing)
         raise StepError(f"--prs の {names} が承認資料の「含む PR」に無い（approval-facts で承認資料を作り直す）", EXIT_PRECONDITION)
     return listed, path
 
 
+def issue_body(root, n, repo=None):
+    """gh issue view <n> --json body の本文（repo を渡せばそのリポジトリの課題）。読めなければ StepError（gh が無い: 3）。"""
+    r = gh_parts.view_json("issue", n, "body", repo=repo, cwd=str(root))
+    if r.returncode == 127 and "gh を実行できない" in r.stderr:
+        raise StepError("gh が無い", EXIT_PRECONDITION)
+    if r.returncode != 0:
+        raise StepError(f"gh issue view {n} が失敗: {r.stderr.strip()[:300]}")
+    try:
+        return (json.loads(r.stdout or "null") or {}).get("body") or ""
+    except (ValueError, AttributeError):
+        raise StepError(f"gh issue view {n} の出力を読めない", 2)
+
+
 def cmd_notes(a):
     root = git_root(a.root)
+    if getattr(a, "check_state", None) is not None and not a.approval:
+        raise StepError("--check-state は --approval と使う", 2)
     skipped = []
     prs, path = notes_prs(root, a)
     reps, bad = [], []
-    notes = pr_notes(root, prs, skipped, reps, bad)
+    data = pr_many(root, [p.number for p in prs], "title,body,state,closingIssuesReferences", comments=True) if path else None
+    notes = pr_notes(root, prs, skipped, reps, bad, data)
     before = {n: items for n, items, *_ in notes}
     after, rep_items = replaced.apply(before, reps)  # 後の PR が置き換えた箇条を除く（#1834）
     rep_items += bad
@@ -1099,7 +1058,18 @@ def cmd_notes(a):
     if path:
         verified = [r for r in (a.verified or "").split(",") if r]
         ref = a.ref or release_decl(root, a)[0]
-        items = write_approval(path, a.version, bullets, risks, verified, ref, migration) + unmerged_items(skipped) + rep_items
+        decl = (release_decl(root, a)[0], repo_lib.owner_repo(root) or "", a.version, a.prs)
+        m = materials.approval_materials(
+            root,
+            decl,
+            getattr(a, "check_state", None),
+            prs,
+            data,
+            lambda r, n: issue_body(root, n) if materials.same_repo(r, decl[1]) else issue_body(root, n, repo=r),
+        )
+        results, machine = materials.check_lines(m), materials.risk_lines(m, bool(risks), materials.now_jst())
+        items = materials.write_approval(path, a.version, bullets, risks, verified, ref, migration, results, machine)
+        items += materials.items_of(m) + unmerged_items(skipped) + rep_items
         emit(
             result(
                 TOOL,
@@ -1229,6 +1199,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--approval", help="本番承認の提示物。渡すと「配る中身」「検証への配布で確かめたこと」の欄を書く")
     p.add_argument("--verified", default="", help="--approval: 導入を確かめた経路（カンマ区切り。例 claude,codex,kiro）")
     p.add_argument("--ref", help="--approval: 検証への配布で導入した ref（既定は宣言のベースブランチ）")
+    p.add_argument(
+        "--check-state",
+        help="--approval: 検査のプランの状態ディレクトリ（レビュー・リファクタリング・全体テストの結果を読む。空・無いときは無い材料として書く）",
+    )
     p.set_defaults(func=cmd_notes)
     return deploy.add_deploy_parser(sub, common, ap)  # deploy-facts（手動反映の本番系の承認資料。#1454）
 

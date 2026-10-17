@@ -88,3 +88,9 @@ def _isolated_issue_locks(tmp_path_factory, monkeypatch):
 def _isolated_mvv_state(tmp_path_factory, monkeypatch):
     """差し戻し・覆し・MVV 判定の記録（`NDF_MVV_STATE_DIR`）を利用者の `~/.local/state/ndf` へ書かない（#1833）。"""
     monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path_factory.mktemp("mvv-state")))
+
+
+@pytest.fixture(autouse=True)
+def _isolated_estimate_records(tmp_path_factory, monkeypatch):
+    """supervise の実行が書く見積もりの実績の記録（#1856）を、リポジトリの git の共通ディレクトリと利用者の状態へ書かない。"""
+    monkeypatch.setenv("NDF_ESTIMATE_DIR", str(tmp_path_factory.mktemp("estimate")))

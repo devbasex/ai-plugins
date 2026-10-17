@@ -8,11 +8,12 @@ import subprocess
 from pathlib import Path
 
 from step_result import result
-from supervise_lib import release_templates
+from supervise_lib import limits, release_templates
 from supervise_lib.decl import with_decls
-from supervise_lib.paths import CHECK_PY, DRIVES, READY, REFACTOR_SCOPE_PY, default_refactor_budget_minutes
+from supervise_lib.paths import CHECK_PY, DRIVES, GLOSSARY_PY, READY, REFACTOR_SCOPE_PY, default_refactor_budget_minutes
 from supervise_lib.procedures import (
     DESIGN_MATCH_MODES,
+    base_sync_steps,
     design_match_steps,
     pr_step,
     push_fix_steps,
@@ -23,7 +24,9 @@ from supervise_lib.procedures import (
     with_touched,
 )
 from supervise_lib.verify_steps import (
+    impl_timeout_estimate,
     merge_steps,
+    pre_test_steps,
     refactor_template_arg,
     scope_cmd,
     scope_timeout,
@@ -52,14 +55,21 @@ IMPL_RULES = (
 )
 
 
-def impl_prompt(a) -> str:
-    """実装の指示文。--prompt が無ければ課題への参照を組み、共通の規則を足す。
+GLOSSARY_RULE = f"- 文書に語を足したら `{GLOSSARY_PY} check --file <文書>` を打ち、新しい語は用語集へ足す"
+DESIGN_DOCS_LINE = "設計文書: {docs}（決定の記録と「設計の結果」を読んでから実装する）"
 
+
+def impl_prompt(a) -> str:
+    """実装の指示文。--prompt が無ければ課題への参照（と設計文書・触る範囲）を組み、共通の規則を足す。
+
+    用語集のあるプロジェクト（`a.glossary_ready`）では用語集と突き合わせる行を規則へ足す。`a.kept` の行
+    （conductor の補正。`design_stage.rewrite` が渡す）は規則の後へ順のまま置く。整形と静的解析は worker に
+    打たせず、ステップが受け持つ（`pre_test_steps`）。
     同時に流れる他のプランの `触るファイル` の除外は、流す時点で `WorkStep` が足す（#1248）。"""
     n = a.issue[0]
-    if a.prompt_file:
+    if getattr(a, "prompt_file", None):
         head = Path(a.prompt_file).read_text().rstrip()
-    elif a.prompt:
+    elif getattr(a, "prompt", None):
         head = a.prompt.rstrip()
     else:
         if len(a.issue) == 1:
@@ -67,12 +77,17 @@ def impl_prompt(a) -> str:
         else:
             refs = "・".join(f"#{i}" for i in a.issue)
             head = f"課題 {refs} を実装する。本文はそれぞれ `gh issue view <番号>` で読む（何をするか と 受け入れ条件）。"
+        if getattr(a, "design_docs", None):
+            head += "\n" + DESIGN_DOCS_LINE.format(docs="、".join(a.design_docs))
         if getattr(a, "files", None):
             head += "\n触る範囲: " + "、".join(a.files)
-    return f"{head}\n{IMPL_RULES}\n"
+    rules = IMPL_RULES + ("\n" + GLOSSARY_RULE if getattr(a, "glossary_ready", False) else "")
+    kept = "".join(f"{line}\n" for line in getattr(a, "kept", None) or [])
+    return f"{head}\n{rules}\n{kept}"
 
 
 def plan_impl(a) -> dict:
+    timeout, estimate = impl_timeout_estimate(a)  # 引数 → 宣言 → 実績の見込み → 3600（#1916・#1856）
     impl = {
         "id": "impl",
         "type": "work",
@@ -80,7 +95,8 @@ def plan_impl(a) -> dict:
         "serena": True,
         "stage": "実装",
         "issues": True,
-        "timeout": getattr(a, "impl_timeout", None) or 3600,  # 実装の上限（--impl-timeout か宣言の impl_timeout。#1916）
+        "timeout": timeout,
+        "estimate": estimate,
         "prompt": impl_prompt(a),
     }
     return plan_to_merge(a, [impl])
@@ -100,13 +116,17 @@ def fix_worktree(branch: str) -> str:
 
 
 def plan_to_merge(a, head: list[dict]) -> dict:
-    """head（impl なら worker の実装）の後に、同期とチェック → 範囲テスト → Pull Request → 全体テスト →
-    doc-lint → ready → マージ（--escape-of なら逃げた不具合の記録）を続けた実装のプラン。"""
+    """head（impl なら worker の実装）の後に、ベースブランチの取り込み → 整形・同期とチェック・範囲の静的解析
+    （`pre_test_steps`）→ 範囲テスト → Pull Request →
+    全体テスト → doc-lint → ready → マージ（--escape-of なら逃げた不具合の記録）を続けた実装のプラン。
+    検査は取り込んだ合成の上で走り（#2003）、マージの直前の衝突（4）は取り込みへ戻る（#1917）。"""
     tests = " ".join(a.tests)
-    sync = bool(getattr(a, "sync_checks", None))
+    pre = pre_test_steps(a, FIX_PROMPT)
     if head:
-        head[-1]["next"] = "sync" if sync else "test-limited"
-    steps = list(head)
+        head[-1]["next"] = "base-sync"
+    first = pre[0]["id"] if pre else "test-limited"
+    *base, back = base_sync_steps(f"--base {shlex.quote(a.base or '')}", first, push=False, on_error=None, returns=True, stage="実装")
+    steps = [*head, *base]
     pr = pr_step(
         a.base,
         a.title,
@@ -121,23 +141,20 @@ def plan_to_merge(a, head: list[dict]) -> dict:
     after_tests = match[0]["id"] if match else "pr"
     if match:
         design_diff_on_pr(pr, "judge")
-    if sync:  # 同期とチェックの宣言が無いプロジェクトではステップを置かない
-        steps += [
-            {"id": "sync", "type": "run", "preset": "sync-check", "stage": "実装", "on_fail": "fix-sync", "next": "test-limited"},
-            {"id": "fix-sync", "type": "work", "kind": "修正", "inputs": ["sync"], "prompt": FIX_PROMPT, "next": "sync"},
-        ]
+    steps += pre  # 整形 → 同期とチェック → 範囲の静的解析（宣言の無いものは置かない。#1651）
+    lint_first = any(s["id"] == "lint-limited" for s in pre)
     steps += [
         {
             "id": "test-limited",
             "type": "run",
             "stage": "完了判定",
             "timeout": scope_timeout(a),
-            "cmd": scope_cmd(a, tests),
+            "cmd": scope_cmd(a, tests) + (" --only-kind test" if lint_first else ""),
             "on_fail": "judge",
             "next": after_tests,
         },
         judge_step(after_tests, bool(match)),
-        {"id": "fix", "type": "work", "kind": "修正", "inputs": ["test-limited", "test-all"], "prompt": FIX_PROMPT, "next": "test-limited"},
+        {"id": "fix", "type": "work", "kind": "修正", "inputs": ["test-limited", "test-all"], "prompt": FIX_PROMPT, "next": first},
         # Draft の PR を全体テストの前に出し、CI と手元の全体テストを並べる。直した後は pr のステップが push して本文を更新する
         # 手動確認の節は課題の PR に載せる（スプリントブランチへ集める実装の PR は載せず、スプリント PR に載せる）
         *match,
@@ -162,7 +179,7 @@ def plan_to_merge(a, head: list[dict]) -> dict:
             "next": "doc-lint",
         },
         {"id": "ready", "type": "run", "cmd": READY, "next": "merge-gate"},
-        *merge_steps(a, next="end"),
+        *merge_steps(a, next="end", on_conflict="base-return"),
     ]
     if getattr(a, "escape_of", None) is not None:
         # その場で直した不具合を「逃げた不具合」として記録する（検査のトリガーの材料。#1078）
@@ -170,13 +187,13 @@ def plan_to_merge(a, head: list[dict]) -> dict:
             if step["id"] in ("merge", "merge-approved"):
                 step["next"] = "escape"
         steps.append({"id": "escape", "type": "run", "cmd": f"{CHECK_PY} escape --pr {{pr}} --of {a.escape_of}", "next": "end"})
+    steps.append(back)  # merge の衝突（4）からの戻りは並びの末尾に置く（merge から後ろへ行く遷移にする）
     plan = {
         "フェーズ": "実装",
         "課題": a.issue,
         "モード": a.mode,
         "作業場所": a.worktree,
         "規則": RULE_IMPL.format(after_tests=after_tests),
-        "上限": 20,
         "steps": steps,
     }
     with_decls(plan, a)
@@ -249,7 +266,7 @@ def _inspect_steps(a, pr_ref: str, scope: str) -> list[dict]:
             "timeout": 3600,
             "args": f"{pr_ref} --max-rounds 4",
             "on_fail": "abort",
-            "next": "test-all",
+            "next": "base-sync",  # 全体テストの前にベースブランチを取り込む（#1917）
         },
     ]
 
@@ -275,6 +292,7 @@ def plan_check(a) -> dict:
     pr = a.pr
     name = getattr(a, "id", None) or f"pr-{pr}"
     scope = refactor_scope(a, pr)
+    *base, back = base_sync_steps(f"--pr {pr}", "test-all", push=True, on_error="abort", returns=True, stage="完了判定")
     plan = _with_test_meta(
         {
             "フェーズ": "検査",
@@ -282,10 +300,10 @@ def plan_check(a) -> dict:
             "モード": a.mode,
             "作業場所": a.worktree,
             "規則": RULE_CHECK,
-            "上限": 12,
             "Pull Request": str(pr),
             "steps": [
                 *_inspect_steps(a, str(pr), scope),
+                *base,
                 {
                     "id": "test-all",
                     "type": "run",
@@ -311,8 +329,9 @@ def plan_check(a) -> dict:
                     "next": "test-all",
                 },
                 {"id": "ready", "type": "run", "cmd": READY.replace("{pr}", str(pr)), "on_fail": "abort", "next": "merge-gate"},
-                *merge_steps(a, on_fail="abort", next="record"),
+                *merge_steps(a, on_fail="abort", next="record", on_conflict="base-return"),
                 *record_steps(name, target_pr=pr, advance=getattr(a, "advance_done", False)),
+                back,
             ],
         },
         a,
@@ -384,15 +403,13 @@ def plan_check_since(a) -> dict:
         ),
         *_inspect_steps(a, "{pr}", scope),
         # 検査の間に起点のブランチが進んでも finish の付け替えの後にマージできるよう、毎回取り込んでから測る
+        *base_sync_steps(f"--base {shlex.quote(a.base)}", "test-all", push=True, on_error="abort", returns=False, stage="完了判定"),
         {
             "id": "test-all",
             "type": "run",
             "stage": "完了判定",
             "timeout": whole_timeout(a),
-            "cmd": (
-                f"git pull -q --rebase && git fetch -q origin {shlex.quote(a.base)} && "
-                f"git merge -q --no-edit origin/{shlex.quote(a.base)} && git push -q && " + whole_cmd(a)
-            ),
+            "cmd": "git pull -q --rebase && " + whole_cmd(a),
             "on_fail": "judge",
             "next": "finish",
         },
@@ -400,8 +417,7 @@ def plan_check_since(a) -> dict:
             "id": "judge",
             "type": "judge",
             "inputs": ["test-all"],
-            "question": "全体テストの失敗（起点のブランチの取り込みの衝突を含む）を直す（fix）か、修正に無関係として進める"
-            "（finish）か、止める（abort）か",
+            "question": "全体テストの失敗を直す（fix）か、修正に無関係として進める（finish）か、止める（abort）か",
             "choices": ["fix", "finish", "abort"],
         },
         {
@@ -409,11 +425,8 @@ def plan_check_since(a) -> dict:
             "type": "work",
             "kind": "修正",
             "inputs": ["test-all"],
-            "prompt": (
-                f"失敗したテストを直してコミットし、git push する。origin/{a.base} の取り込みで衝突していれば、"
-                "両方の変更を残して衝突を解き、マージのコミットを作って git push する。"
-            ),
-            "next": "test-all",
+            "prompt": "失敗したテストを直してコミットし、git push する。",
+            "next": "base-sync",
         },
         {
             "id": "finish",
@@ -445,7 +458,6 @@ def plan_check_since(a) -> dict:
         "起点": f"origin/{a.base}",
         "リポジトリ": repo,
         "規則": RULE_CHECK_SINCE,
-        "上限": 20,
         "実行の条件": {"cmd": cond, "skip_code": 3},
         "steps": steps,
     }
@@ -467,12 +479,17 @@ def cmd_new(a) -> dict:
         "release": lambda: f"release-{a.version}",
     }[a.kind]()
     out = Path(a.out or f"plan-{key}.json")
+    try:
+        limits.fill(plan)  # 上限は遷移から求める（#1909 の I2）
+    except limits.LimitError as e:
+        return result("supervise-new", "stopped", str(e), [], {"steps": len(plan["steps"])})
     out.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n")
+    src = next((s["estimate"]["source"] for s in plan["steps"] if s["id"] == "impl" and s.get("estimate")), None)
     return result(
         "supervise-new",
         "ok",
-        f"計画を書いた: {out}",
-        [{"path": str(out), "kind": a.kind, "steps": [s["id"] for s in plan["steps"]]}],
+        f"計画を書いた: {out}" + ("。実装の上限は未校正（3600 秒）" if src == "uncalibrated" else ""),
+        [{"path": str(out), "kind": a.kind, "steps": [s["id"] for s in plan["steps"]], **({"impl_timeout_source": src} if src else {})}],
         {"steps": len(plan["steps"])},
         next=(f"実装の queue へ --then {out} で渡す（実装がすべて完了した後に続けて流れる）" if a.kind == "release" else None),
     )

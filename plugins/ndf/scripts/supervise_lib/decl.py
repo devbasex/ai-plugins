@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
 import delivery
+import formatting
 import project_decl
 import schema
 from typing import Annotated
@@ -16,7 +18,8 @@ from pydantic import ConfigDict, Field, StrictInt
 
 # プロジェクトごとの宣言（リポジトリの根の .ndf/）。形は plan.py の docstring の「宣言」の節にある
 WORKTREE_DECL = "worktree.json"  # base_branch（起点のブランチ）・production_branch（本番のブランチ）
-SUPERVISE_DECL = "supervise.json"  # test・sync_checks・release・queue・impl_timeout・refactor_budget_minutes
+SUPERVISE_DECL = "supervise.json"  # test・sync_checks・format・release・queue・impl_timeout・refactor_budget_minutes
+GLOSSARY_DECL = "glossary.json"  # 用語集の設定（あれば glossary.py gate で用語集が揃っているかを見る）
 
 
 class DeclError(Exception):
@@ -97,6 +100,27 @@ def decl_roots(worktree: str, repo: str | None = None) -> list[Path]:
         roots.append(Path(str(worktree).split("/.worktrees/")[0]))
     roots.append(Path.cwd())
     return roots
+
+
+def format_of(decl: dict) -> list[tuple[str, str]]:
+    """.ndf/supervise.json の format（整形）を [(名前, コマンド)] で返す。読むのは `formatting.format_commands` だけ（#1507 の I8）。"""
+    try:
+        return [(c.name, c.command) for c in formatting.format_commands(decl)]
+    except formatting.FormatError as e:
+        raise DeclError(str(e)) from e
+
+
+def glossary_ready(roots) -> bool:
+    """用語集の設定と用語集が揃っているか。設定のある最初の根で `glossary.py gate --mode standard` が 0 なら真
+    （設計の工程の入口と同じ判定。#1651 の決定 3）。設定がどこにも無ければ偽。"""
+    for r in roots:
+        if (Path(r) / ".ndf" / GLOSSARY_DECL).is_file():
+            gl = Path(__file__).resolve().parent.parent / "glossary.py"
+            p = subprocess.run(
+                [sys.executable, str(gl), "gate", "--mode", "standard", "--root", str(r)], capture_output=True, text=True, cwd=str(r)
+            )
+            return p.returncode == 0
+    return False
 
 
 def declared_base_of(roots) -> str | None:
@@ -202,6 +226,8 @@ def apply_decls(a) -> None:
       supervise.json の test.command（project.json に test が無いときだけ。読んだことを a.test_note に残す。#1334 決定 3）。
       --test-all は廃止（知らせて無視する）
     - 同期とチェック（a.sync_checks）: supervise.json の sync_checks（無ければ計画に sync のステップを置かない）
+    - 整形（a.format）: supervise.json の format（無ければ計画に format のステップを置かない）
+    - 用語集の有無（a.glossary_ready）: `glossary_ready`（真なら実装の指示に用語集と突き合わせる行を入れる）
     - 配布（a.release）: supervise.json の release
     - 実装の上限（a.impl_timeout）と想定最大時間（a.refactor_budget_minutes）: 引数 → supervise.json の同じ名前の項目。
       宣言の形は引数があっても見る（#1916 の決定 5）
@@ -214,6 +240,8 @@ def apply_decls(a) -> None:
     _apply_simple_decls(a, wt, sv)
     decl, a.test_note = _project_decl(roots, sv)
     _apply_test_strategy(a, decl)
+    if getattr(a, "glossary_ready", None) is None:
+        a.glossary_ready = glossary_ready(roots)
     _require_declared(a)
 
 
@@ -221,6 +249,8 @@ def _apply_simple_decls(a, wt: dict, sv: dict) -> None:
     """引数を優先し、無ければ宣言の値をそのまま写す項目。"""
     sv_test = supervise_shape(sv).test
     budgets = step_budgets(sv)
+    if not getattr(a, "impl_timeout_source", None):  # 実装の上限の出所（#1856。スプリントは各計画へ引き継ぐ）
+        a.impl_timeout_source = "arg" if getattr(a, "impl_timeout", None) else ("decl" if budgets.impl_timeout else None)
     for k in STEP_BUDGETS:
         setattr(a, k, getattr(a, k, None) or getattr(budgets, k))
     a.base = getattr(a, "base", None) or wt.get("base_branch") or None
@@ -231,6 +261,7 @@ def _apply_simple_decls(a, wt: dict, sv: dict) -> None:
     a.test_all = None
     a.no_reports = sv_test.get("no_reports") or ""
     a.sync_checks = sync_checks_of(sv)
+    a.format = format_of(sv)
     a.release = sv.get("release") or None
 
 
@@ -330,11 +361,14 @@ def decl_fields(a) -> dict:
         "test_all",
         "no_reports",
         "sync_checks",
+        "format",
+        "glossary_ready",
         "release",
         "strategy",
         "test_limits",
         "test_note",
         "routes",
+        "impl_timeout_source",
         *STEP_BUDGETS,
     )
     return {k: getattr(a, k, None) for k in keys}

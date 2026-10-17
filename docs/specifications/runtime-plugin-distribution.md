@@ -114,7 +114,7 @@ stdio サーバに `type` / `command` / `args` / `env` / `cwd` しか許さず�
 配布ディレクトリは `.claude-plugin/plugin.json`、`.codex-plugin/plugin.json`、`.mcp.json`、
 `dev.kiro/install.sh` を持つ。hook や Skill を持つプラグインは `hooks/` と `skills/` も持つ。
 
-Kiro MCP installer は対象 project の `.mcp.json` へ MCP server 設定を merge する。hooks や skills を持つ MCP plugin では、必要に応じて `.kiro/agents/default.json` や `.kiro/skills/` も更新する。hook の command に含まれるプラグインルートのプレースホルダは、installer が張った symlink の絶対パスへ置き換える。
+Kiro MCP installer は対象 project の `.mcp.json` へ MCP server 設定を merge する。hooks や skills を持つ MCP plugin では、必要に応じて `.kiro/agents/default.json` や `.kiro/skills/` も更新する。Kiro は agent の `tools` に挙がったツールだけをモデルへ見せるため、installer は `default.json` に `tools` が無ければ `["*"]` を置く（利用者が書いた `tools` は上書きしない）。hook の command に含まれるプラグインルートのプレースホルダは、installer が張った symlink の絶対パスへ置き換える。
 
 NDF installer が生成する agent は `.kiro/agents/ndf.json` であり、MCP installer が更新する `.kiro/agents/default.json` とは別である。NDF と Kiro MCP plugin を併用する場合、MCP server 設定は `ndf.json` へ写す必要がある（`plugins/ndf/README.md`「旧バージョンからの移行」）。MCP installer 側の出力先統一は未対応。
 

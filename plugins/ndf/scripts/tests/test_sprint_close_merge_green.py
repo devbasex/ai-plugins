@@ -60,6 +60,8 @@ elif a[:2] == ["pr", "merge"]:
     if code == 0:
         for s in st.get("pr_seq", {{}}).get(a[2], []):
             s["state"] = "MERGED"
+    else:
+        sys.stderr.write(st.get("merge_err", "merge failed") + "\n")
 elif a[:2] == ["pr", "list"]:
     out = json.dumps(st.get("open_prs", []))
 elif a[:2] == ["pr", "create"]:
@@ -417,6 +419,41 @@ def pending_pr(sha="a"):
 
 def passed_pr(sha="a", rollup=None):
     return {"state": "OPEN", "headRefOid": sha, "statusCheckRollup": [run_("t")] if rollup is None else rollup}
+
+
+# --- #1917-4: ベースブランチとの衝突は終了コード 4 ---------------------------------
+
+
+def test_merge_when_green_stops_with_4_when_the_pr_is_dirty(repo, gh):
+    gh.set(pr_seq={"5": [{**passed_pr(), "mergeStateStatus": "DIRTY"}]})
+    code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--no-cleanup"], gh.env, repo)
+    assert code == 4 and out["status"] == "stopped", (out, err)
+    assert {"kind": "pr", "name": "#5", "result": "conflict"} in out["items"]
+    assert not [c for c in gh.get()["calls"] if c[:2] == ["pr", "merge"]]
+
+
+def test_merge_when_green_waits_while_merge_state_is_unknown(repo, gh):
+    """前提 4: UNKNOWN（GitHub が計算中）は衝突と読まずに待ち、通ればマージする。"""
+    unknown = {**pending_pr(), "mergeStateStatus": "UNKNOWN"}
+    gh.set(pr_seq={"5": [unknown, {**passed_pr(), "mergeStateStatus": "CLEAN"}, passed_pr()]})
+    code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--no-cleanup"], gh.env, repo)
+    assert code == 0 and ("pr", "merged") in [(i["kind"], i["result"]) for i in out["items"]], (out, err)
+
+
+@pytest.mark.parametrize(
+    "err_text, last, code",
+    [
+        ("GraphQL: Pull Request is not mergeable: the merge commit cannot be cleanly created", {}, 4),
+        ("merge failed", {"mergeStateStatus": "DIRTY"}, 4),
+        ("merge failed", {"mergeStateStatus": "BLOCKED"}, 1),
+    ],
+)
+def test_merge_when_green_refused_merge_is_4_only_when_it_conflicts(repo, gh, err_text, last, code):
+    """gh pr merge の拒否は、衝突の文言か読み直した DIRTY のときだけ 4。ほかの拒否は今までどおり 1。"""
+    gh.set(pr_seq={"5": [pending_pr(), passed_pr(), {**passed_pr(), **last}]}, merge_code=1, merge_err=err_text)
+    code_, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--no-cleanup"], gh.env, repo)
+    assert code_ == code and out["status"] == "stopped", (out, err)
+    assert ({"kind": "pr", "name": "#5", "result": "conflict"} in out["items"]) is (code == 4)
 
 
 def test_merge_when_green_merges_on_first_green_after_pending(repo, gh):

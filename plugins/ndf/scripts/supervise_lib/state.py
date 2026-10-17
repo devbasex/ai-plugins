@@ -23,6 +23,7 @@ from sprint_mvv import MVV_PACES
 from supervise_lib.claude import TICK, watch_children
 
 STEP_PID = "step.pid"  # 流れているステップの子のプロセスグループ（ステップが流れている間だけある）
+USAGE_TOKENS = (("input", "input"), ("cache_read", "cache_read_input"), ("cache_write", "cache_creation_input"), ("output", "output"))
 REPORT_INTERVAL = 600  # 最後の行から動きが無いときに「まだ動いている」を足すまでの秒数。計画の "report_interval"
 # worker の途中の報告を分ける語（スクリプトで見る。LLM は使わない）
 PROGRESS_STOP = re.compile(r"止まった|止まる|進めない|進められない|判断が要る|できなかった|stuck", re.I)
@@ -105,6 +106,7 @@ class RunState:
         self.worker_recent: list[str] = []
         self.worker_last_at: float | None = None
         self.run_log: Path | None = None  # run のステップの stderr（待ちの間に最後の行を読む）
+        self.session: dict = {}  # 会話を残す claude -p のセッションの id と設定の置き場（遅れの見張りが記録の伸びを見る。#1623）
         self.project_mvv = None  # 判断の基準（lib/project_mvv.ProjectMvv）。judge か work の最初の 1 回で読む
         self.sprint_mvv: str | None = None  # スプリント MVV の本文（読んで無ければ ""）。最初の 1 回で読む
 
@@ -142,14 +144,14 @@ class RunState:
         return mvv, (self.sprint_mvv_of(plan) if mvv.approved else None)
 
     # --- 途中の報告 ---
-    def progress_write(self, rec: dict) -> None:
+    def progress_write(self, rec: dict) -> dict:
         rec = {"kind": rec.pop("kind"), "at": clock.now_iso(), **rec}
         with open(self.progress, "a") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
         self.progress_seen = self.progress.stat().st_size
         self.last_line_at = time.time()
-        if rec["kind"] in self.pcount:
-            self.pcount[rec["kind"]] += 1
+        self.pcount.update({k: self.pcount[k] + 1 for k in (rec["kind"],) if k in self.pcount})
+        return rec
 
     def attention(self, reason: str, text: str) -> None:
         """conductor の判断が要る出来事を 1 行残す（同じ理由と文は 1 度だけ）。"""
@@ -216,8 +218,8 @@ class RunState:
             return None
         return next((l.strip()[:300] for l in reversed(text.splitlines()) if l.strip()), None)
 
-    def step_line(self, nxt: str | None) -> None:
-        """ステップの切り替わりの 1 行（id・type・exit・秒・費用・次・要約）。"""
+    def step_line(self, nxt: str | None, out: str = "") -> None:
+        """ステップの切り替わりの 1 行（id・type・exit・秒・費用・次・要約・出力ファイルの名前）。"""
         c = self.cur
         text = c.get("text", "") or ""
         summary = c.get("decision") or next((l for l in reversed(text.splitlines()) if l.strip()), "")
@@ -232,23 +234,26 @@ class RunState:
                 "next": nxt or "end",
                 "summary": summary.strip()[:160],
                 **({"pr": c["pr"]} if c.get("pr") else {}),
+                **({"out": out} if out else {}),  # --from の再開で前の実行の結果を引く（#1676 の決定 6）
             }
         )
 
-    def run_line(self, start: str | None) -> None:
-        """実行の始まりの 1 行（`from` は `--from` のステップか null。`recorded_pr` が前の実行の範囲を決める）。"""
-        self.progress_write({"kind": "run", "from": start})
+    def run_line(self, start: str | None) -> str:
+        """実行の始まりの 1 行（`from` は `--from` のステップか null。`recorded_pr` が前の実行の範囲を決める）。行の `at` を返す。"""
+        return self.progress_write({"kind": "run", "from": start})["at"]
+
+    def prior_rows(self, rows: list[dict] | None = None) -> list[dict]:
+        """前の実行の範囲の進捗ログの行（`--from` の無い最後の実行の始まりより後）。recorded_pr と prior_results が共有（#1676）。"""
+        rows = jsonio.read_jsonl(self.progress, missing=[], broken=[], skip_broken=True) if rows is None else rows
+        cut = max((i for i, r in enumerate(rows) if r.get("kind") == "run" and r.get("from") is None), default=-1)
+        return rows[cut + 1 :]
 
     def recorded_pr(self) -> str:
-        """前の実行が決めた Pull Request（`--from` の再開で使う）。最後の `--from` を付けない実行の始まりの行より後の
-        最後の `pr`。実行の始まりの行も `pr` も無い記録（修正より前の版）だけ `report.md` から読む。無ければ空。"""
+        """前の実行（`prior_rows`）が決めた最後の Pull Request。実行の始まりも `pr` も無い古い記録だけ `report.md` から読む。"""
         rows = jsonio.read_jsonl(self.progress, missing=[], broken=[], skip_broken=True)
-        rows = [r for r in rows if r.get("kind") == "run" or r.get("pr")]
-        prev = self.dir / "report.md"
-        if not rows and prev.is_file():
+        if not any(r.get("kind") == "run" or r.get("pr") for r in rows) and (prev := self.dir / "report.md").is_file():
             return m.group(1) if (m := re.search(r"^- Pull Request: (\S*/pull/\d+)", prev.read_text(), re.M)) else ""
-        cut = max((i for i, r in enumerate(rows) if r.get("kind") == "run" and r.get("from") is None), default=-1)
-        return next((str(r["pr"]) for r in reversed(rows[cut + 1 :]) if r.get("pr")), "")
+        return next((str(r["pr"]) for r in reversed(self.prior_rows(rows)) if r.get("pr")), "")
 
     # --- 流れているステップの子（孤児の片付け。決定 35） ---
     def begin_step(self, sid: str) -> str | None:
@@ -295,24 +300,19 @@ class RunState:
             subprocess.run(["bash", rec, str(issue), "stage", stage], cwd=cwd, capture_output=True, text=True)
 
     def add_usage(self, kind: str, res: dict) -> None:
-        """1 回の呼び出しの使用量を、計画の合計（`llm`）と今のステップの内訳（`cur["llm"]`）へ足す。"""
+        """1 回の呼び出しの使用量を、計画の合計（`llm`）と今のステップの内訳（`cur["llm"]`。同じステップの呼び出しは足し合わせる）へ足す。"""
         u = res.get("usage", {})
         w5, w1h = usage_ledger.cache_writes(u)
         self.llm[kind] += 1
-        self.llm["input"] += u.get("input_tokens", 0)
-        self.llm["cache_read"] += u.get("cache_read_input_tokens", 0)
-        self.llm["cache_write"] += u.get("cache_creation_input_tokens", 0)
-        self.llm["output"] += u.get("output_tokens", 0)
         self.llm["cost"] += res.get("cost") or 0.0
-        # ステップごとの内訳（往復の回数・トークン・費用）。同じステップで複数回呼べば足し合わせる
         c = self.cur.setdefault("llm", {"calls": 0, "turns": 0, "input": 0, "cache_read": 0, "cache_write": 0, "output": 0, "cost": 0.0})
         c["calls"] += 1
         c["turns"] += res.get("turns") or 0
-        c["input"] += u.get("input_tokens", 0)
-        c["cache_read"] += u.get("cache_read_input_tokens", 0)
-        c["cache_write"] += u.get("cache_creation_input_tokens", 0)
-        c["output"] += u.get("output_tokens", 0)
+        for key, src in USAGE_TOKENS:
+            self.llm[key] += u.get(f"{src}_tokens", 0)
+            c[key] += u.get(f"{src}_tokens", 0)
         c["cost"] = round(c["cost"] + (res.get("cost") or 0.0), 4)
+        c["cost_unknown"] = c.get("cost_unknown", False) or not isinstance(res.get("cost"), (int, float))  # 実績では費用を不明にする
         # 書き込みの 5 分と 1 時間、モデルごとの呼び出し回数とトークン（#1142 の不足 f。キーの追加だけ）
         c["cache_write_5m"] = c.get("cache_write_5m", 0) + w5
         c["cache_write_1h"] = c.get("cache_write_1h", 0) + w1h
@@ -332,7 +332,7 @@ class RunState:
         self.applied = max(self.applied, n)
         self.results[sid] = dict(self.cur)
         self.read_worker_lines()
-        self.step_line(nxt)
+        self.step_line(nxt, self.out_path(n, sid).name)
         if (
             self.cur.get("exit") not in (0, None)
             and not is_gate(self.cur.get("exit"))

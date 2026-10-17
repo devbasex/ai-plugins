@@ -23,6 +23,7 @@ from pathlib import Path
 import jsonio
 import repo as repo_lib
 import upkeep_rank as R
+from upkeep_rank_estimate import apply_overlay, estimate_overlay
 from step_result import EXIT_PAUSE, EXIT_UNREADABLE, StepError, emit, git_root, result
 from upkeep_gh import Gh, Milestones, list_issues, target_repo, sub_issues
 
@@ -191,6 +192,13 @@ def _build_board(a, gh, rows, order, scores, cfg, sd, ctx, notes):
     previous = {r["title"]: tab for r in rows if (tab := R.parse_rank_table(r.get("description") or "")) is not None}
     ests, excluded = estimates(issues, scores, ctx.read_state(sd / "estimates.json") or {}, previous, cfg)
     jsonio.write_atomic(sd / "estimates.json", {str(n): e.to_json() for n, e in ests.items()}, indent=1)
+    import estimate_records as er  # lib は upkeep.py が sys.path へ載せる
+
+    try:
+        sizes = estimate_overlay(git_root(a.root), list(issues), cfg.scale)  # Size を見積もりの記録の A から決める（#1856）
+    except er.DeclError as e:
+        raise StepError(f"見積もりの宣言の誤り: {e}", EXIT_UNREADABLE)
+    ests = apply_overlay(ests, sizes)
     notes.extend(
         f"--scores の #{n} は open でないため除いた" for n in (i.get("number") for i in scores.get("issues", [])) if n not in issues
     )
@@ -204,7 +212,7 @@ def _build_board(a, gh, rows, order, scores, cfg, sd, ctx, notes):
         set(issues),
     )
     rejected = ctx.read_state(sd / "rejected.json") or []
-    board = R.Board(issues, ests, cfg, order, subs, edges, previous, rejected, tuple(a.approved), excluded)
+    board = R.Board(issues, ests, cfg, order, subs, edges, previous, rejected, tuple(a.approved), excluded, sizes)
     return board, issues, ests, excluded
 
 

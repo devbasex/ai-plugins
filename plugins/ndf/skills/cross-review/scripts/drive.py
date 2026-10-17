@@ -6,7 +6,7 @@
 init → ラウンド（起動・監視・取り込み・根拠の検証・判定）→ 振動の検知 → 修正 → 巻き直し →
 最終スイープ → 検証 → 報告を順に進める。LLM が要る地点（fix / sweep / newtext）で止まる。
 同じコマンドを打ち直すと続きから進む。収束ループが終わった後に打ち直すと、終わりの時点の PR の head と今の head が
-同じなら前回の結果を返し、違えば（または `--reopen` なら）新しい実行の回を始め、`state.py init` がラウンドを足す（#1340）。進みは耐久の記録（`lib/durable.py`、種類 `review`・鍵の元は状態の置き場）に
+同じで結果を変える引数も同じなら前回の結果を返し、違えば（または `--reopen` なら）新しい実行の回を始め、`state.py init` がラウンドを足す（#1340）。進みは耐久の記録（`lib/durable.py`、種類 `review`・鍵の元は状態の置き場）に
 あり、耐久ワークフロー `review_drive` の 1 回が収束ループの 1 回である。`state.py init` とラウンドは耐久ステップで、
 記録のある耐久ステップは打ち直しで流れない（init は 1 回の中で 1 回だけ。#1142 の I19）。止まりはイベント `pause` を
 立てて続きを待ち、打ち直しが続き（`resume`）を送る。結果ファイルが無ければ同じ止まりを番号を増やして返す。
@@ -38,9 +38,11 @@ import post_queue  # noqa: E402  一時的な失敗の流し直し（#1843）
 import assignee_env  # noqa: E402
 import step_result as sr  # noqa: E402
 from drive_pause import Stop  # noqa: E402
-from loop_drive import call, durable_identity, keep_finished, parse_vars, relaunch_seats, review_status, write_review_answer  # noqa: E402,F401  テストは `call` をこのモジュールの上で差し替える
+from loop_drive import call, durable_identity, keep_finished_output, parse_vars  # noqa: E402,F401  テストは `call` をこのモジュールの上で差し替える
+from loop_drive import relaunch_seats, result_args, review_status, write_review_answer  # noqa: E402
 
 TOOL = "cross-review-drive"
+PLACE_ARGS = frozenset({"--worktree"})  # 置き場だけを変える init の引数。完了の記録の比較から除く（#1263 の I4）
 DOCS02 = SKILL / "docs" / "02-fix-and-rotation.md"
 
 
@@ -363,25 +365,23 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
         posts = [sys.executable, str(LIB / "result_posts.py"), "fix", "--pr", pr, "--result", str(self.path("sweep"))]
         self.must(call([*posts, "--worktree", str(self.v.get("WORKTREE", ""))], self.env), "result_posts.py fix")
         self.must(self.st("verify-sweep", str(self.pr)), "state.py verify-sweep", ok=(0, 6))
-        _, rep = self.st("report", str(self.pr))
-        rp = self.tmp / f"drive-pr{self.pr}-report.md"
-        rp.write_text(rep)
+        (rp := self.tmp / f"drive-pr{self.pr}-report.md").write_text(self.st("report", str(self.pr))[1])
         c = self.counts()
-        return dp.done(
-            TOOL,
-            f"収束ループが終わった（final={c['final']}・{c['rounds']} ラウンド・コメント {c['comments']}・指摘 {c['findings']}・修正 {c['fixed']}・未解決 {c['unresolved']}）",
-            rp,
-            c,
-        )
+        summary = f"収束ループが終わった（final={c['final']}・{c['rounds']} ラウンド・コメント {c['comments']}・指摘 {c['findings']}・修正 {c['fixed']}・未解決 {c['unresolved']}）"
+        res = dp.done(TOOL, summary, rp, c)
+        late = json.loads(self.path("sweep").read_text()).get("deferred") or []  # 最終スイープの見送り（#1488 の「レビュー」の材料）
+        ds = [*s.get("deferred_nits", []), *({"round": c["rounds"], **d} for d in late if isinstance(d, dict))]  # 修正の見送り＋スイープ
+        res["items"] += [
+            {"kind": "deferred", **{k: d.get(k) for k in ("path", "line", "summary", "round")}} for d in ds if not d.get("waived")
+        ]
+        return res
 
     # --- 起動: 耐久の記録を開き、耐久ワークフローを始めるか続けて、止まりか終わりを待つ ---
     def finished(self, out) -> bool:
-        """記録した終わりを返してよいか（I10）。状態のファイルが消えていれば頭から流し、head の比べ方は `keep_finished` が決める。"""
-        tmp = out.get("tmp") if isinstance(out, dict) and (out.get("result") or {}).get("status") == "ok" else None
-        if not tmp or not (Path(tmp) / f"cross-review-pr{self.pr}-state.json").is_file():
-            return False
-        recorded = out.get("head")
-        return keep_finished(recorded, self.pr_head(tmp) if recorded and not self.reopen else None, self.reopen)
+        """記録した終わりを返してよいか（I10・#1263）。状態のファイルが消えていれば頭から流し、head と引数の比べ方は `keep_finished_output` が決める。"""
+        tmp = out.get("tmp") if isinstance(out, dict) else None
+        alive = bool(tmp) and (Path(tmp) / f"cross-review-pr{self.pr}-state.json").is_file()
+        return keep_finished_output(out, alive, lambda: self.pr_head(tmp), self.reopen, self.init_args, PLACE_ARGS)
 
     def run(self) -> tuple[dict, int]:
         identity = self.identity()
@@ -457,8 +457,8 @@ def review_drive(pr: int, rotate_mode: str, init_args: list[str]) -> dict:
     d = Drive(pr, rotate_mode, init_args)
     seq, stage = 0, "init"
 
-    def outcome(res: dict, head: str | None = None) -> dict:  # head は終わりの時点の PR の head（#1340 の I10）
-        return {"result": res, "code": dp.exit_code(res), "tmp": d.v.get("TMP_DIR"), "head": head}
+    def outcome(res: dict, head: str | None = None) -> dict:  # head は終わりの PR の head（#1340 の I10）・args は結果を変える引数（#1263）
+        return dict(result=res, code=dp.exit_code(res), tmp=d.v.get("TMP_DIR"), head=head, args=result_args(init_args, PLACE_ARGS))
 
     for _ in range(STEP_LIMIT):
         try:

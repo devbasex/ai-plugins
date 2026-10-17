@@ -5,6 +5,7 @@ err.log・stdout.log の末尾を読み、照合の表（`monitor_patterns`）�
 
 from __future__ import annotations
 
+import json
 import pathlib
 import re
 from dataclasses import dataclass
@@ -124,14 +125,57 @@ def _scan_claude_stdout(path: pathlib.Path, patterns: list[re.Pattern[str]]) -> 
     return None
 
 
+def _claude_result(path: pathlib.Path) -> Optional[dict]:
+    """claude の `--output-format json` の結果を読む。JSON として読めない（途中・壊れた出力）なら None。
+
+    出力は完了時の 1 個の JSON だが、前に行が混じる場合に備えて末尾の空でない行も試す。
+    """
+    data = _read_tail(path, 200 * 1024)
+    if data is None:
+        return None
+    data = monitor_patterns._strip_ansi(data).strip()
+    lines = data.splitlines()
+    for text in (data, lines[-1] if lines else ""):
+        try:
+            parsed = json.loads(text)
+        except ValueError:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return None
+
+
+def _claude_succeeded(result: Optional[dict]) -> bool:
+    """標準出力の JSON が成功の終わり（`subtype: success`・`is_error: false`）か。"""
+    return bool(result) and result.get("subtype") == "success" and result.get("is_error") is False
+
+
 def _scan_claude_stdout_fatal(path: pathlib.Path) -> Optional[str]:
     """claude の JSON 出力から承認失敗・実行失敗を検出する。
 
-    `--output-format json` は完了時に 1 個の JSON を吐くため、
-    `permission_denials` が非空、または `is_error` が真であれば失敗が確定する。
-    err.log 側の行単位パターンでは拾えないので専用に見る。
+    `--output-format json` は完了時に 1 個の JSON を吐く。`is_error` が真なら失敗が確定する。
+    `permission_denials` が非空でも、JSON が成功の終わり（`subtype: success`・`is_error: false`）
+    なら致命にしない（拒否は回り道で済んでおり、成否は結果ファイルの有無が決める。#1513）。
+    JSON として読めないときは拒否を致命に倒す。err.log 側の行単位パターンでは拾えないので専用に見る。
     """
-    return _scan_claude_stdout(path, monitor_patterns.CLAUDE_STDOUT_FATAL)
+    hit = _scan_claude_stdout(path, monitor_patterns.CLAUDE_STDOUT_FATAL)
+    if hit:
+        return hit
+    hit = _scan_claude_stdout(path, monitor_patterns.CLAUDE_STDOUT_DENIALS)
+    if hit and _claude_succeeded(_claude_result(path)):
+        return None
+    return hit
+
+
+def _claude_denials_warning(path: pathlib.Path) -> Optional[str]:
+    """成功の終わりで拒否が残ったときの警告の文。それ以外は None（致命の側は `_scan_claude_stdout_fatal`）。"""
+    result = _claude_result(path)
+    if not _claude_succeeded(result):
+        return None
+    denials = result.get("permission_denials")
+    if not isinstance(denials, list) or not denials:
+        return None
+    return f"permission_denials {len(denials)} 件（subtype: success で終わったため致命にしない）"
 
 
 def _scan_claude_stdout_usage_limit(path: pathlib.Path) -> Optional[str]:
@@ -213,4 +257,7 @@ def _early_error(
     if disabled:
         return None, None
     fatal = _scan_reasoned_fatal(paths, agent) or _scan_fatal(paths, agent)
-    return fatal, _scan_early_warn(paths.err_log)
+    warnings = [_scan_early_warn(paths.err_log)]
+    if monitor_types._agent_runtime(agent) == "claude":
+        warnings.append(_claude_denials_warning(paths.stdout_log))
+    return fatal, " / ".join(w for w in warnings if w) or None

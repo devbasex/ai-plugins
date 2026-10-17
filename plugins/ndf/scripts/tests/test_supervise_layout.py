@@ -30,6 +30,7 @@ SUBCOMMANDS = [
     "design-results",
     "note",
     "sync-check",
+    "format",
     "sync-title",
 ]
 NEW_KINDS = ["impl", "fix", "check", "release", "sprint", "close"]
@@ -41,6 +42,7 @@ MODULES = [
     "paths",
     "decl",
     "plan",
+    "limits",  # ステップの上限をプランの遷移から求める（#1909）
     "prompts",
     "claude",
     "state",
@@ -49,6 +51,7 @@ MODULES = [
     "worker_steps",
     "pr",
     "engine",
+    "actuals",  # supervise の実行を見積もりの実績の記録へ残す（#1856）
     "admission",
     "running",  # queue のプロセスの中の、走っているプランの登録簿（#1674）
     "flow",
@@ -68,6 +71,7 @@ MODULES = [
 NO_ENGINE = [
     "decl",
     "plan",
+    "limits",
     "prompts",
     "claude",
     "state",
@@ -87,6 +91,7 @@ NO_ENGINE = [
     "paths",
     "admission",
     "running",
+    "actuals",
 ]
 
 # 関数の中の import で、モジュールの循環にしない辺（Engine.run と cmd_queue が耐久ワークフローを始める。

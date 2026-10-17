@@ -6,7 +6,7 @@
   "モード": "standard",
   "作業場所": "<TMP>/repo",
   "規則": "全体テストが落ちたら（落ちたテストだけの再実行でも落ちた後）、変更に起因するなら fix、変更に無関係なら ready。2 回直しても同じなら abort。",
-  "上限": 12,
+  "上限": 44,
   "Pull Request": "5",
   "steps": [
     {
@@ -38,7 +38,29 @@
       "timeout": 3600,
       "args": "5 --max-rounds 4",
       "on_fail": "abort",
+      "next": "base-sync"
+    },
+    {
+      "id": "base-sync",
+      "type": "run",
+      "stage": "完了判定",
+      "timeout": 600,
+      "cmd": "python3 <NDF>/scripts/merged-steps.py base-sync --pr 5 --push --root .",
+      "on_exit": {
+        "1": "fix-base"
+      },
+      "on_fail": "abort",
       "next": "test-all"
+    },
+    {
+      "id": "fix-base",
+      "type": "work",
+      "kind": "修正",
+      "inputs": [
+        "base-sync"
+      ],
+      "prompt": "入力はベースブランチの取り込みのステップの出力である。衝突が残っていれば、git status で衝突したファイルを確かめ、両方の変更を残して衝突を解き、git add してマージのコミットを作る。push 前の検査で拒まれていれば、指摘を直してコミットする。どちらも push しない（git merge --abort・rebase・強制 push をしない）。",
+      "next": "base-sync"
     },
     {
       "id": "test-all",
@@ -97,7 +119,8 @@
         "cmd": "python3 <NDF>/scripts/merged-steps.py probe --pr {pr} --act"
       },
       "on_exit": {
-        "75": "stop"
+        "75": "stop",
+        "4": "base-return"
       },
       "on_fail": "abort",
       "next": "record"
@@ -111,7 +134,8 @@
         "cmd": "python3 <NDF>/scripts/merged-steps.py probe --pr {pr} --act"
       },
       "on_exit": {
-        "75": "stop"
+        "75": "stop",
+        "4": "base-return"
       },
       "on_fail": "abort",
       "next": "record"
@@ -128,6 +152,15 @@
       "type": "run",
       "cmd": "python3 <NDF>/scripts/check-trigger.py record --id pr-5 --state {state_dir} --root . --target-pr 5 --failed",
       "next": "end"
+    },
+    {
+      "id": "base-return",
+      "type": "run",
+      "kind": "戻り",
+      "timeout": 120,
+      "cmd": "python3 <NDF>/scripts/merged-steps.py base-return --state {state_dir}",
+      "on_fail": "abort",
+      "next": "base-sync"
     }
   ],
   "base_branch": "main",

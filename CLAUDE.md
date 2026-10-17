@@ -36,58 +36,15 @@ Skill の配布は `plugins/ndf/manifests/` が唯一の基準（数と内訳は
 ## 版ごとの判断の記録
 
 **リリース済み版の判断と理由は確定仕様（[docs/specifications/](docs/specifications/)）が持つ。**
-v10.17.51 までは [docs/ndf-version-decisions.md](docs/ndf-version-decisions.md) にあり、以後は書き足さない。
-変更点は `CHANGELOG.md` が持つ。**過去の版の決定をたどるとき**に読む。
+v10.17.51 までは [docs/archive/version-decisions/](docs/archive/version-decisions/) にあり、以後は書き足さない。
+変更点は `CHANGELOG.md` が持つ。これらの参照に `@` を付けない（全セッションが毎回読むことになる）。
 
-**これらの参照に `@` を付けない。** 付けると記録を全セッションが毎回読むことになる。
+- `CLAUDE.md` に残すのは現行版で決めたことだけ。リリースした版の段落はその主題の確定仕様へ移す（手順は `release`）
+- 版が決まる前の段落は「の次の版で」で書き出す（`.ndf/instructions.json` の `pending_marker`）
+- チェックは `python3 plugins/ndf/scripts/instructions-check.py --root .`。設定の書き方は `release` の `references/instruction-files.md`
 
-**`CLAUDE.md` に残すのは現行版で決めたことだけである。** 版をリリースした時点でその段落は過去の
-記録になるため、その主題の確定仕様へ移す（手順は `release` にある）。
+チェックの理由と経緯は `docs/specifications/ndf-instruction-files-check.md` に、知識の置き場所は `docs/specifications/ndf-knowledge-and-kiro.md` にある。
 
-**版が決まる前の段落は「の次の版で」で書き出す。** 版数はスプリントをマージするまで決まらない
-ため、書く時点では直前の正式版しか書けない。このマーカーを付けておくと、リリースで新しい版が出た
-時点でチェックが拾う（`.ndf/instructions.json` の `pending_marker`）。
+## cross-refactoring・cross-review
 
-```bash
-python3 plugins/ndf/scripts/instructions-check.py --root .
-```
-
-リリース済み版の段落・許可していない @インポート・読み込み量の上限を見る。判定の強さは
-`.ndf/instructions.json` が決め、設定の書き方は `release` の
-`references/instruction-files.md` にある。
-
-## cross-refactoring
-
-**`/ndf:cross-refactoring` は、想定最大時間（`--budget-minutes`、既定 30 分）に収まるリファクタリング計画を 1 回だけ実行する。** 参加者の全員が 1 度だけ多面的に提案し、実装担当 1 者（`--implementer` → ホスト → 参加者の先頭）が計画・テスト追加・実装・検証/修正を通す。参加者の既定は cross-review と同じ **claude / codex / kiro とホスト** で、`--exclude` / `--include` で名指しで変える（agy は `--include agy` で戻す）。レビューは最終ゲートの `cross-review` が担う。
-
-```bash
-/ndf:cross-refactoring 130 --scope src/services tests/services
-/ndf:cross-refactoring 130 --scope src tests --budget-minutes 30
-```
-
-- `--scope` は必須で**検証にも効く**。現状固定テストの置き場所も含める。新しいファイルはどこに置いても範囲の中、範囲の外の既存のファイルは呼び手の書き換えだけを通す
-- テストは**宣言（`.ndf/project.json` の `test`）の戦略**で走らせる。無ければ `--round-test` を渡す
-- 計画は配分テーブル（直近 10 回の集計）で見積もり、「想定最大時間 − 経過 − バッファ」に収まる件数だけを採る。検証の後に時間が残れば、`budget` の見送りとコミットの無かった項目を計画の値のまま採り直す（LLM を呼ばない）。見送りは理由（`budget` / `rank` / `duplicate` / `vocabulary` / `threshold` / `no_target` / `test_failed` / `not_done`）とともに計画に残る
-- 項目の検証は**範囲テスト**（`scope_command` の `{paths}` へ計画の `test_targets`）で走らせる。全体テストは着手前・危険フラグ（D1〜D5）の 1 回・最終ゲートだけ。落ちたら落ちたテストを走らせ直してフレーキー・既存失敗を除き、変更起因なら締め切りまで直し、直らなければ原因の項目から取り消す
-- 時間の数値は `--budget-minutes` から算術で出し、計画へ書く。1 件も入らなければ要る予算を出して提案の前に止まる。項目ごとの期限は持たず、実装を止めるのは実装の終わりだけ。想定最大時間は動いていた時間で数え、中断して再開すると止まっていた分だけ締め切りがずれる。計画の後で LLM が動くのは作業の CLI だけ
-- 廃止: `--max-test-rounds` / `--max-outer-rounds` / `--max-items-per-round` / `--max-fix-rounds` / `--test-timeout` は知らせて無視する
-- ホストと同じランタイムが実装担当になる場合も、サブエージェントではなく **CLI プロセス**として起動する
-- 収束しない・直さなかった改善項目は **項目単位で取り消す**。積み直しが衝突した項目だけを外し、残りは範囲テストで確かめ直す
-- 生成物・配布物の同期は **オーケストレーターの責務**。同期の手順は `--sync-command "bash scripts/build-runtime-plugins.sh"` のように渡す
-- 公開するのは **オーケストレーターだけ**。実装担当は push しない
-- 改善項目のコミットは `Item-Id` で結び、1 項目に複数のコミットを持てる（テストを足す項目はテストのコミットが 1 件加わる）
-- Jev は `AI_GATEWAY_API_KEY` があり公開リポジトリのときだけ使う（グレード・同じ変更か・D5）。使えなければ実装担当が判断する（`NDF_JEV=0` で止める）
-- `init` が参加者の認証状態を確認し、通らない者を外して続ける。全員が揃わないなら止めたいときは `--require-all`。誤検知するときは `NDF_SKIP_AUTH_CHECK=1`
-
-## cross-review
-
-`/ndf:cross-review` は既定の参加者プール（claude / codex / kiro とホスト）の利用可能な参加者から毎ラウンド 2 スロットを選んで PR レビューを委譲し、新しい指摘が出なくなるまで修正ループを回す。2 者に満たなければ同じランタイムの 2 つ目で埋める。ホストのランタイムも CLI プロセスとして起動する。agy は既定から外してあり、`--include agy` で戻す。外すなら `--exclude` で名指しする（既定に無い者の指定は止めずに無視する）。2 ラウンド目以降はコメントのスナップショットを取り直す。agy の progress log を heartbeat に表示し、無言に見える時間も `scan` / `analyze` / `post` / `done` などの作業段階が分かる。
-
-追加レビュー観点は以下のどちらかで渡す:
-
-```bash
-/ndf:cross-review 123 --focus "ドキュメントとコードの整合性を重点的に確認"
-/ndf:cross-review 123 --extra-instructions-file /tmp/review-focus.md
-```
-
-PR の変更ファイルから docs only / 設計（`issues/` の要求・設計・決定の記録）/ code / DB migration / test / dependency / CI設定 / API契約 / 認証認可 / frontend / performance / deletion / generated / i18n / infra を自動分類し、該当するレビュー観点テンプレートも両スロットに渡す。
+使い方と仕様は `plugins/ndf/skills/cross-refactoring/SKILL.md`・`plugins/ndf/skills/cross-review/SKILL.md` と、確定仕様の `docs/specifications/cross-refactoring-*.md`・`docs/specifications/cross-review-*.md` にある。

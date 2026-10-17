@@ -11,6 +11,7 @@ import math
 import shlex
 
 import test_strategy as ts
+from step_result import EXIT_BASE_CONFLICT
 from supervise_lib.decl import scope_paths, test_kind
 from supervise_lib.paths import MERGE_CMD, MERGE_GATE_CMD, MERGE_PROBE, SPRINT_STATE_PY, TEST_RUN_PY
 
@@ -46,6 +47,36 @@ def plan_limits(a) -> dict:
 def with_margin(seconds: int) -> int:
     """ステップの `timeout` = 上限 + 余裕。"""
     return int(seconds) + max(MARGIN_FLOOR, math.ceil(int(seconds) * MARGIN_SHARE))
+
+
+IMPL_TIMEOUT_DEFAULT = 3600  # 実装の上限の既定（引数・宣言・実績のどれも無いとき）
+
+
+def impl_timeout_estimate(a) -> tuple[int, dict]:
+    """実装のステップの (timeout, 根拠)。引数 → 宣言 → 実績の見込み（同じ構成の直近の最大 + 余裕。最大が打ち切りなら余裕を足さない。
+    3600 を下限にする）→ 3600（#1856 の決定 10）。
+
+    根拠はステップの `estimate` の欄の形 `{source: arg|decl|history|uncalibrated, samples, high, basis}`。"""
+    if getattr(a, "impl_timeout", None):
+        source = getattr(a, "impl_timeout_source", None) or "arg"
+        return int(a.impl_timeout), {"source": source, "samples": 0, "high": None, "basis": []}
+    import estimate_predict as ep
+    import estimate_records as er
+
+    root = getattr(a, "repo", None) or getattr(a, "worktree", None) or "."
+    try:
+        decl = er.load_estimate_decl(root)
+        window, least = decl.get("window") or ep.stats.WINDOW, decl.get("min_samples") or ep.IMPL_MIN_SAMPLES
+        got = ep.impl_limit(er.read_actuals(er.estimate_dir(root)), window, least)
+    except (er.DeclError, OSError) as e:
+        got = {"source": "uncalibrated", "samples": 0, "high": None, "basis": [], "note": str(e)[:200]}
+    timed_out = got.pop("timed_out", False)  # ステップの `estimate` の欄の形には載せない
+    if got["source"] == "history" and got["high"]:
+        high = math.ceil(got["high"])
+        # 最大が打ち切りの標本（秒は前の上限）なら余裕を足さない。足すと打ち切りのたびに上限が伸び続ける。
+        # 既定より下げない: 短い実績で上限が下がると、それより長い実装が同じ秒で打ち切られ続け、上限が戻らない
+        return max(IMPL_TIMEOUT_DEFAULT, high if timed_out else with_margin(high)), got
+    return IMPL_TIMEOUT_DEFAULT, got
 
 
 def _template_arg(a) -> str:
@@ -89,14 +120,15 @@ def refactor_template_arg(a) -> str:
     return f" --baseline-test {shlex.quote(template)}" + (f" --test-kind {kind}" if kind != ts.TEST else "")
 
 
-def merge_steps(a, **extra) -> list[dict]:
+def merge_steps(a, on_conflict: str | None = None, **extra) -> list[dict]:
     """マージの 3 ステップ（#1336 の決定 1）。
 
     - `merge-gate`: 宛先が承認ゲート 2（自動反映の本番チャネル）に当たるかだけを判定する。当たればプランを終える（`gate_next: end`）
     - `merge`: CI を待ってマージする。CI の待ちの上限を `--timeout` で渡し、ステップの `timeout` はそれに余裕を足す
     - `merge-approved`: `merge` に `--gate-approved user` を足したもの。通常の流れからは入らず、承認の後に `--from merge-approved` でだけ入る
 
-    `merge` と `merge-approved` は CI の基盤待ち（75）で judge を通らずに止まる（`on_exit`）。
+    `merge` と `merge-approved` は CI の基盤待ち（75）で judge を通らずに止まる（`on_exit`）。`on_conflict` を渡すと、
+    PR がベースブランチと衝突したとき（4。`EXIT_BASE_CONFLICT`）にそのステップへ進む（#1917）。渡さなければ今の失敗と同じ。
 
     `extra` の `next`（と `on_fail`）は `merge` と `merge-approved` に付ける。`next` が無いと `merge` が並びの次の
     `merge-approved` へ流れるため、必ず渡す。
@@ -110,7 +142,7 @@ def merge_steps(a, **extra) -> list[dict]:
         "timeout": with_margin(ci_wait),
         "cmd": f"{MERGE_CMD} --timeout {ci_wait}",
         "probe": MERGE_PROBE,
-        "on_exit": dict(INFRA_WAIT_STOP),
+        "on_exit": {**INFRA_WAIT_STOP, **({str(EXIT_BASE_CONFLICT): on_conflict} if on_conflict else {})},
         **extra,
     }
     gate = {"id": "merge-gate", "type": "run", "timeout": 120, "cmd": MERGE_GATE_CMD, "gate_next": "end", "next": "merge"}
@@ -139,3 +171,39 @@ def test_meta(plan: dict, a) -> dict:
         plan["テストの戦略"] = {"name": strategy["name"], "source": strategy["source"], "note": getattr(a, "test_note", None)}
     plan["テストの時間"] = dict(plan_limits(a))
     return plan
+
+
+def pre_test_steps(a, fix_prompt: str) -> list[dict]:
+    """範囲テストの前のステップ: 整形（format）→ 同期とチェック（sync）→ 範囲の静的解析（lint-limited）。宣言の無いものは
+    置かない（format は supervise.json の format、sync は sync_checks、lint-limited は範囲の雛形を持つ kind: lint の suite が
+    あり戦略が round-only でないとき。#1651 の決定 5・6）。fix-format・fix-sync・fix-lint（修正の worker。`fix_prompt`）は並びの先頭へ戻る
+    （sync は静的解析も打つため、fix-sync の直しも整形を通し直す）。
+    実装のプランの雛形（`templates.plan_to_merge`）が起点の取り込みの後に置く。"""
+    st = plan_strategy(a) or {}
+    lint = st.get("name") != ts.ROUND_ONLY and any(s.get("scope_command") and s.get("kind") == ts.LINT for s in st.get("suites") or [])
+    lint_cmd = scope_cmd(a, " ".join(a.tests)) + " --only-kind lint"
+    wanted = [
+        (getattr(a, "format", None), {"id": "format", "type": "run", "preset": "format", "stage": "実装", "on_exit": {"2": "stop"}}),
+        (getattr(a, "sync_checks", None), {"id": "sync", "type": "run", "preset": "sync-check", "stage": "実装"}),
+        (
+            lint,
+            {
+                "id": "lint-limited",
+                "type": "run",
+                "stage": "完了判定",
+                "timeout": scope_timeout(a),
+                "cmd": lint_cmd,
+                "on_exit": {"2": "stop"},
+            },
+        ),
+    ]
+    found = [step for want, step in wanted if want]
+    out: list[dict] = []
+    for i, step in enumerate(found):
+        fix = "fix-" + step["id"].split("-")[0]
+        nxt = found[i + 1]["id"] if i + 1 < len(found) else "test-limited"
+        out += [
+            {**step, "on_fail": fix, "next": nxt},
+            {"id": fix, "type": "work", "kind": "修正", "inputs": [step["id"]], "prompt": fix_prompt, "next": found[0]["id"]},
+        ]
+    return out

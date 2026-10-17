@@ -58,11 +58,12 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
         # 終了コード: done = 0 / attention = 20 / 上限 = 3。attention の後にもう一度打つと、その続きから待つ
     supervise.py note <引継ぎ文書.md> --report <report.md> [--next 次の欄] [--section 見出しの語]
     supervise.py sync-check [--root DIR] [--commit]   # 宣言した同期とチェック（.ndf/supervise.json の sync_checks）
+    supervise.py format [--root DIR] [--commit]       # 宣言した整形（.ndf/supervise.json の format）。0 = 通った / 1 = 直らない違反 / 2 = 宣言なし・仕組みの失敗
     supervise.py sync-title --pr N --doc <設計文書>   # 設計 PR の題を設計文書の H1 に合わせ直す（違うときだけ。常に 0）
     supervise.py example            # 計画の例を出す
 
 new <種別> --help は、その種別の書き出すステップの並び・要る宣言・引数だけを出す。
-new / queue / wait / note / sync-check / sync-title の結果は lib/step_result.py の形の 1 行の JSON（status を見る）。
+new / queue / wait / note / sync-check / format / sync-title の結果は lib/step_result.py の形の 1 行の JSON（status を見る）。
 
 
 プランの形と実行の決まり（ステップの型ごとの鍵・承認ゲート・遅れの見張り）は supervise_lib/plan.py の docstring にある。
@@ -197,6 +198,13 @@ def main() -> int:
     c = sub.add_parser("sync-check", help="宣言した同期とチェック（.ndf/supervise.json の sync_checks）")
     c.add_argument("--root", default=".")
     c.add_argument("--commit", action="store_true", help="同期で変わったファイルをコミットする")
+    fm = sub.add_parser(
+        "format",
+        help="宣言した整形（.ndf/supervise.json の format）",
+        epilog="終了コード: 通った = 0 / 整形で直らない違反 = 1 / 宣言が無い・形が違う・コマンドの 0 と 1 以外・コミットの失敗 = 2",
+    )
+    fm.add_argument("--root", default=".")
+    fm.add_argument("--commit", action="store_true", help="整形で変わったファイル（整形の前に変更の無かったもの）をコミットする")
     st = sub.add_parser(
         "sync-title",
         help="設計 PR の題を設計文書の H1 に合わせ直す",
@@ -243,6 +251,8 @@ def main() -> int:
         emit(commands.cmd_note(a.doc, a.report, a.next, a.section))
     if a.cmd == "sync-check":
         emit(commands.sync_check(a.root, a.commit))
+    if a.cmd == "format":
+        emit(*commands.cmd_format(a.root, a.commit))
     if a.cmd == "sync-title":
         emit(pr_step.sync_title(".", a.pr, a.doc))
     if a.cmd == "history":

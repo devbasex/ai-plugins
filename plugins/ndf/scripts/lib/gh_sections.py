@@ -143,6 +143,16 @@ def append_line(body: str, line: str) -> str:
 NO_ITEMS = ("無し", "なし")  # 節の箇条で「何も無い」を示す語
 
 
+def says_none(body: str, heading: str) -> bool:
+    """節があり、箇条が `NO_ITEMS` の語（「無し」・「なし」）だけか（#1885 の「配布物の変化なし」）。節が無い・空の節は偽
+    （書き忘れを「変化なし」と読まない）。"""
+    section = get_section(body or "", heading)
+    if section is None:
+        return False
+    texts = [re.sub(r"^[-*]\s+", "", t.strip()).rstrip("。") for t in section.splitlines() if t.strip()]
+    return bool(texts) and all(t in NO_ITEMS for t in texts)
+
+
 def section_items(body: str, heading: str, n: int) -> list[str]:
     """節の箇条を `<本文>（#n）` で返す（本文に `#n` があれば付けない）。続きの行（字下げ）は前の項目へつなぐ。
     字下げした箇条（子の箇条）は独立した項目にせず、前の項目の中へ改行と `  - <本文>` で残す（#1867）。

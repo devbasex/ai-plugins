@@ -12,7 +12,14 @@ codex がレビュー対象の doc / テストコードを echo した際に上�
 
 from __future__ import annotations
 
+import json
 import pathlib
+import subprocess
+import sys
+
+import pytest
+
+_MONITOR_LIB = pathlib.Path(__file__).resolve().parents[3] / "scripts" / "lib" / "monitor.py"
 
 
 def _write(p: pathlib.Path, content: str) -> pathlib.Path:
@@ -144,3 +151,89 @@ def test_fatal_detected_after_preceding_benign_hit(tmp_path, monitor_mod):
     content = "| doc | explanation of `quota exceeded` pattern |\nquota exceeded: please upgrade\n"
     log = _write(tmp_path / "err.log", content)
     assert monitor_mod._scan_early_fatal(log) == "quota exceeded: please upgrade"
+
+
+# ---------- 仕事を終えた後の permission_denials（#1513） ----------
+
+_DENIAL = {"tool_name": "Bash", "tool_use_id": "x", "tool_input": {"command": "grep -n x ../claude/a.py"}}
+
+
+def _claude_json(subtype: str = "success", is_error: bool = False, denials: int = 1) -> str:
+    return json.dumps({"type": "result", "subtype": subtype, "is_error": is_error, "permission_denials": [_DENIAL] * denials})
+
+
+def _claude_paths(monitor_mod, tmp_path: pathlib.Path):
+    return monitor_mod.AgentPaths(
+        agent="claude",
+        pr=7,
+        pidfile=tmp_path / "x.pid",
+        err_log=tmp_path / "err.log",
+        stdout_log=tmp_path / "stdout.log",
+        progress_log=tmp_path / "progress.log",
+        result=tmp_path / "result.json",
+    )
+
+
+def test_denials_after_a_successful_end_are_a_warning_not_fatal(tmp_path, monitor_mod):
+    """1513-1・1513-2: 成功の終わりの拒否は致命にせず、件数を警告に出す。"""
+    paths = _claude_paths(monitor_mod, tmp_path)
+    _write(paths.stdout_log, _claude_json(denials=2))
+
+    fatal, warn = monitor_mod._early_error(paths, "claude", False)
+
+    assert fatal is None
+    assert "permission_denials 2 件" in warn
+
+
+@pytest.mark.parametrize(
+    "stdout",
+    [
+        _claude_json(subtype="error_max_turns"),
+        _claude_json(is_error=True),
+        _claude_json()[:-5],  # 途中で切れた出力（JSON として読めない）
+    ],
+)
+def test_denials_without_a_successful_end_stay_fatal(tmp_path, monitor_mod, stdout):
+    """1513-3: 成功で終わっていない・読めないときは今と同じく致命。"""
+    paths = _claude_paths(monitor_mod, tmp_path)
+    _write(paths.stdout_log, stdout)
+
+    fatal, _warn = monitor_mod._early_error(paths, "claude", False)
+
+    assert fatal is not None and fatal.source == "stdout.log"
+
+
+def test_empty_denials_give_neither_fatal_nor_warning(tmp_path, monitor_mod):
+    """1513-4: 拒否が空なら今と同じ。"""
+    paths = _claude_paths(monitor_mod, tmp_path)
+    _write(paths.stdout_log, _claude_json(denials=0))
+
+    assert monitor_mod._early_error(paths, "claude", False) == (None, None)
+
+
+def _dead_pid() -> int:
+    proc = subprocess.Popen(["true"])
+    proc.wait()
+    return proc.pid
+
+
+@pytest.mark.parametrize(("result", "code", "status", "exists"), [(True, 0, "OK", True), (False, 3, "NO_RESULT", False)])
+def test_monitor_judges_the_successful_end_by_the_result_file(tmp_path, result, code, status, exists):
+    """1513-1・1513-2: 監視は EARLY_ERROR を返さず、結果ファイルの有無で終わりを決め、警告を標準エラーへ出す。"""
+    stem = "claude-review-pr7"
+    (tmp_path / f"{stem}.pid").write_text(str(_dead_pid()))
+    _write(tmp_path / f"{stem}-stdout.log", _claude_json())
+    if result:
+        _write(tmp_path / f"{stem}-result.json", '{"event": "APPROVE"}')
+
+    proc = subprocess.run(
+        [sys.executable, str(_MONITOR_LIB), "7", "--agents", "claude", "--tmp-dir", str(tmp_path), "--poll", "1"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert proc.returncode == code, proc.stderr
+    outcome = json.loads((tmp_path / f"{stem}-monitor.json").read_text(encoding="utf-8"))
+    assert (outcome["status"], outcome["result_exists"]) == (status, exists)
+    assert "permission_denials 1 件" in proc.stderr

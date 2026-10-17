@@ -105,6 +105,7 @@ def fill_queue_prs(plan: str, prs: list[str]) -> str | None:
 
 
 QUEUE_PR = re.compile(r"\{queue_pr:([A-Za-z0-9._-]+)\}")  # 名前の一致する計画の Pull Request 1 本
+QUEUE_STATE = re.compile(r"\{queue_state:([A-Za-z0-9._-]+)\}")  # 名前の一致する計画の状態ディレクトリ（#1488）
 
 
 def plan_pr(item: dict) -> str:
@@ -139,18 +140,22 @@ def results_named(name: str, items: list[dict], plan: str) -> list[dict]:
 
 def fill_queue_pr(plan: str, items: list[dict]) -> str | None:
     """計画の {queue_pr:<名>} を、前のステージの名前の一致する計画の Pull Request 1 本で置き換える。
-    前のステージに無ければ同じディレクトリの計画の報告を読む（関門の後に単独で流すとき）。無い・飛ばされたなら 0。"""
+    前のステージに無ければ同じディレクトリの計画の報告を読む（関門の後に単独で流すとき）。無い・飛ばされたなら 0。
+    {queue_state:<名>} は、名前の一致する計画の状態ディレクトリの絶対パスで置き換える（無ければ空文字。#1488）。"""
     try:
         text = Path(plan).read_text()
     except OSError as e:
         return f"計画を読めない: {e}"
-    names = set(QUEUE_PR.findall(text))
-    if not names:
+    names, states = set(QUEUE_PR.findall(text)), set(QUEUE_STATE.findall(text))
+    if not names and not states:
         return None
     for name in names:
         hits = results_named(name, items, plan)
         prs = [n for n in (plan_pr(i) for i in hits) if n]
         text = text.replace(f"{{queue_pr:{name}}}", prs[-1] if prs else "0")
+    for name in states:
+        hits = [i for i in results_named(name, items, plan) if i.get("plan")]
+        text = text.replace(f"{{queue_state:{name}}}", str(state_dir_of(str(Path(hits[-1]["plan"]).absolute()))) if hits else "")
     write_text_atomic(Path(plan), text)
     return None
 

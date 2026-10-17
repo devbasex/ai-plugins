@@ -10,7 +10,7 @@ from pathlib import Path
 import project_mvv
 from pace import PaceError
 from step_result import result
-from supervise_lib import sprint_inputs
+from supervise_lib import limits, sprint_inputs
 from supervise_lib.decl import decl_roots, with_decls
 from supervise_lib.sprint_waves import (
     sprint_branch,
@@ -33,6 +33,7 @@ from supervise_lib.release_templates import release_verify_step
 from supervise_lib.sprint_routes import (
     MVV_PACES,
     dev_channel_of,
+    has_record,
     has_release_template,
     pace_decl,
     record_pr_ref,
@@ -220,12 +221,11 @@ def close_plan(a, repo: str) -> dict:
             "起点": f"origin/{a.base}",
             "リポジトリ": repo,
             "規則": "",
-            "上限": 12,
             "進め方": "fast",
             "steps": [
                 *_spec_pr_steps(a, refs),
-                *merge_steps(a, next="close" if record_pr == "0" else "release-verify"),
-                *([] if record_pr == "0" else [release_verify_step(a.name, refs, record_pr)]),
+                *merge_steps(a, next="release-verify" if has_record(record_pr) else "close"),
+                *([release_verify_step(a.name, refs, record_pr)] if has_record(record_pr) else []),
                 _close_step(a, repo, record_pr, issues),
                 *_retro_refine_steps(a, refs, stats),
             ],
@@ -398,11 +398,11 @@ def cmd_new_sprint(a, waves: list[dict] | None = None) -> dict:
     if not closing and (stop := sprint_inputs.criteria_refusal(a, lambda design=None: sprint_command(a, design=design))):
         return stop
     waves = waves if waves is not None else sprint_plans(a)
-    if getattr(a, "state", None):
-        # worker と judge がスプリント MVV を状態から読む（#1400 の決定 12）
-        for wave in waves:
-            for plan in (wave.get("plans") or {}).values():
-                plan["スプリント状態"] = sprint_state_path(a)
+    plans = [plan for wave in waves for plan in (wave.get("plans") or {}).values()]
+    for plan in plans if getattr(a, "state", None) else []:
+        plan["スプリント状態"] = sprint_state_path(a)  # worker と judge がスプリント MVV を状態から読む（#1400 の決定 12）
+    if bad := limits.fill_all(plans):  # 上限は遷移から求め、知らない行き先があればどのファイルも書かない（#1909）
+        return result("supervise-new", "stopped", bad, [], {"plans": len(plans)})
     out = sprint_out(a)
     out.mkdir(parents=True, exist_ok=True)
     index = write_stage_index(waves, out)

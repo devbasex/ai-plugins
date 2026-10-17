@@ -56,7 +56,7 @@ def test_standard_plan_runs_the_design_match_between_tests_and_pr(tmp_path):
     assert "design-tests" in st["judge"]["choices"] and "pr" not in st["judge"]["choices"]
     assert "範囲テストなら design-tests" in plan["規則"]  # judge の選択肢と規則が同じ行き先を指す
     assert "#1" in st["design-match"]["prompt"]  # 対象の課題を worker へ渡す
-    assert st["fix"]["next"] == "test-limited"
+    assert st["fix"]["next"] == "format"  # 範囲テストの前のステップの先頭（ai-plugins は整形を宣言する。#1651）
 
 
 @pytest.mark.parametrize("mode", ["light", "operation", "documentation"])

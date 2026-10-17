@@ -35,10 +35,11 @@ probe: 開いた PR のチェックを読み、強い順に failed（fix）/ sta
 stale_again（再実行しても取り残し）/ infra（Runner が付かずに取り消された。CI の基盤待ち）・settled・queued・running（wait）/
 passed・none（judge）の 1 つに分ける。置き換わった失敗は分類に数えず、items に result: superseded で載せる。
 `metrics` に class・action・prs・queued_runs を持つ。書き込みは --act の再実行だけ。終了コードは 0 = 調べた。
-
+base-sync・base-return（ベースブランチの取り込みと merge からの戻り。#1917）の説明は merged_lib/base_sync.py にある。
 結果は lib/step_result.py の形の 1 行の JSON。終了コードは 0 = ok / 10 = 承認ゲート 2（metrics.gate が
 production-merge）か、`git branch -D` が要るブランチがある（同意が要る。どちらも提示物を書く）/
-1 = 取り込み・CI・マージが失敗 / 2 = 読めない / 75 = CI の基盤待ち（merge-when-green・promote）。
+1 = 取り込み・CI・マージが失敗 / 2 = 読めない / 75 = CI の基盤待ち（merge-when-green・promote）/
+4 = PR がベースブランチと衝突している（merge-when-green・promote。mergeStateStatus が DIRTY か、マージの拒否）。
 """
 
 from __future__ import annotations
@@ -70,7 +71,7 @@ import gh_parts  # noqa: E402
 import repo  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from merged_lib import merge, trash  # noqa: E402
+from merged_lib import base_sync, merge, trash  # noqa: E402
 from merged_lib.pull import blocking_local_changes, same_untracked  # noqa: E402,F401
 from merged_lib.checks import queued_run_count  # noqa: E402
 from merged_lib.reading import read_checks  # noqa: E402
@@ -487,6 +488,7 @@ def build_parser():
     pr.add_argument("--head", action="append", default=[], metavar="ブランチ")
     pr.add_argument("--act", action="store_true", help="取り残されたジョブを gh run rerun --job で再実行する")
     pr.set_defaults(func=cmd_probe)
+    base_sync.add_parsers(sub, common_parser)
     return ap
 
 

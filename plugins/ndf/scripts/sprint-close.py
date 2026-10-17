@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """sprint-close.py: スプリントを閉じる（progress-tracking の「スプリントを閉じる」の手順）。
 
-    python3 sprint-close.py --record-pr <PR番号> [--prs 1,2] [--issues 3,4] [--with-verification]
+    python3 sprint-close.py --record-pr <PR番号|0|unknown> [--prs 1,2] [--issues 3,4] [--with-verification]
                              [--label "<マイルストーン>の<工程名>"] [--dry-run] [--root <dir>]
 
 1. 記録の PR の本文とコメントを読み、最後の「## 配布の記録」ブロックを取る
@@ -26,21 +26,22 @@ closed / already_closed / failed / kept_open / closed_unverified（既に閉じ�
 --dry-run で付ける予定の番号。ボードの NOTE は {kind:"board_note"} の項目に載る。
 `--record-pr 0` は「本番の記録なし」（最終の検査で変更が無く本番を飛ばした）。配布の記録を読まず、
 閉じる条件も見ずに --issues の課題を閉じる。--issues と一緒のときだけ受ける。
+`--record-pr unknown` は「記録の置き場が分からない」（リリースの経路が雛形でも昇格でもなく、まとめのプランが
+記録の PR を決められない）。配布の記録を読まず、どの課題も閉じず、ボードも書かずに --issues の課題を理由つきの
+kept_open で返す（終了コード 0）。--issues と一緒のときだけ受ける。
 終了コード: 0 = 失敗なし / 1 = 失敗あり（棚卸しへ進まない）/ 2 = 一覧が取れない・
-閉じる課題が 0 件・--record-pr 0 に --issues が無い / 3 = 呼び出しの誤り。
+閉じる課題が 0 件・--record-pr 0 / unknown に --issues が無い / 3 = 呼び出しの誤り。
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import re
 import shlex
 import subprocess
 import sys
 from contextlib import nullcontext
 from pathlib import Path
-from typing import NamedTuple
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "lib"))
@@ -62,12 +63,13 @@ import gh_call  # noqa: E402
 import gh_parts  # noqa: E402
 import gh_rest  # noqa: E402
 import locks  # noqa: E402
-import md  # noqa: E402
 from closing import referenced_numbers  # noqa: E402
 
 from dist_record import parse_record  # noqa: E402  記録の形は lib/dist_record.py が持つ（#1273）
 
 TOOL = "sprint-close"
+RECORD_UNKNOWN = "unknown"  # --record-pr の「記録の置き場が分からない」（supervise_lib/sprint_routes.py が渡す。#1875）
+UNKNOWN_REASON = "配布の記録の置き場が分からない（リリースの経路が雛形でも昇格でもない。リリース記録を確かめて手で閉じる）"
 LOCK_TIMEOUT = 30  # 課題ごとの錠の待ち（body-lock の既定と同じ）
 
 
@@ -87,47 +89,8 @@ def read_record(root, repo, n):
     return "\n".join(parts)
 
 
-class IssueRows(NamedTuple):
-    """1 課題のリリース後テストの行のまとめ。passed は合格の行にあり、合格でない行に無い受け入れ条件の番号。"""
-
-    all_pass: bool
-    passed: frozenset
-
-
-_ISSUE_CELL = re.compile(r"^(?:([A-Za-z0-9._-]+/[A-Za-z0-9._-]+))?#(\d+)")
-_CRITERION_CELL = re.compile(r"^(\d+)\.")
-
-
-def verification_verdicts(block, record_repo):
-    """表を課題でまとめ、{(repo, number): IssueRows} を返す。表が読めない・課題を指す行が無ければ None。
-
-    表は lib/md.py（GFM）で読む。欠けたセルは空として読むため、`結果` の欠けた行は合格でない。
-    `課題` の列の頭が課題の参照でない行（導入の確認の `—`・`PR 1869` など）は飛ばす（#1683 の I1）。
-    `受け入れ条件` の列の頭の `<番号>.` を受け入れ条件の番号として読む。"""
-    found = md.tables(block)
-    if not found:
-        return None
-    head = [c.strip() for c in found[0].header]
-    if "課題" not in head or "結果" not in head:
-        return None
-    ci, ri = head.index("課題"), head.index("結果")
-    ai = head.index("受け入れ条件") if "受け入れ条件" in head else None
-    acc = {}
-    for row in found[0].rows:
-        cs = [c.strip() for c in row]  # md は行のセルを見出しの数へ揃える
-        m = _ISSUE_CELL.match(cs[ci])
-        if not m:
-            continue
-        key = (m.group(1) or record_repo, int(m.group(2)))
-        ok = cs[ri].startswith("合格")
-        all_pass, passed, failed = acc.get(key, (True, set(), set()))
-        num = _CRITERION_CELL.match(cs[ai]) if ai is not None else None
-        if num:
-            (passed if ok else failed).add(int(num.group(1)))
-        acc[key] = (all_pass and ok, passed, failed)
-    if not acc:
-        return None
-    return {k: IssueRows(a, frozenset(p - f)) for k, (a, p, f) in acc.items()}
+IssueRows = acceptance.IssueRows  # リリース後テストの表は承認の材料と同じ規則で読む（lib/acceptance.py。#1885 の決定 8）
+verification_verdicts = acceptance.verification_verdicts
 
 
 NO_ROWS = "リリース後テストの行が無い"
@@ -256,6 +219,8 @@ def _record_repo(a, root):
 def _read_sprint_record(a, root, record_repo):
     if a.record_pr == 0:
         return {"found": True, "stage": "配布なし（本番の記録なし）", "sprint_prs": [], "verify_block": None}, []
+    if a.record_pr == RECORD_UNKNOWN:
+        return {"found": False, "stage": "記録の置き場が分からない", "sprint_prs": [], "verify_block": None}, []
     rec = parse_record(read_record(root, record_repo, a.record_pr))
     return rec, a.prs or rec["sprint_prs"]
 
@@ -265,6 +230,8 @@ def _closing_blocker(a, rec, record_repo):
     kept_all = None
     if a.record_pr == 0:
         pass  # 本番の記録なし: 閉じる条件（配布とリリース後テスト）を見ない
+    elif a.record_pr == RECORD_UNKNOWN:
+        kept_all = UNKNOWN_REASON  # 記録を読めないので閉じない（#1875）
     elif not rec["found"] or not stage:
         kept_all = "配布の記録が読めない"
     elif not (stage.startswith("本番") or stage.startswith("配布なし")):
@@ -400,12 +367,13 @@ def _stop_no_issues(prs, refs):
 
 
 def cmd_close(a):
-    if a.record_pr == 0 and not a.issues:
+    if a.record_pr in (0, RECORD_UNKNOWN) and not a.issues:
+        what = "0（本番の記録なし）" if a.record_pr == 0 else f"{RECORD_UNKNOWN}（記録の置き場が分からない）"
         emit(
             result(
                 TOOL,
                 "stopped",
-                "--record-pr 0（本番の記録なし）は --issues と一緒に渡す",
+                f"--record-pr {what} は --issues と一緒に渡す",
                 [],
                 {"issues": 0},
                 next="閉じる課題を --issues で渡して打ち直す",
@@ -447,6 +415,10 @@ def cmd_close(a):
     count, metrics, summary = _close_summary(items, prs, a.dry_run, referenced=len(refs_items))
     if count["failed"]:
         emit(result(TOOL, "stopped", summary, items + notes, metrics, next="失敗した課題の cmd でやり直す。棚卸しへ進まない"))
+    if a.record_pr == RECORD_UNKNOWN:
+        summary = f"記録の置き場が分からないため閉じない（リリースの経路が雛形でも昇格でもない）: {summary}"
+        nxt = "リリース記録とリリース後テストの記録を確かめ、受け入れ条件を満たした課題を手で閉じる"
+        emit(result(TOOL, "ok", summary, items + notes, metrics, next=nxt))
     emit(result(TOOL, "ok", summary, items + notes, metrics))
 
 
@@ -464,10 +436,26 @@ def number_list(s):
         raise argparse.ArgumentTypeError(f"PR 番号の並びでない: {s}")
 
 
+def record_pr_arg(s):
+    """--record-pr の値: 0 以上の整数か unknown。"""
+    if s.strip() == RECORD_UNKNOWN:
+        return RECORD_UNKNOWN
+    try:
+        n = int(s)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"PR 番号・0・{RECORD_UNKNOWN} のどれでもない: {s}")
+    if n < 0:
+        raise argparse.ArgumentTypeError(f"PR 番号・0・{RECORD_UNKNOWN} のどれでもない: {s}")
+    return n
+
+
 def build_parser():
     ap = Parser(prog="sprint-close.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument(
-        "--record-pr", type=int, required=True, help="配布の記録を置いた PR の番号。0 は本番の記録なし（--issues と一緒に渡す）"
+        "--record-pr",
+        type=record_pr_arg,
+        required=True,
+        help="配布の記録を置いた PR の番号。0 は本番の記録なし、unknown は記録の置き場が分からない（どちらも --issues と一緒に渡す）",
     )
     ap.add_argument("--prs", type=number_list, help="スプリントの PR の番号（カンマ区切り）。省けば配布の記録から読む")
     ap.add_argument(

@@ -221,6 +221,14 @@ def test_rank_reads_the_declaration_and_arguments_win(env):
     assert code == 2
 
 
+def test_rank_stops_on_a_broken_estimate_declaration(env):
+    nd = env.root / ".ndf"
+    nd.mkdir()
+    (nd / "estimate.json").write_text("{")
+    code, out = env.run("rank", "--scores", env.scores(BASE))
+    assert code == 2 and out["status"] == "stopped"
+
+
 def test_rank_stops_on_a_cycle(env):
     code, out = env.run("rank", "--scores", env.scores([sc(1, depends_on=[2]), sc(2, depends_on=[1]), sc(3), sc(4)]))
     assert code == 2 and out["status"] == "stopped" and out["metrics"]["cycle"] == [1, 2]

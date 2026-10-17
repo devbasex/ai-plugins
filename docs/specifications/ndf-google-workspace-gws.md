@@ -181,7 +181,7 @@ playwright-kit の Skill の名前は変えない。`playwright-evidence` は報
 | login を呼ばない（I2） | すべての引数の組と状態で、スタブの gws に記録された引数が `auth status` だけであること |
 | 資格情報を写さない（I4） | gws の JSON に余分のキーを混ぜても、結果にその値が現れないこと |
 | npm が無い（I5） | `uninstallable`・`stopped`・終了コード 3 になること |
-| 旧名が残らない | `git grep -E "google-auth\|google-drive\|gdrive_fetch\|google_auth"` が履歴の文書（`CHANGELOG.md`・`docs/development-history/`・`issues/`・`docs/ndf-version-decisions*.md`）と `plugins/ndf/scripts/tests/fixtures/wait_notice_corpus.json` の外で 0 件であること |
+| 旧名が残らない | `git grep -E "google-auth\|google-drive\|gdrive_fetch\|google_auth"` が履歴の文書（`CHANGELOG.md`・`docs/development-history/`・`issues/`・`docs/archive/version-decisions/*.md`）と `plugins/ndf/scripts/tests/fixtures/wait_notice_corpus.json` の外で 0 件であること |
 | playwright-kit（I7） | `pytest --help` に `--pwk-drive-folder` が無く、渡すと未知の引数で止まること（`test_pytest_plugin_bootstrap.py`）。`git grep -niE "drive" plugins/playwright-kit` の残りが mp4 の理由の説明と移行の案内だけであること |
 | 配る Skill の一覧（I6） | manifests 4 つに `google-workspace` が 1 行ずつあり、2 つの `plugin.json` と食い違わないこと |
 | 手動（I8 を含む） | gws の無い環境から導入・認証・Doc のエクスポートまで通ること。対応表の操作を打ち、フォルダを指定しないアップロードの直後のファイルが非公開であること |

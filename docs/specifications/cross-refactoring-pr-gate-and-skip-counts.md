@@ -59,8 +59,8 @@ Draft を外した後に起動しても入口で止まらない。
 
 | 出力 | 「見送り」の値 | 出どころ |
 | --- | --- | --- |
-| 結果 JSON の `metrics.deferred` | 見送った改善項目の数 | `ledger.tally(state).deferred`（`drive.py` の `Drive.counts`） |
-| 計画のコメントの件数の行 | 同上 | `ledger.tally`（`plan.counts_line`） |
+| 結果 JSON の `metrics.deferred` | 見送った改善項目と、時間（`budget`）で見送り項目に入っていない候補の数（後者は #1944） | `ledger.tally(state).deferred`（`drive.py` の `Drive.counts`） |
+| 計画のコメントの件数の行 | 同上。後者が 1 件以上なら `見送り N（うち時間 M）` | `ledger.tally`（`plan.counts_line`） |
 | 完了報告の件数の行 | 同上 | `ledger.tally`（`commands/report.py` の `_print_deferred`） |
 | 完了報告の「見送った提案」の行 | 見送った提案の総数と理由別の件数 | 状態ファイルの `deferred_items` |
 
@@ -177,3 +177,4 @@ graph LR
 - [`cross-refactoring` の `docs/04-verify-and-report.md`](../../plugins/ndf/skills/cross-refactoring/docs/04-verify-and-report.md)（完了報告の形）
 - [cross-refactoring-failed-item-rules.md](cross-refactoring-failed-item-rules.md)（取り消しと見送りを分けて数える規則）
 - #1658（入口の検査）、#1660（見送りの件数。#1658 に取り込み）、#1743（採り直し）
+- [cross-drive-rerun-pause-and-denials.md](cross-drive-rerun-pause-and-denials.md)（時間で見送った候補を `deferred` に含める規則と、使える時間が無い計画の中断。#1944）

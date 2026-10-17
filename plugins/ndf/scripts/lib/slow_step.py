@@ -10,10 +10,13 @@ from __future__ import annotations
 import json
 import os
 import shlex
-import statistics
 import subprocess
 from dataclasses import dataclass, fields
+from datetime import datetime
 from pathlib import Path
+
+import estimate_stats as stats
+import gh_call
 
 HISTORY_NAME = "step-history.jsonl"
 WATCHED_TYPES = ("run", "work", "drive")
@@ -28,7 +31,7 @@ class SlowConfigError(ValueError):
 @dataclass(frozen=True)
 class SlowConfig:
     enabled: bool = True
-    window: int = 10
+    window: int = stats.WINDOW
     min_samples: int = 3
     factor: float = 3.0
     floor: float = 300.0
@@ -117,11 +120,11 @@ def expected_for(seconds: list[float], cfg: SlowConfig, step_expected=None) -> t
     """同じステップの所要（古い順）から想定の秒と根拠を返す。step_expected があればそれに固定する。"""
     if step_expected is not None:
         return float(step_expected), {"source": "step"}
-    recent = [float(s) for s in seconds][-cfg.window :]
+    recent = stats.recent([float(s) for s in seconds], cfg.window)
     basis = {"samples": len(recent), "factor": cfg.factor, "floor": cfg.floor}
     if len(recent) < cfg.min_samples:
         return float(cfg.default), {"source": "default", **basis, "default": cfg.default}
-    median = round(statistics.median(recent), 2)
+    median = round(stats.median_value(recent), 2)
     value = round(median * cfg.factor, 1)
     if value < cfg.floor:
         return float(cfg.floor), {"source": "floor", **basis, "median": median}
@@ -172,7 +175,7 @@ def _rows(path: Path):
 def read_history(path: Path, phase: str, step: str, window: int | None = None) -> list[float]:
     """同じステップ（フェーズ, ステップの id）の所要を古い順に返す（window があれば直近の件数だけ）。読めなければ []。"""
     out = [float(d["seconds"]) for d in _rows(path) if d.get("phase") == phase and d.get("step") == step]
-    return out[-window:] if window else out
+    return stats.recent(out, window) if window else out
 
 
 def history_record(phase, step: str, type_: str, seconds: float, exit_code: int, plan: str | None, at: str) -> dict:
@@ -300,22 +303,69 @@ def commit_count(cwd) -> int | None:
     return int(out) if out and out.isdigit() else None
 
 
-def probe_worker(new_lines: int, new_commits: int, last_text: str, since_last: float | None) -> dict:
-    """前の確認から worker の行かコミットが足されたか。"""
-    if new_lines > 0 or new_commits > 0:
+def session_size(session: dict | None) -> int:
+    """会話を残す claude -p のセッションの記録（`<設定の置き場>/projects/*/<id>.jsonl`）の大きさ。見つからなければ 0（#1623）。"""
+    if not session or not session.get("id") or not session.get("config"):
+        return 0
+    for f in Path(session["config"]).glob(f"projects/*/{session['id']}.jsonl"):
+        try:
+            return f.stat().st_size
+        except OSError:
+            return 0
+    return 0
+
+
+def probe_worker(new_lines: int, new_commits: int, last_text: str, since_last: float | None, session_grown: int = 0) -> dict:
+    """前の確認から worker の行かコミットが足されたか、worker のセッションの記録が伸びたか（#1623）。"""
+    if new_lines > 0 or new_commits > 0 or session_grown > 0:
         return {
             "name": "worker",
             "class": "progress",
             "action": "wait",
-            "summary": f"worker の行 {new_lines} 件・コミット {new_commits} 件が足された",
+            "summary": f"worker の行 {new_lines} 件・コミット {new_commits} 件が足され、セッションの記録が {session_grown} バイト伸びた",
         }
     ago = f"（最後の行から {round(since_last)} 秒）" if since_last is not None else ""
     return {
         "name": "worker",
         "class": "silent",
         "action": "judge",
-        "summary": f"worker の行もコミットも足されていない。最後の行: {last_text or '無し'}{ago}",
+        "summary": f"worker の行もコミットも足されず、セッションの記録も伸びていない。最後の行: {last_text or '無し'}{ago}",
     }
+
+
+PR_LATEST_JQ = "[.comments[].createdAt, .reviews[].submittedAt, .commits[].committedDate] | map(select(.)) | max"
+
+
+def pr_latest(pr: str, cwd) -> float | None:
+    """Pull Request の投稿・レビュー・コミットの最も新しい時刻（UNIX 時刻）。PR が無い・gh が落ちた・読めなければ None。"""
+    if not pr:
+        return None
+    try:
+        r = gh_call.gh(["pr", "view", str(pr), "--json", "comments,reviews,commits", "--jq", PR_LATEST_JQ], cwd=cwd)
+        text = r.stdout.strip() if r.returncode == 0 else ""
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp() if text and text != "null" else None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def probe_drive(err_path, prev_size: int, pr: str, cwd, checked: float) -> tuple[dict, int]:
+    """drive のステップ（cross-review など）: 出力の伸びに、前の確認（checked）より後の Pull Request の投稿・レビュー・
+    コミットを足して見る（#1496）。gh を呼ぶのはこの確認のときだけ。読めなければ出力の伸びだけで決める。(調査の結果, 今の大きさ)。"""
+    out, size = probe_output(err_path, prev_size)
+    latest = pr_latest(pr, cwd)
+    newer = latest is not None and latest > checked
+    if latest is None:
+        note = "Pull Request の投稿とコミットを読めない" if pr else "Pull Request がまだ無い"
+    else:
+        at = datetime.fromtimestamp(latest).astimezone().isoformat(timespec="seconds")
+        note = f"Pull Request の最も新しい投稿かコミット（{at}）は前の確認より{'後' if newer else '前'}"
+    progress = out["class"] == "progress" or newer
+    return {
+        "name": "drive",
+        "class": "progress" if progress else "silent",
+        "action": "wait" if progress else "judge",
+        "summary": f"{out['summary']}。{note}",
+    }, size
 
 
 def fill_argv(template: str, values: dict) -> list[str]:

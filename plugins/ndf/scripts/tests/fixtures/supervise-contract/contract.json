@@ -74,6 +74,7 @@
         "tool"
       ],
       "item_keys": [
+        "impl_timeout_source",
         "kind",
         "path",
         "steps"

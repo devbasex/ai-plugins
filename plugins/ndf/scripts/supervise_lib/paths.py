@@ -49,6 +49,7 @@ HERE = SELF.parent  # 配布したスクリプトの置き場。計画のコマ�
 # run のステップの定型（"preset"）。作業場所（リポジトリの根）で動く。{base} は起点のブランチ
 PRESETS = {
     "sync-check": f"python3 {SELF} sync-check --commit",
+    "format": f"python3 {SELF} format --commit",  # 宣言の整形（.ndf/supervise.json の format）を当ててコミットする
     "assess": f"python3 {SKILLS / 'cross-refactoring' / 'scripts' / 'refactor.py'} assess --base origin/{{base}}",
     "doc-lint": f"python3 {HERE / 'doc-lint.py'} --base origin/{{base}}",
 }

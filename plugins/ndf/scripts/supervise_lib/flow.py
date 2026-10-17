@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import Any
 
 import durable
-from supervise_lib import admission, paths, running
+from supervise_lib import actuals, admission, limits, paths, running
 from supervise_lib import queue as queue_files
 from supervise_lib.decl import QUEUE_RESOURCES, SUPERVISE_DECL, DeclError, decl_roots, queue_decl, read_decl
 from supervise_lib.engine import Engine
@@ -103,6 +103,7 @@ def resources_of(engine: Engine) -> dict:
 
 def launch_run(engine: Engine, start: str | None) -> str:
     """`Engine` を登録してから、`run` の耐久の記録を開く（続けない接頭辞の途中の記録は launch の前に止める）。接頭辞を返す。"""
+    actuals.install_cancel_handler()  # 主スレッドで登録する（耐久ワークフローの中では登録できない。#1856）
     prefix = plan_prefix(engine, start)
     resources = resources_of(engine)
     _ENGINES[prefix] = engine
@@ -120,6 +121,7 @@ def launch_queue(done: Path, max_: int, resources: dict, fresh: bool) -> str:
 
     `fresh` なら、途中の耐久ワークフローを launch の前に子ごと止める（流すプランの並びを変えて打ち直したとき）。"""
     queues = {PLANS: {"worker_concurrency": max_}, **_queues(resources)}
+    actuals.install_cancel_handler()  # 主スレッドで登録する（耐久ワークフローの中では登録できない。#1856）
     launched = durable.launch("queue", str(Path(done).resolve()), queues=queues, keep=() if fresh else None)
     _OPENED.update(launched=launched, resources=resources)
     return launched.key
@@ -241,12 +243,15 @@ def _plan_steps(eng: Engine, prefix: str, start: str | None, resources: dict, be
     else:
         eng.after_prepare()
         result, reason = "完了", "無し"
-        limit = eng.plan.get("上限", 30)
-        sid, n = start or eng.order[0], 0
+        limit = eng.plan.get("上限", limits.DEFAULT_LIMIT)
+        # n は耐久ステップの番号（すべての回で増やす）。上限と比べる counted は遅れの見張りの再試行を数えない（#1623 の I6）
+        sid, n, counted, retries, retried = start or eng.order[0], 0, 0, 0, False
         while sid:
             n += 1
-            if n > limit:
-                result, reason = "止まった", f"ステップの数が上限 {limit} を超えた"
+            retries, counted = (retries + 1, counted) if retried else (retries, counted + 1)
+            if counted > limit:
+                note = f"（遅れの再試行 {retries} 回は数えていない）" if retries else ""
+                result, reason = "止まった", f"ステップの数が上限 {limit} を超えた{note}"
                 break
             if sid not in eng.steps:
                 result, reason = "止まった", f"知らないステップ: {sid}"
@@ -256,6 +261,7 @@ def _plan_steps(eng: Engine, prefix: str, start: str | None, resources: dict, be
             eng.replay(out)
             if out["result"] is not None:
                 result, reason = out["result"], out["reason"]
+            retried = out["nxt"] == sid and ((out.get("cur") or {}).get("slow") or {}).get("act") == "retry"
             sid = out["nxt"]
         result, reason = eng._final_result(result, reason)
     gates = [a for a in eng.state.attention_log if a.get("reason") == "関門"]

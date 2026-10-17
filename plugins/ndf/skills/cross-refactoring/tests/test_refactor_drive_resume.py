@@ -105,6 +105,72 @@ def test_rerun_from_done_keeps_counts(tmp_path, monkeypatch, capsys):
     assert fake.inits() == 1  # done から打ち直すと init を打たない
 
 
+class HeadRefactor(FakeRefactor):
+    """PR の head を `gh pr view` で返す（#1263 の決定 3）。"""
+
+    def __init__(self, tmp: Path):
+        super().__init__(tmp)
+        self.head = "a" * 40
+
+    def __call__(self, cmd, env=None, cwd=None):
+        if cmd[0] == "gh":
+            self.calls.append(("gh", *cmd[1:]))
+            return 0, self.head + "\n"
+        return super().__call__(cmd, env, cwd)
+
+
+def test_rerun_with_changed_args_starts_a_new_run(tmp_path, monkeypatch, capsys):
+    """#1263 の 1263-2: 結果を変える init の引数が違えば、前回の結果を返さず新しい実行の回を始める。"""
+    monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path))
+    fake = HeadRefactor(tmp_path)
+    monkeypatch.setattr(rf, "call", fake)
+    run_main(ARGV, capsys)
+    code, out = run_main([*ARGV, "--round-test", "pytest -q tests/a"], capsys)
+    assert code == 0 and fake.inits() == 2
+    assert out["metrics"]["items"] == 0  # 新しい回は作り直した状態の件数を返す
+
+
+def test_rerun_after_the_pr_head_moved_starts_a_new_run(tmp_path, monkeypatch, capsys):
+    """#1263 の 1263-3: 完了の時点の PR の head から進んでいれば、新しい実行の回を始める。"""
+    monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path))
+    fake = HeadRefactor(tmp_path)
+    monkeypatch.setattr(rf, "call", fake)
+    run_main(ARGV, capsys)
+    fake.head = "b" * 40
+    run_main(ARGV, capsys)
+    assert fake.inits() == 2
+
+
+def test_rerun_with_the_same_args_and_head_returns_the_previous_result(tmp_path, monkeypatch, capsys):
+    """#1263 の 1263-4・I4: 引数（形の違い・出力の書き出し先は数えない）も head も同じなら前回の結果を返す。"""
+    monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path))
+    fake = HeadRefactor(tmp_path)
+    monkeypatch.setattr(rf, "call", fake)
+    run_main(ARGV, capsys)
+    code, out = run_main(["7", "--baseline-test=pytest", "--scope=src", "--plan-file", str(tmp_path / "p.md")], capsys)
+    assert code == 0 and out["metrics"]["items"] == 2 and fake.inits() == 1
+
+
+def test_changed_args_are_named_and_an_old_record_is_kept(tmp_path, capsys):
+    """#1263 の 1263-2・1263-5: 違った引数の名前を出す。引数を持たない古い記録は前回を返し、比べられないことを知らせる。"""
+    state = tmp_path / "s.json"
+    state.write_text("{}")
+    d = rf.Drive(7, ["--round-test", "pytest"])
+    done = {"result": {"status": "ok"}, "state_file": str(state)}
+    assert d.finished({**done, "args": {}}) is False
+    assert "--round-test" in capsys.readouterr().err
+    assert d.finished(done) is True
+    assert "引数を持たない" in capsys.readouterr().err
+
+
+def test_an_abort_detail_is_added_to_the_stop_message(monkeypatch):
+    """#1944 の決定 6: 中断の終了コードで止めるとき、子が出した `ABORT_DETAIL` を止まりの文へ添える。"""
+    monkeypatch.setattr(rf, "call", lambda cmd, env=None, cwd=None: (4, "ABORT_DETAIL='使える時間 -3.2 分に候補 5 件が入らない'\n"))
+    with pytest.raises(rf.Stop) as e:
+        rf.Drive(7, []).rf("merge-plan", "7")
+    assert e.value.code == 4 and "候補 5 件" in str(e.value)
+
+
 def test_a_run_whose_final_gate_did_not_pass_stops_without_adopting(tmp_path, monkeypatch, capsys):
     """AC-1399-6: 最終ゲートが `passed` でないまま終わった実行は完了にせず、採用を 0 と数える。"""
     monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path))

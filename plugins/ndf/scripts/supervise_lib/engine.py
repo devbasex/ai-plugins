@@ -19,7 +19,8 @@ import gh_call
 import gh_quota
 import runtime_policy
 import slow_step as ss
-from supervise_lib import decl, paths
+from supervise_lib import decl, limits, paths
+from supervise_lib.actuals import ActualsLog
 from supervise_lib.claude import AuthUnavailable, ClaudeCall, ClaudeRunner, UsageLimit, claude_kind
 from supervise_lib.plan import expand_parts, fail_kind_matches, normalize_plan, on_exit_error
 from supervise_lib.pr import PrStep
@@ -56,6 +57,8 @@ class Engine:
         self.order = [s["id"] for s in plan["steps"]]
         self.state = RunState(state_dir, self.plan)
         self.ctx = StepContext(self.plan, self.steps, self.state, str(Path(plan_path).resolve()) if plan_path else "")
+        self.actuals = ActualsLog(self.state, self.plan)  # 見積もりの実績の記録（#1856）
+        self.actuals.plan_path = self.ctx.plan_path
         self.ctx.tick = self.tick
         self.slow = self.ctx.slow = SlowWatch(self.ctx, slow_args)
         self.ctx.claude = PolicyClaudeRunner(self.ctx)
@@ -122,23 +125,8 @@ class Engine:
         )
 
     def next_of(self, sid: str, step: dict) -> str | None:
-        """成功したときの次のステップ。`next` が無ければ並びの次へ進むが、失敗したときにだけ通るステップ
-        （どこかの `on_fail` が指すステップと、そこから `next` で戻るステップ）は飛ばす。"""
-        if step.get("next"):
-            return None if step["next"] == "end" else step["next"]
-        fail_only = {s["on_fail"] for s in self.steps.values() if s.get("on_fail")}
-        fail_only |= {
-            s["id"]
-            for s in self.steps.values()
-            if s["type"] == "work"
-            and s.get("next") in self.steps
-            and s.get("inputs")
-            and any(self.steps.get(i, {}).get("on_fail") for i in s["inputs"])
-        }
-        i = self.order.index(sid) + 1
-        while i < len(self.order) and self.order[i] in fail_only:
-            i += 1
-        return self.order[i] if i < len(self.order) else None
+        """成功したときの次のステップ（決め方は `limits.default_next`。上限の計算と同じ遷移を使う）。"""
+        return limits.default_next(self.plan["steps"], sid)
 
     def ensure_worktree(self) -> str | None:
         """計画に branch があり作業場所が無ければ、作業ツリーを作る。誤りの文を返す（無ければ None）。"""
@@ -154,6 +142,7 @@ class Engine:
             self.ctx.cwd = root
 
     def report(self, result: str, reason: str) -> str:
+        self.actuals.end(result)
         return self.state.write_report(self.plan, result, reason)
 
     def run(self, start: str | None = None) -> str:
@@ -164,13 +153,14 @@ class Engine:
 
     def setup(self, start: str | None) -> tuple[str, str] | None:
         """ステップを流す前の、ファイルを書かない準備（打ち直しでも毎回流す）。流さないなら (結果, 理由)。"""
+        self.ctx.resumed = bool(start)  # 入力に前の実行の結果を渡す（#1676）
         if start and not self.plan.get("Pull Request"):
             self._restore_pr()
         try:
             self.slow.cfg = self.slow.resolve_slow()
         except ss.SlowConfigError as e:
             return "止まった", f"slow の設定が読めない（{e.args[0]}）"
-        bad = on_exit_error(self.plan["steps"])
+        bad = on_exit_error(self.plan["steps"]) or limits.run_error(self.plan, start)  # 行き先と上限の照合（#1909 の L3・L5）
         if bad:
             return "止まった", bad
         return self.check_runtimes()
@@ -210,7 +200,7 @@ class Engine:
 
     def prepare(self, start: str | None) -> tuple[str, str] | None:
         """実行の条件と worktree の用意（耐久ステップの中で 1 回だけ流す）。流さないなら (結果, 理由)。"""
-        self.state.run_line(start)
+        self.actuals.start(start, self.state.run_line(start))
         if self.plan.get("実行の条件") and not start:
             skipped = self.check_condition(self.plan["実行の条件"])
             if skipped:
@@ -241,6 +231,7 @@ class Engine:
                 st.cur["resumed"] = True
             self.slow.end_watch()
             st.record(n, sid, nxt, (self.steps.get(nxt) or {}).get("type") if nxt else None, is_gate)
+            self.actuals.step(st.cur)
         finally:
             st.end_step()
         return {
@@ -340,7 +331,18 @@ class Engine:
         if step.get("on_fail") and fail_kind_matches(step, st.cur):
             st.failed_step = sid
             return step["on_fail"], None, None
-        return None, "止まった", f"ステップ {sid} が失敗した（exit={st.cur['exit']}）"
+        return None, "止まった", f"ステップ {sid} が失敗した（exit={st.cur['exit']}）" + self._stop_detail(sid)
+
+    def _stop_detail(self, sid: str) -> str:
+        """止まった理由へ添える要約: このステップの結果の summary と、直前のステップが on_fail でここへ回した失敗の
+        summary（検査のプランが abort へ回した理由を読めるように。#1917 の決定 7）。"""
+        st = self.state
+        parts = [(last_json(st.cur.get("text", "")) or {}).get("summary") or ""]
+        prev = st.log[-1].get("id") if st.log else None
+        if prev and prev == st.failed_step and prev != sid and self.steps.get(prev, {}).get("on_fail") == sid:
+            why = (last_json((st.results.get(prev) or {}).get("text", "")) or {}).get("summary") or ""
+            parts.append(f"{prev}: {why}" if why else "")
+        return "".join(f": {p}" for p in parts if p)
 
     def _next_on_exit(self, sid: str, step: dict) -> tuple[str | None, str | None, str | None]:
         """run のステップの `on_exit`（終了コード → ステップの id / end / stop）の行き先。`on_fail` と judge を通らない
