@@ -452,20 +452,56 @@ def test_scoped_week_sets_remaining_and_score(accounts):
     assert c.name == "c" and c.earliest[0] == "b"
 
 
-def test_spend_percent_or_critical_is_spend_limit(accounts):
-    """AC5・I4: spend.percent 100・severity critical なら spend_limit_reached が偽でも支出上限。"""
-    accounts.add("team", tier=MAX5, util5=0, util7=25, spend=False, extra={"spend": TEAM_SPEND})
+def test_spend_full_without_raw_flag_is_usable(accounts):
+    """#2036: spend が 100%・critical でも、生の spend_limit_reached が偽なら支出上限にせず選ぶ。"""
+    accounts.add("team", tier=MAX5, util5=0, util7=0, spend=False, extra={"spend": TEAM_SPEND})
+    accounts.add("other", util5=80, util7=80)
+    assert ca.choose().name == "team"
+    row = next(r for r in ca.rows() if r["name"] == "team")
+    assert row["state"] == "使える" and row["spend_limit_reached"] is False and row["spend_full"] is True
+
+
+def test_spend_saved_usage_from_issue_2036():
+    """#2036 の usage.json の形: 生の旗が偽なら spend_reached は偽、limited_until は None。"""
+    u = cu.Usage.from_json(
+        {
+            "fetched_at": "2026-10-17T03:47:20+00:00",
+            "five_hour": {"utilization": 0.0, "resets_at": None},
+            "seven_day": {"utilization": 0.0, "resets_at": "2026-10-23T17:00:00+00:00"},
+            "spend_limit_reached": False,
+            "spend": {"percent": 100.0, "severity": "critical"},
+        }
+    )
+    assert u.spend_reached() is False and u.spend_full() is True
+    assert u.limited_until(cu.epoch("2026-10-17T03:51:20+00:00")) is None
+
+
+@pytest.mark.parametrize(
+    ("raw", "spend", "reached", "full"),
+    [
+        (True, None, True, None),
+        (True, {"percent": 10, "severity": None}, True, False),
+        (False, {"percent": 100.5, "severity": None}, False, True),
+        (False, {"percent": 10, "severity": "critical"}, False, True),
+        (None, {"percent": 100, "severity": "critical"}, None, True),
+        (None, None, None, None),
+    ],
+)
+def test_spend_reached_follows_raw_flag(raw, spend, reached, full):
+    """I4: 支出上限は生の spend_limit_reached だけで決まる。spend は表示の補足（spend_full）。"""
+    u = cu.Usage(five_hour={"utilization": 1.0}, spend_limit_reached=raw, spend=spend)
+    assert u.spend_reached() is reached and u.spend_full() is full
+    assert u.limited_until(time.time()) == (math.inf if reached else None)
+
+
+def test_raw_spend_flag_is_spend_limit(accounts):
+    """生の旗が真なら従来どおり支出上限で、選ばない。"""
+    accounts.add("team", util5=0, util7=0, spend=True)
     accounts.add("other", util5=80, util7=80)
     c = ca.choose()
-    assert c.name == "other" and c.earliest == ("team", math.inf)
+    assert c.name == "other"
     row = next(r for r in ca.rows() if r["name"] == "team")
-    assert row["state"] == "支出上限" and row["spend_limit_reached"] is True and row["spend"] == {"percent": 100.0, "severity": "critical"}
-
-
-@pytest.mark.parametrize("spend", [{"percent": 100.5, "severity": None}, {"percent": 10, "severity": "critical"}])
-def test_spend_reached_by_either_field(spend):
-    u = cu.Usage(five_hour={"utilization": 1.0}, spend_limit_reached=False, spend=spend)
-    assert u.spend_reached() is True and u.limited_until(time.time()) == math.inf
+    assert row["state"] == "支出上限" and row["spend_limit_reached"] is True
 
 
 def test_unknown_capacity_and_unknown_usage_are_ordered_after(accounts):

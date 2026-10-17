@@ -2434,7 +2434,7 @@
     {
       "term": "支出上限",
       "context": "ndf-relay",
-      "meaning": "追加利用の支出の上限（individual spend limit）。extra_usage.spend_limit_reached が真か、spend.percent が 100 以上か、spend.severity が critical なら達したとする",
+      "meaning": "追加利用の支出の上限（individual spend limit）。extra_usage.spend_limit_reached が真なら達したとする。spend.percent ≥ 100・spend.severity = critical は表示の補足だけに使う（#2036）",
       "source": "",
       "pending_source": "issues/old/issue-1453-design.md"
     },

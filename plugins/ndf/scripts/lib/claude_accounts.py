@@ -961,6 +961,7 @@ def _account_row(name: str, acc: Account, now: float) -> dict:
         "scoped": u.scoped if u else None,
         "spend_limit_reached": u.spend_reached() if u else None,
         "spend": u.spend if u else None,
+        "spend_full": u.spend_full() if u else None,
         "tier": acc.tier or None,
         "capacity": acc.capacity(),
         "capacity_declared": {k: (acc.declared or {}).get(k) for k in WINDOWS},

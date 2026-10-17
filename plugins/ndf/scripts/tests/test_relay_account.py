@@ -699,3 +699,35 @@ def test_relay_start_tells_accounts_needing_relogin(term, accounts):  # noqa: F8
     assert "アカウント b は再登録が要る" not in t.text
     assert t.starts()[0]["account"] == "b"
     assert accounts.account("a")["needs_relogin"] is True
+
+
+@pytest.mark.parametrize(
+    ("raw", "full", "cell"),
+    [
+        (False, True, "no（追加の利用は上限）"),
+        (True, True, "yes"),
+        (False, False, "no"),
+        (None, None, "-"),
+        (None, True, "-（追加の利用は上限）"),
+    ],
+)
+def test_spend_cell_notes_spend_full(raw, full, cell):
+    """#2036: 生の旗が真でないのに spend が上限なら、支出上限の列に補足を出す。"""
+    from relay_lib import accounts as relay_accounts
+
+    r = {
+        "kind": "oauth",
+        "name": "a",
+        "email": "a@example.com",
+        "org_name": None,
+        "five_hour": None,
+        "seven_day": None,
+        "scoped": None,
+        "spend_limit_reached": raw,
+        "spend_full": full,
+        "capacity": {k: None for k in ca.WINDOWS},
+        "capacity_declared": {k: None for k in ca.WINDOWS},
+        "remaining": None,
+        "state": "使える",
+    }
+    assert relay_accounts._table_row(r, ["a@example.com"])[5] == cell

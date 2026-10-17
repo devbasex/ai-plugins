@@ -223,7 +223,10 @@ work2  b@example.com  40%（05:40）  0%（09-30）  -                   達し�
 
 表に無い tier（Team premium など）で宣言も無いアカウントは、枠の大きさが `-` になり、残りの量の分かるアカウントの後ろへ
 使用率の小さい順で並ぶ。使用率が切り替えの閾値以上のアカウントは、閾値未満のアカウントより後に試す。支出上限は
-`extra_usage.spend_limit_reached`・`spend.percent` ≥ 100・`spend.severity` = `critical` のどれかで達したとする。
+`extra_usage.spend_limit_reached` が真のときだけ達したとする。`spend.percent` ≥ 100 か `spend.severity` = `critical`
+（追加の利用の予算の使い切りと見られる）は判定に使わず、生の旗が真でなければ支出上限の列に `no（追加の利用は上限）` と
+補足する（`--json` は `spend_full`）。生の旗が偽でも spend が 100%・critical を返すことがあり、解除の時刻を持たないため、
+判定に使うと上限から外れなくなる（#2036）。
 
 識別の列は、同じメールアドレスの登録が 2 件以上あるときだけ `a@example.com（Team A）` のように組織名を添える。
 従量の接続の宣言があれば、最後に `metered` の行（識別は `Bedrock（<プロファイル>・<地域>・<モデル>）` か
