@@ -99,7 +99,7 @@ graph TD
 
 | 項目 | 内容 |
 | --- | --- |
-| 範囲の PR が多い版の待ち時間 | `approval-facts` は PR の中身を `pr_fields` で 100 件ずつ 1 回で読み（#1885）、checks は PR ごとに 1 回ずつ読む。checks の読み出しが数十件の版でどれだけ延びるかは測っていない |
+| 範囲の PR が多い版の待ち時間 | `approval-facts` は PR の中身を `pr_fields` で 100 件ずつ 1 回で読み、checks は PR ごとに 1 回ずつ読む。checks の読み出しが数十件の版でどれだけ延びるかは測っていない |
 | 承認資料を手で直したとき | 「含む PR」の行を手で消すと、`notes --approval` はその PR の欄を書かない（欄が「含む PR」に従う）。作り直しで手で足した節を残す形は [ndf-release-approval-rebuild-and-replacements.md](ndf-release-approval-rebuild-and-replacements.md) にある。「含む PR」の欄は `approval-facts` の節の中にあるため、作り直しで範囲から書き直される |
 | 外す head の接頭辞 | `release/` の 1 つで、配布の工程が作るブランチ名（`release/v<版>`）と同じ NDF の側の規約である。別の名前で版上げを出すと範囲に並ぶ |
 
