@@ -509,9 +509,9 @@ def test_pr_reads_fall_back_to_rest_when_graphql_is_rate_limited(monkeypatch, tm
     calls = []
 
     def runner(args, stdin=None, cwd=None):
-        calls.append((args, cwd))
-        if args[:2] == ["pr", "view"]:
+        if args[:2] in (["pr", "view"], ["api", "graphql"]):
             return mod.gh_parts.GhResult(1, "", RATE)
+        calls.append((args, cwd))
         n = int(args[1].rsplit("/", 1)[1])
         return mod.gh_parts.GhResult(
             0,
@@ -536,7 +536,7 @@ def test_pr_reads_fall_back_to_rest_when_graphql_is_rate_limited(monkeypatch, tm
     assert mod.merge_commit_of(tmp_path, 5) == "abc"
     assert mod.merge_commit_of(tmp_path, 6) is None
     assert mod.pr_notes(tmp_path, [5])[0][1] == ["変わる（#5）"]
-    assert calls[1] == (["api", "repos/{owner}/{repo}/pulls/5"], str(tmp_path))
+    assert calls[0] == (["api", "repos/{owner}/{repo}/pulls/5"], str(tmp_path))
 
 
 def test_pr_read_failure_other_than_rate_limit_stops(monkeypatch, tmp_path):

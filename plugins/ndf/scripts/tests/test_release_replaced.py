@@ -94,7 +94,7 @@ def test_replaced_item_leaves_changelog_and_approval_without_editing_the_old_pr(
     notes(repo, env, "--approval", "issues/approval.md")
     cell = approval_cell(repo)
     assert "Draft でない" not in cell and "Draft かどうかを問わない（#27）" in cell
-    assert not [line for line in log.read_text().splitlines() if not line.startswith("pr view ")]
+    assert not [line for line in log.read_text().splitlines() if not line.startswith(("pr view ", "api graphql "))]
 
 
 def test_unmatched_replacement_removes_nothing_and_is_reported(repo, tmp_path):

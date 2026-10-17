@@ -34,13 +34,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import shlex
 import subprocess
 import sys
 from contextlib import nullcontext
 from pathlib import Path
-from typing import NamedTuple
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "lib"))
@@ -62,7 +60,6 @@ import gh_call  # noqa: E402
 import gh_parts  # noqa: E402
 import gh_rest  # noqa: E402
 import locks  # noqa: E402
-import md  # noqa: E402
 from closing import referenced_numbers  # noqa: E402
 
 from dist_record import parse_record  # noqa: E402  記録の形は lib/dist_record.py が持つ（#1273）
@@ -87,47 +84,8 @@ def read_record(root, repo, n):
     return "\n".join(parts)
 
 
-class IssueRows(NamedTuple):
-    """1 課題のリリース後テストの行のまとめ。passed は合格の行にあり、合格でない行に無い受け入れ条件の番号。"""
-
-    all_pass: bool
-    passed: frozenset
-
-
-_ISSUE_CELL = re.compile(r"^(?:([A-Za-z0-9._-]+/[A-Za-z0-9._-]+))?#(\d+)")
-_CRITERION_CELL = re.compile(r"^(\d+)\.")
-
-
-def verification_verdicts(block, record_repo):
-    """表を課題でまとめ、{(repo, number): IssueRows} を返す。表が読めない・課題を指す行が無ければ None。
-
-    表は lib/md.py（GFM）で読む。欠けたセルは空として読むため、`結果` の欠けた行は合格でない。
-    `課題` の列の頭が課題の参照でない行（導入の確認の `—`・`PR 1869` など）は飛ばす（#1683 の I1）。
-    `受け入れ条件` の列の頭の `<番号>.` を受け入れ条件の番号として読む。"""
-    found = md.tables(block)
-    if not found:
-        return None
-    head = [c.strip() for c in found[0].header]
-    if "課題" not in head or "結果" not in head:
-        return None
-    ci, ri = head.index("課題"), head.index("結果")
-    ai = head.index("受け入れ条件") if "受け入れ条件" in head else None
-    acc = {}
-    for row in found[0].rows:
-        cs = [c.strip() for c in row]  # md は行のセルを見出しの数へ揃える
-        m = _ISSUE_CELL.match(cs[ci])
-        if not m:
-            continue
-        key = (m.group(1) or record_repo, int(m.group(2)))
-        ok = cs[ri].startswith("合格")
-        all_pass, passed, failed = acc.get(key, (True, set(), set()))
-        num = _CRITERION_CELL.match(cs[ai]) if ai is not None else None
-        if num:
-            (passed if ok else failed).add(int(num.group(1)))
-        acc[key] = (all_pass and ok, passed, failed)
-    if not acc:
-        return None
-    return {k: IssueRows(a, frozenset(p - f)) for k, (a, p, f) in acc.items()}
+IssueRows = acceptance.IssueRows  # リリース後テストの表は承認の材料と同じ規則で読む（lib/acceptance.py。#1885 の決定 8）
+verification_verdicts = acceptance.verification_verdicts
 
 
 NO_ROWS = "リリース後テストの行が無い"
