@@ -878,6 +878,36 @@ def kept_sections(root, approval):
         raise StepError(f"前の承認資料 {approval} を読めない（書き換えずに止める）: {e}", 2)
 
 
+def _shortstat(stat: str) -> tuple[int, int, int]:
+    """git diff --shortstat の出力の (ファイル数, 追加行数, 削除行数)。無い数は 0。"""
+    files = int(m.group(1)) if (m := re.search(r"(\d+) files? changed", stat)) else 0
+    ins = int(m.group(1)) if (m := re.search(r"(\d+) insertions?", stat)) else 0
+    dels = int(m.group(1)) if (m := re.search(r"(\d+) deletions?", stat)) else 0
+    return files, ins, dels
+
+
+def _included_fact(repo, p, d, checks) -> tuple[dict, str]:
+    """PR 1 本の (結果 JSON の項目, 承認資料の「含む PR」の 1 行)。d は gh pr view の出力、checks は CI の結果。"""
+    n = p.number
+    oid = (d.get("mergeCommit") or {}).get("oid") or ""
+    passed = sum(1 for c in checks if c.get("bucket") == "pass")
+    url = d.get("url") or f"https://github.com/{repo}/pull/{n}"
+    item = {
+        "kind": "pr",
+        "name": f"#{n}",
+        "result": str(d.get("state", "")).lower() or "unknown",
+        "url": url,
+        "title": d.get("title", ""),
+        "merge_commit": oid,
+        "checks_passed": passed,
+        "checks": len(checks),
+        "via": p.via,
+        "no_change": included.no_change(d),
+    }
+    facts = [str(d.get("state", "")), oid[:8] if oid else "—", f"CI {passed}/{len(checks)}"]
+    return item, included.included_row(n, d.get("title", ""), facts, p.via, included.no_change(d))
+
+
 def cmd_approval_facts(a):
     root = git_root(a.root)
     repo = repo_lib.owner_repo(root)
@@ -896,33 +926,13 @@ def cmd_approval_facts(a):
     data = pr_many(root, [p.number for p in prs], "number,title,body,state,mergeCommit,url")
 
     stat = git(root, "diff", "--shortstat", f"origin/{prod}...origin/{base}").stdout.strip()
-    files = int(m.group(1)) if (m := re.search(r"(\d+) files? changed", stat)) else 0
-    ins = int(m.group(1)) if (m := re.search(r"(\d+) insertions?", stat)) else 0
-    dels = int(m.group(1)) if (m := re.search(r"(\d+) deletions?", stat)) else 0
+    files, ins, dels = _shortstat(stat)
 
     items, rows = [], []
     for p in prs:
-        n, d = p.number, data.get(p.number) or {}
-        oid = (d.get("mergeCommit") or {}).get("oid") or ""
-        checks = pr_check_buckets(root, n)
-        passed = sum(1 for c in checks if c.get("bucket") == "pass")
-        url = d.get("url") or f"https://github.com/{repo}/pull/{n}"
-        items.append(
-            {
-                "kind": "pr",
-                "name": f"#{n}",
-                "result": str(d.get("state", "")).lower() or "unknown",
-                "url": url,
-                "title": d.get("title", ""),
-                "merge_commit": oid,
-                "checks_passed": passed,
-                "checks": len(checks),
-                "via": p.via,
-                "no_change": included.no_change(d),
-            }
-        )
-        facts = [str(d.get("state", "")), oid[:8] if oid else "—", f"CI {passed}/{len(checks)}"]
-        rows.append(included.included_row(n, d.get("title", ""), facts, p.via, included.no_change(d)))
+        item, row = _included_fact(repo, p, data.get(p.number) or {}, pr_check_buckets(root, p.number))
+        items.append(item)
+        rows.append(row)
 
     compare = f"https://github.com/{repo}/compare/{prev}...{dev}"
     path = approval_present(
