@@ -204,15 +204,22 @@ def require_merged(found, prs):
     return found
 
 
+def _merged(prs: list[IncludedPr], data: dict, skipped):
+    """マージされていない PR の番号を skipped へ足して飛ばし、残りの (PR, gh pr view の出力) を順に返す。"""
+    for p in prs:
+        d = data.get(p.number)
+        if unmerged(d):
+            skipped is not None and skipped.append(p.number)
+            continue
+        yield p, d
+
+
 def titles_of(prs: list[IncludedPr], data: dict, skipped=None) -> list[tuple[int, str]]:
     """PR ごとに (番号, 箇条)。マージされていない PR は載せず、番号を skipped へ足す。スプリント経由の PR
     （変化はスプリント PR の本文が持つ）と配布物の変化なしの PR は箇条にしない（#1885・#1686）。"""
     items, merged = [], []
-    for p in prs:
-        n, d = p.number, data.get(p.number)
-        if unmerged(d):
-            skipped is not None and skipped.append(n)
-            continue
+    for p, d in _merged(prs, data, skipped):
+        n = p.number
         try:
             title = d["title"].strip()
         except (TypeError, KeyError, AttributeError):
@@ -231,11 +238,8 @@ def notes_of(prs: list[IncludedPr], data: dict, skipped=None, replacing=None, un
     スプリント経由の PR は変化と移行の手順をスプリント PR の本文に任せて危険だけを返し、配布物の変化なしの PR は
     変化を返さない（#1885・#1686）。"""
     out = []
-    for p in prs:
-        n, d = p.number, data.get(p.number)
-        if unmerged(d):
-            skipped is not None and skipped.append(n)
-            continue
+    for p, d in _merged(prs, data, skipped):
+        n = p.number
         if not isinstance(d, dict) or not isinstance(d.get("title"), str):
             raise StepError(f"gh pr view {n} の出力を読めない", 2)
         body = d.get("body") or ""
