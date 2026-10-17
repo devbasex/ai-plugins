@@ -442,7 +442,10 @@ def test_notes_fills_approval_cells(repo, tmp_path):
     text = approval.read_text(encoding="utf-8")
     assert "| 配る中身 | - 計画を課題番号だけで作れる（#11）<br>- ステップの順が変わる （続き）（#11）<br>- 題名 B（#12） |" in text
     assert "| 検証への配布で確かめたこと | Claude Code・Codex・Kiro の 3 経路で develop から ndf 1.2.3-dev.1 を導入し" in text
-    assert "## 未検証・残る危険\n\n- 実機の CI とは未照合（#11）\n\n## 移行の手順\n\n- 無し\n\n## 同意を求めること" in text
+    assert (
+        "## 未検証・残る危険\n\n- 実機の CI とは未照合（#11）\n- 無い材料: レビュー・リファクタリング・全体テスト・設計文書の未確認・未実施のリリース後テスト\n\n## 移行の手順\n\n- 無し\n\n## 同意を求めること"
+        in text
+    )
     assert (repo / "CHANGELOG.md").read_text(encoding="utf-8") == before
 
 

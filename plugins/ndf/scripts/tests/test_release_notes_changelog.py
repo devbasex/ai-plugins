@@ -175,7 +175,8 @@ def test_approval_from_pr1863_is_unchanged(tmp_path):
     """受け入れ条件 10（I6）: PR #1863 の本文で notes --approval が書く欄と節は、#1867 の前の出力と同じ。"""
     root = tmp_path / "repo"
     release_repo(root, "# ndf\n", "# Changelog\n\n## [ndf 10.17.68] - 2026-10-08\n\n- x\n", {"issues/approval.md": APPROVAL})
-    env = fake_gh(tmp_path, PR1863)
+    issues = {n: {"body": ""} for n in (635, 767, 1241, 1822, 1843, 1847)}  # 閉じる課題（受け入れ条件なし。#1488 の材料は無い）
+    env = fake_gh(tmp_path, {**PR1863, **issues})
     step(root, env, "notes", "10.17.68", [1863], "--approval", "issues/approval.md", "--verified", "claude,codex")
     want = (FIXTURES / "approval-1863.txt").read_text(encoding="utf-8")
     assert (root / "issues" / "approval.md").read_text(encoding="utf-8") == want

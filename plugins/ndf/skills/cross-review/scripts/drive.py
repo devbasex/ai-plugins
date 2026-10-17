@@ -363,16 +363,17 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
         posts = [sys.executable, str(LIB / "result_posts.py"), "fix", "--pr", pr, "--result", str(self.path("sweep"))]
         self.must(call([*posts, "--worktree", str(self.v.get("WORKTREE", ""))], self.env), "result_posts.py fix")
         self.must(self.st("verify-sweep", str(self.pr)), "state.py verify-sweep", ok=(0, 6))
-        _, rep = self.st("report", str(self.pr))
         rp = self.tmp / f"drive-pr{self.pr}-report.md"
-        rp.write_text(rep)
+        rp.write_text(self.st("report", str(self.pr))[1])
         c = self.counts()
-        return dp.done(
-            TOOL,
-            f"収束ループが終わった（final={c['final']}・{c['rounds']} ラウンド・コメント {c['comments']}・指摘 {c['findings']}・修正 {c['fixed']}・未解決 {c['unresolved']}）",
-            rp,
-            c,
-        )
+        summary = f"収束ループが終わった（final={c['final']}・{c['rounds']} ラウンド・コメント {c['comments']}・指摘 {c['findings']}・修正 {c['fixed']}・未解決 {c['unresolved']}）"
+        res = dp.done(TOOL, summary, rp, c)
+        late = json.loads(self.path("sweep").read_text()).get("deferred") or []  # 最終スイープの見送り（#1488 の「レビュー」の材料）
+        ds = [*s.get("deferred_nits", []), *({"round": c["rounds"], **d} for d in late if isinstance(d, dict))]  # 修正の見送り＋スイープ
+        res["items"] += [
+            {"kind": "deferred", **{k: d.get(k) for k in ("path", "line", "summary", "round")}} for d in ds if not d.get("waived")
+        ]
+        return res
 
     # --- 起動: 耐久の記録を開き、耐久ワークフローを始めるか続けて、止まりか終わりを待つ ---
     def finished(self, out) -> bool:
@@ -405,7 +406,6 @@ STEP_LIMIT = 1000  # 段階の数の上限
 NAME = f"{__name__}:review_drive"
 
 
-@durable.step(name=f"{NAME}.act")
 def act(d: Drive, method: str, *args):
     """`Drive` のメソッドを 1 つ流し、出力を記録する。Stop は例外にせず出力として残す（打ち直しで終了コードを保つ）。"""
     try:

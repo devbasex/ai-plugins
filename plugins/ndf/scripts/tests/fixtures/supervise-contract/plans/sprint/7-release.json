@@ -73,7 +73,7 @@
       "id": "explain",
       "type": "run",
       "cwd": "<TMP>/repo",
-      "cmd": "python3 <NDF>/scripts/release-steps.py notes --version 1.2.0-dev.1 --prs {queue_pr:check} --approval issues/approval-foo-v1.2.0.md --verified claude --ref main",
+      "cmd": "python3 <NDF>/scripts/release-steps.py notes --version 1.2.0-dev.1 --prs {queue_pr:check} --approval issues/approval-foo-v1.2.0.md --verified claude --ref main --check-state '{queue_state:check}'",
       "on_fail": "judge",
       "next": "others"
     },
