@@ -160,7 +160,7 @@ def test_compare_and_changes_stay_and_later_merges_are_not_listed(monkeypatch, w
     mod = load(monkeypatch, world)
     seed, work = world["seed"], world["work"]
     approved = git(seed, "rev-parse", "HEAD")
-    real = mod.included.range_prs
+    real = mod.included.release_range
 
     def moved(root, prev, to):
         merge_pr(seed, 50, "feat/late")
@@ -168,7 +168,7 @@ def test_compare_and_changes_stay_and_later_merges_are_not_listed(monkeypatch, w
         git(work, "fetch", "-q", "origin")
         return real(root, prev, to)
 
-    monkeypatch.setattr(mod.included, "range_prs", moved)
+    monkeypatch.setattr(mod.included, "release_range", moved)
     out, _ = facts(mod, world, [13])
     m = out["metrics"]
     stat = git(work, "diff", "--shortstat", "origin/live...origin/trunk")

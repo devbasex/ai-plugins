@@ -57,9 +57,9 @@
 
 | 要素 | 責務 |
 | --- | --- |
-| `plugins/ndf/scripts/lib/acceptance.py` | 受け入れ条件の節の見出し（`HEADING`）・番号の数え方（`criteria`）・印付け（`check_criteria`）・書く前の確かめ（`only_marks`）の唯一の置き場。純粋な文字列の処理で、GitHub を呼ばない |
+| `plugins/ndf/scripts/lib/acceptance.py` | 受け入れ条件の節の見出し（`HEADING`）・番号の数え方（`criteria`）・印付け（`check_criteria`）・書く前の確かめ（`only_marks`）・リリース後テストの表を課題と番号でまとめる（`verification_verdicts` / `IssueRows`。承認資料の材料と同じ規則で読む）の唯一の置き場。純粋な文字列の処理で、GitHub を呼ばない |
 | `plugins/ndf/scripts/lib/gh_sections.py` の `section_bounds` | 節の中身を元の本文の文字の位置 `(始め, 終わり)` で返す。改行（`\r\n`）を正規化しない |
-| `plugins/ndf/scripts/sprint-close.py` | 表を課題と番号でまとめる（`verification_verdicts`）・閉じる条件 2 の判定（`judge_acceptance`）・錠の中での本文の読み書き・`closed_unverified` と集計 |
+| `plugins/ndf/scripts/sprint-close.py` | 表のまとめ（`acceptance.verification_verdicts` を import する）・閉じる条件 2 の判定（`judge_acceptance`）・錠の中での本文の読み書き・`closed_unverified` と集計 |
 | `plugins/ndf/scripts/supervise_lib/sprint_inputs.py` | 見出しの定数 `HEADING` を `acceptance.HEADING` から引く（同じ役割の定数を 2 か所に置かない） |
 | `plugins/ndf/scripts/progress-record.sh` | モードの列が `-` で記録の無い工程の行を書かない |
 

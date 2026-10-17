@@ -442,7 +442,10 @@ def test_notes_fills_approval_cells(repo, tmp_path):
     text = approval.read_text(encoding="utf-8")
     assert "| 配る中身 | - 計画を課題番号だけで作れる（#11）<br>- ステップの順が変わる （続き）（#11）<br>- 題名 B（#12） |" in text
     assert "| 検証への配布で確かめたこと | Claude Code・Codex・Kiro の 3 経路で develop から ndf 1.2.3-dev.1 を導入し" in text
-    assert "## 未検証・残る危険\n\n- 実機の CI とは未照合（#11）\n\n## 移行の手順\n\n- 無し\n\n## 同意を求めること" in text
+    assert (
+        "## 未検証・残る危険\n\n- 実機の CI とは未照合（#11）\n- 無い材料: レビュー・リファクタリング・全体テスト・設計文書の未確認・未実施のリリース後テスト\n\n## 移行の手順\n\n- 無し\n\n## 同意を求めること"
+        in text
+    )
     assert (repo / "CHANGELOG.md").read_text(encoding="utf-8") == before
 
 
@@ -509,9 +512,9 @@ def test_pr_reads_fall_back_to_rest_when_graphql_is_rate_limited(monkeypatch, tm
     calls = []
 
     def runner(args, stdin=None, cwd=None):
-        calls.append((args, cwd))
-        if args[:2] == ["pr", "view"]:
+        if args[:2] in (["pr", "view"], ["api", "graphql"]):
             return mod.gh_parts.GhResult(1, "", RATE)
+        calls.append((args, cwd))
         n = int(args[1].rsplit("/", 1)[1])
         return mod.gh_parts.GhResult(
             0,
@@ -536,7 +539,7 @@ def test_pr_reads_fall_back_to_rest_when_graphql_is_rate_limited(monkeypatch, tm
     assert mod.merge_commit_of(tmp_path, 5) == "abc"
     assert mod.merge_commit_of(tmp_path, 6) is None
     assert mod.pr_notes(tmp_path, [5])[0][1] == ["変わる（#5）"]
-    assert calls[1] == (["api", "repos/{owner}/{repo}/pulls/5"], str(tmp_path))
+    assert calls[0] == (["api", "repos/{owner}/{repo}/pulls/5"], str(tmp_path))
 
 
 def test_pr_read_failure_other_than_rate_limit_stops(monkeypatch, tmp_path):

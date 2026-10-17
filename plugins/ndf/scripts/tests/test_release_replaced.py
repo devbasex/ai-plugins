@@ -94,7 +94,7 @@ def test_replaced_item_leaves_changelog_and_approval_without_editing_the_old_pr(
     notes(repo, env, "--approval", "issues/approval.md")
     cell = approval_cell(repo)
     assert "Draft でない" not in cell and "Draft かどうかを問わない（#27）" in cell
-    assert not [line for line in log.read_text().splitlines() if not line.startswith("pr view ")]
+    assert not [line for line in log.read_text().splitlines() if not line.startswith(("pr view ", "api graphql "))]
 
 
 def test_unmatched_replacement_removes_nothing_and_is_reported(repo, tmp_path):
@@ -135,7 +135,10 @@ def test_risks_keep_hand_lines_and_add_only_new_items(repo, tmp_path):
     for _ in range(2):
         notes(repo, env, "--approval", "issues/approval.md")
     text = path.read_text(encoding="utf-8")
-    assert "## 未検証・残る危険\n\n- 手で書いた危険\n- 実機で未確認（#27）\n\n## 移行の手順" in text
+    assert (
+        "## 未検証・残る危険\n\n- 手で書いた危険\n- 実機で未確認（#27）\n- 無い材料: レビュー・リファクタリング・全体テスト・設計文書の未確認・未実施のリリース後テスト\n\n## 移行の手順"
+        in text
+    )
 
 
 def test_comparable_drops_trailing_pr_references():
