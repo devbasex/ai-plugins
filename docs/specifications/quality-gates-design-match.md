@@ -205,4 +205,5 @@ graph LR
 - [`design-match.py`](../../plugins/ndf/scripts/design-match.py)（サブコマンドの引数と終了コード）
 - [`lib/gh_parts.py`](../../plugins/ndf/scripts/lib/gh_parts.py)（`body-section` と `body-lock` と錠の置き場）
 - [ndf-agent-layers-unattended-run.md](ndf-agent-layers-unattended-run.md)（3 層の実装プラン）
+- [ndf-supervise-impl-prompt-format-and-transient-failures.md](ndf-supervise-impl-prompt-format-and-transient-failures.md)（`test-limited` の前に置く整形・同期・範囲の静的解析のステップ）
 - #1241（この形を決めた課題）、#735（同じ完了判定へ足す実データの結合確認）、#337（要求から証拠までの全体の追跡。やらないで閉じた）

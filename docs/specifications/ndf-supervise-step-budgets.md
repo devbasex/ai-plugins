@@ -132,5 +132,7 @@ graph TD
 
 - [`supervise_lib/decl.py`](../../plugins/ndf/scripts/supervise_lib/decl.py)・[`new_args.py`](../../plugins/ndf/scripts/supervise_lib/new_args.py)・[`paths.py`](../../plugins/ndf/scripts/supervise_lib/paths.py)・[`plan.py`](../../plugins/ndf/scripts/supervise_lib/plan.py)・[`templates.py`](../../plugins/ndf/scripts/supervise_lib/templates.py)・[`verify_steps.py`](../../plugins/ndf/scripts/supervise_lib/verify_steps.py)（`with_margin`）
 - [cross-refactoring-time-budget.md](cross-refactoring-time-budget.md)・[cross-refactoring-verify-and-final-gate.md](cross-refactoring-verify-and-final-gate.md)
+- [ndf-supervise-plan-limits-and-slow-watch.md](ndf-supervise-plan-limits-and-slow-watch.md) — プランのステップの数の上限（`上限`）と遅れの見張り。時間の枠とは別
+- [ndf-supervise-impl-prompt-format-and-transient-failures.md](ndf-supervise-impl-prompt-format-and-transient-failures.md) — `design_stage.rewrite` が `impl` の `prompt` を組み直し、補正を残す形
 - [issue #1817](https://github.com/devbasex/ai-plugins/issues/1817) — 打ち切りでプロセスの木を止める待ちの `EINVAL`
 - #1916（この形を決めた課題）、#1336（3600 秒ちょうどの exit=124）、#1334・#1370（conductor の手当ての記録）

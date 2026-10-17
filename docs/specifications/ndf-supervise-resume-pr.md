@@ -176,5 +176,6 @@ sequenceDiagram
 
 - [`supervise_lib/engine.py`](../../plugins/ndf/scripts/supervise_lib/engine.py)・[`state.py`](../../plugins/ndf/scripts/supervise_lib/state.py)・[`steps.py`](../../plugins/ndf/scripts/supervise_lib/steps.py)
 - [ndf-production-release-record.md](ndf-production-release-record.md)（`pr_from` と、その値を `pr` の記録へ残すこと）
+- [ndf-supervise-plan-limits-and-slow-watch.md](ndf-supervise-plan-limits-and-slow-watch.md)（同じ前の実行の範囲（`prior_rows`）から、`--from` の再開で judge と work の入力へ前の実行の結果を渡すこと）
 - `development-workflow` の [references/interrupt-resume.md](../../plugins/ndf/skills/development-workflow/references/interrupt-resume.md)（落ちたプランを `--from` で流し直す手順）
 - #1296（この形を決めた課題）、devbasex/devbase issue #273 / PR #308（由来）
