@@ -53,15 +53,28 @@ def has_release_template(a) -> bool:
     return any(r.stage == delivery.STAGE_TEMPLATE for r in routes_of(a))
 
 
+RECORD_NONE = "0"  # 本番の記録なし（配布なし。sprint-close.py は閉じる条件を見ずに閉じる。#1336）
+RECORD_UNKNOWN = "unknown"  # 記録の置き場が分からない（sprint-close.py は課題を開いたまま残す。#1875）
+
+
+def has_record(record_pr: str) -> bool:
+    """まとめの close が読む配布の記録の PR（{queue_pr:…}）があるか。"""
+    return record_pr not in (RECORD_NONE, RECORD_UNKNOWN)
+
+
 def record_pr_ref(a) -> str:
-    """まとめの close が読む配布の記録の PR: 雛形の本番の PR か、昇格の PR（#837）。ほかの経路は記録を持たない
-    （0 = 本番の記録なし。#1336）。昇格は route_waves が昇格のプラン（計画名 promote）を置くときだけ。"""
+    """まとめの close が読む配布の記録の PR: 雛形の本番の PR か、昇格の PR（#837）。昇格は route_waves が昇格の
+    プラン（計画名 promote）を置くときだけ。経路がすべて届けない経路なら RECORD_NONE、それ以外の届ける経路
+    （merge・手で届ける・検証の環境だけ・手動反映の本番系の昇格）は記録の置き場が分からず RECORD_UNKNOWN。"""
     if has_release_template(a):
         return "{queue_pr:release-prod}"
+    rs = routes_of(a)
     manual_prod = getattr(a, "state", None) and dev_channel_of(a).value == delivery.MANUAL_PRODUCTION
-    if not manual_prod and any(r.stage == delivery.STAGE_PROMOTE for r in routes_of(a)):
+    if not manual_prod and any(r.stage == delivery.STAGE_PROMOTE for r in rs):
         return "{queue_pr:promote}"
-    return "0"
+    if all(r.stage == delivery.STAGE_NONE for r in rs):
+        return RECORD_NONE
+    return RECORD_UNKNOWN
 
 
 def manual_release_wave(a) -> dict:

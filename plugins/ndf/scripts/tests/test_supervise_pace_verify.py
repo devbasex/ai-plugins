@@ -247,8 +247,21 @@ def test_close_of_the_promote_route_reads_the_promote_pr(tmp_path):
     assert rv["type"] == "work" and rv["prompt"].startswith("/ndf:release-verification") and "{queue_pr:promote}" in rv["prompt"]
 
 
-def test_close_of_the_merge_route_keeps_record_pr_zero(tmp_path):
-    """#1870 AC3・AC6: 昇格の無い経路（ベースブランチへのマージで届く）は今と同じ --record-pr 0 で、リリース後テストを置かない。"""
-    steps = close_steps(tmp_path, [STG])
+PRD_ON_BASE = {**PRD, "trigger": "develop へのマージ", "branch": "develop"}  # ベースブランチへのマージで本番へ届く
+
+
+@pytest.mark.parametrize("rows", [[STG], [PRD_ON_BASE], [API], [STG, API]], ids=["stg-only", "merged", "manual", "stg-manual"])
+def test_close_without_a_known_record_keeps_the_issues_open(tmp_path, rows):
+    """#1875 1875-1・1875-2: 雛形も昇格も無い届ける経路（merge・手で届ける・検証の環境だけ）は --record-pr unknown で、
+    リリース後テストを置かず merge の次が close。"""
+    steps = close_steps(tmp_path, rows)
+    close = next(s for s in steps if s["id"] == "close")
+    assert "--record-pr unknown " in close["cmd"] and "release-verify" not in [s["id"] for s in steps]
+    assert [s for s in steps if s.get("next") == "close"]
+
+
+def test_close_of_no_delivery_keeps_record_pr_zero(tmp_path):
+    """#1875 1875-3: 届けない経路（delivery が []）だけなら今どおり --record-pr 0 で、リリース後テストを置かない。"""
+    steps = close_steps(tmp_path, [])
     close = next(s for s in steps if s["id"] == "close")
     assert "--record-pr 0 " in close["cmd"] and "release-verify" not in [s["id"] for s in steps]
