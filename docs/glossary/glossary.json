@@ -3761,7 +3761,7 @@
     {
       "term": "範囲の PR",
       "context": "ndf-release",
-      "meaning": "直前の正式版のタグから承認したコミットまでに、ベースブランチへ merge commit か squash merge で入った PR。版上げの PR と、PR でない番号（squash の件名の `(#N)` が課題を指すもの）は含まない",
+      "meaning": "直前の正式版のタグから終点（承認したコミットか、ベースブランチの先端）までに、ベースブランチへ merge commit か squash merge で入った PR と、スプリント経由の PR の和。版上げの PR と、PR でない番号（squash の件名の `(#N)` が課題を指すもの）は含まない",
       "source": "docs/specifications/ndf-release-approval-included-prs.md"
     },
     {
@@ -4047,6 +4047,24 @@
       "context": "ndf-workflow",
       "meaning": "GitHub や git の呼び出しが 0 以外で終わり、打ち直せば通りうる失敗（5xx・接続の切断）。打ち直しても残れば、読めなかったとして止まる（#1941）",
       "source": "docs/specifications/ndf-supervise-impl-prompt-format-and-transient-failures.md"
+    },
+    {
+      "term": "スプリント経由の PR",
+      "context": "ndf-release",
+      "meaning": "範囲の PR のうち、merge commit でベースブランチへ入った PR の 2 つ目の親の側（スプリントブランチ）へ merge commit で入った PR。変化と移行の手順はスプリント PR の本文が集めて持つ",
+      "source": ""
+    },
+    {
+      "term": "承認の材料",
+      "context": "ndf-release",
+      "meaning": "承認資料が集める 5 つの材料。レビュー（cross-review のラウンド数と見送った指摘）・リファクタリング（採用と取り消しの件数）・全体テスト（コマンド・合否・件数）・設計文書の未確認・未実施のリリース後テスト",
+      "source": ""
+    },
+    {
+      "term": "配布物の変化なし",
+      "context": "ndf-release",
+      "meaning": "PR の本文の `## 利用者向けの変化` が「無し」だけを持つこと。節の無い本文（題名で代える）とは別に扱う",
+      "source": ""
     }
   ]
 }
