@@ -30,6 +30,27 @@ def fail(message, stderr_tail):
     sys.exit(1)
 
 
+def hooks_list_response(line):
+    """1 行が hooks/list への応答なら、その message を返す。JSON でない行と別の ID の行は None。"""
+    try:
+        message = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(message, dict) or message.get("id") != HOOKS_LIST_ID:
+        return None
+    return message
+
+
+def result_of(message, body, stderr_tail):
+    """hooks/list の応答から result を取り出す。error を持つか result.data が無ければ終わる。"""
+    if "error" in message:
+        fail("hooks/list returned an error:\n" + body, stderr_tail)
+    result = message.get("result")
+    if not isinstance(result, dict) or "data" not in result:
+        fail("hooks/list response has no result.data:\n" + body, stderr_tail)
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--cwd", default=os.getcwd())
@@ -73,18 +94,10 @@ def main():
             while lines:
                 line = lines.popleft()
                 received.append(line)
-                try:
-                    message = json.loads(line)
-                except json.JSONDecodeError:
+                message = hooks_list_response(line)
+                if message is None:
                     continue
-                if not isinstance(message, dict) or message.get("id") != HOOKS_LIST_ID:
-                    continue
-                body = "".join(received)
-                if "error" in message:
-                    fail("hooks/list returned an error:\n" + body, stderr_tail)
-                result = message.get("result")
-                if not isinstance(result, dict) or "data" not in result:
-                    fail("hooks/list response has no result.data:\n" + body, stderr_tail)
+                result = result_of(message, "".join(received), stderr_tail)
                 json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
                 sys.stdout.write("\n")
                 return
