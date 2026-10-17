@@ -88,51 +88,32 @@ def shift_for_pause(state: dict[str, Any], now: _dt.datetime, last_at: Optional[
     planned = bool(state.get("plan"))
     if not planned and state.get("window_stopped_at"):
         return None
-    record, event = _ensure_record(state, planned, now, last_at)
-    if event is not None:
-        return event
+    record = state.get("pause")
+    if not isinstance(record, dict):
+        if not planned:
+            record = state["pause"] = empty()
+        else:
+            record = state["pause"] = {**empty(), "legacy": True}
+            event = _event(now, last_at, 0.0, False, LEGACY)
+            record["events"].append(event)
+            return event
     if record.get("legacy") or last_at is None:
         return None
     seconds = max(0.0, (now - last_at).total_seconds())
-    _add_seconds(record, "seconds", seconds)
+    record["seconds"] = round(float(record.get("seconds") or 0.0) + seconds, 1)
     if seconds <= timeline.margin(int(state["budget_minutes"])):
         event = _event(now, last_at, seconds, False, WITHIN_MARGIN)
     else:
-        keys = SHIFT_KEYS if planned else PRE_PLAN_SHIFT_KEYS
-        _shift_limits(state.get("limits") or {}, keys, last_at, _dt.timedelta(seconds=seconds))
-        _add_seconds(record, "shifted_seconds", seconds)
+        limits = state.get("limits") or {}
+        delta = _dt.timedelta(seconds=seconds)
+        for key in SHIFT_KEYS if planned else PRE_PLAN_SHIFT_KEYS:
+            value = clock.parse(limits.get(key))
+            if value is not None and value > last_at:
+                limits[key] = clock.iso(value + delta)
+        record["shifted_seconds"] = round(float(record.get("shifted_seconds") or 0.0) + seconds, 1)
         event = _event(now, last_at, seconds, True, SHIFTED)
     record.setdefault("events", []).append(event)
     return event
-
-
-def _ensure_record(
-    state: dict[str, Any], planned: bool, now: _dt.datetime, last_at: Optional[_dt.datetime]
-) -> tuple[dict[str, Any], Optional[dict[str, Any]]]:
-    """`pause` の記録と、記録が無かった計画の後の状態に残した `legacy` の 1 件（それ以外は `None`）。
-    計画の前で記録が無ければ空の記録を作る。"""
-    record = state.get("pause")
-    if isinstance(record, dict):
-        return record, None
-    if not planned:
-        record = state["pause"] = empty()
-        return record, None
-    record = state["pause"] = {**empty(), "legacy": True}
-    event = _event(now, last_at, 0.0, False, LEGACY)
-    record["events"].append(event)
-    return record, event
-
-
-def _add_seconds(record: dict[str, Any], key: str, seconds: float) -> None:
-    record[key] = round(float(record.get(key) or 0.0) + seconds, 1)
-
-
-def _shift_limits(limits: dict[str, Any], keys: tuple[str, ...], last_at: _dt.datetime, delta: _dt.timedelta) -> None:
-    """上限の表のうち、最後の動きの時刻より後に来る締め切りを delta だけ後ろへずらす。"""
-    for key in keys:
-        value = clock.parse(limits.get(key))
-        if value is not None and value > last_at:
-            limits[key] = clock.iso(value + delta)
 
 
 def event_line(event: dict[str, Any]) -> str:

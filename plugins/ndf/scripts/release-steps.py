@@ -514,10 +514,10 @@ def cmd_changed_plugins(a):
     )
 
 
-def _view_json(root, kind, n, fields):
-    """gh <kind> view <n> --json <fields> の JSON。読めなければ StepError（gh が無い: 3）。"""
-    what = f"gh {kind} view {n}"
-    r = gh_parts.view_json(kind, n, fields, cwd=str(root))
+def pr_view(root, n, fields):
+    """gh pr view <n> --json <fields> を読む。GraphQL が上限なら gh_parts が REST で読み直す。"""
+    what = f"gh pr view {n}"
+    r = gh_parts.view_json("pr", n, fields, cwd=str(root))
     if r.returncode == 127 and "gh を実行できない" in r.stderr:
         raise StepError("gh が無い", EXIT_PRECONDITION)
     if r.returncode != 0:
@@ -526,11 +526,6 @@ def _view_json(root, kind, n, fields):
         return json.loads(r.stdout or "null")
     except ValueError:
         raise StepError(f"{what} の出力を読めない", 2)
-
-
-def pr_view(root, n, fields):
-    """gh pr view <n> --json <fields> を読む。GraphQL が上限なら gh_parts が REST で読み直す。"""
-    return _view_json(root, "pr", n, fields)
 
 
 def pr_many(root, prs, fields="title,body,state", comments=False):
@@ -700,25 +695,8 @@ def cmd_release(a):
     bump.require_bumped(root, plugin, ver)
 
     git(root, "push", "-q", "-u", "origin", "HEAD")
-    release_pr, release_commit = _release_dev(root, a, base, branch, plugin, ver, plugins)
 
-    metrics = {
-        "channel": a.channel,
-        "version": ver,
-        "release_pr": release_pr,
-        "main_pr": None,
-        "tag": None,
-        "merge_commit": release_commit,
-        "plugins": ",".join(plugins),
-    }
-    items = [{"kind": "pr", "name": f"#{release_pr}", "result": "merged", "base": base}]
-    if a.channel == "dev":
-        emit(result(TOOL, "ok", f"{plugin} v{ver} を {base} へ出した（#{release_pr}）", items, metrics))
-    _release_prod(root, a, base, prod, plugin, ver, approved, release_pr, items, metrics)
-
-
-def _release_dev(root, a, base, branch, plugin, ver, plugins):
-    """開発版の PR（release/v<版> → ベースブランチ）を確保してマージし、(PR の番号, merge commit) を返す。"""
+    # 開発版の PR（release/v<版> → ベースブランチ）
     pr = find_pr(root, branch, base, states=("OPEN", "MERGED"))
     if pr and pr["state"] == "MERGED":
         # マージ済みの PR へ後から積んだコミットは GitHub が開き直さずベースブランチに入らない。入っていなければ PR を作り直す
@@ -745,11 +723,21 @@ def _release_dev(root, a, base, branch, plugin, ver, plugins):
         pr = {"number": create_pr(root, base, branch, f"Release: {plugin} v{ver}", body), "state": "OPEN"}
     release_pr = pr["number"]
     release_commit = wait_and_merge(root, release_pr, ci_wait=a.ci_wait) if pr["state"] == "OPEN" else merge_commit_of(root, release_pr)
-    return release_pr, release_commit
 
+    metrics = {
+        "channel": a.channel,
+        "version": ver,
+        "release_pr": release_pr,
+        "main_pr": None,
+        "tag": None,
+        "merge_commit": release_commit,
+        "plugins": ",".join(plugins),
+    }
+    items = [{"kind": "pr", "name": f"#{release_pr}", "result": "merged", "base": base}]
+    if a.channel == "dev":
+        emit(result(TOOL, "ok", f"{plugin} v{ver} を {base} へ出した（#{release_pr}）", items, metrics))
 
-def _release_prod(root, a, base, prod, plugin, ver, approved, release_pr, items, metrics):
-    """本番: ベースブランチ → 本番チャネル、タグ、GitHub Release（利用者の承認を得てから呼ぶ）。"""
+    # 本番: ベースブランチ → 本番チャネル、タグ、GitHub Release（利用者の承認を得てから呼ぶ）
     tag = f"{plugin}--v{ver}"
     git(root, "fetch", "-q", "origin", "--tags")
     if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode == 0:
@@ -883,36 +871,6 @@ def kept_sections(root, approval):
         raise StepError(f"前の承認資料 {approval} を読めない（書き換えずに止める）: {e}", 2)
 
 
-def _shortstat(stat: str) -> tuple[int, int, int]:
-    """git diff --shortstat の出力の (ファイル数, 追加行数, 削除行数)。無い数は 0。"""
-    files = int(m.group(1)) if (m := re.search(r"(\d+) files? changed", stat)) else 0
-    ins = int(m.group(1)) if (m := re.search(r"(\d+) insertions?", stat)) else 0
-    dels = int(m.group(1)) if (m := re.search(r"(\d+) deletions?", stat)) else 0
-    return files, ins, dels
-
-
-def _included_fact(repo, p, d, checks) -> tuple[dict, str]:
-    """PR 1 本の (結果 JSON の項目, 承認資料の「含む PR」の 1 行)。d は gh pr view の出力、checks は CI の結果。"""
-    n = p.number
-    oid = (d.get("mergeCommit") or {}).get("oid") or ""
-    passed = sum(1 for c in checks if c.get("bucket") == "pass")
-    url = d.get("url") or f"https://github.com/{repo}/pull/{n}"
-    item = {
-        "kind": "pr",
-        "name": f"#{n}",
-        "result": str(d.get("state", "")).lower() or "unknown",
-        "url": url,
-        "title": d.get("title", ""),
-        "merge_commit": oid,
-        "checks_passed": passed,
-        "checks": len(checks),
-        "via": p.via,
-        "no_change": included.no_change(d),
-    }
-    facts = [str(d.get("state", "")), oid[:8] if oid else "—", f"CI {passed}/{len(checks)}"]
-    return item, included.included_row(n, d.get("title", ""), facts, p.via, included.no_change(d))
-
-
 def cmd_approval_facts(a):
     root = git_root(a.root)
     repo = repo_lib.owner_repo(root)
@@ -931,13 +889,33 @@ def cmd_approval_facts(a):
     data = pr_many(root, [p.number for p in prs], "number,title,body,state,mergeCommit,url")
 
     stat = git(root, "diff", "--shortstat", f"origin/{prod}...origin/{base}").stdout.strip()
-    files, ins, dels = _shortstat(stat)
+    files = int(m.group(1)) if (m := re.search(r"(\d+) files? changed", stat)) else 0
+    ins = int(m.group(1)) if (m := re.search(r"(\d+) insertions?", stat)) else 0
+    dels = int(m.group(1)) if (m := re.search(r"(\d+) deletions?", stat)) else 0
 
     items, rows = [], []
     for p in prs:
-        item, row = _included_fact(repo, p, data.get(p.number) or {}, pr_check_buckets(root, p.number))
-        items.append(item)
-        rows.append(row)
+        n, d = p.number, data.get(p.number) or {}
+        oid = (d.get("mergeCommit") or {}).get("oid") or ""
+        checks = pr_check_buckets(root, n)
+        passed = sum(1 for c in checks if c.get("bucket") == "pass")
+        url = d.get("url") or f"https://github.com/{repo}/pull/{n}"
+        items.append(
+            {
+                "kind": "pr",
+                "name": f"#{n}",
+                "result": str(d.get("state", "")).lower() or "unknown",
+                "url": url,
+                "title": d.get("title", ""),
+                "merge_commit": oid,
+                "checks_passed": passed,
+                "checks": len(checks),
+                "via": p.via,
+                "no_change": included.no_change(d),
+            }
+        )
+        facts = [str(d.get("state", "")), oid[:8] if oid else "—", f"CI {passed}/{len(checks)}"]
+        rows.append(included.included_row(n, d.get("title", ""), facts, p.via, included.no_change(d)))
 
     compare = f"https://github.com/{repo}/compare/{prev}...{dev}"
     path = approval_present(
@@ -1049,10 +1027,14 @@ def notes_prs(root, a):
 
 def issue_body(root, n):
     """gh issue view <n> --json body の本文。読めなければ StepError（gh が無い: 3）。"""
-    data = _view_json(root, "issue", n, "body")
+    r = gh_parts.view_json("issue", n, "body", cwd=str(root))
+    if r.returncode == 127 and "gh を実行できない" in r.stderr:
+        raise StepError("gh が無い", EXIT_PRECONDITION)
+    if r.returncode != 0:
+        raise StepError(f"gh issue view {n} が失敗: {r.stderr.strip()[:300]}")
     try:
-        return (data or {}).get("body") or ""
-    except AttributeError:
+        return (json.loads(r.stdout or "null") or {}).get("body") or ""
+    except (ValueError, AttributeError):
         raise StepError(f"gh issue view {n} の出力を読めない", 2)
 
 
@@ -1065,53 +1047,58 @@ def cmd_notes(a):
     reps, bad = [], []
     data = pr_many(root, [p.number for p in prs], "title,body,state,closingIssuesReferences", comments=True) if path else None
     notes = pr_notes(root, prs, skipped, reps, bad, data)
-    before = {note.number: note.changes for note in notes}
+    before = {n: items for n, items, *_ in notes}
     after, rep_items = replaced.apply(before, reps)  # 後の PR が置き換えた箇条を除く（#1834）
     rep_items += bad
     gone = sum(len(before[n]) - len(after[n]) for n in before)
-    bullets = [f"- {i}" for note in notes for i in after[note.number]]
-    risks = [f"- {i}" for note in notes for i in note.risks]
-    migration = [f"- {i}" for note in notes for i in note.migration]
+    bullets = [f"- {i}" for n, *_ in notes for i in after[n]]
+    risks = [f"- {i}" for _, _, rs, *_ in notes for i in rs]
+    migration = [f"- {i}" for *_, ms in notes for i in ms]
+    fallback = sum(1 for *_, by_title, _ in notes if by_title)
     if path:
-        metrics = _notes_metrics(a, notes, bullets, migration, skipped, gone, approval=str(path))
-        _notes_to_approval(root, a, path, prs, data, bullets, risks, migration, skipped, rep_items, metrics)
+        verified = [r for r in (a.verified or "").split(",") if r]
+        ref = a.ref or release_decl(root, a)[0]
+        decl = (release_decl(root, a)[0], repo_lib.owner_repo(root) or "", a.version, a.prs)
+        m = materials.approval_materials(root, decl, getattr(a, "check_state", None), prs, data, lambda n: issue_body(root, n))
+        results, machine = materials.check_lines(m), materials.risk_lines(m, bool(risks), materials.now_jst())
+        items = materials.write_approval(path, a.version, bullets, risks, verified, ref, migration, results, machine)
+        items += materials.items_of(m) + unmerged_items(skipped) + rep_items
+        emit(
+            result(
+                TOOL,
+                "ok",
+                f"提示物の欄を {len(notes)} 件の PR から書いた{unmerged_note(skipped)}",
+                items,
+                {
+                    "version": a.version,
+                    "prs": len(notes),
+                    "lines": len(bullets),
+                    "migration": len(migration),
+                    "approval": str(path),
+                    "unmerged": skipped,
+                    "replaced": gone,
+                },
+            )
+        )
         return
-    fallback = sum(1 for note in notes if note.by_title)
-    metrics = _notes_metrics(a, notes, bullets, migration, skipped, gone, fallback=fallback)
-    _notes_to_changelog(root, a, bullets, migration, skipped, rep_items, metrics)
-
-
-def _notes_metrics(a, notes, bullets, migration, skipped, gone, **extra):
-    """notes の結果の metrics。出口ごとの鍵（approval / fallback）は extra で migration と unmerged の間に入る。"""
-    return {
-        "version": a.version,
-        "prs": len(notes),
-        "lines": len(bullets),
-        "migration": len(migration),
-        **extra,
-        "unmerged": skipped,
-        "replaced": gone,
-    }
-
-
-def _notes_to_approval(root, a, path, prs, data, bullets, risks, migration, skipped, rep_items, metrics):
-    """承認資料の提示物の欄を書く。"""
-    verified = [r for r in (a.verified or "").split(",") if r]
-    base = release_decl(root, a)[0]
-    ref = a.ref or base
-    decl = (base, repo_lib.owner_repo(root) or "", a.version, a.prs)
-    m = materials.approval_materials(root, decl, getattr(a, "check_state", None), prs, data, lambda n: issue_body(root, n))
-    results, machine = materials.check_lines(m), materials.risk_lines(m, bool(risks), materials.now_jst())
-    items = materials.write_approval(path, a.version, bullets, risks, verified, ref, migration, results, machine)
-    items += materials.items_of(m) + unmerged_items(skipped) + rep_items
-    summary = f"提示物の欄を {metrics['prs']} 件の PR から書いた{unmerged_note(skipped)}"
-    emit(result(TOOL, "ok", summary, items, metrics))
-
-
-def _notes_to_changelog(root, a, bullets, migration, skipped, rep_items, metrics):
-    """CHANGELOG.md の版の節に利用者向けの変化を書く。"""
     items = write_notes(root, a.version, plugin_of(root, a), bullets, migration) + unmerged_items(skipped) + rep_items
-    emit(result(TOOL, "ok", f"{metrics['prs']} 件の PR の利用者向けの変化を書いた{unmerged_note(skipped)}", items, metrics))
+    emit(
+        result(
+            TOOL,
+            "ok",
+            f"{len(notes)} 件の PR の利用者向けの変化を書いた{unmerged_note(skipped)}",
+            items,
+            {
+                "version": a.version,
+                "prs": len(notes),
+                "lines": len(bullets),
+                "migration": len(migration),
+                "fallback": fallback,
+                "unmerged": skipped,
+                "replaced": gone,
+            },
+        )
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:

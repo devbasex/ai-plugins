@@ -16,7 +16,6 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NamedTuple
 
 import approved_commit as ac
 import gh_call
@@ -42,16 +41,6 @@ class IncludedPr:
 
     number: int
     via: int | None = None
-
-
-class PrNote(NamedTuple):
-    """PR 1 本の要約: 利用者向けの変化・未検証・残る危険・題名で代えたか・移行の手順の箇条。"""
-
-    number: int
-    changes: list[str]
-    risks: list[str]
-    by_title: bool
-    migration: list[str]
 
 
 def _in_range(m: merged_range.Merge) -> bool:
@@ -137,39 +126,25 @@ def pr_fields(numbers, cwd: str | None = None, comments: bool = False) -> tuple[
     nums = list(dict.fromkeys(int(n) for n in numbers))
     for i in range(0, len(nums), PER_PAGE):
         chunk = nums[i : i + PER_PAGE]
-        query = _graphql_query(chunk, fields)
+        alias = " ".join(f"p{n}: pullRequest(number: {n}) {{ {fields} }}" for n in chunk)
+        query = f"query($owner: String!, $name: String!) {{ repository(owner: $owner, name: $name) {{ {alias} }} }}"
         r = gh_call.gh(["api", "graphql", "-F", "owner={owner}", "-F", "name={repo}", "-f", f"query={query}"], cwd=cwd)
-        data = _read_repository(r)
-        if data is None:
+        try:
+            data = json.loads(r.stdout)["data"]["repository"]
+        except (ValueError, KeyError, TypeError):
+            data = None
+        if not isinstance(data, dict):
             return None, ("gh が無い" if r.returncode == 127 else (r.stderr or r.stdout).strip()[:300] or "応答を読めない")
         for n in chunk:
             d = data.get(f"p{n}")
-            out[n] = _normalize_pr(d, comments) if isinstance(d, dict) else None
+            if isinstance(d, dict):
+                d = {
+                    **d,
+                    "closingIssuesReferences": list((d.get("closingIssuesReferences") or {}).get("nodes") or []),
+                    **({"comments": list((d.get("comments") or {}).get("nodes") or [])} if comments else {}),
+                }
+            out[n] = d if isinstance(d, dict) else None
     return out, ""
-
-
-def _graphql_query(chunk, fields: str) -> str:
-    """chunk の番号を別名 `p<番号>` で並べた 1 本の GraphQL クエリ。"""
-    alias = " ".join(f"p{n}: pullRequest(number: {n}) {{ {fields} }}" for n in chunk)
-    return f"query($owner: String!, $name: String!) {{ repository(owner: $owner, name: $name) {{ {alias} }} }}"
-
-
-def _read_repository(r) -> dict | None:
-    """gh api graphql の応答の `data.repository`。読めなければ None。"""
-    try:
-        data = json.loads(r.stdout)["data"]["repository"]
-    except (ValueError, KeyError, TypeError):
-        return None
-    return data if isinstance(data, dict) else None
-
-
-def _normalize_pr(d: dict, comments: bool) -> dict:
-    """GraphQL の PR 1 件を gh pr view --json と同じ形へ（closingIssuesReferences と comments の nodes を取り出す）。"""
-    return {
-        **d,
-        "closingIssuesReferences": list((d.get("closingIssuesReferences") or {}).get("nodes") or []),
-        **({"comments": list((d.get("comments") or {}).get("nodes") or [])} if comments else {}),
-    }
 
 
 def read_prs(root: Path, prs, view, fields: str = "title,body,state", comments: bool = False) -> dict[int, dict]:
@@ -215,22 +190,15 @@ def require_merged(found, prs):
     return found
 
 
-def _merged(prs: list[IncludedPr], data: dict, skipped):
-    """マージされていない PR の番号を skipped へ足して飛ばし、残りの (PR, gh pr view の出力) を順に返す。"""
-    for p in prs:
-        d = data.get(p.number)
-        if unmerged(d):
-            skipped is not None and skipped.append(p.number)
-            continue
-        yield p, d
-
-
 def titles_of(prs: list[IncludedPr], data: dict, skipped=None) -> list[tuple[int, str]]:
     """PR ごとに (番号, 箇条)。マージされていない PR は載せず、番号を skipped へ足す。スプリント経由の PR
     （変化はスプリント PR の本文が持つ）と配布物の変化なしの PR は箇条にしない（#1885・#1686）。"""
     items, merged = [], []
-    for p, d in _merged(prs, data, skipped):
-        n = p.number
+    for p in prs:
+        n, d = p.number, data.get(p.number)
+        if unmerged(d):
+            skipped is not None and skipped.append(n)
+            continue
         try:
             title = d["title"].strip()
         except (TypeError, KeyError, AttributeError):
@@ -242,15 +210,18 @@ def titles_of(prs: list[IncludedPr], data: dict, skipped=None) -> list[tuple[int
     return items
 
 
-def notes_of(prs: list[IncludedPr], data: dict, skipped=None, replacing=None, unreadable=None) -> list[PrNote]:
-    """PR ごとに PrNote（番号・利用者向けの変化・未検証・残る危険・題名で代えたか・移行の手順）を返す。
+def notes_of(prs: list[IncludedPr], data: dict, skipped=None, replacing=None, unreadable=None) -> list[tuple]:
+    """PR ごとに (番号, 利用者向けの変化の箇条, 未検証・残る危険の箇条, 題名で代えたか, 移行の手順の箇条) を返す。
     マージされていない PR は配る中身に入らないため載せず、番号を skipped へ足す。replacing を渡すと本文の
     `## 置き換える箇条` を足し、形に合わない行を unreadable へ items の行として足す（#1834）。
     スプリント経由の PR は変化と移行の手順をスプリント PR の本文に任せて危険だけを返し、配布物の変化なしの PR は
     変化を返さない（#1885・#1686）。"""
     out = []
-    for p, d in _merged(prs, data, skipped):
-        n = p.number
+    for p in prs:
+        n, d = p.number, data.get(p.number)
+        if unmerged(d):
+            skipped is not None and skipped.append(n)
+            continue
         if not isinstance(d, dict) or not isinstance(d.get("title"), str):
             raise StepError(f"gh pr view {n} の出力を読めない", 2)
         body = d.get("body") or ""
@@ -263,7 +234,7 @@ def notes_of(prs: list[IncludedPr], data: dict, skipped=None, replacing=None, un
                 {"kind": "replacement", "name": f"#{n}", "result": "unreadable", "text": t} for t in bad
             )
         if p.via is not None or no_change(d):
-            out.append(PrNote(n, [], risks, False, []))
+            out.append((n, [], risks, False, []))
             continue
-        out.append(PrNote(n, items or [f"{d['title'].strip()}（#{n}）"], risks, not items, others.migration_items(body, n)))
+        out.append((n, items or [f"{d['title'].strip()}（#{n}）"], risks, not items, others.migration_items(body, n)))
     return require_merged(out, [p.number for p in prs])

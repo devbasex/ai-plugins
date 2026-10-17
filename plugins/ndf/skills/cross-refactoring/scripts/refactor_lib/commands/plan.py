@@ -288,7 +288,11 @@ def cmd_merge_plan(args: argparse.Namespace) -> None:
     remaining = _limited_commands(state, remaining)
 
     table = forecast.allocation_table(state)
-    _estimate_items(state, remaining, table)
+    # 項目の検証の見積りは、配分の `verify` と着手前に手元で走らせた範囲テストの実測の大きい方（#1334 決定 8）。
+    measured_verify = budget.measured_verify_minutes(state)
+    for item in remaining:
+        item["estimate"] = budget.item_estimate(table, str(item.get("technique")), bool(item["tests"]))
+        item["estimate"]["verify"] = max(float(item["estimate"]["verify"]), measured_verify)
     ranked = sorted(remaining, key=budget.rank_key)
 
     reserve = budget.plan_reserve(state, table)
@@ -302,31 +306,7 @@ def cmd_merge_plan(args: argparse.Namespace) -> None:
 
     state["items"] = new_items(selected)
     _decide_public_io(state, state["items"])
-    state["plan"] = _plan_record(state, elapsed, available, reserve, table)
-    _start_after_plan(state)
-    finish_phase(state, "plan")
-    if not state["items"]:
-        # 最終ゲートへ移すのは `readopt` の `no_fit` だけにする（#1743 決定 10）。
-        state["phase"] = "readopt"
-    statefile.save(path, state)
-    _report(state, available, len(skipped))
-    _emit_and_exit(state)
-
-
-def _estimate_items(state: dict[str, Any], items: list[dict[str, Any]], table: dict[str, Any]) -> None:
-    """項目ごとの見積りを置く。検証の見積りは、配分の `verify` と着手前に手元で走らせた範囲テストの実測の
-    大きい方（#1334 決定 8）。"""
-    measured_verify = budget.measured_verify_minutes(state)
-    for item in items:
-        item["estimate"] = budget.item_estimate(table, str(item.get("technique")), bool(item["tests"]))
-        item["estimate"]["verify"] = max(float(item["estimate"]["verify"]), measured_verify)
-
-
-def _plan_record(
-    state: dict[str, Any], elapsed: float, available: float, reserve: dict[str, float], table: dict[str, Any]
-) -> dict[str, Any]:
-    """改修計画の記録（`state["plan"]`）。"""
-    return {
+    state["plan"] = {
         "base_sha": git_out(work_dir(state), ["rev-parse", "HEAD"]),
         "elapsed_minutes": round(elapsed, 2),
         "available_minutes": round(available, 2),
@@ -335,16 +315,19 @@ def _plan_record(
         "table": table,
         "selected": [i["id"] for i in state["items"]],
     }
-
-
-def _start_after_plan(state: dict[str, Any]) -> None:
-    """計画の後の状態を置く。"""
     # 止まっていた時間の記録（#1491。計画の前の分は引き継ぐ。#1944）と採り直しの記録（#1743 決定 10）を置く。
     if not isinstance(state.get("pause"), dict):
         state["pause"] = pause.empty()
     state["readopt"] = {"round": 1, "events": []}
     # **実行時の値をすべて書き出す**（決定 24）。以後の手順は、この表と時計の比較だけで進む。
     state["limits"] = timeline.of_state(state)
+    finish_phase(state, "plan")
+    if not state["items"]:
+        # 最終ゲートへ移すのは `readopt` の `no_fit` だけにする（#1743 決定 10）。
+        state["phase"] = "readopt"
+    statefile.save(path, state)
+    _report(state, available, len(skipped))
+    _emit_and_exit(state)
 
 
 def _stop_without_time(path: Any, state: dict[str, Any], available: float, candidates: int) -> None:

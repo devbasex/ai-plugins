@@ -226,35 +226,28 @@ def _read_sprint_record(a, root, record_repo):
 
 
 def _closing_blocker(a, rec, record_repo):
-    kept_all = _release_blocker(a, rec)
-    if kept_all is not None or not a.with_verification or a.record_pr == 0:
-        return kept_all, None
-    return _verification_blocker(rec, record_repo)
-
-
-def _release_blocker(a, rec):
-    """配布の記録から見た、閉じられない理由。閉じてよければ None。"""
     stage = rec["stage"] or ""
+    kept_all = None
     if a.record_pr == 0:
-        return None  # 本番の記録なし: 閉じる条件（配布とリリース後テスト）を見ない
-    if a.record_pr == RECORD_UNKNOWN:
-        return UNKNOWN_REASON  # 記録を読めないので閉じない（#1875）
-    if not rec["found"] or not stage:
-        return "配布の記録が読めない"
-    if not (stage.startswith("本番") or stage.startswith("配布なし")):
-        return "本番への配布の前（本番への配布の後に閉じる）"
-    return None
-
-
-def _verification_blocker(rec, record_repo):
-    """リリース後テストの記録から見た (閉じられない理由か None, 条件ごとの判定か None)。"""
-    blk = rec["verify_block"]
-    if blk is None:
-        if (rec["stage"] or "").startswith("配布なし"):
-            return "配布なしの後のリリース後テストの記録が無い", None
-        return "本番の版のリリース後テストの記録が無い", None
-    verdicts = verification_verdicts(blk, record_repo)
-    return (None if verdicts is not None else "条件と課題の対応が読めない"), verdicts
+        pass  # 本番の記録なし: 閉じる条件（配布とリリース後テスト）を見ない
+    elif a.record_pr == RECORD_UNKNOWN:
+        kept_all = UNKNOWN_REASON  # 記録を読めないので閉じない（#1875）
+    elif not rec["found"] or not stage:
+        kept_all = "配布の記録が読めない"
+    elif not (stage.startswith("本番") or stage.startswith("配布なし")):
+        kept_all = "本番への配布の前（本番への配布の後に閉じる）"
+    verdicts = None
+    if kept_all is None and a.with_verification and a.record_pr != 0:
+        blk = rec["verify_block"]
+        if blk is None:
+            kept_all = (
+                "配布なしの後のリリース後テストの記録が無い" if stage.startswith("配布なし") else "本番の版のリリース後テストの記録が無い"
+            )
+        else:
+            verdicts = verification_verdicts(blk, record_repo)
+            if verdicts is None:
+                kept_all = "条件と課題の対応が読めない"
+    return kept_all, verdicts
 
 
 def _read_state_body(root, repo, n):
