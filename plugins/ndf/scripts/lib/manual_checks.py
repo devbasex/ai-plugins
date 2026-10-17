@@ -16,6 +16,7 @@ HEADING = "## 手動確認"
 ITEM = "手動確認"
 BEFORE_MERGE = "手動確認（マージ前）"
 SECTION = "検証手段"  # 要求の中の、手動確認の行を読む節
+_NONE = re.compile(r"^(無し|なし|不要|ない|-|—|―)(?:$|[（(。、\s])")  # 「手動確認は無い」と書いた 2 列目（#1675）
 _BOX = re.compile(r"^\s*-\s+\[( |x|X)\]\s+(#\d+\s+マージ前:.*)$")
 
 
@@ -26,7 +27,8 @@ class ManualRow(NamedTuple):
 
 
 def rows_of(text: str, issue: int) -> list[ManualRow]:
-    """要求の本文から手動確認の行を読む。「検証手段」の節の表の、項目が「手動確認」で始まる行だけを見る。"""
+    """要求の本文から手動確認の行を読む。「検証手段」の節の表の、項目が「手動確認」で始まる行だけを見る。
+    2 列目が「無し」の形（_NONE。「無し」「不要」「-」などの単独か、直後に括弧・句読点・空白が続く形）の行は落とす。"""
     import md  # Markdown のパーサーは要求を読むときだけ使う（merged-steps.py の経路で読み込まない）
 
     sec = md.section_named(text, SECTION)
@@ -39,7 +41,7 @@ def rows_of(text: str, issue: int) -> list[ManualRow]:
         for row in table.rows:
             item = (row[0] if row else "").strip()
             what = (row[1] if len(row) > 1 else "").strip()
-            if item.startswith(ITEM) and what:
+            if item.startswith(ITEM) and what and not _NONE.match(what):
                 out.append(ManualRow(issue, " ".join(what.split()), item == BEFORE_MERGE))
     return out
 
