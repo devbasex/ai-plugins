@@ -84,7 +84,7 @@
 | 範囲の PR | 直前の正式版のタグから終点（承認したコミットか、ベースブランチの先端）までに、ベースブランチへ merge commit か squash merge で入った PR と、スプリント経由の PR の和。版上げの PR と PR でない番号は含まない | 意味の変更 |
 | スプリント経由の PR | 範囲の PR のうち、merge commit でベースブランチへ入った PR の 2 つ目の親の側（スプリントブランチ）へ merge commit で入った PR。変化と移行の手順はスプリント PR の本文が集めて持つ | 追加 |
 | 承認の材料 | 承認資料が集める 5 つの材料。レビュー（cross-review のラウンド数と見送った指摘）・リファクタリング（採用と取り消しの件数）・全体テスト（コマンド・合否・件数）・設計文書の未確認・未実施のリリース後テスト | 追加 |
-| 配布物の変化なし | PR の本文の `## 利用者向けの変化` が「無し」だけを持つこと。節の無い本文（題名で代える）とは別に扱う | 追加 |
+| 配布物の変化なし | PR の本文の `## 利用者向けの変化` が「無し」だけを持つこと（「なし」も同じ。`gh_sections.NO_ITEMS` の語）。節の無い本文（題名で代える）とは別に扱う | 追加 |
 
 ## 機能一覧
 
@@ -107,9 +107,11 @@
 | `lib/merged_range.py` の `nested_merges`（新設） | merge commit の `<sha>^1..<sha>^2` の first-parent のログから `Merge pull request #N` の PR を拾う。`merges_in`・`with_heads` は変えない（I3） |
 | `release_lib/included.py` | `IncludedPr`（番号・経由）を足す。`release_range` が前のタグと終点を決めて範囲の PR を返し、`with_extra` が `--prs` との和を作る（I1・I2）。「含む PR」の行の組み立てと読み出しを持つ（I5） |
 | `release_lib/materials.py`（新設） | 承認の材料を読む: 検査の状態ディレクトリの結果 JSON・設計文書の `## 未確認のまま残ること`・課題の受け入れ条件とリリース後テストの表。`## 検査の結果` と `## 未検証・残る危険` に書く行と、無い材料の名前を返す。終了コードも出力も持たない。gh・git が読めなければ `StepError` を投げ（止めるのは呼ぶ側）、検査の状態の置き場が無いときは材料を `None` にして返す（I10） |
-| `lib/gh_sections.py` の `says_none`（新設） | 節があり「無し」だけを持つかを返す（配布物の変化なし） |
+| `lib/gh_sections.py` の `says_none`（新設） | 節があり、箇条が `NO_ITEMS`（「無し」・「なし」）の語だけかを返す（配布物の変化なし）。`section_items` が箇条なしとする語と同じ定数を使う |
+| `lib/gh_rest.py` の `pr_fields`（新設） | PR の番号の列と GraphQL の欄（`title`・`body`・`state`・`mergeCommit { oid }`・`closingIssuesReferences` など）を受け、`pr_head_branches` と同じ別名の形で 100 件ずつまとめて読む。番号 → 欄の dict を返し、読めなければ (None, 理由)。GraphQL が上限なら呼ぶ側が今の `pr_view` で PR ごとに読み直す |
+| `test-run.py` の `whole` | 結果 JSON の `items` に `{"ran": [<走らせた全体テストのコマンド>], "on_ci": <CI に任せたか>}` を足す（足すだけ） |
 | `lib/acceptance.py` | `sprint-close.py` の `verification_verdicts`・`IssueRows` を移して受け持つ（材料と閉じる判定が同じ規則で表を読む） |
-| `release-steps.py` | `changelog`・`notes`・`changed-plugins`・`approval-facts` が範囲の PR を使う。`notes --approval` が `--check-state` を受け、材料の節を書く |
+| `release-steps.py` | `changelog`・`notes`・`changed-plugins`・`approval-facts` が範囲の PR を使い、範囲の PR の欄は `gh_rest.pr_fields` で 1 ステップ 1 回（100 件ごと）にまとめて読む。`notes --approval` が `--check-state` を受け、材料の節を書く |
 | `skills/cross-review/scripts/drive.py` の `Drive.finish` | 結果 JSON の `items` に見送った指摘を `{"kind": "deferred", "path", "line", "summary"}` で足す |
 | `supervise_lib/queue.py` の `fill_queue_pr` | `{queue_state:<名>}` を、前のステージの名前の一致するプランの状態ディレクトリで置き換える（無ければ空） |
 | `supervise_lib/release_templates.py` の `_dev_approval_steps` | 出す PR が `{queue_pr:check}` のとき、`notes --approval` へ `--check-state {queue_state:check}` を足す |
@@ -214,7 +216,7 @@ classDiagram
 | `notes --version V --prs P...`（`--approval` なし） | `changelog` と同じ PR から版の節を書き直す（I4） |
 | `notes ... --approval A [--check-state D]` | PR は今どおり「含む PR」から読む（範囲を求め直さない。#1274）。スプリント経由の行は変化と移行の手順を足さず、危険だけを足す。配布物の変化なしの PR は「配る中身」に載せない。`## 検査の結果` と `## 未検証・残る危険` の材料の行を書く。`items` に `{"kind": "material", "name": <材料>, "result": "written"|"missing", "lines": N}` を 5 行足す |
 | `changed-plugins --prs P...` | 候補を出す PR = 範囲の PR（起点は `--since` か前のタグ、終点は `HEAD`）と `--prs` の和 |
-| `approval-facts` | 「含む PR」の行に印を足す（下）。PR を読む項目に `body` を足し、1 回で読む（I9） |
+| `approval-facts` | 「含む PR」の行に印を足す（下）。PR を読む欄に `body` を足し、`pr_fields` で範囲の PR をまとめて 1 回で読む（I9） |
 
 `--check-state` は `notes --approval` だけが受ける。`--approval` なしで渡すと引数の誤り（2）。値が空文字か、ディレクトリが無いときは、検査の 3 つの材料を無い材料として書いて進む（I10）。
 
@@ -260,11 +262,11 @@ classDiagram
 | --- | --- | --- |
 | レビュー | `<D>/NN-review.out` の最後の結果 JSON（`tool` が `cross-review-drive`）の `metrics.rounds` と `items` の `kind: deferred` | `--check-state` が無い・ファイルが無い・JSON が無い |
 | リファクタリング | `<D>/NN-refactor.out` の最後の結果 JSON（`cross-refactoring-drive`）の `metrics` の採用と取り消しの件数 | 同上 |
-| 全体テスト | `<D>/NN-test-all.out` の最後の結果 JSON（`test-run`）の `status`・`failed_tests`・`caused`。コマンドは `<D>/../<プラン名>.json` の `test-all` のステップの `cmd` から `git pull ... && ` を外したもの | 同上 |
+| 全体テスト | `<D>/NN-test-all.out` の最後の結果 JSON（`test-run`）の `status`・`failed_tests`・`caused`。コマンドは同じ結果 JSON の `items` の `ran`（`test-run.py whole` が宣言 `.ndf/project.json` の `test.suites[].command` を `test_strategy` で解いて実際に走らせたもの）。`on_ci` が真なら「CI に任せた」と書く。プランの `test-all` の `cmd`（`test-run.py whole --pr …`）は読まない | 同上。`ran` の無い古い出力はコマンドを書かず合否だけ書く |
 | 設計文書の未確認 | 「含む PR」の各 PR が閉じる課題（`closingIssuesReferences`）について、`git show origin/<base>:issues/issue-<番号>-design.md` の `## 未確認のまま残ること` の表の行（`無し` だけの節は 0 件） | 閉じる課題のどれにも設計文書が無い |
 | 未実施のリリース後テスト | 閉じる課題の本文の `## 受け入れ条件`（`acceptance.criteria`）から、`--prs` の PR のコメントの `## リリース後テスト` の表（`対象の版:` が版の基底と一致するもの。`acceptance.verification_verdicts`）に合格の行が無い条件 | 閉じる課題のどれにも受け入れ条件が無い |
 
-`NN` は同じステップの `.out` が複数あるとき番号の最も大きいもの（再開で増える）。閉じる課題は、`notes --approval` が PR を読む 1 回の呼び出し（`pr_notes`）へ `closingIssuesReferences` を足して読む。課題の本文は課題ごとに 1 回読む（I9）。
+`NN` は同じステップの `.out` が複数あるとき番号の最も大きいもの（再開で増える）。閉じる課題は、`notes --approval` が範囲の PR をまとめて読む 1 回の呼び出し（`pr_notes` が使う `pr_fields`）へ `closingIssuesReferences` を足して読む。課題の本文は課題ごとに 1 回読む（I9）。
 
 ### cross-review の結果 JSON（足すだけ）
 
@@ -289,7 +291,7 @@ sequenceDiagram
   INC->>G: merge commit ごとに log ^1..^2
   INC->>G: squash の head を 100 件ずつ
   INC-->>RS: 範囲の PR（経由つき）
-  RS->>G: PR ごとに title,body,state を 1 回
+  RS->>G: 範囲の PR の title,body,state を 100 件ずつ 1 回（pr_fields）
   RS-->>P: 版の節へ追加（変化なし・経由を除く）
   P->>RS: notes --prs S
   RS-->>P: 版の節を範囲の PR から書き直す
@@ -312,8 +314,8 @@ sequenceDiagram
 
 | 条件 | 実現方式 |
 | --- | --- |
-| GitHub への問い合わせが範囲の PR の数に比例する（1 ステップで同じ PR を 2 回読まない） | 範囲は git だけで求め、squash の head は `gh_rest.pr_head_branches` で 100 件ずつ。PR の中身は各コマンドで 1 PR 1 回（`approval-facts` は `body` を同じ呼び出しへ足す）。課題の本文は課題ごとに 1 回 |
-| 所要の増分 | 2026-10-17 の実測: 範囲 15 本の first-parent のログ 0.003 秒、入れ子の 15 回のログ 計 0.04 秒、`gh pr view` 1 回 0.40 秒。10.17.75 の後の範囲の PR は 24 本（15＋9）で、`changelog`・`notes`・`approval-facts`・`changed-plugins`・`notes --approval` の 5 ステップがそれぞれ約 23 本多く読むと、1 ステップ約 9 秒・プラン 1 本で約 46 秒の増分。材料は設計文書の `git show` と課題の本文で、閉じる課題 4 件なら約 2 秒 |
+| GitHub への問い合わせが範囲の PR の数に比例する（1 ステップで同じ PR を 2 回読まない） | 範囲は git だけで求め、squash の head は `gh_rest.pr_head_branches` で 100 件ずつ。PR の中身も各コマンドで `gh_rest.pr_fields` が 100 件ずつ 1 回で読む（`pr_notes`・`changed-plugins` の候補・`approval-facts` の 1 PR 1 回の `gh pr view` を置き換える。`approval-facts` は `body` を同じ呼び出しへ足す）。課題の本文は課題ごとに 1 回 |
+| 所要の増分 | 2026-10-17 の実測: 範囲 15 本の first-parent のログ 0.003 秒、入れ子の 15 回のログ 計 0.04 秒、`gh pr view` 1 回 0.40 秒、GraphQL の別名で PR 24 本の title・body・state・`closingIssuesReferences` を 1 回で読むと 0.53 秒。10.17.75 の後の範囲の PR は 24 本（15＋9）で、1 PR 1 回のままなら 5 ステップ（`changelog`・`notes`・`approval-facts`・`changed-plugins`・`notes --approval`）がそれぞれ約 23 回多く起動し、プラン 1 本で約 115 回・約 46 秒の増分になる。`pr_fields` でまとめると 1 ステップ 1 回（100 件まで）になり、増分は gh の起動 0 回・1 ステップ約 0.1 秒（0.53 秒と今の 1 回 0.40 秒の差）。材料は設計文書の `git show` と課題の本文で、閉じる課題 4 件なら約 2 秒 |
 | 範囲の PR の処理を 1 か所に置く | `release_lib/included.py` の `release_range` だけが範囲を求め、4 コマンドが同じものを使う |
 | 古いプランと承認資料を読める | 引数は足すだけで、`--check-state` の無いプランもそのまま流れる。印の無い「含む PR」の行は印なしとして読む |
 
@@ -345,7 +347,7 @@ first-parent を外すと、`merges_in` を使う `check-trigger.py` の検査�
 
 ### 決定 4: 配布物の外の変更を利用者の更新案内に出さないため、「無し」だけの `## 利用者向けの変化` を配布物の変化なしとして扱う
 
-今は「無し」の PR も節の無い PR も題名で代えて CHANGELOG へ載る。`gh_sections.says_none` で「節があり無しだけ」を見分け、その PR を CHANGELOG の版の節と「配る中身」から外し、「含む PR」の行に `配布物の変化なし` の印を付ける（前提 2・1686-2）。節の無い本文は今どおり題名で代える（書き忘れを黙って落とさない）。
+「無し」と「なし」は同じに扱う。`section_items` が箇条なしとする語（`NO_ITEMS`）と別の語で判定すると、「なし」と書いた PR が題名で CHANGELOG へ載り、印も付かない。今は「無し」の PR も節の無い PR も題名で代えて CHANGELOG へ載る。`gh_sections.says_none` で「節があり無しだけ」を見分け、その PR を CHANGELOG の版の節と「配る中身」から外し、「含む PR」の行に `配布物の変化なし` の印を付ける（前提 2・1686-2）。節の無い本文は今どおり題名で代える（書き忘れを黙って落とさない）。
 
 変化なしを PR のラベルや変更したパスから決める形は採らない。PR の本文の節は `/ndf:pr` が必ず書かせており、書き手の判断が入る唯一の場所である。
 
@@ -391,13 +393,14 @@ PR のコメントから読む形は採らない。見送りの返信は文面�
 | 1885-4 / I1 | `--prs` に範囲の PR と同じ番号を渡すと、版の節と「含む PR」に 1 回だけ並ぶ | 和を取らずに連結すると落ちる |
 | 1885-5 / I2 | `release/v...` の head の PR が範囲の PR に入らない | 除外の規則を外すと落ちる |
 | 1686-1 / I5 | スプリントブランチへ実装 PR 2 本を merge commit で入れ、スプリント PR を入れたリポジトリで `approval-facts` を打つと「含む PR」が 3 行で、実装 PR の 2 行に経由の印がある | `nested_merges` を呼ばないと 1 行になり落ちる |
-| 1686-2 | `## 利用者向けの変化` が「- 無し」の PR が「含む PR」に印つきで載り、版の節と「配る中身」に載らない。節の無い PR は今どおり題名で載る | `says_none` を見ずに題名で代えると載って落ちる。節の無い PR まで外すと落ちる |
+| 1686-2 | `## 利用者向けの変化` が「- 無し」の PR と「- なし」の PR が「含む PR」に印つきで載り、版の節と「配る中身」に載らない。節の無い PR は今どおり題名で載る | `says_none` を見ずに題名で代えると載って落ちる。「無し」だけで判定すると「なし」の PR が載って落ちる。節の無い PR まで外すと落ちる |
 | 1686-3 / I6 | 実装 PR とスプリント PR が同じ変化を持つとき、版の節と「配る中身」にその変化が 1 回だけ並ぶ | スプリント経由の PR の変化を足すと 2 回になり落ちる |
 | I3 | `merges_in` の返す PR が入れ子のマージを含まない | `merges_in` から `--first-parent` を外すと落ちる |
 | 1488-1 | 見送り 1 件を持つ review の出力を置いた状態ディレクトリで `notes --approval --check-state` を打つと、`## 検査の結果` にラウンド数と `パス:行` の行が出る | `kind: deferred` を読まないと落ちる |
 | 1488-1（供給側） | 見送りを持つ修正の結果ファイルで `Drive.finish` を通すと、結果 JSON の `items` に `kind: deferred` が path・line つきで出る | 集める関数を外すと落ちる |
 | 1488-2 | refactor の出力から採用と取り消しの件数が出る | 件数を metrics から読まないと落ちる |
-| 1488-3 | test-all の出力とプランから、コマンド・合否・件数が出る | コマンドの前置き（`git pull ... &&`）を外さないと落ちる |
+| 1488-3 | 宣言の suite のコマンドで `test-run.py whole` を走らせた出力から、そのコマンド・合否・件数が出る。CI に任せる戦略の出力では「CI に任せた」と出る | コマンドをプランの `test-all` の `cmd` から読むと `test-run.py whole` が出て落ちる。`ran` を足さないと落ちる |
+| 非機能（PR の読み出し） | 範囲の PR 3 本で `changelog` を打つと、gh の代役が受ける PR の読み出しが 1 回 | PR ごとに `gh pr view` を呼ぶと 3 回になり落ちる |
 | 1488-4 | 閉じる課題の設計文書の `## 未確認のまま残ること` の 2 行が、課題番号つきで `## 未検証・残る危険` に出る。`無し` の節は 0 行 | 設計文書を読まないと落ちる |
 | 1488-5 | 受け入れ条件 3 つのうち 1 つに合格の行がある表を PR のコメントに置くと、残り 2 つが課題番号と条件の番号つきで出る。表が無ければ 3 つ出る | 表の合否を見ないと 3 つ出て落ちる |
 | 1488-6 / I7 | 材料も PR の危険も無いと「記載が無い」の 1 行に無い材料の 6 つの名前。一部だけ無いと、ある材料の行の後に無い材料の行 | 今の `PR の本文に記載が無い` を出すと落ちる |
