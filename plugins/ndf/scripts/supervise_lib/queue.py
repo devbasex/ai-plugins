@@ -72,13 +72,10 @@ def queue_prs(items: list[dict]) -> list[str]:
     配布の計画（フェーズが「配布」で始まる）の Pull Request は含めない（開発版の後に本番をステージで流すとき）。"""
     out: list[str] = []
     for i in items:
-        rep = Path(i.get("report") or "")
-        if i.get("result") != "完了" or not rep.is_file():
+        text = _report_text(i)
+        if text is None or re.search(r"^- フェーズ: 配布", text, re.M):
             continue
-        if re.search(r"^- フェーズ: 配布", rep.read_text(), re.M):
-            continue
-        m = re.search(r"^- Pull Request: (.*)$", rep.read_text(), re.M)
-        n = pr_number(m.group(1).strip()) if m else ""
+        n = _report_pr(text)
         if n and n not in out:
             out.append(n)
     return sorted(out, key=int)
@@ -108,13 +105,27 @@ QUEUE_PR = re.compile(r"\{queue_pr:([A-Za-z0-9._-]+)\}")  # 名前の一致す�
 QUEUE_STATE = re.compile(r"\{queue_state:([A-Za-z0-9._-]+)\}")  # 名前の一致する計画の状態ディレクトリ（#1488）
 
 
-def plan_pr(item: dict) -> str:
-    """完了した計画の報告の Pull Request の番号。無ければ空。"""
+REPORT_PR = re.compile(r"^- Pull Request: (.*)$", re.M)  # 計画の報告の Pull Request の行
+
+
+def _report_text(item: dict) -> str | None:
+    """完了した計画の報告の本文。完了していないか報告が無ければ None。"""
     rep = Path(item.get("report") or "")
     if item.get("result") != "完了" or not rep.is_file():
-        return ""
-    m = re.search(r"^- Pull Request: (.*)$", rep.read_text(), re.M)
+        return None
+    return rep.read_text()
+
+
+def _report_pr(text: str) -> str:
+    """報告の本文の Pull Request の番号。無ければ空。"""
+    m = REPORT_PR.search(text)
     return pr_number(m.group(1).strip()) if m else ""
+
+
+def plan_pr(item: dict) -> str:
+    """完了した計画の報告の Pull Request の番号。無ければ空。"""
+    text = _report_text(item)
+    return _report_pr(text) if text is not None else ""
 
 
 def named(plan: str, name: str) -> bool:
