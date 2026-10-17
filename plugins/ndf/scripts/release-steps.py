@@ -1054,51 +1054,46 @@ def cmd_notes(a):
     bullets = [f"- {i}" for n, *_ in notes for i in after[n]]
     risks = [f"- {i}" for _, _, rs, *_ in notes for i in rs]
     migration = [f"- {i}" for *_, ms in notes for i in ms]
-    fallback = sum(1 for *_, by_title, _ in notes if by_title)
     if path:
-        verified = [r for r in (a.verified or "").split(",") if r]
-        ref = a.ref or release_decl(root, a)[0]
-        decl = (release_decl(root, a)[0], repo_lib.owner_repo(root) or "", a.version, a.prs)
-        m = materials.approval_materials(root, decl, getattr(a, "check_state", None), prs, data, lambda n: issue_body(root, n))
-        results, machine = materials.check_lines(m), materials.risk_lines(m, bool(risks), materials.now_jst())
-        items = materials.write_approval(path, a.version, bullets, risks, verified, ref, migration, results, machine)
-        items += materials.items_of(m) + unmerged_items(skipped) + rep_items
-        emit(
-            result(
-                TOOL,
-                "ok",
-                f"提示物の欄を {len(notes)} 件の PR から書いた{unmerged_note(skipped)}",
-                items,
-                {
-                    "version": a.version,
-                    "prs": len(notes),
-                    "lines": len(bullets),
-                    "migration": len(migration),
-                    "approval": str(path),
-                    "unmerged": skipped,
-                    "replaced": gone,
-                },
-            )
-        )
+        metrics = _notes_metrics(a, notes, bullets, migration, skipped, gone, approval=str(path))
+        _notes_to_approval(root, a, path, prs, data, bullets, risks, migration, skipped, rep_items, metrics)
         return
+    fallback = sum(1 for *_, by_title, _ in notes if by_title)
+    metrics = _notes_metrics(a, notes, bullets, migration, skipped, gone, fallback=fallback)
+    _notes_to_changelog(root, a, bullets, migration, skipped, rep_items, metrics)
+
+
+def _notes_metrics(a, notes, bullets, migration, skipped, gone, **extra):
+    """notes の結果の metrics。出口ごとの鍵（approval / fallback）は extra で migration と unmerged の間に入る。"""
+    return {
+        "version": a.version,
+        "prs": len(notes),
+        "lines": len(bullets),
+        "migration": len(migration),
+        **extra,
+        "unmerged": skipped,
+        "replaced": gone,
+    }
+
+
+def _notes_to_approval(root, a, path, prs, data, bullets, risks, migration, skipped, rep_items, metrics):
+    """承認資料の提示物の欄を書く。"""
+    verified = [r for r in (a.verified or "").split(",") if r]
+    base = release_decl(root, a)[0]
+    ref = a.ref or base
+    decl = (base, repo_lib.owner_repo(root) or "", a.version, a.prs)
+    m = materials.approval_materials(root, decl, getattr(a, "check_state", None), prs, data, lambda n: issue_body(root, n))
+    results, machine = materials.check_lines(m), materials.risk_lines(m, bool(risks), materials.now_jst())
+    items = materials.write_approval(path, a.version, bullets, risks, verified, ref, migration, results, machine)
+    items += materials.items_of(m) + unmerged_items(skipped) + rep_items
+    summary = f"提示物の欄を {metrics['prs']} 件の PR から書いた{unmerged_note(skipped)}"
+    emit(result(TOOL, "ok", summary, items, metrics))
+
+
+def _notes_to_changelog(root, a, bullets, migration, skipped, rep_items, metrics):
+    """CHANGELOG.md の版の節に利用者向けの変化を書く。"""
     items = write_notes(root, a.version, plugin_of(root, a), bullets, migration) + unmerged_items(skipped) + rep_items
-    emit(
-        result(
-            TOOL,
-            "ok",
-            f"{len(notes)} 件の PR の利用者向けの変化を書いた{unmerged_note(skipped)}",
-            items,
-            {
-                "version": a.version,
-                "prs": len(notes),
-                "lines": len(bullets),
-                "migration": len(migration),
-                "fallback": fallback,
-                "unmerged": skipped,
-                "replaced": gone,
-            },
-        )
-    )
+    emit(result(TOOL, "ok", f"{metrics['prs']} 件の PR の利用者向けの変化を書いた{unmerged_note(skipped)}", items, metrics))
 
 
 def build_parser() -> argparse.ArgumentParser:
