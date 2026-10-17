@@ -33,6 +33,7 @@ from supervise_lib.release_templates import release_verify_step
 from supervise_lib.sprint_routes import (
     MVV_PACES,
     dev_channel_of,
+    has_record,
     has_release_template,
     pace_decl,
     record_pr_ref,
@@ -223,8 +224,8 @@ def close_plan(a, repo: str) -> dict:
             "進め方": "fast",
             "steps": [
                 *_spec_pr_steps(a, refs),
-                *merge_steps(a, next="close" if record_pr == "0" else "release-verify"),
-                *([] if record_pr == "0" else [release_verify_step(a.name, refs, record_pr)]),
+                *merge_steps(a, next="release-verify" if has_record(record_pr) else "close"),
+                *([release_verify_step(a.name, refs, record_pr)] if has_record(record_pr) else []),
                 _close_step(a, repo, record_pr, issues),
                 *_retro_refine_steps(a, refs, stats),
             ],
