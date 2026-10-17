@@ -137,7 +137,7 @@ ai-plugins/
 | [docs/ndf-plugin-reference.md](docs/ndf-plugin-reference.md) | NDFプラグイン詳細リファレンス |
 | [docs/ndf-experiments.md](docs/ndf-experiments.md) | NDF の実験版の台帳（試している仕組み・使った結果・行き先） |
 | [docs/specifications/](docs/specifications/) | 完了済みplan/issue由来の確定仕様 |
-| [docs/presentations/](docs/presentations/) | 勉強会などで使うスライド資料（Marp形式）とビルド手順。**発表日時点の記録で、以後の構成変更には追随しない** |
+| [docs/presentations/](docs/presentations/) | 勉強会などで使うスライド資料。生成スクリプト（pptxgenjs）・台本・構成メモを資料ごとのディレクトリに置く（作り方は `release` の `form-slide.md`）。**発表日時点の記録で、以後の構成変更には追随しない** |
 | [docs/articles/](docs/articles/README.md) | 社外ブログへ載せる記事の正本。**書いた日時点の記録で、以後の構成変更には追随しない** |
 | [docs/claude-code-skills-survey/](docs/claude-code-skills-survey/01-findings.md) | Claude Code Skills調査レポート（3 本） |
 | [docs/development-history/](docs/development-history/) | 2026-09-02 までの開発履歴と知見。**以降の振り返りは、起点の issue か Pull Request のコメントに残す**（`/ndf:retrospective`） |
