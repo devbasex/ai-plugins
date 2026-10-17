@@ -247,7 +247,7 @@ def read_unverified(bodies: dict[int, str], verdicts: dict, repo: str) -> tuple[
 # --- 承認資料の行 ----------------------------------------------------------------
 
 
-def _where(d: Deferred) -> str:
+def _deferred_place(d: Deferred) -> str:
     if d.path and d.line is not None:
         return f"`{d.path}:{d.line}` "
     return f"`{d.path}` " if d.path else ""
@@ -258,7 +258,7 @@ def check_lines(m: Materials) -> list[str]:
     out = []
     if m.review is not None:
         out.append(f"- レビュー: cross-review {m.review.rounds} ラウンド、見送った指摘 {len(m.review.deferred)} 件")
-        out += [f"  - {_where(d)}{d.summary}".rstrip() for d in m.review.deferred]
+        out += [f"  - {_deferred_place(d)}{d.summary}".rstrip() for d in m.review.deferred]
     if m.refactor is not None:
         out.append(f"- リファクタリング: 採用 {m.refactor.adopted} 件 / 取り消し {m.refactor.reverted} 件")
     if (w := m.whole_test) is not None:
@@ -317,7 +317,7 @@ def write_sections(lines: list[str], risks: list[str], machine: list[str], resul
     lines[at:at] = [CHECK_HEADING, "", *results, ""]
 
 
-def closed_issues(prs, data: dict) -> list[int]:
+def issues_closed_by(prs, data: dict) -> list[int]:
     """含む PR が閉じる課題の番号（GitHub の closingIssuesReferences と本文の closing keywords の和。昇順）。"""
     found: set[int] = set()
     for p in prs:
@@ -327,13 +327,13 @@ def closed_issues(prs, data: dict) -> list[int]:
     return sorted(found)
 
 
-def gather(root: Path, decl: tuple, check_state, prs, data: dict, read_issue) -> Materials:
+def approval_materials(root: Path, decl: tuple, check_state, prs, data: dict, read_issue) -> Materials:
     """承認の材料。decl は (ベースブランチ, owner/name, 版, --prs)。prs は「含む PR」、data はその gh pr view の出力
     （comments つき）、read_issue(n) は課題の本文（読めなければ StepError）。リリース後テストの表は --prs の PR の本文と
     コメントから読む。"""
     base, repo, version, sprint_prs = decl
     review, refactor, whole = read_check(check_state, root)
-    issues = closed_issues(prs, data)
+    issues = issues_closed_by(prs, data)
     texts = [(data.get(n) or {}).get("body") or "" for n in sprint_prs]
     texts += [(c or {}).get("body") or "" for n in sprint_prs for c in (data.get(n) or {}).get("comments") or []]
     verdicts = acceptance.version_verdicts("\n".join(texts), version, repo)

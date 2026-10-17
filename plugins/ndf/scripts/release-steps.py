@@ -534,8 +534,12 @@ def pr_many(root, prs, fields="title,body,state", comments=False):
 
 
 def section_prs(root, a):
-    """CHANGELOG の版の節に並べる PR の候補と前のタグ（included.section_range。#1885）。"""
-    plugin = plugin_of(root, a)
+    """CHANGELOG の版の節に並べる PR の候補と前のタグ（included.section_range。#1885）。配るプラグインが決まらなければ
+    --prs だけ（止めるのは版の節を書く側。PR の読み出しの失敗を先に返す）。"""
+    try:
+        plugin = plugin_of(root, a)
+    except StepError:
+        return included.with_extra([], a.prs), None
     prev = release_tag_before(root, plugin, f"{plugin}--v{base_of(a.version)}")
     return included.section_range(root, prev, prev and release_decl(root, a)[0], a.prs), prev
 
@@ -1055,7 +1059,7 @@ def cmd_notes(a):
         verified = [r for r in (a.verified or "").split(",") if r]
         ref = a.ref or release_decl(root, a)[0]
         decl = (release_decl(root, a)[0], repo_lib.owner_repo(root) or "", a.version, a.prs)
-        m = materials.gather(root, decl, getattr(a, "check_state", None), prs, data, lambda n: issue_body(root, n))
+        m = materials.approval_materials(root, decl, getattr(a, "check_state", None), prs, data, lambda n: issue_body(root, n))
         results, machine = materials.check_lines(m), materials.risk_lines(m, bool(risks), materials.now_jst())
         items = materials.write_approval(path, a.version, bullets, risks, verified, ref, migration, results, machine)
         items += materials.items_of(m) + unmerged_items(skipped) + rep_items
