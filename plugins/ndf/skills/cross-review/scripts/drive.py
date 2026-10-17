@@ -38,9 +38,10 @@ import post_queue  # noqa: E402  一時的な失敗の流し直し（#1843）
 import assignee_env  # noqa: E402
 import step_result as sr  # noqa: E402
 from drive_pause import Stop  # noqa: E402
-from loop_drive import call, durable_identity, keep_finished, parse_vars, relaunch_seats, review_status, write_review_answer  # noqa: E402,F401  テストは `call` をこのモジュールの上で差し替える
+from loop_drive import call, durable_identity, keep_finished, parse_vars, relaunch_seats, result_args, review_status, write_review_answer  # noqa: E402,F401  テストは `call` をこのモジュールの上で差し替える
 
 TOOL = "cross-review-drive"
+PLACE_ARGS = frozenset({"--worktree"})  # 置き場だけを変える init の引数。完了の記録の比較から除く（#1263 の I4）
 DOCS02 = SKILL / "docs" / "02-fix-and-rotation.md"
 
 
@@ -376,12 +377,13 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
 
     # --- 起動: 耐久の記録を開き、耐久ワークフローを始めるか続けて、止まりか終わりを待つ ---
     def finished(self, out) -> bool:
-        """記録した終わりを返してよいか（I10）。状態のファイルが消えていれば頭から流し、head の比べ方は `keep_finished` が決める。"""
+        """記録した終わりを返してよいか（I10・#1263）。状態のファイルが消えていれば頭から流し、head と引数の比べ方は `keep_finished` が決める。"""
         tmp = out.get("tmp") if isinstance(out, dict) and (out.get("result") or {}).get("status") == "ok" else None
         if not tmp or not (Path(tmp) / f"cross-review-pr{self.pr}-state.json").is_file():
             return False
         recorded = out.get("head")
-        return keep_finished(recorded, self.pr_head(tmp) if recorded and not self.reopen else None, self.reopen)
+        current = self.pr_head(tmp) if recorded and not self.reopen else None
+        return keep_finished(recorded, current, self.reopen, out.get("args"), result_args(self.init_args, PLACE_ARGS))
 
     def run(self) -> tuple[dict, int]:
         identity = self.identity()
@@ -457,8 +459,8 @@ def review_drive(pr: int, rotate_mode: str, init_args: list[str]) -> dict:
     d = Drive(pr, rotate_mode, init_args)
     seq, stage = 0, "init"
 
-    def outcome(res: dict, head: str | None = None) -> dict:  # head は終わりの時点の PR の head（#1340 の I10）
-        return {"result": res, "code": dp.exit_code(res), "tmp": d.v.get("TMP_DIR"), "head": head}
+    def outcome(res: dict, head: str | None = None) -> dict:  # head は終わりの時点の PR の head（#1340 の I10）・args は結果を変える引数（#1263）
+        return {"result": res, "code": dp.exit_code(res), "tmp": d.v.get("TMP_DIR"), "head": head, "args": result_args(init_args, PLACE_ARGS)}
 
     for _ in range(STEP_LIMIT):
         try:

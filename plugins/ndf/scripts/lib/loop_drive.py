@@ -18,28 +18,73 @@ def durable_identity(tmp: Path | None, pr: int) -> str:
     return str(tmp.resolve()) if tmp is not None else f"{Path.cwd().resolve()}#{pr}"
 
 
-def rerun_reason(recorded_head: str | None, current_head: str | None, forced: bool) -> str | None:
-    """完了した実行の回を返さずに新しく始める理由。返してよければ `None`（#1340 の I10・決定 2・3）。
+def result_args(init_args: list[str], ignore: frozenset[str] | set[str] = frozenset()) -> dict[str, list[list[str]]]:
+    """結果を変える引数（#1263 の決定 1）。`init` へ渡す引数を鍵ごとの値の並びにし、置き場・出力だけを変える鍵（`ignore`）を除く。
 
-    差分を足したかは PR の head で分かる。比べられない（どちらかが無い）ときは前回の結果を返す側に倒す。
-    GitHub の一時的な不調のたびに完了したループがもう 1 回回ると費用が掛かるため。#1263 が引数の比較を足す。
+    鍵は `--` で始まる語で、`--name=value` は鍵と値に分ける。値は次の `--` の語までの語の並び。同じ鍵の繰り返しは
+    出現の順に並べる（`--model` の順は結果を変える）。鍵の順は比べない。最初の `--` の語より前の語は鍵 `""` に置く。
+    """
+    out: dict[str, list[list[str]]] = {}
+    vals: list[str] | None = None
+    for word in init_args:
+        if word.startswith("--"):
+            key, eq, val = word.partition("=")
+            vals = [val] if eq else []
+            if key not in ignore:  # 除く鍵の値は、どこにも置かない並びへ読み捨てる
+                out.setdefault(key, []).append(vals)
+            continue
+        if vals is None:
+            vals = []
+            out.setdefault("", []).append(vals)
+        vals.append(word)
+    return out
+
+
+def args_diff(recorded: dict, current: dict) -> list[str]:
+    """2 つの `result_args` で値の違う鍵の名前（順は並べ替えた順）。"""
+    return sorted(k for k in set(recorded) | set(current) if recorded.get(k) != current.get(k))
+
+
+def rerun_reason(
+    recorded_head: str | None,
+    current_head: str | None,
+    forced: bool,
+    recorded_args: dict | None = None,
+    current_args: dict | None = None,
+) -> str | None:
+    """完了した実行の回を返さずに新しく始める理由。返してよければ `None`（#1340 の I10・#1263 の I1・I2）。
+
+    `--reopen` → head → 結果を変える引数の順に見て、最初の理由を返す。比べられない項目（どちらかが無い）は飛ばす。
+    GitHub の一時的な不調や古い記録のたびに完了したループがもう 1 回回ると費用が掛かるため。
     """
     if forced:
         return "--reopen が渡されたため"
     if recorded_head and current_head and recorded_head != current_head:
         return f"完了の時点の head {recorded_head[:7]} から {current_head[:7]} へ進んでいるため"
+    if recorded_args is not None and current_args is not None:
+        names = args_diff(recorded_args, current_args)
+        if names:
+            return f"完了の時点と結果を変える引数が違うため（{'・'.join(n or '(位置の引数)' for n in names)}）"
     return None
 
 
-def keep_finished(recorded_head: str | None, current_head: str | None, forced: bool) -> bool:
-    """完了した実行の回の結果をそのまま返してよいか。理由を標準エラーへ書く（#1340 の I10）。
+def keep_finished(
+    recorded_head: str | None,
+    current_head: str | None,
+    forced: bool,
+    recorded_args: dict | None = None,
+    current_args: dict | None = None,
+) -> bool:
+    """完了した実行の回の結果をそのまま返してよいか。理由を標準エラーへ書く（#1340 の I10・#1263 の I1〜I3）。
 
-    終わりの時点の head から今の PR の head が進んだか `--reopen` なら返さず、新しい実行の回の `init` がラウンドを足す。
-    比べられないとき（head を持たない古い記録・今の head を取れない）は前回の結果を返す。
+    `--reopen`・head の進み・結果を変える引数の違いのどれかがあれば返さず、新しい実行の回を始める。
+    比べられない項目（head か引数を持たない古い記録・今の head を取れない）は飛ばし、そのことを知らせる。
     """
-    reason = rerun_reason(recorded_head, current_head, forced)
+    if recorded_args is None and not forced:
+        print("ℹ 完了の記録が引数を持たないため、引数を比べない（足すなら --reopen）", file=sys.stderr)
+    reason = rerun_reason(recorded_head, current_head, forced, recorded_args, current_args)
     if reason:
-        print(f"↻ {reason}、ラウンドを足す", file=sys.stderr)
+        print(f"↻ {reason}、新しい実行の回を始める", file=sys.stderr)
         return False
     if not (recorded_head and current_head):
         print("ℹ head を比べられないため前回の結果を返す（足すなら --reopen）", file=sys.stderr)
