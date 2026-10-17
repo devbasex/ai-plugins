@@ -247,5 +247,6 @@ graph TD
 - [`supervise_lib/limits.py`](../../plugins/ndf/scripts/supervise_lib/limits.py)・[`flow.py`](../../plugins/ndf/scripts/supervise_lib/flow.py)・[`engine.py`](../../plugins/ndf/scripts/supervise_lib/engine.py)・[`steps.py`](../../plugins/ndf/scripts/supervise_lib/steps.py)・[`state.py`](../../plugins/ndf/scripts/supervise_lib/state.py)・[`slow.py`](../../plugins/ndf/scripts/supervise_lib/slow.py)・[`claude.py`](../../plugins/ndf/scripts/supervise_lib/claude.py)・[`lib/slow_step.py`](../../plugins/ndf/scripts/lib/slow_step.py)
 - [ndf-supervise-resume-pr.md](ndf-supervise-resume-pr.md)（前の実行の範囲と、再開の Pull Request の読み直し）
 - [ndf-supervise-step-budgets.md](ndf-supervise-step-budgets.md)（ステップの時間の枠。ステップの数の上限とは別）
+- [ndf-supervise-base-sync.md](ndf-supervise-base-sync.md)（戻りの輪 `merge → base-return` と `RETURN_LIMIT`）
 - `development-workflow` の [references/interrupt-resume.md](../../plugins/ndf/skills/development-workflow/references/interrupt-resume.md)（落ちたプランを `--from` で流し直す手順）
 - #1909 #1676 #1623 #1496（この形を決めた課題）、#1917 #2003（取り込みの経路と戻りの上限）

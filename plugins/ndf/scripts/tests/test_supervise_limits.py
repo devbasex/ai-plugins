@@ -16,6 +16,7 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS / "lib"))
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from merged_lib.base_sync import RETURN_LIMIT  # noqa: E402
 from supervise_lib import engine, limits  # noqa: E402
 from supervise_lib.plan import ON_FAIL_ONLY  # noqa: E402
 from supervise_lib.slow import SlowAction  # noqa: E402
@@ -149,6 +150,11 @@ def test_the_longest_path_equals_the_longest_simple_path_in_every_template(plans
             best = max(best, len(path))
             stack += [(d, (*path, d)) for d in graph[sid] if d not in path]
         assert limits.longest_path(plan) == best, name
+
+
+def test_the_return_limit_fits_in_the_rounds_the_limit_counts():
+    """戻りの輪は FIX_ROUNDS 回として上限に入る。base-return が許す戻りの回数がそれを超えると、戻りきる前に上限で止まる。"""
+    assert RETURN_LIMIT <= limits.FIX_ROUNDS
 
 
 # --- L2・I2: ステップを足すと書き出しの計算が上限を増やす ---

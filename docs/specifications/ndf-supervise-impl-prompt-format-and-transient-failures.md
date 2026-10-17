@@ -255,6 +255,8 @@ cross-refactoring の送信は `push_fix` を通らず、整形しない。
 
 - [`supervise_lib/templates.py`](../../plugins/ndf/scripts/supervise_lib/templates.py)・[`verify_steps.py`](../../plugins/ndf/scripts/supervise_lib/verify_steps.py)・[`design_stage.py`](../../plugins/ndf/scripts/supervise_lib/design_stage.py)・[`decl.py`](../../plugins/ndf/scripts/supervise_lib/decl.py)・[`lib/formatting.py`](../../plugins/ndf/scripts/lib/formatting.py)・[`lib/result_posts.py`](../../plugins/ndf/scripts/lib/result_posts.py)・[`lib/design_results.py`](../../plugins/ndf/scripts/lib/design_results.py)・[`lib/waits.py`](../../plugins/ndf/scripts/lib/waits.py)
 - [quality-gates-design-match.md](quality-gates-design-match.md) — `standard` の実装プランで `test-limited` と `pr` の間に置く設計との突き合わせ
+- [ndf-supervise-base-sync.md](ndf-supervise-base-sync.md) — `head` の後に置くベースブランチの取り込み（`base-sync`）。その `next` が整形の並びの先頭へ向く
+- [ndf-supervise-plan-limits-and-slow-watch.md](ndf-supervise-plan-limits-and-slow-watch.md) — 整形と範囲の静的解析のステップと修正のループを数える上限
 - [ndf-supervise-step-budgets.md](ndf-supervise-step-budgets.md) — `impl` の `timeout`。`design_stage.rewrite` は `prompt` だけを書き換えて `timeout` を残す
 - [ndf-sprint-acceptance-check-and-prepush-fix.md](ndf-sprint-acceptance-check-and-prepush-fix.md) — `sync_checks` と、`pr` の push 前の検査の不合格を受ける `fix-push`
 - [cross-review-transient-post-failure.md](cross-review-transient-post-failure.md) — cross-review の投稿の一時的な失敗（別の意味の同じ語）
