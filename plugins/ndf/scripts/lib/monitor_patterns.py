@@ -206,9 +206,13 @@ def _strip_ansi(text: str) -> str:
 # claude の `--output-format json` 出力に現れる致命パターン。
 # 標準出力側に出るため err.log ではなく stdout.log を見る。
 CLAUDE_STDOUT_FATAL = [
-    # 承認失敗。空配列 `[]` は正常なので「非空」だけを致命とする。
-    re.compile(r'"permission_denials"\s*:\s*\[\s*\{'),
     re.compile(r'"is_error"\s*:\s*true'),
+]
+
+# claude の stdout.log の承認の拒否。空配列 `[]` は正常なので「非空」だけを当てる。致命にするかは
+# 標準出力の JSON の終わり方で決める（`subtype: success`・`is_error: false` なら警告。#1513 の決定 7）。
+CLAUDE_STDOUT_DENIALS = [
+    re.compile(r'"permission_denials"\s*:\s*\[\s*\{'),
 ]
 
 # claude の stdout.log に出る利用上限（理由は `usage_limit`）。err.log と stdout.log の
