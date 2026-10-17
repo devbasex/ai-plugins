@@ -222,6 +222,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 耐久の記録 | `durable_store` | 1 回の起動が持つ DBOS の SQLite のファイル（~/.local/state/ndf/dbos/<種類>-<鍵>.sqlite） | — | — | — |
 | 実行の鍵 | `run_key` | 起動を識別する文字列（run-<プランのパスの sha256 の先頭 12 字> など）。耐久の記録のファイル名と executor_id に使う | — | — | — |
 | 実行の回 | `attempt` | 同じ実行の鍵の中で、耐久ワークフローを頭から流した 1 回。ID の末尾の番号 | — | — | — |
+| 結果を変える引数 | — | cross-review・cross-refactoring の drive が `init` へ渡す引数のうち、置き場・出力だけを変えるものを除いた残り。完了の記録に残し、打ち直しで今回と比べる | — | — | — |
 | 資源のタグ | `resource_tag` | ステップが使う、共有する外部の枠の名前（今は graphql だけ） | — | — | — |
 | 資源の枠 | `resource_limit` | 資源のタグごとの、同時に流せるステップの本数の上限（.ndf/supervise.json の queue.resources） | — | — | — |
 | 重なりの組 | `overlap_pair` | 同じステージの 2 本のプランで、触るファイルが包含で重なるか同じ共有の一覧に当たるもの。同時には流さない | — | — | — |
@@ -447,7 +448,7 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 代表の兆候 | — | cross-refactoring の提案の smell に観点の識別子が書かれたとき、写す先の兆候 | — | — | `docs/specifications/cross-refactoring-verify-and-final-gate.md` |
 | ありふれた語 | — | cross-refactoring の呼び手の書き換えの判定で、リファクタリング計画の起点のツリーのコードのファイルの 20% 以上かつ 3 ファイル以上に現れる識別子。変えた名前から除き、追加の行に現れてよい | — | — | `docs/specifications/cross-refactoring-verify-and-final-gate.md` |
 | 使える時間 | — | `cross-refactoring` のリファクタリング計画の時点で、採る改善項目の見積りを収める時間（想定最大時間 − 経過 − バッファ）。`state.plan.available_minutes` | — | — | `docs/specifications/cross-refactoring-implementation-window-and-readopt.md` |
-| 止まっていた時間 | — | `cross-refactoring` をリファクタリング計画の後に中断してから、init か drive.py を打ち直して再開するまでの時間。再開の時刻 − 最後の動きの時刻で測り、想定最大時間に数えない | — | — | `docs/specifications/cross-refactoring-implementation-window-and-readopt.md` |
+| 止まっていた時間 | — | `cross-refactoring` を中断してから、init か drive.py を打ち直して再開するまでの時間。リファクタリング計画の前の中断を含む。再開の時刻 − 最後の動きの時刻で測り、想定最大時間に数えない | — | — | `docs/specifications/cross-refactoring-implementation-window-and-readopt.md` |
 | 最後の動きの時刻 | — | `cross-refactoring` の作業ディレクトリ（`.cross_refactoring/`）の直下のファイルのうち、最も新しい更新時刻。状態ファイル・CLI のログ・テストのログ・結果ファイルと、心拍のファイルを含む。止まっていた時間の起点 | — | — | `docs/specifications/cross-refactoring-implementation-window-and-readopt.md` |
 | 心拍のファイル | — | `cross-refactoring` の作業ディレクトリ直下の `cross-refactoring-rf<ID>-alive`。出力の有無によらず、CLI の監視とテストの実行が待っている間、心拍の間隔（15 秒。見回りの間隔に依らない）ごとに更新時刻を今にする。中断で止まると更新も止まり、最後の動きの時刻が稼働の終わりを指す | — | — | `docs/specifications/cross-refactoring-implementation-window-and-readopt.md` |
 | 実装の終わり | `implement_end_at` | `cross-refactoring` で実装の CLI を止める唯一の時刻。最終ゲート修正の打ち切り − バッファ − 採っていて未検証の改善項目の検証の見積り。項目ごとの見積りでは止めない | — | — | `docs/specifications/cross-refactoring-implementation-window-and-readopt.md` |
