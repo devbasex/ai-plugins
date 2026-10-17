@@ -4122,9 +4122,23 @@
     {
       "term": "台本",
       "context": "ndf-slide",
-      "meaning": "ページごとの読み上げの原稿と配分秒数。スピーカーノートへ入れる",
+      "meaning": "ページごとの見出しと読み上げの原稿。配分秒数は見出しに付けてよい（任意）。スピーカーノートへ入れる",
       "source": "",
-      "pending_source": "issues/issue-2065-requirements.md"
+      "pending_source": "issues/issue-2065-design.md"
+    },
+    {
+      "term": "トーン＆マナーのファイル",
+      "context": "ndf-slide",
+      "meaning": "プロジェクトのトーン＆マナーの値を持つ JSON（slides/theme.json）。書いた項目だけが汎用テンプレートの既定値を上書きする",
+      "source": "",
+      "pending_source": "issues/issue-2065-design.md"
+    },
+    {
+      "term": "尺",
+      "context": "ndf-slide",
+      "meaning": "台本の読み上げにかかる時間。読み上げの字数を 350 字/分で割って出す",
+      "source": "",
+      "pending_source": "issues/issue-2065-design.md"
     }
   ]
 }
