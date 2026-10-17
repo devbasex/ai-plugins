@@ -514,10 +514,10 @@ def cmd_changed_plugins(a):
     )
 
 
-def pr_view(root, n, fields):
-    """gh pr view <n> --json <fields> を読む。GraphQL が上限なら gh_parts が REST で読み直す。"""
-    what = f"gh pr view {n}"
-    r = gh_parts.view_json("pr", n, fields, cwd=str(root))
+def _view_json(root, kind, n, fields):
+    """gh <kind> view <n> --json <fields> の JSON。読めなければ StepError（gh が無い: 3）。"""
+    what = f"gh {kind} view {n}"
+    r = gh_parts.view_json(kind, n, fields, cwd=str(root))
     if r.returncode == 127 and "gh を実行できない" in r.stderr:
         raise StepError("gh が無い", EXIT_PRECONDITION)
     if r.returncode != 0:
@@ -526,6 +526,11 @@ def pr_view(root, n, fields):
         return json.loads(r.stdout or "null")
     except ValueError:
         raise StepError(f"{what} の出力を読めない", 2)
+
+
+def pr_view(root, n, fields):
+    """gh pr view <n> --json <fields> を読む。GraphQL が上限なら gh_parts が REST で読み直す。"""
+    return _view_json(root, "pr", n, fields)
 
 
 def pr_many(root, prs, fields="title,body,state", comments=False):
@@ -1044,14 +1049,10 @@ def notes_prs(root, a):
 
 def issue_body(root, n):
     """gh issue view <n> --json body の本文。読めなければ StepError（gh が無い: 3）。"""
-    r = gh_parts.view_json("issue", n, "body", cwd=str(root))
-    if r.returncode == 127 and "gh を実行できない" in r.stderr:
-        raise StepError("gh が無い", EXIT_PRECONDITION)
-    if r.returncode != 0:
-        raise StepError(f"gh issue view {n} が失敗: {r.stderr.strip()[:300]}")
+    data = _view_json(root, "issue", n, "body")
     try:
-        return (json.loads(r.stdout or "null") or {}).get("body") or ""
-    except (ValueError, AttributeError):
+        return (data or {}).get("body") or ""
+    except AttributeError:
         raise StepError(f"gh issue view {n} の出力を読めない", 2)
 
 
