@@ -2922,7 +2922,7 @@
       "context": "ndf-workflow",
       "meaning": "cross-review・cross-refactoring の drive が `init` へ渡す引数のうち、置き場・出力だけを変えるものを除いた残り。完了の記録に残し、打ち直しで今回と比べる",
       "code": "result_args",
-      "pending_source": "issues/issue-1263-design.md"
+      "source": "docs/specifications/cross-drive-rerun-pause-and-denials.md"
     },
     {
       "term": "資源のタグ",
@@ -4066,19 +4066,19 @@
       "term": "スプリント経由の PR",
       "context": "ndf-release",
       "meaning": "範囲の PR のうち、merge commit でベースブランチへ入った PR の 2 つ目の親の側（スプリントブランチ）へ merge commit で入った PR。変化と移行の手順はスプリント PR の本文が集めて持つ",
-      "source": ""
+      "source": "docs/specifications/ndf-release-approval-included-prs.md"
     },
     {
       "term": "承認の材料",
       "context": "ndf-release",
       "meaning": "承認資料が集める 5 つの材料。レビュー（cross-review のラウンド数と見送った指摘）・リファクタリング（採用と取り消しの件数）・全体テスト（コマンド・合否・件数）・設計文書の未確認・未実施のリリース後テスト",
-      "source": ""
+      "source": "docs/specifications/ndf-release-approval-materials.md"
     },
     {
       "term": "配布物の変化なし",
       "context": "ndf-release",
       "meaning": "PR の本文の `## 利用者向けの変化` が「無し」（「なし」も同じ）だけを持つこと。承認資料の「含む PR」の行に印を付け、CHANGELOG の版の節と「配る中身」には載せない。節の無い本文（題名で代える）とは別に扱う",
-      "source": ""
+      "source": "docs/specifications/ndf-release-approval-included-prs.md"
     }
   ]
 }
