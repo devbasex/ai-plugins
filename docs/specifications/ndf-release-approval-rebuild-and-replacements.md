@@ -59,7 +59,7 @@
 | ---: | --- | --- | --- |
 | 1 | `approval-facts` が `--approval` で前の承認資料を読み、自分の節だけを作り直す。`notes` と `changed-plugins` の節も残す | 残る危険の中身が作り直しを越えるには、その節を「作り直す側」から外す必要がある。後のステップの節は同じプランで書き直されるので、残しても古い中身は残らない | 監督の写し（`copy_presentation`）で合わせる（どのステップの承認ゲートにも使う汎用の処理で、承認資料の節の持ち主を知らない）。`approval-facts` が承認資料へ直接書く（写し先と一時の出力が同じファイルになり、`shutil.copyfile` が失敗する） |
 | 2 | 残す節の錨を「前の資料で直前にあった `approval-facts` の節」にし、その後へ前と同じ順で戻す。錨が無くなれば `## 同意を求めること` の前に置く | `## 指示書の変更` は `## 2.` と `## 同意を求めること` の間に生成するため、1 回目と 2 回目で並びが変わらない | 錨を直前の任意の節（手の節を含む）にする（手の節が消されると錨が無くなり、後ろの手の節が連鎖して同意の前へ動く） |
-| 3 | `notes --approval` は既にある `## 未検証・残る危険` へ無い箇条だけを足し、足したときだけ「PR の本文に記載が無い」の行を外す | 節が作り直しを越えて残るようになると、出し直しで加わった PR の危険が載らなくなる。何を集めるかは #1488 が持ち、ここでは足し方だけを決める | 節を作り直す（手で足した危険が消え、同じ現象が残る危険の節で起き続ける） |
+| 3 | `notes --approval` は既にある `## 未検証・残る危険` へ無い箇条だけを足す。「PR の本文に記載が無い」の行は #1488 で機械の行の 1 つになり、書くたびに消して入れ直す | 節が作り直しを越えて残るようになると、出し直しで加わった PR の危険が載らなくなる。何を集めるかは #1488 が持ち、ここでは足し方だけを決める | 節を作り直す（手で足した危険が消え、同じ現象が残る危険の節で起き続ける） |
 | 4 | 置き換えは後の PR の本文の `## 置き換える箇条` に `- #<前の PR>: <前の PR の箇条の 1 行目>` で書き、箇条の文で指す。比べるときは両側の末尾の `（#N…）` を外す | 書き手が CHANGELOG の案から写せ、読む人も何が外れるかを本文だけで読める。末尾の括弧を外すため、スプリント PR が実装の PR の番号を付けた箇条もそのまま写せる | PR 番号だけで指す（スプリント PR は箇条を 10 以上持ち、1 つだけを外せない）。番号と順番で指す（並びを数えて書く必要があり、写し間違いを本文から見つけられない） |
 | 5 | 一致しない置き換えは何も除かず、終了コード 0 のまま `not_found` で知らせる | 意図しない箇条を黙って外すと、利用者が読む CHANGELOG から変化が抜け、承認する人も気づけない | 前方一致や近い文で除く |
 | 6 | 宣言（`.ndf/instructions.json`）が無いリポジトリでは、指示書を `AGENTS.md` と `CLAUDE.md` に絞る（`release_lib/instructions.py` の `UNDECLARED_FILES`）。宣言があれば `files` に従う | #1834 の受け入れ条件 8 のとおり | 指示書のチェックの既定（`instructions_lib/declaration.py` の `DEFAULT_FILES`。`KIRO.md` を含む）を使う（設計の段階の案。受け入れ条件の文と食い違う） |
@@ -74,7 +74,7 @@
 | 節 | 書き手 | `approval-facts --approval` の作り直しで |
 | --- | --- | --- |
 | H1・`## 1. 対象を開くためのもの`・`## 2. 承認の判断に使うもの`・`## 指示書の変更`・`## 同意を求めること`・`## 戻し方` | `approval-facts` | 作り直す（`APPROVAL_OWN`） |
-| `## 未検証・残る危険`・`## 移行の手順` | `notes --approval` | 残す（後の `explain` が危険は無い行だけを足し、移行の手順は書き直す） |
+| `## 検査の結果`・`## 未検証・残る危険`・`## 移行の手順` | `notes --approval` | 残す（後の `explain` が検査の結果と危険の機械の行を入れ替え、危険の PR の箇条は無い行だけを足し、移行の手順は書き直す。材料は [ndf-release-approval-materials.md](ndf-release-approval-materials.md)） |
 | `## 版を上げる他のプラグイン` | `changed-plugins --approval` | 残す（後の `others` が書き直す） |
 | それ以外の `## ` の節 | 人・conductor（手で足した節） | 残す |
 | CHANGELOG の版の節 `## [<plugin> <版>]` | `notes`（`write_notes`） | — |
@@ -110,8 +110,8 @@
 | `plugins/ndf/scripts/lib/merged_range.py` の `subject_pr_number` | first-parent のログの 1 行（親の列・件名）から PR 番号を読む。`merges_in` と同じ規則 |
 | `plugins/ndf/scripts/release_lib/replaced.py` | `replacements_in(body, n)` が PR の本文の置き換える箇条（`Replacement`: 書いた PR・指す PR・文）と形に合わない行を返し、`apply(items, replacements)` が PR ごとの箇条から一致するものを除いて `items[]` の行を返す。`comparable` が比べる形に整える |
 | `plugins/ndf/scripts/release-steps.py` の `cmd_approval_facts`・`kept_sections` | `--approval` を受け、承認資料を書く前に `carry.kept` で残す節を読み（読めなければ `StepError`（2））、`approval_present` の出力へ `carry.insert_kept` で差し込む |
-| `release-steps.py` の `pr_notes`・`cmd_notes`・`write_approval` | `pr_notes` が本文の `## 置き換える箇条` も読み、`cmd_notes` が `replaced.apply` の後の箇条で CHANGELOG と欄を書く。`write_approval` は残る危険の節があれば `others.merge_lines` で足す |
-| `plugins/ndf/scripts/release_lib/others.py` の `merge_lines` | 既にある節へ無い行だけを足し、足したときだけ `drop` の行を外す。節が無ければ `put_section` で作る |
+| `release-steps.py` の `pr_notes`・`cmd_notes` と `release_lib/materials.py` の `write_approval`・`write_sections` | `pr_notes` が本文の `## 置き換える箇条` も読み、`cmd_notes` が `replaced.apply` の後の箇条で CHANGELOG と欄を書く。`write_sections` は残る危険の節の機械の行を消して入れ直し、PR の本文の箇条は無い行だけを足す |
+| `plugins/ndf/scripts/release_lib/others.py` の `put_section` | 節の中身を入れ替え、節が無ければ作る |
 | `plugins/ndf/scripts/supervise_lib/release_templates.py` の `_dev_approval_steps` | `facts` のステップの `approval-facts` へ `--approval {approval}`（`presentation_to` と同じパス）を渡す |
 
 ```mermaid
@@ -129,7 +129,7 @@ graph TD
     subgraph 配る中身の記述
         NO[notes]
         RP[replaced]
-        PS[others.merge_lines / put_section]
+        PS[materials.write_sections / others.put_section]
     end
     T --> AF
     T --> NO
