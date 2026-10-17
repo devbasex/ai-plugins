@@ -695,8 +695,25 @@ def cmd_release(a):
     bump.require_bumped(root, plugin, ver)
 
     git(root, "push", "-q", "-u", "origin", "HEAD")
+    release_pr, release_commit = _release_dev(root, a, base, branch, plugin, ver, plugins)
 
-    # 開発版の PR（release/v<版> → ベースブランチ）
+    metrics = {
+        "channel": a.channel,
+        "version": ver,
+        "release_pr": release_pr,
+        "main_pr": None,
+        "tag": None,
+        "merge_commit": release_commit,
+        "plugins": ",".join(plugins),
+    }
+    items = [{"kind": "pr", "name": f"#{release_pr}", "result": "merged", "base": base}]
+    if a.channel == "dev":
+        emit(result(TOOL, "ok", f"{plugin} v{ver} を {base} へ出した（#{release_pr}）", items, metrics))
+    _release_prod(root, a, base, prod, plugin, ver, approved, release_pr, items, metrics)
+
+
+def _release_dev(root, a, base, branch, plugin, ver, plugins):
+    """開発版の PR（release/v<版> → ベースブランチ）を確保してマージし、(PR の番号, merge commit) を返す。"""
     pr = find_pr(root, branch, base, states=("OPEN", "MERGED"))
     if pr and pr["state"] == "MERGED":
         # マージ済みの PR へ後から積んだコミットは GitHub が開き直さずベースブランチに入らない。入っていなければ PR を作り直す
@@ -723,21 +740,11 @@ def cmd_release(a):
         pr = {"number": create_pr(root, base, branch, f"Release: {plugin} v{ver}", body), "state": "OPEN"}
     release_pr = pr["number"]
     release_commit = wait_and_merge(root, release_pr, ci_wait=a.ci_wait) if pr["state"] == "OPEN" else merge_commit_of(root, release_pr)
+    return release_pr, release_commit
 
-    metrics = {
-        "channel": a.channel,
-        "version": ver,
-        "release_pr": release_pr,
-        "main_pr": None,
-        "tag": None,
-        "merge_commit": release_commit,
-        "plugins": ",".join(plugins),
-    }
-    items = [{"kind": "pr", "name": f"#{release_pr}", "result": "merged", "base": base}]
-    if a.channel == "dev":
-        emit(result(TOOL, "ok", f"{plugin} v{ver} を {base} へ出した（#{release_pr}）", items, metrics))
 
-    # 本番: ベースブランチ → 本番チャネル、タグ、GitHub Release（利用者の承認を得てから呼ぶ）
+def _release_prod(root, a, base, prod, plugin, ver, approved, release_pr, items, metrics):
+    """本番: ベースブランチ → 本番チャネル、タグ、GitHub Release（利用者の承認を得てから呼ぶ）。"""
     tag = f"{plugin}--v{ver}"
     git(root, "fetch", "-q", "origin", "--tags")
     if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode == 0:
