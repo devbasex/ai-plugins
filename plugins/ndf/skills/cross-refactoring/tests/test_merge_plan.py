@@ -256,7 +256,12 @@ def test_the_rerun_after_no_available_time_builds_the_plan_again(planned, cmd_pl
         _run(cmd_plan)
     state = read_state(path)
     # 止まっていた 4 分をずらした（経過 5 分 → 1 分）。計画の前の記録は計画へ引き継ぐ
-    state["pause"] = {"seconds": 240, "shifted_seconds": 240, "legacy": False, "events": [{"reason": "shifted", "shifted": True, "seconds": 240}]}
+    state["pause"] = {
+        "seconds": 240,
+        "shifted_seconds": 240,
+        "legacy": False,
+        "events": [{"reason": "shifted", "shifted": True, "seconds": 240}],
+    }
     write_state(path, state)
     _run(cmd_plan)
     state = read_state(path)

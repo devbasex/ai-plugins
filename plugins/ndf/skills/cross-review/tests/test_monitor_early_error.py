@@ -159,9 +159,7 @@ _DENIAL = {"tool_name": "Bash", "tool_use_id": "x", "tool_input": {"command": "g
 
 
 def _claude_json(subtype: str = "success", is_error: bool = False, denials: int = 1) -> str:
-    return json.dumps(
-        {"type": "result", "subtype": subtype, "is_error": is_error, "permission_denials": [_DENIAL] * denials}
-    )
+    return json.dumps({"type": "result", "subtype": subtype, "is_error": is_error, "permission_denials": [_DENIAL] * denials})
 
 
 def _claude_paths(monitor_mod, tmp_path: pathlib.Path):

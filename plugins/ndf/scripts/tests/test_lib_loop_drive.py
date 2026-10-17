@@ -96,7 +96,19 @@ def test_durable_identity_without_tmp_is_cwd_and_pr(tmp_path: Path, monkeypatch)
 
 
 def test_result_args_splits_keys_keeps_repeats_in_order_and_drops_place_args():
-    args = ["--round-test", "pytest -q", "--model=claude=opus", "--model", "codex=gpt", "--no-code-metrics", "--scope", "a", "b", "--worktree", "/w"]
+    args = [
+        "--round-test",
+        "pytest -q",
+        "--model=claude=opus",
+        "--model",
+        "codex=gpt",
+        "--no-code-metrics",
+        "--scope",
+        "a",
+        "b",
+        "--worktree",
+        "/w",
+    ]
     got = loop_drive.result_args(args, {"--worktree"})
     assert got == {
         "--round-test": [["pytest -q"]],

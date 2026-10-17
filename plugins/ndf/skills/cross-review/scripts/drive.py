@@ -38,7 +38,8 @@ import post_queue  # noqa: E402  一時的な失敗の流し直し（#1843）
 import assignee_env  # noqa: E402
 import step_result as sr  # noqa: E402
 from drive_pause import Stop  # noqa: E402
-from loop_drive import call, durable_identity, keep_finished_output, parse_vars, relaunch_seats, result_args, review_status, write_review_answer  # noqa: E402,F401  テストは `call` をこのモジュールの上で差し替える
+from loop_drive import call, durable_identity, keep_finished_output, parse_vars  # noqa: E402,F401  テストは `call` をこのモジュールの上で差し替える
+from loop_drive import relaunch_seats, result_args, review_status, write_review_answer  # noqa: E402
 
 TOOL = "cross-review-drive"
 PLACE_ARGS = frozenset({"--worktree"})  # 置き場だけを変える init の引数。完了の記録の比較から除く（#1263 の I4）
@@ -456,8 +457,8 @@ def review_drive(pr: int, rotate_mode: str, init_args: list[str]) -> dict:
     d = Drive(pr, rotate_mode, init_args)
     seq, stage = 0, "init"
 
-    def outcome(res: dict, head: str | None = None) -> dict:  # head は終わりの時点の PR の head（#1340 の I10）・args は結果を変える引数（#1263）
-        return {"result": res, "code": dp.exit_code(res), "tmp": d.v.get("TMP_DIR"), "head": head, "args": result_args(init_args, PLACE_ARGS)}
+    def outcome(res: dict, head: str | None = None) -> dict:  # head は終わりの PR の head（#1340 の I10）・args は結果を変える引数（#1263）
+        return dict(result=res, code=dp.exit_code(res), tmp=d.v.get("TMP_DIR"), head=head, args=result_args(init_args, PLACE_ARGS))
 
     for _ in range(STEP_LIMIT):
         try:

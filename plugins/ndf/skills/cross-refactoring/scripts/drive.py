@@ -67,7 +67,7 @@ ALIVE_PHASES = ("plan", "add-tests", "implement", "fix")  # 監視が心拍の�
 RESUME_AS = {"fix": "verify", "final-fix": "final"}
 GO_FINAL = 2  # refactor.py の終了コード: 最終ゲートへ直に進む
 ABORT = 4  # refactor.py の終了コード: 中断
-PLACE_ARGS = frozenset({"--worktree-root", "--plan-file"})  # 置き場と出力の書き出し先だけを変える init の引数。完了の記録の比較から除く（#1263 の I4）
+PLACE_ARGS = frozenset({"--worktree-root", "--plan-file"})  # 置き場と書き出し先だけを変える引数。完了の記録の比較から除く（#1263 の I4）
 CR_DRIVE = HERE.parents[1] / "cross-review" / "scripts" / "drive.py"
 FOCUS = (
     "項目をまたいだ整合を見る。個々の改善項目の妥当性は範囲テストで判定済みのため対象外とする。"
@@ -152,7 +152,7 @@ class Drive(AssigneeLaunch):
         rc, out = self.call(_refactor_cmd(*args))
         vs = parse_vars(out)
         if rc == ABORT or rc not in ok:  # 子が出した中断の理由の 1 行（ABORT_DETAIL）を添える（#1944 の決定 6）
-            raise Stop(f"refactor.py {args[0]} が終了コード {rc} で止まった" + (f": {vs['ABORT_DETAIL']}" if vs.get("ABORT_DETAIL") else ""), rc)
+            raise Stop(f"refactor.py {args[0]} が終了コード {rc} で止まった" + (f": {why}" if (why := vs.get("ABORT_DETAIL")) else ""), rc)
         self.v.update(vs)
         return rc, vs
 
@@ -478,7 +478,7 @@ def refactor_drive(pr: int, init_args: list[str], root: str | None = None) -> di
     except Stop as e:
         result = d.stopped(e)
     head = pr_head(d.call, pr) if result.get("status") == "ok" else None
-    return {"result": result, "state_file": str(d.state_file()) if d.has_state() else "", "head": head, "args": result_args(init_args, PLACE_ARGS)}
+    return dict(result=result, state_file=str(d.state_file()) if d.has_state() else "", head=head, args=result_args(init_args, PLACE_ARGS))
 
 
 def main(argv: list[str] | None = None) -> None:
