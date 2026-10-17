@@ -41,8 +41,7 @@ from drive_pause import Stop  # noqa: E402
 from loop_drive import call, durable_identity, keep_finished_output, parse_vars  # noqa: E402,F401  テストは `call` をこのモジュールの上で差し替える
 from loop_drive import relaunch_seats, result_args, review_status, write_review_answer  # noqa: E402
 
-TOOL = "cross-review-drive"
-KIND = "review"  # 耐久の記録の種類
+TOOL, KIND = "cross-review-drive", "review"  # KIND は耐久の記録の種類
 PLACE_ARGS = frozenset({"--worktree"})  # 置き場だけを変える init の引数。完了の記録の比較から除く（#1263 の I4）
 DOCS02 = SKILL / "docs" / "02-fix-and-rotation.md"
 
