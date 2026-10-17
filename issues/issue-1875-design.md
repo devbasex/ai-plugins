@@ -225,7 +225,7 @@ merge-gate（`unchecked_before_merge`）で「無し」の行を数えない形�
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #1875 | 実装する | — | `plugins/ndf/scripts/supervise_lib/sprint_routes.py`、`plugins/ndf/scripts/supervise_lib/sprint.py`、`plugins/ndf/scripts/sprint-close.py`、`plugins/ndf/scripts/tests/` |
+| #1875 | 実装する | — | `plugins/ndf/scripts/supervise_lib/sprint_routes.py`、`plugins/ndf/scripts/supervise_lib/sprint.py`、`plugins/ndf/scripts/sprint-close.py`、`plugins/ndf/scripts/tests/`、`plugins/ndf/skills/development-workflow/references/pace.md` |
 | #1675 | 実装する | — | `plugins/ndf/scripts/lib/manual_checks.py`、`plugins/ndf/scripts/tests/`、`docs/glossary/glossary.json`、`docs/glossary.md` |
 
 ほかの主題（#1263 #1944 #1513 / #1885 #1686 #1488）と同じファイルを触るときに重ならないよう、触る関数を次に限る。
@@ -235,6 +235,7 @@ merge-gate（`unchecked_before_merge`）で「無し」の行を数えない形�
 | `supervise_lib/sprint_routes.py` | `record_pr_ref`（本体）、足す `RECORD_NONE`・`RECORD_UNKNOWN`・`has_record` | `route_waves`・`manual_release_wave`・`manual_production_waves`・`routes_of`・`pace_verify` |
 | `supervise_lib/sprint.py` | `close_plan` の `record_pr == "0"` の 2 か所と import の行 | `close_waves`・`_close_step`・`release_verify_step`・`_spec_pr_steps`・`_retro_refine_steps`・`plan_mvv_release`・`plan_fast_check` |
 | `sprint-close.py` | モジュールの docstring、`_read_sprint_record`・`_closing_blocker`・`cmd_close`・`build_parser` | `read_record`・`verification_verdicts`・`sprint_issues`・`_close_summary` ほか |
+| `skills/development-workflow/references/pace.md` | 「リリースの経路がテンプレートで組むものでなければ……`close` のステップは `--record-pr 0` になる」の文を「経路がすべて届けない経路なら `0`、それ以外は `unknown`（課題を開いたまま残す）」に改める | ほかの節 |
 | `lib/manual_checks.py` | `rows_of` と、足す `_NONE` | `issue_rows`・`manual_section`・`unchecked_before_merge` |
 | `supervise_lib/pr_materials.py`・`merged_lib/merge.py` | 触らない | #1885 #1686 #1488 の側 |
 
