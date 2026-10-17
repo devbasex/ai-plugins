@@ -201,12 +201,19 @@ def unconfirmed_items(text: str) -> list[str]:
     if not section:
         return []
     found = md.tables(section)
-    if found:
-        rows = [[c.strip() for c in r] for r in found[0].rows]
-        out = [f"{r[0]}: {r[1]}" if len(r) > 1 and r[1] else r[0] for r in rows if r and r[0]]
-    else:
-        out = [re.sub(r"^[-*]\s+", "", t.strip()) for t in section.splitlines() if re.match(r"^[-*]\s+", t.strip())]
+    out = _items_from_table(found[0]) if found else _items_from_bullets(section)
     return [o for o in out if o.rstrip("。") not in gh_sections.NO_ITEMS]
+
+
+def _items_from_table(table) -> list[str]:
+    """表の行を「項目: 内容」（内容が空なら項目だけ）にする。項目が空の行は除く。"""
+    rows = [[c.strip() for c in r] for r in table.rows]
+    return [f"{r[0]}: {r[1]}" if len(r) > 1 and r[1] else r[0] for r in rows if r and r[0]]
+
+
+def _items_from_bullets(section: str) -> list[str]:
+    """節の箇条の行の文。"""
+    return [re.sub(r"^[-*]\s+", "", t.strip()) for t in section.splitlines() if re.match(r"^[-*]\s+", t.strip())]
 
 
 def read_unconfirmed(root: Path, base: str, issues) -> tuple[Unconfirmed, ...] | None:
