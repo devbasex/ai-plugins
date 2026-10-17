@@ -93,3 +93,63 @@ def test_durable_identity_is_the_resolved_tmp(tmp_path: Path):
 def test_durable_identity_without_tmp_is_cwd_and_pr(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     assert loop_drive.durable_identity(None, 7) == f"{tmp_path.resolve()}#7"
+
+
+def test_result_args_splits_keys_keeps_repeats_in_order_and_drops_place_args():
+    args = [
+        "--round-test",
+        "pytest -q",
+        "--model=claude=opus",
+        "--model",
+        "codex=gpt",
+        "--no-code-metrics",
+        "--scope",
+        "a",
+        "b",
+        "--worktree",
+        "/w",
+    ]
+    got = loop_drive.result_args(args, {"--worktree"})
+    assert got == {
+        "--round-test": [["pytest -q"]],
+        "--model": [["claude=opus"], ["codex=gpt"]],
+        "--no-code-metrics": [[]],
+        "--scope": [["a", "b"]],
+    }
+
+
+def test_result_args_ignore_key_order_and_equals_form():
+    a = loop_drive.result_args(["--scope", "src", "--budget-minutes=30"])
+    b = loop_drive.result_args(["--budget-minutes", "30", "--scope=src"])
+    assert loop_drive.args_diff(a, b) == []
+    swapped = loop_drive.result_args(["--model", "codex", "--model", "claude"])
+    assert loop_drive.args_diff(loop_drive.result_args(["--model", "claude", "--model", "codex"]), swapped) == ["--model"]
+
+
+@pytest.mark.parametrize(
+    "rec_head, cur_head, forced, rec_args, cur_args, keep, said",
+    [
+        ("a" * 40, "a" * 40, False, {"--scope": [["x"]]}, {"--scope": [["x"]]}, True, ""),
+        ("a" * 40, "a" * 40, False, {"--scope": [["x"]]}, {"--scope": [["y"]], "--max-rounds": [["3"]]}, False, "--max-rounds・--scope"),
+        ("a" * 40, "b" * 40, False, {}, {}, False, "head"),
+        ("a" * 40, "a" * 40, True, {}, {}, False, "--reopen"),
+        ("a" * 40, "a" * 40, False, None, {"--scope": [["y"]]}, True, "引数を持たない"),
+        ("a" * 40, "b" * 40, False, None, {"--scope": [["y"]]}, False, "引数を持たない"),
+        (None, None, False, {"--scope": [["x"]]}, {"--scope": [["y"]]}, False, "--scope"),
+    ],
+)
+def test_keep_finished_compares_reopen_head_then_args(rec_head, cur_head, forced, rec_args, cur_args, keep, said, capsys):
+    assert loop_drive.keep_finished(rec_head, cur_head, forced, rec_args, cur_args) is keep
+    err = capsys.readouterr().err
+    assert said in err
+    if not keep:
+        assert "新しい実行の回を始める" in err
+
+
+@pytest.mark.parametrize("path", DRIVES, ids=lambda p: p.parents[1].name)
+def test_both_drives_share_the_finished_comparison(path):
+    """#1263 の 1263-6・I3: 2 つの drive は完了の判定と引数の正規化を同じ関数で通す。違うのは除く鍵だけ。"""
+    drive = load(path)
+    assert drive.keep_finished_output is loop_drive.keep_finished_output
+    assert drive.result_args is loop_drive.result_args
+    assert drive.PLACE_ARGS

@@ -115,13 +115,16 @@ def test_limits(state: dict[str, Any]) -> dict[str, Any]:
 
 def window_offset(state: dict[str, Any]) -> float:
     """手順の枠の起点のずれ o（秒）。着手前のテストの実測 x（無ければ 0）。枠が収まらずに止めた後の打ち直し
-    （`resumed_at`）があれば `max(x, resumed_at − started_at)`（I2）。"""
+    （`resumed_at`）があれば `max(x, resumed_at − started_at)`（I2）。締め切りをずらした止まっていた時間
+    （`pause.shifted_seconds`）を足す（#1944 の I5）。"""
+    from . import pause  # pause → timeline の循環を避ける
+
     x = float((state.get("baseline_test") or {}).get("seconds") or 0.0)
     started = clock.parse(state.get("started_at"))
     resumed = clock.parse(state.get("resumed_at"))
     if started is not None and resumed is not None:
         x = max(x, (resumed - started).total_seconds())
-    return max(0.0, x)
+    return max(0.0, x) + pause.shifted_seconds(state)
 
 
 # 実装の終わりに検証の見積りを引く「採っていて未検証」の項目の状態（I13）。

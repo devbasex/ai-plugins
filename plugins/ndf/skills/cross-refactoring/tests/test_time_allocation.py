@@ -212,13 +212,65 @@ def test_a_legacy_state_is_not_shifted(mods):
     assert mods["pause"].pause_report_line(state).startswith("止まっていた時間: 計測しない")
 
 
-def test_nothing_is_recorded_before_the_plan_or_after_the_final_gate(mods):
-    """I7"""
-    before = _planned_state(plan=None)
-    assert mods["pause"].shift_for_pause(before, START + 22 * M, START + 10 * M) is None
-    after = _planned_state(final_gate={"status": "failing"})
-    assert mods["pause"].shift_for_pause(after, START + 22 * M, START + 10 * M) is None
-    assert after["pause"]["events"] == []
+def test_nothing_is_recorded_after_the_final_gate(mods):
+    """I7: 最終ゲートに入った後（手順が final か、最終ゲートに状態がある）は記録しない。"""
+    for over in ({"final_gate": {"status": "failing"}}, {"phase": "final"}):
+        after = _planned_state(**over)
+        assert mods["pause"].shift_for_pause(after, START + 22 * M, START + 10 * M) is None
+        assert after["pause"]["events"] == []
+
+
+def test_the_empty_final_gate_record_of_init_does_not_stop_the_shift(mods):
+    """`init` が置く最終ゲートの空の記録（`fix_rounds`・`checks`）だけでは、最終ゲートの後と読まない。"""
+    state = _planned_state(phase="implement", final_gate={"fix_rounds": 0, "checks": []})
+    assert mods["pause"].shift_for_pause(state, START + 22 * M, START + 10 * M)["reason"] == "shifted"
+
+
+def _before_plan_state(**over):
+    state = _planned_state(plan=None, started_at=START.isoformat(), phase="plan", **over)
+    state["limits"]["propose_end_at"] = (START + 6 * M).isoformat()
+    state["limits"]["plan_end_at"] = (START + 12 * M).isoformat()
+    return state
+
+
+def test_a_pause_before_the_plan_shifts_the_propose_and_plan_ends(mods):
+    """1944-1・1944-2・I6: 計画の前の中断でも測り、まだ来ていない提案と計画の枠の締め切りもずらす。"""
+    state = _before_plan_state()
+    event = mods["pause"].shift_for_pause(state, START + 17 * M, START + 5 * M)
+    assert event["reason"] == "shifted" and event["seconds"] == 720
+    assert _at(state, "propose_end_at") == START + 18 * M
+    assert _at(state, "plan_end_at") == START + 24 * M
+    assert _at(state, "final_end_at") == START + 42 * M
+    assert len(state["pause"]["events"]) == 1 and state["pause"]["shifted_seconds"] == 720
+    # 1944-6: 報告に止まっていた時間の行が出る
+    assert mods["pause"].pause_report_line(state).startswith("止まっていた時間: 12.0 分（1 回。")
+
+
+def test_a_state_without_a_pause_record_before_the_plan_is_measured(mods):
+    """移行: 計画の前で `pause` を持たない古い状態は、空の記録を作って測る（`legacy` にしない）。"""
+    state = _before_plan_state()
+    del state["pause"]
+    event = mods["pause"].shift_for_pause(state, START + 17 * M, START + 5 * M)
+    assert event["reason"] == "shifted" and not state["pause"]["legacy"]
+
+
+def test_a_window_stopped_rerun_before_the_plan_is_not_measured(mods):
+    """枠が収まらずに止めた後の打ち直しは、起点を打ち直した時刻へ移す扱いが止まっていた時間を含む。"""
+    state = _before_plan_state(window_stopped_at=(START + 5 * M).isoformat())
+    assert mods["pause"].shift_for_pause(state, START + 17 * M, START + 5 * M) is None
+
+
+def test_the_shifted_pause_is_left_out_of_the_elapsed_time_and_the_window(mods, monkeypatch):
+    """1944-1・1944-2・I5: 計画の経過時間からずらした秒を引き、上限の表の起点へ足す。"""
+    phases = importlib.import_module("refactor_lib.phases")
+    clock = importlib.import_module("refactor_lib.clock")
+    monkeypatch.setattr(clock, "now", lambda: START + 17 * M)
+    state = _before_plan_state()
+    assert phases.elapsed_minutes(state) == pytest.approx(17)
+    offset = mods["timeline"].window_offset(state)
+    mods["pause"].shift_for_pause(state, START + 17 * M, START + 5 * M)
+    assert phases.elapsed_minutes(state) == pytest.approx(5)
+    assert mods["timeline"].window_offset(state) == pytest.approx(offset + 720)
 
 
 def test_the_newest_file_is_the_last_activity(mods, tmp_path):

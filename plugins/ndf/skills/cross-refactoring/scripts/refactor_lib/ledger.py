@@ -27,6 +27,7 @@ import statefile
 from . import gitfacts  # 属性は呼ぶ時点で引く（gitfacts → publish → ledger の循環を避ける）
 from .items import DEFERRED, IMPLEMENTED, LIVE, REVERTED, VERIFIED, item_shas
 from .paths import full_commit, git_out
+from .vocabulary import DEFER_BUDGET
 
 ITEM = "item"
 FINAL_FIX = "final_fix"
@@ -130,6 +131,7 @@ class Tally:
     reverted: int
     deferred: int
     confirmed: bool
+    deferred_budget: int = 0  # `deferred` のうち、時間で見送って項目に入っていない候補（#1944）
 
     def as_metrics(self) -> dict[str, Any]:
         """結果 JSON の `metrics` の件数のキー。採用と確定していなければ `unconfirmed` を足す（adopted は 0 になる）。"""
@@ -139,17 +141,32 @@ class Tally:
         return out
 
 
+def budget_deferred(state: dict[str, Any]) -> int:
+    """時間（`budget`）で見送り、項目に入っていない候補の件数。採り直しで項目へ戻した候補は数えない（#1944 の I8）。"""
+    ids = {i.get("candidate_id") for i in state.get("items") or []} - {None}
+    return sum(
+        1
+        for d in state.get("deferred_items") or []
+        if d.get("defer_reason") == DEFER_BUDGET and (not d.get("item_id") or d.get("item_id") not in ids)
+    )
+
+
 def tally(state: dict[str, Any]) -> Tally:
-    """表示の状態を数える。**件数の数え方はここだけが持つ。**"""
+    """表示の状態を数える。**件数の数え方はここだけが持つ。**
+
+    見送りは、見送った項目と、時間で見送って項目に入っていない候補の和（#1944）。
+    """
     items = state.get("items") or []
     shown = [display_status(state, i) for i in items]
+    by_budget = budget_deferred(state)
     return Tally(
         items=len(items),
         adopted=shown.count(ADOPTED),
         unconfirmed=shown.count(UNCONFIRMED),
         reverted=shown.count(REVERTED),
-        deferred=shown.count(DEFERRED),
+        deferred=shown.count(DEFERRED) + by_budget,
         confirmed=adoption_confirmed(state),
+        deferred_budget=by_budget,
     )
 
 

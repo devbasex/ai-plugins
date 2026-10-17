@@ -446,6 +446,47 @@ def test_a_record_without_head_returns_the_previous_result(tmp_path, monkeypatch
     assert fake.inits() == inits
 
 
+def test_changed_init_args_start_a_new_run_and_name_the_args(tmp_path, monkeypatch, capsys):
+    """#1263 の 1263-1・I1: 結果を変える init の引数が違えば、head が同じでも前回を返さず新しい実行の回を始める。"""
+    monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
+    fake = ReopeningReview(tmp_path)
+    monkeypatch.setattr(cr, "call", fake)
+    _drive_to_done(fake, ["5"], capsys)
+    inits = fake.inits()
+    fake.judges = [0]
+    run_main(["5", "--max-rounds", "3"], capsys)
+    assert fake.inits() == inits + 1
+
+
+def test_changed_init_args_are_named_on_stderr(tmp_path, capsys):
+    """#1263 の 1263-1: 新しい実行の回を始めるときは、違った引数の名前を標準エラーへ出す。"""
+    (tmp_path / "cross-review-pr5-state.json").write_text("{}")
+    d = cr.Drive(5, "light", ["--max-rounds", "3", "--worktree", "/elsewhere"])
+    assert d.finished({"result": {"status": "ok"}, "tmp": str(tmp_path), "head": None, "args": {}}) is False
+    err = capsys.readouterr().err
+    assert "--max-rounds" in err and "--worktree" not in err
+
+
+def test_the_same_args_in_another_form_return_the_previous_result(tmp_path, monkeypatch, capsys):
+    """#1263 の 1263-4: 引数も head も同じなら（`--name=value` の形の違いは数えない）前回の結果を返す。"""
+    monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
+    fake = ReopeningReview(tmp_path)
+    monkeypatch.setattr(cr, "call", fake)
+    _drive_to_done(fake, ["5", "--max-rounds", "3"], capsys)
+    inits = fake.inits()
+    code, out = run_main(["5", "--max-rounds=3"], capsys)
+    assert code == 0 and out["status"] == "ok"
+    assert fake.inits() == inits
+
+
+def test_a_record_without_args_returns_the_previous_result_and_says_so(tmp_path, monkeypatch, capsys):
+    """#1263 の 1263-5・I2: 引数を記録していない完了の記録は、head が同じなら前回を返し、比べられないことを知らせる。"""
+    (tmp_path / "cross-review-pr5-state.json").write_text("{}")
+    d = cr.Drive(5, "light", ["--max-rounds", "3"])
+    assert d.finished({"result": {"status": "ok"}, "tmp": str(tmp_path), "head": None}) is True
+    assert "引数を持たない" in capsys.readouterr().err
+
+
 def test_rerun_reason_table():
     import loop_drive
 

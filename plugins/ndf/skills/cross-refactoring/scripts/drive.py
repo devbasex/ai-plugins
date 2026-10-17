@@ -12,7 +12,7 @@ init → 提案 → 改修計画 → テスト追加 → 実装 → 検証と修
 最終ゲートの cross-review で止まるときは、耐久ワークフローがイベント `pause` を立てて続き（`resume`）を待ったまま
 プロセスを抜ける。打ち直した `main` が続きを送り、結果ファイルが無ければ同じ止まりを番号を増やして返す。
 耐久の記録の実行の鍵は `refactor-<状態の置き場の sha256 の先頭 12 字>`（置き場が求まらなければ
-`<作業ディレクトリ>#<PR>`）。done で終わり、状態ファイルが残る実行の回は、打ち直すと記録した結果をそのまま返す。
+`<作業ディレクトリ>#<PR>`）。done で終わり状態ファイルが残る実行の回は、PR の head と結果を変える引数が同じなら記録した結果を返す（#1263）。
 
 止まるときの JSON の形と終了コードの表はライブラリの `scripts/lib/drive_pause.py` にある（使うのは 23 だけ。中断の `metrics.exit` が 4 なら refactor.py の中断）。
 子の起動・KEY=VALUE の読み取りは `scripts/lib/loop_drive.py` にある。最終ステータスは決めない。最終ゲートの cross-review の
@@ -50,7 +50,7 @@ import durable  # noqa: E402
 import assignee_env  # noqa: E402
 from drive_pause import Stop  # noqa: E402
 import proc  # noqa: E402
-from loop_drive import call, durable_identity, parse_vars  # noqa: E402  テストは `call` をこのモジュールの上で差し替える
+from loop_drive import call, durable_identity, keep_finished_output, parse_vars, pr_head, result_args  # noqa: E402  テストは `call` をこのモジュールの上で差し替える
 
 if str(HERE) not in sys.path:
     sys.path.append(str(HERE))
@@ -67,6 +67,7 @@ ALIVE_PHASES = ("plan", "add-tests", "implement", "fix")  # 監視が心拍の�
 RESUME_AS = {"fix": "verify", "final-fix": "final"}
 GO_FINAL = 2  # refactor.py の終了コード: 最終ゲートへ直に進む
 ABORT = 4  # refactor.py の終了コード: 中断
+PLACE_ARGS = frozenset({"--worktree-root", "--plan-file"})  # 置き場と書き出し先だけを変える引数。完了の記録の比較から除く（#1263 の I4）
 CR_DRIVE = HERE.parents[1] / "cross-review" / "scripts" / "drive.py"
 FOCUS = (
     "項目をまたいだ整合を見る。個々の改善項目の妥当性は範囲テストで判定済みのため対象外とする。"
@@ -149,9 +150,9 @@ class Drive(AssigneeLaunch):
 
     def rf(self, *args: str, ok=(0,)) -> tuple[int, dict]:
         rc, out = self.call(_refactor_cmd(*args))
-        if rc == ABORT or rc not in ok:
-            raise Stop(f"refactor.py {args[0]} が終了コード {rc} で止まった", rc)
         vs = parse_vars(out)
+        if rc == ABORT or rc not in ok:  # 子が出した中断の理由の 1 行（ABORT_DETAIL）を添える（#1944 の決定 6）
+            raise Stop(f"refactor.py {args[0]} が終了コード {rc} で止まった" + (f": {why}" if (why := vs.get("ABORT_DETAIL")) else ""), rc)
         self.v.update(vs)
         return rc, vs
 
@@ -422,7 +423,7 @@ class Drive(AssigneeLaunch):
                 durable.launch(KIND, identity)
         except durable.DurableError as exc:
             raise Stop(str(exc), 1) from None
-        ref = durable.resolve(durable.launch_key(KIND, identity), finished=finished)
+        ref = durable.resolve(durable.launch_key(KIND, identity), finished=self.finished)
         if ref.action == "done":
             return ref.output["result"]
         if ref.action == "continue":
@@ -437,17 +438,15 @@ class Drive(AssigneeLaunch):
             return out.value["result"]
         raise Stop(f"耐久ワークフロー {wid} が {out.kind} で終わった: {out.value}", 1)
 
-
-def finished(out: object) -> bool:
-    """done で終わり、状態ファイルがまだある実行の回は、打ち直しても流し直さない。"""
-    if not isinstance(out, dict):
-        return False
-    return (out.get("result") or {}).get("status") == "ok" and Path(out.get("state_file") or "").is_file()
+    def finished(self, out: object) -> bool:
+        """記録した終わりを返してよいか（#1263）。状態ファイルが消えていれば頭から流し、PR の head と引数の比べ方は `keep_finished_output` が決める。"""
+        alive = isinstance(out, dict) and Path(out.get("state_file") or "").is_file()
+        return keep_finished_output(out, alive, lambda: pr_head(self.call, self.pr), False, self.init_args, PLACE_ARGS)
 
 
 @durable.workflow(name="refactor_drive")
 def refactor_drive(pr: int, init_args: list[str], root: str | None = None) -> dict:
-    """1 回の改修計画の実行。出力は `{"result": <結果 JSON>, "state_file": <状態ファイル>}`。"""
+    """1 回の改修計画の実行。出力は `{"result": <結果 JSON>, "state_file": <状態ファイル>, "head": <終わりの PR の head>, "args": <結果を変える引数>}`。"""
     d = Drive(pr, init_args, root)
     try:
         d.start()
@@ -478,7 +477,8 @@ def refactor_drive(pr: int, init_args: list[str], root: str | None = None) -> di
             result = d.done()
     except Stop as e:
         result = d.stopped(e)
-    return {"result": result, "state_file": str(d.state_file()) if d.has_state() else ""}
+    head = pr_head(d.call, pr) if result.get("status") == "ok" else None
+    return dict(result=result, state_file=str(d.state_file()) if d.has_state() else "", head=head, args=result_args(init_args, PLACE_ARGS))
 
 
 def main(argv: list[str] | None = None) -> None:

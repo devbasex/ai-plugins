@@ -59,8 +59,8 @@ Draft を外した後に起動しても入口で止まらない。
 
 | 出力 | 「見送り」の値 | 出どころ |
 | --- | --- | --- |
-| 結果 JSON の `metrics.deferred` | 見送った改善項目の数 | `ledger.tally(state).deferred`（`drive.py` の `Drive.counts`） |
-| 計画のコメントの件数の行 | 同上 | `ledger.tally`（`plan.counts_line`） |
+| 結果 JSON の `metrics.deferred` | 見送った改善項目と、時間（`budget`）で見送り項目に入っていない候補の数（後者は #1944） | `ledger.tally(state).deferred`（`drive.py` の `Drive.counts`） |
+| 計画のコメントの件数の行 | 同上。後者が 1 件以上なら `見送り N（うち時間 M）` | `ledger.tally`（`plan.counts_line`） |
 | 完了報告の件数の行 | 同上 | `ledger.tally`（`commands/report.py` の `_print_deferred`） |
 | 完了報告の「見送った提案」の行 | 見送った提案の総数と理由別の件数 | 状態ファイルの `deferred_items` |
 
