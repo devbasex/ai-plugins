@@ -45,7 +45,7 @@ UNVERIFIED_LINE = "- 未実施のリリース後テスト #"
 MISSING_LINE = "- 無い材料: "
 NOTHING_LINE = "- 記載が無い"
 # `## 未検証・残る危険` のうち機械が書く行の頭。書くたびに消してから入れ直す（手で足した行と PR の本文の行は残す。#1834）
-MACHINE = (UNCONFIRMED_LINE, UNVERIFIED_LINE, MISSING_LINE.rstrip(), NOTHING_LINE, "- PR の本文に記載が無い")
+MACHINE = (UNCONFIRMED_LINE, UNVERIFIED_LINE[:-1], MISSING_LINE.rstrip(), NOTHING_LINE, "- PR の本文に記載が無い")
 STEPS = {
     "review": ("review", "cross-review-drive"),
     "refactor": ("refactor", "cross-refactoring-drive"),
@@ -93,6 +93,7 @@ class Unverified:
     issue: int
     number: int
     text: str
+    repo: str | None = None  # 今のリポジトリでない課題のときだけ owner/name
 
 
 @dataclass(frozen=True)
@@ -227,20 +228,21 @@ def read_unconfirmed(root: Path, base: str, issues) -> tuple[Unconfirmed, ...] |
     return tuple(out) if found else None
 
 
-def read_unverified(bodies: dict[int, str], verdicts: dict, repo: str) -> tuple[Unverified, ...] | None:
-    """閉じる課題の受け入れ条件のうち、印が無く、リリース後テストの表（verdicts）に合格の行が無いもの。
-    どの課題にも受け入れ条件が無ければ None。"""
+def read_unverified(bodies: dict[tuple[str, int], str], verdicts: dict, repo: str) -> tuple[Unverified, ...] | None:
+    """閉じる課題（(owner/name, 番号)）の受け入れ条件のうち、印が無く、リリース後テストの表（verdicts）にその
+    リポジトリの課題として合格の行が無いもの。どの課題にも受け入れ条件が無ければ None。"""
     out, found = [], False
-    for n, body in bodies.items():
+    for (owner, n), body in bodies.items():
         rows = acceptance.criteria_lines(body or "")
         if not rows:
             continue
         found = True
-        v = verdicts.get((repo, n))
+        v = verdicts.get((owner, n))
         if v is not None and v.all_pass and not v.passed:  # 条件の番号を書かずに全行が合格
             continue
         passed = v.passed if v is not None else frozenset()
-        out += [Unverified(n, c.number, text) for c, text in rows if not c.checked and c.number not in passed]
+        other = None if same_repo(owner, repo) else owner
+        out += [Unverified(n, c.number, text, other) for c, text in rows if not c.checked and c.number not in passed]
     return tuple(out) if found else None
 
 
@@ -274,7 +276,7 @@ def now_jst() -> str:
 def risk_lines(m: Materials, pr_risks: bool, at: str) -> list[str]:
     """`## 未検証・残る危険` の機械の行。5 つの材料と PR の本文の危険がすべて無いときだけ「記載が無い」の 1 行。"""
     out = [f"{UNCONFIRMED_LINE}{u.issue}: {u.item}" for u in m.unconfirmed or ()]
-    out += [f"{UNVERIFIED_LINE}{u.issue} の条件 {u.number}: {u.text}（{at} 時点）" for u in m.unverified or ()]
+    out += [f"{UNVERIFIED_LINE[:-1]}{u.repo or ''}#{u.issue} の条件 {u.number}: {u.text}（{at} 時点）" for u in m.unverified or ()]
     missing = m.missing() + ([] if pr_risks else [PR_RISKS])
     if len(missing) == len(NAMES) + 1:
         return [f"{NOTHING_LINE}（無い材料: {'・'.join(missing)}）"]
@@ -317,28 +319,44 @@ def write_sections(lines: list[str], risks: list[str], machine: list[str], resul
     lines[at:at] = [CHECK_HEADING, "", *results, ""]
 
 
-def issues_closed_by(prs, data: dict) -> list[int]:
-    """含む PR が閉じる課題の番号（GitHub の closingIssuesReferences と本文の closing keywords の和。昇順）。"""
-    found: set[int] = set()
+def same_repo(a: str | None, b: str | None) -> bool:
+    """owner/name が同じリポジトリか（GitHub は大文字と小文字を区別しない）。"""
+    return (a or "").lower() == (b or "").lower()
+
+
+def _reference_of(node: dict, repo: str) -> tuple[str, int] | None:
+    """closingIssuesReferences の 1 件を (owner/name, 番号) にする。URL が無ければ今のリポジトリの課題。"""
+    if not isinstance(node.get("number"), int):
+        return None
+    got = closing.issue_ref(node.get("url"), repo) if node.get("url") else None
+    return got if got is not None and got[1] == node["number"] else (repo, node["number"])
+
+
+def issues_closed_by(prs, data: dict, repo: str) -> list[tuple[str, int]]:
+    """含む PR が閉じる課題を (owner/name, 番号) で（GitHub の closingIssuesReferences と本文の closing keywords の和。
+    昇順）。今のリポジトリの課題は owner/name を `repo` に揃え、別のリポジトリの課題は番号だけにしない。"""
+    found: set[tuple[str, int]] = set()
     for p in prs:
         d = data.get(p.number) or {}
-        found |= {i["number"] for i in d.get("closingIssuesReferences") or [] if isinstance(i, dict) and isinstance(i.get("number"), int)}
-        found |= set(closing.closing_numbers(d.get("body") or ""))
+        refs = [_reference_of(i, repo) for i in d.get("closingIssuesReferences") or [] if isinstance(i, dict)]
+        refs += closing.closing_refs(d.get("body") or "", repo)
+        found |= {(repo if same_repo(r, repo) else r, n) for r, n in (x for x in refs if x is not None)}
     return sorted(found)
 
 
 def approval_materials(root: Path, decl: tuple, check_state, prs, data: dict, read_issue) -> Materials:
     """承認の材料。decl は (ベースブランチ, owner/name, 版, --prs)。prs は「含む PR」、data はその gh pr view の出力
-    （comments つき）、read_issue(n) は課題の本文（読めなければ StepError）。リリース後テストの表は --prs の PR の本文と
-    コメントから読む。"""
+    （comments つき）、read_issue(repo, n) は課題の本文（読めなければ StepError）。設計文書は今のリポジトリの課題だけを
+    読む。リリース後テストの表は --prs の PR の本文とコメントから読む。"""
     base, repo, version, sprint_prs = decl
     review, refactor, whole = read_check(check_state, root)
-    issues = issues_closed_by(prs, data)
+    issues = issues_closed_by(prs, data, repo)
     texts = [(data.get(n) or {}).get("body") or "" for n in sprint_prs]
     texts += [(c or {}).get("body") or "" for n in sprint_prs for c in (data.get(n) or {}).get("comments") or []]
     verdicts = acceptance.version_verdicts("\n".join(texts), version, repo)
-    unverified = read_unverified({n: read_issue(n) for n in issues}, verdicts, repo)
-    return Materials(review, refactor, whole, read_unconfirmed(root, base, issues), unverified)
+    unverified = read_unverified({ref: read_issue(*ref) for ref in issues}, verdicts, repo)
+    own = [n for r, n in issues if same_repo(r, repo)]
+    return Materials(review, refactor, whole, read_unconfirmed(root, base, own), unverified)
 
 
 def approval_cell(text: str) -> str:

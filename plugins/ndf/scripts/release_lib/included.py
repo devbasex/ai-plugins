@@ -114,7 +114,7 @@ def read_included(path) -> list[int]:
     return [p.number for p in read_included_rows(path)]
 
 
-_FIELDS = "number title body state url headRefName mergeCommit { oid } closingIssuesReferences(first: 20) { nodes { number } }"
+_FIELDS = "number title body state url headRefName mergeCommit { oid } closingIssuesReferences(first: 20) { nodes { number url } }"
 
 
 def pr_fields(numbers, cwd: str | None = None, comments: bool = False) -> tuple[dict[int, dict | None] | None, str]:

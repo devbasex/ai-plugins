@@ -148,6 +148,7 @@ def compute(
     reserve: Optional[dict[str, Any]] = None,
     offset_seconds: Optional[float] = None,
     after_plan: Optional[dict[str, Any]] = None,
+    paused_seconds: float = 0.0,
 ) -> dict[str, Any]:
     """実行時の値の表。`tests` は `test_strategy.limits` の表（数値か `None` なら、着手前の実測として `local-full` の表を組む）。
     `items` と `reserve`（改修計画の後）が無ければ、その行は `None`。`after_plan` は計画の後に要る時間の見込み
@@ -157,7 +158,8 @@ def compute(
     implement を引いた時刻である（I13）。項目ごとの期限は持たない。
 
     提案と改修計画の枠は `started_at + offset_seconds`（o。着手前のテストの終わり）から数える（#1385 I2）。
-    `final_end_at` と `fix_end_at` は `started_at` から数える（I1・I3）。
+    `final_end_at` と `fix_end_at` は `started_at` から数え、締め切りをずらした止まっていた時間 `paused_seconds`
+    だけ後ろへずらす（I1・I3・#1944）。`offset_seconds` は同じ秒を既に含む（`window_offset`）。
 
     **すべての時刻は想定最大時間の終わり H（`final_end_at`）以前である**（#1932 原則 1）。確かめの開始の締め切り
     H − v は、H と確かめの見込み v（`gate_seconds`）から読み出す（`gate_start_end`）ので、時刻の鍵は持たない。"""
@@ -168,7 +170,8 @@ def compute(
     propose_end = origin + _dt.timedelta(minutes=b * PROPOSE_SHARE)
     plan_end = propose_end + _dt.timedelta(minutes=b * PLAN_SHARE)
     planned = reserve is not None
-    final_end = started_at + _dt.timedelta(minutes=b)
+    start = started_at + _dt.timedelta(seconds=max(0.0, float(paused_seconds or 0.0)))
+    final_end = start + _dt.timedelta(minutes=b)
     pending = pending_items(list(items or []))
     implement_end = budget.implement_end(final_end, reserve, pending) if planned else None
     add_tests_end = budget.add_tests_end(implement_end, pending) if implement_end is not None else None
@@ -188,7 +191,7 @@ def compute(
         "plan_end_at": iso_or_none(plan_end),
         "add_tests_end_at": iso_or_none(add_tests_end),
         "implement_end_at": iso_or_none(implement_end),
-        "fix_end_at": iso_or_none(budget.fix_end(started_at, b, reserve)) if planned else None,
+        "fix_end_at": iso_or_none(budget.fix_end(start, b, reserve)) if planned else None,
         "final_end_at": iso_or_none(final_end),
         # 最終ゲートの確かめ 1 回の見込み v（秒）。バッファの最終ゲートの全体テスト（#1932 決定 5）。
         "gate_seconds": (math.ceil(round(float(reserve.get("final_whole_test") or 0.0) * 60, 6)) if planned else None),
@@ -207,7 +210,10 @@ def after_plan_minutes(after_plan: Optional[dict[str, Any]]) -> float:
 
 
 def of_state(state: dict[str, Any], after_plan: Optional[dict[str, Any]] = None) -> dict[str, Any]:
-    """状態の値から表を組む。改修計画の後なら項目と予備時間も使う。`after_plan` が無ければ、書き出した表の見込みを引き継ぐ。"""
+    """状態の値から表を組む。改修計画の後なら項目と予備時間も使う。`after_plan` が無ければ、書き出した表の見込みを引き継ぐ。
+    締め切りをずらした止まっていた時間は、組み直しても最終終了時刻に残す（#1944）。"""
+    from . import pause  # pause → timeline の循環を避ける
+
     plan = state.get("plan") or None
     if after_plan is None:
         after_plan = ((state.get("limits") or {}).get("basis") or {}).get("after_plan")
@@ -219,6 +225,7 @@ def of_state(state: dict[str, Any], after_plan: Optional[dict[str, Any]] = None)
         (plan or {}).get("reserve") if plan else None,
         window_offset(state),
         after_plan,
+        pause.shifted_seconds(state),
     )
 
 

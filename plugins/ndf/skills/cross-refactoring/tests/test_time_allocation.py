@@ -273,6 +273,16 @@ def test_the_shifted_pause_is_left_out_of_the_elapsed_time_and_the_window(mods, 
     assert mods["timeline"].window_offset(state) == pytest.approx(offset + 720)
 
 
+def test_rebuilding_the_limits_keeps_the_shifted_final_end(mods):
+    """#1944: 計画の前の再開で上限の表を組み直しても、ずらした最終終了時刻を `started_at + B` へ戻さない。"""
+    state = _before_plan_state()
+    mods["pause"].shift_for_pause(state, START + 17 * M, START + 5 * M)
+    shifted_final = _at(state, "final_end_at")
+    state["limits"] = mods["timeline"].of_state(state)
+    assert _at(state, "final_end_at") == shifted_final
+    assert mods["timeline"].window_problem(state["limits"]) is None
+
+
 def test_the_newest_file_is_the_last_activity(mods, tmp_path):
     """決定 3: 状態ファイルより新しいログのファイルがあれば、その時刻が最後の動きの時刻になる。"""
     state_file, log = tmp_path / "cross-refactoring-rf7-state.json", tmp_path / "claude-implement-rf7-err.log"

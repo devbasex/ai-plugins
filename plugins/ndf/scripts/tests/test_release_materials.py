@@ -200,6 +200,30 @@ def test_unreadable_issue_stops(monkeypatch, tmp_path):
         rr.notes(mod, w, [30], approval=path, check_state=str(check_state(tmp_path)))
 
 
+def test_an_issue_in_another_repository_keeps_its_repository(monkeypatch, tmp_path):
+    """別のリポジトリの課題（`Closes other/repo#7`）を今のリポジトリの #7 として読まず、本文と合否もその課題で照合する。"""
+    w = world_with_design(tmp_path)
+    mod = load(monkeypatch, w, said=[VERIFY], risks30="\nCloses other/repo#7\n")
+    asked = []
+
+    def issue_body(root, n, repo=None):
+        asked.append((repo, n))
+        return ISSUE
+
+    monkeypatch.setattr(mod, "issue_body", issue_body)
+    path, _ = run(mod, w, check_state(tmp_path), "1.0.1-dev.1")
+    risks = section(path.read_text(encoding="utf-8"), "## 未検証・残る危険")
+    assert sorted(asked, key=str) == sorted([(None, 7), ("other/repo", 7)], key=str)
+    assert [r.split(":")[0] for r in risks if r.startswith("- 未実施のリリース後テスト")] == [
+        "- 未実施のリリース後テスト #7 の条件 2",
+        "- 未実施のリリース後テスト #7 の条件 4",
+        "- 未実施のリリース後テスト other/repo#7 の条件 1",
+        "- 未実施のリリース後テスト other/repo#7 の条件 2",
+        "- 未実施のリリース後テスト other/repo#7 の条件 4",
+    ]
+    assert len([r for r in risks if r.startswith("- 設計の未確認")]) == 2
+
+
 def test_whole_test_without_ran_reads_the_declared_command(tmp_path):
     """1488-3: `ran` の無い古い出力は宣言の suite のコマンドを書く。宣言が CI に任せるなら「CI に任せた」。"""
     sys.path.insert(0, str(Path(rr.SCRIPT).parent / "lib"))

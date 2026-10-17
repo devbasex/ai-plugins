@@ -1025,9 +1025,9 @@ def notes_prs(root, a):
     return listed, path
 
 
-def issue_body(root, n):
-    """gh issue view <n> --json body の本文。読めなければ StepError（gh が無い: 3）。"""
-    r = gh_parts.view_json("issue", n, "body", cwd=str(root))
+def issue_body(root, n, repo=None):
+    """gh issue view <n> --json body の本文（repo を渡せばそのリポジトリの課題）。読めなければ StepError（gh が無い: 3）。"""
+    r = gh_parts.view_json("issue", n, "body", repo=repo, cwd=str(root))
     if r.returncode == 127 and "gh を実行できない" in r.stderr:
         raise StepError("gh が無い", EXIT_PRECONDITION)
     if r.returncode != 0:
@@ -1059,7 +1059,14 @@ def cmd_notes(a):
         verified = [r for r in (a.verified or "").split(",") if r]
         ref = a.ref or release_decl(root, a)[0]
         decl = (release_decl(root, a)[0], repo_lib.owner_repo(root) or "", a.version, a.prs)
-        m = materials.approval_materials(root, decl, getattr(a, "check_state", None), prs, data, lambda n: issue_body(root, n))
+        m = materials.approval_materials(
+            root,
+            decl,
+            getattr(a, "check_state", None),
+            prs,
+            data,
+            lambda r, n: issue_body(root, n) if materials.same_repo(r, decl[1]) else issue_body(root, n, repo=r),
+        )
         results, machine = materials.check_lines(m), materials.risk_lines(m, bool(risks), materials.now_jst())
         items = materials.write_approval(path, a.version, bullets, risks, verified, ref, migration, results, machine)
         items += materials.items_of(m) + unmerged_items(skipped) + rep_items
