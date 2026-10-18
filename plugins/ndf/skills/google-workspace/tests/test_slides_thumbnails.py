@@ -2,7 +2,8 @@
 
 gws は PATH に置いた偽物で置き換える。偽物は呼ばれた引数を FAKE_CALLS の JSON Lines へ積み、
 `presentations get` には FAKE_IDS のページの ID を、`getThumbnail` にはページの ID ごとの
-`file://` の画像の URL を返す。FAKE_FAIL_ON の ID でだけ失敗し、FAKE_AUTH_FAIL で未認証を返す。
+`file://` の画像の URL を返す。FAKE_FAIL_ON の ID でだけ失敗し、FAKE_AUTH_FAIL で失敗して `auth status` の
+`credential_source` に `none` を返す（未認証の判定はエラーの文言でなく `auth status` で行う）。
 """
 
 from __future__ import annotations
@@ -27,8 +28,12 @@ a = sys.argv[1:]
 with open(os.environ["FAKE_CALLS"], "a", encoding="utf-8") as f:
     f.write(json.dumps(a) + "\n")
 sys.stderr.write("This is not an officially supported Google product.\n")
+if a == ["auth", "status"]:
+    src = "none" if os.environ.get("FAKE_AUTH_FAIL") else "token_cache"
+    print(json.dumps({"credential_source": src, "auth_method": "oauth2", "client_config_exists": True}))
+    sys.exit(0)
 if os.environ.get("FAKE_AUTH_FAIL"):
-    sys.stderr.write("error[auth]: Access denied. No credentials provided.\n")
+    sys.stderr.write("error: request failed (the wording is not relied on)\n")
     sys.exit(1)
 params = json.loads(a[a.index("--params") + 1])
 if a[:3] == ["slides", "presentations", "get"]:
@@ -92,9 +97,10 @@ def test_saves_every_page_in_order(env: dict, tmp_path: Path) -> None:
 
 def test_gws_failure_stops_with_1_and_shows_output(env: dict, tmp_path: Path) -> None:
     env["FAKE_FAIL_ON"] = "p2_x"
-    code, out, _ = _run(env, "PRES", str(tmp_path / "thumbs"))
+    code, out, calls = _run(env, "PRES", str(tmp_path / "thumbs"))
     assert code == 1
     assert out["status"] == "stopped"
+    assert ["auth", "status"] in calls
     assert "backend error" in out["items"][0]["detail"]
     assert not (tmp_path / "thumbs" / "p2.png").exists()
 
@@ -105,6 +111,11 @@ def test_unauthenticated_returns_11(env: dict, tmp_path: Path) -> None:
     assert code == 11
     assert out["status"] == "gate"
     assert out["metrics"]["state"] == "unauthenticated"
+
+
+def test_success_never_calls_auth_status(env: dict, tmp_path: Path) -> None:
+    _, _, calls = _run(env, "PRES", str(tmp_path / "thumbs"))
+    assert ["auth", "status"] not in calls
 
 
 def test_bad_arguments_return_2(env: dict) -> None:

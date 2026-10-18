@@ -17,6 +17,9 @@
 | 2 | stopped | 引数の誤り・gws の応答を読めない |
 | 11 | gate | gws が未認証（`gws-check.py` と同じ値）。利用者に `gws auth login` を頼む |
 
+- 未認証かどうかは、gws が失敗したときだけ `gws auth status` を 1 回打ち、`credential_source` が `none` かで決める
+  （`gws-check.py` と同じ判定。gws のエラーの文言には頼らない）
+
 - gws の認証情報は読まない。認証は gws が自分の設定ディレクトリに持つ（C1）
 - `contentUrl` は要求した利用者の権限で開ける一時的な URL で、認証なしで curl で取る
 """
@@ -46,6 +49,16 @@ TIMEOUT = 120
 CURL = "curl"
 
 
+def _unauthenticated(gws: str) -> bool:
+    """`gws auth status` の `credential_source` が `none` なら True。読めなければ False（一般の失敗として扱う）。"""
+    try:
+        cp = subprocess.run([gws, "auth", "status"], capture_output=True, text=True, timeout=TIMEOUT, check=False)
+        data = json.loads(cp.stdout) if cp.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        return False
+    return isinstance(data, dict) and data.get("credential_source") == "none"
+
+
 def _gws(gws: str, args: list[str], what: str) -> dict:
     """gws を打って応答の JSON を返す。未認証は 11、失敗は 1、読めない応答は 2 で終える。"""
     try:
@@ -54,7 +67,7 @@ def _gws(gws: str, args: list[str], what: str) -> dict:
         emit_stopped(TOOL, f"{what}: gws を起動できない: {e}", sr.EXIT_VIOLATION)
     out = output_tail(cp.stdout + "\n" + cp.stderr)
     if cp.returncode != 0:
-        if "error[auth]" in cp.stderr or "No credentials" in cp.stderr:
+        if _unauthenticated(gws):
             sr.emit(
                 sr.result(
                     TOOL,

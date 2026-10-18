@@ -62,6 +62,8 @@ cat <資料>/slides/lib/*.js | sha256sum
 ```
 
 - `build-deck.js` の `SCRIPT` を `path.join(__dirname, "..", "script.md")` に直し、ページの中身を書き換える
+- `package.json` の `scripts.time` を `node lib/script-time.js ../script.md` に直す（`npm run` は `slides/` で動くため、
+  直さないと無い `slides/script.md` を読んで止まる）
 - 最後のコマンドの値を、写した時点の `lib/` の内容のハッシュとして `README.md` に書く
 - **`lib/` を書き換えない。** 汎用テンプレートの更新を取り込むときは `lib/` を写し直し、`README.md` のハッシュを
   写し直した値へ書き換える。`lib/` のハッシュが `README.md` の値と違えば書き換えた資料であり、プロジェクトの値を
@@ -125,6 +127,12 @@ node <資料>/slides/build-deck.js <出力>.pptx [<theme.json>]
 作り直せるためコミットしない。
 
 ### 変換と確認
+
+**Google Slides へ変換するのは、下書き先（`.ndf/document.json` の `draft`）の `system` が `gdrive` のときだけである。**
+ほかの下書き先では pptx を Google Drive へ上げず、Google の認証も求めない（利用者が指定していないサービスへ資料を
+送らない）。描画の手段は下書き先の `system-<名前>.md` が持ち、手段が無ければ `layout-review` のとおり止めて人へ渡す。
+
+`gdrive` のとき:
 
 1. pptx を Google Slides へ変換する。新しく作るときは pptx を上げて `mimeType` を指定して複製し、既にある
    Google Slides は同じ URL のまま差し替える（置き場所と手段は `document-systems` の `system-gdrive.md`）

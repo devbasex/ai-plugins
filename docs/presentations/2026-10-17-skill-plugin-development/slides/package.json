@@ -5,7 +5,7 @@
   "description": "pptxgenjs で pptx を作る生成スクリプト",
   "scripts": {
     "build": "node build-deck.js deck.pptx",
-    "time": "node lib/script-time.js script.md"
+    "time": "node lib/script-time.js ../script.md"
   },
   "dependencies": {
     "pptxgenjs": "4.0.1"

@@ -59,7 +59,7 @@ gws は Google の公式サポート外の CLI で、版は 0.x である。
 | ファイルのダウンロード | `gws drive files get --params '{"fileId":"<ID>","alt":"media"}' --output <ファイル>` |
 | アップロード（フォルダを指定しなければ非公開） | `gws drive +upload <ファイル>`（フォルダへは `--parent <フォルダの ID>`、名前は `--name <名前>`） |
 | フォルダの共有範囲の確認（`--parent` を付ける前に必ず） | `gws drive permissions list --params '{"fileId":"<フォルダの ID>","supportsAllDrives":true,"fields":"nextPageToken,permissions(type,role,domain,emailAddress)"}' --page-all` |
-| pptx を Google Slides へ変換する（上げた pptx を `mimeType` を指定して複製する） | `gws drive files copy --params '{"fileId":"<上げた pptx の ID>"}' --json '{"name":"<名前>","mimeType":"application/vnd.google-apps.presentation"}'`（フォルダへは `"parents":["<フォルダの ID>"]` を足す） |
+| pptx を Google Slides へ変換する（上げた pptx を `mimeType` を指定して複製する） | `gws drive files copy --params '{"fileId":"<上げた pptx の ID>","ignoreDefaultVisibility":true}' --json '{"name":"<名前>","mimeType":"application/vnd.google-apps.presentation"}'`（フォルダへは `"parents":["<フォルダの ID>"]` を足す） |
 | 既存の Google Slides を同じ URL のまま pptx で差し替える（pptx のあるディレクトリで打つ。`--upload` は作業ディレクトリの外のファイルを受けない） | `gws drive files update --params '{"fileId":"<Google Slides の ID>"}' --upload <ファイル>.pptx --upload-content-type application/vnd.openxmlformats-officedocument.presentationml.presentation` |
 | Google Slides のページの ID（ページ順） | `gws slides presentations get --params '{"presentationId":"<ID>","fields":"slides(objectId)"}'` |
 | Google Slides の全ページのサムネイル（`p<番号>.png`） | `python3 "$SKILL_DIR/scripts/slides-thumbnails.py" <ID> <出力のディレクトリ> [--size LARGE]`（終了コード 11 は未認証。3. へ） |
@@ -67,7 +67,7 @@ gws は Google の公式サポート外の CLI で、版は 0.x である。
 
 - **フォルダを指定しないアップロードは非公開である。** フォルダへ入れたファイルは、そのフォルダの共有権限を引き継ぐ。`permissions create` を打たなくても、公開のフォルダへ入れれば公開になる
 - **`--parent` を付ける前に、フォルダの共有範囲を確かめる。** 上の `permissions list` の応答に、利用者が承認した範囲を超える共有（`type` が `anyone`、承認していない `domain`・`group`・`user`）があれば、アップロードせずに止まり、その共有を示して利用者の判断を待つ。応答は 1 ページに 1 行の JSON で出るため、全部の行の `permissions` を合わせて見る。最後の行に `nextPageToken` が残っている（`--page-all` のページの上限で読み切れなかった）ときと、共有範囲を読めない（終了コードが 0 でない）ときも止まる
-- **pptx の変換は 2 手で打つ。** `+upload` で pptx を上げ、応答の `id` を `files copy` に渡す。複製が Google Slides になり、上げた pptx は残る（消すかは利用者が決める）。`files copy` に `parents` を書かなければ、複製はマイドライブの直下（非公開）に入る
+- **pptx の変換は 2 手で打つ。** `+upload` で pptx を上げ、応答の `id` を `files copy` に渡す。複製が Google Slides になり、上げた pptx は残る（消すかは利用者が決める）。`files copy` に `parents` を書かなければ、複製はマイドライブの直下（非公開）に入る。`ignoreDefaultVisibility` を外さない（外すと Workspace の管理者が決めたドメイン内共有の既定値が複製に付き、非公開にならない）
 - 公開リンクは、利用者が公開を明示したときだけ、アップロードの応答の `id` に付ける。付与が失敗したら、ファイルの共有範囲はアップロード先のまま（フォルダを指定しなければ非公開、指定したらそのフォルダから引き継いだ範囲）と伝える
 - 打つ前に要求の形だけを確かめたいときは `--dry-run` を付ける
 - 対応表の外の操作（Sheets の編集・Gmail・Calendar など）は `gws <サービス> --help` で引数を確かめてから打つ
