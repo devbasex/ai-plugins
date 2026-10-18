@@ -1,4 +1,4 @@
-// 発表資料「独自プラグイン開発の薦め」の生成スクリプト（台本の 23 ページと章扉 6 つの 29 ページ）。
+// 発表資料「独自プラグイン開発の薦め」の生成スクリプト（台本の 21 ページと章扉 6 つの 27 ページ）。
 //
 //   node build-deck.js <出力>.pptx [<theme.json>]
 //
@@ -223,49 +223,41 @@ run(__dirname, { script: SCRIPT, title: "独自プラグイン開発の薦め", 
     card(d, s, c.x, 1.5, c.w, 2.1, r[0], bullets(r[1], 14), "panel1", { band: "accent", headSize: 14 });
   });
 
-  // 10. /ndf:requirements-design と /ndf:design
-  s = d.page("コードの前に「何を」「どう」", "実装の前に、要件と設計の 2 つの文書を書く");
+  // 10. /ndf:requirements-design・/ndf:design・/ndf:document-restructuring
+  s = d.page("コードの前に、読める文書を", "要件と設計を書き、結論から読める順に並べ替える");
   [
-    ["/ndf:requirements-design — 完了の条件", ["確かめられる受け入れ条件", "「速く」を測れる条件へ"]],
-    ["/ndf:design — 作り方", ["構造・入出力・流れ・理由", "AI が変わっても同じ構成"]],
+    ["/ndf:requirements-design — 完了の条件", "確かめられる受け入れ条件"],
+    ["/ndf:design — 作り方", "構造・入出力・流れ・理由"],
   ].forEach((r, i) => {
     const c = cols(2)[i];
-    card(d, s, c.x, 1.5, c.w, 1.5, r[0], bullets(r[1], 15), "panel1", { band: "accent", headSize: 13 });
+    card(d, s, c.x, 1.42, c.w, 0.96, r[0], r[1], "panel1", { band: "accent", headSize: 13, bodySize: 14 });
   });
-  d.callout(s, 3.2, 0.72, "caution", "設計は PR で出す", "主題ごとに並列、承認 1 でまとめて");
+  d.text(s, "/ndf:document-restructuring — 内容は足さず、順だけ直す", { x: X0, y: 2.56, w: W, h: 0.3, fontSize: 13, bold: true, color: "text", valign: "middle" });
+  flow(d, s, X0, 2.96, 4.3, 0.58, ["問題に気づく", "測る", "結論"], { fill: "panel2", size: 11.5 });
+  d.arrow(s, 4.66, 3.25, 0.5, 0, "accent");
+  flow(d, s, 5.32, 2.96, 4.42, 0.58, ["結論", "根拠", "経緯"], { size: 11.5 });
+  d.text(s, "AI が書いた順", { x: X0, y: 3.58, w: 4.3, h: 0.26, fontSize: 10, align: "center" });
+  d.text(s, "読み手が知りたい順", { x: 5.32, y: 3.58, w: 4.42, h: 0.26, fontSize: 10, align: "center" });
+  d.callout(s, 3.98, 0.72, "caution", "設計は PR で出す", "主題ごとに並列、承認 1 でまとめて");
 
-  // 11. /ndf:document-restructuring
-  s = d.page("結論から読める順に並べ替える", "/ndf:document-restructuring — 書き上げた文書の再構成");
-  d.text(s, "AI が書いた順", { x: X0, y: 1.4, w: 4.3, h: 0.3, fontSize: 12, bold: true, color: "text" });
-  flow(d, s, X0, 1.76, 4.3, 0.56, ["問題に気づく", "測る", "結論"], { fill: "panel2", size: 11 });
-  d.arrow(s, 4.66, 2.04, 0.5, 0, "accent");
-  d.text(s, "読み手が知りたい順", { x: 5.32, y: 1.4, w: 4.42, h: 0.3, fontSize: 12, bold: true, color: "text" });
-  flow(d, s, 5.32, 1.76, 4.42, 0.56, ["結論", "根拠", "経緯"], { size: 11 });
-  d.text(s, "手順（内容は足さない）", { x: X0, y: 2.62, w: W, h: 0.3, fontSize: 12, bold: true, color: "text" });
-  flow(d, s, X0, 2.98, W, 0.62, ["測る", "問いの順に並べる", "文を分ける", "対比は表に", "測り直す"], { size: 11 });
-  d.callout(s, 3.86, 0.5, "panel1", "レビューの前に通す → 構成と内容の指摘を分ける", null);
-
-  // 12. /ndf:cross-review
-  s = d.page("2 つの AI で、指摘が尽きるまで", "/ndf:cross-review — 別々の AI が交互にレビュー");
-  d.text(s, "同じ AI は、同じ見落としをする", { x: X0, y: 1.38, w: 5.0, h: 0.3, fontSize: 12, bold: true, color: "text" });
-  flow(d, s, X0, 1.76, 5.0, 0.7, ["AI を 2 つ選ぶ\nclaude・codex・kiro", "レビュー", "指摘を修正"], { size: 10 });
-  d.arrow(s, 2.9, 2.54, 0, 0.3);
-  d.chip(s, 1.5, 2.9, 2.8, 0.56, "新しい指摘は？", "panel2", { fontSize: 11 });
-  d.text(s, "出た → 組み替えて繰り返す\n出ない → 終了", { x: X0, y: 3.56, w: 5.0, h: 0.56, fontSize: 11 });
-  card(d, s, 5.6, 1.38, 4.14, 1.26, "別の AI が見落としを拾う", "2 つの AI を入れ替えながら\n新しい指摘が出なくなるまで", "panel1", { band: "accent", headSize: 14, bodySize: 14, headH: 0.38 });
-  card(d, s, 5.6, 2.86, 4.14, 1.26, "観点は PR の中身で切り替え", "レビューの基準は\nリポジトリごとに設定", "panel1", { band: "accent", headSize: 14, bodySize: 14, headH: 0.38 });
-
-  // 13. /ndf:cross-refactoring
-  s = d.page("全員で提案、1 人が時間内に直す", "/ndf:cross-refactoring — 複数の AI でリファクタリング");
-  flow(d, s, X0, 1.5, W, 0.86, ["全員の AI が提案", "1 つを選ぶ", "既定 30 分で\n収まる分を実施", "テストが壊れたら\n取り消す"], { size: 11 });
-  d.text(s, "実施: 計画 → テスト追加 → 実装 → 検証", { x: 5.0, y: 2.48, w: 4.74, h: 0.3, fontSize: 11, align: "center" });
-  card(d, s, X0, 3.0, 4.66, 1.1, "終わりが見える", "すべて持ち時間から逆算", "panel1", { band: "accent", headSize: 15, bodySize: 15, headH: 0.38 });
-  card(d, s, 5.08, 3.0, 4.66, 1.1, "結果が追える", "採用と取り消しを報告", "panel1", { band: "accent", headSize: 15, bodySize: 15, headH: 0.38 });
+  // 11. /ndf:cross-review と /ndf:cross-refactoring
+  s = d.page("複数の AI で、見て直す", "見落としは別の AI が拾い、直すのは時間内に");
+  [
+    ["/ndf:cross-review — 指摘が尽きるまで", ["2 つの AI が\nレビュー", "指摘を修正", "組み替えて\n繰り返す"], "新しい指摘が出なくなったら終了", "観点は PR の中身で切り替え"],
+    ["/ndf:cross-refactoring — 時間内に直す", ["全員の AI が\n提案", "1 つが既定\n30 分で実施", "壊れたら\n取り消す"], "数値は持ち時間から逆算", "採用と取り消しを報告"],
+  ].forEach((r, i) => {
+    const c = cols(2, 0.3)[i];
+    d.box(s, c.x, 1.42, c.w, 2.96, "panel1", false);
+    d.box(s, c.x, 1.42, c.w, 0.06, "accent", false);
+    d.text(s, r[0], { x: c.x + 0.14, y: 1.54, w: c.w - 0.28, h: 0.34, fontSize: 13, bold: true, color: "text", valign: "middle" });
+    flow(d, s, c.x + 0.14, 2.02, c.w - 0.28, 0.96, r[1], { gap: 0.2, size: 12.5 });
+    d.text(s, bullets([r[2], r[3]], 14), { x: c.x + 0.14, y: 3.2, w: c.w - 0.28, h: 1.0, valign: "middle", paraSpaceAfter: 8 });
+  });
 
   // ==== 章 4 ====
   d.section("4. AI に任せ切る仕組み", "止まらない・迷わない・ごまかさない");
 
-  // 14. 3 層のエージェント
+  // 12. 3 層のエージェント
   s = d.page("3 層のエージェントで止めない", "長い作業も、止まったら続きから");
   [
     ["conductor", "指揮役。人と話し全体を進める"],
@@ -280,7 +272,7 @@ run(__dirname, { script: SCRIPT, title: "独自プラグイン開発の薦め", 
   card(d, s, 5.7, 1.46, 4.04, 1.3, "止まっても続きから", "JSON の計画をスクリプトが実行", "panel1", { band: "accent", headSize: 13, bodySize: 12.5 });
   card(d, s, 5.7, 2.96, 4.04, 1.5, "セッションを自動で切り替え", "次のコマンドを残して新しいセッションへ", "panel1", { band: "accent", headSize: 13, bodySize: 12.5 });
 
-  // 15. 判断基準: MVV と 2 つの承認ゲート
+  // 13. 判断基準: MVV と 2 つの承認ゲート
   s = d.page("迷ったら MVV で判断する", "判断の根拠の番号をログに残す");
   [
     ["Mission", "何のためにやるか"],
@@ -294,7 +286,7 @@ run(__dirname, { script: SCRIPT, title: "独自プラグイン開発の薦め", 
   card(d, s, 6.4, 1.5, 3.34, 1.3, "必ず人が承認する操作", "本番デプロイなど\nAI は省かない", "caution", { headSize: 13, bodySize: 12 });
   d.callout(s, 3.5, 0.4, "panel1", "AI に任せる範囲は、事前に設定で選ぶ", null);
 
-  // 16. /ndf:quality-gates と /ndf:investigation-rules
+  // 14. /ndf:quality-gates と /ndf:investigation-rules
   s = d.page("「完了」も「無い」も証拠で", "AI の言葉を、そのままは信じない");
   [
     ["「完了しました」", "/ndf:quality-gates — 完了の判定", "4 点がそろって完了\nコマンド・終了コード・時刻・範囲"],
@@ -307,7 +299,7 @@ run(__dirname, { script: SCRIPT, title: "独自プラグイン開発の薦め", 
   });
   d.text(s, "AI は「無い」と断定しがち", { x: X0, y: 4.3, w: W, h: 0.34, fontSize: 12, bold: true, color: "text", align: "center", valign: "middle" });
 
-  // 17. 自分を直すループ（導入先のプロジェクトの Issue の一覧を整理し続ける）
+  // 15. 自分を直すループ（導入先のプロジェクトの Issue の一覧を整理し続ける）
   s = d.page("やるべきことを整理し続ける", "導入したプロジェクトの Issue の一覧を、いつも現状に");
   [
     ["/ndf:out-of-scope — 見つけたら起票", "範囲外の問題を即 Issue に"],
@@ -322,7 +314,7 @@ run(__dirname, { script: SCRIPT, title: "独自プラグイン開発の薦め", 
   stat(d, s, 5.4, 3.0, 4.34, 1.5, "49", "件", "本文が古かった Issue\n（71 件を調査。2 件は修正済み）");
   d.note(s, "56% はある時点の棚卸し、49 件は 2026-10-17 の調査。放っておくと、直った Issue を直すことになる");
 
-  // 18. その他の特徴的な機能
+  // 16. その他の特徴的な機能
   s = d.page("そのほかの特徴的な機能", "見積もり・リリース・AI の操作の強制停止");
   d.tbl(s, [
     [d.H("機能"), d.H("何をするか"), d.H("要点")],
@@ -334,7 +326,7 @@ run(__dirname, { script: SCRIPT, title: "独自プラグイン開発の薦め", 
   // ==== 章 5 ====
   d.section("5. 事例", "ほかのプロジェクトでも動くか");
 
-  // 19. 事例: 他のプロジェクトでも動く
+  // 17. 事例: 他のプロジェクトでも動く
   s = d.page("事例: ほかのプロジェクトでも動く", "言語もチームも違う 4 つのプロジェクト");
   d.tbl(s, [
     [d.H("プロジェクトの種類"), d.H("結果")],
@@ -345,7 +337,7 @@ run(__dirname, { script: SCRIPT, title: "独自プラグイン開発の薦め", 
   ], { x: X0, y: 1.42, w: W, colW: [2.3, 7.18], rowH: [0.34, 0.74, 0.6, 0.74, 0.5], fontSize: 12 });
   d.note(s, "インフラは導入前後 37 日の比較。プロジェクトは種類で呼ぶ。数値は 2026-10-17 時点の実測");
 
-  // 20. 事例から分かったこと
+  // 18. 事例から分かったこと
   s = d.page("事例から分かった 2 つのこと", "詰まりは次の版で直り、ルールはプロジェクトごと");
   card(d, s, X0, 1.42, 4.66, 2.48, "1. 最初は詰まり、次の版で直る", bullets([
     "詰まりが Issue になり、次の版で直る",
@@ -365,14 +357,14 @@ run(__dirname, { script: SCRIPT, title: "独自プラグイン開発の薦め", 
   // ==== 章 6 ====
   d.section("6. 始め方", "フォークして、自分用に育てる");
 
-  // 21. だから「フォークして自分用に」
+  // 19. だから「フォークして自分用に」
   s = d.page("だから、フォークして自分用に", "仕組みはそのまま、ルールだけ差し替える");
   card(d, s, X0, 1.42, 4.66, 1.86, "NDF も私のルールのかたまり", bullets(["承認は 2 回だけ", "文書では「道具」でなく「Tool」", "文言を照合するテストは書かない"], 12.5), "warn", { headSize: 13 });
   card(d, s, 5.08, 1.42, 4.66, 1.86, "そのまま使う仕組み", bullets(["ワークフロー", "3 層のエージェント", "クロスレビュー", "判断基準（MVV）"], 12.5), "accentSoft", { headSize: 13 });
   d.text(s, "他人のルールはノイズ → フォークする", { x: X0, y: 3.36, w: W, h: 0.34, fontSize: 12, bold: true, color: "text", align: "center", valign: "middle" });
   cols(3).forEach((c, i) => d.chip(s, c.x, 3.84, c.w, 0.72, ["指摘が資産になる", "ランタイムに依存しない", "計測して改善できる"][i], "panel1", { fontSize: 13 }));
 
-  // 22. 始め方と育て方
+  // 20. 始め方と育て方
   s = d.page("始め方と育て方", "フォークする → 削る → 育てる");
   [
     ["1. フォークする", ["名前を自分のものに", "自分のリポジトリから導入"]],
@@ -388,7 +380,7 @@ run(__dirname, { script: SCRIPT, title: "独自プラグイン開発の薦め", 
     "開発版を使ってから正式版に",
   ], 10.5));
 
-  // 23. まとめ: 明日からの 3 ステップ
+  // 21. まとめ: 明日からの 3 ステップ
   s = d.page("まとめ: 明日からの 3 ステップ", "教えるのは 1 回。プラグインにして、フォークして育てる");
   [
     ["1", "ai-plugins をフォークして\n自分の名前でインストール"],

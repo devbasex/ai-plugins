@@ -75,13 +75,13 @@ def test_deck_uses_copied_frame(deck: Path) -> None:
     assert _lib_hash(deck / "slides" / "lib") == recorded.group(1)
 
 
-def test_skill_plugin_development_has_23_pages_and_6_sections(tmp_path: Path) -> None:
+def test_skill_plugin_development_has_21_pages_and_6_sections(tmp_path: Path) -> None:
     deck = ROOT / "docs" / "presentations" / "2026-10-17-skill-plugin-development"
-    assert len(script_readings(deck / "script.md")) == 23
-    assert _notes_rows(deck / "notes.md") == list(range(1, 24))
+    assert len(script_readings(deck / "script.md")) == 21
+    assert _notes_rows(deck / "notes.md") == list(range(1, 22))
     ensure_node_modules(deck / "slides")
     out = tmp_path / "deck.pptx"
     assert run_node(deck / "slides" / "build-deck.js", out, cwd=deck).returncode == 0
     slides = read_pptx(out)["slides"]
-    assert len(slides) == 29
+    assert len(slides) == 27
     assert sum(_is_section(p) for p in slides) == 6
