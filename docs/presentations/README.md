@@ -28,7 +28,7 @@
 
 | 資料 | 内容 | 想定時間 |
 |---|---|---|
-| [2026-10-17-skill-plugin-development/](2026-10-17-skill-plugin-development/README.md) | 独自スキルプラグイン開発の薦め。NDF の機能を例に、自分用のスキルプラグインを作って育てることを薦める（社外の勉強会・登壇向け） | 30〜35分 / 23ページ |
+| [2026-10-17-skill-plugin-development/](2026-10-17-skill-plugin-development/README.md) | 独自プラグイン開発の薦め。NDF の機能を例に、自分用のスキルを作り、プラグインにして配り、育てることを薦める（社外の勉強会・登壇向け） | 30〜35分 / 21ページ |
 | [2026-08-06-ai-plugins-intro.md](2026-08-06-ai-plugins-intro.md) | ai-plugins / NDF v5.0.0 の個別機能紹介。各スキルに何が書いてあり、何を重視しているかを扱う | 15分 / 15枚 |
 
 `2026-10-17-skill-plugin-development` の成果物は Google Slides で、pptx は生成スクリプトから作り直せるためコミットしません。

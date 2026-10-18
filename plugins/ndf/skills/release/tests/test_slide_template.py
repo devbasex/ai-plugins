@@ -196,25 +196,56 @@ def test_raw_color_value_in_build_script_stops(deck: Path, tmp_path: Path) -> No
     assert "F3F3F3" in cp.stderr
 
 
-def test_notes_come_from_script(deck: Path, tmp_path: Path) -> None:
+def test_notes_come_from_script_and_section_takes_none(deck: Path, tmp_path: Path) -> None:
     out = tmp_path / "n.pptx"
     assert _build(deck, out).returncode == 0
     readings = script_readings(deck / "script.md")
-    notes = [s.notes for s in read_pptx(out)["slides"]]
-    assert notes == [readings[i] for i in range(1, 4)]
-    assert "\n" in notes[2]  # `>` だけの行が段落を分ける
+    assert len(readings) == 2  # 表紙と本編。章扉は台本に区切りを持たない
+    cover, section, body = read_pptx(out)["slides"]
+    assert cover.notes == readings[1]
+    assert not section.notes  # 章扉はノートを持たない
+    assert body.notes == readings[2]  # 章扉の後のページは、台本の次の番号を受ける
+    assert "\n" in body.notes  # `>` だけの行が段落を分ける
+
+
+def test_page_numbers_count_sections(deck: Path, tmp_path: Path) -> None:
+    out = tmp_path / "p.pptx"
+    assert _build(deck, out).returncode == 0
+    _, section, body = read_pptx(out)["slides"]
+    assert any(s.text == "2" for s in section.shapes)
+    assert any(s.text == "3" for s in body.shapes)
+
+
+def _add_section_after_cover(deck: Path) -> None:
+    src = (deck / "build-deck.js").read_text(encoding="utf-8")
+    anchor = '  d.section("現状"'
+    assert anchor in src
+    (deck / "build-deck.js").write_text(src.replace(anchor, '  d.section("前置き", "");\n' + anchor, 1), encoding="utf-8")
+
+
+def test_sections_are_left_out_of_page_count(deck: Path, tmp_path: Path) -> None:
+    _add_section_after_cover(deck)
+    out = tmp_path / "s.pptx"
+    cp = _build(deck, out)
+    assert cp.returncode == 0, cp.stderr
+    slides = read_pptx(out)["slides"]
+    assert len(slides) == 4
+    readings = script_readings(deck / "script.md")
+    assert [bool(s.notes) for s in slides] == [True, False, False, True]
+    assert slides[3].notes == readings[2]
 
 
 def test_page_count_must_match_script(deck: Path, tmp_path: Path) -> None:
     with open(deck / "script.md", "a", encoding="utf-8") as fh:
-        fh.write("\n## 4. 増やしたページ\n\n> 4 ページ目の読み上げ。\n")
+        fh.write("\n## 3. 増やしたページ\n\n> 3 ページ目の読み上げ。\n")
     cp = _build(deck, tmp_path / "x.pptx")
     assert cp.returncode == 1
-    assert "4" in cp.stderr and "3" in cp.stderr
+    # 作ったのは 3 ページだが、章扉を除くと 2 ページで、台本の 3 ページと合わない
+    assert "台本 3 ページ" in cp.stderr and "作ったページ 2" in cp.stderr and "章扉 1" in cp.stderr
     assert not (tmp_path / "x.pptx").exists()
 
 
-@pytest.mark.parametrize(("swap", "to", "message"), [("## 2.", "## 4.", "欠ける: 2"), ("## 3.", "## 2.", "重なる: 2")])
+@pytest.mark.parametrize(("swap", "to", "message"), [("## 2.", "## 4.", "欠ける: 2"), ("## 1.", "## 2.", "重なる: 2")])
 def test_broken_script_numbers_stop_with_2(deck: Path, tmp_path: Path, swap: str, to: str, message: str) -> None:
     script = deck / "script.md"
     script.write_text(script.read_text(encoding="utf-8").replace(swap, to), encoding="utf-8")
