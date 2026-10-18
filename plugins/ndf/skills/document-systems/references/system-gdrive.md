@@ -46,7 +46,7 @@
 
 | 場合 | 順 |
 | --- | --- |
-| 新しく作る | pptx をフォルダを指定せずに上げ（非公開）、応答の `id` を `mimeType` を Google Slides に指定して複製する。複製が成果物である |
+| 新しく作る | pptx をフォルダを指定せず `ignoreDefaultVisibility` を付けて上げ（非公開。`google-workspace` の対応表の変換の 1 手目）、応答の `id` を `mimeType` を Google Slides に指定して複製する。複製が成果物である |
 | 既にある Google スライドを直す | 同じファイルの ID へ pptx を上げ直す。**URL と共有の設定はそのまま残る。** pptx のあるディレクトリで打つ |
 
 フォルダへ入れるときは、先にフォルダの共有範囲を確かめる（`google-workspace` の手順）。
