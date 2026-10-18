@@ -1,4 +1,4 @@
-// 発表資料「独自スキルプラグイン開発の薦め」の生成スクリプト（台本の 23 ページと章扉 6 つの 29 ページ）。
+// 発表資料「独自プラグイン開発の薦め」の生成スクリプト（台本の 23 ページと章扉 6 つの 29 ページ）。
 //
 //   node build-deck.js <出力>.pptx [<theme.json>]
 //
@@ -66,14 +66,14 @@ function flow(d, s, x, y, w, h, labels, opt) {
   });
 }
 
-run(__dirname, { script: SCRIPT, title: "独自スキルプラグイン開発の薦め", author: "NDF" }, (d) => {
+run(__dirname, { script: SCRIPT, title: "独自プラグイン開発の薦め", author: "NDF" }, (d) => {
   let s;
 
   // 1. タイトル
-  d.cover("独自スキルプラグイン開発の薦め", "NDF を例に、自分の開発スタイルを AI に持たせる", "github.com/devbasex/ai-plugins");
+  d.cover("独自プラグイン開発の薦め", "スキルを作り、プラグインで配る\nNDF を例に、自分の開発スタイルを AI に持たせる", "github.com/devbasex/ai-plugins");
 
   // ==== 章 1 ====
-  d.section("1. なぜスキルプラグインか", "CLAUDE.md に書くだけでは届かない");
+  d.section("1. なぜプラグインか", "CLAUDE.md に書くだけでは届かない");
 
   // 2. AI に同じことを何度も言っていませんか
   s = d.page("同じ指摘を、何度もしていませんか", "指摘の回数 ＝ AI にまだ伝わっていない量");
@@ -96,32 +96,41 @@ run(__dirname, { script: SCRIPT, title: "独自スキルプラグイン開発の
     card(d, s, c.x, 1.5 + Math.floor(i / 2) * 1.5, c.w, 1.3, r[0], r[1], "panel1", { band: "accent", headSize: 18, bodySize: 16, headH: 0.46 });
   });
 
-  // 4. スキルプラグインとは
-  s = d.page("スキルプラグインとは", "やり方をパッケージにして、どこでも再利用");
-  d.tbl(s, [
-    [d.H("構成要素"), d.H("役割")],
-    [d.B("Skill"), "手順書。必要なときだけ読む"],
-    [d.B("スクリプト"), "決まった処理を確実に"],
-    [d.B("hook"), "ルールを強制"],
-    [d.B("サブエージェント"), "役割ごとの AI"],
-  ], { x: X0, y: 1.4, w: 5.5, colW: [1.9, 3.6], rowH: [0.34, 0.46, 0.46, 0.46, 0.46], fontSize: 13 });
-  // 公式ドキュメント（Anthropic）へのリンク
-  d.box(s, 5.92, 1.4, 3.82, 2.18, "panel1", false);
+  // 4. スキルとプラグイン
+  s = d.page("スキルとプラグイン", "スキルで作り、プラグインで配る");
+  card(d, s, X0, 1.4, 5.5, 0.92, "スキル（Skill）＝ 作る単位", "手順書（いつ・何を・どの順で）\n必要なときだけ読む", "panel1", { band: "accent", headSize: 14, bodySize: 12 });
+  card(d, s, X0, 2.44, 5.5, 1.62, "プラグイン ＝ 配る単位", bullets([
+    "スキル",
+    "スクリプト（決まった処理を確実に）",
+    "hook（ルールを強制）",
+    "サブエージェント（役割ごとの AI）",
+  ], 12), "panel1", { band: "accent", headSize: 14 });
+  d.text(s, "同じものを 4 つのランタイムで", { x: X0, y: 4.14, w: 5.5, h: 0.28, fontSize: 11, bold: true, color: "text", valign: "middle" });
+  cols(4, 0.1, X0, 5.5).forEach((c, i) => d.chip(s, c.x, 4.46, c.w, 0.5, ["Claude Code", "Codex", "Kiro", "agy"][i], "accentSoft", { fontSize: 11 }));
+  // 公式ドキュメントへのリンク（呼び方は Anthropic と OpenAI の公式に合わせる）
+  d.box(s, 5.92, 1.4, 3.82, 3.56, "panel1", false);
   d.box(s, 5.92, 1.4, 3.82, 0.06, "accent", false);
-  d.text(s, "公式ドキュメント（Anthropic）", { x: 6.06, y: 1.5, w: 3.54, h: 0.32, fontSize: 12, bold: true, color: "text", valign: "middle" });
+  d.text(s, "公式ドキュメント", { x: 6.06, y: 1.5, w: 3.54, h: 0.32, fontSize: 12, bold: true, color: "text", valign: "middle" });
   const OFFICIAL = [
+    ["Anthropic（Claude Code）"],
     ["Claude Code: プラグイン", "https://code.claude.com/docs/ja/plugins"],
     ["Claude Code: Skills", "https://code.claude.com/docs/ja/skills"],
     ["プラグインマーケットプレイス", "https://code.claude.com/docs/ja/plugin-marketplaces"],
     ["Agent Skills の紹介（Engineering Blog）", "https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills"],
     ["公式 Skill の例（anthropics/skills）", "https://github.com/anthropics/skills"],
+    ["OpenAI（Codex）"],
+    ["Codex: Skills", "https://developers.openai.com/codex/skills"],
+    ["Codex: Plugins", "https://developers.openai.com/codex/plugins"],
+    ["規格"],
+    ["Agent Skills（agentskills.io）", "https://agentskills.io"],
   ];
   d.text(s, OFFICIAL.map(([label, url], i) => ({
     text: label,
-    options: { hyperlink: { url }, color: "accent", bullet: { indent: 12 }, breakLine: i < OFFICIAL.length - 1 },
-  })), { x: 6.06, y: 1.86, w: 3.54, h: 1.64, fontSize: 11, valign: "top", paraSpaceAfter: 4 });
-  d.text(s, "同じものを 4 つのランタイムで", { x: X0, y: 3.74, w: W, h: 0.3, fontSize: 12, bold: true, color: "text" });
-  cols(4).forEach((c, i) => d.chip(s, c.x, 4.1, c.w, 0.62, ["Claude Code", "Codex", "Kiro", "agy"][i], "accentSoft", { fontSize: 13 }));
+    options: Object.assign(
+      url ? { hyperlink: { url }, color: "accent", bullet: { indent: 12 } } : { bold: true, color: "text", paraSpaceBefore: i ? 6 : 0 },
+      { breakLine: i < OFFICIAL.length - 1 },
+    ),
+  })), { x: 6.06, y: 1.86, w: 3.54, h: 3.0, fontSize: 11.5, valign: "top", paraSpaceAfter: 3 });
 
   // ==== 章 2 ====
   d.section("2. NDF の全体像", "Issue の束を渡すと、リリースまで進む");
