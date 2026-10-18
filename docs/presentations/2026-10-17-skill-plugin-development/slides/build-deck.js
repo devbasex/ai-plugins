@@ -228,17 +228,8 @@ run(__dirname, { script: SCRIPT, title: "独自スキルプラグイン開発の
   d.arrow(s, 2.9, 2.54, 0, 0.3);
   d.chip(s, 1.5, 2.9, 2.8, 0.56, "新しい指摘は？", "panel2", { fontSize: 11 });
   d.text(s, "出た → 組み替えて繰り返す\n出ない → 終了", { x: X0, y: 3.56, w: 5.0, h: 0.56, fontSize: 11 });
-  d.text(s, "指摘の再現率（手元の実測）", { x: 5.6, y: 1.42, w: 4.14, h: 0.3, fontSize: 12, bold: true, color: "text" });
-  [
-    ["1 つの AI（低い方）", 0.21, "panel2"],
-    ["1 つの AI（高い方）", 0.49, "panel2"],
-    ["2 つの AI を合わせる", 0.91, "accent"],
-  ].forEach((r, i) => {
-    const y = 1.86 + i * 0.86;
-    d.text(s, r[0], { x: 5.6, y, w: 4.14, h: 0.28, fontSize: 11 });
-    d.box(s, 5.6, y + 0.3, 3.4 * r[1], 0.36, r[2], false);
-    d.text(s, r[1].toFixed(2), { x: 5.66 + 3.4 * r[1], y: y + 0.3, w: 0.6, h: 0.36, fontSize: 13, bold: true, color: "text", valign: "middle" });
-  });
+  card(d, s, 5.6, 1.38, 4.14, 1.26, "別の AI が見落としを拾う", "2 つの AI を入れ替えながら\n新しい指摘が出なくなるまで", "panel1", { band: "accent", headSize: 14, bodySize: 14, headH: 0.38 });
+  card(d, s, 5.6, 2.86, 4.14, 1.26, "観点は PR の中身で切り替え", "レビューの基準は\nリポジトリごとに設定", "panel1", { band: "accent", headSize: 14, bodySize: 14, headH: 0.38 });
 
   // 13. /ndf:cross-refactoring
   s = d.page("全員で提案、1 人が時間内に直す", "/ndf:cross-refactoring — 複数の AI でリファクタリング");
