@@ -1,12 +1,12 @@
 # 独自スキルプラグイン開発の薦め
 
-社外の勉強会・登壇で話す 23 ページのスライド。NDF の機能を例に、自分用のスキルプラグインを作って育てることを薦める。
+社外の勉強会・登壇で話すスライド（台本の 23 ページと章扉 6 つの 29 ページ）。NDF の機能を例に、自分用のスキルプラグインを作って育てることを薦める。
 `release` の `form-slide.md` の生成スクリプトの経路で作った。
 
 | ファイル | 中身 |
 | --- | --- |
 | [script.md](script.md) | 台本（第 7 稿の写し）。ページごとの見出しと読み上げ。スピーカーノートの正本 |
-| [notes.md](notes.md) | 構成メモ。ページごとの見出し・役割・根拠の表と、尺 |
+| [notes.md](notes.md) | 構成メモ。ページごとの見出し・役割・根拠の表と、章立て・尺 |
 | [slides/build-deck.js](slides/build-deck.js) | 生成スクリプト。スライドの正本 |
 | [slides/theme.json](slides/theme.json) | トーン＆マナーのファイル |
 | `slides/lib/` | NDF の汎用テンプレートの枠組み（`release` の `assets/slides/lib/`）の写し。書き換えない |
@@ -28,7 +28,7 @@ Google Slides を成果物にする。pptx は生成スクリプトから作り�
 | 色 | 既定値 |
 | 著作権表示 | `NDF — github.com/devbasex/ai-plugins` |
 | ロゴ | なし |
-| 写した時点の `lib/` の内容のハッシュ | `86c3acf6f8b74c80bb92ffa3a1dfe17cde6ee17d199e6f76d029744f7d6a9133`（`cat slides/lib/*.js \| sha256sum`） |
+| 写した時点の `lib/` の内容のハッシュ | `e1fbac1642aef0fe49a57b00d7a2575eaf363bbfd5c55b324d53aa778f632800`（`cat slides/lib/*.js \| sha256sum`） |
 
 ## 生成と確認の手順
 
