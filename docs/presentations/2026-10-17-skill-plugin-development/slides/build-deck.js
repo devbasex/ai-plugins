@@ -45,7 +45,7 @@ function stat(d, s, x, y, w, h, value, unit, label) {
   d.text(s, label, { x: x + 0.2, y: y + 0.8, w: w - 0.3, h: h - 0.9, fontSize: 10 });
 }
 
-// 箇条書き（"- " で始まる項目は 1 段下げる）
+// 箇条書き（"- " で始まる項目は インデントを 1 つ下げる）
 function bullets(items, size) {
   return items.map((t, i) => {
     const sub = t.startsWith("- ");
@@ -204,7 +204,7 @@ run(__dirname, { script: SCRIPT, title: "独自プラグイン開発の薦め", 
     const n = row[1].length;
     const g = 0.2;
     flow(d, s, 1.06, y, (8.68 * n + g * (n - 7)) / 7, 0.7, row[1], { gap: g, size: 9.5 });
-    // 段の続きは左の見出しの列で示す（工程の箱の間に置くと、箱どうしの流れに読める）
+    // 行の続きは左の見出しの列で示す（工程の箱の間に置くと、箱どうしの流れに読める）
     if (i < 2) d.arrow(s, X0 + 0.3, y + 0.76, 0, 0.26);
   });
   d.note(s, "レビューの指摘は直して繰り返す。開発版は自分で使って確かめてから承認 2 へ");
