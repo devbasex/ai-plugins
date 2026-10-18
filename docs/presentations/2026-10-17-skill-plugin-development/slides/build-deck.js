@@ -104,7 +104,22 @@ run(__dirname, { script: SCRIPT, title: "独自スキルプラグイン開発の
     [d.B("スクリプト"), "決まった処理を確実に"],
     [d.B("hook"), "ルールを強制"],
     [d.B("サブエージェント"), "役割ごとの AI"],
-  ], { x: X0, y: 1.4, w: W, colW: [2.2, 7.28], rowH: [0.34, 0.46, 0.46, 0.46, 0.46], fontSize: 13 });
+  ], { x: X0, y: 1.4, w: 5.5, colW: [1.9, 3.6], rowH: [0.34, 0.46, 0.46, 0.46, 0.46], fontSize: 13 });
+  // 公式ドキュメント（Anthropic）へのリンク
+  d.box(s, 5.92, 1.4, 3.82, 2.18, "panel1", false);
+  d.box(s, 5.92, 1.4, 3.82, 0.06, "accent", false);
+  d.text(s, "公式ドキュメント（Anthropic）", { x: 6.06, y: 1.5, w: 3.54, h: 0.32, fontSize: 12, bold: true, color: "text", valign: "middle" });
+  const OFFICIAL = [
+    ["Claude Code: プラグイン", "https://code.claude.com/docs/ja/plugins"],
+    ["Claude Code: Skills", "https://code.claude.com/docs/ja/skills"],
+    ["プラグインマーケットプレイス", "https://code.claude.com/docs/ja/plugin-marketplaces"],
+    ["Agent Skills の紹介（Engineering Blog）", "https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills"],
+    ["公式 Skill の例（anthropics/skills）", "https://github.com/anthropics/skills"],
+  ];
+  d.text(s, OFFICIAL.map(([label, url], i) => ({
+    text: label,
+    options: { hyperlink: { url }, color: "accent", bullet: { indent: 12 }, breakLine: i < OFFICIAL.length - 1 },
+  })), { x: 6.06, y: 1.86, w: 3.54, h: 1.64, fontSize: 11, valign: "top", paraSpaceAfter: 4 });
   d.text(s, "同じものを 4 つのランタイムで", { x: X0, y: 3.74, w: W, h: 0.3, fontSize: 12, bold: true, color: "text" });
   cols(4).forEach((c, i) => d.chip(s, c.x, 4.1, c.w, 0.62, ["Claude Code", "Codex", "Kiro", "agy"][i], "accentSoft", { fontSize: 13 }));
 
