@@ -1,7 +1,6 @@
 """google-workspace のスクリプトが共有する部品（#2065）。
 
-gws の出力の末尾を切り出す関数と、stopped の結果を出して終える関数と、
-未認証の終了コード・gws の待ち時間を 1 か所に置く。
+gws の出力の末尾を切り出す関数と、stopped の結果を出して終える関数を 1 か所に置く。
 """
 
 from __future__ import annotations
@@ -16,8 +15,6 @@ if str(LIB) not in sys.path:
 import step_result as sr  # noqa: E402
 
 TAIL_LINES = 20
-EXIT_UNAUTHENTICATED = sr.EXIT_GATE + 1
-GWS_TIMEOUT = 120
 
 
 def output_tail(text: str) -> str:

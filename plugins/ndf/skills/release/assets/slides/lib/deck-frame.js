@@ -105,48 +105,42 @@ function mergeTheme(override, baseDir) {
   }
   const unknown = Object.keys(override).filter((k) => !THEME_KEYS.includes(k));
   if (unknown.length) throw new DeckError(`theme.json に知らない項目がある: ${unknown.join(", ")}`, EXIT_INPUT);
-  if ("font" in override) mergeFont(t, override.font);
+  if ("font" in override) {
+    if (typeof override.font !== "string" || !override.font) throw new DeckError("theme.json の font は空でない文字列", EXIT_INPUT);
+    t.font = override.font;
+  }
   for (const group of ["colors", "sizes"]) {
-    if (group in override) mergeGroup(t, group, override[group]);
+    if (!(group in override)) continue;
+    const g = override[group];
+    if (typeof g !== "object" || g == null || Array.isArray(g)) throw new DeckError(`theme.json の ${group} はオブジェクト`, EXIT_INPUT);
+    const bad = Object.keys(g).filter((k) => !(k in DEFAULT_THEME[group]));
+    if (bad.length) throw new DeckError(`theme.json の ${group} に知らない項目がある: ${bad.join(", ")}`, EXIT_INPUT);
+    for (const [k, v] of Object.entries(g)) {
+      if (group === "colors" && !(typeof v === "string" && HEX.test(v))) {
+        throw new DeckError(`theme.json の colors.${k} は 6 桁の 16 進（# なし）: ${v}`, EXIT_INPUT);
+      }
+      if (group === "sizes" && !(typeof v === "number" && v > 0)) {
+        throw new DeckError(`theme.json の sizes.${k} は正の数（pt）: ${v}`, EXIT_INPUT);
+      }
+      t[group][k] = group === "colors" ? v.toUpperCase() : v;
+    }
   }
-  if ("copyright" in override) mergeCopyright(t, override.copyright);
-  if ("logo" in override) t.logo = resolveLogo(override.logo, baseDir);
+  if ("copyright" in override) {
+    if (typeof override.copyright !== "string") throw new DeckError("theme.json の copyright は文字列", EXIT_INPUT);
+    t.copyright = override.copyright;
+  }
+  if ("logo" in override) {
+    if (override.logo === null) {
+      t.logo = null;
+    } else if (typeof override.logo === "string" && override.logo) {
+      const p = path.resolve(baseDir || process.cwd(), override.logo);
+      if (!fs.existsSync(p)) throw new DeckError(`theme.json の logo のファイルが無い: ${p}`, EXIT_INPUT);
+      t.logo = p;
+    } else {
+      throw new DeckError("theme.json の logo は PNG の相対パスか null", EXIT_INPUT);
+    }
+  }
   return t;
-}
-
-function mergeFont(t, font) {
-  if (typeof font !== "string" || !font) throw new DeckError("theme.json の font は空でない文字列", EXIT_INPUT);
-  t.font = font;
-}
-
-// colors と sizes の 1 グループを項目ごとに重ねる。
-function mergeGroup(t, group, g) {
-  if (typeof g !== "object" || g == null || Array.isArray(g)) throw new DeckError(`theme.json の ${group} はオブジェクト`, EXIT_INPUT);
-  const bad = Object.keys(g).filter((k) => !(k in DEFAULT_THEME[group]));
-  if (bad.length) throw new DeckError(`theme.json の ${group} に知らない項目がある: ${bad.join(", ")}`, EXIT_INPUT);
-  for (const [k, v] of Object.entries(g)) {
-    if (group === "colors" && !(typeof v === "string" && HEX.test(v))) {
-      throw new DeckError(`theme.json の colors.${k} は 6 桁の 16 進（# なし）: ${v}`, EXIT_INPUT);
-    }
-    if (group === "sizes" && !(typeof v === "number" && v > 0)) {
-      throw new DeckError(`theme.json の sizes.${k} は正の数（pt）: ${v}`, EXIT_INPUT);
-    }
-    t[group][k] = group === "colors" ? v.toUpperCase() : v;
-  }
-}
-
-function mergeCopyright(t, copyright) {
-  if (typeof copyright !== "string") throw new DeckError("theme.json の copyright は文字列", EXIT_INPUT);
-  t.copyright = copyright;
-}
-
-// logo の値を絶対パスか null にする。相対パスは theme.json の場所から解決する。
-function resolveLogo(value, baseDir) {
-  if (value === null) return null;
-  if (typeof value !== "string" || !value) throw new DeckError("theme.json の logo は PNG の相対パスか null", EXIT_INPUT);
-  const p = path.resolve(baseDir || process.cwd(), value);
-  if (!fs.existsSync(p)) throw new DeckError(`theme.json の logo のファイルが無い: ${p}`, EXIT_INPUT);
-  return p;
 }
 
 function loadTheme(theme) {
