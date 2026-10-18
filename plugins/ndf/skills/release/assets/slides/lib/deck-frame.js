@@ -5,6 +5,8 @@
 // - 書体と色の値は DEFAULT_THEME と theme.json だけが持つ。関数に渡す色は theme.colors の項目名で受ける
 // - 台本（script.md）を渡すと、ページを作るたびに同じ番号の読み上げをスピーカーノートへ付け、
 //   保存の前に台本のページ数と作ったページ数を照合する
+// - 章扉（section）は構成を見せるページで、スピーカーノートを持たず、台本の番号を進めない。
+//   ページ数の照合からも外す（ページ番号は章扉も数える）
 //
 // 資料のディレクトリへ写して使う。写した後に書き換えない（プロジェクトの値は theme.json へ書く）。
 
@@ -242,7 +244,9 @@ function createDeck(opts) {
   if (o.title) p.subject = o.title;
   const F = theme.font;
   const logo = theme.logo ? "image/png;base64," + fs.readFileSync(theme.logo).toString("base64") : null;
-  let pageNo = 0;
+  let pageNo = 0; // 作ったページ（章扉を含む）。ページ番号に使う
+  let scriptNo = 0; // 台本のページを消費したページ（章扉を除く）
+  let sections = 0;
 
   function color(name) {
     if (!(name in theme.colors)) throw new DeckError(`色は theme.colors の項目名で指す: ${name}`, EXIT_INPUT);
@@ -271,12 +275,18 @@ function createDeck(opts) {
     return t.map((x) => (x && typeof x === "object" ? { ...x, options: resolve(x.options) } : x));
   }
 
-  function newSlide() {
+  // withScript が false のページ（章扉）は台本の番号を進めず、ノートを持たない
+  function newSlide(withScript) {
     const s = p.addSlide();
     pageNo++;
     s.background = { color: color("background") };
+    if (withScript === false) {
+      sections++;
+      return s;
+    }
+    scriptNo++;
     if (script) {
-      const sp = script[pageNo - 1];
+      const sp = script[scriptNo - 1];
       if (sp && sp.reading) s.addNotes(sp.reading);
     }
     return s;
@@ -322,7 +332,7 @@ function createDeck(opts) {
   }
 
   function section(title, sub) {
-    const s = newSlide();
+    const s = newSlide(false);
     const c = FRAME.section;
     s.addShape(p.ShapeType.rect, { ...c.band, fill: { color: color("accent") }, line: { type: "none" } });
     putLogo(s, FRAME.logo);
@@ -366,11 +376,11 @@ function createDeck(opts) {
 
   async function save(out) {
     if (!out || !/\.pptx$/i.test(out)) throw new DeckError("出力のパスは .pptx で終える", EXIT_INPUT);
-    if (script && script.length !== pageNo) {
-      throw new DeckError(`ページ数が台本と合わない: 台本 ${script.length} ページ / 作ったページ ${pageNo}`, EXIT_INPUT);
+    if (script && script.length !== scriptNo) {
+      throw new DeckError(`ページ数が台本と合わない: 台本 ${script.length} ページ / 作ったページ ${scriptNo}（章扉 ${sections} を除く）`, EXIT_INPUT);
     }
     await p.writeFile({ fileName: out });
-    return { out, pages: pageNo };
+    return { out, pages: pageNo, sections };
   }
 
   return {
@@ -380,6 +390,9 @@ function createDeck(opts) {
     script,
     get pageNo() {
       return pageNo;
+    },
+    get scriptNo() {
+      return scriptNo;
     },
     color,
     text,
@@ -410,7 +423,7 @@ function run(dir, opts, build) {
     const deck = createDeck({ ...opts, theme, baseDir: dir });
     await build(deck);
     const r = await deck.save(out);
-    console.log(`${r.out}: ${r.pages} ページ`);
+    console.log(`${r.out}: ${r.pages} ページ（章扉 ${r.sections}）`);
   })().catch((e) => {
     console.error(e.message);
     process.exit(e instanceof DeckError ? e.code : 1);
