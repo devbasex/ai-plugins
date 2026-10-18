@@ -15,7 +15,7 @@
 | 0 | ok | 全ページを保存した |
 | 1 | stopped | gws か画像の取得が失敗した（gws の出力の末尾を `items` に載せる） |
 | 2 | stopped | 引数の誤り・gws の応答を読めない |
-| 11 | gate | gws が未認証（`gws-check.py` と同じ値）。利用者に `gws auth login` を頼む |
+| 11 | gate | gws が未認証（`gws_common.EXIT_UNAUTHENTICATED`）。利用者に `gws auth login` を頼む |
 
 - gws の認証情報は読まない。認証は gws が自分の設定ディレクトリに持つ（C1）
 - `contentUrl` は要求した利用者の権限で開ける一時的な URL で、認証なしで curl で取る
@@ -37,19 +37,17 @@ if str(LIB) not in sys.path:
 import step_result as sr  # noqa: E402
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from gws_common import emit_stopped, output_tail  # noqa: E402
+from gws_common import EXIT_UNAUTHENTICATED, GWS_TIMEOUT, emit_stopped, output_tail  # noqa: E402
 
 TOOL = "slides-thumbnails"
-EXIT_UNAUTHENTICATED = sr.EXIT_GATE + 1
 SIZES = ("SMALL", "MEDIUM", "LARGE")
-TIMEOUT = 120
 CURL = "curl"
 
 
 def _gws(gws: str, args: list[str], what: str) -> dict:
     """gws を打って応答の JSON を返す。未認証は 11、失敗は 1、読めない応答は 2 で終える。"""
     try:
-        cp = subprocess.run([gws, *args], capture_output=True, text=True, timeout=TIMEOUT, check=False)
+        cp = subprocess.run([gws, *args], capture_output=True, text=True, timeout=GWS_TIMEOUT, check=False)
     except (OSError, subprocess.TimeoutExpired) as e:
         emit_stopped(TOOL, f"{what}: gws を起動できない: {e}", sr.EXIT_VIOLATION)
     out = output_tail(cp.stdout + "\n" + cp.stderr)
@@ -102,7 +100,9 @@ def _thumbnail(gws: str, pid: str, oid: str, size: str, dest: pathlib.Path, no: 
     if not isinstance(url, str) or not url:
         emit_stopped(TOOL, f"{what}: 応答に contentUrl が無い", sr.EXIT_UNREADABLE)
     try:
-        cp = subprocess.run([CURL, "-fsSL", "--max-time", str(TIMEOUT), "-o", str(dest), url], capture_output=True, text=True, check=False)
+        cp = subprocess.run(
+            [CURL, "-fsSL", "--max-time", str(GWS_TIMEOUT), "-o", str(dest), url], capture_output=True, text=True, check=False
+        )
     except OSError as e:
         emit_stopped(TOOL, f"{what}: curl を起動できない: {e}", sr.EXIT_VIOLATION)
     if cp.returncode != 0:

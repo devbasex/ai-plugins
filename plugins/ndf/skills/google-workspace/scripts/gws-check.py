@@ -35,19 +35,17 @@ if str(LIB) not in sys.path:
 import step_result as sr  # noqa: E402
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from gws_common import emit_stopped, output_tail  # noqa: E402
+from gws_common import EXIT_UNAUTHENTICATED, GWS_TIMEOUT, emit_stopped, output_tail  # noqa: E402
 
 TOOL = "google-workspace"
 PACKAGE = "@googleworkspace/cli"
 PACKAGE_URL = "https://www.npmjs.com/package/@googleworkspace/cli"
 INSTALL_CMD = ["npm", "install", "-g", PACKAGE]
 PROBE_KEYS = ("credential_source", "auth_method", "client_config_exists")
-EXIT_UNAUTHENTICATED = sr.EXIT_GATE + 1
-TIMEOUT = 120
 INSTALL_TIMEOUT = 600
 
 
-def _run(cmd: list[str], timeout: int = TIMEOUT) -> subprocess.CompletedProcess:
+def _run(cmd: list[str], timeout: int = GWS_TIMEOUT) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
 
 
