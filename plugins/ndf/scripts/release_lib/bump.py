@@ -14,8 +14,9 @@ import re
 import tempfile
 from pathlib import Path
 
+import md
 import versions
-from step_result import EXIT_PRECONDITION, StepError, plugin_dir
+from step_result import EXIT_PRECONDITION, StepError, base_of, plugin_dir
 
 
 def ver_pat(v):
@@ -154,3 +155,75 @@ def require_bumped(root, plugin, ver):
         raise StepError(f"plugin.json の版を読めない: {e}", EXIT_PRECONDITION)
     if got != ver:
         raise StepError(f"{plugin} の plugin.json の版が {got} で、今回の版 {ver} でない（bump が通っていない）", EXIT_PRECONDITION)
+
+
+def _ver_key(v):
+    return tuple(int(x) for x in v.split("."))
+
+
+def versioning_doc(ed):
+    """docs/versioning-and-distribution.md の「版の付け方と開発版の配布」章の正式版の版数。
+
+    正式版の行が開発版・公開前の確認版の例の基底に追いついたら、例（表の 2 行・次の開発の例・接尾辞を外す例・
+    順序の例）の基底を次の MINOR へ進める（check-doc-staleness.py の「正式版の行より新しい版」を保つ）。
+    """
+    doc = ed.root / "docs" / "versioning-and-distribution.md"
+    rel = "docs/versioning-and-distribution.md"
+    ob, nb = base_of(ed.old), base_of(ed.new)
+    if ob == nb:
+        return
+    if not doc.is_file():
+        ed.manual.append(f"{rel} が無い（この章は手で直す）")
+        return
+    lines = ed.lines(doc)
+    fenced = md.fenced_lines("\n".join(lines))
+    head = next((i for i, l in enumerate(lines) if l.startswith("## 版の付け方と開発版の配布")), None)
+    if head is None:
+        ed.manual.append(f"{rel}: 「版の付け方と開発版の配布」章が無い（この章は手で直す）")
+        return
+    tail = next((i for i in range(head + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+    dev_rows = [l for l in lines[head:tail] if re.match(r"^\| 開発版 \| `", l)]
+    m = re.search(r"`(\d+\.\d+\.\d+)-dev\.\d+`", dev_rows[0]) if len(dev_rows) == 1 else None
+    example = m.group(1) if m else None
+    advance = None
+    if example is None:
+        ed.manual.append(f"{rel}: 「版の付け方と開発版の配布」章の開発版の行が特定できない（この章は手で直す）")
+    elif _ver_key(example) <= _ver_key(nb):
+        if example == ob:
+            ed.manual.append(f"{rel}: 開発版の例の基底 {example} が旧版と同じ（この章は手で直す）")
+        else:
+            major, minor, _ = _ver_key(nb)
+            nxt = f"{major}.{minor + 1}.0"
+            ex_rx = re.compile(r"`" + re.escape(example) + r"((?:-(?:dev|rc)\.\d+)?)`")
+            advance = (ex_rx, nxt)
+
+    def advanced(line):
+        return advance[0].sub(lambda mm: f"`{advance[1]}{mm.group(1)}`", line) if advance else line
+
+    targets = [
+        (re.compile(r"^\| 正式版 \| `([^`]+)` \|"), "正式版の表の行"),
+        (re.compile(r"`([^`]+)` の次を開発するなら"), "接尾辞の例"),
+    ]
+    done = set()
+    for rx, what in targets:
+        hits = [i for i in range(head, tail) if rx.search(lines[i])]
+        if len(hits) != 1:
+            ed.manual.append(f"{rel}: 「版の付け方と開発版の配布」章の{what}が特定できない（この章は手で直す）")
+            continue
+        i = hits[0]
+        done.add(i)
+        cur = rx.search(lines[i]).group(1)
+        if cur == nb:
+            continue
+        if cur != ob:
+            ed.manual.append(f"{rel}: {what}の版が {cur} で旧版 {ob} と違う（この章は手で直す）")
+            continue
+        esc = braces(lines[i])
+        to = braces(advanced(lines[i]))
+        ed.place(doc, [i], esc.replace(f"`{ob}`", f"`{CUR_BASE}`", 1), to.replace(f"`{ob}`", f"`{NEW_BASE}`", 1), what)
+    if advance is None:
+        return
+    for i in range(head, tail):
+        if i in done or advanced(lines[i]) == lines[i] or (i < len(fenced) and fenced[i]):
+            continue
+        ed.place(doc, [i], braces(lines[i]), braces(advanced(lines[i])), "開発版の例")
