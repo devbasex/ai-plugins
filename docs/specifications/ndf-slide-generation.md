@@ -432,4 +432,4 @@ pptxgenjs は `package-lock.json` が固定した版を `npm ci` で取る。使
 - [`google-workspace` の SKILL.md](../../plugins/ndf/skills/google-workspace/SKILL.md)・[scripts/slides-thumbnails.py](../../plugins/ndf/skills/google-workspace/scripts/slides-thumbnails.py)・[`official-skills-autoloader` の SKILL.md](../../plugins/ndf/skills/official-skills-autoloader/SKILL.md)
 - [docs/presentations/README.md](../presentations/README.md)（発表資料の置き場と追加の仕方）
 - [ndf-google-workspace-gws.md](ndf-google-workspace-gws.md)（gws への一本化と `gws-check.py` の終了コード）
-- #2065（この形を決めた課題）
+- #2065（この形を決めた Issue）
