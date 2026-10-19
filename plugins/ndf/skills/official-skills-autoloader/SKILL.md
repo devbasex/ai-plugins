@@ -16,7 +16,7 @@ allowed-tools:
 | ユーザー要求の例 | 使用するSkill |
 |---|---|
 | Word / .docx / 文書 / レポート | `docx` |
-| PowerPoint / .pptx / スライド / プレゼン | `pptx` |
+| 既存の PowerPoint / .pptx を読む・直す | `pptx` |
 | Excel / .xlsx / スプレッドシート / 表計算 | `xlsx` |
 | PDF 生成 / フォーム / .pdf 作成 | `pdf` |
 | フロントエンド設計 / UI設計 | `frontend-design` |
@@ -25,6 +25,8 @@ allowed-tools:
 | 新規Skill作成 | `skill-creator` |
 | Claude API / SDK開発 | `claude-api` |
 | MCPサーバー作成 | `mcp-builder` |
+
+**スライド（プレゼン・発表資料）を新しく作る依頼は、公式 Skill を使わない。** `release` の `references/form-slide.md`（生成スクリプトの経路）へ回す。公式の `pptx` は既存の .pptx を読む・直す依頼だけに使う。
 
 ## 対応ランタイム
 

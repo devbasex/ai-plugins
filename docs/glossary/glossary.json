@@ -85,6 +85,11 @@
       "id": "ndf-estimate",
       "name": "NDF の工数の見積もり",
       "meaning": "AI エージェントが実施する前提で、作業の A・H・L・C を類似の実績から見積もり、予測と実績を突き合わせるときの語"
+    },
+    {
+      "id": "ndf-slide",
+      "name": "NDF のスライドの作成",
+      "meaning": "スライドを生成スクリプトで作り、Google Slides へ変換して確かめるときの語"
     }
   ],
   "terms": [
@@ -4078,6 +4083,62 @@
       "context": "ndf-release",
       "meaning": "PR の本文の `## 利用者向けの変化` が「無し」（「なし」も同じ）だけを持つこと。承認資料の「含む PR」の行に印を付け、CHANGELOG の版の節と「配る中身」には載せない。節の無い本文（題名で代える）とは別に扱う",
       "source": "docs/specifications/ndf-release-approval-included-prs.md"
+    },
+    {
+      "term": "トーン＆マナー",
+      "context": "ndf-slide",
+      "meaning": "スライドの書体・色・文字サイズ・著作権表示・ロゴの値の組。プロジェクトごとに差し替える",
+      "source": "",
+      "pending_source": "issues/issue-2065-requirements.md"
+    },
+    {
+      "term": "ページの枠組み",
+      "context": "ndf-slide",
+      "meaning": "見出し・罫線・ロゴ・著作権表示・ページ番号の位置を固定した、ページを作る共通の関数（page / box / note / tbl / section）",
+      "source": "",
+      "pending_source": "issues/issue-2065-requirements.md"
+    },
+    {
+      "term": "生成スクリプト",
+      "context": "ndf-slide",
+      "meaning": "pptx を出力するスクリプト（pptxgenjs の build-deck.js）。スライドの正本になる",
+      "source": "",
+      "pending_source": "issues/issue-2065-requirements.md"
+    },
+    {
+      "term": "汎用テンプレート",
+      "context": "ndf-slide",
+      "meaning": "会社色を持たないトーン＆マナーとページの枠組みを持つ、生成スクリプトの出発点",
+      "source": "",
+      "pending_source": "issues/issue-2065-requirements.md"
+    },
+    {
+      "term": "構成メモ",
+      "context": "ndf-slide",
+      "meaning": "スライドのページごとの番号・見出し・役割・根拠の表と、構成の考え方を書いた文書",
+      "source": "",
+      "pending_source": "issues/issue-2065-requirements.md"
+    },
+    {
+      "term": "台本",
+      "context": "ndf-slide",
+      "meaning": "ページごとの見出しと読み上げの原稿。配分秒数は見出しに付けてよい（任意）。スピーカーノートへ入れる",
+      "source": "",
+      "pending_source": "issues/issue-2065-design.md"
+    },
+    {
+      "term": "トーン＆マナーのファイル",
+      "context": "ndf-slide",
+      "meaning": "プロジェクトのトーン＆マナーの値を持つ JSON（slides/theme.json）。書いた項目だけが汎用テンプレートの既定値を上書きする",
+      "source": "",
+      "pending_source": "issues/issue-2065-design.md"
+    },
+    {
+      "term": "尺",
+      "context": "ndf-slide",
+      "meaning": "台本の読み上げにかかる時間。読み上げの字数を 350 字/分で割って出す",
+      "source": "",
+      "pending_source": "issues/issue-2065-design.md"
     }
   ]
 }

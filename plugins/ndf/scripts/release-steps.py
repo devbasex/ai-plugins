@@ -327,37 +327,6 @@ def base_version(root, pdir, ref):
         return None
 
 
-def bump_versioning_doc(ed):
-    """docs/versioning-and-distribution.md の「版の付け方と開発版の配布」章の正式版の版数。"""
-    doc = ed.root / "docs" / "versioning-and-distribution.md"
-    rel = "docs/versioning-and-distribution.md"
-    ob, nb = base_of(ed.old), base_of(ed.new)
-    if ob == nb:
-        return
-    if not doc.is_file():
-        ed.manual.append(f"{rel} が無い（この章は手で直す）")
-        return
-    lines = ed.lines(doc)
-    targets = [
-        (re.compile(r"^\| 正式版 \| `([^`]+)` \|"), "正式版の表の行"),
-        (re.compile(r"`([^`]+)` の次を開発するなら"), "接尾辞の例"),
-    ]
-    for rx, what in targets:
-        hits = [i for i, l in enumerate(lines) if rx.search(l)]
-        if len(hits) != 1:
-            ed.manual.append(f"{rel}: 「版の付け方と開発版の配布」章の{what}が特定できない（この章は手で直す）")
-            continue
-        i = hits[0]
-        cur = rx.search(lines[i]).group(1)
-        if cur == nb:
-            continue
-        if cur != ob:
-            ed.manual.append(f"{rel}: {what}の版が {cur} で旧版 {ob} と違う（この章は手で直す）")
-            continue
-        esc = bump.braces(lines[i])
-        ed.place(doc, [i], esc.replace(f"`{ob}`", f"`{bump.CUR_BASE}`", 1), esc.replace(f"`{ob}`", f"`{bump.NEW_BASE}`", 1), what)
-
-
 def plan_bump(root, pdir, plugin, old, new):
     """`plugin` の版を `old` から `new` へ上げる箇所を集めた `BumpPlan` を返す（まだ書き換えない）。"""
     ed = bump.BumpPlan(root, old, new)
@@ -396,7 +365,7 @@ def plan_bump(root, pdir, plugin, old, new):
         ed.sub(nr, r"（Kiro CLI用 / v", "plugins/ndf/README.md の Kiro の確認例")
         ed.sub(nr, r"/plugins/cache/ai-plugins/ndf/", "plugins/ndf/README.md の Codex のパス例", count=2)
         ed.sub(nr, r"ndf@ai-plugins\s+installed", "plugins/ndf/README.md の codex plugin list の出力例")
-        bump_versioning_doc(ed)
+        bump.versioning_doc(ed)
 
     return ed
 

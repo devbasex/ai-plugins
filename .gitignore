@@ -68,3 +68,7 @@ reports/
 
 # cross-review が起動したレビュワーの PID（実行時にだけ作られる）
 *-review-pr*.pid
+
+# スライドの生成スクリプトの依存と生成物（#2065）
+node_modules/
+*.pptx
