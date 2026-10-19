@@ -4088,57 +4088,49 @@
       "term": "トーン＆マナー",
       "context": "ndf-slide",
       "meaning": "スライドの書体・色・文字サイズ・著作権表示・ロゴの値の組。プロジェクトごとに差し替える",
-      "source": "",
-      "pending_source": "issues/issue-2065-requirements.md"
+      "source": "docs/specifications/ndf-slide-generation.md"
     },
     {
       "term": "ページの枠組み",
       "context": "ndf-slide",
       "meaning": "見出し・罫線・ロゴ・著作権表示・ページ番号の位置を固定した、ページを作る共通の関数（page / box / note / tbl / section）",
-      "source": "",
-      "pending_source": "issues/issue-2065-requirements.md"
+      "source": "docs/specifications/ndf-slide-generation.md"
     },
     {
       "term": "生成スクリプト",
       "context": "ndf-slide",
       "meaning": "pptx を出力するスクリプト（pptxgenjs の build-deck.js）。スライドの正本になる",
-      "source": "",
-      "pending_source": "issues/issue-2065-requirements.md"
+      "source": "docs/specifications/ndf-slide-generation.md"
     },
     {
       "term": "汎用テンプレート",
       "context": "ndf-slide",
       "meaning": "会社色を持たないトーン＆マナーとページの枠組みを持つ、生成スクリプトの出発点",
-      "source": "",
-      "pending_source": "issues/issue-2065-requirements.md"
+      "source": "docs/specifications/ndf-slide-generation.md"
     },
     {
       "term": "構成メモ",
       "context": "ndf-slide",
       "meaning": "スライドのページごとの番号・見出し・役割・根拠の表と、構成の考え方を書いた文書",
-      "source": "",
-      "pending_source": "issues/issue-2065-requirements.md"
+      "source": "docs/specifications/ndf-slide-generation.md"
     },
     {
       "term": "台本",
       "context": "ndf-slide",
       "meaning": "ページごとの見出しと読み上げの原稿。配分秒数は見出しに付けてよい（任意）。スピーカーノートへ入れる",
-      "source": "",
-      "pending_source": "issues/issue-2065-design.md"
+      "source": "docs/specifications/ndf-slide-generation.md"
     },
     {
       "term": "トーン＆マナーのファイル",
       "context": "ndf-slide",
       "meaning": "プロジェクトのトーン＆マナーの値を持つ JSON（slides/theme.json）。書いた項目だけが汎用テンプレートの既定値を上書きする",
-      "source": "",
-      "pending_source": "issues/issue-2065-design.md"
+      "source": "docs/specifications/ndf-slide-generation.md"
     },
     {
       "term": "尺",
       "context": "ndf-slide",
       "meaning": "台本の読み上げにかかる時間。読み上げの字数を 350 字/分で割って出す",
-      "source": "",
-      "pending_source": "issues/issue-2065-design.md"
+      "source": "docs/specifications/ndf-slide-generation.md"
     }
   ]
 }

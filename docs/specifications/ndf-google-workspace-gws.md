@@ -26,7 +26,7 @@
 | 3 段の流れ（確かめる → 同意のうえ入れる → 認証を案内する）と、終了コードごとの次の手 | [`google-workspace` の SKILL.md](../../plugins/ndf/skills/google-workspace/SKILL.md) の「流れ」 |
 | 同意の取り方（明示の依頼を同意とみなす・暗黙の依頼では待つ・人がいない起動で止まる） | 同上の「流れ」の 2. |
 | Drive の操作の対応表（エクスポート・ダウンロード・アップロード・フォルダの共有範囲の確認・公開リンクの付与・pptx の Google Slides への変換と同じ URL のままの差し替え）と、エクスポートの MIME | 同上の「操作の対応表」 |
-| Google Slides のページの ID とサムネイルの取得（サムネイルはスクリプト `slides-thumbnails.py`。契約は #2065 の設計の「入出力の契約」） | 同上の「操作の対応表」と [`issues/issue-2065-design.md`](../../issues/issue-2065-design.md) |
+| Google Slides のページの ID とサムネイルの取得（サムネイルはスクリプト `slides-thumbnails.py`。契約はスライドの生成スクリプトの確定仕様の「外部連携」） | 同上の「操作の対応表」と [ndf-slide-generation.md](ndf-slide-generation.md#外部連携) |
 | Drive の素材の取り込みと PDF の取得の経路 | `document-systems` の [`references/system-gdrive.md`](../../plugins/ndf/skills/document-systems/references/system-gdrive.md) |
 | playwright-kit の利用者向けの移行の案内 | [`plugins/playwright-kit/README.md`](../../plugins/playwright-kit/README.md) と根の `CHANGELOG.md` の playwright-kit 3.0.0 |
 
