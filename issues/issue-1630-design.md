@@ -40,22 +40,25 @@
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
 | テストの戦略 | `lib/test_strategy.py` の `resolve`（`init` で 1 度解き、以後は状態ファイルの写しを読むだけ） | `Strategy` | `Suite` | `ScopeRun`・`Outcome` |
-| 着手前のテストの記録 | `refactor_lib/baseline.py`（`init` の中だけで書く） | 状態ファイルの `baseline_test` | — | suite ごとの成否・既存失敗・**テンプレートの試走の記録（新設）** |
+| 着手前のテストの記録 | `refactor_lib/baseline.py`（`init` の中だけで書く。変えない） | 状態ファイルの `baseline_test` | — | suite ごとの成否・既存失敗 |
+| **テンプレートの試走の記録（新設）** | `refactor_lib/template_check.py` の `run`（`init` の中だけで組む） | 状態ファイルの `template_checks` と `<tmp_dir>/template-check.json` | — | suite ごとの入れたパス・結果・基準・判定・直す箇所 |
 
-テンプレートの試走の記録は、着手前のテストの記録の一部として持つ。試走は着手前のテストの結果（suite ごとの成否と
-既存失敗）を入力に取り、同じ `init` の中で 1 度だけ書かれ、以後は読むだけだからである。テストの戦略は変えない
-（試走の結果で戦略を書き換えない）。
+テンプレートの試走の記録は、着手前のテストの記録と別の集約にする（決定 7）。記録の中身を組むのも
+`template-check.json` を書くのも `template_check.run` だけで、`commands/setup.py` は `run` が返した記録を
+状態ファイルの `template_checks` へそのまま置くだけにする（`baseline.run_baseline` の記録を `baseline_test` へ
+そのまま置く今の形と同じ）。`setup.py` も `baseline.py` も試走の記録の中身を書き換えない。試走は着手前のテストの記録を
+読むだけで、`baseline_test` を書き換えない。テストの戦略も変えない（試走の結果で戦略を書き換えない）。
 
 ### 不変条件
 
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
 | I1 | テストの戦略 | 試走に使うコマンドは、改修の範囲テストと同じ組み立て（`fill(scope_command, paths)`）で作る。コマンドの語・ランナーの名前を見ない | 試走が改修の範囲テストと違うものを確かめることになり、見分けが外れる。テストで落とす |
-| I2 | 着手前のテストの記録 | 試走は `scope_command` を持つテストの種別の suite ごとに高々 1 回、`init` の 1 回の起動の中で、着手前のテストの上限の残りの中で走らせる | 上限を超える前に打ち切り、その suite を「判定しない」で記録して続ける |
-| I3 | 着手前のテストの記録 | 試走に入れるパスは、`--scope` のテストの置き場所の配下でその suite が受け持つテストのファイルを最大 2 本。既存失敗の ID を持つファイルを除く | 既存失敗のファイルを入れると、コードの失敗をテンプレートの不備と取り違える |
-| I4 | 着手前のテストの記録 | 「不備」と判定するのは、基準（その suite の着手前のテスト）が通った、または既存失敗を読めて試走のファイルから除けたうえで、試走が `failed` で終わったときだけ | 不備でないテンプレートで止まる。テストで落とす |
-| I5 | 着手前のテストの記録 | 判定が「不備」か「判定できない」の suite が 1 つでもあれば、`init` は状態ファイルを作らずに終了コード 4 で止まる。改修の範囲テストは走らない | テンプレートの不備で落ちた項目が修正へ回る（#1630 の現象） |
-| I6 | 着手前のテストの記録 | 止まるときも続けるときも、試走の記録（suite・テンプレート・入れたパス・結果・判定・直す箇所）を `<tmp_dir>/template-check.json` に書く。続けるときは状態ファイルの `baseline_test.template_checks` にも写す | 止めた理由を後から読めない（非機能の運用・保守性） |
+| I2 | テンプレートの試走の記録 | 試走は `scope_command` を持つテストの種別の suite ごとに高々 1 回、`init` の 1 回の起動の中で、着手前のテストの上限の残りの中で走らせる。**試走の対象の suite は、判定が `ok` のときだけ続ける**（「判定しない」で続ける経路を持たない。決定 6） | 上限の残りが無い・打ち切り（`timed_out`）・候補が 0 本のときは `undecided` で止める。続けると、確かめていない suite のテンプレートの不備が改修の範囲テストへ届く |
+| I3 | テンプレートの試走の記録 | 試走に入れるパスは、その suite が受け持つテストのファイルを最大 2 本。まず `--scope` のテストの置き場所の配下から選び、そこに 1 本も無ければ、リポジトリの追跡ファイルのうちその suite が受け持つテストのファイルから選ぶ。どちらも既存失敗の ID を持つファイルを除く | 既存失敗のファイルを入れると、コードの失敗をテンプレートの不備と取り違える。両方で 0 本なら `undecided` で止める（I2） |
+| I4 | テンプレートの試走の記録 | 「不備」と判定するのは、基準（その suite の着手前のテスト）が通った、または既存失敗を読めて試走のファイルから除けたうえで、試走が `failed` で終わったときだけ | 不備でないテンプレートで止まる。テストで落とす |
+| I5 | テンプレートの試走の記録 | 判定が「不備」か「判定できない」の suite が 1 つでもあれば、`init` は状態ファイルを作らずに終了コード 4 で止まる。改修の範囲テストは走らない | テンプレートの不備で落ちた項目が修正へ回る（#1630 の現象） |
+| I6 | テンプレートの試走の記録 | 止まるときも続けるときも、`template_check.run` が試走の記録（suite・テンプレート・入れたパス・結果・判定・直す箇所）を `<tmp_dir>/template-check.json` に書く。続けるときは `setup.py` が `run` の返した記録を状態ファイルの `template_checks` へそのまま置く | 止めた理由を後から読めない（非機能の運用・保守性） |
 | I7 | テストの戦略 | 静的解析の suite（`kind: lint`）と `scope_command` の無い suite は試走しない。範囲テストの組み立て（`scope_runs`）は変えない | 前提 4 の退行。既存のテストで落とす |
 
 ### ドメインイベント
@@ -67,7 +70,7 @@
 | E3 | 着手前のテストを走らせた | cross-refactoring の `init`（`baseline.run_baseline`） | テンプレートの試走（E3a） |
 | E3a | **テンプレートを試走した（新設）** | `init`（`template_check.run`） | `init`。不備・判定できないなら止まり、ほかは記録して E4 へ |
 | E4 | 改修の範囲テストを組み立てた | 改修の計画・実装・検証 | 範囲テストの実行（変えない） |
-| E5 | 範囲テストが落ちた | E4 のコマンドの終了コード | 修正（E6）。E3a を通った suite だけが走るため、テンプレートの不備では起きない |
+| E5 | 範囲テストが落ちた | E4 のコマンドの終了コード | 修正（E6）。試走の対象の suite はどれも判定が `ok` のときだけ E4 へ進む（I2・I5）ため、テンプレートの不備では起きない |
 | E6 | 落ちた項目を修正へ回した | E5 | 修正担当（変えない。止め方は #2095） |
 
 要求の E2 と E3 のあいだに足すとしたイベントを、E3 の直後の E3a として置く。基準（着手前のテストの成否と既存失敗）が
@@ -93,8 +96,8 @@ E3 で決まってからでないと、試走の失敗をテンプレートの�
 | 要素 | 責務 |
 | --- | --- |
 | `plugins/ndf/scripts/lib/test_strategy.py`（変更） | 純粋な関数を 2 つと、判定の値オブジェクト `ProbeVerdict` を足す。`probe_paths`（suite が受け持つ候補のファイルから、既存失敗のファイルを除いて最大 2 本を選ぶ）と `template_verdict`（基準の成否・既存失敗を読めたか・試走の結果から判定を返す）。プロセスもファイルも触らない |
-| `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/template_check.py`（新設） | 試走の実行と記録。候補のファイルを `scope.test_files_under` で集め、`probe_paths` で選び、`fill` で組んだコマンドをシェルで走らせ、`outcome` と `template_verdict` で判定する。記録を `<tmp_dir>/template-check.json` へ書き、止める判定なら直す箇所を添えた文を返す |
-| `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/setup.py`（変更） | `_verify_init` で、着手前のテストの後・配分の履歴の追記の後に `template_check.run` を呼ぶ。止める判定なら `die`（終了コード 4）、続けるなら記録を `baseline_test.template_checks` へ写す |
+| `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/template_check.py`（新設） | 試走の実行と記録（集約「テンプレートの試走の記録」の持ち主）。候補のファイルを `scope.test_files_under` で集め（`--scope` のテストの置き場所に無ければリポジトリ全体から）、`probe_paths` で選び、`fill` で組んだコマンドをシェルで走らせ、`outcome` と `template_verdict` で判定する。記録を `<tmp_dir>/template-check.json` へ書き、記録と、止める判定なら直す箇所を添えた文を返す |
+| `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/setup.py`（変更） | `_verify_init` で、着手前のテストの後・配分の履歴の追記の後に `template_check.run` を呼ぶ。止める判定なら `die`（終了コード 4）、続けるなら `run` の返した記録を状態ファイルの `template_checks` へそのまま置く（中身を書き換えない） |
 | `plugins/ndf/scripts/project_lib/model.py`（変更） | `Suite` の説明に、`{paths}` に入るパスの種類を場所ごと（改修の範囲テスト・CI に任せる戦略の着手前のテスト・静的解析）に書き、ファイルを受けないテンプレートは `init` が試走で止めることを書く |
 | `plugins/ndf/skills/development-workflow/schemas/project.schema.json`（作り直し） | `project-decl.py schema --out` で `model.py` から作り直す。手で直さない |
 | `plugins/ndf/skills/development-workflow/references/project-analysis.md`（変更） | `test` の行に、`{paths}` に入るパスの種類と、ファイルを受けないランナーの書き方（unittest は `scope_command` を `python3 -m unittest {paths}`、`command` を `python3 -m unittest discover -s <テストのディレクトリ>`）を書く。書く前に再現のリポジトリで走らせて終了コードを確かめる |
@@ -147,7 +150,7 @@ classDiagram
   }
   class ProbeVerdict {
     <<新設 値>>
-    +status: ok|defect|undecided|skipped
+    +status: ok|defect|undecided
     +reason: str
     +stops: bool
   }
@@ -171,7 +174,7 @@ classDiagram
 | --- | --- |
 | 名前 | `refactor.py init`（cross-refactoring の着手） |
 | 入力 | 変わらない（`--scope`・`--round-test`・`--baseline-test` など） |
-| 出力（続けるとき） | 変わらない。標準エラーに試走の 1 行（`✅ 範囲テストのテンプレートを試走: <suite> …` か、判定しない理由）を足す。状態ファイルの `baseline_test.template_checks` に記録を写す |
+| 出力（続けるとき） | 変わらない。標準エラーに試走の 1 行（`✅ 範囲テストのテンプレートを試走: <suite> …`）を足す。状態ファイルの `template_checks` に記録を置く |
 | 失敗の形（止めるとき） | 終了コード 4。状態ファイルを作らない。標準エラーに下の「止めるときの文」。`<tmp_dir>/template-check.json` に記録 |
 | 互換性 | 今まで改修の範囲テストが必ず落ちていた宣言だけが止まる。ファイルを受けるテンプレート（このリポジトリの pytest）は試走が通り、続く。互換の経路は要らない |
 
@@ -185,6 +188,10 @@ classDiagram
    直す箇所: .ndf/project.json の test.suites[0].scope_command（{paths} にはテストのファイルのパスが入る。
    ファイルを受けるコマンドへ直すか、--round-test に {paths} を含まない全体テストを渡す）
 ```
+
+判定が `undecided` のときは、「受けません」の代わりに「受けるかを確かめられません」と理由（候補のファイルが無い・
+上限の残りが無い・打ち切り・既存失敗を除けない）を出し、直し方に「`--round-test` に `{paths}` を含まない全体テストを渡す」
+を必ず添える。
 
 `--round-test` / `--baseline-test` の雛形の suite（`args`）で止まったときは、直す箇所を
 「`--round-test` の値」のように引数の名前で出す。
@@ -202,6 +209,7 @@ classDiagram
       "fix_at": ".ndf/project.json の test.suites[0].scope_command",
       "scope_command": "python3 -m unittest discover -s {paths}",
       "paths": ["tests/test_x.py", "tests/test_y.py"],
+      "source": "scope",
       "command": "python3 -m unittest discover -s tests/test_x.py tests/test_y.py",
       "code": 1,
       "outcome": "failed",
@@ -219,12 +227,13 @@ classDiagram
 | `stopped` | bool | `init` を止めたか |
 | `suites[].index` | int か null | 宣言の `test.suites` の番号。引数の雛形なら null |
 | `suites[].fix_at` | str | 直す箇所 |
-| `suites[].paths` | list[str] | 試走で `{paths}` へ入れたパス（0〜2 本） |
+| `suites[].paths` | list[str] | 試走で `{paths}` へ入れたパス（0〜2 本。0 本なら判定は `undecided`） |
+| `suites[].source` | str か null | 候補を選んだ場所。`scope`（`--scope` のテストの置き場所）/ `repo`（リポジトリ全体）。0 本なら null |
 | `suites[].code` / `outcome` | int か null / str | 試走の終了コードと `test_strategy.outcome` の結果。走らせなかったら null と `not_run` |
-| `suites[].reference` | str | 基準（その suite の着手前のテストの成否）。`green` / `red` / `none`（走っていない） |
-| `suites[].verdict` | str | `ok` / `defect` / `undecided` / `skipped` |
+| `suites[].reference` | str | 基準（その suite の着手前のテストの成否）。`green` / `red` / `none`（走っていない）。`source` が `repo` のときは、着手前のテストがその suite の `command`（全体）で通ったときだけ `green` で、ほかは `none` |
+| `suites[].verdict` | str | `ok` / `defect` / `undecided` |
 
-状態ファイルの `baseline_test.template_checks` は同じ形の `suites` の並びである。旧い状態ファイル（キーが無い）は
+状態ファイルの `template_checks` は同じ形の `suites` の並びである。旧い状態ファイル（キーが無い）は
 空の並びとして読む。
 
 ## 処理の流れ
@@ -242,7 +251,7 @@ sequenceDiagram
   loop scope_command を持つテストの suite ごと
     T->>L: probe_paths(候補, 既存失敗)
     alt 候補が 0 本 または 残りの上限が 0
-      T->>T: skipped を記録
+      T->>T: undecided を記録（止める）
     else
       T->>L: fill(scope_command, paths)
       T->>T: シェルで 1 回走らせる
@@ -255,7 +264,7 @@ sequenceDiagram
   alt 止める
     S->>S: die（終了コード 4。状態ファイルを作らない）
   else 続ける
-    S->>S: baseline_test.template_checks へ写して状態を保存
+    S->>S: 返った記録を template_checks へそのまま置いて状態を保存
   end
 ```
 
@@ -268,8 +277,8 @@ sequenceDiagram
 
 | 試走の結果 | 基準（suite の着手前のテスト） | 既存失敗のファイルを除けたか | 判定 | `init` |
 | --- | --- | --- | --- | --- |
-| 走らせなかった（候補 0 本・残りの上限 0） | — | — | `skipped` | 続ける |
-| `timed_out` | — | — | `skipped` | 続ける |
+| 走らせなかった（候補 0 本・残りの上限 0） | — | — | `undecided` | 止める |
+| `timed_out` | — | — | `undecided` | 止める |
 | `passed` | — | — | `ok` | 続ける |
 | `failed` | `green` | — | `defect` | 止める |
 | `failed` | `red` か `none` | 除けた（JUnit を読めた） | `defect` | 止める |
@@ -281,6 +290,11 @@ sequenceDiagram
 
 - 候補は `scope.test_locations(--scope)` のそれぞれの配下の `test_files_under`（追跡ファイルのうちテストの名前の形）を、
   `suite_groups` と同じ受け持ちの規則（`suite_for`、当たらなければ最初のテストの suite）で suite へ振り分けたもの
+- その suite の候補が `--scope` の配下に 1 本も無ければ、`test_files_under(".")`（リポジトリ全体）を同じ規則で振り分けた
+  ものを候補にする（`source: repo`）。テストを本体と別の場所に置き、その suite のテストが `--scope` に無い構成でも試走できる。
+  このとき基準は、着手前のテストがその suite の `command`（全体）で通ったときだけ `green` とし、ほかは `none`・既存失敗は
+  「除けない」として扱う（範囲を絞った着手前のテストは、`--scope` の外のファイルの成否を示さない）
+- 両方で 0 本なら `probe_paths` は空を返し、判定は `undecided`（止める）
 - 既存失敗の ID を `test_triage.by_file` でファイルへ直し、そのファイルを候補から除く
 - 並べ替えた順の先頭から最大 2 本。2 本にするのは、1 本は受けて 2 本目を受けないテンプレート（`discover -s a b` は 2 本目を
   開始のディレクトリと読まない）を見分けるためである
@@ -289,8 +303,8 @@ sequenceDiagram
 
 | 大項目 | 要求の条件 | 実現方式 | 確かめ方 |
 | --- | --- | --- | --- |
-| 性能・拡張性 | 受け入れ条件 1 の見分けのために足す実行は、cross-refactoring の 1 回の起動につき suite ごとに高々 1 回とし、その所要を着手前のテストの上限（`INIT_TEST_SHARE`）の中に収める | 試走は suite ごとに 1 回。上限は着手前のテストと同じ `init_test_timeout` から、着手前のテストの開始からの経過を引いた残り（`test_triage.run_within` に同じ `started` を渡す）。残りが 0 なら走らせず `skipped` | 試走の回数を数える単体テストと、上限の残りが 0 のときに走らせないテスト |
-| 運用・保守性 | 見分けた結果（止めた理由・当たった suite）が結果の JSON か状態ファイルに残り、後から読める | 止めても続けても `<tmp_dir>/template-check.json` に書く。続けるときは状態ファイルの `baseline_test.template_checks` にも写す | 止める結合のテストで JSON のキーを読む |
+| 性能・拡張性 | 受け入れ条件 1 の見分けのために足す実行は、cross-refactoring の 1 回の起動につき suite ごとに高々 1 回とし、その所要を着手前のテストの上限（`INIT_TEST_SHARE`）の中に収める | 試走は suite ごとに 1 回。上限は着手前のテストと同じ `init_test_timeout` から、着手前のテストの開始からの経過を引いた残り（`test_triage.run_within` に同じ `started` を渡す）。残りが 0 なら走らせず `undecided` で止める | 試走の回数を数える単体テストと、上限の残りが 0 のときに走らせず止めるテスト |
+| 運用・保守性 | 見分けた結果（止めた理由・当たった suite）が結果の JSON か状態ファイルに残り、後から読める | 止めても続けても `<tmp_dir>/template-check.json` に書く。続けるときは `run` の返した記録を状態ファイルの `template_checks` へそのまま置く | 止める結合のテストで JSON のキーを読む |
 
 ## 決定の記録
 
@@ -346,6 +360,30 @@ CI に任せる戦略でファイルだけを受けるテンプレートの着�
 
 根拠: Value 1 / Value 6（MVV 版 2）
 
+### 決定 6: 試走の対象の suite を確かめずに続ける経路を作らないため、候補 0 本・上限の残り 0・打ち切りを `undecided` で止める
+
+「判定しない（`skipped`）」で続けると、試走していない suite もそのまま改修の範囲テストへ進み、ファイルを受けない
+テンプレートで落ちた項目が修正へ回る経路が残る（E5 の保証と受け入れ条件 1・3 が成り立たない）。候補が `--scope` に無い
+ときはリポジトリ全体から選び直して試走できる場合を広げ、それでも確かめられないときだけ止めて人へ戻す
+（共通原則の「決められないときも人へ戻す」）。止める文には `--round-test` に全体テストを渡す直し方を必ず添え、
+利用者が 1 回で続けられるようにする。
+
+`skipped` の suite は改修の範囲テストで落ちても修正へ回さない（全体テストへ落とす）案は採らない。修正へ回す側に見分けを
+足すことになり、決定 4（入口で保証し、回す側には見分けを足さない）に反する。
+
+根拠: Mission / Value 1 / Value 6（MVV 版 2）
+
+### 決定 7: 書き換えてよいものを 1 つに決めるため、試走の記録を別の集約にし、持ち主を `template_check.py` にする
+
+試走の記録を着手前のテストの記録（持ち主 `baseline.py`）の一部にすると、中身を組む `template_check.py` と状態へ写す
+`setup.py` を含め、書く場所が 3 つに割れる。記録を組んで `template-check.json` に書くのは `template_check.run` だけにし、
+`setup.py` は返った値を状態ファイルの `template_checks` へそのまま置く（`baseline_test` と同じ置き方）。
+
+`baseline.py` を経由して書く案は採らない。`baseline.py` は着手前のテストの実行と記録の責務で、試走の判定（`ndf-workflow` の
+関数）と実行を持ち込むと、変えない約束の集約に新しい責務が入る。
+
+根拠: Value 6 / Value 7（MVV 版 2）
+
 ## テスト設計
 
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
@@ -358,9 +396,10 @@ CI に任せる戦略でファイルだけを受けるテンプレートの着�
 | 受け入れ条件 6 | このリポジトリの宣言（pytest の `scope_command`）で、試走が `ok` になり `init` が続く。`scope_runs` が組むコマンドは今と同じ | 試走で `{paths}` の置き換えを `fill` 以外にすると落ちる |
 | 受け入れ条件 7・I7 | 静的解析の suite と `scope_command` の無い suite は試走されず、既存の範囲テストの組み立てのテストが通る | 試走の対象に `kind: lint` を入れると落ちる |
 | I1 | 試走のコマンドが `fill(scope_command, paths)` と一致する | コマンドの語で分岐を足すと落ちる |
-| I2 | 試走が suite ごとに 1 回で、上限の残りが 0 なら走らせず `skipped` になる | 2 回走らせると落ちる。上限を別に取ると落ちる |
-| I3 | 既存失敗の ID を持つファイルが候補から除かれ、最大 2 本が選ばれる | 既存失敗のファイルを選ぶと落ちる。3 本以上選ぶと落ちる |
-| I4 | 判定の表の 6 行どおりの判定を返す（`template_verdict` の単体テスト） | 基準 `red` で既存失敗を除けないのに `defect` を返すと落ちる。`passed` で止めると落ちる |
+| I2 | 試走が suite ごとに 1 回で、上限の残りが 0・打ち切りなら `undecided` で `init` が止まる | 2 回走らせると落ちる。上限を別に取ると落ちる。上限の残りが 0 で続けると落ちる |
+| I3 | 既存失敗の ID を持つファイルが候補から除かれ、最大 2 本が選ばれる。`--scope` にその suite のテストが無ければリポジトリ全体から選ばれ（`--scope` が本体のディレクトリとテストの置き場所、suite のテストは別の置き場所の構成）、両方で 0 本なら `undecided` で止まる | 既存失敗のファイルを選ぶと落ちる。3 本以上選ぶと落ちる。`--scope` の外から選ばずに止めると落ちる。0 本で続けると落ちる |
+| I6・決定 7 | 続けるとき、状態ファイルの `template_checks` が `template-check.json` の `suites` と一致し、`baseline_test` が試走の前と同じである | `setup.py` が記録を書き換えると落ちる。`baseline_test` へ書くと落ちる |
+| I4 | 判定の表の 6 行どおりの判定を返す（`template_verdict` の単体テスト） | 基準 `red` で既存失敗を除けないのに `defect` を返すと落ちる。`passed` で止めると落ちる。走らせなかった・`timed_out` で続けると落ちる |
 
 ## 設計の結果
 
@@ -372,7 +411,7 @@ CI に任せる戦略でファイルだけを受けるテンプレートの着�
 
 | 項目 | 内容 |
 | --- | --- |
-| 試走が `skipped` の suite | 候補のファイルが無い・上限の残りが 0・打ち切りのときは見分けずに続ける。その suite で改修が足したテストのファイルだけが範囲テストに入ると、テンプレートの不備で落ちうる。実装で頻度を見て、リリース後テストで確かめる |
+| 確かめられずに止まる頻度 | 候補のファイルがリポジトリ全体にも無い・上限の残りが 0・打ち切りのときは `undecided` で止まる（決定 6）。止まったときは `--round-test` に全体テストを渡せば続けられるが、どれだけ起きるかは実行で測る |
 | 判定できないで止まる頻度 | 着手前のテストが落ち、JUnit を読めず（unittest は既定で JUnit を書かない）、試走のファイルにコードの失敗があると止まる。止まったときの直し方（JUnit を宣言に書く・`--round-test`）を文に出すが、どれだけ起きるかは実行で測る |
 | 再開の経路 | この変更より前に作った状態ファイルからの再開は試走を通らない。旧い状態は `template_checks` を空として読む |
 | ランナーごとの受け方 | unittest のほかに、ファイルを受けないランナーの実例は確かめていない。見分けは実行の結果だけに依るため、ランナーの種類に依らない |
