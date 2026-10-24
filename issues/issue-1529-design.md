@@ -94,7 +94,7 @@
 | `merged_lib/checks.py` の `GreenWatch._check_expected` と `merge.py` の `merge_when_green` | 読むたびに先端と `expect_head` を比べ、違えば `head_moved` で止める。マージは `--match-head-commit` で比べた先端に固定する | 変えない（呼ぶだけ） |
 | `supervise_lib/delivery_templates.py` の `plan_promote` | `fast` / `auto` の `promote` ステップのコマンドに `--expect-head-from {VERIFY_MATERIAL}` を足す。`on_fail: handoff` は今のまま | 変える |
 | `supervise_lib/verify_steps.py` の `handoff_step` | `by: mvv` の記録を外し、終了コード 10 を返す | 変えない |
-| `skills/development-workflow/references/pace.md` | 昇格のプランの説明に、`promote` が確かめたコミットと照合し、違えば `handoff` で承認ゲート 2 へ戻ることを書く | 変える |
+| `skills/development-workflow/references/pace.md` | 昇格のプランの説明に、`promote` が確かめたコミットと照合し、違えば `handoff` で承認ゲート 2 へ戻ることを書く。承認ゲート 2 の続きの行に「`promote` が照合で止まった（`head_moved`・資料を読めない）ときは `run <プラン> --from verify` から流し直す。`--from promote-approved` は照合を持たず、導入の確認も MVV 判定もしていない今の先端をマージする」を足す | 変える |
 | `docs/glossary/glossary.json` と `docs/glossary.md` | 「確かめたコミット」を足し、`glossary.py render` で作り直す | 変える |
 
 パスは `plugins/ndf/scripts/` からの相対（`pace.md` は `plugins/ndf/` から、用語集はリポジトリの直下から）。
@@ -223,7 +223,9 @@ sequenceDiagram
 
 `head_moved`（1）・読めない（2）・マージの拒否（1）・衝突（4）のどれも、今の `on_fail: handoff` が承認ゲート 2 へ戻す（受け入れ条件 4・5）。`on_exit` で種類ごとに行き先を変えると、戻った後の人の手順（`--from promote-approved` か `--from verify`）が種類ごとに分かれ、要求の前提 4（続きは今の手順のまま）から外れる。
 
-根拠: Value 2 / Value 6（MVV 版 2）
+行き先を分けない代わりに、人が選ぶ続きを `pace.md` に書く。`promote` が照合で止まった（`head_moved`・資料を読めない）ときは `--from verify` から流し直す。`promote-approved` のステップは `--expect-head-from` を持たず（この設計が照合を足すのは `promote` のステップだけ）、`--from promote-approved` は導入の確認も MVV 判定もしていない今の先端をマージするためである。`handoff` の文言（「昇格のマージ」）は先端が動いたことを示さないため、人は `promote` の出力の `head_moved` を見て選ぶ。続きの手順はどちらも今あるもので、前提 4 のとおり手順そのものは変えない。
+
+根拠: C4 / Value 2 / Value 6（MVV 版 2）
 
 ## テスト設計
 
@@ -253,5 +255,6 @@ sequenceDiagram
 | 項目 | 内容 |
 | --- | --- |
 | `normal` の昇格の照合（要求の未決 1） | 利用者が承認ゲート 2 で見た先端と `promote-approved` がマージする先端の照合は、この設計に入れない。同じ食い違いは起きうるが、照合の材料（承認したときの先端を残す記録）が `normal` の経路に無い。別の課題にするかを承認ゲート 1 で決める |
+| 照合で止まった後の続き | `promote` が照合で止まった後に人が `--from promote-approved` を選ぶと、照合を持たない `promote-approved` が確かめていない先端をマージする。これを防ぐのは `pace.md` の続きの行（`--from verify` から流し直す）だけで、テストでは縛らない（テスト設計の 9 のとおり `pace.md` の文言は照合しない）。`handoff` の文言も先端が動いたことを示さない |
 | 実機での昇格 | 本番チャネルへのマージを伴うため、手元では `gh` を差し替えたテストでだけ確かめる。実機はリリース後テストで、経路 `promote` を持つリポジトリが `fast` / `auto` で通るときに見る |
 | 既存のテストの形 | `test_supervise_new.py` の `test_plan_promote_with_mvv_judges_before_merging` は `promote` のコマンドが `--gate-approved mvv` で終わることを見ている。引数を足す位置によってはこの検査を直す |
