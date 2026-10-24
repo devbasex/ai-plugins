@@ -212,30 +212,53 @@ def _js_dependencies(tree: Tree) -> dict[str, str]:
     return out
 
 
-def _py_dependencies(tree: Tree) -> dict[str, str]:
-    """pyproject.toml（project・dependency-groups・poetry）と requirements*.txt。"""
+def _pyproject_project_deps(c: dict) -> dict[str, str]:
+    """pyproject.toml の [project] の dependencies / optional-dependencies。"""
     out: dict[str, str] = {}
-    for f in tree.shallow("pyproject.toml"):
-        c = tree.toml(f)
-        proj = c.get("project") or {}
-        for d in list(proj.get("dependencies") or []) + [x for v in (proj.get("optional-dependencies") or {}).values() for x in v]:
-            name = re.split(r"[\s<>=!~\[;]", str(d), 1)[0].lower()
-            out[name] = str(d)
-        for group in (c.get("dependency-groups") or {}).values():
-            for d in group if isinstance(group, list) else []:
-                out[re.split(r"[\s<>=!~\[;]", str(d), 1)[0].lower()] = str(d)
-        poetry = (c.get("tool") or {}).get("poetry") or {}
-        for sec in ("dependencies", "dev-dependencies"):
-            out.update({k.lower(): str(v) for k, v in (poetry.get(sec) or {}).items()})
-        for g in (poetry.get("group") or {}).values():
-            out.update({k.lower(): str(v) for k, v in (g.get("dependencies") or {}).items()})
-        if proj.get("requires-python"):
-            out["python"] = str(proj["requires-python"])
+    proj = c.get("project") or {}
+    for d in list(proj.get("dependencies") or []) + [x for v in (proj.get("optional-dependencies") or {}).values() for x in v]:
+        name = re.split(r"[\s<>=!~\[;]", str(d), 1)[0].lower()
+        out[name] = str(d)
+    return out
+
+
+def _pyproject_tool_deps(c: dict) -> dict[str, str]:
+    """pyproject.toml の dependency-groups と Poetry の依存。"""
+    out: dict[str, str] = {}
+    for group in (c.get("dependency-groups") or {}).values():
+        for d in group if isinstance(group, list) else []:
+            out[re.split(r"[\s<>=!~\[;]", str(d), 1)[0].lower()] = str(d)
+    poetry = (c.get("tool") or {}).get("poetry") or {}
+    for sec in ("dependencies", "dev-dependencies"):
+        out.update({k.lower(): str(v) for k, v in (poetry.get(sec) or {}).items()})
+    for g in (poetry.get("group") or {}).values():
+        out.update({k.lower(): str(v) for k, v in (g.get("dependencies") or {}).items()})
+    return out
+
+
+def _requirements_deps(tree: Tree) -> dict[str, str]:
+    """requirements*.txt の依存。同じ名前は先に出た行を採る。"""
+    out: dict[str, str] = {}
     for f in tree.shallow("requirements*.txt"):
         for line in (tree.read(f) or "").splitlines():
             name = re.split(r"[\s<>=!~\[;#]", line.strip(), 1)[0].lower()
             if name:
                 out.setdefault(name, line.strip())
+    return out
+
+
+def _py_dependencies(tree: Tree) -> dict[str, str]:
+    """pyproject.toml（project・dependency-groups・poetry）と requirements*.txt。"""
+    out: dict[str, str] = {}
+    for f in tree.shallow("pyproject.toml"):
+        c = tree.toml(f)
+        out.update(_pyproject_project_deps(c))
+        out.update(_pyproject_tool_deps(c))
+        proj = c.get("project") or {}
+        if proj.get("requires-python"):
+            out["python"] = str(proj["requires-python"])
+    for name, line in _requirements_deps(tree).items():
+        out.setdefault(name, line)
     return out
 
 
