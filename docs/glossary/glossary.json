@@ -706,7 +706,7 @@
     {
       "term": "手順",
       "context": "ndf-workflow",
-      "meaning": "1 つの Skill の中で順に通す作業の単位。cross-refactoring の提案・リファクタリング計画・テスト追加・実装・検証/修正の 5 つ、document-restructuring の測る・並べ替える・整える・測り直すの 4 つ",
+      "meaning": "1 つの Skill の中で順に通す作業の単位。cross-refactoring の提案・リファクタリング計画・テスト追加・実装・検証/修正の 5 つ、document-restructuring の決める（出力の形・文書の目的・言語）・測る・組み直す・整える・測り直すの 5 つ（手順 0〜4）",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
