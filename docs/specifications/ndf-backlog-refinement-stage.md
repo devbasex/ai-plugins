@@ -109,7 +109,7 @@ conductor が打ち切った。今の形では次のように動く。
 | `type` | `work`（`full: true`） |
 | `kind` / `stage` | `棚卸し` |
 | `timeout` | 3600 |
-| `prompt` | `/ndf:backlog-refinement スプリント <名前>（<課題>）。棚卸しの工程として無人で通す。` に、`--limit` を上げて打ち直さない・終了コード 10 は承認を求めず `presentation_path` と番号を報告して終える・`--repo` を渡さない・親 issue の起票と結び付けを行わず「人の判断待ち」に載せて終える、の 4 点を続ける |
+| `prompt` | `/ndf:backlog-refinement スプリント <名前>（<課題>）。棚卸しの工程として無人で通す。` に、（`new close --carry <番号...>` で組んだときだけ）前の周回の持ち越しを `upkeep.py` の `--add` で候補へ渡す 1 文（#2089）と、`--limit` を上げて打ち直さない・終了コード 10 は承認を求めず `presentation_path` と番号を報告して終える・`--repo` を渡さない・親 issue の起票と結び付けを行わず「人の判断待ち」に載せて終える、の 4 点を続ける |
 | `next` | `end` |
 
 `refine` へは、`close`（`sprint-close.py`）のステップが 0 で終わったときだけ届く。`timeout` は止まった
