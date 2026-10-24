@@ -103,7 +103,7 @@ def read_loop(root) -> dict:
     if not isinstance(budget, dict):
         raise PaceError(f"進め方の宣言の loop.budget はオブジェクトで書く: {path}")
     budget = {**LOOP_DEFAULTS["budget"], **budget}
-    if set(budget) != set(LOOP_DEFAULTS["budget"]) or not all(_positive(v) for v in budget.values()):
+    if set(budget) != set(LOOP_DEFAULTS["budget"]) or not all(_is_positive_number(v) for v in budget.values()):
         raise PaceError(f"進め方の宣言の loop.budget は laps・usd・hours を正の数で書く: {path}")
     out = {"enabled": sec.get("enabled") is True, "budget": budget}
     for key in ("same_failure", "max_issues"):
@@ -114,7 +114,7 @@ def read_loop(root) -> dict:
     return out
 
 
-def _positive(v) -> bool:
+def _is_positive_number(v) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0
 
 

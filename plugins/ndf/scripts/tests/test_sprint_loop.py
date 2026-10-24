@@ -15,6 +15,8 @@ import supervise_lib  # noqa: E402,F401  lib/ を sys.path へ足す
 import pace  # noqa: E402
 import project_mvv as pm  # noqa: E402
 import sprint_loop as sl  # noqa: E402
+import sprint_loop_gate as sl_gate  # noqa: E402
+import sprint_loop_select as sl_select  # noqa: E402
 
 MVV_TEXT = "## Mission\n速く\n\n## Vision\n回る\n\n## Value\n実測\n"
 DECL = {
@@ -117,7 +119,7 @@ def start(env, name="l1", **budget):
 
 
 def rec(env, name="l1"):
-    return sl.read_record(env, name)
+    return sl.read_loop_record(env, name)
 
 
 def set_state(env, lap, cost=1.0, seconds=10, result="完了", kind="実装", issues=(11,)):
@@ -134,7 +136,7 @@ def set_state(env, lap, cost=1.0, seconds=10, result="完了", kind="実装", is
 
 def run_lap(env, failed=False, result="完了", cost=1.0, kind="実装"):
     """1 周回: 選ぶ → 組む → 締める。"""
-    got = sl.cmd_select(env, "l1")
+    got = sl_select.cmd_select(env, "l1")
     if got["status"] != "ok":
         return got
     sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
@@ -193,12 +195,12 @@ def test_start_creates_the_record_handoff_and_laps(env):
 def test_select_is_deterministic_and_stops_at_the_boundary_and_max_issues(env):
     env.rank_box["out"] = rank_out(ms("01 近い", [11, 12, 13, 14], boundary=13), ms("02 次", [21]))
     start(env)
-    got = sl.cmd_select(env, "l1")
+    got = sl_select.cmd_select(env, "l1")
     assert got["metrics"]["selected"] == [11, 12] and got["metrics"]["milestone"] == "01 近い"
     rows = {r["number"]: r for r in got["metrics"]["excluded"]}
     assert rows[13]["reason"] == "容量" and rows[14]["reason"].startswith("順位")
     assert 21 not in rows  # 1 つのスプリントは 1 つのマイルストーンから
-    again = sl.choose(env, rec(env), env.rank_box["out"], 1, {})
+    again = sl_select.choose_issues(env, rec(env), env.rank_box["out"], 1, {})
     assert [r for r in again["selection"]] == rec(env)["laps"][0]["selection"]
 
 
@@ -206,7 +208,7 @@ def test_select_falls_through_to_the_next_milestone_and_marks_unapproved_sprint_
     env.rank_box["out"] = rank_out(ms("01 近い", [11]), ms("02 次", [21]))
     env.descs = {"01 近い": MVV_TEXT}
     start(env)
-    got = sl.cmd_select(env, "l1")
+    got = sl_select.cmd_select(env, "l1")
     assert got["metrics"]["selected"] == [21]
     assert {r["number"]: r["reason"] for r in got["metrics"]["excluded"]}[11] == "スプリント MVV が未承認"
 
@@ -216,7 +218,7 @@ def test_approved_sprint_mvv_is_selected_and_copied_to_the_state(env):
     env.descs = {"01 近い": MVV_TEXT}
     start(env)
     assert sl.cmd_approve_mvv(env, "l1", "01 近い")["status"] == "ok"
-    assert sl.cmd_select(env, "l1")["metrics"]["selected"] == [11]
+    assert sl_select.cmd_select(env, "l1")["metrics"]["selected"] == [11]
     sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
     state = json.loads(Path(sl.current_lap(rec(env))["state_path"]).read_text())
     assert [g["name"] for g in state["gates"]] == ["MVV"]
@@ -230,15 +232,15 @@ def test_quality_slot_and_large_slice_are_candidates(env):
     r = rec(env)
     r["max_issues"] = 5
     sl.write_record(env, r)
-    got = sl.cmd_select(env, "l1")
+    got = sl_select.cmd_select(env, "l1")
     assert got["metrics"]["selected"] == [11, 13, 14]
     assert {x["number"]: x["reason"] for x in rec(env)["laps"][0]["selection"]}[14] == "品質の枠"
 
 
 def test_select_refuses_while_a_lap_is_in_progress(env):
     start(env)
-    sl.cmd_select(env, "l1")
-    assert sl.cmd_select(env, "l1")["exit"] == 1
+    sl_select.cmd_select(env, "l1")
+    assert sl_select.cmd_select(env, "l1")["exit"] == 1
 
 
 # ---------------- 受け入れ条件 9・10: 選べない ----------------
@@ -247,14 +249,14 @@ def test_select_refuses_while_a_lap_is_in_progress(env):
 def test_no_candidates_is_no_issue_and_all_excluded_is_outside_mvv(env):
     env.rank_box["out"] = rank_out(ms("01 近い", []))
     start(env)
-    out = sl.cmd_select(env, "l1")
+    out = sl_select.cmd_select(env, "l1")
     assert out["exit"] == 3 and out["metrics"]["stop"]["condition"] == "no_issue" and rec(env)["laps"] == []
     assert out["metrics"]["stop_line"] == "[ndf-loop] stopped l1 no_issue"
 
     env.rank_box["out"] = rank_out(ms("01 近い", [11]))
     env.descs = {"01 近い": MVV_TEXT}
     start(env, "l2")
-    out = sl.cmd_select(env, "l2")
+    out = sl_select.cmd_select(env, "l2")
     assert out["metrics"]["stop"]["condition"] == "outside_mvv" and out["metrics"]["stop"]["values"]["reasons"] == {
         "スプリント MVV が未承認": 1
     }
@@ -263,10 +265,10 @@ def test_no_candidates_is_no_issue_and_all_excluded_is_outside_mvv(env):
 def test_exclude_redoes_the_selection_and_all_excluded_stops(env):
     env.rank_box["out"] = rank_out(ms("01 近い", [11, 12]))
     start(env)
-    sl.cmd_select(env, "l1")
-    out = sl.cmd_exclude(env, "l1", 11, "モードが対象外（operation）")
+    sl_select.cmd_select(env, "l1")
+    out = sl_select.cmd_exclude(env, "l1", 11, "モードが対象外（operation）")
     assert out["metrics"]["selected"] == [12]
-    out = sl.cmd_exclude(env, "l1", 12, "MVV に反する疑い")
+    out = sl_select.cmd_exclude(env, "l1", 12, "MVV に反する疑い")
     assert out["exit"] == 3 and out["metrics"]["stop"]["condition"] == "outside_mvv"
 
 
@@ -332,7 +334,7 @@ def test_different_failure_keys_do_not_add_up(env):
 
 def test_stop_file_works_at_the_next_boundary_and_resume_removes_it(env):
     start(env)
-    sl.cmd_select(env, "l1")
+    sl_select.cmd_select(env, "l1")
     sl.cmd_stop(env, "l1")
     assert sl.current_lap(rec(env))["outcome"] == "進行中"  # 途中では止めない
     sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
@@ -342,7 +344,7 @@ def test_stop_file_works_at_the_next_boundary_and_resume_removes_it(env):
     assert any("--loop l1" in i["resume"] for i in out["items"])
     doc = (env.root / ".ndf" / "handoff" / "loop-l1.md").read_text()
     assert "ndf-next\n/goal /ndf:development-workflow --loop l1" in doc
-    assert sl.cmd_select(env, "l1")["exit"] == 3  # 止まったまま（I7）
+    assert sl_select.cmd_select(env, "l1")["exit"] == 3  # 止まったまま（I7）
     assert sl.cmd_start(env, "l1", [], {})["metrics"]["status"] == "resumed"
     assert not (env.root / ".ndf" / "loop" / "l1" / "stop").exists()
     assert run_lap(env)["status"] == "ok"
@@ -361,7 +363,7 @@ def test_budget_resume_needs_an_override(env):
 def test_mvv_change_stops_and_is_not_resumed(env, mvv):
     start(env)
     mvv["p"] = pm.ProjectMvv("approved", version=2, sha256="s2")
-    out = sl.cmd_select(env, "l1")
+    out = sl_select.cmd_select(env, "l1")
     assert out["metrics"]["stop"]["condition"] == "mvv_changed"
     assert sl.cmd_start(env, "l1", [], {})["exit"] == 3
 
@@ -378,11 +380,11 @@ def write_done(env, items):
 def test_gate_1_moves_the_issue_to_waiting_and_continues_without_the_issue(env):
     env.rank_box["out"] = rank_out(ms("01 近い", [11, 12]))
     start(env)
-    sl.cmd_select(env, "l1")
+    sl_select.cmd_select(env, "l1")
     sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
     lap = sl.current_lap(rec(env))
     design11 = str(Path(lap["out"]) / "design-11.json")
-    out = sl.cmd_gate(env, "l1", write_done(env, [{"plan": design11, "result": "関門"}]))
+    out = sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": design11, "result": "関門"}]))
     assert out["status"] == "ok" and out["metrics"]["waiting"] == [11]
     q = out["metrics"]["queue"]
     assert "impl-11.json" not in q and "impl-12.json" in q and "--done" in q and "loop lap l1" in out["metrics"]["pipeline"]
@@ -390,22 +392,22 @@ def test_gate_1_moves_the_issue_to_waiting_and_continues_without_the_issue(env):
     assert not any("--by" in c and "mvv" in c for c in env.calls)  # 承認ゲートを自分で通さない
     # 答えの前は選ばれない
     r = rec(env)
-    assert sl.exclusion_reason(env, r, {"number": 11}, 2, set()) == "人の判断待ち"
+    assert sl_select.exclusion_reason(env, r, {"number": 11}, 2, set()) == "人の判断待ち"
 
 
 def test_gate_1_with_every_issue_returned_closes_the_lap_and_continues(env):
     env.rank_box["out"] = rank_out(ms("01 近い", [11]))
     start(env)
-    sl.cmd_select(env, "l1")
+    sl_select.cmd_select(env, "l1")
     sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
     lap = sl.current_lap(rec(env))
-    out = sl.cmd_gate(env, "l1", write_done(env, [{"plan": str(Path(lap["out"]) / "design-11.json"), "result": "関門"}]))
+    out = sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": str(Path(lap["out"]) / "design-11.json"), "result": "関門"}]))
     assert out["status"] == "ok" and rec(env)["laps"][0]["outcome"] == "人へ戻した" and "ndf_next" in out["metrics"]
 
 
 def test_gate_2_stops_in_the_middle_of_the_lap(env):
     start(env)
-    sl.cmd_select(env, "l1")
+    sl_select.cmd_select(env, "l1")
     sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
     lap = sl.current_lap(rec(env))
     out = sl.cmd_lap(env, "l1", False, write_done(env, [{"plan": str(Path(lap["out"]) / "prod.json"), "result": "関門"}]), [])
@@ -417,25 +419,25 @@ def test_gate_2_stops_in_the_middle_of_the_lap(env):
 def test_answers_control_reselection(env):
     env.rank_box["out"] = rank_out(ms("01 近い", [11, 12]))
     start(env)
-    sl.cmd_select(env, "l1")
+    sl_select.cmd_select(env, "l1")
     sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
     lap = sl.current_lap(rec(env))
-    sl.cmd_gate(env, "l1", write_done(env, [{"plan": str(Path(lap["out"]) / f"design-{n}.json"), "result": "関門"} for n in (11, 12)]))
+    sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": str(Path(lap["out"]) / f"design-{n}.json"), "result": "関門"} for n in (11, 12)]))
     assert sl.cmd_answer(env, "l1", 11, True, 501)["status"] == "ok"
     assert sl.cmd_answer(env, "l1", 12, False, None)["status"] == "ok"
     assert sl.cmd_answer(env, "l1", 12, True, None)["exit"] == 1  # もう待っていない
     r = rec(env)
-    assert sl.exclusion_reason(env, r, {"number": 11}, 2, set()) == "設計 PR がマージ待ち"
-    assert sl.exclusion_reason(env, r, {"number": 12}, 2, set()) == "差し戻し"
+    assert sl_select.exclusion_reason(env, r, {"number": 11}, 2, set()) == "設計 PR がマージ待ち"
+    assert sl_select.exclusion_reason(env, r, {"number": 12}, 2, set()) == "差し戻し"
     env.prs[501] = "MERGED"
-    assert sl.exclusion_reason(env, r, {"number": 11}, 2, set()) is None and r["waiting"][0]["merged_at"]
+    assert sl_select.exclusion_reason(env, r, {"number": 11}, 2, set()) is None and r["waiting"][0]["merged_at"]
     assert any(c[2:4] == ["gate", lap["state_path"]] and "approved" in c for c in env.calls)
 
 
 def test_created_issues_are_not_selected_in_the_same_lap(env):
     start(env)
     r = rec(env)
-    assert sl.exclusion_reason(env, r, {"number": 99}, 1, {99}).startswith("周回の中で起票された")
+    assert sl_select.exclusion_reason(env, r, {"number": 99}, 1, {99}).startswith("周回の中で起票された")
 
 
 # ---------------- 受け入れ条件 14・15・16・21 ----------------
@@ -446,7 +448,7 @@ def test_lap_copies_values_carry_reaches_the_next_close_and_list_shows_laps(env)
     (env.root / "upkeep" / "candidates.json").write_text(json.dumps({"metrics": {"deferred": [31, 32]}}))
     (env.root / "upkeep" / "rank.json").write_text(json.dumps({"metrics": {"changes": [{"number": 11}]}}))
     start(env)
-    sl.cmd_select(env, "l1")
+    sl_select.cmd_select(env, "l1")
     sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
     set_state(env, sl.current_lap(rec(env)), cost=1.5, seconds=20)
     sl.cmd_lap(env, "l1", False, None, [41, 42])
@@ -454,7 +456,7 @@ def test_lap_copies_values_carry_reaches_the_next_close_and_list_shows_laps(env)
     assert lap["cost"] == 1.5 and lap["seconds"] == 20 and lap["versions"]["dev"] == "1.0.0-dev.1"
     assert lap["refine"]["deferred"] == [31, 32] and lap["refine"]["rank_changes"] == [{"number": 11}]
     assert lap["deferred_issues"] == [41, 42]
-    sl.cmd_select(env, "l1")
+    sl_select.cmd_select(env, "l1")
     out = sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.2", None, [])
     assert "--carry 31 32" in out["metrics"]["close_command"] and "--pace auto" in out["metrics"]["close_command"]
     assert "1-close.json" in out["metrics"]["queue"].split("--then")[-1]
@@ -466,7 +468,7 @@ def test_lap_copies_values_carry_reaches_the_next_close_and_list_shows_laps(env)
 
 def test_new_sprint_refusal_stops_with_refused_and_resume_retries(env):
     start(env)
-    sl.cmd_select(env, "l1")
+    sl_select.cmd_select(env, "l1")
     env.run = lambda cmd, cwd=None, stdin=None: (1, "", "断った")
     out = sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
     assert out["exit"] == 3 and out["metrics"]["stop"]["condition"] == "refused"

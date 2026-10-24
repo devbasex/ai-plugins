@@ -107,6 +107,12 @@ def list_issues(gh: Gh, query: str) -> list[dict]:
     return [r for r in rows if isinstance(r, dict) and not r.get("pull_request")]
 
 
+def issue_facts(i: dict) -> dict:
+    """順位付けが読む課題の事実（マイルストーン・ラベル・作られた時刻。#2089 の品質の枠は作られた時刻を読む）。"""
+    labels = [lb.get("name") for lb in i.get("labels") or []]
+    return {"milestone": (i.get("milestone") or {}).get("title"), "labels": labels, "created_at": i.get("created_at") or ""}
+
+
 class Milestones:
     def __init__(self, gh: Gh):
         self.gh, self._by_title = gh, None
