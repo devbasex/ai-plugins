@@ -80,8 +80,8 @@ NDF が持つ。
 
 | 対象 | 置き場 |
 | --- | --- |
-| 体裁設計の項目（トーン＆マナー・ページの枠組み・章立て・ページの文言・構成） | `plugins/ndf/skills/design/references/layout-slide.md`、経路ごとの渡し方は `layout-common.md` |
-| 生成の経路・起点・1 ページの区切り・生成スクリプトの経路の手順 | `plugins/ndf/skills/release/references/form-slide.md`、形の一覧は `distribution-forms.md` |
+| 体裁設計の項目（トーン＆マナー・ページの枠組み・構成） | `plugins/ndf/skills/design/references/layout-slide.md`、経路ごとの渡し方は `layout-common.md` |
+| 生成の経路・起点・1 ページの区切り・ページの文言と章立て・生成スクリプトの経路の手順 | `plugins/ndf/skills/release/references/form-slide.md`、形の一覧は `distribution-forms.md`（`layout-slide.md` はページの文言と章立てを `form-slide.md` の「ページの文言を書く」へ指す） |
 | 汎用テンプレート | `plugins/ndf/skills/release/assets/slides/`（`build-deck.js`・`script.md`・`package.json`・`package-lock.json`・`lib/deck-frame.js`・`lib/script-time.js`） |
 | Google Slides への変換・差し替え・描画の手段 | `plugins/ndf/skills/document-systems/references/system-gdrive.md` |
 | gws のコマンドとサムネイルの取得 | `plugins/ndf/skills/google-workspace/SKILL.md` の操作の対応表、`scripts/slides-thumbnails.py`・`scripts/gws_common.py` |
