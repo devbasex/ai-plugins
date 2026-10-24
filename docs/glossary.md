@@ -73,7 +73,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 即時修正 | — | 4 つの条件（`development-workflow` の SKILL.md の「即時修正」）を満たす不具合を、起票せず、その場のプランで直すこと | その場で直す | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 棚卸し | — | 既存の課題の本文・マイルストーン・ラベルを現状に合わせ、着手の順位を決め直すこと。スクラムのバックログリファインメントに当たる。工程表の行名（進捗記録の stage の値）でもある | 手入れ | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 文言固定テスト | — | リポジトリで追跡している .md を読み、その文字列・見出し・表の並びを照合するテスト。書かない | — | — | `docs/specifications/cross-refactoring-round-tests-and-assess.md` |
-| 手順 | — | 1 つの Skill の中で順に通す作業の単位。cross-refactoring の提案・リファクタリング計画・テスト追加・実装・検証/修正の 5 つ、document-restructuring の測る・並べ替える・整える・測り直すの 4 つ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| 手順 | — | 1 つの Skill の中で順に通す作業の単位。cross-refactoring の提案・リファクタリング計画・テスト追加・実装・検証/修正の 5 つ、document-restructuring の決める（文書形式・文書の目的・言語）・測る・組み直す・整える・測り直すの 5 つ（手順 0〜4） | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 範囲テスト | — | 変更が触った範囲に限って走らせるテスト | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | suite の種別 | `kind` | テストの宣言（.ndf/project.json の test.suites[]）の 1 件がテスト（test）か静的解析（lint。整形の検査を含む）か。キーは kind。書かなければ test | — | — | — |
 | 起動の失敗 | — | テストのコマンドのプロセスを起動できない、またはシェルが終了コード 126 / 127 を返したこと。テストが落ちたこととは別に扱う | — | — | — |
@@ -715,3 +715,18 @@ AI エージェントが実施する前提で、作業の A・H・L・C を類�
 | 台本 | — | ページごとの見出しと読み上げの原稿。配分秒数は見出しに付けてよい（任意）。スピーカーノートへ入れる | — | — | `docs/specifications/ndf-slide-generation.md` |
 | トーン＆マナーのファイル | — | プロジェクトのトーン＆マナーの値を持つ JSON（slides/theme.json）。書いた項目だけが汎用テンプレートの既定値を上書きする | — | — | `docs/specifications/ndf-slide-generation.md` |
 | 尺 | — | 台本の読み上げにかかる時間。読み上げの字数を 350 字/分で割って出す | — | — | `docs/specifications/ndf-slide-generation.md` |
+
+## NDF の文書の組み直し（`ndf-document`）
+
+書き上げた文書を文書形式と文書の目的に合わせて組み直すときの語。document-restructuring が持つ
+
+| 語 | 識別子 | 意味 | 廃止した語 | 廃止した識別子 | 正本 |
+| --- | --- | --- | --- | --- | --- |
+| 文書形式 | — | 文書を読ませる形。リポジトリの Markdown・文書・ページ・スライド・表計算。置き場（Notion・Confluence・Google Drive などのシステム）とは別の軸 | — | — | — |
+| 文書の目的 | — | 読み手にその文書で何をしてもらうか・何を渡すかの種類（決議依頼・議論・アジェンダ・小説・エッセイ・ブログ・作業レポート・論文など） | — | — | — |
+| 共通ルール | — | 文書形式と文書の目的に関わらず、組み直した文書が満たす決まり | — | — | — |
+| キーワード | — | 文書の題・見出しと、本文で繰り返し使い、読み手がその文書の主題として受け取る語 | — | — | — |
+| 確定事項を伝える文書 | — | 確定した設計・報告書のように、結論が既に決まっている文書 | — | — | — |
+| 議論用の文書 | — | 仕様案・提案書・論点の整理のように、まだ決まっていないことを読み手と決めるための文書 | — | — | — |
+| 形式別ガイド | — | 文書形式 1 つについて、文章量の単位と目安・題と見出しの付け方・呼び出し先を持つ document-restructuring の参照ファイル（references/format-<形式>.md） | — | — | — |
+| 目的別ガイド | — | 文書の目的 1 つについて、構成・文章量・見分ける手がかりを持つ document-restructuring の参照ファイル（references/purpose-<目的>.md） | — | — | — |

@@ -90,6 +90,11 @@
       "id": "ndf-slide",
       "name": "NDF のスライドの作成",
       "meaning": "スライドを生成スクリプトで作り、Google Slides へ変換して確かめるときの語"
+    },
+    {
+      "id": "ndf-document",
+      "name": "NDF の文書の組み直し",
+      "meaning": "書き上げた文書を文書形式と文書の目的に合わせて組み直すときの語。document-restructuring が持つ"
     }
   ],
   "terms": [
@@ -701,7 +706,7 @@
     {
       "term": "手順",
       "context": "ndf-workflow",
-      "meaning": "1 つの Skill の中で順に通す作業の単位。cross-refactoring の提案・リファクタリング計画・テスト追加・実装・検証/修正の 5 つ、document-restructuring の測る・並べ替える・整える・測り直すの 4 つ",
+      "meaning": "1 つの Skill の中で順に通す作業の単位。cross-refactoring の提案・リファクタリング計画・テスト追加・実装・検証/修正の 5 つ、document-restructuring の決める（文書形式・文書の目的・言語）・測る・組み直す・整える・測り直すの 5 つ（手順 0〜4）",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
@@ -4131,6 +4136,62 @@
       "context": "ndf-slide",
       "meaning": "台本の読み上げにかかる時間。読み上げの字数を 350 字/分で割って出す",
       "source": "docs/specifications/ndf-slide-generation.md"
+    },
+    {
+      "term": "文書形式",
+      "context": "ndf-document",
+      "meaning": "文書を読ませる形。リポジトリの Markdown・文書・ページ・スライド・表計算。置き場（Notion・Confluence・Google Drive などのシステム）とは別の軸",
+      "source": "",
+      "pending_source": "issues/issue-2086-requirements.md"
+    },
+    {
+      "term": "文書の目的",
+      "context": "ndf-document",
+      "meaning": "読み手にその文書で何をしてもらうか・何を渡すかの種類（決議依頼・議論・アジェンダ・小説・エッセイ・ブログ・作業レポート・論文など）",
+      "source": "",
+      "pending_source": "issues/issue-2086-requirements.md"
+    },
+    {
+      "term": "共通ルール",
+      "context": "ndf-document",
+      "meaning": "文書形式と文書の目的に関わらず、組み直した文書が満たす決まり",
+      "source": "",
+      "pending_source": "issues/issue-2086-requirements.md"
+    },
+    {
+      "term": "キーワード",
+      "context": "ndf-document",
+      "meaning": "文書の題・見出しと、本文で繰り返し使い、読み手がその文書の主題として受け取る語",
+      "source": "",
+      "pending_source": "issues/issue-2086-requirements.md"
+    },
+    {
+      "term": "確定事項を伝える文書",
+      "context": "ndf-document",
+      "meaning": "確定した設計・報告書のように、結論が既に決まっている文書",
+      "source": "",
+      "pending_source": "issues/issue-2086-requirements.md"
+    },
+    {
+      "term": "議論用の文書",
+      "context": "ndf-document",
+      "meaning": "仕様案・提案書・論点の整理のように、まだ決まっていないことを読み手と決めるための文書",
+      "source": "",
+      "pending_source": "issues/issue-2086-requirements.md"
+    },
+    {
+      "term": "形式別ガイド",
+      "context": "ndf-document",
+      "meaning": "文書形式 1 つについて、文章量の単位と目安・題と見出しの付け方・呼び出し先を持つ document-restructuring の参照ファイル（references/format-<形式>.md）",
+      "source": "",
+      "pending_source": "issues/issue-2086-design.md"
+    },
+    {
+      "term": "目的別ガイド",
+      "context": "ndf-document",
+      "meaning": "文書の目的 1 つについて、構成・文章量・見分ける手がかりを持つ document-restructuring の参照ファイル（references/purpose-<目的>.md）",
+      "source": "",
+      "pending_source": "issues/issue-2086-design.md"
     }
   ]
 }
