@@ -203,7 +203,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 代表の run | — | 宣言の解析がワークフローごとに壁時計とテストの所要を測る 1 件の run。取得した候補（ワークフローごとに新しい順の成功の run を最大 5 件）のうち、ジョブを飛ばしていない最新のもの | — | — | `docs/specifications/project-decl-ci-representative-run.md` |
 | 入力の指紋 | — | 解析が読んだファイルの、HEAD の木での blob の SHA と、ブランチの構成の組。プロジェクトの宣言の新しさの判定に使う | — | — | — |
 | テストの戦略 | `strategy` | 範囲テストの走らせ方・全体テストの置き場（手元か CI か）・落ちたテストの見分け方の組。local-full / local-scoped-ci-whole / round-only の 3 つ。宣言の test.strategy か、同じ関数が所要から導く（#1334） | — | — | — |
-| 範囲テストのテンプレート | `scope_command` | {paths} を引用の外の 1 字句として含むテストのコマンド（宣言の scope_command か、{paths} を含む引数）。{paths} をシェルの引用で守った対象の並びへ置き換え、シェルで走らせる | 範囲テストの雛形 | — | — |
+| 範囲テストのテンプレート | `scope_command` | {paths} を引用の外の 1 字句として含むテストのコマンド（宣言の scope_command か、{paths} を含む引数）。{paths} をシェルの引用で守った対象の並びへ置き換え、シェルで走らせる。{paths} には、改修の範囲テストではテストのファイルのパス、CI に任せる戦略の着手前のテストではテストの置き場所（ディレクトリかファイル）、静的解析では変更したファイルのパスが入る | 範囲テストの雛形 | — | — |
 | JUnit の置き場 | `junit` | テストのコマンドが JUnit XML を書くファイルの、作業ディレクトリからの相対パス（宣言の suites[].junit）。NDF はコマンドへ引数を足さず、このファイルを読む | — | — | — |
 | スプリント | `sprint` | 1 回のリリースとして出す課題と Pull Request のセット。版数を持つプロジェクトでは 1 つの版になる。期間ではなく、1 回のリリースとして出す中身で切る。工程はスプリント単位で 1 回ずつ通し、モードもスプリントで 1 つにする | ミッション | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | スプリント状態ファイル | `sprint_state` | スプリントのプラン・done・承認ゲートの記録・MVV・版を持つファイル（パスは呼ぶ側が決め、手順書の例は `sprint-state.json`。目録 `sprint.json` とは別のファイル） | ミッション状態ファイル、ミッションの状態 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
@@ -459,6 +459,7 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 想定最大時間の終わり | `final_end_at` | started_at + 想定最大時間（limits.final_end_at）。中断して再開した実行では、止まっていた分だけずれる。子プロセスへ渡す上限はすべてこの時刻で切る | — | — | `docs/specifications/cross-refactoring-verify-and-final-gate.md` |
 | 確かめの見込み | `gate_seconds` | 最終ゲートの確かめ 1 回にかかる見込みの秒（limits.gate_seconds）。手元で全体テストを走らせるなら w、CI で見るなら c、どちらも測れていなければ 0 | — | — | `docs/specifications/cross-refactoring-verify-and-final-gate.md` |
 | 確かめの開始の締め切り | `gate_start_end` | 想定最大時間の終わり − 確かめの見込み（H − v）。最終ゲートの確かめを始められる最後の時刻で、最終ゲート修正と打ち切りの後の取り消しもこの時刻までに止まる | — | — | `docs/specifications/cross-refactoring-verify-and-final-gate.md` |
+| テンプレートの試走 | — | cross-refactoring の init が着手前のテストの後に、範囲テストのテンプレートへテストのファイルを最大 2 本入れて 1 回走らせ、{paths} に入るパスを受けるかを見分けること。不備か判定できなければ改修の前に止まる | — | — | — |
 
 ## NDF のラッパー（`ndf-relay`）
 
