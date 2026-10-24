@@ -563,6 +563,17 @@ def load_manifests(skills_dir: pathlib.Path) -> dict[str, set[str]]:
     return out
 
 
+def claude_listing_chars(fm: dict, skill_dir: str) -> int:
+    """1 Skill が Claude Code の一覧に載る文字数（パスを除く）を返す。
+
+    Claude Code は description と when_to_use を連結し、
+    合わせて CLAUDE_ITEM_TRUNCATE 文字で切り詰めてから積む。
+    """
+    name = fm.get("name", skill_dir)
+    body = (fm.get("description", "") + fm.get("when_to_use", ""))[:CLAUDE_ITEM_TRUNCATE]
+    return len(name) + len(body)
+
+
 def measure_aggregate(skills: list[dict], skills_dir: pathlib.Path) -> dict:
     """初期一覧に載る文字数と frontmatter 総量を計測する（判定はしない）。
 
@@ -582,20 +593,16 @@ def measure_aggregate(skills: list[dict], skills_dir: pathlib.Path) -> dict:
         fm = s["fm"] or {}
         name = fm.get("name", s["dir"])
         desc = fm.get("description", "")
-        wtu = fm.get("when_to_use", "")
         rel = f"{skills_dir.name}/{s['dir']}/SKILL.md"
         fm_total += len(s["block"])
         for runtime, members in manifests.items():
             if s["dir"] not in members:
                 continue
             if runtime == "claude":
-                # Claude Code は description と when_to_use を連結し、
-                # 合わせて CLAUDE_ITEM_TRUNCATE 文字で切り詰めてから積む。
-                d = (desc + wtu)[:CLAUDE_ITEM_TRUNCATE]
+                item = claude_listing_chars(fm, s["dir"])
             else:
                 # Codex / Kiro は when_to_use を一覧へ載せない。
-                d = desc
-            item = len(name) + len(d)
+                item = len(name) + len(desc)
             if runtime not in LISTINGS or LISTINGS[runtime].includes_path:
                 item += len(rel)
             listings[runtime] += item
@@ -739,10 +746,7 @@ def calibrate(skills_dirs: list[pathlib.Path]) -> int:
         for sk in load_skills(skills_dir):
             if sk["dir"] not in members:
                 continue
-            fm = sk["fm"] or {}
-            name = fm.get("name", sk["dir"])
-            body = (fm.get("description", "") + fm.get("when_to_use", ""))[:CLAUDE_ITEM_TRUNCATE]
-            chars[sk["dir"]] = len(name) + len(body)
+            chars[sk["dir"]] = claude_listing_chars(sk["fm"] or {}, sk["dir"])
 
     common = sorted(set(chars) & set(measured))
     if not common:
