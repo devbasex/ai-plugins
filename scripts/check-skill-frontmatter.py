@@ -243,6 +243,11 @@ HAS_JA_RE = re.compile(r"[ぁ-んァ-ヶ一-龠ー]")
 # 「いつ使うか」を示す語。description にこれが無いと Codex / Kiro で発動判定できない。
 USE_WHEN_RE = re.compile(r"Use\s+when|use\s+when|使う|使い|とき|時に|ときに")
 SENTENCE_SPLIT_RE = re.compile(r"(?<=[.。])\s*")
+# 発動制御の意図を description に書き残す語（AUTHORING.md「発動制御の 5 分類」の明示指示専用 / user-invocable: false）。
+EXPLICIT_ONLY_RE = re.compile(r"明示|explicit|Explicit")
+INJECT_ONLY_RE = re.compile(
+    r"知識として|参照する|実行しない|reference only|do not execute|工程と AI から呼ぶ|called by the workflow"
+)
 
 # --- 「引数を取る Skill か」の判定 -------------------------------------------
 # 規約（AUTHORING.md「発動制御の 5 分類」）は明示指示専用の Skill に対して
@@ -459,7 +464,7 @@ def _check_ops(s: dict, fm: dict, add) -> None:
     # Codex と Kiro には disable-model-invocation / user-invocable がなく description は
     # 常に読まれる。発動制御の意図を description 自体へ書き残す必要がある。
     if fm.get("disable-model-invocation", "").lower() == "true":
-        if not re.search(r"明示|explicit|Explicit", desc):
+        if not EXPLICIT_ONLY_RE.search(desc):
             add(
                 "error",
                 "portability/explicit-only",
@@ -469,10 +474,7 @@ def _check_ops(s: dict, fm: dict, add) -> None:
     # user-invocable: false は 2 つの分類が使う（AUTHORING.md「発動制御の 5 分類」）。常時注入のみは
     # 「知識として参照する」、工程から呼ぶ専用は「工程と AI から呼ぶ」を description に書く。
     if fm.get("user-invocable", "").lower() == "false":
-        if not re.search(
-            r"知識として|参照する|実行しない|reference only|do not execute|工程と AI から呼ぶ|called by the workflow",
-            desc,
-        ):
+        if not INJECT_ONLY_RE.search(desc):
             add(
                 "error",
                 "portability/inject-only",
