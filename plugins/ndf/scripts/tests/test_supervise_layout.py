@@ -62,6 +62,7 @@ MODULES = [
     "sprint_waves",
     "sprint_routes",
     "sprint_inputs",  # new sprint が計画を書く前に課題の受け入れ条件を確かめる（#1767）
+    "sprint_close_steps",  # new close のまとめのステップ（#2089 で sprint から分けた）
     "sprint",
     "queue",
     "commands",
@@ -85,6 +86,7 @@ NO_ENGINE = [
     "sprint_waves",
     "sprint_routes",
     "sprint_inputs",
+    "sprint_close_steps",
     "sprint",
     "queue",
     "new_args",
