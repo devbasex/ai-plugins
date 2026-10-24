@@ -179,7 +179,7 @@ Fix: 作業ツリーの書き込み先の判定が case のフォールスルー
 | --- | --- |
 | どのランタイムへ配るか | `plugins/ndf/manifests/<ランタイム>-skills.txt` に名前を 1 行書く |
 | frontmatter の書き方 | [plugins/ndf/skills/AUTHORING.md](./plugins/ndf/skills/AUTHORING.md) の規約 |
-| 文章の書き方 | `plugins/ndf/skills/markdown-writing/SKILL.md` |
+| 文章の書き方 | `plugins/ndf/skills/document-style/SKILL.md` |
 | 新しいプラグインそのものを足すとき | [docs/plugin-development-guide.md](./docs/plugin-development-guide.md) の「新しいプラグインの追加」 |
 
 frontmatter は `python3 scripts/check-skill-frontmatter.py` がチェックします。`description` の

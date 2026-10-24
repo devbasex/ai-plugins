@@ -146,4 +146,4 @@ transcript JSONL 先頭の `cwd` フィールドを優先してプロジェク�
 
 ## 関連スキル
 
-- `/ndf:markdown-writing` — 結果を読みやすく整形するためのガイドライン
+- `document-style` — 結果を読みやすく整形するためのガイドライン

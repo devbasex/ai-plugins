@@ -59,7 +59,7 @@ allowed-tools:
 └── lab/                             # 版非依存・不採用の探索 (+ README)。「ボツにしたアイデア集」
 ```
 
-> 図表は ASCII ツリーのみ例外的に許可 (本スキルは `ndf:markdown-writing` 準拠)。フロー図は mermaid を使う。
+> 図表は ASCII ツリーのみ例外的に許可 (本スキルは `ndf:document-style` 準拠)。フロー図は mermaid を使う。
 
 ## 版内 SSoT と train/serve 一致
 

@@ -125,6 +125,6 @@ issue にする。**この工程では直さない。**
 ## 関連
 
 - `/ndf:release` — リリース（生成と提出）。この工程はその間に入る
-- `/ndf:document-systems` — 描画して見る手段（システムごと）
+- `document-systems` — 描画して見る手段（システムごと）
 - `/ndf:design` — 体裁設計（`references/layout-<出力の形>.md`）
 - `playwright-kit` の `playwright-evidence` — HTML のスクリーンショット

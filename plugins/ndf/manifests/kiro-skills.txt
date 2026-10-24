@@ -6,7 +6,7 @@ cross-review
 cross-refactoring
 merged
 ndf-policies
-markdown-writing
+document-style
 notion-writing
 docker-container-access
 implementation-plan
@@ -27,7 +27,7 @@ requirements-design
 design
 document-sources
 document-drafting
-document-restructuring
+document-rebuild
 document-systems
 tdd-cycle
 refactoring

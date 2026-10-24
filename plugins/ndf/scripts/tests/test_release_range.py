@@ -16,6 +16,9 @@ from pathlib import Path
 
 import pytest
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from release_repo import seed_release_repo  # noqa: E402
+
 SCRIPT = Path(__file__).resolve().parents[1] / "release-steps.py"
 VER = "1.0.1"
 CH = "## 利用者向けの変化\n\n"
@@ -60,16 +63,7 @@ def add_sprint(root: Path) -> None:
 
 
 def make_world(tmp_path: Path) -> dict:
-    origin = tmp_path / "origin.git"
-    subprocess.run(["git", "init", "-q", "--bare", "-b", "trunk", str(origin)], check=True)
-    seed = tmp_path / "seed"
-    seed.mkdir()
-    git(seed, "init", "-q", "-b", "trunk")
-    git(seed, "config", "user.email", "t@example.com")
-    git(seed, "config", "user.name", "t")
-    (seed / ".ndf").mkdir()
-    (seed / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "trunk", "production_branch": "live"}))
-    (seed / ".ndf" / "supervise.json").write_text(json.dumps({"release": {"form": "package-plugin", "plugin": "foo"}}))
+    origin, seed = seed_release_repo(tmp_path)
     (seed / "CHANGELOG.md").write_text("# Changelog\n\n## [foo 1.0.0] - 2026-10-01\n\n- 前の版\n", encoding="utf-8")
     commit_file(seed, "plugins/foo/.claude-plugin/plugin.json")
     commit_file(seed, "plugins/playwright-kit/.claude-plugin/plugin.json")
