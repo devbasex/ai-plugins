@@ -18,6 +18,9 @@ import sys
 
 import pytest
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from transcript_agents_rows import ROW_KEYS  # noqa: E402
+
 LIB = pathlib.Path(__file__).resolve().parents[1] / "lib"
 SCRIPT = LIB / "transcript_agents.py"
 FIXTURES = pathlib.Path(__file__).resolve().parent / "fixtures" / "transcript_agents"
@@ -74,19 +77,7 @@ def test_a_session_yields_one_record_per_transcript(records) -> None:
 def test_every_record_carries_the_eleven_columns(records) -> None:
     for name, r in records.items():
         row = r.as_row()
-        assert set(row) == {
-            "layer",
-            "role",
-            "depth",
-            "model",
-            "fixed",
-            "peak",
-            "work",
-            "responses",
-            "duration_seconds",
-            "ending",
-            "interruptions",
-        }, name
+        assert set(row) == ROW_KEYS, name
 
 
 def test_as_json_carries_the_eighteen_contract_fields(records) -> None:
