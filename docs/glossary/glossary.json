@@ -2563,6 +2563,12 @@
       "pending_source": "issues/issue-2089-design.md"
     },
     {
+      "term": "品質の枠",
+      "context": "ndf-issue-upkeep",
+      "meaning": "棚卸しの順位付けで、品質向上の Issue（宣言したラベルの Issue）に先に割り当てる容量の割合。最低の件数を持ち、残りの容量を今の順位で埋める。.ndf/backlog.json の quality 節で宣言したときだけ効く",
+      "pending_source": "issues/issue-2089-design.md"
+    },
+    {
       "term": "スプリントブランチ",
       "context": "ndf-workflow",
       "meaning": "課題の Pull Request を集め、ベースブランチへの Pull Request をスプリントで 1 本にするブランチ（`sprint/<名前>`）",
