@@ -3473,6 +3473,12 @@
       "source": "docs/specifications/ndf-release-approved-commit.md"
     },
     {
+      "term": "確かめたコミット",
+      "context": "ndf-release",
+      "meaning": "導入の確認を走らせた、ベースブランチの先頭のコミットの SHA（40 桁）。導入の確認の承認資料に書かれ、pace: fast / auto の昇格でマージしてよい先端はこのコミットに限る",
+      "pending_source": "issues/issue-1529-design.md"
+    },
+    {
       "term": "承認の外のコミット",
       "context": "ndf-release",
       "meaning": "承認したコミットから比べた先端までに入ったコミットのうち、この版の配布の PR のものでないもの。あれば本番の配布は承認ゲートで止まる",
