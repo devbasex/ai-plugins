@@ -8,7 +8,7 @@
 
 ## 適用範囲
 
-- **働く範囲**: 配布先のリポジトリでも働く（NDF の安定版の経路）。自動の切り替えは Claude Code のラッパー（`relay.py`）の下だけで、ほかのランタイムとラッパーの外では、カットポイントで `ndf-next` を出して止まり、貼り直せば同じ周回から続く
+- **働く範囲**: 配布先のリポジトリでも働く（NDF の安定版の経路）。自動の切り替えは Claude Code のラッパー（`relay.py`）の下だけで働く。ほかのランタイムとラッパーの外では、カットポイントで `ndf-next` を出して止まる。貼り直せば同じ周回から続く
 - **プロジェクトごとに違うもの**: ループを許すか・予算・同じ失敗の回数・1 周の課題の上限は `.ndf/pace.json` の `loop` 節で受ける。ループの名前・対象のマイルストーン・予算の上書きは起動の引数で受ける。テストのコマンド・ベースブランチ・配布の手段は今の宣言（`.ndf/project.json`・`.ndf/worktree.json`・`.ndf/supervise.json`）をそのまま使う
 - **当たるモード**: ループの周回は `pace: auto` で組み、`auto` が許すモード（既定 `light` / `standard` / `legacy-refactor`）の課題だけを選ぶ。この変更自体は `standard`
 
@@ -42,7 +42,7 @@
 | 開発ループ | `lib/sprint_loop.py`（`sprint-state.py loop` の副命令だけが呼ぶ） | ループ（名前で識別） | 周回（番号で識別）・人の判断待ちの課題（課題の番号で識別） | 予算・選定の行・止まった理由・失敗の鍵・承認ゲートの判定の写し |
 | スプリントの状態（既存） | `sprint-state.py`（今のまま） | スプリント | 計画の行・承認ゲートの記録 | 版・MVV の参照 |
 
-**ループはスプリントの状態を ID（状態ファイルのパス）で参照し、中身を持たない。** 周回の終わりに、費用・秒・承認ゲートの判定・版をスプリントの状態から写して周回の行へ固定する（以後スプリントの状態が変わっても、周回の行は書き換えない）。
+**ループはスプリントの状態を ID（状態ファイルのパス）で参照し、中身を持たない。** 周回の終わりに、費用・秒・承認ゲートの判定・版をスプリントの状態から写して周回の行へ固定する。以後スプリントの状態が変わっても、周回の行は書き換えない。
 
 ### 不変条件
 
@@ -102,6 +102,194 @@
 | F10 | 周回の一覧と今の状態を出す | 利用者・conductor |
 | F11 | スプリント MVV を承認してループへ渡す（決定 11） | 利用者 |
 
+## 決定の記録
+
+### 決定 1: 新しい基盤を増やさないため、ループの記録を新しい集約にし、入口を `sprint-state.py loop` に足す
+
+ループは複数のスプリントを束ねる。1 スプリントの状態ファイルへ周回の項目を足すと、1 つのファイルが別の集約を 2 つ持つ。そこで記録は別のファイル（`loop.json`）にし、入口は既存の `sprint-state.py` の副命令として足す。結果 JSON の形・排他・原子的な書き込み・引継ぎ文書の節の置き換えは、`sprint-state.py` の部品をそのまま使う。新しいキューや常駐の処理は作らない。
+
+採らなかった案は 2 つある。
+
+| 案 | 採らない理由 |
+| --- | --- |
+| スプリント状態ファイルに `loop` の項目を足す | 周回ごとに別の状態ファイルができ、周回の一覧を出すのに全周回のファイルを探すことになる |
+| 新しいスクリプト（`sprint-loop.py`）を作る | 引数の読み方と結果の出し方が `sprint-state.py` と 2 つに分かれる |
+
+根拠: Value 4 / Value 6（MVV 版 2）
+
+### 決定 2: AI が範囲を広げないため、選定を `rank` の出力とループの記録だけで決め、1 つのマイルストーンから組む
+
+マイルストーンを順（`rank` の `order`）に見て、選べる課題がある最初のマイルストーンから選ぶ。選ぶのは、順位の先頭から切り出しの境界まで（境界が無ければ `max_issues` 件）である。1 つのスプリントは 1 つのマイルストーンから組むため、スプリント MVV の照合が 1 つで済む。外した行も理由つきで残すため、後から「なぜこの組か」を追える。
+
+複数のマイルストーンから順位の値（CoD）の高い順に混ぜて選ぶ案は採らない。スプリント MVV が 2 つ以上になり、マイルストーンの順（着手の順序）を飛び越えるためである。
+
+根拠: Value 4 / Value 6（MVV 版 2）
+
+### 決定 3: 判断を AI に残すため、モードと版は conductor が決め、対象外は `loop exclude` で選定へ戻す
+
+モードの判定（`development-workflow` の手順 2）と版の決め方（`release` の規則）は判断であり、スクリプトにしない。conductor の判定で外す課題は 2 種類ある。`auto` が許さないモード（`operation` / `documentation`）の課題と、MVV に反する疑いのある課題である。どちらも `loop exclude` で外し、選定をやり直す。外した理由は周回の記録に残るため、同じ入力（除外の一覧を含む）からは同じ組になる（I4）。
+
+選定の時点でモードを推す仕組みを足す案は、判断をスクリプトへ移すため採らない。
+
+根拠: Value 4（MVV 版 2）
+
+### 決定 4: 承認を求めずに続けるため、ゲート 1 で人へ戻した課題は人の判断待ちとして外し、ゲート 2 で人へ戻したら止まる（未決 1）
+
+**承認ゲート 1 で選んでほしい案:**
+
+| 案 | 振る舞い | 得失 |
+| --- | --- | --- |
+| A【推奨】 | ゲート 1: その課題を人の判断待ちとして外し、残りの課題で続ける。ゲート 2: その周回の本番を出さずに止まる | 利用者の指定「レッドライン以外で承認を一切求めない」と、共通原則の「決められないときは人へ戻す」の両方を満たす。ゲート 2 で止まるのは、本番を出さずに次の周回へ進むと、次の本番に判定を通っていない変更が混ざるため |
+| B | どちらのゲートでもループを止めて承認を待つ | 単純だが、「判定できない」1 件で全体が止まり、利用者の指定に反する |
+| C | 「判定できない」を「従う」と見なす | 共通原則の「決められないときも人へ戻す」に反する。採らない案として示す |
+
+A を選ぶとき、「判定できない」「反する疑い」は止める理由ではなく外す理由になる。レッドライン（`boundary_paths`・MVV の宣言の変更・判定の `boundary`）も同じく外す理由で、ゲート 2 だけが止める理由である。
+
+根拠: Value 2 / C1〜C8（MVV 版 2）
+
+### 決定 5: 測れる量で止めるため、予算を周回の数・費用（USD）・経過時間の 3 つにし、既定を 3 周・60 USD・24 時間にする（未決 2）
+
+費用（USD）と秒は、スプリント状態ファイルが done と報告から既に埋めている量で、新しく測る仕組みが要らない。トークン数は周回の単位で集めておらず、費用で上限を掛ければ同じ目的を果たすため足さない。
+
+**累計はループの記録が持ち、`/goal` の計数に頼らない。** `/goal` はターン・時間・トークンを表示する。ただし `--continue` / `--resume` で基準がリセットされる（Claude Code の `/goal` のドキュメント）。ループは周回の境ごとにセッションを切り替えるため、`/goal` の計数ではループ全体の消費を数えられない（I8）。上限を必ず置く根拠は 2 つある。1 つは、反復の上限を止まる条件に含めるという Building effective agents の指針である。もう 1 つは、1 回の長い実行が 3〜6 時間・124〜200 USD に達した Harness design の実測である。判定は周回の境だけのため、超過は高々 1 周回分になる。
+
+既定値の出所は過去の課題の実測（#2065: 5.55 USD・L 6,828 秒、#2086: 6.11 USD・L 25,993 秒。どちらも設計と実装まで）である。1 周 3 件で 1 件 6 USD とすると約 18 USD、まとめと検査を足して約 20 USD になり、3 周で 60 USD に当たる。1 件の L が 2〜7 時間のため、3 件を並列で回す周回を 3 回で 24 時間を上限にする。標本は 2 件で、まとめ（振り返り・棚卸し）の費用を含まないため、検証用のリポジトリで 2 周回した実測で見直す（リリース後テスト）。
+
+**承認ゲート 1 で選んでほしい点:** 既定値をこの 3 つにするか。トークン数を予算に足すか（推奨: 足さない）。
+
+根拠: Value 3 / Value 4（MVV 版 2）
+
+### 決定 6: 人が読める記録を 1 つにするため、ループの記録を `.ndf/loop/<名>/` に置き、`laps.md` を描画し、引継ぎ文書は現在地だけを持つ（未決 3）
+
+**承認ゲート 1 で選んでほしい案:**
+
+| 案 | 置き場 | 得失 |
+| --- | --- | --- |
+| A【推奨】 | メインディレクトリの `.ndf/loop/<名>/loop.json`（正本）と `laps.md`（描画）。引継ぎ文書 `loop-<名>` は現在地と次のコマンドだけ | 引継ぎ文書と同じく worktree の後片付けで消えず、コミットも要らない。引継ぎ文書の 300 行の上限に周回の記録を載せずに済む。マシンをまたがない |
+| B | 課題か Pull Request のコメントへ周回ごとに書く | マシンをまたいで残るが、周回の一覧を 1 つのコマンドで出すには GitHub を検索する（検索が当てにならないことは #1640 で実測済み）。選定の行が多いと読みにくい |
+| C | `docs/` の文書としてコミットする | 周回ごとに Pull Request が要り、ループの中で承認の要らない変更を増やす |
+
+**記録はコミットしない。** マシンをまたいで残す置き場は #1640 が棚卸しの持ち越しと合わせて決める。それまでは今の経路で、マシンを替えても要点を追える。周回の記録は、課題の本文（人の判断待ち）とスプリントの Pull Request（承認ゲートの判定のコメント）にも残る。
+
+根拠: Value 7（正本は 1 か所に置き、写さずに指す）/ Value 2（MVV 版 2）
+
+### 決定 7: 今の進め方を壊さないため、ループを引数 `--loop` と `.ndf/pace.json` の `loop` 節で切り替え、`loop` 節を `read_pace` から分けて読む（未決 4）
+
+`--loop` を付けない起動は、今の判定の手順へそのまま進む。`loop` 節は `read_loop` だけが読む。そのため、節が無い・壊れているリポジトリでも `fast` / `auto` / トリガー / MVV 判定の振る舞いは変わらない。名前を省いた起動は日付の名前で始め、`ndf-next` には名前を必ず書く（再開で別のループを始めないため）。
+
+**承認ゲート 1 で選んでほしい点:** 引数の形と設定の形。
+
+| 形 | 案 |
+| --- | --- |
+| 引数 | `--loop [名] [--milestones] [--budget-*]` |
+| 設定 | `loop.enabled`・`budget`・`same_failure`・`max_issues` |
+
+`.ndf/pace.json` の進め方の節として `pace: loop` を足す案は採らない。周回の中は `auto` そのものであり、承認の扱いを 2 つの節で二重に持つことになるためである。
+
+根拠: Value 5（MVV 版 2）
+
+### 決定 8: 同じ失敗を機械で数えるため、失敗の鍵を「課題の組・計画の種類・止まったステップ」にし、既定 2 回で止める（未決 5）
+
+周回が `失敗` で締まるときは 2 つある。conductor がその周回を先へ進められないと判断して `loop lap --failed` を打ったときと、キューが `完了` でも `関門` でもない結果で終わったときである。鍵はスプリント状態ファイルの行（完了でもまだでもない最初の行）の課題・種類・止まったステップから作る。2 回は「1 回は立て直してやり直す」を許し、同じ所で 2 度落ちたら人へ戻す回数である。
+
+鍵に失敗の理由の文を含める案は、文面の揺れで同じ失敗が別の鍵になるため採らない。
+
+**NDF が数えるのは、Claude Code の安全弁が周回をまたぐ失敗を捕まえないためである。** `/goal` は、Tool を使わない応答が数ターン続くと止める。hook は、Tool の呼び出しを挟まない Stop の block が 8 回続くと止める（hooks-guide）。どちらもターン単位で、周回ごとにセッションが替わると数え直しになる。行き詰まりで人へ戻すには、周回の記録に鍵を残して数えるほかない（Building effective agents の "when encountering blockers"）。
+
+**承認ゲート 1 で選んでほしい点:** 鍵の取り方と回数（推奨: この鍵で 2 回）。
+
+根拠: Value 2 / Value 4（MVV 版 2）
+
+### 決定 9: 再起動ループを起こさないため、止まったときは `ndf-next` のブロックを出さず、止まる条件は周回の境でだけ判定する
+
+止まったときにブロックを出すと、ラッパーが次のセッションを起動し、同じ理由で止まり直す。止まった理由と再開のコマンドは本文と引継ぎ文書に残し、利用者が貼れば同じ周回の次から続く。周回の途中では止めない（受け入れ条件 7）。途中で止めるとスプリントのブランチと Pull Request が半端に残り、再開の起点が周回の境とずれる。利用者の止める指示（`loop stop`）も次の境で効く。
+
+根拠: Value 2（MVV 版 2）
+
+### 決定 10: `auto` の周回をスプリントの終わりまで機械で通すため、`new close --pace auto` でまとめのステージだけを組む
+
+今の `auto` は、確定仕様化・振り返り・棚卸しを課題ごとに conductor が通す。`new close` は `fast` のまとめ（最終の検査と `fast` 節の導入の確認を含む）である。`auto` の周回では検査と本番はスプリントのステージで済んでいるため、まとめのステージだけを組む引数を足す。棚卸しのステップは今の無人の指示のままで、前の周回の持ち越しを `--carry` で渡す（受け入れ条件 16）。持ち越しの番号は、`loop lap` が upkeep の候補の記録（`candidates.json` の `metrics.deferred`）から読んで周回へ書く。
+
+`new close` を通さずに conductor が `retrospective` と `backlog-refinement` を順に起動する案は採らない。周回の終わりの手順が文面に残り、パイプラインで本番から次の周回まで続けられないためである。
+
+根拠: Value 4 / Value 6（MVV 版 2）
+
+### 決定 11: スプリント MVV のレッドラインを緩めないため、スプリント MVV を持つマイルストーンは、利用者が承認した sha256 があるときだけ選ぶ
+
+周回ごとにスプリント MVV の承認を人へ求めない（要求の前提 2）。一方でスプリント MVV を無視してプロジェクト MVV だけで判定すると、スプリントのレッドライン（R）が効かなくなる。そこで、説明にスプリント MVV を持つマイルストーンは、ループの記録の `sprint_mvv_approvals` に同じ sha256 があるときだけ選ぶ。選んだときは、`loop sprint` が周回の状態へ承認ゲート `MVV` の記録を写す。承認は利用者が `sprint-state.py loop approve-mvv <名> --milestone M` で足す操作で、ループは問わない。
+
+**承認ゲート 1 で選んでほしい点:** この形にするか。スプリント MVV を持つマイルストーンをループの対象から外す（承認の操作を作らない）案もある。
+
+根拠: Vision / Value 2（MVV 版 2）
+
+### 決定 12: `/goal` の評価役に止まったことを読ませるため、止まったときは決まった語の 1 行を出す
+
+`/goal` の評価役はコマンドもファイルも見ず、会話の出力だけで条件を判定する（Claude Code の `/goal` のドキュメント）。今の起動の条件は `/ndf:development-workflow --loop <名>` だけである。止まった応答を「終わった」と読むかは、評価役の解釈に任される。読まなければ評価役が止めを拒み、conductor は Tool を使わない応答を繰り返し、`/goal` の安全弁で止まるまで費用を使う。そこで止まったときは、1 行 `[ndf-loop] stopped <名> <condition>` を最後に出す。この 1 行は `loop` の結果の `metrics.stop_line` を写す。続くとき（周回の境とカットポイント）は今どおり `ndf-next` を出し、条件は未達のままラッパーが切り替える（`relay.md` の付則）。
+
+**承認ゲート 1 で選んでほしい案:**
+
+| 案 | 振る舞い | 得失 |
+| --- | --- | --- |
+| A | 1 行を出すだけ。起動の条件は今の形 | 引数の形は変わらない。評価役がその 1 行を終わりと読むかは条件の文面に無いため、リリース後テストで確かめるまで分からない |
+| B【推奨】 | 1 行を出し、`ndf-next` と再開のコマンドの条件の末尾に `-- 終わり: [ndf-loop] stopped <名> の行を出したとき` を足す | 公式の「条件は出力で示せる形に書く」「測れる終わりの状態を 1 つ持つ」に合う。Skill の引数の読み方に `--` から後を読まない規則が 1 つ増える |
+
+根拠: Value 2 / Value 4（MVV 版 2）
+
+## 外部の動向
+
+**位置付けは Shapiro の Level 4（人は仕様と MVV の水準で関わり、後から確かめる）であって、Level 5（dark factory）ではない。** MVV のレッドラインで人へ戻すという要求がそれを決める。
+
+**一次情報は 2026-10-24 に別の担当が WebSearch・WebFetch で本文を開いて確かめた。** 主軸は Anthropic・OpenAI のエンジニアリングブログと Claude Code の公式ドキュメントである。個人ブログと StrongDM は語の原典として扱う。起票時に挙げた解説記事（medium・mindstudio・noqta・BCG Platinion・substack・ai.engineer）は根拠に使っていない。
+
+### 取り入れる考え方
+
+| 考え方 | 出典 | この設計のどこで受けるか |
+| --- | --- | --- |
+| 反復には上限を含む止まる条件を必ず置き、人へ戻すのは「チェックポイント」と「行き詰まり」に限る（"stopping conditions (such as a maximum number of iterations)"、"pause for human feedback at checkpoints or when encountering blockers"） | Building effective agents | 止まる条件の 8 つ（データ構造の `stop`）。チェックポイントはレッドラインと承認ゲート 2（決定 4）、行き詰まりは同じ失敗（決定 8）と選べる課題が無いとき |
+| 骨格は決まった順の workflow にし、各工程の中だけをエージェントに任せる。最小から始める | Building effective agents | 選定・判定・記録は LLM を呼ばないスクリプト（`lib/sprint_loop.py`）。周回は直列で 1 つずつ（I2）。並列の周回は入れない |
+| 1 回に 1 つの塊だけを進める（"work on only one feature at a time"、"performs one task per loop"） | Effective harnesses・Huntley | 1 周回 1 スプリント・1 マイルストーン（決定 2） |
+| 回の始めに前回の記録を読んでから次を選び、終わりに記録を書いてから次へ進む | Effective harnesses | `loop start` が記録を読み、`loop lap` が周回を締めて書いてから `ndf-next` を返す（1 周の流れ） |
+| 完了の判定を書き換えにくい構造化データに置き、作る側に判定の項目を消させない（"It is unacceptable to remove or edit tests"）。完了の条件は実装の前に合意する（スプリント契約）。判定の材料を作る側の外に置く（StrongDM のシナリオ） | Effective harnesses・Harness design・StrongDM | 受け入れ条件は要求の工程で固定し、承認ゲート 1 の MVV 判定を通ってから実装する（今の `development-workflow`）。worker は受け入れ条件を書き換えない（今の規則）。ループの記録は JSON（`loop.json`）を正本にし、`laps.md` は描画だけ（決定 6） |
+| 作る役と判定する役を分ける（"agents reliably skew positive when grading their own work"） | Harness design | 承認ゲートの判定は `mvv-gate.py` だけが書き、ループは自分で通さない（I6）。検査はクロスレビューと CI のまま |
+| 完了は主張であって証明ではない。周回の記録に証跡を添える（"“done” is a claim and not a proof"） | Osmani | 周回の行に承認ゲートの判定の写し・Pull Request・版・振り返りの置き場を固定する（I1） |
+| 周回ごとの費用と時間を記録し、予算の上限を必須にする（実測で 1 回 3〜6 時間・124〜200 USD） | Harness design | 予算の 3 つ（決定 5）と、周回の `cost` / `seconds` |
+| `/goal` の計数（ターン・時間・トークン）は再開でリセットされる | `/goal` | 予算の累計は NDF のループの記録が持ち、`/goal` の計数に頼らない（I8・決定 5）。今の設計と一致する |
+| `/goal` の評価役はコマンドもファイルも見ず、会話の出力だけで判定する。条件は出力で示せる形に書く | `/goal` | 止まったときに決まった語の 1 行を出す。推奨の案 B では再開のコマンドの条件にもその語を書く（決定 12） |
+| Claude Code の安全弁（Tool を使わない応答が数ターン続く・Stop hook の block が 8 回続く）はターン単位で、周回をまたぐ失敗は捕まえない | `/goal`・hooks-guide | 同じ失敗は NDF が周回単位で数える（決定 8） |
+| 人が持つのは優先順位・受け入れ条件・成果の確認（"We prioritize work, translate user feedback into acceptance criteria, and validate outcomes."）。判断が要るときだけ人へ戻す | OpenAI | 優先順位は MVV と棚卸しの順位、確認は承認ゲート 2 と周回の記録。周回の中で問わない（決定 4） |
+| 周回の中で見つけた欠けた規則は、その場で直し続けずに仕組みの Issue にする（"so it never happens again"） | Huntley・OpenAI | 周回の中の起票は `created[]` に残し、棚卸しが段階を付けた後の周回で候補になる（受け入れ条件 6） |
+| 人が後から追える記録を残す（"watch the loop"、"Build the loop. Stay the engineer."） | Huntley・Osmani | `laps.md` と `loop list`（何を選び、なぜ選び、何で終わったか） |
+| ハーネスの部品はモデルの弱点の仮定で、効かなくなれば外す（"every component in a harness encodes an assumption about what the model can't do on its own"） | Harness design | 周回の記録の判定と費用を振り返りが読み、効いていない工程を Issue にする（今の `retrospective` の経路。この課題で仕組みは足さない） |
+
+### 取り入れない考え方
+
+| 考え方 | 出典 | 取り入れない理由 |
+| --- | --- | --- |
+| 人がコードを書かない・レビューしない規則と、「1 人 1 日 1,000 USD 以上」の目安 | StrongDM | 要求は予算で止まることで、消費を増やすことを目標にしない。配布するプラグインの品質の検査（クロスレビュー・CI・承認ゲート 2）を外せない |
+| 止まる条件を持たず「収束するまで回す」形 | StrongDM | 要求の止まる条件と相容れない |
+| Level 5（人が要らない工場）を目標にすること | Shapiro | レッドラインで人へ戻す要求と逆である |
+| マージ前の検査を最小にし、不安定なテストは再実行で流す | OpenAI | 記事自身が "This would be irresponsible in a low-throughput environment." と条件を付けている。NDF は利用者へ配布するため、CI とクロスレビューの検査は残す |
+| 新しい進捗ファイル（`claude-progress.txt`）を足す | Effective harnesses | 進捗は既に Issue・Pull Request・スプリント状態ファイルにある。ループが足すのは複数のスプリントを束ねる記録だけで、1 スプリントの進捗を写さない（決定 1・6） |
+| Stop hook を自作して外側のループを強制する | hooks・`/goal` | `/goal` は既に Stop hook の包みで、二重にすると block の上限（8 回）と `stop_hook_active` に干渉する。周回の切り替えは今のラッパー（`relay.py`）が持つ |
+| 棚卸しの候補に「エントロピーの返済」（文書の鮮度・規則の逸脱の掃除）の枠を常に入れる | OpenAI | 選定に枠を足すと、入力が `rank` の出力だけで決まる形（決定 2・I4）が崩れる。掃除の Issue は棚卸しが段階を付ければ順位で選ばれる。枠が要るかは棚卸しの側の課題とする |
+| `/goal` の「直すまで消えないエラー」（認証の失敗・クレジット切れなど）を止まる条件に足す | `/goal` | そのエラーはセッションそのものを終えるため、NDF のスクリプトが判定する機会が無い。記録には進行中の周回が残り、引継ぎ文書の再開のコマンドで `loop start` が `in_lap` から続ける（`relay.md` の「落ちたときの続け方」） |
+| worker の `claude -p` に `--max-budget-usd` を渡して 1 回ごとに上限を掛ける | 非対話の上限 | 上限で止まると、ステップの途中でブランチと Pull Request が半端に残る（決定 9 と同じ理由）。予算は周回の境で判定し、超過は高々 1 周回分になる。1 周回の上限が要るかはリリース後テストの実測で見る（「未確認のまま残ること」） |
+
+### 出典
+
+| 区分 | 出典 | 発行者・日付 | 確かめた範囲 |
+| --- | --- | --- | --- |
+| 主軸 | 「Effective harnesses for long-running agents」 https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents | Anthropic Engineering（Justin Young）・2025-11-26 | 本文 |
+| 主軸 | 「Harness design for long-running application development」 https://www.anthropic.com/engineering/harness-design-long-running-apps | Anthropic Engineering（Prithvi Rajasekaran）・2026-03-24 | 本文 |
+| 主軸 | 「Building effective agents」 https://www.anthropic.com/engineering/building-effective-agents | Anthropic Engineering（Erik Schluntz・Barry Zhang）・2024-12-19 | 本文 |
+| 主軸 | 「Harness engineering: leveraging Codex in an agent-first world」 https://openai.com/index/harness-engineering/ | OpenAI（Ryan Lopopolo）・2026-02-11 | openai.com は 403 のため読み取りのプロキシ経由で本文を取得した。**日付は検索結果の値で、本文からは確かめていない** |
+| 主軸 | Claude Code の `/goal` https://code.claude.com/docs/en/goal 、hook https://code.claude.com/docs/en/hooks ・ https://code.claude.com/docs/en/hooks-guide 、Agent SDK と非対話の上限 https://code.claude.com/docs/en/agent-sdk/agent-loop ・ https://code.claude.com/docs/en/agent-sdk/configuration ・ https://code.claude.com/docs/en/headless | Anthropic・2026-10-24 時点 | 本文 |
+| 語の原典（loop engineering） | Addy Osmani「Loop Engineering」 https://addyosmani.com/blog/loop-engineering/ | 個人ブログ・2026-06-07 | 本文。これより早い用例は検索の範囲で見つからなかった（無いとは言えない） |
+| 語の原典（software factory） | StrongDM「Software Factories And The Agentic Moment」 https://factory.strongdm.ai/ | StrongDM AI（Justin McCarthy）・2026-02-06 | **Story のページだけ。Principles・Techniques の下位ページは未読** |
+| 語の原典（dark factory） | Dan Shapiro「The Five Levels」 https://www.danshapiro.com/blog/2026/01/the-five-levels-from-spicy-autocomplete-to-the-software-factory/ | 個人ブログ・2026-01-23 | 本文 |
+| 語の原典（Ralph loop） | Geoffrey Huntley「everything is a ralph loop」 https://ghuntley.com/loop/ | 個人ブログ・2026-01-17 | 本文 |
+| 未読 | arXiv「Loop Engineering: Building Blocks, Adoption, and Impact」 https://arxiv.org/pdf/2608.21884 | — | **検索で見つけたが開いていない。根拠に使わない** |
+
 ## 構成要素
 
 | 要素 | 責務 |
@@ -117,7 +305,7 @@
 | `references/pace.md`（設定の表に行を足す） | `loop` 節の項目を「設定（`.ndf/pace.json`）」の表へ足し、`loop.md` を指す |
 | 既存のまま使うもの | `relay.py`（切り替え）・`upkeep.py rank`（順位）・`mvv-gate.py`（判定とレッドライン）・`supervise.py new sprint --pace auto` / `queue` / `wait` |
 
-**図に含めない要素**: `references/handoff.md`・`references/pace.md` は文書の行を足すだけで、`SKILL.md` の節は `references/loop.md` へ移る入口だけで、処理の流れに現れない。`handoff.py` は `lib/sprint_loop.py` が引継ぎ文書（H）を書くときの部品で、L → H の辺に含める。
+**図に含めない要素**: `references/handoff.md`・`references/pace.md` は文書の行を足すだけで、処理の流れに現れない。`SKILL.md` の節も `references/loop.md` へ移る入口だけである。`handoff.py` は `lib/sprint_loop.py` が引継ぎ文書（H）を書くときの部品で、L → H の辺に含める。
 
 ```mermaid
 graph TB
@@ -359,7 +547,7 @@ erDiagram
 | `--milestones` | 選定の対象を絞る | 開いているマイルストーンすべて |
 | `--budget-*` | 予算を上書きする（記録の `budget_history` に残る） | 宣言の値 |
 
-`ndf-next` と再開のコマンドは、名前を必ず含めた `/goal /ndf:development-workflow --loop <ループ名>` の形である（`/goal` で始めていなければ付けない）。決定 12 で案 B を選んだときは、末尾に終わりの条件の節（`-- 終わり: [ndf-loop] stopped <ループ名> の行を出したとき`）を足す。Skill は `--` から後を引数として読まない。
+`ndf-next` と再開のコマンドは `/goal /ndf:development-workflow --loop <ループ名>` の形で、名前を必ず含める。`/goal` で始めていなければ `/goal` を付けない。決定 12 で案 B を選んだときは、末尾に終わりの条件の節（`-- 終わり: [ndf-loop] stopped <ループ名> の行を出したとき`）を足す。Skill は `--` から後を引数として読まない。
 
 ### 設定（`.ndf/pace.json` の `loop` 節）
 
@@ -374,7 +562,7 @@ erDiagram
 | `loop.same_failure` | 1 以上の整数 | 2 | 同じ失敗で止まる回数（決定 8） |
 | `loop.max_issues` | 1 以上の整数 | 3 | 1 周の課題の上限（棚卸しの容量が無いときの切り出しの数。容量があっても超えない） |
 
-**ループは `auto` 節も要る。** 周回は `pace: auto` で組むため、`auto.enabled` と `auto.verify` が無ければ `loop start` が断る。`loop` 節の形が誤っていれば `read_loop` が `PaceError` を投げ、`loop start` だけが断る（`read_pace` を使う `fast` / `auto` / `check-trigger` / `mvv-gate` は今どおり）。
+**ループは `auto` 節も要る。** 周回は `pace: auto` で組むため、`auto.enabled` と `auto.verify` が無ければ `loop start` が断る。`loop` 節の形が誤っていれば `read_loop` が `PaceError` を投げ、`loop start` だけが断る。`read_pace` を使う `fast` / `auto` / `check-trigger` / `mvv-gate` は今どおり動く。
 
 ### 副命令（`sprint-state.py loop`）
 
@@ -393,7 +581,7 @@ erDiagram
 | `loop stop <名>` | — | 置いたファイルのパス | 0 |
 | `loop status <名> [--json]` / `loop list <名> [--json]` | 記録・`relay_dir` の `log.jsonl` | 今の状態 / 周回の一覧（何周目・選んだ課題・版・費用・止まった理由） | 0 / 1（記録が無い） |
 
-**3 は「止まる条件に当たった」で、失敗ではない。** `step_result` の 3（各スクリプトが定めた正常な否定の結果）に当てる。4 は `merge-when-green` のベースブランチとの衝突が使っているため使わない。断る（1）と止まった（3）は、`metrics.status` の `refused` / `stopped` でも見分ける。止まったときの出力の `items` には、止まった条件・判定に使った値・再開のコマンドを必ず載せ、`metrics.stop_line` に決まった語の 1 行（決定 12）を載せる。
+**3 は「止まる条件に当たった」で、失敗ではない。** `step_result` の 3（各スクリプトが定めた正常な否定の結果）に当てる。4 は `merge-when-green` のベースブランチとの衝突が使っているため使わない。断る（1）と止まった（3）は、`metrics.status` の `refused` / `stopped` でも見分ける。止まったときの出力の `items` には、止まった条件・判定に使った値・再開のコマンドを必ず載せる。`metrics.stop_line` には決まった語の 1 行（決定 12）を載せる。
 
 ### `supervise.py new close` に足す引数
 
@@ -441,24 +629,30 @@ sequenceDiagram
     RL->>C: 次のセッション（loop start から）
 ```
 
-**本番のキューから `loop lap` までを 1 本のパイプラインで流す。** 今の「本番の後のカットポイント」（`relay.md`）と同じ形で、`supervise.py queue <本番>` → `wait` → `new close --pace auto` → `queue <まとめ>` → `wait` → `loop lap` を続ける。ゲート 2 の通過から次のセッションの起動までに、conductor が組み立てる文は無い。
+**本番のキューから `loop lap` までを 1 本のパイプラインで流す。** 形は今の「本番の後のカットポイント」（`relay.md`）と同じである。続ける順は `supervise.py queue <本番>` → `wait` → `new close --pace auto` → `queue <まとめ>` → `wait` → `loop lap` である。ゲート 2 の通過から次のセッションの起動までに、conductor が組み立てる文は無い。
 
-**周回の途中のカットポイント（ゲート 1 の後など）は今のまま切る。** `ndf-next` の中身はループの再開のコマンドで、次のセッションの `loop start` が `in_lap` と、引継ぎ文書 `loop-<名>` の「次にやること」を返す。conductor は今と同じく引継ぎ文書の続きから進める。
+**周回の途中のカットポイント（ゲート 1 の後など）は今のまま切る。** `ndf-next` の中身はループの再開のコマンドである。次のセッションの `loop start` が、`in_lap` と引継ぎ文書 `loop-<名>` の「次にやること」を返す。conductor は今と同じく引継ぎ文書の続きから進める。
 
 ### 選定（`loop select`）
 
 1. 進行中の周回があれば 1（I2）。プロジェクト MVV の sha256 が開始時と違えば `mvv_changed` で止まる（I9）
 2. `upkeep.py rank --root <根>` を打つ。見積は記録（`estimates.json`）と説明の `### 順位` の表から採られ、棚卸しの担当が付けた段階がそのまま効く。2 か 3 なら 1 で返す（選定を推さない）。20（段階の欠けた課題がある）は、欠けた課題が `rows` に載らないだけなので続ける
 3. マイルストーンを `rank` の `order` の順に見る（`--milestones` で絞ったときはその中だけ）。各マイルストーンで:
-   - 説明に `## Mission` / `## Vision` / `## Value` がそろい、その sha256 が `sprint_mvv_approvals` に無ければ、そのマイルストーンの行をすべて「スプリント MVV が未承認」で外す
-   - 候補は `rows` を `rank` の順に、`boundary.number` まで（境界が無ければ先頭から `max_issues` 件）と、`large_slot.status` が収まる（fit）ときの `large_slot.slice`
-   - 候補から外す: `waiting_decision` が真（人の判断待ち）・`waiting[]` に答えの無い行がある（人の判断待ち）・この周回の `excluded[]` にある（その理由）・`size` が尺度を超える（容量）
+   - スプリント MVV が未承認なら、そのマイルストーンの行をすべて「スプリント MVV が未承認」で外す。未承認とは、説明に `## Mission` / `## Vision` / `## Value` がそろい、その sha256 が `sprint_mvv_approvals` に無いことである
+   - 候補は `rows` を `rank` の順に見た次の 2 つ:
+     - `boundary.number` までの行（境界が無ければ先頭から `max_issues` 件）
+     - `large_slot.status` が収まる（fit）ときの `large_slot.slice`
+   - 候補から次の行を外す（括弧は外した理由）:
+     - `waiting_decision` が真（人の判断待ち）
+     - `waiting[]` に答えの無い行がある（人の判断待ち）
+     - この周回の `excluded[]` にある（その理由）
+     - `size` が尺度を超える（容量）
    - 残りを `rank` の順に `max_issues` 件まで選ぶ。超えた行は「容量」で外す
    - 1 件でも選べたら、このマイルストーンで決める（1 つのスプリントは 1 つのマイルストーンから組む）
 4. どのマイルストーンでも選べず、候補が 0 件なら `no_issue`、候補があってすべて外れたなら `outside_mvv` で止まる
 5. 周回の行を足し、選んだ行と外した行を `selection[]` に、`rank` の `metrics.digest` を `rank_digest` に書く
 
-**入力に無いものを選定に使わない。** 周回の中で起票された課題（`created[]`）は、`rank` が段階のある課題だけを並べるため、棚卸しが段階を付けた後の周回で初めて候補になる（受け入れ条件 6）。
+**入力に無いものを選定に使わない。** 周回の中で起票された課題（`created[]`）は、棚卸しが段階を付けた後の周回で初めて候補になる（受け入れ条件 6）。`rank` が段階のある課題だけを並べるためである。
 
 ### 承認ゲートで止まったとき（`loop gate`）
 
@@ -504,18 +698,26 @@ stateDiagram-v2
 4. `budget_laps` / `budget_usd` / `budget_hours`: 終わった周回の数・費用の和・`started_at` からの経過時間が予算以上
 5. （選定の時点で）`no_issue` / `outside_mvv`
 
-**再開（`loop start`）は止まった理由ごとに解けたかを見る。** `user_stop` は再開でファイルを消して解ける。予算は再開の引数で上書きした予算で判定し直す。`same_failure` は止まった後に利用者が直したことを機械で知れないため、再開の起動そのものを解けた印とし、失敗の数を数え直す（`stops` に残る）。`gate2_returned` はその周回の状態に `関門 2` の記録（利用者の承認）があれば解け、本番のプランを `run <本番のプラン> --from bump` で続けてから（`pace.md` の「承認ゲートで止まった後の続け方」）、まとめのステージへ進む。差し戻しの記録があれば、その周回を `人へ戻した` で締めて次の周回へ進む。`mvv_changed` は開始時の値を今の承認済みの値へ置き換えず、新しい名前でループを始め直すよう示す（承認の記録の起点を混ぜない）。
+**再開（`loop start`）は止まった理由ごとに解けたかを見る。**
+
+| 止まった理由 | 解けたかの見方と、その後 |
+| --- | --- |
+| `user_stop` | 再開でファイルを消して解ける |
+| 予算（`budget_laps` / `budget_usd` / `budget_hours`） | 再開の引数で上書きした予算で判定し直す |
+| `same_failure` | 止まった後に利用者が直したことを機械で知れないため、再開の起動そのものを解けた印とし、失敗の数を数え直す（`stops` に残る） |
+| `gate2_returned` | その周回の状態に `関門 2` の記録（利用者の承認）があれば解ける。本番のプランを `run <本番のプラン> --from bump` で続けてから（`pace.md` の「承認ゲートで止まった後の続け方」）、まとめのステージへ進む。差し戻しの記録があれば、その周回を `人へ戻した` で締めて次の周回へ進む |
+| `mvv_changed` | 開始時の値を今の承認済みの値へ置き換えず、新しい名前でループを始め直すよう示す（承認の記録の起点を混ぜない） |
 
 ### 止まったときの出し方
 
-**止まったときは `ndf-next` のブロックを出さない。** ラッパーがブロックを拾うと次のセッションを起動し、同じ理由で止まり直して再起動ループの上限まで回る。conductor は止まった理由・判定に使った値・再開のコマンドを本文に書き、**最後に決まった語の 1 行 `[ndf-loop] stopped <ループ名> <condition>` を出して**応答を終える（決定 12）。1 行は `loop` の結果 JSON の `metrics.stop_line` をそのまま写し、conductor が文面を作らない。再開のコマンドは引継ぎ文書の「次に実行するコマンド」の節にも `ndf-next` の形で残す（受け入れ条件 12）。
+**止まったときは `ndf-next` のブロックを出さない。** ラッパーがブロックを拾うと次のセッションを起動し、同じ理由で止まり直して再起動ループの上限まで回る。conductor は止まった理由・判定に使った値・再開のコマンドを本文に書く。**最後に決まった語の 1 行 `[ndf-loop] stopped <ループ名> <condition>` を出して**応答を終える（決定 12）。1 行は `loop` の結果 JSON の `metrics.stop_line` をそのまま写し、conductor が文面を作らない。再開のコマンドは引継ぎ文書の「次に実行するコマンド」の節にも `ndf-next` の形で残す（受け入れ条件 12）。
 
 | 止まった理由 | 利用者へ問うか |
 | --- | --- |
 | `gate2_returned` | 問う（レッドラインか判定が「従う」以外の承認ゲート 2。今の承認ゲートの出し方で `AskUserQuestion`） |
 | それ以外 | 問わない。本文で理由と再開のコマンドを示して終える（本文の承認待ちの文にしない） |
 
-**ラッパーの 1 日の起動回数の上限に当たったとき**は、ラッパーが次のセッションを起動せず、引継ぎ文書には直前の `ndf-next` が残る。`loop status` は最後の周回の `relay_dir` の `log.jsonl` に `stop`（`max-starts`）の行があれば「ラッパーが上限で止めた」と再開のコマンドを出す（非機能の可用性）。
+**ラッパーの 1 日の起動回数の上限に当たったとき**は、ラッパーが次のセッションを起動せず、引継ぎ文書には直前の `ndf-next` が残る。`loop status` は、最後の周回の `relay_dir` の `log.jsonl` に `stop`（`max-starts`）の行があるかを見る。あれば「ラッパーが上限で止めた」と再開のコマンドを出す（非機能の可用性）。
 
 ## 非機能の実現方式
 
@@ -526,182 +728,6 @@ stateDiagram-v2
 | セキュリティ | レッドラインと `boundary_paths` をループでも今と同じに効かせる | ループは承認ゲートを自分で通さない（I6）。判定は `mvv-gate.py check` をそのまま通り、`loop gate` は判定の記録を読んで外す・止めるだけ。`loop` 節に `boundary_paths` やレッドラインを変える項目を置かない |
 | 移行性 | ループの設定が無いリポジトリでは何も変わらない | `loop` 節は `read_loop` だけが読む。`--loop` を付けない起動・`--pace` を付けない `new close` の振る舞いと出力は変わらない |
 | 排他 | 同じループの記録を 2 つのセッションが同時に書かない | 記録の読み書きは `locks`（`sprint-state.py gate` と同じ排他）で囲み、`jsonio.write_atomic` で書く |
-
-## 外部の動向
-
-**一次情報は 2026-10-24 に別の担当が WebSearch・WebFetch で本文を開いて確かめた。** 主軸は Anthropic・OpenAI のエンジニアリングブログと Claude Code の公式ドキュメントで、個人ブログと StrongDM は語の原典として扱う。起票時に挙げた解説記事（medium・mindstudio・noqta・BCG Platinion・substack・ai.engineer）は根拠に使っていない。
-
-### 出典
-
-| 区分 | 出典 | 発行者・日付 | 確かめた範囲 |
-| --- | --- | --- | --- |
-| 主軸 | 「Effective harnesses for long-running agents」 https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents | Anthropic Engineering（Justin Young）・2025-11-26 | 本文 |
-| 主軸 | 「Harness design for long-running application development」 https://www.anthropic.com/engineering/harness-design-long-running-apps | Anthropic Engineering（Prithvi Rajasekaran）・2026-03-24 | 本文 |
-| 主軸 | 「Building effective agents」 https://www.anthropic.com/engineering/building-effective-agents | Anthropic Engineering（Erik Schluntz・Barry Zhang）・2024-12-19 | 本文 |
-| 主軸 | 「Harness engineering: leveraging Codex in an agent-first world」 https://openai.com/index/harness-engineering/ | OpenAI（Ryan Lopopolo）・2026-02-11 | openai.com は 403 のため読み取りのプロキシ経由で本文を取得した。**日付は検索結果の値で、本文からは確かめていない** |
-| 主軸 | Claude Code の `/goal` https://code.claude.com/docs/en/goal 、hook https://code.claude.com/docs/en/hooks ・ https://code.claude.com/docs/en/hooks-guide 、Agent SDK と非対話の上限 https://code.claude.com/docs/en/agent-sdk/agent-loop ・ https://code.claude.com/docs/en/agent-sdk/configuration ・ https://code.claude.com/docs/en/headless | Anthropic・2026-10-24 時点 | 本文 |
-| 語の原典（loop engineering） | Addy Osmani「Loop Engineering」 https://addyosmani.com/blog/loop-engineering/ | 個人ブログ・2026-06-07 | 本文。これより早い用例は検索の範囲で見つからなかった（無いとは言えない） |
-| 語の原典（software factory） | StrongDM「Software Factories And The Agentic Moment」 https://factory.strongdm.ai/ | StrongDM AI（Justin McCarthy）・2026-02-06 | **Story のページだけ。Principles・Techniques の下位ページは未読** |
-| 語の原典（dark factory） | Dan Shapiro「The Five Levels」 https://www.danshapiro.com/blog/2026/01/the-five-levels-from-spicy-autocomplete-to-the-software-factory/ | 個人ブログ・2026-01-23 | 本文 |
-| 語の原典（Ralph loop） | Geoffrey Huntley「everything is a ralph loop」 https://ghuntley.com/loop/ | 個人ブログ・2026-01-17 | 本文 |
-| 未読 | arXiv「Loop Engineering: Building Blocks, Adoption, and Impact」 https://arxiv.org/pdf/2608.21884 | — | **検索で見つけたが開いていない。根拠に使わない** |
-
-### 取り入れる考え方
-
-| 考え方 | 出典 | この設計のどこで受けるか |
-| --- | --- | --- |
-| 反復には上限を含む止まる条件を必ず置き、人へ戻すのは「チェックポイント」と「行き詰まり」に限る（"stopping conditions (such as a maximum number of iterations)"、"pause for human feedback at checkpoints or when encountering blockers"） | Building effective agents | 止まる条件の 8 つ（データ構造の `stop`）。チェックポイントはレッドラインと承認ゲート 2（決定 4）、行き詰まりは同じ失敗（決定 8）と選べる課題が無いとき |
-| 骨格は決まった順の workflow にし、各工程の中だけをエージェントに任せる。最小から始める | Building effective agents | 選定・判定・記録は LLM を呼ばないスクリプト（`lib/sprint_loop.py`）。周回は直列で 1 つずつ（I2）。並列の周回は入れない |
-| 1 回に 1 つの塊だけを進める（"work on only one feature at a time"、"performs one task per loop"） | Effective harnesses・Huntley | 1 周回 1 スプリント・1 マイルストーン（決定 2） |
-| 回の始めに前回の記録を読んでから次を選び、終わりに記録を書いてから次へ進む | Effective harnesses | `loop start` が記録を読み、`loop lap` が周回を締めて書いてから `ndf-next` を返す（1 周の流れ） |
-| 完了の判定を書き換えにくい構造化データに置き、作る側に判定の項目を消させない（"It is unacceptable to remove or edit tests"）。完了の条件は実装の前に合意する（スプリント契約）。判定の材料を作る側の外に置く（StrongDM のシナリオ） | Effective harnesses・Harness design・StrongDM | 受け入れ条件は要求の工程で固定し、承認ゲート 1 の MVV 判定を通ってから実装する（今の `development-workflow`）。worker は受け入れ条件を書き換えない（今の規則）。ループの記録は JSON（`loop.json`）を正本にし、`laps.md` は描画だけ（決定 6） |
-| 作る役と判定する役を分ける（"agents reliably skew positive when grading their own work"） | Harness design | 承認ゲートの判定は `mvv-gate.py` だけが書き、ループは自分で通さない（I6）。検査はクロスレビューと CI のまま |
-| 完了は主張であって証明ではない。周回の記録に証跡を添える（"“done” is a claim and not a proof"） | Osmani | 周回の行に承認ゲートの判定の写し・Pull Request・版・振り返りの置き場を固定する（I1） |
-| 周回ごとの費用と時間を記録し、予算の上限を必須にする（実測で 1 回 3〜6 時間・124〜200 USD） | Harness design | 予算の 3 つ（決定 5）と、周回の `cost` / `seconds` |
-| `/goal` の計数（ターン・時間・トークン）は再開でリセットされる | `/goal` | 予算の累計は NDF のループの記録が持ち、`/goal` の計数に頼らない（I8・決定 5）。今の設計と一致する |
-| `/goal` の評価役はコマンドもファイルも見ず、会話の出力だけで判定する。条件は出力で示せる形に書く | `/goal` | 止まったときに決まった語の 1 行を出す。推奨の案 B では再開のコマンドの条件にもその語を書く（決定 12） |
-| Claude Code の安全弁（Tool を使わない応答が数ターン続く・Stop hook の block が 8 回続く）はターン単位で、周回をまたぐ失敗は捕まえない | `/goal`・hooks-guide | 同じ失敗は NDF が周回単位で数える（決定 8） |
-| 人が持つのは優先順位・受け入れ条件・成果の確認（"We prioritize work, translate user feedback into acceptance criteria, and validate outcomes."）。判断が要るときだけ人へ戻す | OpenAI | 優先順位は MVV と棚卸しの順位、確認は承認ゲート 2 と周回の記録。周回の中で問わない（決定 4） |
-| 周回の中で見つけた欠けた規則は、その場で直し続けずに仕組みの Issue にする（"so it never happens again"） | Huntley・OpenAI | 周回の中の起票は `created[]` に残し、棚卸しが段階を付けた後の周回で候補になる（受け入れ条件 6） |
-| 人が後から追える記録を残す（"watch the loop"、"Build the loop. Stay the engineer."） | Huntley・Osmani | `laps.md` と `loop list`（何を選び、なぜ選び、何で終わったか） |
-| ハーネスの部品はモデルの弱点の仮定で、効かなくなれば外す（"every component in a harness encodes an assumption about what the model can't do on its own"） | Harness design | 周回の記録の判定と費用を振り返りが読み、効いていない工程を Issue にする（今の `retrospective` の経路。この課題で仕組みは足さない） |
-
-**位置付けは Shapiro の Level 4（人は仕様と MVV の水準で関わり、後から確かめる）であって、Level 5（dark factory）ではない。** MVV のレッドラインで人へ戻すという要求がそれを決める。
-
-### 取り入れない考え方
-
-| 考え方 | 出典 | 取り入れない理由 |
-| --- | --- | --- |
-| 人がコードを書かない・レビューしない規則と、「1 人 1 日 1,000 USD 以上」の目安 | StrongDM | 要求は予算で止まることで、消費を増やすことを目標にしない。配布するプラグインの品質の検査（クロスレビュー・CI・承認ゲート 2）を外せない |
-| 止まる条件を持たず「収束するまで回す」形 | StrongDM | 要求の止まる条件と相容れない |
-| Level 5（人が要らない工場）を目標にすること | Shapiro | レッドラインで人へ戻す要求と逆である |
-| マージ前の検査を最小にし、不安定なテストは再実行で流す | OpenAI | 記事自身が "This would be irresponsible in a low-throughput environment." と条件を付けている。NDF は利用者へ配布するため、CI とクロスレビューの検査は残す |
-| 新しい進捗ファイル（`claude-progress.txt`）を足す | Effective harnesses | 進捗は既に Issue・Pull Request・スプリント状態ファイルにある。ループが足すのは複数のスプリントを束ねる記録だけで、1 スプリントの進捗を写さない（決定 1・6） |
-| Stop hook を自作して外側のループを強制する | hooks・`/goal` | `/goal` は既に Stop hook の包みで、二重にすると block の上限（8 回）と `stop_hook_active` に干渉する。周回の切り替えは今のラッパー（`relay.py`）が持つ |
-| 棚卸しの候補に「エントロピーの返済」（文書の鮮度・規則の逸脱の掃除）の枠を常に入れる | OpenAI | 選定に枠を足すと、入力が `rank` の出力だけで決まる形（決定 2・I4）が崩れる。掃除の Issue は棚卸しが段階を付ければ順位で選ばれる。枠が要るかは棚卸しの側の課題とする |
-| `/goal` の「直すまで消えないエラー」（認証の失敗・クレジット切れなど）を止まる条件に足す | `/goal` | そのエラーはセッションそのものを終えるため、NDF のスクリプトが判定する機会が無い。記録には進行中の周回が残り、引継ぎ文書の再開のコマンドで `loop start` が `in_lap` から続ける（`relay.md` の「落ちたときの続け方」） |
-| worker の `claude -p` に `--max-budget-usd` を渡して 1 回ごとに上限を掛ける | 非対話の上限 | 上限で止まると、ステップの途中でブランチと Pull Request が半端に残る（決定 9 と同じ理由）。予算は周回の境で判定し、超過は高々 1 周回分になる。1 周回の上限が要るかはリリース後テストの実測で見る（「未確認のまま残ること」） |
-
-## 決定の記録
-
-### 決定 1: 新しい基盤を増やさないため、ループの記録を新しい集約にし、入口を `sprint-state.py loop` に足す
-
-ループは複数のスプリントを束ねるため、1 スプリントの状態ファイルへ周回の項目を足すと、1 つのファイルが別の集約を 2 つ持つ。そこで記録は別のファイル（`loop.json`）にし、入口は既存の `sprint-state.py` の副命令として足す。結果 JSON の形・排他・原子的な書き込み・引継ぎ文書の節の置き換えは `sprint-state.py` の部品をそのまま使い、新しいキューや常駐の処理は作らない。
-
-スプリント状態ファイルに `loop` の項目を足す案は、周回ごとに別の状態ファイルができるため、周回の一覧を出すのに全周回のファイルを探すことになり採らない。新しいスクリプト（`sprint-loop.py`）を作る案は、引数の読み方と結果の出し方が `sprint-state.py` と 2 つに分かれるため採らない。
-
-根拠: Value 4 / Value 6（MVV 版 2）
-
-### 決定 2: AI が範囲を広げないため、選定を `rank` の出力とループの記録だけで決め、1 つのマイルストーンから組む
-
-マイルストーンの順（`rank` の `order`）に見て、最初に選べる課題があるマイルストーンの、順位の先頭から切り出しの境界まで（境界が無ければ `max_issues` 件）を選ぶ。1 つのスプリントは 1 つのマイルストーンから組むため、スプリント MVV の照合が 1 つで済む。外した行も理由つきで残すため、後から「なぜこの組か」を追える。
-
-複数のマイルストーンから順位の値（CoD）の高い順に混ぜて選ぶ案は、スプリント MVV が 2 つ以上になり、マイルストーンの順（着手の順序）を飛び越えるため採らない。
-
-根拠: Value 4 / Value 6（MVV 版 2）
-
-### 決定 3: 判断を AI に残すため、モードと版は conductor が決め、対象外は `loop exclude` で選定へ戻す
-
-モードの判定（`development-workflow` の手順 2）と版の決め方（`release` の規則）は判断であり、スクリプトにしない。conductor が判定した結果のうち、`auto` が許さないモード（`operation` / `documentation`）の課題と、MVV に反する疑いのある課題は `loop exclude` で外し、選定をやり直す。外した理由は周回の記録に残るため、同じ入力（除外の一覧を含む）からは同じ組になる（I4）。
-
-選定の時点でモードを推す仕組みを足す案は、判断をスクリプトへ移すため採らない。
-
-根拠: Value 4（MVV 版 2）
-
-### 決定 4: 承認を求めずに続けるため、ゲート 1 で人へ戻した課題は人の判断待ちとして外し、ゲート 2 で人へ戻したら止まる（未決 1）
-
-**承認ゲート 1 で選んでほしい案:**
-
-| 案 | 振る舞い | 得失 |
-| --- | --- | --- |
-| A【推奨】 | ゲート 1: その課題を人の判断待ちとして外し、残りの課題で続ける。ゲート 2: その周回の本番を出さずに止まる | 利用者の指定「レッドライン以外で承認を一切求めない」と、共通原則の「決められないときは人へ戻す」の両方を満たす。ゲート 2 で止まるのは、本番を出さずに次の周回へ進むと、次の本番に判定を通っていない変更が混ざるため |
-| B | どちらのゲートでもループを止めて承認を待つ | 単純だが、「判定できない」1 件で全体が止まり、利用者の指定に反する |
-| C | 「判定できない」を「従う」と見なす | 共通原則の「決められないときも人へ戻す」に反する。採らない案として示す |
-
-A を選ぶとき、「判定できない」「反する疑い」は止める理由ではなく外す理由になる。レッドライン（`boundary_paths`・MVV の宣言の変更・判定の `boundary`）も同じく外す理由で、ゲート 2 だけが止める理由である。
-
-根拠: Value 2 / C1〜C8（MVV 版 2）
-
-### 決定 5: 測れる量で止めるため、予算を周回の数・費用（USD）・経過時間の 3 つにし、既定を 3 周・60 USD・24 時間にする（未決 2）
-
-費用（USD）と秒は、スプリント状態ファイルが done と報告から既に埋めている量で、新しく測る仕組みが要らない。トークン数は周回の単位で集めておらず、費用で上限を掛ければ同じ目的を果たすため足さない。
-
-**累計はループの記録が持ち、`/goal` の計数に頼らない。** `/goal` はターン・時間・トークンを表示するが、`--continue` / `--resume` で基準がリセットされる（Claude Code の `/goal` のドキュメント）。ループは周回の境ごとにセッションを切り替えるため、`/goal` の計数ではループ全体の消費を数えられない（I8）。上限を必ず置くのは、反復の上限を止まる条件に含めるという Building effective agents の指針と、1 回の長い実行が 3〜6 時間・124〜200 USD に達した Harness design の実測による。判定は周回の境だけのため、超過は高々 1 周回分になる。
-
-既定値の出所は過去の課題の実測（#2065: 5.55 USD・L 6,828 秒、#2086: 6.11 USD・L 25,993 秒。どちらも設計と実装まで）である。1 周 3 件で 1 件 6 USD とすると約 18 USD、まとめと検査を足して約 20 USD になり、3 周で 60 USD に当たる。1 件の L が 2〜7 時間のため、3 件を並列で回す周回を 3 回で 24 時間を上限にする。標本は 2 件で、まとめ（振り返り・棚卸し）の費用を含まないため、検証用のリポジトリで 2 周回した実測で見直す（リリース後テスト）。
-
-**承認ゲート 1 で選んでほしい点:** 既定値をこの 3 つにするか。トークン数を予算に足すか（推奨: 足さない）。
-
-根拠: Value 3 / Value 4（MVV 版 2）
-
-### 決定 6: 人が読める記録を 1 つにするため、ループの記録を `.ndf/loop/<名>/` に置き、`laps.md` を描画し、引継ぎ文書は現在地だけを持つ（未決 3）
-
-**承認ゲート 1 で選んでほしい案:**
-
-| 案 | 置き場 | 得失 |
-| --- | --- | --- |
-| A【推奨】 | メインディレクトリの `.ndf/loop/<名>/loop.json`（正本）と `laps.md`（描画）。引継ぎ文書 `loop-<名>` は現在地と次のコマンドだけ | 引継ぎ文書と同じく worktree の後片付けで消えず、コミットも要らない。引継ぎ文書の 300 行の上限に周回の記録を載せずに済む。マシンをまたがない |
-| B | 課題か Pull Request のコメントへ周回ごとに書く | マシンをまたいで残るが、周回の一覧を 1 つのコマンドで出すには GitHub を検索する（検索が当てにならないことは #1640 で実測済み）。選定の行が多いと読みにくい |
-| C | `docs/` の文書としてコミットする | 周回ごとに Pull Request が要り、ループの中で承認の要らない変更を増やす |
-
-**記録はコミットしない。** マシンをまたいで残す置き場は #1640 が棚卸しの持ち越しと合わせて決める。それまでは、周回の記録を課題の本文（人の判断待ち）とスプリントの Pull Request（承認ゲートの判定のコメント）にも残す今の経路で、マシンを替えても要点を追える。
-
-根拠: Value 7（正本は 1 か所に置き、写さずに指す）/ Value 2（MVV 版 2）
-
-### 決定 7: 今の進め方を壊さないため、ループを引数 `--loop` と `.ndf/pace.json` の `loop` 節で切り替え、`loop` 節を `read_pace` から分けて読む（未決 4）
-
-`--loop` を付けない起動は、今の判定の手順へそのまま進む。`loop` 節は `read_loop` だけが読むため、節が無い・壊れているリポジトリでも `fast` / `auto` / トリガー / MVV 判定の振る舞いは変わらない。名前を省いた起動は日付の名前で始め、`ndf-next` には名前を必ず書く（再開で別のループを始めないため）。
-
-**承認ゲート 1 で選んでほしい点:** 引数の形（`--loop [名] [--milestones] [--budget-*]`）と設定の形（`loop.enabled`・`budget`・`same_failure`・`max_issues`）。`.ndf/pace.json` の進め方の節として `pace: loop` を足す案は、周回の中は `auto` そのものであり、承認の扱いを 2 つの節で二重に持つことになるため採らない。
-
-根拠: Value 5（MVV 版 2）
-
-### 決定 8: 同じ失敗を機械で数えるため、失敗の鍵を「課題の組・計画の種類・止まったステップ」にし、既定 2 回で止める（未決 5）
-
-周回が `失敗` で締まるのは、conductor がその周回を先へ進められないと判断して `loop lap --failed` を打ったときと、キューが `完了` でも `関門` でもない結果で終わったときである。鍵はスプリント状態ファイルの行（完了でもまだでもない最初の行）の課題・種類・止まったステップから作る。2 回は「1 回は立て直してやり直す」を許し、同じ所で 2 度落ちたら人へ戻す回数である。
-
-鍵に失敗の理由の文を含める案は、文面の揺れで同じ失敗が別の鍵になるため採らない。
-
-**NDF が数えるのは、Claude Code の安全弁が周回をまたぐ失敗を捕まえないためである。** `/goal` は Tool を使わない応答が数ターン続くと止め、hook は Tool の呼び出しを挟まない Stop の block が 8 回続くと止める（hooks-guide）。どちらもターン単位で、周回ごとにセッションが替わると数え直しになる。行き詰まりで人へ戻す（Building effective agents の "when encountering blockers"）には、周回の記録に鍵を残して数えるほかない。
-
-**承認ゲート 1 で選んでほしい点:** 鍵の取り方と回数（推奨: この鍵で 2 回）。
-
-根拠: Value 2 / Value 4（MVV 版 2）
-
-### 決定 9: 再起動ループを起こさないため、止まったときは `ndf-next` のブロックを出さず、止まる条件は周回の境でだけ判定する
-
-止まったときにブロックを出すと、ラッパーが次のセッションを起動し、同じ理由で止まり直す。止まった理由と再開のコマンドは本文と引継ぎ文書に残し、利用者が貼れば同じ周回の次から続く。周回の途中で止めないのは、途中で止めるとスプリントのブランチと Pull Request が半端に残り、再開の起点が周回の境とずれるためである（受け入れ条件 7）。利用者の止める指示（`loop stop`）も次の境で効く。
-
-根拠: Value 2（MVV 版 2）
-
-### 決定 10: `auto` の周回をスプリントの終わりまで機械で通すため、`new close --pace auto` でまとめのステージだけを組む
-
-今の `auto` は確定仕様化・振り返り・棚卸しを課題ごとに conductor が通し、`new close` は `fast` のまとめ（最終の検査と `fast` 節の導入の確認を含む）である。`auto` の周回では検査と本番はスプリントのステージで済んでいるため、まとめのステージだけを組む引数を足す。棚卸しのステップは今の無人の指示のままで、前の周回の持ち越しを `--carry` で渡す（受け入れ条件 16）。持ち越しの番号は、`loop lap` が upkeep の候補の記録（`candidates.json` の `metrics.deferred`）から読んで周回へ書く。
-
-`new close` を通さずに conductor が `retrospective` と `backlog-refinement` を順に起動する案は、周回の終わりの手順が文面に残り、パイプラインで本番から次の周回まで続けられないため採らない。
-
-根拠: Value 4 / Value 6（MVV 版 2）
-
-### 決定 11: スプリント MVV のレッドラインを緩めないため、スプリント MVV を持つマイルストーンは、利用者が承認した sha256 があるときだけ選ぶ
-
-周回ごとにスプリント MVV の承認を人へ求めない（要求の前提 2）。一方でスプリント MVV を無視してプロジェクト MVV だけで判定すると、スプリントのレッドライン（R）が効かなくなる。そこで、説明にスプリント MVV を持つマイルストーンは、ループの記録の `sprint_mvv_approvals` に同じ sha256 があるときだけ選び、`loop sprint` が周回の状態へ承認ゲート `MVV` の記録を写す。承認は利用者が `sprint-state.py loop approve-mvv <名> --milestone M` で足す操作で、ループは問わない。
-
-**承認ゲート 1 で選んでほしい点:** この形にするか。スプリント MVV を持つマイルストーンをループの対象から外す（承認の操作を作らない）案もある。
-
-根拠: Vision / Value 2（MVV 版 2）
-
-### 決定 12: `/goal` の評価役に止まったことを読ませるため、止まったときは決まった語の 1 行を出す
-
-`/goal` の評価役はコマンドもファイルも見ず、会話の出力だけで条件を判定する（Claude Code の `/goal` のドキュメント）。今の起動の条件は `/ndf:development-workflow --loop <名>` だけで、止まった応答を「終わった」と読むかは評価役の解釈に任される。読まなければ評価役が止めを拒み、conductor は Tool を使わない応答を繰り返し、`/goal` の安全弁で止まるまで費用を使う。そこで止まったときは `loop` の結果の `metrics.stop_line` を写した 1 行 `[ndf-loop] stopped <名> <condition>` を最後に出す。続くとき（周回の境とカットポイント）は今どおり `ndf-next` を出し、条件は未達のままラッパーが切り替える（`relay.md` の付則）。
-
-**承認ゲート 1 で選んでほしい案:**
-
-| 案 | 振る舞い | 得失 |
-| --- | --- | --- |
-| A | 1 行を出すだけ。起動の条件は今の形 | 引数の形は変わらない。評価役がその 1 行を終わりと読むかは条件の文面に無いため、リリース後テストで確かめるまで分からない |
-| B【推奨】 | 1 行を出し、`ndf-next` と再開のコマンドの条件の末尾に `-- 終わり: [ndf-loop] stopped <名> の行を出したとき` を足す | 公式の「条件は出力で示せる形に書く」「測れる終わりの状態を 1 つ持つ」に合う。Skill の引数の読み方に `--` から後を読まない規則が 1 つ増える |
-
-根拠: Value 2 / Value 4（MVV 版 2）
 
 ## テスト設計
 
