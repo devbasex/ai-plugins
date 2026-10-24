@@ -4178,6 +4178,20 @@
       "meaning": "仕様案・提案書・論点の整理のように、まだ決まっていないことを読み手と決めるための文書",
       "source": "",
       "pending_source": "issues/issue-2086-requirements.md"
+    },
+    {
+      "term": "形の参照",
+      "context": "ndf-document",
+      "meaning": "出力の形 1 つについて、文章量の単位と目安・題と見出しの付け方・呼ぶ先を持つ document-restructuring の参照ファイル（references/output-<形>.md）",
+      "source": "",
+      "pending_source": "issues/issue-2086-design.md"
+    },
+    {
+      "term": "目的の参照",
+      "context": "ndf-document",
+      "meaning": "文書の目的 1 つについて、並び・文章量・見分ける手がかりを持つ document-restructuring の参照ファイル（references/purpose-<目的>.md）",
+      "source": "",
+      "pending_source": "issues/issue-2086-design.md"
     }
   ]
 }
