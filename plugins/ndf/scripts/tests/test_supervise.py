@@ -2653,6 +2653,7 @@ def test_pr_body_tests_table_escapes_a_pipe_in_the_last_line(tmp_path, monkeypat
 
 CARMO_PROJECT = json.loads((Path(__file__).parent / "fixtures" / "carmo_project.json").read_text(encoding="utf-8"))
 
+
 def _carmo_repo(tmp_path):
     root = foreign_repo(tmp_path)
     (root / ".ndf" / "project.json").write_text(json.dumps(CARMO_PROJECT))
