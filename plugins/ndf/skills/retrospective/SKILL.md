@@ -342,7 +342,7 @@ gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 
 | 書かないもの | 理由 |
 | --- | --- |
-| 個人の働き方への評価 | 対象は進め方であって人ではない（`document-style` のルール 5） |
+| 個人の働き方への評価 | 対象は進め方に限り、人を評価しない（`document-style` のルール 5） |
 | 成果物の良し悪し | コードレビューの工程が扱う |
 | 経緯の時系列そのもの | git の履歴と Pull Request に残っている |
 
