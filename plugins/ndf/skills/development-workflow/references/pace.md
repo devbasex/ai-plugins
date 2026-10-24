@@ -125,6 +125,13 @@ conductor は `normal` で進める。`fast` と `auto` の条件は同じで、
 | `areas[].name` / `common` / `paths` | 文字列 / bool / glob の配列 | name と paths は許さない | 領域。`common` が真なら重点領域で、触った Pull Request は `common_weight` 点。流出不具合の重なりはこの単位で数える |
 | `boundary_paths` | glob の配列 | 機械のチェックは無し | レッドラインに当たるファイル |
 | `triggers.score` / `common_weight` / `lines` / `escapes` / `hours` | 数 | 15 / 2 / 5000 / 2 / 24 | トリガーの閾値 |
+| `loop.enabled` | bool | 偽（ループを断る） | 開発ループ（`--loop`）を許すか。周回は `auto` で組むため `auto` 節も要る。手順は [loop.md](loop.md) |
+| `loop.budget.laps` / `usd` / `hours` | 正の数 | 3 / 60 / 24 | ループの予算（周回の数・費用・動いていた時間）。どれかが予算以上になった周回の境で止まる |
+| `loop.same_failure` | 1 以上の整数 | 2 | 同じ失敗（課題の組・計画の種類・止まったところ）が続いたら止まる回数 |
+| `loop.max_issues` | 1 以上の整数 | 3 | 1 周の課題の上限 |
+
+**`loop` 節は `read_loop` だけが読む。** 節の形が誤っていても、`fast` / `auto` / トリガー / MVV 判定は今どおり動き、
+ループの開始だけが断る。
 
 glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの領域にも当たらないファイルは、ディレクトリの
 先頭 3 階層（例 `plugins/ndf/skills`）を領域の名前にする。

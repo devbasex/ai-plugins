@@ -252,7 +252,9 @@ def quality_slot(rows_in, capacity, cfg: Config, issues: dict, slot, blocked=())
     if q is None:
         return None
     piece = slot["slice"] if slot and slot["status"] == SLOT_FIT else None
-    pool = [r for r in rows_in if q["label"] in (issues.get(r.number) or {}).get("labels", []) and r.number != piece and r.number not in blocked]
+    pool = [
+        r for r in rows_in if q["label"] in (issues.get(r.number) or {}).get("labels", []) and r.number != piece and r.number not in blocked
+    ]
     pool.sort(key=lambda r: quality_key(r, issues.get(r.number) or {}))
     budget = None if capacity is None else math.floor(capacity * q["ratio"])
     room = None if capacity is None else capacity - (slot["size"] if piece is not None else 0)
@@ -296,8 +298,7 @@ def _milestone_rows(board, rows, place, title):
 
 def _slot_and_boundary(board, ranked):
     """直近のマイルストーンの大きい課題の枠と、切り出しの境界。候補と表で同じ決め方を使う。"""
-    cfg = board.cfg
-    slot, quality, bnd = _slots(board, ranked)
+    slot, _, bnd = _slots(board, ranked)
     return slot, bnd
 
 

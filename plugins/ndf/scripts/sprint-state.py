@@ -12,6 +12,7 @@ LLM を直接呼ばない（スプリント MVV の照合だけ `lib/sprint_mvv.
 | `render <sprint.json> <引継ぎ文書> --section <見出しの語> [--demote <前の節の語> --heading <新しい見出し>]` | 見出しに語を含む節の本文を置き換える。節の外は変えない |
 | `status <sprint.json>` | 端末向けに 1 行ずつ（スプリント・状態・次） |
 | `next <sprint.json> [--doc <引継ぎ文書> --section <見出しの語>] [--replace <見出しの語>]` | ndf-next の囲みを出す。`--replace` なら引継ぎ文書のその節も置き換える |
+| `loop <副命令> <ループ名> ...` | 開発ループ（#2089）。`start` / `select` / `exclude` / `sprint` / `gate` / `answer` / `approve-mvv` / `lap` / `stop` / `status` / `list`。中身は `lib/sprint_loop.py`。0 = 進める / 1 = 断った / 3 = 止まる条件に当たった |
 
 雛形（`--goal`）は `{name}`・`{milestone}`・`{heading}`（現在地の見出し）・`{dev}`・`{prod}`・
 `{issues}` を差し込む。
@@ -521,6 +522,90 @@ def cmd_next(a) -> dict | None:
     )
 
 
+# ---------------------------------------------------------------- loop（開発ループ。#2089）
+
+
+def loop_update(state: str, dones: list[str]) -> None:
+    """周回を締める前に、スプリント状態の行を done と報告から埋める（`update` と同じ）。"""
+    cmd_update(argparse.Namespace(sprint=state, done=dones, next=None))
+
+
+def cmd_loop(a) -> dict:
+    import sprint_loop as sl
+
+    env = sl.Env(Path(a.root or ".").resolve())
+    budget = {"laps": getattr(a, "budget_laps", None), "usd": getattr(a, "budget_usd", None), "hours": getattr(a, "budget_hours", None)}
+    try:
+        if a.loop_cmd == "start":
+            name = a.loop_name or "l" + clock.now_iso("utc")[:10].replace("-", "")
+            ms = [m.strip() for m in (a.milestones or "").split(",") if m.strip()]
+            return sl.cmd_start(env, name, ms, budget, goal=not a.no_goal)
+        handlers = {
+            "select": lambda: sl.cmd_select(env, a.loop_name),
+            "exclude": lambda: sl.cmd_exclude(env, a.loop_name, a.issue, a.reason),
+            "sprint": lambda: sl.cmd_sprint(env, a.loop_name, a.mode, a.dev, a.prod, [x for x in a.extra if x != "--"]),
+            "gate": lambda: sl.cmd_gate(env, a.loop_name, a.done),
+            "answer": lambda: sl.cmd_answer(env, a.loop_name, a.issue, a.approved, a.pr),
+            "approve-mvv": lambda: sl.cmd_approve_mvv(env, a.loop_name, a.milestone),
+            "lap": lambda: sl.cmd_lap(env, a.loop_name, a.failed, a.done, a.deferred_issues or [], update=loop_update),
+            "stop": lambda: sl.cmd_stop(env, a.loop_name),
+            "status": lambda: sl.cmd_status(env, a.loop_name),
+            "list": lambda: sl.cmd_list(env, a.loop_name),
+        }
+        out = handlers[a.loop_cmd]()
+        if a.loop_cmd in ("status", "list") and not a.json:
+            print(
+                "\n".join([out["summary"], *(json.dumps(x, ensure_ascii=False) if isinstance(x, dict) else str(x) for x in out["items"])])
+            )
+            return None
+        return out
+    except sl.LoopError as e:
+        return outcome("stopped", str(e), metrics={"status": "refused"})
+
+
+def add_loop_parser(sub) -> None:
+    lp = sub.add_parser("loop", help="開発ループ（#2089）")
+    ls = lp.add_subparsers(dest="loop_cmd", required=True)
+
+    def name(p, optional=False):
+        p.add_argument("loop_name", nargs="?" if optional else None, help="ループの名前（英数字・- ・_）")
+        p.add_argument("--root", help="リポジトリの根（既定はカレント。記録はメインディレクトリの .ndf/loop/ に置く）")
+        return p
+
+    s = name(ls.add_parser("start"), optional=True)
+    s.add_argument("--milestones", help="選定の対象を絞るマイルストーン（, 区切り）")
+    s.add_argument("--budget-laps", type=float)
+    s.add_argument("--budget-usd", type=float)
+    s.add_argument("--budget-hours", type=float)
+    s.add_argument("--no-goal", action="store_true", help="/goal で始めていない（再開のコマンドに /goal を付けない）")
+    name(ls.add_parser("select"))
+    s = name(ls.add_parser("exclude"))
+    s.add_argument("issue", type=int)
+    s.add_argument("--reason", required=True)
+    s = name(ls.add_parser("sprint"))
+    s.add_argument("--mode", required=True)
+    s.add_argument("--dev", required=True)
+    s.add_argument("--prod")
+    s.add_argument("extra", nargs=argparse.REMAINDER, help="-- の後は supervise.py new sprint へそのまま渡す")
+    s = name(ls.add_parser("gate"))
+    s.add_argument("--done", required=True)
+    s = name(ls.add_parser("answer"))
+    s.add_argument("issue", type=int)
+    g = s.add_mutually_exclusive_group(required=True)
+    g.add_argument("--approved", action="store_true")
+    g.add_argument("--rejected", action="store_true")
+    s.add_argument("--pr", type=int)
+    s = name(ls.add_parser("approve-mvv"))
+    s.add_argument("--milestone", required=True)
+    s = name(ls.add_parser("lap"))
+    s.add_argument("--failed", action="store_true", help="その周回を先へ進められない（失敗で締める）")
+    s.add_argument("--done", help="周回の queue の done（承認ゲートで止まっていれば loop gate と同じに扱う）")
+    s.add_argument("--deferred-issues", type=int, nargs="+", help="上限に達して Issue へ回した指摘の Issue 番号（決定 13）")
+    name(ls.add_parser("stop"))
+    for k in ("status", "list"):
+        name(ls.add_parser(k)).add_argument("--json", action="store_true")
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="sprint-state.py", description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -581,12 +666,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--replace", nargs="?", const=NEXT_SECTION_DEFAULT, help=f"引継ぎ文書のこの語の節を置き換える（既定 {NEXT_SECTION_DEFAULT}）"
     )
     s.add_argument("--json", action="store_true")
+    add_loop_parser(sub)
     return ap
 
 
 def main(argv: list[str] | None = None) -> int:
     a = build_parser().parse_args(argv)
-    fn = {"init": cmd_init, "update": cmd_update, "gate": cmd_gate, "render": cmd_render, "status": cmd_status, "next": cmd_next}[a.cmd]
+    fn = {
+        "init": cmd_init,
+        "update": cmd_update,
+        "gate": cmd_gate,
+        "render": cmd_render,
+        "status": cmd_status,
+        "next": cmd_next,
+        "loop": cmd_loop,
+    }[a.cmd]
     try:
         out = fn(a)
     except (OSError, ValueError) as e:

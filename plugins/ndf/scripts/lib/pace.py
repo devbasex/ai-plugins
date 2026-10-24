@@ -7,7 +7,10 @@ check-trigger.py・mvv-gate.py・supervise.py が同じ規則で読む。標準�
      "auto": {"enabled": true, "modes": [...], "verify": "<導入の確認のコマンド>"},
      "areas": [{"name": "...", "common": true, "paths": ["<glob>", ...]}, ...],
      "boundary_paths": ["<glob>", ...],
-     "triggers": {"score": 15, "common_weight": 2, "lines": 5000, "escapes": 2, "hours": 24}}
+     "triggers": {"score": 15, "common_weight": 2, "lines": 5000, "escapes": 2, "hours": 24},
+     "loop": {"enabled": false, "budget": {"laps": 3, "usd": 60, "hours": 24}, "same_failure": 2, "max_issues": 3}}
+
+`loop` 節は `read_loop` だけが読む（`read_pace` は検証しない。#2089）。
 
 glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。`**/` は 0 階層でもよい。
 """
@@ -78,6 +81,41 @@ def read_pace(root) -> dict:
     fast = _pace_section(d, "fast", path)
     auto = _pace_section(d, "auto", path)
     return {**d, "fast": fast, "auto": auto, "areas": areas, "triggers": triggers, "boundary_paths": list(boundary_paths)}
+
+
+LOOP_DEFAULTS = {"enabled": False, "budget": {"laps": 3, "usd": 60, "hours": 24}, "same_failure": 2, "max_issues": 3}  # #2089 の決定 5・8
+
+
+def read_loop(root) -> dict:
+    """開発ループの節（`loop`。#2089 の決定 7）を読み、既定を埋めて返す。`read_pace` とは別に読み、節の誤りは
+    ループだけを断る（`fast` / `auto` は今どおり動く）。宣言が無い・読めない・形が誤っていれば PaceError。"""
+    path = Path(root) / ".ndf" / DECL_NAME
+    try:
+        d = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise PaceError(f"進め方の宣言が無い: {path}")
+    except (OSError, ValueError) as e:
+        raise PaceError(f"進め方の宣言を読めない: {path}: {e}")
+    sec = _default(d if isinstance(d, dict) else {}, "loop", {})
+    if not isinstance(sec, dict):
+        raise PaceError(f"進め方の宣言の loop はオブジェクトで書く: {path}")
+    budget = _default(sec, "budget", {})
+    if not isinstance(budget, dict):
+        raise PaceError(f"進め方の宣言の loop.budget はオブジェクトで書く: {path}")
+    budget = {**LOOP_DEFAULTS["budget"], **budget}
+    if set(budget) != set(LOOP_DEFAULTS["budget"]) or not all(_positive(v) for v in budget.values()):
+        raise PaceError(f"進め方の宣言の loop.budget は laps・usd・hours を正の数で書く: {path}")
+    out = {"enabled": sec.get("enabled") is True, "budget": budget}
+    for key in ("same_failure", "max_issues"):
+        v = _default(sec, key, LOOP_DEFAULTS[key])
+        if isinstance(v, bool) or not isinstance(v, int) or v < 1:
+            raise PaceError(f"進め方の宣言の loop.{key} は 1 以上の整数で書く: {path}")
+        out[key] = v
+    return out
+
+
+def _positive(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0
 
 
 def _pace_section(d: dict, name: str, path: Path) -> dict:

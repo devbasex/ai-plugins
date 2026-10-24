@@ -36,7 +36,14 @@ def near(out):
 
 
 # 高い順に #1〜#4（品質ではない）、低い #5・#6 が品質向上の Issue
-SPECS = [raw(1, ubv=8, size=1), raw(2, ubv=5, size=1), raw(3, ubv=5, size=2), raw(4, ubv=3, size=1), raw(5, ubv=1, size=1), raw(6, ubv=1, size=1)]
+SPECS = [
+    raw(1, ubv=8, size=1),
+    raw(2, ubv=5, size=1),
+    raw(3, ubv=5, size=2),
+    raw(4, ubv=3, size=1),
+    raw(5, ubv=1, size=1),
+    raw(6, ubv=1, size=1),
+]
 LABELS = {5: ["quality"], 6: ["quality"]}
 
 
