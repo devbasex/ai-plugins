@@ -2557,6 +2557,12 @@
       "pending_source": "issues/issue-2089-requirements.md"
     },
     {
+      "term": "ループの記録",
+      "context": "ndf-workflow",
+      "meaning": "開発ループの周回ごとの選定・承認ゲートの判定・版・費用と秒・止まる条件の判定を持つ記録。メインディレクトリの .ndf/loop/<名>/loop.json が正本で、laps.md はそこから描画する",
+      "pending_source": "issues/issue-2089-design.md"
+    },
+    {
       "term": "スプリントブランチ",
       "context": "ndf-workflow",
       "meaning": "課題の Pull Request を集め、ベースブランチへの Pull Request をスプリントで 1 本にするブランチ（`sprint/<名前>`）",
