@@ -65,7 +65,7 @@ NDF の Skill 実装は `plugins/ndf/skills/` にあります。公開セット�
 - branch / release workflow: `worktree`, `deploy`, `cherry-pick-pr`, `merged`, `release`,
   `release-verification`
 - planning / documentation: `implementation-plan`, `issue-plan-strategy`, `plan-to-spec`,
-  `markdown-writing`, `investigation-rules`
+  `document-style`, `investigation-rules`
 - development methodology: `development-workflow`, `requirements-design`, `tdd-cycle`,
   `refactoring`, `quality-gates`, `retrospective`, `out-of-scope`
 - quality / execution: `docker-container-access`, `qa-security-scan`

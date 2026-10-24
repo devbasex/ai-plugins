@@ -1,6 +1,7 @@
 ---
-name: markdown-writing
-description: "Write Markdown docs, specs, PR bodies, and reports for a third-party reader, with tables and mermaid. Use when authoring or editing a Markdown document（ドキュメント作成・仕様書を書く・PR本文）."
+name: document-style
+description: "Write Markdown docs, specs, PR bodies, and reports for a third-party reader, with tables and mermaid. Use when authoring or editing a Markdown document（ドキュメント作成・仕様書を書く・PR本文。工程と AI から呼ぶ）."
+user-invocable: false
 allowed-tools:
   - Read
   - Write
@@ -168,6 +169,8 @@ allowed-tools:
 
 ### 9. 文書の長さと分割ルール
 
+**このルールはファイルの長さと分割を持つ。** 章と文の長さの目安は `document-rebuild` の形式別ガイド（`references/format-<形式>.md`）が持つ。
+
 | 行数 | 対応 |
 |---------|-----|
 | ~300行 | そのまま |
@@ -240,6 +243,18 @@ docs/feature-guide/
 
 読み手がエンジニアでない文書（提案書・稟議書・利用者向けのマニュアル）は、読み手の業界の語で書く
 （`document-drafting`）。
+
+### 12. パス・URL は、表示先でリンクとして認識される形で書く
+
+**読み手が、パスと URL をクリックして開ける状態にする。** 表示先（Markdown のプレビュー・VS Code の端末・Slack・
+Confluence など）は、パスと URL の終わりを前後の文字で判定する。全角の文字が密着すると、その文字までを URL として
+読み、リンクが開けない。
+
+- 例: パス・URL の直後に半角スペースを置く（`https://example.com を開く`。`https://example.comを開く` と密着させない）
+- 例: 全角の括弧・句読点を密着させない。括弧で囲むなら、内側に半角スペースを置く（`（ https://example.com ）`）
+- 例: Markdown では、文中のパスをリンクの記法 `[a.md](docs/a.md)` かコードの記法で書く
+
+**半角スペースは手段であって、規則ではない。** 表示先がリンクとして認識する形が別にあれば、その形でよい。
 
 ## 書き終えたらセルフチェック
 
@@ -321,6 +336,7 @@ grep -nE '束|写し|囲み|待ち行列|雛形|見張り|持ち場|入れ物|�
 - [ ] 図はインラインで書いている（ディレクトリツリーはASCIIでよい）
 - [ ] 図の向きと横方向の要素数がガイドの上限に収まっている
 - [ ] plantUML / HTML / インライン`<svg>` を使っていない
+- [ ] パス・URL が、表示先でリンクとして認識される形で書かれている
 - [ ] ファイル長は300行以内（301~500行は内容次第で可、501行以上は分割）
 - [ ] 分割時は順序prefix使用（01-, 02-, ...）
 

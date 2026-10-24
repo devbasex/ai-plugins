@@ -3,7 +3,7 @@
 
     python3 doc-lint.py [--base <ref>] [--root DIR] [--exclude PREFIX...] [--all-lines]
 
-起点（--base と HEAD の分岐点。--base が無ければ origin/<.ndf/worktree.json の base_branch>）から追加した Markdown の行に、markdown-writing のセルフチェックの
+起点（--base と HEAD の分岐点。--base が無ければ origin/<.ndf/worktree.json の base_branch>）から追加した Markdown の行に、document-style のセルフチェックの
 「検討痕跡・変更履歴」の語と、課題番号の由来・以前との比較の語を掛ける。コードブロックの中は見ない。
 掛けるのは `.ndf/project.json` の `ndf_policies.doc_lint` が `true` のときだけで、ほかは `skipped` の ok で 0 を返す。
 結果は lib/step_result.py の形の 1 行の JSON。終了コードは 0 = ヒット無し / 1 = ヒットあり / 2 = 読めない。
@@ -33,7 +33,7 @@ import glossary  # noqa: E402  追加した行の取り方を共有する
 
 TOOL = "doc-lint"
 
-# 規則名 → 正規表現。markdown-writing の「書き終えたらセルフチェック」の語に、課題番号の由来と
+# 規則名 → 正規表現。document-style の「書き終えたらセルフチェック」の語に、課題番号の由来と
 # 以前との比較の語を足したもの
 RULES = {
     "history": re.compile(

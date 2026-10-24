@@ -51,7 +51,7 @@ graph TD
 - `subgraph` で層や境界をまとめる
 - **`legacy-refactor` では現状と変更後の 2 枚を描く。** 1 枚では何が動いたのかが読めない
 - 要素の名前は業務の言葉で書き、ファイル名やクラス名を裸で置かない
-  （`markdown-writing` のルール 1）
+  （`document-style` のルール 1）
 
 ## 配置
 

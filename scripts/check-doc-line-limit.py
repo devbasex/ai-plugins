@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """説明文書と配布物の Markdown が、分割の基準（501 行以上）を超えていないかを見る（#354）。
 
-`markdown-writing` のルール 9 が基準を定めるが、機械では見ていなかった。
+`document-style` のルール 9 が基準を定めるが、機械では見ていなかった。
 `check-skill-frontmatter.py` は `SKILL.md` の行数だけを 500 行で見ており、`docs/` と
 `references/` と `README.md` とリポジトリ直下の文書は対象に入っていない。
 

@@ -245,7 +245,7 @@ USE_WHEN_RE = re.compile(r"Use\s+when|use\s+when|使う|使い|とき|時に|と
 SENTENCE_SPLIT_RE = re.compile(r"(?<=[.。])\s*")
 
 # --- 「引数を取る Skill か」の判定 -------------------------------------------
-# 規約（README「発動制御の 4 分類」）は明示指示専用の Skill に対して
+# 規約（AUTHORING.md「発動制御の 5 分類」）は明示指示専用の Skill に対して
 # 「disable-model-invocation: true（引数を取るなら + argument-hint）」と定めている。
 # 引数を取らない明示指示専用 Skill まで落とさないよう、引数の有無を SKILL.md から
 # 機械的に判定する。判定材料は、実際の Skill が引数を表現している次の 3 通り。
@@ -466,13 +466,19 @@ def _check_ops(s: dict, fm: dict, add) -> None:
                 "明示指示専用の Skill は description に「利用者が明示的に指示したときのみ実行する」"
                 "旨を書く（Codex / Kiro は disable-model-invocation を解釈しない）",
             )
+    # user-invocable: false は 2 つの分類が使う（AUTHORING.md「発動制御の 5 分類」）。常時注入のみは
+    # 「知識として参照する」、工程から呼ぶ専用は「工程と AI から呼ぶ」を description に書く。
     if fm.get("user-invocable", "").lower() == "false":
-        if not re.search(r"知識として|参照する|実行しない|reference only|do not execute", desc):
+        if not re.search(
+            r"知識として|参照する|実行しない|reference only|do not execute|工程と AI から呼ぶ|called by the workflow",
+            desc,
+        ):
             add(
                 "error",
                 "portability/inject-only",
-                "常時注入のみの Skill は description に「知識として参照する。手順として実行しない」"
-                "旨を書く（Codex / Kiro は user-invocable を解釈しない）",
+                "user-invocable: false の Skill は description に、常時注入のみなら「知識として参照する。"
+                "手順として実行しない」、工程から呼ぶ専用なら「工程と AI から呼ぶ」旨を書く"
+                "（Codex / Kiro は user-invocable を解釈しない）",
             )
 
     dmi = fm.get("disable-model-invocation", "").lower() == "true"
