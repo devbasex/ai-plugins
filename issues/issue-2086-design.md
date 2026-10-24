@@ -121,6 +121,7 @@
 | `development-workflow/SKILL.md` | 変更 | 工程の決まりの「ドキュメント再構成」の行に、手順 3 で `markdown-writing` のセルフチェックを通すことを書く（#469 の掛け忘れ） |
 | `document-restructuring` の `description` | 変更 | 「出力の形と文書の目的に合わせて」を足す（一覧の文字数の予算の中で） |
 | 用語集（`docs/glossary/glossary.json`・`docs/glossary.md`） | 変更 | 形の参照・目的の参照を足す |
+| `development-workflow/references/glossary.md` | 変更 | 「手順」の行の `document-restructuring` を手順 0〜4 の 5 つ（決める・測る・組み直す・整える・測り直す）に合わせる。`docs/glossary/glossary.json` の「手順」の出典である |
 
 **新しい Skill は作らない。配布の基準（`manifests/*-skills.txt`）は変わらない。** 参照は Skill のディレクトリの中にあり、4 ランタイムへ同じ形で配られる（`lang-*.md` と同じ経路）。
 
@@ -412,7 +413,7 @@ graph TD
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #2086 | 実装する | — | `plugins/ndf/skills/document-restructuring/`、`plugins/ndf/skills/markdown-writing/SKILL.md`、`plugins/ndf/skills/document-drafting/SKILL.md`、`plugins/ndf/skills/release/references/form-slide.md`、`plugins/ndf/skills/design/references/layout-slide.md`、`plugins/ndf/skills/development-workflow/SKILL.md`、`docs/glossary/glossary.json`、`docs/glossary.md` |
+| #2086 | 実装する | — | `plugins/ndf/skills/document-restructuring/`、`plugins/ndf/skills/markdown-writing/SKILL.md`、`plugins/ndf/skills/document-drafting/SKILL.md`、`plugins/ndf/skills/release/references/form-slide.md`、`plugins/ndf/skills/design/references/layout-slide.md`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/glossary.md`、`docs/glossary/glossary.json`、`docs/glossary.md` |
 | #2083 | 取り込む | #2086 | — |
 | #2080 | 取り込む | #2086 | — |
 | #469 | 取り込む | #2086 | — |
