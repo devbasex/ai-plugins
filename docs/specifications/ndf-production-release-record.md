@@ -215,7 +215,7 @@ stateDiagram-v2
 
 | 項目 | 内容 |
 | --- | --- |
-| merge・manual・検証の環境だけの経路 | 記録を置く PR をプランが知らず、`close` は `--record-pr unknown` で打って課題を開いたまま残す。記録の PR を知っている呼び手は、`supervise.py new close --record-pr <番号>` で組めば `close` へ渡せる（#2089） |
+| merge・manual・検証の環境だけの経路 | 記録を置く PR をプランが知らず、`close` は `--record-pr unknown` で打って課題を開いたまま残す。記録の PR を知っている呼び手は、`supervise.py new close --record-pr <番号>` で組めば `close` へ渡せる |
 | まとめの queue の本番が飛ばされたとき | 最終の検査で変更が無いと、まとめの queue の `release-prod` / `promote` が飛ばされて記録の PR が `0` になり、`new sprint` の本番で出た配布のリリース後テストは見ずに閉じる |
 | `release-verify` の所要 | まとめのプランの上限とステップの `timeout`（3600 秒）に収まるかは、流したスプリントで測る |
 | 課題を閉じた後の本文 | 工程表のチェックボックスは更新しない（受け入れ条件の印は `--with-verification` の経路で閉じる前に付ける。[ndf-sprint-close-acceptance-criteria.md](ndf-sprint-close-acceptance-criteria.md)）。コミットの件名の closing keywords（`Closes #N` など、GitHub が課題を自動で閉じるキーワード）で GitHub が先に閉じる経路も塞がない |
