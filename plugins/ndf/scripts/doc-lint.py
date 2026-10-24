@@ -49,6 +49,24 @@ RULES = {
 DEFAULT_EXCLUDE = ("CHANGELOG.md", "issues/", ".worktrees/", "docs/presentations/")
 
 
+def _line_hits(rel: str, n: int, text: str) -> list[dict]:
+    items = []
+    for rule, rx in RULES.items():
+        m = rx.search(text)
+        if m:
+            items.append(
+                {
+                    "kind": "line",
+                    "name": f"{rel}:{n}",
+                    "result": "hit",
+                    "rule": rule,
+                    "match": m.group(0),
+                    "text": text.strip()[:200],
+                }
+            )
+    return items
+
+
 def lint_files(root: Path, files: dict[str, set[int]], all_lines: bool) -> tuple[list[dict], int]:
     items, total = [], 0
     for rel, nums in sorted(files.items()):
@@ -63,20 +81,7 @@ def lint_files(root: Path, files: dict[str, set[int]], all_lines: bool) -> tuple
             if n in skip or n > len(lines):
                 continue
             total += 1
-            text = lines[n - 1]
-            for rule, rx in RULES.items():
-                m = rx.search(text)
-                if m:
-                    items.append(
-                        {
-                            "kind": "line",
-                            "name": f"{rel}:{n}",
-                            "result": "hit",
-                            "rule": rule,
-                            "match": m.group(0),
-                            "text": text.strip()[:200],
-                        }
-                    )
+            items.extend(_line_hits(rel, n, lines[n - 1]))
     return items, total
 
 
