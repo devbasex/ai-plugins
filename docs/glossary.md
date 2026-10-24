@@ -459,6 +459,7 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 想定最大時間の終わり | `final_end_at` | started_at + 想定最大時間（limits.final_end_at）。中断して再開した実行では、止まっていた分だけずれる。子プロセスへ渡す上限はすべてこの時刻で切る | — | — | `docs/specifications/cross-refactoring-verify-and-final-gate.md` |
 | 確かめの見込み | `gate_seconds` | 最終ゲートの確かめ 1 回にかかる見込みの秒（limits.gate_seconds）。手元で全体テストを走らせるなら w、CI で見るなら c、どちらも測れていなければ 0 | — | — | `docs/specifications/cross-refactoring-verify-and-final-gate.md` |
 | 確かめの開始の締め切り | `gate_start_end` | 想定最大時間の終わり − 確かめの見込み（H − v）。最終ゲートの確かめを始められる最後の時刻で、最終ゲート修正と打ち切りの後の取り消しもこの時刻までに止まる | — | — | `docs/specifications/cross-refactoring-verify-and-final-gate.md` |
+| テストの無い宣言 | — | .ndf/project.json の test があり、unknown と strategy を持たず、種別・雛形の誤りが無く、command も scope_command も持つ suite が 1 つも無いもの。解析が「テストが無い」と測った {"suites": []} を含む。cross-review の最終スイープは検証のコマンドを名指ししない | — | — | — |
 
 ## NDF のラッパー（`ndf-relay`）
 
