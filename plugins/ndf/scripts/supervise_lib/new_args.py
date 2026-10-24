@@ -253,9 +253,13 @@ NEW_ARGS = [
         {
             "choices": ["normal", "fast", "auto"],
             "default": "normal",
-            "help": "進め方（fast と auto は使ってよい条件と MVV の承認を確かめる。auto は normal の工程で承認ゲート 1・2 を MVV 判定にする）",
+            "help": {
+                "*": "進め方（fast と auto は使ってよい条件と MVV の承認を確かめる。auto は normal の工程で承認ゲート 1・2 を MVV 判定にする）",
+                "close": "auto なら最終の検査・開発版・本番を置かず、まとめのステージだけを組む（開発ループの周回。#2089）。"
+                "省けば今の形（fast のスプリントの終わり）",
+            },
         },
-        "sprint",
+        "sprint close",
     ),
     (
         "--state",
@@ -269,6 +273,16 @@ NEW_ARGS = [
         "sprint close",
     ),
     ("--prod", {"help": "本番の版（例 10.18.0。release.form の雛形で配るときだけ要る）"}, "close"),
+    (
+        "--record-pr",
+        {"type": int, "help": "課題を閉じるステップへ渡す本番の記録の Pull Request（省けば配布の経路から導く。#2089）"},
+        "close",
+    ),
+    (
+        "--carry",
+        {"type": int, "nargs": "+", "default": [], "help": "前の周回の棚卸しの持ち越し。棚卸しのステップへ --add で渡す（#2089）"},
+        "close",
+    ),
     ("--milestone", {"help": "マイルストーン（振り返りの材料）"}, "close"),
 ]
 NEW_REQUIRED = {

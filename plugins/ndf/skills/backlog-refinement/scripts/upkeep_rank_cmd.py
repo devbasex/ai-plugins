@@ -186,7 +186,11 @@ def _build_board(a, gh, rows, order, scores, cfg, sd, ctx, notes):
     """open の課題・前回の表・見積・依存の辺から Board を作る。戻り値は (board, issues, ests, excluded)。"""
     open_issues = list_issues(gh, "state=open")
     issues = {
-        i["number"]: {"milestone": (i.get("milestone") or {}).get("title"), "labels": [lb.get("name") for lb in i.get("labels") or []]}
+        i["number"]: {
+            "milestone": (i.get("milestone") or {}).get("title"),
+            "labels": [lb.get("name") for lb in i.get("labels") or []],
+            "created_at": i.get("created_at") or "",
+        }
         for i in open_issues
     }
     previous = {r["title"]: tab for r in rows if (tab := R.parse_rank_table(r.get("description") or "")) is not None}

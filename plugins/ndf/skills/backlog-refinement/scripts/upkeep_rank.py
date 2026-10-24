@@ -213,12 +213,17 @@ def large_slot(rows_in, capacity, cfg: Config, sub_issues, edges):
     return {"issue": big.number, "slice": piece, "size": by_num[piece].size, "budget": budget, "status": SLOT_FIT}
 
 
-def boundary(rows_in, capacity, slot):
-    """切り出しの境界（決定 21 の B）。枠の 1 切れを除いて先頭から、容量の残りに収まるまで取った最後の課題。"""
+def boundary(rows_in, capacity, slot, quality=None):
+    """切り出しの境界（決定 21 の B）。枠の 1 切れ（と品質の枠の課題）を除いて先頭から、容量の残りに収まるまで取った最後の課題。"""
     if capacity is None or not rows_in:
         return None
     piece = slot["slice"] if slot and slot["status"] == SLOT_FIT else None
     rest = capacity - (slot["size"] if piece is not None else 0)
+    reserved = set(quality["issues"]) if quality else set()
+    rest -= quality["size_sum"] if quality else 0
+    rows_in = [r for r in rows_in if r.number not in reserved]
+    if not rows_in:
+        return None
     total, last = 0, None
     for r in rows_in:
         if r.number == piece:
@@ -232,6 +237,35 @@ def boundary(rows_in, capacity, slot):
             return None
         return {"number": first.number, "size_sum": first.size, "capacity": capacity, "over": True}
     return {"number": last.number, "size_sum": total, "capacity": capacity, "over": False}
+
+
+def quality_key(r: Row, issue: dict):
+    """品質の枠の中の並び（決定 14 の A）: 利用者へ届いた不具合（実害の観測）→ 後へ回してからの期間（起票の古い順）→ 今の順位。
+    同じ手当てや失敗の繰り返しの回数は rank の入力に無いため数えない。"""
+    return (not r.observed_harm, issue.get("created_at") or "~", row_key(r))
+
+
+def quality_slot(rows_in, capacity, cfg: Config, issues: dict, slot, blocked=()):
+    """品質の枠（#2089 の決定 14 の A）。宣言が無ければ None。容量の ratio 分（最低 min 件）を品質向上の Issue から先に取る。
+    容量が無ければ min 件を取る。大きい課題の枠の 1 切れと尺度を超える課題は取らない。"""
+    q = cfg.quality
+    if q is None:
+        return None
+    piece = slot["slice"] if slot and slot["status"] == SLOT_FIT else None
+    pool = [r for r in rows_in if q["label"] in (issues.get(r.number) or {}).get("labels", []) and r.number != piece and r.number not in blocked]
+    pool.sort(key=lambda r: quality_key(r, issues.get(r.number) or {}))
+    budget = None if capacity is None else math.floor(capacity * q["ratio"])
+    room = None if capacity is None else capacity - (slot["size"] if piece is not None else 0)
+    taken, total = [], 0
+    for r in pool:
+        if budget is None:
+            if len(taken) >= q["min"]:
+                break
+        elif total + r.size > budget and not (len(taken) < q["min"] and total + r.size <= room):
+            break
+        taken.append(r.number)
+        total += r.size
+    return {"label": q["label"], "ratio": q["ratio"], "min": q["min"], "budget": budget, "issues": taken, "size_sum": total}
 
 
 def stable_digest(obj) -> str:
@@ -263,9 +297,17 @@ def _milestone_rows(board, rows, place, title):
 def _slot_and_boundary(board, ranked):
     """直近のマイルストーンの大きい課題の枠と、切り出しの境界。候補と表で同じ決め方を使う。"""
     cfg = board.cfg
+    slot, quality, bnd = _slots(board, ranked)
+    return slot, bnd
+
+
+def _slots(board, ranked):
+    """大きい課題の枠・品質の枠（宣言があるときだけ）・切り出しの境界。"""
+    cfg = board.cfg
     slot = large_slot(ranked, cfg.capacity, cfg, board.sub_issues, board.edges)
     blocked = _over_and_dependents(board, ranked)
-    return slot, boundary([r for r in ranked if r.number not in blocked], cfg.capacity, slot)
+    quality = quality_slot(ranked, cfg.capacity, cfg, board.issues, slot, blocked)
+    return slot, quality, boundary([r for r in ranked if r.number not in blocked], cfg.capacity, slot, quality)
 
 
 def _over_and_dependents(board, ranked) -> set:
@@ -378,7 +420,8 @@ def _candidates(board, rows, place):
 def _milestone_out(board, rows, place, title, idx):
     cfg = board.cfg
     ranked = _milestone_rows(board, rows, place, title)
-    slot, bnd = _slot_and_boundary(board, ranked)
+    slot, quality, bnd = _slots(board, ranked)
+    marked = set(quality["issues"]) if quality else set()
     out_rows = [
         {
             "rank": k,
@@ -391,6 +434,7 @@ def _milestone_out(board, rows, place, title, idx):
             "waiting_decision": r.waiting_decision,
             "released": r.released,
             "sources": r.sources,
+            **({"quality_slot": r.number in marked} if quality is not None else {}),
         }  # fmt: skip
         for k, r in enumerate(ranked, 1)
     ]
@@ -400,7 +444,10 @@ def _milestone_out(board, rows, place, title, idx):
         "high_count": sum(1 for r in ranked if r.ubv >= cfg.auto_threshold),
     }
     over = [r.number for r in ranked if is_over(board, r.number)]
-    return {"title": title, "order": idx, "rows": out_rows, "large_slot": slot, "boundary": bnd, "totals": totals, "over_scale": over}
+    out = {"title": title, "order": idx, "rows": out_rows, "large_slot": slot, "boundary": bnd, "totals": totals, "over_scale": over}
+    if quality is not None:
+        out["quality_slot"] = quality
+    return out
 
 
 def compute_ranking(board: Board) -> dict:

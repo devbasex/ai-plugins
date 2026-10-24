@@ -171,6 +171,15 @@ def _close_step(a, repo: str, record_pr: str, issues: str) -> dict:
     }
 
 
+def carry_text(a) -> str:
+    """棚卸しの指示へ足す、前の周回の持ち越しの 1 文（--carry が無ければ空）。"""
+    carry = getattr(a, "carry", None) or []
+    if not carry:
+        return ""
+    nums = " ".join(f"#{n}" for n in carry)
+    return f"前の周回の持ち越し {nums} を `upkeep.py` の `--add` で候補へ渡す（{' '.join(map(str, carry))}）。"
+
+
 def _retro_refine_steps(a, refs: str, stats: str) -> list[dict]:
     """振り返りと棚卸し。"""
     return [
@@ -193,7 +202,7 @@ def _retro_refine_steps(a, refs: str, stats: str) -> list[dict]:
             "kind": "棚卸し",
             "stage": "棚卸し",
             "timeout": 3600,
-            "prompt": f"/ndf:backlog-refinement スプリント {a.name}（{refs}）。棚卸しの工程として無人で通す。"
+            "prompt": f"/ndf:backlog-refinement スプリント {a.name}（{refs}）。棚卸しの工程として無人で通す。{carry_text(a)}"
             "候補が上限を超えて持ち越し（`metrics.deferred`）が出ても、`--limit` を上げて打ち直さず、番号と件数を"
             "報告に載せる。`upkeep.py apply` が終了コード 10 を返したら、承認を求めず、承認資料のパス"
             "（`presentation_path`）と対象の番号を報告に載せて終える。`--repo` を渡さない（記録のリポジトリの外へ"
@@ -210,7 +219,7 @@ def close_plan(a, repo: str) -> dict:
     refs = " ".join(f"#{i}" for i in a.issue)
     branch = f"spec/{a.name}"
     stats = f"{CHECK_PY} stats --root {shlex.quote(repo)}"
-    record_pr = record_pr_ref(a)
+    record_pr = str(a.record_pr) if getattr(a, "record_pr", None) else record_pr_ref(a)
     plan = with_decls(
         {
             "フェーズ": "まとめ",
@@ -221,7 +230,7 @@ def close_plan(a, repo: str) -> dict:
             "起点": f"origin/{a.base}",
             "リポジトリ": repo,
             "規則": "",
-            "進め方": "fast",
+            "進め方": "auto" if getattr(a, "pace", None) == "auto" else "fast",
             "steps": [
                 *_spec_pr_steps(a, refs),
                 *merge_steps(a, next="release-verify" if has_record(record_pr) else "close"),
@@ -238,6 +247,9 @@ def close_plan(a, repo: str) -> dict:
 def close_waves(a) -> list[dict]:
     """スプリントの終わりのステージ。最終の検査で変更があったときだけ開発版と本番が流れる。"""
     repo = str(Path(a.worktree).resolve())
+    if getattr(a, "pace", None) == "auto":
+        # 開発ループの周回（#2089 の決定 10）: 検査と本番はスプリントのステージで済んでいるため、まとめだけを組む
+        return [{"name": "まとめ", "plans": {"close": close_plan(a, repo)}}]
     final = f"{a.name}-final"
     changed = {"cmd": f"{CHECK_PY} changed --id {final} --root {shlex.quote(repo)}", "skip_code": 3}
     check = {"name": "最終の検査", "plans": {"check": plan_fast_check(a, repo, final, final=True)}}
@@ -466,6 +478,9 @@ def write_stage_index(waves: list[dict], out: Path) -> list[dict]:
 def manifest_head(a, pace: str, closing: bool = False) -> dict:
     """manifest の見出し（スプリント / 進め方 / 状態 / ブランチ）。"""
     head = {"スプリント": a.name}
+    if closing and pace == "auto":  # new close --pace auto（開発ループの周回のまとめ。#2089）
+        head.update({"進め方": "auto", "状態": sprint_state_path(a)})
+        return head
     if pace in MVV_PACES:
         head.update({"進め方": pace, "状態": sprint_state_path(a)})
         if pace != "fast":
