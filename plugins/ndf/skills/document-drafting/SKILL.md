@@ -26,7 +26,7 @@ allowed-tools:
 | 図表の記法・横幅の上限 | `markdown-writing` の図表ガイド |
 | 版面・書体・1 枚あたりの情報量 | `design` の `layout-<出力の形>.md` |
 | 出力の形への生成 | `release` の `form-<出力の形>.md` |
-| 章立ての組み直し | `document-restructuring` |
+| 章立ての組み直し・キーワードの確かめ | `document-restructuring`（手順 4 で掛ける） |
 | 数値と引用の出所 | `document-sources` |
 
 **`markdown-writing` は全工程に掛かる。** 工程表には載らない。
@@ -86,6 +86,11 @@ allowed-tools:
 ### 4. 見直す
 
 参照の「よくある欠落」と突き合わせる。**`markdown-writing` のセルフチェックはここで通す。**
+
+**書き上げた文書へ `document-restructuring` を掛ける。** 組み直しは文書タイプから目的別ガイドを選び、
+手順 3 で `markdown-writing` のセルフチェックとキーワードの確かめを通す。読み手が社外の文書（提案書・発表資料・記事）では、
+題とキーワードを公式ドキュメントの語と突き合わせる手順を `document-restructuring` の
+[keyword-check.md](../document-restructuring/references/keyword-check.md) が持つ。
 
 ## 範囲外の課題を見つけたとき
 

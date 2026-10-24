@@ -131,6 +131,8 @@ node <資料>/slides/lib/script-time.js <資料>/script.md --limit <持ち時間
 - 聞き手が知らない内部の語は、聞き手に通じる語へ言い換えるか、ページの中で一言で説明を添える。Skill やコマンドの
   名前を出すときは、何をするものかを添える
 - 章扉（`section`）で構成を見せる。章の名前と一言は構成メモに書く
+- 資料の題・章扉の名前・繰り返し出る語（キーワード）は、`document-restructuring` の
+  [keyword-check.md](../../document-restructuring/references/keyword-check.md) で確かめる。聞き手が社外なら公式ドキュメントの語と表記にそろえる
 
 ### 生成する
 
