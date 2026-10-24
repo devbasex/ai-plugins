@@ -217,7 +217,7 @@ sequenceDiagram
 | 受け入れ条件 4・I5 | `--state` ありで「`関門 2`」の `gate` が `sprint-state.py` の `gate` のコマンド（`"関門 2"`・`--by user`）を含み、「配布」が `note` を持たない。`--state` なしで `gate` が `sprint-state.py` を含まない | 「配布」に `note` を残す・`--state` なしでも `normal_gate_2` を続けると落ちる |
 | I4 | `--state` ありの normal の本番のプランが `mvv`・`note`・`handoff` のステップを持たない | 本番を `plan_mvv_release` で組むと落ちる |
 | 受け入れ条件 5 | 雛形の無い経路（昇格・手で届ける）の normal の目録が今の並びと `note` のままで、fast / auto の目録が今の並びのまま（既存のテストの期待を変えない） | 雛形の無い経路にも「`関門 2`」を足す・`route_waves` の `note` を外すと落ちる |
-| I6 | 本番のブランチの無い宣言（`plain_repo`）の normal の `new sprint` が成功し、最後のステージが「配布」 | 本番のブランチが無いのに本番を組もうとすると `DeclError` で落ちる |
+| I6・I5 | 本番のブランチの無い宣言（`plain_repo`）の normal の `new sprint` が成功し、最後のステージが「配布」。`--state` ありでは「配布」が今の `normal_gate_2` の文の `note`（`--by user` を含む）を持つ | 本番のブランチが無いのに本番を組もうとすると `DeclError` で落ちる・本番のブランチの有無によらず「配布」の `note` を外すと落ちる |
 | 受け入れ条件 6・7 | テストを書かない（`.md` の文言を照合しない。`AGENTS.md`）。手順 9 の形は、`new sprint` を一時ディレクトリへ打って「本番」のステージの `command` と一致すること、プランのファイルがあることを実装の中で 1 度確かめる（要求の前提 4。本番のキューは打たない） | — |
 | 受け入れ条件 8 | `.ndf/project.json` の `test` の全体が通る | — |
 
