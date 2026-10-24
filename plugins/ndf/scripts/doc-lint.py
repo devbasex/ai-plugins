@@ -49,10 +49,10 @@ RULES = {
 DEFAULT_EXCLUDE = ("CHANGELOG.md", "issues/", ".worktrees/", "docs/presentations/")
 
 
-def _line_hits(rel: str, n: int, text: str) -> list[dict]:
+def _line_hits(rel: str, n: int, line: str) -> list[dict]:
     items = []
     for rule, rx in RULES.items():
-        m = rx.search(text)
+        m = rx.search(line)
         if m:
             items.append(
                 {
@@ -61,7 +61,7 @@ def _line_hits(rel: str, n: int, text: str) -> list[dict]:
                     "result": "hit",
                     "rule": rule,
                     "match": m.group(0),
-                    "text": text.strip()[:200],
+                    "text": line.strip()[:200],
                 }
             )
     return items
