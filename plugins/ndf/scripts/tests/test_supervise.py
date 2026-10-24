@@ -2651,27 +2651,7 @@ def test_pr_body_tests_table_escapes_a_pipe_in_the_last_line(tmp_path, monkeypat
     assert "| test | 0 | a \\| b |" in body.read_text().splitlines()
 
 
-CARMO_PROJECT = {
-    "version": 1,
-    "test": {
-        "strategy": "local-scoped-ci-whole",
-        "ci": {"check": "test-results", "junit_artifacts": "junit-*"},
-        "suites": [
-            {
-                "name": "phpunit",
-                "runner": "phpunit",
-                "command": "docker compose exec -T app ./vendor/bin/phpunit --log-junit build/ndf/junit.xml",
-                "scope_command": "docker compose exec -T app ./vendor/bin/phpunit --log-junit build/ndf/junit.xml {paths}",
-                "junit": "build/ndf/junit.xml",
-                "container": {"service": "app"},
-                "paths": ["tests"],
-            }
-        ],
-    },
-    "test_duration": {"measured": [{"seconds": 3827.0, "source": "ci-junit", "detail": "run"}]},
-    "ci": {"provider": "github-actions", "workflows": [{"path": ".github/workflows/test-results.yml", "jobs": 24, "wall_seconds": 360.0}]},
-}
-
+CARMO_PROJECT = json.loads((Path(__file__).parent / "fixtures" / "carmo_project.json").read_text(encoding="utf-8"))
 
 def _carmo_repo(tmp_path):
     root = foreign_repo(tmp_path)
