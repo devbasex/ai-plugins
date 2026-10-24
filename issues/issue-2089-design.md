@@ -50,12 +50,12 @@
 | --- | --- | --- | --- |
 | I1 | 開発ループ | 周回は追記だけで、番号は 1 から 1 ずつ増える。終わった周回の行は書き換えない | 書き込みを拒み、終了コード 1（記録が壊れている）で止まる |
 | I2 | 開発ループ | 進行中の周回は高々 1 つ | 新しい周回の開始を拒む（`loop select` が「進行中の周回がある」で 1） |
-| I3 | 開発ループ | 止まる条件は周回の境（周回の開始の前と終わりの後）でだけ判定する。周回の途中で `stop` を書かない | 周回の途中の停止の指示は、次の境まで効かない |
-| I4 | 開発ループ | 選定は入力（`rank` の出力・ループの記録の人の判断待ちと除外・宣言・スプリント MVV の承認）だけで決まる。同じ入力からは同じ組と同じ並びが出る | — （テストで縛る） |
+| I3 | 開発ループ | 予算（`budget_*`）・同じ失敗（`same_failure`）・止める指示（`user_stop`）は周回の境（周回の開始の前と終わりの後）でだけ判定し、周回の途中ではこの 3 つで `stop` を書かない。例外は周回の途中で起きる 3 つで、進行中のまま `stop` を書いて止まる: 承認ゲート 2 を人へ戻した（`gate2_returned`）・プロジェクト MVV が改訂された（`mvv_changed`）・周回を組めなかった（`refused`）。周回は締めずに残し、再開（`loop start`）が同じ周回を続ける | 周回の途中の停止の指示は、次の境まで効かない |
+| I4 | 開発ループ | 選定は入力（`rank` の出力・ループの記録の人の判断待ちと除外・`answer: approved` の行の設計 PR の状態・宣言・スプリント MVV の承認）だけで決まる。同じ入力からは同じ組と同じ並びが出る | — （テストで縛る） |
 | I5 | 開発ループ | 答えの無い人の判断待ちの課題は選ばない | 選定の行に「人の判断待ち」で外す |
 | I6 | 開発ループ | ループは承認ゲートを自分で通さない。承認ゲートの記録（`by: mvv`）を書くのは `mvv-gate.py` だけで、「従う」以外の判定を「従う」として扱わない | — （テストで縛る） |
 | I7 | 開発ループ | 止まったループは、`loop start` が止まった理由を判定し直して解けたと確かめるまで、周回を始めない | 同じ理由で止まり直す |
-| I8 | 開発ループ | 予算の消費（周回の数・費用・経過時間）は再開をまたいで引き継ぐ。経過時間はループの開始の時刻から数える | — （テストで縛る） |
+| I8 | 開発ループ | 予算の消費（周回の数・費用・経過時間）は再開をまたいで引き継ぐ。経過時間は動いていた時間で数える: 周回の `started_at`〜`ended_at` の和から、周回の途中で止まっていた時間（`stops` の行の `at`〜`resumed_at`）を引く。止まって利用者の答えを待った時間は予算を消費しない | — （テストで縛る） |
 | I9 | 開発ループ | 周回を始めるときのプロジェクト MVV の sha256 は、ループの開始時に記録した値と一致する | 周回を始めずに「MVV が改訂された」で止まる |
 
 ### ドメインイベント
@@ -468,15 +468,15 @@ erDiagram
 | `version` | 数 | 記録の形の版。`1` |
 | `name` | 文字列 | ループの名前（英数字・`-`・`_`） |
 | `repo` | 文字列 | `OWNER/REPO` |
-| `started_at` | ISO 8601 | ループの開始の時刻。経過時間の起点（再開で変えない） |
+| `started_at` | ISO 8601 | ループの開始の時刻（再開で変えない）。経過時間は周回の時刻から数え、この値を起点にしない（I8） |
 | `project_mvv` | `{version, sha256}` | 開始時の承認済みプロジェクト MVV |
 | `budget` | `{laps, usd, hours}` | 効いている予算（宣言の値。再開の引数で上書きしたら上書きの値） |
 | `budget_history` | 配列 | 予算の上書きの履歴（`{at, from, to}`）。上書きのたびに 1 行足す |
 | `same_failure` / `max_issues` | 数 | 宣言から写した値 |
 | `milestones` | 文字列の配列 | 起動の引数で絞ったマイルストーン（空ならすべて） |
 | `status` | `running` / `stopped` | 今の状態 |
-| `stop` | オブジェクトか null | 止まった理由（下の表）。`running` に戻るときは `stops` へ移して null にする |
-| `stops` | 配列 | 過去の止まった理由（追記だけ） |
+| `stop` | オブジェクトか null | 止まった理由（`{condition, values, lap, at}`。`condition` と `values` は下の表、`lap` は止まったときの周回の番号、`at` は止まった時刻）。`running` に戻るときは `stops` へ移して null にする |
+| `stops` | 配列 | 過去の止まった理由（追記だけ）。`stop` を移すときに再開の時刻 `resumed_at` を足す |
 | `laps[]` | 配列 | 周回（追記だけ。I1） |
 | `waiting[]` | 配列 | 人の判断待ち（`{number, reason, gate, pr, lap, at, answer?, answered_at?}`）。答えは行を消さずに `answer` を足す |
 | `excluded[]` | 配列 | 周回ごとの除外（`{number, reason, lap}`。モードが対象外・MVV に反する疑い） |
@@ -571,10 +571,10 @@ erDiagram
 | 副命令 | 入力 | 出力（`metrics` の主なキー） | 終了コード |
 | --- | --- | --- | --- |
 | `loop start <名> [--milestones M,...] [--budget-* ...] [--root DIR]` | 宣言・プロジェクト MVV・記録 | `status`（`new` / `resumed` / `in_lap`）・`lap`・`consumed`・`budget`・`next`（次に打つ副命令かプランの続き） | 0 = 始めた・続ける / 1 = 断った（`items` に理由、`next` に 1 スプリントの起動の形 `/ndf:development-workflow #<課題>`）/ 3 = 止まったまま（止まった理由が解けていない。`items` に理由と再開のコマンド） |
-| `loop select <名>` | `upkeep.py rank` の出力（その場で打つ）・記録 | `lap`・`selected[]`・`excluded[]`・`milestone`・`rank_digest` | 0 = 選んだ / 3 = 止まった（`no_issue` / `outside_mvv`。`stop` を書いた）/ 1 = 進行中の周回がある・`rank` が 2 か 3 を返した |
+| `loop select <名>` | `upkeep.py rank` の出力（その場で打つ）・記録・`answer: approved` の行の設計 PR の状態（`gh pr view` をその場で打つ） | `lap`・`selected[]`・`excluded[]`・`milestone`・`rank_digest` | 0 = 選んだ / 3 = 止まった（`no_issue` / `outside_mvv`。`stop` を書いた）/ 1 = 進行中の周回がある・`rank` が 2 か 3 を返した |
 | `loop exclude <名> <課題> --reason <文>` | 進行中の周回の選定 | 外した課題・選定をやり直した結果（`select` と同じ形） | 0 / 3（すべて外れた）/ 1 |
-| `loop sprint <名> --mode M --dev V [--prod V] [--] <new sprint に足す引数>` | 進行中の周回の選定 | 打ったコマンド・`state_path`・`out`・マニフェストのパス・最初の `queue` のコマンド | 0 / 3（`sprint-state.py init` か `new sprint --pace auto` が断った。`stop: refused` を書く） |
-| `loop gate <名> --done <done.json>` | キューの done・`mvv-gate.jsonl`・スプリントの状態 | `gate`（`1` / `2`）・人の判断待ちへ移した課題・続きの `queue` のコマンド（外した課題の計画を除いたもの） | 0 = 残りで続ける、または残りが無く周回を締めて次の周回へ進む（`ndf_next` を返す）/ 3 = 止まった（承認ゲート 2・MVV が改訂された・締めた後の判定で止まる条件に当たった） |
+| `loop sprint <名> --mode M --dev V [--prod V] [--] <new sprint に足す引数>` | 進行中の周回の選定・前の周回の `refine.deferred` | 打ったコマンド・`state_path`・`out`・マニフェストのパス・`close_command`（内で打った `new close --pace auto --issue <選んだ課題> --carry <前の周回の refine.deferred> ...`。持ち越しが無ければ `--carry` を付けない）・最初の `queue` のコマンド（まとめのステージを最後の `--then` につないだもの）・`pipeline`（本番から `loop lap` までの 1 行。下の「1 周の流れ」） | 0 / 3（`sprint-state.py init` か `new sprint --pace auto` か `new close --pace auto` が断った。`stop: refused` を書く） |
+| `loop gate <名> --done <done.json>` | キューの done・`mvv-gate.jsonl`・スプリントの状態 | `gate`（`1` / `2`）・人の判断待ちへ移した課題・続きの `queue` のコマンド（外した課題の計画を除き、外した課題を除いた `new close --pace auto` を組み直して最後の `--then` につないだもの）・`pipeline` | 0 = 残りで続ける、または残りが無く周回を締めて次の周回へ進む（`ndf_next` を返す）/ 3 = 止まった（承認ゲート 2・MVV が改訂された・締めた後の判定で止まる条件に当たった） |
 | `loop answer <名> <課題> --approved\|--rejected [--pr N]` | 人の判断待ち | 答えを書いた行 | 0 / 1（待っていない課題） |
 | `loop lap <名> [--failed]` | スプリントの状態（`update` を内で打つ）・まとめのプランの done と報告・upkeep の候補の記録・止める指示のファイル | 締めた周回・`stop`（止まったとき）・`ndf_next`（続くとき） | 0 = 続く / 3 = 止まった |
 | `loop approve-mvv <名> --milestone M` | マイルストーンの説明のスプリント MVV | 承認した sha256（`sprint_mvv_approvals` に 1 行） | 0 / 3（説明に `## Mission` / `## Vision` / `## Value` がそろわない） |
@@ -588,10 +588,12 @@ erDiagram
 | 引数 | 意味 | 既定 |
 | --- | --- | --- |
 | `--pace auto` | 最終の検査・開発版・本番を置かず、まとめのステージ（確定仕様化 → Pull Request → 課題を閉じる → 振り返り → 棚卸し）だけを組む。`fast` 節を読まない | 無し（今の形。`fast` のまとめ） |
-| `--record-pr N` | 課題を閉じるステップ（`sprint-close.py --record-pr`）に渡す本番の記録の Pull Request | 無し（今の導き方） |
+| `--record-pr N` | 課題を閉じるステップ（`sprint-close.py --record-pr`）に渡す本番の記録の Pull Request。ループの周回では渡さない（下の注） | 無し（今の導き方） |
 | `--carry N...` | 棚卸しのステップの指示へ「前の周回の持ち越し #N... を `--add` で渡す」を足す | 無し（指示は今のまま） |
 
 `--pace` を渡さない `new close` の出力は変わらない（受け入れ条件 18）。
+
+**`--record-pr` の値の出所は、同じキューの前のステージの本番のプランである。** `loop sprint` はまとめのステージを周回のキューの最後の `--then` につなぐため、`--record-pr` を渡さず、`new close` の今の導き方（経路に合わせて `{queue_pr:release-prod}` / `{queue_pr:promote}` / `0` / `unknown`。`pace.md` の「スプリントの終わり」）の印を残す。キューがまとめのステージを流す前に、前のステージの本番のプランの Pull Request で印を埋める（`supervise_lib/queue.py` の `fill_queue_pr`）。`--record-pr N` は、周回の外で人がまとめだけを組み直すときに使う。
 
 ## 処理の流れ
 
@@ -613,23 +615,22 @@ sequenceDiagram
     S-->>C: 選んだ課題と外した理由（0 件なら 3）
     Note over C: モード判定と版の決定（判断）。対象外は loop exclude
     C->>S: loop sprint 名 --mode M --dev V --prod V
-    S->>Q: sprint-state.py init → new sprint --pace auto
-    S-->>C: 最初の queue のコマンド
-    C->>Q: queue（設計 → 本番まで --then）
+    S->>Q: sprint-state.py init → new sprint --pace auto → new close --pace auto --carry 持ち越し
+    S-->>C: 最初の queue のコマンドと pipeline
+    C->>Q: pipeline（queue 設計 → 本番 → まとめまで --then → wait → loop lap）
     Q->>G: 承認ゲート 1・2 の MVV 判定
     alt 承認ゲートで止まった
         Q-->>C: gate（10）
         C->>S: loop gate 名 --done
         S-->>C: ゲート 1: 外した残りの queue / ゲート 2: 3（止まる）
     end
-    C->>Q: new close --pace auto --carry 持ち越し → queue（同じパイプライン）
-    C->>S: loop lap 名
+    Q->>S: loop lap 名（pipeline の最後）
     S-->>C: 続く: ndf-next / 止まった: 3 と理由
     C->>RL: ndf-next（続くときだけ）
     RL->>C: 次のセッション（loop start から）
 ```
 
-**本番のキューから `loop lap` までを 1 本のパイプラインで流す。** 形は今の「本番の後のカットポイント」（`relay.md`）と同じである。続ける順は `supervise.py queue <本番>` → `wait` → `new close --pace auto` → `queue <まとめ>` → `wait` → `loop lap` である。ゲート 2 の通過から次のセッションの起動までに、conductor が組み立てる文は無い。
+**本番のキューから `loop lap` までを 1 本のパイプラインで流す。** 形は今の「本番の後のカットポイント」（`relay.md`）と同じである。まとめのステージは `loop sprint` が周回の組み立てのときに `new close --pace auto` で組み、周回のキューの最後の `--then` につなぐ（持ち越しは前の周回の `refine.deferred` から `--carry` へ、`--record-pr` は前のステージの本番のプランから。「`supervise.py new close` に足す引数」の注）。続ける順は `supervise.py queue <設計 … 本番 … まとめ>` → `wait` → `loop lap` で、この 1 行を `loop sprint` と `loop gate` が `pipeline` として出す。conductor は `pipeline` をそのまま流す。ゲート 2 の通過から次のセッションの起動までに、conductor が組み立てる文は無い。
 
 **周回の途中のカットポイント（ゲート 1 の後など）は今のまま切る。** `ndf-next` の中身はループの再開のコマンドである。次のセッションの `loop start` が、`in_lap` と引継ぎ文書 `loop-<名>` の「次にやること」を返す。conductor は今と同じく引継ぎ文書の続きから進める。
 
@@ -645,6 +646,8 @@ sequenceDiagram
    - 候補から次の行を外す（括弧は外した理由）:
      - `waiting_decision` が真（人の判断待ち）
      - `waiting[]` に答えの無い行がある（人の判断待ち）
+     - `waiting[]` の行が `answer: rejected`（差し戻し。答えた後の周回でも外し続ける）
+     - `waiting[]` の行が `answer: approved` で、その行の `pr`（設計 PR）がまだマージされていない（設計 PR がマージ待ち）。マージは `gh pr view <pr> --json state` の `MERGED` で確かめ、`approved` の行の分だけ打つ。この PR の状態は I4 の入力である
      - この周回の `excluded[]` にある（その理由）
      - `size` が尺度を超える（容量）
    - 残りを `rank` の順に `max_issues` 件まで選ぶ。超えた行は「容量」で外す
@@ -694,8 +697,8 @@ stateDiagram-v2
 
 1. `user_stop`: `.ndf/loop/<名>/stop` がある
 2. `mvv_changed`: プロジェクト MVV が開始時と違う・承認と一致しない
-3. `same_failure`: 直近の `outcome: 失敗` の周回を新しい順に見て、`failure` が同じ鍵の周回が `same_failure` 回続く（間に `完了` の周回があれば数え直す）
-4. `budget_laps` / `budget_usd` / `budget_hours`: 終わった周回の数・費用の和・`started_at` からの経過時間が予算以上
+3. `same_failure`: 直近の `outcome: 失敗` の周回を新しい順に見て、`failure` が同じ鍵の周回が `same_failure` 回続く（間に `完了` の周回があれば数え直す）。`stops` の最後の行の `resumed_at`（最後の再開）より前に始まった周回は数えない
+4. `budget_laps` / `budget_usd` / `budget_hours`: 終わった周回の数・費用の和・動いていた時間（I8。周回の `started_at`〜`ended_at` の和から `stops` の `at`〜`resumed_at` を引いたもの）が予算以上
 5. （選定の時点で）`no_issue` / `outside_mvv`
 
 **再開（`loop start`）は止まった理由ごとに解けたかを見る。**
@@ -704,7 +707,7 @@ stateDiagram-v2
 | --- | --- |
 | `user_stop` | 再開でファイルを消して解ける |
 | 予算（`budget_laps` / `budget_usd` / `budget_hours`） | 再開の引数で上書きした予算で判定し直す |
-| `same_failure` | 止まった後に利用者が直したことを機械で知れないため、再開の起動そのものを解けた印とし、失敗の数を数え直す（`stops` に残る） |
+| `same_failure` | 止まった後に利用者が直したことを機械で知れないため、再開の起動そのものを解けた印とし、失敗の数を数え直す（`stops` に移した行の `resumed_at` が数え直しの区切りになる。判定の手順 3） |
 | `gate2_returned` | その周回の状態に `関門 2` の記録（利用者の承認）があれば解ける。本番のプランを `run <本番のプラン> --from bump` で続けてから（`pace.md` の「承認ゲートで止まった後の続け方」）、まとめのステージへ進む。差し戻しの記録があれば、その周回を `人へ戻した` で締めて次の周回へ進む |
 | `mvv_changed` | 開始時の値を今の承認済みの値へ置き換えず、新しい名前でループを始め直すよう示す（承認の記録の起点を混ぜない） |
 
@@ -740,19 +743,19 @@ stateDiagram-v2
 | 5 | 選定の行が、選んだ行と外した行の両方を理由（順位・容量・スプリント MVV が未承認・人の判断待ち・除外の理由）つきで持つ | 外した行を書かない |
 | 6 | 周回の中で起票された課題が、その周回の選定に入らない | `created[]` を候補に足す |
 | 7 | 周回の数・費用・経過時間のそれぞれが予算以上で `loop lap` が 3 を返し、周回の途中（進行中の周回）では `stop` を書かない | 判定を `>` と `>=` で取り違える・`loop gate` で予算を判定する |
-| 8 | 同じ鍵の失敗が `same_failure` 回続くと止まり、間に完了の周回があれば数え直す | 鍵を理由の文で作る・連続でなく累計で数える |
+| 8 | 同じ鍵の失敗が `same_failure` 回続くと止まり、間に完了の周回があれば数え直す。`same_failure` で止まって再開した後の 1 回目の失敗では止まらない | 鍵を理由の文で作る・連続でなく累計で数える・再開より前の周回を数える |
 | 9・10 | 候補 0 件で `no_issue`、候補がすべて外れて `outside_mvv` | 2 つを取り違える・0 件で周回を足す |
 | 11 | `loop stop` のファイルで次の境に止まり、再開でファイルが消える | 周回の途中で止める・再開でファイルを残して止まり直す |
 | 12 | 止まった出力の `items` に条件・値・再開のコマンドがあり、`metrics.stop_line` が `[ndf-loop] stopped <名> <condition>` の形で、引継ぎ文書の「次に実行するコマンド」の節が再開のコマンドになる | 再開のコマンドを書かない・`stop_line` の条件の語を `stop.condition` と食い違わせる |
-| 13・I8 | 再開した `loop start` が周回の数・費用・`started_at` を引き継ぎ、次の周回の番号が続く | 再開で `started_at` を今の時刻にする |
+| 13・I8 | 再開した `loop start` が周回の数・費用・動いていた時間を引き継ぎ、次の周回の番号が続く。止まっていた時間（`stops` の `at`〜`resumed_at`）は経過時間に入らず、一晩止めて再開した周回を締めても `budget_hours` で止まらない | 再開で消費を 0 に戻す・経過時間を `started_at` からの壁時計で数える |
 | 14・15 | `loop lap` の後、周回の行が選定・判定の写し・版・振り返りの置き場・棚卸しの結果・費用と秒・判定を持ち、`loop list` が一覧を出す | どれかの項目を写さない |
-| 16 | 前の周回の持ち越しが `loop sprint` → `new close --carry` の棚卸しの指示に載る | 持ち越しを読まない |
-| 17・I5 | 人の判断待ちの課題が答えの前は選ばれず、`--approved` の後の周回で選ばれ、`--rejected` の後は選ばれない | 答えを待たずに選ぶ・差し戻しを選び直す |
+| 16 | 前の周回の持ち越しが `loop sprint` → `new close --carry` の棚卸しの指示に載り、`loop sprint` の `close_command` と最初の `queue` のコマンドの最後の `--then` にまとめのステージがあり、`pipeline` が `queue` → `wait` → `loop lap` の 1 行で、まとめの `close` のステップの `--record-pr` が前のステージの本番のプランの印になる | 持ち越しを読まない・まとめのステージをつながない・`--record-pr` を固定の値で渡す |
+| 17・I5 | 人の判断待ちの課題が答えの前は選ばれず、`--approved` の後は設計 PR がマージされた後の周回で選ばれ、`--rejected` の後は選ばれない | 答えを待たずに選ぶ・差し戻しを選び直す・マージ前の `approved` を選ぶ |
 | 19 | 新しい常駐の処理・キューを作らない（設計の範囲。レビューで見る） | — |
 | 20 | 設計文書の出典（レビューで見る） | — |
 | I1 | 終わった周回の行を書き換える呼び出しが 1 で拒まれる | 締めた周回を上書きする |
 | I2 | 進行中の周回があると `select` が 1 | 2 つ目の周回を足す |
-| I3 | `loop gate` と `loop sprint` が `stop` を予算・失敗・停止の指示で書かない | 途中で予算を判定する |
+| I3 | `loop gate` と `loop sprint` が `stop` を予算・失敗・停止の指示で書かず、`gate2_returned`・`mvv_changed`・`refused` では周回を進行中のまま `stop` を書き、再開が同じ周回を続ける | 途中で予算を判定する・ゲート 2 で `stop` を書かない・途中の停止で周回を締める |
 | I7 | 止まったループで `select` が 3 を返し、`start` が解けたと判定した後だけ通る | `start` を経ずに周回を始める |
 | I9 | 周回の開始でプロジェクト MVV の sha256 が違えば `mvv_changed` で止まる | 開始時の値を今の値で置き換える |
 
@@ -771,6 +774,7 @@ stateDiagram-v2
 | 外部の一次情報の残り | OpenAI の記事の日付（検索結果の値）、StrongDM の Principles・Techniques のページ、arXiv 2608.21884 は確かめていない。どれも決定の根拠に使っていない |
 | 予算の既定値 | 実測の標本が 2 件で、まとめの費用を含まない（決定 5）。リリース後テストの 2 周の実測で見直す |
 | 外した課題を除いた続きの `queue` | マニフェストの `resume` から計画を除いて組めるか、`design-results` がマージされていない設計 PR を含む課題の組をどう扱うかは、実装（`tdd-cycle`）で走らせて確かめる |
+| まとめのステージを周回のキューへつなぐ形 | `new close --pace auto` のステージを周回の `queue` の最後の `--then` につないだとき、`close` のステップの `{queue_pr:release-prod}` などの印が前のステージの本番のプランから埋まるかを、実装で走らせて確かめる |
 | 人の判断待ちに答えた課題の設計の結果 | `--design` に入れない課題へ `supervise.py design-results` で設計の結果を渡せるかを、実装で確かめる |
 | 失敗した周回の後始末 | 失敗で締めた周回のスプリントブランチと開いた Pull Request を次の周回がどう扱うか（今の conductor の手当てのまま残すか）。実装で 1 度失敗の周回を流して決める |
 | 判定の記録の読み分け | `mvv-gate.jsonl` の行から機械のチェックのどれで外れたかを読めるか。読めなければ `mvv-gate.py` の結果の `items` を done から読む形にする |
