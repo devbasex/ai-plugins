@@ -6,7 +6,7 @@
 
 | Skill・参照 | 何を求めるか | 読む手順 |
 | --- | --- | --- |
-| [markdown-writing](../../markdown-writing/SKILL.md) | 書き方の規則 1〜12・セルフチェック | 手順 3（すべての文書形式。ソースが Markdown のとき） |
+| [document-style](../../document-style/SKILL.md) | 書き方の規則 1〜12・セルフチェック | 手順 3（すべての文書形式。ソースが Markdown のとき） |
 | [document-drafting](../../document-drafting/SKILL.md) と `references/type-*.md` | 必ず書く節・読み手が最初に問うこと | 手順 0（目的との対応）・手順 2（節を消さない） |
 | `development-workflow` の [document-types.md](../../development-workflow/references/document-types.md) | 文書タイプの判定 | 手順 0 |
 | `design` の [design-template.md](../../design/references/design-template.md) | 承認する人が読む欄と固定の章 | 手順 2（動かさない） |
@@ -38,11 +38,11 @@
 
 **正本の側に従う。** 組み直しの参照と他の Skill の規約が食い違ったら、他の Skill の節を正本として従い、食い違いを範囲外の課題として `out-of-scope` で残す。組み直しの中で他の Skill の規約を書き換えない。
 
-## `markdown-writing` と重なっていた規約
+## `document-style` と重なっていた規約
 
 | 対象 | 正本 | もう片方の扱い |
 | --- | --- | --- |
-| 文書の長さ | ファイルの長さと分割: `markdown-writing` のルール 9。章と文の長さ: `format-<形式>.md` | 単位が違うため両方に残し、互いに 1 行で指す |
-| 文の長さ | `format-<形式>.md`（数え方は `lang-<言語>.md`） | `markdown-writing` は持たない |
-| 対比・列挙の形 | `markdown-writing` のルール 8 | 組み直しの手順 3 はルール 8 を指す |
-| 多義語 | `markdown-writing` のルール 2 | 組み直しは手順 3 のセルフチェックの多義語の候補で見る |
+| 文書の長さ | ファイルの長さと分割: `document-style` のルール 9。章と文の長さ: `format-<形式>.md` | 単位が違うため両方に残し、互いに 1 行で指す |
+| 文の長さ | `format-<形式>.md`（数え方は `lang-<言語>.md`） | `document-style` は持たない |
+| 対比・列挙の形 | `document-style` のルール 8 | 組み直しの手順 3 はルール 8 を指す |
+| 多義語 | `document-style` のルール 2 | 組み直しは手順 3 のセルフチェックの多義語の候補で見る |

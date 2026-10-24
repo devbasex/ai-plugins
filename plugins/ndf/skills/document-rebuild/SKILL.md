@@ -1,6 +1,6 @@
 ---
-name: document-restructuring
-description: "Rebuild a finished document for its format and purpose: measure, reorder chapters into the reader's question order, tighten wording, check with a fresh reader, measure again. Use when a document is written and before it goes to review（ドキュメント再構成・文書形式と目的に合わせて組み直す・読みやすさを測る）."
+name: document-rebuild
+description: "Rebuild a finished document for its format and purpose: reorder chapters, tighten wording, check with a fresh reader, measure before and after. Use when a document is written, before review（ドキュメント再構成・文書形式と目的に合わせて組み直す・読みやすさを測る）."
 allowed-tools:
   - Read
   - Write
@@ -113,8 +113,8 @@ allowed-tools:
 | 順 | 行うこと | 正本 |
 | --- | --- | --- |
 | 1 | 共通ルールを当てる。目的別ガイドが外した行は当てない | [common.md](references/common.md) |
-| 2 | 当たる他の Skill の規約を当てる。長い文は形式別ガイドの目安で分け、対比・列挙の形は `markdown-writing` のルール 8 に従う | [related-skills.md](references/related-skills.md) |
-| 3 | `markdown-writing` のセルフチェックを通す（ソースが Markdown のとき。多義語の候補もここで見る） | `markdown-writing` の「書き終えたらセルフチェック」 |
+| 2 | 当たる他の Skill の規約を当てる。長い文は形式別ガイドの目安で分け、対比・列挙の形は `document-style` のルール 8 に従う | [related-skills.md](references/related-skills.md) |
+| 3 | `document-style` のセルフチェックを通す（ソースが Markdown のとき。多義語の候補もここで見る） | `document-style` の「書き終えたらセルフチェック」 |
 | 4 | キーワードを確かめる。読み手が社外なら公式ドキュメントの語、社内なら用語集と流通している語と突き合わせる | [keyword-check.md](references/keyword-check.md) |
 | 5 | 文脈を持たない読み手役に読ませる（下の節） | この節 |
 
@@ -201,16 +201,16 @@ allowed-tools:
 - **控えた「足すべき内容」は、別の作業として報告に残す。** 組み直しの中では行わない
 - **形式への適用（生成・投稿・版面の点検）は、形式別ガイドの呼び出し先へ渡す。** この Skill では行わない
 
-## `markdown-writing` との境界
+## `document-style` との境界
 
 | Skill | 持つもの | いつ使うか |
 | --- | --- | --- |
-| `markdown-writing` | 何が読みやすい文書かの規則（語・表現・図表・ファイルの長さ） | 書くときと、書いた後の点検 |
+| `document-style` | 何が読みやすい文書かの規則（語・表現・図表・ファイルの長さ） | 書くときと、書いた後の点検 |
 | この Skill | 書き上げた文書を組み直す手順・目的別の構成・形式別の文章量の目安 | 書き上げた後 |
 
-**分かれ目は規則と手順であって、書く前と後ではない。** `markdown-writing` のセルフチェックは
+**分かれ目は規則と手順であって、書く前と後ではない。** `document-style` のセルフチェックは
 書いた後に走る。この Skill は手順 3 でその点検を呼ぶ。重なっていた規約の正本は
-[related-skills.md](references/related-skills.md#markdown-writing-と重なっていた規約) にある。
+[related-skills.md](references/related-skills.md#document-style-と重なっていた規約) にある。
 
 ## 範囲外の課題を見つけたとき
 

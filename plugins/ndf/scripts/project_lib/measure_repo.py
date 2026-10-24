@@ -92,7 +92,7 @@ PYPROJECT_TOOLS = ("ruff", "black", "mypy", "isort")
 INSTRUCTION_FILES = ("AGENTS.md", "CLAUDE.md", ".claude/CLAUDE.md", "KIRO.md", "GEMINI.md")
 OLD_GUIDE_MARK = "NDF_PLUGIN_GUIDE_START"
 TEST_WORDS = re.compile(r"phpunit|pytest|jest|vitest|rspec|go test|npm (?:run )?test|docker compose exec|run-[\w-]*tests?")
-POLICY_WORDS = re.compile(r"doc-lint|文体|文言テスト|markdown-writing|書き方")
+POLICY_WORDS = re.compile(r"doc-lint|文体|文言テスト|markdown-writing|document-style|書き方")
 DEPLOY_WORDS = re.compile(r"deploy|release|publish|デプロイ|リリース|本番|amplify|sam |(?<![a-z])(?:stg|prd)(?![a-z])", re.I)
 IMPORT_TOKEN = re.compile(r"(?:^|\s)@([\w./-]+\.md)\b")
 

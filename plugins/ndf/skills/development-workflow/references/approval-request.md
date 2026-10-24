@@ -47,7 +47,7 @@
 **設計 PR の先頭の 4 行は、承認する人が問う項目である。** 欄の書き方は `design` の
 [design-template.md の「承認する人が読む欄」](../../design/references/design-template.md#承認する人が読む欄) にある。
 出所の節が無いか空なら、その行を「無し（<理由>）」と出して承認ゲートは止めない（差し戻すかは承認する人が決める）。
-対象を開くもののタイトルが題の付け方（`document-restructuring` の [format-markdown.md の「題と見出し」](../../document-restructuring/references/format-markdown.md#題と見出し)。`<対象>: <直すと何ができるようになるか>` の短い 1 文と末尾の課題番号の括弧）でなければ、「題: 規約の形でない」と添える。
+対象を開くもののタイトルが題の付け方（`document-rebuild` の [format-markdown.md の「題と見出し」](../../document-rebuild/references/format-markdown.md#題と見出し)。`<対象>: <直すと何ができるようになるか>` の短い 1 文と末尾の課題番号の括弧）でなければ、「題: 規約の形でない」と添える。
 
 **決定の見出しをそのまま並べるのは、要約で判断が変わるためである。** 承認する側が読むべき
 なのは選んだ結論であり、その言い換えではない。件数だけを示す形も採らない（何を決めたのかが

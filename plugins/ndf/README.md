@@ -406,7 +406,7 @@ agy models   # 認証確認
 | 起動経路 | 抑止後の挙動 |
 |----------|-------------|
 | 暗黙起動 (モデルが自分で選ぶ) | **起動しない**。セッションの skill 一覧 (`## Skills` の `### Available skills`) に載らない |
-| 明示起動 `$deploy` | **展開されない**。抑止していない Skill (`$markdown-writing` 等) は展開されるが、抑止した Skill は `$` を書いても本文が注入されない |
+| 明示起動 `$deploy` | **展開されない**。抑止していない Skill (`$document-style` 等) は展開されるが、抑止した Skill は `$` を書いても本文が注入されない |
 | 名前だけの自然文依頼 (`deploy skill を実行して`) | **起動しない**。一覧に無いため拒否され、別の Skill で代替されることがある |
 | SKILL.md の絶対パスを示す | **起動する**。通常のファイル読み取りとして読み込まれ、本文どおり実行される |
 
@@ -444,7 +444,7 @@ codex plugin list | grep 'ndf@ai-plugins'
 # => ndf@ai-plugins  installed, enabled  10.19.0  <path>
 ```
 
-抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
+抑止していない Skill（`document-style` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
 
 ### 実機検証結果 (codex-cli 0.146.1 / gpt-5.5)
 

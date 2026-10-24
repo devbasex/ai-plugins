@@ -92,8 +92,8 @@ Claude Code では `/ndf:<Skill 名>` と打って呼びます。**Skill** は�
 Claude Code向け core 48個、Kiro向け core 45個、Codex向け core 44個、agy向け core 44個です。
 元Skills（48個）の内訳は次のとおりです。
   - Pull Request とレビュー (7): pr, pr-tests, fix, pr-review, cherry-pick-pr, deploy, merged
-  - 開発の進め方 (17): development-workflow, requirements-design, design, document-restructuring, document-sources, document-drafting, tdd-cycle, refactoring, quality-gates, release, release-verification, retrospective, out-of-scope, progress-tracking, backlog-refinement, layout-review, estimate
-  - 原則と書き方 (11): ndf-policies, implementation-plan, plan-to-spec, investigation-rules, decision-request, problem-solving, logging-guidelines, markdown-writing, notion-writing, issue-plan-strategy, ml-model-structure
+  - 開発の進め方 (17): development-workflow, requirements-design, design, document-rebuild, document-sources, document-drafting, tdd-cycle, refactoring, quality-gates, release, release-verification, retrospective, out-of-scope, progress-tracking, backlog-refinement, layout-review, estimate
+  - 原則と書き方 (11): ndf-policies, implementation-plan, plan-to-spec, investigation-rules, decision-request, problem-solving, logging-guidelines, document-style, notion-writing, issue-plan-strategy, ml-model-structure
   - 品質と実行環境 (3): qa-security-scan, docker-container-access, official-skills-autoloader
   - 外部サービス (2): google-workspace, document-systems
   - 複数の AI によるレビューとリファクタリング (3): cross-review, cross-refactoring, external-ai

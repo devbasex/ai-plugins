@@ -1,6 +1,7 @@
 ---
 name: document-sources
-description: "Fix where every number, figure and quotation comes from, so the same value can be reached again. Use when a business document carries data（素材の収集・出典を確定する・数値の出所・引用元）."
+description: "Fix where every number, figure and quotation comes from, so the same value can be reached again. Use when a business document carries data（素材の収集・出典を確定する・数値の出所・引用元。工程と AI から呼ぶ）."
+user-invocable: false
 allowed-tools:
   - Read
   - Write
@@ -106,6 +107,6 @@ allowed-tools:
 ## 関連
 
 - `/ndf:quality-gates` — 事実確認（書かれた値と出所の突き合わせ）
-- `/ndf:document-drafting` — 執筆（何を書くか）
-- `/ndf:document-systems` — システムごとの取得の手順
+- `document-drafting` — 執筆（何を書くか）
+- `document-systems` — システムごとの取得の手順
 - `/ndf:out-of-scope` — 範囲外と判断した課題の起票

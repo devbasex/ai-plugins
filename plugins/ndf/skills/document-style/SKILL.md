@@ -1,6 +1,7 @@
 ---
-name: markdown-writing
-description: "Write Markdown docs, specs, PR bodies, and reports for a third-party reader, with tables and mermaid. Use when authoring or editing a Markdown document（ドキュメント作成・仕様書を書く・PR本文）."
+name: document-style
+description: "Write Markdown docs, specs, PR bodies, and reports for a third-party reader, with tables and mermaid. Use when authoring or editing a Markdown document（ドキュメント作成・仕様書を書く・PR本文。工程と AI から呼ぶ）."
+user-invocable: false
 allowed-tools:
   - Read
   - Write
@@ -168,7 +169,7 @@ allowed-tools:
 
 ### 9. 文書の長さと分割ルール
 
-**このルールはファイルの長さと分割を持つ。** 章と文の長さの目安は `document-restructuring` の形式別ガイド（`references/format-<形式>.md`）が持つ。
+**このルールはファイルの長さと分割を持つ。** 章と文の長さの目安は `document-rebuild` の形式別ガイド（`references/format-<形式>.md`）が持つ。
 
 | 行数 | 対応 |
 |---------|-----|

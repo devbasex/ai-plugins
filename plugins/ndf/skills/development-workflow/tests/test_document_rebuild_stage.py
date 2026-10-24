@@ -5,7 +5,7 @@
 | 見るもの | なぜ並びのチェックに載らないか |
 | --- | --- |
 | `WF_PR_EXEMPT_STAGE` が指す工程 | 値は 1 つで、並びを持たない。工程表の行名から外れても並びは一致したままになる |
-| `document-restructuring` の配布 | 配布一覧は工程表とは別のファイルが持つ |
+| `document-rebuild` の配布 | 配布一覧は工程表とは別のファイルが持つ |
 | 旧い工程名が実装に残っていないこと | 並びが揃っていても、本文や別の定数へ旧い名前が残りうる |
 
 **旧い名前を新しい名前として読む表は持たない**（設計の決定 3）。移行で 1 度だけ書き換える
@@ -120,11 +120,11 @@ def test_the_skill_is_distributed_to_every_runtime(runtime: str) -> None:
     """工程表の行になる Skill は、どのランタイムからも起動できる必要がある（決定 9）。"""
     manifest = MANIFESTS / f"{runtime}-skills.txt"
     names = manifest.read_text(encoding="utf-8").split()
-    assert "document-restructuring" in names, manifest
+    assert "document-rebuild" in names, manifest
 
 
 def test_the_skill_directory_exists() -> None:
-    assert (SKILL_DIR.parent / "document-restructuring" / "SKILL.md").is_file()
+    assert (SKILL_DIR.parent / "document-rebuild" / "SKILL.md").is_file()
 
 
 # --- C11: 言語ごとの数え方 --------------------------------------------------

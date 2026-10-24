@@ -130,7 +130,7 @@ issue のことではない。
 
 **この手順を行うのは、設計 Pull Request が必須または任意のモードだけである**（「設計の
 書き先」の表）。`light` と `operation` は独立した設計文書を作らないため、この手順と、次節の
-`document-restructuring`、進捗記録の「ドキュメントレビュー」を通らない。
+`document-rebuild`、進捗記録の「ドキュメントレビュー」を通らない。
 
 `standard` では、**実装より先に設計をレビューへ通す**。設計の誤りを実装した
 後で直す費用が大きいためである。
@@ -216,9 +216,9 @@ bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "設計"
 bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "ドキュメントレビュー"
 ```
 
-**手順 5 の前に `document-restructuring` を通す**（工程「ドキュメント再構成」）。
+**手順 5 の前に `document-rebuild` を通す**（工程「ドキュメント再構成」）。
 
-**2 つ目の契機と `document-restructuring` は、設計 Pull Request を出すモードだけに掛かる。**
+**2 つ目の契機と `document-rebuild` は、設計 Pull Request を出すモードだけに掛かる。**
 `light` と `operation` では手順 5 を通らないため、どちらも呼ばない。工程の分類でも
 「ドキュメント再構成」と「ドキュメントレビュー」はこの 2 モードで対象外である。
 
@@ -227,5 +227,5 @@ bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "ドキュメントレビ�
 - `/ndf:requirements-design` — 何を満たすか（この工程の入力）
 - `/ndf:implementation-plan` — どう分解するか（この工程の出力を受け取る）
 - `/ndf:cross-review` — 設計 Pull Request のレビュー
-- `/ndf:document-restructuring` — 書き上げた設計文書を章立てから組み直す（次の工程）
-- `/ndf:markdown-writing` — 文書と図の書き方
+- `/ndf:document-rebuild` — 書き上げた設計文書を章立てから組み直す（次の工程）
+- `document-style` — 文書と図の書き方
