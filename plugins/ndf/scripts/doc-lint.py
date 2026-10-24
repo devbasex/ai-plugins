@@ -96,6 +96,24 @@ def generated_documents(root: Path) -> tuple[str, ...]:
     return (p,) if p not in (".", "") else ()
 
 
+def _resolve_start(root, base_arg):
+    """起点の ref と、HEAD との merge-base の sha。解決できなければ StepError。"""
+    base = base_arg or repo.declared_base(root, remote=True)
+    if not base:
+        raise StepError("起点が分からない（--base か .ndf/worktree.json の base_branch）", EXIT_UNREADABLE)
+    p = proc.git(root, "merge-base", base, "HEAD", check=False)
+    if p.returncode != 0:
+        raise StepError(f"起点 {base} を解決できない: {p.stderr.strip()[:200]}", EXIT_UNREADABLE)
+    return base, p.stdout.strip()
+
+
+def _select_files(root, files, exclude):
+    """生成物と、除外の接頭辞（既定 DEFAULT_EXCLUDE）に当たるパスを外す。"""
+    excl = tuple(exclude) if exclude is not None else DEFAULT_EXCLUDE
+    generated = set(generated_documents(root))
+    return {k: v for k, v in files.items() if k not in generated and not any(k.startswith(e) or k == e.rstrip("/") for e in excl)}
+
+
 def cmd_lint(a):
     root = proc.git_root(a.root)
     if not project_decl.policy(root, "doc_lint"):
@@ -108,17 +126,8 @@ def cmd_lint(a):
                 {"skipped": True},
             )
         )
-    base = a.base or repo.declared_base(root, remote=True)
-    if not base:
-        raise StepError("起点が分からない（--base か .ndf/worktree.json の base_branch）", EXIT_UNREADABLE)
-    p = proc.git(root, "merge-base", base, "HEAD", check=False)
-    if p.returncode != 0:
-        raise StepError(f"起点 {base} を解決できない: {p.stderr.strip()[:200]}", EXIT_UNREADABLE)
-    start = p.stdout.strip()
-    files = glossary.added_lines(root, start, ("*.md", "**/*.md"))
-    excl = tuple(a.exclude) if a.exclude is not None else DEFAULT_EXCLUDE
-    generated = set(generated_documents(root))
-    files = {k: v for k, v in files.items() if k not in generated and not any(k.startswith(e) or k == e.rstrip("/") for e in excl)}
+    base, start = _resolve_start(root, a.base)
+    files = _select_files(root, glossary.added_lines(root, start, ("*.md", "**/*.md")), a.exclude)
     items, total = lint_files(root, files, a.all_lines)
     metrics = {
         "base": base,
