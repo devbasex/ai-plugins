@@ -1,4 +1,4 @@
-# 文書の組み直し: どの文書も「結論から」の 1 通りで組み直され、議論用の文書の提案が決定に読め、スライドや表計算には目安が無い → 文書形式と目的に合った構成と文章量で組み直し、文脈を持たない読み手が理解し納得できることを確かめてから渡せる（#2086 #2083 #2080 #469）
+# document-rebuild: 文書形式と目的に合わせて組み直し、読み手が理解し納得できるかを確かめる（#2086）
 
 ## 目的
 
@@ -127,6 +127,8 @@
 | Skill の名前（決定 10） | 改名 | `document-restructuring` → `document-rebuild`、`markdown-writing` → `document-style`。ディレクトリ・`name`・`manifests/*-skills.txt`・`dev.agy/skills/` のリンク・参照するファイル・工程表・テストを新しい名前へ揃える（AC 26） |
 | `document-drafting`・`document-sources`・`document-systems`・`document-style` の frontmatter | 変更 | `user-invocable: false` を足し、スラッシュコマンドの一覧から外す（AC 25）。`description` に「工程と AI から呼ぶ」と書く |
 | `plugins/ndf/skills/AUTHORING.md` の「発動制御の 4 分類」 | 変更 | 「工程から呼ぶ専用」（`user-invocable: false`。Claude Code だけが解釈する）の行を足し、`ndf-policies` だけの「常時注入のみ」と分ける |
+| `design/references/design-template.md` の H1 と「承認する人が読む欄」の題の行・題の実例 | 変更 | 「今の問題 → 直した後」の形をやめ、`format-markdown.md` の題の付け方を指す 1 行にする。題の実例を新しい形へ差し替える（決定 12） |
+| `development-workflow/references/approval-request.md` の題の形の確かめ | 変更 | 「`→` と末尾の課題番号の括弧」の確かめを、`format-markdown.md` の題の付け方（短い 1 文・目安 60 字）の確かめにする |
 | `development-workflow/references/glossary.md` | 変更 | 「手順」の行の `document-restructuring` を手順 0〜4 の 5 つ（決める・測る・組み直す・整える・測り直す）に合わせる。`docs/glossary/glossary.json` の「手順」の出典である |
 
 **この表と以降の節は、改名の前の名前で書く。** 改名は決定 10 で、実装の最後に一括で行う。**新しい Skill は作らない。配布の基準（`manifests/*-skills.txt`）は、2 つの名前の行だけが変わる。** 参照は Skill のディレクトリの中にあり、4 ランタイムへ同じ形で配られる（`lang-*.md` と同じ経路）。
@@ -185,7 +187,7 @@ graph LR
 
 | 文書形式 | 文章量の単位 | 目安 | 根拠 | 測らない指標 | 題と見出し | 呼び出し先 |
 | --- | --- | --- | --- | --- | --- | --- |
-| Markdown（リポジトリ） | 文・章・ファイル | 平均文長 40 字・最長文 100 字・章 40 行。ファイルの長さは `markdown-writing` のルール 9 | 実測 3 本（今の目安） | — | 題は主題と結論。設計文書と Pull Request は各 Skill の形 | `markdown-writing` |
+| Markdown（リポジトリ） | 文・章・ファイル | 平均文長 40 字・最長文 100 字・章 40 行。ファイルの長さは `markdown-writing` のルール 9 | 実測 3 本（今の目安） | — | 題は「<対象>: <直すと何ができるようになるか>」の短い 1 文（目安 60 字）。Issue・Pull Request・設計文書の題の正本はここ（決定 12） | `markdown-writing` |
 | 文書（Word・Google ドキュメント・PDF） | 文・節・ページ | 文長は Markdown の値を借りる。1 節は 1 ページ以内 | 未実測 | 章あたりの行数（版面で変わる） | 件名に主題と求めること。見出しの階層は `layout-document.md` | `release` の `form-document.md` |
 | ページ（Notion・Confluence・SharePoint） | 文・節・1 画面 | 文長は Markdown の値を借りる。冒頭 1 画面に要点 | 未実測 | 章あたりの行数 | 一覧と検索で見分けられる名詞句。階層は `layout-page.md` | `form-page.md`・`notion-writing`・`document-systems` |
 | スライド | 1 ページ | 1 ページ 1 メッセージ。尺は `form-slide.md` の台本の測り方 | `form-slide.md`（尺は 350 字/分）。ページの字数は未実測 | 平均文長・最長文・章あたりの行数 | 見出しはページの結論。章扉で章を見せる（`form-slide.md` の「ページの文言を書く」） | `form-slide.md`・`layout-review` |
@@ -447,6 +449,24 @@ graph TD
 
 根拠: Vision（MVV 版 2）と利用者の承認（2026-10-24、承認ゲート 1）
 
+### 決定 12: 題を一目で読めるようにするため、題を「<対象>: <直すと何ができるようになるか>」の短い 1 文にし、今の問題は「目的」の章へ移す（利用者が選んだ）
+
+利用者は「設計のテンプレートの決まり（「今の問題 → 直した後」）自体が読みづらい」と指摘した（2026-10-25）。この決まりは #785（仕組みの語だけの題では目的が読めない）から入った。目的を題に出すために現象と結果の 2 つを 1 行へ詰めるため、この設計の題も 145 字になった。
+
+| 項目 | 決まり |
+| --- | --- |
+| 題の形 | `<対象>: <直すと何ができるようになるか>（#<課題番号>）`。1 文で、目安 60 字以内。対象は Skill 名か領域 |
+| 今の問題（現象） | 題に入れない。H1 の直後の「目的」の章の「何が壊れているか」に置く |
+| 仕組みの語 | 題に入れない（#785 の決まりを保つ） |
+| 正本 | 組み直しの Skill の `format-markdown.md`（リポジトリの Issue・Pull Request・設計文書の題）。`design-template.md` と `approval-request.md` は指す |
+
+採らなかった案:
+
+- 今の決まりのまま字数の上限だけを下げる: 現象と結果の 2 つを短く詰めることになり、どちらも読めない語の並びになる
+- 題の決まりの見直しを別の Issue にする: 題の付け方は文書形式ごとに違う（Value 3）ため、形式別ガイドを作るこの変更で正本を置くほうが二重にならない。利用者が #2086 に含めることを選んだ
+
+根拠: Value 3（MVV 版 2）と利用者の指示（2026-10-25）
+
 ## テスト設計
 
 `.md` の文言を照合するテストは書かない（`AGENTS.md`）。参照のつながりは既存の検査、手順の効き目は試行（受け入れ条件 12）で縛る。
@@ -470,13 +490,14 @@ graph TD
 | AC 22・23 | `test_document_restructuring_stage.py` を含む全体テスト（改名に合わせてテストの中の Skill 名も直す） | 工程名を変えるか、Skill 名を直し忘れると落ちる |
 | AC 24 | `python3 scripts/check-skill-frontmatter.py` と `check-doc-line-limit.py` | `SKILL.md` が 500 行か `description` の上限を超えると落ちる |
 | AC 29・I11 | 試行の 3 本それぞれで、読み手役の要点の言い直し・分からなかった箇所・納得できなかった主張の表が報告に出る | 読み手役に会話の文脈を渡すと、分からなかった箇所が出なくなる（試行で文脈を渡した版と比べる） |
+| AC 30 | この設計の題が新しい形で、`design-template.md` と `approval-request.md` に「`→`」の形の決まりが残らない（`grep -n '→ {直した後\|→ <直した後' plugins/ndf/skills` が 0 件） | 決まりを片方だけ直すと grep に当たる |
 | I4 | 試行の前後の行数の増加が、表への置き換えと章の分割で説明できる | 1 文を足すと、説明できない増加が出る |
 
 ## 設計の結果
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #2086 | 実装する | — | `plugins/ndf/skills/document-restructuring/`（→ `document-rebuild/`）、`plugins/ndf/skills/markdown-writing/`（→ `document-style/`）、`plugins/ndf/skills/document-sources/SKILL.md`、`plugins/ndf/skills/document-systems/SKILL.md`、`plugins/ndf/skills/AUTHORING.md`、`plugins/ndf/manifests/*-skills.txt`、2 つの旧名を参照するファイル（約 71）、`plugins/ndf/skills/document-drafting/SKILL.md`、`plugins/ndf/skills/release/references/form-slide.md`、`plugins/ndf/skills/design/references/layout-slide.md`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/glossary.md`、`docs/glossary/glossary.json`、`docs/glossary.md` |
+| #2086 | 実装する | — | `plugins/ndf/skills/document-restructuring/`（→ `document-rebuild/`）、`plugins/ndf/skills/markdown-writing/`（→ `document-style/`）、`plugins/ndf/skills/document-sources/SKILL.md`、`plugins/ndf/skills/document-systems/SKILL.md`、`plugins/ndf/skills/AUTHORING.md`、`plugins/ndf/manifests/*-skills.txt`、2 つの旧名を参照するファイル（約 71）、`plugins/ndf/skills/document-drafting/SKILL.md`、`plugins/ndf/skills/release/references/form-slide.md`、`plugins/ndf/skills/design/references/layout-slide.md`、`plugins/ndf/skills/design/references/design-template.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/glossary.md`、`docs/glossary/glossary.json`、`docs/glossary.md` |
 | #2083 | 取り込む | #2086 | — |
 | #2080 | 取り込む | #2086 | — |
 | #469 | 取り込む | #2086 | — |
