@@ -20,7 +20,7 @@
 | 「pace: autoを基本とし、MVVのレッドライン以外で承認を一切必要としないモードとします。」（#2089、2026-10-25） | 利用者の指示の原文 | 周回の中では `AskUserQuestion` も本文の承認待ちも出さず、レッドラインだけで人へ戻すこと |
 | `relay.md` の「`/goal` のテンプレートを特定の課題に縛らない」と「止まるのは承認ゲート 2 つだけになる」（今の運用） | 既存の形 | 次のスプリントの選び方を文面で書く運用が既にあり、それを機械の手順へ移すのが最小の変更であること |
 | 過去の課題の実測（`estimate.py actuals`、2026-10-24）: #2065 は A 1,817 秒・L 6,828 秒・C 5.55 USD、#2086 は A 2,462 秒・L 25,993 秒・C 6.11 USD（どちらも設計と実装まで） | 実測 | 予算の既定値の案（決定 5）の出所 |
-| loop engineering と software factory の一次情報 | 外部の一次情報 | **この実行では確かめていない**（「外部の動向」の節と「未確認のまま残ること」）。承認ゲート 1 の前に確かめ直す |
+| Anthropic のエンジニアリングブログ 3 本・OpenAI「Harness engineering」・Claude Code の `/goal` と hook の公式ドキュメント（2026-10-24 に本文を確認。出典は「外部の動向」） | 外部の一次情報 | 止まる条件と上限を必ず置くこと・作る役と判定する役を分けること・`/goal` の評価役が出力だけで判定し再開で計数を戻すこと。決定 5・8・12 の根拠 |
 
 要求と受け入れ条件は #2089 の本文にある（コピーは `issues/issue-2089-requirements.md`）。この文書は「どう作るか」だけを扱う。
 
@@ -359,7 +359,7 @@ erDiagram
 | `--milestones` | 選定の対象を絞る | 開いているマイルストーンすべて |
 | `--budget-*` | 予算を上書きする（記録の `budget_history` に残る） | 宣言の値 |
 
-`ndf-next` と再開のコマンドは、名前を必ず含めた `/goal /ndf:development-workflow --loop <ループ名>` の形である（`/goal` で始めていなければ付けない）。
+`ndf-next` と再開のコマンドは、名前を必ず含めた `/goal /ndf:development-workflow --loop <ループ名>` の形である（`/goal` で始めていなければ付けない）。決定 12 で案 B を選んだときは、末尾に終わりの条件の節（`-- 終わり: [ndf-loop] stopped <ループ名> の行を出したとき`）を足す。Skill は `--` から後を引数として読まない。
 
 ### 設定（`.ndf/pace.json` の `loop` 節）
 
@@ -393,7 +393,7 @@ erDiagram
 | `loop stop <名>` | — | 置いたファイルのパス | 0 |
 | `loop status <名> [--json]` / `loop list <名> [--json]` | 記録・`relay_dir` の `log.jsonl` | 今の状態 / 周回の一覧（何周目・選んだ課題・版・費用・止まった理由） | 0 / 1（記録が無い） |
 
-**3 は「止まる条件に当たった」で、失敗ではない。** `step_result` の 3（各スクリプトが定めた正常な否定の結果）に当てる。4 は `merge-when-green` のベースブランチとの衝突が使っているため使わない。断る（1）と止まった（3）は、`metrics.status` の `refused` / `stopped` でも見分ける。止まったときの出力の `items` には、止まった条件・判定に使った値・再開のコマンドを必ず載せる。
+**3 は「止まる条件に当たった」で、失敗ではない。** `step_result` の 3（各スクリプトが定めた正常な否定の結果）に当てる。4 は `merge-when-green` のベースブランチとの衝突が使っているため使わない。断る（1）と止まった（3）は、`metrics.status` の `refused` / `stopped` でも見分ける。止まったときの出力の `items` には、止まった条件・判定に使った値・再開のコマンドを必ず載せ、`metrics.stop_line` に決まった語の 1 行（決定 12）を載せる。
 
 ### `supervise.py new close` に足す引数
 
@@ -508,7 +508,7 @@ stateDiagram-v2
 
 ### 止まったときの出し方
 
-**止まったときは `ndf-next` のブロックを出さない。** ラッパーがブロックを拾うと次のセッションを起動し、同じ理由で止まり直して再起動ループの上限まで回る。conductor は止まった理由・判定に使った値・再開のコマンドを本文に書いて応答を終える。再開のコマンドは引継ぎ文書の「次に実行するコマンド」の節にも `ndf-next` の形で残す（受け入れ条件 12）。
+**止まったときは `ndf-next` のブロックを出さない。** ラッパーがブロックを拾うと次のセッションを起動し、同じ理由で止まり直して再起動ループの上限まで回る。conductor は止まった理由・判定に使った値・再開のコマンドを本文に書き、**最後に決まった語の 1 行 `[ndf-loop] stopped <ループ名> <condition>` を出して**応答を終える（決定 12）。1 行は `loop` の結果 JSON の `metrics.stop_line` をそのまま写し、conductor が文面を作らない。再開のコマンドは引継ぎ文書の「次に実行するコマンド」の節にも `ndf-next` の形で残す（受け入れ条件 12）。
 
 | 止まった理由 | 利用者へ問うか |
 | --- | --- |
@@ -529,18 +529,58 @@ stateDiagram-v2
 
 ## 外部の動向
 
-**この実行では一次情報を確かめていない。** WebSearch と WebFetch がこのセッションで許可されず、呼び出しが拒否された（2026-10-24）。許可の拒否を迂回する取り方（Bash の `curl` など）は使っていない。したがって受け入れ条件 20 はこの文書では満たしていない（「未確認のまま残ること」）。
+**一次情報は 2026-10-24 に別の担当が WebSearch・WebFetch で本文を開いて確かめた。** 主軸は Anthropic・OpenAI のエンジニアリングブログと Claude Code の公式ドキュメントで、個人ブログと StrongDM は語の原典として扱う。起票時に挙げた解説記事（medium・mindstudio・noqta・BCG Platinion・substack・ai.engineer）は根拠に使っていない。
 
-確かめる候補（要求の「未決」の後に挙げた一次情報）と、確かめた後に照らす論点:
+### 出典
 
-| 候補 | URL | 照らす論点 |
+| 区分 | 出典 | 発行者・日付 | 確かめた範囲 |
+| --- | --- | --- | --- |
+| 主軸 | 「Effective harnesses for long-running agents」 https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents | Anthropic Engineering（Justin Young）・2025-11-26 | 本文 |
+| 主軸 | 「Harness design for long-running application development」 https://www.anthropic.com/engineering/harness-design-long-running-apps | Anthropic Engineering（Prithvi Rajasekaran）・2026-03-24 | 本文 |
+| 主軸 | 「Building effective agents」 https://www.anthropic.com/engineering/building-effective-agents | Anthropic Engineering（Erik Schluntz・Barry Zhang）・2024-12-19 | 本文 |
+| 主軸 | 「Harness engineering: leveraging Codex in an agent-first world」 https://openai.com/index/harness-engineering/ | OpenAI（Ryan Lopopolo）・2026-02-11 | openai.com は 403 のため読み取りのプロキシ経由で本文を取得した。**日付は検索結果の値で、本文からは確かめていない** |
+| 主軸 | Claude Code の `/goal` https://code.claude.com/docs/en/goal 、hook https://code.claude.com/docs/en/hooks ・ https://code.claude.com/docs/en/hooks-guide 、Agent SDK と非対話の上限 https://code.claude.com/docs/en/agent-sdk/agent-loop ・ https://code.claude.com/docs/en/agent-sdk/configuration ・ https://code.claude.com/docs/en/headless | Anthropic・2026-10-24 時点 | 本文 |
+| 語の原典（loop engineering） | Addy Osmani「Loop Engineering」 https://addyosmani.com/blog/loop-engineering/ | 個人ブログ・2026-06-07 | 本文。これより早い用例は検索の範囲で見つからなかった（無いとは言えない） |
+| 語の原典（software factory） | StrongDM「Software Factories And The Agentic Moment」 https://factory.strongdm.ai/ | StrongDM AI（Justin McCarthy）・2026-02-06 | **Story のページだけ。Principles・Techniques の下位ページは未読** |
+| 語の原典（dark factory） | Dan Shapiro「The Five Levels」 https://www.danshapiro.com/blog/2026/01/the-five-levels-from-spicy-autocomplete-to-the-software-factory/ | 個人ブログ・2026-01-23 | 本文 |
+| 語の原典（Ralph loop） | Geoffrey Huntley「everything is a ralph loop」 https://ghuntley.com/loop/ | 個人ブログ・2026-01-17 | 本文 |
+| 未読 | arXiv「Loop Engineering: Building Blocks, Adoption, and Impact」 https://arxiv.org/pdf/2608.21884 | — | **検索で見つけたが開いていない。根拠に使わない** |
+
+### 取り入れる考え方
+
+| 考え方 | 出典 | この設計のどこで受けるか |
 | --- | --- | --- |
-| Anthropic「Effective harnesses for long-running agents」 | https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents | セッションをまたぐ状態の引き継ぎ（進捗の記録・1 セッションで進める量）が、ループの記録と引継ぎ文書の分担（決定 6）と合うか |
-| Anthropic「Building effective agents」 | https://www.anthropic.com/engineering/building-effective-agents | 止まる条件と反復の上限の置き方が、予算と同じ失敗の判定（決定 5・8）と合うか |
-| OpenAI「Harness engineering」 | https://openai.com/index/harness-engineering/ | 人が仕様と検証の仕組みに手を掛ける形が、選定を棚卸しの順位だけに縛る形（決定 2）と合うか |
-| Claude Code の `/goal`・hook の公式ドキュメント | https://code.claude.com/docs/en/goal ・ https://code.claude.com/docs/en/hooks | `/goal` の条件の判定と、止まったときに `ndf-next` を出さない形（決定 9）が食い違わないか |
+| 反復には上限を含む止まる条件を必ず置き、人へ戻すのは「チェックポイント」と「行き詰まり」に限る（"stopping conditions (such as a maximum number of iterations)"、"pause for human feedback at checkpoints or when encountering blockers"） | Building effective agents | 止まる条件の 8 つ（データ構造の `stop`）。チェックポイントはレッドラインと承認ゲート 2（決定 4）、行き詰まりは同じ失敗（決定 8）と選べる課題が無いとき |
+| 骨格は決まった順の workflow にし、各工程の中だけをエージェントに任せる。最小から始める | Building effective agents | 選定・判定・記録は LLM を呼ばないスクリプト（`lib/sprint_loop.py`）。周回は直列で 1 つずつ（I2）。並列の周回は入れない |
+| 1 回に 1 つの塊だけを進める（"work on only one feature at a time"、"performs one task per loop"） | Effective harnesses・Huntley | 1 周回 1 スプリント・1 マイルストーン（決定 2） |
+| 回の始めに前回の記録を読んでから次を選び、終わりに記録を書いてから次へ進む | Effective harnesses | `loop start` が記録を読み、`loop lap` が周回を締めて書いてから `ndf-next` を返す（1 周の流れ） |
+| 完了の判定を書き換えにくい構造化データに置き、作る側に判定の項目を消させない（"It is unacceptable to remove or edit tests"）。完了の条件は実装の前に合意する（スプリント契約）。判定の材料を作る側の外に置く（StrongDM のシナリオ） | Effective harnesses・Harness design・StrongDM | 受け入れ条件は要求の工程で固定し、承認ゲート 1 の MVV 判定を通ってから実装する（今の `development-workflow`）。worker は受け入れ条件を書き換えない（今の規則）。ループの記録は JSON（`loop.json`）を正本にし、`laps.md` は描画だけ（決定 6） |
+| 作る役と判定する役を分ける（"agents reliably skew positive when grading their own work"） | Harness design | 承認ゲートの判定は `mvv-gate.py` だけが書き、ループは自分で通さない（I6）。検査はクロスレビューと CI のまま |
+| 完了は主張であって証明ではない。周回の記録に証跡を添える（"“done” is a claim and not a proof"） | Osmani | 周回の行に承認ゲートの判定の写し・Pull Request・版・振り返りの置き場を固定する（I1） |
+| 周回ごとの費用と時間を記録し、予算の上限を必須にする（実測で 1 回 3〜6 時間・124〜200 USD） | Harness design | 予算の 3 つ（決定 5）と、周回の `cost` / `seconds` |
+| `/goal` の計数（ターン・時間・トークン）は再開でリセットされる | `/goal` | 予算の累計は NDF のループの記録が持ち、`/goal` の計数に頼らない（I8・決定 5）。今の設計と一致する |
+| `/goal` の評価役はコマンドもファイルも見ず、会話の出力だけで判定する。条件は出力で示せる形に書く | `/goal` | 止まったときに決まった語の 1 行を出す。推奨の案 B では再開のコマンドの条件にもその語を書く（決定 12） |
+| Claude Code の安全弁（Tool を使わない応答が数ターン続く・Stop hook の block が 8 回続く）はターン単位で、周回をまたぐ失敗は捕まえない | `/goal`・hooks-guide | 同じ失敗は NDF が周回単位で数える（決定 8） |
+| 人が持つのは優先順位・受け入れ条件・成果の確認（"We prioritize work, translate user feedback into acceptance criteria, and validate outcomes."）。判断が要るときだけ人へ戻す | OpenAI | 優先順位は MVV と棚卸しの順位、確認は承認ゲート 2 と周回の記録。周回の中で問わない（決定 4） |
+| 周回の中で見つけた欠けた規則は、その場で直し続けずに仕組みの Issue にする（"so it never happens again"） | Huntley・OpenAI | 周回の中の起票は `created[]` に残し、棚卸しが段階を付けた後の周回で候補になる（受け入れ条件 6） |
+| 人が後から追える記録を残す（"watch the loop"、"Build the loop. Stay the engineer."） | Huntley・Osmani | `laps.md` と `loop list`（何を選び、なぜ選び、何で終わったか） |
+| ハーネスの部品はモデルの弱点の仮定で、効かなくなれば外す（"every component in a harness encodes an assumption about what the model can't do on its own"） | Harness design | 周回の記録の判定と費用を振り返りが読み、効いていない工程を Issue にする（今の `retrospective` の経路。この課題で仕組みは足さない） |
 
-**取り入れる・取り入れないの判断は、この文書の決定に書いていない。** 決定の根拠は利用者の指示の原文・今の仕組み・実測で、外部の考え方を根拠にした決定は無い。一次情報を確かめた結果、決定と食い違う考え方が見つかれば、その決定を書き直す。
+**位置付けは Shapiro の Level 4（人は仕様と MVV の水準で関わり、後から確かめる）であって、Level 5（dark factory）ではない。** MVV のレッドラインで人へ戻すという要求がそれを決める。
+
+### 取り入れない考え方
+
+| 考え方 | 出典 | 取り入れない理由 |
+| --- | --- | --- |
+| 人がコードを書かない・レビューしない規則と、「1 人 1 日 1,000 USD 以上」の目安 | StrongDM | 要求は予算で止まることで、消費を増やすことを目標にしない。配布するプラグインの品質の検査（クロスレビュー・CI・承認ゲート 2）を外せない |
+| 止まる条件を持たず「収束するまで回す」形 | StrongDM | 要求の止まる条件と相容れない |
+| Level 5（人が要らない工場）を目標にすること | Shapiro | レッドラインで人へ戻す要求と逆である |
+| マージ前の検査を最小にし、不安定なテストは再実行で流す | OpenAI | 記事自身が "This would be irresponsible in a low-throughput environment." と条件を付けている。NDF は利用者へ配布するため、CI とクロスレビューの検査は残す |
+| 新しい進捗ファイル（`claude-progress.txt`）を足す | Effective harnesses | 進捗は既に Issue・Pull Request・スプリント状態ファイルにある。ループが足すのは複数のスプリントを束ねる記録だけで、1 スプリントの進捗を写さない（決定 1・6） |
+| Stop hook を自作して外側のループを強制する | hooks・`/goal` | `/goal` は既に Stop hook の包みで、二重にすると block の上限（8 回）と `stop_hook_active` に干渉する。周回の切り替えは今のラッパー（`relay.py`）が持つ |
+| 棚卸しの候補に「エントロピーの返済」（文書の鮮度・規則の逸脱の掃除）の枠を常に入れる | OpenAI | 選定に枠を足すと、入力が `rank` の出力だけで決まる形（決定 2・I4）が崩れる。掃除の Issue は棚卸しが段階を付ければ順位で選ばれる。枠が要るかは棚卸しの側の課題とする |
+| `/goal` の「直すまで消えないエラー」（認証の失敗・クレジット切れなど）を止まる条件に足す | `/goal` | そのエラーはセッションそのものを終えるため、NDF のスクリプトが判定する機会が無い。記録には進行中の周回が残り、引継ぎ文書の再開のコマンドで `loop start` が `in_lap` から続ける（`relay.md` の「落ちたときの続け方」） |
+| worker の `claude -p` に `--max-budget-usd` を渡して 1 回ごとに上限を掛ける | 非対話の上限 | 上限で止まると、ステップの途中でブランチと Pull Request が半端に残る（決定 9 と同じ理由）。予算は周回の境で判定し、超過は高々 1 周回分になる。1 周回の上限が要るかはリリース後テストの実測で見る（「未確認のまま残ること」） |
 
 ## 決定の記録
 
@@ -586,6 +626,8 @@ A を選ぶとき、「判定できない」「反する疑い」は止める理
 
 費用（USD）と秒は、スプリント状態ファイルが done と報告から既に埋めている量で、新しく測る仕組みが要らない。トークン数は周回の単位で集めておらず、費用で上限を掛ければ同じ目的を果たすため足さない。
 
+**累計はループの記録が持ち、`/goal` の計数に頼らない。** `/goal` はターン・時間・トークンを表示するが、`--continue` / `--resume` で基準がリセットされる（Claude Code の `/goal` のドキュメント）。ループは周回の境ごとにセッションを切り替えるため、`/goal` の計数ではループ全体の消費を数えられない（I8）。上限を必ず置くのは、反復の上限を止まる条件に含めるという Building effective agents の指針と、1 回の長い実行が 3〜6 時間・124〜200 USD に達した Harness design の実測による。判定は周回の境だけのため、超過は高々 1 周回分になる。
+
 既定値の出所は過去の課題の実測（#2065: 5.55 USD・L 6,828 秒、#2086: 6.11 USD・L 25,993 秒。どちらも設計と実装まで）である。1 周 3 件で 1 件 6 USD とすると約 18 USD、まとめと検査を足して約 20 USD になり、3 周で 60 USD に当たる。1 件の L が 2〜7 時間のため、3 件を並列で回す周回を 3 回で 24 時間を上限にする。標本は 2 件で、まとめ（振り返り・棚卸し）の費用を含まないため、検証用のリポジトリで 2 周回した実測で見直す（リリース後テスト）。
 
 **承認ゲート 1 で選んでほしい点:** 既定値をこの 3 つにするか。トークン数を予算に足すか（推奨: 足さない）。
@@ -620,6 +662,8 @@ A を選ぶとき、「判定できない」「反する疑い」は止める理
 
 鍵に失敗の理由の文を含める案は、文面の揺れで同じ失敗が別の鍵になるため採らない。
 
+**NDF が数えるのは、Claude Code の安全弁が周回をまたぐ失敗を捕まえないためである。** `/goal` は Tool を使わない応答が数ターン続くと止め、hook は Tool の呼び出しを挟まない Stop の block が 8 回続くと止める（hooks-guide）。どちらもターン単位で、周回ごとにセッションが替わると数え直しになる。行き詰まりで人へ戻す（Building effective agents の "when encountering blockers"）には、周回の記録に鍵を残して数えるほかない。
+
 **承認ゲート 1 で選んでほしい点:** 鍵の取り方と回数（推奨: この鍵で 2 回）。
 
 根拠: Value 2 / Value 4（MVV 版 2）
@@ -646,6 +690,19 @@ A を選ぶとき、「判定できない」「反する疑い」は止める理
 
 根拠: Vision / Value 2（MVV 版 2）
 
+### 決定 12: `/goal` の評価役に止まったことを読ませるため、止まったときは決まった語の 1 行を出す
+
+`/goal` の評価役はコマンドもファイルも見ず、会話の出力だけで条件を判定する（Claude Code の `/goal` のドキュメント）。今の起動の条件は `/ndf:development-workflow --loop <名>` だけで、止まった応答を「終わった」と読むかは評価役の解釈に任される。読まなければ評価役が止めを拒み、conductor は Tool を使わない応答を繰り返し、`/goal` の安全弁で止まるまで費用を使う。そこで止まったときは `loop` の結果の `metrics.stop_line` を写した 1 行 `[ndf-loop] stopped <名> <condition>` を最後に出す。続くとき（周回の境とカットポイント）は今どおり `ndf-next` を出し、条件は未達のままラッパーが切り替える（`relay.md` の付則）。
+
+**承認ゲート 1 で選んでほしい案:**
+
+| 案 | 振る舞い | 得失 |
+| --- | --- | --- |
+| A | 1 行を出すだけ。起動の条件は今の形 | 引数の形は変わらない。評価役がその 1 行を終わりと読むかは条件の文面に無いため、リリース後テストで確かめるまで分からない |
+| B【推奨】 | 1 行を出し、`ndf-next` と再開のコマンドの条件の末尾に `-- 終わり: [ndf-loop] stopped <名> の行を出したとき` を足す | 公式の「条件は出力で示せる形に書く」「測れる終わりの状態を 1 つ持つ」に合う。Skill の引数の読み方に `--` から後を読まない規則が 1 つ増える |
+
+根拠: Value 2 / Value 4（MVV 版 2）
+
 ## テスト設計
 
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
@@ -660,7 +717,7 @@ A を選ぶとき、「判定できない」「反する疑い」は止める理
 | 8 | 同じ鍵の失敗が `same_failure` 回続くと止まり、間に完了の周回があれば数え直す | 鍵を理由の文で作る・連続でなく累計で数える |
 | 9・10 | 候補 0 件で `no_issue`、候補がすべて外れて `outside_mvv` | 2 つを取り違える・0 件で周回を足す |
 | 11 | `loop stop` のファイルで次の境に止まり、再開でファイルが消える | 周回の途中で止める・再開でファイルを残して止まり直す |
-| 12 | 止まった出力の `items` に条件・値・再開のコマンドがあり、引継ぎ文書の「次に実行するコマンド」の節が再開のコマンドになる | 再開のコマンドを書かない |
+| 12 | 止まった出力の `items` に条件・値・再開のコマンドがあり、`metrics.stop_line` が `[ndf-loop] stopped <名> <condition>` の形で、引継ぎ文書の「次に実行するコマンド」の節が再開のコマンドになる | 再開のコマンドを書かない・`stop_line` の条件の語を `stop.condition` と食い違わせる |
 | 13・I8 | 再開した `loop start` が周回の数・費用・`started_at` を引き継ぎ、次の周回の番号が続く | 再開で `started_at` を今の時刻にする |
 | 14・15 | `loop lap` の後、周回の行が選定・判定の写し・版・振り返りの置き場・棚卸しの結果・費用と秒・判定を持ち、`loop list` が一覧を出す | どれかの項目を写さない |
 | 16 | 前の周回の持ち越しが `loop sprint` → `new close --carry` の棚卸しの指示に載る | 持ち越しを読まない |
@@ -685,11 +742,12 @@ A を選ぶとき、「判定できない」「反する疑い」は止める理
 
 | 項目 | 内容 |
 | --- | --- |
-| 外部の一次情報（受け入れ条件 20） | WebSearch・WebFetch が許可されず、一次情報を 1 件も確かめていない。承認ゲート 1 の前に、許可のある実行で「外部の動向」の表の 4 件を確かめ、取り入れる・取り入れない考え方を理由つきで書き足す。食い違う決定があれば書き直す |
+| 外部の一次情報の残り | OpenAI の記事の日付（検索結果の値）、StrongDM の Principles・Techniques のページ、arXiv 2608.21884 は確かめていない。どれも決定の根拠に使っていない |
 | 予算の既定値 | 実測の標本が 2 件で、まとめの費用を含まない（決定 5）。リリース後テストの 2 周の実測で見直す |
 | 外した課題を除いた続きの `queue` | マニフェストの `resume` から計画を除いて組めるか、`design-results` がマージされていない設計 PR を含む課題の組をどう扱うかは、実装（`tdd-cycle`）で走らせて確かめる |
 | 人の判断待ちに答えた課題の設計の結果 | `--design` に入れない課題へ `supervise.py design-results` で設計の結果を渡せるかを、実装で確かめる |
 | 失敗した周回の後始末 | 失敗で締めた周回のスプリントブランチと開いた Pull Request を次の周回がどう扱うか（今の conductor の手当てのまま残すか）。実装で 1 度失敗の周回を流して決める |
 | 判定の記録の読み分け | `mvv-gate.jsonl` の行から機械のチェックのどれで外れたかを読めるか。読めなければ `mvv-gate.py` の結果の `items` を done から読む形にする |
 | 持ち越しの読み先 | upkeep の候補の記録の置き場（`$NDF_UPKEEP_STATE_DIR`、既定は一時ディレクトリ）が周回をまたいで残るか。同じマシンの中では残る前提で、マシンをまたぐ置き場は #1640 が持つ |
-| `/goal` の条件の判定 | 止まったときに `ndf-next` を出さずに終えた応答を、`/goal` が「条件を満たした」と判定するか。目標の文面に「止まる条件に当たるまで周回する」を書く形で、リリース後テストで確かめる |
+| `/goal` の条件の判定 | 止まったときの 1 行（決定 12）を、評価役が「条件を満たした」か「達成できない」と判定してゴールを終えるか。リリース後テストで、止まる条件に当たる周回を 1 度流して確かめる |
+| 1 周回の費用の上限 | 予算は周回の境で判定するため、1 周回の超過は止められない（決定 5）。リリース後テストの実測で 1 周回が予算を大きく超えるなら、周回の中の上限を別の課題で考える |
