@@ -245,9 +245,7 @@ USE_WHEN_RE = re.compile(r"Use\s+when|use\s+when|使う|使い|とき|時に|と
 SENTENCE_SPLIT_RE = re.compile(r"(?<=[.。])\s*")
 # 発動制御の意図を description に書き残す語（AUTHORING.md「発動制御の 5 分類」の明示指示専用 / user-invocable: false）。
 EXPLICIT_ONLY_RE = re.compile(r"明示|explicit|Explicit")
-INJECT_ONLY_RE = re.compile(
-    r"知識として|参照する|実行しない|reference only|do not execute|工程と AI から呼ぶ|called by the workflow"
-)
+INJECT_ONLY_RE = re.compile(r"知識として|参照する|実行しない|reference only|do not execute|工程と AI から呼ぶ|called by the workflow")
 
 # --- 「引数を取る Skill か」の判定 -------------------------------------------
 # 規約（AUTHORING.md「発動制御の 5 分類」）は明示指示専用の Skill に対して
