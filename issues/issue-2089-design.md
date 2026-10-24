@@ -385,8 +385,8 @@ erDiagram
 | `loop start <名> [--milestones M,...] [--budget-* ...] [--root DIR]` | 宣言・プロジェクト MVV・記録 | `status`（`new` / `resumed` / `in_lap`）・`lap`・`consumed`・`budget`・`next`（次に打つ副命令かプランの続き） | 0 = 始めた・続ける / 1 = 断った（`items` に理由、`next` に 1 スプリントの起動の形 `/ndf:development-workflow #<課題>`）/ 3 = 止まったまま（止まった理由が解けていない。`items` に理由と再開のコマンド） |
 | `loop select <名>` | `upkeep.py rank` の出力（その場で打つ）・記録 | `lap`・`selected[]`・`excluded[]`・`milestone`・`rank_digest` | 0 = 選んだ / 3 = 止まった（`no_issue` / `outside_mvv`。`stop` を書いた）/ 1 = 進行中の周回がある・`rank` が 2 か 3 を返した |
 | `loop exclude <名> <課題> --reason <文>` | 進行中の周回の選定 | 外した課題・選定をやり直した結果（`select` と同じ形） | 0 / 3（すべて外れた）/ 1 |
-| `loop sprint <名> --mode M --dev V [--prod V] [--] <new sprint に足す引数>` | 進行中の周回の選定 | 打ったコマンド・`state_path`・`out`・マニフェストのパス・最初の `queue` のコマンド | 0 / 1（`sprint-state.py init` か `new sprint --pace auto` が断った。`stop: refused` を書いて 3 で返す） |
-| `loop gate <名> --done <done.json>` | キューの done・`mvv-gate.jsonl`・スプリントの状態 | `gate`（`1` / `2`）・人の判断待ちへ移した課題・続きの `queue` のコマンド（外した課題の計画を除いたもの） | 0 = 残りで続ける / 3 = 止まった（承認ゲート 2・残りが無い・MVV が改訂された） |
+| `loop sprint <名> --mode M --dev V [--prod V] [--] <new sprint に足す引数>` | 進行中の周回の選定 | 打ったコマンド・`state_path`・`out`・マニフェストのパス・最初の `queue` のコマンド | 0 / 3（`sprint-state.py init` か `new sprint --pace auto` が断った。`stop: refused` を書く） |
+| `loop gate <名> --done <done.json>` | キューの done・`mvv-gate.jsonl`・スプリントの状態 | `gate`（`1` / `2`）・人の判断待ちへ移した課題・続きの `queue` のコマンド（外した課題の計画を除いたもの） | 0 = 残りで続ける、または残りが無く周回を締めて次の周回へ進む（`ndf_next` を返す）/ 3 = 止まった（承認ゲート 2・MVV が改訂された・締めた後の判定で止まる条件に当たった） |
 | `loop answer <名> <課題> --approved\|--rejected [--pr N]` | 人の判断待ち | 答えを書いた行 | 0 / 1（待っていない課題） |
 | `loop lap <名> [--failed]` | スプリントの状態（`update` を内で打つ）・まとめのプランの done と報告・upkeep の候補の記録・止める指示のファイル | 締めた周回・`stop`（止まったとき）・`ndf_next`（続くとき） | 0 = 続く / 3 = 止まった |
 | `loop approve-mvv <名> --milestone M` | マイルストーンの説明のスプリント MVV | 承認した sha256（`sprint_mvv_approvals` に 1 行） | 0 / 3（説明に `## Mission` / `## Vision` / `## Value` がそろわない） |
@@ -418,18 +418,18 @@ sequenceDiagram
     participant G as mvv-gate.py
     participant RL as ラッパー
     C->>S: loop start 名
-    S-->>C: new / resumed / in_lap（断れば 1、止まったままなら 4）
+    S-->>C: new / resumed / in_lap（断れば 1、止まったままなら 3）
     C->>S: loop select 名
     S->>R: rank
     R-->>S: 順位・境界・人の判断待ちの印
-    S-->>C: 選んだ課題と外した理由（0 件なら 4）
+    S-->>C: 選んだ課題と外した理由（0 件なら 3）
     Note over C: モード判定と版の決定（判断）。対象外は loop exclude
     C->>S: loop sprint 名 --mode M --dev V --prod V
     S->>Q: sprint-state.py init → new sprint --pace auto
     S-->>C: 最初の queue のコマンド
     C->>Q: queue（設計 → 本番まで --then）
     Q->>G: 承認ゲート 1・2 の MVV 判定
-    alt 関門で止まった
+    alt 承認ゲートで止まった
         Q-->>C: gate（10）
         C->>S: loop gate 名 --done
         S-->>C: ゲート 1: 外した残りの queue / ゲート 2: 3（止まる）
@@ -504,7 +504,7 @@ stateDiagram-v2
 4. `budget_laps` / `budget_usd` / `budget_hours`: 終わった周回の数・費用の和・`started_at` からの経過時間が予算以上
 5. （選定の時点で）`no_issue` / `outside_mvv`
 
-**再開（`loop start`）は止まった理由ごとに解けたかを見る。** `user_stop` は再開でファイルを消して解ける。予算は再開の引数で上書きした予算で判定し直す。`same_failure` は止まった後に利用者が直したことを機械で知れないため、再開の起動そのものを解けた印とし、失敗の数を数え直す（`stops` に残る）。`gate2_returned` はその周回の状態に `関門 2` の記録（利用者の承認）があれば解け、まとめのステージから続く。`mvv_changed` は開始時の値を今の承認済みの値へ置き換えず、新しい名前でループを始め直すよう示す（承認の記録の起点を混ぜない）。
+**再開（`loop start`）は止まった理由ごとに解けたかを見る。** `user_stop` は再開でファイルを消して解ける。予算は再開の引数で上書きした予算で判定し直す。`same_failure` は止まった後に利用者が直したことを機械で知れないため、再開の起動そのものを解けた印とし、失敗の数を数え直す（`stops` に残る）。`gate2_returned` はその周回の状態に `関門 2` の記録（利用者の承認）があれば解け、本番のプランを `run <本番のプラン> --from bump` で続けてから（`pace.md` の「承認ゲートで止まった後の続け方」）、まとめのステージへ進む。差し戻しの記録があれば、その周回を `人へ戻した` で締めて次の周回へ進む。`mvv_changed` は開始時の値を今の承認済みの値へ置き換えず、新しい名前でループを始め直すよう示す（承認の記録の起点を混ぜない）。
 
 ### 止まったときの出し方
 
@@ -652,7 +652,7 @@ A を選ぶとき、「判定できない」「反する疑い」は止める理
 | --- | --- | --- |
 | 1・18 | `--pace` を渡さない `new close`、`loop` を打たない `sprint-state.py` の各副命令、`read_pace` の出力が今のまま（既存のテストがすべて通る） | `new close` の既定を `auto` のまとめに変える・`read_pace` が `loop` 節を検証する |
 | 2 | `loop start` が `loop.enabled` 偽・`auto` 節の欠け・プロジェクト MVV の未承認か不一致・`loop` 節の形の誤りのそれぞれで 1 を返し、`next` に 1 スプリントの起動の形を出し、記録を作らない | どれか 1 つの確かめを外す・断るときに記録を作る |
-| 3・I6 | `loop gate` が判定の記録のどの行でも承認ゲートの記録を書かず、「判定できない」の行を人の判断待ちへ移す | `unknown` を通過として扱う・`loop gate` が `sprint-state.py gate --by mvv` を打つ |
+| 3・I6 | `loop gate` が判定の記録のどの行でも承認ゲートの記録を書かず、「判定できない」の行を人の判断待ちへ移す。ゲート 1 で全課題が外れたら周回を `人へ戻した` で締めて次の周回へ進み、ゲート 2 ではどの判定でも 3 で止まる | `unknown` を通過として扱う・`loop gate` が `sprint-state.py gate --by mvv` を打つ・ゲート 2 で人へ戻した後に次の周回を始める |
 | 4・I4 | 同じ `rank` の出力と記録から、`select` が同じ組と並びを返す。境界まで・`max_issues` まで・1 つのマイルストーンから | 並びを集合で扱う・境界を無視する・2 つのマイルストーンから選ぶ |
 | 5 | 選定の行が、選んだ行と外した行の両方を理由（順位・容量・スプリント MVV が未承認・人の判断待ち・除外の理由）つきで持つ | 外した行を書かない |
 | 6 | 周回の中で起票された課題が、その周回の選定に入らない | `created[]` を候補に足す |
