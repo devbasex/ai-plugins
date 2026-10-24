@@ -90,6 +90,11 @@
       "id": "ndf-slide",
       "name": "NDF のスライドの作成",
       "meaning": "スライドを生成スクリプトで作り、Google Slides へ変換して確かめるときの語"
+    },
+    {
+      "id": "ndf-document",
+      "name": "NDF の文書の組み直し",
+      "meaning": "書き上げた文書を出力の形と文書の目的に合わせて組み直すときの語。document-restructuring が持つ"
     }
   ],
   "terms": [
@@ -4131,6 +4136,48 @@
       "context": "ndf-slide",
       "meaning": "台本の読み上げにかかる時間。読み上げの字数を 350 字/分で割って出す",
       "source": "docs/specifications/ndf-slide-generation.md"
+    },
+    {
+      "term": "出力の形",
+      "context": "ndf-document",
+      "meaning": "文書を読ませる形。リポジトリの Markdown・文書・ページ・スライド・表計算。置き場（Notion・Confluence・Google Drive などのシステム）とは別の軸",
+      "source": "",
+      "pending_source": "issues/issue-2086-requirements.md"
+    },
+    {
+      "term": "文書の目的",
+      "context": "ndf-document",
+      "meaning": "読み手にその文書で何をしてもらうか・何を渡すかの種類（決議依頼・議論・アジェンダ・小説・エッセイ・ブログ・作業レポート・論文など）",
+      "source": "",
+      "pending_source": "issues/issue-2086-requirements.md"
+    },
+    {
+      "term": "共通項",
+      "context": "ndf-document",
+      "meaning": "出力の形と文書の目的に関わらず、組み直した文書が満たす決まり",
+      "source": "",
+      "pending_source": "issues/issue-2086-requirements.md"
+    },
+    {
+      "term": "鍵の語",
+      "context": "ndf-document",
+      "meaning": "文書の題・見出しと、本文で繰り返し使い、読み手がその文書の主題として受け取る語",
+      "source": "",
+      "pending_source": "issues/issue-2086-requirements.md"
+    },
+    {
+      "term": "決まったことを伝える文書",
+      "context": "ndf-document",
+      "meaning": "確定した設計・報告書のように、結論が既に決まっている文書",
+      "source": "",
+      "pending_source": "issues/issue-2086-requirements.md"
+    },
+    {
+      "term": "議論の文書",
+      "context": "ndf-document",
+      "meaning": "仕様案・提案書・論点の整理のように、まだ決まっていないことを読み手と決めるための文書",
+      "source": "",
+      "pending_source": "issues/issue-2086-requirements.md"
     }
   ]
 }
