@@ -94,7 +94,7 @@
     {
       "id": "ndf-document",
       "name": "NDF の文書の組み直し",
-      "meaning": "書き上げた文書を出力の形と文書の目的に合わせて組み直すときの語。document-restructuring が持つ"
+      "meaning": "書き上げた文書を文書形式と文書の目的に合わせて組み直すときの語。document-restructuring が持つ"
     }
   ],
   "terms": [
@@ -706,7 +706,7 @@
     {
       "term": "手順",
       "context": "ndf-workflow",
-      "meaning": "1 つの Skill の中で順に通す作業の単位。cross-refactoring の提案・リファクタリング計画・テスト追加・実装・検証/修正の 5 つ、document-restructuring の決める（出力の形・文書の目的・言語）・測る・組み直す・整える・測り直すの 5 つ（手順 0〜4）",
+      "meaning": "1 つの Skill の中で順に通す作業の単位。cross-refactoring の提案・リファクタリング計画・テスト追加・実装・検証/修正の 5 つ、document-restructuring の決める（文書形式・文書の目的・言語）・測る・組み直す・整える・測り直すの 5 つ（手順 0〜4）",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
@@ -4138,7 +4138,7 @@
       "source": "docs/specifications/ndf-slide-generation.md"
     },
     {
-      "term": "出力の形",
+      "term": "文書形式",
       "context": "ndf-document",
       "meaning": "文書を読ませる形。リポジトリの Markdown・文書・ページ・スライド・表計算。置き場（Notion・Confluence・Google Drive などのシステム）とは別の軸",
       "source": "",
@@ -4152,44 +4152,44 @@
       "pending_source": "issues/issue-2086-requirements.md"
     },
     {
-      "term": "共通項",
+      "term": "共通ルール",
       "context": "ndf-document",
-      "meaning": "出力の形と文書の目的に関わらず、組み直した文書が満たす決まり",
+      "meaning": "文書形式と文書の目的に関わらず、組み直した文書が満たす決まり",
       "source": "",
       "pending_source": "issues/issue-2086-requirements.md"
     },
     {
-      "term": "鍵の語",
+      "term": "キーワード",
       "context": "ndf-document",
       "meaning": "文書の題・見出しと、本文で繰り返し使い、読み手がその文書の主題として受け取る語",
       "source": "",
       "pending_source": "issues/issue-2086-requirements.md"
     },
     {
-      "term": "決まったことを伝える文書",
+      "term": "確定事項を伝える文書",
       "context": "ndf-document",
       "meaning": "確定した設計・報告書のように、結論が既に決まっている文書",
       "source": "",
       "pending_source": "issues/issue-2086-requirements.md"
     },
     {
-      "term": "議論の文書",
+      "term": "議論用の文書",
       "context": "ndf-document",
       "meaning": "仕様案・提案書・論点の整理のように、まだ決まっていないことを読み手と決めるための文書",
       "source": "",
       "pending_source": "issues/issue-2086-requirements.md"
     },
     {
-      "term": "形の参照",
+      "term": "形式別ガイド",
       "context": "ndf-document",
-      "meaning": "出力の形 1 つについて、文章量の単位と目安・題と見出しの付け方・呼ぶ先を持つ document-restructuring の参照ファイル（references/output-<形>.md）",
+      "meaning": "文書形式 1 つについて、文章量の単位と目安・題と見出しの付け方・呼び出し先を持つ document-restructuring の参照ファイル（references/format-<形式>.md）",
       "source": "",
       "pending_source": "issues/issue-2086-design.md"
     },
     {
-      "term": "目的の参照",
+      "term": "目的別ガイド",
       "context": "ndf-document",
-      "meaning": "文書の目的 1 つについて、並び・文章量・見分ける手がかりを持つ document-restructuring の参照ファイル（references/purpose-<目的>.md）",
+      "meaning": "文書の目的 1 つについて、構成・文章量・見分ける手がかりを持つ document-restructuring の参照ファイル（references/purpose-<目的>.md）",
       "source": "",
       "pending_source": "issues/issue-2086-design.md"
     }
