@@ -3693,7 +3693,7 @@
     {
       "term": "テストの無い宣言",
       "context": "ndf-cross-refactoring",
-      "meaning": ".ndf/project.json の test があり、unknown と strategy を持たず、種別・雛形の誤りが無く、command も scope_command も持つ suite が 1 つも無いもの。解析が「テストが無い」と測った {\"suites\": []} を含む。cross-review の最終スイープは検証のコマンドを名指ししない"
+      "meaning": ".ndf/project.json の test があり、unknown と strategy を持たず、種別・雛形の誤りが無く、どの suite も command と scope_command のどちらも持たないもの（suite が 0 個のときを含む）。解析が「テストが無い」と測った {\"suites\": []} を含む。cross-review の最終スイープは検証のコマンドを名指ししない"
     },
     {
       "term": "未解決のスレッド",

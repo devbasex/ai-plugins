@@ -80,7 +80,7 @@ E1・E2・E6・E10 は要求のとおりで、この変更は発生元も受け�
 
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
-| テストの無い宣言 | `.ndf/project.json` の `test` があり、`unknown` と `strategy` を持たず、種別・雛形の誤りが無く、`command` も `scope_command` も持つ suite が 1 つも無いもの（解析が「テストが無い」と測った `{"suites": []}` を含む） | 追加（`ndf-cross-refactoring`） |
+| テストの無い宣言 | `.ndf/project.json` の `test` があり、`unknown` と `strategy` を持たず、種別・雛形の誤りが無く、どの suite も `command` と `scope_command` のどちらも持たないもの（suite が 0 個のときを含む）（解析が「テストが無い」と測った `{"suites": []}` を含む） | 追加（`ndf-cross-refactoring`） |
 
 ## 機能一覧
 
@@ -189,7 +189,7 @@ sequenceDiagram
 | --- | --- | --- |
 | 1 | 無い・`unknown` を持つ | `None`（今のまま） |
 | 2 | 種別か雛形に誤りがある | `StrategyError`（今のまま。I2） |
-| 3 | `strategy` を書かず、`command` も `scope_command` も持つ suite が 1 つも無い（テストの無い宣言） | `None`（変える。I1） |
+| 3 | `strategy` を書かず、どの suite も `command` と `scope_command` のどちらも持たない（suite が 0 個のときを含む。テストの無い宣言） | `None`（変える。I1） |
 | 4 | 戦略を解けない（`local-scoped-ci-whole` を宣言したのに `scope_command` が無い など） | `StrategyError`（今のまま） |
 | 5 | 解ける | 全体テストのコマンドの並び（今のまま。空なら `None`） |
 
