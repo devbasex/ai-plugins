@@ -72,23 +72,8 @@ def line_count(path: Path) -> int:
         return sum(1 for _ in handle)
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", default=".", help="走査するリポジトリの根")
-    parser.add_argument("--report", action="store_true", help="上位 10 本の行数を出す")
-    args = parser.parse_args(argv)
-
-    root = Path(args.root).resolve()
-    try:
-        paths = tracked_markdown(root)
-    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
-        print(f"[check-doc-line-limit] git ls-files を実行できない: {exc}", file=sys.stderr)
-        return 2
-
-    if not paths:
-        print("[check-doc-line-limit] 走査対象が 1 件も無い", file=sys.stderr)
-        return 2
-
+def measure(root: Path, paths: list[str]) -> tuple[list[tuple[int, str]], list[tuple[int, str]]]:
+    """走査した文書の行数と、そのうち上限を超えた文書。記録と実在しないファイルは外す。"""
     counts: list[tuple[int, str]] = []
     over: list[tuple[int, str]] = []
     for rel in paths:
@@ -101,27 +86,26 @@ def main(argv: list[str] | None = None) -> int:
         counts.append((count, rel))
         if count > LIMIT and rel not in EXEMPT:
             over.append((count, rel))
+    return counts, over
 
+
+def exemption_problems(root: Path) -> tuple[list[str], list[str]]:
+    """要らなくなった除外。基準を下回った文書と、指し先を失った文書。"""
     # **除外は片方向ではない。** 基準を下回った文書も、指し先を失った文書も、除外
     # そのものが要らなくなっている（後者は #417 の 6）。
     stale = sorted(rel for rel in EXEMPT if (root / rel).is_file() and line_count(root / rel) <= LIMIT)
     missing = sorted(rel for rel in EXEMPT if not (root / rel).is_file())
+    return stale, missing
 
-    # 除外の後に 1 件も残らないなら、チェックは働いていない。`git ls-files` が非空でも
-    # 起こりうるため、走査対象の有無とは別に見る（#417 の 2）。
-    if not counts:
-        print(
-            "[check-doc-line-limit] 除外の後に走査対象が 1 件も残らない",
-            file=sys.stderr,
-        )
-        return 2
 
-    if args.report:
-        print(f"走査: {len(counts)} 本 / 上限 {LIMIT} 行")
-        for count, rel in sorted(counts, reverse=True)[:10]:
-            mark = "  (除外)" if rel in EXEMPT else ""
-            print(f"{count:5d}  {rel}{mark}")
+def print_report(counts: list[tuple[int, str]]) -> None:
+    print(f"走査: {len(counts)} 本 / 上限 {LIMIT} 行")
+    for count, rel in sorted(counts, reverse=True)[:10]:
+        mark = "  (除外)" if rel in EXEMPT else ""
+        print(f"{count:5d}  {rel}{mark}")
 
+
+def print_errors(over: list[tuple[int, str]], stale: list[str], missing: list[str]) -> None:
     for count, rel in sorted(over, reverse=True):
         print(
             f"ERROR: {rel} が分割の基準を超えている（{count} 行 / 上限 {LIMIT} 行）。"
@@ -139,6 +123,40 @@ def main(argv: list[str] | None = None) -> int:
             f"ERROR: {rel} は EXEMPT に載っているのに存在しない。除外を外す",
             file=sys.stderr,
         )
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", default=".", help="走査するリポジトリの根")
+    parser.add_argument("--report", action="store_true", help="上位 10 本の行数を出す")
+    args = parser.parse_args(argv)
+
+    root = Path(args.root).resolve()
+    try:
+        paths = tracked_markdown(root)
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        print(f"[check-doc-line-limit] git ls-files を実行できない: {exc}", file=sys.stderr)
+        return 2
+
+    if not paths:
+        print("[check-doc-line-limit] 走査対象が 1 件も無い", file=sys.stderr)
+        return 2
+
+    counts, over = measure(root, paths)
+    stale, missing = exemption_problems(root)
+
+    # 除外の後に 1 件も残らないなら、チェックは働いていない。`git ls-files` が非空でも
+    # 起こりうるため、走査対象の有無とは別に見る（#417 の 2）。
+    if not counts:
+        print(
+            "[check-doc-line-limit] 除外の後に走査対象が 1 件も残らない",
+            file=sys.stderr,
+        )
+        return 2
+
+    if args.report:
+        print_report(counts)
+    print_errors(over, stale, missing)
 
     if over or stale or missing:
         return 1
