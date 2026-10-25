@@ -268,7 +268,7 @@ def sprint_plans(a) -> list[dict]:
     prod = prod_version(a.version)
     return waves + [
         release,
-        {"name": "関門 2", "gate": normal_gate_2_stage(a, prod, advise)},
+        {"name": "関門 2", "gate": normal_gate_2_stage(a, repo, prod, advise)},
         {"name": "本番", "plans": {"release-prod": plan_sprint_release(a, repo, channel="prod", version=prod)}},
     ]
 

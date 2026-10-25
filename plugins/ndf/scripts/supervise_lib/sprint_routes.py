@@ -11,7 +11,7 @@ from supervise_lib.decl import DeclError, decl_roots, delivery_decl, require_ver
 from supervise_lib.paths import HERE
 from supervise_lib.plan import QUEUE_PRS, sprint_state_path
 from supervise_lib.delivery_templates import GATE_2_MATERIAL, plan_gate_2, plan_promote, plan_verify
-from supervise_lib.release_templates import RELEASE_FORMS
+from supervise_lib.release_templates import RELEASE_FORMS, material_path
 from supervise_lib.verify_steps import plan_limits
 
 
@@ -192,11 +192,12 @@ def normal_gate_2(a) -> str:
     )
 
 
-def normal_gate_2_stage(a, prod: str, advise: bool) -> str:
-    """pace: normal の承認ゲート 2 のステージの文。承認の手順はここの 1 か所に置き、配布の note に重ねない（#1914 の決定 1）。"""
-    approval = f"issues/approval-{(a.release or {}).get('plugin')}-v{prod}.md"
+def normal_gate_2_stage(a, repo: str | None, prod: str, advise: bool) -> str:
+    """pace: normal の承認ゲート 2 のステージの文。承認の手順はここの 1 か所に置き、配布の note に重ねない（#1914 の決定 1）。
+    承認資料は本番のプランの release と同じく元のリポジトリの下の絶対パスで示す（作業場所の git の根に依らない）。"""
+    approval = material_path(repo, f"issues/approval-{(a.release or {}).get('plugin')}-v{prod}.md")
     text = (
-        f"開発版の配布が書いた承認資料（{approval}）を示して本番への配布の承認を取り、承認されたら `python3 {shlex.quote(str(HERE / 'release-steps.py'))} approve --approval {approval} "
+        f"開発版の配布が書いた承認資料（{approval}）を示して本番への配布の承認を取り、承認されたら `python3 {shlex.quote(str(HERE / 'release-steps.py'))} approve --approval {shlex.quote(approval)} "
         "--approved-sha <approval-facts の metrics.approved_sha> --by user` で承認を記録してから「本番」のステージの command を打つ（差し戻されたら打たない）"
     )
     return text + "。" + normal_gate_2(a) if advise else text

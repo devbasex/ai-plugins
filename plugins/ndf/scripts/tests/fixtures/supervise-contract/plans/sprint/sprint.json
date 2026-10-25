@@ -69,7 +69,7 @@
     {
       "wave": 8,
       "name": "関門 2",
-      "gate": "開発版の配布が書いた承認資料（issues/approval-foo-v1.2.0.md）を示して本番への配布の承認を取り、承認されたら `python3 <NDF>/scripts/release-steps.py approve --approval issues/approval-foo-v1.2.0.md --approved-sha <approval-facts の metrics.approved_sha> --by user` で承認を記録してから「本番」のステージの command を打つ（差し戻されたら打たない）"
+      "gate": "開発版の配布が書いた承認資料（<TMP>/repo/issues/approval-foo-v1.2.0.md）を示して本番への配布の承認を取り、承認されたら `python3 <NDF>/scripts/release-steps.py approve --approval <TMP>/repo/issues/approval-foo-v1.2.0.md --approved-sha <approval-facts の metrics.approved_sha> --by user` で承認を記録してから「本番」のステージの command を打つ（差し戻されたら打たない）"
     },
     {
       "wave": 9,
