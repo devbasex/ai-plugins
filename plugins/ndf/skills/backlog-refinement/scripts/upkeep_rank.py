@@ -464,6 +464,16 @@ def apply_moves(place: dict, forward: list[dict], backward: list[dict]) -> dict:
     return moved
 
 
+def cross_milestone_deps(board: Board, moved: dict) -> list[dict]:
+    """前のマイルストーンの課題が後ろのマイルストーンの課題に依存している辺。"""
+    pos = {t: i for i, t in enumerate(board.order)}
+    return [
+        {"number": a, "milestone": moved[a], "depends_on": b, "depends_on_milestone": moved[b]}
+        for a, b in sorted(board.edges)
+        if moved.get(a) in pos and moved.get(b) in pos and pos[moved[a]] < pos[moved[b]]
+    ]
+
+
 def compute_ranking(board: Board) -> dict:
     """順位・枠・境界・候補・変化を算出する。CycleError を投げうる。"""
     cfg = board.cfg
@@ -483,12 +493,7 @@ def compute_ranking(board: Board) -> dict:
         forward, backward, dropped, stale = _candidates(board, rows, place)
     moved = apply_moves(place, forward, backward)
     milestones = [_milestone_out(board, rows, moved, t, i) for i, t in enumerate(board.order, 1)]
-    pos = {t: i for i, t in enumerate(board.order)}
-    cross = [
-        {"number": a, "milestone": moved[a], "depends_on": b, "depends_on_milestone": moved[b]}
-        for a, b in sorted(board.edges)
-        if moved.get(a) in pos and moved.get(b) in pos and pos[moved[a]] < pos[moved[b]]
-    ]
+    cross = cross_milestone_deps(board, moved)
     return {
         "milestones": milestones,
         "forward": forward,
