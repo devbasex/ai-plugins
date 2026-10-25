@@ -198,9 +198,15 @@ queue の置き換え: `{queue_prs}` は前のすべてのステージの Pull R
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 # queue が --then のプランを流す前に、先行のプランの Pull Request の番号へ置き換える印
 QUEUE_PRS = "{queue_prs}"
+
+
+def sprint_state_path(a) -> str:
+    """スプリントの状態ファイルの絶対パス（sprint.py と sprint_waves.py が共有する）。"""
+    return str(Path(a.state).resolve())
 
 
 def _part_prompt(base_prompt: str, i: int, parts: list[dict]) -> str:

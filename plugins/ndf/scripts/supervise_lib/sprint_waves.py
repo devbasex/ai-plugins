@@ -15,7 +15,7 @@ from supervise_lib.decl import decl_fields
 from supervise_lib.paths import DESIGN_READY, GLOSSARY_PY, HERE, MVV_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, SYNC_DESIGN_BODY, WORKTREE_SETUP
 from supervise_lib.procedures import DESIGN_RESULTS, pr_step, requirements_path, sprint_materials, sprint_out, with_record
 from supervise_lib.release_templates import MVV_NOTE, advise_steps, plan_release
-from supervise_lib.state_path import sprint_state_path
+from supervise_lib.plan import sprint_state_path
 from supervise_lib.templates import plan_check, plan_check_since, plan_impl
 from supervise_lib.verify_steps import handoff_step, merge_steps
 

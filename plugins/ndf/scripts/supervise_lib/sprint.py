@@ -33,7 +33,7 @@ from supervise_lib.new_args import NEW_ARGS
 from supervise_lib.paths import CHECK_PY, HERE, SELF
 from supervise_lib.procedures import sprint_out, with_record
 from supervise_lib.release_templates import release_verify_step
-from supervise_lib.state_path import sprint_state_path
+from supervise_lib.plan import sprint_state_path
 from supervise_lib.sprint_routes import (
     MVV_PACES,
     dev_channel_of,
