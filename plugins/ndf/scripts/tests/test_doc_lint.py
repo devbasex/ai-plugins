@@ -150,3 +150,61 @@ def test_unreadable_glossary_config_is_ignored(repo, monkeypatch):
 
     monkeypatch.setattr(Path, "read_text", deny)
     assert mod.generated_documents(repo) == ()
+
+
+# --- 現状固定: lint_files の分岐ごとの出力 ------------------------------------------------
+# 期待値は現在の実装の出力をそのまま写したもの（仕様の主張ではない）。構造を変えたときに出力が変わったことを検出する。
+
+
+def _load_doc_lint():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("ndf_doc_lint_fixed", SCRIPTS / "doc-lint.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+LONG_LINE = "従来" + "あ" * 250
+
+
+@pytest.fixture
+def lint_tree(tmp_path):
+    write(tmp_path, "docs/b.md", "# 題\n\n今回は以前と違う（#12 の指摘）。\n\n```\n以前は x\n```\n" + LONG_LINE + "\n  末尾は   \n")
+    write(tmp_path, "a.md", "従来の形。\n")
+    return tmp_path
+
+
+def _hit(name, rule, match, text):
+    return {"kind": "line", "name": name, "result": "hit", "rule": rule, "match": match, "text": text}
+
+
+EXPECTED_HITS = [
+    _hit("a.md:1", "comparison", "従来", "従来の形。"),
+    _hit("docs/b.md:3", "history", "今回", "今回は以前と違う（#12 の指摘）。"),
+    _hit("docs/b.md:3", "issue-origin", "（#12 の指摘）", "今回は以前と違う（#12 の指摘）。"),
+    _hit("docs/b.md:3", "comparison", "以前", "今回は以前と違う（#12 の指摘）。"),
+    _hit("docs/b.md:8", "comparison", "従来", LONG_LINE[:200]),
+]
+
+
+def test_lint_files_given_lines(lint_tree):
+    """指定行だけを見る。存在しないファイル・囲みの中の行（6）・行数を超える番号（99）は数えない。ファイルはパス順、1 行の規則は RULES の順。"""
+    mod = _load_doc_lint()
+    items, total = mod.lint_files(lint_tree, {"docs/b.md": {1, 3, 6, 8, 9, 99}, "a.md": {1}, "nope.md": {1}}, False)
+    assert total == 5
+    assert items == EXPECTED_HITS
+
+
+def test_lint_files_all_lines_ignores_given_numbers(lint_tree):
+    """all_lines は指定行を無視して全行を見る（囲みの 3 行は数えない）。"""
+    mod = _load_doc_lint()
+    items, total = mod.lint_files(lint_tree, {"docs/b.md": set(), "a.md": set(), "nope.md": {1}}, True)
+    assert total == 7
+    assert items == EXPECTED_HITS
+
+
+def test_lint_files_empty(lint_tree):
+    mod = _load_doc_lint()
+    assert mod.lint_files(lint_tree, {}, False) == ([], 0)
+    assert mod.lint_files(lint_tree, {"a.md": set()}, False) == ([], 0)

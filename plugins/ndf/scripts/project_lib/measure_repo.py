@@ -16,6 +16,7 @@ import tomllib
 from pathlib import PurePosixPath
 
 from . import fingerprint
+from .compose import compose_services
 from .secret import is_secret_path, redact
 
 MAX_READ = 512 * 1024
@@ -92,7 +93,7 @@ PYPROJECT_TOOLS = ("ruff", "black", "mypy", "isort")
 INSTRUCTION_FILES = ("AGENTS.md", "CLAUDE.md", ".claude/CLAUDE.md", "KIRO.md", "GEMINI.md")
 OLD_GUIDE_MARK = "NDF_PLUGIN_GUIDE_START"
 TEST_WORDS = re.compile(r"phpunit|pytest|jest|vitest|rspec|go test|npm (?:run )?test|docker compose exec|run-[\w-]*tests?")
-POLICY_WORDS = re.compile(r"doc-lint|文体|文言テスト|markdown-writing|書き方")
+POLICY_WORDS = re.compile(r"doc-lint|文体|文言テスト|markdown-writing|document-style|書き方")
 DEPLOY_WORDS = re.compile(r"deploy|release|publish|デプロイ|リリース|本番|amplify|sam |(?<![a-z])(?:stg|prd)(?![a-z])", re.I)
 IMPORT_TOKEN = re.compile(r"(?:^|\s)@([\w./-]+\.md)\b")
 
@@ -212,30 +213,53 @@ def _js_dependencies(tree: Tree) -> dict[str, str]:
     return out
 
 
-def _py_dependencies(tree: Tree) -> dict[str, str]:
-    """pyproject.toml（project・dependency-groups・poetry）と requirements*.txt。"""
+def _pyproject_project_deps(c: dict) -> dict[str, str]:
+    """pyproject.toml の [project] の dependencies / optional-dependencies。"""
     out: dict[str, str] = {}
-    for f in tree.shallow("pyproject.toml"):
-        c = tree.toml(f)
-        proj = c.get("project") or {}
-        for d in list(proj.get("dependencies") or []) + [x for v in (proj.get("optional-dependencies") or {}).values() for x in v]:
-            name = re.split(r"[\s<>=!~\[;]", str(d), 1)[0].lower()
-            out[name] = str(d)
-        for group in (c.get("dependency-groups") or {}).values():
-            for d in group if isinstance(group, list) else []:
-                out[re.split(r"[\s<>=!~\[;]", str(d), 1)[0].lower()] = str(d)
-        poetry = (c.get("tool") or {}).get("poetry") or {}
-        for sec in ("dependencies", "dev-dependencies"):
-            out.update({k.lower(): str(v) for k, v in (poetry.get(sec) or {}).items()})
-        for g in (poetry.get("group") or {}).values():
-            out.update({k.lower(): str(v) for k, v in (g.get("dependencies") or {}).items()})
-        if proj.get("requires-python"):
-            out["python"] = str(proj["requires-python"])
+    proj = c.get("project") or {}
+    for d in list(proj.get("dependencies") or []) + [x for v in (proj.get("optional-dependencies") or {}).values() for x in v]:
+        name = re.split(r"[\s<>=!~\[;]", str(d), 1)[0].lower()
+        out[name] = str(d)
+    return out
+
+
+def _pyproject_tool_deps(c: dict) -> dict[str, str]:
+    """pyproject.toml の dependency-groups と Poetry の依存。"""
+    out: dict[str, str] = {}
+    for group in (c.get("dependency-groups") or {}).values():
+        for d in group if isinstance(group, list) else []:
+            out[re.split(r"[\s<>=!~\[;]", str(d), 1)[0].lower()] = str(d)
+    poetry = (c.get("tool") or {}).get("poetry") or {}
+    for sec in ("dependencies", "dev-dependencies"):
+        out.update({k.lower(): str(v) for k, v in (poetry.get(sec) or {}).items()})
+    for g in (poetry.get("group") or {}).values():
+        out.update({k.lower(): str(v) for k, v in (g.get("dependencies") or {}).items()})
+    return out
+
+
+def _requirements_deps(tree: Tree) -> dict[str, str]:
+    """requirements*.txt の依存。同じ名前は先に出た行を採る。"""
+    out: dict[str, str] = {}
     for f in tree.shallow("requirements*.txt"):
         for line in (tree.read(f) or "").splitlines():
             name = re.split(r"[\s<>=!~\[;#]", line.strip(), 1)[0].lower()
             if name:
                 out.setdefault(name, line.strip())
+    return out
+
+
+def _py_dependencies(tree: Tree) -> dict[str, str]:
+    """pyproject.toml（project・dependency-groups・poetry）と requirements*.txt。"""
+    out: dict[str, str] = {}
+    for f in tree.shallow("pyproject.toml"):
+        c = tree.toml(f)
+        out.update(_pyproject_project_deps(c))
+        out.update(_pyproject_tool_deps(c))
+        proj = c.get("project") or {}
+        if proj.get("requires-python"):
+            out["python"] = str(proj["requires-python"])
+    for name, line in _requirements_deps(tree).items():
+        out.setdefault(name, line)
     return out
 
 
@@ -269,29 +293,6 @@ def measure_languages(tree: Tree, deps: dict) -> dict:
             entry["version"] = version_of[lang]
         out.append(entry)
     return measured(out)
-
-
-def compose_services(text: str) -> list[tuple[str, str]]:
-    """compose のファイルの `services:` の直下の名前と image（YAML を読まずに字下げで拾う）。"""
-    out, inside, indent, cur = [], False, None, None
-    images: dict[str, str] = {}
-    for line in text.splitlines():
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        lead = len(line) - len(line.lstrip())
-        if lead == 0:
-            inside = line.rstrip() == "services:"
-            continue
-        if not inside:
-            continue
-        if indent is None:
-            indent = lead
-        if lead == indent and line.strip().endswith(":"):
-            cur = line.strip()[:-1].strip("'\"")
-            out.append(cur)
-        elif cur and line.strip().startswith("image:"):
-            images[cur] = line.split(":", 1)[1].strip().strip("'\"")
-    return [(s, images.get(s, "")) for s in out]
 
 
 def _workflow_services(tree: Tree) -> list[str]:

@@ -64,7 +64,7 @@ AI エージェント向けの知識は以下の層で管理する。
 
 ## README の役割
 
-**`README.md` の名前を持つ文書は、規約 `plugins/ndf/skills/markdown-writing/03-readme-roles.md` の
+**`README.md` の名前を持つ文書は、規約 `plugins/ndf/skills/document-style/03-readme-roles.md` の
 役割（入口 / 索引 / 規約）へ当てはめる。** 規約の役割を持つ文書は `README.md` の名前を使わない。
 
 **棚卸しの判定は、節の読み手とその文書を開く読み手が一致するかで行う。** 索引や試験の入口は、
@@ -159,7 +159,7 @@ Codex 連携は MCP サーバではなく `/ndf:external-ai` skill と `corder` 
 - [issue #499](https://github.com/devbasex/ai-plugins/issues/499) / [PR #505](https://github.com/devbasex/ai-plugins/pull/505)（設計） / [PR #594](https://github.com/devbasex/ai-plugins/pull/594)（実装） — `AGENTS.md` と版と配布の正本
 - [issue #500](https://github.com/devbasex/ai-plugins/issues/500) / [PR #608](https://github.com/devbasex/ai-plugins/pull/608)（設計） / [PR #612](https://github.com/devbasex/ai-plugins/pull/612)（実装） — README の役割の適用
 - [版と配布の正本](../versioning-and-distribution.md)
-- [README の役割の規約](../../plugins/ndf/skills/markdown-writing/03-readme-roles.md)
+- [README の役割の規約](../../plugins/ndf/skills/document-style/03-readme-roles.md)
 - [説明文書のチェック](doc-consistency-checks.md)
 - [mcp-serena README](../../plugins/mcp/mcp-serena/README.md)
 - [NDF Plugin リファレンス](../ndf-plugin-reference.md)
