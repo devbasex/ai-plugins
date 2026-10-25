@@ -1,16 +1,7 @@
 """sprint_loop.py: 開発ループの集約（#2089）。`sprint-state.py loop` の副命令だけが呼ぶ。LLM を呼ばない。
 
-ループの記録は、メインディレクトリの `.ndf/loop/<名>/loop.json`（正本）と `laps.md`（描画）である。コミットしない。
-周回はスプリント状態ファイルを ID（パス）で参照し、周回を締めるときに費用・秒・承認ゲートの判定・版を写して固定する。
-止まる条件（予算・同じ失敗・止める指示）は周回の境（周回の開始の前と終わりの後）でだけ判定する。周回の途中で止めるのは、
-承認ゲート 2 を人へ戻した（`gate2_returned`）・プロジェクト MVV が改訂された（`mvv_changed`）・周回を組めなかった
-（`refused`）の 3 つだけで、周回は進行中のまま残す。
-
-外の世界（gh・`upkeep.py rank`・`supervise.py`・`sprint-state.py` の別の副命令）は `Env` の関数を通して呼び、テストで
-差し替える。
-
-記録と止まる条件は `sprint_loop_record.py`、選定は `sprint_loop_select.py`、周回の締めと承認ゲートは
-`sprint_loop_gate.py` にある。
+記録の置き場・周回の固定・止まる条件・`Env` の決まりは `sprint_loop_record.py` の説明にある。選定は
+`sprint_loop_select.py`、周回の締めと承認ゲートは `sprint_loop_gate.py` にある。
 """
 
 from __future__ import annotations
