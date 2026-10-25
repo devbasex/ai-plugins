@@ -240,6 +240,31 @@ def gate2_pipeline(env: Env, rec: dict, lap: dict, stop: dict) -> str:
 # ---------------------------------------------------------------- sprint
 
 
+def sprint_state_init_argv(root: str, rec: dict, lap: dict, issues: list[int]) -> list[str]:
+    """sprint-state.py init のコマンド。周回のディレクトリに mvv.md があればスプリント MVV を渡す。"""
+    init = [sys.executable, str(SPRINT_STATE), "init", lap["state_path"], "--name", lap["sprint"], "--pace", "auto", "--root", root]
+    init += [x for n in issues for x in ("--issue", str(n))] + ["--dev", lap["versions"]["dev"], "--prod", lap["versions"]["prod"]]
+    init += ["--goal", resume_command(rec)]
+    mvv = Path(lap["dir"]) / "mvv.md"
+    if mvv.is_file():
+        init += ["--mvv", str(mvv), "--milestone", lap["milestone"]]
+    return init
+
+
+def new_sprint_argv(root: str, rec: dict, lap: dict, extra: list[str]) -> list[str]:
+    """supervise.py new sprint --pace auto のコマンド。設計を承認済みの課題は --design から外す。"""
+    issues = selected_issues(lap)
+    approved = {w["number"] for w in rec.get("waiting", []) if w.get("answer") == "approved"}
+    design = [n for n in issues if n not in approved]
+    dev = lap["versions"]["dev"]
+    new = [sys.executable, str(SUPERVISE), "new", "sprint", "--pace", "auto", "--state", lap["state_path"], "--name", lap["sprint"]]
+    new += ["--worktree", root, "--issue", *map(str, issues), "--mode", lap["mode"], "--version", dev, "--out", lap["out"]]
+    if design:
+        new += ["--design", *map(str, design)]
+    new += list(extra)
+    return new
+
+
 def cmd_sprint(env: Env, name: str, mode: str, dev: str, prod: str | None, extra: list[str]) -> dict:
     with locked(env, name):
         rec = read_loop_record(env, name)
@@ -254,25 +279,14 @@ def cmd_sprint(env: Env, name: str, mode: str, dev: str, prod: str | None, extra
         d.mkdir(parents=True, exist_ok=True)
         state = d / "state.json"
         lap.update(mode=mode, versions={"dev": dev, "prod": prod or re.sub(r"-.*$", "", dev)}, state_path=str(state))
-        approved = {w["number"] for w in rec.get("waiting", []) if w.get("answer") == "approved"}
         root = str(env.main_dir())
-        init = [sys.executable, str(SPRINT_STATE), "init", str(state), "--name", lap["sprint"], "--pace", "auto", "--root", root]
-        init += [x for n in issues for x in ("--issue", str(n))] + ["--dev", dev, "--prod", lap["versions"]["prod"]]
-        init += ["--goal", resume_command(rec)]
         mvv = d / "mvv.md"
-        if mvv.is_file():
-            init += ["--mvv", str(mvv), "--milestone", lap["milestone"]]
-        code, so, se = env.run(init, cwd=root)
+        code, so, se = env.run(sprint_state_init_argv(root, rec, lap, issues), cwd=root)
         if code != 0:
             return _refused(env, rec, before, "sprint-state.py init", code, (se or so).strip())
         if mvv.is_file():
             copy_mvv_gate(rec, lap, state, mvv)
-        design = [n for n in issues if n not in approved]
-        new = [sys.executable, str(SUPERVISE), "new", "sprint", "--pace", "auto", "--state", str(state), "--name", lap["sprint"]]
-        new += ["--worktree", root, "--issue", *map(str, issues), "--mode", mode, "--version", dev, "--out", lap["out"]]
-        if design:
-            new += ["--design", *map(str, design)]
-        new += list(extra)
+        new = new_sprint_argv(root, rec, lap, extra)
         code, so, se = env.run(new, cwd=root)
         lap["sprint_command"] = shlex.join(new)
         if code != 0:
