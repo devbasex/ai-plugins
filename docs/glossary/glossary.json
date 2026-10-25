@@ -4243,6 +4243,18 @@
       "context": "ndf-document",
       "meaning": "組み直した文書と想定する読み手の説明だけを渡され、会話や経緯の文脈を持たずに読んで、要点の言い直し・分からなかった語と箇所・納得できなかった主張を返す者（サブエージェントか external-ai で呼ぶ別の CLI）",
       "source": "plugins/ndf/skills/document-rebuild/SKILL.md"
+    },
+    {
+      "term": "agy に配る定義",
+      "context": "project-glossary",
+      "meaning": "`plugins/ndf/dev.agy/agents/` の下にあり agy が読むエージェント定義。`plugins/ndf/agents/` から生成した写しで、`model` だけが agy の tier 名に変わる。手で直さない",
+      "source": ""
+    },
+    {
+      "term": "model の対応表",
+      "context": "project-glossary",
+      "meaning": "Claude Code のエージェント定義の `model` の値（型の名前）から agy の tier 名への対応。`scripts/lib/agy_agents.py` が持つ",
+      "source": ""
     }
   ]
 }
