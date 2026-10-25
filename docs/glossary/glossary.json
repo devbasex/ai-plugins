@@ -3735,7 +3735,7 @@
       "term": "テストの無い宣言",
       "context": "ndf-cross-refactoring",
       "meaning": ".ndf/project.json の test があり、unknown と strategy を持たず、種別・雛形の誤りが無く、どの suite も command と scope_command のどちらも持たないもの（suite が 0 個のときを含む）。解析が「テストが無い」と測った {\"suites\": []} を含む。cross-review の最終スイープは検証のコマンドを名指ししない",
-      "pending_source": "issues/issue-1593-design.md"
+      "source": "docs/specifications/cross-review-no-test-declaration-sweep.md"
     },
     {
       "term": "未解決のスレッド",
