@@ -44,6 +44,7 @@ from sprint_loop_record import (
     read_loop_record,
     write_record,
     locked,
+    open_record,
     current_lap,
     consumed,
     resume_command,
@@ -257,9 +258,7 @@ def new_sprint_argv(root: str, rec: dict, lap: dict, extra: list[str]) -> list[s
 
 
 def cmd_sprint(env: Env, name: str, mode: str, dev: str, prod: str | None, extra: list[str]) -> dict:
-    with locked(env, name):
-        rec = read_loop_record(env, name)
-        before = json.loads(json.dumps(rec))
+    with open_record(env, name) as (rec, before):
         lap = current_lap(rec)
         if not lap:
             return refusal_order("進行中の周回が無い（loop select で選んでから組む）")
@@ -319,9 +318,7 @@ def cmd_sprint(env: Env, name: str, mode: str, dev: str, prod: str | None, extra
 
 
 def cmd_answer(env: Env, name: str, number: int, approved: bool, pr: int | None) -> dict:
-    with locked(env, name):
-        rec = read_loop_record(env, name)
-        before = json.loads(json.dumps(rec))
+    with open_record(env, name) as (rec, before):
         w = next((w for w in reversed(rec.get("waiting", [])) if w["number"] == number and not w.get("answer")), None)
         if w is None:
             return refusal_order(f"#{number} は人の判断待ちでない")
@@ -355,9 +352,7 @@ def cmd_answer(env: Env, name: str, number: int, approved: bool, pr: int | None)
 
 
 def cmd_approve_mvv(env: Env, name: str, milestone: str) -> dict:
-    with locked(env, name):
-        rec = read_loop_record(env, name)
-        before = json.loads(json.dumps(rec))
+    with open_record(env, name) as (rec, before):
         try:
             text = sprint_mvv.mvv_sections(env.milestones(rec.get("repo") or "").get(milestone) or "")
         except OSError as e:
@@ -390,9 +385,7 @@ def cmd_stop(env: Env, name: str) -> dict:
 
 
 def cmd_lap(env: Env, name: str, failed: bool, done: str | None, deferred_issues: list[int], update: Callable | None = None) -> dict:
-    with locked(env, name):
-        rec = read_loop_record(env, name)
-        before = json.loads(json.dumps(rec))
+    with open_record(env, name) as (rec, before):
         lap = current_lap(rec)
         if not lap:
             return refusal_order("進行中の周回が無い")

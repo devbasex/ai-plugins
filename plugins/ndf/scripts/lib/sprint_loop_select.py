@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import shlex
 
 import project_mvv as pm
@@ -18,9 +17,8 @@ from sprint_loop_record import (
     PAUSE_RANK,
     Env,
     loop_dir,
-    read_loop_record,
     write_record,
-    locked,
+    open_record,
     current_lap,
     boundary_stop,
     resume_command,
@@ -128,9 +126,7 @@ def choose_issues(env: Env, rec: dict, rank: dict, lap_n: int, descriptions: dic
 
 
 def cmd_select(env: Env, name: str) -> dict:
-    with locked(env, name):
-        rec = read_loop_record(env, name)
-        before = json.loads(json.dumps(rec))
+    with open_record(env, name) as (rec, before):
         if rec.get("status") == "stopped":
             return stopped_result(env, rec, f"ループ {name} は止まっている。再開のコマンド（loop start）で理由を判定し直す")
         if current_lap(rec):
@@ -204,9 +200,7 @@ def run_selection(env: Env, rec: dict, before: dict, n: int, lap: dict | None = 
 
 
 def cmd_exclude(env: Env, name: str, number: int, reason: str) -> dict:
-    with locked(env, name):
-        rec = read_loop_record(env, name)
-        before = json.loads(json.dumps(rec))
+    with open_record(env, name) as (rec, before):
         lap = current_lap(rec)
         if not lap or lap.get("state_path"):
             return refusal_order("スプリントを組む前の進行中の周回が無い（loop exclude は選定の後・loop sprint の前に打つ）")

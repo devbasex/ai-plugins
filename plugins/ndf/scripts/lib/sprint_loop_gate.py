@@ -30,9 +30,8 @@ from sprint_loop_record import (
     NOT_RUN,
     LoopError,
     Env,
-    read_loop_record,
     write_record,
-    locked,
+    open_record,
     current_lap,
     consumed,
     boundary_stop,
@@ -180,9 +179,7 @@ def mark_issue(env: Env, rec: dict, w: dict) -> str | None:
 
 
 def cmd_gate(env: Env, name: str, done: str) -> dict:
-    with locked(env, name):
-        rec = read_loop_record(env, name)
-        before = json.loads(json.dumps(rec))
+    with open_record(env, name) as (rec, before):
         lap = current_lap(rec)
         if not lap or not lap.get("state_path"):
             return refusal_order("スプリントを組んだ進行中の周回が無い")

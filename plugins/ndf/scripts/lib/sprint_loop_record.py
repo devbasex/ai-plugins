@@ -21,6 +21,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -189,6 +190,14 @@ def locked(env: Env, name: str):
     d = loop_dir(env, name)
     d.mkdir(parents=True, exist_ok=True)
     return locks.exclusive(d / RECORD, timeout=60)
+
+
+@contextmanager
+def open_record(env: Env, name: str):
+    """排他の中で記録を読み、(記録, 書き換え検査の基準にする写し) を渡す（I1）。"""
+    with locked(env, name):
+        rec = read_loop_record(env, name)
+        yield rec, json.loads(json.dumps(rec))
 
 
 def current_lap(rec: dict) -> dict | None:
