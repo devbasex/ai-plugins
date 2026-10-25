@@ -299,6 +299,11 @@ def advises(a, closing: bool = False) -> bool:
     return bool(getattr(a, "state", None)) and not closing
 
 
+def has_prod_branch(a) -> bool:
+    """本番のブランチ（--production-branch か .ndf/worktree.json の production_branch）があるか。"""
+    return bool(getattr(a, "production_branch", None))
+
+
 def sprint_state_path(a) -> str:
     return str(Path(a.state).resolve())
 
@@ -328,7 +333,7 @@ def sprint_plans(a) -> list[dict]:
     if not has_release_template(a):
         return waves + route_waves(a, repo, "検査", note=normal_gate_2(a) if advise else None)
     release = {"name": "配布", "plans": {"release": plan_sprint_release(a, repo, advise)}, "then_of": "検査"}
-    if not getattr(a, "production_branch", None):  # 本番を組めないなら今のまま配布で終える（#1914 の決定 3）
+    if not has_prod_branch(a):  # 本番を組めないなら今のまま配布で終える（#1914 の決定 3）
         if advise:
             release["note"] = normal_gate_2(a)
         return waves + [release]
@@ -469,7 +474,7 @@ def manifest_head(a, pace: str, closing: bool = False) -> dict:
 
 def no_prod_stage(a, pace: str, closing: bool) -> bool:
     """normal の雛形の経路で、本番のブランチが無いため本番のステージを置かなかったか（#1914 の決定 3）。"""
-    return pace == "normal" and not closing and not getattr(a, "production_branch", None) and has_release_template(a)
+    return pace == "normal" and not closing and not has_prod_branch(a) and has_release_template(a)
 
 
 def next_text(pace: str, index: list[dict], advise: bool = False, no_prod: bool = False) -> str:
