@@ -37,18 +37,18 @@
 
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
-| 昇格の承認資料 | `merged_lib/merge.py` の `gate_stop`（`normal`）と `_prepare_promote`（`fast` / `auto`）が書く。行の形は `lib/approved_commit.py` の `material_row` / `material_sha` | `{state_dir}/work/approval-promote.md` | — | 承認したコミット（40 桁）・判定の行 |
+| 昇格の承認資料 | 資料の本文と「承認したコミット」の行は `merged_lib/merge.py` の `gate_stop`（`normal`）と `_prepare_promote`（`fast` / `auto`）が書く。「承認の記録」（`by: mvv`）の行だけは `fast` / `auto` の `mvv` ステップの `mvv-gate.py check --gate release --material` が書く。行の形は `lib/approved_commit.py` の `material_row` / `material_sha` | `{state_dir}/work/approval-promote.md` | — | 承認したコミット（40 桁）・判定の行 |
 | 昇格のマージ | `merged_lib/merge.py` の `promote` | 昇格の Pull Request | — | 先端（`headRefOid`）・照合する SHA（`expect_head`） |
 | 昇格のプラン | `supervise_lib/delivery_templates.py` の `plan_promote` | プラン | ステップ（`promote`・`prepare`・`promote-approved`） | 昇格の承認資料のパス（`PROMOTE_MATERIAL`） |
 
-昇格のマージは、承認資料をパスで参照して読むだけで書き換えない。承認資料の書き手は 2 つあるが、`pace` ごとにどちらか 1 つだけが同じプランの中で書く（`normal` は `gate_stop`、`fast` / `auto` は `prepare`）。
+昇格のマージは、承認資料をパスで参照して読むだけで書き換えない。承認資料の持ち主は行ごとに決まる。資料の本文と「承認したコミット」の行は、`pace` ごとにどちらか 1 つだけが同じプランの中で書く（`normal` は `gate_stop`、`fast` / `auto` は `prepare`）。「承認の記録」（`by: mvv`）の行は `fast` / `auto` の `mvv-gate.py` だけが「承認したコミット」の行の直後へ書き、ほかの行を書き換えない（`normal` では書かれない）。そのため `fast` / `auto` の handoff の後に利用者が見る資料には `by: mvv` の承認の記録が残る。
 
 ### 不変条件
 
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
 | I1 | 昇格の承認資料 | `promote` が昇格の Pull Request で承認ゲート 2 に止まる（終了コード 10）とき、承認資料の「2. 承認の判断に使うもの」の表に、止まる判定に使ったのと同じ 1 回の読みの `headRefOid` が `\| 承認したコミット \| <40 桁> \|` の 1 行で載り、結果の `metrics.approved_sha` と gate の `items[].head` も同じ値である | 先端が 40 桁の 16 進で読めなければ資料を書かずに終了コード 2（`EXIT_UNREADABLE`）で止まる。マージしない |
-| I2 | 昇格の承認資料 | `fast` / `auto` の `prepare`（`--prepare`）が書く承認資料も、I1 と同じ形の「承認したコミット」の行を 1 行持つ | I1 と同じ |
+| I2 | 昇格の承認資料 | `fast` / `auto` の `prepare`（`--prepare`）が書く承認資料も、I1 と同じ形の「承認したコミット」の行を 1 行持つ。続く `mvv-gate.py` がその直後へ「承認の記録」（`by: mvv`）の行を足した後も、「承認したコミット」の行は 1 行のままで値は変わらない | I1 と同じ |
 | I3 | 昇格のマージ | `--approved-from <資料>` を受けた `promote` は、昇格の Pull Request の先端が資料の承認したコミットに等しいときだけ `gh pr merge` を呼び、`--match-head-commit` にその SHA を渡す | 読むたびに比べ、違えば `gh pr merge` を呼ばずに `items[].result: head_moved`（`head` と `expected` つき）・終了コード 1 で止まり、`next` に承認ゲート 2 からのやり直しを書く |
 | I4 | 昇格のマージ | `--approved-from` を受けた `promote` は、資料から承認したコミットを読めないまま照合を飛ばさない | `gh` を 1 度も呼ばずに終了コード 2 で止まる |
 | I5 | 昇格のマージ | `promote` は `--gate-approved user` を `--approved-from` 無しで受けない（照合の材料の無い利用者の承認でマージしない） | `gh` を 1 度も呼ばずに終了コード 2 で止まり、`next` に資料つきの打ち方を書く |
