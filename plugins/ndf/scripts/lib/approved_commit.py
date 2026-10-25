@@ -159,9 +159,7 @@ def material_row(sha: str) -> tuple[str, str]:
 _VERIFIED_HEAD = "- ベースブランチ "
 _VERIFIED_MID = " の先頭: `"
 _VERIFIED_TAIL = "`。導入の確認はこのコミットで走らせた"
-_VERIFIED_RE = re.compile(
-    "^" + re.escape(_VERIFIED_HEAD) + r"\S+" + re.escape(_VERIFIED_MID) + "([^`]*)" + re.escape(_VERIFIED_TAIL) + "$"
-)
+_VERIFIED_RE = re.compile("^" + re.escape(_VERIFIED_HEAD) + r"\S+" + re.escape(_VERIFIED_MID) + "([^`]*)" + re.escape(_VERIFIED_TAIL) + "$")
 
 
 def verified_line(base: str, sha: str) -> str:
