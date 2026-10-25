@@ -51,15 +51,20 @@ def matches(path: str, patterns) -> bool:
     return any(glob_re(p).match(path) for p in patterns)
 
 
-def read_pace(root) -> dict:
-    """宣言を読み、既定を埋めて返す。無い・読めない・形が誤っていれば PaceError。"""
+def _load_decl(root) -> tuple[Path, object]:
+    """宣言のパスと未検証の JSON の値を返す。無い・読めなければ PaceError。形の検証は呼び手が行う。"""
     path = Path(root) / ".ndf" / DECL_NAME
     try:
-        d = json.loads(path.read_text(encoding="utf-8"))
+        return path, json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         raise PaceError(f"進め方の宣言が無い: {path}")
     except (OSError, ValueError) as e:
         raise PaceError(f"進め方の宣言を読めない: {path}: {e}")
+
+
+def read_pace(root) -> dict:
+    """宣言を読み、既定を埋めて返す。無い・読めない・形が誤っていれば PaceError。"""
+    path, d = _load_decl(root)
     if not isinstance(d, dict):
         raise PaceError(f"進め方の宣言はオブジェクトで書く: {path}")
     if d.get("version") != 1 or isinstance(d.get("version"), bool):
@@ -89,13 +94,7 @@ LOOP_DEFAULTS = {"enabled": False, "budget": {"laps": 3, "usd": 60, "hours": 24}
 def read_loop(root) -> dict:
     """開発ループの節（`loop`。#2089 の決定 7）を読み、既定を埋めて返す。`read_pace` とは別に読み、節の誤りは
     ループだけを断る（`fast` / `auto` は今どおり動く）。宣言が無い・読めない・形が誤っていれば PaceError。"""
-    path = Path(root) / ".ndf" / DECL_NAME
-    try:
-        d = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        raise PaceError(f"進め方の宣言が無い: {path}")
-    except (OSError, ValueError) as e:
-        raise PaceError(f"進め方の宣言を読めない: {path}: {e}")
+    path, d = _load_decl(root)
     sec = _default(d if isinstance(d, dict) else {}, "loop", {})
     if not isinstance(sec, dict):
         raise PaceError(f"進め方の宣言の loop はオブジェクトで書く: {path}")
