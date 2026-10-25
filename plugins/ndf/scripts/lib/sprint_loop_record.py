@@ -256,15 +256,22 @@ def failure_streak(rec: dict) -> tuple[dict | None, int]:
     return key, count
 
 
+def mvv_change_stop(env: Env, rec: dict) -> dict | None:
+    """プロジェクト MVV が周回の開始時から改訂されたか（未承認を含む）。改訂されていれば止まる理由を返す。"""
+    project = pm.load_mvv(env.main_dir())
+    started = (rec.get("project_mvv") or {}).get("sha256")
+    if not project.approved or project.sha256 != started:
+        return {"condition": "mvv_changed", "values": {"started": started, "now": project.sha256 if project.approved else project.status}}
+    return None
+
+
 def boundary_stop(env: Env, rec: dict) -> dict | None:
     """周回の境の判定。最初に当たったものを返す（判定に使った値は values）。当たらなければ None。"""
     stop_file = loop_dir(env, rec["name"]) / STOP_FILE
     if stop_file.exists():
         return {"condition": "user_stop", "values": {"at": stop_file.read_text(encoding="utf-8").strip()}}
-    project = pm.load_mvv(env.main_dir())
-    started = (rec.get("project_mvv") or {}).get("sha256")
-    if not project.approved or project.sha256 != started:
-        return {"condition": "mvv_changed", "values": {"started": started, "now": project.sha256 if project.approved else project.status}}
+    if stop := mvv_change_stop(env, rec):
+        return stop
     key, count = failure_streak(rec)
     if key is not None and count >= rec.get("same_failure", 2):
         return {"condition": "same_failure", "values": {"key": key, "count": count}}

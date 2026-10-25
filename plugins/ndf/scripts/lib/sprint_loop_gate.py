@@ -37,6 +37,7 @@ from sprint_loop_record import (
     current_lap,
     consumed,
     boundary_stop,
+    mvv_change_stop,
     resume_command,
     write_stop,
     stopped_result,
@@ -198,14 +199,8 @@ def handle_gate(env: Env, rec: dict, before: dict, lap: dict, items: list[dict])
     gated = [i for i in items if i.get("result") == "関門"]
     if not gated:
         return refusal_order("done に承認ゲートで止まった計画が無い")
-    project = pm.load_mvv(env.main_dir())
-    started = (rec.get("project_mvv") or {}).get("sha256")
-    if not project.approved or project.sha256 != started:
-        write_stop(
-            env,
-            rec,
-            {"condition": "mvv_changed", "values": {"started": started, "now": project.sha256 if project.approved else project.status}},
-        )
+    if stop := mvv_change_stop(env, rec):
+        write_stop(env, rec, stop)
         write_record(env, rec, before)
         return stopped_result(env, rec, "プロジェクト MVV が改訂された（承認ゲートの機械のチェック）")
     gate1 = [i for i in gated if plan_info(i["plan"]).get("フェーズ") == DESIGN_PHASE]
