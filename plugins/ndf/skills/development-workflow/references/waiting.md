@@ -164,9 +164,10 @@ conductor が起きるのは、承認ゲート・`attention`・キューの終�
    `sv wait $O/done-6.json`。検査のプランがスプリントの Pull Request をベースブランチへマージし、開発版のリリースプランが続けて流れる。
    スプリントの Pull Request の本文に「手動確認」のマージ前の行があれば、印が付くまで `merge-gate` が承認ゲートで止まる
    （利用者が印を付けたら `sv run $O/6-check.json --from merge-gate`）
-8. 承認ゲート 2: キューの結果が `gate`（開発版の facts のステップ）なら、承認資料を添えて本番の承認を取る
-9. 本番: `sv new release --version 10.18.0 --prs <スプリントの PR 番号> --channel prod --worktree <リポジトリの根>/.worktrees/release/v10.18.0 --out $O/8-release-prod.json`、
-   続けて `sv queue $O/8-release-prod.json --done $O/done-8.json` と `sv wait $O/done-8.json`。最後のステップが後片付けを行う
+8. 承認ゲート 2: キューの結果が `gate`（開発版の facts のステップ）なら、`sprint.json` の `関門 2` のステージの `gate` に沿って
+   承認資料を添えて本番の承認を取る。差し戻されたら 9 を打たない
+9. 本番: `sprint.json` の `本番` のステージの `command` に `--done` を足して打つ（`sv queue $O/9-release-prod.json --max 3 --done $O/done-9.json`）と
+   `sv wait $O/done-9.json`。出す PR は検査の報告から埋まる。最後のステップが後片付けを行う
 
 - ステージの番号とプランのファイル名は `new sprint` の出力（`sprint.json` の `ステージ`）が正である。書き出した `command` に `--done` を足して打つ
 - 確定仕様化・振り返り・棚卸しは `normal` のプランが持たないため、supervisor で回す（[agent-layers.md](agent-layers.md) の表の取り込み・仕上げの行）
