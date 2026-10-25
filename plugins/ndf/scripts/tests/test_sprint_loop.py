@@ -754,7 +754,7 @@ def test_gate_1_takes_the_verdict_of_the_plan_design_pr_and_saves_the_pr_as_a_nu
 
 def approve_gate_2(lap):
     state = json.loads(Path(lap["state_path"]).read_text())
-    state["gates"].append({"name": "関門 2", "by": "user", "outcome": "approved"})
+    state["gates"].append({"name": "関門 2", "by": "user", "outcome": "approved", "at": "2026-12-01T00:00:00Z"})
     Path(lap["state_path"]).write_text(json.dumps(state))
 
 
@@ -824,3 +824,52 @@ def test_handoff_keeps_the_concrete_next_step_for_resuming_inside_a_lap(env):
     out = sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
     body = doc.read_text().split("## 次にやること")[1].split("## ")[0]
     assert out["metrics"]["pipeline"] in body
+
+
+def test_gate_2_answer_ignores_an_approval_from_before_the_stop(env):
+    lap = built_lap(env)
+    state = json.loads(Path(lap["state_path"]).read_text())
+    state["gates"].append({"name": "関門 2", "by": "user", "outcome": "approved", "at": "2026-10-01T00:00:00Z"})  # 前の関門への承認
+    Path(lap["state_path"]).write_text(json.dumps(state))
+    p = Path(lap["out"]) / "prod.json"
+    assert sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": str(p), "result": "関門"}]))["exit"] == 3
+    assert sl.cmd_start(env, "l1", [], {})["exit"] == 3  # 止まった後の答えはまだ無い
+    approve_gate_2(sl.current_lap(rec(env)))
+    assert sl.cmd_start(env, "l1", [], {})["status"] == "ok"
+
+
+def test_manual_release_stage_holds_the_close_until_it_is_done(env):
+    base = env.run
+
+    def run(cmd, cwd=None, stdin=None):
+        got = base(cmd, cwd, stdin)
+        if "new" in cmd and cmd[cmd.index("new") + 1] == "sprint":
+            m = Path(cmd[cmd.index("--out") + 1]) / "sprint.json"
+            index = json.loads(m.read_text())
+            index["ステージ"].append({"name": "リリース", "manual": "/ndf:release", "note": "手で届ける"})
+            m.write_text(json.dumps(index, ensure_ascii=False))
+        return got
+
+    env.run = run
+    start(env)
+    sl_select.cmd_select(env, "l1")
+    out = sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
+    pipe = out["metrics"]["pipeline"]
+    first, rest = pipe.split("を終えてから: ")
+    assert "/ndf:release" in first and "close" not in first.split(" を流し")[0]
+    assert rest.startswith("python3 ") and "1-close.json" in rest and "loop lap l1" in rest
+
+
+def test_refused_continuation_after_gate_1_is_rebuilt_from_the_kept_issues(env, monkeypatch):
+    lap = built_lap(env)
+    real = sl_gate.continuation
+    monkeypatch.setattr(sl_gate, "continuation", lambda *a: (_ for _ in ()).throw(ValueError("組めない")))
+    item = {"plan": str(Path(lap["out"]) / "design-11.json"), "result": "関門"}
+    out = sl_gate.cmd_gate(env, "l1", write_done(env, [item]))
+    assert out["exit"] == 3 and rec(env)["stop"]["values"]["step"] == sl_gate.CONTINUATION_STEP
+    assert sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])["exit"] == sl.EXIT_REFUSED  # 全課題で組み直さない
+    monkeypatch.setattr(sl_gate, "continuation", real)
+    got = sl.cmd_start(env, "l1", [], {})
+    assert got["status"] == "ok" and "loop lap l1" in got["metrics"]["next"]
+    close = next(c for c in reversed(env.calls) if "close" in c)
+    assert close[close.index("--issue") + 1 : close.index("--state")] == ["12"]

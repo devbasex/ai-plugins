@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 from typing import Callable
 
+import clock
 import gate_rejections as gr
 import jsonio
 import project_mvv as pm
@@ -68,6 +69,8 @@ from sprint_loop_gate import (
     plan_info,
     gate2_resume_step,
     stages_after,
+    continuation,
+    CONTINUATION_STEP,
     mark_issue,
     refresh_state,
     handle_gate,
@@ -188,13 +191,22 @@ def resume_stopped(env: Env, rec: dict, before: dict) -> dict:
                 env, rec, f"予算（{unit}）を超えたまま（消費 {used} / 予算 {rec['budget'][unit]}）。--budget-{unit} で上書きして再開する"
             )
     elif cond == "gate2_returned" and lap:
-        answer = gate2_answer(lap)
+        answer = gate2_answer(lap, stop.get("at"))
         if answer is None:
             return stopped_result(env, rec, "承認ゲート 2 の答え（承認か差し戻し）がまだ無い")
         if answer == "rejected":
             close_lap(env, rec, lap, RETURNED)
         else:
             nxt = gate2_pipeline(env, rec, lap, stop)
+    elif cond == "refused" and lap and (stop.get("values") or {}).get("step") == CONTINUATION_STEP:
+        # 承認ゲート 1 の後の続きを組めなかった: 判断待ちへ移した課題を戻さず、残した課題で続きを組み直す
+        moved = [w["number"] for w in rec.get("waiting", []) if w.get("lap") == lap["n"]]
+        try:
+            queue, done = continuation(env, rec, lap, moved, lap.get("issues_kept") or [])
+        except (LoopError, OSError, ValueError, KeyError, StopIteration) as e:
+            write_record(env, rec, before)
+            return stopped_result(env, rec, f"承認ゲート 1 の後の続きをまだ組めない: {str(e)[:200]}")
+        nxt = f"{queue} && {wait_lap(rec, done)}"
     elif cond == "refused" and lap:
         nxt = f"python3 {shlex.quote(str(SPRINT_STATE))} loop sprint {name} --mode <モード> --dev <開発版>（モードと版を決め直す）"
     rec["stops"].append({**stop, "resumed_at": env.now()})
@@ -204,19 +216,31 @@ def resume_stopped(env: Env, rec: dict, before: dict) -> dict:
     return loop_ok(f"開発ループ {name} を再開した（{cond} が解けた）", rec, status="resumed", next_=nxt, resolved=cond)
 
 
-def gate2_answer(lap: dict) -> str | None:
-    """周回の状態に承認ゲート 2 の利用者の承認があれば approved、差し戻しの記録があれば rejected、無ければ None。"""
+EPOCH = clock.parse("1970-01-01T00:00:00Z")  # 時刻の無い答え（止まった時刻の無い古い記録のとき）の並びの値
+
+
+def gate2_answer(lap: dict, since: str | None = None) -> str | None:
+    """承認ゲート 2 の答え: 止まった時刻（since）より後の、周回の状態の利用者の承認と差し戻しの記録のうち最新のもの。
+    approved / rejected、どちらも無ければ None。since より前の答え（同じ周回の前の関門への答え）は数えない。"""
+    after = clock.parse(since, naive="utc") if since else None
+
+    def fresh(at):
+        t = clock.parse(at, naive="utc") if at else None
+        if after is None:
+            return t or EPOCH
+        return t if t is not None and t >= after else None
+
     state = jsonio.read(lap.get("state_path") or "", missing={}, broken={}, want=dict) if lap.get("state_path") else {}
-    if any(g.get("name") == GATE_2 and g.get("by") != "mvv" for g in state.get("gates", [])):
-        return "approved"
+    answers = [
+        (k, "approved") for g in state.get("gates", []) if g.get("name") == GATE_2 and g.get("by") != "mvv" and (k := fresh(g.get("at")))
+    ]
     try:
         rows = gr.read_rejections()
     except jsonio.JsonReadError:
         rows = []
     sp = str(Path(lap.get("state_path") or "").resolve()) if lap.get("state_path") else None
-    if any(r.get("gate") == GATE_2 and r.get("sprint") == sp for r in rows):
-        return "rejected"
-    return None
+    answers += [(k, "rejected") for r in rows if r.get("gate") == GATE_2 and r.get("sprint") == sp and (k := fresh(r.get("at")))]
+    return max(answers, key=lambda a: a[0])[1] if answers else None
 
 
 def gate2_pipeline(env: Env, rec: dict, lap: dict, stop: dict) -> str:
@@ -280,6 +304,8 @@ def cmd_sprint(env: Env, name: str, mode: str, dev: str, prod: str | None, extra
             return refusal_order("進行中の周回が無い（loop select で選んでから組む）")
         if rec.get("status") == "stopped" and (rec.get("stop") or {}).get("condition") != "refused":
             return stopped_result(env, rec, "ループは止まっている")
+        if lap.get("issues_kept") is not None:
+            return refusal_order("承認ゲート 1 の後の周回は組み直さない（loop start で残した課題の続きを組む）")
         issues = selected_issues(lap)
         d = Path(lap["dir"])
         d.mkdir(parents=True, exist_ok=True)
@@ -308,8 +334,18 @@ def cmd_sprint(env: Env, name: str, mode: str, dev: str, prod: str | None, extra
         first = next(e for e in index if e.get("command"))
         done = d / "done-1.json"
         lap["dones"] = [str(done)]
-        queue = first["command"] + " --then " + " ".join(map(shlex.quote, close)) + f" --done {shlex.quote(str(done))}"
-        pipeline = f"{queue} && {wait_lap(rec, done)}"
+        hands = [e for e in index[index.index(first) + 1 :] if e.get("command") or "manual" in e]  # 関門は queue と loop gate が扱う
+        if not hands:
+            queue = first["command"] + " --then " + " ".join(map(shlex.quote, close)) + f" --done {shlex.quote(str(done))}"
+            pipeline = f"{queue} && {wait_lap(rec, done)}"
+        else:  # 手で行うステージか別の command（単独の queue の承認ゲート 2）があれば、それを終えるまでまとめへ進めない
+            queue = (
+                f"python3 {shlex.quote(str(SUPERVISE))} queue "
+                + " ".join(map(shlex.quote, close))
+                + f" --max 3 --done {shlex.quote(str(done))}"
+            )
+            todo = " → ".join(e.get("command") or f"{e['name']}（{e['manual']} で行う）" for e in hands)
+            pipeline = f"{first['command']} を流し、続けて {todo} を終えてから: {queue} && {wait_lap(rec, done)}"
         if rec.get("status") == "stopped":  # refused からのやり直し
             rec["stops"].append({**rec["stop"], "resumed_at": env.now()})
             rec["stop"], rec["status"] = None, "running"

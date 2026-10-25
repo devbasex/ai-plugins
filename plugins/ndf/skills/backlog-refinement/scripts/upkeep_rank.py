@@ -215,7 +215,8 @@ def large_slot(rows_in, capacity, cfg: Config, sub_issues, edges):
 
 
 def boundary(rows_in, capacity, slot, quality=None):
-    """切り出しの境界（決定 21 の B）。枠の 1 切れ（と品質の枠の課題）を除いて先頭から、容量の残りに収まるまで取った最後の課題。"""
+    """切り出しの境界（決定 21 の B）。枠の 1 切れ（と品質の枠の課題）を除いて先頭から、容量の残りに収まるまで取った最後の課題。
+    枠を除いた残りに 1 件も収まらなければ `empty`（通常の候補は 0 件。number は表と前倒しの比べに使う先頭の課題）。"""
     if capacity is None or not rows_in:
         return None
     piece = slot["slice"] if slot and slot["status"] == SLOT_FIT else None
@@ -236,6 +237,8 @@ def boundary(rows_in, capacity, slot, quality=None):
         first = next((r for r in rows_in if r.number != piece), None)
         if first is None:
             return None
+        if piece is not None or reserved:  # 枠で容量を使い切った: 通常の候補は 0 件（枠の外の 1 件を容量を超えて足さない）
+            return {"number": first.number, "size_sum": 0, "capacity": capacity, "over": False, "empty": True}
         return {"number": first.number, "size_sum": first.size, "capacity": capacity, "over": True}
     return {"number": last.number, "size_sum": total, "capacity": capacity, "over": False}
 
@@ -246,9 +249,10 @@ def quality_key(r: Row, issue: dict):
     return (not r.observed_harm, issue.get("created_at") or "~", row_key(r))
 
 
-def quality_slot(rows_in, capacity, cfg: Config, issues: dict, slot, blocked=()):
+def quality_slot(rows_in, capacity, cfg: Config, issues: dict, slot, blocked=(), edges=()):
     """品質の枠（#2089 の決定 14 の A）。宣言が無ければ None。容量の ratio 分（最低 min 件）を品質向上の Issue から先に取る。
-    容量が無ければ min 件を取る。大きい課題の枠の 1 切れと尺度を超える課題は取らない。"""
+    容量が無ければ min 件を取る。大きい課題の枠の 1 切れと尺度を超える課題は取らない。未完了の依存先（edges の b）が
+    先に枠へ入っていない課題も取らない（前提を選ばずに後続だけを枠から起動しない）。"""
     q = cfg.quality
     if q is None:
         return None
@@ -259,8 +263,13 @@ def quality_slot(rows_in, capacity, cfg: Config, issues: dict, slot, blocked=())
     pool.sort(key=lambda r: quality_key(r, issues.get(r.number) or {}))
     budget = None if capacity is None else math.floor(capacity * q["ratio"])
     room = None if capacity is None else capacity - (slot["size"] if piece is not None else 0)
+    deps: dict = {}
+    for a, b in edges:  # a は b に依存する
+        deps.setdefault(a, set()).add(b)
     taken, total = [], 0
     for r in pool:
+        if not deps.get(r.number, set()) <= set(taken):
+            continue
         if budget is None:
             if len(taken) >= q["min"]:
                 break
@@ -308,7 +317,7 @@ def _slots(board, ranked):
     cfg = board.cfg
     slot = large_slot(ranked, cfg.capacity, cfg, board.sub_issues, board.edges)
     blocked = _over_and_dependents(board, ranked)
-    quality = quality_slot(ranked, cfg.capacity, cfg, board.issues, slot, blocked)
+    quality = quality_slot(ranked, cfg.capacity, cfg, board.issues, slot, blocked, board.edges)
     return slot, quality, boundary([r for r in ranked if r.number not in blocked], cfg.capacity, slot, quality)
 
 

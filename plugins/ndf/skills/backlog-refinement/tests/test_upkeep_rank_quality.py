@@ -105,3 +105,17 @@ def test_table_shows_the_slot_mark():
 def test_malformed_declaration_is_an_error(bad):
     with pytest.raises(R.RankError):
         R.build_config({}, {"quality": bad})
+
+
+def test_slot_that_uses_up_the_capacity_leaves_no_normal_candidate():
+    specs = [raw(1, ubv=8, size=1), raw(5, ubv=1, size=3)]
+    m = near(R.compute_ranking(board(specs, {5: ["quality"]}, decl={"quality": {"min": 1}}, capacity=3)))
+    assert m["quality_slot"]["issues"] == [5]
+    assert m["boundary"]["empty"] is True and m["boundary"]["size_sum"] == 0  # #1 を容量を超えて足さない
+    assert "通常の候補は 0 件" in R.render_rank_table(m)
+
+
+def test_slot_skips_a_quality_issue_whose_open_dependency_is_not_in_the_slot():
+    b = board(SPECS, LABELS, decl={"quality": {"ratio": 0.4}}, capacity=5)
+    b.edges = {(5, 4)}  # #5 は品質ではない #4 に依存する
+    assert near(R.compute_ranking(b))["quality_slot"]["issues"] == [6]

@@ -101,6 +101,8 @@ def report_sections(rank_out, app) -> tuple[list, dict]:
 
     def bnd(x):
         b = x.get("boundary")
+        if b and b.get("empty"):
+            return f"（境界なし・枠で容量 {b['capacity']} を使い切った）"
         return f"（境界 #{b['number']}・Size の和 {b['size_sum']} / 容量 {b['capacity']}）" if b else ""
 
     def moves(xs):

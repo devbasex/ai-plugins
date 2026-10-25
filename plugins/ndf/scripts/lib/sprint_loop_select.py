@@ -39,7 +39,9 @@ def candidates_of(ms: dict, max_issues: int) -> list[dict]:
     ＋品質の枠の課題（宣言があるとき）。"""
     rows = sorted(ms.get("rows", []), key=lambda r: r["rank"])
     b = ms.get("boundary")
-    if b:
+    if b and b.get("empty"):  # 枠で容量を使い切った: 通常の候補は 0 件
+        nums = set()
+    elif b:
         idx = next((i for i, r in enumerate(rows) if r["number"] == b["number"]), len(rows) - 1)
         nums = {r["number"] for r in rows[: idx + 1]}
     else:

@@ -233,7 +233,7 @@ def handle_gate(env: Env, rec: dict, before: dict, lap: dict, items: list[dict])
     try:
         queue, done = continuation(env, rec, lap, moved, kept)
     except (LoopError, OSError, ValueError, KeyError, StopIteration) as e:
-        return refused_stop(env, rec, before, "続きの queue", 1, str(e))
+        return refused_stop(env, rec, before, CONTINUATION_STEP, 1, str(e))
     pipeline = f"{queue} && {wait_lap(rec, done)}"
     write_record(env, rec, before)
     update_handoff(
@@ -300,6 +300,9 @@ def drop_issues(plan: str, moved: list[int]) -> None:
         if "closes" in s["materials"]:
             s["materials"]["closes"] = [n for n in s["materials"]["closes"] if n not in gone]
     jsonio.write_atomic(Path(plan), info, indent=2)
+
+
+CONTINUATION_STEP = "続きの queue"  # 承認ゲート 1 の後の続きを組めなかったときの refused の step（loop start が組み直す）
 
 
 def continuation(env: Env, rec: dict, lap: dict, moved: list[int], kept: list[int]) -> tuple[str, Path]:
