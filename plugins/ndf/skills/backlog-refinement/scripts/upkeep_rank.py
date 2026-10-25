@@ -274,6 +274,8 @@ def quality_slot(rows_in, capacity, cfg: Config, issues: dict, slot, blocked=(),
             if len(taken) >= q["min"]:
                 break
         elif total + r.size > budget and not (len(taken) < q["min"] and total + r.size <= room):
+            if len(taken) < q["min"]:
+                continue  # 最低件数が未達: 収まらない課題を飛ばし、後ろの収まる課題を探す
             break
         taken.append(r.number)
         total += r.size

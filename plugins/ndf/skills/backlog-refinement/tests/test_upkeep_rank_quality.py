@@ -119,3 +119,10 @@ def test_slot_skips_a_quality_issue_whose_open_dependency_is_not_in_the_slot():
     b = board(SPECS, LABELS, decl={"quality": {"ratio": 0.4}}, capacity=5)
     b.edges = {(5, 4)}  # #5 は品質ではない #4 に依存する
     assert near(R.compute_ranking(b))["quality_slot"]["issues"] == [6]
+
+
+def test_minimum_skips_a_quality_issue_that_does_not_fit_and_takes_a_later_one():
+    specs = [raw(1, ubv=8, size=1), raw(5, ubv=1, size=5), raw(6, ubv=1, size=1)]
+    created = {5: "2026-10-01T00:00:00Z", 6: "2026-10-20T00:00:00Z"}  # 古い #5 が枠の先頭
+    m = near(R.compute_ranking(board(specs, {5: ["quality"], 6: ["quality"]}, created, decl={"quality": {}}, capacity=3)))
+    assert m["quality_slot"]["issues"] == [6]  # Size 5 の #5 は容量 3 に入らない。後ろの #6 で最低 1 件を満たす

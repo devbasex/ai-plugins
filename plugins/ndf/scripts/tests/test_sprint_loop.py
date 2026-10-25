@@ -16,6 +16,7 @@ import pace  # noqa: E402
 import project_mvv as pm  # noqa: E402
 import sprint_loop as sl  # noqa: E402
 import sprint_loop_gate as sl_gate  # noqa: E402
+import sprint_loop_record as sl_record  # noqa: E402
 import sprint_loop_select as sl_select  # noqa: E402
 
 MVV_TEXT = "## Mission\n速く\n\n## Vision\n回る\n\n## Value\n実測\n"
@@ -422,6 +423,50 @@ def built_lap(env, nums=(11, 12)):
     sl_select.cmd_select(env, "l1")
     sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
     return sl.current_lap(rec(env))
+
+
+def test_gate_1_drops_issues_whose_design_did_not_finish(env):
+    (env.root / ".ndf" / "pace.json").write_text(json.dumps({**DECL, "loop": {**DECL["loop"], "max_issues": 3}}))
+    lap = built_lap(env, (11, 12, 13))
+    out = sl_gate.cmd_gate(
+        env,
+        "l1",
+        write_done(
+            env,
+            [
+                {"plan": str(Path(lap["out"]) / "design-11.json"), "result": "関門"},
+                {"plan": str(Path(lap["out"]) / "design-12.json"), "result": "失敗"},
+                {"plan": str(Path(lap["out"]) / "design-13.json"), "result": "完了"},
+            ],
+        ),
+    )
+    assert out["metrics"]["status"] == "continue" and out["metrics"]["waiting"] == [11]
+    q = out["metrics"]["queue"]
+    assert "impl-12.json" not in q and "impl-11.json" not in q and "impl-13.json" in q  # 設計と承認を経ない #12 を実装しない
+    r = rec(env)
+    assert [w["number"] for w in r["waiting"]] == [11] and r["laps"][-1]["issues_kept"] == [13]
+    assert json.loads((Path(lap["out"]) / "check.json").read_text())["課題"] == [13]
+
+
+def test_gate_1_closes_the_lap_as_failed_when_only_unfinished_designs_remain(env):
+    lap = built_lap(env)
+    items = [
+        {"plan": str(Path(lap["out"]) / "design-11.json"), "result": "関門"},
+        {"plan": str(Path(lap["out"]) / "design-12.json"), "result": "流さなかった"},
+    ]
+    sl_gate.cmd_gate(env, "l1", write_done(env, items))
+    assert rec(env)["laps"][0]["outcome"] == sl.FAILED
+
+
+def test_env_runs_gh_in_the_root_repository(tmp_path, monkeypatch):
+    seen = []
+    monkeypatch.setattr(sl_record, "_run_loop_cmd", lambda cmd, cwd=None, stdin=None: (seen.append((cmd[1:3], cwd)), (0, "[]", ""))[1])
+    e = sl.Env(tmp_path)
+    e.issue_body(3)
+    e.edit_issue(3, "本文")
+    e.pr_state(501)
+    e.milestones("o/r")
+    assert [c for _, c in seen] == [str(tmp_path)] * 4  # 別リポジトリの --root でも、呼んだ側のリポジトリの課題を触らない
 
 
 def test_gate_refuses_when_done_has_no_gated_plan_and_writes_nothing(env):

@@ -226,9 +226,12 @@ def handle_gate(env: Env, rec: dict, before: dict, lap: dict, items: list[dict])
     gate1 = [i for i in gated if plan_info(i["plan"]).get("フェーズ") == DESIGN_PHASE]
     if len(gate1) != len(gated):
         return handle_gate2(env, rec, before, lap, next(i["plan"] for i in gated if i not in gate1))
-    moved, kept, notes = move_to_waiting(env, rec, lap, gate1)
+    unfinished = unfinished_design_issues(items)
+    moved, kept, notes = move_to_waiting(env, rec, lap, gate1, unfinished)
+    if unfinished:
+        notes.append(f"設計が完了していない課題を続きから外した（{' '.join(f'#{n}' for n in unfinished)}）")
     if not kept:
-        close_lap(env, rec, lap, RETURNED)
+        close_lap(env, rec, lap, FAILED if unfinished else RETURNED)
         return after_close(env, rec, before, f"承認ゲート 1 で全課題を人の判断待ちへ移した（{' '.join(f'#{n}' for n in moved)}）")
     try:
         queue, done = continuation(env, rec, lap, moved, kept)
@@ -264,8 +267,21 @@ def handle_gate2(env: Env, rec: dict, before: dict, lap: dict, plan: str | None 
     return stop_and_report(env, rec, before, stop, "承認ゲート 2 を人へ戻した。本番を出さずに止まる（利用者の承認を求める）", {"gate": 2})
 
 
-def move_to_waiting(env: Env, rec: dict, lap: dict, gate1: list[dict]) -> tuple[list[int], list[int], list[str]]:
-    """承認ゲート 1 で止まった計画の課題を人の判断待ちへ移す。移した課題・残る課題・書けなかった理由を返す。"""
+def unfinished_design_issues(items: list[dict]) -> list[int]:
+    """done のうち、設計のプランが完了も関門もしなかった（失敗・流さなかった）課題。設計と承認を経ていないため続きに入れない。"""
+    out: set[int] = set()
+    for i in items:
+        info = plan_info(i.get("plan") or "")
+        if info.get("フェーズ") == DESIGN_PHASE and i.get("result") not in FINISHED:
+            out |= {int(n) for n in info.get("課題", [])}
+    return sorted(out)
+
+
+def move_to_waiting(
+    env: Env, rec: dict, lap: dict, gate1: list[dict], unfinished: list[int] = ()
+) -> tuple[list[int], list[int], list[str]]:
+    """承認ゲート 1 で止まった計画の課題を人の判断待ちへ移す。移した課題・残る課題・書けなかった理由を返す。
+    unfinished（設計が完了していない課題）は判断待ちへ移さず、残る課題からも外す。"""
     moved, notes = [], []
     for i in gate1:
         pr = report_pr(i)
@@ -281,7 +297,7 @@ def move_to_waiting(env: Env, rec: dict, lap: dict, gate1: list[dict]) -> tuple[
             moved.append(int(n))
             if err := mark_issue(env, rec, w):
                 notes.append(err)
-    kept = [n for n in (lap.get("issues_kept") or selected_issues(lap)) if n not in moved]
+    kept = [n for n in (lap.get("issues_kept") or selected_issues(lap)) if n not in moved and n not in unfinished]
     lap["issues_kept"] = kept
     return moved, kept, notes
 
@@ -310,6 +326,7 @@ def continuation(env: Env, rec: dict, lap: dict, moved: list[int], kept: list[in
     外した課題を除いた new close --pace auto を最後の --then につなぐ。"""
     index = json.loads(Path(lap["manifest"]).read_text(encoding="utf-8"))["ステージ"]
     at = next(i for i, e in enumerate(index) if e.get("name") == GATE_1)
+    moved = sorted(set(moved) | (set(selected_issues(lap)) - set(kept)))  # 設計が完了していない課題の計画も外す
     stages = []
     for e in index[at + 1 :]:
         plans = [

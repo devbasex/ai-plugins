@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import datetime as _dt
+import functools
 import json
 import os
 import re
@@ -90,30 +91,31 @@ def _upkeep_rank(root: Path) -> tuple[int, dict]:
         return code, {"summary": (out or err).strip()[:300]}
 
 
-def _milestones(repo: str) -> dict:
+def _milestones(repo: str, cwd: str | None = None) -> dict:
     """開いているマイルストーンの {題: 説明}。"""
     code, out, err = _run_loop_cmd(
-        ["gh", "api", f"repos/{repo or '{owner}/{repo}'}/milestones?state=open&per_page=100", "--jq", "map({title, description})"]
+        ["gh", "api", f"repos/{repo or '{owner}/{repo}'}/milestones?state=open&per_page=100", "--jq", "map({title, description})"],
+        cwd=cwd,
     )
     if code != 0:
         raise OSError(f"マイルストーンを読めない: {err.strip()[:300]}")
     return {m["title"]: m.get("description") or "" for m in json.loads(out or "[]")}
 
 
-def _pr_state(pr: int) -> str:
-    code, out, _ = _run_loop_cmd(["gh", "pr", "view", str(pr), "--json", "state", "--jq", ".state"])
+def _pr_state(pr: int, cwd: str | None = None) -> str:
+    code, out, _ = _run_loop_cmd(["gh", "pr", "view", str(pr), "--json", "state", "--jq", ".state"], cwd=cwd)
     return out.strip() if code == 0 else ""
 
 
-def _issue_body(n: int) -> str:
-    code, out, err = _run_loop_cmd(["gh", "issue", "view", str(n), "--json", "body", "--jq", ".body"])
+def _issue_body(n: int, cwd: str | None = None) -> str:
+    code, out, err = _run_loop_cmd(["gh", "issue", "view", str(n), "--json", "body", "--jq", ".body"], cwd=cwd)
     if code != 0:
         raise OSError(f"課題 #{n} を読めない: {err.strip()[:300]}")
     return out
 
 
-def _edit_issue(n: int, body: str) -> None:
-    code, _, err = _run_loop_cmd(["gh", "issue", "edit", str(n), "--body-file", "-"], stdin=body)
+def _edit_issue(n: int, body: str, cwd: str | None = None) -> None:
+    code, _, err = _run_loop_cmd(["gh", "issue", "edit", str(n), "--body-file", "-"], cwd=cwd, stdin=body)
     if code != 0:
         raise OSError(f"課題 #{n} の本文を書けない: {err.strip()[:300]}")
 
@@ -137,6 +139,13 @@ class Env:
     upkeep_dir: Callable = _upkeep_state_dir
     now: Callable = field(default=lambda: clock.now_iso("utc"))
     main: Path | None = None
+
+    def __post_init__(self) -> None:
+        # gh は cwd の git remote から対象リポジトリを決める。既定の入口は root で動かし、--root の別リポジトリの
+        # 課題番号で呼んだ側のリポジトリの課題を書き換えない（差し替えた入口はそのまま使う）
+        for attr, fn in (("milestones", _milestones), ("pr_state", _pr_state), ("issue_body", _issue_body), ("edit_issue", _edit_issue)):
+            if getattr(self, attr) is fn:
+                setattr(self, attr, functools.partial(fn, cwd=str(self.root)))
 
     def main_dir(self) -> Path:
         if self.main is None:
