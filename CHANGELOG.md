@@ -18,6 +18,7 @@
 - ndf の Markdown の書き方の Skill の名前は document-style になる。（#2090）（#2092）
 - ndf の他の文書系 Skill は、スラッシュコマンドの一覧に出ない。（#2090）（#2092）
 - ndf の文書系 Skill では、組み直しの手順を document-rebuild にまとめている。題の決まりは短い 1 文で示す。（#2090）（#2092）
+- development-workflow と document-rebuild の文書は、document-rebuild の手順を数でなく手順の名前の並びで示す（#2106）
 
 ### 移行の手順
 
