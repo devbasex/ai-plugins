@@ -89,6 +89,9 @@ def run_init(refactor_lib, paths, patch_lib, refactor, origin_repo, monkeypatch)
     refactor_lib = sys.modules["refactor_lib"]
     probed: list[list[str]] = []
     probed_models: list[dict] = []
+    # 範囲テストのテンプレートの試走（#1630）はこのファイルの主題ではないため、対象なしとして通す。
+    # 試走そのものは `test_template_check.py` で見る。
+    _no_template_check(monkeypatch)
 
     def _run(args, viewer="someone-else", probe=None, real_probe=False, pr_status=None):
         """`probe` を渡すと確認を差し替える。`{ランタイム: 理由}` の者だけが通らない。
@@ -162,6 +165,11 @@ def run_init(refactor_lib, paths, patch_lib, refactor, origin_repo, monkeypatch)
     _run.probed = probed
     _run.probed_models = probed_models
     return _run
+
+
+def _no_template_check(monkeypatch):
+    template_check = sys.modules["refactor_lib.template_check"]
+    monkeypatch.setattr(template_check, "run", lambda *a, **k: template_check.Report(False))
 
 
 def refactor_abort():
@@ -2019,6 +2027,7 @@ def verify_init(refactor, monkeypatch, tmp_path):
 
     monkeypatch.setattr(setup, "resolve_participants", lambda *a, **k: {"available": ["claude"]})
     monkeypatch.setattr(setup.baseline_lib, "run_baseline", fake_run)
+    _no_template_check(monkeypatch)
     args = types.SimpleNamespace(budget_minutes=30, scope=["tests"], pr=1554, require_all=None)
     inputs = types.SimpleNamespace(host="claude", include=[], exclude=[], model_spec={})
 
