@@ -1487,7 +1487,17 @@ def test_new_sprint_writes_waves_in_order(tmp_path):
     assert res["status"] == "ok"
     manifest = json.loads((out / "sprint.json").read_text())
     assert manifest["ブランチ"] == "sprint/v10-18"
-    assert [w["name"] for w in manifest["ステージ"]] == ["設計", "関門 1", "設計の結果", "スプリントブランチ", "実装", "検査", "配布"]
+    assert [w["name"] for w in manifest["ステージ"]] == [
+        "設計",
+        "関門 1",
+        "設計の結果",
+        "スプリントブランチ",
+        "実装",
+        "検査",
+        "配布",
+        "関門 2",
+        "本番",
+    ]
     waves = {w["name"]: w for w in manifest["ステージ"]}
     assert "plans" not in waves["関門 1"] and waves["関門 1"]["gate"]
     assert len(waves["実装"]["plans"]) == 2 and waves["実装"]["command"].endswith("--max 3")
@@ -1563,7 +1573,7 @@ def test_new_sprint_without_design_skips_gate(tmp_path):
     p = cli("new", "sprint", "--name", "m", "--worktree", str(tmp_path), "--issue", "1", "--version", "10.18.0-dev.1", "--out", str(out))
     assert p.returncode == 0, p.stderr
     names = [w["name"] for w in json.loads((out / "sprint.json").read_text())["ステージ"]]
-    assert names == ["スプリントブランチ", "実装", "検査", "配布"]
+    assert names == ["スプリントブランチ", "実装", "検査", "配布", "関門 2", "本番"]
 
 
 @pytest.mark.parametrize("args", [["--issue", "1"], ["--name", "a b", "--issue", "1"], ["--name", "m"], ["--name", "m", "--issue", "1"]])
@@ -2447,6 +2457,48 @@ def test_new_sprint_check_and_release_run_without_a_whole_skill(tmp_path):
     # 配布は検査の queue が --then で流す（検査の PR を --prs へ渡すため）
     assert waves["検査"]["command"].endswith("--then " + waves["配布"]["plans"][0])
     assert "command" not in waves["配布"] and waves["配布"]["then_of"] == "検査"
+
+
+def test_normal_sprint_puts_gate_2_and_prod_after_the_dev_release(tmp_path):
+    """normal の雛形の経路は配布の後に関門 2 と本番を置き、本番は承認の後に単独で流す（#1914）。"""
+    out = tmp_path / "m"
+    p = cli("new", "sprint", "--name", "m", "--worktree", str(tmp_path), "--issue", "1", "--version", "10.18.0-dev.1", "--out", str(out))
+    assert p.returncode == 0, p.stderr
+    index = json.loads((out / "sprint.json").read_text())["ステージ"]
+    assert [w["name"] for w in index][-3:] == ["配布", "関門 2", "本番"]
+    waves = {w["name"]: w for w in index}
+    gate, prod = waves["関門 2"], waves["本番"]
+    assert "plans" not in gate and "approval-" in gate["gate"] and "sprint-state.py" not in gate["gate"]
+    assert "then_of" not in prod and prod["plans"][0].endswith("-release-prod.json")
+    assert prod["command"].endswith(f"queue {prod['plans'][0]} --max 3")
+    assert prod["plans"][0] not in waves["検査"]["command"] and "note" not in waves["配布"]
+    plan = json.loads(Path(prod["plans"][0]).read_text())
+    steps = {s["id"]: s for s in plan["steps"]}
+    assert "--channel prod" in steps["release"]["cmd"] and "--version 10.18.0 " in steps["release"]["cmd"]
+    assert "--prs {queue_pr:check}" in steps["changelog"]["cmd"] and plan["課題"] == [1]
+    assert not {"mvv", "note", "handoff"} & set(steps)
+
+
+def test_prod_plan_queued_alone_takes_the_check_pr(tmp_path):
+    """関門 2 の後に本番のプランだけを流すと、同じディレクトリの検査の報告から PR が埋まる（#1914 の AC3）。"""
+    from supervise_lib import paths, queue
+
+    out = tmp_path / "m"
+    p = cli("new", "sprint", "--name", "m", "--worktree", str(tmp_path), "--issue", "1", "--version", "10.18.0-dev.1", "--out", str(out))
+    assert p.returncode == 0, p.stderr
+    waves = {w["name"]: w for w in json.loads((out / "sprint.json").read_text())["ステージ"]}
+    check, prod = waves["検査"]["plans"][0], waves["本番"]["plans"][0]
+    alone = tmp_path / "alone"
+    alone.mkdir()
+    for f in (check, prod):
+        (alone / Path(f).name).write_text(Path(f).read_text())
+    d = paths.state_dir_of(str(alone / Path(check).name))
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "report.md").write_text("## フェーズの報告\n\n- 結果: 完了\n- Pull Request: 4242\n")
+    target = alone / Path(prod).name
+    assert queue.fill_queue_pr(str(target), []) is None
+    text = target.read_text()
+    assert "{queue_pr:check}" not in text and "--prs 4242" in text
 
 
 def test_new_impl_with_several_issues_refers_to_all_of_them(tmp_path):

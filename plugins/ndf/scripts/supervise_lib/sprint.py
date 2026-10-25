@@ -21,6 +21,9 @@ from supervise_lib.sprint_waves import (
     plan_sprint_design,
     plan_sprint_impl,
     plan_sprint_release,
+    normal_gate_1,
+    normal_gate_2,
+    normal_gate_2_stage,
     plan_advise_design,
     plan_design_results,
     plan_mvv_design,
@@ -325,33 +328,16 @@ def sprint_plans(a) -> list[dict]:
     if not has_release_template(a):
         return waves + route_waves(a, repo, "検査", note=normal_gate_2(a) if advise else None)
     release = {"name": "配布", "plans": {"release": plan_sprint_release(a, repo, advise)}, "then_of": "検査"}
-    if advise:
-        release["note"] = normal_gate_2(a)
-    return waves + [release]
-
-
-def user_gate_cmd(a, gate: str, pr: bool) -> str:
-    """利用者の答えを状態へ書くコマンド（覆しの記録。#1400 の AC6）。承認ゲート 1 は答えた設計 PR を --pr で渡す。"""
-    state = shlex.quote(sprint_state_path(a))
-    return (
-        f"python3 {shlex.quote(str(HERE / 'sprint-state.py'))} gate {state} {shlex.quote(gate)} --what <要約> --by user"
-        + (" --pr <設計 PR>" if pr else "")
-        + " --outcome approved|rejected"
-    )
-
-
-def normal_gate_1(a) -> str:
-    return (
-        "設計 Pull Request をまとめて承認してマージする。承認資料には各設計 PR の助言の MVV 判定（PR のコメント。無ければ「MVV なし」）を"
-        f"載せる。利用者が答えたら、設計 PR ごとに `{user_gate_cmd(a, '関門 1', True)}` を打つ"
-    )
-
-
-def normal_gate_2(a) -> str:
-    return (
-        "承認ゲート 2: 承認資料の末尾に助言の MVV 判定が載る（無ければ「MVV なし」）。利用者が本番への配布に答えたら、"
-        f"`{user_gate_cmd(a, '関門 2', False)}` を打つ"
-    )
+    if not getattr(a, "production_branch", None):  # 本番を組めないなら今のまま配布で終える（#1914 の決定 3）
+        if advise:
+            release["note"] = normal_gate_2(a)
+        return waves + [release]
+    prod = prod_version(a.version)
+    return waves + [
+        release,
+        {"name": "関門 2", "gate": normal_gate_2_stage(a, prod, advise)},
+        {"name": "本番", "plans": {"release-prod": plan_sprint_release(a, repo, channel="prod", version=prod)}},
+    ]
 
 
 def sprint_command(a, drop: tuple[str, ...] = (), design: list[int] | None = None) -> str:
@@ -417,7 +403,7 @@ def cmd_new_sprint(a, waves: list[dict] | None = None) -> dict:
         f"スプリント {a.name} の計画を {plans} 本・{len(index)} ステージで書いた: {manifest}",
         index,
         {"waves": len(index), "plans": plans, "manifest": str(manifest)},
-        next=next_text(pace, index, advise=pace == "normal" and advises(a, closing)),
+        next=next_text(pace, index, advise=pace == "normal" and advises(a, closing), no_prod=no_prod_stage(a, pace, closing)),
     )
 
 
@@ -481,13 +467,19 @@ def manifest_head(a, pace: str, closing: bool = False) -> dict:
     return head
 
 
-def next_text(pace: str, index: list[dict], advise: bool = False) -> str:
+def no_prod_stage(a, pace: str, closing: bool) -> bool:
+    """normal の雛形の経路で、本番のブランチが無いため本番のステージを置かなかったか（#1914 の決定 3）。"""
+    return pace == "normal" and not closing and not getattr(a, "production_branch", None) and has_release_template(a)
+
+
+def next_text(pace: str, index: list[dict], advise: bool = False, no_prod: bool = False) -> str:
     """次に打つ手の文面。auto だけ別の文で、manual のステージがあれば追記する。`advise`（normal と --state）なら
-    承認資料に助言の MVV 判定を載せ、答えを状態へ書くことを足す。"""
+    承認資料に助言の MVV 判定を載せ、答えを状態へ書くことを足す。`no_prod` なら本番を置かなかった理由を足す。"""
     nxt = "ステージの番号の順に command を打つ。関門のステージでは承認を取ってから次へ進む"
     if advise:
         nxt += (
-            "。承認資料には助言の MVV 判定を載せ、利用者が答えたら関門 1 のステージの gate・配布のステージの note にある "
+            "。承認資料には助言の MVV 判定を載せ、利用者が答えたら関門 1 のステージの gate・承認ゲート 2 の文（関門 2 のステージの gate か、"
+            "配布の後のステージの note）にある "
             "sprint-state.py gate（--what と --by user。関門 1 は --pr も）を打つ"
         )
     if pace == "auto":
@@ -495,6 +487,8 @@ def next_text(pace: str, index: list[dict], advise: bool = False) -> str:
             "最初のステージの command を打つ（後ろのステージは --then で続く）。queue が gate を返したら、承認資料に判定の理由と"
             "根拠の項目を添えて承認を取り、関門のステージの説明に沿って続きのステージの resume を打つ"
         )
+    if no_prod:
+        nxt += "。本番のブランチ（--production-branch か .ndf/worktree.json の production_branch）が無いため、承認ゲート 2 と本番は置いていない"
     for manual in (e for e in index if "manual" in e):
         nxt += f"。{manual['name']}は {manual['manual']} で行う（{manual['note']}）"
     return nxt

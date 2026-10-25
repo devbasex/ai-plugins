@@ -65,6 +65,19 @@
       ],
       "then_of": "検査",
       "resume": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/sprint/7-release.json --max 3"
+    },
+    {
+      "wave": 8,
+      "name": "関門 2",
+      "gate": "開発版の配布が書いた承認資料（issues/approval-foo-v1.2.0.md）を示して本番への配布の承認を取り、承認されたら「本番」のステージの command を打つ（差し戻されたら打たない）"
+    },
+    {
+      "wave": 9,
+      "name": "本番",
+      "plans": [
+        "<TMP>/out/sprint/9-release-prod.json"
+      ],
+      "command": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/sprint/9-release-prod.json --max 3"
     }
   ]
 }
