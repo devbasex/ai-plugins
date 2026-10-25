@@ -39,8 +39,7 @@ from sprint_loop_record import (
     boundary_stop,
     mvv_change_stop,
     resume_command,
-    write_stop,
-    stopped_result,
+    stop_and_report,
     update_handoff,
 )
 
@@ -103,9 +102,8 @@ def build_close(env: Env, rec: dict, lap: dict, issues: list[int], record_pr=Non
 
 
 def _refused(env: Env, rec: dict, before: dict, step: str, code: int, summary: str) -> dict:
-    write_stop(env, rec, {"condition": "refused", "values": {"step": step, "exit": code, "summary": summary[:300]}})
-    write_record(env, rec, before)
-    return stopped_result(env, rec, f"周回を組めなかった（{step}）: {summary[:200]}")
+    stop = {"condition": "refused", "values": {"step": step, "exit": code, "summary": summary[:300]}}
+    return stop_and_report(env, rec, before, stop, f"周回を組めなかった（{step}）: {summary[:200]}")
 
 
 def copy_mvv_gate(rec: dict, lap: dict, state: Path, mvv: Path) -> None:
@@ -200,9 +198,7 @@ def handle_gate(env: Env, rec: dict, before: dict, lap: dict, items: list[dict])
     if not gated:
         return refusal_order("done に承認ゲートで止まった計画が無い")
     if stop := mvv_change_stop(env, rec):
-        write_stop(env, rec, stop)
-        write_record(env, rec, before)
-        return stopped_result(env, rec, "プロジェクト MVV が改訂された（承認ゲートの機械のチェック）")
+        return stop_and_report(env, rec, before, stop, "プロジェクト MVV が改訂された（承認ゲートの機械のチェック）")
     gate1 = [i for i in gated if plan_info(i["plan"]).get("フェーズ") == DESIGN_PHASE]
     if len(gate1) != len(gated):
         return handle_gate2(env, rec, before, lap)
@@ -235,9 +231,8 @@ def handle_gate2(env: Env, rec: dict, before: dict, lap: dict) -> dict:
     row = last_verdict(lap["state_path"], "release")
     lap.setdefault("gates", []).append(gate_copy(GATE_2, row))
     values = {"pr": row.get("pr"), "verdict": row.get("verdict", "unknown"), "reasons": row.get("reasons") or []}
-    write_stop(env, rec, {"condition": "gate2_returned", "values": values})
-    write_record(env, rec, before)
-    return stopped_result(env, rec, "承認ゲート 2 を人へ戻した。本番を出さずに止まる（利用者の承認を求める）", {"gate": 2})
+    stop = {"condition": "gate2_returned", "values": values}
+    return stop_and_report(env, rec, before, stop, "承認ゲート 2 を人へ戻した。本番を出さずに止まる（利用者の承認を求める）", {"gate": 2})
 
 
 def move_to_waiting(env: Env, rec: dict, lap: dict, gate1: list[dict]) -> tuple[list[int], list[int], list[str]]:
@@ -338,9 +333,7 @@ def after_close(env: Env, rec: dict, before: dict, summary: str) -> dict:
     """周回を締めた後の境の判定。止まれば 3、続けば ndf_next を返す。"""
     stop = boundary_stop(env, rec)
     if stop:
-        write_stop(env, rec, stop)
-        write_record(env, rec, before)
-        return stopped_result(env, rec, f"{summary}。止まる条件に当たった（{stop['condition']}）")
+        return stop_and_report(env, rec, before, stop, f"{summary}。止まる条件に当たった（{stop['condition']}）")
     write_record(env, rec, before)
     nxt = resume_command(rec)
     update_handoff(env, rec, f"周回 {rec['laps'][-1]['n']} を締めた。次の周回へ", nxt)

@@ -315,6 +315,13 @@ def stopped_result(env: Env, rec: dict, summary: str, extra_metrics: dict | None
     return {**step_result.result(TOOL, "stopped", summary, items, metrics), "exit": EXIT_STOPPED}
 
 
+def stop_and_report(env: Env, rec: dict, before: dict, stop: dict, summary: str, extra: dict | None = None) -> dict:
+    """止まる条件を記録へ書いてから、止まったときの結果を作る（記録と結果の順序をここだけが持つ）。"""
+    write_stop(env, rec, stop)
+    write_record(env, rec, before)
+    return stopped_result(env, rec, summary, extra)
+
+
 # ---------------------------------------------------------------- 引継ぎ文書と laps.md
 
 

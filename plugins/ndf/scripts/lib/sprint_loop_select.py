@@ -24,8 +24,8 @@ from sprint_loop_record import (
     current_lap,
     boundary_stop,
     resume_command,
-    write_stop,
     stopped_result,
+    stop_and_report,
     update_handoff,
 )
 
@@ -137,9 +137,7 @@ def cmd_select(env: Env, name: str) -> dict:
             return refusal_order("進行中の周回がある（I2）。周回を締めてから選ぶ")
         stop = boundary_stop(env, rec)
         if stop:
-            write_stop(env, rec, stop)
-            write_record(env, rec, before)
-            return stopped_result(env, rec, f"止まる条件に当たった（{stop['condition']}）")
+            return stop_and_report(env, rec, before, stop, f"止まる条件に当たった（{stop['condition']}）")
         return run_selection(env, rec, before, len(rec["laps"]) + 1)
 
 
@@ -164,11 +162,11 @@ def run_selection(env: Env, rec: dict, before: dict, n: int, lap: dict | None = 
             if cond == "no_issue"
             else {"reasons": reasons}
         )
-        write_stop(env, rec, {"condition": cond, "values": values})
-        write_record(env, rec, before)
-        return stopped_result(
+        return stop_and_report(
             env,
             rec,
+            before,
+            {"condition": cond, "values": values},
             "着手できる課題が無い" if cond == "no_issue" else "候補がすべて MVV の外・人の判断待ちとして外れた",
             {"selection": got["selection"]},
         )
