@@ -42,6 +42,18 @@ class Report:
     path: Optional[pathlib.Path] = None
 
 
+@dataclass(frozen=True)
+class _ProbeContext:
+    """`check_templates` が suite ごとの試走（`_check_one`）へ渡す、suite によらない入力。"""
+
+    baseline: dict[str, Any]
+    work: pathlib.Path
+    scope: list[str]
+    decl: dict[str, Any]
+    flag: Optional[str]
+    tmp_dir: pathlib.Path
+
+
 def targets_of(strategy: ts.Strategy) -> list[ts.Suite]:
     """試走の対象の suite。`round-only` は改修の範囲テストを使わないため、静的解析は `{paths}` に変更したファイルが入るため対象にしない。"""
     if strategy.name == ts.ROUND_ONLY:
@@ -107,18 +119,18 @@ def _run_probe(
 def _check_one(
     strategy: ts.Strategy,
     suite: ts.Suite,
-    ctx: dict[str, Any],
+    ctx: _ProbeContext,
     budget: tuple[float, float],
     i: int,
 ) -> dict[str, Any]:
-    baseline, work = ctx["baseline"], ctx["work"]
+    baseline, work = ctx.baseline, ctx.work
     failures = baseline.get("existing_failures")
     failing = list(test_triage.by_file(list(failures or [])))
-    pick = ts.probe_paths(strategy, suite, *_probe_candidates(strategy, suite, ctx["scope"], work), failing)
-    index, fix_at = _fix_at(strategy, ctx["decl"], suite, ctx["flag"])
+    pick = ts.probe_paths(strategy, suite, *_probe_candidates(strategy, suite, ctx.scope, work), failing)
+    index, fix_at = _fix_at(strategy, ctx.decl, suite, ctx.flag)
     reference = _reference(baseline, suite, pick.source)
     command = ts.fill(str(suite.scope_command), pick.paths) if pick.paths else None
-    log = ctx["tmp_dir"] / f"template-check-{i}.log"
+    log = ctx.tmp_dir / f"template-check-{i}.log"
     result, not_run = _run_probe(command, work, log, budget)
     known = pick.source == ts.PROBE_FROM_SCOPE and failures is not None
     verdict = ts.template_verdict(result, reference, known, pick.owned, not_run)
@@ -182,7 +194,7 @@ def check_templates(
         return Report(False)
     left = float(timeout) - float(baseline.get("seconds") or 0.0)
     budget = (left, time.monotonic())
-    ctx = {"baseline": baseline, "work": work, "scope": list(scope), "decl": decl or {}, "flag": flag, "tmp_dir": tmp_dir}
+    ctx = _ProbeContext(baseline, work, list(scope), decl or {}, flag, tmp_dir)
     rows = [_check_one(strategy, suite, ctx, budget, i) for i, suite in enumerate(suites)]
     # 試走が書いた JUnit を残さない（後の手順が前の実行の結果を読まないため）
     test_triage.clear_junit(str(work), strategy)
