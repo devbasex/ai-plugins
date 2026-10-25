@@ -601,10 +601,16 @@ def verify_commands(decl: dict[str, Any]) -> Optional[list[str]]:
     """cross-review の最終スイープに名指しする全体テスト（両方の種別。I13）。宣言の `test` が無い・不明なら `None`。
 
     `test` があって解けない（不正な `kind` など）ときは `StrategyError` をそのまま上げる。宣言が無いときと
-    分けないと、不正な宣言が最終スイープの既定の探し方へ黙って流れる。
+    分けないと、不正な宣言が最終スイープの既定の探し方へ黙って流れる。種別・雛形の誤りを先に当て、誤りが無く
+    `strategy` を書かず、どの suite も `command` と `scope_command` を持たない宣言（テストの無い宣言。
+    `{"suites": []}` を含む）は名指しするコマンドが無いとして `None` を返す（#1593）。
     """
     test, _ = _test_of(decl)
     if test is None:
+        return None
+    suites = _suites_of(test)
+    _check_templates(suites)
+    if not test.get("strategy") and not any(s.command or s.scope_command for s in suites):
         return None
     return resolve(decl).whole_commands() or None
 

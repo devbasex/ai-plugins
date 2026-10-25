@@ -14,7 +14,7 @@ init → ラウンド（起動・監視・取り込み・根拠の検証・判�
 
 止まるときの JSON の形と終了コードの表は `scripts/lib/drive_pause.py` にある。
 
-件数（metrics）は状態ファイルから数える: rounds / prs / findings / fixed / deferred / rejected / unresolved / final / review_status。
+件数（metrics）は状態ファイルから数える。キーの一覧は SKILL.md の「実行」の節にある。
 """
 
 from __future__ import annotations
@@ -40,6 +40,7 @@ import step_result as sr  # noqa: E402
 from drive_pause import Stop  # noqa: E402
 from loop_drive import call, durable_identity, keep_finished_output, parse_vars  # noqa: E402,F401  テストは `call` をこのモジュールの上で差し替える
 from loop_drive import relaunch_seats, result_args, review_status, write_review_answer  # noqa: E402
+from review_lib.ci import ci_counts  # noqa: E402
 
 TOOL = "cross-review-drive"
 PLACE_ARGS = frozenset({"--worktree"})  # 置き場だけを変える init の引数。完了の記録の比較から除く（#1263 の I4）
@@ -57,10 +58,8 @@ def review_paths():
 
 def sweep_verify_lines(worktree) -> str:
     """最終スイープの検証のコマンドの段落（#1483 I13）。宣言の `test` があれば全体テスト（両方の種別）を名指しする。
-
-    宣言が無い・読めなければ空で、プロンプトは今の探し方（Step 7.5）のまま。`test` があって解けない（不正な
-    `kind` など）ときは、どのキーが不正かを添えて `Stop` で止める。`--verify-command` は読まない。
-    """
+    宣言が無い・読めない・テストの無い宣言（#1593）なら空で、プロンプトは今の探し方（Step 7.5）のまま。`test` があって
+    解けない（不正な `kind` など）ときは、どのキーが不正かを添えて `Stop` で止める。`--verify-command` は読まない。"""
     if not worktree:
         return ""
     import project_decl
@@ -73,7 +72,7 @@ def sweep_verify_lines(worktree) -> str:
     try:
         commands = ts.verify_commands(decl)
     except ts.StrategyError as e:
-        raise Stop(f".ndf/project.json の test が不正: {e}", 2) from e
+        raise Stop(f"最終スイープの指示を組めない: .ndf/project.json の test が不正: {e}", 2) from e
     if not commands:
         return ""
     listed = "\n".join(f"  - {c}" for c in commands)
@@ -164,6 +163,7 @@ class Drive:
             "unresolved": sweep.get("remaining_open"),
             "final": s.get("final"),
             "review_status": review_status(s),
+            **ci_counts(rounds),
         }
 
     # --- 止まる ---
