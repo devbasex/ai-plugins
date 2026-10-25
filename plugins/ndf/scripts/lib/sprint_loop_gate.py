@@ -210,28 +210,8 @@ def handle_gate(env: Env, rec: dict, before: dict, lap: dict, items: list[dict])
         return stopped_result(env, rec, "プロジェクト MVV が改訂された（承認ゲートの機械のチェック）")
     gate1 = [i for i in gated if plan_info(i["plan"]).get("フェーズ") == DESIGN_PHASE]
     if len(gate1) != len(gated):
-        row = last_verdict(lap["state_path"], "release")
-        lap.setdefault("gates", []).append(gate_copy(GATE_2, row))
-        values = {"pr": row.get("pr"), "verdict": row.get("verdict", "unknown"), "reasons": row.get("reasons") or []}
-        write_stop(env, rec, {"condition": "gate2_returned", "values": values})
-        write_record(env, rec, before)
-        return stopped_result(env, rec, "承認ゲート 2 を人へ戻した。本番を出さずに止まる（利用者の承認を求める）", {"gate": 2})
-    moved, notes = [], []
-    for i in gate1:
-        for n in plan_info(i["plan"]).get("課題", []):
-            row = last_verdict(lap["state_path"], "design", n)
-            reasons = row.get("reasons") or []
-            w = {
-                "number": int(n), "reason": "／".join(reasons) or row.get("verdict", "判定を読めない"), "verdict": row.get("verdict", "unknown"),
-                "basis": row.get("basis") or [], "gate": 1, "pr": row.get("pr"), "lap": lap["n"], "at": env.now(),
-            }  # fmt: skip
-            rec["waiting"].append(w)
-            lap.setdefault("gates", []).append(gate_copy(GATE_1, row))
-            moved.append(int(n))
-            if err := mark_issue(env, rec, w):
-                notes.append(err)
-    kept = [n for n in (lap.get("issues_kept") or selected_issues(lap)) if n not in moved]
-    lap["issues_kept"] = kept
+        return handle_gate2(env, rec, before, lap)
+    moved, kept, notes = move_to_waiting(env, rec, lap, gate1)
     if not kept:
         close_lap(env, rec, lap, RETURNED)
         return after_close(env, rec, before, f"承認ゲート 1 で全課題を人の判断待ちへ移した（{' '.join(f'#{n}' for n in moved)}）")
@@ -253,6 +233,37 @@ def handle_gate(env: Env, rec: dict, before: dict, lap: dict, items: list[dict])
         queue=queue,
         pipeline=pipeline,
     )
+
+
+def handle_gate2(env: Env, rec: dict, before: dict, lap: dict) -> dict:
+    """承認ゲート 2 を人へ戻す。本番を出さずに止まる。"""
+    row = last_verdict(lap["state_path"], "release")
+    lap.setdefault("gates", []).append(gate_copy(GATE_2, row))
+    values = {"pr": row.get("pr"), "verdict": row.get("verdict", "unknown"), "reasons": row.get("reasons") or []}
+    write_stop(env, rec, {"condition": "gate2_returned", "values": values})
+    write_record(env, rec, before)
+    return stopped_result(env, rec, "承認ゲート 2 を人へ戻した。本番を出さずに止まる（利用者の承認を求める）", {"gate": 2})
+
+
+def move_to_waiting(env: Env, rec: dict, lap: dict, gate1: list[dict]) -> tuple[list[int], list[int], list[str]]:
+    """承認ゲート 1 で止まった計画の課題を人の判断待ちへ移す。移した課題・残る課題・書けなかった理由を返す。"""
+    moved, notes = [], []
+    for i in gate1:
+        for n in plan_info(i["plan"]).get("課題", []):
+            row = last_verdict(lap["state_path"], "design", n)
+            reasons = row.get("reasons") or []
+            w = {
+                "number": int(n), "reason": "／".join(reasons) or row.get("verdict", "判定を読めない"), "verdict": row.get("verdict", "unknown"),
+                "basis": row.get("basis") or [], "gate": 1, "pr": row.get("pr"), "lap": lap["n"], "at": env.now(),
+            }  # fmt: skip
+            rec["waiting"].append(w)
+            lap.setdefault("gates", []).append(gate_copy(GATE_1, row))
+            moved.append(int(n))
+            if err := mark_issue(env, rec, w):
+                notes.append(err)
+    kept = [n for n in (lap.get("issues_kept") or selected_issues(lap)) if n not in moved]
+    lap["issues_kept"] = kept
+    return moved, kept, notes
 
 
 def continuation(env: Env, rec: dict, lap: dict, moved: list[int], kept: list[int]) -> tuple[str, Path]:
