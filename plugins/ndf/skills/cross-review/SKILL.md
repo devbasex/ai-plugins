@@ -167,7 +167,9 @@ JSON の形と終了コードの表は共通ライブラリの `scripts/lib/driv
 
 再開は同じコマンドを打ち直すだけである。進みは耐久の記録（`~/.local/state/ndf/dbos/review-<鍵>.sqlite`）と state.json にあり、pause の
 結果ファイルがあればその続きから進む。`metrics` は state.json から数えた件数（`rounds` / `prs` / `findings` /
-`fixed` / `deferred` / `rejected` / `unresolved` / `final` / `review_status`）である。
+`fixed` / `deferred` / `rejected` / `unresolved` / `final` / `review_status` / `ci` / `ci_reason`）である。`ci` は最後のラウンドの
+継続的統合の判定（`ci.verdict`。無ければ `null`）、`ci_reason` はその判定が `unverified`・`meta_only`・`pending` のときの理由
+（`unverified` の理由・`meta_only` の注記・未完了のチェックジョブの名前）で、ほかは `null` である。
 
 **終わったレビューにもう一度回すときも、同じコマンドを打ち直すだけである。** state.json を開かない・`mv` しない・
 書き換えない。終わりの時点の PR の head と今の head が違えば（差分を足した）、`state.py init` が `final` を外して

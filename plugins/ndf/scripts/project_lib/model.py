@@ -47,7 +47,12 @@ JobId = Annotated[str, Field(pattern=r"^[^#\s]+\.ya?ml(#[^#\s]+)?$")]
 
 class Suite(schema.Shape):
     """テストの 1 まとまり。`scope_command` の `{paths}`（引用の外の、空白で区切った 1 語）に、シェルの引用で守った範囲の
-    パスが入る。`command` と `scope_command` はシェルで走らせる。
+    パスの並びが入る。入るパスの種類は場所で違う: cross-refactoring の改修の範囲テストではテストのファイルのパス
+    （計画の `test_targets` の `::` より前）、全体テストを CI に任せる戦略の着手前のテストでは `--scope` のテストの置き場所
+    （ディレクトリかファイル）、静的解析（`kind: lint`）では変更したファイルのパス。テストの `scope_command` はテストの
+    ファイルのパスを受けるコマンドで書く（unittest なら `discover -s {paths}` ではなく `python3 -m unittest {paths}`）。
+    ファイルを受けない `scope_command` は、cross-refactoring の `init` がテストのファイルを入れた試走で見分け、改修の前に
+    止める。`command` と `scope_command` はシェルで走らせる。
     `junit` はコマンドが JUnit XML を書く作業ディレクトリからの相対パス（無ければ落ちたテストの見分けは走らせ直しへ落ちる）。
     `kind` は種別で、`test`（テスト）か `lint`（静的解析。整形の検査を含む）。書かなければ `test`。静的解析の suite の範囲は
     変更したファイルのうち `paths` に当たるもの。`paths` の要素は接頭辞（ディレクトリ）か glob（`*.sh` など）で、空ならすべて。

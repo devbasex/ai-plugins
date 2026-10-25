@@ -50,11 +50,13 @@ worker のランタイム: work と drive のステップに `"runtime": "codex"
 `external-ai.py run` で起動する（起動・上限つきの待ち・回収はそのコマンドが持つ）。書かなければ最小構成の claude -p。
 
 drive のステップ: `cmd`（または `"drive": "cross-review" | "cross-refactoring"` と `"args"`）を打ち、最後の行の JSON を読む。
-- `status` が `ok` なら成功。`metrics`（ラウンド数・指摘・未解決・適用・取り消しなど）を報告の「件数」へ載せる
+- `status` が `ok` なら成功。`metrics`（ラウンド数・指摘・未解決・適用・取り消し・cross-review の継続的統合の判定 `ci`
+  と理由 `ci_reason` など）を報告の「件数」へ載せる
 - `gate` なら `items[0]` の `prompt_file` を worker に渡し、`result_file` を書かせてから同じコマンドを打ち直す。
   `command` を持つ pause（最終ゲートの cross-review）は、その駆動を同じ形で回し、`metrics.review_status` を
   `result_file` へ書く
-- `stopped`・結果ファイルが書かれない・`"max_pauses"`（既定 12）を超える、のどれかなら失敗
+- `stopped`・結果ファイルが書かれない・`"max_pauses"`（既定 12）を超える、のどれかなら失敗。`stopped` の止まった理由には
+  駆動の `summary` と、`metrics.exit` があれば「（元の終了コード N）」が添う
 
 ステップごとの作業場所: run と work のステップに `"cwd"` を書くと、そのステップだけ別の場所で動く（取り込みで PR ごとに
 作業ツリーが違うとき）。work のステップでは worker へ渡す「作業場所」もその `cwd` になる。
@@ -196,9 +198,15 @@ queue の置き換え: `{queue_prs}` は前のすべてのステージの Pull R
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 # queue が --then のプランを流す前に、先行のプランの Pull Request の番号へ置き換える印
 QUEUE_PRS = "{queue_prs}"
+
+
+def sprint_state_path(a) -> str:
+    """スプリントの状態ファイルの絶対パス（sprint.py と sprint_waves.py が共有する）。"""
+    return str(Path(a.state).resolve())
 
 
 def _part_prompt(base_prompt: str, i: int, parts: list[dict]) -> str:

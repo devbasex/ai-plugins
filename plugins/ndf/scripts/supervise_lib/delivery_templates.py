@@ -68,7 +68,8 @@ def plan_promote(
 
     - normal（`mvv` 無し）: promote（承認の引数無し。承認ゲート 2 で終える）→ promote-approved（`--from` でだけ入る）
     - fast / auto（`mvv` にスプリントの状態）: verify（導入の確認。落ちたら止まる。#1457）→ prepare（PR と承認資料）→ mvv（承認ゲート 2 の MVV 判定）→ note（判定のコメント）→
-      promote（`--gate-approved mvv`）。note か promote が落ちたら handoff が承認ゲートへ落とす
+      promote（`--gate-approved mvv`）。promote は mvv と同じ導入の確認の承認資料（VERIFY_MATERIAL）を `--expect-head-from` に受け、
+      確かめたコミットのときだけマージする（#1529）。note か promote が落ちたら handoff が承認ゲートへ落とす
     """
     head, base = a.base, production or a.production_branch
     if not base:
@@ -139,7 +140,7 @@ def plan_promote(
                 "type": "run",
                 "stage": "配布",
                 "timeout": timeout,
-                "cmd": promote + wait + " --gate-approved mvv",
+                "cmd": promote + wait + f" --expect-head-from {VERIFY_MATERIAL} --gate-approved mvv",
                 "on_fail": "handoff",
                 "gate_next": "end",
                 "next": "record",

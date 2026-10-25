@@ -282,6 +282,7 @@ sequenceDiagram
 
 止まったときの理由は「ステップ <id> が失敗した（exit=N）」に、そのステップの `summary` と、`on_fail` でそこへ回した直前のステップの
 `<id>: <summary>` が続く（決定 7）。実装のプランは `base-return` の要約が、検査のプランは `abort` の理由の後に `base-return:` の要約が載る。
+どちらの `summary` も、結果 JSON の `status` が `stopped` で `metrics.exit` が整数なら、後ろへ「（元の終了コード N）」が添う。
 
 ## セキュリティ
 

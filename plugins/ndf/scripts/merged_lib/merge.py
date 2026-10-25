@@ -10,11 +10,12 @@ from __future__ import annotations
 
 import json
 
+import approved_commit
 import delivery
 import gh_parts
 import manual_checks
 from merged_lib.checks import TOOL, GreenWatch, pr_state
-from step_result import StepError, approval_present, emit, git_root, result
+from step_result import EXIT_UNREADABLE, StepError, approval_present, emit, git_root, result
 
 
 def add_wait_args(m):
@@ -182,6 +183,30 @@ def _conflicted(root, n, stderr: str) -> bool:
         return False
 
 
+def _merge_pr(root, a, n, watch, items, waits):
+    """緑を確かめた先頭で gh pr merge を走らせ、マージの記録を items へ足す。失敗すれば stopped を emit する。"""
+    sha = watch.last_sha  # --expect-head があれば、GreenWatch が読むたびにこれと比べている
+    pin = ["--match-head-commit", sha] if sha else []  # 緑を確かめた先頭（--expect-head なら比べた先端）だけをマージする
+    p = gh_parts.gh(["pr", "merge", str(n), "--admin", f"--{a.method}", *pin], cwd=root)
+    if p.returncode != 0:
+        if _conflicted(root, n, p.stderr or ""):
+            watch._stop_conflict("gh pr merge がマージのコミットを作れずに拒んだ")
+        emit(
+            result(
+                TOOL,
+                "stopped",
+                f"gh pr merge --admin が失敗: {p.stderr.strip()[:300]}",
+                items + [{"kind": "pr", "name": f"#{n}", "result": "stopped", "reason": p.stderr.strip()[:300]}],
+                {"waits": waits},
+                next=_rerun_superseded_next(n, items),
+            )
+        )
+    merged = {"kind": "pr", "name": f"#{n}", "result": "merged", "method": a.method, "head": sha}
+    if a.gate_approved:
+        merged["gate_approved"] = a.gate_approved  # 誰が承認ゲート 2 を通したか（監査で辿る。#1336 の I8）
+    items.append(merged)
+
+
 def merge_when_green(a, cleanup, next_cmd=None, plan_step="merge-approved"):
     root = git_root(a.root)
     n = a.pr
@@ -203,26 +228,7 @@ def merge_when_green(a, cleanup, next_cmd=None, plan_step="merge-approved"):
     gate_metrics = {"verdict": verdict.value, "target": verdict.target} if verdict else {}
 
     if not any(i["kind"] == "pr" and i["result"] == "already_merged" for i in items):
-        sha = watch.last_sha  # --expect-head があれば、GreenWatch が読むたびにこれと比べている
-        pin = ["--match-head-commit", sha] if sha else []  # 緑を確かめた先頭（--expect-head なら比べた先端）だけをマージする
-        p = gh_parts.gh(["pr", "merge", str(n), "--admin", f"--{a.method}", *pin], cwd=root)
-        if p.returncode != 0:
-            if _conflicted(root, n, p.stderr or ""):
-                watch._stop_conflict("gh pr merge がマージのコミットを作れずに拒んだ")
-            emit(
-                result(
-                    TOOL,
-                    "stopped",
-                    f"gh pr merge --admin が失敗: {p.stderr.strip()[:300]}",
-                    items + [{"kind": "pr", "name": f"#{n}", "result": "stopped", "reason": p.stderr.strip()[:300]}],
-                    {"waits": waits},
-                    next=_rerun_superseded_next(n, items),
-                )
-            )
-        merged = {"kind": "pr", "name": f"#{n}", "result": "merged", "method": a.method, "head": sha}
-        if a.gate_approved:
-            merged["gate_approved"] = a.gate_approved  # 誰が承認ゲート 2 を通したか（監査で辿る。#1336 の I8）
-        items.append(merged)
+        _merge_pr(root, a, n, watch, items, waits)
 
     if a.no_cleanup:
         emit(
@@ -299,7 +305,15 @@ def _prepare_promote(root, a, n, item):
 
 def promote(a, cleanup):
     """ベースブランチ（--head）から本番チャネル（--base）への昇格の Pull Request を作り（あれば使い）、承認ゲート 2 の後にマージする。
-    head はベースブランチなので、マージの後に後片付けをしない（#1336 の I7）。"""
+    head はベースブランチなので、マージの後に後片付けをしない（#1336 の I7）。
+    --expect-head-from があれば、最初に導入の確認の承認資料から確かめたコミットを読み、merge-when-green の
+    --expect-head と同じ照合に使う。読めなければ gh を呼ばずに EXIT_UNREADABLE で止まる（照合を飛ばさない。#1529）。"""
+    src = getattr(a, "expect_head_from", None)
+    if src:
+        try:
+            a.expect_head = approved_commit.verified_sha(src)
+        except ValueError as e:
+            raise StepError(f"確かめたコミットを読めないため昇格しない: {e}", EXIT_UNREADABLE) from e
     root = git_root(a.root)
     n, created = _find_or_create_promote_pr(root, a.head, a.base)
     item = {"kind": "pr", "name": f"#{n}", "result": "created" if created else "found", "base": a.base, "head_branch": a.head}

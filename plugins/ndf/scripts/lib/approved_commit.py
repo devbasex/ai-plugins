@@ -2,10 +2,11 @@
 
 - 承認資料（`release-steps.py approval-facts` が書く Markdown）の欄の名前・SHA の形の検査・読み取り・承認の記録の書き込み
 - 承認したコミットから比べた先端までに、許したもの（配布の PR）の外のコミットや中身が無いかの比較（`compare_approved`）
+- 導入の確認の承認資料（`release-steps.py verify-facts` が書く）の、確かめたコミットの行の形と読み取り
+  （`verified_line` / `verified_sha`。昇格の経路 `merged-steps.py promote --expect-head-from` が読む。#1529）
 
 `compare_approved` は git を読むだけで書かず、終了コードも出力も持たずに判定（`Verdict`）を値で返す。読み替えは呼び手が行う。
-ブランチ名は受け取らず SHA だけを受け取る。`allowed` を空にすると、先端の木が承認したコミットの木と等しいかの判定になる
-（昇格の経路 `merged-steps.py promote` から使う形）。
+ブランチ名は受け取らず SHA だけを受け取る。`allowed` を空にすると、先端の木が承認したコミットの木と等しいかの判定になる。
 """
 
 from __future__ import annotations
@@ -153,6 +154,32 @@ def material_row(sha: str) -> tuple[str, str]:
     return (ROW, parse_sha(sha))
 
 
+# --- 確かめたコミット（導入の確認の承認資料。#1529） ------------------------------
+
+_VERIFIED_HEAD = "- ベースブランチ "
+_VERIFIED_MID = " の先頭: `"
+_VERIFIED_TAIL = "`。導入の確認はこのコミットで走らせた"
+_VERIFIED_RE = re.compile("^" + re.escape(_VERIFIED_HEAD) + r"\S+" + re.escape(_VERIFIED_MID) + "([^`]*)" + re.escape(_VERIFIED_TAIL) + "$")
+
+
+def verified_line(base: str, sha: str) -> str:
+    """導入の確認の承認資料（`release-steps.py verify-facts`）の、確かめたコミットの行。"""
+    return f"{_VERIFIED_HEAD}{base}{_VERIFIED_MID}{sha}{_VERIFIED_TAIL}"
+
+
+def verified_sha(path) -> str:
+    """導入の確認の承認資料から確かめたコミットを読む（`merged-steps.py promote --expect-head-from`）。
+    資料が無い・行が無い・行が 2 つ以上・40 桁の 16 進でなければ ValueError（照合を飛ばさない）。"""
+    p = Path(path)
+    if not p.is_file():
+        raise ValueError(f"導入の確認の承認資料 {p} が無い")
+    found = [m.group(1) for m in (_VERIFIED_RE.match(line) for line in p.read_text(encoding="utf-8").split("\n")) if m]
+    if len(found) != 1:
+        what = "無い" if not found else f"{len(found)} 行ある"
+        raise ValueError(f"導入の確認の承認資料 {p} に確かめたコミットの行が{what}")
+    return parse_sha(found[0])
+
+
 # --- 比較 ---------------------------------------------------------------------
 
 
@@ -195,6 +222,28 @@ def _expected_tree(root, approved, allowed) -> str | None:
     return out.split()[0] if out else None
 
 
+def _outside_of_prs(root, approved, allowed) -> list[str] | None:
+    """approved..配布の PR の先端のうち、配布の PR のコミットでないもの（I3）。読めなければ None。"""
+    outside: list[str] = []
+    for pr in allowed:
+        listed = _rev_list(root, f"{approved}..{pr.head}")
+        if listed is None:
+            return None
+        outside += [c for c in listed if c not in pr.commits and c not in outside]
+    return outside
+
+
+def _outside_to_tip(root, approved, tip, allowed) -> list[str] | None:
+    """approved..tip の（マージでない）コミットのうち、配布の PR の先端から届かず、配布の PR の mergeCommit でも
+    同じ patch-id でもないもの（I9）。読めなければ None。"""
+    listed = _rev_list(root, "--no-merges", f"{approved}..{tip}", *(f"^{pr.head}" for pr in allowed))
+    if listed is None:
+        return None
+    merges = {pr.merge_commit for pr in allowed if pr.merge_commit}
+    patches = {pid for pr in allowed for c in pr.commits if (pid := _patch_id(root, c))}
+    return [c for c in listed if c not in merges and _patch_id(root, c) not in patches]
+
+
 def compare_approved(root, approved: str, tip: str, allowed: list[AllowedPR] = ()) -> Verdict:
     """承認したコミット approved から比べた先端 tip までを比べる（#815 の設計の「compare の中の順序」）。
 
@@ -215,19 +264,13 @@ def compare_approved(root, approved: str, tip: str, allowed: list[AllowedPR] = (
     if not _ok(root, "merge-base", "--is-ancestor", approved, tip):
         v.reason = NOT_ANCESTOR
         return v
-    outside: list[str] = []
-    for pr in allowed:
-        listed = _rev_list(root, f"{approved}..{pr.head}")
-        if listed is None:
-            return v
-        outside += [c for c in listed if c not in pr.commits and c not in outside]
+    outside = _outside_of_prs(root, approved, allowed)
+    if outside is None:
+        return v
     if not outside:
-        listed = _rev_list(root, "--no-merges", f"{approved}..{tip}", *(f"^{pr.head}" for pr in allowed))
-        if listed is None:
+        outside = _outside_to_tip(root, approved, tip, allowed)
+        if outside is None:
             return v
-        merges = {pr.merge_commit for pr in allowed if pr.merge_commit}
-        patches = {pid for pr in allowed for c in pr.commits if (pid := _patch_id(root, c))}
-        outside = [c for c in listed if c not in merges and _patch_id(root, c) not in patches]
     if outside:
         v.reason = OUTSIDE_COMMITS
         v.outside = [Outside(c, _subject(root, c)) for c in outside]

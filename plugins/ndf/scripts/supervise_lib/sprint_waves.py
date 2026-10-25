@@ -15,6 +15,7 @@ from supervise_lib.decl import decl_fields
 from supervise_lib.paths import DESIGN_READY, GLOSSARY_PY, MVV_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, SYNC_DESIGN_BODY, WORKTREE_SETUP
 from supervise_lib.procedures import DESIGN_RESULTS, pr_step, requirements_path, sprint_materials, sprint_out, with_record
 from supervise_lib.release_templates import MVV_NOTE, advise_steps, plan_release
+from supervise_lib.plan import sprint_state_path
 from supervise_lib.templates import plan_check, plan_check_since, plan_impl
 from supervise_lib.verify_steps import handoff_step, merge_steps
 
@@ -318,29 +319,31 @@ def plan_sprint_check(a, repo: str) -> dict:
     return plan
 
 
-def plan_sprint_release(a, repo: str, advise: bool = False) -> dict:
-    """開発版の配布。出す PR は検査のプランのスプリントの PR（`{queue_pr:check}`）で、検査の queue の --then でも
-    単独で流し直しても埋まる（#1915）。`advise` なら承認資料の後に助言の MVV 判定を置く（pace: normal と --state。#1400）。"""
+def plan_sprint_release(a, repo: str, advise: bool = False, channel: str = "dev", version: str | None = None) -> dict:
+    """pace: normal の配布。出す PR は検査のプランのスプリントの PR（`{queue_pr:check}`）で、検査の queue の --then でも
+    単独で流し直しても埋まる（#1915）。本番（channel が prod）も同じ組み立てで、承認ゲート 2 の後に単独で流す（#1914）。
+    `advise` なら開発版の承認資料の後に助言の MVV 判定を置く（pace: normal と --state。#1400）。本番には置かない。"""
+    version = version or a.version
     ns = argparse.Namespace(
         **decl_fields(a),
-        version=a.version,
+        version=version,
         prs=["{queue_pr:check}"],
         prs_from_queue=False,
-        channel="dev",
+        channel=channel,
         repo=repo,
         prev_tag=None,
-        worktree=f"{repo}/.worktrees/release/v{a.version}",
-        branch=f"release/v{a.version}",
+        worktree=f"{repo}/.worktrees/release/v{version}",
+        branch=f"release/v{version}",
         issue=a.issue,
         mode=a.mode,
-        advise=a.state if advise else None,
+        advise=a.state if advise and channel == "dev" else None,
     )
     return plan_release(ns)
 
 
 def advise_design_steps(a) -> list[dict]:
     """助言の MVV 判定（#1400）の mvv・mvv-note のステップ。判定によらず、想定外の失敗でも関門 1 の judge（gate）へ進む。"""
-    state = shlex.quote(str(Path(a.state).resolve()))
+    state = shlex.quote(sprint_state_path(a))
     note = {
         "timeout": 300,
         "cmd": f"sh -c '[ ! -f {MVV_NOTE} ] || gh pr comment {{pr}} --body-file {MVV_NOTE}'",
@@ -369,7 +372,7 @@ def plan_mvv_design(a, n: int, repo: str) -> dict:
     """pace: fast と auto の設計: 関門 1 の judge を MVV 判定のステップへ替える。従えばラベルとコメントを付けてマージする。
     ラベルの付与かマージが落ちたら handoff で関門 1 の by: mvv の記録を外し、プランを関門で終える（#1370 の I8）。"""
     plan = plan_sprint_design(a, n, repo)
-    state = shlex.quote(str(Path(a.state).resolve()))
+    state = shlex.quote(sprint_state_path(a))
     note = MVV_NOTE
     # 用語チェックの当たりが直し切れずに残ったら、mvv の判定へ渡さず関門 1 の judge（gate）へ回す
     push = ""
@@ -400,7 +403,7 @@ def plan_mvv_design(a, n: int, repo: str) -> dict:
             "next": "merge-gate",
         },
         *merge_steps(a, next="end", on_fail="handoff"),
-        handoff_step(str(Path(a.state).resolve()), "関門 1", "承認ラベルの付与かマージ"),
+        handoff_step(sprint_state_path(a), "関門 1", "承認ラベルの付与かマージ"),
     ]
     plan["規則"] = (
         "設計の cross-review は上限 3 ラウンドで関門 1 の判定（mvv のステップ）へ渡す（収束を待たない）。駆動そのものが失敗したら gate。"

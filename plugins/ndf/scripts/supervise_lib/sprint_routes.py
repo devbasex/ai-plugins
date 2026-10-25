@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import shlex
+
 import delivery
 from pace import PaceError, read_pace
 from sprint_mvv import MVV_PACES
 from supervise_lib.decl import DeclError, decl_roots, delivery_decl, require_versions
-from supervise_lib.plan import QUEUE_PRS
+from supervise_lib.paths import HERE
+from supervise_lib.plan import QUEUE_PRS, sprint_state_path
 from supervise_lib.delivery_templates import GATE_2_MATERIAL, plan_gate_2, plan_promote, plan_verify
-from supervise_lib.release_templates import RELEASE_FORMS
+from supervise_lib.release_templates import RELEASE_FORMS, material_path
 from supervise_lib.verify_steps import plan_limits
 
 
@@ -163,3 +166,38 @@ def manual_production_waves(a, repo: str, then_of: str, mvv: str, condition: dic
         },
     ]
     return waves
+
+
+def user_gate_cmd(a, gate: str, pr: bool) -> str:
+    """利用者の答えを状態へ書くコマンド（覆しの記録。#1400 の AC6）。承認ゲート 1 は答えた設計 PR を --pr で渡す。"""
+    state = shlex.quote(sprint_state_path(a))
+    return (
+        f"python3 {shlex.quote(str(HERE / 'sprint-state.py'))} gate {state} {shlex.quote(gate)} --what <要約> --by user"
+        + (" --pr <設計 PR>" if pr else "")
+        + " --outcome approved|rejected"
+    )
+
+
+def normal_gate_1(a) -> str:
+    return (
+        "設計 Pull Request をまとめて承認してマージする。承認資料には各設計 PR の助言の MVV 判定（PR のコメント。無ければ「MVV なし」）を"
+        f"載せる。利用者が答えたら、設計 PR ごとに `{user_gate_cmd(a, '関門 1', True)}` を打つ"
+    )
+
+
+def normal_gate_2(a) -> str:
+    return (
+        "承認ゲート 2: 承認資料の末尾に助言の MVV 判定が載る（無ければ「MVV なし」）。利用者が本番への配布に答えたら、"
+        f"`{user_gate_cmd(a, '関門 2', False)}` を打つ"
+    )
+
+
+def normal_gate_2_stage(a, repo: str | None, prod: str, advise: bool) -> str:
+    """pace: normal の承認ゲート 2 のステージの文。承認の手順はここの 1 か所に置き、配布の note に重ねない（#1914 の決定 1）。
+    承認資料は本番のプランの release と同じく元のリポジトリの下の絶対パスで示す（作業場所の git の根に依らない）。"""
+    approval = material_path(repo, f"issues/approval-{(a.release or {}).get('plugin')}-v{prod}.md")
+    text = (
+        f"開発版の配布が書いた承認資料（{approval}）を示して本番への配布の承認を取り、承認されたら `python3 {shlex.quote(str(HERE / 'release-steps.py'))} approve --approval {shlex.quote(approval)} "
+        "--approved-sha <approval-facts の metrics.approved_sha> --by user` で承認を記録してから「本番」のステージの command を打つ（差し戻されたら打たない）"
+    )
+    return text + "。" + normal_gate_2(a) if advise else text
