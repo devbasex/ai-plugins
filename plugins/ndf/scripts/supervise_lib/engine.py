@@ -34,7 +34,8 @@ def _result_summary(text: str) -> str:
     """ステップの出力の最後の JSON の summary。`status` が `stopped` で `metrics.exit` が整数なら「（元の終了コード N）」を添える。"""
     res = last_json(text) or {}
     summary = str(res.get("summary") or "")
-    code = (res.get("metrics") or {}).get("exit") if isinstance(res.get("metrics"), dict) else None
+    metrics = res.get("metrics")
+    code = metrics.get("exit") if isinstance(metrics, dict) else None
     if summary and res.get("status") == "stopped" and isinstance(code, int) and not isinstance(code, bool):
         return f"{summary}（元の終了コード {code}）"
     return summary
