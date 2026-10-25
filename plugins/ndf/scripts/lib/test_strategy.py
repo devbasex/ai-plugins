@@ -343,6 +343,129 @@ def scope_runs(strategy: Strategy, targets: list[str], changed: list[str]) -> li
     return runs
 
 
+# ---------- 範囲テストのテンプレートの試走（#1630） ----------
+
+# 判定（`template_verdict`）。`ok` だけが続ける（#1630 の I2）。
+PROBE_OK = "ok"
+PROBE_DEFECT = "defect"
+PROBE_UNDECIDED = "undecided"
+# 候補を選んだ場所（`probe_paths`）。上から順に、最初に 1 本以上見つかった場所を使う（#1630 の I3）。
+PROBE_FROM_SCOPE = "scope"
+PROBE_FROM_REPO = "repo"
+PROBE_FROM_PATHS = "paths"
+# 試走の基準（着手前のテストの成否。`template_verdict` が読む）。
+REFERENCE_GREEN = "green"
+REFERENCE_RED = "red"
+REFERENCE_NONE = "none"
+# 試走に入れるテストのファイルの最大の本数。1 本は受けて 2 本目を受けない雛形（`discover -s a b`）を見分ける。
+PROBE_MAX_FILES = 2
+
+
+@dataclass
+class ProbePick:
+    """試走に入れるパス（0〜2 本）と、選んだ場所、その suite が受け持つと言い切れるか（`owned`）。"""
+
+    paths: list[str]
+    source: Optional[str]
+    owned: bool
+
+
+@dataclass
+class ProbeVerdict:
+    """試走の判定。`status` は `ok` / `defect` / `undecided`。`ok` 以外は `init` を止める。"""
+
+    status: str
+    reason: str
+
+    @property
+    def stops(self) -> bool:
+        return self.status in (PROBE_DEFECT, PROBE_UNDECIDED)
+
+
+def _root_of(p) -> str:
+    """suite の `paths` の要素の前後の空白と末尾の `/` を外した形。"""
+    return str(p).strip().rstrip("/")
+
+
+def _is_whole_root(r: str) -> bool:
+    """`_root_of` の形がリポジトリ全体（`.` か空）を指すか。"""
+    return r in (".", "")
+
+
+def _declares_whole(suite: Suite) -> bool:
+    """suite の `paths` が `.` か空（`suite_for` が全てのファイルを当てる）か。"""
+    return not suite.paths or any(_is_whole_root(_root_of(p)) for p in suite.paths)
+
+
+def probe_roots(suite: Suite) -> list[str]:
+    """suite の `paths` のうち、配下の追跡ファイルを候補にしてよい要素（`.` と glob を除く）。"""
+    roots = [_root_of(p) for p in suite.paths]
+    return [r for r in roots if not _is_whole_root(r) and not any(c in r for c in _GLOB_CHARS)]
+
+
+def probe_paths(
+    strategy: Strategy,
+    suite: Suite,
+    scope_files: list[str],
+    repo_files: list[str],
+    paths_files: list[str],
+    failing_files: list[str],
+) -> ProbePick:
+    """試走に入れるテストのファイルを選ぶ（#1630 の I3）。プロセスもファイルも触らない。
+
+    `scope_files` は `--scope` のテストの置き場所の配下のテストのファイルで、`suite_groups` と同じ規則（`suite_for`、
+    当たらなければ最初のテストの suite）でこの suite に当たるもの。`repo_files` はリポジトリの追跡ファイルのうち
+    テストの名前の形のもので、`suite_for` がこの suite を返したものだけ（最初の suite へ寄せない）。`paths_files` は
+    suite の `paths`（`probe_roots`）の配下の追跡ファイル（名前の形を問わない）。どれも `failing_files`
+    （既存失敗のファイル）を除き、並べ替えた先頭から `PROBE_MAX_FILES` 本を取る。
+
+    `owned` が偽なのは、`paths` の候補（テストでないファイルが入りうる）と、`paths` が `.` か空の suite の
+    `repo` の候補（宣言していない置き場所のテストが入りうる）である。"""
+    failing = {target_path(f) for f in failing_files}
+    scoped = strategy.scoped_suites(TEST)
+    first = scoped[0] if scoped else None
+
+    def keep(files: list[str], pick: Any) -> list[str]:
+        out = sorted({target_path(f) for f in files if target_path(f)} - failing)
+        return [f for f in out if pick(f)][:PROBE_MAX_FILES]
+
+    own = keep(scope_files, lambda f: (suite_for(strategy, f, TEST) or first) is suite)
+    if own:
+        return ProbePick(own, PROBE_FROM_SCOPE, True)
+    own = keep(repo_files, lambda f: suite_for(strategy, f, TEST) is suite)
+    if own:
+        return ProbePick(own, PROBE_FROM_REPO, not _declares_whole(suite))
+    own = keep(paths_files, lambda f: True)
+    if own:
+        return ProbePick(own, PROBE_FROM_PATHS, False)
+    return ProbePick([], None, False)
+
+
+def template_verdict(
+    result: Optional[Outcome], reference: str, failures_known: bool, owned: bool, not_run: str = "候補のファイルが無い"
+) -> ProbeVerdict:
+    """試走の判定（#1630 の判定の表。上の行から当てる）。`result` が `None` なら走らせていない（理由は `not_run`）。
+
+    `reference` はその suite の着手前のテストの成否（`green` / `red` / `none`）、`failures_known` は既存失敗を読めて
+    試走のファイルから除けたか、`owned` は入れたファイルをその suite が受け持つと言い切れるか（`ProbePick.owned`）。"""
+    if result is None:
+        return ProbeVerdict(PROBE_UNDECIDED, f"{not_run}ため試走していない")
+    if result.status == TIMED_OUT:
+        return ProbeVerdict(PROBE_UNDECIDED, "試走が上限で打ち切られた")
+    if result.status == PASSED:
+        return ProbeVerdict(PROBE_OK, "試走が通った")
+    if result.status != FAILED:
+        return ProbeVerdict(PROBE_UNDECIDED, f"試走を起動できなかった（{result.reason}）")
+    code = f"終了コード {result.code}"
+    if not owned:
+        return ProbeVerdict(PROBE_UNDECIDED, f"試走が{code}で落ちたが、入れたファイルをこの suite が受け持つと言い切れない")
+    if reference == REFERENCE_GREEN:
+        return ProbeVerdict(PROBE_DEFECT, f"着手前のテストは通り、試走が{code}で落ちた")
+    if failures_known:
+        return ProbeVerdict(PROBE_DEFECT, f"既存失敗のファイルを除いた試走が{code}で落ちた")
+    return ProbeVerdict(PROBE_UNDECIDED, f"着手前のテストが通らず既存失敗も読めないため、試走の{code}の原因を決められない")
+
+
 # ---------- 宣言の読み取り ----------
 
 
@@ -601,10 +724,16 @@ def verify_commands(decl: dict[str, Any]) -> Optional[list[str]]:
     """cross-review の最終スイープに名指しする全体テスト（両方の種別。I13）。宣言の `test` が無い・不明なら `None`。
 
     `test` があって解けない（不正な `kind` など）ときは `StrategyError` をそのまま上げる。宣言が無いときと
-    分けないと、不正な宣言が最終スイープの既定の探し方へ黙って流れる。
+    分けないと、不正な宣言が最終スイープの既定の探し方へ黙って流れる。種別・雛形の誤りを先に当て、誤りが無く
+    `strategy` を書かず、どの suite も `command` と `scope_command` を持たない宣言（テストの無い宣言。
+    `{"suites": []}` を含む）は名指しするコマンドが無いとして `None` を返す（#1593）。
     """
     test, _ = _test_of(decl)
     if test is None:
+        return None
+    suites = _suites_of(test)
+    _check_templates(suites)
+    if not test.get("strategy") and not any(s.command or s.scope_command for s in suites):
         return None
     return resolve(decl).whole_commands() or None
 

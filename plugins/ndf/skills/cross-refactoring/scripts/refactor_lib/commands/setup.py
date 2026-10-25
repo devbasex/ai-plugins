@@ -12,7 +12,7 @@ import pathlib
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional
 
 import assignment
@@ -29,10 +29,7 @@ import worktree_deps
 
 from .. import ABORT, die, forecast, info, init_test, pause
 from .. import baseline as baseline_lib
-from .. import ci_coverage
-from .. import pr_gate
-from .. import runtime_decl
-from .. import timeline
+from .. import ci_coverage, pr_gate, runtime_decl, template_check, timeline
 from ..paths import (
     github_repo_from_origin,
     default_worktree_base,
@@ -462,6 +459,7 @@ class _InitPreparation:
     strategy: ts.Strategy
     decl: dict[str, Any]
     ci_coverage: dict[str, Any]
+    template_checks: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _resolve_init_inputs(args: argparse.Namespace) -> Optional[_InitInputs]:
@@ -601,6 +599,7 @@ def _verify_init(
     init_test.append_init_test(prep, int(args.budget_minutes), args.pr, baseline)
     if baseline.get("timed_out"):
         init_test.abort_timed_out(prep.strategy, int(args.budget_minutes), baseline, timeout)
+    prep.template_checks = template_check.enforce(args, prep, baseline, timeout)  # 不備なら止める（#1630）
     return participants, baseline, baseline_lib.round_record(prep.strategy, baseline)
 
 
@@ -669,6 +668,7 @@ def _save_initial_state(
     # **実行時の値を書き出す**（決定 24）。改修計画の後の値は `merge-plan` が足す。
     state["limits"] = timeline.of_state(state, forecast.after_plan(state))
     state["ci_coverage"] = prep.ci_coverage
+    state["template_checks"] = list(prep.template_checks)  # 範囲テストのテンプレートの試走の記録（#1630 の決定 7）
     info(f"   実装担当: {context.implementer}（{context.implementer_reason}）")
     # GitHub は自分の Pull Request への `APPROVE` と `REQUEST_CHANGES` を `HTTP 422` で拒む。判定はそのまま結果ファイルへ
     # 残し、**投稿の event だけ**を倒す。収束判定は結果ファイルの判定を見るので、倒しても進行は変わらない。

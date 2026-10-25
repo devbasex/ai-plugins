@@ -482,6 +482,28 @@ def test_verify_commands_stops_on_an_invalid_declaration():
         ts.verify_commands(decl)
 
 
+@pytest.mark.parametrize(
+    "test",
+    [{"suites": []}, {"suites": [{"name": "docs", "runner": "none"}]}, {"suites": [{"name": "md", "kind": "lint"}]}],
+)
+def test_verify_commands_name_nothing_for_a_declaration_without_tests(test):
+    """#1593 I1 — テストの無い宣言（`{"suites": []}` を含む）は名指しするコマンドが無いとして `None`。"""
+    assert ts.verify_commands({"test": test}) is None
+
+
+@pytest.mark.parametrize(
+    "test, key",
+    [
+        ({"suites": [{"name": "py", "kind": "unit"}]}, r"test\.suites\[0\]\.kind"),
+        ({"strategy": "local-scoped-ci-whole", "suites": []}, "scope_command"),
+    ],
+)
+def test_verify_commands_still_stop_on_a_wrong_declaration_without_tests(test, key):
+    """#1593 I2 — command の無い宣言でも、種別の誤りと解けない戦略は今のとおり止める。"""
+    with pytest.raises(ts.StrategyError, match=key):
+        ts.verify_commands({"test": test})
+
+
 # ---------- #1437: 雛形から組んだ全体テストの注記 ----------
 
 PYTEST_DECL = {"test": {"suites": [{"name": "py", "runner": "pytest", "command": "pytest -q"}]}}
@@ -599,3 +621,73 @@ def test_covers_whole(paths, locations, expected):
 def test_covers_whole_needs_a_test_suite():
     lint_only = ts.Strategy(ts.LOCAL_SCOPED_CI_WHOLE, "args", [ts.Suite("lint", "ruff .", paths=["."], kind=ts.LINT)])
     assert ts.covers_whole(lint_only, ["."]) is False
+
+
+# ---------- #1630: 範囲テストのテンプレートの試走（probe_paths・template_verdict） ----------
+
+
+def _probe_strategy(*suites):
+    return ts.Strategy(ts.LOCAL_FULL, "test.strategy", list(suites))
+
+
+def test_probe_paths_takes_two_scope_files_and_skips_existing_failures():
+    """I3: `--scope` の候補から既存失敗のファイルを除き、並べ替えた先頭の 2 本を選ぶ。"""
+    unit = ts.Suite("unit", "u", "u {paths}", paths=["tests"])
+    pick = ts.probe_paths(
+        _probe_strategy(unit), unit, ["tests/test_c.py", "tests/test_a.py", "tests/test_b.py"], [], [], ["tests/test_a.py"]
+    )
+    assert (pick.paths, pick.source, pick.owned) == (["tests/test_b.py", "tests/test_c.py"], ts.PROBE_FROM_SCOPE, True)
+
+
+def test_probe_paths_falls_back_to_repo_files_the_suite_owns():
+    """I3: `--scope` にその suite のテストが無ければ、`suite_for` がその suite を返したものだけを選ぶ（最初の suite へ寄せない）。"""
+    unit = ts.Suite("unit", "u", "u {paths}", paths=["tests"])
+    js = ts.Suite("js", "j", "j {paths}", paths=["web"])
+    strategy = _probe_strategy(unit, js)
+    pick = ts.probe_paths(strategy, unit, [], ["e2e/login.spec.ts", "tests/test_x.py", "web/a.test.ts"], [], [])
+    assert (pick.paths, pick.source, pick.owned) == (["tests/test_x.py"], ts.PROBE_FROM_REPO, True)
+
+
+def test_probe_paths_from_repo_is_not_owned_when_the_suite_declares_dot():
+    """I3: `paths` が `.` の suite には全ファイルが当たるため、`repo` の候補は受け持ちが未確定になる。"""
+    unit = ts.Suite("unit", "u", "u {paths}", paths=["."])
+    pick = ts.probe_paths(_probe_strategy(unit), unit, [], ["e2e/login.spec.ts", "tests/test_x.py"], [], [])
+    assert (pick.paths, pick.source, pick.owned) == (["e2e/login.spec.ts", "tests/test_x.py"], ts.PROBE_FROM_REPO, False)
+
+
+def test_probe_paths_uses_the_declared_paths_when_no_name_matches():
+    """I3: 名前の形に当たらないテストは、suite の `paths` の配下から選ぶ（受け持ちは未確定）。`.` と glob は根にしない。"""
+    php = ts.Suite("php", "p", "p {paths}", paths=["tests", ".", "src/**/*Test.php"])
+    assert ts.probe_roots(php) == ["tests"]
+    pick = ts.probe_paths(
+        _probe_strategy(php), php, [], [], ["tests/TestCase.php", "tests/FooTest.php", "tests/CreatesApplication.php"], []
+    )
+    assert (pick.paths, pick.source, pick.owned) == (["tests/CreatesApplication.php", "tests/FooTest.php"], ts.PROBE_FROM_PATHS, False)
+
+
+def test_probe_paths_is_empty_when_nothing_is_found():
+    unit = ts.Suite("unit", "u", "u {paths}", paths=["."])
+    pick = ts.probe_paths(_probe_strategy(unit), unit, [], [], [], [])
+    assert (pick.paths, pick.source, pick.owned) == ([], None, False)
+
+
+@pytest.mark.parametrize(
+    "result, reference, known, owned, expected",
+    [
+        (None, "green", True, True, ts.PROBE_UNDECIDED),
+        (ts.outcome(None, True), "green", True, True, ts.PROBE_UNDECIDED),
+        (ts.outcome(0, False), "none", False, False, ts.PROBE_OK),
+        (ts.outcome(1, False), "green", True, False, ts.PROBE_UNDECIDED),
+        (ts.outcome(1, False), "green", False, True, ts.PROBE_DEFECT),
+        (ts.outcome(5, False), "red", True, True, ts.PROBE_DEFECT),
+        (ts.outcome(1, False), "none", True, True, ts.PROBE_DEFECT),
+        (ts.outcome(1, False), "red", False, True, ts.PROBE_UNDECIDED),
+        (ts.outcome(1, False), "none", False, True, ts.PROBE_UNDECIDED),
+    ],
+)
+def test_template_verdict_follows_the_table(result, reference, known, owned, expected):
+    """I4: 判定の表の行どおりに返し、`ok` 以外は止める。"""
+    verdict = ts.template_verdict(result, reference, known, owned)
+    assert verdict.status == expected
+    assert verdict.stops is (expected != ts.PROBE_OK)
+    assert verdict.reason

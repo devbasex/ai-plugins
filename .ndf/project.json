@@ -5,18 +5,18 @@
     {
       "name": "python",
       "frameworks": [],
-      "files": 633,
+      "files": 917,
       "version": "3.11"
     },
     {
       "name": "shell",
       "frameworks": [],
-      "files": 77
+      "files": 79
     },
     {
       "name": "javascript",
       "frameworks": [],
-      "files": 2
+      "files": 8
     }
   ],
   "test": {
@@ -92,9 +92,9 @@
   "test_duration": {
     "measured": [
       {
-        "seconds": 424.0,
+        "seconds": 1113.0,
         "source": "ci-steps",
-        "detail": "run 36284835140（.github/workflows/pytest.yml）のテストの step 4 個の合計"
+        "detail": "run 40160663747（.github/workflows/pytest.yml）のテストの step 4 個の合計"
       }
     ]
   },
@@ -104,66 +104,77 @@
       {
         "path": ".github/workflows/glossary.yml",
         "jobs": 1,
-        "wall_seconds": 12.0
+        "wall_seconds": 10.0
       },
       {
         "path": ".github/workflows/lint.yml",
         "jobs": 1,
-        "wall_seconds": 16.0
+        "wall_seconds": 15.0
       },
       {
         "path": ".github/workflows/pr-base-guard.yml",
         "jobs": 1,
-        "wall_seconds": 9.0
+        "wall_seconds": 8.0
       },
       {
         "path": ".github/workflows/pr-body-decisions.yml",
         "jobs": 1,
-        "wall_seconds": 12.0
+        "wall_seconds": 9.0
       },
       {
         "path": ".github/workflows/pytest.yml",
         "jobs": 4,
-        "wall_seconds": 296.0
+        "wall_seconds": 616.0
       },
       {
         "path": ".github/workflows/runtime-plugin-authenticated-smoke.yml",
         "jobs": 1
       },
       {
+        "path": ".github/workflows/runtime-plugin-smoke-latest.yml",
+        "jobs": 1
+      },
+      {
         "path": ".github/workflows/runtime-plugin-smoke.yml",
         "jobs": 5,
-        "wall_seconds": 60.0
+        "wall_seconds": 65.0
       },
       {
         "path": ".github/workflows/runtime-plugin-validate.yml",
-        "jobs": 8,
-        "wall_seconds": 25.0
+        "jobs": 9,
+        "wall_seconds": 28.0
       },
       {
         "path": ".github/workflows/script-structure.yml",
         "jobs": 1,
-        "wall_seconds": 13.0
+        "wall_seconds": 15.0
       },
       {
         "path": "dynamic/pages/pages-build-deployment",
         "jobs": 3,
-        "wall_seconds": 29.0
+        "wall_seconds": 27.0
       }
     ],
     "required_checks": [
+      "doc-line-limit-check",
+      "glossary-check",
       "guard",
       "instruction-files-check",
+      "lint",
       "markdown-link-check",
+      "pr-body-decisions-check",
       "pytest",
+      "required-checks-check",
       "runtime-plugin-build-check",
       "runtime-plugin-validate",
       "runtime-smoke (agy)",
       "runtime-smoke (claude)",
       "runtime-smoke (codex)",
       "runtime-smoke (kiro)",
+      "script-structure-check",
       "skill-frontmatter-check",
-      "skill-repo-assumptions-check"
+      "skill-repo-assumptions-check",
+      "skill-shell-vars-check"
     ]
   },
   "services": {
@@ -208,22 +219,23 @@
     "notes": []
   },
   "analysis": {
-    "analyzer": 1,
-    "at": "2026-09-27T03:04:04+00:00",
+    "analyzer": 2,
+    "at": "2026-10-25T04:18:08+00:00",
     "inputs": {
-      ".github/workflows/glossary.yml": "5b79e8c79e18ad4df0d8f2f63e909c4481bf1aa6",
+      ".github/workflows/glossary.yml": "8ca7da924298f00cf75220e28294a9b0bb473743",
       ".github/workflows/lint.yml": "56129aea1429a46cadbcdc1d99e02eb264cbbb95",
       ".github/workflows/pr-base-guard.yml": "71c0cda668b533694c48064813b68bbd03cd6efc",
-      ".github/workflows/pr-body-decisions.yml": "189d6e18ce07444d9947b72cc4f91e2181aeb8db",
-      ".github/workflows/pytest.yml": "28b588d100201a77607a6e601bb50ac547243698",
-      ".github/workflows/runtime-plugin-authenticated-smoke.yml": "1235813a9da744349b7a8a632aebdb7e3398d060",
-      ".github/workflows/runtime-plugin-smoke.yml": "f5ddec37af8f7893488433084f0a2cb082d3f718",
-      ".github/workflows/runtime-plugin-validate.yml": "a35749abebcf580d6a7bd00175741e2d69cb78fd",
-      ".github/workflows/script-structure.yml": "69dbe26a83b9728e823e2f68314ed07e025f62be",
-      "AGENTS.md": "284d264afd238bb74f2450c8c97c45887d081c19",
-      "CLAUDE.md": "9ddeb20e7b8480012e218e60891971907f886206",
-      "KIRO.md": "73383b2d2a593eaaba35d626f73931df78da47c1",
-      "pyproject.toml": "8070c90c878003392767b4fc877edcd5ab9fd9ce",
+      ".github/workflows/pr-body-decisions.yml": "4c9a78fae1d3766973daa66110ad9c6a212d0fe6",
+      ".github/workflows/pytest.yml": "fdd26324b1360e1f56c215873ecff6060b161fbc",
+      ".github/workflows/runtime-plugin-authenticated-smoke.yml": "15e89f83316c0f275f94c1dfff1981a0add61477",
+      ".github/workflows/runtime-plugin-smoke-latest.yml": "4495e9fe0d54537c07e98dc93d5592258801261c",
+      ".github/workflows/runtime-plugin-smoke.yml": "ff951c3adc274597eba75904fe5498f5f9175d4e",
+      ".github/workflows/runtime-plugin-validate.yml": "ff3bfbce63461fca5e024045154bf53487cf16f6",
+      ".github/workflows/script-structure.yml": "8d07e6bbe7a20e80da9d8fa830d53be7c698a254",
+      "AGENTS.md": "1f92a717ed8590f528efe8132975c288a16bf6b9",
+      "CLAUDE.md": "3e34760f5ad5d1df9f965f1acb795e279babdb1a",
+      "KIRO.md": "f15c72bb7ec964a5c3b04e649972d3948f03b12a",
+      "pyproject.toml": "4fe2a1d2450f2ce5a90e34f20340a467e35d0d01",
       "pytest.ini": "47b2c6e3d414cf343d7f45cda0d08980d28b1a5d"
     },
     "branches": {
@@ -234,10 +246,9 @@
       ]
     },
     "written": {
-      "languages": "5d3339f70f1b230e90928da915da309a6854c2277d0c14ba9e8fea42c7cb3a75",
-      "test": "82dfd6cdb46070f65d57323b597a620812d3dc70f945bf55f727498a1867e0dd",
-      "test_duration": "fee345186423404ef87f5fc2eaad90581a699fc14222e23c9be0a44d81fe24a4",
-      "ci": "410acdb0a2a2713bb935fa7d61e39474cb512549a87695d6e6b9c74f9e394db9",
+      "languages": "320a7cb8a0983114f280919dfd4a931307ee34f149b1983226b870e32817124f",
+      "test_duration": "3dc9bfb50364d4c9e4fea7b4ec4f17084026c8d9d7168f8c87b33647c60aad01",
+      "ci": "110c8db4b84130256ae88b38e3e4ece30c91da1c568be8cc6ac8b564864d8ab4",
       "services": "53f4e4c15a04bde773f9d0d89be06cd65f1a9248c0603b06b78bfa8a5f8a0771",
       "delivery": "d4f1c6e5121b913e9147eb9552c3c78f2a4944bba1562c14c6a4056b1da7ac77",
       "issues": "c851aa29d3c11745f1307194db49eba6a488771771ea86c21c7237e400e336b8",
