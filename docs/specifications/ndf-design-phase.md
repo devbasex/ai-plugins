@@ -83,7 +83,7 @@ AI ごとに変わり、文書の分割単位・記載項目・粒度をその�
 | 工程 | `light` | `operation` | `legacy-refactor` | `standard` |
 | --- | --- | --- | --- | --- |
 | 設計 | `design`（該当時） | `design`（該当時） | `design` | `design` |
-| ドキュメント再構成 | — | — | 設計 Pull Request を分けた場合 | `document-restructuring` |
+| ドキュメント再構成 | — | — | 設計 Pull Request を分けた場合 | `document-rebuild` |
 | ドキュメントレビュー | — | — | 設計 Pull Request を分けた場合 | `pr` → `cross-review` → `merged` |
 
 **`light` と `operation` の条件は触る領域が決める。** 「すべての変更」以外の領域が 1 つ以上
@@ -183,7 +183,7 @@ push-glossary-gate は push-glossary の `cmd` をそのまま使う。
 `ドキュメントレビュー` の 2 つ**で、`.ndf/projects.json` を持つリポジトリでだけ働く。
 
 **ボードの単一選択へ足す値は、この 2 つに限らない。** 設計の工程の前後には
-`ドキュメント再構成`（`document-restructuring` が記録する）も入る。**ボードへ足すのは
+`ドキュメント再構成`（`document-rebuild` が記録する）も入る。**ボードへ足すのは
 工程表の行すべてであり、その操作はボードを持つリポジトリ側が行う。**
 
 ## テスト観点
@@ -201,7 +201,7 @@ push-glossary-gate は push-glossary の `cmd` をそのまま使う。
 | pr のステップが H1 で PR を作り、読めなければ `title` で出す。既存の PR は H1 を読めたときだけ題も書き直す | 同上（`test_new_pr_takes_the_h1_as_its_title` / `test_unreadable_h1_falls_back_to_the_step_title` / `test_existing_pr_*`） |
 | `sync-title` が違うときだけ書き直し、読めないときと `gh` の失敗では書かずに 0 で終わる | 同上（`test_sync_title_*`） |
 | 設計のプランが `title_doc` を渡し、push-glossary と push-glossary-gate の両方が送りの後に `sync-title` を打つ | 同上（`test_sprint_design_pr_reads_the_design_doc_and_falls_back` / `test_both_design_pushes_of_the_mvv_plan_sync_the_title`） |
-| 欄の規約の本文が `design-template.md` の 1 か所にだけあり、承認資料・`decisions.md`・`pr`・`requirements-design`・`document-restructuring`・`agent-layers.md` は節を指す | 文書を読んで確かめる（文言を照合するテストは書かない） |
+| 欄の規約の本文が `design-template.md` の 1 か所にだけあり、承認資料・`decisions.md`・`pr`・`requirements-design`・`document-rebuild`・`agent-layers.md` は節を指す | 文書を読んで確かめる（文言を照合するテストは書かない） |
 
 ## 運用
 

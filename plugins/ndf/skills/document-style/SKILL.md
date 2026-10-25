@@ -10,7 +10,7 @@ allowed-tools:
   - Bash
 ---
 
-# Markdown Writing Skill
+# 第三者が読める Markdown を書く
 
 読み手は**その場の会話・コードベース・検討過程を知らない第三者**（社外・レビュアー・将来の担当者）である、という前提で書く。
 
