@@ -3482,7 +3482,7 @@
       "term": "確かめたコミット",
       "context": "ndf-release",
       "meaning": "導入の確認を走らせた、ベースブランチの先頭のコミットの SHA（40 桁）。導入の確認の承認資料に書かれ、pace: fast / auto の昇格でマージしてよい先端はこのコミットに限る",
-      "pending_source": "issues/issue-1529-design.md"
+      "source": "docs/specifications/ndf-release-approved-commit.md"
     },
     {
       "term": "承認の外のコミット",
@@ -3735,7 +3735,8 @@
     {
       "term": "テストの無い宣言",
       "context": "ndf-cross-refactoring",
-      "meaning": ".ndf/project.json の test があり、unknown と strategy を持たず、種別・雛形の誤りが無く、どの suite も command と scope_command のどちらも持たないもの（suite が 0 個のときを含む）。解析が「テストが無い」と測った {\"suites\": []} を含む。cross-review の最終スイープは検証のコマンドを名指ししない"
+      "meaning": ".ndf/project.json の test があり、unknown と strategy を持たず、種別・雛形の誤りが無く、どの suite も command と scope_command のどちらも持たないもの（suite が 0 個のときを含む）。解析が「テストが無い」と測った {\"suites\": []} を含む。cross-review の最終スイープは検証のコマンドを名指ししない",
+      "pending_source": "issues/issue-1593-design.md"
     },
     {
       "term": "未解決のスレッド",
