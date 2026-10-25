@@ -289,7 +289,9 @@ def test_waiting_plans_do_not_hold_the_only_slot(tmp_path, env):
     c = q.plan("c", [run_step(note(tmp_path, "c"))], ["c.py"], after=["a"])
     p, res = q.run(a, b, c, "--max", "1")
     assert p.returncode == 0 and [i["result"] for i in res["items"]] == ["完了"] * 3, p.stderr
-    assert q.visits() == ["a", "b", "c"]
+    # b と c は a の終わりを別々に待つため、先に目を覚ました方が枠を取る（順は約束しない。#2108）
+    visits = q.visits()
+    assert visits[0] == "a" and sorted(visits[1:]) == ["b", "c"]
 
 
 def test_a_plan_needing_one_member_of_a_group_does_not_wait_for_the_rest(tmp_path, env):
