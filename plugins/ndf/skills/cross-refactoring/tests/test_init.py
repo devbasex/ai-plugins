@@ -169,7 +169,7 @@ def run_init(refactor_lib, paths, patch_lib, refactor, origin_repo, monkeypatch)
 
 def _no_template_check(monkeypatch):
     template_check = sys.modules["refactor_lib.template_check"]
-    monkeypatch.setattr(template_check, "run", lambda *a, **k: template_check.Report(False))
+    monkeypatch.setattr(template_check, "check_templates", lambda *a, **k: template_check.Report(False))
 
 
 def refactor_abort():

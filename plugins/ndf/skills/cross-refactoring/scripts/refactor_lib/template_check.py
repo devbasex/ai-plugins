@@ -68,7 +68,7 @@ def _fix_at(strategy: ts.Strategy, decl: dict[str, Any], suite: ts.Suite, flag: 
     return index, f".ndf/project.json の test.suites[{index}].scope_command"
 
 
-def _candidates(strategy: ts.Strategy, suite: ts.Suite, scope: list[str], work: pathlib.Path) -> tuple[list[str], list[str], list[str]]:
+def _probe_candidates(strategy: ts.Strategy, suite: ts.Suite, scope: list[str], work: pathlib.Path) -> tuple[list[str], list[str], list[str]]:
     """`--scope` のテストの置き場所の配下・リポジトリ全体・suite の `paths` の配下の候補（選ぶのは `probe_paths`）。"""
     w = str(work)
     in_scope = [f for loc in test_locations(scope, w) for f in test_files_under(loc, w)]
@@ -96,7 +96,7 @@ def _check_one(
     baseline, work = ctx["baseline"], ctx["work"]
     failures = baseline.get("existing_failures")
     failing = list(test_triage.by_file(list(failures or [])))
-    pick = ts.probe_paths(strategy, suite, *_candidates(strategy, suite, ctx["scope"], work), failing)
+    pick = ts.probe_paths(strategy, suite, *_probe_candidates(strategy, suite, ctx["scope"], work), failing)
     index, fix_at = _fix_at(strategy, ctx["decl"], suite, ctx["flag"])
     reference = _reference(baseline, suite, pick.source)
     command = ts.fill(str(suite.scope_command), pick.paths) if pick.paths else None
@@ -154,7 +154,7 @@ def stop_text(row: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def run(
+def check_templates(
     strategy: ts.Strategy,
     baseline: dict[str, Any],
     scope: list[str],
@@ -188,7 +188,7 @@ def run(
     return Report(stopped, rows, message, path)
 
 
-def summary(report: Report) -> str:
+def report_summary(report: Report) -> str:
     """続けるときの 1 行。"""
     shown = "、".join(f"{r['suite']}（{' '.join(r['paths'])}）" for r in report.suites)
     return f"✅ 範囲テストのテンプレートを試走: {shown}"
@@ -199,10 +199,10 @@ def enforce(args: Any, prep: Any, baseline: dict[str, Any], timeout: int) -> lis
     続けるときは状態ファイルの `template_checks` に置く記録を返す。"""
     round_test = getattr(args, "round_test", None)
     flag = "--round-test" if ts.has_paths(round_test) else "--baseline-test"
-    report = run(prep.strategy, baseline, list(args.scope), prep.work, prep.tmp_dir, timeout, decl=prep.decl, flag=flag)
+    report = check_templates(prep.strategy, baseline, list(args.scope), prep.work, prep.tmp_dir, timeout, decl=prep.decl, flag=flag)
     if report.stopped:
         info(report.message)
         die(f"範囲テストのテンプレートを直してから打ち直してください（記録: {report.path}）")
     if report.suites:
-        info(summary(report))
+        info(report_summary(report))
     return report.suites
