@@ -144,7 +144,7 @@ bash scripts/build-runtime-plugins.sh --check
 |---|---|---|
 | `plugins/<family>/skills/<Skill 名>/agents/openai.yaml` | Skill を配るプラグイン | Codex の暗黙起動を抑える policy。codex 用 manifest に載り frontmatter が `disable-model-invocation: true` の Skill だけ |
 | `plugins/mcp/<plugin-name>/dev.kiro/install.sh` | MCP plugin | Kiro CLI 向け installer。内容はプラグイン名に依存しない |
-| `plugins/<family>/dev.agy/agents/*.md` | `dev.agy/` を持つプラグイン | `agents/*.md` の写し。agy 1.4 系は `model` に tier 名しか受け付けないため、frontmatter の `model:` の 1 行だけを `scripts/lib/agy_agents.py` の対応表（`sonnet` → `flash`、`opus` → `pro`、`haiku` → `flash`、`inherit` → `inherit`）で置き換える。対応表に無い値は生成も `--check` も非 0 で止まる（#2087） |
+| `plugins/<family>/dev.agy/agents/*.md` | `dev.agy/` を持つプラグイン | `agents/*.md` の写し。agy 1.4 系は `model` に tier 名しか受け付けないため、frontmatter の `model:` の 1 行だけを `scripts/lib/agy_agents.py` の対応表（`sonnet` → `flash`、`opus` → `pro`、`haiku` → `flash`、`inherit` → `inherit`）で置き換える。対応表に無い値は生成も `--check` も非 0 で止まる |
 
 `--check` は生成先との差分を比較し、drift がある場合に非 0 で終了する。
 
