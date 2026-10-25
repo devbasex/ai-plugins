@@ -284,6 +284,18 @@ def failure_key(state: dict) -> dict | None:
     return None
 
 
+def refine_summary(env: Env, rec: dict) -> dict:
+    """棚卸しの結果（upkeep の state dir の candidates.json と rank.json）を周回の記録の形にする。"""
+    sd = env.upkeep_dir(rec.get("repo") or "")
+    cands = jsonio.read(sd / "candidates.json", missing={}, broken={}, want=dict)
+    rank = jsonio.read(sd / "rank.json", missing={}, broken={}, want=dict)
+    return {
+        "report": str(sd / "candidates.json") if cands else "",
+        "rank_changes": (rank.get("metrics") or {}).get("changes") or [],
+        "deferred": (cands.get("metrics") or {}).get("deferred") or [],
+    }
+
+
 def close_lap(env: Env, rec: dict, lap: dict, outcome: str, state: dict | None = None, deferred_issues=(), done_rows=()) -> None:
     """周回を締め、スプリント状態とまとめの記録から値を写して固定する。"""
     if lap.get("outcome") != IN_PROGRESS:
@@ -309,14 +321,7 @@ def close_lap(env: Env, rec: dict, lap: dict, outcome: str, state: dict | None =
     close_rep = next((p for p in state.get("plans", []) if p.get("kind") == "まとめ"), None)
     if close_rep:
         lap["retro"] = (close_rep.get("row") or {}).get("report", "")
-    sd = env.upkeep_dir(rec.get("repo") or "")
-    cands = jsonio.read(sd / "candidates.json", missing={}, broken={}, want=dict)
-    rank = jsonio.read(sd / "rank.json", missing={}, broken={}, want=dict)
-    lap["refine"] = {
-        "report": str(sd / "candidates.json") if cands else "",
-        "rank_changes": (rank.get("metrics") or {}).get("changes") or [],
-        "deferred": (cands.get("metrics") or {}).get("deferred") or [],
-    }
+    lap["refine"] = refine_summary(env, rec)
     lap["deferred_issues"] = sorted(set(lap.get("deferred_issues") or []) | {int(n) for n in deferred_issues})
     lap["failure"] = failure_key(state) if outcome == FAILED else None
     if outcome == FAILED and lap["failure"] is None:
