@@ -87,6 +87,7 @@ agy に配る定義の集合は、エージェント定義の集合と model の
 | `scripts/build-runtime-plugins.sh`（変更） | `sync_agy_skill_links` の symlink の一覧から `agents` を外し、`agy_agents.py` を呼ぶ（`codex_skill_policies.py` と同じ呼び方）。冒頭の usage と、共有を説明するコメントを直す |
 | `plugins/ndf/dev.agy/agents/*.md`（生成物・11 本） | agy に配る定義。symlink 1 本から実体のファイル 11 本へ変わる |
 | `scripts/tests/test_agy_agents.py`（新規） | 不変条件 I1〜I6 と受け入れ条件 6・7 を agy なしで縛る |
+| `scripts/tests/agy_build_helpers.py`（変更） | `build_tree` が一時ツリーへ `build-runtime-plugins.sh` に加えて `scripts/lib/agy_agents.py` も複製する。複製しないと、生成スクリプトが `agy_agents.py` を見つけられず、一時ツリーで生成する既存と新設のテストが落ちる |
 | `scripts/tests/test_agy_distribution.py`（変更） | `test_dev_agy_shares_the_implementation` の `agents` の行を外す（`scripts` の行は残す） |
 | `plugins/ndf/README.md`（変更） | 37 行目の段落を新しい形に合わせる（受け入れ条件 8） |
 | `docs/specifications/ndf-worker-agent-and-skill-excerpts.md`（変更） | 64 行目の「`../agents` への symlink で同じ定義が配られる」を新しい形に合わせる |
@@ -130,6 +131,7 @@ scripts/
 │   ├── codex_skill_policies.py     # 既存（呼び方の手本）
 │   └── agy_agents.py               # 新規
 └── tests/
+    ├── agy_build_helpers.py        # 変更: 一時ツリーへ agy_agents.py も複製する
     ├── test_agy_agents.py          # 新規
     └── test_agy_distribution.py    # 変更
 plugins/ndf/
@@ -262,7 +264,7 @@ YAML として読み直して書き出すと、引用符・改行の形・キー
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #2087 | 実装する | — | `scripts/build-runtime-plugins.sh`、`scripts/lib/agy_agents.py`、`scripts/tests/test_agy_agents.py`、`scripts/tests/test_agy_distribution.py`、`plugins/ndf/dev.agy/agents/`、`plugins/ndf/README.md`、`docs/specifications/ndf-worker-agent-and-skill-excerpts.md` |
+| #2087 | 実装する | — | `scripts/build-runtime-plugins.sh`、`scripts/lib/agy_agents.py`、`scripts/tests/test_agy_agents.py`、`scripts/tests/test_agy_distribution.py`、`scripts/tests/agy_build_helpers.py`、`plugins/ndf/dev.agy/agents/`、`plugins/ndf/README.md`、`docs/specifications/ndf-worker-agent-and-skill-excerpts.md` |
 
 ## 未確認のまま残ること
 
