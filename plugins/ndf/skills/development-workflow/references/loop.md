@@ -1,7 +1,7 @@
 # 開発ループ（`--loop`）
 
 スプリントを 1 つ終えるたびに、棚卸しの順位から次のスプリントを機械で選び、`pace: auto` で周回を続ける進め方の手順。
-設計の正本は `issues/issue-2089-design.md`（確定仕様化の後は `docs/`）にある。
+決定の理由・契約・テスト観点は、ai-plugins の確定仕様 `docs/specifications/ndf-workflow-development-loop.md` にある。
 
 ## 具体例: ループ `l20261025` の 1 周
 
