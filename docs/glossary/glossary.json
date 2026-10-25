@@ -2648,6 +2648,12 @@
       "pending_source": "issues/old/issue-1457-design.md"
     },
     {
+      "term": "昇格の承認資料",
+      "context": "ndf-release",
+      "meaning": "昇格の承認ゲート 2 で利用者か MVV 判定が見る承認資料（{state_dir}/work/approval-promote.md）。承認したコミットの欄を持ち、normal では promote の承認ゲート 2 の停止が、fast / auto では prepare が書く。promote-approved はこの欄の SHA が昇格の Pull Request の先端のときだけマージする",
+      "pending_source": "issues/issue-2104-design.md"
+    },
+    {
       "term": "プロダクトバックログ",
       "context": "ndf-issue-upkeep",
       "meaning": "open の課題を着手の順に並べた全体。マイルストーンの順（上の層）→ マイルストーンの中の順位（下の層）の辞書順で読む",
