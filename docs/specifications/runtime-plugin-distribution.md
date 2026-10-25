@@ -26,7 +26,7 @@ NDF plugin の plugin name は全 runtime で `ndf` を維持し、配布物は 
 | Claude Code | `plugins/ndf/.claude-plugin/plugin.json` | `agents/`、`hooks/claude.json`、`skills` 配列 |
 | Codex | `plugins/ndf/.codex-plugin/plugin.json` | `hooks/codex.json`、`skills` 配列 |
 | Kiro CLI | `plugins/ndf/dev.kiro/install.sh` | `.kiro/agents/ndf.json`、`.kiro/steering/ndf-policies.md`、`.kiro/skills/` symlink、prompts、任意 hook |
-| agy | `plugins/ndf/dev.agy/plugin.json` | `dev.agy/hooks.json`、`dev.agy/skills/` の symlink、`agents` と `scripts` への symlink |
+| agy | `plugins/ndf/dev.agy/plugin.json` | `dev.agy/hooks.json`、`dev.agy/skills/` の symlink、`dev.agy/agents/` の生成した写し、`scripts` への symlink |
 
 `plugins/ndf/manifests/{claude,codex,kiro,agy}-skills.txt` が runtime ごとの配布 Skill 一覧を
 定義する。Claude Code と Codex は manifest と同じ内容を各 plugin.json の `skills` 配列へ書き、
@@ -138,12 +138,13 @@ bash scripts/build-runtime-plugins.sh
 bash scripts/build-runtime-plugins.sh --check
 ```
 
-生成対象は 2 つだけである。
+生成対象は次のとおりである。
 
 | 生成物 | 対象 | 内容 |
 |---|---|---|
 | `plugins/<family>/skills/<Skill 名>/agents/openai.yaml` | Skill を配るプラグイン | Codex の暗黙起動を抑える policy。codex 用 manifest に載り frontmatter が `disable-model-invocation: true` の Skill だけ |
 | `plugins/mcp/<plugin-name>/dev.kiro/install.sh` | MCP plugin | Kiro CLI 向け installer。内容はプラグイン名に依存しない |
+| `plugins/<family>/dev.agy/agents/*.md` | `dev.agy/` を持つプラグイン | `agents/*.md` の写し。agy 1.4 系は `model` に tier 名しか受け付けないため、frontmatter の `model:` の 1 行だけを `scripts/lib/agy_agents.py` の対応表（`sonnet` → `flash`、`opus` → `pro`、`haiku` → `flash`、`inherit` → `inherit`）で置き換える。対応表に無い値は生成も `--check` も非 0 で止まる（#2087） |
 
 `--check` は生成先との差分を比較し、drift がある場合に非 0 で終了する。
 
