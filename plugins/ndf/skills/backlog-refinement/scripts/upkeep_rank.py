@@ -45,6 +45,7 @@ from upkeep_rank_config import (  # noqa: F401  呼び出し側は upkeep_rank �
     validate_estimate,
 )
 from upkeep_rank_estimate import OVER_SCALE, is_over, plain_row
+from upkeep_rank_moves import apply_moves, cross_milestone_deps
 from upkeep_rank_table import (  # noqa: F401
     outside_unchanged,
     parallel_group_edges,
@@ -449,29 +450,6 @@ def _milestone_out(board, rows, place, title, idx):
     if quality is not None:
         out["quality_slot"] = quality
     return out
-
-
-def apply_moves(place: dict, forward: list[dict], backward: list[dict]) -> dict:
-    """前倒し（自動・承認済み）と後ろ倒し（承認済み）を反映した課題の置き場所。"""
-    moved = dict(place)
-    for f in forward:
-        if f["decision"] in (AUTO, APPROVED):
-            for n in [f["number"], *f["group"]]:
-                moved[n] = f["to"]
-    for b in backward:
-        if b["decision"] == APPROVED:
-            moved[b["number"]] = b["to"]
-    return moved
-
-
-def cross_milestone_deps(board: Board, moved: dict) -> list[dict]:
-    """前のマイルストーンの課題が後ろのマイルストーンの課題に依存している辺。"""
-    pos = {t: i for i, t in enumerate(board.order)}
-    return [
-        {"number": a, "milestone": moved[a], "depends_on": b, "depends_on_milestone": moved[b]}
-        for a, b in sorted(board.edges)
-        if moved.get(a) in pos and moved.get(b) in pos and pos[moved[a]] < pos[moved[b]]
-    ]
 
 
 def compute_ranking(board: Board) -> dict:
