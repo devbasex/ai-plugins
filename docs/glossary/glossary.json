@@ -4182,57 +4182,49 @@
       "term": "文書形式",
       "context": "ndf-document",
       "meaning": "文書を読ませる形。リポジトリの Markdown・文書・ページ・スライド・表計算。置き場（Notion・Confluence・Google Drive などのシステム）とは別の軸",
-      "source": "",
-      "pending_source": "issues/issue-2086-requirements.md"
+      "source": "docs/specifications/ndf-document-rebuild.md"
     },
     {
       "term": "文書の目的",
       "context": "ndf-document",
       "meaning": "読み手にその文書で何をしてもらうか・何を渡すかの種類（決議依頼・議論・アジェンダ・小説・エッセイ・ブログ・作業レポート・論文など）",
-      "source": "",
-      "pending_source": "issues/issue-2086-requirements.md"
+      "source": "docs/specifications/ndf-document-rebuild.md"
     },
     {
       "term": "共通ルール",
       "context": "ndf-document",
       "meaning": "文書形式と文書の目的に関わらず、組み直した文書が満たす決まり",
-      "source": "",
-      "pending_source": "issues/issue-2086-requirements.md"
+      "source": "docs/specifications/ndf-document-rebuild.md"
     },
     {
       "term": "キーワード",
       "context": "ndf-document",
       "meaning": "文書の題・見出しと、本文で繰り返し使い、読み手がその文書の主題として受け取る語",
-      "source": "",
-      "pending_source": "issues/issue-2086-requirements.md"
+      "source": "docs/specifications/ndf-document-rebuild.md"
     },
     {
       "term": "確定事項を伝える文書",
       "context": "ndf-document",
       "meaning": "確定した設計・報告書のように、結論が既に決まっている文書",
-      "source": "",
-      "pending_source": "issues/issue-2086-requirements.md"
+      "source": "docs/specifications/ndf-document-rebuild.md"
     },
     {
       "term": "議論用の文書",
       "context": "ndf-document",
       "meaning": "仕様案・提案書・論点の整理のように、まだ決まっていないことを読み手と決めるための文書",
-      "source": "",
-      "pending_source": "issues/issue-2086-requirements.md"
+      "source": "docs/specifications/ndf-document-rebuild.md"
     },
     {
       "term": "形式別ガイド",
       "context": "ndf-document",
       "meaning": "文書形式 1 つについて、文章量の単位と目安・題と見出しの付け方・呼び出し先を持つ document-rebuild の参照ファイル（references/format-<形式>.md）",
-      "source": "",
-      "pending_source": "issues/issue-2086-design.md"
+      "source": "docs/specifications/ndf-document-rebuild.md"
     },
     {
       "term": "目的別ガイド",
       "context": "ndf-document",
       "meaning": "文書の目的 1 つについて、構成・文章量・見分ける手がかりを持つ document-rebuild の参照ファイル（references/purpose-<目的>.md）",
-      "source": "",
-      "pending_source": "issues/issue-2086-design.md"
+      "source": "docs/specifications/ndf-document-rebuild.md"
     },
     {
       "term": "読み手役",

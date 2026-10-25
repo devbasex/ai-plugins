@@ -94,5 +94,6 @@
 | [ndf-release-approval-materials.md](ndf-release-approval-materials.md) | 承認資料の検査の結果と未検証・残る危険に、レビュー・リファクタリング・全体テスト・設計文書の未確認・未実施のリリース後テストを集める契約と、材料を読む元（#1885 #1686 #1488。範囲の PR は ndf-release-approval-included-prs.md） |
 | [ndf-sprint-misjudgments-unknown-record-and-manual-none.md](ndf-sprint-misjudgments-unknown-record-and-manual-none.md) | スプリントの誤判定: 記録の置き場が分からない close は課題を開いたまま残し、「無し」の手動確認の行を数えない（#1875 #1675） |
 | [ndf-slide-generation.md](ndf-slide-generation.md) | スライドの生成スクリプトの経路（汎用テンプレートのページの枠組みと座標・theme.json の重ね合わせと検査・台本からのスピーカーノートと尺・build-deck.js と script-time.js と slides-thumbnails.py の終了コード・常に成り立つ条件・決定の理由）。作り方の手順は release の form-slide.md が正 |
+| [ndf-document-rebuild.md](ndf-document-rebuild.md) | 文書の組み直し（文書形式と文書の目的の切り方、document-style との正本の割り当て、キーワードと読み手役の確かめ・題の付け方の置き場、スラッシュコマンドの一覧から外す Skill、常に成り立つ条件と決定の理由）。手順は document-rebuild の SKILL.md が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
