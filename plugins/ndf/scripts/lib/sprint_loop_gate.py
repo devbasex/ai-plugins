@@ -284,6 +284,21 @@ def failure_key(state: dict) -> dict | None:
     return None
 
 
+def copy_state_gates(lap: dict, state: dict) -> None:
+    """スプリント状態の承認ゲートを周回へ写す（写してあるものは重ねない）。"""
+    for g in state.get("gates", []):
+        copy = {
+            "name": g.get("name"),
+            "by": g.get("by", "user"),
+            "verdict": g.get("verdict", g.get("outcome", "approved")),
+            "basis": g.get("basis") or [],
+            "pr": g.get("pr"),
+            "at": g.get("at", ""),
+        }
+        if copy not in lap.setdefault("gates", []):
+            lap["gates"].append(copy)
+
+
 def refine_summary(env: Env, rec: dict) -> dict:
     """棚卸しの結果（upkeep の state dir の candidates.json と rank.json）を周回の記録の形にする。"""
     sd = env.upkeep_dir(rec.get("repo") or "")
@@ -307,17 +322,7 @@ def close_lap(env: Env, rec: dict, lap: dict, outcome: str, state: dict | None =
     lap["cost"] = round(sum(float(r.get("cost") or 0) for r in rows), 6)
     lap["seconds"] = round(sum(float(r.get("seconds") or 0) for r in rows), 3)
     lap["versions"] = state.get("versions") or lap.get("versions") or {}
-    for g in state.get("gates", []):
-        copy = {
-            "name": g.get("name"),
-            "by": g.get("by", "user"),
-            "verdict": g.get("verdict", g.get("outcome", "approved")),
-            "basis": g.get("basis") or [],
-            "pr": g.get("pr"),
-            "at": g.get("at", ""),
-        }
-        if copy not in lap.setdefault("gates", []):
-            lap["gates"].append(copy)
+    copy_state_gates(lap, state)
     close_rep = next((p for p in state.get("plans", []) if p.get("kind") == "まとめ"), None)
     if close_rep:
         lap["retro"] = (close_rep.get("row") or {}).get("report", "")
