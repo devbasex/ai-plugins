@@ -581,6 +581,89 @@ def test_closed_laps_are_not_rewritten(env):
         sl.close_lap(env, r, r["laps"][0], "完了")
 
 
+# 現状固定: render_laps の出力（全分岐を通す記録と、空の記録）
+def test_render_laps_characterizes_every_section():
+    import sprint_loop_record as slr
+
+    rec = {
+        "name": "l1",
+        "status": "stopped",
+        "budget": {"laps": 3},
+        "goal": True,
+        "laps": [
+            {
+                "n": 1,
+                "sprint": "s1",
+                "outcome": slr.DONE,
+                "cost": 1.5,
+                "seconds": 10,
+                "started_at": "2026-10-25T00:00:00Z",
+                "ended_at": "2026-10-25T00:10:00Z",
+                "versions": {"dev": "1.0.0-dev.1", "prod": "1.0.0"},
+                "deferred_issues": [7, 8],
+                "selection": [
+                    {"number": 3, "milestone": "01 a|b", "rank": 1, "decision": slr.SELECTED, "reason": "r"},
+                    {"number": 4, "decision": slr.DROPPED},
+                ],
+                "gates": [{"name": "gate1", "verdict": "ok", "basis": ["x", "y"]}, {"name": "gate2", "by": "mvv"}],
+                "refine": {"deferred": [5], "rank_changes": [1, 2]},
+                "retro": "良い",
+            },
+            {"n": 2, "outcome": slr.IN_PROGRESS},
+        ],
+        "waiting": [{"number": 9, "gate": "gate1", "reason": "why"}],
+        "stops": [{"lap": 1, "condition": "budget"}],
+        "stop": {"condition": "same_failure", "values": {"k": "失敗"}, "lap": 2},
+    }
+    assert slr.render_laps(rec) == (
+        "# 開発ループ l1\n"
+        "\n"
+        "- 状態: stopped。予算: {'laps': 3}。消費: {'laps': 1, 'usd': 1.5, 'hours': 0.166667}\n"
+        "\n"
+        "| 周回 | 課題 | 版 | 費用 | 秒 | 結果 | 止まった理由 | 後へ回した Issue |\n"
+        "| --- | --- | --- | --- | --- | --- | --- | --- |\n"
+        "| 1 | #3 | 1.0.0-dev.1 / 1.0.0 | 1.5 | 10 | 完了 | budget | #7 #8 |\n"
+        "| 2 | — | — | — | — | 進行中 | same_failure | — |\n"
+        "\n"
+        "## 周回 1（s1）\n"
+        "\n"
+        "| 課題 | マイルストーン | 順位 | 選定 | 理由 |\n"
+        "| --- | --- | --- | --- | --- |\n"
+        "| #3 | 01 a\\|b | 1 | 選んだ | r |\n"
+        "| #4 | — | — | 外した | — |\n"
+        "\n"
+        "- gate1: user ok（根拠 x, y）\n"
+        "\n"
+        "- gate2: mvv —（根拠 —）\n"
+        "- 棚卸し: 持ち越し [5]・順位の変化 2 件\n"
+        "- 振り返り: 良い\n"
+        "\n"
+        "## 周回 2（）\n"
+        "\n"
+        "| 課題 | マイルストーン | 順位 | 選定 | 理由 |\n"
+        "| --- | --- | --- | --- | --- |\n"
+        "\n"
+        "## 人の判断待ち\n"
+        "\n"
+        "| 課題 | 承認ゲート | 理由 | 答え |\n"
+        "| --- | --- | --- | --- |\n"
+        "| #9 | gate1 | why | — |\n"
+        "\n"
+        "## 止まった理由: same_failure\n"
+        "\n"
+        '- 値: {"k": "失敗"}\n'
+        "- 再開: `/goal /ndf:development-workflow --loop l1 -- 終わり: [ndf-loop] stopped l1 の行を出したとき`\n"
+    )
+    assert slr.render_laps({"name": "e", "goal": False}) == (
+        "# 開発ループ e\n"
+        "\n"
+        "- 状態: None。予算: None。消費: {'laps': 0, 'usd': 0, 'hours': 0.0}\n"
+        "\n"
+        "| 周回 | 課題 | 版 | 費用 | 秒 | 結果 | 止まった理由 | 後へ回した Issue |\n"
+        "| --- | --- | --- | --- | --- | --- | --- | --- |\n"
+    )
+
+
 # ---------------- CLI ----------------
 
 
