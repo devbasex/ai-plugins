@@ -26,7 +26,7 @@ def run_loop_command(a, update) -> dict | None:
         handlers = {
             "select": lambda: sl_select.cmd_select(env, a.loop_name),
             "exclude": lambda: sl_select.cmd_exclude(env, a.loop_name, a.issue, a.reason),
-            "sprint": lambda: sl.cmd_sprint(env, a.loop_name, a.mode, a.dev, a.prod, [x for x in a.extra if x != "--"]),
+            "sprint": lambda: sl.cmd_sprint(env, a.loop_name, a.mode, a.dev, a.prod, list(a.extra)),
             "gate": lambda: sl_gate.cmd_gate(env, a.loop_name, a.done),
             "answer": lambda: sl.cmd_answer(env, a.loop_name, a.issue, a.approved, a.pr),
             "approve-mvv": lambda: sl.cmd_approve_mvv(env, a.loop_name, a.milestone),
@@ -44,6 +44,24 @@ def run_loop_command(a, update) -> dict | None:
         return out
     except sl.LoopError as e:
         return step_result.result(sl.TOOL, "stopped", str(e), [], {"status": "refused"})
+
+
+def split_extra(argv: list[str]) -> tuple[list[str], list[str] | None]:
+    """`loop sprint ... -- <引数>` の `--` から後を切り分ける（解析する引数, new sprint へ渡す引数）。
+    argparse の REMAINDER は位置引数の後の必須のオプションまで吸うため、解析の前に分ける。`loop sprint` でなければ (argv, None)。"""
+    if argv[:2] != ["loop", "sprint"] or "--" not in argv:
+        return argv, None
+    at = argv.index("--")
+    return argv[:at], argv[at + 1 :]
+
+
+def parse_args(parser: argparse.ArgumentParser, argv: list[str]) -> argparse.Namespace:
+    """`sprint-state.py` の引数を解析する。`loop sprint` の `--` から後は解析せず `extra` に入れる。"""
+    head, extra = split_extra(argv)
+    a = parser.parse_args(head)
+    if extra is not None:
+        a.extra = extra
+    return a
 
 
 def add_loop_parser(sub, cmd_update) -> None:
@@ -73,7 +91,7 @@ def add_loop_parser(sub, cmd_update) -> None:
     s.add_argument("--mode", required=True)
     s.add_argument("--dev", required=True)
     s.add_argument("--prod")
-    s.add_argument("extra", nargs=argparse.REMAINDER, help="-- の後は supervise.py new sprint へそのまま渡す")
+    s.set_defaults(extra=[])  # -- の後は split_extra が切り分けて supervise.py new sprint へそのまま渡す
     s = name(ls.add_parser("gate"))
     s.add_argument("--done", required=True)
     s = name(ls.add_parser("answer"))

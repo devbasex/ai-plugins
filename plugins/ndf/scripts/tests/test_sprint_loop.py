@@ -675,3 +675,141 @@ def test_cli_status_reports_a_missing_record_and_start_refuses(tmp_path):
     assert p.returncode == 1 and json.loads(p.stdout)["status"] == "stopped"
     p = subprocess.run([sys.executable, str(sp), "loop", "start", "x1", "--root", str(tmp_path)], capture_output=True, text=True)
     assert p.returncode == 1 and json.loads(p.stdout)["metrics"]["status"] == "refused"
+
+
+# ---------------- #2103 の指摘 ----------------
+
+
+def test_cli_sprint_reads_options_after_the_loop_name_and_passes_only_what_follows_the_separator():
+    import argparse
+
+    import sprint_loop_cli
+
+    ap = argparse.ArgumentParser()
+    sprint_loop_cli.add_loop_parser(ap.add_subparsers(dest="cmd"), lambda a: None)
+    head, extra = sprint_loop_cli.split_extra(["loop", "sprint", "l1", "--mode", "standard", "--dev", "1.0.0-dev.1"])
+    a = ap.parse_args(head)
+    assert extra is None and (a.loop_name, a.mode, a.dev, a.extra) == ("l1", "standard", "1.0.0-dev.1", [])
+    head, extra = sprint_loop_cli.split_extra(["loop", "sprint", "l1", "--mode", "fast", "--dev", "2.0.0-dev.1", "--", "--design", "11"])
+    a = ap.parse_args(head)
+    assert (a.mode, a.dev, extra) == ("fast", "2.0.0-dev.1", ["--design", "11"])
+
+
+def test_gate_1_drops_the_waiting_issue_from_the_shared_plan_and_its_closes(env):
+    lap = built_lap(env)
+    check = Path(lap["out"]) / "check.json"
+    check.write_text(json.dumps({"フェーズ": "検査", "課題": [11, 12], "steps": [{"id": "pr", "materials": {"closes": [11, 12]}}]}))
+    out = sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": str(Path(lap["out"]) / "design-11.json"), "result": "関門"}]))
+    assert out["status"] == "ok" and "check.json" in out["metrics"]["queue"]
+    got = json.loads(check.read_text())
+    assert got["課題"] == [12] and got["steps"][0]["materials"]["closes"] == [12]
+
+
+def design_report(env, name, pr_url):
+    p = env.root / f"{name}-report.md"
+    p.write_text(f"# 報告\n\n- 結果: 関門\n- Pull Request: {pr_url}\n")
+    return str(p)
+
+
+def test_gate_1_takes_the_verdict_of_the_plan_design_pr_and_saves_the_pr_as_a_number(env, monkeypatch):
+    lap = built_lap(env)
+    log = env.root / "mvv-gate.jsonl"
+    rows = [
+        {
+            "gate": "design",
+            "sprint": lap["state_path"],
+            "pr": [501],
+            "verdict": "従わない",
+            "reasons": ["11 の理由"],
+            "material": ["#501 a.md"],
+        },
+        {
+            "gate": "design",
+            "sprint": lap["state_path"],
+            "pr": [502],
+            "verdict": "従う",
+            "reasons": ["12 の理由"],
+            "material": ["#502 b.md"],
+        },
+    ]
+    log.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
+    monkeypatch.setattr(sl_gate.pm, "gate_log_path", lambda: log)
+    item = {
+        "plan": str(Path(lap["out"]) / "design-11.json"),
+        "result": "関門",
+        "report": design_report(env, "d11", "https://github.com/o/r/pull/501"),
+    }
+    assert sl_gate.cmd_gate(env, "l1", write_done(env, [item]))["status"] == "ok"
+    w = rec(env)["waiting"][0]
+    assert (w["number"], w["pr"], w["reason"], w["verdict"]) == (11, 501, "11 の理由", "従わない")
+    env.calls.clear()
+    sl.cmd_answer(env, "l1", 11, True, None)
+    gate = next(c for c in env.calls if "gate" in c)
+    assert gate[gate.index("--pr") + 1] == "501"
+    assert sl_select.exclusion_reason(env, rec(env), {"number": 11}, 2, set()) == "設計 PR がマージ待ち"
+
+
+def approve_gate_2(lap):
+    state = json.loads(Path(lap["state_path"]).read_text())
+    state["gates"].append({"name": "関門 2", "by": "user", "outcome": "approved"})
+    Path(lap["state_path"]).write_text(json.dumps(state))
+
+
+@pytest.mark.parametrize(
+    "plan, steps, want",
+    [
+        ("prod.json", ["mvv", "note", "bump", "release"], "--from bump"),
+        ("prod.json", ["verify", "prepare", "mvv", "note", "promote", "promote-approved", "record"], "--from promote-approved"),
+    ],
+)
+def test_gate_2_resume_continues_from_the_step_of_the_route(env, plan, steps, want):
+    lap = built_lap(env)
+    p = Path(lap["out"]) / plan
+    p.write_text(json.dumps({"フェーズ": "配布（本番）", "課題": [11, 12], "steps": [{"id": s} for s in steps]}))
+    assert sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": str(p), "result": "関門"}]))["exit"] == 3
+    approve_gate_2(sl.current_lap(rec(env)))
+    nxt = sl.cmd_start(env, "l1", [], {})["metrics"]["next"]
+    assert f"run {p} {want}" in nxt and "loop lap l1" in nxt
+
+
+def test_gate_2_at_the_merge_of_the_check_plan_also_runs_the_rest_of_the_queue(env):
+    lap = built_lap(env)
+    check = Path(lap["out"]) / "check.json"
+    check.write_text(json.dumps({"フェーズ": "検査", "課題": [11, 12], "steps": [{"id": "merge-gate"}, {"id": "merge-approved"}]}))
+    assert sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": str(check), "result": "関門"}]))["exit"] == 3
+    approve_gate_2(sl.current_lap(rec(env)))
+    nxt = sl.cmd_start(env, "l1", [], {})["metrics"]["next"]
+    run, queue = nxt.split(" && ")[:2]
+    assert run.endswith(f"run {check} --from merge-approved")
+    assert "prod.json" in queue.split("--then")[0] and "close" in queue.split("--then")[-1]
+
+
+def test_lap_with_a_gate_updates_the_sprint_state_before_closing(env):
+    lap = built_lap(env, nums=(11,))
+    seen = []
+    done = write_done(env, [{"plan": str(Path(lap["out"]) / "design-11.json"), "result": "関門"}])
+    out = sl.cmd_lap(env, "l1", False, done, [], update=lambda state, dones: seen.append(state))
+    assert seen == [lap["state_path"]] and rec(env)["laps"][0]["outcome"] == "人へ戻した" and out["status"] == "ok"
+
+
+def test_quality_slot_is_kept_inside_max_issues(env):
+    m = ms("01 近い", [11, 12, 13, 14], quality_slot={"issues": [14]})
+    m["rows"][3]["quality_slot"] = True
+    env.rank_box["out"] = rank_out(m)
+    start(env)
+    r = rec(env)
+    r["max_issues"] = 3
+    sl.write_record(env, r)
+    got = sl_select.cmd_select(env, "l1")
+    assert got["metrics"]["selected"] == [11, 12, 14]
+    assert {x["number"]: x["reason"] for x in rec(env)["laps"][0]["selection"]}[13] == "容量"
+
+
+def test_handoff_keeps_the_concrete_next_step_for_resuming_inside_a_lap(env):
+    start(env)
+    sl_select.cmd_select(env, "l1")
+    doc = sl.handoff_path(env, "l1")
+    assert "loop sprint l1 --mode <モード>" in doc.read_text().split("## 次にやること")[1].split("## ")[0]
+    out = sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
+    body = doc.read_text().split("## 次にやること")[1].split("## ")[0]
+    assert out["metrics"]["pipeline"] in body

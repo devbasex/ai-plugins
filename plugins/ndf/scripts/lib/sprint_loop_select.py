@@ -78,12 +78,14 @@ def exclusion_reason(env: Env, rec: dict, row: dict, lap_n: int, lap_created: se
 
 
 def _select_candidate_rows(cands: list[dict], title: str, max_issues: int, reason_for) -> tuple[list[int], list[dict]]:
-    """1 マイルストーンの候補の採否。選んだ番号と選定の行を返す。reason_for は外す理由（外さなければ None）を返す。"""
+    """1 マイルストーンの候補の採否。選んだ番号と選定の行を返す。reason_for は外す理由（外さなければ None）を返す。
+    max_issues の枠は品質の枠の課題に先に割り当て、残りを順位の順に埋める（品質の枠の最低件数を容量で削らない）。"""
+    whys = [reason_for(r) for r in cands]  # 候補ごとに 1 回、順位の順に呼ぶ（exclusion_reason の副作用の回数と順序を保つ）
+    open_ = [i for i, w in enumerate(whys) if w is None]
+    take = set(([i for i in open_ if cands[i].get("quality_slot")] + [i for i in open_ if not cands[i].get("quality_slot")])[:max_issues])
     picked, here = [], []
-    for r in cands:
-        why = reason_for(r)
-        if why is None and len(picked) >= max_issues:
-            why = "容量"
+    for i, r in enumerate(cands):
+        why = whys[i] if whys[i] is not None or i in take else "容量"
         if why is None:
             picked.append(r["number"])
             reason = "品質の枠" if r.get("quality_slot") else "順位"
@@ -185,7 +187,7 @@ def run_selection(env: Env, rec: dict, before: dict, n: int, lap: dict | None = 
     write_record(env, rec, before)
     chosen = selected_issues(new)
     nxt = f"モードと版を決め、対象外は loop exclude で外し、python3 {shlex.quote(str(SPRINT_STATE))} loop sprint {rec['name']} --mode <モード> --dev <開発版> を打つ"
-    update_handoff(env, rec, f"周回 {n} の課題を選んだ: {' '.join(f'#{x}' for x in chosen)}", resume_command(rec))
+    update_handoff(env, rec, f"周回 {n} の課題を選んだ: {' '.join(f'#{x}' for x in chosen)}", resume_command(rec), nxt)
     return loop_ok(
         f"周回 {n} の課題を選んだ（{got['milestone']}）: " + " ".join(f"#{x}" for x in chosen),
         rec,

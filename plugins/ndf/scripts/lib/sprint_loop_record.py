@@ -43,6 +43,7 @@ UPKEEP = SCRIPTS.parent / "skills" / "backlog-refinement" / "scripts" / "upkeep.
 HANDOFF_TEMPLATE = SCRIPTS / "data" / "handoff-template.md"
 LOOP_DIR = Path(".ndf") / "loop"
 HANDOFF_DIR = Path(".ndf") / "handoff"
+NEXT_STEP_SECTION = "次にやること"  # 引継ぎ文書の節（loop start が in_lap のときに指す）
 RECORD = "loop.json"
 LAPS_MD = "laps.md"
 STOP_FILE = "stop"
@@ -317,7 +318,7 @@ def stopped_result(env: Env, rec: dict, summary: str, extra_metrics: dict | None
     """止まったときの結果（終了コード 3）。items に条件・値・再開のコマンド、metrics.stop_line に決まった語の 1 行。"""
     stop = rec["stop"]
     resume = resume_command(rec)
-    update_handoff(env, rec, f"止まった（{stop['condition']}）。理由が解けたら再開のコマンドで続ける", resume)
+    update_handoff(env, rec, f"止まった（{stop['condition']}）。理由が解けたら再開のコマンドで続ける", resume, resume)
     items = [{"condition": stop["condition"], "values": stop["values"], "resume": resume}]
     metrics = {
         "status": "stopped",
@@ -343,8 +344,9 @@ def handoff_path(env: Env, name: str) -> Path:
     return env.main_dir() / HANDOFF_DIR / f"loop-{name}.md"
 
 
-def update_handoff(env: Env, rec: dict, now_text: str, command: str) -> Path:
-    """引継ぎ文書 loop-<名> の「現在地」と「次に実行するコマンド」を置き換える（無ければ雛形から作る）。"""
+def update_handoff(env: Env, rec: dict, now_text: str, command: str, next_step: str | None = None) -> Path:
+    """引継ぎ文書 loop-<名> の「現在地」と「次に実行するコマンド」を置き換える（無ければ雛形から作る）。
+    next_step を渡せば「次にやること」も置き換える（`loop start` が in_lap で指す先。セッションを切っても続きを復元する）。"""
     p = handoff_path(env, rec["name"])
     text = (
         p.read_text(encoding="utf-8")
@@ -355,6 +357,9 @@ def update_handoff(env: Env, rec: dict, now_text: str, command: str) -> Path:
     where = f"\n- ループ: {rec['name']}（{rec.get('status')}）。周回 {lap['n'] if lap else len(rec.get('laps', []))}。{now_text}\n"
     where += f"- 記録: `{loop_dir(env, rec['name']) / LAPS_MD}`\n\n"
     text = handoff_doc.replace_body(text, "現在地", where) or text
+    if next_step:
+        inner = "`" * max(3, max((len(r) for r in re.findall(r"`+", next_step)), default=0) + 1)
+        text = handoff_doc.replace_body(text, NEXT_STEP_SECTION, f"\n{inner}\n{next_step}\n{inner}\n\n") or text
     fence = "`" * max(3, max((len(r) for r in re.findall(r"`+", command)), default=0) + 1)
     text = handoff_doc.replace_body(text, handoff_doc.COMMAND_SECTION, f"\n{fence}ndf-next\n{command}\n{fence}\n") or text
     p.parent.mkdir(parents=True, exist_ok=True)

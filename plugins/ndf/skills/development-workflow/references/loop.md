@@ -86,8 +86,9 @@
 | 5 | `no_issue` / `outside_mvv` | 選定の候補が 0 件 / 候補がすべて外れた | 再開で選定をやり直す |
 
 周回の途中で止まるのは `gate2_returned`・`mvv_changed`・`refused`（`new sprint` などが断った）だけで、周回は進行中のまま残る。
-`gate2_returned` は利用者が承認すれば `loop start` の `metrics.next` の `pipeline`（本番のプランを `--from bump` で続け →
-まとめ → `loop lap`）で続け、差し戻せばその周回を「人へ戻した」で締める。`refused` は同じ周回で `loop sprint` をやり直す。
+`gate2_returned` は利用者が承認すれば `loop start` の `metrics.next` の `pipeline`（承認ゲート 2 で止まった計画を経路に合う
+ステップから続け（雛形の本番は `--from bump`、昇格は `--from promote-approved`、マージで止まった計画は `--from merge-approved`）→
+同じ queue の残りのステージ → まとめ → `loop lap`）で続け、差し戻せばその周回を「人へ戻した」で締める。`refused` は同じ周回で `loop sprint` をやり直す。
 
 止まっていた時間は経過時間に入れない。周回の数・費用・経過時間は再開をまたいで引き継ぐ。
 

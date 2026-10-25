@@ -65,6 +65,9 @@ from sprint_loop_gate import (
     refused_stop,
     copy_mvv_gate,
     read_done_items,
+    plan_info,
+    gate2_resume_step,
+    stages_after,
     mark_issue,
     handle_gate,
     failure_key,
@@ -158,7 +161,7 @@ def start_new(env: Env, name: str, decl: dict, project, milestones: list[str], b
     }
     apply_budget(env, rec, budget)
     write_record(env, rec)
-    update_handoff(env, rec, "始めた。次は選定", resume_command(rec))
+    update_handoff(env, rec, "始めた。次は選定", resume_command(rec), select_cmd(name))
     return loop_ok(f"開発ループ {name} を始めた", rec, status="new", next_=select_cmd(name))
 
 
@@ -196,7 +199,7 @@ def resume_stopped(env: Env, rec: dict, before: dict) -> dict:
     rec["stops"].append({**stop, "resumed_at": env.now()})
     rec["stop"], rec["status"] = None, "running"
     write_record(env, rec, before)
-    update_handoff(env, rec, f"再開した（{cond} が解けた）", resume_command(rec))
+    update_handoff(env, rec, f"再開した（{cond} が解けた）", resume_command(rec), nxt)
     return loop_ok(f"開発ループ {name} を再開した（{cond} が解けた）", rec, status="resumed", next_=nxt, resolved=cond)
 
 
@@ -216,16 +219,25 @@ def gate2_answer(lap: dict) -> str | None:
 
 
 def gate2_pipeline(env: Env, rec: dict, lap: dict, stop: dict) -> str:
-    """承認ゲート 2 の承認の後の続き: 本番のプランを bump から続け → まとめの queue → wait → loop lap の 1 行。"""
+    """承認ゲート 2 の承認の後の続き: 止まった計画を経路に合う再開のステップから続け → 同じ queue の残りのステージと
+    まとめの queue → wait → loop lap の 1 行。続けるステップが無い計画（gate-2 のプラン）は手で行う本番を先に示す。"""
     pr = (stop.get("values") or {}).get("pr")
-    close = build_close(env, rec, lap, lap.get("issues_kept") or selected_issues(lap), record_pr=pr)
+    close = build_close(env, rec, lap, lap.get("issues_kept") or selected_issues(lap), record_pr=pr if isinstance(pr, int) else None)
     done = Path(lap["dir"]) / f"done-{len(lap.get('dones', [])) + 1}.json"
-    prod = lap.get("prod_plan") or "<本番のプラン>"
-    run = f"python3 {shlex.quote(str(SUPERVISE))} run {shlex.quote(prod)} --from bump"
-    queue = (
-        f"python3 {shlex.quote(str(SUPERVISE))} queue " + " ".join(map(shlex.quote, close)) + f" --max 3 --done {shlex.quote(str(done))}"
-    )
+    plan = lap.get("gate2_plan") or lap.get("prod_plan") or "<本番のプラン>"
+    moved = {w["number"] for w in rec.get("waiting", []) if w.get("lap") == lap["n"]}
+    rest = [
+        [p for p in s if not (set(plan_info(p).get("課題") or []) and set(plan_info(p).get("課題") or []) <= moved)]
+        for s in stages_after(lap, plan)
+    ]
+    stages = [s for s in rest if s] + [close]
+    queue = f"python3 {shlex.quote(str(SUPERVISE))} queue " + " ".join(map(shlex.quote, stages[0])) + " --max 3"
+    queue += "".join(" --then " + " ".join(map(shlex.quote, s)) for s in stages[1:]) + f" --done {shlex.quote(str(done))}"
     lap.setdefault("dones", []).append(str(done))
+    step = gate2_resume_step(plan)
+    if step is None:
+        return f"手で行う本番のステージ（{plan} の後）を終えてから: {queue} && {wait_lap(rec, done)}"
+    run = f"python3 {shlex.quote(str(SUPERVISE))} run {shlex.quote(plan)} --from {step}"
     return f"{run} && {queue} && {wait_lap(rec, done)}"
 
 
@@ -298,7 +310,7 @@ def cmd_sprint(env: Env, name: str, mode: str, dev: str, prod: str | None, extra
             rec["stops"].append({**rec["stop"], "resumed_at": env.now()})
             rec["stop"], rec["status"] = None, "running"
         write_record(env, rec, before)
-        update_handoff(env, rec, f"周回 {lap['n']} のスプリントを組んだ。pipeline を流す", resume_command(rec))
+        update_handoff(env, rec, f"周回 {lap['n']} のスプリントを組んだ。pipeline を流す", resume_command(rec), pipeline)
         return loop_ok(
             f"周回 {lap['n']} のスプリント {lap['sprint']} を pace: auto で組んだ",
             rec,
@@ -390,10 +402,10 @@ def cmd_lap(env: Env, name: str, failed: bool, done: str | None, deferred_issues
         if not lap:
             return refusal_order("進行中の周回が無い")
         items = read_done_items(done) if done else []
+        if update and lap.get("state_path"):  # 承認ゲートで締める周回も、設計で使った費用と秒を状態から数える
+            update(lap["state_path"], [d for d in lap.get("dones", []) if Path(d).is_file()])
         if any(i.get("result") == "関門" for i in items):
             return handle_gate(env, rec, before, lap, items)
-        if update and lap.get("state_path"):
-            update(lap["state_path"], [d for d in lap.get("dones", []) if Path(d).is_file()])
         state = jsonio.read(lap["state_path"], missing={}, broken={}, want=dict) if lap.get("state_path") else {}
         bad = [i for i in items if i.get("result") not in FINISHED and i.get("result") != NOT_RUN]
         outcome = FAILED if failed or bad or failure_key(state) else DONE

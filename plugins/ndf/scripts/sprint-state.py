@@ -584,7 +584,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    a = build_parser().parse_args(argv)
+    a = sprint_loop_cli.parse_args(build_parser(), sys.argv[1:] if argv is None else list(argv))
     cmds = {"init": cmd_init, "update": cmd_update, "gate": cmd_gate, "render": cmd_render, "status": cmd_status, "next": cmd_next}
     fn = cmds.get(a.cmd) or a.loop_run
     try:
