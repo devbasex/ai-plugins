@@ -30,6 +30,16 @@ from supervise_lib.steps import JudgeStep, RunStep, StepContext, is_gate, last_j
 from supervise_lib.worker_steps import DriveStep, WorkStep
 
 
+def _result_summary(text: str) -> str:
+    """ステップの出力の最後の JSON の summary。`status` が `stopped` で `metrics.exit` が整数なら「（元の終了コード N）」を添える。"""
+    res = last_json(text) or {}
+    summary = str(res.get("summary") or "")
+    code = (res.get("metrics") or {}).get("exit") if isinstance(res.get("metrics"), dict) else None
+    if summary and res.get("status") == "stopped" and isinstance(code, int) and not isinstance(code, bool):
+        return f"{summary}（元の終了コード {code}）"
+    return summary
+
+
 class PolicyClaudeRunner(ClaudeRunner):
     """ランタイムの宣言（#1598）を起動の前に照らす `ClaudeRunner`。
 
@@ -335,12 +345,13 @@ class Engine:
 
     def _stop_detail(self, sid: str) -> str:
         """止まった理由へ添える要約: このステップの結果の summary と、直前のステップが on_fail でここへ回した失敗の
-        summary（検査のプランが abort へ回した理由を読めるように。#1917 の決定 7）。"""
+        summary（検査のプランが abort へ回した理由を読めるように。#1917 の決定 7）。結果が駆動の stopped で
+        `metrics.exit`（止めたスクリプトの元の終了コード。`lib/drive_pause.py`）を持てば、要約の後ろへ添える（#1593）。"""
         st = self.state
-        parts = [(last_json(st.cur.get("text", "")) or {}).get("summary") or ""]
+        parts = [_result_summary(st.cur.get("text", ""))]
         prev = st.log[-1].get("id") if st.log else None
         if prev and prev == st.failed_step and prev != sid and self.steps.get(prev, {}).get("on_fail") == sid:
-            why = (last_json((st.results.get(prev) or {}).get("text", "")) or {}).get("summary") or ""
+            why = _result_summary((st.results.get(prev) or {}).get("text", ""))
             parts.append(f"{prev}: {why}" if why else "")
         return "".join(f": {p}" for p in parts if p)
 
