@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 import shlex
 import sys
 from pathlib import Path
@@ -30,6 +29,7 @@ from sprint_loop_record import (
     NOT_RUN,
     LoopError,
     Env,
+    prod_of,
     write_record,
     open_record,
     current_lap,
@@ -81,7 +81,7 @@ def build_close(env: Env, rec: dict, lap: dict, issues: list[int], record_pr=Non
     cmd += ["--issue", *map(str, issues), "--state", lap["state_path"], "--out", str(out), "--mode", lap.get("mode") or "standard"]
     v = lap.get("versions") or {}
     if v.get("dev"):
-        cmd += ["--version", v["dev"], "--prod", v.get("prod") or re.sub(r"-.*$", "", v["dev"])]
+        cmd += ["--version", v["dev"], "--prod", v.get("prod") or prod_of(v["dev"])]
     if carry:
         cmd += ["--carry", *map(str, carry)]
     if record_pr:

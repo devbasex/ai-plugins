@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import json
-import re
 import shlex
 import sys
 from pathlib import Path
@@ -39,6 +38,7 @@ from sprint_loop_record import (
     NOT_RUN,
     LoopError,
     Env,
+    prod_of,
     loop_dir,
     loop_record_path,
     read_loop_record,
@@ -268,7 +268,7 @@ def cmd_sprint(env: Env, name: str, mode: str, dev: str, prod: str | None, extra
         d = Path(lap["dir"])
         d.mkdir(parents=True, exist_ok=True)
         state = d / "state.json"
-        lap.update(mode=mode, versions={"dev": dev, "prod": prod or re.sub(r"-.*$", "", dev)}, state_path=str(state))
+        lap.update(mode=mode, versions={"dev": dev, "prod": prod or prod_of(dev)}, state_path=str(state))
         root = str(env.main_dir())
         mvv = d / "mvv.md"
         code, so, se = env.run(sprint_state_init_argv(root, rec, lap, issues), cwd=root)

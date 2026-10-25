@@ -64,6 +64,11 @@ NOT_RUN = "流さなかった"  # supervise_lib.queue.NOT_RUN（前のステー�
 PAUSE_RANK = step_result.EXIT_PAUSE  # rank の 20（段階の欠けた課題がある）は続ける
 
 
+def prod_of(dev: str) -> str:
+    """開発版の版数から本番の版数を導く（接尾辞を外す。supervise_lib.sprint.prod_version と同じ規則）。"""
+    return re.sub(r"-.*$", "", dev)
+
+
 class LoopError(Exception):
     """記録が無い・壊れている・呼び出しの順が誤っている（終了コード 1）。"""
 
