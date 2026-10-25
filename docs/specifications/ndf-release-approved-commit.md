@@ -9,6 +9,8 @@
   照会し直さなくてよい
 - **`pace: fast` / `auto` の昇格の経路では、本番チャネルへ入るのは MVV 判定が読んだ導入の確認の記録のコミット（確かめたコミット）に限る。**
   確認の後にベースブランチが進めば、マージせずに承認ゲート 2 へ戻る（#1529。「昇格の経路の照合」）
+- **承認ゲート 2 の承認の後の昇格のマージ（`promote-approved`）は、利用者が承認資料に見た昇格の Pull Request の先端（承認したコミット）に限る。**
+  承認の後にベースブランチが進めば、マージせずに承認ゲート 2 へ戻る（#2104。「昇格の承認の後の照合」）
 
 例: ndf のある版を本番へ出すとき、承認の 6 分後に別の PR がベースブランチへマージされた。
 
@@ -46,6 +48,7 @@
 | 承認資料 | `issues/approval-<プラグイン>-v<版>.md`。`approval-facts` が書く |
 | 導入の確認の承認資料 | 昇格のプランの `verify` ステップ（`release-steps.py verify-facts`）が書く `approval-verify.md`。確かめたコミットの行を 1 行持つ |
 | 昇格の Pull Request | ベースブランチ → 本番チャネルの Pull Request を `merged-steps.py promote` が作ってマージするもの。head はベースブランチそのもの |
+| 昇格の承認資料 | 昇格の承認ゲート 2 で利用者（か MVV 判定）が見る `{state_dir}/work/approval-promote.md`。`normal` では `promote` の承認ゲート 2 の停止が、`fast` / `auto` では `prepare` が書く。「承認したコミット」の行を 1 行持つ |
 
 ベースブランチ・本番チャネル・プラグイン名は宣言（`.ndf/worktree.json` の `base_branch`・`production_branch` と `.ndf/supervise.json` の `release.plugin`）と引数から読み、
 `develop` / `main` を埋め込まない。
@@ -55,11 +58,12 @@
 | 扱う | 扱わない |
 | --- | --- |
 | `release-steps.py approval-facts` が承認したコミットを書くこと | `--channel dev` の振る舞い（開発版はマージした変更がそのまま載るチャネルで、承認を要しない。引数も結果も変わらない） |
-| `release-steps.py approve` が承認の記録を書くこと、`mvv-gate.py check --gate release` が `by: mvv` で書くこと | `pace: normal` の昇格（`promote` → 利用者の承認 → `promote-approved --gate-approved user`）の照合。導入の確認を走らせず、照合する記録が無い |
+| `release-steps.py approve` が承認の記録を書くこと、`mvv-gate.py check --gate release` が `by: mvv` で書くこと | 昇格の承認資料の「承認の記録」の行（`promote-approved` は承認したコミットの行だけで照合し、承認の記録を求めない） |
 | `release-steps.py release --channel prod` が承認したコミットを受け取り、承認の外のコミットがあれば止まること | 承認資料のほかの欄、MVV 判定の判定の中身、導入の確認（`verify-facts`）の走らせ方 |
 | `merged-steps.py merge-when-green --expect-head` が比べた先端だけをマージすること | 食い違ったときに承認資料を自動で作り直して再承認を求める仕組み、導入の確認と MVV 判定を自動でやり直す仕組み（止まって人へ戻すまでを扱う） |
 | 本番のリリースプラン（`supervise.py new release --channel prod`。`--mvv` 付きを含む）が承認資料を渡すこと | 手動反映の本番系（`gate-2` のプラン。#1454） |
-| `pace: fast` / `auto` の昇格のプラン（`plan_promote`）の `promote` ステップが、確かめたコミットのときだけ本番チャネルへマージし、違えば承認ゲート 2 へ戻ること（`merged-steps.py promote --expect-head-from`。#1529） | |
+| `pace: fast` / `auto` の昇格のプラン（`plan_promote`）の `promote` ステップが、確かめたコミットのときだけ本番チャネルへマージし、違えば承認ゲート 2 へ戻ること（`merged-steps.py promote --expect-head-from`。#1529） | 経路 `merge` で宛先が自動反映の本番チャネルのときの `merge-approved`（`merge-when-green --gate-approved user`）の照合 |
+| 昇格のプランの `promote-approved` が、昇格の承認資料の承認したコミットのときだけ本番チャネルへマージし、違えば承認ゲート 2 へ戻ること（`merged-steps.py promote --approved-from`。#2104） | |
 
 ## 背景
 
@@ -216,7 +220,7 @@ git を読むだけで書かず、終了コードも出力も持たない。ブ�
 | P2 | `--expect-head-from` を受けた `promote` は、資料から確かめたコミットを読めないまま照合を飛ばさない | `gh` を 1 度も呼ばずに終了コード 2（`EXIT_UNREADABLE`）で止まる |
 | P3 | 確かめたコミットの行を書く形と読む形は `verified_line` / `verified_sha` の 1 か所が決める | 読めなければ P2 の扱い |
 | P4 | `fast` / `auto` の `promote` ステップは、`mvv` ステップが材料に渡すのと同じパス（`VERIFY_MATERIAL`）を `--expect-head-from` に渡し、失敗は `handoff` へ進む | プランの組み立てのテストで落とす |
-| P5 | `normal` の `promote` と `promote-approved` のコマンドは `--expect-head-from` を持たない | プランの組み立てのテストで落とす |
+| P5 | `--expect-head-from` は `fast` / `auto` の `promote` ステップだけが持ち、`promote-approved` は持たない（昇格の承認の後の照合は `--approved-from`） | プランの組み立てのテストで落とす |
 
 ```mermaid
 sequenceDiagram
@@ -264,8 +268,32 @@ sequenceDiagram
 
 `promote` の失敗の種類（`head_moved` の 1・読めない 2・マージの拒否 1・衝突 4）で行き先を分けず、どれも `on_fail: handoff` が
 承認ゲート 2 へ戻す。戻った後の続きは `development-workflow` の `references/pace.md` の承認ゲート 2 の行が正で、照合で止まった
-（`head_moved`・資料を読めない）ときは `run <プラン> --from verify` から流し直す。`--from promote-approved` は照合を持たず、
-導入の確認も MVV 判定もしていない今の先端をマージするためである。
+（`head_moved`・資料を読めない）ときは `run <プラン> --from verify` から流し直す。`--from promote-approved` は `prepare` が書いた
+昇格の承認資料の承認したコミットで照合するが、導入の確認も MVV 判定もその先端では走っていないためである。
+
+### 昇格の承認の後の照合（#2104）
+
+`normal` の昇格のプランは `promote`（`--out {state_dir}/work/approval-promote.md`）→ 承認ゲート 2 → `promote-approved` の順に流れる。
+`promote-approved` ステップは `normal` と `fast` / `auto` で同じコマンド
+`merged-steps.py promote ... --approved-from {state_dir}/work/approval-promote.md --gate-approved user` を打つ。
+
+| 集約 | 持ち主（書き換えてよいもの） | 根 | 値オブジェクト |
+| --- | --- | --- | --- |
+| 昇格の承認資料 | 本文と「承認したコミット」の行は `merged_lib/merge.py` の `gate_stop`（`normal`）と `_prepare_promote`（`fast` / `auto`）。「承認の記録」（`by: mvv`）の行は `fast` / `auto` の `mvv-gate.py` だけ。行の形は `lib/approved_commit.py` の `material_row` / `material_sha` | `approval-promote.md` | 承認したコミット（40 桁） |
+| 昇格のプラン | `supervise_lib/delivery_templates.py` の `plan_promote` | プラン | 昇格の承認資料のパス（`PROMOTE_MATERIAL`） |
+
+常に成り立つ条件:
+
+| # | 条件 | 破れたときの扱い |
+| --- | --- | --- |
+| P6 | `promote` が昇格の Pull Request で承認ゲート 2 に止まる（終了コード 10）とき、止まる判定に使った読みの `headRefOid` が承認資料の「承認したコミット」の行・`metrics.approved_sha`・gate の `items[].head` に同じ値で載る。`--prepare` の資料にも同じ形の行が載る | 先端が 40 桁の 16 進で読めなければ資料を書かずに終了コード 2 |
+| P7 | `--approved-from` を受けた `promote` は、先端が資料の承認したコミットのときだけ `--match-head-commit` でマージする | 違えば `gh pr merge` を呼ばずに `head_moved`（`head`・`expected`）で 1。`next` に承認ゲート 2 からのやり直しを書く |
+| P8 | `--approved-from` の資料を読めないまま照合を飛ばさない。`--gate-approved user` は `--approved-from` 無しで受けない | `gh` を 1 度も呼ばずに終了コード 2。資料が無いときは `next` に資料つきの打ち方を書く |
+| P9 | `normal` の `promote` の `--out`、両方の `promote-approved` の `--approved-from`、`fast` / `auto` の `prepare` の `--out` は同じ `PROMOTE_MATERIAL` である | プランの組み立てのテストで落とす |
+
+照合で止まったときの続きは `pace.md` の承認ゲート 2 の行が正で、`normal` は `run <プラン> --from promote` から流し直して
+新しい先端で承認ゲート 2 を取り直し、`fast` / `auto` は `--from verify` から流し直す。`promote-approved` は自分の `pace` を
+知らないため、`next` には両方の打ち方を並べる。
 
 ## データ・設定
 
@@ -310,7 +338,7 @@ sequenceDiagram
 
 ### `merged-steps.py promote --expect-head-from <導入の確認の承認資料>`
 
-`merged-steps.py promote --head <ベースブランチ> --base <本番チャネル> [--prepare] [--gate-approved user|mvv] [--expect-head-from <資料>]`。
+`merged-steps.py promote --head <ベースブランチ> --base <本番チャネル> [--prepare] [--out <資料>] [--gate-approved user|mvv] [--expect-head-from <資料> | --approved-from <資料>]`。
 `--expect-head-from` は任意で、渡すと最初に `verified_sha` で確かめたコミットを読み、`merge-when-green --expect-head` と同じ照合に使う。
 
 | 場合 | 終了コード | 結果 |
@@ -320,8 +348,19 @@ sequenceDiagram
 | 最後の読みとマージの間に先端が変わった | 1 | `--match-head-commit X` で GitHub がマージを拒み、既存の「`gh pr merge --admin` が失敗」になる |
 | 資料が無い・確かめたコミットの行が無いか 2 つ以上・40 桁の 16 進でない | 2 | `status: stopped`。昇格の Pull Request を探さず・作らず、`gh` を呼ばない |
 
-引数を渡さない呼び出し（`normal` の `promote` / `promote-approved`、手で打つ既存の呼び出し）は変わらない。`--prepare` と一緒に
-渡したときも先に読み（読めなければ 2）、読めればマージへ進まない今の振る舞いのまま終える。
+`--prepare` と一緒に渡したときも先に読み（読めなければ 2）、読めればマージへ進まない今の振る舞いのまま終える。
+
+### `merged-steps.py promote --approved-from <昇格の承認資料>`
+
+`--approved-from` は `--expect-head-from` と同時には受けない。渡すと最初に `material_sha` で承認したコミットを読み、同じ照合に使う。
+`--gate-approved user` はこの引数が要る。`--out` は `--prepare` と承認ゲート 2 の停止で書く昇格の承認資料の置き場である。
+
+| 場合 | 終了コード | 結果 |
+| --- | --- | --- |
+| 承認ゲート 2 で止まった（`--gate-approved` 無し） | 10 | `metrics.approved_sha` と gate の `items[].head` に先端。`next` は `promote ... --gate-approved user --approved-from <書いた資料>`（プランなら `--from promote-approved`） |
+| 先端が承認したコミットのまま CI が通った | 0 | `items[]` に `{"kind": "pr", "result": "merged", "head": <X>, "gate_approved": "user"}` |
+| 先端が承認したコミットでない | 1 | `items[]` に `head_moved`（`head`・`expected`）。`next` に `--from promote`（`fast` / `auto` は `--from verify`）から流し直すこと |
+| 資料が無い・欄が無い・40 桁の 16 進でない、`--gate-approved user` に `--approved-from` が無い | 2 | `status: stopped`。`gh` を呼ばない |
 
 ### 本番のリリースプラン
 
@@ -347,6 +386,10 @@ sequenceDiagram
 | `promote` は SHA ではなく承認資料のパスを受けて自分で読む（#1529） | プランのコマンドで `--expect-head "$(…)"` と SHA を置換して渡すと、読めなかったときに空の値が渡り、`_check_expected` は空を「照合しない」と扱う。パスを受けて中で読めば、読めないことを `promote` 自身が失敗として返せる（P2）。SHA を出す副命令を足してプランで繋ぐ形は、ステップが増え空の値の経路も残る |
 | 確かめたコミットの行の形を `lib/approved_commit.py` に置き、`verify_markdown` もそれで書く（#1529） | 読み手だけを足すと、書き手の文言を直したときに読み手が黙って読めなくなる。承認資料に `\| 承認したコミット \|` の欄を足して `material_sha` で読む形は、`mvv-gate.py` がその欄を見て承認の記録を書き足すようになり、承認資料の中身を変える |
 | プランは `mvv` と同じ定数 `VERIFY_MATERIAL` を `promote` に渡す（#1529） | MVV 判定が読んだ資料と照合に使う資料が同じファイルになる。資料を書くのは `verify` ステップだけで、`--from verify` で打ち直すと資料も作り直される。プランを組む時点の先端や `origin/<ベースブランチ>` を引き直すと、確認の後に進んだ先端を拾い照合の意味が無くなる |
+| 昇格の承認資料に「承認したコミット」の行を置き、`material_row` / `material_sha` で読み書きする（#2104） | 昇格の Pull Request の先端はベースブランチの先端で、本番の配布の承認資料と同じ語の意味が当たる。`verified_line` を流用すると、導入の確認を走らせない `normal` で「導入の確認をこのコミットで走らせた」と書くことになる |
+| 照合の基準は承認したコミットの行だけにし、承認の記録を求めない（#2104） | 承認ゲート 2 の承認は `sprint-state.py gate ... --by user` で既に残る。`approve` まで求めると昇格の経路だけ承認の後の操作が 1 つ増える。防ぐのは利用者が見た先端と違う先端のマージで、資料の SHA との一致で足りる |
+| `--gate-approved user` は `--approved-from` 無しで受けない（#2104） | 版の更新の前に書き出したプランの `promote-approved` を照合なしで通すと、照合を飛ばす経路が残る。止めても `--from promote` で流し直せば戻せる |
+| 照合で止まった後を `on_fail` で自動に戻さない（#2104） | `on_fail` は CI の失敗やマージの拒否にも掛かり、承認ゲート 2 の取り直しに読み替えてしまう。続きは `next` と `pace.md` が示す |
 | `promote` の失敗の種類で行き先を分けない（#1529） | どれも `on_fail: handoff` が承認ゲート 2 へ戻す。`on_exit` で種類ごとに行き先を変えると、戻った後の人の手順が種類ごとに分かれる。代わりに人が選ぶ続き（`--from verify`）を `pace.md` に書く |
 
 ## 既知の制約
@@ -354,8 +397,9 @@ sequenceDiagram
 | 項目 | 内容 |
 | --- | --- |
 | 配布の PR のコミット数 | `gh pr view --json commits` は 250 件までを返す。超える配布の PR では I3 が外のコミットと誤り、止まる側に倒れる。配布の PR は bump・changelog・説明文・消費の記録の数件である |
-| `normal` の昇格の照合 | 利用者が承認ゲート 2 で見た先端と `promote-approved` がマージする先端は照合しない。同じ食い違いは起きうるが、照合の材料（承認したときの先端を残す記録）が `normal` の経路に無い |
-| 照合で止まった後の続き | 人が `--from promote-approved` を選ぶと、照合を持たない `promote-approved` が確かめていない先端をマージする。防ぐのは `pace.md` の続きの行だけで、`handoff` の文言（「昇格のマージ」）も先端が動いたことを示さない。人は `promote` の出力の `head_moved` を見て選ぶ |
+| 照合で止まった後の続き（`fast` / `auto`） | 人が `--from promote-approved` を選ぶと、`prepare` が書いた承認したコミットのままなら、導入の確認と MVV 判定の後に進んでいない先端としてマージされる。`promote` が `head_moved` で止まった後は承認資料の先端と昇格の Pull Request の先端も違うため、`promote-approved` も止まる |
+| 書き出し済みのプラン | 版の更新の前に書き出したプランの `promote-approved` は `--approved-from` を持たず 2 で止まる。`--from promote` で流し直すと、書き出し済みの `promote` は `--out` を持たないため資料は既定の置き場へ書かれ、`next` の手で打つ形で続ける |
+| 経路 `merge` の `merge-approved` | 宛先が自動反映の本番チャネルのとき、`merge-when-green` の承認ゲート 2 の停止も先端を資料へ残さず、`--from merge-approved` は今の先端をマージする（この文書の範囲外） |
 | 実機での昇格 | 本番チャネルへのマージを伴うため、手元では `gh` を差し替えたテストでだけ確かめた。実機はリリース後テストで、経路 `promote` を持つリポジトリが `fast` / `auto` で通るときに見る |
 | rebase で入れた配布の PR の `mergeCommit` | 実物で確かめていない。`mergeCommit` は承認の外のコミットの一覧から除くのにだけ使い、木の比較には使わない。違っていても、patch-id で除けないものが一覧に余分に並ぶだけで、通す・止めるの向きは止まる側である |
 
@@ -381,7 +425,8 @@ sequenceDiagram
 | 昇格: 確かめたコミットならマージする（P1） | 先端が資料の X のまま CI が通ると、`promote --expect-head-from` が `gh pr merge … --match-head-commit X` を 1 度呼んで 0 で終わること |
 | 昇格: 先端が進んだらマージしない（P1） | 最初の読みで先端が Y なら `gh pr merge` を呼ばずに `head_moved`（`head: Y`・`expected: X`）と終了コード 1。1 回目の読みは X・2 回目で Y でも同じ。待つ間に Y で既にマージされた PR も成功にしないこと |
 | 昇格: 資料を読めなければ何もしない（P2） | 資料が無い・行が無い・行が 2 つ・SHA が 39 桁のそれぞれで、`gh` を 1 度も呼ばずに終了コード 2 になること |
-| 昇格のプラン（P4・P5） | `fast` / `auto` の `promote` ステップが `--expect-head-from` と `mvv` の `--material` に同じ `VERIFY_MATERIAL` を持ち、`on_fail` が `handoff` で、非 0 で `handoff` へ進み終了コード 10 になること。`normal` の `promote` と `promote-approved` が `--expect-head-from` を含まないこと。`base` と `production_branch` を `develop` / `main` 以外で組むとその名前だけが現れること（`test_supervise_pace_verify.py`・`test_supervise_new.py`） |
+| 昇格のプラン（P4・P5・P9） | `fast` / `auto` の `promote` ステップが `--expect-head-from` と `mvv` の `--material` に同じ `VERIFY_MATERIAL` を持ち、`on_fail` が `handoff` で、非 0 で `handoff` へ進み終了コード 10 になること。`promote-approved` が `--expect-head-from` を含まず、`normal` と `fast` / `auto` で等しく `--approved-from PROMOTE_MATERIAL` を持ち、`normal` の `promote` と `fast` / `auto` の `prepare` の `--out` が同じパスであること。`base` と `production_branch` を `develop` / `main` 以外で組むとその名前だけが現れること（`test_supervise_pace_verify.py`・`test_supervise_new.py`） |
+| 昇格の承認の後の照合（P6〜P8） | 承認ゲート 2 の停止で資料・`metrics.approved_sha`・gate の `items[].head` が最初の読みの先端に等しく、先端が読めなければ資料を書かずに 2 であること。`--prepare` の資料も同じ行を持つこと。`--approved-from` の資料が X で先端が X なら `--match-head-commit X` で 1 度マージし、Y なら（最初の読みでも待つ間でも）マージせずに `head_moved` と `--from promote` を含む `next` で 1 であること。資料が無い・欄が無い・形が違う・`--gate-approved user` に資料が無いときは `gh` を呼ばずに 2 であること（`test_sprint_close_merge_green.py`） |
 | 書き手と読み手（P3） | `verify_markdown` の出力を `verified_sha` で読むと書いた SHA が返り、出力の文字列が変わらないこと。`merged-steps.py promote --help` が `--expect-head-from` を出すこと（`test_approved_commit.py`・`test_sprint_close_merge_green.py`） |
 
 ## 関連リンク

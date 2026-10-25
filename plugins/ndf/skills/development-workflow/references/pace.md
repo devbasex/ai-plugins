@@ -232,7 +232,10 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 `approval-verify.md` を `--expect-head-from` に受け、そこに書かれた確かめたコミット（導入の確認を走らせたベースブランチの先頭）が
 昇格の Pull Request の先端のときだけマージする。確認の後にベースブランチが進んで先端が違えば（CI を待つ間に進んだときも）
 `gh pr merge` を呼ばずに `head_moved` で 1、資料から確かめたコミットを読めなければマージせずに 2 で止まり、どちらも `handoff` が
-承認ゲート 2 の `by: mvv` の記録を外して承認ゲートへ落とす。`fast` / `auto` の `merge` の経路では開発版のステージを置かない
+承認ゲート 2 の `by: mvv` の記録を外して承認ゲートへ落とす。`normal` の `promote` は承認ゲート 2 で止まるときに昇格の
+Pull Request の先端を「承認したコミット」として昇格の承認資料（`approval-promote.md`。`fast` / `auto` では `prepare` が書く）へ載せ、
+`promote-approved` は `pace` によらずその資料の承認したコミットが先端のときだけマージする。先端が違えば `head_moved` で 1、
+資料から読めなければ 2 で、マージせずに止まる。`fast` / `auto` の `merge` の経路では開発版のステージを置かない
 （ベースブランチへのマージが検証への反映である）。
 
 **`fast` / `auto` の `merge` の経路では、導入の確認（`<節>.verify`）を 1 つのスプリントの中で 1 度だけ走らせる。** 昇格のプランが
@@ -264,7 +267,7 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 | 答え | 打つもの |
 | --- | --- |
 | 承認（ゲート 1） | `sprint-state.py gate <状態> "関門 1" --what <要約> --by user --outcome approved` → `supervise.py run <設計のプラン> --from approve` → マニフェストのスプリントブランチのステージの `resume` |
-| 承認（ゲート 2） | `sprint-state.py gate <状態> "関門 2" --what <要約> --by user --outcome approved` → `supervise.py run <本番のプラン> --from bump`（昇格のプランは `--from promote-approved`。ただし `promote` が照合で止まった（`head_moved`・確かめたコミットを読めない）ときは `--from verify` から流し直す。`promote-approved` は照合を持たず、導入の確認も MVV 判定もしていない今の先端をマージする。マージの `merge-gate` で止まったプランは `--from merge-approved`。`gate-2` のプランは続きを流さず、手で行う「本番」のステージへ進む） |
+| 承認（ゲート 2） | `sprint-state.py gate <状態> "関門 2" --what <要約> --by user --outcome approved` → `supervise.py run <本番のプラン> --from bump`（昇格のプランは `--from promote-approved`。ただし `promote` が照合で止まった（`head_moved`・確かめたコミットを読めない）ときは `--from verify` から流し直す。`promote-approved` が照合で止まった（`head_moved`・承認したコミットを読めない）ときは、`normal` は `--from promote` から流し直して新しい先端で承認ゲート 2 を取り直し、`fast` / `auto` は `--from verify` から流し直す。マージの `merge-gate` で止まったプランは `--from merge-approved`。`gate-2` のプランは続きを流さず、手で行う「本番」のステージへ進む） |
 | 差し戻し | `sprint-state.py gate <状態> "関門 N" --what <要約> --by user --outcome rejected`。続きは流さない。差し戻しは状態ファイルでなく差し戻しの記録（`gate-rejections.jsonl`）へ 1 行残る。状態ファイルの無い進め方の打ち方は [approval-request.md](approval-request.md) の「答えを記録する」 |
 
 **判定と食い違う答えは覆しとして残る。** 「従う」で自動に通った後の差し戻しは `override_reject`、「従わない」「判定できない」で
