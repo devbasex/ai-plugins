@@ -17,6 +17,8 @@
 | 未登録の語 | `unregistered` | 用語として書かれているのに用語集に無い語。見出しが「用語」の節の表の 1 列目に書いた語を指す | — | — | `docs/specifications/ndf-ubiquitous-language.md` |
 | 用語集の取り込み | — | ベースブランチの取り込みで衝突した用語集を、共通の祖先・自分の側・相手の側の 3 つの版から語の単位で合わせ、文書を作り直して取り込みを終えること。`glossary.py merge` が行う | — | — | `docs/specifications/ndf-glossary-merge.md` |
 | 語の衝突 | — | 用語集の取り込みで、両側が同じ語（コンテキストと語の組）を違う中身にしたこと、または片側が消して片側が書き換えたこと。コンテキストの `id` でも同じ。スクリプトは解かずに止まる | — | — | `docs/specifications/ndf-glossary-merge.md` |
+| agy に配る定義 | — | `plugins/ndf/dev.agy/agents/` の下にあり agy が読むエージェント定義。`plugins/ndf/agents/` から生成した写しで、`model` だけが agy の tier 名に変わる。手で直さない | — | — | — |
+| model の対応表 | — | Claude Code のエージェント定義の `model` の値（型の名前）から agy の tier 名への対応。`scripts/lib/agy_agents.py` が持つ | — | — | — |
 
 ## NDF の開発ワークフロー（`ndf-workflow`）
 
