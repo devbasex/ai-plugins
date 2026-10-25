@@ -451,6 +451,19 @@ def _milestone_out(board, rows, place, title, idx):
     return out
 
 
+def apply_moves(place: dict, forward: list[dict], backward: list[dict]) -> dict:
+    """前倒し（自動・承認済み）と後ろ倒し（承認済み）を反映した課題の置き場所。"""
+    moved = dict(place)
+    for f in forward:
+        if f["decision"] in (AUTO, APPROVED):
+            for n in [f["number"], *f["group"]]:
+                moved[n] = f["to"]
+    for b in backward:
+        if b["decision"] == APPROVED:
+            moved[b["number"]] = b["to"]
+    return moved
+
+
 def compute_ranking(board: Board) -> dict:
     """順位・枠・境界・候補・変化を算出する。CycleError を投げうる。"""
     cfg = board.cfg
@@ -468,14 +481,7 @@ def compute_ranking(board: Board) -> dict:
     forward, backward, dropped, stale = [], [], [], []
     if board.order:
         forward, backward, dropped, stale = _candidates(board, rows, place)
-    moved = dict(place)
-    for f in forward:
-        if f["decision"] in (AUTO, APPROVED):
-            for n in [f["number"], *f["group"]]:
-                moved[n] = f["to"]
-    for b in backward:
-        if b["decision"] == APPROVED:
-            moved[b["number"]] = b["to"]
+    moved = apply_moves(place, forward, backward)
     milestones = [_milestone_out(board, rows, moved, t, i) for i, t in enumerate(board.order, 1)]
     pos = {t: i for i, t in enumerate(board.order)}
     cross = [
