@@ -22,6 +22,7 @@ from supervise_lib.sprint_waves import (
     plan_sprint_impl,
     plan_sprint_release,
     plan_advise_design,
+    design_read,
     plan_design_results,
     plan_mvv_design,
     plan_mvv_release,
@@ -52,8 +53,8 @@ DESIGN_RESULTS_STAGE = "設計の結果"
 
 
 def design_results_wave(a, repo: str, **then) -> list[dict]:
-    """承認ゲート 1 の直後の「設計の結果」のステージ（決定 2）。設計の課題が無ければ置かない。"""
-    if not a.design:
+    """承認ゲート 1 の直後の「設計の結果」のステージ（決定 2）。設計の課題も設計を承認済みの課題も無ければ置かない。"""
+    if not design_read(a):
         return []
     return [{"name": DESIGN_RESULTS_STAGE, "plans": {"design-results": plan_design_results(a, repo)}, **then}]
 
@@ -78,9 +79,9 @@ def fast_sprint_plans(a) -> list[dict]:
     )
     # 設計の課題があれば、設計の結果のステージが実装の queue の先頭になり、実装以降はその --then で続く
     waves += design_results_wave(a, repo)
-    first = DESIGN_RESULTS_STAGE if a.design else "実装"
+    first = DESIGN_RESULTS_STAGE if design_read(a) else "実装"
     impl = {"name": "実装", "plans": {f"impl-{n}": plan_fast_impl(a, n, repo) for n in a.issue}}
-    if a.design:
+    if design_read(a):
         impl["then_of"] = first
     waves += [
         impl,
@@ -108,14 +109,15 @@ def auto_sprint_plans(a) -> list[dict]:
     スプリントブランチ以降を最初のステージの --then で 1 本の queue に流す（#1370 の決定 3）。check-trigger.py は通らない。"""
     repo = str(Path(a.worktree).resolve())
     waves = mvv_design_waves(a, repo, AUTO_GATE_1)
-    first = "設計" if a.design else "スプリントブランチ"
-    then = {"then_of": first} if a.design else {}
+    # 設計の課題が無くても設計を承認済みの課題があれば、設計の結果のステージが queue の先頭になる
+    first = "設計" if a.design else DESIGN_RESULTS_STAGE if design_read(a) else "スプリントブランチ"
+    then = {"then_of": first} if design_read(a) else {}
     impl = {}
     for n in a.issue:
         plan = plan_sprint_impl(a, n, repo)
         plan["進め方"] = "auto"  # 課題の本文の見出し行と通過記録へ進め方を書く（supervise_lib/state.py）
         impl[f"impl-{n}"] = plan
-    waves += design_results_wave(a, repo, **then)
+    waves += design_results_wave(a, repo, **({"then_of": first} if a.design else {}))
     waves += [
         {"name": "スプリントブランチ", "plans": {"sprint-branch": plan_sprint_branch(a, repo)}, **then},
         {"name": "実装", "plans": impl, "then_of": first},

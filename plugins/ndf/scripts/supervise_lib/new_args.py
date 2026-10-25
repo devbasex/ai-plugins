@@ -249,6 +249,16 @@ NEW_ARGS = [
         "sprint",
     ),
     (
+        "--designed",
+        {
+            "type": int,
+            "nargs": "+",
+            "default": [],
+            "help": "設計を承認済みの課題（設計のプランを作らず、設計の結果のステージで設計 PR の設計の結果を読む）",
+        },
+        "sprint",
+    ),
+    (
         "--pace",
         {
             "choices": ["normal", "fast", "auto"],

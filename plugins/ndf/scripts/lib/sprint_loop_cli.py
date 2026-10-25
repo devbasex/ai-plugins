@@ -27,7 +27,7 @@ def run_loop_command(a, update) -> dict | None:
             "select": lambda: sl_select.cmd_select(env, a.loop_name),
             "exclude": lambda: sl_select.cmd_exclude(env, a.loop_name, a.issue, a.reason),
             "sprint": lambda: sl.cmd_sprint(env, a.loop_name, a.mode, a.dev, a.prod, list(a.extra)),
-            "gate": lambda: sl_gate.cmd_gate(env, a.loop_name, a.done),
+            "gate": lambda: sl_gate.cmd_gate(env, a.loop_name, a.done, update=update),
             "answer": lambda: sl.cmd_answer(env, a.loop_name, a.issue, a.approved, a.pr),
             "approve-mvv": lambda: sl.cmd_approve_mvv(env, a.loop_name, a.milestone),
             "lap": lambda: sl.cmd_lap(env, a.loop_name, a.failed, a.done, a.deferred_issues or [], update=update),

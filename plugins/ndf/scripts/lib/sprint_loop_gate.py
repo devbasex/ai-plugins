@@ -8,6 +8,7 @@ import os
 import re
 import shlex
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import gh_sections
@@ -201,11 +202,18 @@ def mark_issue(env: Env, rec: dict, w: dict) -> str | None:
     return None
 
 
-def cmd_gate(env: Env, name: str, done: str) -> dict:
+def refresh_state(lap: dict, update: Callable | None) -> None:
+    """周回を締める前に、周回の done からスプリント状態を埋める（承認ゲートで締める周回も、設計で使った費用と秒を数える）。"""
+    if update and lap.get("state_path"):
+        update(lap["state_path"], [d for d in lap.get("dones", []) if Path(d).is_file()])
+
+
+def cmd_gate(env: Env, name: str, done: str, update: Callable | None = None) -> dict:
     with open_record(env, name) as (rec, before):
         lap = current_lap(rec)
         if not lap or not lap.get("state_path"):
             return refusal_order("スプリントを組んだ進行中の周回が無い")
+        refresh_state(lap, update)
         return handle_gate(env, rec, before, lap, read_done_items(done))
 
 

@@ -69,6 +69,7 @@ from sprint_loop_gate import (
     gate2_resume_step,
     stages_after,
     mark_issue,
+    refresh_state,
     handle_gate,
     failure_key,
     close_lap,
@@ -256,7 +257,8 @@ def sprint_state_init_argv(root: str, rec: dict, lap: dict, issues: list[int]) -
 
 
 def new_sprint_argv(root: str, rec: dict, lap: dict, extra: list[str]) -> list[str]:
-    """supervise.py new sprint --pace auto のコマンド。設計を承認済みの課題は --design から外す。"""
+    """supervise.py new sprint --pace auto のコマンド。設計を承認済みの課題は --design から外して --designed へ入れ、
+    設計の結果のステージ（supervise.py design-results）で設計の結果を読んで実装のプランへ渡す。"""
     issues = selected_issues(lap)
     approved = {w["number"] for w in rec.get("waiting", []) if w.get("answer") == "approved"}
     design = [n for n in issues if n not in approved]
@@ -265,6 +267,8 @@ def new_sprint_argv(root: str, rec: dict, lap: dict, extra: list[str]) -> list[s
     new += ["--worktree", root, "--issue", *map(str, issues), "--mode", lap["mode"], "--version", dev, "--out", lap["out"]]
     if design:
         new += ["--design", *map(str, design)]
+    if designed := [n for n in issues if n in approved]:
+        new += ["--designed", *map(str, designed)]
     new += list(extra)
     return new
 
@@ -402,8 +406,7 @@ def cmd_lap(env: Env, name: str, failed: bool, done: str | None, deferred_issues
         if not lap:
             return refusal_order("進行中の周回が無い")
         items = read_done_items(done) if done else []
-        if update and lap.get("state_path"):  # 承認ゲートで締める周回も、設計で使った費用と秒を状態から数える
-            update(lap["state_path"], [d for d in lap.get("dones", []) if Path(d).is_file()])
+        refresh_state(lap, update)
         if any(i.get("result") == "関門" for i in items):
             return handle_gate(env, rec, before, lap, items)
         state = jsonio.read(lap["state_path"], missing={}, broken={}, want=dict) if lap.get("state_path") else {}

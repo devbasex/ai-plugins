@@ -522,6 +522,9 @@ def test_answers_control_reselection(env):
     env.prs[501] = "MERGED"
     assert sl_select.exclusion_reason(env, r, {"number": 11}, 2, set()) is None and r["waiting"][0]["merged_at"]
     assert any(c[2:4] == ["gate", lap["state_path"]] and "approved" in c for c in env.calls)
+    # 選び直した周回では、承認済みの #11 を --design から外して --designed で設計の結果を読む
+    argv = sl.new_sprint_argv(str(env.root), r, {**lap, "selection": [{"number": n, "decision": "選んだ"} for n in (11, 13)]}, [])
+    assert argv[argv.index("--design") + 1 :][:1] == ["13"] and argv[argv.index("--designed") + 1] == "11"
 
 
 def test_created_issues_are_not_selected_in_the_same_lap(env):
@@ -789,6 +792,14 @@ def test_lap_with_a_gate_updates_the_sprint_state_before_closing(env):
     seen = []
     done = write_done(env, [{"plan": str(Path(lap["out"]) / "design-11.json"), "result": "関門"}])
     out = sl.cmd_lap(env, "l1", False, done, [], update=lambda state, dones: seen.append(state))
+    assert seen == [lap["state_path"]] and rec(env)["laps"][0]["outcome"] == "人へ戻した" and out["status"] == "ok"
+
+
+def test_gate_updates_the_sprint_state_before_closing(env):
+    lap = built_lap(env, nums=(11,))
+    seen = []
+    done = write_done(env, [{"plan": str(Path(lap["out"]) / "design-11.json"), "result": "関門"}])
+    out = sl_gate.cmd_gate(env, "l1", done, update=lambda state, dones: seen.append(state))
     assert seen == [lap["state_path"]] and rec(env)["laps"][0]["outcome"] == "人へ戻した" and out["status"] == "ok"
 
 
