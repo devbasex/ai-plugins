@@ -94,6 +94,8 @@ def fake_clis(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("CODEX_HOME", str(home / ".codex"))
     monkeypatch.setenv("SECRET_TOKEN", SECRET)
+    for name in ("NDF_USAGE_SOURCE", "NDF_USAGE_KIND", "NDF_USAGE_PLAN", "NDF_USAGE_STEP"):
+        monkeypatch.delenv(name, raising=False)  # supervise の中で走らせても名乗りを持ち込まない
     return tmp_path
 
 
