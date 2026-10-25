@@ -16,6 +16,8 @@ from supervise_lib.verify_steps import MARGIN_FLOOR, handoff_step
 
 
 VERIFY_MATERIAL = "{state_dir}/work/approval-verify.md"  # verify-facts が書く承認資料（#1457）
+# 昇格の承認資料。normal は promote の承認ゲート 2 の停止が、fast / auto は prepare が書き、promote-approved が照合に読む（#2104）
+PROMOTE_MATERIAL = "{state_dir}/work/approval-promote.md"
 
 
 def facts_step(repo: str, cmd: str, next_id: str, step_id: str = "facts") -> dict:
@@ -66,7 +68,8 @@ def plan_promote(
     マージの後に record（`release-steps.py record --promote`）が昇格の PR へリリース記録を書き、その PR を計画の
     Pull Request にする（まとめの close が `{queue_pr:promote}` で読む。#837）。record が落ちたら judge-record へ進む。
 
-    - normal（`mvv` 無し）: promote（承認の引数無し。承認ゲート 2 で終える）→ promote-approved（`--from` でだけ入る）
+    - normal（`mvv` 無し）: promote（承認の引数無し。昇格の承認資料 PROMOTE_MATERIAL へ先端を載せて承認ゲート 2 で終える）→
+      promote-approved（`--from` でだけ入る。PROMOTE_MATERIAL の承認したコミットのときだけマージする。#2104）
     - fast / auto（`mvv` にスプリントの状態）: verify（導入の確認。落ちたら止まる。#1457）→ prepare（PR と承認資料）→ mvv（承認ゲート 2 の MVV 判定）→ note（判定のコメント）→
       promote（`--gate-approved mvv`）。promote は mvv と同じ導入の確認の承認資料（VERIFY_MATERIAL）を `--expect-head-from` に受け、
       確かめたコミットのときだけマージする（#1529）。note か promote が落ちたら handoff が承認ゲートへ落とす
@@ -82,7 +85,7 @@ def plan_promote(
         "type": "run",
         "stage": "配布",
         "timeout": timeout,
-        "cmd": promote + wait + " --gate-approved user",
+        "cmd": promote + wait + f" --approved-from {PROMOTE_MATERIAL} --gate-approved user",
         "next": "record",
     }
     record = [
@@ -106,7 +109,7 @@ def plan_promote(
                 "type": "run",
                 "stage": "配布",
                 "timeout": timeout,
-                "cmd": promote + wait,
+                "cmd": promote + wait + f" --out {PROMOTE_MATERIAL}",
                 "gate_next": "end",
                 "next": "record",
             },
@@ -117,7 +120,7 @@ def plan_promote(
         if not verify:
             raise DeclError("fast / auto の昇格のプランに導入の確認のコマンド（<節>.verify）が無い")
         state = str(Path(mvv).resolve())
-        material = "{state_dir}/work/approval-promote.md"
+        material = PROMOTE_MATERIAL
         pr_of = f'$(gh pr list --head {shlex.quote(head)} --base {shlex.quote(base)} --state open --json number --jq ".[0].number")'
         steps = [
             facts_step(repo, verify_facts_cmd(a, repo, verify), "prepare", "verify"),

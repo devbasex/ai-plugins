@@ -308,7 +308,8 @@ class GreenWatch:
 
     def _check_expected(self, sha, state):
         """--expect-head を渡したとき、読んだ先端がその SHA と違えば、待ち続けず・マージ済みでもそこで止める（#815 の I5）。
-        待つ間に別の先端でマージされた PR を成功として返さない（release が承認していないマージへタグを打たない）。"""
+        待つ間に別の先端でマージされた PR を成功として返さない（release が承認していないマージへタグを打たない）。
+        呼び手が続け方（a.moved_next。promote の --approved-from。#2104）を渡していれば next に載せる。"""
         expect = getattr(self.a, "expect_head", None)
         if not expect or sha == expect:
             return
@@ -320,6 +321,7 @@ class GreenWatch:
                 f"#{n} の先端が {expect[:8]} でない（今は {str(sha)[:8]}・{state}）。マージしない",
                 self.items + [{"kind": "pr", "name": f"#{n}", "result": "head_moved", "head": sha, "expected": expect}],
                 {"waits": self.waits},
+                next=getattr(self.a, "moved_next", None),
             )
         )
 

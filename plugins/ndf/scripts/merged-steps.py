@@ -6,7 +6,7 @@
     python3 merged-steps.py merge-gate (--base <宛先> | --pr <PR番号>) [--pr <PR番号>] [--root <dir>]
     python3 merged-steps.py merge-when-green <PR番号> [--gate-approved user|mvv] [--method merge|squash|rebase]
                             [--interval 秒] [--timeout 秒] [--stale-after 秒] [--no-cleanup] [--expect-head <SHA>] [--root <dir>]
-    python3 merged-steps.py promote --head <ベースブランチ> --base <本番チャネル> [--prepare] [--gate-approved user|mvv] [--expect-head-from <資料>]
+    python3 merged-steps.py promote --head <ベースブランチ> --base <本番チャネル> [--prepare] [--out <資料>] [--gate-approved user|mvv] [--expect-head-from <資料> | --approved-from <資料>]
 
 cleanup: マージ済みの PR の作業ツリーとローカルブランチを外し、主ディレクトリを取り込む。
 `git worktree remove` が拒否した作業ツリーは、未追跡・無視されたファイルを退避してから外す。作り直せる生成物
@@ -20,7 +20,7 @@ merge-when-green: PR が draft なら `gh pr ready` で外し、CI のチェッ�
 CI を待たずに承認ゲート 2 で止まる（status: gate・metrics.gate: production-merge。判定は lib/delivery.py。#1336）。
 merge-gate: 宛先の判定だけを行う（0 = 進めてよい / 10 = 承認ゲート 2）。
 promote: 昇格の Pull Request（ベースブランチ → 本番チャネル）を探すか作り、merge-when-green と同じ判定と待ちでマージする（後片付けはしない）。
---prepare は用意して承認資料を書くところで 0 で終える。--expect-head-from は導入の確認の承認資料の確かめたコミットを --expect-head と同じ照合に使う（違えば head_moved で 1、読めなければ 2。#1529）。
+--prepare は用意して承認資料を書くところで 0 で終える。--expect-head-from は導入の確認の承認資料の確かめたコミットを --expect-head と同じ照合に使う（違えば head_moved で 1、読めなければ 2。#1529）。承認ゲート 2 で止まるときは先端を「承認したコミット」として承認資料（--out）と metrics.approved_sha に載せ、--approved-from はその資料の承認したコミットを同じ照合に使う（--gate-approved user に要る。#2104）。
 実行が終わったのにチェックが pending のまま --stale-after 秒続けば、そのジョブを 1 度だけ `gh run rerun --job` で再実行し、
 再実行でも取り残されれば止まる。実行が終わりジョブに結論があれば、チェックの表示が pending のままでも待たずにその結論で扱う。
 ジョブがランナーを待つ間は、待ち行列の件数を待ちの 1 周ごとに stderr へ 1 行出す。同じチェック（workflow の名前と名前の組）は最新の項目だけで数え、古い項目の失敗は items に result: superseded で残す。
@@ -476,9 +476,7 @@ def build_parser():
     )
     pm.add_argument("--head", required=True, help="昇格させるブランチ（ベースブランチ）")
     pm.add_argument("--base", required=True, help="本番チャネル")
-    pm.add_argument("--prepare", action="store_true", help="Pull Request を用意して承認資料を書くところで終える（マージしない）")
-    pm.add_argument("--out", help="--prepare の承認資料の置き場（既定は提示物の置き場）")
-    pm.add_argument("--expect-head-from", metavar="資料", help="導入の確認の承認資料。確かめたコミットが PR の先端のときだけマージする")
+    merge.add_promote_args(pm)
     merge.add_wait_args(pm)
     pm.set_defaults(func=cmd_promote)
     pr = sub.add_parser(

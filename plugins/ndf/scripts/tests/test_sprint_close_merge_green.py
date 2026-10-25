@@ -19,6 +19,7 @@ import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS / "lib"))
+import approved_commit  # noqa: E402
 from step_result import validate_result  # noqa: E402
 
 PY = sys.executable
@@ -887,10 +888,10 @@ def test_merge_gate_judges_without_gh(repo, gh):
 def test_promote_creates_pr_and_merges_after_approval_without_cleanup(repo, gh):
     """I7: 昇格の Pull Request を作り、承認が無ければ止め、承認があればマージして後片付けをしない。"""
     declare(repo, *TRYGROUP)
-    gh.set(create_number=9, pr_seq={"9": [dict(to("main"), headRefName="develop")]})
+    gh.set(create_number=9, pr_seq={"9": [dict(to("main", X), headRefName="develop")]})
     code, out, _ = call("merged-steps.py", ["promote", "--head", "develop", "--base", "main", "--interval", "0"], gh.env, repo)
     assert code == 10 and "promote-approved" in out["next"] and merges(gh) == []
-    gh.set(open_prs=[{"number": 9}], pr_seq={"9": [dict(to("main"), headRefName="develop")] * 3})
+    gh.set(open_prs=[{"number": 9}], pr_seq={"9": [dict(to("main", X), headRefName="develop")] * 3})
     code, out, err = call(
         "merged-steps.py",
         ["promote", "--head", "develop", "--base", "main", "--interval", "0", "--recheck", "0", "--gate-approved", "mvv"],
@@ -906,10 +907,11 @@ def test_promote_creates_pr_and_merges_after_approval_without_cleanup(repo, gh):
 
 def test_promote_prepare_writes_material_and_stops_short(repo, gh):
     declare(repo, *TRYGROUP)
-    gh.set(create_number=9, pr_seq={"9": [dict(to("main"), headRefName="develop")]})
+    gh.set(create_number=9, pr_seq={"9": [dict(to("main", X), headRefName="develop")]})
     code, out, _ = call("merged-steps.py", ["promote", "--head", "develop", "--base", "main", "--prepare"], gh.env, repo)
     assert code == 0 and out["metrics"]["pr"] == 9 and Path(out["presentation_path"]).is_file()
     assert merges(gh) == []
+    assert approved_commit.material_sha(out["presentation_path"]) == X  # #2104 の AC6・I2
 
 
 # --- #1485: 手動確認（マージ前）の行が未確認なら merge-gate が止まる ---------------------------------
@@ -1007,3 +1009,89 @@ def test_promote_help_shows_the_verified_commit_argument(gh, repo):
     """AC9: promote の --help に照合の引数が出る。"""
     p = subprocess.run([PY, str(SCRIPTS / "merged-steps.py"), "promote", "--help"], capture_output=True, text=True, env=gh.env)
     assert p.returncode == 0 and "--expect-head-from" in p.stdout
+
+
+# --- #2104: 昇格の承認の後のマージは、承認ゲート 2 の承認資料の承認したコミットのときだけ行う ----------------------
+
+
+def promote_args(*extra):
+    return ["promote", "--head", "develop", "--base", "main", "--interval", "0", "--recheck", "0", *extra]
+
+
+def promote_material(tmp_path, sha=X, row="承認したコミット"):
+    """昇格の承認資料（gate_stop が書く形の判断の表の行）。sha が None なら資料を作らない。"""
+    p = tmp_path / "approval-promote.md"
+    if sha is not None:
+        p.write_text(f"## 2. 承認の判断に使うもの\n\n| 項目 | 内容 |\n| --- | --- |\n| {row} | {sha} |\n", encoding="utf-8")
+    return p
+
+
+def test_promote_gate_writes_the_head_into_the_material(repo, gh, tmp_path):
+    """AC1・AC8・I1: 承認ゲート 2 で止まるとき、最初の読みの先端を資料・metrics・gate の items に載せ、next が資料で照合する。"""
+    declare(repo, *TRYGROUP)
+    out_path = tmp_path / "approval-promote.md"
+    gh.set(create_number=9, pr_seq={"9": [dict(to("main", X), headRefName="develop"), dict(to("main", Y), headRefName="develop")]})
+    code, out, err = call("merged-steps.py", promote_args("--out", str(out_path)), gh.env, repo)
+    assert code == 10, (out, err)
+    assert approved_commit.material_sha(out_path) == X and out["metrics"]["approved_sha"] == X
+    assert next(i for i in out["items"] if i.get("result") == "gate")["head"] == X
+    assert f"--approved-from {out_path}" in out["next"] and merges(gh) == []
+
+
+def test_promote_gate_does_not_write_a_material_for_an_unreadable_head(repo, gh, tmp_path):
+    """I1: 先端が 40 桁の 16 進で読めなければ、資料を書かずに 2 で終える。"""
+    declare(repo, *TRYGROUP)
+    out_path = tmp_path / "approval-promote.md"
+    gh.set(create_number=9, pr_seq={"9": [dict(to("main", "a"), headRefName="develop")]})
+    code, out, err = call("merged-steps.py", promote_args("--out", str(out_path)), gh.env, repo)
+    assert code == 2 and out["status"] == "stopped", (out, err)
+    assert not out_path.exists() and merges(gh) == []
+
+
+def test_promote_approved_merges_the_approved_commit(repo, gh, tmp_path):
+    """AC2・I3: 資料が X・先端が X のまま CI が通れば、X に固定して 1 度だけマージする。"""
+    declare(repo, *TRYGROUP)
+    gh.set(open_prs=[{"number": 9}], pr_seq={"9": [dict(to("main", X), headRefName="develop")] * 3})
+    material = promote_material(tmp_path)
+    code, out, err = call("merged-steps.py", promote_args("--approved-from", str(material), "--gate-approved", "user"), gh.env, repo)
+    assert code == 0, (out, err)
+    assert merges(gh) == [["pr", "merge", "9", "--admin", "--merge", "--match-head-commit", X]]
+
+
+@pytest.mark.parametrize(
+    "seq",
+    [
+        [dict(to("main", Y), headRefName="develop")] * 2,  # 承認の前（か後）に進んだ
+        [dict(to("main", X), headRefName="develop"), dict(to("main", Y), headRefName="develop")],  # CI を待つ間に進んだ
+    ],
+)
+def test_promote_approved_stops_when_the_head_moved(repo, gh, tmp_path, seq):
+    """AC3・I3: 先端が承認したコミットと違えば、マージせずに head_moved で 1。next が承認ゲート 2 からのやり直しを示す。"""
+    declare(repo, *TRYGROUP)
+    gh.set(open_prs=[{"number": 9}], pr_seq={"9": seq})
+    material = promote_material(tmp_path)
+    code, out, err = call("merged-steps.py", promote_args("--approved-from", str(material), "--gate-approved", "user"), gh.env, repo)
+    assert code == 1 and out["status"] == "stopped", (out, err)
+    assert {"kind": "pr", "name": "#9", "result": "head_moved", "head": Y, "expected": X} in out["items"]
+    assert "--from promote" in out["next"] and merges(gh) == []
+
+
+@pytest.mark.parametrize(
+    "sha, row",
+    [(None, "承認したコミット"), (X, "確かめたコミット"), (X[:39], "承認したコミット"), ("z" * 40, "承認したコミット")],
+)
+def test_promote_approved_does_not_merge_without_a_readable_approved_commit(repo, gh, tmp_path, sha, row):
+    """AC4・I4: 資料が無い・欄が無い・40 桁の 16 進でなければ、gh を 1 度も呼ばずに 2 で止まる。"""
+    declare(repo, *TRYGROUP)
+    material = promote_material(tmp_path, sha, row)
+    code, out, err = call("merged-steps.py", promote_args("--approved-from", str(material), "--gate-approved", "user"), gh.env, repo)
+    assert code == 2 and out["status"] == "stopped", (out, err)
+    assert gh.get().get("calls", []) == []
+
+
+def test_promote_user_approval_needs_the_material(repo, gh):
+    """I5: --gate-approved user を --approved-from 無しで受けず、gh を 1 度も呼ばずに 2 で止まり、資料つきの打ち方を示す。"""
+    declare(repo, *TRYGROUP)
+    code, out, err = call("merged-steps.py", promote_args("--gate-approved", "user"), gh.env, repo)
+    assert code == 2 and out["status"] == "stopped", (out, err)
+    assert "--approved-from" in out["next"] and gh.get().get("calls", []) == []
