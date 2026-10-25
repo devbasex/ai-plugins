@@ -219,6 +219,28 @@ def _expected_tree(root, approved, allowed) -> str | None:
     return out.split()[0] if out else None
 
 
+def _outside_of_prs(root, approved, allowed) -> list[str] | None:
+    """approved..配布の PR の先端のうち、配布の PR のコミットでないもの（I3）。読めなければ None。"""
+    outside: list[str] = []
+    for pr in allowed:
+        listed = _rev_list(root, f"{approved}..{pr.head}")
+        if listed is None:
+            return None
+        outside += [c for c in listed if c not in pr.commits and c not in outside]
+    return outside
+
+
+def _outside_to_tip(root, approved, tip, allowed) -> list[str] | None:
+    """approved..tip の（マージでない）コミットのうち、配布の PR の先端から届かず、配布の PR の mergeCommit でも
+    同じ patch-id でもないもの（I9）。読めなければ None。"""
+    listed = _rev_list(root, "--no-merges", f"{approved}..{tip}", *(f"^{pr.head}" for pr in allowed))
+    if listed is None:
+        return None
+    merges = {pr.merge_commit for pr in allowed if pr.merge_commit}
+    patches = {pid for pr in allowed for c in pr.commits if (pid := _patch_id(root, c))}
+    return [c for c in listed if c not in merges and _patch_id(root, c) not in patches]
+
+
 def compare_approved(root, approved: str, tip: str, allowed: list[AllowedPR] = ()) -> Verdict:
     """承認したコミット approved から比べた先端 tip までを比べる（#815 の設計の「compare の中の順序」）。
 
@@ -239,19 +261,13 @@ def compare_approved(root, approved: str, tip: str, allowed: list[AllowedPR] = (
     if not _ok(root, "merge-base", "--is-ancestor", approved, tip):
         v.reason = NOT_ANCESTOR
         return v
-    outside: list[str] = []
-    for pr in allowed:
-        listed = _rev_list(root, f"{approved}..{pr.head}")
-        if listed is None:
-            return v
-        outside += [c for c in listed if c not in pr.commits and c not in outside]
+    outside = _outside_of_prs(root, approved, allowed)
+    if outside is None:
+        return v
     if not outside:
-        listed = _rev_list(root, "--no-merges", f"{approved}..{tip}", *(f"^{pr.head}" for pr in allowed))
-        if listed is None:
+        outside = _outside_to_tip(root, approved, tip, allowed)
+        if outside is None:
             return v
-        merges = {pr.merge_commit for pr in allowed if pr.merge_commit}
-        patches = {pid for pr in allowed for c in pr.commits if (pid := _patch_id(root, c))}
-        outside = [c for c in listed if c not in merges and _patch_id(root, c) not in patches]
     if outside:
         v.reason = OUTSIDE_COMMITS
         v.outside = [Outside(c, _subject(root, c)) for c in outside]
