@@ -12,9 +12,7 @@ init → ラウンド（起動・監視・取り込み・根拠の検証・判�
 立てて続きを待ち、打ち直しが続き（`resume`）を送る。結果ファイルが無ければ同じ止まりを番号を増やして返す。
 途中のスクリプトが失敗したときも stopped を返して同じように待ち、打ち直しで同じ段階をやり直す。
 
-止まるときの JSON の形と終了コードの表は `scripts/lib/drive_pause.py` にある。
-
-件数（metrics）は状態ファイルから数える。キーの一覧は SKILL.md の「実行」の節にある。
+止まるときの JSON の形と終了コードの表は `scripts/lib/drive_pause.py`、件数（metrics）のキーの一覧は SKILL.md の「実行」の節にある。
 """
 
 from __future__ import annotations
@@ -40,7 +38,6 @@ import step_result as sr  # noqa: E402
 from drive_pause import Stop  # noqa: E402
 from loop_drive import call, durable_identity, keep_finished_output, parse_vars  # noqa: E402,F401  テストは `call` をこのモジュールの上で差し替える
 from loop_drive import relaunch_seats, result_args, review_status, write_review_answer  # noqa: E402
-from review_lib.ci import ci_counts  # noqa: E402
 
 TOOL = "cross-review-drive"
 PLACE_ARGS = frozenset({"--worktree"})  # 置き場だけを変える init の引数。完了の記録の比較から除く（#1263 の I4）
@@ -141,6 +138,9 @@ class Drive:
         `findings` は修正担当が扱った指摘（各ラウンドの直した・見送った・却下したの和）で、`findings >= fixed` が
         数え方で成り立つ。レビュー担当が出したコメントの数は `comments` で別に出す（1 つのコメントに複数の指摘が
         入り、2 者が同じ所を指せば 2 件になるため、指摘の数と比べない）。収束の判定はこの値を読まない。"""
+        review_paths()  # 継続的統合の判定の写し（ci_counts）は review_lib にある
+        from review_lib.ci import ci_counts
+
         s = self.state()
         rounds = s.get("rounds") or []
         comments = fixed = deferred = rejected = 0

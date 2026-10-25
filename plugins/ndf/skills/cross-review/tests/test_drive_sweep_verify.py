@@ -25,6 +25,7 @@ def _load():
 
 
 cr = _load()
+from review_lib.ci import ci_counts  # noqa: E402  conftest が scripts を読めるようにする
 
 
 def _decl(root: Path, decl: dict) -> Path:
@@ -77,9 +78,9 @@ UNVERIFIED = {"verdict": "unverified", "reason": "チェックジョブを照会
 def test_counts_carry_the_last_round_ci(ci, expected):
     """#1593 I3 — 件数の `ci`・`ci_reason` は最後のラウンドの判定から写す（最初のラウンドは読まない）。"""
     rounds = [{"ci": {"verdict": "code_failure", "failed": ["x"]}}, {"ci": ci} if ci else {}]
-    got = cr.ci_counts(rounds)
+    got = ci_counts(rounds)
     assert (got["ci"], got["ci_reason"]) == expected
-    assert cr.ci_counts([]) == {"ci": None, "ci_reason": None}
+    assert ci_counts([]) == {"ci": None, "ci_reason": None}
 
 
 def test_counts_keep_the_existing_keys(monkeypatch):
