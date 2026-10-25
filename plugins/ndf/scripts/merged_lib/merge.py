@@ -52,6 +52,19 @@ def add_wait_args(m):
     )
 
 
+def add_promote_args(pm):
+    """promote だけが受ける、用意と照合の引数（#1529・#2104）。"""
+    pm.add_argument("--prepare", action="store_true", help="Pull Request を用意して承認資料を書くところで終える（マージしない）")
+    pm.add_argument("--out", help="--prepare と承認ゲート 2 の停止で書く昇格の承認資料の置き場（既定は提示物の置き場）")
+    pin = pm.add_mutually_exclusive_group()
+    pin.add_argument("--expect-head-from", metavar="資料", help="導入の確認の承認資料。確かめたコミットが PR の先端のときだけマージする")
+    pin.add_argument(
+        "--approved-from",
+        metavar="資料",
+        help="昇格の承認資料。承認したコミットが PR の先端のときだけマージする（--gate-approved user に要る）",
+    )
+
+
 # --- 承認ゲート 2（自動反映の本番チャネルへのマージ。#1336） ------------------------
 
 GATE = "production-merge"
