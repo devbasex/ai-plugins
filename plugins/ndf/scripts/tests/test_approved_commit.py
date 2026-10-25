@@ -192,3 +192,29 @@ def test_material_without_the_row_is_value_error(tmp_path):
     assert not isinstance(e.value, ac.Unapproved)
     with pytest.raises(ValueError):
         ac.material_sha(tmp_path / "none.md")
+
+
+# --- 確かめたコミット（導入の確認の承認資料。#1529） --------------------------------
+
+
+def test_verified_sha_reads_what_verify_markdown_wrote(tmp_path: Path):
+    """#1529 の I3: verify-facts の承認資料の行は verified_line が書き、verified_sha が同じ SHA を読む。"""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from release_lib.deploy import verify_markdown
+
+    sha = "0123456789abcdef" * 2 + "01234567"
+    text = verify_markdown("trunk", sha.upper(), "true", 0)
+    assert ac.verified_line("trunk", sha.upper()) in text.split("\n")
+    p = tmp_path / "approval-verify.md"
+    p.write_text(text)
+    assert ac.verified_sha(p) == sha
+
+
+@pytest.mark.parametrize("text", [None, "# 無い\n", "{l}\n{l}\n", "{short}\n"])
+def test_verified_sha_rejects_an_unreadable_material(tmp_path: Path, text):
+    """#1529 の I2: 資料が無い・行が無い・2 つ以上・40 桁でなければ ValueError。"""
+    p = tmp_path / "approval-verify.md"
+    if text is not None:
+        p.write_text(text.format(l=ac.verified_line("trunk", "a" * 40), short=ac.verified_line("trunk", "a" * 39)))
+    with pytest.raises(ValueError):
+        ac.verified_sha(p)

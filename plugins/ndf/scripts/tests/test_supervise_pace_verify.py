@@ -111,6 +111,58 @@ def test_a_failed_verify_stops_before_the_promote_pr(tmp_path):
     assert ran == [] and res["items"][0]["result"] != "完了", res
 
 
+@pytest.mark.parametrize("pace", ["auto", "fast"])
+def test_the_promote_merges_only_the_commit_the_mvv_judge_read(tmp_path, pace):
+    """#1529 の AC4・AC6・I4: fast / auto の promote は mvv の材料と同じ導入の確認の承認資料で照合し、落ちたら handoff へ進む。"""
+    plan = load(wave(new_sprint(tmp_path, make_repo(tmp_path, [STG, PRD]), pace), "本番")["plans"][0])
+    s = steps_of(plan)
+    material = "{state_dir}/work/approval-verify.md"
+    assert material in s["verify"]["cmd"] and material in s["mvv"]["cmd"]
+    assert f"--expect-head-from {material} " in s["promote"]["cmd"] and s["promote"]["on_fail"] == "handoff"
+    assert "--expect-head-from" not in s["promote-approved"]["cmd"]
+
+
+def test_the_promote_plan_uses_the_declared_branch_names(tmp_path):
+    """#1529 の AC7・AC8・I5: 照合の引数は fast / auto の promote にだけ付き、ブランチ名は引数のものだけが現れる。"""
+    from supervise_lib.delivery_templates import plan_promote
+
+    a = type("A", (), {"base": "trunk", "production_branch": "stable", "issue": "11", "mode": "standard"})()
+    normal = steps_of(plan_promote(a, str(tmp_path), 600, verify="true"))
+    fast = steps_of(plan_promote(a, str(tmp_path), 600, mvv=str(tmp_path / "state.json"), verify="true"))
+    base = f"{SCRIPTS / 'merged-steps.py'} promote --head trunk --base stable --timeout 600"
+    assert normal["promote"]["cmd"].endswith(base) and normal["promote-approved"]["cmd"].endswith(base + " --gate-approved user")
+    assert fast["promote-approved"]["cmd"] == normal["promote-approved"]["cmd"]
+    want = base + " --expect-head-from {state_dir}/work/approval-verify.md --gate-approved mvv"
+    assert fast["promote"]["cmd"].endswith(want)
+    for s in (*normal.values(), *fast.values()):
+        assert "develop" not in str(s.get("cmd")) and " main" not in str(s.get("cmd"))
+
+
+def test_a_promote_without_the_verified_commit_falls_back_to_gate_2(tmp_path):
+    """#1529 の AC4・AC5: 導入の確認の承認資料が無ければ、plan の promote はマージせずに落ち、handoff が
+    承認ゲート 2 の by: mvv の記録を外して承認ゲートで終わる。"""
+    repo = make_repo(tmp_path, [STG, PRD])
+    state = sprint_state(tmp_path)
+    plan = load(wave(new_sprint(tmp_path, repo), "本番")["plans"][0])
+    log = tmp_path / "mvv-gate.jsonl"
+    stub = {
+        "verify": "true",  # 承認資料を書かない
+        "prepare": "true",
+        "mvv": f"{PY} {SCRIPTS / 'sprint-state.py'} gate {state} '関門 2' --what x --by mvv --verdict follow --reasons '[]' --log {log}",
+        "note": "true",
+        "record": f"touch {tmp_path / 'recorded'}",
+    }
+    for s in plan["steps"]:
+        if s["id"] in stub:
+            s["cmd"] = stub[s["id"]]
+    path = tmp_path / "promote.json"
+    path.write_text(json.dumps(plan, ensure_ascii=False))
+    res = queue.cmd_queue([str(path)], 1, poll=0.05)
+    assert res["status"] == "gate" and res["items"][0]["result"] == "関門", res
+    assert not (tmp_path / "recorded").exists()
+    assert not [g for g in load(state)["gates"] if g["name"] == "関門 2"]
+
+
 def test_a_passed_verify_keeps_the_order(tmp_path):
     """AC4: 確認が 0 なら今と同じ順で続き、マージの後にリリース記録を書く（#1870）。"""
     res, ran = run_promote(tmp_path, "true")

@@ -10,11 +10,12 @@ from __future__ import annotations
 
 import json
 
+import approved_commit
 import delivery
 import gh_parts
 import manual_checks
 from merged_lib.checks import TOOL, GreenWatch, pr_state
-from step_result import StepError, approval_present, emit, git_root, result
+from step_result import EXIT_UNREADABLE, StepError, approval_present, emit, git_root, result
 
 
 def add_wait_args(m):
@@ -299,7 +300,15 @@ def _prepare_promote(root, a, n, item):
 
 def promote(a, cleanup):
     """ベースブランチ（--head）から本番チャネル（--base）への昇格の Pull Request を作り（あれば使い）、承認ゲート 2 の後にマージする。
-    head はベースブランチなので、マージの後に後片付けをしない（#1336 の I7）。"""
+    head はベースブランチなので、マージの後に後片付けをしない（#1336 の I7）。
+    --expect-head-from があれば、最初に導入の確認の承認資料から確かめたコミットを読み、merge-when-green の
+    --expect-head と同じ照合に使う。読めなければ gh を呼ばずに EXIT_UNREADABLE で止まる（照合を飛ばさない。#1529）。"""
+    src = getattr(a, "expect_head_from", None)
+    if src:
+        try:
+            a.expect_head = approved_commit.verified_sha(src)
+        except ValueError as e:
+            raise StepError(f"確かめたコミットを読めないため昇格しない: {e}", EXIT_UNREADABLE) from e
     root = git_root(a.root)
     n, created = _find_or_create_promote_pr(root, a.head, a.base)
     item = {"kind": "pr", "name": f"#{n}", "result": "created" if created else "found", "base": a.base, "head_branch": a.head}

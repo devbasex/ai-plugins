@@ -935,3 +935,75 @@ def test_merge_gate_stops_on_unchecked_before_merge_rows(repo, gh, body, code):
     if code == 10:
         assert out["metrics"]["gate"] == "manual-check" and "実機で承認資料の欄を見る" in out["summary"]
         assert "--from merge-gate" in out["next"]
+
+
+# --- #1529: fast / auto の昇格は、導入の確認で確かめたコミットのときだけマージする ----------------------
+
+X, Y = "a" * 40, "b" * 40
+
+
+def verified_material(tmp_path, *lines):
+    """導入の確認の承認資料（verify-facts が書く形）。lines を省けば確かめたコミットを X にする。"""
+    sys.path.insert(0, str(SCRIPTS))
+    from release_lib.deploy import verify_markdown
+
+    p = tmp_path / "approval-verify.md"
+    p.write_text("\n".join(lines) if lines else verify_markdown("develop", X, "true", 0), encoding="utf-8")
+    return p
+
+
+def promote_mvv(repo, gh, material):
+    args = ["promote", "--head", "develop", "--base", "main", "--interval", "0", "--recheck", "0"]
+    return call("merged-steps.py", [*args, "--expect-head-from", str(material), "--gate-approved", "mvv"], gh.env, repo)
+
+
+def test_promote_merges_the_verified_commit(repo, gh, tmp_path):
+    """AC1・I1: 先端が確かめたコミットのまま CI が通れば、そのコミットに固定してマージする。"""
+    declare(repo, *TRYGROUP)
+    gh.set(open_prs=[{"number": 9}], pr_seq={"9": [dict(to("main", X), headRefName="develop")] * 3})
+    code, out, err = promote_mvv(repo, gh, verified_material(tmp_path))
+    assert code == 0, (out, err)
+    assert merges(gh) == [["pr", "merge", "9", "--admin", "--merge", "--match-head-commit", X]]
+    assert next(i for i in out["items"] if i.get("result") == "merged")["head"] == X
+
+
+@pytest.mark.parametrize(
+    "seq",
+    [
+        [dict(to("main", Y), headRefName="develop")] * 2,  # 確認の後、最初の読みまでに進んだ
+        [dict(to("main", X), headRefName="develop"), dict(to("main", Y), headRefName="develop")],  # CI を待つ間に進んだ
+        [{"state": "MERGED", "headRefOid": Y, "mergeCommit": {"oid": "c"}, "baseRefName": "main"}],  # 別の先端でマージ済み
+    ],
+)
+def test_promote_stops_when_the_head_moved_from_the_verified_commit(repo, gh, tmp_path, seq):
+    """AC2・AC3・I1: 先端が確かめたコミットと違えば gh pr merge を呼ばず、head_moved と両方の SHA を出して 1。"""
+    declare(repo, *TRYGROUP)
+    gh.set(open_prs=[{"number": 9}], pr_seq={"9": seq})
+    code, out, err = promote_mvv(repo, gh, verified_material(tmp_path))
+    assert code == 1 and out["status"] == "stopped", (out, err)
+    assert {"kind": "pr", "name": "#9", "result": "head_moved", "head": Y, "expected": X} in out["items"]
+    assert merges(gh) == []
+
+
+@pytest.mark.parametrize(
+    "lines",
+    [
+        None,  # 資料が無い
+        ("# 導入の確認の承認資料", "", "- コマンド: `true`"),  # 行が無い
+        (f"- ベースブランチ develop の先頭: `{X}`。導入の確認はこのコミットで走らせた",) * 2,  # 行が 2 つ
+        (f"- ベースブランチ develop の先頭: `{X[:39]}`。導入の確認はこのコミットで走らせた",),  # 39 桁
+    ],
+)
+def test_promote_does_not_merge_without_a_readable_verified_commit(repo, gh, tmp_path, lines):
+    """AC5・I2: 確かめたコミットを読めなければ、gh を 1 度も呼ばずに 2 で止まる（照合を飛ばさない）。"""
+    declare(repo, *TRYGROUP)
+    material = tmp_path / "missing.md" if lines is None else verified_material(tmp_path, *lines)
+    code, out, err = promote_mvv(repo, gh, material)
+    assert code == 2 and out["status"] == "stopped", (out, err)
+    assert gh.get().get("calls", []) == []
+
+
+def test_promote_help_shows_the_verified_commit_argument(gh, repo):
+    """AC9: promote の --help に照合の引数が出る。"""
+    p = subprocess.run([PY, str(SCRIPTS / "merged-steps.py"), "promote", "--help"], capture_output=True, text=True, env=gh.env)
+    assert p.returncode == 0 and "--expect-head-from" in p.stdout

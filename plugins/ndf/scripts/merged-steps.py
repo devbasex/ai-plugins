@@ -7,6 +7,7 @@
     python3 merged-steps.py merge-when-green <PR番号> [--gate-approved user|mvv] [--method merge|squash|rebase]
                             [--interval 秒] [--timeout 秒] [--stale-after 秒] [--no-cleanup] [--expect-head <SHA>] [--root <dir>]
     python3 merged-steps.py promote --head <ベースブランチ> --base <本番チャネル> [--prepare] [--gate-approved user|mvv]
+                            [--expect-head-from <導入の確認の承認資料>]
 
 cleanup: マージ済みの PR の作業ツリーとローカルブランチを外し、主ディレクトリを取り込む。
 `git worktree remove` が拒否した作業ツリーは、未追跡・無視されたファイルを退避してから外す。作り直せる生成物
@@ -20,7 +21,11 @@ merge-when-green: PR が draft なら `gh pr ready` で外し、CI のチェッ�
 CI を待たずに承認ゲート 2 で止まる（status: gate・metrics.gate: production-merge。判定は lib/delivery.py。#1336）。
 merge-gate: 宛先の判定だけを行う（0 = 進めてよい / 10 = 承認ゲート 2）。
 promote: 昇格の Pull Request（ベースブランチ → 本番チャネル）を探すか作り、merge-when-green と同じ判定と待ちで
-マージする（後片付けはしない）。--prepare は用意して承認資料を書くところで 0 で終える。
+マージする（後片付けはしない）。--prepare は用意して承認資料を書くところで 0 で終える。--expect-head-from に
+導入の確認の承認資料（`release-steps.py verify-facts` が書く）を渡すと、そこに書かれた確かめたコミットを --expect-head と
+同じ照合に使い、昇格の Pull Request の先端がそのコミットのときだけマージする（違えば items[].result: head_moved で 1。
+資料が無い・確かめたコミットを読めなければ gh を呼ばずに 2）。fast / auto の昇格のプランはこれで止まると handoff で
+承認ゲート 2 へ戻る（#1529）。
 実行が終わったのにチェックが pending のまま --stale-after 秒続けば、そのジョブを 1 度だけ
 `gh run rerun --job` で再実行し、再実行でも取り残されれば止まる。実行が終わりジョブに結論があれば、チェックの表示が
 pending のままでも待たずにその結論で扱う。ジョブがランナーを待つ間は、待ち行列の件数を待ちの 1 周ごとに stderr へ 1 行出す。
@@ -479,6 +484,12 @@ def build_parser():
     pm.add_argument("--base", required=True, help="本番チャネル")
     pm.add_argument("--prepare", action="store_true", help="Pull Request を用意して承認資料を書くところで終える（マージしない）")
     pm.add_argument("--out", help="--prepare の承認資料の置き場（既定は提示物の置き場）")
+    pm.add_argument(
+        "--expect-head-from",
+        metavar="承認資料",
+        help="導入の確認の承認資料（verify-facts が書く）。確かめたコミットが PR の先端のときだけマージする"
+        "（違えば result: head_moved で止まる。読めなければマージせずに 2）",
+    )
     merge.add_wait_args(pm)
     pm.set_defaults(func=cmd_promote)
     pr = sub.add_parser(

@@ -2,10 +2,11 @@
 
 - 承認資料（`release-steps.py approval-facts` が書く Markdown）の欄の名前・SHA の形の検査・読み取り・承認の記録の書き込み
 - 承認したコミットから比べた先端までに、許したもの（配布の PR）の外のコミットや中身が無いかの比較（`compare_approved`）
+- 導入の確認の承認資料（`release-steps.py verify-facts` が書く）の、確かめたコミットの行の形と読み取り
+  （`verified_line` / `verified_sha`。昇格の経路 `merged-steps.py promote --expect-head-from` が読む。#1529）
 
 `compare_approved` は git を読むだけで書かず、終了コードも出力も持たずに判定（`Verdict`）を値で返す。読み替えは呼び手が行う。
-ブランチ名は受け取らず SHA だけを受け取る。`allowed` を空にすると、先端の木が承認したコミットの木と等しいかの判定になる
-（昇格の経路 `merged-steps.py promote` から使う形）。
+ブランチ名は受け取らず SHA だけを受け取る。`allowed` を空にすると、先端の木が承認したコミットの木と等しいかの判定になる。
 """
 
 from __future__ import annotations
@@ -151,6 +152,29 @@ def record_all(approved: dict[str, str], by: str, at: str) -> list[dict]:
 def material_row(sha: str) -> tuple[str, str]:
     """承認資料の「2. 承認の判断に使うもの」の表へ足す (項目, 内容)。"""
     return (ROW, parse_sha(sha))
+
+
+# --- 確かめたコミット（導入の確認の承認資料。#1529） ------------------------------
+
+_VERIFIED_RE = re.compile(r"^- ベースブランチ \S+ の先頭: `([^`]*)`。導入の確認はこのコミットで走らせた$")
+
+
+def verified_line(base: str, sha: str) -> str:
+    """導入の確認の承認資料（`release-steps.py verify-facts`）の、確かめたコミットの行。"""
+    return f"- ベースブランチ {base} の先頭: `{sha}`。導入の確認はこのコミットで走らせた"
+
+
+def verified_sha(path) -> str:
+    """導入の確認の承認資料から確かめたコミットを読む（`merged-steps.py promote --expect-head-from`）。
+    資料が無い・行が無い・行が 2 つ以上・40 桁の 16 進でなければ ValueError（照合を飛ばさない）。"""
+    p = Path(path)
+    if not p.is_file():
+        raise ValueError(f"導入の確認の承認資料 {p} が無い")
+    found = [m.group(1) for m in (_VERIFIED_RE.match(line) for line in p.read_text(encoding="utf-8").split("\n")) if m]
+    if len(found) != 1:
+        what = "無い" if not found else f"{len(found)} 行ある"
+        raise ValueError(f"導入の確認の承認資料 {p} に確かめたコミットの行が{what}")
+    return parse_sha(found[0])
 
 
 # --- 比較 ---------------------------------------------------------------------

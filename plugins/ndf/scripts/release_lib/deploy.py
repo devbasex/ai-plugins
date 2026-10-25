@@ -23,6 +23,7 @@ import os
 import subprocess
 from pathlib import Path
 
+import approved_commit
 import delivery
 import proc
 from step_result import EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, git_root, result
@@ -68,7 +69,7 @@ def verify_markdown(base: str, sha: str, verify: str, code: int) -> str:
         "",
         "## 確認したコミット",
         "",
-        f"- ベースブランチ {base} の先頭: `{sha}`。導入の確認はこのコミットで走らせた",
+        approved_commit.verified_line(base, sha),
         "",
         *verify_lines(verify, code),
     ]
