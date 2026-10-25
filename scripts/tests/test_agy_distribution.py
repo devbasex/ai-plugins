@@ -85,12 +85,11 @@ def test_dev_agy_links_follow_the_manifest() -> None:
         assert (link / "SKILL.md").is_file()
 
 
-@pytest.mark.parametrize("name,target", [("agents", "../agents"), ("scripts", "../scripts")])
-def test_dev_agy_shares_the_implementation(name: str, target: str) -> None:
-    """エージェント定義と hook の実体は 4 ランタイムで共有する（設計の決定 6）。"""
-    link = PLUGIN_DIR / "dev.agy" / name
+def test_dev_agy_shares_the_implementation() -> None:
+    """hook の実体は 4 ランタイムで共有する（設計の決定 6）。エージェント定義は写しを置く（#2087）。"""
+    link = PLUGIN_DIR / "dev.agy" / "scripts"
     assert link.is_symlink(), f"{link} が symlink でない"
-    assert os.readlink(link) == target
+    assert os.readlink(link) == "../scripts"
 
 
 def test_build_creates_the_links(tmp_path: Path) -> None:

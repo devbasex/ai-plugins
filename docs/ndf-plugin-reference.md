@@ -40,7 +40,7 @@ plugin install 時に build を実行する必要はありません。
 | Claude Code | `.claude-plugin/plugin.json`（`agents/` 11 個（専門 8 個と、3 層の定義 3 個（supervisor 2・worker 1））、`hooks/claude.json`、`skills` 配列 48 個）、`scripts/` |
 | Codex | `.codex-plugin/plugin.json`（`hooks/codex.json`、`skills` 配列 44 個）、`scripts/` |
 | Kiro CLI | `dev.kiro/`（installer・agent config template・workflow prompts）、`manifests/kiro-skills.txt`、`skills/`、`scripts/` |
-| agy | `dev.agy/`（マニフェスト・`hooks.json`・`skills/` の symlink・`agents` と `scripts` への symlink） |
+| agy | `dev.agy/`（マニフェスト・`hooks.json`・`skills/` の symlink・`model` を tier 名へ変えた `agents/` の写し・`scripts` への symlink） |
 
 同じディレクトリを 4 ランタイムが共有しますが、読む対象はマニフェストと installer が決めるため、
 公開される Skill と hook はランタイムごとに異なります。Claude Code 専用の agents / statusline /
