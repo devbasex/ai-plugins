@@ -83,9 +83,9 @@ def _reference(baseline: dict[str, Any], suite: ts.Suite, source: Optional[str])
     """基準。`--scope` の候補はその suite の着手前のテストの成否、ほかは全体（`command`）で通ったときだけ `green`。"""
     status = (baseline.get("suites") or {}).get(suite.name)
     if source == ts.PROBE_FROM_SCOPE:
-        return status if status in ("green", "red") else "none"
+        return status if status in (ts.REFERENCE_GREEN, ts.REFERENCE_RED) else ts.REFERENCE_NONE
     whole = baseline.get("mode") in ("whole", "round") and bool(suite.command)
-    return "green" if whole and status == "green" else "none"
+    return ts.REFERENCE_GREEN if whole and status == ts.REFERENCE_GREEN else ts.REFERENCE_NONE
 
 
 def _run_probe(

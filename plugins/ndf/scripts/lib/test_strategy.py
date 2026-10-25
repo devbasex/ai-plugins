@@ -353,6 +353,10 @@ PROBE_UNDECIDED = "undecided"
 PROBE_FROM_SCOPE = "scope"
 PROBE_FROM_REPO = "repo"
 PROBE_FROM_PATHS = "paths"
+# 試走の基準（着手前のテストの成否。`template_verdict` が読む）。
+REFERENCE_GREEN = "green"
+REFERENCE_RED = "red"
+REFERENCE_NONE = "none"
 # 試走に入れるテストのファイルの最大の本数。1 本は受けて 2 本目を受けない雛形（`discover -s a b`）を見分ける。
 PROBE_MAX_FILES = 2
 
@@ -445,7 +449,7 @@ def template_verdict(
     code = f"終了コード {result.code}"
     if not owned:
         return ProbeVerdict(PROBE_UNDECIDED, f"試走が{code}で落ちたが、入れたファイルをこの suite が受け持つと言い切れない")
-    if reference == "green":
+    if reference == REFERENCE_GREEN:
         return ProbeVerdict(PROBE_DEFECT, f"着手前のテストは通り、試走が{code}で落ちた")
     if failures_known:
         return ProbeVerdict(PROBE_DEFECT, f"既存失敗のファイルを除いた試走が{code}で落ちた")
