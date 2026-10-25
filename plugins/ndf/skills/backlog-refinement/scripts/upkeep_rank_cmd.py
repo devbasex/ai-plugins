@@ -25,7 +25,7 @@ import repo as repo_lib
 import upkeep_rank as R
 from upkeep_rank_estimate import apply_overlay, estimate_overlay
 from step_result import EXIT_PAUSE, EXIT_UNREADABLE, StepError, emit, git_root, result
-from upkeep_gh import Gh, Milestones, list_issues, target_repo, sub_issues
+from upkeep_gh import Gh, Milestones, issue_facts, list_issues, target_repo, sub_issues
 
 DECL = Path(".ndf") / "backlog.json"
 NO_WORK_ROLLBACK = "閉じた課題を reopen し、wontfix を外す（本文は GitHub の編集履歴から戻せる）"
@@ -185,10 +185,7 @@ def _write_rank_result(sd, out, code=None):
 def _build_board(a, gh, rows, order, scores, cfg, sd, ctx, notes):
     """open の課題・前回の表・見積・依存の辺から Board を作る。戻り値は (board, issues, ests, excluded)。"""
     open_issues = list_issues(gh, "state=open")
-    issues = {
-        i["number"]: {"milestone": (i.get("milestone") or {}).get("title"), "labels": [lb.get("name") for lb in i.get("labels") or []]}
-        for i in open_issues
-    }
+    issues = {i["number"]: issue_facts(i) for i in open_issues}
     previous = {r["title"]: tab for r in rows if (tab := R.parse_rank_table(r.get("description") or "")) is not None}
     ests, excluded = estimates(issues, scores, ctx.read_state(sd / "estimates.json") or {}, previous, cfg)
     jsonio.write_atomic(sd / "estimates.json", {str(n): e.to_json() for n, e in ests.items()}, indent=1)

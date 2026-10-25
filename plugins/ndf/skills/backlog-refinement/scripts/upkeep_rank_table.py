@@ -91,8 +91,15 @@ def render_rank_table(ms: dict, limit: int | None = None) -> str:
     slot = ms.get("large_slot")
     if slot:
         tail.append("大きい課題の枠: " + slot_text(slot))
+    q = ms.get("quality_slot")  # 品質の枠（宣言があるときだけ。#2089 の決定 14）
+    if q is not None:
+        got = " ".join(f"#{n}" for n in q["issues"]) or "なし"
+        budget = "容量なし" if q["budget"] is None else f"枠 {q['budget']}"
+        tail.append(f"品質の枠: {got}（ラベル {q['label']}、Size の和 {q['size_sum']} / {budget}、最低 {q['min']} 件）")
     b = ms.get("boundary")
-    if b:
+    if b and b.get("empty"):
+        tail.append(f"切り出しの境界: 無し（枠で容量 {b['capacity']} を使い切った。通常の候補は 0 件）")
+    elif b:
         over = "。1 件で容量を超える" if b["over"] else ""
         tail.append(f"切り出しの境界: #{b['number']}（Size の和 {b['size_sum']} / 容量 {b['capacity']}{over}）")
     if tail:

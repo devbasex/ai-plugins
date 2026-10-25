@@ -22,6 +22,7 @@ from supervise_lib.sprint_waves import (
     plan_sprint_impl,
     plan_sprint_release,
     plan_advise_design,
+    design_read,
     plan_design_results,
     plan_mvv_design,
     plan_mvv_release,
@@ -41,6 +42,7 @@ from supervise_lib.sprint_routes import (
     route_waves,
 )
 from supervise_lib.verify_steps import merge_steps
+from supervise_lib.sprint_close_steps import _close_step, _retro_refine_steps, _spec_pr_steps
 
 
 def prod_version(version: str) -> str:
@@ -51,8 +53,8 @@ DESIGN_RESULTS_STAGE = "設計の結果"
 
 
 def design_results_wave(a, repo: str, **then) -> list[dict]:
-    """承認ゲート 1 の直後の「設計の結果」のステージ（決定 2）。設計の課題が無ければ置かない。"""
-    if not a.design:
+    """承認ゲート 1 の直後の「設計の結果」のステージ（決定 2）。設計の課題も設計を承認済みの課題も無ければ置かない。"""
+    if not design_read(a):
         return []
     return [{"name": DESIGN_RESULTS_STAGE, "plans": {"design-results": plan_design_results(a, repo)}, **then}]
 
@@ -77,9 +79,9 @@ def fast_sprint_plans(a) -> list[dict]:
     )
     # 設計の課題があれば、設計の結果のステージが実装の queue の先頭になり、実装以降はその --then で続く
     waves += design_results_wave(a, repo)
-    first = DESIGN_RESULTS_STAGE if a.design else "実装"
+    first = DESIGN_RESULTS_STAGE if design_read(a) else "実装"
     impl = {"name": "実装", "plans": {f"impl-{n}": plan_fast_impl(a, n, repo) for n in a.issue}}
-    if a.design:
+    if design_read(a):
         impl["then_of"] = first
     waves += [
         impl,
@@ -107,14 +109,15 @@ def auto_sprint_plans(a) -> list[dict]:
     スプリントブランチ以降を最初のステージの --then で 1 本の queue に流す（#1370 の決定 3）。check-trigger.py は通らない。"""
     repo = str(Path(a.worktree).resolve())
     waves = mvv_design_waves(a, repo, AUTO_GATE_1)
-    first = "設計" if a.design else "スプリントブランチ"
-    then = {"then_of": first} if a.design else {}
+    # 設計の課題が無くても設計を承認済みの課題があれば、設計の結果のステージが queue の先頭になる
+    first = "設計" if a.design else DESIGN_RESULTS_STAGE if design_read(a) else "スプリントブランチ"
+    then = {"then_of": first} if design_read(a) else {}
     impl = {}
     for n in a.issue:
         plan = plan_sprint_impl(a, n, repo)
         plan["進め方"] = "auto"  # 課題の本文の見出し行と通過記録へ進め方を書く（supervise_lib/state.py）
         impl[f"impl-{n}"] = plan
-    waves += design_results_wave(a, repo, **then)
+    waves += design_results_wave(a, repo, **({"then_of": first} if a.design else {}))
     waves += [
         {"name": "スプリントブランチ", "plans": {"sprint-branch": plan_sprint_branch(a, repo)}, **then},
         {"name": "実装", "plans": impl, "then_of": first},
@@ -129,88 +132,13 @@ def auto_sprint_plans(a) -> list[dict]:
     ]
 
 
-def _spec_pr_steps(a, refs: str) -> list[dict]:
-    """確定仕様化のコミットと、その Pull Request を出して ready にするまで。"""
-    return [
-        {
-            "id": "spec",
-            "type": "work",
-            "full": True,
-            "kind": "確定仕様化",
-            "stage": "確定仕様化",
-            "timeout": 3600,
-            "prompt": f"/ndf:plan-to-spec {refs}。課題の issues/ の計画と設計を docs/ へ移し、コミットする"
-            "（push しない）。移すものが無ければ何もしない。",
-            "next": "pr",
-        },
-        {
-            "id": "pr",
-            "type": "pr",
-            "stage": "Pull Request",
-            "base": a.base,
-            "title": f"確定仕様化: スプリント {a.name}",
-            "summary": f"スプリント {a.name}（{refs}）の計画と設計を docs/ へ移す。issues/ と docs/ だけを触る",
-            "changes": "無し（文書の置き場所だけ）",
-            "next": "ready",
-        },
-        {"id": "ready", "type": "run", "cmd": "sh -c 'git push -q && gh pr ready {pr}'", "next": "merge-gate"},
-    ]
-
-
-def _close_step(a, repo: str, record_pr: str, issues: str) -> dict:
-    """課題を閉じる（sprint-close.py）。"""
-    return {
-        "id": "close",
-        "type": "run",
-        "stage": "後片付け",
-        "cwd": repo,
-        "timeout": 900,
-        "cmd": f"python3 {HERE / 'sprint-close.py'} --record-pr {record_pr} --issues {issues} "
-        f"--with-verification --label {shlex.quote(f'スプリント {a.name}の後片付け')}",
-        "next": "retro",
-    }
-
-
-def _retro_refine_steps(a, refs: str, stats: str) -> list[dict]:
-    """振り返りと棚卸し。"""
-    return [
-        {
-            "id": "retro",
-            "type": "work",
-            "full": True,
-            "kind": "振り返り",
-            "stage": "振り返り",
-            "timeout": 3600,
-            "prompt": f"/ndf:retrospective スプリント {a.name}（{refs}）。材料に検査の記録の集計（`{stats}` の出力: "
-            "トリガーが立った回数・検査ごとの指摘の件数・検査の後に逃げた不具合の件数）を使い、閾値の"
-            "見直しが要るかを書く。",
-            "next": "refine",
-        },
-        {
-            "id": "refine",
-            "type": "work",
-            "full": True,
-            "kind": "棚卸し",
-            "stage": "棚卸し",
-            "timeout": 3600,
-            "prompt": f"/ndf:backlog-refinement スプリント {a.name}（{refs}）。棚卸しの工程として無人で通す。"
-            "候補が上限を超えて持ち越し（`metrics.deferred`）が出ても、`--limit` を上げて打ち直さず、番号と件数を"
-            "報告に載せる。`upkeep.py apply` が終了コード 10 を返したら、承認を求めず、承認資料のパス"
-            "（`presentation_path`）と対象の番号を報告に載せて終える。`--repo` を渡さない（記録のリポジトリの外へ"
-            "書かない）。親 issue の起票と子 issue の結び付けは行わず、クラスタと提案する親 issue の内容（題・子の"
-            "番号）を報告の「人の判断待ち」に載せて終える。",
-            "next": "end",
-        },
-    ]
-
-
 def close_plan(a, repo: str) -> dict:
     """まとめ: 確定仕様化 → Pull Request →（配布の記録があれば）リリース後テスト → 課題を閉じる → 振り返り → 棚卸し。"""
     issues = ",".join(map(str, a.issue))
     refs = " ".join(f"#{i}" for i in a.issue)
     branch = f"spec/{a.name}"
     stats = f"{CHECK_PY} stats --root {shlex.quote(repo)}"
-    record_pr = record_pr_ref(a)
+    record_pr = str(a.record_pr) if getattr(a, "record_pr", None) else record_pr_ref(a)
     plan = with_decls(
         {
             "フェーズ": "まとめ",
@@ -221,7 +149,7 @@ def close_plan(a, repo: str) -> dict:
             "起点": f"origin/{a.base}",
             "リポジトリ": repo,
             "規則": "",
-            "進め方": "fast",
+            "進め方": "auto" if getattr(a, "pace", None) == "auto" else "fast",
             "steps": [
                 *_spec_pr_steps(a, refs),
                 *merge_steps(a, next="release-verify" if has_record(record_pr) else "close"),
@@ -238,6 +166,9 @@ def close_plan(a, repo: str) -> dict:
 def close_waves(a) -> list[dict]:
     """スプリントの終わりのステージ。最終の検査で変更があったときだけ開発版と本番が流れる。"""
     repo = str(Path(a.worktree).resolve())
+    if getattr(a, "pace", None) == "auto":
+        # 開発ループの周回（#2089 の決定 10）: 検査と本番はスプリントのステージで済んでいるため、まとめだけを組む
+        return [{"name": "まとめ", "plans": {"close": close_plan(a, repo)}}]
     final = f"{a.name}-final"
     changed = {"cmd": f"{CHECK_PY} changed --id {final} --root {shlex.quote(repo)}", "skip_code": 3}
     check = {"name": "最終の検査", "plans": {"check": plan_fast_check(a, repo, final, final=True)}}
@@ -466,6 +397,9 @@ def write_stage_index(waves: list[dict], out: Path) -> list[dict]:
 def manifest_head(a, pace: str, closing: bool = False) -> dict:
     """manifest の見出し（スプリント / 進め方 / 状態 / ブランチ）。"""
     head = {"スプリント": a.name}
+    if closing and pace == "auto":  # new close --pace auto（開発ループの周回のまとめ。#2089）
+        head.update({"進め方": "auto", "状態": sprint_state_path(a)})
+        return head
     if pace in MVV_PACES:
         head.update({"進め方": pace, "状態": sprint_state_path(a)})
         if pace != "fast":
