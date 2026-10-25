@@ -68,7 +68,9 @@ def _fix_at(strategy: ts.Strategy, decl: dict[str, Any], suite: ts.Suite, flag: 
     return index, f".ndf/project.json の test.suites[{index}].scope_command"
 
 
-def _probe_candidates(strategy: ts.Strategy, suite: ts.Suite, scope: list[str], work: pathlib.Path) -> tuple[list[str], list[str], list[str]]:
+def _probe_candidates(
+    strategy: ts.Strategy, suite: ts.Suite, scope: list[str], work: pathlib.Path
+) -> tuple[list[str], list[str], list[str]]:
     """`--scope` のテストの置き場所の配下・リポジトリ全体・suite の `paths` の配下の候補（選ぶのは `probe_paths`）。"""
     w = str(work)
     in_scope = [f for loc in test_locations(scope, w) for f in test_files_under(loc, w)]
