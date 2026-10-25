@@ -1,0 +1,160 @@
+{
+  "フェーズ": "配布（本番）",
+  "課題": [
+    16,
+    17
+  ],
+  "モード": "standard",
+  "作業場所": "<TMP>/repo/.worktrees/release/v1.2.0",
+  "branch": "release/v1.2.0",
+  "起点": "origin/main",
+  "規則": "利用者は関門 2 を承認した。run のステップが落ちたら、直せるもの（版数の書き漏れ・文書の形）は fix。外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度。タグの重複・権限の不足は stop。",
+  "上限": 98,
+  "steps": [
+    {
+      "id": "bump",
+      "type": "run",
+      "stage": "配布",
+      "cmd": "python3 <NDF>/scripts/release-steps.py bump --plugin foo --to 1.2.0 --base main",
+      "on_fail": "judge",
+      "next": "bump-others"
+    },
+    {
+      "id": "bump-others",
+      "type": "run",
+      "stage": "配布",
+      "cmd": "out=$(python3 <NDF>/scripts/release-steps.py changed-plugins --plugin foo --decided <TMP>/repo/issues/approval-foo-v1.2.0.md) || { printf \"%s\\n\" \"$out\"; exit 1; }; printf \"%s\\n\" \"$out\"; printf \"%s\\n\" \"$out\" | python3 -c \"import json,sys; [print(i[\\\"name\\\"], i[\\\"to\\\"]) for i in json.loads(sys.stdin.read().strip().splitlines()[-1])[\\\"items\\\"]]\" | while read -r n to; do python3 <NDF>/scripts/release-steps.py bump --plugin \"$n\" --to \"$to\" --base main || exit 1; done",
+      "on_fail": "judge",
+      "next": "changelog"
+    },
+    {
+      "id": "changelog",
+      "type": "run",
+      "cmd": "python3 <NDF>/scripts/release-steps.py changelog --version 1.2.0 --prs {queue_pr:check}",
+      "on_fail": "judge",
+      "next": "notes"
+    },
+    {
+      "id": "notes",
+      "type": "run",
+      "stage": "配布",
+      "cmd": "sh -c 'python3 <NDF>/scripts/release-steps.py notes --version 1.2.0 --prs {queue_pr:check} && git add -A && (git diff --cached --quiet || git commit -q -m \"Release: foo v1.2.0\")'",
+      "on_fail": "judge",
+      "next": "snapshot"
+    },
+    {
+      "id": "snapshot",
+      "type": "run",
+      "stage": "配布",
+      "timeout": 900,
+      "cmd": "sh -c 'python3 <NDF>/scripts/release-steps.py run --root . --stage production --version 1.2.0 && git add -A && (git diff --cached --quiet || git commit -q -m \"Release: foo v1.2.0 のトークン消費の記録\")'",
+      "on_fail": "judge",
+      "next": "release"
+    },
+    {
+      "id": "release",
+      "type": "run",
+      "stage": "配布",
+      "timeout": 7920,
+      "cmd": "python3 <NDF>/scripts/release-steps.py release --version 1.2.0 --ci-wait 3600 --channel prod --approval <TMP>/repo/issues/approval-foo-v1.2.0.md",
+      "on_exit": {
+        "75": "stop"
+      },
+      "on_fail": "judge",
+      "next": "record",
+      "probe": {
+        "cmd": "python3 <NDF>/scripts/merged-steps.py probe --head {branch} --head {base} --act"
+      },
+      "gate_next": "end"
+    },
+    {
+      "id": "record",
+      "type": "run",
+      "stage": "配布",
+      "timeout": 300,
+      "cmd": "python3 <NDF>/scripts/release-steps.py record --version 1.2.0 --prs {queue_pr:check}",
+      "pr_from": "release_pr_url",
+      "on_fail": "judge-record",
+      "next": "verify"
+    },
+    {
+      "id": "verify",
+      "type": "run",
+      "stage": "リリース後テスト",
+      "timeout": 1500,
+      "cwd": "<TMP>/repo",
+      "cmd": "sh -c 'git pull -q --ff-only origin main && python3 <NDF>/scripts/release-verification-steps.py verify-install --ref main --expect 1.2.0 --runtimes claude'",
+      "on_fail": "judge",
+      "next": "cleanup"
+    },
+    {
+      "id": "cleanup",
+      "type": "run",
+      "stage": "後片付け",
+      "cwd": "<TMP>/repo",
+      "cmd": "sh -c 'python3 <NDF>/scripts/merged-steps.py cleanup $(gh pr list --state merged --limit 30 --json number,headRefName --jq \".[] | select(.headRefName | startswith(\\\"release/v1.2.0\\\")) | .number\") {queue_pr:check}'",
+      "on_fail": "judge",
+      "next": "end"
+    },
+    {
+      "id": "judge",
+      "type": "judge",
+      "inputs": [
+        "bump",
+        "bump-others",
+        "changelog",
+        "notes",
+        "snapshot",
+        "release",
+        "verify",
+        "cleanup"
+      ],
+      "question": "落ちたステップを直す（fix）か、同じステップをもう一度（retry）か、止める（stop）か。retry なら decision に落ちたステップの id を返す",
+      "choices": [
+        "fix",
+        "bump",
+        "bump-others",
+        "changelog",
+        "notes",
+        "snapshot",
+        "release",
+        "verify",
+        "cleanup",
+        "stop"
+      ]
+    },
+    {
+      "id": "fix",
+      "type": "work",
+      "kind": "修正",
+      "inputs": [
+        "bump",
+        "bump-others",
+        "changelog",
+        "notes",
+        "snapshot",
+        "release",
+        "verify",
+        "cleanup"
+      ],
+      "prompt": "落ちたステップの出力を読み、原因を直してコミットする（push しない）。直したら次は落ちたステップからやり直す。",
+      "back_to_failed": true,
+      "next": "release"
+    },
+    {
+      "id": "judge-record",
+      "type": "judge",
+      "inputs": [
+        "record"
+      ],
+      "question": "リリース記録の書き込み（record）が落ちた。本番の配布は済んでいる。GitHub の揺れなら record をもう一度、権限の不足・本番のリリースの PR が無いなら止める（stop）",
+      "choices": [
+        "record",
+        "stop"
+      ]
+    }
+  ],
+  "base_branch": "main",
+  "リポジトリ": "<TMP>/repo",
+  "記録": "<NDF>/scripts/projects-sync.sh"
+}

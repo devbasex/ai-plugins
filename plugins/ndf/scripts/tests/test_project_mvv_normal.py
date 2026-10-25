@@ -319,7 +319,8 @@ def test_normal_sprint_with_a_state_puts_the_advice_before_both_gates(tmp_path):
     manifest, out = new_normal_sprint(tmp_path, "--state", str(state))
     assert (manifest["進め方"], manifest["状態"], manifest["ブランチ"]) == ("normal", str(state.resolve()), "sprint/m26")
     waves = {w["name"]: w for w in manifest["ステージ"]}
-    assert "--what <要約> --by user --pr <設計 PR>" in waves["関門 1"]["gate"] and "--by user" in waves["配布"]["note"]
+    assert "--what <要約> --by user --pr <設計 PR>" in waves["関門 1"]["gate"] and "--by user" in waves["関門 2"]["gate"]
+    assert "note" not in waves["配布"] and "'関門 2' --what" in waves["関門 2"]["gate"]
     assert "sprint-state.py gate" in out["next"]
     design = load(waves["設計"]["plans"][0])
     ds = steps_of(design)
@@ -342,6 +343,7 @@ def test_normal_sprint_with_a_state_puts_the_advice_before_both_gates(tmp_path):
             assert plan["スプリント状態"] == str(state.resolve())
             assert_transitions_exist(plan)
     assert sum(1 for w in manifest["ステージ"] for p in w.get("plans", []) for s in load(p)["steps"] if s["id"] == "mvv") == 2
+    assert not {"mvv", "note", "handoff"} & set(steps_of(load(waves["本番"]["plans"][0])))  # 本番は利用者が答える（#1914 の I4）
 
 
 def test_normal_sprint_without_a_state_is_unchanged(tmp_path):

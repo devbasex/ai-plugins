@@ -12,7 +12,7 @@ from pathlib import Path
 import legacy_names
 
 from supervise_lib.decl import decl_fields
-from supervise_lib.paths import DESIGN_READY, GLOSSARY_PY, MVV_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, SYNC_DESIGN_BODY, WORKTREE_SETUP
+from supervise_lib.paths import DESIGN_READY, GLOSSARY_PY, HERE, MVV_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, SYNC_DESIGN_BODY, WORKTREE_SETUP
 from supervise_lib.procedures import DESIGN_RESULTS, pr_step, requirements_path, sprint_materials, sprint_out, with_record
 from supervise_lib.release_templates import MVV_NOTE, advise_steps, plan_release
 from supervise_lib.templates import plan_check, plan_check_since, plan_impl
@@ -313,24 +313,60 @@ def plan_sprint_check(a, repo: str) -> dict:
     return plan
 
 
-def plan_sprint_release(a, repo: str, advise: bool = False) -> dict:
-    """開発版の配布。出す PR は検査のプランのスプリントの PR（`{queue_pr:check}`）で、検査の queue の --then でも
-    単独で流し直しても埋まる（#1915）。`advise` なら承認資料の後に助言の MVV 判定を置く（pace: normal と --state。#1400）。"""
+def plan_sprint_release(a, repo: str, advise: bool = False, channel: str = "dev", version: str | None = None) -> dict:
+    """pace: normal の配布。出す PR は検査のプランのスプリントの PR（`{queue_pr:check}`）で、検査の queue の --then でも
+    単独で流し直しても埋まる（#1915）。本番（channel が prod）も同じ組み立てで、承認ゲート 2 の後に単独で流す（#1914）。
+    `advise` なら開発版の承認資料の後に助言の MVV 判定を置く（pace: normal と --state。#1400）。本番には置かない。"""
+    version = version or a.version
     ns = argparse.Namespace(
         **decl_fields(a),
-        version=a.version,
+        version=version,
         prs=["{queue_pr:check}"],
         prs_from_queue=False,
-        channel="dev",
+        channel=channel,
         repo=repo,
         prev_tag=None,
-        worktree=f"{repo}/.worktrees/release/v{a.version}",
-        branch=f"release/v{a.version}",
+        worktree=f"{repo}/.worktrees/release/v{version}",
+        branch=f"release/v{version}",
         issue=a.issue,
         mode=a.mode,
-        advise=a.state if advise else None,
+        advise=a.state if advise and channel == "dev" else None,
     )
     return plan_release(ns)
+
+
+def user_gate_cmd(a, gate: str, pr: bool) -> str:
+    """利用者の答えを状態へ書くコマンド（覆しの記録。#1400 の AC6）。承認ゲート 1 は答えた設計 PR を --pr で渡す。"""
+    state = shlex.quote(str(Path(a.state).resolve()))
+    return (
+        f"python3 {shlex.quote(str(HERE / 'sprint-state.py'))} gate {state} {shlex.quote(gate)} --what <要約> --by user"
+        + (" --pr <設計 PR>" if pr else "")
+        + " --outcome approved|rejected"
+    )
+
+
+def normal_gate_1(a) -> str:
+    return (
+        "設計 Pull Request をまとめて承認してマージする。承認資料には各設計 PR の助言の MVV 判定（PR のコメント。無ければ「MVV なし」）を"
+        f"載せる。利用者が答えたら、設計 PR ごとに `{user_gate_cmd(a, '関門 1', True)}` を打つ"
+    )
+
+
+def normal_gate_2(a) -> str:
+    return (
+        "承認ゲート 2: 承認資料の末尾に助言の MVV 判定が載る（無ければ「MVV なし」）。利用者が本番への配布に答えたら、"
+        f"`{user_gate_cmd(a, '関門 2', False)}` を打つ"
+    )
+
+
+def normal_gate_2_stage(a, prod: str, advise: bool) -> str:
+    """pace: normal の承認ゲート 2 のステージの文。承認の手順はここの 1 か所に置き、配布の note に重ねない（#1914 の決定 1）。"""
+    approval = f"issues/approval-{(a.release or {}).get('plugin')}-v{prod}.md"
+    text = (
+        f"開発版の配布が書いた承認資料（{approval}）を示して本番への配布の承認を取り、承認されたら"
+        "「本番」のステージの command を打つ（差し戻されたら打たない）"
+    )
+    return text + "。" + normal_gate_2(a) if advise else text
 
 
 def advise_design_steps(a) -> list[dict]:

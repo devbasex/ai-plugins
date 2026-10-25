@@ -92,6 +92,18 @@ def test_new_sprint_with_package_plugin_keeps_release_stage(tmp_path):
     assert p.returncode == 0, p.stderr
     names = [w["name"] for w in json.loads((out / "sprint.json").read_text())["ステージ"]]
     assert names[-1] == "配布" and "/ndf:release" not in json.loads(p.stdout)["next"]
+    assert "production_branch" in json.loads(p.stdout)["next"]  # 本番のブランチが無いので本番を置かない（#1914 の決定 3）
+
+
+def test_normal_sprint_without_a_production_branch_keeps_gate_2_on_the_release(tmp_path):
+    root = plain_repo(tmp_path, {"form": "package-plugin", "plugin": "foo", "runtimes": ["claude"]})
+    state = tmp_path / "state.json"
+    state.write_text(json.dumps({"name": "m", "pace": "normal", "gates": []}))
+    out = tmp_path / "m"
+    p = new_sprint(root, out, "--state", str(state))
+    assert p.returncode == 0, p.stdout + p.stderr
+    last = json.loads((out / "sprint.json").read_text())["ステージ"][-1]
+    assert last["name"] == "配布" and "--by user" in last["note"]
 
 
 def close_cli(root, out, *extra):
