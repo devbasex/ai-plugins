@@ -545,7 +545,7 @@ def test_context_subagent_passes(tmp_path, state):
 
 def test_context_non_stage_passes(tmp_path, state):
     tp = transcript(tmp_path, 250_000)
-    for name in ("ndf:markdown-writing", "ndf:worktree", "ndf:progress-tracking", "ndf:out-of-scope"):
+    for name in ("ndf:document-style", "ndf:worktree", "ndf:progress-tracking", "ndf:out-of-scope"):
         assert denied(run(skill(tp, name=name), state)) is None, name
     assert denied(run(agent(tp, desc="調査: 既存の規約"), state)) is None
     assert denied(run(agent(tp, desc="何かの説明"), state)) is None
@@ -558,7 +558,7 @@ def test_context_once_then_pass_same_key(tmp_path, state):
     assert denied(run(skill(tp), state))
     run(bash("ls"), state)
     run(read(f), state)
-    run(skill(tp, name="ndf:markdown-writing"), state)
+    run(skill(tp, name="ndf:document-style"), state)
     assert denied(run(skill(tp), state)) is None
     assert denied(run(skill(tp, name="ndf:merged"), state))
 

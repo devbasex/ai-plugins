@@ -117,7 +117,7 @@ run(__dirname, { script: SCRIPT, title: "独自プラグイン開発の薦め", 
     ["Claude Code: Skills", "https://code.claude.com/docs/ja/skills"],
     ["プラグインマーケットプレイス", "https://code.claude.com/docs/ja/plugin-marketplaces"],
     ["Agent Skills の紹介（Engineering Blog）", "https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills"],
-    ["公式 Skill の例（anthropics/skills）", "https://github.com/anthropics/skills"],
+    ["公式スキルの例（anthropics/skills）", "https://github.com/anthropics/skills"],
     ["OpenAI（Codex）"],
     ["Codex: Skills", "https://developers.openai.com/codex/skills"],
     ["Codex: Plugins", "https://developers.openai.com/codex/plugins"],
@@ -139,7 +139,7 @@ run(__dirname, { script: SCRIPT, title: "独自プラグイン開発の薦め", 
   s = d.page("NDF: 自分のやり方をプラグインに", "GitHub で公開。ほぼ 1 人と AI で開発");
   [
     ["102", "回", "リリース（半年）"],
-    ["48", "個", "Skill"],
+    ["48", "個", "スキル"],
     ["4", "つ", "ランタイム"],
     ["10", "リポジトリ", "自分以外へ導入"],
   ].forEach((r, i) => {
@@ -368,14 +368,14 @@ run(__dirname, { script: SCRIPT, title: "独自プラグイン開発の薦め", 
   s = d.page("始め方と育て方", "フォークする → 削る → 育てる");
   [
     ["1. フォークする", ["名前を自分のものに", "自分のリポジトリから導入"]],
-    ["2. 削る", ["使わない Skill は外す", "残すかは呼び出し回数で"]],
-    ["3. 育てる", ["同じ指摘を 2 回したら形に", "手順 → Skill", "決まった処理 → スクリプト", "必ず守らせる → hook"]],
+    ["2. 削る", ["使わないスキルは外す", "残すかは呼び出し回数で"]],
+    ["3. 育てる", ["同じ指摘を 2 回したら形に", "手順 → スキル", "決まった処理 → スクリプト", "必ず守らせる → hook"]],
   ].forEach((r, i) => {
     const c = cols(3)[i];
     card(d, s, c.x, 1.42, c.w, 1.9, r[0], bullets(r[1], 13.5), "accentSoft", { headSize: 14 });
   });
   d.callout(s, 3.5, 1.04, "caution", "気をつける点", bullets([
-    "description（Skill の説明文）は最小限",
+    "description（スキルの説明文）は最小限",
     "思いつきは experimental で試す",
     "開発版を使ってから正式版に",
   ], 10.5));
@@ -384,8 +384,8 @@ run(__dirname, { script: SCRIPT, title: "独自プラグイン開発の薦め", 
   s = d.page("まとめ: 明日からの 3 ステップ", "教えるのは 1 回。プラグインにして、フォークして育てる");
   [
     ["1", "ai-plugins をフォークして\n自分の名前でインストール"],
-    ["2", "使わない Skill を外す"],
-    ["3", "同じ指摘を 2 回したら\nSkill にする"],
+    ["2", "使わないスキルを外す"],
+    ["3", "同じ指摘を 2 回したら\nスキルにする"],
   ].forEach((r, i) => {
     const c = cols(3)[i];
     d.box(s, c.x, 1.5, c.w, 2.0, "panel1", false);

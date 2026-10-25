@@ -123,7 +123,7 @@ description: "Delete merged branches and worktrees, stopping only where git refu
 量が問題になるのは MCP ツールを多用する Skill だけである（`playwright-authoring` は 43 個の
 列挙で 1,916 文字）。この種の Skill は本体プラグインからの分離を検討する。
 
-## 発動制御の 4 分類
+## 発動制御の 5 分類
 
 | 分類 | Claude Code | Codex | Kiro | agy | 対象 |
 | --- | --- | --- | --- | --- | --- |
@@ -131,6 +131,7 @@ description: "Delete merged branches and worktrees, stopping only where git refu
 | パス限定自動発動 | 上記 + `paths` | `paths` 無効 | `paths` 無効 | `paths` 無効 | 特定ディレクトリでのみ意味を持つもの |
 | 明示指示専用 | `disable-model-invocation: true`（引数を取るなら + `argument-hint`） | `agents/openai.yaml` の `policy.allow_implicit_invocation: false`。加えて `description` に明示指示専用である旨を記載する | 制御手段なし。`description` に「利用者が明示的に指示したときのみ実行する」と記載 | 制御手段なし。Kiro と同じく `description` へ記載する | 取り消しが難しく、かつ明示起動が定着している操作 |
 | 常時注入のみ | `user-invocable: false` | 相当機能なし | 相当機能なし | 相当機能なし | `ndf-policies` |
+| 工程から呼ぶ専用 | `user-invocable: false`（スラッシュコマンドの一覧と `/<name>` の入力から外れ、モデルからは呼べる）。`description` に「工程と AI から呼ぶ」と書く | 相当機能なし | 相当機能なし | 相当機能なし | 工程と他の Skill から呼ばれ、利用者が単独で呼ぶ場面の無いもの（`document-drafting`・`document-sources`・`document-systems`・`document-style`）。利用者の入口は `document-rebuild` |
 
 - Codex の相当機能は `<Skill 名>/agents/openai.yaml` の `policy.allow_implicit_invocation: false`
   である。`scripts/build-runtime-plugins.sh` が `disable-model-invocation: true` の Skill に対して
@@ -147,6 +148,7 @@ description: "Delete merged branches and worktrees, stopping only where git refu
   へ載らず、`user-invocable: false` は載る。Codex と Kiro と agy にはこのキーがなく
   `description` は常に読まれるため、明示指示専用にする Skill は `description` 自体へ「利用者が明示的に指示した
   ときのみ実行する」と書き残す
+- 「工程から呼ぶ専用」は「常時注入のみ」と同じ `user-invocable: false` を使う。違いは `description` で、常時注入のみは知識として参照する旨、工程から呼ぶ専用は工程と AI から呼ぶ旨を書く。Codex と Kiro と agy では通常の Skill として一覧に出る。Claude Code での振る舞い（一覧から外れ、Claude は呼べる）は [Claude Code の Skills の文書](https://code.claude.com/docs/en/skills) の `user-invocable` の行にある
 - `disable-model-invocation: true` と `user-invocable: false` を同時に指定しない。誰も起動
   できなくなる
 - 「引数を取るなら + `argument-hint`」の引数の有無は `scripts/check-skill-frontmatter.py` が

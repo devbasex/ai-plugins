@@ -781,3 +781,20 @@ def test_dependencies_of_an_empty_or_broken_tree_are_empty_per_language():
     assert _deps_of({}) == {"php": {}, "javascript": {}, "python": {}}
     broken = {"composer.json": "{", "package.json": "[1]", "pyproject.toml": "[[", "requirements.txt": ""}
     assert _deps_of(broken) == {"php": {}, "javascript": {}, "python": {}}
+
+
+# --- 現状固定: measure_repo.compose_services（I-009） ----------------------------------
+
+
+def test_compose_services_reads_names_and_images_by_indent_as_is():
+    text = (
+        '# head\nversion: "3"\nservices:\n  # comment\n  "app":\n    build: .\n    image: "app:1"\n\n'
+        "  db:\n    environment:\n      image: nested\n    image: mysql:8.0\n"
+        '  cache:\n    ports:\n      - "6379"\n  app:\n    image: app:2\n'
+        "volumes:\n  data:\n    image: ignored\n"
+        "services:\n    late:\n      image: late:1\n  again:\n    image: again:1\n"
+    )
+    cs = _project_lib("measure_repo").compose_services
+    # 同じ名前は最後の image を共有し、字下げの違う 2 つ目の services の行は直前のサービスの image になる
+    assert cs(text) == [("app", "late:1"), ("db", "mysql:8.0"), ("cache", ""), ("app", "late:1"), ("again", "again:1")]
+    assert cs("") == [] and cs("x:\n  image: a\n") == []

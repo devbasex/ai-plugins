@@ -90,6 +90,11 @@
       "id": "ndf-slide",
       "name": "NDF のスライドの作成",
       "meaning": "スライドを生成スクリプトで作り、Google Slides へ変換して確かめるときの語"
+    },
+    {
+      "id": "ndf-document",
+      "name": "NDF の文書の組み直し",
+      "meaning": "書き上げた文書を文書形式と文書の目的に合わせて組み直すときの語。document-rebuild が持つ"
     }
   ],
   "terms": [
@@ -701,7 +706,7 @@
     {
       "term": "手順",
       "context": "ndf-workflow",
-      "meaning": "1 つの Skill の中で順に通す作業の単位。cross-refactoring の提案・リファクタリング計画・テスト追加・実装・検証/修正の 5 つ、document-restructuring の測る・並べ替える・整える・測り直すの 4 つ",
+      "meaning": "1 つの Skill の中で順に通す作業の単位。cross-refactoring の提案・リファクタリング計画・テスト追加・実装・検証/修正の 5 つ、document-rebuild の決める（文書形式・文書の目的・言語）・測る・組み直す・整える・測り直すの 5 つ（手順 0〜4）",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
@@ -2528,6 +2533,36 @@
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
+      "term": "開発ループ",
+      "context": "ndf-workflow",
+      "meaning": "スプリントを 1 つ終えるたびに、棚卸しの結果から次のスプリントを選んで続けて始める進め方。引数で切り替え、止まる条件に当たるまで繰り返す",
+      "pending_source": "issues/issue-2089-requirements.md"
+    },
+    {
+      "term": "周回",
+      "context": "ndf-workflow",
+      "meaning": "開発ループの 1 回分。次のスプリントの選定から、そのスプリントの棚卸しと止まる条件の判定まで",
+      "pending_source": "issues/issue-2089-requirements.md"
+    },
+    {
+      "term": "ループの予算",
+      "context": "ndf-workflow",
+      "meaning": "開発ループが使ってよい量の上限。周回の数・費用・経過時間で数え、超えたら止まる",
+      "pending_source": "issues/issue-2089-requirements.md"
+    },
+    {
+      "term": "止まる条件",
+      "context": "ndf-workflow",
+      "meaning": "開発ループを止める、機械で判定できる条件。予算を超えた・同じ失敗が続いた・着手できる課題が無い・MVV の外の課題しか残らない・利用者が止めた",
+      "pending_source": "issues/issue-2089-requirements.md"
+    },
+    {
+      "term": "ループの記録",
+      "context": "ndf-workflow",
+      "meaning": "開発ループの周回ごとの選定・承認ゲートの判定・版・費用と秒・止まる条件の判定を持つ記録。メインディレクトリの .ndf/loop/<名>/loop.json が正本で、laps.md はそこから描画する",
+      "pending_source": "issues/issue-2089-design.md"
+    },
+    {
       "term": "スプリントブランチ",
       "context": "ndf-workflow",
       "meaning": "課題の Pull Request を集め、ベースブランチへの Pull Request をスプリントで 1 本にするブランチ（`sprint/<名前>`）",
@@ -3438,6 +3473,12 @@
       "source": "docs/specifications/ndf-release-approved-commit.md"
     },
     {
+      "term": "確かめたコミット",
+      "context": "ndf-release",
+      "meaning": "導入の確認を走らせた、ベースブランチの先頭のコミットの SHA（40 桁）。導入の確認の承認資料に書かれ、pace: fast / auto の昇格でマージしてよい先端はこのコミットに限る",
+      "pending_source": "issues/issue-1529-design.md"
+    },
+    {
       "term": "承認の外のコミット",
       "context": "ndf-release",
       "meaning": "承認したコミットから比べた先端までに入ったコミットのうち、この版の配布の PR のものでないもの。あれば本番の配布は承認ゲートで止まる",
@@ -3684,6 +3725,11 @@
       "meaning": "想定最大時間の終わり − 確かめの見込み（H − v）。最終ゲートの確かめを始められる最後の時刻で、最終ゲート修正と打ち切りの後の取り消しもこの時刻までに止まる",
       "code": "gate_start_end",
       "source": "docs/specifications/cross-refactoring-verify-and-final-gate.md"
+    },
+    {
+      "term": "テストの無い宣言",
+      "context": "ndf-cross-refactoring",
+      "meaning": ".ndf/project.json の test があり、unknown と strategy を持たず、種別・雛形の誤りが無く、どの suite も command と scope_command のどちらも持たないもの（suite が 0 個のときを含む）。解析が「テストが無い」と測った {\"suites\": []} を含む。cross-review の最終スイープは検証のコマンドを名指ししない"
     },
     {
       "term": "未解決のスレッド",
@@ -4088,57 +4134,111 @@
       "term": "トーン＆マナー",
       "context": "ndf-slide",
       "meaning": "スライドの書体・色・文字サイズ・著作権表示・ロゴの値の組。プロジェクトごとに差し替える",
-      "source": "",
-      "pending_source": "issues/issue-2065-requirements.md"
+      "source": "docs/specifications/ndf-slide-generation.md"
     },
     {
       "term": "ページの枠組み",
       "context": "ndf-slide",
       "meaning": "見出し・罫線・ロゴ・著作権表示・ページ番号の位置を固定した、ページを作る共通の関数（page / box / note / tbl / section）",
-      "source": "",
-      "pending_source": "issues/issue-2065-requirements.md"
+      "source": "docs/specifications/ndf-slide-generation.md"
     },
     {
       "term": "生成スクリプト",
       "context": "ndf-slide",
       "meaning": "pptx を出力するスクリプト（pptxgenjs の build-deck.js）。スライドの正本になる",
-      "source": "",
-      "pending_source": "issues/issue-2065-requirements.md"
+      "source": "docs/specifications/ndf-slide-generation.md"
     },
     {
       "term": "汎用テンプレート",
       "context": "ndf-slide",
       "meaning": "会社色を持たないトーン＆マナーとページの枠組みを持つ、生成スクリプトの出発点",
-      "source": "",
-      "pending_source": "issues/issue-2065-requirements.md"
+      "source": "docs/specifications/ndf-slide-generation.md"
     },
     {
       "term": "構成メモ",
       "context": "ndf-slide",
       "meaning": "スライドのページごとの番号・見出し・役割・根拠の表と、構成の考え方を書いた文書",
-      "source": "",
-      "pending_source": "issues/issue-2065-requirements.md"
+      "source": "docs/specifications/ndf-slide-generation.md"
     },
     {
       "term": "台本",
       "context": "ndf-slide",
       "meaning": "ページごとの見出しと読み上げの原稿。配分秒数は見出しに付けてよい（任意）。スピーカーノートへ入れる",
-      "source": "",
-      "pending_source": "issues/issue-2065-design.md"
+      "source": "docs/specifications/ndf-slide-generation.md"
     },
     {
       "term": "トーン＆マナーのファイル",
       "context": "ndf-slide",
       "meaning": "プロジェクトのトーン＆マナーの値を持つ JSON（slides/theme.json）。書いた項目だけが汎用テンプレートの既定値を上書きする",
-      "source": "",
-      "pending_source": "issues/issue-2065-design.md"
+      "source": "docs/specifications/ndf-slide-generation.md"
     },
     {
       "term": "尺",
       "context": "ndf-slide",
       "meaning": "台本の読み上げにかかる時間。読み上げの字数を 350 字/分で割って出す",
+      "source": "docs/specifications/ndf-slide-generation.md"
+    },
+    {
+      "term": "文書形式",
+      "context": "ndf-document",
+      "meaning": "文書を読ませる形。リポジトリの Markdown・文書・ページ・スライド・表計算。置き場（Notion・Confluence・Google Drive などのシステム）とは別の軸",
       "source": "",
-      "pending_source": "issues/issue-2065-design.md"
+      "pending_source": "issues/issue-2086-requirements.md"
+    },
+    {
+      "term": "文書の目的",
+      "context": "ndf-document",
+      "meaning": "読み手にその文書で何をしてもらうか・何を渡すかの種類（決議依頼・議論・アジェンダ・小説・エッセイ・ブログ・作業レポート・論文など）",
+      "source": "",
+      "pending_source": "issues/issue-2086-requirements.md"
+    },
+    {
+      "term": "共通ルール",
+      "context": "ndf-document",
+      "meaning": "文書形式と文書の目的に関わらず、組み直した文書が満たす決まり",
+      "source": "",
+      "pending_source": "issues/issue-2086-requirements.md"
+    },
+    {
+      "term": "キーワード",
+      "context": "ndf-document",
+      "meaning": "文書の題・見出しと、本文で繰り返し使い、読み手がその文書の主題として受け取る語",
+      "source": "",
+      "pending_source": "issues/issue-2086-requirements.md"
+    },
+    {
+      "term": "確定事項を伝える文書",
+      "context": "ndf-document",
+      "meaning": "確定した設計・報告書のように、結論が既に決まっている文書",
+      "source": "",
+      "pending_source": "issues/issue-2086-requirements.md"
+    },
+    {
+      "term": "議論用の文書",
+      "context": "ndf-document",
+      "meaning": "仕様案・提案書・論点の整理のように、まだ決まっていないことを読み手と決めるための文書",
+      "source": "",
+      "pending_source": "issues/issue-2086-requirements.md"
+    },
+    {
+      "term": "形式別ガイド",
+      "context": "ndf-document",
+      "meaning": "文書形式 1 つについて、文章量の単位と目安・題と見出しの付け方・呼び出し先を持つ document-rebuild の参照ファイル（references/format-<形式>.md）",
+      "source": "",
+      "pending_source": "issues/issue-2086-design.md"
+    },
+    {
+      "term": "目的別ガイド",
+      "context": "ndf-document",
+      "meaning": "文書の目的 1 つについて、構成・文章量・見分ける手がかりを持つ document-rebuild の参照ファイル（references/purpose-<目的>.md）",
+      "source": "",
+      "pending_source": "issues/issue-2086-design.md"
+    },
+    {
+      "term": "読み手役",
+      "context": "ndf-document",
+      "meaning": "組み直した文書と想定する読み手の説明だけを渡され、会話や経緯の文脈を持たずに読んで、要点の言い直し・分からなかった語と箇所・納得できなかった主張を返す者（サブエージェントか external-ai で呼ぶ別の CLI）",
+      "source": "plugins/ndf/skills/document-rebuild/SKILL.md"
     }
   ]
 }

@@ -73,7 +73,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 即時修正 | — | 4 つの条件（`development-workflow` の SKILL.md の「即時修正」）を満たす不具合を、起票せず、その場のプランで直すこと | その場で直す | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 棚卸し | — | 既存の課題の本文・マイルストーン・ラベルを現状に合わせ、着手の順位を決め直すこと。スクラムのバックログリファインメントに当たる。工程表の行名（進捗記録の stage の値）でもある | 手入れ | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 文言固定テスト | — | リポジトリで追跡している .md を読み、その文字列・見出し・表の並びを照合するテスト。書かない | — | — | `docs/specifications/cross-refactoring-round-tests-and-assess.md` |
-| 手順 | — | 1 つの Skill の中で順に通す作業の単位。cross-refactoring の提案・リファクタリング計画・テスト追加・実装・検証/修正の 5 つ、document-restructuring の測る・並べ替える・整える・測り直すの 4 つ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| 手順 | — | 1 つの Skill の中で順に通す作業の単位。cross-refactoring の提案・リファクタリング計画・テスト追加・実装・検証/修正の 5 つ、document-rebuild の決める（文書形式・文書の目的・言語）・測る・組み直す・整える・測り直すの 5 つ（手順 0〜4） | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 範囲テスト | — | 変更が触った範囲に限って走らせるテスト | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | suite の種別 | `kind` | テストの宣言（.ndf/project.json の test.suites[]）の 1 件がテスト（test）か静的解析（lint。整形の検査を含む）か。キーは kind。書かなければ test | — | — | — |
 | 起動の失敗 | — | テストのコマンドのプロセスを起動できない、またはシェルが終了コード 126 / 127 を返したこと。テストが落ちたこととは別に扱う | — | — | — |
@@ -207,6 +207,11 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | JUnit の置き場 | `junit` | テストのコマンドが JUnit XML を書くファイルの、作業ディレクトリからの相対パス（宣言の suites[].junit）。NDF はコマンドへ引数を足さず、このファイルを読む | — | — | — |
 | スプリント | `sprint` | 1 回のリリースとして出す課題と Pull Request のセット。版数を持つプロジェクトでは 1 つの版になる。期間ではなく、1 回のリリースとして出す中身で切る。工程はスプリント単位で 1 回ずつ通し、モードもスプリントで 1 つにする | ミッション | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | スプリント状態ファイル | `sprint_state` | スプリントのプラン・done・承認ゲートの記録・MVV・版を持つファイル（パスは呼ぶ側が決め、手順書の例は `sprint-state.json`。目録 `sprint.json` とは別のファイル） | ミッション状態ファイル、ミッションの状態 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| 開発ループ | — | スプリントを 1 つ終えるたびに、棚卸しの結果から次のスプリントを選んで続けて始める進め方。引数で切り替え、止まる条件に当たるまで繰り返す | — | — | — |
+| 周回 | — | 開発ループの 1 回分。次のスプリントの選定から、そのスプリントの棚卸しと止まる条件の判定まで | — | — | — |
+| ループの予算 | — | 開発ループが使ってよい量の上限。周回の数・費用・経過時間で数え、超えたら止まる | — | — | — |
+| 止まる条件 | — | 開発ループを止める、機械で判定できる条件。予算を超えた・同じ失敗が続いた・着手できる課題が無い・MVV の外の課題しか残らない・利用者が止めた | — | — | — |
+| ループの記録 | — | 開発ループの周回ごとの選定・承認ゲートの判定・版・費用と秒・止まる条件の判定を持つ記録。メインディレクトリの .ndf/loop/<名>/loop.json が正本で、laps.md はそこから描画する | — | — | — |
 | スプリントブランチ | — | 課題の Pull Request を集め、ベースブランチへの Pull Request をスプリントで 1 本にするブランチ（`sprint/<名前>`） | ミッションブランチ、ミッションのブランチ | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | スプリント課題 | — | 「スプリントを閉じる」が閉じる対象にする課題。スプリントの Pull Request の本文が GitHub の closing keywords（PR 本文に `Closes #123` のように書くと、マージ時にその課題を自動で閉じる機能）で指す課題と、--issues で渡した課題の和 | ミッション課題、ミッションの課題 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | closing keywords | `closing_words` | GitHub の機能。Pull Request の本文に `Closes #123` のように書くと、マージのときにその課題を自動で閉じる。キーワードは Closes / Fixes / Resolves と活用形で、課題の参照が続く。GitHub を使う人なら誰でも知っている機能ではないため、文書では使う箇所ごとに説明を添える | 閉じる語 | — | `docs/specifications/ndf-sprint-close-referenced-issues.md` |
@@ -459,6 +464,7 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 想定最大時間の終わり | `final_end_at` | started_at + 想定最大時間（limits.final_end_at）。中断して再開した実行では、止まっていた分だけずれる。子プロセスへ渡す上限はすべてこの時刻で切る | — | — | `docs/specifications/cross-refactoring-verify-and-final-gate.md` |
 | 確かめの見込み | `gate_seconds` | 最終ゲートの確かめ 1 回にかかる見込みの秒（limits.gate_seconds）。手元で全体テストを走らせるなら w、CI で見るなら c、どちらも測れていなければ 0 | — | — | `docs/specifications/cross-refactoring-verify-and-final-gate.md` |
 | 確かめの開始の締め切り | `gate_start_end` | 想定最大時間の終わり − 確かめの見込み（H − v）。最終ゲートの確かめを始められる最後の時刻で、最終ゲート修正と打ち切りの後の取り消しもこの時刻までに止まる | — | — | `docs/specifications/cross-refactoring-verify-and-final-gate.md` |
+| テストの無い宣言 | — | .ndf/project.json の test があり、unknown と strategy を持たず、種別・雛形の誤りが無く、どの suite も command と scope_command のどちらも持たないもの（suite が 0 個のときを含む）。解析が「テストが無い」と測った {"suites": []} を含む。cross-review の最終スイープは検証のコマンドを名指ししない | — | — | — |
 
 ## NDF のラッパー（`ndf-relay`）
 
@@ -529,6 +535,7 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | 互換なしの印 | — | 要求の「影響」の表の「公開インタフェース」の行に書く、互換の経路を持たないことを示す語（互換なし / 互換の経路は持たない）。release-steps.py changed-plugins が上げ幅の候補を MAJOR にする材料 | — | — | `docs/specifications/ndf-release-other-plugin-levels-and-migration.md` |
 | 承認したコミット | — | ゲート 2 の承認資料が対象にした、ベースブランチの先端のコミットの SHA（40 桁）。本番チャネルへ入れてよい中身の上限を示す | — | — | `docs/specifications/ndf-release-approved-commit.md` |
 | 比べた先端 | — | 本番の配布が承認したコミットと比べた時点の、ベースブランチの先端のコミットの SHA。本番チャネルへマージしてよいのはこのコミットだけである | — | — | `docs/specifications/ndf-release-approved-commit.md` |
+| 確かめたコミット | — | 導入の確認を走らせた、ベースブランチの先頭のコミットの SHA（40 桁）。導入の確認の承認資料に書かれ、pace: fast / auto の昇格でマージしてよい先端はこのコミットに限る | — | — | — |
 | 承認の外のコミット | — | 承認したコミットから比べた先端までに入ったコミットのうち、この版の配布の PR のものでないもの。あれば本番の配布は承認ゲートで止まる | — | — | `docs/specifications/ndf-release-approved-commit.md` |
 | 承認の記録 | — | 承認資料の欄の 1 つ。ゲート 2 を承認したときの承認したコミットの SHA と、承認した者・時刻を持つ。承認資料を書き直すと消え、承認し直すまで本番の配布は通らない | — | — | `docs/specifications/ndf-release-approved-commit.md` |
 | 更新情報の節 | — | plugin の README の `## 更新情報` の節。版を名乗らず、CHANGELOG.md の版の節を参照する固定の案内だけを持つ。配布の手順（bump・changelog・notes）は書かない | — | — | `docs/specifications/ndf-release-readme-update-info.md` |
@@ -707,11 +714,27 @@ AI エージェントが実施する前提で、作業の A・H・L・C を類�
 
 | 語 | 識別子 | 意味 | 廃止した語 | 廃止した識別子 | 正本 |
 | --- | --- | --- | --- | --- | --- |
-| トーン＆マナー | — | スライドの書体・色・文字サイズ・著作権表示・ロゴの値の組。プロジェクトごとに差し替える | — | — | — |
-| ページの枠組み | — | 見出し・罫線・ロゴ・著作権表示・ページ番号の位置を固定した、ページを作る共通の関数（page / box / note / tbl / section） | — | — | — |
-| 生成スクリプト | — | pptx を出力するスクリプト（pptxgenjs の build-deck.js）。スライドの正本になる | — | — | — |
-| 汎用テンプレート | — | 会社色を持たないトーン＆マナーとページの枠組みを持つ、生成スクリプトの出発点 | — | — | — |
-| 構成メモ | — | スライドのページごとの番号・見出し・役割・根拠の表と、構成の考え方を書いた文書 | — | — | — |
-| 台本 | — | ページごとの見出しと読み上げの原稿。配分秒数は見出しに付けてよい（任意）。スピーカーノートへ入れる | — | — | — |
-| トーン＆マナーのファイル | — | プロジェクトのトーン＆マナーの値を持つ JSON（slides/theme.json）。書いた項目だけが汎用テンプレートの既定値を上書きする | — | — | — |
-| 尺 | — | 台本の読み上げにかかる時間。読み上げの字数を 350 字/分で割って出す | — | — | — |
+| トーン＆マナー | — | スライドの書体・色・文字サイズ・著作権表示・ロゴの値の組。プロジェクトごとに差し替える | — | — | `docs/specifications/ndf-slide-generation.md` |
+| ページの枠組み | — | 見出し・罫線・ロゴ・著作権表示・ページ番号の位置を固定した、ページを作る共通の関数（page / box / note / tbl / section） | — | — | `docs/specifications/ndf-slide-generation.md` |
+| 生成スクリプト | — | pptx を出力するスクリプト（pptxgenjs の build-deck.js）。スライドの正本になる | — | — | `docs/specifications/ndf-slide-generation.md` |
+| 汎用テンプレート | — | 会社色を持たないトーン＆マナーとページの枠組みを持つ、生成スクリプトの出発点 | — | — | `docs/specifications/ndf-slide-generation.md` |
+| 構成メモ | — | スライドのページごとの番号・見出し・役割・根拠の表と、構成の考え方を書いた文書 | — | — | `docs/specifications/ndf-slide-generation.md` |
+| 台本 | — | ページごとの見出しと読み上げの原稿。配分秒数は見出しに付けてよい（任意）。スピーカーノートへ入れる | — | — | `docs/specifications/ndf-slide-generation.md` |
+| トーン＆マナーのファイル | — | プロジェクトのトーン＆マナーの値を持つ JSON（slides/theme.json）。書いた項目だけが汎用テンプレートの既定値を上書きする | — | — | `docs/specifications/ndf-slide-generation.md` |
+| 尺 | — | 台本の読み上げにかかる時間。読み上げの字数を 350 字/分で割って出す | — | — | `docs/specifications/ndf-slide-generation.md` |
+
+## NDF の文書の組み直し（`ndf-document`）
+
+書き上げた文書を文書形式と文書の目的に合わせて組み直すときの語。document-rebuild が持つ
+
+| 語 | 識別子 | 意味 | 廃止した語 | 廃止した識別子 | 正本 |
+| --- | --- | --- | --- | --- | --- |
+| 文書形式 | — | 文書を読ませる形。リポジトリの Markdown・文書・ページ・スライド・表計算。置き場（Notion・Confluence・Google Drive などのシステム）とは別の軸 | — | — | — |
+| 文書の目的 | — | 読み手にその文書で何をしてもらうか・何を渡すかの種類（決議依頼・議論・アジェンダ・小説・エッセイ・ブログ・作業レポート・論文など） | — | — | — |
+| 共通ルール | — | 文書形式と文書の目的に関わらず、組み直した文書が満たす決まり | — | — | — |
+| キーワード | — | 文書の題・見出しと、本文で繰り返し使い、読み手がその文書の主題として受け取る語 | — | — | — |
+| 確定事項を伝える文書 | — | 確定した設計・報告書のように、結論が既に決まっている文書 | — | — | — |
+| 議論用の文書 | — | 仕様案・提案書・論点の整理のように、まだ決まっていないことを読み手と決めるための文書 | — | — | — |
+| 形式別ガイド | — | 文書形式 1 つについて、文章量の単位と目安・題と見出しの付け方・呼び出し先を持つ document-rebuild の参照ファイル（references/format-<形式>.md） | — | — | — |
+| 目的別ガイド | — | 文書の目的 1 つについて、構成・文章量・見分ける手がかりを持つ document-rebuild の参照ファイル（references/purpose-<目的>.md） | — | — | — |
+| 読み手役 | — | 組み直した文書と想定する読み手の説明だけを渡され、会話や経緯の文脈を持たずに読んで、要点の言い直し・分からなかった語と箇所・納得できなかった主張を返す者（サブエージェントか external-ai で呼ぶ別の CLI） | — | — | `plugins/ndf/skills/document-rebuild/SKILL.md` |

@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
-import json
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from release_repo import seed_release_repo  # noqa: E402
 
 SCRIPT = Path(__file__).resolve().parents[1] / "release-steps.py"
 VER = "1.0.1"
@@ -52,16 +54,7 @@ def squash_pr(root: Path, n: int, title: str) -> None:
 
 
 def make_world(tmp_path: Path, tag: bool = True) -> dict:
-    origin = tmp_path / "origin.git"
-    subprocess.run(["git", "init", "-q", "--bare", "-b", "trunk", str(origin)], check=True)
-    seed = tmp_path / "seed"
-    seed.mkdir()
-    git(seed, "init", "-q", "-b", "trunk")
-    git(seed, "config", "user.email", "t@example.com")
-    git(seed, "config", "user.name", "t")
-    (seed / ".ndf").mkdir()
-    (seed / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "trunk", "production_branch": "live"}))
-    (seed / ".ndf" / "supervise.json").write_text(json.dumps({"release": {"form": "package-plugin", "plugin": "foo"}}))
+    origin, seed = seed_release_repo(tmp_path)
     change(seed, "a.txt")
     git(seed, "commit", "-q", "-m", "init")
     git(seed, "remote", "add", "origin", str(origin))

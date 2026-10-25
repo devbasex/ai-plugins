@@ -12,7 +12,7 @@ investigation-rules
 decision-request
 issue-plan-strategy
 logging-guidelines
-markdown-writing
+document-style
 notion-writing
 merged
 ndf-policies
@@ -33,7 +33,7 @@ requirements-design
 design
 document-sources
 document-drafting
-document-restructuring
+document-rebuild
 document-systems
 retrospective
 tdd-cycle

@@ -1,6 +1,7 @@
 ---
 name: document-systems
-description: "Hold the per-system steps for reading, posting and rendering documents in Google Drive, Notion, Confluence, SharePoint or the repository itself. Use when a document must be fetched from or published to one of them（ドキュメンテーションシステム・Confluenceへ投稿・SharePointから取り込む・システムごとの手順）."
+description: "Hold the per-system steps for reading, posting and rendering documents in Google Drive, Notion, Confluence, SharePoint or the repository itself. Use when a document must be fetched from or published to one of them（ドキュメンテーションシステム・Confluenceへ投稿・SharePointから取り込む・システムごとの手順。工程と AI から呼ぶ）."
+user-invocable: false
 allowed-tools:
   - Read
   - Write

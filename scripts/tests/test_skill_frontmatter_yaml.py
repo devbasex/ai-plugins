@@ -9,6 +9,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CHECKER = REPO_ROOT / "scripts/check-skill-frontmatter.py"
 
@@ -39,3 +41,46 @@ def test_boolean_flags_are_read_as_yaml_booleans(tmp_path):
     assert "portability/explicit-only" in out
     out = _run(tmp_path / "b", 'name: probe\ndescription: "Probe. Use when testing."\ndisable-model-invocation: yes\n')
     assert "portability/explicit-only" not in out
+
+
+# 現状固定: _check_ops が description に求める語（I-008）
+_EXPLICIT_WORDS = ["明示", "explicit", "Explicit"]
+_INJECT_WORDS = [
+    "知識として",
+    "参照する",
+    "実行しない",
+    "reference only",
+    "do not execute",
+    "工程と AI から呼ぶ",
+    "called by the workflow",
+]
+
+
+@pytest.mark.parametrize("word", _EXPLICIT_WORDS)
+def test_explicit_only_accepts_each_word(tmp_path, word):
+    out = _run(tmp_path, f'name: probe\ndescription: "Probe {word}. Use when testing."\ndisable-model-invocation: true\n')
+    assert "portability/explicit-only" not in out
+
+
+def test_explicit_only_rejects_description_without_word(tmp_path):
+    out = _run(tmp_path, 'name: probe\ndescription: "Probe EXPLICIT. Use when testing."\ndisable-model-invocation: true\n')
+    assert "portability/explicit-only" in out
+
+
+@pytest.mark.parametrize("word", _INJECT_WORDS)
+def test_inject_only_accepts_each_word(tmp_path, word):
+    out = _run(tmp_path, f'name: probe\ndescription: "Probe {word}. Use when testing."\nuser-invocable: false\n')
+    assert "portability/inject-only" not in out
+
+
+def test_inject_only_rejects_description_without_word(tmp_path):
+    out = _run(tmp_path, 'name: probe\ndescription: "Probe Reference Only. Use when testing."\nuser-invocable: false\n')
+    assert "portability/inject-only" in out
+
+
+@pytest.mark.parametrize("key", ["agent", "background"])
+def test_context_fork_is_required_for_agent_and_background(tmp_path, key):
+    out = _run(tmp_path, f'name: probe\ndescription: "Probe. Use when testing."\n{key}: x\n')
+    assert "ops/context-fork" in out
+    out = _run(tmp_path / "b", f'name: probe\ndescription: "Probe. Use when testing."\ncontext: fork\n{key}: x\n')
+    assert "ops/context-fork" not in out

@@ -140,7 +140,7 @@ pace: fast
 | 作業場所の用意 | `worktree`（メインディレクトリで編集してよいパスだけなら不要） | `worktree`（メインディレクトリで編集してよいパスだけなら不要） | `worktree` | `worktree` | `worktree` |
 | 設計 | `design`（該当時） | `design`（該当時） | `design` | `design` | `design` |
 | 素材の収集と出典の確定 | — | — | — | — | `document-sources` |
-| ドキュメント再構成 | — | — | `document-restructuring`（設計 Pull Request を分けた場合） | `document-restructuring` | `document-restructuring` |
+| ドキュメント再構成 | — | — | `document-rebuild`（設計 Pull Request を分けた場合） | `document-rebuild` | `document-rebuild` |
 | ドキュメントレビュー | — | — | `pr` → `cross-review` → `merged`（設計 Pull Request を分けた場合） | `pr` → `cross-review` → `merged` | `pr` → `cross-review` → `merged` |
 | 計画 | — | `implementation-plan` | `implementation-plan` | `implementation-plan` | `implementation-plan`（執筆を分担する場合） |
 | 実装 | 直接編集 | 実行 → [operation-run.md](references/operation-run.md) | `refactoring` | `tdd-cycle` | `document-drafting` |
@@ -174,7 +174,7 @@ pace: fast
 | 工程 | 決まり |
 | --- | --- |
 | 作業場所の用意 | **モードを判定した後に行う。** 要求と受け入れ条件は `issues/` に書くため、メインディレクトリのままで済む。開発の変更は `.worktrees/<ブランチ名>` の worktree の中で行う。後から移すと、メインディレクトリに差分が残ったまま並行作業が始まる。`light` でも、プロダクションコードの文言やテストを触るなら worktree を使う。`issues/` `docs/` と各ランタイムの設定だけで収まる変更は、メインディレクトリのままでよい |
-| ドキュメント再構成 | 書き上げた設計文書を章立てから組み直す。`document-restructuring` が測る・並べ替える・整える・測り直すの 4 つの手順を持つ。**レビューの前に置く。** 後に置くと、レビュー担当が構成の指摘と内容の指摘を同時に出し、どちらの指摘なのかが混ざる |
+| ドキュメント再構成 | 書き上げた設計文書を章立てから組み直す。`document-rebuild` が決める・測る・組み直す・整える・測り直すの手順を持ち、整える手順で `document-style` のセルフチェックとキーワードの確かめを通す（`document-style` はこの工程で掛かり、工程表に別の行を持たない）。**レビューの前に置く。** 後に置くと、レビュー担当が構成の指摘と内容の指摘を同時に出し、どちらの指摘なのかが混ざる |
 | ドキュメントレビュー | 設計だけを載せた Pull Request を、実装より先にマージする。新しい Skill は使わず `pr` → `cross-review` → `merged` を順に呼ぶ。**マージには人間の承認が要る**（止まり方は「自走で工程を通す」）。head のブランチ名は `design/` で始め、マージした後は実装用の worktree を作り直す |
 | 実装（`operation`） | **実行そのものを指す。** 行は増やさない。呼ぶのは `tdd-cycle` でも `refactoring` でもなく、[references/operation-run.md](references/operation-run.md) が定める手順である。実行の範囲・記録・失敗したときの止め方はそちらが持つ。**「本番系へ届く操作」の承認ゲート（ゲート 2）に当たる** |
 | 構造改善 | **必ず通す。** `standard` と `legacy-refactor` のリファクタリングは `cross-refactoring` を通す。`fast` でも通し、時機だけをトリガーへ移す |
@@ -193,7 +193,7 @@ pace: fast
 | 用語と不変条件 | `requirements-design` の仕様へ書く |
 | 設計文書 | `design` が独立したファイルで作る。触る領域に該当する節をすべて埋める |
 | 設計判断の記録 | 設計文書の「決定の記録」の節へ書く |
-| ドキュメント再構成 | `document-restructuring` が章立てを読み手の問う順へ組み直し、前後の値を並べる |
+| ドキュメント再構成 | `document-rebuild` が章立てを文書の目的に合った読み手の問う順へ組み直し、`document-style` の規則で整え、前後の値を並べる |
 | ドキュメントレビュー | 設計だけを載せた Pull Request を `cross-review` へ通し、マージしてから実装へ進む |
 | 契約・結合テスト | `tdd-cycle` の階層の使い分けに従う |
 
