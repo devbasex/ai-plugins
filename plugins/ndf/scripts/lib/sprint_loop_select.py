@@ -79,6 +79,22 @@ def exclusion_reason(env: Env, rec: dict, row: dict, lap_n: int, lap_created: se
     return None
 
 
+def _select_candidate_rows(cands: list[dict], title: str, max_issues: int, reason_for) -> tuple[list[int], list[dict]]:
+    """1 マイルストーンの候補の採否。選んだ番号と選定の行を返す。reason_for は外す理由（外さなければ None）を返す。"""
+    picked, here = [], []
+    for r in cands:
+        why = reason_for(r)
+        if why is None and len(picked) >= max_issues:
+            why = "容量"
+        if why is None:
+            picked.append(r["number"])
+            reason = "品質の枠" if r.get("quality_slot") else "順位"
+            here.append({"number": r["number"], "milestone": title, "rank": r["rank"], "decision": SELECTED, "reason": reason})
+        else:
+            here.append({"number": r["number"], "milestone": title, "rank": r["rank"], "decision": DROPPED, "reason": why})
+    return picked, here
+
+
 def choose_issues(env: Env, rec: dict, rank: dict, lap_n: int, descriptions: dict, lap_created: set = frozenset()) -> dict:
     """選定（決定 2）。入力は rank の出力・記録・マイルストーンの説明だけ。戻り値は
     {"milestone", "selection", "candidates"}。選べたマイルストーンが無ければ milestone は None。"""
@@ -93,17 +109,12 @@ def choose_issues(env: Env, rec: dict, rank: dict, lap_n: int, descriptions: dic
         total += len(cands)
         text = sprint_mvv.mvv_sections(descriptions.get(title) or "")
         unapproved = text is not None and (title, pm.sha256_text(text)) not in approvals
-        picked, here = [], []
-        for r in cands:
-            why = "スプリント MVV が未承認" if unapproved else exclusion_reason(env, rec, r, lap_n, lap_created)
-            if why is None and len(picked) >= rec["max_issues"]:
-                why = "容量"
-            if why is None:
-                picked.append(r["number"])
-                reason = "品質の枠" if r.get("quality_slot") else "順位"
-                here.append({"number": r["number"], "milestone": title, "rank": r["rank"], "decision": SELECTED, "reason": reason})
-            else:
-                here.append({"number": r["number"], "milestone": title, "rank": r["rank"], "decision": DROPPED, "reason": why})
+        picked, here = _select_candidate_rows(
+            cands,
+            title,
+            rec["max_issues"],
+            (lambda r: "スプリント MVV が未承認") if unapproved else (lambda r: exclusion_reason(env, rec, r, lap_n, lap_created)),
+        )
         rows_out += here
         if picked:
             cand_nums = {r["number"] for r in cands}
