@@ -12,6 +12,7 @@ LLM を直接呼ばない（スプリント MVV の照合だけ `lib/sprint_mvv.
 | `render <sprint.json> <引継ぎ文書> --section <見出しの語> [--demote <前の節の語> --heading <新しい見出し>]` | 見出しに語を含む節の本文を置き換える。節の外は変えない |
 | `status <sprint.json>` | 端末向けに 1 行ずつ（スプリント・状態・次） |
 | `next <sprint.json> [--doc <引継ぎ文書> --section <見出しの語>] [--replace <見出しの語>]` | ndf-next の囲みを出す。`--replace` なら引継ぎ文書のその節も置き換える |
+| `loop <副命令> <ループ名> ...` | 開発ループ（#2089）。`start` / `select` / `exclude` / `sprint` / `gate` / `answer` / `approve-mvv` / `lap` / `stop` / `status` / `list`。中身は `lib/sprint_loop_cli.py` と `lib/sprint_loop.py`。0 = 進める / 1 = 断った / 3 = 止まる条件に当たった |
 
 雛形（`--goal`）は `{name}`・`{milestone}`・`{heading}`（現在地の見出し）・`{dev}`・`{prod}`・
 `{issues}` を差し込む。
@@ -49,6 +50,7 @@ import project_mvv as pm  # noqa: E402
 import project_mvv_signals as pms  # noqa: E402
 import gate_rejections as gr  # noqa: E402
 import sprint_mvv  # noqa: E402
+import sprint_loop_cli  # noqa: E402
 
 TOOL = "sprint-state"
 SECTION_DEFAULT = PROGRESS_SECTION
@@ -61,10 +63,6 @@ MVV_GATE = "MVV"  # 利用者が MVV を承認した記録の名前
 def outcome(status: str, summary: str, items=None, metrics=None, **extra) -> dict:
     """結果 JSON（`step_result.result` の形）。`exit` などの鍵を足せる（`main` が終了コードに読む）。"""
     return {**step_result.result(TOOL, status, summary, items, metrics), **extra}
-
-
-def field(report: str, name: str) -> str:
-    return report_fields.report_field(report, name)
 
 
 def pr_label(value: str) -> str:
@@ -227,7 +225,7 @@ def fill_row(p: dict, item: dict | None) -> dict:
     if rep.is_file():
         text = rep.read_text()
         row["report"] = str(rep)
-        row["pr"] = pr_label(field(text, "Pull Request"))
+        row["pr"] = pr_label(report_fields.report_field(text, "Pull Request"))
         cost = report_fields.cost(text)
         row["cost"] = float(cost) if cost else None
         row["reason"] = report_fields.reason_shown(text, row["result"])
@@ -581,12 +579,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--replace", nargs="?", const=NEXT_SECTION_DEFAULT, help=f"引継ぎ文書のこの語の節を置き換える（既定 {NEXT_SECTION_DEFAULT}）"
     )
     s.add_argument("--json", action="store_true")
+    sprint_loop_cli.add_loop_parser(sub, cmd_update)  # loop（開発ループ。#2089）
     return ap
 
 
 def main(argv: list[str] | None = None) -> int:
-    a = build_parser().parse_args(argv)
-    fn = {"init": cmd_init, "update": cmd_update, "gate": cmd_gate, "render": cmd_render, "status": cmd_status, "next": cmd_next}[a.cmd]
+    a = sprint_loop_cli.parse_args(build_parser(), sys.argv[1:] if argv is None else list(argv))
+    cmds = {"init": cmd_init, "update": cmd_update, "gate": cmd_gate, "render": cmd_render, "status": cmd_status, "next": cmd_next}
+    fn = cmds.get(a.cmd) or a.loop_run
     try:
         out = fn(a)
     except (OSError, ValueError) as e:

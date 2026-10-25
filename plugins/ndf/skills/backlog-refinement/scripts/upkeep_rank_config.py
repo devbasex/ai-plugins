@@ -69,6 +69,7 @@ class Config:
     large_min_size: int
     harm_guide: dict
     anchors: dict = field(default_factory=dict)
+    quality: dict | None = None  # 品質の枠の宣言（.ndf/backlog.json の quality 節。#2089 の決定 14）。無ければ順位は今と同じ
 
     def threshold(self, cod: int) -> int:
         """前倒しの閾値。尺度のうち cod より大きい値を小さい順に数えて余白番目の値。尺度の最大の先は最後の差で延ばす（決定 10）。"""
@@ -191,7 +192,29 @@ def build_config(args: dict, decl: dict | None) -> Config:
     anchors = pick("anchors", {}) or {}
     if not isinstance(anchors, dict):
         raise RankError("anchors は列 → 段階 → 課題の列のオブジェクトで書く")
-    return Config(scale, margin, auto, capacity, deps, floor, alpha, ratio, large, bands, anchors)
+    return Config(scale, margin, auto, capacity, deps, floor, alpha, ratio, large, bands, anchors, _parse_quality(decl.get("quality")))
+
+
+QUALITY_DEFAULTS = {"label": "quality", "ratio": 0.2, "min": 1}
+
+
+def _parse_quality(sec) -> dict | None:
+    """品質の枠の宣言（決定 14 の A）。節が無ければ None。label は品質向上の Issue のラベル、ratio は容量のうち先に取る割合、
+    min は最低の件数。"""
+    if sec is None:
+        return None
+    if not isinstance(sec, dict):
+        raise RankError("quality は label・ratio・min のオブジェクトで書く")
+    q = {**QUALITY_DEFAULTS, **sec}
+    if not isinstance(q["label"], str) or not q["label"]:
+        raise RankError("quality.label は空でない文字列で書く")
+    ratio = _decl_number(q["ratio"], "quality.ratio")
+    if not 0 <= ratio < 1:
+        raise RankError("quality.ratio は 0 以上 1 未満")
+    least = _decl_int(q["min"], "quality.min")
+    if least < 0:
+        raise RankError("quality.min は 0 以上")
+    return {"label": q["label"], "ratio": ratio, "min": least}
 
 
 # ---------------- 見積 ----------------

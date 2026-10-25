@@ -162,6 +162,7 @@ python3 "$SCRIPTS/estimate.py" predict --issue 1601 --done 実装 --items spread
 | `harm_guide` | 実害の目安（区分 → 帯） | 上の表 | — |
 | `anchors` | 列 → 段階 → アンカーの課題 | 無し | — |
 | `candidate_limit` | 候補の上限（1 回の棚卸しで区分を決める候補の数。`candidates` が読む） | 10 | `candidates --limit` |
+| `quality` | 品質の枠（`{"label": "quality", "ratio": 0.2, "min": 1}`）。ラベル `label` の品質向上の Issue から、容量の `ratio`（最低 `min` 件。容量が無ければ `min` 件）を先に取り、残りの容量を今の順位で埋める。枠の中の並びは実害の観測 → 起票の古い順 → 今の順位。結果は `quality_slot`（マイルストーンと行）と表の「品質の枠」の行に出る | 無し（順位と境界は今と同じ） | — |
 
 ## 式と判定の置き場
 

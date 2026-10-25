@@ -15,7 +15,7 @@ r"""引継ぎ文書（`.ndf/handoff/<名>.md`）のパスの解決・作る・�
 | `check <名> [--trim] [--max-lines N]` | 節の形と行数（既定 300）を確かめる。`--trim` は先に「前の会話の進み」を履歴へ移す | 0 通る / 1 形の違反 / 5 行数だけ超える |
 | `remove <名>` | 本体と履歴を消し、消したパスを返す | 0 |
 
-共通: 名が `sprint-<名>`・`milestone-<番号>`・`issue-<番号>` の形でない・パスが `.ndf/handoff/` の下でない・
+共通: 名が `loop-<名>`・`sprint-<名>`・`milestone-<番号>`・`issue-<番号>` の形でない・パスが `.ndf/handoff/` の下でない・
 読めない・書けない → 2。git の中でない・メインディレクトリに `.ndf/` が無い → 3。
 出力は `lib/step_result.py` の形の 1 行の JSON（`tool` は `handoff`）。
 
@@ -44,7 +44,7 @@ TOOL = "handoff"
 TEMPLATE = Path(__file__).resolve().parent / "data" / "handoff-template.md"
 HANDOFF_DIR = Path(".ndf") / "handoff"
 HISTORY_SUFFIX = "-history"
-NAME_RE = re.compile(r"^(?:issue-[0-9]+|milestone-[0-9]+|sprint-[0-9A-Za-z][0-9A-Za-z_-]*)$")
+NAME_RE = re.compile(r"^(?:issue-[0-9]+|milestone-[0-9]+|sprint-[0-9A-Za-z][0-9A-Za-z_-]*|loop-[0-9A-Za-z][0-9A-Za-z_-]*)$")
 OPTIONAL_MARK = "<!-- 任意"
 DEFAULT_MAX_LINES = 300
 
@@ -70,7 +70,7 @@ def emit_result(summary: str, items=None, metrics=None, code: int = 0) -> int:
 
 def handoff_name(name: str) -> str:
     if not NAME_RE.match(name) or name.endswith(HISTORY_SUFFIX):
-        raise Failure(f"名が sprint-<名>・milestone-<番号>・issue-<番号> の形でない: {name}")
+        raise Failure(f"名が loop-<名>・sprint-<名>・milestone-<番号>・issue-<番号> の形でない: {name}")
     return name
 
 
