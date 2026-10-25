@@ -79,6 +79,22 @@ def new_sprint(tmp_path, repo, state, *extra, pace="auto", design=True):
 # ---------- 使ってよい条件（AC1・I1・I9） ----------
 
 
+def test_designed_issues_get_a_design_results_stage_without_designing(tmp_path):
+    """設計を承認済みの課題（--designed）は設計を作らず、設計の結果のステージで読んで実装へ渡す（#2089 の loop answer）。"""
+    repo = make_repo(tmp_path, {"auto": AUTO})
+    p, out = new_sprint(tmp_path, repo, sprint_state(tmp_path), "--designed", "12", design=False)
+    assert p.returncode == 0, p.stdout + p.stderr
+    waves = {w["name"]: w for w in load(out / "sprint.json")["ステージ"]}
+    assert "設計" not in waves and "関門 1" not in waves and "command" in waves["設計の結果"]
+    assert all(w.get("then_of") == "設計の結果" for n, w in waves.items() if n != "設計の結果")
+    cmd = steps_of(load(waves["設計の結果"]["plans"][0]))["design-results"]["cmd"]
+    assert cmd.endswith("--design 12")
+    p, out = new_sprint(tmp_path, repo, sprint_state(tmp_path), "--designed", "12")
+    waves = {w["name"]: w for w in load(out / "sprint.json")["ステージ"]}
+    assert waves["設計"]["plans"][0].endswith("design-11.json") and len(waves["設計"]["plans"]) == 1
+    assert steps_of(load(waves["設計の結果"]["plans"][0]))["design-results"]["cmd"].endswith("--design 11 12")
+
+
 def test_auto_sprint_writes_the_normal_order_with_mvv_gates(tmp_path):
     repo = make_repo(tmp_path, {"auto": AUTO})
     p, out = new_sprint(tmp_path, repo, sprint_state(tmp_path))

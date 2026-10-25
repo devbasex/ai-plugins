@@ -237,13 +237,18 @@ def design_results_path(a) -> str:
     return str(sprint_out(a).resolve() / DESIGN_RESULTS)
 
 
+def design_read(a) -> list[int]:
+    """設計の結果を読む課題: 今回設計する課題（--design）と、設計を承認済みの課題（--designed。開発ループの loop answer）。"""
+    return list(dict.fromkeys([*a.design, *(getattr(a, "designed", None) or [])]))
+
+
 def plan_design_results(a, repo: str) -> dict:
     """設計の結果のステージ（承認ゲート 1 の直後）: マージした設計 PR から設計の結果を読み、実装のステージのプランへ
     `触るファイル`・取り込んだ課題・`実行の条件` を書く（決定 2）。LLM を呼ばない run のステップ 1 つ。"""
     manifest = sprint_out(a).resolve() / "sprint.json"
     cmd = (
         f"python3 {shlex.quote(str(SELF))} design-results --manifest {shlex.quote(str(manifest))} "
-        f"--base {shlex.quote(a.base)} --root {shlex.quote(repo)} --design {' '.join(map(str, a.design))}"
+        f"--base {shlex.quote(a.base)} --root {shlex.quote(repo)} --design {' '.join(map(str, design_read(a)))}"
     )
     return with_record(
         {
