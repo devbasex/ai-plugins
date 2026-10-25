@@ -71,8 +71,11 @@ def _judge_rows(verdict):
     return [("判定", verdict.value), ("理由", verdict.reason), *[(i["name"], i["result"]) for i in verdict.items]]
 
 
-def gate_stop(n, verdict, info=None, next_cmd=None, plan_step="merge-approved"):
-    """承認の無い本番系へのマージを止める結果（status: gate・終了コード 10）を出して終える。承認資料を書く。"""
+def gate_stop(n, verdict, info=None, next_cmd=None, plan_step="merge-approved", approved_sha=None, out=None):
+    """承認の無い本番系へのマージを止める結果（status: gate・終了コード 10）を出して終える。承認資料を書く。
+    approved_sha（昇格の Pull Request の先端。#2104）があれば、判断の表の先頭へ「承認したコミット」の行を置き、
+    metrics.approved_sha と gate の items[].head にも載せる。out は承認資料の置き場（無ければ既定の置き場）。
+    next_cmd は文字列か、書いた承認資料のパスを受けて打ち方を返す関数。"""
     info = info or {}
     target = verdict.target or "（不明）"
     what = f"#{n}" if n else f"宛先 {target} へのマージ"
@@ -93,19 +96,26 @@ def gate_stop(n, verdict, info=None, next_cmd=None, plan_step="merge-approved"):
         title=f"{what} のマージ（本番系への反映。承認ゲート 2）",
         targets=[target_row],
         change=change,
-        judge=[*_judge_rows(verdict), ("宛先", target)],
+        judge=[*([approved_commit.material_row(approved_sha)] if approved_sha else []), *_judge_rows(verdict), ("宛先", target)],
         consent=[f"{what} を {target} へマージし、本番系へ反映する"],
         rollback=GATE_ROLLBACK,
+        path=out,
     )
+    if callable(next_cmd):
+        next_cmd = next_cmd(path)
     cmd = next_cmd or (f"merge-when-green {n} --gate-approved user" if n else "merge-when-green <PR番号> --gate-approved user")
-    items = verdict.items + [{"kind": "pr", "name": what, "result": "gate", "base": target}]
+    item = {"kind": "pr", "name": what, "result": "gate", "base": target}
+    metrics = {"gate": GATE, "verdict": verdict.value, "target": target}
+    if approved_sha:
+        item["head"] = metrics["approved_sha"] = approved_sha
+    items = verdict.items + [item]
     emit(
         result(
             TOOL,
             "gate",
             f"{lead}。承認ゲート 2 の承認が要る",
             items,
-            {"gate": GATE, "verdict": verdict.value, "target": target},
+            metrics,
             path,
             f"承認を得たら {cmd}（プランなら run <プラン> --from {plan_step}）",
         )
@@ -207,7 +217,16 @@ def _merge_pr(root, a, n, watch, items, waits):
     items.append(merged)
 
 
-def merge_when_green(a, cleanup, next_cmd=None, plan_step="merge-approved"):
+def _gate_head(info):
+    """承認ゲート 2 で止まる判定に使った読みの先端（承認資料へ載せる承認したコミット）。読めなければ止まる（#2104 の I1）。"""
+    try:
+        return approved_commit.parse_sha(info.get("headRefOid"))
+    except ValueError as e:
+        raise StepError(f"昇格の Pull Request の先端を読めないため承認資料を書かない: {e}", EXIT_UNREADABLE) from e
+
+
+def merge_when_green(a, cleanup, next_cmd=None, plan_step="merge-approved", gate_head=False):
+    """gate_head なら、承認ゲート 2 で止まるときに最初の読みの先端を承認資料へ載せる（promote。#2104）。"""
     root = git_root(a.root)
     n = a.pr
     decl = delivery.load_delivery(root)  # 判定は保存しない。呼ぶたびに宣言から作り直す
@@ -219,7 +238,8 @@ def merge_when_green(a, cleanup, next_cmd=None, plan_step="merge-approved"):
         verdict = delivery.judge_target(decl, info.get("baseRefName") or "")
         judged["verdict"] = verdict
         if verdict.stops and not a.gate_approved:
-            gate_stop(n, verdict, info, next_cmd, plan_step)
+            sha = _gate_head(info) if gate_head else None
+            gate_stop(n, verdict, info, next_cmd, plan_step, sha, getattr(a, "out", None) if gate_head else None)
 
     watch.on_open = gate
     watch.wait()
@@ -286,7 +306,7 @@ def _prepare_promote(root, a, n, item):
         title=f"#{n} の昇格（{a.head} → {a.base}。承認ゲート 2）",
         targets=[{"url": info.get("url") or f"#{n}", "title": info.get("title"), "base_head": f"{a.base} ← {a.head}"}],
         change=_change_text(info),
-        judge=_judge_rows(verdict),
+        judge=[approved_commit.material_row(_gate_head(info)), *_judge_rows(verdict)],
         consent=[f"#{n} を {a.base} へマージし、本番系へ反映する"],
         rollback=GATE_ROLLBACK,
         path=a.out,
@@ -307,17 +327,43 @@ def promote(a, cleanup):
     """ベースブランチ（--head）から本番チャネル（--base）への昇格の Pull Request を作り（あれば使い）、承認ゲート 2 の後にマージする。
     head はベースブランチなので、マージの後に後片付けをしない（#1336 の I7）。
     --expect-head-from があれば、最初に導入の確認の承認資料から確かめたコミットを読み、merge-when-green の
-    --expect-head と同じ照合に使う。読めなければ gh を呼ばずに EXIT_UNREADABLE で止まる（照合を飛ばさない。#1529）。"""
+    --expect-head と同じ照合に使う。読めなければ gh を呼ばずに EXIT_UNREADABLE で止まる（照合を飛ばさない。#1529）。
+    --approved-from があれば、昇格の承認資料の承認したコミットを同じ照合に使い、先端が違えば承認ゲート 2 から
+    やり直す打ち方を next に載せる。--gate-approved user は --approved-from 無しでは受けない（#2104 の I3〜I5）。"""
     src = getattr(a, "expect_head_from", None)
     if src:
         try:
             a.expect_head = approved_commit.verified_sha(src)
         except ValueError as e:
             raise StepError(f"確かめたコミットを読めないため昇格しない: {e}", EXIT_UNREADABLE) from e
+    approved_from = getattr(a, "approved_from", None)
+    if a.gate_approved == "user" and not approved_from:
+        emit(
+            result(
+                TOOL,
+                "stopped",
+                "--gate-approved user に照合の材料（--approved-from の昇格の承認資料）が無いため昇格しない",
+                next=(
+                    f"promote --head {a.head} --base {a.base} --gate-approved user --approved-from <承認資料> で打つ"
+                    "（プランなら run <プラン> --from promote から流し直し、承認ゲート 2 を取り直す）"
+                ),
+            ),
+            EXIT_UNREADABLE,
+        )
+    if approved_from:
+        try:
+            a.expect_head = approved_commit.material_sha(approved_from)
+        except ValueError as e:
+            raise StepError(f"承認したコミットを読めないため昇格しない: {e}", EXIT_UNREADABLE) from e
+        a.moved_next = (
+            "承認ゲート 2 からやり直す: プランなら run <プラン> --from promote（fast / auto は --from verify）。"
+            "承認資料を新しい先端で作り直してから承認を求める"
+        )
     root = git_root(a.root)
     n, created = _find_or_create_promote_pr(root, a.head, a.base)
     item = {"kind": "pr", "name": f"#{n}", "result": "created" if created else "found", "base": a.base, "head_branch": a.head}
     if a.prepare:
         _prepare_promote(root, a, n, item)
     a.pr, a.no_cleanup = n, True
-    merge_when_green(a, cleanup, next_cmd=f"promote --head {a.head} --base {a.base} --gate-approved user", plan_step="promote-approved")
+    approve = f"promote --head {a.head} --base {a.base} --gate-approved user --approved-from "
+    merge_when_green(a, cleanup, next_cmd=lambda path: approve + str(path), plan_step="promote-approved", gate_head=True)

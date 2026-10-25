@@ -123,15 +123,19 @@ def test_the_promote_merges_only_the_commit_the_mvv_judge_read(tmp_path, pace):
 
 
 def test_the_promote_plan_uses_the_declared_branch_names(tmp_path):
-    """#1529 の AC7・AC8・I5: 照合の引数は fast / auto の promote にだけ付き、ブランチ名は引数のものだけが現れる。"""
+    """#1529 の AC7・AC8・I5: 確かめたコミットの照合は fast / auto の promote にだけ付き、ブランチ名は引数のものだけが現れる。
+    #2104 の AC5・I7: normal の promote は昇格の承認資料を書き、両方の promote-approved が同じ資料で照合する。"""
     from supervise_lib.delivery_templates import plan_promote
 
     a = type("A", (), {"base": "trunk", "production_branch": "stable", "issue": "11", "mode": "standard"})()
     normal = steps_of(plan_promote(a, str(tmp_path), 600, verify="true"))
     fast = steps_of(plan_promote(a, str(tmp_path), 600, mvv=str(tmp_path / "state.json"), verify="true"))
     base = f"{SCRIPTS / 'merged-steps.py'} promote --head trunk --base stable --timeout 600"
-    assert normal["promote"]["cmd"].endswith(base) and normal["promote-approved"]["cmd"].endswith(base + " --gate-approved user")
+    promote_material = "{state_dir}/work/approval-promote.md"
+    assert normal["promote"]["cmd"].endswith(base + f" --out {promote_material}")
+    assert normal["promote-approved"]["cmd"].endswith(base + f" --approved-from {promote_material} --gate-approved user")
     assert fast["promote-approved"]["cmd"] == normal["promote-approved"]["cmd"]
+    assert fast["prepare"]["cmd"].endswith(f"--prepare --out {promote_material}")  # #2104 の AC5・I7: 書き手と読み手が同じ資料
     want = base + " --expect-head-from {state_dir}/work/approval-verify.md --gate-approved mvv"
     assert fast["promote"]["cmd"].endswith(want)
     for s in (*normal.values(), *fast.values()):
