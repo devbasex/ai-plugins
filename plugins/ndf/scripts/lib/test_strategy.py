@@ -382,15 +382,25 @@ class ProbeVerdict:
         return self.status in (PROBE_DEFECT, PROBE_UNDECIDED)
 
 
+def _root_of(p) -> str:
+    """suite の `paths` の要素の前後の空白と末尾の `/` を外した形。"""
+    return str(p).strip().rstrip("/")
+
+
+def _is_whole_root(r: str) -> bool:
+    """`_root_of` の形がリポジトリ全体（`.` か空）を指すか。"""
+    return r in (".", "")
+
+
 def _declares_whole(suite: Suite) -> bool:
     """suite の `paths` が `.` か空（`suite_for` が全てのファイルを当てる）か。"""
-    return not suite.paths or any(str(p).strip().rstrip("/") in (".", "") for p in suite.paths)
+    return not suite.paths or any(_is_whole_root(_root_of(p)) for p in suite.paths)
 
 
 def probe_roots(suite: Suite) -> list[str]:
     """suite の `paths` のうち、配下の追跡ファイルを候補にしてよい要素（`.` と glob を除く）。"""
-    roots = [str(p).strip().rstrip("/") for p in suite.paths]
-    return [r for r in roots if r not in (".", "") and not any(c in r for c in _GLOB_CHARS)]
+    roots = [_root_of(p) for p in suite.paths]
+    return [r for r in roots if not _is_whole_root(r) and not any(c in r for c in _GLOB_CHARS)]
 
 
 def probe_paths(
