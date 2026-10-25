@@ -51,7 +51,7 @@
 | 扱う | 扱わない |
 | --- | --- |
 | `release-steps.py approval-facts` が承認したコミットを書くこと | `--channel dev` の振る舞い（開発版はマージした変更がそのまま載るチャネルで、承認を要しない。引数も結果も変わらない） |
-| `release-steps.py approve` が承認の記録を書くこと、`mvv-gate.py check --gate release` が `by: mvv` で書くこと | 昇格の経路（`merged-steps.py promote`）。比較の関数は promote からも呼べる形で `lib/` に置いてある（「決定の理由」） |
+| `release-steps.py approve` が承認の記録を書くこと、`mvv-gate.py check --gate release` が `by: mvv` で書くこと | 昇格の経路（`merged-steps.py promote`）。昇格は `compare_approved` を使わず、導入の確認の承認資料の確かめたコミットを `--expect-head-from` で受けて `--expect-head` と同じ照合を使う（#1529。振る舞いの正本は `merged-steps.py` の冒頭） |
 | `release-steps.py release --channel prod` が承認したコミットを受け取り、承認の外のコミットがあれば止まること | 承認資料のほかの欄、MVV 判定の判定の中身 |
 | `merged-steps.py merge-when-green --expect-head` が比べた先端だけをマージすること | 食い違ったときに承認資料を自動で作り直して再承認を求める仕組み（止まって人へ戻すまでを扱う） |
 | 本番のリリースプラン（`supervise.py new release --channel prod`。`--mvv` 付きを含む）が承認資料を渡すこと | |
@@ -154,7 +154,7 @@ A = 承認したコミット、T = 比べた先端、H = 配布の PR の先端�
 | 4 | `git rev-list --no-merges A..T ^H` から、配布の PR の `mergeCommit` と、配布の PR のコミットと同じ `git patch-id --stable` のものを除いた残り | `outside_commits`（I9） |
 | 5 | `git merge-tree --write-tree A H` の木と `T^{tree}` | 等しければ `match`、違えば `tree_differs`、`merge-tree` が失敗すれば `undecidable` |
 
-`allowed`（入ってよい PR）を空にすると、5 は「T の木が A の木と等しいか」になる（昇格の経路から使う形）。
+`allowed`（入ってよい PR）を空にすると、5 は「T の木が A の木と等しいか」になる（昇格の経路はこの形を使わない。#1529）。
 `allowed` が 2 つ以上のときは期待する木を作らず `undecidable` を返す。`git merge-tree --write-tree` は git 2.38 からで、
 使えない git では 0 以外を返し `undecidable`（I6）に倒れる。
 
@@ -241,7 +241,7 @@ git を読むだけで書かず、終了コードも出力も持たない。ブ�
 | 比べる時点は配布の PR のマージの後の 1 つ | 配布の PR はベースブランチへ入るだけで本番へは届かない。マージの前にも比べると判定の時点が 2 つになる。承認したコミットの形と有無・承認の記録だけは最初に確かめ、何もマージせずに止まる |
 | 判定できないときは承認ゲートで止まる（I6） | 通すと承認の外の変更を見落としうる。失敗（1）にすると、本番のリリースプランの judge が直す（fix）か同じステップをもう一度（retry）を選び、人の承認を経ずに打ち直されうる |
 | `--mvv` 付きのプランは承認ゲートで `handoff` へ進む（I7） | MVV 判定が承認したのは承認資料の中身で、承認の外のコミットは判定の材料に入っていない。人が外のコミットを見てから承認し直す。`gate_next` を置かないと、10 を受けて `next` の `verify` へ進み、配っていない版の導入を確かめに行く |
-| 比べる関数を `lib/` に置く | 昇格の経路にも同じ欠けがあり、`release-steps.py` の中に置くと同じ役割の関数が 2 つになる。`allowed` を空にすれば promote の判定になる |
+| 比べる関数を `lib/` に置く | 昇格の経路にも同じ欠けがあり、`release-steps.py` の中に置くと同じ役割の関数が 2 つになる。`allowed` を空にすれば promote の判定になると見込んだが、#1529 は木が等しい別のコミットを通すため採らず、昇格は `--expect-head` の照合を使う |
 
 ## 既知の制約
 
@@ -268,7 +268,7 @@ git を読むだけで書かず、終了コードも出力も持たない。ブ�
 | MVV 判定の記録（I10） | `mvv-gate.py check --gate release` が従うと判定したときだけ承認資料へ `by: mvv` の承認の記録を書き、判定できない場合と `--advise` では書かないこと（`test_mvv_gate.py`） |
 | 本番のリリースプラン（I7） | 本番の `release` のステップが `--approval <承認資料>` を持ち、`--mvv` 付きは `gate_next: handoff`、無しは `end` であること。開発版のステップに `--approval` も `gate_next` も無いこと（`test_supervise_new.py`） |
 | 退行しない | `--channel dev` の引数・`items`・`metrics` が変わらないこと。`--channel prod` で配布の PR がマージ済みのとき、打ち直しで続きから進み、一致すれば `ok` になること |
-| 昇格の形 | `allowed` を空にしたとき、先端の木が承認したコミットの木と等しいかで判定すること |
+| `allowed` が空の形 | `allowed` を空にしたとき、先端の木が承認したコミットの木と等しいかで判定すること |
 
 ## 関連リンク
 
