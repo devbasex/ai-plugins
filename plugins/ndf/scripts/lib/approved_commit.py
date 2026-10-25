@@ -156,12 +156,17 @@ def material_row(sha: str) -> tuple[str, str]:
 
 # --- 確かめたコミット（導入の確認の承認資料。#1529） ------------------------------
 
-_VERIFIED_RE = re.compile(r"^- ベースブランチ \S+ の先頭: `([^`]*)`。導入の確認はこのコミットで走らせた$")
+_VERIFIED_HEAD = "- ベースブランチ "
+_VERIFIED_MID = " の先頭: `"
+_VERIFIED_TAIL = "`。導入の確認はこのコミットで走らせた"
+_VERIFIED_RE = re.compile(
+    "^" + re.escape(_VERIFIED_HEAD) + r"\S+" + re.escape(_VERIFIED_MID) + "([^`]*)" + re.escape(_VERIFIED_TAIL) + "$"
+)
 
 
 def verified_line(base: str, sha: str) -> str:
     """導入の確認の承認資料（`release-steps.py verify-facts`）の、確かめたコミットの行。"""
-    return f"- ベースブランチ {base} の先頭: `{sha}`。導入の確認はこのコミットで走らせた"
+    return f"{_VERIFIED_HEAD}{base}{_VERIFIED_MID}{sha}{_VERIFIED_TAIL}"
 
 
 def verified_sha(path) -> str:
