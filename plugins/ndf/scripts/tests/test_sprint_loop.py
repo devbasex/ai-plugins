@@ -416,6 +416,96 @@ def test_gate_2_stops_in_the_middle_of_the_lap(env):
     assert sl.cmd_start(env, "l1", [], {})["exit"] == 3  # 答えが無いうちは止まったまま
 
 
+def built_lap(env, nums=(11, 12)):
+    env.rank_box["out"] = rank_out(ms("01 近い", list(nums)))
+    start(env)
+    sl_select.cmd_select(env, "l1")
+    sl.cmd_sprint(env, "l1", "standard", "1.0.0-dev.1", None, [])
+    return sl.current_lap(rec(env))
+
+
+def test_gate_refuses_when_done_has_no_gated_plan_and_writes_nothing(env):
+    lap = built_lap(env)
+    before = rec(env)
+    out = sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": str(Path(lap["out"]) / "design-11.json"), "result": "完了"}]))
+    assert out["exit"] == 1 and out["status"] == "stopped" and out["metrics"] == {"status": "refused"}
+    assert rec(env) == before
+
+
+def test_gate_stops_with_mvv_changed_when_the_project_mvv_was_revised(env, mvv):
+    lap = built_lap(env)
+    mvv["p"] = pm.ProjectMvv("approved", version=2, sha256="s2")
+    out = sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": str(Path(lap["out"]) / "design-11.json"), "result": "関門"}]))
+    stop = out["metrics"]["stop"]
+    assert out["exit"] == 3 and stop["condition"] == "mvv_changed" and stop["values"] == {"started": "s1", "now": "s2"}
+    r = rec(env)
+    assert r["status"] == "stopped" and r["stop"]["condition"] == "mvv_changed" and r["waiting"] == []
+
+
+def test_gate_stops_with_the_mvv_status_when_the_project_mvv_is_not_approved(env, mvv):
+    lap = built_lap(env)
+    mvv["p"] = pm.ProjectMvv("draft")
+    out = sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": str(Path(lap["out"]) / "design-11.json"), "result": "関門"}]))
+    assert out["exit"] == 3 and out["metrics"]["stop"]["values"] == {"started": "s1", "now": "draft"}
+
+
+def test_gate_2_records_the_gate_copy_and_the_stop_values(env):
+    lap = built_lap(env)
+    out = sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": str(Path(lap["out"]) / "prod.json"), "result": "関門"}]))
+    assert out["exit"] == 3 and out["metrics"]["gate"] == 2
+    stop = out["metrics"]["stop"]
+    assert stop["condition"] == "gate2_returned" and stop["values"] == {"pr": None, "verdict": "unknown", "reasons": []}
+    r = rec(env)
+    gates = r["laps"][-1]["gates"]
+    assert gates == [{"name": "関門 2", "by": "mvv", "verdict": "unknown", "basis": [], "pr": None, "at": ""}]
+    assert r["waiting"] == [] and r["laps"][-1]["outcome"] == "進行中"
+
+
+def test_gate_1_mixed_with_a_release_plan_is_treated_as_gate_2(env):
+    lap = built_lap(env)
+    items = [
+        {"plan": str(Path(lap["out"]) / "design-11.json"), "result": "関門"},
+        {"plan": str(Path(lap["out"]) / "prod.json"), "result": "関門"},
+    ]
+    out = sl_gate.cmd_gate(env, "l1", write_done(env, items))
+    assert out["exit"] == 3 and out["metrics"]["stop"]["condition"] == "gate2_returned" and rec(env)["waiting"] == []
+
+
+def test_gate_1_stops_with_refused_when_the_continuation_close_is_refused(env):
+    lap = built_lap(env)
+    base = env.run
+
+    def run(cmd, cwd=None, stdin=None):
+        if "new" in cmd and cmd[cmd.index("new") + 1] == "close":
+            env.calls.append(cmd)
+            return 2, "", "断った理由"
+        return base(cmd, cwd=cwd, stdin=stdin)
+
+    env.run = run
+    out = sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": str(Path(lap["out"]) / "design-11.json"), "result": "関門"}]))
+    stop = out["metrics"]["stop"]
+    assert out["exit"] == 3 and stop["condition"] == "refused"
+    assert stop["values"]["step"] == "続きの queue" and stop["values"]["exit"] == 1 and "断った理由" in stop["values"]["summary"]
+    assert "周回を組めなかった（続きの queue）" in out["summary"]
+    r = rec(env)
+    assert r["status"] == "stopped" and [w["number"] for w in r["waiting"]] == [11]  # before は検査用。移した課題は記録に残る
+
+
+def test_gate_1_keeps_going_and_notes_when_the_issue_body_cannot_be_written(env):
+    lap = built_lap(env)
+
+    def fail(n):
+        raise OSError("gh が落ちた")
+
+    env.issue_body = fail
+    out = sl_gate.cmd_gate(env, "l1", write_done(env, [{"plan": str(Path(lap["out"]) / "design-11.json"), "result": "関門"}]))
+    assert out["status"] == "ok" and out["metrics"]["status"] == "continue" and out["metrics"]["gate"] == 1
+    assert {"note": "gh が落ちた"} in out["items"] and {"waiting": [11]} in out["items"]
+    r = rec(env)
+    assert [w["number"] for w in r["waiting"]] == [11] and r["laps"][-1]["issues_kept"] == [12]
+    assert r["laps"][-1]["gates"][0]["name"] == "関門 1" and r["laps"][-1]["dones"][-1].endswith("done-2.json")
+
+
 def test_answers_control_reselection(env):
     env.rank_box["out"] = rank_out(ms("01 近い", [11, 12]))
     start(env)
