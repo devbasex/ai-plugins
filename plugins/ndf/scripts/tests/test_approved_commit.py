@@ -218,3 +218,13 @@ def test_verified_sha_rejects_an_unreadable_material(tmp_path: Path, text):
         p.write_text(text.format(l=ac.verified_line("trunk", "a" * 40), short=ac.verified_line("trunk", "a" * 39)))
     with pytest.raises(ValueError):
         ac.verified_sha(p)
+
+
+def test_verified_sha_names_the_verify_material_when_the_sha_is_malformed(tmp_path: Path):
+    """#2142: 40 桁でない確かめたコミットの文言は導入の確認の資料を指し、承認したコミットの文言は変わらない。"""
+    p = tmp_path / "approval-verify.md"
+    p.write_text(ac.verified_line("trunk", "a" * 39) + "\n")
+    with pytest.raises(ValueError, match="導入の確認の承認資料 .* の確かめたコミットが 40 桁"):
+        ac.verified_sha(p)
+    with pytest.raises(ValueError, match="^承認したコミットが 40 桁"):
+        ac.parse_sha("a" * 39)
