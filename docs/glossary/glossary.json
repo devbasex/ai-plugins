@@ -2378,8 +2378,7 @@
       "context": "ndf-workflow",
       "meaning": "{paths} を引用の外の 1 字句として含むテストのコマンド（宣言の scope_command か、{paths} を含む引数）。{paths} をシェルの引用で守った対象の並びへ置き換え、シェルで走らせる。{paths} には、改修の範囲テストではテストのファイルのパス、CI に任せる戦略の着手前のテストではテストの置き場所（ディレクトリかファイル）、静的解析では変更したファイルのパスが入る",
       "code": "scope_command",
-      "source": "",
-      "pending_source": "issues/issue-1630-design.md",
+      "source": "docs/specifications/cross-refactoring-scope-template-probe.md",
       "deprecated": [
         "範囲テストの雛形"
       ]
@@ -4237,8 +4236,7 @@
       "term": "テンプレートの試走",
       "context": "ndf-cross-refactoring",
       "meaning": "cross-refactoring の init が着手前のテストの後に、範囲テストのテンプレートへテストのファイルを最大 2 本入れて 1 回走らせ、{paths} に入るパスを受けるかを見分けること。不備か判定できなければ改修の前に止まる",
-      "source": "",
-      "pending_source": "issues/issue-1630-design.md"
+      "source": "docs/specifications/cross-refactoring-scope-template-probe.md"
     },
     {
       "term": "読み手役",
