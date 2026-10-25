@@ -1006,9 +1006,11 @@ def test_promote_does_not_merge_without_a_readable_verified_commit(repo, gh, tmp
 
 
 def test_promote_help_shows_the_verified_commit_argument(gh, repo):
-    """AC9: promote の --help に照合の引数が出る。"""
+    """AC9・#2142: promote の --help に照合の引数と、食い違えば承認ゲート 2 へ戻ることが出る。"""
     p = subprocess.run([PY, str(SCRIPTS / "merged-steps.py"), "promote", "--help"], capture_output=True, text=True, env=gh.env)
-    assert p.returncode == 0 and "--expect-head-from" in p.stdout
+    text = "".join(p.stdout.split())  # argparse の折り返しを外す
+    assert p.returncode == 0 and "--expect-head-from" in text
+    assert "承認ゲート2へ戻す" in text and "--fromverify" in text
 
 
 # --- #2104: 昇格の承認の後のマージは、承認ゲート 2 の承認資料の承認したコミットのときだけ行う ----------------------

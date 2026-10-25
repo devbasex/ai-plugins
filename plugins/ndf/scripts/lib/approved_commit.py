@@ -67,11 +67,11 @@ class Verdict:
     actual_tree: str | None = None
 
 
-def parse_sha(text) -> str:
-    """40 桁の 16 進（小文字へ揃える）。形が違えば ValueError。"""
+def parse_sha(text, what: str = "承認したコミット") -> str:
+    """40 桁の 16 進（小文字へ揃える）。形が違えば ValueError（文言の主語は what）。"""
     s = str(text or "").strip().lower()
     if not SHA_RE.match(s):
-        raise ValueError(f"承認したコミットが 40 桁の 16 進でない: {text!r}")
+        raise ValueError(f"{what}が 40 桁の 16 進でない: {text!r}")
     return s
 
 
@@ -177,7 +177,7 @@ def verified_sha(path) -> str:
     if len(found) != 1:
         what = "無い" if not found else f"{len(found)} 行ある"
         raise ValueError(f"導入の確認の承認資料 {p} に確かめたコミットの行が{what}")
-    return parse_sha(found[0])
+    return parse_sha(found[0], f"導入の確認の承認資料 {p} の確かめたコミット")
 
 
 # --- 比較 ---------------------------------------------------------------------

@@ -57,7 +57,15 @@ def add_promote_args(pm):
     pm.add_argument("--prepare", action="store_true", help="Pull Request を用意して承認資料を書くところで終える（マージしない）")
     pm.add_argument("--out", help="--prepare と承認ゲート 2 の停止で書く昇格の承認資料の置き場（既定は提示物の置き場）")
     pin = pm.add_mutually_exclusive_group()
-    pin.add_argument("--expect-head-from", metavar="資料", help="導入の確認の承認資料。確かめたコミットが PR の先端のときだけマージする")
+    pin.add_argument(
+        "--expect-head-from",
+        metavar="資料",
+        help=(
+            "導入の確認の承認資料。確かめたコミットが PR の先端のときだけマージする（照合）。"
+            "食い違えば head_moved で 1、資料から読めなければ 2 で止まり、プランの handoff が承認ゲート 2 へ戻す"
+            "（run <プラン> --from verify から流し直す）"
+        ),
+    )
     pin.add_argument(
         "--approved-from",
         metavar="資料",
