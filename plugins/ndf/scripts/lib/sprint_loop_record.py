@@ -390,9 +390,8 @@ def lap_rows(rec: dict) -> list[dict]:
     return rows
 
 
-def render_laps(rec: dict) -> str:
-    lines = [f"# 開発ループ {rec['name']}", "", f"- 状態: {rec.get('status')}。予算: {rec.get('budget')}。消費: {consumed(rec)}", ""]
-    lines += [
+def render_lap_overview(rec: dict) -> list[str]:
+    lines = [
         "| 周回 | 課題 | 版 | 費用 | 秒 | 結果 | 止まった理由 | 後へ回した Issue |",
         "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
@@ -404,38 +403,60 @@ def render_laps(rec: dict) -> str:
         lines.append(
             f"| {r['n']} | {_md_cell(issues)} | {_md_cell(ver)} | {_md_cell(r['cost'])} | {_md_cell(r['seconds'])} | {_md_cell(r['outcome'])} | {_md_cell(r['stop'])} | {_md_cell(deferred)} |"
         )
+    return lines
+
+
+def render_lap_detail(lap: dict) -> list[str]:
+    lines = [
+        "",
+        f"## 周回 {lap['n']}（{lap.get('sprint', '')}）",
+        "",
+        "| 課題 | マイルストーン | 順位 | 選定 | 理由 |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for s in lap.get("selection", []):
+        lines.append(
+            f"| #{s['number']} | {_md_cell(s.get('milestone'))} | {_md_cell(s.get('rank'))} | {s['decision']} | {_md_cell(s.get('reason'))} |"
+        )
+    for g in lap.get("gates", []):
+        lines.append(
+            f"\n- {g.get('name')}: {g.get('by', 'user')} {_md_cell(g.get('verdict'))}（根拠 {_md_cell(', '.join(g.get('basis') or []))}）"
+        )
+    if lap.get("refine"):
+        lines.append(
+            f"- 棚卸し: 持ち越し {_md_cell(lap['refine'].get('deferred'))}・順位の変化 {len(lap['refine'].get('rank_changes') or [])} 件"
+        )
+    if lap.get("retro"):
+        lines.append(f"- 振り返り: {lap['retro']}")
+    return lines
+
+
+def render_waiting(rec: dict) -> list[str]:
+    waiting = rec.get("waiting", [])
+    if not waiting:
+        return []
+    lines = ["", "## 人の判断待ち", "", "| 課題 | 承認ゲート | 理由 | 答え |", "| --- | --- | --- | --- |"]
+    lines += [f"| #{w['number']} | {w.get('gate')} | {_md_cell(w.get('reason'))} | {_md_cell(w.get('answer'))} |" for w in waiting]
+    return lines
+
+
+def render_stop(rec: dict) -> list[str]:
+    if not rec.get("stop"):
+        return []
+    return [
+        "",
+        f"## 止まった理由: {rec['stop']['condition']}",
+        "",
+        f"- 値: {json.dumps(rec['stop']['values'], ensure_ascii=False)}",
+        f"- 再開: `{resume_command(rec)}`",
+    ]
+
+
+def render_laps(rec: dict) -> str:
+    lines = [f"# 開発ループ {rec['name']}", "", f"- 状態: {rec.get('status')}。予算: {rec.get('budget')}。消費: {consumed(rec)}", ""]
+    lines += render_lap_overview(rec)
     for lap in rec.get("laps", []):
-        lines += [
-            "",
-            f"## 周回 {lap['n']}（{lap.get('sprint', '')}）",
-            "",
-            "| 課題 | マイルストーン | 順位 | 選定 | 理由 |",
-            "| --- | --- | --- | --- | --- |",
-        ]
-        for s in lap.get("selection", []):
-            lines.append(
-                f"| #{s['number']} | {_md_cell(s.get('milestone'))} | {_md_cell(s.get('rank'))} | {s['decision']} | {_md_cell(s.get('reason'))} |"
-            )
-        for g in lap.get("gates", []):
-            lines.append(
-                f"\n- {g.get('name')}: {g.get('by', 'user')} {_md_cell(g.get('verdict'))}（根拠 {_md_cell(', '.join(g.get('basis') or []))}）"
-            )
-        if lap.get("refine"):
-            lines.append(
-                f"- 棚卸し: 持ち越し {_md_cell(lap['refine'].get('deferred'))}・順位の変化 {len(lap['refine'].get('rank_changes') or [])} 件"
-            )
-        if lap.get("retro"):
-            lines.append(f"- 振り返り: {lap['retro']}")
-    waiting = [w for w in rec.get("waiting", [])]
-    if waiting:
-        lines += ["", "## 人の判断待ち", "", "| 課題 | 承認ゲート | 理由 | 答え |", "| --- | --- | --- | --- |"]
-        lines += [f"| #{w['number']} | {w.get('gate')} | {_md_cell(w.get('reason'))} | {_md_cell(w.get('answer'))} |" for w in waiting]
-    if rec.get("stop"):
-        lines += [
-            "",
-            f"## 止まった理由: {rec['stop']['condition']}",
-            "",
-            f"- 値: {json.dumps(rec['stop']['values'], ensure_ascii=False)}",
-            f"- 再開: `{resume_command(rec)}`",
-        ]
+        lines += render_lap_detail(lap)
+    lines += render_waiting(rec)
+    lines += render_stop(rec)
     return "\n".join(lines) + "\n"
