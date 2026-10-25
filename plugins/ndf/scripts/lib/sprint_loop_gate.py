@@ -23,7 +23,6 @@ from sprint_loop_record import (
     IN_PROGRESS,
     FAILED,
     RETURNED,
-    SELECTED,
     GATE_1,
     GATE_2,
     DESIGN_PHASE,
@@ -41,6 +40,7 @@ from sprint_loop_record import (
     resume_command,
     stop_and_report,
     update_handoff,
+    selected_issues,
 )
 
 
@@ -64,10 +64,6 @@ def select_cmd(name: str) -> str:
 
 def wait_lap(rec: dict, done: Path) -> str:
     return f"python3 {shlex.quote(str(SUPERVISE))} wait {shlex.quote(str(done))} && python3 {shlex.quote(str(SPRINT_STATE))} loop lap {rec['name']} --done {shlex.quote(str(done))}"
-
-
-def selected_issues(lap: dict) -> list[int]:
-    return [r["number"] for r in lap.get("selection", []) if r.get("decision") == SELECTED]
 
 
 def refusal_order(summary: str) -> dict:

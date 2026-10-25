@@ -27,11 +27,11 @@ from sprint_loop_record import (
     stopped_result,
     stop_and_report,
     update_handoff,
+    selected_issues,
 )
 
 from sprint_loop_gate import (
     loop_ok,
-    selected_issues,
     refusal_order,
 )
 

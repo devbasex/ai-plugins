@@ -352,16 +352,19 @@ def _md_cell(v) -> str:
     return str(v).replace("|", "\\|") if v not in (None, "", []) else "—"
 
 
+def selected_issues(lap: dict) -> list[int]:
+    return [r["number"] for r in lap.get("selection", []) if r.get("decision") == SELECTED]
+
+
 def lap_rows(rec: dict) -> list[dict]:
     """周回の一覧（何周目・選んだ課題・版・費用・止まった理由）。"""
     stops = {s.get("lap"): s.get("condition") for s in [*rec.get("stops", []), *([rec["stop"]] if rec.get("stop") else [])]}
     rows = []
     for lap in rec.get("laps", []):
-        chosen = [r["number"] for r in lap.get("selection", []) if r.get("decision") == SELECTED]
         rows.append(
             {
                 "n": lap["n"],
-                "issues": chosen,
+                "issues": selected_issues(lap),
                 "versions": lap.get("versions") or {},
                 "cost": lap.get("cost"),
                 "seconds": lap.get("seconds"),

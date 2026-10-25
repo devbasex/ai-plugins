@@ -52,13 +52,13 @@ from sprint_loop_record import (
     handoff_path,
     update_handoff,
     lap_rows,
+    selected_issues,
 )
 
 from sprint_loop_gate import (
     loop_ok,
     select_cmd,
     wait_lap,
-    selected_issues,
     refusal_order,
     build_close,
     _refused,
