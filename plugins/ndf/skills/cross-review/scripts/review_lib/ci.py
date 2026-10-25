@@ -141,3 +141,11 @@ def _round_ci(st: dict[str, Any], last: dict[str, Any], pr: int) -> dict[str, An
     if c.pending:
         return {"verdict": "pending", "sha": sha, "pending": c.pending}
     return {"verdict": "success", "sha": sha}
+
+
+def ci_counts(rounds: list) -> dict:
+    """最後のラウンドの継続的統合の判定（`ci`）と理由（`ci_reason`）。判定が無ければ両方 `None`（#1593 I3）。"""
+    ci = (rounds[-1].get("ci") if rounds else None) or {}
+    verdict = ci.get("verdict")
+    reason = {"unverified": ci.get("reason"), "meta_only": ci.get("note"), "pending": " ".join(ci.get("pending") or []) or None}
+    return {"ci": verdict, "ci_reason": reason.get(verdict)}

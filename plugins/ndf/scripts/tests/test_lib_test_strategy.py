@@ -482,6 +482,28 @@ def test_verify_commands_stops_on_an_invalid_declaration():
         ts.verify_commands(decl)
 
 
+@pytest.mark.parametrize(
+    "test",
+    [{"suites": []}, {"suites": [{"name": "docs", "runner": "none"}]}, {"suites": [{"name": "md", "kind": "lint"}]}],
+)
+def test_verify_commands_name_nothing_for_a_declaration_without_tests(test):
+    """#1593 I1 — テストの無い宣言（`{"suites": []}` を含む）は名指しするコマンドが無いとして `None`。"""
+    assert ts.verify_commands({"test": test}) is None
+
+
+@pytest.mark.parametrize(
+    "test, key",
+    [
+        ({"suites": [{"name": "py", "kind": "unit"}]}, r"test\.suites\[0\]\.kind"),
+        ({"strategy": "local-scoped-ci-whole", "suites": []}, "scope_command"),
+    ],
+)
+def test_verify_commands_still_stop_on_a_wrong_declaration_without_tests(test, key):
+    """#1593 I2 — command の無い宣言でも、種別の誤りと解けない戦略は今のとおり止める。"""
+    with pytest.raises(ts.StrategyError, match=key):
+        ts.verify_commands({"test": test})
+
+
 # ---------- #1437: 雛形から組んだ全体テストの注記 ----------
 
 PYTEST_DECL = {"test": {"suites": [{"name": "py", "runner": "pytest", "command": "pytest -q"}]}}

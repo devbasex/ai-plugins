@@ -12,9 +12,7 @@ init → ラウンド（起動・監視・取り込み・根拠の検証・判�
 立てて続きを待ち、打ち直しが続き（`resume`）を送る。結果ファイルが無ければ同じ止まりを番号を増やして返す。
 途中のスクリプトが失敗したときも stopped を返して同じように待ち、打ち直しで同じ段階をやり直す。
 
-止まるときの JSON の形と終了コードの表は `scripts/lib/drive_pause.py` にある。
-
-件数（metrics）は状態ファイルから数える: rounds / prs / findings / fixed / deferred / rejected / unresolved / final / review_status。
+止まるときの JSON の形と終了コードの表は `scripts/lib/drive_pause.py`、件数（metrics）のキーの一覧は SKILL.md の「実行」の節にある。
 """
 
 from __future__ import annotations
@@ -57,10 +55,8 @@ def review_paths():
 
 def sweep_verify_lines(worktree) -> str:
     """最終スイープの検証のコマンドの段落（#1483 I13）。宣言の `test` があれば全体テスト（両方の種別）を名指しする。
-
-    宣言が無い・読めなければ空で、プロンプトは今の探し方（Step 7.5）のまま。`test` があって解けない（不正な
-    `kind` など）ときは、どのキーが不正かを添えて `Stop` で止める。`--verify-command` は読まない。
-    """
+    宣言が無い・読めない・テストの無い宣言（#1593）なら空で、プロンプトは今の探し方（Step 7.5）のまま。`test` があって
+    解けない（不正な `kind` など）ときは、どのキーが不正かを添えて `Stop` で止める。`--verify-command` は読まない。"""
     if not worktree:
         return ""
     import project_decl
@@ -73,7 +69,7 @@ def sweep_verify_lines(worktree) -> str:
     try:
         commands = ts.verify_commands(decl)
     except ts.StrategyError as e:
-        raise Stop(f".ndf/project.json の test が不正: {e}", 2) from e
+        raise Stop(f"最終スイープの指示を組めない: .ndf/project.json の test が不正: {e}", 2) from e
     if not commands:
         return ""
     listed = "\n".join(f"  - {c}" for c in commands)
@@ -142,6 +138,9 @@ class Drive:
         `findings` は修正担当が扱った指摘（各ラウンドの直した・見送った・却下したの和）で、`findings >= fixed` が
         数え方で成り立つ。レビュー担当が出したコメントの数は `comments` で別に出す（1 つのコメントに複数の指摘が
         入り、2 者が同じ所を指せば 2 件になるため、指摘の数と比べない）。収束の判定はこの値を読まない。"""
+        review_paths()  # 継続的統合の判定の写し（ci_counts）は review_lib にある
+        from review_lib.ci import ci_counts
+
         s = self.state()
         rounds = s.get("rounds") or []
         comments = fixed = deferred = rejected = 0
@@ -164,6 +163,7 @@ class Drive:
             "unresolved": sweep.get("remaining_open"),
             "final": s.get("final"),
             "review_status": review_status(s),
+            **ci_counts(rounds),
         }
 
     # --- 止まる ---

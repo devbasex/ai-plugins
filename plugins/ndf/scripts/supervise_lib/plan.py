@@ -50,11 +50,13 @@ worker のランタイム: work と drive のステップに `"runtime": "codex"
 `external-ai.py run` で起動する（起動・上限つきの待ち・回収はそのコマンドが持つ）。書かなければ最小構成の claude -p。
 
 drive のステップ: `cmd`（または `"drive": "cross-review" | "cross-refactoring"` と `"args"`）を打ち、最後の行の JSON を読む。
-- `status` が `ok` なら成功。`metrics`（ラウンド数・指摘・未解決・適用・取り消しなど）を報告の「件数」へ載せる
+- `status` が `ok` なら成功。`metrics`（ラウンド数・指摘・未解決・適用・取り消し・cross-review の継続的統合の判定 `ci`
+  と理由 `ci_reason` など）を報告の「件数」へ載せる
 - `gate` なら `items[0]` の `prompt_file` を worker に渡し、`result_file` を書かせてから同じコマンドを打ち直す。
   `command` を持つ pause（最終ゲートの cross-review）は、その駆動を同じ形で回し、`metrics.review_status` を
   `result_file` へ書く
-- `stopped`・結果ファイルが書かれない・`"max_pauses"`（既定 12）を超える、のどれかなら失敗
+- `stopped`・結果ファイルが書かれない・`"max_pauses"`（既定 12）を超える、のどれかなら失敗。`stopped` の止まった理由には
+  駆動の `summary` と、`metrics.exit` があれば「（元の終了コード N）」が添う
 
 ステップごとの作業場所: run と work のステップに `"cwd"` を書くと、そのステップだけ別の場所で動く（取り込みで PR ごとに
 作業ツリーが違うとき）。work のステップでは worker へ渡す「作業場所」もその `cwd` になる。
