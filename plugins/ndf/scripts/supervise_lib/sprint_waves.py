@@ -364,8 +364,8 @@ def normal_gate_2_stage(a, prod: str, advise: bool) -> str:
     """pace: normal の承認ゲート 2 のステージの文。承認の手順はここの 1 か所に置き、配布の note に重ねない（#1914 の決定 1）。"""
     approval = f"issues/approval-{(a.release or {}).get('plugin')}-v{prod}.md"
     text = (
-        f"開発版の配布が書いた承認資料（{approval}）を示して本番への配布の承認を取り、承認されたら"
-        "「本番」のステージの command を打つ（差し戻されたら打たない）"
+        f"開発版の配布が書いた承認資料（{approval}）を示して本番への配布の承認を取り、承認されたら `python3 {shlex.quote(str(HERE / 'release-steps.py'))} approve --approval {approval} "
+        "--approved-sha <approval-facts の metrics.approved_sha> --by user` で承認を記録してから「本番」のステージの command を打つ（差し戻されたら打たない）"
     )
     return text + "。" + normal_gate_2(a) if advise else text
 

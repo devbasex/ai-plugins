@@ -321,6 +321,7 @@ def test_normal_sprint_with_a_state_puts_the_advice_before_both_gates(tmp_path):
     waves = {w["name"]: w for w in manifest["ステージ"]}
     assert "--what <要約> --by user --pr <設計 PR>" in waves["関門 1"]["gate"] and "--by user" in waves["関門 2"]["gate"]
     assert "note" not in waves["配布"] and "'関門 2' --what" in waves["関門 2"]["gate"]
+    assert waves["関門 2"]["gate"].index("release-steps.py approve --approval") < waves["関門 2"]["gate"].index("「本番」のステージ")
     assert "sprint-state.py gate" in out["next"]
     design = load(waves["設計"]["plans"][0])
     ds = steps_of(design)
