@@ -144,7 +144,7 @@ flowchart TB
 | リファクタリング | 振る舞いを変えずに構造を直す工程 | `/ndf:cross-refactoring`、プランの `refactor` のステップ、工程表の行と進捗記録の `stage` の値は `構造改善` | [../SKILL.md](../SKILL.md) の「モードごとに起動する Skill」 |
 | コードレビュー | 実装の差分をレビューし、新しい指摘が出なくなるまで直す工程 | `/ndf:cross-review`（`legacy-refactor` は `pr-review`）、プランの `review` のステップ、工程表の行と進捗記録の `stage` の値は `実装レビュー` | [../SKILL.md](../SKILL.md) の「モードごとに起動する Skill」 |
 | 収束ループ | 新しい指摘が出なくなるまで回すレビューと修正。リファクタリング・コードレビュー・ドキュメントレビューが持つ | drive のステップ | [context-window.md](context-window.md) の「フェーズの中のスイッチポイント」 |
-| 手順 | 1 つの Skill の中で順に通す作業の単位。`cross-refactoring` の提案・リファクタリング計画・テスト追加・実装・検証/修正の 5 つ、`document-rebuild` の決める（文書形式・文書の目的・言語）・測る・組み直す・整える・測り直すの 5 つ（手順 0〜4） | — | [cross-refactoring](../../cross-refactoring/SKILL.md)、[document-rebuild](../../document-rebuild/SKILL.md) |
+| 手順 | 1 つの Skill の中で順に通す作業の単位。`cross-refactoring` の提案・リファクタリング計画・テスト追加・実装・検証/修正、`document-rebuild` の決める（文書形式・文書の目的・言語）・測る・組み直す・整える・測り直す | — | [cross-refactoring](../../cross-refactoring/SKILL.md)、[document-rebuild](../../document-rebuild/SKILL.md) |
 | リファクタリング計画 | `cross-refactoring` が採る改善項目を決め、見送った提案と理由を残す出力 | — | [cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
 | バッファ | `cross-refactoring` の見積りで、想定最大時間から経過を引いた後に残しておく時間 | 「想定最大時間 − 経過 − バッファ」 | [cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
 | 完了判定 | コマンドの証跡で完了を判定する工程。スクラムの完了の定義に当たる | `/ndf:quality-gates` | [quality-gates](../../quality-gates/SKILL.md) |
