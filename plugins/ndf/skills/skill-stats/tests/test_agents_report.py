@@ -19,6 +19,9 @@ SCRIPT = SKILL_DIR / "scripts" / "skill-stats.py"
 PLUGIN_ROOT = SKILL_DIR.parents[1]
 FIXTURES = PLUGIN_ROOT / "scripts" / "tests" / "fixtures" / "transcript_agents"
 
+sys.path.insert(0, str(PLUGIN_ROOT / "scripts" / "tests"))
+from transcript_agents_rows import ROW_KEYS  # noqa: E402
+
 LEGACY_HEADER = "| skill | triggers源 | 計 | 自動 | 明示 | 関連話題 | ヒット | ヒット率 |"
 
 
@@ -58,19 +61,7 @@ def test_the_conductor_row_has_the_same_columns(report) -> None:
     conductor = [r for r in report["agents"] if r["layer"] == "conductor"]
     assert len(conductor) == 1
     assert conductor[0]["depth"] == 0 and conductor[0]["role"] == "-"
-    assert set(report["agents"][0]) == {
-        "layer",
-        "role",
-        "depth",
-        "model",
-        "fixed",
-        "peak",
-        "work",
-        "responses",
-        "duration_seconds",
-        "ending",
-        "interruptions",
-    }
+    assert set(report["agents"][0]) == ROW_KEYS
 
 
 def test_the_record_rows_never_carry_the_agent_id(report) -> None:

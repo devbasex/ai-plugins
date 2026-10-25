@@ -67,7 +67,7 @@ Pull Request が出る場合も、既定の `Linked pull requests` に並ぶた�
 | 作業場所の用意 | `worktree` | `作業場所の用意` |
 | 設計 | `design` | `設計` |
 | 素材の収集と出典の確定 | `document-sources` | `素材の収集と出典の確定` |
-| ドキュメント再構成 | `document-restructuring` | `ドキュメント再構成` |
+| ドキュメント再構成 | `document-rebuild` | `ドキュメント再構成` |
 | ドキュメントレビュー | `design` が `pr` / `cross-review` / `merged` を呼ぶ | `ドキュメントレビュー` |
 | 計画 | `implementation-plan` | `計画` |
 | 実装 | `tdd-cycle` | `実装` |

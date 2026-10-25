@@ -75,7 +75,7 @@ AI ごとに変わり、文書の分割単位・記載項目・粒度をその�
 | 題を読む文書は頭のファイル `issues/issue-<番号>-design.md` に固定する | 直近の設計文書はすべてこの名前で書かれており、規約は今の形の追認である。差分から決定の節を持つ文書を探すと、決定を別ファイルへ分けた文書で取り違える |
 | 既存の PR では、H1 を読めたときだけ題も書き直す | 読めないときに書き直すと、人が付けた題を代わりの題で上書きする |
 | 設計を送る 2 つのステップ（push-glossary と push-glossary-gate）の後にも題を H1 へ合わせ直す | review より後に pr のステップは無く、レビューの直しで H1 が変わると古い題のまま承認ゲート 1 に届く。承認ゲート 1 の前にはどの経路でもこの 2 つのどちらかを通る。送りの定数（`PUSH_DESIGN`）に含めると、設計 PR 以外の送りでも題を書き換える |
-| 256 コードポイントを超える H1 は題に使わず、代わりの題で出す。長さは `len()` で数える | 題を切り詰めると、問題と成り立つことのどちらかが欠けた題が規約の形に見えて出る。バイトで数えると、日本語の 86 文字前後の H1 でも代わりの題へ落ちる |
+| 256 コードポイントを超える H1 は題に使わず、代わりの題で出す。長さは `len()` で数える | 題を切り詰めると、対象と「直すと何ができるようになるか」のどちらかが欠けた題が規約の形に見えて出る。バイトで数えると、日本語の 86 文字前後の H1 でも代わりの題へ落ちる |
 | 題と章の形を機械で検査しない | 欄の欠けと題の形の外れは、承認資料の「無し（理由）」と「題: 規約の形でない」で承認する人に見える。機械の検査は doc-check を扱う #873 の側に置く |
 
 ## 工程表での位置
@@ -83,7 +83,7 @@ AI ごとに変わり、文書の分割単位・記載項目・粒度をその�
 | 工程 | `light` | `operation` | `legacy-refactor` | `standard` |
 | --- | --- | --- | --- | --- |
 | 設計 | `design`（該当時） | `design`（該当時） | `design` | `design` |
-| ドキュメント再構成 | — | — | 設計 Pull Request を分けた場合 | `document-restructuring` |
+| ドキュメント再構成 | — | — | 設計 Pull Request を分けた場合 | `document-rebuild` |
 | ドキュメントレビュー | — | — | 設計 Pull Request を分けた場合 | `pr` → `cross-review` → `merged` |
 
 **`light` と `operation` の条件は触る領域が決める。** 「すべての変更」以外の領域が 1 つ以上
@@ -183,7 +183,7 @@ push-glossary-gate は push-glossary の `cmd` をそのまま使う。
 `ドキュメントレビュー` の 2 つ**で、`.ndf/projects.json` を持つリポジトリでだけ働く。
 
 **ボードの単一選択へ足す値は、この 2 つに限らない。** 設計の工程の前後には
-`ドキュメント再構成`（`document-restructuring` が記録する）も入る。**ボードへ足すのは
+`ドキュメント再構成`（`document-rebuild` が記録する）も入る。**ボードへ足すのは
 工程表の行すべてであり、その操作はボードを持つリポジトリ側が行う。**
 
 ## テスト観点
@@ -201,7 +201,7 @@ push-glossary-gate は push-glossary の `cmd` をそのまま使う。
 | pr のステップが H1 で PR を作り、読めなければ `title` で出す。既存の PR は H1 を読めたときだけ題も書き直す | 同上（`test_new_pr_takes_the_h1_as_its_title` / `test_unreadable_h1_falls_back_to_the_step_title` / `test_existing_pr_*`） |
 | `sync-title` が違うときだけ書き直し、読めないときと `gh` の失敗では書かずに 0 で終わる | 同上（`test_sync_title_*`） |
 | 設計のプランが `title_doc` を渡し、push-glossary と push-glossary-gate の両方が送りの後に `sync-title` を打つ | 同上（`test_sprint_design_pr_reads_the_design_doc_and_falls_back` / `test_both_design_pushes_of_the_mvv_plan_sync_the_title`） |
-| 欄の規約の本文が `design-template.md` の 1 か所にだけあり、承認資料・`decisions.md`・`pr`・`requirements-design`・`document-restructuring`・`agent-layers.md` は節を指す | 文書を読んで確かめる（文言を照合するテストは書かない） |
+| 欄の規約の本文が `design-template.md` の 1 か所にだけあり、承認資料・`decisions.md`・`pr`・`requirements-design`・`document-rebuild`・`agent-layers.md` は節を指す | 文書を読んで確かめる（文言を照合するテストは書かない） |
 
 ## 運用
 

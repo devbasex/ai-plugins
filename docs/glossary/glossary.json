@@ -94,7 +94,7 @@
     {
       "id": "ndf-document",
       "name": "NDF の文書の組み直し",
-      "meaning": "書き上げた文書を文書形式と文書の目的に合わせて組み直すときの語。document-restructuring が持つ"
+      "meaning": "書き上げた文書を文書形式と文書の目的に合わせて組み直すときの語。document-rebuild が持つ"
     }
   ],
   "terms": [
@@ -706,7 +706,7 @@
     {
       "term": "手順",
       "context": "ndf-workflow",
-      "meaning": "1 つの Skill の中で順に通す作業の単位。cross-refactoring の提案・リファクタリング計画・テスト追加・実装・検証/修正の 5 つ、document-restructuring の決める（文書形式・文書の目的・言語）・測る・組み直す・整える・測り直すの 5 つ（手順 0〜4）",
+      "meaning": "1 つの Skill の中で順に通す作業の単位。cross-refactoring の提案・リファクタリング計画・テスト追加・実装・検証/修正の 5 つ、document-rebuild の決める（文書形式・文書の目的・言語）・測る・組み直す・整える・測り直すの 5 つ（手順 0〜4）",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
@@ -2376,10 +2376,10 @@
     {
       "term": "範囲テストのテンプレート",
       "context": "ndf-workflow",
-      "meaning": "{paths} を引用の外の 1 字句として含むテストのコマンド（宣言の scope_command か、{paths} を含む引数）。{paths} をシェルの引用で守った対象の並びへ置き換え、シェルで走らせる",
+      "meaning": "{paths} を引用の外の 1 字句として含むテストのコマンド（宣言の scope_command か、{paths} を含む引数）。{paths} をシェルの引用で守った対象の並びへ置き換え、シェルで走らせる。{paths} には、改修の範囲テストではテストのファイルのパス、CI に任せる戦略の着手前のテストではテストの置き場所（ディレクトリかファイル）、静的解析では変更したファイルのパスが入る",
       "code": "scope_command",
       "source": "",
-      "pending_source": "issues/old/issue-1483-design.md",
+      "pending_source": "issues/issue-1630-design.md",
       "deprecated": [
         "範囲テストの雛形"
       ]
@@ -3479,6 +3479,12 @@
       "source": "docs/specifications/ndf-release-approved-commit.md"
     },
     {
+      "term": "確かめたコミット",
+      "context": "ndf-release",
+      "meaning": "導入の確認を走らせた、ベースブランチの先頭のコミットの SHA（40 桁）。導入の確認の承認資料に書かれ、pace: fast / auto の昇格でマージしてよい先端はこのコミットに限る",
+      "pending_source": "issues/issue-1529-design.md"
+    },
+    {
       "term": "承認の外のコミット",
       "context": "ndf-release",
       "meaning": "承認したコミットから比べた先端までに入ったコミットのうち、この版の配布の PR のものでないもの。あれば本番の配布は承認ゲートで止まる",
@@ -3725,6 +3731,11 @@
       "meaning": "想定最大時間の終わり − 確かめの見込み（H − v）。最終ゲートの確かめを始められる最後の時刻で、最終ゲート修正と打ち切りの後の取り消しもこの時刻までに止まる",
       "code": "gate_start_end",
       "source": "docs/specifications/cross-refactoring-verify-and-final-gate.md"
+    },
+    {
+      "term": "テストの無い宣言",
+      "context": "ndf-cross-refactoring",
+      "meaning": ".ndf/project.json の test があり、unknown と strategy を持たず、種別・雛形の誤りが無く、どの suite も command と scope_command のどちらも持たないもの（suite が 0 個のときを含む）。解析が「テストが無い」と測った {\"suites\": []} を含む。cross-review の最終スイープは検証のコマンドを名指ししない"
     },
     {
       "term": "未解決のスレッド",
@@ -4177,57 +4188,62 @@
       "term": "文書形式",
       "context": "ndf-document",
       "meaning": "文書を読ませる形。リポジトリの Markdown・文書・ページ・スライド・表計算。置き場（Notion・Confluence・Google Drive などのシステム）とは別の軸",
-      "source": "",
-      "pending_source": "issues/issue-2086-requirements.md"
+      "source": "docs/specifications/ndf-document-rebuild.md"
     },
     {
       "term": "文書の目的",
       "context": "ndf-document",
       "meaning": "読み手にその文書で何をしてもらうか・何を渡すかの種類（決議依頼・議論・アジェンダ・小説・エッセイ・ブログ・作業レポート・論文など）",
-      "source": "",
-      "pending_source": "issues/issue-2086-requirements.md"
+      "source": "docs/specifications/ndf-document-rebuild.md"
     },
     {
       "term": "共通ルール",
       "context": "ndf-document",
       "meaning": "文書形式と文書の目的に関わらず、組み直した文書が満たす決まり",
-      "source": "",
-      "pending_source": "issues/issue-2086-requirements.md"
+      "source": "docs/specifications/ndf-document-rebuild.md"
     },
     {
       "term": "キーワード",
       "context": "ndf-document",
       "meaning": "文書の題・見出しと、本文で繰り返し使い、読み手がその文書の主題として受け取る語",
-      "source": "",
-      "pending_source": "issues/issue-2086-requirements.md"
+      "source": "docs/specifications/ndf-document-rebuild.md"
     },
     {
       "term": "確定事項を伝える文書",
       "context": "ndf-document",
       "meaning": "確定した設計・報告書のように、結論が既に決まっている文書",
-      "source": "",
-      "pending_source": "issues/issue-2086-requirements.md"
+      "source": "docs/specifications/ndf-document-rebuild.md"
     },
     {
       "term": "議論用の文書",
       "context": "ndf-document",
       "meaning": "仕様案・提案書・論点の整理のように、まだ決まっていないことを読み手と決めるための文書",
-      "source": "",
-      "pending_source": "issues/issue-2086-requirements.md"
+      "source": "docs/specifications/ndf-document-rebuild.md"
     },
     {
       "term": "形式別ガイド",
       "context": "ndf-document",
-      "meaning": "文書形式 1 つについて、文章量の単位と目安・題と見出しの付け方・呼び出し先を持つ document-restructuring の参照ファイル（references/format-<形式>.md）",
-      "source": "",
-      "pending_source": "issues/issue-2086-design.md"
+      "meaning": "文書形式 1 つについて、文章量の単位と目安・題と見出しの付け方・呼び出し先を持つ document-rebuild の参照ファイル（references/format-<形式>.md）",
+      "source": "docs/specifications/ndf-document-rebuild.md"
     },
     {
       "term": "目的別ガイド",
       "context": "ndf-document",
-      "meaning": "文書の目的 1 つについて、構成・文章量・見分ける手がかりを持つ document-restructuring の参照ファイル（references/purpose-<目的>.md）",
+      "meaning": "文書の目的 1 つについて、構成・文章量・見分ける手がかりを持つ document-rebuild の参照ファイル（references/purpose-<目的>.md）",
+      "source": "docs/specifications/ndf-document-rebuild.md"
+    },
+    {
+      "term": "テンプレートの試走",
+      "context": "ndf-cross-refactoring",
+      "meaning": "cross-refactoring の init が着手前のテストの後に、範囲テストのテンプレートへテストのファイルを最大 2 本入れて 1 回走らせ、{paths} に入るパスを受けるかを見分けること。不備か判定できなければ改修の前に止まる",
       "source": "",
-      "pending_source": "issues/issue-2086-design.md"
+      "pending_source": "issues/issue-1630-design.md"
+    },
+    {
+      "term": "読み手役",
+      "context": "ndf-document",
+      "meaning": "組み直した文書と想定する読み手の説明だけを渡され、会話や経緯の文脈を持たずに読んで、要点の言い直し・分からなかった語と箇所・納得できなかった主張を返す者（サブエージェントか external-ai で呼ぶ別の CLI）",
+      "source": "plugins/ndf/skills/document-rebuild/SKILL.md"
     }
   ]
 }

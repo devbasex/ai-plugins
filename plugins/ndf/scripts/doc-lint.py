@@ -3,7 +3,7 @@
 
     python3 doc-lint.py [--base <ref>] [--root DIR] [--exclude PREFIX...] [--all-lines]
 
-起点（--base と HEAD の分岐点。--base が無ければ origin/<.ndf/worktree.json の base_branch>）から追加した Markdown の行に、markdown-writing のセルフチェックの
+起点（--base と HEAD の分岐点。--base が無ければ origin/<.ndf/worktree.json の base_branch>）から追加した Markdown の行に、document-style のセルフチェックの
 「検討痕跡・変更履歴」の語と、課題番号の由来・以前との比較の語を掛ける。コードブロックの中は見ない。
 掛けるのは `.ndf/project.json` の `ndf_policies.doc_lint` が `true` のときだけで、ほかは `skipped` の ok で 0 を返す。
 結果は lib/step_result.py の形の 1 行の JSON。終了コードは 0 = ヒット無し / 1 = ヒットあり / 2 = 読めない。
@@ -33,7 +33,7 @@ import glossary  # noqa: E402  追加した行の取り方を共有する
 
 TOOL = "doc-lint"
 
-# 規則名 → 正規表現。markdown-writing の「書き終えたらセルフチェック」の語に、課題番号の由来と
+# 規則名 → 正規表現。document-style の「書き終えたらセルフチェック」の語に、課題番号の由来と
 # 以前との比較の語を足したもの
 RULES = {
     "history": re.compile(
@@ -47,6 +47,24 @@ RULES = {
     "comparison": re.compile(r"従来|以前|かつて|もともと|元々|旧来|過去に|によらず|ではな[いく]|に関わらず|にかかわらず"),
 }
 DEFAULT_EXCLUDE = ("CHANGELOG.md", "issues/", ".worktrees/", "docs/presentations/")
+
+
+def _line_hits(rel: str, n: int, line: str) -> list[dict]:
+    items = []
+    for rule, rx in RULES.items():
+        m = rx.search(line)
+        if m:
+            items.append(
+                {
+                    "kind": "line",
+                    "name": f"{rel}:{n}",
+                    "result": "hit",
+                    "rule": rule,
+                    "match": m.group(0),
+                    "text": line.strip()[:200],
+                }
+            )
+    return items
 
 
 def lint_files(root: Path, files: dict[str, set[int]], all_lines: bool) -> tuple[list[dict], int]:
@@ -63,20 +81,7 @@ def lint_files(root: Path, files: dict[str, set[int]], all_lines: bool) -> tuple
             if n in skip or n > len(lines):
                 continue
             total += 1
-            text = lines[n - 1]
-            for rule, rx in RULES.items():
-                m = rx.search(text)
-                if m:
-                    items.append(
-                        {
-                            "kind": "line",
-                            "name": f"{rel}:{n}",
-                            "result": "hit",
-                            "rule": rule,
-                            "match": m.group(0),
-                            "text": text.strip()[:200],
-                        }
-                    )
+            items.extend(_line_hits(rel, n, lines[n - 1]))
     return items, total
 
 
@@ -96,6 +101,24 @@ def generated_documents(root: Path) -> tuple[str, ...]:
     return (p,) if p not in (".", "") else ()
 
 
+def _resolve_start(root, base_arg):
+    """起点の ref と、HEAD との merge-base の sha。解決できなければ StepError。"""
+    base = base_arg or repo.declared_base(root, remote=True)
+    if not base:
+        raise StepError("起点が分からない（--base か .ndf/worktree.json の base_branch）", EXIT_UNREADABLE)
+    p = proc.git(root, "merge-base", base, "HEAD", check=False)
+    if p.returncode != 0:
+        raise StepError(f"起点 {base} を解決できない: {p.stderr.strip()[:200]}", EXIT_UNREADABLE)
+    return base, p.stdout.strip()
+
+
+def _select_files(root, files, exclude):
+    """生成物と、除外の接頭辞（既定 DEFAULT_EXCLUDE）に当たるパスを外す。"""
+    excl = tuple(exclude) if exclude is not None else DEFAULT_EXCLUDE
+    generated = set(generated_documents(root))
+    return {k: v for k, v in files.items() if k not in generated and not any(k.startswith(e) or k == e.rstrip("/") for e in excl)}
+
+
 def cmd_lint(a):
     root = proc.git_root(a.root)
     if not project_decl.policy(root, "doc_lint"):
@@ -108,17 +131,8 @@ def cmd_lint(a):
                 {"skipped": True},
             )
         )
-    base = a.base or repo.declared_base(root, remote=True)
-    if not base:
-        raise StepError("起点が分からない（--base か .ndf/worktree.json の base_branch）", EXIT_UNREADABLE)
-    p = proc.git(root, "merge-base", base, "HEAD", check=False)
-    if p.returncode != 0:
-        raise StepError(f"起点 {base} を解決できない: {p.stderr.strip()[:200]}", EXIT_UNREADABLE)
-    start = p.stdout.strip()
-    files = glossary.added_lines(root, start, ("*.md", "**/*.md"))
-    excl = tuple(a.exclude) if a.exclude is not None else DEFAULT_EXCLUDE
-    generated = set(generated_documents(root))
-    files = {k: v for k, v in files.items() if k not in generated and not any(k.startswith(e) or k == e.rstrip("/") for e in excl)}
+    base, start = _resolve_start(root, a.base)
+    files = _select_files(root, glossary.added_lines(root, start, ("*.md", "**/*.md")), a.exclude)
     items, total = lint_files(root, files, a.all_lines)
     metrics = {
         "base": base,
