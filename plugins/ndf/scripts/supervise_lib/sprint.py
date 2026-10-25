@@ -28,6 +28,7 @@ from supervise_lib.sprint_waves import (
     plan_design_results,
     plan_mvv_design,
     plan_mvv_release,
+    sprint_state_path,
 )
 from supervise_lib.new_args import NEW_ARGS
 from supervise_lib.paths import CHECK_PY, HERE, SELF
@@ -302,10 +303,6 @@ def advises(a, closing: bool = False) -> bool:
 def has_prod_branch(a) -> bool:
     """本番のブランチ（--production-branch か .ndf/worktree.json の production_branch）があるか。"""
     return bool(getattr(a, "production_branch", None))
-
-
-def sprint_state_path(a) -> str:
-    return str(Path(a.state).resolve())
 
 
 PACE_PLANS = {"fast": fast_sprint_plans, "auto": auto_sprint_plans}  # 進め方ごとのステージの組み立て（normal は sprint_plans）

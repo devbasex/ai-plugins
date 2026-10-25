@@ -335,9 +335,13 @@ def plan_sprint_release(a, repo: str, advise: bool = False, channel: str = "dev"
     return plan_release(ns)
 
 
+def sprint_state_path(a) -> str:
+    return str(Path(a.state).resolve())
+
+
 def user_gate_cmd(a, gate: str, pr: bool) -> str:
     """利用者の答えを状態へ書くコマンド（覆しの記録。#1400 の AC6）。承認ゲート 1 は答えた設計 PR を --pr で渡す。"""
-    state = shlex.quote(str(Path(a.state).resolve()))
+    state = shlex.quote(sprint_state_path(a))
     return (
         f"python3 {shlex.quote(str(HERE / 'sprint-state.py'))} gate {state} {shlex.quote(gate)} --what <要約> --by user"
         + (" --pr <設計 PR>" if pr else "")
@@ -371,7 +375,7 @@ def normal_gate_2_stage(a, prod: str, advise: bool) -> str:
 
 def advise_design_steps(a) -> list[dict]:
     """助言の MVV 判定（#1400）の mvv・mvv-note のステップ。判定によらず、想定外の失敗でも関門 1 の judge（gate）へ進む。"""
-    state = shlex.quote(str(Path(a.state).resolve()))
+    state = shlex.quote(sprint_state_path(a))
     note = {
         "timeout": 300,
         "cmd": f"sh -c '[ ! -f {MVV_NOTE} ] || gh pr comment {{pr}} --body-file {MVV_NOTE}'",
@@ -400,7 +404,7 @@ def plan_mvv_design(a, n: int, repo: str) -> dict:
     """pace: fast と auto の設計: 関門 1 の judge を MVV 判定のステップへ替える。従えばラベルとコメントを付けてマージする。
     ラベルの付与かマージが落ちたら handoff で関門 1 の by: mvv の記録を外し、プランを関門で終える（#1370 の I8）。"""
     plan = plan_sprint_design(a, n, repo)
-    state = shlex.quote(str(Path(a.state).resolve()))
+    state = shlex.quote(sprint_state_path(a))
     note = MVV_NOTE
     # 用語チェックの当たりが直し切れずに残ったら、mvv の判定へ渡さず関門 1 の judge（gate）へ回す
     push = ""
@@ -431,7 +435,7 @@ def plan_mvv_design(a, n: int, repo: str) -> dict:
             "next": "merge-gate",
         },
         *merge_steps(a, next="end", on_fail="handoff"),
-        handoff_step(str(Path(a.state).resolve()), "関門 1", "承認ラベルの付与かマージ"),
+        handoff_step(sprint_state_path(a), "関門 1", "承認ラベルの付与かマージ"),
     ]
     plan["規則"] = (
         "設計の cross-review は上限 3 ラウンドで関門 1 の判定（mvv のステップ）へ渡す（収束を待たない）。駆動そのものが失敗したら gate。"
