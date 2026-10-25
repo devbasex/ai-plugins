@@ -234,7 +234,7 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 `gh pr merge` を呼ばずに `head_moved` で 1、資料から確かめたコミットを読めなければマージせずに 2 で止まり、どちらも `handoff` が
 承認ゲート 2 の `by: mvv` の記録を外して承認ゲートへ落とす。`normal` の `promote` は承認ゲート 2 で止まるときに昇格の
 Pull Request の先端を「承認したコミット」として昇格の承認資料（`approval-promote.md`。`fast` / `auto` では `prepare` が書く）へ載せ、
-`promote-approved` は `pace` によらずその資料の承認したコミットが先端のときだけマージする。先端が違えば `head_moved` で 1、
+`promote-approved` は `pace` のどれでもその資料の承認したコミットが先端のときだけマージする。先端が違えば `head_moved` で 1、
 資料から読めなければ 2 で、マージせずに止まる。`fast` / `auto` の `merge` の経路では開発版のステージを置かない
 （ベースブランチへのマージが検証への反映である）。
 
