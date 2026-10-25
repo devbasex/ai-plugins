@@ -88,6 +88,22 @@ def _reference(baseline: dict[str, Any], suite: ts.Suite, source: Optional[str])
     return "green" if whole and status == "green" else "none"
 
 
+def _run_probe(
+    command: Optional[str], work: pathlib.Path, log: pathlib.Path, budget: tuple[float, float]
+) -> tuple[Optional[ts.Outcome], str]:
+    """試走を 1 回走らせ、(結果, 走らせなかった理由) を返す。command が無ければ NO_FILES、上限の残りが 1 秒未満なら NO_TIME。"""
+    if command is None:
+        return None, NO_FILES
+    left, started = budget
+    if left - (time.monotonic() - started) < 1:
+        return None, NO_TIME
+    code, timed_out = test_triage.run_within(left, started, lambda limit: run_with_timeout(command, str(work), limit, output=log))
+    result = ts.outcome(code, timed_out)
+    if result.launch_failed:
+        launch.stop(None, {}, "baseline", command, result, log)
+    return result, NO_FILES
+
+
 def _check_one(
     strategy: ts.Strategy,
     suite: ts.Suite,
@@ -103,17 +119,7 @@ def _check_one(
     reference = _reference(baseline, suite, pick.source)
     command = ts.fill(str(suite.scope_command), pick.paths) if pick.paths else None
     log = ctx["tmp_dir"] / f"template-check-{i}.log"
-    result: Optional[ts.Outcome] = None
-    not_run = NO_FILES
-    if command is not None:
-        left, started = budget
-        if left - (time.monotonic() - started) < 1:
-            not_run = NO_TIME
-        else:
-            code, timed_out = test_triage.run_within(left, started, lambda limit: run_with_timeout(command, str(work), limit, output=log))
-            result = ts.outcome(code, timed_out)
-            if result.launch_failed:
-                launch.stop(None, {}, "baseline", command, result, log)
+    result, not_run = _run_probe(command, work, log, budget)
     known = pick.source == ts.PROBE_FROM_SCOPE and failures is not None
     verdict = ts.template_verdict(result, reference, known, pick.owned, not_run)
     return {
