@@ -62,7 +62,7 @@ from sprint_loop_gate import (
     wait_lap,
     refusal_order,
     build_close,
-    _refused,
+    refused_stop,
     copy_mvv_gate,
     read_done_items,
     mark_issue,
@@ -273,18 +273,18 @@ def cmd_sprint(env: Env, name: str, mode: str, dev: str, prod: str | None, extra
         mvv = d / "mvv.md"
         code, so, se = env.run(sprint_state_init_argv(root, rec, lap, issues), cwd=root)
         if code != 0:
-            return _refused(env, rec, before, "sprint-state.py init", code, (se or so).strip())
+            return refused_stop(env, rec, before, "sprint-state.py init", code, (se or so).strip())
         if mvv.is_file():
             copy_mvv_gate(rec, lap, state, mvv)
         new = new_sprint_argv(root, rec, lap, extra)
         code, so, se = env.run(new, cwd=root)
         lap["sprint_command"] = shlex.join(new)
         if code != 0:
-            return _refused(env, rec, before, "supervise.py new sprint --pace auto", code, (se or so).strip())
+            return refused_stop(env, rec, before, "supervise.py new sprint --pace auto", code, (se or so).strip())
         try:
             close = build_close(env, rec, lap, issues)
         except (LoopError, OSError, ValueError) as e:
-            return _refused(env, rec, before, "supervise.py new close --pace auto", 1, str(e))
+            return refused_stop(env, rec, before, "supervise.py new close --pace auto", 1, str(e))
         manifest = Path(lap["out"]) / "sprint.json"
         index = json.loads(manifest.read_text(encoding="utf-8"))["ステージ"]
         lap["manifest"] = str(manifest)

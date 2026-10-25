@@ -96,7 +96,7 @@ def build_close(env: Env, rec: dict, lap: dict, issues: list[int], record_pr=Non
     return [p for e in manifest["ステージ"] for p in e.get("plans", [])]
 
 
-def _refused(env: Env, rec: dict, before: dict, step: str, code: int, summary: str) -> dict:
+def refused_stop(env: Env, rec: dict, before: dict, step: str, code: int, summary: str) -> dict:
     stop = {"condition": "refused", "values": {"step": step, "exit": code, "summary": summary[:300]}}
     return stop_and_report(env, rec, before, stop, f"周回を組めなかった（{step}）: {summary[:200]}")
 
@@ -202,7 +202,7 @@ def handle_gate(env: Env, rec: dict, before: dict, lap: dict, items: list[dict])
     try:
         queue, done = continuation(env, rec, lap, moved, kept)
     except (LoopError, OSError, ValueError, KeyError, StopIteration) as e:
-        return _refused(env, rec, before, "続きの queue", 1, str(e))
+        return refused_stop(env, rec, before, "続きの queue", 1, str(e))
     pipeline = f"{queue} && {wait_lap(rec, done)}"
     write_record(env, rec, before)
     update_handoff(env, rec, f"承認ゲート 1 で {' '.join(f'#{n}' for n in moved)} を人の判断待ちへ移し、残りで続ける", resume_command(rec))
