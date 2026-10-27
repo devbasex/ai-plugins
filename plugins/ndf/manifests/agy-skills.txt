@@ -4,6 +4,7 @@ cross-review
 deploy
 development-workflow
 docker-container-access
+chrome-cdp
 external-ai
 fix
 implementation-plan
