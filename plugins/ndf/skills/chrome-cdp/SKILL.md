@@ -141,6 +141,23 @@ const cookies = await context.cookies(origin);          // 対象の origin だ�
 fs.writeFileSync('.auth/state.json', JSON.stringify({ cookies, origins: [] }));
 ```
 
+#### `Browser context management is not supported` で拒まれたとき
+
+Chrome の起動のしかたによっては、ブラウザ全体への命令が拒まれる。`connectOverCDP` は接続の直後に `Browser.setDownloadBehavior` を送るので、そこで失敗する。`Storage.getCookies` も同じ理由で通らない。
+
+**タブ（page）単位につなぎ、`Network.getCookies` に対象の URL を渡す。** この経路なら通る。URL を渡すので、ほかのサイトの Cookie は返らない。
+
+```js
+const WebSocket = require('ws');                         // Node 標準の WebSocket は Host を変えられない
+const page = (await getJson('/json/list')).find((t) => t.type === 'page');   // getJson は Host を上書きした http.get
+const u = new URL(page.webSocketDebuggerUrl); u.hostname = CDP.host;
+const ws = new WebSocket(u.toString(), { headers: { Host: 'localhost:9222' } });
+ws.on('open', () => ws.send(JSON.stringify({ id: 1, method: 'Network.getCookies', params: { urls: [`${origin}/`] } })));
+// 応答の cookies を storageState の形（name・value・domain・path・expires（session なら -1）・httpOnly・secure・sameSite）へ直して保存する
+```
+
+この状態の Chrome では、Playwright で画面を操作することもできない。目視や操作は利用者に頼み、テストはコンテナの headless で回す。
+
 Playwright のテストでは `use: { storageState: '.auth/state.json' }` で読ませる。`.auth/` はリポジトリに入れない（`.gitignore` に足す）。セッションの期限が切れたら、利用者に Chrome でログインし直してもらい、取り出し直す。
 
 ## 安全のための決まり
