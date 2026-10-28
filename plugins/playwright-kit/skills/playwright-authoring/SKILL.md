@@ -231,9 +231,9 @@ browser:
   cdp_endpoint: ${CDP_ENDPOINT:-http://localhost:9222}
 ```
 
-WSL2 / macOS / Linux ホストの Chrome へ CDP 接続する手順、`scripts/start-host-chrome.sh` によるホスト
-Chrome の起動、`conftest.py` への統合、ネットワーク到達性の確保、トラブルシュートは
-[references/browser-connection.md](references/browser-connection.md) を参照。
+`cdp-remote` の `cdp_endpoint` は IP で書く（名前だと Chrome が接続を拒む）。`conftest.py` への統合と
+トラブルシュートは [references/browser-connection.md](references/browser-connection.md) を参照。
+利用者の Chrome の起動と、コンテナから届かせる経路は ndf プラグインの `/ndf:chrome-cdp` に従う。
 
 ## MCP でのブラウザ動作確認
 

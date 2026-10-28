@@ -90,7 +90,7 @@ CDP_HOST=host.docker.internal   # 経路 B なら上の $GW
 curl -s -m 5 "http://$CDP_HOST:9222/json/version" -H 'Host: localhost:9222'
 ```
 
-**Host ヘッダを `localhost:9222` に上書きする。** Chrome は Host が IP でも localhost でもない接続を拒む（`Host header is specified and is not an IP address or localhost`）。WebSocket の接続も同じ。
+**Host ヘッダを `localhost:9222` に上書きする。** Chrome は Host が IP でも localhost でもない接続を拒む（`Host header is specified and is not an IP address or localhost`）。WebSocket の接続も同じ。上書きが要るのは `host.docker.internal` のような名前で接続するときで、IP（経路 B の中継など）で接続するなら上書きしなくても通る（Chrome 155 で確認）。上書きしても害はないので、下の手順は常に上書きする。
 
 | 応答 | 意味 |
 | --- | --- |

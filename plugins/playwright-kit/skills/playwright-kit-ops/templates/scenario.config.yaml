@@ -14,15 +14,13 @@
 
 # --- ブラウザ接続設定 --------------------------------------------------
 # local: playwright install chromium でインストールしたローカルブラウザ (デフォルト)
-# cdp-remote: Chrome DevTools Protocol 経由でリモートブラウザに接続
-#   → Windows / macOS のホスト Chrome を GUI 付きで操作可能
-#   → ログイン済み Session (Google, AWS, Slack 等) をそのまま再利用
-#   → 詳細は /playwright-kit:playwright-authoring を参照
+# cdp-remote: Chrome DevTools Protocol 経由で利用者の Chrome に接続
+#   → ログイン済み Session をそのまま再利用
+#   → Chrome の起動とコンテナから届かせる経路は /ndf:chrome-cdp を参照
 browser:
   mode: local
-  # cdp-remote 時のみ有効。環境変数で切り替え推奨:
-  #   Windows (WSL2 Docker): export CDP_ENDPOINT=http://host-gateway:9222
-  #   macOS (Docker Desktop): export CDP_ENDPOINT=http://host.docker.internal:9222
+  # cdp-remote 時のみ有効。IP で書く（名前だと Chrome が Host ヘッダを理由に拒む）:
+  #   export CDP_ENDPOINT=http://172.18.0.1:9222
   # cdp_endpoint: ${CDP_ENDPOINT:-http://localhost:9222}
 
 # --- 接続先 ----------------------------------------------------------
