@@ -2378,8 +2378,7 @@
       "context": "ndf-workflow",
       "meaning": "{paths} を引用の外の 1 字句として含むテストのコマンド（宣言の scope_command か、{paths} を含む引数）。{paths} をシェルの引用で守った対象の並びへ置き換え、シェルで走らせる。{paths} には、改修の範囲テストではテストのファイルのパス、CI に任せる戦略の着手前のテストではテストの置き場所（ディレクトリかファイル）、静的解析では変更したファイルのパスが入る",
       "code": "scope_command",
-      "source": "",
-      "pending_source": "issues/issue-1630-design.md",
+      "source": "docs/specifications/cross-refactoring-scope-template-probe.md",
       "deprecated": [
         "範囲テストの雛形"
       ]
@@ -2647,6 +2646,12 @@
       "context": "ndf-release",
       "meaning": "リリースの経路 promote のための「本番」のステージのプラン（plan_promote）。昇格の Pull Request を作り、承認ゲート 2 の後にマージする",
       "pending_source": "issues/old/issue-1457-design.md"
+    },
+    {
+      "term": "昇格の承認資料",
+      "context": "ndf-release",
+      "meaning": "昇格の承認ゲート 2 で利用者か MVV 判定が見る承認資料（{state_dir}/work/approval-promote.md）。承認したコミットの欄を持ち、normal では promote の承認ゲート 2 の停止が、fast / auto では prepare が書く。promote-approved はこの欄の SHA が昇格の Pull Request の先端のときだけマージする",
+      "pending_source": "issues/issue-2104-design.md"
     },
     {
       "term": "プロダクトバックログ",
@@ -3482,7 +3487,7 @@
       "term": "確かめたコミット",
       "context": "ndf-release",
       "meaning": "導入の確認を走らせた、ベースブランチの先頭のコミットの SHA（40 桁）。導入の確認の承認資料に書かれ、pace: fast / auto の昇格でマージしてよい先端はこのコミットに限る",
-      "pending_source": "issues/issue-1529-design.md"
+      "source": "docs/specifications/ndf-release-approved-commit.md"
     },
     {
       "term": "承認の外のコミット",
@@ -3735,7 +3740,8 @@
     {
       "term": "テストの無い宣言",
       "context": "ndf-cross-refactoring",
-      "meaning": ".ndf/project.json の test があり、unknown と strategy を持たず、種別・雛形の誤りが無く、どの suite も command と scope_command のどちらも持たないもの（suite が 0 個のときを含む）。解析が「テストが無い」と測った {\"suites\": []} を含む。cross-review の最終スイープは検証のコマンドを名指ししない"
+      "meaning": ".ndf/project.json の test があり、unknown と strategy を持たず、種別・雛形の誤りが無く、どの suite も command と scope_command のどちらも持たないもの（suite が 0 個のときを含む）。解析が「テストが無い」と測った {\"suites\": []} を含む。cross-review の最終スイープは検証のコマンドを名指ししない",
+      "source": "docs/specifications/cross-review-no-test-declaration-sweep.md"
     },
     {
       "term": "未解決のスレッド",
@@ -4236,14 +4242,25 @@
       "term": "テンプレートの試走",
       "context": "ndf-cross-refactoring",
       "meaning": "cross-refactoring の init が着手前のテストの後に、範囲テストのテンプレートへテストのファイルを最大 2 本入れて 1 回走らせ、{paths} に入るパスを受けるかを見分けること。不備か判定できなければ改修の前に止まる",
-      "source": "",
-      "pending_source": "issues/issue-1630-design.md"
+      "source": "docs/specifications/cross-refactoring-scope-template-probe.md"
     },
     {
       "term": "読み手役",
       "context": "ndf-document",
       "meaning": "組み直した文書と想定する読み手の説明だけを渡され、会話や経緯の文脈を持たずに読んで、要点の言い直し・分からなかった語と箇所・納得できなかった主張を返す者（サブエージェントか external-ai で呼ぶ別の CLI）",
       "source": "plugins/ndf/skills/document-rebuild/SKILL.md"
+    },
+    {
+      "term": "agy に配る定義",
+      "context": "project-glossary",
+      "meaning": "`plugins/ndf/dev.agy/agents/` の下にあり agy が読むエージェント定義。`plugins/ndf/agents/` から生成した写しで、`model` だけが agy の tier 名に変わる。手で直さない",
+      "source": ""
+    },
+    {
+      "term": "model の対応表",
+      "context": "project-glossary",
+      "meaning": "Claude Code のエージェント定義の `model` の値（型の名前）から agy の tier 名への対応。`scripts/lib/agy_agents.py` が持つ",
+      "source": ""
     }
   ]
 }

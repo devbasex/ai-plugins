@@ -2,23 +2,6 @@
 
 E2E テスト実行時のブラウザ接続先を構成する手順。概要と設定項目は `SKILL.md` の「ブラウザ接続」節を参照。
 
-## Chrome 起動フラグ
-
-CDP 接続に使う Chrome は次のフラグで起動する。OS ごとの差はバイナリパスだけである。
-
-| フラグ | 役割 |
-|---|---|
-| `--remote-debugging-port=9222` | CDP エンドポイントを 9222 で公開 |
-| `--remote-allow-origins=*` | CDP WebSocket の Host ヘッダ検証を無効化し、コンテナ等リモートからの接続を許可 (Chrome 106+) |
-| `--user-data-dir=/tmp/chrome-debug` | 専用プロファイルで起動し、通常の Chrome と共存させる。任意のパスでよい |
-| `--disable-features=DialMediaRouteProvider` | DIAL (Cast) 探索を無効化し、CDP ログのノイズと不要な通信を抑制 |
-| `--remote-debugging-address=0.0.0.0` | 全インターフェースで listen する。loopback bind でコンテナから届かない場合のみ付与 |
-
-既存プロファイルのログイン済み Session をそのまま使う場合は、**全 Chrome プロセスを終了してから**
-`--user-data-dir` を外して起動する (デフォルトプロファイルを使用)。
-
-> **Security**: `--remote-allow-origins=*` と `--remote-debugging-address=0.0.0.0` は信頼できるネットワーク内でのみ使用する。ファイアウォールでポート 9222 へのアクセスを制限することを推奨。
-
 ## パターン 1: ローカルコンテナ Chromium (デフォルト)
 
 設定不要。`run.sh` 初回実行時に `playwright install chromium` が自動実行される。
@@ -28,139 +11,39 @@ browser:
   mode: local
 ```
 
-## パターン 2: Windows ホスト Chrome (WSL2 + Docker → CDP)
+## パターン 2: 利用者の Chrome (cdp-remote)
 
-```
-Docker container (playwright)
-  ↓ http://host.docker.internal:9222
-Docker Desktop (WSL2 backend) → Windows host → localhost:9222
-  ↓
-Chrome (--remote-debugging-port=9222 --remote-allow-origins=*)
-```
+**Chrome の起動と、コンテナから Chrome まで届かせる経路は、ndf プラグインの `chrome-cdp` スキル（`/ndf:chrome-cdp`）に従う。** playwright-kit では扱わない。
 
-**Step 1: Windows Chrome をリモートデバッグモードで起動**
+`chrome-cdp` が扱う範囲:
 
-```powershell
-& "C:\Program Files\Google\Chrome\Application\chrome.exe" `
-  --remote-debugging-port=9222 `
-  --remote-allow-origins=* `
-  --user-data-dir="C:\tmp\chrome-debug"
-```
+- Chrome を専用プロファイル（`--user-data-dir`）で起動する。Chrome 136 以降は、既定のプロファイルではリモート操作の口が開かない
+- 経路の判定。同じ PC の Docker（`host.docker.internal` が引ける）と、EC2 などリモートのホスト（SSH の `RemoteForward` と中継コンテナ）
+- つながったかの確かめ方と、うまくいかないときの切り分け
+- ログインだけ利用者の Chrome で行い、Cookie を取り出して `local` モードの headless で回す方法
 
-> Chrome はデフォルトで `127.0.0.1` にバインドするため、`--remote-allow-origins=*` だけでは WSL2/Docker から接続できない場合がある。その場合は後述の「ネットワーク別接続ガイド」で到達性を確保する。
+`--remote-allow-origins=*` や `--remote-debugging-address=0.0.0.0` で Chrome の検査を外す方法は使わない。同じネットワークの誰からでも利用者の Chrome を操作できてしまう。
 
-**Step 2: WSL2 .wslconfig を NAT mode にする**
+### scenario.config.yaml
 
-```ini
-# %USERPROFILE%\.wslconfig
-[wsl2]
-networkingMode=NAT
-```
-
-**Step 3: scenario.config.yaml**
-
-Docker Desktop (WSL2 backend) は `host.docker.internal` を標準サポートしている。
+**`cdp_endpoint` は IP アドレスで書く。** Chrome は、Host ヘッダが IP でも localhost でもない接続を拒む。`host.docker.internal` のような名前で書くと、`connect_over_cdp` が `Host header is specified and is not an IP address or localhost` で失敗する。IP で書けば、Host ヘッダを書き換えずに接続できる。
 
 ```yaml
 browser:
   mode: cdp-remote
-  cdp_endpoint: ${CDP_ENDPOINT:-http://host.docker.internal:9222}
+  cdp_endpoint: ${CDP_ENDPOINT:-http://localhost:9222}
 ```
-
-> **Docker Desktop を使わず WSL2 から直接実行する場合**: `host.docker.internal` は Docker Desktop 固有の DNS 名のため使えない。Windows ホストの IP を直接指定する。
-> ```bash
-> export CDP_ENDPOINT="http://$(grep nameserver /etc/resolv.conf | awk '{print $2}'):9222"
-> ```
-
-## パターン 3: macOS ホスト Chrome (Docker → CDP)
-
-```
-Docker container (playwright)
-  ↓ http://host.docker.internal:9222
-macOS host → localhost:9222
-  ↓
-Chrome (--remote-debugging-port=9222 --remote-allow-origins=*)
-```
-
-**Step 1: ホスト側で Chrome を起動**
 
 ```bash
-"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-  --remote-debugging-port=9222 \
-  --user-data-dir=/tmp/chrome-debug \
-  --remote-allow-origins=* \
-  --disable-features=DialMediaRouteProvider
+# 同じ PC の Docker: 名前を IP に引き直す
+export CDP_ENDPOINT="http://$(getent hosts host.docker.internal | cut -d' ' -f1):9222"
+# リモートのホスト: chrome-cdp で立てた中継の IP（コンテナのネットワークのゲートウェイ）
+export CDP_ENDPOINT="http://172.18.0.1:9222"
 ```
 
-> **Note**: 上記は macOS Docker Desktop で動作実績のあるコマンド。macOS Docker Desktop は `host.docker.internal` がホストの loopback (127.0.0.1) バインドのサービスに到達できるため、`--remote-debugging-address=0.0.0.0` は不要で、全インターフェース公開によるセキュリティ低下も避けられる。Linux / WSL2 ホストで loopback bind が問題になる場合のみ `0.0.0.0` を付与する。
+### 大量の操作は local モードで回す
 
-**Step 2: scenario.config.yaml**
-
-`--remote-allow-origins=*` で Host ヘッダ検証を無効化しているため、WSL2 と異なり **proxy 不要**。
-
-```yaml
-browser:
-  mode: cdp-remote
-  cdp_endpoint: ${CDP_ENDPOINT:-http://host.docker.internal:9222}
-```
-
-**Step 3 (任意): コンテナからホスト Chrome を起動する** → 次節。
-
-## コンテナからホスト Chrome を起動する (SSH 経由)
-
-### なぜ直接は起動できないのか
-
-Docker コンテナはホストとプロセス空間が分離されているため、**コンテナ内のプロセスがホスト上に直接プロセスを生成することはできない**。
-特に macOS / Windows の Docker Desktop はコンテナを LinuxKit VM 内で実行するため、`nsenter` やホスト PID namespace を使う Linux 系の回避策も VM 止まりでホストには届かない。
-
-したがって「コンテナからホストの Chrome を起動する」には、**ホスト側に起動を受け付ける口** が必要になる。最も導入が容易でスクリプト化しやすいのは **SSH** (macOS の「リモートログイン」= sshd) を使う方法。
-
-```
-Docker container ──ssh──▶ host.docker.internal:22 (macOS sshd)
-                                 └─▶ Google Chrome --remote-debugging-port=9222 ... (バックグラウンド起動)
-Docker container ──CDP──▶ host.docker.internal:9222 (起動後に接続)
-```
-
-### ホスト側の準備 (一度だけ)
-
-1. **リモートログインを有効化**: システム設定 > 一般 > 共有 > 「リモートログイン」を ON (CLI: `sudo systemsetup -setremotelogin on`)
-2. **SSH 鍵を登録** (パスワードレス実行のため): コンテナ側の公開鍵をホストの `~/.ssh/authorized_keys` に追加
-3. ログインユーザーは **コンソールにログイン中の本人** であること。macOS では GUI アプリ (Chrome) は WindowServer に接続するため、コンソールセッションの所有者として起動する必要がある
-
-### スクリプト
-
-`scripts/start-host-chrome.sh` をコンテナ内から実行する。冪等で、既に CDP が起動済みなら何もしない。
-
-```bash
-# コンテナ内
-HOST_SSH_USER=<macのユーザー名> ./scripts/start-host-chrome.sh
-```
-
-| 変数 | デフォルト | 説明 |
-|---|---|---|
-| `HOST_SSH_USER` | (必須) | ホスト (mac) のログインユーザー名 |
-| `HOST_SSH_HOST` | `host.docker.internal` | SSH 接続先ホスト |
-| `CDP_PORT` | `9222` | リモートデバッグポート |
-| `CDP_BIND_ADDRESS` | (空=loopback) | Chrome の listen address。空なら Chrome 既定の loopback bind (macOS Docker Desktop はこれで動作・実証済み)。Linux/WSL2 等で到達できない場合のみ `0.0.0.0` 等を指定 |
-| `CHROME_USER_DATA_DIR` | `/tmp/chrome-debug` | 起動プロファイル。空にするとデフォルトプロファイル (ログイン済み Session) を使用 |
-| `CHROME_BIN` | `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` | Chrome バイナリパス |
-| `MANUAL_WAIT` | `120` | 手動フォールバック時の起動待ち秒。`0` で待たず即終了 |
-
-動作:
-
-1. `http://host.docker.internal:9222/json/version` に疎通すれば **起動済み** とみなし即終了
-2. 未起動なら SSH (`BatchMode=yes`) でホストに接続し、Chrome をバックグラウンド (`nohup ... &`) で起動
-3. CDP エンドポイントが応答するまで最大 30 秒ポーリングして待機
-
-### SSH が使えない場合のフォールバック
-
-`HOST_SSH_USER` 未設定 / コンテナに `ssh` クライアントが無い / SSH 接続・実行に失敗 (鍵未登録・リモートログイン無効・到達不可) のいずれかで、スクリプトは **自動で手動フォールバックに切り替わる**。
-
-フォールバック時は、ホスト側で実行すべき起動コマンドをそのまま画面に出力し、`MANUAL_WAIT` 秒 (既定 120s) のあいだ CDP の起動をポーリングして待機する。利用者はその間にホストのターミナルへコマンドを貼り付けて実行すればよい。CI など人手が介在しない環境では `MANUAL_WAIT=0` を指定すれば、案内を出して即座に非ゼロ終了する。
-
-> **Note (SSH を使わない代替手段)**: ホスト側に常駐ランチャ (launchd エージェントや FIFO 監視スクリプト、簡易 HTTP エンドポイント等) を置き、コンテナからネットワーク経由でトリガする方法もある。ただし SSH 方式が最も追加実装が少なく確実。X11 forwarding (XQuartz + socat) は「コンテナ内 GUI をホスト画面に表示する」用途であり、本件には不要。
-
-> **Note (Linux ホストの場合)**: ホストで sshd が動いていれば同じスクリプトが使える。`CHROME_BIN=google-chrome`、`HOST_SSH_HOST` をホスト IP (`172.17.0.1` 等) に設定する。GUI セッションへの接続には `DISPLAY` 等の追加考慮が必要。
+CDP の操作は 1 回ごとに利用者の PC と往復するので、リモートの開発環境では遅い。テストの本数が多いときは、`chrome-cdp` の手順で Cookie を `storageState` として取り出し、`local` モードの headless の Chromium で回す。`cdp-remote` は、ログイン状態の確認や画面を見せながらの少数の操作に使う。
 
 ## conftest.py への統合
 
@@ -247,80 +130,14 @@ def page(context, pwk_config):
 `playwright install` を実行するが、接続先がリモートの場合はスキップして問題ない。
 
 ```bash
-# エンドポイントの疎通確認
-curl -s http://host.docker.internal:9222/json/version | python3 -m json.tool
+# エンドポイントの疎通確認（Browser を含む JSON が返ればよい）
+curl -s -m 5 "$CDP_ENDPOINT/json/version" | python3 -m json.tool
 ```
-
-## ネットワーク別接続ガイド
-
-Chrome はデフォルトで `127.0.0.1` にバインドするため、同一ホストからしか CDP エンドポイントにアクセスできない。
-Docker コンテナや WSL2 からリモート接続する場合は、次のいずれかで到達性を確保する。
-
-### 方法 1: `--remote-debugging-address=0.0.0.0` (推奨)
-
-Chrome 起動時に全インターフェースでリッスンさせる。最もシンプル。フラグの詳細は冒頭の表を参照。
-
-### 方法 2: socat によるポートフォワード (Linux)
-
-Chrome を `127.0.0.1` バインドのまま維持し、socat でリモートからのアクセスを中継する。
-
-```bash
-socat TCP-LISTEN:9222,bind=0.0.0.0,reuseaddr,fork TCP:127.0.0.1:9222
-```
-
-### 方法 3: netsh portproxy (Windows → WSL2)
-
-```powershell
-# 管理者権限の PowerShell で実行
-netsh interface portproxy add v4tov4 `
-  listenaddress=0.0.0.0 listenport=9222 `
-  connectaddress=127.0.0.1 connectport=9222
-
-netsh interface portproxy show all
-netsh interface portproxy delete v4tov4 listenaddress=0.0.0.0 listenport=9222
-```
-
-### 接続先の早見表
-
-| 実行環境 | Chrome の場所 | 推奨方法 | CDP エンドポイント |
-|---|---|---|---|
-| ローカル (同一ホスト) | 同一ホスト | 設定不要 | `http://localhost:9222` |
-| Docker → ホスト (macOS) | macOS ホスト | 方法 1 | `http://host.docker.internal:9222` |
-| Docker → ホスト (Linux) | Linux ホスト | 方法 1 or 2 | `http://host.docker.internal:9222` or `http://172.17.0.1:9222` |
-| Docker (WSL2) → Windows | Windows ホスト | 方法 1 or 3 | `http://host.docker.internal:9222` |
-| WSL2 → Windows | Windows ホスト | 方法 1 or 3 | `http://$(grep nameserver /etc/resolv.conf \| awk '{print $2}'):9222` |
 
 ## トラブルシュート
 
-### 共通
-
 | 症状 | 原因 | 対策 |
 |---|---|---|
-| `connect_over_cdp` で接続拒否 | Chrome が起動していない / ポートが違う | `curl http://<endpoint>/json/version` で確認 |
-| WebSocket handshake 失敗 | Host ヘッダ不一致 | Chrome 起動時に `--remote-allow-origins=*` を付与 |
-| ページ操作が異常に遅い | VPN / DNS 解決の遅延 | `extra_hosts` で IP 直指定 |
-
-### Windows (WSL2) 固有
-
-| 症状 | 原因 | 対策 |
-|---|---|---|
-| `host.docker.internal` 解決不能 | Docker Desktop 未使用 or 古いバージョン | Docker Desktop を使用するか、WSL2 直接の場合は Windows ホスト IP を直接指定 |
-| IPv6 でバインドされる | WSL2 が IPv6 優先 | listen address に `0.0.0.0` を明示 |
-| `netsh portproxy` で接続ループ | portproxy の自己参照 | `--remote-allow-origins=*` を使い proxy を廃止 |
-| mirrored mode で動かない | mirrored は localhost 共有だが CDP の WS 接続でポート競合 | NAT mode に戻す |
-
-### macOS 固有
-
-| 症状 | 原因 | 対策 |
-|---|---|---|
-| `host.docker.internal` 解決不能 | Docker Desktop が古い / Linux Docker | `--add-host=host.docker.internal:host-gateway` を指定 |
-| ファイアウォールでブロック | macOS のアプリファイアウォール | システム設定 > ネットワーク > ファイアウォール で Chrome を許可 |
-| SSH 起動で Chrome が表示されない / WindowServer エラー | コンソール非ログインユーザーで SSH した | コンソールにログイン中の本人ユーザーで SSH する |
-| `start-host-chrome.sh` が SSH で認証失敗 | リモートログイン未有効 / 鍵未登録 | `sudo systemsetup -setremotelogin on` と `authorized_keys` 登録を確認 |
-
-## CDP 接続のメリット
-
-- **GUI Chrome をそのまま操作可能** — OBS 録画可、人間と AI の協調操作が可能
-- **ログイン済み Session の再利用** — Google / AWS / Slack 等の MFA 済み Session をそのまま使える
-- **ブラウザ拡張機能が有効** — テスト時にも拡張機能の影響を確認可能
-- **AI Agent との相性** — Claude Code / Browser Use / OpenHands がリアルブラウザを操作
+| `Host header is specified and is not an IP address or localhost` | `cdp_endpoint` を名前で書いた | IP で書く（上の「scenario.config.yaml」） |
+| `connect_over_cdp` で接続拒否・空の応答 | Chrome が起動していない / 経路が切れている | `/ndf:chrome-cdp` の「つながったか確かめる」で切り分ける |
+| ページ操作が異常に遅い | 利用者の PC との往復が積み重なっている | Cookie を取り出して `local` モードで回す |

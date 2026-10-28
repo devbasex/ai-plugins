@@ -9,6 +9,7 @@ ndf-policies
 document-style
 notion-writing
 docker-container-access
+chrome-cdp
 implementation-plan
 layout-review
 investigation-rules
