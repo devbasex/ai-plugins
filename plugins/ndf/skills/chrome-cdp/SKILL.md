@@ -31,7 +31,7 @@ CDP の操作は 1 回ごとに利用者の PC と往復する。リモートの
 
 ```bash
 getent hosts host.docker.internal && echo "経路A の候補"
-cat /proc/net/route | awk 'NR>1 && $2=="00000000"{print "既定ゲートウェイ(16進):", $3}'
+while read -r iface dest gw _; do if [ "$dest" = 00000000 ]; then echo "既定ゲートウェイ(16進): $gw"; fi; done < /proc/net/route
 env | grep -qE '^REMOTE_CONTAINERS=' && echo "Dev Containers の中"
 ```
 
