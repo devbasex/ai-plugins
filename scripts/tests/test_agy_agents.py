@@ -148,3 +148,45 @@ def test_broken_model_map_stops_build(tmp_path: Path) -> None:
     plugin_dir = root / "plugins/ndf"
     assert agy_agents.sync(plugin_dir, check=False, model_map={"sonnet": "sonnet"}) is False
     assert not agy_agents_dir(root).exists()
+
+
+# 現状固定テスト: agy_copy と frontmatter_model は frontmatter の走査を別々に持つ。
+# 走査をまとめても、次の入力での出力が変わらないことを固定する。
+_FRONTMATTER_CASES = [
+    # (入力, frontmatter_model の値, agy_copy の出力)
+    ("", None, ""),
+    ("model: sonnet\n", None, "model: sonnet\n"),
+    ("本文\n---\nmodel: sonnet\n---\n", None, "本文\n---\nmodel: sonnet\n---\n"),
+    ("---\nname: a\n---\n\nmodel: sonnet\n", None, "---\nname: a\n---\n\nmodel: sonnet\n"),
+    ("---\nname: a\n---\n", None, "---\nname: a\n---\n"),
+    ("---\nname: a\nmodel: sonnet\n---\n", "sonnet", "---\nname: a\nmodel: flash\n---\n"),
+    ("---  \nmodel: opus\n  ---\n", "opus", "---  \nmodel: pro\n  ---\n"),
+    ("---\nmodel: 'opus'\n---\n", "opus", "---\nmodel: pro\n---\n"),
+    ('---\nmodel: "haiku"\n---\n', "haiku", "---\nmodel: flash\n---\n"),
+    ("---\nmodel:   inherit   \n---\n", "inherit", "---\nmodel: inherit\n---\n"),
+    ("---\r\nmodel: sonnet\r\n---\r\n", "sonnet", "---\r\nmodel: flash\r\n---\r\n"),
+    ("---\nmodel: sonnet", "sonnet", "---\nmodel: flash"),
+    ("---\nname: a\nmodel: sonnet\n", "sonnet", "---\nname: a\nmodel: flash\n"),
+    ("---\n  model: sonnet\n---\n", None, "---\n  model: sonnet\n---\n"),
+    ("---\nmodel: sonnet\nmodel: opus\n---\n", "sonnet", "---\nmodel: flash\nmodel: opus\n---\n"),
+]
+
+
+def test_characterize_frontmatter_model_and_agy_copy() -> None:
+    """frontmatter の走査の境界（無い・閉じない・欄なし・引用符・CRLF・字下げ・2 つ目の欄）を固定する。"""
+    for text, model, copy in _FRONTMATTER_CASES:
+        assert agy_agents.frontmatter_model(text) == model, repr(text)
+        assert agy_agents.agy_copy(text, agy_agents.MODEL_MAP) == copy, repr(text)
+
+
+def test_characterize_agy_copy_unknown_model() -> None:
+    """対応表に無い値は UnknownModel で止まり、値（引用符を外したもの）を持つ。frontmatter の外の値は見ない。"""
+    for text, value in (("---\nmodel: gpt\n---\n", "gpt"), ("---\nmodel: 'x y'\n---\n", "x y"), ("---\nmodel:\n---\n", "")):
+        try:
+            agy_agents.agy_copy(text, agy_agents.MODEL_MAP)
+        except agy_agents.UnknownModel as exc:
+            assert exc.args == (value,)
+        else:
+            raise AssertionError(repr(text))
+    text = "---\nname: a\n---\nmodel: gpt\n"
+    assert agy_agents.agy_copy(text, agy_agents.MODEL_MAP) == text
