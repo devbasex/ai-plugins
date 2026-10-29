@@ -325,16 +325,14 @@ class GreenWatch:
             )
         )
 
-    def poll(self):
-        """1 回読む。終われば ("done", 理由)、待つなら ("wait", 読んだ中身)。止めるときは emit で抜ける。"""
-        root, a, n, items, waits = self.root, self.a, self.n, self.items, self.waits
-        info = pr_state(root, n)
+    def _inspect_pr(self, info) -> bool:
+        """PR の状態を検査する。マージ済みなら True。OPEN でない・衝突しているときは emit で抜ける。"""
+        n = self.n
         state, sha = info.get("state"), info.get("headRefOid")
-        self.recheck = False
         self._check_expected(sha, state)
         if state == "MERGED":
-            items.append({"kind": "pr", "name": f"#{n}", "result": "already_merged"})
-            return ("done", "merged")
+            self.items.append({"kind": "pr", "name": f"#{n}", "result": "already_merged"})
+            return True
         if state != "OPEN":
             emit(
                 result(
@@ -351,20 +349,22 @@ class GreenWatch:
             self._ensure_ready()
         if info.get("mergeStateStatus") == "DIRTY":  # UNKNOWN（計算中）は衝突と読まずに待つ
             self._stop_conflict()
-        self._reset_on_new_sha(sha)
-        self.last_sha = sha
-        reading = read_checks(root, info.get("statusCheckRollup"), self.seen_jobs)
-        self._note(reading)
+        return False
+
+    def _handle_failures(self, reading: CheckReading):
+        """中身の失敗なら止める。基盤待ちは再実行を進め、解けなければ止める。止めるときは emit で抜ける。"""
         if reading.failed:
             self._stop_failed(reading)
         if reading.infra:
-            why, detail = self.infra.step(root, reading, time.monotonic())
-            items += self.infra.log
+            why, detail = self.infra.step(self.root, reading, time.monotonic())
+            self.items += self.infra.log
             self.infra.log.clear()
             if why != "wait":
                 self._stop_infra(reading, why, detail)
-        pending = [i.label for i in reading.pending]
-        passed = [i.label for i in reading.passed]
+
+    def _classify_progress(self, sha, reading: CheckReading, pending, passed):
+        """チェックの進み具合を分ける。終われば ("done", 理由)、待つなら ("wait", None)。"""
+        a, items = self.a, self.items
         if not pending and not passed and not reading.infra:
             # チェックがまだ載っていない。--no-checks-after 秒を過ぎても空なら CI の無いリポジトリとみなす
             self.empty_since = self.empty_since if self.empty_since is not None else time.monotonic()
@@ -381,21 +381,47 @@ class GreenWatch:
             self.green_sha, self.pending_sha, self.empty_since = None, sha, None
             if pending:
                 probed = (reading.stale, reading.queued)
-                count = watch_stuck_checks(root, probed, a, StuckWatch(n, items, waits, self.stale_since, self.rerun_done))
+                stuck = StuckWatch(self.n, items, self.waits, self.stale_since, self.rerun_done)
+                count = watch_stuck_checks(self.root, probed, a, stuck)
                 if count is not None:
                     self.queued_runs = count  # 最後に見た待ち行列の件数
-        if time.monotonic() >= self.deadline:
-            if reading.infra or self.infra.pending_reruns(reading):
-                self._stop_infra(reading, "timeout")
-            emit(
-                result(
-                    TOOL,
-                    "stopped",
-                    f"#{n} の CI が {a.timeout} 秒で終わらない（待ち: {', '.join(pending)}）",
-                    items + [{"kind": "check", "name": c, "result": "pending"} for c in pending],
-                    {"failed": 0, "pending": len(pending), "passed": len(passed), "waits": waits, "queued_runs": self.queued_runs},
-                    next=f"打ち直す: merged-steps.py merge-when-green {n}",
-                )
+        return ("wait", None)
+
+    def _check_deadline(self, reading: CheckReading, pending, passed):
+        """締め切りを過ぎていれば止める（基盤待ちが残れば基盤待ちとして）。止めるときは emit で抜ける。"""
+        if time.monotonic() < self.deadline:
+            return
+        n, a = self.n, self.a
+        if reading.infra or self.infra.pending_reruns(reading):
+            self._stop_infra(reading, "timeout")
+        emit(
+            result(
+                TOOL,
+                "stopped",
+                f"#{n} の CI が {a.timeout} 秒で終わらない（待ち: {', '.join(pending)}）",
+                self.items + [{"kind": "check", "name": c, "result": "pending"} for c in pending],
+                {"failed": 0, "pending": len(pending), "passed": len(passed), "waits": self.waits, "queued_runs": self.queued_runs},
+                next=f"打ち直す: merged-steps.py merge-when-green {n}",
             )
+        )
+
+    def poll(self):
+        """1 回読む。終われば ("done", 理由)、待つなら ("wait", 読んだ中身)。止めるときは emit で抜ける。"""
+        info = pr_state(self.root, self.n)
+        sha = info.get("headRefOid")
+        self.recheck = False
+        if self._inspect_pr(info):
+            return ("done", "merged")
+        self._reset_on_new_sha(sha)
+        self.last_sha = sha
+        reading = read_checks(self.root, info.get("statusCheckRollup"), self.seen_jobs)
+        self._note(reading)
+        self._handle_failures(reading)
+        pending = [i.label for i in reading.pending]
+        passed = [i.label for i in reading.passed]
+        verdict = self._classify_progress(sha, reading, pending, passed)
+        if verdict[0] == "done":
+            return verdict
+        self._check_deadline(reading, pending, passed)
         infra = tuple(sorted(i.label for i in reading.infra))
         return ("wait", (sha, tuple(sorted(pending)), tuple(sorted(passed)), infra, self.recheck))
