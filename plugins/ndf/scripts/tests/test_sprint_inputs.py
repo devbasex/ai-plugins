@@ -31,7 +31,7 @@ def sprint_args(tmp_path: Path, pace: str = "normal", issues=("11", "12"), desig
     args += ["--design", *design] if design else []
     args += ["--version", "10.18.0-dev.1", "--out", str(tmp_path / "m")]
     if pace != "normal":
-        args += ["--pace", pace, "--state", str(sprint_state(tmp_path))]
+        args += ["--pace", pace, "--state", str(sprint_state(tmp_path, "auto"))]
     return args, (repo if pace != "fast" else REPO)
 
 

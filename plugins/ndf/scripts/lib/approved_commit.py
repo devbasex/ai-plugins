@@ -67,19 +67,24 @@ class Verdict:
     actual_tree: str | None = None
 
 
-def parse_sha(text) -> str:
-    """40 桁の 16 進（小文字へ揃える）。形が違えば ValueError。"""
+def parse_sha(text, what: str = "承認したコミット") -> str:
+    """40 桁の 16 進（小文字へ揃える）。形が違えば ValueError（文言の主語は what）。"""
     s = str(text or "").strip().lower()
     if not SHA_RE.match(s):
-        raise ValueError(f"承認したコミットが 40 桁の 16 進でない: {text!r}")
+        raise ValueError(f"{what}が 40 桁の 16 進でない: {text!r}")
     return s
 
 
-def _cells(path) -> tuple[list[str], dict[str, tuple[int, str]]]:
+def _read_material(path, what: str) -> str:
+    """資料の本文。資料が無ければ ValueError（文言の主語は what）。"""
     p = Path(path)
     if not p.is_file():
-        raise ValueError(f"承認資料 {p} が無い")
-    lines = p.read_text(encoding="utf-8").split("\n")
+        raise ValueError(f"{what} {p} が無い")
+    return p.read_text(encoding="utf-8")
+
+
+def _cells(path) -> tuple[list[str], dict[str, tuple[int, str]]]:
+    lines = _read_material(path, "承認資料").split("\n")
     rows = {}
     for i, line in enumerate(lines):
         m = re.match(r"^\| ([^|]+?) \| (.*?) \|$", line)
@@ -88,25 +93,36 @@ def _cells(path) -> tuple[list[str], dict[str, tuple[int, str]]]:
     return lines, rows
 
 
-def material_sha(path) -> str:
-    """承認資料の「承認したコミット」の欄の SHA。資料・欄が無い・形が違えば ValueError（承認の記録は見ない）。"""
-    _, rows = _cells(path)
+def _material_sha_of(rows, path) -> str:
+    """_cells の rows から「承認したコミット」の欄の SHA を取り出す。欄が無い・形が違えば ValueError。"""
     if ROW not in rows:
         raise ValueError(f"承認資料 {path} に「{ROW}」の欄が無い")
     return parse_sha(rows[ROW][1])
 
 
-def recorded_sha(path) -> str | None:
-    """承認資料の「承認の記録」の SHA。無ければ None。"""
-    _, rows = _cells(path)
+def _recorded_sha_of(rows) -> str | None:
+    """_cells の rows から「承認の記録」の SHA を取り出す。無ければ None。"""
     m = _RECORD_RE.match(rows.get(RECORD, (0, ""))[1])
     return m.group(1) if m else None
 
 
+def material_sha(path) -> str:
+    """承認資料の「承認したコミット」の欄の SHA。資料・欄が無い・形が違えば ValueError（承認の記録は見ない）。"""
+    _, rows = _cells(path)
+    return _material_sha_of(rows, path)
+
+
+def recorded_sha(path) -> str | None:
+    """承認資料の「承認の記録」の SHA。無ければ None。"""
+    _, rows = _cells(path)
+    return _recorded_sha_of(rows)
+
+
 def from_material(path) -> str:
     """承認資料から承認したコミットを読む。承認の記録が無いか SHA が違えば Unapproved（I10）。"""
-    sha = material_sha(path)
-    rec = recorded_sha(path)
+    _, rows = _cells(path)
+    sha = _material_sha_of(rows, path)
+    rec = _recorded_sha_of(rows)
     if rec != sha:
         raise Unapproved(sha, rec)
     return sha
@@ -116,10 +132,10 @@ def record_approval(path, sha: str, by: str, at: str) -> None:
     """承認資料の「承認したコミット」の行の直後へ承認の記録を書く（あれば置き換える）。
     sha が資料の承認したコミットと違えば書かずに Unapproved（提示の後に資料が書き直された）。"""
     sha = parse_sha(sha)
-    now = material_sha(path)
+    lines, rows = _cells(path)
+    now = _material_sha_of(rows, path)
     if now != sha:
         raise Unapproved(now, sha)
-    lines, rows = _cells(path)
     row = f"| {RECORD} | {sha} を {by} が {at} に承認 |"
     if RECORD in rows:
         lines[rows[RECORD][0]] = row
@@ -171,13 +187,12 @@ def verified_sha(path) -> str:
     """導入の確認の承認資料から確かめたコミットを読む（`merged-steps.py promote --expect-head-from`）。
     資料が無い・行が無い・行が 2 つ以上・40 桁の 16 進でなければ ValueError（照合を飛ばさない）。"""
     p = Path(path)
-    if not p.is_file():
-        raise ValueError(f"導入の確認の承認資料 {p} が無い")
-    found = [m.group(1) for m in (_VERIFIED_RE.match(line) for line in p.read_text(encoding="utf-8").split("\n")) if m]
+    text = _read_material(p, "導入の確認の承認資料")
+    found = [m.group(1) for m in (_VERIFIED_RE.match(line) for line in text.split("\n")) if m]
     if len(found) != 1:
         what = "無い" if not found else f"{len(found)} 行ある"
         raise ValueError(f"導入の確認の承認資料 {p} に確かめたコミットの行が{what}")
-    return parse_sha(found[0])
+    return parse_sha(found[0], f"導入の確認の承認資料 {p} の確かめたコミット")
 
 
 # --- 比較 ---------------------------------------------------------------------

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import shlex
+from dataclasses import dataclass
 from pathlib import Path
 
 from supervise_lib.decl import WORKTREE_DECL, DeclError, with_decls
@@ -16,6 +17,8 @@ from supervise_lib.verify_steps import MARGIN_FLOOR, handoff_step
 
 
 VERIFY_MATERIAL = "{state_dir}/work/approval-verify.md"  # verify-facts が書く承認資料（#1457）
+# 昇格の承認資料。normal は promote の承認ゲート 2 の停止が、fast / auto は prepare が書き、promote-approved が照合に読む（#2104）
+PROMOTE_MATERIAL = "{state_dir}/work/approval-promote.md"
 
 
 def facts_step(repo: str, cmd: str, next_id: str, step_id: str = "facts") -> dict:
@@ -52,26 +55,29 @@ def plan_verify(a, repo: str, verify: str, condition: dict | None = None) -> dic
     )
 
 
-def plan_promote(
-    a,
-    repo: str,
-    ci_wait: int,
-    mvv: str | None = None,
-    condition: dict | None = None,
-    production: str | None = None,
-    verify: str | None = None,
-) -> dict:
+@dataclass(frozen=True)
+class PromoteParams:
+    """昇格のプランに固有の入力。mvv はスプリントの状態（fast / auto）、production は本番チャネル、verify は導入の確認のコマンド。"""
+
+    mvv: str | None = None
+    production: str | None = None
+    verify: str | None = None
+
+
+def plan_promote(a, repo: str, ci_wait: int, params: PromoteParams = PromoteParams(), condition: dict | None = None) -> dict:
     """昇格のプラン（#1336 の F5）: ベースブランチ（a.base）から本番チャネル（a.production_branch）への Pull Request を
     `merged-steps.py promote` が作り（あれば使い）、承認ゲート 2 の後にマージする。後片付けはしない（head はベースブランチ）。
     マージの後に record（`release-steps.py record --promote`）が昇格の PR へリリース記録を書き、その PR を計画の
     Pull Request にする（まとめの close が `{queue_pr:promote}` で読む。#837）。record が落ちたら judge-record へ進む。
 
-    - normal（`mvv` 無し）: promote（承認の引数無し。承認ゲート 2 で終える）→ promote-approved（`--from` でだけ入る）
+    - normal（`mvv` 無し）: promote（承認の引数無し。昇格の承認資料 PROMOTE_MATERIAL へ先端を載せて承認ゲート 2 で終える）→
+      promote-approved（`--from` でだけ入る。PROMOTE_MATERIAL の承認したコミットのときだけマージする。#2104）
     - fast / auto（`mvv` にスプリントの状態）: verify（導入の確認。落ちたら止まる。#1457）→ prepare（PR と承認資料）→ mvv（承認ゲート 2 の MVV 判定）→ note（判定のコメント）→
       promote（`--gate-approved mvv`）。promote は mvv と同じ導入の確認の承認資料（VERIFY_MATERIAL）を `--expect-head-from` に受け、
       確かめたコミットのときだけマージする（#1529）。note か promote が落ちたら handoff が承認ゲートへ落とす
     """
-    head, base = a.base, production or a.production_branch
+    mvv, verify = params.mvv, params.verify
+    head, base = a.base, params.production or a.production_branch
     if not base:
         raise DeclError(f"昇格に要る本番チャネルが無い（--production-branch か .ndf/{WORKTREE_DECL} の production_branch）")
     promote = f"{MERGED_PY} promote --head {shlex.quote(head)} --base {shlex.quote(base)}"
@@ -82,7 +88,7 @@ def plan_promote(
         "type": "run",
         "stage": "配布",
         "timeout": timeout,
-        "cmd": promote + wait + " --gate-approved user",
+        "cmd": promote + wait + f" --approved-from {PROMOTE_MATERIAL} --gate-approved user",
         "next": "record",
     }
     record = [
@@ -100,56 +106,67 @@ def plan_promote(
         judge_record_step(),
     ]
     if not mvv:
-        steps = [
-            {
-                "id": "promote",
-                "type": "run",
-                "stage": "配布",
-                "timeout": timeout,
-                "cmd": promote + wait,
-                "gate_next": "end",
-                "next": "record",
-            },
-            approved,
-            *record,
-        ]
+        steps = _promote_steps_normal(promote, wait, timeout, approved, record)
     else:
-        if not verify:
-            raise DeclError("fast / auto の昇格のプランに導入の確認のコマンド（<節>.verify）が無い")
-        state = str(Path(mvv).resolve())
-        material = "{state_dir}/work/approval-promote.md"
-        pr_of = f'$(gh pr list --head {shlex.quote(head)} --base {shlex.quote(base)} --state open --json number --jq ".[0].number")'
-        steps = [
-            facts_step(repo, verify_facts_cmd(a, repo, verify), "prepare", "verify"),
-            {
-                "id": "prepare",
-                "type": "run",
-                "stage": "配布",
-                "timeout": 300,
-                "cmd": f"{promote} --prepare --out {material}",
-                "next": "mvv",
-            },
-            *mvv_gate_steps(
-                f"sh -c '{MVV_PY} check --sprint {shlex.quote(state)} --gate release --material {material} {VERIFY_MATERIAL} --pr {pr_of} "
-                f"--mode {a.mode} --root {shlex.quote(repo)} --note {MVV_NOTE}'",
-                f"sh -c 'gh pr comment {pr_of} --body-file {MVV_NOTE}'",
-                "promote",
-            ),
-            {
-                "id": "promote",
-                "type": "run",
-                "stage": "配布",
-                "timeout": timeout,
-                "cmd": promote + wait + f" --expect-head-from {VERIFY_MATERIAL} --gate-approved mvv",
-                "on_fail": "handoff",
-                "gate_next": "end",
-                "next": "record",
-            },
-            approved,
-            *record,
-            handoff_step(state, "関門 2", "昇格のマージ"),
-        ]
+        steps = _promote_steps_mvv(a, repo, head, base, promote, wait, timeout, verify, mvv, approved, record)
     return release_plan(a, repo, "配布（昇格）", RULE_PROMOTE, steps, condition)
+
+
+def _promote_steps_normal(promote: str, wait: str, timeout: int, approved: dict, record: list) -> list:
+    """normal の昇格の steps: promote（承認ゲート 2 で終える）→ promote-approved → record。"""
+    return [
+        {
+            "id": "promote",
+            "type": "run",
+            "stage": "配布",
+            "timeout": timeout,
+            "cmd": promote + wait + f" --out {PROMOTE_MATERIAL}",
+            "gate_next": "end",
+            "next": "record",
+        },
+        approved,
+        *record,
+    ]
+
+
+def _promote_steps_mvv(
+    a, repo: str, head: str, base: str, promote: str, wait: str, timeout: int, verify: str | None, mvv: str, approved: dict, record: list
+) -> list:
+    """fast / auto の昇格の steps: verify → prepare → mvv → note → promote（`--gate-approved mvv`）→ record。"""
+    if not verify:
+        raise DeclError("fast / auto の昇格のプランに導入の確認のコマンド（<節>.verify）が無い")
+    state = str(Path(mvv).resolve())
+    pr_of = f'$(gh pr list --head {shlex.quote(head)} --base {shlex.quote(base)} --state open --json number --jq ".[0].number")'
+    return [
+        facts_step(repo, verify_facts_cmd(a, repo, verify), "prepare", "verify"),
+        {
+            "id": "prepare",
+            "type": "run",
+            "stage": "配布",
+            "timeout": 300,
+            "cmd": f"{promote} --prepare --out {PROMOTE_MATERIAL}",
+            "next": "mvv",
+        },
+        *mvv_gate_steps(
+            f"sh -c '{MVV_PY} check --sprint {shlex.quote(state)} --gate release --material {PROMOTE_MATERIAL} {VERIFY_MATERIAL} --pr {pr_of} "
+            f"--mode {a.mode} --root {shlex.quote(repo)} --note {MVV_NOTE}'",
+            f"sh -c 'gh pr comment {pr_of} --body-file {MVV_NOTE}'",
+            "promote",
+        ),
+        {
+            "id": "promote",
+            "type": "run",
+            "stage": "配布",
+            "timeout": timeout,
+            "cmd": promote + wait + f" --expect-head-from {VERIFY_MATERIAL} --gate-approved mvv",
+            "on_fail": "handoff",
+            "gate_next": "end",
+            "next": "record",
+        },
+        approved,
+        *record,
+        handoff_step(state, "関門 2", "昇格のマージ"),
+    ]
 
 
 GATE_2_MATERIAL = "{state_dir}/work/approval-deploy.md"  # deploy-facts が書く承認資料

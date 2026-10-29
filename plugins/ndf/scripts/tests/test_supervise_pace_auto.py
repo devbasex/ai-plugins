@@ -23,6 +23,9 @@ PY = sys.executable
 sys.path.insert(0, str(SCRIPTS))
 from supervise_lib import queue  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from pace_state import sprint_state  # noqa: E402
+
 AUTO = {"enabled": True, "modes": ["light", "standard", "legacy-refactor"], "verify": "true"}
 STAGES = ["設計", "関門 1", "設計の結果", "スプリントブランチ", "実装", "検査", "開発版", "本番"]
 
@@ -37,20 +40,6 @@ def load(path) -> dict:
 
 def steps_of(plan: dict) -> dict:
     return {s["id"]: s for s in plan["steps"]}
-
-
-def sprint_state(tmp_path: Path, approve: bool = True) -> Path:
-    mvv = tmp_path / "mvv-src.md"
-    mvv.write_text("## Mission\n速く\n## Vision\n回る\n## Value\n実測\n")
-    state = tmp_path / "state" / "sprint-state.json"
-    subprocess.run(
-        [PY, str(SPRINT_STATE), "init", str(state), "--name", "m", "--pace", "auto", "--mvv", str(mvv), "--root", str(tmp_path)],
-        check=True,
-        capture_output=True,
-    )
-    if approve:
-        subprocess.run([PY, str(SPRINT_STATE), "gate", str(state), "MVV", "--what", "MVV を承認"], check=True, capture_output=True)
-    return state
 
 
 def make_repo(tmp_path: Path, pace: dict | None, prod: str = "main", form: bool = True) -> Path:
@@ -82,14 +71,14 @@ def new_sprint(tmp_path, repo, state, *extra, pace="auto", design=True):
 def test_designed_issues_get_a_design_results_stage_without_designing(tmp_path):
     """設計を承認済みの課題（--designed）は設計を作らず、設計の結果のステージで読んで実装へ渡す（#2089 の loop answer）。"""
     repo = make_repo(tmp_path, {"auto": AUTO})
-    p, out = new_sprint(tmp_path, repo, sprint_state(tmp_path), "--designed", "12", design=False)
+    p, out = new_sprint(tmp_path, repo, sprint_state(tmp_path, "auto"), "--designed", "12", design=False)
     assert p.returncode == 0, p.stdout + p.stderr
     waves = {w["name"]: w for w in load(out / "sprint.json")["ステージ"]}
     assert "設計" not in waves and "関門 1" not in waves and "command" in waves["設計の結果"]
     assert all(w.get("then_of") == "設計の結果" for n, w in waves.items() if n != "設計の結果")
     cmd = steps_of(load(waves["設計の結果"]["plans"][0]))["design-results"]["cmd"]
     assert cmd.endswith("--design 12")
-    p, out = new_sprint(tmp_path, repo, sprint_state(tmp_path), "--designed", "12")
+    p, out = new_sprint(tmp_path, repo, sprint_state(tmp_path, "auto"), "--designed", "12")
     waves = {w["name"]: w for w in load(out / "sprint.json")["ステージ"]}
     assert waves["設計"]["plans"][0].endswith("design-11.json") and len(waves["設計"]["plans"]) == 1
     assert steps_of(load(waves["設計の結果"]["plans"][0]))["design-results"]["cmd"].endswith("--design 11 12")
@@ -97,7 +86,7 @@ def test_designed_issues_get_a_design_results_stage_without_designing(tmp_path):
 
 def test_auto_sprint_writes_the_normal_order_with_mvv_gates(tmp_path):
     repo = make_repo(tmp_path, {"auto": AUTO})
-    p, out = new_sprint(tmp_path, repo, sprint_state(tmp_path))
+    p, out = new_sprint(tmp_path, repo, sprint_state(tmp_path, "auto"))
     assert p.returncode == 0, p.stdout + p.stderr
     manifest = load(out / "sprint.json")
     assert manifest["進め方"] == "auto" and manifest["ブランチ"] == "sprint/m27" and manifest["状態"].endswith("sprint-state.json")
@@ -149,7 +138,7 @@ def test_auto_sprint_writes_the_normal_order_with_mvv_gates(tmp_path):
 )
 def test_auto_is_refused_when_the_declaration_does_not_allow_it(tmp_path, pace, word):
     repo = make_repo(tmp_path, pace)
-    p, out = new_sprint(tmp_path, repo, sprint_state(tmp_path))
+    p, out = new_sprint(tmp_path, repo, sprint_state(tmp_path, "auto"))
     res = json.loads(p.stdout)
     assert p.returncode == 1 and res["status"] == "stopped" and word in res["summary"], res
     assert "--pace" not in res["next"] and "new sprint" in res["next"] and not out.exists()
@@ -158,7 +147,7 @@ def test_auto_is_refused_when_the_declaration_does_not_allow_it(tmp_path, pace, 
 def test_the_normal_fallback_keeps_every_sprint_option(tmp_path):
     repo = make_repo(tmp_path, None)
     extra = ["--test-cmd", "pytest {paths}", "--tests", "a", "b", "--scope", "s", "--base", "dev2", "--production-branch", "prd"]
-    p, _ = new_sprint(tmp_path, repo, sprint_state(tmp_path), *extra)
+    p, _ = new_sprint(tmp_path, repo, sprint_state(tmp_path, "auto"), *extra)
     nxt = json.loads(p.stdout)["next"]
     assert "--pace" not in nxt and "--state" not in nxt
     for part in ["--test-cmd 'pytest {paths}'", "--tests a b", "--scope s", "--base dev2", "--production-branch prd", "--design 11"]:
@@ -167,19 +156,19 @@ def test_the_normal_fallback_keeps_every_sprint_option(tmp_path):
 
 def test_auto_is_refused_for_operation_mode_without_a_dev_channel_and_without_mvv(tmp_path):
     repo = make_repo(tmp_path, {"auto": {**AUTO, "modes": ["operation", "standard"]}})
-    p, _ = new_sprint(tmp_path, repo, sprint_state(tmp_path), "--mode", "operation")
+    p, _ = new_sprint(tmp_path, repo, sprint_state(tmp_path, "auto"), "--mode", "operation")
     assert p.returncode == 1 and "モード operation" in json.loads(p.stdout)["summary"]
     repo2 = make_repo(tmp_path / "b", {"auto": AUTO}, prod="develop")
-    p, _ = new_sprint(tmp_path / "b", repo2, sprint_state(tmp_path / "b"))
+    p, _ = new_sprint(tmp_path / "b", repo2, sprint_state(tmp_path / "b", "auto"))
     assert p.returncode == 1 and "開発版のチャネル" in json.loads(p.stdout)["summary"]
     repo3 = make_repo(tmp_path / "c", {"auto": AUTO})
-    p, out = new_sprint(tmp_path / "c", repo3, sprint_state(tmp_path / "c", approve=False))
+    p, out = new_sprint(tmp_path / "c", repo3, sprint_state(tmp_path / "c", "auto", approve=False))
     assert p.returncode == 1 and json.loads(p.stdout)["status"] == "stopped" and not out.exists()
 
 
 def test_the_fast_and_auto_sections_do_not_stand_in_for_each_other(tmp_path):
     repo = make_repo(tmp_path, {"auto": AUTO})
-    p, _ = new_sprint(tmp_path, repo, sprint_state(tmp_path), pace="fast")
+    p, _ = new_sprint(tmp_path, repo, sprint_state(tmp_path, "auto"), pace="fast")
     assert p.returncode == 1 and "fast.enabled" in json.loads(p.stdout)["summary"]
 
 
@@ -188,7 +177,7 @@ def test_the_fast_and_auto_sections_do_not_stand_in_for_each_other(tmp_path):
 
 def test_without_design_the_sprint_branch_carries_the_command(tmp_path):
     repo = make_repo(tmp_path, {"auto": AUTO})
-    p, out = new_sprint(tmp_path, repo, sprint_state(tmp_path), design=False)
+    p, out = new_sprint(tmp_path, repo, sprint_state(tmp_path, "auto"), design=False)
     assert p.returncode == 0, p.stdout + p.stderr
     waves = load(out / "sprint.json")["ステージ"]
     assert [w["name"] for w in waves] == STAGES[3:]
@@ -197,7 +186,7 @@ def test_without_design_the_sprint_branch_carries_the_command(tmp_path):
 
 def test_without_a_release_template_the_last_stage_is_manual(tmp_path):
     repo = make_repo(tmp_path, {"auto": AUTO}, form=False)
-    p, out = new_sprint(tmp_path, repo, sprint_state(tmp_path))
+    p, out = new_sprint(tmp_path, repo, sprint_state(tmp_path, "auto"))
     assert p.returncode == 0, p.stdout + p.stderr
     waves = load(out / "sprint.json")["ステージ"]
     assert [w["name"] for w in waves] == [*STAGES[:6], "リリース"] and "manual" in waves[-1]
@@ -218,7 +207,7 @@ def gate_mvv(state: Path, gate: str, log: Path) -> None:
 
 def auto_plans(tmp_path) -> tuple[Path, dict]:
     repo = make_repo(tmp_path, {"auto": AUTO})
-    state = sprint_state(tmp_path)
+    state = sprint_state(tmp_path, "auto")
     p, out = new_sprint(tmp_path, repo, state)
     assert p.returncode == 0, p.stdout + p.stderr
     return state, {w["name"]: w for w in load(out / "sprint.json")["ステージ"]}
@@ -262,7 +251,7 @@ def test_a_failed_merge_after_a_follow_verdict_ends_in_a_gate_and_withdraws_the_
 
 def test_a_rejection_after_an_automatic_pass_is_an_override(tmp_path, monkeypatch):
     monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path / "mvv-state"))
-    state = sprint_state(tmp_path)
+    state = sprint_state(tmp_path, "auto")
     gate_mvv(state, "関門 2", tmp_path / "mvv-gate.jsonl")
     p = subprocess.run(
         [PY, str(SPRINT_STATE), "gate", str(state), "関門 2", "--what", "差し戻し", "--outcome", "rejected"]
@@ -276,7 +265,7 @@ def test_a_rejection_after_an_automatic_pass_is_an_override(tmp_path, monkeypatc
 
 
 def test_withdraw_keeps_the_user_record_and_does_nothing_without_a_record(tmp_path):
-    state = sprint_state(tmp_path)
+    state = sprint_state(tmp_path, "auto")
     p = subprocess.run([PY, str(SPRINT_STATE), "gate", str(state), "関門 1", "--withdraw"], capture_output=True, text=True)
     assert p.returncode == 0 and json.loads(p.stdout)["metrics"]["withdrawn"] == 0
     assert [w["name"] for w in load(state)["withdrawals"]] == ["関門 1"]
@@ -289,7 +278,7 @@ def test_withdraw_keeps_the_user_record_and_does_nothing_without_a_record(tmp_pa
 
 def test_a_parallel_design_plan_cannot_revive_a_withdrawn_gate(tmp_path):
     """並列の設計プラン: 片方の handoff が先に取り消したら、もう片方が後から書く by: mvv は断られる（#1383 の指摘）。"""
-    state = sprint_state(tmp_path)
+    state = sprint_state(tmp_path, "auto")
     p = subprocess.run([PY, str(SPRINT_STATE), "gate", str(state), "関門 1", "--withdraw"], capture_output=True, text=True)
     assert p.returncode == 0
     p = subprocess.run(

@@ -9,7 +9,7 @@ def close(tmp_path, *extra):
     out = tmp_path / "close"
     p = cli(
         "new", "close", "--name", "l1-1", "--worktree", str(tmp_path), "--issue", "11", "12",
-        "--version", "10.18.0-dev.2", "--prod", "10.18.0", "--state", str(sprint_state(tmp_path)), "--out", str(out), *extra,
+        "--version", "10.18.0-dev.2", "--prod", "10.18.0", "--state", str(sprint_state(tmp_path, "fast")), "--out", str(out), *extra,
     )  # fmt: skip
     assert p.returncode == 0, p.stdout + p.stderr
     return load(out / "sprint.json")

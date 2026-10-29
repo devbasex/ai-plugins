@@ -9,8 +9,8 @@ usage() {
 Usage: bash scripts/build-runtime-plugins.sh [--check]
 
 Generate the tracked build outputs: Codex implicit-invocation policies for
-single-directory plugins, the agy skill links under dev.agy/, and the runtime
-copies of MCP plugins.
+single-directory plugins, the agy skill links and agent definitions under
+dev.agy/, and the runtime copies of MCP plugins.
 
 Options:
   --check   Compare generated output with the working tree and fail on drift.
@@ -41,7 +41,8 @@ sync_codex_skill_policies() {
 # agy は配る Skill を絞る手段を利用者側の設定にしか持たない（`plugins.json` の絞り込みは
 # プラグインのディレクトリ名に掛かり、同梱の Skill には届かない）。そこで絞り込みは
 # dev.agy/skills/ へ何を並べるかで表す。並べる内容は manifests/agy-skills.txt が決める。
-# エージェント定義と hook の実体は 4 ランタイムで共有するため、同じ位置へ symlink を張る。
+# hook の実体は 4 ランタイムで共有するため、同じ位置へ symlink を張る。エージェント定義は
+# agy の受け付ける `model` へ変えた写しを置く（sync_agy_agents）。
 # Agent Plugins 仕様 §8.2 のクライアント拡張ディレクトリに当たる。
 sync_agy_skill_links() {
   local family="$1"
@@ -63,17 +64,15 @@ published = [
     if line.split("#", 1)[0].strip()
 ]
 
-# 生成する symlink と、その向き先。skills/ は基準が決め、agents と scripts は固定である。
+# 生成する symlink と、その向き先。skills/ は基準が決め、scripts は固定である。
 expected = {links_dir / name: f"../../skills/{name}" for name in published}
-expected.update({dev_dir / "agents": "../agents", dev_dir / "scripts": "../scripts"})
+expected.update({dev_dir / "scripts": "../scripts"})
 
 actual = set()
 if links_dir.is_dir():
     actual |= set(links_dir.iterdir())
-for name in ("agents", "scripts"):
-    path = dev_dir / name
-    if path.is_symlink():
-        actual.add(path)
+if (dev_dir / "scripts").is_symlink():
+    actual.add(dev_dir / "scripts")
 stale = sorted(actual - set(expected))
 
 failed = False
@@ -288,6 +287,16 @@ EOF
   chmod +x "$installer"
 }
 
+# agy 1.4 系は `model` に tier 名しか受け付けないため、エージェント定義は symlink で共有せず、
+# `model` だけを tier 名へ変えた写しを dev.agy/agents/ へ置く（#2087）。
+sync_agy_agents() {
+  local family="$1"
+  local plugin_dir="$ROOT_DIR/plugins/$family"
+
+  [ -d "$plugin_dir/dev.agy" ] || return 0
+  python3 "$ROOT_DIR/scripts/lib/agy_agents.py" "$plugin_dir" "$CHECK"
+}
+
 sync_mcp_plugins() {
   local plugin_dir
 
@@ -305,6 +314,7 @@ for dir in "$ROOT_DIR"/plugins/*; do
   esac
   sync_codex_skill_policies "$family"
   sync_agy_skill_links "$family"
+  sync_agy_agents "$family"
 done
 
 sync_mcp_plugins

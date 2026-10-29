@@ -41,7 +41,7 @@ description: |
 | インデックス | フルスキャン | WHERE/JOIN列にインデックス |
 | JOIN最適化 | 不要な大規模JOIN | 必要な列のみ取得 |
 | ウィンドウ関数 | 複雑なサブクエリ | ROW_NUMBER(), RANK()使用 |
-| EXISTS vs IN | 遅いIN句 | EXISTSに変更 |
+| EXISTS vs IN | 遅いIN句 | EXISTSで書く |
 | LIMIT活用 | 全件取得 | SQLでページング |
 
 | DO | DON'T |

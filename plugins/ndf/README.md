@@ -34,9 +34,14 @@ plugins/ndf/
 `dev.kiro` と `dev.agy` は Agent Plugins 仕様 §8.2 が定めるクライアント拡張ディレクトリです。
 
 `dev.agy/skills/` は `manifests/agy-skills.txt` から生成する symlink です
-（`scripts/build-runtime-plugins.sh`）。`dev.agy/agents` と `dev.agy/scripts` は
-`agents/` と `scripts/` を指し、実体を 4 ランタイムで共有します。**agy は配る Skill を絞る
-手段を利用者側の設定にしか持たない**ため、絞り込みはここへ何を並べるかで表します。
+（`scripts/build-runtime-plugins.sh`）。`dev.agy/scripts` は `scripts/` を指し、実体を
+4 ランタイムで共有します。**agy は配る Skill を絞る手段を利用者側の設定にしか持たない**ため、
+絞り込みはここへ何を並べるかで表します。
+
+`dev.agy/agents/` は `agents/` から同じスクリプトが生成する写しです。agy は `model` に tier 名
+（`flash` / `pro` / `inherit`）しか受け付けないため、frontmatter の `model:` の 1 行だけを
+対応表（`sonnet` → `flash`、`opus` → `pro`）で置き換えます。対応表は `scripts/lib/agy_agents.py`
+が持ちます。写しは手で直さず、`agents/` を直してから生成し直します（`--check` が食い違いを落とします）。
 
 **`skills/` に置く Skill は、少なくとも 1 つの manifest へ載せます。** 配らない Skill の
 置き場所（`optional-skills/`）は v10.5.0 で無くしました。どこからも起動できない Skill を
@@ -89,7 +94,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.23.0）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.24.0）
 ```
 
 ### agy
@@ -412,7 +417,7 @@ agy models   # 認証確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.23.0/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.24.0/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -434,14 +439,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.23.0/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.24.0/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.23.0  <path>
+# => ndf@ai-plugins  installed, enabled  10.24.0  <path>
 ```
 
 抑止していない Skill（`document-style` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
