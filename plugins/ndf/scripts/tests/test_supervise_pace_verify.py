@@ -52,7 +52,7 @@ def new_sprint(tmp_path, repo, pace: str | None = "auto"):
     out = tmp_path / "m"
     args = ["new", "sprint", "--name", "m2", "--worktree", str(repo), "--issue", "11", "--out", str(out)]
     if pace:
-        args += ["--pace", pace, "--state", str(sprint_state(tmp_path))]
+        args += ["--pace", pace, "--state", str(sprint_state(tmp_path, "auto"))]
     p = subprocess.run([PY, str(SUPERVISE), *args], capture_output=True, text=True, cwd=repo)
     assert p.returncode == 0, p.stdout + p.stderr
     return load(out / "sprint.json")["ステージ"]
@@ -60,7 +60,7 @@ def new_sprint(tmp_path, repo, pace: str | None = "auto"):
 
 def new_close(tmp_path, repo):
     out = tmp_path / "c"
-    args = ["new", "close", "--name", "m2", "--worktree", str(repo), "--issue", "11", "--state", str(sprint_state(tmp_path))]
+    args = ["new", "close", "--name", "m2", "--worktree", str(repo), "--issue", "11", "--state", str(sprint_state(tmp_path, "auto"))]
     p = subprocess.run([PY, str(SUPERVISE), *args, "--out", str(out)], capture_output=True, text=True, cwd=repo)
     return p, out
 
@@ -146,7 +146,7 @@ def test_a_promote_without_the_verified_commit_falls_back_to_gate_2(tmp_path):
     """#1529 の AC4・AC5: 導入の確認の承認資料が無ければ、plan の promote はマージせずに落ち、handoff が
     承認ゲート 2 の by: mvv の記録を外して承認ゲートで終わる。"""
     repo = make_repo(tmp_path, [STG, PRD])
-    state = sprint_state(tmp_path)
+    state = sprint_state(tmp_path, "auto")
     plan = load(wave(new_sprint(tmp_path, repo), "本番")["plans"][0])
     log = tmp_path / "mvv-gate.jsonl"
     stub = {
@@ -267,7 +267,7 @@ def test_gate_2_and_the_template_keep_their_stages(tmp_path):
     assert facts["timeout"] == 1500 and facts["cwd"] == repo and facts["stage"] == "配布" and facts["next"] == "mvv"
     assert "deploy-facts --root" in facts["cmd"] and "--out {state_dir}/work/approval-deploy.md" in facts["cmd"]
     repo = pa.make_repo(tmp_path / "t", {"auto": pa.AUTO}, form=True)
-    p, out = pa.new_sprint(tmp_path / "t", repo, pa.sprint_state(tmp_path / "t"))
+    p, out = pa.new_sprint(tmp_path / "t", repo, pa.sprint_state(tmp_path / "t", "auto"))
     assert p.returncode == 0, p.stdout + p.stderr
     waves = load(out / "sprint.json")["ステージ"]
     assert [w["name"] for w in waves] == pa.STAGES and verify_steps(waves) == []

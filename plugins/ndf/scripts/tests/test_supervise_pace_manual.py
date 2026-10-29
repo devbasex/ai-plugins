@@ -49,7 +49,7 @@ def make_repo(tmp_path: Path, rows, verify: str = "echo stack-ok") -> Path:
 def new_sprint(tmp_path, repo, pace="auto"):
     out = tmp_path / "m"
     args = ["new", "sprint", "--name", "m2", "--worktree", str(repo), "--issue", "11", "--design", "11"]
-    args += ["--pace", pace, "--state", str(sprint_state(tmp_path)), "--out", str(out)]
+    args += ["--pace", pace, "--state", str(sprint_state(tmp_path, "auto")), "--out", str(out)]
     p = subprocess.run([PY, str(SUPERVISE), *args], capture_output=True, text=True, cwd=repo)
     return p, out
 
@@ -236,7 +236,7 @@ def test_separate_branches_keep_their_stages(tmp_path, form):
     if not form:
         rows = [{**STG, "branch": "develop"}, PRD]
         (repo / ".ndf" / "project.json").write_text(json.dumps({"delivery": rows}))
-    p, out = pa.new_sprint(tmp_path, repo, pa.sprint_state(tmp_path))
+    p, out = pa.new_sprint(tmp_path, repo, pa.sprint_state(tmp_path, "auto"))
     assert p.returncode == 0, p.stdout + p.stderr
     manifest = load(out / "sprint.json")
     names = [w["name"] for w in manifest["ステージ"]]
