@@ -73,6 +73,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from merged_lib import base_sync, merge, trash  # noqa: E402
 from merged_lib.pull import blocking_local_changes, same_untracked  # noqa: E402,F401
 from merged_lib.checks import queued_run_count  # noqa: E402
+from merged_lib.pr_info import merged_pr_info  # noqa: E402
 from merged_lib.reading import read_checks  # noqa: E402
 
 TOOL = "merged"
@@ -161,24 +162,6 @@ def _remove_pr_tmp_worktree(root, tmp_wt, n, add, merge_commit=None):
         add("worktree", w["path"], "removed" if ok else "kept", why)
 
 
-def _merged_pr_info(root, n, add):
-    """PR n の (ブランチ, マージコミット) を返す。読めない・MERGED でないときは記録して None。"""
-    p = gh_parts.gh(["pr", "view", str(n), "--json", "headRefName,state,mergeCommit"], cwd=root)
-    if p.returncode != 0:
-        add("pr", f"#{n}", "kept", f"gh pr view が失敗: {p.stderr.strip()[:200]}")
-        return None
-    try:
-        info = json.loads(p.stdout)
-    except ValueError:
-        add("pr", f"#{n}", "kept", "gh pr view の出力を読めない")
-        return None
-    branch = info.get("headRefName")
-    if info.get("state") != "MERGED":
-        add("pr", branch or f"#{n}", "kept", f"#{n} が MERGED でない（{info.get('state')}）")
-        return None
-    return branch, (info.get("mergeCommit") or {}).get("oid")
-
-
 def _remove_pr_worktrees(root, main_dir, branch, merge_commit, add):
     """branch を checkout した作業ツリーを外す。ブランチを消してよい（使う作業ツリーが残らない）かを返す。"""
     branch_free = True
@@ -197,7 +180,7 @@ def _remove_pr_worktrees(root, main_dir, branch, merge_commit, add):
 
 def _cleanup_pr(root, main_dir, slug, wt_base, n, add):
     """PR 1 件分の作業ツリーとブランチを片付ける。"""
-    got = _merged_pr_info(root, n, add)
+    got = merged_pr_info(root, n, add)
     if got is None:
         return
     branch, merge_commit = got
