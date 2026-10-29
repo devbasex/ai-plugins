@@ -221,7 +221,7 @@ def _merge_pr(root, a, n, watch, items, waits):
     p = gh_parts.gh(["pr", "merge", str(n), "--admin", f"--{a.method}", *pin], cwd=root)
     if p.returncode != 0:
         if _conflicted(root, n, p.stderr or ""):
-            watch._stop_conflict("gh pr merge がマージのコミットを作れずに拒んだ")
+            watch.stop_conflict("gh pr merge がマージのコミットを作れずに拒んだ")
         emit(
             result(
                 TOOL,

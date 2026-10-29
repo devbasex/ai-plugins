@@ -291,7 +291,7 @@ class GreenWatch:
             EXIT_INFRA_WAIT,
         )
 
-    def _stop_conflict(self, why: str = "mergeStateStatus=DIRTY"):
+    def stop_conflict(self, why: str = "mergeStateStatus=DIRTY"):
         """PR がベースブランチと衝突している（終了コード 4。#1917）。プランの merge はベースブランチの取り込みへ戻る。"""
         n = self.n
         emit(
@@ -348,7 +348,7 @@ class GreenWatch:
         if info.get("isDraft"):
             self._ensure_ready()
         if info.get("mergeStateStatus") == "DIRTY":  # UNKNOWN（計算中）は衝突と読まずに待つ
-            self._stop_conflict()
+            self.stop_conflict()
         return False
 
     def _handle_failures(self, reading: CheckReading):
