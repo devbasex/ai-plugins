@@ -344,6 +344,14 @@ def _prepare_promote(root, a, n, item):
     )
 
 
+def _pin_expect_head(a, reader, path, what):
+    """資料から SHA を読み、照合に使う a.expect_head へ入れる。読めなければ gh を呼ばずに EXIT_UNREADABLE で止まる。"""
+    try:
+        a.expect_head = reader(path)
+    except ValueError as e:
+        raise StepError(f"{what}を読めないため昇格しない: {e}", EXIT_UNREADABLE) from e
+
+
 def promote(a, cleanup):
     """ベースブランチ（--head）から本番チャネル（--base）への昇格の Pull Request を作り（あれば使い）、承認ゲート 2 の後にマージする。
     head はベースブランチなので、マージの後に後片付けをしない（#1336 の I7）。
@@ -353,10 +361,7 @@ def promote(a, cleanup):
     やり直す打ち方を next に載せる。--gate-approved user は --approved-from 無しでは受けない（#2104 の I3〜I5）。"""
     src = getattr(a, "expect_head_from", None)
     if src:
-        try:
-            a.expect_head = approved_commit.verified_sha(src)
-        except ValueError as e:
-            raise StepError(f"確かめたコミットを読めないため昇格しない: {e}", EXIT_UNREADABLE) from e
+        _pin_expect_head(a, approved_commit.verified_sha, src, "確かめたコミット")
     approved_from = getattr(a, "approved_from", None)
     if a.gate_approved == "user" and not approved_from:
         emit(
@@ -372,10 +377,7 @@ def promote(a, cleanup):
             EXIT_UNREADABLE,
         )
     if approved_from:
-        try:
-            a.expect_head = approved_commit.material_sha(approved_from)
-        except ValueError as e:
-            raise StepError(f"承認したコミットを読めないため昇格しない: {e}", EXIT_UNREADABLE) from e
+        _pin_expect_head(a, approved_commit.material_sha, approved_from, "承認したコミット")
         a.moved_next = (
             "承認ゲート 2 からやり直す: プランなら run <プラン> --from promote（fast / auto は --from verify）。"
             "承認資料を新しい先端で作り直してから承認を求める"
