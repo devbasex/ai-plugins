@@ -41,34 +41,37 @@ def model_value(line: str) -> str:
     return value
 
 
-def frontmatter_model(text: str) -> str | None:
-    """frontmatter の `model` の値。欄が無ければ None。"""
-    lines = text.splitlines()
+def _model_line_index(lines: list[str]) -> int | None:
+    """frontmatter の `model:` の行の添字。frontmatter か欄が無ければ None（行末の改行の有無は問わない）。"""
     if not lines or lines[0].strip() != "---":
         return None
-    for line in lines[1:]:
+    for index, line in enumerate(lines[1:], start=1):
         if line.strip() == "---":
             return None
         if line.startswith("model:"):
-            return model_value(line)
+            return index
     return None
+
+
+def frontmatter_model(text: str) -> str | None:
+    """frontmatter の `model` の値。欄が無ければ None。"""
+    lines = text.splitlines()
+    index = _model_line_index(lines)
+    return None if index is None else model_value(lines[index])
 
 
 def agy_copy(text: str, model_map: dict[str, str]) -> str:
     """frontmatter の `model:` の 1 行だけを tier 名へ置き換えた写し。欄が無ければそのまま返す。"""
     lines = text.splitlines(keepends=True)
-    if not lines or lines[0].strip() != "---":
+    index = _model_line_index(lines)
+    if index is None:
         return text
-    for index, line in enumerate(lines[1:], start=1):
-        if line.strip() == "---":
-            break
-        if line.startswith("model:"):
-            value = model_value(line)
-            if value not in model_map:
-                raise UnknownModel(value)
-            ending = line[len(line.rstrip("\r\n")) :]
-            lines[index] = f"model: {model_map[value]}{ending}"
-            break
+    line = lines[index]
+    value = model_value(line)
+    if value not in model_map:
+        raise UnknownModel(value)
+    ending = line[len(line.rstrip("\r\n")) :]
+    lines[index] = f"model: {model_map[value]}{ending}"
     return "".join(lines)
 
 
