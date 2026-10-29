@@ -103,56 +103,68 @@ def plan_promote(
         judge_record_step(),
     ]
     if not mvv:
-        steps = [
-            {
-                "id": "promote",
-                "type": "run",
-                "stage": "配布",
-                "timeout": timeout,
-                "cmd": promote + wait + f" --out {PROMOTE_MATERIAL}",
-                "gate_next": "end",
-                "next": "record",
-            },
-            approved,
-            *record,
-        ]
+        steps = _promote_steps_normal(promote, wait, timeout, approved, record)
     else:
-        if not verify:
-            raise DeclError("fast / auto の昇格のプランに導入の確認のコマンド（<節>.verify）が無い")
-        state = str(Path(mvv).resolve())
-        material = PROMOTE_MATERIAL
-        pr_of = f'$(gh pr list --head {shlex.quote(head)} --base {shlex.quote(base)} --state open --json number --jq ".[0].number")'
-        steps = [
-            facts_step(repo, verify_facts_cmd(a, repo, verify), "prepare", "verify"),
-            {
-                "id": "prepare",
-                "type": "run",
-                "stage": "配布",
-                "timeout": 300,
-                "cmd": f"{promote} --prepare --out {material}",
-                "next": "mvv",
-            },
-            *mvv_gate_steps(
-                f"sh -c '{MVV_PY} check --sprint {shlex.quote(state)} --gate release --material {material} {VERIFY_MATERIAL} --pr {pr_of} "
-                f"--mode {a.mode} --root {shlex.quote(repo)} --note {MVV_NOTE}'",
-                f"sh -c 'gh pr comment {pr_of} --body-file {MVV_NOTE}'",
-                "promote",
-            ),
-            {
-                "id": "promote",
-                "type": "run",
-                "stage": "配布",
-                "timeout": timeout,
-                "cmd": promote + wait + f" --expect-head-from {VERIFY_MATERIAL} --gate-approved mvv",
-                "on_fail": "handoff",
-                "gate_next": "end",
-                "next": "record",
-            },
-            approved,
-            *record,
-            handoff_step(state, "関門 2", "昇格のマージ"),
-        ]
+        steps = _promote_steps_mvv(a, repo, head, base, promote, wait, timeout, verify, mvv, approved, record)
     return release_plan(a, repo, "配布（昇格）", RULE_PROMOTE, steps, condition)
+
+
+def _promote_steps_normal(promote: str, wait: str, timeout: int, approved: dict, record: list) -> list:
+    """normal の昇格の steps: promote（承認ゲート 2 で終える）→ promote-approved → record。"""
+    return [
+        {
+            "id": "promote",
+            "type": "run",
+            "stage": "配布",
+            "timeout": timeout,
+            "cmd": promote + wait + f" --out {PROMOTE_MATERIAL}",
+            "gate_next": "end",
+            "next": "record",
+        },
+        approved,
+        *record,
+    ]
+
+
+def _promote_steps_mvv(
+    a, repo: str, head: str, base: str, promote: str, wait: str, timeout: int, verify: str | None, mvv: str, approved: dict, record: list
+) -> list:
+    """fast / auto の昇格の steps: verify → prepare → mvv → note → promote（`--gate-approved mvv`）→ record。"""
+    if not verify:
+        raise DeclError("fast / auto の昇格のプランに導入の確認のコマンド（<節>.verify）が無い")
+    state = str(Path(mvv).resolve())
+    material = PROMOTE_MATERIAL
+    pr_of = f'$(gh pr list --head {shlex.quote(head)} --base {shlex.quote(base)} --state open --json number --jq ".[0].number")'
+    return [
+        facts_step(repo, verify_facts_cmd(a, repo, verify), "prepare", "verify"),
+        {
+            "id": "prepare",
+            "type": "run",
+            "stage": "配布",
+            "timeout": 300,
+            "cmd": f"{promote} --prepare --out {material}",
+            "next": "mvv",
+        },
+        *mvv_gate_steps(
+            f"sh -c '{MVV_PY} check --sprint {shlex.quote(state)} --gate release --material {material} {VERIFY_MATERIAL} --pr {pr_of} "
+            f"--mode {a.mode} --root {shlex.quote(repo)} --note {MVV_NOTE}'",
+            f"sh -c 'gh pr comment {pr_of} --body-file {MVV_NOTE}'",
+            "promote",
+        ),
+        {
+            "id": "promote",
+            "type": "run",
+            "stage": "配布",
+            "timeout": timeout,
+            "cmd": promote + wait + f" --expect-head-from {VERIFY_MATERIAL} --gate-approved mvv",
+            "on_fail": "handoff",
+            "gate_next": "end",
+            "next": "record",
+        },
+        approved,
+        *record,
+        handoff_step(state, "関門 2", "昇格のマージ"),
+    ]
 
 
 GATE_2_MATERIAL = "{state_dir}/work/approval-deploy.md"  # deploy-facts が書く承認資料
