@@ -246,12 +246,13 @@ def _gate_head(info):
         raise StepError(f"昇格の Pull Request の先端を読めないため承認資料を書かない: {e}", EXIT_UNREADABLE) from e
 
 
-def merge_when_green(a, cleanup, next_cmd=None, plan_step="merge-approved", gate_head=False):
-    """gate_head なら、承認ゲート 2 で止まるときに最初の読みの先端を承認資料へ載せる（promote。#2104）。"""
+def merge_when_green(a, cleanup, next_cmd=None, plan_step="merge-approved", gate_head=False, moved_next=None):
+    """gate_head なら、承認ゲート 2 で止まるときに最初の読みの先端を承認資料へ載せる（promote。#2104）。
+    moved_next は、先端が --expect-head と違って止まるときに next へ載せる続け方。"""
     root = git_root(a.root)
     n = a.pr
     decl = delivery.load_delivery(root)  # 判定は保存しない。呼ぶたびに宣言から作り直す
-    watch = GreenWatch(root, a)
+    watch = GreenWatch(root, a, moved_next=moved_next)
     judged = {}
 
     def gate(info):
@@ -363,6 +364,7 @@ def promote(a, cleanup):
     if src:
         _pin_expect_head(a, approved_commit.verified_sha, src, "確かめたコミット")
     approved_from = getattr(a, "approved_from", None)
+    moved_next = None
     if a.gate_approved == "user" and not approved_from:
         emit(
             result(
@@ -378,7 +380,7 @@ def promote(a, cleanup):
         )
     if approved_from:
         _pin_expect_head(a, approved_commit.material_sha, approved_from, "承認したコミット")
-        a.moved_next = (
+        moved_next = (
             "承認ゲート 2 からやり直す: プランなら run <プラン> --from promote（fast / auto は --from verify）。"
             "承認資料を新しい先端で作り直してから承認を求める"
         )
@@ -389,4 +391,11 @@ def promote(a, cleanup):
         _prepare_promote(root, a, n, item)
     a.pr, a.no_cleanup = n, True
     approve = f"promote --head {a.head} --base {a.base} --gate-approved user --approved-from "
-    merge_when_green(a, cleanup, next_cmd=lambda path: approve + str(path), plan_step="promote-approved", gate_head=True)
+    merge_when_green(
+        a,
+        cleanup,
+        next_cmd=lambda path: approve + str(path),
+        plan_step="promote-approved",
+        gate_head=True,
+        moved_next=moved_next,
+    )

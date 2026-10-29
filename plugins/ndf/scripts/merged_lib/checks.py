@@ -172,8 +172,9 @@ class GreenWatch:
     """merge-when-green の 1 回の読み直し（`poll`）と、その間の状態。待ちの間隔は lib/waits.py の `wait_until` が持ち、
     読んだ中身が変わらない間は伸ばす。pending を見ずに通ったときの確かめ直しだけは --recheck の間隔で眠る。"""
 
-    def __init__(self, root, a):
+    def __init__(self, root, a, moved_next=None):
         self.root, self.a, self.n = root, a, a.pr
+        self.moved_next = moved_next  # 先端が照合と違って止まるときの続け方（promote の --approved-from。#2104）
         self.deadline = time.monotonic() + a.timeout
         self.items, self.waits, self.queued_runs = [], 0, 0
         self.green_sha = None  # pending を見ずに通った状態を 1 度見た先頭のコミット。確かめ直して通れば確定とする
@@ -309,7 +310,7 @@ class GreenWatch:
     def _check_expected(self, sha, state):
         """--expect-head を渡したとき、読んだ先端がその SHA と違えば、待ち続けず・マージ済みでもそこで止める（#815 の I5）。
         待つ間に別の先端でマージされた PR を成功として返さない（release が承認していないマージへタグを打たない）。
-        呼び手が続け方（a.moved_next。promote の --approved-from。#2104）を渡していれば next に載せる。"""
+        呼び手が続け方（moved_next。promote の --approved-from。#2104）を渡していれば next に載せる。"""
         expect = getattr(self.a, "expect_head", None)
         if not expect or sha == expect:
             return
@@ -321,7 +322,7 @@ class GreenWatch:
                 f"#{n} の先端が {expect[:8]} でない（今は {str(sha)[:8]}・{state}）。マージしない",
                 self.items + [{"kind": "pr", "name": f"#{n}", "result": "head_moved", "head": sha, "expected": expect}],
                 {"waits": self.waits},
-                next=getattr(self.a, "moved_next", None),
+                next=self.moved_next,
             )
         )
 
