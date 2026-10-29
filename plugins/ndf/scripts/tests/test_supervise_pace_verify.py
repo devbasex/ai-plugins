@@ -125,11 +125,11 @@ def test_the_promote_merges_only_the_commit_the_mvv_judge_read(tmp_path, pace):
 def test_the_promote_plan_uses_the_declared_branch_names(tmp_path):
     """#1529 の AC7・AC8・I5: 確かめたコミットの照合は fast / auto の promote にだけ付き、ブランチ名は引数のものだけが現れる。
     #2104 の AC5・I7: normal の promote は昇格の承認資料を書き、両方の promote-approved が同じ資料で照合する。"""
-    from supervise_lib.delivery_templates import plan_promote
+    from supervise_lib.delivery_templates import PromoteParams, plan_promote
 
     a = type("A", (), {"base": "trunk", "production_branch": "stable", "issue": "11", "mode": "standard"})()
-    normal = steps_of(plan_promote(a, str(tmp_path), 600, verify="true"))
-    fast = steps_of(plan_promote(a, str(tmp_path), 600, mvv=str(tmp_path / "state.json"), verify="true"))
+    normal = steps_of(plan_promote(a, str(tmp_path), 600, PromoteParams(verify="true")))
+    fast = steps_of(plan_promote(a, str(tmp_path), 600, PromoteParams(mvv=str(tmp_path / "state.json"), verify="true")))
     base = f"{SCRIPTS / 'merged-steps.py'} promote --head trunk --base stable --timeout 600"
     promote_material = "{state_dir}/work/approval-promote.md"
     assert normal["promote"]["cmd"].endswith(base + f" --out {promote_material}")

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import shlex
+from dataclasses import dataclass
 from pathlib import Path
 
 from supervise_lib.decl import WORKTREE_DECL, DeclError, with_decls
@@ -54,15 +55,16 @@ def plan_verify(a, repo: str, verify: str, condition: dict | None = None) -> dic
     )
 
 
-def plan_promote(
-    a,
-    repo: str,
-    ci_wait: int,
-    mvv: str | None = None,
-    condition: dict | None = None,
-    production: str | None = None,
-    verify: str | None = None,
-) -> dict:
+@dataclass(frozen=True)
+class PromoteParams:
+    """昇格のプランに固有の入力。mvv はスプリントの状態（fast / auto）、production は本番チャネル、verify は導入の確認のコマンド。"""
+
+    mvv: str | None = None
+    production: str | None = None
+    verify: str | None = None
+
+
+def plan_promote(a, repo: str, ci_wait: int, params: PromoteParams = PromoteParams(), condition: dict | None = None) -> dict:
     """昇格のプラン（#1336 の F5）: ベースブランチ（a.base）から本番チャネル（a.production_branch）への Pull Request を
     `merged-steps.py promote` が作り（あれば使い）、承認ゲート 2 の後にマージする。後片付けはしない（head はベースブランチ）。
     マージの後に record（`release-steps.py record --promote`）が昇格の PR へリリース記録を書き、その PR を計画の
@@ -74,7 +76,8 @@ def plan_promote(
       promote（`--gate-approved mvv`）。promote は mvv と同じ導入の確認の承認資料（VERIFY_MATERIAL）を `--expect-head-from` に受け、
       確かめたコミットのときだけマージする（#1529）。note か promote が落ちたら handoff が承認ゲートへ落とす
     """
-    head, base = a.base, production or a.production_branch
+    mvv, verify = params.mvv, params.verify
+    head, base = a.base, params.production or a.production_branch
     if not base:
         raise DeclError(f"昇格に要る本番チャネルが無い（--production-branch か .ndf/{WORKTREE_DECL} の production_branch）")
     promote = f"{MERGED_PY} promote --head {shlex.quote(head)} --base {shlex.quote(base)}"

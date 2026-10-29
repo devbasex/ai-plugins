@@ -10,7 +10,7 @@ from sprint_mvv import MVV_PACES
 from supervise_lib.decl import DeclError, decl_roots, delivery_decl, require_versions
 from supervise_lib.paths import HERE
 from supervise_lib.plan import QUEUE_PRS, sprint_state_path
-from supervise_lib.delivery_templates import GATE_2_MATERIAL, plan_gate_2, plan_promote, plan_verify
+from supervise_lib.delivery_templates import GATE_2_MATERIAL, PromoteParams, plan_gate_2, plan_promote, plan_verify
 from supervise_lib.release_templates import RELEASE_FORMS, material_path
 from supervise_lib.verify_steps import plan_limits
 
@@ -114,7 +114,7 @@ def route_waves(a, repo: str, then_of: str, mvv: str | None = None, condition: d
     verify = pace_verify(a) if mvv and (promote or merge) else None
     if promote:
         ci_wait = int(plan_limits(a)["ci_wait_timeout"])
-        plan = plan_promote(a, repo, ci_wait, mvv, condition, production=promote.branch, verify=verify)
+        plan = plan_promote(a, repo, ci_wait, PromoteParams(mvv=mvv, production=promote.branch, verify=verify), condition)
         wave = {"name": "本番", "plans": {"promote": plan}, "then_of": then_of}
         if note:
             wave["note"] = note
