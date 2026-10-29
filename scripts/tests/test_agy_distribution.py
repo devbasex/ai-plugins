@@ -38,7 +38,7 @@ MANIFEST_DIR = PLUGIN_DIR / "manifests"
 # 4 つとも同じ 5 だけ増えている（#116 / #144）。Google の 2 つの Skill を `google-workspace`
 # の 1 つへまとめたため、4 つとも同じ 1 だけ減っている（#744）。見積もりの `estimate` を
 # 4 つとも足したため、同じ 1 だけ増えている（#1856）。
-EXPECTED_COUNTS = {"claude": 48, "codex": 44, "kiro": 45, "agy": 44}
+EXPECTED_COUNTS = {"claude": 49, "codex": 45, "kiro": 46, "agy": 45}
 
 
 def manifest_names(runtime: str) -> list[str]:

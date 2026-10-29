@@ -9,6 +9,12 @@
 **開発版（接尾辞の付いた版）は載せない。** `9.8.0` は `9.8.0-dev.1` までしか出ておらず、
 その内容は `10.0.0` で届いている。
 
+## [ndf 10.23.0] - 2026-10-28
+
+- Docs: スプリント m1914 の要求・設計を確定仕様にする（#1914 #1529 #1630 #1593）（#2141）
+- ndf に Skill `chrome-cdp` が加わった。開発コンテナ（リモートのホストの上のものを含む）の中のエージェントが、利用者の PC の Chrome を CDP で操作できる。経路の判定・PC 側の設定・中継の立て方・Cookie の取り出しと、安全のための決まりを持つ。Claude Code・Codex・Kiro CLI・agy のすべてへ配る（#2153）
+- playwright-kit 3.0.2: 利用者の Chrome への接続の説明を `/ndf:chrome-cdp` へ移し、Chrome 136 以降で動かない `scripts/start-host-chrome.sh` を削除した。`cdp_endpoint` は IP で書く（名前だと Chrome が Host ヘッダを理由に拒む）（#2153）
+
 ## [ndf 10.22.0] - 2026-10-25
 
 - Docs: 開発ループ（--loop）の確定仕様を docs/specifications へ置く（#2089）（#2128）

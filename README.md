@@ -67,8 +67,8 @@ Claude Code では `/ndf:<Skill 名>` と打って呼びます。**Skill** は�
 
 | プラグイン名 | バージョン | できること | 詳細 |
 | --- | --- | --- | --- |
-| **ndf** | 10.22.0 | 開発の作業手順（Skill）と専門のサブエージェント。4 つの AI ツールへ同じ名前で入る | [README](./plugins/ndf/README.md) |
-| **playwright-kit** | 3.0.1 | Playwright による E2E テストの計画・スクリプト作成・証跡のレポート | [README](./plugins/playwright-kit/README.md) |
+| **ndf** | 10.23.0 | 開発の作業手順（Skill）と専門のサブエージェント。4 つの AI ツールへ同じ名前で入る | [README](./plugins/ndf/README.md) |
+| **playwright-kit** | 3.0.2 | Playwright による E2E テストの計画・スクリプト作成・証跡のレポート | [README](./plugins/playwright-kit/README.md) |
 
 外部サービスへつなぐ MCP サーバーの設定のプラグインが 10 個あります（Claude Code / Codex / Kiro CLI 向け）。
 使うものだけを入れます（Claude Code なら `/plugin install <プラグイン名>@ai-plugins`）。
@@ -88,13 +88,13 @@ Claude Code では `/ndf:<Skill 名>` と打って呼びます。**Skill** は�
 
 ### NDF プラグインの Skill の一覧
 
-**NDFプラグイン v10.22.0** に入る Skill の数は、AI ツールごとに違います。
-Claude Code向け core 48個、Kiro向け core 45個、Codex向け core 44個、agy向け core 44個です。
-元Skills（48個）の内訳は次のとおりです。
+**NDFプラグイン v10.23.0** に入る Skill の数は、AI ツールごとに違います。
+Claude Code向け core 49個、Kiro向け core 46個、Codex向け core 45個、agy向け core 45個です。
+元Skills（49個）の内訳は次のとおりです。
   - Pull Request とレビュー (7): pr, pr-tests, fix, pr-review, cherry-pick-pr, deploy, merged
   - 開発の進め方 (17): development-workflow, requirements-design, design, document-rebuild, document-sources, document-drafting, tdd-cycle, refactoring, quality-gates, release, release-verification, retrospective, out-of-scope, progress-tracking, backlog-refinement, layout-review, estimate
   - 原則と書き方 (11): ndf-policies, implementation-plan, plan-to-spec, investigation-rules, decision-request, problem-solving, logging-guidelines, document-style, notion-writing, issue-plan-strategy, ml-model-structure
-  - 品質と実行環境 (3): qa-security-scan, docker-container-access, official-skills-autoloader
+  - 品質と実行環境 (4): qa-security-scan, docker-container-access, chrome-cdp, official-skills-autoloader
   - 外部サービス (2): google-workspace, document-systems
   - 複数の AI によるレビューとリファクタリング (3): cross-review, cross-refactoring, external-ai
   - 作業場所 (1): worktree
