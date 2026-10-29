@@ -17,8 +17,8 @@
 | 未登録の語 | `unregistered` | 用語として書かれているのに用語集に無い語。見出しが「用語」の節の表の 1 列目に書いた語を指す | — | — | `docs/specifications/ndf-ubiquitous-language.md` |
 | 用語集の取り込み | — | ベースブランチの取り込みで衝突した用語集を、共通の祖先・自分の側・相手の側の 3 つの版から語の単位で合わせ、文書を作り直して取り込みを終えること。`glossary.py merge` が行う | — | — | `docs/specifications/ndf-glossary-merge.md` |
 | 語の衝突 | — | 用語集の取り込みで、両側が同じ語（コンテキストと語の組）を違う中身にしたこと、または片側が消して片側が書き換えたこと。コンテキストの `id` でも同じ。スクリプトは解かずに止まる | — | — | `docs/specifications/ndf-glossary-merge.md` |
-| agy に配る定義 | — | `plugins/ndf/dev.agy/agents/` の下にあり agy が読むエージェント定義。`plugins/ndf/agents/` から生成した写しで、`model` だけが agy の tier 名に変わる。手で直さない | — | — | — |
-| model の対応表 | — | Claude Code のエージェント定義の `model` の値（型の名前）から agy の tier 名への対応。`scripts/lib/agy_agents.py` が持つ | — | — | — |
+| agy に配る定義 | — | `plugins/ndf/dev.agy/agents/` の下にあり agy が読むエージェント定義。`plugins/ndf/agents/` から生成した写しで、`model` だけが agy の tier 名に変わる。手で直さない | — | — | `docs/specifications/runtime-plugin-distribution.md` |
+| model の対応表 | — | Claude Code のエージェント定義の `model` の値（型の名前）から agy の tier 名への対応。`scripts/lib/agy_agents.py` が持つ | — | — | `docs/specifications/runtime-plugin-distribution.md` |
 
 ## NDF の開発ワークフロー（`ndf-workflow`）
 
@@ -532,7 +532,7 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | リリースの経路 | `release_route` | 変更が本番系へ届く道筋の種類。template（release.form の雛形で組む）/ merge（マージで反映）/ manual（手で反映）/ none（届けない）。release.form があればそれ、無ければ宣言の delivery から決まる。リリースの形とは別の軸 | — | — | — |
 | 昇格の Pull Request | `promotion_pr` | ベースブランチから本番チャネルへ変更を入れる Pull Request | — | — | — |
 | 昇格のプラン | — | リリースの経路 promote のための「本番」のステージのプラン（plan_promote）。昇格の Pull Request を作り、承認ゲート 2 の後にマージする | — | — | — |
-| 昇格の承認資料 | — | 昇格の承認ゲート 2 で利用者か MVV 判定が見る承認資料（{state_dir}/work/approval-promote.md）。承認したコミットの欄を持ち、normal では promote の承認ゲート 2 の停止が、fast / auto では prepare が書く。promote-approved はこの欄の SHA が昇格の Pull Request の先端のときだけマージする | — | — | — |
+| 昇格の承認資料 | — | 昇格の承認ゲート 2 で利用者か MVV 判定が見る承認資料（{state_dir}/work/approval-promote.md）。承認したコミットの欄を持ち、normal では promote の承認ゲート 2 の停止が、fast / auto では prepare が書く。promote-approved はこの欄の SHA が昇格の Pull Request の先端のときだけマージする | — | — | `docs/specifications/ndf-release-approved-commit.md` |
 | 他のプラグイン | — | 配布の宣言の release.plugin 以外で、前のタグからの差分にファイルがあるプラグイン。release-steps.py changed-plugins が列挙する | — | — | `docs/specifications/ndf-release-other-plugin-levels-and-migration.md` |
 | 上げ幅 | — | 版数のどの桁を上げるか（MAJOR / MINOR / PATCH）。セマンティックバージョニングに従う | — | — | `docs/specifications/ndf-release-other-plugin-levels-and-migration.md` |
 | 移行の手順 | — | 利用者が新しい版へ移るときに自分で行う操作（引数の置き換え・認証のし直し・導入し直しなど）。PR 本文の「移行の手順」の節が正 | — | — | `docs/specifications/ndf-release-other-plugin-levels-and-migration.md` |

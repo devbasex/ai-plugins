@@ -2651,7 +2651,7 @@
       "term": "昇格の承認資料",
       "context": "ndf-release",
       "meaning": "昇格の承認ゲート 2 で利用者か MVV 判定が見る承認資料（{state_dir}/work/approval-promote.md）。承認したコミットの欄を持ち、normal では promote の承認ゲート 2 の停止が、fast / auto では prepare が書く。promote-approved はこの欄の SHA が昇格の Pull Request の先端のときだけマージする",
-      "pending_source": "issues/issue-2104-design.md"
+      "source": "docs/specifications/ndf-release-approved-commit.md"
     },
     {
       "term": "プロダクトバックログ",
@@ -4254,13 +4254,13 @@
       "term": "agy に配る定義",
       "context": "project-glossary",
       "meaning": "`plugins/ndf/dev.agy/agents/` の下にあり agy が読むエージェント定義。`plugins/ndf/agents/` から生成した写しで、`model` だけが agy の tier 名に変わる。手で直さない",
-      "source": ""
+      "source": "docs/specifications/runtime-plugin-distribution.md"
     },
     {
       "term": "model の対応表",
       "context": "project-glossary",
       "meaning": "Claude Code のエージェント定義の `model` の値（型の名前）から agy の tier 名への対応。`scripts/lib/agy_agents.py` が持つ",
-      "source": ""
+      "source": "docs/specifications/runtime-plugin-distribution.md"
     }
   ]
 }

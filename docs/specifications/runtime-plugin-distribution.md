@@ -148,6 +148,66 @@ bash scripts/build-runtime-plugins.sh --check
 
 `--check` は生成先との差分を比較し、drift がある場合に非 0 で終了する。
 
+### agy に配るエージェント定義
+
+**agy に配る定義（`plugins/ndf/dev.agy/agents/*.md`）は、`plugins/ndf/agents/*.md` から生成した写しである。**
+agy 1.4 系はエージェント定義の `model` に tier 名（`flash` / `pro` / `inherit`。欄が無ければ既定の `inherit`）しか
+受け付けず、Claude Code の型の名前（`sonnet` / `opus`）を持つ定義を読み飛ばし、`agy plugin validate` も非 0 で
+落ちる（#2087）。写しは `model` だけを tier 名へ変え、Claude Code の定義は変えない。
+
+用語（「agy に配る定義」「model の対応表」）の定義は [用語集](../glossary.md) が正である。
+
+| 集約 | 持ち主（書き換えてよいもの） | 根 | 値オブジェクト |
+|---|---|---|---|
+| エージェント定義の集合 | 開発者（手で書く） | `plugins/ndf/agents/` | `model` の値（Claude Code の型の名前） |
+| agy に配る定義の集合 | `scripts/lib/agy_agents.py` だけ（手で書かない） | `plugins/ndf/dev.agy/agents/` | `model` の値（agy の tier 名） |
+
+`build-runtime-plugins.sh` は `dev.agy/skills/` の symlink を張った後に、`agy_agents.py` を呼ぶ。
+
+```text
+python3 scripts/lib/agy_agents.py <plugin ディレクトリ> <true|false>
+```
+
+| 引数・出力 | 形 |
+|---|---|
+| 1 つ目 | プラグインのディレクトリ（`plugins/ndf`）。`agents/` と `dev.agy/` を読む。`dev.agy/` が無いプラグインでは何もせず 0 |
+| 2 つ目 | `true` なら書かずに突き合わせる（`--check`）。`false` なら写しを書き、元に無い写しを消す |
+| 終了コード | 0 = 書き終えた・食い違いが無い。1 = 食い違い・対応表に無い値・対応表の値が tier でない |
+| 標準エラー | 理由ごとに 1 行。`Generated agent missing: <パス>` / `Generated agent is out of date: <パス>` / `Generated agent is stale: <パス>` / `Generated agents must be files, not a symlink: <パス>` / `Unknown model for agy: <パス>: <値>` / `Model map value is not an agy tier: <キー>: <値>`。パスはリポジトリの根からの相対 |
+
+model の対応表（`agy_agents.py` の `MODEL_MAP`）:
+
+| Claude Code の値 | agy の値 | 理由 |
+|---|---|---|
+| `sonnet` | `flash` | 安い型を選んだ意図を、agy の安い tier へ写す |
+| `opus` | `pro` | 高い型を選んだ意図を、agy の高い tier へ写す |
+| `haiku` | `flash` | 安い型 |
+| `inherit` | `inherit` | どちらも「呼び出し元の型を使う」 |
+| 欄なし | 欄なし | agy の既定（`inherit`）に任せる |
+
+常に成り立つ条件:
+
+| # | 条件 | 破れたときの扱い |
+|---|---|---|
+| A1 | 写しのファイル名の集合は、エージェント定義のファイル名の集合と等しい | `--check` が足りない写し（`missing`）・余った写し（`stale`）を示して 1 |
+| A2 | 写し 1 本は、元の定義の frontmatter の `model:` の 1 行だけを対応表で置き換えたバイト列と等しい | `--check` が `out of date` を示して 1。写しの手直しもここで落ちる |
+| A3 | 写しの `model` は `flash` / `pro` / `inherit` / 欄なしのどれかである | 単体テストが落ちる（agy なしで動く） |
+| A4 | 対応表の値はすべて agy の tier 名の集合（`AGY_TIERS`）に入る | 生成も `--check` も始める前に 1 |
+| A5 | 対応表に無い `model` の値（型 ID など）を持つ定義があると、生成も `--check` も成り立たない。黙って外さず、黙って写さない | 定義のパスと値を示して 1。足すときは対応表に 1 行足す |
+| A6 | 生成はエージェント定義のファイルを書き換えない。`dev.agy/agents` が `../agents` への symlink なら、外してから実体のディレクトリを作る | `--check` は symlink のとき 1。単体テストが元の定義のバイト列で縛る |
+
+決めたことと理由:
+
+| 決定 | 理由 |
+|---|---|
+| symlink をやめて写しを生成し、コミットする | symlink のままでは agy が読む `model` を変えると Claude Code の定義が変わる。agy の `plugin install` は `dev.agy/` を丸ごと取り込み、中身を変える手段を持たないため、受け付ける値は配布物の時点で入っていなければならない。Claude Code の定義から `model` を外す形は型の選び分けを失い、検査の側で `Invalid model tier` だけを通す形は利用者の agy に読み込まれない状態を残す |
+| `model` は外さずに対応表で tier 名へ変換する | Claude Code の `sonnet` / `opus` はエージェントごとに安い型と高い型を選び分けた値で、変換すればこの選び分けが agy でも保たれる。外すと 8 本すべてが利用者の選んだ型で動く |
+| frontmatter を YAML として読み直さず、`model:` の 1 行だけを置き換える | 読み直して書き出すと引用符・キーの順が変わりうる。1 行の置き換えなら写しと元の差は `model:` の 1 行だけになり、A2 をバイト列で確かめられる |
+| 対応表に無い値は生成を止める | 外すと agy の側だけ黙って型の選び分けが消え、そのまま写すと agy に読み飛ばされる。止めれば対応表に 1 行足すかを決める場面に必ず出会う |
+
+agy 1.4.7 で変換した写しの `agy plugin validate plugins/ndf/dev.agy` は exit 0・`agents 11` になり、CI の固定版
+（1.3.4。`model` を検査しない）でも通る。`flash` / `pro` が `sonnet` / `opus` と同じ費用と品質の差を持つかは測っていない。
+
 marketplace 定義と各 plugin manifest は手で更新する（生成しない）。build の対象外で drift チェックに
 掛からないため、版数と Skill 数、`skills` 配列と manifest の一致は `validate-runtime-plugins.sh` の
 突き合わせチェックで担保する。description から Skill 数を読み取れない場合もエラーとして扱う
@@ -239,8 +299,9 @@ MCP plugin を変更する場合:
 2. `bash scripts/build-runtime-plugins.sh` を実行する（Kiro installer の生成）。
 3. `bash scripts/validate-runtime-plugins.sh` を実行する。
 
-生成物（`agents/openai.yaml` と `dev.kiro/install.sh`）を直接編集した場合、
-`build-runtime-plugins.sh --check` で drift として検出される。
+生成物（`agents/openai.yaml`・`dev.kiro/install.sh`・`dev.agy/agents/*.md`）を直接編集した場合、
+`build-runtime-plugins.sh --check` で drift として検出される。エージェント定義を変えたら、`plugins/ndf/agents/` を直してから
+生成し直す（`dev.agy/agents/` は手で直さない）。
 
 ## テスト観点
 
@@ -251,6 +312,8 @@ MCP plugin を変更する場合:
 | Claude Code install smoke | `bash scripts/runtime-smoke-test.sh --runtime claude` |
 | Codex install smoke | `bash scripts/runtime-smoke-test.sh --runtime codex` |
 | Kiro CLI install smoke | `bash scripts/runtime-smoke-test.sh --runtime kiro` |
+| agy に配る定義（A1〜A6） | `scripts/tests/test_agy_agents.py`（agy なし）。リポジトリの写しの `model` がすべて tier か欄なしで、写しの集合が定義の集合と等しいこと。`model: sonnet` の定義を足して生成すると写しが `flash` になり、他の行と本文が元と同じこと。写しの不足・余り・本文の食い違い・手直し・symlink を `--check` が 1 で落とすこと。対応表に無い値・tier でない対応表で生成も `--check` も 1 になること。古い symlink から生成しても元の定義のバイト列が変わらないこと |
+| agy の実物での読み込み | 手元の agy 1.4 系で `agy plugin validate plugins/ndf/dev.agy` が exit 0・`agents 11`。PR の `runtime-smoke (agy)`（固定版）と日次の `runtime-smoke-latest (agy)`（最新版） |
 | 旧パス残存 | docs / scripts / plugin に `plugins/<family>-{shared,claude,codex,kiro}` や `plugins/mcp/{shared,claude,codex,kiro}` を案内する参照が残っていないこと |
 
 ## 関連リンク
@@ -260,4 +323,7 @@ MCP plugin を変更する場合:
 - [NDF Plugin リファレンス](../ndf-plugin-reference.md)
 - [NDF プラグイン README](../../plugins/ndf/README.md)
 - [playwright-kit プラグイン README](../../plugins/playwright-kit/README.md)
+- [Runtime Smoke の CLI の版](runtime-smoke-cli-versions.md)
+- [`scripts/lib/agy_agents.py`](../../scripts/lib/agy_agents.py)（agy に配る定義の生成と model の対応表）
 - [Agent Plugins 仕様](https://github.com/agentplugins/agent-plugins-spec)
+- 課題 [#2087](https://github.com/devbasex/ai-plugins/issues/2087)（agy に配るエージェント定義）

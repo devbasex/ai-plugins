@@ -271,7 +271,7 @@ sequenceDiagram
 （`head_moved`・資料を読めない）ときは `run <プラン> --from verify` から流し直す。`--from promote-approved` は `prepare` が書いた
 昇格の承認資料の承認したコミットで照合するが、導入の確認も MVV 判定もその先端では走っていないためである。
 
-### 昇格の承認の後の照合
+### 昇格の承認の後の照合（#2104）
 
 `normal` の昇格のプランは `promote`（`--out {state_dir}/work/approval-promote.md`）→ 承認ゲート 2 → `promote-approved` の順に流れる。
 `promote-approved` ステップは `normal` と `fast` / `auto` で同じコマンド
@@ -399,7 +399,7 @@ sequenceDiagram
 | 配布の PR のコミット数 | `gh pr view --json commits` は 250 件までを返す。超える配布の PR では I3 が外のコミットと誤り、止まる側に倒れる。配布の PR は bump・changelog・説明文・消費の記録の数件である |
 | 照合で止まった後の続き（`fast` / `auto`） | 人が `--from promote-approved` を選ぶと、`prepare` が書いた承認したコミットのままなら、導入の確認と MVV 判定の後に進んでいない先端としてマージされる。`promote` が `head_moved` で止まった後は承認資料の先端と昇格の Pull Request の先端も違うため、`promote-approved` も止まる |
 | 書き出し済みのプラン | 版の更新の前に書き出したプランの `promote-approved` は `--approved-from` を持たず 2 で止まる。`--from promote` で流し直すと、書き出し済みの `promote` は `--out` を持たないため資料は既定の置き場へ書かれ、`next` の手で打つ形で続ける |
-| 経路 `merge` の `merge-approved` | 宛先が自動反映の本番チャネルのとき、`merge-when-green` の承認ゲート 2 の停止も先端を資料へ残さず、`--from merge-approved` は今の先端をマージする（この文書の範囲外） |
+| 経路 `merge` の `merge-approved` | 宛先が自動反映の本番チャネルのとき、`merge-when-green` の承認ゲート 2 の停止も先端を資料へ残さず、`--from merge-approved` は今の先端をマージする（この文書の範囲外。#2147） |
 | 実機での昇格 | 本番チャネルへのマージを伴うため、手元では `gh` を差し替えたテストでだけ確かめた。実機はリリース後テストで、経路 `promote` を持つリポジトリが `fast` / `auto` で通るときに見る |
 | rebase で入れた配布の PR の `mergeCommit` | 実物で確かめていない。`mergeCommit` は承認の外のコミットの一覧から除くのにだけ使い、木の比較には使わない。違っていても、patch-id で除けないものが一覧に余分に並ぶだけで、通す・止めるの向きは止まる側である |
 
@@ -443,4 +443,4 @@ sequenceDiagram
 - [版と配布](../versioning-and-distribution.md)
 - [承認資料の「含む PR」](ndf-release-approval-included-prs.md)（直前の正式版から後に入った PR の集め方）
 - [後片付けとスプリント課題を閉じる時点](ndf-cleanup-and-bundle-closing.md)（本番の配布の後の退避先の回収）
-- 課題 [#815](https://github.com/devbasex/ai-plugins/issues/815)、昇格の経路の照合の課題 [#1529](https://github.com/devbasex/ai-plugins/issues/1529)（由来 #1457。手動反映の本番系は #1454）
+- 課題 [#815](https://github.com/devbasex/ai-plugins/issues/815)、昇格の経路の照合の課題 [#1529](https://github.com/devbasex/ai-plugins/issues/1529)（由来 #1457。手動反映の本番系は #1454）、昇格の承認の後の照合の課題 [#2104](https://github.com/devbasex/ai-plugins/issues/2104)
