@@ -161,23 +161,26 @@ def _remove_pr_tmp_worktree(root, tmp_wt, n, add, merge_commit=None):
         add("worktree", w["path"], "removed" if ok else "kept", why)
 
 
-def _cleanup_pr(root, main_dir, slug, wt_base, n, add):
-    """PR 1 件分の作業ツリーとブランチを片付ける。"""
+def _merged_pr_info(root, n, add):
+    """PR n の (ブランチ, マージコミット) を返す。読めない・MERGED でないときは記録して None。"""
     p = gh_parts.gh(["pr", "view", str(n), "--json", "headRefName,state,mergeCommit"], cwd=root)
     if p.returncode != 0:
         add("pr", f"#{n}", "kept", f"gh pr view が失敗: {p.stderr.strip()[:200]}")
-        return
+        return None
     try:
         info = json.loads(p.stdout)
     except ValueError:
         add("pr", f"#{n}", "kept", "gh pr view の出力を読めない")
-        return
+        return None
     branch = info.get("headRefName")
     if info.get("state") != "MERGED":
         add("pr", branch or f"#{n}", "kept", f"#{n} が MERGED でない（{info.get('state')}）")
-        return
+        return None
+    return branch, (info.get("mergeCommit") or {}).get("oid")
 
-    merge_commit = (info.get("mergeCommit") or {}).get("oid")
+
+def _remove_pr_worktrees(root, main_dir, branch, merge_commit, add):
+    """branch を checkout した作業ツリーを外す。ブランチを消してよい（使う作業ツリーが残らない）かを返す。"""
     branch_free = True
     for wt in list_worktrees(root):
         if wt["branch"] != branch:
@@ -189,8 +192,16 @@ def _cleanup_pr(root, main_dir, slug, wt_base, n, add):
         ok, why = remove_worktree(root, wt["path"], branch, merge_commit)
         add("worktree", wt["path"], "removed" if ok else "kept", why)
         branch_free = branch_free and ok
+    return branch_free
 
-    if branch_free:
+
+def _cleanup_pr(root, main_dir, slug, wt_base, n, add):
+    """PR 1 件分の作業ツリーとブランチを片付ける。"""
+    got = _merged_pr_info(root, n, add)
+    if got is None:
+        return
+    branch, merge_commit = got
+    if _remove_pr_worktrees(root, main_dir, branch, merge_commit, add):
         _delete_branch(root, branch, add)
 
     if slug:
