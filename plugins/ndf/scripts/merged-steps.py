@@ -329,19 +329,23 @@ def cmd_promote(a):
 
 # --- probe --------------------------------------------------------------------
 
-# 分類は強い順。PR が 2 つ以上に当たれば上を採り、複数の PR は最も上の分類で全体を表す
-PROBE_CLASSES = ("failed", "stale", "stale_again", "infra", "settled", "queued", "running", "passed", "none")
-PROBE_ACTIONS = {
-    "failed": "fix",
-    "stale": "judge",
-    "stale_again": "judge",
-    "infra": "wait",  # Runner が付かずに取り消された（CI の基盤待ち）。再実行は merge-when-green が持つ
-    "settled": "wait",
-    "queued": "wait",
-    "running": "wait",
-    "passed": "judge",
-    "none": "judge",
+# 分類ごとの (手, 要約)。並びは強い順で、PR が 2 つ以上に当たれば上を採り、複数の PR は最も上の分類で全体を表す。
+# 要約の {names} は根拠のチェック名、{queued_runs} は待ち行列の件数
+PROBE_TABLE = {
+    "failed": ("fix", "失敗したチェックがある: {names}"),
+    "stale": ("judge", "取り残されたチェックがある: {names}"),
+    "stale_again": ("judge", "再実行したチェックが再び取り残された: {names}"),
+    # Runner が付かずに取り消された（CI の基盤待ち）。再実行は merge-when-green が持つ
+    "infra": ("wait", "Runner が付かずに取り消されたジョブがある（CI の基盤待ち）: {names}"),
+    "settled": ("wait", "実行は終わりジョブに結論がある（表示だけが pending）: {names}"),
+    "queued": ("wait", "ジョブがランナーを待っている（待ち行列 {queued_runs} 件）: {names}"),
+    "running": ("wait", "実行中のチェックがある: {names}"),
+    "passed": ("judge", "すべてのチェックが通っている（待つ側が抜けていない）"),
+    "none": ("judge", "開いた PR が無い・読めない"),
 }
+PROBE_REMEDIED_SUMMARY = "取り残されたチェックを再実行した: {names}"  # stale を --act で直したとき
+PROBE_CLASSES = tuple(PROBE_TABLE)
+PROBE_ACTIONS = {cls: action for cls, (action, _) in PROBE_TABLE.items()}
 
 
 def probe_prs(root, a):
@@ -438,17 +442,8 @@ def cmd_probe(a):
     queued_runs = (queued_run_count(root) or 0) if cls == "queued" else 0
     prs = [f[0] for f in found]
     names = ", ".join(i["name"] for i in items if i.get("kind") == "check" and i.get("result") != "superseded") or "無し"
-    summary = {
-        "failed": f"失敗したチェックがある: {names}",
-        "stale": ("取り残されたチェックを再実行した: " if action == "remedied" else "取り残されたチェックがある: ") + names,
-        "stale_again": f"再実行したチェックが再び取り残された: {names}",
-        "infra": f"Runner が付かずに取り消されたジョブがある（CI の基盤待ち）: {names}",
-        "settled": f"実行は終わりジョブに結論がある（表示だけが pending）: {names}",
-        "queued": f"ジョブがランナーを待っている（待ち行列 {queued_runs} 件）: {names}",
-        "running": f"実行中のチェックがある: {names}",
-        "passed": "すべてのチェックが通っている（待つ側が抜けていない）",
-        "none": "開いた PR が無い・読めない",
-    }[cls]
+    template = PROBE_REMEDIED_SUMMARY if cls == "stale" and action == "remedied" else PROBE_TABLE[cls][1]
+    summary = template.format(names=names, queued_runs=queued_runs)
     pr_text = " ".join(f"#{n}" for n in prs)
     emit(
         result(TOOL, "ok", f"{pr_text} {summary}".strip(), items, {"class": cls, "action": action, "prs": prs, "queued_runs": queued_runs}),
