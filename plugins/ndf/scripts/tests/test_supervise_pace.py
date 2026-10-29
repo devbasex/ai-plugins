@@ -17,12 +17,14 @@ import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 SUPERVISE = SCRIPTS / "supervise.py"
-SPRINT_STATE = SCRIPTS / "sprint-state.py"
 REPO = SCRIPTS.parents[2]
 PY = sys.executable
 
 sys.path.insert(0, str(SCRIPTS))
 from supervise_lib import engine, flow, paths, queue  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from pace_state import sprint_state  # noqa: E402
 
 
 # new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える
@@ -31,20 +33,6 @@ pytestmark = pytest.mark.usefixtures("issue_bodies")
 
 def cli(*args, cwd=None):
     return subprocess.run([PY, str(SUPERVISE), *args], capture_output=True, text=True, cwd=cwd or REPO)
-
-
-def sprint_state(tmp_path: Path, approve: bool = True) -> Path:
-    mvv = tmp_path / "mvv-src.md"
-    mvv.write_text("## Mission\n速く\n## Vision\n回る\n## Value\n実測\n")
-    state = tmp_path / "state" / "sprint-state.json"
-    subprocess.run(
-        [PY, str(SPRINT_STATE), "init", str(state), "--name", "m", "--pace", "fast", "--mvv", str(mvv), "--root", str(tmp_path)],
-        check=True,
-        capture_output=True,
-    )
-    if approve:
-        subprocess.run([PY, str(SPRINT_STATE), "gate", str(state), "MVV", "--what", "MVV を承認"], check=True, capture_output=True)
-    return state
 
 
 def load(path) -> dict:
@@ -94,7 +82,7 @@ def new_fast_sprint(tmp_path, state, *extra):
 
 
 def test_fast_sprint_puts_check_then_dev_then_prod_after_the_implementation(tmp_path):
-    p, out = new_fast_sprint(tmp_path, sprint_state(tmp_path))
+    p, out = new_fast_sprint(tmp_path, sprint_state(tmp_path, "fast"))
     assert p.returncode == 0, p.stdout + p.stderr
     manifest = load(out / "sprint.json")
     assert manifest["進め方"] == "fast" and manifest["状態"].endswith("sprint-state.json")
@@ -158,7 +146,7 @@ def approve_runs_with_or_without_note(tmp_path, cmd):
 
 @pytest.mark.parametrize("change", ["unapproved", "changed"])
 def test_fast_sprint_is_refused_without_a_matching_approval(tmp_path, change):
-    state = sprint_state(tmp_path, approve=change != "unapproved")
+    state = sprint_state(tmp_path, "fast", approve=change != "unapproved")
     if change == "changed":
         mvv = Path(load(state)["mvv"]["path"])
         mvv.write_text(mvv.read_text() + "足した行\n")
@@ -169,7 +157,7 @@ def test_fast_sprint_is_refused_without_a_matching_approval(tmp_path, change):
 
 
 def test_fast_sprint_is_refused_for_operation_mode(tmp_path):
-    p, out = new_fast_sprint(tmp_path, sprint_state(tmp_path), "--mode", "operation")
+    p, out = new_fast_sprint(tmp_path, sprint_state(tmp_path, "fast"), "--mode", "operation")
     assert p.returncode == 1 and "モード" in json.loads(p.stdout)["summary"]
 
 
@@ -193,7 +181,7 @@ def test_fast_sprint_is_refused_without_the_declaration(tmp_path):
         "--pace",
         "fast",
         "--state",
-        str(sprint_state(tmp_path)),
+        str(sprint_state(tmp_path, "fast")),
         "--out",
         str(out),
         cwd=repo,
@@ -320,7 +308,7 @@ def test_close_runs_spec_close_and_retro_once_each_in_order(tmp_path):
         "--prod",
         "10.18.0",
         "--state",
-        str(sprint_state(tmp_path)),
+        str(sprint_state(tmp_path, "fast")),
         "--out",
         str(out),
     )
@@ -359,7 +347,7 @@ def test_close_runs_spec_close_and_retro_once_each_in_order(tmp_path):
 
 
 def test_release_with_mvv(tmp_path):
-    state = sprint_state(tmp_path)
+    state = sprint_state(tmp_path, "fast")
     for channel, version in (("prod", "10.18.0"), ("dev", "10.18.0-dev.1")):
         out = tmp_path / f"{channel}.json"
         p = cli(

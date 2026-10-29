@@ -34,9 +34,14 @@ plugins/ndf/
 `dev.kiro` と `dev.agy` は Agent Plugins 仕様 §8.2 が定めるクライアント拡張ディレクトリです。
 
 `dev.agy/skills/` は `manifests/agy-skills.txt` から生成する symlink です
-（`scripts/build-runtime-plugins.sh`）。`dev.agy/agents` と `dev.agy/scripts` は
-`agents/` と `scripts/` を指し、実体を 4 ランタイムで共有します。**agy は配る Skill を絞る
-手段を利用者側の設定にしか持たない**ため、絞り込みはここへ何を並べるかで表します。
+（`scripts/build-runtime-plugins.sh`）。`dev.agy/scripts` は `scripts/` を指し、実体を
+4 ランタイムで共有します。**agy は配る Skill を絞る手段を利用者側の設定にしか持たない**ため、
+絞り込みはここへ何を並べるかで表します。
+
+`dev.agy/agents/` は `agents/` から同じスクリプトが生成する写しです。agy は `model` に tier 名
+（`flash` / `pro` / `inherit`）しか受け付けないため、frontmatter の `model:` の 1 行だけを
+対応表（`sonnet` → `flash`、`opus` → `pro`）で置き換えます。対応表は `scripts/lib/agy_agents.py`
+が持ちます。写しは手で直さず、`agents/` を直してから生成し直します（`--check` が食い違いを落とします）。
 
 **`skills/` に置く Skill は、少なくとも 1 つの manifest へ載せます。** 配らない Skill の
 置き場所（`optional-skills/`）は v10.5.0 で無くしました。どこからも起動できない Skill を

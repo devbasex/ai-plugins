@@ -61,7 +61,7 @@ supervisor は設計の工程に入った時点で `bash "<絶対パス>/project
 | `plugins/ndf/scripts/projects-sync.sh` | **進捗記録の入口。** 引数をチェックした後、`stage` / `mode` / `pace` / `worktree` / `plan` では、ボードの設定や `gh` が無くても先に `progress-record.sh` を呼んで issue の本文を更新し、その後でボードを更新する。`status` はボードだけに書く。自分では通過記録へ積まない |
 | `plugins/ndf/scripts/progress-record.sh` | 通過記録へ積み、issue の本文の `## 進行` を更新する。工程名の位置に `-` を受けると、チェックリストを変えずに見出し行（モード・進め方・ worktree ・実装計画のファイル）だけを更新する |
 | `plugins/ndf/agents/worker.md` | worker のエージェント定義（`ndf:worker`）。frontmatter の `disallowedTools: Skill, Agent` で 2 つのツールを外す |
-| `plugins/ndf/.claude-plugin/plugin.json` | `agents` 配列に `./agents/worker.md` を載せる。agy へは `plugins/ndf/dev.agy/agents`（`../agents` への symlink）で同じ定義が配られる |
+| `plugins/ndf/.claude-plugin/plugin.json` | `agents` 配列に `./agents/worker.md` を載せる。agy へは `plugins/ndf/dev.agy/agents/worker.md`（`scripts/build-runtime-plugins.sh` が生成する写し。`model` だけを agy の tier 名へ変える）で同じ定義が配られる |
 | `development-workflow/references/agent-layers.md` | 起動指示の雛形と守る規則。「委譲の線」から `work-vessels.md` を指す |
 | `development-workflow/references/work-vessels.md` | 実行方式の比較表、仕事ごとの選び方、小さな作業の線引き、Tool を定義で絞る理由 |
 | `development-workflow/references/context-window.md` | 「委譲する対象と、しない対象」から `work-vessels.md` を指す（写さない） |

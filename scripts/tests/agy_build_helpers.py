@@ -17,6 +17,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BUILD = REPO_ROOT / "scripts/build-runtime-plugins.sh"
+AGY_AGENTS = REPO_ROOT / "scripts/lib/agy_agents.py"
 
 FAMILY = "ndf"
 VERSION = "9.3.0"
@@ -31,6 +32,8 @@ def build_tree(base: Path, skills: list[str] | None = None) -> Path:
 
     (root / "scripts").mkdir(parents=True)
     (root / "scripts/build-runtime-plugins.sh").write_text(BUILD.read_text(encoding="utf-8"), encoding="utf-8")
+    (root / "scripts/lib").mkdir()
+    (root / "scripts/lib/agy_agents.py").write_text(AGY_AGENTS.read_text(encoding="utf-8"), encoding="utf-8")
     # MCP プラグインの同期はディレクトリを走査する。空でも存在していないと読めない。
     (root / "plugins/mcp").mkdir(parents=True)
 
@@ -67,3 +70,13 @@ def output_of(result: subprocess.CompletedProcess[str]) -> str:
 
 def links_dir(root: Path) -> Path:
     return root / f"plugins/{FAMILY}/dev.agy/skills"
+
+
+def agents_dir(root: Path) -> Path:
+    """エージェント定義の正（Claude Code の定義）。"""
+    return root / f"plugins/{FAMILY}/agents"
+
+
+def agy_agents_dir(root: Path) -> Path:
+    """agy に配る定義（生成した写し）。"""
+    return root / f"plugins/{FAMILY}/dev.agy/agents"

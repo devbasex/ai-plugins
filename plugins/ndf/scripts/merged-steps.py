@@ -6,7 +6,7 @@
     python3 merged-steps.py merge-gate (--base <宛先> | --pr <PR番号>) [--pr <PR番号>] [--root <dir>]
     python3 merged-steps.py merge-when-green <PR番号> [--gate-approved user|mvv] [--method merge|squash|rebase]
                             [--interval 秒] [--timeout 秒] [--stale-after 秒] [--no-cleanup] [--expect-head <SHA>] [--root <dir>]
-    python3 merged-steps.py promote --head <ベースブランチ> --base <本番チャネル> [--prepare] [--gate-approved user|mvv] [--expect-head-from <資料>]
+    python3 merged-steps.py promote --head <ベースブランチ> --base <本番チャネル> [--prepare] [--out <資料>] [--gate-approved user|mvv] [--expect-head-from <資料> | --approved-from <資料>]
 
 cleanup: マージ済みの PR の作業ツリーとローカルブランチを外し、主ディレクトリを取り込む。
 `git worktree remove` が拒否した作業ツリーは、未追跡・無視されたファイルを退避してから外す。作り直せる生成物
@@ -20,7 +20,7 @@ merge-when-green: PR が draft なら `gh pr ready` で外し、CI のチェッ�
 CI を待たずに承認ゲート 2 で止まる（status: gate・metrics.gate: production-merge。判定は lib/delivery.py。#1336）。
 merge-gate: 宛先の判定だけを行う（0 = 進めてよい / 10 = 承認ゲート 2）。
 promote: 昇格の Pull Request（ベースブランチ → 本番チャネル）を探すか作り、merge-when-green と同じ判定と待ちでマージする（後片付けはしない）。
---prepare は用意して承認資料を書くところで 0 で終える。--expect-head-from は導入の確認の承認資料の確かめたコミットを --expect-head と同じ照合に使う（違えば head_moved で 1、読めなければ 2。#1529）。
+--prepare は用意して承認資料を書くところで 0 で終える。--expect-head-from は導入の確認の承認資料の確かめたコミットを --expect-head と同じ照合に使う（違えば head_moved で 1、読めなければ 2。どちらもマージせず、プランの handoff が承認ゲート 2 の by: mvv の記録を外して 10 を返し、承認ゲート 2 へ戻す。流し直しは run <プラン> --from verify。#1529）。承認ゲート 2 で止まるときは先端を「承認したコミット」として承認資料（--out）と metrics.approved_sha に載せ、--approved-from はその資料の承認したコミットを同じ照合に使う（--gate-approved user に要る。#2104）。
 実行が終わったのにチェックが pending のまま --stale-after 秒続けば、そのジョブを 1 度だけ `gh run rerun --job` で再実行し、
 再実行でも取り残されれば止まる。実行が終わりジョブに結論があれば、チェックの表示が pending のままでも待たずにその結論で扱う。
 ジョブがランナーを待つ間は、待ち行列の件数を待ちの 1 周ごとに stderr へ 1 行出す。同じチェック（workflow の名前と名前の組）は最新の項目だけで数え、古い項目の失敗は items に result: superseded で残す。
@@ -73,6 +73,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from merged_lib import base_sync, merge, trash  # noqa: E402
 from merged_lib.pull import blocking_local_changes, same_untracked  # noqa: E402,F401
 from merged_lib.checks import queued_run_count  # noqa: E402
+from merged_lib.pr_info import merged_pr_info  # noqa: E402
+from merged_lib.probe_table import PROBE_ACTIONS, PROBE_CLASSES, PROBE_REMEDIED_SUMMARY, PROBE_TABLE  # noqa: E402
 from merged_lib.reading import read_checks  # noqa: E402
 
 TOOL = "merged"
@@ -161,23 +163,8 @@ def _remove_pr_tmp_worktree(root, tmp_wt, n, add, merge_commit=None):
         add("worktree", w["path"], "removed" if ok else "kept", why)
 
 
-def _cleanup_pr(root, main_dir, slug, wt_base, n, add):
-    """PR 1 件分の作業ツリーとブランチを片付ける。"""
-    p = gh_parts.gh(["pr", "view", str(n), "--json", "headRefName,state,mergeCommit"], cwd=root)
-    if p.returncode != 0:
-        add("pr", f"#{n}", "kept", f"gh pr view が失敗: {p.stderr.strip()[:200]}")
-        return
-    try:
-        info = json.loads(p.stdout)
-    except ValueError:
-        add("pr", f"#{n}", "kept", "gh pr view の出力を読めない")
-        return
-    branch = info.get("headRefName")
-    if info.get("state") != "MERGED":
-        add("pr", branch or f"#{n}", "kept", f"#{n} が MERGED でない（{info.get('state')}）")
-        return
-
-    merge_commit = (info.get("mergeCommit") or {}).get("oid")
+def _remove_pr_worktrees(root, main_dir, branch, merge_commit, add):
+    """branch を checkout した作業ツリーを外す。ブランチを消してよい（使う作業ツリーが残らない）かを返す。"""
     branch_free = True
     for wt in list_worktrees(root):
         if wt["branch"] != branch:
@@ -189,8 +176,16 @@ def _cleanup_pr(root, main_dir, slug, wt_base, n, add):
         ok, why = remove_worktree(root, wt["path"], branch, merge_commit)
         add("worktree", wt["path"], "removed" if ok else "kept", why)
         branch_free = branch_free and ok
+    return branch_free
 
-    if branch_free:
+
+def _cleanup_pr(root, main_dir, slug, wt_base, n, add):
+    """PR 1 件分の作業ツリーとブランチを片付ける。"""
+    got = merged_pr_info(root, n, add)
+    if got is None:
+        return
+    branch, merge_commit = got
+    if _remove_pr_worktrees(root, main_dir, branch, merge_commit, add):
         _delete_branch(root, branch, add)
 
     if slug:
@@ -318,20 +313,6 @@ def cmd_promote(a):
 
 # --- probe --------------------------------------------------------------------
 
-# 分類は強い順。PR が 2 つ以上に当たれば上を採り、複数の PR は最も上の分類で全体を表す
-PROBE_CLASSES = ("failed", "stale", "stale_again", "infra", "settled", "queued", "running", "passed", "none")
-PROBE_ACTIONS = {
-    "failed": "fix",
-    "stale": "judge",
-    "stale_again": "judge",
-    "infra": "wait",  # Runner が付かずに取り消された（CI の基盤待ち）。再実行は merge-when-green が持つ
-    "settled": "wait",
-    "queued": "wait",
-    "running": "wait",
-    "passed": "judge",
-    "none": "judge",
-}
-
 
 def probe_prs(root, a):
     """調べる開いた PR の番号。--pr はそのまま、--head は開いた PR を探す。"""
@@ -427,17 +408,8 @@ def cmd_probe(a):
     queued_runs = (queued_run_count(root) or 0) if cls == "queued" else 0
     prs = [f[0] for f in found]
     names = ", ".join(i["name"] for i in items if i.get("kind") == "check" and i.get("result") != "superseded") or "無し"
-    summary = {
-        "failed": f"失敗したチェックがある: {names}",
-        "stale": ("取り残されたチェックを再実行した: " if action == "remedied" else "取り残されたチェックがある: ") + names,
-        "stale_again": f"再実行したチェックが再び取り残された: {names}",
-        "infra": f"Runner が付かずに取り消されたジョブがある（CI の基盤待ち）: {names}",
-        "settled": f"実行は終わりジョブに結論がある（表示だけが pending）: {names}",
-        "queued": f"ジョブがランナーを待っている（待ち行列 {queued_runs} 件）: {names}",
-        "running": f"実行中のチェックがある: {names}",
-        "passed": "すべてのチェックが通っている（待つ側が抜けていない）",
-        "none": "開いた PR が無い・読めない",
-    }[cls]
+    template = PROBE_REMEDIED_SUMMARY if cls == "stale" and action == "remedied" else PROBE_TABLE[cls][1]
+    summary = template.format(names=names, queued_runs=queued_runs)
     pr_text = " ".join(f"#{n}" for n in prs)
     emit(
         result(TOOL, "ok", f"{pr_text} {summary}".strip(), items, {"class": cls, "action": action, "prs": prs, "queued_runs": queued_runs}),
@@ -476,9 +448,7 @@ def build_parser():
     )
     pm.add_argument("--head", required=True, help="昇格させるブランチ（ベースブランチ）")
     pm.add_argument("--base", required=True, help="本番チャネル")
-    pm.add_argument("--prepare", action="store_true", help="Pull Request を用意して承認資料を書くところで終える（マージしない）")
-    pm.add_argument("--out", help="--prepare の承認資料の置き場（既定は提示物の置き場）")
-    pm.add_argument("--expect-head-from", metavar="資料", help="導入の確認の承認資料。確かめたコミットが PR の先端のときだけマージする")
+    merge.add_promote_args(pm)
     merge.add_wait_args(pm)
     pm.set_defaults(func=cmd_promote)
     pr = sub.add_parser(

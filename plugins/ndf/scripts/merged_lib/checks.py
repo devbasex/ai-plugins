@@ -172,8 +172,9 @@ class GreenWatch:
     """merge-when-green の 1 回の読み直し（`poll`）と、その間の状態。待ちの間隔は lib/waits.py の `wait_until` が持ち、
     読んだ中身が変わらない間は伸ばす。pending を見ずに通ったときの確かめ直しだけは --recheck の間隔で眠る。"""
 
-    def __init__(self, root, a):
+    def __init__(self, root, a, moved_next=None):
         self.root, self.a, self.n = root, a, a.pr
+        self.moved_next = moved_next  # 先端が照合と違って止まるときの続け方（promote の --approved-from。#2104）
         self.deadline = time.monotonic() + a.timeout
         self.items, self.waits, self.queued_runs = [], 0, 0
         self.green_sha = None  # pending を見ずに通った状態を 1 度見た先頭のコミット。確かめ直して通れば確定とする
@@ -291,7 +292,7 @@ class GreenWatch:
             EXIT_INFRA_WAIT,
         )
 
-    def _stop_conflict(self, why: str = "mergeStateStatus=DIRTY"):
+    def stop_conflict(self, why: str = "mergeStateStatus=DIRTY"):
         """PR がベースブランチと衝突している（終了コード 4。#1917）。プランの merge はベースブランチの取り込みへ戻る。"""
         n = self.n
         emit(
@@ -308,7 +309,8 @@ class GreenWatch:
 
     def _check_expected(self, sha, state):
         """--expect-head を渡したとき、読んだ先端がその SHA と違えば、待ち続けず・マージ済みでもそこで止める（#815 の I5）。
-        待つ間に別の先端でマージされた PR を成功として返さない（release が承認していないマージへタグを打たない）。"""
+        待つ間に別の先端でマージされた PR を成功として返さない（release が承認していないマージへタグを打たない）。
+        呼び手が続け方（moved_next。promote の --approved-from。#2104）を渡していれば next に載せる。"""
         expect = getattr(self.a, "expect_head", None)
         if not expect or sha == expect:
             return
@@ -320,19 +322,18 @@ class GreenWatch:
                 f"#{n} の先端が {expect[:8]} でない（今は {str(sha)[:8]}・{state}）。マージしない",
                 self.items + [{"kind": "pr", "name": f"#{n}", "result": "head_moved", "head": sha, "expected": expect}],
                 {"waits": self.waits},
+                next=self.moved_next,
             )
         )
 
-    def poll(self):
-        """1 回読む。終われば ("done", 理由)、待つなら ("wait", 読んだ中身)。止めるときは emit で抜ける。"""
-        root, a, n, items, waits = self.root, self.a, self.n, self.items, self.waits
-        info = pr_state(root, n)
+    def _inspect_pr(self, info) -> bool:
+        """PR の状態を検査する。マージ済みなら True。OPEN でない・衝突しているときは emit で抜ける。"""
+        n = self.n
         state, sha = info.get("state"), info.get("headRefOid")
-        self.recheck = False
         self._check_expected(sha, state)
         if state == "MERGED":
-            items.append({"kind": "pr", "name": f"#{n}", "result": "already_merged"})
-            return ("done", "merged")
+            self.items.append({"kind": "pr", "name": f"#{n}", "result": "already_merged"})
+            return True
         if state != "OPEN":
             emit(
                 result(
@@ -348,21 +349,23 @@ class GreenWatch:
         if info.get("isDraft"):
             self._ensure_ready()
         if info.get("mergeStateStatus") == "DIRTY":  # UNKNOWN（計算中）は衝突と読まずに待つ
-            self._stop_conflict()
-        self._reset_on_new_sha(sha)
-        self.last_sha = sha
-        reading = read_checks(root, info.get("statusCheckRollup"), self.seen_jobs)
-        self._note(reading)
+            self.stop_conflict()
+        return False
+
+    def _handle_failures(self, reading: CheckReading):
+        """中身の失敗なら止める。基盤待ちは再実行を進め、解けなければ止める。止めるときは emit で抜ける。"""
         if reading.failed:
             self._stop_failed(reading)
         if reading.infra:
-            why, detail = self.infra.step(root, reading, time.monotonic())
-            items += self.infra.log
+            why, detail = self.infra.step(self.root, reading, time.monotonic())
+            self.items += self.infra.log
             self.infra.log.clear()
             if why != "wait":
                 self._stop_infra(reading, why, detail)
-        pending = [i.label for i in reading.pending]
-        passed = [i.label for i in reading.passed]
+
+    def _classify_progress(self, sha, reading: CheckReading, pending, passed):
+        """チェックの進み具合を分ける。終われば ("done", 理由)、待つなら ("wait", None)。"""
+        a, items = self.a, self.items
         if not pending and not passed and not reading.infra:
             # チェックがまだ載っていない。--no-checks-after 秒を過ぎても空なら CI の無いリポジトリとみなす
             self.empty_since = self.empty_since if self.empty_since is not None else time.monotonic()
@@ -379,21 +382,47 @@ class GreenWatch:
             self.green_sha, self.pending_sha, self.empty_since = None, sha, None
             if pending:
                 probed = (reading.stale, reading.queued)
-                count = watch_stuck_checks(root, probed, a, StuckWatch(n, items, waits, self.stale_since, self.rerun_done))
+                stuck = StuckWatch(self.n, items, self.waits, self.stale_since, self.rerun_done)
+                count = watch_stuck_checks(self.root, probed, a, stuck)
                 if count is not None:
                     self.queued_runs = count  # 最後に見た待ち行列の件数
-        if time.monotonic() >= self.deadline:
-            if reading.infra or self.infra.pending_reruns(reading):
-                self._stop_infra(reading, "timeout")
-            emit(
-                result(
-                    TOOL,
-                    "stopped",
-                    f"#{n} の CI が {a.timeout} 秒で終わらない（待ち: {', '.join(pending)}）",
-                    items + [{"kind": "check", "name": c, "result": "pending"} for c in pending],
-                    {"failed": 0, "pending": len(pending), "passed": len(passed), "waits": waits, "queued_runs": self.queued_runs},
-                    next=f"打ち直す: merged-steps.py merge-when-green {n}",
-                )
+        return ("wait", None)
+
+    def _check_deadline(self, reading: CheckReading, pending, passed):
+        """締め切りを過ぎていれば止める（基盤待ちが残れば基盤待ちとして）。止めるときは emit で抜ける。"""
+        if time.monotonic() < self.deadline:
+            return
+        n, a = self.n, self.a
+        if reading.infra or self.infra.pending_reruns(reading):
+            self._stop_infra(reading, "timeout")
+        emit(
+            result(
+                TOOL,
+                "stopped",
+                f"#{n} の CI が {a.timeout} 秒で終わらない（待ち: {', '.join(pending)}）",
+                self.items + [{"kind": "check", "name": c, "result": "pending"} for c in pending],
+                {"failed": 0, "pending": len(pending), "passed": len(passed), "waits": self.waits, "queued_runs": self.queued_runs},
+                next=f"打ち直す: merged-steps.py merge-when-green {n}",
             )
+        )
+
+    def poll(self):
+        """1 回読む。終われば ("done", 理由)、待つなら ("wait", 読んだ中身)。止めるときは emit で抜ける。"""
+        info = pr_state(self.root, self.n)
+        sha = info.get("headRefOid")
+        self.recheck = False
+        if self._inspect_pr(info):
+            return ("done", "merged")
+        self._reset_on_new_sha(sha)
+        self.last_sha = sha
+        reading = read_checks(self.root, info.get("statusCheckRollup"), self.seen_jobs)
+        self._note(reading)
+        self._handle_failures(reading)
+        pending = [i.label for i in reading.pending]
+        passed = [i.label for i in reading.passed]
+        verdict = self._classify_progress(sha, reading, pending, passed)
+        if verdict[0] == "done":
+            return verdict
+        self._check_deadline(reading, pending, passed)
         infra = tuple(sorted(i.label for i in reading.infra))
         return ("wait", (sha, tuple(sorted(pending)), tuple(sorted(passed)), infra, self.recheck))
