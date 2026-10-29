@@ -133,7 +133,6 @@ def _promote_steps_mvv(
     if not verify:
         raise DeclError("fast / auto の昇格のプランに導入の確認のコマンド（<節>.verify）が無い")
     state = str(Path(mvv).resolve())
-    material = PROMOTE_MATERIAL
     pr_of = f'$(gh pr list --head {shlex.quote(head)} --base {shlex.quote(base)} --state open --json number --jq ".[0].number")'
     return [
         facts_step(repo, verify_facts_cmd(a, repo, verify), "prepare", "verify"),
@@ -142,11 +141,11 @@ def _promote_steps_mvv(
             "type": "run",
             "stage": "配布",
             "timeout": 300,
-            "cmd": f"{promote} --prepare --out {material}",
+            "cmd": f"{promote} --prepare --out {PROMOTE_MATERIAL}",
             "next": "mvv",
         },
         *mvv_gate_steps(
-            f"sh -c '{MVV_PY} check --sprint {shlex.quote(state)} --gate release --material {material} {VERIFY_MATERIAL} --pr {pr_of} "
+            f"sh -c '{MVV_PY} check --sprint {shlex.quote(state)} --gate release --material {PROMOTE_MATERIAL} {VERIFY_MATERIAL} --pr {pr_of} "
             f"--mode {a.mode} --root {shlex.quote(repo)} --note {MVV_NOTE}'",
             f"sh -c 'gh pr comment {pr_of} --body-file {MVV_NOTE}'",
             "promote",
