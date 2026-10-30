@@ -37,6 +37,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import Callable
 
 SERVICE_DIR = "factory"
 MARKETPLACE = ".claude-plugin/marketplace.json"
@@ -144,12 +145,16 @@ def lines_of(data: bytes) -> list[str]:
     return data.decode("utf-8", errors="replace").splitlines()
 
 
+def matching_lines(kind: str, rel: str, lines: list[str], hit: Callable[[str], bool]) -> list[Finding]:
+    return [Finding(kind, rel, n) for n, line in enumerate(lines, 1) if hit(line)]
+
+
 def check_reference(root: Path, rel: str, lines: list[str]) -> list[Finding]:
     full = root / rel
     if full.is_symlink():
         target = os.path.normpath(os.path.join(os.path.dirname(rel), os.readlink(full)))
         return [Finding(REF, rel)] if in_service(target.replace(os.sep, "/")) else []
-    return [Finding(REF, rel, n) for n, line in enumerate(lines, 1) if SERVICE_REF.search(line)]
+    return matching_lines(REF, rel, lines, SERVICE_REF.search)
 
 
 def check_sources(root: Path) -> list[Finding]:
@@ -176,9 +181,9 @@ def check_infra(rel: str, lines: list[str]) -> list[Finding]:
     if name in INFRA_NAMES or name.endswith(INFRA_SUFFIXES):
         return [Finding(INFRA, rel)]
     if DEPENDENCY_FILE.match(name):
-        return [Finding(INFRA, rel, n) for n, line in enumerate(lines, 1) if "aws-cdk-lib" in line]
+        return matching_lines(INFRA, rel, lines, lambda line: "aws-cdk-lib" in line)
     if name.endswith(CFN_SUFFIXES):
-        return [Finding(INFRA, rel, n) for n, line in enumerate(lines, 1) if CFN_DECL.search(line)][:1]
+        return matching_lines(INFRA, rel, lines, CFN_DECL.search)[:1]
     return []
 
 
@@ -195,16 +200,16 @@ def check_secrets(rel: str, lines: list[str], allowed: dict[tuple[str, str], dic
     return out
 
 
+def has_value(line: str) -> bool:
+    return bool(not line.lstrip().startswith("#") and "=" in line and line.split("=", 1)[1].strip())
+
+
 def check_env(rel: str, lines: list[str]) -> list[Finding]:
     name = PurePosixPath(rel).name
     if name == ".env.example":
         if not in_service(rel):
             return []
-        return [
-            Finding(ENV_VALUE, rel, n)
-            for n, line in enumerate(lines, 1)
-            if not line.lstrip().startswith("#") and "=" in line and line.split("=", 1)[1].strip()
-        ]
+        return matching_lines(ENV_VALUE, rel, lines, has_value)
     if name == ".env" or name.startswith(".env."):
         return [Finding(ENV_FILE, rel)]
     return []
