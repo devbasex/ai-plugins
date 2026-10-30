@@ -4392,6 +4392,20 @@
       "context": "ndf-factory",
       "meaning": "アカウントのランナーが Claude をどう呼ぶか。`local`（手元のランナー）・`byok`（キーの持ち込み）・`managed`（サービスの Bedrock）の 3 つで、アカウントごとに 1 つ持つ。Free は `managed` を選べず、月の token の上限は `managed` だけに掛かる",
       "source": "docs/specifications/ndf-factory-accounts-and-plans.md"
+    },
+    {
+      "term": "作業の報告",
+      "context": "ndf-workflow",
+      "meaning": "worker が応答の最後に書く「## 作業の報告」の節。「結果:」は 完了 / 判断が要る / できなかった のどれかで、supervise はこれでステップの成否を決める",
+      "code": "work_report",
+      "pending_source": "issues/issue-1698-requirements.md"
+    },
+    {
+      "term": "起こし直し",
+      "context": "ndf-workflow",
+      "meaning": "supervise の full のステップで、作業の報告が無いまま応答が終わったとき、同じ会話（--resume）へ続けるよう送ること。3 回まで",
+      "code": "resume_prompt",
+      "pending_source": "issues/issue-1698-requirements.md"
     }
   ]
 }
