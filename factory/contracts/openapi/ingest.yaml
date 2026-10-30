@@ -1,0 +1,169 @@
+openapi: 3.1.0
+info:
+  title: Neural Development Factory の進捗の受け口
+  version: 0.1.0
+  description: >-
+    ランナー・承認と通知（#2173）・GitHub の Webhook から進捗の事象を受け、出所ごとに認証して
+    スプリントの実行ごとの列へ冪等に追記する経路（#2171）。経路が認証の手段を 1 つに決め、
+    事象の source が経路の出所と食い違えば 403 を返す。事象と応答の本文の形は ../schemas/ の
+    JSON Schema が正で、ここは指すだけにする。401 と 403 の本文は理由によらず同じで、
+    202 の本文は同じ冪等の鍵の 2 回目でも同じである。
+  contact:
+    name: devbasex/ai-plugins
+    url: https://github.com/devbasex/ai-plugins
+  license:
+    name: MIT
+    url: https://github.com/devbasex/ai-plugins/blob/main/factory/LICENSE
+servers:
+  - url: https://api.example.com
+    description: API の入口（値はインフラが FACTORY_API_URL で渡す）
+tags:
+  - name: ingest
+    description: 進捗の事象の受け口
+paths:
+  /ingest/events:
+    post:
+      tags: [ingest]
+      operationId: ingestRunnerEvent
+      summary: ランナーが進捗の事象を 1 件送る（source は runner）
+      description: >-
+        実行ジョブの token を Authorization: Bearer で要る。token の実行ジョブと事象の job_id・sprint_run_id が
+        一致し、冪等の鍵が <job_id>:<seq>（job.finished だけ <job_id>:finished）のときだけ残す。
+        gate.answered・pr.updated・ci.updated は書けない。5xx と接続の失敗は同じ事象のまま送り直す。
+      security:
+        - runJobToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "../schemas/progress-event.schema.json"
+      responses:
+        "202":
+          $ref: "#/components/responses/Accepted"
+        "400":
+          $ref: "#/components/responses/InvalidEvent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /ingest/api/events:
+    post:
+      tags: [ingest]
+      operationId: ingestApiEvent
+      summary: 承認と通知（#2173）が gate.answered を 1 件送る（source は api）
+      description: >-
+        API Gateway の IAM 認可（SigV4 の署名）を通った要求だけが届く。受け口は呼び出し元のロールが
+        INGEST_API_CALLER_ROLE_ARN のロールかを確かめ、IAM の文脈が無ければ 401、ロールが違えば 403 を返す。
+        利用者の Cognito の token では書けない。依頼の識別子・属するスプリントの実行・種類・答えた人・承認か
+        差し戻しかが保存済みの答えとすべて一致するときだけ残し、冪等の鍵は api:<依頼の識別子> である。
+      security:
+        - iamSigV4: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "../schemas/progress-event.schema.json"
+      responses:
+        "202":
+          $ref: "#/components/responses/Accepted"
+        "400":
+          $ref: "#/components/responses/InvalidEvent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /ingest/github:
+    post:
+      tags: [ingest]
+      operationId: ingestGithubWebhook
+      summary: GitHub App の Webhook を受け、pr.updated・ci.updated として残す（source は github）
+      description: >-
+        X-Hub-Signature-256 を GitHub App の Webhook の秘密で確かめ、合わなければ 401 を返す。
+        pull_request は pr.updated、check_run は ci.updated へ翻訳し、冪等の鍵は github:<X-GitHub-Delivery の値>、
+        at は対象の更新時刻である。宛先のスプリントの実行は、step.recorded が残した Pull Request の参照で引く。
+        扱わない種類・宛先がちょうど 1 つに決まらない・形の違う本文は 202 で受けて保存しない
+        （GitHub は 2xx 以外を配達の失敗として記録し続けるため）。この経路は 400 と 403 を返さない。
+      security: []
+      parameters:
+        - name: X-Hub-Signature-256
+          in: header
+          required: true
+          description: 本文の HMAC-SHA256（sha256=<16 進>）
+          schema:
+            type: string
+        - name: X-GitHub-Event
+          in: header
+          required: true
+          description: Webhook の種類（pull_request・check_run を扱う）
+          schema:
+            type: string
+        - name: X-GitHub-Delivery
+          in: header
+          required: true
+          description: 配達の識別子。冪等の鍵に使う
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: GitHub の Webhook の本文（形は GitHub が決める）
+      responses:
+        "202":
+          $ref: "#/components/responses/Accepted"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+components:
+  securitySchemes:
+    runJobToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 実行の制御（#2186）が実行ジョブごとに発行する、EdDSA で署名した実行ジョブの token
+    iamSigV4:
+      type: http
+      scheme: AWS4-HMAC-SHA256
+      description: >-
+        API Gateway の IAM 認可（SigV4 の署名）。#2173 のサービスのロールで署名する。
+        認可の設定はインフラ（private リポジトリ）が持つ。
+  responses:
+    Accepted:
+      description: 受け付けた（残した・同じ冪等の鍵が既にある・GitHub の Webhook を残さなかった）
+      content:
+        application/json:
+          schema:
+            $ref: "../schemas/ingest-response.schema.json#/$defs/IngestAccepted"
+    InvalidEvent:
+      description: 本文が JSON でない・256 KiB を超える・定義に合わない（code は invalid_event。message は失敗の位置と規則の名前だけ）
+      content:
+        application/json:
+          schema:
+            $ref: "../schemas/ingest-response.schema.json#/$defs/IngestError"
+    Unauthorized:
+      description: 認証できない（code は unauthorized。理由によらず同じ本文）
+      content:
+        application/json:
+          schema:
+            $ref: "../schemas/ingest-response.schema.json#/$defs/IngestError"
+    Forbidden:
+      description: 認証の手段と事象の出所・種類・識別子が食い違う（code は forbidden。理由によらず同じ本文）
+      content:
+        application/json:
+          schema:
+            $ref: "../schemas/ingest-response.schema.json#/$defs/IngestError"
+    Unavailable:
+      description: 保存・保存済みの答え・秘密を読み書きできない（code は ingest_unavailable）。同じ事象のまま送り直す
+      content:
+        application/json:
+          schema:
+            $ref: "../schemas/ingest-response.schema.json#/$defs/IngestError"

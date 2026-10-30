@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/devbasex/ai-plugins/blob/develop/factory/contracts/schemas/run-job-instruction.schema.json",
+  "title": "RunJobInstruction",
+  "description": "実行の制御からランナーへ渡す実行ジョブの指示（確定仕様の「実行ジョブの指示」）。環境変数と、形態 ① の受け取りの応答で同じ形にするため、値はどれも文字列",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "SPRINT_RUN_ID",
+    "JOB_ID",
+    "REPO",
+    "NDF_VERSION",
+    "START",
+    "INGEST_URL",
+    "INGEST_TOKEN_SECRET_ARN",
+    "EXECUTION_MODE"
+  ],
+  "properties": {
+    "SPRINT_RUN_ID": { "description": "事象の宛先", "type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$" },
+    "JOB_ID": { "description": "冪等の鍵の頭", "type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$" },
+    "REPO": { "description": "取り込むリポジトリ（owner/name）", "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+    "NDF_VERSION": { "description": "スプリントの開始で固定した NDF の版", "type": "string", "minLength": 1 },
+    "START": { "description": "new は課題から始め、resume は保存した状態から続ける", "type": "string", "enum": ["new", "resume"] },
+    "ISSUES": { "description": "スプリントへ入れる課題の番号（カンマ区切り）", "type": "string", "pattern": "^[1-9][0-9]*(,[1-9][0-9]*)*$" },
+    "APPROVAL_REQUEST_ID": { "description": "答えの出た承認の依頼の識別子。答えの本文は載せない", "type": "string", "minLength": 1 },
+    "INGEST_URL": { "description": "進捗の受け口の runner の経路（POST /ingest/events）の URL", "type": "string", "format": "uri" },
+    "INGEST_TOKEN_SECRET_ARN": { "description": "このジョブだけに効く実行ジョブの token の置き場", "type": "string", "pattern": "^arn:aws[a-z-]*:secretsmanager:" },
+    "EXECUTION_MODE": { "description": "スプリントの開始でアカウントから写した実行の形態", "type": "string", "enum": ["local", "byok", "managed"] },
+    "MODEL_CREDENTIAL_SECRET_ARN": { "description": "利用者の Anthropic API キーか、引き受けるロールの ARN の置き場", "type": "string", "pattern": "^arn:aws[a-z-]*:secretsmanager:" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "START": { "const": "new" } }, "required": ["START"] },
+      "then": { "required": ["ISSUES"] }
+    },
+    {
+      "if": { "properties": { "START": { "const": "resume" } }, "required": ["START"] },
+      "then": { "required": ["APPROVAL_REQUEST_ID"] }
+    },
+    {
+      "if": { "properties": { "EXECUTION_MODE": { "const": "byok" } }, "required": ["EXECUTION_MODE"] },
+      "then": { "required": ["MODEL_CREDENTIAL_SECRET_ARN"] },
+      "else": { "not": { "required": ["MODEL_CREDENTIAL_SECRET_ARN"] } }
+    }
+  ]
+}

@@ -11,6 +11,6 @@ def test_this_repository_project_yml_matches_detection():
     assert code == 0
     detected = [d["language"] for d in out["detected"]]
     text = (REPO / ".serena/project.yml").read_text()
-    assert py.read_list(text, "language_servers") == detected == ["python", "bash"]
+    assert py.read_list(text, "language_servers") == detected == ["python", "bash", "typescript"]
     assert {".serena/**", ".worktrees/**"} <= set(py.read_list(text, "ignored_paths"))
     assert py.read_list(text, "mcp_serena_excluded") == []

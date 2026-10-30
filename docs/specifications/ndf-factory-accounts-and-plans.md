@@ -52,7 +52,7 @@ Neural Development Factory の利用者が Google か GitHub のアカウント�
 
 | 要素 | 場所 | 責務 |
 | --- | --- | --- |
-| パッケージの根 | `factory/package.json`・`package-lock.json`・`.node-version`・`vitest.config.ts` | npm の workspaces で `web`・`api` を束ね、依存を 1 つのロックファイルで固める。`npm run check` で契約の検査と両方の検査を走らせる |
+| パッケージの根 | `factory/package.json`・`package-lock.json`・`.node-version`・`vitest.config.ts` | npm の workspaces で `web`・`api`（と #2171 が足した `contracts`）を束ね、依存を 1 つのロックファイルで固める。`npm run check` で契約の検査と各 workspace の検査を走らせる |
 | ログインの画面 | `factory/web/src/auth.ts`・`pages/LoginPage.tsx`・`pages/CallbackPage.tsx` | Cognito の管理されたログインへ IdP を指定して送り、戻りで token を受けて保存する。ログアウトで token を消す |
 | アカウントの画面 | `factory/web/src/pages/AccountPage.tsx`・`NewTeamPage.tsx`・`TeamPage.tsx` | 自分のアカウント・チームを作る・チームのアカウントの 3 画面。API の 401 で token を消してログインへ戻す |
 | token の検証 | `factory/api/src/auth/verify.ts` | `Authorization: Bearer` の access token を検証し、利用者を返す。失敗は 401 |
@@ -351,9 +351,9 @@ GSI `gsi1` は利用者が席を持つチームの一覧を引くためにあり
 
 | 項目 | 決まり |
 | --- | --- |
-| 道具 | npm の workspaces（`web`・`api`）。ロックファイルは `factory/package-lock.json` の 1 つだけ |
+| 道具 | npm の workspaces（`web`・`api`。#2171 が `contracts` を足した）。ロックファイルは `factory/package-lock.json` の 1 つだけ |
 | Node の版 | `factory/.node-version` の 1 行（`24`）。`package.json` の `engines`（`>=24 <25`）と CI の `setup-node` が同じ値を使う |
-| 検査 | 各 workspace に `typecheck`（`tsc --noEmit`）・`test`（`vitest run`）・`check`（2 つを順に）。根の `npm run check` は `lint:contracts`（Spectral の `spectral:oas`、warn 以上で失敗）と両方の `check` を走らせる |
+| 検査 | 各 workspace に `typecheck`（`tsc --noEmit`）・`test`（`vitest run`）・`check`（2 つを順に）。根の `npm run check` は `lint:contracts`（Spectral の `spectral:oas`、warn 以上で失敗）と各 workspace の `check` を走らせる |
 | 画面の資産 | `npm run build -w web` が `factory/web/dist/` に作る |
 
 ## 外部連携
