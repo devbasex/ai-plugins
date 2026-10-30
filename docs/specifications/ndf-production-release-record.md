@@ -8,7 +8,7 @@
   `{queue_pr:release-prod}` からその PR を `--record-pr` に受け取り、`sprint-close.py` が記録から閉じる条件 1 を判定する
 - **記録の書き込みが落ちても、本番の配布はやり直さない。** やり直せるのは記録を書くステップだけである
 - **`pace: normal` のスプリントでも、`new sprint` が承認ゲート 2 と本番のステージ（計画名 `release-prod`）まで目録へ書き出す。**
-  承認ゲート 2 の後に conductor が組み立てるコマンドは無く、目録の「本番」のステージの `command` に `--done` を足して打つだけで
+  承認ゲート 2 の後に conductor が組み立てるコマンドは無く、目録の「本番」のステージの `command`（`--done` を含む。#1426）を打つだけで
   本番の配布が流れる（#1914。「`pace: normal` のスプリントの本番のステージ」）
 
 例: 版 `10.17.30`（本番のリリースの PR は #1268。記録が無く、課題を手で閉じた版である）を今のプランで出したとき。
@@ -223,9 +223,9 @@ stateDiagram-v2
 
 | `name` | 持つキー | 中身 |
 | --- | --- | --- |
-| `配布` | `plans`（`release`）・`then_of: 検査` | 開発版のリリースプラン。`note` は持たない |
+| `配布` | `plans`（`release`）・`then_of: <承認ゲート 1 の後の最初のステージ>` | 開発版のリリースプラン。`note` は持たない。`then_of` は `--design` があれば「設計 PR のマージ」、無ければ「設計の結果」か「スプリントブランチ」（#1426 の決定 5） |
 | `関門 2` | `gate` | 承認ゲート 2 の文（`sprint_routes.normal_gate_2_stage`） |
-| `本番` | `plans`（`release-prod`）・`command` | 本番のリリースプラン。`command` は `python3 <supervise.py> queue <番号>-release-prod.json --max 3` |
+| `本番` | `plans`（`release-prod`）・`command`・`resume` | 本番のリリースプラン。`command` は `python3 <supervise.py> queue <番号>-release-prod.json --max 3 --done <出力先>/done-<番号>.json`、`resume` は同じ done の `queue --resume <done>`（#1426 の決定 6）。先頭のステップは `approve`（下記） |
 
 本番のプランは開発版と同じ `sprint_waves.plan_sprint_release` に `channel="prod"` と `version=prod_version(--version)`（接尾辞を外した版。
 `10.18.0-dev.1` → `10.18.0`）を渡して組む。worktree とブランチは `release/v<正式版>`、出す PR は `{queue_pr:check}` である。
@@ -233,9 +233,15 @@ stateDiagram-v2
 と同じ出力に `課題` が入る（スプリントの工程は雛形に対して順応者の関係にある）。
 
 承認ゲート 2 の文は、開発版の配布が書いた承認資料（元のリポジトリの下の `issues/approval-<プラグイン>-v<正式版>.md` の絶対パス）を示して
-本番への配布の承認を取り、承認されたら `release-steps.py approve --approval <承認資料> --approved-sha <approval-facts の metrics.approved_sha> --by user`
-で承認の記録を書いてから「本番」のステージの `command` を打つこと（差し戻されたら打たない）を書く。`--state` を渡したときだけ、続けて
-助言の MVV 判定の扱いと `sprint-state.py gate <状態> "関門 2" --what <要約> --by user --outcome approved|rejected` を書く（`normal_gate_2`）。
+本番への配布の承認を取ることを書く。`--state` を渡さないときは、承認されたら `release-steps.py approve --approval <承認資料> --approved-sha <approval-facts の metrics.approved_sha> --by user`
+で承認の記録を書いてから「本番」のステージの `command` を打つこと（差し戻されたら打たない）を書く。`--state` を渡したときは、利用者が答えたら
+`sprint-state.py gate <状態> "関門 2" --what <要約> --by user --outcome approved|rejected` を打ち、承認されたら「本番」のステージの `command` を打つことと、
+助言の MVV 判定の扱いを書く（#1426 の決定 1）。
+
+本番のプラン（MVV 判定なし）の先頭のステップ `approve` は `release-steps.py approve --approval <承認資料> --facts-from <開発版のプランの状態> [--answer-from <状態>] --by user`
+を打つ（#1426 の決定 7）。提示した SHA は開発版の `facts` の出力の `metrics.approved_sha` から読み、承認資料に一致する承認の記録が既にあれば書かずに通し、
+無ければ `--answer-from` の承認ゲート 2 の利用者の承認の記録（`facts` の出力より後）があるときだけ書く。どれも無ければ書かずに承認ゲート（10）で終え、
+`bump` へ進まない。開発版のプランの状態は `--dev-state` か、キューの置き場 `{queue_state:release}` で埋める。
 
 | # | 常に成り立つ条件 | 破れたときの扱い |
 | --- | --- | --- |
@@ -259,7 +265,7 @@ sequenceDiagram
     participant Q as queue
     C->>S: new sprint（normal・--version 10.18.0-dev.1）
     S-->>C: sprint.json（… 検査 → 配布 → 関門 2 → 本番）
-    C->>Q: 検査の command（--then 配布）
+    C->>Q: 承認ゲート 1 の後の最初のステージの command（--then … 検査 → 配布）
     Q->>Q: 検査がスプリントの PR をマージ（報告に PR）
     Q->>Q: 配布の {queue_pr:check} を埋めて開発版を流す
     Q-->>C: gate（承認資料）
@@ -267,7 +273,8 @@ sequenceDiagram
     alt 差し戻された
         C->>C: 本番の command を打たない
     else 承認された
-        C->>Q: 本番の command --done（単独）
+        C->>Q: 本番の command（単独。--done を含む）
+        Q->>Q: 先頭の approve が承認の記録を書く（無ければ承認ゲートで止まる）
         Q->>Q: 同じディレクトリの検査の報告から {queue_pr:check} を埋める
         Q-->>C: 本番の配布・記録・リリース後テスト・後片付けの結果
     end
