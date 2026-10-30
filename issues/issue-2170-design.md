@@ -209,7 +209,7 @@ factory/
 ├── package.json                   # 新設。workspaces: web, api。scripts: check, lint:contracts
 ├── package-lock.json              # 新設。唯一のロックファイル
 ├── .gitignore                     # 変更。dist/ と coverage/ を足す
-├── .env.example                   # 変更。下の「データ・設定」の 6 つの名前を足す
+├── .env.example                   # 変更。下の「データ・設定」の 7 つの名前を足す
 ├── README.md                      # 変更。「パッケージの管理」の節を足す（受け入れ条件 15）
 ├── contracts/openapi/accounts.yaml  # 新設
 ├── api/
