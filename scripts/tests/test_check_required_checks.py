@@ -119,7 +119,9 @@ SIMPLE = "on:\n  pull_request:\njobs:\n  a:\n    runs-on: x\n"
 def test_this_repository_has_only_the_awaiting_six_and_itself(tmp_path, capsys):
     """AC6: 12 個の必須と必須にしないジョブの宣言だけで、差は 6 つと突き合わせのチェック自身だけ。"""
     allow = json.loads((REPO / "scripts" / "required-checks-allow.json").read_text(encoding="utf-8"))
-    (tmp_path / "allow.json").write_text(json.dumps({"version": 1, "not_required": allow["not_required"], "awaiting": allow["awaiting"]}), encoding="utf-8")
+    (tmp_path / "allow.json").write_text(
+        json.dumps({"version": 1, "not_required": allow["not_required"], "awaiting": allow["awaiting"]}), encoding="utf-8"
+    )
     (tmp_path / "rules.json").write_text(json.dumps(rules(*REQUIRED_12)), encoding="utf-8")
     code = crc.main(
         [
