@@ -293,6 +293,7 @@ erDiagram
 | `job_id` | 文字列 | 許す | 空は「実行ジョブの外で起きた」（GitHub の通知・API の操作） |
 | `schema_version` | 整数 | 許さない | 事象の形の版。上げるのは互換の無い変更のときだけ |
 | `payload` | JSON | 許さない | 種類ごとの中身。無い種類は `{}` |
+| `pr_ref` | 文字列 | 許す | `step.recorded` が Pull Request を指すときだけ `<owner/name の小文字>#<番号>`。GitHub の Webhook の宛先のスプリントの実行を引く鍵 |
 
 | `source` | `idempotency_key` の形 | `at` の取り方 |
 | --- | --- | --- |
@@ -342,7 +343,7 @@ erDiagram
 | --- | --- | --- | --- |
 | `job.started` | ランナー | NDF の版・`START` | #2172 |
 | `phase.changed` | ランナー（`sprint.json` の計画と `progress.jsonl` の `step` の行） | フェーズの名前・課題 | #2172 |
-| `step.recorded` | ランナー（`progress.jsonl` の `step`） | ステップ・終了コード・秒・要約 | #2172 |
+| `step.recorded` | ランナー（`progress.jsonl` の `step`） | ステップ・終了コード・秒・要約・このステップが作った・更新した Pull Request（リポジトリと番号。任意） | #2172 |
 | `attention` | ランナー（`progress.jsonl` の `attention`） | 理由・要約 | #2172・#2173 |
 | `gate.reached` | ランナー（作業の報告の `判断が要る` と承認資料） | 種類（ゲート 1・ゲート 2・判断）・Pull Request の URL・承認資料の本文 | #2173 |
 | `gate.answered` | API（#2173） | 承認の依頼の識別子・種類・承認か差し戻しか（判断では無し）・答えた人のアカウント。本文は事象に載せない | #2171・#2172 |
@@ -359,6 +360,8 @@ erDiagram
 | `runner` | 実行ジョブごとの token。token の実行ジョブと事象の `job_id`・`sprint_run_id` が一致すること | `gate.answered`・`pr.updated`・`ci.updated` を除く種類 |
 | `api` | #2173 のサービスの IAM ロールによる署名だけ（利用者の Cognito の token では書けない）。加えて、依頼の識別子・属するスプリントの実行・種類・答えた人・承認か差し戻しかが保存済みの答えとすべて一致するときだけ書く（未保存なら 403）。利用者の token と `account_id` の確かめは #2173 の API が行う | `gate.answered` |
 | `github` | `X-Hub-Signature-256` を GitHub App の Webhook の秘密で検証する | `pr.updated`・`ci.updated` |
+
+**GitHub の Webhook の宛先のスプリントの実行は、`pr_ref` が同じ事象の `sprint_run_id` で引く。** ちょうど 1 つに決まらなければ 202 で保存しない。
 
 **受け口の応答**: 受け取ったら 202（同じ冪等の鍵の 2 回目も 202）、認証できなければ 401、認証の手段と `source`・種類・識別子が食い違えば 403、形が違えば 400。ランナーは 5xx と接続の失敗を、同じ事象のまま送り直す。
 
