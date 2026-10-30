@@ -21,6 +21,7 @@ on:
       - "KIRO.md"
       - "README.md"
       - "docs/**"
+      - "factory/**"
       - "issues/**"
       - "plugins/**"
       - "scripts/**"
@@ -64,6 +65,15 @@ jobs:
         with:
           python-version: "3.x"
       - run: python3 scripts/check-skill-shell-vars.py
+
+  service-boundary-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.x"
+      - run: python3 scripts/check-service-boundary.py
 
   runtime-plugin-validate:
     runs-on: ubuntu-latest

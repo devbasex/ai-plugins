@@ -123,6 +123,8 @@ Skill のほかに、次のものが入ります。
 
 MIT License。詳細は [LICENSE](./LICENSE) にあります。
 
+Web サービスのディレクトリ [factory/](./factory/README.md)（Neural Development Factory）は、自分の [LICENSE](./factory/LICENSE) を持ちます。今は根と同じ MIT License です。ライセンスを差し替えるときは `factory/LICENSE` とこの節だけを書き換え、プラグインの配布物は変わりません。
+
 ---
 
 **作成者:** takemi-ohama - https://github.com/takemi-ohama
