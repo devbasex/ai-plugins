@@ -8,7 +8,7 @@ import { ApiError } from "../errors.ts";
 import { appendEvent } from "./append.ts";
 import { authorizeApi, authorizeGithub, authorizeRunner, isCallerRole } from "./authorize.ts";
 import { IngestForbiddenError, IngestUnauthorizedError, IngestUnavailableError, InvalidEventError } from "./errors.ts";
-import { translateWebhook, verifyWebhookSignature } from "./github.ts";
+import { translateWebhook, verifyWebhookSignature, type TranslatedWebhook } from "./github.ts";
 import { RunJobTokenError, type RunJobTokenVerifier } from "./run-job-token.ts";
 import type { SavedAnswerReader } from "./saved-answers.ts";
 import type { ProgressEventStore } from "./store.ts";
@@ -51,6 +51,22 @@ const ACCEPTED = { accepted: true } as const;
 function bearerToken(header: string | undefined): string | null {
   const m = /^Bearer ([^\s]+)$/.exec(header ?? "");
   return m ? m[1]! : null;
+}
+
+// 宛先は Pull Request の参照を持つ事象のスプリントの実行。ちょうど 1 つに決まるときだけ返す（決定 7）
+async function resolveWebhookTarget(
+  candidates: TranslatedWebhook["candidates"],
+  findRuns: (prRef: string) => Promise<string[]>,
+): Promise<{ sprintRunId: string; number: number } | null> {
+  const targets = new Map<string, number>();
+  for (const candidate of candidates) {
+    for (const run of await findRuns(candidate.prRef)) {
+      if (!targets.has(run)) targets.set(run, candidate.number);
+    }
+  }
+  if (targets.size !== 1) return null;
+  const [[sprintRunId, number]] = [...targets] as [[string, number]];
+  return { sprintRunId, number };
 }
 
 export function createIngestApp(
@@ -151,19 +167,14 @@ export function createIngestApp(
     const translated = translateWebhook(eventName, delivery, parsed);
     if (!translated) return c.json(ACCEPTED, 202);
 
-    // 宛先は Pull Request の参照を持つ事象のスプリントの実行。ちょうど 1 つに決まるときだけ残す（決定 7）
-    const targets = new Map<string, number>();
+    let target: { sprintRunId: string; number: number } | null;
     try {
-      for (const candidate of translated.candidates) {
-        for (const run of await resolve().store.findSprintRunsByPrRef(candidate.prRef)) {
-          if (!targets.has(run)) targets.set(run, candidate.number);
-        }
-      }
+      target = await resolveWebhookTarget(translated.candidates, (ref) => resolve().store.findSprintRunsByPrRef(ref));
     } catch {
       throw new IngestUnavailableError();
     }
-    if (targets.size !== 1) return c.json(ACCEPTED, 202);
-    const [[sprintRunId, number]] = [...targets] as [[string, number]];
+    if (!target) return c.json(ACCEPTED, 202);
+    const { sprintRunId, number } = target;
 
     const checked = checkBuiltEvent(translated.build(sprintRunId, number));
     if (!checked.ok || !authorizeGithub(checked.event)) return c.json(ACCEPTED, 202);
