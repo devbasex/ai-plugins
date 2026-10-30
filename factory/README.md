@@ -29,7 +29,7 @@ CDK のスタック・ネットワーク・秘密の管理は別の private リ�
 
 TypeScript のコードは npm の workspaces で束ね、どの子課題も次の規則に従う。
 
-- 道具は npm（Node に同梱）。pnpm と yarn は使わない。理由は、手元・CI・ランナーのコンテナのどこでも追加の導入なしに使え、依存の版を 1 つのロックファイルで揃えられるため（決定の記録は `issues/issue-2170-design-decisions.md` の決定 1）
+- 道具は npm（Node に同梱）。pnpm と yarn は使わない。理由は、手元・CI・ランナーのコンテナのどこでも追加の導入なしに使え、依存の版を 1 つのロックファイルで揃えられるため（確定仕様は [docs/specifications/ndf-factory-accounts-and-plans.md](../docs/specifications/ndf-factory-accounts-and-plans.md) の「背景」）
 - Node の版は [.node-version](./.node-version) の 1 行で決め、`package.json` の `engines` と CI の `setup-node` が同じ値を使う
 - ロックファイルは `factory/package-lock.json` の 1 つだけ。workspace ごとに置かない。依存は `factory/` で `npm install -w <workspace> <パッケージ>` で足す
 - 新しいディレクトリ（`runner/` など）を足すときは、根の `package.json` の `workspaces` に足し、`typecheck`（`tsc --noEmit`）・`test`（`vitest run`）・`check`（2 つを順に）の 3 つの script を置き、根の `check` に足す

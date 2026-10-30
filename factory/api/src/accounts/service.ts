@@ -26,7 +26,7 @@ import {
 } from "./model.ts";
 import { ConditionFailedError, type AccountPatch, type AccountStore } from "./store.ts";
 
-// 版の競合で読み直して書き直す回数の上限（issues/issue-2170-design-interfaces.md の「処理の流れ」）
+// 版の競合で読み直して書き直す回数の上限（docs/specifications/ndf-factory-accounts-and-plans.md の「常に成り立つ条件」）
 const VERSION_RETRIES = 3;
 
 export interface ServiceDeps {

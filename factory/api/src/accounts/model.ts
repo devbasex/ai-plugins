@@ -1,4 +1,4 @@
-// 集約「利用者」と「アカウント」の値（issues/issue-2170-design.md の「データ構造」）
+// 集約「利用者」と「アカウント」の値（docs/specifications/ndf-factory-accounts-and-plans.md の「アカウントの表」）
 export const PLANS = ["free", "pro", "max", "team"] as const;
 export type Plan = (typeof PLANS)[number];
 
