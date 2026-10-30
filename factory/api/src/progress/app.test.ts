@@ -358,6 +358,133 @@ describe("GitHub の Webhook（受け入れ条件 12）", () => {
     expect(res.status).toBe(503);
     expect(await res.json()).toEqual(UNAVAILABLE);
   });
+
+  // 現状固定（リファクタリング I-001: translateWebhook の分岐）。期待値の根拠は今の実装の出力
+  describe("翻訳の分岐の現状固定", () => {
+    async function linkPrNumber(number: number, sprintRunId = "sr-1", jobId = "job-1") {
+      const res = await t.runner(
+        runnerEvent({
+          sprint_run_id: sprintRunId,
+          job_id: jobId,
+          idempotency_key: `${jobId}:${number}`,
+          type: "step.recorded",
+          payload: { step: "pr", exit_code: 0, seconds: 1, summary: "s", pull_request: { repo: "owner/name", number } },
+        }),
+      );
+      expect(res.status).toBe(202);
+    }
+
+    it("本文が配列・repository の full_name が無いか空なら 202 で保存しない", async () => {
+      await linkPr();
+      const bodies: unknown[] = [
+        [prBody()],
+        { ...prBody(), repository: {} },
+        { ...prBody(), repository: { full_name: "" } },
+        { ...prBody(), repository: null },
+      ];
+      for (const [i, body] of bodies.entries()) {
+        expect((await t.github("pull_request", body, { delivery: `d-${i}` })).status).toBe(202);
+      }
+      expect(githubEvents()).toHaveLength(0);
+    });
+
+    it("pull_request の状態・番号・時刻が扱えない形なら 202 で保存しない", async () => {
+      await linkPr();
+      const patches: Record<string, unknown>[] = [
+        { state: "draft" },
+        { state: undefined },
+        { number: 0 },
+        { number: "7" },
+        { number: 7.5 },
+        { updated_at: "" },
+        { updated_at: 123 },
+      ];
+      for (const [i, patch] of patches.entries()) {
+        expect((await t.github("pull_request", prBody(patch), { delivery: `d-${i}` })).status).toBe(202);
+      }
+      expect((await t.github("pull_request", { repository: { full_name: "owner/name" }, pull_request: [] }, { delivery: "d-arr" })).status).toBe(202);
+      expect(githubEvents()).toHaveLength(0);
+    });
+
+    it("merged が true なら state が open でも merged、closed はそのまま closed", async () => {
+      await linkPr();
+      await t.github("pull_request", prBody({ merged: true, state: "open" }), { delivery: "d-1" });
+      await t.github("pull_request", prBody({ state: "closed" }), { delivery: "d-2" });
+      await t.github("pull_request", prBody({ merged: "true", state: "open" }), { delivery: "d-3" });
+      expect(githubEvents().map((e) => (e.payload as { state: string }).state)).toEqual(["merged", "closed", "open"]);
+    });
+
+    it("payload の repo は full_name の大文字を残し、宛先は小文字にそろえた参照で引く", async () => {
+      await linkPr();
+      await t.github("pull_request", { ...prBody(), repository: { full_name: "OWNER/Name" } }, { delivery: "d-1" });
+      await t.github("check_run", { ...checkBody(), repository: { full_name: "OWNER/Name" } }, { delivery: "d-2" });
+      expect(githubEvents().map((e) => [e.sprint_run_id, e.idempotency_key, e.payload])).toEqual([
+        ["sr-1", "github:d-1", { repo: "OWNER/Name", number: 7, state: "open" }],
+        ["sr-1", "github:d-2", { repo: "OWNER/Name", pr_number: 7, name: "factory-check", conclusion: "success" }],
+      ]);
+    });
+
+    it("check_run の名前・時刻・Pull Request が扱えない形なら 202 で保存しない", async () => {
+      await linkPr();
+      const patches: Record<string, unknown>[] = [
+        { name: "" },
+        { name: undefined },
+        { completed_at: null, started_at: null },
+        { completed_at: "", started_at: "" },
+        { pull_requests: [] },
+        { pull_requests: undefined },
+        { pull_requests: { number: 7 } },
+        { pull_requests: [{ number: 0 }, { number: "7" }, null, 7] },
+      ];
+      for (const [i, patch] of patches.entries()) {
+        expect((await t.github("check_run", checkBody(patch), { delivery: `d-${i}` })).status).toBe(202);
+      }
+      expect((await t.github("check_run", { repository: { full_name: "owner/name" } }, { delivery: "d-none" })).status).toBe(202);
+      expect(githubEvents()).toHaveLength(0);
+    });
+
+    it("check_run の completed_at が空文字なら started_at を at にする", async () => {
+      await linkPr();
+      await t.github("check_run", checkBody({ completed_at: "" }), { delivery: "d-1" });
+      expect(githubEvents().map((e) => e.at)).toEqual(["2026-10-30T05:00:00Z"]);
+    });
+
+    it("conclusion が文字列でない・空文字なら null として残す", async () => {
+      await linkPr();
+      await t.github("check_run", checkBody({ conclusion: 1 }), { delivery: "d-1" });
+      await t.github("check_run", checkBody({ conclusion: "" }), { delivery: "d-2" });
+      await t.github("check_run", checkBody({ conclusion: undefined }), { delivery: "d-3" });
+      await t.github("check_run", checkBody({ conclusion: "failure" }), { delivery: "d-4" });
+      expect(githubEvents().map((e) => (e.payload as { conclusion: string | null }).conclusion)).toEqual([null, null, null, "failure"]);
+    });
+
+    it("check_run の Pull Request は不正な番号を除き、宛先の引ける番号で残す", async () => {
+      await linkPr();
+      await t.github("check_run", checkBody({ pull_requests: [{ number: 9 }, { number: "x" }, { number: 7 }, { number: 7 }] }), { delivery: "d-1" });
+      expect(githubEvents().map((e) => [e.sprint_run_id, (e.payload as { pr_number: number }).pr_number])).toEqual([["sr-1", 7]]);
+    });
+
+    it("check_run の 2 つの Pull Request が同じ実行を指せば、先に来た番号で 1 件残す", async () => {
+      await linkPrNumber(8);
+      await linkPrNumber(7);
+      await t.github("check_run", checkBody({ pull_requests: [{ number: 8 }, { number: 7 }] }), { delivery: "d-1" });
+      expect(githubEvents().map((e) => [e.sprint_run_id, (e.payload as { pr_number: number }).pr_number])).toEqual([["sr-1", 8]]);
+    });
+
+    it("check_run の 2 つの Pull Request が別々の実行を指せば 202 で保存しない", async () => {
+      await linkPrNumber(7, "sr-1", "job-1");
+      await linkPrNumber(8, "sr-2", "job-2");
+      expect((await t.github("check_run", checkBody({ pull_requests: [{ number: 7 }, { number: 8 }] }), { delivery: "d-1" })).status).toBe(202);
+      expect(githubEvents()).toHaveLength(0);
+    });
+
+    it("扱わない種類の Webhook は pull_request の形を持っていても保存しない", async () => {
+      await linkPr();
+      expect((await t.github("pull_request_review", prBody(), { delivery: "d-1" })).status).toBe(202);
+      expect((await t.github("check_suite", checkBody(), { delivery: "d-2" })).status).toBe(202);
+      expect(githubEvents()).toHaveLength(0);
+    });
+  });
 });
 
 describe("ログと応答に秘密を出さない（受け入れ条件 19、I30・I31）", () => {
