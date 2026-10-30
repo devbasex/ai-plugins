@@ -1,0 +1,405 @@
+openapi: 3.1.0
+info:
+  title: Neural Development Factory のアカウントの API
+  version: 0.1.0
+  description: >-
+    画面向けのアカウント・席・実行の形態の経路（#2170）。どの経路も Cognito の access token を
+    Authorization: Bearer で要る。使える量の判定は HTTP の経路にせず、factory/api/src/index.ts の関数で呼ぶ。
+  contact:
+    name: devbasex/ai-plugins
+    url: https://github.com/devbasex/ai-plugins
+  license:
+    name: MIT
+    url: https://github.com/devbasex/ai-plugins/blob/main/factory/LICENSE
+servers:
+  - url: https://api.example.com
+    description: API の入口（値はインフラが FACTORY_API_URL で渡す）
+tags:
+  - name: me
+    description: ログインした利用者
+  - name: accounts
+    description: アカウント・席・実行の形態
+security:
+  - cognito: []
+paths:
+  /me:
+    get:
+      tags: [me]
+      operationId: getMe
+      summary: 自分の利用者と、席を持つアカウントの一覧
+      description: 初めての要求では、Free・local の個人のアカウントを 1 つ作る。
+      responses:
+        "200":
+          description: 利用者とアカウントの一覧
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /teams:
+    post:
+      tags: [accounts]
+      operationId: createTeam
+      summary: チームのアカウントを作る
+      description: 作った利用者がチームの持ち主になり、持ち主の席が 1 つできる。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTeam"
+      responses:
+        "201":
+          description: 作ったチームのアカウント
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountDetail"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /accounts/{account_id}:
+    parameters:
+      - $ref: "#/components/parameters/AccountId"
+    get:
+      tags: [accounts]
+      operationId: getAccount
+      summary: アカウントのプラン・実行の形態・使える量・席
+      description: 個人のアカウントの持ち主か、チームの席を持つ利用者だけが読める。
+      responses:
+        "200":
+          description: アカウント
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /accounts/{account_id}/execution-mode:
+    parameters:
+      - $ref: "#/components/parameters/AccountId"
+    put:
+      tags: [accounts]
+      operationId: setExecutionMode
+      summary: 実行の形態を変える
+      description: アカウントの持ち主だけが変えられる。今と同じ値なら履歴を足さずに 200 を返す。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetExecutionMode"
+      responses:
+        "200":
+          description: 変えた後のアカウント
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountDetail"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /accounts/{account_id}/seats:
+    parameters:
+      - $ref: "#/components/parameters/AccountId"
+    post:
+      tags: [accounts]
+      operationId: addSeat
+      summary: 席を足す
+      description: チームの持ち主が、既に 1 度ログインした利用者を ID で指して席を足す。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddSeat"
+      responses:
+        "201":
+          description: 足した席
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Seat"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UserNotFound"
+  /accounts/{account_id}/seats/{user_id}:
+    parameters:
+      - $ref: "#/components/parameters/AccountId"
+      - $ref: "#/components/parameters/UserId"
+    patch:
+      tags: [accounts]
+      operationId: changeSeat
+      summary: 席の種類を変える
+      description: チームの持ち主だけが変えられる。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangeSeat"
+      responses:
+        "200":
+          description: 変えた後の席
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Seat"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/SeatNotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+    delete:
+      tags: [accounts]
+      operationId: removeSeat
+      summary: 席を外す
+      description: チームの持ち主だけが外せる。持ち主自身の席は外せない。
+      responses:
+        "204":
+          description: 外した
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/SeatNotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+components:
+  securitySchemes:
+    cognito:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Cognito の利用者プールの access token
+  parameters:
+    AccountId:
+      name: account_id
+      in: path
+      required: true
+      description: アカウントの ID
+      schema:
+        type: string
+    UserId:
+      name: user_id
+      in: path
+      required: true
+      description: 利用者の ID（Cognito の sub）
+      schema:
+        type: string
+  responses:
+    InvalidRequest:
+      description: 要求の形が正しくない（invalid_request）
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: token が無い・壊れている・期限切れ・別の利用者プールかクライアントのもの（unauthorized）
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: >-
+        席も持ち主でもない・アカウントが無い・持ち主の操作を持ち主でない者が求めた（forbidden）。
+        アカウントの有無は出さない
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    SeatNotFound:
+      description: 席が無い（seat_not_found）。持ち主と確かめた後だけ返す
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Conflict:
+      description: >-
+        not_a_team（個人のアカウントへの席の操作）・seat_exists・owner_seat_protected・
+        managed_not_allowed_on_free
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    UserNotFound:
+      description: 指した利用者がまだログインしていない（user_not_found）
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unavailable:
+      description: 保存に失敗した（account_unavailable）。時間をおいてやり直す
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  schemas:
+    Plan:
+      type: string
+      enum: [free, pro, max, team]
+    SeatType:
+      type: string
+      enum: [standard, premium]
+    ExecutionMode:
+      type: string
+      description: local（手元のランナー）・byok（キーの持ち込み）・managed（サービスの Bedrock）
+      enum: [local, byok, managed]
+    Idp:
+      type: string
+      enum: [google, github]
+    AccountSummary:
+      type: object
+      required: [account_id, kind, name, plan, role, seat_type, execution_mode]
+      properties:
+        account_id:
+          type: string
+        kind:
+          type: string
+          enum: [personal, team]
+        name:
+          type: [string, "null"]
+          description: チームの名前。個人のアカウントは null
+        plan:
+          $ref: "#/components/schemas/Plan"
+        role:
+          type: string
+          enum: [owner, member]
+        seat_type:
+          description: チームのときだけ、要求した利用者の席の種類
+          oneOf:
+            - $ref: "#/components/schemas/SeatType"
+            - type: "null"
+        execution_mode:
+          $ref: "#/components/schemas/ExecutionMode"
+    Limits:
+      type: object
+      required: [concurrent_sprint_runs, monthly_tokens]
+      properties:
+        concurrent_sprint_runs:
+          type: integer
+          description: 同時に動かせるスプリントの実行の数
+        monthly_tokens:
+          type: [integer, "null"]
+          description: 月の token の上限。実行の形態が managed のときだけ数で、ほかは null（掛けない）
+    Seat:
+      type: object
+      required: [user_id, idp, seat_type, added_at]
+      properties:
+        user_id:
+          type: string
+        idp:
+          oneOf:
+            - $ref: "#/components/schemas/Idp"
+            - type: "null"
+        seat_type:
+          $ref: "#/components/schemas/SeatType"
+        added_at:
+          type: string
+          format: date-time
+    AccountDetail:
+      allOf:
+        - $ref: "#/components/schemas/AccountSummary"
+        - type: object
+          required: [limits, seats]
+          properties:
+            limits:
+              description: 表に無い組では null
+              oneOf:
+                - $ref: "#/components/schemas/Limits"
+                - type: "null"
+            seats:
+              description: チームだけ。個人のアカウントは null
+              oneOf:
+                - type: array
+                  items:
+                    $ref: "#/components/schemas/Seat"
+                - type: "null"
+    Me:
+      type: object
+      required: [user_id, idp, personal_account_id, accounts]
+      properties:
+        user_id:
+          type: string
+        idp:
+          $ref: "#/components/schemas/Idp"
+        personal_account_id:
+          type: string
+        accounts:
+          type: array
+          items:
+            $ref: "#/components/schemas/AccountSummary"
+    CreateTeam:
+      type: object
+      required: [name, seat_type]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+        seat_type:
+          $ref: "#/components/schemas/SeatType"
+    SetExecutionMode:
+      type: object
+      required: [execution_mode]
+      properties:
+        execution_mode:
+          $ref: "#/components/schemas/ExecutionMode"
+    AddSeat:
+      type: object
+      required: [user_id, seat_type]
+      properties:
+        user_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        seat_type:
+          $ref: "#/components/schemas/SeatType"
+    ChangeSeat:
+      type: object
+      required: [seat_type]
+      properties:
+        seat_type:
+          $ref: "#/components/schemas/SeatType"
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: 機械の値
+            message:
+              type: string
+              description: 利用者に出す文

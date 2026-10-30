@@ -127,11 +127,11 @@ graph TD
 
 **サービスのディレクトリの変数**（`factory/.env.example`）: `AWS_REGION`・`COGNITO_USER_POOL_ID`・`COGNITO_CLIENT_ID`・`GITHUB_APP_ID`・`GITHUB_APP_PRIVATE_KEY_SECRET_ARN`・`BEDROCK_REGION`・`NDF_MARKETPLACE`・`NDF_CHANNEL`・`RUNNER_TASK_DEFINITION_ARN`。値は private リポジトリのインフラが渡す。子課題は名前を足してよく、値は書かない（I6）。秘密は `*_SECRET_ARN` の名前で Secrets Manager の場所だけを受ける。
 
-**必須のチェックの宣言**（`scripts/required-checks-allow.json`）: `awaiting` に `service-boundary-check` を理由つきで置く。突き合わせのチェック（[必須のチェックの突き合わせ](ci-required-checks-reconcile.md)）はこれを「追加待ち」として知らせ、失敗にしない。
+**必須のチェックの宣言**（`scripts/required-checks-allow.json`）: `awaiting` に `service-boundary-check` と `factory-check`（`factory/` の契約の検査と型検査とテスト。#2170）を理由つきで置く。突き合わせのチェック（[必須のチェックの突き合わせ](ci-required-checks-reconcile.md)）はこれを「追加待ち」として知らせ、失敗にしない。
 
 ## サービス全体の契約（子課題が実装する）
 
-この節は、子課題 #2170〜#2174・#2186 が実装するサービスの形を、決定済みの契約として持つ。子課題は次の形を変えずに作る。**変えるときは本書を直す Pull Request を先に出す。** 機械可読な定義（JSON Schema と OpenAPI）は #2171 が本節から起こして `factory/contracts/` に置き、形の正は本節である。
+この節は、子課題 #2170〜#2174・#2186 が実装するサービスの形を、決定済みの契約として持つ。子課題は次の形を変えずに作る。**変えるときは本書を直す Pull Request を先に出す。** 機械可読な定義（JSON Schema と OpenAPI）は #2171 が本節から起こして `factory/contracts/` に置き、形の正は本節である。アカウントの API の OpenAPI（`factory/contracts/openapi/accounts.yaml`）は、最初にその経路を置く #2170 が作り、#2171 が `contracts/` の形を決めるときに取り込む。
 
 ### 受け持つ課題
 
@@ -145,7 +145,7 @@ graph TD
 | #2174 | プランの料金・使用量の台帳・決済の手段と提供元・Bedrock の使用量の帰属（形態 ③ だけ） | 請求の画面と API | `usage.recorded`、#2170 のプランと実行の形態 |
 | #2189 | 手元のランナー（形態 ①）の登録・心拍・実行ジョブの受け取り | 無し | #2186 の実行ジョブを渡す口と実行ジョブの token、#2171 の `factory/contracts/`・進捗の受け口、#2170 の `resolveAccount` が返す `account_id` と実行の形態 |
 
-各課題が本節の外で決めること: `factory/` の TypeScript のパッケージの管理の道具（npm・pnpm）は、最初に TypeScript のコードを置く #2170、ランナーで使える CLI（Bedrock 経由の claude を前提にし、cross-review が 2 つ目の CLI を要るときの扱い）と実行ジョブの打ち切りの時間（実測で決める）は #2186、`phase.changed` が運ぶフェーズの名前の集合は #2172、決済の提供元と Bedrock の請求との突き合わせは #2174 が決める。
+各課題が本節の外で決めること: `factory/` の TypeScript のパッケージの管理の道具は #2170 が npm の workspaces に決めた（規則は [factory/README.md の「パッケージの管理」](../../factory/README.md#パッケージの管理)）。ランナーで使える CLI（Bedrock 経由の claude を前提にし、cross-review が 2 つ目の CLI を要るときの扱い）と実行ジョブの打ち切りの時間（実測で決める）は #2186、`phase.changed` が運ぶフェーズの名前の集合は #2172、決済の提供元と Bedrock の請求との突き合わせは #2174 が決める。
 
 ### 構成と言語
 

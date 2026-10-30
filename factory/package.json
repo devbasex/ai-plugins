@@ -1,0 +1,18 @@
+{
+  "name": "ndf-factory",
+  "private": true,
+  "workspaces": [
+    "web",
+    "api"
+  ],
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "lint:contracts": "spectral lint contracts/openapi/*.yaml --ruleset contracts/openapi/.spectral.yaml --fail-severity warn",
+    "check": "npm run lint:contracts && npm run check -w web && npm run check -w api"
+  },
+  "devDependencies": {
+    "@stoplight/spectral-cli": "^6.15.0"
+  }
+}
