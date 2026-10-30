@@ -369,8 +369,8 @@ def user_gate_paths(sprint: str, tmp: Path) -> None:
         "items": [g2, g1],
         "metrics": {"gates": 2},
     }
-    # 同じ名前を書き直すと末尾へ移る。--outcome approved を渡したときだけ記録に outcome が載る
-    g2a = {"name": "関門 2", "what": "本番", "at": GATE_AT, "outcome": "approved"}
+    # 同じ名前を書き直すと末尾へ移る。--outcome approved を渡したときだけ記録に outcome と by が載る
+    g2a = {"name": "関門 2", "what": "本番", "at": GATE_AT, "outcome": "approved", "by": "user"}
     code, out, m = gate(sprint, tmp, "関門 2", "--what", "本番", "--outcome", "approved")
     assert (code, out["items"], m["gates"]) == (0, [g1, g2a], [g1, g2a])
     # 差し戻しは関門を通さず、状態ファイルを変えずに差し戻しの記録へ 1 行だけ書く（#1833）
