@@ -266,3 +266,70 @@ def test_this_repository_passes(capsys):
 def test_this_repository_fails_without_allow(tmp_path, capsys):
     (tmp_path / "allow.json").write_text(json.dumps({"version": 1, "secrets": []}), encoding="utf-8")
     assert csb.main(["--root", str(REPO), "--allow", str(tmp_path / "allow.json")]) == 1
+
+
+# --- read_allow の現状固定 ----------------------------------------------------
+
+
+def read_allow_with(tmp_path: Path, text: str) -> list[dict]:
+    path = tmp_path / "allow.json"
+    path.write_text(text, encoding="utf-8")
+    return csb.read_allow(path, tmp_path)
+
+
+def test_read_allow_returns_rows_as_written(tmp_path):
+    row = {"path": "src/t.py", "sha256": "a" * 64, "reason": "偽の値"}
+    assert read_allow_with(tmp_path, json.dumps({"version": 1, "secrets": [row]})) == [row]
+
+
+def test_read_allow_without_secrets_is_empty(tmp_path):
+    assert read_allow_with(tmp_path, json.dumps({"version": 1})) == []
+
+
+def test_read_allow_missing_file_is_unreadable(tmp_path):
+    with pytest.raises(csb.Unreadable, match="^許可の一覧を読めない: "):
+        csb.read_allow(tmp_path / "none.json", tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("text", "prefix"),
+    [
+        ("{", "許可の一覧を読めない: "),
+        ("[]", "許可の一覧の形が違う"),
+        (json.dumps({"secrets": []}), "許可の一覧の形が違う"),
+        (json.dumps({"version": 2, "secrets": []}), "許可の一覧の形が違う"),
+        (json.dumps({"version": "1", "secrets": []}), "許可の一覧の形が違う"),
+        (json.dumps({"version": 1, "secrets": {}}), "許可の一覧の secrets が並びでない: "),
+        (json.dumps({"version": 1, "secrets": ["x"]}), "許可の行の鍵は "),
+        (json.dumps({"version": 1, "secrets": [{"path": "a", "sha256": "0" * 64}]}), "許可の行の鍵は "),
+        (json.dumps({"version": 1, "secrets": [{"path": "", "sha256": "0" * 64, "reason": "r"}]}), "許可の行の path と reason が空: "),
+        (json.dumps({"version": 1, "secrets": [{"path": 1, "sha256": "0" * 64, "reason": "r"}]}), "許可の行の path と reason が空: "),
+        (json.dumps({"version": 1, "secrets": [{"path": "a", "sha256": "0" * 64, "reason": "  "}]}), "許可の行の path と reason が空: "),
+        (json.dumps({"version": 1, "secrets": [{"path": "a?.py", "sha256": "0" * 64, "reason": "r"}]}), "許可の path はファイル 1 つだけ"),
+        (json.dumps({"version": 1, "secrets": [{"path": "a[0].py", "sha256": "0" * 64, "reason": "r"}]}), "許可の path はファイル 1 つだけ"),
+        (json.dumps({"version": 1, "secrets": [{"path": "src/", "sha256": "0" * 64, "reason": "r"}]}), "許可の path はファイル 1 つだけ"),
+        (json.dumps({"version": 1, "secrets": [{"path": "a", "sha256": "A" * 64, "reason": "r"}]}), "許可の sha256 が 64 字の 16 進でない: "),
+        (json.dumps({"version": 1, "secrets": [{"path": "a", "sha256": 0, "reason": "r"}]}), "許可の sha256 が 64 字の 16 進でない: "),
+    ],
+)
+def test_read_allow_rejects_malformed(tmp_path, text, prefix):
+    with pytest.raises(csb.Unreadable) as e:
+        read_allow_with(tmp_path, text)
+    assert str(e.value).startswith(prefix)
+
+
+def test_read_allow_rejects_existing_directory(tmp_path):
+    (tmp_path / "src").mkdir()
+    text = json.dumps({"version": 1, "secrets": [{"path": "src", "sha256": "0" * 64, "reason": "r"}]})
+    with pytest.raises(csb.Unreadable, match="^許可の path はファイル 1 つだけ"):
+        read_allow_with(tmp_path, text)
+
+
+def test_read_allow_checks_rows_in_order(tmp_path):
+    rows = [
+        {"path": "a", "sha256": "0" * 64, "reason": "r"},
+        {"path": "b", "sha256": "bad", "reason": "r"},
+        {"path": "*", "sha256": "0" * 64, "reason": "r"},
+    ]
+    with pytest.raises(csb.Unreadable, match="^許可の sha256"):
+        read_allow_with(tmp_path, json.dumps({"version": 1, "secrets": rows}))
