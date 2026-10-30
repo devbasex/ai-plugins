@@ -17,7 +17,7 @@
 | 順 | 起きること |
 | --- | --- |
 | 1 | 開発版のリリースプランの `approval-facts` が、打った時点の `origin/<ベースブランチ>` の 40 桁を承認資料の「承認したコミット」の行と `metrics.approved_sha` に書く。`next` は `release ... --channel prod --approved-sha <40 桁>` |
-| 2 | 利用者が承認資料を見て承認する。conductor が `approve --approval <承認資料> --approved-sha <1 の metrics.approved_sha> --by user` で「承認の記録」を書く（MVV 判定で通したときは `mvv-gate.py` が `by: mvv` で書く）。`--state` を渡した `pace: normal` では、conductor は `sprint-state.py gate <状態> "関門 2" --by user --outcome approved` だけを打ち、本番のプランの先頭の `approve --facts-from` が書く（#1426） |
+| 2 | 利用者が承認資料を見て承認する。conductor が `approve --approval <承認資料> --approved-sha <1 の metrics.approved_sha> --by user` で「承認の記録」を書く（MVV 判定で通したときは `mvv-gate.py` が `by: mvv` で書く）。`--state` を渡した `pace: normal` では、conductor は `sprint-state.py gate <状態> "関門 2" --by user --outcome approved` だけを打ち、本番のプランの先頭の `approve --facts-from` が書く |
 | 3 | 別の PR がベースブランチへマージされる |
 | 4 | 本番のリリースプランの `release --channel prod --approval <承認資料>` が、承認の記録と承認したコミットが等しいことを確かめ、配布の PR（`release/v<版>` → ベースブランチ）をマージする |
 | 5 | 承認したコミットから `origin/<ベースブランチ>` の先端までに、配布の PR の外のコミット（3 の PR のもの）があるので、本番チャネルの PR を作らずに `gate`・終了コード 10 で止まる。`items[]` に外のコミットの SHA・件名・PR 番号が並ぶ |
@@ -112,7 +112,7 @@
 
 `--approved-sha` で手で渡すときは、打った人が承認した SHA そのものを渡すため、承認の記録を見ない（I10 は `--approval` だけに当たる）。
 
-`approve` の `--facts-from <開発版のプランの状態>`（#1426 の決定 7）は、`--approved-sha` の代わりに開発版の最後の `facts` のステップの出力の
+`approve` の `--facts-from <開発版のプランの状態>` は、`--approved-sha` の代わりに開発版の最後の `facts` のステップの出力の
 `metrics.approved_sha` を提示した SHA とする（資料を読み直さない約束は同じ）。承認資料に一致する承認の記録が既にあれば書かずに 0、無ければ
 `--answer-from` のスプリント状態ファイルに `facts` の出力より後の承認ゲート 2 の利用者の承認の記録があるときだけ書く。`facts` の出力が無い・
 資料の承認したコミットが違う・承認の記録が無いときは、`--approved-sha` の形の 1 でなく `gate`・10 で止まる（本番のプランの先頭のステップが

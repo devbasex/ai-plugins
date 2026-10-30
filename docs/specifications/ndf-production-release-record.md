@@ -223,9 +223,9 @@ stateDiagram-v2
 
 | `name` | 持つキー | 中身 |
 | --- | --- | --- |
-| `配布` | `plans`（`release`）・`then_of: <承認ゲート 1 の後の最初のステージ>` | 開発版のリリースプラン。`note` は持たない。`then_of` は `--design` があれば「設計 PR のマージ」、無ければ「設計の結果」か「スプリントブランチ」（#1426 の決定 5） |
+| `配布` | `plans`（`release`）・`then_of: <承認ゲート 1 の後の最初のステージ>` | 開発版のリリースプラン。`note` は持たない。`then_of` は `--design` があれば「設計 PR のマージ」、無ければ「設計の結果」か「スプリントブランチ」 |
 | `関門 2` | `gate` | 承認ゲート 2 の文（`sprint_routes.normal_gate_2_stage`） |
-| `本番` | `plans`（`release-prod`）・`command`・`resume` | 本番のリリースプラン。`command` は `python3 <supervise.py> queue <番号>-release-prod.json --max 3 --done <出力先>/done-<番号>.json`、`resume` は同じ done の `queue --resume <done>`（#1426 の決定 6）。先頭のステップは `approve`（下記） |
+| `本番` | `plans`（`release-prod`）・`command`・`resume` | 本番のリリースプラン。`command` は `python3 <supervise.py> queue <番号>-release-prod.json --max 3 --done <出力先>/done-<番号>.json`、`resume` は同じ done の `queue --resume <done>`。先頭のステップは `approve`（下記） |
 
 本番のプランは開発版と同じ `sprint_waves.plan_sprint_release` に `channel="prod"` と `version=prod_version(--version)`（接尾辞を外した版。
 `10.18.0-dev.1` → `10.18.0`）を渡して組む。worktree とブランチは `release/v<正式版>`、出す PR は `{queue_pr:check}` である。
@@ -236,10 +236,10 @@ stateDiagram-v2
 本番への配布の承認を取ることを書く。`--state` を渡さないときは、承認されたら `release-steps.py approve --approval <承認資料> --approved-sha <approval-facts の metrics.approved_sha> --by user`
 で承認の記録を書いてから「本番」のステージの `command` を打つこと（差し戻されたら打たない）を書く。`--state` を渡したときは、利用者が答えたら
 `sprint-state.py gate <状態> "関門 2" --what <要約> --by user --outcome approved|rejected` を打ち、承認されたら「本番」のステージの `command` を打つことと、
-助言の MVV 判定の扱いを書く（#1426 の決定 1）。
+助言の MVV 判定の扱いを書く。
 
 本番のプラン（MVV 判定なし）の先頭のステップ `approve` は `release-steps.py approve --approval <承認資料> --facts-from <開発版のプランの状態> [--answer-from <状態>] --by user`
-を打つ（#1426 の決定 7）。提示した SHA は開発版の `facts` の出力の `metrics.approved_sha` から読み、承認資料に一致する承認の記録が既にあれば書かずに通し、
+を打つ。提示した SHA は開発版の `facts` の出力の `metrics.approved_sha` から読み、承認資料に一致する承認の記録が既にあれば書かずに通し、
 無ければ `--answer-from` の承認ゲート 2 の利用者の承認の記録（`facts` の出力より後）があるときだけ書く。どれも無ければ書かずに承認ゲート（10）で終え、
 `bump` へ進まない。開発版のプランの状態は `--dev-state` か、キューの置き場 `{queue_state:release}` で埋める。
 
