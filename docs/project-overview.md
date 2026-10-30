@@ -30,6 +30,7 @@ ai-plugins/
 │   └── mcp/
 │       └── mcp-*/                # MCPプラグイン10個（3ランタイム共通）
 ├── docs/                         # リポジトリ知識
+├── factory/                      # Web サービス（Neural Development Factory）。プラグインと分け、自分の LICENSE を持つ
 ├── AGENTS.md                     # 共通エントリポイント
 ├── CLAUDE.md                     # Claude Code固有設定
 ├── KIRO.md                       # Kiro CLI固有設定

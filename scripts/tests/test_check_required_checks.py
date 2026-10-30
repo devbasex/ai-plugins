@@ -119,7 +119,9 @@ SIMPLE = "on:\n  pull_request:\njobs:\n  a:\n    runs-on: x\n"
 def test_this_repository_has_only_the_awaiting_six_and_itself(tmp_path, capsys):
     """AC6: 12 個の必須と必須にしないジョブの宣言だけで、差は 6 つと突き合わせのチェック自身だけ。"""
     allow = json.loads((REPO / "scripts" / "required-checks-allow.json").read_text(encoding="utf-8"))
-    (tmp_path / "allow.json").write_text(json.dumps({"version": 1, "not_required": allow["not_required"]}), encoding="utf-8")
+    (tmp_path / "allow.json").write_text(
+        json.dumps({"version": 1, "not_required": allow["not_required"], "awaiting": allow["awaiting"]}), encoding="utf-8"
+    )
     (tmp_path / "rules.json").write_text(json.dumps(rules(*REQUIRED_12)), encoding="utf-8")
     code = crc.main(
         [
@@ -149,7 +151,9 @@ def test_this_repository_has_only_the_awaiting_six_and_itself(tmp_path, capsys):
             "required-checks-check",
         ]
     )
-    assert [line for line in lines if not line.startswith("未登録: ")] == ["失敗 7 件・知らせ 0 件"]
+    notices = [line for line in lines if line.startswith("追加待ち: ")]
+    assert len(notices) == len(allow["awaiting"])
+    assert [line for line in lines if not line.startswith(("未登録: ", "追加待ち: "))] == [f"失敗 7 件・知らせ {len(notices)} 件"]
 
 
 def test_matrix_expression_in_name_is_substituted():
@@ -408,4 +412,5 @@ def test_cli_runs_as_a_script(tmp_path):
         timeout=120,
     )
     assert p.returncode == 0, p.stdout + p.stderr
-    assert p.stdout.splitlines()[-1] == "失敗 0 件・知らせ 0 件"
+    awaiting = json.loads((REPO / "scripts" / "required-checks-allow.json").read_text(encoding="utf-8"))["awaiting"]
+    assert p.stdout.splitlines()[-1] == f"失敗 0 件・知らせ {len(awaiting)} 件"
