@@ -42,15 +42,24 @@ SERVICE_DIR = "factory"
 MARKETPLACE = ".claude-plugin/marketplace.json"
 DEFAULT_ALLOW = "scripts/service-boundary-allow.json"
 
+# 違反の種類
+REF = "サービスへの参照"
+OVERLAP = "配布物の木の重なり"
+INFRA = "インフラの定義"
+SECRET = "秘密らしい値"
+ENV_FILE = ".env の実ファイル"
+ENV_VALUE = "値を持つ .env.example"
+STALE_ALLOW = "古い許可"
+
 # 種類 → 直し方。設計の「入出力の契約」の表と同じ並び
 FIXES = {
-    "サービスへの参照": "参照を外す。プラグインからサービスを使わない",
-    "配布物の木の重なり": "source を plugins/ の下へ戻す",
-    "インフラの定義": "private リポジトリへ移す",
-    "秘密らしい値": "値を消して環境変数で受ける。偽の値なら許可へ足す",
-    ".env の実ファイル": "ファイルを消し、.gitignore に足す",
-    "値を持つ .env.example": "値を消し、名前だけにする",
-    "古い許可": "許可の一覧から外す",
+    REF: "参照を外す。プラグインからサービスを使わない",
+    OVERLAP: "source を plugins/ の下へ戻す",
+    INFRA: "private リポジトリへ移す",
+    SECRET: "値を消して環境変数で受ける。偽の値なら許可へ足す",
+    ENV_FILE: "ファイルを消し、.gitignore に足す",
+    ENV_VALUE: "値を消し、名前だけにする",
+    STALE_ALLOW: "許可の一覧から外す",
 }
 
 SERVICE_REF = re.compile(r"(?<![\w.-])" + SERVICE_DIR + r"/")
@@ -139,8 +148,8 @@ def check_reference(root: Path, rel: str, lines: list[str]) -> list[Finding]:
     full = root / rel
     if full.is_symlink():
         target = os.path.normpath(os.path.join(os.path.dirname(rel), os.readlink(full)))
-        return [Finding("サービスへの参照", rel)] if in_service(target.replace(os.sep, "/")) else []
-    return [Finding("サービスへの参照", rel, n) for n, line in enumerate(lines, 1) if SERVICE_REF.search(line)]
+        return [Finding(REF, rel)] if in_service(target.replace(os.sep, "/")) else []
+    return [Finding(REF, rel, n) for n, line in enumerate(lines, 1) if SERVICE_REF.search(line)]
 
 
 def check_sources(root: Path) -> list[Finding]:
@@ -158,18 +167,18 @@ def check_sources(root: Path) -> list[Finding]:
             continue
         s = os.path.normpath(source).replace(os.sep, "/")
         if s in (".", "") or in_service(s) or (SERVICE_DIR + "/").startswith(s + "/"):
-            out.append(Finding("配布物の木の重なり", f"{MARKETPLACE}#{plugin.get('name', source)}"))
+            out.append(Finding(OVERLAP, f"{MARKETPLACE}#{plugin.get('name', source)}"))
     return out
 
 
 def check_infra(rel: str, lines: list[str]) -> list[Finding]:
     name = PurePosixPath(rel).name
     if name in INFRA_NAMES or name.endswith(INFRA_SUFFIXES):
-        return [Finding("インフラの定義", rel)]
+        return [Finding(INFRA, rel)]
     if DEPENDENCY_FILE.match(name):
-        return [Finding("インフラの定義", rel, n) for n, line in enumerate(lines, 1) if "aws-cdk-lib" in line]
+        return [Finding(INFRA, rel, n) for n, line in enumerate(lines, 1) if "aws-cdk-lib" in line]
     if name.endswith(CFN_SUFFIXES):
-        return [Finding("インフラの定義", rel, n) for n, line in enumerate(lines, 1) if CFN_DECL.search(line)][:1]
+        return [Finding(INFRA, rel, n) for n, line in enumerate(lines, 1) if CFN_DECL.search(line)][:1]
     return []
 
 
@@ -180,7 +189,7 @@ def check_secrets(rel: str, lines: list[str], allowed: dict[tuple[str, str], dic
             for m in pattern.finditer(line):
                 row = allowed.get((rel, hashlib.sha256(m.group(0).encode()).hexdigest()))
                 if row is None:
-                    out.append(Finding("秘密らしい値", rel, n))
+                    out.append(Finding(SECRET, rel, n))
                 else:
                     used.add(id(row))
     return out
@@ -192,12 +201,12 @@ def check_env(rel: str, lines: list[str]) -> list[Finding]:
         if not in_service(rel):
             return []
         return [
-            Finding("値を持つ .env.example", rel, n)
+            Finding(ENV_VALUE, rel, n)
             for n, line in enumerate(lines, 1)
             if not line.lstrip().startswith("#") and "=" in line and line.split("=", 1)[1].strip()
         ]
     if name == ".env" or name.startswith(".env."):
-        return [Finding(".env の実ファイル", rel)]
+        return [Finding(ENV_FILE, rel)]
     return []
 
 
@@ -217,7 +226,7 @@ def check(root: Path, allow_path: Path) -> list[Finding]:
         out += check_infra(rel, lines)
         out += check_secrets(rel, lines, allowed, used)
         out += check_env(rel, lines)
-    out += [Finding("古い許可", r["path"]) for r in rows if id(r) not in used]
+    out += [Finding(STALE_ALLOW, r["path"]) for r in rows if id(r) not in used]
     return out
 
 
