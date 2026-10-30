@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { PlanError } from "../errors.ts";
 import { MemoryAccountStore } from "./memory-store.ts";
-import { AccountService } from "./service.ts";
+import { AccountService, validateTeamName } from "./service.ts";
 
 let store: MemoryAccountStore;
 let service: AccountService;
@@ -153,5 +153,15 @@ describe("新しいアカウントの行と履歴（現状固定、I24）", () =
       after: { kind: "team", plan: "team", execution_mode: "local", name: "t" },
     });
     expect(Object.keys(history[0]!.after as object)).toEqual(["kind", "plan", "execution_mode", "name"]);
+  });
+});
+
+describe("validateTeamName（現状固定）", () => {
+  it("1〜64 字の文字列だけを通し、それ以外は同じ文言の InvalidRequestError にする", () => {
+    expect(validateTeamName("a".repeat(64))).toBe("a".repeat(64));
+    expect(validateTeamName("😀".repeat(64))).toBe("😀".repeat(64));
+    for (const bad of [undefined, 1, "", "  ", "a".repeat(65)]) {
+      expect(() => validateTeamName(bad)).toThrow(expect.objectContaining({ status: 400, message: "1〜64 字で入力してください" }));
+    }
   });
 });
