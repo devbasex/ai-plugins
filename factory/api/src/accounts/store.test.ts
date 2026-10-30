@@ -96,10 +96,11 @@ describe("DynamoAccountStore（決定 8）", () => {
     expect(ddb.commandCalls(GetCommand)[0]!.args[0].input).toMatchObject({ Key: { pk: "ACCOUNT#a-1", sk: "ACCOUNT" }, ConsistentRead: true });
   });
 
-  it("席を持つチームは GSI を頁をたどって引く", async () => {
-    const seat = (a: string) => ({ account_id: a, user_id: "u-2", seat_type: "standard", added_at: "x" });
+  it("席を持つチームは GSI を頁をたどって引き、ID は射影によらず載る鍵から取る", async () => {
+    // KEYS_ONLY の射影で返る行（表の鍵と GSI の鍵だけ）
+    const seat = (a: string) => ({ pk: `ACCOUNT#${a}`, sk: "SEAT#u-2", gsi1pk: "USER#u-2", gsi1sk: `ACCOUNT#${a}` });
     ddb.on(QueryCommand).resolvesOnce({ Items: [seat("t-1")], LastEvaluatedKey: { pk: "k" } }).resolvesOnce({ Items: [seat("t-2")] });
-    expect((await store.listMemberships("u-2")).map((s) => s.accountId)).toEqual(["t-1", "t-2"]);
+    expect(await store.listMemberships("u-2")).toEqual(["t-1", "t-2"]);
     expect(ddb.commandCalls(QueryCommand)[0]!.args[0].input).toMatchObject({ IndexName: "gsi1", ExpressionAttributeValues: { ":u": "USER#u-2" } });
   });
 });

@@ -53,7 +53,7 @@ export class MemoryAccountStore implements AccountStore {
   }
 
   async listMemberships(userId: string) {
-    return [...this.seats.values()].filter((s) => s.userId === userId).map((s) => ({ ...s }));
+    return [...this.seats.values()].filter((s) => s.userId === userId).map((s) => s.accountId);
   }
 
   async createTeam(account: AccountRecord, ownerSeat: SeatRecord, history: HistoryRecord[]) {

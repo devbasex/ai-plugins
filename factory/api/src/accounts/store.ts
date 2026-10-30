@@ -30,9 +30,9 @@ export interface AccountStore {
   getAccount(accountId: string): Promise<AccountRecord | null>;
   getSeat(accountId: string, userId: string): Promise<SeatRecord | null>;
   listSeats(accountId: string): Promise<SeatRecord[]>;
-  // 利用者が席を持つチームのアカウントの ID と席の種類（GSI gsi1）。GSI は結果整合のため、
+  // 利用者が席を持つチームのアカウントの ID（GSI gsi1）。GSI は結果整合のため、
   // 返すのは候補であり、呼ぶ側は getSeat で元の席を確かめてから使う
-  listMemberships(userId: string): Promise<SeatRecord[]>;
+  listMemberships(userId: string): Promise<string[]>;
   createTeam(account: AccountRecord, ownerSeat: SeatRecord, history: HistoryRecord[]): Promise<void>;
   // 席が無いときだけ足す（I15）
   addSeat(seat: SeatRecord, history: HistoryRecord[]): Promise<void>;
@@ -217,7 +217,8 @@ export class DynamoAccountStore implements AccountStore {
       KeyConditionExpression: "gsi1pk = :u",
       ExpressionAttributeValues: { ":u": `USER#${userId}` },
     });
-    return items.map(toSeat);
+    // 射影（KEYS_ONLY など）によらず必ず載る表の鍵 pk（ACCOUNT#<id>）から ID を取る
+    return items.map((i) => (i.pk as string).slice("ACCOUNT#".length));
   }
 
   private async queryAll(input: ConstructorParameters<typeof QueryCommand>[0]): Promise<Item[]> {

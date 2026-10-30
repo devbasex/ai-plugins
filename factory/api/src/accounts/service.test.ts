@@ -38,8 +38,7 @@ describe("listAccounts（I18）", () => {
   it("GSI に残った外した席のチームは返さない", async () => {
     await personal();
     const team = await service.createTeam({ userId: "owner", idp: "google" }, "secret", "standard");
-    const stale = { accountId: team.accountId, userId: "u-1", seatType: "standard" as const, addedAt: "x" };
-    store.listMemberships = async () => [stale];
+    store.listMemberships = async () => [team.accountId];
     const { contexts } = await service.listAccounts({ userId: "u-1", idp: "google" });
     expect(contexts.map((c) => c.kind)).toEqual(["personal"]);
   });

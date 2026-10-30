@@ -134,8 +134,8 @@ export class AccountService {
     const personal = await this.resolveAccount(caller);
     const out: (AccountContext & { name: string | null })[] = [{ ...personal, name: null }];
     // GSI の行は候補。外した席が GSI に残る間に名前やプランを返さないよう、元の席を強い整合で確かめる（I18）
-    for (const candidate of await this.store.listMemberships(caller.userId)) {
-      const seat = await this.store.getSeat(candidate.accountId, caller.userId);
+    for (const accountId of await this.store.listMemberships(caller.userId)) {
+      const seat = await this.store.getSeat(accountId, caller.userId);
       if (!seat) continue;
       const account = await this.store.getAccount(seat.accountId);
       if (!account) continue;

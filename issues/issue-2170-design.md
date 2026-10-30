@@ -191,15 +191,16 @@ graph TD
     L2 -->|OAuth の code と token| GHAPI[GitHub]
 ```
 
-インフラへ渡す形は次の 5 つで、private リポジトリはこれに合わせて資源を作る。
+インフラへ渡す形は次の 6 つで、private リポジトリはこれに合わせて資源を作る。
 
 | 渡す形 | 中身 |
 | --- | --- |
 | handler | `factory/api/src/handlers/api.ts` の `handler`（HTTP API の payload 2.0）、`factory/api/src/handlers/github-oidc.ts` の `handler`（同）。束ね方（esbuild など）はインフラが決める |
 | 画面の資産 | `npm run build -w web` が作る `factory/web/dist/` |
-| 表の鍵 | 下の「データ構造」の `pk`・`sk` と GSI `gsi1`（`gsi1pk`・`gsi1sk`） |
+| 表の鍵 | 下の「データ構造」の `pk`・`sk` と GSI `gsi1`（`gsi1pk`・`gsi1sk`）。GSI の射影は KEYS_ONLY でよい（API は GSI の行の表の鍵 `pk` からアカウントの ID だけを取り、中身は表から強い整合で読む） |
 | Cognito の IdP の名前 | `Google`（組み込みの Google）と `GitHub`（OIDC の IdP。発行元は `GITHUB_OIDC_ISSUER`）。大文字と小文字もこのとおりにする。画面が送る `identity_provider` と、API が `idp` を決める token の `username` の頭（`Google_`・`GitHub_`）がこの名前に依存する |
 | GitHub の仲立ちの経路 | API Gateway の HTTP API の `/oidc/github/{proxy+}` を、認可なしで `github-oidc.ts` の `handler` へ通す。`GITHUB_OIDC_ISSUER` は `https://<API の入口>/oidc/github` にする（経路は「入出力の契約」の「GitHub の仲立ち」）。GitHub の OAuth App のコールバックの URL は Cognito でなく `${GITHUB_OIDC_ISSUER}/callback` にする（`nonce` を運ぶため） |
+| CORS | API の handler が持つ。許すオリジンは `FACTORY_WEB_URL` のオリジン、ヘッダは `Authorization`・`Content-Type`、メソッドは GET・POST・PUT・PATCH・DELETE で、preflight（OPTIONS）は認証より先に返す。HTTP API の CORS の設定は使わず、OPTIONS も認可なしで `api.ts` の `handler` へ通す |
 
 ### 置き場所
 
@@ -361,7 +362,7 @@ erDiagram
 | 名前 | 使う側 | 意味 |
 | --- | --- | --- |
 | `COGNITO_DOMAIN` | 画面・GitHub の仲立ち | Cognito の管理されたログインのドメイン。仲立ちは `/authorize` で受ける `redirect_uri` をこのドメインの `/oauth2/idpresponse` と照らす |
-| `FACTORY_WEB_URL` | 画面 | 画面の URL。ログインの戻り（`/callback`）とログアウトの戻りに使う |
+| `FACTORY_WEB_URL` | 画面・API | 画面の URL。画面はログインの戻り（`/callback`）とログアウトの戻りに、API は CORS で許すオリジンに使う |
 | `FACTORY_API_URL` | 画面 | API の入口の URL |
 | `ACCOUNTS_TABLE_NAME` | API | アカウントの表の名前 |
 | `GITHUB_OIDC_ISSUER` | GitHub の仲立ち | 仲立ちの発行元の URL |

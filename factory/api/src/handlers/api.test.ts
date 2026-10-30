@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createTestApi, type TestApi } from "../testing/app.ts";
+import { createApiApp } from "./api.ts";
 
 let api: TestApi;
 beforeEach(async () => {
@@ -251,5 +252,34 @@ describe("実行の形態（受け入れ条件 18・19、I21・I22）", () => {
   it("知らない値は 400", async () => {
     const { personal_account_id: id } = await me("u-1");
     expect((await put("u-1", id, "cloud")).status).toBe(400);
+  });
+});
+
+describe("CORS（画面と API は別のオリジン）", () => {
+  const web = "https://factory.example.com";
+  const app = createApiApp(
+    () => {
+      throw new Error("preflight は依存を使わない");
+    },
+    () => {},
+    () => web,
+  );
+
+  it("画面のオリジンの preflight は認証より先に 204 で返す", async () => {
+    const res = await app.request("/me", {
+      method: "OPTIONS",
+      headers: { Origin: web, "Access-Control-Request-Method": "GET", "Access-Control-Request-Headers": "authorization" },
+    });
+    expect(res.status).toBe(204);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(web);
+    expect(res.headers.get("Access-Control-Allow-Headers")).toMatch(/Authorization/);
+  });
+
+  it("ほかのオリジンには許可の見出しを付けない", async () => {
+    const res = await app.request("/me", {
+      method: "OPTIONS",
+      headers: { Origin: "https://evil.example.com", "Access-Control-Request-Method": "GET" },
+    });
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
   });
 });
