@@ -46,7 +46,10 @@ class ClaudeCall(dict):
         return self.get("cost")
 
 
-WORK_TOOLS = "Read,Edit,Write,Bash,Grep,Glob"
+# 外部の文書（規約・API の仕様・一次情報の記事）を原文で読む Tool。最小構成は --tools に無い Tool を使えず、
+# full は --allowed-tools に無い Tool を拒否されるため、両方の一覧へこの組から足す
+WEB_TOOLS = "WebFetch,WebSearch"
+WORK_TOOLS = "Read,Edit,Write,Bash,Grep,Glob," + WEB_TOOLS
 # work のステップに載せる MCP は Serena だけ（mcp-serena の .mcp.json と同じ起動）。シンボル単位で読み・直し、
 # 大きなファイルの全文を読まずに済ませる。Tool の定義で起動の固定費が約 1.1 万増える（実測: 1 関数の修正で
 # $0.047 → $0.131）ため既定では載せず、ステップに "serena": true を書いたときだけ載せる
@@ -63,7 +66,7 @@ SERENA_MCP = {
         }
     }
 }
-FULL_TOOLS = "Read,Edit,Write,Bash,Grep,Glob,Skill,Agent,Monitor,SendMessage,ToolSearch"
+FULL_TOOLS = "Read,Edit,Write,Bash,Grep,Glob,Skill,Agent,Monitor,SendMessage,ToolSearch," + WEB_TOOLS
 TAIL = 6000  # LLM へ渡す出力の末尾の文字数
 LIMIT_RETRY = 900  # 利用上限の解除時刻が読めないときの待ち（秒）。計画の "limit_retry_seconds"
 LIMIT_WAIT_MAX = 10800  # 利用上限の待ちの最大（秒）。計画の "limit_wait_max"
