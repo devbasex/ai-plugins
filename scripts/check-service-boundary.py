@@ -8,7 +8,9 @@ git が追跡するファイルだけを見る。手元の追跡していない�
 - 配布物の木の重なり: `marketplace.json` の `source` が根・サービスのディレクトリ・その祖先か子孫を指す
 - インフラの定義: CDK・Terraform・CloudFormation の定義。Markdown の本文の語は見ない
 - 秘密らしい値: AWS のアクセスキーの形・PEM の秘密鍵の始まりの行。許可の一覧のファイルと値の sha256 の組に
-  一致するものを除く。PEM の値は始まりの行から終わりの行（無ければファイルの末尾）までの塊全体で照らす
+  一致するものを除く。PEM の値は始まりの行から終わりの行（無ければファイルの末尾）までの塊全体で照らす。
+  違反の行に照らした値の sha256 を出す。偽の値なら、その値をそのまま許可の行の `sha256` へ写す
+  （PEM の塊は行末を `\n` にそろえて結ぶため、ファイルの中身の sha256 とは一致しない）
 - .env の実ファイル: 名前が `.env` か `.env.<何か>`（`.env.example` を除く）
 - 値を持つ .env.example: `factory/` の下の `.env.example` で、`=` の後が空でない行
 - 古い許可: 許可の行が今の木のどこにも当たらない
@@ -86,10 +88,16 @@ class Finding:
     kind: str
     path: str
     line: int | None = None
+    digest: str | None = None
 
     def render(self) -> str:
         where = self.path if self.line is None else f"{self.path}:{self.line}"
-        return f"{self.kind}: {where} → {FIXES[self.kind]}"
+        tail = "" if self.digest is None else f"（sha256={self.digest}）"
+        return f"{self.kind}: {where} → {FIXES[self.kind]}{tail}"
+
+
+def digest_of(value: str) -> str:
+    return hashlib.sha256(value.encode()).hexdigest()
 
 
 class Allowlist:
@@ -100,8 +108,8 @@ class Allowlist:
         self.by_key = {(r["path"], r["sha256"]): r for r in rows}
         self.used: set[int] = set()
 
-    def allows(self, rel: str, value: str) -> bool:
-        row = self.by_key.get((rel, hashlib.sha256(value.encode()).hexdigest()))
+    def allows(self, rel: str, digest: str) -> bool:
+        row = self.by_key.get((rel, digest))
         if row is None:
             return False
         self.used.add(id(row))
@@ -232,7 +240,8 @@ def check_secrets(rel: str, lines: list[str], allow: Allowlist) -> list[Finding]
     for i, line in enumerate(lines):
         values = [m.group(0) for m in ACCESS_KEY_PATTERN.finditer(line)]
         values += [pem_block(lines, i, line, m) for m in PEM_BEGIN.finditer(line)]
-        out += [Finding(SECRET, rel, i + 1) for v in values if not allow.allows(rel, v)]
+        digests = [digest_of(v) for v in values]
+        out += [Finding(SECRET, rel, i + 1, d) for d in digests if not allow.allows(rel, d)]
     return out
 
 

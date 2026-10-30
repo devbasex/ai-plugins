@@ -10,6 +10,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -225,6 +226,17 @@ def test_allowing_only_pem_begin_line_fails(repo, capsys):
     repo.write("src/key.pem", f"{PEM_LINE}\nMIIE\n{PEM_END}\n")
     repo.allow([{"path": "src/key.pem", "sha256": sha(PEM_LINE), "reason": "偽の鍵"}])
     assert repo.run(capsys)[0] == 1
+
+
+@pytest.mark.parametrize("text", [f"{PEM_LINE}\r\nFAKE\r\n{PEM_END}\r\ntrailer\r\n", f"{PEM_LINE}\nFAKE\n", f'K = "{ACCESS_KEY}"\n'])
+def test_printed_sha256_can_be_copied_into_allow(repo, capsys, text):
+    repo.write("src/key.pem", text)
+    assert csb.main(["--root", str(repo.root)]) == 1
+    out = capsys.readouterr().out
+    digests = re.findall(r"（sha256=([0-9a-f]{64})）", out)
+    assert len(digests) == 1
+    repo.allow([{"path": "src/key.pem", "sha256": digests[0], "reason": "偽の鍵"}])
+    assert repo.run(capsys) == (0, [])
 
 
 def test_untracked_env_file_is_ignored(repo, capsys):
