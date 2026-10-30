@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""配布の PR で重いジョブ（pytest・runtime smoke）を省けるかを差分から決める（#1055）。
+"""配布の PR と文書だけの PR で重いジョブ（pytest・runtime smoke）を省けるかを差分から決める（#1055）。
 
 省くのは次のどちらかに当たる Pull Request だけ。push では常に回す（develop で通った
 という記録を、省かずに回した結果だけにするため）。
@@ -9,9 +9,12 @@
    push でこの workflow を通ったものがある。本番の PR（develop → main）。base が merge-base
    から中身を足していないこと（マージの結果が head の木と同じになること）も求める
 
-「版数と説明だけ」の判定:
+「版数と説明だけ」の判定（テストの読まない文書も含める）:
 - DOC_FILES と DOC_RE の文書は中身を問わない（CHANGELOG・README の更新案内・版数を持つ文書・
   配布のコマンドが書く記録）
+- DOCS_MD_RE の `docs/`・`issues/` の Markdown は中身を問わない。テストが中身を読むもの（TESTED_DOCS_RE。
+  全体テストの読み取りを計測して決めた）は除く。行数の上限・リンク・古さは runtime-plugin-validate.yml
+  が PR ごとに必ず確かめるため、ここで省いても検査は抜けない
 - MANIFEST_RE に合う JSON は、変わった行が全部 `"version"` か `"description"` の行
 - それ以外のファイルが 1 つでも変われば省かない
 
@@ -38,6 +41,14 @@ DOC_RE = re.compile(
     r"^(plugins/.+/README\.md"
     # 本番の配布のコマンド（.ndf/release.json）が書く記録。テストもコードも読まない
     r"|docs/metrics/ndf-token-usage/[^/]+\.(md|json))$"
+)
+DOCS_MD_RE = re.compile(r"^(docs|issues)/.+\.md$")
+# テストが中身を読む文書。docs/ や issues/ を読むテストを足したら、ここへも足す
+TESTED_DOCS_RE = re.compile(
+    r"^(docs/glossary(\.md|/.*)"
+    r"|docs/ndf-experiments\.md"
+    r"|docs/presentations/.*"
+    r"|issues/mvv-[^/]*\.md)$"
 )
 MANIFEST_RE = re.compile(
     r"^(\.claude-plugin/marketplace\.json"
@@ -80,9 +91,11 @@ def version_only(root: str, a: str, b: str) -> tuple[bool, str]:
     for f in files:
         if f in DOC_FILES or DOC_RE.match(f):
             continue
+        if DOCS_MD_RE.match(f) and not TESTED_DOCS_RE.match(f):
+            continue
         if MANIFEST_RE.match(f) and manifest_lines_only(root, a, b, f):
             continue
-        return False, f"{f} が版数と説明の外で変わった"
+        return False, f"{f} が版数・説明・テストの読まない文書の外で変わった"
     return True, ""
 
 

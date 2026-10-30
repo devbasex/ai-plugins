@@ -95,6 +95,11 @@
       "id": "ndf-document",
       "name": "NDF の文書の組み直し",
       "meaning": "書き上げた文書を文書形式と文書の目的に合わせて組み直すときの語。document-rebuild が持つ"
+    },
+    {
+      "id": "ndf-factory",
+      "name": "Neural Development Factory",
+      "meaning": "NDF を Web UI から操作できるサービスとして提供するときの語。サービスのディレクトリ・境界の検査・実行基盤"
     }
   ],
   "terms": [
@@ -2651,7 +2656,7 @@
       "term": "昇格の承認資料",
       "context": "ndf-release",
       "meaning": "昇格の承認ゲート 2 で利用者か MVV 判定が見る承認資料（{state_dir}/work/approval-promote.md）。承認したコミットの欄を持ち、normal では promote の承認ゲート 2 の停止が、fast / auto では prepare が書く。promote-approved はこの欄の SHA が昇格の Pull Request の先端のときだけマージする",
-      "pending_source": "issues/issue-2104-design.md"
+      "source": "docs/specifications/ndf-release-approved-commit.md"
     },
     {
       "term": "プロダクトバックログ",
@@ -4254,12 +4259,66 @@
       "term": "agy に配る定義",
       "context": "project-glossary",
       "meaning": "`plugins/ndf/dev.agy/agents/` の下にあり agy が読むエージェント定義。`plugins/ndf/agents/` から生成した写しで、`model` だけが agy の tier 名に変わる。手で直さない",
-      "source": ""
+      "source": "docs/specifications/runtime-plugin-distribution.md"
     },
     {
       "term": "model の対応表",
       "context": "project-glossary",
       "meaning": "Claude Code のエージェント定義の `model` の値（型の名前）から agy の tier 名への対応。`scripts/lib/agy_agents.py` が持つ",
+      "source": "docs/specifications/runtime-plugin-distribution.md"
+    },
+    {
+      "term": "Neural Development Factory",
+      "context": "ndf-factory",
+      "meaning": "NDF を Web UI から操作できる Software Factory のサービスとして提供するときの名前。プラグインとしての NDF と区別するときに使う",
+      "source": ""
+    },
+    {
+      "term": "サービスのディレクトリ",
+      "context": "ndf-factory",
+      "meaning": "Web サービスのコードを置く、プラグインと分けた 1 つのディレクトリ",
+      "source": ""
+    },
+    {
+      "term": "境界の検査",
+      "context": "ndf-factory",
+      "meaning": "サービスのディレクトリとプラグイン・配布物・インフラの境目が守られているかを CI で見る検査",
+      "source": ""
+    },
+    {
+      "term": "実行基盤",
+      "context": "ndf-factory",
+      "meaning": "Web サービスからスプリントを動かす、コンテナとジョブの仕組み",
+      "source": ""
+    },
+    {
+      "term": "ランナー",
+      "context": "ndf-factory",
+      "meaning": "1 つの実行ジョブの中で利用者のリポジトリを取り込み、NDF を導入して conductor を動かし、NDF の書くファイルを進捗の事象へ翻訳して送るプログラム",
+      "source": ""
+    },
+    {
+      "term": "実行ジョブ",
+      "context": "ndf-factory",
+      "meaning": "実行基盤が 1 回起動するコンテナ 1 つ分の実行。スプリントの開始か承認の答えで始まり、次の承認の依頼・止まった・終わったのどれかで終わる",
+      "source": ""
+    },
+    {
+      "term": "スプリントの実行",
+      "context": "ndf-factory",
+      "meaning": "サービスが動かす NDF のスプリント 1 つ（sprint.json 1 つ）と、それを進める実行ジョブの列",
+      "source": ""
+    },
+    {
+      "term": "進捗の事象",
+      "context": "ndf-factory",
+      "meaning": "ランナーと GitHub の通知から受け取り、追記だけで持つ 1 件の出来事。一覧・詳細・通知・課金はここから導く",
+      "source": ""
+    },
+    {
+      "term": "承認の依頼",
+      "context": "ndf-factory",
+      "meaning": "実行ジョブが人の答えを待って終わったときに作る依頼。種類はゲート 1・ゲート 2・判断（止めて人へ戻した）の 3 つ",
       "source": ""
     }
   ]

@@ -67,7 +67,7 @@ Claude Code では `/ndf:<Skill 名>` と打って呼びます。**Skill** は�
 
 | プラグイン名 | バージョン | できること | 詳細 |
 | --- | --- | --- | --- |
-| **ndf** | 10.24.0 | 開発の作業手順（Skill）と専門のサブエージェント。4 つの AI ツールへ同じ名前で入る | [README](./plugins/ndf/README.md) |
+| **ndf** | 10.25.0 | 開発の作業手順（Skill）と専門のサブエージェント。4 つの AI ツールへ同じ名前で入る | [README](./plugins/ndf/README.md) |
 | **playwright-kit** | 3.0.2 | Playwright による E2E テストの計画・スクリプト作成・証跡のレポート | [README](./plugins/playwright-kit/README.md) |
 
 外部サービスへつなぐ MCP サーバーの設定のプラグインが 10 個あります（Claude Code / Codex / Kiro CLI 向け）。
@@ -88,7 +88,7 @@ Claude Code では `/ndf:<Skill 名>` と打って呼びます。**Skill** は�
 
 ### NDF プラグインの Skill の一覧
 
-**NDFプラグイン v10.24.0** に入る Skill の数は、AI ツールごとに違います。
+**NDFプラグイン v10.25.0** に入る Skill の数は、AI ツールごとに違います。
 Claude Code向け core 49個、Kiro向け core 46個、Codex向け core 45個、agy向け core 45個です。
 元Skills（49個）の内訳は次のとおりです。
   - Pull Request とレビュー (7): pr, pr-tests, fix, pr-review, cherry-pick-pr, deploy, merged
@@ -122,6 +122,8 @@ Skill のほかに、次のものが入ります。
 ## ライセンス
 
 MIT License。詳細は [LICENSE](./LICENSE) にあります。
+
+Web サービスのディレクトリ [factory/](./factory/README.md)（Neural Development Factory）は、自分の [LICENSE](./factory/LICENSE) を持ちます。今は根と同じ MIT License です。ライセンスを差し替えるときは `factory/LICENSE` とこの節だけを書き換え、プラグインの配布物は変わりません。
 
 ---
 

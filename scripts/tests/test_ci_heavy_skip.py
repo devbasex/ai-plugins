@@ -106,7 +106,7 @@ def test_version_and_description_only_diff_skips(mod, repo):
     [
         ("plugins/ndf/scripts/tool.py", "print(2)\n"),
         ("scripts/tests/test_x.py", "def test_x():\n    assert True\n"),
-        ("docs/other.md", "changed\n"),
+        ("docs/glossary.md", "changed\n"),
         (".github/workflows/pytest.yml", "on: push\n"),
     ],
 )
@@ -116,6 +116,51 @@ def test_one_line_outside_version_and_description_runs(mod, repo, rel, text):
     bump(repo)
     write(repo, rel, text)
     head = commit(repo, "bump and more")
+    skip, reason = decide(mod, repo, base, head)
+    assert not skip
+    assert rel in reason
+
+
+# --- 1b. テストが中身を読まない文書だけの差分 ------------------------------------------
+
+
+def test_docs_and_issues_markdown_only_diff_skips(mod, repo):
+    base = git(repo, "rev-parse", "HEAD")
+    write(repo, "docs/other.md", "changed\n")
+    write(repo, "docs/specifications/new-spec.md", "# 新しい確定仕様\n")
+    write(repo, "issues/issue-1-design.md", "# 設計\n")
+    head = commit(repo, "docs")
+    skip, reason = decide(mod, repo, base, head)
+    assert skip, reason
+
+
+def test_deleted_issue_markdown_skips(mod, repo):
+    write(repo, "issues/issue-1-design.md", "# 設計\n")
+    base = commit(repo, "plan")
+    (repo / "issues/issue-1-design.md").unlink()
+    head = commit(repo, "plan-to-spec")
+    assert decide(mod, repo, base, head)[0]
+
+
+@pytest.mark.parametrize(
+    "rel",
+    [
+        # テストが中身を読む文書（全体テストの読み取りを計測して決めた）
+        "docs/glossary.md",
+        "docs/glossary/glossary.json",
+        "docs/ndf-experiments.md",
+        "docs/presentations/deck/script.md",
+        "issues/mvv-ai-plugins.md",
+        # Markdown 以外
+        "docs/figure.svg",
+        "issues/plan.json",
+    ],
+)
+def test_docs_that_tests_read_still_run(mod, repo, rel):
+    base = git(repo, "rev-parse", "HEAD")
+    write(repo, "docs/other.md", "changed\n")
+    write(repo, rel, "changed\n")
+    head = commit(repo, "docs")
     skip, reason = decide(mod, repo, base, head)
     assert not skip
     assert rel in reason
