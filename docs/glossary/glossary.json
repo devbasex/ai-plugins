@@ -4410,7 +4410,7 @@
     {
       "term": "任意の依存",
       "context": "ndf-workflow",
-      "meaning": "無ければ代わりの手段へ落ちる import。except ImportError / ModuleNotFoundError で受けるか、同じ関数の中で find_spec / deps.importable で確かめてから読む",
+      "meaning": "無ければ代わりの手段へ落ちる import。except ImportError / ModuleNotFoundError で受けるか、同じ関数の中で find_spec / deps.importable で確かめ、確かめが成り立ったときだけ通る枝で読む",
       "source": "",
       "pending_source": "issues/issue-1455-design.md"
     }
