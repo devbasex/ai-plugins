@@ -160,6 +160,10 @@ def in_service(rel: str) -> bool:
     return rel == SERVICE_DIR or rel.startswith(SERVICE_DIR + "/")
 
 
+def posix_norm(path: str) -> str:
+    return os.path.normpath(path).replace(os.sep, "/")
+
+
 def lines_of(data: bytes) -> list[str]:
     return data.decode("utf-8", errors="replace").splitlines()
 
@@ -171,8 +175,8 @@ def matching_lines(kind: str, rel: str, lines: list[str], hit: Callable[[str], b
 def check_reference(root: Path, rel: str, lines: list[str]) -> list[Finding]:
     full = root / rel
     if full.is_symlink():
-        target = os.path.normpath(os.path.join(os.path.dirname(rel), os.readlink(full)))
-        return [Finding(REF, rel)] if in_service(target.replace(os.sep, "/")) else []
+        target = posix_norm(os.path.join(os.path.dirname(rel), os.readlink(full)))
+        return [Finding(REF, rel)] if in_service(target) else []
     return matching_lines(REF, rel, lines, SERVICE_REF.search)
 
 
@@ -189,7 +193,7 @@ def check_sources(root: Path) -> list[Finding]:
         source = plugin.get("source") if isinstance(plugin, dict) else None
         if not isinstance(source, str):
             continue
-        s = os.path.normpath(source).replace(os.sep, "/")
+        s = posix_norm(source)
         if s in (".", "") or in_service(s) or (SERVICE_DIR + "/").startswith(s + "/"):
             out.append(Finding(OVERLAP, f"{MARKETPLACE}#{plugin.get('name', source)}"))
     return out
