@@ -281,6 +281,13 @@
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
+      "term": "キューの続き",
+      "context": "ndf-workflow",
+      "meaning": "`supervise.py queue --resume <done>`。前の起動のステージの並びを読み、完了していないプランを終えたステップから続け、後続のステージも流す",
+      "source": "",
+      "pending_source": "issues/issue-1426-design.md"
+    },
+    {
       "term": "リリース差分",
       "context": "ndf-workflow",
       "meaning": "版と版の間（タグからタグまで）の変更",
@@ -3131,9 +3138,16 @@
     {
       "term": "取り込んだ課題",
       "context": "ndf-workflow",
-      "meaning": "設計で、受け入れ内容を別の課題の実装へ含めると決めた課題。自分の実装のプランは残すが、`実行の条件` で飛ばして実行しない",
+      "meaning": "受け入れ内容を別の課題の実装へ含めると決めた課題。設計の結果の表か `new sprint --absorb` で決める。実装のプランは `実行の条件` で飛ばして実行しない。`--absorb` で決めたときは自分の設計のプランを持たない",
       "source": "",
-      "pending_source": "issues/old/issue-1485-requirements.md"
+      "pending_source": "issues/issue-1426-design.md"
+    },
+    {
+      "term": "承認の証跡",
+      "context": "ndf-workflow",
+      "meaning": "承認ゲートで利用者が承認したことを示す、プランの外で残った記録。スプリント状態ファイルの承認ゲートの記録（`--by user --outcome approved`）・承認ラベル・承認資料の承認の記録のどれか。プランのステップは承認の証跡があるときだけ、承認を前提にした操作へ進む",
+      "source": "",
+      "pending_source": "issues/issue-1426-design.md"
     },
     {
       "term": "手動確認の行",
