@@ -6,5 +6,7 @@
     {"name": "pytest-scope", "reason": "重いジョブを省くかの判定だけで、結果は後の pytest が返す"},
     {"name": "runtime-smoke-scope", "reason": "重いジョブを省くかの判定だけで、結果は後の runtime-smoke (*) が返す"}
   ],
-  "awaiting": []
+  "awaiting": [
+    {"name": "service-boundary-check", "reason": "サービスのディレクトリの境界の検査（#2169）。ruleset の必須への追加は承認ゲート 2 で利用者が行う"}
+  ]
 }
