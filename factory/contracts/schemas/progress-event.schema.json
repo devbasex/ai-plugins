@@ -1,0 +1,288 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/devbasex/ai-plugins/blob/develop/factory/contracts/schemas/progress-event.schema.json",
+  "title": "ProgressEvent",
+  "description": "進捗の事象 1 件。確定仕様 docs/specifications/ndf-factory-service-boundary.md の「進捗の正本」と「進捗の事象の種類と受け口」。order_key と pr_ref は受け口が作るため含めない",
+  "oneOf": [
+    { "$ref": "#/$defs/JobStartedEvent" },
+    { "$ref": "#/$defs/PhaseChangedEvent" },
+    { "$ref": "#/$defs/StepRecordedEvent" },
+    { "$ref": "#/$defs/AttentionEvent" },
+    { "$ref": "#/$defs/GateReachedEvent" },
+    { "$ref": "#/$defs/GateAnsweredEvent" },
+    { "$ref": "#/$defs/UsageRecordedEvent" },
+    { "$ref": "#/$defs/JobFinishedEvent" },
+    { "$ref": "#/$defs/PrUpdatedEvent" },
+    { "$ref": "#/$defs/CiUpdatedEvent" }
+  ],
+  "$defs": {
+    "Identifier": {
+      "description": "スプリントの実行・実行ジョブの識別子。order_key の区切りの # と冪等の鍵の区切りの : を含めない",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,128}$"
+    },
+    "RepoFullName": {
+      "description": "GitHub のリポジトリ（owner/name）",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+    },
+    "PullRequestNumber": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "GateKind": {
+      "description": "ゲート 1・ゲート 2・判断",
+      "type": "string",
+      "enum": ["gate1", "gate2", "decision"]
+    },
+    "EventSource": {
+      "type": "string",
+      "enum": ["runner", "github", "api", "control"]
+    },
+    "EventCommon": {
+      "description": "どの種類にも共通の列",
+      "type": "object",
+      "required": ["sprint_run_id", "idempotency_key", "type", "at", "source", "job_id", "schema_version", "payload"],
+      "properties": {
+        "sprint_run_id": { "$ref": "#/$defs/Identifier" },
+        "idempotency_key": {
+          "description": "重複の判定の鍵。出所ごとの形は受け口の照合が見る",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "type": { "type": "string" },
+        "at": {
+          "description": "事象が起きた時刻（ISO 8601、UTC）。送り直しでも変えない",
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$"
+        },
+        "source": { "$ref": "#/$defs/EventSource" },
+        "job_id": {
+          "description": "null は実行ジョブの外で起きた事象（github・api）",
+          "type": ["string", "null"],
+          "pattern": "^[A-Za-z0-9_-]{1,128}$"
+        },
+        "schema_version": { "type": "integer", "const": 1 },
+        "payload": { "type": "object" }
+      }
+    },
+    "JobStartedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ndf_version", "start"],
+      "properties": {
+        "ndf_version": { "type": "string", "minLength": 1 },
+        "start": { "type": "string", "enum": ["new", "resume"] }
+      }
+    },
+    "PhaseChangedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phase", "issues"],
+      "properties": {
+        "phase": { "description": "フェーズの名前。集合は #2172 が決めるまで列挙にしない", "type": "string", "minLength": 1 },
+        "issues": { "type": "array", "items": { "type": "integer", "minimum": 1 } }
+      }
+    },
+    "PullRequestRef": {
+      "description": "このステップが作った・更新した Pull Request",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "number"],
+      "properties": {
+        "repo": { "$ref": "#/$defs/RepoFullName" },
+        "number": { "$ref": "#/$defs/PullRequestNumber" }
+      }
+    },
+    "StepRecordedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["step", "exit_code", "seconds", "summary"],
+      "properties": {
+        "step": { "type": "string", "minLength": 1 },
+        "exit_code": { "type": "integer" },
+        "seconds": { "type": "number", "minimum": 0 },
+        "summary": { "type": "string" },
+        "pull_request": { "$ref": "#/$defs/PullRequestRef" }
+      }
+    },
+    "AttentionPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason", "summary"],
+      "properties": {
+        "reason": { "type": "string", "minLength": 1 },
+        "summary": { "type": "string" }
+      }
+    },
+    "GateReachedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "pr_url", "material"],
+      "properties": {
+        "kind": { "$ref": "#/$defs/GateKind" },
+        "pr_url": { "type": ["string", "null"], "format": "uri" },
+        "material": { "description": "承認資料の本文", "type": "string" }
+      }
+    },
+    "GateAnsweredPayload": {
+      "description": "本文は持たない。decision は kind が decision のときは持たず、ほかでは必須",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approval_request_id", "kind", "answered_by_account_id"],
+      "properties": {
+        "approval_request_id": { "type": "string", "minLength": 1 },
+        "kind": { "$ref": "#/$defs/GateKind" },
+        "decision": { "type": "string", "enum": ["approved", "rejected"] },
+        "answered_by_account_id": { "type": "string", "minLength": 1 }
+      },
+      "if": { "properties": { "kind": { "const": "decision" } } },
+      "then": { "not": { "required": ["decision"] } },
+      "else": { "required": ["decision"] }
+    },
+    "UsageRecordedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model", "input_tokens", "output_tokens", "cost_usd", "step"],
+      "properties": {
+        "model": { "type": "string", "minLength": 1 },
+        "input_tokens": { "type": "integer", "minimum": 0 },
+        "output_tokens": { "type": "integer", "minimum": 0 },
+        "cost_usd": { "type": "number", "minimum": 0 },
+        "step": { "type": "string" }
+      }
+    },
+    "JobFinishedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["result", "summary"],
+      "properties": {
+        "result": { "type": "string", "enum": ["gate", "stopped", "done", "failed"] },
+        "summary": { "type": "string" }
+      }
+    },
+    "PrUpdatedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "number", "state"],
+      "properties": {
+        "repo": { "$ref": "#/$defs/RepoFullName" },
+        "number": { "$ref": "#/$defs/PullRequestNumber" },
+        "state": { "type": "string", "enum": ["open", "closed", "merged"] }
+      }
+    },
+    "CiUpdatedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "pr_number", "name", "conclusion"],
+      "properties": {
+        "repo": { "$ref": "#/$defs/RepoFullName" },
+        "pr_number": { "$ref": "#/$defs/PullRequestNumber" },
+        "name": { "type": "string", "minLength": 1 },
+        "conclusion": { "description": "null はまだ終わっていない", "type": ["string", "null"] }
+      }
+    },
+    "JobStartedEvent": {
+      "allOf": [{ "$ref": "#/$defs/EventCommon" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "job.started" },
+        "payload": { "$ref": "#/$defs/JobStartedPayload" }
+      },
+      "unevaluatedProperties": false
+    },
+    "PhaseChangedEvent": {
+      "allOf": [{ "$ref": "#/$defs/EventCommon" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "phase.changed" },
+        "payload": { "$ref": "#/$defs/PhaseChangedPayload" }
+      },
+      "unevaluatedProperties": false
+    },
+    "StepRecordedEvent": {
+      "allOf": [{ "$ref": "#/$defs/EventCommon" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "step.recorded" },
+        "payload": { "$ref": "#/$defs/StepRecordedPayload" }
+      },
+      "unevaluatedProperties": false
+    },
+    "AttentionEvent": {
+      "allOf": [{ "$ref": "#/$defs/EventCommon" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "attention" },
+        "payload": { "$ref": "#/$defs/AttentionPayload" }
+      },
+      "unevaluatedProperties": false
+    },
+    "GateReachedEvent": {
+      "allOf": [{ "$ref": "#/$defs/EventCommon" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "gate.reached" },
+        "payload": { "$ref": "#/$defs/GateReachedPayload" }
+      },
+      "unevaluatedProperties": false
+    },
+    "GateAnsweredEvent": {
+      "allOf": [{ "$ref": "#/$defs/EventCommon" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "gate.answered" },
+        "payload": { "$ref": "#/$defs/GateAnsweredPayload" }
+      },
+      "unevaluatedProperties": false
+    },
+    "UsageRecordedEvent": {
+      "allOf": [{ "$ref": "#/$defs/EventCommon" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "usage.recorded" },
+        "payload": { "$ref": "#/$defs/UsageRecordedPayload" }
+      },
+      "unevaluatedProperties": false
+    },
+    "JobFinishedEvent": {
+      "allOf": [{ "$ref": "#/$defs/EventCommon" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "job.finished" },
+        "payload": { "$ref": "#/$defs/JobFinishedPayload" }
+      },
+      "unevaluatedProperties": false
+    },
+    "PrUpdatedEvent": {
+      "allOf": [{ "$ref": "#/$defs/EventCommon" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "pr.updated" },
+        "payload": { "$ref": "#/$defs/PrUpdatedPayload" }
+      },
+      "unevaluatedProperties": false
+    },
+    "CiUpdatedEvent": {
+      "allOf": [{ "$ref": "#/$defs/EventCommon" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "ci.updated" },
+        "payload": { "$ref": "#/$defs/CiUpdatedPayload" }
+      },
+      "unevaluatedProperties": false
+    }
+  }
+}

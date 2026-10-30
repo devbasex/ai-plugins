@@ -35,6 +35,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | セッション | `session` | ラッパーが起動する claude の 1 回の起動（1 つの会話）。番号を付けて「セッション 4」と呼ぶ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | プラン | `plan` | `supervise.py` が流す 1 本の JSON（`plan.json`）。フェーズの手順をステップの列として持つ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | キュー | `queue` | プランを空いた枠へ順に流す `supervise.py queue`。終わると結果を done へ書く | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| キューの続き | — | `supervise.py queue --resume <done>`。前の起動のステージの並びを読み、完了していないプランを終えたステップから続け、後続のステージも流す | — | — | — |
 | リリース差分 | — | 版と版の間（タグからタグまで）の変更 | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | インライン実行 | — | 仕事を渡す実行方式の 1 つ。いまの会話の文脈で行う | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | オーケストレーター | — | `cross-refactoring` と `cross-review` で、公開・生成物の同期を持ち、担当を回す側。3 層では conductor に当たる | 進行側、レビューを回す側 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
@@ -238,7 +239,8 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 前提のプラン | `after` | プランの JSON の `前提のプラン` に名前で挙げたプラン。その結果が完了でなければ、queue は挙げた側のプランを流さない | — | — | `docs/specifications/ndf-supervise-queue-concurrent-files-and-prerequisites.md` |
 | スプリントの雛形 | — | `supervise.py new sprint` がステージごとのプランを作る関数（`sprint_waves.py` の `plan_sprint_*` / `plan_fast_*`） | — | — | — |
 | 単発の雛形 | — | `supervise.py new impl / fix / check` が 1 本のプランを作る関数（`templates.py`） | — | — | — |
-| 取り込んだ課題 | — | 設計で、受け入れ内容を別の課題の実装へ含めると決めた課題。自分の実装のプランは残すが、`実行の条件` で飛ばして実行しない | — | — | — |
+| 取り込んだ課題 | — | 受け入れ内容を別の課題の実装へ含めると決めた課題。設計の結果の表か `new sprint --absorb` で決める。実装のプランは `実行の条件` で飛ばして実行しない。`--absorb` で決めたときは自分の設計のプランを持たない | — | — | — |
+| 承認の証跡 | — | 承認ゲートで利用者が承認したことを示す、プランの外で残った記録。スプリント状態ファイルの承認ゲートの記録（`--by user --outcome approved`）・承認ラベル・承認資料の承認の記録のどれか。プランのステップは承認の証跡があるときだけ、承認を前提にした操作へ進む | — | — | — |
 | 手動確認の行 | — | 要求の検証手段の表で、項目が「手動確認」で始まり、2 列目が「無し」の形（「無し」「なし」「不要」「ない」「-」「—」「―」の単独か、直後に括弧・句読点・空白が続く形）でない行。項目が「手動確認（マージ前）」ならマージ前、それ以外はリリース後テストに確かめる | — | — | — |
 | 記録の置き場が分からない | — | まとめの close が読むリリース記録の Pull Request を、プランが組まれた時点で決められない状態。sprint-close.py --record-pr unknown で渡し、課題を開いたまま残す | — | — | `docs/specifications/ndf-sprint-misjudgments-unknown-record-and-manual-none.md` |
 | 設計の結果 | — | 設計文書の「設計の結果」の節の表。課題ごとに扱い（実装する / 取り込む / 閉じる）・取り込み先・触るファイルを書き、実装のステージの前に機械が読む | — | — | — |
@@ -302,6 +304,10 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 依存グループ | — | lib/deps.py の GROUPS と pyproject.toml の extra に並ぶ、外部パッケージの用途ごとのまとまり（procs・locks など）。deps.require へ名前で渡す | — | — | — |
 | 未宣言のグループ | — | モジュールから import をたどって届く外部パッケージの依存グループのうち、そのモジュールの中で覆う deps.require が無いもの。そのモジュールを読む側が引き受ける | — | — | — |
 | 任意の依存 | — | 無ければ代わりの手段へ落ちる import。except ImportError / ModuleNotFoundError で受けるか、同じ関数の中で find_spec / deps.importable で確かめ、確かめが成り立ったときだけ通る枝で読む | — | — | — |
+| 所要の記録 | — | `.ndf/project.json` の `test_duration.measured` にある全体テストの所要（秒。w）。出所は ndf-record → ci-junit → ci-steps の順に採る。宣言の解析が書き、プランの作成と test-run.py が読む | — | — | — |
+| 全体テストの実測 | — | 同じリポジトリで先に走った全体テストの壁時計の秒。所要の記録とは別に残し、後のプランと test-run.py が予算なしのテストの上限を決めるときに読む（#1631） | — | — | — |
+| テストの上限 | `limits` | test_strategy.limits が返す init_test_timeout・test_timeout・whole_timeout（秒）。ステップの timeout はこれに with_margin の余裕を足した値で、テストの上限には余裕を足さない | — | — | — |
+| 全体テストの鍵 | `whole_key` | 戦略の全体テストのコマンドの集合から作る識別子（whole_key）。全体テストの実測をコマンドごとに分け、コマンドの違う実測を混ぜない（#1631） | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 
