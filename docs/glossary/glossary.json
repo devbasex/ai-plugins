@@ -4392,6 +4392,28 @@
       "context": "ndf-factory",
       "meaning": "アカウントのランナーが Claude をどう呼ぶか。`local`（手元のランナー）・`byok`（キーの持ち込み）・`managed`（サービスの Bedrock）の 3 つで、アカウントごとに 1 つ持つ。Free は `managed` を選べず、月の token の上限は `managed` だけに掛かる",
       "source": "docs/specifications/ndf-factory-accounts-and-plans.md"
+    },
+    {
+      "term": "所要の記録",
+      "context": "ndf-workflow",
+      "meaning": "`.ndf/project.json` の `test_duration.measured` にある全体テストの所要（秒。w）。出所は ndf-record → ci-junit → ci-steps の順に採る。宣言の解析が書き、プランの作成と test-run.py が読む",
+      "source": "",
+      "pending_source": "issues/issue-1631-requirements.md"
+    },
+    {
+      "term": "全体テストの実測",
+      "context": "ndf-workflow",
+      "meaning": "同じリポジトリで先に走った全体テストの壁時計の秒。所要の記録とは別に残し、後のプランと test-run.py が予算なしのテストの上限を決めるときに読む（#1631）",
+      "source": "",
+      "pending_source": "issues/issue-1631-requirements.md"
+    },
+    {
+      "term": "テストの上限",
+      "context": "ndf-workflow",
+      "meaning": "test_strategy.limits が返す init_test_timeout・test_timeout・whole_timeout（秒）。ステップの timeout はこれに with_margin の余裕を足した値で、テストの上限には余裕を足さない",
+      "source": "",
+      "pending_source": "issues/issue-1631-requirements.md",
+      "code": "limits"
     }
   ]
 }
