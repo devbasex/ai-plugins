@@ -360,11 +360,12 @@ erDiagram
 
 | 名前 | 使う側 | 意味 |
 | --- | --- | --- |
-| `COGNITO_DOMAIN` | 画面 | Cognito の管理されたログインのドメイン |
+| `COGNITO_DOMAIN` | 画面・GitHub の仲立ち | Cognito の管理されたログインのドメイン。仲立ちは `/authorize` で受ける `redirect_uri` をこのドメインの `/oauth2/idpresponse` と照らす |
 | `FACTORY_WEB_URL` | 画面 | 画面の URL。ログインの戻り（`/callback`）とログアウトの戻りに使う |
 | `FACTORY_API_URL` | 画面 | API の入口の URL |
 | `ACCOUNTS_TABLE_NAME` | API | アカウントの表の名前 |
 | `GITHUB_OIDC_ISSUER` | GitHub の仲立ち | 仲立ちの発行元の URL |
+| `GITHUB_OAUTH_CLIENT_ID` | GitHub の仲立ち | GitHub の OAuth App のクライアントの ID（秘密でない）。`/authorize` で受ける `client_id` と照らす |
 | `GITHUB_OIDC_SIGNING_KEY_SECRET_ARN` | GitHub の仲立ち | ID token を署名する RSA の秘密鍵の置き場 |
 
 画面は `vite.config.ts` が、上の画面の 3 つと `COGNITO_CLIENT_ID` だけを名前で選んで埋め込む。ほかの変数を画面へ入れない。
@@ -439,7 +440,7 @@ Pro と Max の比、Team standard を個人 Pro の少し上、Team premium を
 | I22 | 個人のアカウントは本人だけ、チームは持ち主だけが形態を変えられ、ほかは 403 で本文が I18 と同じ形 | 持ち主の確かめを外すと落ちる |
 | I23 | `getLimits` が `managed` の文脈でだけ `monthlyTokens` に表の値を返し、`local`・`byok` では `null` を返す。`managed` で月の token の値が無い組は断る | `managed` の判定を外すと `local` の行が落ちる |
 | I24 | 初めてのログインで作る個人のアカウントと `POST /teams` で作るチームのアカウントの形態が `local` | 既定を `managed` にすると落ちる |
-| GitHub の仲立ち | ID token の `sub` が GitHub の数の利用者 ID で、`aud` が `client_id`、公開した鍵で検証できる。検証済みでないメールは返さない。`/authorize` で受けた `nonce` が `/callback` を経て `/token` の ID token の `nonce` に同じ値で出る。署名の壊れた・期限の切れた・`client_id` か `redirect_uri` の違う `state` と `code` は断る | `sub` にログイン名を入れると落ちる。`nonce` を包まずに運ぶと ID token に出ずに落ちる |
+| GitHub の仲立ち | ID token の `sub` が GitHub の数の利用者 ID で、`aud` が `client_id`、公開した鍵で検証できる。検証済みでないメールは返さない。`/authorize` で受けた `nonce` が `/callback` を経て `/token` の ID token の `nonce` に同じ値で出る。署名の壊れた・期限の切れた・`client_id` か `redirect_uri` の違う `state` と `code` は断る。`/authorize` に `https://${COGNITO_DOMAIN}/oauth2/idpresponse` と違う `redirect_uri` か `GITHUB_OAUTH_CLIENT_ID` と違う `client_id` が来たら、GitHub へ送らずに 400 `invalid_request` を返す | `sub` にログイン名を入れると落ちる。`nonce` を包まずに運ぶと ID token に出ずに落ちる。`redirect_uri` を照らさずに GitHub へ送ると 302 が返って落ちる |
 
 ## 設計の結果
 

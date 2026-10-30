@@ -31,7 +31,7 @@
 | 経路 | 中身 |
 | --- | --- |
 | `GET /.well-known/openid-configuration` | 発行元と下の経路（`/callback` を除く 4 つ）、`id_token_signing_alg_values_supported: ["RS256"]` |
-| `GET /authorize` | 受けた `client_id`・`redirect_uri`・`state`・`nonce` を、署名の鍵で署名した有効期限 10 分の JWT（仲立ちの `state`）に包み、`redirect_uri=${GITHUB_OIDC_ISSUER}/callback`・`scope=read:user user:email` で GitHub の認可の画面へ 302 で送る |
+| `GET /authorize` | 受けた `redirect_uri` が `https://${COGNITO_DOMAIN}/oauth2/idpresponse` と、`client_id` が `GITHUB_OAUTH_CLIENT_ID` と完全に一致するときだけ受ける。どちらかが違えば GitHub へ送らず、どこへも転送せずに 400 `invalid_request` で断る（`/callback` が任意の URL へ `code` を送るオープンリダイレクトにしないため）。受けた `client_id`・`redirect_uri`・`state`・`nonce` を、署名の鍵で署名した有効期限 10 分の JWT（仲立ちの `state`）に包み、`redirect_uri=${GITHUB_OIDC_ISSUER}/callback`・`scope=read:user user:email` で GitHub の認可の画面へ 302 で送る |
 | `GET /callback` | GitHub から `code` と仲立ちの `state` を受け、`state` の署名と期限を確かめる。GitHub の `code` と `state` の中の `client_id`・`redirect_uri`・`nonce` を、署名した有効期限 5 分の JWT（仲立ちの `code`）に包み、Cognito の `redirect_uri` へ Cognito の元の `state` と一緒に 302 で返す。GitHub がエラーを返したら、`error` を元の `state` と一緒にそのまま返す |
 | `POST /token` | 受けた仲立ちの `code` の署名と期限を確かめ、中の `client_id`・`redirect_uri` が要求のものと同じでなければ `invalid_grant` で断る。中の GitHub の `code` とクライアントの ID と秘密を GitHub の token の経路へ渡し、得た access token で GitHub の利用者を引き、`sub` = GitHub の数の利用者 ID、`aud` = `client_id`、`nonce` = 仲立ちの `code` の中の値（`/authorize` で受けなければ載せない）、有効期限 5 分の ID token を署名して返す。`access_token` は GitHub のものをそのまま返す |
 | `GET /userinfo` | 受けた access token で GitHub の利用者を引き、`sub`・`name`・`preferred_username` と、検証済みの主のメールがあれば `email`・`email_verified` を返す |
@@ -39,7 +39,7 @@
 
 `sub` に GitHub のログイン名やメールを使わない。どちらも利用者が変えられ、別人と入れ替わるためである。
 
-**`nonce` は表を使わず、署名した `state` と `code` で運ぶ。** Cognito は OIDC の IdP へ `nonce` を送り、返った ID token の `nonce` と照らす。GitHub の `code` を Cognito へ直に戻すと、`/token` は Cognito の要求に `nonce` が無いため値を復元できない。そこで GitHub の戻り先を仲立ちの `/callback` にし、`nonce` を仲立ちの `code` に結び付ける。包む JWT は ID token と同じ署名の鍵（`GITHUB_OIDC_SIGNING_KEY_SECRET_ARN`）で署名し、新しい秘密と表を足さない。GitHub の `code` は署名だけで暗号化しないが、換えるには Cognito が持つクライアントの秘密が要り、GitHub が 1 回しか換えさせないため、標準の流れでブラウザの URL に出るのと変わらない。
+**`nonce` は表を使わず、署名した `state` と `code` で運ぶ。** Cognito は OIDC の IdP へ `nonce` を送り、返った ID token の `nonce` と照らす。GitHub の `code` を Cognito へ直に戻すと、`/token` は Cognito の要求に `nonce` が無いため値を復元できない。そこで GitHub のコールバックの URL を仲立ちの `/callback` にし、`nonce` を仲立ちの `code` に結び付ける。包む JWT は ID token と同じ署名の鍵（`GITHUB_OIDC_SIGNING_KEY_SECRET_ARN`）で署名し、新しい秘密と表を足さない。GitHub の `code` は署名だけで暗号化しないが、換えるには Cognito が持つクライアントの秘密が要り、GitHub が 1 回しか換えさせないため、標準の流れでブラウザの URL に出るのと変わらない。GitHub はもう Cognito の `redirect_uri` を照らさないため、`/authorize` が設定の値と照らして、`code` を Cognito の戻りの経路にだけ送る。
 
 ### 画面
 
