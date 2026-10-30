@@ -25,14 +25,11 @@ const canWrite = (source: EventSource, event: ProgressEvent) =>
 // 実行ジョブの終わりの冪等の鍵。ランナーと実行の制御が同じ鍵を使い、先の 1 つだけが残る
 export const finishedKey = (jobId: string) => `${jobId}:finished`;
 
-// ランナーの冪等の鍵の連番 <seq> の形。1 以上の整数で、先頭に 0 を置かない（I27）
-const RUNNER_SEQ = /^[1-9][0-9]*$/;
-
 // ランナーの冪等の鍵の形（I27）: job.finished は <job_id>:finished、ほかは <job_id>:<seq>（seq は 1 以上）
 function isRunnerKey(event: ProgressEvent, jobId: string): boolean {
   if (event.type === "job.finished") return event.idempotency_key === finishedKey(jobId);
   const prefix = `${jobId}:`;
-  return event.idempotency_key.startsWith(prefix) && RUNNER_SEQ.test(event.idempotency_key.slice(prefix.length));
+  return event.idempotency_key.startsWith(prefix) && /^[1-9][0-9]*$/.test(event.idempotency_key.slice(prefix.length));
 }
 
 // runner: token の実行ジョブと事象の job_id・sprint_run_id が一致し、鍵がそのジョブの形である（I25〜I27）
