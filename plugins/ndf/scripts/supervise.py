@@ -52,7 +52,9 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
         # 空いた枠へ順に流す。作業ツリーは起動の前に 1 本ずつ作る。--then の計画は前の計画がすべて完了のときだけ
         # 続けて流す（実装の queue の後の配布など）。--then を繰り返すとステージになり、ステージは前のステージがすべて完了のときだけ
         # 流れる。終わると結果の JSON を --done（省けば最初の計画の
-        # <計画>-state/queue-done.json）へ書く。始めに流す計画の一覧を done の隣（<done>.plans.json）へ書く
+        # <計画>-state/queue-done.json）へ書く。始めに流す計画の一覧とステージの並びを done の隣（<done>.plans.json）へ書く
+    supervise.py queue --resume <done> [--from <プラン名>=<ステップ>]... [--max N]
+        # キューの続き: 前の起動の止まった・関門のプランを終えたステップから続け、後続のステージも同じ条件で流す
     supervise.py wait <done のパス> [--timeout 秒] [--poll 秒]
         # queue の終わり（done）か、queue が流す計画の attention の行まで待つ。出力は要約の 1 行と結果の JSON。
         # 終了コード: done = 0 / attention = 20 / 上限 = 3。attention の後にもう一度打つと、その続きから待つ
@@ -85,7 +87,7 @@ import deps  # noqa: E402
 deps.require(
     "md", "mdtable", "schema", "procs", "locks", "durable"
 )  # 課題の本文（state → sprint_mvv → md）・表（pr・commands）・宣言の形（decl）・claude -p の打ち切り（claude）・アカウントの排他（claude_accounts）・耐久の記録（flow）
-from supervise_lib import commands, design_stage, sprint, sprint_routes, new_args, queue, templates  # noqa: E402
+from supervise_lib import commands, design_stage, sprint, sprint_routes, new_args, queue, queue_resume, templates  # noqa: E402
 from supervise_lib import pr as pr_step  # noqa: E402
 from supervise_lib.decl import DeclError, apply_decls  # noqa: E402
 from supervise_lib.plan import EXAMPLE  # noqa: E402
@@ -145,8 +147,10 @@ def main() -> int:
         "--then を繰り返すとステージになる。終わると結果の JSON を --done へ書き、始めに流すプランの"
         "一覧を <done>.plans.json へ書く",
     )
-    q.add_argument("plans", nargs="+", help="流すプランの JSON")
-    q.add_argument("--max", type=int, default=3, help="同時に流す本数（既定 3）")
+    q.add_argument("plans", nargs="*", help="流すプランの JSON（--resume と併せて渡さない）")
+    q.add_argument("--max", type=int, help="同時に流す本数（既定 3。--resume は前の起動の値）")
+    q.add_argument("--resume", metavar="DONE", help="前の起動の done。止まったプランを終えたステップから続け、後続のステージも流す")
+    q.add_argument("--from", dest="from_", action="append", default=[], metavar="PLAN=STEP", help="--resume: 続けるプランの開始のステップ")
     q.add_argument("--poll", type=float, default=5.0, help="終わりを見る間隔（秒）")
     q.add_argument(
         "--then",
@@ -241,8 +245,14 @@ def main() -> int:
             emit(templates.cmd_new(a))
         except DeclError as e:
             ap.error(str(e))
+    if a.cmd == "queue" and a.resume:
+        if a.plans or a.then or a.done:
+            ap.error("queue --resume は位置引数のプラン・--then・--done と併せて渡さない")
+        emit(queue_resume.cmd_queue_resume(a.resume, a.from_, a.max and max(1, a.max), a.poll, queue.cmd_queue))
     if a.cmd == "queue":
-        emit(queue.cmd_queue(a.plans, max(1, a.max), a.poll, a.then, a.done))
+        if not a.plans or a.from_:
+            ap.error("queue にはプランが要る（--from は --resume と使う）")
+        emit(queue.cmd_queue(a.plans, max(1, a.max or 3), a.poll, a.then, a.done))
     if a.cmd == "wait":
         summary, res, code = queue.cmd_wait(a.done, a.timeout, a.poll)
         print(summary, flush=True)
