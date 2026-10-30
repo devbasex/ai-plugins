@@ -306,9 +306,15 @@ def test_read_allow_missing_file_is_unreadable(tmp_path):
         (json.dumps({"version": 1, "secrets": [{"path": 1, "sha256": "0" * 64, "reason": "r"}]}), "許可の行の path と reason が空: "),
         (json.dumps({"version": 1, "secrets": [{"path": "a", "sha256": "0" * 64, "reason": "  "}]}), "許可の行の path と reason が空: "),
         (json.dumps({"version": 1, "secrets": [{"path": "a?.py", "sha256": "0" * 64, "reason": "r"}]}), "許可の path はファイル 1 つだけ"),
-        (json.dumps({"version": 1, "secrets": [{"path": "a[0].py", "sha256": "0" * 64, "reason": "r"}]}), "許可の path はファイル 1 つだけ"),
+        (
+            json.dumps({"version": 1, "secrets": [{"path": "a[0].py", "sha256": "0" * 64, "reason": "r"}]}),
+            "許可の path はファイル 1 つだけ",
+        ),
         (json.dumps({"version": 1, "secrets": [{"path": "src/", "sha256": "0" * 64, "reason": "r"}]}), "許可の path はファイル 1 つだけ"),
-        (json.dumps({"version": 1, "secrets": [{"path": "a", "sha256": "A" * 64, "reason": "r"}]}), "許可の sha256 が 64 字の 16 進でない: "),
+        (
+            json.dumps({"version": 1, "secrets": [{"path": "a", "sha256": "A" * 64, "reason": "r"}]}),
+            "許可の sha256 が 64 字の 16 進でない: ",
+        ),
         (json.dumps({"version": 1, "secrets": [{"path": "a", "sha256": 0, "reason": "r"}]}), "許可の sha256 が 64 字の 16 進でない: "),
     ],
 )
