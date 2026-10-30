@@ -183,13 +183,15 @@ graph TD
     L2 -->|OAuth の code と token| GHAPI[GitHub]
 ```
 
-インフラへ渡す形は次の 3 つで、private リポジトリはこれに合わせて資源を作る。
+インフラへ渡す形は次の 5 つで、private リポジトリはこれに合わせて資源を作る。
 
 | 渡す形 | 中身 |
 | --- | --- |
 | handler | `factory/api/src/handlers/api.ts` の `handler`（HTTP API の payload 2.0）、`factory/api/src/handlers/github-oidc.ts` の `handler`（同）。束ね方（esbuild など）はインフラが決める |
 | 画面の資産 | `npm run build -w web` が作る `factory/web/dist/` |
 | 表の鍵 | 下の「データ構造」の `pk`・`sk` と GSI `gsi1`（`gsi1pk`・`gsi1sk`） |
+| Cognito の IdP の名前 | `Google`（組み込みの Google）と `GitHub`（OIDC の IdP。発行元は `GITHUB_OIDC_ISSUER`）。大文字と小文字もこのとおりにする。画面が送る `identity_provider` と、API が `idp` を決める token の `username` の頭（`Google_`・`GitHub_`）がこの名前に依存する |
+| GitHub の仲立ちの経路 | API Gateway の HTTP API の `/oidc/github/{proxy+}` を、認可なしで `github-oidc.ts` の `handler` へ通す。`GITHUB_OIDC_ISSUER` は `https://<API の入口>/oidc/github` にする（経路は「入出力の契約」の「GitHub の仲立ち」） |
 
 ### 置き場所
 

@@ -137,9 +137,9 @@ graph TD
 
 | 課題 | 受け持つ範囲 | 提供する契約 | 使う契約 |
 | --- | --- | --- | --- |
-| #2170 | Cognito の利用者プール（Google・GitHub）・アカウント・席・プランと使える量の画面と API | 認可の token の `account_id`、使える量の問い合わせ（同時のスプリントの数・月の token の上限） | 無し |
-| #2171 | `factory/contracts/`・進捗の受け口・実行ジョブの token の検証 | 実行ジョブの指示・進捗の事象の種類と形・受け口の認証と応答・実行ジョブの token の検証（token から実行ジョブと `sprint_run_id` を返し、無効なら拒む） | #2170 の `account_id`、#2173 の保存済みの答え（`gate.answered` の照合） |
-| #2186 | GitHub App・リポジトリの登録・スプリントの実行と実行ジョブ・ランナー・実行ジョブの token の発行 | 実行の制御への再開の要求の受け口 | #2171 の `factory/contracts/`・進捗の受け口・token の検証、#2170 の `account_id` と使える量、#2173 の承認の依頼の答えを読む経路 |
+| #2170 | Cognito の利用者プール（Google・GitHub）・アカウント・席・プランと使える量の画面と API | `resolveAccount(caller, accountId?)` が返す `account_id`（token には載せず、検証した token の利用者と経路 `/accounts/{account_id}/…` から解決する。経路に無ければ個人のアカウント）、使える量の問い合わせ（同時のスプリントの数・月の token の上限） | 無し |
+| #2171 | `factory/contracts/`・進捗の受け口・実行ジョブの token の検証 | 実行ジョブの指示・進捗の事象の種類と形・受け口の認証と応答・実行ジョブの token の検証（token から実行ジョブと `sprint_run_id` を返し、無効なら拒む） | #2170 の `resolveAccount` が返す `account_id`、#2173 の保存済みの答え（`gate.answered` の照合） |
+| #2186 | GitHub App・リポジトリの登録・スプリントの実行と実行ジョブ・ランナー・実行ジョブの token の発行 | 実行の制御への再開の要求の受け口 | #2171 の `factory/contracts/`・進捗の受け口・token の検証、#2170 の `resolveAccount` が返す `account_id` と使える量、#2173 の承認の依頼の答えを読む経路 |
 | #2172 | 一覧と詳細の画面・派生の形・フェーズの名前の集合 | 無し | 進捗の事象（`phase.changed`・`step.recorded`・`pr.updated`・`ci.updated`） |
 | #2173 | 承認の依頼・Web と Slack の通知・Web からの承認 | `gate.answered`、承認の依頼の答えを読む経路、実行の制御への再開の要求 | `gate.reached`・`attention`、#2171 の実行ジョブの token の検証 |
 | #2174 | プランの料金・使用量の台帳・決済の手段と提供元・Bedrock の使用量の帰属 | 請求の画面と API | `usage.recorded`、#2170 のプラン |
