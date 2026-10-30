@@ -103,3 +103,55 @@ describe("setPlan（E6、I13・I20・I21）", () => {
     await expect(service.setPlan(id, "pro")).rejects.toMatchObject({ status: 503 });
   });
 });
+
+describe("新しいアカウントの行と履歴（現状固定、I24）", () => {
+  const at = "2026-01-02T03:04:05.000Z";
+  beforeEach(() => {
+    let n = 0;
+    service = new AccountService({ store, newId: () => `acc-${++n}`, now: () => new Date(at) });
+  });
+
+  it("ensureUser は Free・local・版 1 の個人の行と account.created の履歴を作る", async () => {
+    const id = await personal();
+    expect(store.accounts.get(id)).toStrictEqual({
+      accountId: id,
+      kind: "personal",
+      plan: "free",
+      executionMode: "local",
+      version: 1,
+      ownerUserId: "u-1",
+      name: null,
+      createdAt: at,
+      updatedAt: at,
+    });
+    const created = store.history.find((h) => h.accountId === id && h.type === "account.created");
+    expect(created).toStrictEqual({ accountId: id, type: "account.created", at, actor: "u-1", before: null, after: { kind: "personal", plan: "free", execution_mode: "local" } });
+    expect(Object.keys(created!.after as object)).toEqual(["kind", "plan", "execution_mode"]);
+  });
+
+  it("createTeam は team・local・版 1 の行と、name を足した account.created の履歴を作る", async () => {
+    const team = await service.createTeam({ userId: "u-1", idp: "google" }, "t", "premium");
+    expect(store.accounts.get(team.accountId)).toStrictEqual({
+      accountId: team.accountId,
+      kind: "team",
+      plan: "team",
+      executionMode: "local",
+      version: 1,
+      ownerUserId: "u-1",
+      name: "t",
+      createdAt: at,
+      updatedAt: at,
+    });
+    const history = store.history.filter((h) => h.accountId === team.accountId);
+    expect(history.map((h) => h.type)).toEqual(["account.created", "seat.added"]);
+    expect(history[0]).toStrictEqual({
+      accountId: team.accountId,
+      type: "account.created",
+      at,
+      actor: "u-1",
+      before: null,
+      after: { kind: "team", plan: "team", execution_mode: "local", name: "t" },
+    });
+    expect(Object.keys(history[0]!.after as object)).toEqual(["kind", "plan", "execution_mode", "name"]);
+  });
+});
