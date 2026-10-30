@@ -180,7 +180,7 @@ def user_gate_cmd(a, gate: str, pr: bool) -> str:
 
 def normal_gate_1(a, advise: bool = True) -> str:
     """承認ゲート 1 の文。承認の証跡（状態の記録か承認ラベル）を書いてから、設計 PR のマージのステージの command を打つ（#1426 の決定 1）。"""
-    after = "。承認された設計 PR だけが「設計 PR のマージ」のステージでマージされ、後続のステージは --then で続けて流れる"
+    after = "。後続のステージは --then で続けて流れる。証跡の無い設計 PR のマージは承認ゲートで止まり、後続は流れない"
     if not getattr(a, "state", None):
         return (
             "設計 Pull Request の承認を取り、承認された PR ごとに `gh pr edit <設計 PR> --add-label design-approved` を打ってから「設計 PR のマージ」のステージの command を打つ"
