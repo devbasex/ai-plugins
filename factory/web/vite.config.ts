@@ -3,7 +3,7 @@ import { defineConfig } from "vitest/config";
 import { loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 
-// 画面へ埋め込む変数は次の 4 つだけ。ほかの変数を画面へ入れない（issues/issue-2170-design.md の「データ・設定」）
+// 画面へ埋め込む変数は次の 4 つだけ。ほかの変数を画面へ入れない（docs/specifications/ndf-factory-accounts-and-plans.md の「環境変数」）
 const FACTORY_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 export default defineConfig(({ mode }) => {

@@ -3,7 +3,7 @@ import { jwtVerify, SignJWT } from "jose";
 import type { SigningKeys } from "./keys.ts";
 
 // GitHub の OAuth を、Cognito が OIDC の IdP として受け取れる形へ変える仲立ち（決定 3）。
-// 経路と照合は issues/issue-2170-design-interfaces.md の「GitHub の仲立ち」
+// 経路と照合は docs/specifications/ndf-factory-accounts-and-plans.md の「GitHub の仲立ち」
 export interface GithubOidcConfig {
   // 仲立ちの発行元（GITHUB_OIDC_ISSUER）。経路はこの URL の path の下に置く
   issuer: string;
