@@ -93,6 +93,25 @@ class Finding:
         return f"{self.kind}: {where} → {FIXES[self.kind]}"
 
 
+class Allowlist:
+    """許可の行を (path, sha256) で引き、当たった行を覚える。"""
+
+    def __init__(self, rows: list[dict]) -> None:
+        self.rows = rows
+        self.by_key = {(r["path"], r["sha256"]): r for r in rows}
+        self.used: set[int] = set()
+
+    def allows(self, rel: str, value: str) -> bool:
+        row = self.by_key.get((rel, hashlib.sha256(value.encode()).hexdigest()))
+        if row is None:
+            return False
+        self.used.add(id(row))
+        return True
+
+    def stale(self) -> list[dict]:
+        return [r for r in self.rows if id(r) not in self.used]
+
+
 def git_root(root: Path) -> Path:
     r = subprocess.run(["git", "-C", str(root), "rev-parse", "--show-toplevel"], capture_output=True, text=True)
     if r.returncode != 0:
@@ -187,16 +206,13 @@ def check_infra(rel: str, lines: list[str]) -> list[Finding]:
     return []
 
 
-def check_secrets(rel: str, lines: list[str], allowed: dict[tuple[str, str], dict], used: set[int]) -> list[Finding]:
+def check_secrets(rel: str, lines: list[str], allow: Allowlist) -> list[Finding]:
     out = []
     for n, line in enumerate(lines, 1):
         for pattern in SECRET_PATTERNS:
             for m in pattern.finditer(line):
-                row = allowed.get((rel, hashlib.sha256(m.group(0).encode()).hexdigest()))
-                if row is None:
+                if not allow.allows(rel, m.group(0)):
                     out.append(Finding(SECRET, rel, n))
-                else:
-                    used.add(id(row))
     return out
 
 
@@ -217,9 +233,7 @@ def check_env(rel: str, lines: list[str]) -> list[Finding]:
 
 def check(root: Path, allow_path: Path) -> list[Finding]:
     root = git_root(root)
-    rows = read_allow(allow_path, root)
-    allowed = {(r["path"], r["sha256"]): r for r in rows}
-    used: set[int] = set()
+    allow = Allowlist(read_allow(allow_path, root))
     out = check_sources(root)
     for rel in tracked_files(root):
         full = root / rel
@@ -229,9 +243,9 @@ def check(root: Path, allow_path: Path) -> list[Finding]:
         if rel.startswith("plugins/") or rel == MARKETPLACE:
             out += check_reference(root, rel, lines)
         out += check_infra(rel, lines)
-        out += check_secrets(rel, lines, allowed, used)
+        out += check_secrets(rel, lines, allow)
         out += check_env(rel, lines)
-    out += [Finding(STALE_ALLOW, r["path"]) for r in rows if id(r) not in used]
+    out += [Finding(STALE_ALLOW, r["path"]) for r in allow.stale()]
     return out
 
 
