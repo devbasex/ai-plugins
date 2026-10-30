@@ -759,3 +759,7 @@ NDF を Web UI から操作できるサービスとして提供するときの�
 | スプリントの実行 | — | サービスが動かす NDF のスプリント 1 つ（sprint.json 1 つ）と、それを進める実行ジョブの列 | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
 | 進捗の事象 | — | ランナーと GitHub の通知から受け取り、追記だけで持つ 1 件の出来事。一覧・詳細・通知・課金はここから導く | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
 | 承認の依頼 | — | 実行ジョブが人の答えを待って終わったときに作る依頼。種類はゲート 1・ゲート 2・判断（止めて人へ戻した）の 3 つ | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
+| アカウント | — | Neural Development Factory で、プランと使える量を持ち、リポジトリの登録とスプリントの実行を持つ単位。個人とチームの 2 種類。`account_id` で指す | — | — | — |
+| 席 | — | チームのアカウントの中で、1 人の利用者に割り当てる枠。種類は standard と premium | — | — | — |
+| プラン | — | アカウントの契約の種類。Free・個人 Pro・個人 Max・Team の 4 つ。Team の使える量は席の種類で決まる | — | — | — |
+| 使える量 | — | プランか席の種類ごとに決まる上限。同時に動かせるスプリントの実行の数と、月の token の上限の 2 つ | — | — | — |
