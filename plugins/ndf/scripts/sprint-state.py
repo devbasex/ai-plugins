@@ -41,8 +41,7 @@ deps.require("md", "mdtable", "schema", "locks")  # schema は supervise_lib.pat
 import report_fields  # noqa: E402
 from supervise_lib.paths import sha256_of, state_dir_of  # noqa: E402
 import clock  # noqa: E402
-import jsonio  # noqa: E402
-import locks  # noqa: E402
+import gate_answer, jsonio, locks  # noqa: E402,E401
 from handoff_doc import COMMAND_SECTION, PROGRESS_SECTION, find_section, heading_text  # noqa: E402
 import mdtable  # noqa: E402
 import step_result  # noqa: E402
@@ -278,8 +277,8 @@ def gate_locked(a) -> dict:
         override = pms.record_override(m, a.sprint, a.name, a.outcome, at, root, a.mvv_log, pr=a.pr)
         if a.outcome == "rejected":
             return reject_gate(a, m, repo, override, at)
-        if a.outcome:
-            entry["outcome"] = "approved"
+        # 利用者の承認は by と答えた PR を書き、承認ゲートの名と PR の組で置き換える（#1426 の決定 1。lib/gate_answer.py）
+        entry.update({**({"outcome": "approved", "by": "user"} if a.outcome else {}), **({"pr": a.pr} if a.pr else {})})
     if a.name == MVV_GATE:
         sha = mvv_sha(m)
         if sha is None:
@@ -290,7 +289,7 @@ def gate_locked(a) -> dict:
         if stop:
             return stop
         entry.update(judged)
-    m["gates"] = gates = [g for g in m.get("gates", []) if g.get("name") != a.name] + [entry]
+    m["gates"] = gates = [g for g in m.get("gates", []) if not gate_answer.replaces(g, a.name, entry.get("pr"))] + [entry]
     jsonio.write_atomic(a.sprint, m, indent=1)
     who = "MVV 判定" if a.by == "mvv" else "承認"
     return outcome("ok", f"{a.name} の{who}を書いた（{at}）", gates, {"gates": len(gates)})

@@ -252,3 +252,65 @@ def test_approval_facts_writes_the_approved_commit(monkeypatch, world, tmp_path)
     assert out["metrics"]["compare"].endswith(f"...{sha}") and f"--approved-sha {sha}" in out["next"]
     assert mod.ac.material_sha(out["presentation_path"]) == sha
     assert mod.ac.recorded_sha(out["presentation_path"]) is None
+
+
+def facts_dir(tmp_path: Path, sha: str | None) -> Path:
+    """開発版のプランの状態ディレクトリ（facts のステップの出力だけ）。"""
+    d = tmp_path / "dev-state"
+    d.mkdir(exist_ok=True)
+    line = json.dumps({"tool": "release", "status": "gate", "summary": "s", "items": [], "metrics": {"approved_sha": sha} if sha else {}})
+    (d / "12-facts.out").write_text("進捗\n" + line + "\n")
+    return d
+
+
+def approve_facts(mod, world, path, facts, answer=None):
+    ns = argparse.Namespace(
+        root=str(world["work"]), approval=str(path), approved_sha=None, facts_from=str(facts), answer_from=answer, by="user"
+    )
+    with pytest.raises(SystemExit) as out:
+        mod.cmd_approve(ns)
+    return out.value.code
+
+
+def answer_state(tmp_path: Path, at: str) -> str:
+    state = tmp_path / "sprint.json"
+    state.write_text(json.dumps({"gates": [{"name": "関門 2", "what": "本番", "at": at, "by": "user", "outcome": "approved"}]}))
+    return str(state)
+
+
+def test_approve_from_facts_needs_the_users_answer_after_facts(monkeypatch, world, tmp_path):
+    """#1426 の AC10〜12: facts の SHA と資料が違う・利用者の承認の記録が無いか facts より前なら、書かずに 10。
+    facts より後の記録があれば書き、release が承認の照合を通る。"""
+    path = tmp_path / "approval.md"
+    path.write_text(MATERIAL.format(sha=world["approved"]))
+    mod = load(monkeypatch)
+    out, code = approve_facts(mod, world, path, facts_dir(tmp_path, "a" * 40), answer_state(tmp_path, "2999-01-01T00:00:00Z"))
+    assert (out["status"], code) == ("gate", 10)
+    assert "違う" in out["summary"]
+    facts = facts_dir(tmp_path, world["approved"])
+    for answer in (None, answer_state(tmp_path, "2000-01-01T00:00:00Z")):
+        out, code = approve_facts(mod, world, path, facts, answer)
+        assert (out["status"], code) == ("gate", 10)
+    out, code, merged, _ = run_release(monkeypatch, world, approval=str(path))
+    assert (out["status"], merged) == ("gate", [])  # release へ進んでも承認の記録が無いため止まる
+    mod = load(monkeypatch)
+    out, code = approve_facts(mod, world, path, facts, answer_state(tmp_path, "2999-01-01T00:00:00Z"))
+    assert (out["status"], out["items"][0]["result"]) == ("ok", "written")
+    # 記録が既にあれば、証跡を渡さなくても書かずに通す（--state の無いスプリントで conductor が approve を打った後）
+    out, code = approve_facts(mod, world, path, facts)
+    assert (out["status"], out["items"][0]["result"]) == ("ok", "kept")
+    out, code, merged, _ = run_release(monkeypatch, world, approval=str(path))
+    assert (out["status"], out["metrics"]["approved_sha"]) == ("ok", world["approved"])
+
+
+def test_approve_from_facts_without_facts_output_stops_at_the_gate(monkeypatch, world, tmp_path):
+    path = tmp_path / "approval.md"
+    path.write_text(MATERIAL.format(sha=world["approved"]))
+    mod = load(monkeypatch)
+    out, code = approve_facts(mod, world, path, facts_dir(tmp_path, None), answer_state(tmp_path, "2999-01-01T00:00:00Z"))
+    assert (out["status"], code) == ("gate", 10)
+    with pytest.raises(mod.StepError) as e:
+        mod.cmd_approve(
+            argparse.Namespace(root=str(world["work"]), approval=str(path), approved_sha="a" * 40, facts_from=str(tmp_path), by="user")
+        )
+    assert e.value.code == 2

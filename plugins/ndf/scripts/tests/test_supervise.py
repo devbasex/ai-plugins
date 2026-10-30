@@ -1437,6 +1437,7 @@ def test_new_release_dev_and_prod(tmp_path):
     plan = json.loads((tmp_path / "p.json").read_text())
     st = {s["id"]: s for s in plan["steps"]}
     assert [s["id"] for s in plan["steps"]] == [
+        "approve",
         "bump",
         "bump-others",
         "changelog",
@@ -1453,6 +1454,20 @@ def test_new_release_dev_and_prod(tmp_path):
     ]
     assert "--ref main" in st["verify"]["cmd"] and st["verify"]["stage"] == "リリース後テスト"
     assert st["verify"]["next"] == "cleanup" and "facts" not in st
+    # 先頭の approve が開発版の facts の出力から承認したコミットを読む（#1426 の AC9）
+    assert "approve --approval issues/approval-ndf-v10.17.11.md --facts-from '{queue_state:release}' --by user" in st["approve"]["cmd"]
+    assert (st["approve"]["next"], st["approve"]["gate_next"]) == ("bump", "end")
+    p = cli(
+        *"new release --version 10.17.11 --prs 995 --channel prod --worktree /r/.worktrees/release/v10.17.11".split(),
+        "--dev-state",
+        str(tmp_path / "dev"),
+        "--state",
+        str(tmp_path / "s.json"),
+        "--out",
+        str(tmp_path / "p2.json"),
+    )
+    cmd = json.loads((tmp_path / "p2.json").read_text())["steps"][0]["cmd"]
+    assert f"--facts-from {tmp_path / 'dev'} --answer-from {tmp_path / 's.json'} --by user" in cmd
 
 
 def test_new_release_requires_version():
@@ -1490,6 +1505,7 @@ def test_new_sprint_writes_waves_in_order(tmp_path):
     assert [w["name"] for w in manifest["ステージ"]] == [
         "設計",
         "関門 1",
+        "設計 PR のマージ",
         "設計の結果",
         "スプリントブランチ",
         "実装",
@@ -1500,7 +1516,7 @@ def test_new_sprint_writes_waves_in_order(tmp_path):
     ]
     waves = {w["name"]: w for w in manifest["ステージ"]}
     assert "plans" not in waves["関門 1"] and waves["関門 1"]["gate"]
-    assert len(waves["実装"]["plans"]) == 2 and waves["実装"]["command"].endswith("--max 3")
+    assert len(waves["実装"]["plans"]) == 2 and waves["実装"]["then_of"] == "設計 PR のマージ"
     for w in manifest["ステージ"]:
         for path in w.get("plans", []):
             plan = json.loads(Path(path).read_text())
@@ -2454,9 +2470,9 @@ def test_new_sprint_check_and_release_run_without_a_whole_skill(tmp_path):
     release = json.loads(Path(waves["配布"]["plans"][0]).read_text())
     assert release["フェーズ"] == "配布（開発版）"
     assert "{queue_prs}" not in json.dumps(release) and "--prs {queue_pr:check}" in json.dumps(release, ensure_ascii=False)
-    # 配布は検査の queue が --then で流す（検査の PR を --prs へ渡すため）
-    assert waves["検査"]["command"].endswith("--then " + waves["配布"]["plans"][0])
-    assert "command" not in waves["配布"] and waves["配布"]["then_of"] == "検査"
+    # 配布は最初のステージの queue が検査の後に --then で流す（検査の PR を --prs へ渡すため。#1426 の決定 5）
+    assert waves["スプリントブランチ"]["command"].endswith("--then " + waves["配布"]["plans"][0])
+    assert "command" not in waves["配布"] and waves["配布"]["then_of"] == "スプリントブランチ"
 
 
 def test_normal_sprint_puts_gate_2_and_prod_after_the_dev_release(tmp_path):
@@ -2470,13 +2486,14 @@ def test_normal_sprint_puts_gate_2_and_prod_after_the_dev_release(tmp_path):
     gate, prod = waves["関門 2"], waves["本番"]
     assert "plans" not in gate and "approval-" in gate["gate"] and "sprint-state.py" not in gate["gate"]
     assert "then_of" not in prod and prod["plans"][0].endswith("-release-prod.json")
-    assert prod["command"].endswith(f"queue {prod['plans'][0]} --max 3")
-    assert prod["plans"][0] not in waves["検査"]["command"] and "note" not in waves["配布"]
+    assert f"queue {prod['plans'][0]} --max 3 --done " in prod["command"] and "--then" not in prod["command"]
+    assert prod["plans"][0] not in waves["スプリントブランチ"]["command"] and "note" not in waves["配布"]
     plan = json.loads(Path(prod["plans"][0]).read_text())
     steps = {s["id"]: s for s in plan["steps"]}
     assert "--channel prod" in steps["release"]["cmd"] and "--version 10.18.0 " in steps["release"]["cmd"]
     assert "--prs {queue_pr:check}" in steps["changelog"]["cmd"] and plan["課題"] == [1]
     assert not {"mvv", "note", "handoff"} & set(steps)
+    assert plan["steps"][0]["id"] == "approve"  # 承認ゲート 2 の承認の記録を先頭で書く（#1426 の AC9）
 
 
 def test_prod_plan_queued_alone_takes_the_check_pr(tmp_path):

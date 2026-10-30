@@ -278,9 +278,9 @@ def make_worktree(plan: dict) -> str | None:
 
 
 @durable.step(name="ndf.supervise.queue.listing")
-def listing_step(done: str, plans: list[str]) -> None:
-    """前の queue の終わりを消し、流すプランの一覧を done の隣へ書く（wait が読む）。"""
-    queue_files.start_listing(Path(done), plans)
+def listing_step(done: str, plans: list[str], **extra) -> None:
+    """前の queue の終わりを消し、流すプランの一覧（とキューの続きが読むステージの並び・`--max`・開始のステップ）を done の隣へ書く。"""
+    queue_files.start_listing(Path(done), plans, **extra)
 
 
 @durable.step(name="ndf.supervise.queue.fill")
@@ -291,7 +291,7 @@ def fill_step(first: bool, stage: list[str], items: list[dict]) -> dict:
 
 
 @durable.step(name="ndf.supervise.queue.admit")
-def admit_step(plans: list[str], shared: list[dict]) -> dict:
+def admit_step(plans: list[str], shared: list[dict], starts: dict | None = None) -> dict:
     """流すプランの実行の回を選び、重なりの組を数えて標準エラーへ知らせる（耐久ステップの中なので、打ち直しで 2 度出ない）。
 
     完了か関門の記録があるプランは流し直さず、並行中にも数えない。キューの外のプランは候補に入らない（C-4）。
@@ -301,7 +301,7 @@ def admit_step(plans: list[str], shared: list[dict]) -> dict:
     deps: dict[str, list[str]] = {}
     for p in plans:
         body = Path(p).read_text(encoding="utf-8")
-        prefix = prefix_of(str(Path(p).resolve()), body, None)
+        prefix = prefix_of(str(Path(p).resolve()), body, (starts or {}).get(p))  # 開始のステップが違えば別の実行の回
         ref = durable.resolve(prefix, finished=_finished)
         refs[p] = {"prefix": prefix, "id": ref.id, "action": ref.action, "output": ref.output}
         if ref.action != "done":
@@ -469,7 +469,7 @@ def _plan_args(plan: str, prefix: str, args: dict) -> dict:
         "plan_path": plan,
         "state_dir": str(paths.state_dir_of(plan)),
         "slow": [],
-        "start": None,
+        "start": (args.get("starts") or {}).get(plan),
         "resources": args["resources"],
     }
 
@@ -479,7 +479,7 @@ def queue_workflow(args: dict) -> dict:
     """`queue` 1 回。ステージを順に流し、前のステージが 1 本でも完了でなければ後続を流さない。
     `前提のプラン` を持つプランは、前提のプランが完了でなければ流さない（#1674）。"""
     stages, done = args["stages"], args["done"]
-    listing_step(done, [p for stage in stages for p in stage])
+    listing_step(done, [p for stage in stages for p in stage], stages=stages, max=args["max"], starts=args.get("starts") or {})
     items: list[dict] = []
     pairs: list[dict] = []
     queued = [p for stage in stages for p in stage]
@@ -487,7 +487,7 @@ def queue_workflow(args: dict) -> dict:
         filled = fill_step(idx == 0, stage, items)
         items += filled["skipped"]
         if filled["runnable"]:
-            adm = {**admit_step(filled["runnable"], args["shared"]), "prior": list(items), "queued": queued}
+            adm = {**admit_step(filled["runnable"], args["shared"], args.get("starts")), "prior": list(items), "queued": queued}
             pairs += adm["overlaps"]
             items += run_stage(filled["runnable"], adm, args)
     return done_step(done, items, args["max"], pairs, args["resources"])

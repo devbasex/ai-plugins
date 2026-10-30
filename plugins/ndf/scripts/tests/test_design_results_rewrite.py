@@ -203,3 +203,16 @@ def test_no_pr_and_no_table_stay_unread(tmp_path, fake):
     res, code = design_stage.cmd_design_results(a)
     assert code == 0 and res["metrics"]["unread"] == [11, 12]
     assert dr.parse_results("# 設計\n\n## 決定の記録\n", DOC) is None  # 表が無い文書は読めなかった扱い
+
+
+# ---------- 書き出しの取り込み（new sprint --absorb）と表の取り込みを合わせる（#1426 の決定 8） ----------
+
+
+def test_rewrite_keeps_absorptions_made_when_writing_the_plans():
+    """表に無い書き出しの取り込み（`取り込み先`）を保ち、表の取り込みと合わせて取り込み先の `課題` を作る。"""
+    plans = {11: plan_of(11), 12: plan_of(12), 13: plan_of(13)}
+    plans[13]["取り込み先"] = 11
+    items = design_stage.rewrite(plans, results())
+    assert plans[11]["課題"] == [11, 13, 12]
+    assert plans[13]["実行の条件"] and plans[12]["実行の条件"]
+    assert {"issue": 13, "absorbed_into": 11} in items

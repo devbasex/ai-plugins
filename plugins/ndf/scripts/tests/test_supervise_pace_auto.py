@@ -97,11 +97,10 @@ def test_auto_sprint_writes_the_normal_order_with_mvv_gates(tmp_path):
     later = [waves[n]["plans"][0] for n in STAGES[2:]]
     assert [cmd.index("--then " + p) for p in later] == sorted(cmd.index("--then " + p) for p in later)
     assert all(waves[n]["then_of"] == "設計" and "command" not in waves[n] for n in STAGES[2:])
-    # resume はそのステージから最後までを流す
-    for i, n in enumerate(STAGES[2:]):
-        resume = waves[n]["resume"]
-        assert resume.split(" --then ")[0].endswith(f"{waves[n]['plans'][-1]} --max 3")
-        assert resume.count(" --then ") == len(STAGES[2:]) - 1 - i
+    # resume はどのステージも設計の queue の done の続き（#1426 の決定 6）
+    done = cmd.split(" --done ")[1].split(" ")[0]
+    for n in ["設計", *STAGES[2:]]:
+        assert waves[n]["resume"].endswith(f"queue --resume {done}")
     # 実装はスプリントブランチへ入り、検査はスプリントの develop 宛 PR を 1 回出す
     impl = load(waves["実装"]["plans"][0])
     assert impl["起点"] == "origin/sprint/m27" and impl["進め方"] == "auto"

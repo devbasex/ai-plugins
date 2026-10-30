@@ -109,9 +109,9 @@ QUEUE_STATE = re.compile(r"\{queue_state:([A-Za-z0-9._-]+)\}")  # 名前の一�
 
 
 def plan_pr(item: dict) -> str:
-    """完了した計画の報告の Pull Request の番号。無ければ空。"""
+    """完了か関門で終えた計画の報告の Pull Request の番号（設計のプランは承認ゲート 1 の関門で終わる。#1426 の決定 4）。無ければ空。"""
     rep = Path(item.get("report") or "")
-    if item.get("result") != "完了" or not rep.is_file():
+    if item.get("result") not in FINISHED or not rep.is_file():
         return ""
     m = re.search(r"^- Pull Request: (.*)$", rep.read_text(), re.M)
     return pr_number(m.group(1).strip()) if m else ""
@@ -173,7 +173,7 @@ FINISHED = ("完了", "関門")  # 打ち直しでも流し直さない結果（
 NO_REPORT = "報告なし"
 
 
-def cmd_queue(plans: list[str], max_: int, poll: float = 1.0, then: list | None = None, done: str | None = None) -> dict:
+def cmd_queue(plans: list[str], max_: int, poll: float = 1.0, then: list | None = None, done: str | None = None, starts=None) -> dict:
     """プランを同時に max_ 本まで、同じプロセスの中で流す。空いた枠へ入れた順に流す。
 
     流れているプランの progress.jsonl に conductor 向けの行（"kind": "attention"）が足されたら、
@@ -187,7 +187,8 @@ def cmd_queue(plans: list[str], max_: int, poll: float = 1.0, then: list | None 
     あるステップは、資源の枠の本数まで同時に流す（宣言は .ndf/supervise.json の queue）。
     始めに流すプランの一覧を done の隣へ書き（wait が読む）、終わったら（後続を含めて）結果の JSON を done へ書く。
     落ちた後に同じコマンドを打ち直すと、流れていたステップから続ける。流すプランの並びを変えて打ち直すと、途中の
-    記録を止めて頭から流す（完了か関門の記録があるプランは流し直さない）。"""
+    記録を止めて頭から流す（完了か関門の記録があるプランは流し直さない）。`starts`（{プラン: 開始のステップ}）は
+    キューの続き（`queue_resume.py`）が渡し、そのプランを開始のステップから新しい実行の回で流す。"""
     import durable
     from supervise_lib import flow  # DBOS の import は run と queue だけが払う
 
@@ -211,6 +212,7 @@ def cmd_queue(plans: list[str], max_: int, poll: float = 1.0, then: list | None 
         if ref.action == "continue":
             print(f"[ndf supervise] 落ちた前の起動の {ref.id} を続ける（済んだステップは流し直さない）", file=sys.stderr)
         args = {"stages": stages, "max": max_, "done": str(done_path), "resources": decl["resources"], "shared": decl["shared"]}
+        args["starts"] = starts or {}
         wid = durable.start(ref, flow.queue_workflow, args)
         while True:
             got = durable.wait(wid, poll=min(poll, durable.POLL_SECONDS), timeout=poll)
@@ -240,13 +242,15 @@ def _not_started(reason: str, max_: int, done_path: Path) -> dict:
     return result("supervise-queue", "stopped", reason, [], metrics)
 
 
-def start_listing(done_path: Path, all_plans: list[str]) -> None:
+def start_listing(done_path: Path, all_plans: list[str], **extra) -> None:
     """前の queue の終わりと wait の続きを消し、流すプランの一覧と読み始める所を done の隣へ書く（wait が読む）。"""
     done_path.unlink(missing_ok=True)
     wait_cursor_path(done_path).unlink(missing_ok=True)
     write_text_atomic(
         queue_plans_path(done_path),
-        json.dumps({"started": now_iso(), "plans": all_plans, "offsets": {p: progress_size(p) for p in all_plans}}, ensure_ascii=False)
+        json.dumps(
+            {"started": now_iso(), "plans": all_plans, "offsets": {p: progress_size(p) for p in all_plans}, **extra}, ensure_ascii=False
+        )
         + "\n",
     )
 
@@ -337,8 +341,11 @@ def plan_item(plan: str, out: dict) -> dict:
 
 
 def write_done(done_path: Path, items: list[dict], max_: int, overlaps: list[dict], limits: dict) -> dict:
-    """items へ重なりの組を足して結果の JSON を組み立て、done へ書いて返す。"""
+    """items へ重なりの組と続けた開始のステップ（`resumed_from`）を足して結果の JSON を組み立て、done へ書いて返す。"""
+    starts = (_read_listing(queue_plans_path(done_path)) or {}).get("starts") or {}
     for i in items:
+        if starts.get(i["plan"]):
+            i["resumed_from"] = starts[i["plan"]]
         mine = [{"with": o["b"], "paths": o["paths"]} for o in overlaps if o["a"] == i["plan"]]
         mine += [{"with": o["a"], "paths": o["paths"][::-1]} for o in overlaps if o["b"] == i["plan"]]
         if mine:

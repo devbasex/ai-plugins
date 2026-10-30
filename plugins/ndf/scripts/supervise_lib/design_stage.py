@@ -167,6 +167,10 @@ def rewrite(plans: dict[int, dict], res: dr.DesignResults, glossary: bool = Fals
     「閉じる」と「取り込む」の課題のプランは `実行の条件` で飛ばす。実装の指示は雛形の部分（課題・設計文書・触る範囲・
     共通の規則）だけを組み直し、conductor の補正は順のまま残す（`kept_lines`）。書いた内容の一覧を返す。"""
     absorbed: dict[int, list[int]] = {}
+    # new sprint --absorb で書き出しの時点に取り込んだ課題（プランの `取り込み先`）も表の取り込みと合わせる（#1426 の決定 8）
+    pre = {n: p["取り込み先"] for n, p in plans.items() if isinstance(p.get("取り込み先"), int)}
+    for n, h in pre.items():
+        absorbed.setdefault(h, []).append(n)
     for r in res.rows:
         if r.kind != dr.ABSORB:
             continue
@@ -183,13 +187,13 @@ def rewrite(plans: dict[int, dict], res: dr.DesignResults, glossary: bool = Fals
             plan["実行の条件"] = closed_condition(n)
             items.append({"issue": n, "closed": True})
             continue
-        if host is not None:
-            plan["実行の条件"] = absorbed_condition(n, host)
-            items.append({"issue": n, "absorbed_into": host})
+        if host is not None or n in pre:
+            plan["実行の条件"] = absorbed_condition(n, host if host is not None else pre[n])
+            items.append({"issue": n, "absorbed_into": host if host is not None else pre[n]})
             continue
         before = {k: plan.get(k) for k in ("課題", "触るファイル", "設計文書")}
         with_touched(plan, res.files_of(n))
-        issues = [n] + [i for i in absorbed.get(n, []) if i != n]
+        issues = [n] + list(dict.fromkeys(i for i in absorbed.get(n, []) if i != n))
         plan["課題"] = issues
         docs = res.docs_of(issues)
         if docs:

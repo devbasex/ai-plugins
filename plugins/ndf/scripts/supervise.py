@@ -46,13 +46,17 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
         # スプリントの終わり: 最終の検査 → 開発版 → 本番（最終の検査で変更があったときだけ）→ 確定仕様化・閉じる・振り返り・棚卸し
     supervise.py design-results --manifest <sprint.json> --base B --root <根> --design N...
         # 設計の結果のステージ: マージした設計 PR の「設計の結果」の表を読み、実装のステージのプランを書き換える
+    supervise.py design-approved --pr N [--state <状態>]
+        # 設計 PR のマージのプランの入口: 承認ラベルか承認ゲート 1 の利用者の承認の記録が無ければ 10
     supervise.py design-glossary --mode M --root . --out <候補の語.md>
         # 設計の計画の入口: 用語集が揃えば何もしない。無ければ init と candidates を打ってコミットし、候補の語を書く
     supervise.py queue <plan.json>... [--max 3] [--then <plan.json>...]... [--done <パス>]
         # 空いた枠へ順に流す。作業ツリーは起動の前に 1 本ずつ作る。--then の計画は前の計画がすべて完了のときだけ
         # 続けて流す（実装の queue の後の配布など）。--then を繰り返すとステージになり、ステージは前のステージがすべて完了のときだけ
         # 流れる。終わると結果の JSON を --done（省けば最初の計画の
-        # <計画>-state/queue-done.json）へ書く。始めに流す計画の一覧を done の隣（<done>.plans.json）へ書く
+        # <計画>-state/queue-done.json）へ書く。始めに流す計画の一覧とステージの並びを done の隣（<done>.plans.json）へ書く
+    supervise.py queue --resume <done> [--from <プラン名>=<ステップ>]... [--max N]
+        # キューの続き: 前の起動の止まった・関門のプランを終えたステップから続け、後続のステージも同じ条件で流す
     supervise.py wait <done のパス> [--timeout 秒] [--poll 秒]
         # queue の終わり（done）か、queue が流す計画の attention の行まで待つ。出力は要約の 1 行と結果の JSON。
         # 終了コード: done = 0 / attention = 20 / 上限 = 3。attention の後にもう一度打つと、その続きから待つ
@@ -85,7 +89,7 @@ import deps  # noqa: E402
 deps.require(
     "md", "mdtable", "schema", "procs", "locks", "durable"
 )  # 課題の本文（state → sprint_mvv → md）・表（pr・commands）・宣言の形（decl）・claude -p の打ち切り（claude）・アカウントの排他（claude_accounts）・耐久の記録（flow）
-from supervise_lib import commands, design_stage, sprint, sprint_routes, new_args, queue, templates  # noqa: E402
+from supervise_lib import commands, design_merge, design_stage, sprint, sprint_routes, new_args, queue, queue_resume, templates  # noqa: E402
 from supervise_lib import pr as pr_step  # noqa: E402
 from supervise_lib.decl import DeclError, apply_decls  # noqa: E402
 from supervise_lib.plan import EXAMPLE  # noqa: E402
@@ -145,8 +149,10 @@ def main() -> int:
         "--then を繰り返すとステージになる。終わると結果の JSON を --done へ書き、始めに流すプランの"
         "一覧を <done>.plans.json へ書く",
     )
-    q.add_argument("plans", nargs="+", help="流すプランの JSON")
-    q.add_argument("--max", type=int, default=3, help="同時に流す本数（既定 3）")
+    q.add_argument("plans", nargs="*", help="流すプランの JSON（--resume と併せて渡さない）")
+    q.add_argument("--max", type=int, help="同時に流す本数（既定 3。--resume は前の起動の値）")
+    q.add_argument("--resume", metavar="DONE", help="前の起動の done。止まったプランを終えたステップから続け、後続のステージも流す")
+    q.add_argument("--from", dest="from_", action="append", default=[], metavar="PLAN=STEP", help="--resume: 続けるプランの開始のステップ")
     q.add_argument("--poll", type=float, default=5.0, help="終わりを見る間隔（秒）")
     q.add_argument(
         "--then",
@@ -190,6 +196,13 @@ def main() -> int:
     d.add_argument("--base", required=True, help="設計 PR をマージしたベースブランチ")
     d.add_argument("--root", default=".", help="リポジトリの根")
     d.add_argument("--design", type=int, nargs="+", required=True, help="設計の課題")
+    da = sub.add_parser(
+        "design-approved",
+        help="設計 PR のマージのプランの入口: 承認の証跡（承認ラベルか承認ゲート 1 の利用者の承認の記録）を確かめる",
+        epilog="終了コード: 証跡あり = 0（記録だけならラベルを付ける）/ 証跡なし・PR が 0 = 10 / gh が読めない = 2",
+    )
+    da.add_argument("--pr", type=int, required=True, help="設計 Pull Request")
+    da.add_argument("--state", help="スプリントの状態（sprint-state.py のファイル）")
     t = sub.add_parser("note", help="報告から引継ぎ文書の表へ 1 行を足す")
     t.add_argument("doc")
     t.add_argument("--report", required=True)
@@ -218,6 +231,8 @@ def main() -> int:
         new_args.fill_new_defaults(a)
     if a.cmd == "design-glossary":
         emit(*commands.cmd_design_glossary(a.root, a.mode, a.out))
+    if a.cmd == "design-approved":
+        emit(*design_merge.cmd_design_approved(a.pr, a.state))
     if a.cmd == "design-results":
         emit(*design_stage.cmd_design_results(a))
     if a.cmd == "example":
@@ -241,8 +256,14 @@ def main() -> int:
             emit(templates.cmd_new(a))
         except DeclError as e:
             ap.error(str(e))
+    if a.cmd == "queue" and a.resume:
+        if a.plans or a.then or a.done:
+            ap.error("queue --resume は位置引数のプラン・--then・--done と併せて渡さない")
+        emit(queue_resume.cmd_queue_resume(a.resume, a.from_, a.max and max(1, a.max), a.poll, queue.cmd_queue))
     if a.cmd == "queue":
-        emit(queue.cmd_queue(a.plans, max(1, a.max), a.poll, a.then, a.done))
+        if not a.plans or a.from_:
+            ap.error("queue にはプランが要る（--from は --resume と使う）")
+        emit(queue.cmd_queue(a.plans, max(1, a.max or 3), a.poll, a.then, a.done))
     if a.cmd == "wait":
         summary, res, code = queue.cmd_wait(a.done, a.timeout, a.poll)
         print(summary, flush=True)

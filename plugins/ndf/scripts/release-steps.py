@@ -32,6 +32,7 @@
     python3 release-steps.py record         --version <版> --prs <PR番号>... [--plugin <名前>] [--root <dir>]   # prod の後
     python3 release-steps.py record         --promote --head <ベースブランチ> --base <本番チャネル> --prs <PR番号>... [--root <dir>]
     python3 release-steps.py approve        --approval <承認資料> --approved-sha <SHA> --by user|mvv [--root <dir>]
+    python3 release-steps.py approve        --approval <承認資料> --facts-from <開発版の状態> [--answer-from <状態>] --by user
     python3 release-steps.py approval-facts --version <版> --prs <PR番号>... [--prev-tag <タグ>] [--plugin <名前>] [--root <dir>]
     python3 release-steps.py notes          --version <版> --prs <PR番号>... [--approval <提示物>]
                                             [--verified claude,codex,kiro] [--ref <ブランチ>] [--plugin <名前>] [--root <dir>]
@@ -935,7 +936,10 @@ def cmd_approval_facts(a):
 
 def cmd_approve(a):
     """ゲート 2 の承認を承認資料へ記録する（#815 の I10。本体は release_lib/approval.py の approve）。"""
-    emit(approval.approve(git_root(a.root), a))
+    try:
+        emit(approval.approve(git_root(a.root), a))
+    except approval.Gate as g:
+        emit(g.out, EXIT_GATE)
 
 
 CHANGES_HEADING = others.CHANGES_HEADING
@@ -1138,7 +1142,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("approve", parents=[common], help="本番への配布の承認（ゲート 2）を承認資料へ記録する")
     p.add_argument("--approval", required=True, help="承認資料")
-    p.add_argument("--approved-sha", required=True, metavar="SHA", help="提示した承認資料を書いた approval-facts の metrics.approved_sha")
+    p.add_argument("--approved-sha", metavar="SHA", help="提示した承認資料を書いた approval-facts の metrics.approved_sha")
+    p.add_argument("--facts-from", metavar="DIR", help="開発版のプランの状態ディレクトリ（facts の出力から SHA を読む。#1426）")
+    p.add_argument("--answer-from", metavar="STATE", help="--facts-from: 承認ゲート 2 の利用者の承認の記録を読むスプリント状態ファイル")
     p.add_argument("--by", required=True, choices=("user", "mvv"), help="承認した者")
     p.set_defaults(func=cmd_approve)
 

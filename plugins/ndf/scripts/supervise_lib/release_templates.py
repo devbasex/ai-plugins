@@ -334,6 +334,8 @@ def plan_release_package_plugin(a) -> dict:
         steps.append(judge_record_step())
     if mvv and not dev:
         _add_prod_mvv_gate(steps, a, repo, approval, prs)
+    elif not dev:
+        steps.insert(0, approve_step(a, repo, approval))
     rule = RULE_RELEASE_DEV if dev else RULE_RELEASE_PROD_MVV if mvv else RULE_RELEASE_PROD
     plan = {
         "フェーズ": f"配布（{'開発版' if dev else '本番'}）",
@@ -350,6 +352,26 @@ def plan_release_package_plugin(a) -> dict:
         plan["リポジトリ"] = repo
         with_record(plan)
     return plan
+
+
+def approve_step(a, repo: str | None, approval: str) -> dict:
+    """本番のプラン（MVV 判定なし）の先頭: 承認ゲート 2 の承認の記録を書く（#1426 の決定 7）。提示した SHA は開発版の
+    facts の出力（--dev-state か、同じディレクトリの開発版のプランの状態）から読み、利用者の承認の記録は --state から読む。
+    証跡が無ければ承認ゲート（10）で終え、bump へ進まない。"""
+    dev_state = getattr(a, "dev_state", None)
+    facts = shlex.quote(str(Path(dev_state).resolve())) if dev_state else "'{queue_state:release}'"
+    state = getattr(a, "state", None)
+    answer = f" --answer-from {shlex.quote(str(Path(state).resolve()))}" if state else ""
+    return {
+        "id": "approve",
+        "type": "run",
+        "stage": "配布",
+        "timeout": 120,
+        **({"cwd": repo} if repo else {}),
+        "cmd": f"{STEPS_PY} approve --approval {approval} --facts-from {facts}{answer} --by user",
+        "next": "bump",
+        "gate_next": "end",
+    }
 
 
 def advise_steps(state: str, gate: str, args: str, note: dict, head: dict | None = None) -> list[dict]:
