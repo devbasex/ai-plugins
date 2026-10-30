@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { createTestIngest, sign, type TestIngest } from "../testing/ingest.ts";
+import { API_ROLE_ARN, createTestIngest, sign, WEBHOOK_SECRET, type TestIngest } from "../testing/ingest.ts";
+import { createIngestApp, type IngestDeps, type IngestLogEntry } from "./app.ts";
+import { MemoryProgressEventStore } from "./memory-store.ts";
 import { MAX_EVENT_BYTES } from "./validate.ts";
 
 let t: TestIngest;
@@ -500,6 +502,149 @@ describe("ログと応答に秘密を出さない（受け入れ条件 19、I30�
     for (const secret of [token, bad, "test-webhook-secret-value"]) expect(out).not.toContain(secret);
     for (const entry of t.logs) expect(Object.keys(entry).sort()).toEqual(["route", "sprint_run_id", "status", "type"]);
     expect(t.logs[0]).toEqual({ route: "/ingest/events", type: "job.started", status: 202, sprint_run_id: "sr-1" });
+  });
+});
+
+// 現状固定（リファクタリング I-002: createIngestApp の経路ごとの分岐）。期待値の根拠は今の実装の出力
+describe("受け口の経路の分岐の現状固定", () => {
+  const BAD_JSON = { error: { code: "invalid_event", message: "/: json" } };
+
+  function appWith(patch: Partial<IngestDeps>) {
+    const store = new MemoryProgressEventStore();
+    const logs: IngestLogEntry[] = [];
+    const deps: IngestDeps = {
+      verifier: t.tokens.verify,
+      store,
+      savedAnswers: async () => null,
+      webhookSecret: async () => WEBHOOK_SECRET,
+      apiCallerRoleArn: API_ROLE_ARN,
+      ...patch,
+    };
+    return { app: createIngestApp(deps, (e) => logs.push(e)), store, logs };
+  }
+
+  const post = (app: ReturnType<typeof createIngestApp>, path: string, raw: string, headers: Record<string, string> = {}) =>
+    app.request(path, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: raw });
+
+  it("runner の経路は本文の JSON を認証より先に見て、定義の検査は認証の後に見る", async () => {
+    await expectRejected(await t.runner(null, { authorization: null, raw: "{bad" }), 400, BAD_JSON);
+    await expectRejected(await t.runner(runnerEvent({ type: "job.paused" }), { authorization: null }), 401, UNAUTHORIZED);
+  });
+
+  it("api の経路も本文の JSON を認証より先に見て、定義の検査は認証の後に見る", async () => {
+    await expectRejected(await t.api(null, { callerArn: null, raw: "{bad" }), 400, BAD_JSON);
+    await expectRejected(await t.api(answeredEvent({ type: "job.paused" }), { callerArn: null }), 401, UNAUTHORIZED);
+    await expectRejected(
+      await t.api(answeredEvent({ type: "job.paused" }), { callerArn: "arn:aws:sts::123456789012:assumed-role/other-role/s" }),
+      403,
+      FORBIDDEN,
+    );
+  });
+
+  it("api の呼び出し元の ARN が空文字か文字列でなければ 401", async () => {
+    saveAnswer();
+    await expectRejected(await t.api(answeredEvent(), { callerArn: "" }), 401, UNAUTHORIZED);
+    const res = await t.app.request(
+      "/ingest/api/events",
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(answeredEvent()) },
+      { event: { requestContext: { authorizer: { iam: { userArn: 123 } } } } } as never,
+    );
+    await expectRejected(res, 401, UNAUTHORIZED);
+  });
+
+  it("Authorization が Bearer と token 1 つの形でなければ 401", async () => {
+    const token = await t.tokens.sign({ jobId: "job-1", sprintRunId: "sr-1" });
+    for (const authorization of [`Bearer  ${token}`, `Bearer ${token} x`, `bearer ${token}`, "Bearer "]) {
+      await expectRejected(await t.runner(runnerEvent(), { authorization }), 401, UNAUTHORIZED);
+    }
+  });
+
+  it("token の検証が RunJobTokenError 以外で落ちれば 503", async () => {
+    const { app, store } = appWith({ verifier: async () => Promise.reject(new Error("鍵を読めない")) });
+    const res = await post(app, "/ingest/events", JSON.stringify(runnerEvent()), { Authorization: "Bearer x" });
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual(UNAVAILABLE);
+    expect(store.events).toHaveLength(0);
+  });
+
+  it("api の経路で保存に失敗したら 503", async () => {
+    saveAnswer();
+    t.store.failNext = new Error("TransactionConflict");
+    await expectRejected(await t.api(answeredEvent()), 503, UNAVAILABLE);
+  });
+
+  it("GitHub の経路は署名を本文やヘッダーより先に見る", async () => {
+    const res = await t.github("pull_request", null, { raw: "{bad", delivery: null, signature: "sha256=00" });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual(UNAUTHORIZED);
+    const noEvent = await t.app.request("/ingest/github", { method: "POST", headers: { "X-GitHub-Delivery": "d-1", "X-Hub-Signature-256": sign("{}") }, body: "{}" });
+    expect(noEvent.status).toBe(202);
+    expect(await noEvent.json()).toEqual({ accepted: true });
+  });
+
+  it("GitHub の経路で宛先を引けなければ 503、保存に失敗しても 503", async () => {
+    await t.runner(
+      runnerEvent({ type: "step.recorded", payload: { step: "pr", exit_code: 0, seconds: 1, summary: "s", pull_request: { repo: "owner/name", number: 7 } } }),
+    );
+    const body = { repository: { full_name: "owner/name" }, pull_request: { number: 7, state: "open", merged: false, updated_at: "2026-10-30T05:00:00Z" } };
+    t.store.failNext = new Error("TransactionConflict");
+    let res = await t.github("pull_request", body, { delivery: "d-1" });
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual(UNAVAILABLE);
+
+    const { app } = appWith({ store: Object.assign(new MemoryProgressEventStore(), { findSprintRunsByPrRef: async () => Promise.reject(new Error("読めない")) }) });
+    const raw = JSON.stringify(body);
+    res = await post(app, "/ingest/github", raw, { "X-GitHub-Event": "pull_request", "X-GitHub-Delivery": "d-2", "X-Hub-Signature-256": sign(raw) });
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual(UNAVAILABLE);
+  });
+
+  it("GitHub の翻訳が定義の検査に通らなければ 202 で保存しない", async () => {
+    await t.runner(
+      runnerEvent({ type: "step.recorded", payload: { step: "pr", exit_code: 0, seconds: 1, summary: "s", pull_request: { repo: "owner/name", number: 7 } } }),
+    );
+    const body = { repository: { full_name: "owner/name" }, pull_request: { number: 7, state: "open", merged: false, updated_at: "not-a-time" } };
+    expect((await t.github("pull_request", body, { delivery: "d-1" })).status).toBe(202);
+    expect(t.store.events.filter((e) => e.source === "github")).toHaveLength(0);
+  });
+
+  it("deps を関数で渡すと、作るときには呼ばず要求のときに呼ぶ", async () => {
+    let calls = 0;
+    const store = new MemoryProgressEventStore();
+    const app = createIngestApp(() => {
+      calls++;
+      return { verifier: t.tokens.verify, store, savedAnswers: async () => null, webhookSecret: async () => WEBHOOK_SECRET, apiCallerRoleArn: API_ROLE_ARN };
+    }, () => {});
+    expect(calls).toBe(0);
+    const token = await t.tokens.sign({ jobId: "job-1", sprintRunId: "sr-1" });
+    const res = await post(app, "/ingest/events", JSON.stringify(runnerEvent()), { Authorization: `Bearer ${token}` });
+    expect(res.status).toBe(202);
+    expect(calls).toBeGreaterThan(0);
+    expect(store.events).toHaveLength(1);
+  });
+
+  it("ログは事象の種類と実行が決まる前に失敗すれば null、GitHub で保存したときは翻訳後の値を持つ", async () => {
+    await t.runner(null, { authorization: null, raw: "{bad" });
+    await t.runner(runnerEvent(), { authorization: null });
+    await t.runner(runnerEvent({ job_id: "job-2", idempotency_key: "job-2:1" }), { authorization: `Bearer ${await t.tokens.sign({ jobId: "job-1", sprintRunId: "sr-1" })}` });
+    await t.runner(
+      runnerEvent({ type: "step.recorded", payload: { step: "pr", exit_code: 0, seconds: 1, summary: "s", pull_request: { repo: "owner/name", number: 7 } } }),
+    );
+    const body = { repository: { full_name: "owner/name" }, pull_request: { number: 7, state: "open", merged: false, updated_at: "2026-10-30T05:00:00Z" } };
+    await t.github("pull_request", body, { delivery: "d-1" });
+    await t.github("ping", { repository: { full_name: "owner/name" } }, { delivery: "d-2" });
+    await t.github("pull_request", body, { delivery: "d-3", signature: null });
+    await t.app.request("/ingest/unknown", { method: "POST", body: "{}" });
+    expect(t.logs).toEqual([
+      { route: "/ingest/events", type: null, status: 400, sprint_run_id: null },
+      { route: "/ingest/events", type: null, status: 401, sprint_run_id: null },
+      { route: "/ingest/events", type: "job.started", status: 403, sprint_run_id: "sr-1" },
+      { route: "/ingest/events", type: "step.recorded", status: 202, sprint_run_id: "sr-1" },
+      { route: "/ingest/github", type: "pr.updated", status: 202, sprint_run_id: "sr-1" },
+      { route: "/ingest/github", type: null, status: 202, sprint_run_id: null },
+      { route: "/ingest/github", type: null, status: 401, sprint_run_id: null },
+      { route: "/ingest/unknown", type: null, status: 404, sprint_run_id: null },
+    ]);
   });
 });
 
