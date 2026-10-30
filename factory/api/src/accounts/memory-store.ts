@@ -74,22 +74,27 @@ export class MemoryAccountStore implements AccountStore {
     await this.write("addSeat", () => !this.seats.has(key), () => this.seats.set(key, { ...seat }), history);
   }
 
-  async updateSeat(seat: SeatRecord, history: HistoryRecord[]) {
-    const key = MemoryAccountStore.seatKey(seat.accountId, seat.userId);
+  private seatUnchanged(expected: SeatRecord): boolean {
+    const cur = this.seats.get(MemoryAccountStore.seatKey(expected.accountId, expected.userId));
+    return cur !== undefined && cur.seatType === expected.seatType && cur.addedAt === expected.addedAt;
+  }
+
+  async updateSeat(expected: SeatRecord, seatType: SeatRecord["seatType"], history: HistoryRecord[]) {
+    const key = MemoryAccountStore.seatKey(expected.accountId, expected.userId);
     await this.write(
       "updateSeat",
-      () => this.seats.has(key),
+      () => this.seatUnchanged(expected),
       () => {
         const cur = this.seats.get(key)!;
-        this.seats.set(key, { ...cur, seatType: seat.seatType });
+        this.seats.set(key, { ...cur, seatType });
       },
       history,
     );
   }
 
-  async removeSeat(accountId: string, userId: string, history: HistoryRecord[]) {
-    const key = MemoryAccountStore.seatKey(accountId, userId);
-    await this.write("removeSeat", () => this.seats.has(key), () => this.seats.delete(key), history);
+  async removeSeat(expected: SeatRecord, history: HistoryRecord[]) {
+    const key = MemoryAccountStore.seatKey(expected.accountId, expected.userId);
+    await this.write("removeSeat", () => this.seatUnchanged(expected), () => this.seats.delete(key), history);
   }
 
   async updateAccount(

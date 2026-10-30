@@ -34,6 +34,48 @@ describe("resolveAccount（受け入れ条件 5）", () => {
   });
 });
 
+describe("listAccounts（I18）", () => {
+  it("GSI に残った外した席のチームは返さない", async () => {
+    await personal();
+    const team = await service.createTeam({ userId: "owner", idp: "google" }, "secret", "standard");
+    const stale = { accountId: team.accountId, userId: "u-1", seatType: "standard" as const, addedAt: "x" };
+    store.listMemberships = async () => [stale];
+    const { contexts } = await service.listAccounts({ userId: "u-1", idp: "google" });
+    expect(contexts.map((c) => c.kind)).toEqual(["personal"]);
+  });
+});
+
+describe("席の変更と削除の競合", () => {
+  async function teamWithMember() {
+    await personal("u-2");
+    const team = await service.createTeam({ userId: "owner", idp: "google" }, "t", "standard");
+    const ctx = await service.resolveAccount({ userId: "owner", idp: "google" }, team.accountId);
+    await service.addSeat(ctx, "u-2", "standard");
+    return ctx;
+  }
+
+  it("読んだ後に別の要求が席を変えたら、読み直して before を作り直す", async () => {
+    const ctx = await teamWithMember();
+    store.beforeWrite = async (op) => {
+      if (op !== "updateSeat") return;
+      store.beforeWrite = null;
+      await service.changeSeat(ctx, "u-2", "premium");
+    };
+    await service.changeSeat(ctx, "u-2", "standard");
+    expect(store.history.slice(-2).map((h) => h.before)).toEqual([
+      { user_id: "u-2", seat_type: "standard" },
+      { user_id: "u-2", seat_type: "premium" },
+    ]);
+  });
+
+  it("外して足し直した新しい席を、古い削除の要求で消さない", async () => {
+    const ctx = await teamWithMember();
+    const old = (await store.getSeat(ctx.accountId, "u-2"))!;
+    await expect(store.removeSeat({ ...old, addedAt: "1999-01-01T00:00:00.000Z" }, [])).rejects.toThrow("condition failed");
+    expect(await store.getSeat(ctx.accountId, "u-2")).toEqual(old);
+  });
+});
+
 describe("setPlan（E6、I13・I20・I21）", () => {
   it("プランを変え、履歴を 1 つ足す", async () => {
     const id = await personal();

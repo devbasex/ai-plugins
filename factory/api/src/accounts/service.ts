@@ -133,7 +133,10 @@ export class AccountService {
     const user = await this.ensureUser(caller);
     const personal = await this.resolveAccount(caller);
     const out: (AccountContext & { name: string | null })[] = [{ ...personal, name: null }];
-    for (const seat of await this.store.listMemberships(caller.userId)) {
+    // GSI の行は候補。外した席が GSI に残る間に名前やプランを返さないよう、元の席を強い整合で確かめる（I18）
+    for (const candidate of await this.store.listMemberships(caller.userId)) {
+      const seat = await this.store.getSeat(candidate.accountId, caller.userId);
+      if (!seat) continue;
       const account = await this.store.getAccount(seat.accountId);
       if (!account) continue;
       out.push({ ...this.context(account, caller.userId, seat.seatType), name: account.name });
@@ -198,22 +201,24 @@ export class AccountService {
 
   async changeSeat(ctx: AccountContext, userId: string, seatType: SeatType): Promise<SeatRecord> {
     this.requireTeamOwner(ctx);
-    const current = await this.store.getSeat(ctx.accountId, userId);
-    if (!current) throw seatNotFound();
-    const at = this.stamp();
-    const seat: SeatRecord = { ...current, seatType };
-    try {
-      await this.store.updateSeat(seat, [
-        this.hist(ctx.accountId, "seat.changed", at, ctx.userId, { user_id: userId, seat_type: current.seatType }, {
-          user_id: userId,
-          seat_type: seatType,
-        }),
-      ]);
-    } catch (err) {
-      if (err instanceof ConditionFailedError) throw seatNotFound();
-      throw new AccountUnavailableError();
+    // 読んだ席のままのときだけ書く。競合したら読み直し、履歴の before を作り直す
+    for (let attempt = 0; attempt < VERSION_RETRIES; attempt++) {
+      const current = await this.store.getSeat(ctx.accountId, userId);
+      if (!current) throw seatNotFound();
+      const at = this.stamp();
+      try {
+        await this.store.updateSeat(current, seatType, [
+          this.hist(ctx.accountId, "seat.changed", at, ctx.userId, { user_id: userId, seat_type: current.seatType }, {
+            user_id: userId,
+            seat_type: seatType,
+          }),
+        ]);
+        return { ...current, seatType };
+      } catch (err) {
+        if (!(err instanceof ConditionFailedError)) throw new AccountUnavailableError();
+      }
     }
-    return seat;
+    throw new AccountUnavailableError();
   }
 
   async removeSeat(ctx: AccountContext, userId: string): Promise<void> {
@@ -222,17 +227,21 @@ export class AccountService {
     if (account?.ownerUserId === userId) {
       throw new ConflictError("owner_seat_protected", "チームの持ち主の席は外せません");
     }
-    const current = await this.store.getSeat(ctx.accountId, userId);
-    if (!current) throw seatNotFound();
-    const at = this.stamp();
-    try {
-      await this.store.removeSeat(ctx.accountId, userId, [
-        this.hist(ctx.accountId, "seat.removed", at, ctx.userId, { user_id: userId, seat_type: current.seatType }, null),
-      ]);
-    } catch (err) {
-      if (err instanceof ConditionFailedError) throw seatNotFound();
-      throw new AccountUnavailableError();
+    // 読んだ席のままのときだけ外す。外して足し直した新しい席を古い要求で消さない
+    for (let attempt = 0; attempt < VERSION_RETRIES; attempt++) {
+      const current = await this.store.getSeat(ctx.accountId, userId);
+      if (!current) throw seatNotFound();
+      const at = this.stamp();
+      try {
+        await this.store.removeSeat(current, [
+          this.hist(ctx.accountId, "seat.removed", at, ctx.userId, { user_id: userId, seat_type: current.seatType }, null),
+        ]);
+        return;
+      } catch (err) {
+        if (!(err instanceof ConditionFailedError)) throw new AccountUnavailableError();
+      }
     }
+    throw new AccountUnavailableError();
   }
 
   // 実行の形態を変える。持ち主だけ（I22）。Free で managed は断る（I21）

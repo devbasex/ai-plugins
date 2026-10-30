@@ -3,7 +3,7 @@ import { mockClient } from "aws-sdk-client-mock";
 import { DynamoDBClient, TransactionCanceledException } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, GetCommand, QueryCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import { ConditionFailedError, DynamoAccountStore } from "./store.ts";
-import type { AccountRecord } from "./model.ts";
+import type { AccountRecord, SeatRecord } from "./model.ts";
 
 const ddb = mockClient(DynamoDBDocumentClient);
 let store: DynamoAccountStore;
@@ -23,6 +23,8 @@ const account: AccountRecord = {
   createdAt: "2026-10-30T00:00:00.000Z",
   updatedAt: "2026-10-30T00:00:00.000Z",
 };
+
+const seat: SeatRecord = { accountId: "t-1", userId: "u-2", seatType: "standard", addedAt: "2026-10-30T00:00:00.000Z" };
 
 describe("DynamoAccountStore（決定 8）", () => {
   it("利用者と個人のアカウントを、無いときだけの条件と履歴つきで 1 つのトランザクションで書く", async () => {
@@ -65,9 +67,25 @@ describe("DynamoAccountStore（決定 8）", () => {
         CancellationReasons: [{ Code: "ConditionalCheckFailed" }, { Code: "None" }],
       }),
     );
-    await expect(store.removeSeat("t-1", "u-2", [])).rejects.toBeInstanceOf(ConditionFailedError);
+    await expect(store.removeSeat(seat, [])).rejects.toBeInstanceOf(ConditionFailedError);
     ddb.on(TransactWriteCommand).rejects(new Error("throttled"));
-    await expect(store.removeSeat("t-1", "u-2", [])).rejects.toThrow("throttled");
+    await expect(store.removeSeat(seat, [])).rejects.toThrow("throttled");
+  });
+
+  it("席の変更と削除は、読んだ席の種類と足した時刻を条件にする", async () => {
+    ddb.on(TransactWriteCommand).resolves({});
+    await store.updateSeat(seat, "premium", []);
+    await store.removeSeat(seat, []);
+    const [update, remove] = ddb.commandCalls(TransactWriteCommand).map((c) => c.args[0].input.TransactItems![0]!);
+    const condition = "attribute_exists(#pk) AND #seat_type = :expected_type AND #added_at = :expected_added_at";
+    expect(update!.Update).toMatchObject({
+      ConditionExpression: condition,
+      ExpressionAttributeValues: { ":t": "premium", ":expected_type": "standard", ":expected_added_at": seat.addedAt },
+    });
+    expect(remove!.Delete).toMatchObject({
+      ConditionExpression: condition,
+      ExpressionAttributeValues: { ":expected_type": "standard", ":expected_added_at": seat.addedAt },
+    });
   });
 
   it("読み出しは強い整合で、行を値へ戻す", async () => {

@@ -30,15 +30,16 @@ export interface AccountStore {
   getAccount(accountId: string): Promise<AccountRecord | null>;
   getSeat(accountId: string, userId: string): Promise<SeatRecord | null>;
   listSeats(accountId: string): Promise<SeatRecord[]>;
-  // 利用者が席を持つチームのアカウントの ID と席の種類（GSI gsi1）
+  // 利用者が席を持つチームのアカウントの ID と席の種類（GSI gsi1）。GSI は結果整合のため、
+  // 返すのは候補であり、呼ぶ側は getSeat で元の席を確かめてから使う
   listMemberships(userId: string): Promise<SeatRecord[]>;
   createTeam(account: AccountRecord, ownerSeat: SeatRecord, history: HistoryRecord[]): Promise<void>;
   // 席が無いときだけ足す（I15）
   addSeat(seat: SeatRecord, history: HistoryRecord[]): Promise<void>;
-  // 席があるときだけ変える
-  updateSeat(seat: SeatRecord, history: HistoryRecord[]): Promise<void>;
-  // 席があるときだけ外す
-  removeSeat(accountId: string, userId: string, history: HistoryRecord[]): Promise<void>;
+  // 席が読んだときのまま（種類と足した時刻が expected と等しい）のときだけ変える
+  updateSeat(expected: SeatRecord, seatType: SeatRecord["seatType"], history: HistoryRecord[]): Promise<void>;
+  // 席が読んだときのまま（種類と足した時刻が expected と等しい）のときだけ外す
+  removeSeat(expected: SeatRecord, history: HistoryRecord[]): Promise<void>;
   // version が expectedVersion と等しいときだけ変え、version を 1 増やす
   updateAccount(
     accountId: string,
@@ -138,7 +139,10 @@ function toSeat(i: Item): SeatRecord {
 }
 
 const NOT_EXISTS = "attribute_not_exists(pk)";
-const EXISTS = "attribute_exists(pk)";
+// 席が読んだときのまま。種類で途中の変更を、足した時刻で外して足し直したことを見分ける
+const SEAT_UNCHANGED = "attribute_exists(#pk) AND #seat_type = :expected_type AND #added_at = :expected_added_at";
+const SEAT_NAMES = { "#pk": "pk", "#seat_type": "seat_type", "#added_at": "added_at" };
+const seatExpected = (s: SeatRecord) => ({ ":expected_type": s.seatType, ":expected_added_at": s.addedAt });
 
 export class DynamoAccountStore implements AccountStore {
   private readonly doc: DynamoDBDocumentClient;
@@ -239,25 +243,33 @@ export class DynamoAccountStore implements AccountStore {
     await this.transact([this.put(seatItem(seat), NOT_EXISTS), ...history.map((h) => this.put(historyItem(h)))]);
   }
 
-  async updateSeat(seat: SeatRecord, history: HistoryRecord[]) {
+  async updateSeat(expected: SeatRecord, seatType: SeatRecord["seatType"], history: HistoryRecord[]) {
     await this.transact([
       {
         Update: {
           TableName: this.tableName,
-          Key: seatKey(seat.accountId, seat.userId),
+          Key: seatKey(expected.accountId, expected.userId),
           UpdateExpression: "SET #seat_type = :t",
-          ConditionExpression: EXISTS,
-          ExpressionAttributeNames: { "#seat_type": "seat_type" },
-          ExpressionAttributeValues: { ":t": seat.seatType },
+          ConditionExpression: SEAT_UNCHANGED,
+          ExpressionAttributeNames: SEAT_NAMES,
+          ExpressionAttributeValues: { ":t": seatType, ...seatExpected(expected) },
         },
       },
       ...history.map((h) => this.put(historyItem(h))),
     ]);
   }
 
-  async removeSeat(accountId: string, userId: string, history: HistoryRecord[]) {
+  async removeSeat(expected: SeatRecord, history: HistoryRecord[]) {
     await this.transact([
-      { Delete: { TableName: this.tableName, Key: seatKey(accountId, userId), ConditionExpression: EXISTS } },
+      {
+        Delete: {
+          TableName: this.tableName,
+          Key: seatKey(expected.accountId, expected.userId),
+          ConditionExpression: SEAT_UNCHANGED,
+          ExpressionAttributeNames: SEAT_NAMES,
+          ExpressionAttributeValues: seatExpected(expected),
+        },
+      },
       ...history.map((h) => this.put(historyItem(h))),
     ]);
   }
