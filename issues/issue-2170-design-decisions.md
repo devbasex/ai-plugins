@@ -22,7 +22,7 @@ Node 22 は Lambda で長く使えるが、手元で確かめたのは 24 で、
 
 ### 決定 3: Cognito が GitHub を OIDC の IdP として受けられるよう、`factory/api/` に GitHub の仲立ちを置き、GitHub の OAuth の秘密は受け渡すだけにする
 
-Cognito の組み込みの IdP に GitHub は無く、GitHub の OAuth は ID token を返さないため、OIDC の IdP として直に登録できない。仲立ちは OIDC の 5 つの経路を持つ小さな Lambda で、インフラではなくサービスのコードなので `factory/api/` に置く（前提 2）。Cognito の IdP の登録には GitHub の OAuth App のクライアントの ID と秘密を入れ、仲立ちは Cognito から受けたそれを GitHub へ渡すだけにする。サービスが持つ秘密は ID token の署名の鍵 1 つになり、`GITHUB_OIDC_SIGNING_KEY_SECRET_ARN` で受ける。`sub` は GitHub の数の利用者 ID にし、利用者が変えられるログイン名とメールを使わない。
+Cognito の組み込みの IdP に GitHub は無く、GitHub の OAuth は ID token を返さないため、OIDC の IdP として直に登録できない。仲立ちは OIDC の 5 つの経路と GitHub からの戻り先 `/callback` を持つ小さな Lambda で、インフラではなくサービスのコードなので `factory/api/` に置く（前提 2）。Cognito の IdP の登録には GitHub の OAuth App のクライアントの ID と秘密を入れ、仲立ちは Cognito から受けたそれを GitHub へ渡すだけにする。サービスが持つ秘密は ID token の署名の鍵 1 つになり、`GITHUB_OIDC_SIGNING_KEY_SECRET_ARN` で受ける。`sub` は GitHub の数の利用者 ID にし、利用者が変えられるログイン名とメールを使わない。
 
 仲立ちが GitHub の OAuth の秘密を Secrets Manager から読む形は、同じ秘密を Cognito とサービスの 2 か所に置くことになる。Cognito の前に別の認証の層を立てる形は、依頼の「Cognitoによる認証」から外れる。
 

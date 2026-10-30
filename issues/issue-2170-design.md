@@ -199,7 +199,7 @@ graph TD
 | 画面の資産 | `npm run build -w web` が作る `factory/web/dist/` |
 | 表の鍵 | 下の「データ構造」の `pk`・`sk` と GSI `gsi1`（`gsi1pk`・`gsi1sk`） |
 | Cognito の IdP の名前 | `Google`（組み込みの Google）と `GitHub`（OIDC の IdP。発行元は `GITHUB_OIDC_ISSUER`）。大文字と小文字もこのとおりにする。画面が送る `identity_provider` と、API が `idp` を決める token の `username` の頭（`Google_`・`GitHub_`）がこの名前に依存する |
-| GitHub の仲立ちの経路 | API Gateway の HTTP API の `/oidc/github/{proxy+}` を、認可なしで `github-oidc.ts` の `handler` へ通す。`GITHUB_OIDC_ISSUER` は `https://<API の入口>/oidc/github` にする（経路は「入出力の契約」の「GitHub の仲立ち」） |
+| GitHub の仲立ちの経路 | API Gateway の HTTP API の `/oidc/github/{proxy+}` を、認可なしで `github-oidc.ts` の `handler` へ通す。`GITHUB_OIDC_ISSUER` は `https://<API の入口>/oidc/github` にする（経路は「入出力の契約」の「GitHub の仲立ち」）。GitHub の OAuth App のコールバックの URL は Cognito でなく `${GITHUB_OIDC_ISSUER}/callback` にする（`nonce` を運ぶため） |
 
 ### 置き場所
 
@@ -326,6 +326,7 @@ erDiagram
 | アカウント | `kind` | 文字列 | 許さない | `personal` / `team` |
 | アカウント | `plan` | 文字列 | 許さない | `free` / `pro` / `max` / `team`（I13） |
 | アカウント | `execution_mode` | 文字列 | 許さない | `local` / `byok` / `managed`。作成のときは `local`（I24）。プランが `free` なら `managed` を置かない（I21） |
+| アカウント | `version` | 数 | 許さない | 作成のときは 1。プランと形態を変えるたびに同じ更新で 1 増やし、書き込みの条件で読んだ値と照らす（I21 の競合を防ぐ。「入出力の契約」の席の追加の節の後） |
 | アカウント | `owner_user_id` | 文字列 | 許さない | 個人は本人、チームはチームの持ち主 |
 | アカウント | `name` | 文字列 | 許す | チームの名前（1〜64 字）。空は「個人のアカウント」で、未入力ではない |
 | アカウント | `created_at`・`updated_at` | 文字列（ISO 8601、UTC） | 許さない | 作成と最後の変更の時刻 |
@@ -434,10 +435,11 @@ Pro と Max の比、Team standard を個人 Pro の少し上、Team premium を
 | 19 | 持ち主の `PUT /accounts/{account_id}/execution-mode` は 200 で形態が変わる。チームの持ち主でない席の利用者は 403、Free で `managed` は 409 `managed_not_allowed_on_free` と理由の文で、どちらも形態と履歴が変わらない | プランの照合を外すと Free の行が落ちる |
 | 20 | `local`・`byok` の文脈で、月の token が上限より多い今の値を渡しても許す。同時のスプリントの数がちょうど上限なら 3 つの形態のどれでも断る | 形態を見ずに月の token を照らすと `local`・`byok` の行が落ちる |
 | I21 | 形態が `managed` のプロのアカウントへ `setPlan(…, "free")` を呼ぶと、プランが `free`・形態が `local` になり、`plan.changed` と `execution_mode.changed` の履歴の行が同じトランザクションで増える。形態の書き込みが失敗すればプランも変わらない | 形態を別の書き込みにすると、失敗時にプランだけが変わって落ちる |
+| I21（競合） | プロ・`local` の行を読んだ `setPlan(…, "free")` の書き込みの前に、別の要求が `managed` を保存して `version` を進めると、`setPlan` の書き込みは条件で失敗し、読み直して形態を `local` にして書く。終わったときプランが `free`・形態が `local` | 版の条件を外すと `free`・`managed` が残って落ちる |
 | I22 | 個人のアカウントは本人だけ、チームは持ち主だけが形態を変えられ、ほかは 403 で本文が I18 と同じ形 | 持ち主の確かめを外すと落ちる |
 | I23 | `getLimits` が `managed` の文脈でだけ `monthlyTokens` に表の値を返し、`local`・`byok` では `null` を返す。`managed` で月の token の値が無い組は断る | `managed` の判定を外すと `local` の行が落ちる |
 | I24 | 初めてのログインで作る個人のアカウントと `POST /teams` で作るチームのアカウントの形態が `local` | 既定を `managed` にすると落ちる |
-| GitHub の仲立ち | ID token の `sub` が GitHub の数の利用者 ID で、`aud` が `client_id`、公開した鍵で検証できる。検証済みでないメールは返さない | `sub` にログイン名を入れると落ちる |
+| GitHub の仲立ち | ID token の `sub` が GitHub の数の利用者 ID で、`aud` が `client_id`、公開した鍵で検証できる。検証済みでないメールは返さない。`/authorize` で受けた `nonce` が `/callback` を経て `/token` の ID token の `nonce` に同じ値で出る。署名の壊れた・期限の切れた・`client_id` か `redirect_uri` の違う `state` と `code` は断る | `sub` にログイン名を入れると落ちる。`nonce` を包まずに運ぶと ID token に出ずに落ちる |
 
 ## 設計の結果
 
@@ -450,7 +452,6 @@ Pro と Max の比、Team standard を個人 Pro の少し上、Team premium を
 | 項目 | 内容 |
 | --- | --- |
 | Cognito が GitHub を直に受けないこと | Cognito の利用者プールの組み込みの IdP は Google・Facebook・Amazon・Apple で、GitHub は OIDC の IdP の条件（ID token を返す）を満たさないという理解で決定 3 を置いた。この環境では公式の文書を開けず、実装の前に確かめる |
-| Cognito が仲立ちへ `nonce` を送り照らすか | 照らすなら、仲立ちは `/authorize` で受けた `nonce` を GitHub の `state` に包んで `/token` まで運ぶ必要がある。インフラの利用者プールができた後のリリース後テストで確かめ、要れば同じ課題の中で直す |
 | Lambda の `nodejs24.x` | 手元の Node は 24 で動くことを確かめた。Lambda の実行環境に 24 があることは公式の文書で確かめていない。無ければ `.node-version` を 22 にする（1 行の変更） |
 | 受け入れ条件 15 の「`web/`・`api/` にロックファイル」 | npm の workspaces ではロックファイルは `factory/package-lock.json` の 1 つで、`web`・`api` の依存を両方固める（決定 1）。この読み方でよいかをゲート 1 で利用者が確かめる |
 | `factory/contracts/` の置き方 | この課題が `factory/contracts/openapi/accounts.yaml` を最初に置く。#2171 が `contracts/` の形を決めるとき、このファイルをそのまま取り込むかを #2171 の設計で決める |

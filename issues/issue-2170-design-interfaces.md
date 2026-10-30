@@ -16,7 +16,7 @@
 | `POST /accounts/{account_id}/seats` | `{user_id, seat_type}` | 201 席 | 403 `forbidden`（I17・I18）・409 `not_a_team`（I13）・422 `user_not_found`（I16）・409 `seat_exists`（I15） |
 | `PATCH /accounts/{account_id}/seats/{user_id}` | `{seat_type}` | 200 席 | 403・409 `not_a_team`・404 `seat_not_found` |
 | `DELETE /accounts/{account_id}/seats/{user_id}` | — | 204 | 403・409 `not_a_team`・409 `owner_seat_protected`（I14）・404 `seat_not_found` |
-| `PUT /accounts/{account_id}/execution-mode` | `{execution_mode: "local" \| "byok" \| "managed"}` | 200 アカウントの本文（`GET /accounts/{account_id}` と同じ形）。今と同じ値なら履歴の行を足さずに 200 | 400 `invalid_request`（知らない値）・403 `forbidden`（持ち主でない、I22。席も持たない者は I18 と同じ本文）・409 `managed_not_allowed_on_free`（I21。`message` は「Free のプランでは managed（サービスの Bedrock）を選べません」） |
+| `PUT /accounts/{account_id}/execution-mode` | `{execution_mode: "local" \| "byok" \| "managed"}` | 200 アカウントの本文（`GET /accounts/{account_id}` と同じ形）。今と同じ値なら履歴の行を足さずに 200 | 400 `invalid_request`（知らない値）・403 `forbidden`（持ち主でない、I22。席も持たない者は I18 と同じ本文）・409 `managed_not_allowed_on_free`（I21。`message` は「Free のプランでは managed（サービスの Bedrock）を選べません」）・503 `account_unavailable`（版の競合で 3 回書けない） |
 
 `409 managed_not_allowed_on_free` を返すのも、持ち主と確かめた後だけである。`byok` を選んでもキーの登録はこの経路で求めない（キーの保存は #2186）。
 
@@ -30,13 +30,16 @@
 
 | 経路 | 中身 |
 | --- | --- |
-| `GET /.well-known/openid-configuration` | 発行元と下の 4 つの経路、`id_token_signing_alg_values_supported: ["RS256"]` |
-| `GET /authorize` | 受けた `client_id`・`redirect_uri`・`state` をそのまま、`scope=read:user user:email` で GitHub の認可の画面へ 302 で送る |
-| `POST /token` | 受けた `code` とクライアントの ID と秘密を GitHub の token の経路へ渡し、得た access token で GitHub の利用者を引き、`sub` = GitHub の数の利用者 ID、`aud` = `client_id`、有効期限 5 分の ID token を署名して返す。`access_token` は GitHub のものをそのまま返す |
+| `GET /.well-known/openid-configuration` | 発行元と下の経路（`/callback` を除く 4 つ）、`id_token_signing_alg_values_supported: ["RS256"]` |
+| `GET /authorize` | 受けた `client_id`・`redirect_uri`・`state`・`nonce` を、署名の鍵で署名した有効期限 10 分の JWT（仲立ちの `state`）に包み、`redirect_uri=${GITHUB_OIDC_ISSUER}/callback`・`scope=read:user user:email` で GitHub の認可の画面へ 302 で送る |
+| `GET /callback` | GitHub から `code` と仲立ちの `state` を受け、`state` の署名と期限を確かめる。GitHub の `code` と `state` の中の `client_id`・`redirect_uri`・`nonce` を、署名した有効期限 5 分の JWT（仲立ちの `code`）に包み、Cognito の `redirect_uri` へ Cognito の元の `state` と一緒に 302 で返す。GitHub がエラーを返したら、`error` を元の `state` と一緒にそのまま返す |
+| `POST /token` | 受けた仲立ちの `code` の署名と期限を確かめ、中の `client_id`・`redirect_uri` が要求のものと同じでなければ `invalid_grant` で断る。中の GitHub の `code` とクライアントの ID と秘密を GitHub の token の経路へ渡し、得た access token で GitHub の利用者を引き、`sub` = GitHub の数の利用者 ID、`aud` = `client_id`、`nonce` = 仲立ちの `code` の中の値（`/authorize` で受けなければ載せない）、有効期限 5 分の ID token を署名して返す。`access_token` は GitHub のものをそのまま返す |
 | `GET /userinfo` | 受けた access token で GitHub の利用者を引き、`sub`・`name`・`preferred_username` と、検証済みの主のメールがあれば `email`・`email_verified` を返す |
 | `GET /jwks.json` | 署名の鍵の公開鍵 |
 
 `sub` に GitHub のログイン名やメールを使わない。どちらも利用者が変えられ、別人と入れ替わるためである。
+
+**`nonce` は表を使わず、署名した `state` と `code` で運ぶ。** Cognito は OIDC の IdP へ `nonce` を送り、返った ID token の `nonce` と照らす。GitHub の `code` を Cognito へ直に戻すと、`/token` は Cognito の要求に `nonce` が無いため値を復元できない。そこで GitHub の戻り先を仲立ちの `/callback` にし、`nonce` を仲立ちの `code` に結び付ける。包む JWT は ID token と同じ署名の鍵（`GITHUB_OIDC_SIGNING_KEY_SECRET_ARN`）で署名し、新しい秘密と表を足さない。GitHub の `code` は署名だけで暗号化しないが、換えるには Cognito が持つクライアントの秘密が要り、GitHub が 1 回しか換えさせないため、標準の流れでブラウザの URL に出るのと変わらない。
 
 ### 画面
 
@@ -100,8 +103,9 @@ sequenceDiagram
     participant D as DynamoDB
     B->>H: /oauth2/authorize（identity_provider・PKCE）
     alt GitHub
-        H->>G: /authorize
-        G->>H: GitHub の認可を経た code
+        H->>G: /authorize（state・nonce）
+        G->>G: GitHub の認可を経て /callback（nonce を code に包む）
+        G->>H: 仲立ちの code と元の state
         H->>G: /token と /userinfo
         G-->>H: 署名した ID token
     end
@@ -167,3 +171,5 @@ sequenceDiagram
 ```
 
 席の種類の変更と削除も同じ順で、書き込みの条件を「席があること」（削除はさらに「持ち主の席でないこと」を先に照らす）に替える。プランの変更（`setPlan`）は、アカウントの行の更新を「種類とプランの組が I13 を満たすこと」の条件で行い、履歴と同じトランザクションで書く。`free` へ下げるとき（#2174 の支払いの失敗など）に形態が `managed` なら、同じ更新で `execution_mode` を `local` にし、`plan.changed` と `execution_mode.changed` の 2 つの履歴の行を同じトランザクションで足す（I21）。実行の形態の変更（`PUT /accounts/{account_id}/execution-mode`）は持ち主を確かめた後、アカウントの行の更新を「`managed` を置くならプランが `free` でないこと」の条件で行い、条件で失敗すれば 409 を返す。
+
+**プランと形態の更新は、読んだアカウントの行の版が変わっていないことを条件に足す。** アカウントの行は数の `version` を持ち（作成のときは 1）、`setPlan` と形態の変更はどちらも「`version` が読んだ値と等しいこと」を上の条件に足し、同じ更新で `version` を 1 増やす。条件で失敗したら、行を読み直して I13・I21 を判定し直し、もう一度書く（3 回で書けなければ、`setPlan` は `PlanError` でなく保存の失敗を返し、形態の変更は 503 `account_unavailable`）。読み直した後も形態の変更の「プランが `free` でないこと」に反すれば、これまでどおり 409 を返す。これが無いと、プロ・`local` を読んだ `setPlan` が形態を変えないと決めた後に、別の要求がプロの条件で `managed` を保存し、続けて `setPlan` が `free` を保存して、どちらの条件も通ったまま `free`・`managed` が残る（I21 を破る）。
