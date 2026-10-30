@@ -281,6 +281,13 @@
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
+      "term": "キューの続き",
+      "context": "ndf-workflow",
+      "meaning": "`supervise.py queue --resume <done>`。前の起動のステージの並びを読み、完了していないプランを終えたステップから続け、後続のステージも流す",
+      "source": "",
+      "pending_source": "issues/issue-1426-design.md"
+    },
+    {
       "term": "リリース差分",
       "context": "ndf-workflow",
       "meaning": "版と版の間（タグからタグまで）の変更",
@@ -3131,9 +3138,16 @@
     {
       "term": "取り込んだ課題",
       "context": "ndf-workflow",
-      "meaning": "設計で、受け入れ内容を別の課題の実装へ含めると決めた課題。自分の実装のプランは残すが、`実行の条件` で飛ばして実行しない",
+      "meaning": "受け入れ内容を別の課題の実装へ含めると決めた課題。設計の結果の表か `new sprint --absorb` で決める。実装のプランは `実行の条件` で飛ばして実行しない。`--absorb` で決めたときは自分の設計のプランを持たない",
       "source": "",
-      "pending_source": "issues/old/issue-1485-requirements.md"
+      "pending_source": "issues/issue-1426-design.md"
+    },
+    {
+      "term": "承認の証跡",
+      "context": "ndf-workflow",
+      "meaning": "承認ゲートで利用者が承認したことを示す、プランの外で残った記録。スプリント状態ファイルの承認ゲートの記録（`--by user --outcome approved`）・承認ラベル・承認資料の承認の記録のどれか。プランのステップは承認の証跡があるときだけ、承認を前提にした操作へ進む",
+      "source": "",
+      "pending_source": "issues/issue-1426-design.md"
     },
     {
       "term": "手動確認の行",
@@ -4322,58 +4336,141 @@
       "source": "docs/specifications/ndf-factory-service-boundary.md"
     },
     {
+      "term": "進捗の受け口",
+      "context": "ndf-factory",
+      "meaning": "ランナー・GitHub の Webhook・承認の API から進捗の事象を受け、出所ごとに認証して冪等に追記する、factory/api/ の HTTP の経路",
+      "pending_source": "issues/issue-2171-requirements.md"
+    },
+    {
+      "term": "実行ジョブの token",
+      "context": "ndf-factory",
+      "meaning": "実行の制御が実行ジョブ 1 つごとに発行する、期限つきの token。そのジョブのスプリントの実行にだけ進捗の事象を書け、承認の依頼の答えを読める",
+      "pending_source": "issues/issue-2171-requirements.md"
+    },
+    {
+      "term": "冪等の鍵",
+      "context": "ndf-factory",
+      "meaning": "進捗の事象の重複を判定する鍵（idempotency_key）。形は出所ごとに決まり、同じ鍵の事象は 1 つだけ残る",
+      "pending_source": "issues/issue-2171-requirements.md"
+    },
+    {
       "term": "アカウント",
       "context": "ndf-factory",
       "meaning": "Neural Development Factory で、プランと使える量を持ち、リポジトリの登録とスプリントの実行を持つ単位。個人とチームの 2 種類。`account_id` で指す",
-      "pending_source": "issues/issue-2170-requirements.md"
+      "source": "docs/specifications/ndf-factory-accounts-and-plans.md"
     },
     {
       "term": "席",
       "context": "ndf-factory",
       "meaning": "チームのアカウントの中で、1 人の利用者に割り当てる枠。種類は standard と premium",
-      "pending_source": "issues/issue-2170-requirements.md"
+      "source": "docs/specifications/ndf-factory-accounts-and-plans.md"
     },
     {
       "term": "プラン",
       "context": "ndf-factory",
       "meaning": "アカウントの契約の種類。Free・個人 Pro・個人 Max・Team の 4 つ。Team の使える量は席の種類で決まる",
-      "pending_source": "issues/issue-2170-requirements.md"
+      "source": "docs/specifications/ndf-factory-accounts-and-plans.md"
     },
     {
       "term": "使える量",
       "context": "ndf-factory",
       "meaning": "プランか席の種類ごとに決まる上限。同時に動かせるスプリントの実行の数と、月の token の上限の 2 つ",
-      "pending_source": "issues/issue-2170-requirements.md"
+      "source": "docs/specifications/ndf-factory-accounts-and-plans.md"
     },
     {
       "term": "利用者",
       "context": "ndf-factory",
       "meaning": "Google か GitHub の 1 つのアカウントで Neural Development Factory にログインした人。Cognito の `sub` を利用者の ID として持つ。同じ人でも IdP が違えば別の利用者である",
-      "pending_source": "issues/issue-2170-design.md"
+      "source": "docs/specifications/ndf-factory-accounts-and-plans.md"
     },
     {
       "term": "チームの持ち主",
       "context": "ndf-factory",
       "meaning": "チームのアカウントを作った利用者。席を足す・種類を変える・外すことができる唯一の利用者",
-      "pending_source": "issues/issue-2170-design.md"
+      "source": "docs/specifications/ndf-factory-accounts-and-plans.md"
     },
     {
       "term": "使える量の判定",
       "context": "ndf-factory",
       "meaning": "呼び出す側が渡した今の値（動いているスプリントの実行の数・その月の token の数）を使える量の上限と照らし、許すか断るかと理由を返すこと",
-      "pending_source": "issues/issue-2170-design.md"
+      "source": "docs/specifications/ndf-factory-accounts-and-plans.md"
     },
     {
       "term": "GitHub の仲立ち",
       "context": "ndf-factory",
       "meaning": "GitHub の OAuth を Cognito が受け取れる OIDC の形へ変える、`factory/api/` のプログラム",
-      "pending_source": "issues/issue-2170-design.md"
+      "source": "docs/specifications/ndf-factory-accounts-and-plans.md"
     },
     {
       "term": "実行の形態",
       "context": "ndf-factory",
       "meaning": "アカウントのランナーが Claude をどう呼ぶか。`local`（手元のランナー）・`byok`（キーの持ち込み）・`managed`（サービスの Bedrock）の 3 つで、アカウントごとに 1 つ持つ。Free は `managed` を選べず、月の token の上限は `managed` だけに掛かる",
-      "pending_source": "issues/issue-2170-requirements.md"
+      "source": "docs/specifications/ndf-factory-accounts-and-plans.md"
+    },
+    {
+      "term": "依存グループ",
+      "context": "ndf-workflow",
+      "meaning": "lib/deps.py の GROUPS と pyproject.toml の extra に並ぶ、外部パッケージの用途ごとのまとまり（procs・locks など）。deps.require へ名前で渡す",
+      "source": "",
+      "pending_source": "issues/issue-1455-design.md"
+    },
+    {
+      "term": "未宣言のグループ",
+      "context": "ndf-workflow",
+      "meaning": "モジュールから import をたどって届く外部パッケージの依存グループのうち、そのモジュールの中で覆う deps.require が無いもの。そのモジュールを読む側が引き受ける",
+      "source": "",
+      "pending_source": "issues/issue-1455-design.md"
+    },
+    {
+      "term": "任意の依存",
+      "context": "ndf-workflow",
+      "meaning": "無ければ代わりの手段へ落ちる import。except ImportError / ModuleNotFoundError で受けるか、同じ関数の中で find_spec / deps.importable で確かめ、確かめが成り立ったときだけ通る枝で読む",
+      "source": "",
+      "pending_source": "issues/issue-1455-design.md"
+    },
+    {
+      "term": "作業の報告",
+      "context": "ndf-workflow",
+      "meaning": "worker が応答の最後に書く「## 作業の報告」の節。「結果:」は 完了 / 判断が要る / できなかった のどれかで、supervise はこれでステップの成否を決める",
+      "code": "work_report",
+      "pending_source": "issues/issue-1698-requirements.md"
+    },
+    {
+      "term": "起こし直し",
+      "context": "ndf-workflow",
+      "meaning": "supervise の full のステップで、作業の報告が無いまま応答が終わったとき、同じ会話（--resume）へ続けるよう送ること。3 回まで",
+      "code": "resume_prompt",
+      "pending_source": "issues/issue-1698-requirements.md"
+    },
+    {
+      "term": "所要の記録",
+      "context": "ndf-workflow",
+      "meaning": "`.ndf/project.json` の `test_duration.measured` にある全体テストの所要（秒。w）。出所は ndf-record → ci-junit → ci-steps の順に採る。宣言の解析が書き、プランの作成と test-run.py が読む",
+      "source": "",
+      "pending_source": "issues/issue-1631-requirements.md"
+    },
+    {
+      "term": "全体テストの実測",
+      "context": "ndf-workflow",
+      "meaning": "同じリポジトリで先に走った全体テストの壁時計の秒。所要の記録とは別に残し、後のプランと test-run.py が予算なしのテストの上限を決めるときに読む（#1631）",
+      "source": "",
+      "pending_source": "issues/issue-1631-requirements.md"
+    },
+    {
+      "term": "テストの上限",
+      "context": "ndf-workflow",
+      "meaning": "test_strategy.limits が返す init_test_timeout・test_timeout・whole_timeout（秒）。ステップの timeout はこれに with_margin の余裕を足した値で、テストの上限には余裕を足さない",
+      "source": "",
+      "pending_source": "issues/issue-1631-requirements.md",
+      "code": "limits"
+    },
+    {
+      "term": "全体テストの鍵",
+      "context": "ndf-workflow",
+      "meaning": "戦略の全体テストのコマンドの集合から作る識別子（whole_key）。全体テストの実測をコマンドごとに分け、コマンドの違う実測を混ぜない（#1631）",
+      "source": "",
+      "pending_source": "issues/issue-1631-design.md",
+      "code": "whole_key"
     }
   ]
 }

@@ -99,5 +99,6 @@
 | [cross-refactoring-scope-template-probe.md](cross-refactoring-scope-template-probe.md) | cross-refactoring の init が着手前のテストの後に範囲テストのテンプレートを試走し（suite ごとにテストのファイルを最大 2 本）、`{paths}` に入るパスを受けない・確かめられないなら直す箇所を出して改修の前に止まる理由と規則（候補の選び方・判定の表・`template-check.json` の形）。止まり方は `cross-refactoring` の SKILL.md、`{paths}` に入るパスの種類は `development-workflow` の `references/project-analysis.md` が正 |
 | [cross-review-no-test-declaration-sweep.md](cross-review-no-test-declaration-sweep.md) | テストの無い宣言（`{"suites": []}` を含む）で cross-review の最終スイープが検証のコマンドを名指しせずに進み、駆動の件数に継続的統合の判定 `ci`・`ci_reason` を載せ、supervise の止まった理由に元の終了コードを添える理由と境界（`verify_commands` の判定の順・種別と雛形の誤りは止める）。件数の一覧は `cross-review` の SKILL.md、drive のステップの読み方は `supervise_lib/plan.py` が正 |
 | [ndf-factory-service-boundary.md](ndf-factory-service-boundary.md) | Neural Development Factory: サービスのディレクトリ（factory/）と境界の検査（check-service-boundary.py）の入出力・常に成り立つ条件と、子課題 #2170〜#2174 が実装するサービス全体の契約（構成要素・配置・進捗の正本・実行ジョブの指示・進捗の事象と受け口の認証と応答）。#2169 |
+| [ndf-factory-accounts-and-plans.md](ndf-factory-accounts-and-plans.md) | Neural Development Factory: Cognito の認証（Google・GitHub と GitHub の仲立ち）・アカウントの解決・アカウントと席とプランと実行の形態の API と表・使える量の表と判定・factory/ のパッケージの管理と CI（factory-check）。#2170 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。

@@ -1,4 +1,4 @@
-// API が返すエラー。本文は {"error": {"code", "message"}} に揃える（issues/issue-2170-design-interfaces.md）
+// API が返すエラー。本文は {"error": {"code", "message"}} に揃える（docs/specifications/ndf-factory-accounts-and-plans.md の「API の経路」）
 export type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 422 | 503;
 
 export class ApiError extends Error {
