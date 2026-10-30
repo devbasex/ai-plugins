@@ -13,6 +13,7 @@ import {
   isPlan,
   planFitsKind,
   type AccountContext,
+  type AccountKind,
   type AccountRecord,
   type Caller,
   type ExecutionMode,
@@ -53,22 +54,36 @@ export class AccountService {
     return { accountId, type, at, actor, before, after };
   }
 
+  // 新しいアカウントの初期値（I24）。形態は INITIAL_EXECUTION_MODE、版は 1 から始める
+  private newAccount(kind: AccountKind, plan: Plan, ownerUserId: string, name: string | null, at: string): AccountRecord {
+    return {
+      accountId: this.newId(),
+      kind,
+      plan,
+      executionMode: INITIAL_EXECUTION_MODE,
+      version: 1,
+      ownerUserId,
+      name,
+      createdAt: at,
+      updatedAt: at,
+    };
+  }
+
+  private accountCreated(account: AccountRecord, actor: string, extra?: object): HistoryRecord {
+    return this.hist(account.accountId, "account.created", account.createdAt, actor, null, {
+      kind: account.kind,
+      plan: account.plan,
+      execution_mode: account.executionMode,
+      ...extra,
+    });
+  }
+
   // 利用者の行を読み、無ければ利用者と個人のアカウント（Free・local）を 1 つのトランザクションで作る（I12・I24、E2）
   async ensureUser(caller: Caller): Promise<UserRecord> {
     const existing = await this.store.getUser(caller.userId);
     if (existing) return existing;
     const at = this.stamp();
-    const account: AccountRecord = {
-      accountId: this.newId(),
-      kind: "personal",
-      plan: "free",
-      executionMode: INITIAL_EXECUTION_MODE,
-      version: 1,
-      ownerUserId: caller.userId,
-      name: null,
-      createdAt: at,
-      updatedAt: at,
-    };
+    const account = this.newAccount("personal", "free", caller.userId, null, at);
     const user: UserRecord = {
       userId: caller.userId,
       idp: caller.idp,
@@ -76,13 +91,7 @@ export class AccountService {
       createdAt: at,
     };
     try {
-      await this.store.createUserWithPersonalAccount(user, account, [
-        this.hist(account.accountId, "account.created", at, caller.userId, null, {
-          kind: account.kind,
-          plan: account.plan,
-          execution_mode: account.executionMode,
-        }),
-      ]);
+      await this.store.createUserWithPersonalAccount(user, account, [this.accountCreated(account, caller.userId)]);
       return user;
     } catch (err) {
       if (err instanceof ConditionFailedError) {
@@ -148,26 +157,11 @@ export class AccountService {
   async createTeam(caller: Caller, name: string, seatType: SeatType): Promise<AccountContext> {
     await this.ensureUser(caller);
     const at = this.stamp();
-    const account: AccountRecord = {
-      accountId: this.newId(),
-      kind: "team",
-      plan: "team",
-      executionMode: INITIAL_EXECUTION_MODE,
-      version: 1,
-      ownerUserId: caller.userId,
-      name,
-      createdAt: at,
-      updatedAt: at,
-    };
+    const account = this.newAccount("team", "team", caller.userId, name, at);
     const seat: SeatRecord = { accountId: account.accountId, userId: caller.userId, seatType, addedAt: at };
     try {
       await this.store.createTeam(account, seat, [
-        this.hist(account.accountId, "account.created", at, caller.userId, null, {
-          kind: account.kind,
-          plan: account.plan,
-          execution_mode: account.executionMode,
-          name,
-        }),
+        this.accountCreated(account, caller.userId, { name }),
         this.hist(account.accountId, "seat.added", at, caller.userId, null, { user_id: caller.userId, seat_type: seatType }),
       ]);
     } catch {
