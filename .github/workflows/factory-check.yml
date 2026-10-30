@@ -1,0 +1,53 @@
+name: Factory check
+
+# Pull Request では絞り込まずに常に起動する。必須のチェックにしたとき、factory/ を変えない
+# Pull Request でも結果を返す必要があるため（GitHub は paths で除外した実行を「成功」として扱わない）。
+# 代わりにジョブの最初の手順で差分を見て、factory/ かこのワークフローが変わっていなければ
+# 以降を省いて成功で終える。push の側は絞り込みを残す（マージの可否を決めないため）
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - ".github/workflows/factory-check.yml"
+      - "factory/**"
+
+jobs:
+  # factory/ の契約の検査（Spectral）と、web・api の型検査とテスト（#2170）
+  factory-check:
+    name: factory-check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "$BASE...$HEAD" | grep -qE '^(factory/|\.github/workflows/factory-check\.yml$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "factory/ を変えていないため検査を省く"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-node@v7
+        if: steps.scope.outputs.run == 'true'
+        with:
+          node-version-file: factory/.node-version
+          cache: npm
+          cache-dependency-path: factory/package-lock.json
+      - if: steps.scope.outputs.run == 'true'
+        working-directory: factory
+        run: npm ci
+      - if: steps.scope.outputs.run == 'true'
+        working-directory: factory
+        run: npm run check

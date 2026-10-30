@@ -36,6 +36,19 @@
         ]
       },
       {
+        "name": "factory",
+        "runner": "vitest",
+        "command": "npm --prefix factory ci --no-audit --no-fund --silent && npm --prefix factory run check",
+        "scope_command": "npm --prefix factory ci --no-audit --no-fund --silent && factory/node_modules/.bin/vitest run --root factory {paths}",
+        "needs": [],
+        "paths": [
+          "factory"
+        ],
+        "ci_jobs": [
+          ".github/workflows/factory-check.yml"
+        ]
+      },
+      {
         "name": "script-structure",
         "runner": "check-script-structure",
         "kind": "lint",

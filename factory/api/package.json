@@ -1,0 +1,26 @@
+{
+  "name": "@ndf-factory/api",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm run test"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1160.0",
+    "@aws-sdk/client-secrets-manager": "^3.1160.0",
+    "@aws-sdk/lib-dynamodb": "^3.1160.0",
+    "aws-jwt-verify": "^5.2.1",
+    "hono": "^4.13.14",
+    "jose": "^6.2.14"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.164",
+    "@types/node": "^24.19.2",
+    "aws-sdk-client-mock": "^4.1.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}
