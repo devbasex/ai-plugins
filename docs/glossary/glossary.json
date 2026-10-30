@@ -4414,6 +4414,14 @@
       "source": "",
       "pending_source": "issues/issue-1631-requirements.md",
       "code": "limits"
+    },
+    {
+      "term": "全体テストの鍵",
+      "context": "ndf-workflow",
+      "meaning": "戦略の全体テストのコマンドの集合から作る識別子（whole_key）。全体テストの実測をコマンドごとに分け、コマンドの違う実測を混ぜない（#1631）",
+      "source": "",
+      "pending_source": "issues/issue-1631-design.md",
+      "code": "whole_key"
     }
   ]
 }
