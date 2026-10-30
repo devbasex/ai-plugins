@@ -26,50 +26,55 @@ const obj = (v: unknown): Json | null => (typeof v === "object" && v !== null &&
 const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
 const int = (v: unknown): number | null => (Number.isInteger(v) && (v as number) >= 1 ? (v as number) : null);
 
+// 種類によらず共通の列
+type WebhookCommon = Pick<PrUpdatedEvent, "idempotency_key" | "source" | "job_id" | "schema_version">;
+
 // 扱わない種類・形の違う本文・時刻の無い本文は null（202 で保存しない）
 export function translateWebhook(eventName: string, delivery: string, body: unknown): TranslatedWebhook | null {
   const root = obj(body);
   const repo = str(obj(root?.repository)?.full_name);
   if (!root || !repo) return null;
-  const common = {
+  const common: WebhookCommon = {
     idempotency_key: `github:${delivery}`,
     source: "github" as const,
     job_id: null,
     schema_version: 1 as const,
   };
 
-  if (eventName === "pull_request") {
-    const pr = obj(root.pull_request);
-    const number = int(pr?.number);
-    const at = str(pr?.updated_at);
-    const state = pr?.merged === true ? "merged" : pr?.state;
-    if (!pr || !number || !at || (state !== "open" && state !== "closed" && state !== "merged")) return null;
-    return {
-      candidates: [{ prRef: prRef(repo, number), number }],
-      build: (sprintRunId) => ({ ...common, sprint_run_id: sprintRunId, type: "pr.updated", at, payload: { repo, number, state } }),
-    };
-  }
-
-  if (eventName === "check_run") {
-    const run = obj(root.check_run);
-    const name = str(run?.name);
-    const at = str(run?.completed_at) ?? str(run?.started_at);
-    const conclusion = run?.conclusion === null || run?.conclusion === undefined ? null : str(run.conclusion);
-    const numbers = Array.isArray(run?.pull_requests)
-      ? run.pull_requests.map((p) => int(obj(p)?.number)).filter((n): n is number => n !== null)
-      : [];
-    if (!run || !name || !at || numbers.length === 0) return null;
-    return {
-      candidates: [...new Set(numbers)].map((number) => ({ prRef: prRef(repo, number), number })),
-      build: (sprintRunId, number) => ({
-        ...common,
-        sprint_run_id: sprintRunId,
-        type: "ci.updated",
-        at,
-        payload: { repo, pr_number: number, name, conclusion },
-      }),
-    };
-  }
-
+  if (eventName === "pull_request") return translatePullRequest(root, repo, common);
+  if (eventName === "check_run") return translateCheckRun(root, repo, common);
   return null;
+}
+
+function translatePullRequest(root: Json, repo: string, common: WebhookCommon): TranslatedWebhook | null {
+  const pr = obj(root.pull_request);
+  const number = int(pr?.number);
+  const at = str(pr?.updated_at);
+  const state = pr?.merged === true ? "merged" : pr?.state;
+  if (!pr || !number || !at || (state !== "open" && state !== "closed" && state !== "merged")) return null;
+  return {
+    candidates: [{ prRef: prRef(repo, number), number }],
+    build: (sprintRunId) => ({ ...common, sprint_run_id: sprintRunId, type: "pr.updated", at, payload: { repo, number, state } }),
+  };
+}
+
+function translateCheckRun(root: Json, repo: string, common: WebhookCommon): TranslatedWebhook | null {
+  const run = obj(root.check_run);
+  const name = str(run?.name);
+  const at = str(run?.completed_at) ?? str(run?.started_at);
+  const conclusion = run?.conclusion === null || run?.conclusion === undefined ? null : str(run.conclusion);
+  const numbers = Array.isArray(run?.pull_requests)
+    ? run.pull_requests.map((p) => int(obj(p)?.number)).filter((n): n is number => n !== null)
+    : [];
+  if (!run || !name || !at || numbers.length === 0) return null;
+  return {
+    candidates: [...new Set(numbers)].map((number) => ({ prRef: prRef(repo, number), number })),
+    build: (sprintRunId, number) => ({
+      ...common,
+      sprint_run_id: sprintRunId,
+      type: "ci.updated",
+      at,
+      payload: { repo, pr_number: number, name, conclusion },
+    }),
+  };
 }
