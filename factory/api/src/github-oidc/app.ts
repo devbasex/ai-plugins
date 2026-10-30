@@ -58,6 +58,23 @@ function oauthError(c: Context, error: string, status: 400 | 401 = 400) {
   return c.json({ error }, status);
 }
 
+type Form = Record<string, unknown>;
+
+function formText(form: Form, key: string): string | undefined {
+  return typeof form[key] === "string" ? (form[key] as string) : undefined;
+}
+
+// client_secret_post と client_secret_basic の両方を受ける。Basic があれば form より優先する
+function clientCredentials(
+  form: Form,
+  authorizationHeader: string | undefined,
+): { clientId?: string; clientSecret?: string } {
+  const basic = /^Basic (.+)$/.exec(authorizationHeader ?? "");
+  if (!basic) return { clientId: formText(form, "client_id"), clientSecret: formText(form, "client_secret") };
+  const [id, secret] = Buffer.from(basic[1]!, "base64").toString("utf8").split(":");
+  return { clientId: decodeURIComponent(id ?? ""), clientSecret: decodeURIComponent(secret ?? "") };
+}
+
 export function createGithubOidcApp(config: GithubOidcConfig, deps: GithubOidcDeps): Hono {
   const issuer = config.issuer.replace(/\/$/, "");
   const cognitoRedirect = `https://${config.cognitoDomain}/oauth2/idpresponse`;
@@ -101,6 +118,36 @@ export function createGithubOidcApp(config: GithubOidcConfig, deps: GithubOidcDe
     });
     if (!res.ok) return null;
     return (await res.json()) as T;
+  }
+
+  async function exchangeGithubCode(
+    clientId: string,
+    clientSecret: string,
+    ghCode: string,
+  ): Promise<{ access_token?: string; scope?: string }> {
+    const res = await doFetch(GITHUB_TOKEN_URL, {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        code: ghCode,
+        redirect_uri: callbackUrl,
+      }),
+    });
+    return res.ok ? ((await res.json()) as { access_token?: string; scope?: string }) : {};
+  }
+
+  async function issueIdToken(subject: string, audience: string, nonce: string | undefined): Promise<string> {
+    const keys = await deps.keys();
+    return new SignJWT(nonce === undefined ? {} : { nonce })
+      .setProtectedHeader({ alg: "RS256", kid: keys.publicJwk.kid, typ: "JWT" })
+      .setIssuer(issuer)
+      .setSubject(subject)
+      .setAudience(audience)
+      .setIssuedAt()
+      .setExpirationTime(`${ID_TOKEN_TTL_SECONDS}s`)
+      .sign(keys.privateKey);
   }
 
   app.get("/.well-known/openid-configuration", (c) =>
@@ -154,15 +201,8 @@ export function createGithubOidcApp(config: GithubOidcConfig, deps: GithubOidcDe
 
   app.post("/token", async (c) => {
     const form = await c.req.parseBody();
-    const text = (k: string) => (typeof form[k] === "string" ? (form[k] as string) : undefined);
-    let clientId = text("client_id");
-    let clientSecret = text("client_secret");
-    const basic = /^Basic (.+)$/.exec(c.req.header("Authorization") ?? "");
-    if (basic) {
-      const [id, secret] = Buffer.from(basic[1]!, "base64").toString("utf8").split(":");
-      clientId = decodeURIComponent(id ?? "");
-      clientSecret = decodeURIComponent(secret ?? "");
-    }
+    const text = (k: string) => formText(form, k);
+    const { clientId, clientSecret } = clientCredentials(form, c.req.header("Authorization"));
     if (text("grant_type") !== "authorization_code" || !clientId || !clientSecret) {
       return oauthError(c, "invalid_request");
     }
@@ -170,30 +210,12 @@ export function createGithubOidcApp(config: GithubOidcConfig, deps: GithubOidcDe
     if (!code || code.client_id !== clientId || code.redirect_uri !== text("redirect_uri")) {
       return oauthError(c, "invalid_grant");
     }
-    const tokenRes = await doFetch(GITHUB_TOKEN_URL, {
-      method: "POST",
-      headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        code: code.gh_code,
-        redirect_uri: callbackUrl,
-      }),
-    });
-    const token = tokenRes.ok ? ((await tokenRes.json()) as { access_token?: string; scope?: string }) : {};
+    const token = await exchangeGithubCode(clientId, clientSecret, code.gh_code);
     if (!token.access_token) return oauthError(c, "invalid_grant");
     const user = await githubJson<GithubUser>("/user", token.access_token);
     if (!user || typeof user.id !== "number") return oauthError(c, "invalid_grant");
-    const keys = await deps.keys();
     // sub は GitHub の数の利用者 ID。利用者が変えられるログイン名とメールを使わない
-    const idToken = await new SignJWT(code.nonce === undefined ? {} : { nonce: code.nonce })
-      .setProtectedHeader({ alg: "RS256", kid: keys.publicJwk.kid, typ: "JWT" })
-      .setIssuer(issuer)
-      .setSubject(String(user.id))
-      .setAudience(clientId)
-      .setIssuedAt()
-      .setExpirationTime(`${ID_TOKEN_TTL_SECONDS}s`)
-      .sign(keys.privateKey);
+    const idToken = await issueIdToken(String(user.id), clientId, code.nonce);
     return c.json({
       access_token: token.access_token,
       token_type: "Bearer",
