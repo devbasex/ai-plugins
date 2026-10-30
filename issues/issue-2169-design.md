@@ -133,15 +133,15 @@ E1〜E5 は要求の番号を引き継ぐ。E6・E7 は子課題の契約を固�
 
 ```mermaid
 graph TD
-    subgraph 画面と入口
+    subgraph sg1["画面と入口"]
         WEB[画面]
         API[API]
     end
-    subgraph 実行
+    subgraph sg2["実行"]
         CTRL[実行の制御]
         RUN[ランナー]
     end
-    subgraph 記録と派生
+    subgraph sg3["記録と派生"]
         ING[進捗の受け口]
         VIEW[一覧と詳細]
         APR[承認と通知]
@@ -185,17 +185,17 @@ graph LR
 
 ```mermaid
 graph TD
-    subgraph 利用者の端末
+    subgraph sg4["利用者の端末"]
         BRW[ブラウザ]
     end
-    subgraph AWS のアカウント（private リポジトリが作る）
+    subgraph sg5["AWS のアカウント（private リポジトリが作る）"]
         CDN[静的な配信]
         GW[API の入口と Lambda]
         DB[(DynamoDB)]
         OBJ[(S3)]
         ECS[ECS Fargate の実行ジョブ]
     end
-    subgraph 外部
+    subgraph sg6["外部"]
         GHX[GitHub]
         BRX[Bedrock]
     end
@@ -242,14 +242,14 @@ scripts/
 
 ```mermaid
 erDiagram
-    アカウント ||--o{ リポジトリの登録 : 持つ
-    リポジトリの登録 ||--o{ スプリントの実行 : 持つ
-    スプリントの実行 ||--|{ 実行ジョブ : 進める
-    スプリントの実行 ||--o{ 進捗の事象 : 積む
-    実行ジョブ ||--o{ 進捗の事象 : 出す
-    スプリントの実行 ||--o{ 承認の依頼 : 待つ
-    アカウント ||--o{ 使用量の記録 : 積む
-    進捗の事象 {
+    "アカウント" ||--o{ "リポジトリの登録" : "持つ"
+    "リポジトリの登録" ||--o{ "スプリントの実行" : "持つ"
+    "スプリントの実行" ||--|{ "実行ジョブ" : "進める"
+    "スプリントの実行" ||--o{ "進捗の事象" : "積む"
+    "実行ジョブ" ||--o{ "進捗の事象" : "出す"
+    "スプリントの実行" ||--o{ "承認の依頼" : "待つ"
+    "アカウント" ||--o{ "使用量の記録" : "積む"
+    "進捗の事象" {
         string sprint_run_id PK
         string order_key "SK"
         string type
