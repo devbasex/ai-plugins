@@ -104,7 +104,11 @@ export class AccountService {
 
   // 要求の利用者と経路のアカウントの ID から、権限つきの文脈を返す（決定 4、I18）
   async resolveAccount(caller: Caller, accountId?: string): Promise<AccountContext> {
-    const user = await this.ensureUser(caller);
+    return this.resolveFor(await this.ensureUser(caller), caller, accountId);
+  }
+
+  // 読んだ利用者の行から文脈を組む。利用者の行を読み直さない
+  private async resolveFor(user: UserRecord, caller: Caller, accountId?: string): Promise<AccountContext> {
     const id = accountId ?? user.personalAccountId;
     const account = await this.store.getAccount(id);
     if (!account) throw new ForbiddenError();
@@ -131,7 +135,7 @@ export class AccountService {
 
   async listAccounts(caller: Caller): Promise<{ user: UserRecord; contexts: (AccountContext & { name: string | null })[] }> {
     const user = await this.ensureUser(caller);
-    const personal = await this.resolveAccount(caller);
+    const personal = await this.resolveFor(user, caller);
     const out: (AccountContext & { name: string | null })[] = [{ ...personal, name: null }];
     // GSI の行は候補。外した席が GSI に残る間に名前やプランを返さないよう、元の席を強い整合で確かめる（I18）
     for (const accountId of await this.store.listMemberships(caller.userId)) {

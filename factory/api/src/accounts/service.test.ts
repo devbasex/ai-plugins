@@ -42,6 +42,19 @@ describe("listAccounts（I18）", () => {
     const { contexts } = await service.listAccounts({ userId: "u-1", idp: "google" });
     expect(contexts.map((c) => c.kind)).toEqual(["personal"]);
   });
+
+  it("利用者の行は 1 回だけ読む", async () => {
+    await personal();
+    const getUser = store.getUser.bind(store);
+    let reads = 0;
+    store.getUser = async (userId) => {
+      reads += 1;
+      return getUser(userId);
+    };
+    const { contexts } = await service.listAccounts({ userId: "u-1", idp: "google" });
+    expect(contexts.map((c) => c.kind)).toEqual(["personal"]);
+    expect(reads).toBe(1);
+  });
 });
 
 describe("席の変更と削除の競合", () => {
