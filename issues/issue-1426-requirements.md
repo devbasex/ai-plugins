@@ -36,18 +36,18 @@ python3 "$SCRIPTS/supervise.py" queue r-1407/4-impl-1407.json --done ...        
 | 3 | 並行の Pull Request が用語集へ語を足し合う衝突 | conductor が両方の語を残し、用語集の文書を作り直す | 語の追加どうしの衝突だけは、スクリプトが両方を残して解消する。ほかの衝突はこれまでどおり止まる |
 | 4 | 承認ゲート 2 の後の本番のリリース | `new sprint` が本番のプラン（`release-prod`）を書き出すのは `pace: fast` / `auto` だけで（`supervise_lib/sprint.py` の `fast_sprint_plans`・`auto_sprint_plans`）、`pace: normal` は release の雛形の有無にかかわらず配布（開発版）のステージで終わる。conductor が `supervise.py new release --channel prod` で本番のプランを作り、キューと待ちを打つ（`waiting.md` の「スプリントを流すコマンド」の手順 8） | `pace: normal` でも `new sprint` が本番のプランを書き出し、`waiting.md` の手順 8 をキューと待ちだけにする。版とスプリントの Pull Request の番号は、スプリント状態ファイルから読む |
 | 5 | 開発版のリリースのプランの、スプリントの Pull Request の番号 | 検査の後に開発版のプランだけを流し直すとき、conductor がプランの中の置き場（`{queue_prs}`）を番号へ置き換える（#1370・#1337・#1389・#1400） | 番号をスプリント状態ファイルから読む |
-| 6 | 実装のプランの指示と上限、構造改善の予算 | conductor が毎回 jq で足す。設計文書のパス、コミットの前の `scripts/check-lint.sh --fix`、実装の上限 5400 秒（既定の 3600 秒では足りなかった。#1334）、構造改善の `--budget-minutes 60`（既定の 30 分では着手前のテストが予算を使い切った。#1370） | `new sprint` が設計文書を実装の指示へ渡し、lint を実装のステップに入れる。上限と予算は宣言か引数で受ける |
+| 6 | 実装のプランの指示と上限、リファクタリングの予算 | conductor が毎回 jq で足す。設計文書のパス、コミットの前の `scripts/check-lint.sh --fix`、実装の上限 5400 秒（既定の 3600 秒では足りなかった。#1334）、リファクタリングの `--budget-minutes 60`（既定の 30 分では着手前のテストが予算を使い切った。#1370） | `new sprint` が設計文書を実装の指示へ渡し、lint を実装のステップに入れる。上限と予算は宣言か引数で受ける |
 | 7 | 設計 Pull Request の本文の「決めたこと」 | 設計を直した後に本文を同期せず、継続的統合のチェックが落ちてレビューが異常終了する（PR 1402・1424）。決定の記録の見出しが `## 決定の記録` でないと、決定を 0 件と数える（PR 1423） | 設計のプランの修正と push の後に `pr-body-decisions.sh sync` のステップを置く。見出しの形が違えば、設計のステップで落とす |
 | 8 | 検査を途中から再開したときのレビュー | `run --from review` は、終わったレビューの状態を読み直すだけで回らない。conductor がレビューの状態のファイルを退避してから流し直す（PR 1402・1404） | #1340（レビューを終わった後に回し直す正規の手段）と合わせ、プランの再開がその手段を使う |
 | 9 | スプリントの Pull Request と develop の衝突 | 並行のスプリントの本番リリースで develop が進み、検査のマージが止まる。conductor が develop の取り込み・衝突の解消・全体テストを自分で打った（セッション 26 で 3 回） | 検査のマージの前に develop を取り込むステップを置き、衝突したら worker の修正へ回す。用語集の衝突は 3 と同じに扱う |
-| 10 | 構造改善の後の lint | 構造改善の実装担当が lint を通さずにコミットし、push の前の lint で落ちる。conductor が作業ディレクトリで整形を別のコミットにした（#1370・#1389） | 構造改善の push の前に `scripts/check-lint.sh --fix` を通す |
+| 10 | リファクタリングの後の lint | リファクタリングの実装担当が lint を通さずにコミットし、push の前の lint で落ちる。conductor が作業ディレクトリで整形を別のコミットにした（#1370・#1389） | リファクタリングの push の前に `scripts/check-lint.sh --fix` を通す |
 | 11 | 止まったプランの続き | キューは止まったプランを途中のステップから続けられない。conductor がプランを分けて作り直した（`4b-impl-1334-cont.json`・`4c-impl-1334-pr.json`） | キューが止まったプランの続きのステップを受け、`--then` の後続もそのまま流す |
-| 13 | 承認ゲート 2 の承認の記録 | 利用者が承認した後に conductor が `release-steps.py approve --approval <承認資料> --approved-sha <SHA> --by user` を手で打つ。打たずに会話を切ると、本番のプランの release が「承認の記録が無い」で関門（exit=10）を返して止まる（PR 1845、2026-10-08。止まり方は安全側で、記録を書いて `run --from release` で続けた） | 承認を受けた時点の記録を、本番のプランの最初のステップか `new sprint` の関門の後続に置き、conductor が打つのはキューだけにする |
+| 13 | 承認ゲート 2 の承認の記録 | 利用者が承認した後に conductor が `release-steps.py approve --approval <承認資料> --approved-sha <SHA> --by user` を手で打つ。打たずに会話を切ると、本番のプランの release が「承認の記録が無い」で承認ゲート（exit=10）を返して止まる（PR 1845、2026-10-08。止まり方は安全側で、記録を書いて `run --from release` で続けた） | 承認を受けた時点の記録を、本番のプランの最初のステップか `new sprint` の承認ゲートの後続に置き、conductor が打つのはキューだけにする |
 | 12 | hook の歯止め | 1〜11 を直しても、conductor がつなぎを書けば止まらない | PreToolUse の hook が、バックグラウンドの Bash の `sleep` と、NDF のスクリプト（`merged-steps.py`・`supervise.py`）を `&&` / `;` でつないだコマンドを拒み、プランと `supervise.py wait` を案内する |
 
 ## 元の受け入れ条件（2026-09-28・2026-09-29）
 
-見出しを「受け入れ条件」から変えた（2026-10-30、要求と受け入れ条件の工程）。スプリント m1426 で満たす条件を下の「受け入れ条件」の節に置き、元の条件は文を変えずにここへ残す。各条件の扱いは次の表にある。
+見出しを「受け入れ条件」から変えた（2026-10-30、要求と受け入れ条件の工程。あわせて本文の廃止した語を用語集の語（リファクタリング・承認ゲート）へ置き換えた）。スプリント m1426 で満たす条件を下の「受け入れ条件」の節に置き、元の条件は文を変えずにここへ残す。各条件の扱いは次の表にある。
 
 | 元の条件 | 扱い |
 | --- | --- |
@@ -71,8 +71,8 @@ python3 "$SCRIPTS/supervise.py" queue r-1407/4-impl-1407.json --done ...        
 - [ ] 4. 表の 4〜11 の手当てを、conductor が jq・sed・シェルのつなぎで行わずに済む。スプリントを 1 本流し、conductor が打ったコマンドを数えて確かめる
 - [ ] 5. バックグラウンドの Bash で `sleep` や NDF のスクリプトのつなぎを書くと、hook が拒んで案内を出す
 - [ ] 6. 既存のテスト（`uv run --frozen --project . --all-extras pytest . -q -n 4`）が通る
-- [ ] 7. 実装・構造改善・修正の worker の後の push で lint が落ちない（表 6・10。修正の worker の fix / fix-sync / fix-doc も含む）
-- [ ] 8. 構造改善のステップの `timeout` が予算に余裕を足した値（`supervise_lib/verify_steps.py` の `with_margin`）になり、予算と同じ値で打ち切られない（表 6。#1336 で 3600 秒ちょうどで exit=124。今は `supervise_lib/templates.py` の検査のプランの `refactor` のステップが `timeout` 3600 の固定値を持つ）
+- [ ] 7. 実装・リファクタリング・修正の worker の後の push で lint が落ちない（表 6・10。修正の worker の fix / fix-sync / fix-doc も含む）
+- [ ] 8. リファクタリングのステップの `timeout` が予算に余裕を足した値（`supervise_lib/verify_steps.py` の `with_margin`）になり、予算と同じ値で打ち切られない（表 6。#1336 で 3600 秒ちょうどで exit=124。今は `supervise_lib/templates.py` の検査のプランの `refactor` のステップが `timeout` 3600 の固定値を持つ）
 - [ ] 9. 引数を変えずに差分だけが増えたスプリント PR で、`run --from review` がレビューを回し直す（表 8）
 - [ ] 10. 検査のマージの直前に develop が進んで衝突しても、取り込みのステップへ戻る（表 9。`merged_lib/checks.py` の `PR_FIELDS` が取っている `mergeStateStatus` を判定に使う。今は `supervise_lib/templates.py` の検査のプランの `merge_steps(a, on_fail="abort", ...)` で中断する）
 - [ ] 11. `pace: normal` の開発版のプランを単独で流しても `{queue_prs}` が埋まる（表 5。auto / fast は PR 1378・1465 で対応済み。normal は `supervise_lib/sprint_waves.py` の `plan_sprint_release`（`prs=[]`・`prs_from_queue=True`）と、先頭のステージでは `{queue_prs}` を埋めない `supervise_lib/queue.py` の `fill_stage` が残る）
@@ -245,7 +245,7 @@ python3 "$SCRIPTS/supervise.py" queue r-1407/4-impl-1407.json --done ...        
 
 - #1407（閉じた）: 工程の単位を「スプリント」と呼ぶ
 - #1340（閉じた）: レビューを収束・異常終了の後に回し直す正規の手段（表の 8）。`skills/cross-review/scripts/drive.py` は、収束ループの終わりの時点の PR の head と今の head が違えば（または `--reopen` なら）新しい回を始める。受け入れ条件 9 はこの手段をプランの再開から確かめる
-- #1399（閉じた）: 構造改善の取り消しが増え続けた不具合（別の課題で扱う）
+- #1399（閉じた）: リファクタリングの取り消しが増え続けた不具合（別の課題で扱う）
 - #1645（閉じた）: 置き換わった失敗を CI の失敗と数えない（表の 2）
 - #1810・#1834（閉じた）: 本番・開発版のプランの手のステップ（再発の記録の「新しい形」）
 - #635（閉じた）: 決定の記録の見出しの形（表の 7）
