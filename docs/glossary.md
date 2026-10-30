@@ -750,12 +750,12 @@ NDF を Web UI から操作できるサービスとして提供するときの�
 
 | 語 | 識別子 | 意味 | 廃止した語 | 廃止した識別子 | 正本 |
 | --- | --- | --- | --- | --- | --- |
-| Neural Development Factory | — | NDF を Web UI から操作できる Software Factory のサービスとして提供するときの名前。プラグインとしての NDF と区別するときに使う | — | — | — |
-| サービスのディレクトリ | — | Web サービスのコードを置く、プラグインと分けた 1 つのディレクトリ | — | — | — |
-| 境界の検査 | — | サービスのディレクトリとプラグイン・配布物・インフラの境目が守られているかを CI で見る検査 | — | — | — |
-| 実行基盤 | — | Web サービスからスプリントを動かす、コンテナとジョブの仕組み | — | — | — |
-| ランナー | — | 1 つの実行ジョブの中で利用者のリポジトリを取り込み、NDF を導入して conductor を動かし、NDF の書くファイルを進捗の事象へ翻訳して送るプログラム | — | — | — |
-| 実行ジョブ | — | 実行基盤が 1 回起動するコンテナ 1 つ分の実行。スプリントの開始か承認の答えで始まり、次の承認の依頼・止まった・終わったのどれかで終わる | — | — | — |
-| スプリントの実行 | — | サービスが動かす NDF のスプリント 1 つ（sprint.json 1 つ）と、それを進める実行ジョブの列 | — | — | — |
-| 進捗の事象 | — | ランナーと GitHub の通知から受け取り、追記だけで持つ 1 件の出来事。一覧・詳細・通知・課金はここから導く | — | — | — |
-| 承認の依頼 | — | 実行ジョブが人の答えを待って終わったときに作る依頼。種類はゲート 1・ゲート 2・判断（止めて人へ戻した）の 3 つ | — | — | — |
+| Neural Development Factory | — | NDF を Web UI から操作できる Software Factory のサービスとして提供するときの名前。プラグインとしての NDF と区別するときに使う | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
+| サービスのディレクトリ | — | Web サービスのコードを置く、プラグインと分けた 1 つのディレクトリ | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
+| 境界の検査 | — | サービスのディレクトリとプラグイン・配布物・インフラの境目が守られているかを CI で見る検査 | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
+| 実行基盤 | — | Web サービスからスプリントを動かす、コンテナとジョブの仕組み | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
+| ランナー | — | 1 つの実行ジョブの中で利用者のリポジトリを取り込み、NDF を導入して conductor を動かし、NDF の書くファイルを進捗の事象へ翻訳して送るプログラム | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
+| 実行ジョブ | — | 実行基盤が 1 回起動するコンテナ 1 つ分の実行。スプリントの開始か承認の答えで始まり、次の承認の依頼・止まった・終わったのどれかで終わる | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
+| スプリントの実行 | — | サービスが動かす NDF のスプリント 1 つ（sprint.json 1 つ）と、それを進める実行ジョブの列 | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
+| 進捗の事象 | — | ランナーと GitHub の通知から受け取り、追記だけで持つ 1 件の出来事。一覧・詳細・通知・課金はここから導く | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
+| 承認の依頼 | — | 実行ジョブが人の答えを待って終わったときに作る依頼。種類はゲート 1・ゲート 2・判断（止めて人へ戻した）の 3 つ | — | — | `docs/specifications/ndf-factory-service-boundary.md` |

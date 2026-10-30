@@ -25,4 +25,4 @@ CDK のスタック・ネットワーク・秘密の管理は別の private リ�
 | `api/` | 画面からの要求を受け、アカウントで認可して各集約の持ち主へ渡す処理 | #2170〜#2174 |
 | `runner/` | 実行ジョブのコンテナ。リポジトリの取り込み・NDF の導入・conductor の起動・進捗の事象の送信 | #2171 |
 
-全体の設計（構成要素・実行基盤・進捗の正本・構成要素の間の契約）は [issues/issue-2169-design.md](../issues/issue-2169-design.md) にある。
+全体の設計（構成要素・実行基盤・進捗の正本・構成要素の間の契約）は [docs/specifications/ndf-factory-service-boundary.md](../docs/specifications/ndf-factory-service-boundary.md) にある。
