@@ -291,9 +291,12 @@ function seatNotFound(): NotFoundError {
   return new NotFoundError("seat_not_found", "その席はありません");
 }
 
+const TEAM_NAME_MAX_LENGTH = 64;
+const TEAM_NAME_MESSAGE = `1〜${TEAM_NAME_MAX_LENGTH} 字で入力してください`;
+
 export function validateTeamName(name: unknown): string {
-  if (typeof name !== "string") throw new InvalidRequestError("1〜64 字で入力してください");
+  if (typeof name !== "string") throw new InvalidRequestError(TEAM_NAME_MESSAGE);
   const length = [...name].length;
-  if (name.trim() === "" || length > 64) throw new InvalidRequestError("1〜64 字で入力してください");
+  if (name.trim() === "" || length > TEAM_NAME_MAX_LENGTH) throw new InvalidRequestError(TEAM_NAME_MESSAGE);
   return name;
 }
