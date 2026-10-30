@@ -239,7 +239,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 前提のプラン | `after` | プランの JSON の `前提のプラン` に名前で挙げたプラン。その結果が完了でなければ、queue は挙げた側のプランを流さない | — | — | `docs/specifications/ndf-supervise-queue-concurrent-files-and-prerequisites.md` |
 | スプリントの雛形 | — | `supervise.py new sprint` がステージごとのプランを作る関数（`sprint_waves.py` の `plan_sprint_*` / `plan_fast_*`） | — | — | — |
 | 単発の雛形 | — | `supervise.py new impl / fix / check` が 1 本のプランを作る関数（`templates.py`） | — | — | — |
-| 取り込んだ課題 | — | 受け入れ内容を別の課題の実装へ含めると決めた課題。設計の結果の表か `new sprint --absorb` で決める。自分の設計のプランを持たず、実装のプランは `実行の条件` で飛ばして実行しない | — | — | — |
+| 取り込んだ課題 | — | 受け入れ内容を別の課題の実装へ含めると決めた課題。設計の結果の表か `new sprint --absorb` で決める。実装のプランは `実行の条件` で飛ばして実行しない。`--absorb` で決めたときは自分の設計のプランを持たない | — | — | — |
 | 承認の証跡 | — | 承認ゲートで利用者が承認したことを示す、プランの外で残った記録。スプリント状態ファイルの承認ゲートの記録（`--by user --outcome approved`）・承認ラベル・承認資料の承認の記録のどれか。プランのステップは承認の証跡があるときだけ、承認を前提にした操作へ進む | — | — | — |
 | 手動確認の行 | — | 要求の検証手段の表で、項目が「手動確認」で始まり、2 列目が「無し」の形（「無し」「なし」「不要」「ない」「-」「—」「―」の単独か、直後に括弧・句読点・空白が続く形）でない行。項目が「手動確認（マージ前）」ならマージ前、それ以外はリリース後テストに確かめる | — | — | — |
 | 記録の置き場が分からない | — | まとめの close が読むリリース記録の Pull Request を、プランが組まれた時点で決められない状態。sprint-close.py --record-pr unknown で渡し、課題を開いたまま残す | — | — | `docs/specifications/ndf-sprint-misjudgments-unknown-record-and-manual-none.md` |

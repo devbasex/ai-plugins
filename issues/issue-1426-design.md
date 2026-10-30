@@ -45,19 +45,19 @@
 | プラン | 書き出しは `new sprint`、承認ゲート 1 の後の書き換えは `design-results`、置き場の埋め込みは `queue`（時点で分ける。今の持ち方のまま） | プランの JSON | ステップ | `課題`・`取り込み先`・`実行の条件`・`Pull Request` |
 | キューの実行 | `queue`（`supervise_lib/queue.py`・`flow.py`・新しい `queue_resume.py`） | done とその隣の一覧 `<done>.plans.json` | プランの結果（`items` の 1 件） | ステージの並び・`--max`・開始のステップ |
 | 承認資料 | `release-steps.py`（`approval-facts` が書き、`approve` が承認の記録を足す） | 承認資料のファイル | — | 承認したコミット・承認の記録 |
-| スプリント状態ファイル | `sprint-state.py`（この変更では読むだけ） | 状態のファイル | 承認ゲートの記録 | `name`・`by`・`outcome`・`pr`・`at` |
+| スプリント状態ファイル | `sprint-state.py`（`gate` の書き込みを変える。読むのは `lib/gate_answer.py`） | 状態のファイル | 承認ゲートの記録（関門の名と `pr` の組で 1 件） | `name`・`by`・`outcome`・`pr`・`at` |
 
 ### 不変条件
 
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
 | I1 | プラン | 設計 Pull Request のマージのプランは、その PR の承認の証跡（承認ラベルか、承認ゲート 1 の利用者の承認の記録）が無ければマージへ進まない | 終了コード 10（承認ゲート）で止まる |
-| I2 | 承認資料 | 本番のプランの先頭のステップは、利用者の承認の証跡（開発版の `facts` より後に書かれた承認ゲート 2 の利用者の承認の記録）が無ければ承認の記録を書かない | 書かずに 10 で止まり、`release` へ進まない |
+| I2 | 承認資料 | 本番のプランの先頭のステップは、利用者の承認の証跡が無ければ承認の記録を書かず、`release` へ進まない。証跡は次のどちらか: 承認資料に `facts` の SHA と一致する承認の記録が既にある（`--state` の無いスプリントで conductor が `approve` を打った場合。書かずに通す）か、スプリント状態ファイルに開発版の `facts` より後に書かれた承認ゲート 2 の利用者の承認の記録がある（承認の記録を書いて通す） | どちらも無ければ書かずに 10 で止まり、`release` へ進まない |
 | I3 | 承認資料 | 承認の記録の SHA は、開発版の `facts` のステップの結果の `metrics.approved_sha` に一致し、承認資料の承認したコミットにも一致する | どちらかが違えば書かずに 10 で止まる |
 | I4 | キューの実行 | キューの続きは、前の起動で完了したプランを流し直さない | 完了の記録があるプランは記録した結果を返す |
 | I5 | キューの実行 | キューの続きでも、後続のステージは前のステージがすべて完了のときだけ流れる | 流さず `流さなかった` と理由を残す |
 | I6 | キューの実行 | キューの続きは前の起動のステージの並びをそのまま使い、並びを読めなければ何も流さない | `stopped` の結果を返し、元のコマンドを打ち直すよう `next` に書く |
-| I7 | プラン | 取り込んだ課題は設計のプランを持たず、実装のプランは `実行の条件` で飛ぶ。取り込み先の設計と実装のプランの `課題` に含まれる | — （書き出しが常にこの形で書く） |
+| I7 | プラン | 取り込んだ課題の実装のプランは `実行の条件` で飛ぶ。`new sprint --absorb` で設計の前に取り込んだ課題は設計のプランを持たない（設計の結果の表で後から取り込んだ課題の設計のプランは、既に流れたものとして残す）。取り込んだ課題は、取り込み先のプランのうち存在するもの（`--design` の取り込み先は設計と実装のプラン、`--issue` の取り込み先は実装のプラン）の `課題` に含まれる | — （書き出しと `design-results` が常にこの形で書く） |
 | I8 | スプリントの目録 | 取り込み先が `--design` にも `--issue` にも無い・取り込む課題が `--design` にある・取り込む課題と取り込み先が同じ、のどれかなら、どのファイルも書かない | `stopped` の結果と理由を返す（終了コード 1） |
 | I9 | スプリントの目録 | `normal` の承認ゲート 1 の後のステージ（マージ・設計の結果・スプリントブランチ・実装・検査・配布）は、最初のステージの `command` 1 本に `--then` でつながる | — （書き出しが常にこの形で書く） |
 | I10 | スプリントの目録 | `fast` と `auto` のステージの並びと、本番のプランの先頭のステップは変わらない | — （既存のテストが縛る） |
@@ -85,7 +85,7 @@
 | --- | --- | --- |
 | 承認の証跡 | 承認ゲートで利用者が承認したことを示す、プランの外で残った記録。スプリント状態ファイルの承認ゲートの記録（`--by user --outcome approved`）・承認ラベル・承認資料の承認の記録のどれか。プランのステップは承認の証跡があるときだけ、承認を前提にした操作へ進む | 追加（`ndf-workflow`） |
 | キューの続き | `supervise.py queue --resume <done>`。前の起動のステージの並びを読み、完了していないプランを終えたステップから続け、後続のステージも流す | 追加（`ndf-workflow`） |
-| 取り込んだ課題 | 受け入れ内容を別の課題の実装へ含めると決めた課題。設計の結果の表か `new sprint --absorb` で決める。自分の設計のプランを持たず、実装のプランは `実行の条件` で飛ばす | 意味の変更（`ndf-workflow`） |
+| 取り込んだ課題 | 受け入れ内容を別の課題の実装へ含めると決めた課題。設計の結果の表か `new sprint --absorb` で決める。実装のプランは `実行の条件` で飛ばす。`--absorb` で決めたときは自分の設計のプランを持たない | 意味の変更（`ndf-workflow`） |
 
 ## 機能一覧
 
@@ -113,7 +113,8 @@
 | `supervise.py`（変更） | `queue --resume` / `--from` と、副命令 `design-approved` を受ける |
 | `supervise_lib/release_templates.py`（変更） | `normal` の本番のプランの先頭へ `approve` のステップを置く |
 | `supervise_lib/new_args.py`（変更） | `--absorb`（sprint）と `--dev-state`（release）を足す |
-| `lib/gate_answer.py`（新設） | スプリント状態ファイルから承認ゲートの利用者の承認の記録を読む（承認ゲート 1・2 で共有） |
+| `sprint-state.py`（変更） | `gate --by user --outcome approved` の記録に `by: user` と、`--pr` を渡したときの `pr` を書く。同じ関門の記録の置き換えを関門の名と `pr` の組で行い、同じ承認ゲート 1 で複数の設計 PR を承認した記録を並べて残す（`--pr` を渡さない記録の置き換えは今のまま） |
+| `lib/gate_answer.py`（新設） | スプリント状態ファイルから承認ゲートの利用者の承認の記録（`by: user`・`outcome: approved`。承認ゲート 1 は `pr` も一致するもの）を読む（承認ゲート 1・2 で共有） |
 | `release_lib/approval.py`・`release-steps.py`（変更） | `approve --facts-from` / `--answer-from` で、証跡と SHA を照らしてから承認の記録を書く（I2・I3） |
 | `development-workflow/references/waiting.md`・`pace.md`（変更） | 流し方と止まったときの手順を、キューと `wait` と `queue --resume` の形へ書き直す |
 | 用語集（`docs/glossary/glossary.json`・`docs/glossary.md`） | 用語の表の 3 語を反映する |
@@ -153,6 +154,7 @@ plugins/ndf/
 ├── scripts/
 │   ├── supervise.py
 │   ├── release-steps.py
+│   ├── sprint-state.py
 │   ├── lib/gate_answer.py            （新設）
 │   ├── release_lib/approval.py
 │   └── supervise_lib/
@@ -248,6 +250,7 @@ graph LR
 | `supervise.py new sprint --absorb <課題>:<取り込み先>...` | 整数の組。何度でも並べられる | 取り込み先の設計と実装のプランの `課題` が両方の番号を持ち、requirements と design の `prompt` が両方の課題を参照する。取り込んだ課題の実装のプランは `取り込み先` と `実行の条件`（`absorbed_condition`）を持つ。取り込んだ課題が `--issue` に無ければ足す | I8 に当たれば計画を書かずに `stopped`（終了コード 1）。形の誤りは 2 | 足すだけ |
 | `supervise.py design-approved --pr <N> [--state <状態>]` | 設計 PR の番号とスプリント状態ファイル | 承認ラベルがあれば 0。無く、状態に承認ゲート 1 の `--pr N` の利用者の承認の記録があれば承認ラベルを付けて 0 | 証跡が無い・PR が 0 → 10。`gh` が読めない → 2 | 新設 |
 | `release-steps.py approve --approval <資料> --facts-from <開発版の状態ディレクトリ> [--answer-from <状態>] --by user` | 開発版のプランの最後の `facts` のステップの出力（結果 JSON の `metrics.approved_sha`） | 承認資料に承認の記録が既にあり、`facts` の SHA と一致すれば書かずに 0。無ければ、`--answer-from` の承認ゲート 2 の利用者の承認の記録（`at` が `facts` の出力より後）を確かめて書き、0 | `facts` の出力が無い・SHA が資料の承認したコミットと違う・証跡が無い → 書かずに 10。`--facts-from` と `--approved-sha` を併せて渡す → 2 | 足すだけ。`--approved-sha` の今の形は変えない |
+| `sprint-state.py gate <状態> <関門の名> --what <要約> --by user --outcome approved [--pr N]` | 今と同じ引数 | 記録に `by: user`・`outcome: approved`、`--pr` を渡せば `pr` を書く。同じ関門の名と同じ `pr`（どちらも無いを含む）の記録だけを置き換え、別の `pr` の記録は残す | 今のまま | 足すだけ。`--pr` を渡さない呼び出しの置き換えと、`--by mvv`・`--withdraw` の振る舞いは変えない |
 | `supervise.py new release --channel prod --dev-state <ディレクトリ>` | 開発版のプランの状態ディレクトリ | 本番のプランの `approve` の `--facts-from` に使う | — | 足すだけ。省けば `{queue_state:release}` |
 | `{queue_pr:<名>}` | 名前の一致するプランの報告 | 完了か結果が `関門` のプランの Pull Request の番号 | 無い・飛ばされた → `0`（今のまま） | 結果が `関門` のプランからも埋めるよう広げる（決定 4） |
 
@@ -352,11 +355,12 @@ graph TD
 | AC8 | 目録の `command` を持つステージと `then_of` のステージの `resume` が、どれも `queue --resume <その done>` の形である | `then_of` のステージに今の形の `resume` を残す |
 | AC9 | `normal` の `new sprint` と `new release --channel prod` の本番のプランの先頭が `approve` で、`--facts-from` を持つ | 先頭を `bump` のままにする・`--approved-sha` を固定で書く |
 | AC10・I3 | 開発版の `facts` の出力の SHA と承認資料の承認したコミットが違うと、`approve` は書かずに 10 を返す | SHA を承認資料から読み直す |
-| AC11・I2 | 承認ゲート 2 の利用者の承認の記録が無いか、`facts` の出力より前の時刻だと、`approve` は書かずに 10 を返し、プランは `release` へ進まない | 時刻を見ない・`--by mvv` の記録を証跡に数える・10 を止まったと扱う |
+| AC11・I2 | 承認資料に一致する承認の記録が無く、承認ゲート 2 の利用者の承認の記録も無いか `facts` の出力より前の時刻だと、`approve` は書かずに 10 を返し、プランは `release` へ進まない。`--answer-from` を渡さず、承認資料に `facts` の SHA と一致する承認の記録があれば書かずに 0 を返す | 時刻を見ない・`--by mvv` の記録を証跡に数える・10 を止まったと扱う・`--state` の無いスプリントの既存の承認の記録で通さない |
 | AC12 | 一時ディレクトリに開発版の `facts` の出力・承認資料・承認の記録を置いて本番のプランを流すと、`release` の承認の照合を通る（`gh` はスタブ） | `approve` の後に `release` が承認の記録を読めない |
 | I1 | 承認ラベルも承認ゲート 1 の記録も無いと、`design-approved` は 10 を返し、マージのプランは `merge` へ進まない。記録があればラベルを付けて 0 | 証跡なしに 0 を返す・別の PR の記録を証跡に数える |
+| I1（記録の書き込み） | `sprint-state.py gate … "関門 1" --pr 1 --by user --outcome approved` の後に `--pr 2` で同じ関門を書くと、両方の記録が `by: user` と `pr` を持って残り、`design-approved --pr 1` と `--pr 2` がどちらも 0 を返す | 同じ関門の名で前の PR の記録を上書きする・`by` か `pr` を書かない |
 | AC13・AC14・I7 | `--absorb 1693:1688` で、`design-1688` の `課題` が `[1688, 1693]` で requirements と design の `prompt` が両方を参照し、`design-1693` が無く、`impl-1693` が `取り込み先` と `実行の条件` を持つ | 取り込んだ課題の設計のプランを書く・`prompt` に片方しか入れない |
-| AC14・I7（2 つの経路を揃える） | 承認ゲート 1 の後の `design-results` が、表に無い書き出しの取り込みを保ち、表の取り込みと合わせる | 表の内容で `課題` を作り直して書き出しの取り込みを消す |
+| AC14・I7（2 つの経路を揃える） | 承認ゲート 1 の後の `design-results` が、表に無い書き出しの取り込みを保ち、表の取り込みと合わせる。表で後から取り込んだ課題の流れた設計のプランを消さず、`--issue` の取り込み先（設計のプランが無い）へは実装のプランだけに反映する | 表の内容で `課題` を作り直して書き出しの取り込みを消す・後から取り込んだ課題の設計のプランを拒む・取り込み先に設計のプランを作る |
 | AC15 | 取り込んだ課題の本文に受け入れ条件の節が無くても、`new sprint` が止まらない | 確認の対象から取り込んだ課題を除かない |
 | AC16・I8 | 取り込み先が `--design` にも `--issue` にも無い・取り込む課題が `--design` にある・同じ番号のとき、ファイルを書かずに `stopped` を返す | 一部のプランを書いてから止まる |
 | AC17・I10 | `fast` と `auto` の目録のステージの並びと、本番のプランの先頭のステップ（`mvv`）が変わらない（既存のテスト） | `normal` の並びの変更を `auto` へ漏らす |
@@ -367,7 +371,7 @@ graph TD
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #1426 | 実装する | — | `plugins/ndf/scripts/supervise.py`、`plugins/ndf/scripts/release-steps.py`、`plugins/ndf/scripts/lib/gate_answer.py`、`plugins/ndf/scripts/release_lib/approval.py`、`plugins/ndf/scripts/supervise_lib/`、`plugins/ndf/scripts/tests/`、`plugins/ndf/skills/development-workflow/references/waiting.md`、`plugins/ndf/skills/development-workflow/references/pace.md`、`docs/glossary/glossary.json`、`docs/glossary.md` |
+| #1426 | 実装する | — | `plugins/ndf/scripts/supervise.py`、`plugins/ndf/scripts/release-steps.py`、`plugins/ndf/scripts/sprint-state.py`、`plugins/ndf/scripts/lib/gate_answer.py`、`plugins/ndf/scripts/release_lib/approval.py`、`plugins/ndf/scripts/supervise_lib/`、`plugins/ndf/scripts/tests/`、`plugins/ndf/skills/development-workflow/references/waiting.md`、`plugins/ndf/skills/development-workflow/references/pace.md`、`docs/glossary/glossary.json`、`docs/glossary.md` |
 
 残る子課題（#1912・#1918・#1920・#1921）はこの表に載せない。表の行はスプリント PR の閉じる行になるが、子課題は
 実装の Pull Request のマージの後に受け入れ条件を確かめてから閉じる（要求の前提 1）。

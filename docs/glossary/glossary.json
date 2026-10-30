@@ -3138,7 +3138,7 @@
     {
       "term": "取り込んだ課題",
       "context": "ndf-workflow",
-      "meaning": "受け入れ内容を別の課題の実装へ含めると決めた課題。設計の結果の表か `new sprint --absorb` で決める。自分の設計のプランを持たず、実装のプランは `実行の条件` で飛ばして実行しない",
+      "meaning": "受け入れ内容を別の課題の実装へ含めると決めた課題。設計の結果の表か `new sprint --absorb` で決める。実装のプランは `実行の条件` で飛ばして実行しない。`--absorb` で決めたときは自分の設計のプランを持たない",
       "source": "",
       "pending_source": "issues/issue-1426-design.md"
     },
