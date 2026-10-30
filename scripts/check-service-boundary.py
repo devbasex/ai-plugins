@@ -111,16 +111,20 @@ def read_allow(path: Path, root: Path) -> list[dict]:
     if not isinstance(rows, list):
         raise Unreadable(f"許可の一覧の secrets が並びでない: {path}")
     for row in rows:
-        if not isinstance(row, dict) or set(row) != ALLOW_ROW_KEYS:
-            raise Unreadable(f"許可の行の鍵は {sorted(ALLOW_ROW_KEYS)} だけ: {row}")
-        p, digest, reason = row["path"], row["sha256"], row["reason"]
-        if not (isinstance(p, str) and p and isinstance(reason, str) and reason.strip()):
-            raise Unreadable(f"許可の行の path と reason が空: {row}")
-        if any(c in p for c in "*?[") or p.endswith("/") or (root / p).is_dir():
-            raise Unreadable(f"許可の path はファイル 1 つだけ（ディレクトリと glob は受けない）: {p}")
-        if not (isinstance(digest, str) and SHA256.match(digest)):
-            raise Unreadable(f"許可の sha256 が 64 字の 16 進でない: {row}")
+        validate_allow_row(row, root)
     return rows
+
+
+def validate_allow_row(row: object, root: Path) -> None:
+    if not isinstance(row, dict) or set(row) != ALLOW_ROW_KEYS:
+        raise Unreadable(f"許可の行の鍵は {sorted(ALLOW_ROW_KEYS)} だけ: {row}")
+    p, digest, reason = row["path"], row["sha256"], row["reason"]
+    if not (isinstance(p, str) and p and isinstance(reason, str) and reason.strip()):
+        raise Unreadable(f"許可の行の path と reason が空: {row}")
+    if any(c in p for c in "*?[") or p.endswith("/") or (root / p).is_dir():
+        raise Unreadable(f"許可の path はファイル 1 つだけ（ディレクトリと glob は受けない）: {p}")
+    if not (isinstance(digest, str) and SHA256.match(digest)):
+        raise Unreadable(f"許可の sha256 が 64 字の 16 進でない: {row}")
 
 
 def in_service(rel: str) -> bool:
