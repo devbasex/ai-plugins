@@ -12,6 +12,7 @@
     "@aws-sdk/client-dynamodb": "^3.1160.0",
     "@aws-sdk/client-secrets-manager": "^3.1160.0",
     "@aws-sdk/lib-dynamodb": "^3.1160.0",
+    "@ndf-factory/contracts": "*",
     "aws-jwt-verify": "^5.2.1",
     "hono": "^4.13.14",
     "jose": "^6.2.14"

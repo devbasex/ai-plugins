@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/devbasex/ai-plugins/blob/develop/factory/contracts/schemas/ingest-response.schema.json",
+  "title": "IngestResponse",
+  "description": "進捗の受け口の応答の本文。202 は重複でも同じ本文、401・403 は理由によらず同じ本文",
+  "oneOf": [{ "$ref": "#/$defs/IngestAccepted" }, { "$ref": "#/$defs/IngestError" }],
+  "$defs": {
+    "IngestAccepted": {
+      "description": "202。残した・同じ冪等の鍵が既にある・github で扱わないか宛先が引けない",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accepted"],
+      "properties": {
+        "accepted": { "type": "boolean", "const": true }
+      }
+    },
+    "IngestError": {
+      "description": "400 invalid_event・401 unauthorized・403 forbidden・503 ingest_unavailable",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["error"],
+      "properties": {
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code", "message"],
+          "properties": {
+            "code": { "type": "string", "enum": ["invalid_event", "unauthorized", "forbidden", "ingest_unavailable"] },
+            "message": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}
