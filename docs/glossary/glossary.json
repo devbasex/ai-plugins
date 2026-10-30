@@ -95,6 +95,11 @@
       "id": "ndf-document",
       "name": "NDF の文書の組み直し",
       "meaning": "書き上げた文書を文書形式と文書の目的に合わせて組み直すときの語。document-rebuild が持つ"
+    },
+    {
+      "id": "ndf-factory",
+      "name": "Neural Development Factory",
+      "meaning": "NDF を Web UI から操作できるサービスとして提供するときの語。サービスのディレクトリ・境界の検査・実行基盤"
     }
   ],
   "terms": [
@@ -4261,6 +4266,30 @@
       "context": "project-glossary",
       "meaning": "Claude Code のエージェント定義の `model` の値（型の名前）から agy の tier 名への対応。`scripts/lib/agy_agents.py` が持つ",
       "source": "docs/specifications/runtime-plugin-distribution.md"
+    },
+    {
+      "term": "Neural Development Factory",
+      "context": "ndf-factory",
+      "meaning": "NDF を Web UI から操作できる Software Factory のサービスとして提供するときの名前。プラグインとしての NDF と区別するときに使う",
+      "source": ""
+    },
+    {
+      "term": "サービスのディレクトリ",
+      "context": "ndf-factory",
+      "meaning": "Web サービスのコードを置く、プラグインと分けた 1 つのディレクトリ",
+      "source": ""
+    },
+    {
+      "term": "境界の検査",
+      "context": "ndf-factory",
+      "meaning": "サービスのディレクトリとプラグイン・配布物・インフラの境目が守られているかを CI で見る検査",
+      "source": ""
+    },
+    {
+      "term": "実行基盤",
+      "context": "ndf-factory",
+      "meaning": "Web サービスからスプリントを動かす、コンテナとジョブの仕組み",
+      "source": ""
     }
   ]
 }

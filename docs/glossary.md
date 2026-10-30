@@ -743,3 +743,14 @@ AI エージェントが実施する前提で、作業の A・H・L・C を類�
 | 形式別ガイド | — | 文書形式 1 つについて、文章量の単位と目安・題と見出しの付け方・呼び出し先を持つ document-rebuild の参照ファイル（references/format-<形式>.md） | — | — | `docs/specifications/ndf-document-rebuild.md` |
 | 目的別ガイド | — | 文書の目的 1 つについて、構成・文章量・見分ける手がかりを持つ document-rebuild の参照ファイル（references/purpose-<目的>.md） | — | — | `docs/specifications/ndf-document-rebuild.md` |
 | 読み手役 | — | 組み直した文書と想定する読み手の説明だけを渡され、会話や経緯の文脈を持たずに読んで、要点の言い直し・分からなかった語と箇所・納得できなかった主張を返す者（サブエージェントか external-ai で呼ぶ別の CLI） | — | — | `plugins/ndf/skills/document-rebuild/SKILL.md` |
+
+## Neural Development Factory（`ndf-factory`）
+
+NDF を Web UI から操作できるサービスとして提供するときの語。サービスのディレクトリ・境界の検査・実行基盤
+
+| 語 | 識別子 | 意味 | 廃止した語 | 廃止した識別子 | 正本 |
+| --- | --- | --- | --- | --- | --- |
+| Neural Development Factory | — | NDF を Web UI から操作できる Software Factory のサービスとして提供するときの名前。プラグインとしての NDF と区別するときに使う | — | — | — |
+| サービスのディレクトリ | — | Web サービスのコードを置く、プラグインと分けた 1 つのディレクトリ | — | — | — |
+| 境界の検査 | — | サービスのディレクトリとプラグイン・配布物・インフラの境目が守られているかを CI で見る検査 | — | — | — |
+| 実行基盤 | — | Web サービスからスプリントを動かす、コンテナとジョブの仕組み | — | — | — |
