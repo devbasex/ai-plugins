@@ -7,6 +7,7 @@
     {"name": "runtime-smoke-scope", "reason": "重いジョブを省くかの判定だけで、結果は後の runtime-smoke (*) が返す"}
   ],
   "awaiting": [
-    {"name": "service-boundary-check", "reason": "サービスのディレクトリの境界の検査（#2169）。ruleset の必須への追加は承認ゲート 2 で利用者が行う"}
+    {"name": "service-boundary-check", "reason": "サービスのディレクトリの境界の検査（#2169）。ruleset の必須への追加は承認ゲート 2 で利用者が行う"},
+    {"name": "factory-check", "reason": "factory/ の契約の検査と web・api の型検査とテスト（#2170）。ruleset の必須への追加は承認ゲート 2 で利用者が行う"}
   ]
 }
