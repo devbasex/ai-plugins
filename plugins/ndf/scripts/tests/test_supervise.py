@@ -1437,6 +1437,7 @@ def test_new_release_dev_and_prod(tmp_path):
     plan = json.loads((tmp_path / "p.json").read_text())
     st = {s["id"]: s for s in plan["steps"]}
     assert [s["id"] for s in plan["steps"]] == [
+        "approve",
         "bump",
         "bump-others",
         "changelog",
@@ -1453,6 +1454,20 @@ def test_new_release_dev_and_prod(tmp_path):
     ]
     assert "--ref main" in st["verify"]["cmd"] and st["verify"]["stage"] == "リリース後テスト"
     assert st["verify"]["next"] == "cleanup" and "facts" not in st
+    # 先頭の approve が開発版の facts の出力から承認したコミットを読む（#1426 の AC9）
+    assert "approve --approval issues/approval-ndf-v10.17.11.md --facts-from '{queue_state:release}' --by user" in st["approve"]["cmd"]
+    assert (st["approve"]["next"], st["approve"]["gate_next"]) == ("bump", "end")
+    p = cli(
+        *"new release --version 10.17.11 --prs 995 --channel prod --worktree /r/.worktrees/release/v10.17.11".split(),
+        "--dev-state",
+        str(tmp_path / "dev"),
+        "--state",
+        str(tmp_path / "s.json"),
+        "--out",
+        str(tmp_path / "p2.json"),
+    )
+    cmd = json.loads((tmp_path / "p2.json").read_text())["steps"][0]["cmd"]
+    assert f"--facts-from {tmp_path / 'dev'} --answer-from {tmp_path / 's.json'} --by user" in cmd
 
 
 def test_new_release_requires_version():

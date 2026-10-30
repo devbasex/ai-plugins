@@ -337,6 +337,7 @@ def plan_sprint_release(a, repo: str, advise: bool = False, channel: str = "dev"
         issue=a.issue,
         mode=a.mode,
         advise=a.state if advise and channel == "dev" else None,
+        state=getattr(a, "state", None),  # 本番の approve が承認ゲート 2 の利用者の承認の記録を読む（#1426）
     )
     return plan_release(ns)
 

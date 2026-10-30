@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import approved_commit as ac
@@ -153,9 +154,80 @@ def gate(root, a, plugin, base, verdict, items, metrics, moved=False) -> dict:
     )
 
 
+def _facts_of(state_dir) -> tuple[str | None, str | None]:
+    """開発版のプランの状態ディレクトリの最後の facts のステップの出力から (提示した SHA, 出力の時刻)。無ければ None。"""
+    from release_lib.materials import last_result
+
+    d = Path(state_dir)
+    got = last_result(d, "facts", TOOL) if d.is_dir() else None
+    sha = ((got or {}).get("metrics") or {}).get("approved_sha")
+    if not sha:
+        return None, None
+    outs = sorted(d.glob("*-facts.out"), key=lambda f: f.stat().st_mtime)
+    at = datetime.fromtimestamp(outs[-1].stat().st_mtime, timezone.utc).isoformat() if outs else None
+    return sha, at
+
+
+def _approve_gate(path, why: str, metrics: dict, nxt: str) -> Gate:
+    return Gate(result(TOOL, "gate", f"承認の記録を書かずに止めた: {why}", [], metrics, str(path), nxt))
+
+
+def approve_from_facts(root, a) -> dict:
+    """本番のプランの先頭の approve（#1426 の決定 7）。提示した SHA は開発版の facts の出力から読み（資料を読み直さない）、
+    承認資料に一致する承認の記録が既にあれば書かずに通す。無ければ承認ゲート 2 の利用者の承認の記録（facts の出力より後）が
+    `--answer-from` にあるときだけ書く。どれかが欠ければ書かずに承認ゲート（10）で止まる（I2・I3）。"""
+    import gate_answer
+
+    if getattr(a, "approved_sha", None):
+        raise StepError("--facts-from と --approved-sha は併せて渡さない", EXIT_UNREADABLE)
+    path = _material(root, a.approval)
+    sha, facts_at = _facts_of(a.facts_from)
+    metrics = {"approved_sha": sha, "facts_at": facts_at, "by": a.by}
+    retry = '承認を取り、sprint-state.py gate <状態> "関門 2" --what <要約> --by user --outcome approved を書いてから続ける'
+    if not sha:
+        raise _approve_gate(path, f"開発版の facts の出力（{a.facts_from}）に承認したコミットが無い", metrics, "開発版のプランを流し直す")
+    try:
+        now = ac.material_sha(path)
+        if now != sha:
+            nxt = "承認資料を提示し直して承認を取り直す"
+            raise _approve_gate(
+                path, f"承認資料の承認したコミット {now[:8]} が facts の {sha[:8]} と違う（提示の後に書き直された）", metrics, nxt
+            )
+        if ac.recorded_sha(path) == sha:
+            return result(
+                TOOL,
+                "ok",
+                f"承認資料に承認の記録（{sha[:8]}）が既にある",
+                [{"kind": "cell", "name": ac.RECORD, "result": "kept"}],
+                metrics,
+                str(path),
+            )
+    except ValueError as e:
+        raise _approve_gate(path, str(e), metrics, "開発版のプランを流し直す")
+    answer = gate_answer.approved(getattr(a, "answer_from", None), "関門 2", after=facts_at)
+    if answer is None:
+        raise _approve_gate(path, "承認ゲート 2 の利用者の承認の記録が facts の出力より後に無い", metrics, retry)
+    at = clock.now_iso("utc")
+    ac.record_approval(path, sha, a.by, at)
+    metrics.update({"at": at, "answer_at": answer.at})
+    return result(
+        TOOL,
+        "ok",
+        f"承認資料に承認の記録（{sha[:8]}・{a.by}）を書いた",
+        [{"kind": "cell", "name": ac.RECORD, "result": "written"}],
+        metrics,
+        str(path),
+    )
+
+
 def approve(root, a) -> dict:
     """ゲート 2 の承認を承認資料へ記録する（#815 の I10）。--approved-sha は提示した資料を書いた approval-facts の
-    metrics.approved_sha（資料を読み直した値ではない）。資料がその後に書き直されていれば書かずに止まる。"""
+    metrics.approved_sha（資料を読み直した値ではない）。資料がその後に書き直されていれば書かずに止まる。
+    --facts-from なら approve_from_facts（#1426）。"""
+    if getattr(a, "facts_from", None):
+        return approve_from_facts(root, a)
+    if not getattr(a, "approved_sha", None):
+        raise StepError("--approved-sha か --facts-from が要る", EXIT_UNREADABLE)
     path = _material(root, a.approval)
     try:
         sha = ac.parse_sha(a.approved_sha)

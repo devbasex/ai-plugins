@@ -15,8 +15,22 @@ import gate_answer  # noqa: E402
 
 def gate(state: Path, tmp: Path, name: str, *args: str, at: str = "2026-10-30T01:00:00+00:00") -> dict:
     p = subprocess.run(
-        [sys.executable, str(SCRIPTS / "sprint-state.py"), "gate", str(state), name, "--what", "要約", "--at", at, *args,
-         "--mvv-log", str(tmp / "mvv-gate.jsonl"), "--root", str(tmp)],
+        [
+            sys.executable,
+            str(SCRIPTS / "sprint-state.py"),
+            "gate",
+            str(state),
+            name,
+            "--what",
+            "要約",
+            "--at",
+            at,
+            *args,
+            "--mvv-log",
+            str(tmp / "mvv-gate.jsonl"),
+            "--root",
+            str(tmp),
+        ],
         capture_output=True,
         text=True,
     )

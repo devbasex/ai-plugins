@@ -237,6 +237,13 @@ NEW_ARGS = [
     ("--prev-tag", {"help": "dev: approval-facts の前のタグ。prod: 他のプラグインの差分の起点（省略時は自動）"}, "release"),
     ("--repo", {"help": "元のリポジトリ（省略時は作業場所の /.worktrees/ より前）"}, "release"),
     ("--mvv", {"help": "承認ゲート 2 を MVV で判定する（スプリントの状態）"}, "release"),
+    (
+        "--dev-state",
+        {
+            "help": "prod: 開発版のプランの状態ディレクトリ（先頭の approve が facts の出力から承認したコミットを読む。省けば同じ置き場の開発版）"
+        },
+        "release",
+    ),
     ("--name", {"help": "スプリントの名前（英数字・. _ -。ブランチは sprint/<名前>）"}, "sprint close"),
     (
         "--design",
@@ -278,9 +285,10 @@ NEW_ARGS = [
                 "*": "スプリントの状態（sprint-state.py のファイル）",
                 "sprint": "スプリントの状態（sprint-state.py のファイル）。--pace fast / auto では要る。normal で渡すと承認ゲート 1・2 の前に"
                 "助言の MVV 判定を置き、worker と judge が状態のスプリント MVV を読む",
+                "release": "prod: 承認ゲート 2 の利用者の承認の記録を読むスプリントの状態（先頭の approve が読む）",
             }
         },
-        "sprint close",
+        "sprint close release",
     ),
     ("--prod", {"help": "本番の版（例 10.18.0。release.form の雛形で配るときだけ要る）"}, "close"),
     (
