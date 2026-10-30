@@ -4344,6 +4344,30 @@
       "context": "ndf-factory",
       "meaning": "プランか席の種類ごとに決まる上限。同時に動かせるスプリントの実行の数と、月の token の上限の 2 つ",
       "pending_source": "issues/issue-2170-requirements.md"
+    },
+    {
+      "term": "利用者",
+      "context": "ndf-factory",
+      "meaning": "Google か GitHub の 1 つのアカウントで Neural Development Factory にログインした人。Cognito の `sub` を利用者の ID として持つ。同じ人でも IdP が違えば別の利用者である",
+      "pending_source": "issues/issue-2170-design.md"
+    },
+    {
+      "term": "チームの持ち主",
+      "context": "ndf-factory",
+      "meaning": "チームのアカウントを作った利用者。席を足す・種類を変える・外すことができる唯一の利用者",
+      "pending_source": "issues/issue-2170-design.md"
+    },
+    {
+      "term": "使える量の判定",
+      "context": "ndf-factory",
+      "meaning": "呼び出す側が渡した今の値（動いているスプリントの実行の数・その月の token の数）を使える量の上限と照らし、許すか断るかと理由を返すこと",
+      "pending_source": "issues/issue-2170-design.md"
+    },
+    {
+      "term": "GitHub の仲立ち",
+      "context": "ndf-factory",
+      "meaning": "GitHub の OAuth を Cognito が受け取れる OIDC の形へ変える、`factory/api/` のプログラム",
+      "pending_source": "issues/issue-2170-design.md"
     }
   ]
 }
