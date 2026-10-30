@@ -60,6 +60,6 @@ TypeScript のコードは npm の workspaces で束ね、どの子課題も次�
 
 進捗の事象の表（`PROGRESS_EVENTS_TABLE_NAME`）は区分の鍵 `sprint_run_id`・並びの鍵 `order_key` と、区分の鍵 `pr_ref` の GSI `pr_ref-index`（射影に `sprint_run_id` を含める）を持つ。冪等の鍵の表（`PROGRESS_IDEMPOTENCY_TABLE_NAME`）は区分の鍵 `idempotency_key` だけを持ち、TTL を置かない。
 
-ほかの子課題は `api/src/index.ts` から export したものだけを使う。要求の利用者は `requireCaller`、アカウントの文脈は `resolveFromRequest`（関数としては `resolveAccount`）、使える量は `getLimits`・`judgeLimits`、プランの変更は `setPlan` で得る。実行ジョブの token は `signRunJobToken` で作り（#2186）、`verifyRunJobToken` で確かめる（受け口と #2173）。テストでは `createRunJobTokenKit` で鍵の組をメモリの中に作る。実行の制御（#2186）は `job.finished` を `appendControlEvent` で直に書く。契約の型は `@ndf-factory/contracts` か `api/src/index.ts` から import する。
+ほかの子課題は `api/src/index.ts` から export したものだけを使う。要求の利用者は `requireCaller`、アカウントの文脈は `resolveFromRequest`（関数としては `resolveAccount`）、使える量は `getLimits`・`judgeLimits`、プランの変更は `setPlan` で得る。実行ジョブの token は `signRunJobToken` で作り、受け口で `verifyRunJobToken` で確かめる。テストでは `createRunJobTokenKit` で鍵の組をメモリの中に作る。実行の制御は `job.finished` を `appendControlEvent` で直に書く。契約の型は `@ndf-factory/contracts` か `api/src/index.ts` から import する。
 
 全体の設計（構成要素・実行基盤・進捗の正本・構成要素の間の契約）は [docs/specifications/ndf-factory-service-boundary.md](../docs/specifications/ndf-factory-service-boundary.md) にある。
