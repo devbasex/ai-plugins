@@ -1,5 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { createLocalJWKSet, decodeJwt, generateKeyPair, jwtVerify, SignJWT, type JWK } from "jose";
+import { createLocalJWKSet, decodeJwt, decodeProtectedHeader, generateKeyPair, jwtVerify, SignJWT, type JWK } from "jose";
 import { createGithubOidcApp, GITHUB_API_URL, GITHUB_TOKEN_URL } from "./app.ts";
 import { signingKeysFromPrivateKey, type SigningKeys } from "./keys.ts";
 
@@ -196,5 +196,236 @@ describe("GitHub の仲立ち（決定 3）", () => {
     const text = await (await token(back.searchParams.get("code")!)).text();
     expect(text).not.toContain(GH_SECRET);
     expect(text).not.toContain('"d"');
+  });
+});
+
+// 現状固定テスト（createGithubOidcApp の分割の前に、経路ごとの振る舞いを固定する）
+describe("GitHub の仲立ちの現状固定", () => {
+  interface Fake {
+    requests: { url: string; method?: string; headers: Record<string, string>; body?: string }[];
+    tokenStatus: number;
+    tokenBody: Record<string, unknown>;
+    userStatus: number;
+    user: Record<string, unknown>;
+    emailsStatus: number;
+    emails: unknown;
+  }
+
+  let fake: Fake;
+  const fakeFetch: typeof fetch = async (input, init) => {
+    const url = String(input);
+    fake.requests.push({ url, method: init?.method, headers: Object.fromEntries(new Headers(init?.headers)), body: init?.body?.toString() });
+    if (url === GITHUB_TOKEN_URL) return Response.json(fake.tokenBody, { status: fake.tokenStatus });
+    if (url === `${GITHUB_API_URL}/user`) return Response.json(fake.user, { status: fake.userStatus });
+    if (url === `${GITHUB_API_URL}/user/emails`) return Response.json(fake.emails, { status: fake.emailsStatus });
+    return new Response("", { status: 404 });
+  };
+  beforeEach(() => {
+    fake = {
+      requests: [],
+      tokenStatus: 200,
+      tokenBody: { access_token: "gho_token", scope: "read:user" },
+      userStatus: 200,
+      user: { id: 7, login: "octo", name: "Octo Cat" },
+      emailsStatus: 200,
+      emails: [{ email: "me@example.test", primary: true, verified: true }],
+    };
+  });
+
+  const make = (issuer = ISSUER) =>
+    createGithubOidcApp({ issuer, cognitoDomain: COGNITO_DOMAIN, githubClientId: GH_CLIENT }, { keys: async () => keys, fetch: fakeFetch });
+
+  async function codeFor(a: ReturnType<typeof make>, base: string, q: Record<string, string> = { state: "s", nonce: "n" }) {
+    const params = new URLSearchParams({ client_id: GH_CLIENT, redirect_uri: COGNITO_REDIRECT, ...q });
+    const loc = new URL((await a.request(`${base}/authorize?${params}`)).headers.get("Location")!);
+    const res = await a.request(`${base}/callback?${new URLSearchParams({ state: loc.searchParams.get("state")!, code: "gh-code" })}`);
+    return new URL(res.headers.get("Location")!).searchParams.get("code")!;
+  }
+
+  function postToken(a: ReturnType<typeof make>, form: Record<string, string>, headers: Record<string, string> = {}) {
+    return a.request("/oidc/github/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", ...headers },
+      body: new URLSearchParams(form),
+    });
+  }
+
+  it("発見の文書の全体", async () => {
+    const conf = await (await make().request("/oidc/github/.well-known/openid-configuration")).json();
+    expect(conf).toEqual({
+      issuer: ISSUER,
+      authorization_endpoint: `${ISSUER}/authorize`,
+      token_endpoint: `${ISSUER}/token`,
+      userinfo_endpoint: `${ISSUER}/userinfo`,
+      jwks_uri: `${ISSUER}/jwks.json`,
+      response_types_supported: ["code"],
+      subject_types_supported: ["public"],
+      id_token_signing_alg_values_supported: ["RS256"],
+      scopes_supported: ["openid", "profile", "email"],
+      token_endpoint_auth_methods_supported: ["client_secret_post", "client_secret_basic"],
+    });
+  });
+
+  it("発行元の末尾の / は落とす", async () => {
+    const conf = (await (await make(`${ISSUER}/`).request("/oidc/github/.well-known/openid-configuration")).json()) as { issuer: string };
+    expect(conf.issuer).toBe(ISSUER);
+    const loc = new URL((await make(`${ISSUER}/`).request(`/oidc/github/authorize?${new URLSearchParams({ client_id: GH_CLIENT, redirect_uri: COGNITO_REDIRECT })}`)).headers.get("Location")!);
+    expect(loc.searchParams.get("redirect_uri")).toBe(`${ISSUER}/callback`);
+  });
+
+  it("発行元の path が無ければ根に置く", async () => {
+    const a = make("https://idp.example.test");
+    const conf = (await (await a.request("/.well-known/openid-configuration")).json()) as Record<string, string>;
+    expect(conf.issuer).toBe("https://idp.example.test");
+    expect(conf.jwks_uri).toBe("https://idp.example.test/jwks.json");
+    expect((await a.request("/oidc/github/jwks.json")).status).toBe(404);
+  });
+
+  it("jwks.json は公開鍵の JWK をそのまま 1 つ返す", async () => {
+    expect(await (await make().request("/oidc/github/jwks.json")).json()).toEqual({ keys: [keys.publicJwk] });
+  });
+
+  it("/authorize の包んだ state の中身と見出し", async () => {
+    const q = new URLSearchParams({ client_id: GH_CLIENT, redirect_uri: COGNITO_REDIRECT, state: "s", nonce: "n" });
+    const loc = new URL((await make().request(`/oidc/github/authorize?${q}`)).headers.get("Location")!);
+    expect([...loc.searchParams.keys()]).toEqual(["client_id", "redirect_uri", "scope", "state"]);
+    const st = loc.searchParams.get("state")!;
+    expect(decodeProtectedHeader(st)).toEqual({ alg: "RS256", kid: keys.publicJwk.kid, typ: "ndf-github-state+jwt" });
+    const p = decodeJwt(st);
+    expect(p).toMatchObject({ client_id: GH_CLIENT, redirect_uri: COGNITO_REDIRECT, state: "s", nonce: "n", iss: ISSUER, aud: ISSUER });
+    expect(p.exp! - p.iat!).toBe(600);
+  });
+
+  it("/authorize は client_id と redirect_uri の無い要求を 400 で断る", async () => {
+    const res = await make().request("/oidc/github/authorize");
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "invalid_request" });
+  });
+
+  it("/callback の包んだ code の中身と見出し", async () => {
+    const c = await codeFor(make(), "/oidc/github");
+    expect(decodeProtectedHeader(c)).toEqual({ alg: "RS256", kid: keys.publicJwk.kid, typ: "ndf-github-code+jwt" });
+    const p = decodeJwt(c);
+    expect(p).toMatchObject({ gh_code: "gh-code", client_id: GH_CLIENT, redirect_uri: COGNITO_REDIRECT, nonce: "n", iss: ISSUER, aud: ISSUER });
+    expect(p).not.toHaveProperty("state");
+    expect(p.exp! - p.iat!).toBe(300);
+  });
+
+  it("/callback は state が無ければ 400、code も error も無ければ access_denied、元の state が無ければ state を付けない", async () => {
+    const a = make();
+    const none = await a.request("/oidc/github/callback?code=gh-code");
+    expect(none.status).toBe(400);
+    expect(await none.json()).toEqual({ error: "invalid_request" });
+
+    const q = new URLSearchParams({ client_id: GH_CLIENT, redirect_uri: COGNITO_REDIRECT });
+    const loc = new URL((await a.request(`/oidc/github/authorize?${q}`)).headers.get("Location")!);
+    const res = await a.request(`/oidc/github/callback?${new URLSearchParams({ state: loc.searchParams.get("state")! })}`);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toBe(`${COGNITO_REDIRECT}?error=access_denied`);
+    const ok = await a.request(`/oidc/github/callback?${new URLSearchParams({ state: loc.searchParams.get("state")!, code: "x" })}`);
+    expect([...new URL(ok.headers.get("Location")!).searchParams.keys()]).toEqual(["code"]);
+  });
+
+  it("/token の応答・ID token・GitHub への要求の全体", async () => {
+    const a = make();
+    const c = await codeFor(a, "/oidc/github");
+    const res = await postToken(a, { grant_type: "authorization_code", code: c, redirect_uri: COGNITO_REDIRECT, client_id: GH_CLIENT, client_secret: GH_SECRET });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, string>;
+    expect(Object.keys(body)).toEqual(["access_token", "token_type", "id_token", "scope"]);
+    expect(body).toMatchObject({ access_token: "gho_token", token_type: "Bearer", scope: "read:user" });
+    expect(decodeProtectedHeader(body.id_token!)).toEqual({ alg: "RS256", kid: keys.publicJwk.kid, typ: "JWT" });
+    const p = decodeJwt(body.id_token!);
+    expect(Object.keys(p).sort()).toEqual(["aud", "exp", "iat", "iss", "nonce", "sub"]);
+    expect(p).toMatchObject({ iss: ISSUER, sub: "7", aud: GH_CLIENT, nonce: "n" });
+    expect(p.exp! - p.iat!).toBe(300);
+
+    expect(fake.requests.map((r) => r.url)).toEqual([GITHUB_TOKEN_URL, `${GITHUB_API_URL}/user`]);
+    const [tok, user] = fake.requests;
+    expect(tok!.method).toBe("POST");
+    expect(tok!.headers).toEqual({ accept: "application/json", "content-type": "application/x-www-form-urlencoded" });
+    expect(Object.fromEntries(new URLSearchParams(tok!.body))).toEqual({ client_id: GH_CLIENT, client_secret: GH_SECRET, code: "gh-code", redirect_uri: `${ISSUER}/callback` });
+    expect(user!.method).toBeUndefined();
+    expect(user!.headers).toEqual({ authorization: "Bearer gho_token", accept: "application/vnd.github+json", "user-agent": "ndf-factory" });
+  });
+
+  it("/token は scope が無ければ空文字を返す", async () => {
+    fake.tokenBody = { access_token: "gho_token" };
+    const a = make();
+    const c = await codeFor(a, "/oidc/github");
+    const body = (await (await postToken(a, { grant_type: "authorization_code", code: c, redirect_uri: COGNITO_REDIRECT, client_id: GH_CLIENT, client_secret: GH_SECRET })).json()) as Record<string, string>;
+    expect(body.scope).toBe("");
+  });
+
+  it("/token は Basic 認証のクライアントを受け、本文の値より優先する", async () => {
+    const a = make();
+    const c = await codeFor(a, "/oidc/github");
+    const basic = Buffer.from(`${encodeURIComponent(GH_CLIENT)}:${encodeURIComponent("s:e c")}`).toString("base64");
+    const res = await postToken(a, { grant_type: "authorization_code", code: c, redirect_uri: COGNITO_REDIRECT, client_id: "ignored", client_secret: "ignored" }, { Authorization: `Basic ${basic}` });
+    expect(res.status).toBe(200);
+    expect(new URLSearchParams(fake.requests[0]!.body).get("client_secret")).toBe("s:e c");
+  });
+
+  it.each([
+    ["grant_type の違う", { grant_type: "client_credentials" }],
+    ["client_id の無い", { client_id: "" }],
+    ["client_secret の無い", { client_secret: "" }],
+  ])("/token は %s 要求を invalid_request で断る", async (_name, over) => {
+    const a = make();
+    const c = await codeFor(a, "/oidc/github");
+    const res = await postToken(a, { grant_type: "authorization_code", code: c, redirect_uri: COGNITO_REDIRECT, client_id: GH_CLIENT, client_secret: GH_SECRET, ...over });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "invalid_request" });
+    expect(fake.requests).toHaveLength(0);
+  });
+
+  it("/token は code の無い要求を invalid_grant で断る", async () => {
+    const res = await postToken(make(), { grant_type: "authorization_code", redirect_uri: COGNITO_REDIRECT, client_id: GH_CLIENT, client_secret: GH_SECRET });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "invalid_grant" });
+  });
+
+  it.each([
+    ["token の応答が失敗", (f: Fake) => { f.tokenStatus = 500; }, 1],
+    ["token の応答に access_token が無い", (f: Fake) => { f.tokenBody = { error: "bad_verification_code" }; }, 1],
+    ["利用者の応答が失敗", (f: Fake) => { f.userStatus = 401; }, 2],
+    ["利用者の id が数でない", (f: Fake) => { f.user = { id: "7", login: "octo" }; }, 2],
+  ])("/token は GitHub の%sなら invalid_grant", async (_name, set, calls) => {
+    set(fake);
+    const a = make();
+    const c = await codeFor(a, "/oidc/github");
+    const res = await postToken(a, { grant_type: "authorization_code", code: c, redirect_uri: COGNITO_REDIRECT, client_id: GH_CLIENT, client_secret: GH_SECRET });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "invalid_grant" });
+    expect(fake.requests).toHaveLength(calls);
+  });
+
+  it("/userinfo は POST も受け、name を返し、メールの読み出しの失敗ではメールを出さない", async () => {
+    const a = make();
+    const post = await a.request("/oidc/github/userinfo", { method: "POST", headers: { Authorization: "Bearer t" } });
+    expect(await post.json()).toEqual({ sub: "7", name: "Octo Cat", preferred_username: "octo", email: "me@example.test", email_verified: true });
+    expect(fake.requests.map((r) => r.url)).toEqual([`${GITHUB_API_URL}/user`, `${GITHUB_API_URL}/user/emails`]);
+    expect(fake.requests[1]!.headers).toEqual({ authorization: "Bearer t", accept: "application/vnd.github+json", "user-agent": "ndf-factory" });
+    fake.emailsStatus = 500;
+    expect(await (await a.request("/oidc/github/userinfo", { headers: { Authorization: "Bearer t" } })).json()).toEqual({ sub: "7", name: "Octo Cat", preferred_username: "octo" });
+    fake.emailsStatus = 200;
+    fake.emails = [{ email: "a@example.test", primary: false, verified: true }, { email: "b@example.test", primary: true, verified: true }];
+    expect(await (await a.request("/oidc/github/userinfo", { headers: { Authorization: "Bearer t" } })).json()).toMatchObject({ email: "b@example.test" });
+  });
+
+  it.each([
+    ["Bearer でない見出し", { Authorization: "Basic abc" }, (_f: Fake) => {}, 0],
+    ["利用者の応答の失敗", { Authorization: "Bearer t" }, (f: Fake) => { f.userStatus = 401; }, 1],
+    ["数でない id", { Authorization: "Bearer t" }, (f: Fake) => { f.user = { login: "octo" }; }, 1],
+  ])("/userinfo は %s で 401 invalid_token", async (_name, headers, set, calls) => {
+    set(fake);
+    const res = await make().request("/oidc/github/userinfo", { headers });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "invalid_token" });
+    expect(fake.requests).toHaveLength(calls);
+  });
+
+  it("/userinfo は PUT を受けない", async () => {
+    expect((await make().request("/oidc/github/userinfo", { method: "PUT", headers: { Authorization: "Bearer t" } })).status).toBe(404);
   });
 });
