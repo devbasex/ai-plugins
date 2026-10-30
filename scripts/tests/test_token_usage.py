@@ -61,7 +61,7 @@ U = {
 U_COST = 1010
 
 
-def build(tmp: Path, version: str = "10.16.0") -> dict:
+def _build_claude(tmp: Path, version: str) -> Path:
     claude = tmp / "claude"
     proj = claude / "-work-x"
     _jsonl(
@@ -104,7 +104,10 @@ def build(tmp: Path, version: str = "10.16.0") -> dict:
     # 席が Agent で起動したサブエージェントの消費も席に入る
     seat_sub = dict(_assistant(31, "c2", U, model="claude-opus-5-5"), cwd=WT)
     _jsonl(claude / "-tmp-ndf-worktrees-acme--secret-repo-pr7" / "seat" / "subagents" / "agent-b1.jsonl", [seat_sub])
+    return claude
 
+
+def _build_codex(tmp: Path) -> Path:
     codex = tmp / "codex"
     _jsonl(
         codex / "2026/09/10/rollout-a.jsonl",
@@ -136,6 +139,10 @@ def build(tmp: Path, version: str = "10.16.0") -> dict:
             },
         ],
     )
+    return codex
+
+
+def _build_kiro(tmp: Path) -> Path:
     kiro = tmp / "kiro"
     kiro.mkdir()
     (kiro / "k.json").write_text(
@@ -159,6 +166,13 @@ def build(tmp: Path, version: str = "10.16.0") -> dict:
         ),
         encoding="utf-8",
     )
+    return kiro
+
+
+def build(tmp: Path, version: str = "10.16.0") -> dict:
+    claude = _build_claude(tmp, version)
+    codex = _build_codex(tmp)
+    kiro = _build_kiro(tmp)
     return {"claude": claude, "codex": codex, "kiro": kiro}
 
 
