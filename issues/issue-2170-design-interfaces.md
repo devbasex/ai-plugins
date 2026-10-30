@@ -10,12 +10,15 @@
 
 | 経路 | 入力 | 成功 | 失敗 |
 | --- | --- | --- | --- |
-| `GET /me` | — | 200 `{user_id, idp, personal_account_id, accounts: [{account_id, kind, name, plan, role, seat_type}]}`。初回は個人のアカウントを作る（E2） | 401。作成に失敗したら 503 `account_unavailable` |
-| `GET /accounts/{account_id}` | — | 200 `{account_id, kind, name, plan, role, seat_type, limits: {concurrent_sprint_runs, monthly_tokens}, seats}`。`seats` はチームだけで `[{user_id, idp, seat_type, added_at}]` | 401。席も持ち主でもない・存在しない → 403 `forbidden`（I18） |
+| `GET /me` | — | 200 `{user_id, idp, personal_account_id, accounts: [{account_id, kind, name, plan, role, seat_type, execution_mode}]}`。初回は個人のアカウントを作る（E2） | 401。作成に失敗したら 503 `account_unavailable` |
+| `GET /accounts/{account_id}` | — | 200 `{account_id, kind, name, plan, role, seat_type, execution_mode, limits: {concurrent_sprint_runs, monthly_tokens}, seats}`。`execution_mode` は `local` / `byok` / `managed`。`monthly_tokens` は `managed` のときだけ数で、ほかは `null`（掛けない、I23）。`seats` はチームだけで `[{user_id, idp, seat_type, added_at}]` | 401。席も持ち主でもない・存在しない → 403 `forbidden`（I18） |
 | `POST /teams` | `{name: 1〜64 字, seat_type}` | 201 アカウントの本文（上と同じ形） | 400 `invalid_request` |
 | `POST /accounts/{account_id}/seats` | `{user_id, seat_type}` | 201 席 | 403 `forbidden`（I17・I18）・409 `not_a_team`（I13）・422 `user_not_found`（I16）・409 `seat_exists`（I15） |
 | `PATCH /accounts/{account_id}/seats/{user_id}` | `{seat_type}` | 200 席 | 403・409 `not_a_team`・404 `seat_not_found` |
 | `DELETE /accounts/{account_id}/seats/{user_id}` | — | 204 | 403・409 `not_a_team`・409 `owner_seat_protected`（I14）・404 `seat_not_found` |
+| `PUT /accounts/{account_id}/execution-mode` | `{execution_mode: "local" \| "byok" \| "managed"}` | 200 アカウントの本文（`GET /accounts/{account_id}` と同じ形）。今と同じ値なら履歴の行を足さずに 200 | 400 `invalid_request`（知らない値）・403 `forbidden`（持ち主でない、I22。席も持たない者は I18 と同じ本文）・409 `managed_not_allowed_on_free`（I21。`message` は「Free のプランでは managed（サービスの Bedrock）を選べません」） |
+
+`409 managed_not_allowed_on_free` を返すのも、持ち主と確かめた後だけである。`byok` を選んでもキーの登録はこの経路で求めない（キーの保存は #2186）。
 
 `404 seat_not_found` を返すのは、要求した者がそのチームの持ち主と確かめた後だけである。持ち主でなければ、席の有無にかかわらず先に 403 を返す（I18）。
 
@@ -41,9 +44,9 @@
 | --- | --- | --- |
 | ログイン | `/login` | Google と GitHub の 2 つのボタン。`?error=` があれば「ログインできませんでした」を出す |
 | ログインの戻り | `/callback` | code を token に換え、`/account` へ移る。IdP の拒否・取り消し（`error` つきの戻り）は token を保存せず `/login?error=…` へ移る |
-| 自分のアカウント | `/account` | 利用者の ID（写すボタン）・IdP・個人のプランと 2 つの上限・席を持つチームの一覧・チームを作る・ログアウト |
+| 自分のアカウント | `/account` | 利用者の ID（写すボタン）・IdP・個人のプランと実行の形態と 2 つの上限（`managed` でなければ月の token は「掛けない」）・形態を変える操作・席を持つチームの一覧・チームを作る・ログアウト |
 | チームを作る | `/teams/new` | 名前と自分の席の種類を入れて作る |
-| チームのアカウント | `/accounts/:accountId` | プラン・自分の席の種類と 2 つの上限・席の一覧。持ち主には席の追加・種類の変更・削除の操作が出る |
+| チームのアカウント | `/accounts/:accountId` | プラン・実行の形態・自分の席の種類と 2 つの上限・席の一覧。持ち主には席の追加・種類の変更・削除と形態を変える操作が出る |
 
 ```mermaid
 graph LR
@@ -64,21 +67,23 @@ graph LR
 | チームを作る | 自分の席の種類 | standard / premium | 必須 | — | 既定は standard |
 | チームのアカウント | 足す利用者の ID | 文字列（UUID の形） | 必須 | 36 字 | 「利用者の ID の形ではありません」。API の 422 は「その利用者はまだログインしていません」 |
 | チームのアカウント | 席の種類 | standard / premium | 必須 | — | — |
+| 自分のアカウント・チームのアカウント | 実行の形態 | local / byok / managed | 必須 | — | Free では managed を選べない。API の 409 は `message` を出す |
 
 | 状態 | 出すもの |
 | --- | --- |
 | 読み込み中 | 「読み込み中」 |
 | 未ログイン・API の 401 | token を消して `/login` へ移る（受け入れ条件 3） |
 | 403 | 「このアカウントを見る権限がありません」。アカウントの有無は出さない |
-| 席の操作の 409・422 | API の `message` を操作の下に出す。席の一覧は読み直さない |
+| 席の操作と形態の変更の 409・422 | API の `message` を操作の下に出す。席の一覧と形態は読み直さない |
 | 5xx | 「時間をおいてやり直してください」 |
 
 | 画面の要素 | 持ち主 | 席を持つ利用者 |
 | --- | --- | --- |
 | 席の一覧 | 見える | 見える |
 | 席の追加・種類の変更・削除 | 出す | 出さない（隠す） |
+| 実行の形態 | 見える・変える操作を出す | 見える（変える操作は隠す） |
 
-画面の判定は表示のためだけで、認可は API が毎回行う（I17・I18）。
+画面の判定は表示のためだけで、認可は API が毎回行う（I17・I18・I22）。
 
 ## 処理の流れ
 
@@ -161,4 +166,4 @@ sequenceDiagram
     end
 ```
 
-席の種類の変更と削除も同じ順で、書き込みの条件を「席があること」（削除はさらに「持ち主の席でないこと」を先に照らす）に替える。プランの変更（`setPlan`）は、アカウントの行の更新を「種類とプランの組が I13 を満たすこと」の条件で行い、履歴と同じトランザクションで書く。
+席の種類の変更と削除も同じ順で、書き込みの条件を「席があること」（削除はさらに「持ち主の席でないこと」を先に照らす）に替える。プランの変更（`setPlan`）は、アカウントの行の更新を「種類とプランの組が I13 を満たすこと」の条件で行い、履歴と同じトランザクションで書く。`free` へ下げるとき（#2174 の支払いの失敗など）に形態が `managed` なら、同じ更新で `execution_mode` を `local` にし、`plan.changed` と `execution_mode.changed` の 2 つの履歴の行を同じトランザクションで足す（I21）。実行の形態の変更（`PUT /accounts/{account_id}/execution-mode`）は持ち主を確かめた後、アカウントの行の更新を「`managed` を置くならプランが `free` でないこと」の条件で行い、条件で失敗すれば 409 を返す。

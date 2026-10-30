@@ -4368,6 +4368,12 @@
       "context": "ndf-factory",
       "meaning": "GitHub の OAuth を Cognito が受け取れる OIDC の形へ変える、`factory/api/` のプログラム",
       "pending_source": "issues/issue-2170-design.md"
+    },
+    {
+      "term": "実行の形態",
+      "context": "ndf-factory",
+      "meaning": "アカウントのランナーが Claude をどう呼ぶか。`local`（手元のランナー）・`byok`（キーの持ち込み）・`managed`（サービスの Bedrock）の 3 つで、アカウントごとに 1 つ持つ。Free は `managed` を選べず、月の token の上限は `managed` だけに掛かる",
+      "pending_source": "issues/issue-2170-requirements.md"
     }
   ]
 }

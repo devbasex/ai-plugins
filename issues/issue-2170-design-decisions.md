@@ -107,3 +107,13 @@ Hono は Lambda の HTTP API の handler をそのまま出せ、テストでは
 `factory/api/` の中に置く形は、#2171 の後で場所を移すことになる。
 
 根拠: Value 7（MVV 版 3）
+
+### 決定 14: 規約が認める形だけで Claude を呼べるよう、実行の形態をアカウントの値にし、既定を `local` にし、Free で `managed` を断る
+
+claude.ai のログインをサービスが預かる形は、Anthropic の Agent SDK の文書が事前の承認なしに認めていない。そこで 2026-10-30 の利用者の決定で、ランナーが Claude を呼ぶ方法をアカウントごとに `local`（手元のランナー）・`byok`（キーの持ち込み）・`managed`（サービスの Bedrock）の 3 つから選ぶ形にした（PR #2190 https://github.com/devbasex/ai-plugins/pull/2190 の確定仕様の「実行の形態」）。この課題は形態の値と選べる条件だけを持ち、アカウントの行の `execution_mode` に置き、`resolveAccount` の文脈と `GET /accounts/{account_id}` で返す。#2186・#2189・#2174 は同じ文脈から形態を読み、形態ごとの実行と課金を受け持つ。
+
+新しいアカウントの形態は `local` にする（I24）。`local` はサービスが Claude の認証情報も token の費用も持たず、Free のまま何も足さずに使える唯一の形である。`byok` は持ち込むキーの登録（#2186）が先に要り、`managed` は Free では選べない。プランが `free` のアカウントは `managed` を持たない（I21）。Free の月の token の上限（ゲート 1 で承認した 2,000,000）はスプリントを 1 本も通せない値で、`managed` を Free に置いても使えないためである。形態を `managed` へ変える要求は 409 `managed_not_allowed_on_free` で断り、`setPlan` で `free` へ下げるとき（#2174 の支払いの失敗など）に `managed` なら、同じトランザクションで `local` へ変えて履歴の行を足す。月の token の上限は `managed` だけで照らし（I23）、Free の行は月の token の値を持たない。
+
+既定を `managed` にする形は、Free の新しいアカウントが I21 を初めから破る。形態をアカウントでなくリポジトリの登録かスプリントの実行ごとに持つ形は、確定仕様が値の持ち主をアカウントの集約に決めており、同じアカウントの中で課金の扱いが分かれる。Free で `managed` を許して月の token を小さく掛ける形は、利用者の決定（Free は ① と ② だけ）から外れる。
+
+根拠: C2 / Value 5 / Value 7（MVV 版 3）
