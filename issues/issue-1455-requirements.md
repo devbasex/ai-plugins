@@ -76,6 +76,7 @@
 - `deps.require` の起動し直しの手順・終了コード 69・uv の入れ方の変更
 - hook の経路（`deps.require` を呼ばない。I13・決定 20）の依存の扱い
 - `project-mvv.py` の `check` / `collect` / `approve` / `show` / `context` / `signals` / `schema` の振る舞いの変更
+- クラス図（型・クラスを追加も変更もしない。変えるのはモジュールの関数と構造チェックの規則だけ）
 
 ## ドメインイベント
 

@@ -299,6 +299,9 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 補正 | — | conductor が雛形の書いたプランへ手で足した指示や値。プランを書き直す側は消さない | — | — | `docs/specifications/ndf-supervise-impl-prompt-format-and-transient-failures.md` |
 | 整形 | — | 規則を変えずにコードの形だけを揃えるコマンド。何を打つかはプロジェクトの宣言が持つ | — | — | `docs/specifications/ndf-supervise-impl-prompt-format-and-transient-failures.md` |
 | 一時的な失敗 | — | GitHub や git の呼び出しが 0 以外で終わり、打ち直せば通りうる失敗（5xx・接続の切断）。打ち直しても残れば、読めなかったとして止まる（#1941） | — | — | `docs/specifications/ndf-supervise-impl-prompt-format-and-transient-failures.md` |
+| 依存グループ | — | lib/deps.py の GROUPS と pyproject.toml の extra に並ぶ、外部パッケージの用途ごとのまとまり（procs・locks など）。deps.require へ名前で渡す | — | — | — |
+| 未宣言のグループ | — | モジュールから import をたどって届く外部パッケージの依存グループのうち、そのモジュールの中で覆う deps.require が無いもの。そのモジュールを読む側が引き受ける | — | — | — |
+| 任意の依存 | — | 無ければ代わりの手段へ落ちる import。except ImportError / ModuleNotFoundError で受けるか、同じ関数の中で find_spec / deps.importable で確かめてから読む | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 

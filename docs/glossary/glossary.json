@@ -4392,6 +4392,27 @@
       "context": "ndf-factory",
       "meaning": "アカウントのランナーが Claude をどう呼ぶか。`local`（手元のランナー）・`byok`（キーの持ち込み）・`managed`（サービスの Bedrock）の 3 つで、アカウントごとに 1 つ持つ。Free は `managed` を選べず、月の token の上限は `managed` だけに掛かる",
       "source": "docs/specifications/ndf-factory-accounts-and-plans.md"
+    },
+    {
+      "term": "依存グループ",
+      "context": "ndf-workflow",
+      "meaning": "lib/deps.py の GROUPS と pyproject.toml の extra に並ぶ、外部パッケージの用途ごとのまとまり（procs・locks など）。deps.require へ名前で渡す",
+      "source": "",
+      "pending_source": "issues/issue-1455-design.md"
+    },
+    {
+      "term": "未宣言のグループ",
+      "context": "ndf-workflow",
+      "meaning": "モジュールから import をたどって届く外部パッケージの依存グループのうち、そのモジュールの中で覆う deps.require が無いもの。そのモジュールを読む側が引き受ける",
+      "source": "",
+      "pending_source": "issues/issue-1455-design.md"
+    },
+    {
+      "term": "任意の依存",
+      "context": "ndf-workflow",
+      "meaning": "無ければ代わりの手段へ落ちる import。except ImportError / ModuleNotFoundError で受けるか、同じ関数の中で find_spec / deps.importable で確かめてから読む",
+      "source": "",
+      "pending_source": "issues/issue-1455-design.md"
     }
   ]
 }
