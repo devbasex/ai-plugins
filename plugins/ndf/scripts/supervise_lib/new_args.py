@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import re
 
+from supervise_lib.absorb import absorb_arg
 from supervise_lib.decl import NEEDS
 from supervise_lib.templates import fix_worktree
 
@@ -289,6 +290,17 @@ NEW_ARGS = [
             }
         },
         "sprint close release",
+    ),
+    (
+        "--absorb",
+        {
+            "type": absorb_arg,
+            "nargs": "+",
+            "default": [],
+            "metavar": "ISSUE:HOST",
+            "help": "取り込んだ課題と取り込み先（<課題>:<取り込み先>）。取り込み先の設計と実装のプランへ含め、取り込んだ課題の設計のプランは書かない",
+        },
+        "sprint",
     ),
     ("--prod", {"help": "本番の版（例 10.18.0。release.form の雛形で配るときだけ要る）"}, "close"),
     (

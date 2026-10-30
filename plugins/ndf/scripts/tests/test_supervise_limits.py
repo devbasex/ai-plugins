@@ -266,7 +266,7 @@ def test_1909_1_the_route_of_1833_reaches_merge(plans, tmp_path):
         "impl", "base-sync", "sync", "test-limited", *MATCH, ("test-all", 1), ("judge", "fix"), "fix", "sync",
         "test-limited", *MATCH, "test-all", ("doc-lint", 1), "fix-doc", "doc-lint", "ready", "merge-gate", "merge",
     )  # fmt: skip
-    ran, text, _ = drive(tmp_path, plans["sprint/5-impl-16"], scripted(route))
+    ran, text, _ = drive(tmp_path, plans["sprint/6-impl-16"], scripted(route))
     assert ran == [r for r, _ in route] and "結果: 完了" in text
 
 
@@ -276,7 +276,7 @@ def test_1909_2_the_route_of_1702_reaches_merge(plans, tmp_path):
         "impl", "base-sync", "sync", *fix, *fix, *fix, "test-limited", *MATCH, "test-all", ("doc-lint", 1), "fix-doc", "doc-lint",
         "ready", "merge-gate", "merge",
     )  # fmt: skip
-    ran, text, _ = drive(tmp_path, plans["sprint/5-impl-16"], scripted(route))
+    ran, text, _ = drive(tmp_path, plans["sprint/6-impl-16"], scripted(route))
     assert len(ran) == 27 and ran == [r for r, _ in route] and "結果: 完了" in text
 
 
@@ -285,7 +285,7 @@ def test_1909_3_the_route_of_m1910_reaches_record(plans, tmp_path):
         "collect", "pr", "assess", "refactor", "review", "base-sync", ("test-all", 1), ("judge", "fix"), "fix", "test-all",
         "ready", "merge-gate", "merge", "record",
     )  # fmt: skip
-    ran, text, _ = drive(tmp_path, plans["sprint/6-check"], scripted(route))
+    ran, text, _ = drive(tmp_path, plans["sprint/7-check"], scripted(route))
     assert ran == [r for r, _ in route] and "結果: 完了" in text
 
 

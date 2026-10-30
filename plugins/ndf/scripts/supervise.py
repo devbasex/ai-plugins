@@ -46,6 +46,8 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
         # スプリントの終わり: 最終の検査 → 開発版 → 本番（最終の検査で変更があったときだけ）→ 確定仕様化・閉じる・振り返り・棚卸し
     supervise.py design-results --manifest <sprint.json> --base B --root <根> --design N...
         # 設計の結果のステージ: マージした設計 PR の「設計の結果」の表を読み、実装のステージのプランを書き換える
+    supervise.py design-approved --pr N [--state <状態>]
+        # 設計 PR のマージのプランの入口: 承認ラベルか承認ゲート 1 の利用者の承認の記録が無ければ 10
     supervise.py design-glossary --mode M --root . --out <候補の語.md>
         # 設計の計画の入口: 用語集が揃えば何もしない。無ければ init と candidates を打ってコミットし、候補の語を書く
     supervise.py queue <plan.json>... [--max 3] [--then <plan.json>...]... [--done <パス>]
@@ -87,7 +89,7 @@ import deps  # noqa: E402
 deps.require(
     "md", "mdtable", "schema", "procs", "locks", "durable"
 )  # 課題の本文（state → sprint_mvv → md）・表（pr・commands）・宣言の形（decl）・claude -p の打ち切り（claude）・アカウントの排他（claude_accounts）・耐久の記録（flow）
-from supervise_lib import commands, design_stage, sprint, sprint_routes, new_args, queue, queue_resume, templates  # noqa: E402
+from supervise_lib import commands, design_merge, design_stage, sprint, sprint_routes, new_args, queue, queue_resume, templates  # noqa: E402
 from supervise_lib import pr as pr_step  # noqa: E402
 from supervise_lib.decl import DeclError, apply_decls  # noqa: E402
 from supervise_lib.plan import EXAMPLE  # noqa: E402
@@ -194,6 +196,13 @@ def main() -> int:
     d.add_argument("--base", required=True, help="設計 PR をマージしたベースブランチ")
     d.add_argument("--root", default=".", help="リポジトリの根")
     d.add_argument("--design", type=int, nargs="+", required=True, help="設計の課題")
+    da = sub.add_parser(
+        "design-approved",
+        help="設計 PR のマージのプランの入口: 承認の証跡（承認ラベルか承認ゲート 1 の利用者の承認の記録）を確かめる",
+        epilog="終了コード: 証跡あり = 0（記録だけならラベルを付ける）/ 証跡なし・PR が 0 = 10 / gh が読めない = 2",
+    )
+    da.add_argument("--pr", type=int, required=True, help="設計 Pull Request")
+    da.add_argument("--state", help="スプリントの状態（sprint-state.py のファイル）")
     t = sub.add_parser("note", help="報告から引継ぎ文書の表へ 1 行を足す")
     t.add_argument("doc")
     t.add_argument("--report", required=True)
@@ -222,6 +231,8 @@ def main() -> int:
         new_args.fill_new_defaults(a)
     if a.cmd == "design-glossary":
         emit(*commands.cmd_design_glossary(a.root, a.mode, a.out))
+    if a.cmd == "design-approved":
+        emit(*design_merge.cmd_design_approved(a.pr, a.state))
     if a.cmd == "design-results":
         emit(*design_stage.cmd_design_results(a))
     if a.cmd == "example":

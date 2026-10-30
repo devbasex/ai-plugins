@@ -99,7 +99,9 @@ def lack_next_text(lacks: list[Lack], design_command: str, same_command: str) ->
 def criteria_refusal(a, command: Callable[..., str]) -> dict | None:
     """--design に無い課題の本文が受け入れ条件を持たない・読めないとき、計画を書かずに止める結果。
     command(design=[番号]) は今の引数を写して --design へ番号を足した起動の形、command() は今の起動の形。"""
-    lacks = lacking(list(a.issue), list(getattr(a, "design", None) or []), cwd=str(Path(a.worktree).resolve()))
+    # 取り込んだ課題（--absorb）は取り込み先の設計と実装が受け入れ内容を持つため確かめない（#1426 の AC15）
+    skip = [*(getattr(a, "design", None) or []), *(int(v.split(":")[0]) for v in getattr(a, "absorb", None) or [])]
+    lacks = lacking(list(a.issue), skip, cwd=str(Path(a.worktree).resolve()))
     if not lacks:
         return None
     nums = " ".join(f"#{x.issue}" for x in lacks)

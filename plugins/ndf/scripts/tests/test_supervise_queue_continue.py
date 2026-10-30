@@ -50,7 +50,8 @@ def test_resume_continues_from_the_stopped_step_and_runs_the_next_stage(tmp_path
     assert p.returncode == 0, p.stderr
     assert results(res) == {"a": "完了", "b": "完了", "c": "完了"}
     assert [i.get("resumed_from") for i in res["items"]] == ["a3", None, None]
-    assert q.visits() == ["a1", "a2", "a3", "b1", "a3", "a3", "c1"]  # 頭から流し直さない・b を流し直さない
+    visits = q.visits()  # a と b は同じステージで並んで流れる
+    assert sorted(visits) == ["a1", "a2", "a3", "a3", "a3", "b1", "c1"] and visits[-1] == "c1"  # 頭から流し直さない・b を流し直さない
     assert not list(t.glob("*-r2.json"))  # プランのファイルを写さない
 
 
