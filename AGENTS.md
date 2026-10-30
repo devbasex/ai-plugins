@@ -121,11 +121,14 @@ ai-plugins/
 │   └── mcp/
 │       └── mcp-*/               # MCPプラグイン10個（3ランタイム共通）
 ├── docs/                         # リポジトリ知識
+├── factory/                      # Web サービス（Neural Development Factory）。プラグインと分け、自分の LICENSE を持つ
 ├── AGENTS.md                     # 共通エントリポイント
 ├── CLAUDE.md                     # Claude Code固有設定
 ├── KIRO.md                       # Kiro CLI固有設定
 └── README.md                     # プロジェクト説明
 ```
+
+`plugins/` と `.claude-plugin/marketplace.json` は `factory/` を参照しない。インフラの定義（CDK など）と秘密は private リポジトリに置き、このリポジトリに入れない。どちらも `python3 scripts/check-service-boundary.py`（CI のジョブ `service-boundary-check`）が落とす。
 
 ## ドキュメント
 
