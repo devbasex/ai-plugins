@@ -8,7 +8,7 @@ git が追跡するファイルだけを見る。手元の追跡していない�
 - 配布物の木の重なり: `marketplace.json` の `source` が根・サービスのディレクトリ・その祖先か子孫を指す
 - インフラの定義: CDK・Terraform・CloudFormation の定義。Markdown の本文の語は見ない
 - 秘密らしい値: AWS のアクセスキーの形・PEM の秘密鍵の始まりの行。許可の一覧のファイルと値の sha256 の組に
-  一致するものを除く
+  一致するものを除く。PEM の値は始まりの行から終わりの行（無ければファイルの末尾）までの塊全体で照らす
 - .env の実ファイル: 名前が `.env` か `.env.<何か>`（`.env.example` を除く）
 - 値を持つ .env.example: `factory/` の下の `.env.example` で、`=` の後が空でない行
 - 古い許可: 許可の行が今の木のどこにも当たらない
@@ -64,10 +64,9 @@ FIXES = {
 }
 
 SERVICE_REF = re.compile(r"(?<![\w.-])" + SERVICE_DIR + r"/")
-SECRET_PATTERNS = (
-    re.compile(r"(?<![0-9A-Z])(?:AKIA|ASIA)[0-9A-Z]{16}(?![0-9A-Z])"),
-    re.compile("-----" + r"BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY" + "-----"),
-)
+ACCESS_KEY_PATTERN = re.compile(r"(?<![0-9A-Z])(?:AKIA|ASIA)[0-9A-Z]{16}(?![0-9A-Z])")
+PEM_BEGIN = re.compile("-----" + r"BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY" + "-----")
+PEM_END = re.compile("-----" + r"END (?:[A-Z0-9]+ )*PRIVATE KEY" + "-----")
 INFRA_NAMES = {"cdk.json", "cdk.context.json", ".terraform.lock.hcl"}
 INFRA_SUFFIXES = (".tf", ".tf.json", ".tfvars")
 DEPENDENCY_FILE = re.compile(r"^(package\.json|pyproject\.toml|requirements[^/]*\.txt)$")
@@ -210,13 +209,30 @@ def check_infra(rel: str, lines: list[str]) -> list[Finding]:
     return []
 
 
+def pem_block(lines: list[str], start: int, line: str, begin: re.Match) -> str:
+    """始まりの行の位置から終わりの行（無ければファイルの末尾）までの鍵の塊。
+
+    許可は塊全体の sha256 で照らす。始まりの行だけで照らすと、同じパスの鍵を差し替えても許可されるため。
+    """
+    end = PEM_END.search(line, begin.end())
+    if end:
+        return line[begin.start() : end.end()]
+    block = [line[begin.start() :]]
+    for nxt in lines[start + 1 :]:
+        end = PEM_END.search(nxt)
+        if end:
+            block.append(nxt[: end.end()])
+            break
+        block.append(nxt)
+    return "\n".join(block)
+
+
 def check_secrets(rel: str, lines: list[str], allow: Allowlist) -> list[Finding]:
     out = []
-    for n, line in enumerate(lines, 1):
-        for pattern in SECRET_PATTERNS:
-            for m in pattern.finditer(line):
-                if not allow.allows(rel, m.group(0)):
-                    out.append(Finding(SECRET, rel, n))
+    for i, line in enumerate(lines):
+        values = [m.group(0) for m in ACCESS_KEY_PATTERN.finditer(line)]
+        values += [pem_block(lines, i, line, m) for m in PEM_BEGIN.finditer(line)]
+        out += [Finding(SECRET, rel, i + 1) for v in values if not allow.allows(rel, v)]
     return out
 
 

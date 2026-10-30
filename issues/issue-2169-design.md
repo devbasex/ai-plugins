@@ -305,7 +305,7 @@ erDiagram
 | サービスへの参照 | `plugins/` の下と `.claude-plugin/marketplace.json` で、パスの区切りとして現れる `factory/`、または行き先がサービスのディレクトリのシンボリックリンク | 参照を外す。プラグインからサービスを使わない |
 | 配布物の木の重なり | `source` が根・サービスのディレクトリ・その祖先か子孫を指す | `source` を `plugins/` の下へ戻す |
 | インフラの定義 | `cdk.json`・`cdk.context.json`、依存の宣言（`package.json`・`pyproject.toml`・`requirements*.txt`）の `aws-cdk-lib`、`*.tf`・`*.tf.json`・`*.tfvars`・`.terraform.lock.hcl`、`.json`・`.yaml`・`.yml`・`.template` の CloudFormation の宣言（`AWSTemplateFormatVersion` か `AWS::` の資源の型）。Markdown の本文の語は見ない（決定 12） | private リポジトリへ移す |
-| 秘密らしい値 | AWS のアクセスキーの形（`AKIA` か `ASIA` に英大文字と数字 16 字）、PEM の秘密鍵の始まりの行。許可の行と一致するものを除く | 値を消して環境変数で受ける。偽の値なら許可へ足す |
+| 秘密らしい値 | AWS のアクセスキーの形（`AKIA` か `ASIA` に英大文字と数字 16 字）、PEM の秘密鍵の始まりの行。許可の行と一致するものを除く（PEM は始まりの行から終わりの行までの塊全体の sha256 で照らす） | 値を消して環境変数で受ける。偽の値なら許可へ足す |
 | .env の実ファイル | 名前が `.env` か `.env.<何か>` のファイル（`.env.example` を除く） | ファイルを消し、`.gitignore` に足す |
 | 値を持つ .env.example | `factory/` の下の `.env.example` で、`=` の後が空でない行（注釈の行を除く） | 値を消し、名前だけにする |
 | 古い許可 | 許可の行が今の木のどこにも当たらない | 許可の一覧から外す |

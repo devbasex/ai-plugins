@@ -209,6 +209,24 @@ def test_allowed_value_in_other_file_fails(repo, capsys):
     assert repo.run(capsys) == (1, ["秘密らしい値"])
 
 
+PEM_END = "-----" + "END RSA PRIVATE KEY" + "-----"
+
+
+def test_allowed_pem_block_passes_but_replaced_key_fails(repo, capsys):
+    fake = f"{PEM_LINE}\nFAKEFAKE\n{PEM_END}"
+    repo.write("src/key.pem", fake + "\n")
+    repo.allow([{"path": "src/key.pem", "sha256": sha(fake), "reason": "偽の鍵"}])
+    assert repo.run(capsys) == (0, [])
+    repo.write("src/key.pem", f"{PEM_LINE}\nREALREAL\n{PEM_END}\n")
+    assert repo.run(capsys) == (1, ["秘密らしい値", "古い許可"])
+
+
+def test_allowing_only_pem_begin_line_fails(repo, capsys):
+    repo.write("src/key.pem", f"{PEM_LINE}\nMIIE\n{PEM_END}\n")
+    repo.allow([{"path": "src/key.pem", "sha256": sha(PEM_LINE), "reason": "偽の鍵"}])
+    assert repo.run(capsys)[0] == 1
+
+
 def test_untracked_env_file_is_ignored(repo, capsys):
     (repo.root / "factory" / ".env").write_text("A=1\n", encoding="utf-8")
     assert repo.run(capsys) == (0, [])
