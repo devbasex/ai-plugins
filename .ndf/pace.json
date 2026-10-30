@@ -21,6 +21,11 @@
                "plugins/ndf/scripts/merged-steps.py", "scripts/build-runtime-plugins.sh"]}
   ],
   "boundary_paths": ["plugins/ndf/scripts/lib/auth.py", "plugins/ndf/scripts/lib/git-credential.sh",
-                     "plugins/ndf/skills/google-workspace/**", ".github/workflows/**", "**/.env*"],
-  "triggers": {"score": 10, "common_weight": 2, "lines": 3000, "escapes": 1, "hours": 24}
+                     "plugins/ndf/skills/google-workspace/**", ".github/workflows/**", "**/.env*",
+                     "factory/**/auth/**", "factory/**/*auth*", "factory/**/*token*"],
+  "triggers": {"score": 10, "common_weight": 2, "lines": 3000, "escapes": 1, "hours": 24},
+  "loop": {
+    "enabled": true,
+    "budget": {"laps": 8, "usd": 200, "hours": 72}
+  }
 }
