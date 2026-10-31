@@ -284,8 +284,7 @@
       "term": "キューの続き",
       "context": "ndf-workflow",
       "meaning": "`supervise.py queue --resume <done>`。前の起動のステージの並びを読み、完了していないプランを終えたステップから続け、後続のステージも流す",
-      "source": "",
-      "pending_source": "issues/issue-1426-design.md"
+      "source": "docs/specifications/ndf-supervise-queue-resume-and-gate-evidence.md"
     },
     {
       "term": "リリース差分",
@@ -3139,15 +3138,13 @@
       "term": "取り込んだ課題",
       "context": "ndf-workflow",
       "meaning": "受け入れ内容を別の課題の実装へ含めると決めた課題。設計の結果の表か `new sprint --absorb` で決める。実装のプランは `実行の条件` で飛ばして実行しない。`--absorb` で決めたときは自分の設計のプランを持たない",
-      "source": "",
-      "pending_source": "issues/issue-1426-design.md"
+      "source": "docs/specifications/ndf-supervise-queue-resume-and-gate-evidence.md"
     },
     {
       "term": "承認の証跡",
       "context": "ndf-workflow",
       "meaning": "承認ゲートで利用者が承認したことを示す、プランの外で残った記録。スプリント状態ファイルの承認ゲートの記録（`--by user --outcome approved`）・承認ラベル・承認資料の承認の記録のどれか。プランのステップは承認の証跡があるときだけ、承認を前提にした操作へ進む",
-      "source": "",
-      "pending_source": "issues/issue-1426-design.md"
+      "source": "docs/specifications/ndf-supervise-queue-resume-and-gate-evidence.md"
     },
     {
       "term": "手動確認の行",
@@ -4411,65 +4408,58 @@
       "term": "依存グループ",
       "context": "ndf-workflow",
       "meaning": "lib/deps.py の GROUPS と pyproject.toml の extra に並ぶ、外部パッケージの用途ごとのまとまり（procs・locks など）。deps.require へ名前で渡す",
-      "source": "",
-      "pending_source": "issues/issue-1455-design.md"
+      "source": "docs/specifications/ndf-deps-require-groups-check.md"
     },
     {
       "term": "未宣言のグループ",
       "context": "ndf-workflow",
       "meaning": "モジュールから import をたどって届く外部パッケージの依存グループのうち、そのモジュールの中で覆う deps.require が無いもの。そのモジュールを読む側が引き受ける",
-      "source": "",
-      "pending_source": "issues/issue-1455-design.md"
+      "source": "docs/specifications/ndf-deps-require-groups-check.md"
     },
     {
       "term": "任意の依存",
       "context": "ndf-workflow",
       "meaning": "無ければ代わりの手段へ落ちる import。except ImportError / ModuleNotFoundError で受けるか、同じ関数の中で find_spec / deps.importable で確かめ、確かめが成り立ったときだけ通る枝で読む",
-      "source": "",
-      "pending_source": "issues/issue-1455-design.md"
+      "source": "docs/specifications/ndf-deps-require-groups-check.md"
     },
     {
       "term": "作業の報告",
       "context": "ndf-workflow",
       "meaning": "worker が応答の最後に書く「## 作業の報告」の節。「結果:」は 完了 / 判断が要る / できなかった のどれかで、supervise はこれでステップの成否を決める",
       "code": "work_report",
-      "pending_source": "issues/issue-1698-requirements.md"
+      "source": "docs/specifications/ndf-supervise-work-step-web-tools-and-report-stop.md"
     },
     {
       "term": "起こし直し",
       "context": "ndf-workflow",
       "meaning": "supervise の full のステップで、作業の報告が無いまま応答が終わったとき、同じ会話（--resume）へ続けるよう送ること。3 回まで",
       "code": "resume_prompt",
-      "pending_source": "issues/issue-1698-requirements.md"
+      "source": "docs/specifications/ndf-supervise-work-step-web-tools-and-report-stop.md"
     },
     {
       "term": "所要の記録",
       "context": "ndf-workflow",
       "meaning": "`.ndf/project.json` の `test_duration.measured` にある全体テストの所要（秒。w）。出所は ndf-record → ci-junit → ci-steps の順に採る。宣言の解析が書き、プランの作成と test-run.py が読む",
-      "source": "",
-      "pending_source": "issues/issue-1631-requirements.md"
+      "source": "docs/specifications/ndf-supervise-test-limits-from-whole-runs.md"
     },
     {
       "term": "全体テストの実測",
       "context": "ndf-workflow",
       "meaning": "同じリポジトリで先に走った全体テストの壁時計の秒。所要の記録とは別に残し、後のプランと test-run.py が予算なしのテストの上限を決めるときに読む（#1631）",
-      "source": "",
-      "pending_source": "issues/issue-1631-requirements.md"
+      "source": "docs/specifications/ndf-supervise-test-limits-from-whole-runs.md"
     },
     {
       "term": "テストの上限",
       "context": "ndf-workflow",
       "meaning": "test_strategy.limits が返す init_test_timeout・test_timeout・whole_timeout（秒）。ステップの timeout はこれに with_margin の余裕を足した値で、テストの上限には余裕を足さない",
-      "source": "",
-      "pending_source": "issues/issue-1631-requirements.md",
+      "source": "docs/specifications/ndf-supervise-test-limits-from-whole-runs.md",
       "code": "limits"
     },
     {
       "term": "全体テストの鍵",
       "context": "ndf-workflow",
       "meaning": "戦略の全体テストのコマンドの集合から作る識別子（whole_key）。全体テストの実測をコマンドごとに分け、コマンドの違う実測を混ぜない（#1631）",
-      "source": "",
-      "pending_source": "issues/issue-1631-design.md",
+      "source": "docs/specifications/ndf-supervise-test-limits-from-whole-runs.md",
       "code": "whole_key"
     },
     {

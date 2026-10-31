@@ -101,5 +101,9 @@
 | [ndf-factory-service-boundary.md](ndf-factory-service-boundary.md) | Neural Development Factory: サービスのディレクトリ（factory/）と境界の検査（check-service-boundary.py）の入出力・常に成り立つ条件と、子課題 #2170〜#2174 が実装するサービス全体の契約（構成要素・配置・進捗の正本・実行ジョブの指示・進捗の事象と受け口の認証と応答）。#2169 |
 | [ndf-factory-accounts-and-plans.md](ndf-factory-accounts-and-plans.md) | Neural Development Factory: Cognito の認証（Google・GitHub と GitHub の仲立ち）・アカウントの解決・アカウントと席とプランと実行の形態の API と表・使える量の表と判定・factory/ のパッケージの管理と CI（factory-check）。#2170 |
 | [ndf-factory-contracts-and-progress.md](ndf-factory-contracts-and-progress.md) | Neural Development Factory: 契約の定義（JSON Schema・生成した型・ingest.yaml）・進捗の受け口の 3 つの経路と出所ごとの認証と照合・冪等な追記と事象の表・GitHub の Webhook の翻訳・実行ジョブの token（EdDSA）の発行と検証・appendControlEvent。#2171 |
+| [ndf-supervise-work-step-web-tools-and-report-stop.md](ndf-supervise-work-step-web-tools-and-report-stop.md) | supervise の work のステップが WebFetch・WebSearch で外部の文書を読み、読めないときと「判断が要る / できなかった」の報告で起こし直さずに止まること |
+| [ndf-deps-require-groups-check.md](ndf-deps-require-groups-check.md) | 依存の宣言の検査（project-mvv.py propose / vet の deps.require と、構造チェックの require-groups をエントリポイントから関数の中の import までたどること） |
+| [ndf-supervise-queue-resume-and-gate-evidence.md](ndf-supervise-queue-resume-and-gate-evidence.md) | pace: normal の承認ゲートの後をキュー 1 回で流すこと、queue --resume で止まったプランを続けること、承認ゲートの記録、new sprint --absorb |
+| [ndf-supervise-test-limits-from-whole-runs.md](ndf-supervise-test-limits-from-whole-runs.md) | 予算なしのテストの上限を、所要の記録と直近の全体テストの実測（whole.jsonl）の大きい方の 3 倍で決め、テストのステップの開始で決め直すこと |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
