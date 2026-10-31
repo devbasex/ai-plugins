@@ -24,6 +24,7 @@ def git(root: Path, *args: str) -> str:
 
 
 def commit(root: Path, name: str, text: str, msg: str) -> str:
+    (root / name).parent.mkdir(parents=True, exist_ok=True)
     (root / name).write_text(text)
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", msg)
@@ -72,8 +73,13 @@ def world(tmp_path: Path):
     return {"origin": origin, "work": work, "other": other, "approved": approved}
 
 
-def run_release(monkeypatch, w, *, outside_after=False, move_head=False, **extra):
-    """release --channel prod を流し、(結果, 終了コード, マージした PR と expect, gh の呼び出し) を返す。"""
+SHIPPED_FILE = "plugins/foo/statusline.txt"
+DOC_FILE = "docs/design.md"
+
+
+def run_release(monkeypatch, w, *, outside_after=None, move_head=None, **extra):
+    """release --channel prod を流し、(結果, 終了コード, マージした PR と expect, gh の呼び出し) を返す。
+    outside_after は配布の PR の後に、move_head は本番チャネルへのマージを待つ間に（1 回だけ）別の人が入れるファイルのパス。"""
     mod = load(monkeypatch)
     work, other = w["work"], w["other"]
     merged, ghcalls, state = [], [], {}
@@ -89,11 +95,12 @@ def run_release(monkeypatch, w, *, outside_after=False, move_head=False, **extra
             git(other, "merge", "-q", "--no-ff", "-m", "Merge pull request #1", f"origin/release/v{VER}")
             state["merge"] = git(other, "rev-parse", "HEAD")
             if outside_after:
-                commit(other, "statusline.txt", "x\n", "statusline (#806)")
+                commit(other, outside_after, "x\n", "statusline (#806)")
             git(other, "push", "-q", "origin", "HEAD:trunk")
             return state["merge"]
-        if move_head:
-            commit(other, "late.txt", "x\n", "late (#900)")
+        if move_head and not state.get("moved"):
+            state["moved"] = True
+            commit(other, move_head, "x\n", "late (#900)")
             git(other, "push", "-q", "origin", "HEAD:trunk")
             raise mod.HeadMoved("moved")
         git(other, "push", "-q", "origin", f"{expect}:live")
@@ -145,7 +152,7 @@ def test_release_after_only_the_release_pr_is_ok(monkeypatch, world):
 
 def test_release_with_an_outside_pr_after_approval_stops_at_the_gate(monkeypatch, world):
     """受け入れ条件 5: 配布の PR の外の変更があれば、本番チャネルの PR・タグ・Release を作らずに 10。"""
-    out, code, merged, ghcalls = run_release(monkeypatch, world, outside_after=True, approved_sha=world["approved"])
+    out, code, merged, ghcalls = run_release(monkeypatch, world, outside_after=SHIPPED_FILE, approved_sha=world["approved"])
     assert (out["status"], code) == ("gate", 10)
     assert merged == [(1, None)] and tags(world["origin"]) == ""
     assert not any(a[:2] == ["release", "create"] for a in ghcalls)
@@ -159,10 +166,29 @@ def test_release_with_an_outside_pr_after_approval_stops_at_the_gate(monkeypatch
 
 def test_release_stops_when_the_head_moves_while_waiting(monkeypatch, world):
     """受け入れ条件 6: 比べた後に先端が進めば、本番チャネルへマージせず 10。"""
-    out, code, merged, _ = run_release(monkeypatch, world, move_head=True, approved_sha=world["approved"])
+    out, code, merged, _ = run_release(monkeypatch, world, move_head=SHIPPED_FILE, approved_sha=world["approved"])
     assert (out["status"], code) == ("gate", 10)
     assert git(world["origin"], "rev-parse", "live") != git(world["origin"], "rev-parse", "trunk")
     assert tags(world["origin"]) == "" and out["metrics"]["reason"] == "outside_commits"
+
+
+def test_release_after_an_outside_pr_that_ships_nothing_is_ok(monkeypatch, world):
+    """#2221: 承認の後に入ったのが配布物に触れない PR だけなら、承認を取り直さずに本番チャネルへ入れ、通したコミットを残す。"""
+    out, code, merged, _ = run_release(monkeypatch, world, outside_after=DOC_FILE, approved_sha=world["approved"])
+    tip = git(world["origin"], "rev-parse", "trunk")
+    assert (out["status"], code) == ("ok", None)
+    assert merged == [(1, None), (2, tip)] and tags(world["origin"]) == f"foo--v{VER}"
+    assert [i["subject"] for i in out["items"] if i.get("result") == "outside_unshipped"] == ["statusline (#806)"]
+    assert out["metrics"]["tolerated"] == 1
+
+
+def test_release_retries_when_the_head_moves_by_a_change_that_ships_nothing(monkeypatch, world):
+    """#2221: 待つ間に配布物に触れないコミットで先端が進めば、比べ直した先端で入れ直す。"""
+    out, code, merged, _ = run_release(monkeypatch, world, move_head=DOC_FILE, approved_sha=world["approved"])
+    tip = git(world["origin"], "rev-parse", "trunk")
+    assert (out["status"], code) == ("ok", None)
+    assert merged[-1] == (2, tip) and len(merged) == 3
+    assert git(world["origin"], "rev-parse", "live") == tip and out["metrics"]["compared_head"] == tip
 
 
 def test_release_with_a_commit_that_is_not_an_ancestor_stops_at_the_gate(monkeypatch, world):
@@ -333,7 +359,7 @@ def test_approve_from_facts_without_facts_output_stops_at_the_gate(monkeypatch, 
     assert e.value.code == 2
 
 
-@pytest.mark.parametrize("facts", ["", "{queue_state:release}"])
+@pytest.mark.parametrize("facts", ["", "{queue_state?:release}"])
 def test_approve_without_readable_facts_passes_only_with_an_existing_record(monkeypatch, world, tmp_path, facts):
     """--dev-state を省いた単発の本番のプラン: queue は facts の置き場を空で、run は置き換えずに渡す（#2247）。
     記録が無ければ 10（2 の引数の誤りにしない）、資料に一致する記録が既にあれば書かずに通す（決定 7）。"""

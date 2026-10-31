@@ -330,7 +330,7 @@ def test_normal_sprint_with_a_state_puts_the_advice_before_both_gates(tmp_path):
     assert "sprint-state.py gate" in out["next"]
     design = load(waves["設計"]["plans"][0])
     ds = steps_of(design)
-    assert [s["id"] for s in design["steps"]][-3:] == ["mvv", "mvv-note", "gate"]
+    assert [s["id"] for s in design["steps"]][-4:] == ["mvv", "mvv-note", "gate", "reject"]
     assert ds["push-glossary"]["next"] == "ready" and ds["ready"]["next"] == "mvv" and ds["glossary-recheck"]["on_fail"] == "push-glossary"
     assert ds["mvv"]["cmd"].endswith("--advise") and "--gate design --pr {pr}" in ds["mvv"]["cmd"]
     assert (ds["mvv"]["on_fail"], ds["mvv-note"]["on_fail"], ds["mvv-note"]["next"]) == ("mvv-note", "gate", "gate")
@@ -368,8 +368,8 @@ def test_the_design_plan_stops_at_gate_1_whatever_the_advice(tmp_path, monkeypat
     state.write_text(json.dumps({"name": "m", "pace": "normal", "gates": []}))
     manifest, _ = new_normal_sprint(tmp_path, "--state", str(state))
     design = load(next(w for w in manifest["ステージ"] if w["name"] == "設計")["plans"][0])
-    tail = design["steps"][-3:]
-    tail[0]["cmd"], tail[1]["cmd"] = f"exit {code}", "true"
+    tail = [s for s in design["steps"] if s["id"] in ("mvv", "mvv-note", "gate", "reject")]
+    tail[0]["cmd"], tail[1]["cmd"], tail[3]["cmd"] = f"exit {code}", "true", "false"  # reject は --from でだけ入る
     fake = tmp_path / "judge.sh"
     fake.write_text(
         """#!/bin/sh\ncat > /dev/null\necho '{"result": "{\\"decision\\": \\"gate\\", \\"reason\\": \\"関門 1\\"}", "usage": {}}'\n"""

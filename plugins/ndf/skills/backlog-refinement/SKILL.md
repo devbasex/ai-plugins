@@ -102,12 +102,14 @@ allowed-tools:
 UPKEEP=$(bash "$R/scripts/resolve.sh" scripts backlog-refinement) || exit 3
 ```
 
-| 終了コード | status | 次の手 |
-| --- | --- | --- |
-| 0 | `ok` | 次の手順へ進む |
-| 10 | `gate` | `presentation_path` を読み、「やらない」と承認の要る前倒し・後ろ倒しを AI が一括で決める（人へ問わない。決めた番号と理由を `ask.py decide --question` で記録し、棚卸しの報告に一覧を残す）。**無人の経路（3 層のフェーズ・プランのステップ）では承認を求めず**、`presentation_path` と対象の番号を報告の「人の判断待ち」に載せて終える（承認の要る反映は行わない） |
-| 20 | `gate` | `next` に従う（上限を超えた候補・照合で飛ばした課題・部分的に終わった反映・段階の欠けた課題・`rank` と合わない plan） |
-| 1 / 2 / 3 | `stopped` | `summary` と `items[].reason` を報告して止まる |
+状態と終了コードの意味は `$SCRIPTS/lib/README.md` の「手順のスクリプトの結果」にある。
+
+| 終了コード | 次の手 |
+| --- | --- |
+| 0 | 次の手順へ進む |
+| 10 | `presentation_path` を読み、「やらない」と承認の要る前倒し・後ろ倒しを AI が一括で決める（人へ問わない。決めた番号と理由を `ask.py decide --question` で記録し、棚卸しの報告に一覧を残す）。**無人の経路（3 層のフェーズ・プランのステップ）では承認を求めず**、`presentation_path` と対象の番号を報告の「人の判断待ち」に載せて終える（承認の要る反映は行わない） |
+| 20 | `next` に従う（上限を超えた候補・照合で飛ばした課題・部分的に終わった反映・段階の欠けた課題・`rank` と合わない plan） |
+| 1 / 2 / 3 | `summary` と `items[].reason` を報告して止まる |
 
 **区分の決定を 2A と 2B に分けるのは、課題どうしが独立しないためである。** 重複の判定・正本の
 決定・関連する課題の状態・マイルストーンの完了・同じ修正レイヤーを指す課題の突き合わせ・
@@ -358,7 +360,11 @@ python3 "$UPKEEP/upkeep.py" apply --plan plan.json [--max-waits N]
 `apply` がこの待ち方を持つ（`metrics.waits`）。回数の上限は `--max-waits`、1 回の長さの上限は
 `--max-wait` で、超えると `partial` を立てて残りを `pending` に並べる。同じ plan で打ち直すと、
 済んだ課題は記録で飛ぶ。`report` の反映と待ちの件数は、同じ回（前の `candidates` 以降）に打った
-`apply` をすべて足し合わせた値（`metrics.round`）である。
+`apply` をすべて足し合わせた値（`metrics.round`）である。区分の内訳（`verdicts`）・承認待ち（`needs_approval`）・
+返した課題（`returned` は件数、`returned_numbers` は番号）も同じ回の `apply` を足し合わせ、2 回の `apply` に同じ番号が
+出たら後の `apply` の値を採る。本文と順位の表を別の plan で反映しても、前の `apply` の区分は報告から落ちない。
+前の `apply` の記録が読めないときは `apply` が 1 件も書かずに止まり、番号ごとの値を持たない記録（前の版）を
+足し合わせた回では `report` が `gaps` を付けた `stopped` で返す。
 
 ## 他のリポジトリで動くこと
 

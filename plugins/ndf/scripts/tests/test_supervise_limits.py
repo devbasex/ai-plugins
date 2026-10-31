@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -87,7 +88,10 @@ class _FakeJudge:
 
 def drive(tmp: Path, plan: dict, decide, start: str | None = None) -> tuple[list[str], str, engine.Engine]:
     """プランをスタブの結果で流し、(流したステップの id, 報告, Engine) を返す。"""
-    plan = {k: v for k, v in json.loads(json.dumps(plan)).items() if k not in DROP}
+    # queue が流す前に埋める差し込みを、埋めた後の形にする（残っているとステップを打たずに止まる。#2079）
+    filled = re.sub(r"\{queue_pr:[A-Za-z0-9._-]+\}", "1", json.dumps(plan))
+    filled = re.sub(r"\{queue_state:[A-Za-z0-9._-]+\}", json.dumps(str(tmp / "check-state"))[1:-1], filled)
+    plan = {k: v for k, v in json.loads(filled).items() if k not in DROP}
     plan["作業場所"] = str(tmp)
     eng = engine.Engine(plan, tmp / "state")
     for kind in ("run", "work", "drive", "pr"):

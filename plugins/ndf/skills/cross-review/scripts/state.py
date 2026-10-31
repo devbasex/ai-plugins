@@ -112,6 +112,11 @@ def _add_init_parser(sub: _Subparsers) -> None:
     )
     sp.add_argument("--worktree", default=None)
     sp.add_argument(
+        "--run",
+        default=None,
+        help="この実行の識別子（drive.py が渡す）。既存の pr<n> の持ち主の記録と一致すれば同じ実行の続きとして使う（#2229）",
+    )
+    sp.add_argument(
         "--verify-command",
         action="append",
         default=None,

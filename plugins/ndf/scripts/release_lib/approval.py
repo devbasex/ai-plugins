@@ -17,6 +17,9 @@ import repo as repo_lib
 from step_result import EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, git, result
 
 TOOL = "release"
+# 承認を取り直さずに通すパス（許可リスト）。承認の外のコミットの差分がすべてこの下に収まれば通す（#2221）。
+# 拒否リスト（配布物だけ）にすると、秘密を渡すワークフローが実行する scripts/・.github/ などの未承認の変更が main へ入る（C1）
+UNGATED = ("docs/", "issues/")
 
 
 class HeadMoved(Exception):
@@ -94,12 +97,13 @@ def release_pr_allowed(root, n, pr_view):
 
 
 def check_approved(root, approved, base, allowed):
-    """origin/<base> の先端を読み直し、承認したコミットと比べた判定（Verdict）を返す。"""
+    """origin/<base> の先端を読み直し、承認したコミットと比べた判定（Verdict）を返す。
+    差分がすべて許可リスト（UNGATED）の下に収まる承認の外のコミットは止めずに Verdict.tolerated へ入れる（#2221）。"""
     git(root, "fetch", "-q", "origin", base)
     tip = git(root, "rev-parse", f"origin/{base}").stdout.strip()
     if allowed is None:
         return ac.Verdict(False, approved, tip, ac.UNDECIDABLE)
-    return ac.compare_approved(root, approved, tip, [allowed])
+    return ac.compare_approved(root, approved, tip, [allowed], UNGATED)
 
 
 def commit_pr(root, sha):
@@ -121,6 +125,11 @@ GATE_LEADS = {
     ac.UNDECIDABLE: "承認したコミット {a} の後に承認の外の変更が無いかを判定できない",
     "head_moved": "{base} の先端が比べた後に {t} へ進んだ",
 }
+
+
+def tolerated_items(verdict) -> list[dict]:
+    """配布物に触れないので承認を取り直さずに通した、承認の外のコミット（#2221）。"""
+    return [{"kind": "commit", "name": o.sha, "result": "outside_unshipped", "subject": o.subject} for o in verdict.tolerated]
 
 
 def gate(root, a, plugin, base, verdict, items, metrics, moved=False) -> dict:
@@ -165,7 +174,7 @@ def _facts_of(state_dir) -> tuple[str | None, str | None]:
     if out is None:
         return None, None
     # SHA と時刻は同じ出力から読む（再開で NN が 01 に戻っても、古い回の SHA と新しい回の時刻を組み合わせない）
-    sha = ((last_result(d, "facts", TOOL, out) or {}).get("metrics") or {}).get("approved_sha")
+    sha = ((last_result(d, "facts", TOOL, out=out) or {}).get("metrics") or {}).get("approved_sha")
     if not sha:
         return None, None
     try:
@@ -247,7 +256,7 @@ def approve(root, a) -> dict:
     """ゲート 2 の承認を承認資料へ記録する（#815 の I10）。--approved-sha は提示した資料を書いた approval-facts の
     metrics.approved_sha（資料を読み直した値ではない）。資料がその後に書き直されていれば書かずに止まる。
     --facts-from なら approve_from_facts（#1426）。"""
-    # 空の --facts-from（queue が {queue_state:release} を空で埋めた）も facts の経路で扱い、承認ゲート（10）で返す
+    # 空の --facts-from（queue が {queue_state?:release} を空で埋めた）も facts の経路で扱い、承認ゲート（10）で返す
     if getattr(a, "facts_from", None) is not None:
         return approve_from_facts(root, a)
     if not getattr(a, "approved_sha", None):

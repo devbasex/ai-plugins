@@ -8,8 +8,9 @@
                             [--interval 秒] [--timeout 秒] [--stale-after 秒] [--no-cleanup] [--expect-head <SHA>] [--root <dir>]
     python3 merged-steps.py promote --head <ベースブランチ> --base <本番チャネル> [--prepare] [--out <資料>] [--gate-approved user|mvv] [--expect-head-from <資料> | --approved-from <資料>]
 
-cleanup: マージ済みの PR の作業ツリーとローカルブランチを外し、主ディレクトリを取り込む。
-`git worktree remove` が拒否した作業ツリーは、未追跡・無視されたファイルを退避してから外す。作り直せる生成物
+cleanup: マージ済みの PR の作業ツリーとローカルブランチを外し、主ディレクトリを取り込む。一時の置き場のレビュー worktree
+（`pr<n>`・`rf<n>`）は lib/run_state.py が `--force` を使わずに外し、続けて持ち主の終わった残る状態を片付ける（`run_state.sweep_states`。
+items に足し、metrics の swept_removed・swept_kept で数える。#2229）。開発の作業ツリーで `git worktree remove` が拒否したものは、未追跡・無視されたファイルを退避してから外す。作り直せる生成物
 （`.venv`・`node_modules`・`__pycache__`・`target` など）は退避せずに捨てる（merged_lib/trash.py）。
 sweep-trash: 本番に出たコミット（--ref）に含まれるブランチの退避先を回収の候補として挙げる。消すのは、人が候補を見て
 承認した後に --yes と --only <承認した退避先>... を付けたときの、その名前の退避先だけ（消すと戻せない利用者のファイル）。
@@ -45,15 +46,14 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
-import tempfile
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
 
-deps.require("waits", "durable", "md")
+deps.require("waits", "durable", "md", "procs")
 from step_result import (
     StepError,
     approval_present,
@@ -68,6 +68,9 @@ from step_result import (
 )
 import gh_parts  # noqa: E402
 import repo  # noqa: E402
+import run_owner  # noqa: E402
+import run_state  # noqa: E402
+import worktree_base  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from merged_lib import base_sync, merge, trash  # noqa: E402
@@ -148,19 +151,22 @@ def _delete_branch(root, branch, add):
         add("branch", branch, "absent")
 
 
-def _remove_pr_tmp_worktree(root, tmp_wt, n, add, merge_commit=None):
-    """PR の一時作業ツリー（wt_base/slug/pr<n>）を、登録済みで detached のときだけ外す。"""
-    if not tmp_wt.exists():
-        return
-    listed = {str(Path(w["path"]).resolve()): w for w in list_worktrees(root)}
-    w = listed.get(str(tmp_wt.resolve()))
-    if w is None:
-        add("worktree", str(tmp_wt), "kept", "この repo の作業ツリーとして登録されていない")
-    elif not w["detached"]:
-        add("worktree", str(tmp_wt), "kept", "detached でない")
-    else:
-        ok, why = remove_worktree(root, w["path"], f"pr{n}", merge_commit)
-        add("worktree", w["path"], "removed" if ok else "kept", why)
+def _remove_pr_tmp_worktrees(root, wt_dir, n, add):
+    """PR の一時作業ツリー（wt_base/slug/pr<n> と rf<n> の中の worktree）を、`--force` を使わずに外す（#2229・#1680）。
+
+    作業（変更・未追跡・未 push のコミット）を持つものと、持ち主の実行が動いているものは外さず kept にする。"""
+    state = None
+    for name, remove in ((f"pr{n}", run_state.remove_pr_dir), (f"rf{n}", run_state.remove_run_dir)):
+        path = wt_dir / name
+        if not path.exists():
+            continue
+        record, err = run_owner.read_owner(path)
+        if err or (record is not None and run_owner.alive(path, record, time.time())):
+            add("run-dir" if name.startswith("rf") else "worktree", str(path), "kept", err or run_owner.alive_reason(path, record))
+            continue
+        state = state or run_state.view_pr(root, n) or {}
+        for it in remove(root, path, state):
+            add(it["kind"], it["name"], it["result"], it.get("reason"))
 
 
 def _remove_pr_worktrees(root, main_dir, branch, merge_commit, add):
@@ -189,7 +195,7 @@ def _cleanup_pr(root, main_dir, slug, wt_base, n, add):
         _delete_branch(root, branch, add)
 
     if slug:
-        _remove_pr_tmp_worktree(root, wt_base / slug / f"pr{n}", n, add, merge_commit)
+        _remove_pr_tmp_worktrees(root, wt_base / slug, n, add)
 
 
 def _update_main_dir(main_dir, add):
@@ -228,13 +234,19 @@ def _update_main_dir(main_dir, add):
 
 def _cleanup_result(items, prs, pull_err):
     """記録から (status, summary, items, metrics, presentation_path, next) を組み立てる。"""
-    count = {k: sum(1 for i in items if i["result"] == k) for k in ("removed", "deleted", "absent", "kept", "stopped")}
+    # 値の一致でなく印で分ける（同じパスの kept が両方に並んでも、片方へ寄せない）
+    marks = [i.pop("swept", False) for i in items]
+    swept = [i for i, m in zip(items, marks) if m]
+    own = [i for i, m in zip(items, marks) if not m]
+    count = {k: sum(1 for i in own if i["result"] == k) for k in ("removed", "deleted", "absent", "kept", "stopped")}
     metrics = {
         "removed_worktrees": count["removed"],
         "deleted_branches": count["deleted"],
         "absent_branches": count["absent"],
         "kept": count["kept"],
         "stopped": count["stopped"],
+        "swept_removed": sum(1 for i in swept if i["result"] == "removed"),
+        "swept_kept": sum(1 for i in swept if i["result"] == "kept"),
     }
     summary = (
         f"作業ツリー {count['removed']} 件を外し、ブランチ {count['deleted']} 件を消した"
@@ -267,11 +279,16 @@ def cleanup(root, prs):
     # root が消す作業ツリーのこともある（計画の merge のステップ）。以後は主ディレクトリから打つ
     root = main_dir
     slug = repo_slug(root)
-    wt_base = Path(os.environ.get("NDF_WORKTREE_BASE") or Path(tempfile.gettempdir()) / "ndf-worktrees")
+    wt_base = worktree_base.worktree_parent()
 
     for n in prs:
         _cleanup_pr(root, main_dir, slug, wt_base, n, add)
 
+    # 持ち主の終わった残る状態（merged を通らずに閉じた PR の worktree・一時ファイル）も片付ける（#2229）
+    # 上で扱った pr<n>・rf<n> は見直さない（同じものを 2 度数えない）
+    done = [wt_base / slug / f"{k}{n}" for n in prs for k in ("pr", "rf")] if slug else []
+    swept = run_state.sweep_states(root, skip=done)
+    items.extend({**i, "swept": True} for i in swept)
     git(root, "worktree", "prune", check=False)
     pull_err = _update_main_dir(main_dir, add)
     return _cleanup_result(items, prs, pull_err)

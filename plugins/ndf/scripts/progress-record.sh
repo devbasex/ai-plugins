@@ -18,26 +18,36 @@
 # 失敗しても（`gh` が無い・issue を取得できない）積む。積めない（リポジトリを特定できない・`jq` が
 # 無い・排他を取れない）ときは標準エラーへ `NOTE:` を残して続ける。鍵は `--repo` があればそのリポジトリ、
 # 無ければ作業ディレクトリの origin である。`--worktree` / `--plan` / `--note` は積まない。
-# 工程名が `配布` で、記録の無い必須の工程があれば、その案内を本文の行より先に標準出力へ出す。
+# 工程名が `配布` で、記録の無い必須の工程があれば、工程ごとに `items` の `kind: "stage-missing"` の要素
+# （`result` は missing か conditional、`reason` に記録し直すコマンド）として返す。
 #
-# `gh` が無い、issue を取得できないときは本文を書かずに終了コード 0 で終わる。
-# **進行管理が理由で開発の工程を止めない。**
+# **結果は 1 行の結果 JSON で返す（#2227）。** 形は `lib/README.md` の「手順のスクリプトの結果」で、
+# `lib/step-result.sh` の `sr_emit` が出す。記録した・変える内容が無かったときだけ `ok`（0）。
+# `gh` が無ければ `stopped`（3）、本文を書けなかった（`gh` の失敗・錠を取れない）ときは `stopped`（6）で、
+# `gaps` に `gh` の標準エラーの要旨を載せ、同じ理由を標準エラーへ `NOTE:` の 1 行で出す。本文も通過記録も書けなければ `stopped`（1）。
+# **進行管理が理由で開発の工程を止めない。** 止めない判断は呼ぶ側が持ち、ここは書けなかった事実を返す。
 #
 # **本文の読みから書きまでは課題ごとの錠の中で行う（#1241 の I10）。** 錠は `lib/gh_parts.py body-lock` が取り、
-# その中でこのスクリプトをもう 1 度走らせる（`NDF_PROGRESS_LOCKED=1`。通過記録は外側だけが積む）。錠を
-# 30 秒（`NDF_PROGRESS_LOCK_TIMEOUT`）で取れなければ、`## 進行` を書かずに `NOTE:` を残して終了コード 0 で終わる。
+# その中でこのスクリプトをもう 1 度走らせる（`NDF_PROGRESS_LOCKED=1`。通過記録は外側だけが積む）。外側は
+# 内側の結果 JSON を受けてまとめ、標準出力へは自分の 1 行だけを出す。錠を 30 秒（`NDF_PROGRESS_LOCK_TIMEOUT`）で
+# 取れなければ、`## 進行` を書かずに欠けとして返す。
 #
-# 呼び出し側の誤り（引数不足・知らない工程名）だけは 2 を返す。
+# 呼び出し側の誤り（引数不足・知らない工程名）は `stopped`（2）を返す。
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TOOL=progress-record
+# shellcheck source=lib/step-result.sh
+. "$SCRIPT_DIR/lib/step-result.sh" 2>/dev/null || { printf 'ERROR: lib/step-result.sh を読めない\n' >&2; exit 2; }
 # shellcheck source=lib/projects-common.sh
-. "$SCRIPT_DIR/lib/projects-common.sh" 2>/dev/null || exit 0
+. "$SCRIPT_DIR/lib/projects-common.sh" 2>/dev/null \
+  || sr_emit --tool "$TOOL" --status stopped --summary "lib/projects-common.sh を読めない" --code 3
 # 工程名・モード・進め方の一覧と通過記録は development-workflow のライブラリが持つ（#725 の決定 2・3）。
 # **同じプラグインの根の相対で辿る。** `cd -P` で実体へ解決しない。agy の配置（dev.agy/scripts と
 # dev.agy/skills/development-workflow がどちらも symlink）でも、`scripts/` の 1 つ上に `skills/` がある。
 # shellcheck source=../skills/development-workflow/scripts/lib/workflow-common.sh
-. "$SCRIPT_DIR/../skills/development-workflow/scripts/lib/workflow-common.sh" 2>/dev/null || exit 0
+. "$SCRIPT_DIR/../skills/development-workflow/scripts/lib/workflow-common.sh" 2>/dev/null \
+  || sr_emit --tool "$TOOL" --status stopped --summary "development-workflow の workflow-common.sh を読めない" --code 3
 
 SECTION_HEADING="## 進行"
 
@@ -64,6 +74,7 @@ usage() {
   printf 'usage: progress-record.sh <issue番号> <工程名> [--mode M] [--pace P] [--worktree P] [--plan P] [--repo R] [--note TEXT]\n' >&2
 }
 
+
 ARGS=("$@")
 ISSUE="${1:-}"
 STAGE="${2:-}"
@@ -78,32 +89,40 @@ while [ "$#" -gt 0 ]; do
     --plan) PLAN="${2:-}"; shift 2 ;;
     --repo) REPO="${2:-}"; shift 2 ;;
     --note) NOTE="${2:-}"; shift 2 ;;
-    *) printf 'ERROR: 知らない引数です: %s\n' "$1" >&2; usage; exit 2 ;;
+    *) sr_bad_args "$TOOL" "知らない引数です: $1" usage ;;
   esac
 done
 
-if [ -z "$ISSUE" ] || [ -z "$STAGE" ]; then
-  printf 'ERROR: 引数が足りません\n' >&2
-  usage
-  exit 2
-fi
+[ -n "$ISSUE" ] && [ -n "$STAGE" ] || sr_bad_args "$TOOL" "引数が足りません" usage
 case "$ISSUE" in
-  ''|*[!0-9]*) printf 'ERROR: issue 番号が数値ではありません: %s\n' "$ISSUE" >&2; exit 2 ;;
+  ''|*[!0-9]*) sr_bad_args "$TOOL" "issue 番号が数値ではありません: $ISSUE" ;;
 esac
-if [ "$STAGE" != "-" ] && ! wf_is_stage "$STAGE"; then
-  printf 'ERROR: 工程表に無い工程名です: %s\n' "$STAGE" >&2
-  exit 2
-fi
-if [ -n "$MODE" ] && ! wf_is_mode "$MODE"; then
-  printf 'ERROR: 知らないモードです: %s\n' "$MODE" >&2
-  exit 2
-fi
-if [ -n "$PACE" ] && ! wf_is_pace "$PACE"; then
-  printf 'ERROR: 知らない進め方です: %s\n' "$PACE" >&2
-  exit 2
-fi
+[ "$STAGE" = "-" ] || wf_is_stage "$STAGE" || sr_bad_args "$TOOL" "工程表に無い工程名です: $STAGE"
+[ -z "$MODE" ] || wf_is_mode "$MODE" || sr_bad_args "$TOOL" "知らないモードです: $MODE"
+[ -z "$PACE" ] || wf_is_pace "$PACE" || sr_bad_args "$TOOL" "知らない進め方です: $PACE"
 
-# 通過記録へ積む。**本文の書き換えより前に置く**（#725 の決定 4）。後ろの早い `exit 0` のどれを
+# `配布` の記録で wf_record_progress が出す案内（`  記録なし: A / B`・`  条件付き: C`）を、工程ごとの
+# `stage-missing` の要素へ移す。標準出力へは出さない（結果 JSON の 1 行を守る）。
+absorb_stage_report() {
+  local line label result rest stage
+  local -a stages
+  while IFS= read -r line; do
+    case "$line" in
+      *'記録なし: '*) label='記録なし: ' result=missing ;;
+      *'条件付き: '*) label='条件付き: ' result=conditional ;;
+      *) continue ;;
+    esac
+    rest=${line#*"$label"}
+    IFS='/' read -r -a stages <<<"$rest"
+    for stage in "${stages[@]}"; do
+      stage=$(sr_brief "$stage")
+      [ -n "$stage" ] || continue
+      sr_item stage-missing "$stage" "$result" "bash \"\$SCRIPTS/projects-sync.sh\" $ISSUE stage \"$stage\""
+    done
+  done <<<"$1"
+}
+
+# 通過記録へ積む。**本文の書き換えより前に置く**（#725 の決定 4）。後ろの早い終わり方のどれを
 # 通っても、引数のチェックを通った呼び出しは 1 回だけ積まれる。
 if [ -n "$REPO" ]; then
   SLUG=$REPO
@@ -112,26 +131,61 @@ else
 fi
 RECORD_STAGE=$STAGE
 [ "$RECORD_STAGE" != "-" ] || RECORD_STAGE=''
-[ -n "${NDF_PROGRESS_LOCKED:-}" ] || wf_record_progress "$SLUG" "$ISSUE" "$RECORD_STAGE" "$MODE" "$PACE"
-
-command -v gh >/dev/null 2>&1 || exit 0
-
-if [ -z "${NDF_PROGRESS_LOCKED:-}" ]; then
-  NDF_PROGRESS_LOCKED=1 python3 "$SCRIPT_DIR/lib/gh_parts.py" body-lock --issue "$ISSUE" ${REPO:+--repo "$REPO"} \
-    --timeout "${NDF_PROGRESS_LOCK_TIMEOUT:-30}" -- bash "${BASH_SOURCE[0]}" "${ARGS[@]}" \
-    || printf 'NOTE: #%s の本文の錠を取れない（または記録が失敗した）。進行を書かずに続ける\n' "$ISSUE" >&2
-  exit 0
+PASSED=0
+if [ -z "${NDF_PROGRESS_LOCKED:-}" ] && [ -n "$RECORD_STAGE$MODE$PACE" ]; then
+  STAGE_REPORT=$(wf_record_progress "$SLUG" "$ISSUE" "$RECORD_STAGE" "$MODE" "$PACE")
+  if [ -n "$SLUG" ] && command -v jq >/dev/null 2>&1; then
+    PASSED=1
+    sr_process "通過記録へ積む（#${ISSUE}）" "積んだ"
+  else
+    sr_process "通過記録へ積む（#${ISSUE}）" "積めない（リポジトリを特定できないか jq が無い）"
+  fi
+  absorb_stage_report "$STAGE_REPORT"
 fi
 
-BODY_FILE=$(mktemp) || exit 0
-NEW_FILE=$(mktemp) || { rm -f "$BODY_FILE"; exit 0; }
+if ! command -v gh >/dev/null 2>&1; then
+  sr_emit --tool "$TOOL" --status stopped --summary "gh が無いため #$ISSUE の本文へ進行を書かない" --code 3
+fi
+
+# 外側: 錠の中で自分を走らせ、内側の結果 JSON を自分の結果へまとめる。
+if [ -z "${NDF_PROGRESS_LOCKED:-}" ]; then
+  LOCK_ERR=$(mktemp 2>/dev/null) || LOCK_ERR=/dev/null
+  INNER=$(NDF_PROGRESS_LOCKED=1 python3 "$SCRIPT_DIR/lib/gh_parts.py" body-lock --issue "$ISSUE" ${REPO:+--repo "$REPO"} \
+    --timeout "${NDF_PROGRESS_LOCK_TIMEOUT:-30}" -- bash "${BASH_SOURCE[0]}" "${ARGS[@]}" 2>"$LOCK_ERR")
+  RC=$?
+  ERR_TEXT=''
+  if [ "$LOCK_ERR" != /dev/null ]; then
+    ERR_TEXT=$(cat "$LOCK_ERR" 2>/dev/null)
+    [ -z "$ERR_TEXT" ] || printf '%s\n' "$ERR_TEXT" >&2
+    rm -f "$LOCK_ERR"
+  fi
+  SUMMARY=''
+  if sr_absorb "${INNER##*$'\n'}"; then
+    SUMMARY=$SR_ABSORBED_SUMMARY
+  else
+    printf 'NOTE: #%s の本文の錠を取れない（または記録が失敗した）。進行を書かずに続ける\n' "$ISSUE" >&2
+    sr_gap issue-body "#$ISSUE" "本文の錠を取れないか、記録が結果を返さなかった（終了コード ${RC}）: $(sr_brief "${ERR_TEXT:-理由の出力なし}")"
+  fi
+  [ "$SR_GAPS" -eq 0 ] && sr_emit --tool "$TOOL" --status ok --summary "$SUMMARY"
+  if [ "$PASSED" -eq 1 ]; then
+    sr_emit --tool "$TOOL" --status stopped --summary "#$ISSUE の本文へ進行を書けなかった（通過記録は積んだ）" --code 6
+  fi
+  sr_emit --tool "$TOOL" --status stopped --summary "#$ISSUE の進行を何も書けなかった" --code 1
+fi
+
+# 内側: 本文を書けなかったことを欠けとして返す。理由は標準エラーへも 1 行出す（外側がそのまま流す。#671）。
+body_gap() {
+  printf 'NOTE: #%s の本文へ進行を書けなかった: %s\n' "$ISSUE" "$1" >&2
+  sr_gap issue-body "#$ISSUE" "$1"
+  sr_emit --tool "$TOOL" --status stopped --summary "#$ISSUE の本文へ進行を書けなかった" --code 6
+}
+
+BODY_FILE=$(mktemp) || body_gap "一時ファイルを作れない"
+NEW_FILE=$(mktemp) || { rm -f "$BODY_FILE"; body_gap "一時ファイルを作れない"; }
 trap 'rm -f "$BODY_FILE" "$NEW_FILE"' EXIT
 
-if [ -n "$REPO" ]; then
-  gh issue view "$ISSUE" --repo "$REPO" --json body -q .body > "$BODY_FILE" 2>/dev/null || exit 0
-else
-  gh issue view "$ISSUE" --json body -q .body > "$BODY_FILE" 2>/dev/null || exit 0
-fi
+sr_gh issue view "$ISSUE" ${REPO:+--repo "$REPO"} --json body -q .body > "$BODY_FILE" \
+  || body_gap "本文を読めない（gh issue view）: $SR_GH_ERR"
 
 # 節の中身を組み立てる。**目印を付けるのは、この呼び出しが記録する工程までである。**
 # 一覧の残りは空欄のまま残し、飛ばした工程がチェックの穴として見えるようにする。
@@ -142,7 +196,7 @@ STAGES=$(wf_stages)
 SKIP_STAGES=$(wf_skipped_stages)
 export SKIP_STAGES
 export STAGES SECTION_HEADING STAGE STAMP MODE PACE WORKTREE PLAN NOTE SCRIPT_DIR
-python3 - "$BODY_FILE" > "$NEW_FILE" <<'PY' || exit 0
+python3 - "$BODY_FILE" > "$NEW_FILE" <<'PY' || body_gap "本文の節を組めない"
 import os
 import re
 import sys
@@ -227,19 +281,18 @@ for name in stages:
 sys.stdout.write(replace_section(body, heading, "\n".join(lines)))
 PY
 
-[ -s "$NEW_FILE" ] || exit 0
+[ -s "$NEW_FILE" ] || body_gap "本文の節を組めない（出力が空）"
+if [ "$STAGE" = "-" ]; then
+  DONE_TEXT="#$ISSUE 進行の見出し = $(sed -n '/^## 進行[[:space:]]*$/,/^## /{/^モード: /p;}' "$NEW_FILE" | head -1)"
+else
+  DONE_TEXT="#$ISSUE 進行 = $STAGE"
+fi
 if cmp -s "$BODY_FILE" "$NEW_FILE"; then
   # 変える内容が無いときは書き込まない。同じ操作を 2 度行っても結果が変わらない。
-  exit 0
+  sr_item issue-body "#$ISSUE" unchanged
+  sr_emit --tool "$TOOL" --status ok --summary "${DONE_TEXT}（変える内容が無い）"
 fi
-if [ -n "$REPO" ]; then
-  gh issue edit "$ISSUE" --repo "$REPO" --body-file "$NEW_FILE" >/dev/null 2>&1 || exit 0
-else
-  gh issue edit "$ISSUE" --body-file "$NEW_FILE" >/dev/null 2>&1 || exit 0
-fi
-if [ "$STAGE" = "-" ]; then
-  printf '#%s 進行の見出し = %s\n' "$ISSUE" "$(sed -n '/^## 進行[[:space:]]*$/,/^## /{/^モード: /p;}' "$NEW_FILE" | head -1)"
-else
-  printf '#%s 進行 = %s\n' "$ISSUE" "$STAGE"
-fi
-exit 0
+sr_gh issue edit "$ISSUE" ${REPO:+--repo "$REPO"} --body-file "$NEW_FILE" >/dev/null \
+  || body_gap "本文を書けない（gh issue edit）: $SR_GH_ERR"
+sr_item issue-body "#$ISSUE" recorded
+sr_emit --tool "$TOOL" --status ok --summary "$DONE_TEXT"

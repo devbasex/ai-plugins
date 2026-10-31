@@ -72,7 +72,7 @@ def test_normal_with_design_merges_then_chains_up_to_the_release(tmp_path):
     assert "resume" not in by["関門 1"] and "resume" not in by["関門 2"]
     # 本番のプランの先頭が approve（AC9）
     prod = json.loads(Path(by["本番"]["plans"][0]).read_text())
-    assert prod["steps"][0]["id"] == "approve" and "--facts-from '{queue_state:release}'" in prod["steps"][0]["cmd"]
+    assert prod["steps"][0]["id"] == "approve" and "--facts-from '{queue_state?:release}'" in prod["steps"][0]["cmd"]
 
 
 def test_normal_without_design_chains_from_the_sprint_branch(tmp_path):
