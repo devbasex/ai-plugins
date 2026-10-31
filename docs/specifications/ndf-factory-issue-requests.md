@@ -49,7 +49,7 @@
 | 1 | 題と本文に秘密らしい値（AWS のアクセスキー・PEM の秘密鍵の始まりの行・GitHub の token・Anthropic の API キー・JWT の形）が無い | `secret_suspected` |
 | 2 | 依頼の `sprint_run_id` からサービスの表で引いたアカウントの登録に、名前が大文字と小文字を問わず一致するものがある（ほかのアカウントの登録は引かない） | `not_registered` |
 | 3 | 流儀の判定の口（`FilingStyleResolver`）が GitHub Issues を返す。#2239 が入るまでの既定は「GitHub Issues へ、テンプレートを使わず、依頼の題と本文のまま」 | `unsupported_tracker` |
-| 4 | 起票先の公開範囲を読める。起票先が公開なら、実行のリポジトリも公開である（AI が書いた本文は非公開のコードや設定を含みうる） | 読めない → `not_installed`、公開範囲が広がる → `visibility` |
+| 4 | 起票先の公開範囲を、1 リポジトリと `metadata: read` だけに絞った導入の token で読める。起票先が公開なら、実行のリポジトリも公開である（AI が書いた本文は非公開のコードや設定を含みうる） | 読めない → `not_installed`、公開範囲が広がる → `visibility` |
 | 5 | 起票した数を上限（`ISSUE_REQUEST_LIMIT_PER_RUN`、既定 10）より少ないときだけ増やせる。下書きは数に入れない | `limit_exceeded` |
 | 6 | 起票先の 1 リポジトリ（数の ID）と `issues: write` だけに絞った導入の token で Issue を作れる | token を作れない → `not_installed`、作成の要求の失敗 → `filing_failed`（どちらも数を 1 つ戻す） |
 
