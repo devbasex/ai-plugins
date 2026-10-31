@@ -4344,7 +4344,7 @@
     {
       "term": "実行ジョブの token",
       "context": "ndf-factory",
-      "meaning": "実行の制御が実行ジョブ 1 つごとに発行する、期限つきの token。そのジョブのスプリントの実行にだけ進捗の事象を書け、承認の依頼の答えを読める",
+      "meaning": "実行の制御が実行ジョブ 1 つごとに発行する、期限つきの token。そのジョブのスプリントの実行にだけ進捗の事象を書け、Pull Request の参照はそのジョブの取り込むリポジトリのものだけを残せる。承認の依頼の答えを読める",
       "source": "docs/specifications/ndf-factory-contracts-and-progress.md"
     },
     {
@@ -4473,6 +4473,93 @@
       "code": "whole_key"
     },
     {
+      "term": "起票の依頼",
+      "context": "ndf-factory",
+      "meaning": "実行ジョブの中で NDF が別のリポジトリへの起票を決めたとき、ランナーが進捗の事象 issue.requested でサービスへ送る依頼。起票先・題・本文を持ち、ランナーは自分では起票しない",
+      "source": ""
+    },
+    {
+      "term": "起票の依頼の結果",
+      "context": "ndf-factory",
+      "meaning": "起票の依頼 1 件ごとに 1 件残る進捗の事象 issue.request_resolved。サービスが起票した Issue の参照か、下書きへ回した理由を持つ",
+      "source": ""
+    },
+    {
+      "term": "起票の代行",
+      "context": "ndf-factory",
+      "meaning": "記録された起票の依頼を読み、起票してよい先へはサービスが 1 リポジトリと Issues の書き込みだけに絞った導入の token で起票し、そうでない先は下書きを人へ回す、サービスの処理",
+      "source": ""
+    },
+    {
+      "term": "下書き（起票の依頼）",
+      "context": "ndf-factory",
+      "meaning": "サービスが起票しなかった起票の依頼の題と本文。人が相手先の流儀に沿って起票するために回る",
+      "source": ""
+    },
+    {
+      "term": "リポジトリの登録",
+      "context": "ndf-factory",
+      "meaning": "アカウントが GitHub のリポジトリ 1 つを、GitHub App の導入の識別子と一緒に持つこと。スプリントの実行はこれに属する",
+      "source": "",
+      "pending_source": "issues/issue-2186-requirements.md"
+    },
+    {
+      "term": "GitHub App の導入",
+      "context": "ndf-factory",
+      "meaning": "利用者が自分のリポジトリへサービスの GitHub App を入れたもの。導入の識別子で指し、clone と push の導入の token をここから作る",
+      "source": "",
+      "pending_source": "issues/issue-2186-requirements.md"
+    },
+    {
+      "term": "キーの持ち込み",
+      "context": "ndf-factory",
+      "meaning": "実行の形態 `byok` で、利用者の Anthropic API キーか、引き受ける AWS のロールの ARN をサービスへ預けること",
+      "source": "",
+      "pending_source": "issues/issue-2186-requirements.md"
+    },
+    {
+      "term": "再開の要求",
+      "context": "ndf-factory",
+      "meaning": "承認の依頼に答えが保存された後、承認と通知が実行の制御へ出す、`resume` の実行ジョブを起こす要求",
+      "source": "",
+      "pending_source": "issues/issue-2186-requirements.md"
+    },
+    {
+      "term": "打ち切りの時間",
+      "context": "ndf-factory",
+      "meaning": "1 つの実行ジョブが動いてよい時間の上限。超えたら実行の制御が止める",
+      "source": "",
+      "pending_source": "issues/issue-2186-requirements.md"
+    },
+    {
+      "term": "課題の候補",
+      "context": "ndf-factory",
+      "meaning": "スプリントを始める画面に、AI が棚卸しの順位から理由つきで出す課題",
+      "source": "",
+      "pending_source": "issues/issue-2186-requirements.md"
+    },
+    {
+      "term": "実行の枠",
+      "context": "ndf-factory",
+      "meaning": "アカウントとリポジトリごとに、終わりの状態でないスプリントの実行を数えた値。開始で増え、終わりの状態への移りで減る",
+      "source": "",
+      "pending_source": "issues/issue-2186-design.md"
+    },
+    {
+      "term": "見回り",
+      "context": "ndf-factory",
+      "meaning": "実行の制御が 5 分ごとに動き、打ち切りの時間を過ぎた実行ジョブを止め、停止の知らせを取りこぼした実行ジョブを終わらせる処理",
+      "source": "",
+      "pending_source": "issues/issue-2186-design.md"
+    },
+    {
+      "term": "候補の証明",
+      "context": "ndf-factory",
+      "meaning": "GitHub で確かめたリポジトリの登録の候補を、取り込みが署名して 10 分だけ有効にした値。登録の要求はこれを持って来る",
+      "source": "",
+      "pending_source": "issues/issue-2186-design.md"
+    },
+    {
       "term": "問い合わせの区分",
       "context": "ndf-workflow",
       "meaning": "AskUserQuestion の metadata.source に AI が付ける値。ndf-gate:<番号>（承認ゲート）・ndf-ask:redline:<番号>（レッドライン。宣言で外せない）・ndf-ask:<名前>（宣言が許す区分）の 3 つの形。hook は質問の中身を読まず、この値が許された区分かだけを見る（#2206）",
@@ -4542,6 +4629,55 @@
       "meaning": "結果 JSON の decisions。スクリプトが決めたことと、その根拠を並べる",
       "code": "decisions",
       "pending_source": "issues/issue-2227-design.md"
+    },
+    {
+      "term": "残る状態",
+      "context": "ndf-worktree",
+      "meaning": "NDF の実行が作り、その実行が終わった後もディスクに残るもの（レビュー worktree・状態ファイル・一時ファイル・投稿キューの項目）（#2229）",
+      "source": "",
+      "pending_source": "issues/issue-2229-requirements.md"
+    },
+    {
+      "term": "状態の持ち主",
+      "context": "ndf-worktree",
+      "meaning": "残る状態を作った実行。持ち主が生きている間は、別の実行がその状態を消さない（#2229）",
+      "source": "",
+      "pending_source": "issues/issue-2229-requirements.md"
+    },
+    {
+      "term": "状態の寿命",
+      "context": "ndf-worktree",
+      "meaning": "残る状態を片付けてよくなる条件（持ち主のプロセスの終わり・Pull Request が閉じたこと・送り終えたこと など）。状態の種類ごとに 1 つ決める（#2229）",
+      "source": "",
+      "pending_source": "issues/issue-2229-requirements.md"
+    },
+    {
+      "term": "以前の実行",
+      "context": "ndf-worktree",
+      "meaning": "今の実行より前に同じ Pull Request・同じリポジトリで回った、終わった実行。supervise.py の run --from の「前の実行」とは別（#2229）",
+      "source": "",
+      "pending_source": "issues/issue-2229-requirements.md"
+    },
+    {
+      "term": "持ち主の記録",
+      "context": "ndf-worktree",
+      "meaning": "残る状態ごとに、作った実行が書く記録。実行の識別子・開始・最後に動いた時刻・終わった時刻、またはプロセス（pid と開始時刻）を持つ。片付けが持ち主の生存を判定するために読む（#2229）",
+      "source": "",
+      "pending_source": "issues/issue-2229-design.md"
+    },
+    {
+      "term": "寿命の窓",
+      "context": "ndf-worktree",
+      "meaning": "持ち主の記録が終わっていなくても、最後に動いた時刻からこの時間を過ぎた実行を終わったとみなす長さ。24 時間（#2229）",
+      "source": "",
+      "pending_source": "issues/issue-2229-design.md"
+    },
+    {
+      "term": "片付け",
+      "context": "ndf-worktree",
+      "meaning": "状態の一覧に従い、持ち主の終わった残る状態を外し、残したものと理由を返す処理（run_state.sweep）。git が拒めば止まる操作だけで行う（#2229）",
+      "source": "",
+      "pending_source": "issues/issue-2229-design.md"
     }
   ]
 }
