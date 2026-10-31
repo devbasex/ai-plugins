@@ -52,7 +52,9 @@ export async function writeRoleCredentials(
 }
 
 // 子へ渡さない環境変数（秘密の置き場の ARN と、受け口の token。手元のランナーの INGEST_TOKEN も含む）
-const PARENT_ONLY = ["INGEST_TOKEN", "INGEST_TOKEN_SECRET_ARN", "MODEL_CREDENTIAL_SECRET_ARN", "ANTHROPIC_API_KEY", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"];
+const PARENT_ONLY = ["INGEST_TOKEN", "INGEST_TOKEN_SECRET_ARN", "MODEL_CREDENTIAL_SECRET_ARN"];
+// モデルの資格。managed と byok では Factory が決めた資格だけを子へ置く。local は利用者が手元で設定した資格をそのまま渡す
+const MODEL_CREDENTIALS = ["ANTHROPIC_API_KEY", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"];
 
 export async function claudeEnv(
   base: Record<string, string | undefined>,
@@ -63,7 +65,8 @@ export async function claudeEnv(
   credentialDir: string,
 ): Promise<Record<string, string>> {
   const env: Record<string, string> = {};
-  for (const [k, v] of Object.entries(base)) if (v !== undefined && !PARENT_ONLY.includes(k)) env[k] = v;
+  const drop = mode === "local" ? PARENT_ONLY : [...PARENT_ONLY, ...MODEL_CREDENTIALS];
+  for (const [k, v] of Object.entries(base)) if (v !== undefined && !drop.includes(k)) env[k] = v;
   if (mode === "managed") {
     env.CLAUDE_CODE_USE_BEDROCK = "1";
     env.AWS_REGION = base.BEDROCK_REGION ?? base.AWS_REGION ?? "us-east-1";

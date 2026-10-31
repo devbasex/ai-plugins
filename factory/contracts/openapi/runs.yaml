@@ -654,13 +654,14 @@ components:
       type: object
       required: [kind]
       description: >-
-        kind が gate1 / gate2 なら decision が要り、ランナーは sprint-state.py gate へ gate（無ければ kind）の名前で書く。
-        decision なら body を conductor への利用者の判断として渡す。
+        kind が gate1 / gate2 なら decision が要り、ランナーはスプリント状態ファイルへ sprint-state.py gate で
+        gate（無ければ kind を NDF の記録の名前へ写した「関門 1」/「関門 2」）の名前で書く。rejected なら差し戻しと
+        body を conductor の再開の指示へ渡す。decision なら body を conductor への利用者の判断として渡す。
       properties:
         kind: { type: string, enum: [gate1, gate2, decision] }
         decision: { type: string, enum: [approved, rejected] }
         body: { type: ["string", "null"], description: 承認の理由か判断の本文 }
-        gate: { type: string, description: スプリントの状態に書く関門の名前（省略時は kind） }
+        gate: { type: string, description: スプリントの状態に書く関門の名前（省略時は kind から「関門 1」/「関門 2」） }
     SignedUrl:
       type: object
       required: [url, expires_at]

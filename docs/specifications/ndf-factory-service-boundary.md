@@ -433,7 +433,7 @@ stateDiagram-v2
 | NDF の版 | 開始の時点で決め、以後の実行ジョブは同じ値を持つ。正式版は `plugin.json` の版（タグ `ndf--v<版>` を入れる）、開発版は `<版>@<コミットの SHA>` |
 | ランナーで使える CLI | `claude` だけ。cross-review は、ランタイムが 1 つのとき 2 つの枠を `claude` で埋める既存の振る舞いに任せる |
 | GitHub App の権限 | Metadata（読む）・Contents（読み書き）・Pull requests（読み書き）・Issues（読み書き）・Checks（読む）・Actions（読む）。Workflows・Administration・Projects は持たない。導入の token はリポジトリ 1 つに絞る |
-| ランナー向けの経路 | `INGEST_URL` と同じ origin の `/run-jobs/*`。実行ジョブの token で認証し、導入の token の渡し直し（`POST /run-jobs/github-token`）・状態の置き場の 15 分の署名つき URL（`POST /run-jobs/state`）・resume で読む承認の依頼への人の答え（`GET /run-jobs/approval-requests/{id}/answer`。`kind`・`decision`・`body`・`gate` を返し、sprint.json の置き場はランナーが復元した状態から求める。答えを保存する側は #2173）だけを返す。形は `factory/contracts/openapi/runs.yaml` |
+| ランナー向けの経路 | `INGEST_URL` と同じ origin の `/run-jobs/*`。実行ジョブの token で認証し、導入の token の渡し直し（`POST /run-jobs/github-token`）・状態の置き場の 15 分の署名つき URL（`POST /run-jobs/state`）・resume で読む承認の依頼への人の答え（`GET /run-jobs/approval-requests/{id}/answer`。`kind`・`decision`・`body`・`gate` を返し、書く先のスプリント状態ファイル（`sprint-state.py init` が作るもの。目録の `sprint.json` とは別）はランナーが復元した状態から求める。`gate` が無ければ `kind` を `関門 1` / `関門 2` へ写す。差し戻しは理由とともに conductor の再開の指示へ渡す。答えを保存する側は #2173）だけを返す。形は `factory/contracts/openapi/runs.yaml` |
 | `gate.reached` の切り詰め | 256 KiB を超えると `material` だけを UTF-8 の文字の境目で切り、末尾に Pull Request の URL（無ければ元の大きさ）への案内を残す |
 
 `factory/api/src/index.ts` は `requestResume`・`claimLocalRunJob`・`reportLocalRunJobEnded`・`cancelSprintRun` を公開する。

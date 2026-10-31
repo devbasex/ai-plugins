@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { validateRunJobInstruction } from "@ndf-factory/contracts";
 import { ApiError } from "../errors.ts";
 import { appendEvent } from "../progress/append.ts";
@@ -239,6 +239,20 @@ describe("停止の知らせ・再開（受け入れ条件 15・19・20、I8・I
     expect(await h.table.getSlots("acc-1", REPO_ID)).toEqual({ account: active, repository: active });
     expect(active).toBe(1);
     expect(b).toBeDefined();
+  });
+
+  it("ジョブを終わりにする前に止まっても、次の見回りが同じ結果でやり直し、実行は承認待ちへ移る（I40）", async () => {
+    const { sprintRunId, jobId } = await runningRun();
+    const original = h.table.updateJob.bind(h.table);
+    h.table.updateJob = vi.fn(async () => {
+      throw new Error("中断");
+    });
+    await expect(finishJob(jobId, sprintRunId, "gate")).rejects.toThrow("中断");
+    h.table.updateJob = original;
+    expect((await h.table.getJob(jobId))!.state).toBe("running");
+    await h.control.onTaskStateChange(jobId, "STOPPED");
+    expect((await h.table.getRun(sprintRunId))!).toMatchObject({ state: "awaiting_approval", currentJobId: null });
+    expect((await h.table.getJob(jobId))!.state).toBe("gate");
   });
 
   it("local のジョブの終わりの知らせも同じ処理になる（#2189 の口）", async () => {

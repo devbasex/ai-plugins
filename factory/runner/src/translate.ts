@@ -75,7 +75,8 @@ export function translateProgressLine(line: Line, repo: string): Pick<StepRecord
       seconds: typeof line.seconds === "number" && line.seconds >= 0 ? line.seconds : 0,
       summary,
     };
-    const pr = findPullRequest(`${String(line.summary ?? "")}\n${String(line.report ?? "")}`, repo);
+    // supervise は pr のステップの URL を step 行の pr へ書く（summary は末尾の要約で切れる）
+    const pr = findPullRequest([line.pr, line.summary, line.report].map((v) => String(v ?? "")).join("\n"), repo);
     if (pr) payload.pull_request = pr;
     return { type: "step.recorded", payload };
   }
@@ -121,6 +122,26 @@ export function gateKindOf(planName: string | null): GateKind {
   if (/design/.test(planName)) return "gate1";
   if (/release-prod|release/.test(planName)) return "gate2";
   return "decision";
+}
+
+// 承認の依頼の種類から、NDF のスプリント状態に書く関門の名前（sprint-state.py gate の名。NDF は「関門 2」で通過を判定する）
+export function gateRecordName(kind: string): string {
+  if (kind === "gate1") return "関門 1";
+  if (kind === "gate2") return "関門 2";
+  return kind;
+}
+
+// 差し戻しの答えから、再開する conductor への指示を作る（承認と区別できるように差し戻しを明示する）
+export function rejectionDirective(gate: string, body: string | null | undefined): string {
+  const reason = body && body.trim() !== "" ? body.trim() : "理由の記載なし";
+  return `利用者は${gate}を差し戻した（理由: ${reason}）。関門を通さず、差し戻された工程をこの理由に沿って直してから、もう一度${gate}の承認を求めてください。`;
+}
+
+// スプリント状態ファイル（sprint-state.py init が作る）か。目録の sprint.json（supervise.py new。「ステージ」を持つ）とは別
+export function isSprintState(json: unknown): boolean {
+  if (typeof json !== "object" || json === null || Array.isArray(json)) return false;
+  const o = json as Record<string, unknown>;
+  return Array.isArray(o.gates) && Array.isArray(o.plans) && !("ステージ" in o);
 }
 
 export function finishedResult(report: ReportResult, failed: boolean): JobFinishedEvent["payload"]["result"] {

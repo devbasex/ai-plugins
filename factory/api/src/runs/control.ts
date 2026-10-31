@@ -276,20 +276,24 @@ export class RunControl {
     }
     const result = finished.payload.result;
     const now = this.iso();
+    // 実行と枠を先に移し、ジョブを終わりの状態にするのは最後にする。途中で止まってもジョブは見回りの対象に残り、
+    // 次の見回りか停止の知らせの再送が同じ結果でやり直す（実行の移し替えは条件つきで、2 度目は何もしない）
+    if (run.currentJobId === job.jobId) {
+      if (run.cancelRequested) {
+        await table.finishRun(run.sprintRunId, "cancelled", null, now);
+      } else if (result === "gate") {
+        await table.awaitApproval(run.sprintRunId, job.jobId, now);
+      } else {
+        const failure = result === "failed" ? (job.stopReason ?? (finished.source === "control" ? reason : "job_failed")) : null;
+        await table.finishRun(run.sprintRunId, RESULT_TO_RUN[result], failure, now);
+      }
+    }
     const updated = await table.updateJob(job.jobId, { state: result, result, finishedAt: now }, ["pending", "running"]);
     if (!updated) return;
     if (job.tokenSecretArn) {
       await platform.deleteJobToken(job.tokenSecretArn).catch((err: Error) =>
         this.log({ event: "token_delete_failed", job_id: job.jobId, error: err.name }),
       );
-    }
-    if (run.cancelRequested) {
-      await table.finishRun(run.sprintRunId, "cancelled", null, now);
-    } else if (result === "gate") {
-      await table.awaitApproval(run.sprintRunId, job.jobId, now);
-    } else {
-      const failure = result === "failed" ? (job.stopReason ?? (finished.source === "control" ? reason : "job_failed")) : null;
-      await table.finishRun(run.sprintRunId, RESULT_TO_RUN[result], failure, now);
     }
   }
 

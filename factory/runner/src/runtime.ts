@@ -12,7 +12,10 @@ import { exec, packState, unpackState } from "./state.ts";
 import {
   delegatedFromRecord,
   gateKindOf,
+  gateRecordName,
+  isSprintState,
   phaseChanged,
+  rejectionDirective,
   reportResult,
   translateProgressLine,
   usageFromResult,
@@ -112,15 +115,17 @@ export async function createRuntime(instruction: RunJobInstruction, env: Record<
       // 形は factory/contracts/openapi/runs.yaml の ApprovalAnswer
       const answer = (await res.json()) as { kind: string; decision?: string; body?: string | null; gate?: string };
       if (answer.kind === "decision") return answer.body ?? null;
-      // sprint.json は API から受けず、復元した状態から求める（複数あれば最後に更新したもの）
-      const sprints = await findFiles(join(repoDir, ".ndf"), "sprint.json");
-      const mtimes = await Promise.all(sprints.map(async (f) => (await stat(f)).mtimeMs));
-      const sprint = sprints[mtimes.indexOf(Math.max(...mtimes))];
-      if (!sprint) throw new Error("復元した状態に sprint.json が無い");
-      const args = [join(ndfScripts(), "sprint-state.py"), "gate", sprint, answer.gate ?? answer.kind, "--by", "user", "--outcome", answer.decision ?? "rejected"];
+      // 書く先はスプリント状態ファイル（sprint-state.py init が作る。開発ループでは周回の state.json）。
+      // 目録の sprint.json（supervise.py new）は別のファイルのため、形で見分ける。API から受けず、復元した状態から求める
+      const sprint = await latestSprintState(join(repoDir, ".ndf"));
+      if (!sprint) throw new Error("復元した状態にスプリント状態ファイルが無い");
+      const gate = answer.gate ?? gateRecordName(answer.kind);
+      const decision = answer.decision ?? "rejected";
+      const args = [join(ndfScripts(), "sprint-state.py"), "gate", sprint, gate, "--by", "user", "--outcome", decision];
       args.push("--what", answer.body || "Factory の画面での利用者の答え"); // sprint-state.py gate は --what が要る
       if ((await run("python3", args, { cwd: repoDir })) !== 0) throw new Error("承認の記録を書けない");
-      return null;
+      // 差し戻しは状態ファイルを変えないため、conductor へ差し戻しと理由を明示して渡す
+      return decision === "rejected" ? rejectionDirective(gate, answer.body) : null;
     },
     async runConductor(inst, directive, emit) {
       const prompt =
@@ -199,6 +204,20 @@ export async function createRuntime(instruction: RunJobInstruction, env: Record<
       return { report, summary: lastText.slice(0, 2000), gate: report === "判断が要る" ? { kind: gateKindOf(plan), pr_url: prUrl, material: lastText } : null };
     },
   };
+}
+
+// スプリント状態ファイルのうち最後に更新したもの。名前は呼ぶ側が決めるため、よく使う名前を集めて形で選ぶ
+async function latestSprintState(ndfDir: string): Promise<string | null> {
+  const names = ["state.json", "sprint-state.json", "sprint.json"];
+  const found = (await Promise.all(names.map((n) => findFiles(ndfDir, n)))).flat();
+  let best: { path: string; mtime: number } | null = null;
+  for (const path of found) {
+    const json = await readFile(path, "utf8").then((t) => JSON.parse(t) as unknown).catch(() => null);
+    if (!isSprintState(json)) continue;
+    const mtime = (await stat(path)).mtimeMs;
+    if (!best || mtime > best.mtime) best = { path, mtime };
+  }
+  return best?.path ?? null;
 }
 
 async function findFiles(dir: string, name: string, depth = 5): Promise<string[]> {

@@ -12,6 +12,9 @@ import {
   delegatedFromRecord,
   verdictSourcesOf,
   findPullRequest,
+  gateRecordName,
+  isSprintState,
+  rejectionDirective,
   MAX_EVENT_BYTES,
   phaseOf,
   translateProgressLine,
@@ -35,6 +38,20 @@ describe("翻訳（受け入れ条件 25）", () => {
     expect(attention.payload).toEqual({ reason: "関門", summary: "止まった" });
     for (const [i, body] of [step, attention].entries()) expect(validateProgressEvent(full(i + 1, body)).ok).toBe(true);
     expect(translateProgressLine({ kind: "run" }, ID.repo)).toBeNull();
+  });
+
+  it("step 行の pr の URL から Pull Request を取る（summary が切れていても）", () => {
+    const step = translateProgressLine({ kind: "step", step: "pr", summary: "作った", pr: "https://github.com/org-a/repo-a/pull/9" }, ID.repo)!;
+    expect(step.payload).toMatchObject({ pull_request: { repo: "org-a/repo-a", number: 9 } });
+  });
+
+  it("答えの記録: 関門の名前を NDF の名前へ写し、差し戻しを明示し、状態ファイルを目録と見分ける", () => {
+    expect(gateRecordName("gate1")).toBe("関門 1");
+    expect(gateRecordName("gate2")).toBe("関門 2");
+    expect(rejectionDirective("関門 2", "テストが足りない")).toMatch(/差し戻し.*テストが足りない/);
+    expect(isSprintState({ name: "s", plans: [], gates: [] })).toBe(true);
+    expect(isSprintState({ ステージ: [], plans: [], gates: [] })).toBe(false);
+    expect(isSprintState({ ステージ: [] })).toBe(false);
   });
 
   it("計画の名前からフェーズと課題、stream-json の modelUsage からモデルごとの usage を作る", () => {
@@ -113,6 +130,13 @@ describe("claude の呼び方（受け入れ条件 8・29）", () => {
     expect(env.AWS_ACCESS_KEY_ID).toBeUndefined();
     expect(env.INGEST_TOKEN_SECRET_ARN).toBeUndefined();
     expect(env.INGEST_TOKEN).toBeUndefined();
+  });
+
+  it("local は利用者が手元で設定したモデルの資格を渡し、受け口の token は渡さない", async () => {
+    const env = await claudeEnv({ ...base, ANTHROPIC_API_KEY: "mine", AWS_ACCESS_KEY_ID: "AK" }, "local", null, assume, "s", dir);
+    expect(env).toMatchObject({ ANTHROPIC_API_KEY: "mine", AWS_ACCESS_KEY_ID: "AK" });
+    expect(env.INGEST_TOKEN).toBeUndefined();
+    expect(env.MODEL_CREDENTIAL_SECRET_ARN).toBeUndefined();
   });
 
   it("byok の API キーは子の環境にだけ置き、ロールは外部 ID つきで引き受ける。外部 ID が違えば失敗する", async () => {
