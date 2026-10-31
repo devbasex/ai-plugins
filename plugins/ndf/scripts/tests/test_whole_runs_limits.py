@@ -192,9 +192,7 @@ def test_a_check_plan_made_before_the_impl_run_does_not_stop(tmp_path):
     cmd = f"{sys.executable} {TEST_RUN} whole --root {root} --limit {{test_limit:whole_timeout:1}}"
     step = {"id": "test-all", "timeout": with_margin(1)}
 
-    impl = subprocess.run(
-        [sys.executable, str(TEST_RUN), "whole", "--root", str(root), "--limit", "36"], capture_output=True, text=True
-    )
+    impl = subprocess.run([sys.executable, str(TEST_RUN), "whole", "--root", str(root), "--limit", "36"], capture_output=True, text=True)
     assert impl.returncode == 0  # 実装のフェーズの test-all（報告では上限 36 秒）
 
     ctx = _ctx(plan, root)
