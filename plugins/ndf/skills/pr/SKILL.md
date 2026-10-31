@@ -152,12 +152,19 @@ URL は最終行に生のまま置く（Markdown リンクにすると利用者�
 
 課題の Pull Request は `--base sprint/<名前>` で出す。スプリントの Pull Request は、
 スプリントブランチの worktree から `--base` を省いて出し、本文にスプリントが閉じる課題を番号ごとに書く。
+開発の起点（`base_branch`）が既定ブランチと同じリポジトリでは、上の develop の行の Pull Request が既定ブランチ宛になる。
+そのときの本文の扱いは次の節にある。
 
 ## closing keywords は本文だけに書く
 
 **closing keywords（`Closes` / `Fixes` / `Resolves` の後に番号を書く記法）は Pull Request の本文だけに、番号ごとに書く。** コミット
 メッセージに書くと、マージでそのコミットが指す課題だけが先に閉じ、スプリントが割れる。**本文の closing keywords は
 外さない**（`stage-completeness.md` と `progress-tracking` の「スプリントを閉じる」が本文を入力にする）。
+
+**宛先が既定ブランチの Pull Request では、`pr-steps.py create` / `update` が本文の closing keywords を閉じる予定の参照
+（`最終工程の後に閉じる: #<番号>`）へ置き換えてから送る。** 書く側は宛先によらず closing keywords で書いてよい。置き換えた
+指し先は結果の `metrics.deferred_closing` に載る。課題を閉じる時点と閉じる予定の参照の形は `progress-tracking` の
+「スプリントを閉じる」が正本である。
 
 ## 設計 Pull Request の本文
 
