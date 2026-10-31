@@ -406,3 +406,31 @@ def test_one_record_adds_less_than_a_second(env: Env, tmp_path: Path) -> None:
     elapsed = time.monotonic() - start
     assert out.returncode == 0, out.stderr
     assert elapsed < 1.0
+
+
+def test_record_stage_keeps_going_and_keeps_a_failed_record(tmp_path: Path) -> None:
+    """#2227 の決定 7: 記録のスクリプトが stopped / 6 を返してもプランを止めず、書けなかった工程を process に残す。"""
+    sys.path.insert(0, str(SCRIPTS / "lib"))
+    sys.path.insert(0, str(SCRIPTS))
+    from supervise_lib.state import RunState  # noqa: PLC0415
+
+    gap = {"kind": "issue-body", "name": "#11", "reason": "HTTP 502: 偽の gh の失敗"}
+    res = {"tool": "projects-sync", "status": "stopped", "summary": "#11 の進行の一部を書けなかった（1 件）"}
+    res.update({"items": [], "metrics": {}, "gaps": [gap]})
+    rec = tmp_path / "rec.sh"
+    rec.write_text(f"#!/usr/bin/env bash\nprintf '%s\\n' '{json.dumps(res, ensure_ascii=False)}'\nexit 6\n", encoding="utf-8")
+    ok = tmp_path / "ok.sh"
+    ok_res = {"tool": "projects-sync", "status": "ok", "summary": "#11 進行 = 設計", "items": [], "metrics": {}}
+    ok.write_text(f"#!/usr/bin/env bash\nprintf '%s\\n' '{json.dumps(ok_res, ensure_ascii=False)}'\n", encoding="utf-8")
+
+    st = RunState(tmp_path / "sv", {})
+    st.record_stage("設計", {"記録": str(rec), "課題": [11]}, str(tmp_path))  # 例外を上げず戻る（止めない）
+    assert len(st.process) == 1
+    assert st.process[0]["run"] == "rec.sh 11 stage 設計"
+    assert "HTTP 502: 偽の gh の失敗" in st.process[0]["result"]
+    assert "書けなかったもの" in st._extra_lines()
+    assert st.snapshot()["process"] == st.process
+
+    st2 = RunState(tmp_path / "sv2", {})
+    st2.record_stage("設計", {"記録": str(ok), "課題": [11]}, str(tmp_path))
+    assert st2.process == []

@@ -23,7 +23,8 @@
 {kind:"issue", repo, number, result, reason?, cmd?, checked?, would_check?}。result は
 closed / already_closed / failed / kept_open / closed_unverified（既に閉じていたが条件 2 を満たさない。
 開き直さない）（--dry-run では would_close）。checked は印を付けた受け入れ条件の番号、would_check は
---dry-run で付ける予定の番号。ボードの NOTE は {kind:"board_note"} の項目に載る。
+--dry-run で付ける予定の番号。ボードへ Done を書けなかった（`projects-sync.sh` の結果 JSON が ok でない）ときは
+{kind:"board_note"} の項目に理由が載り、課題を閉じる処理は続ける。
 `--record-pr 0` は「本番の記録なし」（最終の検査で変更が無く本番を飛ばした）。配布の記録を読まず、
 閉じる条件も見ずに --issues の課題を閉じる。--issues と一緒のときだけ受ける。
 `--record-pr unknown` は「記録の置き場が分からない」（リリースの経路が雛形でも昇格でもなく、まとめのプランが
@@ -57,6 +58,7 @@ from step_result import (
     main_with,
     result,
     run,
+    validate_result,
 )
 import acceptance  # noqa: E402
 import gh_call  # noqa: E402
@@ -158,12 +160,27 @@ def issue_state(root, repo, n):
 
 
 class CloseContext:
-    """全課題で一定の閉じる処理の材料。notes は課題ごとのボードの NOTE を溜める。retry_cmd は今の引数で組んだやり直しの cmd。"""
+    """全課題で一定の閉じる処理の材料。notes は課題ごとのボードの記録の失敗を溜める。retry_cmd は今の引数で組んだやり直しの cmd。"""
 
     def __init__(self, root, record_repo, comment, argv=()):
         self.root, self.record_repo, self.comment = root, record_repo, comment
         self.notes = []
         self.retry_cmd = shlex.join(["python3", str(Path(__file__).resolve()), *argv])
+
+
+def board_failure(stdout, code, stderr=""):
+    """`projects-sync.sh` の結果 JSON（最後の行）が ok でなければ理由の 1 行を返す。ok なら None（#2227）。"""
+    lines = [ln for ln in (stdout or "").splitlines() if ln.strip()]
+    try:
+        obj = json.loads(lines[-1]) if lines else None
+    except ValueError:
+        obj = None
+    if obj is None or validate_result(obj):
+        return f"projects-sync.sh が結果 JSON を返さなかった（exit={code}）: {(stderr or '').strip()[:200]}"
+    if obj["status"] == "ok" and code == 0:
+        return None
+    reasons = "; ".join(g["reason"] for g in obj.get("gaps", []))
+    return f"{obj['status']}（exit={code}）: {obj['summary']}" + (f"（{reasons}）" if reasons else "")
 
 
 def close_one(ctx, repo, n):
@@ -174,9 +191,9 @@ def close_one(ctx, repo, n):
         return {**it, "result": "failed", "reason": "before を読めない", "cmd": f"gh issue close {n} --repo {repo}"}
     if repo == record_repo:
         s = run(["bash", str(HERE / "projects-sync.sh"), str(n), "status", "Done"], cwd=root, check=False)
-        for ln in (s.stdout + s.stderr).splitlines():
-            if "NOTE" in ln:
-                notes.append({"kind": "board_note", "name": f"{repo}#{n}", "result": "note", "reason": ln.strip()})
+        why = board_failure(s.stdout, s.returncode, s.stderr)
+        if why:
+            notes.append({"kind": "board_note", "name": f"{repo}#{n}", "result": "note", "reason": why})
     close_out = _close_if_open(root, repo, n, comment) if before == "OPEN" else None
     after = issue_state(root, repo, n)
     return _close_result(it, before, after, close_out)

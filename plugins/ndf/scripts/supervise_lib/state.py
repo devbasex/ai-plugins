@@ -31,6 +31,20 @@ PROGRESS_GATE = re.compile(r"関門|承認が要る|承認を待つ")
 PROGRESS_FAIL = re.compile(r"失敗|落ちた|落ちる|エラー|\berror\b|\bfailed\b|traceback", re.I)
 
 
+def record_result(stdout: str) -> dict | None:
+    """記録のスクリプトの標準出力の最後の行を結果 JSON として読む。形が誤っていれば None。"""
+    import step_result
+
+    lines = [ln for ln in (stdout or "").splitlines() if ln.strip()]
+    if not lines:
+        return None
+    try:
+        obj = json.loads(lines[-1])
+    except ValueError:
+        return None
+    return obj if not step_result.validate_result(obj) else None
+
+
 def counts_text(counts: dict) -> str:
     return " / ".join(f"{k} {v}" for k, v in counts.items() if v is not None) or "無し"
 
@@ -84,6 +98,8 @@ class RunState:
         self.last_stage = "無し"
         self.pace_recorded = False
         self.recorded_stages: list[str] = []  # 課題の本文へ記録した工程（同じ工程を 2 度記録しない。#1485 の AC4）
+        # 進行の記録で書けなかったもの（結果 JSON の process の形 {run, result}）。プランは止めずに報告へ載せる（#2227）
+        self.process: list[dict] = []
         self.gates: list[dict] = []  # run のステップが返した関門（終了コード 10〜19）
         self.switched: list[str] = []  # 利用上限で切り替えた認証（変数の名前・アカウント・従量の接続）
         self.cur: dict = {}
@@ -296,8 +312,21 @@ class RunState:
         self.pace_recorded = True
         for issue in plan.get("課題", []):
             if pace_first:  # 通過記録と本文の見出し行へ進め方を先に書く（まとめる工程を記録なしと数えない）
-                subprocess.run(["bash", rec, str(issue), "pace", pace], cwd=cwd, capture_output=True, text=True)
-            subprocess.run(["bash", rec, str(issue), "stage", stage], cwd=cwd, capture_output=True, text=True)
+                self._run_record(rec, [str(issue), "pace", pace], cwd)
+            self._run_record(rec, [str(issue), "stage", stage], cwd)
+
+    def _run_record(self, rec: str, args: list[str], cwd: str) -> None:
+        """記録のスクリプトを 1 回打ち、結果 JSON が ok でなければ process へ残す。**プランは止めない**（#2227 の決定 7）。"""
+        p = subprocess.run(["bash", rec, *args], cwd=cwd, capture_output=True, text=True)
+        res = record_result(p.stdout)
+        if res is not None and res["status"] == "ok" and p.returncode == 0:
+            return
+        if res is None:
+            why = f"結果 JSON が無い（exit={p.returncode}）: {(p.stderr or '').strip()[:200]}"
+        else:
+            reasons = "; ".join(g["reason"] for g in res.get("gaps", []))
+            why = f"{res['status']}（exit={p.returncode}）: {res['summary']}" + (f"（{reasons}）" if reasons else "")
+        self.process.append({"run": " ".join([Path(rec).name, *args]), "result": why})
 
     def add_usage(self, kind: str, res: dict) -> None:
         """1 回の呼び出しの使用量を、計画の合計（`llm`）と今のステップの内訳（`cur["llm"]`。同じステップの呼び出しは足し合わせる）へ足す。"""
@@ -364,6 +393,7 @@ class RunState:
             "last_stage": self.last_stage,
             "pace_recorded": self.pace_recorded,
             "recorded_stages": list(self.recorded_stages),
+            "process": [dict(p) for p in self.process],
             "switched": list(self.switched),
             "slow_events": [dict(e) for e in self.slow_events],
             "pcount": dict(self.pcount),
@@ -390,6 +420,7 @@ class RunState:
         self.last_stage = acc.get("last_stage", self.last_stage)
         self.pace_recorded = acc.get("pace_recorded", self.pace_recorded)
         self.recorded_stages = list(acc.get("recorded_stages", self.recorded_stages))
+        self.process = [dict(p) for p in acc.get("process", self.process)]
         self.switched = list(acc.get("switched", self.switched))
         self.slow_events = [dict(e) for e in acc.get("slow_events", self.slow_events)]
         self.pcount = dict(acc.get("pcount", self.pcount))
@@ -419,6 +450,8 @@ class RunState:
         extra = ""
         if self.switched:
             extra += f"- 認証: 切り替え（{', '.join(self.switched)}）\n"
+        if self.process:
+            extra += "- 進行の記録で書けなかったもの: " + "; ".join(f"{p['run']} → {p['result']}" for p in self.process) + "\n"
         limited = [e for e in self.log if e.get("limit")]
         if limited:
             extra += (
