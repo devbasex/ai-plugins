@@ -58,6 +58,7 @@
 | [gh_quota.py](gh_quota.py) | 上限の見分け・枠（GraphQL と REST）の残り・枠の代替（`with_fallback`）・回復の時刻までの待ち（`wait_for_reset`）・変化が無い間に伸ばす待ちの間隔（`PollInterval`・`poll_until`） | `gh_*` |
 | [gh_fields.py](gh_fields.py) | REST の応答を GraphQL の `--json` の形へ変える対応表 | `gh_rest` |
 | [gh_rest.py](gh_rest.py) | PR と課題の単発の読み書き（読み取り・一覧・検索・作成・編集・コメント・マージ）。REST で行い、REST が上限なら `gh pr` / `gh issue` で代わる（検索の `issue_search` は `gh issue list --search` の 1 回）。値は `Attempt`（`value`・`error`・`via`） | `gh_parts` / `issue-file.py` |
+| [runner_issue_request.py](runner_issue_request.py) | Neural Development Factory のランナーの中（`NDF_ISSUE_REQUEST_FILE` があるとき）で、別のリポジトリへの起票を承認資料の代わりに依頼の 1 行として書き出す（`request_if_runner`、#2216） | `issue-file.py` |
 | [gh_graphql.py](gh_graphql.py) | 入れ子の読み取り（未解決のスレッド）と GraphQL の 1 回の要求（`graphql`） | `gh_parts` / `gh_pr_info` |
 | [gh_checks.py](gh_checks.py) | チェックジョブの読み取りと、名前ごとの最新の実行への畳み方・失敗のログの保存 | `gh_parts` / `gh_pr_info` |
 | [gh_pr_info.py](gh_pr_info.py) | `pr-info` の組み立て | `gh_parts` |

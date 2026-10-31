@@ -6,8 +6,8 @@ import { verifyAuthorization } from "./auth/verify.ts";
 import type { AuthEnv } from "./auth/resolve.ts";
 import type { AccountContext, Caller, Plan } from "./accounts/model.ts";
 import type { SprintRun } from "./runs/model.ts";
-import type { JobFinishedEvent } from "@ndf-factory/contracts";
-import { appendControlEventTo } from "./progress/append.ts";
+import type { IssueRequestResolvedEvent, JobFinishedEvent } from "@ndf-factory/contracts";
+import { appendControlEventTo, appendIssueRequestResolvedTo } from "./progress/append.ts";
 import { progressStoreFromEnv } from "./handlers/ingest.ts";
 import { runJobTokenVerifierFromEnv, type VerifiedRunJob } from "./progress/run-job-token.ts";
 import { factoryDepsFromEnv } from "./runs/deps.ts";
@@ -70,6 +70,12 @@ export function verifyRunJobToken(token: string): Promise<VerifiedRunJob> {
 // { written: false } は同じ鍵（ランナーの分）が既にある。定義・照合に合わなければ ProgressEventError
 export function appendControlEvent(event: JobFinishedEvent): Promise<{ written: boolean }> {
   return appendControlEventTo(progressStoreFromEnv(), event);
+}
+
+// 起票の代行（#2216）が issue.request_resolved（source は control、鍵は <依頼の鍵>:resolved）を直に書く。
+// { written: false } は同じ依頼の結果が既にある。定義・照合に合わなければ ProgressEventError
+export function appendIssueRequestResolved(event: IssueRequestResolvedEvent): Promise<{ written: boolean }> {
+  return appendIssueRequestResolvedTo(progressStoreFromEnv(), event);
 }
 
 // 実行の制御（#2186）。#2173 が答えの保存の後に呼ぶ再開の要求と、#2189 が使う形態 local の渡す口

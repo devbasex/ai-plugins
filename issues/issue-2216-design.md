@@ -263,7 +263,7 @@ classDiagram
 | `not_registered` | 依頼の実行のアカウントの登録に、名前が `repoKey` で一致するものが無い（ほかのアカウントだけが登録している場合も同じ。I50） |
 | `not_installed` | 登録はあるが、その導入で起票先に絞った token を作れない（App を外した・導入の対象から外した） |
 | `unsupported_tracker` | 流儀の判定が GitHub Issues 以外を返した（#2239 の後に起こる） |
-| `visibility` | 起票先が公開で、実行のリポジトリが非公開（決定 11） |
+| `visibility` | 起票先が実行のリポジトリより広く見える（private < internal < public。決定 11） |
 | `secret_suspected` | 題か本文に秘密らしい値がある（決定 12） |
 | `limit_exceeded` | 起票した数が上限に達している |
 | `filing_failed` | GitHub が Issue の作成を断った・応答が無い・前の試みが途中で止まった |
@@ -377,7 +377,7 @@ sequenceDiagram
 | 受け入れ条件 19 | 既定の流儀の判定の口が `github_issues` とテンプレート無しを返し、偽の口が `redmine` を返すと `unsupported_tracker` | 判定の口を通らずに起票すると落ちる |
 | 受け入れ条件 9・20 | 確定仕様の書き換えは文書の変更で、テストを書かない（`.md` の文言を照合するテストは書かない） | — |
 | 受け入れ条件 10 | `cd factory && npm run check` が 0 で終わる | — |
-| 公開範囲（決定 11） | 起票先が公開・実行のリポジトリが非公開で `visibility`、両方とも非公開・両方とも公開・起票先だけ非公開では起票する | 向きを逆にすると落ちる |
+| 公開範囲（決定 11） | 起票先が公開・実行のリポジトリが非公開か社内、起票先が社内・実行のリポジトリが非公開で `visibility`、広さが同じか起票先の方が狭いときは起票する | 向きを逆にすると落ちる |
 | 途中で止まった試み（決定 10） | 行が同じ `request_key` の `filing` のまま流し直すと続きから進み、`attempted_at` があれば作り直さず `filing_failed` | 印を見ずに作り直すと落ちる |
 | NDF の分岐（F7） | `NDF_ISSUE_REQUEST_FILE` があり起票先が別のとき、ファイルに 1 行増え、承認資料を書かず 0。変数が無いときと起票先が同じときは今どおり | 変数が無いのに書き出すと落ちる（pytest、`plugins/ndf/scripts/tests/`） |
 | I31（変更） | token の本体の鍵が `aud`・`exp`・`iat`・`iss`・`repo`・`sprint_run_id`・`sub` だけ | `account_id` を載せると落ちる |

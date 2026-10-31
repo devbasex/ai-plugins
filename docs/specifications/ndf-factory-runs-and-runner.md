@@ -68,7 +68,7 @@ Neural Development Factory の利用者が自分の GitHub のリポジトリを
 
 | 要素 | 場所 | 責務 |
 | --- | --- | --- |
-| GitHub の口 | `factory/api/src/github/port.ts`（型）・`app.ts`（`GitHubApp`） | App の JWT（RS256。秘密鍵は `GITHUB_APP_PRIVATE_KEY_SECRET_ARN`）・リポジトリ 1 つに絞った導入の token の作成・利用者の認可の code の交換と届くリポジトリの一覧・課題の確かめ・新しい順の課題・棚卸しの順位の表の読み出し。API の中で読む導入の token は残り 10 分を切るまで使い回す。テストは偽物 |
+| GitHub の口 | `factory/api/src/github/port.ts`（型）・`app.ts`（`GitHubApp`） | App の JWT（RS256。秘密鍵は `GITHUB_APP_PRIVATE_KEY_SECRET_ARN`）・リポジトリ 1 つに絞った導入の token の作成・利用者の認可の code の交換と届くリポジトリの一覧・課題の確かめ・新しい順の課題・棚卸しの順位の表の読み出し・起票の代行の Issue の作成（`createIssue`）と公開範囲の読み出し（`repositoryVisibility`。[起票の依頼と起票の代行](ndf-factory-issue-requests.md)）。API の中で読む導入の token は残り 10 分を切るまで使い回す。テストは偽物 |
 | 取り込み | `factory/api/src/repositories/service.ts`（`RepositoryService`）・`proof.ts` | 導入の URL・認可の URL と `state`・候補と候補の証明・登録・外し・一覧（I32・I33・I36） |
 | キーの持ち込み | `factory/api/src/credentials/service.ts`（`CredentialService`） | 保存・差し替え・消去・外部 ID（`externalIdOf`）。値は Secrets Manager にだけ書く（I38） |
 | 課題の候補 | `factory/api/src/runs/candidates.ts`（`chooseCandidates`・`bedrockCandidateModel`） | 棚卸しの順位の表か新しい順の課題を読み、Bedrock の Converse で採否と理由を作る |
@@ -273,7 +273,7 @@ graph TD
 
 ### ランナーの翻訳
 
-`runtime.ts` が 2 秒ごとに `<repo>/.ndf/` の下（5 階層まで）の `progress.jsonl` と `ask.jsonl` の伸びた分を読み、`translate.ts` で事象にする。`seq` はジョブの中で 1 から増やし、冪等の鍵は `<job_id>:<seq>`、`job.finished` だけ `<job_id>:finished` である。`resume` では復元したファイルの末尾から読み、前のジョブが送った行を新しい `job_id` で送り直さない。
+`runtime.ts` が 2 秒ごとに `<repo>/.ndf/` の下（5 階層まで）の `progress.jsonl` と `ask.jsonl`、ジョブのホームの `issue-requests.jsonl`（`NDF_ISSUE_REQUEST_FILE` で NDF へ渡す。作業のディレクトリの外）の伸びた分を読み、`translate.ts` で事象にする。`seq` はジョブの中で 1 から増やし、冪等の鍵は `<job_id>:<seq>`、`job.finished` だけ `<job_id>:finished` である。`resume` では復元したファイルの末尾から読み、前のジョブが送った行を新しい `job_id` で送り直さない。
 
 | 事象 | NDF の何から | 規則 |
 | --- | --- | --- |
@@ -282,6 +282,7 @@ graph TD
 | `attention` | `progress.jsonl` の `kind: attention` の行 | `reason`（空なら `attention`）・`summary`（`text`、無ければ `summary`） |
 | `usage.recorded` | conductor の stream-json の `result` の `modelUsage`（`step` は `conductor`）と、`progress.jsonl` の `step` の行の `models`（supervise が別のプロセスで起動したステップの分） | モデルごとに 1 件。入力の token は入力に cache の読みと書きを足す（#2170 の数え方）。`cost_usd` は `costUSD` か `cost` |
 | `decision.delegated` | `${NDF_MVV_STATE_DIR:-~/.local/state/ndf}/ask.jsonl`（[`ask_ledger.py`](../../plugins/ndf/scripts/lib/ask_ledger.py)）の `kind: decision` の行のうち、`cwd` がこのジョブの作業場所の下のもの | `question`・`answer`・`reason`（どれかが無ければ送らない。4,000 字で切る）。`category` は `ref` が指す `kind: verdict` の行の `source`、無ければ行の `category`、それも無ければ `null` |
+| `issue.requested` | `NDF_ISSUE_REQUEST_FILE` の 1 行（`{"repo", "title", "body"}` の JSON。#2216） | 値をそのまま写す。題が 256 字か本文が 50,000 字を超える行は送らず `attention`（`reason` は `issue_request_too_large`）にし、形の違う行は送らない |
 | `gate.reached` | conductor の最後の `result` の文の `- 結果: 判断が要る` | `kind` は最後の計画の名前が `design` を含めば `gate1`、`release` を含めば `gate2`、ほかは `decision`。`pr_url` は文の最初の Pull Request の URL、`material` は文そのもの |
 | `job.finished` | 終わり方 | 失敗 → `failed`、結果が `判断が要る` → `gate`、`完了` → `done`、`できなかった` → `stopped`、結果の行が無い → `failed`。`summary` は文の先頭 2,000 字か失敗の理由 |
 
@@ -291,7 +292,7 @@ graph TD
 
 ### GitHub App の権限
 
-全体の契約の「実行の制御」の表のとおり 6 つで、導入の token はこの権限とリポジトリ 1 つに絞って作る（`INSTALLATION_PERMISSIONS`）。NDF が今の工程で使う操作だけを許すためである。
+全体の契約の「実行の制御」の表のとおり 6 つで、導入の token はこの権限とリポジトリ 1 つに絞って作る（`INSTALLATION_PERMISSIONS`）。NDF が今の工程で使う操作だけを許すためである。起票の代行が API の中で作る token はさらに狭く、Issue の作成は `issues: write`（`ISSUE_FILING_PERMISSIONS`）、公開範囲の読み出しは `metadata: read`（`METADATA_PERMISSIONS`）だけで、どちらもリポジトリ 1 つに絞る。
 
 | 権限 | 水準 | 何に使うか |
 | --- | --- | --- |

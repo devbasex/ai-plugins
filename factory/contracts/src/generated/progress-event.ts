@@ -14,7 +14,9 @@ export type ProgressEvent =
   | JobFinishedEvent
   | PrUpdatedEvent
   | CiUpdatedEvent
-  | DecisionDelegatedEvent;
+  | DecisionDelegatedEvent
+  | IssueRequestedEvent
+  | IssueRequestResolvedEvent;
 export type JobStartedEvent = EventCommon & {
   type: "job.started";
   payload: JobStartedPayload;
@@ -72,6 +74,14 @@ export type CiUpdatedEvent = EventCommon & {
 export type DecisionDelegatedEvent = EventCommon & {
   type: "decision.delegated";
   payload: DecisionDelegatedPayload;
+};
+export type IssueRequestedEvent = EventCommon & {
+  type: "issue.requested";
+  payload: IssueRequestedPayload;
+};
+export type IssueRequestResolvedEvent = EventCommon & {
+  type: "issue.request_resolved";
+  payload: IssueRequestResolvedPayload;
 };
 
 /**
@@ -178,4 +188,46 @@ export interface DecisionDelegatedPayload {
    * 止めたときの metadata.source。無ければ null
    */
   category: string | null;
+}
+/**
+ * 実行のリポジトリと別のリポジトリへの起票の依頼（#2216）。起票はサービスが行い、ランナーは送るだけ
+ */
+export interface IssueRequestedPayload {
+  /**
+   * GitHub のリポジトリ（owner/name）
+   */
+  repo: string;
+  title: string;
+  body: string;
+}
+/**
+ * 起票の依頼 1 件ごとの結果（#2216）。filed は起票した Issue の参照を、drafted は下書きへ回した理由を持つ
+ */
+export interface IssueRequestResolvedPayload {
+  /**
+   * 依頼の冪等の鍵（<job_id>:<seq>）
+   */
+  request_key: string;
+  outcome: "filed" | "drafted";
+  issue?: IssueRef;
+  reason?:
+    | "not_registered"
+    | "not_installed"
+    | "unsupported_tracker"
+    | "visibility"
+    | "secret_suspected"
+    | "limit_exceeded"
+    | "filing_failed";
+  /**
+   * 同じ中身の最初の依頼の鍵。最初の依頼なら null
+   */
+  duplicate_of: string | null;
+}
+/**
+ * サービスが起票した Issue の参照
+ */
+export interface IssueRef {
+  repo: RepoFullName;
+  number: number;
+  url: string;
 }
