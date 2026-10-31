@@ -183,7 +183,7 @@ def approve_from_facts(root, a) -> dict:
     path = _material(root, a.approval)
     sha, facts_at = _facts_of(a.facts_from)
     metrics = {"approved_sha": sha, "facts_at": facts_at, "by": a.by}
-    retry = '承認を取り、sprint-state.py gate <状態> "関門 2" --what <要約> --by user --outcome approved を書いてから続ける'
+    retry = f'承認を取り、sprint-state.py gate <状態> "{gate_answer.GATE_2}" --what <要約> --by user --outcome approved を書いてから続ける'
     if not sha:
         raise _approve_gate(path, f"開発版の facts の出力（{a.facts_from}）に承認したコミットが無い", metrics, "開発版のプランを流し直す")
     try:
@@ -204,7 +204,7 @@ def approve_from_facts(root, a) -> dict:
             )
     except ValueError as e:
         raise _approve_gate(path, str(e), metrics, "開発版のプランを流し直す")
-    answer = gate_answer.approved(getattr(a, "answer_from", None), "関門 2", after=facts_at)
+    answer = gate_answer.approved(getattr(a, "answer_from", None), gate_answer.GATE_2, after=facts_at)
     if answer is None:
         raise _approve_gate(path, "承認ゲート 2 の利用者の承認の記録が facts の出力より後に無い", metrics, retry)
     at = clock.now_iso("utc")

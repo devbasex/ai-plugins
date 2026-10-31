@@ -5,6 +5,7 @@ from __future__ import annotations
 import shlex
 
 import delivery
+from gate_answer import GATE_1, GATE_2
 from pace import PaceError, read_pace
 from sprint_mvv import MVV_PACES
 from supervise_lib.decl import DeclError, decl_roots, delivery_decl, require_versions
@@ -189,7 +190,7 @@ def normal_gate_1(a, advise: bool = True) -> str:
     return (
         "設計 Pull Request の承認を取る。"
         + ("承認資料には各設計 PR の助言の MVV 判定（PR のコメント。無ければ「MVV なし」）を載せる。" if advise else "")
-        + f"利用者が答えたら、設計 PR ごとに `{user_gate_cmd(a, '関門 1', True)}` を打ってから「設計 PR のマージ」のステージの command を打つ"
+        + f"利用者が答えたら、設計 PR ごとに `{user_gate_cmd(a, GATE_1, True)}` を打ってから「設計 PR のマージ」のステージの command を打つ"
         + after
     )
 
@@ -197,7 +198,7 @@ def normal_gate_1(a, advise: bool = True) -> str:
 def normal_gate_2(a) -> str:
     return (
         "承認ゲート 2: 承認資料の末尾に助言の MVV 判定が載る（無ければ「MVV なし」）。利用者が本番への配布に答えたら、"
-        f"`{user_gate_cmd(a, '関門 2', False)}` を打つ"
+        f"`{user_gate_cmd(a, GATE_2, False)}` を打つ"
     )
 
 
@@ -208,7 +209,7 @@ def normal_gate_2_stage(a, repo: str | None, prod: str, advise: bool) -> str:
     if getattr(a, "state", None):  # 本番のプランの先頭の approve が状態の記録を証跡に承認の記録を書く（#1426 の決定 1）
         return (
             f"開発版の配布が書いた承認資料（{approval}）を示して本番への配布の承認を取り、利用者が答えたら "
-            f"`{user_gate_cmd(a, '関門 2', False)}` を打ち、承認されたら「本番」のステージの command を打つ（差し戻されたら打たない）。"
+            f"`{user_gate_cmd(a, GATE_2, False)}` を打ち、承認されたら「本番」のステージの command を打つ（差し戻されたら打たない）。"
             "本番のプランの先頭の approve が、開発版の facts の承認したコミットとこの記録を照らして承認資料へ承認の記録を書く"
             + ("。承認資料の末尾に助言の MVV 判定が載る（無ければ「MVV なし」）" if advise else "")
         )

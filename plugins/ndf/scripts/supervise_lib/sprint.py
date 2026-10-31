@@ -8,6 +8,7 @@ import shlex
 from pathlib import Path
 
 import project_mvv
+from gate_answer import GATE_1, GATE_2
 from pace import PaceError
 from step_result import result
 from supervise_lib import absorb, limits, sprint_inputs
@@ -70,7 +71,7 @@ def mvv_design_waves(a, repo: str, gate: str) -> list[dict]:
         return []
     return [
         {"name": "設計", "plans": {f"design-{n}": plan_mvv_design(a, n, repo) for n in a.design}},
-        {"name": "関門 1", "gate": gate},
+        {"name": GATE_1, "gate": gate},
     ]
 
 
@@ -104,7 +105,7 @@ def fast_sprint_plans(a) -> list[dict]:
 
 AUTO_GATE_1 = (
     "設計のプランの MVV 判定が通せばマージ済みで、このステージは通過する。設計のプランが関門を返したら、承認を取り "
-    '`sprint-state.py gate <状態> "関門 1" --by user` の後に、設計のステージの resume に `--from design-<N>=approve` を足して打つ'
+    f'`sprint-state.py gate <状態> "{GATE_1}" --by user` の後に、設計のステージの resume に `--from design-<N>=approve` を足して打つ'
 )
 
 
@@ -257,7 +258,7 @@ def sprint_plans(a) -> list[dict]:
     waves = []
     if a.design:
         waves.append({"name": "設計", "plans": {f"design-{n}": design(a, n, repo) for n in a.design}})
-        waves.append({"name": "関門 1", "gate": normal_gate_1(a, advise)})
+        waves.append({"name": GATE_1, "gate": normal_gate_1(a, advise)})
         waves.append({"name": MERGE_STAGE, "plans": {f"design-merge-{n}": plan_design_merge(a, n, repo) for n in a.design}})
     first = MERGE_STAGE if a.design else DESIGN_RESULTS_STAGE if design_read(a) else "スプリントブランチ"
 
@@ -280,7 +281,7 @@ def sprint_plans(a) -> list[dict]:
     prod = prod_version(a.version)
     return waves + [
         release,
-        {"name": "関門 2", "gate": normal_gate_2_stage(a, repo, prod, advise)},
+        {"name": GATE_2, "gate": normal_gate_2_stage(a, repo, prod, advise)},
         {"name": "本番", "plans": {"release-prod": plan_sprint_release(a, repo, channel="prod", version=prod)}},
     ]
 

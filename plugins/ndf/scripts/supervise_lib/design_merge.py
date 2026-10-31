@@ -12,6 +12,7 @@ import subprocess
 from typing import Callable
 
 import gate_answer
+from gate_answer import GATE_1
 from step_result import EXIT_GATE, EXIT_UNREADABLE, result
 from supervise_lib.paths import SELF
 from supervise_lib.plan import sprint_state_path
@@ -20,7 +21,6 @@ from supervise_lib.verify_steps import merge_steps
 
 TOOL = "supervise-design-approved"
 LABEL = "design-approved"
-GATE_1 = "関門 1"
 RULE = "承認の証跡が無ければ approved が関門で止まる。マージが落ちたら止まり、conductor は queue --resume で続ける。"
 
 

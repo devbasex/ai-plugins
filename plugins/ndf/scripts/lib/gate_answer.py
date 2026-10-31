@@ -14,6 +14,8 @@ from pathlib import Path
 import clock
 import jsonio
 
+GATE_1, GATE_2 = "関門 1", "関門 2"  # sprint-state.py gate が書き、approved が名前の一致で読む承認ゲートの記録の名前
+
 
 @dataclass(frozen=True)
 class Answer:

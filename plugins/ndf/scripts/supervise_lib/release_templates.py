@@ -6,6 +6,7 @@ import re
 import shlex
 from pathlib import Path
 
+from gate_answer import GATE_2
 from supervise_lib.decl import WORKTREE_DECL, DeclError, with_decls
 from supervise_lib.paths import MERGED_PY, MVV_PY, STEPS_PY, VERIFY_PY
 from supervise_lib.plan import QUEUE_PRS
@@ -138,7 +139,7 @@ def _add_prod_mvv_gate(steps: list[dict], a, repo: str | None, approval: str, pr
         f"sh -c 'for p in {prs}; do gh pr comment \"$p\" --body-file {MVV_NOTE} || exit 1; done'",
         "bump",
     )
-    steps.append(handoff_step(state, "関門 2", "判定のコメント"))
+    steps.append(handoff_step(state, GATE_2, "判定のコメント"))
 
 
 def _prepare_steps(a, plugin: str, v: str, prs: str, dev: bool, after_notes: str, repo: str | None, approval: str) -> list[dict]:
