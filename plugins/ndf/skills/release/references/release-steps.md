@@ -174,8 +174,11 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
   （どちらも無い・形の誤りは 2、資料・欄が無いと 3。どれも何もマージしない）。`--approval` は承認の記録の SHA が
   承認したコミットと同じときだけ受け取り、違えば何もマージせずに `gate`（10・`result: not_approved`）で止まる。
   配布の PR をマージした後、`origin/<ベースブランチ>` の先端（比べた先端）までに配布の PR の外のコミットか中身が
-  あれば、本番チャネルの PR・タグ・GitHub Release を作らずに `gate`（10）で止まる。本番チャネルへは比べた先端だけを
-  マージし（`merged-steps.py merge-when-green --expect-head`）、CI 待ちの間に先端が進んでも `gate` で止まる。
+  あれば、本番チャネルの PR・タグ・GitHub Release を作らずに `gate`（10）で止まる。ただし差分が配布物のパス
+  （プラグインの置き場とマーケットプレイスの定義。`release_lib/approval.py` の `SHIPPED`）に触れない外のコミット（設計文書・用語集だけの PR など）は止めずに通し、
+  `items[]` に `result: outside_unshipped` で、件数を `metrics.tolerated` に残す。本番チャネルへは比べた先端だけを
+  マージし（`merged-steps.py merge-when-green --expect-head`）、CI 待ちの間に先端が進んだときは比べ直す。進んだ分が
+  配布物に触れなければ比べ直した先端で入れ直し（3 回まで）、触れれば `gate` で止まる。
   `--channel dev` には渡さない（2）
 
   `gate` の読み方（git を照会し直さずに、結果 JSON だけで読める）:
