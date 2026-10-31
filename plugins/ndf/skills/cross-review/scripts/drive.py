@@ -368,10 +368,7 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
         (rp := self.tmp / f"drive-pr{self.pr}-report.md").write_text(self.st("report", str(self.pr))[1])
         c = self.counts()
         summary = f"収束ループが終わった（final={c['final']}・{c['rounds']} ラウンド・コメント {c['comments']}・指摘 {c['findings']}・修正 {c['fixed']}・未解決 {c['unresolved']}）"
-        if c["final"] == "approved":
-            res = dp.done(TOOL, summary, rp, c)
-        else:  # max_rounds・oscillation・error は収束していない。ok で返すと呼び出し側が後続へ進む（#2143）
-            res = dp.unconverged(TOOL, f"{summary}。収束していない", rp, c)
+        res = dp.done(TOOL, summary, rp, c) if c["final"] == "approved" else dp.unconverged(TOOL, f"{summary}。収束していない", rp, c)
         late = json.loads(self.path("sweep").read_text()).get("deferred") or []  # 最終スイープの見送り（#1488 の「レビュー」の材料）
         ds = [*s.get("deferred_nits", []), *({"round": c["rounds"], **d} for d in late if isinstance(d, dict))]  # 修正の見送り＋スイープ
         res["items"] += [
