@@ -358,10 +358,70 @@ def test_every_script_that_writes_to_the_temp_place_is_in_the_list() -> None:
     found = set()
     for path in [*PLUGIN.glob("scripts/**/*"), *PLUGIN.glob("skills/*/scripts/**/*")]:
         rel = path.relative_to(PLUGIN).as_posix()
-        if path.suffix not in (".py", ".sh") or "/tests/" in f"/{rel}" or path.name.startswith("test_") or path.name == "conftest.py":
+        # 試行の置き場（scripts の下の experimental）は既定の振る舞いの外で、本体の一覧から指さない（AGENTS.md の「安定版と実験版」）
+        trial = rel.split("/")[:2] == ["scripts", "experimental"]
+        skipped = "/tests/" in f"/{rel}" or trial or path.name.startswith("test_") or path.name == "conftest.py"
+        if path.suffix not in (".py", ".sh") or skipped:
             continue
         if _CREATES.search(path.read_text(encoding="utf-8", errors="replace")):
             found.add(rel)
     assert found - creators == set()
     assert all(k.name and k.place and k.owner and k.life and k.when for k in run_state.KINDS)
     assert all((PLUGIN / c).exists() or c == "conftest.py" for c in creators)
+
+
+# ---------------- cross-review の開始（state.py init の再開の経路） ----------------
+
+
+CR_STATE = PLUGIN / "skills" / "cross-review" / "scripts" / "state.py"
+QUIET_GH = "#!/bin/sh\nexit 0\n"
+
+
+def _cr_init(place, tmp_path, *extra):
+    root, base, systmp = place
+    git(root, "remote", "set-url", "origin", "https://github.com/o/r.git")
+    crtmp = tmp_path / "crtmp"
+    crtmp.mkdir(exist_ok=True)
+    state = {"current_pr": 7, "repo": "o/r", "tmp_dir": str(crtmp), "head_branch": "feat/x", "base_branch": "main", "pr_author": "a"}
+    state.update(viewer_login="a", is_own_pr=True, event_downgrade=True, worktree_path="", rounds=[], carried_over=None, final=None)
+    state.update(auto_review_categories=["code"], auto_review_instructions="x", review_instructions="x")
+    (crtmp / "cross-review-pr7-state.json").write_text(json.dumps(state), encoding="utf-8")
+    bindir = tmp_path / "quiet-bin"
+    bindir.mkdir(exist_ok=True)
+    (bindir / "gh").write_text(QUIET_GH, encoding="utf-8")
+    (bindir / "gh").chmod(0o755)
+    env = {**os.environ, "PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}", "CROSS_REVIEW_TMP_DIR": str(crtmp), "TMPDIR": str(systmp)}
+    env.setdefault("NDF_HOST", "claude")
+    p = subprocess.run([sys.executable, str(CR_STATE), "init", "7", *extra], capture_output=True, text=True, env=env, cwd=root)
+    return p, base / "pr7"
+
+
+def test_cross_review_init_stops_while_another_run_owns_the_worktree(place, tmp_path) -> None:
+    """I12: 窓の中の別の実行の記録があれば、--run 無し・違う --run の開始は止まり、記録は変わらない。一致すれば再開する。"""
+    _, base, _ = place
+    pr = base / "pr7"
+    run = run_state.claim(pr, tool="cross-review", pr=7)
+    before = run_state.owner_path(pr).read_text(encoding="utf-8")
+
+    for extra in ((), ("--run", "other")):
+        p, _ = _cr_init(place, tmp_path, *extra)
+        assert p.returncode == 1 and "別の実行" in p.stderr
+        assert run_state.owner_path(pr).read_text(encoding="utf-8") == before
+
+    p, _ = _cr_init(place, tmp_path, "--run", run)
+    assert p.returncode == 0, p.stderr
+    assert "RESUMED=1" in p.stdout and f"RUN={run}" in p.stdout and "SWEPT=" in p.stdout
+
+
+def test_cross_review_init_claims_after_a_finished_run(place, tmp_path) -> None:
+    """AC15・I11: 以前の実行（終わった記録）なら作業の無い開始は通り、新しい実行の記録を書く。"""
+    _, base, _ = place
+    pr = base / "pr7"
+    old = run_state.claim(pr, tool="cross-review", pr=7)
+    run_state.finish(pr, old)
+
+    p, _ = _cr_init(place, tmp_path)
+
+    assert p.returncode == 0, p.stderr
+    record = run_state.read_owner(pr)[0]
+    assert record["run"] != old and record["finished_at"] is None and f"RUN={record['run']}" in p.stdout

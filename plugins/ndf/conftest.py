@@ -1,7 +1,7 @@
 """NDF のテストに共通する前提（#1142・#1953 の決定 9）。プラグインの根に置き、リポジトリでもプラグインのキャッシュでも効く。
 
 1. テストごとに、使用量の帳簿（`NDF_USAGE_DIR`）・プランの状態の実体（`NDF_SV_STATE_DIR`）・耐久の記録
-   （`NDF_DBOS_DIR`）を別の一時ディレクトリへ向ける。帳簿を読むテストが、ほかのテストの書いた行を読まない。
+   （`NDF_DBOS_DIR`）・レビュー worktree の置き場（`NDF_WORKTREE_BASE`）・一時の置き場（`TMPDIR`）を別の一時ディレクトリへ向ける。帳簿を読むテストが、ほかのテストの書いた行を読まない。
    どれも書く時に作るため、ここではパスを決めるだけでディレクトリを作らない
 2. テストの終わりに、本物の帳簿（`NDF_USAGE_DIR` を外したときに決まる置き場所）へそのテストの印（`pytest`）の
    付いた行が増えていたら、そのテストを落とす（I9）。増えたファイルと大きさを失敗の文に出す。印の無い行
@@ -40,6 +40,12 @@ def _isolated_usage_dirs(_ndf_isolated_base: Path, request: pytest.FixtureReques
     monkeypatch.setenv("NDF_USAGE_DIR", str(base / "usage"))
     monkeypatch.setenv("NDF_SV_STATE_DIR", str(base / "sv"))
     monkeypatch.setenv("NDF_DBOS_DIR", str(base / "dbos"))
+    # レビュー worktree と一時の置き場も別にする。開始と merged の片付け（lib/run_state.py の sweep）が、手元の
+    # /tmp/ndf-worktrees と /tmp の残る状態に触れない（#2229）
+    monkeypatch.setenv("NDF_WORKTREE_BASE", str(base / "worktrees"))
+    (tmp := base / "tmp").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("TMPDIR", str(tmp))
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp))
     before = usage_ledger.ledger_snapshot(REAL_LEDGER)
     yield
     leaked = usage_ledger.marked_rows(REAL_LEDGER, before, request.node.nodeid)

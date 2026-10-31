@@ -127,8 +127,6 @@ KINDS: tuple[Kind, ...] = (
         (
             "scripts/check-trigger.py",
             "scripts/ensure-retention.sh",
-            "scripts/experimental/hook-trial/ht_checks.py",
-            "scripts/experimental/hook-trial/ht_hook.py",
             "scripts/hook_lib/token_guard.py",
             "scripts/lib/gh_pr_info.py",
             "scripts/lib/sprint_loop_record.py",

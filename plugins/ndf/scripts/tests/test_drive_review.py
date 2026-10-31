@@ -178,7 +178,8 @@ def test_review_drive_pauses_for_fix_then_sweep_then_finishes(tmp_path, monkeypa
         assert tool not in prompt
     assert "02-fix-and-rotation" not in prompt  # 修正の手順は /ndf:fix が持ち、雛形を読ませない
     assert Path(item["result_file"]).name == "fix-pr5-result.json" and item["result_file"] in prompt
-    assert ("state.py", "init", "5", "--max-rounds", "4") in fake.calls
+    # init の引数はそのまま渡り、実行の識別子（--run）が足される（#2229）
+    assert any(c[:5] == ("state.py", "init", "5", "--max-rounds", "4") and c[5:-1] == ("--run",) for c in fake.calls)
 
     # 打ち直しても結果ファイルが無ければ同じ pause を返す
     code, out = run_main(cr, ["5"], capsys)
@@ -331,7 +332,8 @@ def test_the_answer_file_holds_the_review_status_of_the_state(tmp_path, monkeypa
     argv = ["5", "--result-file", str(answer)]
     code, out = run_main(cr, argv, capsys)
     assert code == 21 and not answer.exists()  # 止まり（gate）では書かない
-    assert ("state.py", "init", "5") in fake.calls
+    # init には結果を変える引数（--result-file）を渡さず、実行の識別子（--run）だけを足す（#2229）
+    assert any(c[:3] == ("state.py", "init", "5") and c[3:-1] == ("--run",) for c in fake.calls)
     Path(out["items"][0]["result_file"]).write_text("{}")
     code, out = run_main(cr, argv, capsys)
     assert code == 0 and out["metrics"]["review_status"] == want

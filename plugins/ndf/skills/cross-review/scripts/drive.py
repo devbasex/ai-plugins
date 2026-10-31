@@ -33,6 +33,7 @@ deps.require("durable", "waits")
 import drive_pause as dp  # noqa: E402
 import durable  # noqa: E402
 import post_queue  # noqa: E402  一時的な失敗の流し直し（#1843）
+import run_state  # noqa: E402  持ち主の記録（#2229）
 import assignee_env  # noqa: E402
 import step_result as sr  # noqa: E402
 from drive_pause import Stop  # noqa: E402
@@ -261,16 +262,26 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
         return durable_identity(self.known_tmp(), self.pr)
 
     def init(self) -> dict:
-        out = self.must(call([sys.executable, str(HERE / "state.py"), "init", str(self.pr), *self.init_args], self.env), "state.py init")
+        try:  # 実行の識別子は収束ループの耐久ワークフローの ID（打ち直しでも同じ。#2229）
+            run = [] if "--run" in self.init_args else ["--run", durable.current_id()]
+        except durable.DurableError:
+            run = []
+        out = self.must(call([sys.executable, str(HERE / "state.py"), "init", str(self.pr), *self.init_args, *run], self.env), "state.py init")
         iv = parse_vars(out)
         if "TMP_DIR" not in iv:
             raise Stop("state.py init が TMP_DIR を返さない", 2)
         return iv
 
     def adopt(self, iv: dict) -> None:
-        """init の出力（耐久ステップの記録）を持つ。打ち直しでは記録から組み直し、init を打たない（I19）。"""
+        """init の出力（耐久ステップの記録）を持つ。打ち直しでは記録から組み直し、init を打たない（I19）。
+
+        起動のたびに pr<n> の持ち主の記録へ動いた時刻を書く。別の実行が引き継いでいれば止まる（#2229 の I12）。"""
         self.v.update(iv)
         self.env["CROSS_REVIEW_TMP_DIR"] = self.v["TMP_DIR"]
+        if self.v.get("RUN") and self.v.get("WORKTREE"):
+            done, why = run_state.touch(self.v["WORKTREE"], self.v["RUN"])
+            if not done:
+                raise Held(f"持ち主の記録を更新できない: {why}", 1)
 
     def review_round(self) -> str:
         """1 ラウンド。戻り値: fix / round（修正を挟まずに次のラウンド）/ posts（投稿だけが残った）/ done。"""
@@ -374,6 +385,11 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
         res["items"] += [
             {"kind": "deferred", **{k: d.get(k) for k in ("path", "line", "summary", "round")}} for d in ds if not d.get("waived")
         ]
+        res["items"] += json.loads(self.v.get("SWEPT") or "[]")  # 開始の片付けの結果（#2229）
+        if self.v.get("RUN") and self.v.get("WORKTREE"):
+            done, why = run_state.finish(self.v["WORKTREE"], self.v["RUN"])
+            if not done:
+                raise Stop(f"持ち主の記録に終わりを書けない: {why}", 1)
         return res
 
     # --- 起動: 耐久の記録を開き、耐久ワークフローを始めるか続けて、止まりか終わりを待つ ---

@@ -12,6 +12,7 @@ from typing import Any, NamedTuple
 import review_lib  # noqa: E402
 import assignment  # noqa: E402
 import review_criteria  # noqa: E402
+import run_state  # noqa: E402
 from classifications import default_max_rounds, review_kind  # noqa: E402
 from review_lib import (  # noqa: E402
     categories as categories_mod,
@@ -242,10 +243,25 @@ def cmd_init(args: argparse.Namespace) -> None:
     # worktree ディレクトリが副作用で作成され exists() が常に true になる。
     # そのため _tmp_dir() 呼び出しは worktree 作成/確認の後に行う。
 
-    if _resume_from_state(pr, repo, worktree, manual_extra_review, args):
-        return
+    # 持ち主の終わった残る状態を片付け（開始する pr<n> は見ない）、既存の pr<n> を使ってよいかを決める（#2229）
+    swept = run_state.sweep(pathlib.Path.cwd(), skip=[worktree])
+    owned = not args.worktree  # 置き場を渡した worktree は呼び出し元が持つ。記録を書かない
+    stop = run_state.check_start(worktree, getattr(args, "run", None)) if owned else None
+    if stop:
+        review_lib.die(stop)
 
-    _init_new_state(args, pr, repo, worktree, manual_extra_review)
+    if not _resume_from_state(pr, repo, worktree, manual_extra_review, args):
+        _init_new_state(args, pr, repo, worktree, manual_extra_review)
+    print(f"RUN={_claim(worktree, pr, getattr(args, 'run', None)) if owned else ''}")
+    print(f"SWEPT={shlex.quote(json.dumps(swept, ensure_ascii=False))}")
+
+
+def _claim(worktree: str, pr: object, run: str | None) -> str:
+    """pr<n> の持ち主の記録を書き、実行の識別子を返す。同じ実行の続きなら記録を引き継いで動いた時刻だけを書く。"""
+    record, _ = run_state.read_owner(worktree)
+    if run and record is not None and record.get("run") == run and run_state.touch(worktree, run)[0]:
+        return run
+    return run_state.claim(worktree, tool="cross-review", pr=int(str(pr)), run=run)
 
 
 class _InitPRContext(NamedTuple):
