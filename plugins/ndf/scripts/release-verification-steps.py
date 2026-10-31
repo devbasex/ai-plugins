@@ -271,24 +271,36 @@ def _verify_runtimes(a, root, src, tmp, runtimes, plugins, rel, prev, ref_rev, w
     return runtimes_res, mismatch
 
 
+def _runtime_result(r, expect) -> str:
+    """ランタイム 1 件の判定: 導入が失敗 → failed、版が --expect と違う → version_mismatch、それ以外 ok。"""
+    v = r.get("version")
+    # mcp-serena などは別の版を持つので、ndf があれば ndf だけを --expect と比べる
+    vs = ([v.get("ndf")] if "ndf" in v else list(v.values())) if isinstance(v, dict) else [v]
+    if r.get("exit") != 0:
+        return "failed"
+    if any(x != expect for x in vs):
+        return "version_mismatch"
+    return "ok"
+
+
+def _env_items(before, after) -> list[dict]:
+    """利用者の環境の差分を、変わった鍵ごとの項目にする。"""
+    if before == after:
+        return []
+    return [
+        {"kind": "user_env", "name": k, "result": "changed", "before": before[k], "after": after[k]}
+        for k in before
+        if before[k] != after[k]
+    ]
+
+
 def _build_result(a, ref_rev, prev, runtimes_res, mismatch, before, after) -> dict:
     """ランタイムごとの結果・中身の不一致・利用者の環境の差分から結果をまとめる。"""
-    items = []
     env_same = before == after
-    if not env_same:
-        for k in before:
-            if before[k] != after[k]:
-                items.append({"kind": "user_env", "name": k, "result": "changed", "before": before[k], "after": after[k]})
+    items = _env_items(before, after)
     ok = env_same and not mismatch
     for name, r in runtimes_res.items():
-        v = r.get("version")
-        # mcp-serena などは別の版を持つので、ndf があれば ndf だけを --expect と比べる
-        vs = ([v.get("ndf")] if "ndf" in v else list(v.values())) if isinstance(v, dict) else [v]
-        res = "ok"
-        if r.get("exit") != 0:
-            res = "failed"
-        elif any(x != a.expect for x in vs):
-            res = "version_mismatch"
+        res = _runtime_result(r, a.expect)
         if res != "ok":
             ok = False
         items.append({"kind": "runtime", "name": name, "result": res, **r})
