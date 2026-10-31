@@ -38,51 +38,10 @@ def cmd_report(a, ctx):
             }
         )
     if app:
-        am = app["metrics"]
-        rnd = am.get("round") or {**am, "runs": 1}  # round を持たない前の版の記録は、最後の 1 回だけを数える
-        applied, closed, waits = rnd["applied"], rnd["closed"], rnd.get("waits", [])
-        verdicts, needs_approval, returned = _round_verdicts(am, rnd)
-        if rnd.get("lost") or (rnd["runs"] > 1 and "verdict_of" not in rnd):
-            gaps.append(
-                {
-                    "kind": "record",
-                    "name": "apply.json",
-                    "reason": "同じ回の前の apply の区分が記録に無く、区分の内訳・承認待ち・返した課題を足し合わせられない。"
-                    "candidates から打ち直す",
-                }
-            )
-        metrics.update(
-            {
-                "verdicts": verdicts,
-                "applied": len(applied),
-                "closed": len(closed),
-                "apply_runs": rnd["runs"],
-                "returned": len(returned),
-                "returned_numbers": returned,
-                "skipped_changed": am["skipped_changed"],
-                "needs_approval": needs_approval,
-                "failed": am["failed"],
-                "pending": am["pending"],
-                "partial": am["partial"],
-                "wait_count": len(waits),
-                "wait_seconds": round(sum(w["seconds"] for w in waits), 1),
-            }
-        )
-        items += [
-            {
-                "kind": "section",
-                "name": "区分の内訳",
-                "result": "ok",
-                "value": "・".join(f"{v} {c}" for v, c in verdicts.items() if c),
-            },
-            {
-                "kind": "section",
-                "name": "反映",
-                "result": "partial" if am["partial"] else "ok",
-                "value": f"直した {len(applied) - len(closed)} 件・閉じた {len(closed)} 件・返した {len(returned)} 件",
-            },
-            {"kind": "section", "name": "待った回数", "result": "ok", "value": f"{len(waits)} 回・計 {metrics['wait_seconds']:g} 秒"},
-        ]
+        app_items, app_metrics, app_gaps = _apply_report(app)
+        items += app_items
+        metrics.update(app_metrics)
+        gaps += app_gaps
     rank_items, rank_metrics = report_sections(rank, app)
     items += rank_items
     metrics.update(rank_metrics)
@@ -90,6 +49,55 @@ def cmd_report(a, ctx):
     if gaps:  # 足し合わせられない値を 0 件の ok と読ませない
         summary = "足し合わせられない記録がある: " + gaps[0]["reason"] + " / " + summary
     emit(result(ctx.tool, "stopped" if gaps else "ok", summary, items, metrics, gaps=gaps))
+
+
+def _apply_report(app) -> tuple[list, dict, list]:
+    """apply の記録から、表示項目・集計値・足し合わせられない記録の欠けを組み立てる。"""
+    am = app["metrics"]
+    rnd = am.get("round") or {**am, "runs": 1}  # round を持たない前の版の記録は、最後の 1 回だけを数える
+    applied, closed, waits = rnd["applied"], rnd["closed"], rnd.get("waits", [])
+    verdicts, needs_approval, returned = _round_verdicts(am, rnd)
+    gaps = []
+    if rnd.get("lost") or (rnd["runs"] > 1 and "verdict_of" not in rnd):
+        gaps.append(
+            {
+                "kind": "record",
+                "name": "apply.json",
+                "reason": "同じ回の前の apply の区分が記録に無く、区分の内訳・承認待ち・返した課題を足し合わせられない。"
+                "candidates から打ち直す",
+            }
+        )
+    metrics = {
+        "verdicts": verdicts,
+        "applied": len(applied),
+        "closed": len(closed),
+        "apply_runs": rnd["runs"],
+        "returned": len(returned),
+        "returned_numbers": returned,
+        "skipped_changed": am["skipped_changed"],
+        "needs_approval": needs_approval,
+        "failed": am["failed"],
+        "pending": am["pending"],
+        "partial": am["partial"],
+        "wait_count": len(waits),
+        "wait_seconds": round(sum(w["seconds"] for w in waits), 1),
+    }
+    items = [
+        {
+            "kind": "section",
+            "name": "区分の内訳",
+            "result": "ok",
+            "value": "・".join(f"{v} {c}" for v, c in verdicts.items() if c),
+        },
+        {
+            "kind": "section",
+            "name": "反映",
+            "result": "partial" if am["partial"] else "ok",
+            "value": f"直した {len(applied) - len(closed)} 件・閉じた {len(closed)} 件・返した {len(returned)} 件",
+        },
+        {"kind": "section", "name": "待った回数", "result": "ok", "value": f"{len(waits)} 回・計 {metrics['wait_seconds']:g} 秒"},
+    ]
+    return items, metrics, gaps
 
 
 def next_round(prev, actions, buckets, closed, waits) -> dict:
