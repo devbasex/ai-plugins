@@ -58,13 +58,13 @@ from step_result import (
     main_with,
     result,
     run,
-    validate_result,
 )
 import acceptance  # noqa: E402
 import gh_call  # noqa: E402
 import gh_parts  # noqa: E402
 import gh_rest  # noqa: E402
 import locks  # noqa: E402
+import step_read  # noqa: E402  projects-sync.sh の結果 JSON を読む（#2227）
 from closing import referenced_numbers  # noqa: E402
 
 from dist_record import parse_record  # noqa: E402  記録の形は lib/dist_record.py が持つ（#1273）
@@ -168,21 +168,6 @@ class CloseContext:
         self.retry_cmd = shlex.join(["python3", str(Path(__file__).resolve()), *argv])
 
 
-def board_failure(stdout, code, stderr=""):
-    """`projects-sync.sh` の結果 JSON（最後の行）が ok でなければ理由の 1 行を返す。ok なら None（#2227）。"""
-    lines = [ln for ln in (stdout or "").splitlines() if ln.strip()]
-    try:
-        obj = json.loads(lines[-1]) if lines else None
-    except ValueError:
-        obj = None
-    if obj is None or validate_result(obj):
-        return f"projects-sync.sh が結果 JSON を返さなかった（exit={code}）: {(stderr or '').strip()[:200]}"
-    if obj["status"] == "ok" and code == 0:
-        return None
-    reasons = "; ".join(g["reason"] for g in obj.get("gaps", []))
-    return f"{obj['status']}（exit={code}）: {obj['summary']}" + (f"（{reasons}）" if reasons else "")
-
-
 def close_one(ctx, repo, n):
     root, record_repo, comment, notes = ctx.root, ctx.record_repo, ctx.comment, ctx.notes
     it = {"kind": "issue", "repo": repo, "number": n}
@@ -191,7 +176,7 @@ def close_one(ctx, repo, n):
         return {**it, "result": "failed", "reason": "before を読めない", "cmd": f"gh issue close {n} --repo {repo}"}
     if repo == record_repo:
         s = run(["bash", str(HERE / "projects-sync.sh"), str(n), "status", "Done"], cwd=root, check=False)
-        why = board_failure(s.stdout, s.returncode, s.stderr)
+        why = step_read.not_ok_reason(s.stdout, s.returncode, s.stderr)
         if why:
             notes.append({"kind": "board_note", "name": f"{repo}#{n}", "result": "note", "reason": why})
     close_out = _close_if_open(root, repo, n, comment) if before == "OPEN" else None

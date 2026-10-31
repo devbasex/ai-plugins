@@ -4,6 +4,8 @@
   `ok` の試行のうち番号の最も大きいものだけを採る。`ok` の試行が無ければ値を返さず、理由を返す
 - `open_place` / `place_stop`: 結果の置き場（ファイル・ディレクトリ）が無い・読めないことと、
   置き場はあるが材料が 0 件であることを別の値で返す
+- `result_line` / `not_ok_reason`: 子プロセスの標準出力の最後の行を結果 JSON として読み、`ok`（終了コード 0）で
+  なければ理由の 1 行を返す。結果 JSON が無い・形が誤っていることも成功と読まない
 
 読むだけで、試行も置き場も書き換えない。形の正本は同じディレクトリの README.md の
 「手順のスクリプトの結果」。標準ライブラリだけで書く。
@@ -132,3 +134,30 @@ def place_stop(tool: str, place: Place, what: str):
         why = f"（{place.reason}）" if place.reason else ""
         return step_result.result(tool, "stopped", f"{what} の置き場を読めない: {place.path}{why}"), step_result.EXIT_UNREADABLE
     return None
+
+
+def result_line(stdout: str) -> dict | None:
+    """標準出力の最後の空でない行を結果 JSON として読む。無い・形が誤っていれば None。"""
+    lines = [ln for ln in (stdout or "").splitlines() if ln.strip()]
+    try:
+        obj = json.loads(lines[-1]) if lines else None
+    except ValueError:
+        return None
+    return obj if obj is not None and not step_result.validate_result(obj) else None
+
+
+def not_ok_reason(stdout: str, code: int, stderr: str = "") -> str | None:
+    """結果 JSON が ok（終了コード 0）なら None、そうでなければ状態・終了コード・要約・欠けの理由の 1 行を返す。"""
+    obj = result_line(stdout)
+    if obj is None:
+        return f"結果 JSON が無い（exit={code}）: {(stderr or '').strip()[:200]}"
+    if obj["status"] == "ok" and code == 0:
+        return None
+    reasons = "; ".join(g["reason"] for g in obj.get("gaps", []))
+    return f"{obj['status']}（exit={code}）: {obj['summary']}" + (f"（{reasons}）" if reasons else "")
+
+
+def process_if_not_ok(run: str, completed) -> list[dict]:
+    """子プロセス（`subprocess.CompletedProcess`）の結果 JSON が ok でなければ、過程の項目 1 件（`run` / `result`）の列を返す。"""
+    why = not_ok_reason(completed.stdout, completed.returncode, completed.stderr)
+    return [{"run": run, "result": why}] if why else []

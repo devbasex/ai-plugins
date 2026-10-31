@@ -100,3 +100,14 @@ def test_open_place_unreadable_by_permission(tmp_path):
         assert rd.open_place(p).state == "unreadable"
     finally:
         p.chmod(0o600)
+
+
+def test_process_if_not_ok_reads_the_last_result_line():
+    import subprocess
+
+    ok = {"tool": "t", "status": "ok", "summary": "記録した", "items": [], "metrics": {}}
+    p = subprocess.CompletedProcess([], 0, "前の行\n" + json.dumps(ok) + "\n", "")
+    assert rd.process_if_not_ok("rec.sh 1 stage 設計", p) == []
+    bad = subprocess.CompletedProcess([], 0, "#1 進行 = 設計\n", "")  # 古い形の行は成功と読まない
+    got = rd.process_if_not_ok("rec.sh 1 stage 設計", bad)
+    assert got[0]["run"] == "rec.sh 1 stage 設計" and "結果 JSON が無い" in got[0]["result"]

@@ -25,18 +25,18 @@ def line(status, summary, gaps=None):
 
 
 def test_ok_result_has_no_note():
-    assert sc.board_failure(line("ok", "#1 Status = Done（ボード）"), 0) is None
+    assert sc.step_read.not_ok_reason(line("ok", "#1 Status = Done（ボード）"), 0) is None
 
 
 def test_stopped_result_carries_the_gap_reason():
     gap = {"kind": "board", "name": "#1 Status", "reason": "GraphQL: 偽の書き込みの失敗"}
-    why = sc.board_failure(line("stopped", "#1 の進行の一部を書けなかった（1 件）", [gap]), 6)
+    why = sc.step_read.not_ok_reason(line("stopped", "#1 の進行の一部を書けなかった（1 件）", [gap]), 6)
     assert why and "exit=6" in why and "GraphQL: 偽の書き込みの失敗" in why
 
 
 def test_missing_result_is_not_read_as_ok():
-    why = sc.board_failure("NOTE: 古い形の行\n", 0, "落ちた")
-    assert why and "結果 JSON を返さなかった" in why
+    why = sc.step_read.not_ok_reason("NOTE: 古い形の行\n", 0, "落ちた")
+    assert why and "結果 JSON が無い" in why
 
 
 def test_close_one_notes_a_failed_board_and_keeps_closing(monkeypatch, tmp_path):

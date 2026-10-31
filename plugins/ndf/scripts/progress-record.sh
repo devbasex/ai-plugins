@@ -74,12 +74,6 @@ usage() {
   printf 'usage: progress-record.sh <issue番号> <工程名> [--mode M] [--pace P] [--worktree P] [--plan P] [--repo R] [--note TEXT]\n' >&2
 }
 
-# 呼び出し側の誤りを 2 で返す。
-bad_args() {
-  printf 'ERROR: %s\n' "$1" >&2
-  [ -z "${2:-}" ] || usage
-  sr_emit --tool "$TOOL" --status stopped --summary "$1" --code 2
-}
 
 ARGS=("$@")
 ISSUE="${1:-}"
@@ -95,17 +89,17 @@ while [ "$#" -gt 0 ]; do
     --plan) PLAN="${2:-}"; shift 2 ;;
     --repo) REPO="${2:-}"; shift 2 ;;
     --note) NOTE="${2:-}"; shift 2 ;;
-    *) bad_args "知らない引数です: $1" usage ;;
+    *) sr_bad_args "$TOOL" "知らない引数です: $1" usage ;;
   esac
 done
 
-[ -n "$ISSUE" ] && [ -n "$STAGE" ] || bad_args "引数が足りません" usage
+[ -n "$ISSUE" ] && [ -n "$STAGE" ] || sr_bad_args "$TOOL" "引数が足りません" usage
 case "$ISSUE" in
-  ''|*[!0-9]*) bad_args "issue 番号が数値ではありません: $ISSUE" ;;
+  ''|*[!0-9]*) sr_bad_args "$TOOL" "issue 番号が数値ではありません: $ISSUE" ;;
 esac
-[ "$STAGE" = "-" ] || wf_is_stage "$STAGE" || bad_args "工程表に無い工程名です: $STAGE"
-[ -z "$MODE" ] || wf_is_mode "$MODE" || bad_args "知らないモードです: $MODE"
-[ -z "$PACE" ] || wf_is_pace "$PACE" || bad_args "知らない進め方です: $PACE"
+[ "$STAGE" = "-" ] || wf_is_stage "$STAGE" || sr_bad_args "$TOOL" "工程表に無い工程名です: $STAGE"
+[ -z "$MODE" ] || wf_is_mode "$MODE" || sr_bad_args "$TOOL" "知らないモードです: $MODE"
+[ -z "$PACE" ] || wf_is_pace "$PACE" || sr_bad_args "$TOOL" "知らない進め方です: $PACE"
 
 # `配布` の記録で wf_record_progress が出す案内（`  記録なし: A / B`・`  条件付き: C`）を、工程ごとの
 # `stage-missing` の要素へ移す。標準出力へは出さない（結果 JSON の 1 行を守る）。

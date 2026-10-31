@@ -44,44 +44,36 @@ usage() {
   printf 'usage: projects-sync.sh <issue番号> <キー: stage|mode|pace|status|worktree|plan> <値>\n' >&2
 }
 
-# 呼び出し側の誤りを 2 で返す。
-bad_args() {
-  printf 'ERROR: %s\n' "$1" >&2
-  [ -z "${2:-}" ] || usage
-  sr_emit --tool "$TOOL" --status stopped --summary "$1" --code 2
-}
 
 ISSUE="${1:-}"
 KEY="${2:-}"
 VALUE="${3:-}"
 
 if [ "$#" -ne 3 ] || [ -z "$ISSUE" ] || [ -z "$KEY" ] || [ -z "$VALUE" ]; then
-  bad_args "引数が足りません" usage
+  sr_bad_args "$TOOL" "引数が足りません" usage
 fi
 case "$ISSUE" in
-  ''|*[!0-9]*) bad_args "issue 番号が数値ではありません: $ISSUE" ;;
+  ''|*[!0-9]*) sr_bad_args "$TOOL" "issue 番号が数値ではありません: $ISSUE" ;;
 esac
-KIND=$(pj_key_kind "$KEY") || bad_args "知らないキーです: $KEY" usage
+KIND=$(pj_key_kind "$KEY") || sr_bad_args "$TOOL" "知らないキーです: $KEY" usage
 case "$KEY" in
   stage) wf_is_stage "$VALUE" ;;
   mode) wf_is_mode "$VALUE" ;;
   pace) wf_is_pace "$VALUE" ;;
   *) pj_is_valid_value "$KEY" "$VALUE" ;;
-esac || bad_args "$KEY が取らない値です: $VALUE"
+esac || sr_bad_args "$TOOL" "$KEY が取らない値です: $VALUE"
 
 # issue の本文と通過記録。失敗してもボードの更新へ進む。
 # **`gh` の有無を見る前に呼ぶ。** 通過記録は `gh` が無くても積む（#725 の決定 4）。
 # `progress-record.sh` も自分で `gh` の有無を見るため、本文の振る舞いは変わらない。
-BODY_STATUS=none BODY_CODE=0 SUMMARY_BODY=''
+BODY_CODE=0 SUMMARY_BODY=''
 record_body() {
   local out
   out=$(bash "$SCRIPT_DIR/progress-record.sh" "$@")
   BODY_CODE=$?
   if sr_absorb "${out##*$'\n'}"; then
-    BODY_STATUS=$SR_ABSORBED_STATUS
     SUMMARY_BODY=$SR_ABSORBED_SUMMARY
   else
-    BODY_STATUS=stopped
     sr_gap issue-body "#$ISSUE" "progress-record.sh が結果を返さなかった（終了コード $BODY_CODE）"
   fi
 }

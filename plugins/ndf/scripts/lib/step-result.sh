@@ -59,8 +59,8 @@ sr_gh() {
 
 # 別の手順のスクリプトの結果 JSON（1 行）の items / gaps / process / decisions を SR_ARGS へ取り込む。
 # 取り込んだ結果の status と summary を SR_ABSORBED_STATUS / SR_ABSORBED_SUMMARY に残す。結果 JSON でない・形が誤っていれば 1 を返し、何も足さない。
-SR_ABSORBED_STATUS=''
-SR_ABSORBED_SUMMARY=''
+# shellcheck disable=SC2034  # source した側が読む
+SR_ABSORBED_STATUS='' SR_ABSORBED_SUMMARY=''
 sr_absorb() {
   local line
   local -a got=()
@@ -88,8 +88,8 @@ for field, keys in RECORD_KEYS.items():
 sys.stdout.write("\0".join(out) + "\0")
 ' "$SR_LIB_DIR" 2>/dev/null)
   [ "${#got[@]}" -gt 1 ] || return 1
-  SR_ABSORBED_STATUS=${got[0]}
-  SR_ABSORBED_SUMMARY=${got[1]}
+  # shellcheck disable=SC2034  # source した側が読む
+  SR_ABSORBED_STATUS=${got[0]} SR_ABSORBED_SUMMARY=${got[1]}
   local i=2
   while [ "$i" -lt "${#got[@]}" ]; do
     [ "${got[$i]}" = "--gap" ] && SR_GAPS=$((SR_GAPS + 1))
@@ -97,6 +97,13 @@ sys.stdout.write("\0".join(out) + "\0")
     i=$((i + 1))
   done
   return 0
+}
+
+# 呼び出し側の誤りを標準エラーへ 1 行出し、stopped / 2 の結果で終える。第 3 引数に関数名を渡すと、先にそれ（usage）を呼ぶ。
+sr_bad_args() {
+  printf 'ERROR: %s\n' "$2" >&2
+  [ -z "${3:-}" ] || "$3"
+  sr_emit --tool "$1" --status stopped --summary "$2" --code 2
 }
 
 # 結果 JSON を 1 行出し、その終了コードでシェルを終える。引数は `step_result.py emit` のもの
