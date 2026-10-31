@@ -2650,13 +2650,19 @@ def _arg(argv, flag):
     return argv[argv.index(flag) + 1].split(",") if flag in argv else None
 
 
+# 足す Tool は WebFetch・WebSearch の 2 つだけ（I3）。前の許可の一覧との差分で縛る
+_WEB = {"WebFetch", "WebSearch"}
+_BEFORE_WORK = {"Read", "Edit", "Write", "Bash", "Grep", "Glob"}
+_BEFORE_FULL = _BEFORE_WORK | {"Skill", "Agent", "Monitor", "SendMessage", "ToolSearch"}
+
+
 def test_full_work_allows_web_tools(tmp_path, seq):
     """full の work の claude -p は WebFetch・WebSearch を許可し、--permission-mode は acceptEdits のまま（#1698）。"""
     set_responses, calls = seq
     set_responses(OK)
     run_plan(tmp_path, [{"id": "design", "type": "work", "full": True, "prompt": "/ndf:design 1", "next": "end"}])
     argv = calls()[0]["argv"]
-    assert {"WebFetch", "WebSearch"} <= set(_arg(argv, "--allowed-tools")) and _arg(argv, "--permission-mode") == ["acceptEdits"]
+    assert set(_arg(argv, "--allowed-tools")) == _BEFORE_FULL | _WEB and _arg(argv, "--permission-mode") == ["acceptEdits"]
 
 
 @pytest.mark.parametrize("serena", [False, True])
@@ -2668,7 +2674,7 @@ def test_minimal_work_lists_web_tools_in_tools_and_allowed(tmp_path, seq, serena
     argv = calls()[0]["argv"]
     for flag in ("--tools", "--allowed-tools"):
         assert {"WebFetch", "WebSearch"} <= set(_arg(argv, flag)), flag
-    assert set(_arg(argv, "--tools")) - set(claude.WORK_TOOLS.split(",")) == set()
+    assert set(_arg(argv, "--tools")) == _BEFORE_WORK | _WEB
 
 
 def test_toolless_calls_get_no_tools():
