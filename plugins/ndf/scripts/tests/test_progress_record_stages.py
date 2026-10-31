@@ -168,7 +168,7 @@ def test_a_repository_without_a_board_declaration_is_recorded(env: Env) -> None:
 
 
 def test_without_gh_the_stage_is_still_recorded(env: Env, tmp_path: Path) -> None:
-    """`gh` が無くても積み、終了コードは 0 である。"""
+    """`gh` が無くても積む。本文を書けないことは前提の欠け（3）で返す（#2227）。"""
     nogh = tmp_path / "nogh"
     nogh.mkdir()
     for name in (
@@ -201,7 +201,7 @@ def test_without_gh_the_stage_is_still_recorded(env: Env, tmp_path: Path) -> Non
         if found:
             (nogh / name).symlink_to(found)
     out = env.run(str(SYNC), "42", "stage", "設計", env=env.env(PATH=str(nogh)))
-    assert out.returncode == 0, out.stderr
+    assert out.returncode == 3, out.stderr
     assert env.stages(42) == ["設計"]
     assert env.body(42) == ""
 
@@ -226,15 +226,20 @@ def test_the_refinement_stage_is_recorded_and_required_in_every_mode(env: Env) -
     assert got == ["棚卸し", "R", "R", "R", "R", "R"]
 
 
-def test_the_release_lists_the_missing_stages_on_stdout(env: Env) -> None:
+def stage_missing(out) -> dict[str, str]:
+    assert len(out.stdout.splitlines()) == 1, out.stdout
+    return {i["name"]: i["result"] for i in json.loads(out.stdout)["items"] if i["kind"] == "stage-missing"}
+
+
+def test_the_release_lists_the_missing_stages_as_items(env: Env) -> None:
     env.run(str(SYNC), "42", "mode", "standard")
     env.run(str(SYNC), "42", "stage", "設計")
     out = env.run(str(SYNC), "42", "stage", "配布")
     assert out.returncode == 0, out.stderr
-    assert "記録なし:" in out.stdout
-    assert "実装" in out.stdout
-    # 案内は本文の行より先に出る
-    assert out.stdout.index("記録なし:") < out.stdout.index("#42 進行 = 配布")
+    missing = stage_missing(out)
+    assert missing["実装"] == "missing"
+    item = next(i for i in json.loads(out.stdout)["items"] if i.get("name") == "実装")
+    assert 'projects-sync.sh" 42 stage "実装"' in item["reason"]
 
 
 def test_the_release_without_a_gap_says_nothing_more(env: Env) -> None:
@@ -248,9 +253,8 @@ def test_the_release_without_a_gap_says_nothing_more(env: Env) -> None:
             env.run(str(SYNC), "42", "stage", name)
     out = env.run(str(SYNC), "42", "stage", "配布")
     assert out.returncode == 0, out.stderr
-    assert "記録なし:" not in out.stdout
-    assert "条件付き:" not in out.stdout
-    assert out.stdout.strip() == "#42 進行 = 配布"
+    assert stage_missing(out) == {}
+    assert json.loads(out.stdout)["summary"] == "#42 進行 = 配布"
 
 
 def test_a_conditional_stage_without_a_record_is_shown_apart(env: Env) -> None:
@@ -259,8 +263,9 @@ def test_a_conditional_stage_without_a_record_is_shown_apart(env: Env) -> None:
     for name in ("要求と受け入れ条件", "作業場所の用意", "実装", "実装レビュー", "完了判定", "Pull Request", "後片付け"):
         env.run(str(SYNC), "42", "stage", name)
     out = env.run(str(SYNC), "42", "stage", "配布")
-    assert "条件付き: 設計" in out.stdout
-    assert "記録なし:" not in out.stdout
+    missing = stage_missing(out)
+    assert missing.get("設計") == "conditional"
+    assert "missing" not in missing.values()
 
 
 @pytest.mark.parametrize(
@@ -401,3 +406,31 @@ def test_one_record_adds_less_than_a_second(env: Env, tmp_path: Path) -> None:
     elapsed = time.monotonic() - start
     assert out.returncode == 0, out.stderr
     assert elapsed < 1.0
+
+
+def test_record_stage_keeps_going_and_keeps_a_failed_record(tmp_path: Path) -> None:
+    """#2227 の決定 7: 記録のスクリプトが stopped / 6 を返してもプランを止めず、書けなかった工程を process に残す。"""
+    sys.path.insert(0, str(SCRIPTS / "lib"))
+    sys.path.insert(0, str(SCRIPTS))
+    from supervise_lib.state import RunState  # noqa: PLC0415
+
+    gap = {"kind": "issue-body", "name": "#11", "reason": "HTTP 502: 偽の gh の失敗"}
+    res = {"tool": "projects-sync", "status": "stopped", "summary": "#11 の進行の一部を書けなかった（1 件）"}
+    res.update({"items": [], "metrics": {}, "gaps": [gap]})
+    rec = tmp_path / "rec.sh"
+    rec.write_text(f"#!/usr/bin/env bash\nprintf '%s\\n' '{json.dumps(res, ensure_ascii=False)}'\nexit 6\n", encoding="utf-8")
+    ok = tmp_path / "ok.sh"
+    ok_res = {"tool": "projects-sync", "status": "ok", "summary": "#11 進行 = 設計", "items": [], "metrics": {}}
+    ok.write_text(f"#!/usr/bin/env bash\nprintf '%s\\n' '{json.dumps(ok_res, ensure_ascii=False)}'\n", encoding="utf-8")
+
+    st = RunState(tmp_path / "sv", {})
+    st.record_stage("設計", {"記録": str(rec), "課題": [11]}, str(tmp_path))  # 例外を上げず戻る（止めない）
+    assert len(st.process) == 1
+    assert st.process[0]["run"] == "rec.sh 11 stage 設計"
+    assert "HTTP 502: 偽の gh の失敗" in st.process[0]["result"]
+    assert "書けなかったもの" in st._extra_lines()
+    assert st.snapshot()["process"] == st.process
+
+    st2 = RunState(tmp_path / "sv2", {})
+    st2.record_stage("設計", {"記録": str(ok), "課題": [11]}, str(tmp_path))
+    assert st2.process == []

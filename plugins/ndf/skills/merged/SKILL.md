@@ -112,13 +112,13 @@ fi
 python3 "$SCRIPTS/merged-steps.py" cleanup <PR番号>... --root <メインディレクトリ>
 ```
 
-出力は 1 行の JSON（形は `$SCRIPTS/lib/README.md`）。`status` を見て次を決める。
+出力は 1 行の JSON（形と状態の意味は `$SCRIPTS/lib/README.md` の「手順のスクリプトの結果」）。終了コードを見て次を決める。
 
-| `status`（終了コード） | 次にすること |
+| 終了コード | 次にすること |
 | --- | --- |
-| `ok`（0） | 「スプリント課題を報告する」→ 必要なら「マージ済みブランチの整理」→ 作業完了報告 |
-| `gate`（10） | `git branch -d` が拒んだブランチがある。`presentation_path` の承認資料を示して同意を取り、同意を得た対象にだけ `next` のコマンド（`git branch -D`）を打つ |
-| `stopped`（1 / 2 / 3） | `summary` と `items[].reason` を報告して止まる |
+| 0 | 「スプリント課題を報告する」→ 必要なら「マージ済みブランチの整理」→ 作業完了報告 |
+| 10 | `git branch -d` が拒んだブランチがある。`presentation_path` の承認資料を示して同意を取り、同意を得た対象にだけ `next` のコマンド（`git branch -D`）を打つ |
+| 1 / 2 / 3 | `summary` と `items[].reason` を報告して止まる |
 
 - `items[]` の `result` は `removed`（worktree を外した）/ `deleted`（ブランチを消した。`restore` が戻し方）/ `absent`（ローカルに無い。削除済みとして扱う）/ `kept`（MERGED でない・メインディレクトリが checkout している など。`reason` を報告へ載せる）/ `stopped` / `pulled` を取る
 - worktree の未追跡・無視されたファイルは `<共通の git ディレクトリ>/ndf/worktree-trash/` へ退避してから外す。退避先は `reason` に載る（`退避先 <パス>`。退避するものが残らなければ `退避するものは無かった` で、退避先を作らない）

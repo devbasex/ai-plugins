@@ -29,24 +29,26 @@ def fake_gh(tmp_path, log, exit_code: int = 0, stderr: str = "") -> dict:
     return {"PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}"}
 
 
-ISSUE_LINE = "#186 進行 = 実装レビュー\n"
+def result(got) -> dict:
+    """標準出力は 1 行の結果 JSON である（#2227。形は scripts/lib/README.md の「手順のスクリプトの結果」）。"""
+    lines = got.stdout.splitlines()
+    assert len(lines) == 1, got.stdout
+    return json.loads(lines[0])
 
 
-def board_stdout(stdout: str) -> str:
-    """ボードの更新の出力だけを取り出す。
-
-    入口は先に issue の本文を更新し、その 1 行を出す（#828）。ボードの行は同じ文面のため、
-    先頭の issue の本文の行を 1 つだけ外して残りをボードの出力として読む。
-    """
-    return stdout[len(ISSUE_LINE) :] if stdout.startswith(ISSUE_LINE) else stdout
+def board_gaps(got) -> list[str]:
+    """ボードへ書けなかった理由（欠けの board の要素）。"""
+    return [g["reason"] for g in result(got).get("gaps", []) if g["kind"] == "board"]
 
 
 def test_no_declaration_writes_only_the_issue_body(repo, tmp_path) -> None:
     """宣言が無いリポジトリではボードへ問い合わせず、issue の本文だけを更新する（#828）。"""
     log = tmp_path / "gh.log"
     got = run_sync("186", "stage", "実装レビュー", cwd=repo, env=fake_gh(tmp_path, log))
-    assert got.returncode == 0
-    assert got.stdout == ISSUE_LINE and got.stderr == ""
+    assert got.returncode == 0 and got.stderr == ""
+    res = result(got)
+    assert res["status"] == "ok" and res["summary"] == "#186 進行 = 実装レビュー"
+    assert {"kind": "board", "name": "#186 stage", "result": "not_declared"} in res["items"]
     calls = log.read_text(encoding="utf-8")
     assert "issue edit" in calls
     assert "project" not in calls, "宣言が無いのにボードへ問い合わせている"
@@ -59,7 +61,7 @@ def without_gh(tmp_path) -> dict:
     """
     bindir = tmp_path / "nogh"
     bindir.mkdir(exist_ok=True)
-    for name in ("bash", "git", "jq", "grep", "dirname", "printf"):
+    for name in ("bash", "git", "jq", "grep", "dirname", "printf", "python3"):
         found = shutil.which(name)
         if found:
             link = bindir / name
@@ -68,21 +70,24 @@ def without_gh(tmp_path) -> dict:
     return {"PATH": str(bindir)}
 
 
-def test_missing_gh_is_silent(repo, tmp_path) -> None:
-    """`gh` が無い環境でも 0 で終わる。進行管理を開発の前提条件にしない。"""
+def test_missing_gh_is_a_missing_precondition(repo, tmp_path) -> None:
+    """`gh` が無ければ何も書かず、前提が無い（3）の結果 JSON を返す。止めるかは呼ぶ側が決める（#2227）。"""
     write_declaration(repo, VALID)
     got = run_sync("186", "stage", "実装レビュー", cwd=repo, env=without_gh(tmp_path))
-    assert got.returncode == 0, got.stderr
-    assert got.stdout == ""
+    assert got.returncode == 3, got.stderr
+    assert result(got)["status"] == "stopped"
 
 
-def test_gh_failure_is_silent(repo, tmp_path) -> None:
-    """権限不足などで `gh` が落ちても 0 で終わる。"""
+def test_gh_failure_is_reported_as_gaps(repo, tmp_path) -> None:
+    """権限不足などで `gh` が落ちたら ok で返さず、`gh` の標準エラーの要旨を欠けに載せる（#2227）。"""
     write_declaration(repo, VALID)
     log = tmp_path / "gh.log"
     env = fake_gh(tmp_path, log, exit_code=1, stderr="missing scope 'project'")
     got = run_sync("186", "stage", "実装レビュー", cwd=repo, env=env)
-    assert got.returncode == 0
+    assert got.returncode == 6, got.stderr
+    res = result(got)
+    assert res["status"] == "stopped"
+    assert all("missing scope 'project'" in g["reason"] for g in res["gaps"]) and len(res["gaps"]) == 2
 
 
 def test_unknown_key_is_an_error(repo, tmp_path) -> None:
@@ -118,9 +123,10 @@ def test_known_stage_reaches_gh(repo, tmp_path) -> None:
     write_declaration(repo, VALID)
     log = tmp_path / "gh.log"
     got = run_sync("186", "stage", "実装レビュー", cwd=repo, env=fake_gh(tmp_path, log))
-    assert got.returncode == 0
     assert log.exists(), "gh が呼ばれていない"
     assert "devbasex" in log.read_text(encoding="utf-8")
+    # 偽の gh はボードの応答を返さないため、ボードは欠けとして返る
+    assert got.returncode == 6 and board_gaps(got) == ["ボードの識別子が無い"]
 
 
 def test_text_key_reaches_gh(repo, tmp_path) -> None:
@@ -128,7 +134,7 @@ def test_text_key_reaches_gh(repo, tmp_path) -> None:
     write_declaration(repo, VALID)
     log = tmp_path / "gh.log"
     got = run_sync("186", "plan", "issues/issue-186.md", cwd=repo, env=fake_gh(tmp_path, log))
-    assert got.returncode == 0
+    assert got.returncode == 6 and board_gaps(got) == ["ボードの識別子が無い"]
     assert log.exists()
 
 
@@ -142,7 +148,7 @@ def test_stage_with_a_space_reaches_gh(repo, tmp_path) -> None:
     write_declaration(repo, VALID)
     log = tmp_path / "gh.log"
     got = run_sync("186", "stage", "Pull Request", cwd=repo, env=fake_gh(tmp_path, log))
-    assert got.returncode == 0, got.stderr
+    assert got.returncode == 6 and board_gaps(got) == ["ボードの識別子が無い"], got.stderr
     assert log.exists(), "gh が呼ばれていない"
 
 
@@ -223,17 +229,17 @@ def test_item_below_the_limit_is_updated(repo, tmp_path) -> None:
     env = scripted_gh(tmp_path, list(range(180, 190)))
     got = run_sync("186", "stage", "実装レビュー", cwd=repo, env=env)
     assert got.returncode == 0, got.stderr
-    assert "#186 進行 = 実装レビュー" in got.stdout
+    assert result(got)["summary"] == "#186 進行 = 実装レビュー / #186 進行 = 実装レビュー（ボード）"
     assert got.stderr == ""
 
 
-def test_missing_item_below_the_limit_is_silent(repo, tmp_path) -> None:
-    """ボードへ登録していないだけなら黙って抜ける。これは正常な状態である。"""
+def test_missing_item_below_the_limit_is_added_or_reported(repo, tmp_path) -> None:
+    """ボードへ登録していなければ載せる。載せられなければ（偽の gh は課題の URL を返さない）欠けとして返す（#2227）。"""
     write_declaration(repo, VALID)
     env = scripted_gh(tmp_path, [1, 2, 3])
     got = run_sync("186", "stage", "実装レビュー", cwd=repo, env=env)
-    assert got.returncode == 0
-    assert board_stdout(got.stdout) == "" and got.stderr == ""
+    assert got.returncode == 6 and got.stderr == ""
+    assert board_gaps(got) == ["課題の URL が空"]
 
 
 def test_another_repository_with_the_same_number_is_not_updated(repo, tmp_path) -> None:
@@ -247,19 +253,19 @@ def test_another_repository_with_the_same_number_is_not_updated(repo, tmp_path) 
     env = scripted_gh(tmp_path, [(OTHER_REPO, 186), (HOST_REPO, 186)])
     got = run_sync("186", "stage", "実装レビュー", cwd=repo, env=env)
     assert got.returncode == 0, got.stderr
-    assert "#186 進行 = 実装レビュー" in got.stdout
+    assert result(got)["status"] == "ok"
     log = (tmp_path / "gh.log").read_text(encoding="utf-8")
     assert item_id(HOST_REPO, 186) in log
     assert item_id(OTHER_REPO, 186) not in log, "別のリポジトリのアイテムを更新している"
 
 
-def test_only_another_repository_has_the_number_is_silent(repo, tmp_path) -> None:
-    """同じ番号が別のリポジトリにしか無いときは、何もせず 0 で終わる。"""
+def test_only_another_repository_has_the_number_is_not_updated(repo, tmp_path) -> None:
+    """同じ番号が別のリポジトリにしか無いときは、そのアイテムを書き換えない。載せられなければ欠けとして返す。"""
     write_declaration(repo, VALID)
     env = scripted_gh(tmp_path, [(OTHER_REPO, 186)])
     got = run_sync("186", "stage", "実装レビュー", cwd=repo, env=env)
-    assert got.returncode == 0
-    assert board_stdout(got.stdout) == "" and got.stderr == ""
+    assert got.returncode == 6 and got.stderr == ""
+    assert board_gaps(got) == ["課題の URL が空"]
     log = (tmp_path / "gh.log").read_text(encoding="utf-8")
     assert "item-edit" not in log, "別のリポジトリのアイテムを更新している"
 
@@ -267,23 +273,23 @@ def test_only_another_repository_has_the_number_is_silent(repo, tmp_path) -> Non
 def test_missing_item_beyond_the_limit_is_reported(repo, tmp_path) -> None:
     """総数が上限を超えるときは知らせる。登録していない場合と区別できないためである。
 
-    終了コードは 0 のままにする。進行管理が理由で工程を止めない。
+    書けなかったことを欠け（6）で返す。止めるかは呼ぶ側が決める（#2227）。
     """
     write_declaration(repo, VALID)
     # 1000 件を返し、ボードの総数は 1200 件だと申告する。その中に #186 は含めない。
     env = scripted_gh(tmp_path, list(range(1000, 2000)), total_count=1200)
     got = run_sync("186", "stage", "実装レビュー", cwd=repo, env=env)
-    assert got.returncode == 0
-    assert board_stdout(got.stdout) == ""
+    assert got.returncode == 6
+    assert any("上限 1000" in r and "1200" in r for r in board_gaps(got))
     assert "上限 1000" in got.stderr
     assert "1200" in got.stderr
     assert "#186" in got.stderr
 
 
-def test_missing_item_exactly_at_the_limit_is_silent(repo, tmp_path) -> None:
-    """総数がちょうど上限のときは切れていない。知らせると誤った警告になる。"""
+def test_missing_item_exactly_at_the_limit_is_not_a_truncation(repo, tmp_path) -> None:
+    """総数がちょうど上限のときは切れていない。上限の警告を出さず、載せる側へ進む。"""
     write_declaration(repo, VALID)
     env = scripted_gh(tmp_path, list(range(1000, 2000)), total_count=1000)
     got = run_sync("186", "stage", "実装レビュー", cwd=repo, env=env)
-    assert got.returncode == 0
-    assert board_stdout(got.stdout) == "" and got.stderr == ""
+    assert got.returncode == 6 and got.stderr == ""
+    assert board_gaps(got) == ["課題の URL が空"]
