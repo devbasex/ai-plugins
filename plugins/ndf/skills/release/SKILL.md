@@ -133,8 +133,7 @@ Pull Request が最後かどうかを判断できない。
 
 **承認を求めるときに提示するものは
 [references/approval-request.md](../development-workflow/references/approval-request.md) が
-定める。** 本番リリース・制作物承認・公開の同意の問いは `AskUserQuestion` の `metadata.source` に `ndf-gate:2` を付ける
-（区分の正本は [asking.md](../development-workflow/references/asking.md)）。 ドキュメントレビューの承認と同じ定義を使い、リリースでは対象が版になる分だけ項目が変わる
+定める。** 本番リリース・制作物承認・公開の同意の問いは `AskUserQuestion` の `metadata.source` に `ndf-gate:2` を付ける（区分の正本は [asking.md](../development-workflow/references/asking.md)）。ドキュメントレビューの承認と同じ定義を使い、リリースでは対象が版になる分だけ項目が変わる
 （版の比較の URL・配布物の差分・**取り消しの手段とその限界**）。
 
 **Claude Code のプラグインの形では、承認資料の機械で作れる部分を `release-steps.py approval-facts` が
