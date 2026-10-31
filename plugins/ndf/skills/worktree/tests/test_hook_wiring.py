@@ -42,4 +42,3 @@ def test_sessionstart_runs_the_session_script(runtime: str) -> None:
     config = json.loads((HOOKS_DIR / f"{runtime}.json").read_text(encoding="utf-8"))
     commands = [hook["command"] for entry in config["hooks"]["SessionStart"] for hook in entry["hooks"]]
     assert any("worktree-session.sh" in c for c in commands), commands
-
