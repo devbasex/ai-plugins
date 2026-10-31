@@ -33,7 +33,9 @@ from typing import NamedTuple
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "lib"))
+import deps  # noqa: E402
 
+deps.require("schema")  # 全体テストの実測（whole_runs → estimate_records）が宣言の形に pydantic を使う
 import container_reach  # noqa: E402
 import repo as repo_lib  # noqa: E402
 import test_strategy as ts  # noqa: E402
