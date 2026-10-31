@@ -2148,3 +2148,131 @@ def test_the_pull_request_check_adds_no_gh_call(run_init, tmp_path, capsys):
     run_init(_args(tmp_path))
     assert stopped == run_init.gh_calls
     assert sum(1 for c in stopped if c[2:3] and c[2].startswith("repos/")) == 1
+
+
+# ---------- #2047: 想定最大時間を省いたら下限まで上げ、明示したら飛ばす合図を出す ----------
+
+
+def _floor_minutes(state, x):
+    """打ち直しの見込みを足さない下限（決定 2）。"""
+    import math
+
+    return math.ceil(round((x / 60 + float(state["limits"]["after_plan_minutes"])) / 0.70, 9))
+
+
+def test_an_omitted_budget_rises_to_the_lower_bound(run_init, tmp_path, init_clock, slow_baseline, capsys):
+    """受け入れ条件 3・I3: x = 495 秒で既定 30 分の枠が収まらなくても止まらず、下限まで上げて続ける。"""
+    timeline = sys.modules["refactor_lib.timeline"]
+    slow_baseline["seconds"] = 495.0
+    init_clock(0)
+    run_init(_args(tmp_path))
+    captured = capsys.readouterr()
+    _, state = _state_of(tmp_path)
+    floor = _floor_minutes(state, 495.0)
+    assert floor > 30 and floor < timeline.required_budget_minutes(495.0, state["limits"]["after_plan_minutes"])
+    assert (state["budget_minutes"], state["budget_source"]) == (floor, "floor")
+    assert state["budget_floor"]["from_minutes"] == 30 and state["budget_floor"]["minutes"] == floor
+    assert state["limits"]["budget_minutes"] == floor and timeline.window_problem(state["limits"]) is None
+    assert f"下限の {floor} 分へ上げました" in captured.err
+    assert "BUDGET_SOURCE=floor" in captured.out and f"BUDGET_MINUTES={floor}" in captured.out
+    assert "PHASE=" in captured.out and "SKIP=" not in captured.out
+
+
+def test_a_resume_keeps_or_replaces_the_budget_source(run_init, tmp_path, init_clock, slow_baseline):
+    """受け入れ条件 3（再開）: 引数なしの再開は floor のまま、引数を渡すと explicit になる。"""
+    slow_baseline["seconds"] = 495.0
+    init_clock(0)
+    run_init(_args(tmp_path))
+    raised = _state_of(tmp_path)[1]["budget_minutes"]
+    run_init(_args(tmp_path))
+    _, state = _state_of(tmp_path)
+    assert (state["budget_minutes"], state["budget_source"]) == (raised, "floor")
+    run_init(_args(tmp_path, budget_minutes="120"))
+    _, state = _state_of(tmp_path)
+    assert (state["budget_minutes"], state["budget_source"]) == (120, "explicit")
+
+
+def test_an_explicit_budget_short_of_the_floor_emits_skip(run_init, tmp_path, init_clock, slow_baseline, capsys):
+    """受け入れ条件 5・I2・I4: 明示した 30 分は上げず、SKIP=window と下限（打ち直しの見込みなし）を出して 4 で止まる。"""
+    slow_baseline["seconds"] = 495.0
+    captured = _stopped_init(run_init, tmp_path, init_clock, capsys)
+    _, state = _state_of(tmp_path)
+    floor = _floor_minutes(state, 495.0)
+    assert (state["budget_minutes"], state["budget_source"]) == (30, "explicit") and state["window_stopped_at"]
+    assert "SKIP=window" in captured.out
+    assert f"要る下限 {floor} 分 > 想定最大時間 30 分（着手前のテスト 495.0 秒）" in captured.out
+    assert "以上にして" in captured.err, "人へ出す文は今どおり"
+
+
+def test_an_explicit_budget_that_fits_does_not_change(run_init, tmp_path, init_clock, slow_baseline, capsys):
+    """受け入れ条件 6: 明示した想定最大時間が下限以上なら、想定最大時間と手順の枠は今と同じ。"""
+    slow_baseline["seconds"] = 495.0
+    init_clock(0)
+    run_init(_args(tmp_path, budget_minutes="120"))
+    _, state = _state_of(tmp_path)
+    assert (state["budget_minutes"], state["budget_source"]) == (120, "explicit") and "budget_floor" not in state
+    assert _window_seconds(state, "final_end_at") == 120 * 60
+    assert _window_seconds(state, "propose_end_at") == 495 + 120 * 60 * 0.20
+    assert "SKIP=" not in capsys.readouterr().out
+
+
+def test_a_state_without_the_source_reads_as_explicit(refactor):
+    assert sys.modules["refactor_lib.init_test"].budget_source({"budget_minutes": 30}) == "explicit"
+
+
+def test_a_timed_out_init_test_emits_skip(verify_init, capsys):
+    """受け入れ条件 5・I4: 着手前のテストの打ち切りは SKIP=init-timeout と上限の秒を出す。"""
+    verify_init.run["timed_out"] = True
+    with pytest.raises(SystemExit):
+        verify_init.call()
+    out = capsys.readouterr().out
+    assert "SKIP=init-timeout" in out and "上限 180 秒で終わらなかった" in out
+
+
+def _record_recent(verify_init, seconds):
+    whole_runs = sys.modules["whole_runs"]
+    ts = sys.modules["test_strategy"]
+    work = verify_init.history.parents[2] / "work"
+    whole_runs.record_whole(work, ts.whole_key(verify_init.strategy), seconds, "test")
+
+
+def test_the_first_init_limit_reads_the_recent_whole_test(verify_init):
+    """受け入れ条件 1・I1: 履歴が無くても、手元の全体テストの直近の実測 m = 620 秒なら上限は 3·m = 1,860 秒。"""
+    _record_recent(verify_init, 620.0)
+    _, baseline, _ = verify_init.call()
+    assert verify_init.given == [1860]
+    assert (baseline["scope_seconds"], baseline["scope_source"]) == (620.0, "recent")
+
+
+@pytest.mark.parametrize("name", ["local-full", "local-scoped-ci-whole"])
+def test_the_init_estimate_order(refactor, tmp_path, name):
+    """受け入れ条件 2・I1: m → w → 無し。w は置き場所が全体テストを覆うかを問わない。"""
+    ts = sys.modules["test_strategy"]
+    init_test = sys.modules["refactor_lib.init_test"]
+    strategy = ts.Strategy(name, "args", [ts.Suite("unit", "pytest .", scope_command="pytest {paths}", paths=["elsewhere"])])
+    prep = types.SimpleNamespace(strategy=strategy, work=tmp_path, repo="acme/demo")
+    assert init_test.resolve_scope_seconds(prep, ["tests"], 1518.0, 620.0) == (620.0, "recent")
+    assert init_test.resolve_scope_seconds(prep, ["tests"], 1518.0) == (1518.0, "whole")
+    assert init_test.resolve_scope_seconds(prep, ["tests"], None) == (None, None)
+
+
+def test_a_long_init_limit_extends_the_step_before_the_test(verify_init, monkeypatch, tmp_path):
+    """決定 4: 既定 30 分・s = 1,518 秒なら、着手前のテストを始める前に延長のファイルへ 6,174 秒を書く。"""
+    drive_pause = sys.modules["drive_pause"]
+    target = tmp_path / "01-refactor.extend.json"
+    monkeypatch.setenv(drive_pause.EXTEND_ENV, str(target))
+    seen = []
+    real = verify_init.setup.baseline_lib.run_baseline
+    monkeypatch.setattr(
+        verify_init.setup.baseline_lib, "run_baseline", lambda *a, **k: (seen.append(drive_pause.read_extension(target)), real(*a, **k))[1]
+    )
+    _record_recent(verify_init, 1518.0)
+    verify_init.call()
+    assert verify_init.given == [4554] and seen[0][0] == 6174.0
+
+
+def test_a_short_init_limit_does_not_extend_the_step(verify_init, monkeypatch, tmp_path):
+    target = tmp_path / "01-refactor.extend.json"
+    monkeypatch.setenv(sys.modules["drive_pause"].EXTEND_ENV, str(target))
+    verify_init.call()
+    assert verify_init.given == [180] and not target.exists()
