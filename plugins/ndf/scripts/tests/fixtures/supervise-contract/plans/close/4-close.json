@@ -80,15 +80,6 @@
       "stage": "リリース後テスト",
       "timeout": 3600,
       "prompt": "/ndf:release-verification スプリント m9（#15）。配布の記録は Pull Request #{queue_pr:release-prod} にある。リリース後テストの記録をその Pull Request へコメントで書く。課題は閉じない（次の close が閉じる）。番号が 0 なら本番へ出ていないため、何もせずに終える。",
-      "next": "close"
-    },
-    {
-      "id": "close",
-      "type": "run",
-      "stage": "後片付け",
-      "cwd": "<TMP>/repo",
-      "timeout": 900,
-      "cmd": "python3 <NDF>/scripts/sprint-close.py --record-pr {queue_pr:release-prod} --issues 15 --with-verification --label 'スプリント m9の後片付け'",
       "next": "retro"
     },
     {
@@ -98,7 +89,16 @@
       "kind": "振り返り",
       "stage": "振り返り",
       "timeout": 3600,
-      "prompt": "/ndf:retrospective スプリント m9（#15）。材料に検査の記録の集計（`python3 <NDF>/scripts/check-trigger.py stats --root <TMP>/repo` の出力: トリガーが立った回数・検査ごとの指摘の件数・検査の後に逃げた不具合の件数）を使い、閾値の見直しが要るかを書く。",
+      "prompt": "/ndf:retrospective スプリント m9（#15）。材料に検査の記録の集計（`python3 <NDF>/scripts/check-trigger.py stats --root <TMP>/repo` の出力: トリガーが立った回数・検査ごとの指摘の件数・検査の後に逃げた不具合の件数）を使い、閾値の見直しが要るかを書く。課題は閉じない（次の close が閉じる）。",
+      "next": "close"
+    },
+    {
+      "id": "close",
+      "type": "run",
+      "stage": "後片付け",
+      "cwd": "<TMP>/repo",
+      "timeout": 900,
+      "cmd": "python3 <NDF>/scripts/sprint-close.py --record-pr {queue_pr:release-prod} --issues 15 --final-stage 振り返り --with-verification --label 'スプリント m9の後片付け'",
       "next": "refine"
     },
     {

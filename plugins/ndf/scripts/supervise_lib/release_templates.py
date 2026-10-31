@@ -236,7 +236,7 @@ def judge_record_step() -> dict:
 
 
 def release_verify_step(sprint: str, refs: str, record_pr: str) -> dict:
-    """リリース後テスト（/ndf:release-verification）。記録を配布の記録の PR へ置き、まとめの close がそれを読む（#1683）。"""
+    """リリース後テスト（/ndf:release-verification）。記録を配布の記録の PR へ置き、振り返りの後のまとめの close がそれを読む（#1683）。"""
     return {
         "id": "release-verify",
         "type": "work",
@@ -247,7 +247,7 @@ def release_verify_step(sprint: str, refs: str, record_pr: str) -> dict:
         "prompt": f"/ndf:release-verification スプリント {sprint}（{refs}）。配布の記録は Pull Request #{record_pr} にある。"
         "リリース後テストの記録をその Pull Request へコメントで書く。課題は閉じない（次の close が閉じる）。"
         "番号が 0 なら本番へ出ていないため、何もせずに終える。",
-        "next": "close",
+        "next": "retro",
     }
 
 
