@@ -1,10 +1,10 @@
-# #2047: 検査のプランの構造改善が既定の予算で下限に届かず、33 行の差分でも refactor が落ちて abort へ進む
+# #2047: 検査のプランのリファクタリングが既定の予算で下限に届かず、33 行の差分でも refactor が落ちて abort へ進む
 
 正は課題の本文（#2047）で、この文書はその写しである。`spec-copy.py write` で作り直す。手で直さない。
 
 ## 何が起きたか
 
-2026-10-17、PR #2043（#1873。11 ファイル・33 行）の検査のプラン（`supervise.py new check --pr 2043`）で、構造改善（`refactor`）のステップが終了コード 1 で落ち、プランは abort へ進んだ。
+2026-10-17、PR #2043（#1873。11 ファイル・33 行）の検査のプラン（`supervise.py new check --pr 2043`）で、リファクタリング（`refactor`）のステップが終了コード 1 で落ち、プランは abort へ進んだ。
 
 - 出力: 「`--budget-minutes` を 39 以上にして 5 分以内に init を打ち直すと、着手前のテストを走らせ直さずに続けます（下限では 1 件だけが入ります）」
 - プランの `refactor` の cmd は `--budget-minutes` を持たず（`.ndf/supervise.json` に `refactor_budget_minutes` も無い）、timeout は 1980 秒だった
