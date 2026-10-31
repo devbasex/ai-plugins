@@ -95,7 +95,7 @@ python3 "$SCRIPTS/issue-file.py" by-origin --origin "issue #<起点>" --origin "
 | 工程 | 実際に通った工程 | 飛ばした工程と、その結果 |
 | context window | `/ndf:skill-stats --agents --session <conductor のセッション>` | 層ごとの固定費と実作業、束ねる候補・割る候補・worker を使いすぎの目印 |
 | 用語集 | `python3 "$SCRIPTS/glossary.py" diff --base <起点> --head <終点>` | その変更で足された語・廃止された語・意味の変わった語（コンテキストごと） |
-| 承認ゲートの差し戻し | `python3 "$SCRIPTS/gate-rejections.py" count --sprint <状態ファイル>`（状態ファイルが無ければ `--issue <N>` か `--pr <N>` を繰り返す） | 承認ゲート 1・2 で利用者が差し戻した件数（`metrics` の `gate_1`・`gate_2`）と、何を差し戻したか（`items` の `what`）。終了コード 2 なら件数を 0 でなく「不明」と書く |
+| 承認ゲートの差し戻し | `python3 "$SCRIPTS/gate-rejections.py" count --sprint <状態ファイル>`（状態ファイルが無ければ `--issue <N>` か `--pr <N>` を繰り返す） | 承認ゲート 1・2 で利用者が差し戻した件数（`metrics` の `gate_1`・`gate_2`）と、何を差し戻したか（`items` の `what`）。終了コード 2 なら件数を 0 でなく「不明」、終了コード 3（範囲に承認ゲートの答えの行が無い）なら「未記録」と書く |
 | MVV を見直すか | `python3 "$SCRIPTS/project-mvv.py" signals` | 現行の版のもとで、人が AI の判断を覆した回数・「判定できない」の回数・流出不具合の件数と閾値。`items` に改訂の提案があるか |
 
 **用語集の変化は、その変更の起点と終点の 2 つの版で `glossary.py diff` を打って取る。** 起点と終点は
@@ -287,7 +287,7 @@ worker を減らす・そのままのどれにするかと、その理由を 1 �
 
 ## 承認ゲートの差し戻し
 
-（`gate-rejections.py count` の結果: 関門 1・関門 2 の件数と、差し戻した中身を 1 行ずつ。記録が読めなければ「不明」）
+（`gate-rejections.py count` の結果: 関門 1・関門 2 の件数と、差し戻した中身を 1 行ずつ。記録が読めなければ「不明」、差し戻しの記録が無ければ「未記録」）
 
 ## MVV を見直すか
 

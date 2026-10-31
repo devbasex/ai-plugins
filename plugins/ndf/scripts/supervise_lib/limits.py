@@ -36,12 +36,13 @@ def _steps(plan: dict) -> list[dict]:
 
 def default_next(steps: list[dict], sid: str) -> str | None:
     """成功したときの次のステップ。`next` が無ければ並びの次へ進むが、失敗したときにだけ通るステップ
-    （どこかの `on_fail` が指すステップと、そこから `next` で戻るステップ）は飛ばす。終わりなら None。"""
+    （どこかの `on_fail` が指すステップと、そこから `next` で戻るステップ）と、`--from` でだけ入るステップ
+    （`from_only`。差し戻しの後の reject）は飛ばす。終わりなら None。"""
     by = {s["id"]: s for s in steps}
     step = by[sid]
     if step.get("next"):
         return None if step["next"] == "end" else step["next"]
-    fail_only = {s["on_fail"] for s in steps if s.get("on_fail")}
+    fail_only = {s["on_fail"] for s in steps if s.get("on_fail")} | {s["id"] for s in steps if s.get("from_only")}
     fail_only |= {
         s["id"]
         for s in steps

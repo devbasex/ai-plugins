@@ -9,7 +9,7 @@ from pathlib import Path
 from supervise_lib.decl import WORKTREE_DECL, DeclError, with_decls
 from supervise_lib.paths import MERGED_PY, MVV_PY, STEPS_PY, VERIFY_PY
 from supervise_lib.plan import QUEUE_PRS
-from supervise_lib.verify_steps import INFRA_WAIT_STOP, handoff_step, plan_limits, with_margin
+from supervise_lib.verify_steps import INFRA_WAIT_STOP, handoff_step, plan_limits, reject_step, with_margin
 from supervise_lib.procedures import with_record
 
 
@@ -139,6 +139,7 @@ def _add_prod_mvv_gate(steps: list[dict], a, repo: str | None, approval: str, pr
         "bump",
     )
     steps.append(handoff_step(state, "関門 2", "判定のコメント"))
+    steps.append(reject_step(state, "関門 2", "mvv", root=repo or "."))
 
 
 def _prepare_steps(a, plugin: str, v: str, prs: str, dev: bool, after_notes: str, repo: str | None, approval: str) -> list[dict]:
