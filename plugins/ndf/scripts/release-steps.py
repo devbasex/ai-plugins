@@ -859,6 +859,36 @@ def kept_sections(root, approval):
         raise StepError(f"前の承認資料 {approval} を読めない（書き換えずに止める）: {e}", 2)
 
 
+def included_pr_facts(prs, data, checks, repo):
+    """含む PR ごとの事実から、機械向けの items と承認資料の「含む PR」の行を作る。
+
+    data は PR 番号 → 取得済みの PR、checks は PR 番号 → CI の結果（pr_check_buckets の戻り）。"""
+    items, rows = [], []
+    for p in prs:
+        n, d = p.number, data.get(p.number) or {}
+        oid = (d.get("mergeCommit") or {}).get("oid") or ""
+        pr_checks = checks[n]
+        passed = sum(1 for c in pr_checks if c.get("bucket") == "pass")
+        url = d.get("url") or f"https://github.com/{repo}/pull/{n}"
+        items.append(
+            {
+                "kind": "pr",
+                "name": f"#{n}",
+                "result": str(d.get("state", "")).lower() or "unknown",
+                "url": url,
+                "title": d.get("title", ""),
+                "merge_commit": oid,
+                "checks_passed": passed,
+                "checks": len(pr_checks),
+                "via": p.via,
+                "no_change": included.no_change(d),
+            }
+        )
+        facts = [str(d.get("state", "")), oid[:8] if oid else "—", f"CI {passed}/{len(pr_checks)}"]
+        rows.append(included.included_row(n, d.get("title", ""), facts, p.via, included.no_change(d)))
+    return items, rows
+
+
 def cmd_approval_facts(a):
     root = git_root(a.root)
     repo = repo_lib.owner_repo(root)
@@ -881,30 +911,8 @@ def cmd_approval_facts(a):
     ins = int(m.group(1)) if (m := re.search(r"(\d+) insertions?", stat)) else 0
     dels = int(m.group(1)) if (m := re.search(r"(\d+) deletions?", stat)) else 0
 
-    items, rows = [], []
-    for p in prs:
-        n, d = p.number, data.get(p.number) or {}
-        oid = (d.get("mergeCommit") or {}).get("oid") or ""
-        checks = pr_check_buckets(root, n)
-        passed = sum(1 for c in checks if c.get("bucket") == "pass")
-        url = d.get("url") or f"https://github.com/{repo}/pull/{n}"
-        items.append(
-            {
-                "kind": "pr",
-                "name": f"#{n}",
-                "result": str(d.get("state", "")).lower() or "unknown",
-                "url": url,
-                "title": d.get("title", ""),
-                "merge_commit": oid,
-                "checks_passed": passed,
-                "checks": len(checks),
-                "via": p.via,
-                "no_change": included.no_change(d),
-            }
-        )
-        facts = [str(d.get("state", "")), oid[:8] if oid else "—", f"CI {passed}/{len(checks)}"]
-        rows.append(included.included_row(n, d.get("title", ""), facts, p.via, included.no_change(d)))
-
+    checks = {p.number: pr_check_buckets(root, p.number) for p in prs}
+    items, rows = included_pr_facts(prs, data, checks, repo)
     compare = f"https://github.com/{repo}/compare/{prev}...{dev}"
     path = approval_present(
         TOOL,
