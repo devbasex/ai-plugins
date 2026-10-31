@@ -53,3 +53,10 @@ def _isolated_usage_dirs(_ndf_isolated_base: Path, request: pytest.FixtureReques
         after = usage_ledger.ledger_snapshot(REAL_LEDGER)
         grown = {k: (before.get(k, 0), v) for k, v in after.items() if before.get(k, 0) != v}
         pytest.fail(f"テストが本物の使用量の帳簿（{REAL_LEDGER}）へ書いた: {leaked}（増えたファイルと大きさ: {grown}）", pytrace=False)
+
+
+def pytest_sessionfinish(session, exitstatus) -> None:
+    """テストのセッションの終わりに、寿命の窓を過ぎた `ndf-tests-*`（止められたセッションの残り）を片付ける（#2229）。"""
+    import run_state
+
+    run_state.sweep(None, kinds=("test-tmp",), tmp_only=True)

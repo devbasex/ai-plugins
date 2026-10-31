@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 import tempfile
 import zlib
 from pathlib import Path
@@ -129,6 +130,14 @@ def pytest_unconfigure(config) -> None:
     """実行が終わったら、外した環境変数を戻す。"""
     os.environ.update(_saved_monitor_env)
     _saved_monitor_env.clear()
+
+
+def pytest_sessionfinish(session, exitstatus) -> None:
+    """テストのセッションの終わりに、寿命の窓を過ぎた `ndf-tests-*`（止められたセッションの残り）を片付ける（#2229）。"""
+    sys.path.insert(0, str(Path(__file__).resolve().parent / "plugins" / "ndf" / "scripts" / "lib"))
+    import run_state
+
+    run_state.sweep(None, kinds=("test-tmp",), tmp_only=True)
 
 
 # ジョブの分割（#882）。**分ける単位はファイルで、割り当てはパスの剰余だけで決める。**
