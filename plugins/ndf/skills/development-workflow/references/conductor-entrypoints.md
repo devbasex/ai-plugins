@@ -38,9 +38,9 @@ python3 "$SCRIPTS/supervise.py" wait <プラン>-state/queue-done.json
 | --- | --- |
 | `scripts/sprint-state.py init` | スプリントの状態ファイルを作る |
 | `scripts/sprint-state.py update` | 終えたプランと次のプランを状態ファイルへ書く |
-| `scripts/sprint-state.py gate` | 承認ゲートの判定（利用者か MVV）を状態ファイルへ書く。利用者の答えは `--what <要約> --by user [--pr <設計 PR>] --outcome approved\|rejected`（差し戻しは承認ゲートを通さず、差し戻しの記録へ 1 行書く） |
+| `scripts/sprint-state.py gate` | 承認ゲートの判定（利用者か MVV）を状態ファイルへ書く。利用者の答えは `--what <要約> --by user [--pr <設計 PR>] --outcome approved\|rejected`（承認も差し戻しも差し戻しの記録へ 1 行書く。差し戻しは承認ゲートを通さない。`reject` のステップを持つプランの差し戻しは `supervise.py run <プラン> --from reject` が書く） |
 | `scripts/gate-rejections.py record` | 状態ファイルの無い進め方で、承認ゲートの差し戻しを差し戻しの記録へ 1 行書く。打つ場面は [approval-request.md](approval-request.md) の「答えを記録する」 |
-| `scripts/gate-rejections.py count` | 承認ゲートの差し戻しを、スプリント・課題・PR ごとに承認ゲート 1・2 に分けて数える（読めなければ件数は「不明」） |
+| `scripts/gate-rejections.py count` | 承認ゲートの差し戻しを、スプリント・課題・PR ごとに承認ゲート 1・2 に分けて数える（読めなければ件数は「不明」、範囲に答えの行が無ければ「未記録」） |
 | `scripts/project-mvv.py` | プロジェクト MVV の判定（`check`）・材料（`collect`）・候補（`propose`）・照合（`vet`）・承認の書き込み（`approve`）・版（`show`）・節（`context`）・改訂の兆候（`signals`）。手順は [project-mvv.md](project-mvv.md) |
 | `scripts/sprint-state.py status` | 今の状態を出す |
 | `scripts/sprint-state.py next` | 切れ目で引継ぎ文書へ置く ndf-next のブロックを作る |

@@ -22,6 +22,8 @@ import models as models_lib
 import project_mvv
 import project_decl
 import repo as repo_lib
+import run_owner
+import run_state
 import statefile
 import test_strategy as ts
 import tool_paths
@@ -402,6 +404,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     runtime_decl.require_in_policy([*(inputs.include or []), getattr(args, "implementer", None)], "--include / --implementer")
     prep = _prepare_init(args)
     if _resume_if_pending(args, inputs, prep):
+        _emit_run(prep)
         return
 
     for key, value in NEW_RUN_DEFAULTS.items():
@@ -414,6 +417,12 @@ def cmd_init(args: argparse.Namespace) -> None:
     init_test.stop_if_window_short(prep.state_file, state)
     # **出力は入口から直接呼ぶ。** 手順書の変数の出所のチェック（`scripts/check-skill-shell-vars.py`）は 1 階層だけたどる。
     _emit_init(state)
+    _emit_run(prep)
+
+
+def _emit_run(prep: "_InitPreparation") -> None:
+    """持ち主の記録の実行の識別子と、開始の片付けの結果を出す（#2229）。"""
+    statefile.emit(RUN=prep.run, SWEPT=json.dumps(prep.swept, ensure_ascii=False))
 
 
 def _normalize_args(args: argparse.Namespace) -> None:
@@ -460,6 +469,8 @@ class _InitPreparation:
     decl: dict[str, Any]
     ci_coverage: dict[str, Any]
     template_checks: list[dict[str, Any]] = field(default_factory=list)
+    run: str = ""  # 持ち主の記録の実行の識別子（#2229）
+    swept: list[dict[str, Any]] = field(default_factory=list)  # 開始の片付けの結果
 
 
 def _resolve_init_inputs(args: argparse.Namespace) -> Optional[_InitInputs]:
@@ -499,7 +510,13 @@ def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
     reason = pr_gate.init_refusal(args.pr, repo, status)
     if reason:
         die(reason)
+    # 持ち主の終わった残る状態を片付け（開始する rf<n> は見ない）、既存の rf<n> を使ってよいかを決める（#2229）
+    owned = not args.worktree_root  # 置き場を渡した作業ディレクトリは呼び出し元が持つ。記録を書かない
+    swept, stop = run_state.begin_review(root, getattr(args, "run", None), owned=owned)
+    if stop:
+        die(stop)
     _ensure_work_worktree(work, head_branch)
+    run = run_owner.adopt_owner(root, tool="cross-refactoring", pr=args.pr, run=getattr(args, "run", None)) if owned else ""
 
     # **テストの戦略は宣言（`.ndf/project.json` の `test`）と引数から解く**（#1334 E1）。コマンドの文字列は
     # 解析しない。解けなければ欠けたキーと直し方を出して止める（I3）。引数の雛形の種別は `--test-kind`（#1483 I1）。
@@ -544,6 +561,8 @@ def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
         strategy=strategy,
         decl=decl,
         ci_coverage=coverage.as_state(),
+        run=run,
+        swept=swept,
     )
 
 

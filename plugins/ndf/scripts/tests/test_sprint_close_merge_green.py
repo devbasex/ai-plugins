@@ -157,6 +157,8 @@ def gh(tmp_path):
     env["FAKE_GH_STATE"] = str(state)
     env["NDF_PRESENTATION_DIR"] = str(tmp_path / "pres")
     env["NDF_WORKTREE_BASE"] = str(tmp_path / "wtbase")
+    env["TMPDIR"] = str((tmp_path / "systmp").resolve())  # 片付け（run_state.sweep_states）が手元の一時の置き場に触れない
+    (tmp_path / "systmp").mkdir(exist_ok=True)
     env["NDF_LOCK_DIR"] = str(tmp_path / "locks")
     for k in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GH_TOKEN", "GITHUB_TOKEN"):  # REST も偽の gh を通す
         env.pop(k, None)
@@ -717,6 +719,15 @@ def load_merged():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
+
+
+def test_cleanup_result_splits_own_and_swept_by_mark_not_value():
+    """同じ値の kept が自分の片付けと持ち主の終わった状態の片付けの両方にあっても、それぞれで数える。"""
+    mod = load_merged()
+    same = {"kind": "worktree", "name": "/w/pr1", "result": "kept", "reason": "r"}
+    items = [dict(same), {**same, "swept": True}]
+    _, _, _, metrics, _, _ = mod._cleanup_result(items, [1], None)
+    assert (metrics["kept"], metrics["swept_kept"]) == (1, 1)
 
 
 @pytest.mark.parametrize("change", ["modified", "staged", "deleted"])

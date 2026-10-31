@@ -35,7 +35,7 @@ import deps  # noqa: E402
 
 # `refactor_lib` の呼び名の表の読み取り（md）と報告の表（mdtable）が外部パッケージを使う。
 # **`refactor_lib` の import より前に呼ぶ**（呼び名の表は取り込みの時点で読む）。
-deps.require("md", "mdtable", "locks", "procs", "waits", "schema")
+deps.require("md", "mdtable", "locks", "procs", "waits", "schema", "durable")
 
 # 分割したモジュールは同じディレクトリの `refactor_lib/` にある。**自身の
 # ディレクトリを探索先へ入れる。** `uv run --script` で起動したときの現在地は、
@@ -216,6 +216,11 @@ def add_init_parser(sub: argparse._SubParsersAction) -> None:
         help="提案の前に対象範囲の指標（循環的複雑度・行数・重複）を測る。--no-code-metrics で測らない (default: 測る)",
     )
     init.add_argument("--worktree-root", default=None)
+    init.add_argument(
+        "--run",
+        default=None,
+        help="この実行の識別子（drive.py が渡す）。既存の rf<n> の持ち主の記録と一致すれば同じ実行の続きとして使う（#2229）",
+    )
     init.set_defaults(func=cmd_init)
 
 

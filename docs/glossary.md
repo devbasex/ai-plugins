@@ -35,7 +35,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | セッション | `session` | ラッパーが起動する claude の 1 回の起動（1 つの会話）。番号を付けて「セッション 4」と呼ぶ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | プラン | `plan` | `supervise.py` が流す 1 本の JSON（`plan.json`）。フェーズの手順をステップの列として持つ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | キュー | `queue` | プランを空いた枠へ順に流す `supervise.py queue`。終わると結果を done へ書く | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| キューの続き | — | `supervise.py queue --resume <done>`。前の起動のステージの並びを読み、完了していないプランを終えたステップから続け、後続のステージも流す | — | — | — |
+| キューの続き | — | `supervise.py queue --resume <done>`。前の起動のステージの並びを読み、完了していないプランを終えたステップから続け、後続のステージも流す | — | — | `docs/specifications/ndf-supervise-queue-resume-and-gate-evidence.md` |
 | リリース差分 | — | 版と版の間（タグからタグまで）の変更 | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | インライン実行 | — | 仕事を渡す実行方式の 1 つ。いまの会話の文脈で行う | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | オーケストレーター | — | `cross-refactoring` と `cross-review` で、公開・生成物の同期を持ち、担当を回す側。3 層では conductor に当たる | 進行側、レビューを回す側 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
@@ -239,8 +239,8 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 前提のプラン | `after` | プランの JSON の `前提のプラン` に名前で挙げたプラン。その結果が完了でなければ、queue は挙げた側のプランを流さない | — | — | `docs/specifications/ndf-supervise-queue-concurrent-files-and-prerequisites.md` |
 | スプリントの雛形 | — | `supervise.py new sprint` がステージごとのプランを作る関数（`sprint_waves.py` の `plan_sprint_*` / `plan_fast_*`） | — | — | — |
 | 単発の雛形 | — | `supervise.py new impl / fix / check` が 1 本のプランを作る関数（`templates.py`） | — | — | — |
-| 取り込んだ課題 | — | 受け入れ内容を別の課題の実装へ含めると決めた課題。設計の結果の表か `new sprint --absorb` で決める。実装のプランは `実行の条件` で飛ばして実行しない。`--absorb` で決めたときは自分の設計のプランを持たない | — | — | — |
-| 承認の証跡 | — | 承認ゲートで利用者が承認したことを示す、プランの外で残った記録。スプリント状態ファイルの承認ゲートの記録（`--by user --outcome approved`）・承認ラベル・承認資料の承認の記録のどれか。プランのステップは承認の証跡があるときだけ、承認を前提にした操作へ進む | — | — | — |
+| 取り込んだ課題 | — | 受け入れ内容を別の課題の実装へ含めると決めた課題。設計の結果の表か `new sprint --absorb` で決める。実装のプランは `実行の条件` で飛ばして実行しない。`--absorb` で決めたときは自分の設計のプランを持たない | — | — | `docs/specifications/ndf-supervise-queue-resume-and-gate-evidence.md` |
+| 承認の証跡 | — | 承認ゲートで利用者が承認したことを示す、プランの外で残った記録。スプリント状態ファイルの承認ゲートの記録（`--by user --outcome approved`）・承認ラベル・承認資料の承認の記録のどれか。プランのステップは承認の証跡があるときだけ、承認を前提にした操作へ進む | — | — | `docs/specifications/ndf-supervise-queue-resume-and-gate-evidence.md` |
 | 手動確認の行 | — | 要求の検証手段の表で、項目が「手動確認」で始まり、2 列目が「無し」の形（「無し」「なし」「不要」「ない」「-」「—」「―」の単独か、直後に括弧・句読点・空白が続く形）でない行。項目が「手動確認（マージ前）」ならマージ前、それ以外はリリース後テストに確かめる | — | — | — |
 | 記録の置き場が分からない | — | まとめの close が読むリリース記録の Pull Request を、プランが組まれた時点で決められない状態。sprint-close.py --record-pr unknown で渡し、課題を開いたまま残す | — | — | `docs/specifications/ndf-sprint-misjudgments-unknown-record-and-manual-none.md` |
 | 設計の結果 | — | 設計文書の「設計の結果」の節の表。課題ごとに扱い（実装する / 取り込む / 閉じる）・取り込み先・触るファイルを書き、実装のステージの前に機械が読む | — | — | — |
@@ -301,19 +301,19 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 補正 | — | conductor が雛形の書いたプランへ手で足した指示や値。プランを書き直す側は消さない | — | — | `docs/specifications/ndf-supervise-impl-prompt-format-and-transient-failures.md` |
 | 整形 | — | 規則を変えずにコードの形だけを揃えるコマンド。何を打つかはプロジェクトの宣言が持つ | — | — | `docs/specifications/ndf-supervise-impl-prompt-format-and-transient-failures.md` |
 | 一時的な失敗 | — | GitHub や git の呼び出しが 0 以外で終わり、打ち直せば通りうる失敗（5xx・接続の切断）。打ち直しても残れば、読めなかったとして止まる（#1941） | — | — | `docs/specifications/ndf-supervise-impl-prompt-format-and-transient-failures.md` |
-| 依存グループ | — | lib/deps.py の GROUPS と pyproject.toml の extra に並ぶ、外部パッケージの用途ごとのまとまり（procs・locks など）。deps.require へ名前で渡す | — | — | — |
-| 未宣言のグループ | — | モジュールから import をたどって届く外部パッケージの依存グループのうち、そのモジュールの中で覆う deps.require が無いもの。そのモジュールを読む側が引き受ける | — | — | — |
-| 任意の依存 | — | 無ければ代わりの手段へ落ちる import。except ImportError / ModuleNotFoundError で受けるか、同じ関数の中で find_spec / deps.importable で確かめ、確かめが成り立ったときだけ通る枝で読む | — | — | — |
-| 作業の報告 | `work_report` | worker が応答の最後に書く「## 作業の報告」の節。「結果:」は 完了 / 判断が要る / できなかった のどれかで、supervise はこれでステップの成否を決める | — | — | — |
-| 起こし直し | `resume_prompt` | supervise の full のステップで、作業の報告が無いまま応答が終わったとき、同じ会話（--resume）へ続けるよう送ること。3 回まで | — | — | — |
-| 所要の記録 | — | `.ndf/project.json` の `test_duration.measured` にある全体テストの所要（秒。w）。出所は ndf-record → ci-junit → ci-steps の順に採る。宣言の解析が書き、プランの作成と test-run.py が読む | — | — | — |
-| 全体テストの実測 | — | 同じリポジトリで先に走った全体テストの壁時計の秒。所要の記録とは別に残し、後のプランと test-run.py が予算なしのテストの上限を決めるときに読む（#1631） | — | — | — |
-| テストの上限 | `limits` | test_strategy.limits が返す init_test_timeout・test_timeout・whole_timeout（秒）。ステップの timeout はこれに with_margin の余裕を足した値で、テストの上限には余裕を足さない | — | — | — |
-| 全体テストの鍵 | `whole_key` | 戦略の全体テストのコマンドの集合から作る識別子（whole_key）。全体テストの実測をコマンドごとに分け、コマンドの違う実測を混ぜない（#1631） | — | — | — |
-| 問い合わせの区分 | `ask_category` | AskUserQuestion の metadata.source に AI が付ける値。ndf-gate:<番号>（承認ゲート）・ndf-ask:redline:<番号>（レッドライン。宣言で外せない）・ndf-ask:<名前>（宣言が許す区分）の 3 つの形。hook は質問の中身を読まず、この値が許された区分かだけを見る（#2206） | — | — | — |
-| 問い合わせの宣言 | `ask_declaration` | プロジェクトの .ndf/ask.json。人へ回してよい問い合わせの区分と hook の働き方（enforce / advise / off）を書く（#2206） | — | — | — |
-| 代わりの判断 | `proxy_decision` | hook が問い合わせを止めた後か、手順が「AI が決める」とした場面で AI が自分で下した判断。問い・選んだ答え・理由を問い合わせの記録へ書く（#2206） | — | — | — |
-| 問い合わせの記録 | `ask_ledger` | 状態の置き場の ask.jsonl。hook の判定の行と代わりの判断の行を追記だけで持ち、振り返りと Factory のランナーが読む（#2206） | — | — | — |
+| 依存グループ | — | lib/deps.py の GROUPS と pyproject.toml の extra に並ぶ、外部パッケージの用途ごとのまとまり（procs・locks など）。deps.require へ名前で渡す | — | — | `docs/specifications/ndf-deps-require-groups-check.md` |
+| 未宣言のグループ | — | モジュールから import をたどって届く外部パッケージの依存グループのうち、そのモジュールの中で覆う deps.require が無いもの。そのモジュールを読む側が引き受ける | — | — | `docs/specifications/ndf-deps-require-groups-check.md` |
+| 任意の依存 | — | 無ければ代わりの手段へ落ちる import。except ImportError / ModuleNotFoundError で受けるか、同じ関数の中で find_spec / deps.importable で確かめ、確かめが成り立ったときだけ通る枝で読む | — | — | `docs/specifications/ndf-deps-require-groups-check.md` |
+| 作業の報告 | `work_report` | worker が応答の最後に書く「## 作業の報告」の節。「結果:」は 完了 / 判断が要る / できなかった のどれかで、supervise はこれでステップの成否を決める | — | — | `docs/specifications/ndf-supervise-work-step-web-tools-and-report-stop.md` |
+| 起こし直し | `resume_prompt` | supervise の full のステップで、作業の報告が無いまま応答が終わったとき、同じ会話（--resume）へ続けるよう送ること。3 回まで | — | — | `docs/specifications/ndf-supervise-work-step-web-tools-and-report-stop.md` |
+| 所要の記録 | — | `.ndf/project.json` の `test_duration.measured` にある全体テストの所要（秒。w）。出所は ndf-record → ci-junit → ci-steps の順に採る。宣言の解析が書き、プランの作成と test-run.py が読む | — | — | `docs/specifications/ndf-supervise-test-limits-from-whole-runs.md` |
+| 全体テストの実測 | — | 同じリポジトリで先に走った全体テストの壁時計の秒。所要の記録とは別に残し、後のプランと test-run.py が予算なしのテストの上限を決めるときに読む（#1631） | — | — | `docs/specifications/ndf-supervise-test-limits-from-whole-runs.md` |
+| テストの上限 | `limits` | test_strategy.limits が返す init_test_timeout・test_timeout・whole_timeout（秒）。ステップの timeout はこれに with_margin の余裕を足した値で、テストの上限には余裕を足さない | — | — | `docs/specifications/ndf-supervise-test-limits-from-whole-runs.md` |
+| 全体テストの鍵 | `whole_key` | 戦略の全体テストのコマンドの集合から作る識別子（whole_key）。全体テストの実測をコマンドごとに分け、コマンドの違う実測を混ぜない（#1631） | — | — | `docs/specifications/ndf-supervise-test-limits-from-whole-runs.md` |
+| 問い合わせの区分 | `ask_category` | AskUserQuestion の metadata.source に AI が付ける値。ndf-gate:<番号>（承認ゲート）・ndf-ask:redline:<番号>（レッドライン。宣言で外せない）・ndf-ask:<名前>（宣言が許す区分）の 3 つの形。hook は質問の中身を読まず、この値が許された区分かだけを見る（#2206） | — | — | `docs/specifications/ndf-ask-guard.md` |
+| 問い合わせの宣言 | `ask_declaration` | プロジェクトの .ndf/ask.json。人へ回してよい問い合わせの区分と hook の働き方（enforce / advise / off）を書く（#2206） | — | — | `docs/specifications/ndf-ask-guard.md` |
+| 代わりの判断 | `proxy_decision` | hook が問い合わせを止めた後か、手順が「AI が決める」とした場面で AI が自分で下した判断。問い・選んだ答え・理由を問い合わせの記録へ書く（#2206） | — | — | `docs/specifications/ndf-ask-guard.md` |
+| 問い合わせの記録 | `ask_ledger` | 状態の置き場の ask.jsonl。hook の判定の行と代わりの判断の行を追記だけで持ち、振り返りと Factory のランナーが読む（#2206） | — | — | `docs/specifications/ndf-ask-guard.md` |
 | 試行 | — | 同じステップを流し直したときの 1 回ごとの実行と、その結果 JSON。プランの実行の記録の NN-<ステップ>.out の 1 つが 1 試行に当たる | — | — | — |
 | 欠けの残る結果 | — | 手順は終わったが、出すはずの材料・記録の一部が無いか、目標（収束など）に届かなかった結果。stopped と終了コード 6 と gaps で返し、ok で返さない | — | — | — |
 | 結果の置き場 | — | 読む側が結果 JSON や材料を探す場所（プランの実行の記録・記録のファイル）。置き場が無いことと、材料が 0 件であることを分けて扱う | — | — | — |
@@ -561,7 +561,7 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | 承認したコミット | — | ゲート 2 の承認資料が対象にした、ベースブランチの先端のコミットの SHA（40 桁）。本番チャネルへ入れてよい中身の上限を示す | — | — | `docs/specifications/ndf-release-approved-commit.md` |
 | 比べた先端 | — | 本番の配布が承認したコミットと比べた時点の、ベースブランチの先端のコミットの SHA。本番チャネルへマージしてよいのはこのコミットだけである | — | — | `docs/specifications/ndf-release-approved-commit.md` |
 | 確かめたコミット | — | 導入の確認を走らせた、ベースブランチの先頭のコミットの SHA（40 桁）。導入の確認の承認資料に書かれ、pace: fast / auto の昇格でマージしてよい先端はこのコミットに限る | — | — | `docs/specifications/ndf-release-approved-commit.md` |
-| 承認の外のコミット | — | 承認したコミットから比べた先端までに入ったコミットのうち、この版の配布の PR のものでないもの。あれば本番の配布は承認ゲートで止まる | — | — | `docs/specifications/ndf-release-approved-commit.md` |
+| 承認の外のコミット | — | 承認したコミットから比べた先端までに入ったコミットのうち、この版の配布の PR のものでないもの。配布物（`plugins/`・`.claude-plugin/`）に触れるものがあれば本番の配布は承認ゲートで止まる | — | — | `docs/specifications/ndf-release-approved-commit.md` |
 | 承認の記録 | — | 承認資料の欄の 1 つ。ゲート 2 を承認したときの承認したコミットの SHA と、承認した者・時刻を持つ。承認資料を書き直すと消え、承認し直すまで本番の配布は通らない | — | — | `docs/specifications/ndf-release-approved-commit.md` |
 | 更新情報の節 | — | plugin の README の `## 更新情報` の節。版を名乗らず、CHANGELOG.md の版の節を参照する固定の案内だけを持つ。配布の手順（bump・changelog・notes）は書かない | — | — | `docs/specifications/ndf-release-readme-update-info.md` |
 | 版の節 | — | CHANGELOG.md の `## [<plugin> <基底の版>]` の見出しから次の `## ` までの節。その版の利用者向けの変化と移行の手順の全件の正本 | — | — | `docs/specifications/ndf-release-readme-update-info.md` |
@@ -662,7 +662,7 @@ worktree の設定・セッション開始 hook・テスト環境の割り当て
 | 以前の実行 | — | 今の実行より前に同じ Pull Request・同じリポジトリで回った、終わった実行。supervise.py の run --from の「前の実行」とは別（#2229） | — | — | — |
 | 持ち主の記録 | — | 残る状態ごとに、作った実行が書く記録。実行の識別子・開始・最後に動いた時刻・終わった時刻、またはプロセス（pid と開始時刻）を持つ。片付けが持ち主の生存を判定するために読む（#2229） | — | — | — |
 | 寿命の窓 | — | 持ち主の記録が終わっていなくても、最後に動いた時刻からこの時間を過ぎた実行を終わったとみなす長さ。24 時間（#2229） | — | — | — |
-| 片付け | — | 状態の一覧に従い、持ち主の終わった残る状態を外し、残したものと理由を返す処理（run_state.sweep）。git が拒めば止まる操作だけで行う（#2229） | — | — | — |
+| 片付け | — | 状態の一覧に従い、持ち主の終わった残る状態を外し、残したものと理由を返す処理（run_state.sweep_states）。git が拒めば止まる操作だけで行う（#2229） | — | — | — |
 
 ## mcp-serena（`mcp-serena`）
 
@@ -803,12 +803,12 @@ NDF を Web UI から操作できるサービスとして提供するときの�
 | 起票の依頼の結果 | — | 起票の依頼 1 件ごとに 1 件残る進捗の事象 issue.request_resolved。サービスが起票した Issue の参照か、下書きへ回した理由を持つ | — | — | — |
 | 起票の代行 | — | 記録された起票の依頼を読み、起票してよい先へはサービスが 1 リポジトリと Issues の書き込みだけに絞った導入の token で起票し、そうでない先は下書きを人へ回す、サービスの処理 | — | — | — |
 | 下書き（起票の依頼） | — | サービスが起票しなかった起票の依頼の題と本文。人が相手先の流儀に沿って起票するために回る | — | — | — |
-| リポジトリの登録 | — | アカウントが GitHub のリポジトリ 1 つを、GitHub App の導入の識別子と一緒に持つこと。スプリントの実行はこれに属する | — | — | — |
-| GitHub App の導入 | — | 利用者が自分のリポジトリへサービスの GitHub App を入れたもの。導入の識別子で指し、clone と push の導入の token をここから作る | — | — | — |
-| キーの持ち込み | — | 実行の形態 `byok` で、利用者の Anthropic API キーか、引き受ける AWS のロールの ARN をサービスへ預けること | — | — | — |
-| 再開の要求 | — | 承認の依頼に答えが保存された後、承認と通知が実行の制御へ出す、`resume` の実行ジョブを起こす要求 | — | — | — |
-| 打ち切りの時間 | — | 1 つの実行ジョブが動いてよい時間の上限。超えたら実行の制御が止める | — | — | — |
-| 課題の候補 | — | スプリントを始める画面に、AI が棚卸しの順位から理由つきで出す課題 | — | — | — |
-| 実行の枠 | — | アカウントとリポジトリごとに、終わりの状態でないスプリントの実行を数えた値。開始で増え、終わりの状態への移りで減る | — | — | — |
-| 見回り | — | 実行の制御が 5 分ごとに動き、打ち切りの時間を過ぎた実行ジョブを止め、停止の知らせを取りこぼした実行ジョブを終わらせる処理 | — | — | — |
-| 候補の証明 | — | GitHub で確かめたリポジトリの登録の候補を、取り込みが署名して 10 分だけ有効にした値。登録の要求はこれを持って来る | — | — | — |
+| リポジトリの登録 | — | アカウントが GitHub のリポジトリ 1 つを、GitHub App の導入の識別子と一緒に持つこと。スプリントの実行はこれに属する | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
+| GitHub App の導入 | — | 利用者が自分のリポジトリへサービスの GitHub App を入れたもの。導入の識別子で指し、clone と push の導入の token をここから作る | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
+| キーの持ち込み | — | 実行の形態 `byok` で、利用者の Anthropic API キーか、引き受ける AWS のロールの ARN をサービスへ預けること | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
+| 再開の要求 | — | 承認の依頼に答えが保存された後、承認と通知が実行の制御へ出す、`resume` の実行ジョブを起こす要求 | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
+| 打ち切りの時間 | — | 1 つの実行ジョブが動いてよい時間の上限。超えたら実行の制御が止める | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
+| 課題の候補 | — | スプリントを始める画面に、AI が棚卸しの順位から理由つきで出す課題 | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
+| 実行の枠 | — | アカウントとリポジトリごとに、終わりの状態でないスプリントの実行を数えた値。開始で増え、終わりの状態への移りで減る | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
+| 見回り | — | 実行の制御が 5 分ごとに動き、打ち切りの時間を過ぎた実行ジョブを止め、停止の知らせを取りこぼした実行ジョブを終わらせる処理 | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
+| 候補の証明 | — | GitHub で確かめたリポジトリの登録の候補を、取り込みが署名して 10 分だけ有効にした値。登録の要求はこれを持って来る | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |

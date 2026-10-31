@@ -579,6 +579,36 @@ def test_flush_still_stops_at_a_rejected_review(tmp_path: pathlib.Path, monkeypa
     assert result.remaining == 2
 
 
+_POSITION = post_queue.Attempt(1, '{"message": "Line could not be resolved"}', "gh: Unprocessable Entity (HTTP 422)")
+
+
+def test_flush_sets_aside_a_position_rejected_review_that_is_not_kept(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """今回分でない位置エラーの review-post は控えへ外し、後ろを送る。`outcome` は `dropped` を返す（#2084）。"""
+    _write_kind(tmp_path, 1, "review-post")
+    _write_kind(tmp_path, 2, "pr-comment")
+    monkeypatch.setattr(post_queue, "posted_match", lambda item: (False, None))
+    monkeypatch.setattr(post_queue, "send", lambda item: _POSITION if item["seq"] == 1 else post_queue.Attempt(0, '{"id": 9}', ""))
+    q = post_queue.Queue(tmp_path)
+
+    result = q.flush(keep=2)
+
+    assert [i["seq"] for i in result.dropped] == [1] and [i["seq"] for i in result.sent] == [2]
+    assert result.failed is None and result.remaining == 0
+    assert (tmp_path / "dropped" / "0001-review-post-1.json").exists()
+    assert q.outcome(1)["state"] == "dropped" and q.outcome(2)["state"] == "sent" and q.outcome(9) is None
+
+
+def test_flush_stops_at_the_kept_review_rejected_by_position(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """今回分（`keep`）の位置エラーは外さず先頭で止め、呼び出し側が総評へ移す。"""
+    _write_kind(tmp_path, 1, "review-post")
+    monkeypatch.setattr(post_queue, "posted_match", lambda item: (False, None))
+    monkeypatch.setattr(post_queue, "send", lambda item: _POSITION)
+
+    result = post_queue.Queue(tmp_path).flush(keep=1)
+
+    assert result.failed["seq"] == 1 and result.dropped == [] and result.remaining == 1
+
+
 def test_flush_cli_prints_the_dropped_count(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     _write_kind(tmp_path, 1, "review-reply")
     monkeypatch.setattr(post_queue, "posted_match", lambda item: (False, None))
@@ -727,7 +757,7 @@ def test_an_unsent_item_is_retried_in_order_by_the_next_flush(tmp_path: pathlib.
 
 
 def test_flush_drop_flush_run_in_one_process_that_exits_normally(tmp_path: pathlib.Path) -> None:
-    """result_posts の順（flush → drop → 積み直し → flush）を 1 つのプロセスで打ち、プロセスが普通に終わる。"""
+    """result_posts の順（flush(keep) → drop → 積み直し → flush(keep)）を 1 つのプロセスで打ち、プロセスが普通に終わる。"""
     script = tmp_path / "run.py"
     script.write_text(
         f"""
@@ -744,11 +774,11 @@ post_queue.send = send
 post_queue.posted_match = lambda item: (False, None)
 q = post_queue.Queue({str(tmp_path / "pending")!r})
 seq = post_queue.enqueue(q, "review-post", "o/r", 1, {{"body": "b", "event": "COMMENT"}})["seq"]
-first = q.flush()
+first = q.flush(keep=seq)
 assert post_queue.rejected_by_position(first.failed), first
 assert q.drop(first.failed["seq"]) is True
 seq = post_queue.enqueue(q, "review-post", "o/r", 1, {{"body": "b2", "event": "COMMENT"}})["seq"]
-second = q.flush()
+second = q.flush(keep=seq)
 print(seq, [i["seq"] for i in second.sent], second.remaining, calls)
 """,
         encoding="utf-8",

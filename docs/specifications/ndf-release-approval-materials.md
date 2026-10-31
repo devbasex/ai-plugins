@@ -68,7 +68,7 @@
 | `plugins/ndf/scripts/lib/acceptance.py` | 受け入れ条件の番号・印・文（`criteria_lines`）、リリース後テストの表を課題と番号でまとめる処理（`verification_verdicts`・`IssueRows`）、版の一致するブロックだけを読む処理（`version_verdicts`） |
 | `release-steps.py` の `cmd_notes` | `--check-state` を受け、`--approval` が無ければ引数の誤り（2）。「含む PR」の中身を `closingIssuesReferences` とコメントつきで 1 回でまとめて読み、課題の本文を課題ごとに `issue_body` で読んで `materials` へ渡す |
 | `plugins/ndf/skills/cross-review/scripts/drive.py` の `Drive.finish` | 終わりの結果 JSON の `items` へ、見送った指摘を 1 件ずつ足す（決定 6） |
-| `plugins/ndf/scripts/supervise_lib/queue.py` の `fill_queue_pr` | `{queue_state:<名>}` を、名前の一致するプランの状態の置き場の絶対パスで置き換える。一致するプランが無ければ空文字 |
+| `plugins/ndf/scripts/supervise_lib/queue.py` の `fill_queue_pr` | `{queue_state:<名>}` を、名前の一致するプランの状態の置き場の絶対パスで置き換える。一致するプランの置き場が無ければ空文字で埋めず、そのプランを流さない（queue は `ok` で返さない） |
 | `plugins/ndf/scripts/supervise_lib/release_templates.py` の `_dev_approval_steps` | 出す PR が `{queue_pr:<名>}` の 1 語のとき、`explain` のステップの `notes --approval` へ `--check-state '{queue_state:<名>}'` を足す |
 
 ```mermaid
@@ -95,13 +95,13 @@ flowchart LR
 
 | 材料 | 読む元 | 無い材料になるとき |
 | --- | --- | --- |
-| レビュー | `<D>/NN-review.out` の最後の結果 JSON（`tool` が `cross-review-drive`）の `metrics.rounds` と、`items` の `kind: deferred`（`path`・`line`・`summary`・`round`） | `--check-state` が空・置き場が無い・出力が無い・その `tool` の JSON が無い |
+| レビュー | `<D>/NN-review.out` の最後の結果 JSON（`tool` が `cross-review-drive`）の `metrics.rounds` と、`items` の `kind: deferred`（`path`・`line`・`summary`・`round`） | `--check-state` を渡さない・出力が無い・その `tool` の JSON が無い |
 | リファクタリング | `<D>/NN-refactor.out` の最後の結果 JSON（`cross-refactoring-drive`）の `metrics.adopted`・`metrics.reverted` | 同上 |
 | 全体テスト | `<D>/NN-test-all.out` の最後の結果 JSON（`test-run`）。`status` が `ok` なら合格、落ちたテストは `items` の `failed_tests` の数、変更起因は `metrics.caused`。コマンドは `items` に `ran` があればそれを、無ければ宣言（`.ndf/project.json` と `.ndf/supervise.json`）を `test_strategy` で解いた全体テストのコマンドを書き、CI に任せる戦略なら「CI に任せた」と書く | 同上 |
 | 設計文書の未確認 | 「含む PR」が閉じる課題（`closingIssuesReferences` と本文の closing keywords の和）のうち今のリポジトリの課題について、`<ref>:issues/issue-<番号>-design.md` の `## 未確認のまま残ること`。表なら「項目: 内容」、箇条ならその文。「無し」だけの節は 0 件。`<ref>` は `origin/<base>`、無ければ `<base>`、それも無ければ `HEAD` | 閉じる課題のどれにも設計文書が無い |
 | 未実施のリリース後テスト | 閉じる課題（他のリポジトリの課題も含む）の本文の `## 受け入れ条件` のうち、印（`[x]`）が無く、`--prs` の PR の本文とコメントの `## リリース後テスト` の表に合格の行が無い条件。表は `対象の版:` の基底が今の版の基底と一致する最後のブロックを読む。条件の番号を書かずに全行が合格した課題は 0 件 | 閉じる課題のどれにも受け入れ条件が無い |
 
-`NN` は同じステップの出力が複数あるとき番号の最も大きいもの（再開で増える）。他のリポジトリの課題は、行の課題番号の前に `owner/name` を付ける。
+`NN` は同じステップの出力が複数あるとき（再開で増える）、レビューとリファクタリングは結果 JSON の `status` が `ok` の試行のうち番号の最も大きいもの、全体テストは番号の最も大きいもの（`status` が合否そのもの）。レビューかリファクタリングに `ok` の試行が 1 つも無ければ、落ちた試行の件数を載せず「どの試行も `ok` で終わっていない（最後の試行の status: `<status>`）」と書く。レビューの見送った指摘は、`ok` の試行が無いとき（未収束で終了コード 6 のまま配布へ進んだとき）もこの行に件数を添えて載せる。見送った指摘は `path` と `summary` が同じなら、`line` の有無・値が違っても（ラウンドを跨いだ同じ指摘）1 行・1 件に畳み、行番号のあるものを残す。他のリポジトリの課題は、行の課題番号の前に `owner/name` を付ける。
 
 ### 常に成り立つ条件
 
@@ -150,7 +150,8 @@ sequenceDiagram
 | 場合 | 扱い |
 | --- | --- |
 | `--check-state` を `--approval` なしで渡した | 引数の誤り（2） |
-| `--check-state` が空文字・置き場が無い・出力か結果 JSON が無い | 止まらず、その材料を無い材料として書く |
+| `--check-state` を渡さない・置き場はあるが出力か結果 JSON が無い | 止まらず、その材料を無い材料として書く（`## 検査の結果` は「無し（…の結果が検査の状態に無い）」） |
+| `--check-state` が空文字・置き場のディレクトリが無い | `StepError`（3）で止まり、承認資料を書かない（置き場が無いことを「無し」と書かない。#2079） |
 | 「含む PR」の中身・課題の本文を GitHub から読めない | `StepError` で止まり、承認資料を書かない（材料を黙って空にしない） |
 | 設計文書を読む ref（`origin/<base>`・`<base>`・`HEAD`）がどれも無い | `StepError`（2）で止まる |
 
@@ -179,7 +180,7 @@ cross-review の供給側は `plugins/ndf/skills/cross-review/scripts/tests/test
 - `--check-state` を `--approval` なしで渡すと 2 で止まること。課題の本文を読めないと止まること
 - 他のリポジトリの課題の条件は、行に `owner/name` が残ること
 - `ran` の無い全体テストの出力から、宣言のコマンドが書かれること
-- `{queue_state:check}` が名前の一致するプランの状態の置き場で埋まり、一致するプランが無ければ空になること。雛形が `{queue_pr:check}` のときだけ `--check-state` を足すこと
+- `{queue_state:check}` が名前の一致するプランの状態の置き場で埋まり、一致するプランが無ければ埋まらずにそのプランを流さないこと。`--check-state` の置き場が空文字・無いディレクトリなら 3 で止まること。雛形が `{queue_pr:check}` のときだけ `--check-state` を足すこと
 - 見送りを持つ状態で `Drive.finish` を通すと、`items` に `kind: deferred` が `path`・`line` つきで出て、`waived` の要素は出ないこと。見送りが無ければ何も足さないこと（M8）
 
 ## 関連リンク

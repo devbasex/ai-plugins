@@ -10,7 +10,7 @@ from gate_answer import GATE_2
 from supervise_lib.decl import WORKTREE_DECL, DeclError, with_decls
 from supervise_lib.paths import MERGED_PY, MVV_PY, STEPS_PY, VERIFY_PY
 from supervise_lib.plan import QUEUE_PRS
-from supervise_lib.verify_steps import INFRA_WAIT_STOP, handoff_step, plan_limits, with_margin
+from supervise_lib.verify_steps import INFRA_WAIT_STOP, handoff_step, plan_limits, reject_step, with_margin
 from supervise_lib.procedures import with_record
 
 
@@ -140,6 +140,7 @@ def _add_prod_mvv_gate(steps: list[dict], a, repo: str | None, approval: str, pr
         "bump",
     )
     steps.append(handoff_step(state, GATE_2, "判定のコメント"))
+    steps.append(reject_step(state, GATE_2, "mvv", root=repo or "."))
 
 
 def _prepare_steps(a, plugin: str, v: str, prs: str, dev: bool, after_notes: str, repo: str | None, approval: str) -> list[dict]:
@@ -360,7 +361,7 @@ def approve_step(a, repo: str | None, approval: str) -> dict:
     facts の出力（--dev-state か、同じディレクトリの開発版のプランの状態）から読み、利用者の承認の記録は --state から読む。
     証跡が無ければ承認ゲート（10）で終え、bump へ進まない。"""
     dev_state = getattr(a, "dev_state", None)
-    facts = shlex.quote(str(Path(dev_state).resolve())) if dev_state else "'{queue_state:release}'"
+    facts = shlex.quote(str(Path(dev_state).resolve())) if dev_state else "'{queue_state?:release}'"
     state = getattr(a, "state", None)
     answer = f" --answer-from {shlex.quote(str(Path(state).resolve()))}" if state else ""
     return {

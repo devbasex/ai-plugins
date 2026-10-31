@@ -71,8 +71,8 @@
 | E1 | 実行が残る状態を作り、持ち主を記録した | cross-review の `init`・cross-refactoring の `setup`・セッションの hook・`worktree-deps.sh` | 片付け（生存の判定で読む） |
 | E2 | 実行が終わった | cross-review の `drive.py` の終わり（`finish`）・cross-refactoring の `report`・プロセスの終わり | 片付け（記録の終わった時刻か、プロセスの不在で読む） |
 | E3 | Pull Request がマージされた、または閉じられた | 人か conductor（merged を通るとは限らない） | 片付け（Pull Request の照会で読む） |
-| E4 | 片付けが、持ち主の終わった状態を外した | `run_state.sweep`（merged の `cleanup`・cross-review の開始・cross-refactoring の開始・テストのセッションの終わり） | 呼び出し元の結果の `items`（`removed`） |
-| E5 | 片付けが、持ち主の生きている状態・作業の残る状態を残した | `run_state.sweep` | 呼び出し元の結果の `items`（`kept` と理由） |
+| E4 | 片付けが、持ち主の終わった状態を外した | `run_state.sweep_states`（merged の `cleanup`・cross-review の開始・cross-refactoring の開始・テストのセッションの終わり） | 呼び出し元の結果の `items`（`removed`） |
+| E5 | 片付けが、持ち主の生きている状態・作業の残る状態を残した | `run_state.sweep_states` | 呼び出し元の結果の `items`（`kept` と理由） |
 | E6 | 次の実行が、以前の実行が積んだ投稿の項目を送り、GitHub が位置エラーで拒んだ | `Queue.flush` | `Queue.flush`（E7 を起こす） |
 | E7 | その項目を待ち行列から外し、控えに残した | `Queue.flush` | `post_review`（今回分なら総評へ移して送り直す）・流しの結果の `dropped` |
 | E8 | 次の実行が、以前の実行の残したレビュー worktree を見つけた | cross-review の `init`・cross-refactoring の `setup` | 開始の判定（使い直す / 止める。I11） |
@@ -83,7 +83,7 @@
 | --- | --- | --- |
 | 持ち主の記録 | 残る状態ごとに、作った実行が書く記録。実行の識別子・開始・最後に動いた時刻・終わった時刻、またはプロセス（pid と開始時刻）を持つ。片付けが持ち主の生存を判定するために読む（#2229） | 追加（`ndf-worktree`） |
 | 寿命の窓 | 持ち主の記録が終わっていなくても、最後に動いた時刻からこの時間を過ぎた実行を終わったとみなす長さ。24 時間（#2229） | 追加（`ndf-worktree`） |
-| 片付け | 状態の一覧に従い、持ち主の終わった残る状態を外し、残したものと理由を返す処理（`run_state.sweep`）。git が拒めば止まる操作だけで行う（#2229） | 追加（`ndf-worktree`） |
+| 片付け | 状態の一覧に従い、持ち主の終わった残る状態を外し、残したものと理由を返す処理（`run_state.sweep_states`）。git が拒めば止まる操作だけで行う（#2229） | 追加（`ndf-worktree`） |
 
 ## 機能一覧
 
@@ -100,15 +100,15 @@
 
 | 要素 | 責務 |
 | --- | --- |
-| `scripts/lib/run_state.py`（新規） | 状態の一覧 `KINDS`、持ち主の記録の読み書き（`claim` / `touch` / `finish`）、生存の判定、レビュー worktree の外し方（`remove_review_worktree`）、片付け（`sweep`）。`python3 run_state.py sweep [--root <dir>] [--tmp-only]` で単独でも呼べ、統一の JSON（`tool: run-state`）を返す |
+| `scripts/lib/run_state.py`・`run_owner.py`・`run_state_kinds.py`（新規） | 状態の一覧 `KINDS`（`run_state_kinds.py`）、持ち主の記録の読み書き（`run_owner.py` の `claim_owner` / `touch_owner` / `finish_owner`。開始が共有する `adopt_owner`・`run_args`・`mark_owner`）、生存の判定（`run_owner.alive`）、レビュー worktree の外し方（`remove_review_worktree`）、開始の片付けと判定（`begin_review`）、片付け（`sweep_states`）。`python3 run_state.py sweep [--root <dir>] [--tmp-only]` で単独でも呼べ、統一の JSON（`tool: run-state`）を返す |
 | `scripts/lib/worktree_base.py` | 変えない。一時の置き場の解決の唯一の場所として `run_state` と merged から使う |
-| `scripts/merged-steps.py` | `cleanup` の置き場の解決を `worktree_base.worktree_parent` へ替える。PR ごとに `pr<n>` と `rf<n>` を `run_state.remove_review_worktree` で外し、最後に `run_state.sweep` を呼んで結果を `items` へ足す |
-| `skills/cross-review/scripts/review_lib/commands/init.py`・`workspace.py` | 開始で `run_state.sweep` を呼ぶ。既存の `pr<n>` を見つけたら持ち主の記録と `--run` で「同じ実行の続き / 別の実行が動いている / 以前の実行」を分け、別の実行が動いていれば止め（I12）、以前の実行で作業があれば止める（I11）。作ったら `claim` する |
+| `scripts/merged-steps.py` | `cleanup` の置き場の解決を `worktree_base.worktree_parent` へ替える。PR ごとに `pr<n>` と `rf<n>` を `run_state.remove_review_worktree` で外し、最後に `run_state.sweep_states` を呼んで結果を `items` へ足す |
+| `skills/cross-review/scripts/review_lib/commands/init.py`・`workspace.py` | 開始で `run_state.sweep_states` を呼ぶ。既存の `pr<n>` を見つけたら持ち主の記録と `--run` で「同じ実行の続き / 別の実行が動いている / 以前の実行」を分け、別の実行が動いていれば止め（I12）、以前の実行で作業があれば止める（I11）。作ったら `run_owner.adopt_owner` で記録を書く |
 | `skills/cross-review/scripts/drive.py` | 起動のたびに `touch`、終わり（`finish` の段）で `finish` を呼ぶ。開始の片付けの結果を自分の結果の `items` へ載せる |
 | `skills/cross-refactoring/scripts/refactor_lib/commands/setup.py`・`refactor.py` | `setup` で `sweep`（結果を `setup` の出力の `items` へ載せる）・`claim`・既存の `rf<n>/work` の判定（I11）。`refactor.py` の起動のたびに `touch`、`report` で `finish` |
 | `scripts/hook_lib/worktree.py` | セッションの状態ファイルに持ち主（ランタイムのプロセスの pid と開始時刻）を書く。記録の無い既存のファイルには、次に読んだときに足す |
 | `scripts/worktree-deps.sh` | `ndf-deps.*` の中に持ち主のファイル（自分の pid）を書く |
-| `conftest.py`（リポジトリの直下と `plugins/ndf/`） | テストのセッションの終わりに `run_state.sweep(tmp_only=True, kinds=("test-tmp",))` を呼ぶ |
+| `conftest.py`（リポジトリの直下と `plugins/ndf/`） | テストのセッションの終わりに `run_state.sweep_states(tmp_only=True, kinds=("test-tmp",))` を呼ぶ |
 | `scripts/lib/post_queue.py` | `Queue.flush(keep=None)` を足す。`keep` でない位置エラーの `review-post` を控えへ外して続ける。`Queue.outcome(seq)` で項目の最後の状態を返す |
 | `scripts/lib/result_posts.py` | `post_review` が `flush(keep=seq)` を呼び、今回分が外されたら `outcome` で見つけて総評へ移して送り直す |
 
@@ -187,11 +187,11 @@ AC1 の「1 か所の一覧」はこのコードの表である（決定 2）。
 
 プロセスが持ち主の記録（`session-state` の `owner`・`deps-work` の `owner`）: `{"pid": 123, "started": 1761872400.12}`。`started` は `procs.start_time(pid)`。読むときは pid が生きていて開始時刻が一致すれば生きているとする（pid の使い回しを除く）。`deps-work` はシェルから書くため `started` を持たず、`procs.cmdline_contains(pid, "worktree-deps.sh")` で使い回しを除く。
 
-**生存の判定**（`run_state.alive(record, now)`）: 終わった時刻がある → 終わった。無く、`seen_at`（無ければ `started_at`、記録が無ければ状態の最終更新の時刻）が寿命の窓の中 → 生きている。窓を過ぎた → 終わった。記録が壊れている → 判定できない（I5 で残す）。
+**生存の判定**（`run_owner.alive(record, now)`）: 終わった時刻がある → 終わった。無く、`seen_at`（無ければ `started_at`、記録が無ければ状態の最終更新の時刻）が寿命の窓の中 → 生きている。窓を過ぎた → 終わった。記録が壊れている → 判定できない（I5 で残す）。
 
 ## 入出力の契約
 
-### `run_state.sweep`
+### `run_state.sweep_states`
 
 ```text
 sweep(root: Path | None, *, kinds: Iterable[str] | None = None, tmp_only: bool = False,

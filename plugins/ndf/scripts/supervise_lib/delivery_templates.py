@@ -13,7 +13,7 @@ from supervise_lib.decl import WORKTREE_DECL, DeclError, with_decls
 from supervise_lib.paths import MERGED_PY, MVV_PY, STEPS_PY
 from supervise_lib.plan import QUEUE_PRS
 from supervise_lib.release_templates import MVV_NOTE, judge_record_step, mvv_gate_steps
-from supervise_lib.verify_steps import MARGIN_FLOOR, handoff_step
+from supervise_lib.verify_steps import MARGIN_FLOOR, handoff_step, reject_step
 
 
 VERIFY_MATERIAL = "{state_dir}/work/approval-verify.md"  # verify-facts が書く承認資料（#1457）
@@ -166,6 +166,7 @@ def _promote_steps_mvv(
         approved,
         *record,
         handoff_step(state, "関門 2", "昇格のマージ"),
+        reject_step(state, "関門 2", "verify", root=repo),
     ]
 
 
@@ -203,6 +204,7 @@ def plan_gate_2(a, repo: str, mvv: str, verify: str, prs: str | None, condition:
             f'for p; do gh pr comment "$p" --body-file {MVV_NOTE} || exit 1; done\''
         )
         steps = [facts, *mvv_gate_steps(mvv_cmd, note_cmd, "end"), handoff_step(state, "関門 2", "判定のコメント")]
+    steps.append(reject_step(state, "関門 2", "facts", root=repo))
     return release_plan(a, repo, "配布（承認ゲート 2）", RULE_GATE_2, steps, condition)
 
 

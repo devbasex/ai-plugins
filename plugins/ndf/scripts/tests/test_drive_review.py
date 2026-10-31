@@ -178,7 +178,8 @@ def test_review_drive_pauses_for_fix_then_sweep_then_finishes(tmp_path, monkeypa
         assert tool not in prompt
     assert "02-fix-and-rotation" not in prompt  # 修正の手順は /ndf:fix が持ち、雛形を読ませない
     assert Path(item["result_file"]).name == "fix-pr5-result.json" and item["result_file"] in prompt
-    assert ("state.py", "init", "5", "--max-rounds", "4") in fake.calls
+    # init の引数はそのまま渡り、実行の識別子（--run）が足される（#2229）
+    assert any(c[:5] == ("state.py", "init", "5", "--max-rounds", "4") and c[5:-1] == ("--run",) for c in fake.calls)
 
     # 打ち直しても結果ファイルが無ければ同じ pause を返す
     code, out = run_main(cr, ["5"], capsys)
@@ -320,9 +321,8 @@ class FakeEnding(FakeReview):
         ("approved", {"verified": True, "remaining_open": 0, "commit": None}, "approved"),
         ("approved", {"verified": False, "remaining_open": 0, "commit": None}, "unverified"),
         ("approved", {"verified": True, "remaining_open": 0, "commit": "abc"}, "unverified"),
-        ("max_rounds", {"verified": True, "remaining_open": 0, "commit": None}, "max_rounds"),
     ],
-    ids=["a-approved", "b-unverified-sweep", "c-sweep-commit", "d-max-rounds"],
+    ids=["a-approved", "b-unverified-sweep", "c-sweep-commit"],
 )
 def test_the_answer_file_holds_the_review_status_of_the_state(tmp_path, monkeypatch, capsys, final, sweep, want):
     """AC6: 回答ファイルの値は終わった状態の `review_status()` と一致する。gate では書かず、init へは渡さない。"""
@@ -332,7 +332,8 @@ def test_the_answer_file_holds_the_review_status_of_the_state(tmp_path, monkeypa
     argv = ["5", "--result-file", str(answer)]
     code, out = run_main(cr, argv, capsys)
     assert code == 21 and not answer.exists()  # 止まり（gate）では書かない
-    assert ("state.py", "init", "5") in fake.calls
+    # init には結果を変える引数（--result-file）を渡さず、実行の識別子（--run）だけを足す（#2229）
+    assert any(c[:3] == ("state.py", "init", "5") and c[3:-1] == ("--run",) for c in fake.calls)
     Path(out["items"][0]["result_file"]).write_text("{}")
     code, out = run_main(cr, argv, capsys)
     assert code == 0 and out["metrics"]["review_status"] == want
@@ -342,6 +343,26 @@ def test_the_answer_file_holds_the_review_status_of_the_state(tmp_path, monkeypa
     answer.unlink()
     code, out = run_main(cr, argv, capsys)
     assert code == 0 and json.loads(answer.read_text()) == {"review_status": want}
+
+
+@pytest.mark.parametrize("final", ["max_rounds", "oscillation", "error"])
+def test_an_unconverged_end_is_not_ok(tmp_path, monkeypatch, capsys, final):
+    """#2143: 最終スイープまで終えても `final` が approved 以外なら stopped で返す。報告・件数・回答ファイルは残す。"""
+    fake = FakeEnding(tmp_path, final, {"verified": True, "remaining_open": 0, "commit": None})
+    monkeypatch.setattr(cr, "call", fake)
+    answer = tmp_path / "answer.json"
+    argv = ["5", "--result-file", str(answer)]
+    code, out = run_main(cr, argv, capsys)
+    assert code == 21
+    Path(out["items"][0]["result_file"]).write_text("{}")
+    code, out = run_main(cr, argv, capsys)
+    if final == "error":  # レビューが成立していない終わりは 6 にせず、on_exit で後続へ進ませない
+        assert code == 1 and out["status"] == "stopped" and not out.get("gaps")
+    else:
+        assert code == 6 and out["status"] == "stopped"
+        assert out["gaps"] == [{"kind": "review", "name": "converge", "reason": f"final={final}"}]
+    assert out["metrics"]["final"] == final and out["items"][0]["report"]
+    assert json.loads(answer.read_text()) == {"review_status": final}
 
 
 def test_a_stopped_drive_writes_no_answer(tmp_path, monkeypatch, capsys):

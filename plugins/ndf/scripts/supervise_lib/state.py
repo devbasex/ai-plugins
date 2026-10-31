@@ -17,6 +17,7 @@ import clock
 import jsonio
 import legacy_names
 import procs
+import step_read
 import usage_aggregate
 import usage_ledger
 from sprint_mvv import MVV_PACES
@@ -29,6 +30,7 @@ REPORT_INTERVAL = 600  # 最後の行から動きが無いときに「まだ動�
 PROGRESS_STOP = re.compile(r"止まった|止まる|進めない|進められない|判断が要る|できなかった|stuck", re.I)
 PROGRESS_GATE = re.compile(r"関門|承認が要る|承認を待つ")
 PROGRESS_FAIL = re.compile(r"失敗|落ちた|落ちる|エラー|\berror\b|\bfailed\b|traceback", re.I)
+DICT_LISTS = ("gates", "process", "slow_events", "attention_log")  # ステップをまたいで積むオブジェクトの列（snapshot / replay）
 
 
 def counts_text(counts: dict) -> str:
@@ -84,6 +86,7 @@ class RunState:
         self.last_stage = "無し"
         self.pace_recorded = False
         self.recorded_stages: list[str] = []  # 課題の本文へ記録した工程（同じ工程を 2 度記録しない。#1485 の AC4）
+        self.process: list[dict] = []  # 進行の記録で書けなかったもの（結果 JSON の process の形）。止めずに報告へ載せる（#2227）
         self.gates: list[dict] = []  # run のステップが返した関門（終了コード 10〜19）
         self.switched: list[str] = []  # 利用上限で切り替えた認証（変数の名前・アカウント・従量の接続）
         self.cur: dict = {}
@@ -291,13 +294,12 @@ class RunState:
         if not rec or stage in self.recorded_stages:
             return
         self.recorded_stages.append(stage)
-        pace = plan.get("進め方")
-        pace_first = pace in MVV_PACES and not self.pace_recorded
+        pace_first = (pace := plan.get("進め方")) in MVV_PACES and not self.pace_recorded
         self.pace_recorded = True
-        for issue in plan.get("課題", []):
-            if pace_first:  # 通過記録と本文の見出し行へ進め方を先に書く（まとめる工程を記録なしと数えない）
-                subprocess.run(["bash", rec, str(issue), "pace", pace], cwd=cwd, capture_output=True, text=True)
-            subprocess.run(["bash", rec, str(issue), "stage", stage], cwd=cwd, capture_output=True, text=True)
+        for issue in plan.get("課題", []):  # 進め方を先に書く（まとめる工程を記録なしと数えない）。書けなくても止めない（#2227）
+            for args in ([[str(issue), "pace", pace]] if pace_first else []) + [[str(issue), "stage", stage]]:
+                p = subprocess.run(["bash", rec, *args], cwd=cwd, capture_output=True, text=True)
+                self.process += step_read.process_if_not_ok(" ".join([Path(rec).name, *args]), p)
 
     def add_usage(self, kind: str, res: dict) -> None:
         """1 回の呼び出しの使用量を、計画の合計（`llm`）と今のステップの内訳（`cur["llm"]`。同じステップの呼び出しは足し合わせる）へ足す。"""
@@ -358,17 +360,15 @@ class RunState:
         """ステップをまたいで積む値の写し。耐久ステップの出力に入れ、落ちた後の続きで `replay` が戻す。"""
         return {
             "llm": dict(self.llm),
-            "gates": [dict(g) for g in self.gates],
+            **{k: [dict(x) for x in getattr(self, k)] for k in DICT_LISTS},
             "fail_counts": dict(self.fail_counts),
             "failed_step": self.failed_step,
             "last_stage": self.last_stage,
             "pace_recorded": self.pace_recorded,
             "recorded_stages": list(self.recorded_stages),
             "switched": list(self.switched),
-            "slow_events": [dict(e) for e in self.slow_events],
             "pcount": dict(self.pcount),
             "attention_keys": sorted(self.attention_keys),
-            "attention_log": [dict(a) for a in self.attention_log],
         }
 
     def replay(self, out: dict) -> bool:
@@ -384,17 +384,16 @@ class RunState:
         self.log.append({k: v for k, v in self.cur.items() if k != "text"})
         acc = out.get("acc") or {}
         self.llm = dict(acc.get("llm", self.llm))
-        self.gates = [dict(g) for g in acc.get("gates", self.gates)]
+        for k in DICT_LISTS:
+            setattr(self, k, [dict(x) for x in acc.get(k, getattr(self, k))])
         self.fail_counts = dict(acc.get("fail_counts", self.fail_counts))
         self.failed_step = acc.get("failed_step", self.failed_step)
         self.last_stage = acc.get("last_stage", self.last_stage)
         self.pace_recorded = acc.get("pace_recorded", self.pace_recorded)
         self.recorded_stages = list(acc.get("recorded_stages", self.recorded_stages))
         self.switched = list(acc.get("switched", self.switched))
-        self.slow_events = [dict(e) for e in acc.get("slow_events", self.slow_events)]
         self.pcount = dict(acc.get("pcount", self.pcount))
         self.attention_keys = set(acc.get("attention_keys", self.attention_keys))
-        self.attention_log = [dict(a) for a in acc.get("attention_log", self.attention_log)]
         return True
 
     def retell_gates(self, recorded: list[dict]) -> None:
@@ -419,6 +418,7 @@ class RunState:
         extra = ""
         if self.switched:
             extra += f"- 認証: 切り替え（{', '.join(self.switched)}）\n"
+        extra += "".join(f"- 進行の記録で書けなかったもの: {p['run']} → {p['result']}\n" for p in self.process)
         limited = [e for e in self.log if e.get("limit")]
         if limited:
             extra += (

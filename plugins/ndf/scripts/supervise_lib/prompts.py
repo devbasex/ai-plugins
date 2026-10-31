@@ -44,7 +44,6 @@ FULL_SYSTEM = (
 - 人間へ問わない（AskUserQuestion を使わない）。Skill の確認は提示して進める
 - 関門に当たる操作（設計 PR のマージ・main への配布・タグ）をしない
 - 課題を閉じる語（Fix #番号・Closes など）をコミットと PR 本文に書かない
-- 待ちは背景起動と完了通知で行い、応答を途中で終えない
 """
     + EXTERNAL_DOC_RULE
     + """

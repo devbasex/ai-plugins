@@ -204,17 +204,20 @@ gh api repos/<所有者>/<リポジトリ>/rules/branches/<起点> \
 
 ## 答えを記録する
 
-**利用者が承認ゲートで差し戻したら、答えを受けた直後に差し戻しの記録へ 1 行書く。** pace と MVV 判定の有無を問わない。
-利用者へ新しい確認は求めない。記録は振り返りが `gate-rejections.py count` で承認ゲートごとに数える。
+**利用者が承認ゲートで答えたら、承認も差し戻しも差し戻しの記録（`gate-rejections.jsonl`）へ 1 行書く。** pace と MVV 判定の
+有無を問わない。利用者へ新しい確認は求めない。記録は振り返りが `gate-rejections.py count` で承認ゲートごとに数える。
+範囲に答えの行が 1 行も無ければ、`count` は差し戻しを 0 件と書かず「未記録」（`status: stopped`・終了コード 3）を返す。
 
-| 進め方 | 打つもの |
-| --- | --- |
-| スプリントの状態ファイルがある | `python3 "$SCRIPTS/sprint-state.py" gate <状態ファイル> "<関門 1 か 関門 2>" --what <要約> --by user --outcome rejected [--pr <N>]` |
-| 状態ファイルが無い（単発の変更など） | 下の `gate-rejections.py record` |
+| 進め方 | 承認 | 差し戻し |
+| --- | --- | --- |
+| `reject` のステップを持つプランで止まった | `python3 "$SCRIPTS/sprint-state.py" gate <状態ファイル> "<関門 1 か 関門 2>" --what <要約> --by user --outcome approved [--pr <N>]` | 直してから `supervise.py run <プラン> --from reject`（`reject` が差し戻しを書いて再提示する） |
+| スプリントの状態ファイルがある（`reject` の無いプラン） | 同上 | `python3 "$SCRIPTS/sprint-state.py" gate <状態ファイル> "<関門 1 か 関門 2>" --what <要約> --by user --outcome rejected [--pr <N>]` |
+| 状態ファイルが無い（単発の変更など） | 下の `gate-rejections.py record --outcome approved` | 下の `gate-rejections.py record` |
 
 ```bash
 python3 "$SCRIPTS/gate-rejections.py" record --gate "関門 1" --what "<要約>" --issue <N>   # 設計の承認の差し戻し
 python3 "$SCRIPTS/gate-rejections.py" record --gate "関門 2" --what "<要約>" --pr <N>      # 本番への配布の承認の差し戻し
+python3 "$SCRIPTS/gate-rejections.py" record --gate "関門 1" --what "<要約>" --issue <N> --outcome approved   # 承認
 ```
 
 `--gate` には `関門 1` / `関門 2` だけを書く（`sprint-state.py` の記録の名前と同じで、`count` がこの名前で承認ゲート 1・2 に

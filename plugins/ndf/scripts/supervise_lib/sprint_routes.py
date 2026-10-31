@@ -9,7 +9,7 @@ from gate_answer import GATE_1, GATE_2
 from pace import PaceError, read_pace
 from sprint_mvv import MVV_PACES
 from supervise_lib.decl import DeclError, decl_roots, delivery_decl, require_versions
-from supervise_lib.paths import HERE
+from supervise_lib.paths import HERE, SELF
 from supervise_lib.plan import QUEUE_PRS, sprint_state_path
 from supervise_lib.delivery_templates import GATE_2_MATERIAL, PromoteParams, plan_gate_2, plan_promote, plan_verify
 from supervise_lib.release_templates import RELEASE_FORMS, material_path
@@ -169,14 +169,19 @@ def manual_production_waves(a, repo: str, then_of: str, mvv: str, condition: dic
     return waves
 
 
-def user_gate_cmd(a, gate: str, pr: bool) -> str:
-    """利用者の答えを状態へ書くコマンド（覆しの記録。#1400 の AC6）。承認ゲート 1 は答えた設計 PR を --pr で渡す。"""
+def user_gate_cmd(a, gate: str, pr: bool, outcomes: str = "approved|rejected") -> str:
+    """利用者の答えを状態と差し戻しの記録へ書くコマンド（覆しの記録。#1400 の AC6・#2183）。承認ゲート 1 は答えた設計 PR を --pr で渡す。"""
     state = shlex.quote(sprint_state_path(a))
     return (
         f"python3 {shlex.quote(str(HERE / 'sprint-state.py'))} gate {state} {shlex.quote(gate)} --what <要約> --by user"
         + (" --pr <設計 PR>" if pr else "")
-        + " --outcome approved|rejected"
+        + f" --outcome {outcomes}"
     )
+
+
+def reject_resume(what: str) -> str:
+    """差し戻しの後の続き: 直してから計画を `--from reject` で流す（差し戻しを差し戻しの記録へ書いて再提示する。#2183）。"""
+    return f"差し戻されたら直してから `python3 {shlex.quote(str(SELF))} run <{what}> --from reject` で流す（差し戻しを記録して再提示する）"
 
 
 def normal_gate_1(a, advise: bool = True) -> str:
@@ -190,8 +195,10 @@ def normal_gate_1(a, advise: bool = True) -> str:
     return (
         "設計 Pull Request の承認を取る。"
         + ("承認資料には各設計 PR の助言の MVV 判定（PR のコメント。無ければ「MVV なし」）を載せる。" if advise else "")
-        + f"利用者が答えたら、設計 PR ごとに `{user_gate_cmd(a, GATE_1, True)}` を打ってから「設計 PR のマージ」のステージの command を打つ"
+        + f"利用者が答えたら、設計 PR ごとに `{user_gate_cmd(a, GATE_1, True, 'approved')}` を打ってから「設計 PR のマージ」のステージの command を打つ"
         + after
+        + "。"
+        + reject_resume("その設計 PR の設計のプラン")
     )
 
 

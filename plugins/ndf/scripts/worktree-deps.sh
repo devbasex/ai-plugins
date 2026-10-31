@@ -137,6 +137,8 @@ STEPS=$(( ${#COPY_FROM_MAIN[@]} + ${#COPY_AS_REAL[@]} + ${#RUN_JSON[@]} ))
 START=$SECONDS
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/ndf-deps.XXXXXX") || exit 1
 trap 'rm -rf "$WORK"' EXIT
+# 持ち主（このプロセスの pid）。trap が走らずに止められても、片付け（lib/run_state.py）が pid の不在で外す（#2229）
+printf '%s\n' "$$" > "$WORK/owner"
 LOG="$WORK/log"
 STAMP="$WORK/stamp"
 : > "$LOG"
