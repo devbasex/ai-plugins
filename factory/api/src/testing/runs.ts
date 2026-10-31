@@ -1,7 +1,15 @@
 // 実行の制御・取り込み・キーの持ち込みのテストの道具。GitHub・実行基盤・秘密の置き場は偽物で、表と進捗の記録はメモリに置く
 import type { RunJobInstruction } from "@ndf-factory/contracts";
 import type { AccountContext, ExecutionMode, Plan, SeatType } from "../accounts/model.ts";
-import type { GitHubPort, InstallationToken, IssueSummary, RankingTable, ReachableRepository } from "../github/port.ts";
+import type {
+  CreatedIssue,
+  GitHubPort,
+  InstallationToken,
+  IssueSummary,
+  RankingTable,
+  ReachableRepository,
+  RepositoryVisibility,
+} from "../github/port.ts";
 import { appendControlEventTo } from "../progress/append.ts";
 import { MemoryProgressEventStore } from "../progress/memory-store.ts";
 import { memoryProgressReader } from "../progress/read.ts";
@@ -51,6 +59,24 @@ export class FakeGitHub implements GitHubPort {
   }
   async findRankingTable(_installationId: number, _repositoryId: number, fullName: string) {
     return this.rankings.get(fullName) ?? null;
+  }
+
+  // 起票の代行（#2216）。作った Issue と、作成を断らせる・応答を落とす数の ID
+  readonly createdIssues: { installationId: number; repositoryId: number; title: string; body: string }[] = [];
+  readonly visibilities = new Map<number, RepositoryVisibility>();
+  readonly failCreate = new Set<number>();
+
+  async createIssue(installationId: number, repositoryId: number, issue: { title: string; body: string }): Promise<CreatedIssue | null> {
+    const name = this.installations.get(installationId)?.get(repositoryId);
+    if (!name) return null;
+    if (this.failCreate.has(repositoryId)) throw new Error("GitHub の Issue の作成に失敗しました（502）");
+    this.createdIssues.push({ installationId, repositoryId, ...issue });
+    const number = this.createdIssues.length;
+    return { repo: name, number, url: `https://github.com/${name}/issues/${number}` };
+  }
+  async repositoryVisibility(installationId: number, repositoryId: number): Promise<RepositoryVisibility | null> {
+    if (!this.installations.get(installationId)?.has(repositoryId)) return null;
+    return this.visibilities.get(repositoryId) ?? "private";
   }
 }
 
@@ -125,7 +151,8 @@ export async function createRunsHarness(config: RunControlConfig = TEST_CONFIG):
   const platform = new FakePlatform();
   const progress = new MemoryProgressEventStore();
   const tokens = await createRunJobTokenKit();
-  const clock = { now: new Date("2026-10-31T00:00:00Z") };
+  // 発行した token は実際の時刻で検証されるため、今の時刻（JWT の exp に合わせて秒にそろえる）から始める
+  const clock = { now: new Date(Math.floor(Date.now() / 1000) * 1000) };
   const logs: Record<string, unknown>[] = [];
   let id = 0;
   const control = new RunControl({

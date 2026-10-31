@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import type { JobFinishedEvent } from "@ndf-factory/contracts";
-import { appendControlEventTo, orderKey } from "./append.ts";
+import type { IssueRequestResolvedEvent, JobFinishedEvent } from "@ndf-factory/contracts";
+import { appendControlEventTo, appendIssueRequestResolvedTo, orderKey } from "./append.ts";
 import { ProgressEventError } from "./errors.ts";
 import { MemoryProgressEventStore } from "./memory-store.ts";
 import { isCallerRole } from "./authorize.ts";
@@ -58,6 +58,38 @@ describe("appendControlEvent（受け入れ条件 20、決定 9）", () => {
   it("定義に合わないものは invalid_event", async () => {
     expect(await errorOf(appendControlEventTo(store, finished({ payload: { result: "lost" as "done", summary: "" } })))).toBe("invalid_event");
     expect(store.events).toHaveLength(0);
+  });
+});
+
+const resolved = (patch: Partial<IssueRequestResolvedEvent> = {}): IssueRequestResolvedEvent => ({
+  sprint_run_id: "sr-1",
+  idempotency_key: "job-1:4:resolved",
+  type: "issue.request_resolved",
+  at: "2026-10-30T02:00:00Z",
+  source: "control",
+  job_id: "job-1",
+  schema_version: 1,
+  payload: { request_key: "job-1:4", outcome: "drafted", reason: "not_registered", duplicate_of: null },
+  ...patch,
+});
+
+describe("appendIssueRequestResolved（#2216 の決定 10、I48）", () => {
+  it("依頼 1 件に結果は 1 件だけ残る", async () => {
+    expect(await appendIssueRequestResolvedTo(store, resolved())).toEqual({ written: true });
+    expect(await appendIssueRequestResolvedTo(store, resolved({ at: "2026-10-30T03:00:00Z" }))).toEqual({ written: false });
+    expect(store.events).toHaveLength(1);
+  });
+
+  it("鍵が <依頼の鍵>:resolved でない・依頼が別のジョブ・source が control でない・ほかの種類は forbidden", async () => {
+    expect(await errorOf(appendIssueRequestResolvedTo(store, resolved({ idempotency_key: "job-1:5:resolved" })))).toBe("forbidden");
+    expect(await errorOf(appendIssueRequestResolvedTo(store, resolved({ job_id: "job-2", idempotency_key: "job-1:4:resolved" })))).toBe("forbidden");
+    expect(await errorOf(appendIssueRequestResolvedTo(store, resolved({ source: "runner" })))).toBe("forbidden");
+    expect(await errorOf(appendIssueRequestResolvedTo(store, finished() as unknown as IssueRequestResolvedEvent))).toBe("forbidden");
+    expect(store.events).toHaveLength(0);
+  });
+
+  it("appendControlEvent は issue.request_resolved を受けない", async () => {
+    expect(await errorOf(appendControlEventTo(store, resolved() as unknown as JobFinishedEvent))).toBe("forbidden");
   });
 });
 
