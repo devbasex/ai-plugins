@@ -1,7 +1,7 @@
 """スクリプトの `main(argv)` を、テストのプロセスの中で呼ぶ（#2291 の決定 3 の (2)）。
 
 スクリプトを子のプロセスで起動すると、起動と import だけで 1 回 0.2〜0.4 秒かかる。CLI の配線（引数・終了コード・
-結果 JSON）は代表の数件の起動で確かめ、分岐はこの関数で確かめる。返す値は `subprocess.run` と同じ形
+結果 JSON）は代表の数件の起動で確かめ、分岐はこの関数で確かめる。引数を取らない `main()` は `sys.argv` から読む。返す値は `subprocess.run` と同じ形
 （`returncode`・`stdout`・`stderr`）で、起動を置き換えても読み手を変えずに済む。
 
 作業ディレクトリ・環境変数・`sys.argv`・標準入出力は呼ぶ間だけ差し替え、戻す。モジュールは 1 度だけ読み込む。
@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import contextlib
 import importlib.util
+import inspect
 import io
 import os
 import subprocess
@@ -26,6 +27,7 @@ def load(script: Path | str):
         name = "inproc_" + Path(key).stem.replace("-", "_")
         spec = importlib.util.spec_from_file_location(name, key)
         mod = importlib.util.module_from_spec(spec)
+        sys.modules[name] = mod  # dataclass などがモジュールを sys.modules から引く
         spec.loader.exec_module(mod)
         _modules[key] = mod
     return _modules[key]
@@ -54,7 +56,7 @@ def run(script: Path | str, *args: str, cwd: Path | str | None = None, env: dict
         sys.stdin = io.StringIO(input or "")
         with contextlib.chdir(cwd or os.getcwd()), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             try:
-                r = mod.main(argv)
+                r = mod.main(argv) if inspect.signature(mod.main).parameters else mod.main()
                 code = r if isinstance(r, int) else 0
             except SystemExit as e:
                 code = _code(e, err)

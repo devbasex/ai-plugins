@@ -16,6 +16,9 @@ import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 SUPERVISE = SCRIPTS / "supervise.py"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import inproc  # noqa: E402
+
 PY = sys.executable
 
 sys.path.insert(0, str(SCRIPTS / "lib"))
@@ -447,7 +450,7 @@ REPO = SCRIPTS.parents[2]  # このリポジトリの根（.ndf/ の宣言を持
 
 def cli(*args, cwd=None):
     """既定ではこのリポジトリの根で打つ（作業場所に宣言が無いとき、今のディレクトリの .ndf/ を読む）。"""
-    return subprocess.run([PY, str(SUPERVISE), *args], capture_output=True, text=True, cwd=cwd or REPO)
+    return inproc.run(SUPERVISE, *args, cwd=cwd or REPO)
 
 
 AI_PLUGINS_WORDS = ("plugins/", "playwright-kit", "build-runtime-plugins", "claude,codex,kiro", "develop", "scripts/check-")

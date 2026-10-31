@@ -11,6 +11,9 @@ from pathlib import Path
 import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import inproc  # noqa: E402
+
 SUPERVISE = SCRIPTS / "supervise.py"
 PY = sys.executable
 
@@ -23,7 +26,7 @@ pytestmark = pytest.mark.usefixtures("issue_bodies")
 
 
 def cli(*args, cwd):
-    return subprocess.run([PY, str(SUPERVISE), *args], capture_output=True, text=True, cwd=cwd)
+    return inproc.run(SUPERVISE, *args, cwd=cwd)
 
 
 def git(cwd, *args):
