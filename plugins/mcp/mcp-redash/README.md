@@ -33,14 +33,6 @@ Redash MCP サーバーをマルチ環境対応で利用するための Claude C
 codex plugin add mcp-redash@ai-plugins
 ```
 
-### Kiro CLI
-
-Kiro では repository clone 後、対象 plugin の installer を project root で実行します。
-
-```bash
-bash plugins/mcp/mcp-redash/dev.kiro/install.sh
-```
-
 ### 必要な環境変数
 
 - `REDASH_API_KEY`

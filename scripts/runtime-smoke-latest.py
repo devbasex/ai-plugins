@@ -68,7 +68,6 @@ def resolve_codex() -> list[tuple[str, str]]:
     return [("CODEX_VERSION", _npm_latest("@openai/codex"))]
 
 
-
 RESOLVERS = {"claude": resolve_claude, "codex": resolve_codex}
 
 

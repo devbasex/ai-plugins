@@ -32,14 +32,6 @@
 codex plugin add mcp-dbhub@ai-plugins
 ```
 
-### Kiro CLI
-
-Kiro では repository clone 後、対象 plugin の installer を project root で実行します。
-
-```bash
-bash plugins/mcp/mcp-dbhub/dev.kiro/install.sh
-```
-
 ### 必要な環境変数
 
 - 追加の環境変数は不要です。
@@ -54,9 +46,6 @@ bash plugins/mcp/mcp-dbhub/dev.kiro/install.sh
 # Codex
 codex plugin marketplace upgrade ai-plugins
 codex plugin add mcp-dbhub@ai-plugins
-
-# Kiro CLI
-bash plugins/mcp/mcp-dbhub/dev.kiro/install.sh
 ```
 
 ## 設定

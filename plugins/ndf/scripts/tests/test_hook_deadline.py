@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
 import sys
 import time
@@ -135,4 +134,3 @@ def test_the_hook_limit_leaves_the_margin(rel):
     limits = _hook_timeouts(PLUGIN / rel)
     assert limits
     assert all(deadline.DEADLINE_SECONDS + deadline.MARGIN_SECONDS <= t for t in limits)
-

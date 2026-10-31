@@ -1,7 +1,7 @@
 # BigQuery MCP
 
 Google が運用するリモートの BigQuery MCP サーバー（`https://bigquery.googleapis.com/mcp`）を
-Claude Code・Codex・Kiro CLI から使うためのプラグインです。
+Claude Code・Codex から使うためのプラグインです。
 
 ## 概要
 
@@ -64,19 +64,17 @@ Claude Code・Codex・Kiro CLI から使うためのプラグインです。
 |---|---|---|
 | Claude Code | `~/.claude/settings.json`（またはプロジェクトの `.claude/settings.json`） | `"permissions": {"deny": ["mcp__plugin_mcp-bigquery_bigquery__execute_sql", "mcp__bigquery__execute_sql"]}` |
 | Codex | `~/.codex/config.toml` | 下の例 |
-| Kiro CLI | `.kiro/agents/default.json` の `mcpServers.bigquery` | `"disabledTools": ["execute_sql"]`（`install.sh` を流し直したら書き直す） |
 
 ```toml
 [plugins."mcp-bigquery@ai-plugins".mcp_servers.bigquery]
 disabled_tools = ["execute_sql"]
 ```
 
-Claude Code の 2 つ目の名前は、Kiro CLI の `install.sh` がプロジェクト直下の `.mcp.json` にも
-`bigquery` を書くためです。同じプロジェクトで Claude Code を使うと、プロジェクトのサーバーとして
+Claude Code の 2 つ目の名前は、前の版の Kiro CLI 向けの `install.sh` がプロジェクト直下の `.mcp.json` にも
+`bigquery` を書いたためです。同じプロジェクトで Claude Code を使うと、プロジェクトのサーバーとして
 `mcp__bigquery__execute_sql` の名前で読まれ、1 つ目の名前の deny では止まりません。
 
-どれもツールの一覧から `execute_sql` が消えます（Claude Code 2.1.295・Codex 0.160.0・
-kiro-cli 2.24.1 で確認）。組織として止めるときは、IAM の deny ポリシーで `execute_sql` を禁じます。
+どれもツールの一覧から `execute_sql` が消えます（Claude Code 2.1.295・Codex 0.160.0 で確認）。組織として止めるときは、IAM の deny ポリシーで `execute_sql` を禁じます。
 
 ## ランタイムごとの認証
 
@@ -86,13 +84,6 @@ kiro-cli 2.24.1 で確認）。組織として止めるときは、IAM の deny 
 |---|---|---|
 | Claude Code | `headersHelper` | 接続のたびに `gcloud auth print-access-token` を実行する（401/403 でも取り直す） |
 | Codex | `http_headers_helper` | 同上 |
-| Kiro CLI | `headers` の `${BIGQUERY_ACCESS_TOKEN}` | **自動では取り直さない**。起動前に環境変数へ入れる |
-
-Kiro CLI では、起動の前に次を実行してください。1 時間たったら入れ直して再起動します。
-
-```bash
-export BIGQUERY_ACCESS_TOKEN=$(gcloud auth print-access-token)
-```
 
 Codex は `http_headers_helper` を、`HOME`・`PATH` など限られた環境変数だけを渡して実行します。
 `CLOUDSDK_CONFIG` で gcloud の設定の場所を変えていると、helper の中の gcloud は既定の場所
@@ -114,7 +105,7 @@ v2 までのローカルサーバー（`mcp-server-bigquery`）をやめ、リ�
 |---|---|---|
 | サーバー | `uvx mcp-server-bigquery`（stdio） | `https://bigquery.googleapis.com/mcp`（HTTP） |
 | 認証 | サービスアカウントの鍵ファイル | gcloud にログインした利用者のトークン |
-| 環境変数 | `BIGQUERY_PROJECT` `BIGQUERY_LOCATION` `BIGQUERY_DATASET` `BIGQUERY_KEY_FILE` | 不要（Kiro CLI のみ `BIGQUERY_ACCESS_TOKEN`） |
+| 環境変数 | `BIGQUERY_PROJECT` `BIGQUERY_LOCATION` `BIGQUERY_DATASET` `BIGQUERY_KEY_FILE` | 不要 |
 | ツール名 | `execute-query` `list-tables` `describe-table` | `execute_sql_readonly` `list_table_ids` `get_table_info` など |
 
 v2 は依存する `mcp` パッケージの 2 系で起動できなくなっていました（`'Server' object has no
@@ -132,14 +123,6 @@ attribute 'list_tools'`）。
 
 ```bash
 codex plugin add mcp-bigquery@ai-plugins
-```
-
-### Kiro CLI
-
-Kiro では repository clone 後、対象 plugin の installer を project root で実行します。
-
-```bash
-bash plugins/mcp/mcp-bigquery/dev.kiro/install.sh
 ```
 
 ## 更新情報
