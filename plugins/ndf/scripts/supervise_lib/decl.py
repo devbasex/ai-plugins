@@ -280,10 +280,9 @@ def _apply_test_strategy(a, decl: dict) -> None:
         # 戦略の注記（雛形から組んだ全体テスト・組まなかった静的解析の全体テスト）を計画の作成の時点で知らせる（#1437）
         for note in strategy.notes:
             print(f"⚠ {note}", file=sys.stderr, flush=True)
-        w, w_source = ts.whole_seconds(decl)
-        c = ts.ci_wall_seconds(decl, (strategy.ci or {}).get("check") if strategy.ci else None)
         a.strategy = strategy.as_state()
-        a.test_limits = ts.limits(strategy, None, whole_seconds_value=w, whole_source=w_source, ci_seconds=c)
+        # 所要の記録と、同じリポジトリで先に走った全体テストの実測から決める（#1631）
+        a.test_limits = ts.unbudgeted_limits(strategy, decl, a.worktree)
 
 
 def _require_declared(a) -> None:

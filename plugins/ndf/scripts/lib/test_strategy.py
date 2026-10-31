@@ -12,6 +12,7 @@ cross-refactoring・supervise・`test-run.py`・cross-review が同じ関数を�
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import math
 import posixpath
 import shlex
@@ -777,14 +778,17 @@ def limits(
     measured_seconds: Optional[float] = None,
     scope_seconds: Optional[float] = None,
     scope_source: Optional[str] = None,
+    recent_seconds: Optional[float] = None,
+    recent_source: Optional[str] = None,
 ) -> dict[str, Any]:
     """時間の上限（秒）の表（決定 8）。`basis` に入力を並べる。
 
     `scope_seconds` は CI に任せる戦略で着手前に走らせる範囲テストの所要の見込み s（`scope_source` はその出所。
     `history` / `whole`）。分かれば着手前の上限を `max(0.10·B, 3·s)` にする（#1555）。ほかの戦略と予算なしでは使わない。
 
-    予算が無い（supervise）ときは `3·w` と `3·c` を上限にし、所要も無ければ `UNKNOWN_DURATION_LIMITS` を使って
-    `basis.unknown_duration` を真にする。
+    予算が無い（supervise）ときは `3·max(w, m)` と `3·c` を上限にし、所要も無ければ `UNKNOWN_DURATION_LIMITS` を使って
+    `basis.unknown_duration` を真にする（`3·m` が上回るときだけ広げる）。`recent_seconds` は先に走った全体テストの
+    実測 m（`recent_source` はその出所）で、予算なしでだけ使う（#1631）。上限に余裕は足さない（余裕はステップの `timeout`）。
     """
     w, c, x = whole_seconds_value, ci_seconds, measured_seconds
     basis = {
@@ -797,13 +801,22 @@ def limits(
         "unknown_duration": False,
     }
     if budget_minutes is None:
+        m = float(recent_seconds) if recent_seconds is not None else None
+        basis.update(recent=m, recent_source=recent_source if m is not None else None)
         if w is None and x is None:
             basis["unknown_duration"] = True
             test_timeout = UNKNOWN_DURATION_LIMITS["test_timeout"]
             whole_timeout = UNKNOWN_DURATION_LIMITS["whole_timeout"]
+            if m is not None:
+                test_timeout = max(test_timeout, _ceil(TEST_FACTOR * m))
+                whole_timeout = max(whole_timeout, _ceil(TEST_FACTOR * m))
+            basis["limit_from"] = "recent" if whole_timeout > UNKNOWN_DURATION_LIMITS["whole_timeout"] else "unknown"
         else:
-            test_timeout = _ceil(TEST_FACTOR * float(x if x is not None else w))
-            whole_timeout = _ceil(TEST_FACTOR * float(w if w is not None else x))
+            base_test = float(x if x is not None else w)
+            base_whole = float(w if w is not None else x)
+            test_timeout = _ceil(TEST_FACTOR * max(base_test, m or 0.0))
+            whole_timeout = _ceil(TEST_FACTOR * max(base_whole, m or 0.0))
+            basis["limit_from"] = "recent" if m is not None and m > base_whole else "record"
         ci_wait = _ceil(TEST_FACTOR * c) if c is not None else UNKNOWN_DURATION_LIMITS["ci_wait_timeout"]
         return {
             "init_test_timeout": whole_timeout,
@@ -836,6 +849,42 @@ def limits(
         "ci_wait_timeout": ci_wait,
         "basis": basis,
     }
+
+
+def whole_key(strategy: Strategy) -> str:
+    """全体テストの鍵（全体テストのコマンドの集合を並べ替えて改行でつないだものの sha256 の先頭 16 文字）。"""
+    text = "\n".join(sorted(set(strategy.whole_commands())))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def unbudgeted_limits(strategy: Strategy, source: dict[str, Any], root, key: Optional[str] = None) -> dict[str, Any]:
+    """予算なしの上限を、所要の記録と直近の全体テストの実測から決める（#1631。呼び出し元はこの関数だけを使う）。
+
+    `source` は宣言（`whole_seconds`・`ci_wall_seconds` で w と c を読む）か、プランの「テストの時間」の `basis`
+    （`w`・`w_source`・`c`・`key`）。`key` を省くと `basis.key` か `whole_key(strategy)`。実測が読めなければ記録だけで決める。
+    """
+    import whole_runs
+
+    source = source if isinstance(source, dict) else {}
+    if "w_source" in source and "strategy" in source:
+        w, w_source, c = source.get("w"), source.get("w_source"), source.get("c")
+        key = key or source.get("key")
+    else:
+        w, w_source = whole_seconds(source)
+        c = ci_wall_seconds(source, (strategy.ci or {}).get("check") if strategy.ci else None)
+    key = key or whole_key(strategy)
+    got = whole_runs.recent(root, key)
+    out = limits(
+        strategy,
+        None,
+        whole_seconds_value=w,
+        whole_source=w_source,
+        ci_seconds=c,
+        recent_seconds=got[0] if got else None,
+        recent_source=got[1] if got else None,
+    )
+    out["basis"]["key"] = key
+    return out
 
 
 def reserve_seconds(strategy: Strategy, whole: Optional[float], ci: Optional[float], ci_gate: bool) -> tuple[float, float]:
