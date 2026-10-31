@@ -122,7 +122,7 @@ def parse_declaration(data) -> Declaration:
     return Declaration(mode=mode, allow=allow, threshold_usd=threshold, extra=extra)
 
 
-def load_declaration(root: str | os.PathLike) -> Declaration:
+def load_ask_declaration(root: str | os.PathLike) -> Declaration:
     """`<root>/.ndf/ask.json` を読む。無ければ既定、読めなければ既定と箇所（I4）。"""
     path = Path(root) / DECL_PATH
     try:
@@ -163,7 +163,7 @@ def parse_source(value: str) -> tuple[str, str]:
     return "malformed", value
 
 
-def judge(tool_input, decl: Declaration) -> Verdict:
+def judge_ask(tool_input, decl: Declaration) -> Verdict:
     """1 回の `AskUserQuestion` への判定。問いの文は読まない（I6）。"""
     source, is_str = source_of(tool_input)
     if decl.mode == "off":
@@ -203,5 +203,5 @@ def passing_sources(decl: Declaration) -> list[tuple[str, str]]:
 def judge_input(raw: dict, cwd: str | os.PathLike | None = None) -> tuple[Verdict, Declaration]:
     """hook の入力（辞書）から宣言を読み、判定する。`cwd` を省くと入力の `cwd`、無ければカレント。"""
     where = cwd or (raw.get("cwd") if isinstance(raw.get("cwd"), str) and raw.get("cwd") else os.getcwd())
-    decl = load_declaration(project_root(where))
-    return judge(raw.get("tool_input"), decl), decl
+    decl = load_ask_declaration(project_root(where))
+    return judge_ask(raw.get("tool_input"), decl), decl

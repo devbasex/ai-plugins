@@ -88,7 +88,7 @@ def is_deny(out) -> bool:
 
 
 def rows():
-    return ask_ledger.read_rows()
+    return ask_ledger.read_ask_rows()
 
 
 # ---------------------------------------------------------------- AC1・AC6・AC9
@@ -197,8 +197,8 @@ def test_advise_does_not_deny_but_guides(proj):
 
 def test_question_text_does_not_change_the_verdict():
     decl = ask_policy.Declaration()
-    a = ask_policy.judge({"questions": [{"question": "費用がかかりますか"}]}, decl)
-    b = ask_policy.judge({"questions": [{"question": "色は"}]}, decl)
+    a = ask_policy.judge_ask({"questions": [{"question": "費用がかかりますか"}]}, decl)
+    b = ask_policy.judge_ask({"questions": [{"question": "色は"}]}, decl)
     assert a == b
 
 
@@ -214,12 +214,12 @@ def test_one_row_per_verdict_and_rows_are_kept(proj):
 
 
 def test_failures_never_deny(proj, monkeypatch):
-    for name in ("load_declaration", "judge"):
+    for name in ("load_ask_declaration", "judge_ask"):
         with monkeypatch.context() as m:
             m.setattr(ask_policy, name, lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
             from hook_lib import ask_guard, payload
 
-            assert ask_guard.decision(payload.event_of(ask_input(proj))) is None
+            assert ask_guard.ask_decision(payload.event_of(ask_input(proj))) is None
 
 
 def test_unwritable_ledger_still_judges(proj, tmp_path):
@@ -235,7 +235,7 @@ def test_deadline_passes_through(proj, monkeypatch):
     def slow(ev):
         raise deadline.HookDeadlineExceeded("ask-guard")
 
-    monkeypatch.setattr(ask_guard, "decision", slow)
+    monkeypatch.setattr(ask_guard, "ask_decision", slow)
     out = hook_entry.dispatch("", "claude", ask_input(proj))
     assert not is_deny(out)
 

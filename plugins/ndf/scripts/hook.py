@@ -134,7 +134,7 @@ def _guards(command: str, runtime: str, ev, outs: list) -> None:
             dl.current = "ask-guard"
             from hook_lib import ask_guard
 
-            outs.append(ask_guard.decision(ev))
+            outs.append(ask_guard.ask_decision(ev))
     except deadline.HookDeadlineExceeded as e:
         print(dl.notice(e.name), file=sys.stderr)
     finally:

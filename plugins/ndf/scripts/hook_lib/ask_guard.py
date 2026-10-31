@@ -31,7 +31,7 @@ def _common_tail(decl) -> list[str]:
     return lines
 
 
-def stop_text(verdict, decl, row_id: str) -> str:
+def ask_stop_text(verdict, decl, row_id: str) -> str:
     """`deny` の理由（`advise` の案内にも使う）。"""
     import ask_policy
 
@@ -55,7 +55,7 @@ def pass_text(verdict, decl) -> str:
     return "\n".join(lines + _common_tail(decl))
 
 
-def _record(ev, verdict, decl) -> str:
+def _record_verdict(ev, verdict, decl) -> str:
     """判定の行を追記し、その `id` を返す。追記に失敗しても `id` は返す。"""
     import ask_ledger
 
@@ -71,33 +71,30 @@ def _record(ev, verdict, decl) -> str:
         tool_input=ev.tool_input,
     )
     try:
-        ask_ledger.append(row)
+        ask_ledger.append_ask_row(row)
     except Exception:  # noqa: BLE001 — 記録を書けなくても判定は変えない（E5）
         pass
     return row["id"]
-
-
-def _deny(reason: str) -> dict:
-    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}}
 
 
 def _context(text: str) -> dict:
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": text}}
 
 
-def decision(ev) -> dict | None:
+def ask_decision(ev) -> dict | None:
     try:
         import ask_policy
+        from hook_lib.token_guard import deny
 
-        decl = ask_policy.load_declaration(ask_policy.project_root(ev.cwd))
-        verdict = ask_policy.judge(ev.tool_input, decl)
+        decl = ask_policy.load_ask_declaration(ask_policy.project_root(ev.cwd))
+        verdict = ask_policy.judge_ask(ev.tool_input, decl)
         if verdict.decision == "off":
             return None
-        row_id = _record(ev, verdict, decl)
+        row_id = _record_verdict(ev, verdict, decl)
         if verdict.decision == "deny":
-            return _deny(stop_text(verdict, decl, row_id))
+            return deny(ask_stop_text(verdict, decl, row_id))
         if verdict.decision == "advise":
-            return _context("ndf: mode が advise のため止めていない。\n" + stop_text(verdict, decl, row_id))
+            return _context("ndf: mode が advise のため止めていない。\n" + ask_stop_text(verdict, decl, row_id))
         return _context(pass_text(verdict, decl))
     except Exception:  # noqa: BLE001 — 宣言・判定・記録のどの失敗も通す（I8）
         return None

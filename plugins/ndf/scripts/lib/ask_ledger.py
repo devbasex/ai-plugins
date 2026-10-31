@@ -25,7 +25,7 @@ FILE_NAME = "ask.jsonl"
 VERSION = 1
 
 
-def ledger_path() -> Path:
+def ask_ledger_path() -> Path:
     env = os.environ.get("NDF_MVV_STATE_DIR")
     base = Path(env).expanduser() if env else Path("~/.local/state/ndf").expanduser()
     return base / FILE_NAME
@@ -35,7 +35,7 @@ def new_id() -> str:
     return uuid.uuid4().hex[:12]
 
 
-def now() -> str:
+def ask_stamp() -> str:
     return datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat()
 
 
@@ -53,7 +53,7 @@ def verdict_row(
         "v": VERSION,
         "kind": "verdict",
         "id": new_id(),
-        "at": now(),
+        "at": ask_stamp(),
         "session": session or "",
         "cwd": str(cwd),
         "runtime": runtime,
@@ -71,7 +71,7 @@ def decision_row(*, ref: str, question: str, answer: str, reason: str, session: 
         "v": VERSION,
         "kind": "decision",
         "id": new_id(),
-        "at": now(),
+        "at": ask_stamp(),
         "session": session or "",
         "cwd": str(cwd),
         "ref": ref or "",
@@ -81,9 +81,9 @@ def decision_row(*, ref: str, question: str, answer: str, reason: str, session: 
     }
 
 
-def append(row: dict, path: Path | None = None) -> Path:
+def append_ask_row(row: dict, path: Path | None = None) -> Path:
     """1 行を 1 回の `write` で追記する（ロックは取らない）。書けなければ OSError。"""
-    p = path or ledger_path()
+    p = path or ask_ledger_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     line = json.dumps(row, ensure_ascii=False) + "\n"
     fd = os.open(p, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
@@ -94,9 +94,9 @@ def append(row: dict, path: Path | None = None) -> Path:
     return p
 
 
-def read_rows(path: Path | None = None) -> list[dict]:
+def read_ask_rows(path: Path | None = None) -> list[dict]:
     """記録の行。無ければ空。読めない行は飛ばす。"""
-    p = path or ledger_path()
+    p = path or ask_ledger_path()
     try:
         text = p.read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -112,15 +112,15 @@ def read_rows(path: Path | None = None) -> list[dict]:
     return rows
 
 
-def find(row_id: str, rows: list[dict] | None = None) -> dict | None:
+def find_row(row_id: str, rows: list[dict] | None = None) -> dict | None:
     """判定の行を `id` で引く。"""
-    for row in rows if rows is not None else read_rows():
+    for row in rows if rows is not None else read_ask_rows():
         if row.get("kind") == "verdict" and row.get("id") == row_id:
             return row
     return None
 
 
-def summary(rows: list[dict]) -> dict:
+def summarize_asks(rows: list[dict]) -> dict:
     """判定ごと・区分ごと・代わりの判断の `ref` の有無ごとの件数と、代わりの判断が無い止めた行の件数。"""
     verdicts = {"deny": 0, "allow": 0, "advise": 0}
     sources: dict[str, int] = {}
