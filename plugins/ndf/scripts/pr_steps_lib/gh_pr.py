@@ -59,12 +59,14 @@ def existing_pr(root, branch):
         if not prs:
             return []
         pr = prs[0]
-        return [{
-            "number": pr["number"],
-            "url": pr["html_url"],
-            "isDraft": pr.get("draft", False),
-            "baseRefName": pr.get("base", {}).get("ref", ""),
-        }]
+        return [
+            {
+                "number": pr["number"],
+                "url": pr["html_url"],
+                "isDraft": pr.get("draft", False),
+                "baseRefName": pr.get("base", {}).get("ref", ""),
+            }
+        ]
 
     prs = _gh_or_rest(
         root,
