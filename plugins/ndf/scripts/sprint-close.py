@@ -99,6 +99,7 @@ NO_ROWS = "リリース後テストの行が無い"
 NOT_PASSED = "リリース後テストに合格でない条件がある（不合格・保留）"
 UNVERIFIED = "閉じているが閉じる条件 2 を満たさない: "
 UNREADABLE_BODY = "本文を読めない（最終工程の記録を確かめられない）"
+NO_MAPPING = "条件と課題の対応が読めない"
 
 
 def judge_acceptance(rows, criteria, pre_merge=frozenset()):
@@ -233,7 +234,9 @@ def _closing_blocker(a, rec, record_repo):
         else:
             verdicts = verification_verdicts(blk, record_repo)
             if verdicts is None:
-                kept_all = "条件と課題の対応が読めない"
+                kept_all = NO_MAPPING
+                if acceptance.verdict_table_readable(blk):
+                    verdicts = {}  # 課題を指す行が無い表: すべての条件をマージ前に確かめた課題だけ判定へ進める（#2144）
     return kept_all, verdicts
 
 
@@ -290,9 +293,17 @@ def _close_verified(a, ctx, repo, n, rows):
     return {**out, "checked": checked} if checked else out
 
 
+def _all_pre_merge(ctx, repo, n):
+    """本文の受け入れ条件がすべてマージ前に確かめたものか（行の要らない課題か）。本文を読めなければ False。"""
+    got = _read_state_body(ctx.root, repo, n)
+    if got is None:
+        return False
+    return judge_acceptance(None, acceptance.criteria(got[1]), acceptance.pre_merge_numbers(got[1]))[0]
+
+
 def _close_item(a, ctx, repo, n, kept_all, verdicts):
     base = _issue_base(repo, n)
-    if kept_all:
+    if kept_all and not (kept_all == NO_MAPPING and verdicts == {} and _all_pre_merge(ctx, repo, n)):
         return {**base, "result": "kept_open", "reason": kept_all}
     if verdicts is not None:
         return _close_verified(a, ctx, repo, n, verdicts.get((repo, n)))

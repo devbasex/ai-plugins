@@ -105,6 +105,19 @@ def test_a_table_without_issue_rows_keeps_every_issue_open(repo, gh):
     assert not calls(gh, ["issue", "close"]) and not calls(gh, ["api"])
 
 
+def test_a_table_without_issue_rows_closes_an_issue_verified_before_merge(repo, gh):
+    """導入の確認だけの表でも、すべての条件をマージ前に確かめた課題は閉じる。他は対応の読めない kept_open（#2144）。"""
+    record = "\n## 受け入れ条件の確認\n\n| 条件 | 区分 | 手段 |\n| --- | --- | --- |\n" + "".join(
+        f"| {i} | マージ前 | `pytest` |\n" for i in (1, 2, 3)
+    )
+    setup(gh, [("—", "導入の確認", "合格")], {"o/r#1": THREE + record, "o/r#2": THREE}, prs="Fixes #1, fixes #2")
+    code, out, err = call("sprint-close.py", CLOSE, gh.env, repo)
+    assert code == 0, (out, err)
+    got = issues_of(out)
+    assert got["o/r#1"]["result"] == "closed" and got["o/r#1"]["checked"] == [1, 2, 3]
+    assert (got["o/r#2"]["result"], got["o/r#2"]["reason"]) == ("kept_open", "条件と課題の対応が読めない")
+
+
 # --- 閉じる条件 2 と印（受け入れ条件 3〜11） ------------------------------------------
 
 

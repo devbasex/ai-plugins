@@ -173,6 +173,14 @@ def verification_verdicts(block, record_repo):
     return {k: IssueRows(a, frozenset(p - f)) for k, (a, p, f) in acc.items()}
 
 
+def verdict_table_readable(block):
+    """表があり、見出しに課題と結果の列があるか。verification_verdicts の None が「課題を指す行が無い」だけかを分ける。"""
+    import md
+
+    found = md.tables(block)
+    return bool(found) and _column_indices(found[0].header) is not None
+
+
 def _column_indices(header):
     """見出しから (課題, 結果, 受け入れ条件) の列の位置を返す。受け入れ条件の列が無ければ 3 つ目は None。
     課題か結果の列が無ければ None。"""

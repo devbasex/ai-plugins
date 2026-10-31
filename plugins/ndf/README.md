@@ -62,7 +62,7 @@ Claude Code か Codex をホストにして agy・Kiro CLI を相手役として
 | ランタイム | 残すとき | 消すとき |
 | --- | --- | --- |
 | agy | 導入の写し（`~/.gemini/config/plugins/ndf/`）だけで動き続ける。新しい版は届かない | 写しが残るうちに `bash ~/.gemini/config/plugins/ndf/install-hooks.sh --uninstall` で `~/.gemini/config/hooks.json` の項目を外し、`agy plugin uninstall ndf` を打つ |
-| Kiro CLI | `.kiro/agents/ndf.json` の hook は clone の `plugins/ndf/scripts/` を呼ぶため、clone を進めても動く。Skill を固定したいときは clone を `ndf--v10.27.4` のタグへ戻す | `ndf` を既定のエージェントにしたなら `kiro-cli agent set-default kiro_default` で戻し、`.kiro/agents/ndf.json`・`.kiro/steering/ndf-policies.md`・`.kiro/prompts/` の NDF の 5 本（`--with-codex` で入れたなら `codex.md` も）・`.kiro/skills/` の NDF への symlink（mcp-* を入れたなら `.kiro/mcp_runtime/` と `.kiro/agents/default.json` の該当の項目も）を消す |
+| Kiro CLI | `.kiro/agents/ndf.json` の hook は clone の `plugins/ndf/scripts/` を呼ぶため、clone を進めても動く。Skill を固定したいときは clone を `ndf--v10.27.4` のタグへ戻す | 前の installer は `.kiro/agents/ndf.json` に利用者が足した `mcpServers`・hook・その他の鍵を引き継いでいたため、消す前に `cp .kiro/agents/ndf.json ndf.json.bak` で退避し、残したい項目を使い続けるエージェント（`.kiro/agents/` の別のファイル）へ写す。`ndf` を既定のエージェントにしたなら `kiro-cli agent set-default kiro_default` で戻し、`.kiro/agents/ndf.json`・`.kiro/steering/ndf-policies.md`・`.kiro/prompts/` の NDF の 5 本（`--with-codex` で入れたなら `codex.md` も）・`.kiro/skills/` の NDF への symlink（mcp-* を入れたなら `.kiro/mcp_runtime/` と `.kiro/agents/default.json` の該当の項目も）を消す |
 
 ## 更新情報
 
