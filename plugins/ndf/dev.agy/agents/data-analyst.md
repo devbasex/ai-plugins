@@ -112,6 +112,6 @@ description: |
 
 ## 制約事項
 
-- 破壊的な操作（DELETE、DROP等）は慎重に扱い、ユーザーに確認
+- 破壊的な操作（DELETE、DROP等）は慎重に扱い、ユーザーに確認する（`AskUserQuestion` の `metadata.source` は、利用者のデータを変えるなら `ndf-ask:redline:C3`、戻せない操作なら `ndf-ask:redline:C4`）
 - 個人情報や機密データの取り扱いに注意
 - パフォーマンスに影響する重いクエリは事前に警告
