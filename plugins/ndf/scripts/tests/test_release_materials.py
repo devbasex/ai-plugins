@@ -251,3 +251,58 @@ def test_whole_test_without_ran_reads_the_declared_command(tmp_path):
     assert whole.commands == ("pytest .",) and whole.passed and whole.failed == 1
     on_ci = materials.WholeTest((), True, True, 0, 0)
     assert "CI に任せた" in materials.check_lines(materials.Materials(whole_test=on_ci))[0]
+
+
+def _materials():
+    sys.path.insert(0, str(Path(rr.SCRIPT).parent / "lib"))
+    sys.path.insert(0, str(Path(rr.SCRIPT).parent))
+    from release_lib import materials
+
+    return materials
+
+
+def _check(tmp_path, **kw) -> list[str]:
+    m = _materials()
+    review, refactor, whole = m.read_check(check_state(tmp_path, **kw), tmp_path)
+    return m.check_lines(m.Materials(review, refactor, whole))
+
+
+FAILED = {
+    "tool": "cross-refactoring-drive",
+    "status": "error",
+    "summary": "打ち切り",
+    "items": [],
+    "metrics": {"adopted": 0, "reverted": 0},
+}
+
+
+def test_refactor_reads_the_ok_attempt_when_a_later_attempt_failed(tmp_path):
+    """2129-1: 番号の最大の試行が落ち、前の試行が ok なら、ok の試行の件数を書く。"""
+    d = tmp_path / "6-check-state"
+    put_out(d, "01-refactor.out", {**REFACTOR, "metrics": {"adopted": 14, "reverted": 0}})
+    lines = _check(tmp_path, refactor=FAILED)  # 04-refactor.out が落ちた試行
+    assert "- リファクタリング: 採用 14 件 / 取り消し 0 件" in lines
+
+
+def test_refactor_without_an_ok_attempt_says_it_did_not_finish(tmp_path):
+    """2129-2: ok の試行が 1 つも無ければ、落ちた試行の件数を載せず、ok で終わっていないと書く。"""
+    put_out(tmp_path / "6-check-state", "01-refactor.out", FAILED)
+    line = next(x for x in _check(tmp_path, refactor=FAILED) if x.startswith("- リファクタリング:"))
+    assert "採用" not in line and "`ok` で終わっていない" in line and "`error`" in line
+
+
+def test_refactor_with_one_ok_attempt_keeps_its_counts(tmp_path):
+    """2129-3: 試行が 1 回で ok なら今と同じ値。"""
+    assert "- リファクタリング: 採用 1 件 / 取り消し 0 件" in _check(tmp_path)
+
+
+def test_deferred_findings_fold_by_path_and_summary(tmp_path):
+    """2129-4・2129-5: path と summary が同じ見送りは line の有無・値が違っても 1 件。違うものは別の件。"""
+    same = [{"kind": "deferred", "path": "a.py", "line": n, "summary": "同じ指摘", "round": r} for r, n in enumerate((None, 3, 9))]
+    other = [
+        {"kind": "deferred", "path": "b.py", "summary": "同じ指摘"},
+        {"kind": "deferred", "path": "a.py", "line": 3, "summary": "別の指摘"},
+    ]
+    lines = _check(tmp_path, review={**REVIEW, "items": same + other})
+    assert lines[0].endswith("見送った指摘 3 件")
+    assert lines[1:4] == ["  - `a.py:3` 同じ指摘", "  - `b.py` 同じ指摘", "  - `a.py:3` 別の指摘"]
