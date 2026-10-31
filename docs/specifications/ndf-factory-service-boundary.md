@@ -131,7 +131,7 @@ graph TD
 
 ## サービス全体の契約（子課題が実装する）
 
-この節は、子課題 #2170〜#2174・#2186 が実装するサービスの形を、決定済みの契約として持つ。子課題は次の形を変えずに作る。**変えるときは本書を直す Pull Request を先に出す。** 機械可読な定義（JSON Schema と OpenAPI）は #2171 が本節から起こして `factory/contracts/` に置き、形の正は本節である。アカウントの API の OpenAPI（`factory/contracts/openapi/accounts.yaml`）は、最初にその経路を置く #2170 が作り、#2171 が `contracts/` の形を決めるときに取り込む。
+この節は、子課題 #2170〜#2174・#2186 が実装するサービスの形を、決定済みの契約として持つ。子課題は次の形を変えずに作る。**変えるときは本書を直す Pull Request を先に出す。** 機械可読な定義（JSON Schema と OpenAPI）は #2171 が本節から起こして `factory/contracts/` に置き、形の正は本節である。アカウントの API の OpenAPI（`factory/contracts/openapi/accounts.yaml`）は、最初にその経路を置く #2170 が作り、#2171 が `contracts/` の形を決めるときに取り込んだ。定義の置き場・`payload` の鍵の名前と型・受け口の経路と応答の本文・実行ジョブの token の形は [契約の定義と型・進捗の受け口・実行ジョブの token](ndf-factory-contracts-and-progress.md) にある。
 
 ### 受け持つ課題
 
@@ -353,7 +353,7 @@ erDiagram
 
 課金の境界はランナーが `usage.recorded` を出すところまでで、料金の計算・台帳・決済・Bedrock の請求との突き合わせは #2174 が持つ（決定 14）。
 
-**受け口の認証は出所ごとに 1 つで、認証の手段と事象の `source` が食い違えば拒む。** 実行の制御は受け口を通らず、進捗の記録へ直に書く。
+**受け口の認証は出所ごとに 1 つで、認証の手段と事象の `source` が食い違えば拒む。** 実行の制御は受け口を通らず、#2171 が公開する追記の関数（`appendControlEvent`）で進捗の記録へ直に書く。
 
 | 出所 | 認証の手段 | 書ける種類 |
 | --- | --- | --- |
@@ -363,7 +363,7 @@ erDiagram
 
 **GitHub の Webhook の宛先のスプリントの実行は、`pr_ref` が同じ事象の `sprint_run_id` で引く。** ちょうど 1 つに決まらなければ 202 で保存しない。
 
-**受け口の応答**: 受け取ったら 202（同じ冪等の鍵の 2 回目も 202）、認証できなければ 401、認証の手段と `source`・種類・識別子が食い違えば 403、形が違えば 400。ランナーは 5xx と接続の失敗を、同じ事象のまま送り直す。
+**受け口の応答**: 受け取ったら 202（同じ冪等の鍵の 2 回目も 202）、認証できなければ 401、認証の手段と `source`・種類・識別子が食い違えば 403、形が違えば 400、保存などができなければ 503。ランナーは 5xx と接続の失敗を、同じ事象のまま送り直す。経路と本文の形は [契約の定義と型・進捗の受け口・実行ジョブの token](ndf-factory-contracts-and-progress.md) にある。
 
 ### スプリントの実行の流れ
 
@@ -467,6 +467,7 @@ stateDiagram-v2
 - 設計 Pull Request: [#2175](https://github.com/devbasex/ai-plugins/pull/2175)、実装: [#2177](https://github.com/devbasex/ai-plugins/pull/2177)
 - サービスのディレクトリ: [factory/README.md](../../factory/README.md)
 - 認証とアカウント・席・プランの使える量（#2170）: [ndf-factory-accounts-and-plans.md](ndf-factory-accounts-and-plans.md)
+- 契約の定義と型・進捗の受け口・実行ジョブの token（#2171）: [ndf-factory-contracts-and-progress.md](ndf-factory-contracts-and-progress.md)
 - 境界の検査: [scripts/check-service-boundary.py](../../scripts/check-service-boundary.py)、許可の一覧: [scripts/service-boundary-allow.json](../../scripts/service-boundary-allow.json)
 - 追加待ちの扱い: [必須のチェックの突き合わせ](ci-required-checks-reconcile.md)
 - 版と配布の規則（ランナーが導入する NDF に当たる）: [版と配布の正本](../versioning-and-distribution.md)
