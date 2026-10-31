@@ -54,7 +54,7 @@ codex plugin add ndf@ai-plugins
 
 ### agy・Kiro CLI への配布の終了
 
-agy と Kiro CLI へは配りません。最後に配ったのは v10.27.4 です。cross-review と cross-refactoring は、
+agy と Kiro CLI へは配りません。最後に配ったのは v10.27.3 です。cross-review と cross-refactoring は、
 Claude Code か Codex をホストにして agy・Kiro CLI を相手役として今までどおり起動します。相手役に配布物は要りません。
 
 前の版で入れた手元は、こちらからは消しません。残すか消すかを選べます。
@@ -62,7 +62,7 @@ Claude Code か Codex をホストにして agy・Kiro CLI を相手役として
 | ランタイム | 残すとき | 消すとき |
 | --- | --- | --- |
 | agy | 導入の写し（`~/.gemini/config/plugins/ndf/`）だけで動き続ける。新しい版は届かない | 写しが残るうちに `bash ~/.gemini/config/plugins/ndf/install-hooks.sh --uninstall` で `~/.gemini/config/hooks.json` の項目を外し、`agy plugin uninstall ndf` を打つ |
-| Kiro CLI | `.kiro/agents/ndf.json` の hook は clone の `plugins/ndf/scripts/` を呼ぶため、clone を進めても動く。Skill を固定したいときは clone を `ndf--v10.27.4` のタグへ戻す | `ndf` を既定のエージェントにしたなら `kiro-cli agent set-default kiro_default` で戻し、`.kiro/agents/ndf.json`・`.kiro/steering/ndf-policies.md`・`.kiro/prompts/` の NDF の 5 本（`--with-codex` で入れたなら `codex.md` も）・`.kiro/skills/` の NDF への symlink（mcp-* を入れたなら `.kiro/mcp_runtime/` と `.kiro/agents/default.json` の該当の項目も）を消す |
+| Kiro CLI | `.kiro/agents/ndf.json` の hook は clone の `plugins/ndf/scripts/` を呼ぶため、clone を進めても動く。Skill を固定したいときは clone を `ndf--v10.27.3` のタグへ戻す | `ndf` を既定のエージェントにしたなら `kiro-cli agent set-default kiro_default` で戻し、`.kiro/agents/ndf.json`・`.kiro/steering/ndf-policies.md`・`.kiro/prompts/` の NDF の 5 本（`--with-codex` で入れたなら `codex.md` も）・`.kiro/skills/` の NDF への symlink（mcp-* を入れたなら `.kiro/mcp_runtime/` と `.kiro/agents/default.json` の該当の項目も）を消す |
 
 ## 更新情報
 
@@ -350,7 +350,7 @@ agy models   # 認証確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.27.4/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.27.3/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -372,14 +372,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.27.4/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.27.3/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.27.4  <path>
+# => ndf@ai-plugins  installed, enabled  10.27.3  <path>
 ```
 
 抑止していない Skill（`document-style` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。

@@ -1,6 +1,6 @@
 """記録の PR とスプリントの PR の読み取りと、閉じる課題・参照だけの課題の集め方（`sprint-close.py` から分けた）。
 
-記録の形は `lib/dist_record.py`、closing keywords の読み取りは `lib/closing.py` が持つ。
+記録の形は `lib/dist_record.py`、closing keywords の読み取りは `lib/closing-issues.sh` と `lib/closing.py` が持つ。
 出す（emit）のは呼び手である。
 """
 
@@ -8,10 +8,15 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
+from pathlib import Path
 
 import gh_call
-from closing import closing_refs, referenced_numbers
+from closing import referenced_numbers
 from step_result import EXIT_UNREADABLE, StepError
+
+CLOSING_ISSUES = Path(__file__).resolve().parent.parent / "lib" / "closing-issues.sh"
+
 
 _COMMENT_ID = re.compile(r"#issuecomment-(\d+)$")
 
@@ -60,7 +65,12 @@ def sprint_issues(root, repo, prs):
     for n in prs:
         title, body = _read_sprint_pr(root, repo, n)
         refs += [r for r in referenced_numbers(title + "\n" + body, repo) if r not in refs]
-        for key in closing_refs(body, repo):
+        c = subprocess.run(["bash", str(CLOSING_ISSUES), "--repo", repo], cwd=root, input=body, capture_output=True, text=True)
+        for ln in c.stdout.splitlines():
+            if "\t" not in ln:
+                continue
+            r, num = ln.split("\t", 1)
+            key = (r.strip(), int(num.strip()))
             if key not in seen:
                 seen.add(key)
                 out.append(key)

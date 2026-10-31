@@ -63,19 +63,11 @@
 13. **着手前のテスト** — 戦略ごとに走らせる（`local-full` は全体テスト、`local-scoped-ci-whole` は `--scope` のテストの
     置き場所の範囲テスト、`round-only` は全体テストとラウンドテスト）。**落ちても止めない。** 落ちたテストは JUnit から読んで
     `baseline_test.existing_failures`（既存失敗）に書き、最終ゲートは既存失敗の外で新しく落ちたテストが無ければ通る。
-    JUnit を読めなければ `null` と理由を書く。上限（`limits.init_test_timeout`）を超えたときだけ止める（`SKIP=init-timeout` を出して終了コード 4）。
-    上限は `max(0.10·B, 3·s)`。s は着手前のテストの所要の見込みで、CI に任せる戦略の同じ範囲の配分の履歴 → 手元の全体テストの直近の実測
-    （`whole_runs`）→ 宣言の所要の順に採り（`baseline_test.scope_source` は `history` / `recent` / `whole`）、どれも無ければ `0.10·B` にする。
-    上限が `0.10·B` を超えるときは、走らせる前にステップの延長（環境変数 `NDF_STEP_EXTEND_FILE` の指すファイル）へ `B·60 + (上限 − 0.10·B·60)` 秒を書く。
+    JUnit を読めなければ `null` と理由を書く。上限（`limits.init_test_timeout`）を超えたときだけ止める。
     実測の秒は `baseline_test.seconds`、宣言の所要は `whole_seconds`・`ci_seconds` に残し、時間の上限とバッファに使う
 14. **測定の設定の読み込み** — 書き込み用の作業ディレクトリの `.ndf/code-metrics.json` を読み、
     既定の対応と重ねて状態の `code_metrics.config` に書く。`status` は `pending` から始まる。
     `limits.measure_timeout` もここで書く（下の「指標の測定」）
-15. **手順の枠の確かめ**（`init_test.settle_window`）— 提案とリファクタリング計画の枠と計画の後の見込みが想定最大時間に収まるかを見る。
-    収まらないとき、想定最大時間の出所（状態の `budget_source`）が `default` / `floor` なら、打ち直しの見込みを足さない下限まで
-    `budget_minutes` を上げ、出所を `floor`・上げる前と後を `budget_floor` に残して上限の表を組み直し、`ℹ` の 1 行を出して続ける。
-    `explicit`（引数か宣言で渡した。`budget_source` を持たない旧い状態ファイルも同じ）なら上げず、`SKIP=window` と要る下限を出して
-    止めた印（`window_stopped_at`）を残し、終了コード 4 で止まる。出力の `BUDGET_SOURCE` に出所を出す
 
 ### 再開
 
@@ -93,7 +85,7 @@
 | --- | --- |
 | `--max-fix-rounds` / `--test-timeout` | 廃止を知らせて無視する（決定 24。修正は締め切りまで、テストの上限は予算から導く） |
 | `--baseline-test` / `--round-test` | 知らせるだけ（戦略は `init` で解いたまま） |
-| `--budget-minutes` | **リファクタリング計画の前**（`phase` が `propose` か `plan` でリファクタリング計画が無い）だけ置き換え、想定最大時間の出所を `explicit` にして上限の表（`limits`）を組み直す。渡さなければ出所は状態のまま。後は知らせるだけ。採用の件数・実装の終わり・バッファはリファクタリング計画の時点の予算で固定されている |
+| `--budget-minutes` | **リファクタリング計画の前**（`phase` が `propose` か `plan` でリファクタリング計画が無い）だけ置き換え、上限の表（`limits`）を組み直す。後は知らせるだけ。採用の件数・実装の終わり・バッファはリファクタリング計画の時点の予算で固定されている |
 | `--implementer` | 知らせるだけ（置き換えない） |
 | `--exclude` / `--include` / `--require-all` | 参加者を作り直す。**実装担当が外れたら**、リファクタリング計画の前は決め方を当て直し、リファクタリング計画の後は止める |
 | そのほか状態に載る引数 | 状態と違えば「反映しない」と知らせる |

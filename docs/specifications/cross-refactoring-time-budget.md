@@ -163,7 +163,7 @@
 
 | 引数 | 扱い | 既定 |
 | --- | --- | --- |
-| `--budget-minutes N` | 1 以上の整数。それ以外は `init` が終了コード 4（argparse の 2 にしない）。明示した値は上げない | 30（`vocabulary.DEFAULT_BUDGET_MINUTES`）。省いて手順の枠が収まらなければ想定最大時間の下限まで上げる |
+| `--budget-minutes N` | 1 以上の整数。それ以外は `init` が終了コード 4（argparse の 2 にしない） | 30（`vocabulary.DEFAULT_BUDGET_MINUTES`） |
 | `--implementer NAME` | 参加者の中の 1 者。参加者に無ければ終了コード 4 | 下の決め方 |
 | `--round-test CMD` | 範囲テストを組み立てる元。**`--baseline-test` の実行器が既知でなければ必須**（無ければ提案の前に終了コード 4） | `--baseline-test` を元にする |
 | `--max-test-rounds` / `--max-outer-rounds` / `--max-items-per-round` / `--max-fix-rounds` / `--test-timeout` | 廃止。受け取ると標準エラーへ `⚠ <引数> は廃止しました（#933）。--budget-minutes で所要を決めます` を出し、値を使わずに続ける（`setup.DEPRECATED_ARGS`） | — |
@@ -251,7 +251,7 @@
 | 値 | 要点 | 係数・関数 |
 | --- | --- | --- |
 | 余裕 | 0.05·B | `MARGIN_SHARE` |
-| 着手前のテスト 1 回の上限 | max(0.10·B, 3·s)。s（着手前のテストの所要の見込み）が分からなければ 0.10·B か max(0.10·B, 3·w) | `INIT_TEST_SHARE` |
+| 着手前のテスト 1 回の上限 | 0.10·B（w はまだ無い） | `INIT_TEST_SHARE` |
 | テスト 1 回の上限 | max(3·w, 0.01·B) | `TEST_FACTOR` / `TEST_FLOOR_SHARE` |
 | 提案の枠の終わり / リファクタリング計画の枠の終わり | 開始 + 0.20·B / さらに + 0.10·B（開始 + 0.30·B） | `PROPOSE_SHARE` / `PLAN_SHARE` |
 | テストの追加・実装の終わり | 実装の終わり = 最終ゲート修正の打ち切り − R − Σ（採っていて未検証の項目の verify）。テストの追加の終わりはそこから同じ項目の implement を引く | `budget.implement_end` / `budget.add_tests_end` |

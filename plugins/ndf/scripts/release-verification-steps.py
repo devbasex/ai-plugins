@@ -26,7 +26,6 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 from step_result import (
@@ -251,86 +250,60 @@ def _extract_source(root, ref_rev, tmp) -> Path:
     return src
 
 
-class VerifyContext(NamedTuple):
-    """verify-install の 1 回で組む値の束（ref・版・前のタグ・対象のプラグインと導入元）。"""
-
-    ref: str
-    expect: str
-    root: Path
-    ref_rev: str
-    prev: str | None
-    runtimes: list[str]
-    plugins: list[str]
-    rel: dict[str, str]
-    where: object
-
-
-def _verify_runtimes(ctx: VerifyContext, src, tmp):
+def _verify_runtimes(a, root, src, tmp, runtimes, plugins, rel, prev, ref_rev, where):
     """ランタイムごとに導入して確かめる。(ランタイムごとの結果, 中身の不一致) を返す。"""
     runtimes_res, mismatch = {}, []
     changed = {
-        p: ([f for f in git(ctx.root, "diff", "--name-only", ctx.prev, ctx.ref_rev, "--", r).stdout.split() if f] if ctx.prev else [])
-        for p, r in ctx.rel.items()
+        p: ([f for f in git(root, "diff", "--name-only", prev, ref_rev, "--", r).stdout.split() if f] if prev else [])
+        for p, r in rel.items()
     }
     env = isolated_env(tmp)
     for name, fn in (("claude", verify_claude), ("codex", verify_codex)):
-        if name not in ctx.runtimes:
+        if name not in runtimes:
             continue
-        res, dirs = fn(env, ctx.ref, ctx.plugins, ctx.expect, ctx.where)
+        res, dirs = fn(env, a.ref, plugins, a.expect, where)
         runtimes_res[name] = res
         for p, d in dirs.items():
             if d is None:
                 mismatch.append(f"{name}: {p} の導入先が無い")
             else:
-                mismatch += compare_files(src, d, ctx.rel[p], changed[p], name, keeps_symlinks=(name != "codex"))
+                mismatch += compare_files(src, d, rel[p], changed[p], name, keeps_symlinks=(name != "codex"))
     return runtimes_res, mismatch
 
 
-def _runtime_result(r, expect) -> str:
-    """ランタイム 1 件の判定: 導入が失敗 → failed、版が --expect と違う → version_mismatch、それ以外 ok。"""
-    v = r.get("version")
-    # mcp-serena などは別の版を持つので、ndf があれば ndf だけを --expect と比べる
-    vs = ([v.get("ndf")] if "ndf" in v else list(v.values())) if isinstance(v, dict) else [v]
-    if r.get("exit") != 0:
-        return "failed"
-    if any(x != expect for x in vs):
-        return "version_mismatch"
-    return "ok"
-
-
-def _env_items(before, after) -> list[dict]:
-    """利用者の環境の差分を、変わった鍵ごとの項目にする。"""
-    if before == after:
-        return []
-    return [
-        {"kind": "user_env", "name": k, "result": "changed", "before": before[k], "after": after[k]}
-        for k in before
-        if before[k] != after[k]
-    ]
-
-
-def _build_result(ctx: VerifyContext, runtimes_res, mismatch, before, after) -> dict:
+def _build_result(a, ref_rev, prev, runtimes_res, mismatch, before, after) -> dict:
     """ランタイムごとの結果・中身の不一致・利用者の環境の差分から結果をまとめる。"""
+    items = []
     env_same = before == after
-    items = _env_items(before, after)
+    if not env_same:
+        for k in before:
+            if before[k] != after[k]:
+                items.append({"kind": "user_env", "name": k, "result": "changed", "before": before[k], "after": after[k]})
     ok = env_same and not mismatch
     for name, r in runtimes_res.items():
-        res = _runtime_result(r, ctx.expect)
+        v = r.get("version")
+        # mcp-serena などは別の版を持つので、ndf があれば ndf だけを --expect と比べる
+        vs = ([v.get("ndf")] if "ndf" in v else list(v.values())) if isinstance(v, dict) else [v]
+        res = "ok"
+        if r.get("exit") != 0:
+            res = "failed"
+        elif any(x != a.expect for x in vs):
+            res = "version_mismatch"
         if res != "ok":
             ok = False
         items.append({"kind": "runtime", "name": name, "result": res, **r})
     items += [{"kind": "file", "name": m, "result": "mismatch"} for m in mismatch]
     metrics = {
-        "ref": ctx.ref,
-        "rev": ctx.ref_rev[:8],
-        "prev_tag": ctx.prev,
-        "expect": ctx.expect,
+        "ref": a.ref,
+        "rev": ref_rev[:8],
+        "prev_tag": prev,
+        "expect": a.expect,
         "user_env_unchanged": env_same,
         "mismatch": len(mismatch),
     }
     bad_rt = [i["name"] for i in items if i["kind"] == "runtime" and i["result"] != "ok"]
     summary = (
-        f"{ctx.ref}（{ctx.ref_rev[:8]}）から {', '.join(runtimes_res)} へ導入し v{ctx.expect} を確かめた"
+        f"{a.ref}（{ref_rev[:8]}）から {', '.join(runtimes_res)} へ導入し v{a.expect} を確かめた"
         if ok
         else f"導入の確認が通らない（runtime: {', '.join(bad_rt) or 'なし'} / 中身の不一致 {len(mismatch)} 件"
         f" / 利用者の環境が{'変わらない' if env_same else '変わった'}）"
@@ -353,18 +326,17 @@ def cmd_verify_install(a):
     tags = git(root, "tag", "--list", f"{prefix}*", "--sort=-v:refname").stdout.split()
     cur = f"{prefix}{a.expect}"
     prev = next((t for t in tags if t != cur and "-" not in t[len(prefix) :]), None)
-    ctx = VerifyContext(a.ref, a.expect, root, ref_rev, prev, runtimes, plugins, rel, where)
 
     before = user_env_snapshot()
     tmp = tempfile.mkdtemp(prefix="ndf-verify-install-")
     try:
         src = _extract_source(root, ref_rev, tmp)
-        runtimes_res, mismatch = _verify_runtimes(ctx, src, tmp)
+        runtimes_res, mismatch = _verify_runtimes(a, root, src, tmp, runtimes, plugins, rel, prev, ref_rev, where)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
     after = user_env_snapshot()
-    emit(_build_result(ctx, runtimes_res, mismatch, before, after))
+    emit(_build_result(a, ref_rev, prev, runtimes_res, mismatch, before, after))
 
 
 def build_parser():

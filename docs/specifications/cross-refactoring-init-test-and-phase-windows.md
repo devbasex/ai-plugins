@@ -6,11 +6,9 @@
   提案とリファクタリング計画の枠は着手前のテストの終わりから数え、全体の締め切り（`started_at + B`）は動かさない。
   伸びた分はリファクタリング計画で採る件数が減ることで吸収する
 - **枠が想定最大時間に収まらないときは、提案者を起動せずに止まる。** 要る想定最大時間の下限を出し、予算を広げて
-  `init` を打ち直すと、着手前のテストを走らせ直さずに続く。止まるのは想定最大時間を明示した実行だけで、省いた実行は
-  `init` が想定最大時間の下限まで上げて続ける
-- **着手前のテストの上限は、所要の見込み s が分かればそれを下回らない。** s は CI に任せる戦略なら同じ範囲の履歴の実測を先に採り、
-  無ければ（ほかの戦略も）手元の全体テストの直近の実測 m、無ければ宣言の w から取る（戦略を問わない。w は置き場所が suite を覆うかを問わない）。
-  範囲の広いスプリントでも、予算を広げずに init を通る
+  `init` を打ち直すと、着手前のテストを走らせ直さずに続く
+- **CI に任せる戦略の着手前のテストの上限は、範囲テストの所要が分かればそれを下回らない。** 所要は同じ範囲の履歴の実測か、
+  範囲が全体テストの suite を覆うときの w から取る。範囲の広いスプリントでも、予算を広げずに init を通る
 
 共通の原則は「**着手前のテストの上限と、その後の手順の枠を、同じ算術の層（`test_strategy.limits` と `timeline`）で入力だけから決める**」である。
 
@@ -89,16 +87,13 @@ init が終了コード 4 で止まった。同じ範囲の実測は 320 秒（6
   #1385 と同じ打ち切りに戻る
 - **枠が想定最大時間に収まらなければ、`init` で状態を保存してから止める。** 枠を残りの時間へ縮めて起動すると、縮めた枠
   （90 秒）で提案 0 件になった実測がある。予算を自動で広げないのは、想定最大時間が利用者の与えた上限だからである。
-  保存しておけば、予算を広げた打ち直しは着手前のテストを走らせ直さずに続く。自動で広げないのは明示した
-  想定最大時間（出所 `explicit`）だけにした。省いた実行（出所 `default`）は利用者の上限を持たないため、`init_test.settle_window` が
-  下限まで上げて出所を `floor` にする。明示で収まらないときは `SKIP=window` を出して止まり、駆動はリファクタリングを飛ばした
-  欠けの残る結果（終了コード 6）で返す。理由は [#2047 の設計](../../issues/issue-2047-design.md) の決定 2・決定 3 にある
+  保存しておけば、予算を広げた打ち直しは着手前のテストを走らせ直さずに続く
 - **止めた後の打ち直しでだけ、枠の起点を打ち直した時刻へずらす。** 起点を `started_at + x` のまま残すと、止まってから人が
   打ち直すまでの数分が提案の枠から引かれ、下限どおりの予算で提案者が余裕だけで起動される。提案や計画の途中で落ちた再開まで
   ずらすと、提案が揃っているのに枠が想定最大時間を越えて止まる。計画を取り込んだ後は採った件数が期限に合わせてあるため、
   保存した期限で続ける
 - **要る想定最大時間の下限には、人が打ち直すまでの 300 秒（`RESUME_GRACE_SECONDS`）を足す。** 足さないと、出した下限で
-  打ち直したときに経過の分だけ o が伸びて再び収まらない。打ち直さずにその場で上げる `settle_window` は足さない（`grace_seconds=0`。#2047 の決定 2）
+  打ち直したときに経過の分だけ o が伸びて再び収まらない
 - **範囲テストの所要は、着手前のテストの行を履歴に別の種類（`kind: init_test`）として足して実測から引く。** 実行の行は
   最終ゲートを通った実行だけが書くため、中断した実行と init で打ち切られた実行が残らず、範囲が suite の `paths` を覆わない
   リポジトリではいつまでも所要が分からない。打ち切りの行は上限の秒を下限の実測として残し、次の実行は `3·上限` で走らせる
@@ -123,10 +118,10 @@ init が終了コード 4 で止まった。同じ範囲の実測は 320 秒（6
 | I2 | `propose_end_at = started_at + o + 0.20·B`、`plan_end_at = propose_end_at + 0.10·B`。o は `resumed_at` が無ければ x（`baseline_test.seconds`。無ければ 0）、あれば `max(x, resumed_at − started_at)` | 単体テストで落とす |
 | I3 | `resumed_at` を書くのは、止めた印（`window_stopped_at`）を持つ状態をリファクタリング計画の前に打ち直したときだけである。印の無い再開と計画を取り込んだ後の再開は `resumed_at` を変えない | `init` のテストで落とす |
 | I4 | `fix_end_at`・`final_end_at`・実装の終わりは `started_at` から数え、x に依らない（項目ごとの期限は持たない） | 単体テストで落とす |
-| I5 | `plan_end_at` に計画の後の見込み（`after_plan_minutes`。バッファの見込みと最短の項目 1 件）を足した時刻が `final_end_at` を越える状態で提案者を起動しない。`init`（新規と、計画の前の再開）は、想定最大時間の出所が `explicit`（`budget_source` を持たない旧い状態も同じ）なら `SKIP=window` を出し、止めた印を残して状態を保存し、要る想定最大時間の下限を出して終了コード 4 で止まる。`default` / `floor` なら下限まで上げて続ける。収まれば印を消す | `init` のテストで落とす |
+| I5 | `plan_end_at` に計画の後の見込み（`after_plan_minutes`。バッファの見込みと最短の項目 1 件）を足した時刻が `final_end_at` を越える状態で提案者を起動しない。`init`（新規と、計画の前の再開）は止めた印を残して状態を保存し、要る想定最大時間の下限を出して終了コード 4 で止まる。収まれば印を消す | `init` のテストで落とす |
 | I6 | 計画を取り込んだ後の再開は `limits` を組み直さず、`window_problem` も見ない | `init` のテストで落とす |
-| I7 | `init_test_timeout` は、戦略を問わず着手前のテストの所要の見込み s が分かれば `max(0.10·B, 3·s)`、分からなければ今の値（CI に任せる戦略は `0.10·B`、ほかは `max(0.10·B, 3·w)`）。予算なしの値は s を渡しても変わらない | 単体テストで落とす |
-| I8 | s は、CI に任せる戦略なら同じ戦略・同じ置き場所の集合の `init_test` 行の直近 10 行の秒の最大 → 手元の全体テストの直近の実測 m（`recent`）→ 宣言の w（`whole`。置き場所が suite を覆うかは問わない）→ 無し、の順に採る。CI に任せる戦略でなければ履歴を読まず m → w を採る | 単体テストで落とす |
+| I7 | CI に任せる戦略の `init_test_timeout` は、範囲テストの所要 s が分かれば `max(0.10·B, 3·s)`、分からなければ `0.10·B`。ほかの戦略と予算なしの値は s を渡しても変わらない | 単体テストで落とす |
+| I8 | s は、同じ戦略・同じ置き場所の集合の `init_test` 行の直近 10 行の秒の最大 → 置き場所が全体テストの suite の `paths` を覆うときの w → 無し、の順に採る。CI に任せる戦略でなければ履歴を読まない | 単体テストで落とす |
 | I9 | 新規の `init` では、着手前のテストに使った上限と、状態から組み直した `init_test_timeout` が一致する（s は `baseline_test` に残る）。再開で予算を置き換えたときは置き換えた後の予算から組み直す | 単体テストで落とす |
 | I10 | 着手前のテストは成否と打ち切りを問わず `init_test` 行を 1 行足してから次へ進むか止まる | `init` のテストで落とす |
 | I11 | `init_test` 行は配分テーブルにも `ndf_record` にも数えない。`schema` が 2 未満の行と `kind` を持たない行は実行の行として読み、範囲の一致に使わない。読んでも落ちない | 単体テストで落とす |
@@ -135,8 +130,8 @@ init が終了コード 4 で止まった。同じ範囲の実測は 320 秒（6
 
 | 関数 | 契約 |
 | --- | --- |
-| `limits(strategy, budget_minutes, ..., scope_seconds=None, scope_source=None)` | キーワード引数 2 つを足した（既定 `None` で、今の呼び出しはそのまま通る）。`scope_seconds` は戦略を問わず着手前の上限に効く。予算があるときだけ `basis` に `scope_seconds` / `scope_source` を書く（`scope_seconds` が `None` なら両方 `None`）。予算が無いとき（supervise）は表も `basis` の形も変えない。`test_timeout` と `whole_timeout` の代わりの値（x・w が無いとき）は s を入れない着手前の上限のまま |
-| `covers_whole(strategy, locations, kind=TEST)` | `kind` の suite の `paths` の全要素を、置き場所のどれかが同じか祖先として覆えば真（純粋）。置き場所は正規化して比べる。`.` と glob の要素は置き場所 `.` だけが覆う。`kind` の suite が無いか置き場所が無ければ偽。s の決め方には使わない |
+| `limits(strategy, budget_minutes, ..., scope_seconds=None, scope_source=None)` | キーワード引数 2 つを足した（既定 `None` で、今の呼び出しはそのまま通る）。予算があるときだけ `basis` に `scope_seconds` / `scope_source` を書く（`scope_seconds` が `None` なら両方 `None`）。予算が無いとき（supervise）は表も `basis` の形も変えない。`test_timeout` と `whole_timeout` の代わりの値（x・w が無いとき）は s を入れない着手前の上限のまま |
+| `covers_whole(strategy, locations, kind=TEST)` | `kind` の suite の `paths` の全要素を、置き場所のどれかが同じか祖先として覆えば真（純粋）。置き場所は正規化して比べる。`.` と glob の要素は置き場所 `.` だけが覆う。`kind` の suite が無いか置き場所が無ければ偽 |
 
 ### 手順の枠（`refactor_lib/timeline.py`）
 
@@ -146,7 +141,7 @@ init が終了コード 4 で止まった。同じ範囲の実測は 320 秒（6
 | `window_offset(state)` | o（秒）。I2 の式で、状態の `baseline_test.seconds`・`started_at`・`resumed_at` を読み、締め切りをずらした止まっていた時間（`pause.shifted_seconds`。#1944）を足す |
 | `of_state(state)` | `window_offset(state)` を `compute` へ渡す。`test_limits(state)` は `baseline_test.scope_seconds` / `scope_source` を `limits` へ渡す（I9） |
 | `RESUME_GRACE_SECONDS` | 300。人が文を読んで打ち直すまでの見込み |
-| `required_budget_minutes(offset_seconds, after_plan=0, grace_seconds=RESUME_GRACE_SECONDS)` | `ceil(((o + grace_seconds) / 60 + after_plan) / (1 − PROPOSE_SHARE − PLAN_SHARE))`（分）。見込みが 0 なら o = 1300 で 39、1700 で 48。`settle_window` の上げる経路だけ `grace_seconds=0` |
+| `required_budget_minutes(offset_seconds, after_plan=0)` | `ceil(((o + RESUME_GRACE_SECONDS) / 60 + after_plan) / (1 − PROPOSE_SHARE − PLAN_SHARE))`（分）。見込みが 0 なら o = 1300 で 39、1700 で 48 |
 | `window_problem(limits)` | `plan_end_at + after_plan_minutes > final_end_at` なら止める理由の文（`limits` から o を逆算し、下限を `required_budget_minutes` で出す）、収まれば `None`（純粋）。見込みの出し方は [実装の時間と採り直しの確定仕様](cross-refactoring-implementation-window-and-readopt.md) にある |
 
 ### 着手前のテスト（`refactor_lib/baseline.py`・`refactor_lib/init_test.py`）
@@ -155,20 +150,18 @@ init が終了コード 4 で止まった。同じ範囲の実測は 320 秒（6
 | --- | --- |
 | `baseline.locations_of(strategy, scope, work)` | CI に任せる戦略（`round-only` を除く）で着手前に走らせる範囲テストの置き場所を、正規化して並べ替えた集合で返す。ほかの戦略は空。`commands_of` も同じ関数で置き場所を求める |
 | `baseline.run_baseline(...)` | 上限を超えたら止めずに記録を返す（`timed_out: true`・`seconds` は上限の秒。既存失敗の読み取りは行わない）。止めるのは起動の失敗だけ。記録に `locations`（`scope` のときだけ）と `timed_out` を足した |
-| `init_test.resolve_scope_seconds(prep, scope, w, m=None)` | `(s, 出所)`。I8 の順で `history` / `recent` / `whole` / `(None, None)`。CI に任せる戦略でなければ履歴を読まずに m → w を採る |
-| `init_test.recent_whole_seconds(prep)` | 手元の全体テストの直近の実測 m（`whole_runs.recent_whole`）。無ければ `None` |
-| `init_test.extend_for_init_test(budget_minutes, timeout)` | 上限 T が `0.10·B` を超えるときだけ、テストの前にステップの延長へ `B·60 + (T − 0.10·B·60)` 秒を書く（`NDF_STEP_EXTEND_FILE` が無ければ何もしない。#2047 の決定 4） |
+| `init_test.resolve_scope_seconds(prep, scope, w)` | `(s, 出所)`。I8 の順で `history` / `whole` / `(None, None)`。CI に任せる戦略でなければ履歴を読まずに `(None, None)` |
 | `init_test.append_init_test(prep, budget_minutes, pr, baseline)` | `init_test` 行を 1 行追記する。書けなければ知らせて続ける |
-| `init_test.abort_timed_out(strategy, budget_minutes, baseline, timeout)` | `SKIP=init-timeout` と `SKIP_DETAIL` を出し、打ち切りの文で終了コード 4 にする。`scope` の CI に任せる戦略なら、次の実行の上限の見込み（`3·上限` を s とした `limits`）を添える |
-| `init_test.settle_window(state_file, state)` | `window_problem` が `None` なら印を消し、消したときだけ保存する。文を返し、出所（`budget_source`）が `explicit` なら `SKIP=window` と `SKIP_DETAIL` を出し、`window_stopped_at` を書いて保存し、終了コード 4。`default` / `floor` なら `budget_minutes` を `grace_seconds=0` の下限へ上げ、`limits` を組み直して出所を `floor`・`budget_floor` を書いて保存し、`ℹ` の 1 行を出して続ける |
+| `init_test.abort_timed_out(strategy, budget_minutes, baseline, timeout)` | 打ち切りの文で終了コード 4 にする。`scope` の CI に任せる戦略なら、次の実行の上限の見込み（`3·上限` を s とした `limits`）を添える |
+| `init_test.stop_if_window_short(state_file, state)` | `window_problem` が文を返せば `window_stopped_at` を書いて保存し、終了コード 4。`None` なら印を消し、消したときだけ保存する |
 
 `refactor.py init` の順序（`commands/setup.py`）:
 
-1. `_verify_init`: w と c と m を読み、`resolve_scope_seconds` で s を求めて `limits` から上限を出す → `extend_for_init_test` → `run_baseline` →
+1. `_verify_init`: w と c を読み、`resolve_scope_seconds` で s を求めて `limits` から上限を出す → `run_baseline` →
    `baseline_test` に `scope_seconds` / `scope_source` を残す → `append_init_test` → 打ち切りなら `abort_timed_out`
-2. `cmd_init`: 既定を埋める前に出所（`explicit` / `default`）を決め、`_save_initial_state` で状態を保存した後に `settle_window`。止まらなければ出力（`PHASE=`・`BUDGET_SOURCE=` など）へ進む
+2. `cmd_init`: `_save_initial_state` で状態を保存した後に `stop_if_window_short`。止まらなければ出力（`PHASE=` など）へ進む
 3. `_resume`: 計画の前後を問わず先に `pause.resume_after_pause` で止まっていた時間を測る。計画の前（`state.plan` が無い）なら、
-   引数で想定最大時間を渡せば出所を `explicit` にし、印があるときだけ `resumed_at` を今にし、`limits` を `of_state` で組み直して `settle_window`。計画の後は組み直さない（I6）
+   印があるときだけ `resumed_at` を今にし、`limits` を `of_state` で組み直して `stop_if_window_short`。計画の後は組み直さない（I6）
 
 ### 履歴の行（`refactor_lib/allocation.py`）
 
@@ -206,10 +199,9 @@ init が終了コード 4 で止まった。同じ範囲の実測は 320 秒（6
 | --- | --- | --- | --- | --- |
 | `baseline_test` | `locations` | 着手前に走らせた範囲テストの置き場所（`scope` 以外は `null`） | `baseline.run_baseline` | `allocation.init_test_row` |
 | `baseline_test` | `timed_out` | 上限で打ち切ったか | 同上 | `setup._verify_init`・`allocation.init_test_row` |
-| `baseline_test` | `scope_seconds` / `scope_source` | 上限に使った s と出所（`history` / `recent` / `whole`。分からなければ両方 `null`） | `setup._verify_init` | `timeline.test_limits` |
+| `baseline_test` | `scope_seconds` / `scope_source` | 上限に使った s と出所（`history` / `whole`。分からなければ両方 `null`） | `setup._verify_init` | `timeline.test_limits` |
 | `limits.basis` | `scope_seconds` / `scope_source` | 同上の写し | `test_strategy.limits` | `plan.limits_section`（計画のコメントの「入力:」の行） |
-| 状態の根 | `window_stopped_at` | 枠が収まらずに止めた時刻（止めた印） | `init_test.settle_window` | `setup._resume` |
-| 状態の根 | `budget_source` / `budget_floor` | 想定最大時間の出所（`explicit` / `default` / `floor`）と、上げたときの前後の分 | `setup.cmd_init`・`setup._resume`・`init_test.settle_window` | `settle_window`・`_emit_init`・`allocation.build_row`・`report` |
+| 状態の根 | `window_stopped_at` | 枠が収まらずに止めた時刻（止めた印） | `init_test.stop_if_window_short` | `setup._resume` |
 | 状態の根 | `resumed_at` | 止めた後に打ち直した時刻 | `setup._resume` | `timeline.window_offset` |
 
 `limits` を持つ旧い状態ファイルは書き出した値を使い、持たないものは `of_state` が新しい式で組む。`baseline_test.scope_seconds` が
@@ -238,16 +230,12 @@ init が終了コード 4 で止まった。同じ範囲の実測は 320 秒（6
   `baseline_test` から組み直した `init_test_timeout` も 960（`test_the_scope_test_seconds_feed_the_next_init_limit`）
 - 打ち切りでも `seconds: 180.0`・`timed_out: true` の行を足してから終了コード 4 で止まり、次の上限は 540
   （`test_a_timed_out_init_test_is_recorded_before_stopping`）
-- 置き場所が suite の `paths` を覆い履歴に一致が無ければ s = w、w が無ければ無し（`test_the_whole_test_covers_the_scope`）。
-  #2047 の振る舞い（m を w より先に採る・明示で収まらなければ `SKIP=window`・省けば下限へ上げる・打ち切りの `SKIP=init-timeout`・
-  テストの前のステップの延長）は `test_the_init_estimate_order`・`test_the_first_init_limit_reads_the_recent_whole_test`・
-  `test_an_omitted_budget_rises_to_the_lower_bound`・`test_an_explicit_budget_short_of_the_floor_emits_skip`・
-  `test_a_timed_out_init_test_emits_skip`・`test_a_long_init_limit_extends_the_step_before_the_test` が縛る
+- 置き場所が suite の `paths` を覆い履歴に一致が無ければ s = w、w が無ければ無し（`test_the_whole_test_covers_the_scope`）
   （以上 `plugins/ndf/skills/cross-refactoring/tests/test_init.py`）
 - `limits` が CI に任せる戦略・B 30 で s 320 → 960、424 → 1272、無し → 180、30 → 180 を返し、`basis` に s と出所が残る
   （`test_the_ci_strategy_init_limit_does_not_fall_below_the_scope_test`）。s で `test_timeout`・`whole_timeout`・`ci_wait_timeout` は変わらない
   （`test_the_scope_test_does_not_change_the_other_limits`）
-- `local-full` / `round-only` も s を渡せば `max(0.10·B, 3·s)`、渡さなければ `max(0.10·B, 3·w)`（`test_other_strategies_take_the_init_test_estimate`。#2047）。予算なしの表は
+- `local-full` / `round-only` は s を渡しても `max(0.10·B, 3·w)`（`test_other_strategies_ignore_the_scope_test`）。予算なしの表は
   s を渡しても変わらず、`basis` に `scope_seconds` を持たない（`test_supervise_limits_stay_the_same`）
 - `covers_whole` が祖先・正規化・片方だけ・子・`.`・glob・空の置き場所・テストの suite が無いときを区別する
   （`test_covers_whole`・`test_covers_whole_needs_a_test_suite`）（以上 `plugins/ndf/scripts/tests/test_lib_test_strategy.py`）

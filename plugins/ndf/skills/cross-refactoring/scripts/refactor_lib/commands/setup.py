@@ -317,8 +317,6 @@ def _build_initial_state(args: argparse.Namespace, ctx: InitialContext) -> dict[
         "id": args.pr,
         "started_at": ctx.started_at,
         "budget_minutes": args.budget_minutes,
-        # 想定最大時間の出所（#2047）。`explicit` / `default` / `floor`（`init_test.settle_window` が下限まで上げた）
-        "budget_source": getattr(args, "budget_source", None) or "explicit",
         "repo": ctx.repo,
         "current_pr": args.pr,
         "base_branch": ctx.base_branch,
@@ -409,8 +407,6 @@ def cmd_init(args: argparse.Namespace) -> None:
         _emit_run(prep)
         return
 
-    # 想定最大時間の出所（#2047）。既定を埋める前に決める。省いた実行だけ、手順の枠が収まらなければ下限まで上げる
-    args.budget_source = "explicit" if getattr(args, "budget_minutes", None) is not None else "default"
     for key, value in NEW_RUN_DEFAULTS.items():
         if getattr(args, key, None) is None:
             setattr(args, key, value)
@@ -418,8 +414,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     participants, baseline, round_record = _verify_init(args, inputs, prep)
     state = _save_initial_state(args, inputs, prep, participants, baseline, round_record, started_at)
     # **手順の枠と計画の後の見込みが想定最大時間に収まらなければ、提案者を起動せずに止める**（#1385 I4・#1743 I8）。
-    # 想定最大時間を省いた実行は止めずに下限まで上げる（#2047 の I3）。
-    init_test.settle_window(prep.state_file, state)
+    init_test.stop_if_window_short(prep.state_file, state)
     # **出力は入口から直接呼ぶ。** 手順書の変数の出所のチェック（`scripts/check-skill-shell-vars.py`）は 1 階層だけたどる。
     _emit_init(state)
     _emit_run(prep)
@@ -610,16 +605,14 @@ def _verify_init(
     )
     _warn_unmeasurable_models(inputs.model_spec, participants["available"])
 
-    # 着手前のテストの上限は予算と、着手前のテストの所要の見込み s（履歴 → 手元の全体テストの直近の実測 m → 宣言の w）から導く
-    # （決定 8・#1555・#2047 の I1）。
+    # 着手前のテストの上限は予算と宣言の所要から導く（決定 8）。CI に任せる戦略は範囲テストの所要 s も入れる（#1555）。
     w, w_source = ts.whole_seconds(prep.decl)
     c = ts.ci_wall_seconds(prep.decl, (prep.strategy.ci or {}).get("check") if prep.strategy.ci else None)
-    s, s_source = init_test.resolve_scope_seconds(prep, list(args.scope), w, init_test.recent_whole_seconds(prep))
+    s, s_source = init_test.resolve_scope_seconds(prep, list(args.scope), w)
     kw: dict[str, Any] = {"whole_seconds_value": w, "whole_source": w_source, "ci_seconds": c, "scope_seconds": s, "scope_source": s_source}
     timeout = ts.limits(prep.strategy, int(args.budget_minutes), **kw)["init_test_timeout"]
     if s is not None:
-        info(f"   着手前のテストの上限: {timeout} 秒（着手前のテストの所要の見込み {s} 秒 / {s_source}）")
-    init_test.extend_for_init_test(int(args.budget_minutes), timeout)  # 親のステップの締め切りで先に切られない（#2047 の決定 4）
+        info(f"   着手前のテストの上限: {timeout} 秒（範囲テストの所要 {s} 秒 / {s_source}）")
     baseline = baseline_lib.run_baseline(prep.strategy, prep.work, timeout, list(args.scope), prep.tmp_dir)
     baseline.update({"whole_seconds": w, "whole_source": w_source, "ci_seconds": c, "scope_seconds": s, "scope_source": s_source})
     init_test.append_init_test(prep, int(args.budget_minutes), args.pr, baseline)
@@ -760,8 +753,6 @@ def _resume(
     info(f"↻ 前回中断した状態から再開します（手順 {state.get('phase')}）")
     ensure_record(state, getattr(args, "code_metrics", None))
     budget_spec = RESUME_BUDGET_REPLACE if _before_plan(state) else RESUME_BUDGET_NOTIFY
-    if getattr(args, "budget_minutes", None) is not None and _before_plan(state):
-        state["budget_source"] = "explicit"  # 渡した想定最大時間は利用者の上限として守る（#2047 の I2）
     for line in statefile.apply_resume_args(state, args, budget_spec):
         info(line)
     view, given = _notify_view(state, args, inputs.model_spec)
@@ -781,7 +772,7 @@ def _resume(
         if state.get("window_stopped_at"):
             state["resumed_at"] = statefile.now()
         state["limits"] = timeline.of_state(state, forecast.after_plan(state))
-        init_test.settle_window(state_file, state)
+        init_test.stop_if_window_short(state_file, state)
     statefile.save(state_file, state)
     _emit_init(state)
 
@@ -862,7 +853,6 @@ def _emit_init(state: dict[str, Any]) -> None:
         # 再開の地点。駆動は終わった手順を飛ばす（AC24）。
         PHASE=state.get("phase") or "propose",
         BUDGET_MINUTES=state["budget_minutes"],
-        BUDGET_SOURCE=init_test.budget_source(state),  # 想定最大時間の出所（#2047）。駆動は floor ならステップの延長を書く
         WORKTREE_ROOT=state["worktree_root"],
         WORK=state["worktrees"]["work"],
         TMP_DIR=state["tmp_dir"],

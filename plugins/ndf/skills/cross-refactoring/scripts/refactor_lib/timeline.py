@@ -229,12 +229,11 @@ def of_state(state: dict[str, Any], after_plan: Optional[dict[str, Any]] = None)
     )
 
 
-def required_budget_minutes(offset_seconds: float, after_plan: float = 0.0, grace_seconds: float = RESUME_GRACE_SECONDS) -> int:
+def required_budget_minutes(offset_seconds: float, after_plan: float = 0.0) -> int:
     """枠の起点が o のとき、提案と改修計画の枠の後に見込み（R + L）が収まる想定最大時間の下限（分）。
-    人が打ち直すまでの見込み `grace_seconds` を足す（I8）。打ち直さずにその場で上げる経路（`init_test.settle_window`）は 0 を渡す
-    （#2047 の決定 2）。見込みが 0 なら枠だけが収まる下限である。"""
+    人が打ち直すまでの見込みを足す（I8）。見込みが 0 なら枠だけが収まる下限である。"""
     share = round(1.0 - PROPOSE_SHARE - PLAN_SHARE, 9)
-    return math.ceil(round(((float(offset_seconds) + float(grace_seconds)) / 60 + float(after_plan or 0.0)) / share, 9))
+    return math.ceil(round(((float(offset_seconds) + RESUME_GRACE_SECONDS) / 60 + float(after_plan or 0.0)) / share, 9))
 
 
 def window_problem(limits: dict[str, Any]) -> Optional[str]:

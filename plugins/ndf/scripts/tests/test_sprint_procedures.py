@@ -16,9 +16,6 @@ from pathlib import Path
 import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import inproc  # noqa: E402
-
 SUPERVISE = SCRIPTS / "supervise.py"
 SPRINT_STATE = SCRIPTS / "sprint-state.py"
 REPO = SCRIPTS.parents[2]
@@ -73,7 +70,7 @@ def new_sprint(tmp_path: Path, pace: str, design: bool = True) -> dict:
     args += ["--design", "11"] if design else []
     if pace != "normal":
         args += ["--pace", pace, "--state", str(sprint_state(tmp_path, pace))]
-    p = inproc.run(SUPERVISE, *args, "--out", str(out), cwd=repo)
+    p = subprocess.run([PY, str(SUPERVISE), *args, "--out", str(out)], capture_output=True, text=True, cwd=repo)
     assert p.returncode == 0, p.stdout + p.stderr
     return {w["name"]: w for w in load(out / "sprint.json")["ステージ"]}
 
@@ -90,7 +87,7 @@ def test_sprint_waves_does_not_rebuild_the_shared_procedures():
 def new_single(tmp_path: Path, kind: str, *extra: str) -> dict:
     repo = tmp_path / "repo" if (tmp_path / "repo").is_dir() else make_repo(tmp_path)
     out = tmp_path / f"{kind}-{len(list(tmp_path.glob('*.json')))}.json"
-    p = inproc.run(SUPERVISE, "new", kind, *extra, "--out", str(out), cwd=repo)
+    p = subprocess.run([PY, str(SUPERVISE), "new", kind, *extra, "--out", str(out)], capture_output=True, text=True, cwd=repo)
     assert p.returncode == 0, p.stdout + p.stderr
     return load(out)
 

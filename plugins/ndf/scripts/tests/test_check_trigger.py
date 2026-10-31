@@ -16,9 +16,6 @@ from pathlib import Path
 import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import inproc  # noqa: E402
-
 SCRIPT = SCRIPTS / "check-trigger.py"
 sys.path.insert(0, str(SCRIPTS / "lib"))
 from step_result import validate_result  # noqa: E402
@@ -135,7 +132,7 @@ def merge_pr(root: Path, n: int, branch: str, files: dict[str, int]) -> str:
 
 
 def call(root: Path, env: dict, *args: str) -> tuple[int, dict | None, str]:
-    p = inproc.run(SCRIPT, *args, "--root", str(root), env=env, cwd=root)
+    p = subprocess.run([sys.executable, str(SCRIPT), *args, "--root", str(root)], capture_output=True, text=True, env=env, cwd=root)
     lines = p.stdout.strip().splitlines()
     out = json.loads(lines[-1]) if lines and lines[-1].startswith("{") else None
     if out is not None:
@@ -440,16 +437,6 @@ def test_findings_have_no_unconfirmed_when_the_refactor_step_did_not_return_it(t
     st = state_dir(tmp_path, [{"id": "refactor", "exit": 0, "counts": {"adopted": 2, "reverted": 1}}])
     findings, _ = _check_trigger_module().findings_of(st)
     assert "unconfirmed" not in findings
-
-
-def test_findings_copy_a_skipped_refactor_without_failing_it(tmp_path):
-    """#2047 の I8: 飛ばした refactor（6 と gaps）は理由を写し、落ちたステップに数えない。後の review が落ちればそれを返す。"""
-    skipped = {"kind": "window", "reason": "要る下限 61 分 > 想定最大時間 30 分"}
-    ref = {"id": "refactor", "exit": 6, "gaps": [{"kind": "refactor"}], "counts": {"skipped": skipped, "exit": 4}}
-    findings, failed = _check_trigger_module().findings_of(state_dir(tmp_path, [ref, {"id": "review", "exit": 0}]))
-    assert (findings["refactor_skipped"], failed) == (skipped, "")
-    findings, failed = _check_trigger_module().findings_of(state_dir(tmp_path, [ref, {"id": "review", "exit": 1}]))
-    assert (findings["refactor_skipped"], failed) == (skipped, "review")
 
 
 def test_review_fires_on_one_pr_without_the_other_triggers(repo, env):

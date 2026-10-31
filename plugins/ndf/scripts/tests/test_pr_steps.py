@@ -17,9 +17,6 @@ from pathlib import Path
 import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import inproc  # noqa: E402
-
 PY = sys.executable
 
 FAKE_GH = """#!{py}
@@ -126,7 +123,7 @@ def repo(tmp_path):
 
 
 def call(args, env, cwd):
-    p = inproc.run(SCRIPTS / "pr-steps.py", *args, env=env, cwd=cwd)
+    p = subprocess.run([PY, str(SCRIPTS / "pr-steps.py"), *args], capture_output=True, text=True, env=env, cwd=cwd)
     lines = p.stdout.strip().splitlines()
     out = json.loads(lines[-1]) if lines else None
     return p.returncode, out, p.stderr

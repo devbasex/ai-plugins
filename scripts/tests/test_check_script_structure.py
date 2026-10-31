@@ -227,6 +227,12 @@ def run_repo(repo: Path) -> tuple[int, dict]:
     return p.returncode, json.loads(p.stdout.strip().splitlines()[-1])
 
 
+def test_repository_matches_its_allow_list():
+    """実物の木は例外リストと合う。直した移行ステップは、同じ PR で例外リストの行を消す。"""
+    p = subprocess.run([sys.executable, str(CHECK)], capture_output=True, text=True, cwd=REPO)
+    assert p.returncode == 0, p.stdout[-2000:] + p.stderr[-2000:]
+
+
 def test_structure_baseline_runs_on_a_given_root(tmp_path: Path):
     put(tmp_path, "scripts/a.py", "def f():\n    return 1\n")
     put(tmp_path, "scripts/b.py", "def f():\n    return 1\n")

@@ -181,30 +181,7 @@ class RunStep:
             return ""
         return str(test.get("no_reports") or "") if isinstance(test, dict) else ""
 
-    @staticmethod
-    def extension(ctx, step: dict, path: Path, timeout) -> int | None:
-        """延長のファイルの秒から、この呼び出しの開始からの締め切り（`with_margin`）を返す。今の `timeout` 以下なら None。
-        延ばしたら `cur.extended_timeout` と進捗ログの 1 行に残す（#2047 の決定 4）。"""
-        import drive_pause
-        from supervise_lib.verify_steps import with_margin
-
-        got = drive_pause.read_extension(path)
-        if got is None:
-            return None
-        longer = with_margin(int(got[0]))
-        if longer <= int(timeout):
-            return None
-        cur = ctx.state.cur
-        if isinstance(cur, dict) and int((cur.get("extended_timeout") or {}).get("timeout") or 0) < longer:
-            cur["extended_timeout"] = {"seconds": int(got[0]), "timeout": longer, "planned": int(timeout), "reason": got[1]}
-            write = getattr(ctx.state, "progress_write", None)
-            if write:
-                write({"kind": "extend", "step": step.get("id"), "timeout": longer, "planned": int(timeout), "reason": got[1]})
-        return longer
-
-    def run_cmd(self, ctx, step: dict, extend_file: Path | None = None) -> tuple[int, str]:
-        """コマンドを締め切りまで待つ。`extend_file` を渡すと（drive のステップ）、子へ `NDF_STEP_EXTEND_FILE` で置き場を渡し、
-        子が書いた見込みの秒で締め切りを後ろへずらす（#2047 の決定 4）。"""
+    def run_cmd(self, ctx, step: dict) -> tuple[int, str]:
         cmd = step.get("cmd") or paths.PRESETS.get(step.get("preset", ""), "")
         if not cmd:
             return 2, f"ステップ {step['id']} に cmd も知っている preset も無い"
@@ -228,12 +205,6 @@ class RunStep:
         env["PYTEST_ADDOPTS"] = " ".join(a for a in addopts if a)
         # 子が起動する CLI の使用量の帳簿の行にプランとステップを付ける（#1953 の決定 7・決定 11）
         env.update(NDF_USAGE_PLAN=getattr(ctx, "plan_path", None) or "", NDF_USAGE_STEP=str(step.get("id") or ""))
-        extend = None
-        if extend_file is not None:
-            import drive_pause
-
-            env[drive_pause.EXTEND_ENV] = str(extend_file)
-            extend = lambda started: (t := self.extension(ctx, step, Path(extend_file), timeout)) and started + t  # noqa: E731
         ctx.state.run_log = ctx.state.dir / "run-stderr.log"
         try:
             p = run_ticking(
@@ -245,7 +216,6 @@ class RunStep:
                 timeout=timeout,
                 env=env,
                 err_path=ctx.state.run_log,
-                extend=extend,
             )
             return p.returncode, p.stdout + p.stderr
         except subprocess.TimeoutExpired as e:

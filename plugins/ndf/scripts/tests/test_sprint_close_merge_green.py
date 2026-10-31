@@ -18,9 +18,6 @@ from pathlib import Path
 import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import inproc  # noqa: E402
-
 sys.path.insert(0, str(SCRIPTS / "lib"))
 import approved_commit  # noqa: E402
 from step_result import validate_result  # noqa: E402
@@ -180,7 +177,7 @@ def gh(tmp_path):
 
 
 def call(script, args, env, cwd):
-    p = inproc.run(SCRIPTS / script, *args, env=env, cwd=cwd)
+    p = subprocess.run([PY, str(SCRIPTS / script), *args], capture_output=True, text=True, env=env, cwd=cwd)
     lines = p.stdout.strip().splitlines()
     out = json.loads(lines[-1]) if lines else None
     if out is not None:

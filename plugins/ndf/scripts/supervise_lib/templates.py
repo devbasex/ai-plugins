@@ -254,9 +254,6 @@ def _inspect_steps(a, pr_ref: str, scope: str) -> list[dict]:
             "timeout": with_margin((budget or default_refactor_budget_minutes()) * 60),
             "cmd": f"ndf_scope={scope} || exit 2; python3 {DRIVES['cross-refactoring']} {pr_ref} --workflow-step --scope $ndf_scope"
             f"{budget_arg}{refactor_template_arg(a)}",
-            # 時間の枠に収まらずリファクタリングを飛ばした終わり（終了コード 6 と gaps）はコードレビューへ進む（#2047 の I6）。
-            # 想定最大時間を省いて下限まで上げたときの締め切りは、駆動が書くステップの延長で実行の時点に延ばす
-            "on_exit": {"6": "review"},
             "on_fail": "abort",
             "next": "review",
         },

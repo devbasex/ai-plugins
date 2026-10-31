@@ -18,8 +18,6 @@ from pathlib import Path
 import pytest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "instructions-check.py"
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import inproc  # noqa: E402
 
 
 # --- 一時リポジトリの組み立て ------------------------------------------------
@@ -62,8 +60,12 @@ def declare(root: Path, decl: dict) -> None:
 
 
 def run(root: Path, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
-    """分岐はプロセスの中で main を呼ぶ（起動の配線は `test_entry_point_runs_from_a_copy_without_lib_on_sys_path` などの起動のテスト）。"""
-    return inproc.run(SCRIPT, "--root", str(root), *args, cwd=cwd)
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), "--root", str(root), *args],
+        capture_output=True,
+        text=True,
+        cwd=str(cwd) if cwd else None,
+    )
 
 
 def errors(proc: subprocess.CompletedProcess) -> list[str]:

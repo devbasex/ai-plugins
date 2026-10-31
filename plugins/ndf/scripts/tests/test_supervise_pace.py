@@ -25,7 +25,6 @@ from supervise_lib import engine, flow, paths, queue  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pace_state import sprint_state  # noqa: E402
-from sprint_args import new_sprint_args  # noqa: E402
 
 
 # new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える
@@ -58,7 +57,26 @@ def assert_transitions_exist(plan: dict) -> None:
 def new_fast_sprint(tmp_path, state, *extra):
     out = tmp_path / "m"
     p = cli(
-        *new_sprint_args(tmp_path, out, "--pace", "fast", "--state", str(state), *extra, name="m26", issue=("11", "12"), design=("11",))
+        "new",
+        "sprint",
+        "--name",
+        "m26",
+        "--worktree",
+        str(tmp_path),
+        "--issue",
+        "11",
+        "12",
+        "--design",
+        "11",
+        "--version",
+        "10.18.0-dev.1",
+        "--pace",
+        "fast",
+        "--state",
+        str(state),
+        "--out",
+        str(out),
+        *extra,
     )
     return p, out
 
@@ -149,7 +167,25 @@ def test_fast_sprint_is_refused_without_the_declaration(tmp_path):
     (repo / ".ndf" / "worktree.json").write_text('{"version": 1, "base_branch": "develop", "production_branch": "main"}')
     (repo / ".ndf" / "supervise.json").write_text((REPO / ".ndf" / "supervise.json").read_text())
     out = tmp_path / "m"
-    p = cli(*new_sprint_args(repo, out, "--pace", "fast", "--state", str(sprint_state(tmp_path, "fast")), version="1.0.0-dev.1"), cwd=repo)
+    p = cli(
+        "new",
+        "sprint",
+        "--name",
+        "m",
+        "--worktree",
+        str(repo),
+        "--issue",
+        "1",
+        "--version",
+        "1.0.0-dev.1",
+        "--pace",
+        "fast",
+        "--state",
+        str(sprint_state(tmp_path, "fast")),
+        "--out",
+        str(out),
+        cwd=repo,
+    )
     assert p.returncode == 1 and "pace.json" in json.loads(p.stdout)["summary"]
 
 
@@ -470,7 +506,7 @@ def test_queue_pr_placeholder_reads_a_sibling_plan_when_queued_alone(tmp_path):
 @pytest.mark.parametrize("alone", [True, False])
 def test_normal_sprint_release_fills_the_check_pr_alone_or_after_check(tmp_path, monkeypatch, alone):
     out = tmp_path / "m"
-    p = cli(*new_sprint_args(tmp_path, out))
+    p = cli("new", "sprint", "--name", "m", "--worktree", str(tmp_path), "--issue", "1", "--version", "10.18.0-dev.1", "--out", str(out))
     assert p.returncode == 0, p.stderr
     waves = {w["name"]: w for w in load(out / "sprint.json")["ステージ"]}
     check, release = waves["検査"]["plans"][0], waves["配布"]["plans"][0]

@@ -59,11 +59,6 @@ def _read_dist_block(block):
     return out
 
 
-def _heading_sections(text, lines):
-    """本文の節のうち、見出しの行が `#` で始まるもの（ブロックの切り出しと配布の記録の読み取りが共有する）。"""
-    return [s for s in md.md_sections(text) if lines[s.heading.line].startswith("#")]
-
-
 def _verify_blocks(lines, sections):
     """リリース後テストのブロックを切り出す。各ブロックは {"start": 開始行, "ver": 対象の版, "lines": 行の並び}。"""
     blocks = []
@@ -85,20 +80,6 @@ def _verify_blocks(lines, sections):
 
 
 _EXPLICIT_VERSION = re.compile(r"v?\d+\.\d+\.\d+")
-_BASE_VERSION = re.compile(r"v?(\d+\.\d+\.\d+)")
-
-
-def verify_block_for_base(text, version):
-    """本文（text）のリリース後テストのブロックのうち、`対象の版:` の基底が version の基底と一致する最後のブロックの
-    本文。無ければ None。parse_record の完全な版の一致とは別の規則で、受け入れ条件の版ごとの判定が使う。"""
-    want = _BASE_VERSION.match(str(version))
-    lines = text.splitlines()
-    blocks = [
-        b
-        for b in _verify_blocks(lines, _heading_sections(text, lines))
-        if want and (m := _BASE_VERSION.match(b["ver"] or "")) and m.group(1) == want.group(1)
-    ]
-    return "\n".join(blocks[-1]["lines"]) if blocks else None
 
 
 def _is_explicit_version(ver):
@@ -149,7 +130,7 @@ def parse_record(text, parts=None):
     dist_comment_id は最後の配布の記録のコメントの識別子（_dist_comment_id。記録が無ければ None）。
     """
     lines = text.splitlines()
-    sections = _heading_sections(text, lines)
+    sections = [s for s in md.md_sections(text) if lines[s.heading.line].startswith("#")]
     dists = [s for s in sections if lines[s.heading.line].startswith(DIST)]
     dist_start = dists[-1].heading.line if dists else None
     out = {"found": dist_start is not None, "stage": None, "version": None, "sprint_prs": [], "verify_block": None, "dist_comment_id": None}

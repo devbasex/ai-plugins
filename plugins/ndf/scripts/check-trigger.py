@@ -495,16 +495,9 @@ def findings_of(state: Path) -> tuple[dict, str]:
         **({"unconfirmed": ref["unconfirmed"]} if "unconfirmed" in ref else {}),  # 最終ゲートを経ていない実行だけ（#1652）
         # drive が返したキーだけを写す（古い drive の `findings` はコメントの数で、stats が読むときに読み替える）
         **{k: rev[k] for k in REVIEW_COUNTS if k in rev},
-        # 時間の枠に収まらずリファクタリングを飛ばした（#2047 の I8）。種類と理由だけを写す
-        **(
-            {"refactor_skipped": {"kind": sk.get("kind"), "reason": sk.get("reason")}} if isinstance(sk := ref.get("skipped"), dict) else {}
-        ),
     }
-    # 欠けを残して後続へ進んだステップ（終了コード 6 と gaps）は落ちたステップに数えない
     failed = [
-        e.get("id")
-        for e in log
-        if e.get("exit") not in (0, None) and not e.get("gate") and not e.get("gaps") and not str(e.get("id", "")).startswith("abort")
+        e.get("id") for e in log if e.get("exit") not in (0, None) and not e.get("gate") and not str(e.get("id", "")).startswith("abort")
     ]
     return findings, (failed[-1] if failed else "")
 

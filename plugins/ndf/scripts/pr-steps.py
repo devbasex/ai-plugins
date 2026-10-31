@@ -39,9 +39,8 @@ from step_result import (
     result,
     run,
 )
-from closing import closing_issues, closing_words  # noqa: E402
+from closing import closing_issues, closing_words, defer_for_base  # noqa: E402
 import repo  # noqa: E402
-from repo import defer_for_base  # noqa: E402
 import tool_paths  # noqa: E402
 from design_diff import DESIGN_DIFF_HEADING  # noqa: E402
 from pr_mode import needs_review, pr_target, split_stages, with_mode_line  # noqa: E402

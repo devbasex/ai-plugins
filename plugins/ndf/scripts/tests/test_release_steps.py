@@ -14,9 +14,6 @@ from pathlib import Path
 import pytest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "release-steps.py"
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import inproc  # noqa: E402
-
 PY = sys.executable
 
 
@@ -500,7 +497,7 @@ def test_notes_and_changelog_stop_when_no_pr_is_merged(repo, tmp_path):
     before = [f.read_bytes() for f in files]
     base = ["--root", str(repo), "--version", "1.2.3-dev.1", "--prs", "13"]
     for args in (["notes", *base], ["notes", *base, "--approval", "issues/approval.md"], ["changelog", *base]):
-        p = inproc.run(SCRIPT, *args, env=env)
+        p = subprocess.run([PY, str(SCRIPT), *args], capture_output=True, text=True, env=env)
         assert p.returncode == 3, args
         assert [f.read_bytes() for f in files] == before, args
 
@@ -770,7 +767,7 @@ def m744_repo(root: Path) -> tuple[Path, str]:
 
 
 def others_run(root: Path, env: dict, *args: str) -> tuple[int, dict]:
-    p = inproc.run(SCRIPT, "changed-plugins", "--root", str(root), *args, env=env)
+    p = subprocess.run([PY, str(SCRIPT), "changed-plugins", "--root", str(root), *args], capture_output=True, text=True, env=env)
     return p.returncode, json.loads(p.stdout.strip().splitlines()[-1])
 
 

@@ -16,9 +16,6 @@ import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 SUPERVISE = SCRIPTS / "supervise.py"
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import inproc  # noqa: E402
-
 PY = sys.executable
 
 sys.path.insert(0, str(SCRIPTS / "lib"))
@@ -32,7 +29,6 @@ import gh_call  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from account_fake import FakeAnthropic, accounts, window  # noqa: E402,F401
-from sprint_args import new_sprint_args  # noqa: E402
 
 FAKE_GH = """#!{py}
 import json, sys
@@ -340,69 +336,6 @@ def test_an_unconverged_review_stops_the_plan(tmp_path, monkeypatch, final, ran)
     assert [e["id"] for e in s.state.log] == ran, text
 
 
-def _skipping_drive(tmp_path, monkeypatch):
-    drive = tmp_path / "skip-drive.py"
-    drive.write_text(
-        f"import json, sys\nsys.path.insert(0, {str(SCRIPTS / 'lib')!r})\nimport drive_pause as dp\n"
-        "gap = {'kind': 'refactor', 'name': 'window', 'reason': '時間の枠に収まらず飛ばした: 要る下限 61 分 > 想定最大時間 30 分'}\n"
-        "out = dp.incomplete('d', 's', {'skipped': {'kind': 'window', 'reason': 'r'}, 'exit': 4}, gap)\n"
-        "print(json.dumps(out)); sys.exit(dp.exit_code(out))\n"
-    )
-    monkeypatch.setitem(paths.DRIVES, "skip", drive)
-    return [
-        {"id": "refactor", "type": "drive", "drive": "skip", "on_exit": {"6": "review"}, "on_fail": "abort", "next": "review"},
-        {"id": "review", "type": "run", "cmd": "true", "next": "end"},
-        {"id": "abort", "type": "run", "cmd": "true", "next": "end"},
-    ]
-
-
-def test_a_skipped_refactor_goes_on_to_the_review(tmp_path, monkeypatch):
-    """#2047 の I6・決定 5: 時間の枠の不足で飛ばした refactor（6 と gaps）は review へ進み、報告に欠けの理由が出る。"""
-    steps = _skipping_drive(tmp_path, monkeypatch)
-    s, text = run_plan(tmp_path, steps)
-    assert [e["id"] for e in s.state.log] == ["refactor", "review"], text
-    assert s.state.log[0]["exit"] == 6 and s.state.log[0]["gaps"][0]["name"] == "window"
-    assert "- 欠けを残して進んだステップ: refactor（window: 時間の枠に収まらず飛ばした: 要る下限 61 分 > 想定最大時間 30 分）" in text
-    # on_exit を持たない旧いプランは今どおり abort へ行く（移行性）
-    del steps[0]["on_exit"]
-    s, text = run_plan(tmp_path, steps)
-    assert [e["id"] for e in s.state.log] == ["refactor", "abort"], text
-
-
-def _extending_drive(tmp_path, monkeypatch, seconds):
-    """延長のファイルへ `seconds` を書いてから 2 秒眠る駆動。"""
-    drive = tmp_path / "slow-drive.py"
-    drive.write_text(
-        f"import json, os, sys, time\nsys.path.insert(0, {str(SCRIPTS / 'lib')!r})\nimport drive_pause as dp\n"
-        f"dp.write_extension({seconds}, '想定最大時間を下限の 40 分へ上げた')\ntime.sleep(2)\n"
-        "out = dp.done('d', 's', 'r.md', {})\nprint(json.dumps(out)); sys.exit(dp.exit_code(out))\n"
-    )
-    monkeypatch.setitem(paths.DRIVES, "slow", drive)
-    return [{"id": "refactor", "type": "drive", "drive": "slow", "timeout": 1, "on_fail": "end", "next": "end"}]
-
-
-def test_the_drive_extends_the_step_deadline(tmp_path, monkeypatch):
-    """#2047 の決定 4・I7: 子が書いた秒に余裕を足した締め切りまで待ち、延ばしたことを試行と進捗ログに残す。"""
-    s, text = run_plan(tmp_path, _extending_drive(tmp_path, monkeypatch, 1))
-    assert s.state.log[0]["exit"] == 0, text
-    assert s.state.log[0]["extended_timeout"] == {"seconds": 1, "timeout": 31, "planned": 1, "reason": "想定最大時間を下限の 40 分へ上げた"}
-    rows = [json.loads(line) for line in (s.state.dir / "progress.jsonl").read_text().splitlines()]
-    assert any(r["kind"] == "extend" and r["timeout"] == 31 for r in rows)
-
-
-def test_a_drive_without_the_extension_is_cut_at_the_plan_timeout(tmp_path, monkeypatch):
-    steps = _extending_drive(tmp_path, monkeypatch, 0)
-    s, _ = run_plan(tmp_path, steps)
-    assert s.state.log[0]["exit"] == 1 and "extended_timeout" not in s.state.log[0]
-
-
-def test_run_ticking_moves_the_deadline_only_later():
-    """I7: extend の時刻が締め切りより前なら使わない。後ろなら延ばす。"""
-    assert claude.run_ticking("sleep 1.5", shell=True, timeout=0.5, every=0.1, extend=lambda started: started + 5).returncode == 0
-    with pytest.raises(subprocess.TimeoutExpired):
-        claude.run_ticking("sleep 3", shell=True, timeout=0.5, every=0.1, extend=lambda started: started + 0.1)
-
-
 @pytest.mark.parametrize("drive", ["cross-review", "cross-refactoring"])
 def test_real_drives_take_pr_number_not_url(drive):
     # drive の args の {pr} は番号になる。2 つの駆動は URL を引数の解析で拒む
@@ -523,7 +456,7 @@ REPO = SCRIPTS.parents[2]  # このリポジトリの根（.ndf/ の宣言を持
 
 def cli(*args, cwd=None):
     """既定ではこのリポジトリの根で打つ（作業場所に宣言が無いとき、今のディレクトリの .ndf/ を読む）。"""
-    return inproc.run(SUPERVISE, *args, cwd=cwd or REPO)
+    return subprocess.run([PY, str(SUPERVISE), *args], capture_output=True, text=True, cwd=cwd or REPO)
 
 
 AI_PLUGINS_WORDS = ("plugins/", "playwright-kit", "build-runtime-plugins", "claude,codex,kiro", "develop", "scripts/check-")
@@ -733,7 +666,22 @@ def test_new_check_skips_refactor_for_modes_without_it(tmp_path, mode):
 
 def test_new_sprint_check_for_light_goes_from_pr_to_review(tmp_path):
     out = tmp_path / "m"
-    p = cli(*new_sprint_args(tmp_path, out, "--mode", "light"))
+    p = cli(
+        "new",
+        "sprint",
+        "--name",
+        "m",
+        "--worktree",
+        str(tmp_path),
+        "--issue",
+        "1",
+        "--mode",
+        "light",
+        "--version",
+        "10.18.0-dev.1",
+        "--out",
+        str(out),
+    )
     assert p.returncode == 0, p.stderr
     waves = {w["name"]: w for w in json.loads((out / "sprint.json").read_text())["ステージ"]}
     steps = {s["id"]: s for s in json.loads(Path(waves["検査"]["plans"][0]).read_text())["steps"]}
@@ -946,7 +894,6 @@ REPORT_EMPTY = """## フェーズの報告
 - 理由: 無し
 - 通ったステップ: {empty}
 - 件数: 無し
-- 欠けを残して進んだステップ: 無し
 - LLM の使用量: 入力 0 / cache read 0 / cache write 0 / 出力 0 / $0.000
 - CLI（drive・work の中）: 無し
 - 記録: {dir}
@@ -974,7 +921,6 @@ REPORT_RICH = """## フェーズの報告
 - 理由: 承認を待つ
 - 通ったステップ: impl(exit=0) → judge[続ける] → show(exit=12) → quiet(exit=12) → wait(exit=0) → wait2(exit=None)
 - 件数: impl: passed 3 / skipped 0; judge: 無し
-- 欠けを残して進んだステップ: 無し
 - LLM の使用量: 入力 56 / cache read 200 / cache write 40 / 出力 14 / $1.012
 - CLI（drive・work の中）: 無し
 - 記録: {dir}
@@ -1578,7 +1524,23 @@ def test_new_release_requires_version():
 
 def test_new_sprint_writes_waves_in_order(tmp_path):
     out = tmp_path / "m"
-    p = cli(*new_sprint_args(tmp_path, out, name="v10-18", issue=("11", "12"), design=("11",)))
+    p = cli(
+        "new",
+        "sprint",
+        "--name",
+        "v10-18",
+        "--worktree",
+        str(tmp_path),
+        "--issue",
+        "11",
+        "12",
+        "--design",
+        "11",
+        "--version",
+        "10.18.0-dev.1",
+        "--out",
+        str(out),
+    )
     assert p.returncode == 0, p.stderr
     res = json.loads(p.stdout)
     assert res["status"] == "ok"
@@ -1668,7 +1630,7 @@ def test_new_sprint_writes_waves_in_order(tmp_path):
 
 def test_new_sprint_without_design_skips_gate(tmp_path):
     out = tmp_path / "m"
-    p = cli(*new_sprint_args(tmp_path, out))
+    p = cli("new", "sprint", "--name", "m", "--worktree", str(tmp_path), "--issue", "1", "--version", "10.18.0-dev.1", "--out", str(out))
     assert p.returncode == 0, p.stderr
     names = [w["name"] for w in json.loads((out / "sprint.json").read_text())["ステージ"]]
     assert names == ["スプリントブランチ", "実装", "検査", "配布", "関門 2", "本番"]
@@ -2513,7 +2475,10 @@ def test_new_check_builds_the_refactor_scope_from_the_pr_files(tmp_path):
 
 def test_new_sprint_check_hands_the_declared_tests_and_scope_to_the_same_builder(tmp_path):
     out = tmp_path / "m"
-    p = cli(*new_sprint_args(tmp_path, out, "--tests", "tests/cli", "--scope", "lib/a"))
+    p = cli(
+        "new", "sprint", "--name", "m", "--worktree", str(tmp_path), "--issue", "1", "--version", "10.18.0-dev.1",
+        "--tests", "tests/cli", "--scope", "lib/a", "--out", str(out),
+    )  # fmt: skip
     assert p.returncode == 0, p.stderr
     check = next(out.glob("*-check.json"))
     refactor = next(s for s in json.loads(check.read_text())["steps"] if s["id"] == "refactor")
@@ -2540,7 +2505,7 @@ def test_refactor_step_stops_with_the_scope_exit_code_before_starting_the_drive(
 
 def test_new_sprint_check_and_release_run_without_a_whole_skill(tmp_path):
     out = tmp_path / "m"
-    p = cli(*new_sprint_args(tmp_path, out))
+    p = cli("new", "sprint", "--name", "m", "--worktree", str(tmp_path), "--issue", "1", "--version", "10.18.0-dev.1", "--out", str(out))
     assert p.returncode == 0, p.stderr
     waves = {w["name"]: w for w in json.loads((out / "sprint.json").read_text())["ステージ"]}
     for name in ("検査", "配布"):
@@ -2557,7 +2522,7 @@ def test_new_sprint_check_and_release_run_without_a_whole_skill(tmp_path):
 def test_normal_sprint_puts_gate_2_and_prod_after_the_dev_release(tmp_path):
     """normal の雛形の経路は配布の後に関門 2 と本番を置き、本番は承認の後に単独で流す（#1914）。"""
     out = tmp_path / "m"
-    p = cli(*new_sprint_args(tmp_path, out))
+    p = cli("new", "sprint", "--name", "m", "--worktree", str(tmp_path), "--issue", "1", "--version", "10.18.0-dev.1", "--out", str(out))
     assert p.returncode == 0, p.stderr
     index = json.loads((out / "sprint.json").read_text())["ステージ"]
     assert [w["name"] for w in index][-3:] == ["配布", "関門 2", "本番"]
@@ -2580,7 +2545,7 @@ def test_prod_plan_queued_alone_takes_the_check_pr(tmp_path):
     from supervise_lib import paths, queue
 
     out = tmp_path / "m"
-    p = cli(*new_sprint_args(tmp_path, out))
+    p = cli("new", "sprint", "--name", "m", "--worktree", str(tmp_path), "--issue", "1", "--version", "10.18.0-dev.1", "--out", str(out))
     assert p.returncode == 0, p.stderr
     waves = {w["name"]: w for w in json.loads((out / "sprint.json").read_text())["ステージ"]}
     check, prod = waves["検査"]["plans"][0], waves["本番"]["plans"][0]

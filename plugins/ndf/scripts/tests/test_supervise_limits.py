@@ -120,22 +120,11 @@ def reason_of(text: str) -> str:
 # --- L1・I1: 雛形ごとに、修正のループのそれぞれを 3 回ずつ通しても上限で止まらない ---
 
 
-def _failing_sets(plans: dict[str, dict]) -> dict[frozenset, tuple[str, dict]]:
-    """修正のループの入口の組ごとに、最初のプランを 1 つ（総当たりを代表の組に絞る。修正のループの無いプランは除く）。"""
-    reps: dict[frozenset, tuple[str, dict]] = {}
+def test_every_template_plan_gets_through_each_fix_loop_three_times(plans, tmp_path):
     for name, plan in plans.items():
         fixes, _ = limits.loops(plan)
         failing = {k.split("→")[0] for k in fixes}
-        failing = frozenset(c for c in failing if any(s["id"] == c and s.get("on_fail") for s in plan["steps"]))
-        if failing:
-            reps.setdefault(failing, (name, plan))
-    return reps
-
-
-def test_every_fix_loop_shape_gets_through_each_fix_loop_three_times(plans, tmp_path):
-    reps = _failing_sets(plans)
-    assert len(reps) >= 4, sorted(n for n, _ in reps.values())  # impl・check・release・release-prod の形
-    for failing, (name, plan) in reps.items():
+        failing = {c for c in failing if any(s["id"] == c and s.get("on_fail") for s in plan["steps"])}
         visits: dict[str, int] = {}
 
         def decide(sid, step, failing=failing, visits=visits):

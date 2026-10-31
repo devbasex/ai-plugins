@@ -307,7 +307,6 @@ def build_row(state: dict[str, Any]) -> dict[str, Any]:
         "pr": state.get("pr", state.get("current_pr")),
         "implementer": state.get("implementer"),
         "budget_minutes": state.get("budget_minutes"),
-        "budget_source": state.get("budget_source"),  # 想定最大時間の出所（#2047）。旧い行は持たない（集計には使わない）
         "elapsed_seconds": elapsed,
         "phases": phase_seconds(state),
         "kinds": kinds,
