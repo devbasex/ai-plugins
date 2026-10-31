@@ -330,11 +330,8 @@ def base_version(root, pdir, ref):
         return None
 
 
-def plan_bump(root, pdir, plugin, old, new):
-    """`plugin` の版を `old` から `new` へ上げる箇所を集めた `BumpPlan` を返す（まだ書き換えない）。"""
-    ed = bump.BumpPlan(root, old, new)
-    desc_re = r'^\s*"description"\s*:.*\(v' + re.escape(old) + r"\)"
-
+def _bump_manifests(ed, pdir, old, desc_re):
+    """plugin.json 群の version と description の版を書き換える箇所を `ed` へ足す。"""
     for rel, _ in (
         (".claude-plugin/plugin.json", True),
         (".codex-plugin/plugin.json", False),
@@ -347,6 +344,9 @@ def plan_bump(root, pdir, plugin, old, new):
         if f"(v{old})" in f.read_text(encoding="utf-8"):
             ed.sub(f, desc_re, f"{rel} の description")
 
+
+def _bump_marketplace_and_readme(ed, root, plugin, old, desc_re):
+    """marketplace.json の description と README.md のプラグイン一覧表の版を書き換える箇所を `ed` へ足す。"""
     mp = root / ".claude-plugin" / "marketplace.json"
     if mp.is_file():
         s, e = bump.marketplace_range(ed.lines(mp), plugin)
@@ -361,13 +361,25 @@ def plan_bump(root, pdir, plugin, old, new):
         ed.sub(readme, r"^\| \*\*" + re.escape(plugin) + r"\*\* \|", "README.md のプラグイン一覧表")
     elif plugin in ("ndf", "playwright-kit"):
         ed.manual.append(f"README.md のプラグイン一覧表に {plugin} の行が無い")
-    if plugin == "ndf":
-        ed.sub(readme, r"\*\*NDFプラグイン v", "README.md の概要の版")
-        nr = pdir / "README.md"
-        ed.sub(nr, r"/plugins/cache/ai-plugins/ndf/", "plugins/ndf/README.md の Codex のパス例", count=2)
-        ed.sub(nr, r"ndf@ai-plugins\s+installed", "plugins/ndf/README.md の codex plugin list の出力例")
-        bump.versioning_doc(ed)
 
+
+def _bump_ndf_docs(ed, root, pdir):
+    """ndf だけが持つ版の記載（README 概要・Codex のパス例・list の出力例・版の文書）を `ed` へ足す。"""
+    ed.sub(root / "README.md", r"\*\*NDFプラグイン v", "README.md の概要の版")
+    nr = pdir / "README.md"
+    ed.sub(nr, r"/plugins/cache/ai-plugins/ndf/", "plugins/ndf/README.md の Codex のパス例", count=2)
+    ed.sub(nr, r"ndf@ai-plugins\s+installed", "plugins/ndf/README.md の codex plugin list の出力例")
+    bump.versioning_doc(ed)
+
+
+def plan_bump(root, pdir, plugin, old, new):
+    """`plugin` の版を `old` から `new` へ上げる箇所を集めた `BumpPlan` を返す（まだ書き換えない）。"""
+    ed = bump.BumpPlan(root, old, new)
+    desc_re = r'^\s*"description"\s*:.*\(v' + re.escape(old) + r"\)"
+    _bump_manifests(ed, pdir, old, desc_re)
+    _bump_marketplace_and_readme(ed, root, plugin, old, desc_re)
+    if plugin == "ndf":
+        _bump_ndf_docs(ed, root, pdir)
     return ed
 
 
