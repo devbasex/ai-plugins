@@ -474,12 +474,7 @@ def _apply_outcome(repo, actions, buckets, partial, why_partial, prev, waits, rp
         **buckets,
         "closed": closed,
         "waits": waits,
-        "round": {
-            "applied": sorted(set(prev.get("applied", [])) | set(buckets["applied"])),
-            "closed": sorted(set(prev.get("closed", [])) | set(closed)),
-            "waits": prev.get("waits", []) + waits,
-            "runs": prev.get("runs", 0) + 1,
-        },
+        "round": upkeep_report.next_round(prev, actions, buckets, closed, waits),
         "partial": partial,
         "verdicts": {v: sum(1 for act in actions if act["verdict"] == v) for v in VERDICTS},
         "tables": rp.tables,
@@ -541,6 +536,10 @@ def cmd_apply(a):
     ms = Milestones(gh)
     buckets = {k: [] for k in ("applied", "skipped_changed", "unchanged", "already", "needs_approval", "returned", "failed", "pending")}
     items, partial, why_partial = [], False, ""
+    # 同じ回（前の candidates 以降）の打ち直しを足し合わせ、承認後・partial 後の報告から前の反映・区分・待ちを落とさない。
+    # 書き込む前に読み、前の記録が読めないときは 1 件も書かずに止める
+    prev_out = _read_state(sd / "apply.json")
+    prev = (((prev_out or {}).get("metrics") or {}).get("round") or {"runs": 1}) if prev_out is not None else {}
     rp = RC.RankPlan(plan, sd, _read_state)
     actions = [] if rp.stale else plan["actions"]  # rank.json と合わない plan は何も書かない
     for idx, act in enumerate(actions):
@@ -571,8 +570,6 @@ def cmd_apply(a):
         partial, why_partial = True, str(e)
     rp.update_rejected()
 
-    # 同じ回（前の candidates 以降）の打ち直しを足し合わせ、承認後・partial 後の報告から前の反映と待ちを落とさない
-    prev = ((_read_state(sd / "apply.json") or {}).get("metrics") or {}).get("round") or {}
     status, code, summary, metrics, pres, nxt = _apply_outcome(repo, actions, buckets, partial, why_partial, prev, gh.waits, rp)
     out = result(TOOL, status, summary, items, metrics, presentation_path=pres, next=nxt)
     jsonio.write_atomic(sd / "apply.json", out, indent=1)

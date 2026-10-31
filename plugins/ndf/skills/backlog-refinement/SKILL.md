@@ -360,7 +360,11 @@ python3 "$UPKEEP/upkeep.py" apply --plan plan.json [--max-waits N]
 `apply` がこの待ち方を持つ（`metrics.waits`）。回数の上限は `--max-waits`、1 回の長さの上限は
 `--max-wait` で、超えると `partial` を立てて残りを `pending` に並べる。同じ plan で打ち直すと、
 済んだ課題は記録で飛ぶ。`report` の反映と待ちの件数は、同じ回（前の `candidates` 以降）に打った
-`apply` をすべて足し合わせた値（`metrics.round`）である。
+`apply` をすべて足し合わせた値（`metrics.round`）である。区分の内訳（`verdicts`）・承認待ち（`needs_approval`）・
+返した課題（`returned` は件数、`returned_numbers` は番号）も同じ回の `apply` を足し合わせ、2 回の `apply` に同じ番号が
+出たら後の `apply` の値を採る。本文と順位の表を別の plan で反映しても、前の `apply` の区分は報告から落ちない。
+前の `apply` の記録が読めないときは `apply` が 1 件も書かずに止まり、番号ごとの値を持たない記録（前の版）を
+足し合わせた回では `report` が `gaps` を付けた `stopped` で返す。
 
 ## 他のリポジトリで動くこと
 

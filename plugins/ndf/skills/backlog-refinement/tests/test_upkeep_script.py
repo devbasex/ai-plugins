@@ -504,6 +504,81 @@ def test_report_sums_reruns_within_round(env):
     assert code == 0 and m["applied"] == 2 and m["closed"] == 2 and m["wait_count"] == 1 and m["apply_runs"] == 2
 
 
+def _first_apply(env):
+    """そのまま 1・やらない 1・要判断 1 の apply を打つ。"""
+    s3, s4, s7 = env.snapshot(3), env.snapshot(4), env.snapshot(7)
+    no_work = _action(s7, "やらない", {"state": "closed", "state_reason": "not_planned"})
+    code, out = env.run("apply", "--plan", env.plan([_action(s4, "そのまま", {}), no_work, _action(s3, "要判断", {"body": "x"})]))
+    assert code == 10
+    return no_work, out
+
+
+def test_report_keeps_verdicts_after_a_rank_only_apply(env):
+    _, first = _first_apply(env)
+    code, _ = env.run("apply", "--plan", env.plan([]))  # 順位の表だけの plan
+    assert code == 0
+    code, out = env.run("report")
+    m = out["metrics"]
+    assert code == 0 and m["apply_runs"] == 2
+    assert m["verdicts"] == first["metrics"]["verdicts"]
+    assert m["verdicts"]["そのまま"] == 1 and m["verdicts"]["やらない"] == 1 and m["verdicts"]["要判断"] == 1
+    assert m["needs_approval"] == [7] and m["returned_numbers"] == [3] and m["returned"] == 1
+
+
+def test_report_takes_the_later_result_per_number(env):
+    # 規則: 同じ番号が 2 回の apply に出たら、区分も結果も後の apply の値を採る（番号は重複させない）
+    no_work, _ = _first_apply(env)
+    code, _ = env.run("apply", "--plan", env.plan([no_work]))  # 承認がまだ無いまま打ち直す
+    assert code == 10
+    code, out = env.run("report")
+    m = out["metrics"]
+    assert m["needs_approval"] == [7] and m["returned_numbers"] == [3]
+    assert m["verdicts"]["やらない"] == 1 and m["verdicts"]["そのまま"] == 1
+    code, _ = env.run("apply", "--plan", env.plan([{**no_work, "approved": True}]))
+    assert code == 0
+    code, out = env.run("report")
+    m = out["metrics"]
+    assert code == 0 and m["needs_approval"] == [] and m["returned_numbers"] == [3] and m["verdicts"]["やらない"] == 1
+    assert m["apply_runs"] == 3 and m["closed"] == 1
+
+
+def test_report_single_apply_keeps_the_values_of_that_apply(env):
+    _, first = _first_apply(env)
+    code, out = env.run("report")
+    m, fm = out["metrics"], first["metrics"]
+    assert m["verdicts"] == fm["verdicts"] and m["needs_approval"] == fm["needs_approval"]
+    assert m["returned_numbers"] == fm["returned"] and m["apply_runs"] == 1
+
+
+def test_report_after_new_candidates_does_not_carry_verdicts(env):
+    _first_apply(env)
+    env.snapshot(3)  # 次の回の candidates
+    s4 = env.snapshot(4)
+    env.run("apply", "--plan", env.plan([_action(s4, "そのまま", {})]))
+    code, out = env.run("report")
+    m = out["metrics"]
+    assert code == 0 and m["verdicts"]["やらない"] == 0 and m["verdicts"]["そのまま"] == 1 and m["needs_approval"] == []
+
+
+def test_report_is_not_ok_when_previous_apply_cannot_be_summed(env):
+    _first_apply(env)
+    sd = next((env.path / "state").iterdir())
+    rec = json.loads((sd / "apply.json").read_text())
+    rec["metrics"]["round"] = {k: v for k, v in rec["metrics"]["round"].items() if k not in ("verdict_of", "result_of")}
+    (sd / "apply.json").write_text(json.dumps(rec, ensure_ascii=False))  # 番号ごとの値を持たない前の版の記録
+    env.run("apply", "--plan", env.plan([]))
+    code, out = env.run("report")
+    assert code == 6 and out["status"] == "stopped" and out["gaps"][0]["name"] == "apply.json"
+
+
+def test_apply_stops_before_writing_when_previous_apply_is_unreadable(env):
+    snap = env.snapshot(4)
+    sd = next((env.path / "state").iterdir())
+    (sd / "apply.json").write_text("{")
+    code, _ = env.run("apply", "--plan", env.plan([_action(snap, "閉じてよい", {"state": "closed", "state_reason": "completed"})]))
+    assert code == 2 and not env.writes()
+
+
 def test_report_after_new_candidates_drops_previous_apply(env):
     snap = env.snapshot(4)
     env.run("apply", "--plan", env.plan([_action(snap, "閉じてよい", {"state": "closed", "state_reason": "completed"})]))
