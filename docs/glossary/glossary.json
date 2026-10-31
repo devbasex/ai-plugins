@@ -4411,22 +4411,19 @@
       "term": "依存グループ",
       "context": "ndf-workflow",
       "meaning": "lib/deps.py の GROUPS と pyproject.toml の extra に並ぶ、外部パッケージの用途ごとのまとまり（procs・locks など）。deps.require へ名前で渡す",
-      "source": "",
-      "pending_source": "issues/issue-1455-design.md"
+      "source": "docs/specifications/ndf-deps-require-groups-check.md"
     },
     {
       "term": "未宣言のグループ",
       "context": "ndf-workflow",
       "meaning": "モジュールから import をたどって届く外部パッケージの依存グループのうち、そのモジュールの中で覆う deps.require が無いもの。そのモジュールを読む側が引き受ける",
-      "source": "",
-      "pending_source": "issues/issue-1455-design.md"
+      "source": "docs/specifications/ndf-deps-require-groups-check.md"
     },
     {
       "term": "任意の依存",
       "context": "ndf-workflow",
       "meaning": "無ければ代わりの手段へ落ちる import。except ImportError / ModuleNotFoundError で受けるか、同じ関数の中で find_spec / deps.importable で確かめ、確かめが成り立ったときだけ通る枝で読む",
-      "source": "",
-      "pending_source": "issues/issue-1455-design.md"
+      "source": "docs/specifications/ndf-deps-require-groups-check.md"
     },
     {
       "term": "作業の報告",

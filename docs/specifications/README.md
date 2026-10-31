@@ -102,5 +102,6 @@
 | [ndf-factory-accounts-and-plans.md](ndf-factory-accounts-and-plans.md) | Neural Development Factory: Cognito の認証（Google・GitHub と GitHub の仲立ち）・アカウントの解決・アカウントと席とプランと実行の形態の API と表・使える量の表と判定・factory/ のパッケージの管理と CI（factory-check）。#2170 |
 | [ndf-factory-contracts-and-progress.md](ndf-factory-contracts-and-progress.md) | Neural Development Factory: 契約の定義（JSON Schema・生成した型・ingest.yaml）・進捗の受け口の 3 つの経路と出所ごとの認証と照合・冪等な追記と事象の表・GitHub の Webhook の翻訳・実行ジョブの token（EdDSA）の発行と検証・appendControlEvent。#2171 |
 | [ndf-supervise-work-step-web-tools-and-report-stop.md](ndf-supervise-work-step-web-tools-and-report-stop.md) | supervise の work のステップが WebFetch・WebSearch で外部の文書を読み、読めないときと「判断が要る / できなかった」の報告で起こし直さずに止まること |
+| [ndf-deps-require-groups-check.md](ndf-deps-require-groups-check.md) | 依存の宣言の検査（project-mvv.py propose / vet の deps.require と、構造チェックの require-groups をエントリポイントから関数の中の import までたどること） |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
