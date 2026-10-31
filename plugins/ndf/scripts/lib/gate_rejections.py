@@ -76,6 +76,17 @@ def append(row: dict, path=None) -> Path:
     return target
 
 
+def write_sprint_answer(a, manifest: dict, outcome: str, *, repo: str, at: str) -> str | None:
+    """`sprint-state.py gate` の答え（`a` はその引数）を 1 行書く。範囲は状態ファイル・その課題・`--pr`。
+    書けなければ理由（置き場と OSError）を返す。"""
+    issues, prs = manifest.get("issues") or [], [a.pr] if a.pr else []
+    try:
+        append(make_row(a.name, a.what, repo=repo, at=at, sprint=a.sprint, issues=issues, prs=prs, outcome=outcome))
+    except OSError as e:
+        return f"{ledger_path()}: {e}"
+    return None
+
+
 def read_rejections(path=None) -> list[dict]:
     """記録を読む。無ければ空。読めない・壊れた行があれば `jsonio.JsonReadError`（件数を「不明」にする）。"""
     return jsonio.read_jsonl(Path(path) if path else ledger_path(), missing=[])

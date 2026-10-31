@@ -274,8 +274,7 @@ def gate_locked(a) -> dict:
     entry, repo = {"name": a.name, "what": a.what, "at": at}, None
     if a.by == "user":
         root = Path(a.root or ".").resolve()
-        answer = a.outcome == "rejected" or a.name in pms.GATE_KEYS  # 差し戻しの記録（gate-rejections.jsonl）へ書くか（#2183）
-        repo = gr.ledger_repo(root) if answer else None  # 覆しを書く前に決める（落ちて打ち直すと覆しが重なる）
+        repo = gr.ledger_repo(root) if a.outcome == "rejected" or a.name in pms.GATE_KEYS else None  # 覆しを書く前に決める
         override = pms.record_override(m, a.sprint, a.name, a.outcome, at, root, a.mvv_log, pr=a.pr)
         if a.outcome == "rejected":
             return reject_gate(a, m, repo, override, at)
@@ -294,34 +293,16 @@ def gate_locked(a) -> dict:
     m["gates"] = gates = [g for g in m.get("gates", []) if g.get("name") != a.name] + [entry]
     jsonio.write_atomic(a.sprint, m, indent=1)
     who = "MVV 判定" if a.by == "mvv" else "承認"
-    note = approve_answer(a, m, repo, at) if repo else ""
+    note = f"。差し戻しの記録へ書けない（{err}）" if repo and (err := gr.write_sprint_answer(a, m, gr.APPROVED, repo=repo, at=at)) else ""
     return outcome("ok", f"{a.name} の{who}を書いた（{at}）{note}", gates, {"gates": len(gates)})
-
-
-def answer_row(a, m: dict, repo: str, at: str, result: str) -> dict:
-    """差し戻しの記録（`lib/gate_rejections.py`）の 1 行。範囲はこのスプリントの状態ファイル・課題・`--pr`。"""
-    issues, prs = m.get("issues") or [], [a.pr] if a.pr else []
-    return gr.make_row(a.name, a.what, repo=repo, at=at, sprint=a.sprint, issues=issues, prs=prs, outcome=result)
-
-
-def approve_answer(a, m: dict, repo: str, at: str) -> str:
-    """利用者の承認を差し戻しの記録へ 1 行書く（差し戻しの件数を「未記録」と分けるため。#2183）。書けなくても承認は通す。"""
-    try:
-        gr.append(answer_row(a, m, repo, at, gr.APPROVED))
-        return ""
-    except OSError as e:
-        return f"。差し戻しの記録へ書けない（{gr.ledger_path()}: {e}。差し戻しの件数は未記録と読まれる）"
 
 
 def reject_gate(a, m: dict, repo: str, override: dict | None, at: str) -> dict:
     """利用者の差し戻しを差し戻しの記録（`lib/gate_rejections.py`）へ 1 行書く。関門は通さず、状態ファイルは変えない。"""
     extra = f"。覆しを記録した（{override['kind']}）" if override else ""
-    try:
-        gr.append(answer_row(a, m, repo, at, gr.REJECTED))
-        status, summary = "ok", f"{a.name} の差し戻しを書いた（{at}。関門は通さない）"
-    except OSError as e:
-        status, summary = "stopped", f"{a.name} の差し戻しを記録できない（{gr.ledger_path()}: {e}）"
-    return outcome(status, summary + extra, [override] if override else [], {"gates": len(m.get("gates", []))})
+    err = gr.write_sprint_answer(a, m, gr.REJECTED, repo=repo, at=at)
+    summary = f"{a.name} の差し戻しを記録できない（{err}）" if err else f"{a.name} の差し戻しを書いた（{at}。関門は通さない）"
+    return outcome("stopped" if err else "ok", summary + extra, [override] if override else [], {"gates": len(m.get("gates", []))})
 
 
 def mvv_sha(m: dict) -> str | None:

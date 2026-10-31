@@ -239,11 +239,8 @@ def gate2_answer(lap: dict, since: str | None = None) -> str | None:
     except jsonio.JsonReadError:
         rows = []
     sp = str(Path(lap.get("state_path") or "").resolve()) if lap.get("state_path") else None
-    answers += [
-        (k, "rejected")
-        for r in rows
-        if gr.is_rejection(r) and r.get("gate") == GATE_2 and r.get("sprint") == sp and (k := fresh(r.get("at")))
-    ]
+    rows = [r for r in rows if gr.is_rejection(r)]  # 承認の行（#2183）は状態ファイルの gates の方で読む
+    answers += [(k, "rejected") for r in rows if r.get("gate") == GATE_2 and r.get("sprint") == sp and (k := fresh(r.get("at")))]
     return max(answers, key=lambda a: a[0])[1] if answers else None
 
 
