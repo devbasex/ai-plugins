@@ -325,6 +325,15 @@ def test_an_unconverged_review_stops_the_plan(tmp_path, monkeypatch, final, ran)
     steps[0]["on_exit"] = {"6": "after"}
     s, text = run_plan(tmp_path, steps)
     assert [e["id"] for e in s.state.log] == ["review", "after"], text
+    # 検査のプランの review（templates の雛形そのもの）も、収束しなければ後続の base-sync へ進まない
+    from types import SimpleNamespace
+
+    from supervise_lib.templates import _inspect_steps
+
+    review = next(s for s in _inspect_steps(SimpleNamespace(), "1", "x") if s["id"] == "review")
+    review = {**review, "drive": "fake", "args": "", "next": "after"}
+    s, text = run_plan(tmp_path, [review, *steps[1:]])
+    assert [e["id"] for e in s.state.log] == ran, text
 
 
 @pytest.mark.parametrize("drive", ["cross-review", "cross-refactoring"])
