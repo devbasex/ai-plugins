@@ -74,7 +74,7 @@ carmo-system-console の会話の記録（2026-09-27 に集計）で、次の手
 | `plugins/ndf/scripts/lib/loop_drive.py` の `rerun_reason`・`keep_finished`・`keep_finished_output`・`result_args`・`args_diff`・`pr_head` | 完了した実行の回の結果を返してよいかの判定（cross-review と cross-refactoring の駆動の共有の部品。結果を変える引数の比較は #1263） |
 | `cross-review/scripts/drive.py` の `Drive.finished`・`Drive.pr_head` | 耐久の記録の完了を返すかを `keep_finished_output` で決める。終わりの出力に PR の head と結果を変える引数を残す |
 | `plugins/ndf/scripts/hook_lib/deadline.py` | `DEADLINE_SECONDS`・`MARGIN_SECONDS`・`Deadline`・`HookDeadlineExceeded` |
-| `plugins/ndf/scripts/hook.py` の `_guards` | worktree の guard・token の guard・問い合わせの guard（#2206）を締め切りの中で打つ |
+| `plugins/ndf/scripts/hook.py` の `_guards` | worktree の guard・token の guard・問い合わせの guardを締め切りの中で打つ |
 
 ```mermaid
 classDiagram
@@ -196,7 +196,7 @@ cross-refactoring の駆動も同じ `keep_finished_output` を通る（#1263。
 
 `hook.py` の `dispatch` は事象を問わず `_guards` を通し、`_guards` が `Deadline` を掛けてから guard を打つ。guard を打つのは
 Tool の事象（`tool_kind` がある）と userPromptSubmit だけで、待ちの Slack 通知（`wait_notify`）は締め切りを外した後に打つ。
-問い合わせの guard（`hook_lib/ask_guard.py`。Claude Code の PreToolUse の `AskUserQuestion`）も締め切りの中で打ち、`deny` を返したときは待ちの通知を打たない（#2206）。
+問い合わせの guard（`hook_lib/ask_guard.py`。Claude Code の PreToolUse の `AskUserQuestion`）も締め切りの中で打ち、`deny` を返したときは待ちの通知を打たない。
 副命令 `wait-notify` と `goal-skill`（Claude Code の `UserPromptSubmit` の `/goal` の条件の Skill の案内）は `_guards` を通さず、締め切りを掛けない。
 
 | 項目 | 振る舞い |
