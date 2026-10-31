@@ -40,6 +40,7 @@ import jsonio  # noqa: E402
 import proc  # noqa: E402
 from comment_mask import mask_comments  # noqa: E402
 import glossary_merge  # noqa: E402
+import ndf_tracking  # noqa: E402
 
 TOOL = "glossary"
 DECLARATION = ".ndf/glossary.json"
@@ -580,11 +581,11 @@ def cmd_init(a):
         except OSError as e:
             raise unreadable(f"{rel} を書けない: {e}")
         items.append({"name": rel, "result": "created"})
-    emit(
-        result(
-            TOOL, "ok", f"{len(items)} 個のファイルを作った" if items else "宣言・用語集・文書は揃っている", items, {"created": len(items)}
-        )
-    )
+    notes = ndf_tracking.ignored_notes(root, [DECLARATION, source, document])  # 共有が前提の宣言。除外の対象なら出す（#2157）
+    for n in notes:
+        print(f"案内: {n['text']}")
+    summary = (f"{len(items)} 個のファイルを作った" if items else "宣言・用語集・文書は揃っている") + ndf_tracking.summary_note(notes)
+    emit(result(TOOL, "ok", summary, [*items, *notes], {"created": len(items)}))
 
 
 def _md_candidates(rel, text, sections, add):
