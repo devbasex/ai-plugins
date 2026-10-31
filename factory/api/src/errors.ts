@@ -6,13 +6,14 @@ export class ApiError extends Error {
     readonly status: ErrorStatus,
     readonly code: string,
     message: string,
+    readonly details?: Record<string, unknown>,
   ) {
     super(message);
     this.name = new.target.name;
   }
 
-  body(): { error: { code: string; message: string } } {
-    return { error: { code: this.code, message: this.message } };
+  body(): { error: { code: string; message: string; details?: Record<string, unknown> } } {
+    return { error: { code: this.code, message: this.message, ...(this.details ? { details: this.details } : {}) } };
   }
 }
 
@@ -30,14 +31,14 @@ export class ForbiddenError extends ApiError {
 }
 
 export class InvalidRequestError extends ApiError {
-  constructor(message = "要求の形が正しくありません") {
-    super(400, "invalid_request", message);
+  constructor(message = "要求の形が正しくありません", code = "invalid_request", details?: Record<string, unknown>) {
+    super(400, code, message, details);
   }
 }
 
 export class ConflictError extends ApiError {
-  constructor(code: string, message: string) {
-    super(409, code, message);
+  constructor(code: string, message: string, details?: Record<string, unknown>) {
+    super(409, code, message, details);
   }
 }
 
@@ -50,6 +51,12 @@ export class NotFoundError extends ApiError {
 export class UnprocessableError extends ApiError {
   constructor(code: string, message: string) {
     super(422, code, message);
+  }
+}
+
+export class ServiceUnavailableError extends ApiError {
+  constructor(code: string) {
+    super(503, code, "時間をおいてやり直してください");
   }
 }
 

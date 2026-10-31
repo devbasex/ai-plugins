@@ -1,6 +1,7 @@
 // 実行ジョブの token（決定 5）。EdDSA（Ed25519）の JWT で、確かめる側は公開鍵の集合だけを読む。
 // account_id は載せない（I31）。token の値と鍵はログ・応答・例外の文に出さない
 import { GetSecretValueCommand, SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
+import { progressEventSchema } from "@ndf-factory/contracts";
 import { createLocalJWKSet, importJWK, jwtVerify, SignJWT, type CryptoKey, type JWK } from "jose";
 
 export const RUN_JOB_TOKEN_ISSUER = "ndf-factory/run-control";
@@ -12,8 +13,8 @@ export const RUN_JOB_TOKEN_ALG = "EdDSA";
 export const VERIFY_KEYS_TTL_MS = 5 * 60 * 1000;
 
 const IDENTIFIER = /^[A-Za-z0-9_-]{1,128}$/;
-// 許可したリポジトリ（owner/name）。契約の RepoFullName と同じ形
-const REPO = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/;
+// 許可したリポジトリ（owner/name）。契約の RepoFullName の pattern を写さずに読む
+const REPO = new RegExp(progressEventSchema.$defs.RepoFullName.pattern);
 
 // 発行で受けるのはこの 4 つだけ。ほかの鍵（account_id など）は型で受けない。
 // repo はその実行に許可したリポジトリ（#2216。受け口が step.recorded の Pull Request と照らす）

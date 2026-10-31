@@ -8,6 +8,7 @@ import { exportJWK, generateKeyPair, type JWK } from "jose";
 import {
   createRunJobTokenVerifier,
   signRunJobToken,
+  type RunJobSigningKey,
   type RunJobTokenClaims,
   type RunJobTokenVerifier,
 } from "../progress/run-job-token.ts";
@@ -19,6 +20,8 @@ export interface RunJobTokenKit {
   otherKeySign(claims: KitClaims): Promise<string>;
   verify: RunJobTokenVerifier;
   publicJwks: { keys: JWK[] };
+  // 検証の関数が知っている発行の鍵（実行の制御のテストが使う）
+  signingKey: RunJobSigningKey;
 }
 
 export const TEST_RUN_JOB_KID = "test-run-job-kid";
@@ -40,5 +43,6 @@ export async function createRunJobTokenKit(): Promise<RunJobTokenKit> {
     otherKeySign: (claims) => signRunJobToken(withExpiry(claims), { kid: TEST_RUN_JOB_KID, privateKey: other.privateKey }),
     verify: createRunJobTokenVerifier(publicJwks.keys),
     publicJwks,
+    signingKey: { kid: TEST_RUN_JOB_KID, privateKey: main.privateKey },
   };
 }
