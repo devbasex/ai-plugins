@@ -9,10 +9,11 @@ Neural Development Factory の子課題が共有する機械可読な契約（`f
 - **残すのは 1 回のトランザクションで、追記だけである。** 冪等の鍵の表と事象の表へ条件つきの `Put` を 2 つ書き、同じ冪等の鍵の 2 回目は 202 を返して保存しない。書き換え・削除の経路は無い
 - **実行ジョブの token は EdDSA（Ed25519）の JWT である。** 確かめる側（受け口・#2173）は公開鍵の集合だけを読み、発行の鍵は実行の制御（#2186）だけが持つ。発行の形（`signRunJobToken`）と検証（`verifyRunJobToken`）は本書の側が持つ
 - **他の子課題は `factory/api/src/index.ts` から export したものだけを使う。** 実行の制御は `job.finished`（`control`）を `appendControlEvent` で受け口と同じ重複の拒否で直に書く
+- **別のリポジトリの修正は、ランナーが起票の依頼（`issue.requested`）を送り、サービスの起票の代行が起票するか下書きを人へ回す（#2216）。** 受け口は依頼を記録するだけで、起票の代行は事象の表のストリームから依頼を読み、結果（`issue.request_resolved`）を `appendIssueRequestResolved` で直に 1 件だけ書く。ランナーの token は 1 リポジトリのまま広げない
 
 ## 用語
 
-定義は [用語集](../glossary.md) が正である（文脈 `ndf-factory`）。この文書で使う語は「進捗の受け口」「進捗の事象」「冪等の鍵」「実行ジョブの token」「実行ジョブ」「スプリントの実行」「ランナー」「承認の依頼」である。
+定義は [用語集](../glossary.md) が正である（文脈 `ndf-factory`）。この文書で使う語は「進捗の受け口」「進捗の事象」「冪等の鍵」「実行ジョブの token」「実行ジョブ」「スプリントの実行」「ランナー」「承認の依頼」「起票の依頼」「起票の依頼の結果」「起票の代行」「下書き（起票の依頼）」である。
 
 ## コンテキスト
 
@@ -27,16 +28,19 @@ Neural Development Factory の子課題が共有する機械可読な契約（`f
 - **実行時の検査も同じ定義から `ajv` で作る。** 手で書いた検査は定義を変えたときに直し忘れても落ちず、生成した型だけでは余分な鍵・知らない種類を実行時に落とせない
 - **出所ごとに経路を分ける。** IAM 認可は API Gateway の経路ごとの設定で、Bearer の token と Webhook の署名と同じ経路に同居できない。画面向けの `createApiApp` は全経路に Cognito の token を要るため、そこに足さない
 - **token を鍵の組（Ed25519）にする。** 共有の秘密にすると、確かめる側が漏れたとき任意のスプリントの実行へ書ける token を作れる。`kid` で鍵を選ぶため、集合へ新しい公開鍵を足してから発行の鍵を替えれば止めずに差し替えられる。期限より前の取り消しは実行ジョブの状態（#2186 の集約）を読むことになるため持たない
-- **GitHub の Webhook の宛先は `step.recorded` が運ぶ Pull Request の参照で引く。** 宛先のスプリントの実行を知るのは Pull Request を作ったランナーだけで、ブランチの名前は取り込んだリポジトリの NDF が決めるためサービスの規則を置けない。参照を事象の列（`pr_ref`）に置けば、書き込みは 1 回のトランザクションのまま増えない
+- **GitHub の Webhook の宛先は `step.recorded` が運ぶ Pull Request の参照で引く。** 宛先のスプリントの実行を知るのは Pull Request を作ったランナーだけで、ブランチの名前は取り込んだリポジトリの NDF が決めるためサービスの規則を置けない。参照を事象の列（`pr_ref`）に置けば、書き込みは 1 回のトランザクションのまま増えない。ただし申告の `repo` が token の `repo` と一致するときだけ置く（I37）。申告だけで置くと、正しい token を持つランナーが関係の無いリポジトリの Pull Request を自分の実行へ結び付け、ほかの利用者の Pull Request と CI の状態が別の実行の進捗に見える（#2216）
 - **事象 1 件の上限は 256 KiB である。** DynamoDB の項目の上限（400 KB）から `order_key`・`pr_ref` と列の名前を引いても 100 KB 以上残る。超える承認資料（`gate.reached` の `material`）はランナーが切り詰め、全文は `pr_url` の Pull Request で読む
 - **401・403 の本文は理由によらず 1 つにし、202 は重複でも同じ本文にする。** 送り手が理由を知ると、ほかのスプリントの実行や依頼の有無を試せる。400 だけは送り手が直せるよう、失敗の位置と規則の名前を返す（値は返さない）
+- **照合に使うリポジトリは実行ジョブの token の `repo` で運び、受け口はほかの集約を読まない（#2216）。** 実行の制御は実行ジョブの指示の `REPO` と token を同じスプリントの実行から作るため、token に入れる費用は 1 つの値だけで、署名された値はランナーが書き換えられない。受け口がスプリントの実行からリポジトリを引く形は、事象 1 件ごとに読み出しと 503 の経路が増え、期限より前の取り消しを持たない判断とも食い違う
+- **別のリポジトリへの起票は、ランナーが依頼を進捗の事象として送り、サービスが代わりに起票する（#2216）。** 依頼を事象にすれば、token の検証・冪等の鍵・送り直しがそのまま使え、依頼と結果が実行の列に並ぶ。受け口は起票先が token の `repo` と同じ依頼だけを拒み（実行のリポジトリへはランナーが自分の導入の token で起票する）、起票してよいかの判定は受け口の外の起票の代行が行う。受け口が登録と GitHub を読むと、照合を token の値だけで閉じる境目が崩れる
+- **下書きは承認の依頼にせず、結果の事象を知らせとして回す（#2216）。** 承認を求める種類はゲート 1・ゲート 2 の 2 つだけで（全体の契約の I11）、下書きの起票はスプリントの進行を止める答えを要らない
 - **保存済みの答えの読み出しは関数の型の口にし、既定は 503 にする。** 答えは #2173 の集約である。既定を「未保存」（403）にすると、#2173 の実装の途中の誤りを権限の誤りと区別できない
 
 ## 対象範囲
 
-- **含む**: `factory/contracts/`（3 つの JSON Schema・生成した型・検査の関数・`openapi/ingest.yaml`・型のずれの検査）、`factory/api/src/progress/` の受け口・事象の検査・出所の照合・GitHub の翻訳・保存・追記・実行ジョブの token、`factory/api/src/handlers/ingest.ts`、`factory/api/src/testing/run-job-tokens.ts`、`factory/api/src/index.ts` への export、`factory/.env.example` の 5 つの変数の名前
-- **含まない**: GitHub App の導入とリポジトリの登録・実行の制御・ランナー・実行ジョブの token の発行の鍵の置き場と期限（#2186）、承認の依頼の保存と答えを読む経路（#2173）、事象からの一覧と詳細の派生と読み出し（#2172）、使用量の台帳と請求（#2174）、token の期限より前の取り消し、DynamoDB の表と GSI・API Gateway の IAM 認可・ロール・秘密などインフラの定義（private リポジトリが作る）
-- プラグインの配布物・Skill・hook は変わらない。`plugins/` は `factory/` を参照しない（全体の契約の I1）
+- **含む**: `factory/contracts/`（3 つの JSON Schema・生成した型・検査の関数・`openapi/ingest.yaml`・型のずれの検査）、`factory/api/src/progress/` の受け口・事象の検査・出所の照合・GitHub の翻訳・保存・追記・実行ジョブの token、`factory/api/src/handlers/ingest.ts`、起票の代行（`factory/api/src/issue-requests/`・`factory/api/src/handlers/issue-requests.ts`、#2216）、`factory/api/src/testing/run-job-tokens.ts`、`factory/api/src/index.ts` への export、`factory/.env.example` の 5 つの変数の名前
+- **含まない**: GitHub App の導入とリポジトリの登録・実行の制御・ランナー・実行ジョブの token の発行の鍵の置き場と期限（#2186）、承認の依頼の保存と答えを読む経路（#2173）、事象からの一覧と詳細の派生と読み出し（#2172）、使用量の台帳と請求（#2174）、token の期限より前の取り消し、相手先の流儀（課題追跡の宣言・Issue テンプレート・外部チケット）を読む判定（#2239）、下書きを受けた人への知らせの送り方（#2173）と見せ方（#2172）、DynamoDB の表と GSI・ストリーム・API Gateway の IAM 認可・ロール・秘密などインフラの定義（private リポジトリが作る）
+- プラグインの配布物は、NDF の `issue-file.py create` がランナーの中（環境変数 `NDF_ISSUE_REQUEST_FILE` があるとき）で別のリポジトリへの起票を依頼の行として書き出す分岐だけを持つ。`plugins/` は `factory/` を参照しない（全体の契約の I1）
 
 ## 仕様
 
@@ -44,9 +48,12 @@ Neural Development Factory の子課題が共有する機械可読な契約（`f
 
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
-| 進捗の記録 | 進捗の受け口（`factory/api/src/progress/`）。実行の制御（#2186）は `appendControlEvent` を通してだけ書く | スプリントの実行の識別子ごとの列 | 進捗の事象 | 種類・発生の時刻・冪等の鍵・出所・Pull Request の参照 |
+| 進捗の記録 | 進捗の受け口（`factory/api/src/progress/`）。実行の制御（#2186）は `appendControlEvent` を、起票の代行は `appendIssueRequestResolved` を通してだけ書く | スプリントの実行の識別子ごとの列 | 進捗の事象 | 種類・発生の時刻・冪等の鍵・出所・Pull Request の参照・起票した Issue の参照 |
+| 起票の依頼の台帳 | 起票の代行（`factory/api/src/issue-requests/`） | スプリントの実行ごとの台帳 | 依頼（中身の要約値ごと） | 状態（`filing`・`filed`・`drafted`）・起票した数 |
 
 **冪等の鍵の表は集約の一部で、別の集約ではない。** 鍵の一意（I10）を守るためだけにあり、事象と同じトランザクションで書く。ほかの集約（スプリントの実行・承認の依頼）は識別子で参照し、承認の依頼は保存済みの答えを読むだけにする。
+
+**起票の代行は、ほかの集約を読むだけで書かない。** スプリントの実行（アカウントを知る）と登録（導入を知る）は #2186 の表を読む。書くのは自分の台帳と、進捗の記録への直の追記（`issue.request_resolved` だけ）である。台帳の依頼の行と起票した数の行は同じ集約で、1 つのトランザクションで書く。
 
 ### 構成要素
 
@@ -64,6 +71,8 @@ Neural Development Factory の子課題が共有する機械可読な契約（`f
 | 追記 | `factory/api/src/progress/append.ts` | 事象から `order_key` と `pr_ref` を作り、保存へ渡して `{ written }` を返す。受け口と `appendControlEvent` が同じ関数を通る |
 | 受け口の app | `factory/api/src/progress/app.ts`・`errors.ts` | Hono の app。3 つの経路と、失敗を決まった本文の応答へ変える処理とログ |
 | 受け口の handler | `factory/api/src/handlers/ingest.ts` | API Gateway の HTTP API（payload 2.0）から呼ばれる Lambda の handler。環境変数から依存を 1 回だけ作る |
+| 起票の代行 | `factory/api/src/issue-requests/`（`resolve.ts`・`ledger.ts`・`memory-ledger.ts`・`secrets.ts`・`style.ts`） | 記録された `issue.requested` 1 件を判定し、起票してよい先へは GitHub の口で起票し、そうでない先は下書きへ回し、結果を直に追記する（「起票の依頼と起票の代行」）。`memory-ledger.ts` はテスト用の偽物 |
+| 起票の代行の handler | `factory/api/src/handlers/issue-requests.ts` | 事象の表の DynamoDB Streams のうち、`type` が `issue.requested` の新しい項目を 1 件ずつ起票の代行へ渡す。投げた項目だけを `batchItemFailures` で返し、ストリームがやり直す |
 | テストの鍵の組 | `factory/api/src/testing/run-job-tokens.ts` | テストの中で Ed25519 の鍵の組をメモリに作り、token を作る・確かめる |
 | 公開の入口 | `factory/api/src/index.ts` | 「他の子課題へ公開する関数」を export する。#2170 の既存の export は変えない |
 
@@ -118,13 +127,14 @@ graph TD
 | `signRunJobToken(claims, key)` | `claims` = `RunJobTokenClaims`（`jobId`・`sprintRunId`・`repo`・`expiresAt: Date` だけ。ほかの鍵を型で受けない）、`key` = `RunJobSigningKey`（`kid`・`privateKey`（`CryptoKey` か JWK）） | `Promise<string>` | 鍵が Ed25519 でなければ例外 |
 | `createRunJobTokenKit()` | 無し | `Promise<RunJobTokenKit>`（`sign(claims, opts?)`・`otherKeySign(claims)`・`verify`・`publicJwks`・`signingKey`）。`claims` の `repo` を省くと `owner/name` になる。鍵はメモリの中だけ。`sign` の `opts.kid` を変えると知らない鍵の token、`otherKeySign` は署名が合わない token になる | — |
 | `appendControlEvent(event)` | `JobFinishedEvent`（`source` は `control`、冪等の鍵は `<job_id>:finished`） | `Promise<{ written: boolean }>`。`false` は同じ鍵（ランナーの分）が既にある | 定義に合わない → `ProgressEventError`（`code` が `invalid_event`）。`control` の照合に合わない → `ProgressEventError`（`forbidden`）。保存の失敗はそのまま投げる |
+| `appendIssueRequestResolved(event)` | `IssueRequestResolvedEvent`（`source` は `control`、冪等の鍵は `<依頼の鍵>:resolved`、`payload.request_key` はその `job_id` の `<job_id>:<seq>`） | `Promise<{ written: boolean }>`。`false` は同じ依頼の結果が既にある | 定義に合わない → `ProgressEventError`（`invalid_event`）。ほかの種類・照合に合わない → `ProgressEventError`（`forbidden`）。保存の失敗はそのまま投げる |
 | `createIngestApp(deps, log?)` | `deps` = `IngestDeps`（`verifier`・`store`・`savedAnswers`・`webhookSecret: () => Promise<string>`・`apiCallerRoleArn`）か、それを返す関数。`log` は `IngestLogger`（既定は 1 行の JSON を標準出力へ） | Hono の app | — |
 
 あわせて `RunJobTokenError`・`ProgressEventError` と、`IngestDeps`・`IngestLogEntry`・`IngestLogger`・`RunJobSigningKey`・`RunJobTokenClaims`・`RunJobTokenErrorCode`・`RunJobTokenVerifier`・`VerifiedRunJob`・`SavedAnswer`・`SavedAnswerReader`・`ProgressEventRecord`・`ProgressEventStore`・`RunJobTokenKit` の型を export し、`@ndf-factory/contracts` の型（`ProgressEvent`・種類ごとの `JobStartedEvent` など・`RunJobInstruction`・`IngestResponse`・`GateKind`・`EventSource` など）をそのまま写して出す。検査の関数と種類の一覧は `@ndf-factory/contracts` から import する。
 
 ### 進捗の事象の定義
 
-`factory/contracts/schemas/progress-event.schema.json`。最上位は 11 種類の `oneOf` で、各種類（`$defs` の `JobStartedEvent` など）は共通の列を `allOf` で取り込み、`unevaluatedProperties: false` で余分な列を落とす。`payload` は種類ごとに `additionalProperties: false`。生成した型は `ProgressEvent`（11 種類の共用）と種類ごとの型である。
+`factory/contracts/schemas/progress-event.schema.json`。最上位は 13 種類の `oneOf` で、各種類（`$defs` の `JobStartedEvent` など）は共通の列を `allOf` で取り込み、`unevaluatedProperties: false` で余分な列を落とす。`payload` は種類ごとに `additionalProperties: false`。生成した型は `ProgressEvent`（13 種類の共用）と種類ごとの型である。
 
 **共通の列**（全体の契約の「進捗の正本」の列から、受け口が作る `order_key` と `pr_ref` を除いた 8 列）:
 
@@ -132,7 +142,7 @@ graph TD
 | --- | --- | --- | --- |
 | `sprint_run_id` | 文字列 | 必須 | `^[A-Za-z0-9_-]{1,128}$`（`order_key` の区切りの `#` と冪等の鍵の区切りの `:` を含めない） |
 | `idempotency_key` | 文字列 | 必須 | 1〜300 字。出所ごとの形は「出所ごとの照合」が見る |
-| `type` | 文字列 | 必須 | 11 種類のどれか（種類ごとの `const`） |
+| `type` | 文字列 | 必須 | 13 種類のどれか（種類ごとの `const`） |
 | `at` | 文字列 | 必須 | `format: date-time` かつ末尾 `Z`（UTC） |
 | `source` | 文字列 | 必須 | `runner` / `github` / `api` / `control` |
 | `job_id` | 文字列か `null` | 必須（値は `null` を許す） | `^[A-Za-z0-9_-]{1,128}$`。`github`・`api` は `null` |
@@ -154,6 +164,8 @@ graph TD
 | `job.finished` | `result`（`gate` / `stopped` / `done` / `failed`）、`summary`（文字列） |
 | `pr.updated` | `repo`（`owner/name`）、`number`（1 以上の整数）、`state`（`open` / `closed` / `merged`） |
 | `ci.updated` | `repo`（`owner/name`）、`pr_number`（1 以上の整数）、`name`（文字列）、`conclusion`（文字列か `null`。`null` は「まだ終わっていない」） |
+| `issue.requested` | `repo`（`owner/name`。起票先）、`title`（1〜256 字。GitHub の題の上限）、`body`（1〜50,000 字。4 バイトの文字だけでも 256 KiB に収まる長さ）。ラベルと相手の課題の番号は相手先の流儀に属するため持たない |
+| `issue.request_resolved` | `request_key`（依頼の冪等の鍵）、`outcome`（`filed` / `drafted`）、`issue`（`filed` のときだけ必須で `drafted` では持たない。`repo`（`owner/name`）・`number`（1 以上の整数）・`url`（URI））、`reason`（`drafted` のときだけ必須。「起票の依頼と起票の代行」の理由の表のどれか）、`duplicate_of`（同じ中身の最初の依頼の鍵か `null`） |
 
 **大きさの上限は 256 KiB（262,144 バイト、`MAX_EVENT_BYTES`）で、定義の外で見る。** `runner`・`api` の経路は要求の本文の UTF-8 のバイト数、`github` の経路と `appendControlEvent` は作った事象を JSON にしたバイト数で見る。JSON Schema の `maxLength` は字の数でバイトを数えられないためである。
 
@@ -276,10 +288,10 @@ sequenceDiagram
 | 出所 | 書ける種類 | 照らすこと |
 | --- | --- | --- |
 | すべて | — | 事象の `source` が経路の出所と一致する（I25） |
-| `runner` | `job.started`・`phase.changed`・`step.recorded`・`attention`・`gate.reached`・`usage.recorded`・`decision.delegated`・`job.finished` | `job_id` と `sprint_run_id` が token の `sub` と `sprint_run_id` と一致する。`step.recorded` の `pull_request.repo` は token の `repo` と大文字と小文字を問わず等しい（I37）。冪等の鍵が `job.finished` なら `<job_id>:finished`、ほかなら `<job_id>:<seq>`（`seq` は `^[1-9][0-9]*$`）（I27） |
+| `runner` | `job.started`・`phase.changed`・`step.recorded`・`attention`・`gate.reached`・`usage.recorded`・`decision.delegated`・`issue.requested`・`job.finished` | `job_id` と `sprint_run_id` が token の `sub` と `sprint_run_id` と一致する。`step.recorded` の `pull_request.repo` は token の `repo` と大文字と小文字を問わず等しい（I37）。`issue.requested` の `repo` は token の `repo` と大文字と小文字を問わず違う（I45）。冪等の鍵が `job.finished` なら `<job_id>:finished`、ほかなら `<job_id>:<seq>`（`seq` は `^[1-9][0-9]*$`）（I27） |
 | `api` | `gate.answered` | 呼び出し元のロールが `INGEST_API_CALLER_ROLE_ARN` のロールである（IAM の文脈が無ければ 401、形が違うか一致しなければ 403。認証の段で見る）。`job_id` が `null`。冪等の鍵が `api:<payload.approval_request_id>`。保存済みの答えを読み、`null` なら 403、依頼の識別子・`sprint_run_id`・`kind`・`answered_by_account_id`・`decision`（無いことも含めて）がすべて答えと一致する（I28） |
 | `github` | `pr.updated`・`ci.updated` | `job_id` が `null`。翻訳した事象だけが通る |
-| `control` | `job.finished` | `job_id` が `null` でなく、冪等の鍵が `<job_id>:finished` |
+| `control` | `job.finished`・`issue.request_resolved` | `job_id` が `null` でない。`job.finished` は冪等の鍵が `<job_id>:finished`。`issue.request_resolved` は `payload.request_key` が `<job_id>:<seq>` で、冪等の鍵が `<request_key>:resolved`（I48） |
 
 書ける種類の表は `authorize.ts` の `WRITABLE_TYPES` が持つ（I26）。
 
@@ -310,7 +322,7 @@ sequenceDiagram
 | 本体 | `aud` | `ndf-factory/run-job` |
 | 本体 | `sub` | 実行ジョブの識別子（`job_id`。`^[A-Za-z0-9_-]{1,128}$`） |
 | 本体 | `sprint_run_id` | スプリントの実行の識別子（同じ形） |
-| 本体 | `repo` | その実行のリポジトリ（`owner/name`）。`step.recorded` の Pull Request の照合に使う（I37） |
+| 本体 | `repo` | その実行のリポジトリ（`owner/name`。必須で、無い・形が違えば `malformed`。I44）。`step.recorded` の Pull Request の照合（I37）と、起票の依頼の照合（I45）に使う |
 | 本体 | `iat`・`exp` | 発行と期限（秒）。期限の長さは発行側が `RUN_JOB_TOKEN_TTL_SECONDS`（既定 32,400 秒）で決め、打ち切りの時間より長くする |
 
 **検証の失敗は 4 つの「無効」に分け、`jose` の失敗の `code` を読み替える。** `bad_signature` は `ERR_JWS_SIGNATURE_VERIFICATION_FAILED`、`expired` は `ERR_JWT_EXPIRED`、`unknown_key` は `ERR_JWKS_NO_MATCHING_KEY`・`ERR_JWKS_MULTIPLE_MATCHING_KEYS` で、ほか（`ERR_JWS_INVALID`・`ERR_JWT_INVALID`・`ERR_JWT_CLAIM_VALIDATION_FAILED`・`ERR_JOSE_ALG_NOT_ALLOWED`・`ERR_JOSE_NOT_SUPPORTED`、発行者・宛先・`typ`・必須の主張（`sub`・`exp`・`sprint_run_id`・`repo`）の違い、識別子の形の違い、知らない `code`）はすべて `malformed` である。失敗の文に token の値を含めない。
@@ -319,25 +331,54 @@ sequenceDiagram
 
 ### 直の追記と保存済みの答えの口
 
+- **`appendIssueRequestResolved` は `issue.request_resolved`（`control`）だけを受ける。** 起票の代行は受け口の認証を通らないサービスの中の処理のため、`appendControlEvent` と同じ `control` の出所で、契約の検査・`control` の照合・追記の 3 つを通る。出所に新しい値を足すと、種類の表と全体の契約の I25 の受け手がすべて新しい値を扱うことになる
 - **`appendControlEvent` は `job.finished`（`control`）だけを受ける。** 全体の契約で実行の制御が直に書くのは、ランナーが `job.finished` を送れずに終わったときの `job.finished`（`failed`）だけで、ほかの種類を受けると受け口の認証を通らずに書ける経路が増えるためである。ランナーの `job.finished` が先にあれば同じ鍵のため `{ written: false }` で書かない
 - **`SavedAnswerReader` は `(approvalRequestId) => Promise<SavedAnswer | null>` である。** `SavedAnswer` は `{ approvalRequestId; sprintRunId; kind; decision?; answeredByAccountId }` で、`decision` は判断（`kind` が `decision`）では持たない。`null` は未保存、読めないときは投げる（受け口が 503 にする）
 - **handler は `savedAnswers` に `saved-answers.ts` の `savedAnswersFromEnv()` を渡す。** 今は常に `SavedAnswersUnavailableError` を投げる既定で、`api` の経路は 503 を返す。#2173 が同じファイルの中身を本物の読み出しに替え、受け口のほかのファイルは変えずに済む
 
+### 起票の依頼と起票の代行
+
+実行ジョブの中で NDF が開発対象リポジトリと別のリポジトリへの起票を決めると、`issue-file.py create` が承認資料の代わりにランナーの渡したファイル（`NDF_ISSUE_REQUEST_FILE`、作業のディレクトリの外）へ `{"repo", "title", "body"}` の 1 行を足して 0 で終える。ランナーは伸びた行を `issue.requested` にして送る（値はそのまま写し、題か本文が上限を超える行は送らずに `attention`（`reason` は `issue_request_too_large`）にする）。ランナーの外では変数が無いため、NDF は今どおり承認資料を書いて止まる。
+
+受け口は依頼を記録して 202 を返すだけで、GitHub もほかの集約も読まない。起票の代行は事象の表のストリームから依頼を受け、次の順で判定する。外へ出す前に安く確かめられるものから並べ、起票した数は起票の直前に増やす。
+
+| 順 | 確かめること | 合わなければ（`reason`） |
+| --- | --- | --- |
+| 1 | 題と本文に秘密らしい値（AWS のアクセスキー・PEM の秘密鍵の始まりの行・GitHub の token・Anthropic の API キー・JWT の形）が無い | `secret_suspected` |
+| 2 | 依頼の `sprint_run_id` からサービスの表で引いたアカウントの登録に、名前が大文字と小文字を問わず一致するものがある（ほかのアカウントの登録は引かない） | `not_registered` |
+| 3 | 流儀の判定の口（`FilingStyleResolver`）が GitHub Issues を返す。#2239 が入るまでの既定は「GitHub Issues へ、テンプレートを使わず、依頼の題と本文のまま」 | `unsupported_tracker` |
+| 4 | 起票先の公開範囲を読める。起票先が公開なら、実行のリポジトリも公開である（AI が書いた本文は非公開のコードや設定を含みうる） | 読めない → `not_installed`、公開範囲が広がる → `visibility` |
+| 5 | 起票した数を上限（`ISSUE_REQUEST_LIMIT_PER_RUN`、既定 10）より少ないときだけ増やせる。下書きは数に入れない | `limit_exceeded` |
+| 6 | 起票先の 1 リポジトリ（数の ID）と `issues: write` だけに絞った導入の token で Issue を作れる | token を作れない → `not_installed`、作成の要求の失敗 → `filing_failed`（どちらも数を 1 つ戻す） |
+
+- **同じ中身の依頼から Issue は 1 件だけ作る。** 台帳の行（`RUN#<sprint_run_id>` / `ISSUE#<要約値>`）を条件つきで書いた依頼だけが判定へ進み、同じ中身の別の依頼（送り直し・再開のジョブ）は最初の結果を `duplicate_of` つきで写す。最初の依頼が起票の途中（`filing`）なら投げてやり直させる。要約値は `{"body", "repo"（小文字）, "title"}` を鍵の順にそろえた JSON の sha256 である
+- **作成の要求の後はやり直さない。** 要求を出す直前に行へ `attempted_at` を書き、それがある `filing` の行を流し直すと作り直さずに `filing_failed` にする。GitHub が作ったのに応答が届かなかったとき 2 件目を作らないためで、GitHub の Issue の作成は冪等の鍵を持たない
+- **読み出しの失敗（表・GitHub の公開範囲）は投げてやり直させる。** 行は自分の `request_key` の `filing` のまま残り、やり直しは続きから進む
+- **下書きは結果の事象で人へ回る。** `outcome` が `drafted` の `issue.request_resolved` を #2173 が知らせとして扱い、#2172 が依頼の題と本文を写せる形で見せる。承認の依頼にはしない
+- **ログは種類・依頼の鍵・結果・理由・写したかの 5 列だけで、題・本文・token を出さない**
+
 ### 常に成り立つ条件
 
-I10 は全体の契約のもの。#2170 の I24 に続けて番号を振る。I37 は #2186 が #2216 の照合として足した（I32〜I36 は #2186 のほかの集約の条件）。
+I10 は全体の契約のもの。#2170 の I24 に続けて番号を振る。I37 は #2186 が #2216 の照合として足し、I44〜I50 は #2216 が足した（I32〜I36・I38〜I43 は #2186 のほかの集約の条件）。
 
 | # | 集約 | 条件 | 破れそうなときの扱い |
 | --- | --- | --- | --- |
 | I10 | 進捗の記録 | 進捗の事象は追記だけで書き換えない。同じ冪等の鍵の事象は 1 つ | 同じ鍵の 2 回目は 202 を返し、保存しない。保存の型（`ProgressEventStore`）は `append` と `findSprintRunsByPrRef` だけを持ち、書き換え・削除の操作を持たない |
 | I25 | 進捗の記録 | 事象の `source` は、受け取った経路の認証の手段と一致する（`runner` の経路は `runner`、`api` の経路は `api`、`github` の経路は翻訳した `github`、`appendControlEvent` は `control`） | 403 で保存しない。`appendControlEvent` は `ProgressEventError` を投げて書かない |
-| I26 | 進捗の記録 | 出所ごとに書ける種類は決まっている（`runner` は `gate.answered`・`pr.updated`・`ci.updated` 以外、`api` は `gate.answered`、`github` は `pr.updated`・`ci.updated`、`control` は `job.finished`） | 403 で保存しない |
+| I26 | 進捗の記録 | 出所ごとに書ける種類は決まっている（`runner` は `gate.answered`・`pr.updated`・`ci.updated`・`issue.request_resolved` 以外、`api` は `gate.answered`、`github` は `pr.updated`・`ci.updated`、`control` は `job.finished`・`issue.request_resolved`） | 403 で保存しない。直の追記は `ProgressEventError`（`forbidden`） |
 | I27 | 進捗の記録 | `runner` の事象の `job_id`・`sprint_run_id` は token のものと一致し、冪等の鍵は `<job_id>:<seq>`（`seq` は 1 以上）か、`job.finished` だけ `<job_id>:finished` である | 403 で保存しない |
 | I28 | 進捗の記録 | `gate.answered` は、依頼の識別子・属するスプリントの実行・種類・答えた人・承認か差し戻しかが保存済みの答えとすべて一致するときだけ残る。冪等の鍵は `api:<依頼の識別子>` | 未保存も含めて 403 で保存しない。答えを読めなければ 503 |
 | I29 | 進捗の記録 | 残る事象は契約の定義に合い、1 件の大きさは 256 KiB 以下である | 400 で保存しない（`github` の経路は 202 で保存しない） |
 | I30 | 進捗の記録 | 401 と 403 の応答の本文は理由によらず同じで、事象・依頼・スプリントの実行の有無を明かさない | 理由ごとの文言を出さない |
-| I31 | 進捗の記録 | 実行ジョブの token は `account_id` を運ばない。token の値・署名の鍵・Webhook の秘密は応答・ログ・事象に出ない | `signRunJobToken` の `claims` は 4 つの鍵だけを型で受ける。ログは決まった 4 列だけにする |
+| I31 | 進捗の記録 | 実行ジョブの token は `account_id` を運ばない。token の値・署名の鍵・Webhook の秘密・起票に使う導入の token は応答・ログ・事象に出ない | `signRunJobToken` の `claims` は 4 つの鍵だけを型で受ける。ログは決まった 4 列だけにする |
 | I37 | 進捗の記録 | `runner` の `step.recorded` の `pull_request.repo` は、token の `repo` と大文字と小文字を問わず等しい。他のリポジトリの Pull Request を自分の実行へ結び付けない（#2216） | 403 で保存せず、`pr_ref` を残さない |
+| I44 | 進捗の記録 | 実行ジョブの token は取り込むリポジトリ（`repo`、`owner/name` の形）を必ず運ぶ | 無い・形が違う token は `malformed` で、どの種類の事象も 401 で保存しない |
+| I45 | 進捗の記録 | `runner` の `issue.requested` の `repo` は、token の `repo` と大文字と小文字を問わず違う | 403 で保存しない |
+| I46 | 起票の依頼の台帳 | サービスが Issue を作るのは、依頼の実行が属するアカウントの登録に名前の一致するものがあり、その導入で token を作れ、流儀の判定が GitHub Issues を返し、公開範囲が広がらず、秘密らしい値が無く、起票した数が上限より少ないときだけである | どれかが欠ければ起票せず、`drafted` と理由を残す |
+| I47 | 起票の依頼の台帳 | 起票に使う導入の token は、起票先の 1 リポジトリ（数の ID）と `issues: write` だけで作り、GitHub の口の中で 1 回使って捨てる。保存しない・返さない・ランナーへ渡さない | GitHub の口の `createIssue` は Issue の参照だけを返す |
+| I48 | 起票の依頼の台帳 | 1 つのスプリントの実行で、起票先・題・本文の等しい依頼から作る Issue は 1 件までで、どの依頼にも結果はちょうど 1 件ある | 台帳の行を条件つきで書いてから GitHub を呼ぶ。結果の冪等の鍵は `<依頼の鍵>:resolved` |
+| I49 | 起票の依頼の台帳 | 1 つのスプリントの実行で起票した数は上限（`ISSUE_REQUEST_LIMIT_PER_RUN`）以下 | 数の行の条件つきの増加が通らなければ起票せず `limit_exceeded` |
+| I50 | 進捗の記録 | 結果の理由と応答は、ほかのアカウントの登録の有無を明かさない | 未登録と「ほかのアカウントだけが登録」を同じ `not_registered` にする |
 
 ## データ・設定
 
@@ -367,7 +408,7 @@ erDiagram
 | `sprint_run_id` | 文字列 | 許さない | 区分の鍵 |
 | `order_key` | 文字列 | 許さない | 並びの鍵。`<at をミリ秒の 3 桁にそろえた UTC（toISOString）>#<冪等の鍵>`。小数の桁が違う時刻を文字列のまま並べると `…:00.5Z` が `…:00Z` より前に来るため、そろえてから結ぶ |
 | `idempotency_key` | 文字列 | 許さない | 出所ごとの形（全体の契約の「進捗の正本」） |
-| `type` | 文字列 | 許さない | 11 種類のどれか |
+| `type` | 文字列 | 許さない | 13 種類のどれか |
 | `at` | 文字列 | 許さない | 送られた値のまま（UTC、末尾 `Z`） |
 | `source` | 文字列 | 許さない | `runner` / `github` / `api` / `control` |
 | `job_id` | 文字列 | 許す | 空（`null`）は「実行ジョブの外で起きた」（`github`・`api`） |
@@ -388,7 +429,24 @@ DynamoDB の表（`PROGRESS_IDEMPOTENCY_TABLE_NAME`）。区分の鍵 `idempoten
 | ランナーの事象 | C | C | — | — |
 | `gate.answered` | C | C | — | R |
 | GitHub の Webhook | C | C | R | — |
-| 直の追記（`appendControlEvent`） | C | C | — | — |
+| 直の追記（`appendControlEvent`・`appendIssueRequestResolved`） | C | C | — | — |
+
+### 起票の依頼の台帳
+
+DynamoDB の表（`ISSUE_REQUESTS_TABLE_NAME`）。区分の鍵 `pk`・並びの鍵 `sk`、読み出しは強い整合で、GSI は持たない。**時系列の扱いは「今の値の上書き」である。** 過去は進捗の記録（`issue.requested` と `issue.request_resolved`）が持ち、上書きで失うのは `filing` の時刻だけで、結果の事象の `at` から足りる。
+
+| 行 | `pk` | `sk` | 列 |
+| --- | --- | --- | --- |
+| 依頼 | `RUN#<sprint_run_id>` | `ISSUE#<要約値>` | `state`（`filing` / `filed` / `drafted`）・`request_key`（最初の依頼の冪等の鍵）・`issue_repo`・`issue_number`・`issue_url`（`filed` のとき）・`reason`（`drafted` のとき）・`attempted_at`（Issue の作成の要求を出す直前に書く）・`updated_at` |
+| 起票した数 | `RUN#<sprint_run_id>` | `FILED_COUNT` | `count`（I49） |
+
+依頼の行は `attribute_not_exists(pk)` つきの `Put` で作る。数の増加と `attempted_at` は `TransactWrite` 1 回で書き、数の行の条件（`count < 上限`）で取り消されたときだけ上限として読む。
+
+| 機能 | 依頼の行 | 数の行 | 進捗の記録 | スプリントの実行・登録 |
+| --- | --- | --- | --- | --- |
+| 依頼の受け付け | — | — | C（`issue.requested`） | — |
+| 起票 | C・U | U | C（`issue.request_resolved`） | R |
+| 下書き | C・U | — | C（`issue.request_resolved`） | R |
 
 ### 環境変数
 
@@ -401,6 +459,8 @@ DynamoDB の表（`PROGRESS_IDEMPOTENCY_TABLE_NAME`）。区分の鍵 `idempoten
 | `RUN_JOB_TOKEN_VERIFY_KEYS_SECRET_ARN` | 受け口・`verifyRunJobToken` | token の公開鍵の集合の置き場 |
 | `GITHUB_APP_WEBHOOK_SECRET_ARN` | 受け口 | GitHub App の Webhook の秘密の置き場 |
 | `INGEST_API_CALLER_ROLE_ARN` | 受け口 | `api` の出所として認める #2173 のサービスのロールの ARN |
+| `ISSUE_REQUESTS_TABLE_NAME` | 起票の代行 | 起票の依頼の台帳の表の名前（#2216） |
+| `ISSUE_REQUEST_LIMIT_PER_RUN` | 起票の代行 | スプリントの実行ごとにサービスが作る Issue の上限（1 以上の整数。無い・形が違えば 10）。10 は実測に基づかない初期値で、本番の結果の事象の `limit_exceeded` の数で見直す（#2216） |
 
 handler は要る変数が無ければ最初の要求の処理で失敗し、503 を返す。Webhook の秘密は 1 回だけ読み、読めなければ次の要求で読み直す。
 
@@ -419,6 +479,7 @@ handler は要る変数が無ければ最初の要求の処理で失敗し、503
 | 表の鍵 | 事象の表の区分の鍵 `sprint_run_id`・並びの鍵 `order_key`、GSI `pr_ref-index`（区分の鍵 `pr_ref`、射影に `sprint_run_id` を含める）。冪等の鍵の表の区分の鍵 `idempotency_key` |
 | 秘密 | 公開鍵の集合（`{"keys": [...]}` の JSON の文字列）と Webhook の秘密（文字列）を Secrets Manager に置き、ARN を変数で渡す |
 | GitHub App の Webhook | 宛先の URL を `POST /ingest/github` に、秘密を `GITHUB_APP_WEBHOOK_SECRET_ARN` の値と同じにする。受けるのは `pull_request`・`check_run`（GitHub App の設定は #2186 とインフラが持つ） |
+| 起票の代行 | `factory/api/src/handlers/issue-requests.ts` の `handler`（DynamoDB Streams、部分的なバッチの失敗の報告を使う）。事象の表のストリーム（新しい項目の像）を `type` が `issue.requested` の項目に絞って渡す。起票の依頼の台帳の表（区分の鍵 `pk`・並びの鍵 `sk`）を作る。やり直しの回数と行き先はインフラが決める |
 
 ```mermaid
 graph TD
@@ -449,6 +510,7 @@ graph TD
 
 - **認証は出所ごとに 1 つで、経路が決める。** 受け口の認証を変えることは認証と認可の変更のため、人が承認ゲートで見る
 - **秘密は ARN だけで受け、応答・ログ・事象に値を出さない。** 受け口が読む秘密は token の公開鍵の集合と Webhook の秘密の 2 つで、発行の鍵は受け口も #2173 も持たない（I31）
+- **起票の代行が起票する先は、依頼の実行のアカウントが登録し App を入れたリポジトリだけで、使う token は 1 リポジトリと `issues: write` だけである**（I46・I47）。サービスが利用者に代わって外へ書く条件を変えることは認可の変更のため、人が承認ゲートで見る
 - **ログは 1 要求 1 行の JSON で、`route`・`type`（読めたときだけ）・`status`・`sprint_run_id`（読めたときだけ）の 4 列だけを出す。** 要求の見出し・本文・token を出さない
 - **401・403 の本文は理由によらず同じで、202 は重複でも同じである**（I30）。400 の `message` は位置と規則の名前だけで値を含めない
 - このリポジトリに表・ロール・秘密などインフラの定義と秘密の値を置かない（全体の契約の I3・I4・I6）。テストの鍵と Webhook の秘密はテストの中で作るか、許可の一覧で個別に除いた偽の値にする
@@ -469,20 +531,23 @@ graph TD
 | 観点 | 縛る振る舞い |
 | --- | --- |
 | 実行ジョブの指示の定義 | 入力の名前の集合が全体の契約の 11 項目と等しいこと。`START` が `new` で `ISSUES` が無い・`resume` で `APPROVAL_REQUEST_ID` が無い・`byok` で `MODEL_CREDENTIAL_SECRET_ARN` が無い・`local`・`managed` にそれがある・知らない入力・番号でない `ISSUES` がそれぞれ落ちること |
-| 進捗の事象の定義（I29） | 種類の集合が全体の契約の 11 種類と、共通の列が「進捗の正本」の列と 1 対 1 に対応すること。知らない種類は `/type` の `enum`、`schema_version` 2・`payload` の余分な鍵・共通の列の欠け・余分な列・UTC でない時刻・`#` を含む識別子が落ちること。`gate.answered` の `decision` が判断では持てず、ゲートでは必須であること。`step.recorded` の `pull_request` が任意で、形が違えば落ちること |
+| 進捗の事象の定義（I29） | 種類の集合が全体の契約の 13 種類と、共通の列が「進捗の正本」の列と 1 対 1 に対応すること。知らない種類は `/type` の `enum`、`schema_version` 2・`payload` の余分な鍵・共通の列の欠け・余分な列・UTC でない時刻・`#` を含む識別子が落ちること。`gate.answered` の `decision` が判断では持てず、ゲートでは必須であること。`step.recorded` の `pull_request` が任意で、形が違えば落ちること。`issue.requested` の題が 257 字・本文が空・余分な鍵で落ちること。`issue.request_resolved` が `filed` で `issue` だけを、`drafted` で `reason` だけを持てること |
 | 型のずれと応答の定義 | コミットした型が定義から作り直した型と一致し、定義に項目を足して作り直さないと食い違うこと。202 と 4 つのエラーの本文が応答の定義に合い、ほかは合わないこと |
 | OpenAPI | `npm run lint:contracts` が `ingest.yaml` を含めて 0 で終わること（`$ref` の参照切れは Spectral の `invalid-ref` で落ちる） |
 | `runner` の認証 | token が無い・`Bearer` でない・形が違う・署名が合わない・期限切れ・知らない鍵がどれも 401 で、保存 0 件、本文が同じであること |
 | `runner` の照合（I26・I27） | token と `job_id`・`sprint_run_id` のどちらかが違う、`gate.answered`・`pr.updated`・`ci.updated`、鍵が別のジョブの頭・`seq` が 0 か数でない・`job.finished` に `seq`・ほかの種類に `finished`・token と別のリポジトリの Pull Request を持つ `step.recorded`（I37）がそれぞれ 403 で保存 0 件。`job.finished` は `<job_id>:finished` で残ること |
+| 起票の依頼の受け付け（I45） | token の `repo` と違うリポジトリ宛ての `issue.requested` が 202 で 1 件残り、token の `repo` 宛ては大文字と小文字を問わず 403 で保存 0 件。形の違う依頼は token の `repo` 宛てでも 400。`runner` は `issue.request_resolved` を書けないこと |
 | `api` の認証と照合（I28） | 保存済みの答えとすべて一致すれば 202 で残ること。IAM の文脈が無い（Cognito の token だけ）と 401、別のロール・別のアカウント・ロールでない呼び出し元は 403。`gate.answered` 以外、5 つの項目のどれかの違い、答えが未保存、鍵が `api:<依頼の識別子>` でない、`job_id` があるのどれも 403。読み出しが投げると 503。どれも保存 0 件。呼び出し元はセッションの ARN とロールの ARN（パスの有無を問わず）をアカウントとロールの名前で照らし、ロールの ARN でない設定とは一致しないこと |
 | 出所と形（I25・I29） | どの経路でも `source` の食い違いは 403。JSON でない本文は 400。256 KiB ちょうどの本文は通り、1 バイト超えると 400 で保存 0 件 |
 | 追記と冪等（I10） | 受け付けた事象が 202 で列に 1 件、`order_key` が `<ミリ秒にそろえた at>#<鍵>` であること。同じ鍵の 2 回目は中身が違っても 202 で 1 件目が変わらないこと。同じ鍵を同時に 2 本送っても 1 件。保存に失敗したら 503 で、送り直すと 1 件になること |
 | 保存（I10） | 1 件の追記が `TransactWriteCommand` 1 回で、冪等の鍵の表を先に、どちらも条件つきの `Put` であること。`ConditionalCheckFailed` だけが重複として読まれ、ほかの取り消しと失敗は投げること。保存の型に書き換えと削除の操作が無いこと |
 | Pull Request の参照 | `pull_request` を持つ `step.recorded` だけが `pr_ref` を持ち、`Owner/Name` が小文字にそろうこと。GSI を引いてスプリントの実行を重複なく返すこと |
 | GitHub の Webhook | 署名が無い・合わないと 401、長さの違う署名は比べずに落ちること。合った `pull_request`・`check_run` が鍵 `github:<delivery>` と対象の更新時刻（`completed_at`、無ければ `started_at`）の `at` で残ること。同じ delivery の 2 回目、扱わない種類・宛先が引けない・2 つ以上引ける・時刻が無い・形の違う本文は 202 で保存 0 件。Webhook の秘密を読めなければ 503 |
-| 実行ジョブの token | 正しい token から `jobId`・`sprintRunId` が返ること。形が違う・署名が合わない・期限切れ・知らない `kid` がそれぞれ `malformed`・`bad_signature`・`expired`・`unknown_key` で、発行者・宛先・`typ`・`sprint_run_id` の違いは `malformed`。失敗の文に token の値が無いこと。公開鍵の集合を 5 分ごとに読み直し、読めない失敗は `RunJobTokenError` でないこと |
+| 実行ジョブの token | 正しい token から `jobId`・`sprintRunId`・`repo` が返ること。`repo` の無い・形の違う token は `malformed` で、どの種類の事象も 401 で保存 0 件（I44）。形が違う・署名が合わない・期限切れ・知らない `kid` がそれぞれ `malformed`・`bad_signature`・`expired`・`unknown_key` で、発行者・宛先・`typ`・`sprint_run_id` の違いは `malformed`。失敗の文に token の値が無いこと。公開鍵の集合を 5 分ごとに読み直し、読めない失敗は `RunJobTokenError` でないこと |
 | 公開の入口 | `index.ts` の `signRunJobToken`・`verifyRunJobToken`・`createRunJobTokenKit` で往復できること。`appendControlEvent` が環境変数の表へ 1 回のトランザクションで書くこと。#2170 の既存の export が残ること |
 | 直の追記 | `appendControlEvent` が、ランナーの `job.finished` が無ければ `{ written: true }` で 1 件、先にあれば `{ written: false }` で書かないこと。`job.finished` 以外・鍵が `<job_id>:finished` でない・`source` が `control` でないものは `forbidden`、定義に合わないものは `invalid_event` |
+| 起票の代行（I46〜I50） | 偽の登録と GitHub の口で、同じアカウントが登録し導入に入った先へ依頼の題と本文の Issue が 1 件でき、結果が参照を持つこと。登録が無い・ほかのアカウントだけが登録はどちらも `not_registered`、導入が起票先を含まないと `not_installed`。流儀の判定が GitHub Issues 以外なら `unsupported_tracker`。起票先が公開で実行のリポジトリが公開でないと `visibility`。同じ中身の依頼を別の `seq`・別のジョブで流すと Issue は 1 件で `duplicate_of` を持ち、同じ依頼を 2 回流しても結果は 1 件。`attempted_at` のある行は作り直さず `filing_failed`。上限 2 で 3 件目が `limit_exceeded`、GitHub が断ると数が戻ること。秘密らしい値で `secret_suspected`、ログに題と本文が無いこと。本物の GitHub の口が token の作成の要求に `repository_ids` 1 つと `{ issues: "write" }` だけを送り、token を返さないこと |
+| ランナーと NDF の起票の依頼 | ランナーが依頼の行を `issue.requested` にし、上限を超える行を `attention`、形の違う行を送らないこと。`issue-file.py create` が `NDF_ISSUE_REQUEST_FILE` があり起票先が別のときだけ 1 行を足して 0 で終え、承認資料を書かないこと（pytest） |
 | 秘密を出さない（I30・I31） | ログが 4 列だけで、token と Webhook の秘密の値が応答にもログにも現れないこと。`python3 scripts/check-service-boundary.py` が 0 で終わること |
 | 1 件の所要 | 偽の表へ `runner` の経路で 1,000 件を送り、token の検証・検査・追記を通した 1 件の平均を測ること |
 | 既存への影響 | #2170 のアカウントのテストが変わらずに通り、`accounts.yaml` の経路と応答が変わらないこと |
@@ -490,7 +555,7 @@ graph TD
 
 ## 関連リンク
 
-- 課題: [#2171](https://github.com/devbasex/ai-plugins/issues/2171)（要求と受け入れ条件の正本）、親の [#2168](https://github.com/devbasex/ai-plugins/issues/2168)
+- 課題: [#2171](https://github.com/devbasex/ai-plugins/issues/2171)（要求と受け入れ条件の正本）、親の [#2168](https://github.com/devbasex/ai-plugins/issues/2168)、照合と起票の依頼の [#2216](https://github.com/devbasex/ai-plugins/issues/2216)（設計 Pull Request [#2233](https://github.com/devbasex/ai-plugins/pull/2233)）、相手先の流儀の判定の [#2239](https://github.com/devbasex/ai-plugins/issues/2239)
 - 設計 Pull Request: [#2201](https://github.com/devbasex/ai-plugins/pull/2201)、実装: [#2207](https://github.com/devbasex/ai-plugins/pull/2207)・[#2209](https://github.com/devbasex/ai-plugins/pull/2209)
 - サービス全体の契約: [ndf-factory-service-boundary.md](ndf-factory-service-boundary.md)
 - 認証とアカウント・席・プランの使える量（#2170）: [ndf-factory-accounts-and-plans.md](ndf-factory-accounts-and-plans.md)
