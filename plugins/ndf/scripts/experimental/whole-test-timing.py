@@ -85,7 +85,7 @@ def read_junit(path: Path) -> dict[str, dict]:
     return tests
 
 
-def summarize(tests: dict[str, dict]) -> tuple[dict, list[dict]]:
+def summarize_tests(tests: dict[str, dict]) -> tuple[dict, list[dict]]:
     ran = {k: v for k, v in tests.items() if v["outcome"] != "skipped"}
     metrics = {
         "tests": len(ran),
@@ -128,7 +128,7 @@ def cmd_measure(a) -> None:
     for s in suites:
         if s.get("junit"):
             tests.update(read_junit(root / s["junit"]))
-    counted, items = summarize(tests)
+    counted, items = summarize_tests(tests)
     metrics = {
         "load_average_1m": round(load1, 2),
         "cpus": cpus,
@@ -163,7 +163,7 @@ def _read_out(path: str) -> dict:
         raise StepError(f"計測の記録を読めない: {path}: {e}", EXIT_UNREADABLE)
 
 
-def compare(before: dict, after: dict, ledger: set[str]) -> dict:
+def compare_sets(before: dict, after: dict, ledger: set[str]) -> dict:
     ran_before = {k for k, v in before.items() if v["outcome"] != "skipped"}
     missing = sorted(k for k in ran_before if k not in after and k not in ledger)
     skipped = sorted(k for k in ran_before if k in after and after[k]["outcome"] == "skipped")
@@ -176,8 +176,8 @@ def cmd_diff(a) -> None:
         ledger = ledger_nodeids(Path(a.ledger).read_text(encoding="utf-8"))
     except OSError as e:
         raise StepError(f"台帳を読めない: {a.ledger}: {e}", EXIT_UNREADABLE)
-    found = compare(before, after, ledger)
-    b, f = summarize(before)[0], summarize(after)[0]
+    found = compare_sets(before, after, ledger)
+    b, f = summarize_tests(before)[0], summarize_tests(after)[0]
     metrics = {"before": b, "after": f, "missing": len(found["missing"]), "now_skipped": len(found["now_skipped"])}
     items = [{"kind": "missing", "name": n, "result": "not-in-ledger"} for n in found["missing"]]
     items += [{"kind": "now_skipped", "name": n, "result": "skipped"} for n in found["now_skipped"]]
