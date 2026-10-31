@@ -79,7 +79,7 @@
       "kind": "リリース後テスト",
       "stage": "リリース後テスト",
       "timeout": 3600,
-      "prompt": "/ndf:release-verification スプリント m9（#15）。配布の記録は Pull Request #{queue_pr:release-prod} にある。リリース後テストの記録をその Pull Request へコメントで書く。課題は閉じない（次の close が閉じる）。番号が 0 なら本番へ出ていないため、何もせずに終える。",
+      "prompt": "/ndf:release-verification スプリント m9（#15）。配布の記録は Pull Request #{queue_pr:release-prod} にある。受け入れ条件ごとに確かめ、スプリントの Pull Request の「手動確認」でリリース後テストへ回した項目と、マージ前に未検証として残した項目も行として載せて、リリース後テストの記録をその Pull Request へコメントで書く。課題は閉じない（次の close が閉じる）。番号が 0 なら本番へ出ていないため、何もせずに終える。",
       "next": "retro"
     },
     {

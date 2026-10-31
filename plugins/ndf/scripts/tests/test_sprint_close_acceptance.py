@@ -118,6 +118,16 @@ def test_a_criterion_without_a_passing_row_keeps_the_issue_open(repo, gh):
     assert gh.get()["issue_bodies"]["o/r#1"] == THREE
 
 
+def test_a_pre_merge_criterion_needs_no_passing_row(repo, gh):
+    """本文の `## 受け入れ条件の確認` でマージ前に確かめたと記録した条件 3 は、合格の行が無くても閉じる（#2144）。"""
+    record = "\n## 受け入れ条件の確認\n\n| 条件 | 区分 | 手段 |\n| --- | --- | --- |\n| 3 | マージ前 | `pytest -k three` |\n"
+    setup(gh, [("#1", "1. 一", "合格"), ("#1", "2. 二", "合格")], {"o/r#1": THREE + record})
+    code, out, err = call("sprint-close.py", CLOSE, gh.env, repo)
+    it = issues_of(out)["o/r#1"]
+    assert code == 0, (out, err)
+    assert it["result"] == "closed" and it["checked"] == [1, 2, 3]
+
+
 def test_all_criteria_passed_closes_and_marks_before_closing(repo, gh):
     """1〜3 がそろうと閉じ、本文の 3 個のチェックボックスに印が付く。書くのは閉じる前（受け入れ条件 4）。"""
     setup(gh, [("#1", f"{i}. c", "合格") for i in (1, 2, 3)], {"o/r#1": THREE})

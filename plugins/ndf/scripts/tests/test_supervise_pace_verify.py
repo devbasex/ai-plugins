@@ -301,6 +301,8 @@ def test_close_of_the_promote_route_reads_the_promote_pr(tmp_path):
     assert ids.index("release-verify") < ids.index("retro") < ids.index("close")
     rv = steps[ids.index("release-verify")]
     assert rv["type"] == "work" and rv["prompt"].startswith("/ndf:release-verification") and "{queue_pr:promote}" in rv["prompt"]
+    # 「リリース後テスト」と記録するのは、受け入れ条件ごとに確かめて記録を書くこのステップだけ（#2288 の AC1）
+    assert [s["id"] for s in steps if s.get("stage") == "リリース後テスト"] == ["release-verify"]
 
 
 PRD_ON_BASE = {**PRD, "trigger": "develop へのマージ", "branch": "develop"}  # ベースブランチへのマージで本番へ届く

@@ -14,7 +14,8 @@
 3. 閉じる条件 1（本番への配布まで済んだ、または配布なし）と、--with-verification か最終工程がリリース後テストのときは
    条件 2（その課題のリリース後テストの行がすべて合格で、本文の受け入れ条件の番号のすべてに合格の行がある）
    を課題ごとに判定する。`課題` の列が課題を指さない行（`—`・`PR 1869` など）は飛ばす。条件 2 は課題ごとの錠
-   （lib/gh_parts.py の issue_lock）の中で状態と本文を 1 回で読んで判定し、満たした記録のリポジトリの課題は
+   （lib/gh_parts.py の issue_lock）の中で状態と本文を 1 回で読んで判定し（本文の `## 受け入れ条件の確認` で
+   マージ前に確かめたと記録された条件には合格の行を求めない。#2144）、満たした記録のリポジトリの課題は
    本文の受け入れ条件に印（`[x]`）を付けてから閉じる（規則は lib/acceptance.py。#1683）。
    最後に条件 3（最終工程の記録。--final-stage、省けば振り返り）を判定する。振り返りは課題の本文の
    `振り返り: <コメントの URL>` の行のうち、コメントの識別子が記録の PR の最後の配布の記録のコメントの識別子以上の
@@ -100,15 +101,18 @@ UNVERIFIED = "閉じているが閉じる条件 2 を満たさない: "
 UNREADABLE_BODY = "本文を読めない（最終工程の記録を確かめられない）"
 
 
-def judge_acceptance(rows, criteria):
+def judge_acceptance(rows, criteria, pre_merge=frozenset()):
     """閉じる条件 2 の判定。(満たすか, 満たさない理由, 印を付ける番号) を返す。
 
-    受け入れ条件が 0 個なら表の行の合否だけで決める。"""
+    受け入れ条件が 0 個なら表の行の合否だけで決める。pre_merge（本文の `## 受け入れ条件の確認` でマージ前に
+    確かめたと記録された番号。#2144）の条件には合格の行を求めない。すべての条件がそれなら行が無くても満たす。"""
+    if rows is None and criteria and all(c.number in pre_merge for c in criteria):
+        return True, None, [c.number for c in criteria if not c.checked]
     if rows is None:
         return False, NO_ROWS, []
     if not rows.all_pass:
         return False, NOT_PASSED, []
-    missing = [c.number for c in criteria if c.number not in rows.passed]
+    missing = [c.number for c in criteria if c.number not in rows.passed and c.number not in pre_merge]
     if missing:
         return False, "合格の行が無い受け入れ条件: " + ", ".join(map(str, missing)), []
     return True, None, [c.number for c in criteria if not c.checked]
@@ -237,7 +241,7 @@ def _judge_and_mark(a, ctx, repo, n, rows):
     if got is None:
         return {**base, "result": "failed", "reason": UNREADABLE_BODY, "cmd": ctx.retry_cmd}, []
     state, body = got
-    ok, why, to_check = judge_acceptance(rows, acceptance.criteria(body))
+    ok, why, to_check = judge_acceptance(rows, acceptance.criteria(body), acceptance.pre_merge_numbers(body))
     own = repo == ctx.record_repo  # 他のリポジトリの課題の本文は書かない（I7）
     if not ok:
         if state == "CLOSED":

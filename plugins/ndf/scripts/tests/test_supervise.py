@@ -1451,6 +1451,7 @@ def test_new_release_dev_and_prod(tmp_path):
     assert st["facts"]["presentation_to"] == "issues/approval-ndf-v10.17.11.md"
     assert st["facts"]["gate_next"] == "explain" and st["verify"]["cwd"] == "/r"
     assert "--ref develop" in st["verify"]["cmd"] and "--channel dev" in st["release"]["cmd"]
+    assert st["verify"]["stage"] == "配布"  # 開発版の導入の確認は「配布」（#2288 の AC2）
 
     p = cli(
         "new",
@@ -1484,7 +1485,9 @@ def test_new_release_dev_and_prod(tmp_path):
         "fix",
         "judge-record",
     ]
-    assert "--ref main" in st["verify"]["cmd"] and st["verify"]["stage"] == "リリース後テスト"
+    # 導入の確認だけのステップは「リリース後テスト」と記録しない。それは仕上げの release-verify が担う（#2288 の AC1）
+    assert "--ref main" in st["verify"]["cmd"] and st["verify"]["stage"] == "配布"
+    assert not [s for s in plan["steps"] if s.get("stage") == "リリース後テスト"]
     assert st["verify"]["next"] == "cleanup" and "facts" not in st
     # 先頭の approve が開発版の facts の出力から承認したコミットを読む（#1426 の AC9）
     assert "approve --approval issues/approval-ndf-v10.17.11.md --facts-from '{queue_state?:release}' --by user" in st["approve"]["cmd"]
