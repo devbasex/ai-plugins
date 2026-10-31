@@ -1006,7 +1006,7 @@ n = len(open(os.path.join(state, "calls")).read().splitlines()) if os.path.exist
 responses = json.load(open(os.path.join(state, "responses.json")))
 r = responses[min(n, len(responses) - 1)]
 sys.stdin.read()
-open(os.path.join(state, "calls"), "a").write(json.dumps({"n": n, "bedrock": os.environ.get("CLAUDE_CODE_USE_BEDROCK"), "token": os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"), "config_dir": os.environ.get("CLAUDE_CONFIG_DIR"), "account": os.environ.get("NDF_CLAUDE_ACCOUNT"), "auth_token": os.environ.get("ANTHROPIC_AUTH_TOKEN")}) + "\\n")
+open(os.path.join(state, "calls"), "a").write(json.dumps({"n": n, "bedrock": os.environ.get("CLAUDE_CODE_USE_BEDROCK"), "token": os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"), "config_dir": os.environ.get("CLAUDE_CONFIG_DIR"), "account": os.environ.get("NDF_CLAUDE_ACCOUNT"), "auth_token": os.environ.get("ANTHROPIC_AUTH_TOKEN"), "argv": sys.argv[1:]}) + "\\n")
 if r.get("stderr"):
     sys.stderr.write(r["stderr"])
 print(json.dumps(r["out"]))
@@ -2644,6 +2644,90 @@ def test_work_without_report_keeps_cli_result(tmp_path, seq):
     seq[0]({"out": {"result": "直した", "usage": {}, "total_cost_usd": 0.01, "num_turns": 1}})
     s, _ = run_plan(tmp_path, [{"id": "impl", "type": "work", "prompt": "直す", "next": "end"}])
     assert s.state.results["impl"]["exit"] == 0
+
+
+def _arg(argv, flag):
+    return argv[argv.index(flag) + 1].split(",") if flag in argv else None
+
+
+# 足す Tool は WebFetch・WebSearch の 2 つだけ（I3）。前の許可の一覧との差分で縛る
+_WEB = {"WebFetch", "WebSearch"}
+_BEFORE_WORK = {"Read", "Edit", "Write", "Bash", "Grep", "Glob"}
+_BEFORE_FULL = _BEFORE_WORK | {"Skill", "Agent", "Monitor", "SendMessage", "ToolSearch"}
+
+
+def test_full_work_allows_web_tools(tmp_path, seq):
+    """full の work の claude -p は WebFetch・WebSearch を許可し、--permission-mode は acceptEdits のまま（#1698）。"""
+    set_responses, calls = seq
+    set_responses(OK)
+    run_plan(tmp_path, [{"id": "design", "type": "work", "full": True, "prompt": "/ndf:design 1", "next": "end"}])
+    argv = calls()[0]["argv"]
+    assert set(_arg(argv, "--allowed-tools")) == _BEFORE_FULL | _WEB and _arg(argv, "--permission-mode") == ["acceptEdits"]
+
+
+@pytest.mark.parametrize("serena", [False, True])
+def test_minimal_work_lists_web_tools_in_tools_and_allowed(tmp_path, seq, serena):
+    """最小構成の work は --tools と --allowed-tools の両方に WebFetch・WebSearch が入る（Serena を付けても）。"""
+    set_responses, calls = seq
+    set_responses(OK)
+    run_plan(tmp_path, [{"id": "impl", "type": "work", "prompt": "実装する", "serena": serena, "next": "end"}])
+    argv = calls()[0]["argv"]
+    for flag in ("--tools", "--allowed-tools"):
+        assert {"WebFetch", "WebSearch"} <= set(_arg(argv, flag)), flag
+    assert set(_arg(argv, "--tools")) == _BEFORE_WORK | _WEB
+
+
+def test_toolless_calls_get_no_tools():
+    """judge・遅れの判定・PR の本文のように Tool を渡さない呼び出しは --tools "" のままで、許可の一覧を持たない。"""
+    argv = claude.claude_cmd("s", None, "/w", base="claude")
+    assert argv[argv.index("--tools") + 1] == "" and "--allowed-tools" not in argv and "WebFetch" not in " ".join(argv)
+
+
+NO_REPORT = {"out": {"result": "途中", "usage": {}, "total_cost_usd": 0.01, "num_turns": 1, "session_id": "s1"}}
+
+
+def _report(result):
+    body = f"止めた\n\n## 作業の報告\n- 作業: 設計\n- 結果: {result}\n- 見つけたもの: 1 件（https://example.com/terms を取得できなかった）"
+    return {"out": {"result": body, "usage": {}, "total_cost_usd": 0.01, "num_turns": 1, "session_id": "s1"}}
+
+
+def _resumes(calls):
+    return sum("--resume" in c["argv"] for c in calls())
+
+
+DESIGN_PLAN = [
+    {"id": "design", "type": "work", "full": True, "prompt": "/ndf:design 1", "next": "pr"},
+    {"id": "pr", "type": "run", "cmd": "echo pr-ran", "next": "end"},
+]
+
+
+@pytest.mark.parametrize("result", ["判断が要る", "できなかった"])
+def test_full_report_not_done_stops_without_resume(tmp_path, seq, result):
+    """full の最初の報告が「判断が要る / できなかった」なら起こし直さずに落ち、計画は止まって報告が残る（#1698）。"""
+    set_responses, calls = seq
+    set_responses(_report(result), OK)
+    s, text = run_plan(tmp_path, DESIGN_PLAN)
+    assert _resumes(calls) == 0 and len(calls()) == 1
+    assert s.state.results["design"]["exit"] == 1 and "pr" not in s.state.results
+    assert "結果: 止まった" in text
+    assert _report(result)["out"]["result"] in s.state.results["design"]["text"]
+
+
+def test_full_resume_stops_when_resumed_reply_needs_a_decision(tmp_path, seq):
+    """起こし直しの途中の応答が「判断が要る」なら、残りの回数を使わずに止める。"""
+    set_responses, calls = seq
+    set_responses(NO_REPORT, _report("判断が要る"), OK)
+    s, _ = run_plan(tmp_path, DESIGN_PLAN)
+    assert _resumes(calls) == 1 and s.state.results["design"]["exit"] == 1
+
+
+@pytest.mark.parametrize("replies, resumes, code", [([NO_REPORT] * 4, 3, 1), ([NO_REPORT, OK], 1, 0)])
+def test_full_without_report_resumes_up_to_three_times(tmp_path, seq, replies, resumes, code):
+    """報告が無いまま終わった full のステップは、今までどおり 3 回まで起こし直す。"""
+    set_responses, calls = seq
+    set_responses(*replies)
+    s, _ = run_plan(tmp_path, [DESIGN_PLAN[0] | {"next": "end"}])
+    assert _resumes(calls) == resumes and s.state.results["design"]["exit"] == code
 
 
 def test_run_ticking_timeout_stops_the_group_after_the_leader_exits(tmp_path):
