@@ -16,13 +16,12 @@ from validate_manifests_helpers import build_tree, output_of, run_check
 
 def _mcp_plugin(root: Path, declared, files=(".mcp.json",)) -> None:
     plugin = root / "plugins/mcp/mcp-x"
-    for rel in (".claude-plugin", ".codex-plugin", "dev.kiro"):
+    for rel in (".claude-plugin", ".codex-plugin"):
         (plugin / rel).mkdir(parents=True)
     for name in files:
         (plugin / name).write_text('{"mcpServers": {}}\n', encoding="utf-8")
     (plugin / ".claude-plugin/plugin.json").write_text('{"name": "mcp-x"}\n', encoding="utf-8")
     (plugin / ".codex-plugin/plugin.json").write_text(json.dumps({"name": "mcp-x", "mcpServers": declared}), encoding="utf-8")
-    (plugin / "dev.kiro/install.sh").write_text("#!/bin/sh\n", encoding="utf-8")
 
 
 @pytest.mark.parametrize(

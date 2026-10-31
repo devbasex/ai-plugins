@@ -1,6 +1,6 @@
 # AI Plugins
 
-Claude Code / Codex / Kiro CLI / agy で使うプラグインを配るマーケットプレイスです。
+Claude Code / Codex で使うプラグインを配るマーケットプレイスです。
 入れると、Pull Request の作成・レビュー・修正といった開発の作業を、手順どおりに AI へ任せられます。
 よく使う外部サービス（Notion・BigQuery・データベースなど）へつなぐ設定も入ります。
 
@@ -22,29 +22,10 @@ codex plugin marketplace add https://github.com/devbasex/ai-plugins
 codex plugin add ndf@ai-plugins
 ```
 
-### Kiro CLI
+### Kiro CLI と agy
 
-Kiro CLI はマーケットプレイスから入れられません。clone したディレクトリでインストーラーを実行します。
-
-```bash
-git clone https://github.com/devbasex/ai-plugins.git
-cd ai-plugins
-bash plugins/ndf/dev.kiro/install.sh
-```
-
-起動の方法は [plugins/ndf/README.md の「Kiro CLI」](./plugins/ndf/README.md#kiro-cli) にあります。
-
-### agy
-
-agy もマーケットプレイスから入れられません。clone したディレクトリから導入します。
-
-```bash
-git clone https://github.com/devbasex/ai-plugins.git
-cd ai-plugins
-agy plugin install plugins/ndf/dev.agy
-```
-
-hook を効かせる手順は [plugins/ndf/README.md の「agy」](./plugins/ndf/README.md#agy) にあります。
+Kiro CLI と agy へはプラグインを配りません。cross-review と cross-refactoring が、別の AI の意見を得る相手役として CLI を起動するだけです（Claude Code か Codex に ndf を入れれば使えます）。
+前の版で入れた手元の扱いは [plugins/ndf/README.md の「agy・Kiro CLI への配布の終了」](./plugins/ndf/README.md#agykiro-cli-への配布の終了) にあります。
 
 更新の方法と Slack 通知の設定は [plugins/ndf/README.md](./plugins/ndf/README.md) にあります。
 
@@ -67,10 +48,10 @@ Claude Code では `/ndf:<Skill 名>` と打って呼びます。**Skill** は�
 
 | プラグイン名 | バージョン | できること | 詳細 |
 | --- | --- | --- | --- |
-| **ndf** | 10.27.3 | 開発の作業手順（Skill）と専門のサブエージェント。4 つの AI ツールへ同じ名前で入る | [README](./plugins/ndf/README.md) |
+| **ndf** | 10.27.3 | 開発の作業手順（Skill）と専門のサブエージェント。Claude Code と Codex へ同じ名前で入る | [README](./plugins/ndf/README.md) |
 | **playwright-kit** | 3.0.2 | Playwright による E2E テストの計画・スクリプト作成・証跡のレポート | [README](./plugins/playwright-kit/README.md) |
 
-外部サービスへつなぐ MCP サーバーの設定のプラグインが 10 個あります（Claude Code / Codex / Kiro CLI 向け）。
+外部サービスへつなぐ MCP サーバーの設定のプラグインが 10 個あります（Claude Code / Codex 向け）。
 使うものだけを入れます（Claude Code なら `/plugin install <プラグイン名>@ai-plugins`）。
 
 | プラグイン名 | つなぐ先 |
@@ -89,7 +70,7 @@ Claude Code では `/ndf:<Skill 名>` と打って呼びます。**Skill** は�
 ### NDF プラグインの Skill の一覧
 
 **NDFプラグイン v10.27.3** に入る Skill の数は、AI ツールごとに違います。
-Claude Code向け core 49個、Kiro向け core 46個、Codex向け core 45個、agy向け core 45個です。
+Claude Code向け core 49個、Codex向け core 45個です。
 元Skills（49個）の内訳は次のとおりです。
   - Pull Request とレビュー (7): pr, pr-tests, fix, pr-review, cherry-pick-pr, deploy, merged
   - 開発の進め方 (17): development-workflow, requirements-design, design, document-rebuild, document-sources, document-drafting, tdd-cycle, refactoring, quality-gates, release, release-verification, retrospective, out-of-scope, progress-tracking, backlog-refinement, layout-review, estimate
@@ -105,7 +86,7 @@ Skill のほかに、次のものが入ります。
 | 部品 | できること |
 | --- | --- |
 | サブエージェント（Claude Code） | 調査・データ分析・デバッグ・コードレビュー・CI/CD などを任せる専門のサブエージェント 8 個 |
-| 外部 AI への委譲 | Codex や agy をバックグラウンドで動かし、別の AI の意見を得る |
+| 外部 AI への委譲 | Codex・Kiro CLI・agy をバックグラウンドで動かし、別の AI の意見を得る |
 | hook | 会話の記録を 90 日以上残す。回答や承認を待つときに Slack へ知らせる。リポジトリに `.ndf/worktree.json` があるときは git worktree での作業を案内する |
 
 ## もっと知る

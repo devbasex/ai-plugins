@@ -2,7 +2,7 @@
 
 ## プロジェクト概要
 
-**Claude Code / Codex / Kiro CLI / agy 向けプラグインマーケットプレイス**の開発プロジェクトです。チーム全体で AI 開発ツールの導入を加速するための事前設定されたプラグインを提供します。
+**Claude Code / Codex 向けプラグインマーケットプレイス**の開発プロジェクトです。Kiro CLI と agy へは配らず、cross-review / cross-refactoring の相手役として起動するだけです。チーム全体で AI 開発ツールの導入を加速するための事前設定されたプラグインを提供します。
 
 **リポジトリ**: https://github.com/devbasex/ai-plugins
 
@@ -116,15 +116,15 @@ ai-plugins/
 ├── .claude-plugin/
 │   └── marketplace.json          # マーケットプレイス定義（必須）
 ├── plugins/
-│   ├── ndf/                      # NDF（4ランタイム共通の単一ディレクトリ）
-│   ├── playwright-kit/           # playwright-kit（3ランタイム共通の単一ディレクトリ）
+│   ├── ndf/                      # NDF（Claude Code・Codex 共通の単一ディレクトリ）
+│   ├── playwright-kit/           # playwright-kit（Claude Code・Codex 共通の単一ディレクトリ）
 │   └── mcp/
-│       └── mcp-*/               # MCPプラグイン10個（3ランタイム共通）
+│       └── mcp-*/               # MCPプラグイン10個（Claude Code・Codex 共通）
 ├── docs/                         # リポジトリ知識
 ├── factory/                      # Web サービス（Neural Development Factory）。プラグインと分け、自分の LICENSE を持つ
 ├── AGENTS.md                     # 共通エントリポイント
 ├── CLAUDE.md                     # Claude Code固有設定
-├── KIRO.md                       # Kiro CLI固有設定
+├── KIRO.md                       # 相手役として起動される Kiro CLI の説明
 └── README.md                     # プロジェクト説明
 ```
 
@@ -144,16 +144,15 @@ ai-plugins/
 | [docs/articles/](docs/articles/README.md) | 社外ブログへ載せる記事の正本。**書いた日時点の記録で、以後の構成変更には追随しない** |
 | [docs/claude-code-skills-survey/](docs/claude-code-skills-survey/01-findings.md) | Claude Code Skills調査レポート（3 本） |
 | [docs/development-history/](docs/development-history/) | 2026-09-02 までの開発履歴と知見。**以降の振り返りは、起点の issue か Pull Request のコメントに残す**（`/ndf:retrospective`） |
-| [plugins/ndf/README.md](plugins/ndf/README.md) | NDFプラグイン（4ランタイム共通） |
+| [plugins/ndf/README.md](plugins/ndf/README.md) | NDFプラグイン（Claude Code・Codex 共通） |
 
 ## NDFプラグインについて
 
-**NDFプラグイン**は、このマーケットプレイスの主要プラグインです。plugin 名は全ランタイムで `ndf` を維持し、配布物は `plugins/ndf/` の1ディレクトリにまとまっています。
-- Skill の実体は `plugins/ndf/skills/` の1箇所。配布先は `plugins/ndf/manifests/*-skills.txt` が決める
+**NDFプラグイン**は、このマーケットプレイスの主要プラグインです。plugin 名は Claude Code・Codex のどちらでも `ndf` を維持し、配布物は `plugins/ndf/` の1ディレクトリにまとまっています。
+- Skill の実体は `plugins/ndf/skills/` の1箇所。配布先は Claude Code と Codex の 2 つで、配る Skill は `plugins/ndf/manifests/{claude,codex}-skills.txt` が決める
 - Claude Code版は専門サブエージェントと実行主体（supervisor・worker）の定義（`plugins/ndf/agents/`）、公開Skills、PreToolUse/SessionStart/Stopフックを提供
 - Codex版は Codex向け公開Skillsと任意Slack通知hookを提供
-- Kiro版は `plugins/ndf/dev.kiro/install.sh` で `.kiro/skills/`、`.kiro/steering/ndf-policies.md`、`.kiro/agents/ndf.json` を生成
-- agy版は `plugins/ndf/dev.agy/` を `agy plugin install` で導入し、公開Skills・エージェント定義・PreToolUse/PreInvocationフックを提供
+- Kiro CLI と agy へは何も配らない。cross-review のレビュー担当、cross-refactoring の提案・実装の担当（相手役）として、ホスト（Claude Code・Codex）から CLI プロセスで起動する。相手役が読む手順書はホストの導入先から担当の worktree へ写す（起動の形の正本は `plugins/ndf/skills/external-ai/references/cli-kiro.md`・`cli-agy.md`）
 - 外部AI委譲は `/ndf:external-ai` skill と `corder` エージェント経由で Codex / agy を呼び出す
 
 詳細は各 runtime README と `docs/ndf-plugin-reference.md` を参照。

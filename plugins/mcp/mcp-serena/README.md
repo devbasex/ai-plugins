@@ -1,7 +1,7 @@
 # mcp-serena
 
 Serena MCP サーバを提供するプラグインです。シンボル単位の読み書き（定義・参照・シンボル単位の
-置換）と、言語サーバの診断を Claude Code・Codex・Kiro CLI で使えるようにします。
+置換）と、言語サーバの診断を Claude Code・Codex で使えるようにします。
 
 ## 最初に: 言語サーバの設定はプロジェクトごとに行う
 
@@ -51,14 +51,6 @@ Codex では `--context codex` で起動します（`.codex.mcp.json`）。
 
 **Codex では、プラグインの hook は信頼するまで動きません**（Codex 0.156 で実測。何も表示されずに走らないだけになる）。対話の Codex で `/hooks` を開き、mcp-serena の hook を信頼してください。起動時に出る「Review hooks」の案内からも信頼できます。
 
-### Kiro CLI
-
-repository を clone した後、対象のプロジェクトの根で installer を実行します。
-
-```bash
-bash plugins/mcp/mcp-serena/dev.kiro/install.sh
-```
-
 ### 前提
 
 - `uv`（`uvx`）。Serena は `uvx --from serena-agent==1.7.0` で起動します
@@ -75,9 +67,6 @@ bash plugins/mcp/mcp-serena/dev.kiro/install.sh
 # Codex
 codex plugin marketplace upgrade ai-plugins
 codex plugin add mcp-serena@ai-plugins
-
-# Kiro CLI
-bash plugins/mcp/mcp-serena/dev.kiro/install.sh
 ```
 
 ## 公式の `serena` プラグインと併用しない
@@ -98,7 +87,7 @@ bash plugins/mcp/mcp-serena/dev.kiro/install.sh
 
 | ランタイム | 定義 | 文脈 |
 | --- | --- | --- |
-| Claude Code / Kiro CLI | `.mcp.json` | `claude-code` |
+| Claude Code | `.mcp.json` | `claude-code` |
 | Codex | `.codex.mcp.json` | `codex` |
 
 どちらも `SERENA_HOME=.serena`（起動したディレクトリからの相対）で動きます。worktree ごとに

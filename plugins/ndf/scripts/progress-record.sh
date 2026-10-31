@@ -43,8 +43,8 @@ TOOL=progress-record
 . "$SCRIPT_DIR/lib/projects-common.sh" 2>/dev/null \
   || sr_emit --tool "$TOOL" --status stopped --summary "lib/projects-common.sh を読めない" --code 3
 # 工程名・モード・進め方の一覧と通過記録は development-workflow のライブラリが持つ（#725 の決定 2・3）。
-# **同じプラグインの根の相対で辿る。** `cd -P` で実体へ解決しない。agy の配置（dev.agy/scripts と
-# dev.agy/skills/development-workflow がどちらも symlink）でも、`scripts/` の 1 つ上に `skills/` がある。
+# **同じプラグインの根の相対で辿る。** `cd -P` で実体へ解決しない。`scripts/` が symlink で置かれた配置でも、
+# `scripts/` の 1 つ上に `skills/` がある。
 # shellcheck source=../skills/development-workflow/scripts/lib/workflow-common.sh
 . "$SCRIPT_DIR/../skills/development-workflow/scripts/lib/workflow-common.sh" 2>/dev/null \
   || sr_emit --tool "$TOOL" --status stopped --summary "development-workflow の workflow-common.sh を読めない" --code 3

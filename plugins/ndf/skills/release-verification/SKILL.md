@@ -66,7 +66,7 @@ allowed-tools:
 
 ```bash
 python3 "$SCRIPTS/release-verification-steps.py" verify-install --ref <develop|main> --expect <版> \
-  [--plugins ndf,...] [--runtimes claude,codex,kiro] --root .
+  [--plugins ndf,...] [--runtimes claude,codex] --root .
 ```
 
 隔離した HOME で ref から導入し、導入された版と、前の正式版のタグから変わったファイルの中身が

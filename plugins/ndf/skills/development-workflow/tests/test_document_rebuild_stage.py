@@ -26,7 +26,7 @@ PROJECTS_COMMON = PLUGIN_ROOT / "scripts/lib/projects-common.sh"
 
 NEW_STAGE = "ドキュメント再構成"
 RENAMED = {"設計レビュー": "ドキュメントレビュー", "レビュー": "実装レビュー"}
-RUNTIMES = ("claude", "codex", "kiro", "agy")
+RUNTIMES = ("claude", "codex")
 
 
 def lib_body() -> str:

@@ -74,9 +74,7 @@ def test_root_defaults_to_current_directory() -> None:
     ("before", "after", "expected"),
     [
         ("Claude Code向け core 5個", "Claude Code向け core 4個", "5"),
-        ("Kiro向け core 4個", "Kiro向け core 3個", "4"),
         ("Codex向け core 3個", "Codex向け core 2個", "3"),
-        ("agy向け core 2個", "agy向け core 1個", "2"),
     ],
 )
 def test_runtime_skill_count_mismatch_fails(tree: Path, before: str, after: str, expected: str) -> None:
@@ -92,9 +90,7 @@ def test_runtime_skill_count_mismatch_fails(tree: Path, before: str, after: str,
     "fragment",
     [
         "Claude Code向け core 5個、",
-        "Kiro向け core 4個、",
-        "Codex向け core 3個、",
-        "agy向け core 2個",
+        "Codex向け core 3個",
     ],
 )
 def test_runtime_skill_count_removed_fails(tree: Path, fragment: str) -> None:
@@ -167,8 +163,6 @@ def test_category_breakdown_removed_fails(tree: Path) -> None:
     [
         ("| Claude Code | 5 個 |", "| Claude Code | 4 個 |", "5"),
         ("| Codex | 3 個 |", "| Codex | 2 個 |", "3"),
-        ("| Kiro CLI | 4 個 |", "| Kiro CLI | 9 個 |", "4"),
-        ("| agy | 2 個 |", "| agy | 7 個 |", "2"),
     ],
 )
 def test_distribution_table_mismatch_fails(tree: Path, before: str, after: str, expected: str) -> None:
@@ -185,8 +179,6 @@ def test_distribution_table_mismatch_fails(tree: Path, before: str, after: str, 
     [
         "| Claude Code | 5 個 | `.claude-plugin/plugin.json` |\n",
         "| Codex | 3 個 | `.codex-plugin/plugin.json` |\n",
-        "| Kiro CLI | 4 個 | `dev.kiro/install.sh` |\n",
-        "| agy | 2 個 | `dev.agy/plugin.json` |\n",
     ],
 )
 def test_distribution_table_row_removed_fails(tree: Path, row: str) -> None:
@@ -265,10 +257,10 @@ def test_failure_output_names_file_label_and_both_values(tree: Path) -> None:
 
 def test_missing_manifest_fails(tree: Path) -> None:
     """数える相手が無いことを、読み取れた値と一致しているとみなさない。"""
-    (tree / "plugins/ndf/manifests/kiro-skills.txt").unlink()
+    (tree / "plugins/ndf/manifests/codex-skills.txt").unlink()
     result = run_check(tree)
     assert result.returncode != 0
-    assert "kiro-skills.txt" in output_of(result)
+    assert "codex-skills.txt" in output_of(result)
 
 
 def test_missing_plugin_json_fails(tree: Path) -> None:
@@ -315,7 +307,6 @@ def agents_md(tree: Path) -> Path:
     ("mark", "document", "before", "after"),
     [
         ("G", "README.md", "**NDFプラグイン v9.3.0**", "**NDFプラグイン v9.2.1**"),
-        ("K", "plugins/ndf/README.md", "Kiro CLI用 / v9.3.0）", "Kiro CLI用 / v9.2.1）"),
         (
             "M",
             "plugins/ndf/README.md",
@@ -352,7 +343,6 @@ def test_codex_cache_path_partial_stale_fails(tree: Path) -> None:
     ("mark", "document", "fragment", "occurrences"),
     [
         ("G", "README.md", "**NDFプラグイン v9.3.0** のチェック用の最小構成です。\n", 1),
-        ("K", "plugins/ndf/README.md", "# => NDF統合開発エージェント（Kiro CLI用 / v9.3.0）\n", 1),
         ("L", "plugins/ndf/README.md", "~/.codex/plugins/cache/ai-plugins/ndf/9.3.0/skills/deploy/SKILL.md", 2),
         ("M", "plugins/ndf/README.md", "# => ndf@ai-plugins  installed, enabled  9.3.0  <path>\n", 1),
     ],
@@ -804,7 +794,7 @@ def test_versions_outside_the_section_do_not_fail(tree: Path) -> None:
 
 
 def test_bumping_only_the_plugin_version_reports_every_body_claim(tree: Path) -> None:
-    """この課題が起きた経路そのもの。説明文書を直さずに版だけ上げると 6 種類が挙がる。"""
+    """この課題が起きた経路そのもの。説明文書を直さずに版だけ上げると 5 種類が挙がる。"""
     bump_plugin_version(tree, "9.4.0")
     result = run_check(tree)
     assert result.returncode != 0
@@ -813,7 +803,6 @@ def test_bumping_only_the_plugin_version_reports_every_body_claim(tree: Path) ->
         "概要の版数",
         "プラグイン一覧表の ndf の版数",
         "版の付け方の節の版数",
-        "Kiro の確認例の版数",
         "Codex のキャッシュパスの例の版数",
         "`codex plugin list` の出力例の版数",
     ):
@@ -907,12 +896,12 @@ def test_manifest_skill_count_with_only_blank_and_comment_lines_returns_zero(tmp
     `None` と区別されている経路である。
     """
     module = _load_checker()
-    manifest = tmp_path / "plugins/ndf/manifests/kiro-skills.txt"
+    manifest = tmp_path / "plugins/ndf/manifests/codex-skills.txt"
     manifest.parent.mkdir(parents=True)
     manifest.write_text("# コメント行\n\n   \n# 別のコメント\n", encoding="utf-8")
 
     report = module.Report()
-    assert module.manifest_skill_count(tmp_path, "kiro", report) == 0
+    assert module.manifest_skill_count(tmp_path, "codex", report) == 0
     assert report.errors == []
 
 

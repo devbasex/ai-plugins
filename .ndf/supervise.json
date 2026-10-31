@@ -23,6 +23,6 @@
   "release": {
     "form": "package-plugin",
     "plugin": "ndf",
-    "runtimes": ["claude", "codex", "kiro"]
+    "runtimes": ["claude", "codex"]
   }
 }

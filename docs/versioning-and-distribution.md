@@ -47,7 +47,7 @@ Codex は全ブランチを取得するが、登録した ref を基準にする
 
 **接尾辞は人が読むための目印である。** Claude Code の直接インストール経路は版数を
 **キャッシュキーとしての文字列一致**でしか見ず、`-dev` や `-rc` を prerelease として
-扱わない。Codex と Kiro も同様で、Agent Plugins Specification には解釈の規定が無い。
+扱わない。Codex も同様で、Agent Plugins Specification には解釈の規定が無い。
 semver の順序で除外されるのは、プラグイン間の依存解決（`dependencies`）の経路だけである。
 それでも接尾辞を付けるのは、**入れたくない利用者が版数を見て判断できるようにする**ためである。
 
@@ -69,6 +69,10 @@ semver の順序で除外されるのは、プラグイン間の依存解決（`
 
 ## ランタイムごとの取得と導入
 
+**配布先は Claude Code と Codex の 2 つである。** Kiro CLI と agy へは配らず（#2231。最後に配ったのは
+`10.27.3`）、cross-review / cross-refactoring の相手役として CLI を起動するだけである。前の版で入れた手元の扱いは
+[plugins/ndf/README.md の「agy・Kiro CLI への配布の終了」](../plugins/ndf/README.md#agykiro-cli-への配布の終了)にある。
+
 **取得元の登録と、プラグインの導入は別の操作である。** 登録は取得元の一覧を書き換えるだけで、
 導入済みの実体には触れない。実体は版ごとのディレクトリ（`plugins/cache/<取得元>/<名前>/<版>/`）
 に置かれ、導入の記録がそのうち 1 つを指す。**登録を切り替えただけでは、その記録は元の版を
@@ -83,17 +87,6 @@ claude plugin install ndf@ai-plugins
 codex plugin marketplace add devbasex/ai-plugins
 codex plugin add ndf@ai-plugins
 ```
-
-**agy には入れ替えの操作が無い。** `agy plugin --help` の副コマンドは
-`list` / `import` / `install` / `uninstall` / `enable` / `disable` / `validate` / `link` /
-`help` で、導入済みを新しい版へ入れ替えるものが無い。他の 3 ランタイムは持つ
-（Claude Code は `claude plugin update`、Codex は取得元を更新してから `codex plugin add`、
-Kiro CLI はインストーラの再実行）。
-
-**`install` は既存の導入を拒まず、上書きする。ただし消えたファイルは残る**（agy 1.1.26 /
-2026-09-05 に実測）。同じ名前で導入し直すと `plugin.json` の版数も Skill の中身も入れ替わるが、
-**取得元から取り除いたファイルは実体に残り続ける**。配布物が減る版へ上げると、消したはずの
-Skill が利用者の手元で生き続ける。そのため案内は外してから入れ直す 2 手のままにする。
 
 **ローカルのディレクトリを同じ名前でマーケットプレイスとして追加しない。** 登録の鍵は取得元では
 なく `marketplace.json` の `name` で、**1 つの名前につき 1 つしか登録できない**（公式ドキュメントに
@@ -111,16 +104,8 @@ Skill が利用者の手元で生き続ける。そのため案内は外して�
 定まらず検証の手段にならない。手元での確認は次のいずれかで行う。どれも取得元を書き換えない。
 
 ```bash
-bash plugins/ndf/dev.kiro/install.sh --project <検証用ディレクトリ> --yes   # Kiro
 claude --plugin-dir plugins/ndf                                             # Claude Code
-agy plugin validate plugins/ndf/dev.agy                                     # agy（読み込みの確認）
 ```
-
-**agy は導入したプラグインの `hooks.json` を読み込まない。** 読む先は
-`~/.gemini/config/hooks.json` の 1 か所だけで、プラグイン配下とプロジェクト直下のどちらに
-置いても `loaded 1 named hooks from 1 hooks.json file(s)` のまま変わらない（agy 1.1.26 で
-実測）。導入した hook を効かせるには `bash plugins/ndf/dev.agy/install-hooks.sh` を実行して
-その 1 か所へ差し込む。冪等で、他の項目には触れない。
 
 ## 開発版を試す
 
@@ -142,16 +127,6 @@ ref の書き方は `owner/repo@ref` と `git-url#ref` の 2 つで、
 [公式ドキュメント](https://code.claude.com/docs/en/plugin-marketplaces)に記載がある。
 `claude plugin marketplace add --help` には出ないが実機で動く。Codex は `--ref` を持ち、
 `owner/repo@ref` も受け取る。`claude plugin install` に版を指定する手段は無い（これは確定）。
-
-**Kiro と agy はマーケットプレイスの経路を持たない。** clone した作業ディレクトリから
-導入するため、ref にあたるのは clone の checkout である。clone 直後は既定ブランチ（`main`）
-なので、正式版を使うだけなら追加の操作は要らない。
-
-```bash
-git -C <clone> checkout develop   # 開発版を試すときだけ
-bash plugins/ndf/dev.kiro/install.sh --project <ディレクトリ> --yes
-agy plugin uninstall ndf && agy plugin install <clone>/plugins/ndf/dev.agy
-```
 
 **サードパーティのマーケットプレイスは自動更新が既定で無効である。** `main` へ出した版が
 即座に全利用者へ届くわけではなく、利用者が `marketplace update` を実行した時点で届く。
@@ -237,7 +212,7 @@ claude plugin tag plugins/ndf --push      # ndf--v<版> を作って origin へ�
 落ちる。**記載を消してもチェックは通らない。** 位置を決める語が見つからなければ、読み取れない
 こととして落ちる。
 
-**定義ファイルが 7 箇所である。** 3 つの `plugin.json` はいずれも
+**定義ファイルが 5 箇所である。** 2 つの `plugin.json` はいずれも
 `version` と `description` の両方に版数を持つため、片方だけ直すとチェックで止まる。
 
 | 箇所 | 何を書くか |
@@ -246,8 +221,6 @@ claude plugin tag plugins/ndf --push      # ndf--v<版> を作って origin へ�
 | `plugins/ndf/.claude-plugin/plugin.json` の `description` | `(vX.Y.Z)` の形で版数 |
 | `plugins/ndf/.codex-plugin/plugin.json` の `version` | 版数そのもの |
 | `plugins/ndf/.codex-plugin/plugin.json` の `description` | `(vX.Y.Z)` の形で版数 |
-| `plugins/ndf/dev.agy/plugin.json` の `version` | 版数そのもの |
-| `plugins/ndf/dev.agy/plugin.json` の `description` | `(vX.Y.Z)` の形で版数 |
 | `.claude-plugin/marketplace.json` の該当プラグインの `description` | 同上 |
 
 **plugin の README は版ごとの更新の節（`## vX.Y.Z へ更新するとき`）を持たない。** README は現行版の説明と、
@@ -255,7 +228,7 @@ CHANGELOG.md を参照する固定の「`## 更新情報`」の節だけを持�
 置く。配布の手順（`release-steps.py` の `bump`・`changelog`・`notes`）は README に触れない。節が戻ると
 `scripts/check-doc-staleness.py` が落とす（`plugins/*/README.md`・`plugins/mcp/*/README.md`）。
 
-**説明文書の本文が 6 箇所である。** いずれも利用者が読む入口にあり、古いまま残ると現行版を
+**説明文書の本文が 5 箇所である。** いずれも利用者が読む入口にあり、古いまま残ると現行版を
 誤って伝えるか、書かれたとおりに実行できない。
 
 **指示書（`AGENTS.md` / `CLAUDE.md`）には版数を書かない。** 開発版の配布の `bump` が版数を
@@ -267,7 +240,6 @@ CHANGELOG.md を参照する固定の「`## 更新情報`」の節だけを持�
 | `README.md` の概要 | `**NDFプラグイン vX.Y.Z**` | `ndf` の `plugin.json` |
 | `README.md` のプラグイン一覧表 | 版数の列 | 行ごとに `plugins/<名前>/.claude-plugin/plugin.json` |
 | `docs/versioning-and-distribution.md` の「版の付け方と開発版の配布」章 | 版数の例 | `ndf` の `plugin.json`（基底の比較） |
-| `plugins/ndf/README.md` の Kiro の確認例 | 期待出力の版数 | `ndf` の `plugin.json` |
 | `plugins/ndf/README.md` の Codex のパス例 | `~/.codex/plugins/cache/.../ndf/X.Y.Z/`（2 箇所） | `ndf` の `plugin.json` |
 | `plugins/ndf/README.md` の `codex plugin list` の出力例 | 期待出力の版数 | `ndf` の `plugin.json` |
 
@@ -305,9 +277,9 @@ CHANGELOG.md を参照する固定の「`## 更新情報`」の節だけを持�
 両方に版を持たせると `plugin.json` が無警告で優先され、食い違いに気づけなくなる。
 
 `scripts/validate-runtime-plugins.sh` が突き合わせるのは、説明文書に書かれた Skill の数と、
-**版数を書いた箇所**です。定義ファイルが 7 箇所、説明文書の本文が
-6 箇所あります（`README.md` の概要とプラグイン一覧表、正本に 1 箇所、
-`plugins/ndf/README.md` の Kiro と Codex の確認例 3 種類）。**記載を消してもチェックは通りません。**
+**版数を書いた箇所**です。定義ファイルが 5 箇所、説明文書の本文が
+5 箇所あります（`README.md` の概要とプラグイン一覧表、正本に 1 箇所、
+`plugins/ndf/README.md` の Codex の確認例 2 種類）。**記載を消してもチェックは通りません。**
 一覧は上の 2 つの表にあります。
 
 ## チェックに載らず手で直す箇所
@@ -340,12 +312,12 @@ CHANGELOG.md を参照する固定の「`## 更新情報`」の節だけを持�
 そのまま残す。現行版を指しているかは文脈で決まる。**チェックが突き合わせるのは、周囲の固定の語で
 位置を決めた記載だけである。** 履歴と記録は最初から走査に入らない。
 
-**説明文書の本文に書かれた版数は取りこぼしやすい。** 上の 7 箇所を
+**説明文書の本文に書かれた版数は取りこぼしやすい。** 上の本文の 5 箇所を
 チェックの対象へ入れ、この取りこぼしを機械が拾う。
 
 ## 取得元の登録を確かめる
 
-**取得元の登録そのものを確かめるときは、設定ディレクトリを隔離する。** 「ランタイムごとの取得と導入」の手元での確認の 3 つは配布物を
+**取得元の登録そのものを確かめるときは、設定ディレクトリを隔離する。** 「ランタイムごとの取得と導入」の手元での確認（`claude --plugin-dir`）は配布物を
 直接読み込む確認で、取得元の登録から導入までの経路は通らない。開発版チャネルの取得手順は
 その経路そのものであるため、別の設定ディレクトリを与えて確かめる。**利用者の登録には触れない**
 （claude 2.1.261 / codex-cli 0.153.2 で実測）。
