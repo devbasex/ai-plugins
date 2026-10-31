@@ -2,7 +2,8 @@
 
 資料のディレクトリ（`<日付>-<topic>/`）ごとに、生成スクリプトを実行して pptx を検査する。
 - 生成が終了コード 0 で、章扉を除いたページ数が台本と構成メモの表の行数に等しい
-- 章扉を除く全ページのスピーカーノートが、台本の同じ番号の読み上げと一致する。章扉はノートを持たない
+- 章扉を除く全ページのスピーカーノートが、台本の同じ番号の読み上げと一致する。章扉はノートを持たない。
+  改行と空行は比べない（資料によってはノートに台本の改行と空行を残す）
 - 生成スクリプトが写した枠組み（`slides/lib/`）を使い、その内容が README に書いた写した時点のハッシュと一致する
 """
 
@@ -31,6 +32,11 @@ def _notes_rows(notes: Path) -> list[int]:
     text = notes.read_text(encoding="utf-8")
     section = text.split("## 構成", 1)[1].split("\n## ", 1)[0]
     return [int(m.group(1)) for m in re.finditer(r"^\|\s*(\d+)\s*\|", section, re.M)]
+
+
+def _flat(text: str) -> str:
+    """改行と空行を除いた読み上げ。ノートの改行の形は資料ごとに違ってよい。"""
+    return re.sub(r"\s*\n\s*", "", text)
 
 
 def _is_section(slide) -> bool:
@@ -63,7 +69,7 @@ def test_deck_builds_with_notes_from_script(deck: Path, tmp_path: Path) -> None:
         assert not page.notes, "章扉にスピーカーノートがある"
     for no, page in enumerate(pages, start=1):
         assert page.notes, f"台本の {no} ページ目にスピーカーノートが無い"
-        assert page.notes == readings[no], f"台本の {no} ページ目のノートが台本と違う"
+        assert _flat(page.notes) == _flat(readings[no]), f"台本の {no} ページ目のノートが台本と違う"
 
 
 @pytest.mark.parametrize("deck", DECKS, ids=[d.name for d in DECKS])
