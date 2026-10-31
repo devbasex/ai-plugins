@@ -166,3 +166,51 @@ def test_all_pre_merge_closes_without_rows_and_unrecorded_still_needs_rows():
     body = _recorded({1: "a", 2: "b", 3: "c", 4: "d"}, [])
     assert _judge(body, None)[0]
     assert _judge(BODY, None) == (False, sprint_close.NO_ROWS, [])
+
+
+# --- 版ごとのリリース後テストの表（version_verdicts の現状固定） ------------------------
+
+
+def _verify(ver, rows, verdict="合格"):
+    table = "| 課題 | 受け入れ条件 | 結果 |\n| --- | --- | --- |\n" + "".join(f"| {i} | {c} | {r} |\n" for i, c, r in rows)
+    return f"## リリース後テスト\n\n対象の版: {ver}\n\n{table}\n合否: {verdict}\n"
+
+
+def test_version_verdicts_reads_the_block_whose_base_version_matches():
+    text = _verify("1.0.1-dev.1", [("#7", "2. 二", "合格"), ("x/y#8", "1. 一", "不合格")])
+    assert acceptance.version_verdicts(text, "v1.0.1", "o/r") == {
+        ("o/r", 7): acceptance.IssueRows(True, frozenset({2})),
+        ("x/y", 8): acceptance.IssueRows(False, frozenset()),
+    }
+
+
+def test_version_verdicts_uses_the_last_matching_block_and_ignores_other_versions():
+    text = "\n".join(
+        [
+            _verify("1.0.1", [("#7", "1. 一", "不合格")]),
+            _verify("1.0.1（注記）", [("#7", "1. 一", "合格")]),
+            _verify("1.0.2", [("#9", "1. 一", "合格")]),
+        ]
+    )
+    assert acceptance.version_verdicts(text, "1.0.1", "o/r") == {("o/r", 7): acceptance.IssueRows(True, frozenset({1}))}
+
+
+@pytest.mark.parametrize(
+    "text, version",
+    [
+        ("", "1.0.1"),
+        ("本文だけ\n", "1.0.1"),
+        (_verify("1.0.2", [("#7", "1. 一", "合格")]), "1.0.1"),
+        (_verify("main c427284", [("#7", "1. 一", "合格")]), "1.0.1"),
+        (_verify("1.0.1", [("#7", "1. 一", "合格")]), "main"),
+        (_verify("1.0.1", [("—", "導入", "合格")]), "1.0.1"),
+        ("## リリース後テスト\n\n対象の版: 1.0.1\n\n| 課題 | 結果 |\n| --- | --- |\n| #7 | 合格 |\n", "1.0.1"),
+    ],
+)
+def test_version_verdicts_returns_empty_when_nothing_matches(text, version):
+    assert acceptance.version_verdicts(text, version, "o/r") == {}
+
+
+def test_version_verdicts_skips_a_block_without_a_version_line():
+    text = "## リリース後テスト\n\n| 課題 | 結果 |\n| --- | --- |\n| #7 | 合格 |\n\n合否: 合格\n"
+    assert acceptance.version_verdicts(text, "1.0.1", "o/r") == {}
