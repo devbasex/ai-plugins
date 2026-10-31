@@ -278,6 +278,43 @@ def _shipped_differs(root, expected, actual, shipped) -> bool | None:
     return None if p.returncode else _ships(p.stdout.split(), shipped)
 
 
+def _commits_resolvable(root, tip, allowed) -> bool:
+    """比べた先端と配布の PR の先端がどれもコミットとして読めるか。"""
+    return _is_commit(root, tip) and all(_is_commit(root, pr.head) for pr in allowed)
+
+
+def _classify_outside(root, approved, tip, allowed, shipped) -> tuple[list[str], list[Outside]] | None:
+    """承認の外のコミット（I3・I9）と、shipped のパスに触れないため退避するもの。読めなければ None。"""
+    outside = _outside_of_prs(root, approved, allowed)
+    if outside is None:
+        return None
+    if not outside or shipped:
+        to_tip = _outside_to_tip(root, approved, tip, allowed)
+        if to_tip is None:
+            return None
+        outside += [c for c in to_tip if c not in outside]
+    tolerated: list[Outside] = []
+    if shipped:
+        touched = {c: _touched(root, c) for c in outside}
+        tolerated = [Outside(c, _subject(root, c)) for c in outside if touched[c] is not None and not _ships(touched[c], shipped)]
+        outside = [c for c in outside if touched[c] is None or _ships(touched[c], shipped)]
+    return outside, tolerated
+
+
+def _tree_matches(root, v: Verdict, approved, allowed, shipped) -> bool | None:
+    """期待する木と tip の木を v へ書き、一致するか（shipped を渡すと違いが配布物に及ばなければ一致）。読めなければ None。"""
+    v.expected_tree = _expected_tree(root, approved, allowed)
+    v.actual_tree = _out(root, "rev-parse", f"{v.tip}^{{tree}}")
+    if not v.expected_tree or not v.actual_tree:
+        return None
+    differs = v.expected_tree != v.actual_tree
+    if differs and shipped:
+        differs = _shipped_differs(root, v.expected_tree, v.actual_tree, shipped)
+        if differs is None:
+            return None
+    return not differs
+
+
 def compare_approved(root, approved: str, tip: str, allowed: list[AllowedPR] = (), shipped: tuple[str, ...] = ()) -> Verdict:
     """承認したコミット approved から比べた先端 tip までを比べる（#815 の設計の「compare の中の順序」）。
 
@@ -296,36 +333,22 @@ def compare_approved(root, approved: str, tip: str, allowed: list[AllowedPR] = (
     if not _is_commit(root, approved):
         v.reason = UNKNOWN_COMMIT
         return v
-    if not _is_commit(root, tip) or not all(_is_commit(root, pr.head) for pr in allowed):
+    if not _commits_resolvable(root, tip, allowed):
         return v
     if not _ok(root, "merge-base", "--is-ancestor", approved, tip):
         v.reason = NOT_ANCESTOR
         return v
-    outside = _outside_of_prs(root, approved, allowed)
-    if outside is None:
+    classified = _classify_outside(root, approved, tip, allowed, shipped)
+    if classified is None:
         return v
-    if not outside or shipped:
-        to_tip = _outside_to_tip(root, approved, tip, allowed)
-        if to_tip is None:
-            return v
-        outside += [c for c in to_tip if c not in outside]
-    if shipped:
-        touched = {c: _touched(root, c) for c in outside}
-        v.tolerated = [Outside(c, _subject(root, c)) for c in outside if touched[c] is not None and not _ships(touched[c], shipped)]
-        outside = [c for c in outside if touched[c] is None or _ships(touched[c], shipped)]
+    outside, v.tolerated = classified
     if outside:
         v.reason = OUTSIDE_COMMITS
         v.outside = [Outside(c, _subject(root, c)) for c in outside]
         return v
-    v.expected_tree = _expected_tree(root, approved, allowed)
-    v.actual_tree = _out(root, "rev-parse", f"{tip}^{{tree}}")
-    if not v.expected_tree or not v.actual_tree:
+    matches = _tree_matches(root, v, approved, allowed, shipped)
+    if matches is None:
         return v
-    differs = v.expected_tree != v.actual_tree
-    if differs and shipped:
-        differs = _shipped_differs(root, v.expected_tree, v.actual_tree, shipped)
-        if differs is None:
-            return v
-    v.ok = not differs
+    v.ok = matches
     v.reason = MATCH if v.ok else TREE_DIFFERS
     return v
