@@ -30,7 +30,7 @@
 
 | コンテキスト | 何の語が 1 つの意味に決まるか |
 | --- | --- |
-| Neural Development Factory（`ndf-factory`） | リポジトリの登録・キーの持ち込み・スプリントの実行・実行ジョブ・実行の枠・打ち切りの時間・課題の候補・代わりの判断 |
+| Neural Development Factory（`ndf-factory`） | リポジトリの登録・キーの持ち込み・スプリントの実行・実行ジョブ・実行の枠・打ち切りの時間・課題の候補 |
 | NDF の開発ワークフロー（`ndf-workflow`） | スプリント・承認ゲート・conductor・`sprint.json`・`progress.jsonl`・作業の報告 |
 
 `ndf-workflow` が上流、`ndf-factory` が下流の**腐敗防止層**（全体の契約のまま）。翻訳はランナーだけが持つ。GitHub と AWS は外部の系で、取り込み（GitHub）と実行の制御（ECS・Secrets Manager・S3）が口の裏で自分の語へ変える。
