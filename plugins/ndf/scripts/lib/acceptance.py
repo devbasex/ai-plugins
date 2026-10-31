@@ -178,21 +178,10 @@ def verification_verdicts(block, record_repo):
     return {k: IssueRows(a, frozenset(p - f)) for k, (a, p, f) in acc.items()}
 
 
-_VERSION = re.compile(r"v?(\d+\.\d+\.\d+)")
-
-
 def version_verdicts(text, version, record_repo):
     """PR の本文とコメント（text）の `## リリース後テスト` のブロックのうち、`対象の版:` の基底が version の基底と
     一致する最後のブロックの表を読む（{(repo, number): IssueRows}）。無い・読めなければ空。"""
     import dist_record
-    import md
 
-    want = _VERSION.match(str(version))
-    lines = text.splitlines()
-    sections = [s for s in md.md_sections(text) if lines[s.heading.line].startswith("#")]
-    blocks = [
-        b
-        for b in dist_record._verify_blocks(lines, sections)
-        if want and (m := _VERSION.match(b["ver"] or "")) and m.group(1) == want.group(1)
-    ]
-    return (verification_verdicts("\n".join(blocks[-1]["lines"]), record_repo) or {}) if blocks else {}
+    block = dist_record.verify_block_for_base(text, version)
+    return (verification_verdicts(block, record_repo) or {}) if block is not None else {}
