@@ -318,7 +318,7 @@ def _close_summary(items, prs, dry_run, referenced):
 def _stop_no_issues(prs, refs):
     """スプリントの PR を読んだのに閉じる課題が 0 件。課題もボードも書かずに止まる（参照の状態は読まない）。"""
     seen = f"（PR が参照した番号: {' '.join(f'#{n}' for n in refs)}）" if refs else ""
-    _stop(
+    _stop_close(
         f"閉じる課題が 0 件（スプリントの PR {len(prs)} 本に closing keywords（GitHub が課題を自動で閉じるキーワード"
         " Closes / Fixes / Resolves）が無く、--issues も無い）",
         f"閉じる課題を --issues で渡して打ち直す{seen}",
@@ -326,7 +326,7 @@ def _stop_no_issues(prs, refs):
     )
 
 
-def _stop(summary, nxt, metrics=None):
+def _stop_close(summary, nxt, metrics=None):
     """閉じる前に止まる（items は空・終了コードは EXIT_UNREADABLE）。"""
     emit(
         result(TOOL, "stopped", summary, [], {"issues": 0} if metrics is None else metrics, next=nxt),
@@ -334,11 +334,11 @@ def _stop(summary, nxt, metrics=None):
     )
 
 
-def _collect_issues(a, root, record_repo, prs):
+def _collect_close_issues(a, root, record_repo, prs):
     """閉じる課題（スプリントの PR が閉じる課題と --issues）と、PR が参照しただけの番号を集める。0 件なら止まる。"""
     given = [(record_repo, n) for n in a.issues or []]
     if not prs and not given:
-        _stop("スプリントの PR の一覧が取れない。推測せず運用者に一覧を聞く", "運用者に一覧を聞き、--prs で渡して打ち直す")
+        _stop_close("スプリントの PR の一覧が取れない。推測せず運用者に一覧を聞く", "運用者に一覧を聞き、--prs で渡して打ち直す")
     issues, refs = sprint_issues(root, record_repo, prs) if prs else ([], [])
     issues += [k for k in given if k not in issues]
     if not issues:
@@ -373,11 +373,11 @@ def _emit_close_result(a, items, notes, metrics, summary, count, decisions):
 def cmd_close(a):
     if a.record_pr in (0, RECORD_UNKNOWN) and not a.issues:
         what = "0（本番の記録なし）" if a.record_pr == 0 else f"{RECORD_UNKNOWN}（記録の置き場が分からない）"
-        _stop(f"--record-pr {what} は --issues と一緒に渡す", "閉じる課題を --issues で渡して打ち直す")
+        _stop_close(f"--record-pr {what} は --issues と一緒に渡す", "閉じる課題を --issues で渡して打ち直す")
     root = git_root(a.root)
     record_repo = _record_repo(a, root)
     rec, prs = _read_sprint_record(a, root, record_repo)
-    issues, refs = _collect_issues(a, root, record_repo, prs)
+    issues, refs = _collect_close_issues(a, root, record_repo, prs)
 
     kept_all, verdicts = _closing_blocker(a, rec, record_repo)
 
