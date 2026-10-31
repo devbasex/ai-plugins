@@ -223,6 +223,7 @@ class RunState:
         c = self.cur
         text = c.get("text", "") or ""
         summary = c.get("decision") or next((l for l in reversed(text.splitlines()) if l.strip()), "")
+        llm = c.get("llm") or {}
         self.progress_write(
             {
                 "kind": "step",
@@ -230,13 +231,10 @@ class RunState:
                 "type": c.get("type"),
                 "exit": c.get("exit"),
                 "seconds": c.get("seconds"),
-                "cost": (c.get("llm") or {}).get("cost", 0.0),
+                "cost": llm.get("cost", 0.0),
                 "next": nxt or "end",
                 "summary": summary.strip()[:160],
-                **({"pr": c["pr"]} if c.get("pr") else {}),
-                **({"out": out} if out else {}),  # --from の再開で前の実行の結果を引く（#1676 の決定 6）
-                # モデルごとの使用量（factory のランナーが月の上限の数へ入れる。キーの追加だけ）
-                **({"models": (c.get("llm") or {})["models"]} if (c.get("llm") or {}).get("models") else {}),
+                **{k: v for k, v in (("pr", c.get("pr")), ("out", out), ("models", llm.get("models"))) if v},  # out は #1676 の決定 6
             }
         )
 
