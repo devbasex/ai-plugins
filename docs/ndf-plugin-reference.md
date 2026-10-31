@@ -101,7 +101,7 @@ Codex MCP サーバは廃止済みです。外部 AI 委譲は `/ndf:external-ai
 
 ### 相手役のランタイム
 
-Kiro CLI と agy は配布先ではなく、cross-review のレビュー担当と cross-refactoring の提案・実装の担当（相手役）です。ホストは `plugins/ndf/scripts/lib/launch-cli.sh` で CLI を起動し、`--agent` もプラグインの導入先も渡しません。cross-refactoring の担当が読む手順書（`refactoring`・`tdd-cycle`・`quality-gates`）は、ホストの導入先から担当の worktree（Kiro CLI は `.kiro/skills`、agy は `.agents/skills`）へ写します（`plugins/ndf/skills/cross-refactoring/scripts/prepare-worktrees.sh`）。起動の形の正本は `plugins/ndf/skills/external-ai/references/cli-kiro.md`・`cli-agy.md` です。
+Kiro CLI と agy は cross-review のレビュー担当と cross-refactoring の提案・実装の担当（相手役）で、プラグインは配りません。ホストは `plugins/ndf/scripts/lib/launch-cli.sh` で CLI を起動し、`--agent` もプラグインの導入先も渡しません。cross-refactoring の担当が読む手順書（`refactoring`・`tdd-cycle`・`quality-gates`）は、ホストの導入先から担当の worktree（Kiro CLI は `.kiro/skills`、agy は `.agents/skills`）へ写します（`plugins/ndf/skills/cross-refactoring/scripts/prepare-worktrees.sh`）。起動の形の正本は `plugins/ndf/skills/external-ai/references/cli-kiro.md`・`cli-agy.md` です。
 
 ## 承認ゲートの外の問い合わせ
 

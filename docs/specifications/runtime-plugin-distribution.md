@@ -324,6 +324,5 @@ MCP plugin を変更する場合:
 - [NDF プラグイン README](../../plugins/ndf/README.md)
 - [playwright-kit プラグイン README](../../plugins/playwright-kit/README.md)
 - [Runtime Smoke の CLI の版](runtime-smoke-cli-versions.md)
-- `scripts/lib/agy_agents.py`（agy に配る定義の生成と model の対応表。#2231 で消した）
 - [Agent Plugins 仕様](https://github.com/agentplugins/agent-plugins-spec)
 - 課題 [#2087](https://github.com/devbasex/ai-plugins/issues/2087)（agy に配るエージェント定義）

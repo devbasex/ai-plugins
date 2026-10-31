@@ -54,7 +54,7 @@ codex plugin add ndf@ai-plugins
 
 ### agy・Kiro CLI への配布の終了
 
-agy と Kiro CLI へは配りません（#2231）。最後に配ったのは v10.27.3 です。cross-review と cross-refactoring は、
+agy と Kiro CLI へは配りません。最後に配ったのは v10.27.3 です。cross-review と cross-refactoring は、
 Claude Code か Codex をホストにして agy・Kiro CLI を相手役として今までどおり起動します。相手役に配布物は要りません。
 
 前の版で入れた手元は、こちらからは消しません。残すか消すかを選べます。

@@ -182,8 +182,8 @@ frontmatter と命名の書き方は [AUTHORING.md](../plugins/ndf/skills/AUTHOR
 | 9 | `plugins/ndf/README.md` のレイアウト図 | `唯一の実体（45 個）` | `check-doc-staleness.py` |
 | 10 | `plugin.json` 2 本（claude・codex）の `description` | `45 focused NDF skills` の形 | `validate-runtime-plugins.sh` |
 | 11 | `.claude-plugin/marketplace.json` の `ndf` の `description` | 10 と同じ形（Claude Code の数） | `validate-runtime-plugins.sh` |
-| 12 | `plugins/ndf/README.md` の「Codex の暗黙起動抑止」の数と表 | `disable-model-invocation: true` のときだけ | **拾わない**（#611） |
-| 13 | `docs/ndf-plugin-reference.md` の数 | 2 ランタイムの数と実体の数 | **拾わない**（#611） |
+| 12 | `plugins/ndf/README.md` の「Codex の暗黙起動抑止」の数と表 | `disable-model-invocation: true` のときだけ | **拾わない** |
+| 13 | `docs/ndf-plugin-reference.md` の数 | 2 ランタイムの数と実体の数 | **拾わない** |
 
 **数の形は 3 通りあります。** `README.md` は `core 45個`（空白なし）、`plugins/ndf/README.md` は
 `45 個`、`plugin.json` は `45 focused NDF skills` です。数だけを機械的に置き換えると、どれかに
