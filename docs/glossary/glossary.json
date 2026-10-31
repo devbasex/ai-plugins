@@ -4541,6 +4541,16 @@
       "source": "docs/specifications/ndf-factory-runs-and-runner.md"
     },
     {
+      "term": "同じ役割の写し",
+      "context": "ndf-factory",
+      "meaning": "リファクタリングの対象と同じ処理・同じ判断を、別の場所に書き写したもの。対象と同じ変更で 1 か所へ寄せる（#2199）"
+    },
+    {
+      "term": "保存の契約",
+      "context": "ndf-factory",
+      "meaning": "アカウントの保存（AccountStore）の interface と、その引数・失敗の型。DynamoDB とメモリの 2 つの実装が満たし、AWS SDK を読まない（accounts/port.ts）"
+    },
+    {
       "term": "問い合わせの区分",
       "context": "ndf-workflow",
       "meaning": "AskUserQuestion の metadata.source に AI が付ける値。ndf-gate:<番号>（承認ゲート）・ndf-ask:redline:<番号>（レッドライン。宣言で外せない）・ndf-ask:<名前>（宣言が許す区分）の 3 つの形。hook は質問の中身を読まず、この値が許された区分かだけを見る（#2206）",
