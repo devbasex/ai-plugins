@@ -108,5 +108,6 @@
 | [ndf-deps-require-groups-check.md](ndf-deps-require-groups-check.md) | 依存の宣言の検査（project-mvv.py propose / vet の deps.require と、構造チェックの require-groups をエントリポイントから関数の中の import までたどること） |
 | [ndf-supervise-queue-resume-and-gate-evidence.md](ndf-supervise-queue-resume-and-gate-evidence.md) | pace: normal の承認ゲートの後をキュー 1 回で流すこと、queue --resume で止まったプランを続けること、承認ゲートの記録、new sprint --absorb |
 | [ndf-supervise-test-limits-from-whole-runs.md](ndf-supervise-test-limits-from-whole-runs.md) | 予算なしのテストの上限を、所要の記録と直近の全体テストの実測（whole.jsonl）の大きい方の 3 倍で決め、テストのステップの開始で決め直すこと |
+| [ndf-step-result-gaps-and-reading.md](ndf-step-result-gaps-and-reading.md) | 手順のスクリプトの結果 JSON の欠け（`gaps`）・過程（`process`）・判断（`decisions`）と、`ok` を欠けの無いときだけにする検査（`validate_result`・欠けの残る結果の `stopped` / 終了コード 6）、シェルから同じ形を出す `step_result.py emit` と `step-result.sh`、読む側の共通の関数（`step_read.py`）、記録のスクリプト（`progress-record.sh`・`projects-sync.sh`）の返し方と呼ぶ側が止まらずに報告へ載せること、子の 7 件がこの形をどう使ったか。形と終了コードの表は `plugins/ndf/scripts/lib/README.md` が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
