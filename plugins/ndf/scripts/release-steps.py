@@ -35,7 +35,7 @@
     python3 release-steps.py approve        --approval <承認資料> --facts-from <開発版の状態> [--answer-from <状態>] --by user
     python3 release-steps.py approval-facts --version <版> --prs <PR番号>... [--prev-tag <タグ>] [--plugin <名前>] [--root <dir>]
     python3 release-steps.py notes          --version <版> --prs <PR番号>... [--approval <提示物>]
-                                            [--verified claude,codex,kiro] [--ref <ブランチ>] [--plugin <名前>] [--root <dir>]
+                                            [--verified claude,codex] [--ref <ブランチ>] [--plugin <名前>] [--root <dir>]
 
 release --channel prod は承認したコミットを受け取り、配布の PR をマージした後の `origin/<ベースブランチ>` の先端と比べ、
 承認の外の変更があれば本番チャネルの PR もタグも作らずに承認ゲート（10）で止まる（release_lib/approval.py。#815）。
@@ -338,7 +338,6 @@ def plan_bump(root, pdir, plugin, old, new):
     for rel, _ in (
         (".claude-plugin/plugin.json", True),
         (".codex-plugin/plugin.json", False),
-        ("dev.agy/plugin.json", False),
         ("plugin.json", False),
     ):
         f = pdir / rel
@@ -365,7 +364,6 @@ def plan_bump(root, pdir, plugin, old, new):
     if plugin == "ndf":
         ed.sub(readme, r"\*\*NDFプラグイン v", "README.md の概要の版")
         nr = pdir / "README.md"
-        ed.sub(nr, r"（Kiro CLI用 / v", "plugins/ndf/README.md の Kiro の確認例")
         ed.sub(nr, r"/plugins/cache/ai-plugins/ndf/", "plugins/ndf/README.md の Codex のパス例", count=2)
         ed.sub(nr, r"ndf@ai-plugins\s+installed", "plugins/ndf/README.md の codex plugin list の出力例")
         bump.versioning_doc(ed)
@@ -1192,7 +1190,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--plugin", help="配るプラグイン（既定は宣言の release.plugin）")
     p.add_argument("--approval", help="本番承認の提示物。渡すと「配る中身」「検証への配布で確かめたこと」の欄を書く")
-    p.add_argument("--verified", default="", help="--approval: 導入を確かめた経路（カンマ区切り。例 claude,codex,kiro）")
+    p.add_argument("--verified", default="", help="--approval: 導入を確かめた経路（カンマ区切り。例 claude,codex）")
     p.add_argument("--ref", help="--approval: 検証への配布で導入した ref（既定は宣言のベースブランチ）")
     p.add_argument(
         "--check-state",

@@ -29,7 +29,6 @@ VERSION = "9.3.0"
 MANIFESTS = {
     "claude": ["alpha", "bravo", "charlie", "delta", "echo"],
     "codex": ["alpha", "bravo", "charlie"],
-    "agy": ["alpha", "bravo"],
 }
 
 
@@ -78,23 +77,6 @@ def build_tree(base: Path, version: str = VERSION, described: str | None = None)
             + "\n",
             encoding="utf-8",
         )
-
-    # agy 向けの定義はクライアント拡張ディレクトリに置く。Skill の絞り込みを持たないため、
-    # 突き合わせ先は agy-skills.txt の行数である。
-    (ndf / "dev.agy").mkdir(parents=True)
-    (ndf / "dev.agy/plugin.json").write_text(
-        json.dumps(
-            {
-                "name": FAMILY,
-                "version": version,
-                "description": description(described, len(MANIFESTS["agy"])),
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
 
     (root / ".claude-plugin").mkdir(parents=True)
     (root / ".claude-plugin/marketplace.json").write_text(

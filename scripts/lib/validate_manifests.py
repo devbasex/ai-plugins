@@ -208,25 +208,6 @@ for family in families:
         )
     # ルートマニフェスト（Agent Plugins 形式）は絞り込みを持たず `skills/` を全件公開する。
     # description の Skill 数は manifest ではなく実体の数と突き合わせる。
-    # agy 向けの定義はクライアント拡張ディレクトリ（Agent Plugins 1.0.0 §8.2）へ置く。
-    # ルート直下へ置くと Codex がそちらを優先して読み、配布 Skill が codex-skills.txt では
-    # なく skills/ の実体になる。agy には取得元の登録が無く `agy plugin list` も版数を出さない
-    # ため、利用者が版を判断できる手がかりは clone した中身の版数だけである。
-    agy_manifest_path = plugin_dir_of(family) / "dev.agy/plugin.json"
-    if agy_manifest_path.is_file():
-        agy_manifest = read_json(agy_manifest_path)
-        if agy_manifest.get("version") != version:
-            errors.append(
-                f"{agy_manifest_path.relative_to(root)} の version が claude 版と"
-                f"食い違う（agy: {agy_manifest.get('version')} / claude: {version}）"
-            )
-        check_description(
-            str(agy_manifest_path.relative_to(root)),
-            agy_manifest,
-            version,
-            manifest_skill_count(family, "agy"),
-            "agy-skills.txt",
-        )
     root_manifest_path = plugin_dir_of(family) / "plugin.json"
     if root_manifest_path.is_file():
         root_manifest = read_json(root_manifest_path)
@@ -357,7 +338,7 @@ for family in families:
                 )
 
 # MCP プラグインも 1 ディレクトリにまとめた。runtime ごとの配布物は無く、
-# 3 runtime が同じ .mcp.json を読む（Codex だけ .codex.mcp.json を読ませる例外がある）。
+# 2 runtime が同じ .mcp.json を読む（Codex だけ .codex.mcp.json を読ませる例外がある）。
 for mcp in sorted((root / "plugins/mcp").iterdir()):
     if not mcp.is_dir():
         continue
@@ -368,8 +349,6 @@ for mcp in sorted((root / "plugins/mcp").iterdir()):
         errors.append(f"Claude plugin manifest missing: plugins/mcp/{mcp.name}/.claude-plugin/plugin.json")
     if not (mcp / ".codex-plugin/plugin.json").is_file():
         errors.append(f"Codex plugin manifest missing: plugins/mcp/{mcp.name}/.codex-plugin/plugin.json")
-    if not (mcp / "dev.kiro/install.sh").is_file():
-        errors.append(f"Kiro MCP installer missing: plugins/mcp/{mcp.name}/dev.kiro/install.sh")
     # Codex は .mcp.json を manifest の mcpServers から読む。指定が無いと
     # サーバが 1 つも登録されない。Codex だけ別の起動定義を読ませるときは
     # `./.codex.mcp.json` を指す（mcp-serena の `--context codex`。#818）。

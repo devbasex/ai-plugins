@@ -2,7 +2,7 @@
 """release-verification-steps.py: リリース後テストの導入確認（#862。試作は #827 の phase-steps.py）。
 
     python3 release-verification-steps.py verify-install --ref <ベースブランチ|本番チャネル> --expect <版>
-        [--plugins <名前>,...] [--runtimes claude,codex,kiro] [--root <dir>]
+        [--plugins <名前>,...] [--runtimes claude,codex] [--root <dir>]
 
 隔離した HOME で ref から導入し、導入された版と、前の正式版のタグから変わったファイルの中身が
 ref と一致するかを確かめる。利用者の HOME の設定が変わっていないことも確かめる。
@@ -138,7 +138,7 @@ def same_entry(s, t):
     """s と t の中身が同じか。symlink はリンク先の文字列か、辿った先の中身で比べる。
 
     導入先は symlink をそのまま残すことも、辿った先を複製することもあるため、どちらでも一致とする。
-    ディレクトリ（例: dev.agy/skills/<名前> → ../../skills/<名前>）は配下のファイルをすべて比べる。
+    ディレクトリは配下のファイルをすべて比べる。
     """
     s, t = Path(s), Path(t)
     if s.is_symlink() and t.is_symlink() and os.readlink(s) == os.readlink(t):
@@ -164,7 +164,7 @@ def compare_files(src_root, dst, rel_plugin, files, label, keeps_symlinks=True):
         if not s.exists():
             continue  # ref で消えたファイル
         if not keeps_symlinks and s.is_symlink():
-            continue  # 導入先に入らない（例: dev.agy/skills/<名前> → ../../skills/<名前>）
+            continue  # 導入先に入らない
         if not same_entry(s, t):
             out.append(f"{label}: {f}")
     return out
@@ -220,83 +220,6 @@ def verify_codex(env, ref, plugins, expect, where):
     return res, dirs
 
 
-def verify_kiro(env, src, tmp, expect):
-    proj = Path(tmp) / "kiro-project"
-    proj.mkdir()
-    res = {"exit": 0, "version": None}
-    code, out = run_env_i(["bash", str(src / "plugins/ndf/dev.kiro/install.sh"), "--project", str(proj), "--yes"], env, cwd=str(src))
-    res["exit"] = code
-    if code != 0:
-        res["error"] = out.strip()[-500:]
-        return res, None
-    agent = proj / ".kiro" / "agents" / "ndf.json"
-    if agent.is_file():
-        try:
-            desc = json.loads(agent.read_text(encoding="utf-8")).get("description", "")
-        except (OSError, ValueError):
-            desc = ""
-        m = re.search(r"v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)", desc)
-        res["version"] = m.group(1) if m else None
-    return res, proj
-
-
-KIRO_PLUGIN = "plugins/ndf"
-KIRO_POLICY = "ndf-policies"
-
-
-def kiro_manifest_skills(src):
-    """manifests/kiro-skills.txt に載る Skill 名（コメント・空行を除く）。"""
-    text = (Path(src) / KIRO_PLUGIN / "manifests" / "kiro-skills.txt").read_text(encoding="utf-8")
-    return sorted({line.split("#", 1)[0].strip() for line in text.splitlines()} - {""})
-
-
-def kiro_steering_body(policy_file):
-    """install.sh が steering へ写す ndf-policies の本文（frontmatter を除いた部分）。"""
-    text = Path(policy_file).read_text(encoding="utf-8")
-    if text.startswith("---\n"):
-        end = text.find("\n---\n", 3)
-        if end != -1:
-            text = text[end + len("\n---\n") :]
-    return text.strip("\n")
-
-
-def compare_kiro(src, proj):
-    """Kiro の導入先（<proj>/.kiro）を ref の展開物と比べ、一致しないものを返す。
-
-    manifest の Skill は .kiro/skills/<名前> のリンク、dev.kiro/prompts/*.md は .kiro/prompts/ の複製、
-    ndf-policies は .kiro/steering/ndf-policies.md の本文、agents/ndf.json は JSON として読めることを見る。
-    """
-    src, kiro = Path(src), Path(proj) / ".kiro"
-    plugin = src / KIRO_PLUGIN
-    out = []
-    for name in kiro_manifest_skills(src):
-        s, t = plugin / "skills" / name, kiro / "skills" / name
-        if not (s / "SKILL.md").is_file():
-            continue  # installer も SKIP する
-        if name == KIRO_POLICY:
-            if t.exists() or t.is_symlink():
-                out.append(f"kiro: {t.relative_to(proj)} が残っている（steering へ移した Skill）")
-            continue
-        if not same_entry(s, t):
-            out.append(f"kiro: {t.relative_to(proj)}")
-    for f in sorted((plugin / "dev.kiro" / "prompts").glob("*.md")):
-        if f.name == "codex.md":
-            continue  # --with-codex のときだけ配る
-        t = kiro / "prompts" / f.name
-        if not (t.is_file() and filecmp.cmp(f, t, shallow=False)):
-            out.append(f"kiro: {t.relative_to(proj)}")
-    steering = kiro / "steering" / f"{KIRO_POLICY}.md"
-    body = kiro_steering_body(plugin / "skills" / KIRO_POLICY / "SKILL.md")
-    if not (steering.is_file() and steering.read_text(encoding="utf-8").endswith(f"\n{body}\n")):
-        out.append(f"kiro: {steering.relative_to(proj)}")
-    agent = kiro / "agents" / "ndf.json"
-    try:
-        json.loads(agent.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        out.append(f"kiro: {agent.relative_to(proj)}")
-    return out
-
-
 def install_source(root, a):
     """導入元（owner/repo・マーケットプレイスの名前・本番チャネル）と、確かめるプラグイン。値は origin の URL と宣言から読む
     （#1336 の決定 8）。--ref は宣言のベースブランチか本番チャネルに限る。"""
@@ -345,10 +268,6 @@ def _verify_runtimes(a, root, src, tmp, runtimes, plugins, rel, prev, ref_rev, w
                 mismatch.append(f"{name}: {p} の導入先が無い")
             else:
                 mismatch += compare_files(src, d, rel[p], changed[p], name, keeps_symlinks=(name != "codex"))
-    if "kiro" in runtimes:
-        runtimes_res["kiro"], proj = verify_kiro(env, src, tmp, a.expect)
-        if proj is not None:
-            mismatch += compare_kiro(src, proj)
     return runtimes_res, mismatch
 
 
@@ -396,7 +315,7 @@ def cmd_verify_install(a):
     root = git_root(a.root)
     where, plugins = install_source(root, a)
     runtimes = [r.strip() for r in a.runtimes.split(",") if r.strip()]
-    bad = [r for r in runtimes if r not in ("claude", "codex", "kiro")]
+    bad = [r for r in runtimes if r not in ("claude", "codex")]
     if bad:
         raise StepError(f"未知の runtime: {','.join(bad)}", EXIT_UNREADABLE)
     rel = {p: plugin_dir(root, p).relative_to(root).as_posix() for p in plugins}
@@ -430,7 +349,7 @@ def build_parser():
     p.add_argument("--ref", required=True, help="導入する ref（宣言のベースブランチか本番チャネル）")
     p.add_argument("--expect", required=True, type=version_arg)
     p.add_argument("--plugins", help="カンマ区切り（例 ndf,mcp-serena。既定は宣言の release.plugin）")
-    p.add_argument("--runtimes", default="claude,codex,kiro", help="カンマ区切り（claude,codex,kiro）")
+    p.add_argument("--runtimes", default="claude,codex", help="カンマ区切り（claude,codex）")
     p.set_defaults(func=cmd_verify_install)
     return ap
 

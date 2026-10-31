@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """最新の版のスモークの手順のうち、判断の要らない 2 つを持つ（#1982）。
 
-- `resolve --runtime <claude|codex|kiro|agy|all>`: 取得元の最新の版を、CLI の版の一覧
+- `resolve --runtime <claude|codex|all>`: 取得元の最新の版を、CLI の版の一覧
   （`tests/runtime-smoke/cli-versions.env`）と同じ `KEY=VALUE` の形で標準出力へ出す。
   取得元に届かない・形が読めないときは終了コード 1 で、標準エラーへ取得元の URL を書く
 - `report --runtime <名前> --run-url <URL> [--versions <パス>] [--repo <owner/name>]`: 題が
@@ -22,16 +22,10 @@ import sys
 import urllib.request
 from pathlib import Path
 
-RUNTIMES = ("claude", "codex", "kiro", "agy")
+RUNTIMES = ("claude", "codex")
 VERSION_RE = re.compile(r"^[0-9]+(\.[0-9]+)+$")
-HEX_RE = re.compile(r"^[0-9a-f]+$")
 
 NPM_DIST_TAGS = "https://registry.npmjs.org/-/package/{package}/dist-tags"
-KIRO_MANIFEST = "https://prod.download.cli.kiro.dev/stable/latest/manifest.json"
-AGY_MANIFEST = "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/{platform}.json"
-# arch の名前は `uname -m` の値に揃える（一覧のキーの末尾）。agy の manifest は別の名前で引く
-AGY_PLATFORMS = {"X86_64": "linux_amd64", "AARCH64": "linux_arm64"}
-KIRO_ARCHES = {"X86_64": "x86_64", "AARCH64": "aarch64"}
 
 TITLE = "最新の版のスモークが落ちた: {runtime}"
 
@@ -59,12 +53,6 @@ def _version(url: str, value: object) -> str:
     return value
 
 
-def _hex(url: str, value: object, length: int) -> str:
-    if not isinstance(value, str) or len(value) != length or not HEX_RE.match(value):
-        raise ResolveError(url, f"checksum が読めない: {value!r}")
-    return value
-
-
 def _npm_latest(package: str) -> str:
     url = NPM_DIST_TAGS.format(package=package)
     data = fetch_json(url)
@@ -80,45 +68,8 @@ def resolve_codex() -> list[tuple[str, str]]:
     return [("CODEX_VERSION", _npm_latest("@openai/codex"))]
 
 
-def resolve_kiro() -> list[tuple[str, str]]:
-    url = KIRO_MANIFEST
-    data = fetch_json(url)
-    if not isinstance(data, dict) or not isinstance(data.get("packages"), list):
-        raise ResolveError(url, "packages が無い")
-    version = _version(url, data.get("version"))
-    pairs = [("KIRO_CLI_VERSION", version)]
-    for key, arch in KIRO_ARCHES.items():
-        download = f"{version}/kirocli-{arch}-linux-musl.tar.gz"
-        found = [p for p in data["packages"] if isinstance(p, dict) and p.get("download") == download]
-        if len(found) != 1:
-            raise ResolveError(url, f"{download} が manifest に 1 つだけ載っていない")
-        pairs.append((f"KIRO_CLI_SHA256_{key}", _hex(url, found[0].get("sha256"), 64)))
-    return pairs
 
-
-def resolve_agy() -> list[tuple[str, str]]:
-    versions: dict[str, str] = {}
-    urls: list[tuple[str, str]] = []
-    sums: list[tuple[str, str]] = []
-    for key, platform in AGY_PLATFORMS.items():
-        url = AGY_MANIFEST.format(platform=platform)
-        data = fetch_json(url)
-        if not isinstance(data, dict):
-            raise ResolveError(url, "形が読めない")
-        version = _version(url, data.get("version"))
-        dl = data.get("url")
-        # 版つきの取得先だけを受ける（版を含まない url は固定にならない）
-        if not isinstance(dl, str) or not dl.startswith("https://") or f"/{version}-" not in dl:
-            raise ResolveError(url, f"版つきの url が読めない: {dl!r}")
-        versions[platform] = version
-        urls.append((f"AGY_URL_{key}", dl))
-        sums.append((f"AGY_SHA512_{key}", _hex(url, data.get("sha512"), 128)))
-    if len(set(versions.values())) != 1:
-        raise ResolveError(AGY_MANIFEST.format(platform="*"), f"arch ごとの版が違う: {versions}")
-    return [("AGY_VERSION", next(iter(versions.values()))), *urls, *sums]
-
-
-RESOLVERS = {"claude": resolve_claude, "codex": resolve_codex, "kiro": resolve_kiro, "agy": resolve_agy}
+RESOLVERS = {"claude": resolve_claude, "codex": resolve_codex}
 
 
 def resolve(runtime: str) -> list[tuple[str, str]]:

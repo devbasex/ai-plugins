@@ -192,10 +192,8 @@
       "required-checks-check",
       "runtime-plugin-build-check",
       "runtime-plugin-validate",
-      "runtime-smoke (agy)",
       "runtime-smoke (claude)",
       "runtime-smoke (codex)",
-      "runtime-smoke (kiro)",
       "script-structure-check",
       "skill-frontmatter-check",
       "skill-repo-assumptions-check",
@@ -209,7 +207,7 @@
   },
   "delivery": [
     {
-      "target": "ndf プラグイン（Claude Code・Codex・Kiro）",
+      "target": "ndf プラグイン（Claude Code・Codex）",
       "kind": "manual",
       "trigger": "release の工程で版を上げ、main へマージしてタグ ndf--v<版> を打つ",
       "branch": "main",

@@ -52,7 +52,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runtime: [claude, codex, kiro, agy]
+        runtime: [claude, codex]
     env:
       SKIP_HEAVY: ${{ needs.ci-scope.outputs.skip == 'true' }}
     steps:
