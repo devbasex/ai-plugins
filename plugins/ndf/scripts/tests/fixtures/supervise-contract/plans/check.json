@@ -38,9 +38,6 @@
       "timeout": 3600,
       "args": "5 --max-rounds 4",
       "on_fail": "abort",
-      "on_exit": {
-        "6": "base-sync"
-      },
       "next": "base-sync"
     },
     {
