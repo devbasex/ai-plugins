@@ -40,11 +40,11 @@ env | grep -qE '^REMOTE_CONTAINERS=' && echo "Dev Containers の中"
 | A. 同じ PC の Docker | Docker Desktop（macOS / Windows）の上のコンテナ。`host.docker.internal` が引ける | コンテナ → `host.docker.internal:9222` → Chrome |
 | B. リモートのホスト | クラウドの VM（EC2 など）の上のコンテナに、エディタが SSH でつないでいる。`host.docker.internal` が引けない | Chrome ← SSH の `RemoteForward` ← ホストの `127.0.0.1:9222` ← 中継コンテナ ← コンテナ |
 
-どちらにも当たらない（ホストへ SSH していない・PC から VM へ届く経路が無い）ときは、ここで止めて利用者に構成を尋ねる。**Tailscale などで 9222 をネットワークへ開く案は採らない**（下の「安全のための決まり」）。
+どちらにも当たらない（ホストへ SSH していない・PC から VM へ届く経路が無い）ときは、ここで止めて、当たらなかった理由を報告する（構成の選択は問わない）。**Tailscale などで 9222 をネットワークへ開く案は採らない**（下の「安全のための決まり」）。
 
 ## 2. 利用者の PC 側の設定（利用者が行う）
 
-利用者に頼む。利用者の PC で動くエージェント（WSL の Claude など）がいるなら、[references/local-side-setup.md](references/local-side-setup.md) をそのまま指示書として渡す。
+利用者に頼む（問うときの `metadata.source` は `ndf-ask:human-action`）。利用者の PC で動くエージェント（WSL の Claude など）がいるなら、[references/local-side-setup.md](references/local-side-setup.md) をそのまま指示書として渡す。
 
 ### Chrome を専用プロファイルで起動する
 
@@ -95,7 +95,7 @@ curl -s -m 5 "http://$CDP_HOST:9222/json/version" -H 'Host: localhost:9222'
 | 応答 | 意味 |
 | --- | --- |
 | `Browser` を含む JSON | つながった |
-| 空の応答・`socket hang up` | 経路 B で、中継は生きているが、その先（SSH の転送か Chrome）が無い。接続の張り直しと Chrome の起動を利用者に確かめてもらう |
+| 空の応答・`socket hang up` | 経路 B で、中継は生きているが、その先（SSH の転送か Chrome）が無い。接続の張り直しと Chrome の起動を利用者に確かめてもらう（`ndf-ask:human-action`） |
 | 接続できない・名前が引けない | 経路の判定が違う。1 へ戻る |
 
 ## 5. 操作する（Playwright）
@@ -156,7 +156,7 @@ ws.on('open', () => ws.send(JSON.stringify({ id: 1, method: 'Network.getCookies'
 // 応答の cookies を storageState の形（name・value・domain・path・expires（session なら -1）・httpOnly・secure・sameSite）へ直して保存する
 ```
 
-この状態の Chrome では、Playwright で画面を操作することもできない。目視や操作は利用者に頼み、テストはコンテナの headless で回す。
+この状態の Chrome では、Playwright で画面を操作することもできない。目視や操作は利用者に頼み（`ndf-ask:human-action`）、テストはコンテナの headless で回す。
 
 Playwright のテストでは `use: { storageState: '.auth/state.json' }` で読ませる。`.auth/` はリポジトリに入れない（`.gitignore` に足す）。セッションの期限が切れたら、利用者に Chrome でログインし直してもらい、取り出し直す。
 

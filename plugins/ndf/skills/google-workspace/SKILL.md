@@ -28,7 +28,7 @@ gws は Google の公式サポート外の CLI で、版は 0.x である。
    | 3 | `uninstallable` | npm（Node.js）が無く導入できない。理由を示して止まる |
    | 1・2 | — | `summary` と `items` を示して止まる |
 
-2. **同意のうえ入れる**（`missing` のとき）: `presentation_path` の承認資料（取得元・打つコマンド `npm install -g @googleworkspace/cli`・入る先・戻し方）を利用者に示し、同意を得てから打ち直す
+2. **同意のうえ入れる**（`missing` のとき）: `presentation_path` の承認資料（取得元・打つコマンド `npm install -g @googleworkspace/cli`・入る先・戻し方）を利用者に示し、同意（`AskUserQuestion` の `metadata.source` は `ndf-ask:redline:C6`。利用者の環境へ入れるため）を得てから打ち直す
 
    ```bash
    python3 "$SKILL_DIR/scripts/gws-check.py" --install
@@ -41,7 +41,7 @@ gws は Google の公式サポート外の CLI で、版は 0.x である。
 
    入った後はスクリプトが同じ起動の中で確かめ直し、その状態を返す（多くは `unauthenticated`）。
 
-3. **認証を案内する**（`unauthenticated` のとき）: ブラウザでの承認が要るため、エージェントは `gws auth login` を打たない。利用者に次を頼み、終えたと伝えられたら 1. から打ち直す
+3. **認証を案内する**（`unauthenticated` のとき）: ブラウザでの承認が要るため、エージェントは `gws auth login` を打たない。利用者に次を頼み（問うときの `metadata.source` は `ndf-ask:human-action`）、終えたと伝えられたら 1. から打ち直す
 
    - Claude Code: `! gws auth login`
    - ほかのランタイム: 別の端末で `gws auth login`
