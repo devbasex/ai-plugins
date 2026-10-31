@@ -299,7 +299,7 @@ sequenceDiagram
 
 ### 実行ジョブの token
 
-**形は JWS の compact（JWT）で、署名は EdDSA（Ed25519）である。**
+**形は JWS の compact（JWT）で、署名は EdDSA（Ed25519）である。** `account_id` は載せない（I31）。
 
 | 部分 | 鍵 | 値 |
 | --- | --- | --- |
@@ -312,8 +312,6 @@ sequenceDiagram
 | 本体 | `sprint_run_id` | スプリントの実行の識別子（同じ形） |
 | 本体 | `repo` | その実行のリポジトリ（`owner/name`）。`step.recorded` の Pull Request の照合に使う（I37） |
 | 本体 | `iat`・`exp` | 発行と期限（秒）。期限の長さは発行側が `RUN_JOB_TOKEN_TTL_SECONDS`（既定 32,400 秒）で決め、打ち切りの時間より長くする |
-
-`account_id` は載せない（I31）。
 
 **検証の失敗は 4 つの「無効」に分け、`jose` の失敗の `code` を読み替える。** `bad_signature` は `ERR_JWS_SIGNATURE_VERIFICATION_FAILED`、`expired` は `ERR_JWT_EXPIRED`、`unknown_key` は `ERR_JWKS_NO_MATCHING_KEY`・`ERR_JWKS_MULTIPLE_MATCHING_KEYS` で、ほか（`ERR_JWS_INVALID`・`ERR_JWT_INVALID`・`ERR_JWT_CLAIM_VALIDATION_FAILED`・`ERR_JOSE_ALG_NOT_ALLOWED`・`ERR_JOSE_NOT_SUPPORTED`、発行者・宛先・`typ`・必須の主張（`sub`・`exp`・`sprint_run_id`・`repo`）の違い、識別子の形の違い、知らない `code`）はすべて `malformed` である。失敗の文に token の値を含めない。
 
