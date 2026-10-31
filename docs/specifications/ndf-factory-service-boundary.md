@@ -348,6 +348,7 @@ erDiagram
 | `gate.reached` | ランナー（作業の報告の `判断が要る` と承認資料） | 種類（ゲート 1・ゲート 2・判断）・Pull Request の URL・承認資料の本文 | #2173 |
 | `gate.answered` | API（#2173） | 承認の依頼の識別子・種類・承認か差し戻しか（判断では無し）・答えた人のアカウント。本文は事象に載せない | #2171・#2172 |
 | `usage.recorded` | ランナー（claude の結果の使用量） | モデル・入力と出力の token・費用・ステップ | #2174 |
+| `decision.delegated` | ランナー（#2206 の代わりの判断の記録） | 問い・選んだ答え・理由・hook が止めたときの区分 | #2172 |
 | `job.finished` | ランナー。送れずに終わったときは実行の制御 | 結果（`gate` / `stopped` / `done` / `failed`）・要約 | #2186・#2172 |
 | `pr.updated`・`ci.updated` | GitHub の Webhook | Pull Request の番号と状態・チェックの名前と結論 | #2172 |
 
@@ -357,7 +358,7 @@ erDiagram
 
 | 出所 | 認証の手段 | 書ける種類 |
 | --- | --- | --- |
-| `runner` | 実行ジョブごとの token。token の実行ジョブと事象の `job_id`・`sprint_run_id` が一致すること | `gate.answered`・`pr.updated`・`ci.updated` を除く種類 |
+| `runner` | 実行ジョブごとの token。token の実行ジョブと事象の `job_id`・`sprint_run_id` が一致し、`step.recorded` の Pull Request が token のリポジトリのものであること | `gate.answered`・`pr.updated`・`ci.updated` を除く種類 |
 | `api` | #2173 のサービスの IAM ロールによる署名だけ（利用者の Cognito の token では書けない）。加えて、依頼の識別子・属するスプリントの実行・種類・答えた人・承認か差し戻しかが保存済みの答えとすべて一致するときだけ書く（未保存なら 403）。利用者の token と `account_id` の確かめは #2173 の API が行う | `gate.answered` |
 | `github` | `X-Hub-Signature-256` を GitHub App の Webhook の秘密で検証する | `pr.updated`・`ci.updated` |
 

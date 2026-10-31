@@ -4513,6 +4513,34 @@
       "meaning": "スプリントを始める画面に、AI が棚卸しの順位から理由つきで出す課題",
       "source": "",
       "pending_source": "issues/issue-2186-requirements.md"
+    },
+    {
+      "term": "実行の枠",
+      "context": "ndf-factory",
+      "meaning": "アカウントとリポジトリごとに、終わりの状態でないスプリントの実行を数えた値。開始で増え、終わりの状態への移りで減る",
+      "source": "",
+      "pending_source": "issues/issue-2186-design.md"
+    },
+    {
+      "term": "見回り",
+      "context": "ndf-factory",
+      "meaning": "実行の制御が 5 分ごとに動き、打ち切りの時間を過ぎた実行ジョブを止め、停止の知らせを取りこぼした実行ジョブを終わらせる処理",
+      "source": "",
+      "pending_source": "issues/issue-2186-design.md"
+    },
+    {
+      "term": "代わりの判断",
+      "context": "ndf-factory",
+      "meaning": "承認ゲートの外の問い合わせを hook が止めた後に、AI が自分で下した判断。問い・選んだ答え・理由を持つ",
+      "source": "",
+      "pending_source": "issues/issue-2186-design.md"
+    },
+    {
+      "term": "候補の証明",
+      "context": "ndf-factory",
+      "meaning": "GitHub で確かめたリポジトリの登録の候補を、取り込みが署名して 10 分だけ有効にした値。登録の要求はこれを持って来る",
+      "source": "",
+      "pending_source": "issues/issue-2186-design.md"
     }
   ]
 }
