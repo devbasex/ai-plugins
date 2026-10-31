@@ -204,7 +204,8 @@ sequenceDiagram
 | 契機 | 振る舞い |
 | --- | --- |
 | 起動（`pytest_configure`） | 親と各 worker を子の回収役にする。`subprocess.Popen` と `os.fork` を包み、自分が起こした pid を記録し始める。SIGCHLD の扱いを置く |
-| SIGCHLD | 直接の子（`child_pids(os.getpid(), recursive=False)`）のうち、ゾンビで、かつ自分が起こした pid の記録に無いものだけを `os.waitpid(pid, os.WNOHANG)` で 1 つずつ回収する。`os.waitpid(-1, ...)` は使わない（`subprocess.Popen` や `os.fork` の呼び手が待つ終了コードを横取りする） |
+| 子の起動と記録（包んだ `subprocess.Popen` と `os.fork`） | 元の `Popen.__init__` / `os.fork` を呼ぶ前に、`threading.Lock` で守った「起動中の数」を 1 増やす。元の呼び出しが戻って pid を記録し終えたら（失敗して例外になったときも `finally` で）1 減らす。0 に戻ったときに「見送った回収」の印があれば、印を消して SIGCHLD と同じ回収をその場で 1 回やり直す。`os.fork` の子の側では、起動中の数・印・記録を空にしてから戻る（子は別のプロセスで、親の記録を持ち越さない） |
+| SIGCHLD | 起動中の数が 1 以上なら回収せず、「見送った回収」の印を立てて戻る（起動から記録までの間に終わった自分の子は、まだ記録に無いため「覚えの無いゾンビ」に見え、回収すると `Popen._try_wait` が ECHILD を受けて終了コードを 0 にする）。SIGCHLD の扱いは主スレッドで走り、主スレッドの包んだ呼び出しの途中にも割り込むため、ロックを待たない（`acquire(blocking=False)` が取れなければ印を立てて戻る。待つと自分が持つロックで止まる）。起動中の数が 0 なら、直接の子（`child_pids(os.getpid(), recursive=False)`）のうち、ゾンビで、かつ自分が起こした pid の記録に無いものだけを `os.waitpid(pid, os.WNOHANG)` で 1 つずつ回収する。`os.waitpid(-1, ...)` は使わない（`subprocess.Popen` や `os.fork` の呼び手が待つ終了コードを横取りする） |
 | SIGTERM | 直接の子（`child_pids(os.getpid(), recursive=False)`）の各 pid へ `stop_tree` をかけ、自分の pid には送らない（`stop_tree` は pid 自身とそのグループも止めるため、自分へ向けると自分の SIGTERM の扱いへ入り直すか、自分を SIGKILL で止める）。止める pid が複数あるときは、猶予の 2 秒を pid ごとに順に待たず、各 pid の `stop_tree(pid, grace=2)` をスレッドで並べて呼び、全部の終わりをまとめて待つ（`stop_group` の猶予 5 秒に収める。`stop_tree` と同じ役割の関数は作らない）。その後、既定の SIGTERM の扱いへ戻して自分へ送り直す。終了の仕方は今と同じ |
 | 終了（`pytest_unconfigure`） | SIGTERM と同じ呼び方で残った子孫を止め、記録に無いゾンビを回収し、包んだ `subprocess.Popen` と `os.fork`・SIGCHLD の扱いを元へ戻す |
 
@@ -248,7 +249,7 @@ pytest 以外の suite（script-structure など）を速くする作業は、E1
 
 子が残るのは、テストが自分の session で起こした子がプロセスグループの外に出るためで、打ち切る側（`test_triage.run_command`・`refactor_lib.process.run_with_timeout`）はグループにしかシグナルを送れない。グループの外の子を知っているのはテストを走らせる pytest のプロセスだけなので、後始末を pytest の側に置く。打ち切る側はどちらも SIGTERM を先に送り 5 秒待つため、pytest の側の後始末はその猶予の中で終わる。Linux の子の回収役（`PR_SET_CHILD_SUBREAPER`）にするのは、`launch-cli.sh` の `setsid` のように親がすぐ終わる起動でも、孫が init へ付け替わって列挙から漏れないようにするためである。止める処理は `lib/procs.py` の `child_pids` と `stop_tree` を使い、同じ役割の関数を作らない。`stop_tree(pid)` は pid 自身とそのグループも止めるため、自分の pid へは向けず、`child_pids(os.getpid(), recursive=False)` の各 pid へかけ、複数あればスレッドで並べてまとめて待つ。
 
-子の回収役にすると、付け替わった孫が終わったときの回収も pytest のプロセスの役目になる。回収しないとゾンビが残り、`stop_group` のグループの存否の判定と `os.kill(pid, 0)` が成功し続けるため、打ち切る側が猶予の 5 秒を毎回待ち切り、既存の `test_lib_test_triage.py::test_a_timed_out_shell_command_takes_its_children_down` も落ちる。そこで SIGCHLD を受けるたびに、直接の子のゾンビを回収する。回収するのは自分が起こした覚えの無い pid だけに限り、`os.waitpid(-1, ...)` で全部を回収しない。全部を回収すると、`subprocess.Popen` の `wait` や、テストが `os.fork` の後に呼ぶ `os.waitpid(pid, ...)` の終了コードを横取りし、ECHILD で取り違える。自分が起こした pid は、`subprocess.Popen`（`subprocess.run` と `asyncio` の子プロセスもここを通る）と `os.fork`（テストが直接呼ぶ。`multiprocessing` の fork もここを通る）を包んで記録する。
+子の回収役にすると、付け替わった孫が終わったときの回収も pytest のプロセスの役目になる。回収しないとゾンビが残り、`stop_group` のグループの存否の判定と `os.kill(pid, 0)` が成功し続けるため、打ち切る側が猶予の 5 秒を毎回待ち切り、既存の `test_lib_test_triage.py::test_a_timed_out_shell_command_takes_its_children_down` も落ちる。そこで SIGCHLD を受けるたびに、直接の子のゾンビを回収する。回収するのは自分が起こした覚えの無い pid だけに限り、`os.waitpid(-1, ...)` で全部を回収しない。全部を回収すると、`subprocess.Popen` の `wait` や、テストが `os.fork` の後に呼ぶ `os.waitpid(pid, ...)` の終了コードを横取りし、ECHILD で取り違える。自分が起こした pid は、`subprocess.Popen`（`subprocess.run` と `asyncio` の子プロセスもここを通る）と `os.fork`（テストが直接呼ぶ。`multiprocessing` の fork もここを通る）を包んで記録する。子の起動と記録の間は回収しない。fork の直後に終わった子（`subprocess.run(["false"])` のようにすぐ終わる子）や、別スレッドの `Popen` が起こした子は、pid を記録する前に SIGCHLD を起こし、そのときは記録に無いため「覚えの無いゾンビ」に見える。そこで包んだ呼び出しは呼ぶ前に起動中の数を増やし、記録の後に減らす。SIGCHLD の扱いは起動中の数が 1 以上なら回収を見送って印だけを立て、数が 0 に戻った時点で包んだ側が見送った回収をやり直す。`signal.pthread_sigmask` で SIGCHLD を塞ぐ方法は、塞げるのが呼んだスレッドだけで別スレッドの `Popen` を守れないため採らない。
 
 NDF の打ち切る側にも子孫を止める処理を足す案は採らない。受け入れ条件 7 が求める NDF を通さない打ち切りでは効かず、pytest の側と同じ役割を 2 か所に持つことになる。テストごとに後始末する案も採らない。1 万件のテストごとに子孫を列挙すると、それだけで所要が増える。
 
@@ -284,6 +285,7 @@ NDF の打ち切る側にも子孫を止める処理を足す案は採らない�
 | 受け入れ条件 6・I4 | 自分の session で sleep を起こすテストを含む小さな束を、NDF の打ち切る側で上限まで流して打ち切ると、10 秒後にその束のパスを含むプロセスが 0 件 | 後始末の部品を読み込まない・子の回収役にしない（親が先に終わる孫が残る）と落ちる |
 | 受け入れ条件 7・I4 | 同じ束を pytest（`-n 2`）で流し、親だけに SIGTERM を送ると、10 秒後に子孫が 0 件 | 後始末を worker にだけ置く（親だけが SIGTERM を受けると残る）と落ちる |
 | 受け入れ条件 6・I4 | 後始末の部品を読み込んだまま、既存の `test_lib_test_triage.py::test_a_timed_out_shell_command_takes_its_children_down` が通る。`os.fork` の後に `os.waitpid(pid, 0)` で待つテストと `subprocess.Popen` の終了コードが変わらない | SIGCHLD で付け替わった孫を回収しない（ゾンビで猶予を待ち切る）・`os.waitpid(-1, ...)` で全部を回収する（終了コードを横取りする）と落ちる |
+| 受け入れ条件 6・I4 | 後始末の部品を読み込んだまま、`subprocess.run(["false"])` を主スレッドと別スレッド（4 本）から 200 回ずつ繰り返し呼んでも、returncode がすべて 1 のまま | 起動中の数を数えずに SIGCHLD で回収する（記録の前に終わった子を回収し、ECHILD で 0 になる）・SIGCHLD の扱いがロックを待つ（主スレッドで止まる）と落ちる |
 | 受け入れ条件 6・I4 | SIGTERM の後始末が自分の pid を止める対象に入れず、直接の子が 2 つあっても 5 秒以内に終わる | `stop_tree(os.getpid())` と書く・猶予を pid ごとに順に待つと落ちる |
 | 受け入れ条件 9・I5 | `main` / `develop` への push を続けて 2 回行うと、2 つの run がどちらも最後まで回る | push の組を ref ごとにする（待っている前の実行が取り消される）と落ちる |
 | 受け入れ条件 8 | 実装の PR の 3 回の run で、開始から `pytest` の結果までが 180 秒以内 | 手元の削減が CI に効いていない・準備が縮んでいないと超える |
