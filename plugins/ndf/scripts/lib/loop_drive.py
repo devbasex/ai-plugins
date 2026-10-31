@@ -185,11 +185,14 @@ def review_answer(metrics: dict | None) -> dict:
 
 
 def write_review_answer(path: Path, out: dict) -> None:
-    """ok の結果（終わった収束ループの結果をそのまま返すときを含む）なら `review_answer` を回答ファイルへ書く。
+    """収束ループが終わった結果なら `review_answer` を回答ファイルへ書く。
 
-    gate と stopped では書かない。書けなくても結果と終了コードは変えない（読む側が無しとして扱う）。
+    終わった結果は、ok（終わった収束ループの結果をそのまま返すときを含む）と、最後まで回ったが収束しなかった
+    stopped（`drive_pause.unconverged` の形。`items[0].report` がある。#2143）である。gate と途中の stopped では書かない。
+    書けなくても結果と終了コードは変えない（読む側が無しとして扱う）。
     """
-    if out.get("status") != "ok":
+    ended = out.get("status") == "stopped" and "report" in ((out.get("items") or [{}])[0] or {})
+    if out.get("status") != "ok" and not ended:
         return
     try:
         path.write_text(json.dumps(review_answer(out.get("metrics"))))

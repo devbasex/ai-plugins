@@ -301,6 +301,28 @@ def test_drive_args_get_pr_number(tmp_path, monkeypatch):
     assert '"argv": ["77", "--max-rounds", "4"]' in s.state.results["d"]["text"]
 
 
+@pytest.mark.parametrize(
+    ("final", "ran"), [("max_rounds", ["review", "abort"]), ("oscillation", ["review", "abort"]), ("approved", ["review", "after"])]
+)
+def test_an_unconverged_review_stops_the_plan(tmp_path, monkeypatch, final, ran):
+    """#2143: cross-review の駆動が収束せずに終わると review（on_fail: abort）が失敗し、後続へ進まない。"""
+    drive = tmp_path / "drive.py"
+    drive.write_text(
+        f"import json, sys\nsys.path.insert(0, {str(SCRIPTS / 'lib')!r})\nimport drive_pause as dp\n"
+        f"m = {{'final': {final!r}}}\n"
+        "out = dp.done('d', 's', 'r.md', m) if m['final'] == 'approved' else dp.unconverged('d', 's', 'r.md', m)\n"
+        "print(json.dumps(out)); sys.exit(dp.exit_code(out))\n"
+    )
+    monkeypatch.setitem(paths.DRIVES, "fake", drive)
+    steps = [
+        {"id": "review", "type": "drive", "drive": "fake", "on_fail": "abort"},
+        {"id": "after", "type": "run", "cmd": "true", "next": "end"},
+        {"id": "abort", "type": "run", "cmd": "true", "next": "end"},
+    ]
+    s, text = run_plan(tmp_path, steps)
+    assert [e["id"] for e in s.state.log] == ran, text  # 失敗なら on_fail の abort へ、成功なら後続へ
+
+
 @pytest.mark.parametrize("drive", ["cross-review", "cross-refactoring"])
 def test_real_drives_take_pr_number_not_url(drive):
     # drive の args の {pr} は番号になる。2 つの駆動は URL を引数の解析で拒む
