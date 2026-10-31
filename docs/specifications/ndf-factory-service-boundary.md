@@ -131,7 +131,7 @@ graph TD
 
 ## サービス全体の契約（子課題が実装する）
 
-この節は、子課題 #2170〜#2174・#2186 が実装するサービスの形を、決定済みの契約として持つ。子課題は次の形を変えずに作る。**変えるときは本書を直す Pull Request を先に出す。** 機械可読な定義（JSON Schema と OpenAPI）は #2171 が本節から起こして `factory/contracts/` に置き、形の正は本節である。アカウントの API の OpenAPI（`factory/contracts/openapi/accounts.yaml`）は、最初にその経路を置く #2170 が作り、#2171 が `contracts/` の形を決めるときに取り込む。
+この節は、子課題 #2170〜#2174・#2186 が実装するサービスの形を、決定済みの契約として持つ。子課題は次の形を変えずに作る。**変えるときは本書を直す Pull Request を先に出す。** 機械可読な定義（JSON Schema と OpenAPI）は #2171 が本節から起こして `factory/contracts/` に置き、形の正は本節である。アカウントの API の OpenAPI（`factory/contracts/openapi/accounts.yaml`）は、最初にその経路を置く #2170 が作り、#2171 が `contracts/` の形を決めるときに取り込んだ。定義の置き場・`payload` の鍵の名前と型・受け口の経路と応答の本文・実行ジョブの token の形は [契約の定義と型・進捗の受け口・実行ジョブの token](ndf-factory-contracts-and-progress.md) にある。
 
 ### 受け持つ課題
 
@@ -232,11 +232,12 @@ graph TD
 | アカウント | 認証とプラン（#2170） | アカウント | 席 | プラン・使える量 |
 | リポジトリの登録 | 取り込み（#2186） | 登録 | — | GitHub のリポジトリの識別子・GitHub App の導入の識別子 |
 | スプリントの実行 | 実行の制御（#2186） | スプリントの実行 | 実行ジョブ | NDF の版・スプリントの状態・ジョブの結果 |
+| 実行の枠 | 実行の制御（#2186） | アカウントの枠 | — | 終わりの状態でない数（アカウント全体・リポジトリごと） |
 | 進捗の記録 | 進捗の受け口（#2171） | スプリントの実行の識別子ごとの列 | 進捗の事象 | 種類・発生の時刻・冪等の鍵 |
 | 承認の依頼 | 承認（#2173） | 承認の依頼 | — | 種類（ゲート 1・ゲート 2・判断）・答え |
 | 使用量の記録 | 課金（#2174） | アカウントと月ごとの台帳 | 使用量の行 | モデル・入力と出力の token・費用 |
 
-ほかの集約は識別子で参照する。1 つの処理が書き換える集約は 1 つで、集約の間は進捗の事象で後から揃える。
+ほかの集約は識別子で参照する。1 つの処理が書き換える集約は 1 つで、集約の間は進捗の事象で後から揃える。例外はスプリントの実行と実行の枠の 2 つだけで、開始と終わりの状態への移りを 1 つのトランザクションで書く。分けると同時の 2 本の開始が上限を超えるためである（#2186 の設計の決定 5）。
 
 ### 実行の形態
 
@@ -348,22 +349,23 @@ erDiagram
 | `gate.reached` | ランナー（作業の報告の `判断が要る` と承認資料） | 種類（ゲート 1・ゲート 2・判断）・Pull Request の URL・承認資料の本文 | #2173 |
 | `gate.answered` | API（#2173） | 承認の依頼の識別子・種類・承認か差し戻しか（判断では無し）・答えた人のアカウント。本文は事象に載せない | #2171・#2172 |
 | `usage.recorded` | ランナー（claude の結果の使用量） | モデル・入力と出力の token・費用・ステップ | #2174 |
+| `decision.delegated` | ランナー（#2206 の代わりの判断の記録） | 問い・選んだ答え・理由・hook が止めたときの区分 | #2172 |
 | `job.finished` | ランナー。送れずに終わったときは実行の制御 | 結果（`gate` / `stopped` / `done` / `failed`）・要約 | #2186・#2172 |
 | `pr.updated`・`ci.updated` | GitHub の Webhook | Pull Request の番号と状態・チェックの名前と結論 | #2172 |
 
 課金の境界はランナーが `usage.recorded` を出すところまでで、料金の計算・台帳・決済・Bedrock の請求との突き合わせは #2174 が持つ（決定 14）。
 
-**受け口の認証は出所ごとに 1 つで、認証の手段と事象の `source` が食い違えば拒む。** 実行の制御は受け口を通らず、進捗の記録へ直に書く。
+**受け口の認証は出所ごとに 1 つで、認証の手段と事象の `source` が食い違えば拒む。** 実行の制御は受け口を通らず、#2171 が公開する追記の関数（`appendControlEvent`）で進捗の記録へ直に書く。
 
 | 出所 | 認証の手段 | 書ける種類 |
 | --- | --- | --- |
-| `runner` | 実行ジョブごとの token。token の実行ジョブと事象の `job_id`・`sprint_run_id` が一致すること | `gate.answered`・`pr.updated`・`ci.updated` を除く種類 |
+| `runner` | 実行ジョブごとの token。token の実行ジョブと事象の `job_id`・`sprint_run_id` が一致し、`step.recorded` の Pull Request が token のリポジトリのものであること | `gate.answered`・`pr.updated`・`ci.updated` を除く種類 |
 | `api` | #2173 のサービスの IAM ロールによる署名だけ（利用者の Cognito の token では書けない）。加えて、依頼の識別子・属するスプリントの実行・種類・答えた人・承認か差し戻しかが保存済みの答えとすべて一致するときだけ書く（未保存なら 403）。利用者の token と `account_id` の確かめは #2173 の API が行う | `gate.answered` |
 | `github` | `X-Hub-Signature-256` を GitHub App の Webhook の秘密で検証する | `pr.updated`・`ci.updated` |
 
 **GitHub の Webhook の宛先のスプリントの実行は、`pr_ref` が同じ事象の `sprint_run_id` で引く。** ちょうど 1 つに決まらなければ 202 で保存しない。
 
-**受け口の応答**: 受け取ったら 202（同じ冪等の鍵の 2 回目も 202）、認証できなければ 401、認証の手段と `source`・種類・識別子が食い違えば 403、形が違えば 400。ランナーは 5xx と接続の失敗を、同じ事象のまま送り直す。
+**受け口の応答**: 受け取ったら 202（同じ冪等の鍵の 2 回目も 202）、認証できなければ 401、認証の手段と `source`・種類・識別子が食い違えば 403、形が違えば 400、保存などができなければ 503。ランナーは 5xx と接続の失敗を、同じ事象のまま送り直す。経路と本文の形は [契約の定義と型・進捗の受け口・実行ジョブの token](ndf-factory-contracts-and-progress.md) にある。
 
 ### スプリントの実行の流れ
 
@@ -467,6 +469,7 @@ stateDiagram-v2
 - 設計 Pull Request: [#2175](https://github.com/devbasex/ai-plugins/pull/2175)、実装: [#2177](https://github.com/devbasex/ai-plugins/pull/2177)
 - サービスのディレクトリ: [factory/README.md](../../factory/README.md)
 - 認証とアカウント・席・プランの使える量（#2170）: [ndf-factory-accounts-and-plans.md](ndf-factory-accounts-and-plans.md)
+- 契約の定義と型・進捗の受け口・実行ジョブの token（#2171）: [ndf-factory-contracts-and-progress.md](ndf-factory-contracts-and-progress.md)
 - 境界の検査: [scripts/check-service-boundary.py](../../scripts/check-service-boundary.py)、許可の一覧: [scripts/service-boundary-allow.json](../../scripts/service-boundary-allow.json)
 - 追加待ちの扱い: [必須のチェックの突き合わせ](ci-required-checks-reconcile.md)
 - 版と配布の規則（ランナーが導入する NDF に当たる）: [版と配布の正本](../versioning-and-distribution.md)
