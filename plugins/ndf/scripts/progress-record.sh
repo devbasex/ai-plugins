@@ -136,9 +136,9 @@ if [ -z "${NDF_PROGRESS_LOCKED:-}" ] && [ -n "$RECORD_STAGE$MODE$PACE" ]; then
   STAGE_REPORT=$(wf_record_progress "$SLUG" "$ISSUE" "$RECORD_STAGE" "$MODE" "$PACE")
   if [ -n "$SLUG" ] && command -v jq >/dev/null 2>&1; then
     PASSED=1
-    sr_process "通過記録へ積む（#$ISSUE）" "積んだ"
+    sr_process "通過記録へ積む（#${ISSUE}）" "積んだ"
   else
-    sr_process "通過記録へ積む（#$ISSUE）" "積めない（リポジトリを特定できないか jq が無い）"
+    sr_process "通過記録へ積む（#${ISSUE}）" "積めない（リポジトリを特定できないか jq が無い）"
   fi
   absorb_stage_report "$STAGE_REPORT"
 fi
@@ -164,7 +164,7 @@ if [ -z "${NDF_PROGRESS_LOCKED:-}" ]; then
     SUMMARY=$SR_ABSORBED_SUMMARY
   else
     printf 'NOTE: #%s の本文の錠を取れない（または記録が失敗した）。進行を書かずに続ける\n' "$ISSUE" >&2
-    sr_gap issue-body "#$ISSUE" "本文の錠を取れないか、記録が結果を返さなかった（終了コード $RC）: $(sr_brief "${ERR_TEXT:-理由の出力なし}")"
+    sr_gap issue-body "#$ISSUE" "本文の錠を取れないか、記録が結果を返さなかった（終了コード ${RC}）: $(sr_brief "${ERR_TEXT:-理由の出力なし}")"
   fi
   [ "$SR_GAPS" -eq 0 ] && sr_emit --tool "$TOOL" --status ok --summary "$SUMMARY"
   if [ "$PASSED" -eq 1 ]; then
@@ -289,7 +289,7 @@ fi
 if cmp -s "$BODY_FILE" "$NEW_FILE"; then
   # 変える内容が無いときは書き込まない。同じ操作を 2 度行っても結果が変わらない。
   sr_item issue-body "#$ISSUE" unchanged
-  sr_emit --tool "$TOOL" --status ok --summary "$DONE_TEXT（変える内容が無い）"
+  sr_emit --tool "$TOOL" --status ok --summary "${DONE_TEXT}（変える内容が無い）"
 fi
 sr_gh issue edit "$ISSUE" ${REPO:+--repo "$REPO"} --body-file "$NEW_FILE" >/dev/null \
   || body_gap "本文を書けない（gh issue edit）: $SR_GH_ERR"

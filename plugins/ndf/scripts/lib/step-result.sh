@@ -67,8 +67,10 @@ sr_absorb() {
   SR_ABSORBED_STATUS='' SR_ABSORBED_SUMMARY=''
   line="${1:-}"
   [ -n "$line" ] || return 1
-  # NUL 区切りの値はコマンド置換で落ちるため、プロセス置換から直に配列へ読む。読めなければ値が出ない
-  mapfile -t -d '' got < <(printf '%s' "$line" | python3 -c '
+  # NUL 区切りの値はコマンド置換で落ちるため、プロセス置換から 1 つずつ配列へ読む（bash 3.2 に mapfile は無い）。
+  # 読めなければ値が出ない
+  local v
+  while IFS= read -r -d '' v; do got+=("$v"); done < <(printf '%s' "$line" | python3 -c '
 import json, sys
 sys.path.insert(0, sys.argv[1])
 from step_result import RECORD_KEYS, validate_result

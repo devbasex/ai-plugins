@@ -74,7 +74,7 @@ record_body() {
   if sr_absorb "${out##*$'\n'}"; then
     SUMMARY_BODY=$SR_ABSORBED_SUMMARY
   else
-    sr_gap issue-body "#$ISSUE" "progress-record.sh が結果を返さなかった（終了コード $BODY_CODE）"
+    sr_gap issue-body "#$ISSUE" "progress-record.sh が結果を返さなかった（終了コード ${BODY_CODE}）"
   fi
 }
 case "$KEY" in
@@ -88,7 +88,7 @@ BOARD_RESULT='' FIELD_NAME=''
 finish() {
   local summary
   summary=$SUMMARY_BODY
-  [ "$BOARD_RESULT" != recorded ] || summary="${summary:+$summary / }#$ISSUE $FIELD_NAME = $VALUE（ボード）"
+  [ "$BOARD_RESULT" != recorded ] || summary="${summary:+$summary / }#$ISSUE $FIELD_NAME = ${VALUE}（ボード）"
   if [ "$SR_GAPS" -eq 0 ]; then
     if [ "$BODY_CODE" -eq 3 ]; then
       sr_emit --tool "$TOOL" --status stopped --summary "gh が無いため #$ISSUE の進行を書かない" --code 3
@@ -262,13 +262,13 @@ write_field() {
   local project_id="$1" item_id="$2" fields_json="$3" field_id option_id
   field_id=$(printf '%s' "$fields_json" | jq -r --arg n "$FIELD_NAME" \
     'first(.fields[]? | select(.name == $n) | .id) // empty' 2>/dev/null) || { board_fail "ボードのフィールドの応答を読めない"; return 1; }
-  [ -n "$field_id" ] || { board_fail "ボードにフィールド「$FIELD_NAME」が無い"; return 1; }
+  [ -n "$field_id" ] || { board_fail "ボードにフィールド「${FIELD_NAME}」が無い"; return 1; }
 
   if [ "$KIND" = "select" ]; then
     option_id=$(printf '%s' "$fields_json" | jq -r --arg n "$FIELD_NAME" --arg v "$VALUE" \
       'first(.fields[]? | select(.name == $n) | .options[]? | select(.name == $v) | .id) // empty' 2>/dev/null) \
       || { board_fail "ボードのフィールドの応答を読めない"; return 1; }
-    [ -n "$option_id" ] || { board_fail "フィールド「$FIELD_NAME」に選択肢「$VALUE」が無い"; return 1; }
+    [ -n "$option_id" ] || { board_fail "フィールド「${FIELD_NAME}」に選択肢「${VALUE}」が無い"; return 1; }
     sr_gh project item-edit --project-id "$project_id" --id "$item_id" \
       --field-id "$field_id" --single-select-option-id "$option_id" >/dev/null \
       || { board_fail "ボードへ書けない（gh project item-edit）: $SR_GH_ERR"; return 1; }
@@ -282,7 +282,7 @@ write_field() {
 if update; then
   BOARD_RESULT=recorded
   sr_item board "#$ISSUE $FIELD_NAME" recorded
-  sr_process "ボードの「$FIELD_NAME」へ書く" "$VALUE"
+  sr_process "ボードの「${FIELD_NAME}」へ書く" "$VALUE"
 else
   reason=''
   [ -z "$BOARD_ERR_FILE" ] || reason=$(cat "$BOARD_ERR_FILE" 2>/dev/null)

@@ -152,8 +152,7 @@ bash "$SCRIPTS/../skills/development-workflow/scripts/stage-check.sh" report <�
 
 **終了コードで工程を止めない。** `stage-check.sh` は呼び出し側の誤りだけを 2 で返す。`projects-sync.sh` は
 書けなかったときも 0 以外（6・3・1）を結果 JSON で返すが、呼ぶ側はそれでも止まらず、`summary` と
-`gaps[].reason` を報告へ載せて先へ進む（[../../progress-tracking/references/excerpt.md](../../progress-tracking/references/excerpt.md) の
-「結果の読み方」）。`record` は進捗記録のスクリプトが同じ処理を自分で行うため、手で呼ぶのは `report` だけである。
+`gaps[].reason` を報告へ載せて先へ進む（`progress-tracking` の抜粋の「結果の読み方」）。`record` は進捗記録のスクリプトが同じ処理を自分で行うため、手で呼ぶのは `report` だけである。
 
 ## 報告の読み方
 
