@@ -11,8 +11,7 @@ from pathlib import Path
 import gh_call
 import gh_sections
 import mdtable
-import repo
-from closing import defer_closing
+from closing import defer_for_base
 from pr_mode import with_mode_line
 from release_lib.others import MIGRATION_HEADING
 from supervise_lib.claude import TAIL
@@ -342,10 +341,9 @@ class PrStep:
             .stdout.strip()
             .partition("\t")
         )
-        if repo.merge_closes_issues(ctx.cwd, (found_base or None) if found else base):
-            body, deferred = defer_closing(body)
-            if deferred:
-                ctx.state.cur["deferred_closing"] = deferred
+        body, deferred = defer_for_base(ctx.cwd, (found_base or None) if found else base, body)
+        if deferred:
+            ctx.state.cur["deferred_closing"] = deferred
         if found:
             p = gh_call.gh(["pr", "edit", found, *(["--title", title] if retitle else []), "--body", body], cwd=ctx.cwd)
             url = found
