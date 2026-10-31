@@ -50,6 +50,8 @@ def env(tmp_path):
     e["PATH"] = f"{bindir}{os.pathsep}{e['PATH']}"
     e["NDF_PRESENTATION_DIR"] = str(tmp_path / "pres")
     e["NDF_WORKTREE_BASE"] = str(tmp_path / "wtbase")
+    e["TMPDIR"] = str((tmp_path / "systmp").resolve())  # 片付け（run_state.sweep）が手元の一時の置き場に触れない
+    (tmp_path / "systmp").mkdir(exist_ok=True)
     e["FAKE_GH_PRS"] = "{}"
     for k in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
         e.pop(k, None)

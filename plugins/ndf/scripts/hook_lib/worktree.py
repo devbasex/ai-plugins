@@ -151,9 +151,34 @@ def _save_state(path: str, data: dict[str, Any]) -> None:
         pass
 
 
+# セッションの持ち主として探すランタイムのプロセスの名前（先頭の一致）。
+_RUNTIME_NAMES = ("claude", "codex", "kiro-cli", "kiro", "agy")
+
+
+def session_owner() -> dict[str, Any] | None:
+    """hook の親をたどって最初に当たるランタイムのプロセス（`{"pid", "started"}`）。見つからなければ None（#2229）。
+
+    片付け（`lib/run_state.py`）は、この pid が開始時刻ごと生きている間は状態ファイルを消さない。記録が無ければ
+    最終更新から寿命の窓で判定する。"""
+    try:
+        import procs  # psutil を要する。無い環境では記録を書かない
+    except Exception:  # noqa: BLE001
+        return None
+    for pid in procs.ancestor_pids(os.getpid()):
+        got = procs.parent_and_name(pid)
+        if got and got[1].lower().startswith(_RUNTIME_NAMES):
+            started = procs.start_time(pid)
+            return {"pid": pid, "started": started} if started is not None else None
+    return None
+
+
 def place(cwd: str, path: str | None) -> tuple[Place, dict] | None:
     """位置と宣言の控え（Tool の呼び出しのたびに git を起動しない）。解決したときの cwd と宣言の目印が合えば使う。"""
     state = _load_state(path)
+    if state is not None and path and "owner" not in state:
+        # 持ち主の記録の無い既存のファイルには、次に読んだときに 1 度だけ足す（見つからなければ null を書く）
+        state["owner"] = session_owner()
+        _save_state(path, state)
     if state and state.get("resolved_from") == cwd and state.get("main_dir"):
         if state.get("declaration_stamp", "") == declaration_stamp(state["main_dir"]):
             allow = [x for x in state.get("allow_paths") or [] if isinstance(x, str)]
@@ -172,6 +197,7 @@ def place(cwd: str, path: str | None) -> tuple[Place, dict] | None:
         "allow_paths": [x for x in p.allow_paths if x],
         "notified": [],
         "pending": [],
+        "owner": state["owner"] if state and "owner" in state else session_owner(),
     }
     if path:
         _save_state(path, state)
