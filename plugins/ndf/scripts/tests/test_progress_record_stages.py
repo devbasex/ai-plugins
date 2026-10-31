@@ -168,7 +168,7 @@ def test_a_repository_without_a_board_declaration_is_recorded(env: Env) -> None:
 
 
 def test_without_gh_the_stage_is_still_recorded(env: Env, tmp_path: Path) -> None:
-    """`gh` が無くても積み、終了コードは 0 である。"""
+    """`gh` が無くても積む。本文を書けないことは前提の欠け（3）で返す（#2227）。"""
     nogh = tmp_path / "nogh"
     nogh.mkdir()
     for name in (
@@ -201,7 +201,7 @@ def test_without_gh_the_stage_is_still_recorded(env: Env, tmp_path: Path) -> Non
         if found:
             (nogh / name).symlink_to(found)
     out = env.run(str(SYNC), "42", "stage", "設計", env=env.env(PATH=str(nogh)))
-    assert out.returncode == 0, out.stderr
+    assert out.returncode == 3, out.stderr
     assert env.stages(42) == ["設計"]
     assert env.body(42) == ""
 
@@ -226,15 +226,20 @@ def test_the_refinement_stage_is_recorded_and_required_in_every_mode(env: Env) -
     assert got == ["棚卸し", "R", "R", "R", "R", "R"]
 
 
-def test_the_release_lists_the_missing_stages_on_stdout(env: Env) -> None:
+def stage_missing(out) -> dict[str, str]:
+    assert len(out.stdout.splitlines()) == 1, out.stdout
+    return {i["name"]: i["result"] for i in json.loads(out.stdout)["items"] if i["kind"] == "stage-missing"}
+
+
+def test_the_release_lists_the_missing_stages_as_items(env: Env) -> None:
     env.run(str(SYNC), "42", "mode", "standard")
     env.run(str(SYNC), "42", "stage", "設計")
     out = env.run(str(SYNC), "42", "stage", "配布")
     assert out.returncode == 0, out.stderr
-    assert "記録なし:" in out.stdout
-    assert "実装" in out.stdout
-    # 案内は本文の行より先に出る
-    assert out.stdout.index("記録なし:") < out.stdout.index("#42 進行 = 配布")
+    missing = stage_missing(out)
+    assert missing["実装"] == "missing"
+    item = next(i for i in json.loads(out.stdout)["items"] if i.get("name") == "実装")
+    assert 'projects-sync.sh" 42 stage "実装"' in item["reason"]
 
 
 def test_the_release_without_a_gap_says_nothing_more(env: Env) -> None:
@@ -248,9 +253,8 @@ def test_the_release_without_a_gap_says_nothing_more(env: Env) -> None:
             env.run(str(SYNC), "42", "stage", name)
     out = env.run(str(SYNC), "42", "stage", "配布")
     assert out.returncode == 0, out.stderr
-    assert "記録なし:" not in out.stdout
-    assert "条件付き:" not in out.stdout
-    assert out.stdout.strip() == "#42 進行 = 配布"
+    assert stage_missing(out) == {}
+    assert json.loads(out.stdout)["summary"] == "#42 進行 = 配布"
 
 
 def test_a_conditional_stage_without_a_record_is_shown_apart(env: Env) -> None:
@@ -259,8 +263,9 @@ def test_a_conditional_stage_without_a_record_is_shown_apart(env: Env) -> None:
     for name in ("要求と受け入れ条件", "作業場所の用意", "実装", "実装レビュー", "完了判定", "Pull Request", "後片付け"):
         env.run(str(SYNC), "42", "stage", name)
     out = env.run(str(SYNC), "42", "stage", "配布")
-    assert "条件付き: 設計" in out.stdout
-    assert "記録なし:" not in out.stdout
+    missing = stage_missing(out)
+    assert missing.get("設計") == "conditional"
+    assert "missing" not in missing.values()
 
 
 @pytest.mark.parametrize(
