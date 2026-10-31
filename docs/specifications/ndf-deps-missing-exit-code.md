@@ -16,8 +16,8 @@ NDF_DEPS_REEXEC="$PWD/plugins/ndf/skills/cross-refactoring/scripts/refactor.py" 
 
 | 時点 | 振る舞い |
 | --- | --- |
-| `refactor.py` の import | `deps.require("md", "mdtable")` が import できず、印が自分のパスなので起動し直さずに止まる |
-| 標準エラー | `❌ [ndf deps] uv の環境へ起動し直したが md / mdtable のパッケージ（…）を import できない。…` |
+| `refactor.py` の import | `deps.require("md", "mdtable", "locks", "procs", "waits", "schema")` のグループが import できず、印が自分のパスなので起動し直さずに止まる |
+| 標準エラー | `❌ [ndf deps] uv の環境へ起動し直したが md / mdtable / …（import できないグループを並べる）のパッケージ（…）を import できない。…` |
 | 終了コード | 69 |
 | supervise | assess のステップ（`skip_to: review` / `on_fail: refactor`）は `skipped` を記録せず、`on_fail` へ進む |
 
