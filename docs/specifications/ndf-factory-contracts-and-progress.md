@@ -113,9 +113,9 @@ graph TD
 
 | 名前 | 入力 | 出力 | 失敗 |
 | --- | --- | --- | --- |
-| `verifyRunJobToken(token)` | token の文字列（`Bearer ` を除いたもの） | `Promise<VerifiedRunJob>`（`jobId`・`sprintRunId`・`expiresAt`）。公開鍵の集合は `RUN_JOB_TOKEN_VERIFY_KEYS_SECRET_ARN` から読み、5 分ごとに読み直す | 無効は `RunJobTokenError`（`code` が `malformed` / `bad_signature` / `expired` / `unknown_key`。呼ぶ側が 401 にする）。秘密を読めない失敗は `RunJobTokenError` でない例外（呼ぶ側が 503 にする） |
+| `verifyRunJobToken(token)` | token の文字列（`Bearer ` を除いたもの） | `Promise<VerifiedRunJob>`（`jobId`・`sprintRunId`・`repo`・`expiresAt`）。公開鍵の集合は `RUN_JOB_TOKEN_VERIFY_KEYS_SECRET_ARN` から読み、5 分ごとに読み直す | 無効は `RunJobTokenError`（`code` が `malformed` / `bad_signature` / `expired` / `unknown_key`。呼ぶ側が 401 にする）。秘密を読めない失敗は `RunJobTokenError` でない例外（呼ぶ側が 503 にする） |
 | `createRunJobTokenVerifier(keys)` | 公開鍵の JWK の並び（Ed25519 でない鍵は捨てる） | `RunJobTokenVerifier`（`(token) => Promise<VerifiedRunJob>`） | 無効は `RunJobTokenError`（同じ 4 つ） |
-| `signRunJobToken(claims, key)` | `claims` = `RunJobTokenClaims`（`jobId`・`sprintRunId`・`expiresAt: Date` だけ。ほかの鍵を型で受けない）、`key` = `RunJobSigningKey`（`kid`・`privateKey`（`CryptoKey` か JWK）） | `Promise<string>` | 鍵が Ed25519 でなければ例外 |
+| `signRunJobToken(claims, key)` | `claims` = `RunJobTokenClaims`（`jobId`・`sprintRunId`・`repo`・`expiresAt: Date` だけ。ほかの鍵を型で受けない）、`key` = `RunJobSigningKey`（`kid`・`privateKey`（`CryptoKey` か JWK）） | `Promise<string>` | 鍵が Ed25519 でなければ例外 |
 | `createRunJobTokenKit()` | 無し | `Promise<RunJobTokenKit>`（`sign(claims, opts?)`・`otherKeySign(claims)`・`verify`・`publicJwks`）。鍵はメモリの中だけ。`sign` の `opts.kid` を変えると知らない鍵の token、`otherKeySign` は署名が合わない token になる | — |
 | `appendControlEvent(event)` | `JobFinishedEvent`（`source` は `control`、冪等の鍵は `<job_id>:finished`） | `Promise<{ written: boolean }>`。`false` は同じ鍵（ランナーの分）が既にある | 定義に合わない → `ProgressEventError`（`code` が `invalid_event`）。`control` の照合に合わない → `ProgressEventError`（`forbidden`）。保存の失敗はそのまま投げる |
 | `createIngestApp(deps, log?)` | `deps` = `IngestDeps`（`verifier`・`store`・`savedAnswers`・`webhookSecret: () => Promise<string>`・`apiCallerRoleArn`）か、それを返す関数。`log` は `IngestLogger`（既定は 1 行の JSON を標準出力へ） | Hono の app | — |
@@ -124,7 +124,7 @@ graph TD
 
 ### 進捗の事象の定義
 
-`factory/contracts/schemas/progress-event.schema.json`。最上位は 10 種類の `oneOf` で、各種類（`$defs` の `JobStartedEvent` など）は共通の列を `allOf` で取り込み、`unevaluatedProperties: false` で余分な列を落とす。`payload` は種類ごとに `additionalProperties: false`。生成した型は `ProgressEvent`（10 種類の共用）と種類ごとの型である。
+`factory/contracts/schemas/progress-event.schema.json`。最上位は 11 種類の `oneOf` で、各種類（`$defs` の `JobStartedEvent` など）は共通の列を `allOf` で取り込み、`unevaluatedProperties: false` で余分な列を落とす。`payload` は種類ごとに `additionalProperties: false`。生成した型は `ProgressEvent`（11 種類の共用）と種類ごとの型である。
 
 **共通の列**（全体の契約の「進捗の正本」の列から、受け口が作る `order_key` と `pr_ref` を除いた 8 列）:
 
@@ -132,7 +132,7 @@ graph TD
 | --- | --- | --- | --- |
 | `sprint_run_id` | 文字列 | 必須 | `^[A-Za-z0-9_-]{1,128}$`（`order_key` の区切りの `#` と冪等の鍵の区切りの `:` を含めない） |
 | `idempotency_key` | 文字列 | 必須 | 1〜300 字。出所ごとの形は「出所ごとの照合」が見る |
-| `type` | 文字列 | 必須 | 10 種類のどれか（種類ごとの `const`） |
+| `type` | 文字列 | 必須 | 11 種類のどれか（種類ごとの `const`） |
 | `at` | 文字列 | 必須 | `format: date-time` かつ末尾 `Z`（UTC） |
 | `source` | 文字列 | 必須 | `runner` / `github` / `api` / `control` |
 | `job_id` | 文字列か `null` | 必須（値は `null` を許す） | `^[A-Za-z0-9_-]{1,128}$`。`github`・`api` は `null` |
@@ -150,6 +150,7 @@ graph TD
 | `gate.reached` | `kind`（`gate1` / `gate2` / `decision`）、`pr_url`（URI か `null`）、`material`（文字列。承認資料の本文） |
 | `gate.answered` | `approval_request_id`（文字列）、`kind`（`gate1` / `gate2` / `decision`）、`decision`（`approved` / `rejected`。`kind` が `decision` のときは持たず、ほかでは必須）、`answered_by_account_id`（文字列。#2170 の解決の結果の `accountId`）。本文は持たない |
 | `usage.recorded` | `model`（文字列）、`input_tokens`・`output_tokens`（0 以上の整数）、`cost_usd`（0 以上の数）、`step`（文字列） |
+| `decision.delegated` | `question`・`answer`・`reason`（どれも 1〜4,000 字の文字列）、`category`（文字列か `null`。hook が止めたときの `metadata.source`） |
 | `job.finished` | `result`（`gate` / `stopped` / `done` / `failed`）、`summary`（文字列） |
 | `pr.updated` | `repo`（`owner/name`）、`number`（1 以上の整数）、`state`（`open` / `closed` / `merged`） |
 | `ci.updated` | `repo`（`owner/name`）、`pr_number`（1 以上の整数）、`name`（文字列）、`conclusion`（文字列か `null`。`null` は「まだ終わっていない」） |
@@ -275,7 +276,7 @@ sequenceDiagram
 | 出所 | 書ける種類 | 照らすこと |
 | --- | --- | --- |
 | すべて | — | 事象の `source` が経路の出所と一致する（I25） |
-| `runner` | `job.started`・`phase.changed`・`step.recorded`・`attention`・`gate.reached`・`usage.recorded`・`job.finished` | `job_id` と `sprint_run_id` が token の `sub` と `sprint_run_id` と一致する。冪等の鍵が `job.finished` なら `<job_id>:finished`、ほかなら `<job_id>:<seq>`（`seq` は `^[1-9][0-9]*$`）（I27） |
+| `runner` | `job.started`・`phase.changed`・`step.recorded`・`attention`・`gate.reached`・`usage.recorded`・`decision.delegated`・`job.finished` | `job_id` と `sprint_run_id` が token の `sub` と `sprint_run_id` と一致する。`step.recorded` の `pull_request.repo` は token の `repo` と大文字と小文字を問わず等しい（I37）。冪等の鍵が `job.finished` なら `<job_id>:finished`、ほかなら `<job_id>:<seq>`（`seq` は `^[1-9][0-9]*$`）（I27） |
 | `api` | `gate.answered` | 呼び出し元のロールが `INGEST_API_CALLER_ROLE_ARN` のロールである（IAM の文脈が無ければ 401、形が違うか一致しなければ 403。認証の段で見る）。`job_id` が `null`。冪等の鍵が `api:<payload.approval_request_id>`。保存済みの答えを読み、`null` なら 403、依頼の識別子・`sprint_run_id`・`kind`・`answered_by_account_id`・`decision`（無いことも含めて）がすべて答えと一致する（I28） |
 | `github` | `pr.updated`・`ci.updated` | `job_id` が `null`。翻訳した事象だけが通る |
 | `control` | `job.finished` | `job_id` が `null` でなく、冪等の鍵が `<job_id>:finished` |
@@ -298,7 +299,7 @@ sequenceDiagram
 
 ### 実行ジョブの token
 
-**形は JWS の compact（JWT）で、署名は EdDSA（Ed25519）である。**
+**形は JWS の compact（JWT）で、署名は EdDSA（Ed25519）である。** `account_id` は載せない（I31）。
 
 | 部分 | 鍵 | 値 |
 | --- | --- | --- |
@@ -309,13 +310,12 @@ sequenceDiagram
 | 本体 | `aud` | `ndf-factory/run-job` |
 | 本体 | `sub` | 実行ジョブの識別子（`job_id`。`^[A-Za-z0-9_-]{1,128}$`） |
 | 本体 | `sprint_run_id` | スプリントの実行の識別子（同じ形） |
-| 本体 | `iat`・`exp` | 発行と期限（秒）。期限の長さは発行側（#2186）が決める |
+| 本体 | `repo` | その実行のリポジトリ（`owner/name`）。`step.recorded` の Pull Request の照合に使う（I37） |
+| 本体 | `iat`・`exp` | 発行と期限（秒）。期限の長さは発行側が `RUN_JOB_TOKEN_TTL_SECONDS`（既定 32,400 秒）で決め、打ち切りの時間より長くする |
 
-`account_id` は載せない（I31）。
+**検証の失敗は 4 つの「無効」に分け、`jose` の失敗の `code` を読み替える。** `bad_signature` は `ERR_JWS_SIGNATURE_VERIFICATION_FAILED`、`expired` は `ERR_JWT_EXPIRED`、`unknown_key` は `ERR_JWKS_NO_MATCHING_KEY`・`ERR_JWKS_MULTIPLE_MATCHING_KEYS` で、ほか（`ERR_JWS_INVALID`・`ERR_JWT_INVALID`・`ERR_JWT_CLAIM_VALIDATION_FAILED`・`ERR_JOSE_ALG_NOT_ALLOWED`・`ERR_JOSE_NOT_SUPPORTED`、発行者・宛先・`typ`・必須の主張（`sub`・`exp`・`sprint_run_id`・`repo`）の違い、識別子の形の違い、知らない `code`）はすべて `malformed` である。失敗の文に token の値を含めない。
 
-**検証の失敗は 4 つの「無効」に分け、`jose` の失敗の `code` を読み替える。** `bad_signature` は `ERR_JWS_SIGNATURE_VERIFICATION_FAILED`、`expired` は `ERR_JWT_EXPIRED`、`unknown_key` は `ERR_JWKS_NO_MATCHING_KEY`・`ERR_JWKS_MULTIPLE_MATCHING_KEYS` で、ほか（`ERR_JWS_INVALID`・`ERR_JWT_INVALID`・`ERR_JWT_CLAIM_VALIDATION_FAILED`・`ERR_JOSE_ALG_NOT_ALLOWED`・`ERR_JOSE_NOT_SUPPORTED`、発行者・宛先・`typ`・必須の主張（`sub`・`exp`・`sprint_run_id`）の違い、識別子の形の違い、知らない `code`）はすべて `malformed` である。失敗の文に token の値を含めない。
-
-**鍵の置き場**: 公開鍵の集合（`{"keys": [<Ed25519 の公開鍵の JWK。kid つき>, …]}`）は `RUN_JOB_TOKEN_VERIFY_KEYS_SECRET_ARN` にあり、受け口と #2173 が読む。発行の鍵（Ed25519 の秘密鍵と `kid`）は実行の制御（#2186）だけが読み、変数の名前は #2186 が決める。公開鍵の集合は `createCachedRunJobTokenVerifier` が 5 分（`VERIFY_KEYS_TTL_MS`）ごとに読み直す。集合に Ed25519 でない鍵があれば捨てる。
+**鍵の置き場**: 公開鍵の集合（`{"keys": [<Ed25519 の公開鍵の JWK。kid つき>, …]}`）は `RUN_JOB_TOKEN_VERIFY_KEYS_SECRET_ARN` にあり、受け口と #2173 が読む。発行の鍵（Ed25519 の秘密鍵と `kid`）は実行の制御（#2186）だけが読み、変数は `RUN_JOB_TOKEN_SIGNING_KEY_SECRET_ARN` である。公開鍵の集合は `createCachedRunJobTokenVerifier` が 5 分（`VERIFY_KEYS_TTL_MS`）ごとに読み直す。集合に Ed25519 でない鍵があれば捨てる。
 
 ### 直の追記と保存済みの答えの口
 
@@ -325,7 +325,7 @@ sequenceDiagram
 
 ### 常に成り立つ条件
 
-I10 は全体の契約のもの。#2170 の I24 に続けて番号を振る。
+I10 は全体の契約のもの。#2170 の I24 に続けて番号を振る。I37 は #2186 が #2216 の照合として足した（I32〜I36 は #2186 のほかの集約の条件）。
 
 | # | 集約 | 条件 | 破れそうなときの扱い |
 | --- | --- | --- | --- |
@@ -336,7 +336,8 @@ I10 は全体の契約のもの。#2170 の I24 に続けて番号を振る。
 | I28 | 進捗の記録 | `gate.answered` は、依頼の識別子・属するスプリントの実行・種類・答えた人・承認か差し戻しかが保存済みの答えとすべて一致するときだけ残る。冪等の鍵は `api:<依頼の識別子>` | 未保存も含めて 403 で保存しない。答えを読めなければ 503 |
 | I29 | 進捗の記録 | 残る事象は契約の定義に合い、1 件の大きさは 256 KiB 以下である | 400 で保存しない（`github` の経路は 202 で保存しない） |
 | I30 | 進捗の記録 | 401 と 403 の応答の本文は理由によらず同じで、事象・依頼・スプリントの実行の有無を明かさない | 理由ごとの文言を出さない |
-| I31 | 進捗の記録 | 実行ジョブの token は `account_id` を運ばない。token の値・署名の鍵・Webhook の秘密は応答・ログ・事象に出ない | `signRunJobToken` の `claims` は 3 つの鍵だけを型で受ける。ログは決まった 4 列だけにする |
+| I31 | 進捗の記録 | 実行ジョブの token は `account_id` を運ばない。token の値・署名の鍵・Webhook の秘密は応答・ログ・事象に出ない | `signRunJobToken` の `claims` は 4 つの鍵だけを型で受ける。ログは決まった 4 列だけにする |
+| I37 | 進捗の記録 | `runner` の `step.recorded` の `pull_request.repo` は、token の `repo` と大文字と小文字を問わず等しい。他のリポジトリの Pull Request を自分の実行へ結び付けない（#2216） | 403 で保存せず、`pr_ref` を残さない |
 
 ## データ・設定
 
@@ -366,7 +367,7 @@ erDiagram
 | `sprint_run_id` | 文字列 | 許さない | 区分の鍵 |
 | `order_key` | 文字列 | 許さない | 並びの鍵。`<at をミリ秒の 3 桁にそろえた UTC（toISOString）>#<冪等の鍵>`。小数の桁が違う時刻を文字列のまま並べると `…:00.5Z` が `…:00Z` より前に来るため、そろえてから結ぶ |
 | `idempotency_key` | 文字列 | 許さない | 出所ごとの形（全体の契約の「進捗の正本」） |
-| `type` | 文字列 | 許さない | 10 種類のどれか |
+| `type` | 文字列 | 許さない | 11 種類のどれか |
 | `at` | 文字列 | 許さない | 送られた値のまま（UTC、末尾 `Z`） |
 | `source` | 文字列 | 許さない | `runner` / `github` / `api` / `control` |
 | `job_id` | 文字列 | 許す | 空（`null`）は「実行ジョブの外で起きた」（`github`・`api`） |
@@ -459,7 +460,7 @@ graph TD
 - **token の公開鍵を差し替えるとき**: 新しい公開鍵を集合へ足し、読み直しの間隔（5 分）が過ぎてから発行の鍵を替え、古い token の期限が過ぎてから古い公開鍵を外す。手順の詳細は #2186 とインフラの運用が持つ
 - **#2173 が答えの読み出しを実装するとき**: `factory/api/src/progress/saved-answers.ts` の `savedAnswersFromEnv` の中身を替える。それまで `api` の経路は 503 を返す
 - **GitHub の Webhook で残らない事象がある。** Pull Request を作った直後の `pull_request.opened` は、ランナーが `step.recorded` で参照を送るより先に届くため、宛先が引けず残らない。`pr_ref-index` は結果整合のため、参照を書いた直後の Webhook も取りこぼすことがある。以後の `synchronize`・`closed` と CI は届き、#2172 は最初の状態を `step.recorded` の参照から読める。スプリントの実行の途中でリポジトリを改名すると `pr_ref` が合わず引けなくなる
-- **256 KiB を超える `gate.reached`** は、ランナー（#2186）が `material` を切り詰めて Pull Request の URL への案内を残す。切り詰めの形は #2186 が決める
+- **256 KiB を超える `gate.reached`** は、ランナー（#2186）が `material` を切り詰めて Pull Request の URL への案内を残す。JSON にしたバイト数が 256 KiB 以下になる最長の位置で文字の境目に切り、末尾に Pull Request の URL への案内を足す
 
 ## テスト観点
 
@@ -468,11 +469,11 @@ graph TD
 | 観点 | 縛る振る舞い |
 | --- | --- |
 | 実行ジョブの指示の定義 | 入力の名前の集合が全体の契約の 11 項目と等しいこと。`START` が `new` で `ISSUES` が無い・`resume` で `APPROVAL_REQUEST_ID` が無い・`byok` で `MODEL_CREDENTIAL_SECRET_ARN` が無い・`local`・`managed` にそれがある・知らない入力・番号でない `ISSUES` がそれぞれ落ちること |
-| 進捗の事象の定義（I29） | 種類の集合が全体の契約の 10 種類と、共通の列が「進捗の正本」の列と 1 対 1 に対応すること。知らない種類は `/type` の `enum`、`schema_version` 2・`payload` の余分な鍵・共通の列の欠け・余分な列・UTC でない時刻・`#` を含む識別子が落ちること。`gate.answered` の `decision` が判断では持てず、ゲートでは必須であること。`step.recorded` の `pull_request` が任意で、形が違えば落ちること |
+| 進捗の事象の定義（I29） | 種類の集合が全体の契約の 11 種類と、共通の列が「進捗の正本」の列と 1 対 1 に対応すること。知らない種類は `/type` の `enum`、`schema_version` 2・`payload` の余分な鍵・共通の列の欠け・余分な列・UTC でない時刻・`#` を含む識別子が落ちること。`gate.answered` の `decision` が判断では持てず、ゲートでは必須であること。`step.recorded` の `pull_request` が任意で、形が違えば落ちること |
 | 型のずれと応答の定義 | コミットした型が定義から作り直した型と一致し、定義に項目を足して作り直さないと食い違うこと。202 と 4 つのエラーの本文が応答の定義に合い、ほかは合わないこと |
 | OpenAPI | `npm run lint:contracts` が `ingest.yaml` を含めて 0 で終わること（`$ref` の参照切れは Spectral の `invalid-ref` で落ちる） |
 | `runner` の認証 | token が無い・`Bearer` でない・形が違う・署名が合わない・期限切れ・知らない鍵がどれも 401 で、保存 0 件、本文が同じであること |
-| `runner` の照合（I26・I27） | token と `job_id`・`sprint_run_id` のどちらかが違う、`gate.answered`・`pr.updated`・`ci.updated`、鍵が別のジョブの頭・`seq` が 0 か数でない・`job.finished` に `seq`・ほかの種類に `finished` がそれぞれ 403 で保存 0 件。`job.finished` は `<job_id>:finished` で残ること |
+| `runner` の照合（I26・I27） | token と `job_id`・`sprint_run_id` のどちらかが違う、`gate.answered`・`pr.updated`・`ci.updated`、鍵が別のジョブの頭・`seq` が 0 か数でない・`job.finished` に `seq`・ほかの種類に `finished`・token と別のリポジトリの Pull Request を持つ `step.recorded`（I37）がそれぞれ 403 で保存 0 件。`job.finished` は `<job_id>:finished` で残ること |
 | `api` の認証と照合（I28） | 保存済みの答えとすべて一致すれば 202 で残ること。IAM の文脈が無い（Cognito の token だけ）と 401、別のロール・別のアカウント・ロールでない呼び出し元は 403。`gate.answered` 以外、5 つの項目のどれかの違い、答えが未保存、鍵が `api:<依頼の識別子>` でない、`job_id` があるのどれも 403。読み出しが投げると 503。どれも保存 0 件。呼び出し元はセッションの ARN とロールの ARN（パスの有無を問わず）をアカウントとロールの名前で照らし、ロールの ARN でない設定とは一致しないこと |
 | 出所と形（I25・I29） | どの経路でも `source` の食い違いは 403。JSON でない本文は 400。256 KiB ちょうどの本文は通り、1 バイト超えると 400 で保存 0 件 |
 | 追記と冪等（I10） | 受け付けた事象が 202 で列に 1 件、`order_key` が `<ミリ秒にそろえた at>#<鍵>` であること。同じ鍵の 2 回目は中身が違っても 202 で 1 件目が変わらないこと。同じ鍵を同時に 2 本送っても 1 件。保存に失敗したら 503 で、送り直すと 1 件になること |
