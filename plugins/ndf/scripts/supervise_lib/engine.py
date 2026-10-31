@@ -22,7 +22,7 @@ import slow_step as ss
 from supervise_lib import decl, limits, paths
 from supervise_lib.actuals import ActualsLog
 from supervise_lib.claude import AuthUnavailable, ClaudeCall, ClaudeRunner, UsageLimit, claude_kind
-from supervise_lib.plan import expand_parts, fail_kind_matches, normalize_plan, on_exit_error
+from supervise_lib.plan import expand_parts, fail_kind_matches, leftover_placeholders, normalize_plan, on_exit_error
 from supervise_lib.pr import PrStep
 from supervise_lib.slow import SLOW_EXIT, SlowAction, SlowWatch
 from supervise_lib.state import RunState
@@ -271,6 +271,13 @@ class Engine:
         carry, slow.carry = slow.carry, None
         slow.watch = slow.start_watch(step, carry if carry and carry.step_id == sid else None)
         try:
+            left = leftover_placeholders(str(step.get("cmd") or ""))
+            if left:
+                # 置き換わらない差し込みを文字列のまま打たない（黙って空の結果を返すコマンドがある。#2079）
+                why = f"ステップ {sid} のコマンドに置き換わらない差し込みが残った: {' '.join(left)}"
+                st.cur["exit"] = 1
+                st.cur["text"] = why
+                return None, "止まった", why
             if step["type"] == "judge":
                 return self._next_after_judge(sid, step)
             ok, _ = self.handlers[step["type"]].execute(self.ctx, step)

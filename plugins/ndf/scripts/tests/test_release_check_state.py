@@ -40,9 +40,27 @@ def test_queue_state_takes_the_named_plan_state_dir(tmp_path):
     assert queue.fill_queue_pr(alone, []) is None and cmd_of(alone) == f"x '{paths.state_dir_of(check)}'"
 
 
-def test_queue_state_without_the_plan_is_empty(tmp_path):
-    dev = plan_file(tmp_path, "7-release", "x '{queue_state:check}'")
-    assert queue.fill_queue_pr(dev, []) is None and cmd_of(dev) == "x ''"
+def test_queue_placeholders_without_the_plan_are_not_filled(tmp_path):
+    """名前の一致する計画の結果が無ければ、0・空文字で埋めずに理由を返し、計画を書き換えない（#2079）。"""
+    dev = plan_file(tmp_path, "7-release", "notes --prs {queue_pr:check} --check-state '{queue_state:check}'")
+    err = queue.fill_queue_pr(dev, [])
+    assert err and "{queue_pr:check}" in err and "{queue_state:check}" in err
+    assert cmd_of(dev) == "notes --prs {queue_pr:check} --check-state '{queue_state:check}'"
+
+
+def test_queue_pr_of_a_stopped_plan_is_not_zero(tmp_path):
+    check = plan_file(tmp_path, "6-check", "true")
+    item = {**done(check), "result": "止まった"}
+    dev = plan_file(tmp_path, "7-release", "x {queue_pr:check}")
+    assert queue.fill_queue_pr(dev, [item]) and cmd_of(dev) == "x {queue_pr:check}"
+
+
+def test_queue_stage_with_unfilled_placeholder_is_not_ok(tmp_path):
+    dev = plan_file(tmp_path, "7-release", "x {queue_pr:check}")
+    skipped, runnable = queue.fill_stage(False, [dev], [])
+    assert runnable == [] and skipped[0]["result"] == queue.NOT_RUN and skipped[0]["unfilled"]
+    res = queue._queue_result(skipped, 3, tmp_path / "done.json")
+    assert res["status"] != "ok" and "{queue_pr:check}" in skipped[0]["reason"]
 
 
 def test_dev_approval_passes_the_check_state_only_for_the_check_pr():

@@ -150,9 +150,11 @@ def test_nothing_at_all_says_so_with_every_name(monkeypatch, tmp_path):
 
 
 def test_some_missing_lists_the_missing_after_the_present(monkeypatch, tmp_path):
-    """1488-6・I10: --check-state のディレクトリが無いと止まらず、ある材料の行の後に無い 3 つの名前を 1 行で書く。"""
+    """1488-6・I10: --check-state のディレクトリに結果 JSON が無いと止まらず、ある材料の行の後に無い 3 つの名前を 1 行で書く。"""
     w = world_with_design(tmp_path)
-    path, out = run(load(monkeypatch, w), w, tmp_path / "無い")
+    (tmp_path / "空").mkdir()
+    path, out = run(load(monkeypatch, w), w, tmp_path / "空")
+    assert section(path.read_text(encoding="utf-8"), "## 検査の結果")[0].startswith("- 無し")
     risks = section(path.read_text(encoding="utf-8"), "## 未検証・残る危険")
     assert risks[-1].startswith("- 無い材料:") and all(n in risks[-1] for n in ("レビュー", "リファクタリング", "全体テスト"))
     assert "設計文書の未確認" not in risks[-1] and any(r.startswith("- 設計の未確認 #7") for r in risks)
@@ -176,6 +178,18 @@ def test_rewriting_replaces_machine_lines_and_keeps_hand_lines(monkeypatch, tmp_
     assert "- 手で書いた危険" in risks and not [r for r in risks if r.startswith("- 未実施のリリース後テスト")]
     assert len([r for r in risks if r.startswith("- 設計の未確認")]) == 2
     assert "3 ラウンド" in section(text, "## 検査の結果")[0] and text.count("## 検査の結果") == 1
+
+
+@pytest.mark.parametrize("state", ["", "無い"])
+def test_check_state_without_the_directory_stops(monkeypatch, tmp_path, state):
+    """#2079: 置き場が空文字・無いディレクトリなら「無し」と書かずに 3 で止まる。"""
+    w = world_with_design(tmp_path)
+    mod = load(monkeypatch, w)
+    path = rr.facts(mod, w, [30])[0]["presentation_path"]
+    before = Path(path).read_text(encoding="utf-8")
+    with pytest.raises(mod.StepError) as e:
+        rr.notes(mod, w, [30], approval=path, version=rr.VER, check_state=str(tmp_path / state) if state else "")
+    assert e.value.code == 3 and Path(path).read_text(encoding="utf-8") == before
 
 
 def test_check_state_needs_approval(monkeypatch, tmp_path):

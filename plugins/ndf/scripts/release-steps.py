@@ -1170,7 +1170,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--ref", help="--approval: 検証への配布で導入した ref（既定は宣言のベースブランチ）")
     p.add_argument(
         "--check-state",
-        help="--approval: 検査のプランの状態ディレクトリ（レビュー・リファクタリング・全体テストの結果を読む。空・無いときは無い材料として書く）",
+        help="--approval: 検査のプランの状態ディレクトリ（レビュー・リファクタリング・全体テストの結果を読む。結果 JSON が無ければ無い材料として書き、空文字・無いディレクトリなら書かずに 3 で止まる）",
     )
     p.set_defaults(func=cmd_notes)
     return deploy.add_deploy_parser(sub, common, ap)  # deploy-facts（手動反映の本番系の承認資料。#1454）
