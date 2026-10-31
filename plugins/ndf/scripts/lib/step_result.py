@@ -4,10 +4,13 @@
 ディレクトリの README.md にある。
 
     {"tool": "merged", "status": "ok|gate|stopped", "summary": "...", "items": [...],
-     "metrics": {...}, "presentation_path": "...", "next": "..."}
+     "metrics": {...}, "gaps": [...], "process": [...], "decisions": [...],
+     "presentation_path": "...", "next": "..."}
 
-読み手は `status`（と終了コード）だけで次の手を決める。`items[].result` の語彙はスクリプトごとに
-持ってよい。承認の関門の提示物は `approval_present()` が書き出す。
+読み手は `status`（と終了コード）だけで次の手を決め、成功と読むのは `ok`（終了コード 0）だけである。
+`ok` は欠け（`gaps`）が無いときだけ返せ、欠けが残るなら `stopped` と終了コード 6 で返す（#2227）。
+`items[].result` の語彙はスクリプトごとに持ってよい。承認の関門の提示物は `approval_present()` が書き出す。
+シェルのスクリプトは `python3 step_result.py emit ...`（`step-result.sh` の `sr_emit`）で同じ形を出す。
 
 後半は、手順のスクリプトが共通に使う小さな関数（git / gh の呼び出し、版の形、plugin の置き場所）。
 標準ライブラリだけで書く。
@@ -38,6 +41,8 @@ git_root = proc.git_root
 STATUSES = ("ok", "gate", "stopped")
 REQUIRED = ("tool", "status", "summary", "items", "metrics")
 OPTIONAL = ("presentation_path", "next")
+# 欠け・過程・判断の項目（任意）。各要素はオブジェクトで、この鍵を空でない文字列で持つ（#2227 の I3）
+RECORD_KEYS = {"gaps": ("kind", "name", "reason"), "process": ("run", "result"), "decisions": ("decision", "basis")}
 
 EXIT_OK = 0
 EXIT_VIOLATION = 1  # チェックで違反あり・手順が失敗した
@@ -47,6 +52,8 @@ EXIT_PRECONDITION = 3  # 前提が無い（宣言・認証・対象のファイ�
 # PR がベースブランチと衝突している（mergeStateStatus が DIRTY か、gh pr merge がマージのコミットを作れずに拒んだ）。
 # merge-when-green が返し、プランの merge はベースブランチの取り込みへ戻る（#1917）
 EXIT_BASE_CONFLICT = 4
+# 欠けが残る。手順は終わったが、`gaps` に書いた材料・記録・目標が欠けた（`stopped` だけ。#2227）
+EXIT_INCOMPLETE = 6
 EXIT_GATE = 10  # 10〜19: 関門（人の同意が要る）
 EXIT_PAUSE = 20  # 20〜29: LLM の判断待ち
 # 依存の欠け（`deps.require` が外部パッケージを用意できずに止まった。何も判定していない）。値の持ち主は deps.py
@@ -69,7 +76,15 @@ def code_matches(status: str, code: int) -> bool:
         return code == EXIT_OK
     if status == "gate":
         return code in GATE_CODES or code in PAUSE_CODES
-    return code in (EXIT_VIOLATION, EXIT_UNREADABLE, EXIT_PRECONDITION, EXIT_BASE_CONFLICT, EXIT_DEPS_MISSING, EXIT_INFRA_WAIT)
+    return code in (
+        EXIT_VIOLATION,
+        EXIT_UNREADABLE,
+        EXIT_PRECONDITION,
+        EXIT_BASE_CONFLICT,
+        EXIT_INCOMPLETE,
+        EXIT_DEPS_MISSING,
+        EXIT_INFRA_WAIT,
+    )
 
 
 def _check_item_types(obj: dict, errs: list[str]) -> None:
@@ -83,6 +98,23 @@ def _check_item_types(obj: dict, errs: list[str]) -> None:
             errs.append(f"items[{i}] はオブジェクトで書く")
 
 
+def _check_records(obj: dict, errs: list[str]) -> None:
+    """gaps / process / decisions の各要素が決めた鍵を空でない文字列で持つか（I3）。"""
+    for field, keys in RECORD_KEYS.items():
+        if field not in obj:
+            continue
+        if not isinstance(obj[field], list):
+            errs.append(f"{field} は配列で書く")
+            continue
+        for i, it in enumerate(obj[field]):
+            if not isinstance(it, dict):
+                errs.append(f"{field}[{i}] はオブジェクトで書く")
+                continue
+            for k in keys:
+                if not isinstance(it.get(k), str) or not it[k].strip():
+                    errs.append(f"{field}[{i}] の {k} を空でない文字列で書く")
+
+
 def _check_field_types(obj: dict, errs: list[str]) -> None:
     if "tool" in obj and (not isinstance(obj["tool"], str) or not obj["tool"]):
         errs.append("tool は空でない文字列で書く")
@@ -91,6 +123,7 @@ def _check_field_types(obj: dict, errs: list[str]) -> None:
     if "summary" in obj and not isinstance(obj["summary"], str):
         errs.append("summary は文字列で書く")
     _check_item_types(obj, errs)
+    _check_records(obj, errs)
     if "metrics" in obj and not isinstance(obj["metrics"], dict):
         errs.append("metrics はオブジェクトで書く")
     for k in OPTIONAL:
@@ -101,6 +134,11 @@ def _check_field_types(obj: dict, errs: list[str]) -> None:
 def _check_status_code(obj: dict, code: int | None, errs: list[str]) -> None:
     if obj.get("status") == "gate" and not obj.get("presentation_path") and not obj.get("next"):
         errs.append("gate には presentation_path か next を添える")
+    has_gaps = isinstance(obj.get("gaps"), list) and bool(obj["gaps"])
+    if obj.get("status") == "ok" and has_gaps:
+        errs.append("ok に gaps を添えない（欠けが残るなら stopped と終了コード 6）")
+    if code == EXIT_INCOMPLETE and obj.get("status") == "stopped" and not has_gaps:
+        errs.append("終了コード 6 には gaps を 1 件以上書く")
     if code is not None and obj.get("status") in STATUSES and not code_matches(obj["status"], code):
         errs.append(f"status {obj['status']} と終了コード {code} が合わない")
 
@@ -110,7 +148,7 @@ def validate_result(obj, code: int | None = None) -> list[str]:
     if not isinstance(obj, dict):
         return ["結果はオブジェクトで書く"]
     errs = [f"{k} が無い" for k in REQUIRED if k not in obj]
-    unknown = set(obj) - set(REQUIRED) - set(OPTIONAL)
+    unknown = set(obj) - set(REQUIRED) - set(OPTIONAL) - set(RECORD_KEYS)
     if unknown:
         errs.append(f"知らない項目: {', '.join(sorted(unknown))}")
     _check_field_types(obj, errs)
@@ -119,9 +157,23 @@ def validate_result(obj, code: int | None = None) -> list[str]:
 
 
 def result(
-    tool: str, status: str, summary: str, items=None, metrics=None, presentation_path: str | None = None, next: str | None = None
+    tool: str,
+    status: str,
+    summary: str,
+    items=None,
+    metrics=None,
+    presentation_path: str | None = None,
+    next: str | None = None,
+    *,
+    gaps=None,
+    process=None,
+    decisions=None,
 ) -> dict:
+    """結果を組む。gaps / process / decisions は渡したときだけ置く（空の配列は置かない）。"""
     out = {"tool": tool, "status": status, "summary": summary, "items": list(items or []), "metrics": dict(metrics or {})}
+    for k, v in (("gaps", gaps), ("process", process), ("decisions", decisions)):
+        if v:
+            out[k] = list(v)
     if presentation_path:
         out["presentation_path"] = str(presentation_path)
     if next:
@@ -132,11 +184,13 @@ def result(
 def emit(obj: dict, code: int | None = None, stream=None) -> "NoReturn":  # noqa: F821
     """結果を 1 行の JSON で出し、終了コードで終える。
 
-    code を省くと status から決める（ok=0 / gate=10 / stopped=1）。形が誤っていれば、
+    code を省くと status から決める（ok=0 / gate=10 / stopped=1。`stopped` で gaps があれば 6）。形が誤っていれば、
     誤りを標準エラーへ出して 2 で終える（誤った結果を「通った」と読ませない）。
     """
     if code is None and isinstance(obj, dict) and obj.get("status") in STATUSES:
         code = default_code(obj["status"])
+        if obj["status"] == "stopped" and isinstance(obj.get("gaps"), list) and obj["gaps"]:
+            code = EXIT_INCOMPLETE
     errs = validate_result(obj, code)
     if errs:
         print("結果の形が誤っている: " + " / ".join(errs), file=sys.stderr)
@@ -303,3 +357,56 @@ def main_with(ap, tool_of, argv=None):
         return a.func(a)
     except StepError as e:
         emit(result(tool_of(a), "stopped", str(e)), e.code)
+
+
+# --- シェルから結果を出す CLI（`step-result.sh` の `sr_emit` が呼ぶ。#2227） ----------------
+
+
+def _metric_value(v: str):
+    try:
+        return int(v)
+    except ValueError:
+        return v
+
+
+def _cli_result(a) -> dict:
+    items = [{"kind": k, "name": n, "result": r, **({"reason": why} if why else {})} for k, n, r, why in a.item]
+    return result(
+        a.tool,
+        a.status,
+        a.summary,
+        items,
+        {k: _metric_value(v) for k, v in a.metric},
+        a.presentation_path,
+        a.next,
+        gaps=[{"kind": k, "name": n, "reason": why} for k, n, why in a.gap],
+        process=[{"run": r, "result": res} for r, res in a.process],
+        decisions=[{"decision": d, "basis": b} for d, b in a.decision],
+    )
+
+
+def cli_parser() -> argparse.ArgumentParser:
+    ap = argparse.ArgumentParser(prog="step_result.py", description="手順のスクリプトの結果 JSON を 1 行出して終える")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    e = sub.add_parser("emit", help="値を 1 つずつ別の引数で受けて結果 JSON を出す")
+    e.add_argument("--tool", required=True)
+    e.add_argument("--status", required=True, choices=STATUSES)
+    e.add_argument("--summary", required=True)
+    e.add_argument("--code", type=int, default=None, help="終了コード（省けば status と gaps から決める）")
+    e.add_argument("--item", nargs=4, action="append", default=[], metavar=("KIND", "NAME", "RESULT", "REASON"))
+    e.add_argument("--gap", nargs=3, action="append", default=[], metavar=("KIND", "NAME", "REASON"))
+    e.add_argument("--process", nargs=2, action="append", default=[], metavar=("RUN", "RESULT"))
+    e.add_argument("--decision", nargs=2, action="append", default=[], metavar=("DECISION", "BASIS"))
+    e.add_argument("--metric", nargs=2, action="append", default=[], metavar=("KEY", "VALUE"))
+    e.add_argument("--next", default=None)
+    e.add_argument("--presentation-path", default=None)
+    return ap
+
+
+def main(argv=None) -> "NoReturn":  # noqa: F821
+    a = cli_parser().parse_args(argv)  # 引数の誤りは argparse が 2 で終える
+    emit(_cli_result(a), a.code)
+
+
+if __name__ == "__main__":
+    main()
