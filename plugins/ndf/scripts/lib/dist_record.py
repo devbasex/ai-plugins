@@ -103,22 +103,41 @@ def _pick_verify_block(blocks, stage, version, dist_start):
     return "\n".join(after[-1]["lines"]) if after else None
 
 
-def parse_record(text):
+def _dist_comment_id(parts, dist_line):
+    """最後の配布の記録の見出しの行を含む部分のコメントの識別子（振り返りの行を比べる基準。#2228 の決定 10）。
+
+    parts は (先頭の行の番号, コメントの識別子) の並び（本文は識別子が None）。記録が本文にあれば、記録の PR の
+    最初のコメントの識別子を使い、コメントが 1 件も無ければ None。parts が無ければ None。"""
+    if not parts:
+        return None
+    hit = None
+    for start, cid in parts:
+        if start <= dist_line:
+            hit = cid
+    if hit is not None:
+        return hit
+    return next((cid for _, cid in parts if cid is not None), None)
+
+
+def parse_record(text, parts=None):
     """最後の配布の記録と、使うリリース後テストのブロックを読む。
 
-    戻り値: {"found", "stage", "version", "sprint_prs", "verify_block"}。
+    parts は text を組んだ部分ごとの (先頭の行の番号, コメントの識別子) の並び（sprint-close.py の read_record が返す）。
+    戻り値: {"found", "stage", "version", "sprint_prs", "verify_block", "dist_comment_id"}。
     verify_block は本番なら対象の版が一致する最後のブロック（無ければ最後の配布の記録より後で、対象の版が版数でない
     最後のブロック）、
     配布なしなら最後の配布の記録より後の最後のブロック。無ければ None。
+    dist_comment_id は最後の配布の記録のコメントの識別子（_dist_comment_id。記録が無ければ None）。
     """
     lines = text.splitlines()
     sections = [s for s in md.md_sections(text) if lines[s.heading.line].startswith("#")]
     dists = [s for s in sections if lines[s.heading.line].startswith(DIST)]
     dist_start = dists[-1].heading.line if dists else None
-    out = {"found": dist_start is not None, "stage": None, "version": None, "sprint_prs": [], "verify_block": None}
+    out = {"found": dist_start is not None, "stage": None, "version": None, "sprint_prs": [], "verify_block": None, "dist_comment_id": None}
     if dist_start is None:
         return out
     out.update(_read_dist_block(lines[dists[-1].start : dists[-1].end]))
     blocks = _verify_blocks(lines, sections)
     out["verify_block"] = _pick_verify_block(blocks, out["stage"] or "", out["version"], dist_start)
+    out["dist_comment_id"] = _dist_comment_id(parts, dist_start)
     return out

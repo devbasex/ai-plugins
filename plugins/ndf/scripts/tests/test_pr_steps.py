@@ -548,7 +548,9 @@ def test_create_to_the_default_branch_defers_the_closing_keywords(repo, env, tmp
 
 def test_update_of_a_pr_to_the_default_branch_defers_the_closing_keywords(repo, env, tmp_path):
     set_default(repo, "main")
-    env["FAKE_GH_PRS"] = json.dumps({"feature/x": [{"number": 7, "url": "https://github.com/o/r/pull/7", "isDraft": False, "baseRefName": "main"}]})
+    env["FAKE_GH_PRS"] = json.dumps(
+        {"feature/x": [{"number": 7, "url": "https://github.com/o/r/pull/7", "isDraft": False, "baseRefName": "main"}]}
+    )
     code, out, err = call(["update", "--body-file", str(body_file(tmp_path))], env, repo)
     assert code == 0, err
     assert "Closes" not in sent_body(env) and out["metrics"]["deferred_closing"] == ["#858"]

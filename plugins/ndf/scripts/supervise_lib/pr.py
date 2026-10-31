@@ -325,7 +325,18 @@ class PrStep:
         置き換えてから送る（マージで課題を閉じない。#2228 の I7）。"""
         found, _, found_base = (
             gh_call.gh(
-                ["pr", "list", "--head", branch, "--state", "open", "--json", "url,baseRefName", "--jq", '.[0] | [.url, .baseRefName] | @tsv'],
+                [
+                    "pr",
+                    "list",
+                    "--head",
+                    branch,
+                    "--state",
+                    "open",
+                    "--json",
+                    "url,baseRefName",
+                    "--jq",
+                    ".[0] | [.url, .baseRefName] | @tsv",
+                ],
                 cwd=ctx.cwd,
             )
             .stdout.strip()

@@ -206,7 +206,9 @@ def test_sprint_close_four_outcomes(repo, gh):
         bodies={"11": "Fixes #1, closes #2", "12": "Resolves #3 and fixes other/x#4"},
         issues={"o/r#1": ["OPEN"], "o/r#2": ["CLOSED"], "o/r#3": ["OPEN"], "other/x#4": [None]},
     )
-    code, out, err = call("sprint-close.py", ["--record-pr", "20", "--repo", "o/r", "--label", "M26の振り返り"], gh.env, repo)
+    code, out, err = call(
+        "sprint-close.py", ["--final-stage", "配布", "--record-pr", "20", "--repo", "o/r", "--label", "M26の振り返り"], gh.env, repo
+    )
     res = issues_of(out)
     assert res["o/r#1"]["result"] == "closed" and res["o/r#1"]["cmd"] == "gh issue reopen 1 --repo o/r"
     assert res["o/r#2"]["result"] == "already_closed"
@@ -223,7 +225,7 @@ def test_sprint_close_failed_when_close_does_not_take(repo, gh):
         issues={"o/r#1": ["OPEN"]},
         close_works=False,
     )
-    code, out, err = call("sprint-close.py", ["--record-pr", "20", "--repo", "o/r"], gh.env, repo)
+    code, out, err = call("sprint-close.py", ["--final-stage", "配布", "--record-pr", "20", "--repo", "o/r"], gh.env, repo)
     it = issues_of(out)["o/r#1"]
     assert code == 1 and it["result"] == "failed" and it["cmd"] == "gh issue close 1 --repo o/r"
 
@@ -234,7 +236,7 @@ def test_sprint_close_kept_open_before_production(repo, gh):
         bodies={"11": "Fixes #1"},
         issues={"o/r#1": ["OPEN"]},
     )
-    code, out, err = call("sprint-close.py", ["--record-pr", "20", "--repo", "o/r"], gh.env, repo)
+    code, out, err = call("sprint-close.py", ["--final-stage", "配布", "--record-pr", "20", "--repo", "o/r"], gh.env, repo)
     assert code == 0 and out["status"] == "ok"
     assert issues_of(out)["o/r#1"]["result"] == "kept_open"
     assert "closed" not in gh.get()
@@ -249,7 +251,9 @@ def test_sprint_close_verification_per_issue(repo, gh):
         bodies={"11": "Fixes #1", "12": "Fixes #2 fixes #3"},
         issues={"o/r#1": ["OPEN"], "o/r#2": ["OPEN"], "o/r#3": ["OPEN"]},
     )
-    code, out, err = call("sprint-close.py", ["--record-pr", "20", "--repo", "o/r", "--with-verification"], gh.env, repo)
+    code, out, err = call(
+        "sprint-close.py", ["--final-stage", "配布", "--record-pr", "20", "--repo", "o/r", "--with-verification"], gh.env, repo
+    )
     res = issues_of(out)
     assert res["o/r#1"]["result"] == "closed"
     assert res["o/r#2"]["result"] == "kept_open" and "合格でない" in res["o/r#2"]["reason"]
@@ -259,13 +263,15 @@ def test_sprint_close_verification_per_issue(repo, gh):
 
 def test_sprint_close_no_verification_record_keeps_all(repo, gh):
     gh.set(records={"20": {"body": DIST_PROD, "comments": []}}, bodies={"11": "Fixes #1", "12": ""}, issues={"o/r#1": ["OPEN"]})
-    code, out, err = call("sprint-close.py", ["--record-pr", "20", "--repo", "o/r", "--with-verification"], gh.env, repo)
+    code, out, err = call(
+        "sprint-close.py", ["--final-stage", "配布", "--record-pr", "20", "--repo", "o/r", "--with-verification"], gh.env, repo
+    )
     assert code == 0 and issues_of(out)["o/r#1"]["reason"] == "本番の版のリリース後テストの記録が無い"
 
 
 def test_sprint_close_empty_list_is_2(repo, gh):
     gh.set(records={"20": {"body": "## 配布の記録\n段階: 配布なし（文書だけ）\n", "comments": []}})
-    code, out, err = call("sprint-close.py", ["--record-pr", "20", "--repo", "o/r"], gh.env, repo)
+    code, out, err = call("sprint-close.py", ["--final-stage", "配布", "--record-pr", "20", "--repo", "o/r"], gh.env, repo)
     assert code == 2 and out["status"] == "stopped"
 
 
@@ -275,7 +281,9 @@ def test_sprint_close_dry_run_writes_nothing(repo, gh):
         bodies={"11": "Fixes #1"},
         issues={"o/r#1": ["OPEN"]},
     )
-    code, out, err = call("sprint-close.py", ["--record-pr", "20", "--repo", "o/r", "--prs", "11", "--dry-run"], gh.env, repo)
+    code, out, err = call(
+        "sprint-close.py", ["--final-stage", "配布", "--record-pr", "20", "--repo", "o/r", "--prs", "11", "--dry-run"], gh.env, repo
+    )
     assert code == 0 and issues_of(out)["o/r#1"]["result"] == "would_close"
     assert "closed" not in gh.get()
 
