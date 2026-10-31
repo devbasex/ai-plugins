@@ -5,6 +5,7 @@ import type {
   DecisionDelegatedEvent,
   GateKind,
   GateReachedEvent,
+  IssueRequestedEvent,
   JobFinishedEvent,
   PhaseChangedEvent,
   ProgressEvent,
@@ -186,6 +187,22 @@ export function delegatedFromRecord(record: Line, verdictSources: ReadonlyMap<st
   const source = typeof record.ref === "string" ? verdictSources.get(record.ref) : undefined;
   const category = source || (typeof record.category === "string" ? record.category : null);
   return { type: "decision.delegated", payload: { question, answer, reason, category } };
+}
+
+// 起票の依頼の上限（契約の IssueRequestedPayload と同じ。題は GitHub の題の上限、本文は 4 バイトの文字でも 256 KiB に収まる長さ）
+export const ISSUE_TITLE_MAX = 256;
+export const ISSUE_BODY_MAX = 50_000;
+const REPO_FULL_NAME = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+
+// NDF の issue-file.py が NDF_ISSUE_REQUEST_FILE へ書いた 1 行（{"repo", "title", "body"}）から issue.requested を作る（#2216）。
+// 値はそのまま写す。題か本文が上限を超える行は送らず attention（issue_request_too_large）にし、形の違う行は送らない
+export function issueRequestFromLine(line: Line): Pick<IssueRequestedEvent, "type" | "payload"> | Pick<AttentionEvent, "type" | "payload"> | null {
+  const { repo, title, body } = line;
+  if (typeof repo !== "string" || !REPO_FULL_NAME.test(repo) || typeof title !== "string" || typeof body !== "string" || !title || !body) return null;
+  if (Array.from(title).length > ISSUE_TITLE_MAX || Array.from(body).length > ISSUE_BODY_MAX) {
+    return { type: "attention", payload: { reason: "issue_request_too_large", summary: `${repo} への起票の依頼が上限を超えたため送らなかった` } };
+  }
+  return { type: "issue.requested", payload: { repo, title, body } };
 }
 
 // progress.jsonl の step の行の models（supervise が別のプロセスで起動した claude のモデルごとの使用量）から、
