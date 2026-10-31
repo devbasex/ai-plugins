@@ -2073,7 +2073,7 @@
     {
       "term": "結果 JSON",
       "context": "ndf-workflow",
-      "meaning": "手順のスクリプトが返す 1 行の JSON。status で読む",
+      "meaning": "手順のスクリプトが返す 1 行の JSON。status と終了コードで読み、成功は ok だけ",
       "code": "step_result",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
@@ -4507,20 +4507,41 @@
     {
       "term": "試行",
       "context": "ndf-workflow",
-      "meaning": "同じステップを流し直したときの 1 回ごとの実行と、その結果 JSON。状態ディレクトリの NN-<ステップ>.out の 1 つが 1 試行に当たる",
-      "pending_source": "issues/issue-2227-requirements.md"
+      "meaning": "同じステップを流し直したときの 1 回ごとの実行と、その結果 JSON。プランの実行の記録の NN-<ステップ>.out の 1 つが 1 試行に当たる",
+      "pending_source": "issues/issue-2227-design.md"
     },
     {
       "term": "欠けの残る結果",
       "context": "ndf-workflow",
-      "meaning": "手順は終わったが、出すはずの材料・記録の一部が無いか、目標（収束など）に届かなかった結果。status を ok で返さない",
-      "pending_source": "issues/issue-2227-requirements.md"
+      "meaning": "手順は終わったが、出すはずの材料・記録の一部が無いか、目標（収束など）に届かなかった結果。stopped と終了コード 6 と gaps で返し、ok で返さない",
+      "pending_source": "issues/issue-2227-design.md"
     },
     {
       "term": "結果の置き場",
       "context": "ndf-workflow",
-      "meaning": "読む側が結果 JSON や材料を探す場所（状態ディレクトリ・記録のファイル）。置き場が無いことと、材料が 0 件であることを分けて扱う",
-      "pending_source": "issues/issue-2227-requirements.md"
+      "meaning": "読む側が結果 JSON や材料を探す場所（プランの実行の記録・記録のファイル）。置き場が無いことと、材料が 0 件であることを分けて扱う",
+      "pending_source": "issues/issue-2227-design.md"
+    },
+    {
+      "term": "欠け",
+      "context": "ndf-workflow",
+      "meaning": "結果 JSON の gaps の 1 件。出すはずだったのに出せなかった材料・記録、届かなかった目標を、種類・名前・理由で書く",
+      "code": "gaps",
+      "pending_source": "issues/issue-2227-design.md"
+    },
+    {
+      "term": "過程の項目",
+      "context": "ndf-workflow",
+      "meaning": "結果 JSON の process。スクリプトが実行したこと（コマンド・操作）と、その結果の要旨を順に並べる",
+      "code": "process",
+      "pending_source": "issues/issue-2227-design.md"
+    },
+    {
+      "term": "判断の項目",
+      "context": "ndf-workflow",
+      "meaning": "結果 JSON の decisions。スクリプトが決めたことと、その根拠を並べる",
+      "code": "decisions",
+      "pending_source": "issues/issue-2227-design.md"
     }
   ]
 }
