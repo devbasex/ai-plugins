@@ -285,6 +285,19 @@ def _rm(path: Path) -> None:
         path.unlink(missing_ok=True)
 
 
+def _owned_item(
+    kind: str, path: Path, pid: int | None, is_alive: Callable[[], bool],
+    mtime_of: Callable[[], float], now: float, remove: Callable[[], None],
+) -> dict[str, Any]:
+    """持ち主の記録が無ければ寿命の窓で、あれば持ち主のプロセスの生死で消すかを決める。"""
+    if pid is None:
+        return _window_item(kind, path, mtime_of(), now, remove)
+    if is_alive():
+        return _item(kind, path, False, f"持ち主のプロセス {pid} が動いている")
+    remove()
+    return _item(kind, path, True)
+
+
 def _sweep_session(tmp: Path, now: float) -> list[dict[str, Any]]:
     items = []
     for path in sorted(tmp.glob("ndf-worktree-*.json")):
@@ -294,13 +307,10 @@ def _sweep_session(tmp: Path, now: float) -> list[dict[str, Any]]:
             items.append(_item("session-state", path, False, f"判定できない: 読めない ({e})"))
             continue
         owner = _pid_record(data.get("owner") if isinstance(data, dict) else None)
-        if owner is None:
-            items.append(_window_item("session-state", path, path.stat().st_mtime, now, lambda p=path: p.unlink(missing_ok=True)))
-        elif _process_alive(*owner):
-            items.append(_item("session-state", path, False, f"持ち主のプロセス {owner[0]} が動いている"))
-        else:
-            path.unlink(missing_ok=True)
-            items.append(_item("session-state", path, True))
+        items.append(_owned_item(
+            "session-state", path, owner[0] if owner else None, lambda o=owner: _process_alive(*o),
+            lambda p=path: p.stat().st_mtime, now, lambda p=path: p.unlink(missing_ok=True),
+        ))
     return items
 
 
@@ -311,13 +321,10 @@ def _sweep_deps(tmp: Path, now: float) -> list[dict[str, Any]]:
         pid = None
         with contextlib.suppress(OSError, ValueError):
             pid = int(owner_file.read_text(encoding="utf-8").strip())
-        if pid is None:
-            items.append(_window_item("deps-work", path, mtime(path), now, lambda p=path: shutil.rmtree(p)))
-        elif _process_alive(pid, None, "worktree-deps.sh"):
-            items.append(_item("deps-work", path, False, f"持ち主のプロセス {pid} が動いている"))
-        else:
-            shutil.rmtree(path)
-            items.append(_item("deps-work", path, True))
+        items.append(_owned_item(
+            "deps-work", path, pid, lambda pid=pid: _process_alive(pid, None, "worktree-deps.sh"),
+            lambda p=path: mtime(p), now, lambda p=path: shutil.rmtree(p),
+        ))
     return items
 
 
