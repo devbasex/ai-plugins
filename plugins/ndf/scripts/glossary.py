@@ -581,13 +581,11 @@ def cmd_init(a):
         except OSError as e:
             raise unreadable(f"{rel} を書けない: {e}")
         items.append({"name": rel, "result": "created"})
-    created = len(items)
-    # 用語集は共有が前提の宣言である。.gitignore の対象なら、コミットできないことを出す（#2157）
-    notes = ndf_tracking.ignored_notes(root, [DECLARATION, source, document])
+    notes = ndf_tracking.ignored_notes(root, [DECLARATION, source, document])  # 共有が前提の宣言。除外の対象なら出す（#2157）
     for n in notes:
         print(f"案内: {n['text']}")
-    summary = (f"{created} 個のファイルを作った" if created else "宣言・用語集・文書は揃っている") + ndf_tracking.summary_note(notes)
-    emit(result(TOOL, "ok", summary, [*items, *notes], {"created": created}))
+    summary = (f"{len(items)} 個のファイルを作った" if items else "宣言・用語集・文書は揃っている") + ndf_tracking.summary_note(notes)
+    emit(result(TOOL, "ok", summary, [*items, *notes], {"created": len(items)}))
 
 
 def _md_candidates(rel, text, sections, add):
