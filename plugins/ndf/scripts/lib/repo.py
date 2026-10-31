@@ -85,6 +85,15 @@ def default_branch(root) -> str | None:
     return None
 
 
+def merge_closes_issues(root, base) -> bool:
+    """宛先 `base` の Pull Request をマージすると、GitHub が本文の closing keywords で課題を閉じるか。
+
+    GitHub が閉じるのは既定ブランチへのマージだけである。既定ブランチを決められない・宛先が分からないときも真を返す
+    （置き換えても閉じる予定の参照として NDF の手順で閉じられ、失うものが無い。#2228 の決定 9）。"""
+    d = default_branch(root)
+    return d is None or not base or str(base).removeprefix("origin/") == d
+
+
 def base_branch(root) -> str | None:
     """開発の起点。`.ndf/worktree.json` の `base_branch` → 既定ブランチ（`default_branch`）の順。決まらなければ `None`。"""
     return declared_base(root) or default_branch(root)

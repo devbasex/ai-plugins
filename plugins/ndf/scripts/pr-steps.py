@@ -41,7 +41,7 @@ from step_result import (
     run,
 )
 import gh_parts  # noqa: E402
-from closing import closing_issues, closing_words  # noqa: E402
+from closing import closing_issues, closing_words, defer_closing  # noqa: E402
 import repo  # noqa: E402
 import tool_paths  # noqa: E402
 from design_diff import DESIGN_DIFF_HEADING  # noqa: E402
@@ -349,12 +349,34 @@ def rest_create(root, branch, base, title, body, draft):
     return d["number"], d["html_url"]
 
 
-def send_body(root, branch, body, body_path, a, must_exist):
-    """gh へ本文ファイルを渡して PR を作る・更新する。(番号, URL, action) を返す。"""
+def _pr_base(root, number):
+    """番号で指した PR の宛先。読めなければ None（宛先が分からない。merge_closes_issues は置き換える側に倒す）。"""
+    p = gh_parts.gh(["pr", "view", str(number), "--json", "baseRefName"], cwd=root)
+    try:
+        d = json.loads(p.stdout) if p.returncode == 0 else None
+    except ValueError:
+        d = None
+    return (d.get("baseRefName") or None) if isinstance(d, dict) else None
+
+
+def target_pr(root, branch, a, must_exist):
+    """書く先の PR と宛先。(既存の PR か None, 宛先のブランチか None) を返す。
+
+    宛先は、既存の PR なら baseRefName、新しく作るなら --base か起点（#2228 の決定 9）。"""
     if getattr(a, "pr", None):
-        pr = {"number": a.pr, "url": f"#{a.pr}"}
-    else:
-        pr = existing_pr(root, branch)
+        return {"number": a.pr, "url": f"#{a.pr}"}, _pr_base(root, a.pr)
+    pr = existing_pr(root, branch)
+    if pr:
+        return pr, pr.get("baseRefName") or None
+    if must_exist:
+        raise StepError(f"{branch} の OPEN の PR が無い（create を使う）", EXIT_PRECONDITION)
+    if not a.title:
+        raise StepError("--title が要る", EXIT_UNREADABLE)
+    return None, a.base or repo.base_branch(root) or "main"
+
+
+def send_body(root, branch, body, body_path, a, pr, base):
+    """gh へ本文ファイルを渡して PR を作る・更新する。(番号, URL, action) を返す。"""
     if pr:
         args = ["pr", "edit", str(pr["number"]), "--body-file", body_path]
         if a.title:
@@ -363,11 +385,6 @@ def send_body(root, branch, body, body_path, a, must_exist):
         if p.returncode != 0:
             raise StepError(f"gh pr edit {pr['number']} が失敗: {p.stderr.strip()[:300]}")
         return pr["number"], pr["url"], "updated"
-    if must_exist:
-        raise StepError(f"{branch} の OPEN の PR が無い（create を使う）", EXIT_PRECONDITION)
-    if not a.title:
-        raise StepError("--title が要る", EXIT_UNREADABLE)
-    base = a.base or repo.base_branch(root) or "main"
     args = ["pr", "create", "--base", base, "--title", a.title, "--body-file", body_path]
     if a.draft:
         args.append("--draft")
@@ -386,11 +403,15 @@ def upsert(a, must_exist):
     root = git_root(a.root)
     branch = current_branch(root)
     body = with_mode_line(body_with_mark(a.body_file), getattr(a, "mode", None), split_stages(getattr(a, "stages", None)))
+    pr, base = target_pr(root, branch, a, must_exist)
+    deferred = []
+    if repo.merge_closes_issues(root, base):  # 既定ブランチ宛はマージで閉じないよう置き換える（#2228 の I7）
+        body, deferred = defer_closing(body)
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as f:
         f.write(body)
         body_path = f.name
     try:
-        number, url, action = send_body(root, branch, body, body_path, a, must_exist)
+        number, url, action = send_body(root, branch, body, body_path, a, pr, base)
     finally:
         Path(body_path).unlink(missing_ok=True)  # 本文を /tmp に残さない
     sync_exit = decisions_sync(root, number) if number else None
@@ -401,9 +422,11 @@ def upsert(a, must_exist):
         "branch": branch,
         "draft": bool(getattr(a, "draft", False)),
         "closing_issues_in_body": closing_issues(body),
+        "deferred_closing": deferred,
         "decisions_sync_exit": sync_exit,
     }
     items = [{"kind": "pr", "name": url, "result": action}]
+    items += [{"kind": "closing", "name": t, "result": "deferred"} for t in deferred]
     if sync_exit is not None:
         items.append({"kind": "decisions", "name": "pr-body-decisions.sh sync", "result": f"exit={sync_exit}"})
     nxt = None

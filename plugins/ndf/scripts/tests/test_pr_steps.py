@@ -511,3 +511,69 @@ def test_plan_sprint_base_summary_names_the_sprint_review(repo, env):
     code, out, err = call(["plan", "--base", "sprint/m1"], env, repo)
     assert code == 0, err
     assert out["summary"].endswith("新しい PR を作る（スプリントブランチ宛て。実装レビューはスプリントの PR で通す）")
+
+
+# --- 既定ブランチ宛の本文の closing keywords（#2228・#2082） -------------------------
+
+
+def set_default(repo, name):
+    """origin の HEAD（既定ブランチ）を name にする。name が origin に無ければ develop から作る。"""
+    if name != "develop":
+        git(repo, "push", "-q", "origin", f"develop:{name}")
+        git(repo, "fetch", "-q", "origin")
+    git(repo, "remote", "set-head", "origin", name)
+
+
+def sent_body(env):
+    return Path(env["FAKE_GH_LOG"] + ".body").read_text(encoding="utf-8")
+
+
+def test_create_to_the_default_branch_defers_the_closing_keywords(repo, env, tmp_path):
+    sys.path.insert(0, str(SCRIPTS / "lib"))
+    from closing import closing_words
+
+    set_default(repo, "develop")  # 起点と既定ブランチが同じ構成
+    text = "## Summary\n\nCloses #858\nfixes: o/r#3\nResolves https://github.com/o/r/issues/9\n"
+    code, out, err = call(["create", "--title", "題", "--body-file", str(body_file(tmp_path, text))], env, repo)
+    assert code == 0, err
+    sent = sent_body(env)
+    assert closing_words(sent) == []
+    assert "最終工程の後に閉じる: #858" in sent and "最終工程の後に閉じる: o/r#3" in sent
+    m = out["metrics"]
+    assert m["deferred_closing"] == ["#858", "o/r#3", "https://github.com/o/r/issues/9"]
+    assert m["closing_issues_in_body"] == m["deferred_closing"]
+    assert [i["name"] for i in out["items"] if i["kind"] == "closing" and i["result"] == "deferred"] == m["deferred_closing"]
+    assert out["status"] == "ok"
+
+
+def test_update_of_a_pr_to_the_default_branch_defers_the_closing_keywords(repo, env, tmp_path):
+    set_default(repo, "main")
+    env["FAKE_GH_PRS"] = json.dumps({"feature/x": [{"number": 7, "url": "https://github.com/o/r/pull/7", "isDraft": False, "baseRefName": "main"}]})
+    code, out, err = call(["update", "--body-file", str(body_file(tmp_path))], env, repo)
+    assert code == 0, err
+    assert "Closes" not in sent_body(env) and out["metrics"]["deferred_closing"] == ["#858"]
+
+
+def test_update_by_number_reads_the_base_of_that_pr(repo, env, tmp_path):
+    set_default(repo, "main")
+    env["FAKE_GH_VIEW"] = json.dumps({"7": {"baseRefName": "main"}})
+    code, out, err = call(["update", "--pr", "7", "--body-file", str(body_file(tmp_path))], env, repo)
+    assert code == 0, err
+    assert out["metrics"]["deferred_closing"] == ["#858"]
+
+
+def test_create_without_a_known_default_branch_defers_the_closing_keywords(repo, env, tmp_path):
+    code, out, err = call(["create", "--title", "題", "--body-file", str(body_file(tmp_path))], env, repo)
+    assert code == 0, err
+    assert "Closes #858" not in sent_body(env) and out["metrics"]["deferred_closing"] == ["#858"]
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_a_pr_to_another_branch_keeps_the_closing_keywords(repo, env, tmp_path, existing):
+    set_default(repo, "main")  # 起点 develop ≠ 既定ブランチ main（このリポジトリの構成）
+    if existing:
+        env["FAKE_GH_PRS"] = json.dumps({"feature/x": [{"number": 7, "url": "u", "isDraft": False, "baseRefName": "develop"}]})
+    code, out, err = call(["create", "--title", "題", "--body-file", str(body_file(tmp_path))], env, repo)
+    assert code == 0, err
+    assert "Closes #858" in sent_body(env)
+    assert out["metrics"]["deferred_closing"] == [] and out["metrics"]["closing_issues_in_body"] == ["#858"]
