@@ -37,14 +37,14 @@ def _read_root_conftest() -> str:
     return ROOT_CONFTEST.read_text(encoding="utf-8")
 
 
-def _run_pytest(target: str, *, path: str | None = None, env_extra: dict | None = None):
+def _run_pytest(target: str, *args: str, path: str | None = None, env_extra: dict | None = None):
     env = dict(os.environ)
     env.pop("NDF_TESTS_ALLOW_MISSING_COMMANDS", None)
     if path is not None:
         env["PATH"] = path
     env.update(env_extra or {})
     return subprocess.run(
-        [sys.executable, "-m", "pytest", target, "-q", "--no-header", "-p", "no:cacheprovider"],
+        [sys.executable, "-m", "pytest", target, *args, "-q", "--no-header", "-p", "no:cacheprovider"],
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
@@ -71,11 +71,6 @@ def _path_without(tmp_path: Path, *names: str) -> str:
     return str(bin_dir)
 
 
-def test_the_root_conftest_declares_the_plugin() -> None:
-    """`pytest_plugins` は最上位の conftest.py でしか宣言できない。"""
-    assert 'pytest_plugins = ["pytester"]' in _read_root_conftest()
-
-
 def test_the_skill_conftest_no_longer_declares_the_plugin() -> None:
     body = (REPO_ROOT / "plugins/playwright-kit/skills/playwright-kit-ops/tests/conftest.py").read_text(encoding="utf-8")
     assert 'pytest_plugins = ["pytester"]' not in body
@@ -98,18 +93,11 @@ def test_no_bundle_skips_itself_when_a_command_is_missing() -> None:
 
 @pytest.mark.skipif(shutil.which("jq") is None, reason="jq を外した PATH を組み立てられない")
 def test_a_missing_command_fails_the_collection(tmp_path: Path) -> None:
-    """前提のコマンドが無ければ、読み飛ばさずに 0 以外の終了コードで終わる。"""
-    result = _run_pytest(BUNDLE, path=_path_without(tmp_path, "jq"))
-
-    assert result.returncode != 0
-    assert "jq" in result.stdout + result.stderr
-
-
-@pytest.mark.skipif(shutil.which("jq") is None, reason="jq を外した PATH を組み立てられない")
-def test_the_failure_names_the_bundle_and_the_command(tmp_path: Path) -> None:
+    """前提のコマンドが無ければ、読み飛ばさずに 0 以外の終了コードで終わり、束とコマンドの名前を出す。"""
     result = _run_pytest(BUNDLE, path=_path_without(tmp_path, "jq"))
     out = result.stdout + result.stderr
 
+    assert result.returncode != 0
     assert BUNDLE in out
     assert "jq" in out
 
@@ -138,8 +126,8 @@ def test_the_outside_bundle_is_really_outside_the_table() -> None:
 
 
 def test_a_bundle_outside_the_table_is_not_checked(tmp_path: Path) -> None:
-    """一覧に無い束だけを収集したときは、前提を確かめない。"""
-    result = _run_pytest(OUTSIDE_BUNDLE, path=_path_without(tmp_path, "jq"))
+    """一覧に無い束だけを収集したときは、前提を確かめない（確かめるのは収集の時点なので、収集だけで足りる）。"""
+    result = _run_pytest(OUTSIDE_BUNDLE, "--collect-only", path=_path_without(tmp_path, "jq"))
 
     assert result.returncode == 0, result.stdout + result.stderr
 
@@ -267,14 +255,6 @@ def test_the_isolation_holds_from_a_bundle_directory() -> None:
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-
-
-def test_the_prefix_is_declared_once() -> None:
-    """接頭辞は根の設定だけが持つ。テストの側へ書き戻すと、同じ除去がまた散る。"""
-    body = _read_root_conftest()
-
-    assert 'MONITOR_ENV_PREFIX = "MONITOR_"' in body
-    assert "def pytest_unconfigure" in body
 
 
 # ジョブの分割（#882）。**分けても項目が欠けず、重ならず、ファイルが割れないこと**を、

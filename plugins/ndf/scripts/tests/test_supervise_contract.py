@@ -26,6 +26,9 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 PLUGIN = SCRIPTS.parent
 SUPERVISE = SCRIPTS / "supervise.py"
 PY = sys.executable
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import inproc  # noqa: E402
+
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "supervise-contract"
 SUBCOMMANDS = ["run", "history", "expected", "example", "new", "queue", "wait", "design-glossary", "note", "sync-check"]
 KINDS = ["sprint", "impl", "fix", "check", "release", "close"]
@@ -37,6 +40,11 @@ pytestmark = pytest.mark.usefixtures("issue_bodies")
 
 
 def cli(*args: str, cwd: Path, timeout: float = 120) -> subprocess.CompletedProcess:
+    """分岐と結果の形はプロセスの中で main を呼んで確かめる（起動の配線は `cli_proc` の代表の 1 件）。"""
+    return inproc.run(SUPERVISE, *args, cwd=cwd, env=dict(os.environ, COLUMNS="200"))
+
+
+def cli_proc(*args: str, cwd: Path, timeout: float = 120) -> subprocess.CompletedProcess:
     env = dict(os.environ, COLUMNS="200")
     return subprocess.run([PY, str(SUPERVISE), *args], capture_output=True, text=True, cwd=cwd, env=env, timeout=timeout)
 
@@ -214,6 +222,6 @@ def test_the_fixture_plans_run_without_claude(tmp_path, monkeypatch):
         stub.write_text("#!/bin/sh\necho called >&2\nexit 99\n")
         stub.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
-    p = cli("run", str(runnable(tmp_path, "ok")), cwd=tmp_path)
+    p = cli_proc("run", str(runnable(tmp_path, "ok")), cwd=tmp_path)
     assert p.returncode == 0 and "called" not in p.stderr, p.stderr
     assert shutil.which("claude") == str(bindir / "claude")

@@ -14,6 +14,9 @@ from pathlib import Path
 import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import inproc  # noqa: E402
+
 SUPERVISE = SCRIPTS / "supervise.py"
 STEPS = SCRIPTS / "release-steps.py"
 PY = sys.executable
@@ -53,7 +56,7 @@ def new_sprint(tmp_path, repo, pace: str | None = "auto"):
     args = ["new", "sprint", "--name", "m2", "--worktree", str(repo), "--issue", "11", "--out", str(out)]
     if pace:
         args += ["--pace", pace, "--state", str(sprint_state(tmp_path, "auto"))]
-    p = subprocess.run([PY, str(SUPERVISE), *args], capture_output=True, text=True, cwd=repo)
+    p = inproc.run(SUPERVISE, *args, cwd=repo)
     assert p.returncode == 0, p.stdout + p.stderr
     return load(out / "sprint.json")["ステージ"]
 
@@ -61,7 +64,7 @@ def new_sprint(tmp_path, repo, pace: str | None = "auto"):
 def new_close(tmp_path, repo):
     out = tmp_path / "c"
     args = ["new", "close", "--name", "m2", "--worktree", str(repo), "--issue", "11", "--state", str(sprint_state(tmp_path, "auto"))]
-    p = subprocess.run([PY, str(SUPERVISE), *args, "--out", str(out)], capture_output=True, text=True, cwd=repo)
+    p = inproc.run(SUPERVISE, *args, "--out", str(out), cwd=repo)
     return p, out
 
 

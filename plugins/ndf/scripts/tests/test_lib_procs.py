@@ -51,6 +51,17 @@ def test_zombie_counts_as_dead_and_missing_pids_are_quiet():
     assert procs.wait_gone(p.pid, timeout=0.1)
 
 
+def test_empty_cmdline_of_an_exiting_process_is_unreadable(monkeypatch):
+    """終了の途中（ゾンビになる前）の pid は psutil が空の引数を返す。別のプロセス（False）と取らない。"""
+
+    class Exiting:
+        def cmdline(self):
+            return []
+
+    monkeypatch.setattr(procs, "_process", lambda pid: Exiting())
+    assert procs.cmdline_contains(12345, "claude") is None
+
+
 def test_memory_and_cgroup(tmp_path: Path):
     avail, total = procs.memory_available()
     assert 0 < avail <= total

@@ -1,1 +1,1 @@
-{"path": "plugins/ndf/skills/cross-refactoring/scripts/drive.py", "name": "", "kind": "lines", "reason": "#2229 の前の時点で 500 行（上限ちょうど）。#2229（rf<n> の持ち主の記録を動いた時刻・終わりで更新する）で増えた。共有の処理は lib/run_owner.py へ置き、呼び出しだけが残る。触って 500 行以下にしたら消す", "lines": 509}
+{"path": "plugins/ndf/skills/cross-refactoring/scripts/drive.py", "name": "", "kind": "lines", "reason": "#2229 の前の時点で 500 行（上限ちょうど）。#2229（rf<n> の持ち主の記録を動いた時刻・終わりで更新する）で増えた。共有の処理は lib/run_owner.py へ置き、呼び出しだけが残る。触って 500 行以下にしたら消す。#2047（時間の枠の不足で飛ばした結果・想定最大時間を下限へ上げたときのステップの延長）で増えた。延長の書き出しは lib/drive_pause.py へ置いた", "lines": 536}
