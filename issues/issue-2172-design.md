@@ -314,7 +314,7 @@ erDiagram
 
 | 名前 | 入力 | 出力 | 失敗の形 |
 | --- | --- | --- | --- |
-| `listRunEvents` | 実行の ID・`step.recorded` の上限 | `order_key` の順の事象の列（`step.recorded` 以外はすべて、`step.recorded` は新しい方から上限まで。`step.recorded` の `files`・`decisions`・`output` を読まない）と、上限で読まなかった `step.recorded` の件数 | 保存の失敗は投げる（経路が 503） |
+| `listRunEvents` | 実行の ID・`step.recorded` の上限 | `order_key` の順の事象の列（`step.recorded` 以外はすべて、`step.recorded` は新しい方から上限まで。`step.recorded` の `files`・`decisions`・`output` を読まない）と、上限で読まなかった `step.recorded` の件数。DynamoDB では事象の表を `sprint_run_id` で `order_key` の昇順に Query し、`LastEvaluatedKey` が無くなるまで全ページ読んでから、手元で古い `step.recorded` を上限の外として捨てる（表のキーは `sprint_run_id`・`order_key` だけで `type` の索引が無く、`Limit`・`FilterExpression` では「`step.recorded` だけを新しい方から上限まで」を作れない）。`ScanIndexForward=false` と `Limit` で件数を切らない（古い `gate.reached`・`usage.recorded` を落とす）。上限が抑えるのは応答の大きさだけで、読み出しの量（RCU・ページの数）は実行の事象の総数に比例する | 保存の失敗は投げる（経路が 503） |
 | `latestOfRun` | 実行の ID | 最後の `phase.changed`・最後の `step.recorded`・最後の事象（どれも無ければ `null`） | 同上 |
 | `getStep` | 実行の ID・`idempotency_key` | その実行の `step.recorded` の全項目か `null`（別の実行の鍵も `null`） | 同上 |
 | `listStepsNamed` | 実行の ID・`step` の値 | その値の `step.recorded`（本文を読まない） | 同上 |
