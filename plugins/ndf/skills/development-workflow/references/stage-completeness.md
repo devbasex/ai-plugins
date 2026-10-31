@@ -150,9 +150,9 @@ bash "$SCRIPTS/../skills/development-workflow/scripts/stage-check.sh" report <�
 | `report <課題番号>`（欠落がある） | 通過工程の一覧と、記録の無い必須の工程 | 0 |
 | 引数の誤り | 標準エラーへ 1 行 | 2 |
 
-**終了コードで工程を止めない。** 呼び出し側の誤りだけを 2 で返すのは、`projects-sync.sh` が
-採っている扱いと同じである。`record` は進捗記録のスクリプトが同じ処理を自分で行うため、手で呼ぶのは
-`report` だけである。
+**終了コードで工程を止めない。** `stage-check.sh` は呼び出し側の誤りだけを 2 で返す。`projects-sync.sh` は
+書けなかったときも 0 以外（6・3・1）を結果 JSON で返すが、呼ぶ側はそれでも止まらず、`summary` と
+`gaps[].reason` を報告へ載せて先へ進む（`progress-tracking` の抜粋の「結果の読み方」）。`record` は進捗記録のスクリプトが同じ処理を自分で行うため、手で呼ぶのは `report` だけである。
 
 ## 報告の読み方
 

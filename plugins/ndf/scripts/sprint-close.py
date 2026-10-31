@@ -23,7 +23,8 @@
 {kind:"issue", repo, number, result, reason?, cmd?, checked?, would_check?}。result は
 closed / already_closed / failed / kept_open / closed_unverified（既に閉じていたが条件 2 を満たさない。
 開き直さない）（--dry-run では would_close）。checked は印を付けた受け入れ条件の番号、would_check は
---dry-run で付ける予定の番号。ボードの NOTE は {kind:"board_note"} の項目に載る。
+--dry-run で付ける予定の番号。ボードへ Done を書けなかった（`projects-sync.sh` の結果 JSON が ok でない）ときは
+{kind:"board_note"} の項目に理由が載り、課題を閉じる処理は続ける。
 `--record-pr 0` は「本番の記録なし」（最終の検査で変更が無く本番を飛ばした）。配布の記録を読まず、
 閉じる条件も見ずに --issues の課題を閉じる。--issues と一緒のときだけ受ける。
 `--record-pr unknown` は「記録の置き場が分からない」（リリースの経路が雛形でも昇格でもなく、まとめのプランが
@@ -63,6 +64,7 @@ import gh_call  # noqa: E402
 import gh_parts  # noqa: E402
 import gh_rest  # noqa: E402
 import locks  # noqa: E402
+import step_read  # noqa: E402  projects-sync.sh の結果 JSON を読む（#2227）
 from closing import referenced_numbers  # noqa: E402
 
 from dist_record import parse_record  # noqa: E402  記録の形は lib/dist_record.py が持つ（#1273）
@@ -158,7 +160,7 @@ def issue_state(root, repo, n):
 
 
 class CloseContext:
-    """全課題で一定の閉じる処理の材料。notes は課題ごとのボードの NOTE を溜める。retry_cmd は今の引数で組んだやり直しの cmd。"""
+    """全課題で一定の閉じる処理の材料。notes は課題ごとのボードの記録の失敗を溜める。retry_cmd は今の引数で組んだやり直しの cmd。"""
 
     def __init__(self, root, record_repo, comment, argv=()):
         self.root, self.record_repo, self.comment = root, record_repo, comment
@@ -174,9 +176,9 @@ def close_one(ctx, repo, n):
         return {**it, "result": "failed", "reason": "before を読めない", "cmd": f"gh issue close {n} --repo {repo}"}
     if repo == record_repo:
         s = run(["bash", str(HERE / "projects-sync.sh"), str(n), "status", "Done"], cwd=root, check=False)
-        for ln in (s.stdout + s.stderr).splitlines():
-            if "NOTE" in ln:
-                notes.append({"kind": "board_note", "name": f"{repo}#{n}", "result": "note", "reason": ln.strip()})
+        why = step_read.not_ok_reason(s.stdout, s.returncode, s.stderr)
+        if why:
+            notes.append({"kind": "board_note", "name": f"{repo}#{n}", "result": "note", "reason": why})
     close_out = _close_if_open(root, repo, n, comment) if before == "OPEN" else None
     after = issue_state(root, repo, n)
     return _close_result(it, before, after, close_out)

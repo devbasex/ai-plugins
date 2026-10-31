@@ -49,7 +49,9 @@
 | [closing-issues.sh](closing-issues.sh) | Pull Request の本文から、閉じる語が指す issue を取り出す | `progress-tracking`（スプリントを閉じる） / `merged`（OPEN の一覧） / `development-workflow` の hook |
 | [refresh.py](refresh.py) | 観点の出典の取得・指紋の比較・一覧の提示・待ちの扱い（#554）。**提示するだけで書き換えない** | `instructions-check.py` |
 | [transcript_agents.py](transcript_agents.py) | 会話の記録を conductor / supervisor / worker の層の単位で読む（#550）。上限の中断の一覧（`interrupted`）と解除の待ち（`wait-reset`）も持つ（#657）。**読むだけで送信の経路を持たない** | `skill-stats` / `development-workflow` |
-| [step_result.py](step_result.py) | 手順のスクリプトの結果 JSON の形・検証（`validate_result`）・出力と終了（`emit`）・承認資料（`approval_present`）と、git / gh を呼ぶ小関数（`StepError`・`run`・`git`・`git_root` は `proc` の再エクスポート） | `merged-steps.py` / `plan-to-spec-steps.py` / `release-steps.py` / `release-verification-steps.py` / `sprint-close.py` / `drive_pause.py` / `issue-file.py` |
+| [step_result.py](step_result.py) | 手順のスクリプトの結果 JSON の形・検証（`validate_result`）・出力と終了（`emit`）・シェルから同じ形を出す CLI（`step_result.py emit`）・承認資料（`approval_present`）と、git / gh を呼ぶ小関数（`StepError`・`run`・`git`・`git_root` は `proc` の再エクスポート） | `merged-steps.py` / `plan-to-spec-steps.py` / `release-steps.py` / `release-verification-steps.py` / `sprint-close.py` / `drive_pause.py` / `issue-file.py` / `step-result.sh` |
+| [step_read.py](step_read.py) | 結果を読む側の共通の規則。同じステップの試行から `ok` の最も新しい試行だけを採る `pick_ok_attempt`、置き場の無い・読めない・空・ありを分ける `open_place` と、無い・読めないときの結果を組む `place_stop`、子プロセスの標準出力の最後の行を結果 JSON として読み `ok` でなければ理由を返す `result_line`・`not_ok_reason`・`process_if_not_ok`。読むだけで書かない | `supervise_lib/state.py`（`record_stage`） / `sprint-close.py` / 子の課題の読み手（承認資料・差し戻しの件数ほか） |
+| [step-result.sh](step-result.sh) | シェルの手順のスクリプトが結果 JSON を 1 行出すための関数（`sr_item`・`sr_gap`・`sr_process`・`sr_decision`・`sr_metric` で値を溜め、`sr_emit` が `step_result.py emit` を呼ぶ。`sr_gh` は `gh` の失敗の要旨を `SR_GH_ERR` に残す。`sr_absorb` は別のスクリプトの結果 JSON を取り込む）。JSON をシェルで組まない | `progress-record.sh` / `projects-sync.sh` |
 | [dist_record.py](dist_record.py) | リリース記録（`## 配布の記録`）の組み立て（`format_record`）と読み取り（`parse_record`）。形は `progress-tracking` の「配布の記録」が定める | `release-steps.py`（`record`） / `sprint-close.py` |
 | [gh_parts.py](gh_parts.py) | PR / issue の取得と本文の節の差し替え。`pr-info`（メタ・本文・差分の統計・checks を名前ごとの最新の実行へ畳んだもの・未解決のスレッド。GraphQL が上限なら REST へ退避。差分とログはファイルへ書く）、`unresolved-threads`、`body-section`（節の取得・置換・末尾への 1 行の追記。節の終わりに `<!-- ndf:section-end -->` を置き、後ろへ足した行を節に含めない）、`review-post`（自分の PR なら REQUEST_CHANGES を COMMENT へ下げる）。結果は `step_result` の形。エントリポイントと再エクスポートだけを持ち、部品は下の `gh_*` の 8 本にある | `cross-review`（`review_lib/` の未解決のスレッドと checks） |
 | [gh_call.py](gh_call.py) | GitHub の呼び出しの最下層。GitHub を呼ぶのはここだけで、テストは `RUNNER` を差し替える。REST の 1 回の要求（githubkit が import できれば githubkit、できなければ `gh api`）と、ETag 付きの読み直し（`rest_cached`。変わっていなければ 304 で上限に数えられない） | `gh_*` |
@@ -103,9 +105,11 @@
 
 ## 手順のスクリプトの結果
 
-Skill から呼ぶ手順のスクリプト（`scripts/*-steps.py`）は、最後に 1 行の JSON を標準出力へ出し、
-終了コードで終える。読み手（LLM）は `status` だけで次の手を決める。形は
-[step_result.py](step_result.py) の `validate_result` が確かめる。
+Skill の本文かプランのステップから呼ぶ手順のスクリプト（`scripts/*-steps.py` ほか）は、最後に 1 行の
+JSON を標準出力へ出し、終了コードで終える。**この節が結果 JSON の形の正本である。** Skill の本文と
+references は形と状態の表を写さず、ここを指す（そのスクリプトの終了コードごとの次の手だけを持つ）。
+形は [step_result.py](step_result.py) の `validate_result` が確かめ、`emit` は形の誤った結果を出さない。
+シェルのスクリプトは [step-result.sh](step-result.sh) の `sr_emit` で同じ形を出し、JSON を自前で組まない。
 
 例（`merged-steps.py cleanup 812` で、未マージのコミットを持つブランチが残ったとき。終了コード 10）:
 
@@ -116,28 +120,68 @@ Skill から呼ぶ手順のスクリプト（`scripts/*-steps.py`）は、最後
  "presentation_path": "/tmp/ndf/merged-812-gate.md", "next": "同意を得たら git branch -D feature/x"}
 ```
 
+例（`projects-sync.sh 42 stage 設計` で、本文は書けたがボードへ書けなかったとき。終了コード 6）:
+
+```json
+{"tool": "projects-sync", "status": "stopped", "summary": "#42 の進行の一部を書けなかった（1 件）",
+ "items": [{"kind": "issue-body", "name": "#42", "result": "recorded"}], "metrics": {},
+ "gaps": [{"kind": "board", "name": "#42 進行", "reason": "ボードへ書けない（gh project item-edit）: HTTP 502"}],
+ "process": [{"run": "通過記録へ積む（#42）", "result": "積んだ"}]}
+```
+
 | 項目 | 必須 | 形 | 意味 |
 | --- | --- | --- | --- |
-| `tool` | はい | 文字列 | 呼んだ Skill の名前（`merged` / `plan-to-spec` / `release` / `release-verification`）。`sprint-close.py` は `sprint-close` |
+| `tool` | はい | 文字列 | 呼んだ Skill かスクリプトの名前（`merged` / `plan-to-spec` / `release` / `release-verification`）。`sprint-close.py` は `sprint-close`、`progress-record.sh` は `progress-record`、`projects-sync.sh` は `projects-sync` |
 | `status` | はい | `ok` / `gate` / `stopped` | 3 値に固定する |
 | `summary` | はい | 文字列 | 1 行の要約。報告へそのまま写せる |
 | `items` | はい | オブジェクトの配列 | 対象ごとの結果。`kind` / `name` / `result` を持つ。`result` の語彙はスクリプトごとに決めてよい |
 | `metrics` | はい | オブジェクト | 件数・版数・コミットなどの値 |
+| `gaps` | いいえ | オブジェクトの配列。各要素は `kind` / `name` / `reason`（空でない文字列） | 欠け。出すはずだったのに出せなかった材料・記録、届かなかった目標。無い・空なら「欠けは無い」と書き手が述べたことになる |
+| `process` | いいえ | オブジェクトの配列。各要素は `run` / `result`（空でない文字列） | 過程。実行したこと（コマンド・操作）と結果の要旨を、実行した順に |
+| `decisions` | いいえ | オブジェクトの配列。各要素は `decision` / `basis`（空でない文字列） | 判断。決めたことと、その根拠（読んだ値・規則・設定） |
 | `presentation_path` | いいえ | 文字列 | 承認ゲートで利用者へ示す承認資料（`approval_present` が書く） |
 | `next` | いいえ | 文字列 | 次に打つコマンドか、LLM が書く説明文 |
 
+`gaps` / `process` / `decisions` の各要素は、決めた鍵のほかに鍵を持ってよい（`items` と同じ扱い）。
 `gate` のときは `presentation_path` か `next` を必ず添える。表に無い項目は置かない。
+
+結果 JSON から後で追う 3 つの問いと、書く項目の対応:
+
+| 問い | 書く項目 |
+| --- | --- |
+| 過程（何を実行したか） | `process` |
+| 判断（何を根拠にどう決めたか） | `decisions` |
+| 結果（何ができ、何が欠けたか） | できたことは `summary` / `items` / `metrics`、欠けたことは `gaps` |
+
+**`ok` を返してよいのは、手順が成功し、目標（収束など）に届き、欠けが無いときだけである。**
+
+- 欠けが残るときは `stopped` と終了コード 6 で返し、`gaps` に 1 件以上を書く。人か LLM の判断を待つなら `gate`（10〜29）で返し、`gaps` を添えてよい
+- 未記録（書くはずの記録を書けなかった）は欠けとして返す
+- 置き場が無い・読めないときは、前提が無い（3）・読めない（2）で返す（下の「読む側の規則」）
+- `ok` に `gaps` を添えた結果と、`gaps` の無い終了コード 6 は形の誤りで、`emit` は標準出力へ何も出さず理由を標準エラーへ出して 2 で終える
+- `emit` で終了コードを省くと、`ok` は 0、`gate` は 10、`stopped` は `gaps` があれば 6・無ければ 1 になる
 
 | 終了コード | status | 意味 |
 | --- | --- | --- |
-| 0 | `ok` | 手順が終わった |
+| 0 | `ok` | 手順が成功し、目標に届き、欠けが無い |
 | 1 | `stopped` | チェックで違反があった・手順が失敗した |
 | 2 | `stopped` | 読めない・呼び出しの誤り。「一致」「0 件」と読まない |
 | 3 | `stopped` | 前提が無い（宣言・認証・対象のファイル）、または各スクリプトが定めた正常な否定の結果（立たない・変更なし・飛ばしてよい。例 `check-trigger.py eval`・`refactor.py assess`）。読めないときは 2 で返し、3 と混ぜない |
 | 4 | `stopped` | PR がベースブランチと衝突している（`merge-when-green`・`promote`。値の持ち主は `step_result.py` の `EXIT_BASE_CONFLICT`。#1917） |
+| 6 | `stopped` | 欠けが残る。手順は終わったが、`gaps` に書いた材料・記録・目標が欠けた。「0 件」「一致」と読まない（値の持ち主は `step_result.py` の `EXIT_INCOMPLETE`） |
 | 10〜19 | `gate` | 承認ゲート。人の同意が要る |
 | 20〜29 | `gate` | LLM の判断待ち |
 | 69 | `stopped` | 依存の欠け。`deps.require` が外部パッケージを用意できずに止まった。手順は何も判定していない。「飛ばしてよい」とも 3 とも読まない（値の持ち主は `deps.py` の `EXIT_DEPS_MISSING`） |
+| 75 | `stopped` | CI の基盤待ち。Runner が付かずに取り消されたジョブが再実行でも解けない。後で打ち直せば通りうる（`merge-when-green`・`release`。値の持ち主は `step_result.py` の `EXIT_INFRA_WAIT`。#1645） |
+
+### 読む側の規則
+
+- **成功と読むのは `status` が `ok`（終了コード 0）だけである。** 6 を含め、ほかの値・終了コードを成功と読まない。結果 JSON が無い・形が誤っているときも成功と読まない（`supervise_lib` は `on_fail` へ回すか止まる）
+- **同じステップの試行（プランの実行の記録の `NN-<ステップ>.out`）から値を採るのは、`status` が `ok` の試行のうち番号の最も大きいものだけである。** 落ちた試行の値を採らない。`step_read.pick_ok_attempt(dir, step, tool)` を使い、採れなければ `Pick.outcome`（`no_ok_attempt` / `no_attempt` / `no_place` / `unreadable`）を理由として返す
+- **置き場が無い・読めないことと、材料が 0 件であることを分ける。** `step_read.open_place(path)` の `Place.state` が `missing` なら 3、`unreadable` なら 2 の `stopped` で返し（`place_stop` が組む）、0 件・「無し」とは返さない。`empty` のときだけ 0 件として `ok` を返してよい
+- 置き場が設定で任意のもの（宣言が無ければ使わない。例 `.ndf/projects.json`）は、`open_place` の前に宣言の有無で分け、無いことを欠けとも前提の欠けとも読まない
+- 子プロセスとして打った手順のスクリプトの結果は `step_read.not_ok_reason`（標準出力の最後の行を読む）で確かめ、`#N 進行 = X` のような結果 JSON でない行を成功と読まない
+- 記録のスクリプト（`progress-record.sh`・`projects-sync.sh`）が `ok` 以外を返しても、呼ぶ側は工程を止めない。`supervise_lib` の `record_stage` はフェーズレポートへ、`sprint-close.py` は `board_note` の項目へ、LLM は作業の報告の「見つけたもの」へ、`summary` と `gaps[].reason` を載せる
 
 承認資料は `development-workflow/references/approval-request.md` の 2 層（対象を開くもの・判断に
 使うもの）に、同意を求めること・戻し方を足した形で書く。置き場所は `NDF_PRESENTATION_DIR`
