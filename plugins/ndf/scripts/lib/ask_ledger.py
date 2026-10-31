@@ -46,7 +46,9 @@ def _questions(tool_input) -> list[str]:
     return [q["question"] for q in qs if isinstance(q, dict) and isinstance(q.get("question"), str)]
 
 
-def verdict_row(*, session: str, cwd: str, runtime: str, source: str, verdict: str, reason: str, mode: str, decl_problem: str, tool_input) -> dict:
+def verdict_row(
+    *, session: str, cwd: str, runtime: str, source: str, verdict: str, reason: str, mode: str, decl_problem: str, tool_input
+) -> dict:
     return {
         "v": VERSION,
         "kind": "verdict",

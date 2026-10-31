@@ -22,7 +22,21 @@ import ask_ledger  # noqa: E402
 import ask_policy  # noqa: E402
 import hook as hook_entry  # noqa: E402
 
-LEDGER_KEYS_VERDICT = {"v", "kind", "id", "at", "session", "cwd", "runtime", "source", "verdict", "reason", "mode", "decl_problem", "questions"}
+LEDGER_KEYS_VERDICT = {
+    "v",
+    "kind",
+    "id",
+    "at",
+    "session",
+    "cwd",
+    "runtime",
+    "source",
+    "verdict",
+    "reason",
+    "mode",
+    "decl_problem",
+    "questions",
+}
 LEDGER_KEYS_DECISION = {"v", "kind", "id", "at", "session", "cwd", "ref", "question", "answer", "reason"}
 
 
@@ -45,13 +59,22 @@ def ask_input(proj, source=None, question="どれにしますか", **extra) -> d
     ti: dict = {"questions": [{"question": question, "options": [{"label": "A"}, {"label": "B"}]}]}
     if source is not None:
         ti["metadata"] = {"source": source}
-    return {"hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion", "session_id": "s1", "cwd": str(proj), "tool_input": ti, **extra}
+    return {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "AskUserQuestion",
+        "session_id": "s1",
+        "cwd": str(proj),
+        "tool_input": ti,
+        **extra,
+    }
 
 
 def run_hook(proj, data, env=None):
     e = {k: v for k, v in os.environ.items() if not k.startswith("SLACK")}
     e.update(env or {})
-    r = subprocess.run([sys.executable, str(HOOK)], input=json.dumps(data), capture_output=True, text=True, env=e, cwd=str(proj), timeout=30)
+    r = subprocess.run(
+        [sys.executable, str(HOOK)], input=json.dumps(data), capture_output=True, text=True, env=e, cwd=str(proj), timeout=30
+    )
     assert r.returncode == 0, r.stderr
     return json.loads(r.stdout) if r.stdout.strip() else None
 
@@ -89,7 +112,7 @@ def test_verdict_row_has_only_the_ledger_columns(proj):
     run_hook(proj, data)
     [row] = rows()
     assert set(row) == LEDGER_KEYS_VERDICT
-    assert "/secret" not in json.dumps(row) and "\"A\"" not in json.dumps(row)
+    assert "/secret" not in json.dumps(row) and '"A"' not in json.dumps(row)
 
 
 # ---------------------------------------------------------------- AC2・AC3・AC4・AC5
@@ -137,8 +160,13 @@ def test_allowed_source_gets_threshold_context(proj):
 
 @pytest.mark.parametrize(
     "decl, where",
-    [("{", "JSON"), ({"version": 2}, "version"), ({"version": True}, "version"), ({"version": 1, "allow": ["cost", "x"]}, "allow[1]"),
-     ({"version": 1, "mode": "off", "extra": [{"name": "redline", "description": "d"}]}, "extra[0].name")],
+    [
+        ("{", "JSON"),
+        ({"version": 2}, "version"),
+        ({"version": True}, "version"),
+        ({"version": 1, "allow": ["cost", "x"]}, "allow[1]"),
+        ({"version": 1, "mode": "off", "extra": [{"name": "redline", "description": "d"}]}, "extra[0].name"),
+    ],
 )
 def test_broken_declaration_falls_back_to_default(proj, decl, where):
     declare(proj, decl)
@@ -223,7 +251,14 @@ def test_wait_notify_only_when_not_denied(proj, monkeypatch, source, notified):
 
 
 def test_other_runtimes_are_not_judged(proj):
-    r = subprocess.run([sys.executable, str(HOOK), "--runtime", "codex"], input=json.dumps(ask_input(proj)), capture_output=True, text=True, cwd=str(proj), timeout=30)
+    r = subprocess.run(
+        [sys.executable, str(HOOK), "--runtime", "codex"],
+        input=json.dumps(ask_input(proj)),
+        capture_output=True,
+        text=True,
+        cwd=str(proj),
+        timeout=30,
+    )
     assert r.returncode == 0 and "deny" not in r.stdout
 
 
@@ -253,7 +288,11 @@ def test_decide_with_question_only(proj):
 
 @pytest.mark.parametrize(
     "args",
-    [["--ref", "nope", "--answer", "A", "--reason", "r"], ["--question", "q", "--answer", " ", "--reason", "r"], ["--answer", "A", "--reason", "r"]],
+    [
+        ["--ref", "nope", "--answer", "A", "--reason", "r"],
+        ["--question", "q", "--answer", " ", "--reason", "r"],
+        ["--answer", "A", "--reason", "r"],
+    ],
 )
 def test_decide_rejects_bad_input(proj, args):
     code, rep = run_ask("decide", *args)
