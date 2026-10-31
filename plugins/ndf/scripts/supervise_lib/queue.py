@@ -140,22 +140,33 @@ def results_named(name: str, items: list[dict], plan: str) -> list[dict]:
 
 def fill_queue_pr(plan: str, items: list[dict]) -> str | None:
     """計画の {queue_pr:<名>} を、前のステージの名前の一致する計画の Pull Request 1 本で置き換える。
-    前のステージに無ければ同じディレクトリの計画の報告を読む（関門の後に単独で流すとき）。無い・飛ばされたなら 0。
-    {queue_state:<名>} は、名前の一致する計画の状態ディレクトリの絶対パスで置き換える（無ければ空文字。#1488）。"""
+    前のステージに無ければ同じディレクトリの計画の報告を読む（関門の後に単独で流すとき）。完了して PR が無い・飛ばされたなら 0。
+    {queue_state:<名>} は、名前の一致する計画の状態ディレクトリの絶対パスで置き換える（#1488）。結果（完了した報告・
+    状態ディレクトリ）が見つからなければ、0・空文字で埋めずに計画を書き換えず理由を返す（#2079）。"""
     try:
         text = Path(plan).read_text()
     except OSError as e:
         return f"計画を読めない: {e}"
-    names, states = set(QUEUE_PR.findall(text)), set(QUEUE_STATE.findall(text))
+    names, states = sorted(set(QUEUE_PR.findall(text))), sorted(set(QUEUE_STATE.findall(text)))
     if not names and not states:
         return None
+    missing = []
     for name in names:
-        hits = results_named(name, items, plan)
-        prs = [n for n in (plan_pr(i) for i in hits) if n]
+        done = [i for i in results_named(name, items, plan) if i.get("result") == "完了"]
+        if not done:
+            missing.append(f"{{queue_pr:{name}}}（名前の一致する計画の完了した報告が無い）")
+            continue
+        prs = [n for n in (plan_pr(i) for i in done) if n]
         text = text.replace(f"{{queue_pr:{name}}}", prs[-1] if prs else "0")
     for name in states:
-        hits = [i for i in results_named(name, items, plan) if i.get("plan")]
-        text = text.replace(f"{{queue_state:{name}}}", str(state_dir_of(str(Path(hits[-1]["plan"]).absolute()))) if hits else "")
+        found = [state_dir_of(str(Path(i["plan"]).absolute())) for i in results_named(name, items, plan) if i.get("plan")]
+        dirs = [d for d in found if d.is_dir()]
+        if not dirs:
+            missing.append(f"{{queue_state:{name}}}（名前の一致する計画の状態ディレクトリが無い）")
+            continue
+        text = text.replace(f"{{queue_state:{name}}}", str(dirs[-1]))
+    if missing:
+        return "差し込みを埋める前の計画の結果が見つからない: " + "、".join(missing)
     write_text_atomic(Path(plan), text)
     return None
 
@@ -254,7 +265,7 @@ def start_listing(done_path: Path, all_plans: list[str]) -> None:
 def fill_stage(first: bool, stage: list[str], items: list[dict]) -> tuple[list[dict], list[str]]:
     """ステージを流す前に、プランの {queue_pr:<名>} と QUEUE_PRS を埋める。(流さないプランの items, 流すプラン) を返す。
 
-    後続のステージ（first でない）は、前のすべてのプランが 完了 のときだけ流す。埋められないプランは流さずに理由を残す。"""
+    後続のステージ（first でない）は、前のすべてのプランが 完了 のときだけ流す。埋められないプランは流さずに理由と `unfilled` を残す（#2079）。"""
     not_done = [i for i in items if i["result"] != "完了"]
     if not first and not_done:
         ran_bad = [i for i in not_done if i["result"] != NOT_RUN]
@@ -269,7 +280,7 @@ def fill_stage(first: bool, stage: list[str], items: list[dict]) -> tuple[list[d
     for p in stage:
         err = (None if prs is None else fill_queue_prs(p, prs)) or fill_queue_pr(p, items)
         if err:
-            skipped.append({"plan": p, "result": NOT_RUN, "reason": err})
+            skipped.append({"plan": p, "result": NOT_RUN, "reason": err, "unfilled": True})
         else:
             runnable.append(p)
     return skipped, runnable
@@ -355,10 +366,11 @@ def _queue_result(items: list[dict], max_: int, done_path: Path) -> dict:
     skipped = len(items) - len(ran)
     stopped = [i for i in ran if i["result"] not in FINISHED]
     gates = [i for i in ran if i["result"] == "関門"]
-    status = "stopped" if stopped else "gate" if gates else "ok"
+    unfilled = [i for i in items if i.get("unfilled")]  # 差し込みを埋められずに流さなかったプラン（#2079）
+    status = "stopped" if stopped or unfilled else "gate" if gates else "ok"
     summary = f"{len(ran)} 本: 完了 {len(ran) - len(stopped) - len(gates)} / 関門 {len(gates)} / 止まった {len(stopped)}"
     if skipped:
-        summary += f"。{skipped} 本は流さなかった"
+        summary += f"。{skipped} 本は流さなかった" + (f"（うち {len(unfilled)} 本は差し込みを埋められない）" if unfilled else "")
     nxt = "関門の計画の report.md を読んで提示する" if status == "gate" else None
     return result(
         "supervise-queue",
