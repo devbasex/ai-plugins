@@ -58,7 +58,7 @@
 | 5 | `project-mvv.py vet --kind candidate --body <本文>` | 10「反する疑い」: 箇所（`C4`・`priority` など）を示して本文を直し、5 をやり直す。10「判定できない」: 引き受けるかを利用者に問う |
 | 6 | 本文を示して承認を問う（`AskUserQuestion`） | 承認されない: 3 へ戻る。`approve` を打たない |
 | 7 | `project-mvv.py approve --body <本文> --by <承認者> [--accept-unknown]` | 1: 照合が無い・本文が照合の後に変わった・形が足りない。5 から |
-| 8 | `.ndf/mvv.md`・`.ndf/mvv.json` をコミットし、通常の Pull Request で届ける | 宣言を変える Pull Request は MVV 判定で通らず、承認ゲートで利用者が見る（共通原則の C7） |
+| 8 | `.ndf/mvv.md`・`.ndf/mvv.json` をコミットし、通常の Pull Request で届ける | 宣言を変える Pull Request は MVV 判定で通らず、承認ゲートで利用者が見る（共通原則の C7）。7 の結果に `key: gitignore` の行があれば、コミットできない。除外している `.gitignore` の行を利用者へ示す（[project-analysis.md](project-analysis.md) の「`.ndf/` の追跡」） |
 
 **承認の前に `.ndf/` へ書かない。** `collect` と `propose` の出力はリポジトリの外に置く。`approve` は同じ本文への直近の照合が
 「従う」（か、人が引き受けた「判定できない」）のときだけ書く。「反する疑い」の本文は利用者が望んでも承認へ進めない
