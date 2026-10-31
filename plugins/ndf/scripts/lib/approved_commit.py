@@ -264,8 +264,14 @@ def _outside_to_tip(root, approved, tip, allowed) -> list[str] | None:
 
 def _touched(root, sha) -> list[str] | None:
     """コミットが第 1 親から変えたパス（マージのコミットは取り込んだ側の変更を含む）。読めなければ None。"""
-    p = proc.git(root, "diff", "--name-only", f"{sha}^1", sha, check=False)
-    return None if p.returncode else p.stdout.split()
+    return _tree_diff_paths(root, f"{sha}^1", sha)
+
+
+def _tree_diff_paths(root, a, b) -> list[str] | None:
+    """2 つの木の間で変わったパス。読めなければ None。引用符で包まない（-z）・移動は元の削除と先の追加に分ける
+    （--no-renames）ため、日本語や空白を含むパスと、配布物から外へ移したファイルも配布物の変更として拾う。"""
+    p = proc.git(root, "diff", "--name-only", "-z", "--no-renames", a, b, check=False)
+    return None if p.returncode else [x for x in p.stdout.split("\0") if x]
 
 
 def _ships(paths, shipped) -> bool:
@@ -274,8 +280,8 @@ def _ships(paths, shipped) -> bool:
 
 def _shipped_differs(root, expected, actual, shipped) -> bool | None:
     """2 つの木の違いが配布物のパスに及ぶか。読めなければ None。"""
-    p = proc.git(root, "diff", "--name-only", expected, actual, check=False)
-    return None if p.returncode else _ships(p.stdout.split(), shipped)
+    paths = _tree_diff_paths(root, expected, actual)
+    return None if paths is None else _ships(paths, shipped)
 
 
 def _commits_resolvable(root, tip, allowed) -> bool:

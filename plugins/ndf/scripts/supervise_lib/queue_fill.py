@@ -50,12 +50,13 @@ def results_named(name: str, items: list[dict], plan: str) -> list[dict]:
 
 
 def _fill_prs(text: str, names: list[str], items: list[dict], plan: str) -> tuple[str, list[str]]:
-    """{queue_pr:<名>} を完了した結果の PR の番号（無ければ 0）で置き換える。完了した結果が無い名前は欠けの文で返す。"""
+    """{queue_pr:<名>} を完了か関門で終えた結果の PR の番号（無ければ 0）で置き換える。そうした結果が無い名前は欠けの文で返す。
+    設計のプランは承認ゲート 1 の関門で終わるため、関門も受ける（plan_pr と同じ FINISHED）。"""
     missing = []
     for name in names:
-        done = [i for i in results_named(name, items, plan) if i.get("result") == "完了"]
+        done = [i for i in results_named(name, items, plan) if i.get("result") in FINISHED]
         if not done:
-            missing.append(f"{{queue_pr:{name}}}（名前の一致する計画の完了した報告が無い）")
+            missing.append(f"{{queue_pr:{name}}}（名前の一致する計画の完了か関門で終えた報告が無い）")
             continue
         prs = [n for n in (plan_pr(i) for i in done) if n]
         text = text.replace(f"{{queue_pr:{name}}}", prs[-1] if prs else "0")

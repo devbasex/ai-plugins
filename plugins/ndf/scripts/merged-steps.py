@@ -234,8 +234,10 @@ def _update_main_dir(main_dir, add):
 
 def _cleanup_result(items, prs, pull_err):
     """記録から (status, summary, items, metrics, presentation_path, next) を組み立てる。"""
-    swept = [i for i in items if i.pop("swept", False)]
-    own = [i for i in items if i not in swept]
+    # 値の一致でなく印で分ける（同じパスの kept が両方に並んでも、片方へ寄せない）
+    marks = [i.pop("swept", False) for i in items]
+    swept = [i for i, m in zip(items, marks) if m]
+    own = [i for i, m in zip(items, marks) if not m]
     count = {k: sum(1 for i in own if i["result"] == k) for k in ("removed", "deleted", "absent", "kept", "stopped")}
     metrics = {
         "removed_worktrees": count["removed"],
@@ -283,7 +285,9 @@ def cleanup(root, prs):
         _cleanup_pr(root, main_dir, slug, wt_base, n, add)
 
     # 持ち主の終わった残る状態（merged を通らずに閉じた PR の worktree・一時ファイル）も片付ける（#2229）
-    swept = run_state.sweep_states(root)
+    # 上で扱った pr<n>・rf<n> は見直さない（同じものを 2 度数えない）
+    done = [wt_base / slug / f"{k}{n}" for n in prs for k in ("pr", "rf")] if slug else []
+    swept = run_state.sweep_states(root, skip=done)
     items.extend({**i, "swept": True} for i in swept)
     git(root, "worktree", "prune", check=False)
     pull_err = _update_main_dir(main_dir, add)

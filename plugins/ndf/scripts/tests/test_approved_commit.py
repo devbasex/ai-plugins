@@ -193,6 +193,26 @@ def test_an_outside_commit_that_ships_is_still_caught(repo):
     assert [o.subject for o in v.tolerated] == ["design (#2214)"]
 
 
+@pytest.mark.parametrize("move", [False, True])
+def test_an_outside_commit_with_a_quoted_path_or_a_move_out_of_shipped_is_caught(repo, move):
+    """日本語のパス（core.quotePath で引用符に包まれる）と、配布物から外への移動（rename の検出で移動先だけになる）も、
+    配布物に触れる外のコミットとして止める。"""
+    (repo / "plugins" / "foo").mkdir(parents=True)
+    commit(repo, "plugins/foo/a.txt", "a\n")
+    approved = git(repo, "rev-parse", "HEAD")
+    rel = release_branch(repo, approved)
+    mc = land(repo, "merge")
+    if move:
+        (repo / "docs").mkdir()
+        git(repo, "mv", "plugins/foo/a.txt", "docs/a.txt")
+        git(repo, "commit", "-q", "-m", "move (#9)")
+        outside = git(repo, "rev-parse", "HEAD")
+    else:
+        outside = commit(repo, "plugins/foo/設定.md", "x\n", "ja (#9)")
+    v = ac.compare_approved(repo, approved, outside, [rel.pr(mc)], SHIPPED)
+    assert v.reason == ac.OUTSIDE_COMMITS and [o.sha for o in v.outside] == [outside]
+
+
 @pytest.mark.parametrize(("path", "reason"), [("docs/evil.md", ac.MATCH), ("plugins/evil.txt", ac.TREE_DIFFERS)])
 def test_a_merge_commit_carrying_a_change_differs_only_when_it_ships(repo, path, reason):
     """#2221: マージのコミットの中で入れた変更は、配布物のパスに及ぶときだけ tree_differs。"""

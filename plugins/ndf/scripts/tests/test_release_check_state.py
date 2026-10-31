@@ -55,6 +55,14 @@ def test_queue_pr_of_a_stopped_plan_is_not_zero(tmp_path):
     assert queue.fill_queue_pr(dev, [item]) and cmd_of(dev) == "x {queue_pr:check}"
 
 
+def test_queue_pr_of_a_plan_ended_at_the_gate_is_filled(tmp_path):
+    """設計のプランは承認ゲート 1 の関門で終わる。関門の報告の PR も埋める（design-merge の {queue_pr:design-N}）。"""
+    design = plan_file(tmp_path, "2-design-16", "true")
+    item = {**done(design), "result": "関門"}
+    merge = plan_file(tmp_path, "3-design-merge-16", "x {queue_pr:design-16}")
+    assert queue.fill_queue_pr(merge, [item]) is None and cmd_of(merge) == "x 77"
+
+
 def test_queue_stage_with_unfilled_placeholder_is_not_ok(tmp_path):
     dev = plan_file(tmp_path, "7-release", "x {queue_pr:check}")
     skipped, runnable = queue.fill_stage(False, [dev], [])

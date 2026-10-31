@@ -721,6 +721,15 @@ def load_merged():
     return mod
 
 
+def test_cleanup_result_splits_own_and_swept_by_mark_not_value():
+    """同じ値の kept が自分の片付けと持ち主の終わった状態の片付けの両方にあっても、それぞれで数える。"""
+    mod = load_merged()
+    same = {"kind": "worktree", "name": "/w/pr1", "result": "kept", "reason": "r"}
+    items = [dict(same), {**same, "swept": True}]
+    _, _, _, metrics, _, _ = mod._cleanup_result(items, [1], None)
+    assert (metrics["kept"], metrics["swept_kept"]) == (1, 1)
+
+
 @pytest.mark.parametrize("change", ["modified", "staged", "deleted"])
 def test_remove_worktree_keeps_uncommitted_tracked_changes(repo, tmp_path, change):
     """追跡ファイルの未コミットの変更は退避できないので、--force で消さず kept にする。"""
