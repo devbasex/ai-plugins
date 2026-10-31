@@ -14,6 +14,9 @@ from pathlib import Path
 import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import inproc  # noqa: E402
+
 PY = sys.executable
 
 FAKE_GH = """#!{py}
@@ -72,8 +75,12 @@ def repo(tmp_path):
     return root
 
 
-def call(script, args, env, cwd=None):
-    p = subprocess.run([PY, str(SCRIPTS / script), *args], capture_output=True, text=True, env=env, cwd=cwd)
+def call(script, args, env, cwd=None, proc=False):
+    """分岐はプロセスの中で main を呼ぶ。子のプロセスへ渡す入口（phase-steps.py）は `proc=True` で起動して確かめる。"""
+    if proc:
+        p = subprocess.run([PY, str(SCRIPTS / script), *args], capture_output=True, text=True, env=env, cwd=cwd)
+    else:
+        p = inproc.run(SCRIPTS / script, *args, env=env, cwd=cwd)
     lines = p.stdout.strip().splitlines()
     out = json.loads(lines[-1]) if lines else None
     return p.returncode, out, p.stderr
@@ -518,13 +525,13 @@ def test_phase_steps_forwards_with_root_before_or_after(repo, env, root_first):
     spec_repo(repo)
     sub = ["spec-finalize", "--spec", "docs/specifications/x.md", "--design", "docs/design/x-design.md"]
     args = ["--root", str(repo), *sub] if root_first else [*sub, "--root", str(repo)]
-    code, out, err = call("phase-steps.py", args, env, cwd=str(repo.parent))
+    code, out, err = call("phase-steps.py", args, env, cwd=str(repo.parent), proc=True)
     assert code == 0, err
     assert out["tool"] == "plan-to-spec" and out["status"] == "ok"
 
 
 def test_phase_steps_forwards_exit_code(repo, env):
-    code, out, _ = call("phase-steps.py", [f"--root={repo}", "bump", "--plugin", "nope", "--to", "1.1.0"], env)
+    code, out, _ = call("phase-steps.py", [f"--root={repo}", "bump", "--plugin", "nope", "--to", "1.1.0"], env, proc=True)
     assert code == 3 and out["tool"] == "release"
 
 
