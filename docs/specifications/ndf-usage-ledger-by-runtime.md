@@ -101,7 +101,7 @@ python3 plugins/ndf/scripts/usage-report.py --ledger codex --since 2026-10-13 --
 | 集計 | `plugins/ndf/scripts/lib/usage_aggregate.py` | 帳簿 1 つ × 期間の合計、Claude の 3 つの値、閉じた課題の数、supervise のステップの集め直し（`step_totals`）。読むだけで書かない |
 | 集計の CLI | `plugins/ndf/scripts/usage-report.py` | 引数を受けて `usage_aggregate.usage_report` を呼び、JSON か表を出す |
 | SubagentStop の hook | `plugins/ndf/scripts/usage-subagent.py`（登録は `plugins/ndf/hooks/claude.json`） | 入力の会話の記録を読み、サブエージェント 1 回を Claude の帳簿へ 1 行書く |
-| テストの隔離と検査 | `plugins/ndf/conftest.py` | テストごとに帳簿・supervise の状態・耐久の記録のディレクトリ・レビュー worktree の置き場（`NDF_WORKTREE_BASE`）・一時の置き場（`TMPDIR`）を一時ディレクトリへ向け、終わりに本物の帳簿へ印の付いた行が増えていれば落とす。セッションの終わりに寿命の窓を過ぎた `ndf-tests-*` を片付ける（#2229） |
+| テストの隔離と検査 | `plugins/ndf/conftest.py` | テストごとに帳簿・supervise の状態・耐久の記録のディレクトリ・レビュー worktree の置き場（`NDF_WORKTREE_BASE`）・一時の置き場（`TMPDIR`）を一時ディレクトリへ向け、終わりに本物の帳簿へ印の付いた行が増えていれば落とす。セッションの終わりに寿命の窓を過ぎた `ndf-tests-*` を片付ける |
 | 起動の検査 | `plugins/ndf/scripts/tests/test_launch_sites.py` | 起動の共有処理の外にある LLM の起動を落とす |
 
 ```mermaid
