@@ -35,7 +35,7 @@ from sprint_loop_gate import (
 
 
 def candidates_of(ms: dict, max_issues: int) -> list[dict]:
-    """マイルストーンの候補（順位の順）: 境界までの行（境界が無ければ先頭から max_issues 件）＋大きい課題の枠の 1 切れ（当てたとき）
+    """マイルストーンの候補（順位の順）: 境界までの行（境界が無ければ判断待ちを除いた先頭から max_issues 件まで）＋大きい課題の枠の 1 切れ（当てたとき）
     ＋品質の枠の課題（宣言があるとき）。"""
     rows = sorted(ms.get("rows", []), key=lambda r: r["rank"])
     b = ms.get("boundary")
@@ -44,8 +44,10 @@ def candidates_of(ms: dict, max_issues: int) -> list[dict]:
     elif b:
         idx = next((i for i, r in enumerate(rows) if r["number"] == b["number"]), len(rows) - 1)
         nums = {r["number"] for r in rows[: idx + 1]}
-    else:
-        nums = {r["number"] for r in rows[:max_issues]}
+    else:  # 判断待ちの行は枠を使わない（選ばれない行で max_issues を埋めると、後ろの課題が候補に上がらない）
+        open_rows = [r for r in rows if not r.get("waiting_decision")][:max_issues]
+        last = rows.index(open_rows[-1]) if open_rows else len(rows) - 1
+        nums = {r["number"] for r in rows[: last + 1]}
     slot = ms.get("large_slot") or {}
     if slot.get("status") == SLOT_FIT and slot.get("slice"):
         nums.add(slot["slice"])
