@@ -4471,6 +4471,48 @@
       "source": "",
       "pending_source": "issues/issue-1631-design.md",
       "code": "whole_key"
+    },
+    {
+      "term": "リポジトリの登録",
+      "context": "ndf-factory",
+      "meaning": "アカウントが GitHub のリポジトリ 1 つを、GitHub App の導入の識別子と一緒に持つこと。スプリントの実行はこれに属する",
+      "source": "",
+      "pending_source": "issues/issue-2186-requirements.md"
+    },
+    {
+      "term": "GitHub App の導入",
+      "context": "ndf-factory",
+      "meaning": "利用者が自分のリポジトリへサービスの GitHub App を入れたもの。導入の識別子で指し、clone と push の導入の token をここから作る",
+      "source": "",
+      "pending_source": "issues/issue-2186-requirements.md"
+    },
+    {
+      "term": "キーの持ち込み",
+      "context": "ndf-factory",
+      "meaning": "実行の形態 `byok` で、利用者の Anthropic API キーか、引き受ける AWS のロールの ARN をサービスへ預けること",
+      "source": "",
+      "pending_source": "issues/issue-2186-requirements.md"
+    },
+    {
+      "term": "再開の要求",
+      "context": "ndf-factory",
+      "meaning": "承認の依頼に答えが保存された後、承認と通知が実行の制御へ出す、`resume` の実行ジョブを起こす要求",
+      "source": "",
+      "pending_source": "issues/issue-2186-requirements.md"
+    },
+    {
+      "term": "打ち切りの時間",
+      "context": "ndf-factory",
+      "meaning": "1 つの実行ジョブが動いてよい時間の上限。超えたら実行の制御が止める",
+      "source": "",
+      "pending_source": "issues/issue-2186-requirements.md"
+    },
+    {
+      "term": "課題の候補",
+      "context": "ndf-factory",
+      "meaning": "スプリントを始める画面に、AI が棚卸しの順位から理由つきで出す課題",
+      "source": "",
+      "pending_source": "issues/issue-2186-requirements.md"
     }
   ]
 }
