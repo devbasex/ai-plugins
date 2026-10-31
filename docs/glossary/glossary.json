@@ -4471,6 +4471,30 @@
       "source": "",
       "pending_source": "issues/issue-1631-design.md",
       "code": "whole_key"
+    },
+    {
+      "term": "問い合わせの区分",
+      "context": "ndf-workflow",
+      "meaning": "AskUserQuestion の metadata.source に AI が付ける値（ndf-gate:<番号> か ndf-ask:<名前>）。hook は質問の中身を読まず、この値が許された区分かだけを見る（#2206）",
+      "source": "",
+      "pending_source": "issues/issue-2206-requirements.md",
+      "code": "ask_category"
+    },
+    {
+      "term": "問い合わせの宣言",
+      "context": "ndf-workflow",
+      "meaning": "プロジェクトの .ndf/ask.json。人へ回してよい問い合わせの区分と hook の働き方（enforce / advise / off）を書く（#2206）",
+      "source": "",
+      "pending_source": "issues/issue-2206-requirements.md",
+      "code": "ask_declaration"
+    },
+    {
+      "term": "代わりの判断",
+      "context": "ndf-workflow",
+      "meaning": "hook が問い合わせを止めた後に AI が自分で下した判断。問い・選んだ答え・理由を記録する（#2206）",
+      "source": "",
+      "pending_source": "issues/issue-2206-requirements.md",
+      "code": "proxy_decision"
     }
   ]
 }
