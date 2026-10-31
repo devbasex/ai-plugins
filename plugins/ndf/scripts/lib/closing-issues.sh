@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# NDF plugin: Pull Request の本文から、閉じる語が指す issue を取り出す。
+# NDF plugin: Pull Request の本文から、閉じる語と閉じる予定の参照が指す issue を取り出す。
 #
 #   closing-issues.sh [--repo <所有者>/<リポジトリ>] [本文のファイル]
 #     引数が無ければ標準入力から読む。`<所有者>/<リポジトリ>` と `<番号>` をタブで
@@ -16,6 +16,9 @@
 #
 # 起点ブランチが既定ブランチでないリポジトリでは、マージしても自動クローズが働かない。
 # 後片付けの工程がこの一覧を読み、まだ OPEN のものだけを閉じる。
+#
+# **閉じる予定の参照（`最終工程の後に閉じる: #12`）も同じ指し先の規則で取り出す**（#2228）。
+# 既定ブランチ宛の本文では NDF の手順が閉じる語をこの形へ置き換える。形の正本は lib/closing.py の DEFERRED。
 set -uo pipefail
 
 DEFAULT_REPO=""
@@ -46,7 +49,7 @@ body=$(cat -- "${1:--}")
 # **Pull Request の URL は拾わない。** 閉じる対象は issue である。
 NAME='[A-Za-z0-9._-]+'
 REF="(https?://github\.com/$NAME/$NAME/issues/[0-9]+|$NAME/$NAME#[0-9]+|#[0-9]+)"
-KEYWORD='\b(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]*:?[[:space:]]*'
+KEYWORD='(\b(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]*:?[[:space:]]*|最終工程の後に閉じる[[:space:]]*:[[:space:]]*)'
 
 # **1 件も見つからないことは正常な結果である。** `grep` の終了コードをそのまま返すと、
 # 閉じる語の無い Pull Request で失敗したように見える。

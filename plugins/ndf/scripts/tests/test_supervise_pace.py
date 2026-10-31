@@ -291,7 +291,7 @@ def test_check_since_last_with_pr_is_a_usage_error(tmp_path):
 # ---------- new close ----------
 
 
-def test_close_runs_spec_close_and_retro_once_each_in_order(tmp_path):
+def test_close_runs_spec_retro_and_close_once_each_in_order(tmp_path):
     out = tmp_path / "close"
     p = cli(
         "new",
@@ -325,19 +325,21 @@ def test_close_runs_spec_close_and_retro_once_each_in_order(tmp_path):
     stages = [s.get("stage") for s in close["steps"]]
     for stage in ("確定仕様化", "後片付け", "振り返り"):
         assert stages.count(stage) == 1
-    assert stages.index("確定仕様化") < stages.index("後片付け") < stages.index("振り返り")
+    assert stages.index("確定仕様化") < stages.index("振り返り") < stages.index("後片付け")  # 振り返りの後に閉じる（#2228）
     cl = steps_of(close)["close"]["cmd"]
     assert "--record-pr {queue_pr:release-prod}" in cl and "--issues 11,12" in cl and "--with-verification" in cl
+    assert "--final-stage 振り返り" in cl
     assert close["課題"] == [11, 12] and close.get("記録")
     cmd = waves["最終の検査"]["command"]
     assert cmd.count("--then") == 3
     assert_transitions_exist(close)
     # 棚卸しは振り返りの後の別のステップ（#842）。振り返りのプロンプトは棚卸しを含まない
     steps = steps_of(close)
-    assert steps["retro"]["next"] == "refine" and "backlog-refinement" not in steps["retro"]["prompt"]
+    assert steps["retro"]["next"] == "close" and steps["close"]["next"] == "refine"
+    assert "backlog-refinement" not in steps["retro"]["prompt"]
     refine = steps["refine"]
     assert refine["stage"] == "棚卸し" and refine["type"] == "work" and refine["timeout"] > 0
-    assert refine["next"] == "end" and stages.index("振り返り") < stages.index("棚卸し")
+    assert refine["next"] == "end" and stages.index("後片付け") < stages.index("棚卸し")
     # 無人で通す: 上限を上げて打ち直さない・終了コード 10 で承認を求めない・記録のリポジトリの外へ書かない
     for words in ("--limit` を上げて打ち直さず", "承認を求めず", "`--repo` を渡さない", "親 issue の起票"):
         assert words in refine["prompt"]

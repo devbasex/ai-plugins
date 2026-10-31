@@ -11,6 +11,7 @@ from pathlib import Path
 import gh_call
 import gh_sections
 import mdtable
+from closing import defer_for_base
 from pr_mode import with_mode_line
 from release_lib.others import MIGRATION_HEADING
 from supervise_lib.claude import TAIL
@@ -317,10 +318,32 @@ class PrStep:
         return body
 
     def _publish(self, ctx, base: str, branch: str, title: str, body: str, retitle: bool = False) -> tuple[bool, str]:
-        """既存の PR があれば本文を書き直し（retitle なら題も。#1289 の決定 6）、無ければ Draft で作る。"""
-        found = gh_call.gh(
-            ["pr", "list", "--head", branch, "--state", "open", "--json", "url", "--jq", ".[0].url"], cwd=ctx.cwd
-        ).stdout.rstrip()
+        """既存の PR があれば本文を書き直し（retitle なら題も。#1289 の決定 6）、無ければ Draft で作る。
+
+        宛先（既存の PR なら baseRefName、無ければ base）が既定ブランチなら、本文の closing keywords を閉じる予定の参照へ
+        置き換えてから送る（マージで課題を閉じない。#2228 の I7）。"""
+        found, _, found_base = (
+            gh_call.gh(
+                [
+                    "pr",
+                    "list",
+                    "--head",
+                    branch,
+                    "--state",
+                    "open",
+                    "--json",
+                    "url,baseRefName",
+                    "--jq",
+                    ".[0] | [.url, .baseRefName] | @tsv",
+                ],
+                cwd=ctx.cwd,
+            )
+            .stdout.strip()
+            .partition("\t")
+        )
+        body, deferred = defer_for_base(ctx.cwd, (found_base or None) if found else base, body)
+        if deferred:
+            ctx.state.cur["deferred_closing"] = deferred
         if found:
             p = gh_call.gh(["pr", "edit", found, *(["--title", title] if retitle else []), "--body", body], cwd=ctx.cwd)
             url = found

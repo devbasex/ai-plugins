@@ -51,9 +51,9 @@
 | # | 条件 | 破れたときの扱い |
 | --- | --- | --- |
 | I1 | まとめのプランの記録の参照が `0`（`RECORD_NONE`）になるのは、リリースの経路がすべて届けない経路（`STAGE_NONE`）のときだけである | テストが落とす |
-| I2 | 記録の参照が `{queue_pr:…}` でない（`has_record` が偽）とき、プランに `release-verify` を置かず、merge の次は `close` になる | テストが落とす |
+| I2 | 記録の参照が `{queue_pr:…}` でない（`has_record` が偽）とき、プランに `release-verify` を置かず、merge の次は `retro`（その次が `close`。#2228）になる | テストが落とす |
 | I3 | `--record-pr unknown` の実行は、どの課題も閉じず、ボードも書かず、課題の本文も読まない（gh へ書き込まない） | テストが落とす |
-| I4 | `--record-pr 0` の意味（記録を読まず、閉じる条件を見ずに `--issues` を閉じる。`--issues` が無ければ終了コード 2）は変わらない | 既存のテストが落とす |
+| I4 | `--record-pr 0` の意味（記録を読まず、閉じる条件 1・2 を見ずに `--issues` を閉じる（条件 3 の振り返りの記録は見る）。`--issues` が無ければ終了コード 2）は変わらない | 既存のテストが落とす |
 | I5 | 要求の 2 列目が「無し」の形の行は `ManualRow` にならない。それ以外の空でない 2 列目は手動確認の行になる | テストが落とす |
 
 ### 入出力の契約
@@ -112,9 +112,9 @@ flowchart TD
   C -- いいえ --> D{"経路がすべて STAGE_NONE"}
   D -- はい --> Z["0"]
   D -- いいえ --> U["unknown"]
-  T --> V["merge → release-verify → close"]
+  T --> V["merge → release-verify → retro → close"]
   P --> V
-  Z --> W["merge → close（release-verify なし）"]
+  Z --> W["merge → retro → close（release-verify なし）"]
   U --> W
 ```
 

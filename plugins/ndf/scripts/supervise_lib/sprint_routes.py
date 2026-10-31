@@ -57,7 +57,7 @@ def has_release_template(a) -> bool:
     return any(r.stage == delivery.STAGE_TEMPLATE for r in routes_of(a))
 
 
-RECORD_NONE = "0"  # 本番の記録なし（配布なし。sprint-close.py は閉じる条件を見ずに閉じる。#1336）
+RECORD_NONE = "0"  # 本番の記録なし（配布なし。sprint-close.py は閉じる条件 1・2 を見ない。#1336）
 RECORD_UNKNOWN = "unknown"  # 記録の置き場が分からない（sprint-close.py は課題を開いたまま残す。#1875）
 
 

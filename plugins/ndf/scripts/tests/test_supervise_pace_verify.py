@@ -298,7 +298,7 @@ def test_close_of_the_promote_route_reads_the_promote_pr(tmp_path):
     ids = [s["id"] for s in steps]
     close = next(s for s in steps if s["id"] == "close")
     assert "--record-pr {queue_pr:promote} " in close["cmd"]
-    assert ids.index("release-verify") == ids.index("close") - 1
+    assert ids.index("release-verify") < ids.index("retro") < ids.index("close")
     rv = steps[ids.index("release-verify")]
     assert rv["type"] == "work" and rv["prompt"].startswith("/ndf:release-verification") and "{queue_pr:promote}" in rv["prompt"]
     # 「リリース後テスト」と記録するのは、受け入れ条件ごとに確かめて記録を書くこのステップだけ（#2288 の AC1）
@@ -311,7 +311,7 @@ PRD_ON_BASE = {**PRD, "trigger": "develop へのマージ", "branch": "develop"}
 @pytest.mark.parametrize("rows", [[STG], [PRD_ON_BASE], [API], [STG, API]], ids=["stg-only", "merged", "manual", "stg-manual"])
 def test_close_without_a_known_record_keeps_the_issues_open(tmp_path, rows):
     """#1875 1875-1・1875-2: 雛形も昇格も無い届ける経路（merge・手で届ける・検証の環境だけ）は --record-pr unknown で、
-    リリース後テストを置かず merge の次が close。"""
+    リリース後テストを置かず merge の次が振り返り、その次が close。"""
     steps = close_steps(tmp_path, rows)
     close = next(s for s in steps if s["id"] == "close")
     assert "--record-pr unknown " in close["cmd"] and "release-verify" not in [s["id"] for s in steps]
@@ -323,3 +323,47 @@ def test_close_of_no_delivery_keeps_record_pr_zero(tmp_path):
     steps = close_steps(tmp_path, [])
     close = next(s for s in steps if s["id"] == "close")
     assert "--record-pr 0 " in close["cmd"] and "release-verify" not in [s["id"] for s in steps]
+
+
+def chain(steps) -> list[str]:
+    """merge から `next` をたどった id の並び（end まで）。"""
+    by = {s["id"]: s for s in steps}
+    out, cur = [], "merge"
+    while cur in by and cur not in out:
+        out.append(cur)
+        cur = by[cur].get("next")
+    return out
+
+
+@pytest.mark.parametrize(
+    "rows, want",
+    [
+        ([STG, PRD], ["merge", "release-verify", "retro", "close", "refine"]),
+        ([], ["merge", "retro", "close", "refine"]),
+        ([STG], ["merge", "retro", "close", "refine"]),
+    ],
+    ids=["record", "no-delivery", "unknown"],
+)
+def test_close_comes_after_the_retro_and_before_the_refine(tmp_path, rows, want):
+    """#2228 の受け入れ条件 5・6（I6）: next のつながりで リリース後テスト → 振り返り → 課題を閉じる → 棚卸し。
+    振り返りとリリース後テストの指示は課題を閉じない。close は最終工程を振り返りとして渡す。"""
+    steps = close_steps(tmp_path, rows)
+    assert chain(steps)[-len(want) :] == want and chain(steps)[0] == "merge"
+    by = {s["id"]: s for s in steps}
+    assert "--final-stage 振り返り" in by["close"]["cmd"]
+    for sid in ("retro", "release-verify"):
+        if sid in by:
+            assert "課題は閉じない" in by[sid]["prompt"]
+
+
+@pytest.mark.parametrize("mode", ["light", "operation", "documentation", "legacy-refactor"])
+def test_close_comes_after_the_retro_in_every_mode(tmp_path, mode):
+    """#2228 の受け入れ条件 6: どのモードで組んでも close は振り返りの後、棚卸しの前にある。"""
+    repo = make_repo(tmp_path, [])
+    out = tmp_path / "c"
+    args = ["new", "close", "--name", "m2", "--worktree", str(repo), "--issue", "11", "--mode", mode]
+    args += ["--state", str(sprint_state(tmp_path, "auto")), "--out", str(out)]
+    p = subprocess.run([PY, str(SUPERVISE), *args], capture_output=True, text=True, cwd=repo)
+    assert p.returncode == 0, p.stdout + p.stderr
+    close = next(load(f) for f in sorted(out.glob("*.json")) if load(f).get("フェーズ") == "まとめ")
+    assert chain(close["steps"])[-3:] == ["retro", "close", "refine"]

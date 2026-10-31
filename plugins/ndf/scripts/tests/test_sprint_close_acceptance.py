@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import importlib.util
+import shlex
 import sys
 from pathlib import Path
 
@@ -23,7 +24,15 @@ repo, gh = harness.repo, harness.gh  # fixture
 sys.path.insert(0, str(HERE.parent / "lib"))
 import acceptance  # noqa: E402
 
-CLOSE = ["--record-pr", "20", "--repo", "o/r", "--with-verification"]
+CLOSE = [
+    "--record-pr",
+    "20",
+    "--repo",
+    "o/r",
+    "--with-verification",
+    "--final-stage",
+    "配布",
+]  # 条件 2 を見る（条件 3 は test_sprint_close_final_stage.py）
 THREE = "# 課題\n\n## 受け入れ条件\n\n- [ ] 1. 一\n- [ ] 2. 二\n- [ ] 3. 三\n\n## 進行\n\nモード: standard\n"
 
 
@@ -192,7 +201,7 @@ def test_a_failed_write_does_not_close(repo, gh):
     code, out, err = call("sprint-close.py", CLOSE, gh.env, repo)
     it = issues_of(out)["o/r#1"]
     assert code == 1 and it["result"] == "failed" and it["reason"] == "受け入れ条件の印を書けない"
-    assert it["cmd"].endswith("sprint-close.py " + " ".join(CLOSE))
+    assert it["cmd"].endswith("sprint-close.py " + shlex.join(CLOSE))
     assert not calls(gh, ["issue", "close"])
 
 
@@ -205,7 +214,13 @@ def test_issue_without_checkboxes_is_judged_by_the_rows_only(repo, gh, body):
     assert not calls(gh, ["api"])
 
 
-@pytest.mark.parametrize("args", [["--record-pr", "20", "--repo", "o/r"], ["--record-pr", "0", "--repo", "o/r", "--issues", "1"]])
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["--record-pr", "20", "--repo", "o/r", "--final-stage", "配布"],
+        ["--record-pr", "0", "--repo", "o/r", "--issues", "1", "--final-stage", "配布"],
+    ],
+)
 def test_paths_without_verification_do_not_read_the_body(repo, gh, args):
     """--with-verification なし・--record-pr 0 は本文を読まず書かない（受け入れ条件 12）。"""
     setup(gh, [("#1", "1. c", "合格")], {"o/r#1": THREE})
@@ -236,7 +251,7 @@ def test_body_is_read_inside_the_issue_lock_and_a_held_lock_fails(tmp_path, monk
     """本文の読み書きは課題ごとの錠の中で行う。錠を取れなければ failed（非機能の条件）。"""
     monkeypatch.setenv("NDF_LOCK_DIR", str(tmp_path))
     mod = load_sprint_close()
-    ctx = mod.CloseContext(str(tmp_path), "o/r", "c")
+    ctx = mod.CloseContext(str(tmp_path), "o/r", "c", final_stage="配布")
     seen = []
 
     def read(root, repo_, n):
@@ -266,7 +281,9 @@ def test_a_check_that_changes_more_than_the_marks_is_not_written(tmp_path, monke
     monkeypatch.setattr(mod.acceptance, "check_criteria", lambda body, nums: body.replace("# 課題", "# 変えた"))
     wrote = []
     monkeypatch.setattr(mod.gh_rest, "update_body", lambda *a: wrote.append(a) or True)
-    it = mod._close_verified(_A(), mod.CloseContext(str(tmp_path), "o/r", "c"), "o/r", 1, mod.IssueRows(True, frozenset({1, 2, 3})))
+    it = mod._close_verified(
+        _A(), mod.CloseContext(str(tmp_path), "o/r", "c", final_stage="配布"), "o/r", 1, mod.IssueRows(True, frozenset({1, 2, 3}))
+    )
     assert it["result"] == "failed" and not wrote
 
 

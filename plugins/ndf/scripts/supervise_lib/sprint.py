@@ -48,7 +48,7 @@ from supervise_lib.sprint_routes import (
     route_waves,
 )
 from supervise_lib.verify_steps import merge_steps
-from supervise_lib.sprint_close_steps import _close_step, _retro_refine_steps, _spec_pr_steps
+from supervise_lib.sprint_close_steps import _close_step, _refine_step, _retro_step, _spec_pr_steps
 
 
 def prod_version(version: str) -> str:
@@ -139,7 +139,7 @@ def auto_sprint_plans(a) -> list[dict]:
 
 
 def close_plan(a, repo: str) -> dict:
-    """まとめ: 確定仕様化 → Pull Request →（配布の記録があれば）リリース後テスト → 課題を閉じる → 振り返り → 棚卸し。"""
+    """まとめ: 確定仕様化 → Pull Request →（配布の記録があれば）リリース後テスト → 振り返り → 課題を閉じる → 棚卸し。"""
     issues = ",".join(map(str, a.issue))
     refs = " ".join(f"#{i}" for i in a.issue)
     branch = f"spec/{a.name}"
@@ -158,10 +158,11 @@ def close_plan(a, repo: str) -> dict:
             "進め方": "auto" if getattr(a, "pace", None) == "auto" else "fast",
             "steps": [
                 *_spec_pr_steps(a, refs),
-                *merge_steps(a, next="release-verify" if has_record(record_pr) else "close"),
+                *merge_steps(a, next="release-verify" if has_record(record_pr) else "retro"),
                 *([release_verify_step(a.name, refs, record_pr)] if has_record(record_pr) else []),
+                _retro_step(a, refs, stats),
                 _close_step(a, repo, record_pr, issues),
-                *_retro_refine_steps(a, refs, stats),
+                _refine_step(a, refs),
             ],
         },
         a,
