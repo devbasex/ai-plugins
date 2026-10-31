@@ -484,7 +484,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[list[str]] = None) -> None:
-    deps.require("mdtable")
+    deps.require("mdtable", "locks")
     args = build_parser().parse_args(argv)
     base = pathlib.Path(args.dir) if args.dir else metrics_dir()
     print(aggregate_table(base, args))

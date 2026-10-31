@@ -614,7 +614,7 @@ def build_parser():
 
 
 def main(argv=None):
-    deps.require("durable", "schema")  # schema は見積もりの記録の形（rank が読む。#1856）
+    deps.require("durable", "schema", "waits")  # schema は見積もりの記録の形（rank が読む。#1856）
     main_with(build_parser(), lambda a: TOOL, argv)
 
 

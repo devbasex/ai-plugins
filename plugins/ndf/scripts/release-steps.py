@@ -81,7 +81,7 @@ from typing import Literal
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
 
-deps.require("schema", "versions", "bump", "md", "mdtable", "durable")
+deps.require("schema", "versions", "bump", "md", "mdtable", "durable", "waits")
 import approved_commit as ac  # noqa: E402
 import schema  # noqa: E402
 
