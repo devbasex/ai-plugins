@@ -318,7 +318,9 @@ def test_propose_and_vet_without_psutil_reexec_and_call_the_llm(env):
 def test_check_and_collect_without_psutil_do_not_reexec(env):
     """LLM を呼ばない副命令は、psutil の無い python でも起動し直さず、同じ出力と終了コードで終わる。"""
     e = no_site(env)
-    p = subprocess.run([PY, str(MVV_PY), "check", "--root", str(env["root"])], capture_output=True, text=True, env=e["env"], cwd=env["root"])
+    p = subprocess.run(
+        [PY, str(MVV_PY), "check", "--root", str(env["root"])], capture_output=True, text=True, env=e["env"], cwd=env["root"]
+    )
     code, out, _ = run_no_site(e, "check", "--root", str(env["root"]))
     assert (code, out) == (p.returncode, p.stdout) and code == 2
     code, out, err = run_no_site(e, "collect", "--root", str(env["root"]))
