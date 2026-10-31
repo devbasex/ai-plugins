@@ -4440,30 +4440,26 @@
       "term": "所要の記録",
       "context": "ndf-workflow",
       "meaning": "`.ndf/project.json` の `test_duration.measured` にある全体テストの所要（秒。w）。出所は ndf-record → ci-junit → ci-steps の順に採る。宣言の解析が書き、プランの作成と test-run.py が読む",
-      "source": "",
-      "pending_source": "issues/issue-1631-requirements.md"
+      "source": "docs/specifications/ndf-supervise-test-limits-from-whole-runs.md"
     },
     {
       "term": "全体テストの実測",
       "context": "ndf-workflow",
       "meaning": "同じリポジトリで先に走った全体テストの壁時計の秒。所要の記録とは別に残し、後のプランと test-run.py が予算なしのテストの上限を決めるときに読む（#1631）",
-      "source": "",
-      "pending_source": "issues/issue-1631-requirements.md"
+      "source": "docs/specifications/ndf-supervise-test-limits-from-whole-runs.md"
     },
     {
       "term": "テストの上限",
       "context": "ndf-workflow",
       "meaning": "test_strategy.limits が返す init_test_timeout・test_timeout・whole_timeout（秒）。ステップの timeout はこれに with_margin の余裕を足した値で、テストの上限には余裕を足さない",
-      "source": "",
-      "pending_source": "issues/issue-1631-requirements.md",
+      "source": "docs/specifications/ndf-supervise-test-limits-from-whole-runs.md",
       "code": "limits"
     },
     {
       "term": "全体テストの鍵",
       "context": "ndf-workflow",
       "meaning": "戦略の全体テストのコマンドの集合から作る識別子（whole_key）。全体テストの実測をコマンドごとに分け、コマンドの違う実測を混ぜない（#1631）",
-      "source": "",
-      "pending_source": "issues/issue-1631-design.md",
+      "source": "docs/specifications/ndf-supervise-test-limits-from-whole-runs.md",
       "code": "whole_key"
     },
     {

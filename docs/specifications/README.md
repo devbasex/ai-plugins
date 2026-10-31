@@ -104,5 +104,6 @@
 | [ndf-supervise-work-step-web-tools-and-report-stop.md](ndf-supervise-work-step-web-tools-and-report-stop.md) | supervise の work のステップが WebFetch・WebSearch で外部の文書を読み、読めないときと「判断が要る / できなかった」の報告で起こし直さずに止まること |
 | [ndf-deps-require-groups-check.md](ndf-deps-require-groups-check.md) | 依存の宣言の検査（project-mvv.py propose / vet の deps.require と、構造チェックの require-groups をエントリポイントから関数の中の import までたどること） |
 | [ndf-supervise-queue-resume-and-gate-evidence.md](ndf-supervise-queue-resume-and-gate-evidence.md) | pace: normal の承認ゲートの後をキュー 1 回で流すこと、queue --resume で止まったプランを続けること、承認ゲートの記録、new sprint --absorb |
+| [ndf-supervise-test-limits-from-whole-runs.md](ndf-supervise-test-limits-from-whole-runs.md) | 予算なしのテストの上限を、所要の記録と直近の全体テストの実測（whole.jsonl）の大きい方の 3 倍で決め、テストのステップの開始で決め直すこと |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
