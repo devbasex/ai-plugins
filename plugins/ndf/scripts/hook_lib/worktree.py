@@ -230,6 +230,34 @@ def targets(ev: pl.Event) -> tuple[list[str], str, bool] | None:
     return None
 
 
+def _flagged_targets(raw: list[str], base: str, where: Place) -> list[str]:
+    """書き込み先をメインディレクトリからの相対パスにし、worktree の外で許可されていないものだけを残す。"""
+    flagged = []
+    for r in raw:
+        if not r:
+            continue
+        rel = relative_to_main(wt.normalize_path(r, base), where.main_dir)
+        if rel is None or rel == "." or rel.startswith(WORKTREE_DIR + "/"):
+            continue
+        if not is_allowed(rel, where.allow_paths):
+            flagged.append(rel)
+    return flagged
+
+
+def _dedupe_notified(path: str | None, state: dict, flagged: list[str]) -> list[str]:
+    """状態ファイルがあれば、既に案内した先を除き、残りを案内済みとして保存する。"""
+    if not (path and os.path.isfile(path)):
+        return flagged
+    seen = set(state.get("notified") or [])
+    flagged = [r for r in flagged if r not in seen]
+    if not flagged:
+        return flagged
+    state = _load_state(path) or state
+    state["notified"] = sorted(set(state.get("notified") or []) | set(flagged))
+    _save_state(path, state)
+    return flagged
+
+
 def notice(ev: pl.Event) -> dict | str | None:
     """PreToolUse とプロンプト送信時の判定。返り値は hook の出力（辞書）か、Kiro へ書く文字列か、None（何も出さない）。"""
     path = state_file(ev.session)
@@ -247,25 +275,12 @@ def notice(ev: pl.Event) -> dict | str | None:
     raw, base, unread = got
     if unread:
         return _output(ev, path, None, UNREAD)
-    flagged = []
-    for r in raw:
-        if not r:
-            continue
-        rel = relative_to_main(wt.normalize_path(r, base), where.main_dir)
-        if rel is None or rel == "." or rel.startswith(WORKTREE_DIR + "/"):
-            continue
-        if not is_allowed(rel, where.allow_paths):
-            flagged.append(rel)
+    flagged = _flagged_targets(raw, base, where)
     if not flagged:
         return None
-    if path and os.path.isfile(path):
-        seen = set(state.get("notified") or [])
-        flagged = [r for r in flagged if r not in seen]
-        if not flagged:
-            return None
-        state = _load_state(path) or state
-        state["notified"] = sorted(set(state.get("notified") or []) | set(flagged))
-        _save_state(path, state)
+    flagged = _dedupe_notified(path, state, flagged)
+    if not flagged:
+        return None
     paths = "\n".join(f"  - {r}" for r in flagged)
     return _output(ev, path, SUMMARY, CONTEXT.format(paths=paths, wdir=WORKTREE_DIR))
 
