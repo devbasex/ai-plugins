@@ -149,6 +149,8 @@ def test_design_approved_needs_a_label_or_the_users_answer_for_that_pr(tmp_path)
     assert design_merge.cmd_design_approved(1, str(state), gh([]))[1] == 10
     assert design_merge.cmd_design_approved(0, str(state), gh([]))[1] == 10
     assert design_merge.cmd_design_approved(1, None, gh(["design-approved"]))[1] == 0
+    assert design_merge.cmd_design_approved(1, None, gh(["design-approved-pending"]))[1] == 10  # 部分一致を数えない
+    assert design_merge.cmd_design_approved(1, None, lambda args: (0, "not json"))[1] == 2
     calls.clear()
     out, code = design_merge.cmd_design_approved(2, str(state), gh([]))
     assert (code, out["items"][0]["result"]) == (0, "added")

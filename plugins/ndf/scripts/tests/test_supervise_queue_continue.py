@@ -76,3 +76,16 @@ def test_resume_with_from_and_without_a_listing(tmp_path, env):
     assert (results(res), res["items"][0]["resumed_from"], q.visits()) == ({"g": "完了"}, "g2", ["g1", "g2"])
     listing = json.loads((t / "done.plans.json").read_text())
     assert (listing["stages"], listing["max"], listing["starts"]) == ([[g]], 3, {g: "g2"})
+
+
+def test_resume_keeps_the_start_of_a_finished_plan(tmp_path, env):
+    """完了したプランの前の開始のステップを次の --resume でも保つ。落とすと元の関門の結果を拾い、後続を止める。"""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from supervise_lib import queue_resume
+
+    done = tmp_path / "done.json"
+    (tmp_path / "done.plans.json").write_text(json.dumps({"stages": [["d"], ["v"]], "max": 2, "starts": {"d": "approve"}}))
+    done.write_text(json.dumps({"items": [{"plan": "d", "result": "完了"}, {"plan": "v", "result": "止まった"}]}))
+    stages, _, found = queue_resume.resume_targets(done)
+    assert stages == [["d"], ["v"]]
+    assert {t.plan: t.step for t in found}["d"] == "approve"

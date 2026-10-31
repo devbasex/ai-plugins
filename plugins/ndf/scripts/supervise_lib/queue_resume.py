@@ -72,11 +72,13 @@ def resume_targets(done: Path, overrides: dict[str, str] | None = None) -> tuple
         raise ResumeError("前の起動の一覧にステージの並びが無い（この版より前の queue が書いたもの）")
     plans = [p for s in stages for p in s]
     prev = _json_of(done)
+    kept = [ResumeTarget(p, s, "前の起動の開始") for p, s in (listing.get("starts") or {}).items() if p in plans and s]
     if prev is None:
-        found = [ResumeTarget(p, s, "前の起動の続き") for p, s in (listing.get("starts") or {}).items() if p in plans]
+        found = kept
     else:
+        # 続けないプラン（完了など）も前の開始のステップを保つ。落とすと別の実行の回になり、元の関門の結果を拾う
         items = [i for i in prev.get("items") or [] if isinstance(i, dict) and i.get("result") in RESUMABLE]
-        found = [ResumeTarget(i["plan"], last_step(i["plan"]), i["result"]) for i in items if i.get("plan") in plans]
+        found = kept + [ResumeTarget(i["plan"], last_step(i["plan"]), i["result"]) for i in items if i.get("plan") in plans]
     by_plan = {t.plan: t for t in found}
     for name, step in (overrides or {}).items():
         hits = [p for p in plans if named(p, name)]

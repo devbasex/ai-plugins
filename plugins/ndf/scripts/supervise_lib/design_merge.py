@@ -7,6 +7,7 @@ PR の番号は設計のプランの報告から `{queue_pr:design-<N>}` で読�
 
 from __future__ import annotations
 
+import json
 import shlex
 import subprocess
 from typing import Callable
@@ -71,7 +72,13 @@ def cmd_design_approved(pr: int, state: str | None, gh: Callable[[list[str]], tu
     code, out = gh(["pr", "view", str(pr), "--json", "labels", "--jq", "[.labels[].name]"])
     if code != 0:
         return result(TOOL, "stopped", f"PR {pr} のラベルを読めない: {out.strip()[-300:]}", [], metrics), EXIT_UNREADABLE
-    if LABEL in out:
+    try:
+        names = json.loads(out)
+    except ValueError:
+        names = None
+    if not isinstance(names, list):
+        return result(TOOL, "stopped", f"PR {pr} のラベルを読めない: {out.strip()[-300:]}", [], metrics), EXIT_UNREADABLE
+    if LABEL in names:  # 完全一致だけ（design-approved-pending などの別ラベルを承認に数えない）
         return result(TOOL, "ok", f"PR {pr} に承認ラベルがある", [{"kind": "label", "name": LABEL, "result": "kept"}], metrics), 0
     answer = gate_answer.approved(state, GATE_1, pr=pr)
     if answer is None:
