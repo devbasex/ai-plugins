@@ -108,11 +108,7 @@ MAIN_EPILOG = """フェーズごとの種別（new <種別> --help で、書き�
 書き出したプランは run で 1 本、queue で並べて流し、wait で終わりか attention まで待つ。"""
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(
-        description=__doc__.splitlines()[0], epilog=MAIN_EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-    sub = ap.add_subparsers(dest="cmd", required=True)
+def build_parser(sub) -> None:
     r = sub.add_parser(
         "run",
         help="プランを 1 本流す",
@@ -226,19 +222,11 @@ def main() -> int:
     )
     st.add_argument("--pr", type=int, required=True, help="題を合わせる Pull Request")
     st.add_argument("--doc", required=True, help="題を読む設計文書（作業ディレクトリからの相対パス）")
-    a = ap.parse_args(legacy_names.rewrite_argv("supervise.py", sys.argv[1:]))
-    if a.cmd == "new":
-        new_args.fill_new_defaults(a)
-    if a.cmd == "design-glossary":
-        emit(*commands.cmd_design_glossary(a.root, a.mode, a.out))
-    if a.cmd == "design-approved":
-        emit(*design_merge.cmd_design_approved(a.pr, a.state))
-    if a.cmd == "design-results":
-        emit(*design_stage.cmd_design_results(a))
-    if a.cmd == "example":
-        print(json.dumps(EXAMPLE, ensure_ascii=False, indent=2))
-        return 0
-    if a.cmd == "new" and a.kind in ("sprint", "close"):
+
+
+def _cmd_new(ap: argparse.ArgumentParser, a: argparse.Namespace) -> "NoReturn":  # noqa: F821
+    new_args.fill_new_defaults(a)
+    if a.kind in ("sprint", "close"):
         new_args.check_sprint(ap, a)
         try:
             apply_decls(a)
@@ -249,38 +237,62 @@ def main() -> int:
             emit(res, 1 if res["status"] == "stopped" else None)
         except DeclError as e:
             ap.error(str(e))
-    if a.cmd == "new":
-        new_args.check_new(ap, a)
-        try:
-            apply_decls(a)
-            emit(templates.cmd_new(a))
-        except DeclError as e:
-            ap.error(str(e))
-    if a.cmd == "queue" and a.resume:
+    new_args.check_new(ap, a)
+    try:
+        apply_decls(a)
+        emit(templates.cmd_new(a))
+    except DeclError as e:
+        ap.error(str(e))
+
+
+def _cmd_queue(ap: argparse.ArgumentParser, a: argparse.Namespace) -> "NoReturn":  # noqa: F821
+    if a.resume:
         if a.plans or a.then or a.done:
             ap.error("queue --resume は位置引数のプラン・--then・--done と併せて渡さない")
         emit(queue_resume.cmd_queue_resume(a.resume, a.from_, a.max and max(1, a.max), a.poll, queue.cmd_queue))
-    if a.cmd == "queue":
-        if not a.plans or a.from_:
-            ap.error("queue にはプランが要る（--from は --resume と使う）")
-        emit(queue.cmd_queue(a.plans, max(1, a.max or 3), a.poll, a.then, a.done))
-    if a.cmd == "wait":
-        summary, res, code = queue.cmd_wait(a.done, a.timeout, a.poll)
-        print(summary, flush=True)
-        emit(res, code)
-    if a.cmd == "note":
-        emit(commands.cmd_note(a.doc, a.report, a.next, a.section))
-    if a.cmd == "sync-check":
-        emit(commands.sync_check(a.root, a.commit))
-    if a.cmd == "format":
-        emit(*commands.cmd_format(a.root, a.commit))
-    if a.cmd == "sync-title":
-        emit(pr_step.sync_title(".", a.pr, a.doc))
-    if a.cmd == "history":
-        emit(commands.cmd_history_import(a.progress, a.history))
-    if a.cmd == "expected":
-        emit(*commands.cmd_expected(a.plan, a.history, a.slow))
-    return commands.cmd_run(a.plan, a.state_dir, a.slow, a.start)
+    if not a.plans or a.from_:
+        ap.error("queue にはプランが要る（--from は --resume と使う）")
+    emit(queue.cmd_queue(a.plans, max(1, a.max or 3), a.poll, a.then, a.done))
+
+
+def _cmd_wait(ap: argparse.ArgumentParser, a: argparse.Namespace) -> "NoReturn":  # noqa: F821
+    summary, res, code = queue.cmd_wait(a.done, a.timeout, a.poll)
+    print(summary, flush=True)
+    emit(res, code)
+
+
+def _cmd_example(ap: argparse.ArgumentParser, a: argparse.Namespace) -> int:
+    print(json.dumps(EXAMPLE, ensure_ascii=False, indent=2))
+    return 0
+
+
+# 副命令 → 処理。emit で終わるものは戻らない。run だけが終了コードを返す
+COMMANDS = {
+    "run": lambda ap, a: commands.cmd_run(a.plan, a.state_dir, a.slow, a.start),
+    "history": lambda ap, a: emit(commands.cmd_history_import(a.progress, a.history)),
+    "expected": lambda ap, a: emit(*commands.cmd_expected(a.plan, a.history, a.slow)),
+    "example": _cmd_example,
+    "new": _cmd_new,
+    "queue": _cmd_queue,
+    "wait": _cmd_wait,
+    "design-glossary": lambda ap, a: emit(*commands.cmd_design_glossary(a.root, a.mode, a.out)),
+    "design-results": lambda ap, a: emit(*design_stage.cmd_design_results(a)),
+    "design-approved": lambda ap, a: emit(*design_merge.cmd_design_approved(a.pr, a.state)),
+    "note": lambda ap, a: emit(commands.cmd_note(a.doc, a.report, a.next, a.section)),
+    "sync-check": lambda ap, a: emit(commands.sync_check(a.root, a.commit)),
+    "format": lambda ap, a: emit(*commands.cmd_format(a.root, a.commit)),
+    "sync-title": lambda ap, a: emit(pr_step.sync_title(".", a.pr, a.doc)),
+}
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(
+        description=__doc__.splitlines()[0], epilog=MAIN_EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    build_parser(sub)
+    a = ap.parse_args(legacy_names.rewrite_argv("supervise.py", sys.argv[1:]))
+    return COMMANDS[a.cmd](ap, a)
 
 
 if __name__ == "__main__":
