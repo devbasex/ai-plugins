@@ -179,9 +179,12 @@ def _whole(d: dict, root: Path) -> WholeTest:
 
 
 def read_check(state_dir, root: Path) -> tuple[Review | None, Refactor | None, WholeTest | None]:
-    """検査のプランの状態ディレクトリから 3 つの材料。置き場が空・無いときと、結果 JSON が無いときはその材料を None。"""
-    if not state_dir or not Path(state_dir).is_dir():
+    """検査のプランの状態ディレクトリから 3 つの材料。渡されない（None）ときと、結果 JSON が無いときはその材料を None。
+    渡されたのに空文字か無いディレクトリなら、材料が無いと書かずに StepError（3）で止める（置き場が無い。#2079）。"""
+    if state_dir is None:
         return None, None, None
+    if not str(state_dir).strip() or not Path(state_dir).is_dir():
+        raise StepError(f"--check-state の検査の状態ディレクトリが無い: {state_dir!r}", EXIT_PRECONDITION)
     d = Path(state_dir)
     got = {key: last_result(d, step, tool) for key, (step, tool) in STEPS.items()}
     return (
