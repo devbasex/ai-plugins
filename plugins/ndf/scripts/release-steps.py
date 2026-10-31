@@ -1047,37 +1047,7 @@ def cmd_notes(a):
     migration = [f"- {i}" for *_, ms in notes for i in ms]
     fallback = sum(1 for *_, by_title, _ in notes if by_title)
     if path:
-        verified = [r for r in (a.verified or "").split(",") if r]
-        ref = a.ref or release_decl(root, a)[0]
-        decl = (release_decl(root, a)[0], repo_lib.owner_repo(root) or "", a.version, a.prs)
-        m = materials.approval_materials(
-            root,
-            decl,
-            getattr(a, "check_state", None),
-            prs,
-            data,
-            lambda r, n: issue_body(root, n) if materials.same_repo(r, decl[1]) else issue_body(root, n, repo=r),
-        )
-        results, machine = materials.check_lines(m), materials.risk_lines(m, bool(risks), materials.now_jst())
-        items = materials.write_approval(path, a.version, bullets, risks, verified, ref, migration, results, machine)
-        items += materials.items_of(m) + unmerged_items(skipped) + rep_items
-        emit(
-            result(
-                TOOL,
-                "ok",
-                f"提示物の欄を {len(notes)} 件の PR から書いた{unmerged_note(skipped)}",
-                items,
-                {
-                    "version": a.version,
-                    "prs": len(notes),
-                    "lines": len(bullets),
-                    "migration": len(migration),
-                    "approval": str(path),
-                    "unmerged": skipped,
-                    "replaced": gone,
-                },
-            )
-        )
+        _emit_approval_notes(root, a, path, prs, data, notes, bullets, risks, migration, skipped, rep_items, gone)
         return
     items = write_notes(root, a.version, plugin_of(root, a), bullets, migration) + unmerged_items(skipped) + rep_items
     emit(
@@ -1086,15 +1056,48 @@ def cmd_notes(a):
             "ok",
             f"{len(notes)} 件の PR の利用者向けの変化を書いた{unmerged_note(skipped)}",
             items,
-            {
-                "version": a.version,
-                "prs": len(notes),
-                "lines": len(bullets),
-                "migration": len(migration),
-                "fallback": fallback,
-                "unmerged": skipped,
-                "replaced": gone,
-            },
+            _notes_metrics(a, notes, bullets, migration, skipped, gone, fallback=fallback),
+        )
+    )
+
+
+def _notes_metrics(a, notes, bullets, migration, skipped, gone, **extra):
+    """notes の 2 つの経路に共通の metrics。経路ごとの鍵（approval / fallback）は extra で migration の後へ入れる。"""
+    return {
+        "version": a.version,
+        "prs": len(notes),
+        "lines": len(bullets),
+        "migration": len(migration),
+        **extra,
+        "unmerged": skipped,
+        "replaced": gone,
+    }
+
+
+def _emit_approval_notes(root, a, path, prs, data, notes, bullets, risks, migration, skipped, rep_items, gone):
+    """承認の資料（--approval）の経路: 資料を集めて提示物の欄を書き、結果を出す。"""
+    verified = [r for r in (a.verified or "").split(",") if r]
+    base = release_decl(root, a)[0]
+    ref = a.ref or base
+    decl = (base, repo_lib.owner_repo(root) or "", a.version, a.prs)
+    m = materials.approval_materials(
+        root,
+        decl,
+        getattr(a, "check_state", None),
+        prs,
+        data,
+        lambda r, n: issue_body(root, n) if materials.same_repo(r, decl[1]) else issue_body(root, n, repo=r),
+    )
+    results, machine = materials.check_lines(m), materials.risk_lines(m, bool(risks), materials.now_jst())
+    items = materials.write_approval(path, a.version, bullets, risks, verified, ref, migration, results, machine)
+    items += materials.items_of(m) + unmerged_items(skipped) + rep_items
+    emit(
+        result(
+            TOOL,
+            "ok",
+            f"提示物の欄を {len(notes)} 件の PR から書いた{unmerged_note(skipped)}",
+            items,
+            _notes_metrics(a, notes, bullets, migration, skipped, gone, approval=str(path)),
         )
     )
 
