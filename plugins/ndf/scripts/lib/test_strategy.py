@@ -43,7 +43,7 @@ DURATION_SOURCES = ("ndf-record", "ci-junit", "ci-steps")
 CI_WHOLE_THRESHOLD_SECONDS = 600.0
 
 # 時間の係数（決定 8）。B は予算（分）、w は全体テストの所要、x は着手前に手元で走らせたテストの実測、c は CI の壁時計。
-INIT_TEST_SHARE = 0.10  # 着手前のテスト 1 回の上限 = max(0.10·B, 3·w)（CI に任せる戦略は max(0.10·B, 3·s)。s が分からなければ 0.10·B）
+INIT_TEST_SHARE = 0.10  # 着手前のテスト 1 回の上限 = max(0.10·B, 3·s)（s は着手前のテストの所要の見込み。分からなければ 0.10·B）
 TEST_FACTOR = 3.0  # テスト 1 回の上限 = max(3·x, 0.01·B)
 TEST_FLOOR_SHARE = 0.01
 CI_WAIT_SHARE = 0.05  # CI の待ちの上限 = max(3·c, 0.05·B)
@@ -820,8 +820,8 @@ def limits(
 ) -> dict[str, Any]:
     """時間の上限（秒）の表（決定 8）。`basis` に入力を並べる。
 
-    `scope_seconds` は CI に任せる戦略で着手前に走らせる範囲テストの所要の見込み s（`scope_source` はその出所。
-    `history` / `whole`）。分かれば着手前の上限を `max(0.10·B, 3·s)` にする（#1555）。ほかの戦略と予算なしでは使わない。
+    `scope_seconds` は着手前のテストの所要の見込み s（`scope_source` はその出所。`history` / `recent` / `whole`）。
+    分かれば戦略を問わず着手前の上限を `max(0.10·B, 3·s)` にする（#1555・#2047 の I1）。予算なしでは使わない。
 
     予算が無い（supervise）ときは `3·max(w, m)` と `3·c` を上限にし、所要も無ければ `UNKNOWN_DURATION_LIMITS` を使って
     `basis.unknown_duration` を真にする（`3·m` が上回るときだけ広げる）。`recent_seconds` は先に走った全体テストの
@@ -848,7 +848,7 @@ def limits(
     else:
         base_timeout = _ceil(max(seconds * INIT_TEST_SHARE, TEST_FACTOR * w))
     init_timeout = base_timeout
-    if strategy.whole_on_ci and scope_seconds is not None:
+    if scope_seconds is not None:
         init_timeout = _ceil(max(seconds * INIT_TEST_SHARE, TEST_FACTOR * float(scope_seconds)))
     if x is None:
         test_timeout = base_timeout
