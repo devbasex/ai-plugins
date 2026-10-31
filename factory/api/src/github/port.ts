@@ -36,6 +36,16 @@ export interface IssueCheck {
   invalid: number[];
 }
 
+// サービスが起票した Issue の参照（#2216）
+export interface CreatedIssue {
+  repo: string;
+  number: number;
+  url: string;
+}
+
+// リポジトリの公開範囲。internal は企業の中の全員に見え、private より広く public より狭い
+export type RepositoryVisibility = "public" | "private" | "internal";
+
 export interface GitHubPort {
   installUrl(): string;
   authorizeUrl(state: string): string;
@@ -51,6 +61,11 @@ export interface GitHubPort {
   checkOpenIssues(installationId: number, repositoryId: number, fullName: string, numbers: number[]): Promise<IssueCheck>;
   listRecentOpenIssues(installationId: number, repositoryId: number, fullName: string, limit: number): Promise<IssueSummary[]>;
   findRankingTable(installationId: number, repositoryId: number, fullName: string): Promise<RankingTable | null>;
+  // 起票の代行（#2216、I47）。repositoryId の 1 つと issues: write だけに絞った導入の token をこの中で作り、
+  // 1 回使って捨てる。token を作れなければ null（Issue は作っていない）。作成の要求の失敗は投げる
+  createIssue(installationId: number, repositoryId: number, issue: { title: string; body: string }): Promise<CreatedIssue | null>;
+  // 公開範囲（metadata: read だけの token で読む）。導入が届かなければ null
+  repositoryVisibility(installationId: number, repositoryId: number): Promise<RepositoryVisibility | null>;
 }
 
 // マイルストーンの名前の形（<2 桁の連番> <主題>）

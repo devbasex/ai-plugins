@@ -2,7 +2,15 @@
 // 利用者の認可（App のクライアント）で利用者の届く導入を引く。token と秘密鍵の値はログ・例外の文に出さない
 import { importPKCS8, SignJWT } from "jose";
 import { createPrivateKey } from "node:crypto";
-import { pickRankingTable, type GitHubPort, type InstallationToken, type IssueSummary, type ReachableRepository } from "./port.ts";
+import {
+  pickRankingTable,
+  type CreatedIssue,
+  type GitHubPort,
+  type InstallationToken,
+  type IssueSummary,
+  type ReachableRepository,
+  type RepositoryVisibility,
+} from "./port.ts";
 
 // 決定 6 の権限。導入の token はこの範囲とリポジトリ 1 つに絞る
 export const INSTALLATION_PERMISSIONS = {
@@ -13,6 +21,10 @@ export const INSTALLATION_PERMISSIONS = {
   checks: "read",
   actions: "read",
 } as const;
+
+// 起票の代行（#2216、I47）と公開範囲の読み出しの権限。導入の token をこの範囲とリポジトリ 1 つだけに絞る
+export const ISSUE_FILING_PERMISSIONS = { issues: "write" } as const;
+export const METADATA_PERMISSIONS = { metadata: "read" } as const;
 
 export interface GitHubAppConfig {
   appId: string;
@@ -68,10 +80,39 @@ export class GitHubApp implements GitHubPort {
   }
 
   async createInstallationToken(installationId: number, repositoryId: number): Promise<InstallationToken | null> {
+    return this.scopedToken(installationId, repositoryId, INSTALLATION_PERMISSIONS);
+  }
+
+  async createIssue(installationId: number, repositoryId: number, issue: { title: string; body: string }): Promise<CreatedIssue | null> {
+    const token = await this.scopedToken(installationId, repositoryId, ISSUE_FILING_PERMISSIONS);
+    if (!token) return null;
+    const res = await this.http(`${this.api}/repositories/${repositoryId}/issues`, {
+      method: "POST",
+      headers: { ...this.headers(token.token), "Content-Type": "application/json" },
+      body: JSON.stringify({ title: issue.title, body: issue.body }),
+    });
+    if (!res.ok) throw new Error(`GitHub の Issue の作成に失敗しました（${res.status}）`);
+    const body = (await res.json()) as Json;
+    // 応答の repository_url は https://api.github.com/repos/<owner>/<name>
+    const repo = typeof body.repository_url === "string" ? body.repository_url.split("/repos/")[1] : undefined;
+    return { repo: repo ?? "", number: body.number as number, url: body.html_url as string };
+  }
+
+  async repositoryVisibility(installationId: number, repositoryId: number): Promise<RepositoryVisibility | null> {
+    const token = await this.scopedToken(installationId, repositoryId, METADATA_PERMISSIONS);
+    if (!token) return null;
+    const repo = await this.get(`/repositories/${repositoryId}`, token.token);
+    if (!repo) return null;
+    if (repo.visibility === "public" || repo.visibility === "private" || repo.visibility === "internal") return repo.visibility;
+    return repo.private === false ? "public" : "private";
+  }
+
+  // リポジトリ 1 つと permissions の範囲だけに絞った導入の token。導入が届かなければ null
+  private async scopedToken(installationId: number, repositoryId: number, permissions: Record<string, string>): Promise<InstallationToken | null> {
     const res = await this.http(`${this.api}/app/installations/${installationId}/access_tokens`, {
       method: "POST",
       headers: { ...this.headers(await this.appJwt()), "Content-Type": "application/json" },
-      body: JSON.stringify({ repository_ids: [repositoryId], permissions: INSTALLATION_PERMISSIONS }),
+      body: JSON.stringify({ repository_ids: [repositoryId], permissions }),
     });
     if (res.status === 404 || res.status === 403 || res.status === 422) return null;
     if (!res.ok) throw new Error(`GitHub の導入の token を作れません（${res.status}）`);

@@ -29,7 +29,10 @@ paths:
       description: >-
         実行ジョブの token を Authorization: Bearer で要る。token の実行ジョブと事象の job_id・sprint_run_id が
         一致し、冪等の鍵が <job_id>:<seq>（job.finished だけ <job_id>:finished）のときだけ残す。
-        gate.answered・pr.updated・ci.updated は書けない。5xx と接続の失敗は同じ事象のまま送り直す。
+        gate.answered・pr.updated・ci.updated・issue.request_resolved は書けない。step.recorded の
+        pull_request.repo は token の repo と同じもの、issue.requested の repo は token の repo と違うものだけを
+        受け（大文字と小文字は問わない）、合わなければ 403 を返す。issue.requested は記録だけをし、起票は
+        サービスが後で行う。5xx と接続の失敗は同じ事象のまま送り直す。
       security:
         - runJobToken: []
       requestBody:
