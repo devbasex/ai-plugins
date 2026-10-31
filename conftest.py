@@ -37,9 +37,11 @@ import pytest
 
 # `pytester` は playwright-kit の pytest plugin の自己テストが使う。pytest はこの宣言を
 # 最上位の conftest.py でしか受け付けない。
-pytest_plugins = ["pytester"]
-
+# `pytest_child_cleanup` は、テストが起こした子孫のプロセスを、pytest が SIGTERM で止められたとき・
+# 終わったときに止める（#2291）。親と xdist の各 worker で働く。
 ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT / "scripts"))
+pytest_plugins = ["pytester", "pytest_child_cleanup"]
 
 # `plugins/<family>/dev.agy/skills/` は配布 Skill への symlink である。実体は
 # `plugins/<family>/skills/` にあり、そちらを収集する。両方をたどると同じテストが 2 度
