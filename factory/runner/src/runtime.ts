@@ -9,7 +9,16 @@ import type { RunJobInstruction } from "@ndf-factory/contracts";
 import type { JobRuntime } from "./main.ts";
 import { claudeEnv, ROLE_REFRESH_MS, stsAssumeRole, writeRoleCredentials, type ModelCredential } from "./model.ts";
 import { exec, packState, unpackState } from "./state.ts";
-import { delegatedFromRecord, gateKindOf, phaseChanged, reportResult, translateProgressLine, usageFromResult, usageFromStepLine } from "./translate.ts";
+import {
+  delegatedFromRecord,
+  gateKindOf,
+  phaseChanged,
+  reportResult,
+  translateProgressLine,
+  usageFromResult,
+  usageFromStepLine,
+  verdictSourcesOf,
+} from "./translate.ts";
 
 const POLL_MS = 2000;
 
@@ -100,10 +109,16 @@ export async function createRuntime(instruction: RunJobInstruction, env: Record<
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error(`承認の依頼の答えを読めない（${res.status}）`);
-      const answer = (await res.json()) as { kind: string; decision?: string; body?: string; sprint?: string; gate?: string };
+      // 形は factory/contracts/openapi/runs.yaml の ApprovalAnswer
+      const answer = (await res.json()) as { kind: string; decision?: string; body?: string | null; gate?: string };
       if (answer.kind === "decision") return answer.body ?? null;
-      const args = [join(ndfScripts(), "sprint-state.py"), "gate", answer.sprint ?? "", answer.gate ?? answer.kind, "--by", "user", "--outcome", answer.decision ?? "rejected"];
-      if (answer.body) args.push("--what", answer.body);
+      // sprint.json は API から受けず、復元した状態から求める（複数あれば最後に更新したもの）
+      const sprints = await findFiles(join(repoDir, ".ndf"), "sprint.json");
+      const mtimes = await Promise.all(sprints.map(async (f) => (await stat(f)).mtimeMs));
+      const sprint = sprints[mtimes.indexOf(Math.max(...mtimes))];
+      if (!sprint) throw new Error("復元した状態に sprint.json が無い");
+      const args = [join(ndfScripts(), "sprint-state.py"), "gate", sprint, answer.gate ?? answer.kind, "--by", "user", "--outcome", answer.decision ?? "rejected"];
+      args.push("--what", answer.body || "Factory の画面での利用者の答え"); // sprint-state.py gate は --what が要る
       if ((await run("python3", args, { cwd: repoDir })) !== 0) throw new Error("承認の記録を書けない");
       return null;
     },
@@ -145,10 +160,12 @@ export async function createRuntime(instruction: RunJobInstruction, env: Record<
         const content = await readFile(askLedger, "utf8").catch(() => "");
         const from = offsets.get(askLedger) ?? 0;
         offsets.set(askLedger, content.length);
-        for (const raw of content.slice(from).split("\n").filter(Boolean)) {
-          const row = JSON.parse(raw) as Record<string, unknown>;
-          if (row.kind !== "decision") continue;
-          const body = delegatedFromRecord(row);
+        const rows = (text: string) => text.split("\n").filter(Boolean).map((raw) => JSON.parse(raw) as Record<string, unknown>);
+        const decisions = rows(content.slice(from)).filter((row) => row.kind === "decision");
+        // ref の判定の行は読み取り位置より前にもあるため、判断の行があるときだけ全体から引く
+        const sources = decisions.length > 0 ? verdictSourcesOf(rows(content)) : new Map<string, string>();
+        for (const row of decisions) {
+          const body = delegatedFromRecord(row, sources);
           if (body) await emit(body);
         }
       };

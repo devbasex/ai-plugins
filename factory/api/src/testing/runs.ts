@@ -42,14 +42,14 @@ export class FakeGitHub implements GitHubPort {
   async repositoryName(installationId: number, repositoryId: number) {
     return this.installations.get(installationId)?.get(repositoryId) ?? null;
   }
-  async checkOpenIssues(_installationId: number, fullName: string, numbers: number[]) {
+  async checkOpenIssues(_installationId: number, _repositoryId: number, fullName: string, numbers: number[]) {
     const open = new Set((this.openIssues.get(fullName) ?? []).map((i) => i.number));
     return { invalid: numbers.filter((n) => !open.has(n)) };
   }
-  async listRecentOpenIssues(_installationId: number, fullName: string, limit: number) {
+  async listRecentOpenIssues(_installationId: number, _repositoryId: number, fullName: string, limit: number) {
     return (this.openIssues.get(fullName) ?? []).slice(0, limit);
   }
-  async findRankingTable(_installationId: number, fullName: string) {
+  async findRankingTable(_installationId: number, _repositoryId: number, fullName: string) {
     return this.rankings.get(fullName) ?? null;
   }
 }

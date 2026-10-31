@@ -10,6 +10,7 @@ import { trackedEntries } from "./state.ts";
 import {
   common,
   delegatedFromRecord,
+  verdictSourcesOf,
   findPullRequest,
   MAX_EVENT_BYTES,
   phaseOf,
@@ -47,6 +48,10 @@ describe("翻訳（受け入れ条件 25）", () => {
     const body = delegatedFromRecord({ question: "q", answer: "a", reason: "r", category: "AskUserQuestion" })!;
     expect(validateProgressEvent(full(1, body)).ok).toBe(true);
     expect(delegatedFromRecord({ question: "q" })).toBeNull();
+    // ask_ledger.py の decision の行は category を持たず、ref の判定の行の source から埋める
+    const sources = verdictSourcesOf([{ kind: "verdict", id: "v1", source: "hook" }, { kind: "verdict", id: "v2", source: "" }]);
+    expect(delegatedFromRecord({ kind: "decision", ref: "v1", question: "q", answer: "a", reason: "r" }, sources)!.payload.category).toBe("hook");
+    expect(delegatedFromRecord({ kind: "decision", ref: "v2", question: "q", answer: "a", reason: "r" }, sources)!.payload.category).toBeNull();
   });
 
   it("300 KiB の承認資料を 256 KiB 以下に切り、案内を残す（AC26）", () => {

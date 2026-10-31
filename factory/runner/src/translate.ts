@@ -154,19 +154,28 @@ export function truncateGate(event: GateReachedEvent): GateReachedEvent {
   return build(lo);
 }
 
-// #2206 の代わりの判断の記録（1 行 1 件）から decision.delegated を作る。形が違う行は送らない
-export function delegatedFromRecord(record: Line): Pick<DecisionDelegatedEvent, "type" | "payload"> | null {
+// #2206 の代わりの判断の記録（1 行 1 件）から decision.delegated を作る。形が違う行は送らない。
+// category は ask_ledger.py の decision の行に無いため、ref が指す判定の行（kind: verdict）の source から埋める
+export function delegatedFromRecord(record: Line, verdictSources: ReadonlyMap<string, string> = new Map()): Pick<DecisionDelegatedEvent, "type" | "payload"> | null {
   const text = (v: unknown) => (typeof v === "string" && v.length > 0 ? v.slice(0, 4000) : null);
   const question = text(record.question);
   const answer = text(record.answer);
   const reason = text(record.reason);
   if (!question || !answer || !reason) return null;
-  const category = typeof record.category === "string" ? record.category : null;
+  const source = typeof record.ref === "string" ? verdictSources.get(record.ref) : undefined;
+  const category = source || (typeof record.category === "string" ? record.category : null);
   return { type: "decision.delegated", payload: { question, answer, reason, category } };
 }
 
 // progress.jsonl の step の行の models（supervise が別のプロセスで起動した claude のモデルごとの使用量）から、
 // モデルごとに 1 件。数え方は usageFromResult と同じ（cache の読み書きを入力に足す）
+// ask.jsonl の判定の行（kind: verdict）の id から source を引く表。source が空の行は入れない
+export function verdictSourcesOf(rows: Line[]): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const r of rows) if (r.kind === "verdict" && typeof r.id === "string" && typeof r.source === "string" && r.source) out.set(r.id, r.source);
+  return out;
+}
+
 export function usageFromStepLine(line: Line): Pick<UsageRecordedEvent, "type" | "payload">[] {
   if (line.kind !== "step" || typeof line.step !== "string") return [];
   const models = line.models;

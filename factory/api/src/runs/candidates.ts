@@ -4,6 +4,7 @@ import { BedrockRuntimeClient, ConverseCommand } from "@aws-sdk/client-bedrock-r
 import type { AccountContext } from "../accounts/model.ts";
 import { NotFoundError } from "../errors.ts";
 import type { GitHubPort, IssueSummary } from "../github/port.ts";
+import { MAX_ISSUES } from "./control.ts";
 import type { RunsTable } from "./table.ts";
 
 export const RECENT_LIMIT = 10;
@@ -44,11 +45,12 @@ export async function chooseCandidates(
   const reg = await deps.table.getRegistration(ctx.accountId, repositoryId);
   if (!reg) throw new NotFoundError("repository_not_found", "登録したリポジトリが見つかりません");
   const skip = new Set(exclude);
-  const ranking = await deps.github.findRankingTable(reg.installationId, reg.fullName);
+  const ranking = await deps.github.findRankingTable(reg.installationId, reg.repositoryId, reg.fullName);
   const source = ranking ? "ranking" : "recent";
-  const pool = (ranking ? ranking.rows : await deps.github.listRecentOpenIssues(reg.installationId, reg.fullName, RECENT_LIMIT + skip.size))
+  const pool = (ranking ? ranking.rows : await deps.github.listRecentOpenIssues(reg.installationId, reg.repositoryId, reg.fullName, RECENT_LIMIT + skip.size))
     .filter((i) => !skip.has(i.number))
-    .slice(0, ranking ? undefined : RECENT_LIMIT);
+    // 順位の表も上限で切る（出力の CANDIDATE_MAX_TOKENS に収まる件数。選べる数の上限と同じ）
+    .slice(0, ranking ? MAX_ISSUES : RECENT_LIMIT);
   const milestone = ranking?.milestone ?? null;
   if (pool.length === 0) return { source, milestone, candidates: [], note: "候補にできる開いた課題がありません" };
   try {

@@ -29,6 +29,7 @@ type Json = Record<string, unknown>;
 export class GitHubApp implements GitHubPort {
   private readonly api: string;
   private readonly http: typeof fetch;
+  private readonly repoTokens = new Map<string, InstallationToken>();
 
   constructor(private readonly config: GitHubAppConfig) {
     this.api = config.apiUrl ?? "https://api.github.com";
@@ -79,14 +80,14 @@ export class GitHubApp implements GitHubPort {
   }
 
   async repositoryName(installationId: number, repositoryId: number): Promise<string | null> {
-    const token = await this.createInstallationToken(installationId, repositoryId);
+    const token = await this.tokenFor(installationId, repositoryId);
     if (!token) return null;
-    const repo = await this.get(`/repositories/${repositoryId}`, token.token);
+    const repo = await this.get(`/repositories/${repositoryId}`, token);
     return typeof repo?.full_name === "string" ? repo.full_name : null;
   }
 
-  async checkOpenIssues(installationId: number, fullName: string, numbers: number[]) {
-    const token = await this.tokenFor(installationId, fullName);
+  async checkOpenIssues(installationId: number, repositoryId: number, fullName: string, numbers: number[]) {
+    const token = await this.tokenFor(installationId, repositoryId);
     const invalid: number[] = [];
     for (const n of numbers) {
       const issue = token ? await this.get(`/repos/${fullName}/issues/${n}`, token) : null;
@@ -95,8 +96,8 @@ export class GitHubApp implements GitHubPort {
     return { invalid };
   }
 
-  async listRecentOpenIssues(installationId: number, fullName: string, limit: number): Promise<IssueSummary[]> {
-    const token = await this.tokenFor(installationId, fullName);
+  async listRecentOpenIssues(installationId: number, repositoryId: number, fullName: string, limit: number): Promise<IssueSummary[]> {
+    const token = await this.tokenFor(installationId, repositoryId);
     if (!token) return [];
     const list = (await this.getList(`/repos/${fullName}/issues?state=open&sort=created&direction=desc&per_page=${limit * 2}`, token)) ?? [];
     return list
@@ -105,8 +106,8 @@ export class GitHubApp implements GitHubPort {
       .map((i) => ({ number: i.number as number, title: i.title as string }));
   }
 
-  async findRankingTable(installationId: number, fullName: string) {
-    const token = await this.tokenFor(installationId, fullName);
+  async findRankingTable(installationId: number, repositoryId: number, fullName: string) {
+    const token = await this.tokenFor(installationId, repositoryId);
     if (!token) return null;
     const list = (await this.getList(`/repos/${fullName}/milestones?state=open&per_page=100`, token)) ?? [];
     const picked = pickRankingTable(
@@ -134,20 +135,15 @@ export class GitHubApp implements GitHubPort {
     }
   }
 
-  private async tokenFor(installationId: number, fullName: string): Promise<string | null> {
-    const repo = await this.get(`/repos/${fullName}`, (await this.installationTokenAll(installationId)) ?? "");
-    if (typeof repo?.id !== "number") return null;
-    return (await this.createInstallationToken(installationId, repo.id))?.token ?? null;
-  }
-
-  private async installationTokenAll(installationId: number): Promise<string | null> {
-    const res = await this.http(`${this.api}/app/installations/${installationId}/access_tokens`, {
-      method: "POST",
-      headers: { ...this.headers(await this.appJwt()), "Content-Type": "application/json" },
-      body: JSON.stringify({ permissions: { metadata: "read" } }),
-    });
-    if (!res.ok) return null;
-    return ((await res.json()) as Json).token as string;
+  // API の中で読むための、リポジトリ 1 つに絞った導入の token。残りが 10 分を切るまで使い回し、1 回の操作で作り直さない
+  private async tokenFor(installationId: number, repositoryId: number): Promise<string | null> {
+    const key = `${installationId}:${repositoryId}`;
+    const cached = this.repoTokens.get(key);
+    if (cached && new Date(cached.expiresAt).getTime() - Date.now() > 600_000) return cached.token;
+    const fresh = await this.createInstallationToken(installationId, repositoryId);
+    if (fresh) this.repoTokens.set(key, fresh);
+    else this.repoTokens.delete(key);
+    return fresh?.token ?? null;
   }
 
   private headers(token: string): Record<string, string> {

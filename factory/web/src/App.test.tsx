@@ -185,7 +185,7 @@ describe("リポジトリ・キーの持ち込み・スプリントを始める�
       "GET /accounts/t-1": ok(team),
       "GET /accounts/t-1/github/install-url": ok({ url: "https://github.com/apps/x/installations/new" }),
       "GET /accounts/t-1/repositories": ok({ repositories: [{ repository_id: 1, full_name: "o/r", installation_id: 2, registered_at: "t", active_sprint_runs: 0 }] }),
-      "GET /accounts/t-1/sprint-runs?repository_id=1": ok({ sprint_runs: [{ sprint_run_id: "s", repository_id: 1, issues: [3], state: "failed", failure_reason: "timeout", created_at: "t" }] }),
+      "GET /accounts/t-1/sprint-runs": ok({ sprint_runs: [{ sprint_run_id: "s", repository_id: 1, issues: [3], state: "failed", failure_reason: "timeout", created_at: "t" }] }),
     });
     expect(await screen.findByText("o/r")).toBeTruthy();
     expect(screen.getByText("#3: 失敗（timeout）")).toBeTruthy();

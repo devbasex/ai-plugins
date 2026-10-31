@@ -108,7 +108,7 @@ export class RunControl {
     }
     const registration = await table.getRegistration(ctx.accountId, repositoryId as number);
     if (!registration) throw new NotFoundError("repository_not_found", "登録したリポジトリが見つかりません");
-    const { invalid } = await github.checkOpenIssues(registration.installationId, registration.fullName, issues as number[]);
+    const { invalid } = await github.checkOpenIssues(registration.installationId, registration.repositoryId, registration.fullName, issues as number[]);
     if (invalid.length > 0) throw new InvalidRequestError("開いている課題ではありません", "invalid_issues", { numbers: invalid });
 
     let modelCredentialSecretArn: string | null = null;

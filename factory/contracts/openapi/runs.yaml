@@ -391,6 +391,37 @@ paths:
           $ref: "#/components/responses/E403"
         "404":
           $ref: "#/components/responses/E404"
+  /run-jobs/approval-requests/{approvalRequestId}/answer:
+    get:
+      tags: [run-jobs]
+      operationId: getRunJobApprovalAnswer
+      summary: 承認の依頼への人の答え
+      description: >-
+        resume の実行ジョブが、起動の指示の APPROVAL_REQUEST_ID で人の答えを 1 回だけ読む。実行ジョブの token で認証し、
+        その実行の依頼でなければ 403、答えがまだ無ければ 409。sprint.json の置き場は返さない
+        （ランナーが復元した状態から求める）。答えを保存する側の実装は #2173。
+      security:
+        - runJob: []
+      parameters:
+        - name: approvalRequestId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalAnswer"
+        "401":
+          $ref: "#/components/responses/E401"
+        "403":
+          $ref: "#/components/responses/E403"
+        "404":
+          $ref: "#/components/responses/E404"
+        "409":
+          $ref: "#/components/responses/E409"
   /accounts/{accountId}/repositories/{repositoryId}:
     delete:
       tags: [repositories]
@@ -619,6 +650,17 @@ components:
       required: [op]
       properties:
         op: { type: string, enum: [put, get] }
+    ApprovalAnswer:
+      type: object
+      required: [kind]
+      description: >-
+        kind が gate1 / gate2 なら decision が要り、ランナーは sprint-state.py gate へ gate（無ければ kind）の名前で書く。
+        decision なら body を conductor への利用者の判断として渡す。
+      properties:
+        kind: { type: string, enum: [gate1, gate2, decision] }
+        decision: { type: string, enum: [approved, rejected] }
+        body: { type: ["string", "null"], description: 承認の理由か判断の本文 }
+        gate: { type: string, description: スプリントの状態に書く関門の名前（省略時は kind） }
     SignedUrl:
       type: object
       required: [url, expires_at]

@@ -114,7 +114,8 @@ export interface Api {
   deleteModelCredential(id: string): Promise<void>;
   issueCandidates(id: string, repositoryId: number, exclude: number[]): Promise<IssueCandidates>;
   startSprintRun(id: string, repositoryId: number, issues: number[]): Promise<{ sprint_run_id: string; state: string }>;
-  sprintRuns(id: string, repositoryId: number): Promise<{ sprint_runs: SprintRunSummary[] }>;
+  // repositoryId を省くとアカウントの新しい順の 50 件（画面は 1 回だけ呼んでリポジトリごとに分ける）
+  sprintRuns(id: string, repositoryId?: number): Promise<{ sprint_runs: SprintRunSummary[] }>;
   cancelSprintRun(id: string, sprintRunId: string): Promise<{ state: string }>;
 }
 
@@ -160,7 +161,8 @@ export function createApi(apiUrl: string, auth: Auth, doFetch: typeof fetch = (.
     deleteModelCredential: (id) => request("DELETE", `/accounts/${seg(id)}/model-credential`),
     issueCandidates: (id, repositoryId, exclude) => request("POST", `/accounts/${seg(id)}/repositories/${repositoryId}/issue-candidates`, { exclude }),
     startSprintRun: (id, repository_id, issues) => request("POST", `/accounts/${seg(id)}/sprint-runs`, { repository_id, issues }),
-    sprintRuns: (id, repositoryId) => request("GET", `/accounts/${seg(id)}/sprint-runs?repository_id=${repositoryId}`),
+    sprintRuns: (id, repositoryId) =>
+      request("GET", `/accounts/${seg(id)}/sprint-runs${repositoryId === undefined ? "" : `?repository_id=${repositoryId}`}`),
     cancelSprintRun: (id, sprintRunId) => request("POST", `/accounts/${seg(id)}/sprint-runs/${seg(sprintRunId)}/cancel`),
   };
 }

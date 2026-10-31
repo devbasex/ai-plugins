@@ -31,8 +31,9 @@ export function RepositoriesPage() {
   const reload = useCallback(async () => {
     const list = (await api.repositories(accountId)).repositories;
     setRepos(list);
-    const byRepo: Record<number, SprintRunSummary[]> = {};
-    for (const r of list) byRepo[r.repository_id] = (await api.sprintRuns(accountId, r.repository_id)).sprint_runs;
+    // 実行の一覧は 1 回だけ取り、リポジトリごとに分ける（リポジトリの数だけ API を呼ばない）
+    const byRepo: Record<number, SprintRunSummary[]> = Object.fromEntries(list.map((r) => [r.repository_id, [] as SprintRunSummary[]]));
+    if (list.length > 0) for (const run of (await api.sprintRuns(accountId)).sprint_runs) byRepo[run.repository_id]?.push(run);
     setRuns(byRepo);
   }, [api, accountId]);
 

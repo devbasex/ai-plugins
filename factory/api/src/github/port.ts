@@ -47,9 +47,10 @@ export interface GitHubPort {
   createInstallationToken(installationId: number, repositoryId: number): Promise<InstallationToken | null>;
   // 導入の token でリポジトリの今の名前を引く。届かなければ null
   repositoryName(installationId: number, repositoryId: number): Promise<string | null>;
-  checkOpenIssues(installationId: number, fullName: string, numbers: number[]): Promise<IssueCheck>;
-  listRecentOpenIssues(installationId: number, fullName: string, limit: number): Promise<IssueSummary[]>;
-  findRankingTable(installationId: number, fullName: string): Promise<RankingTable | null>;
+  // repositoryId は登録が持つ ID。導入の token はそのリポジトリ 1 つに絞って作る
+  checkOpenIssues(installationId: number, repositoryId: number, fullName: string, numbers: number[]): Promise<IssueCheck>;
+  listRecentOpenIssues(installationId: number, repositoryId: number, fullName: string, limit: number): Promise<IssueSummary[]>;
+  findRankingTable(installationId: number, repositoryId: number, fullName: string): Promise<RankingTable | null>;
 }
 
 // マイルストーンの名前の形（<2 桁の連番> <主題>）
