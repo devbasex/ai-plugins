@@ -61,6 +61,8 @@ with open(log, encoding="utf-8") as f:
 for rule in rules:
     if "calls_lt" in rule and prior >= int(rule["calls_lt"]):
         continue
+    if "stdin_has" in rule and rule["stdin_has"] not in stdin:
+        continue
     if rule.get("match", "") in joined:
         sys.stdout.write(rule.get("stdout", ""))
         sys.stderr.write(rule.get("stderr", ""))
@@ -290,45 +292,94 @@ def test_another_rejection_of_the_same_status_is_not_moved(tmp_path, fake_gh) ->
     assert outcome.review_url is None
 
 
-def test_a_position_rejection_of_an_earlier_item_is_not_taken_as_ours(tmp_path, fake_gh) -> None:
-    """先に積まれた項目の位置エラーで、今回の分を退避しない。
-
-    先客を消して今回分を二重に積むと、未投稿のまま指摘のファイルへ送れた先を書き、取り込みを
-    成功扱いにしてしまう。今回分が送れていない限り、失敗として残す。
-    """
-    earlier = post_queue.enqueue(
+def _enqueue_earlier(tmp_path) -> int:
+    """以前の実行が積んだ review-post を 1 件積み、連番を返す（本文に「先客」を持つ）。"""
+    return post_queue.enqueue(
         _queue(tmp_path),
         "review-post",
         REPO,
         PR,
         {
-            "body": f"## 🤖 cross-review | round {ROUND} | agy | COMMENT\n",
+            "body": f"## 🤖 cross-review | round {ROUND - 1} | agy | COMMENT\n",
             "event": "COMMENT",
             "comments": [{"path": "c.py", "line": 9, "side": "RIGHT", "body": "先客"}],
         },
         actor=ACTOR,
-        extra={"ident": f"agy-r{ROUND}"},
-    )
-    earlier_seq = earlier["seq"]
-    fake_gh.set_rules(
-        [
-            {"match": "pulls/730/reviews?", "stdout": "[]"},
-            _REJECT_POSITION,
-        ]
-    )
+        extra={"ident": f"agy-r{ROUND - 1}"},
+    )["seq"]
+
+
+def _earlier_sends(fake_gh) -> int:
+    return sum(1 for body in fake_gh.sent() if "先客" in json.dumps(body, ensure_ascii=False))
+
+
+def test_a_position_rejection_of_an_earlier_item_sets_it_aside_and_ours_is_sent(tmp_path, fake_gh) -> None:
+    """以前の実行が積んだ項目の位置エラーで、今回分を止めない（#2084 の AC11・AC12）。
+
+    先客は控え（`dropped/`）へ外れ、今回分は送れる。次のラウンドで同じ先客の 422 は起きない。
+    """
+    _enqueue_earlier(tmp_path)
+    fake_gh.set_rules([{"match": "pulls/730/reviews?", "stdout": "[]"}, dict(_REJECT_POSITION, stdin_has="先客"), _ACCEPT])
+
+    outcome, _ = _post_review(tmp_path)
+
+    assert outcome.failed is False
+    assert outcome.queued == 0
+    assert outcome.review_url == "https://x/pull/730#pullrequestreview-99"
+    assert _queue(tmp_path).items() == []
+    aside = list((tmp_path / "pending" / "dropped").glob("*.json"))
+    assert len(aside) == 1 and "先客" in aside[0].read_text(encoding="utf-8")
+
+    before = _earlier_sends(fake_gh)
+    again, _ = _post_review(tmp_path)
+    assert again.failed is False and again.queued == 0
+    assert _earlier_sends(fake_gh) == before
+
+
+def test_a_rate_limited_earlier_item_stays_and_ours_waits_in_order(tmp_path, fake_gh) -> None:
+    """先客が上限で送れないときは外さず、今回分も順序を保って待つ（#2084 の AC13）。"""
+    earlier_seq = _enqueue_earlier(tmp_path)
+    fake_gh.set_rules([{"match": "pulls/730/reviews?", "stdout": "[]"}, dict(_RATE_LIMITED, stdin_has="先客"), _ACCEPT])
+
+    outcome, _ = _post_review(tmp_path)
+
+    assert outcome.failed is False
+    assert outcome.queued == 1
+    queued = [item["seq"] for _, item in _queue(tmp_path).items()]
+    assert queued[0] == earlier_seq and len(queued) == 2
+
+
+def test_another_permanent_rejection_of_an_earlier_item_still_stops_ours(tmp_path, fake_gh) -> None:
+    """位置エラーでない 422 の先客は今までどおり外さず、今回分は送れずに失敗として残す（#2084 の AC14）。"""
+    earlier_seq = _enqueue_earlier(tmp_path)
+    fake_gh.set_rules([{"match": "pulls/730/reviews?", "stdout": "[]"}, dict(_REJECT_EVENT, stdin_has="先客"), _ACCEPT])
 
     outcome, payload = _post_review(tmp_path)
 
     assert outcome.failed is True
     assert outcome.queued == 1
-    assert outcome.review_url is None
     note = json.loads(payload.read_text(encoding="utf-8"))
     assert all("posted_to" not in comment for comment in note["comments"])
-    # 先客は残り、今回分は 1 件だけ（退避した複製を足さない）。
-    queued = [item for _, item in _queue(tmp_path).items()]
-    assert [i["seq"] for i in queued][0] == earlier_seq
-    assert len(queued) == 2
-    assert [i["extra"].get("agent") for i in queued] == [None, SEAT]
+    queued = [item["seq"] for _, item in _queue(tmp_path).items()]
+    assert queued[0] == earlier_seq and len(queued) == 2
+
+
+def test_ours_set_aside_by_another_flush_is_moved_to_the_summary(tmp_path, fake_gh, monkeypatch) -> None:
+    """別の実行の流し（`keep` 無し）が今回分を位置エラーで控えへ外しても、総評へ移して送る（決定 5・I10）。"""
+    fake_gh.set_rules([{"match": "pulls/730/reviews?", "stdout": "[]"}, dict(_REJECT_POSITION, stdin_has='"comments"'), _ACCEPT])
+    real_flush, calls = post_queue.Queue.flush, []
+
+    def other_flush_first(self, keep=None):
+        calls.append(keep)
+        return real_flush(self, keep=None if len(calls) == 1 else keep)
+
+    monkeypatch.setattr(post_queue.Queue, "flush", other_flush_first)
+
+    outcome, _ = _post_review(tmp_path)
+
+    assert outcome.queued == 0 and outcome.failed is False
+    assert outcome.posted_inline == 0 and outcome.posted_body == 2
+    assert "comments" not in fake_gh.sent()[-1]
 
 
 def test_a_failed_write_of_the_note_keeps_it_whole_and_stops_the_take_in(tmp_path, fake_gh, monkeypatch) -> None:

@@ -247,6 +247,14 @@ def _write_destinations(payload_path: pathlib.Path | str, inline_count: int) -> 
     return ""
 
 
+def _set_aside_by_others(queue: post_queue.Queue, flushed: post_queue.FlushResult, seq: Any) -> bool:
+    """今回分が送れておらず、別の実行の流しが位置エラーで控えへ外していたか（#2084）。"""
+    if _find(flushed.sent, seq) or _find(flushed.skipped, seq) or (flushed.failed or {}).get("seq") == seq:
+        return False
+    record = queue.outcome(seq) or {}
+    return record.get("state") == "dropped" and post_queue.rejected_by_position(record.get("item") or {})
+
+
 def post_review(
     queue: post_queue.Queue,
     payload_path: pathlib.Path | str,
@@ -269,19 +277,22 @@ def post_review(
 
     **退避するのは、今回積んだ項目が拒まれたときだけである。** 先に積まれていた項目
     （先客）の拒まれ方を今回分のものと取り違えると、先客を消して今回分を二重に積む。
+    先客の位置エラーは待ち行列が控えへ外す（`flush(keep=seq)`。#2084）。別の実行の流しが
+    今回分を位置エラーで控えへ外していたときも、`outcome` で見つけて同じく退避する。
     今回分が送れていない限り、指摘のファイルへ送れた先を書かない。
     """
     findings = len(_findings(_read_json(payload_path)))
     item = review_posts(payload_path, result_path, repo, pr, round_no, seat, head_sha, is_own_pr, since=since)[0]
     seq = post_queue.enqueue(queue, item["kind"], repo, pr, item["fields"], actor=actor, extra=item["extra"])["seq"]
-    flushed = queue.flush()
+    flushed = queue.flush(keep=seq)
 
     ours_failed = flushed.failed is not None and flushed.failed.get("seq") == seq
     if ours_failed and post_queue.rejected_by_position(flushed.failed):
         queue.drop(flushed.failed.get("seq"))
+    if (ours_failed and post_queue.rejected_by_position(flushed.failed)) or _set_aside_by_others(queue, flushed, seq):
         item = review_posts(payload_path, result_path, repo, pr, round_no, seat, head_sha, is_own_pr, evacuate_all=True, since=since)[0]
         seq = post_queue.enqueue(queue, item["kind"], repo, pr, item["fields"], actor=actor, extra=item["extra"])["seq"]
-        flushed = queue.flush()
+        flushed = queue.flush(keep=seq)
 
     done = _find(flushed.sent, seq) or _find(flushed.skipped, seq)
     # 送れた後に指摘のファイルを書けなければ、取り込みを止める。再実行は既投稿として照合し直す。
