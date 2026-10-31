@@ -1,0 +1,627 @@
+openapi: 3.1.0
+info:
+  title: Neural Development Factory のスプリントの実行の API
+  version: 0.1.0
+  description: >-
+    画面向けの取り込み・キーの持ち込み・課題の候補・スプリントの実行の経路と、ランナー向けの経路（#2186）。
+    画面向けは Cognito の access token、ランナー向け（/run-jobs/*）は実行ジョブの token を Authorization: Bearer で要る。
+    再開の要求と形態 local の渡す口は HTTP の経路にせず、factory/api/src/index.ts の関数で呼ぶ。
+  contact:
+    name: devbasex/ai-plugins
+    url: https://github.com/devbasex/ai-plugins
+  license:
+    name: MIT
+    url: https://github.com/devbasex/ai-plugins/blob/main/factory/LICENSE
+servers:
+  - url: https://api.example.com
+    description: API の入口（値はインフラが FACTORY_API_URL で渡す。/run-jobs/* は INGEST_URL と同じ origin）
+tags:
+  - name: repositories
+    description: リポジトリの登録
+  - name: credentials
+    description: キーの持ち込み
+  - name: sprint-runs
+    description: 課題の候補とスプリントの実行
+  - name: run-jobs
+    description: ランナー向けの経路
+security:
+  - cognito: []
+paths:
+  /accounts/{accountId}/github/install-url:
+    get:
+      tags: [repositories]
+      operationId: getInstallUrl
+      summary: GitHub App の導入の画面の URL
+      description: 利用者が自分のリポジトリへ GitHub App を入れる画面の URL を返す。
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Url"
+        "403":
+          $ref: "#/components/responses/E403"
+  /accounts/{accountId}/github/authorize-url:
+    get:
+      tags: [repositories]
+      operationId: getAuthorizeUrl
+      summary: GitHub App の利用者の認可の URL
+      description: state は利用者とアカウントを署名した 10 分の値。持ち主だけが使える。
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Url"
+        "403":
+          $ref: "#/components/responses/E403"
+  /accounts/{accountId}/github/candidates:
+    post:
+      tags: [repositories]
+      operationId: postRepositoryCandidates
+      summary: 認可の戻りから登録の候補を返す
+      description: 導入の対象で利用者の届くリポジトリと、10 分の候補の証明を返す。利用者の token は保存しない。
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CandidatesRequest"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RepositoryCandidates"
+        "400":
+          $ref: "#/components/responses/E400"
+        "403":
+          $ref: "#/components/responses/E403"
+  /accounts/{accountId}/repositories:
+    get:
+      tags: [repositories]
+      operationId: listRepositories
+      summary: 登録したリポジトリの一覧
+      description: リポジトリごとの終わりの状態でないスプリントの実行の数を添える。
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RepositoryList"
+        "403":
+          $ref: "#/components/responses/E403"
+    post:
+      tags: [repositories]
+      operationId: registerRepository
+      summary: リポジトリを登録する
+      description: 候補の証明と、登録の直前の導入の token の作成で確かめる（I33）。同じリポジトリは 409（I32）。
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Repository"
+        "400":
+          $ref: "#/components/responses/E400"
+        "403":
+          $ref: "#/components/responses/E403"
+        "409":
+          $ref: "#/components/responses/E409"
+  /accounts/{accountId}/model-credential:
+    get:
+      tags: [credentials]
+      operationId: getModelCredential
+      summary: 持ち込んだキーの有無
+      description: 登録済みか・種類・更新の時刻・外部 ID だけを返し、値も置き場の ARN も返さない（I38）。
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelCredential"
+        "403":
+          $ref: "#/components/responses/E403"
+    put:
+      tags: [credentials]
+      operationId: putModelCredential
+      summary: キーを保存・差し替える
+      description: Anthropic API キーか AWS のロールの ARN と地域のどちらか 1 つ。持ち主だけが使える。
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModelCredentialInput"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelCredential"
+        "400":
+          $ref: "#/components/responses/E400"
+        "403":
+          $ref: "#/components/responses/E403"
+        "503":
+          $ref: "#/components/responses/E503"
+    delete:
+      tags: [credentials]
+      operationId: deleteModelCredential
+      summary: 持ち込んだキーを消す
+      description: 復元の期間を置かずに消す（決定 14）。無くても 204。
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: 成功
+        "403":
+          $ref: "#/components/responses/E403"
+        "503":
+          $ref: "#/components/responses/E503"
+  /accounts/{accountId}/repositories/{repositoryId}/issue-candidates:
+    post:
+      tags: [sprint-runs]
+      operationId: postIssueCandidates
+      summary: AI が選んだ課題の候補
+      description: 棚卸しの順位の表（無ければ開いている課題の新しい順）から、サービスの Bedrock で採否と理由を作る。保存しない。
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repositoryId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IssueCandidatesRequest"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IssueCandidates"
+        "403":
+          $ref: "#/components/responses/E403"
+        "404":
+          $ref: "#/components/responses/E404"
+  /accounts/{accountId}/sprint-runs:
+    post:
+      tags: [sprint-runs]
+      operationId: startSprintRun
+      summary: スプリントの実行を始める
+      description: 確かめの順は 課題（400）→ 登録（404）→ キー（409）→ 導入（409）→ 使える量（409）。
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartRequest"
+      responses:
+        "201":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SprintRunStarted"
+        "400":
+          $ref: "#/components/responses/E400"
+        "403":
+          $ref: "#/components/responses/E403"
+        "404":
+          $ref: "#/components/responses/E404"
+        "409":
+          $ref: "#/components/responses/E409"
+    get:
+      tags: [sprint-runs]
+      operationId: listSprintRuns
+      summary: スプリントの実行の一覧
+      description: 新しい順に 50 件。repository_id で絞れる。
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repository_id
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SprintRunList"
+        "403":
+          $ref: "#/components/responses/E403"
+  /accounts/{accountId}/sprint-runs/{sprintRunId}/cancel:
+    post:
+      tags: [sprint-runs]
+      operationId: cancelSprintRun
+      summary: スプリントの実行を取り消す
+      description: 動いている実行ジョブがあれば止め、停止の後に cancelled へ移す。
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: sprintRunId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CancelResult"
+        "403":
+          $ref: "#/components/responses/E403"
+        "404":
+          $ref: "#/components/responses/E404"
+        "409":
+          $ref: "#/components/responses/E409"
+  /run-jobs/github-token:
+    post:
+      tags: [run-jobs]
+      operationId: postRunJobGitHubToken
+      summary: 導入の token の渡し直し
+      description: 実行ジョブの token で認証し、その実行のリポジトリ 1 つに絞った 1 時間の導入の token を返す（決定 7）。
+      security:
+        - runJob: []
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitHubToken"
+        "401":
+          $ref: "#/components/responses/E401"
+        "403":
+          $ref: "#/components/responses/E403"
+        "409":
+          $ref: "#/components/responses/E409"
+  /run-jobs/state:
+    post:
+      tags: [run-jobs]
+      operationId: postRunJobState
+      summary: 状態の置き場の署名つき URL
+      description: その実行の鍵だけの 15 分の URL を返す（決定 8）。get で保存が無ければ 404。
+      security:
+        - runJob: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StateRequest"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignedUrl"
+        "400":
+          $ref: "#/components/responses/E400"
+        "401":
+          $ref: "#/components/responses/E401"
+        "403":
+          $ref: "#/components/responses/E403"
+        "404":
+          $ref: "#/components/responses/E404"
+  /accounts/{accountId}/repositories/{repositoryId}:
+    delete:
+      tags: [repositories]
+      operationId: removeRepository
+      summary: リポジトリの登録を外す
+      description: 終わりの状態でないスプリントの実行があれば 409（I36）。持ち主だけが使える。
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repositoryId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: 成功
+        "403":
+          $ref: "#/components/responses/E403"
+        "404":
+          $ref: "#/components/responses/E404"
+        "409":
+          $ref: "#/components/responses/E409"
+components:
+  securitySchemes:
+    cognito:
+      type: http
+      scheme: bearer
+      description: Cognito の access token
+    runJob:
+      type: http
+      scheme: bearer
+      description: 実行ジョブの token
+  responses:
+    E400:
+      description: 要求の形が違う
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    E401:
+      description: 認証できない
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    E403:
+      description: 権限が無い（他人のアカウントと同じ本文）
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    E404:
+      description: 見つからない
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    E409:
+      description: 状態が合わない
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    E503:
+      description: 時間をおいてやり直す
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            details: { type: object }
+    Url:
+      type: object
+      required: [url]
+      properties:
+        url: { type: string, format: uri }
+    CandidatesRequest:
+      type: object
+      required: [code, state]
+      properties:
+        code: { type: string, minLength: 1 }
+        state: { type: string, minLength: 1 }
+    RepositoryCandidates:
+      type: object
+      required: [proof, candidates]
+      properties:
+        proof: { type: string }
+        candidates:
+          type: array
+          items:
+            type: object
+            required: [repository_id, full_name, installation_id, registered]
+            properties:
+              repository_id: { type: integer }
+              full_name: { type: string }
+              installation_id: { type: integer }
+              registered: { type: boolean }
+    RegisterRequest:
+      type: object
+      required: [proof, repository_id]
+      properties:
+        proof: { type: string }
+        repository_id: { type: integer, minimum: 1 }
+    Repository:
+      type: object
+      required: [repository_id, full_name, installation_id, registered_at]
+      properties:
+        repository_id: { type: integer }
+        full_name: { type: string }
+        installation_id: { type: integer }
+        registered_at: { type: string, format: date-time }
+        active_sprint_runs: { type: integer, minimum: 0 }
+    RepositoryList:
+      type: object
+      required: [repositories]
+      properties:
+        repositories:
+          type: array
+          items: { $ref: "#/components/schemas/Repository" }
+    ModelCredential:
+      type: object
+      required: [registered, kind, updated_at, external_id]
+      properties:
+        registered: { type: boolean }
+        kind: { type: ["string", "null"], enum: [anthropic_api_key, aws_role, null] }
+        updated_at: { type: ["string", "null"], format: date-time }
+        external_id: { type: string }
+    ModelCredentialInput:
+      oneOf:
+        - type: object
+          required: [kind, api_key]
+          additionalProperties: false
+          properties:
+            kind: { const: anthropic_api_key }
+            api_key: { type: string, minLength: 1, maxLength: 512 }
+        - type: object
+          required: [kind, role_arn, region]
+          additionalProperties: false
+          properties:
+            kind: { const: aws_role }
+            role_arn: { type: string, maxLength: 2048, pattern: "^arn:aws[a-z-]*:iam::\\d{12}:role/.+$" }
+            region: { type: string, maxLength: 32, pattern: "^[a-z]{2}(-[a-z]+)+-\\d$" }
+    IssueCandidatesRequest:
+      type: object
+      properties:
+        exclude:
+          type: array
+          items: { type: integer, minimum: 1 }
+    IssueCandidates:
+      type: object
+      required: [source, milestone, candidates, note]
+      properties:
+        source: { type: string, enum: [ranking, recent] }
+        milestone: { type: ["string", "null"] }
+        note: { type: ["string", "null"] }
+        candidates:
+          type: array
+          items:
+            type: object
+            required: [number, title, selected, reason]
+            properties:
+              number: { type: integer }
+              title: { type: string }
+              selected: { type: boolean }
+              reason: { type: string, minLength: 1 }
+    StartRequest:
+      type: object
+      required: [repository_id, issues]
+      properties:
+        repository_id: { type: integer, minimum: 1 }
+        issues:
+          type: array
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          items: { type: integer, minimum: 1 }
+    SprintRunStarted:
+      type: object
+      required: [sprint_run_id, state]
+      properties:
+        sprint_run_id: { type: string }
+        state: { const: starting }
+    SprintRunList:
+      type: object
+      required: [sprint_runs]
+      properties:
+        sprint_runs:
+          type: array
+          items:
+            type: object
+            required: [sprint_run_id, repository_id, issues, state, failure_reason, created_at]
+            properties:
+              sprint_run_id: { type: string }
+              repository_id: { type: integer }
+              issues: { type: array, items: { type: integer } }
+              state: { type: string, enum: [starting, running, awaiting_approval, done, stopped, failed, cancelled] }
+              failure_reason: { type: ["string", "null"] }
+              created_at: { type: string, format: date-time }
+    CancelResult:
+      type: object
+      required: [state]
+      properties:
+        state: { type: string, enum: [cancelled, running] }
+    GitHubToken:
+      type: object
+      required: [token, expires_at]
+      properties:
+        token: { type: string }
+        expires_at: { type: string, format: date-time }
+    StateRequest:
+      type: object
+      required: [op]
+      properties:
+        op: { type: string, enum: [put, get] }
+    SignedUrl:
+      type: object
+      required: [url, expires_at]
+      properties:
+        url: { type: string, format: uri }
+        expires_at: { type: string, format: date-time }
