@@ -232,3 +232,36 @@ def test_signals_reader_still_skips_broken_rows(tmp_path):
     path.write_text('{"a": 1}\n{broken\n[2]\n\n{"b": 2}\n')
     assert pms.read_jsonl(path) == [{"a": 1}, {"b": 2}]
     assert pms.read_jsonl(tmp_path / "none.jsonl") == []
+
+
+def test_running_a_plan_from_reject_records_the_rejection_and_re_presents(tmp_path, monkeypatch):
+    """差し戻しの後に `run <計画> --from reject` で流すと、手で gate を打たずに差し戻しが 1 行増え、再提示へ進む（#2183）。"""
+    sys.path.insert(0, str(SCRIPTS))
+    from supervise_lib import engine
+    from supervise_lib.verify_steps import reject_step
+
+    state = _state(tmp_path, "normal")
+    assert _gate(tmp_path, state, "--outcome", "rejected")[0] == 0  # 前の差し戻し（記録済み）
+    _, before = run("count", "--sprint", str(state), "--root", str(tmp_path))
+    marker = tmp_path / "re-presented"
+    steps = [
+        {"id": "mvv", "type": "run", "timeout": 30, "cmd": f"touch {marker}", "next": "end"},
+        reject_step(str(state), "関門 1", "mvv", root=str(tmp_path)),
+    ]
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("NDF_USAGE_DIR", str(tmp_path / "usage"))
+    plan = {"フェーズ": "設計", "課題": [4], "作業場所": str(tmp_path), "steps": steps}
+    engine.Engine(plan, tmp_path / "sv").run("reject")
+    _, after = run("count", "--sprint", str(state), "--root", str(tmp_path))
+    assert marker.exists() and after["status"] == "ok"
+    assert (after["metrics"]["gate_1"], after["metrics"]["gate_2"]) == (before["metrics"]["gate_1"] + 1, before["metrics"]["gate_2"])
+
+
+def test_a_plan_does_not_fall_into_reject_without_from(tmp_path):
+    """reject は `--from` でだけ入る。並びの次として通らない（判断のステップの後に置いても）。"""
+    sys.path.insert(0, str(SCRIPTS))
+    from supervise_lib import limits
+    from supervise_lib.verify_steps import reject_step
+
+    steps = [{"id": "gate", "type": "judge"}, reject_step("s.json", "関門 1", "gate")]
+    assert limits.default_next(steps, "gate") is None

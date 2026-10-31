@@ -17,7 +17,7 @@ from supervise_lib.procedures import DESIGN_RESULTS, pr_step, requirements_path,
 from supervise_lib.release_templates import MVV_NOTE, advise_steps, plan_release
 from supervise_lib.plan import sprint_state_path
 from supervise_lib.templates import plan_check, plan_check_since, plan_impl
-from supervise_lib.verify_steps import handoff_step, merge_steps
+from supervise_lib.verify_steps import handoff_step, merge_steps, reject_step
 
 
 DESIGN_GLOSSARY_NOTE = "{state_dir}/work/glossary-candidates.md"  # 設計のプランが起こした用語集の候補の語
@@ -364,7 +364,7 @@ def plan_advise_design(a, n: int, repo: str) -> dict:
             s["next"] = "mvv"
     gate["inputs"] = [*gate["inputs"], "mvv"]
     gate["question"] += "。mvv に助言の MVV 判定（判定・理由・根拠）があれば、関門 1 の提示に載せる（承認は利用者が行う）"
-    plan["steps"] = [*steps, *advise_design_steps(a), gate]
+    plan["steps"] = [*steps, *advise_design_steps(a), gate, reject_step(sprint_state_path(a), "関門 1", "mvv", pr="{pr}")]
     return plan
 
 
@@ -404,6 +404,7 @@ def plan_mvv_design(a, n: int, repo: str) -> dict:
         },
         *merge_steps(a, next="end", on_fail="handoff"),
         handoff_step(sprint_state_path(a), "関門 1", "承認ラベルの付与かマージ"),
+        reject_step(sprint_state_path(a), "関門 1", "mvv", pr="{pr}"),
     ]
     plan["規則"] = (
         "設計の cross-review は上限 3 ラウンドで関門 1 の判定（mvv のステップ）へ渡す（収束を待たない）。駆動そのものが失敗したら gate。"
