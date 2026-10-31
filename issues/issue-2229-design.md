@@ -41,7 +41,7 @@
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
 | 状態の一覧 | `lib/run_state.py` の `KINDS`（コードの定数） | 一覧 | — | 種類（名前・置き場の形・持ち主・寿命・片付ける時点・作るスクリプト） |
-| 持ち主の記録（残る状態 1 つにつき 1 つ） | その状態を作った実行だけが書く。片付けは読んで、状態と一緒に消すだけ | 記録 | — | 実行の識別子・開始・最後に動いた時刻・終わった時刻・プロセス（pid と開始時刻） |
+| 持ち主の記録（残る状態 1 つにつき 1 つ） | 記録の `run` と同じ実行だけが書く（`touch` / `finish`）。別の実行が書いてよいのは、記録が無いか以前の実行（終わった・寿命の窓の外）の記録を `claim` で引き継ぐときだけ（I12）。片付けは読んで、状態と一緒に消すだけ | 記録 | — | 実行の識別子・開始・最後に動いた時刻・終わった時刻・プロセス（pid と開始時刻） |
 | 片付け（1 回） | `lib/run_state.py` の `sweep` | 片付けの結果 | 結果の 1 件（状態 1 つ） | `removed` / `kept`・理由・置き場・種類 |
 | 投稿キュー | `lib/post_queue.py` の `Queue` | 待ち行列 | 項目（連番 `seq` で識別） | 試行の結果（`sent` / `skipped` / `dropped` / `unsent`）・控え |
 
@@ -62,6 +62,7 @@
 | I9 | 投稿キュー | 先頭の項目の失敗が上限か一時の失敗なら、外さずにそこで止まる（`waitable` が真）。位置エラーでない恒久の失敗の `review-post` も、今までどおりそこで止まる | テストが落ちる（AC13・AC14） |
 | I10 | 投稿キュー | 今回分が位置エラーで拒まれたら、自分の流しで拒まれたときも、別の実行の流しが控えへ外したときも、総評へ移して送り直す。外された今回分を「積んだまま（`queued`）」と報告しない | テストが落ちる（決定 5） |
 | I11 | 持ち主の記録 | 以前の実行（記録が終わっているか、寿命の窓を過ぎた）が残したレビュー worktree は、作業が無ければ次の開始が使い直す。作業（I4 の 3 つ）があれば消さず、開始を止めて理由を返す | 開始が終了コード 1 と理由で止まる（AC15） |
+| I12 | 持ち主の記録 | 終わっていない窓の中の記録を持つレビュー worktree は、記録の `run` と同じ実行（開始に `--run <id>` で渡す）だけが続きとして使う。違う実行・`--run` の無い開始は、同期も記録の更新もせずに止まる。`touch` / `finish` も記録の `run` と渡した `run` が一致するときだけ書く | 開始が終了コード 1 と理由「別の実行 <run> が動いている」で止まる。`touch` / `finish` は書かずに `False` と理由を返し、呼び出し元が止まる |
 
 ### ドメインイベント
 
@@ -102,7 +103,7 @@
 | `scripts/lib/run_state.py`（新規） | 状態の一覧 `KINDS`、持ち主の記録の読み書き（`claim` / `touch` / `finish`）、生存の判定、レビュー worktree の外し方（`remove_review_worktree`）、片付け（`sweep`）。`python3 run_state.py sweep [--root <dir>] [--tmp-only]` で単独でも呼べ、統一の JSON（`tool: run-state`）を返す |
 | `scripts/lib/worktree_base.py` | 変えない。一時の置き場の解決の唯一の場所として `run_state` と merged から使う |
 | `scripts/merged-steps.py` | `cleanup` の置き場の解決を `worktree_base.worktree_parent` へ替える。PR ごとに `pr<n>` と `rf<n>` を `run_state.remove_review_worktree` で外し、最後に `run_state.sweep` を呼んで結果を `items` へ足す |
-| `skills/cross-review/scripts/review_lib/commands/init.py`・`workspace.py` | 開始で `run_state.sweep` を呼ぶ。既存の `pr<n>` を見つけたら持ち主の記録で「同じ実行の続き / 以前の実行」を分け、以前の実行で作業があれば止める（I11）。作ったら `claim` する |
+| `skills/cross-review/scripts/review_lib/commands/init.py`・`workspace.py` | 開始で `run_state.sweep` を呼ぶ。既存の `pr<n>` を見つけたら持ち主の記録と `--run` で「同じ実行の続き / 別の実行が動いている / 以前の実行」を分け、別の実行が動いていれば止め（I12）、以前の実行で作業があれば止める（I11）。作ったら `claim` する |
 | `skills/cross-review/scripts/drive.py` | 起動のたびに `touch`、終わり（`finish` の段）で `finish` を呼ぶ。開始の片付けの結果を自分の結果の `items` へ載せる |
 | `skills/cross-refactoring/scripts/refactor_lib/commands/setup.py`・`refactor.py` | `setup` で `sweep`（結果を `setup` の出力の `items` へ載せる）・`claim`・既存の `rf<n>/work` の判定（I11）。`refactor.py` の起動のたびに `touch`、`report` で `finish` |
 | `scripts/hook_lib/worktree.py` | セッションの状態ファイルに持ち主（ランタイムのプロセスの pid と開始時刻）を書く。記録の無い既存のファイルには、次に読んだときに足す |
@@ -178,9 +179,11 @@ AC1 の「1 か所の一覧」はこのコードの表である（決定 2）。
 
 | キー | 書く者・時点 | 読む者 |
 | --- | --- | --- |
-| `run` | `claim`（開始で、終わっていない記録が無いとき新しく作る） | 開始の判定（同じ実行の続きか） |
-| `seen_at` | `touch`（`drive.py`・`refactor.py` の起動ごと） | 生存の判定（寿命の窓） |
-| `finished_at` | `finish`（E2） | 生存の判定 |
+| `run` | `claim`（開始で、記録が無いか以前の実行の記録のとき新しく作る。以前の実行の記録は上書きして引き継ぐ） | 開始の判定（同じ実行の続きか）・`touch` / `finish` の照合 |
+| `seen_at` | `touch`（`drive.py`・`refactor.py` の起動ごと。記録の `run` と一致するときだけ） | 生存の判定（寿命の窓） |
+| `finished_at` | `finish`（E2。記録の `run` と一致するときだけ） | 生存の判定 |
+
+`claim(path, *, tool, pr) -> str` は新しい `run` を返し、開始が出力（`RUN=<id>`）と状態ファイル（`run`）へ載せる。`touch(path, run)`・`finish(path, run) -> tuple[bool, str | None]` は記録の `run` と違えば書かずに `(False, 理由)` を返す。`drive.py`・`refactor.py` は状態ファイルの `run` を渡し、`False` なら終了コード 1 で止まる（引き継がれた後の古い実行が、新しい実行の記録を書き換えない）。
 
 プロセスが持ち主の記録（`session-state` の `owner`・`deps-work` の `owner`）: `{"pid": 123, "started": 1761872400.12}`。`started` は `procs.start_time(pid)`。読むときは pid が生きていて開始時刻が一致すれば生きているとする（pid の使い回しを除く）。`deps-work` はシェルから書くため `started` を持たず、`procs.cmdline_contains(pid, "worktree-deps.sh")` で使い回しを除く。
 
@@ -214,7 +217,7 @@ sweep(root: Path | None, *, kinds: Iterable[str] | None = None, tmp_only: bool =
 | `run-dir` | 中の worktree をすべて外した後の `rf<n>` のディレクトリと記録 |
 | `session-state` / `deps-work` / `fix-files` / `test-tmp` | 一時の状態 1 つ（`fix-files` は `fix-pr<n>-` の組で 1 件） |
 
-`result` は `removed` か `kept` だけ（新しい値を足さない）。寿命に届いていない一時ファイルは結果に出さない（毎回の数十件の `kept` で読み手の目を塞がないため。外したものと、外せたはずなのに残したものだけを出す）。
+`result` は `removed` か `kept` だけ（新しい値を足さない）。見た状態はすべて 1 件ずつ出す（I6）。寿命に届いていない一時ファイルも `kept` と理由「寿命の窓の中（最終更新 <時刻>）」で出し、持ち主が生きている状態は I2 の理由で出す。`skip` に入れた状態だけは見ないため出さない。
 
 単独の起動 `python3 run_state.py sweep [--root <dir>] [--tmp-only]` は `{"tool": "run-state", "status": "ok", "summary": "…", "items": [...], "metrics": {"removed": N, "kept": M}}` を 1 行で出し、終了コード 0。引数が読めなければ 2。
 
@@ -236,7 +239,8 @@ remove_review_worktree(root, path: Path, pr: int, pr_state: dict | None) -> tupl
 | --- | --- |
 | 記録が無いか、以前の実行（終わった・窓の外）で、作業が無い | 今までどおり同期して使い直し、`claim` で新しい `run` を書く |
 | 以前の実行で、作業（I4 の 3 つ）がある | 消さずに終了コード 1 で止め、理由（どの作業か・数・パス）と「手で確かめて外すか、続きの実行なら記録を戻す」の案内を出す |
-| 終わっていない窓の中の記録（同じ実行の続き） | 今までどおり（`init` の再開の経路。未 push のコミットは巻き戻さない） |
+| 終わっていない窓の中の記録で、開始に渡した `--run` が記録の `run` と一致する（同じ実行の続き） | 今までどおり（`init` の再開の経路。未 push のコミットは巻き戻さない） |
+| 終わっていない窓の中の記録で、`--run` が無いか一致しない（別の実行が動いている） | 同期も `claim` もせず、記録も書き換えずに終了コード 1 で止め、理由「別の実行 <run> が動いている（最後に動いた時刻）」と「その実行の続きなら `--run <run>` を渡す。終わっていれば寿命の窓を過ぎるか `finish` の後に開始する」の案内を出す（I12） |
 
 今までの `init` は、以前の実行の追跡ファイルの変更を `reset --hard` で捨てていた。この変更で止まる側へ替わる（AC15）。
 
@@ -394,7 +398,8 @@ Pull Request の状態だけで判定する形は採らない（AC8: マージ�
 | I10 | 今回分を `keep` 無しの `flush` で外させた後の `post_review` が、総評へ移して送り、`queued` を返さない | `outcome` を見ないと落ちる |
 | AC15・I11 | 以前の実行の記録を持つ作業の無い `pr<n>`・`rf<n>/work` で開始が成功し、作業のあるものでは終了コード 1 と理由で止まり、中身が残る | 今までの `reset --hard` へ戻すと落ちる |
 | I5 | 壊れた記録・照会の失敗・git の失敗のどれでも `kept`「判定できない」 | 例外で `sweep` 全体が止まると落ちる |
-| I6 | 見た状態 1 つにつき 1 件。1 件の失敗の後もほかが片付く | 途中の例外で以降の結果が消えると落ちる |
+| I6 | 見た状態 1 つにつき 1 件（寿命の窓の中の一時ファイルも `kept` と理由で 1 件）。1 件の失敗の後もほかが片付く | 途中の例外で以降の結果が消えると落ちる。窓の中の状態を結果から外すと落ちる |
+| I12 | 窓の中の記録を持つ `pr<n>` で、`--run` 無し・違う `--run` の開始は終了コード 1 で止まり、worktree の HEAD と記録が変わらない。一致する `--run` では再開する。違う `run` の `touch` / `finish` は記録を変えない | `--run` を見ずに続きと扱うと落ちる |
 | I7 | `sweep` 1 回で照会がレビュー worktree の数（`rf<n>` は 1 つ）以下、一時ファイルだけの `sweep` では 0 回 | 照会を判定の先頭に移すと回数で落ちる |
 | AC16 | `plugins/ndf` 一式が通り、`cleanup` の `items` のキーと `result` の値が今までの集合に収まる | 新しい `result` の値を足すと落ちる |
 
