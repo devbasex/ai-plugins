@@ -114,7 +114,7 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
 ```
 
 - `approval-facts`: `gate` なら `presentation_path` の承認資料の「`配る中身`」と「`検証への配布で確かめたこと`」を
-  `notes --approval` で埋めて利用者へ示し、承認を得てから `next` のコマンドを打つ。`stopped`
+  `notes --approval` で埋めて利用者へ示し、承認（`AskUserQuestion` の `metadata.source` は `ndf-gate:2`）を得てから `next` のコマンドを打つ。`stopped`
   （3 = 前のタグを決められない）なら `--prev-tag` を渡して打ち直す。`metrics.approved_sha` と承認資料の
   「`承認したコミット`」が承認の対象（打った時点の `origin/<ベースブランチ>` の 40 桁）で、`next` の
   `--approved-sha` も同じ値である。資料を書き直すと承認の記録は消える。「`含む PR`」は、前のタグから

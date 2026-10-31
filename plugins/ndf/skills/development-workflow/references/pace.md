@@ -144,7 +144,7 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 | 順 | 打つもの | 失敗・未承認のとき |
 | --- | --- | --- |
 | 1 | `sprint-state.py init <状態> --name <名> --pace <値> --milestone <M>` | 終了コード 3（説明に `## Mission` / `## Vision` / `## Value` がそろわない・読めない）: 利用者に説明を直してもらい打ち直す |
-| 2 | conductor が `mvv.md`（スプリント状態ファイルの隣）を利用者へ示し、承認を得る | 承認されない: 説明を直して 1 から。`normal` で進めてもよい |
+| 2 | conductor が `mvv.md`（スプリント状態ファイルの隣）を利用者へ示し、承認を得る（承認ゲート 1 の委任の承認として `AskUserQuestion` に `ndf-gate:1` を付ける） | 承認されない: 説明を直して 1 から。`normal` で進めてもよい |
 | 3 | `sprint-state.py gate <状態> MVV --what <要約>` | — |
 | 4 | `supervise.py new sprint ... --pace <値> --state <状態>` | 終了コード 1（承認の記録が無い・ハッシュ不一致・宣言が許していない）: 2 へ戻るか `normal` で進める |
 
@@ -191,7 +191,7 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 | ステージ | プラン | 流し方 |
 | --- | --- | --- |
 | 設計 | `design-<N>`（review の後に `mvv` → `approve`（ラベル `design-approved` と判定のコメント）→ `merge`） | `queue --max 3` |
-| ゲート 1 | 無し。設計のプランがすべて `完了` なら通過し、`関門` を返したプランの Pull Request だけ利用者の承認を取ってマージする | conductor |
+| ゲート 1 | 無し。設計のプランがすべて `完了` なら通過し、`関門` を返したプランの Pull Request だけ利用者の承認（`ndf-gate:1`）を取ってマージする | conductor |
 | 設計の結果 | `design-results`（設計文書の「設計の結果」の表を読み、実装のプランへ触るファイルと取り込んだ課題を書く） | `queue <設計の結果> --then <実装>... --then <検査> --then <コードレビュー> --then <開発版> --then <本番>` |
 | 実装 | `impl-<N>`（`base` は develop。手動確認の節は実装の Pull Request に載る） | 1 つ目の `--then`（設計の課題が無ければ `queue <実装>... --max 3 --then <検査> ...` の `command`） |
 | 検査 | `check`（実行条件 `check-trigger.py eval --id <スプリント>-1`） | 次の `--then` |
@@ -380,7 +380,7 @@ mvv-gate.py check --sprint <状態> --gate design|release [--material F...] [--p
 
 ### レッドライン
 
-**次のどれかに当たれば、判定が「従う」でも利用者の承認を求める。**
+**次のどれかに当たれば、判定が「従う」でも利用者の承認を求める。** 問いは承認ゲートの場で出し、`metadata.source` はその承認ゲートの `ndf-gate:<番号>` にする。
 
 | 種類 | 機械で見る所 | LLM で見る所 |
 | --- | --- | --- |

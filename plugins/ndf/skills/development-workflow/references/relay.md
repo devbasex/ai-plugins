@@ -6,7 +6,7 @@
 例: ゲート 1 をまたいで実装へ進む。
 
 1. 利用者がいつもどおり `claude` と打つ（`/ndf:install-wrapper` で入れた関数がラッパーを挟む）。その中で `/ndf:development-workflow #895` を入力する
-2. conductor がゲート 1 で `AskUserQuestion` を出し、利用者が「承認」と答える
+2. conductor がゲート 1 で `AskUserQuestion`（`metadata.source` は `ndf-gate:1`）を出し、利用者が「承認」と答える
 3. conductor が設計 Pull Request をマージし、最後の応答に次のブロックを出して応答を終える
 
    ```ndf-next
@@ -138,7 +138,8 @@ claude が再開コマンドを `ndf-next` のブロックで出して応答を�
 
 **本文で承認を待って終えた応答は、1 度止めて `AskUserQuestion` へ戻す。** ラッパーの直接の子の応答が `AskUserQuestion` を呼ばずに
 承認待ちの文（判定は `lib/wait_notice.py` の `classify_reply_wait` で、回答待ちか承認待ちに当たる文。Slack の待ち通知の `classify_text` より狭く、操作の案内は待ちに数えない）で
-終わると、Stop hook（`mark`）が Stop を止め、同じ問いを `AskUserQuestion` で出し直すよう伝える。`/goal` の判定は本文の待ちでは
+終わると、Stop hook（`mark`）が Stop を止め、承認ゲートの問いなら `metadata.source` に `ndf-gate:<番号>` を付けて
+`AskUserQuestion` で出し直し、区分（[asking.md](asking.md)）に当たらない問いなら自分で決めて記録し続けるよう伝える。`/goal` の判定は本文の待ちでは
 止まらないためである。次のときは止めない。
 
 - 止めた直後の、同じセッションの次の Stop（作業ディレクトリの `wait-held.json` で見分ける。`stop_hook_active` は `/goal` の続きで常に真になるため使わない）

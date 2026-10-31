@@ -107,7 +107,7 @@ TodoWrite([{content: "タスク内容", status: "in_progress", activeForm: "進�
 
 **大規模タスク:**
 - Plan Modeに移行
-- 設計案を作成しユーザー承認を得る
+- 設計案を作成しユーザー承認を得る（承認ゲート 1。`AskUserQuestion` の `metadata.source` は `ndf-gate:1`）
 - **計画と調査結果をファイルに保存**（復帰可能にするため必須）
 
 ### フェーズ4: 実行依頼
@@ -329,7 +329,7 @@ Main Agentは上記順序でエージェントを起動してください。
 1. EnterPlanMode()
 2. Explore Agentで現状調査
 3. 設計案を作成、`issues/`に保存
-4. ユーザー承認を取得
+4. ユーザー承認を取得（`ndf-gate:1`）
 5. ExitPlanMode()
 6. **Main Agentに段階的に報告:**
    - フェーズ1: サービス分割の実装

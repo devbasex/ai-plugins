@@ -41,7 +41,8 @@ def stop_text(verdict, decl, row_id: str) -> str:
         f"ndf: この AskUserQuestion を止めた。理由: {reason}。",
         "自分で決め、理由を記録して続ける。迷い・情報不足・好みの違いは人へ回す理由にならない。根拠を集めて推奨の案を選ぶ。",
         f'記録の手段: python3 "{ASK_PY}" decide --ref {row_id} --answer "<選んだ答え>" --reason "<理由>"',
-        f"人へ回してよい区分（metadata.source に付ける。正本: {ASKING_MD}）:\n{listing}",
+        f"人へ回してよい区分（metadata.source に付ける。正本: {ASKING_MD}）。問いがこのどれか（特にレッドラインの操作の承認）に当たるときだけ、"
+        f"その区分を付けて出し直す:\n{listing}",
         *_common_tail(decl),
     ]
     return "\n".join(lines)

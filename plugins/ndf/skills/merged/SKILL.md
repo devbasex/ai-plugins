@@ -130,7 +130,8 @@ python3 "$SCRIPTS/merged-steps.py" cleanup <PR番号>... --root <メインディ
 ### マージから行うとき
 
 **マージの承認を得た後に限り、** CI の待ちとマージを同じスクリプトで行える。承認ゲート
-（`development-workflow` の Pull Request のマージの承認）はこのコマンドの前に置き、この
+（`development-workflow` の Pull Request のマージの承認。`AskUserQuestion` の `metadata.source` は設計 Pull Request なら `ndf-gate:1`、
+本番チャネルへのマージなら `ndf-gate:2`）はこのコマンドの前に置き、この
 コマンドを承認の代わりにしない。
 
 ```bash
