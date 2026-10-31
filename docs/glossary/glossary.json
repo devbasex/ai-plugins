@@ -4471,6 +4471,38 @@
       "source": "",
       "pending_source": "issues/issue-1631-design.md",
       "code": "whole_key"
+    },
+    {
+      "term": "問い合わせの区分",
+      "context": "ndf-workflow",
+      "meaning": "AskUserQuestion の metadata.source に AI が付ける値。ndf-gate:<番号>（承認ゲート）・ndf-ask:redline:<番号>（レッドライン。宣言で外せない）・ndf-ask:<名前>（宣言が許す区分）の 3 つの形。hook は質問の中身を読まず、この値が許された区分かだけを見る（#2206）",
+      "source": "",
+      "pending_source": "issues/issue-2206-design.md",
+      "code": "ask_category"
+    },
+    {
+      "term": "問い合わせの宣言",
+      "context": "ndf-workflow",
+      "meaning": "プロジェクトの .ndf/ask.json。人へ回してよい問い合わせの区分と hook の働き方（enforce / advise / off）を書く（#2206）",
+      "source": "",
+      "pending_source": "issues/issue-2206-requirements.md",
+      "code": "ask_declaration"
+    },
+    {
+      "term": "代わりの判断",
+      "context": "ndf-workflow",
+      "meaning": "hook が問い合わせを止めた後か、手順が「AI が決める」とした場面で AI が自分で下した判断。問い・選んだ答え・理由を問い合わせの記録へ書く（#2206）",
+      "source": "",
+      "pending_source": "issues/issue-2206-design.md",
+      "code": "proxy_decision"
+    },
+    {
+      "term": "問い合わせの記録",
+      "context": "ndf-workflow",
+      "meaning": "状態の置き場の ask.jsonl。hook の判定の行と代わりの判断の行を追記だけで持ち、振り返りと Factory のランナーが読む（#2206）",
+      "source": "",
+      "pending_source": "issues/issue-2206-design.md",
+      "code": "ask_ledger"
     }
   ]
 }
