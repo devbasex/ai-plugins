@@ -7,9 +7,9 @@ import { join } from "node:path";
 import { GetSecretValueCommand, SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
 import type { RunJobInstruction } from "@ndf-factory/contracts";
 import type { JobRuntime } from "./main.ts";
-import { claudeEnv, stsAssumeRole, type ModelCredential } from "./model.ts";
+import { claudeEnv, ROLE_REFRESH_MS, stsAssumeRole, writeRoleCredentials, type ModelCredential } from "./model.ts";
 import { exec, packState, unpackState } from "./state.ts";
-import { delegatedFromRecord, gateKindOf, phaseChanged, reportResult, translateProgressLine, usageFromResult } from "./translate.ts";
+import { delegatedFromRecord, gateKindOf, phaseChanged, reportResult, translateProgressLine, usageFromResult, usageFromStepLine } from "./translate.ts";
 
 const POLL_MS = 2000;
 
@@ -45,8 +45,14 @@ export async function createRuntime(instruction: RunJobInstruction, env: Record<
     const out = await new SecretsManagerClient({}).send(new GetSecretValueCommand({ SecretId: instruction.MODEL_CREDENTIAL_SECRET_ARN }));
     credential = JSON.parse(out.SecretString ?? "null") as ModelCredential;
   }
-  const childEnv = () => claudeEnv(env, instruction.EXECUTION_MODE, credential, stsAssumeRole, `ndf-${instruction.JOB_ID}`);
-  const ndfScripts = () => join(homedir(), ".claude/plugins/marketplaces/ndf-pinned/plugins/ndf/scripts");
+  const sessionName = `ndf-${instruction.JOB_ID}`;
+  const credentialDir = join(homedir(), ".ndf-byok");
+  const childEnv = () => claudeEnv(env, instruction.EXECUTION_MODE, credential, stsAssumeRole, sessionName, credentialDir);
+  // 版を固定して取った取得元。スクリプトは入れた版と同じこの写しから読む
+  const ndfSource = join(work, "ndf-marketplace");
+  const ndfScripts = () => join(ndfSource, "plugins/ndf/scripts");
+  // ask_ledger.py の置き場（${NDF_MVV_STATE_DIR:-~/.local/state/ndf}/ask.jsonl）
+  const askLedger = join(env.NDF_MVV_STATE_DIR ?? join(homedir(), ".local/state/ndf"), "ask.jsonl");
 
   return {
     async writeGitHubToken(token) {
@@ -61,14 +67,18 @@ export async function createRuntime(instruction: RunJobInstruction, env: Record<
     },
     async installNdf(version) {
       const { ref, version: want } = ndfRef(version);
-      const src = join(work, "ndf-marketplace");
+      const src = ndfSource;
       if ((await run("git", ["clone", "--depth", "1", "--branch", ref, `https://github.com/${marketplace}.git`, src], { cwd: work })) !== 0) {
         // コミットはブランチとして clone できないため、取ってから切り替える
         await run("git", ["clone", `https://github.com/${marketplace}.git`, src], { cwd: work });
         if ((await run("git", ["checkout", ref], { cwd: src })) !== 0) throw new Error("NDF の版を取れない");
       }
-      await run("claude", ["plugin", "marketplace", "add", src], { cwd: repoDir, env: await childEnv() });
-      await run("claude", ["plugin", "install", "ndf@ndf-pinned"], { cwd: repoDir, env: await childEnv() });
+      // 導入の名前（ndf@<name>）は取得元の marketplace.json の name で決まる
+      const name = (JSON.parse(await readFile(join(src, ".claude-plugin/marketplace.json"), "utf8")) as { name?: unknown }).name;
+      if (typeof name !== "string" || name === "") throw new Error("取得元の marketplace.json に name が無い");
+      const pluginEnv = await childEnv();
+      if ((await run("claude", ["plugin", "marketplace", "add", src], { cwd: repoDir, env: pluginEnv })) !== 0) throw new Error("NDF の取得元を足せない");
+      if ((await run("claude", ["plugin", "install", `ndf@${name}`], { cwd: repoDir, env: pluginEnv })) !== 0) throw new Error("NDF を入れられない");
       const manifest = JSON.parse(await readFile(join(src, "plugins/ndf/.claude-plugin/plugin.json"), "utf8")) as { version: string };
       return manifest.version === want ? version : manifest.version;
     },
@@ -103,6 +113,14 @@ export async function createRuntime(instruction: RunJobInstruction, env: Record<
           ? `/ndf:development-workflow ${inst.ISSUES!.split(",").map((n) => `#${n}`).join(" ")}`
           : `前回の続きから進めてください。${directive ? `利用者の判断: ${directive}` : ""}`;
       const offsets = new Map<string, number>();
+      // 再開では復元したログの末尾から読む。前のジョブが送った行を新しい job_id で送り直さない
+      if (inst.START === "resume") {
+        for (const file of [...(await findFiles(join(repoDir, ".ndf"), "progress.jsonl")), askLedger]) {
+          offsets.set(file, (await readFile(file, "utf8").catch(() => "")).length);
+        }
+      } else {
+        offsets.set(askLedger, (await readFile(askLedger, "utf8").catch(() => "")).length);
+      }
       let plan: string | null = null;
       let lastText = "";
       const poll = async () => {
@@ -119,21 +137,27 @@ export async function createRuntime(instruction: RunJobInstruction, env: Record<
             }
             const body = translateProgressLine(line, inst.REPO);
             if (body) await emit(body);
+            // supervise が別のプロセスで起動したステップの使用量（conductor の result には入らない）
+            for (const u of usageFromStepLine(line)) await emit(u);
           }
         }
-        // #2206 の代わりの判断の記録。置き場は #2206 が決める（NDF_DELEGATED_FILE）。無ければ何も送らない
-        const delegated = env.NDF_DELEGATED_FILE ? join(repoDir, env.NDF_DELEGATED_FILE) : null;
-        if (delegated) {
-          const content = await readFile(delegated, "utf8").catch(() => "");
-          const from = offsets.get(delegated) ?? 0;
-          offsets.set(delegated, content.length);
-          for (const raw of content.slice(from).split("\n").filter(Boolean)) {
-            const body = delegatedFromRecord(JSON.parse(raw) as Record<string, unknown>);
-            if (body) await emit(body);
-          }
+        // 代わりの判断の記録（ask_ledger.py の ask.jsonl の kind: decision の行）
+        const content = await readFile(askLedger, "utf8").catch(() => "");
+        const from = offsets.get(askLedger) ?? 0;
+        offsets.set(askLedger, content.length);
+        for (const raw of content.slice(from).split("\n").filter(Boolean)) {
+          const row = JSON.parse(raw) as Record<string, unknown>;
+          if (row.kind !== "decision") continue;
+          const body = delegatedFromRecord(row);
+          if (body) await emit(body);
         }
       };
       const timer = setInterval(() => void poll().catch(() => undefined), POLL_MS);
+      // ロールの資格は 1 時間で切れるため、動いている間は置き直す（子は credential_process で読み直す）
+      const role = credential?.kind === "aws_role" ? credential : null;
+      const refresher = role
+        ? setInterval(() => void writeRoleCredentials(role, stsAssumeRole, sessionName, credentialDir).catch(() => undefined), ROLE_REFRESH_MS)
+        : null;
       const code = await run("claude", ["-p", prompt, "--output-format", "stream-json", "--verbose"], {
         cwd: repoDir,
         env: await childEnv(),
@@ -150,6 +174,7 @@ export async function createRuntime(instruction: RunJobInstruction, env: Record<
         },
       });
       clearInterval(timer);
+      if (refresher) clearInterval(refresher);
       await poll();
       if (code !== 0) throw new Error(`conductor が ${code} で終わった`);
       const report = reportResult(lastText);

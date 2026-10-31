@@ -18,10 +18,17 @@ export interface IssueSummary {
   title: string;
 }
 
-// 棚卸しの順位の表（/ndf:backlog-refinement がマイルストーンの説明へ書く表）
+// 棚卸しの順位の表（/ndf:backlog-refinement がマイルストーンの説明へ書く表）。題は GitHub から引いて埋める
 export interface RankingTable {
   milestone: string;
   rows: IssueSummary[];
+}
+
+// 説明から拾った順位の表。題を持たず、マイルストーンの番号で課題を引く
+export interface RankedMilestone {
+  milestone: string;
+  milestoneNumber: number;
+  numbers: number[];
 }
 
 // 課題の番号を確かめた結果。開いている課題でない番号（閉じた・Pull Request・無い）を返す
@@ -47,22 +54,22 @@ export interface GitHubPort {
 
 // マイルストーンの名前の形（<2 桁の連番> <主題>）
 const MILESTONE = /^(\d{2}) \S/;
-// 順位の表の行（| 順位 | #番号 | 題 | …）から番号と題を拾う
-const RANK_ROW = /^\|\s*\d+\s*\|\s*#(\d+)\s*\|\s*([^|]+?)\s*\|/;
+// 順位の表の行（| 順位 | #番号（判断待ち） | UBV | …。upkeep_rank_table.py の形）から番号を拾う。表は題を持たない
+const RANK_ROW = /^\|\s*\d+\s*\|\s*#(\d+)[^|]*\|/;
 
 // 開いたマイルストーンのうち、順位の表を持つ番号が最も小さいものから表を作る
-export function pickRankingTable(milestones: { title: string; description: string | null }[]): RankingTable | null {
+export function pickRankingTable(milestones: { title: string; number: number; description: string | null }[]): RankedMilestone | null {
   const ordered = milestones
     .map((m) => ({ ...m, order: MILESTONE.exec(m.title)?.[1] }))
     .filter((m): m is typeof m & { order: string } => m.order !== undefined)
     .sort((a, b) => Number(a.order) - Number(b.order));
   for (const m of ordered) {
-    const rows = (m.description ?? "")
+    const numbers = (m.description ?? "")
       .split("\n")
       .map((line) => RANK_ROW.exec(line.trim()))
       .filter((x): x is RegExpExecArray => x !== null)
-      .map((x) => ({ number: Number(x[1]), title: x[2]! }));
-    if (rows.length > 0) return { milestone: m.title, rows };
+      .map((x) => Number(x[1]));
+    if (numbers.length > 0) return { milestone: m.title, milestoneNumber: m.number, numbers };
   }
   return null;
 }

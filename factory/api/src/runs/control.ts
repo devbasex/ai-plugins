@@ -144,9 +144,10 @@ export class RunControl {
     const job = this.newJob(run, 1, "new", null);
     run.currentJobId = job.jobId;
 
+    // 月の token は枠の取り直しで変わらないため、1 回の開始で 1 度だけ数える
+    const tokensThisMonth = ctx.executionMode === "managed" ? await this.tokensThisMonth(ctx.accountId, ctx.plan === "team" ? ctx.userId : null) : undefined;
     for (let attempt = 0; attempt < SLOT_RETRIES; attempt++) {
       const slots = await table.getSlots(ctx.accountId, registration.repositoryId);
-      const tokensThisMonth = ctx.executionMode === "managed" ? await this.tokensThisMonth(ctx.accountId) : undefined;
       const judgment = judgeLimits(ctx, { runningSprintRuns: slots.account, tokensThisMonth });
       if (!judgment.allowed) {
         throw new ConflictError("limits_exceeded", "使える量の上限に達しています", { reasons: judgment.reasons });
@@ -159,13 +160,15 @@ export class RunControl {
     throw new ServiceUnavailableError("sprint_run_unavailable");
   }
 
-  // その UTC の暦月に、アカウントの実行が使った token（形態 managed の上限の判定に使う）
-  private async tokensThisMonth(accountId: string): Promise<number> {
+  // その UTC の暦月に、アカウントの実行が使った token（形態 managed の上限の判定に使う）。
+  // チームでは上限が席ごとのため、userId を渡してその席の利用者が始めた実行だけを数える
+  private async tokensThisMonth(accountId: string, userId: string | null): Promise<number> {
     const now = this.now();
     const since = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
     const runs = await this.deps.table.listRuns(accountId, 1000);
     let total = 0;
     for (const run of runs) {
+      if (userId !== null && run.createdBy !== userId) continue;
       if (isTerminalRun(run.state) && new Date(run.updatedAt) < since) continue;
       total += await this.deps.reader.sumTokensSince(run.sprintRunId, since);
     }

@@ -2,7 +2,8 @@
 import type { RunJobInstruction } from "@ndf-factory/contracts";
 import type { ExecutionMode } from "../accounts/model.ts";
 
-export type TaskStatus = "PENDING" | "RUNNING" | "STOPPED" | "MISSING";
+// STOPPING は止まる途中（コンテナがまだ動きうる）。STOPPED を確かめるまでジョブを確定しない
+export type TaskStatus = "PENDING" | "RUNNING" | "STOPPING" | "STOPPED" | "MISSING";
 
 export interface SignedUrl {
   url: string;

@@ -235,6 +235,8 @@ class RunState:
                 "summary": summary.strip()[:160],
                 **({"pr": c["pr"]} if c.get("pr") else {}),
                 **({"out": out} if out else {}),  # --from の再開で前の実行の結果を引く（#1676 の決定 6）
+                # モデルごとの使用量（factory のランナーが月の上限の数へ入れる。キーの追加だけ）
+                **({"models": (c.get("llm") or {})["models"]} if (c.get("llm") or {}).get("models") else {}),
             }
         )
 

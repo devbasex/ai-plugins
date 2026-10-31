@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { validateProgressEvent, type GateReachedEvent, type ProgressEvent, type RunJobInstruction } from "@ndf-factory/contracts";
 import { GITHUB_TOKEN_REFRESH_MS, runJob, type JobRuntime } from "./main.ts";
-import { claudeEnv, type AssumeRole } from "./model.ts";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { claudeEnv, ROLE_PROFILE, type AssumeRole } from "./model.ts";
 import { createSender } from "./send.ts";
 import { trackedEntries } from "./state.ts";
 import {
@@ -91,25 +94,32 @@ describe("状態（受け入れ条件 28・32、I42）", () => {
 });
 
 describe("claude の呼び方（受け入れ条件 8・29）", () => {
-  const base = { PATH: "/usr/bin", INGEST_TOKEN_SECRET_ARN: "arn:x", MODEL_CREDENTIAL_SECRET_ARN: "arn:y", BEDROCK_REGION: "us-west-2" };
+  const dir = mkdtempSync(join(tmpdir(), "ndf-byok-"));
+  const base = { PATH: "/usr/bin", INGEST_TOKEN: "raw", INGEST_TOKEN_SECRET_ARN: "arn:x", MODEL_CREDENTIAL_SECRET_ARN: "arn:y", BEDROCK_REGION: "us-west-2" };
   const assume: AssumeRole = async (cred) => {
     if (cred.external_id !== "ndf-factory:acc-1") throw new Error("AccessDenied");
     return { accessKeyId: "AKIA", secretAccessKey: "s", sessionToken: "t" };
   };
 
   it("managed は Bedrock とタスクの役割で、API キーもアクセスキーも置かない", async () => {
-    const env = await claudeEnv(base, "managed", null, assume, "s");
+    const env = await claudeEnv(base, "managed", null, assume, "s", dir);
     expect(env).toMatchObject({ CLAUDE_CODE_USE_BEDROCK: "1", AWS_REGION: "us-west-2" });
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
     expect(env.AWS_ACCESS_KEY_ID).toBeUndefined();
     expect(env.INGEST_TOKEN_SECRET_ARN).toBeUndefined();
+    expect(env.INGEST_TOKEN).toBeUndefined();
   });
 
   it("byok の API キーは子の環境にだけ置き、ロールは外部 ID つきで引き受ける。外部 ID が違えば失敗する", async () => {
-    expect((await claudeEnv(base, "byok", { kind: "anthropic_api_key", api_key: "k" }, assume, "s")).ANTHROPIC_API_KEY).toBe("k");
+    expect((await claudeEnv(base, "byok", { kind: "anthropic_api_key", api_key: "k" }, assume, "s", dir)).ANTHROPIC_API_KEY).toBe("k");
     const role = { kind: "aws_role" as const, role_arn: "arn:aws:iam::123456789012:role/r", region: "us-east-1", external_id: "ndf-factory:acc-1" };
-    expect((await claudeEnv(base, "byok", role, assume, "s")).AWS_SESSION_TOKEN).toBe("t");
-    await expect(claudeEnv(base, "byok", { ...role, external_id: "other" }, assume, "s")).rejects.toThrow();
+    const env = await claudeEnv(base, "byok", role, assume, "s", dir);
+    // 資格は環境変数へ固定せず、親が置き直すファイルを credential_process で読ませる
+    expect(env.AWS_SESSION_TOKEN).toBeUndefined();
+    expect(env.AWS_PROFILE).toBe(ROLE_PROFILE);
+    expect(readFileSync(env.AWS_CONFIG_FILE!, "utf8")).toContain("credential_process");
+    expect(JSON.parse(readFileSync(join(dir, "credentials.json"), "utf8"))).toMatchObject({ Version: 1, SessionToken: "t" });
+    await expect(claudeEnv(base, "byok", { ...role, external_id: "other" }, assume, "s", dir)).rejects.toThrow();
   });
 });
 

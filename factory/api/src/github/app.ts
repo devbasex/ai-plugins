@@ -57,11 +57,9 @@ export class GitHubApp implements GitHubPort {
 
   async listReachableRepositories(userToken: string): Promise<ReachableRepository[]> {
     const out: ReachableRepository[] = [];
-    const installs = await this.get(`/user/installations?per_page=100`, userToken);
-    for (const inst of (installs?.installations as Json[] | undefined) ?? []) {
+    for (const inst of await this.getAllPages(`/user/installations`, userToken, "installations")) {
       const installationId = inst.id as number;
-      const repos = await this.get(`/user/installations/${installationId}/repositories?per_page=100`, userToken);
-      for (const r of (repos?.repositories as Json[] | undefined) ?? []) {
+      for (const r of await this.getAllPages(`/user/installations/${installationId}/repositories`, userToken, "repositories")) {
         out.push({ repositoryId: r.id as number, fullName: r.full_name as string, installationId });
       }
     }
@@ -111,7 +109,29 @@ export class GitHubApp implements GitHubPort {
     const token = await this.tokenFor(installationId, fullName);
     if (!token) return null;
     const list = (await this.getList(`/repos/${fullName}/milestones?state=open&per_page=100`, token)) ?? [];
-    return pickRankingTable(list.map((m) => ({ title: m.title as string, description: (m.description as string | null) ?? null })));
+    const picked = pickRankingTable(
+      list.map((m) => ({ title: m.title as string, number: m.number as number, description: (m.description as string | null) ?? null })),
+    );
+    if (!picked) return null;
+    // 題は表に無いため、そのマイルストーンの開いた課題から引く。閉じた課題と Pull Request は候補にしない
+    const titles = new Map<number, string>();
+    for (const i of await this.getAllPages(`/repos/${fullName}/issues?state=open&milestone=${picked.milestoneNumber}`, token, null)) {
+      if (i.pull_request === undefined) titles.set(i.number as number, i.title as string);
+    }
+    const rows = picked.numbers.filter((n) => titles.has(n)).map((n) => ({ number: n, title: titles.get(n)! }));
+    return rows.length > 0 ? { milestone: picked.milestone, rows } : null;
+  }
+
+  // per_page=100 で最後のページまで読む。key があればその配列を、無ければ本体の配列を集める
+  private async getAllPages(path: string, token: string, key: string | null): Promise<Json[]> {
+    const out: Json[] = [];
+    const sep = path.includes("?") ? "&" : "?";
+    for (let page = 1; ; page++) {
+      const body = await this.get(`${path}${sep}per_page=100&page=${page}`, token);
+      const items = ((key ? body?.[key] : body) as Json[] | undefined) ?? [];
+      out.push(...items);
+      if (items.length < 100) return out;
+    }
   }
 
   private async tokenFor(installationId: number, fullName: string): Promise<string | null> {

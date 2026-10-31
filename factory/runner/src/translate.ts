@@ -164,3 +164,22 @@ export function delegatedFromRecord(record: Line): Pick<DecisionDelegatedEvent, 
   const category = typeof record.category === "string" ? record.category : null;
   return { type: "decision.delegated", payload: { question, answer, reason, category } };
 }
+
+// progress.jsonl の step の行の models（supervise が別のプロセスで起動した claude のモデルごとの使用量）から、
+// モデルごとに 1 件。数え方は usageFromResult と同じ（cache の読み書きを入力に足す）
+export function usageFromStepLine(line: Line): Pick<UsageRecordedEvent, "type" | "payload">[] {
+  if (line.kind !== "step" || typeof line.step !== "string") return [];
+  const models = line.models;
+  if (typeof models !== "object" || models === null) return [];
+  const n = (v: unknown) => (typeof v === "number" && v >= 0 ? v : 0);
+  return Object.entries(models as Record<string, Record<string, unknown>>).map(([model, u]) => ({
+    type: "usage.recorded" as const,
+    payload: {
+      model,
+      input_tokens: n(u.input) + n(u.cache_read) + n(u.cache_write),
+      output_tokens: n(u.output),
+      cost_usd: n(u.cost),
+      step: line.step as string,
+    },
+  }));
+}

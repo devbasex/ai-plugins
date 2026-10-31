@@ -64,7 +64,8 @@ export class EcsRunnerPlatform implements RunnerPlatform {
     const out = await this.ecs.send(new DescribeTasksCommand({ cluster: this.config.clusterArn, tasks: [taskArn] }));
     const status = out.tasks?.[0]?.lastStatus;
     if (!status) return "MISSING";
-    if (status === "STOPPED" || status === "DEPROVISIONING" || status === "STOPPING") return "STOPPED";
+    if (status === "STOPPED") return "STOPPED";
+    if (status === "DEACTIVATING" || status === "STOPPING" || status === "DEPROVISIONING") return "STOPPING";
     return status === "RUNNING" ? "RUNNING" : "PENDING";
   }
 
