@@ -212,6 +212,22 @@ bash <プラグインのパス>/scripts/worktree-setup.sh init
 規約は `skills/development-workflow/references/waiting.md`（待ち方）と
 `skills/development-workflow/references/context-window.md`（会話を切る）にあります。
 
+### 承認ゲートの外の問い合わせを止める（Claude Code だけ）
+
+`scripts/hook.py` の問い合わせの guard（`hook_lib/ask_guard.py`）が PreToolUse の `AskUserQuestion` で動き、問いの区分
+（入力の `metadata.source`）が無い・許されていない問いを止めます。止めたときは、AI が自分で決めて `scripts/ask.py decide` で
+記録する手段と、人へ回してよい区分の一覧を理由の欄に出します。承認ゲート（`ndf-gate:1`・`ndf-gate:2`）とレッドライン
+（`ndf-ask:redline:<番号>`）の問いはどの宣言でも止めません。止めた問いでは Slack の待ち通知を送りません。
+
+プロジェクトごとの働き方は `.ndf/ask.json` で変えます（無ければ `enforce`）。今の振る舞いへ戻すには次を書きます。
+
+```json
+{"version": 1, "mode": "off"}
+```
+
+区分の表と宣言の形は `skills/development-workflow/references/asking.md`、ランタイムごとの扱い（Codex・Kiro CLI・agy は対象外）は
+[docs/ndf-plugin-reference.md の「承認ゲートの外の問い合わせ」](../../docs/ndf-plugin-reference.md#承認ゲートの外の問い合わせ) にあります。
+
 ### 学習の設定を Off にする（Claude Code と Codex）
 
 NDF を読み込んだセッションの開始で、そのアカウントの「入力を学習に使う」設定を確かめ、On なら Off にします
