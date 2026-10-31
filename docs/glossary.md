@@ -310,10 +310,10 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 全体テストの実測 | — | 同じリポジトリで先に走った全体テストの壁時計の秒。所要の記録とは別に残し、後のプランと test-run.py が予算なしのテストの上限を決めるときに読む（#1631） | — | — | `docs/specifications/ndf-supervise-test-limits-from-whole-runs.md` |
 | テストの上限 | `limits` | test_strategy.limits が返す init_test_timeout・test_timeout・whole_timeout（秒）。ステップの timeout はこれに with_margin の余裕を足した値で、テストの上限には余裕を足さない | — | — | `docs/specifications/ndf-supervise-test-limits-from-whole-runs.md` |
 | 全体テストの鍵 | `whole_key` | 戦略の全体テストのコマンドの集合から作る識別子（whole_key）。全体テストの実測をコマンドごとに分け、コマンドの違う実測を混ぜない（#1631） | — | — | `docs/specifications/ndf-supervise-test-limits-from-whole-runs.md` |
-| 問い合わせの区分 | `ask_category` | AskUserQuestion の metadata.source に AI が付ける値。ndf-gate:<番号>（承認ゲート）・ndf-ask:redline:<番号>（レッドライン。宣言で外せない）・ndf-ask:<名前>（宣言が許す区分）の 3 つの形。hook は質問の中身を読まず、この値が許された区分かだけを見る（#2206） | — | — | — |
-| 問い合わせの宣言 | `ask_declaration` | プロジェクトの .ndf/ask.json。人へ回してよい問い合わせの区分と hook の働き方（enforce / advise / off）を書く（#2206） | — | — | — |
-| 代わりの判断 | `proxy_decision` | hook が問い合わせを止めた後か、手順が「AI が決める」とした場面で AI が自分で下した判断。問い・選んだ答え・理由を問い合わせの記録へ書く（#2206） | — | — | — |
-| 問い合わせの記録 | `ask_ledger` | 状態の置き場の ask.jsonl。hook の判定の行と代わりの判断の行を追記だけで持ち、振り返りと Factory のランナーが読む（#2206） | — | — | — |
+| 問い合わせの区分 | `ask_category` | AskUserQuestion の metadata.source に AI が付ける値。ndf-gate:<番号>（承認ゲート）・ndf-ask:redline:<番号>（レッドライン。宣言で外せない）・ndf-ask:<名前>（宣言が許す区分）の 3 つの形。hook は質問の中身を読まず、この値が許された区分かだけを見る（#2206） | — | — | `docs/specifications/ndf-ask-guard.md` |
+| 問い合わせの宣言 | `ask_declaration` | プロジェクトの .ndf/ask.json。人へ回してよい問い合わせの区分と hook の働き方（enforce / advise / off）を書く（#2206） | — | — | `docs/specifications/ndf-ask-guard.md` |
+| 代わりの判断 | `proxy_decision` | hook が問い合わせを止めた後か、手順が「AI が決める」とした場面で AI が自分で下した判断。問い・選んだ答え・理由を問い合わせの記録へ書く（#2206） | — | — | `docs/specifications/ndf-ask-guard.md` |
+| 問い合わせの記録 | `ask_ledger` | 状態の置き場の ask.jsonl。hook の判定の行と代わりの判断の行を追記だけで持ち、振り返りと Factory のランナーが読む（#2206） | — | — | `docs/specifications/ndf-ask-guard.md` |
 | 試行 | — | 同じステップを流し直したときの 1 回ごとの実行と、その結果 JSON。プランの実行の記録の NN-<ステップ>.out の 1 つが 1 試行に当たる | — | — | — |
 | 欠けの残る結果 | — | 手順は終わったが、出すはずの材料・記録の一部が無いか、目標（収束など）に届かなかった結果。stopped と終了コード 6 と gaps で返し、ok で返さない | — | — | — |
 | 結果の置き場 | — | 読む側が結果 JSON や材料を探す場所（プランの実行の記録・記録のファイル）。置き場が無いことと、材料が 0 件であることを分けて扱う | — | — | — |
@@ -803,12 +803,12 @@ NDF を Web UI から操作できるサービスとして提供するときの�
 | 起票の依頼の結果 | — | 起票の依頼 1 件ごとに 1 件残る進捗の事象 issue.request_resolved。サービスが起票した Issue の参照か、下書きへ回した理由を持つ | — | — | — |
 | 起票の代行 | — | 記録された起票の依頼を読み、起票してよい先へはサービスが 1 リポジトリと Issues の書き込みだけに絞った導入の token で起票し、そうでない先は下書きを人へ回す、サービスの処理 | — | — | — |
 | 下書き（起票の依頼） | — | サービスが起票しなかった起票の依頼の題と本文。人が相手先の流儀に沿って起票するために回る | — | — | — |
-| リポジトリの登録 | — | アカウントが GitHub のリポジトリ 1 つを、GitHub App の導入の識別子と一緒に持つこと。スプリントの実行はこれに属する | — | — | — |
-| GitHub App の導入 | — | 利用者が自分のリポジトリへサービスの GitHub App を入れたもの。導入の識別子で指し、clone と push の導入の token をここから作る | — | — | — |
-| キーの持ち込み | — | 実行の形態 `byok` で、利用者の Anthropic API キーか、引き受ける AWS のロールの ARN をサービスへ預けること | — | — | — |
-| 再開の要求 | — | 承認の依頼に答えが保存された後、承認と通知が実行の制御へ出す、`resume` の実行ジョブを起こす要求 | — | — | — |
-| 打ち切りの時間 | — | 1 つの実行ジョブが動いてよい時間の上限。超えたら実行の制御が止める | — | — | — |
-| 課題の候補 | — | スプリントを始める画面に、AI が棚卸しの順位から理由つきで出す課題 | — | — | — |
-| 実行の枠 | — | アカウントとリポジトリごとに、終わりの状態でないスプリントの実行を数えた値。開始で増え、終わりの状態への移りで減る | — | — | — |
-| 見回り | — | 実行の制御が 5 分ごとに動き、打ち切りの時間を過ぎた実行ジョブを止め、停止の知らせを取りこぼした実行ジョブを終わらせる処理 | — | — | — |
-| 候補の証明 | — | GitHub で確かめたリポジトリの登録の候補を、取り込みが署名して 10 分だけ有効にした値。登録の要求はこれを持って来る | — | — | — |
+| リポジトリの登録 | — | アカウントが GitHub のリポジトリ 1 つを、GitHub App の導入の識別子と一緒に持つこと。スプリントの実行はこれに属する | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
+| GitHub App の導入 | — | 利用者が自分のリポジトリへサービスの GitHub App を入れたもの。導入の識別子で指し、clone と push の導入の token をここから作る | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
+| キーの持ち込み | — | 実行の形態 `byok` で、利用者の Anthropic API キーか、引き受ける AWS のロールの ARN をサービスへ預けること | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
+| 再開の要求 | — | 承認の依頼に答えが保存された後、承認と通知が実行の制御へ出す、`resume` の実行ジョブを起こす要求 | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
+| 打ち切りの時間 | — | 1 つの実行ジョブが動いてよい時間の上限。超えたら実行の制御が止める | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
+| 課題の候補 | — | スプリントを始める画面に、AI が棚卸しの順位から理由つきで出す課題 | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
+| 実行の枠 | — | アカウントとリポジトリごとに、終わりの状態でないスプリントの実行を数えた値。開始で増え、終わりの状態への移りで減る | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
+| 見回り | — | 実行の制御が 5 分ごとに動き、打ち切りの時間を過ぎた実行ジョブを止め、停止の知らせを取りこぼした実行ジョブを終わらせる処理 | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
+| 候補の証明 | — | GitHub で確かめたリポジトリの登録の候補を、取り込みが署名して 10 分だけ有効にした値。登録の要求はこれを持って来る | — | — | `docs/specifications/ndf-factory-runs-and-runner.md` |
