@@ -9,6 +9,8 @@ import { requireCaller, type AuthDeps, type AuthEnv } from "../auth/resolve.ts";
 import { registerMe } from "../routes/me.ts";
 import { registerTeams } from "../routes/teams.ts";
 import { registerAccounts } from "../routes/accounts.ts";
+import { registerFactory, type FactoryDeps } from "../routes/factory.ts";
+import { factoryDepsFromEnv } from "../runs/deps.ts";
 
 export interface LogEntry {
   user_id: string | null;
@@ -38,6 +40,7 @@ export function createApiApp(
   deps: () => AuthDeps,
   log: Logger = jsonLogger,
   webOrigin: () => string | null = webOriginFromEnv,
+  factory: (() => FactoryDeps) | null = null,
 ): Hono<AuthEnv> {
   const app = new Hono<AuthEnv>();
   app.use("*", async (c, next) => {
@@ -66,6 +69,7 @@ export function createApiApp(
   registerMe(app);
   registerTeams(app);
   registerAccounts(app);
+  if (factory) registerFactory(app, factory);
   return app;
 }
 
@@ -90,4 +94,4 @@ export function depsFromEnv(): AuthDeps {
 }
 
 // API Gateway の HTTP API（payload 2.0）から呼ばれる Lambda の handler
-export const handler = handle(createApiApp(depsFromEnv));
+export const handler = handle(createApiApp(depsFromEnv, jsonLogger, webOriginFromEnv, factoryDepsFromEnv));

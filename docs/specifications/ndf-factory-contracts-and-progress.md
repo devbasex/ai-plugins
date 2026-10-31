@@ -116,7 +116,7 @@ graph TD
 | `verifyRunJobToken(token)` | token の文字列（`Bearer ` を除いたもの） | `Promise<VerifiedRunJob>`（`jobId`・`sprintRunId`・`repo`・`expiresAt`）。公開鍵の集合は `RUN_JOB_TOKEN_VERIFY_KEYS_SECRET_ARN` から読み、5 分ごとに読み直す | 無効は `RunJobTokenError`（`code` が `malformed` / `bad_signature` / `expired` / `unknown_key`。呼ぶ側が 401 にする）。秘密を読めない失敗は `RunJobTokenError` でない例外（呼ぶ側が 503 にする） |
 | `createRunJobTokenVerifier(keys)` | 公開鍵の JWK の並び（Ed25519 でない鍵は捨てる） | `RunJobTokenVerifier`（`(token) => Promise<VerifiedRunJob>`） | 無効は `RunJobTokenError`（同じ 4 つ） |
 | `signRunJobToken(claims, key)` | `claims` = `RunJobTokenClaims`（`jobId`・`sprintRunId`・`repo`・`expiresAt: Date` だけ。ほかの鍵を型で受けない）、`key` = `RunJobSigningKey`（`kid`・`privateKey`（`CryptoKey` か JWK）） | `Promise<string>` | 鍵が Ed25519 でなければ例外 |
-| `createRunJobTokenKit()` | 無し | `Promise<RunJobTokenKit>`（`sign(claims, opts?)`・`otherKeySign(claims)`・`verify`・`publicJwks`）。鍵はメモリの中だけ。`sign` の `opts.kid` を変えると知らない鍵の token、`otherKeySign` は署名が合わない token になる | — |
+| `createRunJobTokenKit()` | 無し | `Promise<RunJobTokenKit>`（`sign(claims, opts?)`・`otherKeySign(claims)`・`verify`・`publicJwks`・`signingKey`）。`claims` の `repo` を省くと `owner/name` になる。鍵はメモリの中だけ。`sign` の `opts.kid` を変えると知らない鍵の token、`otherKeySign` は署名が合わない token になる | — |
 | `appendControlEvent(event)` | `JobFinishedEvent`（`source` は `control`、冪等の鍵は `<job_id>:finished`） | `Promise<{ written: boolean }>`。`false` は同じ鍵（ランナーの分）が既にある | 定義に合わない → `ProgressEventError`（`code` が `invalid_event`）。`control` の照合に合わない → `ProgressEventError`（`forbidden`）。保存の失敗はそのまま投げる |
 | `createIngestApp(deps, log?)` | `deps` = `IngestDeps`（`verifier`・`store`・`savedAnswers`・`webhookSecret: () => Promise<string>`・`apiCallerRoleArn`）か、それを返す関数。`log` は `IngestLogger`（既定は 1 行の JSON を標準出力へ） | Hono の app | — |
 

@@ -258,6 +258,36 @@ describe("追記と冪等（受け入れ条件 14・15、I10）", () => {
   });
 });
 
+describe("step.recorded の Pull Request の照合（#2186 の受け入れ条件 16・17、I37）", () => {
+  const prStep = (repo: string, key = "job-1:1") =>
+    runnerEvent({ idempotency_key: key, type: "step.recorded", payload: { step: "pr", exit_code: 0, seconds: 1, summary: "s", pull_request: { repo, number: 7 } } });
+  const bearer = async () => `Bearer ${await t.tokens.sign({ jobId: "job-1", sprintRunId: "sr-1", repo: "org-a/repo-a" })}`;
+
+  it("token の repo と違うリポジトリの Pull Request は 403 で、pr_ref を残さない", async () => {
+    await expectRejected(await t.runner(prStep("org-b/repo-b"), { authorization: await bearer() }), 403, FORBIDDEN);
+    expect(t.store.events).toHaveLength(0);
+    const webhook = {
+      action: "synchronize",
+      repository: { full_name: "org-b/repo-b" },
+      pull_request: { number: 7, state: "open", merged: false, updated_at: "2026-10-30T05:00:00Z" },
+    };
+    expect((await t.github("pull_request", webhook)).status).toBe(202);
+    expect(t.store.events.filter((e) => e.type === "pr.updated")).toHaveLength(0);
+  });
+
+  it("token の repo のものは大文字と小文字を問わず 202 で、pr_ref は小文字", async () => {
+    expect((await t.runner(prStep("Org-A/Repo-A"), { authorization: await bearer() })).status).toBe(202);
+    expect(t.store.events.map((e) => e.pr_ref)).toEqual(["org-a/repo-a#7"]);
+  });
+
+  it("decision.delegated は runner が書ける（#2206）", async () => {
+    const res = await t.runner(
+      runnerEvent({ type: "decision.delegated", payload: { question: "q", answer: "a", reason: "r", category: null } }),
+    );
+    expect(res.status).toBe(202);
+  });
+});
+
 describe("GitHub の Webhook（受け入れ条件 12）", () => {
   const prBody = (patch: Record<string, unknown> = {}) => ({
     action: "synchronize",
