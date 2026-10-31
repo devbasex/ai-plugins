@@ -1,6 +1,6 @@
-"""gate_rejections.py: 承認ゲートの利用者の答えの記録（#1833・#2183）。標準ライブラリと lib/ だけで書く。
+"""gate_rejections.py: 承認ゲートの差し戻しの記録（承認の行も書く。#1833・#2183）。標準ライブラリと lib/ だけで書く。
 
-答えの記録は `<NDF_MVV_STATE_DIR>/gate-rejections.jsonl`（覆し・MVV 判定の記録と同じ置き場）に、
+差し戻しの記録は `<NDF_MVV_STATE_DIR>/gate-rejections.jsonl`（覆し・MVV 判定の記録と同じ置き場）に、
 利用者の答え 1 回（差し戻しか承認）を 1 行で追記する。pace と状態ファイルの有無によらず、差し戻しの置き場はここだけである。
 覆しの記録（`project_mvv_signals`）へは書かず、覆しの集計はこの記録を読まない。
 

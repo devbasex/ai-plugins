@@ -169,7 +169,7 @@ def manual_production_waves(a, repo: str, then_of: str, mvv: str, condition: dic
 
 
 def user_gate_cmd(a, gate: str, pr: bool, outcomes: str = "approved|rejected") -> str:
-    """利用者の答えを状態と答えの記録へ書くコマンド（覆しの記録。#1400 の AC6・#2183）。承認ゲート 1 は答えた設計 PR を --pr で渡す。"""
+    """利用者の答えを状態と差し戻しの記録へ書くコマンド（覆しの記録。#1400 の AC6・#2183）。承認ゲート 1 は答えた設計 PR を --pr で渡す。"""
     state = shlex.quote(sprint_state_path(a))
     return (
         f"python3 {shlex.quote(str(HERE / 'sprint-state.py'))} gate {state} {shlex.quote(gate)} --what <要約> --by user"
@@ -179,7 +179,7 @@ def user_gate_cmd(a, gate: str, pr: bool, outcomes: str = "approved|rejected") -
 
 
 def reject_resume(what: str) -> str:
-    """差し戻しの後の続き: 直してから計画を `--from reject` で流す（差し戻しを答えの記録へ書いて再提示する。#2183）。"""
+    """差し戻しの後の続き: 直してから計画を `--from reject` で流す（差し戻しを差し戻しの記録へ書いて再提示する。#2183）。"""
     return f"差し戻されたら直してから `python3 {shlex.quote(str(SELF))} run <{what}> --from reject` で流す（差し戻しを記録して再提示する）"
 
 

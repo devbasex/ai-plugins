@@ -210,7 +210,7 @@ def test_sprint_state_approval_writes_an_approval_not_a_rejection(tmp_path):
 
 
 def test_a_gate_passed_by_mvv_in_the_state_file_is_a_recorded_zero(tmp_path):
-    """MVV 判定で通した承認ゲートは状態ファイルにだけ残る。それも答えの記録として読み、0 件を返す。"""
+    """MVV 判定で通した承認ゲートは状態ファイルにだけ残る。それも答えとして読み、0 件を返す。"""
     state = _state(tmp_path, "normal")
     m = json.loads(state.read_text())
     m["gates"] = [{"name": "関門 2", "what": "x", "at": AT, "by": "mvv", "verdict": "従う"}]

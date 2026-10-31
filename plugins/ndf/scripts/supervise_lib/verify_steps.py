@@ -168,7 +168,7 @@ REJECT_STEP = "reject"
 
 
 def reject_step(state: str, gate: str, next_id: str, root: str = ".", pr: str | None = None) -> dict:
-    """承認ゲートで差し戻された後の続き（#2183）。直した後に `run <計画> --from reject` で流すと、差し戻しを答えの記録
+    """承認ゲートで差し戻された後の続き（#2183）。直した後に `run <計画> --from reject` で流すと、差し戻しを差し戻しの記録
     （`gate-rejections.jsonl`）へ 1 行書いてから `next_id`（再提示のステップ）へ進む。記録を書けなければ止まる。
     conductor は `sprint-state.py gate ... --outcome rejected` を手で打たない。"""
     what = shlex.quote(f"{gate} で差し戻された（直して再提示する）")

@@ -13,7 +13,7 @@
 件数を 0 と書かずに「未記録」（`status: stopped`・件数は `null`・`metrics.recorded` は false）を返す。
 
 終了コード: 0 = 書いた・数えた / 1 = 記録を書けない / 2 = 引数の誤り・範囲が無い・記録を読めない（件数は `null`、
-summary は「不明」）/ 3 = 範囲に答えの記録が無い（件数は `null`、summary は「未記録」）。
+summary は「不明」）/ 3 = 範囲に答えの行が無い（件数は `null`、summary は「未記録」）。
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ def cmd_record(a) -> tuple[dict, int]:
     try:
         path = gr.append(row)
     except OSError as e:
-        return step_result.result(TOOL, "stopped", f"答えの記録を書けない（{gr.ledger_path()}）: {e}"), step_result.EXIT_VIOLATION
+        return step_result.result(TOOL, "stopped", f"差し戻しの記録を書けない（{gr.ledger_path()}）: {e}"), step_result.EXIT_VIOLATION
     word = "差し戻し" if row["outcome"] == gr.REJECTED else "承認"
     summary = f"{row['gate']} の{word}を記録した（{row['at']}）"
     return step_result.result(TOOL, "ok", summary, [row], {"path": str(path)}), step_result.EXIT_OK
@@ -60,7 +60,7 @@ def cmd_count(a) -> tuple[dict, int]:
     except jsonio.JsonReadError as e:
         return step_result.result(TOOL, "stopped", f"承認ゲートの差し戻し: 不明（{e}）", [], unknown), step_result.EXIT_UNREADABLE
     if not answered:
-        summary = "承認ゲートの差し戻し: 未記録（範囲に承認ゲートの答えの記録が無い。0 件とは読まない）"
+        summary = "承認ゲートの差し戻し: 未記録（範囲に承認ゲートの答えの行が無い。0 件とは読まない）"
         return step_result.result(TOOL, "stopped", summary, [], {**unknown, "recorded": False}), step_result.EXIT_PRECONDITION
     c = gr.count_by_gate(rows)
     summary = f"承認ゲートの差し戻し: 関門 1 が {c['gate_1']} 件・関門 2 が {c['gate_2']} 件（ほか {c['other']} 件）"
