@@ -327,6 +327,69 @@ def test_an_unconverged_review_stops_the_plan(tmp_path, monkeypatch, final, ran)
     assert [e["id"] for e in s.state.log] == ["review", "after"], text
 
 
+def _skipping_drive(tmp_path, monkeypatch):
+    drive = tmp_path / "skip-drive.py"
+    drive.write_text(
+        f"import json, sys\nsys.path.insert(0, {str(SCRIPTS / 'lib')!r})\nimport drive_pause as dp\n"
+        "gap = {'kind': 'refactor', 'name': 'window', 'reason': '時間の枠に収まらず飛ばした: 要る下限 61 分 > 想定最大時間 30 分'}\n"
+        "out = dp.incomplete('d', 's', {'skipped': {'kind': 'window', 'reason': 'r'}, 'exit': 4}, gap)\n"
+        "print(json.dumps(out)); sys.exit(dp.exit_code(out))\n"
+    )
+    monkeypatch.setitem(paths.DRIVES, "skip", drive)
+    return [
+        {"id": "refactor", "type": "drive", "drive": "skip", "on_exit": {"6": "review"}, "on_fail": "abort", "next": "review"},
+        {"id": "review", "type": "run", "cmd": "true", "next": "end"},
+        {"id": "abort", "type": "run", "cmd": "true", "next": "end"},
+    ]
+
+
+def test_a_skipped_refactor_goes_on_to_the_review(tmp_path, monkeypatch):
+    """#2047 の I6・決定 5: 時間の枠の不足で飛ばした refactor（6 と gaps）は review へ進み、報告に欠けの理由が出る。"""
+    steps = _skipping_drive(tmp_path, monkeypatch)
+    s, text = run_plan(tmp_path, steps)
+    assert [e["id"] for e in s.state.log] == ["refactor", "review"], text
+    assert s.state.log[0]["exit"] == 6 and s.state.log[0]["gaps"][0]["name"] == "window"
+    assert "- 欠けを残して進んだステップ: refactor（window: 時間の枠に収まらず飛ばした: 要る下限 61 分 > 想定最大時間 30 分）" in text
+    # on_exit を持たない旧いプランは今どおり abort へ行く（移行性）
+    del steps[0]["on_exit"]
+    s, text = run_plan(tmp_path, steps)
+    assert [e["id"] for e in s.state.log] == ["refactor", "abort"], text
+
+
+def _extending_drive(tmp_path, monkeypatch, seconds):
+    """延長のファイルへ `seconds` を書いてから 2 秒眠る駆動。"""
+    drive = tmp_path / "slow-drive.py"
+    drive.write_text(
+        f"import json, os, sys, time\nsys.path.insert(0, {str(SCRIPTS / 'lib')!r})\nimport drive_pause as dp\n"
+        f"dp.write_extension({seconds}, '想定最大時間を下限の 40 分へ上げた')\ntime.sleep(2)\n"
+        "out = dp.done('d', 's', 'r.md', {})\nprint(json.dumps(out)); sys.exit(dp.exit_code(out))\n"
+    )
+    monkeypatch.setitem(paths.DRIVES, "slow", drive)
+    return [{"id": "refactor", "type": "drive", "drive": "slow", "timeout": 1, "on_fail": "end", "next": "end"}]
+
+
+def test_the_drive_extends_the_step_deadline(tmp_path, monkeypatch):
+    """#2047 の決定 4・I7: 子が書いた秒に余裕を足した締め切りまで待ち、延ばしたことを試行と進捗ログに残す。"""
+    s, text = run_plan(tmp_path, _extending_drive(tmp_path, monkeypatch, 1))
+    assert s.state.log[0]["exit"] == 0, text
+    assert s.state.log[0]["extended_timeout"] == {"seconds": 1, "timeout": 31, "planned": 1, "reason": "想定最大時間を下限の 40 分へ上げた"}
+    rows = [json.loads(line) for line in (s.state.dir / "progress.jsonl").read_text().splitlines()]
+    assert any(r["kind"] == "extend" and r["timeout"] == 31 for r in rows)
+
+
+def test_a_drive_without_the_extension_is_cut_at_the_plan_timeout(tmp_path, monkeypatch):
+    steps = _extending_drive(tmp_path, monkeypatch, 0)
+    s, _ = run_plan(tmp_path, steps)
+    assert s.state.log[0]["exit"] == 1 and "extended_timeout" not in s.state.log[0]
+
+
+def test_run_ticking_moves_the_deadline_only_later():
+    """I7: extend の時刻が締め切りより前なら使わない。後ろなら延ばす。"""
+    assert claude.run_ticking("sleep 1.5", shell=True, timeout=0.5, every=0.1, extend=lambda started: started + 5).returncode == 0
+    with pytest.raises(subprocess.TimeoutExpired):
+        claude.run_ticking("sleep 3", shell=True, timeout=0.5, every=0.1, extend=lambda started: started + 0.1)
+
+
 @pytest.mark.parametrize("drive", ["cross-review", "cross-refactoring"])
 def test_real_drives_take_pr_number_not_url(drive):
     # drive の args の {pr} は番号になる。2 つの駆動は URL を引数の解析で拒む
@@ -885,6 +948,7 @@ REPORT_EMPTY = """## フェーズの報告
 - 理由: 無し
 - 通ったステップ: {empty}
 - 件数: 無し
+- 欠けを残して進んだステップ: 無し
 - LLM の使用量: 入力 0 / cache read 0 / cache write 0 / 出力 0 / $0.000
 - CLI（drive・work の中）: 無し
 - 記録: {dir}
@@ -912,6 +976,7 @@ REPORT_RICH = """## フェーズの報告
 - 理由: 承認を待つ
 - 通ったステップ: impl(exit=0) → judge[続ける] → show(exit=12) → quiet(exit=12) → wait(exit=0) → wait2(exit=None)
 - 件数: impl: passed 3 / skipped 0; judge: 無し
+- 欠けを残して進んだステップ: 無し
 - LLM の使用量: 入力 56 / cache read 200 / cache write 40 / 出力 14 / $1.012
 - CLI（drive・work の中）: 無し
 - 記録: {dir}
