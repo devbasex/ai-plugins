@@ -115,7 +115,9 @@ def cmd_record(a):
     checks = acceptance.read_check_kinds(new)
     pre_n = sum(c.kind == acceptance.PRE_MERGE for c in checks.values())
     state = "変更なし" if new == body else "記録した"
-    emit(result(TOOL, "ok", f"#{a.issue}: {state}（マージ前 {pre_n} 件・リリース後 {len(checks) - pre_n} 件）", _criterion_items(checks)), 0)
+    emit(
+        result(TOOL, "ok", f"#{a.issue}: {state}（マージ前 {pre_n} 件・リリース後 {len(checks) - pre_n} 件）", _criterion_items(checks)), 0
+    )
 
 
 def cmd_show(a):
