@@ -58,7 +58,7 @@
 | I8 | 派生 | 工程の費用は、同じ `job_id`・同じ `payload.step`・同じ `at` の `usage.recorded` の `cost_usd` の和で、1 件も無ければ `null`（画面は「—」） | — |
 | I9 | 派生 | 承認の欄はゲート 1・ゲート 2 の 2 つだけで、判断の欄は 1 つ。どの欄も、その種類の最後の `gate.reached` と、それより後の同じ種類の `gate.answered` から状態を決める | — |
 | I10 | 派生 | 仕上げの欄は、振り返り（`retro`）と棚卸し（`refine`）の行を常に持つ。記録が無ければ `record` が `null`（画面は「まだ」） | — |
-| I11 | 派生 | 詳細は 1 つの実行の事象を最大 2,000 件読む。超えたら古い `step.recorded` から省き、省いた件数を `omitted_steps` に返す | — |
+| I11 | 派生 | 詳細の上限は `step.recorded` だけに効き、新しい方から最大 2,000 件読む。超えたら古い `step.recorded` から省き、省いた件数を `omitted_steps` に返す。`step.recorded` 以外の事象（`phase.changed`・`gate.reached`・`gate.answered`・`usage.recorded`・`job.*` など）は件数によらずすべて読み、I4・I7〜I9 の状態と `usage` の和から欠かさない | — |
 | I12 | 読み出しの経路 | 一覧・詳細・工程の中身・バックログは、`resolveAccount` で解決したアカウントの実行とリポジトリだけを返す。他人のアカウント・無いアカウント・アカウントに属さない実行・無い実行・登録の無いリポジトリは、どれも同じ 403 `forbidden` の本文 | 本文か状態のコードが分かれたら、認可のテストが落ちる |
 | I13 | 読み出しの経路 | 一覧・詳細・工程の中身の読み出しは GitHub の口を呼ばない。バックログは順位の表の読み出し（`findRankingTable`）だけを呼び、書き込む口を呼ばない | 偽の GitHub の口の呼び出しの数で落ちる |
 | I14 | 読み出しの経路 | 読み出しは事象の表と実行の表へ書かない | 偽の保存の行が変わればテストが落ちる |
@@ -314,7 +314,7 @@ erDiagram
 
 | 名前 | 入力 | 出力 | 失敗の形 |
 | --- | --- | --- | --- |
-| `listRunEvents` | 実行の ID・上限 | `order_key` の順の事象の列（`step.recorded` の `files`・`decisions`・`output` を読まない）と、上限で読まなかった件数 | 保存の失敗は投げる（経路が 503） |
+| `listRunEvents` | 実行の ID・`step.recorded` の上限 | `order_key` の順の事象の列（`step.recorded` 以外はすべて、`step.recorded` は新しい方から上限まで。`step.recorded` の `files`・`decisions`・`output` を読まない）と、上限で読まなかった `step.recorded` の件数 | 保存の失敗は投げる（経路が 503） |
 | `latestOfRun` | 実行の ID | 最後の `phase.changed`・最後の `step.recorded`・最後の事象（どれも無ければ `null`） | 同上 |
 | `getStep` | 実行の ID・`idempotency_key` | その実行の `step.recorded` の全項目か `null`（別の実行の鍵も `null`） | 同上 |
 | `listStepsNamed` | 実行の ID・`step` の値 | その値の `step.recorded`（本文を読まない） | 同上 |
@@ -399,8 +399,8 @@ sequenceDiagram
     alt 実行が無い・別のアカウント
         R-->>W: 403 forbidden
     end
-    R->>P: listRunEvents（上限 2,000、本文なし）
-    P-->>R: 事象の列・読まなかった件数
+    R->>P: listRunEvents（step.recorded の上限 2,000、本文なし）
+    P-->>R: 事象の列・読まなかった step.recorded の件数
     R->>D: 実行の行・事象の列
     D-->>R: SprintRunDetail
     R-->>W: 200
@@ -429,7 +429,7 @@ stateDiagram-v2
 
 | 大項目 | 要求の条件 | 実現方式 | 確かめ方 |
 | --- | --- | --- | --- |
-| 性能・拡張性 | 一覧（50 件）と詳細の読み出しの応答の時間の上限、詳細で読む事象の件数の上限は、設計で過去のスプリントの `progress.jsonl` を実測して決める（前提 10） | 件数の上限は 2,000 件（実測の最大 233 件の約 8.6 倍）。詳細は本文（`files`・`decisions`・`output`）を射影で外して読み、本文は工程の中身の経路で 1 件ずつ読む。一覧は実行ごとに最後の事象から逆に読み、並列 10 本まで。応答の時間の上限は一覧・詳細とも p95 2 秒とする（決定 9） | 件数: 2,001 件の偽の列で `omitted_steps` が 1 になるテスト。時間: リリース後テストで実環境の 1 本を開いて測る（未確認 1） |
+| 性能・拡張性 | 一覧（50 件）と詳細の読み出しの応答の時間の上限、詳細で読む事象の件数の上限は、設計で過去のスプリントの `progress.jsonl` を実測して決める（前提 10） | 件数の上限は `step.recorded` に 2,000 件（実測の事象の最大 233 件の約 8.6 倍）で、それ以外の事象は上限を掛けずにすべて読む（I11）。詳細は本文（`files`・`decisions`・`output`）を射影で外して読み、本文は工程の中身の経路で 1 件ずつ読む。一覧は実行ごとに最後の事象から逆に読み、並列 10 本まで。応答の時間の上限は一覧・詳細とも p95 2 秒とする（決定 9） | 件数: `step.recorded` 2,001 件の偽の列で `omitted_steps` が 1 になり、最も古い `gate.reached`・`usage.recorded` が残るテスト。時間: リリース後テストで実環境の 1 本を開いて測る（未確認 1） |
 | 運用・保守性 | フェーズの名前の集合は `factory/contracts/` の 1 か所にあり、画面・API・ランナーはそこから型を得る | `factory/contracts/src/phases.ts` に置き、ランナー・派生・画面が読む。`@ndf-factory/contracts/phases` の入口は依存を持たない（画面へ ajv を入れない） | 型検査（`npm run check`）。列挙を書き換えると 3 か所の型が追う |
 | 移行性 | `step.recorded` の追加は任意の項目で、`schema_version` を上げない。今のランナーの事象と既に残った事象はそのまま読める | 足す項目をすべて任意にし、派生は無い項目を「記録なし」「直前の `phase.changed`」「スプリント全体」で読む | 受け口の既存のテストを変えずに通す。足す前の形の事象の列で詳細を導くテスト |
 | セキュリティ | 他人の実行の有無を応答の本文・状態のコード・時間で区別できない（403 の本文を揃える）。作業の報告とログの本文に秘密が入りうるため、ランナーが送る前に NDF の既存の伏せ字の規則を通す範囲は設計で決める（未決 3） | 403 は 1 つの例外の型で返し、無い実行と他人の実行で同じ回数の読み出し（`getRun` 1 回）の後に返す。伏せ字は `output.text`・`decisions`・`files` のパスに当て、NDF の 4 つの規則にランナーが持つ秘密の値の置き換えを足す（決定 7）。本文の上限は `output.text` 32 KiB、事象 1 件 256 KiB（I2） | 4 つの場合の 403 の本文と状態のコードが一致するテスト。秘密の値と 4 つの形を含む報告を送って、送られた本文に残らないテスト |
@@ -463,7 +463,7 @@ stateDiagram-v2
 | I2 | 300 KiB になる中身の `step.recorded` が 256 KiB 以下になり、`output.truncated` が真 | 切らずに送る |
 | I3 | ランナーが持つ秘密の値と 4 つの形（URL の資格・GitHub の token・`x-access-token:`・認証ヘッダー）を含む報告・判断・パスが、送る本文に残らない | 伏せ字を `output` だけに当てる |
 | I7 | `phase` の無い工程が同じ実行ジョブの直前の `phase.changed` のフェーズに入る | 別の実行ジョブの `phase.changed` を使う |
-| I11 | 2,001 件の列で `omitted_steps: 1`、省くのは最も古い工程 | 新しい方から省く |
+| I11 | `step.recorded` 2,001 件と、その前の `gate.reached`・`usage.recorded` を持つ列で `omitted_steps: 1`、省くのは最も古い工程で、ゲートの状態と `usage` の和は全件から導いた値と一致する | 新しい方から省く。事象の総数で上限を掛けて古い `gate.reached`・`usage.recorded` を落とす |
 
 ## 設計の結果
 
