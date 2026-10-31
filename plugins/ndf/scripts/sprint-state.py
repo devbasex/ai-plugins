@@ -8,7 +8,7 @@ LLM を直接呼ばない（スプリント MVV の照合だけ `lib/sprint_mvv.
 | --- | --- |
 | `init <sprint.json> --name <名> [--milestone M] [--issue N]... [--plan <種類>=<plan.json>]... [--done <done.json>]... [--dev <版>] [--prod <版>] [--goal <雛形の文字列か @ファイル>] [--pace normal\|fast\|auto] [--mvv <ファイル>] [--repo OWNER/REPO]` | 状態のファイルを作る。同じパスに別の形の JSON があれば上書きせずに止まる（終了コード 1） |
 | `update <sprint.json> [--done <done.json>]... [--next <plan.json>=<文>]...` | done の JSON と報告を読み、行の状態・PR・秒・費用を埋める。何度走らせても同じ結果 |
-| `gate <sprint.json> <関門の名> --what <何を> [--at <ISO 8601>] [--by user\|mvv --verdict V --reasons <JSON> --log <jsonl>] [--outcome approved\|rejected] [--pr N] [--root DIR] [--withdraw]` | 関門の承認の時刻を書く。名前が `MVV` なら今の MVV のハッシュも書く。`--by user --outcome rejected` は関門を通さず、差し戻しを差し戻しの記録（`gate-rejections.jsonl`。`lib/gate_rejections.py`）へ 1 行書く（状態ファイルは変えない）。利用者の答えが同じ関門の直前の MVV 判定（`--pr` を渡せばその PR の判定）と食い違えば、改訂の兆候（覆し）を `project-mvv-signals.jsonl` へ 1 行書く。`--withdraw` は同じ関門の `by: mvv` の記録を外し、取り消しを残す（MVV 判定で通した後に関門へ落ちたとき。`lib/sprint_mvv.withdraw`）。取り消した関門へは以後 `--by mvv` を書かない |
+| `gate <sprint.json> <関門の名> --what <何を> [--at <ISO 8601>] [--by user\|mvv --verdict V --reasons <JSON> --log <jsonl>] [--outcome approved\|rejected] [--pr N] [--root DIR] [--withdraw]` | 関門の承認の時刻を書く。名前が `MVV` なら今の MVV のハッシュも書く。`--by user --outcome rejected` は関門を通さず、差し戻しを答えの記録（`gate-rejections.jsonl`。`lib/gate_rejections.py`）へ 1 行書く（状態ファイルは変えない）。`--by user` の `関門 1` / `関門 2` の承認も答えの記録へ 1 行書く（差し戻しの件数の 0 と未記録を分ける）。利用者の答えが同じ関門の直前の MVV 判定（`--pr` を渡せばその PR の判定）と食い違えば、改訂の兆候（覆し）を `project-mvv-signals.jsonl` へ 1 行書く。`--withdraw` は同じ関門の `by: mvv` の記録を外し、取り消しを残す（MVV 判定で通した後に関門へ落ちたとき。`lib/sprint_mvv.withdraw`）。取り消した関門へは以後 `--by mvv` を書かない |
 | `render <sprint.json> <引継ぎ文書> --section <見出しの語> [--demote <前の節の語> --heading <新しい見出し>]` | 見出しに語を含む節の本文を置き換える。節の外は変えない |
 | `status <sprint.json>` | 端末向けに 1 行ずつ（スプリント・状態・次） |
 | `next <sprint.json> [--doc <引継ぎ文書> --section <見出しの語>] [--replace <見出しの語>]` | ndf-next の囲みを出す。`--replace` なら引継ぎ文書のその節も置き換える |
@@ -271,10 +271,11 @@ def gate_locked(a) -> dict:
         return withdraw_gate(a, m, at)
     if not a.what:
         return outcome("stopped", "--what が要る（--withdraw のときだけ省ける）", exit=step_result.EXIT_UNREADABLE)
-    entry = {"name": a.name, "what": a.what, "at": at}
+    entry, repo = {"name": a.name, "what": a.what, "at": at}, None
     if a.by == "user":
         root = Path(a.root or ".").resolve()
-        repo = gr.ledger_repo(root) if a.outcome == "rejected" else None  # 覆しを書く前に決める（落ちて打ち直すと覆しが重なる）
+        answer = a.outcome == "rejected" or a.name in pms.GATE_KEYS  # 答えの記録（gate-rejections.jsonl）へ書くか（#2183）
+        repo = gr.ledger_repo(root) if answer else None  # 覆しを書く前に決める（落ちて打ち直すと覆しが重なる）
         override = pms.record_override(m, a.sprint, a.name, a.outcome, at, root, a.mvv_log, pr=a.pr)
         if a.outcome == "rejected":
             return reject_gate(a, m, repo, override, at)
@@ -293,14 +294,30 @@ def gate_locked(a) -> dict:
     m["gates"] = gates = [g for g in m.get("gates", []) if g.get("name") != a.name] + [entry]
     jsonio.write_atomic(a.sprint, m, indent=1)
     who = "MVV 判定" if a.by == "mvv" else "承認"
-    return outcome("ok", f"{a.name} の{who}を書いた（{at}）", gates, {"gates": len(gates)})
+    note = approve_answer(a, m, repo, at) if repo else ""
+    return outcome("ok", f"{a.name} の{who}を書いた（{at}）{note}", gates, {"gates": len(gates)})
+
+
+def answer_row(a, m: dict, repo: str, at: str, result: str) -> dict:
+    """答えの記録（`lib/gate_rejections.py`）の 1 行。範囲はこのスプリントの状態ファイル・課題・`--pr`。"""
+    issues, prs = m.get("issues") or [], [a.pr] if a.pr else []
+    return gr.make_row(a.name, a.what, repo=repo, at=at, sprint=a.sprint, issues=issues, prs=prs, outcome=result)
+
+
+def approve_answer(a, m: dict, repo: str, at: str) -> str:
+    """利用者の承認を答えの記録へ 1 行書く（差し戻しの件数を「未記録」と分けるため。#2183）。書けなくても承認は通す。"""
+    try:
+        gr.append(answer_row(a, m, repo, at, gr.APPROVED))
+        return ""
+    except OSError as e:
+        return f"。答えの記録へ書けない（{gr.ledger_path()}: {e}。差し戻しの件数は未記録と読まれる）"
 
 
 def reject_gate(a, m: dict, repo: str, override: dict | None, at: str) -> dict:
-    """利用者の差し戻しを差し戻しの記録（`lib/gate_rejections.py`）へ 1 行書く。関門は通さず、状態ファイルは変えない。"""
+    """利用者の差し戻しを答えの記録（`lib/gate_rejections.py`）へ 1 行書く。関門は通さず、状態ファイルは変えない。"""
     extra = f"。覆しを記録した（{override['kind']}）" if override else ""
     try:
-        gr.append(gr.make_row(a.name, a.what, repo=repo, at=at, sprint=a.sprint, issues=m.get("issues") or [], prs=[a.pr] if a.pr else []))
+        gr.append(answer_row(a, m, repo, at, gr.REJECTED))
         status, summary = "ok", f"{a.name} の差し戻しを書いた（{at}。関門は通さない）"
     except OSError as e:
         status, summary = "stopped", f"{a.name} の差し戻しを記録できない（{gr.ledger_path()}: {e}）"

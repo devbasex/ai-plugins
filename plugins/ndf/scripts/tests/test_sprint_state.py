@@ -331,10 +331,15 @@ def gate(sprint: str, tmp: Path, *args: str) -> tuple[int, dict, dict]:
     return p.returncode, json.loads(p.stdout), json.loads(Path(sprint).read_text())
 
 
-def rejection_rows() -> list[dict]:
-    """差し戻しの記録（`NDF_MVV_STATE_DIR` は conftest が tmp へ向ける）の行。"""
+def answer_rows() -> list[dict]:
+    """答えの記録（`NDF_MVV_STATE_DIR` は conftest が tmp へ向ける）の行。"""
     path = Path(os.environ["NDF_MVV_STATE_DIR"]) / "gate-rejections.jsonl"
     return [json.loads(ln) for ln in path.read_text().splitlines()] if path.exists() else []
+
+
+def rejection_rows() -> list[dict]:
+    """答えの記録のうち差し戻しの行。"""
+    return [r for r in answer_rows() if r.get("outcome") == "rejected"]
 
 
 def rejection(sprint: str, tmp: Path, name: str, what: str, m: dict, prs=()) -> dict:
@@ -347,6 +352,7 @@ def rejection(sprint: str, tmp: Path, name: str, what: str, m: dict, prs=()) -> 
         "issues": sorted(m.get("issues") or []),
         "prs": list(prs),
         "by": "user",
+        "outcome": "rejected",
     }
 
 
@@ -373,6 +379,8 @@ def user_gate_paths(sprint: str, tmp: Path) -> None:
     g2a = {"name": "関門 2", "what": "本番", "at": GATE_AT, "outcome": "approved"}
     code, out, m = gate(sprint, tmp, "関門 2", "--what", "本番", "--outcome", "approved")
     assert (code, out["items"], m["gates"]) == (0, [g1, g2a], [g1, g2a])
+    # 関門 1・関門 2 の利用者の承認は答えの記録へも 1 行ずつ書く（#2183）
+    assert [(r["gate"], r["outcome"]) for r in answer_rows()][-2:] == [("関門 1", "approved"), ("関門 2", "approved")]
     # 差し戻しは関門を通さず、状態ファイルを変えずに差し戻しの記録へ 1 行だけ書く（#1833）
     before_reject = m
     code, out, m = gate(sprint, tmp, "関門 3", "--what", "配布", "--outcome", "rejected", "--pr", "7")

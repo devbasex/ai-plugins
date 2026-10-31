@@ -1,11 +1,14 @@
-"""gate_rejections.py: 承認ゲートの差し戻しの記録（#1833）。標準ライブラリと lib/ だけで書く。
+"""gate_rejections.py: 承認ゲートの利用者の答えの記録（#1833・#2183）。標準ライブラリと lib/ だけで書く。
 
-差し戻しの記録は `<NDF_MVV_STATE_DIR>/gate-rejections.jsonl`（覆し・MVV 判定の記録と同じ置き場）に、
-差し戻し 1 回を 1 行で追記する。pace と状態ファイルの有無によらず、差し戻しの置き場はここだけである。
+答えの記録は `<NDF_MVV_STATE_DIR>/gate-rejections.jsonl`（覆し・MVV 判定の記録と同じ置き場）に、
+利用者の答え 1 回（差し戻しか承認）を 1 行で追記する。pace と状態ファイルの有無によらず、差し戻しの置き場はここだけである。
 覆しの記録（`project_mvv_signals`）へは書かず、覆しの集計はこの記録を読まない。
 
-1 行の形: `at`・`repo`・`gate`・`what`・`sprint`（状態ファイルの絶対パスか null）・`issues`・`prs`・`by`（常に user）。
+1 行の形: `at`・`repo`・`gate`・`what`・`sprint`（状態ファイルの絶対パスか null）・`issues`・`prs`・`by`（常に user）・
+`outcome`（`rejected` か `approved`。`outcome` の無い行は #2183 より前に書いた差し戻し）。
 `sprint`・`issues`・`prs` のうち 1 つ以上は空でない。
+
+範囲に答えの行が 1 つも無く、状態ファイルにも承認ゲートの記録が無ければ、差し戻しの件数は 0 ではなく「未記録」である。
 """
 
 from __future__ import annotations
@@ -19,6 +22,8 @@ import repo as repo_lib
 
 LEDGER_NAME = "gate-rejections.jsonl"
 COUNT_KEYS = ("gate_1", "gate_2", "other", "total")
+REJECTED, APPROVED = "rejected", "approved"
+OUTCOMES = (REJECTED, APPROVED)
 _GATE_COUNT_KEY = {"design": "gate_1", "release": "gate_2"}
 
 
@@ -40,8 +45,10 @@ def ledger_repo(root, repo: str | None = None) -> str:
     return str(main if main is not None else Path(root).resolve())
 
 
-def make_row(gate: str, what: str, *, repo: str, at: str, sprint=None, issues=(), prs=()) -> dict:
-    """1 行を作る。承認ゲートの名前・要約が空か、範囲（sprint・issues・prs）が 1 つも無ければ ValueError。"""
+def make_row(gate: str, what: str, *, repo: str, at: str, sprint=None, issues=(), prs=(), outcome: str = REJECTED) -> dict:
+    """1 行を作る。承認ゲートの名前・要約が空か、範囲（sprint・issues・prs）が 1 つも無いか、答えが OUTCOMES に無ければ ValueError。"""
+    if outcome not in OUTCOMES:
+        raise ValueError(f"答えは {' / '.join(OUTCOMES)} のどれか: {outcome!r}")
     if not (gate or "").strip():
         raise ValueError("承認ゲートの名前が空")
     if not (what or "").strip():
@@ -58,6 +65,7 @@ def make_row(gate: str, what: str, *, repo: str, at: str, sprint=None, issues=()
         "issues": issues,
         "prs": prs,
         "by": "user",
+        "outcome": outcome,
     }
 
 
@@ -86,10 +94,26 @@ def in_scope(row: dict, *, repo: str, sprint=None, issues=(), prs=()) -> bool:
     return bool(set(prs) & set(row.get("prs") or []))
 
 
+def is_rejection(row: dict) -> bool:
+    """差し戻しの行か。`outcome` の無い行（#2183 より前の記録）は差し戻しとして読む。"""
+    return row.get("outcome", REJECTED) == REJECTED
+
+
+def state_answered(sprint) -> bool:
+    """状態ファイルの `gates` に承認ゲート（`関門 1` / `関門 2`）の記録（利用者の承認か MVV 判定の通過）があるか。
+    状態ファイルが無ければ False、読めなければ `jsonio.JsonReadError`。"""
+    if not sprint:
+        return False
+    m = jsonio.read(sprint, missing={}, want=dict)
+    return any(isinstance(g, dict) and g.get("name") in pms.GATE_KEYS for g in m.get("gates") or [])
+
+
 def count_by_gate(rows: list[dict]) -> dict:
-    """承認ゲート 1・2・ほかに分けた件数。名前は `sprint-state.py` の記録の名前（`関門 1` / `関門 2`）で仕分ける。"""
+    """差し戻しを承認ゲート 1・2・ほかに分けた件数（承認の行は数えない）。名前は `sprint-state.py` の記録の名前
+    （`関門 1` / `関門 2`）で仕分ける。"""
+    rejected = [r for r in rows if is_rejection(r)]
     counts = dict.fromkeys(COUNT_KEYS, 0)
-    for r in rows:
+    for r in rejected:
         counts[_GATE_COUNT_KEY.get(pms.GATE_KEYS.get(r.get("gate")), "other")] += 1
-    counts["total"] = len(rows)
+    counts["total"] = len(rejected)
     return counts
