@@ -101,7 +101,7 @@ conductor が打ち切った。今の形では次のように動く。
 ### スプリントの終わりのプランの `refine` ステップ
 
 `supervise.py new close` が組むプラン（`supervise_lib/sprint.py` の `close_plan`）は、`retro` の後に課題を閉じる `close` を、
-その後に `refine` を置く（#2228）。`retro` の `next` は `close`、`close` の `next` は `refine` で、`retro` の `prompt` は棚卸しを含まない。
+その後に `refine` を置く。`retro` の `next` は `close`、`close` の `next` は `refine` で、`retro` の `prompt` は棚卸しを含まない。
 
 | キー | 値 |
 | --- | --- |
