@@ -4503,6 +4503,24 @@
       "source": "",
       "pending_source": "issues/issue-2206-design.md",
       "code": "ask_ledger"
+    },
+    {
+      "term": "試行",
+      "context": "ndf-workflow",
+      "meaning": "同じステップを流し直したときの 1 回ごとの実行と、その結果 JSON。状態ディレクトリの NN-<ステップ>.out の 1 つが 1 試行に当たる",
+      "pending_source": "issues/issue-2227-requirements.md"
+    },
+    {
+      "term": "欠けの残る結果",
+      "context": "ndf-workflow",
+      "meaning": "手順は終わったが、出すはずの材料・記録の一部が無いか、目標（収束など）に届かなかった結果。status を ok で返さない",
+      "pending_source": "issues/issue-2227-requirements.md"
+    },
+    {
+      "term": "結果の置き場",
+      "context": "ndf-workflow",
+      "meaning": "読む側が結果 JSON や材料を探す場所（状態ディレクトリ・記録のファイル）。置き場が無いことと、材料が 0 件であることを分けて扱う",
+      "pending_source": "issues/issue-2227-requirements.md"
     }
   ]
 }
