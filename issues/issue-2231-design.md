@@ -51,10 +51,10 @@ cross 系の参加が顧客、配布が供給者の関係（顧客 / 供給者�
 | --- | --- | --- | --- |
 | I1 | 配る Skill の一覧 | codex・agy・kiro の 3 つのマニフェストは同じ集合で、決定 1 の 8 本と一致する | pytest が落ちる（CI の `pytest`） |
 | I2 | 配る Skill の一覧 | `cross-refactoring` を載せるマニフェストは `REQUIRED_SKILLS` の 3 本をすべて載せる | pytest が落ちる。ホストの導入先からworktreeへ写せず、提案が語彙の外になって全件降格する |
-| I3 | 配る Skill の一覧 | Skill の境界をまたぐ参照と共同配布の組（`cross-review`↔`cross-refactoring`、`cross-review`→`fix`、`/ndf:external-ai` を指す Skill→`external-ai`）が、どのマニフェストでも欠けない | 既存の pytest と `scripts/check-cross-skill-refs.py` が落ちる |
+| I3 | 配る Skill の一覧 | Skill の境界をまたぐ参照と共同配布の組（`cross-review`↔`cross-refactoring`、`cross-review`→`fix`、`/ndf:external-ai` を指す Skill→`external-ai`）が、どのマニフェストでも欠けない | `cross-review`↔`cross-refactoring` と `external-ai` の組は既存の共同配布の pytest（`test_cross_review_codistribution.py`・`test_external_ai_codistribution.py`）が落ちる。`cross-review`→`fix` の組を縛る既存の pytest は無く、決定 3 の新しい pytest（`test_partner_manifests.py` の 8 本の一覧＝I1）だけが落ちる。`scripts/check-cross-skill-refs.py` はソースの参照が例外に登録されているかを見る検査で、マニフェストを読まないため、マニフェストの欠けでは落ちない |
 | I4 | agy の配布物 | `dev.agy/skills/` の並びは `agy-skills.txt` と一致し、`dev.agy/agents/`・`dev.agy/hooks.json`・`dev.agy/install-hooks.sh` は無い | `build-runtime-plugins.sh --check` とスモークが落ちる |
 | I5 | kiro の導入物 | `install.sh` が利用者のリポジトリへ作るのは `.kiro/skills/` のリンクだけで、steering・プロンプト・エージェント定義を作らない | `install.sh` を一時ディレクトリで走らせるテストとスモークが落ちる |
-| I6 | 配る Skill の一覧 | `claude-skills.txt` と Claude Code の配布物（`.claude-plugin/`・`agents/`・`hooks/claude.json`・`skills/` の中身）は変わらない | 差分に現れる。既存の pytest が通る |
+| I6 | 配る Skill の一覧 | `claude-skills.txt` と Claude Code の配布物（`.claude-plugin/`・`agents/`・`hooks/claude.json`・`skills/` の中身）は変わらない。例外は codex 専用の生成物 `skills/{cherry-pick-pr,deploy}/agents/openai.yaml` の削除で、生成の同期が codex の一覧から外れた Skill の分を消す（「構成要素」の生成の手順の行）。Claude Code はこのファイルを読まない | 差分に現れる。既存の pytest が通る |
 | I7 | agy・codex の配布物 | `plugin.json` の description の Skill 数がマニフェストの行数と一致する | `scripts/validate-runtime-plugins.sh` が落ちる（既存の検査） |
 
 ### ドメインイベント
@@ -331,7 +331,7 @@ codex の hook のうち worktree の案内と待ち通知だけを外す案は�
 | --- | --- | --- |
 | 受け入れ条件 1・I1 | 3 つのマニフェストの集合が 8 本の一覧と一致する | どれかのマニフェストへ `release` を 1 行足すと落ちる。`fix` を 1 行消しても落ちる |
 | 受け入れ条件 2・I2 | `cross-refactoring` を載せるマニフェストは `REQUIRED_SKILLS` をすべて載せる。`REQUIRED_SKILLS` は `vocabulary.py` から読む | `tdd-cycle` をマニフェストから消すと落ちる。`REQUIRED_SKILLS` に Skill を足してマニフェストに足さないと落ちる |
-| I3 | 既存の共同配布のテスト（`test_cross_review_codistribution.py`・`test_external_ai_codistribution.py`）と `check-cross-skill-refs.py` が 8 本の一覧で通る | `external-ai` をマニフェストから消すと落ちる |
+| I3 | 既存の共同配布のテスト（`test_cross_review_codistribution.py`・`test_external_ai_codistribution.py`）が 8 本の一覧で通る。`cross-review`→`fix` の組は I1 の新しい pytest が縛る | `external-ai` をマニフェストから消すと既存の共同配布のテストが落ちる。`fix` を消すと I1 の新しい pytest が落ちる |
 | 受け入れ条件 3・I4 | `build-runtime-plugins.sh --check` が通り、`dev.agy/skills/` の並びがマニフェストと一致し、`agents/`・`hooks.json`・`install-hooks.sh` が無い | `dev.agy/agents/` に 1 本残すとスモークか検査が落ちる。マニフェストに無いリンクを `dev.agy/skills/` に足すと `--check` が落ちる |
 | 受け入れ条件 4・I5 | 一時ディレクトリで `install.sh --project <dir> --yes` を打つと、`.kiro/` の下に Skill のリンク 8 本だけができる。外したフラグを渡しても終了コード 0 で続く | steering を生成する処理を残すと落ちる。`--with-codex` で終了コード 2 を返すように戻すと落ちる |
 | 受け入れ条件 5・I7 | `claude plugin validate .`・`check-skill-frontmatter.py`・`instructions-check.py --root .`・`validate-runtime-plugins.sh` が通る | `dev.agy/plugin.json` の description の数を 45 のまま残すと落ちる |
@@ -339,7 +339,7 @@ codex の hook のうち worktree の案内と待ち通知だけを外す案は�
 | 受け入れ条件 7 | スモークが codex・agy・kiro の導入先の Skill の並びをマニフェストと突き合わせ、配らない Skill を求めない | 導入先に 9 本目が残ると落ちる。スモークが `playwright-planning` 以外の配らない Skill の存在を求めていたら落ちる（求めないことを CI の通過で見る） |
 | 受け入れ条件 8 | リリース後テストで、新しい版を入れた環境から `/ndf:cross-review <PR>`（`--include agy`）と `/ndf:cross-refactoring <PR>` を 1 回ずつ回し、codex・agy・kiro の結果ファイルが揃う | NO_RESULT が出たら失敗として記録する |
 | 受け入れ条件 9 | 「配布を絞ると要らなくなる課題」の表が実装の PR の本文に写る | — |
-| 受け入れ条件 10・I6 | `claude-skills.txt` と Claude Code の配布物に差分が無く、`uv run --frozen --project . --all-extras pytest . -q -n 4` が通る | `claude-skills.txt` を触ると差分のレビューで見える |
+| 受け入れ条件 10・I6 | `claude-skills.txt` と Claude Code の配布物に差分が無く（I6 の例外の `openai.yaml` の削除を除く）、`uv run --frozen --project . --all-extras pytest . -q -n 4` が通る | `claude-skills.txt` を触ると差分のレビューで見える |
 
 ## 配布を絞ると要らなくなる課題
 
