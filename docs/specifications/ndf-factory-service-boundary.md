@@ -145,7 +145,7 @@ graph TD
 | #2174 | プランの料金・使用量の台帳・決済の手段と提供元・Bedrock の使用量の帰属（形態 ③ だけ） | 請求の画面と API | `usage.recorded`、#2170 のプランと実行の形態 |
 | #2189 | 手元のランナー（形態 ①）の登録・心拍・実行ジョブの受け取り | 無し | #2186 の実行ジョブを渡す口と実行ジョブの token、#2171 の `factory/contracts/`・進捗の受け口、#2170 の `resolveAccount` が返す `account_id` と実行の形態 |
 
-各課題が本節の外で決めること: `factory/` の TypeScript のパッケージの管理の道具は #2170 が npm の workspaces に決めた（規則は [factory/README.md の「パッケージの管理」](../../factory/README.md#パッケージの管理)）。ランナーで使える CLI（Bedrock 経由の claude を前提にし、cross-review が 2 つ目の CLI を要るときの扱い）と実行ジョブの打ち切りの時間（実測で決める）は #2186、`phase.changed` が運ぶフェーズの名前の集合は #2172、決済の提供元と Bedrock の請求との突き合わせは #2174 が決める。
+各課題が本節の外で決めること: `factory/` の TypeScript のパッケージの管理の道具は #2170 が npm の workspaces に決めた（規則は [factory/README.md の「パッケージの管理」](../../factory/README.md#パッケージの管理)）。ランナーで使える CLI と実行ジョブの打ち切りの時間は #2186 が決めた（「実行の制御」）。`phase.changed` が運ぶフェーズの名前の集合は #2172、決済の提供元と Bedrock の請求との突き合わせは #2174 が決める。
 
 ### 構成と言語
 
@@ -418,11 +418,31 @@ stateDiagram-v2
 
 実行ジョブは承認待ちから実行中へ戻らない。再開は新しい実行ジョブである。
 
+### 実行の制御
+
+`factory/api/src/runs/` が持つ。ジョブとスプリントの実行の状態の移りは、タスクの停止の後（ECS の停止の知らせか見回り）だけで行う。ランナーの `job.finished` を読み、無ければ `appendControlEvent` で `failed` を書いてから移す。
+
+| 項目 | 決まり |
+| --- | --- |
+| 打ち切りの時間 | 28,800 秒（8 時間）。`RUN_JOB_TIMEOUT_SECONDS` で変える。過去 7 本のスプリントの実行ジョブ 1 本に当たる区間の最大 18,031 秒の 1.5 倍を時間へ切り上げた値 |
+| 実行ジョブの token の期限 | 32,400 秒（9 時間）。`RUN_JOB_TOKEN_TTL_SECONDS` で変える。打ち切りの時間以下の値は起動の設定の読み込みで断る |
+| 発行の鍵 | `RUN_JOB_TOKEN_SIGNING_KEY_SECRET_ARN`（Ed25519 の秘密鍵の JWK と `kid`） |
+| 見回り | 5 分ごと。打ち切りの時間を過ぎたジョブを止め、止まったタスクのジョブを終わらせ、`pending` のまま 15 分を過ぎたジョブを `failed`（`launch_failed`）にする |
+| 実行の枠 | アカウントとリポジトリごとに、終わりの状態でないスプリントの実行を数えた行。開始と終わりの状態への移りで、実行と同じトランザクションで増減し、`judgeLimits` へ渡す。承認待ちも数え、再開は数を変えない |
+| スプリントの実行の状態 | `starting` / `running` / `awaiting_approval` / `done` / `stopped` / `failed` / `cancelled`。後ろの 4 つが終わりの状態 |
+| NDF の版 | 開始の時点で決め、以後の実行ジョブは同じ値を持つ。正式版は `plugin.json` の版（タグ `ndf--v<版>` を入れる）、開発版は `<版>@<コミットの SHA>` |
+| ランナーで使える CLI | `claude` だけ。cross-review は、ランタイムが 1 つのとき 2 つの枠を `claude` で埋める既存の振る舞いに任せる |
+| GitHub App の権限 | Metadata（読む）・Contents（読み書き）・Pull requests（読み書き）・Issues（読み書き）・Checks（読む）・Actions（読む）。Workflows・Administration・Projects は持たない。導入の token はリポジトリ 1 つに絞る |
+| ランナー向けの経路 | `INGEST_URL` と同じ origin の `/run-jobs/*`。実行ジョブの token で認証し、導入の token の渡し直し（`POST /run-jobs/github-token`）と状態の置き場の 15 分の署名つき URL（`POST /run-jobs/state`）だけを返す。形は `factory/contracts/openapi/runs.yaml` |
+| `gate.reached` の切り詰め | 256 KiB を超えると `material` だけを UTF-8 の文字の境目で切り、末尾に Pull Request の URL（無ければ元の大きさ）への案内を残す |
+
+他の子課題へは `factory/api/src/index.ts` の `requestResume`（#2173）・`claimLocalRunJob`・`reportLocalRunJobEnded`（#2189）・`cancelSprintRun` を公開する。
+
 ### 常に成り立つ条件（サービス全体）
 
 | # | 集約 | 条件 | 破れたときの扱い | 縛る課題 |
 | --- | --- | --- | --- | --- |
-| I8 | スプリントの実行 | 実行ジョブは承認の依頼が出たら終わる。人の答えを待つ間に動いている実行ジョブは無い | 実行の制御が待ちの上限で止め、ジョブの結果を「失敗」にする | #2186 |
+| I8 | スプリントの実行 | 実行ジョブは承認の依頼が出たら終わる。人の答えを待つ間に動いている実行ジョブは無い。打ち切りの時間を超えて動く実行ジョブも無い | 見回りが止め、ジョブの結果を「失敗」にする | #2186 |
 | I9 | スプリントの実行 | 1 つのスプリントの実行で、同時に動く実行ジョブは 1 つ | 2 つ目の開始を拒む | #2186 |
 | I10 | 進捗の記録 | 進捗の事象は追記だけで書き換えない。同じ冪等の鍵の事象は 1 つ | 同じ鍵の 2 回目は 202 を返し、保存しない | #2171 |
 | I11 | 承認の依頼 | 承認を求める種類はゲート 1 とゲート 2 の 2 つだけ | 3 つ目の種類の承認を受け付けない | #2173 |
