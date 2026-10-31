@@ -299,9 +299,10 @@ def check_lines(m: Materials) -> list[str]:
     """`## 検査の結果` の行。検査の 3 つの材料がどれも無ければ、無いことを 1 行で書く。"""
     out = []
     if m.review is not None and m.review.status != "ok":
-        out.append(_not_ok("レビュー", m.review.status))
+        out.append(_not_ok("レビュー", m.review.status) + (f"、見送った指摘 {len(m.review.deferred)} 件" if m.review.deferred else ""))
     elif m.review is not None:
         out.append(f"- レビュー: cross-review {m.review.rounds} ラウンド、見送った指摘 {len(m.review.deferred)} 件")
+    if m.review is not None:  # 未収束（終了コード 6）で配布へ進んだときも、残る指摘を承認ゲート 2 で確かめられるように載せる
         out += [f"  - {_deferred_place(d)}{d.summary}".rstrip() for d in m.review.deferred]
     if m.refactor is not None and m.refactor.status != "ok":
         out.append(_not_ok("リファクタリング", m.refactor.status))
@@ -335,7 +336,7 @@ def risk_lines(m: Materials, pr_risks: bool, at: str) -> list[str]:
 def items_of(m: Materials) -> list[dict]:
     """結果 JSON の items の材料の行（5 行）。"""
     lines = {
-        "review": m.review and 1 + (len(m.review.deferred) if m.review.status == "ok" else 0),
+        "review": m.review and 1 + len(m.review.deferred),
         "refactor": m.refactor and 1,
         "whole_test": m.whole_test and 1,
         "unconfirmed": m.unconfirmed and len(m.unconfirmed),

@@ -306,3 +306,11 @@ def test_deferred_findings_fold_by_path_and_summary(tmp_path):
     lines = _check(tmp_path, review={**REVIEW, "items": same + other})
     assert lines[0].endswith("見送った指摘 3 件")
     assert lines[1:4] == ["  - `a.py:3` 同じ指摘", "  - `b.py` 同じ指摘", "  - `a.py:3` 別の指摘"]
+
+
+def test_unconverged_review_keeps_its_deferred_findings(tmp_path):
+    """未収束（stopped・終了コード 6）で配布へ進んだレビューも、見送った指摘の本文と位置を承認資料へ載せる。"""
+    items = [{"kind": "deferred", "path": "a.py", "line": 3, "summary": "残る指摘"}]
+    lines = _check(tmp_path, review={**REVIEW, "status": "stopped", "items": items})
+    assert "`ok` で終わっていない" in lines[0] and lines[0].endswith("見送った指摘 1 件")
+    assert lines[1] == "  - `a.py:3` 残る指摘"

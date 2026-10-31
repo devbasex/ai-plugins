@@ -356,8 +356,11 @@ def test_an_unconverged_end_is_not_ok(tmp_path, monkeypatch, capsys, final):
     assert code == 21
     Path(out["items"][0]["result_file"]).write_text("{}")
     code, out = run_main(cr, argv, capsys)
-    assert code == 6 and out["status"] == "stopped"
-    assert out["gaps"] == [{"kind": "review", "name": "converge", "reason": f"final={final}"}]
+    if final == "error":  # レビューが成立していない終わりは 6 にせず、on_exit で後続へ進ませない
+        assert code == 1 and out["status"] == "stopped" and not out.get("gaps")
+    else:
+        assert code == 6 and out["status"] == "stopped"
+        assert out["gaps"] == [{"kind": "review", "name": "converge", "reason": f"final={final}"}]
     assert out["metrics"]["final"] == final and out["items"][0]["report"]
     assert json.loads(answer.read_text()) == {"review_status": final}
 

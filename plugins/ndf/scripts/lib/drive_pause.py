@@ -16,7 +16,8 @@
 | 22 | gate | `newtext` | 巻き直しの新しい title・body 待ち | 同上 |
 | 23 | gate | `cross-review` | 最終ゲートの cross-review 待ち | 同上（`items[0].command` が cross-review の drive） |
 | 1 | stopped | — | 中断（`metrics.exit` に元の終了コード） | 理由（summary）を報告する |
-| 6 | stopped | — | 最後まで回ったが収束しなかった（`metrics.final` が `approved` 以外。報告は `items[0].report`・`gaps` に `kind: review`） | 理由と件数を報告する。プランは `on_exit` の `"6"` で行き先を分けられる（無ければ `on_fail`） |
+| 1 | stopped | — | 収束ループがレビューの成立しないまま終わった（`metrics.final` が `error`。報告は `items[0].report`・`gaps` 無し） | 理由と件数を報告し、後続へ進まない |
+| 6 | stopped | — | 最後まで回ったが収束しなかった（`metrics.final` が `max_rounds`・`oscillation`。報告は `items[0].report`・`gaps` に `kind: review`） | 理由と件数を報告する。プランは `on_exit` の `"6"` で行き先を分けられる（無ければ `on_fail`） |
 
 `items[0]` の項目: `pause`・`prompt_file`・`result_file`・`round` は必ずある。任意の項目は次の通り。
 
@@ -74,9 +75,16 @@ def done(tool: str, summary: str, report: Path | str, metrics: dict) -> dict:
     return sr.result(tool, "ok", summary, [{"report": str(report)}], metrics)
 
 
+UNCONVERGED_FINALS = ("max_rounds", "oscillation")
+
+
 def unconverged(tool: str, summary: str, report: Path | str, metrics: dict) -> dict:
     """最後まで回ったが収束しなかった結果。報告と件数は `done` と同じ形で持ち、status は ok にしない（#2143）。
-    欠けの残る結果として `gaps` と終了コード 6 で返す（#2227 の決定 1）。"""
+    `final` が max_rounds・oscillation なら欠けの残る結果として `gaps` と終了コード 6 で返す（#2227 の決定 1）。
+    それ以外（`error`: 席を選べない・修正のコード関連 CI 失敗など、レビューが成立していない）は終了コード 1 の中断で返し、
+    プランの `on_exit` の `"6"` で後続へ進ませない。"""
+    if metrics.get("final") not in UNCONVERGED_FINALS:
+        return sr.result(tool, "stopped", summary, [{"report": str(report)}], {**metrics, "exit": EXIT_STOPPED})
     gap = {"kind": "review", "name": "converge", "reason": f"final={metrics.get('final')}"}
     return sr.result(tool, "stopped", summary, [{"report": str(report)}], {**metrics, "exit": sr.EXIT_INCOMPLETE}, gaps=[gap])
 
