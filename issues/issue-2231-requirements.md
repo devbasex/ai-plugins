@@ -1,6 +1,27 @@
-# #2231: codex・agy・kiro への配布を cross-review / cross-refactoring に要る Skill だけに絞る
+# #2231: 配布を Claude Code と codex だけにし（すべてのプラグイン）、agy・kiro へは配らず cross 系の相手役だけにする
 
 正は課題の本文（#2231）で、この文書はその写しである。`spec-copy.py write` で作り直す。手で直さない。
+
+## 方針の変更（2026-10-31 夜、承認ゲート 1 で利用者が指示）
+
+> claude とcodexのみ、すべてのpluginを配布することとします。agy、kiroは配布せず、cross系で呼ばれるだけ。
+
+（書き手: 利用者、日付: 2026-10-31。会話の原文）
+
+- **Claude Code と codex**: マーケットプレイスのすべてのプラグイン（ndf・playwright-kit・mcp-*）を、すべての Skill で配る。codex の配布は縮めない
+- **agy と kiro**: 何も配らない（`plugins/ndf/manifests/agy-skills.txt`・`kiro-skills.txt`、`dev.agy/`・各プラグインの `dev.kiro/` の導入物、`release.runtimes` の kiro を外す）。cross-review / cross-refactoring から相手役の CLI として呼ばれる経路だけを保つ
+- 下の「依頼（原文）」と受け入れ条件のうち、codex に配布を絞る部分はこの変更で置き換わる。プロジェクト MVV の Mission（4 ランタイム）の改訂は別の課題で扱う
+
+## 受け入れ条件（方針の変更の後）
+
+- [ ] 1. `agy-skills.txt`・`kiro-skills.txt` と agy・kiro 向けの導入物（`dev.agy/`、ndf・playwright-kit・mcp-* の `dev.kiro/`）が配布物から無くなり、`release` の対象ランタイムが claude と codex だけになる（マージ前にテストとビルドで確かめる）
+- [ ] 2. codex へ配る Skill とプラグインは変更前と同じ（すべて）である（マージ前に manifests とビルドで確かめる）
+- [ ] 3. agy・kiro を相手役にした cross-review と cross-refactoring の起動経路（`launch-cli.sh`・`launch-reviewer.sh`）が変わらず通る（マージ前にテスト、リリース後に実物で確かめる）
+- [ ] 4. AGENTS.md・CLAUDE.md・KIRO.md・README・`docs/ndf-plugin-reference.md`・`docs/versioning-and-distribution.md`・`docs/plugin-development-guide.md` が 2 ランタイム配布＋相手役 2 つの構成を書く（マージ前にリンク検査と指示書のチェックで確かめる）
+- [ ] 5. ランタイムのスモークテストと CI から agy・kiro の導入の検査が外れ、codex の検査は残る（マージ前に CI で確かめる）
+- [ ] 6. 配布をやめると直す必要が無くなる agy・kiro だけの open の課題の一覧を設計に載せる（閉じるのは棚卸し）
+
+---
 
 ## 依頼（原文）
 

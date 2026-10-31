@@ -578,6 +578,7 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | 承認の材料 | — | 承認資料が集める 5 つの材料。レビュー（cross-review のラウンド数と見送った指摘）・リファクタリング（採用と取り消しの件数）・全体テスト（コマンド・合否・件数）・設計文書の未確認・未実施のリリース後テスト | — | — | `docs/specifications/ndf-release-approval-materials.md` |
 | 配布物の変化なし | — | PR の本文の `## 利用者向けの変化` が「無し」（「なし」も同じ）だけを持つこと。承認資料の「含む PR」の行に印を付け、CHANGELOG の版の節と「配る中身」には載せない。節の無い本文（題名で代える）とは別に扱う | — | — | `docs/specifications/ndf-release-approval-included-prs.md` |
 | マニフェスト | — | plugins/ndf/manifests/<ランタイム>-skills.txt。ランタイムごとに配る Skill の一覧で、配布の唯一の基準（#2231） | — | — | — |
+| 配布先のランタイム | — | マーケットプレイスのプラグインを導入できる形で届けるランタイム。#2231 の後は Claude Code と codex で、相手役のランタイムとは別に決まる（#2231） | — | — | — |
 
 ## NDF の指示書チェック（`ndf-instructions`）
 
