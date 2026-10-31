@@ -284,8 +284,7 @@
       "term": "キューの続き",
       "context": "ndf-workflow",
       "meaning": "`supervise.py queue --resume <done>`。前の起動のステージの並びを読み、完了していないプランを終えたステップから続け、後続のステージも流す",
-      "source": "",
-      "pending_source": "issues/issue-1426-design.md"
+      "source": "docs/specifications/ndf-supervise-queue-resume-and-gate-evidence.md"
     },
     {
       "term": "リリース差分",
@@ -3139,15 +3138,13 @@
       "term": "取り込んだ課題",
       "context": "ndf-workflow",
       "meaning": "受け入れ内容を別の課題の実装へ含めると決めた課題。設計の結果の表か `new sprint --absorb` で決める。実装のプランは `実行の条件` で飛ばして実行しない。`--absorb` で決めたときは自分の設計のプランを持たない",
-      "source": "",
-      "pending_source": "issues/issue-1426-design.md"
+      "source": "docs/specifications/ndf-supervise-queue-resume-and-gate-evidence.md"
     },
     {
       "term": "承認の証跡",
       "context": "ndf-workflow",
       "meaning": "承認ゲートで利用者が承認したことを示す、プランの外で残った記録。スプリント状態ファイルの承認ゲートの記録（`--by user --outcome approved`）・承認ラベル・承認資料の承認の記録のどれか。プランのステップは承認の証跡があるときだけ、承認を前提にした操作へ進む",
-      "source": "",
-      "pending_source": "issues/issue-1426-design.md"
+      "source": "docs/specifications/ndf-supervise-queue-resume-and-gate-evidence.md"
     },
     {
       "term": "手動確認の行",
@@ -4411,65 +4408,58 @@
       "term": "依存グループ",
       "context": "ndf-workflow",
       "meaning": "lib/deps.py の GROUPS と pyproject.toml の extra に並ぶ、外部パッケージの用途ごとのまとまり（procs・locks など）。deps.require へ名前で渡す",
-      "source": "",
-      "pending_source": "issues/issue-1455-design.md"
+      "source": "docs/specifications/ndf-deps-require-groups-check.md"
     },
     {
       "term": "未宣言のグループ",
       "context": "ndf-workflow",
       "meaning": "モジュールから import をたどって届く外部パッケージの依存グループのうち、そのモジュールの中で覆う deps.require が無いもの。そのモジュールを読む側が引き受ける",
-      "source": "",
-      "pending_source": "issues/issue-1455-design.md"
+      "source": "docs/specifications/ndf-deps-require-groups-check.md"
     },
     {
       "term": "任意の依存",
       "context": "ndf-workflow",
       "meaning": "無ければ代わりの手段へ落ちる import。except ImportError / ModuleNotFoundError で受けるか、同じ関数の中で find_spec / deps.importable で確かめ、確かめが成り立ったときだけ通る枝で読む",
-      "source": "",
-      "pending_source": "issues/issue-1455-design.md"
+      "source": "docs/specifications/ndf-deps-require-groups-check.md"
     },
     {
       "term": "作業の報告",
       "context": "ndf-workflow",
       "meaning": "worker が応答の最後に書く「## 作業の報告」の節。「結果:」は 完了 / 判断が要る / できなかった のどれかで、supervise はこれでステップの成否を決める",
       "code": "work_report",
-      "pending_source": "issues/issue-1698-requirements.md"
+      "source": "docs/specifications/ndf-supervise-work-step-web-tools-and-report-stop.md"
     },
     {
       "term": "起こし直し",
       "context": "ndf-workflow",
       "meaning": "supervise の full のステップで、作業の報告が無いまま応答が終わったとき、同じ会話（--resume）へ続けるよう送ること。3 回まで",
       "code": "resume_prompt",
-      "pending_source": "issues/issue-1698-requirements.md"
+      "source": "docs/specifications/ndf-supervise-work-step-web-tools-and-report-stop.md"
     },
     {
       "term": "所要の記録",
       "context": "ndf-workflow",
       "meaning": "`.ndf/project.json` の `test_duration.measured` にある全体テストの所要（秒。w）。出所は ndf-record → ci-junit → ci-steps の順に採る。宣言の解析が書き、プランの作成と test-run.py が読む",
-      "source": "",
-      "pending_source": "issues/issue-1631-requirements.md"
+      "source": "docs/specifications/ndf-supervise-test-limits-from-whole-runs.md"
     },
     {
       "term": "全体テストの実測",
       "context": "ndf-workflow",
       "meaning": "同じリポジトリで先に走った全体テストの壁時計の秒。所要の記録とは別に残し、後のプランと test-run.py が予算なしのテストの上限を決めるときに読む（#1631）",
-      "source": "",
-      "pending_source": "issues/issue-1631-requirements.md"
+      "source": "docs/specifications/ndf-supervise-test-limits-from-whole-runs.md"
     },
     {
       "term": "テストの上限",
       "context": "ndf-workflow",
       "meaning": "test_strategy.limits が返す init_test_timeout・test_timeout・whole_timeout（秒）。ステップの timeout はこれに with_margin の余裕を足した値で、テストの上限には余裕を足さない",
-      "source": "",
-      "pending_source": "issues/issue-1631-requirements.md",
+      "source": "docs/specifications/ndf-supervise-test-limits-from-whole-runs.md",
       "code": "limits"
     },
     {
       "term": "全体テストの鍵",
       "context": "ndf-workflow",
       "meaning": "戦略の全体テストのコマンドの集合から作る識別子（whole_key）。全体テストの実測をコマンドごとに分け、コマンドの違う実測を混ぜない（#1631）",
-      "source": "",
-      "pending_source": "issues/issue-1631-design.md",
+      "source": "docs/specifications/ndf-supervise-test-limits-from-whole-runs.md",
       "code": "whole_key"
     },
     {
@@ -4500,95 +4490,82 @@
       "term": "リポジトリの登録",
       "context": "ndf-factory",
       "meaning": "アカウントが GitHub のリポジトリ 1 つを、GitHub App の導入の識別子と一緒に持つこと。スプリントの実行はこれに属する",
-      "source": "",
-      "pending_source": "issues/issue-2186-requirements.md"
+      "source": "docs/specifications/ndf-factory-runs-and-runner.md"
     },
     {
       "term": "GitHub App の導入",
       "context": "ndf-factory",
       "meaning": "利用者が自分のリポジトリへサービスの GitHub App を入れたもの。導入の識別子で指し、clone と push の導入の token をここから作る",
-      "source": "",
-      "pending_source": "issues/issue-2186-requirements.md"
+      "source": "docs/specifications/ndf-factory-runs-and-runner.md"
     },
     {
       "term": "キーの持ち込み",
       "context": "ndf-factory",
       "meaning": "実行の形態 `byok` で、利用者の Anthropic API キーか、引き受ける AWS のロールの ARN をサービスへ預けること",
-      "source": "",
-      "pending_source": "issues/issue-2186-requirements.md"
+      "source": "docs/specifications/ndf-factory-runs-and-runner.md"
     },
     {
       "term": "再開の要求",
       "context": "ndf-factory",
       "meaning": "承認の依頼に答えが保存された後、承認と通知が実行の制御へ出す、`resume` の実行ジョブを起こす要求",
-      "source": "",
-      "pending_source": "issues/issue-2186-requirements.md"
+      "source": "docs/specifications/ndf-factory-runs-and-runner.md"
     },
     {
       "term": "打ち切りの時間",
       "context": "ndf-factory",
       "meaning": "1 つの実行ジョブが動いてよい時間の上限。超えたら実行の制御が止める",
-      "source": "",
-      "pending_source": "issues/issue-2186-requirements.md"
+      "source": "docs/specifications/ndf-factory-runs-and-runner.md"
     },
     {
       "term": "課題の候補",
       "context": "ndf-factory",
       "meaning": "スプリントを始める画面に、AI が棚卸しの順位から理由つきで出す課題",
-      "source": "",
-      "pending_source": "issues/issue-2186-requirements.md"
+      "source": "docs/specifications/ndf-factory-runs-and-runner.md"
     },
     {
       "term": "実行の枠",
       "context": "ndf-factory",
       "meaning": "アカウントとリポジトリごとに、終わりの状態でないスプリントの実行を数えた値。開始で増え、終わりの状態への移りで減る",
-      "source": "",
-      "pending_source": "issues/issue-2186-design.md"
+      "source": "docs/specifications/ndf-factory-runs-and-runner.md"
     },
     {
       "term": "見回り",
       "context": "ndf-factory",
       "meaning": "実行の制御が 5 分ごとに動き、打ち切りの時間を過ぎた実行ジョブを止め、停止の知らせを取りこぼした実行ジョブを終わらせる処理",
-      "source": "",
-      "pending_source": "issues/issue-2186-design.md"
+      "source": "docs/specifications/ndf-factory-runs-and-runner.md"
     },
     {
       "term": "候補の証明",
       "context": "ndf-factory",
       "meaning": "GitHub で確かめたリポジトリの登録の候補を、取り込みが署名して 10 分だけ有効にした値。登録の要求はこれを持って来る",
-      "source": "",
-      "pending_source": "issues/issue-2186-design.md"
+      "source": "docs/specifications/ndf-factory-runs-and-runner.md"
     },
     {
       "term": "問い合わせの区分",
       "context": "ndf-workflow",
       "meaning": "AskUserQuestion の metadata.source に AI が付ける値。ndf-gate:<番号>（承認ゲート）・ndf-ask:redline:<番号>（レッドライン。宣言で外せない）・ndf-ask:<名前>（宣言が許す区分）の 3 つの形。hook は質問の中身を読まず、この値が許された区分かだけを見る（#2206）",
-      "source": "",
-      "pending_source": "issues/issue-2206-design.md",
+      "source": "docs/specifications/ndf-ask-guard.md",
       "code": "ask_category"
     },
     {
       "term": "問い合わせの宣言",
       "context": "ndf-workflow",
       "meaning": "プロジェクトの .ndf/ask.json。人へ回してよい問い合わせの区分と hook の働き方（enforce / advise / off）を書く（#2206）",
-      "source": "",
-      "pending_source": "issues/issue-2206-requirements.md",
+      "source": "docs/specifications/ndf-ask-guard.md",
       "code": "ask_declaration"
     },
     {
       "term": "代わりの判断",
       "context": "ndf-workflow",
       "meaning": "hook が問い合わせを止めた後か、手順が「AI が決める」とした場面で AI が自分で下した判断。問い・選んだ答え・理由を問い合わせの記録へ書く（#2206）",
-      "source": "",
-      "pending_source": "issues/issue-2206-design.md",
+      "source": "docs/specifications/ndf-ask-guard.md",
       "code": "proxy_decision"
     },
     {
       "term": "問い合わせの記録",
       "context": "ndf-workflow",
       "meaning": "状態の置き場の ask.jsonl。hook の判定の行と代わりの判断の行を追記だけで持ち、振り返りと Factory のランナーが読む（#2206）",
-      "source": "",
-      "pending_source": "issues/issue-2206-design.md",
+      "source": "docs/specifications/ndf-ask-guard.md",
       "code": "ask_ledger"
     },
     {
