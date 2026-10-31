@@ -49,6 +49,32 @@ def results_named(name: str, items: list[dict], plan: str) -> list[dict]:
     ]
 
 
+def _fill_prs(text: str, names: list[str], items: list[dict], plan: str) -> tuple[str, list[str]]:
+    """{queue_pr:<名>} を完了した結果の PR の番号（無ければ 0）で置き換える。完了した結果が無い名前は欠けの文で返す。"""
+    missing = []
+    for name in names:
+        done = [i for i in results_named(name, items, plan) if i.get("result") == "完了"]
+        if not done:
+            missing.append(f"{{queue_pr:{name}}}（名前の一致する計画の完了した報告が無い）")
+            continue
+        prs = [n for n in (plan_pr(i) for i in done) if n]
+        text = text.replace(f"{{queue_pr:{name}}}", prs[-1] if prs else "0")
+    return text, missing
+
+
+def _fill_states(text: str, states: list[tuple[str, str]], items: list[dict], plan: str) -> tuple[str, list[str]]:
+    """{queue_state:<名>} を状態ディレクトリの絶対パスで置き換える。`?` 付きは無ければ空文字、無印は欠けの文で返す。"""
+    missing = []
+    for opt, name in states:
+        found = [state_dir_of(str(Path(i["plan"]).absolute())) for i in results_named(name, items, plan) if i.get("plan")]
+        dirs = [d for d in found if d.is_dir()]
+        if not dirs and not opt:
+            missing.append(f"{{queue_state:{name}}}（名前の一致する計画の状態ディレクトリが無い）")
+            continue
+        text = text.replace(f"{{queue_state{opt}:{name}}}", str(dirs[-1]) if dirs else "")
+    return text, missing
+
+
 def fill_queue_pr(plan: str, items: list[dict]) -> str | None:
     """計画の {queue_pr:<名>} を、前のステージの名前の一致する計画の Pull Request 1 本で置き換える。
     前のステージに無ければ同じディレクトリの計画の報告を読む（関門の後に単独で流すとき）。完了して PR が無い・飛ばされたなら 0。
@@ -62,21 +88,9 @@ def fill_queue_pr(plan: str, items: list[dict]) -> str | None:
     names, states = sorted(set(QUEUE_PR.findall(text))), sorted(set(QUEUE_STATE.findall(text)))
     if not names and not states:
         return None
-    missing = []
-    for name in names:
-        done = [i for i in results_named(name, items, plan) if i.get("result") == "完了"]
-        if not done:
-            missing.append(f"{{queue_pr:{name}}}（名前の一致する計画の完了した報告が無い）")
-            continue
-        prs = [n for n in (plan_pr(i) for i in done) if n]
-        text = text.replace(f"{{queue_pr:{name}}}", prs[-1] if prs else "0")
-    for opt, name in states:
-        found = [state_dir_of(str(Path(i["plan"]).absolute())) for i in results_named(name, items, plan) if i.get("plan")]
-        dirs = [d for d in found if d.is_dir()]
-        if not dirs and not opt:
-            missing.append(f"{{queue_state:{name}}}（名前の一致する計画の状態ディレクトリが無い）")
-            continue
-        text = text.replace(f"{{queue_state{opt}:{name}}}", str(dirs[-1]) if dirs else "")
+    text, missing_prs = _fill_prs(text, names, items, plan)
+    text, missing_states = _fill_states(text, states, items, plan)
+    missing = missing_prs + missing_states
     if missing:
         return "差し込みを埋める前の計画の結果が見つからない: " + "、".join(missing)
     write_text_atomic(Path(plan), text)
