@@ -12,7 +12,7 @@
 | 1 | ラッパーが次のセッションを `claude "/goal /ndf:development-workflow #895"` で起動する。最初の入力は前のセッションと同じ文面である |
 | 2 | `UserPromptSubmit` hook（`hook.py goal-skill`）が入力の 1 行目を読み、`ndf:development-workflow` を引数 `#895` で Skill ツールから読み込むよう案内する文を `additionalContext` に足す |
 | 3 | Claude Code が `/goal` で目標を設定し、conductor は案内に従って Skill を読み込んでから作業を始める |
-| 4 | 承認ゲートで conductor が「設計 PR の承認を待ちます。」と本文に書いて応答を終えると、Stop hook（`relay.py mark`）が Stop を止め、同じ問いを `AskUserQuestion` で出し直すよう伝える。`log.jsonl` に `prose_wait` の行が 1 行残る |
+| 4 | 承認ゲートで conductor が「設計 PR の承認を待ちます。」と本文に書いて応答を終えると、Stop hook（`relay.py mark`）が Stop を止め、同じ問いを `AskUserQuestion` で出し直し、`metadata.source` に区分（承認ゲートは `ndf-gate:<番号>`）を付けるよう伝える（区分は #2206）。`log.jsonl` に `prose_wait` の行が 1 行残る |
 | 5 | 続いた応答が再び本文で待って終わっても、その Stop は止めない（同じ区間で 2 度続けては止めない） |
 
 この文書は、その形に**なぜしたか**（背景・決定と理由・常に成り立つ条件・境界・データの形・既知の限界・テスト観点）を残す。
