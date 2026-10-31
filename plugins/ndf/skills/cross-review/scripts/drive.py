@@ -6,7 +6,7 @@
 init → ラウンド（起動・監視・取り込み・根拠の検証・判定）→ 振動の検知 → 修正 → 巻き直し →
 最終スイープ → 検証 → 報告を順に進める。LLM が要る地点（fix / sweep / newtext）で止まる。
 同じコマンドを打ち直すと続きから進む。収束ループが終わった後に打ち直すと、終わりの時点の PR の head と今の head が
-同じで結果を変える引数も同じなら前回の結果を返し、違えば（または `--reopen` なら）新しい実行の回を始め、`state.py init` がラウンドを足す（#1340）。進みは耐久の記録（`lib/durable.py`、種類 `review`・鍵の元は状態の置き場）に
+同じで結果を変える引数も同じなら前回の結果を返し（`ok` で終わったときだけ。`final` が `approved` 以外の終わりは `stopped` を返し、打ち直すとラウンドを足す）、違えば（または `--reopen` なら）新しい実行の回を始め、`state.py init` がラウンドを足す（#1340）。進みは耐久の記録（`lib/durable.py`、種類 `review`・鍵の元は状態の置き場）に
 あり、耐久ワークフロー `review_drive` の 1 回が収束ループの 1 回である。`state.py init` とラウンドは耐久ステップで、
 記録のある耐久ステップは打ち直しで流れない（init は 1 回の中で 1 回だけ。#1142 の I19）。止まりはイベント `pause` を
 立てて続きを待ち、打ち直しが続き（`resume`）を送る。結果ファイルが無ければ同じ止まりを番号を増やして返す。
@@ -368,7 +368,7 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
         (rp := self.tmp / f"drive-pr{self.pr}-report.md").write_text(self.st("report", str(self.pr))[1])
         c = self.counts()
         summary = f"収束ループが終わった（final={c['final']}・{c['rounds']} ラウンド・コメント {c['comments']}・指摘 {c['findings']}・修正 {c['fixed']}・未解決 {c['unresolved']}）"
-        res = dp.done(TOOL, summary, rp, c)
+        res = dp.done(TOOL, summary, rp, c) if c["final"] == "approved" else dp.unconverged(TOOL, f"{summary}。収束していない", rp, c)
         late = json.loads(self.path("sweep").read_text()).get("deferred") or []  # 最終スイープの見送り（#1488 の「レビュー」の材料）
         ds = [*s.get("deferred_nits", []), *({"round": c["rounds"], **d} for d in late if isinstance(d, dict))]  # 修正の見送り＋スイープ
         res["items"] += [
