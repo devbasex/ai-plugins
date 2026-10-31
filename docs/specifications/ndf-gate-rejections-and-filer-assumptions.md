@@ -117,6 +117,7 @@ graph TB
 - `repo` が一致する行だけを見る。範囲（`--sprint` / `--issue` / `--pr`）を渡せば、そのどれかに当たる行を数える（または）。範囲を渡さなければそのリポジトリのすべての行
 - `gate` を `関門 1` → `gate_1`、`関門 2` → `gate_2`、ほか → `other` に仕分け、`total` は数えた行の数
 - 既存の `sprint.json` の `rejections` は読まず、書き換えもしない
+- 範囲に答え（差し戻し・承認）の行が 1 つも無く、`--sprint` の状態ファイルにも承認ゲート（関門 1・関門 2）の記録が無ければ、件数を 0 と書かずに「未記録」を返す（`status: stopped`・終了コード 3・件数は `null`・`metrics.recorded` は false）。記録の置き場のファイルが無いときも同じである。承認の行か状態ファイルの承認ゲートの記録があれば、差し戻しが無いことを 0 件として `ok` で返す（`metrics.recorded` は true）
 
 ## 運用
 
@@ -125,7 +126,7 @@ graph TB
 | 項目 | 内容 |
 | --- | --- |
 | 端末をまたぐ件数 | 差し戻しの記録は端末ごとの置き場にあり、スプリントを複数の端末で通すと 1 台の `count` には一部しか出ない。覆しの記録と同じ制約である |
-| 記録を始める前の差し戻し | 記録には無く、`count` は 0 を出す |
+| 記録を始める前の差し戻し | 記録には無い。範囲に答えの行も承認ゲートの記録も無ければ `count` は「未記録」（終了コード 3）を返し、0 件とは書かない |
 | `--gate` の書き方の揺れ | `承認ゲート 1` などの別の書き方は `other` に数える。`approval-request.md` のコマンド例が `関門 1` / `関門 2` を固定している |
 | 起票者の推定の正しさ | 推定かどうかは書き手にしか分からない。機械で確かめるのは節があることだけである |
 
@@ -138,7 +139,7 @@ graph TB
 - `record` が 1 回で記録を 1 行増やし、行が `gate`・`at`・`what`・`repo` と範囲を持つこと。範囲が無ければ 2 で書かないこと。`sprint-state.py gate --outcome rejected` も（`pace: normal` の状態ファイルでも）1 行増やし、`sprint.json` に `rejections` を書かないこと
 - `origin` の無いリポジトリの worktree で `record` し、メインディレクトリで `count` すると 1 件になること
 - 記録の置き場が書けないとき、`record` と `sprint-state.py gate --outcome rejected` が 1 を返すこと
-- `count` がスプリント・課題・PR の範囲ごとに `gate_1`・`gate_2` を数え、壊れた行があると 2 で件数が `null`・`summary` に「不明」、ファイルが無いと 0 であること
+- `count` がスプリント・課題・PR の範囲ごとに `gate_1`・`gate_2` を数え、壊れた行があると 2 で件数が `null`・`summary` に「不明」、範囲に答えの行も承認ゲートの記録も無い（ファイルが無いときを含む）と 3 で件数が `null`・`summary` に「未記録」であること。承認の行だけがあれば 0 件の `ok` であること
 - 差し戻しを記録する前と後で、同じ覆しの記録と MVV 判定の記録に対する `project-mvv.py signals` の `metrics` が同じであること。`project_mvv_signals.read_jsonl` が壊れた行を飛ばすこと
 - 承認（`--outcome approved` と省略）・`--by mvv`・`--withdraw`・`issue-file.py` の `resolve-target`・`dup`・`note`・`by-origin` の既存のテストが期待値を変えずに通ること
 
