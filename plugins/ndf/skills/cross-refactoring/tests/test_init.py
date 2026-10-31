@@ -10,6 +10,7 @@ import sys
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import types
 
@@ -25,15 +26,10 @@ def _git(*args, cwd):
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True)
 
 
-@pytest.fixture
-def origin_repo(tmp_path):
-    """origin にだけ head ブランチがあるリポジトリ。
-
-    `git worktree add <path> <branch>` はローカルにブランチが無いと失敗するため、
-    その経路を踏ませる形で用意する。
-    """
-    origin = tmp_path / "origin.git"
-    repo = tmp_path / "repo"
+def _build_origin_repo(base):
+    """origin にだけ head ブランチがあるリポジトリを `base` の下に作る。"""
+    origin = base / "origin.git"
+    repo = base / "repo"
     subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
     subprocess.run(["git", "clone", "-q", str(origin), str(repo)], check=True, capture_output=True)
     _git("config", "user.email", "t@e.st", cwd=repo)
@@ -52,6 +48,26 @@ def origin_repo(tmp_path):
     # ローカルの head ブランチを消し、origin にだけある状態にする
     _git("checkout", "-q", "main", cwd=repo)
     _git("branch", "-qD", HEAD_BRANCH, cwd=repo)
+
+
+@pytest.fixture(scope="session")
+def _origin_template(tmp_path_factory):
+    base = tmp_path_factory.mktemp("origin-template")
+    _build_origin_repo(base)
+    return base
+
+
+@pytest.fixture
+def origin_repo(tmp_path, _origin_template):
+    """origin にだけ head ブランチがあるリポジトリ。
+
+    `git worktree add <path> <branch>` はローカルにブランチが無いと失敗するため、
+    その経路を踏ませる形で用意する。git の組み立てはプロセスごとに 1 度だけ行い、テストごとに複製する。
+    """
+    for name in ("origin.git", "repo"):
+        shutil.copytree(_origin_template / name, tmp_path / name, symlinks=True)
+    repo = tmp_path / "repo"
+    _git("remote", "set-url", "origin", str(tmp_path / "origin.git"), cwd=repo)
     return repo
 
 

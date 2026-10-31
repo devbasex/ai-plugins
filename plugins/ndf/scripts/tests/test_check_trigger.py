@@ -16,6 +16,9 @@ from pathlib import Path
 import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import inproc  # noqa: E402
+
 SCRIPT = SCRIPTS / "check-trigger.py"
 sys.path.insert(0, str(SCRIPTS / "lib"))
 from step_result import validate_result  # noqa: E402
@@ -132,7 +135,7 @@ def merge_pr(root: Path, n: int, branch: str, files: dict[str, int]) -> str:
 
 
 def call(root: Path, env: dict, *args: str) -> tuple[int, dict | None, str]:
-    p = subprocess.run([sys.executable, str(SCRIPT), *args, "--root", str(root)], capture_output=True, text=True, env=env, cwd=root)
+    p = inproc.run(SCRIPT, *args, "--root", str(root), env=env, cwd=root)
     lines = p.stdout.strip().splitlines()
     out = json.loads(lines[-1]) if lines and lines[-1].startswith("{") else None
     if out is not None:
