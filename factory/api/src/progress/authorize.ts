@@ -1,5 +1,6 @@
 // 出所の照合（I25〜I28）。契約の定義の検査を通った事象に当て、経路の出所・書ける種類・識別子・冪等の鍵の形を照らす
-import type { EventSource, EventType, GateAnsweredEvent, ProgressEvent } from "@ndf-factory/contracts";
+import type { EventSource, EventType, GateAnsweredEvent, ProgressEvent, StepRecordedEvent } from "@ndf-factory/contracts";
+import { repoKey } from "./github.ts";
 import type { VerifiedRunJob } from "./run-job-token.ts";
 import type { SavedAnswerReader } from "./saved-answers.ts";
 
@@ -13,6 +14,7 @@ export const WRITABLE_TYPES: Record<EventSource, ReadonlySet<EventType>> = {
     "gate.reached",
     "usage.recorded",
     "job.finished",
+    "decision.delegated",
   ]),
   api: new Set<EventType>(["gate.answered"]),
   github: new Set<EventType>(["pr.updated", "ci.updated"]),
@@ -32,13 +34,22 @@ function isRunnerKey(event: ProgressEvent, jobId: string): boolean {
   return event.idempotency_key.startsWith(prefix) && /^[1-9][0-9]*$/.test(event.idempotency_key.slice(prefix.length));
 }
 
-// runner: token の実行ジョブと事象の job_id・sprint_run_id が一致し、鍵がそのジョブの形である（I25〜I27）
+// step.recorded の Pull Request は token の repo のものだけ（I37、#2216）。大文字と小文字は問わない
+function isAllowedPullRequest(event: ProgressEvent, job: VerifiedRunJob): boolean {
+  if (event.type !== "step.recorded") return true;
+  const pr = (event as StepRecordedEvent).payload.pull_request;
+  return pr === undefined || repoKey(pr.repo) === repoKey(job.repo);
+}
+
+// runner: token の実行ジョブと事象の job_id・sprint_run_id が一致し、鍵がそのジョブの形で、
+// Pull Request の参照がその実行に許可したリポジトリのものである（I25〜I27・I37）
 export function authorizeRunner(event: ProgressEvent, job: VerifiedRunJob): boolean {
   return (
     canWrite("runner", event) &&
     event.job_id === job.jobId &&
     event.sprint_run_id === job.sprintRunId &&
-    isRunnerKey(event, job.jobId)
+    isRunnerKey(event, job.jobId) &&
+    isAllowedPullRequest(event, job)
   );
 }
 

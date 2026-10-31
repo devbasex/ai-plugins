@@ -164,3 +164,69 @@ describe("チームのアカウント（受け入れ条件 8・10・11）", () =
     expect(await screen.findByText("このアカウントを見る権限がありません")).toBeTruthy();
   });
 });
+
+describe("リポジトリ・キーの持ち込み・スプリントを始める（#2186）", () => {
+  beforeEach(() => sessionStorage.setItem("ndf-factory.access_token", "t"));
+  const owner: AccountDetail = { ...personal, account_id: "p-1", role: "owner" };
+
+  it("登録が 0 件なら導入の案内と「まだリポジトリがありません」を出す", async () => {
+    show("/accounts/p-1/repositories", {
+      "GET /accounts/p-1": ok(owner),
+      "GET /accounts/p-1/github/install-url": ok({ url: "https://github.com/apps/x/installations/new" }),
+      "GET /accounts/p-1/repositories": ok({ repositories: [] }),
+    });
+    expect(await screen.findByText("まだリポジトリがありません")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "GitHub App をリポジトリへ入れる" }).getAttribute("href")).toContain("/installations/new");
+    expect(screen.getByRole("button", { name: "GitHub で確かめる" })).toBeTruthy();
+  });
+
+  it("持ち主でない席の人には登録と外すを出さない", async () => {
+    show("/accounts/t-1/repositories", {
+      "GET /accounts/t-1": ok(team),
+      "GET /accounts/t-1/github/install-url": ok({ url: "https://github.com/apps/x/installations/new" }),
+      "GET /accounts/t-1/repositories": ok({ repositories: [{ repository_id: 1, full_name: "o/r", installation_id: 2, registered_at: "t", active_sprint_runs: 0 }] }),
+      "GET /accounts/t-1/sprint-runs": ok({ sprint_runs: [{ sprint_run_id: "s", repository_id: 1, issues: [3], state: "failed", failure_reason: "timeout", created_at: "t" }] }),
+    });
+    expect(await screen.findByText("o/r")).toBeTruthy();
+    expect(screen.getByText("#3: 失敗（timeout）")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "外す" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "GitHub で確かめる" })).toBeNull();
+  });
+
+  it("キーの持ち込みは入力を確かめ、保存しても値を出さない", async () => {
+    let saved: unknown = null;
+    show("/accounts/p-1/model-credential", {
+      "GET /accounts/p-1/model-credential": ok({ registered: false, kind: null, updated_at: null, external_id: "ndf-factory:p-1" }),
+      "PUT /accounts/p-1/model-credential": () => ((saved = true), Response.json({ registered: true, kind: "anthropic_api_key", updated_at: "2026-10-31", external_id: "ndf-factory:p-1" })),
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "保存する" }));
+    expect(screen.getByRole("alert").textContent).toBe("API キーを入力してください");
+    await userEvent.type(screen.getByLabelText("API キー"), "sk-secret");
+    await userEvent.click(screen.getByRole("button", { name: "保存する" }));
+    expect(await screen.findByText(/登録済み/)).toBeTruthy();
+    expect(saved).toBe(true);
+    expect(document.body.textContent).not.toContain("sk-secret");
+  });
+
+  it("AI の候補を理由つきで出し、上限の 409 を本数で知らせる", async () => {
+    show("/accounts/p-1/repositories/1/sprints/new", {
+      "POST /accounts/p-1/repositories/1/issue-candidates": ok({
+        source: "ranking",
+        milestone: "03 x",
+        note: null,
+        candidates: [
+          { number: 5, title: "五", selected: true, reason: "順位が高い" },
+          { number: 6, title: "六", selected: false, reason: "後でよい" },
+        ],
+      }),
+      "POST /accounts/p-1/sprint-runs": () =>
+        Response.json(
+          { error: { code: "limits_exceeded", message: "x", details: { reasons: [{ quantity: "concurrent_sprint_runs", limit: 1, current: 1 }] } } },
+          { status: 409 },
+        ),
+    });
+    expect(await screen.findByText("順位が高い")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "開始する" }));
+    expect((await screen.findByRole("alert")).textContent).toBe("同時に動かせるスプリントは 1 本までです（今 1 本）");
+  });
+});

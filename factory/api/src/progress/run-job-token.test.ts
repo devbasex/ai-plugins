@@ -11,7 +11,7 @@ import {
 } from "./run-job-token.ts";
 import { createRunJobTokenKit, TEST_RUN_JOB_KID } from "../testing/run-job-tokens.ts";
 
-const claims = { jobId: "job-1", sprintRunId: "sr-1" };
+const claims = { jobId: "job-1", sprintRunId: "sr-1", repo: "org-a/repo-a" };
 
 async function codeOf(p: Promise<unknown>): Promise<string> {
   try {
@@ -27,7 +27,7 @@ describe("実行ジョブの token の検証（受け入れ条件 17・18、決�
   it("正しい token から実行ジョブの識別子と sprint_run_id を返す", async () => {
     const kit = await createRunJobTokenKit();
     const expiresAt = new Date(Math.floor(Date.now() / 1000 + 600) * 1000);
-    expect(await kit.verify(await kit.sign({ ...claims, expiresAt }))).toEqual({ jobId: "job-1", sprintRunId: "sr-1", expiresAt });
+    expect(await kit.verify(await kit.sign({ ...claims, expiresAt }))).toEqual({ jobId: "job-1", sprintRunId: "sr-1", repo: "org-a/repo-a", expiresAt });
   });
 
   it("形が違う token は malformed", async () => {
@@ -58,7 +58,7 @@ describe("実行ジョブの token の検証（受け入れ条件 17・18、決�
     const { createRunJobTokenVerifier } = await import("./run-job-token.ts");
     const verify = createRunJobTokenVerifier([jwk]);
     const base = () =>
-      new SignJWT({ sprint_run_id: "sr-1" })
+      new SignJWT({ sprint_run_id: "sr-1", repo: "org-a/repo-a" })
         .setIssuer("ndf-factory/run-control")
         .setAudience("ndf-factory/run-job")
         .setSubject("job-1")
@@ -101,10 +101,27 @@ describe("実行ジョブの token の発行（受け入れ条件 19、I31）", 
     const expiresAt = new Date(Date.now() + 60_000);
     const token = await signRunJobToken(
       // @ts-expect-error account_id は token に載せない（#2170 の約束）
-      { jobId: "job-1", sprintRunId: "sr-1", expiresAt, account_id: "acc-1" },
+      { jobId: "job-1", sprintRunId: "sr-1", repo: "org-a/repo-a", expiresAt, account_id: "acc-1" },
       { kid: "k", privateKey },
     );
-    expect(Object.keys(decodeJwt(token)).sort()).toEqual(["aud", "exp", "iat", "iss", "sprint_run_id", "sub"]);
+    expect(Object.keys(decodeJwt(token)).sort()).toEqual(["aud", "exp", "iat", "iss", "repo", "sprint_run_id", "sub"]);
+  });
+
+  it("repo を token に載せ、検証で返す。repo の無い token は malformed（I37）", async () => {
+    const kit = await createRunJobTokenKit();
+    const token = await kit.sign({ jobId: "job-1", sprintRunId: "sr-1", repo: "Org-A/Repo-A" });
+    expect((await kit.verify(token)).repo).toBe("Org-A/Repo-A");
+    const { privateKey } = await generateKeyPair("EdDSA", { crv: "Ed25519" });
+    const noRepo = await new SignJWT({ sprint_run_id: "sr-1" })
+      .setProtectedHeader({ alg: "EdDSA", typ: "ndf-run-job+jwt", kid: "k3" })
+      .setIssuer("ndf-factory/run-control")
+      .setAudience("ndf-factory/run-job")
+      .setSubject("job-1")
+      .setExpirationTime("1h")
+      .sign(privateKey);
+    const { createRunJobTokenVerifier } = await import("./run-job-token.ts");
+    const pub = { ...(await exportJWK((await generateKeyPair("EdDSA", { crv: "Ed25519" })).publicKey)), kid: "k3" };
+    await expect(createRunJobTokenVerifier([pub])(noRepo)).rejects.toBeInstanceOf(RunJobTokenError);
   });
 
   it("Ed25519 でない鍵では作らない", async () => {

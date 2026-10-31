@@ -63,7 +63,7 @@ python3 "$SCRIPTS/issue-file.py" resolve-target
 ```
 
 0 なら `metrics.upstream` と `metrics.target` から [references/issue-target.md](references/issue-target.md) の判断表で
-起票先を選ぶ。20 なら推測せず `items` の候補を示して利用者に聞く。
+起票先を選ぶ。20 なら推測せず `items` の候補を示して利用者に聞く（候補に他のリポジトリが入るため、`AskUserQuestion` の `metadata.source` は `ndf-ask:redline:C5`）。
 
 ### 4. 重複を確かめる
 
@@ -75,8 +75,8 @@ python3 "$SCRIPTS/issue-file.py" note --repo <起票先> --number <番号> --ori
 ```
 
 打つ先が開発対象リポジトリと同じなら `note` はそのまま 1 行を打つ。**別のリポジトリ（開発対象を読めないときも含む）
-なら、1 回目は承認資料（打つ先・番号・1 行）を書いて 10 で止まる**（他のリポジトリへの公開）。利用者に示して同意を
-取り、同じ引数に `--approved <metrics.digest>` を足して打ち直すと 1 行が打たれる（示した後に変えると 1 で打たれない）。
+なら、1 回目は承認資料（打つ先・番号・1 行）を書いて 10 で止まる**（他のリポジトリへの公開）。利用者に示して同意
+（`ndf-ask:redline:C5`）を取り、同じ引数に `--approved <metrics.digest>` を足して打ち直すと 1 行が打たれる（示した後に変えると 1 で打たれない）。
 人に問えない起動では打ち直さず、承認資料を添えて人へ戻す。
 
 ### 5. 起票する
@@ -115,8 +115,9 @@ python3 "$SCRIPTS/issue-file.py" create --repo <起票先> --title "<何が起�
   --body-file <本文のファイル> --origin "<由来>" [--label <名前>]...
 ```
 
-**1 回目は承認資料（起票先・題・本文・ラベル）を書いて 10 で止まる。** 利用者に示して同意を取り、同じ引数に
-`--approved <metrics.digest>` を足して打ち直すと課題ができる（示した後に変えると 1 で作られない）。人に問えない起動
+**1 回目は承認資料（起票先・題・本文・ラベル）を書いて 10 で止まる。** `metrics.other_repo` が真（他のリポジトリへの公開）なら
+利用者に示して同意（`AskUserQuestion` の `metadata.source` は `ndf-ask:redline:C5`）を取り、偽（開発対象と同じリポジトリ）なら
+問わずに AI が承認資料を確かめて決め、同じ引数に `--approved <metrics.digest>` を足して打ち直すと課題ができる（示した後に変えると 1 で作られない）。人に問えない起動
 では起動指示に従うが、**`metrics.other_repo` が真なら打ち直さず、承認資料を添えて人へ戻す**（他のリポジトリへの公開）。
 
 両方にまたがる課題の順序は [references/issue-target.md](references/issue-target.md) にある。

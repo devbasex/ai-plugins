@@ -320,7 +320,7 @@ hook が止めるのは工程へ入る起動だけで、フェーズの中の Ba
 | `child.pid` | `run` | 今のセッションの claude の pid。セッションごとに書き換える |
 | `next.json` | `mark` | シグナルファイル。権限 `0600` の一時ファイルに書いてから置き換える |
 | `question` / `question.lock` | `question open` / `close`・`mark`・`run` | 質問シグナルファイル（`0600`、空）と、質問の始まりと `/exit` の write を排他にするロック |
-| `asked` | `question open` | 最後に質問が出た時刻（`{"at": "<ISO 8601 UTC>"}`）。シグナルファイルより後に質問が出たかを `mark` と `run` が見る |
+| `asked` | `question open` | 最後に質問が出た時刻（`{"at": "<ISO 8601 UTC>"}`）。シグナルファイルより後に質問が出たかを `mark` と `run` が見る。問い合わせの guard が `deny` と判定する問いでは `question` とともに書かない |
 | `wait-held.json` | `mark` | 承認待ちの差し戻しの状態（`{"section", "at": "<Stop の時刻>", "held": <差し戻したか>}`）。直接の子の Stop のうち 9 を判定したものごとに書き直す |
 | `stop` | `stop` か利用者 | 空。在れば停止シグナルファイル |
 | `log.jsonl` | `run` | 記録 |

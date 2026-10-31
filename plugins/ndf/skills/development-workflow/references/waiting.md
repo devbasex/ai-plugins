@@ -138,7 +138,7 @@ python3 plugins/ndf/scripts/supervise.py wait q/done.json
    報告の `Pull Request` の番号を changelog・approval-facts のステップの `--prs` へ入れる。
    先行の報告に Pull Request が 1 件も無ければ、リリースプランは `流さなかった` になる
 2. `queue <実装のプラン>... --then <開発版のプラン> --done <パス>` と `wait <パス>` をバックグラウンドで起動する
-3. `wait` が 0 で終わり、キューの結果が `gate`（開発版の facts のステップのゲート 2）なら、承認資料を添えて本番の承認を取る。
+3. `wait` が 0 で終わり、キューの結果が `gate`（開発版の facts のステップのゲート 2）なら、承認資料を添えて本番の承認（`ndf-gate:2`）を取る。
    利用者が答えたら `sprint-state.py gate <状態> "関門 2" --what <要約> --by user --outcome approved|rejected` を打つ
 4. 承認の後、本番のプランを `new release --channel prod --dev-state <開発版のプランの状態ディレクトリ> --state <状態>` で作り、
    `queue <本番のプラン> --done <パス>` と `wait <パス>` をバックグラウンドで起動する。本番のプランの先頭の `approve` が、
@@ -172,7 +172,7 @@ python3 plugins/ndf/scripts/supervise.py wait q/done.json
    付けてからマージする（記録が無ければ承認ゲートで止まる）。設計の結果のプランがマージした設計文書の「設計の結果」の表を
    実装のプランへ写し、検査のプランがスプリントの Pull Request をベースブランチへマージし、開発版のリリースプランが続けて流れる
 5. 承認ゲート 2: キューの結果が `gate`（開発版の facts のステップ）なら、`sprint.json` の `関門 2` のステージの `gate` に沿って
-   承認資料を添えて本番の承認を取る。利用者が答えたら `sprint-state.py gate $S "関門 2" --what <要約> --by user --outcome approved|rejected`
+   承認資料を添えて本番の承認（`ndf-gate:2`）を取る。利用者が答えたら `sprint-state.py gate $S "関門 2" --what <要約> --by user --outcome approved|rejected`
    を打つ。差し戻されたら 6 を打たない
 6. 本番: `sv queue $O/10-release-prod.json --max 3 --done $O/done-10.json` と `sv wait $O/done-10.json`。先頭の `approve` が
    5 の記録を見て承認資料へ承認の記録を書き、出す PR は検査の報告から埋まる。最後のステップが後片付けを行う

@@ -111,7 +111,8 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 
 | 状況 | 対応 |
 | --- | --- |
-| 選択を誤ると手戻りが大きい、または安全性・課金・外部公開に関わる | 利用者に質問して止まる |
+| 課金・外部公開・安全性（レッドライン）に関わる | 利用者に質問して止まる。`metadata.source` は費用なら `ndf-ask:cost`、外部へ出すなら `ndf-ask:irreversible` かレッドラインの番号（`ndf-ask:redline:C5` など。[asking.md](../development-workflow/references/asking.md)） |
+| 選択を誤ると手戻りが大きいが、上のどれにも当たらない | 問わずに最も筋の通る案を選び、要求の「起票者の推定」に理由とともに記録して進む |
 | 誤っても局所的に直せる | **前提として明記**して進める |
 
 前提は「前提: 対象は既存の管理画面利用者のみで、外部公開はしない」のように、後から
