@@ -216,6 +216,11 @@ def add_init_parser(sub: argparse._SubParsersAction) -> None:
         help="提案の前に対象範囲の指標（循環的複雑度・行数・重複）を測る。--no-code-metrics で測らない (default: 測る)",
     )
     init.add_argument("--worktree-root", default=None)
+    init.add_argument(
+        "--run",
+        default=None,
+        help="この実行の識別子（drive.py が渡す）。既存の rf<n> の持ち主の記録と一致すれば同じ実行の続きとして使う（#2229）",
+    )
     init.set_defaults(func=cmd_init)
 
 
