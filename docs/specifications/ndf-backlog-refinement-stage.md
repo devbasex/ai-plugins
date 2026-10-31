@@ -100,8 +100,8 @@ conductor が打ち切った。今の形では次のように動く。
 
 ### スプリントの終わりのプランの `refine` ステップ
 
-`supervise.py new close` が組むプラン（`supervise_lib/sprint.py` の `close_plan`）は、`retro` の後に
-`refine` を置く。`retro` の `next` は `refine` で、`retro` の `prompt` は棚卸しを含まない。
+`supervise.py new close` が組むプラン（`supervise_lib/sprint.py` の `close_plan`）は、`retro` の後に課題を閉じる `close` を、
+その後に `refine` を置く（#2228）。`retro` の `next` は `close`、`close` の `next` は `refine` で、`retro` の `prompt` は棚卸しを含まない。
 
 | キー | 値 |
 | --- | --- |
@@ -131,7 +131,7 @@ worker の歯止めで、費用の上限は件数が持つ。プランの `上�
 | 不正な上限は候補を集めずに終了コード 2 | 同上の `test_candidates_reject_invalid_limit_before_collecting` |
 | 候補が 0 件の棚卸しは上限の導入で持ち越しにならない | 同上の `test_candidates_zero_is_ok_under_limit` |
 | 書き込み先・plan の `repo`・記録のどれかが食い違えば、1 件も書かずに終了コード 3 | 同上の `test_apply_refuses_*` |
-| `new close` のプランで `retro` の次が `refine`、`refine` の `stage` が `棚卸し` で `timeout` を持ち、プロンプトが無人の扱いを渡す | `plugins/ndf/scripts/tests/test_supervise_pace.py`（`test_close_runs_spec_close_and_retro_once_each_in_order`） |
+| `new close` のプランで `retro` の次が `close`、その次が `refine`、`refine` の `stage` が `棚卸し` で `timeout` を持ち、プロンプトが無人の扱いを渡す | `plugins/ndf/scripts/tests/test_supervise_pace.py`（`test_close_runs_spec_close_and_retro_once_each_in_order`） |
 | `STEP_PHASES` がフェーズの表と一致する | `plugins/ndf/scripts/tests/test_transcript_agents.py`（`test_the_step_names_match_the_phase_table`） |
 | `stage 棚卸し` が記録され、5 モードで必須として扱われる | `plugins/ndf/scripts/tests/test_progress_record_stages.py`（`test_the_refinement_stage_is_recorded_and_required_in_every_mode`） |
 | 最終工程を持つ 3 つの Skill（`retrospective` / `release-verification` / `release`）が棚卸しを呼ばない。順序の制約と規則 14 がそれぞれ 1 か所にある | 文書を `grep -n` で読んで確かめる（文言を照合するテストは書かない） |

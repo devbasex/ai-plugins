@@ -190,7 +190,7 @@ MVV のレッドラインで人へ戻すという要求がそれを決める。
 | --- | --- |
 | `sprint-state.py init <state> --name <名>-<n> --pace auto --issue ... --dev V --prod V --goal <再開のコマンド> [--mvv mvv.md --milestone M]` | `--prod` を省けば開発版の接尾辞を外した版 |
 | `supervise.py new sprint --pace auto --issue <選んだ課題> --design <承認済みでない課題> [--designed <approved の課題>] ... [<-- の後の引数>]` | `loop answer --approved` で答えた課題は設計のプランを作らず、設計の結果のステージが設計 PR の設計の結果を読む |
-| `supervise.py new close --pace auto --issue <選んだ課題> --state <state> [--carry <前の周回の refine.deferred>] [--milestone M]` | まとめのステージ（確定仕様化 → Pull Request → 課題を閉じる → 振り返り → 棚卸し）だけを組む。最終の検査・開発版・本番は置かず、`fast` 節を読まない |
+| `supervise.py new close --pace auto --issue <選んだ課題> --state <state> [--carry <前の周回の refine.deferred>] [--milestone M]` | まとめのステージ（確定仕様化 → Pull Request → 振り返り → 課題を閉じる → 棚卸し。#2228）だけを組む。最終の検査・開発版・本番は置かず、`fast` 節を読まない |
 
 `pipeline` は、最初のステージの queue の最後に `--then <まとめのプラン>` をつなぎ、`supervise.py wait <D>` →
 `loop lap <名> --done <D>` を続けた 1 行である。手で行うステージか別の queue のステージが残るときは、それを終えてから
