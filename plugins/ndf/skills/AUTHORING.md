@@ -118,8 +118,7 @@ description: "Delete merged branches and worktrees, stopping only where git refu
 - **実行前確認が要る操作を無確認にしない。** 事前承認は確認プロンプトを飛ばす仕組みなので、
   「実行前確認の要否を決める 3 つの問い」で確認が要ると決まった操作は「対象を提示して同意を
   取る」手順を本文へ必ず置き、その問いの区分（`AskUserQuestion` の `metadata.source`。正本は `development-workflow` の
-  `references/asking.md`）を書く。区分に当たらない操作には同意の手順を置かない（区分の無い問いは hook が止める）（frontmatter で守れるのは承認プロンプトの有無だけで、Kiro と
-  Codex には対応する項目がない）
+  `references/asking.md`）を書く。区分に当たらない操作には同意の手順を置かない（区分の無い問いは hook が止める）（frontmatter で守れるのは承認プロンプトの有無だけで、Kiro と Codex には対応する項目がない）
 
 量が問題になるのは MCP ツールを多用する Skill だけである（`playwright-authoring` は 43 個の
 列挙で 1,916 文字）。この種の Skill は本体プラグインからの分離を検討する。

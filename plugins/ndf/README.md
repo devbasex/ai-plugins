@@ -219,11 +219,7 @@ bash <プラグインのパス>/scripts/worktree-setup.sh init
 記録する手段と、人へ回してよい区分の一覧を理由の欄に出します。承認ゲート（`ndf-gate:1`・`ndf-gate:2`）とレッドライン
 （`ndf-ask:redline:<番号>`）の問いはどの宣言でも止めません。止めた問いでは Slack の待ち通知を送りません。
 
-プロジェクトごとの働き方は `.ndf/ask.json` で変えます（無ければ `enforce`）。今の振る舞いへ戻すには次を書きます。
-
-```json
-{"version": 1, "mode": "off"}
-```
+プロジェクトごとの働き方は `.ndf/ask.json` で変えます（無ければ `enforce`）。今の振る舞いへ戻すには `{"version": 1, "mode": "off"}` を書きます。
 
 区分の表と宣言の形は `skills/development-workflow/references/asking.md`、ランタイムごとの扱い（Codex・Kiro CLI・agy は対象外）は
 [docs/ndf-plugin-reference.md の「承認ゲートの外の問い合わせ」](../../docs/ndf-plugin-reference.md#承認ゲートの外の問い合わせ) にあります。
