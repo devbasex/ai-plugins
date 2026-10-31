@@ -4531,6 +4531,27 @@
       "meaning": "今の実行より前に同じ Pull Request・同じリポジトリで回った、終わった実行。supervise.py の run --from の「前の実行」とは別（#2229）",
       "source": "",
       "pending_source": "issues/issue-2229-requirements.md"
+    },
+    {
+      "term": "持ち主の記録",
+      "context": "ndf-worktree",
+      "meaning": "残る状態ごとに、作った実行が書く記録。実行の識別子・開始・最後に動いた時刻・終わった時刻、またはプロセス（pid と開始時刻）を持つ。片付けが持ち主の生存を判定するために読む（#2229）",
+      "source": "",
+      "pending_source": "issues/issue-2229-design.md"
+    },
+    {
+      "term": "寿命の窓",
+      "context": "ndf-worktree",
+      "meaning": "持ち主の記録が終わっていなくても、最後に動いた時刻からこの時間を過ぎた実行を終わったとみなす長さ。24 時間（#2229）",
+      "source": "",
+      "pending_source": "issues/issue-2229-design.md"
+    },
+    {
+      "term": "片付け",
+      "context": "ndf-worktree",
+      "meaning": "状態の一覧に従い、持ち主の終わった残る状態を外し、残したものと理由を返す処理（run_state.sweep）。git が拒めば止まる操作だけで行う（#2229）",
+      "source": "",
+      "pending_source": "issues/issue-2229-design.md"
     }
   ]
 }
