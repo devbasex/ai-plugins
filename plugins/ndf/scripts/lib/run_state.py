@@ -214,7 +214,16 @@ def claim(state: Path | str, *, tool: str, pr: int, run: str | None = None) -> s
     now = _now_iso()
     _write_owner(
         state,
-        {"version": 1, "kind": "review-worktree", "tool": tool, "pr": int(pr), "run": run, "started_at": now, "seen_at": now, "finished_at": None},
+        {
+            "version": 1,
+            "kind": "review-worktree",
+            "tool": tool,
+            "pr": int(pr),
+            "run": run,
+            "started_at": now,
+            "seen_at": now,
+            "finished_at": None,
+        },
     )
     return run
 
@@ -614,7 +623,13 @@ def main(argv: list[str] | None = None) -> int:
         return 2 if e.code else 0
     items = sweep(Path(a.root or os.getcwd()), tmp_only=a.tmp_only)
     c = counts(items)
-    out = {"tool": TOOL, "status": "ok", "summary": f"残る状態 {c['removed']} 件を外し、{c['kept']} 件を残した", "items": items, "metrics": c}
+    out = {
+        "tool": TOOL,
+        "status": "ok",
+        "summary": f"残る状態 {c['removed']} 件を外し、{c['kept']} 件を残した",
+        "items": items,
+        "metrics": c,
+    }
     print(json.dumps(out, ensure_ascii=False))
     return 0
 

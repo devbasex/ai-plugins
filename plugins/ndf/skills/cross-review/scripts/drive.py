@@ -266,7 +266,9 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
             run = [] if "--run" in self.init_args else ["--run", durable.current_id()]
         except durable.DurableError:
             run = []
-        out = self.must(call([sys.executable, str(HERE / "state.py"), "init", str(self.pr), *self.init_args, *run], self.env), "state.py init")
+        out = self.must(
+            call([sys.executable, str(HERE / "state.py"), "init", str(self.pr), *self.init_args, *run], self.env), "state.py init"
+        )
         iv = parse_vars(out)
         if "TMP_DIR" not in iv:
             raise Stop("state.py init が TMP_DIR を返さない", 2)

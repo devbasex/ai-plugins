@@ -332,10 +332,14 @@ def test_merged_cleanup_removes_rf_like_pr(place, tmp_path) -> None:
     (bindir / "gh").chmod(0o755)
     head = git(root, "rev-parse", "HEAD").strip()
     env = {**os.environ, "PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}", "TMPDIR": str(systmp)}
-    env["FAKE_GH_PRS"] = json.dumps({"5": {"headRefName": "feature/z", "state": "MERGED", "mergeCommit": {"oid": head}, "headRefOid": head}})
+    env["FAKE_GH_PRS"] = json.dumps(
+        {"5": {"headRefName": "feature/z", "state": "MERGED", "mergeCommit": {"oid": head}, "headRefOid": head}}
+    )
     env["NDF_PRESENTATION_DIR"] = str(tmp_path / "pres")
 
-    p = subprocess.run([sys.executable, str(SCRIPTS / "merged-steps.py"), "cleanup", "5", "--root", str(root)], capture_output=True, text=True, env=env)
+    p = subprocess.run(
+        [sys.executable, str(SCRIPTS / "merged-steps.py"), "cleanup", "5", "--root", str(root)], capture_output=True, text=True, env=env
+    )
 
     out = json.loads(p.stdout.strip().splitlines()[-1])
     got = {(i["kind"], Path(i["name"]).name): i["result"] for i in out["items"]}
