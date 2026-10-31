@@ -436,7 +436,7 @@ stateDiagram-v2
 | ランナー向けの経路 | `INGEST_URL` と同じ origin の `/run-jobs/*`。実行ジョブの token で認証し、導入の token の渡し直し（`POST /run-jobs/github-token`）と状態の置き場の 15 分の署名つき URL（`POST /run-jobs/state`）だけを返す。形は `factory/contracts/openapi/runs.yaml` |
 | `gate.reached` の切り詰め | 256 KiB を超えると `material` だけを UTF-8 の文字の境目で切り、末尾に Pull Request の URL（無ければ元の大きさ）への案内を残す |
 
-他の子課題へは `factory/api/src/index.ts` の `requestResume`（#2173）・`claimLocalRunJob`・`reportLocalRunJobEnded`（#2189）・`cancelSprintRun` を公開する。
+`factory/api/src/index.ts` は `requestResume`・`claimLocalRunJob`・`reportLocalRunJobEnded`・`cancelSprintRun` を公開する。
 
 ### 常に成り立つ条件（サービス全体）
 
