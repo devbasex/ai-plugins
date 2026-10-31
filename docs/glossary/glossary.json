@@ -4655,6 +4655,34 @@
       "meaning": "状態の一覧に従い、持ち主の終わった残る状態を外し、残したものと理由を返す処理（run_state.sweep）。git が拒めば止まる操作だけで行う（#2229）",
       "source": "",
       "pending_source": "issues/issue-2229-design.md"
+    },
+    {
+      "term": "スプリントの一覧",
+      "context": "ndf-factory",
+      "meaning": "アカウントのスプリントの実行を新しい順に並べ、それぞれの今のフェーズと状態を出す画面（#2172）",
+      "source": "",
+      "pending_source": "issues/issue-2172-requirements.md"
+    },
+    {
+      "term": "スプリントの詳細",
+      "context": "ndf-factory",
+      "meaning": "1 つのスプリントの実行の、課題ごとの工程・Pull Request・CI の結果・承認ゲートの状態を出す画面（#2172）",
+      "source": "",
+      "pending_source": "issues/issue-2172-requirements.md"
+    },
+    {
+      "term": "詳細パネル",
+      "context": "ndf-factory",
+      "meaning": "スプリントの詳細で工程の行を押すと右側に出る、その工程の中身（触ったファイル・決めたこと・終了コード・秒・費用・作業の報告）の欄（#2172）",
+      "source": "",
+      "pending_source": "issues/issue-2172-requirements.md"
+    },
+    {
+      "term": "バックログの画面",
+      "context": "ndf-factory",
+      "meaning": "取り込んだリポジトリの順位の表と棚卸しの記録を、スプリントの外で読む画面（#2172）",
+      "source": "",
+      "pending_source": "issues/issue-2172-requirements.md"
     }
   ]
 }
