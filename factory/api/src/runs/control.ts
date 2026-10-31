@@ -160,7 +160,7 @@ export class RunControl {
     throw new ServiceUnavailableError("sprint_run_unavailable");
   }
 
-  // その UTC の暦月に、アカウントの実行が使った token（形態 managed の上限の判定に使う）。
+  // その UTC の暦月に、アカウントの managed の実行が使った token（形態 managed の上限の判定に使う）。
   // チームでは上限が席ごとのため、userId を渡してその席の利用者が始めた実行だけを数える
   private async tokensThisMonth(accountId: string, userId: string | null): Promise<number> {
     const now = this.now();
@@ -168,6 +168,8 @@ export class RunControl {
     const runs = await this.deps.table.listRuns(accountId, 1000);
     let total = 0;
     for (const run of runs) {
+      // 上限は managed（サービス側のモデル）の分だけに効く。local・byok で使った分は数えない
+      if (run.executionMode !== "managed") continue;
       if (userId !== null && run.createdBy !== userId) continue;
       if (isTerminalRun(run.state) && new Date(run.updatedAt) < since) continue;
       total += await this.deps.reader.sumTokensSince(run.sprintRunId, since);

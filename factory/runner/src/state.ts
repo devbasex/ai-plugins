@@ -20,9 +20,12 @@ export function trackedEntries(entries: string[], tracked: Set<string>): string[
 }
 
 export class StateRejectedError extends Error {
-  constructor(readonly paths: string[]) {
+  // Node が型を消すだけで動かすため、parameter property（変換が要る構文）を使わない
+  readonly paths: string[];
+  constructor(paths: string[]) {
     super(`保存した状態が追跡するパスを含むため戻しません（${paths.length} 件）`);
     this.name = "StateRejectedError";
+    this.paths = paths;
   }
 }
 
