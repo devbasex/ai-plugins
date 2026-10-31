@@ -52,7 +52,7 @@ PLUGIN_ROOT = HERE.parents[2]
 sys.path.insert(0, str(PLUGIN_ROOT / "scripts" / "lib"))
 import deps  # noqa: E402
 
-deps.require("md", "durable")
+deps.require("md", "durable", "waits")
 import md  # noqa: E402
 from step_result import (  # noqa: E402
     EXIT_PRECONDITION,

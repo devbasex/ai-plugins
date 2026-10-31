@@ -43,7 +43,7 @@ sys.path.insert(0, str(LIB))
 import deps  # noqa: E402
 
 # `refactor_lib` を同じプロセスで読む（状態の置き場・origin の owner/repo）。呼び名の表は md で読む
-deps.require("md", "mdtable", "durable")
+deps.require("md", "mdtable", "durable", "procs", "waits")
 
 import drive_pause as dp  # noqa: E402
 import durable  # noqa: E402

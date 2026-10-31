@@ -29,7 +29,7 @@ LIB = HERE.parents[2] / "scripts" / "lib"
 sys.path.insert(0, str(LIB))
 import deps  # noqa: E402
 
-deps.require("durable", "waits")
+deps.require("durable", "waits", "procs")
 import drive_pause as dp  # noqa: E402
 import durable  # noqa: E402
 import post_queue  # noqa: E402  一時的な失敗の流し直し（#1843）
