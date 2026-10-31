@@ -116,7 +116,7 @@ def worktree_work(path: Path | str, head_oid: str | None = None) -> str | None:
     return _local_work(Path(path)) or _unpushed(Path(path), head_oid)
 
 
-def remove_review_worktree(root: Path | str, path: Path | str, pr: int, pr_state: dict[str, Any] | None) -> tuple[bool, str | None]:
+def remove_review_worktree(root: Path | str, path: Path | str, pr_state: dict[str, Any] | None) -> tuple[bool, str | None]:
     """レビュー worktree 1 本を `--force` を使わずに外す。外せなければ (False, 理由)。"""
     path = Path(path)
     w = _listed(root).get(str(path.resolve()))
@@ -138,14 +138,14 @@ def remove_review_worktree(root: Path | str, path: Path | str, pr: int, pr_state
     return True, None
 
 
-def remove_run_dir(root: Path | str, rf_dir: Path | str, pr: int, pr_state: dict[str, Any] | None) -> list[dict[str, Any]]:
+def remove_run_dir(root: Path | str, rf_dir: Path | str, pr_state: dict[str, Any] | None) -> list[dict[str, Any]]:
     """`rf<n>` の中の worktree を 1 本ずつ外し、すべて外れたら `rf<n>` と記録を消す。結果の行を返す。"""
     rf_dir, items = Path(rf_dir), []
     if not rf_dir.is_dir():
         return items
     left = False
     for child in sorted(p for p in rf_dir.iterdir() if p.is_dir()):
-        ok, why = remove_review_worktree(root, child, pr, pr_state)
+        ok, why = remove_review_worktree(root, child, pr_state)
         items.append(_item("worktree", child, ok, why))
         left = left or not ok
     rest = [p.name for p in rf_dir.iterdir()] if rf_dir.is_dir() else []
@@ -159,10 +159,10 @@ def remove_run_dir(root: Path | str, rf_dir: Path | str, pr: int, pr_state: dict
     return items
 
 
-def remove_pr_dir(root: Path | str, path: Path | str, pr: int, pr_state: dict[str, Any] | None) -> list[dict[str, Any]]:
+def remove_pr_dir(root: Path | str, path: Path | str, pr_state: dict[str, Any] | None) -> list[dict[str, Any]]:
     """`pr<n>` を外し、外れたら記録も消す。結果の行を返す。"""
     path = Path(path)
-    ok, why = remove_review_worktree(root, path, pr, pr_state)
+    ok, why = remove_review_worktree(root, path, pr_state)
     if ok:
         owner_path(path).unlink(missing_ok=True)
     return [_item("worktree", path, ok, why)]
@@ -247,8 +247,8 @@ def _sweep_one_review(root: Path, path: Path, kind: str, pr: int, now: float, vi
     if state.get("state") == "OPEN":
         return [_item(label, path, False, f"Pull Request #{pr} が open")]
     if kind == "rf":
-        return remove_run_dir(root, path, pr, state)
-    return remove_pr_dir(root, path, pr, state)
+        return remove_run_dir(root, path, state)
+    return remove_pr_dir(root, path, state)
 
 
 def _pid_record(raw: Any) -> tuple[int, float | None] | None:

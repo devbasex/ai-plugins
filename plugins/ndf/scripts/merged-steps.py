@@ -165,7 +165,7 @@ def _remove_pr_tmp_worktrees(root, wt_dir, n, add):
             add("run-dir" if name.startswith("rf") else "worktree", str(path), "kept", err or run_owner.alive_reason(path, record))
             continue
         state = state or run_state.view_pr(root, n) or {}
-        for it in remove(root, path, n, state):
+        for it in remove(root, path, state):
             add(it["kind"], it["name"], it["result"], it.get("reason"))
 
 
