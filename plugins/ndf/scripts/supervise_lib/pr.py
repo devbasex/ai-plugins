@@ -11,9 +11,9 @@ from pathlib import Path
 import gh_call
 import gh_sections
 import mdtable
-from closing import defer_for_base
 from pr_mode import with_mode_line
 from release_lib.others import MIGRATION_HEADING
+from repo import defer_for_base
 from supervise_lib.claude import TAIL
 from supervise_lib.paths import DECISIONS_SH
 from supervise_lib.pr_materials import CHANGES_HEADING, Materials, gather_materials

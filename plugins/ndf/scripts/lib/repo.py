@@ -12,6 +12,7 @@ import re
 from pathlib import Path
 
 import proc
+from closing import defer_closing
 
 ORIGIN_URL = re.compile(r"[:/](?P<owner>[^/:]+)/(?P<name>[^/]+?)(?:\.git)?/?$")
 WORKTREE_DECL = Path(".ndf") / "worktree.json"
@@ -92,6 +93,12 @@ def merge_closes_issues(root, base) -> bool:
     （置き換えても閉じる予定の参照として NDF の手順で閉じられ、失うものが無い。#2228 の決定 9）。"""
     d = default_branch(root)
     return d is None or not base or str(base).removeprefix("origin/") == d
+
+
+def defer_for_base(root, base, text):
+    """宛先 base の Pull Request の本文を、マージで GitHub が課題を閉じるとき（merge_closes_issues）だけ
+    closing.defer_closing に通す。(本文, 置き換えた指し先の字面の並び) を返す。`pr-steps.py` と `supervise_lib/pr.py` が使う。"""
+    return defer_closing(text) if merge_closes_issues(root, base) else (text or "", [])
 
 
 def base_branch(root) -> str | None:
