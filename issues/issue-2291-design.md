@@ -91,7 +91,7 @@
 | 削る基準（`docs/plugin-development-guide.md` の「検証とテスト」に節を足す） | 決定 2 の 6 つの基準と、消すときに台帳へ残すもの。実装の細部の判定は `tdd-cycle` の `references/test-quality.md` を指し、写さない |
 | 計測のスクリプト（`plugins/ndf/scripts/experimental/whole-test-timing.py`、実験版） | `measure`: load average を読み、宣言の suite を順に流して秒を測り、pytest の junit から件数・合計・遅いテストの上位 30 件・ファイルの上位 10 本・nodeid ごとの結果を JSON に書く。`diff`: 着手前後の JSON と台帳を照らす（I1・I2） |
 | テストの台帳（`issues/issue-2291-test-ledger.md`） | 着手前後の実測・遅いテストの表と処置・消したテストの 1 件ごとの基準と守るテスト。PR 本文の上限を避けて置き、PR 本文から指す |
-| 後始末の部品（`scripts/pytest_child_cleanup.py`、根の `conftest.py` が `pytest_plugins` で読む） | pytest の親と各 worker を子の回収役にし、SIGTERM と終了の時点で子孫を止める。止めるのは `plugins/ndf/scripts/lib/procs.py` の `child_pids` と `stop_tree` |
+| 後始末の部品（`scripts/pytest_child_cleanup.py`、根の `conftest.py` が `pytest_plugins` で読む） | pytest の親と各 worker を子の回収役にし、付け替わって終わった孫を回収し、SIGTERM と終了の時点で子孫を止める。止めるのは `plugins/ndf/scripts/lib/procs.py` の `child_pids` と `stop_tree` で、`child_pids(os.getpid(), recursive=False)` の各 pid へ `stop_tree` をかけ、自分の pid には送らない |
 | 重いテストの書き直し（`plugins/ndf/scripts/tests/`・`plugins/ndf/skills/*/tests/`・`scripts/tests/`） | 決定 3 の 3 つの手段で、遅いテストを消す・まとめる・速くする |
 | `Python tests` のワークフロー（`.github/workflows/pytest.yml`） | PR ごとの取り消し（決定 5）と、準備の短縮（決定 6）。分割の数・集約のジョブは変えない |
 | 実験版の台帳（`docs/ndf-experiments.md`） | 計測のスクリプトの 1 行（使った結果と行き先） |
@@ -165,6 +165,7 @@ sequenceDiagram
 
 - 親だけが SIGTERM を受けたとき（`kill -TERM <親の pid>`、受け入れ条件 7）は、worker は SIGTERM を受けない。親が子孫の木（worker とその子孫）をまとめて止める
 - 子の回収役にしてあるため、親（中継など）が先に終わった孫は init ではなく最も近い pytest のプロセスへ付け替わり、列挙から漏れない
+- 付け替わった孫が終わると、その pytest のプロセスが回収しない限りゾンビとして残る。ゾンビはグループの存否（`os.killpg(pgid, 0)`）と `os.kill(pid, 0)` を成功させるため、打ち切る側の `stop_group` が猶予の 5 秒を毎回待ち切る。そこで各プロセスは SIGCHLD を受けるたびに、自分が起こした覚えの無い直接の子のゾンビだけを回収する（決定 4）
 - 正常に終わったとき（`pytest_unconfigure`）も、各プロセスは残った子孫を止める。テストが止め忘れた子を次のテストへ持ち越さない
 - 子の回収役にできない環境（Linux 以外）では何もしない。テストの結果は変えない
 
@@ -184,7 +185,7 @@ sequenceDiagram
     Note over A,H: 古い実行の結果は古いコミットに付き、<br/>head のチェックには付かない
 ```
 
-`main` / `develop` への push は取り消さない（マージ後の確認の記録をコミットごとに残す）。
+`main` / `develop` への push は取り消さない（マージ後の確認の記録をコミットごとに残す）。push の実行は実行ごとに別の組（`github.run_id`）へ入れ、同じ組で待っている前の実行が取り消されないようにする（決定 5）。
 
 ## 入出力の契約
 
@@ -202,9 +203,10 @@ sequenceDiagram
 
 | 契機 | 振る舞い |
 | --- | --- |
-| 起動（`pytest_configure`） | 親と各 worker を子の回収役にする |
-| SIGTERM | 子孫を止め（SIGTERM → 2 秒 → SIGKILL）、既定の SIGTERM の扱いへ戻して自分へ送り直す。終了の仕方は今と同じ |
-| 終了（`pytest_unconfigure`） | 残った子孫を止める |
+| 起動（`pytest_configure`） | 親と各 worker を子の回収役にする。`subprocess.Popen` と `os.fork` を包み、自分が起こした pid を記録し始める。SIGCHLD の扱いを置く |
+| SIGCHLD | 直接の子（`child_pids(os.getpid(), recursive=False)`）のうち、ゾンビで、かつ自分が起こした pid の記録に無いものだけを `os.waitpid(pid, os.WNOHANG)` で 1 つずつ回収する。`os.waitpid(-1, ...)` は使わない（`subprocess.Popen` や `os.fork` の呼び手が待つ終了コードを横取りする） |
+| SIGTERM | 直接の子（`child_pids(os.getpid(), recursive=False)`）の各 pid へ `stop_tree` をかけ、自分の pid には送らない（`stop_tree` は pid 自身とそのグループも止めるため、自分へ向けると自分の SIGTERM の扱いへ入り直すか、自分を SIGKILL で止める）。止める pid が複数あるときは、猶予の 2 秒を pid ごとに順に待たず、各 pid の `stop_tree(pid, grace=2)` をスレッドで並べて呼び、全部の終わりをまとめて待つ（`stop_group` の猶予 5 秒に収める。`stop_tree` と同じ役割の関数は作らない）。その後、既定の SIGTERM の扱いへ戻して自分へ送り直す。終了の仕方は今と同じ |
+| 終了（`pytest_unconfigure`） | SIGTERM と同じ呼び方で残った子孫を止め、記録に無いゾンビを回収し、包んだ `subprocess.Popen` と `os.fork`・SIGCHLD の扱いを元へ戻す |
 
 ## 非機能の実現方式
 
@@ -244,7 +246,9 @@ pytest 以外の suite（script-structure など）を速くする作業は、E1
 
 ### 決定 4: NDF を通さない打ち切りでも子を残さないため、後始末を根の conftest が読む部品に置き、pytest の各プロセスを子の回収役にする
 
-子が残るのは、テストが自分の session で起こした子がプロセスグループの外に出るためで、打ち切る側（`test_triage.run_command`・`refactor_lib.process.run_with_timeout`）はグループにしかシグナルを送れない。グループの外の子を知っているのはテストを走らせる pytest のプロセスだけなので、後始末を pytest の側に置く。打ち切る側はどちらも SIGTERM を先に送り 5 秒待つため、pytest の側の後始末はその猶予の中で終わる。Linux の子の回収役（`PR_SET_CHILD_SUBREAPER`）にするのは、`launch-cli.sh` の `setsid` のように親がすぐ終わる起動でも、孫が init へ付け替わって列挙から漏れないようにするためである。止める処理は `lib/procs.py` の `child_pids` と `stop_tree` を使い、同じ役割の関数を作らない。
+子が残るのは、テストが自分の session で起こした子がプロセスグループの外に出るためで、打ち切る側（`test_triage.run_command`・`refactor_lib.process.run_with_timeout`）はグループにしかシグナルを送れない。グループの外の子を知っているのはテストを走らせる pytest のプロセスだけなので、後始末を pytest の側に置く。打ち切る側はどちらも SIGTERM を先に送り 5 秒待つため、pytest の側の後始末はその猶予の中で終わる。Linux の子の回収役（`PR_SET_CHILD_SUBREAPER`）にするのは、`launch-cli.sh` の `setsid` のように親がすぐ終わる起動でも、孫が init へ付け替わって列挙から漏れないようにするためである。止める処理は `lib/procs.py` の `child_pids` と `stop_tree` を使い、同じ役割の関数を作らない。`stop_tree(pid)` は pid 自身とそのグループも止めるため、自分の pid へは向けず、`child_pids(os.getpid(), recursive=False)` の各 pid へかけ、複数あればスレッドで並べてまとめて待つ。
+
+子の回収役にすると、付け替わった孫が終わったときの回収も pytest のプロセスの役目になる。回収しないとゾンビが残り、`stop_group` のグループの存否の判定と `os.kill(pid, 0)` が成功し続けるため、打ち切る側が猶予の 5 秒を毎回待ち切り、既存の `test_lib_test_triage.py::test_a_timed_out_shell_command_takes_its_children_down` も落ちる。そこで SIGCHLD を受けるたびに、直接の子のゾンビを回収する。回収するのは自分が起こした覚えの無い pid だけに限り、`os.waitpid(-1, ...)` で全部を回収しない。全部を回収すると、`subprocess.Popen` の `wait` や、テストが `os.fork` の後に呼ぶ `os.waitpid(pid, ...)` の終了コードを横取りし、ECHILD で取り違える。自分が起こした pid は、`subprocess.Popen`（`subprocess.run` と `asyncio` の子プロセスもここを通る）と `os.fork`（テストが直接呼ぶ。`multiprocessing` の fork もここを通る）を包んで記録する。
 
 NDF の打ち切る側にも子孫を止める処理を足す案は採らない。受け入れ条件 7 が求める NDF を通さない打ち切りでは効かず、pytest の側と同じ役割を 2 か所に持つことになる。テストごとに後始末する案も採らない。1 万件のテストごとに子孫を列挙すると、それだけで所要が増える。
 
@@ -252,7 +256,7 @@ NDF の打ち切る側にも子孫を止める処理を足す案は採らない�
 
 ### 決定 5: 同じ PR で古い CI の実行を進めないため、`Python tests` に PR の番号ごとの concurrency を置き、集約のジョブの判定は変えない
 
-組は `<ワークフロー名>-<PR の番号、無ければ ref>` とし、取り消しは `pull_request` のときだけ行う。`main` / `develop` への push はコミットごとの記録として最後まで回す。集約のジョブ `pytest` の `if: always()` と、分割のジョブの取り消しを失敗として返す判定はそのまま残す。`if: ${{ !cancelled() }}` に変えると、取り消した実行で集約のジョブが skipped になり、GitHub は skipped の必須のチェックを成功として扱う。head のコミットの実行を手で取り消すと、テストを通さずにマージできる状態になる。古い実行の集約のジョブは古いコミットに結果を付け、head のコミットのチェックには付かない。
+組は、`pull_request` のときは `<ワークフロー名>-<PR の番号>`、それ以外（`main` / `develop` への push など）のときは `<ワークフロー名>-<github.run_id>` と実行ごとに一意にし、取り消しは `pull_request` のときだけ行う。`main` / `develop` への push はコミットごとの記録として最後まで回す。push の組を ref ごとにしない理由は、GitHub の concurrency が、同じ組に新しい実行が入ると、待っている前の実行を `cancel-in-progress: false` でも取り消すためである。マージが続くと途中のコミットの実行が回らず、コミットごとの記録が欠ける。集約のジョブ `pytest` の `if: always()` と、分割のジョブの取り消しを失敗として返す判定はそのまま残す。`if: ${{ !cancelled() }}` に変えると、取り消した実行で集約のジョブが skipped になり、GitHub は skipped の必須のチェックを成功として扱う。head のコミットの実行を手で取り消すと、テストを通さずにマージできる状態になる。古い実行の集約のジョブは古いコミットに結果を付け、head のコミットのチェックには付かない。
 
 根拠: Value 2（MVV 版 3）
 
@@ -279,6 +283,9 @@ NDF の打ち切る側にも子孫を止める処理を足す案は採らない�
 | 受け入れ条件 5・I2 | `diff` が、着手前に通った・落ちた nodeid のうち着手後に skip になったものを出し、終了コード 1 を返す | 既存のテストに skip の印を足すと落ちる |
 | 受け入れ条件 6・I4 | 自分の session で sleep を起こすテストを含む小さな束を、NDF の打ち切る側で上限まで流して打ち切ると、10 秒後にその束のパスを含むプロセスが 0 件 | 後始末の部品を読み込まない・子の回収役にしない（親が先に終わる孫が残る）と落ちる |
 | 受け入れ条件 7・I4 | 同じ束を pytest（`-n 2`）で流し、親だけに SIGTERM を送ると、10 秒後に子孫が 0 件 | 後始末を worker にだけ置く（親だけが SIGTERM を受けると残る）と落ちる |
+| 受け入れ条件 6・I4 | 後始末の部品を読み込んだまま、既存の `test_lib_test_triage.py::test_a_timed_out_shell_command_takes_its_children_down` が通る。`os.fork` の後に `os.waitpid(pid, 0)` で待つテストと `subprocess.Popen` の終了コードが変わらない | SIGCHLD で付け替わった孫を回収しない（ゾンビで猶予を待ち切る）・`os.waitpid(-1, ...)` で全部を回収する（終了コードを横取りする）と落ちる |
+| 受け入れ条件 6・I4 | SIGTERM の後始末が自分の pid を止める対象に入れず、直接の子が 2 つあっても 5 秒以内に終わる | `stop_tree(os.getpid())` と書く・猶予を pid ごとに順に待つと落ちる |
+| 受け入れ条件 9・I5 | `main` / `develop` への push を続けて 2 回行うと、2 つの run がどちらも最後まで回る | push の組を ref ごとにする（待っている前の実行が取り消される）と落ちる |
 | 受け入れ条件 8 | 実装の PR の 3 回の run で、開始から `pytest` の結果までが 180 秒以内 | 手元の削減が CI に効いていない・準備が縮んでいないと超える |
 | 受け入れ条件 9・I5 | 実行中に空のコミットを push すると、古い run の分割のジョブが cancelled になり、head の `pytest` は新しい run の結果になる | `cancel-in-progress` を外すと古い実行が残る |
 | 受け入れ条件 10・I6 | 必須のチェックがすべて通り、`required-checks-check` が集約のジョブの名前を見つける | 集約のジョブの名前を変えると落ちる |
@@ -301,5 +308,6 @@ NDF の打ち切る側にも子孫を止める処理を足す案は採らない�
 | 予算の値 | pytest 以外の suite の秒と収集の固定の秒は高負荷の下の値しか無い。負荷 8 以下の値は E1 で決まり、決定 1 の「約 460 秒」はそこで置き換わる |
 | 3 つの手段で届くか | 0.3 秒以上の 1,366 件をどこまで消せるか・速くできるかは、ファイルごとに読むまで分からない。届かなければ未決 1 で人へ戻す（決定 3） |
 | 取り消した実行の結論 | concurrency で取り消した run で、`if: always()` の集約のジョブが走って失敗を古いコミットに付けたとき、run の `conclusion` が `cancelled` になるかは実行して確かめる。`failure` になったら、受け入れ条件 9 の確かめ方との食い違いとしてゲート 2 で人へ戻し、集約の判定は緩めない（決定 5） |
+| worker の SIGCHLD の扱い | Python はシグナルの扱いを主スレッドでしか置けない。xdist の worker で `pytest_configure` とテストの本体が主スレッドで走り、SIGCHLD の扱いが置けて、`stop_group` の待ちの間に呼ばれるかは実行して確かめる。置けなければ、上の既存のテストが落ちる形で実装の中で見つかる（決定 4） |
 | CI の 180 秒 | 分割の数を変えずに届くかは、実装の PR の run で初めて分かる。届かなければ未決 1 と同じ扱いで人へ戻す |
 | 未決 2・3 | #2154 を取り込むか（受け入れ条件 8・9）と、#2285 の 1 項目目を残す扱いは、承認ゲート 1 で利用者が決める |
