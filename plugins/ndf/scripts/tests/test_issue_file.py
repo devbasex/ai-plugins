@@ -61,6 +61,7 @@ def _isolated(monkeypatch, tmp_path):
     monkeypatch.setenv("NDF_PRESENTATION_DIR", str(tmp_path / "present"))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.delenv("NDF_SKILL_REPO", raising=False)
+    monkeypatch.delenv("NDF_ISSUE_REQUEST_FILE", raising=False)
     monkeypatch.chdir(tmp_path)
 
 
@@ -325,6 +326,42 @@ def test_create_with_the_shown_digest_files_the_issue_with_the_origin(fake, tmp_
     assert origin.count("PR #1900") == 1
     assert payload["body"].split("## 由来")[0] == BODY.split("## 由来")[0]
     assert "ndf:section-end" not in payload["body"]
+
+
+# --- ランナーの中の起票の依頼（#2216） -----------------------------------------------
+
+
+def _requests(path: Path) -> list[dict]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
+
+
+def test_create_to_another_repository_inside_the_runner_writes_a_request(fake, tmp_path, monkeypatch):
+    target_is(fake, "example/app")
+    requests = tmp_path / "issue-requests.jsonl"
+    monkeypatch.setenv("NDF_ISSUE_REQUEST_FILE", str(requests))
+    code, obj = run("create", "--repo", REPO, "--title", "題", "--body-file", body_file(tmp_path), "--origin", "PR #1900")
+    assert code == 0 and obj["status"] == "ok"
+    assert obj["items"] == [{"repo": REPO, "title": "題", "result": "requested"}]
+    (request,) = _requests(requests)
+    assert request["repo"] == REPO and request["title"] == "題"
+    assert "PR #1900" in request["body"].split("## 由来", 1)[1]
+    assert posted(fake) == []
+    assert not (tmp_path / "present").exists() or not any((tmp_path / "present").iterdir())
+
+
+def test_create_to_the_development_repository_inside_the_runner_is_unchanged(fake, tmp_path, monkeypatch):
+    target_is(fake, REPO)
+    requests = tmp_path / "issue-requests.jsonl"
+    monkeypatch.setenv("NDF_ISSUE_REQUEST_FILE", str(requests))
+    code, obj = run("create", "--repo", REPO, "--title", "題", "--body-file", body_file(tmp_path), "--origin", "PR #1900")
+    assert code == step_result.EXIT_GATE and obj["metrics"]["other_repo"] is False
+    assert _requests(requests) == []
+
+
+def test_create_without_the_request_file_still_stops_for_consent(fake, tmp_path):
+    target_is(fake, "example/app")
+    code, _ = run("create", "--repo", REPO, "--title", "題", "--body-file", body_file(tmp_path), "--origin", "PR #1900")
+    assert code == step_result.EXIT_GATE
 
 
 def test_sections_after_the_origin_are_kept(fake, tmp_path):
