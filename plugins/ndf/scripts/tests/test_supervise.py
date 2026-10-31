@@ -2771,3 +2771,13 @@ def test_new_stops_on_a_template_whose_paths_is_not_a_word(tmp_path):
     )
     assert p.returncode == 2 and "1 語" in p.stderr
     assert not out.exists()
+
+
+def test_step_with_a_leftover_queue_placeholder_stops_without_running(tmp_path):
+    """#2079: 置き換わらない {queue_pr:…}・{queue_state:…} が残ったステップは、コマンドを打たずに失敗で止まる。"""
+    plan = queue_plan(tmp_path, "7-release", f"touch {tmp_path}/ran --prs {{queue_pr:check}} '{{queue_state:check}}'")
+    p = cli("run", plan)
+    assert p.returncode != 0, p.stdout + p.stderr
+    assert not (tmp_path / "ran").exists()
+    report = (paths.state_dir_of(plan) / "report.md").read_text()
+    assert "止まった" in report and "{queue_pr:check}" in report and "{queue_state:check}" in report
