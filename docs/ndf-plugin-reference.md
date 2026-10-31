@@ -107,6 +107,36 @@ bash scripts/runtime-smoke-test.sh --runtime kiro
 
 Codex MCP サーバは廃止済みです。外部 AI 委譲は `/ndf:external-ai` Skill と Claude Code 版の `corder` エージェントから Codex / agy を直接呼び出す方式を標準とします。
 
+## 承認ゲートの外の問い合わせ
+
+`AskUserQuestion` は、問いの区分（入力の `metadata.source`）が人へ回してよい区分のときだけ利用者へ出ます。区分の無い・
+許されていない問いは `plugins/ndf/scripts/hook.py` の問い合わせの guard（`hook_lib/ask_guard.py`）が PreToolUse で止め、AI は
+止めた理由を受け取って自分で決め、`scripts/ask.py decide` で記録して続けます。区分の表・宣言 `.ndf/ask.json` の形・記録の数え方の
+正本は [`skills/development-workflow/references/asking.md`](../plugins/ndf/skills/development-workflow/references/asking.md) です。
+
+| 区分 | 宣言で外せるか |
+|---|---|
+| `ndf-gate:1`・`ndf-gate:2`（承認ゲート） | 外せない |
+| `ndf-ask:redline:<番号>`（共通原則の C1〜C8・プロジェクトの P・スプリントの R） | 外せない |
+| `ndf-ask:cost`・`ndf-ask:irreversible`・`ndf-ask:human-action`・`ndf-ask:legal` | `allow` で外せる |
+| `ndf-ask:<名前>`（`extra` に書いた区分） | — |
+
+宣言が無いリポジトリでも既定（`enforce`・組み込みの 4 区分・費用のしきい値 0 USD）で働きます。止めたくないリポジトリは
+`.ndf/ask.json` に `{"version": 1, "mode": "off"}` を書きます。判定と代わりの判断は `${NDF_MVV_STATE_DIR:-~/.local/state/ndf}/ask.jsonl`
+へ追記され、`scripts/ask.py summary` で数えます。
+
+手元の版（2026-10-31）で確かめたランタイムごとの扱い:
+
+| ランタイム | 問い合わせの Tool | hook で止められるか | 扱い |
+|---|---|---|---|
+| Claude Code 2.1.314 | `AskUserQuestion`（`metadata.source` を持つ） | 止められる（PreToolUse の `deny`） | 止める |
+| Codex CLI 0.164.0 | `request_user_input`（`codex features list` で `default_mode_request_user_input` が `under development`・`false`。exec では使えない） | 確かめていない（PreToolUse が発火するか、区分の欄があるか） | 対象外。Skill の手順の規則（`asking.md`）だけで守る |
+| agy 1.4.7 | `ask_question` | 確かめていない（PreToolUse の `toolCall.name` と、拒否の理由がモデルへ届くか） | 対象外。Skill の手順の規則だけで守る |
+| Kiro CLI 2.34.0 | 見つからない（組み込みの Tool に無く、MCP の elicitation だけ） | — | 対象外（止める対象が無い） |
+
+hook の無いランタイムでは、区分に当たる問いを本文か各ランタイムの問い合わせの Tool で出し、区分の名前を問いの先頭に書きます。
+止めた問いでは Slack の待ち通知を送りません。
+
 ## Slack 通知
 
 利用者の回答か承認を待つときだけ、`plugins/ndf/scripts/wait-notify.py` が Slack へ知らせます。送る時点・本文・
@@ -114,7 +144,7 @@ Codex MCP サーバは廃止済みです。外部 AI 委譲は `/ndf:external-ai
 
 | Runtime | 通知方法 |
 |---|---|
-| Claude Code | Stop・Notification（`permission_prompt` ほか）・PermissionRequest（`ExitPlanMode`）・PreToolUse（`AskUserQuestion`）hook で `wait-notify.py --runtime claude` を実行 |
+| Claude Code | Stop・Notification（`permission_prompt` ほか）・PermissionRequest（`ExitPlanMode`）・PreToolUse（`AskUserQuestion`。問い合わせの guard が止めた問いを除く）hook で `wait-notify.py --runtime claude` を実行 |
 | Codex | `NDF_CODEX_SLACK_NOTIFY=true` の場合のみ Stop・PermissionRequest hook で `wait-notify.py --runtime codex` を実行 |
 | Kiro CLI | `plugins/ndf/dev.kiro/install.sh --with-slack` で `stop` hook に `wait-notify.py --runtime kiro` を生成 |
 

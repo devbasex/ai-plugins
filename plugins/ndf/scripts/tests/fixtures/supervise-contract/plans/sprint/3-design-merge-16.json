@@ -1,0 +1,58 @@
+{
+  "フェーズ": "設計",
+  "課題": [
+    16
+  ],
+  "モード": "standard",
+  "作業場所": "<TMP>/repo",
+  "リポジトリ": "<TMP>/repo",
+  "Pull Request": "{queue_pr:design-16}",
+  "規則": "承認の証跡が無ければ approved が関門で止まる。マージが落ちたら止まり、conductor は queue --resume で続ける。",
+  "上限": 3,
+  "steps": [
+    {
+      "id": "approved",
+      "type": "run",
+      "stage": "設計",
+      "timeout": 300,
+      "cmd": "python3 <NDF>/scripts/supervise.py design-approved --pr {pr}",
+      "gate_next": "end",
+      "next": "merge-gate"
+    },
+    {
+      "id": "merge-gate",
+      "type": "run",
+      "timeout": 120,
+      "cmd": "python3 <NDF>/scripts/merged-steps.py merge-gate --pr {pr}",
+      "gate_next": "end",
+      "next": "merge"
+    },
+    {
+      "id": "merge",
+      "type": "run",
+      "timeout": 3960,
+      "cmd": "python3 <NDF>/scripts/merged-steps.py merge-when-green {pr} --timeout 3600",
+      "probe": {
+        "cmd": "python3 <NDF>/scripts/merged-steps.py probe --pr {pr} --act"
+      },
+      "on_exit": {
+        "75": "stop"
+      },
+      "next": "end"
+    },
+    {
+      "id": "merge-approved",
+      "type": "run",
+      "timeout": 3960,
+      "cmd": "python3 <NDF>/scripts/merged-steps.py merge-when-green {pr} --timeout 3600 --gate-approved user",
+      "probe": {
+        "cmd": "python3 <NDF>/scripts/merged-steps.py probe --pr {pr} --act"
+      },
+      "on_exit": {
+        "75": "stop"
+      },
+      "next": "end"
+    }
+  ],
+  "記録": "<NDF>/scripts/projects-sync.sh"
+}

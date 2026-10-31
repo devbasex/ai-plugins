@@ -11,6 +11,7 @@ from typing import Any, Optional
 import run_metrics
 import statefile
 import test_strategy as ts
+import whole_runs
 
 from . import allocation, die, info, timeline
 from . import baseline as baseline_lib
@@ -43,6 +44,15 @@ def append_init_test(prep: Any, budget_minutes: int, pr: Any, baseline: dict[str
         allocation.append_row(target, allocation.init_test_row(baseline, prep.strategy.name, budget_minutes, pr))
     except OSError as exc:
         info(f"⚠ 着手前のテストの所要を配分の履歴へ追記できませんでした（{exc}）。進行は止めません")
+    record_whole_run(prep, baseline)
+
+
+def record_whole_run(prep: Any, baseline: dict[str, Any]) -> None:
+    """手元で全 suite を走らせた着手前のテスト（`mode: whole`）が上限の中で終わったら、全体テストの実測として残す（#1631 の決定 4）。
+    範囲テスト・ラウンドテスト・打ち切りは残さない（起動の失敗はここへ来る前に止まる）。書けなくても止めない（`whole_runs.record_whole` が知らせる）。"""
+    if baseline.get("mode") != "whole" or baseline.get("timed_out"):
+        return
+    whole_runs.record_whole(prep.work, ts.whole_key(prep.strategy), baseline.get("seconds"), "cross-refactoring")
 
 
 def abort_timed_out(strategy: ts.Strategy, budget_minutes: int, baseline: dict[str, Any], timeout: int) -> None:

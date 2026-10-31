@@ -150,8 +150,10 @@ def _skip_mark(d: str, record: RelayRecord, blocks: list[str], tasks: list[dict]
 
 WAIT_REASON = (
     "ndf-relay: この応答は AskUserQuestion を呼ばずに、本文で承認・判断を待って終わった。/goal の判定は本文の待ちでは止まらず、"
-    "承認のないまま先へ進む。利用者の承認・判断が要るなら、同じ問いを AskUserQuestion で出し直す（判断の材料は本文に書いてよい）。"
-    "問いでなければ、そのまま作業を続ける。"
+    "承認のないまま先へ進む。承認ゲートの承認なら、同じ問いを AskUserQuestion で出し直し、metadata.source に ndf-gate:<番号>"
+    "（設計の承認は ndf-gate:1、本番系へ届く操作の承認は ndf-gate:2）を付ける（判断の材料は本文に書いてよい）。"
+    "共通原則・プロジェクトの承認が要る操作なら ndf-ask:redline:<番号>、.ndf/ask.json が許す区分なら ndf-ask:<名前> を付ける。"
+    "区分に当たらない問いは人へ回さず、自分で決めて理由を記録し（ask.py decide --question）、そのまま作業を続ける。"
 )
 
 
@@ -284,12 +286,27 @@ DENY_REASON = (
 )
 
 
+def question_denied(raw: str) -> bool:
+    """hook の入力が、問い合わせの guard（`lib/ask_policy.py`）に止められる `AskUserQuestion` なら真。どの失敗も偽。"""
+    try:
+        data = json.loads(raw) if raw else None
+        if not isinstance(data, dict) or data.get("tool_name") != "AskUserQuestion":
+            return False
+        import ask_policy
+
+        verdict, _ = ask_policy.judge_input(data)
+        return verdict.decision == "deny"
+    except Exception:  # noqa: BLE001 — 判定できなければ今のまま合図を作る
+        return False
+
+
 def cmd_question(action: str) -> int:
-    """`open`: 質問の合図を作る（ロックが取れなければ質問を拒否する）。`close`: 消す。"""
+    """`open`: 質問の合図を作る（ロックが取れなければ質問を拒否する。問い合わせの guard が止める問いには作らない）。`close`: 消す。"""
     started = time.time()
+    raw = ""
     try:
         if not sys.stdin.isatty():
-            sys.stdin.read()  # hook の JSON は読み捨てる
+            raw = sys.stdin.read()
     except (OSError, ValueError):
         pass
     try:
@@ -305,6 +322,8 @@ def cmd_question(action: str) -> int:
             pass
         return 0
     if action != "open":
+        return 0
+    if question_denied(raw):  # hook.py の問い合わせの guard が止める問い: 出ないので合図を作らない（#2206 の I7）
         return 0
     try:
         fd = _lock(os.path.join(d, QUESTION_LOCK), max(0.0, started + env_num("NDF_RELAY_QUESTION_WAIT", 3) - time.time()))

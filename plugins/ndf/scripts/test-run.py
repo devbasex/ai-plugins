@@ -3,6 +3,7 @@
 
     python3 test-run.py scope --paths <パス>... [--changed <パス>...] [--only-kind test|lint] [--root DIR] [--template CMD] [--test-kind test|lint]
     python3 test-run.py whole [--paths <パス>...] [--pr N] [--base <ブランチ>] [--root DIR] [--template CMD] [--test-kind test|lint]
+    （どちらも `--limit <秒>` で上限を渡せる。省くと所要の記録と直近の全体テストの実測から決める）
 
 宣言（`.ndf/project.json` の `test`。無ければ `.ndf/supervise.json` の `test.command` を 1 つの suite として読む）から
 戦略を解き（`lib/test_strategy.resolve`）、範囲テストは `test_strategy.scope_runs` で組んでシェルで走らせる（テストの suite には
@@ -12,6 +13,7 @@
 落ちた静的解析は `lib/test_triage.lint_verdict` で分ける。`--template` は引数の雛形で、宣言より先に効き、種別は `--test-kind`。
 `whole --paths` は静的解析の雛形の全体テストの `{paths}` に入れる範囲である。
 `scope --only-kind` は渡した種別の suite だけを打ち（当てる範囲は同じ）、打つものが無ければ通る（0）。
+手元の全体検証が上限の中で終わったら（通った・落ちたを問わない）、その秒を全体テストの実測として `lib/whole_runs.py` へ残す。
 
 終了コード: 0 = 通った（フレーキーと既存失敗だけのときも 0。`items` に分類を持つ）/ 1 = 変更起因の失敗がある /
 2 = 判断できない（起動の失敗・CI が上限までに終わらない・`gh` が使えない・宣言の不足・コンテナで走る suite が worktree を
@@ -31,15 +33,19 @@ from typing import NamedTuple
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "lib"))
+import deps  # noqa: E402
 
+deps.require("schema")  # 全体テストの実測（whole_runs → estimate_records）が宣言の形に pydantic を使う
 import container_reach  # noqa: E402
 import repo as repo_lib  # noqa: E402
 import test_strategy as ts  # noqa: E402
 import test_triage  # noqa: E402
+import whole_runs  # noqa: E402
 from step_result import emit, result  # noqa: E402
 
 TOOL = "test-run"
 LOG_DIR = pathlib.Path(".ndf") / "tmp" / "test-run"
+LIMIT_KEY = {"scope": "test_timeout", "whole": "whole_timeout"}  # `--limit` が置き換える上限
 
 
 def _supervise_decl(root: pathlib.Path) -> dict:
@@ -57,10 +63,17 @@ def _resolve(root: pathlib.Path, a) -> tuple[ts.Strategy, dict, list[str]]:
     scope_paths = list(getattr(a, "paths", None) or []) if a.cmd == "whole" else None
     strategy = ts.resolve(decl, baseline_test=a.template, template_kind=a.test_kind, scope_paths=scope_paths)
     notes.extend(strategy.notes)
-    w, w_source = ts.whole_seconds(decl)
-    c = ts.ci_wall_seconds(decl, (strategy.ci or {}).get("check") if strategy.ci else None)
-    limits = ts.limits(strategy, None, whole_seconds_value=w, whole_source=w_source, ci_seconds=c)
+    limits = ts.unbudgeted_limits(strategy, decl, root)
+    # プランのステップが決めた上限（`--limit`）は、ステップの `timeout` と同じ値から作ったものなので、それを使う（#1631）
+    given = getattr(a, "limit", None)
+    if given is not None:
+        limits[LIMIT_KEY[a.cmd]] = int(given)
     return strategy, limits, notes
+
+
+def _record_whole(root: pathlib.Path, strategy: ts.Strategy, started: float) -> None:
+    """手元の全体検証が上限の中で終わった秒を、全体テストの実測として残す（#1631。書けなくても結果は変えない）。"""
+    whole_runs.record_whole(root, ts.whole_key(strategy), time.monotonic() - started, "test-run")
 
 
 def _git_out(root: pathlib.Path, *args: str) -> str | None:
@@ -347,6 +360,7 @@ def cmd_whole(a) -> int:
     commands = strategy.whole_commands(ts.TEST)
     if not commands:
         if lint is not None:
+            _record_whole(root, strategy, budget_started)
             return _emit_outcome(OutcomeContext(strategy, limits, notes, passed=not lint, detail="静的解析の全体テスト", lint=lint))
         emit(result(TOOL, "stopped", "全体テストのコマンド（suites[].command）が無い", [{"note": n} for n in notes], {}))
         return 2
@@ -359,6 +373,7 @@ def cmd_whole(a) -> int:
             return _emit_launch(strategy, command, outcome, log)
         emit(result(TOOL, "stopped", f"全体テストが {limits['whole_timeout']} 秒で終わらなかった", [], {}))
         return 2
+    _record_whole(root, strategy, budget_started)
     failed_any = any(o.status != ts.PASSED for _, o, _ in done)
     seconds = round(time.monotonic() - started, 1)
     detail = f"全体テスト {len(commands)} 本（{seconds} 秒 / 戦略 {strategy.name}）"
@@ -396,6 +411,12 @@ def main(argv=None) -> int:
         p.add_argument("--base", default=None, help="着手前の HEAD とみなす起点のブランチ（既定は .ndf/worktree.json の base_branch）")
         p.add_argument("--template", default=None, help="範囲テストの雛形（{paths} を含むコマンド。宣言より先に効く）")
         p.add_argument("--test-kind", choices=ts.KINDS, default=ts.TEST, help="--template の種別（test = テスト / lint = 静的解析）")
+        p.add_argument(
+            "--limit",
+            type=int,
+            default=None,
+            help="この実行の上限の秒（scope は test_timeout、whole は whole_timeout を置き換える。既定は記録と直近の実測から決める）",
+        )
     a = ap.parse_args(argv)
     try:
         return cmd_scope(a) if a.cmd == "scope" else cmd_whole(a)

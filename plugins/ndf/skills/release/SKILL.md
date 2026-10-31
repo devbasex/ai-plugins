@@ -92,7 +92,7 @@ Pull Request が最後かどうかを判断できない。
 
 | | 何を扱うか |
 | --- | --- |
-| `merged` | マージ後の後片付け。worktree とブランチの削除。その退避先は本番へ出した後にこの工程が回収の候補として挙げ、人の承認を得てから消す（[references/release-steps.md](references/release-steps.md)「退避先の回収」） |
+| `merged` | マージ後の後片付け。worktree とブランチの削除。その退避先は本番へ出した後にこの工程が回収の候補として挙げ、人の承認（`ndf-ask:redline:C4`）を得てから消す（[references/release-steps.md](references/release-steps.md)「退避先の回収」） |
 | **この Skill** | 利用者が受け取れる状態にする |
 | `release-verification` | リリースされた成果物を、利用者の環境で確かめる |
 
@@ -101,7 +101,7 @@ Pull Request が最後かどうかを判断できない。
 ## 開始条件
 
 - **スプリントのすべての Pull Request がマージされている。** どこまでがスプリントかを確かめるのは
-  この工程である（`merged` は判断できなくても待たない）。分からなければ運用者に聞く
+  この工程である（`merged` は判断できなくても待たない）。状態ファイル（スプリントの状態・目録）から AI が決め、決まらなければ止めて報告する
 - 配布物に差分がある（手順 1）
 - そのスプリントが、リリースそのものを目的としない
 
@@ -133,7 +133,7 @@ Pull Request が最後かどうかを判断できない。
 
 **承認を求めるときに提示するものは
 [references/approval-request.md](../development-workflow/references/approval-request.md) が
-定める。** ドキュメントレビューの承認と同じ定義を使い、リリースでは対象が版になる分だけ項目が変わる
+定める。** 本番リリース・制作物承認・公開の同意の問いは `AskUserQuestion` の `metadata.source` に `ndf-gate:2` を付ける（区分の正本は [asking.md](../development-workflow/references/asking.md)）。ドキュメントレビューの承認と同じ定義を使い、リリースでは対象が版になる分だけ項目が変わる
 （版の比較の URL・配布物の差分・**取り消しの手段とその限界**）。
 
 **Claude Code のプラグインの形では、承認資料の機械で作れる部分を `release-steps.py approval-facts` が
@@ -234,7 +234,7 @@ Pull Request に入れる。`guide:` の行が出たら、その手引きに従�
 
 ### 4. 公開する
 
-同意を得てから実行する。**公開の仕方は形で変わる**（レジストリへの公開・対象の系への反映・
+同意（`ndf-gate:2`）を得てから実行する。**公開の仕方は形で変わる**（レジストリへの公開・対象の系への反映・
 署名した配布物の設置・ストアへの提出）。参照先の形ごとのファイルに従う。
 
 **Claude Code のプラグインの形では、公開を `release-steps.py release --channel dev|prod` が行う**

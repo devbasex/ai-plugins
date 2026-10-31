@@ -29,7 +29,7 @@ description: "Create or update an implementation plan under issues/ before codin
 - フォーマッター適用のみ
 - ドキュメントのみの更新
 
-判断に迷う場合はユーザーに確認する。
+判断に迷う場合は AI が決め、決めた理由を `ask.py decide --question` で記録する（`development-workflow` の `references/asking.md`）。
 
 ## ファイル配置・命名
 

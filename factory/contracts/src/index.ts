@@ -12,7 +12,7 @@ export type * from "./generated/run-job-instruction.ts";
 export type * from "./generated/ingest-response.ts";
 export { progressEventSchema, runJobInstructionSchema, ingestResponseSchema };
 
-// 進捗の事象の 10 種類と、定義の中の名前（$defs）
+// 進捗の事象の 11 種類と、定義の中の名前（$defs）
 export const EVENT_DEFINITIONS = {
   "job.started": "JobStartedEvent",
   "phase.changed": "PhaseChangedEvent",
@@ -24,6 +24,7 @@ export const EVENT_DEFINITIONS = {
   "job.finished": "JobFinishedEvent",
   "pr.updated": "PrUpdatedEvent",
   "ci.updated": "CiUpdatedEvent",
+  "decision.delegated": "DecisionDelegatedEvent",
 } as const satisfies Record<ProgressEvent["type"], string>;
 
 export type EventType = keyof typeof EVENT_DEFINITIONS;
@@ -60,7 +61,7 @@ function firstViolation(v: ValidateFunction): ContractViolation {
   return { instancePath: e?.instancePath ?? "", keyword: e?.keyword ?? "unknown" };
 }
 
-// 進捗の事象 1 件を定義で確かめる。種類が 10 種類のどれでもなければ /type の enum で落とす
+// 進捗の事象 1 件を定義で確かめる。種類が 11 種類のどれでもなければ /type の enum で落とす
 export function validateProgressEvent(value: unknown): ContractResult<ProgressEvent> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return { ok: false, violation: { instancePath: "", keyword: "type" } };

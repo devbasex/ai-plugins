@@ -27,11 +27,18 @@
   `supervise_lib/queue.py` の `Popen`・`.poll()`・関数 `run_batch`、`post_queue.Queue` の `os.open`・`glob` の
   呼び出し（`_import_legacy` を除く）、drive の `save_ds`・`ds_path`。あわせて `state.py` を除く置き場が
   `durable.workflow` の関数を持つか、それを持つモジュールを import することを見る。置き場を 1 つも持たない木は見ない
-- `require-groups`: モジュールの最上位で `deps.require(…)` を呼ぶエントリポイントが、読み込み時にたどれる外部パッケージの
-  グループを並べていない（決定 17・23）。エントリポイントから最上位の import（関数の中の import と
-  `except ImportError` で受ける import を除く）を、エントリポイントの置き場と `scripts/`・`scripts/lib/` の
-  モジュールへ推移的にたどり、届いた外部パッケージを `lib/deps.py` の `GROUPS` でグループへ引く。
-  例外リストの `name` はグループの名前
+- `require-groups`: エントリポイント（最上位に `if __name__ == "__main__":` の文を持つ `.py`。hook の経路と
+  `lib/deps.py` を除く）から import をたどって届く外部パッケージのグループを、その import を覆う `deps.require(…)`
+  が並べていない（決定 17・23）。import は関数の中のものも含めて、エントリポイントの置き場と `scripts/`・
+  `scripts/lib/` のモジュールへ推移的にたどり、届いた外部パッケージを `lib/deps.py` の `GROUPS` でグループへ引く。
+  呼び出しの流れは追わない。`require` が覆うのは、モジュールの最上位で呼べばそれより後の最上位の文とすべての
+  関数の本体、関数の中で呼べばその関数のそれより後の文（入れ子のブロックで呼べばそのブロックの中）だけ。
+  例外は `main` の本体の最上位で呼ぶ `require` で、そのモジュールをエントリポイントとして見るときだけ、`main` の
+  それより後の文と、関数の本体で遅れて読む依存（最上位で import したモジュールの関数の本体を含む）を覆う。
+  任意の依存は違反にしない: `except ImportError` / `ModuleNotFoundError`（組の中を含む）を受ける `try` の本体と、
+  `find_spec("<名前>")` / `deps.importable("<グループ>")` の確かめが成り立つときだけ通る枝（真で入る `if` の本体と、
+  偽で入り `return` / `raise` で終わる `if` の後の同じブロックの文）。互いに import し合うモジュールは、
+  たどっている途中のものを空として扱う。例外リストの `name` はグループの名前
 
 副命令のハンドラー（`cmd_*`）・`main`・`build_parser`・`_build_parser`・シェルの `usage` は規則で外す。
 
@@ -457,105 +464,216 @@ def _dep_groups(root: Path) -> dict[str, list[str]]:
     return {}
 
 
-def _load_time_imports(tree: ast.Module) -> set[str]:
-    """読み込み時に走る import の名前（関数の本体と `except ImportError` で受ける `try` の中を除く）。"""
-    names: set[str] = set()
-
-    def walk(stmts: list[ast.stmt]) -> None:
-        for n in stmts:
-            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            if isinstance(n, ast.Import):
-                names.update(a.name for a in n.names)
-            elif isinstance(n, ast.ImportFrom) and not n.level and n.module:
-                names.add(n.module)
-                names.update(f"{n.module}.{a.name}" for a in n.names)
-            elif isinstance(n, ast.ImportFrom) and n.level:
-                names.update(f".{n.module}." + a.name if n.module else "." + a.name for a in n.names)
-                names.add(f".{n.module}") if n.module else None
-            elif isinstance(n, ast.Try):
-                guarded = any(isinstance(h.type, ast.Name) and h.type.id in ("ImportError", "ModuleNotFoundError") for h in n.handlers)
-                if not guarded:
-                    walk(n.body)
-                walk(n.orelse)
-                walk(n.finalbody)
-                for h in n.handlers:
-                    walk(h.body)
-            else:
-                for field in ("body", "orelse"):
-                    sub = getattr(n, field, None)
-                    if isinstance(sub, list):
-                        walk(sub)
-
-    walk(tree.body)
-    return names
+_IMPORT_ERRORS = ("ImportError", "ModuleNotFoundError")
 
 
-def _require_args(tree: ast.Module) -> set[str] | None:
-    """最上位で呼ぶ `deps.require(…)` / `require(…)` のグループ（最上位で呼ばなければ None）。"""
-    for n in tree.body:
-        call = n.value if isinstance(n, ast.Expr) and isinstance(n.value, ast.Call) else None
-        if call is None:
-            continue
-        f = call.func
-        if (isinstance(f, ast.Attribute) and f.attr == "require" and isinstance(f.value, ast.Name) and f.value.id == "deps") or (
-            isinstance(f, ast.Name) and f.id == "require"
-        ):
-            return {a.value for a in call.args if isinstance(a, ast.Constant) and isinstance(a.value, str)}
+def _guards_import(t: ast.Try) -> bool:
+    """`except ImportError` / `ModuleNotFoundError`（組の中を含む）を受ける `try` か。"""
+    for h in t.handlers:
+        types = h.type.elts if isinstance(h.type, ast.Tuple) else [h.type]
+        if any(isinstance(x, ast.Name) and x.id in _IMPORT_ERRORS for x in types):
+            return True
+    return False
+
+
+def _require_call(stmt: ast.stmt) -> set[str] | None:
+    """文が `deps.require(…)` / `require(…)` の呼び出しなら、並べたグループ。そうでなければ None。"""
+    call = stmt.value if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call) else None
+    if call is None:
+        return None
+    f = call.func
+    if (isinstance(f, ast.Attribute) and f.attr == "require" and isinstance(f.value, ast.Name) and f.value.id == "deps") or (
+        isinstance(f, ast.Name) and f.id == "require"
+    ):
+        return {a.value for a in call.args if isinstance(a, ast.Constant) and isinstance(a.value, str)}
     return None
 
 
+def _import_names(n: ast.Import | ast.ImportFrom) -> list[str]:
+    """import の文が読む名前（相対の import は `.` から始まる）。"""
+    if isinstance(n, ast.Import):
+        return [a.name for a in n.names]
+    if n.level:
+        mod = f".{n.module}" if n.module else ""
+        return ([mod] if mod else []) + [f"{mod}.{a.name}" if mod else "." + a.name for a in n.names]
+    return ([n.module] if n.module else []) + [f"{n.module}.{a.name}" for a in n.names]
+
+
+def _child_blocks(n: ast.stmt) -> list[list[ast.stmt]]:
+    """複文の子の文の並び（import を受ける `try` の本体は除く）。"""
+    if isinstance(n, ast.Try):
+        return ([] if _guards_import(n) else [n.body]) + [h.body for h in n.handlers] + [n.orelse, n.finalbody]
+    blocks: list[list[ast.stmt]] = []
+    for field in ("body", "orelse", "finalbody", "handlers", "cases"):
+        sub = getattr(n, field, None)
+        if isinstance(sub, list):
+            blocks += [c.body for c in sub] if field in ("handlers", "cases") else [sub]
+    return blocks
+
+
+def _add_group(side: dict, group: str, where: str, owners: frozenset, covered: set[str]) -> None:
+    if not owners & covered:
+        side.setdefault(group, (where, owners))
+
+
+class _DepScan:
+    """I1〜I4: モジュールごとの未宣言のグループ（読み込みの時に届く側・遅れて読む側）を求めて覚える。"""
+
+    def __init__(self, root: Path, groups: dict[str, list[str]]):
+        self.root, self.groups = root, groups
+        self.memo: dict[tuple, tuple[dict, dict]] = {}
+        self.trees: dict[str, ast.Module | None] = {}
+
+    def owners(self, name: str) -> list[str]:
+        return [g for g, mods in self.groups.items() if any(name == m or name.startswith(m + ".") for m in mods)]
+
+    def tree(self, rel: str) -> ast.Module | None:
+        if rel not in self.trees:
+            try:
+                self.trees[rel] = ast.parse((self.root / rel).read_text(errors="ignore"))
+            except (OSError, SyntaxError):
+                self.trees[rel] = None
+        return self.trees[rel]
+
+    def _checked(self, e: ast.expr, truthy: bool) -> set[str]:
+        """I2: 条件 e が真（truthy）/ 偽のときに import できると確かめたグループ。"""
+        if isinstance(e, ast.UnaryOp) and isinstance(e.op, ast.Not):
+            return self._checked(e.operand, not truthy)
+        if isinstance(e, ast.BoolOp):
+            if isinstance(e.op, ast.And) == truthy:
+                return set().union(*(self._checked(v, truthy) for v in e.values))
+            return set()
+        if isinstance(e, ast.Compare) and len(e.ops) == 1 and isinstance(e.comparators[0], ast.Constant):
+            if e.comparators[0].value is None and isinstance(e.ops[0], (ast.Is, ast.IsNot)):
+                return self._checked(e.left, truthy == isinstance(e.ops[0], ast.IsNot))
+            return set()
+        if not truthy or not isinstance(e, ast.Call) or len(e.args) != 1:
+            return set()
+        arg, f = e.args[0], e.func
+        if not (isinstance(arg, ast.Constant) and isinstance(arg.value, str)):
+            return set()
+        fname = f.attr if isinstance(f, ast.Attribute) else f.id if isinstance(f, ast.Name) else ""
+        if fname == "find_spec":
+            return set(self.owners(arg.value))
+        if fname == "importable":
+            return {arg.value}
+        return set()
+
+    def _resolve(self, rel: str, bases: tuple[str, ...], name: str) -> str | None:
+        if name.startswith("."):
+            here = Path(rel).parent.as_posix()
+            cands = [f"{here}/{name[1:].replace('.', '/')}{s}" for s in (".py", "/__init__.py")]
+        else:
+            cands = [b + name.replace(".", "/") + s for b in bases for s in (".py", "/__init__.py")]
+        return next((c for c in cands if (self.root / c).is_file()), None)
+
+    def module(self, rel: str, bases: tuple[str, ...], entry: bool = False) -> tuple[dict, dict]:
+        """(読み込みの時に届く未宣言のグループ, 遅れて読む未宣言のグループ)。値は (届いた名前（書いたモジュール）, 持つグループ)。"""
+        key = (rel, bases, entry)
+        if key in self.memo:
+            return self.memo[key]
+        self.memo[key] = ({}, {})  # たどっている途中は空として扱う
+        load: dict[str, tuple[str, frozenset]] = {}
+        late: dict[str, tuple[str, frozenset]] = {}
+        tree = self.tree(rel)
+        if tree is not None:
+            top = set().union(*(_require_call(s) or set() for s in tree.body))
+            main = next((n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main"), None)
+            in_main = set().union(*(_require_call(s) or set() for s in main.body)) if entry and main else set()
+
+            def walk(stmts: list[ast.stmt], covered: set[str], lazy: bool, fn: ast.AST | None) -> None:
+                covered = set(covered)
+                for n in stmts:
+                    listed = _require_call(n)
+                    if listed is not None:
+                        covered |= listed
+                    elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        base = top if fn is None else covered
+                        walk(n.body, base | (in_main if n is not main else set()), True, n)
+                    elif isinstance(n, (ast.Import, ast.ImportFrom)):
+                        self._visit_import(rel, bases, n, late if lazy else load, late, covered, in_main, fn)
+                    elif isinstance(n, ast.If):
+                        walk(n.body, covered | self._checked(n.test, True), lazy, fn)
+                        walk(n.orelse, covered | self._checked(n.test, False), lazy, fn)
+                        if n.body and isinstance(n.body[-1], (ast.Return, ast.Raise)):
+                            covered |= self._checked(n.test, False)
+                    else:
+                        for block in _child_blocks(n):
+                            walk(block, covered, lazy, fn)
+
+            walk(tree.body, set(), False, None)
+        self.memo[key] = (load, late)
+        return load, late
+
+    def _visit_import(
+        self,
+        rel: str,
+        bases: tuple[str, ...],
+        n: ast.Import | ast.ImportFrom,
+        side: dict,
+        late: dict,
+        covered: set[str],
+        in_main: set[str],
+        fn: ast.AST | None,
+    ) -> None:
+        """import の文が届けるグループを side（と、読まれる側の遅れて読む分を late）へ足す。"""
+        for name in _import_names(n):
+            local = self._resolve(rel, bases, name)
+            if local:
+                sub_load, sub_late = self.module(local, bases)
+                for g, (where, owners) in sub_load.items():
+                    _add_group(side, g, where, owners, covered)
+                # 読まれる側の関数の本体は main の require の後に呼ばれる（最上位の import のとき）
+                for g, (where, owners) in sub_late.items():
+                    _add_group(late, g, where, owners, covered | (in_main if fn is None else set()))
+            elif not name.startswith("."):
+                owners = self.owners(name)
+                if owners:
+                    _add_group(side, owners[0], f"{name}（{rel}）", frozenset(owners), covered)
+
+
+def _entries(root: Path, files: list[str]) -> list[str]:
+    """`if __name__ == "__main__":` の文を最上位に持つ `.py`（hook の経路と `lib/deps.py` を除く。I7）。"""
+    hook, todo = set(), [e for e in HOOK_ENTRIES if (root / e).is_file()]
+    while todo:
+        rel = todo.pop()
+        if rel in hook:
+            continue
+        hook.add(rel)
+        todo += [f for f in (_module_file(root, n) for n in _imported(rel, (root / rel).read_text(errors="ignore"))) if f]
+    out = []
+    for rel in files:
+        if not rel.endswith(".py") or rel.endswith("lib/deps.py") or rel in hook:
+            continue
+        text = (root / rel).read_text(errors="ignore")
+        if "__main__" not in text:
+            continue
+        try:
+            body = ast.parse(text).body
+        except SyntaxError:
+            continue
+        if any(isinstance(n, ast.If) and "__name__" in ast.unparse(n.test) and "__main__" in ast.unparse(n.test) for n in body):
+            out.append(rel)
+    return out
+
+
 def require_groups(root: Path) -> list[dict]:
-    """決定 23: 最上位で require を呼ぶエントリポイントが、読み込み時に届く外部パッケージのグループを並べるか。"""
+    """決定 23・#1455: エントリポイントから import（関数の中を含む）をたどって届く外部パッケージのグループを、覆う require が並べるか。"""
     groups = _dep_groups(root)
     if not groups:
         return []
-    out: list[dict] = []
-    for entry in list_files(root):
-        if not entry.endswith(".py") or entry.endswith("lib/deps.py"):
-            continue
-        try:
-            listed = _require_args(ast.parse((root / entry).read_text(errors="ignore")))
-        except SyntaxError:
-            continue
-        if listed is None:
-            continue
+    scan, out = _DepScan(root, groups), []
+    for entry in _entries(root, list_files(root)):
         bases = (Path(entry).parent.as_posix() + "/", *IMPORT_ROOTS)
-        reached: dict[str, str] = {}  # 外部の import の名前 → それを書いたモジュール
-        todo, seen = [entry], set()
-        while todo:
-            rel = todo.pop()
-            if rel in seen:
-                continue
-            seen.add(rel)
-            try:
-                names = _load_time_imports(ast.parse((root / rel).read_text(errors="ignore")))
-            except SyntaxError:
-                continue
-            here = Path(rel).parent.as_posix()
-            for name in sorted(names):
-                if name.startswith("."):
-                    cands = [f"{here}/{name[1:].replace('.', '/')}{s}" for s in (".py", "/__init__.py")]
-                else:
-                    stem = [b + name.replace(".", "/") for b in bases]
-                    cands = [c + s for c in stem for s in (".py", "/__init__.py")]
-                local = next((c for c in cands if (root / c).is_file()), None)
-                if local:
-                    todo.append(local)
-                elif not name.startswith("."):
-                    reached.setdefault(name, rel)
-        missing: dict[str, str] = {}
-        for name, rel in reached.items():
-            owners = [g for g, mods in groups.items() if any(name == m or name.startswith(m + ".") for m in mods)]
-            if owners and not listed & set(owners):
-                missing.setdefault(owners[0], f"{name}（{rel}）")
-        for g, where in sorted(missing.items()):
+        load, late = scan.module(entry, bases, entry=True)
+        missing = {**late, **load}
+        for g, (where, _) in sorted(missing.items()):
             out.append(
                 {
                     "kind": "require-groups",
                     "path": entry,
                     "function": g,
-                    "detail": f"読み込み時に {where} へ届くのに deps.require() にグループ {g} が無い（決定 23）",
+                    "detail": f"{where}へ届くのに deps.require() にグループ {g} が無い",
                 }
             )
     return out

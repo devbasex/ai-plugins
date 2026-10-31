@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 import legacy_names
+from gate_answer import GATE_1
 
 from supervise_lib.decl import decl_fields
 from supervise_lib.paths import DESIGN_READY, GLOSSARY_PY, MVV_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, SYNC_DESIGN_BODY, WORKTREE_SETUP
@@ -337,6 +338,7 @@ def plan_sprint_release(a, repo: str, advise: bool = False, channel: str = "dev"
         issue=a.issue,
         mode=a.mode,
         advise=a.state if advise and channel == "dev" else None,
+        state=getattr(a, "state", None),  # 本番の approve が承認ゲート 2 の利用者の承認の記録を読む（#1426）
     )
     return plan_release(ns)
 
@@ -364,7 +366,7 @@ def plan_advise_design(a, n: int, repo: str) -> dict:
             s["next"] = "mvv"
     gate["inputs"] = [*gate["inputs"], "mvv"]
     gate["question"] += "。mvv に助言の MVV 判定（判定・理由・根拠）があれば、関門 1 の提示に載せる（承認は利用者が行う）"
-    plan["steps"] = [*steps, *advise_design_steps(a), gate, reject_step(sprint_state_path(a), "関門 1", "mvv", pr="{pr}")]
+    plan["steps"] = [*steps, *advise_design_steps(a), gate, reject_step(sprint_state_path(a), GATE_1, "mvv", pr="{pr}")]
     return plan
 
 
@@ -403,8 +405,8 @@ def plan_mvv_design(a, n: int, repo: str) -> dict:
             "next": "merge-gate",
         },
         *merge_steps(a, next="end", on_fail="handoff"),
-        handoff_step(sprint_state_path(a), "関門 1", "承認ラベルの付与かマージ"),
-        reject_step(sprint_state_path(a), "関門 1", "mvv", pr="{pr}"),
+        handoff_step(sprint_state_path(a), GATE_1, "承認ラベルの付与かマージ"),
+        reject_step(sprint_state_path(a), GATE_1, "mvv", pr="{pr}"),
     ]
     plan["規則"] = (
         "設計の cross-review は上限 3 ラウンドで関門 1 の判定（mvv のステップ）へ渡す（収束を待たない）。駆動そのものが失敗したら gate。"

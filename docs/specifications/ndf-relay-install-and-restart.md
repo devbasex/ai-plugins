@@ -287,7 +287,7 @@ sh -c 'R="${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/rc-added"; C="${XDG_DA
 
 | 書く側 | 条件 | すること |
 | --- | --- | --- |
-| `question open`（`PreToolUse`・`AskUserQuestion`） | `NDF_RELAY_DIR` があり、ラッパーが動いていて、hook の親をたどって最初に当たる claude が `child.pid` と一致する | `question.lock` を起動から `NDF_RELAY_QUESTION_WAIT` 秒（既定 3）まで待って取り、`0600` の空のファイルを作ってから放す。取れない・作れない・例外なら質問を拒否する |
+| `question open`（`PreToolUse`・`AskUserQuestion`） | `NDF_RELAY_DIR` があり、ラッパーが動いていて、hook の親をたどって最初に当たる claude が `child.pid` と一致する | `question.lock` を起動から `NDF_RELAY_QUESTION_WAIT` 秒（既定 3）まで待って取り、`0600` の空のファイルを作ってから放す。取れない・作れない・例外なら質問を拒否する。問い合わせの guard（`lib/ask_policy.py`）が `deny` と判定する問いには作らない（#2206。出ない問いの合図を残さない） |
 | `question close`（`PostToolUse`・`AskUserQuestion`） | 同じ | 消す。失敗しても何も出さない（シグナルファイルが残るのは安全な側） |
 | `mark`（Stop） | 直接の子の判定を通った | シグナルファイルの判定の前に消す |
 | `run` | セッションを起動する | シグナルファイル（`next.json`）と一緒に消す |

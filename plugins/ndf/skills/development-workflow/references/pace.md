@@ -144,7 +144,7 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 | 順 | 打つもの | 失敗・未承認のとき |
 | --- | --- | --- |
 | 1 | `sprint-state.py init <状態> --name <名> --pace <値> --milestone <M>` | 終了コード 3（説明に `## Mission` / `## Vision` / `## Value` がそろわない・読めない）: 利用者に説明を直してもらい打ち直す |
-| 2 | conductor が `mvv.md`（スプリント状態ファイルの隣）を利用者へ示し、承認を得る | 承認されない: 説明を直して 1 から。`normal` で進めてもよい |
+| 2 | conductor が `mvv.md`（スプリント状態ファイルの隣）を利用者へ示し、承認を得る（承認ゲート 1 の委任の承認として `AskUserQuestion` に `ndf-gate:1` を付ける） | 承認されない: 説明を直して 1 から。`normal` で進めてもよい |
 | 3 | `sprint-state.py gate <状態> MVV --what <要約>` | — |
 | 4 | `supervise.py new sprint ... --pace <値> --state <状態>` | 終了コード 1（承認の記録が無い・ハッシュ不一致・宣言が許していない）: 2 へ戻るか `normal` で進める |
 
@@ -177,7 +177,8 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 `--designed` で渡すと（開発ループの `loop answer --approved` の後）、設計とゲート 1 を置かずに設計の結果のステージがその課題の設計の結果を読み、
 `--design` が無ければ設計の結果のステージが `command` を持つ。リリースの経路がテンプレートで
 組むもの（`release.form` にテンプレートがある）でなければ、開発版と本番の代わりに下の「リリースの経路からステージを組む」のステージが入る。
-`then_of` のステージはマニフェストに `resume`（そのステージから最後までを流す queue のコマンド）を持つ。
+`command` を持つステージと `then_of` のステージは、マニフェストに `resume`（`supervise.py queue --resume <最初のステージの done>`）を持つ。
+止まったらどのステージでもこれを打ち、承認の後に別の入口から入るステップは `--from <プラン名>=<ステップ>` を足す。
 
 **MVV 判定の後のステップ（`approve`・`merge`・本番の `note`）が落ちたら、`handoff` のステップが承認ゲートへ落とす。**
 `sprint-state.py gate <状態> "関門 N" --withdraw` で `mvv` のステップが書いた `by: mvv` の記録を外し、理由を 1 行出して
@@ -191,13 +192,13 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 | ステージ | プラン | 流し方 |
 | --- | --- | --- |
 | 設計 | `design-<N>`（review の後に `mvv` → `approve`（ラベル `design-approved` と判定のコメント）→ `merge`） | `queue --max 3` |
-| ゲート 1 | 無し。設計のプランがすべて `完了` なら通過し、`関門` を返したプランの Pull Request だけ利用者の承認を取ってマージする | conductor |
+| ゲート 1 | 無し。設計のプランがすべて `完了` なら通過し、`関門` を返したプランの Pull Request だけ利用者の承認（`ndf-gate:1`）を取ってマージする | conductor |
 | 設計の結果 | `design-results`（設計文書の「設計の結果」の表を読み、実装のプランへ触るファイルと取り込んだ課題を書く） | `queue <設計の結果> --then <実装>... --then <検査> --then <コードレビュー> --then <開発版> --then <本番>` |
 | 実装 | `impl-<N>`（`base` は develop。手動確認の節は実装の Pull Request に載る） | 1 つ目の `--then`（設計の課題が無ければ `queue <実装>... --max 3 --then <検査> ...` の `command`） |
 | 検査 | `check`（実行条件 `check-trigger.py eval --id <スプリント>-1`） | 次の `--then` |
 | コードレビュー | `review`（`new check --since-last --review-only`。実行条件 `eval --id <スプリント>-review --review`） | 次の `--then`。検査が立った回は範囲が空になり流れない |
 | 開発版 | `release`（`facts` は `gate_as_ok`） | 次の `--then` |
-| 本番 | `release-prod`（先頭が `mvv` のステップ） | 最後の `--then`。`関門` ならキューの結果が `gate` になり、承認の後に `run <プラン> --from bump` で続ける |
+| 本番 | `release-prod`（先頭が `mvv` のステップ） | 最後の `--then`。`関門` ならキューの結果が `gate` になり、承認の後に `resume` に `--from release-prod=bump` を足して続ける |
 
 **スプリントの終わり**は `supervise.py new close --name M --worktree <根> --issue N... --version <開発版> --prod <正式版>
 --state <状態>` が組む。最終の検査（実行条件 `eval --final`）→ 開発版と本番（実行条件 `changed --id <M>-final`。
@@ -226,7 +227,7 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 | `delivery` が無い・不明（`{"unknown": ...}`） | `manual` | 「リリース」: 手で行うステージ。note に経路を決められない理由 |
 
 「本番」（か「導入の確認」）と「リリース」が両方あれば、この順に置く。昇格のプランは `normal` では `promote`（承認の引数無し。
-承認ゲート 2 で終える）→ 承認の後に `run <プラン> --from promote-approved`、`fast` / `auto` では `verify`（導入の確認）→
+承認ゲート 2 で終える）→ 承認の後に `resume` に `--from promote=promote-approved` を足して続ける、`fast` / `auto` では `verify`（導入の確認）→
 `prepare`（Pull Request と承認資料）→ `mvv`（承認ゲート 2 の MVV 判定）→ `note` → `promote`（`--gate-approved mvv`）で、
 `note` か `promote` が落ちたら `handoff` が承認ゲートへ落とす。`fast` / `auto` の `promote` は、`mvv` が読んだのと同じ
 `approval-verify.md` を `--expect-head-from` に受け、そこに書かれた確かめたコミット（導入の確認を走らせたベースブランチの先頭）が
@@ -245,7 +246,7 @@ Pull Request の先端を「承認したコミット」として昇格の承認�
 確認が非 0 なら 1、HEAD が先頭と違う・追跡中の変更があれば確認を走らせずに 3 で止まり、昇格の Pull Request を作らず `mvv` へも
 進まない。`mvv` は昇格の承認資料と `approval-verify.md` の 2 つを材料に読む。`new close` は `fast` の節を読み、最終の検査で変更が
 無ければ（実行の条件の skip）確認も走らない。節に `verify` が無ければ `new close` もプランを書かずに 2 で終える。
-開発版のチャネルへの反映を待つのは `<節>.verify` のコマンドの側で、NDF は待たない。止まったら直して `supervise.py run <プラン> --from verify` で打ち直す。
+開発版のチャネルへの反映を待つのは `<節>.verify` のコマンドの側で、NDF は待たない。止まったら直して `resume` に `--from <プラン名>=verify` を足して打ち直す。
 
 **手動反映の本番系の形の `fast` / `auto` は、手で届ける経路を 3 つのステージに分ける。** `normal` は上の「リリース」1 つのまま。
 
@@ -266,8 +267,8 @@ Pull Request の先端を「承認したコミット」として昇格の承認�
 
 | 答え | 打つもの |
 | --- | --- |
-| 承認（ゲート 1） | `sprint-state.py gate <状態> "関門 1" --what <要約> --by user --outcome approved` → `supervise.py run <設計のプラン> --from approve` → マニフェストのスプリントブランチのステージの `resume` |
-| 承認（ゲート 2） | `sprint-state.py gate <状態> "関門 2" --what <要約> --by user --outcome approved` → `supervise.py run <本番のプラン> --from bump`（昇格のプランは `--from promote-approved`。ただし `promote` が照合で止まった（`head_moved`・確かめたコミットを読めない）ときは `--from verify` から流し直す。`promote-approved` が照合で止まった（`head_moved`・承認したコミットを読めない）ときは、`normal` は `--from promote` から流し直して新しい先端で承認ゲート 2 を取り直し、`fast` / `auto` は `--from verify` から流し直す。マージの `merge-gate` で止まったプランは `--from merge-approved`。`gate-2` のプランは続きを流さず、手で行う「本番」のステージへ進む） |
+| 承認（ゲート 1） | `sprint-state.py gate <状態> "関門 1" --what <要約> --by user --outcome approved` → 設計のステージの `resume` に `--from design-<N>=approve` を足して打つ（後続のステージも続けて流れる） |
+| 承認（ゲート 2） | `sprint-state.py gate <状態> "関門 2" --what <要約> --by user --outcome approved` → 本番のプランを含むステージの `resume` に `--from release-prod=bump` を足して打つ（昇格のプランは `--from promote=promote-approved`。ただし `promote` が照合で止まった（`head_moved`・確かめたコミットを読めない）ときは `--from promote=verify` から流し直す。`promote-approved` が照合で止まった（`head_moved`・承認したコミットを読めない）ときは、`normal` は `--from promote=promote` から流し直して新しい先端で承認ゲート 2 を取り直し、`fast` / `auto` は `--from promote=verify` から流し直す。マージの `merge-gate` で止まったプランは `--from <プラン名>=merge-approved`。`gate-2` のプランは続きを流さず、手で行う「本番」のステージへ進む） |
 | 差し戻し | 直してから、止まったプランを `supervise.py run <プラン> --from reject` で流す。`reject` のステップが差し戻しを差し戻しの記録（`gate-rejections.jsonl`）へ 1 行書き、再提示のステップ（設計は `mvv`、`gate-2` は `facts`、昇格は `verify`、本番は `mvv`）へ進む。`sprint-state.py gate ... --outcome rejected` は手で打たない。`reject` を持たないプラン（`pace: normal` の本番など）と状態ファイルの無い進め方の打ち方は [approval-request.md](approval-request.md) の「答えを記録する」 |
 
 **判定と食い違う答えは覆しとして残る。** 「従う」で自動に通った後の差し戻しは `override_reject`、「従わない」「判定できない」で
@@ -380,7 +381,7 @@ mvv-gate.py check --sprint <状態> --gate design|release [--material F...] [--p
 
 ### レッドライン
 
-**次のどれかに当たれば、判定が「従う」でも利用者の承認を求める。**
+**次のどれかに当たれば、判定が「従う」でも利用者の承認を求める。** 問いは承認ゲートの場で出し、`metadata.source` はその承認ゲートの `ndf-gate:<番号>` にする。
 
 | 種類 | 機械で見る所 | LLM で見る所 |
 | --- | --- | --- |

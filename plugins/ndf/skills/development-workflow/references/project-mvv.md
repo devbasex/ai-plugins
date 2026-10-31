@@ -11,7 +11,7 @@
 2. `project-mvv.py collect` がコミット 3787 件・課題 574 件で履歴モードを選び、出典つきの材料 `materials.json` を
    リポジトリの外（`~/.local/state/ndf/project-mvv/<根の名前>/`）へ書く（実測 6.2 秒）
 3. `project-mvv.py propose --materials <materials.json>` が候補 A・B と「利用者に決めてもらう点」を `candidates.md` に書く
-4. conductor が `candidates.md` を示し、分かれる点を `AskUserQuestion` で問い、答えから本文を固める。
+4. conductor が `candidates.md` を示し、分かれる点を `AskUserQuestion`（`metadata.source` は `ndf-ask:redline:C7`。`.ndf/mvv.*` を書くため）で問い、答えから本文を固める。
    ai-plugins では利用者が承認した `issues/mvv-ai-plugins.md` の文面がそのまま本文になる。**ここまで `.ndf/` に何も書かない**
 5. `project-mvv.py vet --kind candidate --body <本文>` が「従う」（0）を返す
 6. 利用者が同じ本文を承認した後に `project-mvv.py approve --body <本文> --by <承認者>` を打つ。`.ndf/mvv.md`（本文）と
@@ -53,10 +53,10 @@
 | --- | --- | --- |
 | 1 | `project-mvv.py collect [--request-file <依頼文>]` | 欠け（`git` が無い・`gh` が読めない）は `missing` に残り、集めた材料で進む。宣言の `settings` が壊れていれば 3 |
 | 2 | `project-mvv.py propose --materials <materials.json>` | 1: 候補の形が足りない・LLM が返さない。`materials.json` を示して利用者に直接問う |
-| 3 | `candidates.md` を示し、「利用者に決めてもらう点」を `AskUserQuestion` で問う（下のテンプレートの形） | 答えが割れたら問い直す |
+| 3 | `candidates.md` を示し、「利用者に決めてもらう点」を `AskUserQuestion`（`ndf-ask:redline:C7`）で問う（下のテンプレートの形） | 答えが割れたら問い直す |
 | 4 | 答えから本文を組み、作業ディレクトリ（リポジトリの外）に置く。候補ごとの本文の案は `candidate-<ID>.md` にある | — |
-| 5 | `project-mvv.py vet --kind candidate --body <本文>` | 10「反する疑い」: 箇所（`C4`・`priority` など）を示して本文を直し、5 をやり直す。10「判定できない」: 引き受けるかを利用者に問う |
-| 6 | 本文を示して承認を問う（`AskUserQuestion`） | 承認されない: 3 へ戻る。`approve` を打たない |
+| 5 | `project-mvv.py vet --kind candidate --body <本文>` | 10「反する疑い」: 箇所（`C4`・`priority` など）を示して本文を直し、5 をやり直す。10「判定できない」: 引き受けるかを利用者に問う（`ndf-ask:redline:C7`） |
+| 6 | 本文を示して承認を問う（`AskUserQuestion`。`ndf-ask:redline:C7`） | 承認されない: 3 へ戻る。`approve` を打たない |
 | 7 | `project-mvv.py approve --body <本文> --by <承認者> [--accept-unknown]` | 1: 照合が無い・本文が照合の後に変わった・形が足りない。5 から |
 | 8 | `.ndf/mvv.md`・`.ndf/mvv.json` をコミットし、通常の Pull Request で届ける | 宣言を変える Pull Request は MVV 判定で通らず、承認ゲートで利用者が見る（共通原則の C7）。7 の結果に `key: gitignore` の行があれば、コミットできない。除外している `.gitignore` の行を利用者へ示す（[project-analysis.md](project-analysis.md) の「`.ndf/` の追跡」） |
 
@@ -68,7 +68,7 @@
 `settings.trend_commits` / `trend_issues` か `--trend-commits` / `--trend-issues` で変える）に満たないと、
 README・指示書（`AGENTS.md` / `CLAUDE.md` など）・依頼文（`--request-file`）だけを材料にする。
 
-**Claude Code 以外のランタイム。** `AskUserQuestion` が無ければ、同じテンプレートの文面を会話で示して問う。
+**Claude Code 以外のランタイム。** `AskUserQuestion` が無ければ、同じテンプレートの文面を会話で示して問い、問いの先頭に区分の名前（`ndf-ask:redline:C7`）を書く。
 
 ## 改訂
 
@@ -94,7 +94,8 @@ README・指示書（`AGENTS.md` / `CLAUDE.md` など）・依頼文（`--reques
 
 ## 人へ示す文面の雛形（候補の提示・改訂の提案・承認ゲートの資料）
 
-人に判断や承認を求める文面は、次の 4 節をこの順に先頭へ置く（共通原則の「人と AI の対話」）。`propose` の
+人に判断や承認を求める文面は、次の 4 節をこの順に先頭へ置く（共通原則の「人と AI の対話」）。`AskUserQuestion` で問うときは、
+入力の `metadata.source` に区分（承認ゲートの資料は `ndf-gate:<番号>`、MVV の候補・改訂は `ndf-ask:redline:C7`。正本は [asking.md](asking.md)）を付ける。`propose` の
 `candidates.md` はこの形で出る。承認ゲートの資料と改訂の提案は conductor がこの形で組む。
 
 | 節 | 書くこと |

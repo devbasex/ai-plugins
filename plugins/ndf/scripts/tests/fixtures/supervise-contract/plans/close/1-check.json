@@ -9,11 +9,11 @@
   "起点": "origin/main",
   "リポジトリ": "<TMP>/repo",
   "規則": "全体テストが落ちたら（落ちたテストだけの再実行でも落ちた後）、検査の修正に起因するなら fix、修正に無関係なら finish。2 回直しても同じなら abort。",
-  "上限": 32,
   "実行の条件": {
     "cmd": "git -C <TMP>/repo fetch -q origin && python3 <NDF>/scripts/check-trigger.py eval --id m9-final --root <TMP>/repo --final",
     "skip_code": 3
   },
+  "上限": 32,
   "steps": [
     {
       "id": "prepare",
@@ -94,7 +94,7 @@
       "type": "run",
       "stage": "完了判定",
       "timeout": 1980,
-      "cmd": "git pull -q --rebase && python3 <NDF>/scripts/test-run.py whole --pr {pr}",
+      "cmd": "git pull -q --rebase && python3 <NDF>/scripts/test-run.py whole --pr {pr} --limit {test_limit:whole_timeout:1800}",
       "on_fail": "judge",
       "next": "finish"
     },
@@ -212,7 +212,11 @@
       "c": null,
       "x": null,
       "strategy": "local-full",
-      "unknown_duration": true
+      "unknown_duration": true,
+      "recent": null,
+      "recent_source": null,
+      "limit_from": "unknown",
+      "key": "7db7ebdbdfdcffcf"
     }
   },
   "記録": "<NDF>/scripts/projects-sync.sh",

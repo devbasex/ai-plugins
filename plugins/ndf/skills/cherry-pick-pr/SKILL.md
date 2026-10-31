@@ -142,7 +142,7 @@ git cherry-pick -x <commit-hash-1> <commit-hash-2> ...
 
 conflict が発生した場合:
 - `git diff --name-only --diff-filter=U` でconflictファイル一覧
-- 解消を試み、ユーザーに確認後 `git cherry-pick --continue`
+- 解消して `git cherry-pick --continue` で続け、解消の内容（ファイルと採った側）を報告に書く
 
 ### 7. push して PR 作成
 

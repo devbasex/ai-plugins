@@ -78,7 +78,7 @@ Google のネイティブ形式（スライド / ドキュメント / スプレ�
 
 | 事象 | 対処 |
 | --- | --- |
-| gws が未認証で失敗する | `google-workspace` の手順で確かめ、利用者に `gws auth login` を頼む |
+| gws が未認証で失敗する | `google-workspace` の手順で確かめ、利用者に `gws auth login` を頼む（問うときの `metadata.source` は `ndf-ask:human-action`） |
 | 取り込んだテキストがほぼ 1 行になる | 正規化する（[import.md](import.md)） |
 | ページ番号が本文へ連結する | 同上 |
 | pptx で差し替えた Google スライドの本文の書体が、pptx の指定でなく Arial になる（同じ pptx の差し替え 4 回のうち 1 回で起きた） | サムネイルで書体が変わっていないかを見る。疑わしければ `gws slides presentations get --params '{"presentationId":"<ID>","fields":"slides(pageElements(shape(text(textElements(textRun(style(fontFamily)))))))"}'` で書体を数え、トーン＆マナーの書体でなければ差し替えを打ち直す（空白だけの文字列は既定の書体のまま残ってよい） |

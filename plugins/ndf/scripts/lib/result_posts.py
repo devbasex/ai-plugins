@@ -611,7 +611,7 @@ def main() -> None:
     f.add_argument("--actor")
     f.set_defaults(func=cmd_fix)
     args = p.parse_args()
-    deps.require("durable")
+    deps.require("durable", "waits")
     sys.exit(args.func(args))
 
 

@@ -94,7 +94,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.26.1）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.27.1）
 ```
 
 ### agy
@@ -211,6 +211,18 @@ bash <プラグインのパス>/scripts/worktree-setup.sh init
 
 規約は `skills/development-workflow/references/waiting.md`（待ち方）と
 `skills/development-workflow/references/context-window.md`（会話を切る）にあります。
+
+### 承認ゲートの外の問い合わせを止める（Claude Code だけ）
+
+`scripts/hook.py` の問い合わせの guard（`hook_lib/ask_guard.py`）が PreToolUse の `AskUserQuestion` で動き、問いの区分
+（入力の `metadata.source`）が無い・許されていない問いを止めます。止めたときは、AI が自分で決めて `scripts/ask.py decide` で
+記録する手段と、人へ回してよい区分の一覧を理由の欄に出します。承認ゲート（`ndf-gate:1`・`ndf-gate:2`）とレッドライン
+（`ndf-ask:redline:<番号>`）の問いはどの宣言でも止めません。止めた問いでは Slack の待ち通知を送りません。
+
+プロジェクトごとの働き方は `.ndf/ask.json` で変えます（無ければ `enforce`）。今の振る舞いへ戻すには `{"version": 1, "mode": "off"}` を書きます。
+
+区分の表と宣言の形は `skills/development-workflow/references/asking.md`、ランタイムごとの扱い（Codex・Kiro CLI・agy は対象外）は
+[docs/ndf-plugin-reference.md の「承認ゲートの外の問い合わせ」](../../docs/ndf-plugin-reference.md#承認ゲートの外の問い合わせ) にあります。
 
 ### 学習の設定を Off にする（Claude Code と Codex）
 
@@ -417,7 +429,7 @@ agy models   # 認証確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.26.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.27.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -439,14 +451,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.26.1/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.27.1/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.26.1  <path>
+# => ndf@ai-plugins  installed, enabled  10.27.1  <path>
 ```
 
 抑止していない Skill（`document-style` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。

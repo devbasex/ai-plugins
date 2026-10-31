@@ -118,11 +118,29 @@ class Materials:
 # --- 検査の結果（状態ディレクトリ） -------------------------------------------------
 
 
-def last_result(state_dir: Path, step: str, tool: str, prefer_ok: bool = False) -> dict | None:
-    """`<state_dir>/NN-<step>.out`（NN の最も大きいもの。再開で増える）の最後の結果 JSON（`tool` が一致するもの）。
-    prefer_ok なら `status: ok` の結果を持つ試行のうち NN の最も大きいもの。ok の試行が無ければ最後の試行の結果（#2129）。"""
-    outs = [(int(m.group(1)), f) for f in state_dir.glob(f"*-{step}.out") if (m := re.match(rf"(\d+)-{re.escape(step)}\.out$", f.name))]
-    got = [r for _, f in sorted(outs, reverse=True) if (r := _result_of(f, tool)) is not None]
+def _outs(state_dir: Path, step: str) -> list[Path]:
+    """`<state_dir>/NN-<step>.out` を新しい順に（更新時刻、同じなら NN の大きい方）。
+    NN は実行の回ごとに 01 から数え直すため（再開すると古い回の大きい NN が残る）、NN だけでは並べない。"""
+    outs = []
+    for f in state_dir.glob(f"*-{step}.out"):
+        if m := re.match(rf"(\d+)-{re.escape(step)}\.out$", f.name):
+            try:
+                outs.append((f.stat().st_mtime, int(m.group(1)), f))
+            except OSError:
+                continue
+    return [f for *_, f in sorted(outs, reverse=True)]
+
+
+def last_out(state_dir: Path, step: str) -> Path | None:
+    """`<state_dir>/NN-<step>.out` のうち最後に書かれたもの（`_outs` の先頭）。"""
+    outs = _outs(state_dir, step)
+    return outs[0] if outs else None
+
+
+def last_result(state_dir: Path, step: str, tool: str, prefer_ok: bool = False, out: Path | None = None) -> dict | None:
+    """最後に書かれた `<state_dir>/NN-<step>.out`（`out` を渡せばそれ）の最後の結果 JSON（`tool` が一致するもの）。
+    prefer_ok なら `status: ok` の結果を持つ試行のうち最も新しいもの。ok の試行が無ければ最後の試行の結果（#2129）。"""
+    got = [r for f in ([out] if out else _outs(state_dir, step)) if (r := _result_of(f, tool)) is not None]
     if not got:
         return None
     return next((r for r in got if r.get("status") == "ok"), got[0]) if prefer_ok else got[0]

@@ -375,8 +375,8 @@ def user_gate_paths(sprint: str, tmp: Path) -> None:
         "items": [g2, g1],
         "metrics": {"gates": 2},
     }
-    # 同じ名前を書き直すと末尾へ移る。--outcome approved を渡したときだけ記録に outcome が載る
-    g2a = {"name": "関門 2", "what": "本番", "at": GATE_AT, "outcome": "approved"}
+    # 同じ名前を書き直すと末尾へ移る。--outcome approved を渡したときだけ記録に outcome と by が載る
+    g2a = {"name": "関門 2", "what": "本番", "at": GATE_AT, "outcome": "approved", "by": "user"}
     code, out, m = gate(sprint, tmp, "関門 2", "--what", "本番", "--outcome", "approved")
     assert (code, out["items"], m["gates"]) == (0, [g1, g2a], [g1, g2a])
     # 関門 1・関門 2 の利用者の承認は差し戻しの記録へも 1 行ずつ書く（#2183）

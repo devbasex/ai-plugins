@@ -9,7 +9,6 @@ DBOS を import しない（`wait` ほかの副命令が払わないよう、`fl
 from __future__ import annotations
 
 import json
-import os
 import re
 import sys
 import time
@@ -18,8 +17,9 @@ from pathlib import Path
 from clock import now_iso  # cmd_wait の引数 clock（時計の差し替え）と名前を分ける
 from step_result import result
 from supervise_lib.decl import DeclError, queue_decl_of
-from supervise_lib.paths import queue_done_path, queue_plans_path, report_result, state_dir_of, wait_cursor_path
+from supervise_lib.paths import queue_done_path, queue_plans_path, state_dir_of, wait_cursor_path
 from supervise_lib.plan import QUEUE_PRS, pr_number
+from supervise_lib.queue_fill import FINISHED, fill_queue_pr, named, results_named, write_text_atomic  # noqa: F401 -- 公開を保つ
 
 
 def attention_lines(prog: Path, offset: int) -> tuple[list[dict], int]:
@@ -104,87 +104,13 @@ def fill_queue_prs(plan: str, prs: list[str]) -> str | None:
     return None
 
 
-QUEUE_PR = re.compile(r"\{queue_pr:([A-Za-z0-9._-]+)\}")  # 名前の一致する計画の Pull Request 1 本
-QUEUE_STATE = re.compile(r"\{queue_state:([A-Za-z0-9._-]+)\}")  # 名前の一致する計画の状態ディレクトリ（#1488）
-
-
-def plan_pr(item: dict) -> str:
-    """完了した計画の報告の Pull Request の番号。無ければ空。"""
-    rep = Path(item.get("report") or "")
-    if item.get("result") != "完了" or not rep.is_file():
-        return ""
-    m = re.search(r"^- Pull Request: (.*)$", rep.read_text(), re.M)
-    return pr_number(m.group(1).strip()) if m else ""
-
-
-def named(plan: str, name: str) -> bool:
-    stem = Path(plan).stem
-    return stem == name or stem.endswith(f"-{name}")
-
-
-def results_named(name: str, items: list[dict], plan: str) -> list[dict]:
-    """名前の一致する計画の結果。`items` に無ければ、`plan` と同じディレクトリの計画の報告を読む（関門の後に単独で流すとき）。"""
-    hits = [i for i in items if named(i.get("plan", ""), name)]
-    if hits:
-        return hits
-    return [
-        {
-            "plan": str(f),
-            "result": report_result((state_dir_of(str(f)) / "report.md").read_text()),
-            "report": str(state_dir_of(str(f)) / "report.md"),
-        }
-        for f in sorted(Path(plan).parent.glob("*.json"))
-        if str(f) != plan and named(str(f), name) and (state_dir_of(str(f)) / "report.md").is_file()
-    ]
-
-
-def fill_queue_pr(plan: str, items: list[dict]) -> str | None:
-    """計画の {queue_pr:<名>} を、前のステージの名前の一致する計画の Pull Request 1 本で置き換える。
-    前のステージに無ければ同じディレクトリの計画の報告を読む（関門の後に単独で流すとき）。完了して PR が無い・飛ばされたなら 0。
-    {queue_state:<名>} は、名前の一致する計画の状態ディレクトリの絶対パスで置き換える（#1488）。結果（完了した報告・
-    状態ディレクトリ）が見つからなければ、0・空文字で埋めずに計画を書き換えず理由を返す（#2079）。"""
-    try:
-        text = Path(plan).read_text()
-    except OSError as e:
-        return f"計画を読めない: {e}"
-    names, states = sorted(set(QUEUE_PR.findall(text))), sorted(set(QUEUE_STATE.findall(text)))
-    if not names and not states:
-        return None
-    missing = []
-    for name in names:
-        done = [i for i in results_named(name, items, plan) if i.get("result") == "完了"]
-        if not done:
-            missing.append(f"{{queue_pr:{name}}}（名前の一致する計画の完了した報告が無い）")
-            continue
-        prs = [n for n in (plan_pr(i) for i in done) if n]
-        text = text.replace(f"{{queue_pr:{name}}}", prs[-1] if prs else "0")
-    for name in states:
-        found = [state_dir_of(str(Path(i["plan"]).absolute())) for i in results_named(name, items, plan) if i.get("plan")]
-        dirs = [d for d in found if d.is_dir()]
-        if not dirs:
-            missing.append(f"{{queue_state:{name}}}（名前の一致する計画の状態ディレクトリが無い）")
-            continue
-        text = text.replace(f"{{queue_state:{name}}}", str(dirs[-1]))
-    if missing:
-        return "差し込みを埋める前の計画の結果が見つからない: " + "、".join(missing)
-    write_text_atomic(Path(plan), text)
-    return None
-
-
-def write_text_atomic(path: Path, text: str) -> None:
-    """一時ファイルへ書いてから rename する（待つ側が書きかけを読まない）。"""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(text)
-    os.replace(tmp, path)
-
-
 NOT_RUN = "流さなかった"
-FINISHED = ("完了", "関門")  # 打ち直しでも流し直さない結果（止まったは次の実行の回で頭から流す）
 NO_REPORT = "報告なし"
 
 
-def cmd_queue(plans: list[str], max_: int, poll: float = 1.0, then: list | None = None, done: str | None = None) -> dict:
+def cmd_queue(
+    plans: list[str], max_: int, poll: float = 1.0, then: list | None = None, done: str | None = None, starts=None, rerun=None
+) -> dict:
     """プランを同時に max_ 本まで、同じプロセスの中で流す。空いた枠へ入れた順に流す。
 
     流れているプランの progress.jsonl に conductor 向けの行（"kind": "attention"）が足されたら、
@@ -198,7 +124,9 @@ def cmd_queue(plans: list[str], max_: int, poll: float = 1.0, then: list | None 
     あるステップは、資源の枠の本数まで同時に流す（宣言は .ndf/supervise.json の queue）。
     始めに流すプランの一覧を done の隣へ書き（wait が読む）、終わったら（後続を含めて）結果の JSON を done へ書く。
     落ちた後に同じコマンドを打ち直すと、流れていたステップから続ける。流すプランの並びを変えて打ち直すと、途中の
-    記録を止めて頭から流す（完了か関門の記録があるプランは流し直さない）。"""
+    記録を止めて頭から流す（完了か関門の記録があるプランは流し直さない）。`starts`（{プラン: 開始のステップ}）は
+    キューの続き（`queue_resume.py`）が渡し、そのプランを開始のステップから新しい実行の回で流す。`rerun`（プランの並び）も
+    キューの続きが渡し、そのプランは関門の記録があっても新しい実行の回で流す。"""
     import durable
     from supervise_lib import flow  # DBOS の import は run と queue だけが払う
 
@@ -222,6 +150,8 @@ def cmd_queue(plans: list[str], max_: int, poll: float = 1.0, then: list | None 
         if ref.action == "continue":
             print(f"[ndf supervise] 落ちた前の起動の {ref.id} を続ける（済んだステップは流し直さない）", file=sys.stderr)
         args = {"stages": stages, "max": max_, "done": str(done_path), "resources": decl["resources"], "shared": decl["shared"]}
+        args["starts"] = starts or {}
+        args["rerun"] = list(rerun or [])
         wid = durable.start(ref, flow.queue_workflow, args)
         while True:
             got = durable.wait(wid, poll=min(poll, durable.POLL_SECONDS), timeout=poll)
@@ -251,13 +181,15 @@ def _not_started(reason: str, max_: int, done_path: Path) -> dict:
     return result("supervise-queue", "stopped", reason, [], metrics)
 
 
-def start_listing(done_path: Path, all_plans: list[str]) -> None:
+def start_listing(done_path: Path, all_plans: list[str], **extra) -> None:
     """前の queue の終わりと wait の続きを消し、流すプランの一覧と読み始める所を done の隣へ書く（wait が読む）。"""
     done_path.unlink(missing_ok=True)
     wait_cursor_path(done_path).unlink(missing_ok=True)
     write_text_atomic(
         queue_plans_path(done_path),
-        json.dumps({"started": now_iso(), "plans": all_plans, "offsets": {p: progress_size(p) for p in all_plans}}, ensure_ascii=False)
+        json.dumps(
+            {"started": now_iso(), "plans": all_plans, "offsets": {p: progress_size(p) for p in all_plans}, **extra}, ensure_ascii=False
+        )
         + "\n",
     )
 
@@ -348,8 +280,11 @@ def plan_item(plan: str, out: dict) -> dict:
 
 
 def write_done(done_path: Path, items: list[dict], max_: int, overlaps: list[dict], limits: dict) -> dict:
-    """items へ重なりの組を足して結果の JSON を組み立て、done へ書いて返す。"""
+    """items へ重なりの組と続けた開始のステップ（`resumed_from`）を足して結果の JSON を組み立て、done へ書いて返す。"""
+    starts = (_read_listing(queue_plans_path(done_path)) or {}).get("starts") or {}
     for i in items:
+        if starts.get(i["plan"]):
+            i["resumed_from"] = starts[i["plan"]]
         mine = [{"with": o["b"], "paths": o["paths"]} for o in overlaps if o["a"] == i["plan"]]
         mine += [{"with": o["a"], "paths": o["paths"][::-1]} for o in overlaps if o["b"] == i["plan"]]
         if mine:

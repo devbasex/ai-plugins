@@ -137,7 +137,7 @@ python3 "$SCRIPTS/estimate.py" predict --issue 1601 --done 実装 --items spread
 
 ## 宣言の書き方
 
-リポジトリごとの値は `.ndf/backlog.json` に置く（書き換えは利用者の承認が要る）。引数が宣言に勝ち、どちらにも無ければ
+リポジトリごとの値は `.ndf/backlog.json` に置く（書き換えは利用者の承認が要る。問いの `metadata.source` は `ndf-ask:redline:C7`）。引数が宣言に勝ち、どちらにも無ければ
 一般的な WSJF の既定値で動く。
 
 ```json

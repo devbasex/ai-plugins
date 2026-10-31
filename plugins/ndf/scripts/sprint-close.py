@@ -48,7 +48,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "lib"))
 import deps  # noqa: E402
 
-deps.require("md", "locks")
+deps.require("md", "locks", "durable", "waits")
 from step_result import (
     EXIT_PRECONDITION,
     EXIT_UNREADABLE,
