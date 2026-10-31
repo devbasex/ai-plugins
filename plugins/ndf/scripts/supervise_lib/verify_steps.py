@@ -88,15 +88,27 @@ def _template_arg(a) -> str:
     return f" --template {shlex.quote(template)}" + (f" --test-kind {kind}" if kind != ts.TEST else "")
 
 
+def limit_arg(key: str, seconds: int) -> str:
+    """テストのステップの `--limit`。run のステップが開始の時点で上限を決め直して置き換える（`steps.fill_test_limit`。#1631）。
+
+    `{test_limit:<上限の表の鍵>:<プランの作成の時点の秒>}` の形で、決め直せなければ作成の時点の秒になる。"""
+    return f" --limit {{test_limit:{key}:{int(seconds)}}}"
+
+
 def scope_cmd(a, tests: str) -> str:
     """範囲テストのステップのコマンド（`test-run.py scope`）。"""
-    return f"{TEST_RUN_PY} scope --paths {tests}{_template_arg(a)}"
+    limit = limit_arg("test_timeout", plan_limits(a)["test_timeout"])
+    return f"{TEST_RUN_PY} scope --paths {tests}{_template_arg(a)}{limit}"
 
 
 def whole_cmd(a) -> str:
     """全体テストのステップのコマンド（`test-run.py whole`。CI に任せる戦略は Pull Request のチェックを待つ）。"""
     paths = (getattr(a, "test_paths", None) or scope_paths(a)) if getattr(a, "test_cmd", None) and test_kind(a) == ts.LINT else []
     extra = " --paths " + " ".join(shlex.quote(p) for p in paths) if paths else ""
+    strategy = plan_strategy(a)
+    # CI に任せる戦略のステップの timeout は CI の待ちの上限で決まるため、手元の上限を渡さない
+    if not (strategy and strategy.get("name") == ts.LOCAL_SCOPED_CI_WHOLE):
+        extra += limit_arg("whole_timeout", plan_limits(a)["whole_timeout"])
     return f"{TEST_RUN_PY} whole --pr {{pr}}{_template_arg(a)}{extra}"
 
 

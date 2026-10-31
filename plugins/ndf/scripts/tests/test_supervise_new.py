@@ -720,7 +720,7 @@ def test_a_lint_test_cmd_never_builds_a_whole_test_on_the_dot(tmp_path):
         for s in json.loads(f.read_text()).get("steps") or []
         if "test-run.py whole" in str(s.get("cmd"))
     ]
-    assert wholes and all("--test-kind lint" in c and c.endswith("--paths scripts/a.sh") for c in wholes)
+    assert wholes and all("--test-kind lint" in c and "--paths scripts/a.sh --limit {test_limit:whole_timeout:" in c for c in wholes)
 
 
 # --- #1437: 戦略の注記を計画の作成の時点で標準エラーへ出す ---------------------------------
