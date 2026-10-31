@@ -116,6 +116,8 @@ def test_a_table_without_issue_rows_closes_an_issue_verified_before_merge(repo, 
     got = issues_of(out)
     assert got["o/r#1"]["result"] == "closed" and got["o/r#1"]["checked"] == [1, 2, 3]
     assert (got["o/r#2"]["result"], got["o/r#2"]["reason"]) == ("kept_open", "条件と課題の対応が読めない")
+    reads = [c for c in calls(gh, ["issue", "view"]) if "state,body" in c]
+    assert sorted(c[2] for c in reads) == ["1", "2"]  # 本文は課題ごとに 1 回だけ読む
 
 
 # --- 閉じる条件 2 と印（受け入れ条件 3〜11） ------------------------------------------

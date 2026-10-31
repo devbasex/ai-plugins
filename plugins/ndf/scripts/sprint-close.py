@@ -252,15 +252,20 @@ def _read_state_body(root, repo, n):
     return d["state"], d.get("body") or ""
 
 
-def _judge_and_mark(a, ctx, repo, n, rows):
-    """錠の中で状態と本文を読み、条件 2 と条件 3 を判定し、満たせば印を書く。(結果の項目か None, 印を付けた番号) を返す。"""
+def _judge_and_mark(a, ctx, repo, n, rows, kept=None):
+    """錠の中で状態と本文を読み、条件 2 と条件 3 を判定し、満たせば印を書く。(結果の項目か None, 印を付けた番号) を返す。
+
+    kept は課題を指す行の無い表の理由（NO_MAPPING）。そのときはすべての条件がマージ前の課題だけを判定へ進め、
+    本文を読めない課題とそれ以外の課題は kept の kept_open にする（同じ 1 回の本文の読みで決める。#2144）。"""
     base = _issue_base(repo, n)
     got = _read_state_body(ctx.root, repo, n)
     if got is None:
-        return _failed(base, UNREADABLE_BODY, ctx), []
+        return ({**base, "result": "kept_open", "reason": kept} if kept else _failed(base, UNREADABLE_BODY, ctx)), []
     state, body = got
     ok, why, to_check = judge_acceptance(rows, acceptance.criteria(body), acceptance.pre_merge_numbers(body))
     own = repo == ctx.record_repo  # 他のリポジトリの課題の本文は書かない（I7）
+    if not ok and kept:
+        return {**base, "result": "kept_open", "reason": kept}, []
     if not ok:
         if state == "CLOSED":
             return {**base, "result": "closed_unverified", "reason": UNVERIFIED + why}, []
@@ -279,12 +284,12 @@ def _judge_and_mark(a, ctx, repo, n, rows):
     return None, to_check
 
 
-def _close_verified(a, ctx, repo, n, rows):
+def _close_verified(a, ctx, repo, n, rows, kept=None):
     """--with-verification の 1 課題。本文の読みから書きまでを課題ごとの錠の中で行い、閉じるのは錠の外で行う。"""
     lock = gh_parts.issue_lock(repo, n, LOCK_TIMEOUT) if repo == ctx.record_repo and not a.dry_run else nullcontext()
     try:
         with lock:
-            done, checked = _judge_and_mark(a, ctx, repo, n, rows)
+            done, checked = _judge_and_mark(a, ctx, repo, n, rows, kept)
     except locks.LockTimeout:
         return _failed(_issue_base(repo, n), "本文の錠を取れない", ctx)
     if done is not None:
@@ -293,17 +298,11 @@ def _close_verified(a, ctx, repo, n, rows):
     return {**out, "checked": checked} if checked else out
 
 
-def _all_pre_merge(ctx, repo, n):
-    """本文の受け入れ条件がすべてマージ前に確かめたものか（行の要らない課題か）。本文を読めなければ False。"""
-    got = _read_state_body(ctx.root, repo, n)
-    if got is None:
-        return False
-    return judge_acceptance(None, acceptance.criteria(got[1]), acceptance.pre_merge_numbers(got[1]))[0]
-
-
 def _close_item(a, ctx, repo, n, kept_all, verdicts):
     base = _issue_base(repo, n)
-    if kept_all and not (kept_all == NO_MAPPING and verdicts == {} and _all_pre_merge(ctx, repo, n)):
+    if kept_all == NO_MAPPING and verdicts == {}:  # 課題を指す行の無い表: 判定は錠の中の 1 回の本文の読みで行う
+        return _close_verified(a, ctx, repo, n, None, kept_all)
+    if kept_all:
         return {**base, "result": "kept_open", "reason": kept_all}
     if verdicts is not None:
         return _close_verified(a, ctx, repo, n, verdicts.get((repo, n)))
