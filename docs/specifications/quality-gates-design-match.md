@@ -195,7 +195,7 @@ graph LR
 - `standard` のプランで `test-limited` → `design-tests` → `design-specs` → `design-match` → `pr` の順につながり、`design-tests` の `skip_to` が `pr` であること。ほかのモードのステップの並びが変わらないこと（`plugins/ndf/scripts/tests/test_supervise_design_match.py`）
 - `PrStep` が書かれた節を署名の前に 1 つだけ置き、LLM の本文の同じ見出しを置き換えて署名を残すこと。節のファイルが無いとき、`design-tests` が 3 なら「該当なし」、0 / 1 / 2 なら PR を作らずに止まること（`test_supervise_design_match.py`）
 - `pr-steps.py template --mode standard` だけが節の雛形を書き、`create --mode standard` が節の無い本文に `next` で節を求めること（`plugins/ndf/scripts/tests/test_pr_steps.py`）
-- 錠を持つ別のプロセスがあるあいだ `body-section replace` が本文を読まずに待ち、`body-lock` が錠の中でコマンドを走らせ、`--timeout` で取れなければ走らせないこと。`progress-record.sh` が錠を待ってから書き、取れなければ書かずに 0 で終わること（`plugins/ndf/scripts/tests/test_gh_parts.py`・`plugins/ndf/scripts/tests/test_progress_record.py`）
+- 錠を持つ別のプロセスがあるあいだ `body-section replace` が本文を読まずに待ち、`body-lock` が錠の中でコマンドを走らせ、`--timeout` で取れなければ走らせないこと。`progress-record.sh` が錠を待ってから書き、取れなければ書かずに `stopped`（6）の結果 JSON を返し、`gaps` に錠を取れなかった理由を載せること（#2227）（`plugins/ndf/scripts/tests/test_gh_parts.py`・`plugins/ndf/scripts/tests/test_progress_record.py`）
 
 ## 関連リンク
 

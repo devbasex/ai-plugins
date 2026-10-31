@@ -89,9 +89,9 @@ flowchart TB
 
 ### 常に成り立つ条件
 
-- **進捗記録の失敗で工程を止めない。** 呼び出し側の誤り（知らないキー・工程表に無い値・
-  引数の不足）だけが終了コード 2 で、それ以外はすべて 0 で終わる。`progress-record.sh` が
-  失敗してもボードの更新へ進む
+- **進捗記録の失敗で工程を止めない。** 記録のスクリプトは書けなかった事実を 1 行の結果 JSON
+  （`stopped` と終了コード 6・3・1、`gaps`）で返し、止めない判断は呼ぶ側が持つ（呼ぶ側は止まらずに
+  報告へ載せる。#2227）。`progress-record.sh` が失敗してもボードの更新へ進む
 - **引数のチェックは何かを書く前に行う。** 値の誤りで 2 を返すときに、issue の本文だけが書かれた
   状態を作らない
 - **進捗記録は 1 回の実行に何件並べてもよい。** 通過記録へ積むのは記録のスクリプト自身で、
@@ -115,7 +115,7 @@ projects-sync.sh <課題番号> <キー> <値>
 
 | キー | 打つ時点 | issue の本文 | ボード | 通過記録 |
 | --- | --- | --- | --- | --- |
-| `stage` | 工程に入るたび（課題ごと） | `progress-record.sh <課題> "<値>"`（チェックを付ける） | 工程のフィールド | 工程を積む。`配布` のときは記録の無い必須の工程を標準出力で案内する |
+| `stage` | 工程に入るたび（課題ごと） | `progress-record.sh <課題> "<値>"`（チェックを付ける） | 工程のフィールド | 工程を積む。`配布` のときは記録の無い必須の工程を結果 JSON の `items` の `kind: "stage-missing"` の要素で返す |
 | `mode` | フェーズの最初の工程で 1 度 | `progress-record.sh <課題> - --mode <値>`（見出し行だけ） | モードのフィールド | モードを書く |
 | `pace` | フェーズの最初の工程で 1 度 | `progress-record.sh <課題> - --pace <値>`（見出し行だけ） | 書かない | 進め方を書く |
 | `worktree` | 作業場所の用意の後に 1 度 | `progress-record.sh <課題> - --worktree <値>` | worktree のフィールド | 読まない |
@@ -125,15 +125,19 @@ projects-sync.sh <課題番号> <キー> <値>
 見出し行だけを更新するときは、既にある見出し行のモード・ worktree ・実装計画のファイルのうち
 渡さなかったものを引き継ぐ。
 
+標準出力は 1 行の結果 JSON だけである（#2227。形と状態・終了コードの意味は
+[lib/README.md の「手順のスクリプトの結果」](../../plugins/ndf/scripts/lib/README.md) が正）。
+`projects-sync.sh` は中で呼ぶ `progress-record.sh` の結果 JSON を自分の `items` / `gaps` / `process` へ移し、自分の 1 行だけを出す。
+
 | 条件 | 終了コード | 出力 |
 | --- | --- | --- |
-| issue の本文を書き換えた | 0 | `stage` は `#<課題> 進行 = <工程>`、他のキーは `#<課題> 進行の見出し = モード: …`。ボードの設定があればボードの行が続く |
-| 同じ値を記録し直した（issue の本文が変わらない） | 0 | issue の本文の行は出ない。ボードの設定があればボードの行だけが出る |
-| ボードの設定が無い | 0 | issue の本文の行だけ |
-| `gh` が無い | 0 | issue の本文もボードも書かない。通過記録へは積む |
-| issue を取得できない | 0 | issue の本文の行は出ない。ボードの更新は続ける |
-| ボードが上限・ボードにアイテムを追加できない | 0 | `NOTE:` の 1 行 |
-| 知らないキー・工程表に無い値・引数の不足 | 2 | `ERROR:` の行。issue の本文もボードも書かない |
+| issue の本文を書き換えた | 0 | `items` に `{kind: "issue-body", result: "recorded"}`。ボードの設定があればボードの要素（`recorded`）が続く |
+| 同じ値を記録し直した（issue の本文が変わらない） | 0 | issue の本文の要素は `result: "unchanged"` |
+| ボードの設定が無い | 0 | ボードの要素は `result: "not_declared"`。欠けにしない |
+| `gh` が無い | 3 | issue の本文もボードも書かない。通過記録へは積む |
+| issue を取得できない・本文を書けない・錠を取れない・ボードが上限・ボードにアイテムを追加できない | 6 | 書けなかったものを 1 件ずつ `gaps` に載せ、`reason` に `gh` の標準エラーの要旨か理由。書けるものは続けて書く |
+| 本文もボードも書けず、通過記録も積めなかった | 1 | `summary` に先頭の理由、`gaps` に各々 |
+| 知らないキー・工程表に無い値・引数の不足 | 2 | issue の本文もボードも書かない |
 
 **`progress-record.sh` を直接呼ぶのは 2 つの場合だけである。** 他のリポジトリの課題へ書く
 （`--repo`。ボードへは書かない）ときと、付随情報を足す（`--note`）ときである。
@@ -157,7 +161,7 @@ projects-sync.sh <課題番号> <キー> <値>
 | `stage-check.sh record` を子プロセスで呼ばず、ライブラリ（`workflow-common.sh`）の `wf_record_progress` を呼ぶ | `stage-check.sh record` の鍵は作業ディレクトリの `origin` で決まり、`--repo` を受けない。引数を足すと手で積む口の契約が変わる |
 | ライブラリは同じプラグインの根の相対（`scripts/../skills/development-workflow/scripts/lib/`）で読み、`cd -P` で実体へ解決しない | 積む処理と工程名の一覧が常に同じ版になる。agy の配置（`dev.agy/scripts` と `dev.agy/skills/development-workflow` はどちらも symlink）でも `scripts/` の 1 つ上に `skills/` がある |
 | 工程名・モード・進め方の一覧は `workflow-common.sh` の 1 か所に置く（`WF_STAGE_MATRIX` / `WF_MODES` / `WF_PACES`） | 工程表は `development-workflow` の持ち物で、工程名とモードごとの分類が同じ行にある。`projects-common.sh` はボードの判定だけを持つ。一致を確かめるテストで 2 つの一覧を残すと、変更のたびに 2 か所を直す |
-| 通過記録へ積むのは本文の書き換えより前に置く | 本文の側には `gh` が無い・課題を取得できない・書き換えが失敗したときの早い `exit 0` が並ぶ。前に置けば、引数のチェックを通った呼び出しは必ず 1 回積む。そのため `配布` の案内は本文の行より先に出る |
+| 通過記録へ積むのは本文の書き換えより前に置く | 本文の側には `gh` が無い・課題を取得できない・書き換えが失敗したときの早い終わり方（結果 JSON の `stopped`）が並ぶ。前に置けば、引数のチェックを通った呼び出しは必ず 1 回積む |
 | hook から進捗記録の観測を外す（`wf_parse_sync` を消し、`wf_is_candidate` は `pr merge` / `pulls/<番号>/merge` / `pr create` にだけ当たる） | 積む役目が無くなった hook が進捗記録を見分けると、記録のたびに語の分割の費用がかかる。`配布` の案内は記録のスクリプトの標準出力で同じ AI に届き、hook だと Claude Code で `development-workflow` を起動した会話にしか届かない |
 
 **`wf_record_progress <slug> <課題番号> <工程名|空> <モード|空> <進め方|空>`**（`workflow-common.sh`）。値は
@@ -168,11 +172,11 @@ projects-sync.sh <課題番号> <キー> <値>
 | 3 つの値がすべて空 | 何もしない（`worktree` / `plan` / `--note` だけの記録） |
 | `slug` が空・`jq` が無い | どのキーも積まず、標準エラーへ `NOTE:` の 1 行 |
 | それ以外 | 空でないキーを `mode` → `pace` → `stage` の順に `wf_record` で積む。排他はキーごとに取り、取れなかったキーだけを飛ばす（`wf_record` が 1 行出す）。残りのキーは続けて積む |
-| `stage` が `WF_REPORT_STAGE`（`配布`） | 積んだ後に `wf_report` を呼び、出力が `記録なし:` か `条件付き:` を含むときだけ標準出力へそのまま出す |
+| `stage` が `WF_REPORT_STAGE`（`配布`） | 積んだ後に `wf_report` を呼び、出力が `記録なし:` か `条件付き:` を含むときだけ標準出力へ出す。`progress-record.sh` はそれを捕まえ、工程ごとに結果 JSON の `items` の `kind: "stage-missing"` の要素（`result` は `missing` か `conditional`、`reason` に記録し直すコマンド）へ移す（#2227） |
 
 `progress-record.sh` の鍵は、`--repo` があればその値、無ければ作業ディレクトリの `origin` を畳んだ
 `<所有者>/<リポジトリ>`（`wf_repo_slug`）である。どちらのスクリプトもライブラリを読み込めないときは
-何もせずに終了コード 0 で抜ける。
+何もせずに `stopped`（終了コード 3）の結果 JSON で抜ける（#2227）。
 
 **旧い版の hook と新しいスクリプトが併存すると、同じ工程が 2 回積まれることがある。** 通過記録は追記だけで、
 判定は工程の集合で行うため、結果は変わらない。
@@ -411,7 +415,8 @@ CLI の worker（#760）で Skill を塞ぐ手段は次のとおりで、今の 
 - `status` が issue の本文を書かないこと
 - `stage` / `mode` / `worktree` / `plan` の 4 キーそれぞれで、issue の本文が `progress-record.sh` と
   `projects-sync.sh` を別々に呼んだときと同じになること
-- `gh` が無いとき、issue の本文もボードも書かずに 0 で終わり、通過記録へは積むこと
+- `gh` が無いとき、issue の本文もボードも書かずに `stopped`（3）で終わり、通過記録へは積むこと
+- `gh` が失敗するとき、`progress-record.sh` と `projects-sync.sh` が 1 行の結果 JSON（`ok` でない・`gaps` に `gh` の標準エラーの要旨）を出し、0 以外で終わること（`plugins/ndf/scripts/tests/test_progress_record.py`・`plugins/ndf/scripts/tests/test_projects_sync_record.py`）
 - 通過記録の積み方（呼び方・実行の形・`--repo`・積めないとき・hook が積まないこと）は
   `plugins/ndf/scripts/tests/test_progress_record_stages.py` が確かめる（「仕様」の「通過記録を積む場所」）
 - `worker.md` の frontmatter の `disallowedTools` に `Skill` と `Agent` があり、`plugin.json` の
