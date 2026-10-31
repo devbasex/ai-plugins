@@ -103,7 +103,9 @@
 | `plugins/ndf/scripts/supervise_lib/state.py` の `record_stage` | 記録のスクリプトの結果 JSON を読み、`ok` でなければプランの実行の結果の `process` へ残す。プランは止めない（変える） |
 | `plugins/ndf/scripts/sprint-close.py` の `close_one` | `projects-sync.sh` の出力の `NOTE` の行ではなく結果 JSON を読み、`ok` でなければ `notes` へ載せる（変える） |
 | `plugins/ndf/skills/progress-tracking/SKILL.md` の「何もしない条件」 | 記録できなかったときの返し方を、終了コード 0 から結果 JSON の状態へ書き換え、呼ぶ側は止まらずに報告へ載せると定める（変える） |
-| `plugins/ndf/skills/backlog-refinement/SKILL.md` の終了コードの表 | `status` の列を外し、状態の意味は正本を指す（変える） |
+| `plugins/ndf/skills/progress-tracking/references/excerpt.md` の「結果の読み方」 | 全部の行が終了コード 0 と `#N 進行 = X` / `NOTE:` の行を前提にした表を、1 行の結果 JSON の読み方へ書き換える。`ok`（0）は先へ進む、終了コード 6（`gaps` あり）・3（`gh` が無い）・1（何も書けなかった）は止まらずに `summary` と `gaps[].reason` を報告の「見つけたもの」へ載せて先へ進む、2 は値を直して打ち直す。表の見出しに `status` の列を置かず、状態の意味は正本を指す（変える） |
+| `plugins/ndf/skills/development-workflow/references/stage-completeness.md` の「終了コードで工程を止めない」 | 「呼び出し側の誤りだけを 2 で返すのは `projects-sync.sh` と同じ」の比べを、`projects-sync.sh` が書けなかったときも 0 以外（6・3・1）を返し、呼ぶ側が止まらずに報告へ載せる扱いへ書き換える（`stage-check.sh` 自身の終了コードは変えない）（変える） |
+| 終了コードごとの「次の手」の表（`backlog-refinement/SKILL.md`・`progress-tracking/SKILL.md`・`release-verification/SKILL.md`・`merged/SKILL.md`・`plan-to-spec/references/excerpt.md`） | 見出しの `status` の列（`status`（終了コード）の書き方を含む）を外して終了コードだけで行を引き、次の手と、そのスクリプトに固有の意味だけを残す。状態の意味は正本を指す（変える） |
 
 ```mermaid
 graph LR
@@ -123,7 +125,7 @@ graph LR
   RD -->|形を確かめる| SR
   CH["子の課題の読み手<br>materials / gate-rejections ほか"] -->|呼ぶ| RD
   README -. 正本 .- SR
-  SK["Skill の本文<br>progress-tracking / backlog-refinement"] -. 指す .-> README
+  SK["Skill の本文と references<br>progress-tracking / stage-completeness / 次の手の表の 5 つ"] -. 指す .-> README
 ```
 
 ### シェルのスクリプトの対象（要求の未決 3）
@@ -294,7 +296,7 @@ sequenceDiagram
   RS->>RS: process に「記録できなかった」を積み、次のステップへ進む
 ```
 
-`sprint-close.py` の `close_one` も `record_stage` と同じく `projects-sync.sh` の結果 JSON を読み、`ok` でなければ `notes` へ載せて課題を閉じる処理を続ける。図に含めない構成要素は、処理を持たない文書（`lib/README.md`・`progress-tracking` と `backlog-refinement` の本文）である。
+`sprint-close.py` の `close_one` も `record_stage` と同じく `projects-sync.sh` の結果 JSON を読み、`ok` でなければ `notes` へ載せて課題を閉じる処理を続ける。図に含めない構成要素は、処理を持たない文書（`lib/README.md`・`progress-tracking` の本文と抜粋・`stage-completeness.md`・次の手の表を持つ 5 つの文書）である。
 
 ## 非機能の実現方式
 
@@ -343,7 +345,7 @@ README に規則を書くだけでは、`ok` に欠けを添えた結果がそ�
 
 ### 決定 7: 進捗記録を理由に開発の工程を止めず、かつ未記録を隠さないため、記録のスクリプトは `ok` 以外を返し、呼ぶ側は止まらずに結果へ残す
 
-`progress-tracking` の「進行管理が理由で開発の工程を止めない」は残す。止めない判断は呼ぶ側が持ち、スクリプトは事実（書けなかった）を `stopped` / 6 と `gaps` で返す。`record_stage` はプランの実行の結果の `process` へ、`sprint-close.py` は `notes` へ載せ、Skill の本文から打つ LLM は作業の報告の「見つけたもの」へ載せる。スクリプトが止める判断まで持つ案（記録の失敗でプランを止める）は採らない。ボードの一時的な上限で開発が止まり、間違った成功より止まらない害の方が大きくなる。`.ndf/projects.json` が無いことは欠けにしない（ボードを使わないと決めたリポジトリ）。
+`progress-tracking` の「進行管理が理由で開発の工程を止めない」は残す。止めない判断は呼ぶ側が持ち、スクリプトは事実（書けなかった）を `stopped` / 6 と `gaps` で返す。`record_stage` はプランの実行の結果の `process` へ、`sprint-close.py` は `notes` へ載せ、Skill の本文から打つ LLM は作業の報告の「見つけたもの」へ載せる。LLM が読む手引き（`progress-tracking/references/excerpt.md` の「結果の読み方」と `stage-completeness.md` の「終了コードで工程を止めない」）は、新しい出力（`status`・終了コード 6・`gaps`）を読んでも止まらずに報告へ載せる、という次の手へ書き換える。終了コード 0 と `NOTE:` の行を前提にした今の表を残すと、LLM が 0 以外を見て止まるか、`gaps` を読み落とす。スクリプトが止める判断まで持つ案（記録の失敗でプランを止める）は採らない。ボードの一時的な上限で開発が止まり、間違った成功より止まらない害の方が大きくなる。`.ndf/projects.json` が無いことは欠けにしない（ボードを使わないと決めたリポジトリ）。
 
 根拠: Value 2 / Value 4（MVV 版 3）
 
@@ -355,7 +357,7 @@ README に規則を書くだけでは、`ok` に欠けを添えた結果がそ�
 
 ### 決定 9: 形式の写しを 1 か所へ寄せるため、`status` と終了コードの対応を持つ表は `lib/README.md` だけに置く
 
-Skill の本文が持ってよいのは、そのスクリプトの終了コードごとの「次の手」までで、状態の意味は正本を指す。今これに当たるのは `backlog-refinement` の表だけで、`status` の列を外す。`external-ai` の表は `metrics.result` の語彙ごとの次の手で、状態と終了コードの対応ではないため残す。
+Skill の本文が持ってよいのは、そのスクリプトの終了コードごとの「次の手」（と、そのスクリプトに固有の意味）までで、状態の意味は正本を指す。見出し行に `status` と `終了コード` を並べた表は、今 `lib/README.md` のほかに 5 つある（`backlog-refinement/SKILL.md` の「終了コード | status | 次の手」、`progress-tracking/SKILL.md`・`release-verification/SKILL.md`・`merged/SKILL.md` の「`status`（終了コード） | 次にすること」、`plan-to-spec/references/excerpt.md` の「`status`（終了コード） | 意味 | 次にすること」）。どれも次の手の表で、`status` の列（か `status`（終了コード）の書き方）が正本の状態と終了コードの対応を写している点は同じなので、5 つを同じ扱いにし、見出しと行から `status` を外して終了コードだけで行を引く。一部だけを残すと、受け入れ条件 1 の `grep`（`status` の値の表を持つ文書が `lib/README.md` だけ）が通らない。`external-ai` の表は `metrics.result` の語彙ごとの次の手で、状態と終了コードの対応ではないため残す。書き換える `progress-tracking/references/excerpt.md` の「結果の読み方」も、見出しに `status` の列を置かない。
 
 根拠: Value 7 / Value 8（MVV 版 3）
 
@@ -363,7 +365,7 @@ Skill の本文が持ってよいのは、そのスクリプトの終了コー�
 
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
-| 受け入れ条件 1・決定 9 | `status` と `終了コード` を同じ見出し行に持つ表を `plugins/ndf` の `.md` から `grep` すると `lib/README.md` だけが出る（実装の検証で打つ。`.md` の文言を照らすテストは書かない） | `backlog-refinement` の表に `status` の列を残すと 2 件出る |
+| 受け入れ条件 1・決定 9 | `status` と `終了コード` を同じ見出し行（直後に `| --- |` の行が続く行）に持つ表を `plugins/ndf` の `.md` から `grep` すると `lib/README.md` だけが出る（実装の検証で打つ。`.md` の文言を照らすテストは書かない）。今は `lib/README.md` と決定 9 の 5 つの計 6 件が出る | 5 つの次の手の表のどれかに `status` の列を残すと 2 件以上出る |
 | 受け入れ条件 2・I1 | `ok` に `gaps` を 1 件添えた結果を `validate_result` へ渡すと誤りが返る | I1 の検査を外すと誤りが空になる |
 | 受け入れ条件 3・I1 | 同じ結果を `emit` すると標準出力は空、標準エラーに理由、終了コード 2 | `emit` が誤りを無視して出すと標準出力に行が出る |
 | I2 | `stopped` / 6 で `gaps` が空なら誤り、1 件なら通る。`ok` / 6・`gate` / 6 は不一致の誤り | 6 を `code_matches` の `stopped` に入れ忘れると正しい結果が 2 になる。`gaps` の件数を見ないと空でも通る |
@@ -382,7 +384,7 @@ Skill の本文が持ってよいのは、そのスクリプトの終了コー�
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #2227 | 実装する | — | `plugins/ndf/scripts/lib/README.md`、`plugins/ndf/scripts/lib/step_result.py`、`plugins/ndf/scripts/lib/step_read.py`、`plugins/ndf/scripts/lib/step-result.sh`、`plugins/ndf/scripts/progress-record.sh`、`plugins/ndf/scripts/projects-sync.sh`、`plugins/ndf/scripts/supervise_lib/state.py`、`plugins/ndf/scripts/sprint-close.py`、`plugins/ndf/skills/progress-tracking/SKILL.md`、`plugins/ndf/skills/backlog-refinement/SKILL.md`、`plugins/ndf/scripts/tests/`、`docs/glossary/glossary.json`、`docs/glossary.md` |
+| #2227 | 実装する | — | `plugins/ndf/scripts/lib/README.md`、`plugins/ndf/scripts/lib/step_result.py`、`plugins/ndf/scripts/lib/step_read.py`、`plugins/ndf/scripts/lib/step-result.sh`、`plugins/ndf/scripts/progress-record.sh`、`plugins/ndf/scripts/projects-sync.sh`、`plugins/ndf/scripts/supervise_lib/state.py`、`plugins/ndf/scripts/sprint-close.py`、`plugins/ndf/skills/progress-tracking/SKILL.md`、`plugins/ndf/skills/progress-tracking/references/excerpt.md`、`plugins/ndf/skills/development-workflow/references/stage-completeness.md`、`plugins/ndf/skills/backlog-refinement/SKILL.md`、`plugins/ndf/skills/release-verification/SKILL.md`、`plugins/ndf/skills/merged/SKILL.md`、`plugins/ndf/skills/plan-to-spec/references/excerpt.md`、`plugins/ndf/scripts/tests/`、`docs/glossary/glossary.json`、`docs/glossary.md` |
 
 ## 未確認のまま残ること
 
