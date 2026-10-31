@@ -1,7 +1,7 @@
 // 起票の代行（#2216 の「処理の流れ」の起票の代行、I46〜I50）。記録された issue.requested 1 件を判定し、
 // 起票してよい先へはサービスが起票し、そうでない先は下書きへ回し、結果の issue.request_resolved を 1 件残す
 import type { IssueRequestedEvent, IssueRequestResolvedEvent } from "@ndf-factory/contracts";
-import type { CreatedIssue, GitHubPort } from "../github/port.ts";
+import type { CreatedIssue, GitHubPort, RepositoryVisibility } from "../github/port.ts";
 import { resolvedKey } from "../progress/authorize.ts";
 import { repoKey } from "../progress/github.ts";
 import type { Registration, SprintRun } from "../runs/model.ts";
@@ -11,6 +11,9 @@ import type { FilingStyleResolver } from "./style.ts";
 
 // スプリントの実行ごとにサービスが作る Issue の数の既定の上限（決定 12。実測に基づかない初期値）
 export const DEFAULT_ISSUE_REQUEST_LIMIT_PER_RUN = 10;
+
+// 見える人の広さの順。internal は企業の中の全員に見え、private より広い
+const VISIBILITY_RANK: Record<RepositoryVisibility, number> = { private: 0, internal: 1, public: 2 };
 
 // ログの 1 行。依頼の本文・題・token は載せない
 export interface IssueRequestLogEntry {
@@ -78,13 +81,13 @@ async function decide(request: IssueRequestedEvent, deps: IssueRequestDeps, dige
   const style = await deps.style.resolve(targetRef);
   if (style.tracker !== "github_issues") return drafted("unsupported_tracker");
 
-  // 公開範囲が広がる向き（起票先が公開で、実行のリポジトリが公開でない）は起票しない（決定 11）
+  // 公開範囲が広がる向き（起票先の方が実行のリポジトリより広く見える。private < internal < public）は起票しない（決定 11）
   const targetVisibility = await deps.github.repositoryVisibility(target.installationId, target.repositoryId);
   if (targetVisibility === null) return drafted("not_installed");
-  if (targetVisibility === "public") {
+  if (targetVisibility !== "private") {
     const source = registrations.find((r) => r.repositoryId === run.repositoryId);
     const sourceVisibility = source ? await deps.github.repositoryVisibility(source.installationId, source.repositoryId) : null;
-    if (sourceVisibility !== "public") return drafted("visibility");
+    if (sourceVisibility === null || VISIBILITY_RANK[sourceVisibility] < VISIBILITY_RANK[targetVisibility]) return drafted("visibility");
   }
 
   // 数は起票の直前に増やし、起票しなかった依頼で枠を使わない（I49）

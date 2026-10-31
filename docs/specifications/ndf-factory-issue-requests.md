@@ -49,7 +49,7 @@
 | 1 | 題と本文に秘密らしい値（AWS のアクセスキー・PEM の秘密鍵の始まりの行・GitHub の token・Anthropic の API キー・JWT の形）が無い | `secret_suspected` |
 | 2 | 依頼の `sprint_run_id` からサービスの表で引いたアカウントの登録に、名前が大文字と小文字を問わず一致するものがある（ほかのアカウントの登録は引かない） | `not_registered` |
 | 3 | 流儀の判定の口（`FilingStyleResolver`）が GitHub Issues を返す。#2239 が入るまでの既定は「GitHub Issues へ、テンプレートを使わず、依頼の題と本文のまま」 | `unsupported_tracker` |
-| 4 | 起票先の公開範囲を、1 リポジトリと `metadata: read` だけに絞った導入の token で読める。起票先が公開なら、実行のリポジトリも公開である（AI が書いた本文は非公開のコードや設定を含みうる） | 読めない → `not_installed`、公開範囲が広がる → `visibility` |
+| 4 | 起票先の公開範囲を、1 リポジトリと `metadata: read` だけに絞った導入の token で読める。起票先は実行のリポジトリより広く見えない（広さは private < internal < public。AI が書いた本文は非公開のコードや設定を含みうる） | 読めない → `not_installed`、公開範囲が広がる → `visibility` |
 | 5 | 起票した数を上限（`ISSUE_REQUEST_LIMIT_PER_RUN`、既定 10）より少ないときだけ増やせる。下書きは数に入れない | `limit_exceeded` |
 | 6 | 起票先の 1 リポジトリ（数の ID）と `issues: write` だけに絞った導入の token で Issue を作れる | token を作れない → `not_installed`、作成の要求の失敗 → `filing_failed`（どちらも数を 1 つ戻す） |
 
@@ -113,7 +113,7 @@ DynamoDB の表（`ISSUE_REQUESTS_TABLE_NAME`）。区分の鍵 `pk`・並びの
 
 | 観点 | 縛る振る舞い |
 | --- | --- |
-| 起票の代行（I46〜I50） | 偽の登録と GitHub の口で、同じアカウントが登録し導入に入った先へ依頼の題と本文の Issue が 1 件でき、結果が参照を持つこと。登録が無い・ほかのアカウントだけが登録はどちらも `not_registered`、導入が起票先を含まないと `not_installed`。流儀の判定が GitHub Issues 以外なら `unsupported_tracker`。起票先が公開で実行のリポジトリが公開でないと `visibility`。同じ中身の依頼を別の `seq`・別のジョブで流すと Issue は 1 件で `duplicate_of` を持ち、同じ依頼を 2 回流しても結果は 1 件。`attempted_at` のある行は作り直さず `filing_failed`。上限 2 で 3 件目が `limit_exceeded`、GitHub が断ると数が戻ること。秘密らしい値で `secret_suspected`、ログに題と本文が無いこと。本物の GitHub の口が token の作成の要求に `repository_ids` 1 つと `{ issues: "write" }` だけを送り、token を返さないこと |
+| 起票の代行（I46〜I50） | 偽の登録と GitHub の口で、同じアカウントが登録し導入に入った先へ依頼の題と本文の Issue が 1 件でき、結果が参照を持つこと。登録が無い・ほかのアカウントだけが登録はどちらも `not_registered`、導入が起票先を含まないと `not_installed`。流儀の判定が GitHub Issues 以外なら `unsupported_tracker`。起票先が実行のリポジトリより広く見える（公開と非公開・社内、社内と非公開）と `visibility`。同じ中身の依頼を別の `seq`・別のジョブで流すと Issue は 1 件で `duplicate_of` を持ち、同じ依頼を 2 回流しても結果は 1 件。`attempted_at` のある行は作り直さず `filing_failed`。上限 2 で 3 件目が `limit_exceeded`、GitHub が断ると数が戻ること。秘密らしい値で `secret_suspected`、ログに題と本文が無いこと。本物の GitHub の口が token の作成の要求に `repository_ids` 1 つと `{ issues: "write" }` だけを送り、token を返さないこと |
 | ランナーと NDF の起票の依頼 | ランナーが依頼の行を `issue.requested` にし、上限を超える行を `attention`、形の違う行を送らないこと。`issue-file.py create` が `NDF_ISSUE_REQUEST_FILE` があり起票先が別のときだけ 1 行を足して 0 で終え、承認資料を書かないこと（pytest） |
 
 ## 関連リンク

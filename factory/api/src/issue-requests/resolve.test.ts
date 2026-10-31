@@ -111,6 +111,10 @@ describe("公開範囲を広げない（決定 11）", () => {
   it.each([
     ["public", "private", "drafted"],
     ["public", "internal", "drafted"],
+    ["internal", "private", "drafted"],
+    ["internal", "internal", "filed"],
+    ["internal", "public", "filed"],
+    ["private", "internal", "filed"],
     ["private", "private", "filed"],
     ["public", "public", "filed"],
     ["private", "public", "filed"],

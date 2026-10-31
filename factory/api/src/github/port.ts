@@ -43,7 +43,7 @@ export interface CreatedIssue {
   url: string;
 }
 
-// リポジトリの公開範囲。internal は企業の中だけに見え、公開として扱わない
+// リポジトリの公開範囲。internal は企業の中の全員に見え、private より広く public より狭い
 export type RepositoryVisibility = "public" | "private" | "internal";
 
 export interface GitHubPort {
