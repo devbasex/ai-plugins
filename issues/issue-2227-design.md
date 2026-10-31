@@ -103,7 +103,7 @@
 | `plugins/ndf/scripts/supervise_lib/state.py` の `record_stage` | 記録のスクリプトの結果 JSON を読み、`ok` でなければプランの実行の結果の `process` へ残す。プランは止めない（変える） |
 | `plugins/ndf/scripts/sprint-close.py` の `close_one` | `projects-sync.sh` の出力の `NOTE` の行ではなく結果 JSON を読み、`ok` でなければ `notes` へ載せる（変える） |
 | `plugins/ndf/skills/progress-tracking/SKILL.md` の「何もしない条件」 | 記録できなかったときの返し方を、終了コード 0 から結果 JSON の状態へ書き換え、呼ぶ側は止まらずに報告へ載せると定める（変える） |
-| `plugins/ndf/skills/progress-tracking/references/excerpt.md` の「結果の読み方」 | 全部の行が終了コード 0 と `#N 進行 = X` / `NOTE:` の行を前提にした表を、1 行の結果 JSON の読み方へ書き換える。`ok`（0）は先へ進む、終了コード 6（`gaps` あり）・3（`gh` が無い）・1（何も書けなかった）は止まらずに `summary` と `gaps[].reason` を報告の「見つけたもの」へ載せて先へ進む、2 は値を直して打ち直す。表の見出しに `status` の列を置かず、状態の意味は正本を指す（変える） |
+| `plugins/ndf/skills/progress-tracking/references/excerpt.md` の「結果の読み方」 | 全部の行が終了コード 0 と `#N 進行 = X` / `NOTE:` の行を前提にした表を、1 行の結果 JSON の読み方へ書き換える。`ok`（0）は先へ進む。ただし `items` に `kind: "stage-missing"` の要素がある（`配布` のとき、記録の無い必須の工程がある。今の `記録なし:` / `条件付き:` の行）なら、終了コードによらず、実施済みの工程を要素の `reason` のコマンドで記録してから先へ進む。終了コード 6（`gaps` あり）・3（`gh` が無い）・1（何も書けなかった）は止まらずに `summary` と `gaps[].reason` を報告の「見つけたもの」へ載せて先へ進む、2 は値を直して打ち直す。表の見出しに `status` の列を置かず、状態の意味は正本を指す（変える） |
 | `plugins/ndf/skills/development-workflow/references/stage-completeness.md` の「終了コードで工程を止めない」 | 「呼び出し側の誤りだけを 2 で返すのは `projects-sync.sh` と同じ」の比べを、`projects-sync.sh` が書けなかったときも 0 以外（6・3・1）を返し、呼ぶ側が止まらずに報告へ載せる扱いへ書き換える（`stage-check.sh` 自身の終了コードは変えない）（変える） |
 | 終了コードごとの「次の手」の表（`backlog-refinement/SKILL.md`・`progress-tracking/SKILL.md`・`release-verification/SKILL.md`・`merged/SKILL.md`・`plan-to-spec/references/excerpt.md`） | 見出しの `status` の列（`status`（終了コード）の書き方を含む）を外して終了コードだけで行を引き、次の手と、そのスクリプトに固有の意味だけを残す。状態の意味は正本を指す（変える） |
 
@@ -244,6 +244,7 @@ python3 "$LIB/step_result.py" emit --tool <名前> --status <ok|gate|stopped> --
 | 場合 | `status` / 終了コード | 載せる所 |
 | --- | --- | --- |
 | 記録した・変える内容が無かった | `ok` / 0 | `items` に `{kind: "issue-body", name: "#N", result: "recorded" か "unchanged"}`、ボードは `result: "recorded"` か宣言が無ければ `"not_declared"` |
+| `配布` を記録し、記録の無い必須の工程がある（今の `wf_record_progress` が標準出力へ出す `記録なし:` / `条件付き:` の案内） | 本文・ボードの結果のとおり（`ok` / 0 のことも 6 のこともある）。案内は状態を変えない | 工程ごとに `items` へ `{kind: "stage-missing", name: "<工程>", result: "missing"（必須で記録なし）か "conditional"（条件付き）, reason: "<記録し直すコマンド>"}`。`gaps` へは入れない（記録の無い工程は書き込みの失敗ではなく、I1 により `ok` に `gaps` を付けられない）。`wf_record_progress` の案内は標準出力へ出さずに捕まえて要素へ移す（I7 の 1 行を守る） |
 | 引数の誤り（知らない工程名・引数不足） | `stopped` / 2 | `summary`（今と同じ 2） |
 | `gh` が無い | `stopped` / 3 | `summary` に「gh が無い」。通過記録は今までどおり積む（`process` に残す） |
 | 本文・ボードのどれかを書けなかった（`gh` の失敗・錠を取れない・問い合わせの上限・ボードにアイテムが無く追加もできない） | `stopped` / 6 | 書けなかったものを 1 件ずつ `gaps` に。`reason` に `SR_GH_ERR` か錠・上限の理由 |
