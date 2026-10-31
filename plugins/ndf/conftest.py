@@ -59,4 +59,4 @@ def pytest_sessionfinish(session, exitstatus) -> None:
     """テストのセッションの終わりに、寿命の窓を過ぎた `ndf-tests-*`（止められたセッションの残り）を片付ける（#2229）。"""
     import run_state
 
-    run_state.sweep(None, kinds=("test-tmp",), tmp_only=True)
+    run_state.sweep_states(None, kinds=("test-tmp",), tmp_only=True)

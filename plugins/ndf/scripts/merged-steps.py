@@ -9,7 +9,7 @@
     python3 merged-steps.py promote --head <ベースブランチ> --base <本番チャネル> [--prepare] [--out <資料>] [--gate-approved user|mvv] [--expect-head-from <資料> | --approved-from <資料>]
 
 cleanup: マージ済みの PR の作業ツリーとローカルブランチを外し、主ディレクトリを取り込む。一時の置き場のレビュー worktree
-（`pr<n>`・`rf<n>`）は lib/run_state.py が `--force` を使わずに外し、続けて持ち主の終わった残る状態を片付ける（`run_state.sweep`。
+（`pr<n>`・`rf<n>`）は lib/run_state.py が `--force` を使わずに外し、続けて持ち主の終わった残る状態を片付ける（`run_state.sweep_states`。
 items に足し、metrics の swept_removed・swept_kept で数える。#2229）。開発の作業ツリーで `git worktree remove` が拒否したものは、未追跡・無視されたファイルを退避してから外す。作り直せる生成物
 （`.venv`・`node_modules`・`__pycache__`・`target` など）は退避せずに捨てる（merged_lib/trash.py）。
 sweep-trash: 本番に出たコミット（--ref）に含まれるブランチの退避先を回収の候補として挙げる。消すのは、人が候補を見て
@@ -68,6 +68,7 @@ from step_result import (
 )
 import gh_parts  # noqa: E402
 import repo  # noqa: E402
+import run_owner  # noqa: E402
 import run_state  # noqa: E402
 import worktree_base  # noqa: E402
 
@@ -159,11 +160,11 @@ def _remove_pr_tmp_worktrees(root, wt_dir, n, add):
         path = wt_dir / name
         if not path.exists():
             continue
-        record, err = run_state.read_owner(path)
-        if err or (record is not None and run_state.alive(path, record, time.time())):
-            add("run-dir" if name.startswith("rf") else "worktree", str(path), "kept", err or run_state._alive_reason(path, record))
+        record, err = run_owner.read_owner(path)
+        if err or (record is not None and run_owner.alive(path, record, time.time())):
+            add("run-dir" if name.startswith("rf") else "worktree", str(path), "kept", err or run_owner.alive_reason(path, record))
             continue
-        state = state or run_state.pr_view(root, n) or {}
+        state = state or run_state.view_pr(root, n) or {}
         for it in remove(root, path, n, state):
             add(it["kind"], it["name"], it["result"], it.get("reason"))
 
@@ -282,7 +283,7 @@ def cleanup(root, prs):
         _cleanup_pr(root, main_dir, slug, wt_base, n, add)
 
     # 持ち主の終わった残る状態（merged を通らずに閉じた PR の worktree・一時ファイル）も片付ける（#2229）
-    swept = run_state.sweep(root)
+    swept = run_state.sweep_states(root)
     items.extend({**i, "swept": True} for i in swept)
     git(root, "worktree", "prune", check=False)
     pull_err = _update_main_dir(main_dir, add)

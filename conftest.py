@@ -137,7 +137,7 @@ def pytest_sessionfinish(session, exitstatus) -> None:
     sys.path.insert(0, str(Path(__file__).resolve().parent / "plugins" / "ndf" / "scripts" / "lib"))
     import run_state
 
-    run_state.sweep(None, kinds=("test-tmp",), tmp_only=True)
+    run_state.sweep_states(None, kinds=("test-tmp",), tmp_only=True)
 
 
 # ジョブの分割（#882）。**分ける単位はファイルで、割り当てはパスの剰余だけで決める。**

@@ -22,6 +22,7 @@ import models as models_lib
 import project_mvv
 import project_decl
 import repo as repo_lib
+import run_owner
 import run_state
 import statefile
 import test_strategy as ts
@@ -424,14 +425,6 @@ def _emit_run(prep: "_InitPreparation") -> None:
     statefile.emit(RUN=prep.run, SWEPT=json.dumps(prep.swept, ensure_ascii=False))
 
 
-def _claim(root: pathlib.Path, pr: int, run: Optional[str]) -> str:
-    """rf<n> の持ち主の記録を書き、実行の識別子を返す。同じ実行の続きなら記録を引き継いで動いた時刻だけを書く。"""
-    record, _ = run_state.read_owner(root)
-    if run and record is not None and record.get("run") == run and run_state.touch(root, run)[0]:
-        return run
-    return run_state.claim(root, tool="cross-refactoring", pr=pr, run=run)
-
-
 def _normalize_args(args: argparse.Namespace) -> None:
     """予算のチェックと、廃止した引数の知らせ。**提案の前に止める**（AC1 AC2）。"""
     raw = getattr(args, "budget_minutes", None)
@@ -518,13 +511,12 @@ def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
     if reason:
         die(reason)
     # 持ち主の終わった残る状態を片付け（開始する rf<n> は見ない）、既存の rf<n> を使ってよいかを決める（#2229）
-    swept = run_state.sweep(pathlib.Path.cwd(), skip=[root])
     owned = not args.worktree_root  # 置き場を渡した作業ディレクトリは呼び出し元が持つ。記録を書かない
-    stop = run_state.check_start(root, getattr(args, "run", None)) if owned else None
+    swept, stop = run_state.begin_review(root, getattr(args, "run", None), owned=owned)
     if stop:
         die(stop)
     _ensure_work_worktree(work, head_branch)
-    run = _claim(root, args.pr, getattr(args, "run", None)) if owned else ""
+    run = run_owner.adopt_owner(root, tool="cross-refactoring", pr=args.pr, run=getattr(args, "run", None)) if owned else ""
 
     # **テストの戦略は宣言（`.ndf/project.json` の `test`）と引数から解く**（#1334 E1）。コマンドの文字列は
     # 解析しない。解けなければ欠けたキーと直し方を出して止める（I3）。引数の雛形の種別は `--test-kind`（#1483 I1）。

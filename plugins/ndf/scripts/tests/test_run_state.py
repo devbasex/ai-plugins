@@ -31,6 +31,7 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 PLUGIN = SCRIPTS.parent
 sys.path.insert(0, str(SCRIPTS / "lib"))
 
+import run_owner  # noqa: E402
 import run_state  # noqa: E402
 
 OLD = time.time() - 2 * run_state.WINDOW
@@ -109,7 +110,7 @@ def test_a_closed_pr_worktree_without_work_is_removed(place) -> None:
     work, claude = add_tree(root, rf / "work"), add_tree(root, rf / "claude")
     age(pr, work, claude, rf)
 
-    items = run_state.sweep(root, view=View({7: "MERGED", 8: "CLOSED"}))
+    items = run_state.sweep_states(root, view=View({7: "MERGED", 8: "CLOSED"}))
 
     got = by_name(items)
     assert got["pr7"]["result"] == "removed" and got["work"]["result"] == "removed" and got["claude"]["result"] == "removed"
@@ -122,10 +123,10 @@ def test_an_open_pr_worktree_stays_even_when_its_owner_finished(place) -> None:
     """AC7・I3: open の PR のレビュー worktree はどの片付けでも外れない。"""
     root, base, _ = place
     pr = add_tree(root, base / "pr7")
-    run = run_state.claim(pr, tool="cross-review", pr=7)
-    run_state.finish(pr, run)
+    run = run_owner.claim_owner(pr, tool="cross-review", pr=7)
+    run_owner.finish_owner(pr, run)
 
-    items = run_state.sweep(root, view=View({7: "OPEN"}))
+    items = run_state.sweep_states(root, view=View({7: "OPEN"}))
 
     assert by_name(items)["pr7"]["result"] == "kept" and "open" in by_name(items)["pr7"]["reason"]
     assert pr.exists()
@@ -135,10 +136,10 @@ def test_a_running_owner_keeps_its_worktree_even_after_the_merge(place) -> None:
     """AC8・I2・I7: 生きている実行の worktree はマージ済みでも残り、照会もしない。"""
     root, base, _ = place
     pr = add_tree(root, base / "pr7")
-    run = run_state.claim(pr, tool="cross-review", pr=7)
+    run = run_owner.claim_owner(pr, tool="cross-review", pr=7)
     view = View({7: "MERGED"})
 
-    items = run_state.sweep(root, view=view)
+    items = run_state.sweep_states(root, view=view)
 
     got = by_name(items)["pr7"]
     assert got["result"] == "kept" and run in got["reason"]
@@ -160,7 +161,7 @@ def test_a_worktree_with_work_is_kept_with_the_reason(place, work) -> None:
         git(pr, "commit", "-q", "-m", "local")
     age(pr)
 
-    items = run_state.sweep(root, view=View({7: "MERGED"}))
+    items = run_state.sweep_states(root, view=View({7: "MERGED"}))
 
     got = by_name(items)["pr7"]
     assert got["result"] == "kept"
@@ -176,7 +177,7 @@ def test_undecidable_states_are_kept_and_do_not_stop_the_others(place) -> None:
     age(broken, failing, done)
     view = View({2: None, 3: "MERGED"})
 
-    items = run_state.sweep(root, view=view)
+    items = run_state.sweep_states(root, view=view)
 
     got = by_name(items)
     assert "判定できない" in got["pr1"]["reason"] and "判定できない" in got["pr2"]["reason"]
@@ -189,7 +190,7 @@ def test_skip_leaves_the_starting_worktree_unseen(place) -> None:
     pr = add_tree(root, base / "pr7")
     age(pr)
 
-    assert run_state.sweep(root, skip=[pr], view=View({7: "MERGED"})) == []
+    assert run_state.sweep_states(root, skip=[pr], view=View({7: "MERGED"})) == []
     assert pr.exists()
 
 
@@ -208,7 +209,7 @@ def test_session_state_follows_its_owner_process(place) -> None:
     (tmp / "ndf-worktree-old.json").write_text("{}", encoding="utf-8")
     os.utime(tmp / "ndf-worktree-old.json", (OLD, OLD))
 
-    got = by_name(run_state.sweep(None, kinds=("session-state",)))
+    got = by_name(run_state.sweep_states(None, kinds=("session-state",)))
 
     assert got["ndf-worktree-live.json"]["result"] == "kept"
     assert {got[n]["result"] for n in ("ndf-worktree-reused.json", "ndf-worktree-gone.json", "ndf-worktree-old.json")} == {"removed"}
@@ -224,7 +225,7 @@ def test_deps_work_left_by_a_killed_script_is_removed(place) -> None:
             (tmp / name).mkdir()
             (tmp / name / "owner").write_text(f"{pid}\n", encoding="utf-8")
 
-        got = by_name(run_state.sweep(None, kinds=("deps-work",)))
+        got = by_name(run_state.sweep_states(None, kinds=("deps-work",)))
     finally:
         live.kill()
         live.wait()
@@ -255,7 +256,7 @@ def test_fix_files_and_test_tmp_follow_the_window(place) -> None:
     for name in ("fix-pr1-result.json", "fix-pr1-context.md", "ndf-tests-usage-a"):
         os.utime(tmp / name, (OLD, OLD))
 
-    items = run_state.sweep(None, tmp_only=True)
+    items = run_state.sweep_states(None, tmp_only=True)
 
     got = by_name(items)
     assert got["fix-pr1-*"]["result"] == "removed" and got["ndf-tests-usage-a"]["result"] == "removed"
@@ -271,12 +272,12 @@ def test_touch_and_finish_write_only_for_the_same_run(place) -> None:
     """I12: 違う run の touch / finish は記録を変えない。"""
     root, base, _ = place
     pr = add_tree(root, base / "pr7")
-    run = run_state.claim(pr, tool="cross-review", pr=7)
+    run = run_owner.claim_owner(pr, tool="cross-review", pr=7)
     before = run_state.owner_path(pr).read_text(encoding="utf-8")
 
-    assert run_state.touch(pr, "other")[0] is False and run_state.finish(pr, None)[0] is False
+    assert run_owner.touch_owner(pr, "other")[0] is False and run_owner.finish_owner(pr, None)[0] is False
     assert run_state.owner_path(pr).read_text(encoding="utf-8") == before
-    assert run_state.finish(pr, run) == (True, None)
+    assert run_owner.finish_owner(pr, run) == (True, None)
     assert run_state.read_owner(pr)[0]["finished_at"]
 
 
@@ -284,12 +285,12 @@ def test_check_start_separates_continuation_other_run_and_previous_run(place) ->
     """AC15・I11・I12: 同じ実行の続きは通し、別の実行が動いていれば止め、以前の実行は作業の有無で分ける。"""
     root, base, _ = place
     pr = add_tree(root, base / "pr7")
-    run = run_state.claim(pr, tool="cross-review", pr=7)
+    run = run_owner.claim_owner(pr, tool="cross-review", pr=7)
 
     assert run_state.check_start(pr, run) is None
     assert "別の実行" in run_state.check_start(pr, None) and "--run" in run_state.check_start(pr, "other")
 
-    run_state.finish(pr, run)
+    run_owner.finish_owner(pr, run)
     assert run_state.check_start(pr, None) is None
     (pr / "a.txt").write_text("changed\n", encoding="utf-8")
     assert "作業が残る" in run_state.check_start(pr, None)
@@ -404,7 +405,7 @@ def test_cross_review_init_stops_while_another_run_owns_the_worktree(place, tmp_
     """I12: 窓の中の別の実行の記録があれば、--run 無し・違う --run の開始は止まり、記録は変わらない。一致すれば再開する。"""
     _, base, _ = place
     pr = base / "pr7"
-    run = run_state.claim(pr, tool="cross-review", pr=7)
+    run = run_owner.claim_owner(pr, tool="cross-review", pr=7)
     before = run_state.owner_path(pr).read_text(encoding="utf-8")
 
     for extra in ((), ("--run", "other")):
@@ -421,8 +422,8 @@ def test_cross_review_init_claims_after_a_finished_run(place, tmp_path) -> None:
     """AC15・I11: 以前の実行（終わった記録）なら作業の無い開始は通り、新しい実行の記録を書く。"""
     _, base, _ = place
     pr = base / "pr7"
-    old = run_state.claim(pr, tool="cross-review", pr=7)
-    run_state.finish(pr, old)
+    old = run_owner.claim_owner(pr, tool="cross-review", pr=7)
+    run_owner.finish_owner(pr, old)
 
     p, _ = _cr_init(place, tmp_path)
 
