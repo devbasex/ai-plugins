@@ -17,11 +17,6 @@
     10  承認資料を書いた。同意の後に `--approved <metrics.digest>` を足して打ち直す（create と、打つ先が開発対象リポジトリと別の note）
     20  上流リポジトリを 1 つに絞れない。候補を示して利用者に選んでもらう（resolve-target）
 
-**Neural Development Factory のランナーの中では、別のリポジトリへの `create` を起票の依頼として書き出す（#2216）。**
-環境変数 `NDF_ISSUE_REQUEST_FILE` があり、起票先が開発対象リポジトリと別のときは、承認資料を書かずに
-そのファイルへ 1 行（`{"repo", "title", "body"}` の JSON）を足し、0（`items[].result` は `requested`）で終える。
-起票するかはサービスが判定し、起票しない先は下書きを人へ回す。ランナーの外では変数が無いため、今どおり 10 で止まる。
-
 由来は `PR #<番号>` か `issue #<番号>`、リポジトリは `<所有者>/<リポジトリ>`、相手の課題は `<所有者>/<リポジトリ>#<番号>`。
 形が違えば GitHub を呼ばずに 2 で終える。GitHub は `lib/gh_rest.py`（下は `gh_call`）だけを通して呼ぶ。
 
@@ -61,6 +56,7 @@ import gh_call  # noqa: E402
 import gh_rest  # noqa: E402
 import gh_sections  # noqa: E402
 import proc  # noqa: E402
+import runner_issue_request  # noqa: E402
 from step_result import EXIT_GATE, EXIT_OK, EXIT_PAUSE, EXIT_UNREADABLE, EXIT_VIOLATION  # noqa: E402
 from step_result import approval_present, emit, presentation_dir, result  # noqa: E402
 
@@ -434,7 +430,7 @@ def _create_inputs(a) -> tuple[str, str, tuple[str, int] | None, str, str, list[
 def _create_gate_or_check(repo: str, title: str, body: str, labels: list[str], approved: str | None) -> tuple[str, bool]:
     """承認が無ければゲートへ回し、あれば要約値を照合する。`(要約値, 開発対象リポジトリと別か)`。"""
     digest = digest_of(repo, title, body, labels)
-    other = _is_other_repo(repo, development_repo())
+    other = runner_issue_request.request_if_runner(TOOL, repo, title, body, _is_other_repo(repo, development_repo()))
     if not approved:
         _gate(repo, title, body, labels, digest, other)
     if approved != digest:
@@ -446,24 +442,8 @@ def _create_gate_or_check(repo: str, title: str, body: str, labels: list[str], a
     return digest, other
 
 
-def _request_through_runner(repo: str, title: str, body: str) -> None:
-    """ランナーが渡した `NDF_ISSUE_REQUEST_FILE` があり、起票先が開発対象リポジトリと別なら、依頼の 1 行を足して 0 で終える。"""
-    path = os.environ.get("NDF_ISSUE_REQUEST_FILE", "")
-    if not path or not _is_other_repo(repo, development_repo()):
-        return
-    line = json.dumps({"repo": repo, "title": title, "body": body}, ensure_ascii=False)
-    try:
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(line + "\n")
-    except OSError as exc:
-        _stop_with(f"起票の依頼を書けない: {path}（{exc}）", EXIT_VIOLATION)
-    item = {"repo": repo, "title": title, "result": "requested"}
-    emit(result(TOOL, "ok", f"{repo} への起票をサービスへ依頼した", [item], {"other_repo": True}), EXIT_OK)
-
-
 def cmd_create(a) -> None:
     repo, _origin, counterpart, title, body, labels = _create_inputs(a)
-    _request_through_runner(repo, title, body)
     digest, other = _create_gate_or_check(repo, title, body, labels, a.approved)
     made = gh_rest.issue_create(repo, title, body, labels or None)
     if not made.ok:
