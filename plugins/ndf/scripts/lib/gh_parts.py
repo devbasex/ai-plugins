@@ -354,7 +354,7 @@ _COMMANDS = {
 
 def main(argv: list[str] | None = None) -> None:
     args = _parser().parse_args(argv)
-    deps.require("durable", "locks")  # 投稿キュー（post-review）は耐久の記録を、本文の書き換えは課題ごとの錠を使う
+    deps.require("durable", "locks", "waits")  # 投稿キュー（post-review）は耐久の記録を、本文の書き換えは課題ごとの錠を使う
     if args.cmd == "body-lock":
         cmd = args.command[1:] if args.command[:1] == ["--"] else args.command
         if not cmd:

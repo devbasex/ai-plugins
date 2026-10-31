@@ -8,10 +8,12 @@ import shlex
 from pathlib import Path
 
 import project_mvv
+from gate_answer import GATE_1, GATE_2
 from pace import PaceError
 from step_result import result
-from supervise_lib import limits, sprint_inputs
+from supervise_lib import absorb, limits, sprint_inputs
 from supervise_lib.decl import decl_roots, with_decls
+from supervise_lib.design_merge import plan_design_merge
 from supervise_lib.sprint_waves import (
     sprint_branch,
     plan_fast_check,
@@ -69,7 +71,7 @@ def mvv_design_waves(a, repo: str, gate: str) -> list[dict]:
         return []
     return [
         {"name": "設計", "plans": {f"design-{n}": plan_mvv_design(a, n, repo) for n in a.design}},
-        {"name": "関門 1", "gate": gate},
+        {"name": GATE_1, "gate": gate},
     ]
 
 
@@ -103,7 +105,7 @@ def fast_sprint_plans(a) -> list[dict]:
 
 AUTO_GATE_1 = (
     "設計のプランの MVV 判定が通せばマージ済みで、このステージは通過する。設計のプランが関門を返したら、承認を取り "
-    '`sprint-state.py gate <状態> "関門 1" --by user` と `run <プラン> --from approve` の後に次のステージの resume を打つ'
+    f'`sprint-state.py gate <状態> "{GATE_1}" --by user` の後に、設計のステージの resume に `--from design-<N>=approve` を足して打つ'
 )
 
 
@@ -239,8 +241,13 @@ def has_prod_branch(a) -> bool:
 PACE_PLANS = {"fast": fast_sprint_plans, "auto": auto_sprint_plans}  # 進め方ごとのステージの組み立て（normal は sprint_plans）
 
 
+MERGE_STAGE = "設計 PR のマージ"
+
+
 def sprint_plans(a) -> list[dict]:
     """スプリントのステージを順に返す。ステージの中の計画は queue --max 3 で同時に流してよい。
+    normal は承認ゲート 1 の後（設計 PR のマージ → 設計の結果 → スプリントブランチ → 実装 → 検査 → 配布）を、最初の
+    ステージの command 1 本に --then でつなぐ（#1426 の決定 5・I9）。承認ゲート 2 の後の本番は別の command にする。
     リリースの経路が雛形で組むものでなければ、経路ごとのステージ（route_waves）を最後に置く。"""
     build = PACE_PLANS.get(getattr(a, "pace", "normal"))
     if build:
@@ -251,16 +258,22 @@ def sprint_plans(a) -> list[dict]:
     waves = []
     if a.design:
         waves.append({"name": "設計", "plans": {f"design-{n}": design(a, n, repo) for n in a.design}})
-        waves.append({"name": "関門 1", "gate": normal_gate_1(a) if advise else "設計 Pull Request をまとめて承認してマージする"})
-    waves += design_results_wave(a, repo)
+        waves.append({"name": GATE_1, "gate": normal_gate_1(a, advise)})
+        waves.append({"name": MERGE_STAGE, "plans": {f"design-merge-{n}": plan_design_merge(a, n, repo) for n in a.design}})
+    first = MERGE_STAGE if a.design else DESIGN_RESULTS_STAGE if design_read(a) else "スプリントブランチ"
+
+    def then(name: str) -> dict:
+        return {} if name == first else {"then_of": first}
+
+    waves += design_results_wave(a, repo, **then(DESIGN_RESULTS_STAGE))
     waves += [
-        {"name": "スプリントブランチ", "plans": {"sprint-branch": plan_sprint_branch(a, repo)}},
-        {"name": "実装", "plans": {f"impl-{n}": plan_sprint_impl(a, n, repo) for n in a.issue}},
-        {"name": "検査", "plans": {"check": plan_sprint_check(a, repo)}},
+        {"name": "スプリントブランチ", "plans": {"sprint-branch": plan_sprint_branch(a, repo)}, **then("スプリントブランチ")},
+        {"name": "実装", "plans": {f"impl-{n}": plan_sprint_impl(a, n, repo) for n in a.issue}, "then_of": first},
+        {"name": "検査", "plans": {"check": plan_sprint_check(a, repo)}, "then_of": first},
     ]
     if not has_release_template(a):
-        return waves + route_waves(a, repo, "検査", note=normal_gate_2(a) if advise else None)
-    release = {"name": "配布", "plans": {"release": plan_sprint_release(a, repo, advise)}, "then_of": "検査"}
+        return waves + route_waves(a, repo, first, note=normal_gate_2(a) if advise else None)
+    release = {"name": "配布", "plans": {"release": plan_sprint_release(a, repo, advise)}, "then_of": first}
     if not has_prod_branch(a):  # 本番を組めないなら今のまま配布で終える（#1914 の決定 3）
         if advise:
             release["note"] = normal_gate_2(a)
@@ -268,7 +281,7 @@ def sprint_plans(a) -> list[dict]:
     prod = prod_version(a.version)
     return waves + [
         release,
-        {"name": "関門 2", "gate": normal_gate_2_stage(a, repo, prod, advise)},
+        {"name": GATE_2, "gate": normal_gate_2_stage(a, repo, prod, advise)},
         {"name": "本番", "plans": {"release-prod": plan_sprint_release(a, repo, channel="prod", version=prod)}},
     ]
 
@@ -288,14 +301,13 @@ def sprint_command(a, drop: tuple[str, ...] = (), design: list[int] | None = Non
 
 
 def add_resume(index: list[dict]) -> None:
-    """then_of のステージへ resume（そのステージから最後までの then_of のステージを流す queue のコマンド）を書く。
-    承認ゲートで止まった後に続きを流すときに写す（#1370 の決定 4）。"""
-    for i, entry in enumerate(index):
-        if "then_of" not in entry:
-            continue
-        rest = [e for e in index[i + 1 :] if e.get("then_of") == entry["then_of"]]
-        cmd = f"python3 {shlex.quote(str(SELF))} queue " + " ".join(map(shlex.quote, entry["plans"])) + " --max 3"
-        entry["resume"] = cmd + "".join(" --then " + " ".join(map(shlex.quote, e["plans"])) for e in rest)
+    """command を持つステージと、その then_of のステージへ resume（`queue --resume <その done>`）を書く。止まったら
+    どのステージでもこの 1 つを打つ（#1426 の決定 6・AC8）。gate / manual のステージは持たない。"""
+    dones = {e["name"]: e.pop("done") for e in index if "done" in e}
+    for entry in index:
+        done = dones.get(entry.get("then_of") or entry["name"])
+        if done:
+            entry["resume"] = f"python3 {shlex.quote(str(SELF))} queue --resume {shlex.quote(done)}"
 
 
 def cmd_new_sprint(a, waves: list[dict] | None = None) -> dict:
@@ -314,9 +326,17 @@ def cmd_new_sprint(a, waves: list[dict] | None = None) -> dict:
                 next=f"normal で進める（{sprint_command(a, drop=('--pace', '--state'))}）か、条件を満たしてから打ち直す",
             )
     closing = waves is not None
+    if not closing and (why := absorb.absorb_refusal(a)):  # どのファイルも書かない（#1426 の I8）
+        return result(
+            "supervise-new", "stopped", f"{why}。計画を書かない", [], {"absorb": list(a.absorb)}, next="--absorb を直して打ち直す"
+        )
+    if not closing:
+        absorb.add_absorbed(a)
     if not closing and (stop := sprint_inputs.criteria_refusal(a, lambda design=None: sprint_command(a, design=design))):
         return stop
     waves = waves if waves is not None else sprint_plans(a)
+    if not closing:
+        absorb.apply_absorb(a, waves)  # 進め方によらず組み立ての後の 1 か所で当てる（#1426 の決定 8）
     plans = [plan for wave in waves for plan in (wave.get("plans") or {}).values()]
     for plan in plans if getattr(a, "state", None) else []:
         plan["スプリント状態"] = sprint_state_path(a)  # worker と judge がスプリント MVV を状態から読む（#1400 の決定 12）
@@ -365,7 +385,12 @@ def _stage_entry(wave: dict, i: int, out: Path) -> dict:
         if "then_of" in wave:
             entry["then_of"] = wave["then_of"]
         else:
-            entry["command"] = f"python3 {shlex.quote(str(SELF))} queue " + " ".join(map(shlex.quote, paths)) + " --max 3"
+            entry["done"] = str(out.resolve() / f"done-{i}.json")  # 待ちとキューの続きが読む（#1426 の決定 6）
+            entry["command"] = (
+                f"python3 {shlex.quote(str(SELF))} queue "
+                + " ".join(map(shlex.quote, paths))
+                + f" --max 3 --done {shlex.quote(entry['done'])}"
+            )
     return entry
 
 
@@ -411,7 +436,10 @@ def no_prod_stage(a, pace: str, closing: bool) -> bool:
 def next_text(pace: str, index: list[dict], advise: bool = False, no_prod: bool = False) -> str:
     """次に打つ手の文面。auto だけ別の文で、manual のステージがあれば追記する。`advise`（normal と --state）なら
     承認資料に助言の MVV 判定を載せ、答えを状態へ書くことを足す。`no_prod` なら本番を置かなかった理由を足す。"""
-    nxt = "ステージの番号の順に command を打つ。関門のステージでは承認を取ってから次へ進む"
+    nxt = (
+        "command を持つステージを番号の順に打ち、done を wait で待つ（then_of のステージは前の command が --then で続けて流す）。"
+        "関門のステージでは承認を取ってから次へ進む。止まったらそのステージの resume を打つ"
+    )
     if advise:
         nxt += (
             "。承認資料には助言の MVV 判定を載せ、利用者が答えたら関門 1 のステージの gate・承認ゲート 2 の文（関門 2 のステージの gate か、"

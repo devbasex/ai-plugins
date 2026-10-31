@@ -455,8 +455,11 @@ def test_new_impl_in_other_repo_uses_declarations_only(tmp_path):
     steps = {s["id"]: s for s in plan["steps"]}
     assert "sync" not in steps and steps["impl"]["next"] == "base-sync" and steps["base-sync"]["next"] == "test-limited"
     # テストのステップは test-run.py が宣言（supervise.json の test.command を 1 つの suite として読む）から走らせる（#1334）
-    assert steps["test-limited"]["cmd"] == f"python3 {SCRIPTS / 'test-run.py'} scope --paths src/a.test.js"
-    assert steps["test-all"]["cmd"] == f"python3 {SCRIPTS / 'test-run.py'} whole --pr {{pr}}"
+    assert (
+        steps["test-limited"]["cmd"]
+        == f"python3 {SCRIPTS / 'test-run.py'} scope --paths src/a.test.js --limit {{test_limit:test_timeout:900}}"
+    )
+    assert steps["test-all"]["cmd"] == f"python3 {SCRIPTS / 'test-run.py'} whole --pr {{pr}} --limit {{test_limit:whole_timeout:1800}}"
     assert "rerun_failed" not in steps["test-limited"] and "rerun_failed" not in steps["test-all"]
     assert plan["テストの戦略"]["name"] == "local-full" and "supervise.json" in plan["テストの戦略"]["note"]
     assert plan["テストの時間"]["basis"]["unknown_duration"] is True
@@ -502,7 +505,10 @@ def test_new_impl_without_declaration_stops(tmp_path):
     plan = json.loads((tmp_path / "p.json").read_text())
     steps = {s["id"]: s for s in plan["steps"]}
     # `--test-cmd` は雛形として test-run.py へ渡す。`{paths}` が無いのでそのまま走らせる round-only になる
-    assert steps["test-limited"]["cmd"].endswith("scope --paths t --template 'make test'") and steps["pr"]["base"] == "trunk"
+    assert (
+        steps["test-limited"]["cmd"].endswith("scope --paths t --template 'make test' --limit {test_limit:test_timeout:900}")
+        and steps["pr"]["base"] == "trunk"
+    )
     assert plan["テストの戦略"]["name"] == "round-only"
 
 
@@ -1006,7 +1012,7 @@ n = len(open(os.path.join(state, "calls")).read().splitlines()) if os.path.exist
 responses = json.load(open(os.path.join(state, "responses.json")))
 r = responses[min(n, len(responses) - 1)]
 sys.stdin.read()
-open(os.path.join(state, "calls"), "a").write(json.dumps({"n": n, "bedrock": os.environ.get("CLAUDE_CODE_USE_BEDROCK"), "token": os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"), "config_dir": os.environ.get("CLAUDE_CONFIG_DIR"), "account": os.environ.get("NDF_CLAUDE_ACCOUNT"), "auth_token": os.environ.get("ANTHROPIC_AUTH_TOKEN")}) + "\\n")
+open(os.path.join(state, "calls"), "a").write(json.dumps({"n": n, "bedrock": os.environ.get("CLAUDE_CODE_USE_BEDROCK"), "token": os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"), "config_dir": os.environ.get("CLAUDE_CONFIG_DIR"), "account": os.environ.get("NDF_CLAUDE_ACCOUNT"), "auth_token": os.environ.get("ANTHROPIC_AUTH_TOKEN"), "argv": sys.argv[1:]}) + "\\n")
 if r.get("stderr"):
     sys.stderr.write(r["stderr"])
 print(json.dumps(r["out"]))
@@ -1437,6 +1443,7 @@ def test_new_release_dev_and_prod(tmp_path):
     plan = json.loads((tmp_path / "p.json").read_text())
     st = {s["id"]: s for s in plan["steps"]}
     assert [s["id"] for s in plan["steps"]] == [
+        "approve",
         "bump",
         "bump-others",
         "changelog",
@@ -1453,6 +1460,20 @@ def test_new_release_dev_and_prod(tmp_path):
     ]
     assert "--ref main" in st["verify"]["cmd"] and st["verify"]["stage"] == "リリース後テスト"
     assert st["verify"]["next"] == "cleanup" and "facts" not in st
+    # 先頭の approve が開発版の facts の出力から承認したコミットを読む（#1426 の AC9）
+    assert "approve --approval issues/approval-ndf-v10.17.11.md --facts-from '{queue_state:release}' --by user" in st["approve"]["cmd"]
+    assert (st["approve"]["next"], st["approve"]["gate_next"]) == ("bump", "end")
+    p = cli(
+        *"new release --version 10.17.11 --prs 995 --channel prod --worktree /r/.worktrees/release/v10.17.11".split(),
+        "--dev-state",
+        str(tmp_path / "dev"),
+        "--state",
+        str(tmp_path / "s.json"),
+        "--out",
+        str(tmp_path / "p2.json"),
+    )
+    cmd = json.loads((tmp_path / "p2.json").read_text())["steps"][0]["cmd"]
+    assert f"--facts-from {tmp_path / 'dev'} --answer-from {tmp_path / 's.json'} --by user" in cmd
 
 
 def test_new_release_requires_version():
@@ -1490,6 +1511,7 @@ def test_new_sprint_writes_waves_in_order(tmp_path):
     assert [w["name"] for w in manifest["ステージ"]] == [
         "設計",
         "関門 1",
+        "設計 PR のマージ",
         "設計の結果",
         "スプリントブランチ",
         "実装",
@@ -1500,7 +1522,7 @@ def test_new_sprint_writes_waves_in_order(tmp_path):
     ]
     waves = {w["name"]: w for w in manifest["ステージ"]}
     assert "plans" not in waves["関門 1"] and waves["関門 1"]["gate"]
-    assert len(waves["実装"]["plans"]) == 2 and waves["実装"]["command"].endswith("--max 3")
+    assert len(waves["実装"]["plans"]) == 2 and waves["実装"]["then_of"] == "設計 PR のマージ"
     for w in manifest["ステージ"]:
         for path in w.get("plans", []):
             plan = json.loads(Path(path).read_text())
@@ -2454,9 +2476,9 @@ def test_new_sprint_check_and_release_run_without_a_whole_skill(tmp_path):
     release = json.loads(Path(waves["配布"]["plans"][0]).read_text())
     assert release["フェーズ"] == "配布（開発版）"
     assert "{queue_prs}" not in json.dumps(release) and "--prs {queue_pr:check}" in json.dumps(release, ensure_ascii=False)
-    # 配布は検査の queue が --then で流す（検査の PR を --prs へ渡すため）
-    assert waves["検査"]["command"].endswith("--then " + waves["配布"]["plans"][0])
-    assert "command" not in waves["配布"] and waves["配布"]["then_of"] == "検査"
+    # 配布は最初のステージの queue が検査の後に --then で流す（検査の PR を --prs へ渡すため。#1426 の決定 5）
+    assert waves["スプリントブランチ"]["command"].endswith("--then " + waves["配布"]["plans"][0])
+    assert "command" not in waves["配布"] and waves["配布"]["then_of"] == "スプリントブランチ"
 
 
 def test_normal_sprint_puts_gate_2_and_prod_after_the_dev_release(tmp_path):
@@ -2470,13 +2492,14 @@ def test_normal_sprint_puts_gate_2_and_prod_after_the_dev_release(tmp_path):
     gate, prod = waves["関門 2"], waves["本番"]
     assert "plans" not in gate and "approval-" in gate["gate"] and "sprint-state.py" not in gate["gate"]
     assert "then_of" not in prod and prod["plans"][0].endswith("-release-prod.json")
-    assert prod["command"].endswith(f"queue {prod['plans'][0]} --max 3")
-    assert prod["plans"][0] not in waves["検査"]["command"] and "note" not in waves["配布"]
+    assert f"queue {prod['plans'][0]} --max 3 --done " in prod["command"] and "--then" not in prod["command"]
+    assert prod["plans"][0] not in waves["スプリントブランチ"]["command"] and "note" not in waves["配布"]
     plan = json.loads(Path(prod["plans"][0]).read_text())
     steps = {s["id"]: s for s in plan["steps"]}
     assert "--channel prod" in steps["release"]["cmd"] and "--version 10.18.0 " in steps["release"]["cmd"]
     assert "--prs {queue_pr:check}" in steps["changelog"]["cmd"] and plan["課題"] == [1]
     assert not {"mvv", "note", "handoff"} & set(steps)
+    assert plan["steps"][0]["id"] == "approve"  # 承認ゲート 2 の承認の記録を先頭で書く（#1426 の AC9）
 
 
 def test_prod_plan_queued_alone_takes_the_check_pr(tmp_path):
@@ -2629,6 +2652,90 @@ def test_work_without_report_keeps_cli_result(tmp_path, seq):
     assert s.state.results["impl"]["exit"] == 0
 
 
+def _arg(argv, flag):
+    return argv[argv.index(flag) + 1].split(",") if flag in argv else None
+
+
+# 足す Tool は WebFetch・WebSearch の 2 つだけ（I3）。前の許可の一覧との差分で縛る
+_WEB = {"WebFetch", "WebSearch"}
+_BEFORE_WORK = {"Read", "Edit", "Write", "Bash", "Grep", "Glob"}
+_BEFORE_FULL = _BEFORE_WORK | {"Skill", "Agent", "Monitor", "SendMessage", "ToolSearch"}
+
+
+def test_full_work_allows_web_tools(tmp_path, seq):
+    """full の work の claude -p は WebFetch・WebSearch を許可し、--permission-mode は acceptEdits のまま（#1698）。"""
+    set_responses, calls = seq
+    set_responses(OK)
+    run_plan(tmp_path, [{"id": "design", "type": "work", "full": True, "prompt": "/ndf:design 1", "next": "end"}])
+    argv = calls()[0]["argv"]
+    assert set(_arg(argv, "--allowed-tools")) == _BEFORE_FULL | _WEB and _arg(argv, "--permission-mode") == ["acceptEdits"]
+
+
+@pytest.mark.parametrize("serena", [False, True])
+def test_minimal_work_lists_web_tools_in_tools_and_allowed(tmp_path, seq, serena):
+    """最小構成の work は --tools と --allowed-tools の両方に WebFetch・WebSearch が入る（Serena を付けても）。"""
+    set_responses, calls = seq
+    set_responses(OK)
+    run_plan(tmp_path, [{"id": "impl", "type": "work", "prompt": "実装する", "serena": serena, "next": "end"}])
+    argv = calls()[0]["argv"]
+    for flag in ("--tools", "--allowed-tools"):
+        assert {"WebFetch", "WebSearch"} <= set(_arg(argv, flag)), flag
+    assert set(_arg(argv, "--tools")) == _BEFORE_WORK | _WEB
+
+
+def test_toolless_calls_get_no_tools():
+    """judge・遅れの判定・PR の本文のように Tool を渡さない呼び出しは --tools "" のままで、許可の一覧を持たない。"""
+    argv = claude.claude_cmd("s", None, "/w", base="claude")
+    assert argv[argv.index("--tools") + 1] == "" and "--allowed-tools" not in argv and "WebFetch" not in " ".join(argv)
+
+
+NO_REPORT = {"out": {"result": "途中", "usage": {}, "total_cost_usd": 0.01, "num_turns": 1, "session_id": "s1"}}
+
+
+def _report(result):
+    body = f"止めた\n\n## 作業の報告\n- 作業: 設計\n- 結果: {result}\n- 見つけたもの: 1 件（https://example.com/terms を取得できなかった）"
+    return {"out": {"result": body, "usage": {}, "total_cost_usd": 0.01, "num_turns": 1, "session_id": "s1"}}
+
+
+def _resumes(calls):
+    return sum("--resume" in c["argv"] for c in calls())
+
+
+DESIGN_PLAN = [
+    {"id": "design", "type": "work", "full": True, "prompt": "/ndf:design 1", "next": "pr"},
+    {"id": "pr", "type": "run", "cmd": "echo pr-ran", "next": "end"},
+]
+
+
+@pytest.mark.parametrize("result", ["判断が要る", "できなかった"])
+def test_full_report_not_done_stops_without_resume(tmp_path, seq, result):
+    """full の最初の報告が「判断が要る / できなかった」なら起こし直さずに落ち、計画は止まって報告が残る（#1698）。"""
+    set_responses, calls = seq
+    set_responses(_report(result), OK)
+    s, text = run_plan(tmp_path, DESIGN_PLAN)
+    assert _resumes(calls) == 0 and len(calls()) == 1
+    assert s.state.results["design"]["exit"] == 1 and "pr" not in s.state.results
+    assert "結果: 止まった" in text
+    assert _report(result)["out"]["result"] in s.state.results["design"]["text"]
+
+
+def test_full_resume_stops_when_resumed_reply_needs_a_decision(tmp_path, seq):
+    """起こし直しの途中の応答が「判断が要る」なら、残りの回数を使わずに止める。"""
+    set_responses, calls = seq
+    set_responses(NO_REPORT, _report("判断が要る"), OK)
+    s, _ = run_plan(tmp_path, DESIGN_PLAN)
+    assert _resumes(calls) == 1 and s.state.results["design"]["exit"] == 1
+
+
+@pytest.mark.parametrize("replies, resumes, code", [([NO_REPORT] * 4, 3, 1), ([NO_REPORT, OK], 1, 0)])
+def test_full_without_report_resumes_up_to_three_times(tmp_path, seq, replies, resumes, code):
+    """報告が無いまま終わった full のステップは、今までどおり 3 回まで起こし直す。"""
+    set_responses, calls = seq
+    set_responses(*replies)
+    s, _ = run_plan(tmp_path, [DESIGN_PLAN[0] | {"next": "end"}])
+    assert _resumes(calls) == resumes and s.state.results["design"]["exit"] == code
+
+
 def test_run_ticking_timeout_stops_the_group_after_the_leader_exits(tmp_path):
     """打ち切りは lib/procs.py で木を止め、先頭が先に終わったグループの孫も残さない（#1142 の D1）。"""
     import procs
@@ -2744,7 +2851,11 @@ def test_new_impl_with_a_ci_whole_declaration_takes_the_scope_timeout_from_the_l
     assert p.returncode == 0, p.stderr
     plan = json.loads(out.read_text())
     steps = {s["id"]: s for s in plan["steps"]}
-    assert steps["test-limited"]["cmd"] == f"python3 {SCRIPTS / 'test-run.py'} scope --paths tests/Unit/A.php"
+    limit = plan["テストの時間"]["test_timeout"]
+    assert (
+        steps["test-limited"]["cmd"]
+        == f"python3 {SCRIPTS / 'test-run.py'} scope --paths tests/Unit/A.php --limit {{test_limit:test_timeout:{limit}}}"
+    )
     assert steps["test-limited"]["timeout"] > plan["テストの時間"]["test_timeout"] > 990
 
 

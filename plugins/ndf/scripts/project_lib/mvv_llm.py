@@ -32,7 +32,14 @@ VET_SYSTEM = """あなたは MVV の照合者である。Tool は無い。
 
 
 def call_llm_json(system: str, prompt: str, root: Path, kind: str) -> tuple[dict | None, str, dict]:
-    """最小構成の claude -p を 1 回呼ぶ（Tool なし）。(JSON, 生の文, 使用量)。"""
+    """最小構成の claude -p を 1 回呼ぶ（Tool なし）。(JSON, 生の文, 使用量)。
+
+    `supervise_lib.claude` が読む外部パッケージを、読む前に用意する（足りなければ uv の環境で起動し直す。
+    呼び出し元はここまで外へ書かない）。
+    """
+    import deps
+
+    deps.require("procs", "locks")
     import supervise_lib  # noqa: F401  lib/ を sys.path へ足す
     from supervise_lib.claude import call_claude
 

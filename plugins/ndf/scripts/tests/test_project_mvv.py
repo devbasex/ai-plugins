@@ -278,6 +278,56 @@ def test_propose_writes_candidates_with_the_four_sections_first(env):
     assert not (env["root"] / ".ndf").exists()  # 承認の前に .ndf/ へ書かない（AC5）
 
 
+# ---------------------------------------------------------------- 依存の欠けた python（#1455）
+
+
+def no_site(env: dict) -> dict:
+    """site-packages を外した python（-S。psutil が無い）で打ち、uv の偽物は呼ばれたら site のある python で起動し直す。"""
+    uv = env["tmp"] / "bin" / "uv"
+    uv.write_text(f'#!/bin/sh\necho uv >> {env["calls"]}\nwhile [ "$1" != python ]; do shift; done\nshift\nexec {PY} "$@"\n')
+    uv.chmod(0o755)
+    e = {k: v for k, v in env["env"].items() if k not in ("NDF_DEPS_REEXEC", "UV_PROJECT_ENVIRONMENT")}
+    return {**env, "env": {**e, "NDF_DEPS_VENV": str(env["tmp"] / "venv")}}
+
+
+def run_no_site(env: dict, *args: str) -> tuple[int, str, str]:
+    p = subprocess.run([PY, "-S", str(MVV_PY), *args], capture_output=True, text=True, env=env["env"], cwd=env["root"], timeout=60)
+    return p.returncode, p.stdout, p.stderr
+
+
+def test_propose_and_vet_without_psutil_reexec_and_call_the_llm(env):
+    """psutil の無い python でも propose / vet は依存を用意して LLM を呼び、終了コードは psutil のある python と同じ。"""
+    assert subprocess.run([PY, "-S", "-c", "import psutil"], capture_output=True).returncode != 0
+    mats = materials(env)
+    answer(env, proposal([candidate("A"), candidate("B")]))
+    code, _, _ = run(env, "propose", "--materials", mats, "--root", str(env["root"]))
+    assert code == 0 and calls(env, "uv") == 0  # 揃った python は起動し直さない
+    e = no_site(env)
+    code, out, err = run_no_site(e, "propose", "--materials", mats, "--root", str(env["root"]))
+    assert code == 0, err
+    assert "ModuleNotFoundError" not in err and calls(env, "uv") == 1 and calls(env, "claude") == 2
+    answer(env, FOLLOW)
+    log = env["tmp"] / "state" / "project-mvv.jsonl"
+    before = len(log.read_text().splitlines()) if log.exists() else 0
+    code, out, err = run_no_site(e, "vet", "--body", body_file(env), "--kind", "candidate", "--root", str(env["root"]))
+    assert code == 0, err
+    assert calls(env, "uv") == 2 and calls(env, "claude") == 3
+    assert len(log.read_text().splitlines()) == before + 1  # 起動し直す前に記録を書かない
+
+
+def test_check_and_collect_without_psutil_do_not_reexec(env):
+    """LLM を呼ばない副命令は、psutil の無い python でも起動し直さず、同じ出力と終了コードで終わる。"""
+    e = no_site(env)
+    p = subprocess.run(
+        [PY, str(MVV_PY), "check", "--root", str(env["root"])], capture_output=True, text=True, env=e["env"], cwd=env["root"]
+    )
+    code, out, _ = run_no_site(e, "check", "--root", str(env["root"]))
+    assert (code, out) == (p.returncode, p.stdout) and code == 2
+    code, out, err = run_no_site(e, "collect", "--root", str(env["root"]))
+    assert code == 0 and "materials" in out, err
+    assert calls(env, "uv") == 0
+
+
 def _proposal(cands, **over) -> dict:
     return {**json.loads(proposal(cands)), **over}
 

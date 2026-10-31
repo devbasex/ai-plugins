@@ -56,13 +56,14 @@ sys.path.insert(0, str(HERE))
 import supervise_lib  # noqa: E402,F401  lib/ を sys.path へ足す
 import deps  # noqa: E402
 
-deps.require("schema", "procs")  # schema は supervise_lib.paths → decl、procs は ask() の supervise_lib.claude が使う
+deps.require("schema", "procs", "locks")  # schema は supervise_lib.paths → decl、procs は ask() の supervise_lib.claude が使う
 from step_result import EXIT_GATE, emit, result  # noqa: E402
 import approved_commit as ac  # noqa: E402
 import clock  # noqa: E402
 import legacy_names  # noqa: E402
 import gh_call  # noqa: E402
 import gh_rest  # noqa: E402
+from gate_answer import GATE_1, GATE_2  # noqa: E402
 import jsonio  # noqa: E402
 from pace import DECL_NAME, EXCLUDED_MODES, PaceError, matches, read_pace  # noqa: E402
 import project_mvv as pm  # noqa: E402
@@ -70,7 +71,7 @@ import project_mvv_signals as pms  # noqa: E402
 
 TOOL = "mvv-gate"
 GATES = {"design": "関門 1（設計の承認）", "release": "関門 2（本番への配布の承認）"}
-GATE_NAMES = {"design": "関門 1", "release": "関門 2"}  # sprint-state.py の関門の記録の名前
+GATE_NAMES = {"design": GATE_1, "release": GATE_2}  # sprint-state.py の関門の記録の名前
 MVV_GATE = "MVV"  # 利用者が MVV を承認した記録の名前
 VERDICTS = ("follow", "not_follow", "unknown")
 MAX_MATERIAL = 60_000  # 材料 1 件の上限の文字数（超えた分は切る）
