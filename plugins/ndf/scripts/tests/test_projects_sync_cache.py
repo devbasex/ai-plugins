@@ -123,8 +123,11 @@ exit 1
     (repo.bin / "gh").chmod(0o755)
 
     out = run(repo)
-    assert out.returncode == 0
+    # 本文も通過記録もボードも書けない → 何も書けなかった（#2227）。欠けは ok で返さない
+    assert out.returncode == 1
     assert "上限に達している可能性" in out.stderr
+    res = json.loads(out.stdout)
+    assert res["status"] == "stopped" and any("unknown owner type" in g["reason"] for g in res["gaps"])
 
 
 def test_the_cache_lives_outside_the_worktree(tmp_path, repo):

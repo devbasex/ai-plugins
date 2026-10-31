@@ -300,6 +300,8 @@ def _head_digest(root: Path, path: str) -> str | None:
 # ---------- 配布の決まった手順（#862） ----------
 
 TOOL = "release"
+# 本番チャネルへのマージを待つ間にベースブランチが許可リスト（UNGATED）の下に収まるコミットだけで進んだとき、比べ直して入れ直す回数（#2221）
+HEAD_MOVED_RETRIES = 3
 
 
 def run_staleness(root, expected=()):
@@ -649,6 +651,38 @@ def merge_commit_of(root, n):
     return ((d.get("mergeCommit") or {}).get("oid")) or None
 
 
+def _reusable_release_pr(root, branch, base):
+    """開発版の PR（release/v<版> → ベースブランチ）のうち使い回せるものを返す。無ければ None。"""
+    pr = find_pr(root, branch, base, states=("OPEN", "MERGED"))
+    if pr and pr["state"] == "MERGED":
+        # マージ済みの PR へ後から積んだコミットは GitHub が開き直さずベースブランチに入らない。入っていなければ PR を作り直す
+        git(root, "fetch", "-q", "origin", base)
+        pr = pr if git(root, "merge-base", "--is-ancestor", "HEAD", f"origin/{base}", check=False).returncode == 0 else None
+    return pr
+
+
+def _release_pr_body(root, a, plugin, plugins):
+    """CHANGELOG.md の節とチェックの結果から開発版の PR の本文を組む。"""
+    ver = a.version
+    section = changelog_section(root, ver, plugin)
+    mark = {True: "pass", False: "fail", None: "skip"}
+    return "\n".join(
+        [
+            f"{plugin} v{ver} のリリース（{a.channel}）。対象の plugin: {', '.join(plugins)}",
+            "",
+            "## 含む PR",
+            "",
+            section or "（CHANGELOG.md に該当の節が無い）",
+            "",
+            "## チェックの結果",
+            "",
+            *[f"- {name}: {mark[ok]}" + (f"（{tail.splitlines()[-1]}）" if tail else "") for name, ok, tail in run_checks(root)],
+            "",
+            "🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+        ]
+    )
+
+
 def cmd_release(a):
     root = git_root(a.root)
     ver = a.version
@@ -667,29 +701,9 @@ def cmd_release(a):
     git(root, "push", "-q", "-u", "origin", "HEAD")
 
     # 開発版の PR（release/v<版> → ベースブランチ）
-    pr = find_pr(root, branch, base, states=("OPEN", "MERGED"))
-    if pr and pr["state"] == "MERGED":
-        # マージ済みの PR へ後から積んだコミットは GitHub が開き直さずベースブランチに入らない。入っていなければ PR を作り直す
-        git(root, "fetch", "-q", "origin", base)
-        pr = pr if git(root, "merge-base", "--is-ancestor", "HEAD", f"origin/{base}", check=False).returncode == 0 else None
+    pr = _reusable_release_pr(root, branch, base)
     if pr is None:
-        section = changelog_section(root, ver, plugin)
-        mark = {True: "pass", False: "fail", None: "skip"}
-        body = "\n".join(
-            [
-                f"{plugin} v{ver} のリリース（{a.channel}）。対象の plugin: {', '.join(plugins)}",
-                "",
-                "## 含む PR",
-                "",
-                section or "（CHANGELOG.md に該当の節が無い）",
-                "",
-                "## チェックの結果",
-                "",
-                *[f"- {name}: {mark[ok]}" + (f"（{tail.splitlines()[-1]}）" if tail else "") for name, ok, tail in run_checks(root)],
-                "",
-                "🤖 Generated with [Claude Code](https://claude.com/claude-code)",
-            ]
-        )
+        body = _release_pr_body(root, a, plugin, plugins)
         pr = {"number": create_pr(root, base, branch, f"Release: {plugin} v{ver}", body), "state": "OPEN"}
     release_pr = pr["number"]
     release_commit = wait_and_merge(root, release_pr, ci_wait=a.ci_wait) if pr["state"] == "OPEN" else merge_commit_of(root, release_pr)
@@ -717,7 +731,7 @@ def cmd_release(a):
     verdict = approval.check_approved(root, approved, base, allowed)
     if not verdict.ok:
         emit(approval.gate(root, a, plugin, base, verdict, items, metrics), EXIT_GATE)
-    metrics.update({"approved_sha": approved, "compared_head": verdict.tip})
+    metrics.update({"approved_sha": approved, "compared_head": verdict.tip, "tolerated": len(verdict.tolerated)})
     mp = find_pr(root, base, prod, states=("OPEN",))
     main_pr = (
         mp["number"]
@@ -730,11 +744,17 @@ def cmd_release(a):
             f"{plugin} v{ver} を {prod} へ出す（開発版の PR #{release_pr}）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)",
         )
     )
-    try:
-        merge = wait_and_merge(root, main_pr, expect=verdict.tip, ci_wait=a.ci_wait)  # 比べた先端だけを本番チャネルへ入れる
-    except HeadMoved:
-        moved = approval.check_approved(root, approved, base, allowed)
-        emit(approval.gate(root, a, plugin, base, moved, items, metrics, moved=True), EXIT_GATE)
+    for left in range(HEAD_MOVED_RETRIES, -1, -1):
+        try:
+            merge = wait_and_merge(root, main_pr, expect=verdict.tip, ci_wait=a.ci_wait)  # 比べた先端だけを本番チャネルへ入れる
+            break
+        except HeadMoved:
+            moved = approval.check_approved(root, approved, base, allowed)
+            if not moved.ok or not left:
+                emit(approval.gate(root, a, plugin, base, moved, items, metrics, moved=not left), EXIT_GATE)
+            verdict = moved  # 進んだ分が許可リストの下に収まるので、比べ直した先端で入れ直す（#2221）
+    metrics.update({"compared_head": verdict.tip, "tolerated": len(verdict.tolerated)})
+    items += approval.tolerated_items(verdict)
     git(root, "fetch", "-q", "origin")
     if not merge:
         merge = git(root, "rev-parse", f"origin/{prod}").stdout.strip()
@@ -1176,7 +1196,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--ref", help="--approval: 検証への配布で導入した ref（既定は宣言のベースブランチ）")
     p.add_argument(
         "--check-state",
-        help="--approval: 検査のプランの状態ディレクトリ（レビュー・リファクタリング・全体テストの結果を読む。空・無いときは無い材料として書く）",
+        help="--approval: 検査のプランの状態ディレクトリ（レビュー・リファクタリング・全体テストの結果を読む。結果 JSON が無ければ無い材料として書き、空文字・無いディレクトリなら書かずに 3 で止まる）",
     )
     p.set_defaults(func=cmd_notes)
     return deploy.add_deploy_parser(sub, common, ap)  # deploy-facts（手動反映の本番系の承認資料。#1454）

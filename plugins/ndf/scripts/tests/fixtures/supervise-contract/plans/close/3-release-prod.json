@@ -175,6 +175,14 @@
       "cmd": "sh -c 'python3 <NDF>/scripts/sprint-state.py gate \"$1\" \"$2\" --withdraw >/dev/null || echo \"$2 の MVV 判定の記録を外せなかった\"; echo \"$3\"; exit 10' handoff <TMP>/out/sprint/sprint.json '関門 2' '判定のコメントが失敗した。関門 2 は自動で通さず、利用者の承認を求める'",
       "gate_next": "end",
       "next": "end"
+    },
+    {
+      "id": "reject",
+      "type": "run",
+      "timeout": 120,
+      "cmd": "python3 <NDF>/scripts/sprint-state.py gate <TMP>/out/sprint/sprint.json '関門 2' --what '関門 2 で差し戻された（直して再提示する）' --by user --outcome rejected --root <TMP>/repo",
+      "next": "mvv",
+      "from_only": true
     }
   ],
   "base_branch": "main",

@@ -241,8 +241,8 @@ Pull Request に入れる。`guide:` の行が出たら、その手引きに従�
 （打ち方は [references/release-steps.md](references/release-steps.md)）。**`--channel prod` は
 「公開前の提示と承認」で承認を得るまで打たない。** `stopped` なら `summary` を報告して止まる。
 
-**`--channel prod` には承認したコミットを渡す**（`--approved-sha <SHA>` か `--approval <承認資料>`）。承認の外の変更が入って
-いれば `gate`（10）で止まり、本番チャネルの PR もタグも作られていない。読み方は同じ references にある。MVV 判定で通さず人へ戻す。
+**`--channel prod` には承認したコミットを渡す**（`--approved-sha <SHA>` か `--approval <承認資料>`）。配布物に触れる承認の外の
+変更が入っていれば `gate`（10）で止まり、本番チャネルの PR もタグも作られていない。読み方は同じ references にある。MVV 判定で通さず人へ戻す。
 
 **提出は公開ではない形がある。** ストアの審査を経るものは、審査を通って初めて利用者へ届く。
 待っている間はこの工程が続いている状態で、`release-verification` はまだ始められない。

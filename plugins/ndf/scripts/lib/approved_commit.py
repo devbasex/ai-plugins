@@ -7,6 +7,9 @@
 
 `compare_approved` は git を読むだけで書かず、終了コードも出力も持たずに判定（`Verdict`）を値で返す。読み替えは呼び手が行う。
 ブランチ名は受け取らず SHA だけを受け取る。`allowed` を空にすると、先端の木が承認したコミットの木と等しいかの判定になる。
+`ungated`（承認を取り直さずに通すパスの接頭辞。許可リスト）を渡すと、差分がすべてその下に収まる承認の外のコミットは止めずに
+`Verdict.tolerated` へ入れ、木の比較もその外のパスだけで行う（#2221）。許可リストの外はどれも承認の対象で、配布物だけでなく
+秘密を渡すワークフローが実行する `scripts/`・`.github/` なども止まる。渡さなければ、承認の外のコミットと木の違いを一律に止める。
 """
 
 from __future__ import annotations
@@ -63,6 +66,7 @@ class Verdict:
     tip: str
     reason: str
     outside: list[Outside] = field(default_factory=list)
+    tolerated: list[Outside] = field(default_factory=list)
     expected_tree: str | None = None
     actual_tree: str | None = None
 
@@ -259,7 +263,67 @@ def _outside_to_tip(root, approved, tip, allowed) -> list[str] | None:
     return [c for c in listed if c not in merges and _patch_id(root, c) not in patches]
 
 
-def compare_approved(root, approved: str, tip: str, allowed: list[AllowedPR] = ()) -> Verdict:
+def _touched(root, sha) -> list[str] | None:
+    """コミットが第 1 親から変えたパス（マージのコミットは取り込んだ側の変更を含む）。読めなければ None。"""
+    return _tree_diff_paths(root, f"{sha}^1", sha)
+
+
+def _tree_diff_paths(root, a, b) -> list[str] | None:
+    """2 つの木の間で変わったパス。読めなければ None。引用符で包まない（-z）・移動は元の削除と先の追加に分ける
+    （--no-renames）ため、日本語や空白を含むパスと、配布物から外へ移したファイルも配布物の変更として拾う。"""
+    p = proc.git(root, "diff", "--name-only", "-z", "--no-renames", a, b, check=False)
+    return None if p.returncode else [x for x in p.stdout.split("\0") if x]
+
+
+def _gated(paths, ungated) -> bool:
+    """許可リスト ungated のどの接頭辞にも収まらないパス（承認の対象）が 1 つでもあるか。"""
+    return any(not path.startswith(tuple(ungated)) for path in paths)
+
+
+def _gated_differs(root, expected, actual, ungated) -> bool | None:
+    """2 つの木の違いが許可リストの外のパスに及ぶか。読めなければ None。"""
+    paths = _tree_diff_paths(root, expected, actual)
+    return None if paths is None else _gated(paths, ungated)
+
+
+def _commits_resolvable(root, tip, allowed) -> bool:
+    """比べた先端と配布の PR の先端がどれもコミットとして読めるか。"""
+    return _is_commit(root, tip) and all(_is_commit(root, pr.head) for pr in allowed)
+
+
+def _classify_outside(root, approved, tip, allowed, ungated) -> tuple[list[str], list[Outside]] | None:
+    """承認の外のコミット（I3・I9）と、差分が ungated の下に収まるため退避するもの。読めなければ None。"""
+    outside = _outside_of_prs(root, approved, allowed)
+    if outside is None:
+        return None
+    if not outside or ungated:
+        to_tip = _outside_to_tip(root, approved, tip, allowed)
+        if to_tip is None:
+            return None
+        outside += [c for c in to_tip if c not in outside]
+    tolerated: list[Outside] = []
+    if ungated:
+        touched = {c: _touched(root, c) for c in outside}
+        tolerated = [Outside(c, _subject(root, c)) for c in outside if touched[c] is not None and not _gated(touched[c], ungated)]
+        outside = [c for c in outside if touched[c] is None or _gated(touched[c], ungated)]
+    return outside, tolerated
+
+
+def _tree_matches(root, v: Verdict, approved, allowed, ungated) -> bool | None:
+    """期待する木と tip の木を v へ書き、一致するか（ungated を渡すと違いがその下に収まれば一致）。読めなければ None。"""
+    v.expected_tree = _expected_tree(root, approved, allowed)
+    v.actual_tree = _out(root, "rev-parse", f"{v.tip}^{{tree}}")
+    if not v.expected_tree or not v.actual_tree:
+        return None
+    differs = v.expected_tree != v.actual_tree
+    if differs and ungated:
+        differs = _gated_differs(root, v.expected_tree, v.actual_tree, ungated)
+        if differs is None:
+            return None
+    return not differs
+
+
+def compare_approved(root, approved: str, tip: str, allowed: list[AllowedPR] = (), ungated: tuple[str, ...] = ()) -> Verdict:
     """承認したコミット approved から比べた先端 tip までを比べる（#815 の設計の「compare の中の順序」）。
 
     1. 読めない approved は unknown_commit、読めない tip・配布の PR の先端は undecidable
@@ -268,32 +332,31 @@ def compare_approved(root, approved: str, tip: str, allowed: list[AllowedPR] = (
     4. approved..tip の（マージでない）コミットのうち、配布の PR の先端から届かず、配布の PR の mergeCommit でも
        同じ patch-id でもないものがあれば outside_commits（I9。木の結果によらない）
     5. tip の木が approved に配布の PR を merge-tree で足した木と違えば tree_differs、merge-tree が失敗すれば undecidable
+
+    ungated（許可リスト）を渡すと、3・4 の承認の外のコミットのうち差分がすべて ungated の下に収まるもの（読めないものは
+    収まらないとみなす）を tolerated へ移して止めず、5 は違いが ungated の外のパスに及ぶときだけ tree_differs にする（#2221）。
     """
     allowed = list(allowed)
     v = Verdict(False, approved, tip, UNDECIDABLE)
     if not _is_commit(root, approved):
         v.reason = UNKNOWN_COMMIT
         return v
-    if not _is_commit(root, tip) or not all(_is_commit(root, pr.head) for pr in allowed):
+    if not _commits_resolvable(root, tip, allowed):
         return v
     if not _ok(root, "merge-base", "--is-ancestor", approved, tip):
         v.reason = NOT_ANCESTOR
         return v
-    outside = _outside_of_prs(root, approved, allowed)
-    if outside is None:
+    classified = _classify_outside(root, approved, tip, allowed, ungated)
+    if classified is None:
         return v
-    if not outside:
-        outside = _outside_to_tip(root, approved, tip, allowed)
-        if outside is None:
-            return v
+    outside, v.tolerated = classified
     if outside:
         v.reason = OUTSIDE_COMMITS
         v.outside = [Outside(c, _subject(root, c)) for c in outside]
         return v
-    v.expected_tree = _expected_tree(root, approved, allowed)
-    v.actual_tree = _out(root, "rev-parse", f"{tip}^{{tree}}")
-    if not v.expected_tree or not v.actual_tree:
+    matches = _tree_matches(root, v, approved, allowed, ungated)
+    if matches is None:
         return v
-    v.ok = v.expected_tree == v.actual_tree
+    v.ok = matches
     v.reason = MATCH if v.ok else TREE_DIFFERS
     return v

@@ -249,5 +249,7 @@ class DriveStep:
             ctx.state.cur["counts"] = dict((out or {}).get("metrics") or {})
             if inner:
                 ctx.state.cur["counts"]["inner"] = inner[-1]
-        ctx.state.cur.update(exit=0 if ok else 1, text=text, seconds=round(time.time() - started, 1))
+        # 欠けの残る終わり（stopped と gaps。収束しなかったなど）は終了コード 6 として控え、on_exit で分けられるようにする
+        code = 0 if ok else (6 if out and out.get("status") == "stopped" and out.get("gaps") else 1)
+        ctx.state.cur.update(exit=code, text=text, seconds=round(time.time() - started, 1))
         return ok, text

@@ -151,3 +151,87 @@ def test_infra_wait_is_stopped():
     assert sr.EXIT_INFRA_WAIT == 75
     assert sr.code_matches("stopped", 75)
     assert not sr.code_matches("ok", 75) and not sr.code_matches("gate", 75)
+
+
+# --- 欠け・過程・判断の項目と終了コード 6（#2227） -----------------------------------------
+
+GAP = {"kind": "record", "name": "#1", "reason": "gh が失敗"}
+
+
+def test_ok_with_gaps_is_an_error():
+    errs = sr.validate_result(sr.result("m", "ok", "s", gaps=[GAP]))
+    assert any("gaps" in e for e in errs), errs
+
+
+def test_emit_refuses_ok_with_gaps(capsys):
+    with pytest.raises(SystemExit) as e:
+        sr.emit(sr.result("m", "ok", "s", gaps=[GAP]))
+    assert e.value.code == 2
+    out = capsys.readouterr()
+    assert out.out == "" and "gaps" in out.err
+
+
+@pytest.mark.parametrize(
+    "status, gaps, good",
+    [("stopped", [GAP], True), ("stopped", [], False), ("ok", [], False), ("gate", [GAP], False)],
+)
+def test_exit_code_6_needs_stopped_and_gaps(status, gaps, good):
+    obj = sr.result("m", status, "s", next="n", gaps=gaps)
+    assert (sr.validate_result(obj, sr.EXIT_INCOMPLETE) == []) is good
+
+
+def test_emit_defaults_stopped_with_gaps_to_6(capsys):
+    with pytest.raises(SystemExit) as e:
+        sr.emit(sr.result("m", "stopped", "s", gaps=[GAP]))
+    assert e.value.code == sr.EXIT_INCOMPLETE
+    assert json.loads(capsys.readouterr().out)["gaps"] == [GAP]
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("gaps", [{"kind": "k", "name": "n"}]),
+        ("gaps", [{"kind": "k", "name": "n", "reason": " "}]),
+        ("gaps", [{"kind": "k", "name": "n", "reason": 1}]),
+        ("process", ["run"]),
+        ("process", {}),
+        ("decisions", [{"decision": "d"}]),
+    ],
+)
+def test_record_items_need_their_keys(field, value):
+    obj = {**sr.result("m", "stopped", "s"), field: value}
+    assert any(field in e for e in sr.validate_result(obj)), sr.validate_result(obj)
+
+
+def test_records_with_keys_and_extra_keys_pass():
+    obj = sr.result(
+        "m",
+        "ok",
+        "s",
+        process=[{"run": "gh issue view 1", "result": "読めた", "extra": 1}],
+        decisions=[{"decision": "記録する", "basis": "工程名が既知"}],
+    )
+    assert sr.validate_result(obj, 0) == []
+
+
+def test_result_omits_empty_records():
+    assert set(sr.result("m", "ok", "s", gaps=[], process=None)) == set(sr.REQUIRED)
+
+
+def test_cli_emit_builds_the_same_result(capsys):
+    argv = ["emit", "--tool", "t", "--status", "stopped", "--summary", "書けなかった", "--code", "6"]
+    argv += ["--item", "issue-body", "#1", "failed", "", "--gap", "issue-body", "#1", "gh: 404"]
+    argv += ["--process", "gh issue view 1", "失敗", "--decision", "止めない", "進行管理", "--metric", "n", "3"]
+    with pytest.raises(SystemExit) as e:
+        sr.main(argv)
+    assert e.value.code == 6
+    obj = json.loads(capsys.readouterr().out)
+    assert obj["items"] == [{"kind": "issue-body", "name": "#1", "result": "failed"}]
+    assert obj["metrics"] == {"n": 3} and obj["gaps"][0]["reason"] == "gh: 404"
+    assert sr.validate_result(obj, 6) == []
+
+
+def test_cli_emit_refuses_ok_with_gap(capsys):
+    with pytest.raises(SystemExit) as e:
+        sr.main(["emit", "--tool", "t", "--status", "ok", "--summary", "s", "--gap", "k", "n", "r"])
+    assert e.value.code == 2 and capsys.readouterr().out == ""

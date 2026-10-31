@@ -101,9 +101,24 @@ CI の壁時計（`ci.workflows[].wall_seconds`）とテストの所要の `ci-s
 - 秘密の形の値は、手で書いた値でも捨てて `{"unknown": "秘密の形"}` にする。値は宣言・差分・出力のどれにも出ない
 - `.ndf/worktree.json` には、`base_branch`・`production_branch` のうち無いキーだけを足す。ほかのキーと順序は変えない
 - 解析の結果が前と同じなら、ファイルを書かない
-- 宣言はメインディレクトリの `.ndf/` に書き、コミットは利用者に任せる。要らなければコミットしない。`.gitignore` の対象なら、そのことが出力に出る
+- 宣言はメインディレクトリの `.ndf/` に書く。コミットするかは下の「`.ndf/` の追跡」に従う。`.gitignore` の対象なら、そのことが出力に出る
 
 宣言の形は [../schemas/project.schema.json](../schemas/project.schema.json) にある（`project-decl.py schema` の生成物）。
+
+## `.ndf/` の追跡
+
+**`.ndf/` は追跡する（コミットしてチームで共有する）のが標準である。** 宣言（`project.json`・`worktree.json`・`mvv.md`・`mvv.json`・`glossary.json` など）は
+clone した全員と CI で同じ値のまま効き、変える Pull Request を承認ゲートで人が見る（共通原則の C7）。追跡から外すのは次の 2 種類だけである。
+
+| 外すもの | 外し方 |
+| --- | --- |
+| 個人の値（`.ndf/worktree.local.json`） | `.ndf/.gitignore` に書く。`worktree` Skill の `worktree-setup.sh init` が作る |
+| 実行時の出力（`.ndf/handoff/` など） | コミットしない。`handoff/` は `.gitignore` にも書かない（[handoff.md](handoff.md)） |
+
+ルートの `.gitignore` が `.ndf/` を丸ごと外しているときは、利用者が `.gitignore` を直す（NDF は `.gitignore` を書き換えない）。
+宣言を書く・確かめるコマンド（`project-mvv.py approve` / `check`・`project-decl.py write`・`glossary.py init`）は、宣言が `.gitignore` の対象なら
+`status: ok` のまま、除外している行（`<ファイル>:<行>` とパターン）と対象のファイルを `items`（`kind: note`・`key: gitignore`・`result: ignored`）と
+要約に出す。検出は `scripts/lib/ndf_tracking.py` が持つ。
 
 ## 指示書の案内
 

@@ -150,9 +150,11 @@ def test_nothing_at_all_says_so_with_every_name(monkeypatch, tmp_path):
 
 
 def test_some_missing_lists_the_missing_after_the_present(monkeypatch, tmp_path):
-    """1488-6・I10: --check-state のディレクトリが無いと止まらず、ある材料の行の後に無い 3 つの名前を 1 行で書く。"""
+    """1488-6・I10: --check-state のディレクトリに結果 JSON が無いと止まらず、ある材料の行の後に無い 3 つの名前を 1 行で書く。"""
     w = world_with_design(tmp_path)
-    path, out = run(load(monkeypatch, w), w, tmp_path / "無い")
+    (tmp_path / "空").mkdir()
+    path, out = run(load(monkeypatch, w), w, tmp_path / "空")
+    assert section(path.read_text(encoding="utf-8"), "## 検査の結果")[0].startswith("- 無し")
     risks = section(path.read_text(encoding="utf-8"), "## 未検証・残る危険")
     assert risks[-1].startswith("- 無い材料:") and all(n in risks[-1] for n in ("レビュー", "リファクタリング", "全体テスト"))
     assert "設計文書の未確認" not in risks[-1] and any(r.startswith("- 設計の未確認 #7") for r in risks)
@@ -176,6 +178,18 @@ def test_rewriting_replaces_machine_lines_and_keeps_hand_lines(monkeypatch, tmp_
     assert "- 手で書いた危険" in risks and not [r for r in risks if r.startswith("- 未実施のリリース後テスト")]
     assert len([r for r in risks if r.startswith("- 設計の未確認")]) == 2
     assert "3 ラウンド" in section(text, "## 検査の結果")[0] and text.count("## 検査の結果") == 1
+
+
+@pytest.mark.parametrize("state", ["", "無い"])
+def test_check_state_without_the_directory_stops(monkeypatch, tmp_path, state):
+    """#2079: 置き場が空文字・無いディレクトリなら「無し」と書かずに 3 で止まる。"""
+    w = world_with_design(tmp_path)
+    mod = load(monkeypatch, w)
+    path = rr.facts(mod, w, [30])[0]["presentation_path"]
+    before = Path(path).read_text(encoding="utf-8")
+    with pytest.raises(mod.StepError) as e:
+        rr.notes(mod, w, [30], approval=path, version=rr.VER, check_state=str(tmp_path / state) if state else "")
+    assert e.value.code == 3 and Path(path).read_text(encoding="utf-8") == before
 
 
 def test_check_state_needs_approval(monkeypatch, tmp_path):
@@ -237,3 +251,66 @@ def test_whole_test_without_ran_reads_the_declared_command(tmp_path):
     assert whole.commands == ("pytest .",) and whole.passed and whole.failed == 1
     on_ci = materials.WholeTest((), True, True, 0, 0)
     assert "CI に任せた" in materials.check_lines(materials.Materials(whole_test=on_ci))[0]
+
+
+def _materials():
+    sys.path.insert(0, str(Path(rr.SCRIPT).parent / "lib"))
+    sys.path.insert(0, str(Path(rr.SCRIPT).parent))
+    from release_lib import materials
+
+    return materials
+
+
+def _check(tmp_path, **kw) -> list[str]:
+    m = _materials()
+    review, refactor, whole = m.read_check(check_state(tmp_path, **kw), tmp_path)
+    return m.check_lines(m.Materials(review, refactor, whole))
+
+
+FAILED = {
+    "tool": "cross-refactoring-drive",
+    "status": "error",
+    "summary": "打ち切り",
+    "items": [],
+    "metrics": {"adopted": 0, "reverted": 0},
+}
+
+
+def test_refactor_reads_the_ok_attempt_when_a_later_attempt_failed(tmp_path):
+    """2129-1: 番号の最大の試行が落ち、前の試行が ok なら、ok の試行の件数を書く。"""
+    d = tmp_path / "6-check-state"
+    put_out(d, "01-refactor.out", {**REFACTOR, "metrics": {"adopted": 14, "reverted": 0}})
+    lines = _check(tmp_path, refactor=FAILED)  # 04-refactor.out が落ちた試行
+    assert "- リファクタリング: 採用 14 件 / 取り消し 0 件" in lines
+
+
+def test_refactor_without_an_ok_attempt_says_it_did_not_finish(tmp_path):
+    """2129-2: ok の試行が 1 つも無ければ、落ちた試行の件数を載せず、ok で終わっていないと書く。"""
+    put_out(tmp_path / "6-check-state", "01-refactor.out", FAILED)
+    line = next(x for x in _check(tmp_path, refactor=FAILED) if x.startswith("- リファクタリング:"))
+    assert "採用" not in line and "`ok` で終わっていない" in line and "`error`" in line
+
+
+def test_refactor_with_one_ok_attempt_keeps_its_counts(tmp_path):
+    """2129-3: 試行が 1 回で ok なら今と同じ値。"""
+    assert "- リファクタリング: 採用 1 件 / 取り消し 0 件" in _check(tmp_path)
+
+
+def test_deferred_findings_fold_by_path_and_summary(tmp_path):
+    """2129-4・2129-5: path と summary が同じ見送りは line の有無・値が違っても 1 件。違うものは別の件。"""
+    same = [{"kind": "deferred", "path": "a.py", "line": n, "summary": "同じ指摘", "round": r} for r, n in enumerate((None, 3, 9))]
+    other = [
+        {"kind": "deferred", "path": "b.py", "summary": "同じ指摘"},
+        {"kind": "deferred", "path": "a.py", "line": 3, "summary": "別の指摘"},
+    ]
+    lines = _check(tmp_path, review={**REVIEW, "items": same + other})
+    assert lines[0].endswith("見送った指摘 3 件")
+    assert lines[1:4] == ["  - `a.py:3` 同じ指摘", "  - `b.py` 同じ指摘", "  - `a.py:3` 別の指摘"]
+
+
+def test_unconverged_review_keeps_its_deferred_findings(tmp_path):
+    """未収束（stopped・終了コード 6）で配布へ進んだレビューも、見送った指摘の本文と位置を承認資料へ載せる。"""
+    items = [{"kind": "deferred", "path": "a.py", "line": 3, "summary": "残る指摘"}]
+    lines = _check(tmp_path, review={**REVIEW, "status": "stopped", "items": items})
+    assert "`ok` で終わっていない" in lines[0] and lines[0].endswith("見送った指摘 1 件")
+    assert lines[1] == "  - `a.py:3` 残る指摘"

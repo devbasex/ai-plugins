@@ -154,6 +154,91 @@ def test_without_allowed_prs_the_tip_must_keep_the_approved_tree(repo):
     assert ac.compare_approved(repo, approved, tip).reason == ac.OUTSIDE_COMMITS
 
 
+UNGATED = ("docs/", "issues/")
+
+
+def doc_pr(root: Path, name: str = "docs/design.md") -> str:
+    """配布物に触れない PR を develop へマージのコミットで入れ、そのマージのコミットを返す。"""
+    git(root, "checkout", "-q", "-b", f"doc-{name.replace('/', '-')}")
+    (root / name).parent.mkdir(parents=True, exist_ok=True)
+    commit(root, name, "d\n", "design (#2214)")
+    git(root, "checkout", "-q", "develop")
+    git(root, "merge", "-q", "--no-ff", "-m", "Merge pull request #2214", f"doc-{name.replace('/', '-')}")
+    return git(root, "rev-parse", "HEAD")
+
+
+@pytest.mark.parametrize("before", [False, True])
+def test_outside_commits_that_ship_nothing_are_tolerated(repo, before):
+    """#2221: 配布の PR の前後に入った外のコミットが配布物に触れなければ、止めずに tolerated へ入れる。"""
+    approved = git(repo, "rev-parse", "HEAD")
+    base = doc_pr(repo) if before else approved
+    rel = release_branch(repo, base)
+    mc = land(repo, "merge")
+    tip = git(repo, "rev-parse", "HEAD") if before else doc_pr(repo)
+    v = ac.compare_approved(repo, approved, tip, [rel.pr(mc)], UNGATED)
+    assert (v.ok, v.reason, v.outside) == (True, ac.MATCH, [])
+    assert "design (#2214)" in [o.subject for o in v.tolerated]  # 配布のブランチの起点より前なら、マージのコミットも並ぶ
+
+
+def test_an_outside_commit_that_ships_is_still_caught(repo):
+    """#2221: 配布物に触れる外のコミットは今どおり outside_commits で止め、触れないものは tolerated に分ける。"""
+    approved = git(repo, "rev-parse", "HEAD")
+    rel = release_branch(repo, approved)
+    mc = land(repo, "merge")
+    doc_pr(repo)
+    (repo / "plugins" / "foo").mkdir(parents=True)
+    shipped = commit(repo, "plugins/foo/x.py", "x\n", "statusline (#806)")
+    v = ac.compare_approved(repo, approved, shipped, [rel.pr(mc)], UNGATED)
+    assert v.reason == ac.OUTSIDE_COMMITS and [o.sha for o in v.outside] == [shipped]
+    assert [o.subject for o in v.tolerated] == ["design (#2214)"]
+
+
+@pytest.mark.parametrize("move", [False, True])
+def test_an_outside_commit_with_a_quoted_path_or_a_move_out_of_shipped_is_caught(repo, move):
+    """日本語のパス（core.quotePath で引用符に包まれる）と、配布物から外への移動（rename の検出で移動先だけになる）も、
+    配布物に触れる外のコミットとして止める。"""
+    (repo / "plugins" / "foo").mkdir(parents=True)
+    commit(repo, "plugins/foo/a.txt", "a\n")
+    approved = git(repo, "rev-parse", "HEAD")
+    rel = release_branch(repo, approved)
+    mc = land(repo, "merge")
+    if move:
+        (repo / "docs").mkdir()
+        git(repo, "mv", "plugins/foo/a.txt", "docs/a.txt")
+        git(repo, "commit", "-q", "-m", "move (#9)")
+        outside = git(repo, "rev-parse", "HEAD")
+    else:
+        outside = commit(repo, "plugins/foo/設定.md", "x\n", "ja (#9)")
+    v = ac.compare_approved(repo, approved, outside, [rel.pr(mc)], UNGATED)
+    assert v.reason == ac.OUTSIDE_COMMITS and [o.sha for o in v.outside] == [outside]
+
+
+@pytest.mark.parametrize("path", ["scripts/runtime-smoke-test.sh", ".github/workflows/ci.yml", "pyproject.toml"])
+def test_an_outside_commit_outside_the_allow_list_is_caught(repo, path):
+    """配布物でなくても、許可リスト（docs/・issues/）の外を変えた承認の外のコミットは止める（秘密を渡す CI が実行する。C1）。"""
+    approved = git(repo, "rev-parse", "HEAD")
+    rel = release_branch(repo, approved)
+    mc = land(repo, "merge")
+    (repo / path).parent.mkdir(parents=True, exist_ok=True)
+    outside = commit(repo, path, "x\n", "ci (#9)")
+    v = ac.compare_approved(repo, approved, outside, [rel.pr(mc)], UNGATED)
+    assert v.reason == ac.OUTSIDE_COMMITS and [o.sha for o in v.outside] == [outside]
+
+
+@pytest.mark.parametrize(("path", "reason"), [("docs/evil.md", ac.MATCH), ("plugins/evil.txt", ac.TREE_DIFFERS)])
+def test_a_merge_commit_carrying_a_change_differs_only_when_it_ships(repo, path, reason):
+    """#2221: マージのコミットの中で入れた変更は、配布物のパスに及ぶときだけ tree_differs。"""
+    approved = git(repo, "rev-parse", "HEAD")
+    rel = release_branch(repo, approved)
+    git(repo, "merge", "-q", "--no-ff", "--no-commit", "release")
+    (repo / path).parent.mkdir(parents=True, exist_ok=True)
+    (repo / path).write_text("x\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "Merge pull request #1")
+    tip = git(repo, "rev-parse", "HEAD")
+    assert ac.compare_approved(repo, approved, tip, [rel.pr(tip)], UNGATED).reason == reason
+
+
 MATERIAL = "# t\n\n## 2. 承認の判断に使うもの\n\n| 項目 | 内容 |\n| --- | --- |\n| {row} | {sha} |\n| 版数 | 1.0.0 |\n"
 
 

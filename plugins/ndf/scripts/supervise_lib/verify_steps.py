@@ -176,6 +176,21 @@ def handoff_step(state: str, gate: str, what: str) -> dict:
     return {"id": "handoff", "type": "run", "timeout": 120, "cmd": cmd, "gate_next": "end", "next": "end"}
 
 
+REJECT_STEP = "reject"
+
+
+def reject_step(state: str, gate: str, next_id: str, root: str = ".", pr: str | None = None) -> dict:
+    """承認ゲートで差し戻された後の続き（#2183）。直した後に `run <計画> --from reject` で流すと、差し戻しを差し戻しの記録
+    （`gate-rejections.jsonl`）へ 1 行書いてから `next_id`（再提示のステップ）へ進む。記録を書けなければ止まる。
+    conductor は `sprint-state.py gate ... --outcome rejected` を手で打たない。"""
+    what = shlex.quote(f"{gate} で差し戻された（直して再提示する）")
+    cmd = (
+        f"{SPRINT_STATE_PY} gate {shlex.quote(state)} {shlex.quote(gate)} --what {what} --by user --outcome rejected "
+        f"--root {shlex.quote(root)}" + (f" --pr {pr}" if pr else "")
+    )
+    return {"id": REJECT_STEP, "type": "run", "timeout": 120, "cmd": cmd, "next": next_id, "from_only": True}
+
+
 def test_meta(plan: dict, a) -> dict:
     """計画の最上位に `テストの戦略` と `テストの時間` を書く。"""
     strategy = plan_strategy(a)

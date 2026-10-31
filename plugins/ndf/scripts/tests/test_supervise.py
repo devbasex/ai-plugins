@@ -301,6 +301,32 @@ def test_drive_args_get_pr_number(tmp_path, monkeypatch):
     assert '"argv": ["77", "--max-rounds", "4"]' in s.state.results["d"]["text"]
 
 
+@pytest.mark.parametrize(
+    ("final", "ran"), [("max_rounds", ["review", "abort"]), ("oscillation", ["review", "abort"]), ("approved", ["review", "after"])]
+)
+def test_an_unconverged_review_stops_the_plan(tmp_path, monkeypatch, final, ran):
+    """#2143: cross-review の駆動が収束せずに終わると review（on_fail: abort）が失敗し、後続へ進まない。"""
+    drive = tmp_path / "drive.py"
+    drive.write_text(
+        f"import json, sys\nsys.path.insert(0, {str(SCRIPTS / 'lib')!r})\nimport drive_pause as dp\n"
+        f"m = {{'final': {final!r}}}\n"
+        "out = dp.done('d', 's', 'r.md', m) if m['final'] == 'approved' else dp.unconverged('d', 's', 'r.md', m)\n"
+        "print(json.dumps(out)); sys.exit(dp.exit_code(out))\n"
+    )
+    monkeypatch.setitem(paths.DRIVES, "fake", drive)
+    steps = [
+        {"id": "review", "type": "drive", "drive": "fake", "on_fail": "abort"},
+        {"id": "after", "type": "run", "cmd": "true", "next": "end"},
+        {"id": "abort", "type": "run", "cmd": "true", "next": "end"},
+    ]
+    s, text = run_plan(tmp_path, steps)
+    assert [e["id"] for e in s.state.log] == ran, text  # 失敗なら on_fail の abort へ、成功なら後続へ
+    # on_exit の "6" があれば、収束しなかった終わりは on_fail を通らずにその行き先へ進む（#2227 の決定 1）
+    steps[0]["on_exit"] = {"6": "after"}
+    s, text = run_plan(tmp_path, steps)
+    assert [e["id"] for e in s.state.log] == ["review", "after"], text
+
+
 @pytest.mark.parametrize("drive", ["cross-review", "cross-refactoring"])
 def test_real_drives_take_pr_number_not_url(drive):
     # drive の args の {pr} は番号になる。2 つの駆動は URL を引数の解析で拒む
@@ -1461,7 +1487,7 @@ def test_new_release_dev_and_prod(tmp_path):
     assert "--ref main" in st["verify"]["cmd"] and st["verify"]["stage"] == "リリース後テスト"
     assert st["verify"]["next"] == "cleanup" and "facts" not in st
     # 先頭の approve が開発版の facts の出力から承認したコミットを読む（#1426 の AC9）
-    assert "approve --approval issues/approval-ndf-v10.17.11.md --facts-from '{queue_state:release}' --by user" in st["approve"]["cmd"]
+    assert "approve --approval issues/approval-ndf-v10.17.11.md --facts-from '{queue_state?:release}' --by user" in st["approve"]["cmd"]
     assert (st["approve"]["next"], st["approve"]["gate_next"]) == ("bump", "end")
     p = cli(
         *"new release --version 10.17.11 --prs 995 --channel prod --worktree /r/.worktrees/release/v10.17.11".split(),
@@ -2882,3 +2908,13 @@ def test_new_stops_on_a_template_whose_paths_is_not_a_word(tmp_path):
     )
     assert p.returncode == 2 and "1 語" in p.stderr
     assert not out.exists()
+
+
+def test_step_with_a_leftover_queue_placeholder_stops_without_running(tmp_path):
+    """#2079: 置き換わらない {queue_pr:…}・{queue_state:…} が残ったステップは、コマンドを打たずに失敗で止まる。"""
+    plan = queue_plan(tmp_path, "7-release", f"touch {tmp_path}/ran --prs {{queue_pr:check}} '{{queue_state:check}}'")
+    p = cli("run", plan)
+    assert p.returncode != 0, p.stdout + p.stderr
+    assert not (tmp_path / "ran").exists()
+    report = (paths.state_dir_of(plan) / "report.md").read_text()
+    assert "止まった" in report and "{queue_pr:check}" in report and "{queue_state:check}" in report

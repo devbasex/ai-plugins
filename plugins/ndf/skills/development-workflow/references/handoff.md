@@ -21,7 +21,7 @@
   動いていても、パスは `handoff.py path <名>` が返すメインディレクトリの絶対パスを使う。worktree は後片付けで消え、
   VS Code で開いているのはメインディレクトリであるため
 - **本体は `<名>.md`、終わった項目を移す引継ぎの履歴は同じ場所の `<名>-history.md` である**
-- **コミットしない。`.gitignore` にも書かない。** `git status` に `?? .ndf/handoff/` と出る方が探しやすい。手元の文書の検査は
+- **コミットしない。`.gitignore` にも書かない。** `.ndf/` のほかの宣言は追跡するのが標準で、`handoff/` はその例外である（[project-analysis.md](project-analysis.md) の「`.ndf/` の追跡」）。`git status` に `?? .ndf/handoff/` と出る方が探しやすい。手元の文書の検査は
   追跡外の文書を理由に落ちない
 - **`.ndf/` が無いリポジトリでは作らない。** `development-workflow` の手順 0 が `.ndf/` を作ってから作る（`handoff.py` は終了コード 3）。
   **終了コード 3（git の外・メインディレクトリに `.ndf/` が無い）は「文書なし」として扱い、失敗として止めない**

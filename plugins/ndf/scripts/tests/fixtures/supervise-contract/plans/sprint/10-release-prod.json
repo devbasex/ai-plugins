@@ -17,7 +17,7 @@
       "stage": "配布",
       "timeout": 120,
       "cwd": "<TMP>/repo",
-      "cmd": "python3 <NDF>/scripts/release-steps.py approve --approval issues/approval-foo-v1.2.0.md --facts-from '{queue_state:release}' --by user",
+      "cmd": "python3 <NDF>/scripts/release-steps.py approve --approval issues/approval-foo-v1.2.0.md --facts-from '{queue_state?:release}' --by user",
       "next": "bump",
       "gate_next": "end"
     },
