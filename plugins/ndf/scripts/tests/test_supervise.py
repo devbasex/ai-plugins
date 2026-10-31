@@ -455,8 +455,11 @@ def test_new_impl_in_other_repo_uses_declarations_only(tmp_path):
     steps = {s["id"]: s for s in plan["steps"]}
     assert "sync" not in steps and steps["impl"]["next"] == "base-sync" and steps["base-sync"]["next"] == "test-limited"
     # テストのステップは test-run.py が宣言（supervise.json の test.command を 1 つの suite として読む）から走らせる（#1334）
-    assert steps["test-limited"]["cmd"] == f"python3 {SCRIPTS / 'test-run.py'} scope --paths src/a.test.js"
-    assert steps["test-all"]["cmd"] == f"python3 {SCRIPTS / 'test-run.py'} whole --pr {{pr}}"
+    assert (
+        steps["test-limited"]["cmd"]
+        == f"python3 {SCRIPTS / 'test-run.py'} scope --paths src/a.test.js --limit {{test_limit:test_timeout:900}}"
+    )
+    assert steps["test-all"]["cmd"] == f"python3 {SCRIPTS / 'test-run.py'} whole --pr {{pr}} --limit {{test_limit:whole_timeout:1800}}"
     assert "rerun_failed" not in steps["test-limited"] and "rerun_failed" not in steps["test-all"]
     assert plan["テストの戦略"]["name"] == "local-full" and "supervise.json" in plan["テストの戦略"]["note"]
     assert plan["テストの時間"]["basis"]["unknown_duration"] is True
@@ -502,7 +505,10 @@ def test_new_impl_without_declaration_stops(tmp_path):
     plan = json.loads((tmp_path / "p.json").read_text())
     steps = {s["id"]: s for s in plan["steps"]}
     # `--test-cmd` は雛形として test-run.py へ渡す。`{paths}` が無いのでそのまま走らせる round-only になる
-    assert steps["test-limited"]["cmd"].endswith("scope --paths t --template 'make test'") and steps["pr"]["base"] == "trunk"
+    assert (
+        steps["test-limited"]["cmd"].endswith("scope --paths t --template 'make test' --limit {test_limit:test_timeout:900}")
+        and steps["pr"]["base"] == "trunk"
+    )
     assert plan["テストの戦略"]["name"] == "round-only"
 
 
@@ -2845,7 +2851,11 @@ def test_new_impl_with_a_ci_whole_declaration_takes_the_scope_timeout_from_the_l
     assert p.returncode == 0, p.stderr
     plan = json.loads(out.read_text())
     steps = {s["id"]: s for s in plan["steps"]}
-    assert steps["test-limited"]["cmd"] == f"python3 {SCRIPTS / 'test-run.py'} scope --paths tests/Unit/A.php"
+    limit = plan["テストの時間"]["test_timeout"]
+    assert (
+        steps["test-limited"]["cmd"]
+        == f"python3 {SCRIPTS / 'test-run.py'} scope --paths tests/Unit/A.php --limit {{test_limit:test_timeout:{limit}}}"
+    )
     assert steps["test-limited"]["timeout"] > plan["テストの時間"]["test_timeout"] > 990
 
 

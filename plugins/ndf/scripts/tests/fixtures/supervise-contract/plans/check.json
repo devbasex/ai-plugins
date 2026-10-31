@@ -6,8 +6,8 @@
   "モード": "standard",
   "作業場所": "<TMP>/repo",
   "規則": "全体テストが落ちたら（落ちたテストだけの再実行でも落ちた後）、変更に起因するなら fix、変更に無関係なら ready。2 回直しても同じなら abort。",
-  "上限": 44,
   "Pull Request": "5",
+  "上限": 44,
   "steps": [
     {
       "id": "assess",
@@ -67,7 +67,7 @@
       "type": "run",
       "stage": "完了判定",
       "timeout": 1980,
-      "cmd": "git pull -q --rebase && python3 <NDF>/scripts/test-run.py whole --pr {pr}",
+      "cmd": "git pull -q --rebase && python3 <NDF>/scripts/test-run.py whole --pr {pr} --limit {test_limit:whole_timeout:1800}",
       "on_fail": "judge",
       "next": "ready"
     },
@@ -181,7 +181,11 @@
       "c": null,
       "x": null,
       "strategy": "local-full",
-      "unknown_duration": true
+      "unknown_duration": true,
+      "recent": null,
+      "recent_source": null,
+      "limit_from": "unknown",
+      "key": "7db7ebdbdfdcffcf"
     }
   },
   "記録": "<NDF>/scripts/projects-sync.sh"
