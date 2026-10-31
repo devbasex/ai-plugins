@@ -102,5 +102,6 @@
 | [ndf-factory-accounts-and-plans.md](ndf-factory-accounts-and-plans.md) | Neural Development Factory: Cognito の認証（Google・GitHub と GitHub の仲立ち）・アカウントの解決・アカウントと席とプランと実行の形態の API と表・使える量の表と判定・factory/ のパッケージの管理と CI（factory-check）。#2170 |
 | [ndf-factory-contracts-and-progress.md](ndf-factory-contracts-and-progress.md) | Neural Development Factory: 契約の定義（JSON Schema・生成した型・ingest.yaml）・進捗の受け口の 3 つの経路と出所ごとの認証と照合・冪等な追記と事象の表・GitHub の Webhook の翻訳・実行ジョブの token（EdDSA）の発行と検証・appendControlEvent。#2171 |
 | [ndf-ask-guard.md](ndf-ask-guard.md) | `AskUserQuestion` を PreToolUse の hook（問い合わせの guard）で判定し、区分（`metadata.source`）の無い・許されない問いを止めて AI に決めさせる理由と境界（承認ゲートとレッドラインは宣言で外せない、壊れた宣言は丸ごと既定に戻す、relay の `question open` も同じ判定を使う、止めた問いでは待ちの通知を送らない）、宣言 `.ndf/ask.json` と記録 `ask.jsonl` の形、`ask.py decide` / `summary` の契約。区分と手順は `development-workflow` の `references/asking.md` が正 |
+| [ndf-factory-runs-and-runner.md](ndf-factory-runs-and-runner.md) | Neural Development Factory: リポジトリの登録（GitHub App の利用者の認可と候補の証明）・キーの持ち込み・課題の候補・実行の制御（開始の判定と実行の枠・起動・停止の知らせと見回り・取り消し・再開の要求・形態 local の渡す口・打ち切りの時間と token の期限）・ランナー（手順・翻訳・送信・状態の保存と復元・形態ごとの claude の呼び方）・runs.yaml の経路・実行の表。#2186 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。
