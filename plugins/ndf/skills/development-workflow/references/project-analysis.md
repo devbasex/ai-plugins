@@ -112,7 +112,7 @@ clone した全員と CI で同じ値のまま効き、変える Pull Request �
 
 | 外すもの | 外し方 |
 | --- | --- |
-| 個人の値（`.ndf/worktree.local.json`） | `.ndf/.gitignore` に書く。`worktree-setup.sh init` が作る（[../../worktree/references/declaration.md](../../worktree/references/declaration.md)） |
+| 個人の値（`.ndf/worktree.local.json`） | `.ndf/.gitignore` に書く。`worktree` Skill の `worktree-setup.sh init` が作る |
 | 実行時の出力（`.ndf/handoff/` など） | コミットしない。`handoff/` は `.gitignore` にも書かない（[handoff.md](handoff.md)） |
 
 ルートの `.gitignore` が `.ndf/` を丸ごと外しているときは、利用者が `.gitignore` を直す（NDF は `.gitignore` を書き換えない）。
