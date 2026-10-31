@@ -56,6 +56,7 @@ import gh_call  # noqa: E402
 import gh_rest  # noqa: E402
 import gh_sections  # noqa: E402
 import proc  # noqa: E402
+import runner_issue_request  # noqa: E402
 from step_result import EXIT_GATE, EXIT_OK, EXIT_PAUSE, EXIT_UNREADABLE, EXIT_VIOLATION  # noqa: E402
 from step_result import approval_present, emit, presentation_dir, result  # noqa: E402
 
@@ -429,7 +430,7 @@ def _create_inputs(a) -> tuple[str, str, tuple[str, int] | None, str, str, list[
 def _create_gate_or_check(repo: str, title: str, body: str, labels: list[str], approved: str | None) -> tuple[str, bool]:
     """承認が無ければゲートへ回し、あれば要約値を照合する。`(要約値, 開発対象リポジトリと別か)`。"""
     digest = digest_of(repo, title, body, labels)
-    other = _is_other_repo(repo, development_repo())
+    other = runner_issue_request.request_if_runner(TOOL, repo, title, body, _is_other_repo(repo, development_repo()))
     if not approved:
         _gate(repo, title, body, labels, digest, other)
     if approved != digest:

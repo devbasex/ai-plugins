@@ -10,6 +10,7 @@ import { trackedEntries } from "./state.ts";
 import {
   common,
   delegatedFromRecord,
+  issueRequestFromLine,
   verdictSourcesOf,
   findPullRequest,
   gateRecordName,
@@ -69,6 +70,18 @@ describe("翻訳（受け入れ条件 25）", () => {
     const sources = verdictSourcesOf([{ kind: "verdict", id: "v1", source: "hook" }, { kind: "verdict", id: "v2", source: "" }]);
     expect(delegatedFromRecord({ kind: "decision", ref: "v1", question: "q", answer: "a", reason: "r" }, sources)!.payload.category).toBe("hook");
     expect(delegatedFromRecord({ kind: "decision", ref: "v2", question: "q", answer: "a", reason: "r" }, sources)!.payload.category).toBeNull();
+  });
+
+  it("起票の依頼の行から issue.requested を作り、上限を超える行は attention、形の違う行は送らない（#2216）", () => {
+    const body = issueRequestFromLine({ repo: "org-b/repo-b", title: "直してほしい", body: "由来: org-a/repo-a#1" })!;
+    expect(body).toEqual({ type: "issue.requested", payload: { repo: "org-b/repo-b", title: "直してほしい", body: "由来: org-a/repo-a#1" } });
+    expect(validateProgressEvent(full(1, body)).ok).toBe(true);
+    const tooLarge = issueRequestFromLine({ repo: "org-b/repo-b", title: "あ".repeat(257), body: "b" })!;
+    expect(tooLarge).toMatchObject({ type: "attention", payload: { reason: "issue_request_too_large" } });
+    expect(validateProgressEvent(full(1, tooLarge)).ok).toBe(true);
+    expect(issueRequestFromLine({ repo: "org-b/repo-b", title: "t", body: "あ".repeat(50_001) })).toMatchObject({ type: "attention" });
+    expect(issueRequestFromLine({ repo: "org-b", title: "t", body: "b" })).toBeNull();
+    expect(issueRequestFromLine({ repo: "org-b/repo-b", title: "", body: "b" })).toBeNull();
   });
 
   it("300 KiB の承認資料を 256 KiB 以下に切り、案内を残す（AC26）", () => {

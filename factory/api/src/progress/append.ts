@@ -1,5 +1,5 @@
 // 追記。受け口と appendControlEvent が同じ関数を通り、同じ重複の拒否で 1 件を残す（I10）
-import type { JobFinishedEvent, ProgressEvent } from "@ndf-factory/contracts";
+import type { IssueRequestResolvedEvent, JobFinishedEvent, ProgressEvent } from "@ndf-factory/contracts";
 import { authorizeControl } from "./authorize.ts";
 import { ProgressEventError } from "./errors.ts";
 import { prRef } from "./github.ts";
@@ -27,6 +27,22 @@ export function appendEvent(store: ProgressEventStore, event: ProgressEvent): Pr
 export async function appendControlEventTo(store: ProgressEventStore, event: JobFinishedEvent): Promise<{ written: boolean }> {
   const checked = checkBuiltEvent(event);
   if (!checked.ok) throw new ProgressEventError("invalid_event", checked.message);
-  if (!authorizeControl(checked.event)) throw new ProgressEventError("forbidden", "control が書けるのは <job_id>:finished の job.finished だけです");
+  if (checked.event.type !== "job.finished" || !authorizeControl(checked.event)) {
+    throw new ProgressEventError("forbidden", "control が書けるのは <job_id>:finished の job.finished だけです");
+  }
+  return appendEvent(store, checked.event);
+}
+
+// 起票の代行（#2216）が issue.request_resolved（source は control、鍵は <依頼の鍵>:resolved）を直に追記する。
+// appendControlEventTo と同じ 3 つを通り、受けるのは issue.request_resolved だけ（決定 10）。false は同じ依頼の結果が既にある
+export async function appendIssueRequestResolvedTo(
+  store: ProgressEventStore,
+  event: IssueRequestResolvedEvent,
+): Promise<{ written: boolean }> {
+  const checked = checkBuiltEvent(event);
+  if (!checked.ok) throw new ProgressEventError("invalid_event", checked.message);
+  if (checked.event.type !== "issue.request_resolved" || !authorizeControl(checked.event)) {
+    throw new ProgressEventError("forbidden", "ここで書けるのは <依頼の鍵>:resolved の issue.request_resolved だけです");
+  }
   return appendEvent(store, checked.event);
 }

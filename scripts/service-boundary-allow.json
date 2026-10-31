@@ -5,6 +5,16 @@
       "path": "plugins/ndf/scripts/tests/test_project_decl.py",
       "sha256": "457643f44d19aed85fd756aa50cc0cd6b57376d4e8f5a72f9f85972a522002a3",
       "reason": "秘密を伏せる処理のテストの入力に置いた、AWS のアクセスキーの形をした偽の値"
+    },
+    {
+      "path": "factory/api/src/issue-requests/resolve.test.ts",
+      "sha256": "457643f44d19aed85fd756aa50cc0cd6b57376d4e8f5a72f9f85972a522002a3",
+      "reason": "起票の代行が秘密らしい値を含む依頼を起票しないことのテストの入力に置いた、AWS のアクセスキーの形をした偽の値"
+    },
+    {
+      "path": "factory/api/src/issue-requests/resolve.test.ts",
+      "sha256": "270a66beaa30b2877923e8b39b756023edad2c935549ee9e3bd485792d44941d",
+      "reason": "起票の代行が秘密らしい値を含む依頼を起票しないことのテストの入力に置いた、PEM の秘密鍵の始まりの行の形をした偽の値"
     }
   ]
 }

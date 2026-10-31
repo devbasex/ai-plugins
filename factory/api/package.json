@@ -16,6 +16,7 @@
     "@aws-sdk/client-secrets-manager": "^3.1160.0",
     "@aws-sdk/lib-dynamodb": "^3.1160.0",
     "@aws-sdk/s3-request-presigner": "^3.1161.0",
+    "@aws-sdk/util-dynamodb": "^3.996.9",
     "@ndf-factory/contracts": "*",
     "aws-jwt-verify": "^5.2.1",
     "hono": "^4.13.14",

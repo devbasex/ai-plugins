@@ -14,7 +14,9 @@
     { "$ref": "#/$defs/JobFinishedEvent" },
     { "$ref": "#/$defs/PrUpdatedEvent" },
     { "$ref": "#/$defs/CiUpdatedEvent" },
-    { "$ref": "#/$defs/DecisionDelegatedEvent" }
+    { "$ref": "#/$defs/DecisionDelegatedEvent" },
+    { "$ref": "#/$defs/IssueRequestedEvent" },
+    { "$ref": "#/$defs/IssueRequestResolvedEvent" }
   ],
   "$defs": {
     "Identifier": {
@@ -197,6 +199,47 @@
         "category": { "description": "止めたときの metadata.source。無ければ null", "type": ["string", "null"] }
       }
     },
+    "IssueRequestedPayload": {
+      "description": "実行のリポジトリと別のリポジトリへの起票の依頼（#2216）。起票はサービスが行い、ランナーは送るだけ",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "title", "body"],
+      "properties": {
+        "repo": { "description": "起票先。token の repo と違うものだけを受ける", "$ref": "#/$defs/RepoFullName" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "body": { "type": "string", "minLength": 1, "maxLength": 50000 }
+      }
+    },
+    "IssueRef": {
+      "description": "サービスが起票した Issue の参照",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "number", "url"],
+      "properties": {
+        "repo": { "$ref": "#/$defs/RepoFullName" },
+        "number": { "type": "integer", "minimum": 1 },
+        "url": { "type": "string", "format": "uri" }
+      }
+    },
+    "IssueRequestResolvedPayload": {
+      "description": "起票の依頼 1 件ごとの結果（#2216）。filed は起票した Issue の参照を、drafted は下書きへ回した理由を持つ",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_key", "outcome", "duplicate_of"],
+      "properties": {
+        "request_key": { "description": "依頼の冪等の鍵（<job_id>:<seq>）", "type": "string", "minLength": 1, "maxLength": 290 },
+        "outcome": { "type": "string", "enum": ["filed", "drafted"] },
+        "issue": { "$ref": "#/$defs/IssueRef" },
+        "reason": {
+          "type": "string",
+          "enum": ["not_registered", "not_installed", "unsupported_tracker", "visibility", "secret_suspected", "limit_exceeded", "filing_failed"]
+        },
+        "duplicate_of": { "description": "同じ中身の最初の依頼の鍵。最初の依頼なら null", "type": ["string", "null"] }
+      },
+      "if": { "properties": { "outcome": { "const": "filed" } } },
+      "then": { "required": ["issue"], "not": { "required": ["reason"] } },
+      "else": { "required": ["reason"], "not": { "required": ["issue"] } }
+    },
     "JobStartedEvent": {
       "allOf": [{ "$ref": "#/$defs/EventCommon" }],
       "type": "object",
@@ -304,6 +347,26 @@
       "properties": {
         "type": { "const": "decision.delegated" },
         "payload": { "$ref": "#/$defs/DecisionDelegatedPayload" }
+      },
+      "unevaluatedProperties": false
+    },
+    "IssueRequestedEvent": {
+      "allOf": [{ "$ref": "#/$defs/EventCommon" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "issue.requested" },
+        "payload": { "$ref": "#/$defs/IssueRequestedPayload" }
+      },
+      "unevaluatedProperties": false
+    },
+    "IssueRequestResolvedEvent": {
+      "allOf": [{ "$ref": "#/$defs/EventCommon" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "issue.request_resolved" },
+        "payload": { "$ref": "#/$defs/IssueRequestResolvedPayload" }
       },
       "unevaluatedProperties": false
     }

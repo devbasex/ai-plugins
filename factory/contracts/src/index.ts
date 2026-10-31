@@ -12,7 +12,7 @@ export type * from "./generated/run-job-instruction.ts";
 export type * from "./generated/ingest-response.ts";
 export { progressEventSchema, runJobInstructionSchema, ingestResponseSchema };
 
-// 進捗の事象の 11 種類と、定義の中の名前（$defs）
+// 進捗の事象の 13 種類と、定義の中の名前（$defs）
 export const EVENT_DEFINITIONS = {
   "job.started": "JobStartedEvent",
   "phase.changed": "PhaseChangedEvent",
@@ -25,6 +25,8 @@ export const EVENT_DEFINITIONS = {
   "pr.updated": "PrUpdatedEvent",
   "ci.updated": "CiUpdatedEvent",
   "decision.delegated": "DecisionDelegatedEvent",
+  "issue.requested": "IssueRequestedEvent",
+  "issue.request_resolved": "IssueRequestResolvedEvent",
 } as const satisfies Record<ProgressEvent["type"], string>;
 
 export type EventType = keyof typeof EVENT_DEFINITIONS;

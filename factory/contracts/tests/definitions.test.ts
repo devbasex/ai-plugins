@@ -23,7 +23,7 @@ const SPEC_INSTRUCTION_INPUTS = [
   "MODEL_CREDENTIAL_SECRET_ARN",
 ];
 
-// 同じ確定仕様の「進捗の事象の種類と受け口」の種類（11 種類）
+// 同じ確定仕様の「進捗の事象の種類と受け口」の種類（13 種類）
 const SPEC_EVENT_TYPES = [
   "job.started",
   "phase.changed",
@@ -36,6 +36,8 @@ const SPEC_EVENT_TYPES = [
   "pr.updated",
   "ci.updated",
   "decision.delegated",
+  "issue.requested",
+  "issue.request_resolved",
 ];
 
 // 同じ確定仕様の「進捗の正本」の列から、受け口が作る order_key・pr_ref を除いたもの
@@ -53,6 +55,13 @@ const PAYLOADS: Record<string, Record<string, unknown>> = {
   "pr.updated": { repo: "o/r", number: 1, state: "merged" },
   "ci.updated": { repo: "o/r", pr_number: 1, name: "check", conclusion: null },
   "decision.delegated": { question: "どちらにしますか", answer: "A", reason: "既存の方針に沿う", category: null },
+  "issue.requested": { repo: "org-b/repo-b", title: "直してほしい", body: "由来: org-a/repo-a#1" },
+  "issue.request_resolved": {
+    request_key: "job-1:3",
+    outcome: "filed",
+    issue: { repo: "org-b/repo-b", number: 7, url: "https://github.com/org-b/repo-b/issues/7" },
+    duplicate_of: null,
+  },
 };
 
 function event(type: string, patch: Record<string, unknown> = {}) {
@@ -121,7 +130,7 @@ describe("実行ジョブの指示の定義（受け入れ条件 1）", () => {
 });
 
 describe("進捗の事象の定義（受け入れ条件 1・11）", () => {
-  it("種類が確定仕様の 11 種類と 1 対 1 に対応する", () => {
+  it("種類が確定仕様の 13 種類と 1 対 1 に対応する", () => {
     expect([...EVENT_TYPES].sort()).toEqual([...SPEC_EVENT_TYPES].sort());
     expect(progressEventSchema.oneOf).toHaveLength(SPEC_EVENT_TYPES.length);
   });
@@ -179,6 +188,27 @@ describe("進捗の事象の定義（受け入れ条件 1・11）", () => {
     expect(step({ repo: "Owner/Name", number: 3 })).toBe(true);
     expect(step({ repo: "owner", number: 3 })).toBe(false);
     expect(step({ repo: "o/r", number: 0 })).toBe(false);
+  });
+
+  it("issue.requested は起票先・題・本文の 3 つで、題は 256 字まで・本文は空にできない（#2216）", () => {
+    const requested = (payload: Record<string, unknown>) => validateProgressEvent(event("issue.requested", { payload })).ok;
+    const base = PAYLOADS["issue.requested"];
+    expect(requested({ ...base, title: "あ".repeat(256) })).toBe(true);
+    expect(requested({ ...base, title: "あ".repeat(257) })).toBe(false);
+    expect(requested({ ...base, body: "" })).toBe(false);
+    expect(requested({ ...base, repo: "org-b" })).toBe(false);
+    expect(requested({ ...base, labels: ["bug"] })).toBe(false);
+  });
+
+  it("issue.request_resolved は filed なら Issue の参照だけを、drafted なら理由だけを持つ（#2216）", () => {
+    const resolved = (payload: Record<string, unknown>) => validateProgressEvent(event("issue.request_resolved", { payload })).ok;
+    const filed = PAYLOADS["issue.request_resolved"]!;
+    const drafted = { request_key: "job-1:3", outcome: "drafted", reason: "not_registered", duplicate_of: null };
+    expect(resolved(drafted)).toBe(true);
+    expect(resolved({ ...drafted, reason: "unknown" })).toBe(false);
+    expect(resolved({ ...drafted, issue: filed.issue })).toBe(false);
+    expect(resolved({ ...filed, reason: "not_registered" })).toBe(false);
+    expect(resolved({ ...filed, issue: undefined })).toBe(false);
   });
 
   it("配列や null の本文は最上位の type で落ちる", () => {

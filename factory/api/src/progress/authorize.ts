@@ -1,5 +1,13 @@
 // 出所の照合（I25〜I28）。契約の定義の検査を通った事象に当て、経路の出所・書ける種類・識別子・冪等の鍵の形を照らす
-import type { EventSource, EventType, GateAnsweredEvent, ProgressEvent, StepRecordedEvent } from "@ndf-factory/contracts";
+import type {
+  EventSource,
+  EventType,
+  GateAnsweredEvent,
+  IssueRequestedEvent,
+  IssueRequestResolvedEvent,
+  ProgressEvent,
+  StepRecordedEvent,
+} from "@ndf-factory/contracts";
 import { repoKey } from "./github.ts";
 import type { VerifiedRunJob } from "./run-job-token.ts";
 import type { SavedAnswerReader } from "./saved-answers.ts";
@@ -15,10 +23,11 @@ export const WRITABLE_TYPES: Record<EventSource, ReadonlySet<EventType>> = {
     "usage.recorded",
     "job.finished",
     "decision.delegated",
+    "issue.requested",
   ]),
   api: new Set<EventType>(["gate.answered"]),
   github: new Set<EventType>(["pr.updated", "ci.updated"]),
-  control: new Set<EventType>(["job.finished"]),
+  control: new Set<EventType>(["job.finished", "issue.request_resolved"]),
 };
 
 const canWrite = (source: EventSource, event: ProgressEvent) =>
@@ -41,21 +50,40 @@ function isAllowedPullRequest(event: ProgressEvent, job: VerifiedRunJob): boolea
   return pr === undefined || repoKey(pr.repo) === repoKey(job.repo);
 }
 
+// issue.requested の起票先は token の repo と違う（I45、#2216）。実行のリポジトリへはランナーが自分の権限で起票する
+function isAllowedIssueRequest(event: ProgressEvent, job: VerifiedRunJob): boolean {
+  if (event.type !== "issue.requested") return true;
+  return repoKey((event as IssueRequestedEvent).payload.repo) !== repoKey(job.repo);
+}
+
 // runner: token の実行ジョブと事象の job_id・sprint_run_id が一致し、鍵がそのジョブの形で、
-// Pull Request の参照がその実行に許可したリポジトリのものである（I25〜I27・I37）
+// Pull Request の参照がその実行に許可したリポジトリのもので、起票の依頼が別のリポジトリ宛てである（I25〜I27・I37・I45）
 export function authorizeRunner(event: ProgressEvent, job: VerifiedRunJob): boolean {
   return (
     canWrite("runner", event) &&
     event.job_id === job.jobId &&
     event.sprint_run_id === job.sprintRunId &&
     isRunnerKey(event, job.jobId) &&
-    isAllowedPullRequest(event, job)
+    isAllowedPullRequest(event, job) &&
+    isAllowedIssueRequest(event, job)
   );
 }
 
-// control: job.finished だけで、鍵は <job_id>:finished（決定 9）
+// 起票の依頼の結果の冪等の鍵。依頼 1 件に結果は 1 件だけ残る（I48、#2216）
+export const resolvedKey = (requestKey: string) => `${requestKey}:resolved`;
+
+// control: job.finished は鍵が <job_id>:finished（決定 9）。issue.request_resolved は request_key が
+// そのジョブの依頼の鍵（<job_id>:<seq>）で、鍵が <request_key>:resolved（#2216）
 export function authorizeControl(event: ProgressEvent): boolean {
-  return canWrite("control", event) && event.job_id !== null && event.idempotency_key === finishedKey(event.job_id);
+  if (!canWrite("control", event) || event.job_id === null) return false;
+  if (event.type === "job.finished") return event.idempotency_key === finishedKey(event.job_id);
+  const { request_key } = (event as IssueRequestResolvedEvent).payload;
+  const prefix = `${event.job_id}:`;
+  return (
+    request_key.startsWith(prefix) &&
+    /^[1-9][0-9]*$/.test(request_key.slice(prefix.length)) &&
+    event.idempotency_key === resolvedKey(request_key)
+  );
 }
 
 // api: gate.answered の識別子・スプリントの実行・種類・答えた人・承認か差し戻しかが保存済みの答えとすべて一致する（I28）。
