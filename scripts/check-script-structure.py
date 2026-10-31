@@ -489,6 +489,33 @@ def _require_call(stmt: ast.stmt) -> set[str] | None:
     return None
 
 
+def _import_names(n: ast.Import | ast.ImportFrom) -> list[str]:
+    """import の文が読む名前（相対の import は `.` から始まる）。"""
+    if isinstance(n, ast.Import):
+        return [a.name for a in n.names]
+    if n.level:
+        mod = f".{n.module}" if n.module else ""
+        return ([mod] if mod else []) + [f"{mod}.{a.name}" if mod else "." + a.name for a in n.names]
+    return ([n.module] if n.module else []) + [f"{n.module}.{a.name}" for a in n.names]
+
+
+def _child_blocks(n: ast.stmt) -> list[list[ast.stmt]]:
+    """複文の子の文の並び（import を受ける `try` の本体は除く）。"""
+    if isinstance(n, ast.Try):
+        return ([] if _guards_import(n) else [n.body]) + [h.body for h in n.handlers] + [n.orelse, n.finalbody]
+    blocks: list[list[ast.stmt]] = []
+    for field in ("body", "orelse", "finalbody", "handlers", "cases"):
+        sub = getattr(n, field, None)
+        if isinstance(sub, list):
+            blocks += [c.body for c in sub] if field in ("handlers", "cases") else [sub]
+    return blocks
+
+
+def _add_group(side: dict, group: str, where: str, owners: frozenset, covered: set[str]) -> None:
+    if not owners & covered:
+        side.setdefault(group, (where, owners))
+
+
 class _DepScan:
     """I1〜I4: モジュールごとの未宣言のグループ（読み込みの時に届く側・遅れて読む側）を求めて覚える。"""
 
@@ -554,18 +581,6 @@ class _DepScan:
             main = next((n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main"), None)
             in_main = set().union(*(_require_call(s) or set() for s in main.body)) if entry and main else set()
 
-            def add(side: dict, group: str, where: str, owners: frozenset, covered: set[str]) -> None:
-                if not owners & covered:
-                    side.setdefault(group, (where, owners))
-
-            def imports(n: ast.stmt) -> list[str]:
-                if isinstance(n, ast.Import):
-                    return [a.name for a in n.names]
-                if n.level:
-                    mod = f".{n.module}" if n.module else ""
-                    return ([mod] if mod else []) + [f"{mod}.{a.name}" if mod else "." + a.name for a in n.names]
-                return ([n.module] if n.module else []) + [f"{n.module}.{a.name}" for a in n.names]
-
             def walk(stmts: list[ast.stmt], covered: set[str], lazy: bool, fn: ast.AST | None) -> None:
                 covered = set(covered)
                 for n in stmts:
@@ -576,45 +591,45 @@ class _DepScan:
                         base = top if fn is None else covered
                         walk(n.body, base | (in_main if n is not main else set()), True, n)
                     elif isinstance(n, (ast.Import, ast.ImportFrom)):
-                        side = late if lazy else load
-                        for name in imports(n):
-                            local = self._resolve(rel, bases, name)
-                            if local:
-                                sub_load, sub_late = self.module(local, bases)
-                                for g, (where, owners) in sub_load.items():
-                                    add(side, g, where, owners, covered)
-                                # 読まれる側の関数の本体は main の require の後に呼ばれる（最上位の import のとき）
-                                for g, (where, owners) in sub_late.items():
-                                    add(late, g, where, owners, covered | (in_main if fn is None else set()))
-                            elif not name.startswith("."):
-                                owners = self.owners(name)
-                                if owners:
-                                    add(side, owners[0], f"{name}（{rel}）", frozenset(owners), covered)
-                    elif isinstance(n, ast.Try):
-                        if not _guards_import(n):
-                            walk(n.body, covered, lazy, fn)
-                        for h in n.handlers:
-                            walk(h.body, covered, lazy, fn)
-                        walk(n.orelse, covered, lazy, fn)
-                        walk(n.finalbody, covered, lazy, fn)
+                        self._visit_import(rel, bases, n, late if lazy else load, late, covered, in_main, fn)
                     elif isinstance(n, ast.If):
                         walk(n.body, covered | self._checked(n.test, True), lazy, fn)
                         walk(n.orelse, covered | self._checked(n.test, False), lazy, fn)
                         if n.body and isinstance(n.body[-1], (ast.Return, ast.Raise)):
                             covered |= self._checked(n.test, False)
                     else:
-                        for field in ("body", "orelse", "finalbody", "handlers", "cases"):
-                            sub = getattr(n, field, None)
-                            if isinstance(sub, list):
-                                if field in ("handlers", "cases"):
-                                    for c in sub:
-                                        walk(c.body, covered, lazy, fn)
-                                else:
-                                    walk(sub, covered, lazy, fn)
+                        for block in _child_blocks(n):
+                            walk(block, covered, lazy, fn)
 
             walk(tree.body, set(), False, None)
         self.memo[key] = (load, late)
         return load, late
+
+    def _visit_import(
+        self,
+        rel: str,
+        bases: tuple[str, ...],
+        n: ast.Import | ast.ImportFrom,
+        side: dict,
+        late: dict,
+        covered: set[str],
+        in_main: set[str],
+        fn: ast.AST | None,
+    ) -> None:
+        """import の文が届けるグループを side（と、読まれる側の遅れて読む分を late）へ足す。"""
+        for name in _import_names(n):
+            local = self._resolve(rel, bases, name)
+            if local:
+                sub_load, sub_late = self.module(local, bases)
+                for g, (where, owners) in sub_load.items():
+                    _add_group(side, g, where, owners, covered)
+                # 読まれる側の関数の本体は main の require の後に呼ばれる（最上位の import のとき）
+                for g, (where, owners) in sub_late.items():
+                    _add_group(late, g, where, owners, covered | (in_main if fn is None else set()))
+            elif not name.startswith("."):
+                owners = self.owners(name)
+                if owners:
+                    _add_group(side, owners[0], f"{name}（{rel}）", frozenset(owners), covered)
 
 
 def _entries(root: Path, files: list[str]) -> list[str]:
