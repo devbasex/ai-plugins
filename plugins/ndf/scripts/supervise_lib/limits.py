@@ -55,22 +55,26 @@ def default_next(steps: list[dict], sid: str) -> str | None:
     return order[i] if i < len(order) else None
 
 
-def _targets(steps: list[dict], step: dict) -> list[tuple[str, str, bool]]:
-    """ステップの遷移の (鍵, 行き先, 成功か)。終わりの値は含めない。"""
+def _judge_targets(steps: list[dict], step: dict) -> list[tuple[str, str, bool]]:
+    """judge のステップの遷移。`choices` の各値と、`choices` が無いときの並びの次。"""
     out: list[tuple[str, str, bool]] = []
-    if step.get("type") == "judge":
-        for c in step.get("choices") or []:
-            if c == "next":
-                nxt = default_next(steps, step["id"])
-                if nxt:
-                    out.append(("choices", nxt, True))
-            elif c not in JUDGE_END:
-                out.append(("choices", str(c), True))
-        if not step.get("choices"):
+    for c in step.get("choices") or []:
+        if c == "next":
             nxt = default_next(steps, step["id"])
             if nxt:
-                out.append(("next", nxt, True))
-        return out
+                out.append(("choices", nxt, True))
+        elif c not in JUDGE_END:
+            out.append(("choices", str(c), True))
+    if not step.get("choices"):
+        nxt = default_next(steps, step["id"])
+        if nxt:
+            out.append(("next", nxt, True))
+    return out
+
+
+def _edge_targets(steps: list[dict], step: dict) -> list[tuple[str, str, bool]]:
+    """judge 以外のステップの遷移（next / skip_to / gate_next / on_fail / on_section_missing / on_exit）。"""
+    out: list[tuple[str, str, bool]] = []
     nxt = default_next(steps, step["id"])
     if nxt:
         out.append(("next", nxt, True))
@@ -86,6 +90,13 @@ def _targets(steps: list[dict], step: dict) -> list[tuple[str, str, bool]]:
             if dest not in END:
                 out.append(("on_exit", str(dest), str(code) == "0"))
     return out
+
+
+def _targets(steps: list[dict], step: dict) -> list[tuple[str, str, bool]]:
+    """ステップの遷移の (鍵, 行き先, 成功か)。終わりの値は含めない。"""
+    if step.get("type") == "judge":
+        return _judge_targets(steps, step)
+    return _edge_targets(steps, step)
 
 
 def unknown_targets(plan: dict) -> list[tuple[str, str, str]]:
