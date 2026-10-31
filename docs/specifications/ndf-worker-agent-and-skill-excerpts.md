@@ -172,11 +172,11 @@ projects-sync.sh <課題番号> <キー> <値>
 | 3 つの値がすべて空 | 何もしない（`worktree` / `plan` / `--note` だけの記録） |
 | `slug` が空・`jq` が無い | どのキーも積まず、標準エラーへ `NOTE:` の 1 行 |
 | それ以外 | 空でないキーを `mode` → `pace` → `stage` の順に `wf_record` で積む。排他はキーごとに取り、取れなかったキーだけを飛ばす（`wf_record` が 1 行出す）。残りのキーは続けて積む |
-| `stage` が `WF_REPORT_STAGE`（`配布`） | 積んだ後に `wf_report` を呼び、出力が `記録なし:` か `条件付き:` を含むときだけ標準出力へ出す。`progress-record.sh` はそれを捕まえ、工程ごとに結果 JSON の `items` の `kind: "stage-missing"` の要素（`result` は `missing` か `conditional`、`reason` に記録し直すコマンド）へ移す（#2227） |
+| `stage` が `WF_REPORT_STAGE`（`配布`） | 積んだ後に `wf_report` を呼び、出力が `記録なし:` か `条件付き:` を含むときだけ標準出力へ出す。`progress-record.sh` はそれを捕まえ、工程ごとに結果 JSON の `items` の `kind: "stage-missing"` の要素（`result` は `missing` か `conditional`、`reason` に記録し直すコマンド）へ移す |
 
 `progress-record.sh` の鍵は、`--repo` があればその値、無ければ作業ディレクトリの `origin` を畳んだ
 `<所有者>/<リポジトリ>`（`wf_repo_slug`）である。どちらのスクリプトもライブラリを読み込めないときは
-何もせずに `stopped`（終了コード 3）の結果 JSON で抜ける（#2227）。
+何もせずに `stopped`（終了コード 3）の結果 JSON で抜ける。
 
 **旧い版の hook と新しいスクリプトが併存すると、同じ工程が 2 回積まれることがある。** 通過記録は追記だけで、
 判定は工程の集合で行うため、結果は変わらない。

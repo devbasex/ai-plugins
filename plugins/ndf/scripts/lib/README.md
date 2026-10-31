@@ -50,7 +50,7 @@
 | [refresh.py](refresh.py) | 観点の出典の取得・指紋の比較・一覧の提示・待ちの扱い（#554）。**提示するだけで書き換えない** | `instructions-check.py` |
 | [transcript_agents.py](transcript_agents.py) | 会話の記録を conductor / supervisor / worker の層の単位で読む（#550）。上限の中断の一覧（`interrupted`）と解除の待ち（`wait-reset`）も持つ（#657）。**読むだけで送信の経路を持たない** | `skill-stats` / `development-workflow` |
 | [step_result.py](step_result.py) | 手順のスクリプトの結果 JSON の形・検証（`validate_result`）・出力と終了（`emit`）・シェルから同じ形を出す CLI（`step_result.py emit`）・承認資料（`approval_present`）と、git / gh を呼ぶ小関数（`StepError`・`run`・`git`・`git_root` は `proc` の再エクスポート） | `merged-steps.py` / `plan-to-spec-steps.py` / `release-steps.py` / `release-verification-steps.py` / `sprint-close.py` / `drive_pause.py` / `issue-file.py` / `step-result.sh` |
-| [step_read.py](step_read.py) | 結果を読む側の共通の規則。同じステップの試行から `ok` の最も新しい試行だけを採る `pick_ok_attempt`、置き場の無い・読めない・空・ありを分ける `open_place` と、無い・読めないときの結果を組む `place_stop`、子プロセスの標準出力の最後の行を結果 JSON として読み `ok` でなければ理由を返す `result_line`・`not_ok_reason`・`process_if_not_ok`。読むだけで書かない | `supervise_lib/state.py`（`record_stage`） / `sprint-close.py` / 子の課題の読み手（#2129 の承認資料・#2183 の差し戻しの件数ほか） |
+| [step_read.py](step_read.py) | 結果を読む側の共通の規則。同じステップの試行から `ok` の最も新しい試行だけを採る `pick_ok_attempt`、置き場の無い・読めない・空・ありを分ける `open_place` と、無い・読めないときの結果を組む `place_stop`、子プロセスの標準出力の最後の行を結果 JSON として読み `ok` でなければ理由を返す `result_line`・`not_ok_reason`・`process_if_not_ok`。読むだけで書かない | `supervise_lib/state.py`（`record_stage`） / `sprint-close.py` / 子の課題の読み手（承認資料・差し戻しの件数ほか） |
 | [step-result.sh](step-result.sh) | シェルの手順のスクリプトが結果 JSON を 1 行出すための関数（`sr_item`・`sr_gap`・`sr_process`・`sr_decision`・`sr_metric` で値を溜め、`sr_emit` が `step_result.py emit` を呼ぶ。`sr_gh` は `gh` の失敗の要旨を `SR_GH_ERR` に残す。`sr_absorb` は別のスクリプトの結果 JSON を取り込む）。JSON をシェルで組まない | `progress-record.sh` / `projects-sync.sh` |
 | [dist_record.py](dist_record.py) | リリース記録（`## 配布の記録`）の組み立て（`format_record`）と読み取り（`parse_record`）。形は `progress-tracking` の「配布の記録」が定める | `release-steps.py`（`record`） / `sprint-close.py` |
 | [gh_parts.py](gh_parts.py) | PR / issue の取得と本文の節の差し替え。`pr-info`（メタ・本文・差分の統計・checks を名前ごとの最新の実行へ畳んだもの・未解決のスレッド。GraphQL が上限なら REST へ退避。差分とログはファイルへ書く）、`unresolved-threads`、`body-section`（節の取得・置換・末尾への 1 行の追記。節の終わりに `<!-- ndf:section-end -->` を置き、後ろへ足した行を節に含めない）、`review-post`（自分の PR なら REQUEST_CHANGES を COMMENT へ下げる）。結果は `step_result` の形。エントリポイントと再エクスポートだけを持ち、部品は下の `gh_*` の 8 本にある | `cross-review`（`review_lib/` の未解決のスレッドと checks） |
@@ -157,7 +157,7 @@ references は形と状態の表を写さず、ここを指す（そのスクリ
 
 - 欠けが残るときは `stopped` と終了コード 6 で返し、`gaps` に 1 件以上を書く。人か LLM の判断を待つなら `gate`（10〜29）で返し、`gaps` を添えてよい
 - 未記録（書くはずの記録を書けなかった）は欠けとして返す
-- 置き場が無い・読めないことは欠けではなく、前提が無い（3）・読めない（2）で返す（下の「読む側の規則」）
+- 置き場が無い・読めないときは、前提が無い（3）・読めない（2）で返す（下の「読む側の規則」）
 - `ok` に `gaps` を添えた結果と、`gaps` の無い終了コード 6 は形の誤りで、`emit` は標準出力へ何も出さず理由を標準エラーへ出して 2 で終える
 - `emit` で終了コードを省くと、`ok` は 0、`gate` は 10、`stopped` は `gaps` があれば 6・無ければ 1 になる
 
