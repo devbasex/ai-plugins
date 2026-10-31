@@ -155,44 +155,50 @@ def verification_verdicts(block, record_repo):
     found = md.tables(block)
     if not found:
         return None
-    head = [c.strip() for c in found[0].header]
-    if "課題" not in head or "結果" not in head:
+    cols = _column_indices(found[0].header)
+    if cols is None:
         return None
-    ci, ri = head.index("課題"), head.index("結果")
-    ai = head.index("受け入れ条件") if "受け入れ条件" in head else None
     acc = {}
     for row in found[0].rows:
-        cs = [c.strip() for c in row]  # md は行のセルを見出しの数へ揃える
-        m = _ISSUE_CELL.match(cs[ci])
-        if not m:
+        parsed = _parse_verdict_row(row, cols, record_repo)
+        if parsed is None:
             continue
-        key = (m.group(1) or record_repo, int(m.group(2)))
-        ok = cs[ri].startswith("合格")
+        key, ok, num = parsed
         all_pass, passed, failed = acc.get(key, (True, set(), set()))
-        num = _CRITERION_CELL.match(cs[ai]) if ai is not None else None
-        if num:
-            (passed if ok else failed).add(int(num.group(1)))
+        if num is not None:
+            (passed if ok else failed).add(num)
         acc[key] = (all_pass and ok, passed, failed)
     if not acc:
         return None
     return {k: IssueRows(a, frozenset(p - f)) for k, (a, p, f) in acc.items()}
 
 
-_VERSION = re.compile(r"v?(\d+\.\d+\.\d+)")
+def _column_indices(header):
+    """見出しから (課題, 結果, 受け入れ条件) の列の位置を返す。受け入れ条件の列が無ければ 3 つ目は None。
+    課題か結果の列が無ければ None。"""
+    head = [c.strip() for c in header]
+    if "課題" not in head or "結果" not in head:
+        return None
+    ai = head.index("受け入れ条件") if "受け入れ条件" in head else None
+    return head.index("課題"), head.index("結果"), ai
+
+
+def _parse_verdict_row(row, cols, record_repo):
+    """1 行を (key, 合格か, 受け入れ条件の番号または None) に解く。課題を指さない行は None。"""
+    ci, ri, ai = cols
+    cs = [c.strip() for c in row]  # md は行のセルを見出しの数へ揃える
+    m = _ISSUE_CELL.match(cs[ci])
+    if not m:
+        return None
+    key = (m.group(1) or record_repo, int(m.group(2)))
+    num = _CRITERION_CELL.match(cs[ai]) if ai is not None else None
+    return key, cs[ri].startswith("合格"), int(num.group(1)) if num else None
 
 
 def version_verdicts(text, version, record_repo):
     """PR の本文とコメント（text）の `## リリース後テスト` のブロックのうち、`対象の版:` の基底が version の基底と
     一致する最後のブロックの表を読む（{(repo, number): IssueRows}）。無い・読めなければ空。"""
     import dist_record
-    import md
 
-    want = _VERSION.match(str(version))
-    lines = text.splitlines()
-    sections = [s for s in md.md_sections(text) if lines[s.heading.line].startswith("#")]
-    blocks = [
-        b
-        for b in dist_record._verify_blocks(lines, sections)
-        if want and (m := _VERSION.match(b["ver"] or "")) and m.group(1) == want.group(1)
-    ]
-    return (verification_verdicts("\n".join(blocks[-1]["lines"]), record_repo) or {}) if blocks else {}
+    block = dist_record.verify_block_for_base(text, version)
+    return (verification_verdicts(block, record_repo) or {}) if block is not None else {}

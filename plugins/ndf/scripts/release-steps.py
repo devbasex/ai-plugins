@@ -330,11 +330,8 @@ def base_version(root, pdir, ref):
         return None
 
 
-def plan_bump(root, pdir, plugin, old, new):
-    """`plugin` の版を `old` から `new` へ上げる箇所を集めた `BumpPlan` を返す（まだ書き換えない）。"""
-    ed = bump.BumpPlan(root, old, new)
-    desc_re = r'^\s*"description"\s*:.*\(v' + re.escape(old) + r"\)"
-
+def _bump_manifests(ed, pdir, old, desc_re):
+    """plugin.json 群の version と description の版を書き換える箇所を `ed` へ足す。"""
     for rel, _ in (
         (".claude-plugin/plugin.json", True),
         (".codex-plugin/plugin.json", False),
@@ -347,6 +344,9 @@ def plan_bump(root, pdir, plugin, old, new):
         if f"(v{old})" in f.read_text(encoding="utf-8"):
             ed.sub(f, desc_re, f"{rel} の description")
 
+
+def _bump_marketplace_and_readme(ed, root, plugin, old, desc_re):
+    """marketplace.json の description と README.md のプラグイン一覧表の版を書き換える箇所を `ed` へ足す。"""
     mp = root / ".claude-plugin" / "marketplace.json"
     if mp.is_file():
         s, e = bump.marketplace_range(ed.lines(mp), plugin)
@@ -361,13 +361,25 @@ def plan_bump(root, pdir, plugin, old, new):
         ed.sub(readme, r"^\| \*\*" + re.escape(plugin) + r"\*\* \|", "README.md のプラグイン一覧表")
     elif plugin in ("ndf", "playwright-kit"):
         ed.manual.append(f"README.md のプラグイン一覧表に {plugin} の行が無い")
-    if plugin == "ndf":
-        ed.sub(readme, r"\*\*NDFプラグイン v", "README.md の概要の版")
-        nr = pdir / "README.md"
-        ed.sub(nr, r"/plugins/cache/ai-plugins/ndf/", "plugins/ndf/README.md の Codex のパス例", count=2)
-        ed.sub(nr, r"ndf@ai-plugins\s+installed", "plugins/ndf/README.md の codex plugin list の出力例")
-        bump.versioning_doc(ed)
 
+
+def _bump_ndf_docs(ed, root, pdir):
+    """ndf だけが持つ版の記載（README 概要・Codex のパス例・list の出力例・版の文書）を `ed` へ足す。"""
+    ed.sub(root / "README.md", r"\*\*NDFプラグイン v", "README.md の概要の版")
+    nr = pdir / "README.md"
+    ed.sub(nr, r"/plugins/cache/ai-plugins/ndf/", "plugins/ndf/README.md の Codex のパス例", count=2)
+    ed.sub(nr, r"ndf@ai-plugins\s+installed", "plugins/ndf/README.md の codex plugin list の出力例")
+    bump.versioning_doc(ed)
+
+
+def plan_bump(root, pdir, plugin, old, new):
+    """`plugin` の版を `old` から `new` へ上げる箇所を集めた `BumpPlan` を返す（まだ書き換えない）。"""
+    ed = bump.BumpPlan(root, old, new)
+    desc_re = r'^\s*"description"\s*:.*\(v' + re.escape(old) + r"\)"
+    _bump_manifests(ed, pdir, old, desc_re)
+    _bump_marketplace_and_readme(ed, root, plugin, old, desc_re)
+    if plugin == "ndf":
+        _bump_ndf_docs(ed, root, pdir)
     return ed
 
 
@@ -859,6 +871,36 @@ def kept_sections(root, approval):
         raise StepError(f"前の承認資料 {approval} を読めない（書き換えずに止める）: {e}", 2)
 
 
+def included_pr_facts(prs, data, checks, repo):
+    """含む PR ごとの事実から、機械向けの items と承認資料の「含む PR」の行を作る。
+
+    data は PR 番号 → 取得済みの PR、checks は PR 番号 → CI の結果（pr_check_buckets の戻り）。"""
+    items, rows = [], []
+    for p in prs:
+        n, d = p.number, data.get(p.number) or {}
+        oid = (d.get("mergeCommit") or {}).get("oid") or ""
+        pr_checks = checks[n]
+        passed = sum(1 for c in pr_checks if c.get("bucket") == "pass")
+        url = d.get("url") or f"https://github.com/{repo}/pull/{n}"
+        items.append(
+            {
+                "kind": "pr",
+                "name": f"#{n}",
+                "result": str(d.get("state", "")).lower() or "unknown",
+                "url": url,
+                "title": d.get("title", ""),
+                "merge_commit": oid,
+                "checks_passed": passed,
+                "checks": len(pr_checks),
+                "via": p.via,
+                "no_change": included.no_change(d),
+            }
+        )
+        facts = [str(d.get("state", "")), oid[:8] if oid else "—", f"CI {passed}/{len(pr_checks)}"]
+        rows.append(included.included_row(n, d.get("title", ""), facts, p.via, included.no_change(d)))
+    return items, rows
+
+
 def cmd_approval_facts(a):
     root = git_root(a.root)
     repo = repo_lib.owner_repo(root)
@@ -881,30 +923,8 @@ def cmd_approval_facts(a):
     ins = int(m.group(1)) if (m := re.search(r"(\d+) insertions?", stat)) else 0
     dels = int(m.group(1)) if (m := re.search(r"(\d+) deletions?", stat)) else 0
 
-    items, rows = [], []
-    for p in prs:
-        n, d = p.number, data.get(p.number) or {}
-        oid = (d.get("mergeCommit") or {}).get("oid") or ""
-        checks = pr_check_buckets(root, n)
-        passed = sum(1 for c in checks if c.get("bucket") == "pass")
-        url = d.get("url") or f"https://github.com/{repo}/pull/{n}"
-        items.append(
-            {
-                "kind": "pr",
-                "name": f"#{n}",
-                "result": str(d.get("state", "")).lower() or "unknown",
-                "url": url,
-                "title": d.get("title", ""),
-                "merge_commit": oid,
-                "checks_passed": passed,
-                "checks": len(checks),
-                "via": p.via,
-                "no_change": included.no_change(d),
-            }
-        )
-        facts = [str(d.get("state", "")), oid[:8] if oid else "—", f"CI {passed}/{len(checks)}"]
-        rows.append(included.included_row(n, d.get("title", ""), facts, p.via, included.no_change(d)))
-
+    checks = {p.number: pr_check_buckets(root, p.number) for p in prs}
+    items, rows = included_pr_facts(prs, data, checks, repo)
     compare = f"https://github.com/{repo}/compare/{prev}...{dev}"
     path = approval_present(
         TOOL,
@@ -1047,37 +1067,7 @@ def cmd_notes(a):
     migration = [f"- {i}" for *_, ms in notes for i in ms]
     fallback = sum(1 for *_, by_title, _ in notes if by_title)
     if path:
-        verified = [r for r in (a.verified or "").split(",") if r]
-        ref = a.ref or release_decl(root, a)[0]
-        decl = (release_decl(root, a)[0], repo_lib.owner_repo(root) or "", a.version, a.prs)
-        m = materials.approval_materials(
-            root,
-            decl,
-            getattr(a, "check_state", None),
-            prs,
-            data,
-            lambda r, n: issue_body(root, n) if materials.same_repo(r, decl[1]) else issue_body(root, n, repo=r),
-        )
-        results, machine = materials.check_lines(m), materials.risk_lines(m, bool(risks), materials.now_jst())
-        items = materials.write_approval(path, a.version, bullets, risks, verified, ref, migration, results, machine)
-        items += materials.items_of(m) + unmerged_items(skipped) + rep_items
-        emit(
-            result(
-                TOOL,
-                "ok",
-                f"提示物の欄を {len(notes)} 件の PR から書いた{unmerged_note(skipped)}",
-                items,
-                {
-                    "version": a.version,
-                    "prs": len(notes),
-                    "lines": len(bullets),
-                    "migration": len(migration),
-                    "approval": str(path),
-                    "unmerged": skipped,
-                    "replaced": gone,
-                },
-            )
-        )
+        _emit_approval_notes(root, a, path, prs, data, notes, bullets, risks, migration, skipped, rep_items, gone)
         return
     items = write_notes(root, a.version, plugin_of(root, a), bullets, migration) + unmerged_items(skipped) + rep_items
     emit(
@@ -1086,15 +1076,48 @@ def cmd_notes(a):
             "ok",
             f"{len(notes)} 件の PR の利用者向けの変化を書いた{unmerged_note(skipped)}",
             items,
-            {
-                "version": a.version,
-                "prs": len(notes),
-                "lines": len(bullets),
-                "migration": len(migration),
-                "fallback": fallback,
-                "unmerged": skipped,
-                "replaced": gone,
-            },
+            _notes_metrics(a, notes, bullets, migration, skipped, gone, fallback=fallback),
+        )
+    )
+
+
+def _notes_metrics(a, notes, bullets, migration, skipped, gone, **extra):
+    """notes の 2 つの経路に共通の metrics。経路ごとの鍵（approval / fallback）は extra で migration の後へ入れる。"""
+    return {
+        "version": a.version,
+        "prs": len(notes),
+        "lines": len(bullets),
+        "migration": len(migration),
+        **extra,
+        "unmerged": skipped,
+        "replaced": gone,
+    }
+
+
+def _emit_approval_notes(root, a, path, prs, data, notes, bullets, risks, migration, skipped, rep_items, gone):
+    """承認の資料（--approval）の経路: 資料を集めて提示物の欄を書き、結果を出す。"""
+    verified = [r for r in (a.verified or "").split(",") if r]
+    base = release_decl(root, a)[0]
+    ref = a.ref or base
+    decl = (base, repo_lib.owner_repo(root) or "", a.version, a.prs)
+    m = materials.approval_materials(
+        root,
+        decl,
+        getattr(a, "check_state", None),
+        prs,
+        data,
+        lambda r, n: issue_body(root, n) if materials.same_repo(r, decl[1]) else issue_body(root, n, repo=r),
+    )
+    results, machine = materials.check_lines(m), materials.risk_lines(m, bool(risks), materials.now_jst())
+    items = materials.write_approval(path, a.version, bullets, risks, verified, ref, migration, results, machine)
+    items += materials.items_of(m) + unmerged_items(skipped) + rep_items
+    emit(
+        result(
+            TOOL,
+            "ok",
+            f"提示物の欄を {len(notes)} 件の PR から書いた{unmerged_note(skipped)}",
+            items,
+            _notes_metrics(a, notes, bullets, migration, skipped, gone, approval=str(path)),
         )
     )
 

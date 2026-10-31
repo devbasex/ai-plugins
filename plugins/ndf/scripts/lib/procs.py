@@ -82,14 +82,19 @@ def pid_is_zombie(pid: int) -> bool:
 
 
 def cmdline_contains(pid: int, expected: str) -> bool | None:
-    """pid の起動の引数（空白でつないだもの）が `expected` を含むか（大文字と小文字を区別しない）。読めなければ None。"""
+    """pid の起動の引数（空白でつないだもの）が `expected` を含むか（大文字と小文字を区別しない）。読めなければ None。
+
+    空の引数も読めないとみなす。終了の途中（ゾンビになる前）の pid は、psutil が例外でなく `[]` を返す。
+    False（別のプロセス）と取ると、すぐ終わる CLI を監視が PIDFILE_BAD で止める（CI の不定の失敗）。
+    """
     p = _process(pid)
     if p is None:
         return None
     try:
-        return expected.lower() in " ".join(p.cmdline()).lower()
+        args = p.cmdline()
     except psutil.Error:
         return None
+    return expected.lower() in " ".join(args).lower() if args else None
 
 
 def parent_and_name(pid: int) -> tuple[int, str] | None:

@@ -137,9 +137,24 @@ class CloseContext:
         self.retry_cmd = shlex.join(["python3", str(Path(__file__).resolve()), *argv])
 
 
+def _issue_base(repo, n):
+    """課題 1 件の結果の項目の共通部分。"""
+    return {"kind": "issue", "repo": repo, "number": n}
+
+
+def _failed(base, reason, ctx):
+    """やり直しの cmd を添えた failed の項目。"""
+    return {**base, "result": "failed", "reason": reason, "cmd": ctx.retry_cmd}
+
+
+def _dry_run_result(state):
+    """試行（dry_run）の結果: CLOSED なら already_closed、それ以外は would_close。"""
+    return "already_closed" if state == "CLOSED" else "would_close"
+
+
 def close_one(ctx, repo, n):
     root, record_repo, comment, notes = ctx.root, ctx.record_repo, ctx.comment, ctx.notes
-    it = {"kind": "issue", "repo": repo, "number": n}
+    it = _issue_base(repo, n)
     before = issue_state(root, repo, n)
     if before is None:
         return {**it, "result": "failed", "reason": "before を読めない", "cmd": f"gh issue close {n} --repo {repo}"}
@@ -236,10 +251,10 @@ def _read_state_body(root, repo, n):
 
 def _judge_and_mark(a, ctx, repo, n, rows):
     """錠の中で状態と本文を読み、条件 2 と条件 3 を判定し、満たせば印を書く。(結果の項目か None, 印を付けた番号) を返す。"""
-    base = {"kind": "issue", "repo": repo, "number": n}
+    base = _issue_base(repo, n)
     got = _read_state_body(ctx.root, repo, n)
     if got is None:
-        return {**base, "result": "failed", "reason": UNREADABLE_BODY, "cmd": ctx.retry_cmd}, []
+        return _failed(base, UNREADABLE_BODY, ctx), []
     state, body = got
     ok, why, to_check = judge_acceptance(rows, acceptance.criteria(body), acceptance.pre_merge_numbers(body))
     own = repo == ctx.record_repo  # 他のリポジトリの課題の本文は書かない（I7）
@@ -251,13 +266,13 @@ def _judge_and_mark(a, ctx, repo, n, rows):
     if gap:  # 条件 3 を満たさない課題の本文は書かない
         return gap_item(base, state, gap), []
     if a.dry_run:
-        out = {**base, "result": "already_closed" if state == "CLOSED" else "would_close"}
+        out = {**base, "result": _dry_run_result(state)}
         return ({**out, "would_check": to_check} if own and to_check else out), []
     if not (own and to_check):
         return None, []
     new = acceptance.check_criteria(body, to_check)
     if not acceptance.only_marks(body, new) or not gh_rest.update_body(repo, n, new):
-        return {**base, "result": "failed", "reason": "受け入れ条件の印を書けない", "cmd": ctx.retry_cmd}, []
+        return _failed(base, "受け入れ条件の印を書けない", ctx), []
     return None, to_check
 
 
@@ -268,7 +283,7 @@ def _close_verified(a, ctx, repo, n, rows):
         with lock:
             done, checked = _judge_and_mark(a, ctx, repo, n, rows)
     except locks.LockTimeout:
-        return {"kind": "issue", "repo": repo, "number": n, "result": "failed", "reason": "本文の錠を取れない", "cmd": ctx.retry_cmd}
+        return _failed(_issue_base(repo, n), "本文の錠を取れない", ctx)
     if done is not None:
         return done
     out = close_one(ctx, repo, n)
@@ -276,7 +291,7 @@ def _close_verified(a, ctx, repo, n, rows):
 
 
 def _close_item(a, ctx, repo, n, kept_all, verdicts):
-    base = {"kind": "issue", "repo": repo, "number": n}
+    base = _issue_base(repo, n)
     if kept_all:
         return {**base, "result": "kept_open", "reason": kept_all}
     if verdicts is not None:
@@ -284,18 +299,18 @@ def _close_item(a, ctx, repo, n, kept_all, verdicts):
     if ctx.final_stage == STAGE_RETRO:
         got = _read_state_body(ctx.root, repo, n)
         if got is None:  # 記録の置き場を読めないときは記録があるとは読まない（I2）
-            return {**base, "result": "failed", "reason": UNREADABLE_BODY, "cmd": ctx.retry_cmd}
+            return _failed(base, UNREADABLE_BODY, ctx)
         state, body = got
         gap = final_stage_gap(ctx.final_stage, body, ctx.since)
         if gap:
             return gap_item(base, state, gap)
         if a.dry_run:
-            return {**base, "result": "already_closed" if state == "CLOSED" else "would_close"}
+            return {**base, "result": _dry_run_result(state)}
     if a.dry_run:
         st = issue_state(ctx.root, repo, n)
         return {
             **base,
-            "result": "already_closed" if st == "CLOSED" else "would_close",
+            "result": _dry_run_result(st),
             **({"reason": "状態を読めない"} if st is None else {}),
         }
     return close_one(ctx, repo, n)
@@ -318,72 +333,36 @@ def _close_summary(items, prs, dry_run, referenced):
 def _stop_no_issues(prs, refs):
     """スプリントの PR を読んだのに閉じる課題が 0 件。課題もボードも書かずに止まる（参照の状態は読まない）。"""
     seen = f"（PR が参照した番号: {' '.join(f'#{n}' for n in refs)}）" if refs else ""
+    _stop_close(
+        f"閉じる課題が 0 件（スプリントの PR {len(prs)} 本に closing keywords（GitHub が課題を自動で閉じるキーワード"
+        " Closes / Fixes / Resolves）が無く、--issues も無い）",
+        f"閉じる課題を --issues で渡して打ち直す{seen}",
+        {"issues": 0, "prs": len(prs)},
+    )
+
+
+def _stop_close(summary, nxt, metrics=None):
+    """閉じる前に止まる（items は空・終了コードは EXIT_UNREADABLE）。"""
     emit(
-        result(
-            TOOL,
-            "stopped",
-            f"閉じる課題が 0 件（スプリントの PR {len(prs)} 本に closing keywords（GitHub が課題を自動で閉じるキーワード"
-            " Closes / Fixes / Resolves）が無く、--issues も無い）",
-            [],
-            {"issues": 0, "prs": len(prs)},
-            next=f"閉じる課題を --issues で渡して打ち直す{seen}",
-        ),
+        result(TOOL, "stopped", summary, [], {"issues": 0} if metrics is None else metrics, next=nxt),
         EXIT_UNREADABLE,
     )
 
 
-def cmd_close(a):
-    if a.record_pr in (0, RECORD_UNKNOWN) and not a.issues:
-        what = "0（本番の記録なし）" if a.record_pr == 0 else f"{RECORD_UNKNOWN}（記録の置き場が分からない）"
-        emit(
-            result(
-                TOOL,
-                "stopped",
-                f"--record-pr {what} は --issues と一緒に渡す",
-                [],
-                {"issues": 0},
-                next="閉じる課題を --issues で渡して打ち直す",
-            ),
-            EXIT_UNREADABLE,
-        )
-    root = git_root(a.root)
-    record_repo = _record_repo(a, root)
+def _collect_close_issues(a, root, record_repo, prs):
+    """閉じる課題（スプリントの PR が閉じる課題と --issues）と、PR が参照しただけの番号を集める。0 件なら止まる。"""
     given = [(record_repo, n) for n in a.issues or []]
-    rec, prs = _read_sprint_record(a, root, record_repo)
     if not prs and not given:
-        emit(
-            result(
-                TOOL,
-                "stopped",
-                "スプリントの PR の一覧が取れない。推測せず運用者に一覧を聞く",
-                [],
-                {"issues": 0},
-                next="運用者に一覧を聞き、--prs で渡して打ち直す",
-            ),
-            EXIT_UNREADABLE,
-        )
+        _stop_close("スプリントの PR の一覧が取れない。推測せず運用者に一覧を聞く", "運用者に一覧を聞き、--prs で渡して打ち直す")
     issues, refs = sprint_issues(root, record_repo, prs) if prs else ([], [])
     issues += [k for k in given if k not in issues]
     if not issues:
         _stop_no_issues(prs, refs)
+    return issues, refs
 
-    kept_all, verdicts = _closing_blocker(a, rec, record_repo)
 
-    items = []
-    comment = f"スプリント（{a.label}）を通りました" if a.label else "スプリントの終わりの工程を通りました"
-    since = NO_BASE if a.record_pr == 0 else rec.get("dist_comment_id")
-    ctx = CloseContext(root, record_repo, comment, a.argv, a.final_stage, since)
-    notes = ctx.notes
-    for repo, n in issues:
-        items.append(_close_item(a, ctx, repo, n, kept_all, verdicts))
-    refs_items = referenced_items(root, record_repo, refs, issues)
-    items += refs_items
-
-    count, metrics, summary = _close_summary(items, prs, a.dry_run, referenced=len(refs_items))
-    metrics["final_stage"] = a.final_stage
-    decisions = [
-        {"decision": f"最終工程を {a.final_stage} として判定した", "basis": f"--final-stage {a.final_stage}（省略時は{STAGE_RETRO}）"}
-    ]
+def _emit_close_result(a, items, notes, metrics, summary, count, decisions):
+    """結果を出す: 失敗があれば止める → 記録の置き場が分からなければ閉じない旨 → 通常（最終工程の記録の欠けを案内）。"""
     if count["failed"]:
         emit(
             result(
@@ -404,6 +383,35 @@ def cmd_close(a):
     if any(FINAL_GAP_LEAD in (i.get("reason") or "") for i in items):
         nxt = "最終工程の記録が無い課題は、その工程（振り返りなど）を通してから打ち直す。前の版で工程を通った課題は確かめて手で閉じる"
     emit(result(TOOL, "ok", summary, items + notes, metrics, next=nxt, decisions=decisions))
+
+
+def cmd_close(a):
+    if a.record_pr in (0, RECORD_UNKNOWN) and not a.issues:
+        what = "0（本番の記録なし）" if a.record_pr == 0 else f"{RECORD_UNKNOWN}（記録の置き場が分からない）"
+        _stop_close(f"--record-pr {what} は --issues と一緒に渡す", "閉じる課題を --issues で渡して打ち直す")
+    root = git_root(a.root)
+    record_repo = _record_repo(a, root)
+    rec, prs = _read_sprint_record(a, root, record_repo)
+    issues, refs = _collect_close_issues(a, root, record_repo, prs)
+
+    kept_all, verdicts = _closing_blocker(a, rec, record_repo)
+
+    items = []
+    comment = f"スプリント（{a.label}）を通りました" if a.label else "スプリントの終わりの工程を通りました"
+    since = NO_BASE if a.record_pr == 0 else rec.get("dist_comment_id")
+    ctx = CloseContext(root, record_repo, comment, a.argv, a.final_stage, since)
+    notes = ctx.notes
+    for repo, n in issues:
+        items.append(_close_item(a, ctx, repo, n, kept_all, verdicts))
+    refs_items = referenced_items(root, record_repo, refs, issues)
+    items += refs_items
+
+    count, metrics, summary = _close_summary(items, prs, a.dry_run, referenced=len(refs_items))
+    metrics["final_stage"] = a.final_stage
+    decisions = [
+        {"decision": f"最終工程を {a.final_stage} として判定した", "basis": f"--final-stage {a.final_stage}（省略時は{STAGE_RETRO}）"}
+    ]
+    _emit_close_result(a, items, notes, metrics, summary, count, decisions)
 
 
 class Parser(argparse.ArgumentParser):

@@ -31,14 +31,6 @@ def defer_closing(text):
     return CLOSING.sub(repl, text or ""), targets
 
 
-def defer_for_base(root, base, text):
-    """宛先 base の Pull Request の本文を、マージで GitHub が課題を閉じるとき（lib/repo.py の merge_closes_issues）だけ
-    defer_closing に通す。(本文, 置き換えた指し先の字面の並び) を返す。`pr-steps.py` と `supervise_lib/pr.py` が使う。"""
-    import repo  # git を読む層。本文だけを扱う関数の読み手に git の依存を持ち込まない
-
-    return defer_closing(text) if repo.merge_closes_issues(root, base) else (text or "", [])
-
-
 def closing_words(text):
     """closing keywords の一致の字面（`Closes #12` など）。"""
     return [m.group(0) for m in CLOSING.finditer(text or "")]

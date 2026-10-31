@@ -31,60 +31,79 @@ def repo_owner_name(root):
     return owner, name
 
 
-def existing_pr(root, branch):
-    """head が branch の OPEN の PR（{number, url, isDraft, baseRefName}）。無ければ None。上限なら REST。"""
-    p = gh_parts.gh(["pr", "list", "--head", branch, "--state", "open", "--json", "number,url,isDraft,baseRefName"], cwd=root)
+def _gh_or_rest(root, args, rest_path, parse_rest, *, label, fail, rest_fail, fail_code=1, empty=""):
+    """gh を呼び、成功なら JSON を返す。上限なら REST（rest_path(owner, name)）の出力を parse_rest で読む。"""
+    p = gh_parts.gh(args, cwd=root)
     if p.returncode == 0:
         try:
-            prs = json.loads(p.stdout or "[]")
+            return json.loads(p.stdout or empty)
         except ValueError:
-            raise StepError("gh pr list の出力を読めない", EXIT_UNREADABLE)
-        return prs[0] if prs else None
+            raise StepError(f"{label} の出力を読めない", EXIT_UNREADABLE)
     if not gh_parts.is_rate_limited(p.stderr):
-        raise StepError(f"gh pr list が失敗: {p.stderr.strip()[:300]}", EXIT_PRECONDITION)
+        raise StepError(f"{fail}: {p.stderr.strip()[:300]}", fail_code)
     owner, name = repo_owner_name(root)
-    q = gh_parts.gh(["api", f"repos/{owner}/{name}/pulls?head={owner}:{branch}&state=open"], cwd=root)
+    q = gh_parts.gh(["api", rest_path(owner, name)], cwd=root)
     if q.returncode != 0:
-        raise StepError(f"REST でも既存の PR を引けない: {q.stderr.strip()[:300]}")
-    try:
-        prs = json.loads(q.stdout or "[]")
-    except ValueError:
-        raise StepError("REST の出力を読めない", EXIT_UNREADABLE)
-    if not prs:
-        return None
-    pr = prs[0]
-    return {
-        "number": pr["number"],
-        "url": pr["html_url"],
-        "isDraft": pr.get("draft", False),
-        "baseRefName": pr.get("base", {}).get("ref", ""),
-    }
+        raise StepError(f"{rest_fail}: {q.stderr.strip()[:300]}")
+    return parse_rest(q.stdout)
+
+
+def existing_pr(root, branch):
+    """head が branch の OPEN の PR（{number, url, isDraft, baseRefName}）。無ければ None。上限なら REST。"""
+
+    def parse_rest(out):
+        try:
+            prs = json.loads(out or "[]")
+        except ValueError:
+            raise StepError("REST の出力を読めない", EXIT_UNREADABLE)
+        if not prs:
+            return []
+        pr = prs[0]
+        return [
+            {
+                "number": pr["number"],
+                "url": pr["html_url"],
+                "isDraft": pr.get("draft", False),
+                "baseRefName": pr.get("base", {}).get("ref", ""),
+            }
+        ]
+
+    prs = _gh_or_rest(
+        root,
+        ["pr", "list", "--head", branch, "--state", "open", "--json", "number,url,isDraft,baseRefName"],
+        lambda owner, name: f"repos/{owner}/{name}/pulls?head={owner}:{branch}&state=open",
+        parse_rest,
+        label="gh pr list",
+        fail="gh pr list が失敗",
+        rest_fail="REST でも既存の PR を引けない",
+        fail_code=EXIT_PRECONDITION,
+        empty="[]",
+    )
+    return prs[0] if prs else None
 
 
 def pr_for_report(root, number):
-    fields = "number,title,url,isDraft,baseRefName,headRefName,body"
-    p = gh_parts.gh(["pr", "view", str(number), "--json", fields], cwd=root)
-    if p.returncode == 0:
-        try:
-            return json.loads(p.stdout)
-        except ValueError:
-            raise StepError("gh pr view の出力を読めない", EXIT_UNREADABLE)
-    if not gh_parts.is_rate_limited(p.stderr):
-        raise StepError(f"gh pr view {number} が失敗: {p.stderr.strip()[:300]}")
-    owner, name = repo_owner_name(root)
-    q = gh_parts.gh(["api", f"repos/{owner}/{name}/pulls/{number}"], cwd=root)
-    if q.returncode != 0:
-        raise StepError(f"REST でも PR を引けない: {q.stderr.strip()[:300]}")
-    d = json.loads(q.stdout)
-    return {
-        "number": d["number"],
-        "title": d["title"],
-        "url": d["html_url"],
-        "isDraft": d.get("draft", False),
-        "baseRefName": d["base"]["ref"],
-        "headRefName": d["head"]["ref"],
-        "body": d.get("body") or "",
-    }
+    def parse_rest(out):
+        d = json.loads(out)
+        return {
+            "number": d["number"],
+            "title": d["title"],
+            "url": d["html_url"],
+            "isDraft": d.get("draft", False),
+            "baseRefName": d["base"]["ref"],
+            "headRefName": d["head"]["ref"],
+            "body": d.get("body") or "",
+        }
+
+    return _gh_or_rest(
+        root,
+        ["pr", "view", str(number), "--json", "number,title,url,isDraft,baseRefName,headRefName,body"],
+        lambda owner, name: f"repos/{owner}/{name}/pulls/{number}",
+        parse_rest,
+        label="gh pr view",
+        fail=f"gh pr view {number} が失敗",
+        rest_fail="REST でも PR を引けない",
+    )
 
 
 def target_pr(root, branch, a, must_exist):

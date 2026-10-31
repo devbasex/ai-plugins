@@ -582,13 +582,15 @@ def test_the_scope_test_does_not_change_the_other_limits():
 
 
 @pytest.mark.parametrize("name", [ts.LOCAL_FULL, ts.ROUND_ONLY])
-def test_other_strategies_ignore_the_scope_test(name):
-    """AC12: local-full / round-only は max(0.10·B, 3·w) のまま。s を渡しても使わない。"""
+def test_other_strategies_take_the_init_test_estimate(name):
+    """#2047 の I1: 戦略を問わず、s を渡せば着手前の上限は max(0.10·B, 3·s)。渡さなければ max(0.10·B, 3·w) のまま。"""
     strategy = ts.Strategy(
         name, "args", [ts.Suite("unit", "pytest .", paths=["."])], round_command="pytest ." if name == ts.ROUND_ONLY else None
     )
-    assert ts.limits(strategy, 30, whole_seconds_value=424.0, scope_seconds=900.0, scope_source="history")["init_test_timeout"] == 1272
-    assert ts.limits(strategy, 30, scope_seconds=900.0, scope_source="history")["init_test_timeout"] == 180
+    # 手元の全体テストの直近の実測 m = 620 秒が w = 1,518 秒より先に効く（3·m = 1,860 秒）
+    assert ts.limits(strategy, 30, whole_seconds_value=1518.0, scope_seconds=620.0, scope_source="recent")["init_test_timeout"] == 1860
+    assert ts.limits(strategy, 30, whole_seconds_value=424.0)["init_test_timeout"] == 1272
+    assert ts.limits(strategy, 30)["init_test_timeout"] == 180
 
 
 def test_supervise_limits_stay_the_same():

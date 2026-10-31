@@ -403,15 +403,13 @@ class RunState:
 
     def _step_rows(self) -> str:
         """LLM を使ったステップの表の行。無ければ「無し」の 1 行。"""
-        return (
-            "\n".join(
-                f"| {e['id']} | {e['llm']['turns']} | {e.get('seconds', '')} | {e['llm']['cache_read']} | "
-                f"{e['llm']['cache_write']} | {e['llm']['output']} | ${e['llm']['cost']:.3f} |"
-                for e in self.log
-                if e.get("llm")
-            )
-            or "| 無し | | | | | | |"
-        )
+        rows = [
+            f"| {e['id']} | {e['llm']['turns']} | {e.get('seconds', '')} | {e['llm']['cache_read']} | "
+            f"{e['llm']['cache_write']} | {e['llm']['output']} | ${e['llm']['cost']:.3f} |"
+            for e in self.log
+            if e.get("llm")
+        ]
+        return "\n".join(rows) or "| 無し | | | | | | |"
 
     def _extra_lines(self) -> str:
         """認証の切り替え・利用上限・遅れの行。記録があるものだけを出す。"""
@@ -450,7 +448,7 @@ class RunState:
         return extra
 
     def write_report(self, plan: dict, result: str, reason: str) -> str:
-        """`## フェーズの報告` を組み、`report.md` へ書いて返す。"""
+        """`## フェーズの報告` を組み、`report.md` へ書いて返す。欠けを残して進んだステップは欠けの理由を写す（#2047 の決定 5）。"""
         l = self.llm
         self.read_worker_lines()
         pc = self.pcount
@@ -460,19 +458,18 @@ class RunState:
             if "counts" in e:
                 counts[e["id"]] = e["counts"]
         counts_line = "; ".join(f"{k}: {counts_text(v)}" for k, v in counts.items()) or "無し"
+        gaps = [
+            f"{e['id']}（" + ", ".join(f"{g.get('name') or g.get('kind')}: {g.get('reason')}" for g in e["gaps"]) + "）"
+            for e in self.log
+            if e.get("gaps")
+        ]
         if self.gates:
             gate_line = "; ".join(f"ステップ {g['id']}（exit={g['exit']}）" for g in self.gates)
         else:
             gate_line = "本番の系へ届く操作" if result == "関門" else "無し"
-        presented = (
-            ", ".join(
-                [
-                    *(g["presentation"] for g in self.gates if g.get("presentation")),
-                    *(e["presentation"] for e in self.log if e.get("gate_as_ok") and e.get("presentation")),
-                ]
-            )
-            or "無し"
-        )
+        shown = [g["presentation"] for g in self.gates if g.get("presentation")]
+        shown += [e["presentation"] for e in self.log if e.get("gate_as_ok") and e.get("presentation")]
+        presented = ", ".join(shown) or "無し"
         text = f"""## フェーズの報告
 
 - フェーズ: {plan.get("フェーズ")}
@@ -488,6 +485,7 @@ class RunState:
 - 理由: {reason}
 - 通ったステップ: {steps}
 - 件数: {counts_line}
+- 欠けを残して進んだステップ: {"; ".join(gaps) or "無し"}
 - LLM の使用量: 入力 {l["input"]} / cache read {l["cache_read"]} / cache write {l["cache_write"]} / 出力 {l["output"]} / ${l["cost"]:.3f}
 - CLI（drive・work の中）: {usage_aggregate.runtimes_text(self.log)}
 - 記録: {self.dir}

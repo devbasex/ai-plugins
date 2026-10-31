@@ -106,3 +106,64 @@ def test_readopt_round_launches_the_implement_cli_for_tested_items():
     d, calls = _readopt_drive(["verified", "tested"])
     d.readopt_rounds()
     assert calls == ["readopt", "cli:add-tests", "merge-tests", "cli:implement", "merge-implement", "verify", "readopt"]
+
+
+# ---------- #2047: 時間の枠の不足は飛ばした欠けの残る結果、下限まで上げたらステップの延長 ----------
+
+
+@pytest.mark.parametrize(
+    "kind, detail",
+    [
+        ("window", "要る下限 61 分 > 想定最大時間 30 分（着手前のテスト 495.0 秒）"),
+        ("init-timeout", "着手前のテストが上限 180 秒で終わらなかった"),
+    ],
+)
+def test_a_window_shortage_returns_the_skipped_gap(tmp_path, monkeypatch, capsys, kind, detail):
+    """I5: init の SKIP だけを、gaps 1 件の stopped・終了コード 6 で返す。summary と理由に「落ちた」「失敗」を入れない。"""
+
+    def fake(cmd, env=None, cwd=None):
+        return 4, f"SKIP={kind}\nSKIP_DETAIL='{detail}'\n"
+
+    monkeypatch.setattr(rf, "call", fake)
+    with pytest.raises(SystemExit) as e:
+        rf.main(["5"])
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert e.value.code == 6
+    assert out["status"] == "stopped"
+    assert out["metrics"] == {"skipped": {"kind": kind, "reason": detail}, "exit": 4}
+    assert out["gaps"] == [{"kind": "refactor", "name": kind, "reason": f"時間の枠に収まらず飛ばした: {detail}"}]
+    for text in (out["summary"], out["gaps"][0]["reason"]):
+        assert "落ちた" not in text and "失敗" not in text
+
+
+def _started_drive(tmp_path, monkeypatch, source: str):
+    """init が BUDGET_SOURCE を返す start を、子を呼ばずに打つ。延長のファイルのパスを返す。"""
+    target = tmp_path / "01-refactor.extend.json"
+    monkeypatch.setenv(drive_pause.EXTEND_ENV, str(target))
+    d = rf.Drive(5, [])
+    out = f"ID=7\nTMP_DIR={tmp_path}\nBUDGET_MINUTES=40\nBUDGET_SOURCE={source}\n"
+    monkeypatch.setattr(rf, "call", lambda cmd, env=None, cwd=None: (0, out if "init" in cmd else ""))
+    d.start()
+    return target
+
+
+def test_a_floor_budget_extends_the_step(tmp_path, monkeypatch):
+    """決定 4: 下限まで上げた想定最大時間（40 分）の秒を延長のファイルへ書く。"""
+    target = _started_drive(tmp_path, monkeypatch, "floor")
+    assert drive_pause.read_extension(target) == (2400.0, "想定最大時間を下限の 40 分へ上げた")
+
+
+@pytest.mark.parametrize("source", ["default", "explicit"])
+def test_other_budget_sources_do_not_extend_the_step(tmp_path, monkeypatch, source):
+    assert not _started_drive(tmp_path, monkeypatch, source).exists()
+
+
+def test_the_extension_never_moves_back(tmp_path, monkeypatch):
+    """I7: 後から小さい秒を書いても、延長のファイルの秒は前へ戻らない。"""
+    target = tmp_path / "x.extend.json"
+    monkeypatch.setenv(drive_pause.EXTEND_ENV, str(target))
+    assert drive_pause.write_extension(6174, "着手前のテスト")
+    assert drive_pause.write_extension(2400, "下限")
+    assert drive_pause.read_extension(target) == (6174.0, "着手前のテスト")
+    monkeypatch.delenv(drive_pause.EXTEND_ENV)
+    assert not drive_pause.write_extension(9000, "エンジンの外")

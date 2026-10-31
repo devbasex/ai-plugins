@@ -18,6 +18,9 @@ from pathlib import Path
 import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import inproc  # noqa: E402
+
 PY = sys.executable
 SECRET = "AKIAABCDEFGHIJKLMNOP"
 DB_URL = "mysql://app:hunter2secret@db.internal:3306/app"
@@ -142,7 +145,7 @@ def plain(tmp_path):
 
 
 def run(env, *args, cwd=None):
-    p = subprocess.run([PY, str(SCRIPTS / "project-decl.py"), *args], capture_output=True, text=True, env=env, cwd=cwd)
+    p = inproc.run(SCRIPTS / "project-decl.py", *args, env=env, cwd=cwd)
     lines = p.stdout.strip().splitlines()
     try:
         out = json.loads(lines[-1]) if lines else None
