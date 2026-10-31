@@ -92,6 +92,28 @@ def cmd_report(a, ctx):
     emit(result(ctx.tool, "stopped" if gaps else "ok", summary, items, metrics, gaps=gaps))
 
 
+def next_round(prev, actions, buckets, closed, waits) -> dict:
+    """同じ回（前の candidates 以降）の apply を足し合わせた記録。report がこれを読む。
+
+    区分と結果は課題の番号ごとに持ち、同じ番号は後の apply の値を採る（承認後の打ち直しが前の承認待ちを消す）。
+    前の apply の記録が番号ごとの値を持たない（前の版の記録）なら足し合わせられないので、`lost` を立てて回の終わりまで残す。
+    """
+    verdict_of = {**(prev.get("verdict_of") or {}), **{str(act["number"]): act["verdict"] for act in actions}}
+    result_of = dict(prev.get("result_of") or {})
+    for bucket, numbers in buckets.items():
+        result_of.update({str(n): bucket for n in numbers})
+    lost = bool(prev.get("lost")) or (prev.get("runs", 0) > 0 and "verdict_of" not in prev)
+    return {
+        "applied": sorted(set(prev.get("applied", [])) | set(buckets["applied"])),
+        "closed": sorted(set(prev.get("closed", [])) | set(closed)),
+        "waits": prev.get("waits", []) + waits,
+        "runs": prev.get("runs", 0) + 1,
+        "verdict_of": verdict_of,
+        "result_of": result_of,
+        **({"lost": True} if lost else {}),
+    }
+
+
 def _round_verdicts(am, rnd) -> tuple[dict, list, list]:
     """同じ回の区分の内訳・承認待ち・返した課題。番号ごとの記録（後の apply の値）から数え、無ければ最後の apply の値。"""
     if "verdict_of" not in rnd:

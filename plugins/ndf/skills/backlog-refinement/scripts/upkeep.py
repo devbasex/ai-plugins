@@ -465,19 +465,6 @@ def _apply_one(gh, ms, repo, act, rec, record, hold=None):
         raise
 
 
-def _round_by_number(prev, actions, buckets) -> dict:
-    """同じ回の区分と結果を課題の番号ごとに持つ。同じ番号は後の apply の値を採る（承認後の打ち直しが前の承認待ちを消す）。
-
-    前の apply の記録が番号ごとの値を持たない（前の版の記録）なら足し合わせられないので、`lost` を立てて回の終わりまで残す。
-    """
-    verdict_of = {**(prev.get("verdict_of") or {}), **{str(act["number"]): act["verdict"] for act in actions}}
-    result_of = dict(prev.get("result_of") or {})
-    for bucket, numbers in buckets.items():
-        result_of.update({str(n): bucket for n in numbers})
-    lost = bool(prev.get("lost")) or (prev.get("runs", 0) > 0 and "verdict_of" not in prev)
-    return {"verdict_of": verdict_of, "result_of": result_of, **({"lost": True} if lost else {})}
-
-
 def _apply_outcome(repo, actions, buckets, partial, why_partial, prev, waits, rp):
     """区分ごとの課題番号から metrics・要約・終了の状態・次の手を作る。"""
     closed = [
@@ -487,13 +474,7 @@ def _apply_outcome(repo, actions, buckets, partial, why_partial, prev, waits, rp
         **buckets,
         "closed": closed,
         "waits": waits,
-        "round": {
-            "applied": sorted(set(prev.get("applied", [])) | set(buckets["applied"])),
-            "closed": sorted(set(prev.get("closed", [])) | set(closed)),
-            "waits": prev.get("waits", []) + waits,
-            "runs": prev.get("runs", 0) + 1,
-            **_round_by_number(prev, actions, buckets),
-        },
+        "round": upkeep_report.next_round(prev, actions, buckets, closed, waits),
         "partial": partial,
         "verdicts": {v: sum(1 for act in actions if act["verdict"] == v) for v in VERDICTS},
         "tables": rp.tables,
