@@ -465,6 +465,19 @@ def _apply_one(gh, ms, repo, act, rec, record, hold=None):
         raise
 
 
+def _round_by_number(prev, actions, buckets) -> dict:
+    """同じ回の区分と結果を課題の番号ごとに持つ。同じ番号は後の apply の値を採る（承認後の打ち直しが前の承認待ちを消す）。
+
+    前の apply の記録が番号ごとの値を持たない（前の版の記録）なら足し合わせられないので、`lost` を立てて回の終わりまで残す。
+    """
+    verdict_of = {**(prev.get("verdict_of") or {}), **{str(act["number"]): act["verdict"] for act in actions}}
+    result_of = dict(prev.get("result_of") or {})
+    for bucket, numbers in buckets.items():
+        result_of.update({str(n): bucket for n in numbers})
+    lost = bool(prev.get("lost")) or (prev.get("runs", 0) > 0 and "verdict_of" not in prev)
+    return {"verdict_of": verdict_of, "result_of": result_of, **({"lost": True} if lost else {})}
+
+
 def _apply_outcome(repo, actions, buckets, partial, why_partial, prev, waits, rp):
     """区分ごとの課題番号から metrics・要約・終了の状態・次の手を作る。"""
     closed = [
@@ -479,6 +492,7 @@ def _apply_outcome(repo, actions, buckets, partial, why_partial, prev, waits, rp
             "closed": sorted(set(prev.get("closed", [])) | set(closed)),
             "waits": prev.get("waits", []) + waits,
             "runs": prev.get("runs", 0) + 1,
+            **_round_by_number(prev, actions, buckets),
         },
         "partial": partial,
         "verdicts": {v: sum(1 for act in actions if act["verdict"] == v) for v in VERDICTS},
@@ -541,6 +555,10 @@ def cmd_apply(a):
     ms = Milestones(gh)
     buckets = {k: [] for k in ("applied", "skipped_changed", "unchanged", "already", "needs_approval", "returned", "failed", "pending")}
     items, partial, why_partial = [], False, ""
+    # 同じ回（前の candidates 以降）の打ち直しを足し合わせ、承認後・partial 後の報告から前の反映・区分・待ちを落とさない。
+    # 書き込む前に読み、前の記録が読めないときは 1 件も書かずに止める
+    prev_out = _read_state(sd / "apply.json")
+    prev = (((prev_out or {}).get("metrics") or {}).get("round") or {"runs": 1}) if prev_out is not None else {}
     rp = RC.RankPlan(plan, sd, _read_state)
     actions = [] if rp.stale else plan["actions"]  # rank.json と合わない plan は何も書かない
     for idx, act in enumerate(actions):
@@ -571,8 +589,6 @@ def cmd_apply(a):
         partial, why_partial = True, str(e)
     rp.update_rejected()
 
-    # 同じ回（前の candidates 以降）の打ち直しを足し合わせ、承認後・partial 後の報告から前の反映と待ちを落とさない
-    prev = ((_read_state(sd / "apply.json") or {}).get("metrics") or {}).get("round") or {}
     status, code, summary, metrics, pres, nxt = _apply_outcome(repo, actions, buckets, partial, why_partial, prev, gh.waits, rp)
     out = result(TOOL, status, summary, items, metrics, presentation_path=pres, next=nxt)
     jsonio.write_atomic(sd / "apply.json", out, indent=1)

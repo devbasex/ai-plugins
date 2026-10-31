@@ -14,7 +14,7 @@ def cmd_report(a, ctx):
     cand, app, rank = (ctx.read_state(sd / f"{f}.json") for f in ("candidates", "apply", "rank"))
     if cand is None and app is None and rank is None:
         raise StepError(f"記録が無い（candidates も apply もまだ打っていない）: {sd}", EXIT_PRECONDITION)
-    items, metrics = [], {"repo": repo}
+    items, metrics, gaps = [], {"repo": repo}, []
     if cand:
         cm = cand["metrics"]
         metrics.update(
@@ -41,15 +41,26 @@ def cmd_report(a, ctx):
         am = app["metrics"]
         rnd = am.get("round") or {**am, "runs": 1}  # round を持たない前の版の記録は、最後の 1 回だけを数える
         applied, closed, waits = rnd["applied"], rnd["closed"], rnd.get("waits", [])
+        verdicts, needs_approval, returned = _round_verdicts(am, rnd)
+        if rnd.get("lost") or (rnd["runs"] > 1 and "verdict_of" not in rnd):
+            gaps.append(
+                {
+                    "kind": "record",
+                    "name": "apply.json",
+                    "reason": "同じ回の前の apply の区分が記録に無く、区分の内訳・承認待ち・返した課題を足し合わせられない。"
+                    "candidates から打ち直す",
+                }
+            )
         metrics.update(
             {
-                "verdicts": am["verdicts"],
+                "verdicts": verdicts,
                 "applied": len(applied),
                 "closed": len(closed),
                 "apply_runs": rnd["runs"],
-                "returned": len(am["returned"]),
+                "returned": len(returned),
+                "returned_numbers": returned,
                 "skipped_changed": am["skipped_changed"],
-                "needs_approval": am["needs_approval"],
+                "needs_approval": needs_approval,
                 "failed": am["failed"],
                 "pending": am["pending"],
                 "partial": am["partial"],
@@ -62,13 +73,13 @@ def cmd_report(a, ctx):
                 "kind": "section",
                 "name": "区分の内訳",
                 "result": "ok",
-                "value": "・".join(f"{v} {c}" for v, c in am["verdicts"].items() if c),
+                "value": "・".join(f"{v} {c}" for v, c in verdicts.items() if c),
             },
             {
                 "kind": "section",
                 "name": "反映",
                 "result": "partial" if am["partial"] else "ok",
-                "value": f"直した {len(applied) - len(closed)} 件・閉じた {len(closed)} 件・返した {len(am['returned'])} 件",
+                "value": f"直した {len(applied) - len(closed)} 件・閉じた {len(closed)} 件・返した {len(returned)} 件",
             },
             {"kind": "section", "name": "待った回数", "result": "ok", "value": f"{len(waits)} 回・計 {metrics['wait_seconds']:g} 秒"},
         ]
@@ -76,7 +87,20 @@ def cmd_report(a, ctx):
     items += rank_items
     metrics.update(rank_metrics)
     summary = " / ".join(f"{i['name']}: {i['value']}" for i in items)
-    emit(result(ctx.tool, "ok", summary, items, metrics))
+    if gaps:  # 足し合わせられない値を 0 件の ok と読ませない
+        summary = "足し合わせられない記録がある: " + gaps[0]["reason"] + " / " + summary
+    emit(result(ctx.tool, "stopped" if gaps else "ok", summary, items, metrics, gaps=gaps))
+
+
+def _round_verdicts(am, rnd) -> tuple[dict, list, list]:
+    """同じ回の区分の内訳・承認待ち・返した課題。番号ごとの記録（後の apply の値）から数え、無ければ最後の apply の値。"""
+    if "verdict_of" not in rnd:
+        return am["verdicts"], am["needs_approval"], am["returned"]
+    verdicts = {v: 0 for v in am["verdicts"]}
+    for v in rnd["verdict_of"].values():
+        verdicts[v] = verdicts.get(v, 0) + 1
+    by = rnd.get("result_of") or {}
+    return verdicts, *(sorted(int(n) for n, b in by.items() if b == want) for want in ("needs_approval", "returned"))
 
 
 def report_sections(rank_out, app) -> tuple[list, dict]:
