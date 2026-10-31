@@ -320,9 +320,8 @@ class FakeEnding(FakeReview):
         ("approved", {"verified": True, "remaining_open": 0, "commit": None}, "approved"),
         ("approved", {"verified": False, "remaining_open": 0, "commit": None}, "unverified"),
         ("approved", {"verified": True, "remaining_open": 0, "commit": "abc"}, "unverified"),
-        ("max_rounds", {"verified": True, "remaining_open": 0, "commit": None}, "max_rounds"),
     ],
-    ids=["a-approved", "b-unverified-sweep", "c-sweep-commit", "d-max-rounds"],
+    ids=["a-approved", "b-unverified-sweep", "c-sweep-commit"],
 )
 def test_the_answer_file_holds_the_review_status_of_the_state(tmp_path, monkeypatch, capsys, final, sweep, want):
     """AC6: 回答ファイルの値は終わった状態の `review_status()` と一致する。gate では書かず、init へは渡さない。"""
@@ -342,6 +341,22 @@ def test_the_answer_file_holds_the_review_status_of_the_state(tmp_path, monkeypa
     answer.unlink()
     code, out = run_main(cr, argv, capsys)
     assert code == 0 and json.loads(answer.read_text()) == {"review_status": want}
+
+
+@pytest.mark.parametrize("final", ["max_rounds", "oscillation", "error"])
+def test_an_unconverged_end_is_not_ok(tmp_path, monkeypatch, capsys, final):
+    """#2143: 最終スイープまで終えても `final` が approved 以外なら stopped で返す。報告・件数・回答ファイルは残す。"""
+    fake = FakeEnding(tmp_path, final, {"verified": True, "remaining_open": 0, "commit": None})
+    monkeypatch.setattr(cr, "call", fake)
+    answer = tmp_path / "answer.json"
+    argv = ["5", "--result-file", str(answer)]
+    code, out = run_main(cr, argv, capsys)
+    assert code == 21
+    Path(out["items"][0]["result_file"]).write_text("{}")
+    code, out = run_main(cr, argv, capsys)
+    assert code == 1 and out["status"] == "stopped"
+    assert out["metrics"]["final"] == final and out["items"][0]["report"]
+    assert json.loads(answer.read_text()) == {"review_status": final}
 
 
 def test_a_stopped_drive_writes_no_answer(tmp_path, monkeypatch, capsys):

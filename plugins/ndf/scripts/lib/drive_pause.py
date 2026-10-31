@@ -16,6 +16,7 @@
 | 22 | gate | `newtext` | 巻き直しの新しい title・body 待ち | 同上 |
 | 23 | gate | `cross-review` | 最終ゲートの cross-review 待ち | 同上（`items[0].command` が cross-review の drive） |
 | 1 | stopped | — | 中断（`metrics.exit` に元の終了コード） | 理由（summary）を報告する |
+| 1 | stopped | — | 最後まで回ったが収束しなかった（`metrics.final` が `approved` 以外。報告は `items[0].report`） | 理由と件数を報告し、後続へ進まない |
 
 `items[0]` の項目: `pause`・`prompt_file`・`result_file`・`round` は必ずある。任意の項目は次の通り。
 
@@ -71,6 +72,11 @@ def pause(tool: str, kind: str, prompt_file: Path | str, result_file: Path | str
 
 def done(tool: str, summary: str, report: Path | str, metrics: dict) -> dict:
     return sr.result(tool, "ok", summary, [{"report": str(report)}], metrics)
+
+
+def unconverged(tool: str, summary: str, report: Path | str, metrics: dict) -> dict:
+    """最後まで回ったが収束しなかった結果。報告と件数は `done` と同じ形で持ち、status は ok にしない（#2143）。"""
+    return sr.result(tool, "stopped", summary, [{"report": str(report)}], {**metrics, "exit": EXIT_STOPPED})
 
 
 def stopped(tool: str, msg: str, metrics: dict, code: int) -> dict:

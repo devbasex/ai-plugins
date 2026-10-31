@@ -155,11 +155,11 @@ JSON の形と終了コードの表は共通ライブラリの `scripts/lib/driv
 
 | 終了コード（`items[0].pause`） | 止まった地点 | すること |
 | --- | --- | --- |
-| 0 | 最終スイープと検証まで終わった | `items[0].report` と `metrics` を「作業完了報告」へ写す |
+| 0 | 最終スイープと検証まで終わり、`final` が `approved` | `items[0].report` と `metrics` を「作業完了報告」へ写す |
 | 20（`fix`） | 一方でも REQUEST_CHANGES | worker を起こし、`prompt_file` を読ませて `result_file` を書かせる。書けたら同じコマンドを打ち直す |
 | 21（`sweep`） | ループを抜けた（どの `final` でも） | 同上（最終スイープ） |
 | 22（`newtext`） | light の巻き直し | 同上（新しい title / body） |
-| 1 | 中断（`metrics.exit` に元の終了コード） | `summary` を報告して止まる |
+| 1 | 中断（`metrics.exit` に元の終了コード）か、最終スイープまで終えたが `final` が `approved` 以外（`items[0].report` がある） | `summary` を報告して止まる。報告があれば「作業完了報告」へ写す |
 
 **修正はメインで書かない。** `prompt_file` は `/ndf:fix` の呼び出しと PR 固有の値（ブランチ・前ラウンドの
 レビュー・戻り値ファイル）だけを持つ。担当はコミットまでで、送信・返信・決着は駆動の取り込みが行う。
@@ -191,7 +191,7 @@ JSON の形と終了コードの表は共通ライブラリの `scripts/lib/driv
 
 ## 作業完了報告（必須）
 
-駆動の結果（`status: ok`）の `items[0].report`（`state.py report` の出力）と `metrics` を材料に、次を報告する。
+駆動の結果（`status: ok`、または収束せずに終わった `status: stopped`）の `items[0].report`（`state.py report` の出力）と `metrics` を材料に、次を報告する。
 
 - **最終ステータス**（`final`: `approved` / `max_rounds` / `oscillation` / `error`）・**ラウンド数 / PR 数**（`rounds` / `prs`）
 - **各ラウンドのサマリ表**（round・PR・担当と判定・fix・CI。担当はラウンドごとに変わるため、担当と判定を 1 つの列にする）
