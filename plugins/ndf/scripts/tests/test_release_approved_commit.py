@@ -314,3 +314,19 @@ def test_approve_from_facts_without_facts_output_stops_at_the_gate(monkeypatch, 
             argparse.Namespace(root=str(world["work"]), approval=str(path), approved_sha="a" * 40, facts_from=str(tmp_path), by="user")
         )
     assert e.value.code == 2
+
+
+@pytest.mark.parametrize("facts", ["", "{queue_state:release}"])
+def test_approve_without_readable_facts_passes_only_with_an_existing_record(monkeypatch, world, tmp_path, facts):
+    """--dev-state を省いた単発の本番のプラン: queue は facts の置き場を空で、run は置き換えずに渡す（#2247）。
+    記録が無ければ 10（2 の引数の誤りにしない）、資料に一致する記録が既にあれば書かずに通す（決定 7）。"""
+    path = tmp_path / "approval.md"
+    path.write_text(MATERIAL.format(sha=world["approved"]))
+    monkeypatch.chdir(facts_dir(tmp_path, world["approved"]))  # 空の置き場が作業場所（.）の facts を拾わない
+    mod = load(monkeypatch)
+    out, code = approve_facts(mod, world, path, facts)
+    assert (out["status"], code) == ("gate", 10) and "--dev-state" in out["next"]
+    mod.ac.record_approval(path, world["approved"], "user", "2026-10-31T00:00:00Z")
+    out, code = approve_facts(mod, world, path, facts)
+    assert (out["status"], out["items"][0]["result"]) == ("ok", "kept")
+    assert out["metrics"]["approved_sha"] == world["approved"]

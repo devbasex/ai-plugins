@@ -158,6 +158,8 @@ def _facts_of(state_dir) -> tuple[str | None, str | None]:
     """開発版のプランの状態ディレクトリの最後の facts のステップの出力から (提示した SHA, 出力の時刻)。無ければ None。"""
     from release_lib.materials import last_result
 
+    if not state_dir:  # Path("") は作業場所（.）を指すため読まない
+        return None, None
     d = Path(state_dir)
     got = last_result(d, "facts", TOOL) if d.is_dir() else None
     sha = ((got or {}).get("metrics") or {}).get("approved_sha")
@@ -185,7 +187,23 @@ def approve_from_facts(root, a) -> dict:
     metrics = {"approved_sha": sha, "facts_at": facts_at, "by": a.by}
     retry = f'承認を取り、sprint-state.py gate <状態> "{gate_answer.GATE_2}" --what <要約> --by user --outcome approved を書いてから続ける'
     if not sha:
-        raise _approve_gate(path, f"開発版の facts の出力（{a.facts_from}）に承認したコミットが無い", metrics, "開発版のプランを流し直す")
+        # facts を読めなくても（--dev-state を省いた単発の本番のプランなど）、資料に一致する承認の記録が既にあれば通す（決定 7）
+        try:
+            kept = ac.from_material(path)
+        except (ac.Unapproved, ValueError):
+            kept = None
+        if kept:
+            metrics["approved_sha"] = kept
+            return result(
+                TOOL,
+                "ok",
+                f"承認資料に承認の記録（{kept[:8]}）が既にある",
+                [{"kind": "cell", "name": ac.RECORD, "result": "kept"}],
+                metrics,
+                str(path),
+            )
+        nxt = "開発版のプランを流し直すか、new release --channel prod に --dev-state <開発版のプランの状態ディレクトリ> を渡して作り直す"
+        raise _approve_gate(path, f"開発版の facts の出力（{a.facts_from or '空'}）に承認したコミットが無い", metrics, nxt)
     try:
         now = ac.material_sha(path)
         if now != sha:
@@ -224,7 +242,8 @@ def approve(root, a) -> dict:
     """ゲート 2 の承認を承認資料へ記録する（#815 の I10）。--approved-sha は提示した資料を書いた approval-facts の
     metrics.approved_sha（資料を読み直した値ではない）。資料がその後に書き直されていれば書かずに止まる。
     --facts-from なら approve_from_facts（#1426）。"""
-    if getattr(a, "facts_from", None):
+    # 空の --facts-from（queue が {queue_state:release} を空で埋めた）も facts の経路で扱い、承認ゲート（10）で返す
+    if getattr(a, "facts_from", None) is not None:
         return approve_from_facts(root, a)
     if not getattr(a, "approved_sha", None):
         raise StepError("--approved-sha か --facts-from が要る", EXIT_UNREADABLE)
