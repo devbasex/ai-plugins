@@ -18,7 +18,7 @@ PAIR = ("refactoring", "cross-refactoring")
 
 def test_the_manifests_are_found() -> None:
     """配る基準そのものが見つかること。**空の一覧で通さない。**"""
-    assert len(MANIFESTS) >= 4, [p.name for p in MANIFESTS]
+    assert len(MANIFESTS) >= 2, [p.name for p in MANIFESTS]
 
 
 @pytest.mark.parametrize("manifest", MANIFESTS, ids=lambda p: p.stem)

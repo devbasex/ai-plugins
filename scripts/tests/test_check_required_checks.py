@@ -21,14 +21,12 @@ crc = importlib.util.module_from_spec(spec)
 assert spec.loader is not None
 spec.loader.exec_module(crc)
 
-# 2026-10-05 の develop の必須のチェック 12 個
-REQUIRED_12 = [
+# 2026-10-05 の develop の必須のチェック 12 個から、配布をやめた runtime-smoke の kiro・agy を除いた 10 個（#2231）
+REQUIRED_10 = [
     "guard",
     "pytest",
     "runtime-smoke (claude)",
     "runtime-smoke (codex)",
-    "runtime-smoke (kiro)",
-    "runtime-smoke (agy)",
     "runtime-plugin-build-check",
     "skill-frontmatter-check",
     "skill-repo-assumptions-check",
@@ -36,7 +34,7 @@ REQUIRED_12 = [
     "markdown-link-check",
     "instruction-files-check",
 ]
-# 承認ゲート 2 で ruleset へ足した 7 つ（#653）。足した後の必須は 19 個
+# 承認ゲート 2 で ruleset へ足した 7 つ（#653）。足した後の必須は 17 個
 ADDED_7 = [
     "doc-line-limit-check",
     "glossary-check",
@@ -46,7 +44,7 @@ ADDED_7 = [
     "script-structure-check",
     "skill-shell-vars-check",
 ]
-REQUIRED_19 = REQUIRED_12 + ADDED_7
+REQUIRED_17 = REQUIRED_10 + ADDED_7
 
 
 def rules(*contexts: str) -> list[dict]:
@@ -117,12 +115,12 @@ SIMPLE = "on:\n  pull_request:\njobs:\n  a:\n    runs-on: x\n"
 
 
 def test_this_repository_has_only_the_awaiting_six_and_itself(tmp_path, capsys):
-    """AC6: 12 個の必須と必須にしないジョブの宣言だけで、差は 6 つと突き合わせのチェック自身だけ。"""
+    """AC6: 10 個の必須と必須にしないジョブの宣言だけで、差は 6 つと突き合わせのチェック自身だけ。"""
     allow = json.loads((REPO / "scripts" / "required-checks-allow.json").read_text(encoding="utf-8"))
     (tmp_path / "allow.json").write_text(
         json.dumps({"version": 1, "not_required": allow["not_required"], "awaiting": allow["awaiting"]}), encoding="utf-8"
     )
-    (tmp_path / "rules.json").write_text(json.dumps(rules(*REQUIRED_12)), encoding="utf-8")
+    (tmp_path / "rules.json").write_text(json.dumps(rules(*REQUIRED_10)), encoding="utf-8")
     code = crc.main(
         [
             "--root",
@@ -404,7 +402,7 @@ def test_the_job_runs_only_on_pull_requests():
 
 def test_cli_runs_as_a_script(tmp_path):
     rules_file = tmp_path / "rules.json"
-    rules_file.write_text(json.dumps(rules(*REQUIRED_19)), encoding="utf-8")
+    rules_file.write_text(json.dumps(rules(*REQUIRED_17)), encoding="utf-8")
     p = subprocess.run(
         [sys.executable, str(CHECK), "--root", str(REPO), "--repo", "o/r", "--branch", "develop", "--rules-file", str(rules_file)],
         capture_output=True,
