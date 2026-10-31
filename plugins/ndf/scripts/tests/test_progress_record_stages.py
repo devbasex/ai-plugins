@@ -348,6 +348,23 @@ def test_the_agy_layout_records_through_the_symlink(env: Env) -> None:
     assert env.stages(42) == ["設計"]
 
 
+@pytest.mark.parametrize("verb", ["view", "edit"])
+def test_a_failing_gh_still_records_the_stage_once(env: Env, verb: str) -> None:
+    """gh が失敗しても通過記録は 1 回だけ積まれ、結果は ok 以外（#671）。"""
+    (env.bin / "gh").write_text(
+        f"""#!/usr/bin/env bash
+[ "$1 $2" = "issue {verb}" ] && {{ echo "graphql_rate_limit" >&2; exit 1; }}
+[ "$2" = view ] && printf '%s' {json.dumps(BODY)}
+exit 0
+""",
+        encoding="utf-8",
+    )
+    out = env.run(str(RECORD), "42", "完了判定")
+    assert out.returncode == 6, out.stderr
+    assert json.loads(out.stdout.splitlines()[-1])["status"] == "stopped"
+    assert env.stages(42) == ["完了判定"]
+
+
 def test_a_stage_recorded_twice_reports_the_same(env: Env) -> None:
     """旧い hook と二重に積まれても、報告は工程の集合で判定する（前提 7）。"""
     env.run(str(SYNC), "42", "mode", "standard")
