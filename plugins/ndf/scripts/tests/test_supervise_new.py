@@ -17,6 +17,9 @@ PY = sys.executable
 sys.path.insert(0, str(SCRIPTS))
 from supervise_lib import commands, engine, pr as pr_step  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from sprint_args import new_sprint_args  # noqa: E402
+
 
 # new sprint は --design に無い課題の本文を gh で読む（#1767）。見本の本文で答える
 pytestmark = pytest.mark.usefixtures("issue_bodies")
@@ -43,25 +46,7 @@ def plain_repo(tmp_path, release=None):
 
 
 def new_sprint(root, out, *extra):
-    return cli(
-        "new",
-        "sprint",
-        "--name",
-        "m6",
-        "--worktree",
-        str(root),
-        "--issue",
-        "216",
-        "247",
-        "--design",
-        "216",
-        "--version",
-        "3.8.0-dev.1",
-        "--out",
-        str(out),
-        *extra,
-        cwd=root,
-    )
+    return cli(*new_sprint_args(root, out, *extra, name="m6", issue=("216", "247"), design=("216",), version="3.8.0-dev.1"), cwd=root)
 
 
 # --- #1192: リリースの雛形の無い形 -------------------------------------------------
@@ -145,7 +130,7 @@ def test_new_close_without_release_form_puts_manual_stage(tmp_path, delivery):
 def test_new_sprint_and_close_with_package_plugin_still_need_versions(tmp_path):
     """#1336 の I6: 雛形で組む経路だけが版数を要する。"""
     root = plain_repo(tmp_path, {"form": "package-plugin", "plugin": "foo", "runtimes": ["claude"]})
-    p = cli("new", "sprint", "--name", "m6", "--worktree", str(root), "--issue", "216", "--out", str(tmp_path / "m"), cwd=root)
+    p = cli(*new_sprint_args(root, tmp_path / "m", name="m6", issue=("216",), version=None), cwd=root)
     assert p.returncode == 2 and "--version" in p.stderr
     p = close_cli(root, tmp_path / "c", "--version", "3.8.0-dev.1")
     assert p.returncode == 2 and "--prod" in p.stderr and "--version" not in p.stderr.split("無い:")[-1]
@@ -199,7 +184,7 @@ def test_samples_start_and_close_a_sprint_without_versions(tmp_path, name):
     (root / ".ndf" / "project.json").write_text(json.dumps({"delivery": rows}, ensure_ascii=False))
     (root / ".ndf" / "pace.json").write_text(json.dumps({"version": 1, "fast": {"enabled": True, "verify": "true"}}))
     out = tmp_path / "m"
-    p = cli("new", "sprint", "--name", "m6", "--worktree", str(root), "--issue", "216", "--out", str(out), cwd=root)
+    p = cli(*new_sprint_args(root, out, name="m6", issue=("216",), version=None), cwd=root)
     assert p.returncode == 0, p.stderr
     manifest = json.loads((out / "sprint.json").read_text())
     assert [(r["route"], r["stage"]) for r in manifest["リリースの経路"]] == expected
