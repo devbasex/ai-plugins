@@ -3450,9 +3450,25 @@
     {
       "term": "着手前のテストの初回の上限",
       "context": "ndf-cross-refactoring",
-      "meaning": "同じ範囲の打ち切りと実測が配分の履歴に無いときの、着手前のテストの上限（秒）",
+      "meaning": "同じ範囲の打ち切りと実測が配分の履歴に無いときの、着手前のテストの上限（秒）。max(0.10·B, 3·s) で、s は手元の全体テストの直近の実測 m → 宣言の w の順に採る（どちらも無ければ 0.10·B）",
       "source": "",
-      "pending_source": "issues/issue-2047-requirements.md"
+      "pending_source": "issues/issue-2047-design.md"
+    },
+    {
+      "term": "想定最大時間の出所",
+      "context": "ndf-cross-refactoring",
+      "meaning": "その実行の想定最大時間をどこから決めたか。explicit（引数か宣言で渡した）・default（省いて既定の 30 分を使った）・floor（省いて想定最大時間の下限まで上げた）の 3 つ",
+      "code": "budget_source",
+      "source": "",
+      "pending_source": "issues/issue-2047-design.md"
+    },
+    {
+      "term": "時間の枠の不足",
+      "context": "ndf-cross-refactoring",
+      "meaning": "着手前のテストが上限で打ち切られたか、明示した想定最大時間が想定最大時間の下限に届かないこと。init は SKIP を出して止まり、駆動はリファクタリングを飛ばした欠けの残る結果を返す",
+      "code": "window_skip",
+      "source": "",
+      "pending_source": "issues/issue-2047-design.md"
     },
     {
       "term": "手順の枠",
@@ -3463,8 +3479,9 @@
     {
       "term": "範囲テストの所要",
       "context": "ndf-cross-refactoring",
-      "meaning": "CI に任せる戦略で、着手前に走らせる範囲テストの所要の見込み（秒）。同じ範囲の履歴の実測か、範囲が全体テストの suite のパスを覆うときの w",
-      "source": ""
+      "meaning": "CI に任せる戦略で、着手前に走らせる範囲テストの所要の見込み（秒）。同じ範囲の履歴の実測 → 手元の全体テストの直近の実測 m → 宣言の w の順に採る",
+      "source": "",
+      "pending_source": "issues/issue-2047-design.md"
     },
     {
       "term": "gws",
@@ -4607,6 +4624,14 @@
       "meaning": "結果 JSON の gaps の 1 件。出すはずだったのに出せなかった材料・記録、届かなかった目標を、種類・名前・理由で書く",
       "code": "gaps",
       "source": "docs/specifications/ndf-step-result-gaps-and-reading.md"
+    },
+    {
+      "term": "ステップの延長",
+      "context": "ndf-workflow",
+      "meaning": "drive のステップの子が自分の見込みの秒を延長のファイル（NDF_STEP_EXTEND_FILE の指すパス）へ書き、エンジンがその試行の締め切りを with_margin を足して後ろへずらすこと。前へはずらさない",
+      "code": "step_extend",
+      "source": "",
+      "pending_source": "issues/issue-2047-design.md"
     },
     {
       "term": "過程の項目",
