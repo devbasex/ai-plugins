@@ -48,7 +48,7 @@ description: "Delegate coding, review, or research to the codex, agy, kiro-cli, 
 - 短時間（1〜2 分以内）で済むタスク → メインエージェントで直接対応
 - ユーザとの対話が必要な設計相談 → Plan Mode 等で対話しながら進める
 - 単純な質問回答 → WebFetch / WebSearch で足りる
-- 機密情報を含むコード → 外部 API へ送信されるため、可否を組織ポリシーで確認してから
+- 機密情報を含むコード → 外部 API へ送信されるため、可否を組織ポリシーで確認してから（利用者に問うときの `metadata.source` は `ndf-ask:legal`）
 
 ## どの CLI を選ぶか
 

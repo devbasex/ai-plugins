@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 import gh_call
+import test_strategy as ts
 from supervise_lib import decl, paths, plan as plan_mod
 from supervise_lib.claude import TAIL, run_ticking
 from supervise_lib.prompts import JUDGE_SYSTEM
@@ -63,6 +64,38 @@ def prior_results(state) -> dict[str, dict]:
             text = str(r.get("summary") or "")
         found[str(r["step"])] = {"exit": r.get("exit"), "text": text}
     return found
+
+
+TEST_LIMIT = re.compile(r"\{test_limit:(\w+):(\d+)\}")
+
+
+def fill_test_limit(ctx, step: dict, cmd: str) -> tuple[str, Any]:
+    """テストのステップの `{test_limit:<鍵>:<秒>}` を、開始の時点の上限に置き換える（#1631 の決定 3）。(cmd, timeout) を返す。
+
+    上限 = max(プランの作成の時点の秒, 所要の記録と直近の全体テストの実測から決めた秒)。広がったら `timeout` を
+    `with_margin(上限)` にし（ほかの余裕は足さない）、同じ秒を `test-run.py` の `--limit` へ渡す。決め直せない
+    （プランの「テストの時間」の `basis` が読めない）ときは作成の時点の秒で流す。決めた値は `cur.test_limit` に残す。"""
+    from supervise_lib.verify_steps import with_margin
+
+    timeout = step.get("timeout", 3600)
+    m = TEST_LIMIT.search(cmd)
+    if not m:
+        return cmd, timeout
+    key, planned = m.group(1), int(m.group(2))
+    limit, basis = planned, None
+    b = (ctx.plan.get("テストの時間") or {}).get("basis") if isinstance(ctx.plan.get("テストの時間"), dict) else None
+    if isinstance(b, dict) and b.get("key") and b.get("budget_minutes") is None:
+        try:
+            got = ts.unbudgeted_limits(ts.Strategy(str(b.get("strategy")), "plan"), b, step.get("cwd", ctx.cwd))
+            limit, basis = max(planned, int(got[key])), got["basis"]
+        except (OSError, ValueError, KeyError, TypeError):
+            limit, basis = planned, None
+    if limit > planned:
+        timeout = max(int(timeout), with_margin(limit))
+    cur = getattr(ctx.state, "cur", None)
+    if isinstance(cur, dict):
+        cur["test_limit"] = {"key": key, "planned": planned, "seconds": limit, "timeout": timeout, "basis": basis}
+    return TEST_LIMIT.sub(str(limit), cmd), timeout
 
 
 class StepContext:
@@ -161,6 +194,7 @@ class RunStep:
                 return 2, "cmd の {base} を置き換える起点のブランチが無い（計画か .ndf/worktree.json の base_branch）"
             cmd = cmd.replace("{base}", base)
         cmd = cmd.replace("{state_dir}", str(ctx.state.dir))
+        cmd, timeout = fill_test_limit(ctx, step, cmd)
         env = dict(os.environ)
         # 親の run のステップから受け継いだ no_reports は、reports: true なら外す
         no_reports = self.no_reports(ctx)
@@ -179,7 +213,7 @@ class RunStep:
                 ctx.state.every,
                 shell=True,
                 cwd=step.get("cwd", ctx.cwd),
-                timeout=step.get("timeout", 3600),
+                timeout=timeout,
                 env=env,
                 err_path=ctx.state.run_log,
             )

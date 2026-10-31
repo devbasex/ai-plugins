@@ -47,7 +47,7 @@ Chrome 136 以降は、**既定のプロファイルではリモート操作の�
 
 1. CDP 用の Chrome を起動する
 2. PC の側で 9222 が開いたことを確かめる。Windows は `powershell.exe -NoProfile -Command "(Invoke-WebRequest -UseBasicParsing http://127.0.0.1:9222/json/version).Content"` で `webSocketDebuggerUrl` を含む JSON が返る（WSL の `curl localhost:9222` は WSL のネットワークの設定によっては Windows に届かないので、判定に使わない）
-3. 利用者に頼む（このエージェントにはできない）
+3. 利用者に頼む（このエージェントにはできない。`AskUserQuestion` で頼むときの `metadata.source` は `ndf-ask:human-action`）
    - **エディタのウィンドウを閉じて、リモートのホストへ接続し直す**（転送は SSH の接続を張り直すまで効かない）
    - CDP 用の Chrome で、対象のサイトにログインする
 4. 利用者に「コンテナ側のエージェントに、PC 側の設定が済んだと伝えてください」と案内して終える

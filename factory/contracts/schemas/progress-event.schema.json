@@ -13,7 +13,8 @@
     { "$ref": "#/$defs/UsageRecordedEvent" },
     { "$ref": "#/$defs/JobFinishedEvent" },
     { "$ref": "#/$defs/PrUpdatedEvent" },
-    { "$ref": "#/$defs/CiUpdatedEvent" }
+    { "$ref": "#/$defs/CiUpdatedEvent" },
+    { "$ref": "#/$defs/DecisionDelegatedEvent" }
   ],
   "$defs": {
     "Identifier": {
@@ -184,6 +185,18 @@
         "conclusion": { "description": "null はまだ終わっていない", "type": ["string", "null"] }
       }
     },
+    "DecisionDelegatedPayload": {
+      "description": "承認ゲートの外の問い合わせを hook が止めた後に、AI が自分で下した判断（#2206）",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["question", "answer", "reason", "category"],
+      "properties": {
+        "question": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "answer": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "category": { "description": "止めたときの metadata.source。無ければ null", "type": ["string", "null"] }
+      }
+    },
     "JobStartedEvent": {
       "allOf": [{ "$ref": "#/$defs/EventCommon" }],
       "type": "object",
@@ -281,6 +294,16 @@
       "properties": {
         "type": { "const": "ci.updated" },
         "payload": { "$ref": "#/$defs/CiUpdatedPayload" }
+      },
+      "unevaluatedProperties": false
+    },
+    "DecisionDelegatedEvent": {
+      "allOf": [{ "$ref": "#/$defs/EventCommon" }],
+      "type": "object",
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "decision.delegated" },
+        "payload": { "$ref": "#/$defs/DecisionDelegatedPayload" }
       },
       "unevaluatedProperties": false
     }

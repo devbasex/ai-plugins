@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Navigate, useParams } from "react-router";
+import { Link, Navigate, useParams } from "react-router";
 import type { AccountDetail, SeatType } from "../api.ts";
 import { useFailureHandler, useServices } from "../context.tsx";
 import { ExecutionModeView, LimitsView, PLAN_LABELS } from "./parts.tsx";
@@ -51,6 +51,15 @@ export function TeamPage() {
       <p>自分の席の種類: {account.seat_type}</p>
       <ExecutionModeView account={account} onChanged={setAccount} />
       <LimitsView limits={account.limits} />
+      <p>
+        <Link to={`/accounts/${account.account_id}/repositories`}>リポジトリ</Link>
+        {account.role === "owner" && (
+          <>
+            {" "}
+            <Link to={`/accounts/${account.account_id}/model-credential`}>キーの持ち込み</Link>
+          </>
+        )}
+      </p>
       <h2>席</h2>
       <ul aria-label="席の一覧">
         {(account.seats ?? []).map((s) => (

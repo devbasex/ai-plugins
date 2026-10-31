@@ -94,3 +94,9 @@ def _isolated_mvv_state(tmp_path_factory, monkeypatch):
 def _isolated_estimate_records(tmp_path_factory, monkeypatch):
     """supervise の実行が書く見積もりの実績の記録（#1856）を、リポジトリの git の共通ディレクトリと利用者の状態へ書かない。"""
     monkeypatch.setenv("NDF_ESTIMATE_DIR", str(tmp_path_factory.mktemp("estimate")))
+
+
+@pytest.fixture(autouse=True)
+def _isolated_whole_runs(tmp_path_factory, monkeypatch):
+    """全体テストの実測の記録（#1631）を、リポジトリの git の共通ディレクトリと利用者の状態へ書かない。"""
+    monkeypatch.setenv("NDF_WHOLE_RUNS_DIR", str(tmp_path_factory.mktemp("whole-runs")))

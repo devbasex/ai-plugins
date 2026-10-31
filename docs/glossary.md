@@ -187,7 +187,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | ndf-next | — | 次のセッションの最初の入力を置く、情報文字列が ndf-next のコードブロック。最後の応答に 1 つだけ置く | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | step / alive / worker / attention | — | 進捗ログの行の種類。ステップの切り替わり・動きの無い間の生存・worker の進み・conductor の判断が要る出来事（止まった・承認ゲート・同じ失敗の繰り返し・judge のステップで stop が出そう） | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | done | — | キューが終わったときに書く結果の JSON。wait は done か attention の行まで待つ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| 結果 JSON | `step_result` | 手順のスクリプトが返す 1 行の JSON。status で読む | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| 結果 JSON | `step_result` | 手順のスクリプトが返す 1 行の JSON。status と終了コードで読み、成功は ok だけ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 実装計画 | — | implementation-plan が issues/ に書く、実装の前の計画 | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 確定仕様化 | — | 完了した実装計画を docs/ の確定仕様へ書き直す工程 | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 振り返り | — | 進め方で変えることを記録し、起票の取りこぼしを拾う工程 | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
@@ -310,6 +310,16 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 全体テストの実測 | — | 同じリポジトリで先に走った全体テストの壁時計の秒。所要の記録とは別に残し、後のプランと test-run.py が予算なしのテストの上限を決めるときに読む（#1631） | — | — | — |
 | テストの上限 | `limits` | test_strategy.limits が返す init_test_timeout・test_timeout・whole_timeout（秒）。ステップの timeout はこれに with_margin の余裕を足した値で、テストの上限には余裕を足さない | — | — | — |
 | 全体テストの鍵 | `whole_key` | 戦略の全体テストのコマンドの集合から作る識別子（whole_key）。全体テストの実測をコマンドごとに分け、コマンドの違う実測を混ぜない（#1631） | — | — | — |
+| 問い合わせの区分 | `ask_category` | AskUserQuestion の metadata.source に AI が付ける値。ndf-gate:<番号>（承認ゲート）・ndf-ask:redline:<番号>（レッドライン。宣言で外せない）・ndf-ask:<名前>（宣言が許す区分）の 3 つの形。hook は質問の中身を読まず、この値が許された区分かだけを見る（#2206） | — | — | — |
+| 問い合わせの宣言 | `ask_declaration` | プロジェクトの .ndf/ask.json。人へ回してよい問い合わせの区分と hook の働き方（enforce / advise / off）を書く（#2206） | — | — | — |
+| 代わりの判断 | `proxy_decision` | hook が問い合わせを止めた後か、手順が「AI が決める」とした場面で AI が自分で下した判断。問い・選んだ答え・理由を問い合わせの記録へ書く（#2206） | — | — | — |
+| 問い合わせの記録 | `ask_ledger` | 状態の置き場の ask.jsonl。hook の判定の行と代わりの判断の行を追記だけで持ち、振り返りと Factory のランナーが読む（#2206） | — | — | — |
+| 試行 | — | 同じステップを流し直したときの 1 回ごとの実行と、その結果 JSON。プランの実行の記録の NN-<ステップ>.out の 1 つが 1 試行に当たる | — | — | — |
+| 欠けの残る結果 | — | 手順は終わったが、出すはずの材料・記録の一部が無いか、目標（収束など）に届かなかった結果。stopped と終了コード 6 と gaps で返し、ok で返さない | — | — | — |
+| 結果の置き場 | — | 読む側が結果 JSON や材料を探す場所（プランの実行の記録・記録のファイル）。置き場が無いことと、材料が 0 件であることを分けて扱う | — | — | — |
+| 欠け | `gaps` | 結果 JSON の gaps の 1 件。出すはずだったのに出せなかった材料・記録、届かなかった目標を、種類・名前・理由で書く | — | — | — |
+| 過程の項目 | `process` | 結果 JSON の process。スクリプトが実行したこと（コマンド・操作）と、その結果の要旨を順に並べる | — | — | — |
+| 判断の項目 | `decisions` | 結果 JSON の decisions。スクリプトが決めたことと、その根拠を並べる | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 
@@ -646,6 +656,13 @@ worktree の設定・セッション開始 hook・テスト環境の割り当て
 | 用意の印 | — | 依存の用意が済んだことを示す、worktree ごとの git ディレクトリの `ndf-deps` ファイル。使い回すときはこれを見てやり直しを省く | — | — | — |
 | 到達の確認 | — | コンテナの中から worktree の探りの印を読み、テストのコンテナが worktree を見ているかを確かめること | — | — | — |
 | ツールのパス | `tool_paths` | CLI が起動したツール（MCP サーバーなど）が、利用者の操作なしに worktree の中で書き換える既知のパス。既定（`.serena/project.yml` と `.serena/serena_config.yml`）と `.ndf/worktree.json` の `tool_paths`（`add` / `remove`）で決まる。検査とコミットの対象から外す | — | — | — |
+| 残る状態 | — | NDF の実行が作り、その実行が終わった後もディスクに残るもの（レビュー worktree・状態ファイル・一時ファイル・投稿キューの項目）（#2229） | — | — | — |
+| 状態の持ち主 | — | 残る状態を作った実行。持ち主が生きている間は、別の実行がその状態を消さない（#2229） | — | — | — |
+| 状態の寿命 | — | 残る状態を片付けてよくなる条件（持ち主のプロセスの終わり・Pull Request が閉じたこと・送り終えたこと など）。状態の種類ごとに 1 つ決める（#2229） | — | — | — |
+| 以前の実行 | — | 今の実行より前に同じ Pull Request・同じリポジトリで回った、終わった実行。supervise.py の run --from の「前の実行」とは別（#2229） | — | — | — |
+| 持ち主の記録 | — | 残る状態ごとに、作った実行が書く記録。実行の識別子・開始・最後に動いた時刻・終わった時刻、またはプロセス（pid と開始時刻）を持つ。片付けが持ち主の生存を判定するために読む（#2229） | — | — | — |
+| 寿命の窓 | — | 持ち主の記録が終わっていなくても、最後に動いた時刻からこの時間を過ぎた実行を終わったとみなす長さ。24 時間（#2229） | — | — | — |
+| 片付け | — | 状態の一覧に従い、持ち主の終わった残る状態を外し、残したものと理由を返す処理（run_state.sweep）。git が拒めば止まる操作だけで行う（#2229） | — | — | — |
 
 ## mcp-serena（`mcp-serena`）
 
@@ -770,9 +787,9 @@ NDF を Web UI から操作できるサービスとして提供するときの�
 | スプリントの実行 | — | サービスが動かす NDF のスプリント 1 つ（sprint.json 1 つ）と、それを進める実行ジョブの列 | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
 | 進捗の事象 | — | ランナーと GitHub の通知から受け取り、追記だけで持つ 1 件の出来事。一覧・詳細・通知・課金はここから導く | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
 | 承認の依頼 | — | 実行ジョブが人の答えを待って終わったときに作る依頼。種類はゲート 1・ゲート 2・判断（止めて人へ戻した）の 3 つ | — | — | `docs/specifications/ndf-factory-service-boundary.md` |
-| 進捗の受け口 | — | ランナー・GitHub の Webhook・承認の API から進捗の事象を受け、出所ごとに認証して冪等に追記する、factory/api/ の HTTP の経路 | — | — | — |
-| 実行ジョブの token | — | 実行の制御が実行ジョブ 1 つごとに発行する、期限つきの token。そのジョブのスプリントの実行にだけ進捗の事象を書け、承認の依頼の答えを読める | — | — | — |
-| 冪等の鍵 | — | 進捗の事象の重複を判定する鍵（idempotency_key）。形は出所ごとに決まり、同じ鍵の事象は 1 つだけ残る | — | — | — |
+| 進捗の受け口 | — | ランナー・GitHub の Webhook・承認の API から進捗の事象を受け、出所ごとに認証して冪等に追記する、factory/api/ の HTTP の経路 | — | — | `docs/specifications/ndf-factory-contracts-and-progress.md` |
+| 実行ジョブの token | — | 実行の制御が実行ジョブ 1 つごとに発行する、期限つきの token。そのジョブのスプリントの実行にだけ進捗の事象を書け、Pull Request の参照はそのジョブの取り込むリポジトリのものだけを残せる。承認の依頼の答えを読める | — | — | `docs/specifications/ndf-factory-contracts-and-progress.md` |
+| 冪等の鍵 | — | 進捗の事象の重複を判定する鍵（idempotency_key）。形は出所ごとに決まり、同じ鍵の事象は 1 つだけ残る | — | — | `docs/specifications/ndf-factory-contracts-and-progress.md` |
 | アカウント | — | Neural Development Factory で、プランと使える量を持ち、リポジトリの登録とスプリントの実行を持つ単位。個人とチームの 2 種類。`account_id` で指す | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
 | 席 | — | チームのアカウントの中で、1 人の利用者に割り当てる枠。種類は standard と premium | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
 | プラン | — | アカウントの契約の種類。Free・個人 Pro・個人 Max・Team の 4 つ。Team の使える量は席の種類で決まる | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
@@ -782,3 +799,16 @@ NDF を Web UI から操作できるサービスとして提供するときの�
 | 使える量の判定 | — | 呼び出す側が渡した今の値（動いているスプリントの実行の数・その月の token の数）を使える量の上限と照らし、許すか断るかと理由を返すこと | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
 | GitHub の仲立ち | — | GitHub の OAuth を Cognito が受け取れる OIDC の形へ変える、`factory/api/` のプログラム | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
 | 実行の形態 | — | アカウントのランナーが Claude をどう呼ぶか。`local`（手元のランナー）・`byok`（キーの持ち込み）・`managed`（サービスの Bedrock）の 3 つで、アカウントごとに 1 つ持つ。Free は `managed` を選べず、月の token の上限は `managed` だけに掛かる | — | — | `docs/specifications/ndf-factory-accounts-and-plans.md` |
+| 起票の依頼 | — | 実行ジョブの中で NDF が別のリポジトリへの起票を決めたとき、ランナーが進捗の事象 issue.requested でサービスへ送る依頼。起票先・題・本文を持ち、ランナーは自分では起票しない | — | — | — |
+| 起票の依頼の結果 | — | 起票の依頼 1 件ごとに 1 件残る進捗の事象 issue.request_resolved。サービスが起票した Issue の参照か、下書きへ回した理由を持つ | — | — | — |
+| 起票の代行 | — | 記録された起票の依頼を読み、起票してよい先へはサービスが 1 リポジトリと Issues の書き込みだけに絞った導入の token で起票し、そうでない先は下書きを人へ回す、サービスの処理 | — | — | — |
+| 下書き（起票の依頼） | — | サービスが起票しなかった起票の依頼の題と本文。人が相手先の流儀に沿って起票するために回る | — | — | — |
+| リポジトリの登録 | — | アカウントが GitHub のリポジトリ 1 つを、GitHub App の導入の識別子と一緒に持つこと。スプリントの実行はこれに属する | — | — | — |
+| GitHub App の導入 | — | 利用者が自分のリポジトリへサービスの GitHub App を入れたもの。導入の識別子で指し、clone と push の導入の token をここから作る | — | — | — |
+| キーの持ち込み | — | 実行の形態 `byok` で、利用者の Anthropic API キーか、引き受ける AWS のロールの ARN をサービスへ預けること | — | — | — |
+| 再開の要求 | — | 承認の依頼に答えが保存された後、承認と通知が実行の制御へ出す、`resume` の実行ジョブを起こす要求 | — | — | — |
+| 打ち切りの時間 | — | 1 つの実行ジョブが動いてよい時間の上限。超えたら実行の制御が止める | — | — | — |
+| 課題の候補 | — | スプリントを始める画面に、AI が棚卸しの順位から理由つきで出す課題 | — | — | — |
+| 実行の枠 | — | アカウントとリポジトリごとに、終わりの状態でないスプリントの実行を数えた値。開始で増え、終わりの状態への移りで減る | — | — | — |
+| 見回り | — | 実行の制御が 5 分ごとに動き、打ち切りの時間を過ぎた実行ジョブを止め、停止の知らせを取りこぼした実行ジョブを終わらせる処理 | — | — | — |
+| 候補の証明 | — | GitHub で確かめたリポジトリの登録の候補を、取り込みが署名して 10 分だけ有効にした値。登録の要求はこれを持って来る | — | — | — |

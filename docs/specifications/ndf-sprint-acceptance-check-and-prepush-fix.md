@@ -64,7 +64,7 @@ worker が `判断が要る` で止まり、conductor が利用者へ問い、�
 
 | 要素 | 責務 |
 | --- | --- |
-| [`supervise_lib/sprint_inputs.py`](../../plugins/ndf/scripts/supervise_lib/sprint_inputs.py) | 確かめる課題（`--issue` から `--design` を除いたもの。順序を保ち重複を除く）の本文を 1 件 1 回取り、節の有無を判定して、止まるときの結果（`criteria_refusal`）を組む |
+| [`supervise_lib/sprint_inputs.py`](../../plugins/ndf/scripts/supervise_lib/sprint_inputs.py) | 確かめる課題（`--issue` から `--design` と `--absorb` で取り込んだ課題を除いたもの。順序を保ち重複を除く。取り込んだ課題は取り込み先の設計と実装が受け入れ内容を持つ。#1426）の本文を 1 件 1 回取り、節の有無を判定して、止まるときの結果（`criteria_refusal`）を組む |
 | [`supervise_lib/sprint.py`](../../plugins/ndf/scripts/supervise_lib/sprint.py) の `cmd_new_sprint` | `waves` を受けない（スプリントを組む）ときだけ、進め方の確かめの後・計画を書く前に `criteria_refusal` を呼ぶ。打ち直すコマンドは `sprint_command`（今の引数をすべて写し、`design` を渡せば `--design` へ足す）で組む |
 | [`supervise_lib/procedures.py`](../../plugins/ndf/scripts/supervise_lib/procedures.py) の `push_fix_steps` | 渡した `pr` のステップへ `on_fail: fix-push` と `on_fail_only: push-check` を足し、`fix-push` のステップ（指示は `PUSH_FIX_PROMPT`）を返す。修正の経路の組み立てはこの関数だけが持つ |
 | [`supervise_lib/templates.py`](../../plugins/ndf/scripts/supervise_lib/templates.py) の `plan_to_merge` | `pr` のステップの直後に `push_fix_steps(pr)` を並べる。`sync_checks` の有無によらない |
@@ -76,9 +76,9 @@ worker が `判断が要る` で止まり、conductor が利用者へ問い、�
 
 | # | 条件（保つこと） | 破れたときの扱い |
 | --- | --- | --- |
-| I1 | `--design` に無い課題は、本文の `## 受け入れ条件` の節に空でない行を 1 行以上持つ。持たない課題があれば、出力のディレクトリに `sprint.json` も計画のファイルも書かない | 計画を書かずに `stopped` を返し、該当する番号を全部載せる |
+| I1 | `--design` に無く `--absorb` で取り込んだ課題でもない課題は、本文の `## 受け入れ条件` の節に空でない行を 1 行以上持つ。持たない課題があれば、出力のディレクトリに `sprint.json` も計画のファイルも書かない | 計画を書かずに `stopped` を返し、該当する番号を全部載せる |
 | I2 | 本文を取れなかった課題は確かめずに通さない | 同上。その行に `gh` の終了コードと標準エラーの末尾を載せる |
-| I3 | 確かめで打つ `gh` は、確かめる課題 1 件あたり 1 回までである。`--design` の課題には打たない | — |
+| I3 | 確かめで打つ `gh` は、確かめる課題 1 件あたり 1 回までである。`--design` の課題と `--absorb` で取り込んだ課題には打たない | — |
 | I4 | 全課題が受け入れ条件を持つとき、書く計画の中身は確かめを通さずに組んだものと同じである | テストで落とす |
 | I5 | `fix-push` へ回るのは、push 前の検査の不合格（終了コード 1 で、`! [` で始まる拒否の行が無い）だけである | ほかの失敗は `止まった` で終わる |
 | I6 | 同じコミットで 2 回続けて push 前の検査に落ちたら、`fix-push` へ回さない | 2 回目の `pr` で `止まった` で終わり、最後の push の出力を `text` と状態ディレクトリの `NN-pr.out` に残す |

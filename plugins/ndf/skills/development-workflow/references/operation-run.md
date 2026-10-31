@@ -94,7 +94,7 @@
 - 対象の系が**本番系**なら、承認を得るまで実行しない
 - 検証用の系への操作は、提示して進めてよい
 - 承認を求めるときに提示するものは
-  [approval-request.md](approval-request.md) が定める
+  [approval-request.md](approval-request.md) が定める。問いの `metadata.source` は `ndf-gate:2`
 
 **提示するのは、1 の範囲の表（依存する項目を含む）と 2 の取り消しの手段と 3 で踏めなかった
 分岐である。** 承認する側が読むのは、何が

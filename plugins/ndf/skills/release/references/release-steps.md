@@ -114,7 +114,7 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
 ```
 
 - `approval-facts`: `gate` なら `presentation_path` の承認資料の「`配る中身`」と「`検証への配布で確かめたこと`」を
-  `notes --approval` で埋めて利用者へ示し、承認を得てから `next` のコマンドを打つ。`stopped`
+  `notes --approval` で埋めて利用者へ示し、承認（`AskUserQuestion` の `metadata.source` は `ndf-gate:2`）を得てから `next` のコマンドを打つ。`stopped`
   （3 = 前のタグを決められない）なら `--prev-tag` を渡して打ち直す。`metrics.approved_sha` と承認資料の
   「`承認したコミット`」が承認の対象（打った時点の `origin/<ベースブランチ>` の 40 桁）で、`next` の
   `--approved-sha` も同じ値である。資料を書き直すと承認の記録は消える。「`含む PR`」は、前のタグから
@@ -167,7 +167,7 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
   `prod` は続けて `develop` → `main` をマージし、タグと GitHub Release を作る。`items[]`
   （マージした Pull Request・タグ・GitHub Release）がリリース完了の確認で照会した結果である。
   `prod` は最後に「退避先の回収」の候補を挙げ、`items[]` の `kind: trash`（`result: candidate`）と
-  `metrics.sweep_candidates` に載せる。消すのは人の承認を得た後である（下の節）。
+  `metrics.sweep_candidates` に載せる。消すのは人の承認（`ndf-ask:redline:C4`）を得た後である（下の節）。
   どちらの Pull Request でも pytest と runtime smoke は省かれて成功（skipping / pass）を返す
   （[版と配布](../../../../../docs/versioning-and-distribution.md#正式版を出す)）。待ちはそれを通ったものとして扱う
 - `release --channel prod` の承認したコミット: `--approved-sha <SHA>` か `--approval <承認資料>` のどちらかが要る
@@ -224,7 +224,7 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --app
 `merged` が worktree を外すときに退避したファイル（`<共通の git ディレクトリ>/ndf/worktree-trash/`）は、
 戻す必要が出るのが本番の前だけだからである。ただし退避先は Git にも本番のコミットにも無い利用者のファイル
 （手で直した `.env`・未追跡のメモ）を含み、消すと戻せない。**本番の承認はこの削除の承認を兼ねない**
-（共通原則の C3・C4）。候補（退避先のパスと `du -sh <退避先>` の容量）を人へ示し、承認を得たときだけ、承認した退避先の名前を
+（共通原則の C3・C4）。候補（退避先のパスと `du -sh <退避先>` の容量）を人へ示し、`AskUserQuestion`（`metadata.source` は `ndf-ask:redline:C4`）で承認を得たときだけ、承認した退避先の名前を
 `--yes --only <名前>...` で渡して消す。名前の外の退避先（候補を挙げた後に増えたもの）は消さない。
 承認が無ければ退避先は残す。Claude Code のプラグインの形では `release --channel prod` が候補を挙げ、`next` に
 候補の名前を並べた消す 1 行を載せる。それ以外の形では、本番へ出たコミット（タグ・本番チャネルのブランチ）を渡して打つ。

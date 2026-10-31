@@ -299,7 +299,7 @@ def by_id(plan):
 
 def test_every_template_builds_the_take_with_the_one_part(tpl):
     """I2・#2003-3: 取り込みのステップは base_sync_steps の返す形で、雛形にコマンドの文字列が残らない。"""
-    for name in ("impl", "fix", "check", "sprint/5-impl-16", "sprint/6-check"):
+    for name in ("impl", "fix", "check", "sprint/6-impl-16", "sprint/7-check"):
         s = by_id(tpl[name])
         source = s["base-sync"]["cmd"].split(" base-sync ", 1)[1].split(" --push")[0].removesuffix(" --root .")
         want = base_sync_steps(source, s["base-sync"]["next"], push="--push" in s["base-sync"]["cmd"],
@@ -309,7 +309,7 @@ def test_every_template_builds_the_take_with_the_one_part(tpl):
 
 
 def test_2003_1_impl_takes_the_base_after_the_work_and_before_the_checks(tpl):
-    for name, first in (("impl", "impl"), ("sprint/5-impl-16", "impl"), ("fix", "base-sync")):
+    for name, first in (("impl", "impl"), ("sprint/6-impl-16", "impl"), ("fix", "base-sync")):
         plan = tpl[name]
         s = by_id(plan)
         assert plan["steps"][0]["id"] == first
@@ -321,7 +321,7 @@ def test_2003_1_impl_takes_the_base_after_the_work_and_before_the_checks(tpl):
 
 
 def test_1917_1_check_takes_the_base_before_the_whole_tests(tpl):
-    for name in ("check", "sprint/6-check"):
+    for name in ("check", "sprint/7-check"):
         order = [x["id"] for x in tpl[name]["steps"]]
         s = by_id(tpl[name])
         assert s["review"]["next"] == "base-sync" and s["base-sync"]["next"] == "test-all", name
@@ -329,7 +329,7 @@ def test_1917_1_check_takes_the_base_before_the_whole_tests(tpl):
         assert "--pr " in s["base-sync"]["cmd"] and "--push" in s["base-sync"]["cmd"] and s["base-sync"]["on_fail"] == "abort"
 
 
-@pytest.mark.parametrize("name", ["impl", "fix", "check", "sprint/5-impl-16", "sprint/6-check"])
+@pytest.mark.parametrize("name", ["impl", "fix", "check", "sprint/6-impl-16", "sprint/7-check"])
 def test_1917_5_6_merge_goes_back_to_the_take_on_conflict(tpl, name):
     s = by_id(tpl[name])
     assert s["merge"]["on_exit"]["4"] == s["merge-approved"]["on_exit"]["4"] == "base-return"
@@ -365,7 +365,7 @@ CHECK_AFTER_TAKE = ("test-all", "ready", "merge-gate")
 def test_impl_route_goes_back_three_times_and_merges(tpl, tmp_path):
     back = (("merge", 4), "base-return", "base-sync", *IMPL_AFTER_TAKE)
     route = _route("impl", "base-sync", *IMPL_AFTER_TAKE, *back, *back, *back, "merge")
-    ran, text, _ = drive(tmp_path, tpl["sprint/5-impl-16"], scripted(route))
+    ran, text, _ = drive(tmp_path, tpl["sprint/6-impl-16"], scripted(route))
     assert ran == [r for r, _ in route] and "結果: 完了" in text, reason_of(text)
 
 
@@ -373,13 +373,13 @@ def test_check_route_goes_back_and_reaches_record(tpl, tmp_path):
     back = (("merge", 4), "base-return", "base-sync", *CHECK_AFTER_TAKE)
     head = ("collect", "pr", "assess", "refactor", "review", "base-sync")
     route = _route(*head, *CHECK_AFTER_TAKE, *back, *back, *back, "merge", "record")
-    ran, text, _ = drive(tmp_path, tpl["sprint/6-check"], scripted(route))
+    ran, text, _ = drive(tmp_path, tpl["sprint/7-check"], scripted(route))
     assert ran == [r for r, _ in route] and "結果: 完了" in text, reason_of(text)
 
 
 def test_take_conflict_goes_to_the_worker_and_back(tpl, tmp_path):
     route = _route("impl", ("base-sync", 1), "fix-base", "base-sync", *IMPL_AFTER_TAKE, "merge")
-    ran, text, _ = drive(tmp_path, tpl["sprint/5-impl-16"], scripted(route))
+    ran, text, _ = drive(tmp_path, tpl["sprint/6-impl-16"], scripted(route))
     assert ran == [r for r, _ in route] and "結果: 完了" in text, reason_of(text)
 
 
@@ -387,7 +387,7 @@ def test_check_stops_through_abort_when_returns_run_out(tpl, tmp_path):
     route = _route(
         *("collect", "pr", "assess", "refactor", "review", "base-sync"), *CHECK_AFTER_TAKE, ("merge", 4), ("base-return", 1), ("abort", 1)
     )
-    ran, text, _ = drive(tmp_path, tpl["sprint/6-check"], scripted(route))
+    ran, text, _ = drive(tmp_path, tpl["sprint/7-check"], scripted(route))
     assert ran == [r for r, _ in route] and "結果: 止まった" in text
 
 

@@ -44,6 +44,10 @@ export function AccountPage() {
       <p>プラン: {PLAN_LABELS[personal.plan]}</p>
       <ExecutionModeView account={personal} onChanged={setPersonal} />
       <LimitsView limits={personal.limits} />
+      <p>
+        <Link to={`/accounts/${personal.account_id}/repositories`}>リポジトリ</Link>{" "}
+        <Link to={`/accounts/${personal.account_id}/model-credential`}>キーの持ち込み</Link>
+      </p>
       <h2>チーム</h2>
       <ul>
         {teams.map((t) => (

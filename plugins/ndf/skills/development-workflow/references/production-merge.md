@@ -14,7 +14,7 @@
 3. 利用者が承認したら、同じコマンドに `--gate-approved user` を付けて打ち直し、マージする
 
 **設計 Pull Request の宛先が自動反映の本番チャネルなら、そのマージは本番への反映も起こす。** 承認ゲート 1 の承認資料に
-「このマージで本番へ出る」ことを書き、1 回の承認で両方を通す。承認を得たら conductor が
+「このマージで本番へ出る」ことを書き、1 回の承認（`AskUserQuestion` の `metadata.source` は `ndf-gate:1`）で両方を通す。承認を得たら conductor が
 `merged-steps.py merge-when-green <番号> --gate-approved user` でマージする。1 回のマージに 2 回の承認を求めない。
 
 ## 宛先ごとの判定
@@ -28,7 +28,7 @@
 
 **判定と止める場所は `merged-steps.py` が持つ**（本体は `lib/delivery.py` の `judge_target`。`gh` を呼ばず、宣言と宛先だけで決める）。
 `merge-when-green` は最初の読みで宛先を判定し、当たれば CI を待たずに終了コード 10（`metrics.gate: production-merge`）で止まり、
-承認資料を書く。承認を得たら同じコマンドに `--gate-approved user`（`fast` / `auto` の MVV 判定が通したときは `mvv`）を付けて打ち直す。
+承認資料を書く。承認（`ndf-gate:2`）を得たら同じコマンドに `--gate-approved user`（`fast` / `auto` の MVV 判定が通したときは `mvv`）を付けて打ち直す。
 プランでは `merge-gate` のステップがプランを終え、承認の後に `run <プラン> --from merge-approved` で続ける。
 エージェントが直接打つ `gh pr merge` は hook（`workflow-guard.sh`）が同じ判定で拒み、`merge-when-green` へ案内する。
 人の手によるマージ（端末・GitHub の画面）は止めない。

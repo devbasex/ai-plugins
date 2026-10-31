@@ -42,7 +42,7 @@ worker へ委ねるときは、起動指示へこれをコピーし、本文を�
    - `git branch --show-current`
    - `git log --oneline --decorate -20`
    - `find issues docs -maxdepth 3 -type f \( -iname '*plan*' -o -iname '*PLAN*' \)`
-4. plan が複数候補ある場合は、現在ブランチ・PR・変更ファイルと最も関連が強いものを選ぶ。不明ならユーザーに確認する
+4. plan が複数候補ある場合は、現在ブランチ・PR・変更ファイルと最も関連が強いものを選ぶ。決め手が無くても AI が 1 つを選び、選んだ理由を `ask.py decide --question` で記録する
 5. 実装範囲を特定する:
    - PR がある場合: `gh pr diff` / `gh pr view --json files,title,body`
    - ローカル変更の場合: `git diff --stat` / `git diff`
@@ -64,7 +64,7 @@ docs/features/review-workflow.md
 docs/architecture/plugin-skill-loading.md
 ```
 
-仕様書はこの配置先へ新しいファイルとして書く。元の plan の削除・索引への追記・コミットは手順 8 のスクリプトが行う。plan を残す必要がある運用の場合は、ユーザーに確認してから手順 8 の `--design` に plan を渡さない。
+仕様書はこの配置先へ新しいファイルとして書く。元の plan の削除・索引への追記・コミットは手順 8 のスクリプトが行う。plan を残す必要がある運用（指示書や `issues/` の索引が plan を残すと定めている）なら、AI がそう判断して手順 8 の `--design` に plan を渡さず、理由を記録する。
 
 ### 3. 仕様書としてリライトする
 

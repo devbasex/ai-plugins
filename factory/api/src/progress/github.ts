@@ -12,8 +12,11 @@ export function verifyWebhookSignature(secret: string, body: string, header: str
   return timingSafeEqual(given, expected);
 }
 
-// Pull Request の参照。owner/name を小文字にそろえる（GitHub のリポジトリの名前は大文字と小文字を区別しない）
-export const prRef = (repo: string, number: number) => `${repo.toLowerCase()}#${number}`;
+// リポジトリの名前の比べ方。owner/name を小文字にそろえる（GitHub のリポジトリの名前は大文字と小文字を区別しない）
+export const repoKey = (repo: string) => repo.toLowerCase();
+
+// Pull Request の参照
+export const prRef = (repo: string, number: number) => `${repoKey(repo)}#${number}`;
 
 // 宛先のスプリントの実行がまだ決まっていない事象と、宛先を引く参照の候補
 export interface TranslatedWebhook {
