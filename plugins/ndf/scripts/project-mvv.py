@@ -49,6 +49,7 @@ import jsonio  # noqa: E402
 import project_mvv as pm  # noqa: E402
 import clock  # noqa: E402
 import legacy_names  # noqa: E402
+import ndf_tracking  # noqa: E402
 import project_mvv_decl as pmd  # noqa: E402
 import project_mvv_signals as pms  # noqa: E402
 from step_result import EXIT_GATE, EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, main_with, result, validate_result  # noqa: E402
@@ -76,6 +77,14 @@ def _emit_code(obj: dict, code: int) -> None:
         raise SystemExit(EXIT_UNREADABLE)
     print(json.dumps(obj, ensure_ascii=False))
     raise SystemExit(code)
+
+
+def _ignored_notes(root: Path) -> list[dict]:
+    """`.ndf/mvv.md`・`.ndf/mvv.json` が `.gitignore` の対象なら、その行（items）を返し、人が読む行を出す。"""
+    notes = ndf_tracking.ignored_notes(root, [str(p) for p in pm.decl_paths(root)])
+    for n in notes:
+        print(f"案内: {n['text']}")
+    return notes
 
 
 def _work_dir(root: Path, out_dir: str | None) -> Path:
@@ -109,11 +118,14 @@ def cmd_check(a):
     print(f"プロジェクト MVV: {label}" + (f"（版 {mvv.version}）" if mvv.approved else ""))
     if mvv.error:
         print(mvv.error)
-    items = [{"kind": "status", "name": mvv.status, "result": mvv.status, **pm.record(mvv)}]
+    notes = _ignored_notes(root)
+    items = [{"kind": "status", "name": mvv.status, "result": mvv.status, **pm.record(mvv)}, *notes]
+    tail = ndf_tracking.summary_note(notes)
     if mvv.approved:
-        emit(result(TOOL, "ok", f"プロジェクト MVV は承認済み（版 {mvv.version}）", items, pm.record(mvv)))
+        emit(result(TOOL, "ok", f"プロジェクト MVV は承認済み（版 {mvv.version}）{tail}", items, pm.record(mvv)))
     items.append({"kind": "next", "name": guide[mvv.status], "result": "guide"})
-    out = result(TOOL, "stopped", label + (f": {mvv.error}" if mvv.error else ""), items, pm.record(mvv), next=guide[mvv.status])
+    summary = label + (f": {mvv.error}" if mvv.error else "") + tail
+    out = result(TOOL, "stopped", summary, items, pm.record(mvv), next=guide[mvv.status])
     if mvv.status == "none":
         emit(out, EXIT_UNREADABLE)
     if mvv.status == "unreadable":
@@ -316,12 +328,13 @@ def cmd_approve(a):
     except OSError as e:
         raise StepError(f"宣言を書けない: {e}。本文を利用者へ示す", 1) from None
     print(f"プロジェクト MVV: 版 {v['version']} を書いた（{body_path}・{decl_path}）")
+    notes = _ignored_notes(root)
     emit(
         result(
             TOOL,
             "ok",
-            f"プロジェクト MVV の版 {v['version']} を書いた（sha256 {sha[:12]}）",
-            [{"kind": "change", "name": c["item"], "result": c["kind"]} for c in diff],
+            f"プロジェクト MVV の版 {v['version']} を書いた（sha256 {sha[:12]}）{ndf_tracking.summary_note(notes)}",
+            [*({"kind": "change", "name": c["item"], "result": c["kind"]} for c in diff), *notes],
             {"version": v["version"], "sha256": sha, "body": str(body_path), "decl": str(decl_path)},
         )
     )

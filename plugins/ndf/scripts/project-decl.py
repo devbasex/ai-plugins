@@ -33,6 +33,7 @@ sys.path.insert(0, str(HERE / "lib"))
 sys.path.insert(0, str(HERE))
 import deps  # noqa: E402
 import jsonio  # noqa: E402
+import ndf_tracking  # noqa: E402
 import proc  # noqa: E402
 import repo  # noqa: E402
 from step_result import EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, main_with, result  # noqa: E402
@@ -320,10 +321,7 @@ def _merge_worktree_part(main, wt, meas, answers, check, written_before):
 
 
 def _gitignore_note(main) -> list:
-    ignored = proc.git_out(main, "check-ignore", str(DECL_FILE), str(WORKTREE_FILE))
-    if not ignored:
-        return []
-    return [{"kind": "note", "key": "gitignore", "text": f".gitignore の対象: {ignored.replace(chr(10), '・')}（.gitignore は変えない）"}]
+    return ndf_tracking.ignored_notes(main, [DECL_FILE, WORKTREE_FILE])
 
 
 def cmd_write(a):
@@ -394,7 +392,7 @@ def _report_write(files, rows, dry_run):
         f"{'作成した' if any(o is None for _, _, o, _ in files) else '更新した'}（{names}。不明 {'・'.join(unknown) or '無し'}）"
         if files
         else "書くものが無い"
-    )
+    ) + ndf_tracking.summary_note(rows)
     kinds: dict[str, int] = {}
     for row in rows:
         kinds[row["kind"]] = kinds.get(row["kind"], 0) + 1

@@ -500,6 +500,14 @@ def test_broken_declaration_stops_with_3_and_is_not_rewritten(plain, env, tmp_pa
     assert (plain / ".ndf" / "project.json").read_text(encoding="utf-8") == text
 
 
+def test_write_reports_a_root_gitignore_that_excludes_ndf(plain, env, tmp_path):
+    write(plain, ".gitignore", ".ndf/\n")  # #2157: 書いた宣言をコミットできないことを items と要約に出す
+    code, out, _, _ = analyze(env, plain, tmp_path)
+    hits = [it for it in out["items"] if it.get("key") == "gitignore"]
+    assert code == 0 and ".ndf/project.json" in {h["name"] for h in hits}
+    assert {h["source"] for h in hits} == {".gitignore:1"} and "コミットできない" in out["summary"]
+
+
 def test_check_outside_git_is_1(tmp_path, env):
     d = tmp_path / "nogit"
     d.mkdir()
