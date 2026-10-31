@@ -205,6 +205,19 @@ def test_select_is_deterministic_and_stops_at_the_boundary_and_max_issues(env):
     assert [r for r in again["selection"]] == rec(env)["laps"][0]["selection"]
 
 
+def test_waiting_rows_do_not_use_up_max_issues_without_a_boundary(env):
+    # 容量の宣言が無いと境界が無く、先頭から max_issues 件が候補になる。判断待ちの行で枠を埋めない（m2171 の後のループで 0 件になった）
+    m = ms("01 近い", [11, 12, 13, 14, 15])
+    for row in m["rows"][:2]:
+        row["waiting_decision"] = True
+    env.rank_box["out"] = rank_out(m)
+    start(env)
+    got = sl_select.cmd_select(env, "l1")
+    assert got["metrics"]["selected"] == [13, 14]
+    rows = {r["number"]: r["reason"] for r in got["metrics"]["excluded"]}
+    assert rows[11] == rows[12] == "人の判断待ち（棚卸し）" and rows[15].startswith("順位")
+
+
 def test_select_falls_through_to_the_next_milestone_and_marks_unapproved_sprint_mvv(env):
     env.rank_box["out"] = rank_out(ms("01 近い", [11]), ms("02 次", [21]))
     env.descs = {"01 近い": MVV_TEXT}
