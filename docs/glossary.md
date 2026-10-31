@@ -467,6 +467,8 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 対象のリポジトリ | — | cross-refactoring が Pull Request を取り、作業ディレクトリを作るリポジトリ。打った場所（現在のディレクトリ）が属する git の worktree の根で決まる | — | — | — |
 | 提案担当 | — | cross-refactoring の propose で改善の提案を出す参加者 | — | — | `docs/specifications/cross-assignee-reassignment-on-no-result.md` |
 | 着手前のテスト | — | `cross-refactoring` の init が改修の前に 1 回走らせるテスト。CI に任せる戦略では --scope のテストの置き場所の範囲テスト、ほかは全体テスト（round-only はラウンドテストも） | — | — | — |
+| 想定最大時間の下限 | `required_budget_minutes` | 着手前のテストの実測から求める、手順の枠と計画の後の見込みが収まる想定最大時間の最小値（分）。init が「--budget-minutes を N 以上に」と案内する N | — | — | — |
+| 着手前のテストの初回の上限 | — | 同じ範囲の打ち切りと実測が配分の履歴に無いときの、着手前のテストの上限（秒） | — | — | — |
 | 手順の枠 | — | `cross-refactoring` で提案とリファクタリング計画に充てる時間。着手前のテストの終わり（started_at + 実測）から 0.20·B と 0.10·B。枠が想定最大時間に収まらずに止めた後の init の打ち直しでは打ち直した時刻から数える | — | — | — |
 | 範囲テストの所要 | — | CI に任せる戦略で、着手前に走らせる範囲テストの所要の見込み（秒）。同じ範囲の履歴の実測か、範囲が全体テストの suite のパスを覆うときの w | — | — | — |
 | 積み直し | — | 取り消しで、取り消しの起点から HEAD までの残すコミット（未公開のもの）を cherry-pick で順に積み直すこと。項目に属するコミットが衝突したら、その項目だけを外して続ける | — | — | `docs/specifications/cross-refactoring-failed-item-rules.md` |

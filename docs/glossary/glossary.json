@@ -3440,6 +3440,21 @@
       "source": ""
     },
     {
+      "term": "想定最大時間の下限",
+      "context": "ndf-cross-refactoring",
+      "meaning": "着手前のテストの実測から求める、手順の枠と計画の後の見込みが収まる想定最大時間の最小値（分）。init が「--budget-minutes を N 以上に」と案内する N",
+      "code": "required_budget_minutes",
+      "source": "",
+      "pending_source": "issues/issue-2047-requirements.md"
+    },
+    {
+      "term": "着手前のテストの初回の上限",
+      "context": "ndf-cross-refactoring",
+      "meaning": "同じ範囲の打ち切りと実測が配分の履歴に無いときの、着手前のテストの上限（秒）",
+      "source": "",
+      "pending_source": "issues/issue-2047-requirements.md"
+    },
+    {
       "term": "手順の枠",
       "context": "ndf-cross-refactoring",
       "meaning": "`cross-refactoring` で提案とリファクタリング計画に充てる時間。着手前のテストの終わり（started_at + 実測）から 0.20·B と 0.10·B。枠が想定最大時間に収まらずに止めた後の init の打ち直しでは打ち直した時刻から数える",
