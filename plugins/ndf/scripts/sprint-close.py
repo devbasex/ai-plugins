@@ -43,9 +43,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import shlex
-import subprocess
 import sys
 from contextlib import nullcontext
 from pathlib import Path
@@ -71,44 +69,25 @@ import gh_parts  # noqa: E402
 import gh_rest  # noqa: E402
 import locks  # noqa: E402
 import step_read  # noqa: E402  projects-sync.sh の結果 JSON を読む（#2227）
-from closing import referenced_numbers  # noqa: E402
 
 from dist_record import parse_record  # noqa: E402  記録の形は lib/dist_record.py が持つ（#1273）
+
+sys.path.insert(0, str(HERE))
+from sprint_close_lib.collect import read_record, referenced_items, sprint_issues  # noqa: E402
+from sprint_close_lib.final_stage import (  # noqa: E402  閉じる条件 3（#2228）
+    FINAL_GAP_LEAD,
+    FINAL_STAGES,
+    NO_BASE,
+    STAGE_RETRO,
+    STAGE_VERIFY,
+    final_stage_gap,
+    gap_item,
+)
 
 TOOL = "sprint-close"
 RECORD_UNKNOWN = "unknown"  # --record-pr の「記録の置き場が分からない」（supervise_lib/sprint_routes.py が渡す。#1875）
 UNKNOWN_REASON = "配布の記録の置き場が分からない（リリースの経路が雛形でも昇格でもない。リリース記録を確かめて手で閉じる）"
 LOCK_TIMEOUT = 30  # 課題ごとの錠の待ち（body-lock の既定と同じ）
-
-
-# --- 記録の読み取り -------------------------------------------------------------
-
-
-_COMMENT_ID = re.compile(r"#issuecomment-(\d+)$")
-
-
-def read_record(root, repo, n):
-    """記録の PR の本文とコメントを投稿の順に 1 つの文字列にする。
-
-    (連結した文字列, 部分ごとの (先頭の行の番号, コメントの識別子) の並び) を返す。本文の識別子は None、コメントの
-    識別子は `comments[].url` の `#issuecomment-<識別子>` の数字（読めなければ None）。"""
-    p = gh_call.gh(["pr", "view", str(n), "--repo", repo, "--json", "body,comments"], cwd=root)
-    if p.returncode != 0:
-        raise StepError(f"記録の PR #{n} を読めない: {p.stderr.strip()[:300]}", EXIT_UNREADABLE)
-    try:
-        d = json.loads(p.stdout)
-    except ValueError:
-        raise StepError(f"記録の PR #{n} の出力を読めない", EXIT_UNREADABLE)
-    comments = [c or {} for c in d.get("comments") or []]
-    parts = [(d.get("body") or "", None)]
-    for c in comments:
-        m = _COMMENT_ID.search(c.get("url") or "")
-        parts.append((c.get("body") or "", int(m.group(1)) if m else None))
-    starts, line = [], 0
-    for text, cid in parts:
-        starts.append((line, cid))
-        line += len(text.split("\n"))
-    return "\n".join(t for t, _ in parts), starts
 
 
 IssueRows = acceptance.IssueRows  # リリース後テストの表は承認の材料と同じ規則で読む（lib/acceptance.py。#1885 の決定 8）
@@ -118,7 +97,6 @@ verification_verdicts = acceptance.verification_verdicts
 NO_ROWS = "リリース後テストの行が無い"
 NOT_PASSED = "リリース後テストに合格でない条件がある（不合格・保留）"
 UNVERIFIED = "閉じているが閉じる条件 2 を満たさない: "
-UNVERIFIED_FINAL = "閉じているが閉じる条件 3 を満たさない: "
 UNREADABLE_BODY = "本文を読めない（最終工程の記録を確かめられない）"
 
 
@@ -134,78 +112,6 @@ def judge_acceptance(rows, criteria):
     if missing:
         return False, "合格の行が無い受け入れ条件: " + ", ".join(map(str, missing)), []
     return True, None, [c.number for c in criteria if not c.checked]
-
-
-# --- 閉じる条件 3（最終工程の記録。#2228） -----------------------------------------------
-
-STAGE_DIST, STAGE_VERIFY, STAGE_RETRO = "配布", "リリース後テスト", "振り返り"
-FINAL_STAGES = (STAGE_DIST, STAGE_VERIFY, STAGE_RETRO)
-NO_BASE = 0  # --record-pr 0 の比べる基準（配布の記録が無いため、どの識別子も数える）
-_RETRO_LINE = re.compile(r"^振り返り:\s*https://github\.com/[\w.-]+/[\w.-]+/(?:issues|pull)/\d+#issuecomment-(\d+)\s*$", re.M)
-FINAL_GAP = "最終工程（{stage}）の記録が無い: {what}"
-FINAL_GAP_LEAD = "最終工程（"
-
-
-def final_stage_gap(stage, body, since):
-    """最終工程の記録が無ければ、何が無いかを含む理由を返す。あれば None。
-
-    配布とリリース後テストの記録は条件 1・2 が見るため、ここでは振り返りだけを判定する。振り返りは本文の
-    `振り返り: <コメントの URL>` の行のうち、識別子が since（記録の PR の最後の配布の記録のコメントの識別子）以上の
-    ものを数える。since が None なら比べる基準が無いため満たさない。"""
-    if stage != STAGE_RETRO:
-        return None
-    if since is None:
-        return FINAL_GAP.format(stage=stage, what="比べる配布の記録のコメントが無い")
-    ids = [int(x) for x in _RETRO_LINE.findall(body or "")]
-    if not ids:
-        return FINAL_GAP.format(stage=stage, what="課題の本文に振り返りの記録の行が無い")
-    if max(ids) < since:
-        return FINAL_GAP.format(stage=stage, what="課題の本文の振り返りの行が今回の配布の記録より前のもの")
-    return None
-
-
-def _gap_item(base, state, gap):
-    """条件 3 を満たさない課題の項目。閉じていれば開き直さない。"""
-    if state == "CLOSED":
-        return {**base, "result": "closed_unverified", "reason": UNVERIFIED_FINAL + gap}
-    return {**base, "result": "kept_open", "reason": gap}
-
-
-# --- 課題の収集 -----------------------------------------------------------------
-
-
-def _read_sprint_pr(root, repo, n):
-    """スプリントの PR の題と本文を 1 回で読む。"""
-    p = gh_call.gh(["pr", "view", str(n), "--repo", repo, "--json", "title,body"], cwd=root)
-    if p.returncode != 0:
-        raise StepError(f"スプリントの PR #{n} を読めない: {p.stderr.strip()[:300]}", EXIT_UNREADABLE)
-    try:
-        d = json.loads(p.stdout)
-    except ValueError:
-        raise StepError(f"スプリントの PR #{n} の出力を読めない", EXIT_UNREADABLE)
-    return d.get("title") or "", d.get("body") or ""
-
-
-def sprint_issues(root, repo, prs):
-    """(closing keywords が指す課題, 題と本文が参照する記録のリポジトリの番号) を返す。
-
-    closing keywords は本文だけから読む（GitHub は題の closing keywords で課題を閉じない）。"""
-    seen, out, refs = set(), [], []
-    for n in prs:
-        title, body = _read_sprint_pr(root, repo, n)
-        refs += [r for r in referenced_numbers(title + "\n" + body, repo) if r not in refs]
-        c = subprocess.run(
-            ["bash", str(HERE / "lib" / "closing-issues.sh"), "--repo", repo], cwd=root, input=body, capture_output=True, text=True
-        )
-        for ln in c.stdout.splitlines():
-            if "\t" not in ln:
-                continue
-            r, num = ln.split("\t", 1)
-            key = (r.strip(), int(num.strip()))
-            if key not in seen:
-                seen.add(key)
-                out.append(key)
-    return out, refs
 
 
 # --- 閉じる ---------------------------------------------------------------------
@@ -339,7 +245,7 @@ def _judge_and_mark(a, ctx, repo, n, rows):
         return {**base, "result": "kept_open", "reason": why}, []
     gap = final_stage_gap(ctx.final_stage, body, ctx.since)
     if gap:  # 条件 3 を満たさない課題の本文は書かない
-        return _gap_item(base, state, gap), []
+        return gap_item(base, state, gap), []
     if a.dry_run:
         out = {**base, "result": "already_closed" if state == "CLOSED" else "would_close"}
         return ({**out, "would_check": to_check} if own and to_check else out), []
@@ -378,7 +284,7 @@ def _close_item(a, ctx, repo, n, kept_all, verdicts):
         state, body = got
         gap = final_stage_gap(ctx.final_stage, body, ctx.since)
         if gap:
-            return _gap_item(base, state, gap)
+            return gap_item(base, state, gap)
         if a.dry_run:
             return {**base, "result": "already_closed" if state == "CLOSED" else "would_close"}
     if a.dry_run:
@@ -389,25 +295,6 @@ def _close_item(a, ctx, repo, n, kept_all, verdicts):
             **({"reason": "状態を読めない"} if st is None else {}),
         }
     return close_one(ctx, repo, n)
-
-
-NOT_GIVEN = "closing keywords（GitHub が課題を自動で閉じるキーワード Closes / Fixes / Resolves）も --issues も無い参照"
-
-
-def _referenced_items(root, repo, refs, issues):
-    """参照だけの課題の行。1 番号につき状態と URL を 1 回読み、Pull Request と閉じた課題は行にしない。"""
-    items = []
-    for n in refs:
-        if (repo, n) in issues:
-            continue
-        p = gh_call.gh(["issue", "view", str(n), "--repo", repo, "--json", "state,url", "-q", "[.state, .url] | @tsv"], cwd=root)
-        state, _, url = p.stdout.strip().partition("\t")
-        base = {"kind": "issue", "repo": repo, "number": n, "result": "kept_open"}
-        if p.returncode != 0 or not state:
-            items.append({**base, "reason": f"状態を読めない（{NOT_GIVEN}）"})
-        elif "/pull/" not in url and state != "CLOSED":
-            items.append({**base, "reason": NOT_GIVEN})
-    return items
 
 
 def _close_summary(items, prs, dry_run, referenced):
@@ -485,7 +372,7 @@ def cmd_close(a):
     notes = ctx.notes
     for repo, n in issues:
         items.append(_close_item(a, ctx, repo, n, kept_all, verdicts))
-    refs_items = _referenced_items(root, record_repo, refs, issues)
+    refs_items = referenced_items(root, record_repo, refs, issues)
     items += refs_items
 
     count, metrics, summary = _close_summary(items, prs, a.dry_run, referenced=len(refs_items))
