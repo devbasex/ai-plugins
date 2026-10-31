@@ -608,7 +608,8 @@ def test_gate_records_overrides_only_when_the_user_disagrees(env):
     assert [r["kind"] for r in signal_rows(env)] == ["override_pass", "override_reject"]
     m = json.loads(state.read_text())
     assert "rejections" not in m  # 差し戻しは差し戻しの記録へだけ書く（#1833）
-    assert [r["gate"] for r in gr.read_rejections(env["tmp"] / "state" / gr.LEDGER_NAME)] == ["関門 2"]
+    ledger = gr.read_rejections(env["tmp"] / "state" / gr.LEDGER_NAME)
+    assert [r["gate"] for r in ledger if gr.is_rejection(r)] == ["関門 2"]
     assert next(g for g in m["gates"] if g["name"] == "関門 2")["by"] == "mvv"  # 差し戻しは関門を通さない
     sprint_gate(env, state, "--by", "mvv", "--verdict", "follow", "--reasons", "[]")
     assert sprint_gate(env, state, "--outcome", "approved") == 0

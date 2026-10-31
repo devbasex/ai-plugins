@@ -3,7 +3,8 @@
 
 承認の材料は 5 つ: レビュー（cross-review のラウンド数と見送った指摘）・リファクタリング（採用と取り消しの件数）・
 全体テスト（コマンド・合否・件数）・設計文書の未確認・未実施のリリース後テスト。検査の 3 つは検査のプランの状態
-ディレクトリの `NN-<ステップ>.out` の最後の結果 JSON から、設計文書の未確認はベースブランチの
+ディレクトリの `NN-<ステップ>.out` の最後の結果 JSON から（レビューとリファクタリングは `status: ok` で終わった試行のうち
+NN の最も大きいもの。ok の試行が無ければ最後の試行を読み、ok で終わっていないと書く。#2129）、設計文書の未確認はベースブランチの
 `issues/issue-<番号>-design.md` の `## 未確認のまま残ること` から、未実施のリリース後テストは閉じる課題の
 `## 受け入れ条件` と `## リリース後テスト` の表（`lib/acceptance.py`）から読む。
 
@@ -51,6 +52,8 @@ STEPS = {
     "refactor": ("refactor", "cross-refactoring-drive"),
     "whole_test": ("test-all", "test-run"),
 }
+# ok で終わった試行を優先して読むステップ。全体テストは status が合否そのものなので、最後の試行を読む（#2129）
+PREFER_OK = ("review", "refactor")
 JST = timezone(timedelta(hours=9))
 
 
@@ -65,12 +68,14 @@ class Deferred:
 class Review:
     rounds: int
     deferred: tuple[Deferred, ...]
+    status: str = "ok"  # 読んだ試行の status。ok の試行が無いときだけ ok 以外になる
 
 
 @dataclass(frozen=True)
 class Refactor:
     adopted: int
     reverted: int
+    status: str = "ok"  # 読んだ試行の status。ok の試行が無いときだけ ok 以外になる
 
 
 @dataclass(frozen=True)
@@ -113,13 +118,20 @@ class Materials:
 # --- 検査の結果（状態ディレクトリ） -------------------------------------------------
 
 
-def last_result(state_dir: Path, step: str, tool: str) -> dict | None:
-    """`<state_dir>/NN-<step>.out`（NN の最も大きいもの。再開で増える）の最後の結果 JSON（`tool` が一致するもの）。"""
+def last_result(state_dir: Path, step: str, tool: str, prefer_ok: bool = False) -> dict | None:
+    """`<state_dir>/NN-<step>.out`（NN の最も大きいもの。再開で増える）の最後の結果 JSON（`tool` が一致するもの）。
+    prefer_ok なら `status: ok` の結果を持つ試行のうち NN の最も大きいもの。ok の試行が無ければ最後の試行の結果（#2129）。"""
     outs = [(int(m.group(1)), f) for f in state_dir.glob(f"*-{step}.out") if (m := re.match(rf"(\d+)-{re.escape(step)}\.out$", f.name))]
-    if not outs:
+    got = [r for _, f in sorted(outs, reverse=True) if (r := _result_of(f, tool)) is not None]
+    if not got:
         return None
+    return next((r for r in got if r.get("status") == "ok"), got[0]) if prefer_ok else got[0]
+
+
+def _result_of(out: Path, tool: str) -> dict | None:
+    """1 つの試行の出力の最後の結果 JSON（`tool` が一致するもの）。読めなければ None。"""
     try:
-        lines = max(outs)[1].read_text(encoding="utf-8", errors="replace").splitlines()
+        lines = out.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
         return None
     for line in reversed(lines):
@@ -143,16 +155,23 @@ def _int(v) -> int:
 
 def _review(d: dict) -> Review:
     items = [i for i in d.get("items") or [] if isinstance(i, dict) and i.get("kind") == "deferred"]
-    deferred = tuple(
-        Deferred(i.get("path") or None, i.get("line") if isinstance(i.get("line"), int) else None, str(i.get("summary") or ""))
-        for i in items
-    )
-    return Review(_int((d.get("metrics") or {}).get("rounds")), deferred)
+    deferred: dict[tuple, Deferred] = {}
+    for i in items:
+        got = Deferred(i.get("path") or None, i.get("line") if isinstance(i.get("line"), int) else None, str(i.get("summary") or ""))
+        # path と summary が同じ見送りはラウンドを跨いで同じ指摘。1 件に畳み、行番号のあるものを残す（#2129）
+        have = deferred.get((got.path, got.summary))
+        if have is None or (have.line is None and got.line is not None):
+            deferred[(got.path, got.summary)] = got
+    return Review(_int((d.get("metrics") or {}).get("rounds")), tuple(deferred.values()), _status(d))
+
+
+def _status(d: dict) -> str:
+    return str(d.get("status") or "unknown")
 
 
 def _refactor(d: dict) -> Refactor:
     m = d.get("metrics") or {}
-    return Refactor(_int(m.get("adopted")), _int(m.get("reverted")))
+    return Refactor(_int(m.get("adopted")), _int(m.get("reverted")), _status(d))
 
 
 def declared_whole(root: Path) -> tuple[tuple[str, ...], bool]:
@@ -186,7 +205,7 @@ def read_check(state_dir, root: Path) -> tuple[Review | None, Refactor | None, W
     if not str(state_dir).strip() or not Path(state_dir).is_dir():
         raise StepError(f"--check-state の検査の状態ディレクトリが無い: {state_dir!r}", EXIT_PRECONDITION)
     d = Path(state_dir)
-    got = {key: last_result(d, step, tool) for key, (step, tool) in STEPS.items()}
+    got = {key: last_result(d, step, tool, key in PREFER_OK) for key, (step, tool) in STEPS.items()}
     return (
         _review(got["review"]) if got["review"] else None,
         _refactor(got["refactor"]) if got["refactor"] else None,
@@ -261,15 +280,24 @@ def _deferred_place(d: Deferred) -> str:
 def check_lines(m: Materials) -> list[str]:
     """`## 検査の結果` の行。検査の 3 つの材料がどれも無ければ、無いことを 1 行で書く。"""
     out = []
-    if m.review is not None:
+    if m.review is not None and m.review.status != "ok":
+        out.append(_not_ok("レビュー", m.review.status))
+    elif m.review is not None:
         out.append(f"- レビュー: cross-review {m.review.rounds} ラウンド、見送った指摘 {len(m.review.deferred)} 件")
         out += [f"  - {_deferred_place(d)}{d.summary}".rstrip() for d in m.review.deferred]
-    if m.refactor is not None:
+    if m.refactor is not None and m.refactor.status != "ok":
+        out.append(_not_ok("リファクタリング", m.refactor.status))
+    elif m.refactor is not None:
         out.append(f"- リファクタリング: 採用 {m.refactor.adopted} 件 / 取り消し {m.refactor.reverted} 件")
     if (w := m.whole_test) is not None:
         how = "CI に任せた " if w.on_ci else (" / ".join(f"`{c}`" for c in w.commands) + " " if w.commands else "")
         out.append(f"- 全体テスト: {how}{'合格' if w.passed else '不合格'}（落ちたテスト {w.failed} 件・変更起因 {w.caused} 件）")
     return out or [f"- 無し（{'・'.join(NAMES[k] for k in STEPS)}の結果が検査の状態に無い）"]
+
+
+def _not_ok(name: str, status: str) -> str:
+    """ok の試行が無いステップの行。落ちた試行の件数は載せない（#2129）。"""
+    return f"- {name}: どの試行も `ok` で終わっていない（最後の試行の status: `{status}`）"
 
 
 def now_jst() -> str:
@@ -289,7 +317,7 @@ def risk_lines(m: Materials, pr_risks: bool, at: str) -> list[str]:
 def items_of(m: Materials) -> list[dict]:
     """結果 JSON の items の材料の行（5 行）。"""
     lines = {
-        "review": m.review and 1 + len(m.review.deferred),
+        "review": m.review and 1 + (len(m.review.deferred) if m.review.status == "ok" else 0),
         "refactor": m.refactor and 1,
         "whole_test": m.whole_test and 1,
         "unconfirmed": m.unconfirmed and len(m.unconfirmed),

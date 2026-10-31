@@ -24,7 +24,7 @@
 # **結果は 1 行の結果 JSON で返す（#2227）。** 形は `lib/README.md` の「手順のスクリプトの結果」で、
 # `lib/step-result.sh` の `sr_emit` が出す。記録した・変える内容が無かったときだけ `ok`（0）。
 # `gh` が無ければ `stopped`（3）、本文を書けなかった（`gh` の失敗・錠を取れない）ときは `stopped`（6）で、
-# `gaps` に `gh` の標準エラーの要旨を載せる。本文も通過記録も書けなければ `stopped`（1）。
+# `gaps` に `gh` の標準エラーの要旨を載せ、同じ理由を標準エラーへ `NOTE:` の 1 行で出す。本文も通過記録も書けなければ `stopped`（1）。
 # **進行管理が理由で開発の工程を止めない。** 止めない判断は呼ぶ側が持ち、ここは書けなかった事実を返す。
 #
 # **本文の読みから書きまでは課題ごとの錠の中で行う（#1241 の I10）。** 錠は `lib/gh_parts.py body-lock` が取り、
@@ -173,8 +173,9 @@ if [ -z "${NDF_PROGRESS_LOCKED:-}" ]; then
   sr_emit --tool "$TOOL" --status stopped --summary "#$ISSUE の進行を何も書けなかった" --code 1
 fi
 
-# 内側: 本文を書けなかったことを欠けとして返す。
+# 内側: 本文を書けなかったことを欠けとして返す。理由は標準エラーへも 1 行出す（外側がそのまま流す。#671）。
 body_gap() {
+  printf 'NOTE: #%s の本文へ進行を書けなかった: %s\n' "$ISSUE" "$1" >&2
   sr_gap issue-body "#$ISSUE" "$1"
   sr_emit --tool "$TOOL" --status stopped --summary "#$ISSUE の本文へ進行を書けなかった" --code 6
 }
