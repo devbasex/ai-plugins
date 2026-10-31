@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/wait-notify.py", "name": "notify", "kind": "require-groups", "reason": "dotenv（plugins/ndf/scripts/lib/notify.py）へ届くのに deps.require() にグループ notify が無い。hook から起動され、hook_python で用意済みの環境を確かめてから読む（deps.require を呼ばない経路）。#1455 の前提 5 で、直すのを後続の課題へ回す"}

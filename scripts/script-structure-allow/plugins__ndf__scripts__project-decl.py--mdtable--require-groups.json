@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/project-decl.py", "name": "mdtable", "kind": "require-groups", "reason": "tabulate（plugins/ndf/scripts/lib/mdtable.py）へ届くのに deps.require() にグループ mdtable が無い。deps.require を呼ばないエントリポイントで、関数の中の import が届く。関数の中で呼ぶ位置が外へ書く前か（起動し直しで書き込みが 2 度起きないか）を確かめていない。#1455 の前提 5 で、直すのを後続の課題へ回す"}
