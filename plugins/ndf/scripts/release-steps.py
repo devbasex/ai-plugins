@@ -651,6 +651,38 @@ def merge_commit_of(root, n):
     return ((d.get("mergeCommit") or {}).get("oid")) or None
 
 
+def _reusable_release_pr(root, branch, base):
+    """開発版の PR（release/v<版> → ベースブランチ）のうち使い回せるものを返す。無ければ None。"""
+    pr = find_pr(root, branch, base, states=("OPEN", "MERGED"))
+    if pr and pr["state"] == "MERGED":
+        # マージ済みの PR へ後から積んだコミットは GitHub が開き直さずベースブランチに入らない。入っていなければ PR を作り直す
+        git(root, "fetch", "-q", "origin", base)
+        pr = pr if git(root, "merge-base", "--is-ancestor", "HEAD", f"origin/{base}", check=False).returncode == 0 else None
+    return pr
+
+
+def _release_pr_body(root, a, plugin, plugins):
+    """CHANGELOG.md の節とチェックの結果から開発版の PR の本文を組む。"""
+    ver = a.version
+    section = changelog_section(root, ver, plugin)
+    mark = {True: "pass", False: "fail", None: "skip"}
+    return "\n".join(
+        [
+            f"{plugin} v{ver} のリリース（{a.channel}）。対象の plugin: {', '.join(plugins)}",
+            "",
+            "## 含む PR",
+            "",
+            section or "（CHANGELOG.md に該当の節が無い）",
+            "",
+            "## チェックの結果",
+            "",
+            *[f"- {name}: {mark[ok]}" + (f"（{tail.splitlines()[-1]}）" if tail else "") for name, ok, tail in run_checks(root)],
+            "",
+            "🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+        ]
+    )
+
+
 def cmd_release(a):
     root = git_root(a.root)
     ver = a.version
@@ -669,29 +701,9 @@ def cmd_release(a):
     git(root, "push", "-q", "-u", "origin", "HEAD")
 
     # 開発版の PR（release/v<版> → ベースブランチ）
-    pr = find_pr(root, branch, base, states=("OPEN", "MERGED"))
-    if pr and pr["state"] == "MERGED":
-        # マージ済みの PR へ後から積んだコミットは GitHub が開き直さずベースブランチに入らない。入っていなければ PR を作り直す
-        git(root, "fetch", "-q", "origin", base)
-        pr = pr if git(root, "merge-base", "--is-ancestor", "HEAD", f"origin/{base}", check=False).returncode == 0 else None
+    pr = _reusable_release_pr(root, branch, base)
     if pr is None:
-        section = changelog_section(root, ver, plugin)
-        mark = {True: "pass", False: "fail", None: "skip"}
-        body = "\n".join(
-            [
-                f"{plugin} v{ver} のリリース（{a.channel}）。対象の plugin: {', '.join(plugins)}",
-                "",
-                "## 含む PR",
-                "",
-                section or "（CHANGELOG.md に該当の節が無い）",
-                "",
-                "## チェックの結果",
-                "",
-                *[f"- {name}: {mark[ok]}" + (f"（{tail.splitlines()[-1]}）" if tail else "") for name, ok, tail in run_checks(root)],
-                "",
-                "🤖 Generated with [Claude Code](https://claude.com/claude-code)",
-            ]
-        )
+        body = _release_pr_body(root, a, plugin, plugins)
         pr = {"number": create_pr(root, base, branch, f"Release: {plugin} v{ver}", body), "state": "OPEN"}
     release_pr = pr["number"]
     release_commit = wait_and_merge(root, release_pr, ci_wait=a.ci_wait) if pr["state"] == "OPEN" else merge_commit_of(root, release_pr)
