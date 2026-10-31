@@ -103,9 +103,12 @@ def _version_problems(i: int, v) -> list[str]:
 
 
 def decl_models():
-    """宣言の型（`lib/schema.py` の `Shape`）。使う側は `deps.require("schema")` を先に呼ぶ。"""
+    """宣言の型（`lib/schema.py` の `Shape`）。`pydantic` を読む前に `deps.require("schema")` を呼ぶ。"""
     from typing import Literal, Optional
 
+    import deps
+
+    deps.require("schema")
     import schema
     from pydantic import Field
 

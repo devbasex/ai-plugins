@@ -18,7 +18,8 @@
       "plans": [
         "<TMP>/out/close/1-check.json"
       ],
-      "command": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/close/1-check.json --max 3 --then <TMP>/out/close/2-release.json --then <TMP>/out/close/3-release-prod.json --then <TMP>/out/close/4-close.json"
+      "command": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/close/1-check.json --max 3 --done <TMP>/out/close/done-1.json --then <TMP>/out/close/2-release.json --then <TMP>/out/close/3-release-prod.json --then <TMP>/out/close/4-close.json",
+      "resume": "python3 <NDF>/scripts/supervise.py queue --resume <TMP>/out/close/done-1.json"
     },
     {
       "wave": 2,
@@ -27,7 +28,7 @@
         "<TMP>/out/close/2-release.json"
       ],
       "then_of": "最終の検査",
-      "resume": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/close/2-release.json --max 3 --then <TMP>/out/close/3-release-prod.json --then <TMP>/out/close/4-close.json"
+      "resume": "python3 <NDF>/scripts/supervise.py queue --resume <TMP>/out/close/done-1.json"
     },
     {
       "wave": 3,
@@ -36,7 +37,7 @@
         "<TMP>/out/close/3-release-prod.json"
       ],
       "then_of": "最終の検査",
-      "resume": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/close/3-release-prod.json --max 3 --then <TMP>/out/close/4-close.json"
+      "resume": "python3 <NDF>/scripts/supervise.py queue --resume <TMP>/out/close/done-1.json"
     },
     {
       "wave": 4,
@@ -45,7 +46,7 @@
         "<TMP>/out/close/4-close.json"
       ],
       "then_of": "最終の検査",
-      "resume": "python3 <NDF>/scripts/supervise.py queue <TMP>/out/close/4-close.json --max 3"
+      "resume": "python3 <NDF>/scripts/supervise.py queue --resume <TMP>/out/close/done-1.json"
     }
   ]
 }

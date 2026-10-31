@@ -142,9 +142,11 @@ class WorkStep:
         if not res.get("runtime"):  # runtime を指定した work は claude -p に数えない（帳簿から集める）
             ctx.claude.record_usage("work", res)
         # 報告が無いまま応答を終えた Skill のステップは、同じ会話を起こし直す（supervisor へ SendMessage で
-        # 続けさせていたのと同じ。3 回まで）
+        # 続けさせていたのと同じ。3 回まで）。「判断が要る / できなかった」を報告して止まった worker は、
+        # 続けさせても判断が変わらないため起こし直さず、下の判定で失敗にして conductor へ戻す
         for _ in range(3):
-            if not full or REPORT_DONE.search(res["text"] or "") or not res.get("session"):
+            text = res["text"] or ""
+            if not full or REPORT_DONE.search(text) or REPORT_NOT_DONE.search(text) or not res.get("session"):
                 break
             res = ctx.claude.call(system, RESUME_PROMPT, WORK_TOOLS, cwd, _timeout(step), full=True, resume=res["session"])
             ctx.claude.record_usage("work", res)

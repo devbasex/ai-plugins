@@ -113,13 +113,26 @@ class Materials:
 # --- 検査の結果（状態ディレクトリ） -------------------------------------------------
 
 
-def last_result(state_dir: Path, step: str, tool: str) -> dict | None:
-    """`<state_dir>/NN-<step>.out`（NN の最も大きいもの。再開で増える）の最後の結果 JSON（`tool` が一致するもの）。"""
-    outs = [(int(m.group(1)), f) for f in state_dir.glob(f"*-{step}.out") if (m := re.match(rf"(\d+)-{re.escape(step)}\.out$", f.name))]
-    if not outs:
+def last_out(state_dir: Path, step: str) -> Path | None:
+    """`<state_dir>/NN-<step>.out` のうち最後に書かれたもの（更新時刻、同じなら NN の大きい方）。
+    NN は実行の回ごとに 01 から数え直すため（再開すると古い回の大きい NN が残る）、NN だけでは選ばない。"""
+    outs = []
+    for f in state_dir.glob(f"*-{step}.out"):
+        if m := re.match(rf"(\d+)-{re.escape(step)}\.out$", f.name):
+            try:
+                outs.append((f.stat().st_mtime, int(m.group(1)), f))
+            except OSError:
+                continue
+    return max(outs)[2] if outs else None
+
+
+def last_result(state_dir: Path, step: str, tool: str, out: Path | None = None) -> dict | None:
+    """最後に書かれた `<state_dir>/NN-<step>.out`（`last_out`。`out` を渡せばそれ）の最後の結果 JSON（`tool` が一致するもの）。"""
+    out = out or last_out(state_dir, step)
+    if out is None:
         return None
     try:
-        lines = max(outs)[1].read_text(encoding="utf-8", errors="replace").splitlines()
+        lines = out.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
         return None
     for line in reversed(lines):

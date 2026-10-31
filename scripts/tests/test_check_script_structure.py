@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -324,7 +325,16 @@ def test_hook_path_must_not_use_deps(tmp_path: Path):
     }
 
 
-DEPS_PY = 'GROUPS = {"md": ["markdown_it"], "mdtable": ["tabulate"], "durable": ["dbos", "filelock"], "locks": ["filelock"]}\n'
+DEPS_PY = (
+    'GROUPS = {"md": ["markdown_it"], "mdtable": ["tabulate"], "durable": ["dbos", "filelock"], "locks": ["filelock"],'
+    ' "procs": ["psutil"]}\n'
+)
+MAIN = '\nif __name__ == "__main__":\n    main()\n'
+
+
+def rg(r: dict) -> set[str]:
+    """require-groups の違反（`<パス>:<グループ>`。パスは scripts/ からの相対）。"""
+    return {i["name"].removeprefix("plugins/ndf/scripts/") for i in r["items"] if i["kind"] == "require-groups"}
 
 
 def test_require_must_list_groups_reached_through_imports(tmp_path: Path):
@@ -336,22 +346,132 @@ def test_require_must_list_groups_reached_through_imports(tmp_path: Path):
     put(tmp_path, "scripts/sup_lib/state.py", "import mvv\n")
     put(tmp_path, "scripts/sup_lib/table.py", "import tabulate\n")
     put(tmp_path, "scripts/sup_lib/cmds.py", "from . import state\nfrom .table import x\n")
-    entry = "import deps\n\ndeps.require({})\nfrom sup_lib import cmds\n"
+    entry = "import deps\n\ndeps.require({})\nfrom sup_lib import cmds\n" + MAIN
     put(tmp_path, "scripts/sup.py", entry.format('"mdtable"'))
-    # 関数の中の import と except ImportError で受ける import は読み込み時に届かない
-    put(
-        tmp_path,
-        "scripts/lazy.py",
-        "import deps\n\ndeps.require('mdtable')\ntry:\n    import markdown_it\nexcept ImportError:\n    pass\n\ndef f():\n    import md\n",
-    )
-    put(tmp_path, "scripts/lock.py", "import deps\n\ndeps.require('durable')\nimport filelock\n")  # 同じ名前は持つグループのどれかでよい
-    put(tmp_path, "scripts/plain.py", "import md\n")  # require を呼ばないモジュールは見ない
+    put(tmp_path, "scripts/lock.py", "import deps\n\ndeps.require('durable')\nimport filelock\n" + MAIN)  # 持つグループのどれかでよい
+    put(tmp_path, "scripts/plain.py", "import md\n")  # __main__ の文を持たないモジュールはエントリポイントでない
     code, r = run(tmp_path, [])
     assert code == 1
     assert kinds(r) == {("require-groups", "plugins/ndf/scripts/sup.py:md")}
     put(tmp_path, "scripts/sup.py", entry.format('"md", "mdtable"'))
     code, r = run(tmp_path, [])
     assert code == 0, r
+
+
+def lazy_llm_tree(tmp_path: Path, call_body: str) -> None:
+    """project-mvv.py の形: require を呼ばないエントリポイント → 関数の中の import → procs → psutil。"""
+    put(tmp_path, "scripts/lib/deps.py", DEPS_PY)
+    put(tmp_path, "scripts/lib/procs.py", "import psutil\n")
+    put(tmp_path, "scripts/lib/claude.py", "import procs\n")
+    put(tmp_path, "scripts/llm_lib/__init__.py", "")
+    put(tmp_path, "scripts/llm_lib/llm.py", f"def call():\n{call_body}")
+    put(tmp_path, "scripts/mvv.py", "from llm_lib import llm\n\ndef main():\n    llm.call()\n" + MAIN)
+
+
+def test_a_late_import_reaching_a_group_without_require_is_a_violation(tmp_path: Path):
+    """受け入れ条件 4・5: 関数の中の import から届くグループも、覆う require が無ければ落ち、届いた名前と書いたモジュールが出る。"""
+    lazy_llm_tree(tmp_path, "    import claude\n")
+    code, r = run(tmp_path, [])
+    assert code == 1 and rg(r) == {"mvv.py:procs"}
+    assert r["items"][0]["detail"] == "psutil（plugins/ndf/scripts/lib/procs.py）へ届くのに deps.require() にグループ procs が無い"
+    lazy_llm_tree(tmp_path, "    import deps\n\n    deps.require('procs')\n    import claude\n")  # 呼ばれる側の宣言（I3）
+    code, r = run(tmp_path, [])
+    assert code == 0, r
+    lazy_llm_tree(tmp_path, "    import claude\n    import deps\n\n    deps.require('procs')\n")  # import の後の require は覆わない
+    assert rg(run(tmp_path, [])[1]) == {"mvv.py:procs"}
+
+
+@pytest.mark.parametrize(
+    "body, bad",
+    [
+        pytest.param("    try:\n        import procs\n    except ImportError:\n        return\n", False, id="except-import-error"),
+        pytest.param("    try:\n        import procs\n    except (ImportError, OSError):\n        return\n", False, id="except-tuple"),
+        pytest.param("    if importlib.util.find_spec('psutil'):\n        import procs\n", False, id="if-find-spec"),
+        pytest.param("    if deps.importable('procs') and x:\n        import procs\n", False, id="if-importable-and"),
+        pytest.param("    if x or find_spec('psutil') is None:\n        return\n    import procs\n", False, id="return-when-missing"),
+        pytest.param(
+            "    if not deps.importable('procs'):\n        raise SystemExit(0)\n    import procs\n", False, id="raise-when-missing"
+        ),
+        pytest.param("    print(find_spec('psutil'))\n    import procs\n", True, id="check-without-branch"),
+        pytest.param("    if find_spec('psutil'):\n        pass\n    import procs\n", True, id="after-the-branch"),
+        pytest.param("    if find_spec('psutil') is None:\n        print(1)\n    import procs\n", True, id="no-return"),
+    ],
+)
+def test_optional_imports_are_not_violations(tmp_path: Path, body: str, bad: bool):
+    """受け入れ条件 6・I2: 無ければ代わりの手段へ落ちる import は違反にしない。確かめた後に枝を通らず読む import は違反。"""
+    put(tmp_path, "scripts/lib/deps.py", DEPS_PY)
+    put(tmp_path, "scripts/lib/procs.py", "import psutil\n")
+    put(
+        tmp_path,
+        "scripts/opt.py",
+        "import deps\nimport importlib.util\nfrom importlib.util import find_spec\n\ndef main():\n" + body + MAIN,
+    )
+    assert rg(run(tmp_path, [])[1]) == ({"opt.py:procs"} if bad else set())
+
+
+@pytest.mark.parametrize(
+    "rel, text, bad",
+    [
+        pytest.param(
+            "scripts/other_fn.py",
+            "import deps\n\ndef f():\n    deps.require('procs')\n\ndef main():\n    import procs\n",
+            True,
+            id="another-function",
+        ),
+        pytest.param(
+            "scripts/lib/mon.py",
+            "import deps\n\ndef main():\n    deps.require('procs')\n    run()\n\ndef run():\n    import procs\n",
+            False,
+            id="main-covers-functions",
+        ),
+        pytest.param(
+            "scripts/top.py", "import deps\nimport procs\n\ndef main():\n    deps.require('procs')\n", True, id="main-does-not-cover-load"
+        ),
+        pytest.param(
+            "scripts/before.py", "import deps\n\ndef main():\n    import procs\n    deps.require('procs')\n", True, id="main-before-require"
+        ),
+        pytest.param(
+            "scripts/under_if.py",
+            "import deps\n\ndef main():\n    if x:\n        deps.require('procs')\n\ndef g():\n    import procs\n",
+            True,
+            id="main-under-if",
+        ),
+        pytest.param(
+            "scripts/mod_top.py",
+            "import deps\n\ndeps.require('procs')\n\ndef main():\n    import procs\n",
+            False,
+            id="module-top-covers-functions",
+        ),
+    ],
+)
+def test_require_covers_only_its_own_reach(tmp_path: Path, rel: str, text: str, bad: bool):
+    """I4: 関数の require は同じ関数の後だけ、main の本体の最上位の require はエントリポイントとして見るときの遅れた依存だけを覆う。"""
+    put(tmp_path, "scripts/lib/deps.py", DEPS_PY)
+    put(tmp_path, "scripts/lib/procs.py", "import psutil\n")
+    put(tmp_path, rel, text + MAIN)
+    assert rg(run(tmp_path, [])[1]) == ({rel.removeprefix("scripts/") + ":procs"} if bad else set())
+
+
+def test_main_require_of_an_imported_module_does_not_cover_its_reader(tmp_path: Path):
+    """I4: ほかのモジュールから読まれたとき main は走らないため、その require は読む側を覆わない（monitor.py の形）。"""
+    put(tmp_path, "scripts/lib/deps.py", DEPS_PY)
+    put(tmp_path, "scripts/lib/procs.py", "import psutil\n")
+    put(tmp_path, "scripts/lib/mon.py", "import deps\n\ndef main():\n    deps.require('procs')\n\ndef run():\n    import procs\n" + MAIN)
+    put(tmp_path, "scripts/user.py", "import mon\n\ndef main():\n    mon.run()\n" + MAIN)
+    assert rg(run(tmp_path, [])[1]) == {"user.py:procs"}
+
+
+def test_hook_entries_are_left_to_hook_deps(tmp_path: Path):
+    """I7: hook の経路のエントリポイントは require を呼べないため、require-groups の対象にしない。"""
+    put(tmp_path, "scripts/lib/deps.py", DEPS_PY)
+    put(tmp_path, "scripts/hook.py", "def main():\n    import psutil\n" + MAIN)
+    assert rg(run(tmp_path, [])[1]) == set()
+
+
+def test_require_groups_allow_rows_name_their_issue():
+    """I8: require-groups の例外リストの項目は、reason に課題の番号を持つ。"""
+    rows = [json.loads(f.read_text()) for f in (REPO / "scripts" / "script-structure-allow").glob("*--require-groups.json")]
+    assert all(re.search(r"#\d+", r["reason"]) for r in rows), [r["path"] for r in rows if not re.search(r"#\d+", r["reason"])]
 
 
 GOOD_BOUNDARY = {

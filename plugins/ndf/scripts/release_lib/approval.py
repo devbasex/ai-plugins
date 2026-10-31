@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import approved_commit as ac
@@ -153,9 +154,104 @@ def gate(root, a, plugin, base, verdict, items, metrics, moved=False) -> dict:
     )
 
 
+def _facts_of(state_dir) -> tuple[str | None, str | None]:
+    """開発版のプランの状態ディレクトリの最後の facts のステップの出力から (提示した SHA, 出力の時刻)。無ければ None。"""
+    from release_lib.materials import last_out, last_result
+
+    if not state_dir:  # Path("") は作業場所（.）を指すため読まない
+        return None, None
+    d = Path(state_dir)
+    out = last_out(d, "facts") if d.is_dir() else None
+    if out is None:
+        return None, None
+    # SHA と時刻は同じ出力から読む（再開で NN が 01 に戻っても、古い回の SHA と新しい回の時刻を組み合わせない）
+    sha = ((last_result(d, "facts", TOOL, out) or {}).get("metrics") or {}).get("approved_sha")
+    if not sha:
+        return None, None
+    try:
+        at = datetime.fromtimestamp(out.stat().st_mtime, timezone.utc).isoformat()
+    except OSError:
+        return None, None
+    return sha, at
+
+
+def _approve_gate(path, why: str, metrics: dict, nxt: str) -> Gate:
+    return Gate(result(TOOL, "gate", f"承認の記録を書かずに止めた: {why}", [], metrics, str(path), nxt))
+
+
+def approve_from_facts(root, a) -> dict:
+    """本番のプランの先頭の approve（#1426 の決定 7）。提示した SHA は開発版の facts の出力から読み（資料を読み直さない）、
+    承認資料に一致する承認の記録が既にあれば書かずに通す。無ければ承認ゲート 2 の利用者の承認の記録（facts の出力より後）が
+    `--answer-from` にあるときだけ書く。どれかが欠ければ書かずに承認ゲート（10）で止まる（I2・I3）。"""
+    import gate_answer
+
+    if getattr(a, "approved_sha", None):
+        raise StepError("--facts-from と --approved-sha は併せて渡さない", EXIT_UNREADABLE)
+    path = _material(root, a.approval)
+    sha, facts_at = _facts_of(a.facts_from)
+    metrics = {"approved_sha": sha, "facts_at": facts_at, "by": a.by}
+    retry = f'承認を取り、sprint-state.py gate <状態> "{gate_answer.GATE_2}" --what <要約> --by user --outcome approved を書いてから続ける'
+    if not sha:
+        # facts を読めなくても（--dev-state を省いた単発の本番のプランなど）、資料に一致する承認の記録が既にあれば通す（決定 7）
+        try:
+            kept = ac.from_material(path)
+        except (ac.Unapproved, ValueError):
+            kept = None
+        if kept:
+            metrics["approved_sha"] = kept
+            return result(
+                TOOL,
+                "ok",
+                f"承認資料に承認の記録（{kept[:8]}）が既にある",
+                [{"kind": "cell", "name": ac.RECORD, "result": "kept"}],
+                metrics,
+                str(path),
+            )
+        nxt = "開発版のプランを流し直すか、new release --channel prod に --dev-state <開発版のプランの状態ディレクトリ> を渡して作り直す"
+        raise _approve_gate(path, f"開発版の facts の出力（{a.facts_from or '空'}）に承認したコミットが無い", metrics, nxt)
+    try:
+        now = ac.material_sha(path)
+        if now != sha:
+            nxt = "承認資料を提示し直して承認を取り直す"
+            raise _approve_gate(
+                path, f"承認資料の承認したコミット {now[:8]} が facts の {sha[:8]} と違う（提示の後に書き直された）", metrics, nxt
+            )
+        if ac.recorded_sha(path) == sha:
+            return result(
+                TOOL,
+                "ok",
+                f"承認資料に承認の記録（{sha[:8]}）が既にある",
+                [{"kind": "cell", "name": ac.RECORD, "result": "kept"}],
+                metrics,
+                str(path),
+            )
+    except ValueError as e:
+        raise _approve_gate(path, str(e), metrics, "開発版のプランを流し直す")
+    answer = gate_answer.approved(getattr(a, "answer_from", None), gate_answer.GATE_2, after=facts_at)
+    if answer is None:
+        raise _approve_gate(path, "承認ゲート 2 の利用者の承認の記録が facts の出力より後に無い", metrics, retry)
+    at = clock.now_iso("utc")
+    ac.record_approval(path, sha, a.by, at)
+    metrics.update({"at": at, "answer_at": answer.at})
+    return result(
+        TOOL,
+        "ok",
+        f"承認資料に承認の記録（{sha[:8]}・{a.by}）を書いた",
+        [{"kind": "cell", "name": ac.RECORD, "result": "written"}],
+        metrics,
+        str(path),
+    )
+
+
 def approve(root, a) -> dict:
     """ゲート 2 の承認を承認資料へ記録する（#815 の I10）。--approved-sha は提示した資料を書いた approval-facts の
-    metrics.approved_sha（資料を読み直した値ではない）。資料がその後に書き直されていれば書かずに止まる。"""
+    metrics.approved_sha（資料を読み直した値ではない）。資料がその後に書き直されていれば書かずに止まる。
+    --facts-from なら approve_from_facts（#1426）。"""
+    # 空の --facts-from（queue が {queue_state:release} を空で埋めた）も facts の経路で扱い、承認ゲート（10）で返す
+    if getattr(a, "facts_from", None) is not None:
+        return approve_from_facts(root, a)
+    if not getattr(a, "approved_sha", None):
+        raise StepError("--approved-sha か --facts-from が要る", EXIT_UNREADABLE)
     path = _material(root, a.approval)
     try:
         sha = ac.parse_sha(a.approved_sha)
