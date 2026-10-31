@@ -157,6 +157,8 @@ def gh(tmp_path):
     env["FAKE_GH_STATE"] = str(state)
     env["NDF_PRESENTATION_DIR"] = str(tmp_path / "pres")
     env["NDF_WORKTREE_BASE"] = str(tmp_path / "wtbase")
+    env["TMPDIR"] = str((tmp_path / "systmp").resolve())  # 片付け（run_state.sweep_states）が手元の一時の置き場に触れない
+    (tmp_path / "systmp").mkdir(exist_ok=True)
     env["NDF_LOCK_DIR"] = str(tmp_path / "locks")
     for k in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GH_TOKEN", "GITHUB_TOKEN"):  # REST も偽の gh を通す
         env.pop(k, None)

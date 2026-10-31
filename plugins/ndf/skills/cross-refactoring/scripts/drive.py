@@ -50,6 +50,7 @@ import durable  # noqa: E402
 import assignee_env  # noqa: E402
 from drive_pause import Stop  # noqa: E402
 import proc  # noqa: E402
+import run_owner  # noqa: E402  持ち主の記録（#2229）
 from loop_drive import call, durable_identity, keep_finished_output, parse_vars, pr_head, result_args  # noqa: E402  テストは `call` をこのモジュールの上で差し替える
 
 if str(HERE) not in sys.path:
@@ -266,11 +267,17 @@ class Drive(AssigneeLaunch):
     # --- 進行（繰り返しは耐久ワークフロー `refactor_drive` が持つ） ---
     def start(self) -> None:
         """init（1 つの実行の回で 1 回だけ。I19）と worktree の用意。"""
-        self.rf("init", str(self.pr), *self.init_args)
+        self.rf("init", str(self.pr), *self.init_args, *run_owner.run_args(self.init_args))  # 実行の識別子（#2229）
         if "TMP_DIR" not in self.v or "ID" not in self.v:
             raise Stop("refactor.py init が TMP_DIR / ID を返さない", 2)
+        self.own("touch")
         self.extra_env["CROSS_REFACTORING_TMP_DIR"] = self.v["TMP_DIR"]
         self.sh("prepare-worktrees.sh", ["bash", str(HERE / "prepare-worktrees.sh"), self.v["ID"]])
+
+    def own(self, what: str) -> None:
+        """rf<n> の持ち主の記録へ動いた時刻（touch）か終わり（finish）を書く。別の実行が引き継いでいれば止まる（#2229 の I12）。"""
+        if why := run_owner.mark_owner(self.v.get("WORKTREE_ROOT"), self.v.get("RUN"), what):
+            raise Stop(f"持ち主の記録を更新できない: {why}", 1)
 
     def phases(self) -> bool:
         """提案から実装の取り込みまで。最終ゲートへ直に進むなら真を返す。"""
@@ -475,6 +482,8 @@ def refactor_drive(pr: int, init_args: list[str], root: str | None = None) -> di
         else:
             d.rf("finalize", d.v["ID"])
             result = d.done()
+        result["items"] = [*result.get("items", []), *json.loads(d.v.get("SWEPT") or "[]")]  # 開始の片付けの結果
+        d.own("finish")
     except Stop as e:
         result = d.stopped(e)
     head = pr_head(d.call, pr) if result.get("status") == "ok" else None

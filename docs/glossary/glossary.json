@@ -4675,7 +4675,7 @@
     {
       "term": "片付け",
       "context": "ndf-worktree",
-      "meaning": "状態の一覧に従い、持ち主の終わった残る状態を外し、残したものと理由を返す処理（run_state.sweep）。git が拒めば止まる操作だけで行う（#2229）",
+      "meaning": "状態の一覧に従い、持ち主の終わった残る状態を外し、残したものと理由を返す処理（run_state.sweep_states）。git が拒めば止まる操作だけで行う（#2229）",
       "source": "",
       "pending_source": "issues/issue-2229-design.md"
     }
