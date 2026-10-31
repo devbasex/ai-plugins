@@ -28,7 +28,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
 
-deps.require("md", "mdtable", "locks")
+deps.require("md", "mdtable", "locks", "durable", "waits")
 import acceptance  # noqa: E402
 import gh_call  # noqa: E402
 import gh_parts  # noqa: E402
@@ -81,21 +81,21 @@ def recorded_body(body: str, pre_merge: dict[int, str], post_release) -> str:
     return gh_sections.replace_section(body, acceptance.CHECKS_HEADING, table)
 
 
-def _items(checks: dict[int, acceptance.Check]) -> list[dict]:
+def _criterion_items(checks: dict[int, acceptance.Check]) -> list[dict]:
     return [
         {"kind": "criterion", "name": str(n), "result": c.kind, **({"means": c.means} if c.means else {})}
         for n, c in sorted(checks.items())
     ]
 
 
-def _slug(a) -> str:
+def _repo_slug(a) -> str:
     slug = gh_call.resolve_repo(a.repo)
     if not slug:
         raise StepError("リポジトリを決められない（--repo を渡す）", EXIT_PRECONDITION)
     return slug
 
 
-def _fetch(slug: str, n: int) -> str:
+def _fetch_issue_body(slug: str, n: int) -> str:
     body = gh_rest.fetch_body(slug, n)
     if body is None:
         raise StepError(f"{slug}#{n} の本文を読めない", EXIT_UNREADABLE)
@@ -106,22 +106,22 @@ def cmd_record(a):
     pre = parse_pre_merge(a.pre_merge)
     if not pre and not a.post_release:
         raise StepError("--pre-merge か --post-release を 1 つ以上渡す", EXIT_UNREADABLE)
-    slug = _slug(a)
+    slug = _repo_slug(a)
     with gh_parts.issue_lock(slug, a.issue):  # 読みから書きまでを課題ごとの錠の中で行う
-        body = _fetch(slug, a.issue)
+        body = _fetch_issue_body(slug, a.issue)
         new = recorded_body(body, pre, a.post_release)
         if new != body and not gh_rest.update_body(slug, a.issue, new):
             emit(result(TOOL, "stopped", f"{slug}#{a.issue} の本文を書けない"), EXIT_VIOLATION)
     checks = acceptance.read_check_kinds(new)
     pre_n = sum(c.kind == acceptance.PRE_MERGE for c in checks.values())
     state = "変更なし" if new == body else "記録した"
-    emit(result(TOOL, "ok", f"#{a.issue}: {state}（マージ前 {pre_n} 件・リリース後 {len(checks) - pre_n} 件）", _items(checks)), 0)
+    emit(result(TOOL, "ok", f"#{a.issue}: {state}（マージ前 {pre_n} 件・リリース後 {len(checks) - pre_n} 件）", _criterion_items(checks)), 0)
 
 
 def cmd_show(a):
-    slug = _slug(a)
-    checks = acceptance.read_check_kinds(_fetch(slug, a.issue))
-    emit(result(TOOL, "ok", f"#{a.issue}: 記録 {len(checks)} 件", _items(checks)), 0)
+    slug = _repo_slug(a)
+    checks = acceptance.read_check_kinds(_fetch_issue_body(slug, a.issue))
+    emit(result(TOOL, "ok", f"#{a.issue}: 記録 {len(checks)} 件", _criterion_items(checks)), 0)
 
 
 def build_parser():
