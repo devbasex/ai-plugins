@@ -119,7 +119,9 @@ def test_prompt_submit_returns_the_kiro_notice(repo, name):
 
 def test_untargeted_tool_is_quiet(repo):
     _declare(repo)
-    ev = event_of({"hook_event_name": "PreToolUse", "tool_name": "Read", "tool_input": {"file_path": f"{repo}/a.py"}, "cwd": repo, "session_id": "s"})
+    ev = event_of(
+        {"hook_event_name": "PreToolUse", "tool_name": "Read", "tool_input": {"file_path": f"{repo}/a.py"}, "cwd": repo, "session_id": "s"}
+    )
     assert wtg.notice(ev) is None
 
 
@@ -149,7 +151,11 @@ def test_multiple_edit_paths_are_listed_and_only_new_ones_after(repo):
 
 def test_agy_queues_the_context_and_allows(repo):
     _declare(repo)
-    raw = {"toolCall": {"name": "write_to_file", "args": {"TargetFile": f"{repo}/src/a.py"}}, "workspacePaths": [repo], "conversationId": "g1"}
+    raw = {
+        "toolCall": {"name": "write_to_file", "args": {"TargetFile": f"{repo}/src/a.py"}},
+        "workspacePaths": [repo],
+        "conversationId": "g1",
+    }
     assert wtg.notice(event_of(raw)) == {"decision": "allow"}
     state = json.loads(Path(wtg.state_file("g1")).read_text())
     assert state["pending"] == [wtg.CONTEXT.format(paths="  - src/a.py", wdir=wtg.WORKTREE_DIR)]
@@ -160,7 +166,9 @@ def test_agy_queues_the_context_and_allows(repo):
 def test_patch_targets_are_flagged(repo):
     _declare(repo)
     patch = "*** Begin Patch\n*** Add File: src/new.py\n+x\n*** End Patch\n"
-    ev = event_of({"hook_event_name": "PreToolUse", "tool_name": "apply_patch", "tool_input": {"command": patch}, "cwd": repo, "session_id": "p"})
+    ev = event_of(
+        {"hook_event_name": "PreToolUse", "tool_name": "apply_patch", "tool_input": {"command": patch}, "cwd": repo, "session_id": "p"}
+    )
     assert wtg.notice(ev) == _expected(["src/new.py"])
 
 
@@ -176,7 +184,9 @@ class TestShell:
         pytest.importorskip("tree_sitter_bash")
 
     def _bash(self, repo: str, cmd: str, session: str = "b", **ti) -> object:
-        return event_of({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd, **ti}, "cwd": repo, "session_id": session})
+        return event_of(
+            {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd, **ti}, "cwd": repo, "session_id": session}
+        )
 
     def test_redirect_into_the_main_directory_is_flagged(self, repo):
         _declare(repo)
