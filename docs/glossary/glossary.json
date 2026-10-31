@@ -4339,19 +4339,19 @@
       "term": "進捗の受け口",
       "context": "ndf-factory",
       "meaning": "ランナー・GitHub の Webhook・承認の API から進捗の事象を受け、出所ごとに認証して冪等に追記する、factory/api/ の HTTP の経路",
-      "pending_source": "issues/issue-2171-requirements.md"
+      "source": "docs/specifications/ndf-factory-contracts-and-progress.md"
     },
     {
       "term": "実行ジョブの token",
       "context": "ndf-factory",
       "meaning": "実行の制御が実行ジョブ 1 つごとに発行する、期限つきの token。そのジョブのスプリントの実行にだけ進捗の事象を書け、承認の依頼の答えを読める",
-      "pending_source": "issues/issue-2171-requirements.md"
+      "source": "docs/specifications/ndf-factory-contracts-and-progress.md"
     },
     {
       "term": "冪等の鍵",
       "context": "ndf-factory",
       "meaning": "進捗の事象の重複を判定する鍵（idempotency_key）。形は出所ごとに決まり、同じ鍵の事象は 1 つだけ残る",
-      "pending_source": "issues/issue-2171-requirements.md"
+      "source": "docs/specifications/ndf-factory-contracts-and-progress.md"
     },
     {
       "term": "アカウント",
