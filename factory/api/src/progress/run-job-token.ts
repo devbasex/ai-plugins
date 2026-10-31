@@ -12,11 +12,15 @@ export const RUN_JOB_TOKEN_ALG = "EdDSA";
 export const VERIFY_KEYS_TTL_MS = 5 * 60 * 1000;
 
 const IDENTIFIER = /^[A-Za-z0-9_-]{1,128}$/;
+// 許可したリポジトリ（owner/name）。契約の RepoFullName と同じ形
+const REPO = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/;
 
-// 発行で受けるのはこの 3 つだけ。ほかの鍵（account_id など）は型で受けない
+// 発行で受けるのはこの 4 つだけ。ほかの鍵（account_id など）は型で受けない。
+// repo はその実行に許可したリポジトリ（#2216。受け口が step.recorded の Pull Request と照らす）
 export interface RunJobTokenClaims {
   jobId: string;
   sprintRunId: string;
+  repo: string;
   expiresAt: Date;
 }
 
@@ -75,15 +79,16 @@ export function createRunJobTokenVerifier(keys: JWK[]): RunJobTokenVerifier {
         issuer: RUN_JOB_TOKEN_ISSUER,
         audience: RUN_JOB_TOKEN_AUDIENCE,
         typ: RUN_JOB_TOKEN_TYPE,
-        requiredClaims: ["sub", "exp", "sprint_run_id"],
+        requiredClaims: ["sub", "exp", "sprint_run_id", "repo"],
       }));
     } catch (err) {
       throw toRunJobTokenError(err) ?? new RunJobTokenError("malformed");
     }
-    const { sub, sprint_run_id: sprintRunId, exp } = payload;
+    const { sub, sprint_run_id: sprintRunId, repo, exp } = payload;
     if (typeof sub !== "string" || !IDENTIFIER.test(sub)) throw new RunJobTokenError("malformed");
     if (typeof sprintRunId !== "string" || !IDENTIFIER.test(sprintRunId)) throw new RunJobTokenError("malformed");
-    return { jobId: sub, sprintRunId, expiresAt: new Date((exp as number) * 1000) };
+    if (typeof repo !== "string" || !REPO.test(repo)) throw new RunJobTokenError("malformed");
+    return { jobId: sub, sprintRunId, repo, expiresAt: new Date((exp as number) * 1000) };
   };
 }
 
@@ -94,7 +99,8 @@ export async function signRunJobToken(claims: RunJobTokenClaims, key: RunJobSign
   if ("algorithm" in privateKey && privateKey.algorithm.name !== "Ed25519") {
     throw new Error("実行ジョブの token の鍵は Ed25519 にしてください");
   }
-  return new SignJWT({ sprint_run_id: claims.sprintRunId })
+  if (!REPO.test(claims.repo)) throw new Error("実行ジョブの token の repo は owner/name の形にしてください");
+  return new SignJWT({ sprint_run_id: claims.sprintRunId, repo: claims.repo })
     .setProtectedHeader({ alg: RUN_JOB_TOKEN_ALG, typ: RUN_JOB_TOKEN_TYPE, kid: key.kid })
     .setIssuer(RUN_JOB_TOKEN_ISSUER)
     .setAudience(RUN_JOB_TOKEN_AUDIENCE)

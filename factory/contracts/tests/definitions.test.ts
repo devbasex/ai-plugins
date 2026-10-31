@@ -23,7 +23,7 @@ const SPEC_INSTRUCTION_INPUTS = [
   "MODEL_CREDENTIAL_SECRET_ARN",
 ];
 
-// 同じ確定仕様の「進捗の事象の種類と受け口」の種類（10 種類）
+// 同じ確定仕様の「進捗の事象の種類と受け口」の種類（11 種類）
 const SPEC_EVENT_TYPES = [
   "job.started",
   "phase.changed",
@@ -35,6 +35,7 @@ const SPEC_EVENT_TYPES = [
   "job.finished",
   "pr.updated",
   "ci.updated",
+  "decision.delegated",
 ];
 
 // 同じ確定仕様の「進捗の正本」の列から、受け口が作る order_key・pr_ref を除いたもの
@@ -51,6 +52,7 @@ const PAYLOADS: Record<string, Record<string, unknown>> = {
   "job.finished": { result: "done", summary: "終わった" },
   "pr.updated": { repo: "o/r", number: 1, state: "merged" },
   "ci.updated": { repo: "o/r", pr_number: 1, name: "check", conclusion: null },
+  "decision.delegated": { question: "どちらにしますか", answer: "A", reason: "既存の方針に沿う", category: null },
 };
 
 function event(type: string, patch: Record<string, unknown> = {}) {
@@ -119,7 +121,7 @@ describe("実行ジョブの指示の定義（受け入れ条件 1）", () => {
 });
 
 describe("進捗の事象の定義（受け入れ条件 1・11）", () => {
-  it("種類が確定仕様の 10 種類と 1 対 1 に対応する", () => {
+  it("種類が確定仕様の 11 種類と 1 対 1 に対応する", () => {
     expect([...EVENT_TYPES].sort()).toEqual([...SPEC_EVENT_TYPES].sort());
     expect(progressEventSchema.oneOf).toHaveLength(SPEC_EVENT_TYPES.length);
   });

@@ -13,7 +13,8 @@ export type ProgressEvent =
   | UsageRecordedEvent
   | JobFinishedEvent
   | PrUpdatedEvent
-  | CiUpdatedEvent;
+  | CiUpdatedEvent
+  | DecisionDelegatedEvent;
 export type JobStartedEvent = EventCommon & {
   type: "job.started";
   payload: JobStartedPayload;
@@ -67,6 +68,10 @@ export type PrUpdatedEvent = EventCommon & {
 export type CiUpdatedEvent = EventCommon & {
   type: "ci.updated";
   payload: CiUpdatedPayload;
+};
+export type DecisionDelegatedEvent = EventCommon & {
+  type: "decision.delegated";
+  payload: DecisionDelegatedPayload;
 };
 
 /**
@@ -161,4 +166,16 @@ export interface CiUpdatedPayload {
    * null はまだ終わっていない
    */
   conclusion: string | null;
+}
+/**
+ * 承認ゲートの外の問い合わせを hook が止めた後に、AI が自分で下した判断（#2206）
+ */
+export interface DecisionDelegatedPayload {
+  question: string;
+  answer: string;
+  reason: string;
+  /**
+   * 止めたときの metadata.source。無ければ null
+   */
+  category: string | null;
 }
