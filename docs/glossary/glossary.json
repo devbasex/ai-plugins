@@ -3466,7 +3466,6 @@
       "term": "時間の枠の不足",
       "context": "ndf-cross-refactoring",
       "meaning": "着手前のテストが上限で打ち切られたか、明示した想定最大時間が想定最大時間の下限に届かないこと。init は SKIP を出して止まり、駆動はリファクタリングを飛ばした欠けの残る結果を返す",
-      "code": "window_skip",
       "source": "",
       "pending_source": "issues/issue-2047-design.md"
     },
@@ -4628,8 +4627,7 @@
     {
       "term": "ステップの延長",
       "context": "ndf-workflow",
-      "meaning": "drive のステップの子が自分の見込みの秒を延長のファイル（NDF_STEP_EXTEND_FILE の指すパス）へ書き、エンジンがその試行の締め切りを with_margin を足して後ろへずらすこと。前へはずらさない",
-      "code": "step_extend",
+      "meaning": "drive のステップの子孫（駆動と、駆動が起動した init）が自分の見込みの秒を延長のファイル（NDF_STEP_EXTEND_FILE の指すパス）へ書き、エンジンがその試行の締め切りを with_margin を足して後ろへずらすこと。前へはずらさない",
       "source": "",
       "pending_source": "issues/issue-2047-design.md"
     },

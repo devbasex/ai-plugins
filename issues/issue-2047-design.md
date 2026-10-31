@@ -56,8 +56,8 @@
 | I4 | リファクタリングの実行 | `init` が `SKIP=<種類>` を出すのは、着手前のテストの打ち切り（`init-timeout`）と、`budget_source` が `explicit` で手順の枠が収まらないとき（`window`）の 2 つだけで、どちらも終了コード 4 のまま終わる。ほかの中断は `SKIP` を出さない | `init` のテストで落とす |
 | I5 | 駆動の結果 | 駆動は `init` が `SKIP` を出した中断だけを欠けの残る結果（`stopped`・`gaps` 1 件・終了コード 6）で返す。ほかの中断は今どおり終了コード 1 で返す | 駆動のテストで落とす |
 | I6 | プランの実行 | 雛形の書く `refactor` のステップは `on_exit` に `"6": "review"` だけを持つ。終了コード 1 は今どおり `on_fail` の `abort` へ行く | 雛形のテストで落とす |
-| I7 | プランの実行 | ステップの延長は締め切りを後ろへずらすだけで、前へずらさない。延長した締め切りは「試行の開始 + `with_margin`（延長のファイルの秒）」で、プランの `timeout` から決まる締め切りより前なら使わない | 単体テストで落とす |
-| I8 | 検査の記録 | リファクタリングを飛ばした検査の行は `findings.refactor_skipped` に種類と理由を持ち、`result` は `failed` にならない | `check-trigger.py` のテストで落とす |
+| I7 | プランの実行 | ステップの延長は締め切りを後ろへずらすだけで、前へずらさない。延長した締め切りは「試行の開始 + `with_margin`（延長のファイルの秒）」で、今の締め切り（プランの `timeout` から決まるものか、それまでに延ばしたもの）より前なら使わない | 単体テストで落とす |
+| I8 | 検査の記録 | リファクタリングを飛ばした検査の行は `findings.refactor_skipped` に種類と理由を持ち、飛ばしたことだけを理由に `result` を `failed` にしない。飛ばして進んだ後の工程（`review` など）が実際に失敗して abort した検査は、今どおり `failed` を記録する | `check-trigger.py` のテストで落とす |
 
 ### ドメインイベント
 
@@ -65,7 +65,7 @@
 | --- | --- | --- | --- |
 | E1 | 検査のプランを書いた（`refactor` のステップの `on_exit` と timeout が決まった） | `supervise.py new check` / `new sprint` / `new close`（`_inspect_steps`） | プランの実行 |
 | E2 | リファクタリングのステップを始めた（延長のファイルの置き場を子へ渡した） | `supervise_lib/steps.py` の `RunStep.run_cmd` | 駆動（`drive.py`） |
-| E3 | 着手前のテストの上限を決めた | `refactor.py init`（`_verify_init`） | 着手前のテスト（`baseline.run_baseline`） |
+| E3 | 着手前のテストの上限を決めた | `refactor.py init`（`_verify_init`） | 着手前のテスト（`baseline.run_baseline`）・延長のファイル（上限 T が `0.10·B` を超えるとき、テストを始める前に `init` が書く） |
 | E4 | 着手前のテストが終わった / 打ち切られた | `baseline.run_baseline` | `init`（打ち切りなら E7 の飛ばした経路） |
 | E5 | 想定最大時間が決まった（明示のまま / 下限まで上げた） | `init_test.settle_window` | 状態ファイル・標準出力・駆動（`BUDGET_SOURCE=floor` なら延長のファイルを書く） |
 | E6 | 手順の枠が想定最大時間に収まった / 収まらなかった | `init_test.settle_window` | `init`（明示で収まらなければ E7 の飛ばした経路） |
@@ -78,7 +78,7 @@
 | --- | --- | --- |
 | 想定最大時間の出所 | その実行の想定最大時間をどこから決めたか。`explicit`（引数か宣言で渡した）・`default`（省いて既定の 30 分を使った）・`floor`（省いて想定最大時間の下限まで上げた）の 3 つ。状態ファイルの `budget_source` | 追加（`ndf-cross-refactoring`） |
 | 時間の枠の不足 | 着手前のテストが上限で打ち切られたか、明示した想定最大時間が想定最大時間の下限に届かないこと。`init` は `SKIP=init-timeout` / `SKIP=window` を出して終了コード 4 で止まり、駆動はリファクタリングを飛ばした欠けの残る結果を返す | 追加（`ndf-cross-refactoring`） |
-| ステップの延長 | drive のステップの子が、自分の見込みの秒を延長のファイル（環境変数 `NDF_STEP_EXTEND_FILE` の指すパス）へ書き、エンジンがその試行の締め切りを `with_margin` を足して後ろへずらすこと。前へはずらさない | 追加（`ndf-workflow`） |
+| ステップの延長 | drive のステップの子孫（駆動と、駆動が起動した `init`）が、自分の見込みの秒を延長のファイル（環境変数 `NDF_STEP_EXTEND_FILE` の指すパス）へ書き、エンジンがその試行の締め切りを `with_margin` を足して後ろへずらすこと。前へはずらさない | 追加（`ndf-workflow`） |
 | 着手前のテストの初回の上限 | 同じ範囲の打ち切りと実測が配分の履歴に無いときの、着手前のテストの上限（秒）。`max(0.10·B, 3·s)` で、s は手元の全体テストの直近の実測 m → 宣言の w の順に採る | 意味の変更（`ndf-cross-refactoring`。決め方を足した） |
 | 範囲テストの所要 | CI に任せる戦略で、着手前に走らせる範囲テストの所要の見込み（秒）。同じ範囲の履歴の実測 → 手元の全体テストの直近の実測 m → 宣言の w の順に採る（w は範囲が全体テストを覆うかを問わない） | 意味の変更（`ndf-cross-refactoring`。出所に m を足し、w の条件を外した） |
 
@@ -102,7 +102,7 @@
 | `refactor_lib/init_test.py` の `settle_window`（新設。`stop_if_window_short` を置き換える） | 手順の枠を確かめ、出所に応じて上げるか止める | I3 と I4。上げたら `budget_floor` を書いて保存し、`ℹ` の 1 行を出す。明示で収まらなければ `SKIP=window` を出してから今の文で止まる |
 | `refactor_lib/init_test.py` の `abort_timed_out` | 着手前のテストの打ち切りで止める | 止まる前に `SKIP=init-timeout` と `SKIP_DETAIL` を出す |
 | `refactor_lib/timeline.py` の `required_budget_minutes` | 想定最大時間の下限を出す | 引数 `grace_seconds`（既定 `RESUME_GRACE_SECONDS`）を足す。`settle_window` の上げる経路だけ 0 を渡す |
-| `refactor_lib/commands/setup.py` の `cmd_init`・`_resume`・`_build_initial_state`・`_emit_init` | `init` の順序と状態の組み立て | 既定を埋める前に出所を決めて状態へ書く。`_verify_init` が m を読む。2 か所の `stop_if_window_short` を `settle_window` に替える。`_emit_init` に `BUDGET_SOURCE` を足す |
+| `refactor_lib/commands/setup.py` の `cmd_init`・`_resume`・`_build_initial_state`・`_emit_init` | `init` の順序と状態の組み立て | 既定を埋める前に出所を決めて状態へ書く。`_verify_init` が m を読み、上限 T が `0.10·B` を超えたら、着手前のテストを始める前に延長のファイル（環境変数 `NDF_STEP_EXTEND_FILE` があるときだけ）へ `B·60 + (T − 0.10·B·60)` を書く。2 か所の `stop_if_window_short` を `settle_window` に替える。`_emit_init` に `BUDGET_SOURCE` を足す |
 | `refactor_lib/plan.py` の上限の節（計画のコメントの「入力:」の行）と `_verify_init` の `info` の行 | s と出所を読み手へ示す | 「範囲テストの所要 s」の呼び名を「着手前のテストの所要の見込み s」に替え、出所の `recent` を表示できるようにする（ほかの戦略でも s が入るため） |
 | `refactor_lib/allocation.py` の `build_row` | 実行の行を配分の履歴へ書く | `budget_source` の列を足す |
 | `refactor_lib/commands/report.py` | 実行の報告 | 想定最大時間の行に出所を添える（`floor` なら「下限から決めた」と既定の分） |
@@ -196,10 +196,10 @@ classDiagram
 
 | 項目 | 型 | 中身 |
 | --- | --- | --- |
-| `seconds` | int | 子が見込む、この試行の開始からの所要の上限（秒）。駆動は `budget_minutes × 60` を書く |
+| `seconds` | int | 子孫が見込む、この試行の開始からの所要の上限（秒）。`init` は着手前のテストの前に `B·60 + (T − 0.10·B·60)`（T は E3 で決めた上限）を、駆動は想定最大時間を上げた後に `budget_minutes × 60` を書く。後から書いた値が今の締め切りより小さければ締め切りは変わらない（I7） |
 | `reason` | str | 1 行の理由（例: `想定最大時間を下限の 40 分へ上げた`） |
 
-置き場はプランの状態ディレクトリの `<試行の番号>-<ステップ>.extend.json`。書くのは駆動、読むのはエンジンだけで、試行の開始で消す。
+置き場はプランの状態ディレクトリの `<試行の番号>-<ステップ>.extend.json`。書くのは `init`（E3）と駆動（E5）、読むのはエンジンだけで、試行の開始で消す。
 
 ### 検査の行（`check-trigger.py` の `findings`）
 
@@ -256,7 +256,11 @@ sequenceDiagram
   E->>D: 起動（NDF_STEP_EXTEND_FILE, timeout 1980）
   D->>I: init（--budget-minutes 無し）
   I->>I: 出所 = default、s = 履歴 → m → w
-  I->>I: 着手前のテスト（上限 max(0.10·B, 3·s)）
+  I->>I: 着手前のテストの上限 T = max(0.10·B, 3·s)
+  opt T > 0.10·B
+    I->>E: 延長のファイル {seconds: B·60 + (T − 0.10·B·60)}
+  end
+  I->>I: 着手前のテスト（上限 T）
   alt 打ち切り
     I-->>D: SKIP=init-timeout, exit 4
     D-->>E: stopped + gaps, exit 6
@@ -327,7 +331,7 @@ w を置き場所が全体テストを覆うときだけ使う今の条件は外
 
 ### 決定 4: ステップの timeout で切られないため、想定最大時間を上げた駆動がステップの締め切りを実行の時点で延ばす
 
-想定最大時間を省いたプランの `refactor` のステップは、`timeout` を今どおり既定の 30 分から書く。駆動は `init` が想定最大時間を上げたら、延長のファイルに `budget_minutes × 60` を書く。エンジンは drive のステップの試行の待ちの周期ごとにそのファイルを読み、締め切りを「試行の開始 + `with_margin`（秒）」まで後ろへずらす。前へはずらさない。
+想定最大時間を省いたプランの `refactor` のステップは、`timeout` を今どおり既定の 30 分から書く。駆動は `init` が想定最大時間を上げたら、延長のファイルに `budget_minutes × 60` を書く。着手前のテストの上限 T が `0.10·B` を超えるとき（決定 1 の `3·s`）は、`init` がテストを始める前に `B·60 + (T − 0.10·B·60)` を書く。たとえば既知の所要が 1,518 秒なら T は 4,554 秒で、既定の 30 分なら 6,174 秒を書く。これが無いと、親が 1,980 秒で先に切り、上限内で終わるテストも、打ち切りの `SKIP` から `review` への遷移も届かない。エンジンは drive のステップの試行の待ちの周期ごとにそのファイルを読み、締め切りを「試行の開始 + `with_margin`（秒）」まで後ろへずらす。前へはずらさない。
 
 プランを書く時点で timeout を大きく見込む形は採らない。上げた想定最大時間は x と計画の後の見込みで決まり、書く時点では上限を出せない。大きな固定値を置くと、テストが固まったときに待つ時間が根拠なく延びる。延ばす値を子が決め、余裕の式（`with_margin`）を supervise の 1 か所に残す。テストのステップの上限を流し始めた時点で広げる `fill_test_limit` と同じ考えである。
 
@@ -356,10 +360,11 @@ w を置き場所が全体テストを覆うときだけ使う今の条件は外
 | 受け入れ条件 3・I3 | 想定最大時間を省き、x = 495 秒で既定 30 分の枠が収まらない入力で、`init` は終了コード 0 で終わり、状態の `budget_minutes` が下限・`budget_source` が `floor`・`budget_floor` があり、標準エラーに `ℹ` の 1 行、出力に `BUDGET_SOURCE=floor` が出る。組み直した `limits` で `window_problem` は `None` | 上げずに 4 で止める・300 秒を足す・`limits` を組み直さないと落ちる |
 | 受け入れ条件 3（再開） | 上げた実行を計画の前に引数なしで再開すると出所は `floor` のまま、引数を渡すと `explicit` になる | 再開で出所を `default` に戻す・引数を渡しても上げ続けると落ちる |
 | 受け入れ条件 4・I7 | 延長のファイルに 2,400 秒を書いた子は、プランの `timeout` 1,980 秒を過ぎても切られず、2,640 秒で切られる。ファイルの秒がプランの値より小さければ締め切りは変わらない。`cur.extended_timeout` が残る | 延長を読まない・締め切りを前へずらす・余裕を足さない・前の試行のファイルを読むと落ちる |
+| 受け入れ条件 1・I7（`init`） | 既定 30 分・s = 1,518 秒の入力で、`init` は着手前のテストを始める前に延長のファイルへ 6,174 秒を書く。T が `0.10·B` 以下なら書かない。後から駆動が小さい秒を書いても締め切りは前へ戻らない | テストの後に書く・書かない・後の小さい値で締め切りを戻すと落ちる |
 | 受け入れ条件 4（駆動） | `BUDGET_SOURCE=floor` の `init` の後、駆動が延長のファイルを書く。`default` / `explicit` では書かない | 出所を問わずに書く・書かないと落ちる |
 | 受け入れ条件 5・I4・I5 | 明示 30 分・x = 495 秒の入力で `init` は `SKIP=window` を出して 4、駆動は `gaps` 1 件の `stopped` と終了コード 6 を返す。打ち切りでも `SKIP=init-timeout` で同じ | `SKIP` を出さない・駆動が 1 を返す・summary に「落ちた」を入れると落ちる |
 | 受け入れ条件 5・I6 | 検査のプランを流すテストで、`refactor` が 6 を返すと次は `review`、検査は abort へ進まない | `on_exit` を書かない・`"6"` を abort へ向けると落ちる |
-| 受け入れ条件 5・I8 | 飛ばした検査の行は `findings.refactor_skipped` を持ち `result` が `failed` でない。フェーズレポートに「欠けを残して進んだステップ: refactor」の行が出る | 理由を写さない・飛ばした検査を failed として書くと落ちる |
+| 受け入れ条件 5・I8 | 飛ばして `review` まで終えた検査の行は `findings.refactor_skipped` を持ち `result` が `failed` でない。飛ばした後に `review` が失敗して abort した検査は `findings.refactor_skipped` を持ち `result` が `failed`。フェーズレポートに「欠けを残して進んだステップ: refactor」の行が出る | 理由を写さない・飛ばしただけの検査を failed として書く・後の失敗まで failed にしないと落ちる |
 | 受け入れ条件 6・I2 | 明示 60 分・下限 43 分の入力で、`budget_minutes`・`limits`（着手前のテストの上限を除く）・手順の枠の時刻が変更前と同じ | 明示でも下限へ寄せる・出所で式を変えると落ちる |
 | 受け入れ条件 7・I4・I5 | 起動の失敗・認証の失敗・テンプレートの試走の不備・最終ゲートの失敗では `SKIP` が出ず、駆動は 1、プランは abort へ進む | 中断をすべて 6 にすると落ちる |
 | 受け入れ条件 8 | `new check` / `new sprint` / `new close` の 3 つで書いたプランの `refactor` が同じ `on_exit` を持つ | 雛形の 1 つだけに足すと落ちる |
