@@ -80,6 +80,56 @@ def criteria_lines(body: str) -> list[tuple[Criterion, str]]:
     return out
 
 
+# --- 受け入れ条件の確認の区分（#2144。完了判定が書き、承認資料と閉じる判定が読む）
+
+
+CHECKS_HEADING = "## 受け入れ条件の確認"
+PRE_MERGE = "マージ前"  # マージ前に確かめた。手段（テスト名・実行したコマンド）を必ず持つ
+POST_RELEASE = "リリース後"  # リリースの後でしか確かめられない
+KINDS = (PRE_MERGE, POST_RELEASE)
+CHECKS_HEAD = ("条件", "区分", "手段")
+NO_MEANS = "—"
+
+
+class Check(NamedTuple):
+    """1 つの受け入れ条件の確認の区分。means はマージ前に確かめた手段（リリース後なら空）。"""
+
+    kind: str
+    means: str
+
+
+def read_check_kinds(body: str) -> dict[int, Check]:
+    """本文の `## 受け入れ条件の確認` の表を {条件の番号: Check} で返す。節・表が無ければ空（今の課題）。
+
+    `条件` の列の頭の数字を番号として読む。区分が `マージ前` / `リリース後` のどちらでもない行と、手段の無い
+    `マージ前` の行は読まない（確かめた手段を書けない条件は確認済みと言えない）。使う側は `deps.require("md")` を先に呼ぶ。"""
+    import md
+
+    section = gh_sections.get_section(body or "", CHECKS_HEADING)
+    found = md.tables(section) if section else []
+    if not found:
+        return {}
+    head = [c.strip() for c in found[0].header]
+    if any(h not in head for h in CHECKS_HEAD):
+        return {}
+    ni, ki, mi = (head.index(h) for h in CHECKS_HEAD)
+    out: dict[int, Check] = {}
+    for row in found[0].rows:
+        cs = [c.strip() for c in row]
+        num, kind, means = re.match(r"^(\d+)", cs[ni]), cs[ki], cs[mi].strip("`").strip()
+        if not num or kind not in KINDS:
+            continue
+        if kind == PRE_MERGE and (not means or means == NO_MEANS):
+            continue
+        out[int(num.group(1))] = Check(kind, "" if kind == POST_RELEASE else cs[mi])
+    return out
+
+
+def pre_merge_numbers(body: str) -> frozenset:
+    """マージ前に確かめたと記録された受け入れ条件の番号。"""
+    return frozenset(n for n, c in read_check_kinds(body).items() if c.kind == PRE_MERGE)
+
+
 # --- リリース後テストの表（sprint-close.py の閉じる判定と release-steps.py の承認の材料が同じ規則で読む。#1885 の決定 8）
 
 

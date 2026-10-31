@@ -90,7 +90,7 @@
     {
       "id": "verify",
       "type": "run",
-      "stage": "リリース後テスト",
+      "stage": "配布",
       "timeout": 1500,
       "cwd": "<TMP>/repo",
       "cmd": "sh -c 'git pull -q --ff-only origin main && python3 <NDF>/scripts/release-verification-steps.py verify-install --ref main --expect 1.2.0 --runtimes claude'",

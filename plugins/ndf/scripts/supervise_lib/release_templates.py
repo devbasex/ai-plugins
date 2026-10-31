@@ -245,7 +245,9 @@ def release_verify_step(sprint: str, refs: str, record_pr: str) -> dict:
         "stage": "リリース後テスト",
         "timeout": 3600,
         "prompt": f"/ndf:release-verification スプリント {sprint}（{refs}）。配布の記録は Pull Request #{record_pr} にある。"
-        "リリース後テストの記録をその Pull Request へコメントで書く。課題は閉じない（次の close が閉じる）。"
+        "受け入れ条件ごとに確かめ、スプリントの Pull Request の「手動確認」でリリース後テストへ回した項目と、"
+        "マージ前に未検証として残した項目も行として載せて、リリース後テストの記録をその Pull Request へコメントで書く。"
+        "課題は閉じない（次の close が閉じる）。"
         "番号が 0 なら本番へ出ていないため、何もせずに終える。",
         "next": "close",
     }
@@ -259,7 +261,9 @@ def _release_verify_steps(a, v: str, dev: bool, repo: str | None, ref: str, rts:
         {
             "id": "verify",
             "type": "run",
-            "stage": "配布" if dev else "リリース後テスト",
+            # 導入の確認だけを流すため、本番でも「リリース後テスト」と記録しない。受け入れ条件ごとの確認と
+            # 配布の記録の PR への記録は、まとめの release-verify（release_verify_step）が担う（#2288）
+            "stage": "配布",
             "timeout": 1500,
             "cwd": repo,
             "cmd": f"sh -c 'git pull -q --ff-only origin {a.base} && {VERIFY_PY} verify-install --ref {ref} --expect {v} --runtimes {rts}'",
