@@ -300,7 +300,7 @@ def _head_digest(root: Path, path: str) -> str | None:
 # ---------- 配布の決まった手順（#862） ----------
 
 TOOL = "release"
-# 本番チャネルへのマージを待つ間にベースブランチが配布物に触れないコミットだけで進んだとき、比べ直して入れ直す回数（#2221）
+# 本番チャネルへのマージを待つ間にベースブランチが許可リスト（UNGATED）の下に収まるコミットだけで進んだとき、比べ直して入れ直す回数（#2221）
 HEAD_MOVED_RETRIES = 3
 
 
@@ -752,7 +752,7 @@ def cmd_release(a):
             moved = approval.check_approved(root, approved, base, allowed)
             if not moved.ok or not left:
                 emit(approval.gate(root, a, plugin, base, moved, items, metrics, moved=not left), EXIT_GATE)
-            verdict = moved  # 進んだ分が配布物に触れないので、比べ直した先端で入れ直す（#2221）
+            verdict = moved  # 進んだ分が許可リストの下に収まるので、比べ直した先端で入れ直す（#2221）
     metrics.update({"compared_head": verdict.tip, "tolerated": len(verdict.tolerated)})
     items += approval.tolerated_items(verdict)
     git(root, "fetch", "-q", "origin")

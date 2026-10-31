@@ -101,18 +101,20 @@
 | --- | --- | --- |
 | I1 | 承認したコミットを受け取っていない本番の配布は、配布の PR も本番チャネルの PR もマージしない（push もしない） | `stopped`。引数が無い・`--approved-sha` の形が違う・`--channel dev` に渡した → 2、承認資料が無い・欄が無い・欄の値の形が違う → 3 |
 | I2 | 承認したコミットは比べた先端の祖先である | `gate`・10。本番チャネルの PR をマージしない |
-| I3 | 承認したコミットから配布の PR の先端までのコミットは、配布の PR のコミットか、配布物に触れないコミットである | `gate`・10。外のコミットを `items[]` に並べる |
-| I4 | 比べた先端の木は、配布物のパスで、承認したコミットに配布の PR を `git merge-tree --write-tree` で足した木と等しい | `gate`・10（`tree_differs`） |
+| I3 | 承認したコミットから配布の PR の先端までのコミットは、配布の PR のコミットか、差分が許可リスト（`docs/`・`issues/`）の下に収まるコミットである | `gate`・10。外のコミットを `items[]` に並べる |
+| I4 | 比べた先端の木は、許可リストの外のパスで、承認したコミットに配布の PR を `git merge-tree --write-tree` で足した木と等しい | `gate`・10（`tree_differs`） |
 | I5 | 本番チャネルへマージするのは比べた先端のコミットだけである | マージしない。進んだ先端で比べ直し、一致すればその先端で入れ直す（3 回まで）。一致しないか回数を超えれば `gate`・10 |
 | I6 | 判定できない（`merge-tree` が衝突する・コミットを読めない・配布の PR のコミットを読めない）ときは通さない | `gate`・10（`undecidable`） |
 | I7 | MVV 判定の承認では I2〜I6 の承認ゲートを通さない | 本番のリリースプランは `--mvv` 付きなら `handoff`、無しなら `end` へ進み、`verify` へ進まない |
 | I8 | 承認資料の「承認したコミット」は `approval-facts` を打った時点の `origin/<ベースブランチ>` の 40 桁で、題の先頭 8 桁・比較の URL・`metrics.approved_sha`・`next` の `--approved-sha` と同じ値である | 1 つの変数から作る（`cmd_approval_facts`）。テストで縛る |
-| I9 | 承認したコミットから比べた先端までのコミットは、配布の PR のもの（そのコミット・squash の `mergeCommit`・同じ patch-id のもの）か、配布物に触れないものである。木が一致しても別に確かめる | `gate`・10（`outside_commits`） |
+| I9 | 承認したコミットから比べた先端までのコミットは、配布の PR のもの（そのコミット・squash の `mergeCommit`・同じ patch-id のもの）か、差分が許可リストの下に収まるものである。木が一致しても別に確かめる | `gate`・10（`outside_commits`） |
 | I10 | `--approval` で受け取るときは、承認資料の「承認の記録」の SHA が同じ資料の「承認したコミット」と等しい。`approval-facts` で資料を書き直すと承認の記録は消え、承認し直すまで通らない | `gate`・10（`not_approved`）。何もマージする前に止まる |
 
-配布物は `plugins/`・`.claude-plugin/` の下のパスである（`release_lib/approval.py` の `SHIPPED`）。差分がこのどれにも触れない
-コミット（設計文書・用語集だけの PR など）は、承認の外でも利用者へ届く中身を変えないため、承認を取り直さずに通し、
-結果に残す。
+承認を取り直さずに通すパスは `docs/`・`issues/` の下である（許可リスト。`release_lib/approval.py` の `UNGATED`）。差分がすべて
+この下に収まるコミット（設計文書・用語集だけの PR など）は、承認の外でも利用者へ届く中身と CI が実行する中身を変えないため、
+承認を取り直さずに通し、結果に残す。許可リストの外はどれも承認の対象である。配布物（`plugins/`・`.claude-plugin/`）だけを
+止める拒否リストにすると、秘密を渡すワークフロー（`runtime-plugin-authenticated-smoke.yml` など）が実行する `scripts/`・
+`.github/` の未承認の変更が承認ゲート 2 を通らずに main へ入る（C1）。
 
 `--approved-sha` で手で渡すときは、打った人が承認した SHA そのものを渡すため、承認の記録を見ない（I10 は `--approval` だけに当たる）。
 
@@ -178,9 +180,9 @@ A = 承認したコミット、T = 比べた先端、H = 配布の PR の先端�
 | 4 | `git rev-list --no-merges A..T ^H` から、配布の PR の `mergeCommit` と、配布の PR のコミットと同じ `git patch-id --stable` のものを除いた残り | `outside_commits`（I9） |
 | 5 | `git merge-tree --write-tree A H` の木と `T^{tree}` | 等しければ `match`、違えば `tree_differs`、`merge-tree` が失敗すれば `undecidable` |
 
-`shipped`（配布物のパスの接頭辞）を渡すと、3 と 4 で見つけたコミットのうち第 1 親との差分が `shipped` に触れないもの
-（差分を読めないものは触れたとみなす）を `Verdict.tolerated` へ移して止めず、3 で見つけても 4 まで進む。5 は 2 つの木の
-違いが `shipped` に及ぶときだけ `tree_differs` にする。本番の配布は `SHIPPED` を渡し、昇格の経路は渡さない。
+`ungated`（承認を取り直さずに通すパスの接頭辞。許可リスト）を渡すと、3 と 4 で見つけたコミットのうち第 1 親との差分が
+すべて `ungated` の下に収まるもの（差分を読めないものは収まらないとみなす）を `Verdict.tolerated` へ移して止めず、3 で見つけても
+4 まで進む。5 は 2 つの木の違いが `ungated` の外に及ぶときだけ `tree_differs` にする。本番の配布は `UNGATED` を渡し、昇格の経路は渡さない。
 
 `allowed`（入ってよい PR）を空にすると、5 は「T の木が A の木と等しいか」になる（昇格の経路はこの形を使わない。#1529）。
 `allowed` が 2 つ以上のときは期待する木を作らず `undecidable` を返す。`git merge-tree --write-tree` は git 2.38 からで、
@@ -433,7 +435,7 @@ sequenceDiagram
 | 承認の外のコミットで止まる（I3・I4・I9） | 外の PR が配布の PR の前に入った場合・後に入った場合・後に外の変更とその revert が入った場合（木は一致する）・外の変更を入れたマージコミット（木が違う）のどれでも、外の変更が配布物に触れれば止まり、`release` は `gate`（10）でタグも GitHub Release も作らず、`items[]` に外のコミットの SHA が並ぶこと |
 | 承認したコミットが無ければ何もマージしない（I1） | `--channel prod` で承認したコミットが無い・形が違う・資料に欄が無いとき、`gh pr merge` も `git push` も呼ばれずに 2 / 3 で止まること。`--channel dev` に渡すと 2 であること |
 | 祖先でない・読めない・判定できない（I2・I6） | 履歴に無い SHA・祖先でない SHA・`merge-tree` が衝突する場合に `gate`（10）になり、失敗（1）で返さないこと |
-| 配布物に触れない承認の外のコミットは通す | 設計文書だけの PR が配布の PR の前に入った場合・後に入った場合・CI 待ちの間に入った場合に、`release` が承認を取り直さずに `ok` でタグを作り、`items[]` に `outside_unshipped` が並ぶこと。配布物に触れるコミットが混ざれば、そのコミットだけが `unapproved` で並んで `gate`（10）で止まること。マージのコミットの中で入れた変更は、配布物のパスに及ぶときだけ `tree_differs` になること |
+| 配布物に触れない承認の外のコミットは通す | 設計文書だけの PR が配布の PR の前に入った場合・後に入った場合・CI 待ちの間に入った場合に、`release` が承認を取り直さずに `ok` でタグを作り、`items[]` に `outside_unshipped` が並ぶこと。許可リストの外（配布物・`scripts/`・`.github/` など）に触れるコミットが混ざれば、そのコミットだけが `unapproved` で並んで `gate`（10）で止まること。マージのコミットの中で入れた変更は、許可リストの外に及ぶときだけ `tree_differs` になること |
 | 先端が進んだらマージしない（I5） | `merge-when-green --expect-head` が、緑を確かめた先端が違えば `gh pr merge` を呼ばずに `head_moved` で止まり、待つ間に別の先端でマージされた PR も成功にしないこと（`test_sprint_close_merge_green.py`）。`release` がそれを受けて `gate`（10）で止まること |
 | 承認の記録（I10） | 承認の記録の後に `approval-facts` で資料を書き直すと、`release --approval` が何もマージせずに `gate`（10）・`not_approved` になること。`approve` は提示した SHA と資料が違えば記録を書かずに 1 で止まること。記録があり SHA が同じなら先へ進むこと |
 | MVV 判定の記録（I10） | `mvv-gate.py check --gate release` が従うと判定したときだけ承認資料へ `by: mvv` の承認の記録を書き、判定できない場合と `--advise` では書かないこと（`test_mvv_gate.py`） |

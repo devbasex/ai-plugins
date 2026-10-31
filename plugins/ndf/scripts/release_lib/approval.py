@@ -17,8 +17,9 @@ import repo as repo_lib
 from step_result import EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, git, result
 
 TOOL = "release"
-# 配布物のパス。承認の外のコミットがここに触れなければ、承認を取り直さずに通す（#2221）
-SHIPPED = ("plugins/", ".claude-plugin/")
+# 承認を取り直さずに通すパス（許可リスト）。承認の外のコミットの差分がすべてこの下に収まれば通す（#2221）。
+# 拒否リスト（配布物だけ）にすると、秘密を渡すワークフローが実行する scripts/・.github/ などの未承認の変更が main へ入る（C1）
+UNGATED = ("docs/", "issues/")
 
 
 class HeadMoved(Exception):
@@ -97,12 +98,12 @@ def release_pr_allowed(root, n, pr_view):
 
 def check_approved(root, approved, base, allowed):
     """origin/<base> の先端を読み直し、承認したコミットと比べた判定（Verdict）を返す。
-    配布物（SHIPPED）に触れない承認の外のコミットは止めずに Verdict.tolerated へ入れる（#2221）。"""
+    差分がすべて許可リスト（UNGATED）の下に収まる承認の外のコミットは止めずに Verdict.tolerated へ入れる（#2221）。"""
     git(root, "fetch", "-q", "origin", base)
     tip = git(root, "rev-parse", f"origin/{base}").stdout.strip()
     if allowed is None:
         return ac.Verdict(False, approved, tip, ac.UNDECIDABLE)
-    return ac.compare_approved(root, approved, tip, [allowed], SHIPPED)
+    return ac.compare_approved(root, approved, tip, [allowed], UNGATED)
 
 
 def commit_pr(root, sha):

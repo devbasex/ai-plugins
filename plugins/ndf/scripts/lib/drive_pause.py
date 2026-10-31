@@ -16,7 +16,7 @@
 | 22 | gate | `newtext` | 巻き直しの新しい title・body 待ち | 同上 |
 | 23 | gate | `cross-review` | 最終ゲートの cross-review 待ち | 同上（`items[0].command` が cross-review の drive） |
 | 1 | stopped | — | 中断（`metrics.exit` に元の終了コード） | 理由（summary）を報告する |
-| 1 | stopped | — | 最後まで回ったが収束しなかった（`metrics.final` が `approved` 以外。報告は `items[0].report`） | 理由と件数を報告し、後続へ進まない |
+| 6 | stopped | — | 最後まで回ったが収束しなかった（`metrics.final` が `approved` 以外。報告は `items[0].report`・`gaps` に `kind: review`） | 理由と件数を報告する。プランは `on_exit` の `"6"` で行き先を分けられる（無ければ `on_fail`） |
 
 `items[0]` の項目: `pause`・`prompt_file`・`result_file`・`round` は必ずある。任意の項目は次の通り。
 
@@ -75,8 +75,10 @@ def done(tool: str, summary: str, report: Path | str, metrics: dict) -> dict:
 
 
 def unconverged(tool: str, summary: str, report: Path | str, metrics: dict) -> dict:
-    """最後まで回ったが収束しなかった結果。報告と件数は `done` と同じ形で持ち、status は ok にしない（#2143）。"""
-    return sr.result(tool, "stopped", summary, [{"report": str(report)}], {**metrics, "exit": EXIT_STOPPED})
+    """最後まで回ったが収束しなかった結果。報告と件数は `done` と同じ形で持ち、status は ok にしない（#2143）。
+    欠けの残る結果として `gaps` と終了コード 6 で返す（#2227 の決定 1）。"""
+    gap = {"kind": "review", "name": "converge", "reason": f"final={metrics.get('final')}"}
+    return sr.result(tool, "stopped", summary, [{"report": str(report)}], {**metrics, "exit": sr.EXIT_INCOMPLETE}, gaps=[gap])
 
 
 def stopped(tool: str, msg: str, metrics: dict, code: int) -> dict:
@@ -87,7 +89,9 @@ def exit_code(out: dict) -> int:
     """結果から終了コードを引く（表の通り）。"""
     if out.get("status") == "gate":
         return PAUSE_CODES[out.get("next")]
-    return EXIT_DONE if out.get("status") == "ok" else EXIT_STOPPED
+    if out.get("status") == "ok":
+        return EXIT_DONE
+    return sr.EXIT_INCOMPLETE if out.get("gaps") else EXIT_STOPPED
 
 
 def main(tool: str, run: Callable[[], dict], counts: Callable[[], dict]) -> "NoReturn":  # noqa: F821

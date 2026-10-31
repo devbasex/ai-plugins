@@ -321,6 +321,10 @@ def test_an_unconverged_review_stops_the_plan(tmp_path, monkeypatch, final, ran)
     ]
     s, text = run_plan(tmp_path, steps)
     assert [e["id"] for e in s.state.log] == ran, text  # 失敗なら on_fail の abort へ、成功なら後続へ
+    # on_exit の "6" があれば、収束しなかった終わりは on_fail を通らずにその行き先へ進む（#2227 の決定 1）
+    steps[0]["on_exit"] = {"6": "after"}
+    s, text = run_plan(tmp_path, steps)
+    assert [e["id"] for e in s.state.log] == ["review", "after"], text
 
 
 @pytest.mark.parametrize("drive", ["cross-review", "cross-refactoring"])

@@ -327,7 +327,7 @@ class Engine:
         if is_run and self.run_step.is_skip(step, st.cur.get("exit")):
             st.cur["skipped"] = True
             return (None if step["skip_to"] == "end" else step["skip_to"]), None, None
-        if is_run and step.get("on_exit") and str(st.cur.get("exit")) in step["on_exit"]:
+        if step["type"] in ("run", "drive") and step.get("on_exit") and str(st.cur.get("exit")) in step["on_exit"]:
             return self._next_on_exit(sid, step)
         if is_run and is_gate(st.cur.get("exit")) and step.get("gate_as_ok"):
             # 関門として数えない（MVV 判定が前もって通した関門 2 の提示物など）。提示物だけを写す
