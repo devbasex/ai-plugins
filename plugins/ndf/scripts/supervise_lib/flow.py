@@ -291,10 +291,11 @@ def fill_step(first: bool, stage: list[str], items: list[dict]) -> dict:
 
 
 @durable.step(name="ndf.supervise.queue.admit")
-def admit_step(plans: list[str], shared: list[dict], starts: dict | None = None) -> dict:
+def admit_step(plans: list[str], shared: list[dict], starts: dict | None = None, rerun: list | None = None) -> dict:
     """流すプランの実行の回を選び、重なりの組を数えて標準エラーへ知らせる（耐久ステップの中なので、打ち直しで 2 度出ない）。
 
     完了か関門の記録があるプランは流し直さず、並行中にも数えない。キューの外のプランは候補に入らない（C-4）。
+    `rerun`（キューの続きが続ける対象）のプランは、関門の記録があっても新しい実行の回で流す。
     関門の記録があるプランは、記録した関門の attention を進捗ログへ書き直す。"""
     refs: dict[str, dict] = {}
     files: dict[str, list[str]] = {}
@@ -302,7 +303,8 @@ def admit_step(plans: list[str], shared: list[dict], starts: dict | None = None)
     for p in plans:
         body = Path(p).read_text(encoding="utf-8")
         prefix = prefix_of(str(Path(p).resolve()), body, (starts or {}).get(p))  # 開始のステップが違えば別の実行の回
-        ref = durable.resolve(prefix, finished=_finished)
+        gate_ends = p not in (rerun or [])  # 続ける対象は、関門で終えた記録を終わりとして扱わない
+        ref = durable.resolve(prefix, finished=lambda out, ends=gate_ends: _finished(out) and (ends or out.get("result") != "関門"))
         refs[p] = {"prefix": prefix, "id": ref.id, "action": ref.action, "output": ref.output}
         if ref.action != "done":
             files[p] = queue_files.touched_files(body)
@@ -487,7 +489,11 @@ def queue_workflow(args: dict) -> dict:
         filled = fill_step(idx == 0, stage, items)
         items += filled["skipped"]
         if filled["runnable"]:
-            adm = {**admit_step(filled["runnable"], args["shared"], args.get("starts")), "prior": list(items), "queued": queued}
+            adm = {
+                **admit_step(filled["runnable"], args["shared"], args.get("starts"), args.get("rerun")),
+                "prior": list(items),
+                "queued": queued,
+            }
             pairs += adm["overlaps"]
             items += run_stage(filled["runnable"], adm, args)
     return done_step(done, items, args["max"], pairs, args["resources"])

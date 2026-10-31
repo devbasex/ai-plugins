@@ -119,11 +119,16 @@ def test_absorb_folds_the_issue_into_the_host(tmp_path, issue_bodies):
 
 @pytest.mark.parametrize(
     "extra",
-    [["--absorb", "13:99"], ["--absorb", "11:11"], ["--design", "11", "12", "--absorb", "12:11"]],
-    ids=["no-host", "same", "absorbed-in-design"],
+    [
+        ["--absorb", "13:99"],
+        ["--absorb", "11:11"],
+        ["--design", "11", "12", "--absorb", "12:11"],
+        ["--design", "21", "--absorb", "12:21"],
+    ],
+    ids=["no-host", "same", "absorbed-in-design", "host-without-impl"],
 )
 def test_absorb_with_a_bad_pair_writes_nothing(tmp_path, extra):
-    """AC16・I8: 取り込み先が無い・同じ番号・取り込む課題が --design にあるなら、どのファイルも書かない。"""
+    """AC16・I8: 取り込み先が無い・実装のプランが無い・同じ番号・取り込む課題が --design にあるなら、どのファイルも書かない。"""
     out = tmp_path / "m"
     p = cli(*BASE, "--worktree", str(tmp_path), "--out", str(out), *extra)
     assert p.returncode == 1 and json.loads(p.stdout)["status"] == "stopped"

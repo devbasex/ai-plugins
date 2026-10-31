@@ -19,6 +19,7 @@ from supervise_lib.queue import named
 
 TOOL = "supervise-queue"
 RESUMABLE = ("止まった", "報告なし", "関門")  # 続ける対象の結果
+KEPT = "前の起動の開始"  # 一覧に残した前の開始のステップ（続ける対象ではない）
 
 
 @dataclass(frozen=True)
@@ -72,7 +73,7 @@ def resume_targets(done: Path, overrides: dict[str, str] | None = None) -> tuple
         raise ResumeError("前の起動の一覧にステージの並びが無い（この版より前の queue が書いたもの）")
     plans = [p for s in stages for p in s]
     prev = _json_of(done)
-    kept = [ResumeTarget(p, s, "前の起動の開始") for p, s in (listing.get("starts") or {}).items() if p in plans and s]
+    kept = [ResumeTarget(p, s, KEPT) for p, s in (listing.get("starts") or {}).items() if p in plans and s]
     if prev is None:
         found = kept
     else:
@@ -98,6 +99,9 @@ def cmd_queue_resume(done: str, from_: list[str], max_: int | None, poll: float,
         metrics = {"plans": 0, "stopped": 0, "gate": 0, "not_run": 0, "done": str(done_path)}
         return result(TOOL, "stopped", f"続きを組めない: {e}。何も流さない", [], metrics, next="元の queue のコマンドを打ち直す")
     starts = {t.plan: t.step for t in found if t.step}
+    # 続ける対象（前の結果か --from）は、関門の記録があっても新しい実行の回で流す。同じ開始のステップでも、
+    # 承認を記録した後に過去の関門の結果を返し続けないため
+    rerun = [t.plan for t in found if t.reason != KEPT]
     for t in found:
         print(f"supervise-queue: {t.plan} を {t.step or '頭'} から続ける（{t.reason}）", file=sys.stderr, flush=True)
-    return run_queue(stages[0], max_ or prev_max, poll, then=stages[1:], done=str(done_path), starts=starts)
+    return run_queue(stages[0], max_ or prev_max, poll, then=stages[1:], done=str(done_path), starts=starts, rerun=rerun)

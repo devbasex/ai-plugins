@@ -33,7 +33,8 @@ def absorbed_issues(a) -> list[int]:
 
 
 def absorb_refusal(a) -> str | None:
-    """I8: 取り込み先が --design にも --issue にも無い・取り込む課題が --design にある・同じ番号なら理由を返す。"""
+    """I8: 取り込み先が --design にも --issue にも無い・--issue に無い（実装のプランが無い）・取り込む課題が --design にある・
+    同じ番号なら理由を返す。"""
     design, issues = set(a.design or []), set(a.issue or [])
     for m, h in pairs_of(a):
         if m == h:
@@ -42,6 +43,8 @@ def absorb_refusal(a) -> str | None:
             return f"--absorb {m}:{h}: 取り込む課題 #{m} が --design にある（設計のプランを持たない）"
         if h not in design and h not in issues:
             return f"--absorb {m}:{h}: 取り込み先 #{h} が --design にも --issue にも無い"
+        if h not in issues:  # 実装のプランは --issue の課題だけに作られ、取り込んだ課題の実装は飛ぶ
+            return f"--absorb {m}:{h}: 取り込み先 #{h} が --issue に無い（取り込んだ受け入れ内容を実装するプランが無い）"
         if h in absorbed_issues(a):
             return f"--absorb {m}:{h}: 取り込み先 #{h} も取り込む課題になっている"
     return None

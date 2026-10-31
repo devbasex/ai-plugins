@@ -78,6 +78,25 @@ def test_resume_with_from_and_without_a_listing(tmp_path, env):
     assert (listing["stages"], listing["max"], listing["starts"]) == ([[g]], 3, {g: "g2"})
 
 
+def test_resume_reruns_a_gate_from_the_same_step(tmp_path, env):
+    """続ける対象が関門で終わっていれば、同じ開始のステップでも新しい実行の回で流す。過去の関門の結果を返し続けない。"""
+    t, q = tmp_path, Queue(tmp_path, env)
+    g = q.plan(
+        "g",
+        [
+            {**run_step(note(t, "g1", f"test -f {t / 'ok'} || exit 10"), "g1"), "gate_next": "end", "next": "g2"},
+            run_step(note(t, "g2"), "g2"),
+        ],
+    )
+    p, res = q.run(g)
+    assert results(res) == {"g": "関門"}
+    p, res = resume(q)  # g1 から続けて、また関門
+    assert results(res) == {"g": "関門"}
+    (t / "ok").touch()
+    p, res = resume(q)  # 開始のステップは前と同じ g1
+    assert (results(res), q.visits()) == ({"g": "完了"}, ["g1", "g1", "g1", "g2"])
+
+
 def test_resume_keeps_the_start_of_a_finished_plan(tmp_path, env):
     """完了したプランの前の開始のステップを次の --resume でも保つ。落とすと元の関門の結果を拾い、後続を止める。"""
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
