@@ -3511,7 +3511,7 @@
     {
       "term": "承認の外のコミット",
       "context": "ndf-release",
-      "meaning": "承認したコミットから比べた先端までに入ったコミットのうち、この版の配布の PR のものでないもの。あれば本番の配布は承認ゲートで止まる",
+      "meaning": "承認したコミットから比べた先端までに入ったコミットのうち、この版の配布の PR のものでないもの。配布物（`plugins/`・`.claude-plugin/`）に触れるものがあれば本番の配布は承認ゲートで止まる",
       "source": "docs/specifications/ndf-release-approved-commit.md"
     },
     {

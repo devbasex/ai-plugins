@@ -16,6 +16,8 @@ import repo as repo_lib
 from step_result import EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, git, result
 
 TOOL = "release"
+# 配布物のパス。承認の外のコミットがここに触れなければ、承認を取り直さずに通す（#2221）
+SHIPPED = ("plugins/", ".claude-plugin/")
 
 
 class HeadMoved(Exception):
@@ -93,12 +95,13 @@ def release_pr_allowed(root, n, pr_view):
 
 
 def check_approved(root, approved, base, allowed):
-    """origin/<base> の先端を読み直し、承認したコミットと比べた判定（Verdict）を返す。"""
+    """origin/<base> の先端を読み直し、承認したコミットと比べた判定（Verdict）を返す。
+    配布物（SHIPPED）に触れない承認の外のコミットは止めずに Verdict.tolerated へ入れる（#2221）。"""
     git(root, "fetch", "-q", "origin", base)
     tip = git(root, "rev-parse", f"origin/{base}").stdout.strip()
     if allowed is None:
         return ac.Verdict(False, approved, tip, ac.UNDECIDABLE)
-    return ac.compare_approved(root, approved, tip, [allowed])
+    return ac.compare_approved(root, approved, tip, [allowed], SHIPPED)
 
 
 def commit_pr(root, sha):
@@ -120,6 +123,11 @@ GATE_LEADS = {
     ac.UNDECIDABLE: "承認したコミット {a} の後に承認の外の変更が無いかを判定できない",
     "head_moved": "{base} の先端が比べた後に {t} へ進んだ",
 }
+
+
+def tolerated_items(verdict) -> list[dict]:
+    """配布物に触れないので承認を取り直さずに通した、承認の外のコミット（#2221）。"""
+    return [{"kind": "commit", "name": o.sha, "result": "outside_unshipped", "subject": o.subject} for o in verdict.tolerated]
 
 
 def gate(root, a, plugin, base, verdict, items, metrics, moved=False) -> dict:

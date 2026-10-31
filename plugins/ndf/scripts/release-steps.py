@@ -299,6 +299,8 @@ def _head_digest(root: Path, path: str) -> str | None:
 # ---------- 配布の決まった手順（#862） ----------
 
 TOOL = "release"
+# 本番チャネルへのマージを待つ間にベースブランチが配布物に触れないコミットだけで進んだとき、比べ直して入れ直す回数（#2221）
+HEAD_MOVED_RETRIES = 3
 
 
 def run_staleness(root, expected=()):
@@ -716,7 +718,7 @@ def cmd_release(a):
     verdict = approval.check_approved(root, approved, base, allowed)
     if not verdict.ok:
         emit(approval.gate(root, a, plugin, base, verdict, items, metrics), EXIT_GATE)
-    metrics.update({"approved_sha": approved, "compared_head": verdict.tip})
+    metrics.update({"approved_sha": approved, "compared_head": verdict.tip, "tolerated": len(verdict.tolerated)})
     mp = find_pr(root, base, prod, states=("OPEN",))
     main_pr = (
         mp["number"]
@@ -729,11 +731,17 @@ def cmd_release(a):
             f"{plugin} v{ver} を {prod} へ出す（開発版の PR #{release_pr}）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)",
         )
     )
-    try:
-        merge = wait_and_merge(root, main_pr, expect=verdict.tip, ci_wait=a.ci_wait)  # 比べた先端だけを本番チャネルへ入れる
-    except HeadMoved:
-        moved = approval.check_approved(root, approved, base, allowed)
-        emit(approval.gate(root, a, plugin, base, moved, items, metrics, moved=True), EXIT_GATE)
+    for left in range(HEAD_MOVED_RETRIES, -1, -1):
+        try:
+            merge = wait_and_merge(root, main_pr, expect=verdict.tip, ci_wait=a.ci_wait)  # 比べた先端だけを本番チャネルへ入れる
+            break
+        except HeadMoved:
+            moved = approval.check_approved(root, approved, base, allowed)
+            if not moved.ok or not left:
+                emit(approval.gate(root, a, plugin, base, moved, items, metrics, moved=not left), EXIT_GATE)
+            verdict = moved  # 進んだ分が配布物に触れないので、比べ直した先端で入れ直す（#2221）
+    metrics.update({"compared_head": verdict.tip, "tolerated": len(verdict.tolerated)})
+    items += approval.tolerated_items(verdict)
     git(root, "fetch", "-q", "origin")
     if not merge:
         merge = git(root, "rev-parse", f"origin/{prod}").stdout.strip()

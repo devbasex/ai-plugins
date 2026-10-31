@@ -7,6 +7,8 @@
 
 `compare_approved` は git を読むだけで書かず、終了コードも出力も持たずに判定（`Verdict`）を値で返す。読み替えは呼び手が行う。
 ブランチ名は受け取らず SHA だけを受け取る。`allowed` を空にすると、先端の木が承認したコミットの木と等しいかの判定になる。
+`shipped`（配布物のパスの接頭辞）を渡すと、配布物に触れない承認の外のコミットは止めずに `Verdict.tolerated` へ入れ、
+木の比較も配布物のパスだけで行う（#2221）。渡さなければ、承認の外のコミットと木の違いを一律に止める。
 """
 
 from __future__ import annotations
@@ -63,6 +65,7 @@ class Verdict:
     tip: str
     reason: str
     outside: list[Outside] = field(default_factory=list)
+    tolerated: list[Outside] = field(default_factory=list)
     expected_tree: str | None = None
     actual_tree: str | None = None
 
@@ -259,7 +262,23 @@ def _outside_to_tip(root, approved, tip, allowed) -> list[str] | None:
     return [c for c in listed if c not in merges and _patch_id(root, c) not in patches]
 
 
-def compare_approved(root, approved: str, tip: str, allowed: list[AllowedPR] = ()) -> Verdict:
+def _touched(root, sha) -> list[str] | None:
+    """コミットが第 1 親から変えたパス（マージのコミットは取り込んだ側の変更を含む）。読めなければ None。"""
+    p = proc.git(root, "diff", "--name-only", f"{sha}^1", sha, check=False)
+    return None if p.returncode else p.stdout.split()
+
+
+def _ships(paths, shipped) -> bool:
+    return any(path.startswith(prefix) for path in paths for prefix in shipped)
+
+
+def _shipped_differs(root, expected, actual, shipped) -> bool | None:
+    """2 つの木の違いが配布物のパスに及ぶか。読めなければ None。"""
+    p = proc.git(root, "diff", "--name-only", expected, actual, check=False)
+    return None if p.returncode else _ships(p.stdout.split(), shipped)
+
+
+def compare_approved(root, approved: str, tip: str, allowed: list[AllowedPR] = (), shipped: tuple[str, ...] = ()) -> Verdict:
     """承認したコミット approved から比べた先端 tip までを比べる（#815 の設計の「compare の中の順序」）。
 
     1. 読めない approved は unknown_commit、読めない tip・配布の PR の先端は undecidable
@@ -268,6 +287,9 @@ def compare_approved(root, approved: str, tip: str, allowed: list[AllowedPR] = (
     4. approved..tip の（マージでない）コミットのうち、配布の PR の先端から届かず、配布の PR の mergeCommit でも
        同じ patch-id でもないものがあれば outside_commits（I9。木の結果によらない）
     5. tip の木が approved に配布の PR を merge-tree で足した木と違えば tree_differs、merge-tree が失敗すれば undecidable
+
+    shipped を渡すと、3・4 の承認の外のコミットのうち差分が shipped のどのパスにも触れないもの（読めないものは触れたとみなす）を
+    tolerated へ移して止めず、5 は違いが shipped のパスに及ぶときだけ tree_differs にする（#2221）。
     """
     allowed = list(allowed)
     v = Verdict(False, approved, tip, UNDECIDABLE)
@@ -282,10 +304,15 @@ def compare_approved(root, approved: str, tip: str, allowed: list[AllowedPR] = (
     outside = _outside_of_prs(root, approved, allowed)
     if outside is None:
         return v
-    if not outside:
-        outside = _outside_to_tip(root, approved, tip, allowed)
-        if outside is None:
+    if not outside or shipped:
+        to_tip = _outside_to_tip(root, approved, tip, allowed)
+        if to_tip is None:
             return v
+        outside += [c for c in to_tip if c not in outside]
+    if shipped:
+        touched = {c: _touched(root, c) for c in outside}
+        v.tolerated = [Outside(c, _subject(root, c)) for c in outside if touched[c] is not None and not _ships(touched[c], shipped)]
+        outside = [c for c in outside if touched[c] is None or _ships(touched[c], shipped)]
     if outside:
         v.reason = OUTSIDE_COMMITS
         v.outside = [Outside(c, _subject(root, c)) for c in outside]
@@ -294,6 +321,11 @@ def compare_approved(root, approved: str, tip: str, allowed: list[AllowedPR] = (
     v.actual_tree = _out(root, "rev-parse", f"{tip}^{{tree}}")
     if not v.expected_tree or not v.actual_tree:
         return v
-    v.ok = v.expected_tree == v.actual_tree
+    differs = v.expected_tree != v.actual_tree
+    if differs and shipped:
+        differs = _shipped_differs(root, v.expected_tree, v.actual_tree, shipped)
+        if differs is None:
+            return v
+    v.ok = not differs
     v.reason = MATCH if v.ok else TREE_DIFFERS
     return v
