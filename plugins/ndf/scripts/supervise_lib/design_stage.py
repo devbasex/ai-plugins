@@ -169,17 +169,15 @@ def rewrite(plans: dict[int, dict], res: dr.DesignResults, glossary: bool = Fals
     absorbed: dict[int, list[int]] = {}
     # new sprint --absorb で書き出しの時点に取り込んだ課題（プランの `取り込み先`）も表の取り込みと合わせる（#1426 の決定 8）
     pre = {n: p["取り込み先"] for n, p in plans.items() if isinstance(p.get("取り込み先"), int)}
-    for n, h in pre.items():
-        absorbed.setdefault(h, []).append(n)
-    for r in res.rows:
-        if r.kind != dr.ABSORB:
-            continue
-        host_row = res.row_of(r.host)
-        if r.host not in plans or (host_row is not None and host_row.kind != dr.IMPLEMENT):
+    # --absorb の取り込みも表の取り込みも、取り込み先に実装が流れることを確かめる（取り込み先が閉じる・別へ取り込まれると、
+    # 取り込んだ受け入れ内容を実装するプランが無くなる）
+    for n, h in [*pre.items(), *((r.issue, r.host) for r in res.rows if r.kind == dr.ABSORB)]:
+        host_row = res.row_of(h)
+        if h not in plans or (host_row is not None and host_row.kind != dr.IMPLEMENT):
             raise dr.DesignResultsError(
-                f"#{r.issue} の取り込み先 #{r.host} に流れる実装プランが無い（スプリントの課題でないか、設計の結果で取り込む・閉じるとした）"
+                f"#{n} の取り込み先 #{h} に流れる実装プランが無い（スプリントの課題でないか、設計の結果で取り込む・閉じるとした）"
             )
-        absorbed.setdefault(r.host, []).append(r.issue)
+        absorbed.setdefault(h, []).append(n)
     items = []
     for n, plan in plans.items():
         row, host = res.row_of(n), res.host_of(n)

@@ -303,6 +303,23 @@ def test_approve_from_facts_needs_the_users_answer_after_facts(monkeypatch, worl
     assert (out["status"], out["metrics"]["approved_sha"]) == ("ok", world["approved"])
 
 
+def test_approve_from_facts_reads_sha_and_time_from_the_newest_output(monkeypatch, world, tmp_path):
+    """facts を再開すると NN が 01 に戻る（#2247）。古い回の 12 の SHA と新しい回の 01 の時刻を組み合わせず、
+    最後に書かれた 01 の SHA と時刻を使う。"""
+    import os
+
+    path = tmp_path / "approval.md"
+    path.write_text(MATERIAL.format(sha=world["approved"]))
+    d = facts_dir(tmp_path, "a" * 40)  # 古い回の 12-facts.out（古い SHA）
+    os.utime(d / "12-facts.out", (1_000_000_000, 1_000_000_000))
+    line = json.dumps({"tool": "release", "status": "gate", "summary": "s", "items": [], "metrics": {"approved_sha": world["approved"]}})
+    (d / "01-facts.out").write_text(line + "\n")
+    mod = load(monkeypatch)
+    out, code = approve_facts(mod, world, path, d, answer_state(tmp_path, "2999-01-01T00:00:00Z"))
+    assert (out["status"], out["items"][0]["result"]) == ("ok", "written")
+    assert out["metrics"]["approved_sha"] == world["approved"]
+
+
 def test_approve_from_facts_without_facts_output_stops_at_the_gate(monkeypatch, world, tmp_path):
     path = tmp_path / "approval.md"
     path.write_text(MATERIAL.format(sha=world["approved"]))

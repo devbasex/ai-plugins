@@ -216,3 +216,16 @@ def test_rewrite_keeps_absorptions_made_when_writing_the_plans():
     assert plans[11]["課題"] == [11, 13, 12]
     assert plans[13]["実行の条件"] and plans[12]["実行の条件"]
     assert {"issue": 13, "absorbed_into": 11} in items
+
+
+@pytest.mark.parametrize("row", ["| #11 | 取り込む | #12 | — |", "| #11 | 閉じる | — | — |"], ids=["host-absorbed", "host-closed"])
+def test_rewrite_stops_when_the_absorb_host_does_not_implement(row):
+    """--absorb 13:11 の取り込み先 #11 を設計の結果が別へ取り込む・閉じると、#13 を実装するプランが無くなる（#2247）。
+    書き換える前に止まる。"""
+    table = f"# 設計\n\n## 設計の結果\n\n| 課題 | 扱い | 取り込み先 | 触るファイル |\n| --- | --- | --- | --- |\n{row}\n| #12 | 実装する | — | — |\n"
+    plans = {11: plan_of(11), 12: plan_of(12), 13: plan_of(13)}
+    plans[13]["取り込み先"] = 11
+    before = json.dumps(plans, ensure_ascii=False)
+    with pytest.raises(dr.DesignResultsError, match="#13 の取り込み先 #11"):
+        design_stage.rewrite(plans, results(table))
+    assert json.dumps(plans, ensure_ascii=False) == before

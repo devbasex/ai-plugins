@@ -156,17 +156,22 @@ def gate(root, a, plugin, base, verdict, items, metrics, moved=False) -> dict:
 
 def _facts_of(state_dir) -> tuple[str | None, str | None]:
     """開発版のプランの状態ディレクトリの最後の facts のステップの出力から (提示した SHA, 出力の時刻)。無ければ None。"""
-    from release_lib.materials import last_result
+    from release_lib.materials import last_out, last_result
 
     if not state_dir:  # Path("") は作業場所（.）を指すため読まない
         return None, None
     d = Path(state_dir)
-    got = last_result(d, "facts", TOOL) if d.is_dir() else None
-    sha = ((got or {}).get("metrics") or {}).get("approved_sha")
+    out = last_out(d, "facts") if d.is_dir() else None
+    if out is None:
+        return None, None
+    # SHA と時刻は同じ出力から読む（再開で NN が 01 に戻っても、古い回の SHA と新しい回の時刻を組み合わせない）
+    sha = ((last_result(d, "facts", TOOL, out) or {}).get("metrics") or {}).get("approved_sha")
     if not sha:
         return None, None
-    outs = sorted(d.glob("*-facts.out"), key=lambda f: f.stat().st_mtime)
-    at = datetime.fromtimestamp(outs[-1].stat().st_mtime, timezone.utc).isoformat() if outs else None
+    try:
+        at = datetime.fromtimestamp(out.stat().st_mtime, timezone.utc).isoformat()
+    except OSError:
+        return None, None
     return sha, at
 
 
