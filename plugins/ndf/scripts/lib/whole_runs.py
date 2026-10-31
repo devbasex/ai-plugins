@@ -37,7 +37,7 @@ def path(root: Path | str | None = None) -> Path:
     return Path(base) / "ndf" / "test-run" / hashlib.sha256(str(start).encode()).hexdigest()[:12] / "whole.jsonl"
 
 
-def append(root: Path | str | None, key: str, seconds: float, source: str) -> bool:
+def record_whole(root: Path | str | None, key: str, seconds: float, source: str) -> bool:
     """実測を 1 行足す。書けなければ標準エラーへ 1 行知らせて偽を返す（呼び手の結果は変えない）。"""
     if not key or not isinstance(seconds, (int, float)) or seconds <= 0:
         return False
@@ -59,7 +59,7 @@ def append(root: Path | str | None, key: str, seconds: float, source: str) -> bo
         return False
 
 
-def recent(root: Path | str | None, key: str) -> Optional[tuple[float, str]]:
+def recent_whole(root: Path | str | None, key: str) -> Optional[tuple[float, str]]:
     """同じ鍵の最新 `RECENT_ROWS` 行のうち最大の秒と、その行の出所。無い・読めなければ `None`。"""
     if not key:
         return None

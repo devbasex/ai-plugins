@@ -49,10 +49,10 @@ def append_init_test(prep: Any, budget_minutes: int, pr: Any, baseline: dict[str
 
 def record_whole_run(prep: Any, baseline: dict[str, Any]) -> None:
     """手元で全 suite を走らせた着手前のテスト（`mode: whole`）が上限の中で終わったら、全体テストの実測として残す（#1631 の決定 4）。
-    範囲テスト・ラウンドテスト・打ち切りは残さない（起動の失敗はここへ来る前に止まる）。書けなくても止めない（`whole_runs.append` が知らせる）。"""
+    範囲テスト・ラウンドテスト・打ち切りは残さない（起動の失敗はここへ来る前に止まる）。書けなくても止めない（`whole_runs.record_whole` が知らせる）。"""
     if baseline.get("mode") != "whole" or baseline.get("timed_out"):
         return
-    whole_runs.append(prep.work, ts.whole_key(prep.strategy), baseline.get("seconds"), "cross-refactoring")
+    whole_runs.record_whole(prep.work, ts.whole_key(prep.strategy), baseline.get("seconds"), "cross-refactoring")
 
 
 def abort_timed_out(strategy: ts.Strategy, budget_minutes: int, baseline: dict[str, Any], timeout: int) -> None:

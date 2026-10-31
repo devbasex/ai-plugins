@@ -71,7 +71,7 @@ def _resolve(root: pathlib.Path, a) -> tuple[ts.Strategy, dict, list[str]]:
 
 def _record_whole(root: pathlib.Path, strategy: ts.Strategy, started: float) -> None:
     """手元の全体検証が上限の中で終わった秒を、全体テストの実測として残す（#1631。書けなくても結果は変えない）。"""
-    whole_runs.append(root, ts.whole_key(strategy), time.monotonic() - started, "test-run")
+    whole_runs.record_whole(root, ts.whole_key(strategy), time.monotonic() - started, "test-run")
 
 
 def _git_out(root: pathlib.Path, *args: str) -> str | None:

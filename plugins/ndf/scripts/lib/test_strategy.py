@@ -873,7 +873,7 @@ def unbudgeted_limits(strategy: Strategy, source: dict[str, Any], root, key: Opt
         w, w_source = whole_seconds(source)
         c = ci_wall_seconds(source, (strategy.ci or {}).get("check") if strategy.ci else None)
     key = key or whole_key(strategy)
-    got = whole_runs.recent(root, key)
+    got = whole_runs.recent_whole(root, key)
     out = limits(
         strategy,
         None,

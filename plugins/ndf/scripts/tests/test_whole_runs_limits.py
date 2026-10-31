@@ -80,21 +80,21 @@ def test_a_budgeted_call_ignores_the_measurement():
 
 def test_recent_is_the_largest_of_the_last_five_rows_of_the_same_key(tmp_path):
     for s in (50.0, 1.0, 2.0, 3.0, 4.0, 5.0):
-        assert whole_runs.append(tmp_path, "k", s, "test-run")
-    whole_runs.append(tmp_path, "other", 99.0, "test-run")
-    assert whole_runs.recent(tmp_path, "k") == (5.0, "test-run"), "6 行前の 50 秒は直近に入れない"
-    whole_runs.append(tmp_path, "k", 1.0, "cross-refactoring")
-    assert whole_runs.recent(tmp_path, "k") == (5.0, "test-run"), "落ちて早く止まった短い行で戻らない"
-    assert whole_runs.recent(tmp_path, "missing") is None
+        assert whole_runs.record_whole(tmp_path, "k", s, "test-run")
+    whole_runs.record_whole(tmp_path, "other", 99.0, "test-run")
+    assert whole_runs.recent_whole(tmp_path, "k") == (5.0, "test-run"), "6 行前の 50 秒は直近に入れない"
+    whole_runs.record_whole(tmp_path, "k", 1.0, "cross-refactoring")
+    assert whole_runs.recent_whole(tmp_path, "k") == (5.0, "test-run"), "落ちて早く止まった短い行で戻らない"
+    assert whole_runs.recent_whole(tmp_path, "missing") is None
 
 
 def test_broken_rows_are_skipped(tmp_path):
     f = whole_runs.path(tmp_path)
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text('not json\n{"schema": 2, "key": "k", "seconds": 80}\n{"schema": 1, "key": "k", "seconds": "x"}\n', encoding="utf-8")
-    assert whole_runs.recent(tmp_path, "k") is None
-    whole_runs.append(tmp_path, "k", 7.0, "test-run")
-    assert whole_runs.recent(tmp_path, "k") == (7.0, "test-run")
+    assert whole_runs.recent_whole(tmp_path, "k") is None
+    whole_runs.record_whole(tmp_path, "k", 7.0, "test-run")
+    assert whole_runs.recent_whole(tmp_path, "k") == (7.0, "test-run")
 
 
 def test_an_unwritable_place_returns_false_without_raising(tmp_path, monkeypatch, capsys):
@@ -102,8 +102,8 @@ def test_an_unwritable_place_returns_false_without_raising(tmp_path, monkeypatch
     blocker = tmp_path / "blocked"
     blocker.write_text("", encoding="utf-8")
     monkeypatch.setenv("NDF_WHOLE_RUNS_DIR", str(blocker))
-    assert whole_runs.append(tmp_path, "k", 3.0, "test-run") is False
-    assert whole_runs.recent(tmp_path, "k") is None
+    assert whole_runs.record_whole(tmp_path, "k", 3.0, "test-run") is False
+    assert whole_runs.recent_whole(tmp_path, "k") is None
     assert "残せませんでした" in capsys.readouterr().err
 
 
@@ -119,9 +119,9 @@ def test_another_worktree_reads_the_same_record(tmp_path, monkeypatch):
     _git("init", "-q", cwd=main)
     _git("commit", "-q", "--allow-empty", "-m", "i", cwd=main)
     _git("worktree", "add", "-q", "-b", "other", str(tmp_path / "wt"), cwd=main)
-    assert whole_runs.append(tmp_path / "wt", "k", 12.0, "test-run")
+    assert whole_runs.record_whole(tmp_path / "wt", "k", 12.0, "test-run")
     assert whole_runs.path(tmp_path / "wt") == main / ".git" / "ndf" / "test-run" / "whole.jsonl"
-    assert whole_runs.recent(main, "k") == (12.0, "test-run")
+    assert whole_runs.recent_whole(main, "k") == (12.0, "test-run")
     assert not (tmp_path / "wt" / ".ndf").exists()
 
 
@@ -157,10 +157,10 @@ def test_test_run_records_a_finished_whole_and_the_next_run_widens(tmp_path):
     root = _repo(tmp_path)
     code, out = _run(root, "whole")
     assert code != 0 and "1 秒で終わらなかった" in out["summary"]
-    assert whole_runs.recent(root, _key(root)) is None, "I6 — 打ち切りは残さない"
+    assert whole_runs.recent_whole(root, _key(root)) is None, "I6 — 打ち切りは残さない"
     code, out = _run(root, "whole", "--limit", "10")
     assert code == 0 and out["items"][0]["limits"]["whole_timeout"] == 10
-    seconds, source = whole_runs.recent(root, _key(root))
+    seconds, source = whole_runs.recent_whole(root, _key(root))
     assert source == "test-run" and 1.5 <= seconds < 10
     code, out = _run(root, "whole")
     assert code == 0 and out["items"][0]["limits"]["whole_timeout"] >= 5
@@ -233,6 +233,6 @@ def test_only_a_finished_whole_baseline_is_recorded(tmp_path, monkeypatch):
         {"mode": "round", "timed_out": False, "seconds": 50.0},
     ):
         init_test.record_whole_run(prep, baseline)
-    assert whole_runs.recent(tmp_path, ts.whole_key(strategy)) is None
+    assert whole_runs.recent_whole(tmp_path, ts.whole_key(strategy)) is None
     init_test.record_whole_run(prep, {"mode": "whole", "timed_out": False, "seconds": 12.6})
-    assert whole_runs.recent(tmp_path, ts.whole_key(strategy)) == (12.6, "cross-refactoring")
+    assert whole_runs.recent_whole(tmp_path, ts.whole_key(strategy)) == (12.6, "cross-refactoring")
