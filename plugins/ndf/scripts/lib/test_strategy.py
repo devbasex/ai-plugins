@@ -768,6 +768,43 @@ def _ceil(value: float) -> int:
     return int(math.ceil(value))
 
 
+def _widen(base_seconds: float, m: Optional[float]) -> int:
+    """基準の秒を、直近の実測 m が上回るときは m に広げて `TEST_FACTOR` 倍した上限。"""
+    return _ceil(TEST_FACTOR * max(base_seconds, m or 0.0))
+
+
+def _unbudgeted(
+    w: Optional[float],
+    x: Optional[float],
+    c: Optional[float],
+    recent_seconds: Optional[float],
+    recent_source: Optional[str],
+    basis: dict[str, Any],
+) -> dict[str, Any]:
+    """予算なし（supervise）の上限の表（`limits` の予算なしの側）。"""
+    m = float(recent_seconds) if recent_seconds is not None else None
+    basis.update(recent=m, recent_source=recent_source if m is not None else None)
+    if w is None and x is None:
+        basis["unknown_duration"] = True
+        test_timeout = max(UNKNOWN_DURATION_LIMITS["test_timeout"], _widen(0.0, m))
+        whole_timeout = max(UNKNOWN_DURATION_LIMITS["whole_timeout"], _widen(0.0, m))
+        basis["limit_from"] = "recent" if whole_timeout > UNKNOWN_DURATION_LIMITS["whole_timeout"] else "unknown"
+    else:
+        base_test = float(x if x is not None else w)
+        base_whole = float(w if w is not None else x)
+        test_timeout = _widen(base_test, m)
+        whole_timeout = _widen(base_whole, m)
+        basis["limit_from"] = "recent" if m is not None and m > base_whole else "record"
+    ci_wait = _ceil(TEST_FACTOR * c) if c is not None else UNKNOWN_DURATION_LIMITS["ci_wait_timeout"]
+    return {
+        "init_test_timeout": whole_timeout,
+        "test_timeout": test_timeout,
+        "whole_timeout": whole_timeout,
+        "ci_wait_timeout": ci_wait,
+        "basis": basis,
+    }
+
+
 def limits(
     strategy: Strategy,
     budget_minutes: Optional[int],
@@ -801,30 +838,7 @@ def limits(
         "unknown_duration": False,
     }
     if budget_minutes is None:
-        m = float(recent_seconds) if recent_seconds is not None else None
-        basis.update(recent=m, recent_source=recent_source if m is not None else None)
-        if w is None and x is None:
-            basis["unknown_duration"] = True
-            test_timeout = UNKNOWN_DURATION_LIMITS["test_timeout"]
-            whole_timeout = UNKNOWN_DURATION_LIMITS["whole_timeout"]
-            if m is not None:
-                test_timeout = max(test_timeout, _ceil(TEST_FACTOR * m))
-                whole_timeout = max(whole_timeout, _ceil(TEST_FACTOR * m))
-            basis["limit_from"] = "recent" if whole_timeout > UNKNOWN_DURATION_LIMITS["whole_timeout"] else "unknown"
-        else:
-            base_test = float(x if x is not None else w)
-            base_whole = float(w if w is not None else x)
-            test_timeout = _ceil(TEST_FACTOR * max(base_test, m or 0.0))
-            whole_timeout = _ceil(TEST_FACTOR * max(base_whole, m or 0.0))
-            basis["limit_from"] = "recent" if m is not None and m > base_whole else "record"
-        ci_wait = _ceil(TEST_FACTOR * c) if c is not None else UNKNOWN_DURATION_LIMITS["ci_wait_timeout"]
-        return {
-            "init_test_timeout": whole_timeout,
-            "test_timeout": test_timeout,
-            "whole_timeout": whole_timeout,
-            "ci_wait_timeout": ci_wait,
-            "basis": basis,
-        }
+        return _unbudgeted(w, x, c, recent_seconds, recent_source, basis)
     seconds = float(budget_minutes) * 60
     # 範囲テストの所要は予算を持つ呼び出し（cross-refactoring）だけが渡す。supervise の表の形は変えない（AC12）。
     basis["scope_seconds"] = scope_seconds
