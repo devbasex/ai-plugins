@@ -47,6 +47,82 @@ def sprint_branch(a) -> str:
     return _branch_of(str(Path(a.worktree).resolve()), a.name)
 
 
+def _review_steps(n: int, copy: str) -> list:
+    """設計のプランのレビューのまとまり（review / sync-review / requirements-recheck）。"""
+    return [
+        # --max-rounds を渡さない。設計の分類の既定（3 ラウンド・前のラウンドからの変更だけ）で回る
+        {
+            "id": "review",
+            "type": "drive",
+            "drive": "cross-review",
+            "kind": "ドキュメントレビュー",
+            "stage": "ドキュメントレビュー",
+            "timeout": 3600,
+            "args": "{pr}",
+            "on_fail": "ready",
+            "next": "sync-review",
+        },
+        # レビューの直しは別の場所から PR のブランチへ push される。追いついてから語を見て push する
+        {
+            "id": "sync-review",
+            "type": "run",
+            "stage": "ドキュメントレビュー",
+            "timeout": 120,
+            "cmd": "git fetch -q && git merge -q --ff-only '@{u}'",
+            "next": "requirements-recheck",
+        },
+        # レビューの直しの後にも写しと課題の本文（正）の一致を見る。写しだけを直した直しを送らずに止める
+        # （on_fail を置かない。受け入れ条件の変更は課題の本文を直す利用者の判断で、修正担当の手直しで済ませない。#1769）
+        {
+            "id": "requirements-recheck",
+            "type": "run",
+            "stage": "ドキュメントレビュー",
+            "timeout": 120,
+            "cmd": f"{SPEC_COPY_PY} check {n} {copy}",
+            "next": "glossary-check",
+        },
+    ]
+
+
+def _glossary_steps(glossary_check: str, push: str) -> list:
+    """設計のプランの用語チェックのまとまり（glossary-check / fix-glossary / glossary-recheck / push-glossary）。"""
+    return [
+        # 用語チェック。当たりは 1 回だけ直し、残った当たりは関門 1 の提示へ載せる
+        {
+            "id": "glossary-check",
+            "type": "run",
+            "stage": "ドキュメントレビュー",
+            "timeout": 120,
+            "cmd": glossary_check,
+            "on_fail": "fix-glossary",
+            "next": "push-glossary",
+        },
+        {
+            "id": "fix-glossary",
+            "type": "work",
+            "kind": "修正",
+            "stage": "ドキュメントレビュー",
+            "inputs": ["glossary-check"],
+            "timeout": 1800,
+            "next": "glossary-recheck",
+            "prompt": "用語チェックの当たりを直す。未登録の語は用語集へ足す（source は空にし、pending_source に"
+            "設計文書のパスを書く）か、用語集の語へ言い換える。廃止した語は"
+            "用語集の語へ言い換える。用語集を変えたら `glossary.py render` で文書を作り直し、コミットする"
+            "（push しない）。利用者が採るかを決めるべき語は直さずに「判断が要る」と報告する。",
+        },
+        {
+            "id": "glossary-recheck",
+            "type": "run",
+            "stage": "ドキュメントレビュー",
+            "timeout": 120,
+            "cmd": glossary_check,
+            "on_fail": "push-glossary",
+            "next": "push-glossary",
+        },
+        {"id": "push-glossary", "type": "run", "stage": "ドキュメントレビュー", "timeout": 300, "cmd": push, "next": "ready"},
+    ]
+
+
 def plan_sprint_design(a, n: int, repo: str) -> dict:
     """設計のフェーズ: 設計文書を書き、設計 PR を出し、cross-review（設計の既定 3 ラウンド）の後に関門 1 で止まる。"""
     branch = f"design/issue-{n}"
@@ -135,70 +211,8 @@ def plan_sprint_design(a, n: int, repo: str) -> dict:
                 "cmd": SYNC_DESIGN_BODY,
                 "next": "review",
             },
-            # --max-rounds を渡さない。設計の分類の既定（3 ラウンド・前のラウンドからの変更だけ）で回る
-            {
-                "id": "review",
-                "type": "drive",
-                "drive": "cross-review",
-                "kind": "ドキュメントレビュー",
-                "stage": "ドキュメントレビュー",
-                "timeout": 3600,
-                "args": "{pr}",
-                "on_fail": "ready",
-                "next": "sync-review",
-            },
-            # レビューの直しは別の場所から PR のブランチへ push される。追いついてから語を見て push する
-            {
-                "id": "sync-review",
-                "type": "run",
-                "stage": "ドキュメントレビュー",
-                "timeout": 120,
-                "cmd": "git fetch -q && git merge -q --ff-only '@{u}'",
-                "next": "requirements-recheck",
-            },
-            # レビューの直しの後にも写しと課題の本文（正）の一致を見る。写しだけを直した直しを送らずに止める
-            # （on_fail を置かない。受け入れ条件の変更は課題の本文を直す利用者の判断で、修正担当の手直しで済ませない。#1769）
-            {
-                "id": "requirements-recheck",
-                "type": "run",
-                "stage": "ドキュメントレビュー",
-                "timeout": 120,
-                "cmd": f"{SPEC_COPY_PY} check {n} {copy}",
-                "next": "glossary-check",
-            },
-            # 用語チェック。当たりは 1 回だけ直し、残った当たりは関門 1 の提示へ載せる
-            {
-                "id": "glossary-check",
-                "type": "run",
-                "stage": "ドキュメントレビュー",
-                "timeout": 120,
-                "cmd": glossary_check,
-                "on_fail": "fix-glossary",
-                "next": "push-glossary",
-            },
-            {
-                "id": "fix-glossary",
-                "type": "work",
-                "kind": "修正",
-                "stage": "ドキュメントレビュー",
-                "inputs": ["glossary-check"],
-                "timeout": 1800,
-                "next": "glossary-recheck",
-                "prompt": "用語チェックの当たりを直す。未登録の語は用語集へ足す（source は空にし、pending_source に"
-                "設計文書のパスを書く）か、用語集の語へ言い換える。廃止した語は"
-                "用語集の語へ言い換える。用語集を変えたら `glossary.py render` で文書を作り直し、コミットする"
-                "（push しない）。利用者が採るかを決めるべき語は直さずに「判断が要る」と報告する。",
-            },
-            {
-                "id": "glossary-recheck",
-                "type": "run",
-                "stage": "ドキュメントレビュー",
-                "timeout": 120,
-                "cmd": glossary_check,
-                "on_fail": "push-glossary",
-                "next": "push-glossary",
-            },
-            {"id": "push-glossary", "type": "run", "stage": "ドキュメントレビュー", "timeout": 300, "cmd": push, "next": "ready"},
+            *_review_steps(n, copy),
+            *_glossary_steps(glossary_check, push),
             # pr のステップは設計 PR を Draft で作る（レビュー中に CI と並べる）。関門 1 の前に Draft を外す。
             # push は直前の push-glossary が済ませ、落ちればプランが止まってここへ来ない
             {"id": "ready", "type": "run", "stage": "ドキュメントレビュー", "timeout": 300, "cmd": DESIGN_READY, "next": "gate"},
