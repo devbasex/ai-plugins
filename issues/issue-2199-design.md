@@ -42,7 +42,10 @@
 
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
-| アカウント | `AccountService`（`accounts/service.ts`）。保存は `AccountStore` の契約を通す | アカウント（`AccountRecord`） | 席（`SeatRecord`）・利用者（`UserRecord`） | プラン・実行の形態・席の種類・履歴の行（`HistoryRecord`） |
+| 利用者 | `AccountService`（`accounts/service.ts`）。保存は `AccountStore` の契約を通す | 利用者（`UserRecord`） | — | 利用者の ID（Cognito の `sub`）・IdP の種類 |
+| アカウント | `AccountService`（`accounts/service.ts`）。保存は `AccountStore` の契約を通す | アカウント（`AccountRecord`） | 席（`SeatRecord`） | プラン・実行の形態・席の種類・履歴の行（`HistoryRecord`） |
+
+利用者とアカウントは別の集約である（確定仕様 `docs/specifications/ndf-factory-accounts-and-plans.md` の「集約」）。2 つを 1 つのトランザクションで書くのは初めてのログインで両方を作るときだけで、それ以外の利用者の読み書きはアカウントの操作に含めない。保存の契約（`AccountStore`）が両方の集約の保存を受け持つのは今のままで、この変更は契約の置き場（`accounts/port.ts`）だけを変える。
 
 ### 不変条件
 
@@ -55,7 +58,7 @@
 | I3 | アカウント | どの書き込みも履歴の行を同じトランザクションで足す（既存の I20）。条件の失敗は `ConditionFailedError`、それ以外の失敗は今と同じ型で呼ぶ側へ届く | その件を戻す |
 | I4 | — | 認証（`auth/verify.ts`・`github-oidc/`）と認可（`auth/resolve.ts`）の判定が変更の前と同じ | その件を戻す（C2 に当たる変更を入れない） |
 | I5 | — | 「適用した」件の同じ役割の関数・定数の定義が `factory/` の中で 1 か所にある | 残った写しを寄せるまで実装の Pull Request を出さない |
-| I6 | — | `factory/api/src` の `handlers/` の外のコード（テストを除く）が `handlers/` を import しない | import を移した先へ替えるまで出さない |
+| I6 | — | `factory/api/src` の `handlers/` の外のコード（`*.test.ts` を除く。テストの補助の `testing/app.ts` は除かない）が `handlers/` を import しない | import を移した先へ替えるまで出さない |
 
 ### ドメインイベント
 
@@ -139,6 +142,7 @@
 | `factory/api/src/handlers/api.ts`・`ingest.ts`・`github-oidc.ts` | Lambda の `handler` の配線だけを持つ。`handler` の名前と置き場は変えない（インフラが束ねる入口のため） | R02・R20 |
 | `factory/api/src/index.ts` | import を `app.ts`・`auth/deps.ts`・`progress/deps.ts` へ替える。export する名前と形は変えない | R02 |
 | `factory/api/src/runs/deps.ts` | `requireEnv` を `env.ts` から、`progressStoreFromEnv` を `progress/deps.ts` から読む | R02・R20 |
+| `factory/api/src/testing/app.ts`・`routes/factory.test.ts`・`handlers/api.test.ts` | `createApiApp`・`LogEntry` の import 元を `app.ts` へ替える（import の行だけを変え、期待値は変えない）。`handlers/api.ts` は移した名前を再 export しない | R02 |
 | `factory/api/src/accounts/port.ts`（新規） | 保存の契約: `AccountStore`・`AccountPatch`・`AccountUpdate`・`ConditionFailedError`。AWS SDK を読まない | R08・R18 |
 | `factory/api/src/accounts/store.ts` | DynamoDB の実装だけを持つ。`transact(items, history)`・`PATCH_COLUMNS`・鍵の頭の定数 | R04・R09・R10・R18・R19 |
 | `factory/api/src/accounts/memory-store.ts` | `port.ts` から契約を読み、`updateAccount(update)` へ合わせる | R08・R18 |
@@ -375,7 +379,7 @@ R04 と R09 は同じ兆候（6 つの書き込みが末尾に履歴の行の展
 | I2 | `store.test.ts` の既存の期待値（鍵・GSI の鍵・条件式・`:expected`・`:next`・`:plan`・`:mode`・履歴の行が最後） | プレースホルダの名前を変える・履歴を業務の項目より先に並べると落ちる |
 | I3 | `service.test.ts` の「版の競合が 3 回続けば保存の失敗を返す」と、`handlers/api.test.ts` の「書き込みが失敗したら席も履歴も増えない」「既に席がある → 409」 | `retryOnConflict` が条件以外の失敗を再試行する・`setPlan` の失敗を包む・`writeOr` が 409 を返さないと落ちる |
 | I4 | `verify.test.ts`・`github-oidc/app.test.ts` の既存の期待値 | IdP の判定の順序・`/token` の `invalid_grant`・`/userinfo` の 401 を変えると落ちる |
-| I6 | `grep -rln 'from "\.\{1,2\}/handlers/' factory/api/src --include=*.ts` から `*.test.ts` を除いて 0 件（今は `index.ts`・`runs/deps.ts`・`testing/app.ts` の 3 件） | `index.ts` に `handlers/` の import を残すと 1 件になる |
+| I6 | `grep -rln 'from "\.\{1,2\}/handlers/' factory/api/src --include=*.ts` から `*.test.ts` を除いて 0 件（今は `index.ts`・`runs/deps.ts`・`testing/app.ts` の 3 件。`testing/app.ts` は除かずに数える） | `index.ts` か `testing/app.ts` に `handlers/` の import を残すと 1 件になる |
 
 ## 設計の結果
 
