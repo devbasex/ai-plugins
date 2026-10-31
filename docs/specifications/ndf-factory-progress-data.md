@@ -44,7 +44,7 @@ DynamoDB の表（`PROGRESS_IDEMPOTENCY_TABLE_NAME`）。区分の鍵 `idempoten
 
 **1 件の追記は `TransactWrite` 1 回に 2 つの `Put` である。** 1 つ目が冪等の鍵の表への `attribute_not_exists(idempotency_key)` つき、2 つ目が事象の表への `attribute_not_exists(order_key)` つきで、どの経路でも既存の項目を上書きしない。取り消しの理由の 1 つ目が `ConditionalCheckFailed` なら重複として `{ written: false }`（受け口は 202）を返し、ほかの理由（`TransactionConflict` など）とほかの失敗は投げる（受け口は 503）。同時の 2 本はどちらかが取り消され、送り直しで重複になる。
 
-| 機能 | 事象の表 | 冪等の鍵の表 | GSI | 承認の依頼（#2173） |
+| 機能 | 事象の表 | 冪等の鍵の表 | GSI | 承認の依頼 |
 | --- | --- | --- | --- | --- |
 | ランナーの事象 | C | C | — | — |
 | `gate.answered` | C | C | — | R |
