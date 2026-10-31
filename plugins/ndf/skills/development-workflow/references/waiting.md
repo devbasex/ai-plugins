@@ -138,7 +138,7 @@ python3 plugins/ndf/scripts/supervise.py wait q/done.json
    報告の `Pull Request` の番号を changelog・approval-facts のステップの `--prs` へ入れる。
    先行の報告に Pull Request が 1 件も無ければ、リリースプランは `流さなかった` になる
 2. `queue <実装のプラン>... --then <開発版のプラン> --done <パス>` と `wait <パス>` をバックグラウンドで起動する
-3. `wait` が 0 で終わり、キューの結果が `gate`（開発版の facts のステップのゲート 2）なら、承認資料を添えて本番の承認を取る
+3. `wait` が 0 で終わり、キューの結果が `gate`（開発版の facts のステップのゲート 2）なら、承認資料を添えて本番の承認（`ndf-gate:2`）を取る
 4. 承認の後、`queue <本番のプラン> --done <パス>` と `wait <パス>` をバックグラウンドで起動する。本番のプランのステップの最後は
    後片付け（`merged-steps.py cleanup`）で、リリースの PR（`release/v<版>` → main）とスプリントの PR（`--prs`）の
    ブランチ・worktree を片付ける。`git branch -D` が要るブランチがあれば承認ゲートで止まる
@@ -165,7 +165,7 @@ conductor が起きるのは、承認ゲート・`attention`・キューの終�
    スプリントの Pull Request の本文に「手動確認」のマージ前の行があれば、印が付くまで `merge-gate` が承認ゲートで止まる
    （利用者が印を付けたら `sv run $O/6-check.json --from merge-gate`）
 8. 承認ゲート 2: キューの結果が `gate`（開発版の facts のステップ）なら、`sprint.json` の `関門 2` のステージの `gate` に沿って
-   承認資料を添えて本番の承認を取る。差し戻されたら 9 を打たない
+   承認資料を添えて本番の承認（`ndf-gate:2`）を取る。差し戻されたら 9 を打たない
 9. 本番: `sprint.json` の `本番` のステージの `command` に `--done` を足して打つ（`sv queue $O/9-release-prod.json --max 3 --done $O/done-9.json`）と
    `sv wait $O/done-9.json`。出す PR は検査の報告から埋まる。最後のステップが後片付けを行う
 

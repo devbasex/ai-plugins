@@ -2301,6 +2301,25 @@ def test_question_denies_when_unwritable(tmp_path, relay):
     assert json.loads(p.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
+@pytest.mark.parametrize("source, created", [(None, False), ("ndf-gate:1", True)])
+def test_question_open_follows_the_ask_guard(tmp_path, relay, source, created):
+    """#2206 の I7: hook の問い合わせの guard が止める問いには、合図と質問の時刻を作らない。通す問いには作る。"""
+    proj = tmp_path / "proj"
+    (proj / ".git").mkdir(parents=True)
+    ti = {"questions": [{"question": "q"}], **({"metadata": {"source": source}} if source else {})}
+    data = json.dumps({"hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion", "cwd": str(proj), "tool_input": ti})
+    e = isolated_env(tmp_path)
+    e["NDF_RELAY_DIR"] = str(relay.dir)
+    p = subprocess.run([sys.executable, str(RELAY), "question", "open"], input=data, capture_output=True, text=True, env=e, timeout=20)
+    quiet_ok(p)
+    assert (relay.dir / "question").exists() is created
+    assert (relay.dir / relay_common.ASKED_FILE).exists() is created
+
+
+def test_wait_reason_tells_how_to_tag_gate_questions():
+    assert "ndf-gate:" in relay_mark.WAIT_REASON
+
+
 def test_question_close_removes(tmp_path, relay):
     (relay.dir / "question").write_text("")
     quiet_ok(question(tmp_path, relay.dir, "close"))

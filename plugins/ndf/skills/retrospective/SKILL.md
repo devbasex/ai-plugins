@@ -69,7 +69,7 @@ python3 "$SCRIPTS/issue-file.py" by-origin --origin "issue #<起点>" --origin "
 **起点の issue と Pull Request の両方を `--origin` に渡す。** Pull Request を作る前に見つけた課題は起点の issue の
 番号で残る。結果の `items` は課題ごとに 1 件（`repo`・`number`・`origins`）で、終了コード 2 は検索の失敗であり 0 件と
 読まない。**`metrics.upstream` が `null` なら上流リポジトリは検索されていない。** 上流リポジトリを `--repo` で名指しして
-打ち直す（名前が分からなければ利用者に聞く）。上流リポジトリを検索に足しても、記録の投稿先は変わらない。
+打ち直す（名前が分からなければ記録（設定・Pull Request・課題の本文）から AI が決める。決まらなければ投稿を止めて報告する）。上流リポジトリを検索に足しても、記録の投稿先は変わらない。
 
 次の 3 か所と突き合わせる。番号が無いものが取りこぼしである。
 
@@ -115,9 +115,11 @@ python3 "$CLAUDE_PLUGIN_ROOT/skills/skill-stats/scripts/skill-stats.py" \
 **承認ゲートの差し戻しは覆しと別の数である。** 覆しは直前の MVV 判定と食い違った答えだけを数え、差し戻しは MVV 判定の
 有無を問わず利用者が差し戻した 1 回を 1 件と数える。`pace: normal` の差し戻しは覆しに出ないため、この行で数える。
 
-**「MVV を見直すか」は毎回問う。** `signals` の集計（件数・閾値・超えた兆候）を示し、プロジェクト MVV を改訂するかを
-利用者に問う。示す文面は `development-workflow` の `references/project-mvv.md` の「人へ示す文面の雛形」（経緯・前提・根拠・
-選択肢）に従う。改訂すると決めたら、同じ文書の「改訂」の手順へ入る。プロジェクト MVV が無ければ、定めるかを問う。
+**「MVV を見直すか」は AI が `signals` から決める。** `signals` の集計（件数・閾値・超えた兆候）を報告に載せ、閾値を超えた兆候が
+無ければ見直さないと決め、`ask.py decide --question "MVV を見直すか"` で理由とともに記録する（[asking.md](../development-workflow/references/asking.md)）。
+閾値を超えた兆候があれば改訂の案を作り、改訂の承認だけを `AskUserQuestion`（`metadata.source` は `ndf-ask:redline:C7`）で問う。
+示す文面は `development-workflow` の `references/project-mvv.md` の「人へ示す文面の雛形」（経緯・前提・根拠・選択肢）に従い、
+承認されたら同じ文書の「改訂」の手順へ入る。プロジェクト MVV が無ければ、定めるかを同じ区分で問う。
 
 ### 3. 次に変えることを決める
 
@@ -229,7 +231,7 @@ record_base=$dev_base
 # スプリント — リリースした先を使う。**リリースした先は対象リポジトリが決める。** 開発の起点を
 # そのままリリースに使っているリポジトリでは `$dev_base` と同じ値になり、正式版のチャネルを
 # 分けているリポジトリでは別の値になる。字面で書かず、既定ブランチ（origin の HEAD が
-# 指す先）で確かめる。取れないときは推測せず番号を利用者に聞く
+# 指す先）で確かめる。取れないときは推測せず、記録から決まらなければ投稿を止めて報告する
 record_base=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
 [ -n "$record_base" ] || {
   printf 'NOTE: スプリントを配布した先のブランチを判別できません。番号を利用者に聞いてください\n' >&2
