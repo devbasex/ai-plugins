@@ -286,8 +286,13 @@ def _rm(path: Path) -> None:
 
 
 def _owned_item(
-    kind: str, path: Path, pid: int | None, is_alive: Callable[[], bool],
-    mtime_of: Callable[[], float], now: float, remove: Callable[[], None],
+    kind: str,
+    path: Path,
+    pid: int | None,
+    is_alive: Callable[[], bool],
+    mtime_of: Callable[[], float],
+    now: float,
+    remove: Callable[[], None],
 ) -> dict[str, Any]:
     """持ち主の記録が無ければ寿命の窓で、あれば持ち主のプロセスの生死で消すかを決める。"""
     if pid is None:
@@ -307,10 +312,17 @@ def _sweep_session(tmp: Path, now: float) -> list[dict[str, Any]]:
             items.append(_item("session-state", path, False, f"判定できない: 読めない ({e})"))
             continue
         owner = _pid_record(data.get("owner") if isinstance(data, dict) else None)
-        items.append(_owned_item(
-            "session-state", path, owner[0] if owner else None, lambda o=owner: _process_alive(*o),
-            lambda p=path: p.stat().st_mtime, now, lambda p=path: p.unlink(missing_ok=True),
-        ))
+        items.append(
+            _owned_item(
+                "session-state",
+                path,
+                owner[0] if owner else None,
+                lambda o=owner: _process_alive(*o),
+                lambda p=path: p.stat().st_mtime,
+                now,
+                lambda p=path: p.unlink(missing_ok=True),
+            )
+        )
     return items
 
 
@@ -321,10 +333,17 @@ def _sweep_deps(tmp: Path, now: float) -> list[dict[str, Any]]:
         pid = None
         with contextlib.suppress(OSError, ValueError):
             pid = int(owner_file.read_text(encoding="utf-8").strip())
-        items.append(_owned_item(
-            "deps-work", path, pid, lambda pid=pid: _process_alive(pid, None, "worktree-deps.sh"),
-            lambda p=path: mtime(p), now, lambda p=path: shutil.rmtree(p),
-        ))
+        items.append(
+            _owned_item(
+                "deps-work",
+                path,
+                pid,
+                lambda pid=pid: _process_alive(pid, None, "worktree-deps.sh"),
+                lambda p=path: mtime(p),
+                now,
+                lambda p=path: shutil.rmtree(p),
+            )
+        )
     return items
 
 
