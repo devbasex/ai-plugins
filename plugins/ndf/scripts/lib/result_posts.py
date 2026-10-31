@@ -529,10 +529,14 @@ def _sh(*cmd: str, cwd: pathlib.Path | str | None = None) -> str:
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
+def _tmp_base(worktree: pathlib.Path) -> pathlib.Path:
+    """一時の置き場。待ち行列と修正の結果ファイルが同じ場所を指すよう、規則をここだけに置く。"""
+    return pathlib.Path(os.environ.get("CROSS_REVIEW_TMP_DIR") or str(worktree / TMP_DIRNAME))
+
+
 def queue_for(worktree: pathlib.Path) -> post_queue.Queue:
     """待ち行列の置き場所。**引数では渡さない。** 作業ツリーの下の決まった名前から導く。"""
-    base = os.environ.get("CROSS_REVIEW_TMP_DIR") or str(worktree / TMP_DIRNAME)
-    return post_queue.Queue(pathlib.Path(base) / post_queue.QUEUE_DIRNAME)
+    return post_queue.Queue(_tmp_base(worktree) / post_queue.QUEUE_DIRNAME)
 
 
 class FixInputs(NamedTuple):
@@ -557,11 +561,7 @@ def _resolve_fix_inputs(args: argparse.Namespace) -> tuple[FixInputs | None, str
     if not head:
         # 送れない修正へ「対応しました」と返信しないため、返信へ進まず止める。
         return None, "送り先のブランチを決められない（--head を渡す）"
-    result = (
-        pathlib.Path(args.result)
-        if args.result
-        else (pathlib.Path(os.environ.get("CROSS_REVIEW_TMP_DIR") or str(worktree / TMP_DIRNAME)) / f"fix-pr{args.pr}-result.json")
-    )
+    result = pathlib.Path(args.result) if args.result else _tmp_base(worktree) / f"fix-pr{args.pr}-result.json"
     fix = _read_json(result)
     if not fix:
         return None, f"修正の結果ファイルを読めない: {result}"
