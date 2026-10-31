@@ -137,9 +137,24 @@ class CloseContext:
         self.retry_cmd = shlex.join(["python3", str(Path(__file__).resolve()), *argv])
 
 
+def _issue_base(repo, n):
+    """課題 1 件の結果の項目の共通部分。"""
+    return {"kind": "issue", "repo": repo, "number": n}
+
+
+def _failed(base, reason, ctx):
+    """やり直しの cmd を添えた failed の項目。"""
+    return {**base, "result": "failed", "reason": reason, "cmd": ctx.retry_cmd}
+
+
+def _dry_run_result(state):
+    """試行（dry_run）の結果: CLOSED なら already_closed、それ以外は would_close。"""
+    return "already_closed" if state == "CLOSED" else "would_close"
+
+
 def close_one(ctx, repo, n):
     root, record_repo, comment, notes = ctx.root, ctx.record_repo, ctx.comment, ctx.notes
-    it = {"kind": "issue", "repo": repo, "number": n}
+    it = _issue_base(repo, n)
     before = issue_state(root, repo, n)
     if before is None:
         return {**it, "result": "failed", "reason": "before を読めない", "cmd": f"gh issue close {n} --repo {repo}"}
@@ -236,10 +251,10 @@ def _read_state_body(root, repo, n):
 
 def _judge_and_mark(a, ctx, repo, n, rows):
     """錠の中で状態と本文を読み、条件 2 と条件 3 を判定し、満たせば印を書く。(結果の項目か None, 印を付けた番号) を返す。"""
-    base = {"kind": "issue", "repo": repo, "number": n}
+    base = _issue_base(repo, n)
     got = _read_state_body(ctx.root, repo, n)
     if got is None:
-        return {**base, "result": "failed", "reason": UNREADABLE_BODY, "cmd": ctx.retry_cmd}, []
+        return _failed(base, UNREADABLE_BODY, ctx), []
     state, body = got
     ok, why, to_check = judge_acceptance(rows, acceptance.criteria(body), acceptance.pre_merge_numbers(body))
     own = repo == ctx.record_repo  # 他のリポジトリの課題の本文は書かない（I7）
@@ -251,13 +266,13 @@ def _judge_and_mark(a, ctx, repo, n, rows):
     if gap:  # 条件 3 を満たさない課題の本文は書かない
         return gap_item(base, state, gap), []
     if a.dry_run:
-        out = {**base, "result": "already_closed" if state == "CLOSED" else "would_close"}
+        out = {**base, "result": _dry_run_result(state)}
         return ({**out, "would_check": to_check} if own and to_check else out), []
     if not (own and to_check):
         return None, []
     new = acceptance.check_criteria(body, to_check)
     if not acceptance.only_marks(body, new) or not gh_rest.update_body(repo, n, new):
-        return {**base, "result": "failed", "reason": "受け入れ条件の印を書けない", "cmd": ctx.retry_cmd}, []
+        return _failed(base, "受け入れ条件の印を書けない", ctx), []
     return None, to_check
 
 
@@ -268,7 +283,7 @@ def _close_verified(a, ctx, repo, n, rows):
         with lock:
             done, checked = _judge_and_mark(a, ctx, repo, n, rows)
     except locks.LockTimeout:
-        return {"kind": "issue", "repo": repo, "number": n, "result": "failed", "reason": "本文の錠を取れない", "cmd": ctx.retry_cmd}
+        return _failed(_issue_base(repo, n), "本文の錠を取れない", ctx)
     if done is not None:
         return done
     out = close_one(ctx, repo, n)
@@ -276,7 +291,7 @@ def _close_verified(a, ctx, repo, n, rows):
 
 
 def _close_item(a, ctx, repo, n, kept_all, verdicts):
-    base = {"kind": "issue", "repo": repo, "number": n}
+    base = _issue_base(repo, n)
     if kept_all:
         return {**base, "result": "kept_open", "reason": kept_all}
     if verdicts is not None:
@@ -284,18 +299,18 @@ def _close_item(a, ctx, repo, n, kept_all, verdicts):
     if ctx.final_stage == STAGE_RETRO:
         got = _read_state_body(ctx.root, repo, n)
         if got is None:  # 記録の置き場を読めないときは記録があるとは読まない（I2）
-            return {**base, "result": "failed", "reason": UNREADABLE_BODY, "cmd": ctx.retry_cmd}
+            return _failed(base, UNREADABLE_BODY, ctx)
         state, body = got
         gap = final_stage_gap(ctx.final_stage, body, ctx.since)
         if gap:
             return gap_item(base, state, gap)
         if a.dry_run:
-            return {**base, "result": "already_closed" if state == "CLOSED" else "would_close"}
+            return {**base, "result": _dry_run_result(state)}
     if a.dry_run:
         st = issue_state(ctx.root, repo, n)
         return {
             **base,
-            "result": "already_closed" if st == "CLOSED" else "would_close",
+            "result": _dry_run_result(st),
             **({"reason": "状態を読めない"} if st is None else {}),
         }
     return close_one(ctx, repo, n)
