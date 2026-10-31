@@ -81,3 +81,14 @@
 | `scripts/tests/test_root_conftest.py::test_the_prefix_is_declared_once` | 消した | 4 | 根の conftest の文字列を固定していた。接頭辞の除去は `scripts/tests/test_root_conftest.py::test_no_monitor_variable_survives_into_a_test` が守る |
 | `scripts/tests/test_check_script_structure.py::test_repository_matches_its_allow_list` | 消した | 6 | suite `script-structure`（`python3 scripts/check-script-structure.py`）と CI の `.github/workflows/script-structure.yml` が同じ検査をリポジトリ全体へ流す |
 | `plugins/ndf/scripts/tests/test_supervise_limits.py::test_every_template_plan_gets_through_each_fix_loop_three_times` | まとめた | 5 | 17 本の雛形のプランのうち、修正のループの入口の組が同じものは同じ遷移を通る。組ごとに 1 本（impl・check・release・release-prod の形）を流す `plugins/ndf/scripts/tests/test_supervise_limits.py::test_every_fix_loop_shape_gets_through_each_fix_loop_three_times` が守る。修正のループの無いプランは上限に届く経路が無い |
+
+## 打ち切りの確かめ（受け入れ条件 6・7）
+
+2026-11-01 02:00 JST ごろ に手元で確かめた。数えたのは、作業場所のパスをコマンドラインに含むプロセスのうち、打ち切る前から動いていた作業者のセッションと言語サーバーを除いたもの。
+
+| 打ち切り方 | 打ち切る前 | 打ち切りから 10 秒後 |
+| --- | --- | --- |
+| `test_triage.run_command` に宣言の pytest のコマンドを上限 30 秒で渡す（cross-refactoring の着手前のテストと同じ打ち切る側。30.2 秒で打ち切った） | — | 0 件 |
+| `pytest -n 4`（`test_relay.py`・`test_supervise_queue.py`）を 25 秒流し、親だけへ `kill -TERM` | 11 件 | 0 件 |
+
+`python3 plugins/ndf/scripts/test-run.py whole --limit 30` は、PR の無いこのブランチでは CI のチェックの結論を待つ側へ進み、手元のテストを流さなかったため、上の 1 行目で打ち切る側を直に呼んで確かめた。
