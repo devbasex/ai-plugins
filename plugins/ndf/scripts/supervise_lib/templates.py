@@ -265,9 +265,8 @@ def _inspect_steps(a, pr_ref: str, scope: str) -> list[dict]:
             "stage": "実装レビュー",
             "timeout": 3600,
             "args": f"{pr_ref} --max-rounds 4",
+            # 収束しなかった終わり（終了コード 6 と gaps）も落ちたとして止まり、後続の検査へ進めない（#2143）
             "on_fail": "abort",
-            # 収束しなかった終わり（終了コード 6 と gaps）は見送りとして材料へ載せて進む（#2227 の決定 1）
-            "on_exit": {"6": "base-sync"},
             "next": "base-sync",  # 全体テストの前にベースブランチを取り込む（#1917）
         },
     ]
