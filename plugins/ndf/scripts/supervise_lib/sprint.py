@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 import shlex
 from pathlib import Path
 
@@ -32,7 +31,7 @@ from supervise_lib.sprint_waves import (
 from supervise_lib.new_args import NEW_ARGS
 from supervise_lib.paths import CHECK_PY, SELF
 from supervise_lib.procedures import sprint_out, with_record
-from supervise_lib.release_templates import release_verify_step
+from supervise_lib.release_templates import release_verify_step, strip_suffix
 from supervise_lib.plan import sprint_state_path
 from supervise_lib.sprint_routes import (
     normal_gate_1,
@@ -51,8 +50,9 @@ from supervise_lib.verify_steps import merge_steps
 from supervise_lib.sprint_close_steps import _close_step, _refine_step, _retro_step, _spec_pr_steps
 
 
-def prod_version(version: str) -> str:
-    return re.sub(r"-.*$", "", version)
+def prod_version(version: str | None) -> str | None:
+    """明示の開発版から本番の明示の版を作る。開発版が無ければ None（本番は開発版のプランの版の記録から読む。#2164）。"""
+    return strip_suffix(version) if version else None
 
 
 DESIGN_RESULTS_STAGE = "設計の結果"
@@ -185,7 +185,11 @@ def close_waves(a) -> list[dict]:
     return [
         check,
         {"name": "開発版", "plans": {"release": plan_mvv_release(a, repo, a.version, "dev", changed)}, "then_of": "最終の検査"},
-        {"name": "本番", "plans": {"release-prod": plan_mvv_release(a, repo, a.prod, "prod", changed)}, "then_of": "最終の検査"},
+        {
+            "name": "本番",
+            "plans": {"release-prod": plan_mvv_release(a, repo, getattr(a, "prod", None), "prod", changed)},
+            "then_of": "最終の検査",
+        },
         close,
     ]
 

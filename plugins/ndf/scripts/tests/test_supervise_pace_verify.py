@@ -312,13 +312,13 @@ PRD_ON_BASE = {**PRD, "trigger": "develop へのマージ", "branch": "develop"}
 
 
 @pytest.mark.parametrize("rows", [[STG], [PRD_ON_BASE], [API], [STG, API]], ids=["stg-only", "merged", "manual", "stg-manual"])
-def test_close_without_a_known_record_keeps_the_issues_open(tmp_path, rows):
-    """#1875 1875-1・1875-2: 雛形も昇格も無い届ける経路（merge・手で届ける・検証の環境だけ）は --record-pr unknown で、
-    リリース後テストを置かず merge の次が振り返り、その次が close。"""
+def test_close_without_a_plan_record_resolves_it_when_run(tmp_path, rows):
+    """#2230 の受け入れ条件 1・3・5: 雛形も昇格も無い届ける経路（merge・手で届ける・検証の環境だけ）は --record-pr unknown を
+    組まず、{queue_record} を close とリリース後テストの両方に持つ。"""
     steps = close_steps(tmp_path, rows)
-    close = next(s for s in steps if s["id"] == "close")
-    assert "--record-pr unknown " in close["cmd"] and "release-verify" not in [s["id"] for s in steps]
-    assert [s for s in steps if s.get("next") == "close"]
+    by = {s["id"]: s for s in steps}
+    assert "--record-pr {queue_record} " in by["close"]["cmd"] and "unknown" not in by["close"]["cmd"]
+    assert "#{queue_record}" in by["release-verify"]["prompt"]
 
 
 def test_close_of_no_delivery_keeps_record_pr_zero(tmp_path):
@@ -343,9 +343,9 @@ def chain(steps) -> list[str]:
     [
         ([STG, PRD], ["merge", "release-verify", "retro", "close", "refine"]),
         ([], ["merge", "retro", "close", "refine"]),
-        ([STG], ["merge", "retro", "close", "refine"]),
+        ([STG], ["merge", "release-verify", "retro", "close", "refine"]),
     ],
-    ids=["record", "no-delivery", "unknown"],
+    ids=["record", "no-delivery", "queue-record"],
 )
 def test_close_comes_after_the_retro_and_before_the_refine(tmp_path, rows, want):
     """#2228 の受け入れ条件 5・6（I6）: next のつながりで リリース後テスト → 振り返り → 課題を閉じる → 棚卸し。

@@ -247,7 +247,8 @@ python3 "$SCRIPTS/sprint-close.py" --record-pr <記録のPR番号> [--final-stag
 確かめていないことが終わったように見える。
 
 `--record-pr 0`（本番の記録なし）は条件 1・2 を見ない。`--record-pr unknown`（記録の置き場が分からない）は
-本文を読まずにすべて `kept_open` で返す。
+本文を読まずにすべて `kept_open` で返す。まとめのプランは `unknown` を組まず、記録の PR を流す時点に `{queue_record}` で探す
+（`development-workflow` の `references/pace.md` の「スプリントの終わり」）。`unknown` を渡すのは手で打つ入口と、前の版で組んだまとめのプランだけである。
 
 ### 閉じる予定の参照
 

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
@@ -26,7 +25,7 @@ from supervise_lib.plan import expand_parts, fail_kind_matches, leftover_placeho
 from supervise_lib.pr import PrStep
 from supervise_lib.slow import SLOW_EXIT, SlowAction, SlowWatch
 from supervise_lib.state import RunState
-from supervise_lib.steps import JudgeStep, RunStep, StepContext, is_gate, last_json
+from supervise_lib.steps import COND_RUN, COND_SKIP, JudgeStep, RunStep, StepContext, is_gate, last_json, run_condition
 from supervise_lib.worker_steps import DriveStep, WorkStep
 
 
@@ -412,34 +411,13 @@ class Engine:
 
     def check_condition(self, cond: dict) -> tuple[str, str] | None:
         """計画の実行の条件を、作業ツリーを作る前に打つ。流すなら None、流さないなら (結果, 理由)。"""
-        cmd = str(cond.get("cmd") or "").replace("{state_dir}", str(self.state.dir))
-        wt = Path(self.plan["作業場所"])
-        cwd = self.plan.get("リポジトリ") or (
-            str(wt) if wt.is_dir() else str(wt).split("/.worktrees/")[0] if "/.worktrees/" in str(wt) else None
-        )
-        if cwd and not Path(cwd).is_dir():
-            cwd = None
-        started = time.time()
-        try:
-            p = subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True, text=True, timeout=cond.get("timeout", 900))
-            code, text = p.returncode, p.stdout + p.stderr
-        except subprocess.TimeoutExpired as e:
-            code, text = 124, f"打ち切り（{e.timeout} 秒）"
-        out = last_json(text) or {}
-        summary = str(out.get("summary") or text.strip()[-200:] or f"exit={code}")
+        verdict, code, summary, seconds = run_condition(cond, self.plan, self.state.dir)
         self.state.progress_write(
-            {
-                "kind": "step",
-                "step": "実行の条件",
-                "type": "run",
-                "exit": code,
-                "seconds": round(time.time() - started, 1),
-                "summary": summary[:300],
-            }
+            {"kind": "step", "step": "実行の条件", "type": "run", "exit": code, "seconds": seconds, "summary": summary[:300]}
         )
-        if code == 0:
+        if verdict == COND_RUN:
             return None
-        if code == cond.get("skip_code", 3):
+        if verdict == COND_SKIP:
             return "完了", f"実行の条件に当たらない（{summary}）"
         self.state.attention("止まった", f"実行の条件を判定できない（exit={code}）: {summary}")
         return "止まった", f"実行の条件を判定できない（exit={code}: {summary}）"

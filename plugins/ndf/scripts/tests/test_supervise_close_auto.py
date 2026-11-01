@@ -16,12 +16,15 @@ def close(tmp_path, *extra):
 
 
 def test_auto_builds_only_the_wrapup_stage_with_the_record_marker(tmp_path):
+    """#2230 の決定 5: 開発ループのまとめは雛形の経路でも {queue_record} を組み、リリース後テストも同じ参照を受ける。"""
     manifest = close(tmp_path, "--pace", "auto")
     assert [w["name"] for w in manifest["ステージ"]] == ["まとめ"]
     assert manifest["進め方"] == "auto"
     plan = load(manifest["ステージ"][0]["plans"][0])
     assert plan["進め方"] == "auto"
-    assert "--record-pr {queue_pr:release-prod}" in steps_of(plan)["close"]["cmd"]
+    steps = steps_of(plan)
+    assert "--record-pr {queue_record} " in steps["close"]["cmd"]
+    assert "#{queue_record}" in steps["release-verify"]["prompt"]
 
 
 def test_carry_reaches_the_refinement_prompt_and_record_pr_overrides(tmp_path):
