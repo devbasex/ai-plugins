@@ -126,3 +126,234 @@ def write_text_atomic(path: Path, text: str) -> None:
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     tmp.write_text(text)
     os.replace(tmp, path)
+
+
+# ---- 版の差し込み（#2164） ----
+
+RELEASE_VERSION, RELEASE_BASE = "{release_version}", "{release_base}"  # 版の差し込みの語（雛形の release_templates も読む）
+VERSION_RECORD = "version.json"  # 版の記録
+VERSION_PLAN = "version-plan.json"  # 差し込み前のプランの写し
+SUPERSEDED = "superseded"  # 決め直した前の版のステップの記録の退避先
+KEEP_ON_REDECIDE = {VERSION_RECORD, VERSION_PLAN, SUPERSEDED, "plan.json"}  # 決め直しで退避しないもの（plan.json は状態の実体の写し）
+GATE_2_STEPS = ("approve", "mvv")  # 本番のプランの先頭で承認ゲート 2 を通すステップ
+
+
+def _now() -> str:
+    import datetime
+
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+
+
+def _read_json(path: Path) -> dict | None:
+    try:
+        d = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    return d if isinstance(d, dict) else None
+
+
+def _write_json(path: Path, obj: dict) -> None:
+    write_text_atomic(path, json.dumps(obj, ensure_ascii=False, indent=2) + "\n")
+
+
+def _filled(text: str, version: str) -> str:
+    import versions
+
+    return text.replace(RELEASE_VERSION, version).replace(RELEASE_BASE, versions.release_base(version))
+
+
+def _stopped(cause: str, version: str | None = None, existing: str | None = None, next_free: str | None = None, unreadable=None):
+    """埋められないときの (理由, キューの項目の version)。"""
+    info = {"cause": cause, "version": version, "existing": existing, "next_free": next_free, "unreadable": list(unreadable or [])}
+    why = {
+        "taken": f"版 {version} はすでに出ている（{existing}。次に空いている版は {next_free}）。別の版で黙って進めない",
+        "unreadable": f"版を決める値を読めない: {'・'.join(info['unreadable'])}。推定で決めない",
+        "no_series": "本番が版を読む開発版のプランの版の記録が無い",
+        "series_changed": f"承認ゲート 2 の後に、本番が読む開発版の記録の版が変わった（{existing} → {version}）",
+    }[cause]
+    return f"版の差し込みを埋められない: {why}", info
+
+
+class _Fill:
+    """1 本のプランの版の差し込み。状態ディレクトリの版の記録と差し込み前の写しを読み書きする。"""
+
+    def __init__(self, plan: str, text: str, info: dict, items: list[dict]):
+        import delivery
+
+        self.path, self.text, self.info, self.items = Path(plan), text, info, items
+        self.field = info["版"]
+        self.sd = state_dir_of(str(self.path.absolute()))
+        self.sd.mkdir(parents=True, exist_ok=True)
+        self.repo = info.get("リポジトリ") or "."
+        self.base = str(info.get("起点") or "").removeprefix("origin/")
+        self.production = delivery.load_delivery(self.repo).production
+        self.plugin = self.field.get("プラグイン")
+        self.level = self.field.get("上げ幅") or "patch"
+        self.explicit = self.field.get("明示") or None
+
+    @property
+    def record_path(self) -> Path:
+        return self.sd / VERSION_RECORD
+
+    def observe(self):
+        import release_version
+
+        return release_version.observe(self.repo, self.plugin, self.base, self.production)
+
+    def branch_of(self, version: str) -> str:
+        b = self.info.get("branch")
+        return b if b and RELEASE_VERSION not in b else f"release/v{version}"
+
+    def log(self, text: str, **extra) -> None:
+        line = json.dumps({"kind": "version", "at": _now(), "text": text, **extra}, ensure_ascii=False)
+        with (self.sd / "progress.jsonl").open("a") as f:
+            f.write(line + "\n")
+
+    def write_record(self, version: str, how: str, observed: dict, series_from: str | None = None) -> dict:
+        import versions
+
+        if not (self.sd / VERSION_PLAN).exists():
+            write_text_atomic(self.sd / VERSION_PLAN, self.text)
+        rec = {
+            "version": version,
+            "base": versions.release_base(version),
+            "how": how,
+            "level": self.level,
+            "observed": observed,
+            "series_from": series_from,
+            "at": _now(),
+            "history": [],
+        }
+        _write_json(self.record_path, rec)
+        return rec
+
+    def ensure_filled(self, rec: dict) -> None:
+        """プランが記録の版で埋まっていなければ、差し込み前の写しを記録の版で埋めて書き直す（決め直しの途中で落ちた後も同じ）。"""
+        if RELEASE_VERSION not in self.text and RELEASE_BASE not in self.text and rec["version"] in self.text:
+            return
+        src = self.sd / VERSION_PLAN
+        text = src.read_text() if src.is_file() else self.text
+        write_text_atomic(self.path, _filled(text, rec["version"]))
+        self.log(f"版の差し込みを {rec['version']} で埋めた（{self.record_path}）", version=rec["version"], record=str(self.record_path))
+
+    def redecide(self, rec: dict, new: str, reason: str, existing: str | None, observed: dict) -> dict:
+        """記録の版を決め直す。ステップの記録を退避 → 記録を書き換え → 写しから埋め直す の順（落ちても流し直しで同じ所へ戻る）。"""
+        import versions
+
+        old = rec["version"]
+        dst = self.sd / SUPERSEDED / f"v{old}"
+        dst.mkdir(parents=True, exist_ok=True)
+        for f in sorted(self.sd.iterdir()):
+            if f.name in KEEP_ON_REDECIDE:
+                continue
+            target = dst / f.name
+            n = 1
+            while target.exists():
+                target, n = dst / f"{f.name}.{n}", n + 1
+            os.replace(f, target)
+        left = {"作業場所": self.info.get("作業場所"), "branch": self.info.get("branch"), "superseded": str(dst)}
+        hist = {"from": old, "to": new, "reason": reason, "existing": existing, "observed": observed, "left": left, "at": _now()}
+        rec = {**rec, "version": new, "base": versions.release_base(new), "observed": observed, "at": _now()}
+        rec["history"] = [*(rec.get("history") or []), hist]
+        _write_json(self.record_path, rec)
+        self.log(
+            f"版を {old} から {new} へ決め直した（{reason}）。前の作業場所 {left['作業場所']} と branch {left['branch']} は残した",
+            version=new,
+            record=str(self.record_path),
+        )
+        return rec
+
+    def series_record(self) -> tuple[dict | None, str | None]:
+        """本番が版を読む開発版のプラン（`系列` の名前）の版の記録と、そのパス。最も新しく書かれたもの。"""
+        found = []
+        for i in results_named(self.field.get("系列") or "", self.items, str(self.path)):
+            if not i.get("plan"):
+                continue
+            f = state_dir_of(str(Path(i["plan"]).absolute())) / VERSION_RECORD
+            rec = _read_json(f)
+            if rec and rec.get("base"):
+                found.append((f.stat().st_mtime, rec, str(f)))
+        if not found:
+            return None, None
+        _, rec, f = max(found, key=lambda t: t[0])
+        return rec, f
+
+    def approved(self) -> bool:
+        """本番のプランの状態に承認ゲート 2 の通過（approve か mvv のステップが 0 で終えた記録）があるか。"""
+        state = _read_json(self.sd / "state.json") or {}
+        return any(e.get("id") in GATE_2_STEPS and e.get("exit") == 0 for e in state.get("log") or [] if isinstance(e, dict))
+
+
+def _fill_dev(f: _Fill, rec: dict | None):
+    import release_version
+
+    obs = f.observe()
+    if obs.unreadable:
+        return _stopped("unreadable", (rec or {}).get("version") or f.explicit, unreadable=obs.unreadable)
+    if rec is None:
+        d = release_version.taken(obs, f.explicit, "explicit", f.level) if f.explicit else release_version.decide_dev(obs, f.level)
+        if d.is_taken:
+            return _stopped("taken", d.version, d.existing, d.next_free)
+        rec = f.write_record(d.version, d.how, obs.as_dict())
+    else:
+        d = release_version.taken(obs, rec["version"], rec.get("how") or "decided", f.level)
+        if d.is_taken:
+            own = release_version.own_released(f.repo, f.branch_of(rec["version"]), f.base)
+            if own is None:
+                return _stopped("unreadable", rec["version"], unreadable=["pr"])
+            if not own:
+                if rec.get("how") == "explicit":
+                    return _stopped("taken", d.version, d.existing, d.next_free)
+                rec = f.redecide(rec, release_version.decide_dev(obs, f.level).version, "taken", d.existing, obs.as_dict())
+    f.ensure_filled(rec)
+    return None, None
+
+
+def _fill_prod(f: _Fill, rec: dict | None):
+    import release_version
+
+    if rec is not None and rec.get("how") != "series":
+        f.ensure_filled(rec)
+        return None, None
+    series, series_from = (None, None) if f.explicit else f.series_record()
+    if not f.explicit and series is None:
+        return _stopped("no_series")
+    want = f.explicit or series["base"]
+    if rec is not None and rec["version"] == want:
+        f.ensure_filled(rec)
+        return None, None
+    if rec is not None and f.approved():
+        return _stopped("series_changed", want, rec["version"])
+    obs = f.observe()
+    if obs.unreadable:
+        return _stopped("unreadable", want, unreadable=obs.unreadable)
+    d = release_version.taken(obs, want, "explicit" if f.explicit else "series")
+    if d.is_taken:
+        return _stopped("taken", d.version, d.existing, d.next_free)
+    if rec is None:
+        rec = f.write_record(want, d.how, obs.as_dict(), series_from)
+    else:
+        rec = f.redecide(rec, want, "series_changed", rec["version"], obs.as_dict())
+    f.ensure_filled(rec)
+    return None, None
+
+
+def fill_release_version(plan: str, items: list[dict]) -> tuple[str | None, dict | None]:
+    """配布のプランの版の差し込み（`{release_version}`・`{release_base}`）を、版の記録の値で埋める（#2164）。
+    (埋められない理由, キューの項目に載せる `version`) を返す。どちらも None なら流してよい。「版」の欄を持たないプランは触らない。
+
+    開発版は、記録が無ければ origin から次に空いている版を決めて（明示の版はまだ出ていないかを確かめて）記録を書く。記録が
+    あれば記録の版を使い、それがもう出ていて自分の配布のマージ済みの PR が無ければ決め直す（明示の版は止める）。本番は
+    明示の版か `系列` の開発版の記録の base で出し、タグがあれば止める。承認ゲート 2 の後に開発版の記録の版が変わったら止める。"""
+    try:
+        text = Path(plan).read_text()
+        info = json.loads(text)
+    except (OSError, ValueError) as e:
+        return f"計画を読めない: {e}", None
+    if not isinstance(info, dict) or not isinstance(info.get("版"), dict):
+        return None, None
+    f = _Fill(plan, text, info, items)
+    if not f.plugin or not f.base:
+        return "版の差し込みを埋められない: プランの「版」の欄にプラグインが無いか、起点が無い", None
+    rec = _read_json(f.record_path)
+    return (_fill_prod if f.field.get("チャネル") == "prod" else _fill_dev)(f, rec)
