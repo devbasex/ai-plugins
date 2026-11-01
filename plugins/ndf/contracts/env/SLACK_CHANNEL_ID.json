@@ -1,0 +1,5 @@
+{
+  "name": "SLACK_CHANNEL_ID",
+  "set_by": "runtime",
+  "summary": "SLACK_CHANNEL_ID。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/hook_lib/wait_notify.py:180）が決める"
+}

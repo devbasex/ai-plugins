@@ -1,0 +1,5 @@
+{
+  "name": "CRITIQUE_RETRY_AGENTS",
+  "set_by": "runtime",
+  "summary": "CRITIQUE_RETRY_AGENTS。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/skills/cross-review/scripts/critique-round.sh:61）が決める"
+}

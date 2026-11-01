@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/skills/google-workspace/scripts/slides-thumbnails.py",
+  "summary": "slides-thumbnails.py: Google Slides の全ページのサムネイルを PNG で保存する（#2065）。",
+  "args": {
+    "options": [
+      "--size"
+    ],
+    "positionals": [
+      "presentation_id",
+      "out_dir"
+    ]
+  },
+  "env": [
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_PRESENTATION_DIR"
+  ],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/skills/document-systems/references/system-gdrive.md",
+    "plugins/ndf/skills/google-workspace/SKILL.md"
+  ]
+}

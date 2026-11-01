@@ -1,0 +1,5 @@
+{
+  "name": "NDF_UPKEEP_NO_SLEEP",
+  "set_by": "user",
+  "summary": "NDF_UPKEEP_NO_SLEEP。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/skills/backlog-refinement/scripts/upkeep_gh.py:56）が決める"
+}

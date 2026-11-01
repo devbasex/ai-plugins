@@ -4,6 +4,10 @@ name: Script structure
 # 本体の同じ関数・同じ名前で本体の違う関数を数え、scripts/script-structure-allow/ の例外のほかに
 # 当たれば落とす。例外リストの使われない項目も落とす（直した Pull Request が同じ差分でその項目のファイルを消す）。
 #
+# 同じワークフローの ndf-contracts-check は、エントリポイントの契約の一覧（plugins/ndf/contracts/）とコードを
+# 突き合わせ、scripts/contract-allow/ の例外のほかに当たれば落とす。例外リストはベースブランチとの
+# merge-base より増えると落とすため、履歴をすべて取る（fetch-depth: 0）。
+#
 # Pull Request では絞り込まずに常に起動する（pytest.yml と同じ理由）。数秒で終わる
 on:
   pull_request:
@@ -16,6 +20,9 @@ on:
       - "plugins/ndf/**"
       - "scripts/check-script-structure.py"
       - "scripts/script-structure-allow/**"
+      - "scripts/check-ndf-contracts.py"
+      - "scripts/contracts_lib/**"
+      - "scripts/contract-allow/**"
 
 permissions:
   contents: read
@@ -30,3 +37,15 @@ jobs:
           python-version: "3.10"
       - name: Check the script structure
         run: python3 scripts/check-script-structure.py
+
+  ndf-contracts-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.10"
+      - name: Check the NDF entrypoint contracts
+        run: python3 scripts/check-ndf-contracts.py

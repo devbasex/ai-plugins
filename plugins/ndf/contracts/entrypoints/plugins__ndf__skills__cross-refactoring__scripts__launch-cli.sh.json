@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/skills/cross-refactoring/scripts/launch-cli.sh",
+  "summary": "cross-refactoring: 手順ごとのプロンプトを組み立てて CLI を起動する（#933）。",
+  "args": {
+    "unparsed": "位置引数（$1・\"$@\"）を手で読む（シェルの位置引数は静的に拾えない）"
+  },
+  "env": [
+    "CROSS_REFACTORING_TMP_DIR"
+  ],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "text",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "1": "違反があった・手順が失敗した（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/README.md",
+    "plugins/ndf/scripts/lib/claude_settings.py",
+    "plugins/ndf/scripts/lib/launch-cli.sh",
+    "plugins/ndf/scripts/lib/limits.py",
+    "plugins/ndf/scripts/lib/models.py"
+  ]
+}

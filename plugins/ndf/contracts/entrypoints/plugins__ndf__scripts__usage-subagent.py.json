@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/usage-subagent.py",
+  "summary": "SubagentStop の hook: 終わったサブエージェント 1 回を Claude の使用量の帳簿へ 1 行書く（#1953 の決定 4）。",
+  "args": {
+    "options": [],
+    "positionals": []
+  },
+  "env": [
+    "CODEX_HOME"
+  ],
+  "settings": [],
+  "stdin": "hook-json",
+  "stdout": "text",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）"
+  },
+  "callers": [
+    "plugins/ndf/hooks/claude.json",
+    "plugins/ndf/scripts/lib/usage_capture.py"
+  ]
+}

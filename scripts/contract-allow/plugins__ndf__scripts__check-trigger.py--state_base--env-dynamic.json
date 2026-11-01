@@ -1,0 +1,6 @@
+{
+  "path": "plugins/ndf/scripts/check-trigger.py",
+  "name": "state_base",
+  "kind": "env-dynamic",
+  "reason": "環境変数を名前を組み立てて読むか走査する（plugins/ndf/scripts/check-trigger.py の state_base）。静的に拾えない"
+}

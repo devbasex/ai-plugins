@@ -1,0 +1,183 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/skills/cross-review/scripts/state.py",
+  "summary": "cross-review state.json 操作 CLI。",
+  "args": {
+    "options": [],
+    "positionals": [],
+    "subcommands": {
+      "check-oscillation": {
+        "options": [],
+        "positionals": [
+          "pr"
+        ]
+      },
+      "collect-critiques": {
+        "options": [],
+        "positionals": [
+          "pr"
+        ]
+      },
+      "flush": {
+        "options": [],
+        "positionals": [
+          "pr"
+        ]
+      },
+      "init": {
+        "options": [
+          "--exclude",
+          "--extra-instructions-file",
+          "--focus",
+          "--host",
+          "--include",
+          "--max-rounds",
+          "--only",
+          "--require-all",
+          "--rotate-after",
+          "--run",
+          "--verify-command",
+          "--verify-exit-code",
+          "--worktree"
+        ],
+        "positionals": [
+          "pr"
+        ]
+      },
+      "judge": {
+        "options": [],
+        "positionals": [
+          "pr"
+        ]
+      },
+      "merge-fix": {
+        "options": [
+          "--file"
+        ],
+        "positionals": [
+          "pr"
+        ]
+      },
+      "read-result": {
+        "options": [
+          "--file"
+        ],
+        "positionals": [
+          "pr",
+          "agent"
+        ]
+      },
+      "record-fix": {
+        "options": [
+          "--commit",
+          "--resolved-thread"
+        ],
+        "positionals": [
+          "pr"
+        ]
+      },
+      "report": {
+        "options": [],
+        "positionals": [
+          "pr"
+        ]
+      },
+      "set-current-pr": {
+        "options": [
+          "--head-branch"
+        ],
+        "positionals": [
+          "pr",
+          "new_pr"
+        ]
+      },
+      "should-rotate": {
+        "options": [],
+        "positionals": [
+          "pr"
+        ]
+      },
+      "start-round": {
+        "options": [],
+        "positionals": [
+          "pr"
+        ]
+      },
+      "unresolved-threads": {
+        "options": [],
+        "positionals": [
+          "pr"
+        ]
+      },
+      "verify-findings": {
+        "options": [],
+        "positionals": [
+          "pr"
+        ]
+      },
+      "verify-sweep": {
+        "options": [
+          "--file"
+        ],
+        "positionals": [
+          "pr"
+        ]
+      }
+    }
+  },
+  "env": [
+    "CLAUDE_CONFIG_DIR",
+    "CODEX_HOME",
+    "CROSS_REVIEW_TMP_DIR",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "MONITOR_NO_EARLY_ERROR",
+    "NDF_ACCOUNTS_DIR",
+    "NDF_ACCOUNT_TOKEN_URL",
+    "NDF_ACCOUNT_USAGE_URL",
+    "NDF_CLAUDE_ACCOUNT",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_LOCK_DIR",
+    "NDF_MVV_STATE_DIR",
+    "NDF_PRESENTATION_DIR",
+    "NDF_SHARED_CONFIG_DIR",
+    "NDF_SKIP_AUTH_CHECK",
+    "NDF_SUPERVISE_CLAUDE",
+    "NDF_SUPERVISE_CLAUDE_FALLBACK",
+    "NDF_SUPERVISE_LIMIT_SLEEP",
+    "NDF_SUPERVISE_MODEL",
+    "NDF_WORKTREE_BASE"
+  ],
+  "settings": [
+    {
+      "file": "project.json",
+      "keys": [
+        "ndf_policies"
+      ]
+    },
+    {
+      "file": "worktree.json",
+      "keys": [
+        "base_branch",
+        "tool_paths",
+        "version"
+      ]
+    }
+  ],
+  "stdin": "none",
+  "stdout": "kv",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/conftest.py",
+    "plugins/ndf/scripts/gate-rejections.py",
+    "plugins/ndf/scripts/hook_lib/worktree.py",
+    "plugins/ndf/scripts/lib/README.md",
+    "plugins/ndf/scripts/lib/clock.py"
+  ]
+}

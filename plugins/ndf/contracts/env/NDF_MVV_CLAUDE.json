@@ -1,0 +1,5 @@
+{
+  "name": "NDF_MVV_CLAUDE",
+  "set_by": "user",
+  "summary": "NDF_MVV_CLAUDE。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/mvv-gate.py:197）が決める"
+}

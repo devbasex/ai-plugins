@@ -1,0 +1,5 @@
+{
+  "name": "WT_LINES",
+  "set_by": "runtime",
+  "summary": "WT_LINES。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/worktree-deps.sh:125）が決める"
+}

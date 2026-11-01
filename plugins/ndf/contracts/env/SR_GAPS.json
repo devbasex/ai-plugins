@@ -1,0 +1,5 @@
+{
+  "name": "SR_GAPS",
+  "set_by": "runtime",
+  "summary": "SR_GAPS。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/progress-record.sh:169）が決める"
+}

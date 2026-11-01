@@ -75,9 +75,18 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+from allowlist import AllowError, allow_file_name, under  # noqa: E402
+from allowlist import rel_target as _rel  # noqa: E402
+from allowlist import load_allow as _load_rows  # noqa: E402
+from py_imports import IMPORT_ROOTS  # noqa: E402
+from py_imports import imported as _imported  # noqa: E402
+from py_imports import module_file as _module_file  # noqa: E402
+
 REPO = Path(__file__).resolve().parents[1]
 SCAN = "plugins/ndf"
 SELF = "scripts/check-script-structure.py"
+SHARED_LIB = "scripts/lib"
 MAX_LINES = 500
 KINDS = ("lines", "same-body", "same-name", "wrapped", "hook-deps", "durable-boundary", "require-groups")
 LIB = "plugins/ndf/scripts/"
@@ -95,7 +104,6 @@ WRAPPED = {
 IMPORT_PARTS = ("fcntl", "pty", "termios", "urllib.request", "dbos")
 # I13: hook のエントリポイント（決定 20）。ここから import でたどれるモジュールは deps を import しない
 HOOK_ENTRIES = (LIB + "hook.py",)
-IMPORT_ROOTS = (LIB, LIB + "lib/")
 RE_FUNCS = {"compile", "match", "search", "fullmatch", "finditer", "findall", "sub", "subn", "split"}
 FENCE_HINT = re.compile(r"```|~~~|`\{3|~\{3|\[`~\]|\[~`\]")
 RULE_NAMES = {"main", "build_parser", "_build_parser"}
@@ -103,8 +111,7 @@ SHELL_RULE_NAMES = {"usage"}
 SH_FUNC_RE = re.compile(r"^(\s*)(?:function\s+([A-Za-z_][\w:.-]*)\s*(?:\(\))?|([A-Za-z_][\w:.-]*)\s*\(\))\s*(\{.*)?$")
 
 
-class UsageError(Exception):
-    pass
+UsageError = AllowError
 
 
 def is_test(rel: Path) -> bool:
@@ -252,37 +259,14 @@ def sh_functions(text: str) -> list[tuple[str, str]]:
     return out
 
 
-def allow_file_name(row: dict) -> str:
-    """例外リストの 1 項目のファイル名。path の `/` を `__` に、各部を `--` でつなぐ（lines は name を省く）。"""
-    parts = [row["path"].replace("/", "__"), row["name"], row["kind"]]
-    return "--".join(p for p in parts if p) + ".json"
+def _check_lines(f: Path, r: dict) -> None:
+    if "lines" in r and (isinstance(r["lines"], bool) or not isinstance(r["lines"], int) or r["lines"] <= MAX_LINES):
+        raise UsageError(f"例外リストの {f.name} の lines は {MAX_LINES} を超える整数: {r['lines']}")
 
 
 def load_allow(path: Path) -> list[dict]:
-    """置き場（ディレクトリ）の `*.json` を 1 ファイル 1 項目として読む。"""
-    if not path.exists():
-        return []
-    if not path.is_dir():
-        raise UsageError(f"例外リストの置き場はディレクトリにする: {path}")
-    rows = []
-    for f in sorted(path.glob("*.json")):
-        try:
-            r = json.loads(f.read_text())
-        except ValueError as e:
-            raise UsageError(f"例外リストを読めない: {f}: {e}")
-        keys = {"path", "name", "kind", "reason"} | ({"lines"} if isinstance(r, dict) and r.get("kind") == "lines" else set())
-        if not isinstance(r, dict) or set(r) != keys:
-            raise UsageError(f"例外リストの {f.name} は {'・'.join(sorted(keys))} を持つ: {r}")
-        if "lines" in r and (isinstance(r["lines"], bool) or not isinstance(r["lines"], int) or r["lines"] <= MAX_LINES):
-            raise UsageError(f"例外リストの {f.name} の lines は {MAX_LINES} を超える整数: {r['lines']}")
-        if r["kind"] not in KINDS:
-            raise UsageError(f"例外リストの {f.name} の kind は {'/'.join(KINDS)} のどれか: {r['kind']}")
-        if not isinstance(r["reason"], str) or not r["reason"].strip():
-            raise UsageError(f"例外リストの {f.name} に理由が無い: {r['path']}:{r['name']}")
-        if not all(isinstance(r[k], str) for k in ("path", "name")) or f.name != allow_file_name(r):
-            raise UsageError(f"例外リストの {f.name} は {allow_file_name(r)} という名前にする")
-        rows.append(r)
-    return rows
+    """置き場（ディレクトリ）の `*.json` を 1 ファイル 1 項目として読む（`lines` は載せた時点の行数を持つ）。"""
+    return _load_rows(path, KINDS, lambda r: {"lines"} if r.get("kind") == "lines" else set(), _check_lines)
 
 
 def _scan_file(root: Path, rel: str, defs: dict[str, list[tuple[str, str, str]]], violations: list[dict]) -> bool:
@@ -378,35 +362,6 @@ def _calls_require(tree: ast.AST) -> bool:
         ):
             return True
     return False
-
-
-def _imported(rel: str, text: str) -> set[str]:
-    """モジュールが import する名前（関数の中の import も含む。`from . import x` は `<パッケージ>.x`）。"""
-    try:
-        tree = ast.parse(text)
-    except SyntaxError:
-        return set()
-    pkg = Path(rel).parent.name if Path(rel).parent.as_posix() + "/" not in IMPORT_ROOTS else ""
-    names: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            names |= {a.name for a in node.names}
-        elif isinstance(node, ast.ImportFrom):
-            base = node.module or ""
-            if node.level and pkg:
-                base = f"{pkg}.{base}" if base else pkg
-            names.add(base) if base else None
-            names |= {f"{base}.{a.name}" if base else a.name for a in node.names}
-    return names
-
-
-def _module_file(root: Path, name: str) -> str | None:
-    for base in IMPORT_ROOTS:
-        stem = base + name.replace(".", "/")
-        for cand in (stem + ".py", stem + "/__init__.py"):
-            if (root / cand).is_file():
-                return cand
-    return None
 
 
 def hook_deps(root: Path) -> list[dict]:
@@ -842,38 +797,22 @@ def item(kind: str, path: str, function: str, result: str, detail: str) -> dict:
     }
 
 
-def _rel(root: Path, target: str) -> str:
-    """指定のパスを根からの相対パス（`/` 区切り・末尾の `/` なし）にする。根の外の絶対パスはそのまま返す。"""
-    p = Path(target)
-    if p.is_absolute():
-        try:
-            p = p.resolve().relative_to(root)
-        except ValueError:
-            return p.as_posix()
-    parts = [x for x in p.as_posix().split("/") if x not in ("", ".")]
-    return "/".join(parts) or "."
-
-
-def _under(path: str, targets: set[str]) -> bool:
-    """`path` が指定のどれかと同じか、指定のディレクトリの下にあるか。"""
-    return any(t == "." or path == t or path.startswith(t + "/") for t in targets)
-
-
 class Scope:
     """位置引数のファイルの指定。違反と例外の行が指定に関わるかを決める（#1668）。"""
 
     def __init__(self, root: Path, allow_dir: Path, targets: list[str]):
         self.targets = {_rel(root, t) for t in targets}
         allow_rel = _rel(root, str(allow_dir.resolve()))
-        self.everything = _under(SELF, self.targets) or _under(allow_rel, self.targets)
+        # 例外リストの置き場と、チェッカ自身とその部品（scripts/lib/）の変更は木全体の結果を変える
+        self.everything = under(SELF, self.targets) or under(allow_rel, self.targets) or any(under(t, (SHARED_LIB,)) for t in self.targets)
         self.allow_files = {Path(t).name for t in self.targets if t.startswith(allow_rel + "/")}
 
     def row(self, r: dict) -> bool:
         """例外の行が指定に関わるか（行の `path` か、行のファイルが指定にある）。"""
-        return self.everything or _under(r["path"], self.targets) or allow_file_name(r) in self.allow_files
+        return self.everything or under(r["path"], self.targets) or allow_file_name(r) in self.allow_files
 
     def violation(self, v: dict, row: dict | None) -> bool:
-        if self.everything or _under(v["path"], self.targets) or any(_under(o, self.targets) for o in v.get("others", ())):
+        if self.everything or under(v["path"], self.targets) or any(under(o, self.targets) for o in v.get("others", ())):
             return True
         return row is not None and allow_file_name(row) in self.allow_files
 

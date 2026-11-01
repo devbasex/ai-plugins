@@ -1,0 +1,6 @@
+{
+  "path": "plugins/ndf/scripts/supervise_lib/claude.py",
+  "name": "__init__",
+  "kind": "env-dynamic",
+  "reason": "環境変数を名前を組み立てて読むか走査する（plugins/ndf/scripts/supervise_lib/claude.py の __init__）。静的に拾えない"
+}

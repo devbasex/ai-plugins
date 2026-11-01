@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/pr-steps.py",
+  "summary": "pr-steps.py: pr の決まった手順（#858）。LLM に残るのはコミットメッセージ・PR 本文・同意の判断だけ。",
+  "args": {
+    "unparsed": "副命令を定数表・補助関数・繰り返しで作り、どの副命令の引数か静的に決められない"
+  },
+  "env": [
+    "CROSS_REVIEW_TMP_DIR",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_LOCK_DIR",
+    "NDF_PRESENTATION_DIR"
+  ],
+  "settings": [
+    {
+      "file": "worktree.json",
+      "keys": [
+        "base_branch",
+        "tool_paths",
+        "version"
+      ]
+    }
+  ],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/README.md",
+    "plugins/ndf/scripts/lib/closing.py",
+    "plugins/ndf/scripts/lib/design_diff.py",
+    "plugins/ndf/scripts/lib/repo.py",
+    "plugins/ndf/scripts/pr_steps_lib/__init__.py"
+  ]
+}

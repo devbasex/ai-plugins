@@ -1,0 +1,5 @@
+{
+  "name": "NDF_SUPERVISE_CLAUDE_FALLBACK",
+  "set_by": "user",
+  "summary": "NDF_SUPERVISE_CLAUDE_FALLBACK。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/lib/claude_accounts.py:658）が決める"
+}

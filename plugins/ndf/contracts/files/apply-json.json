@@ -1,0 +1,7 @@
+{
+  "name": "apply-json",
+  "pattern": "apply.json",
+  "kind": "result",
+  "place": "tmp",
+  "skill_readers": []
+}

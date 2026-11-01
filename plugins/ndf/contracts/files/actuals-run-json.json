@@ -1,0 +1,7 @@
+{
+  "name": "actuals-run-json",
+  "pattern": "actuals-run.json",
+  "kind": "result",
+  "place": "state-dir",
+  "skill_readers": []
+}

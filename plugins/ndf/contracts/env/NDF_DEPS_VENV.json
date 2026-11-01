@@ -1,0 +1,5 @@
+{
+  "name": "NDF_DEPS_VENV",
+  "set_by": "user",
+  "summary": "NDF_DEPS_VENV。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/lib/deps.py:128）が決める"
+}

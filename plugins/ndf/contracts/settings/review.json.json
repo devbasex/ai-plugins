@@ -1,0 +1,17 @@
+{
+  "file": "review.json",
+  "summary": "レビューの観点",
+  "place": "worktree",
+  "scope": "team",
+  "readers": [
+    "plugins/ndf/scripts/lib/review_criteria_decl.py:load"
+  ],
+  "keys": {
+    "version": {
+      "summary": "version（このリポジトリの宣言にある最上位のキー）"
+    },
+    "focus": {
+      "summary": "focus（このリポジトリの宣言にある最上位のキー）"
+    }
+  }
+}

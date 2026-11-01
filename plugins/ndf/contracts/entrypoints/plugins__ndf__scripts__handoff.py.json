@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/handoff.py",
+  "summary": "引継ぎ文書（`.ndf/handoff/<名>.md`）のパスの解決・作る・探す・置き換え・検査・消す（#1560）。",
+  "args": {
+    "options": [],
+    "positionals": [],
+    "subcommands": {
+      "check": {
+        "options": [
+          "--max-lines",
+          "--trim"
+        ],
+        "positionals": [
+          "name"
+        ]
+      },
+      "find": {
+        "options": [
+          "--text"
+        ],
+        "positionals": []
+      },
+      "init": {
+        "options": [
+          "--title"
+        ],
+        "positionals": [
+          "name"
+        ]
+      },
+      "next": {
+        "options": [],
+        "positionals": [
+          "name"
+        ]
+      },
+      "path": {
+        "options": [
+          "--exists"
+        ],
+        "positionals": [
+          "target"
+        ]
+      },
+      "remove": {
+        "options": [],
+        "positionals": [
+          "name"
+        ]
+      }
+    }
+  },
+  "env": [
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_PRESENTATION_DIR"
+  ],
+  "settings": [
+    {
+      "file": "worktree.json",
+      "keys": [
+        "base_branch"
+      ]
+    }
+  ],
+  "stdin": "text",
+  "stdout": "step-result",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/README.md",
+    "plugins/ndf/scripts/lib/handoff_doc.py",
+    "plugins/ndf/skills/development-workflow/references/conductor-entrypoints.md",
+    "plugins/ndf/skills/development-workflow/references/glossary.md",
+    "plugins/ndf/skills/development-workflow/references/handoff.md"
+  ]
+}

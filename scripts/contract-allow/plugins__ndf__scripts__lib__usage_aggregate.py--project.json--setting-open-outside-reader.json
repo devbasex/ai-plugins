@@ -1,0 +1,6 @@
+{
+  "path": "plugins/ndf/scripts/lib/usage_aggregate.py",
+  "name": "project.json",
+  "kind": "setting-open-outside-reader",
+  "reason": "読み手の関数の外で .ndf/ の設定を開く今の外れ（読み手の関数の外で .ndf/project.json を開く（issues_on_github。plugins/ndf/scripts/lib/usage_aggregate.py:243））。lib/decl.locate を通す読み手へ寄せたら消す"
+}

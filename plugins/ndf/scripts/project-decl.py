@@ -311,13 +311,15 @@ def _merge_worktree_part(main, wt, meas, answers, check, written_before):
                 "text": "worktree.json が無い（worktree-setup.sh init を先に通す）。起点と本番を書かない",
             }
         ]
-        return files, rows, {}, []
+        branches, _ = merge.branch_answer(meas, answers, check)
+        return files, rows, {}, [], branches
     branches, origin = merge.branch_answer(meas, answers, check)
     new_wt, rows, wt_written = merge.merge_worktree(wt, branches, origin, written_before)
     if new_wt != wt:
         files.append((main / WORKTREE_FILE, str(WORKTREE_FILE), (main / WORKTREE_FILE).read_text(encoding="utf-8"), merge.dumps(new_wt)))
     declared = fingerprint.branch_names(new_wt)
-    return files, rows, wt_written, declared
+    names = {bkey: new_wt.get(wkey) for wkey, bkey in merge.WORKTREE_KEYS}
+    return files, rows, wt_written, declared, names
 
 
 def _gitignore_note(main) -> list:
@@ -340,7 +342,8 @@ def cmd_write(a):
     rows = [{"kind": "ignored", "key": k} for k in answers if k not in questions]
     written_before = ((existing or {}).get("analysis") or {}).get("written") or {}
 
-    files, wt_rows, wt_written, declared = _merge_worktree_part(main, wt, meas, answers, check, written_before)
+    files, wt_rows, wt_written, declared, names = _merge_worktree_part(main, wt, meas, answers, check, written_before)
+    answers = merge.delivery_channels(answers, names)
     rows += wt_rows
     analysis = {
         "analyzer": ANALYZER,

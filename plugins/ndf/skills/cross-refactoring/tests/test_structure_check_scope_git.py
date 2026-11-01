@@ -37,7 +37,7 @@ def test_the_declaration_has_the_structure_check_as_a_lint_suite():
     suite = _structure_suite(strategy)
     assert suite.kind == ts.LINT and ts.has_paths(suite.scope_command)
     assert "scripts/check-script-structure.py" in suite.scope_command
-    assert suite.paths == ["plugins/ndf", "scripts/script-structure-allow", "scripts/check-script-structure.py"]
+    assert suite.paths == ["plugins/ndf", "scripts/script-structure-allow", "scripts/lib", "scripts/check-script-structure.py"]
 
 
 def test_the_structure_check_runs_only_when_its_paths_change():
@@ -105,6 +105,7 @@ def test_items_breaking_the_structure_fail_their_own_scope_test(flow, cmd_setup,
     work = flow["work"]
     (work / "scripts").mkdir(exist_ok=True)
     shutil.copy(CHECK, work / "scripts" / "check-script-structure.py")
+    shutil.copytree(CHECK.parent / "lib", work / "scripts" / "lib", ignore=shutil.ignore_patterns("__pycache__"))  # 共通部品（#2336）
     _write(work, "plugins/ndf/scripts/lib/accounts.py", "def remove(p):\n    return p\n")
     _write(work, "plugins/ndf/scripts/big.py", "x = 1\n" * 400)
     _write(work, "plugins/ndf/scripts/clean.py", "def clean():\n    return 1\n")

@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/issue-file.py",
+  "summary": "範囲外の課題の起票の決まった手順（#851）。`out-of-scope` と `retrospective` から呼ぶ。",
+  "args": {
+    "options": [],
+    "positionals": [],
+    "subcommands": {
+      "by-origin": {
+        "options": [
+          "--origin",
+          "--repo",
+          "--with-upstream"
+        ],
+        "positionals": []
+      },
+      "create": {
+        "options": [
+          "--approved",
+          "--body-file",
+          "--counterpart",
+          "--label",
+          "--origin",
+          "--repo",
+          "--title"
+        ],
+        "positionals": []
+      },
+      "dup": {
+        "options": [
+          "--query",
+          "--repo"
+        ],
+        "positionals": []
+      },
+      "note": {
+        "options": [
+          "--approved",
+          "--counterpart",
+          "--number",
+          "--origin",
+          "--repo"
+        ],
+        "positionals": []
+      }
+    }
+  },
+  "env": [
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "HOME",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_ISSUE_REQUEST_FILE",
+    "NDF_PRESENTATION_DIR",
+    "NDF_SKILL_REPO"
+  ],
+  "settings": [],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/README.md",
+    "plugins/ndf/scripts/lib/runner_issue_request.py",
+    "plugins/ndf/skills/out-of-scope/SKILL.md",
+    "plugins/ndf/skills/out-of-scope/references/issue-target.md",
+    "plugins/ndf/skills/retrospective/SKILL.md"
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "path": "plugins/ndf/scripts/relay.py",
+  "name": "",
+  "kind": "args-unparsed",
+  "reason": "sys.argv を手で読み、relay_lib.main が副命令ごとに振り分ける。柱 P8（#2341）で argparse へ移したら消す"
+}

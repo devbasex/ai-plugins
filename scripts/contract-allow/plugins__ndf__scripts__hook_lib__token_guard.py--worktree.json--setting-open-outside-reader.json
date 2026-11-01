@@ -1,0 +1,6 @@
+{
+  "path": "plugins/ndf/scripts/hook_lib/token_guard.py",
+  "name": "worktree.json",
+  "kind": "setting-open-outside-reader",
+  "reason": "読み手の関数の外で .ndf/ の設定を開く今の外れ（読み手の関数の外で .ndf/worktree.json を開く（plan_hint。plugins/ndf/scripts/hook_lib/token_guard.py:373））。lib/decl.locate を通す読み手へ寄せたら消す"
+}

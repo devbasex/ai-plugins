@@ -1,0 +1,7 @@
+{
+  "name": "loop-json",
+  "pattern": "loop.json",
+  "kind": "result",
+  "place": "main",
+  "skill_readers": []
+}

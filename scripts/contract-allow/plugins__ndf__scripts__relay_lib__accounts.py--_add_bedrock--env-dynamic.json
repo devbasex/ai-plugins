@@ -1,0 +1,6 @@
+{
+  "path": "plugins/ndf/scripts/relay_lib/accounts.py",
+  "name": "_add_bedrock",
+  "kind": "env-dynamic",
+  "reason": "環境変数を名前を組み立てて読むか走査する（plugins/ndf/scripts/relay_lib/accounts.py の _add_bedrock）。静的に拾えない"
+}

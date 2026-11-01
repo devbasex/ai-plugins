@@ -7,9 +7,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+import decl as setting_decl
 import delivery
 import formatting
 import project_decl
+import repo
 import schema
 from typing import Annotated
 
@@ -74,7 +76,11 @@ def step_budgets(decl: dict) -> StepBudgets:
 
 
 def read_decl(roots, name: str) -> dict:
-    """roots の順に .ndf/<name> を探し、最初に見つかった宣言を返す。どこにも無ければ {}。"""
+    """roots の順に .ndf/<name> を探し、最初に見つかった宣言を返す。どこにも無ければ {}。
+
+    契約がキーごとに別の置き場を宣言した値（`worktree.json` の `production_branch`）は、見つけた木から
+    `setting_decl.overlay_keys` で読み直す（Pull Request の変更で本番のブランチを動かせないようにする。#2363）。
+    """
     for r in roots:
         f = Path(r) / ".ndf" / name
         if not f.is_file():
@@ -87,6 +93,10 @@ def read_decl(roots, name: str) -> dict:
             schema.load_shape(Decl, d, str(f))
         except schema.ShapeError as e:
             raise DeclError(f"{e}（最上位はオブジェクトで書く）") from e
+        if name in setting_decl.places():
+            d, why = setting_decl.overlay_keys(r, name, d, f)
+            if why:
+                raise DeclError(why)
         return d
     return {}
 
@@ -205,6 +215,8 @@ NEEDS = {
     "sprint": ("base", "test"),
     "close": ("base", "test"),
 }
+# 本番のブランチを使う雛形（`--production-branch` を受ける種別と同じ）。ほかの種別では既定ブランチを問い合わせない（git の起動を増やさない）
+USES_PRODUCTION = ("release", "sprint", "close")
 
 
 def test_kind(a) -> str:
@@ -221,7 +233,9 @@ def apply_decls(a) -> None:
     """引数に無いものを .ndf/ の宣言から埋める。雛形に要るのにどちらにも無ければ DeclError。
 
     - 起点のブランチ（a.base）: --base → worktree.json の base_branch
-    - 本番のブランチ（a.production_branch）: --production-branch → worktree.json の production_branch
+    - 本番のブランチ（a.production_branch）: --production-branch → `repo.production_branch`（worktree.json の
+      production_branch → 既定ブランチ。決め方の正本は `repo.production_of`。#2097）。既定ブランチへの補完は
+      本番を使う雛形（`USES_PRODUCTION`）だけで行う
     - テスト（a.strategy・a.test_limits・a.test_cmd・a.no_reports）: --test-cmd（雛形）→ project.json の test →
       supervise.json の test.command（project.json に test が無いときだけ。読んだことを a.test_note に残す。#1334 決定 3）。
       --test-all は廃止（知らせて無視する）
@@ -238,6 +252,8 @@ def apply_decls(a) -> None:
     wt = read_decl(roots, WORKTREE_DECL)
     sv = read_decl(roots, SUPERVISE_DECL)
     _apply_simple_decls(a, wt, sv)
+    if not a.production_branch and roots and a.kind in USES_PRODUCTION:
+        a.production_branch = repo.production_branch(roots[0], wt)[0]
     decl, a.test_note = _project_decl(roots, sv)
     _apply_test_strategy(a, decl)
     if getattr(a, "glossary_ready", None) is None:

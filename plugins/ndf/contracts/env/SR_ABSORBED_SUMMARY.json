@@ -1,0 +1,5 @@
+{
+  "name": "SR_ABSORBED_SUMMARY",
+  "set_by": "runtime",
+  "summary": "SR_ABSORBED_SUMMARY。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/progress-record.sh:164）が決める"
+}

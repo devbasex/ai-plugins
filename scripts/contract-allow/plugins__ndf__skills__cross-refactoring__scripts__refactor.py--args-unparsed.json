@@ -1,0 +1,6 @@
+{
+  "path": "plugins/ndf/skills/cross-refactoring/scripts/refactor.py",
+  "name": "",
+  "kind": "args-unparsed",
+  "reason": "副命令を定数表・補助関数・繰り返しで作る。副命令ごとに add_parser と add_argument を並べたら消す"
+}

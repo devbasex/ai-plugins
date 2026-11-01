@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/merged-steps.py",
+  "summary": "merged-steps.py: merged の後片付けの決まった手順。",
+  "args": {
+    "unparsed": "副命令を定数表・補助関数・繰り返しで作り、どの副命令の引数か静的に決められない"
+  },
+  "env": [
+    "CROSS_REVIEW_TMP_DIR",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_LOCK_DIR",
+    "NDF_PRESENTATION_DIR",
+    "NDF_WORKTREE_BASE"
+  ],
+  "settings": [
+    {
+      "file": "project.json",
+      "keys": [
+        "ndf_policies"
+      ]
+    },
+    {
+      "file": "supervise.json",
+      "keys": [
+        "release"
+      ]
+    },
+    {
+      "file": "worktree.json",
+      "keys": [
+        "base_branch",
+        "tool_paths",
+        "version"
+      ]
+    }
+  ],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "1": "取り込み・CI・マージが失敗した（status stopped）",
+    "2": "読めない・呼び出しの誤り（status stopped）",
+    "4": "PR がベースブランチと衝突している（merge-when-green・promote。mergeStateStatus が DIRTY か、マージの拒否）",
+    "10": "承認ゲート 2 で止まる（metrics.gate が production-merge）か、git branch -D が要るブランチがある（同意が要る。どちらも提示物を書く）",
+    "75": "CI の基盤待ち（merge-when-green・promote。items[].result: infra_wait）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/hook_lib/token_guard.py",
+    "plugins/ndf/scripts/lib/README.md",
+    "plugins/ndf/scripts/lib/approved_commit.py",
+    "plugins/ndf/scripts/lib/manual_checks.py",
+    "plugins/ndf/scripts/lib/run_state_kinds.py"
+  ]
+}

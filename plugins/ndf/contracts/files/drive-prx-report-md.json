@@ -1,0 +1,7 @@
+{
+  "name": "drive-prx-report-md",
+  "pattern": "drive-pr*-report.md",
+  "kind": "report",
+  "place": "tmp",
+  "skill_readers": []
+}

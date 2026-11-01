@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/sprint-state.py",
+  "summary": "スプリントの状態を sprint.json に持ち、引継ぎ文書の節・status・ndf-next を生成する（#1063）。",
+  "args": {
+    "unparsed": "副命令を定数表・補助関数・繰り返しで作り、どの副命令の引数か静的に決められない"
+  },
+  "env": [
+    "CLAUDE_CONFIG_DIR",
+    "CODEX_HOME",
+    "MONITOR_NO_EARLY_ERROR",
+    "NDF_ACCOUNTS_DIR",
+    "NDF_ACCOUNT_TOKEN_URL",
+    "NDF_ACCOUNT_USAGE_URL",
+    "NDF_CLAUDE_ACCOUNT",
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_ESTIMATE_DIR",
+    "NDF_MVV_STATE_DIR",
+    "NDF_PRESENTATION_DIR",
+    "NDF_RELAY_DIR",
+    "NDF_SHARED_CONFIG_DIR",
+    "NDF_SUPERVISE_CLAUDE",
+    "NDF_SUPERVISE_CLAUDE_FALLBACK",
+    "NDF_SUPERVISE_LIMIT_SLEEP",
+    "NDF_SUPERVISE_MODEL",
+    "NDF_SV_STATE_DIR",
+    "NDF_UPKEEP_STATE_DIR",
+    "NDF_WHOLE_RUNS_DIR",
+    "XDG_STATE_HOME"
+  ],
+  "settings": [
+    {
+      "file": "estimate.json",
+      "keys": [
+        "records_dir"
+      ]
+    },
+    {
+      "file": "pace.json",
+      "keys": [
+        "auto",
+        "enabled",
+        "verify"
+      ]
+    },
+    {
+      "file": "project.json",
+      "keys": [
+        "ndf_policies"
+      ]
+    },
+    {
+      "file": "supervise.json",
+      "keys": [
+        "release"
+      ]
+    },
+    {
+      "file": "worktree.json",
+      "keys": [
+        "base_branch"
+      ]
+    }
+  ],
+  "stdin": "none",
+  "stdout": "json",
+  "writes": [
+    "laps-md",
+    "loop-json"
+  ],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/gate-rejections.py",
+    "plugins/ndf/scripts/lib/README.md",
+    "plugins/ndf/scripts/lib/gate_answer.py",
+    "plugins/ndf/scripts/lib/gate_rejections.py",
+    "plugins/ndf/scripts/lib/handoff_doc.py"
+  ]
+}

@@ -1,0 +1,102 @@
+{
+  "version": 1,
+  "path": "plugins/ndf/scripts/estimate.py",
+  "summary": "工数の見積もりの部品の CLI（#1856）。結果は `step_result` の形の 1 行の JSON。",
+  "args": {
+    "options": [],
+    "positionals": [],
+    "subcommands": {
+      "actuals": {
+        "options": [
+          "--done",
+          "--issue",
+          "--root"
+        ],
+        "positionals": []
+      },
+      "errors": {
+        "options": [
+          "--since"
+        ],
+        "positionals": []
+      },
+      "human": {
+        "options": [
+          "--issue",
+          "--minutes",
+          "--what"
+        ],
+        "positionals": []
+      },
+      "import": {
+        "options": [
+          "--sv-dir"
+        ],
+        "positionals": []
+      },
+      "predict": {
+        "options": [
+          "--batch",
+          "--done",
+          "--issue",
+          "--items",
+          "--like",
+          "--provisional",
+          "--save",
+          "--task"
+        ],
+        "positionals": []
+      }
+    }
+  },
+  "env": [
+    "NDF_DEPS_REEXEC",
+    "NDF_DEPS_VENV",
+    "NDF_ESTIMATE_DIR",
+    "NDF_PRESENTATION_DIR",
+    "NDF_SV_STATE_DIR",
+    "NDF_WHOLE_RUNS_DIR",
+    "XDG_STATE_HOME"
+  ],
+  "settings": [
+    {
+      "file": "estimate.json",
+      "keys": [
+        "records_dir"
+      ]
+    },
+    {
+      "file": "project.json",
+      "keys": [
+        "ndf_policies"
+      ]
+    },
+    {
+      "file": "supervise.json",
+      "keys": [
+        "release"
+      ]
+    },
+    {
+      "file": "worktree.json",
+      "keys": [
+        "base_branch"
+      ]
+    }
+  ],
+  "stdin": "none",
+  "stdout": "step-result",
+  "writes": [],
+  "reads": [],
+  "exit": {
+    "0": "成功（status ok）",
+    "2": "読めない・呼び出しの誤り（status stopped）"
+  },
+  "callers": [
+    "plugins/ndf/scripts/lib/README.md",
+    "plugins/ndf/scripts/lib/estimate_records.py",
+    "plugins/ndf/skills/backlog-refinement/SKILL.md",
+    "plugins/ndf/skills/backlog-refinement/references/no-work.md",
+    "plugins/ndf/skills/backlog-refinement/references/ranking.md"
+  ]
+}

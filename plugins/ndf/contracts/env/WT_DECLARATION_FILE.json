@@ -1,0 +1,5 @@
+{
+  "name": "WT_DECLARATION_FILE",
+  "set_by": "runtime",
+  "summary": "WT_DECLARATION_FILE。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/worktree-deps.sh:66）が決める"
+}

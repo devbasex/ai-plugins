@@ -1,0 +1,5 @@
+{
+  "name": "SCRIPTS",
+  "set_by": "runtime",
+  "summary": "SCRIPTS。初版は抽出で起こした。無いときの扱いは読む箇所（plugins/ndf/scripts/progress-record.sh:120）が決める"
+}
