@@ -235,10 +235,14 @@ stateDiagram-v2
 
 本番のプランは開発版と同じ `sprint_waves.plan_sprint_release` に `channel="prod"` と `version=prod_version(--version)`（接尾辞を外した版。
 `10.18.0-dev.1` → `10.18.0`）を渡して組む。worktree とブランチは `release/v<正式版>`、出す PR は `{queue_pr:check}` である。
+`--version` を省いたときは `version` が空で、worktree・ブランチ・承認資料のパスは版の差し込み（`{release_version}`・`{release_base}`）で書き、
+プランの「版」の欄の `系列` に開発版のプランの名前 `release` を入れる。キューが本番のプランを流す直前に、開発版のプランの版の記録（`version.json`）の
+`base` で埋める（#2164）。
 雛形（`release_templates.plan_release`）が組んだステップを目録の側で書き換えず、`new release --version <正式版> --prs {queue_pr:check} --channel prod`
 と同じ出力に `課題` が入る（スプリントの工程は雛形に対して順応者の関係にある）。
 
-承認ゲート 2 の文は、開発版の配布が書いた承認資料（元のリポジトリの下の `issues/approval-<プラグイン>-v<正式版>.md` の絶対パス）を示して
+承認ゲート 2 の文は、開発版の配布が書いた承認資料（元のリポジトリの下の `issues/approval-<プラグイン>-v<正式版>.md` の絶対パス。版を明示しなかったときは
+`v<base>` と書き、`<base>` が開発版のプラン `release` の状態ディレクトリの `version.json` の `base` であることを添える）を示して
 本番への配布の承認を取ることを書く。`--state` を渡さないときは、承認されたら `release-steps.py approve --approval <承認資料> --approved-sha <approval-facts の metrics.approved_sha> --by user`
 で承認の記録を書いてから「本番」のステージの `command` を打つこと（差し戻されたら打たない）を書く。`--state` を渡したときは、利用者が答えたら
 `sprint-state.py gate <状態> "関門 2" --what <要約> --by user --outcome approved|rejected` を打ち、承認されたら「本番」のステージの `command` を打つことと、
@@ -253,7 +257,7 @@ stateDiagram-v2
 | --- | --- | --- |
 | N1 | 「本番」のステージは `then_of` を持たず、どの queue の `--then` にも入らない（承認ゲート 2 は利用者が答える。連結すると承認を待たずに本番が流れる） | テストで落とす |
 | N2 | 並びは「配布」→「`関門 2`」→「本番」で、間に他のステージが入らない | テストで落とす |
-| N3 | 本番のプランの版は `--version` から接尾辞を外したもの、チャネルは `prod`、出す PR は `{queue_pr:check}` | テストで落とす |
+| N3 | 本番のプランの版は `--version` から接尾辞を外したもの（`--version` を省けば版の差し込みで、開発版の版の記録の `base` で埋まる）、チャネルは `prod`、出す PR は `{queue_pr:check}` | テストで落とす |
 | N4 | `--state` を渡しても、本番のプランは MVV 判定のステップ（`mvv`・`note`・`handoff`）を持たない（`advise` は `channel` が `dev` のときだけ渡す） | テストで落とす |
 | N5 | 「`関門 2`」を置くとき、承認ゲート 2 の文はその `gate` の 1 か所にだけあり、「配布」の `note` に重ねない。ほかの経路（N6 と `route_waves`）では「配布」か経路のステージの `note` が正本である | テストで落とす |
 | N6 | 本番のブランチが決まっていないときは「`関門 2`」と「本番」を置かず、「配布」で終える（`--state` なら `note` に `normal_gate_2` の文）。`next` に置かなかった理由を 1 文足す（`no_prod_stage`） | テストで落とす |
