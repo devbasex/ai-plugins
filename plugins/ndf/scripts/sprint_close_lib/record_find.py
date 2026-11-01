@@ -91,6 +91,43 @@ def _referencing_prs(root, repo: str, n: int) -> list[dict]:
     return list(out.values())
 
 
+def _closers_of(root, repo: str, issues: tuple[int, ...]) -> dict[int, set[int]]:
+    """まとめの課題ごとに、その課題を閉じる PR の集合。閉じる PR が見つからない課題は含めない。"""
+    closers_of: dict[int, set[int]] = {}
+    for n in issues:
+        hit = {pr["number"] for pr in _referencing_prs(root, repo, n) if (repo, n) in closing_refs(pr["body"], repo)}
+        if hit:
+            closers_of[n] = hit
+    return closers_of
+
+
+def _candidates(root, repo: str, closers: tuple[int, ...]) -> set[int]:
+    """閉じる PR と、それを参照する PR の和。"""
+    cands = set(closers)
+    for pr in closers:
+        cands |= {r["number"] for r in _referencing_prs(root, repo, pr)}
+    return cands
+
+
+def _released_records(root, repo: str, cands: set[int], closers_of: dict[int, set[int]]) -> tuple[list, list[int]]:
+    """候補ごとに最後のリリース記録を読み、(本番か配布なしで閉じる PR を含む記録, 本番の前の記録の PR) に振り分ける。"""
+    kept, pre = [], []
+    for pr in sorted(cands):
+        try:
+            rec = parse_record(*read_record(root, repo, pr))
+        except StepError as e:
+            raise _Unreadable(str(e))
+        if not rec["found"]:
+            continue
+        if not released(rec["stage"]):
+            pre.append(pr)
+            continue
+        sprint = set(rec["sprint_prs"])
+        if all(sprint & want for want in closers_of.values()):
+            kept.append((rec["dist_comment_id"] or 0, pr, tuple(sorted(sprint))))
+    return kept, pre
+
+
 def find_record(root, repo: str | None, issues) -> RecordHit:
     """まとめの課題 `issues` のリリース記録を置いた PR を決める。`root` は `gh` を打つ作業場所、`repo` は owner/name（None なら `root` から決める）。"""
     issues = tuple(int(n) for n in issues)
@@ -98,31 +135,12 @@ def find_record(root, repo: str | None, issues) -> RecordHit:
         return RecordHit(error="まとめの課題が無い")
     try:
         repo = repo or _repo_of(root)
-        closers_of: dict[int, set[int]] = {}
-        for n in issues:
-            hit = {pr["number"] for pr in _referencing_prs(root, repo, n) if (repo, n) in closing_refs(pr["body"], repo)}
-            if hit:
-                closers_of[n] = hit
+        closers_of = _closers_of(root, repo, issues)
         closers = tuple(sorted(set().union(*closers_of.values()))) if closers_of else ()
         if not closers:
             return RecordHit(issues=issues)
-        cands = set(closers)
-        for pr in closers:
-            cands |= {r["number"] for r in _referencing_prs(root, repo, pr)}
-        kept, pre = [], []
-        for pr in sorted(cands):
-            try:
-                rec = parse_record(*read_record(root, repo, pr))
-            except StepError as e:
-                raise _Unreadable(str(e))
-            if not rec["found"]:
-                continue
-            if not released(rec["stage"]):
-                pre.append(pr)
-                continue
-            sprint = set(rec["sprint_prs"])
-            if all(sprint & want for want in closers_of.values()):
-                kept.append((rec["dist_comment_id"] or 0, pr, tuple(sorted(sprint))))
+        cands = _candidates(root, repo, closers)
+        kept, pre = _released_records(root, repo, cands, closers_of)
     except _Unreadable as e:
         return RecordHit(issues=issues, error=str(e))
     base = {"issues": issues, "closers": closers, "searched": tuple(sorted(cands)), "pre_release": tuple(pre)}
