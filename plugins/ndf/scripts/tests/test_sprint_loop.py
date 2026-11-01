@@ -1061,3 +1061,140 @@ def test_gate2_answer_treats_a_broken_ledger_as_empty(tmp_path):
     (tmp_path / "x").mkdir()
     lap2, _ = g2_lap(tmp_path / "x")
     assert sl.gate2_answer(lap2) is None
+
+
+# ---------------- 現状固定: resume_stopped の止まった理由ごとの分岐 ----------------
+
+
+def stopped_on(env, cond, **stop):
+    """記録を cond で止まった状態にして返す（resume_stopped を直接通すため）。"""
+    r = rec(env)
+    r["status"], r["stop"] = "stopped", {"condition": cond, "at": "2026-10-25T00:00:00Z", "values": {}, **stop}
+    sl.write_record(env, r)
+    return rec(env)
+
+
+def test_resume_stopped_mvv_changed_stays_stopped_and_points_to_a_new_loop(env):
+    start(env)
+    r = stopped_on(env, "mvv_changed")
+    out = sl.resume_stopped(env, r, json.loads(json.dumps(r)))
+    assert out["exit"] == 3 and "新しい名前でループを始め直す" in out["summary"]
+    assert rec(env)["status"] == "stopped" and rec(env)["stop"]["condition"] == "mvv_changed"
+
+
+def test_resume_stopped_user_stop_removes_the_stop_file_and_resumes(env):
+    start(env)
+    sl.cmd_stop(env, "l1")
+    stop_file = env.root / ".ndf" / "loop" / "l1" / "stop"
+    assert stop_file.exists()
+    r = stopped_on(env, "user_stop")
+    out = sl.resume_stopped(env, r, json.loads(json.dumps(r)))
+    assert out["status"] == "ok" and out["metrics"]["status"] == "resumed" and out["metrics"]["resolved"] == "user_stop"
+    assert out["metrics"]["next"] == sl.select_cmd("l1") and "user_stop が解けた" in out["summary"]
+    assert not stop_file.exists()
+    after = rec(env)
+    assert after["status"] == "running" and after["stop"] is None and after["stops"][-1]["condition"] == "user_stop"
+    assert "resumed_at" in after["stops"][-1]
+
+
+def test_resume_stopped_budget_still_exceeded_writes_the_record_and_stays_stopped(env):
+    start(env, laps=1)
+    run_lap(env)
+    r = rec(env)
+    assert r["stop"]["condition"] == "budget_laps"
+    out = sl.resume_stopped(env, r, json.loads(json.dumps(r)))
+    assert out["exit"] == 3 and "予算（laps）を超えたまま（消費 1 / 予算 1）" in out["summary"] and "--budget-laps" in out["summary"]
+    assert rec(env)["status"] == "stopped"
+
+
+def test_resume_stopped_budget_within_the_limit_resumes(env):
+    start(env, laps=3)
+    r = stopped_on(env, "budget_laps")
+    out = sl.resume_stopped(env, r, json.loads(json.dumps(r)))
+    assert out["metrics"]["status"] == "resumed" and out["metrics"]["resolved"] == "budget_laps"
+    assert out["metrics"]["next"] == sl.select_cmd("l1") and rec(env)["status"] == "running"
+
+
+@pytest.mark.parametrize("cond", ["same_failure", "no_issue", "gate2_returned", "refused"])
+def test_resume_stopped_other_conditions_without_a_lap_resume_with_select(env, cond):
+    start(env)
+    r = stopped_on(env, cond)
+    assert sl.current_lap(r) is None
+    out = sl.resume_stopped(env, r, json.loads(json.dumps(r)))
+    assert out["status"] == "ok" and out["metrics"]["status"] == "resumed" and out["metrics"]["resolved"] == cond
+    assert out["metrics"]["next"] == sl.select_cmd("l1") and f"再開した（{cond} が解けた）" in out["summary"]
+    assert rec(env)["stops"][-1]["condition"] == cond
+
+
+def test_resume_stopped_gate2_without_an_answer_stays_stopped(env, monkeypatch):
+    built_lap(env)
+    monkeypatch.setattr(sl, "gate2_answer", lambda lap, since=None: None)
+    r = stopped_on(env, "gate2_returned")
+    out = sl.resume_stopped(env, r, json.loads(json.dumps(r)))
+    assert out["exit"] == 3 and "承認ゲート 2 の答え（承認か差し戻し）がまだ無い" in out["summary"]
+    assert rec(env)["status"] == "stopped"
+
+
+def test_resume_stopped_gate2_rejected_closes_the_lap_as_returned_and_selects_next(env, monkeypatch):
+    built_lap(env)
+    seen = []
+    monkeypatch.setattr(sl, "gate2_answer", lambda lap, since=None: seen.append(since) or "rejected")
+    r = stopped_on(env, "gate2_returned")
+    out = sl.resume_stopped(env, r, json.loads(json.dumps(r)))
+    assert seen == ["2026-10-25T00:00:00Z"]
+    assert out["metrics"]["status"] == "resumed" and out["metrics"]["resolved"] == "gate2_returned"
+    assert out["metrics"]["next"] == sl.select_cmd("l1")
+    after = rec(env)
+    assert after["laps"][0]["outcome"] == sl.RETURNED and sl.current_lap(after) is None and after["status"] == "running"
+
+
+def test_resume_stopped_gate2_approved_runs_the_gate2_pipeline(env, monkeypatch):
+    built_lap(env)
+    monkeypatch.setattr(sl, "gate2_answer", lambda lap, since=None: "approved")
+    monkeypatch.setattr(sl, "gate2_pipeline", lambda env, rec, lap, stop: f"PIPE {lap['n']} {stop['condition']}")
+    r = stopped_on(env, "gate2_returned")
+    out = sl.resume_stopped(env, r, json.loads(json.dumps(r)))
+    assert out["metrics"]["next"] == "PIPE 1 gate2_returned" and out["metrics"]["status"] == "resumed"
+    assert sl.current_lap(rec(env)) is not None
+
+
+def test_resume_stopped_refused_in_a_lap_asks_to_rebuild_the_sprint(env):
+    built_lap(env)
+    r = stopped_on(env, "refused", values={"step": "new sprint"})
+    out = sl.resume_stopped(env, r, json.loads(json.dumps(r)))
+    nxt = out["metrics"]["next"]
+    assert out["metrics"]["status"] == "resumed" and "loop sprint l1 --mode <モード> --dev <開発版>" in nxt
+
+
+def test_resume_stopped_refused_continuation_rebuilds_the_queue_with_kept_issues(env, monkeypatch):
+    lap = built_lap(env)
+    seen = []
+
+    def cont(env_, rec_, lap_, moved, kept):
+        seen.append((lap_["n"], moved, kept))
+        return "QUEUE", Path("/tmp/done.json")
+
+    monkeypatch.setattr(sl, "continuation", cont)
+    r = rec(env)
+    r["waiting"] = [{"number": 11, "lap": lap["n"]}, {"number": 99, "lap": lap["n"] + 1}]
+    r["laps"][-1]["issues_kept"] = [12]
+    sl.write_record(env, r)
+    r = stopped_on(env, "refused", values={"step": sl.CONTINUATION_STEP})
+    out = sl.resume_stopped(env, r, json.loads(json.dumps(r)))
+    assert seen == [(1, [11], [12])]
+    assert out["metrics"]["next"] == f"QUEUE && {sl.wait_lap(r, Path('/tmp/done.json'))}"
+    assert out["metrics"]["status"] == "resumed"
+
+
+@pytest.mark.parametrize("err", [sl.LoopError("組めない"), OSError("os"), ValueError("v"), KeyError("k"), StopIteration()])
+def test_resume_stopped_refused_continuation_failure_stays_stopped(env, monkeypatch, err):
+    built_lap(env)
+
+    def cont(*a):
+        raise err
+
+    monkeypatch.setattr(sl, "continuation", cont)
+    r = stopped_on(env, "refused", values={"step": sl.CONTINUATION_STEP})
+    out = sl.resume_stopped(env, r, json.loads(json.dumps(r)))
+    assert out["exit"] == 3 and "承認ゲート 1 の後の続きをまだ組めない: " in out["summary"]
+    assert rec(env)["status"] == "stopped"
