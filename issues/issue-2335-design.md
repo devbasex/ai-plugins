@@ -480,7 +480,7 @@ stateDiagram-v2
 
 | 課題 | 扱い | 取り込み先 | 触るファイル |
 | --- | --- | --- | --- |
-| #2336 | 実装する | — | `plugins/ndf/contracts/`、`plugins/ndf/scripts/lib/contracts.py`、`scripts/check-script-structure.py`、`scripts/script-structure-allow/`、`issues/issue-2335-classification.jsonl` |
+| #2336 | 実装する | — | `plugins/ndf/contracts/`、`scripts/check-ndf-contracts.py`、`scripts/contracts_lib/`、`scripts/lib/allowlist.py`、`scripts/lib/py_imports.py`、`scripts/contract-allow/`、`scripts/check-script-structure.py`、`scripts/tests/`、`plugins/ndf/scripts/lib/`、`plugins/ndf/scripts/supervise_lib/decl.py`、`plugins/ndf/scripts/project-decl.py`、`plugins/ndf/scripts/project_lib/`、`plugins/ndf/scripts/tests/`、`plugins/ndf/skills/development-workflow/schemas/project.schema.json`、`.github/workflows/script-structure.yml`、`.ndf/project.json`、`docs/glossary/glossary.json`、`docs/glossary.md` |
 
 この課題（#2335）は表に載せない。柱がすべて閉じ、受け入れ条件 8・9 を確かめた時点で閉じるためである（前提 1）。P1〜P8 は、それぞれのマイルストーンで自分の設計の結果を持つ。
 
