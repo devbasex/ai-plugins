@@ -1,5 +1,7 @@
 # NDF 知識構造・Kiro CLI 仕様
 
+> **配布先は Claude Code と Codex である（#2231）。** この文書に残る agy・Kiro CLI への配布・導入物・生成・検査・スモークの記述は配布先を 4 つにしていた時点のもので、配布先については [ndf-distribution-runtimes.md](ndf-distribution-runtimes.md) が優先する。
+
 ## 概要
 
 NDF の知識配置（`AGENTS.md` と版と配布の正本、README の役割を含む）、Serena MCP 分離、Kiro CLI 対応に関する確定仕様。
