@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 import shlex
 from pathlib import Path
 
@@ -32,7 +31,7 @@ from supervise_lib.sprint_waves import (
 from supervise_lib.new_args import NEW_ARGS
 from supervise_lib.paths import CHECK_PY, SELF
 from supervise_lib.procedures import sprint_out, with_record
-from supervise_lib.release_templates import release_verify_step
+from supervise_lib.release_templates import release_verify_step, strip_suffix
 from supervise_lib.plan import sprint_state_path
 from supervise_lib.sprint_routes import (
     normal_gate_1,
@@ -53,7 +52,7 @@ from supervise_lib.sprint_close_steps import _close_step, _refine_step, _retro_s
 
 def prod_version(version: str | None) -> str | None:
     """明示の開発版から本番の明示の版を作る。開発版が無ければ None（本番は開発版のプランの版の記録から読む。#2164）。"""
-    return re.sub(r"-.*$", "", version) if version else None
+    return strip_suffix(version) if version else None
 
 
 DESIGN_RESULTS_STAGE = "設計の結果"

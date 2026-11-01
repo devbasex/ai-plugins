@@ -50,10 +50,15 @@ def release_names(version: str | None) -> tuple[str, str]:
     return f".worktrees/release/v{v}", f"release/v{v}"
 
 
+def strip_suffix(v: str) -> str:
+    """開発版の版数から接尾辞（最初の `-` から後ろ）を外す。"""
+    return re.sub(r"-.*$", "", v)
+
+
 def release_version_of(a) -> tuple[str, str]:
     """(出す版, その接尾辞を外した版)。明示の版が無ければ版の差し込み（#2164）。"""
     v = getattr(a, "version", None)
-    return (v, re.sub(r"-.*$", "", v)) if v else (RELEASE_VERSION, RELEASE_BASE)
+    return (v, strip_suffix(v)) if v else (RELEASE_VERSION, RELEASE_BASE)
 
 
 def version_field(a, plugin: str, dev: bool) -> dict:
