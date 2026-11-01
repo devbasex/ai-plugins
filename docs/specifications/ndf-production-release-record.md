@@ -167,14 +167,20 @@ python3 release-steps.py record --version <版> --prs <PR番号>... [--plugin <�
 ### まとめのプランの記録の PR と `release-verify`
 
 まとめのプラン（`supervise_lib/sprint.py` の `close_plan`）は、記録の PR の参照を経路から決め（`supervise_lib/sprint_routes.py` の
-`record_pr_ref`）、記録の PR が `{queue_pr:…}` で決まる経路ではマージの後・`close` の前に work ステップ `release-verify`（`/ndf:release-verification`）を置く。
+`record_pr_ref`）、記録の PR の参照が `0` でない経路ではマージの後・`close` の前に work ステップ `release-verify`（`/ndf:release-verification`）を置く。
 
 | 経路 | `close` の `--record-pr` | `release-verify` |
 | --- | --- | --- |
 | 雛形（`release.form`） | `{queue_pr:release-prod}` | 置く |
 | 昇格（`route_waves` が昇格のプランを置き、開発版のチャネルが手で届ける本番でないとき） | `{queue_pr:promote}` | 置く |
 | 経路がすべて届けない経路（none） | `0`（本番の記録なし。条件を見ずに閉じる） | 置かない |
-| それ以外（merge・manual・検証の環境だけ・手動反映の本番系の昇格） | `unknown`（記録の置き場が分からない。課題を理由つきの `kept_open` で開いたまま残し、ボードも書かない） | 置かない |
+| それ以外（merge・manual・検証の環境だけ・手動反映の本番系の昇格） | `{queue_record}`（まとめを流し始める時点に queue が GitHub の参照から記録の PR を探して埋める。#2230） | 置く |
+| 開発ループのまとめ（`new close --pace auto`）で、経路がすべて届けない経路でないとき | 経路にかかわらず `{queue_record}`（承認ゲート 2 の後のまとめは本番のプランと別の queue にあり、`{queue_pr:…}` を解けない） | 置く |
+
+`{queue_record}` は、まとめの課題を閉じる PR とそれを参照する PR のリリース記録のうち、段階が本番か配布なしで `スプリント:` が
+その閉じる PR を含む記録を置いた PR の番号で埋まる（`sprint_close_lib/record_find.py`）。見つからない・2 つ以上のスプリントにある・
+GitHub を読めなければ、まとめを流さずに止まる（queue の結果は `stopped`、開発ループの周回は失敗で締まる）。まとめのプランは
+`sprint-close.py --record-pr unknown` を組まず、`unknown` を渡すのは手で打つ入口と #2230 より前に組んだプランだけである。
 
 `release-verify` は、記録の PR にリリース後テストの記録をコメントで置き、課題は閉じない。実行時に番号が `0` になったとき
 （最終の検査で変更が無く、まとめの queue の本番が飛ばされたとき）は何もせずに終える。

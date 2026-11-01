@@ -4,10 +4,12 @@
 
 スプリントの機械の判定が、記録の無い状態や「確かめる中身が無い」行を取り違えないようにする決まりを 2 つ置く。
 
-- **記録の置き場が分からないまとめの `close` は、課題を閉じない。** リリースの経路が雛形（`release.form`）でも昇格（promote）でも
-  なく、届ける経路を 1 つでも含むとき、まとめのプランは `sprint-close.py --record-pr unknown` を打つ（`new close --record-pr <番号>`
-  で組んだときはその番号を打つ。#2089）。`sprint-close.py` は
-  配布の記録を読まず、どの課題も閉じず、ボードも書かずに、`--issues` の課題を理由つきの `kept_open` で返す（終了コード 0）
+- **記録の置き場が分からない `close` は、課題を閉じない。** `sprint-close.py --record-pr unknown` は
+  配布の記録を読まず、どの課題も閉じず、ボードも書かずに、`--issues` の課題を理由つきの `kept_open` で返す（終了コード 0）。
+  #2230 から、まとめのプランは `unknown` を組まない。リリースの経路が雛形（`release.form`）でも昇格（promote）でもなく、届ける経路を
+  1 つでも含むとき（と開発ループのまとめ）は `--record-pr {queue_record}` を組み、まとめを流し始める時点に queue が記録の PR を探して埋める
+  （[ndf-production-release-record.md](ndf-production-release-record.md) の「まとめのプランの記録の PR と `release-verify`」）。
+  `unknown` を渡すのは手で打つ入口と、#2230 より前に組んだまとめのプランだけである
 - **「手動確認は無い」と書いた行は、手動確認の行として数えない。** 要求の「検証手段」の表で 2 列目が「無し」の形の行は、
   PR 本文の `## 手動確認` の節に載らず、merge-gate も承認ゲート（終了コード 10）で止まらない
 
@@ -51,7 +53,7 @@
 | # | 条件 | 破れたときの扱い |
 | --- | --- | --- |
 | I1 | まとめのプランの記録の参照が `0`（`RECORD_NONE`）になるのは、リリースの経路がすべて届けない経路（`STAGE_NONE`）のときだけである | テストが落とす |
-| I2 | 記録の参照が `{queue_pr:…}` でない（`has_record` が偽）とき、プランに `release-verify` を置かず、merge の次は `retro`（その次が `close`。#2228）になる | テストが落とす |
+| I2 | 記録の参照が `0` のとき（`has_record` が偽。#2230 からは `0` のときだけ偽）、プランに `release-verify` を置かず、merge の次は `retro`（その次が `close`。#2228）になる | テストが落とす |
 | I3 | `--record-pr unknown` の実行は、どの課題も閉じず、ボードも書かず、課題の本文も読まない（gh へ書き込まない） | テストが落とす |
 | I4 | `--record-pr 0` の意味（記録を読まず、閉じる条件 1・2 を見ずに `--issues` を閉じる（条件 3 の振り返りの記録は見る）。`--issues` が無ければ終了コード 2）は変わらない | 既存のテストが落とす |
 | I5 | 要求の 2 列目が「無し」の形の行は `ManualRow` にならない。それ以外の空でない 2 列目は手動確認の行になる | テストが落とす |
@@ -66,10 +68,11 @@
 | --- | --- |
 | 雛形の経路がある | `{queue_pr:release-prod}` |
 | 昇格の経路があり、開発版のチャネルが手動反映の本番系（`delivery.MANUAL_PRODUCTION`）でない | `{queue_pr:promote}` |
-| 経路がすべて `STAGE_NONE`（`delivery` が `[]` を含む） | `0`（`RECORD_NONE`） |
-| それ以外（merge・手で届ける・検証の環境だけ・手動反映の本番系の昇格） | `unknown`（`RECORD_UNKNOWN`） |
+| それ以外（merge・手で届ける・検証の環境だけ・手動反映の本番系の昇格） | `{queue_record}`（`RECORD_FOUND`。#2230） |
 
-語 `0` と `unknown` と `has_record` は `supervise_lib/sprint_routes.py` に置き、`close_plan` はそれを呼ぶだけにする。
+#2230 から、最初に経路がすべて `STAGE_NONE`（`delivery` が `[]` を含む）かを見て `0`（`RECORD_NONE`）を返し、次に開発ループのまとめ
+（`--pace auto`）なら `{queue_record}` を返し、その後に上の表を上から見る。`unknown`（`RECORD_UNKNOWN`）は `sprint_routes.py` から消えた。
+語 `0` と `{queue_record}` と `has_record` は `supervise_lib/sprint_routes.py` に置き、`close_plan` はそれを呼ぶだけにする。
 
 #### `sprint-close.py --record-pr`
 
@@ -105,17 +108,19 @@
 
 ```mermaid
 flowchart TD
-  A["record_pr_ref"] --> B{"雛形の経路がある"}
+  A["record_pr_ref"] --> D{"経路がすべて STAGE_NONE"}
+  D -- はい --> Z["0"]
+  D -- いいえ --> L{"開発ループのまとめ（--pace auto）"}
+  L -- はい --> U["{queue_record}"]
+  L -- いいえ --> B{"雛形の経路がある"}
   B -- はい --> T["{queue_pr:release-prod}"]
   B -- いいえ --> C{"昇格の経路があり、手動反映の本番系でない"}
   C -- はい --> P["{queue_pr:promote}"]
-  C -- いいえ --> D{"経路がすべて STAGE_NONE"}
-  D -- はい --> Z["0"]
-  D -- いいえ --> U["unknown"]
+  C -- いいえ --> U
   T --> V["merge → release-verify → retro → close"]
   P --> V
+  U --> V
   Z --> W["merge → retro → close（release-verify なし）"]
-  U --> W
 ```
 
 `sprint-close.py` の中では、`cmd_close` が `--issues` の有無を確かめ、`_read_sprint_record` が `0` と `unknown` で記録を読まずに
@@ -130,7 +135,7 @@ PR の一覧を空で返す。`_closing_blocker` は `unknown` のとき全課�
 | 決定 | 理由 | 採らなかった案 |
 | --- | --- | --- |
 | `--record-pr` に語 `unknown` を足し、`0` の意味は変えない | 語ならプランの `cmd` と結果を読む人がそのまま意味を取れる。`0` を手で打つ既存の手順の意味が黙って変わらない | 負の数（`-1`）で表す。`0` を「置き場を知らない」に変え、配布なしに別の値を足す |
-| 検証の環境だけ（本番の行の無い）経路・手動反映の本番系の昇格も `unknown` にする | 開いたまま残った課題は人が 1 回の操作で閉じられるが、条件を見ずに閉じた課題は確かめていないことが結果から読めない | 検証の環境だけの経路を配布なしとして `0` で閉じる |
+| 検証の環境だけ（本番の行の無い）経路・手動反映の本番系の昇格も `unknown` にする（#2230 で `{queue_record}` に置き換わった。閉じる条件を見ずに閉じない方針は変わらない） | 開いたまま残った課題は人が 1 回の操作で閉じられるが、条件を見ずに閉じた課題は確かめていないことが結果から読めない | 検証の環境だけの経路を配布なしとして `0` で閉じる |
 | 「無し」の判定を `rows_of` の 1 か所に置き、語の直後を括弧・句読点・空白・文末に限る | PR 本文の節も merge-gate の数え方も `rows_of` の出力から作られる。後続を限れば「無しの場合は〜」のような確認の文を落とさない | merge-gate で「無し」の行を数えない（PR 本文に未チェックの行が残り続ける）。要求の雛形の文を変える（雛形に「無ければ行を消す」が既にある） |
 
 ## データ・設定
@@ -157,7 +162,7 @@ PR の一覧を空で返す。`_closing_blocker` は `unknown` のとき全課�
 
 | 観点 | テスト |
 | --- | --- |
-| merge・手で届ける・検証の環境だけの経路で、`close` の `cmd` が `--record-pr unknown` になり `release-verify` が無いこと（I1・I2） | `test_supervise_pace_verify.py` の `test_close_without_a_known_record_keeps_the_issues_open` |
+| merge・手で届ける・検証の環境だけの経路で、`close` の `cmd` が `--record-pr {queue_record}` になり `unknown` を持たず、`release-verify` が同じ参照を持つこと（I1・I2。#2230） | `test_supervise_pace_verify.py` の `test_close_without_a_plan_record_resolves_it_when_run` |
 | `delivery: []` で `--record-pr 0` のまま変わらないこと（I1） | 同じファイルの `test_close_of_no_delivery_keeps_record_pr_zero` |
 | `--record-pr unknown --issues …` で全課題が `kept_open`・理由つき・終了コード 0、gh の書き込みが 0 回で、`summary` が先頭の文を持つこと（I3） | `test_sprint_close_issues.py` の `test_record_unknown_keeps_the_given_issues_open_with_a_reason` |
 | `unknown` に `--issues` が無ければ終了コード 2、それ以外の値・負の数は終了コード 3 | 同じファイルの `test_record_unknown_alone_returns_two`・`test_record_pr_rejects_other_values` |
@@ -170,15 +175,13 @@ PR の一覧を空で返す。`_closing_blocker` は `unknown` のとき全課�
 
 | 項目 | 内容 |
 | --- | --- |
-| 記録の PR を `close` へ渡す手段が無い | merge・手で届ける・検証の環境だけの経路の課題は、`unknown` で開いたまま残り、人が手で閉じる。受け渡しの手段は課題 #2044 が扱う |
-| 手動反映の本番系の昇格はテストで縛っていない | 見本のリポジトリ（`make_repo`）は起点 develop・本番 main で、起点と本番が同じ形を組めない。`record_pr_ref` の分岐（`manual_prod`）は昇格を飛ばして `unknown` へ落ちる形で入っている |
-| 語 `unknown` が 2 か所にある | `sprint-close.py` は `supervise_lib` を import しない独立のスクリプトで、`RECORD_UNKNOWN` を `sprint_routes.py` と別に持つ（コメントで指し合う） |
+| 手動反映の本番系の昇格はテストで縛っていない | 見本のリポジトリ（`make_repo`）は起点 develop・本番 main で、起点と本番が同じ形を組めない。`record_pr_ref` の分岐（`manual_prod`）は昇格を飛ばして `{queue_record}` へ落ちる形で入っている |
 | 既に閉じた課題も `kept_open` で載る | `unknown` は課題の状態を読まずに返すため、closing keywords で GitHub が先に閉じた課題も `kept_open` に並ぶ |
 | 流し直さない PR 本文 | 既に作られた PR 本文の「無し」の未チェック行は、pr ステップを流し直さない限り残る |
 
 ## 関連リンク
 
-- 課題: #1875（記録の置き場が分からない close）・#1675（「無し」の手動確認の行）。実装は PR #2051
+- 課題: #1875（記録の置き場が分からない close）・#1675（「無し」の手動確認の行）。実装は PR #2051。まとめのプランが `unknown` の代わりに `{queue_record}` を組む変更は #2230
 - [ndf-production-release-record.md](ndf-production-release-record.md): 経路ごとの記録の PR と `release-verify`
 - [ndf-sprint-close-acceptance-criteria.md](ndf-sprint-close-acceptance-criteria.md): 閉じる条件 2 と受け入れ条件の印（`unknown` で本文を読まない条件 I8）
 - [ndf-sprint-close-referenced-issues.md](ndf-sprint-close-referenced-issues.md): 参照だけの課題（`unknown` ではスプリントの PR を読まない）
