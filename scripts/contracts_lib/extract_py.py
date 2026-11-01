@@ -183,21 +183,37 @@ class _Scan(ast.NodeVisitor):
     def visit_Call(self, node):
         fn = _func_name(node.func)
         recv = getattr(node.func, "value", None)
-        if fn in ("get", "setdefault") and recv is not None and _is_environ(recv) and node.args and fn == "get":
+        self._env_or_key_call(node, fn, recv)
+        self._argparse_call(node, fn, recv)
+        self._write_call(node, fn, recv)
+        self._exit_call(node, fn, recv)
+        self._stdout_call(fn, recv)
+        self.generic_visit(node)
+
+    def _env_or_key_call(self, node, fn, recv):
+        """環境変数の読み（`os.environ.get`・`os.getenv`）か、設定のキーの読み（`.get`）。"""
+        if fn == "get" and recv is not None and _is_environ(recv) and node.args:
             self._env(node.args[0], node.lineno)
         elif fn == "getenv" and node.args:
             self._env(node.args[0], node.lineno)
         elif fn == "get" and node.args and recv is not None:
             self._key_read(recv, node.args[0], node.lineno)
-        if fn in ("add_argument",):
-            self.f.has_parser = True
-            sub = self.sub_of.get(recv.id, "") if isinstance(recv, ast.Name) else ""
-            strs = [s for s in (_const_str(a, self.f.constants) for a in node.args) if s]
-            opts = [s for s in strs if s.startswith("-")]
-            if opts:
-                self.f.options |= {(sub, o) for o in opts}
-            elif strs:
-                self.f.positionals.add((sub, strs[0]))
+
+    def _argparse_call(self, node, fn, recv):
+        """`add_argument` の引数（副命令ごとのオプションか位置引数）。"""
+        if fn != "add_argument":
+            return
+        self.f.has_parser = True
+        sub = self.sub_of.get(recv.id, "") if isinstance(recv, ast.Name) else ""
+        strs = [s for s in (_const_str(a, self.f.constants) for a in node.args) if s]
+        opts = [s for s in strs if s.startswith("-")]
+        if opts:
+            self.f.options |= {(sub, o) for o in opts}
+        elif strs:
+            self.f.positionals.add((sub, strs[0]))
+
+    def _write_call(self, node, fn, recv):
+        """ファイルの書き（書きモードの `open`・`write_text`・`write_bytes`・JSON の書き手）。"""
         if fn == "open" and isinstance(node.func, ast.Name) and node.args:
             mode = node.args[1] if len(node.args) > 1 else next((k.value for k in node.keywords if k.arg == "mode"), None)
             m = _const_str(mode, {}) if mode is not None else None
@@ -207,17 +223,22 @@ class _Scan(ast.NodeVisitor):
             self._write(recv, node.lineno)
         elif fn in JSONIO_WRITERS and node.args:
             self._write(node.args[0], node.lineno)
+
+    def _exit_call(self, node, fn, recv):
+        """終了コード（`sys.exit`・`SystemExit`・`StepError` の第 2 引数）。"""
         if fn in ("exit", "SystemExit") and node.args and (fn == "SystemExit" or getattr(recv, "id", "") == "sys"):
             self._exit(node.args[0])
+        if fn == "StepError" and len(node.args) > 1:
+            self._exit(node.args[1])
+
+    def _stdout_call(self, fn, recv):
+        """標準出力の形（text → json → step-result の順に強くなる）。"""
         if fn == "print" and self.f.stdout == "none":
             self.f.stdout = "text"
         if fn == "dumps" and getattr(recv, "id", "") == "json":
             self.f.stdout = "json" if self.f.stdout in ("none", "text") else self.f.stdout
         if fn in ("emit", "emit_result") and self.f.stdout != "step-result":
             self.f.stdout = "step-result"
-        if fn == "StepError" and len(node.args) > 1:
-            self._exit(node.args[1])
-        self.generic_visit(node)
 
     def visit_Return(self, node):
         if self.func == "main" or self.func.startswith("cmd_"):
